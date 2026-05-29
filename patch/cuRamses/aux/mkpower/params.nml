@@ -1,0 +1,58 @@
+! ============================================================
+! mkpower parameter file (Fortran namelist format)
+! Compatible with RAMSES &COSMO_PARAMS conventions
+!
+! Output: standard CAMB ASCII format (MUSIC-compatible)
+!   <root>_transfer_out.dat  (13 columns)
+!   <root>_matterpower.dat   (2 columns: k/h, P(k))
+! ============================================================
+
+&COSMO_PARAMS
+
+! --- Core cosmological parameters ---
+omega_m   = 0.3111       ! Total matter (CDM + baryon + neutrino)
+omega_b   = 0.04897      ! Baryon density
+omega_l   = 0.6889       ! Dark energy density
+! omega_k = 0.0          ! Curvature (auto: 1 - Om - OL if omitted)
+h0        = 67.36        ! Hubble constant [km/s/Mpc] (or h if <= 10)
+
+! --- Dark energy model ---
+! de_model:
+!   'lambda'  — cosmological constant (w=-1 fixed, default)
+!   'fluid'   — w0-wa CPL with constant c_s^2 (quintessence-like)
+!   'ppf'     — w0-wa CPL with PPF approximation (allows w-crossing)
+!   'axion'   — AxionEffectiveFluid (early dark energy)
+de_model  = 'lambda'
+
+! --- CPL parameters (de_model = 'fluid' or 'ppf') ---
+! w(a) = w0 + wa*(1-a)
+w0        = -1.0
+wa        =  0.0
+cs2_de    =  1.0         ! DE sound speed squared (fluid only)
+
+! --- AxionEffectiveFluid parameters (de_model = 'axion') ---
+! axion_fde_zc  = 0.1    ! fractional DE density at z_c
+! axion_zc      = 3000   ! critical redshift
+! axion_w_n     = 1      ! effective EOS power index
+! axion_theta_i = 1      ! initial field angle
+
+! --- Massive neutrinos ---
+omega_nu  = 0.0          ! Neutrino density (e.g. 0.00140 for sum_mnu=0.06eV)
+
+! --- Primordial power spectrum ---
+n_s       = 0.9649       ! Scalar spectral index
+sigma8    = 0.8111       ! Amplitude (sigma8 at z=0)
+! A_s     = 2.1e-9       ! Alternative: scalar amplitude (overrides sigma8)
+
+! --- CMB / reionization ---
+! T_cmb   = 2.7255       ! CMB temperature [K]
+! tau     = 0.0544       ! Optical depth to reionization
+
+! --- Redshift(s) for output ---
+redshift  = 0            ! Single value or space-separated list
+! redshift = '0 0.5 1 2 5 10 29.5'
+
+! --- Output ---
+output_root = 'camb'     ! Produces camb_transfer_out.dat, camb_matterpower.dat
+
+/

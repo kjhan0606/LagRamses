@@ -1,0 +1,2250 @@
+% cuRAMSES: Scalable Domain Decomposition and CUDA-enabled AMR
+% for Cosmological Simulations
+%
+% MNRAS-style LaTeX paper
+%
+\documentclass[fleqn,usenatbib]{mnras}
+
+% Standard packages
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+%\usepackage{lineno}
+
+% Algorithm formatting
+\renewcommand{\algorithmicrequire}{\textbf{Input:}}
+\renewcommand{\algorithmicensure}{\textbf{Output:}}
+
+% Shorthand macros
+\newcommand{\ramses}{\textsc{ramses}}
+\newcommand{\curamses}{\textsc{cuRAMSES}}
+\newcommand{\ncpu}{N_{\rm cpu}}
+\newcommand{\nfile}{N_{\rm file}}
+\newcommand{\ngridmax}{N_{\rm gridmax}}
+\newcommand{\nlevelmax}{N_{\rm levelmax}}
+\newcommand{\twotondim}{2^{N_{\rm dim}}}
+\newcommand{\ksec}{\ensuremath{k}\text{-section}}
+\newcommand{\Olog}[1]{\mathcal{O}(#1)}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title[cuRAMSES~I: Scalable AMR Optimizations for Cosmological Simulations]
+{cuRAMSES~I: Scalable AMR Optimizations for Large-Scale Cosmological Simulations}
+
+\author[J.~Kim]{
+Juhan Kim$^{1}$\thanks{E-mail: kjhan@kias.re.kr}
+\\
+$^{1}$Center for Advanced Computation, Korea Institute for Advanced Study,
+85 Hoegiro, Dongdaemun-gu, Seoul 02455, Republic of Korea
+}
+
+\date{Accepted XXX. Received YYY; in original form ZZZ}
+
+\pubyear{2026}
+
+\begin{document}
+%\linenumbers
+
+\label{firstpage}
+\pagerange{\pageref{firstpage}--\pageref{lastpage}}
+
+\maketitle
+
+% ===================================================================
+% ABSTRACT
+% ===================================================================
+\begin{abstract}
+We present \curamses, a suite of advanced domain decomposition strategies and 
+algorithmic optimizations for the \ramses\ adaptive mesh refinement (AMR) code, 
+designed to overcome the communication, memory, and solver bottlenecks inherent 
+in next-generation exascale cosmological simulations. 
+The central innovation is a recursive \ksec\ domain decomposition, which replaces 
+the traditional Hilbert curve ordering with a hierarchical spatial partitioning. 
+This approach substitutes global \code{MPI\_ALLTOALL} collectives with neighbour-only 
+point-to-point communications. By maintaining a constant number of communication 
+partners regardless of the total rank count, it significantly improves strong 
+scaling at high concurrency. 
+To address critical memory constraints at scale, we introduce a Morton-key hash 
+table for octree neighbour lookup alongside on-demand array allocation, drastically 
+reducing the per-rank memory footprint. Furthermore, a novel spatial hash-binning 
+algorithm accelerates supernova and AGN feedback routines by over two orders of 
+magnitude (a ${\sim}260\times$ speedup). 
+For hybrid architectures, an automatic CPU/GPU dispatch model with GPU-resident 
+mesh data reduces host--device transfer overhead to just 5.7\% of the GPU runtime. 
+Additionally, a variable-$\ncpu$ restart capability enables flexible I/O workflows. 
+Extensive diagnostics verify that all modifications preserve mass, momentum, and 
+energy conservation to machine precision.
+\end{abstract}
+
+\begin{keywords}
+methods: numerical -- cosmology: simulations -- hydrodynamics --
+software: development
+\end{keywords}
+
+% ===================================================================
+% 1. INTRODUCTION
+% ===================================================================
+\section{INTRODUCTION}
+\label{sec:intro}
+
+Cosmological hydrodynamic simulations play a central role in modern
+astrophysics, connecting the predictions of the $\Lambda$CDM paradigm
+to the observable properties of galaxies, the intergalactic medium,
+and the large-scale structures of the Universe. Over the past decade,
+landmark galaxy formation simulations --- IllustrisTNG
+\citep{Pillepich2018,Nelson2019} with the moving-mesh code \textsc{arepo}
+\citep{Springel2010}, EAGLE \citep{Schaye2015} with \textsc{gadget}
+\citep{Springel2005}, and the Horizon-AGN / NewHorizon / NewCluster simulations
+\citep{Dubois2014,Dubois2021,Han2026} with the adaptive mesh refinement (AMR) code
+\ramses\ \citep{Teyssier2002}, among others
+\citep{Hopkins2018,Dave2019,Tremmel2017} have advanced our
+understanding of cosmic structure.
+
+These achievements, however, highlight the need for simulations of
+even greater scale and dynamic range.  Capturing large-scale
+statistical properties with percent-level precision
+\citep{Kim2011,Kim2015,Ishiyama2021,Maksimova2021,Schaye2015,Libeskind2018}
+requires volumes exceeding $(1\,h^{-1}\,\mathrm{Gpc})^3$ with $10^{11}$
+or more particles.
+At the same time, resolving the physics that governs individual
+galaxies, including supermassive black hole (SMBH) feedback
+\citep{Dubois2012,Weinberger2017}, the multi-phase interstellar medium
+(ISM) \citep{Springel2003}, and star formation on sub-parsec scales
+\citep{Hopkins2014}, demands deep AMR hierarchies with dynamic ranges of
+$10^5$ or more.
+Achieving both goals simultaneously, large volume \emph{and} high
+resolution, requires an unprecedented computational effort that pushes
+well into the exascale regime \citep{Habib2016,Frontiere2025}.
+The principal barriers to reaching this regime are not only physical
+modelling limitations but also \emph{algorithmic} challenges, including
+communication overhead that grows with the number of MPI ranks, memory
+consumption that limits the refinement depth per node, and solver
+inefficiencies that dominate the wallclock time.
+
+Among the numerical approaches employed by these simulations, AMR
+codes such as \ramses\ and Enzo \citep{Bryan2014} provide a
+particularly attractive framework, in which the
+computational mesh is refined only where the physics demands it,
+concentrating resources on collapsing haloes and star-forming regions
+while keeping the cost of smooth, low-density regions manageable.
+
+A key design choice in parallel AMR codes is the domain decomposition
+strategy for distributed cluster systems. Space-filling curves (SFCs), particularly the Hilbert
+(Peano--Hilbert) curve, have been widely adopted for this purpose
+\citep{Warren1993,Springel2005}. The Hilbert curve maps the
+three-dimensional computational domain to a one-dimensional index,
+preserving spatial locality so that cells close in physical space
+remain close along the curve.  For equal-volume partitioning, each
+rank's subdomain typically borders 6--8 neighbours in three dimensions.
+This enables a simple and effective
+partitioning where the one-dimensional index range is divided into
+$\ncpu$ contiguous segments, each assigned to an MPI rank. The resulting
+decomposition naturally produces compact subdomains with relatively
+small surface-to-volume ratios, minimising the ghost-zone boundary
+between neighbouring ranks.
+
+However, scaling this approach to the regime of $10^{10}$--$10^{11}$
+particles and $10^4$--$10^5$ MPI ranks reveals fundamental
+limitations. The one-dimensional nature of the SFC means that
+\emph{every} rank may, in principle, border \emph{any other} rank in worst cases,
+forcing communication patterns that scale poorly with $\ncpu$. In the
+standard \ramses\ implementation, ghost-zone exchange, grid and particle migration, and sink particle
+synchronisation all rely on \code{MPI\_ALLTOALL} to communicate
+counts among all ranks, leading to $\Olog{\ncpu^2}$ communication
+complexity and $\Olog{\ncpu}$ per-rank buffer memory, which becomes a severe
+bottleneck when $\ncpu$ exceeds ${\sim}10^3$
+\citep{Teyssier2002}. Furthermore, the Hilbert load balancer assigns each
+cell a cost of $80 + N_{\rm part}$, where $N_{\rm part}$ is the
+particle count per oct.  While this does account for particles, the
+implied 80 times more weight to grid with respect to particle, severely underweights
+particle-dominated cells. For example, a grid hosting $10^4$ particles in a dense
+halo carries a cost only ${\sim}125\times$ that of an empty cell,
+whereas its actual memory footprint is about 450 times larger
+(taking $w_{\rm grid}=2256$\,B for \code{nvar}=14 and $w_{\rm part}=12$\,B per particle; see
+Section~\ref{sec:ksec_membal}).  The result is that particle-rich
+ranks are systematically overloaded in both memory and compute time
+\citep{Springel2005}. The problem is particularly acute in
+cosmological zoom-in simulations \citep{Dubois2021}, where the
+high-resolution region occupies a small fraction of the total volume.
+The Hilbert curve concentrates nearly all refinement on a few ranks
+while the remaining ranks are left with low-resolution void cells,
+leading to severe load imbalance that worsens with increasing zoom
+factor.  In the Horizon Run~5 simulation \citep{Lee2021}, for example,
+the Hilbert-based load rebalancing required more than 10 hours per
+invocation as structure formation progressed, and had to be abandoned
+entirely below redshift $z \approx 2$.
+
+Beyond communication and load balancing, per-rank memory overhead
+(e.g.\ the \code{nbor} and Hilbert key arrays, $>$1\,GB for
+$\ngridmax = 5\,\mathrm{M}$; Section~\ref{sec:morton}) limits the
+refinement depth.  The multigrid Poisson solver \citep{Guillet2011}
+dominates runtime (${\sim}50$\,per\,cent), and \ramses' one-file-per-rank
+I/O prevents restarting with a different rank count.
+
+The original \ramses\ code relies exclusively on MPI for
+parallelism, assigning one MPI rank per processor core. To exploit the
+shared-memory bandwidth of modern multi-core nodes, hybrid MPI+OpenMP
+implementations have been developed. The Horizon Run~5 simulation
+\citep{Lee2021} employs OMP-RAMSES, and the NewCluster zoom-in
+simulation \citep{Han2026} employs RAMSES-yOMP, both adding OpenMP
+threading within each MPI rank for improved intra-node scalability. However,
+MPI+OpenMP alone still leaves the GPU compute capability of modern
+heterogeneous nodes untapped. With the emergence of exascale
+supercomputers whose floating-point throughput is dominated by GPU
+accelerators, a three-level MPI+OpenMP+CUDA parallelism is essential
+to fully utilise the available hardware.
+
+In this paper we describe \curamses, a comprehensive set of
+modifications to \ramses\ that addresses each of these challenges. We
+introduce a recursive \ksec\ domain decomposition
+(Section~\ref{sec:ksection}), adaptive MPI exchange backends
+(Section~\ref{sec:ksec_exchange}), a Morton key hash table
+(Section~\ref{sec:morton}), multigrid and FFTW3 Poisson solver
+optimizations (Section~\ref{sec:multigrid}), spatial hash binning for
+feedback (Section~\ref{sec:feedback}), variable-$\ncpu$ restart
+(Section~\ref{sec:varcpu}), and GPU-accelerated solvers
+(Section~\ref{sec:hybrid}).  Performance benchmarks are presented in
+Section~\ref{sec:performance}, and we conclude in
+Section~\ref{sec:conclusions}.
+
+Throughout this paper, we use the notation of \citet{Teyssier2002}, where
+$\nlevelmax$ is the maximum AMR level, $\ngridmax$ is the maximum
+number of grids per rank, and
+$\ncpu$ is the total number of MPI ranks.
+
+
+% ===================================================================
+% 2. K-SECTION DOMAIN DECOMPOSITION
+% ===================================================================
+\section{RECURSIVE K-SECTION DOMAIN DECOMPOSITION}
+\label{sec:ksection}
+
+We replace the Hilbert ordering with a recursive $k$-ary spatial
+partitioning that eliminates global MPI collectives and encodes the
+communication pattern directly in the tree structure.
+
+\subsection{Hierarchical Partitioning of Spatial and Communication Domain}
+\label{sec:ksec_tree}
+
+Given $\ncpu$ MPI ranks, we first compute the prime factorization as
+\begin{equation}
+\ncpu = p^{m_1}  q^{m_2}  \cdots  r^{m_r},
+\quad p > q > \cdots > r.
+\label{eq:prime_factorization}
+\end{equation}
+The splitting sequence is then
+\begin{equation}
+\mathbf{k} = (\underbrace{p, \ldots, p}_{m_1},
+              \underbrace{q, \ldots, q}_{m_2}, \ldots,
+              \underbrace{r, \ldots, r}_{m_r}),
+\label{eq:split_sequence}
+\end{equation}
+yielding $L\,(= \sum_i m_i)$ levels in the tree, which encodes both
+the domain hierarchy and the communication pattern.
+The tree is a $k$-ary structure in which each \emph{node} represents a
+contiguous group of MPI ranks sharing a spatial sub-domain. The
+\emph{root} node at level~0 spans all $\ncpu$ ranks, and each
+\emph{leaf} node at level~$L$ corresponds to a single rank.
+At each level $l$, the
+domain of a node is split into $k_l$ child nodes along the longest
+axis of the current bounding box. This longest-axis selection ensures
+roughly isotropic sub-domains, minimising the surface-to-volume ratio
+and hence the ghost-zone count.
+
+For example, $\ncpu = 12 = 3 \times 2 \times 2$ produces the
+splitting sequence $(3, 2, 2)$ with $L = 3$ tree levels, where the root is
+split into 3 slabs along the longest axis, each slab is bisected, and
+each half is bisected again, yielding 12 leaf nodes, one per rank.
+Figure~\ref{fig:ksec_progressive} illustrates this progressive
+decomposition for $\ncpu = 12$, from the undivided domain through
+three successive levels of splitting, with the corresponding
+\ksec\ tree shown beneath each panel.
+
+\begin{figure}
+\centering
+\includegraphics[width=\columnwidth]{./ksection_progressive.pdf}
+\caption{Progressive recursive \ksec\ decomposition for $\ncpu = 12 =
+3 \times 2 \times 2$. (a)~The full and undivided simulation domain. (b)~First
+split into $k = 3$ slabs along the longest axis. (c)~Each slab bisected
+along the second axis ($3 \times 2 = 6$ sub-domains). (d)~Final bisection
+along the third axis ($3 \times 2 \times 2 = 12$ leaf domains). Below
+each panel, the corresponding \ksec\ tree is shown. Sub-domain volumes
+vary by approximately 10--30\,per\,cent, reflecting load-balanced wall placement.}
+\label{fig:ksec_progressive}
+\end{figure}
+
+The tree is stored as a set of arrays indexed by node identifier.
+For each internal node, the child indices for each of the $k_l$
+partitions and the spatial coordinates of the partition boundaries
+are recorded; for each leaf node, the assigned MPI rank is stored.
+Every node also carries the minimum and maximum rank indices of all
+leaves in its subtree, enabling rapid range queries during the
+hierarchical exchange.
+
+The total number of tree nodes,
+$N_{\rm nodes} = 1 + \sum_{l=1}^{L} \prod_{i=1}^{l} k_i$,
+is at most a few hundreds for practical values of $\ncpu$
+($\ncpu \leq 10^5$), representing negligible overhead.
+
+
+\subsection{Load-Balanced Wall Placement}
+\label{sec:ksec_loadbal}
+
+When the tree is updated during load balancing (every \code{nremap}
+coarse steps), the wall positions are adjusted by iterative
+binary search so that each partition receives a load proportional to the
+number of ranks it contains. The procedure operates level by level, top to bottom. At level $l$,
+the following steps are performed.
+
+\begin{enumerate}
+\item A histogram is built over the splitting coordinate. For each
+  node at level $l$, the cells within that node are projected onto the
+  splitting axis and binned into a cumulative cost histogram with
+  resolution $\Delta x_{\rm hist}$.
+
+\item For each of the $k_l - 1$ walls within each node, a binary
+  search adjusts the wall position until the cumulative
+  load on the left side matches the target fraction. The target
+  cumulative fraction for wall $j$ in a node spanning ranks
+  $[i_{\rm min}, i_{\rm max}]$ with total count
+  $n = i_{\rm max} - i_{\rm min} + 1$ is
+  \begin{equation}
+  f_j = n^{-1}\sum_{m=1}^{j} n_m,
+  \label{eq:target_frac}
+  \end{equation}
+  where $n_m$ is the number of ranks assigned to partition $m$.
+
+\item An \code{MPI\_ALLREDUCE} aggregates the local histograms across
+  all $\ncpu$ ranks to obtain the global cumulative load at each wall
+  position. The binary search converges when the relative load imbalance
+ falls below a
+  tolerance $\epsilon_{\rm tol}$ (typically 1\,per\,cent), or when the
+  wall position can no longer be resolved at the histogram resolution.
+
+\item After wall convergence, the cells are repartitioned (sorted)
+  according to the new wall positions, and the histogram bounds are
+  updated for the next level.
+\end{enumerate}
+
+
+\subsection{Memory-Weighted Cost Function}
+\label{sec:ksec_membal}
+
+The default \ramses\ load balancer uses a cost of $80 + N_{\rm part}$
+per oct, which underweights particle-dominated cells by a factor of
+${\sim}3$--$4$ relative to their true memory footprint.
+\curamses\ replaces this with a memory-weighted cost function
+\begin{equation}
+C_{\rm cell} = {{w_{\rm grid} +
+n_{\rm part}({\code{igrid}}) \cdot w_{\rm part} +
+n_{\rm sink}({\code{igrid}}) \cdot w_{\rm sink}
+\label{eq:cost_function}} \over 2^{N_{\rm dim}}},
+\end{equation}
+where $w_{\rm grid}$ is the memory cost per grid slot, computed
+automatically as 
+\begin{equation}
+	w_{\rm grid} = 2^{N_{\rm dim}} \times (2\,\code{nvar}\times 8 + 52) + 48
+\end{equation}
+in bytes, for example,  1232\,B for \code{nvar}=6 or 2256\,B for \code{nvar}=14,
+accounting for hydro (\code{uold}+\code{unew}), gravity, and AMR bookkeeping arrays.
+A user-specified value overrides the automatic formula. And
+$w_{\rm part}$ is the memory cost per particle slot (default 12 bytes
+for position, velocity, mass, and linked-list pointers),
+$n_{\rm part}({\code{igrid}})$ is the number of dark matter and star
+particles (both sharing the same memory layout) attached to grid
+\code{igrid}, and $w_{\rm sink}$ is a computational weight per sink
+particle (default 500) that accounts for the expensive feedback and
+accretion operations associated with each sink. The sink count
+$n_{\rm sink}({\code{igrid}})$ is obtained by descending the AMR tree
+from each sink position to its leaf cell.
+The division by $\twotondim$ distributes the grid
+cost evenly among its eight cells.
+
+This cost function ensures that ranks hosting dense haloes (many
+particles per cell) receive fewer cells, preventing memory exhaustion
+on particle-heavy ranks.
+Our Cosmo256 test (Section~\ref{sec:perf_config}; $200\,\mathrm{M}$ particles, 12 ranks) shows that
+memory-weighted balancing reduces the peak-to-mean memory ratio from
+2.5 to 1.3, and keeps the per-rank memory imbalance
+$M_{\max}/M_{\min} \le 1.05$ across 2--64 ranks
+(Section~\ref{sec:perf_membal}), without affecting physics results such as identical numbers of new stars, sinks,
+$e_{\rm cons}$ (fractional total energy conservation error),
+$e_{\rm pot}$ (gravitational potential energy), and
+$e_{\rm kin}$ (kinetic energy)
+to machine precision after advancing ten coarse time steps.
+
+
+\section{AUTO-TUNING MPI COMMUNICATIONS}
+\label{sec:ksec_exchange}
+
+Ghost-zone (virtual boundary) exchange is the most
+communication-intensive operation in \ramses, invoked multiple times
+per fine time step for hydro variables, gravitational potential,
+particle flags, and density contributions. Each exchange involves
+the same algorithmic pattern (pack data from local grids, transfer to
+remote ranks, and unpack into ghost zones), but the underlying MPI
+transport can be realised in fundamentally different ways.
+\curamses\ implements three exchange methods and selects among them
+adaptively at runtime.
+
+\subsection{Exchange Methods}
+\label{sec:exchange_backends}
+
+\subsubsection{MPI\_ALLTOALLV}
+\label{sec:backend_alltoall}
+
+The \code{MPI\_ALLTOALLV} collective exchanges variable-length
+messages among all ranks in a single call. This backend packs all
+emission data (data to be sent to other ranks) into a contiguous buffer with displacements computed
+from per-rank send counts, invokes \code{MPI\_ALLTOALLV}, and unpacks
+the received data. Although it involves all $\ncpu$ ranks (with zero
+counts for non-neighbours), high-quality MPI implementations exploit
+the sparsity internally and can outperform explicit P2P on certain
+interconnects, particularly for small messages on fat-tree topologies.
+However, the implicit global synchronisation and $\Olog{\ncpu}$ memory
+overhead make it less attractive at very large rank counts.
+
+\subsubsection{Point-to-point (P2P)}
+\label{sec:backend_p2p}
+
+The P2P backend follows the original \ramses\ pattern of non-blocking
+sends/receives (\code{MPI\_ISEND}/\code{MPI\_IRECV}) with
+\code{MPI\_WAITALL}.  The number of communication partners is set by
+the domain geometry (typically 6--8), independent of $\ncpu$, making
+P2P the best choice when neighbour sets are sparse.
+
+\subsubsection{Hierarchical K-Section Exchange}
+\label{sec:backend_ksection}
+
+The \ksec\ backend replaces the global communication pattern with a
+hierarchical tree walk using the domain decomposition tree described
+in Section~\ref{sec:ksec_tree}.  The algorithm walks the tree from
+root to leaf, where each node represents a contiguous group of MPI
+ranks.  At each level~$l$, a node is
+partitioned into $k_l$ child nodes; each rank communicates with at
+most $k_l - 1$ correspondents (one per sibling subtree).  This spreads the communication load evenly across the
+sibling rather than funnelling all traffic to a single rank.
+
+The total number of communications per rank per exchange is
+\begin{equation}
+N_{\rm com} = \sum_{l=1}^{L} (k_l - 1) = \sum_i m_i (p_i - 1),
+\label{eq:msg_count}
+\end{equation}
+which for $\ncpu = 1024 = 2^{10}$ gives $N_{\rm com} = 10$, which is two
+orders of magnitude fewer than the ${\sim}1024$ communications in an
+all-to-all pattern. Even in the best case, where the MPI library
+internally optimises \code{MPI\_ALLTOALLV} to skip zero-length
+communications, a rank with six neighbours must still perform at least six
+pairwise transfers (and often more on non-ideal interconnects), so the
+\ksec\ communication count of $\Olog{\sum_l k_l}$ remains competitive.
+Crucially, $N_{\rm com}$ depends only on the prime factorization of
+$\ncpu$ and is completely independent of the degree of particle
+clustering or the AMR refinement level, so the communication topology
+remains fixed regardless of how complex the simulation becomes.
+
+Figure~\ref{fig:hier_exchange} illustrates the communication pattern
+for $\ncpu = 12$.  Each rank sends $N_{\rm com} = (3{-}1) + (2{-}1) +
+(2{-}1) = 4$ messages per exchange, independent of $\ncpu$.
+
+The pairing structure at each tree level follows directly from the
+branching factor. When a node has $p$ children, data from every child
+must reach every other child, accomplished in $p - 1$ sequential
+steps. In step~$s$ ($s = 1, \ldots, p-1$), child~$s+1$ exchanges
+with each of the children $1, \ldots, s$, yielding $s$ concurrent
+point-to-point communications. After all $p - 1$ steps, every child
+possesses the complete data set of the entire subtree.
+
+A trade-off is that the total data volume per rank exceeds that of
+direct P2P or \code{MPI\_ALLTOALLV} since items may be forwarded
+through multiple tree levels. In the worst case, a rank relays its
+entire buffer at every level, giving at most $L \times V_{\rm local}$, where $V_{\rm local}$ is the local data volume.
+In practice, items are filtered by child index at each level, and
+successive levels operate on progressively smaller subsets. The key
+advantage, namely reducing the number of communication partners from
+$\Olog{\ncpu}$ to $\Olog{\sum_l k_l}$, more than compensates for the
+modest volume increase, particularly at large $\ncpu$ where the startup latency in the network hand-shaking dominates.
+
+\begin{figure}
+\centering
+\includegraphics[width=\columnwidth]{./hierarchical_exchange.pdf}
+\caption{Hierarchical exchange communication pattern for $\ncpu = 12
+\,(= 3 \times 2 \times 2)$. Coloured rectangles represent MPI ranks
+numbered 1--12, using the same colour scheme as
+Figure~\ref{fig:ksec_progressive}. Arcs denote bidirectional
+point-to-point exchanges.  At level~1 ($k_1 = 3$), two steps connect
+each rank with correspondents in the two sibling subtrees; the
+two colours in step~2 distinguish the children~1$\leftrightarrow$3
+(dark red) and children~2$\leftrightarrow$3 (orange) pairings that
+proceed concurrently.  At levels~2 and~3 ($k_2 = k_3 = 2$), the
+communication range contracts to within each group and then to
+adjacent pairs.  The total communication count per rank is
+$N_{\rm com} = (3{-}1) + (2{-}1) + (2{-}1) = 4$.}
+\label{fig:hier_exchange}
+\end{figure}
+
+Table~\ref{tab:complexity} compares the communication complexity of
+the three backends. The \ksec\ exchange also extends to
+ghost-zone operations (forward, reverse, integer, and bulk variants),
+communication structure construction (replacing the original
+\code{MPI\_ALLTOALL}-based build\_comm), and feedback collectives,
+eliminating all global communication patterns from the AMR
+infrastructure.
+
+\begin{table}
+\centering
+\caption{Communication complexity per exchange operation.
+$N_{\rm nb}$ is the number of neighbour ranks,
+$N_{\rm gh}$ the number of ghost grids per rank,
+$k_l$ the branching factor at tree level $l$, and
+$k_{\rm max} = \max(k_l)$.}
+\label{tab:complexity}
+\begin{tabular}{lccc}
+\toprule
+& P2P & \code{ALLTOALLV} & \ksec \\
+\midrule
+Msgs   & $\Olog{N_{\rm nb}}$          & $\Olog{\ncpu}$                        & $\Olog{\sum_l k_l}$ \\
+Buffer & $\Olog{N_{\rm nb} N_{\rm gh}}$ & $\Olog{\ncpu N_{\rm gh}}$           & $\Olog{k_{\rm max} N_{\rm gh}}$ \\
+Sync.  & none                    & barrier                      & none \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Adaptive Method Selection}
+\label{sec:autotune}
+
+No single backend dominates across all exchange types, rank counts,
+and simulation stages. During the initial mesh setup and I/O phases,
+communication is sparse and P2P excels. After load rebalancing, the
+neighbour topology changes and a previously inferior method may become
+optimal. As the simulation evolves and AMR levels deepen, ghost-zone
+volumes grow and the relative cost of each backend shifts.
+\curamses\ therefore implements a continuous per-component auto-tuning
+framework that adapts to the evolving communication pattern throughout
+the simulation.
+
+\subsubsection{Exchange components}
+\label{sec:autotune_components}
+
+Seven independent exchange components are identified, each with its
+own data size and call frequency.
+(i) \code{fine\_dp}, forward double-precision ghost exchange (hydro,
+potential).
+(ii) \code{fine\_int}, forward integer ghost exchange (\code{cpu\_map},
+flags).
+(iii) \code{reverse\_dp}, reverse accumulation (density).
+(iv) \code{reverse\_int}, reverse integer accumulation.
+(v) \code{pair\_int}, paired integer exchange.
+(vi) \code{bulk\_dp}, bulk forward exchange ($N_{\rm var}$ variables
+in one call).
+(vii) \code{bulk\_rev\_dp}, bulk reverse accumulation.
+Each component maintains its own auto-tune state, so a method that is
+optimal for small integer exchanges need not be the same as for large
+bulk hydro transfers.
+
+\subsubsection{Auto-tune protocol}
+\label{sec:autotune_protocol}
+
+Each component independently progresses through four phases. (0)~trial
+P2P, (1)~trial \ksec, (2)~production with the faster backend, and
+(3)~periodic probing of the alternative.  Phase~2 tracks performance
+via an exponential moving average (EMA, $\alpha = 0.05$) as
+\begin{equation}
+	\bar{t}_{n+1} = \alpha t_n + (1-\alpha) \bar{t}_n,
+\end{equation} 
+where $\alpha$ is the update rate, $t_n$ is the elapsed time of the current call and $\bar{t}_n$ is
+the running EMA from the previous step.
+When the
+probe in Phase~3 finds the alternative faster by $>$20\%, the
+component switches. 
+
+
+% ===================================================================
+% 4. MORTON KEY HASH TABLE AND MEMORY OPTIMIZATIONS
+% ===================================================================
+\section{MORTON KEY HASH TABLE AND MEMORY OPTIMIZATIONS}
+\label{sec:morton}
+
+\subsection{The Neighbour Array (\texttt{nbor}) Problem}
+\label{sec:morton_problem}
+
+\ramses\ stores the octree connectivity in several arrays, the largest
+of which is \code{nbor(1:ngridmax, 1:$2^{\rm dim}$)}, a six-column
+integer array (in 3D) that records, for each grid, the cell index of its
+neighbour in each of the six Cartesian directions ($\pm x$, $\pm y$,
+$\pm z$). Each entry is a 64-bit integer occupying 8\,bytes, so this
+array consumes $48\,\ngridmax$ bytes (240\,MB for
+$\ngridmax = 5\,\mathrm{M}$).
+Moreover, the \code{nbor} array must be maintained during grid creation,
+deletion, defragmentation, and inter-rank migration, which is a significant
+source of code complexity and a potential source of bugs.
+
+
+\subsection{Morton Key Encoding and Neighbour Arithmetic}
+\label{sec:morton_encoding}
+
+A Morton key (also known as a Z-order key) \citep{Morton1966,Samet2006} is an integer formed
+by interleaving the bits of the three-dimensional integer coordinates
+$(i, j, k)$ of a grid at its AMR level:
+\begin{equation}
+M(i, j, k) = \sum_{b=0}^{B-1}
+\Bigl[
+  \text{bit}_b(i) \cdot 2^{3b} +
+  \text{bit}_b(j) \cdot 2^{3b+1} +
+  \text{bit}_b(k) \cdot 2^{3b+2}
+\Bigr],
+\label{eq:morton_encode}
+\end{equation}
+where $B$ is the number of bits per coordinate and $\text{bit}_b(n)$
+extracts bit $b$ of integer $n$.
+Two key widths are supported via a compile-time flag:
+a 64-bit key with $B = 21$ (default, compatible with the Intel \texttt{ifx}
+compiler), and a 128-bit key with $B = 42$.
+At AMR level $l$, the integer coordinate range is $\texttt{[}0,\, 
+2^{l-1}n_x\texttt{)}$, where $n_x$ is the number of root-level cells per dimension.
+With $B = 21$ the maximum allowed level is 22 ($n_x = 1$) or 20 ($n_x = 4$) while
+$B = 42$ extends these to 43 and 41, respectively.
+
+The integer coordinates of a grid at level $l$ are computed from its
+floating-point centre position $\mathbf{r}_g$ as
+\begin{equation}
+i_d = \texttt{iFloor}( 2^{l-1}r_{g,d} ), \quad d \in \{x, y, z\},
+\label{eq:grid_to_int}
+\end{equation}
+where \texttt{iFloor} is the integer floor function and coordinates are in units of the coarse grid spacing.
+The integer coordinates use zero-based (C-style) indexing,
+starting from $i_d = 0$, even though Fortran arrays are
+conventionally one-based.
+Note that AMR does not populate all possible grid positions at a given
+level, since only regions that satisfy the refinement criteria contain grids.
+The Morton key therefore serves as a unique spatial address for each
+\emph{existing} grid. The hash table (Appendix~\ref{app:hashtable})
+stores only the grids that are actually allocated, making the
+look-up cost independent of the total number of potential grid
+positions at that level.
+
+The neighbour key in direction $j$ is obtained by decoding, shifting
+the appropriate coordinate with periodic wrapping, and re-encoding
+(Appendix~\ref{app:morton}).  Parent and child keys follow from
+3-bit shifts: $M_{\rm parent} = M \text{\texttt{>>}} 3$, $M_{\rm child} =
+(M \text{\texttt{<<}} 3) \,|\, i_{\rm child}$.
+
+
+The Morton keys are stored in a per-level open-addressing hash table
+that maps keys to grid indices, providing $\Olog{1}$ expected
+neighbour look-up (Appendix~\ref{app:hashtable}).
+Each hash table entry stores a 16-byte Morton key and a 4-byte grid
+index (20 bytes total).  With a maximum filling factor of 1.4 (i.e.\ 70\,per\,cent occupancy), the
+aggregate memory footprint across all levels is approximately
+$1.4 \times 20 \times N_{\rm grids} = 28\,N_{\rm grids}$ bytes,
+where $N_{\rm grids}$ is the number of allocated grids.
+For a typical run with $N_{\rm grids} \approx 3\,\mathrm{M}$, this
+amounts to roughly 83\,MB, far smaller than the original
+\code{nbor} array ($48\,\ngridmax \approx 240$\,MB for
+$\ngridmax = 5\,\mathrm{M}$).
+
+The hash table memory cost is
+far smaller than the original \code{nbor} cost of $48\,\ngridmax$ bytes.
+Combined with Hilbert key elimination and on-demand allocation of
+auxiliary arrays, the total savings exceed 1.2\,GB per rank
+(Appendix~\ref{app:memory}).
+
+
+% ===================================================================
+% 5. POISSON SOLVER OPTIMIZATIONS
+% ===================================================================
+\section{POISSON SOLVER OPTIMIZATIONS}
+\label{sec:multigrid}
+
+Solving the Poisson equation $\nabla^2\phi = 4\pi G\rho$ for
+self-gravity is one of the most expensive operations in cosmological
+AMR simulations.  In baseline \ramses, profiling reveals that the
+Poisson solver accounts for approximately half of the total
+wall-clock time per coarse step. And this fraction grows further as the
+AMR structure develops and deeper levels are populated.  We describe two complementary
+strategies, optimizing the iterative multigrid solver that operates on
+all AMR levels (Section~\ref{sec:mg_method}), and replacing it with a
+direct FFT solve on the uniform base level
+(Section~\ref{sec:fftw3}).  Together these reduce the Poisson
+fraction to approximately 40\%.
+
+\subsection{Multi-Grid Method}
+\label{sec:mg_method}
+
+\ramses\ employs a multigrid V-cycle
+\citep{Brandt1977,Briggs2000,Trottenberg2001} with red-black
+Gauss--Seidel (RBGS) smoothing \citep{Wesseling1992,Adams2001}
+at each AMR level.
+
+\subsubsection{V-Cycle Algorithm and Exchange Optimization}
+\label{sec:mg_vcycle}
+
+Starting at the finest AMR level, the algorithm applies RBGS
+pre-smoothing and then \emph{restricts} the residual to the next
+coarser level.  Restriction requires no ghost exchange because each
+coarse cell is the average of its eight fine children, all of which
+reside on the same rank by the oct-tree construction.  This
+restriction--smooth sequence descends to the coarsest level, where a
+direct solve (or additional smoothing) is applied.  The correction is
+then \emph{prolongated} (interpolated) back up through each level,
+with post-smoothing at each step in order to damp high-frequency errors
+introduced by the interpolation.  Unlike restriction, prolongation
+\emph{does} require a ghost exchange. Specifically the trilinear interpolation
+stencil reads neighbouring coarse cells that may belong to a different
+rank.  Figure~\ref{fig:mg_vcycle} illustrates the V-cycle structure
+and the exchange positions.
+
+In a distributed-memory implementation each smoothing step requires
+ghost-zone exchanges between MPI ranks to update boundary values.
+In the original code, every red sweep, black sweep, residual
+computation, and norm reduction each triggers a separate communication
+(ghost exchange or \code{MPI\_ALLREDUCE}),
+totalling 9~communications per smoothing cycle per level (4 for
+pre-smoothing, 4 for post-smoothing, plus 1 for prolongation).
+
+We apply several targeted optimizations as follows.
+\begin{enumerate}
+\item \textbf{Precomputed neighbour cache.}  Neighbour grid indices
+  are precomputed into a contiguous array before the V-cycle,
+  reducing the cost of hash table lookups over all iterations
+  (see Appendix~\ref{app:mg_details}).
+\item \textbf{Merged red-black sweep.}  The inter-sweep ghost
+  exchange between the red and black passes is removed. The black
+  sweep proceeds using boundary values that have not yet been refreshed
+  from neighbouring ranks.  Because the multigrid smoother is used only
+  as a preconditioner (not as a standalone solver), these slightly
+  outdated boundary values do not affect convergence since any small error
+  they introduce is corrected by the next iteration. This means that we need not be bothered by the fresh communication of data from neighbours.
+\item \textbf{Fused residual and norm.}  The residual
+  $r_i \equiv f_i - (\nabla^2_h\phi)_i$, where $f_i \equiv 4\pi G\rho_i$
+  is the source term and $\nabla^2_h$ is the discrete Laplacian,
+  and its squared norm $\sum_i r_i^2$ are computed in a single loop,
+  eliminating one exchange per iteration.
+\end{enumerate}
+These reduce the exchange count from 9 to 5 per iteration,
+as shown in the lower panel of
+Figure~\ref{fig:mg_vcycle}.  The merged red-black technique is a
+standard relaxed-synchronisation strategy for distributed multigrid
+solvers \citep{Adams2001,Briggs2000}.  Implementation details are given in
+Appendix~\ref{app:mg_details}.
+
+\begin{figure}
+\centering
+\includegraphics[width=\columnwidth]{fig_mg_vcycle.pdf}
+\caption{Schematic of the multigrid V-cycle for four AMR levels.
+  \emph{Upper:} The left (descending) leg restricts the residual from
+  fine to coarse; the right (ascending) leg prolongates the
+  correction.  Orange diamonds on the prolongation arrows mark
+  ghost-zone exchanges.
+  \emph{Lower:} Exchange positions within one smoothing step.
+  The original code requires 4 exchanges (after red, after black,
+  residual, norm). However, the optimized code merges the red-black sweep and
+  fuses the residual and norm computation, reducing the count to 2.
+  With two smoothing steps (pre + post) plus one prolongation
+  exchange, the total number decreases from~9 to~5 per level per iteration.}
+\label{fig:mg_vcycle}
+\end{figure}
+
+\subsubsection{Performance Impact}
+\label{sec:mg_performance}
+
+Combining all optimizations, the MG Poisson solver's share of total
+runtime is reduced from approximately 50\,per\,cent to 40\,per\,cent in a
+Cosmo256 test ($200\,\mathrm{M}$ particles, 12 ranks, 10 coarse
+steps). The iteration counts are unchanged (Level~8, 5 iterations and
+Level~9, 4 iterations), confirming that the merged red-black exchange
+does not degrade convergence.
+
+\subsection{FFTW3 CPU Direct Poisson Solver}
+\label{sec:fftw3}
+
+As a complement to the iterative optimizations described above,
+we replace the MG V-cycle
+on fully uniform AMR levels with a single direct FFT solve.  At the
+base level (\code{levelmin}), all $N = N_x  N_y  N_z$
+cells exist and the grid is periodic making the Poisson equation
+$\nabla^2\phi = 4\pi G\rho$ solvable exactly via spectral methods.
+A further advantage of the Fourier-space representation is that
+modified gravity models (e.g.\ massive neutrinos, coupled dark energy
+perturbations) can be incorporated by multiplying the Green's function
+with a scale- and time-dependent transfer function, without altering
+the real-space solver infrastructure.
+
+The solver uses \textsc{fftw3} \citep{Frigo2005} and operates in two
+regimes depending on the grid size.
+
+\subsubsection{Small grid ($N \le 256^3$)}
+Each rank gathers its local right-hand side into a local array and an
+\code{MPI\_ALLREDUCE} sums the contributions.  A local in-place R2C
+FFT (multi-threaded via \textsc{fftw3}+OpenMP) solves the system.
+
+\subsubsection{Large grid ($N > 256^3$)}
+The global grid is distributed across ranks using FFTW's native slab
+decomposition along the $x$-axis.  Data redistribution between
+RAMSES's spatial domain decomposition and FFTW's slab layout requires
+an all-to-all exchange in both forward and reverse directions.
+
+\subsubsection{Sparse point-to-point exchange}
+We replace \code{MPI\_ALLTOALLV} with sparse
+\code{MPI\_ISEND}/\code{MPI\_IRECV} targeting only actual
+communication partners, since each rank's domain overlaps only a
+small number of FFTW slabs.  Partner lists are precomputed from the
+spatial bounding boxes and cached until the domain decomposition
+changes, reducing the communication count from $O(\ncpu)$ to
+$O(n_{\text{partners}})$.
+
+\subsubsection{Performance}
+The FFTW3 solver reduces the base-level Poisson time from 241\,s
+(MG V-cycle) to 28.9\,s (\textbf{8.3$\times$ speedup}) on 12~ranks
+with a $512^3$ base grid, matching the cuFFT GPU result (28\,s)
+without requiring a GPU.
+The solver is enabled via \code{use\_fftw=.true.} in
+\code{\&RUN\_PARAMS} and requires compilation with
+\code{make USE\_FFTW=1}.
+
+Partner lists are computed from bounding boxes via
+\code{MPI\_ALLGATHER}, so the solver works identically with both
+Hilbert and \ksec\ orderings.
+
+
+% ===================================================================
+% 6. FEEDBACK SPATIAL BINNING
+% ===================================================================
+\section{FEEDBACK SPATIAL BINNING}
+\label{sec:feedback}
+
+\subsection{The Brute-Force Bottleneck}
+\label{sec:fb_problem}
+
+The Type~II supernova (SNII) feedback implementation in \ramses\
+involves two computationally expensive routines.
+
+\begin{itemize}
+\item \code{average\_SN}: averages hydrodynamic quantities within the
+  blast radius of each SN event, accumulating volume, momentum, kinetic
+  energy, mass loading, and metal loading. The original implementation
+  loops over all cells with respect to all SNe, yielding
+  $\Olog{N_{\rm cells} \times N_{\rm SN}}$ complexity.
+
+\item \code{Sedov\_blast}: injects the blast energy and ejecta into
+  cells within the blast radius. Same $\Olog{N_{\rm cells} \times
+  N_{\rm SN}}$ complexity.
+\end{itemize}
+
+In production simulations with $\sim$2000 simultaneous SN events,
+these routines consume 66\,s and 11\,s per call respectively,
+dominating the feedback time step.
+
+
+\subsection{Spatial Hash Binning}
+\label{sec:fb_binning}
+
+We partition the simulation domain into a uniform grid of
+$n_{\rm bin}^3$ bins, where
+\begin{equation}
+n_{\rm bin} = \texttt{max}\bigl[1,\, \texttt{min}\bigl(128,\,
+\texttt{iFloor}(L_{\rm box} \,/\, r_{\rm max})\bigr)\bigr]	
+\end{equation}
+and $r_{\rm max}$ is the maximum SN blast radius (the larger of
+\code{rcell} $\times$ \code{dx\_min} and \code{rbubble}). Each SN
+event is assigned to a bin based on its position, and a linked list
+threads the events within each bin.
+
+For each cell, we compute its bin index and check only the 27
+neighbouring bins in three dimensions. Since $r_{\rm max}$ is at most the bin size by
+construction, this 27-bin neighbourhood is guaranteed to contain all
+SNe that could influence the cell. The complexity becomes
+$\Olog{N_{\rm cells} \times \bar{n}_{\rm SN/bin} \times 27}$,
+where $\bar{n}_{\rm SN/bin} = N_{\rm SN} / n_{\rm bin}^3$ is the
+average number of SNe per bin. Figure~\ref{fig:spatial_binning}
+illustrates this approach.
+
+\begin{figure}
+\centering
+\includegraphics[width=\columnwidth]{fig_spatial_binning.pdf}
+\caption{Spatial hash binning for feedback (shown in 2D for clarity).
+  The domain is partitioned into a uniform grid of bins.  The target
+  cell (blue square) checks only the 9 neighbouring bins (27 in 3D),
+  shown as shaded regions.  Solid green lines connect the cell to SN
+  events (orange stars) within the neighbourhood.  Grey dashed lines
+  indicate distant SN events that are skipped, reducing the complexity
+  from $\Olog{N_{\rm cells} \times N_{\rm SN}}$ to
+  $\Olog{N_{\rm cells} \times 27\,\bar{n}_{\rm SN/bin}}$.}
+\label{fig:spatial_binning}
+\end{figure}
+
+\subsection{Performance Results}
+\label{sec:fb_performance}
+
+Both routines are parallelised with OpenMP over grids. With the thread-local temporary array, 
+\code{average\_SN} manages to secure the shared accumulation
+arrays while
+\code{Sedov\_blast} writes only to locally owned cells (thread-local) and needs no further array.
+
+With approximately 2000 simultaneous SN events, the improvements are as follows.
+\begin{itemize}
+\item \code{average\_SN}: 66\,s $\rightarrow$ 0.25\,s
+  ($\sim$260$\times$ speedup)
+\item \code{Sedov\_blast}: 11\,s $\rightarrow$ 0.07\,s
+  ($\sim$157$\times$ speedup)
+\end{itemize}
+
+Verification by restarting at the same snapshot confirms bit-identical
+results for all quantities ($n_\star$, $n_{\rm sink}$, $n_{\rm grid}$, $m_{\rm cons}$,
+$e_{\rm cons}$, $e_{\rm pot}$, $e_{\rm kin}$, $e_{\rm int}$).
+
+The same spatial binning technique is applied to the AGN feedback
+routines (\code{average\_AGN} and \code{AGN\_blast}), which suffer
+from the same $\Olog{N_{\rm cells} \times N_{\rm AGN}}$ brute-force
+scaling. In production simulations with tens of thousands of active
+AGN sink particles, these routines dominate the sink-particle time
+step.
+
+The AGN feedback involves three distinct interaction modes (saved
+energy injection, jet feedback, and thermal feedback), each with a
+different geometric distance criterion. The spatial binning is
+agnostic to these distinctions and simply reduces the candidate AGN set from
+the full population to only those in the 27 neighbouring bins, while
+preserving all distance-check logic and physical calculations
+unchanged. The linked-list construction and 27-bin traversal follow
+the same pattern as the SNII implementation
+(\S\ref{sec:fb_binning}), with \code{bin\_head} and \code{agn\_next}
+arrays replacing the SN-specific versions.
+
+With approximately 32\,000 active AGN particles, the binned
+\code{average\_AGN} achieves a $30\times$ speedup and \code{AGN\_blast}
+a $14\times$ speedup, reducing the total AGN feedback time by a factor
+of $\sim$4. Verification confirms bit-identical conservation
+diagnostics compared to the original brute-force implementation.
+
+
+\subsection{Sink Particle Merger: Oct-Tree FoF with Auto-Tuning}
+\label{sec:fof}
+
+Sink particles in \ramses\ represent unresolved compact objects (black
+holes, proto-stars) and must be merged when they approach within a
+linking length $r_{\rm link} = r_{\rm merge}\,\Delta x_{\rm min}$.
+The standard merge routine uses a Friends-of-Friends (FoF) algorithm
+with $\Olog{N_{\rm sink}^2}$ brute-force pair enumeration, in which for each
+connected component (group) it swaps particles into a contiguous block
+and iterates until no new links are found.  Although $N_{\rm sink}$ is
+typically small (${\lesssim}10^3$), production simulations of galaxy
+clusters can reach $N_{\rm sink} \sim 10^5$
+\citep[e.g.\ Horizon Run~5;][]{Lee2021}, at which point the
+$\Olog{N^2}$ scaling becomes prohibitive.
+
+We provide three FoF backends with automatic selection.
+
+\paragraph{Sequential brute-force.}
+The original $\Olog{N^2}$ algorithm, preserved as a correctness
+reference. But note that the order of sink array changes by swapping a pair of sinks during the FoF link.
+
+\paragraph{Serial oct-tree.}
+An oct-tree is built over the sink positions.  For each sink particle,
+tree nodes whose bounding sphere does not overlap the linking sphere
+are pruned, reducing the average neighbour search to
+$\Olog{N\log N}$.  Linked particles are erased from the tree
+so subsequent searches skip them.  This is
+equivalent to the brute-force result but dramatically faster for
+$N_{\rm sink} \gtrsim 500$.
+
+\paragraph{OpenMP oct-tree.}
+Every MPI rank builds the same oct-tree from the full (replicated)
+sink particle list, so no MPI data distribution is involved that the
+parallelism is purely intra-rank via OpenMP.  The particle index range
+is divided among OpenMP threads, and all threads share the same
+read-only tree but maintain private inclusion and group-ID arrays.
+A thread-safe variant of \code{FoF\_link}
+(\code{Omp\_FoF\_link}) replaces the sequential tree-erasure step
+with a thread-local \code{included} array, enabling concurrent
+traversal without locks.
+
+Cross-boundary groups are rolled back to the owning thread, ensuring
+deterministic results at negligible cost ($< 0.1$\,per\,cent of
+particles form multi-member groups).  Thread-local results are
+consolidated after the parallel phase; the final result is identical on
+all ranks.
+
+\paragraph{Auto-tuning.}
+An \code{Auto\_Do\_FoF} wrapper probes all three backends during the
+first call, measures their wall-clock time, and selects the fastest
+via \code{MPI\_BCAST} consensus.  Subsequent calls bypass the probe
+and invoke the winner directly.
+
+\begin{figure}
+\centering
+\includegraphics[width=\columnwidth]{fig_fof_scaling.pdf}
+\caption{FoF merger wall-clock time as a function of the number of
+  sink particles for the three backends.  The sequential brute-force
+  (blue) scales as $\Olog{N^2}$, the serial oct-tree (orange) scales
+  as $\Olog{N\log N}$, and the OpenMP oct-tree (green, 12~threads)
+  achieves a further parallel speedup of about 4.3.
+  The test uses a massively populated, highly clustered particle
+  distribution in which nearly every particle has close neighbours,
+  representing a worst-case scenario for the FoF algorithm.
+  The dashed line shows the $\Olog{N^2}$ scaling for reference.
+  At $N_{\rm sink}=10^5$, the parallel tree is
+  about 600 times faster than brute-force.}
+\label{fig:fof_scaling}
+\end{figure}
+
+All three methods produce identical group partitions for every test
+case ($N_{\rm sink}$ from 1 to $10^5$), verified by an $\Olog{N}$
+bidirectional group-mapping check.  At $N_{\rm sink} = 10^5$ the
+OpenMP oct-tree is ${\sim}600\times$ faster than brute-force
+(Figure~\ref{fig:fof_scaling}).
+
+
+% ===================================================================
+% 7. VARIABLE-NCPU RESTART
+% ===================================================================
+\section{VARIABLE-NCPU RESTART}
+\label{sec:varcpu}
+
+\subsection{HDF5 Parallel I/O and Restart}
+\label{sec:hdf5}
+
+Standard \ramses\ writes one binary file per MPI rank per output.
+Restarting with a different number of ranks is not directly supported,
+requiring an intermediate step of reading with the original rank count,
+redistributing, and re-writing.
+
+We implement HDF5 parallel I/O using the HDF5 library's MPI-IO
+backend. All ranks write to and read from a single HDF5 file,
+with datasets organized hierarchically. Figure~\ref{fig:hdf5_schema} illustrates this hierarchy.
+
+\begin{figure}
+\centering
+\includegraphics[width=0.75\columnwidth]{fig_hdf5_schema.pdf}
+\caption{HDF5 output file hierarchy.  AMR, hydro, and gravity data are
+  stored per level while particles and sinks are stored as flat arrays.
+  All ranks write to a single shared file via MPI-IO.}
+\label{fig:hdf5_schema}
+\end{figure}
+
+When the number of ranks in the output file ($\nfile$) 
+differs from the current run (when $\nfile \ne \ncpu$), the following procedure
+executes during restart:
+
+\begin{enumerate}
+\item Build a uniform \ksec\ tree for the new $\ncpu$ (equal-volume
+  partitioning, without load-balance adjustment).
+\item Read all grids from the HDF5 file. Since the file is a single
+  shared file, all ranks can access all data.
+\item For each grid, compute the CPU ownership from the father cell's
+  position.
+\item Each rank retains only the grids assigned to it, building the
+  local AMR tree incrementally.
+\item Hydro, gravity, and particle data are read and scattered to
+  locally owned grids using a precomputed file-index-to-local-grid
+  mapping.
+\item On the first coarse step after restart, a forced load-balance
+  operation redistributes grids for optimal balance under the new rank
+  configuration.
+\end{enumerate}
+
+This approach requires that all ranks temporarily hold the full grid
+metadata (positions and \texttt{son} flags) during the reconstruction phase.
+For typical production outputs (${\sim}10\,\mathrm{M}$ total grids), this
+temporary overhead is a few hundred MB, well within the memory
+budget freed by the optimizations of Section~\ref{sec:morton}.
+
+
+\subsection{Restarting Issues}
+\label{sec:varcpu_binary}
+
+When HDF5 is unavailable or the native binary format
+(\code{informat='origin'}) is preferred, a distributed I/O strategy
+enables variable-$\ncpu$ restart from the per-rank binary files
+written by standard \ramses.  The binary format stores one file per
+MPI rank (\code{amr\_XXXXX.outYYYYY},
+\code{hydro\_XXXXX.outYYYYY}, etc.), so the number of files equals
+$\nfile$, which may differ from the current $\ncpu$.
+
+The restart proceeds in three stages as; 
+first, files are distributed among ranks by round-robin assignment.
+Second, each rank reads its assigned AMR files, determines the
+owner of each grid, and an
+\code{MPI\_ALLTOALLV} exchange routes grids to owners.
+Lastly, hydro and gravity data are redistributed using the same exchange
+metadata.  Particle files are filtered by position into the local
+\ksec\ domain.  
+
+\subsection{Format Compatibility}
+\label{sec:varcpu_compat}
+
+Table~\ref{tab:restart_compat} summarises the supported
+input--output combinations for variable-$\ncpu$ restart.
+The \ksec\ decomposition can restore from any input format and
+rank count because the spatial tree is rebuilt from scratch.
+Conversely, restoring to Hilbert ordering requires the input
+to have been written with Hilbert ordering, and the binary
+format further restricts restarts to the original $\ncpu$.
+
+\begin{table}
+\centering
+\caption{Restart format compatibility.  ``Any'' means the output can
+be restarted with an arbitrary number of MPI ranks;
+``Same'' requires $\ncpu = \nfile$.}
+\label{tab:restart_compat}
+\small
+\begin{tabular}{@{}llccc@{}}
+\toprule
+Format & File DD & Run DD & $\ncpu$ & OK? \\
+\midrule
+Binary & Hilbert & Hilbert & Same & Yes \\
+Binary & Hilbert & \ksec   & Any  & Yes \\
+Binary & \ksec   & \ksec   & Any  & Yes \\
+Binary & \ksec   & Hilbert & ---  & No  \\
+HDF5   & Hilbert & Hilbert & Any  & Yes \\
+HDF5   & Hilbert & \ksec   & Any  & Yes \\
+HDF5   & \ksec   & \ksec   & Any  & Yes \\
+HDF5   & \ksec   & Hilbert & ---  & No  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ===================================================================
+% 8. GPU-ACCELERATED SOLVERS
+% ===================================================================
+\section{GPU-ACCELERATED SOLVERS}
+\label{sec:hybrid}
+
+Certain compute-intensive routines, namely the Godunov solver, gravity force
+computation, hydrodynamic synchronisation, CFL timestep, prolongation,
+and radiative cooling, are amenable to GPU acceleration.  Rather than
+offloading entire time steps to the GPU, \curamses\ adopts a
+\emph{hybrid dispatch} model in which OMP threads dynamically choose
+between CPU and GPU execution at runtime.
+
+\subsection{Dynamic Dispatch Model}
+\label{sec:hybrid_dispatch}
+
+At the start of each parallel region, each OMP thread attempts to
+acquire a GPU stream slot via an atomic counter.  Threads that succeed
+accumulate grid data into a \textbf{batched grid buffer} of configurable
+size (typically 4096 grids) and launch GPU kernels asynchronously when
+the buffer becomes full.  Threads that do not acquire a slot execute the
+standard CPU code path.  The \code{schedule(dynamic)} clause ensures
+load balancing, so that if a GPU thread is waiting for kernel completion,
+remaining loop iterations are picked up by CPU threads.
+
+This design requires no code duplication, as the CPU path is the
+original Fortran subroutine, and the GPU path is an alternative branch
+within the same \texttt{OpenMP do} loop.
+
+\subsection{Batched Grid Buffering}
+\label{sec:hybrid_superbatch}
+
+GPU kernel launch latency ($\sim$10--50\,$\mu$s) is reduced by
+batching, whereby each GPU thread accumulates the full stencil data for many
+grids before launching a single kernel covering all accumulated grids.
+For the Godunov solver, the GPU pipeline executes five kernels in
+sequence of primitive variable conversion, slope computation, Riemann
+tracing, flux computation, and artificial diffusion.
+
+A key optimisation is the \textbf{on-device flux reduction}
+that computes the conservative update entirely on the GPU.  Instead of
+transferring the full flux array back to the host ($\sim$98\,MB per
+flush), the kernel reduces fluxes into compact per-grid output arrays,
+reducing the device-to-host transfer to $\sim$5\,MB per flush, a 20-times reduction in PCIe bandwidth.
+
+
+\subsection{GPU-Resident Mesh Data}
+\label{sec:hybrid_gather}
+
+The initial GPU implementation gathers the stencil data for each batch
+of grids on the CPU, copies it to the device, and copies the results
+back after the kernel finishes.  Profiling reveals that this
+host-to-device (H2D) transfer accounts for about majority of the total
+GPU time, completely negating the kernel speedup.
+
+We therefore adopt a \emph{GPU-resident mesh} strategy in which the full AMR
+mesh arrays (\code{uold}, \code{unew}, \code{phi}, \code{f},
+\code{son}) are uploaded to the device once at the beginning of each
+level update.  The gather phase, which formerly assembled the stencil
+on the host, is moved to a GPU kernel that reads directly from
+device-resident arrays.  After the Godunov sweep the scatter kernel
+writes updated fluxes back to \code{unew} on the device, and only the
+modified portion is copied back to the host.
+
+This reorganisation reduces the H2D fraction almost negligible (less than 10 \% of wall-clock time).  The CPU-side gather time drops from 70.7\,s to
+2.1\,s ($34\times$) and the H2D transfer from 6.6\,s to 0.24\,s
+($27\times$).  The approach requires one MPI rank per GPU because
+the mesh upload consumes 4--9\,GB of device memory per rank. When the
+device memory is insufficient the code falls back automatically to
+CPU execution.
+
+With the Godunov solver efficiently offloaded, we next turn to the
+other major compute kernel, the multigrid Poisson solver, which
+dominates the remaining runtime.
+
+\subsection{GPU Multigrid Solver}
+\label{sec:hybrid_mg}
+
+We extend the GPU acceleration to the multigrid (MG) Poisson solver.
+The red-black Gauss--Seidel smoother and residual computation are
+ported to CUDA kernels, with the device-side data (\code{phi},
+\code{f}, neighbour arrays) totalling approximately 6.4\,GB.
+
+A \emph{halo-only} exchange --- transferring only the ghost-zone
+boundary cells between host and device instead of the full
+\code{phi} array --- reduces per-sweep PCIe volume from
+${\sim}2.4$\,GB to ${\sim}6$\,MB.  However, the interpolation step
+between AMR levels still requires a full \code{phi} device-to-host
+transfer at each V-cycle.
+
+\subsection{GPU Performance Assessment}
+\label{sec:hybrid_perf}
+
+Table~\ref{tab:gpu_perf} summarises the GPU performance on an NVIDIA
+H100~NVL system (93.1\,GB HBM3 per device, PCIe Gen5) using 2~MPI
+ranks $\times$ 4~OMP threads, running 2 coarse steps of the
+HR5-512 test (Section~\ref{sec:perf_config}).
+
+\begin{table}
+\centering
+\caption{GPU performance comparison on H100~NVL (2~ranks $\times$
+4~threads, 2 coarse steps).  ``MG base'' is the base-level multigrid
+solve and ``MG AMR'' is the fine-level AMR correction.  ``Full D2H/H2D''
+transfers the entire \code{phi} array every MG iteration; ``Halo-only''
+transfers only boundary cells during smoothing but still requires
+a full transfer for interpolation.}
+\label{tab:gpu_perf}
+\footnotesize
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Mode & Total & MG base & MG AMR & Godunov \\
+     & (s)   & (s)     & (s)    & (s)     \\
+\midrule
+CPU-only         & 45.9 & 10.2 & (incl.) & 9.5 \\
+GPU full D2H/H2D & 66.6 & 23.1 & 11.5    & 7.4 \\
+GPU halo-only     & 82.0 & 30.5 & 17.6    & 8.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Godunov solver benefits modestly from GPU offloading (9.5\,s
+$\to$ 7.4--8.4\,s), but the multigrid solver is consistently
+\emph{slower} on the GPU, with the base-level solve degrading from 10.2\,s
+to 30.5\,s (about 3 times slower).  The root cause is the PCIe bandwidth
+bottleneck.  Even on the H100~NVL with PCIe Gen5, pageable memory
+throughput is 9.2\,GB/s and pinned memory reaches only
+13.6--22.4\,GB/s.  The MG solver's coarse-level solve and the
+interpolation/restriction operators remain on the CPU, forcing a full
+\code{phi} (a potential array) device-to-host and host-to-device transfer at every
+V-cycle iteration.  This synchronisation cost overwhelms the
+computational savings from the GPU kernels.
+
+The fundamental difficulty is that AMR multigrid requires
+level-by-level processing with inter-level transfers that break GPU
+data residency.  A net GPU speedup would require full device-residency
+of the entire V-cycle. For the current code structure, CPU-only
+optimizations (Section~\ref{sec:multigrid}) remain more effective.
+
+
+% ===================================================================
+% 9. PERFORMANCE RESULTS
+% ===================================================================
+\section{PERFORMANCE RESULTS}
+\label{sec:performance}
+
+\subsection{Test Configuration}
+\label{sec:perf_config}
+
+We use two test configurations, referred to throughout as
+\textbf{Cosmo256} and \textbf{HR5-512}.
+
+The \textbf{Cosmo256} test has
+$200\,\mathrm{M}$ dark matter particles in a periodic box of side
+256\,$h^{-1}$\,Mpc, initialised at $z = 29.5$ with \textsc{music}
+\citep{Hahn2011}. The base AMR grid is $256^3$ (\code{levelmin}=8)
+with adaptive refinement up to \code{levelmax}=10. The simulation is
+restarted from an HDF5 output at coarse step~5 and evolved to
+step~10 (5 coarse steps).
+
+The \textbf{HR5-512} test, used for strong scaling
+(Section~\ref{sec:perf_timing}), is drawn from an ongoing
+Horizon-5 production run.  It contains $135.7\,\mathrm{M}$ dark
+matter particles and $3.2 \times 10^4$ sink particles in the same
+256\,$h^{-1}$\,Mpc box with $\Lambda$CDM cosmology
+($\Omega_b = 0.04$).  The base grid is $512^3$
+(\code{levelmin}=9) with \code{levelmax}=17; at the restart epoch
+(coarse step~241) levels 9--14 are active.  The physics suite
+includes radiative cooling \citep[Haardt \& Madau
+background;][]{HaardtMadau2012}, star formation, Type~II supernova
+(SNII) and AGN feedback, Bondi black hole accretion, and BH spin
+with magnetically arrested disc (MAD) jets.  Initial conditions are
+generated with \textsc{music} at $z = 29.5$.  Each MPI rank
+allocates $\ngridmax = 5\,\mathrm{M}$ grids (88\,M total grids
+across all ranks), and the run is restarted from an HDF5 output at
+coarse step~241.
+
+Both tests are run on a dual-socket AMD EPYC
+7543 node (64 physical cores, 128 threads) with 1\,TB of DDR4 memory.
+
+
+\subsection{Conservation Verification}
+\label{sec:perf_conservation}
+
+Every optimization is verified against a Hilbert-ordering reference run.
+The comparison encompasses the full set of global diagnostics:
+energy conservation error $e_{\rm cons}$, gravitational potential
+energy $e_{\rm pot}$, kinetic energy $e_{\rm kin}$, internal energy
+$e_{\rm int}$, total mass $m_{\rm tot}$, number of stars formed
+$n_\star$, number of sink particles $n_{\rm sink}$, and the total
+number of created AMR grids.
+The \ksec\ decomposition, Morton hash table, and their combination produce
+diagnostics identical to the reference ($e_{\rm cons} =
+3.77 \times 10^{-3}$, $e_{\rm pot} = -1.88 \times 10^{-6}$,
+$e_{\rm kin} = 1.23 \times 10^{-6}$; all other quantities match to
+machine precision).  The MG-optimized configuration
+yields $e_{\rm cons} = 3.79 \times 10^{-3}$ (0.5\,per\,cent higher),
+attributable to relaxed boundary synchronisation in the merged red-black
+sweep, well within the solver's convergence tolerance.
+
+Achieving bit-identical star and sink counts across different domain
+decompositions requires a thread-safe random number generator.  The
+standard Fortran \code{RANDOM\_NUMBER} intrinsic uses per-image state
+that depends on the thread scheduling order, introducing
+non-determinism under OpenMP.  We replace it with a deterministic
+generator seeded by the global grid cell index, so that each cell
+receives the same random draw regardless of the number of MPI ranks
+or OpenMP threads.  This eliminates the sole source of run-to-run
+variation in star formation stochasticity.
+
+All optimizations operate purely at the data-structure and communication
+level, leaving the discrete operators unchanged.
+
+
+\subsection{Strong Scaling}
+\label{sec:perf_timing}
+
+We separate the scaling analysis into two complementary parts. The
+full-physics application benchmark in this section tests intra-node
+strong scaling with all solver components active, providing precise
+per-component attribution. The multi-node communication scaling
+behaviour, which is governed by the \ksec\ domain decomposition and
+sparse P2P exchange patterns, is characterised independently through
+dedicated microbenchmarks on a 16-node cluster in
+Section~\ref{sec:bench_ghost}.
+
+We measure strong scaling by restarting the HR5-512 simulation
+from an HDF5 output.  The test problem comprises
+$54\,\mathrm{M}$ AMR grids (levels~9--14) and $135.7\,\mathrm{M}$ particles
+including $3.2 \times 10^4$ sink particles, with full physics enabled
+(radiative cooling, star formation, SNII/AGN feedback).
+The output was written at coarse step~241 with 12 MPI ranks,
+and we run 2 additional coarse steps to step~243.
+The variable-$\ncpu$ restart feature (\S\ref{sec:varcpu}) allows the
+output to be read with any number of MPI ranks. A forced
+\code{load\_balance} on the first coarse step ensures optimal grid
+distribution before timing begins.
+The test platform has two AMD EPYC 7543 processors (64 cores, 128 threads)
+and 1\,TB of shared memory; all runs use \code{OMP\_NUM\_THREADS=1}.
+
+The wall-clock time and per-component timer averages for $\ncpu = 1$--64
+are measured.  All configurations yield energy conservation errors
+$e_{\rm cons}$ of $\mathcal{O}(10^{-4})$, with small variations due
+to floating-point summation order changes across different domain
+decompositions.
+
+Several scaling trends are evident:
+
+\begin{itemize}
+\item \emph{Particle operations} scale nearly ideally from 1 to 64 ranks:
+  538\,s $\to$ 14\,s, a $38.4\times$ speedup for $64\times$ the ranks.
+
+\item \emph{Multigrid Poisson solver} dominates the total time ($\sim$37\%),
+  scaling from 4034\,s (1~rank) to 106\,s (64~ranks).  The $38.2\times$
+  speedup is near-ideal, reflecting the effectiveness of the Morton
+  hash-based neighbour lookup and precomputed cache arrays.
+
+\item \emph{Godunov solver} scales $58.4\times$ from 1 to 64 ranks
+  (2536\,s $\to$ 43\,s).  The super-linear speedup arises because
+  multi-rank runs benefit from cache effects, since each rank processes
+  a smaller working set that fits in the L3 cache.
+
+\item \emph{Sink particle operations} scale well up to 24 ranks
+  (1346\,s $\to$ 69\,s, $19.5\times$) but slow beyond 32 ranks
+  due to the global ALLREDUCE operations in AGN feedback.
+
+\item \emph{Load balancing} overhead converges to $\sim$16\,s beyond
+  32 ranks.  This cost is spread over \code{nremap} coarse steps
+  (every 5 steps in production).
+
+\item The \emph{overall speedup} reaches $33.9\times$ at 64 ranks
+  relative to the single-rank baseline, demonstrating excellent
+  scaling efficiency ($53\%$) on this shared-memory node.
+\end{itemize}
+
+Figure~\ref{fig:scaling} visualises these trends.  Panel~(a) shows the
+elapsed time and per-component timer values as a function of $\ncpu$
+on a log--log scale.  All major components follow the ideal scaling
+line closely up to $\sim$16 ranks, with gradual deviation at higher
+rank counts due to communication overhead.
+Panel~(b) shows the speedup relative to the single-rank baseline:
+particle operations and the flag routine achieve near-ideal scaling,
+while the elapsed time reaches $33.9\times$ at 64 ranks.
+
+\begin{figure*}
+\centering
+\includegraphics[width=\textwidth]{strong_scaling.pdf}
+\caption{Strong scaling of \curamses\ on a dual-socket AMD EPYC 7543
+node (64 cores) with a $135.7\,\mathrm{M}$ particle cosmological
+simulation including full physics.
+(a)~Elapsed time and per-component wall-clock times versus $\ncpu$.
+The dashed line shows ideal scaling from the single-rank baseline.
+(b)~Speedup relative to 1~rank.  Particle operations and the
+flag routine scale near-ideally, while the overall speedup reaches
+$33.9\times$ at 64 ranks ($53\%$ parallel efficiency).}
+\label{fig:scaling}
+\end{figure*}
+
+
+\subsection{OpenMP Thread Scaling}
+\label{sec:perf_omp}
+
+To evaluate intra-rank parallelism we fix $\ncpu = 4$ and vary
+\code{OMP\_NUM\_THREADS} from 1 to 30, using the same HR5-512 problem as
+Section~\ref{sec:perf_timing}.  The total core count ranges from 4 to
+120, and the physical core limit of the dual-socket node is 64.
+
+All runs conserve energy
+to $e_{\rm cons} \le 6.56 \times 10^{-4}$.
+
+Several trends distinguish the OpenMP scaling from the MPI-only results:
+
+\begin{itemize}
+\item \emph{Multigrid Poisson solver} benefits the most from
+  threading, improving from $1085 \to 121$\,s at 16 threads ($8.9\times$), with
+  continued gains beyond 16 threads reaching $10.5\times$ at 30 threads.
+  The precomputed neighbour arrays and fused residual loops
+  (Section~\ref{sec:multigrid}) expose substantial loop-level
+  parallelism.
+
+\item \emph{Godunov solver} scales $11.4\times$ from 1 to 16 threads
+  ($610 \to 54$\,s).  Beyond 16 threads, performance degrades slightly
+  due to memory bandwidth saturation and NUMA effects.
+
+\item \emph{Sinks and Poisson} exhibit modest scaling ($3.0\times$ and
+  $3.0\times$ at 16 threads) because sink operations involve global
+  reductions and serial sections that limit parallelism.
+
+\item \emph{Overall speedup} plateaus at $5.8\times$ with 16 threads
+  (64 cores), limited by the serial fraction of MPI communication and
+  sink-particle operations.  Beyond the physical core count,
+  oversubscription yields no further improvement.
+\end{itemize}
+
+Figure~\ref{fig:omp_scaling} compares per-component timers and speedup
+curves as a function of $N_{\rm omp}$.  The vertical dotted line marks
+the physical core limit (64 cores).  Panel~(a) shows that the MG solver
+and Godunov components track the ideal scaling line most closely, while
+sinks and Poisson saturate early.  Panel~(b) confirms that the overall
+speedup reaches a ceiling near $6\times$, indicating that further
+performance gains require additional MPI ranks rather than more threads
+per rank.
+
+\begin{figure*}
+\centering
+\includegraphics[width=\textwidth]{omp_scaling.pdf}
+\caption{OpenMP thread scaling of \curamses\ with $\ncpu = 4$ MPI
+ranks on a dual-socket AMD EPYC 7543 node (64 cores).
+(a)~Per-component wall-clock times versus $N_{\rm omp}$. The dashed
+line shows ideal scaling from the single-thread baseline.
+The vertical dotted line marks the physical core limit (16 threads
+$\times$ 4 ranks $=$ 64 cores).
+(b)~Speedup relative to 1 thread.  The MG solver achieves $10.5\times$
+speedup, while the overall elapsed time plateaus at ${\sim}5.8\times$.}
+\label{fig:omp_scaling}
+\end{figure*}
+
+
+\subsection{Memory-Weighted Load Balancing}
+\label{sec:perf_membal}
+
+The memory-weighted cost function (equation~\ref{eq:cost_function})
+assigns $w_{\rm grid}$ automatically from \code{nvar} (2256\,B for
+\code{nvar}=14 in our test) and $w_{\rm part} = 12$ bytes per particle.
+Table~\ref{tab:membal} quantifies the load balance achieved by this
+scheme across the strong-scaling runs described in the preceding section.
+
+\begin{table}
+\centering
+\caption{Memory load balance for the strong-scaling test
+  ($54\,\mathrm{M}$ grids, $135.7\,\mathrm{M}$ particles).
+  $M_{\min}$ and $M_{\max}$ are the minimum and maximum per-rank
+  resident memory after the final load-balance remap (step 243).
+  The ratio $M_{\max}/M_{\min}$ measures memory imbalance.
+  The level-10 grid counts illustrate the per-rank work imbalance
+  at the most populated refined level ($19.5\,\mathrm{M}$ grids total).}
+\label{tab:membal}
+\small
+\begin{tabular}{rrrrcrrr}
+\hline
+$\ncpu$ & $M_{\min}$ & $M_{\max}$ & $\frac{M_{\max}}{M_{\min}}$
+  & & \multicolumn{3}{c}{Lv-10 grids/rank ($\times 10^3$)} \\
+  &  (Gb) & (Gb) &  & & min & max & ratio \\
+\hline
+  1 & 147.2 & 147.2 & 1.000 & &\multicolumn{3}{c}{---} \\
+  2 &  87.0 &  87.4 & 1.005 & & 9120 & 10338 & 1.13 \\
+  4 &  50.1 &  50.5 & 1.008 & & 4546 &  5210 & 1.15 \\
+  8 &  28.0 &  28.6 & 1.021 & & 2200 &  2675 & 1.22 \\
+ 12 &  20.9 &  21.4 & 1.024 & & 1370 &  1828 & 1.33 \\
+ 16 &  16.7 &  17.1 & 1.024 & & 1021 &  1376 & 1.35 \\
+ 24 &  12.5 &  13.1 & 1.048 & &  671 &   937 & 1.40 \\
+ 32 &  10.7 &  11.1 & 1.037 & &  521 &   711 & 1.36 \\
+ 48 &   8.2 &   8.6 & 1.049 & &  306 &   479 & 1.56 \\
+ 64 &   8.2 &   8.6 & 1.049 & &  225 &   362 & 1.61 \\
+\hline
+\end{tabular}
+\end{table}
+
+The memory-weighted balancer keeps the per-rank memory imbalance
+remarkably low, with $M_{\max}/M_{\min} \le 1.05$ for all rank counts tested,
+from 2 to 64.  This is achieved despite substantial grid-count imbalance
+at the most populated refined level (level~10, containing
+$19.5\,\mathrm{M}$ grids), where the per-rank max/min ratio grows from
+1.13 at 2~ranks to 1.61 at 64~ranks because the \ksec\ sub-domains
+become smaller relative to the AMR clustering scale.
+
+The low memory imbalance is key for production runs because each rank
+must pre-allocate arrays sized to its local $\ngridmax$. A high imbalance
+forces over-allocation on lightly loaded ranks.  With memory-weighted
+balancing, the 64-rank run requires only 8.6\,Gb per rank at peak,
+compared with the 147.2\,Gb needed in a single-rank run, a factor of
+17.1 reduction, close to the ideal 64$\times$ scaling modulo the
+$\sim$4\,Gb fixed per-rank overhead (MPI buffers, hash tables, coarse
+grid).  The fixed overhead explains why per-rank memory saturates at
+$\sim$8\,Gb for 48 and 64 ranks.
+
+The load-balance remap itself costs 16--26\,s for $\ncpu \ge 8$,
+growing from 2.3 to 5.1\,per\,cent of the
+total runtime as the computation shrinks under strong scaling, a
+modest price for near-perfect memory balance.
+Figure~\ref{fig:memory_balance} visualizes these trends.
+
+\begin{figure*}
+\centering
+\includegraphics[width=\textwidth]{fig_memory_balance.pdf}
+\caption{Memory-weighted load balance across the strong-scaling test
+  suite.
+  (a)~Per-rank memory: $M_{\min}$ and $M_{\max}$ follow the ideal
+  $1/\ncpu$ scaling (dashed grey) until a fixed per-rank overhead of
+  $\sim$4\,Gb dominates at high rank counts.
+  (b)~Load balance quality: the memory imbalance ratio
+  $M_{\max}/M_{\min}$ (blue, left axis) remains below 5\,per\,cent
+  for all rank counts tested ($2$--$64$), while the level-10 grid
+  count imbalance (red, right axis) grows to 1.61 at 64 ranks,
+  demonstrating that the memory-weighted cost function successfully
+  decouples memory balance from grid-count balance.}
+\label{fig:memory_balance}
+\end{figure*}
+
+\subsection{Communication Microbenchmarks}
+\label{sec:perf_bench}
+
+To validate the communication advantages of the \ksec\ framework at
+scale, we design and execute a suite of dedicated microbenchmarks on the
+\textit{Grammar} cluster (16 nodes, $2\times 32$-core Intel Xeon per node,
+InfiniBand HDR interconnect, 504\,Gb RAM per node, Intel~MPI 2021.17).
+All benchmarks are self-contained single-source Fortran programs using
+plane-by-plane ownership computation [$O(N^2)$ memory per rank] so that
+grid sizes up to $N=2048$ are feasible.
+
+\subsubsection{Ghost zone exchange}
+\label{sec:bench_ghost}
+
+This benchmark constructs a uniform $N^3$ periodic grid, assigns cell
+ownership via either Hilbert or \ksec\ domain decomposition, and
+measures ghost zone exchange time for three communication backends:
+\textit{P2P} (non-blocking \texttt{MPI\_ISEND/IRECV}),
+\texttt{MPI\_ALLTOALLV}, and the hierarchical \ksec\ exchange described
+in Section~\ref{sec:ksec_exchange}.  Each cell carries $n_{\rm var}=5$
+double-precision variables (matching \ramses\ hydro), and timings are
+averaged over 3~repeats.
+
+Results for $N=1024$ ($10^9$~cells)
+on 64--1024~MPI ranks show the following trends:
+
+\begin{itemize}
+\item The ghost list \emph{build time} is dominated by the Hilbert curve
+  computation (${\sim}453$--$534$\,s, rising at high rank counts) versus
+  the \ksec\ tree traversal which scales from 200\,s (64~ranks) to
+  354\,s (1024~ranks).  The \ksec\ build is $1.5$--$2.3\times$ faster
+  across all rank counts.
+\item The \emph{exchange time} decreases with rank count as the
+  per-rank ghost volume shrinks.  P2P and \texttt{ALLTOALLV} are
+  effectively tied (7--42\,ms at 64--1024 ranks), while the hierarchical
+  \ksec\ exchange is ${\sim}5$--$10\times$ slower (52--368\,ms) due to
+  its $O(\log P)$ serialised stages.  The gap narrows at high rank
+  counts: at 1024~ranks the \ksec\ exchange drops to 52\,ms versus
+  7\,ms for P2P.
+  The \ksec\ exchange is designed for variable-size AMR communications where
+  all-to-all collectives become prohibitive. On this uniform-grid test
+  its overhead is expected.
+\item The average number of communication partners is constant at 6.0
+  for \ksec\ across all rank counts, compared to 6.0--9.1 for Hilbert.
+  Non-power-of-two rank counts (96, 192, 320, 448) increase the Hilbert
+  neighbour count to 8.4--9.1, while \ksec\ remains at exactly 6,
+  reflecting the compact cuboid sub-domains produced by recursive
+  bisection.
+\item The surface-to-volume ratio is consistently lower for \ksec\
+  than for Hilbert at non-power-of-two ranks (e.g.\ 0.027 vs.\ 0.033
+  at 96~ranks), confirming that the cuboid decomposition minimises
+  ghost volume.
+\end{itemize}
+
+
+\subsubsection{MPI collective performance}
+\label{sec:bench_mpi}
+
+A second benchmark profiles the raw performance of five MPI collectives,
+namely \texttt{MPI\_ALLREDUCE}, a manual binary-tree allreduce (reduce to
+root then broadcast, $O(\log_2 P)$ stages), \texttt{MPI\_BCAST},
+neighbour-to-neighbour \texttt{MPI\_SENDRECV} (1D ring), and
+\texttt{MPI\_ALLTOALL}, over message sizes from 1 to $10^7$ doubles
+(8\,B to 80\,MB).  Each test executes a warmup round followed by 100
+timed repeats; the per-repeat maximum across all ranks is recorded.
+These measurements provide a baseline for interpreting the dominant
+communication costs in \curamses.
+
+\subsubsection{Load balance quality}
+\label{sec:bench_lb}
+
+To isolate the impact of domain decomposition geometry on load balance,
+a third benchmark assigns non-uniform cell weights drawn from 20
+Gaussian clusters (amplitude 10--100, width $\sigma=0.02$--0.10)
+superposed on a unit background.  For each DD method (Hilbert vs.\
+\ksec) the benchmark reports (i)~the weight imbalance ratio
+$W_{\max}/W_{\mathrm{mean}}$, (ii)~the ghost cell ratio (fraction of
+owned cells with at least one face neighbour on a different rank), and
+(iii)~the number of MPI communication partners per rank.
+
+\subsubsection{Poisson solver}
+\label{sec:bench_poisson}
+
+The fourth benchmark compares three iterative solvers (Jacobi,
+red-black Gauss-Seidel, and unpreconditioned conjugate gradient)
+on a distributed $N^3$ periodic grid with slab decomposition in~$z$.
+The source term is $f = -12\pi^2 \sin(2\pi x)\sin(2\pi y)\sin(2\pi z)$,
+giving an exact solution $\phi = \sin(2\pi x)\sin(2\pi y)\sin(2\pi z)$.
+Each solver separates computation (stencil update) from communication
+(ghost plane exchange via \texttt{MPI\_SENDRECV}), enabling direct
+measurement of the compute/communication ratio.  CG achieves
+machine-precision convergence in $O(N)$ iterations versus the $O(N^2)$
+scaling of Jacobi and Gauss-Seidel, quantifying the benefit of the
+Krylov approach used in \curamses' multigrid V-cycle smoother.
+
+
+% ===================================================================
+% 10. CONCLUSIONS
+% ===================================================================
+\section{CONCLUSIONS}
+\label{sec:conclusions}
+
+We have presented \curamses, a set of algorithmic and implementation
+improvements to the \ramses\ cosmological AMR code that collectively
+address the key scaling bottlenecks, namely communication overhead, memory
+consumption, solver efficiency, and hardware utilisation, encountered
+in large-scale cosmological simulations. While previous efforts such as
+OMP-RAMSES \citep{Lee2021} and RAMSES-yOMP \citep{Han2026} introduced
+MPI+OpenMP hybrid parallelism, \curamses\ extends this to a three-level
+MPI+OpenMP+CUDA paradigm suited to the GPU-dominated architectures of
+current and upcoming exascale supercomputers. The main contributions
+are:
+
+\begin{enumerate}
+\item \textbf{Recursive \ksec\ domain decomposition}
+  (Section~\ref{sec:ksection}): hierarchical MPI exchange with
+  $\Olog{\sum_l k_l}$ communications, substituting all \code{MPI\_ALLTOALL}
+  calls, with memory-weighted load balancing reducing peak-to-mean
+  imbalance to $<$5\%.
+
+\item \textbf{Morton key hash table} (Section~\ref{sec:morton}):
+  $\Olog{1}$ neighbour lookup replacing the \code{nbor} array, saving
+  $>$190\,MB per rank.
+
+\item \textbf{Memory optimizations}: on-demand allocation saves
+  $>$1\,GB per rank (Appendix~\ref{app:memory}).
+
+\item \textbf{Multigrid solver optimizations}
+  (Section~\ref{sec:multigrid}): merged red-black sweeps and fused
+  residual-norm reduce MG communication by 44\,per\,cent, lowering
+  the Poisson share from 50 to 40\,per\,cent.
+
+\item \textbf{FFTW3 direct Poisson solver} (Section~\ref{sec:fftw3}):
+  $8.3\times$ speedup at the base level with sparse P2P exchange.
+
+\item \textbf{Feedback spatial binning} (Section~\ref{sec:feedback}):
+  ${\sim}260\times$ SNII and $30\times$ AGN speedups.
+
+\item \textbf{Variable-$\ncpu$ restart} (Section~\ref{sec:varcpu}):
+  HDF5 and binary I/O with arbitrary rank counts.
+
+\item \textbf{GPU acceleration} (Section~\ref{sec:hybrid}):
+  GPU-resident mesh reduces H2D transfer to 5.7\,per\,cent, but the MG
+  solver is $3\times$ slower on GPU due to per-V-cycle PCIe transfers;
+  CPU-only optimization remains more effective for AMR multigrid.
+\end{enumerate}
+
+All optimizations preserve conservation to machine precision
+(Section~\ref{sec:perf_conservation}).  Every global diagnostic ---
+$e_{\rm cons}$, $e_{\rm pot}$, $e_{\rm kin}$, $e_{\rm int}$,
+$m_{\rm tot}$, $n_\star$, $n_{\rm sink}$, and the total number of AMR
+grids --- is verified to match the Hilbert-ordering reference run,
+with only a 0.5\,per\,cent shift in $e_{\rm cons}$ for the merged
+red-black sweep.  The use of a deterministic, cell-index-seeded random
+number generator ensures that star formation stochasticity is
+independent of the domain decomposition and thread scheduling.
+
+The techniques presented here --- Morton hash table, \ksec\
+decomposition, spatial binning, and auto-tuning MPI backends --- are
+general and applicable to other octree AMR codes beyond \ramses.
+The FFTW3 base-level solver opens the door to modified-gravity
+cosmologies (e.g.\ massive neutrinos, coupled dark energy) via
+Fourier-space transfer functions, without altering the real-space AMR
+infrastructure.
+
+The GPU acceleration experiment (Section~\ref{sec:hybrid}) demonstrates
+that a hybrid CPU+GPU approach is viable for the Godunov solver but
+counterproductive for AMR multigrid, where per-V-cycle PCIe transfers
+negate the kernel speedup.  Achieving efficient GPU utilisation for
+AMR multigrid remains an open challenge requiring full device-residency
+of the V-cycle, ideally with GPU-native restriction, prolongation, and
+coarse-level solve.
+
+Strong scaling on a single 64-core node reaches $33.9\times$ speedup
+(53\,per\,cent parallel efficiency), while OpenMP thread scaling
+achieves $5.8\times$ with 16 threads per rank.  The variable-$\ncpu$
+restart capability, supporting both HDF5 and binary formats, provides
+operational flexibility for production campaigns where hardware
+availability changes between runs.
+
+\curamses\ is in production use for the Horizon Run~5 cosmological
+simulation project and will be made publicly available upon completion
+of the benchmark campaign.
+
+
+% ===================================================================
+% ACKNOWLEDGEMENTS
+% ===================================================================
+\section*{Acknowledgements}
+
+This work was supported by the Korea Institute for Advanced Study.
+Computational resources were provided by the KIAS Center for Advanced
+Computation. The author thanks Romain Teyssier for the public release
+of the \ramses\ code and the \ramses\ developer community for
+continued maintenance and improvements.
+
+
+% ===================================================================
+% DATA AVAILABILITY
+% ===================================================================
+\section*{Data Availability}
+
+The modified code is available at
+\url{https://github.com/kjhan0606/cuRAMSES}. Test configurations
+and analysis scripts will be shared upon reasonable request to the
+author.
+
+
+% ===================================================================
+% BIBLIOGRAPHY
+% ===================================================================
+\bibliographystyle{mnras}
+
+\begin{thebibliography}{99}
+
+\bibitem[\protect\citeauthoryear{Adams}{Adams}{2001}]{Adams2001}
+Adams M.~F., 2001, in Proc.\ SC01. ACM, Denver,
+\href{https://doi.org/10.1145/582034.582038}{doi:10.1145/582034.582038}
+
+\bibitem[\protect\citeauthoryear{Brandt}{Brandt}{1977}]{Brandt1977}
+Brandt A., 1977, Mathematics of Computation, 31, 333,
+\href{https://doi.org/10.1090/S0025-5718-1977-0431719-X}{doi:10.1090/S0025-5718-1977-0431719-X}
+
+\bibitem[\protect\citeauthoryear{Briggs, Henson \& McCormick}{Briggs et al.}{2000}]{Briggs2000}
+Briggs W.~L., Henson V.~E., McCormick S.~F., 2000, A Multigrid Tutorial, 2nd edn. SIAM, Philadelphia
+
+\bibitem[\protect\citeauthoryear{Bryan et al.}{Bryan et al.}{2014}]{Bryan2014}
+Bryan G.~L., et al., 2014, ApJS, 211, 19,
+\href{https://doi.org/10.1088/0067-0049/211/2/19}{doi:10.1088/0067-0049/211/2/19},
+\href{https://arxiv.org/abs/1307.2265}{arXiv:1307.2265}
+
+\bibitem[\protect\citeauthoryear{Dav{\'e} et al.}{Dav{\'e} et al.}{2019}]{Dave2019}
+Dav{\'e} R., Angl{\'e}s-Alc{\'a}zar D., Narayanan D., Li Q., Rafieferantsoa M.~H., Appleby S., 2019, MNRAS, 486, 2827,
+\href{https://doi.org/10.1093/mnras/stz937}{doi:10.1093/mnras/stz937},
+\href{https://arxiv.org/abs/1901.10203}{arXiv:1901.10203}
+
+\bibitem[\protect\citeauthoryear{Dubois et al.}{Dubois et al.}{2012}]{Dubois2012}
+Dubois Y., Devriendt J., Slyz A., Teyssier R., 2012, MNRAS, 420, 2662,
+\href{https://doi.org/10.1111/j.1365-2966.2011.20142.x}{doi:10.1111/j.1365-2966.2011.20142.x},
+\href{https://arxiv.org/abs/1108.0110}{arXiv:1108.0110}
+
+\bibitem[\protect\citeauthoryear{Dubois et al.}{Dubois et al.}{2014}]{Dubois2014}
+Dubois Y., et al., 2014, MNRAS, 444, 1453,
+\href{https://doi.org/10.1093/mnras/stu1227}{doi:10.1093/mnras/stu1227},
+\href{https://arxiv.org/abs/1402.1165}{arXiv:1402.1165}
+
+\bibitem[\protect\citeauthoryear{Dubois et al.}{Dubois et al.}{2021}]{Dubois2021}
+Dubois Y., et al., 2021, A\&A, 651, A109,
+\href{https://doi.org/10.1051/0004-6361/202039429}{doi:10.1051/0004-6361/202039429},
+\href{https://arxiv.org/abs/2009.10578}{arXiv:2009.10578}
+
+\bibitem[\protect\citeauthoryear{Frigo \& Johnson}{Frigo \& Johnson}{2005}]{Frigo2005}
+Frigo M., Johnson S.~G., 2005, Proc.\ IEEE, 93, 216,
+\href{https://doi.org/10.1109/JPROC.2004.840301}{doi:10.1109/JPROC.2004.840301}
+
+\bibitem[\protect\citeauthoryear{Frontiere et al.}{Frontiere et al.}{2025}]{Frontiere2025}
+Frontiere N., et al., 2025, in Proc.\ SC~'25, ACM, New York,
+\href{https://doi.org/10.1145/3712285.3771786}{doi:10.1145/3712285.3771786},
+\href{https://arxiv.org/abs/2510.03557}{arXiv:2510.03557}
+
+\bibitem[\protect\citeauthoryear{Guillet \& Teyssier}{Guillet \& Teyssier}{2011}]{Guillet2011}
+Guillet T., Teyssier R., 2011, J.\ Comput.\ Phys., 230, 4756,
+\href{https://doi.org/10.1016/j.jcp.2011.02.044}{doi:10.1016/j.jcp.2011.02.044},
+\href{https://arxiv.org/abs/1104.1703}{arXiv:1104.1703}
+
+\bibitem[\protect\citeauthoryear{Haardt \& Madau}{Haardt \& Madau}{2012}]{HaardtMadau2012}
+Haardt F., Madau P., 2012, ApJ, 746, 125,
+\href{https://doi.org/10.1088/0004-637X/746/2/125}{doi:10.1088/0004-637X/746/2/125},
+\href{https://arxiv.org/abs/1105.2039}{arXiv:1105.2039}
+
+\bibitem[\protect\citeauthoryear{Habib et al.}{Habib et al.}{2016}]{Habib2016}
+Habib S., et al., 2016, New Astron., 42, 49,
+\href{https://doi.org/10.1016/j.newast.2015.06.003}{doi:10.1016/j.newast.2015.06.003},
+\href{https://arxiv.org/abs/1410.2805}{arXiv:1410.2805}
+
+\bibitem[\protect\citeauthoryear{Hahn \& Abel}{Hahn \& Abel}{2011}]{Hahn2011}
+Hahn O., Abel T., 2011, MNRAS, 415, 2101,
+\href{https://doi.org/10.1111/j.1365-2966.2011.18820.x}{doi:10.1111/j.1365-2966.2011.18820.x},
+\href{https://arxiv.org/abs/1103.6031}{arXiv:1103.6031}
+
+\bibitem[\protect\citeauthoryear{Han et al.}{Han et al.}{2026}]{Han2026}
+Han S., et al., 2026, A\&A, 705, A169,
+\href{https://doi.org/10.1051/0004-6361/202556291}{doi:10.1051/0004-6361/202556291},
+\href{https://arxiv.org/abs/2507.06301}{arXiv:2507.06301}
+
+\bibitem[\protect\citeauthoryear{Hopkins et al.}{Hopkins et al.}{2014}]{Hopkins2014}
+Hopkins P.~F., Kere{\v s} D., O{\~n}orbe J., Faucher-Gigu{\`e}re C.-A., Quataert E., Murray N., Bullock J.~S., 2014, MNRAS, 445, 581,
+\href{https://doi.org/10.1093/mnras/stu1738}{doi:10.1093/mnras/stu1738},
+\href{https://arxiv.org/abs/1311.2073}{arXiv:1311.2073}
+
+\bibitem[\protect\citeauthoryear{Hopkins}{Hopkins}{2015}]{Hopkins2015}
+Hopkins P.~F., 2015, MNRAS, 450, 53,
+\href{https://doi.org/10.1093/mnras/stv195}{doi:10.1093/mnras/stv195},
+\href{https://arxiv.org/abs/1409.7395}{arXiv:1409.7395}
+
+\bibitem[\protect\citeauthoryear{Hopkins et al.}{Hopkins et al.}{2018}]{Hopkins2018}
+Hopkins P.~F., et al., 2018, MNRAS, 480, 800,
+\href{https://doi.org/10.1093/mnras/sty1690}{doi:10.1093/mnras/sty1690},
+\href{https://arxiv.org/abs/1702.06148}{arXiv:1702.06148}
+
+\bibitem[\protect\citeauthoryear{Ishiyama et al.}{Ishiyama et al.}{2021}]{Ishiyama2021}
+Ishiyama T., et al., 2021, MNRAS, 506, 4210,
+\href{https://doi.org/10.1093/mnras/stab1755}{doi:10.1093/mnras/stab1755},
+\href{https://arxiv.org/abs/2007.14720}{arXiv:2007.14720}
+
+\bibitem[\protect\citeauthoryear{Kim et al.}{Kim et al.}{2011}]{Kim2011}
+Kim J., Park C., Rossi G., Lee S.~M., Gott III J.~R., 2011, J.\ Korean Astron.\ Soc., 44, 217,
+\href{https://doi.org/10.5303/JKAS.2011.44.6.217}{doi:10.5303/JKAS.2011.44.6.217}
+
+\bibitem[\protect\citeauthoryear{Kim et al.}{Kim et al.}{2015}]{Kim2015}
+Kim J., Park C., L'Huillier B., Hong S.~E., 2015, J.\ Korean Astron.\ Soc., 48, 213,
+\href{https://doi.org/10.5303/JKAS.2015.48.4.213}{doi:10.5303/JKAS.2015.48.4.213},
+\href{https://arxiv.org/abs/1508.05107}{arXiv:1508.05107}
+
+\bibitem[\protect\citeauthoryear{Knuth}{Knuth}{1997}]{Knuth1997}
+Knuth D.~E., 1997, The Art of Computer Programming, Vol.~3:
+Sorting and Searching, 2nd edn. Addison-Wesley, Reading, MA
+
+\bibitem[\protect\citeauthoryear{Lee et al.}{Lee et al.}{2021}]{Lee2021}
+Lee J., et al., 2021, ApJ, 908, 11,
+\href{https://doi.org/10.3847/1538-4357/abd08b}{doi:10.3847/1538-4357/abd08b},
+\href{https://arxiv.org/abs/2006.01039}{arXiv:2006.01039}
+
+\bibitem[\protect\citeauthoryear{Libeskind et al.}{Libeskind et al.}{2018}]{Libeskind2018}
+Libeskind N.~I., et al., 2018, MNRAS, 473, 1195,
+\href{https://doi.org/10.1093/mnras/stx1976}{doi:10.1093/mnras/stx1976},
+\href{https://arxiv.org/abs/1705.03021}{arXiv:1705.03021}
+
+\bibitem[\protect\citeauthoryear{Maksimova et al.}{Maksimova et al.}{2021}]{Maksimova2021}
+Maksimova N.~A., Garrison L.~H., Eisenstein D.~J., Hadzhiyska B., Bose S., Satterthwaite T.~P., 2021, MNRAS, 508, 4017,
+\href{https://doi.org/10.1093/mnras/stab2484}{doi:10.1093/mnras/stab2484},
+\href{https://arxiv.org/abs/2110.11398}{arXiv:2110.11398}
+
+\bibitem[\protect\citeauthoryear{Morton}{Morton}{1966}]{Morton1966}
+Morton G.~M., 1966, A Computer Oriented Geodetic Data Base and a
+New Technique in File Sequencing. IBM, Ottawa
+
+\bibitem[\protect\citeauthoryear{Nelson et al.}{Nelson et al.}{2019}]{Nelson2019}
+Nelson D., et al., 2019, Comput.\ Astrophys.\ Cosmol., 6, 2,
+\href{https://doi.org/10.1186/s40668-019-0028-x}{doi:10.1186/s40668-019-0028-x},
+\href{https://arxiv.org/abs/1812.05609}{arXiv:1812.05609}
+
+\bibitem[\protect\citeauthoryear{Pillepich et al.}{Pillepich et al.}{2018}]{Pillepich2018}
+Pillepich A., et al., 2018, MNRAS, 473, 4077,
+\href{https://doi.org/10.1093/mnras/stx2656}{doi:10.1093/mnras/stx2656},
+\href{https://arxiv.org/abs/1703.02970}{arXiv:1703.02970}
+
+\bibitem[\protect\citeauthoryear{{RAMSES Team}}{{RAMSES Team}}{2024}]{RamsesManual}
+{RAMSES Team}, 2024, RAMSES User's Guide,
+\url{https://ramses-organisation.readthedocs.io}
+
+\bibitem[\protect\citeauthoryear{Samet}{Samet}{2006}]{Samet2006}
+Samet H., 2006, Foundations of Multidimensional and Metric Data Structures. Morgan Kaufmann
+
+\bibitem[\protect\citeauthoryear{Schaye et al.}{Schaye et al.}{2015}]{Schaye2015}
+Schaye J., et al., 2015, MNRAS, 446, 521,
+\href{https://doi.org/10.1093/mnras/stu2058}{doi:10.1093/mnras/stu2058},
+\href{https://arxiv.org/abs/1407.7040}{arXiv:1407.7040}
+
+\bibitem[\protect\citeauthoryear{Springel \& Hernquist}{Springel \& Hernquist}{2003}]{Springel2003}
+Springel V., Hernquist L., 2003, MNRAS, 339, 289,
+\href{https://doi.org/10.1046/j.1365-8711.2003.06206.x}{doi:10.1046/j.1365-8711.2003.06206.x},
+\href{https://arxiv.org/abs/astro-ph/0206393}{arXiv:astro-ph/0206393}
+
+\bibitem[\protect\citeauthoryear{Springel}{Springel}{2005}]{Springel2005}
+Springel V., 2005, MNRAS, 364, 1105,
+\href{https://doi.org/10.1111/j.1365-2966.2005.09655.x}{doi:10.1111/j.1365-2966.2005.09655.x},
+\href{https://arxiv.org/abs/astro-ph/0505010}{arXiv:astro-ph/0505010}
+
+\bibitem[\protect\citeauthoryear{Springel}{Springel}{2010}]{Springel2010}
+Springel V., 2010, MNRAS, 401, 791,
+\href{https://doi.org/10.1111/j.1365-2966.2009.15715.x}{doi:10.1111/j.1365-2966.2009.15715.x},
+\href{https://arxiv.org/abs/0901.4107}{arXiv:0901.4107}
+
+\bibitem[\protect\citeauthoryear{Teyssier}{Teyssier}{2002}]{Teyssier2002}
+Teyssier R., 2002, A\&A, 385, 337,
+\href{https://doi.org/10.1051/0004-6361:20011817}{doi:10.1051/0004-6361:20011817},
+\href{https://arxiv.org/abs/astro-ph/0111367}{arXiv:astro-ph/0111367}
+
+\bibitem[\protect\citeauthoryear{Trottenberg, Oosterlee \& Sch\"uller}{Trottenberg et al.}{2001}]{Trottenberg2001}
+Trottenberg U., Oosterlee C.~W., Sch\"uller A., 2001, Multigrid. Academic Press
+
+\bibitem[\protect\citeauthoryear{Tremmel et al.}{Tremmel et al.}{2017}]{Tremmel2017}
+Tremmel M., Karcher M., Governato F., Volonteri M., Quinn T.~R., Pontzen A., Anderson L., Bellovary J., 2017, MNRAS, 470, 1121,
+\href{https://doi.org/10.1093/mnras/stx1160}{doi:10.1093/mnras/stx1160},
+\href{https://arxiv.org/abs/1607.02151}{arXiv:1607.02151}
+
+\bibitem[\protect\citeauthoryear{Wesseling}{Wesseling}{1992}]{Wesseling1992}
+Wesseling P., 1992, An Introduction to Multigrid Methods. Wiley, Chichester
+
+\bibitem[\protect\citeauthoryear{Vogelsberger et al.}{Vogelsberger et al.}{2014}]{Vogelsberger2014}
+Vogelsberger M., et al., 2014, MNRAS, 444, 1518,
+\href{https://doi.org/10.1093/mnras/stu1536}{doi:10.1093/mnras/stu1536},
+\href{https://arxiv.org/abs/1405.2921}{arXiv:1405.2921}
+
+\bibitem[\protect\citeauthoryear{Warren \& Salmon}{Warren \& Salmon}{1993}]{Warren1993}
+Warren M.~S., Salmon J.~K., 1993, in Proc.\ Supercomputing '93. ACM, New York, p.~12,
+\href{https://doi.org/10.1145/169627.169640}{doi:10.1145/169627.169640}
+
+\bibitem[\protect\citeauthoryear{Weinberger et al.}{Weinberger et al.}{2017}]{Weinberger2017}
+Weinberger R., et al., 2017, MNRAS, 465, 3291,
+\href{https://doi.org/10.1093/mnras/stw2944}{doi:10.1093/mnras/stw2944},
+\href{https://arxiv.org/abs/1607.03486}{arXiv:1607.03486}
+
+\bibitem[\protect\citeauthoryear{Truelove et al.}{Truelove et al.}{1997}]{Truelove1997}
+Truelove J.~K., Klein R.~I., McKee C.~F., Holliman J.~H., Howell L.~H.,
+Greenough J.~A., 1997, ApJ, 489, L179,
+\href{https://doi.org/10.1086/310975}{doi:10.1086/310975}
+
+\end{thebibliography}
+
+
+% ===================================================================
+% APPENDIX
+% ===================================================================
+\appendix
+
+\section{MORTON KEY ENCODING DETAILS}
+\label{app:morton}
+
+The Morton key interleaving for a single coordinate value $v$ with
+$B$ bits per coordinate ($B = 21$ for 64-bit keys, $B = 42$ for 128-bit keys)
+is computed by the following bit-manipulation loop:
+
+\begin{algorithm}[H]
+\caption{Morton key encoding of $(i_x, i_y, i_z)$}
+\label{alg:morton_encode}
+\begin{algorithmic}[1]
+\REQUIRE Integer coordinates $(i_x, i_y, i_z)$
+\ENSURE $3B$-bit Morton key $M$
+\STATE $M \leftarrow 0$
+\FOR{$b = 0$ \TO $B - 1$}
+  \STATE $M \leftarrow M \,|\, (\text{bit}_b(i_x) \text{\texttt{<<}} 3b)$
+  \STATE $M \leftarrow M \,|\, (\text{bit}_b(i_y) \text{\texttt{<<}} (3b+1))$
+  \STATE $M \leftarrow M \,|\, (\text{bit}_b(i_z) \text{\texttt{<<}} (3b+2))$
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+The neighbour key computation decodes, shifts the appropriate
+coordinate, applies periodic wrapping, and re-encodes:
+
+\begin{algorithm}[H]
+\caption{Morton neighbour key in direction $j$}
+\label{alg:morton_neighbor}
+\begin{algorithmic}[1]
+\REQUIRE Morton key $M$, direction $j$, grid counts $(n_x, n_y, n_z)$
+\ENSURE Neighbour Morton key $M'$ (or $-1$ if out of bounds)
+\STATE $(i_x, i_y, i_z) \leftarrow$ \textsc{Decode}($M$)
+\STATE Adjust $i_d$ by $\pm 1$ according to direction $j$
+\STATE Apply periodic wrapping: $i_d \leftarrow i_d \bmod n_d$
+\STATE $M' \leftarrow$ \textsc{Encode}$(i_x, i_y, i_z)$
+\end{algorithmic}
+\end{algorithm}
+
+
+\section{PER-LEVEL HASH TABLE AND REPLACEMENT FUNCTIONS}
+\label{app:hashtable}
+
+We maintain one open-addressing hash table (probing consecutive slots
+on collision) per AMR level, mapping Morton keys $M$ to grid indices
+\code{igrid}.
+
+The hash function first reduces the key to 64 bits (for
+128-bit keys, an XOR fold of the upper and lower halves; for 64-bit
+keys, a direct cast), then applies multiplicative hashing
+with an additional mixing step:
+\begin{align}
+t   &= \bigl[(h \times \phi_1) \text{\texttt{\textasciicircum}} (h \text{\texttt{>>}} 16)\bigr] \times \phi_2,
+\nonumber \\
+h(M) &= t \text{\texttt{\textasciicircum}} (t \text{\texttt{>>}} 13),
+\label{eq:hash_func}
+\end{align}
+where $h$ is the 64-bit reduced key,
+$\text{\texttt{\textasciicircum}}$ is bitwise XOR,
+$\text{\texttt{>>}}$ is a logical right bit-shift,
+$\phi_1 = 2654435761$ and $\phi_2 = \texttt{0x9E3779B97F4A7C15}$
+are constants chosen for good bit mixing, and the table capacity is
+always a power of two to allow bitmask modular arithmetic. Collisions
+are resolved by linear probing, and the fill fraction is kept below 0.7 by
+automatic rehashing (doubling capacity).
+
+The hash table is maintained incrementally.
+\begin{itemize}
+\item \code{morton\_hash\_insert} is called during \code{make\_grid\_coarse} and \code{make\_grid\_fine}.
+\item \code{morton\_hash\_delete} is called during \code{kill\_grid}.
+\item A full rebuild is performed after defragmentation (\code{morton\_hash\_rebuild}).
+\end{itemize}
+
+A companion array \code{grid\_level(igrid)} stores the AMR level of
+each grid, enabling Morton key computation from the grid index alone.
+
+Two wrapper functions provide drop-in replacements for the original
+\code{nbor}-based access patterns.
+
+\begin{itemize}
+\item \code{morton\_nbor\_grid(igrid, ilevel, j)} returns the grid
+  index of the same-level neighbour in direction $j$, replacing the
+  pattern \code{son(nbor(igrid, j))}. The implementation computes the
+  Morton key, shifts by direction, and looks up the result in the hash table.
+
+\item \code{morton\_nbor\_cell(igrid, ilevel, j)} returns the father
+  cell index of the neighbour, replacing the pattern
+  \code{nbor(igrid, j)}. For level 1 it returns the coarse cell index
+  directly. For finer levels it computes the parent grid via the
+  hash table at level $l-1$ and the octant index from the coordinate
+  parity.
+\end{itemize}
+
+The \code{nbor} array is reduced to \code{allocate(nbor(1:1, 1:1))}
+, effectively eliminated while maintaining compilation compatibility
+with any remaining references.
+
+
+
+
+
+% ===================================================================
+% APPENDIX E: MEMORY SAVINGS DETAILS
+% ===================================================================
+\section{MEMORY SAVINGS DETAILS}
+\label{app:memory}
+
+\subsection{Hilbert Key and Histogram Array Elimination}
+\label{app:mem_hilbert}
+
+When using \ksec\ ordering, the Hilbert key array
+\code{hilbert\_key(1:ncell)} is no longer needed for domain
+decomposition. We replace it with \code{allocate(hilbert\_key(1:1))},
+saving $16\,\ngridmax\,\twotondim$ bytes
+under \code{QUADHILBERT} (128-bit keys stored as two 64-bit integers).
+For $\ngridmax = 5\,\mathrm{M}$, this is approximately 640\,MB.
+
+The defragmentation routine, which previously required Hilbert keys
+for reordering, uses a local scratch array (\code{defrag\_dp})
+allocated only during the defragmentation pass and immediately
+deallocated.
+
+Similarly, the arrays \code{bisec\_ind\_cell} and \code{cell\_level},
+each of size $\ngridmax\,\twotondim$ integers (8 bytes), are used
+exclusively during load balancing to build the bisection histogram.
+We allocate them on entry to \code{init\_bisection\_histogram} and
+deallocate them after \code{cmp\_new\_cpu\_map} returns, saving
+$16\,\ngridmax\,\twotondim \approx 320$\,MB
+for $\ngridmax = 5\,\mathrm{M}$. Since load balancing occurs only
+every \code{nremap} coarse steps, these arrays are absent during the
+vast majority of the simulation.
+
+
+\subsection{Memory Savings Summary}
+\label{app:mem_summary}
+
+The hash table memory cost is given by equation~(\ref{eq:hash_memory}).
+The \code{grid\_level} array adds $4\,\ngridmax$ bytes.
+Compared to the original \code{nbor} cost of $48\,\ngridmax$
+bytes, the net savings are approximately
+$44\,\ngridmax - 17\,N_{\rm grids}$.
+Since $N_{\rm grids} \ll \ngridmax$ in practice (typical occupancy is
+30--60\,per\,cent), the savings are substantial, reaching $\sim$176\,MB for
+$\ngridmax = 5\,\mathrm{M}$ at 50\,per\,cent occupancy,
+a reduction of roughly 60\,per\,cent in neighbour-related memory.
+
+The computational cost of a hash lookup is $\Olog{1}$ expected time,
+with worst-case linear probing bounded by the fill fraction. In
+practice, the precomputed neighbour caches described in
+Appendix~\ref{app:mg_details} alleviate any per-lookup overhead in the
+performance-critical Poisson solver.
+
+The combined memory savings for $\ngridmax = 5\,\mathrm{M}$ exceed
+1.2\,GB per rank, including \code{nbor} removal (240\,MB),
+\code{hilbert\_key} elimination (640\,MB under \code{QUADHILBERT}),
+on-demand \code{bisec\_ind\_cell} and \code{cell\_level} (320\,MB),
+and defrag scratch (40\,MB), minus hash table overhead
+(${\sim}50$\,MB). For standard 64-bit keys the Hilbert savings would be
+320\,MB.
+
+The freed memory enables deeper AMR hierarchies or larger $\ngridmax$
+within the same hardware budget.
+
+A diagnostic routine \code{writemem\_minmax} reports
+the minimum and maximum resident set size across all ranks at each
+coarse step, providing runtime verification of the memory savings.
+
+
+% ===================================================================
+% APPENDIX F: MULTIGRID SOLVER IMPLEMENTATION DETAILS
+% ===================================================================
+\section{MULTIGRID SOLVER IMPLEMENTATION DETAILS}
+\label{app:mg_details}
+
+\subsection{Neighbour Grid Precomputation}
+\label{app:mg_nbor_precompute}
+
+The Gauss--Seidel (GS) smoother and residual computation both require
+access to the six Cartesian neighbours of each grid. In the Morton
+hash table approach (Section~\ref{sec:morton}), each neighbour lookup
+involves a hash table query. While individual lookups are $\Olog{1}$,
+the GS kernel accesses 6 neighbours per grid, 8 cells per grid, and
+typically 4--5 V-cycle iterations, resulting in hundreds of hash
+lookups per grid per solve.
+
+We precompute all neighbour grids into a contiguous array before
+entering the V-cycle iteration loop,
+\begin{equation}
+\text{nbor\_grid\_fine}(j,\, i) = \text{morton\_nbor\_grid}(
+\text{igrid\_amr}(i),\, l,\, j),
+\label{eq:nbor_precompute}
+\end{equation}
+where $l$ is the AMR level being solved, $\text{igrid\_amr}(i)$ is
+the AMR grid pointer for the $i$-th active grid at level $l$,
+$j = 0, 1, \ldots, 6$ (where $j = 0$ stores the grid's own AMR
+index), and $i = 1, \ldots, N_{\rm grid}$. This
+array is allocated before the iteration loop and deallocated after,
+so its memory overhead is transient.
+
+
+\subsection{Merged Red-Black Exchange and Fused Kernels}
+\label{app:mg_merged_rb}
+
+We remove the inter-sweep ghost exchange between red and black passes
+(Red $\to$ Black $\to$ Exchange instead of Red $\to$ Exchange $\to$
+Black $\to$ Exchange), reducing the per-iteration exchange count from 9
+to 5.  Boundary cells in the black sweep use values from the previous
+iteration; since the MG solve serves as a preconditioner for the CG
+outer iteration, this relaxed synchronisation does not affect
+convergence.
+
+We also remove two unnecessary residual exchanges per iteration,
+reducing the total from 9 to 5 exchange calls per iteration, a
+44\,per\,cent reduction in MG communication volume.
+
+The same optimization is applied to the coarse-level solver
+(direct solve, pre-smoothing, post-smoothing), where the merged
+red-black pattern similarly halves the exchange count.
+
+The MG algorithm requires both the residual $r = f - \nabla^2_h\phi$ and its
+$L^2$ norm $\|r\|_2^2$ at specific points in the V-cycle. In the
+original code, these are computed in separate passes. We add an
+optional \code{norm2} argument to \code{cmp\_residual\_mg\_fine}:
+when present, the norm is accumulated during the same loop that
+computes the residual, saving one full grid traversal.
+Since the subroutine is \code{external} (not module-contained), callers
+must include an \code{interface} block to enable the optional-argument
+dispatch.
+
+The GS fast-path computation involves a division by
+$2 N_{\rm dim} = 6$:
+\begin{equation}
+\phi_{\rm new} = \frac{\sum_j \phi_j - h^2 f}{2 N_{\rm dim}}.
+\label{eq:gs_update}
+\end{equation}
+We replace the division by $2N_{\rm dim}$ with a multiplication by
+the precomputed reciprocal $1/(2N_{\rm dim})$, which is faster
+on most architectures.
+
+
+
+% ===================================================================
+% APPENDIX G: NEW NAMELIST PARAMETERS
+% ===================================================================
+\section{NEW NAMELIST PARAMETERS}
+\label{app:namelist}
+
+Table~\ref{tab:namelist} lists the namelist parameters introduced or
+modified by \curamses.
+
+\begin{table*}
+\centering
+\caption{New namelist parameters introduced by \curamses.  Default
+values are shown where applicable.}
+\label{tab:namelist}
+\small
+\begin{tabular}{lllll}
+\toprule
+Parameter & Namelist block & Type & Default & Description \\
+\midrule
+\code{ordering}        & \code{\&RUN\_PARAMS}   & string  & \code{'hilbert'} & Domain decomposition ordering (\code{'hilbert'} or \code{'ksection'}) \\
+\code{use\_fftw}       & \code{\&RUN\_PARAMS}   & logical & \code{.false.}   & Enable FFTW3 direct Poisson solver at base level \\
+\code{exchange\_method} & \code{\&RUN\_PARAMS}  & string  & \code{'auto'}    & MPI exchange backend (\code{'auto'}, \code{'p2p'}, \code{'ksection'}) \\
+\code{gpu\_hydro}      & \code{\&RUN\_PARAMS}   & logical & \code{.false.}   & Enable GPU dispatch for hydrodynamics \\
+\code{gpu\_poisson}    & \code{\&RUN\_PARAMS}   & logical & \code{.false.}   & Enable GPU dispatch for MG Poisson solver \\
+\code{gpu\_fft}        & \code{\&RUN\_PARAMS}   & logical & \code{.false.}   & Enable GPU dispatch for FFT solver \\
+\code{gpu\_sink}       & \code{\&RUN\_PARAMS}   & logical & \code{.false.}   & Enable GPU dispatch for sink particle routines \\
+\code{memory\_balance} & \code{\&RUN\_PARAMS}   & logical & \code{.false.}   & Enable memory-weighted load balancing \\
+\code{use\_neutrino}   & \code{\&RUN\_PARAMS}   & logical & \code{.false.}   & Enable massive neutrino linear response \\
+\code{de\_perturb}     & \code{\&RUN\_PARAMS}   & logical & \code{.false.}   & Enable dark energy perturbation corrections \\
+\midrule
+\code{mem\_weight\_grid} & \code{\&AMR\_PARAMS} & integer & auto             & Memory cost per grid (0\,=\,auto from \code{nvar}; $>0$\,=\,override) \\
+\code{mem\_weight\_part} & \code{\&AMR\_PARAMS} & integer & 12               & Memory cost per particle \\
+\code{mem\_weight\_sink} & \code{\&AMR\_PARAMS} & integer & 500              & Computational cost per sink particle \\
+\midrule
+\code{omega\_nu}       & \code{\&COSMO\_PARAMS} & real    & 0                & Massive neutrino density parameter $\Omega_\nu$ \\
+\code{neutrino\_table} & \code{\&COSMO\_PARAMS} & string  & ---              & Path to neutrino transfer function table \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+
+\label{lastpage}
+
+\end{document}
+

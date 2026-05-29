@@ -1,0 +1,428 @@
+subroutine adaptive_loop
+  use amr_commons
+  use hydro_commons
+  use pm_commons
+  use poisson_commons
+  use cooling_module
+  use ksection, only: ksection_trim_done
+#ifdef RT
+  use rt_hydro_commons
+#endif
+#ifdef HYDRO_CUDA
+  use poisson_cuda_interface, only: cuda_fft_print_timers_c
+  use cuda_commons, only: cuda_pool_init_f, cuda_available
+  use iso_c_binding, only: c_int
+#endif
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer(kind=8)::n_step
+  integer::ilevel,idim,ivar,info,tot_pt
+!jhshin1
+  real(kind=8)::tt1,tt2,muspt,muspt_this_step,wallsec,dumpsec
+!jhshin2
+  real(kind=4)::real_mem,real_mem_tot,real_mem_min,real_mem_max
+!jhshin1
+  real(kind=8),save::tstart=0.0
+!jhshin2
+  ! SFR tracking
+  real(dp)::scale_l_s,scale_t_s,scale_d_s,scale_v_s,scale_nH_s,scale_T2_s
+  real(dp)::mstar_tot_glob,scale_m_sfr,V_box_sfr,sfr_inst
+  real(dp),save::mstar_glob_old=0.0d0, t_sfr_old=-1.0d30
+  ! SGS diagnostics
+  real(dp)::sgs_loc(4),sgs_glob(4)
+  real(dp)::esgs_tot,pturb_max,pth_at_max,csgs_ratio_max
+  integer::icell,igrid_sgs,ind_sgs,iskip_sgs,ncell_sgs
+  ! Sink/AGN coarse-step log
+  integer::isink_log
+
+#ifndef WITHOUTMPI
+  tt1=MPI_WTIME()
+!jhshin1
+  ! for calculating total run time
+  if (tstart.eq.0.0) then
+     tstart = MPI_WTIME()
+  end if
+!jhshin2
+#endif
+
+  call init_amr                      ! Initialize AMR variables
+
+  ! Diagnostic: test MPI health after init_amr (build_comm may stress IB)
+#ifndef WITHOUTMPI
+  if(myid==1) write(*,*) 'Diagnostic: testing MPI after init_amr...'
+  call flush(6)
+  call MPI_BARRIER(MPI_COMM_WORLD, info)
+  tot_pt = myid
+  call MPI_ALLREDUCE(MPI_IN_PLACE, tot_pt, 1, MPI_INTEGER, &
+       & MPI_SUM, MPI_COMM_WORLD, info)
+  if(myid==1) write(*,'(A,I6)') &
+       & ' Diagnostic: ALLREDUCE OK, sum=', tot_pt
+  call flush(6)
+#endif
+
+  call init_time                     ! Initialize time variables
+  if(hydro)call init_hydro           ! Initialize hydro variables
+#ifdef RT
+  if(rt.or.neq_chem) &
+       & call rt_init_hydro          ! Initialize radiation variables
+#endif
+  if(poisson)call init_poisson       ! Initialize poisson variables
+  if(use_fdm)call fdm_compute_hbar   ! Compute effective hbar in code units
+#ifdef ATON
+  if(aton)call init_radiation        ! Initialize radiation variables
+#endif
+  if(nrestart==0)call init_refine    ! Build initial AMR grid
+
+#ifdef grackle
+  if(cosmo)then
+     ! Compute cooling table at current aexp
+  endif
+#else  
+  if(cooling.and..not.neq_chem) &
+       call set_table(dble(aexp))    ! Initialize cooling look up table
+#endif
+  if(pic)call init_part              ! Initialize particle variables
+  if(pic)call init_tree              ! Initialize particle tree
+  if(nrestart==0)call init_refine_2  ! Build initial AMR grid again
+
+  ! Initialize FDM wavefunction (after AMR grid and density are set)
+  if(use_fdm .and. nrestart==0) call fdm_init_psi
+
+  ! Rebuild Morton hash tables after full AMR grid is available
+  if(nrestart==0) call morton_hash_build_and_verify()
+
+#ifndef WITHOUTMPI
+  muspt=0.
+  tot_pt=-1
+  tt2=MPI_WTIME()
+  if(myid==1)write(*,*)'Time elapsed since startup:',tt2-tt1
+#endif
+
+
+  if(myid==1)then
+     write(*,*)'Initial mesh structure'
+     do ilevel=1,nlevelmax
+        if(numbtot(1,ilevel)>0)write(*,999)ilevel,numbtot(1:4,ilevel)
+     end do
+  end if
+
+  nstep_coarse_old=nstep_coarse
+
+  ! Initialize polytropic floor coefficients for eEOS in hydro solver
+  call init_eeos_poly_coeff
+
+#ifdef HYDRO_CUDA
+  ! Early CUDA pool init: must happen before first multigrid_fine call so the
+  ! cuFFT direct-solve gate (cuda_pool_is_initialized_c()/=0) passes on every
+  ! rank. Previously init was lazy in godunov_fine, missing the first force solve.
+  if(gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink) then
+     call cuda_pool_init_f()
+     if(myid==1) write(*,'(A,L1)') ' Adaptive loop: CUDA pool early-init, available=', cuda_available
+  end if
+#endif
+
+  if(myid==1)write(*,*)'Starting time integration'
+
+  do ! Main time loop
+                               call timer('coarse levels','start')
+
+#ifndef WITHOUTMPI
+     tt1=MPI_WTIME()
+#endif
+
+     if(verbose)write(*,*)'Entering amr_step_coarse'
+
+     epot_tot=0.0D0  ! Reset total potential energy
+     ekin_tot=0.0D0  ! Reset total kinetic energy
+     mass_tot=0.0D0  ! Reset total mass
+     eint_tot=0.0D0  ! Reset total internal energy
+#ifdef SOLVERmhd
+     emag_tot=0.0D0  ! Reset total magnetic energy
+#endif
+
+     ! Make new refinements
+     if(levelmin.lt.nlevelmax.and.(.not.static.or.(nstep_coarse_old.eq.nstep_coarse.and.restart_remap)))then
+        call refine_coarse
+        do ilevel=1,levelmin
+           call build_comm(ilevel)
+           call make_virtual_fine_int(cpu_map(1),ilevel)
+           if(hydro)then
+#ifdef SOLVERmhd
+              call make_virtual_fine_dp_bulk(uold,nvar+3,ilevel)
+#else
+              call make_virtual_fine_dp_bulk(uold,nvar,ilevel)
+#endif
+              if(simple_boundary)call make_boundary_hydro(ilevel)
+           endif
+#ifdef RT
+           if(rt)then
+              call make_virtual_fine_dp_bulk(rtuold,nrtvar,ilevel)
+              if(simple_boundary)call rt_make_boundary_hydro(ilevel)
+           endif
+#endif
+           if(poisson)then
+              call make_virtual_fine_dp(phi(1),ilevel)
+              call make_virtual_fine_dp_bulk(f,ndim,ilevel)
+           end if
+           if(ilevel<levelmin)call refine_fine(ilevel)
+        end do
+        ! Clear trim flag after exchange routines have processed it
+        call ksection_trim_done()
+     endif
+
+     ! Call base level
+     call amr_step(levelmin,1)
+
+     ! Rebuild and verify Morton hash tables after all levels updated
+     call morton_hash_rebuild
+     call morton_hash_verify('step')
+
+                               call timer('coarse levels','start')
+
+     if(levelmin.lt.nlevelmax.and.(.not.static.or.(nstep_coarse_old.eq.nstep_coarse.and.restart_remap)))then
+
+        do ilevel=levelmin-1,1,-1
+           ! Hydro book-keeping
+           if(hydro)then
+              call upload_fine(ilevel)
+#ifdef SOLVERmhd
+              call make_virtual_fine_dp_bulk(uold,nvar+3,ilevel)
+#else
+              call make_virtual_fine_dp_bulk(uold,nvar,ilevel)
+#endif
+              if(simple_boundary)call make_boundary_hydro(ilevel)
+           end if
+#ifdef RT
+           ! Radiation book-keeping
+           if(rt)then
+              call rt_upload_fine(ilevel)
+              call make_virtual_fine_dp_bulk(rtuold,nrtvar,ilevel)
+              if(simple_boundary)call rt_make_boundary_hydro(ilevel)
+           end if
+#endif
+           ! Gravity book-keeping
+           if(poisson)then
+              call make_virtual_fine_dp(phi(1),ilevel)
+              call make_virtual_fine_dp_bulk(f,ndim,ilevel)
+           end if
+        end do
+        
+        ! Build refinement map
+        do ilevel=levelmin-1,1,-1
+           call flag_fine(ilevel,2)
+        end do
+        call flag_coarse
+!		if(lightcone) then
+!			call output_cone_hydro(1)
+!			call output_cone_part(1)
+!			call output_cone_sink(1)
+!			call output_cone_hydro(2)
+!			call output_cone_part(2)
+!			call output_cone_sink(2)
+!		endif
+
+ !       aexp_old2=aexp_old
+!		if(myid .eq.1) write(*,*)aexp_old
+!		if(myid .eq.1) write(*,*)aexp
+     endif
+
+     ! New coarse time-step
+     nstep_coarse=nstep_coarse+1
+
+     call check_jobcontrol
+
+     ! Sink/AGN log every coarse step (append to sink_log.csv)
+     if(sink .and. nsink>0 .and. myid==1) then
+        call units(scale_l_s,scale_t_s,scale_d_s,scale_v_s,scale_nH_s,scale_T2_s)
+        open(unit=667, file='sink_log.csv', position='append', &
+             form='formatted', status='unknown')
+        do isink_log=1, nsink
+           write(667,'(I8,",",ES14.6,",",F8.4,",",I10,6(",",ES14.6))') &
+                nstep_coarse, aexp, 1d0/aexp-1d0, &
+                idsink(isink_log), &
+                msink(isink_log)*scale_d_s*scale_l_s**3/1.98892d33, &
+                xsink(isink_log,1), xsink(isink_log,2), &
+                xsink(isink_log,3), &
+                dMBH_coarse(isink_log), spinmag(isink_log)
+        end do
+        close(667)
+     end if
+
+!jhshin1 -walltime setting
+#ifndef WITHOUTMPI
+     tt2=MPI_WTIME()
+     if(mod(nstep_coarse,ncontrol)==0)then
+        call getmem(real_mem)
+        call MPI_ALLREDUCE(real_mem,real_mem_max,1,MPI_REAL,MPI_MAX,MPI_COMM_WORLD,info)
+        call MPI_ALLREDUCE(real_mem,real_mem_min,1,MPI_REAL,MPI_MIN,MPI_COMM_WORLD,info)
+        real_mem_tot=real_mem_max
+        ! Global star mass for SFR diagnostic
+        ! mstar_tot is already global (identical on all ranks from star_formation ALLREDUCE)
+        ! No need for MPI_ALLREDUCE here — just use it directly
+        mstar_tot_glob=mstar_tot
+        if(myid==1)then
+           if (tot_pt==0) muspt=0. ! dont count first timestep
+           n_step = int(numbtot(1,levelmin),kind=8)*twotondim
+           do ilevel=levelmin+1,nlevelmax
+             n_step = n_step + int(numbtot(1,ilevel),kind=8)*product(nsubcycle(levelmin:ilevel-1))*(twotondim-1)
+           enddo
+           muspt_this_step = (tt2-tt1)*1e6/n_step*ncpu
+           muspt = muspt + muspt_this_step
+           tot_pt = tot_pt + 1
+           write(*,'(a,f8.2,a,f12.2,a,f12.2,a)')' Time elapsed since last coarse step:',tt2-tt1 &
+          ,' s',muspt_this_step,' mus/pt'  &
+          ,muspt / max(tot_pt,1), ' mus/pt (av)'
+           call writemem(real_mem_tot)
+           call writemem_minmax(real_mem_min,real_mem_max)
+           write(*,*)'Total running time:', NINT((tt2-tstart)*100.0)*0.01,'s'
+#ifdef HYDRO_CUDA
+           if(gpu_fft) call cuda_fft_print_timers_c(int(myid, c_int))
+#endif
+           ! SFR diagnostic
+           if(nstar_tot>0)then
+              call units(scale_l_s,scale_t_s,scale_d_s,scale_v_s,scale_nH_s,scale_T2_s)
+              scale_m_sfr=scale_d_s*scale_l_s**3
+              V_box_sfr=(boxlen_ini*3.08d24/(h0/100d0)/3.0857d24)**3
+              sfr_inst=0.0d0
+              if(t_sfr_old>-1.0d29 .and. t>t_sfr_old)then
+                 sfr_inst=(mstar_tot_glob-mstar_glob_old)*scale_m_sfr/1.98892d33 &
+                         /((t-t_sfr_old)*scale_t_s/3.15576d7)
+              endif
+              write(*,'(" SFR: N*=",I10," M*=",1PE10.3," Msun",' // &
+                 '" SFR=",1PE10.3," Msun/yr",' // &
+                 '" SFRD=",1PE10.3," Msun/yr/Mpc3  z=",0PF7.2)') &
+                 nstar_tot, &
+                 mstar_tot_glob*scale_m_sfr/1.98892d33, &
+                 sfr_inst, sfr_inst/V_box_sfr, &
+                 1.0d0/aexp-1.0d0
+              mstar_glob_old=mstar_tot_glob
+              t_sfr_old=t
+           endif
+           ! FPR diagnostic: per-level dx_phys and m_refine_eff/m_refine ratio
+           if(dr_proper > 0.0d0 .and. cosmo) then
+              call units(scale_l_s,scale_t_s,scale_d_s,scale_v_s,scale_nH_s,scale_T2_s)
+              write(*,'(A)') ' FPR (Gnedin 2016):'
+              do ilevel=levelmin,nlevelmax
+                 call compute_fpr_m_refine_eff(ilevel)
+                 if(m_refine(ilevel)>0.0d0) then
+                    write(*,'(A,I2,A,F8.3,A,F8.2)') &
+                         '   lv',ilevel,' dx_phys=', &
+                         (0.5d0**ilevel)*boxlen/dble(icoarse_max-icoarse_min+1) &
+                         *aexp*boxlen_ini*1000d0/(h0/100d0), &
+                         ' kpc  m_eff/m=', m_refine_eff(ilevel)/m_refine(ilevel)
+                 end if
+              end do
+           end if
+        endif
+        ! iSIDM excited fraction diagnostic (must be outside myid==1 for MPI_ALLREDUCE)
+        if(sidm .and. sidm_inelastic) then
+           call sidm_report_excited_fraction()
+        end if
+        ! FDM diagnostics (must be outside myid==1 for MPI_ALLREDUCE)
+        if(use_fdm) call fdm_diagnostics()
+        ! SGS turbulence diagnostics
+        if(use_sgs .and. isgs>0) then
+           ! Collect local SGS statistics over leaf cells at levelmin
+           sgs_loc=0d0  ! (1)=sum(rho*esgs*vol), (2)=max(Pturb/Pth), (3)=ncells, (4)=sum(esgs)
+           do ilevel=levelmin,nlevelmax
+              do igrid_sgs=1,active(ilevel)%ngrid
+                 do ind_sgs=1,twotondim
+                    iskip_sgs=ncoarse+(ind_sgs-1)*ngridmax
+                    icell=iskip_sgs+active(ilevel)%igrid(igrid_sgs)
+                    if(son(icell)/=0) cycle
+                    sgs_loc(3)=sgs_loc(3)+1d0
+                    sgs_loc(1)=sgs_loc(1)+uold(icell,isgs)  ! sum(rho*esgs)
+                    ! P_turb/P_th ratio
+                    if(uold(icell,1)>0d0) then
+                       esgs_tot=max(uold(icell,isgs)/uold(icell,1),0d0)
+                       pturb_max=(2d0/3d0)*uold(icell,1)*esgs_tot
+                       ! thermal pressure
+                       pth_at_max=(gamma-1d0)*max(uold(icell,ndim+2) &
+                            -0.5d0*(uold(icell,2)**2+uold(icell,3)**2+uold(icell,4)**2)/uold(icell,1),smallr*smallc**2)
+                       if(pth_at_max>0d0) sgs_loc(2)=max(sgs_loc(2),pturb_max/pth_at_max)
+                       sgs_loc(4)=sgs_loc(4)+esgs_tot
+                    end if
+                 end do
+              end do
+           end do
+           call MPI_ALLREDUCE(sgs_loc,sgs_glob,4,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+           ! Fix max: use MPI_MAX for element 2
+           call MPI_ALLREDUCE(sgs_loc(2),sgs_glob(2),1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+           if(myid==1 .and. sgs_glob(3)>0d0) then
+              write(*,'(" SGS: E_sgs=",1PE10.3," <e_sgs>=",1PE10.3," max(Pt/Pth)=",1PE10.3)') &
+                   sgs_glob(1), sgs_glob(4)/sgs_glob(3), sgs_glob(2)
+           end if
+        end if
+        if(walltime_hrs.gt.0d0) then
+           wallsec = walltime_hrs*3600.     ! Convert from hours to seconds
+           dumpsec = minutes_dump*60.       ! Convert minutes before end to seconds
+           if(wallsec-dumpsec.lt.tt2-tstart) then
+              output_now=.true.
+              if(myid==1) write(*,*) 'Dumping snapshot before walltime runs out'
+              ! Now set walltime to a negative number so we don't keep printing
+              ! outputs
+              walltime_hrs = -1d0
+           endif
+        endif
+     endif
+#endif
+!jhshin2
+
+  end do
+
+999 format(' Level ',I2,' has ',I10,' grids (',3(I8,','),')')
+
+end subroutine adaptive_loop
+
+subroutine check_jobcontrol
+  use amr_commons
+  use amr_parameters
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+  integer::mpi_err
+#endif
+  integer::istep,iaction,ios,action_todo
+  logical::fexist
+
+  if(len_trim(jobcontrolfile)==0) return
+
+  action_todo = 0  ! default: do nothing
+
+  if(myid==1) then
+    inquire(file=trim(jobcontrolfile), exist=fexist)
+    if(fexist) then
+      open(unit=99, file=trim(jobcontrolfile), form='formatted', status='old', iostat=ios)
+      if(ios==0) then
+        do  ! read all lines
+          read(99, *, iostat=ios) istep, iaction
+          if(ios /= 0) exit
+          if(istep == 0 .or. istep == nstep_coarse) then
+            ! Match: take the strongest action (-1 > 1 > 0)
+            if(iaction == -1) then
+              action_todo = -1  ! stop always wins
+            else if(iaction == 1 .and. action_todo /= -1) then
+              action_todo = 1
+            endif
+          endif
+        end do
+        close(99)
+      endif
+    endif
+  endif
+
+#ifndef WITHOUTMPI
+  call MPI_BCAST(action_todo, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, mpi_err)
+#endif
+
+  if(action_todo == 1) then
+    output_now = .true.
+    if(myid==1) write(*,'(A,I7)') ' Job control: extra output requested at step', nstep_coarse
+  else if(action_todo == -1) then
+    output_now = .true.
+    nstepmax = nstep_coarse  ! triggers clean_stop in update_time
+    if(myid==1) write(*,'(A,I7)') ' Job control: stop requested at step', nstep_coarse
+  endif
+end subroutine check_jobcontrol

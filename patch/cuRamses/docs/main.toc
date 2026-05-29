@@ -1,0 +1,136 @@
+\contentsline {part}{I\hspace {1em}Code Modifications}{7}{part.1}%
+\contentsline {chapter}{\numberline {1}Quick Start Guide}{9}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Prerequisites}{9}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Building cuRAMSES}{9}{section.1.2}%
+\contentsline {section}{\numberline {1.3}Setting Up a Zoom-In Simulation}{9}{section.1.3}%
+\contentsline {subsection}{\numberline {1.3.1}Step 1: Generate Initial Conditions with MUSIC}{9}{subsection.1.3.1}%
+\contentsline {subsection}{\numberline {1.3.2}Step 2: Create Zoom Geometry Scalar}{10}{subsection.1.3.2}%
+\contentsline {subsection}{\numberline {1.3.3}Step 3: Create Run Directory}{10}{subsection.1.3.3}%
+\contentsline {subsection}{\numberline {1.3.4}Step 4: Configure Namelist}{11}{subsection.1.3.4}%
+\contentsline {subsection}{\numberline {1.3.5}Step 5: Run}{11}{subsection.1.3.5}%
+\contentsline {section}{\numberline {1.4}Key Parameters Quick Reference}{11}{section.1.4}%
+\contentsline {subsection}{\numberline {1.4.1}mass\_cut\_refine Reference}{12}{subsection.1.4.1}%
+\contentsline {section}{\numberline {1.5}Troubleshooting}{12}{section.1.5}%
+\contentsline {chapter}{\numberline {2}K-Section Ordering}{15}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Overview}{15}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Hierarchical MPI Exchange}{15}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Exclusive Exchange}{15}{subsection.2.2.1}%
+\contentsline {subsection}{\numberline {2.2.2}Overlap Exchange}{16}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3}Periodic Boundary Conditions}{16}{subsection.2.2.3}%
+\contentsline {section}{\numberline {2.3}Tree Navigation}{16}{section.2.3}%
+\contentsline {section}{\numberline {2.4}Verification}{17}{section.2.4}%
+\contentsline {chapter}{\numberline {3}Ghost Zone Exchange via K-Section}{19}{chapter.3}%
+\contentsline {section}{\numberline {3.1}AMR Ghost Zones}{19}{section.3.1}%
+\contentsline {subsection}{\numberline {3.1.1}Modified File}{19}{subsection.3.1.1}%
+\contentsline {subsection}{\numberline {3.1.2}Subroutines}{19}{subsection.3.1.2}%
+\contentsline {subsection}{\numberline {3.1.3}Data Packing}{19}{subsection.3.1.3}%
+\contentsline {subsection}{\numberline {3.1.4}Dispatch}{19}{subsection.3.1.4}%
+\contentsline {subsection}{\numberline {3.1.5}Bulk Exchange}{20}{subsection.3.1.5}%
+\contentsline {section}{\numberline {3.2}build\_comm via K-Section}{20}{section.3.2}%
+\contentsline {section}{\numberline {3.3}MPI\_ALLTOALL Replacements}{20}{section.3.3}%
+\contentsline {section}{\numberline {3.4}Pre-Allocated Buffer Pool}{20}{section.3.4}%
+\contentsline {chapter}{\numberline {4}Multigrid Poisson K-Section Communication}{21}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Motivation}{21}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Implementation}{21}{section.4.2}%
+\contentsline {subsection}{\numberline {4.2.1}Key Differences from AMR Exchange}{21}{subsection.4.2.1}%
+\contentsline {subsection}{\numberline {4.2.2}Forward Exchange}{21}{subsection.4.2.2}%
+\contentsline {subsection}{\numberline {4.2.3}Reverse Exchange (Accumulation)}{22}{subsection.4.2.3}%
+\contentsline {chapter}{\numberline {5}Morton Key Octree}{23}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Overview}{23}{section.5.1}%
+\contentsline {subsection}{\numberline {5.1.1}Modified Files}{23}{subsection.5.1.1}%
+\contentsline {section}{\numberline {5.2}Morton Key}{23}{section.5.2}%
+\contentsline {section}{\numberline {5.3}Hash Table}{23}{section.5.3}%
+\contentsline {section}{\numberline {5.4}Neighbor Lookup}{23}{section.5.4}%
+\contentsline {section}{\numberline {5.5}nbor Array Removal (Phase 4)}{23}{section.5.5}%
+\contentsline {chapter}{\numberline {6}Memory-Based Load Balancing}{25}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Motivation}{25}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Cost Function}{25}{section.6.2}%
+\contentsline {section}{\numberline {6.3}Implementation Details}{25}{section.6.3}%
+\contentsline {section}{\numberline {6.4}Parameters}{25}{section.6.4}%
+\contentsline {chapter}{\numberline {7}Memory Savings: Large Array Optimization}{27}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Overview}{27}{section.7.1}%
+\contentsline {chapter}{\numberline {8}IC Reading with Stream Access}{29}{chapter.8}%
+\contentsline {section}{\numberline {8.1}Motivation}{29}{section.8.1}%
+\contentsline {section}{\numberline {8.2}Implementation}{29}{section.8.2}%
+\contentsline {subsection}{\numberline {8.2.1}Modified Files}{29}{subsection.8.2.1}%
+\contentsline {chapter}{\numberline {9}Load Balance Profiling and Tuning}{31}{chapter.9}%
+\contentsline {section}{\numberline {9.1}Internal Timing}{31}{section.9.1}%
+\contentsline {section}{\numberline {9.2}nremap Tuning}{31}{section.9.2}%
+\contentsline {section}{\numberline {9.3}Min/Max Memory Reporting}{31}{section.9.3}%
+\contentsline {chapter}{\numberline {10}Zoom-In Simulation Setup}{33}{chapter.10}%
+\contentsline {section}{\numberline {10.1}Overview}{33}{section.10.1}%
+\contentsline {section}{\numberline {10.2}Initial Conditions}{33}{section.10.2}%
+\contentsline {subsection}{\numberline {10.2.1}MUSIC Configuration}{33}{subsection.10.2.1}%
+\contentsline {subsection}{\numberline {10.2.2}Generated IC Structure}{34}{subsection.10.2.2}%
+\contentsline {section}{\numberline {10.3}Zoom Geometry Scalar (\texttt {ic\_pvar\_00006})}{34}{section.10.3}%
+\contentsline {subsection}{\numberline {10.3.1}The Problem}{34}{subsection.10.3.1}%
+\contentsline {subsection}{\numberline {10.3.2}The Solution: Passive Scalar Mask}{34}{subsection.10.3.2}%
+\contentsline {subsection}{\numberline {10.3.3}How It Works at Each Stage}{35}{subsection.10.3.3}%
+\contentsline {subsection}{\numberline {10.3.4}Creating \texttt {ic\_pvar\_00006}}{35}{subsection.10.3.4}%
+\contentsline {subsection}{\numberline {10.3.5}mass\_cut\_refine}{36}{subsection.10.3.5}%
+\contentsline {section}{\numberline {10.4}Memory Considerations}{36}{section.10.4}%
+\contentsline {subsection}{\numberline {10.4.1}ngridtot Sizing}{36}{subsection.10.4.1}%
+\contentsline {subsection}{\numberline {10.4.2}CommitLimit}{36}{subsection.10.4.2}%
+\contentsline {subsection}{\numberline {10.4.3}Virtual vs. Physical Memory}{37}{subsection.10.4.3}%
+\contentsline {chapter}{\numberline {11}HDF5 I/O}{39}{chapter.11}%
+\contentsline {section}{\numberline {11.1}Overview}{39}{section.11.1}%
+\contentsline {section}{\numberline {11.2}Building HDF5}{39}{section.11.2}%
+\contentsline {section}{\numberline {11.3}Namelist Parameters}{40}{section.11.3}%
+\contentsline {section}{\numberline {11.4}HDF5 File Structure}{40}{section.11.4}%
+\contentsline {subsection}{\numberline {11.4.1}Parallel Write Strategy}{41}{subsection.11.4.1}%
+\contentsline {section}{\numberline {11.5}Implementation Files}{41}{section.11.5}%
+\contentsline {subsection}{\numberline {11.5.1}Dispatch}{42}{subsection.11.5.1}%
+\contentsline {section}{\numberline {11.6}Verification}{42}{section.11.6}%
+\contentsline {section}{\numberline {11.7}Variable-NCPU Restart: Distributed Grid Creation}{42}{section.11.7}%
+\contentsline {subsection}{\numberline {11.7.1}Distributed Algorithm}{42}{subsection.11.7.1}%
+\contentsline {subsection}{\numberline {11.7.2}Key Design Decisions}{43}{subsection.11.7.2}%
+\contentsline {subsection}{\numberline {11.7.3}Verification}{43}{subsection.11.7.3}%
+\contentsline {section}{\numberline {11.8}Poisson MG Fine-Level Optimization}{44}{section.11.8}%
+\contentsline {subsection}{\numberline {11.8.1}Precomputed Neighbor Grid Array}{44}{subsection.11.8.1}%
+\contentsline {subsection}{\numberline {11.8.2}Merged Red-Black Gauss-Seidel Exchange}{44}{subsection.11.8.2}%
+\contentsline {subsection}{\numberline {11.8.3}Residual and Norm Single Pass}{44}{subsection.11.8.3}%
+\contentsline {subsection}{\numberline {11.8.4}Division to Multiplication}{44}{subsection.11.8.4}%
+\contentsline {subsection}{\numberline {11.8.5}Performance Impact}{45}{subsection.11.8.5}%
+\contentsline {chapter}{\numberline {12}Scaling Performance}{47}{chapter.12}%
+\contentsline {section}{\numberline {12.1}Pure MPI Scaling}{47}{section.12.1}%
+\contentsline {section}{\numberline {12.2}Hybrid MPI + OpenMP Scaling}{47}{section.12.2}%
+\contentsline {section}{\numberline {12.3}Key Observations}{48}{section.12.3}%
+\contentsline {section}{\numberline {12.4}Per-Routine Scaling Analysis}{48}{section.12.4}%
+\contentsline {subsection}{\numberline {12.4.1}Scaling Categories}{48}{subsection.12.4.1}%
+\contentsline {subsection}{\numberline {12.4.2}Bottleneck Shift}{50}{subsection.12.4.2}%
+\contentsline {chapter}{\numberline {13}GPU Hydro Acceleration}{51}{chapter.13}%
+\contentsline {section}{\numberline {13.1}Architecture Overview}{51}{section.13.1}%
+\contentsline {section}{\numberline {13.2}Hybrid CPU/GPU Dispatch}{51}{section.13.2}%
+\contentsline {subsection}{\numberline {13.2.1}Superbatch Buffering}{52}{subsection.13.2.1}%
+\contentsline {subsection}{\numberline {13.2.2}Accelerated Routines}{52}{subsection.13.2.2}%
+\contentsline {subsection}{\numberline {13.2.3}Memory Management}{52}{subsection.13.2.3}%
+\contentsline {subsection}{\numberline {13.2.4}Per-Thread Scatter Buffer (Lock-Free Level L-1)}{52}{subsection.13.2.4}%
+\contentsline {section}{\numberline {13.3}Fortran--CUDA Interface}{53}{section.13.3}%
+\contentsline {section}{\numberline {13.4}Multi-GPU Support}{53}{section.13.4}%
+\contentsline {section}{\numberline {13.5}Scatter-Reduce GPU Kernel}{53}{section.13.5}%
+\contentsline {section}{\numberline {13.6}Verification and Performance}{54}{section.13.6}%
+\contentsline {subsection}{\numberline {13.6.1}Physics Verification}{54}{subsection.13.6.1}%
+\contentsline {subsection}{\numberline {13.6.2}Performance (RTX 5000 Ada, 8 cores)}{54}{subsection.13.6.2}%
+\contentsline {subsection}{\numberline {13.6.3}GPU Kernel Breakdown (8-stream, RTX 5000 Ada)}{54}{subsection.13.6.3}%
+\contentsline {part}{II\hspace {1em}Namelist Reference}{55}{part.2}%
+\contentsline {chapter}{\numberline {14}RUN\_PARAMS}{57}{chapter.14}%
+\contentsline {chapter}{\numberline {15}AMR\_PARAMS}{59}{chapter.15}%
+\contentsline {chapter}{\numberline {16}OUTPUT\_PARAMS}{61}{chapter.16}%
+\contentsline {chapter}{\numberline {17}INIT\_PARAMS}{63}{chapter.17}%
+\contentsline {chapter}{\numberline {18}REFINE\_PARAMS}{65}{chapter.18}%
+\contentsline {chapter}{\numberline {19}HYDRO\_PARAMS}{67}{chapter.19}%
+\contentsline {chapter}{\numberline {20}POISSON\_PARAMS}{69}{chapter.20}%
+\contentsline {chapter}{\numberline {21}PHYSICS\_PARAMS}{71}{chapter.21}%
+\contentsline {chapter}{\numberline {22}Example Namelist}{73}{chapter.22}%
+\contentsline {section}{\numberline {22.1}Cosmological Simulation with Memory Balancing}{73}{section.22.1}%
+\contentsline {part}{III\hspace {1em}Build and Testing}{75}{part.3}%
+\contentsline {chapter}{\numberline {23}Build Instructions}{77}{chapter.23}%
+\contentsline {section}{\numberline {23.1}Prerequisites}{77}{section.23.1}%
+\contentsline {section}{\numberline {23.2}Build}{77}{section.23.2}%
+\contentsline {section}{\numberline {23.3}Compile-Time Options}{77}{section.23.3}%
+\contentsline {chapter}{\numberline {24}Verification Tests}{79}{chapter.24}%
+\contentsline {section}{\numberline {24.1}Test Configuration}{79}{section.24.1}%
+\contentsline {section}{\numberline {24.2}Reference Values (nremap=5)}{79}{section.24.2}%
+\contentsline {section}{\numberline {24.3}Running Tests}{79}{section.24.3}%
+\contentsline {chapter}{\numberline {A}Modified Files Summary}{81}{appendix.A}%
+\contentsfinish 

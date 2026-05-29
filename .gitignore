@@ -1,0 +1,40 @@
+# Fortran build artifacts
+*.o
+*.mod
+*.smod
+
+# RAMSES executables
+bin/ramses_final
+bin/ramses_final[0-9]*
+bin/ramses_final3d
+bin/ramses_final2d
+bin/ramses_final1d
+bin/*.exe
+
+# CUDA build artifacts
+*.cu.o
+*.fatbin
+*.cubin
+*.ptx
+
+# Run / output artifacts (not source)
+output_*/
+movie*/
+*.h5
+*.hdf5
+*.out
+*.log
+core
+core.*
+
+# Editor backups
+*.swp
+*.swo
+*~
+.*.swp
+.DS_Store
+
+# Python / tooling
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
