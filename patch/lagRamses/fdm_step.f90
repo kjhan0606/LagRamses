@@ -22,18 +22,38 @@ subroutine fdm_step(ilevel)
   integer,intent(in)::ilevel
 
   real(dp)::dt_loc
+  real(dp)::yw0,yw1
 
   if(.not.use_fdm) return
   if(numbtot(1,ilevel)==0) return
 
   dt_loc = dtnew(ilevel)
 
-  ! DKD splitting: Drift(dt/2) - Kick(dt) - Drift(dt/2)
-  ! (fdm_drift_fft sets its own finer-grained phase timers)
-  call fdm_drift(ilevel, 0.5d0*dt_loc)
-  call timer('fdm-kick','start')
-  call fdm_kick(ilevel, dt_loc)
-  call fdm_drift(ilevel, 0.5d0*dt_loc)
+  if(fdm_split_order == 4) then
+     ! Yoshida 4th-order triple-jump of the symmetric Strang(DKD) map.
+     ! S4(dt) = S2(w1 dt) S2(w0 dt) S2(w1 dt), 2*w1+w0 = 1.
+     ! Adjacent half-drifts merge -> 4 drifts + 3 kicks per step.
+     ! w0<0 => signed (backward) sub-steps; exact for unitary phase rotations.
+     yw1 = 1.0d0/(2.0d0 - 2.0d0**(1.0d0/3.0d0))  !  1.351207...
+     yw0 = 1.0d0 - 2.0d0*yw1                      ! -1.702414...
+     call fdm_drift(ilevel, 0.5d0*yw1*dt_loc)
+     call timer('fdm-kick','start')
+     call fdm_kick (ilevel,        yw1*dt_loc)
+     call fdm_drift(ilevel, 0.5d0*(yw1+yw0)*dt_loc)
+     call timer('fdm-kick','start')
+     call fdm_kick (ilevel,        yw0*dt_loc)
+     call fdm_drift(ilevel, 0.5d0*(yw0+yw1)*dt_loc)
+     call timer('fdm-kick','start')
+     call fdm_kick (ilevel,        yw1*dt_loc)
+     call fdm_drift(ilevel, 0.5d0*yw1*dt_loc)
+  else
+     ! Strang DKD splitting: Drift(dt/2) - Kick(dt) - Drift(dt/2)
+     ! (fdm_drift_fft sets its own finer-grained phase timers)
+     call fdm_drift(ilevel, 0.5d0*dt_loc)
+     call timer('fdm-kick','start')
+     call fdm_kick(ilevel, dt_loc)
+     call fdm_drift(ilevel, 0.5d0*dt_loc)
+  end if
 
   ! Update ghost zones for psi after evolution
   call timer('fdm-ghost','start')

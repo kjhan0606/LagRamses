@@ -34,7 +34,11 @@ DEFINES = -DNVECTOR=$(NVECTOR) -DNDIM=$(NDIM) -DNPRE=$(NPRE) -DNENER=$(NENER) -D
 #   MORTON128=1:  128-bit Morton key via dual-int8 mkey_t (level <= 43)
 #############################################################################
 F90 = mpiifx -qopenmp
-FFLAGS = -fpp -O3 $(DEFINES) -DLONGINT -DQUADHILBERT -DOUTPUT_PARTICLE_POTENTIAL
+ifdef FDMDEBUG
+  FFLAGS = -fpp -O2 -check bounds -traceback -g $(DEFINES) -DLONGINT -DQUADHILBERT -DOUTPUT_PARTICLE_POTENTIAL
+else
+  FFLAGS = -fpp -O3 $(DEFINES) -DLONGINT -DQUADHILBERT -DOUTPUT_PARTICLE_POTENTIAL
+endif
 ifdef MORTON128
   FFLAGS += -DMORTON128
 endif
@@ -125,7 +129,7 @@ SIDM_OBJ = sidm_scatter.o
 # Atomic Dark Matter objects
 ADM_OBJ = dark_cooling_fine.o
 # Fuzzy Dark Matter objects
-FDM_OBJ = fdm_step.o
+FDM_OBJ = fdm_step.o output_fdm.o light_cone.fdm.o
 
 AMROBJ = read_params.jaehyun.o init_amr.o init_time.o init_refine.o adaptive_loop.jaehyun.o amr_step.jaehyun.o update_time.o \
          output_amr.kjhan.o flag_utils.kjhan.o physical_boundaries.kjhan.o virtual_boundaries.kjhan.o refine_utils.o nbors_utils.kjhan.o \
@@ -187,6 +191,8 @@ sink_cuda_interface.o: cuda_commons.o
 cuda_commons.o: amr_commons.kjhan.o
 endif
 power_spectrum.o: amr_parameters.jaehyun.o amr_commons.kjhan.o poisson_commons.o
+output_fdm.o: amr_commons.kjhan.o poisson_commons.o
+light_cone.fdm.o: amr_commons.kjhan.o pm_commons.o poisson_commons.o
 eunha_cooling_mod.o: amr_parameters.jaehyun.o amr_commons.kjhan.o
 dark_cooling_mod.o: amr_parameters.jaehyun.o
 dark_cooling_fine.o: amr_commons.kjhan.o pm_commons.o dark_cooling_mod.o
