@@ -1,0 +1,1454 @@
+!################################################################
+!################################################################
+! Fuzzy Dark Matter (FDM) Schrödinger-Poisson time integrator
+!
+! DKD operator splitting per level:
+!   1. Half Drift (kinetic): exp(-i hbar k^2 dt/4a^2) in k-space (base)
+!                         or FD Laplacian (refined levels)
+!   2. Full Kick (potential): exp(-i Phi dt / hbar) in real space
+!   3. Half Drift (kinetic): same as step 1
+!
+! Base level (levelmin): FFT kinetic operator (spectral accuracy)
+! Fine levels (>levelmin): Explicit FD kinetic operator
+!################################################################
+subroutine fdm_step(ilevel)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+
+  real(dp)::dt_loc
+
+  if(.not.use_fdm) return
+  if(numbtot(1,ilevel)==0) return
+
+  dt_loc = dtnew(ilevel)
+
+  ! DKD splitting: Drift(dt/2) - Kick(dt) - Drift(dt/2)
+  ! (fdm_drift_fft sets its own finer-grained phase timers)
+  call fdm_drift(ilevel, 0.5d0*dt_loc)
+  call timer('fdm-kick','start')
+  call fdm_kick(ilevel, dt_loc)
+  call fdm_drift(ilevel, 0.5d0*dt_loc)
+
+  ! Update ghost zones for psi after evolution
+  call timer('fdm-ghost','start')
+  call make_virtual_fine_dp(psi_re(1), ilevel)
+  call make_virtual_fine_dp(psi_im(1), ilevel)
+
+  ! Restore caller's timer ('particles' was running on entry) so that
+  ! work after fdm_step is attributed as before.
+  call timer('particles','start')
+
+end subroutine fdm_step
+!################################################################
+!################################################################
+! Kinetic operator (Drift): exp(-i hbar/(2a^2) nabla^2 dt)
+!
+! Base level: FFT (spectral)
+! Fine levels: explicit FD with 7-point Laplacian
+!################################################################
+subroutine fdm_drift(ilevel, dt_half)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::dt_half
+
+#ifdef USE_FFTW
+  if(ilevel == levelmin) then
+     call fdm_drift_fft(ilevel, dt_half)
+     return
+  end if
+#endif
+  call fdm_drift_fd(ilevel, dt_half)
+
+end subroutine fdm_drift
+!################################################################
+!################################################################
+! FFT kinetic operator for base level (spectral accuracy)
+! Applies exp(-i alpha k^2) to psi in Fourier space
+! where alpha = hbar_code * dt / (2 a^2)
+!################################################################
+#ifdef USE_FFTW
+subroutine fdm_drift_fft(ilevel, dt_half)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  use iso_c_binding
+  use omp_lib
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  include 'fftw3.f03'
+
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::dt_half
+
+  ! Grid dimensions
+  integer::fft_Nx, fft_Ny, fft_Nz, nx_loc
+  integer(i8b)::N_total
+  real(dp)::dx_fft, twopi, alpha
+  real(dp)::denom, phase, cos_p, sin_p
+
+  ! FFTW plans (cached) -- single complex-to-complex transform of psi.
+  ! psi = psi_re + i*psi_im is ONE complex field; the drift multiplies its
+  ! full spectrum by exp(i*phase). (The old two-R2C scheme was wrong: C2R
+  ! re-imposes Hermitian symmetry, flipping exp(+i*phase)->exp(-i*phase) on
+  ! the unstored half of k-space and making the result axis-dependent.)
+  logical,save::fdm_fftw_init = .false.
+  type(C_PTR),save::plan_fwd = C_NULL_PTR, plan_bwd = C_NULL_PTR
+  integer,save::saved_Nx = 0
+
+  ! Work arrays (cached)
+  complex(C_DOUBLE_COMPLEX),allocatable,save::psi_3d(:), psi_hat(:)
+  integer,allocatable,save::fft_map(:)
+
+  ! Loop vars
+  integer::igrid,ind,iskip,icell,ix,iy,iz,idx_3d,info
+  integer(i8b)::idx_c
+  real(dp)::cr, ci, new_re, new_im
+  real(dp)::scale
+
+  ! Grid dimensions
+  fft_Nx = nx * 2**ilevel
+  fft_Ny = ny * 2**ilevel
+  fft_Nz = nz * 2**ilevel
+  N_total = int(fft_Nx,i8b) * int(fft_Ny,i8b) * int(fft_Nz,i8b)
+  dx_fft = 0.5d0**ilevel
+  twopi = 2.0d0*acos(-1.0d0)
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale = boxlen / dble(nx_loc)
+
+  ! alpha = hbar_code * dt / (2 * a^2)
+  alpha = hbar_code * dt_half / (aexp**2)
+
+#ifndef WITHOUTMPI
+  ! Large-grid / multi-rank: distributed FFTW-MPI slab path (no full-grid
+  ! ALLREDUCE). Mirrors the distributed Poisson solver; same 256^3 threshold.
+  if(N_total >= 256_i8b**3 .and. ncpu > 1) then
+     call fdm_drift_fft_distributed(ilevel, dt_half)
+     return
+  end if
+#endif
+
+  ! Initialize FFTW plans and work arrays (once)
+  call timer('fdm-plan','start')
+  if(.not.fdm_fftw_init .or. fft_Nx /= saved_Nx) then
+     if(allocated(psi_3d))  deallocate(psi_3d, psi_hat, fft_map)
+     allocate(psi_3d(1:N_total), psi_hat(1:N_total))
+     allocate(fft_map(1:N_total))
+
+     ! Build AMR cell -> flat 3D index map
+     fft_map = 0
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           ix = int((xg(igrid,1) + (dble(iand(ind-1,1)) - 0.5d0)*dx_fft &
+                - dble(icoarse_min)*scale) / dx_fft / scale) + 1
+           iy = int((xg(igrid,2) + (dble(iand(ishft(ind-1,-1),1)) - 0.5d0)*dx_fft &
+                - dble(jcoarse_min)*scale) / dx_fft / scale) + 1
+           iz = int((xg(igrid,3) + (dble(iand(ishft(ind-1,-2),1)) - 0.5d0)*dx_fft &
+                - dble(kcoarse_min)*scale) / dx_fft / scale) + 1
+           ix = max(1, min(ix, fft_Nx))
+           iy = max(1, min(iy, fft_Ny))
+           iz = max(1, min(iz, fft_Nz))
+           idx_3d = ix + (iy-1)*fft_Nx + (iz-1)*fft_Nx*fft_Ny
+           fft_map(idx_3d) = icell
+           igrid = next(igrid)
+        end do
+     end do
+
+     ! Create complex-to-complex forward / backward plans (full spectrum)
+     if(c_associated(plan_fwd)) call dfftw_destroy_plan(plan_fwd)
+     if(c_associated(plan_bwd)) call dfftw_destroy_plan(plan_bwd)
+     call dfftw_plan_dft_3d(plan_fwd, fft_Nx, fft_Ny, fft_Nz, &
+          psi_3d, psi_hat, FFTW_FORWARD, FFTW_MEASURE)
+     call dfftw_plan_dft_3d(plan_bwd, fft_Nx, fft_Ny, fft_Nz, &
+          psi_hat, psi_3d, FFTW_BACKWARD, FFTW_MEASURE)
+
+     saved_Nx = fft_Nx
+     fdm_fftw_init = .true.
+  end if
+
+  ! Step 1: Gather complex psi from AMR to flat 3D array
+  ! ALLREDUCE for small grids (each rank has subset of cells)
+  call timer('fdm-pack','start')
+  psi_3d = (0.0d0, 0.0d0)
+  do idx_3d=1,N_total
+     icell = fft_map(idx_3d)
+     if(icell > 0) then
+        psi_3d(idx_3d) = cmplx(psi_re(icell), psi_im(icell), C_DOUBLE_COMPLEX)
+     end if
+  end do
+#ifndef WITHOUTMPI
+  if(ncpu > 1) then
+     call timer('fdm-allreduce','start')
+     call MPI_ALLREDUCE(MPI_IN_PLACE, psi_3d, int(N_total), &
+          MPI_DOUBLE_COMPLEX, MPI_SUM, MPI_COMM_WORLD, info)
+  end if
+#endif
+
+  ! Step 2: Forward FFT (C2C) of the full complex field
+  call timer('fdm-fft-fwd','start')
+  call dfftw_execute_dft(plan_fwd, psi_3d, psi_hat)
+
+  ! Step 3: Apply kinetic phase rotation exp(i*phase) to the FULL spectrum.
+  ! phi(k) is even in k, so cos() of the raw array index gives the correct
+  ! discrete-Laplacian eigenvalue per axis (negative-k wraparound handled by cos).
+  call timer('fdm-kphase','start')
+  ! psi_hat(k) -> psi_hat(k) * exp(i*phase),  phase = 0.5*alpha*denom/dx^2
+  ! denom = 2*sum_d [cos(2pi k_d/N_d) - 1]  (discrete Laplacian eigenvalue).
+  ! Index runs over the FULL complex spectrum (no half-storage), so the phase
+  ! is applied uniformly to every mode -- correct for a complex field.
+  !$omp parallel do private(iz,iy,ix,idx_c,denom,phase, &
+  !$omp&  cos_p,sin_p,cr,ci,new_re,new_im) schedule(static)
+  do iz=0,fft_Nz-1
+     do iy=0,fft_Ny-1
+        do ix=0,fft_Nx-1
+           idx_c = int(ix+1,i8b) + int(iy,i8b)*int(fft_Nx,i8b) &
+                + int(iz,i8b)*int(fft_Nx,i8b)*int(fft_Ny,i8b)
+
+           denom = 2.0d0*( cos(twopi*dble(ix)/dble(fft_Nx)) &
+                         + cos(twopi*dble(iy)/dble(fft_Ny)) &
+                         + cos(twopi*dble(iz)/dble(fft_Nz)) - 3.0d0 )
+
+           phase = 0.5d0 * alpha * denom / (dx_fft**2)
+           cos_p = cos(phase)
+           sin_p = sin(phase)
+
+           cr = dble(psi_hat(idx_c)); ci = aimag(psi_hat(idx_c))
+           new_re = cr*cos_p - ci*sin_p
+           new_im = cr*sin_p + ci*cos_p
+           psi_hat(idx_c) = cmplx(new_re, new_im, C_DOUBLE_COMPLEX)
+        end do
+     end do
+  end do
+  !$omp end parallel do
+
+  ! Step 4: Inverse FFT (C2C)
+  call timer('fdm-fft-bwd','start')
+  call dfftw_execute_dft(plan_bwd, psi_hat, psi_3d)
+
+  ! Step 5: Normalize (FFTW convention: unnormalized) and scatter back
+  call timer('fdm-scatter','start')
+  do idx_3d=1,N_total
+     icell = fft_map(idx_3d)
+     if(icell > 0) then
+        psi_re(icell) = dble(psi_3d(idx_3d)) / dble(N_total)
+        psi_im(icell) = aimag(psi_3d(idx_3d)) / dble(N_total)
+     end if
+  end do
+
+end subroutine fdm_drift_fft
+!################################################################
+!################################################################
+! Distributed FFTW-MPI kinetic drift for the base (uniform) level.
+! psi = psi_re + i*psi_im is ONE complex field: sparse P2P slab scatter of
+! (psi_re, psi_im) into a single complex slab buffer, full complex-to-complex
+! FFT, pointwise phase rotation exp(i*phase) over the WHOLE spectrum, inverse
+! C2C, sparse P2P gather back. NO full-grid MPI_ALLREDUCE; scales to large N^3.
+! (A C2C transform of psi is the correct kinetic operator; the earlier
+! two-R2C scheme was axis-dependent and wrong -- see fdm_drift_fft.)
+!################################################################
+subroutine fdm_drift_fft_distributed(ilevel, dt_half)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  use iso_c_binding
+  use omp_lib
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  include 'fftw3-mpi.f03'
+
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::dt_half
+
+  ! Grid dimensions
+  integer::fft_Nx, fft_Ny, fft_Nz
+  integer(i8b)::N_total, N_complex
+  real(dp)::dx_fft, dx2_fft, twopi, alpha
+
+  ! Cached FFTW MPI state (single complex slab buffer: psi = re + i*im)
+  logical,save::dist_init = .false.
+  type(C_PTR),save::plan_fwd = C_NULL_PTR, plan_bwd = C_NULL_PTR
+  integer,save::saved_Nx = 0, saved_Ny = 0, saved_Nz = 0
+  type(C_PTR),save::p_c = C_NULL_PTR
+  complex(C_DOUBLE_COMPLEX),pointer,save::cdata(:) => null()
+  integer(C_INTPTR_T),save::loc_nx = 0, nx_start = 0   ! x-slab (input/output)
+  integer(C_INTPTR_T),save::loc_ny = 0, ny_start = 0   ! y-slab (transposed spectrum)
+  integer(C_INTPTR_T),save::alloc_local = 0
+  integer,save::fftw_block = 0
+  real(dp),allocatable,save::kfac(:)                   ! geometry-only k^2 factor
+
+  ! Sparse P2P partner lists (cached)
+  integer,allocatable,save::send_partners(:), recv_partners(:)
+  integer,save::n_send = 0, n_recv = 0
+  logical,save::partners_done = .false.
+  real(dp),save::cached_xmin = -1.0d0, cached_xmax = -1.0d0
+  integer,save::cached_block = 0
+  real(dp),allocatable,save::cpubox_min(:), cpubox_max(:)
+
+  ! Cached static cell->slab mapping (rebuilt only on grid/partition change).
+  ! For the uniform levelmin=levelmax grid, Kx/idx_3d/dest_rank/slot/icell are
+  ! all geometry-fixed; only psi values change between calls.
+  integer,allocatable,save::pack_slot(:), pack_icell(:), pack_idx3d(:)
+  logical,save::cache_done = .false.
+  integer,save::cached_ngrid = -1, M_cache = 0
+
+  ! Locals
+  integer::igrid, ngrid_loc, igrid_amr, icell_amr
+  integer::ind, iskip, ix, iy, iz, idx_3d, slab_real_size
+  integer::Kx, Ky, Kz, kx_i, ky_i, kz_i
+  integer::info, irank, ip, nreq, dest_rank, x_local
+  integer::n_send_total, n_recv_total
+  integer::m, slot
+  integer::slab_x_lo, slab_x_hi
+  integer(i8b)::idx_c
+  real(dp)::denom, phase, cos_p, sin_p
+  real(dp)::my_xmin, my_xmax, recv_pos_lo, recv_pos_hi
+  real(dp)::cr, ci
+  logical::overlap, local_changed, global_changed
+
+  integer,allocatable::sendcounts(:), sdispls(:), recvcounts(:), rdispls(:)
+  integer,allocatable::send_idx(:), reqs(:), mpi_stat(:,:)
+  real(dp),allocatable::sendbuf(:), recvbuf(:)
+  real(dp),allocatable::sendbuf2(:), recvbuf2(:)   ! reverse path: (re,im) only
+
+  ! Grid dimensions
+  fft_Nx = nx * 2**ilevel
+  fft_Ny = ny * 2**ilevel
+  fft_Nz = nz * 2**ilevel
+  N_total = int(fft_Nx,i8b) * int(fft_Ny,i8b) * int(fft_Nz,i8b)
+  dx_fft  = 0.5d0**ilevel
+  dx2_fft = dx_fft * dx_fft
+  twopi   = 2.0d0*acos(-1.0d0)
+  alpha   = hbar_code * dt_half / (aexp**2)
+
+  call timer('fdm-plan','start')
+
+  ! --- FFTW init (idempotent; Poisson solver may have already done it) ---
+  if(.not. dist_init) then
+     info = fftw_init_threads()
+     call fftw_plan_with_nthreads(int(omp_get_max_threads(), C_INT))
+     call fftw_mpi_init()
+     dist_init = .true.
+  end if
+
+  ! --- Plan / buffer creation on size change ---
+  if(fft_Nx /= saved_Nx .or. fft_Ny /= saved_Ny .or. fft_Nz /= saved_Nz) then
+     if(c_associated(plan_fwd)) call fftw_destroy_plan(plan_fwd)
+     if(c_associated(plan_bwd)) call fftw_destroy_plan(plan_bwd)
+     if(c_associated(p_c)) call fftw_free(p_c)
+     saved_Nx = fft_Nx; saved_Ny = fft_Ny; saved_Nz = fft_Nz
+
+     ! Full complex C2C with TRANSPOSED ordering: input/output are x-slab
+     ! distributed (first dim Nx), but the forward FFT leaves the spectrum
+     ! TRANSPOSED (Ny-distributed, logical order Ny,Nx,Nz) -- this skips the
+     ! transpose-back communication, halving the FFT all-to-all. The phase is
+     ! applied in that transposed layout; the backward plan (TRANSPOSED_IN)
+     ! consumes it and restores the x-slab layout.
+     alloc_local = fftw_mpi_local_size_3d_transposed( &
+          int(fft_Nx, C_INTPTR_T), int(fft_Ny, C_INTPTR_T), &
+          int(fft_Nz, C_INTPTR_T), MPI_COMM_WORLD, &
+          loc_nx, nx_start, loc_ny, ny_start)
+
+     p_c = fftw_alloc_complex(alloc_local)
+     call c_f_pointer(p_c, cdata, [int(alloc_local)])
+
+     ! In-place complex forward/backward plans (transposed out/in).
+     plan_fwd = fftw_mpi_plan_dft_3d( &
+          int(fft_Nx, C_INTPTR_T), int(fft_Ny, C_INTPTR_T), int(fft_Nz, C_INTPTR_T), &
+          cdata, cdata, MPI_COMM_WORLD, FFTW_FORWARD, &
+          ior(FFTW_ESTIMATE, FFTW_MPI_TRANSPOSED_OUT))
+     plan_bwd = fftw_mpi_plan_dft_3d( &
+          int(fft_Nx, C_INTPTR_T), int(fft_Ny, C_INTPTR_T), int(fft_Nz, C_INTPTR_T), &
+          cdata, cdata, MPI_COMM_WORLD, FFTW_BACKWARD, &
+          ior(FFTW_ESTIMATE, FFTW_MPI_TRANSPOSED_IN))
+
+     fftw_block = (fft_Nx + ncpu - 1) / ncpu
+
+     ! Geometry-only k^2 factor for the TRANSPOSED (Ny-distributed) layout:
+     !   idx_c = ky_local*(Nx*Nz) + kx*Nz + kz,  ky = ny_start+ky_local
+     ! phase(k) = alpha * kfac(k);  kfac = 0.5*denom/dx^2.  k=0 -> identity.
+     if(allocated(kfac)) deallocate(kfac)
+     N_complex = int(loc_ny,i8b) * int(fft_Nx,i8b) * int(fft_Nz,i8b)
+     allocate(kfac(0:N_complex-1))
+     do ky_i = 0, int(loc_ny)-1
+        iy = int(ny_start) + ky_i
+        do kx_i = 0, fft_Nx-1
+           do kz_i = 0, fft_Nz-1
+              idx_c = int(ky_i,i8b)*int(fft_Nx,i8b)*int(fft_Nz,i8b) &
+                    + int(kx_i,i8b)*int(fft_Nz,i8b) + int(kz_i,i8b)
+              denom = 2.0d0*( cos(twopi*dble(kx_i)/dble(fft_Nx)) &
+                            + cos(twopi*dble(iy)/dble(fft_Ny)) &
+                            + cos(twopi*dble(kz_i)/dble(fft_Nz)) - 3.0d0 )
+              kfac(idx_c) = 0.5d0 * denom / dx2_fft
+           end do
+        end do
+     end do
+  end if
+
+  ! ================================================================
+  ! Sparse P2P partner discovery (cached; recomputed on rebalance)
+  ! ================================================================
+  my_xmin = 1.0d0; my_xmax = 0.0d0
+  ngrid_loc = active(ilevel)%ngrid
+  do igrid = 1, ngrid_loc
+     igrid_amr = active(ilevel)%igrid(igrid)
+     my_xmin = min(my_xmin, xg(igrid_amr,1) - dx_fft)
+     my_xmax = max(my_xmax, xg(igrid_amr,1) + dx_fft)
+  end do
+  if(ngrid_loc == 0) then
+     my_xmin = 0.5d0; my_xmax = 0.5d0
+  end if
+
+  local_changed = (.not. partners_done .or. cached_xmin /= my_xmin .or. &
+       cached_xmax /= my_xmax .or. cached_block /= fftw_block)
+  call MPI_ALLREDUCE(local_changed, global_changed, 1, MPI_LOGICAL, &
+       MPI_LOR, MPI_COMM_WORLD, info)
+  if(global_changed) then
+     if(.not. allocated(cpubox_min)) allocate(cpubox_min(ncpu))
+     if(.not. allocated(cpubox_max)) allocate(cpubox_max(ncpu))
+     call MPI_ALLGATHER(my_xmin, 1, MPI_DOUBLE_PRECISION, &
+          cpubox_min, 1, MPI_DOUBLE_PRECISION, MPI_COMM_WORLD, info)
+     call MPI_ALLGATHER(my_xmax, 1, MPI_DOUBLE_PRECISION, &
+          cpubox_max, 1, MPI_DOUBLE_PRECISION, MPI_COMM_WORLD, info)
+
+     if(allocated(send_partners)) deallocate(send_partners)
+     if(allocated(recv_partners)) deallocate(recv_partners)
+
+     ! Send partners: FFTW slab owners whose x-range overlaps my domain
+     n_send = 0
+     do irank = 0, ncpu-1
+        slab_x_lo = irank * fftw_block
+        slab_x_hi = min((irank+1)*fftw_block, fft_Nx) - 1
+        recv_pos_lo = (dble(slab_x_lo) - 0.5d0) / dble(fft_Nx)
+        recv_pos_hi = (dble(slab_x_hi) + 1.5d0) / dble(fft_Nx)
+        overlap = (cpubox_max(myid) > recv_pos_lo .and. cpubox_min(myid) < recv_pos_hi)
+        if(recv_pos_lo < 0.0d0) overlap = overlap .or. (cpubox_max(myid) > recv_pos_lo+1.0d0)
+        if(recv_pos_hi > 1.0d0) overlap = overlap .or. (cpubox_min(myid) < recv_pos_hi-1.0d0)
+        if(overlap) n_send = n_send + 1
+     end do
+     allocate(send_partners(n_send))
+     n_send = 0
+     do irank = 0, ncpu-1
+        slab_x_lo = irank * fftw_block
+        slab_x_hi = min((irank+1)*fftw_block, fft_Nx) - 1
+        recv_pos_lo = (dble(slab_x_lo) - 0.5d0) / dble(fft_Nx)
+        recv_pos_hi = (dble(slab_x_hi) + 1.5d0) / dble(fft_Nx)
+        overlap = (cpubox_max(myid) > recv_pos_lo .and. cpubox_min(myid) < recv_pos_hi)
+        if(recv_pos_lo < 0.0d0) overlap = overlap .or. (cpubox_max(myid) > recv_pos_lo+1.0d0)
+        if(recv_pos_hi > 1.0d0) overlap = overlap .or. (cpubox_min(myid) < recv_pos_hi-1.0d0)
+        if(overlap) then
+           n_send = n_send + 1
+           send_partners(n_send) = irank
+        end if
+     end do
+
+     ! Recv partners: RAMSES ranks whose domain overlaps my FFTW slab
+     slab_x_lo = (myid-1) * fftw_block
+     slab_x_hi = min(myid*fftw_block, fft_Nx) - 1
+     recv_pos_lo = (dble(slab_x_lo) - 0.5d0) / dble(fft_Nx)
+     recv_pos_hi = (dble(slab_x_hi) + 1.5d0) / dble(fft_Nx)
+     n_recv = 0
+     do irank = 1, ncpu
+        overlap = (cpubox_max(irank) > recv_pos_lo .and. cpubox_min(irank) < recv_pos_hi)
+        if(recv_pos_lo < 0.0d0) overlap = overlap .or. (cpubox_max(irank) > recv_pos_lo+1.0d0)
+        if(recv_pos_hi > 1.0d0) overlap = overlap .or. (cpubox_min(irank) < recv_pos_hi-1.0d0)
+        if(overlap) n_recv = n_recv + 1
+     end do
+     allocate(recv_partners(n_recv))
+     n_recv = 0
+     do irank = 1, ncpu
+        overlap = (cpubox_max(irank) > recv_pos_lo .and. cpubox_min(irank) < recv_pos_hi)
+        if(recv_pos_lo < 0.0d0) overlap = overlap .or. (cpubox_max(irank) > recv_pos_lo+1.0d0)
+        if(recv_pos_hi > 1.0d0) overlap = overlap .or. (cpubox_min(irank) < recv_pos_hi-1.0d0)
+        if(overlap) then
+           n_recv = n_recv + 1
+           recv_partners(n_recv) = irank - 1
+        end if
+     end do
+
+     cached_xmin = my_xmin; cached_xmax = my_xmax
+     cached_block = fftw_block; partners_done = .true.
+  end if
+
+  ! ================================================================
+  ! Count cells per destination slab
+  ! ================================================================
+  allocate(sendcounts(0:ncpu-1), recvcounts(0:ncpu-1))
+  allocate(sdispls(0:ncpu-1), rdispls(0:ncpu-1))
+  sendcounts = 0; recvcounts = 0
+  do igrid = 1, ngrid_loc
+     igrid_amr = active(ilevel)%igrid(igrid)
+     Kx = nint(xg(igrid_amr,1) * dble(fft_Nx))
+     do ind = 1, twotondim
+        ix = modulo(Kx - 1 + mod(ind-1,2), fft_Nx)
+        dest_rank = min(ix / fftw_block, ncpu-1)
+        sendcounts(dest_rank) = sendcounts(dest_rank) + 1
+     end do
+  end do
+
+  ! Exchange counts (sparse P2P)
+  nreq = 0
+  allocate(reqs(n_send + n_recv))
+  do ip = 1, n_recv
+     nreq = nreq + 1
+     call MPI_IRECV(recvcounts(recv_partners(ip)), 1, MPI_INTEGER, &
+          recv_partners(ip), 711, MPI_COMM_WORLD, reqs(nreq), info)
+  end do
+  do ip = 1, n_send
+     nreq = nreq + 1
+     call MPI_ISEND(sendcounts(send_partners(ip)), 1, MPI_INTEGER, &
+          send_partners(ip), 711, MPI_COMM_WORLD, reqs(nreq), info)
+  end do
+  if(nreq > 0) then
+     allocate(mpi_stat(MPI_STATUS_SIZE, nreq))
+     call MPI_WAITALL(nreq, reqs, mpi_stat, info)
+     deallocate(mpi_stat)
+  end if
+  deallocate(reqs)
+
+  sdispls(0) = 0; rdispls(0) = 0
+  do irank = 1, ncpu-1
+     sdispls(irank) = sdispls(irank-1) + sendcounts(irank-1)
+     rdispls(irank) = rdispls(irank-1) + recvcounts(irank-1)
+  end do
+  n_send_total = sdispls(ncpu-1) + sendcounts(ncpu-1)
+  n_recv_total = rdispls(ncpu-1) + recvcounts(ncpu-1)
+
+  ! ================================================================
+  ! (Re)build the static cell->slab mapping cache when the grid/partition
+  ! changed. Stores, in cell-instance order, the absolute sendbuf slot, the
+  ! slab idx_3d, and the AMR cell -- everything that does NOT depend on psi.
+  ! ================================================================
+  if(.not. cache_done .or. global_changed .or. ngrid_loc /= cached_ngrid) then
+     if(allocated(pack_slot)) deallocate(pack_slot, pack_icell, pack_idx3d)
+     M_cache = ngrid_loc * twotondim
+     allocate(pack_slot(M_cache), pack_icell(M_cache), pack_idx3d(M_cache))
+     allocate(send_idx(0:ncpu-1))
+     send_idx = sdispls
+     m = 0
+     do igrid = 1, ngrid_loc
+        igrid_amr = active(ilevel)%igrid(igrid)
+        Kx = nint(xg(igrid_amr,1) * dble(fft_Nx))
+        Ky = nint(xg(igrid_amr,2) * dble(fft_Ny))
+        Kz = nint(xg(igrid_amr,3) * dble(fft_Nz))
+        do ind = 1, twotondim
+           ix = modulo(Kx - 1 + mod(ind-1,2),     fft_Nx)
+           iy = modulo(Ky - 1 + mod((ind-1)/2,2), fft_Ny)
+           iz = modulo(Kz - 1 + (ind-1)/4,        fft_Nz)
+           dest_rank = min(ix / fftw_block, ncpu-1)
+           x_local = ix - dest_rank * fftw_block
+           idx_3d = x_local * fft_Ny * fft_Nz + iy * fft_Nz + iz
+           iskip = ncoarse + (ind-1)*ngridmax
+           icell_amr = iskip + igrid_amr
+           m = m + 1
+           pack_slot(m)  = send_idx(dest_rank)
+           pack_idx3d(m) = idx_3d
+           pack_icell(m) = icell_amr
+           send_idx(dest_rank) = send_idx(dest_rank) + 1
+        end do
+     end do
+     deallocate(send_idx)
+     cached_ngrid = ngrid_loc; cache_done = .true.
+  end if
+
+  ! ================================================================
+  ! Pack (idx_3d, psi_re, psi_im) triples via the cached mapping.
+  ! Each m writes a distinct sendbuf slot -> threadable, byte-identical.
+  ! ================================================================
+  call timer('fdm-pack','start')
+  allocate(sendbuf(0:3*n_send_total-1))
+  allocate(recvbuf(0:3*n_recv_total-1))
+  !$omp parallel do private(slot) schedule(static)
+  do m = 1, M_cache
+     slot = pack_slot(m)
+     sendbuf(3*slot)     = dble(pack_idx3d(m))
+     sendbuf(3*slot + 1) = psi_re(pack_icell(m))
+     sendbuf(3*slot + 2) = psi_im(pack_icell(m))
+  end do
+  !$omp end parallel do
+
+  ! Counts/displs are kept in CELL units; forward ships 3 doubles/cell
+  ! (idx_3d, re, im), reverse ships 2 doubles/cell (re, im).
+  call timer('fdm-p2p','start')
+  nreq = 0
+  allocate(reqs(n_send + n_recv))
+  do ip = 1, n_recv
+     irank = recv_partners(ip)
+     if(recvcounts(irank) > 0) then
+        nreq = nreq + 1
+        call MPI_IRECV(recvbuf(3*rdispls(irank)), 3*recvcounts(irank), &
+             MPI_DOUBLE_PRECISION, irank, 712, MPI_COMM_WORLD, reqs(nreq), info)
+     end if
+  end do
+  do ip = 1, n_send
+     irank = send_partners(ip)
+     if(sendcounts(irank) > 0) then
+        nreq = nreq + 1
+        call MPI_ISEND(sendbuf(3*sdispls(irank)), 3*sendcounts(irank), &
+             MPI_DOUBLE_PRECISION, irank, 712, MPI_COMM_WORLD, reqs(nreq), info)
+     end if
+  end do
+  if(nreq > 0) then
+     allocate(mpi_stat(MPI_STATUS_SIZE, nreq))
+     call MPI_WAITALL(nreq, reqs, mpi_stat, info)
+     deallocate(mpi_stat)
+  end if
+  deallocate(reqs)
+
+  ! Unpack into the single complex slab buffer (psi = re + i*im).
+  ! Zeroing is a pure fill -> safe to thread. The scatter-add below stays
+  ! SERIAL: it accumulates (+=) at ghost-overlap cells, so threading would
+  ! both race and reorder the float sum, breaking byte-identity vs serial.
+  !$omp parallel do schedule(static)
+  do idx_c = 1_i8b, int(alloc_local,i8b)
+     cdata(idx_c) = (0.0d0, 0.0d0)
+  end do
+  !$omp end parallel do
+  do ix = 0, n_recv_total-1
+     idx_3d = nint(recvbuf(3*ix))
+     cdata(idx_3d + 1) = cdata(idx_3d + 1) &
+          + cmplx(recvbuf(3*ix + 1), recvbuf(3*ix + 2), C_DOUBLE_COMPLEX)
+  end do
+
+  ! ================================================================
+  ! Forward C2C FFT, phase rotation over full spectrum, inverse C2C
+  ! ================================================================
+  call timer('fdm-fft-fwd','start')
+  call fftw_mpi_execute_dft(plan_fwd, cdata, cdata)
+
+  call timer('fdm-kphase','start')
+  N_complex = int(loc_ny,i8b) * int(fft_Nx,i8b) * int(fft_Nz,i8b)
+  !$omp parallel do private(idx_c,phase,cos_p,sin_p,cr,ci) schedule(static)
+  do idx_c = 0, N_complex-1
+     phase = alpha * kfac(idx_c)
+     cos_p = cos(phase); sin_p = sin(phase)
+     cr = dble(cdata(idx_c+1)); ci = aimag(cdata(idx_c+1))
+     cdata(idx_c+1) = cmplx(cr*cos_p - ci*sin_p, cr*sin_p + ci*cos_p, C_DOUBLE_COMPLEX)
+  end do
+  !$omp end parallel do
+
+  call timer('fdm-fft-bwd','start')
+  call fftw_mpi_execute_dft(plan_bwd, cdata, cdata)
+  cdata = cdata / dble(N_total)
+
+  ! ================================================================
+  ! Reverse scatter: slab -> original AMR owners (values only, 2 doubles).
+  ! idx_3d is NOT re-sent: data returns in the same per-rank order it was
+  ! sent, and the unpack walks send_idx identically -- so the receiver maps
+  ! each value back to its cell by ordering alone. Cuts reverse comm by 1/3.
+  ! ================================================================
+  call timer('fdm-p2p-rev','start')
+  allocate(sendbuf2(0:2*n_send_total-1))
+  allocate(recvbuf2(0:2*n_recv_total-1))
+  ! Gather: each ix writes distinct recvbuf2 slots (no accumulation) -> safe
+  ! to thread and byte-identical to serial.
+  !$omp parallel do private(idx_3d) schedule(static)
+  do ix = 0, n_recv_total-1
+     idx_3d = nint(recvbuf(3*ix))
+     recvbuf2(2*ix)     = dble(cdata(idx_3d + 1))
+     recvbuf2(2*ix + 1) = aimag(cdata(idx_3d + 1))
+  end do
+  !$omp end parallel do
+  nreq = 0
+  allocate(reqs(n_send + n_recv))
+  do ip = 1, n_send
+     irank = send_partners(ip)
+     if(sendcounts(irank) > 0) then
+        nreq = nreq + 1
+        call MPI_IRECV(sendbuf2(2*sdispls(irank)), 2*sendcounts(irank), &
+             MPI_DOUBLE_PRECISION, irank, 713, MPI_COMM_WORLD, reqs(nreq), info)
+     end if
+  end do
+  do ip = 1, n_recv
+     irank = recv_partners(ip)
+     if(recvcounts(irank) > 0) then
+        nreq = nreq + 1
+        call MPI_ISEND(recvbuf2(2*rdispls(irank)), 2*recvcounts(irank), &
+             MPI_DOUBLE_PRECISION, irank, 713, MPI_COMM_WORLD, reqs(nreq), info)
+     end if
+  end do
+  if(nreq > 0) then
+     allocate(mpi_stat(MPI_STATUS_SIZE, nreq))
+     call MPI_WAITALL(nreq, reqs, mpi_stat, info)
+     deallocate(mpi_stat)
+  end if
+  deallocate(reqs)
+
+  ! Unpack back into AMR cells via the cached mapping (same cell order as the
+  ! pack). Each m writes a distinct icell -> threadable, byte-identical.
+  call timer('fdm-scatter','start')
+  !$omp parallel do private(slot) schedule(static)
+  do m = 1, M_cache
+     slot = pack_slot(m)
+     psi_re(pack_icell(m)) = sendbuf2(2*slot)
+     psi_im(pack_icell(m)) = sendbuf2(2*slot + 1)
+  end do
+  !$omp end parallel do
+
+  deallocate(sendcounts, sdispls, recvcounts, rdispls)
+  deallocate(sendbuf, recvbuf, sendbuf2, recvbuf2)
+
+end subroutine fdm_drift_fft_distributed
+#endif
+!################################################################
+!################################################################
+! Finite-difference kinetic operator for AMR fine levels
+! Crank-Nicolson implicit (unitary, unconditionally stable)
+!
+! Solves: (1 + i*alpha*L) psi^{n+1} = (1 - i*alpha*L) psi^n
+! where alpha = hbar*dt/(4*a^2*dx^2), L = discrete Laplacian
+!
+! Implemented as fixed-point iteration (Jacobi):
+!   psi^{k+1} = [(1-i*alpha*L)*psi^n - i*alpha*L_offdiag*psi^k] / (1+6*i*alpha)
+! Converges in ~5-10 iterations for typical alpha.
+! Falls back to explicit if alpha < 0.1 (CFL safe, explicit is faster).
+!################################################################
+subroutine fdm_drift_fd(ilevel, dt_half)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::dt_half
+
+  integer::igrid,ind,iskip,icell,iter
+  real(dp)::dx,scale,dx_loc,alpha,a2p1
+  real(dp)::lap_re,lap_im,psi_re_c,psi_im_c
+  real(dp)::rhs_re,rhs_im,denom_re,denom_im
+  real(dp)::nbor_re,nbor_im
+  integer::nx_loc,idim,inbor,icell_nbor
+  integer,parameter::max_iter=10
+
+  ! Precompute alpha = hbar * dt_half / (4 * a^2 * dx^2)
+  ! (factor 4 because CN uses dt/2 in each half-step, and we split kinetic as -(hbar^2/2)*L)
+  dx = 0.5d0**ilevel
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale = boxlen / dble(nx_loc)
+  dx_loc = dx * scale
+  alpha = hbar_code * dt_half / (2.0d0 * aexp**2 * dx_loc**2)
+
+  ! Use explicit with automatic sub-cycling (stable for any alpha)
+  call timer('fdm-drift-fd','start')
+  call fdm_drift_fd_explicit(ilevel, dt_half)
+
+end subroutine fdm_drift_fd
+!################################################################
+! Explicit FD kinetic step (with automatic sub-cycling for stability)
+!################################################################
+subroutine fdm_drift_fd_explicit(ilevel, dt_half)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::dt_half
+
+  integer::igrid,ind,iskip,icell,isub,nsub
+  real(dp)::dx,scale,dx_loc,alpha,alpha_sub,dt_sub
+  real(dp)::lap_re,lap_im,psi_re_c,psi_im_c
+  integer::nx_loc,idim,inbor,icell_nbor
+
+  dx = 0.5d0**ilevel
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale = boxlen / dble(nx_loc)
+  dx_loc = dx * scale
+
+  ! Full alpha for the requested dt_half
+  alpha = hbar_code * dt_half / (2.0d0 * aexp**2 * dx_loc**2)
+
+  ! Sub-cycle if alpha > 1/6 (CFL limit)
+  nsub = max(1, int(6.0d0*alpha) + 1)
+  dt_sub = dt_half / dble(nsub)
+  alpha_sub = alpha / dble(nsub)
+
+  do isub=1,nsub
+     ! Ghost zone exchange at start of each sub-step
+     call make_virtual_fine_dp(psi_re(1), ilevel)
+     call make_virtual_fine_dp(psi_im(1), ilevel)
+
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0) then
+              psi_re_c = psi_re(icell)
+              psi_im_c = psi_im(icell)
+
+              ! 7-point Laplacian
+              lap_re = -6.0d0 * psi_re_c
+              lap_im = -6.0d0 * psi_im_c
+              do idim=1,ndim
+                 do inbor=1,2
+                    call fdm_neighbor_cell(igrid, ind, idim, inbor, icell_nbor)
+                    if(icell_nbor > 0) then
+                       lap_re = lap_re + psi_re(icell_nbor)
+                       lap_im = lap_im + psi_im(icell_nbor)
+                    else
+                       lap_re = lap_re + psi_re_c
+                       lap_im = lap_im + psi_im_c
+                    end if
+                 end do
+              end do
+
+              ! Explicit update: dpsi = i*(hbar/2a^2)*L*dt
+              psi_re(icell) = psi_re_c - alpha_sub * lap_im
+              psi_im(icell) = psi_im_c + alpha_sub * lap_re
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+  end do
+
+end subroutine fdm_drift_fd_explicit
+!################################################################
+! Find the neighbor cell of subcell ind in grid igrid
+! in direction (idim, inbor): idim=1,2,3; inbor=1(left),2(right)
+!################################################################
+subroutine fdm_neighbor_cell(igrid, ind, idim, inbor, icell_nbor)
+  use amr_commons
+  implicit none
+  integer,intent(in)::igrid, ind, idim, inbor
+  integer,intent(out)::icell_nbor
+
+  integer::ind_bit, ind_nbor, igrid_nbor, iskip
+
+  ! Extract the bit for this dimension from ind (1-based, bits: x=bit0, y=bit1, z=bit2)
+  ind_bit = iand(ishft(ind-1, -(idim-1)), 1)  ! 0 or 1
+
+  if(inbor == 2) then
+     ! Right neighbor
+     if(ind_bit == 0) then
+        ! Neighbor is in same grid, flip this dimension bit
+        ind_nbor = ind + ishft(1, idim-1)
+        iskip = ncoarse + (ind_nbor-1)*ngridmax
+        icell_nbor = igrid + iskip
+     else
+        ! Neighbor is in adjacent grid
+        igrid_nbor = son(nbor(igrid, 2*idim))
+        if(igrid_nbor == 0) then
+           icell_nbor = 0; return
+        end if
+        ind_nbor = ind - ishft(1, idim-1)
+        iskip = ncoarse + (ind_nbor-1)*ngridmax
+        icell_nbor = igrid_nbor + iskip
+     end if
+  else
+     ! Left neighbor
+     if(ind_bit == 1) then
+        ! Neighbor is in same grid
+        ind_nbor = ind - ishft(1, idim-1)
+        iskip = ncoarse + (ind_nbor-1)*ngridmax
+        icell_nbor = igrid + iskip
+     else
+        ! Neighbor is in adjacent grid
+        igrid_nbor = son(nbor(igrid, 2*idim-1))
+        if(igrid_nbor == 0) then
+           icell_nbor = 0; return
+        end if
+        ind_nbor = ind + ishft(1, idim-1)
+        iskip = ncoarse + (ind_nbor-1)*ngridmax
+        icell_nbor = igrid_nbor + iskip
+     end if
+  end if
+
+end subroutine fdm_neighbor_cell
+!################################################################
+!################################################################
+! Potential operator (Kick): exp(-i Phi dt / hbar)
+! Local pointwise rotation in real space
+!################################################################
+subroutine fdm_kick(ilevel, dt_loc)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::dt_loc
+
+  integer::igrid,ind,iskip,icell
+  real(dp)::phase,cos_p,sin_p,re_old,im_old
+
+  if(hbar_code <= 0.0d0) return
+
+  ! Loop over all leaf cells at this level
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           ! Schrödinger: i*hbar*dpsi/dt = m*Phi*psi
+           ! => dpsi/dt = -i*(Phi/hbar)*psi
+           ! => psi(t+dt) = psi(t) * exp(-i*Phi*dt/hbar)
+           ! exp(-i*theta) = cos(theta) - i*sin(theta)
+           ! where theta = Phi*dt/hbar
+           phase = phi(icell) * dt_loc / hbar_code
+
+           cos_p = cos(phase)
+           sin_p = sin(phase)
+
+           re_old = psi_re(icell)
+           im_old = psi_im(icell)
+
+           ! psi_new = psi * exp(-i*phase) = (re+i*im)*(cos-i*sin)
+           psi_re(icell) =  re_old*cos_p + im_old*sin_p
+           psi_im(icell) = -re_old*sin_p + im_old*cos_p
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+end subroutine fdm_kick
+!################################################################
+!################################################################
+! Compute hbar_code from physical constants and code units
+! Called once at initialization
+!################################################################
+subroutine fdm_compute_hbar()
+  use amr_commons
+  use fdm_commons
+  implicit none
+
+  real(dp)::scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
+  real(dp)::m_axion_g
+
+  call units(scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2)
+
+  ! m_axion in grams: m [eV] * eV_to_erg / c^2
+  m_axion_g = m_axion * eV_to_erg / c_light**2
+
+  ! hbar_code = hbar_cgs / (m_axion * scale_l * scale_v)
+  ! This is the effective Planck constant in code units
+  hbar_code = hbar_cgs / (m_axion_g * scale_l * scale_v)
+
+  if(myid==1) then
+     write(*,'(A,ES10.3,A)') ' FDM: m_axion = ', m_axion, ' eV'
+     write(*,'(A,ES10.3)')   '   m_axion [g] = ', m_axion_g
+     write(*,'(A,ES10.3)')   '   hbar_code   = ', hbar_code
+     write(*,'(A,ES10.3,A)') '   lambda_dB(100km/s) = ', &
+          2.0d0*acos(-1.0d0)*hbar_code/(100.0d5/scale_v) * scale_l/3.0857d21, ' kpc'
+  end if
+
+end subroutine fdm_compute_hbar
+!################################################################
+!################################################################
+! Initialize psi from the grafic initial conditions (Madelung transform)
+! For fresh start (nrestart=0):
+!   amplitude  |psi| = sqrt(rho),  rho = 1 + dfact*delta   (from ic_deltac)
+!   phase      theta = (aexp^2/hbar_code) * phi_v,
+!              where phi_v is the velocity potential, nabla phi_v = v_code,
+!              solved by FFT on the periodic base grid from ic_velc{x,y,z}.
+!   psi_re = |psi|*cos(theta),  psi_im = |psi|*sin(theta)
+! The phase solve requires FFTW (-DUSE_FFTW); without it the wavefunction is
+! initialized with zero phase (amplitude only) and a warning is emitted.
+!################################################################
+subroutine fdm_init_psi()
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ilevel,igrid,ind,iskip,icell,info,i1,i2,i3
+  integer::ix,iy,iz,nx_loc,ng1,ng2,ng3
+  integer(i8b)::N_total,idx
+  real(dp)::dx,dxL,scale,dx_loc,rho_cell,theta_cell,amp
+  real(dp)::xx1,xx2,xx3,p1,p2,p3,mass_loc,mass_glob
+  real(dp),dimension(1:3)::skip_loc
+  real(dp),dimension(1:twotondim,1:3)::xc
+  real(dp),allocatable::rho_3d(:),theta_3d(:)
+  real(kind=4),allocatable::init_plane(:,:)
+  character(LEN=256)::filename
+  logical::ok
+  integer,parameter::tag=2207
+
+  if(.not.use_fdm) return
+
+  ! Base (levelmin) grafic grid dimensions
+  ng1 = n1(levelmin); ng2 = n2(levelmin); ng3 = n3(levelmin)
+  N_total = int(ng1,i8b)*int(ng2,i8b)*int(ng3,i8b)
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale = boxlen/dble(nx_loc)
+  dxL = 0.5d0**levelmin
+  dx_loc = dxL*scale
+  skip_loc=(/0.0d0,0.0d0,0.0d0/)
+  if(ndim>0)skip_loc(1)=dble(icoarse_min)
+  if(ndim>1)skip_loc(2)=dble(jcoarse_min)
+  if(ndim>2)skip_loc(3)=dble(kcoarse_min)
+
+  allocate(rho_3d(1:N_total))
+  allocate(theta_3d(1:N_total))
+  rho_3d = 1.0d0      ! mean density (overwritten if a density IC is found)
+  theta_3d = 0.0d0    ! zero-phase default
+
+  !-------------------------------------------------------------
+  ! Amplitude: read density overdensity, rho = 1 + dfact*delta
+  ! (rank 1 reads each plane, broadcasts to all ranks)
+  !-------------------------------------------------------------
+  allocate(init_plane(1:ng1,1:ng2))
+  filename = TRIM(initfile(levelmin))//'/ic_deltac'
+  INQUIRE(file=filename,exist=ok)
+  if(.not.ok)then
+     filename = TRIM(initfile(levelmin))//'/ic_deltab'
+     INQUIRE(file=filename,exist=ok)
+  end if
+  if(ok)then
+     if(myid==1)write(*,*)' FDM: reading density IC '//TRIM(filename)
+     if(myid==1)then
+        open(10,file=filename,form='unformatted')
+        rewind 10
+        read(10) ! skip header
+     end if
+     do i3=1,ng3
+        if(myid==1)then
+           read(10) ((init_plane(i1,i2),i1=1,ng1),i2=1,ng2)
+        else
+           init_plane = 0.0
+        end if
+#ifndef WITHOUTMPI
+        call MPI_BCAST(init_plane,ng1*ng2,MPI_REAL,0,MPI_COMM_WORLD,info)
+#endif
+        do i2=1,ng2
+           do i1=1,ng1
+              idx = int(i1,i8b)+int(i2-1,i8b)*int(ng1,i8b) &
+                   +int(i3-1,i8b)*int(ng1,i8b)*int(ng2,i8b)
+              rho_3d(idx) = 1.0d0 + dfact(levelmin)*dble(init_plane(i1,i2))
+           end do
+        end do
+     end do
+     if(myid==1)close(10)
+  else
+     if(myid==1)write(*,*)' FDM WARNING: no density IC (ic_deltac/ic_deltab) found, using rho=1'
+  end if
+  deallocate(init_plane)
+
+  !-------------------------------------------------------------
+  ! Phase: solve velocity potential by FFT (rank 1), broadcast theta
+  !-------------------------------------------------------------
+#ifdef USE_FFTW
+  if(hbar_code <= 0.0d0)then
+     if(myid==1)write(*,*)' FDM WARNING: hbar_code <= 0, initializing psi with zero phase'
+  else
+     if(myid==1) call fdm_init_phase_fft(ng1,ng2,ng3,N_total,dx_loc,theta_3d)
+#ifndef WITHOUTMPI
+     call MPI_BCAST(theta_3d,int(N_total),MPI_DOUBLE_PRECISION,0,MPI_COMM_WORLD,info)
+#endif
+  end if
+#else
+  if(myid==1)write(*,*)' FDM WARNING: USE_FFTW not enabled — psi initialized with zero phase (no velocity potential)'
+#endif
+
+  !-------------------------------------------------------------
+  ! Scatter rho,theta onto AMR leaf cells -> psi = sqrt(rho) e^{i theta}
+  !-------------------------------------------------------------
+  mass_loc = 0.0d0
+  do ilevel=levelmin,nlevelmax
+     dx = 0.5d0**ilevel
+     do ind=1,twotondim
+        iz=(ind-1)/4
+        iy=(ind-1-4*iz)/2
+        ix=(ind-1-2*iy-4*iz)
+        if(ndim>0)xc(ind,1)=(dble(ix)-0.5d0)*dx
+        if(ndim>1)xc(ind,2)=(dble(iy)-0.5d0)*dx
+        if(ndim>2)xc(ind,3)=(dble(iz)-0.5d0)*dx
+     end do
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0)then
+              ! Map cell centre onto the levelmin grafic grid
+              p1 = xg(igrid,1)+xc(ind,1)-skip_loc(1)
+              p2 = xg(igrid,2)+xc(ind,2)-skip_loc(2)
+              p3 = xg(igrid,3)+xc(ind,3)-skip_loc(3)
+              xx1=(p1*(dxini(levelmin)/dxL)-xoff1(levelmin))/dxini(levelmin)
+              xx2=(p2*(dxini(levelmin)/dxL)-xoff2(levelmin))/dxini(levelmin)
+              xx3=(p3*(dxini(levelmin)/dxL)-xoff3(levelmin))/dxini(levelmin)
+              i1=max(1,min(ng1,int(xx1)+1))
+              i2=max(1,min(ng2,int(xx2)+1))
+              i3=max(1,min(ng3,int(xx3)+1))
+              idx = int(i1,i8b)+int(i2-1,i8b)*int(ng1,i8b) &
+                   +int(i3-1,i8b)*int(ng1,i8b)*int(ng2,i8b)
+              rho_cell = max(rho_3d(idx),0.0d0)
+              theta_cell = theta_3d(idx)
+              amp = sqrt(rho_cell)
+              psi_re(icell) = amp*cos(theta_cell)
+              psi_im(icell) = amp*sin(theta_cell)
+              mass_loc = mass_loc + rho_cell * dx**3
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+  end do
+
+  deallocate(rho_3d,theta_3d)
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(mass_loc, mass_glob, 1, MPI_DOUBLE_PRECISION, &
+       MPI_SUM, MPI_COMM_WORLD, info)
+#else
+  mass_glob = mass_loc
+#endif
+
+  ! Ghost zones for psi at every level
+  do ilevel=levelmin,nlevelmax
+     call make_virtual_fine_dp(psi_re(1), ilevel)
+     call make_virtual_fine_dp(psi_im(1), ilevel)
+  end do
+
+  if(myid==1) write(*,'(A,ES12.5)') ' FDM: initial |psi|^2 total mass = ', mass_glob
+
+end subroutine fdm_init_psi
+#ifdef USE_FFTW
+!################################################################
+! Solve the velocity potential phi_v (nabla phi_v = v_code) on the
+! periodic base grid by FFT, return theta = (aexp^2/hbar_code)*phi_v.
+! Serial: executed on rank 1 only over the full ng1*ng2*ng3 grid.
+!   phi_v(k) = (i*dx_loc/denom) * [Sx*Vx + Sy*Vy + Sz*Vz]
+!   Sd = sin(2pi Kd/Nd),  denom = 2(cosKx+cosKy+cosKz-3),  k=0 -> 0
+!################################################################
+subroutine fdm_init_phase_fft(ng1,ng2,ng3,N_total,dx_loc,theta_3d)
+  use amr_commons
+  use fdm_commons
+  use iso_c_binding
+  implicit none
+  include 'fftw3.f03'
+  integer,intent(in)::ng1,ng2,ng3
+  integer(i8b),intent(in)::N_total
+  real(dp),intent(in)::dx_loc
+  real(dp),intent(inout)::theta_3d(1:N_total)
+
+  integer(i8b)::N_complex,idx,idx_c
+  integer::i1,i2,i3,ivar,Kx,Ky,Kz
+  real(dp)::twopi,Sx,Sy,Sz,denom,Xr,Xi,fac,vscale,fmin,fmax
+  real(kind=4),allocatable::plane(:,:)
+  real(dp),allocatable::vx(:),vy(:),vz(:),phi_v(:)
+  complex(C_DOUBLE_COMPLEX),allocatable::vxh(:),vyh(:),vzh(:),phih(:)
+  type(C_PTR)::plan_x,plan_y,plan_z,plan_bwd
+  character(LEN=256)::filename
+  logical::ok
+
+  twopi = 2.0d0*acos(-1.0d0)
+  N_complex = int(ng1/2+1,i8b)*int(ng2,i8b)*int(ng3,i8b)
+
+  allocate(vx(1:N_total),vy(1:N_total),vz(1:N_total),phi_v(1:N_total))
+  allocate(vxh(1:N_complex),vyh(1:N_complex),vzh(1:N_complex),phih(1:N_complex))
+  allocate(plane(1:ng1,1:ng2))
+  vx=0.0d0; vy=0.0d0; vz=0.0d0
+
+  ! Velocity rescale to code units (identical to init_flow_fine, level=levelmin)
+  vscale = dfact(levelmin)*vfact(1)*dx_loc/dxini(levelmin)/vfact(levelmin)
+
+  do ivar=1,3
+     if(ivar==1) filename = TRIM(initfile(levelmin))//'/ic_velcx'
+     if(ivar==2) filename = TRIM(initfile(levelmin))//'/ic_velcy'
+     if(ivar==3) filename = TRIM(initfile(levelmin))//'/ic_velcz'
+     INQUIRE(file=filename,exist=ok)
+     if(.not.ok)then
+        write(*,*)' FDM WARNING: velocity IC missing '//TRIM(filename)//' -> treated as 0'
+        cycle
+     end if
+     write(*,*)' FDM: reading velocity IC '//TRIM(filename)
+     open(11,file=filename,form='unformatted')
+     rewind 11
+     read(11) ! skip header
+     do i3=1,ng3
+        read(11) ((plane(i1,i2),i1=1,ng1),i2=1,ng2)
+        do i2=1,ng2
+           do i1=1,ng1
+              idx = int(i1,i8b)+int(i2-1,i8b)*int(ng1,i8b) &
+                   +int(i3-1,i8b)*int(ng1,i8b)*int(ng2,i8b)
+              if(ivar==1) vx(idx) = vscale*dble(plane(i1,i2))
+              if(ivar==2) vy(idx) = vscale*dble(plane(i1,i2))
+              if(ivar==3) vz(idx) = vscale*dble(plane(i1,i2))
+           end do
+        end do
+     end do
+     close(11)
+  end do
+
+  ! Forward R2C transforms
+  call dfftw_plan_dft_r2c_3d(plan_x, ng1, ng2, ng3, vx, vxh, FFTW_ESTIMATE)
+  call dfftw_execute_dft_r2c(plan_x, vx, vxh)
+  call dfftw_destroy_plan(plan_x)
+  call dfftw_plan_dft_r2c_3d(plan_y, ng1, ng2, ng3, vy, vyh, FFTW_ESTIMATE)
+  call dfftw_execute_dft_r2c(plan_y, vy, vyh)
+  call dfftw_destroy_plan(plan_y)
+  call dfftw_plan_dft_r2c_3d(plan_z, ng1, ng2, ng3, vz, vzh, FFTW_ESTIMATE)
+  call dfftw_execute_dft_r2c(plan_z, vz, vzh)
+  call dfftw_destroy_plan(plan_z)
+
+  ! phi_v(k) = (i*dx_loc/denom) * (Sx*Vx + Sy*Vy + Sz*Vz)
+  do Kz=0,ng3-1
+     do Ky=0,ng2-1
+        do Kx=0,ng1/2
+           idx_c = int(Kx+1,i8b)+int(Ky,i8b)*int(ng1/2+1,i8b) &
+                +int(Kz,i8b)*int(ng1/2+1,i8b)*int(ng2,i8b)
+           denom = 2.0d0*( cos(twopi*dble(Kx)/dble(ng1)) &
+                         + cos(twopi*dble(Ky)/dble(ng2)) &
+                         + cos(twopi*dble(Kz)/dble(ng3)) - 3.0d0 )
+           if(abs(denom) < 1.0d-30)then
+              phih(idx_c) = cmplx(0.0d0,0.0d0,C_DOUBLE_COMPLEX)
+           else
+              Sx = sin(twopi*dble(Kx)/dble(ng1))
+              Sy = sin(twopi*dble(Ky)/dble(ng2))
+              Sz = sin(twopi*dble(Kz)/dble(ng3))
+              Xr = Sx*dble(vxh(idx_c)) + Sy*dble(vyh(idx_c)) + Sz*dble(vzh(idx_c))
+              Xi = Sx*aimag(vxh(idx_c)) + Sy*aimag(vyh(idx_c)) + Sz*aimag(vzh(idx_c))
+              fac = dx_loc/denom
+              ! multiply (Xr+iXi) by i*fac -> (-fac*Xi) + i(fac*Xr)
+              phih(idx_c) = cmplx(-fac*Xi, fac*Xr, C_DOUBLE_COMPLEX)
+           end if
+        end do
+     end do
+  end do
+
+  ! Inverse C2R, normalize, theta = (aexp^2/hbar_code)*phi_v
+  call dfftw_plan_dft_c2r_3d(plan_bwd, ng1, ng2, ng3, phih, phi_v, FFTW_ESTIMATE)
+  call dfftw_execute_dft_c2r(plan_bwd, phih, phi_v)
+  call dfftw_destroy_plan(plan_bwd)
+
+  fmin=1.0d30; fmax=-1.0d30
+  do idx=1,N_total
+     phi_v(idx) = phi_v(idx)/dble(N_total)
+     theta_3d(idx) = (aexp**2/hbar_code)*phi_v(idx)
+     if(theta_3d(idx)<fmin) fmin=theta_3d(idx)
+     if(theta_3d(idx)>fmax) fmax=theta_3d(idx)
+  end do
+  write(*,'(A,2ES12.4)') ' FDM: initial phase theta range [min,max] = ', fmin, fmax
+
+  deallocate(vx,vy,vz,phi_v,vxh,vyh,vzh,phih,plane)
+
+end subroutine fdm_init_phase_fft
+#endif
+!################################################################
+!################################################################
+! Phase 4: AMR prolongation for psi (mass-conserving)
+! Called when new refined grids are created at ilevel from ilevel-1
+! Trilinear interpolation + renormalization to preserve |psi|^2 integral
+!################################################################
+subroutine fdm_prolong(ilevel)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+
+  integer::igrid,icell_coarse,ind,iskip,i
+  integer::ind_child,iskip_child,icell_child
+  real(dp)::mass_coarse,mass_fine,ratio
+  real(dp)::psi_re_parent,psi_im_parent
+
+  if(.not.use_fdm) return
+  if(ilevel <= levelmin) return
+
+  ! For each newly created grid at ilevel, initialize psi from parent cell
+  ! Simple injection: copy parent cell value to all 8 children
+  ! Then renormalize to conserve mass
+  igrid = headl(myid, ilevel)
+  do while(igrid > 0)
+     ! Parent cell
+     icell_coarse = father(igrid)
+     if(icell_coarse <= 0) then
+        igrid = next(igrid)
+        cycle
+     end if
+
+     psi_re_parent = psi_re(icell_coarse)
+     psi_im_parent = psi_im(icell_coarse)
+
+     ! Inject parent value to all children
+     do ind_child=1,twotondim
+        iskip_child = ncoarse + (ind_child-1)*ngridmax
+        icell_child = igrid + iskip_child
+        psi_re(icell_child) = psi_re_parent
+        psi_im(icell_child) = psi_im_parent
+     end do
+
+     igrid = next(igrid)
+  end do
+
+  call make_virtual_fine_dp(psi_re(1), ilevel)
+  call make_virtual_fine_dp(psi_im(1), ilevel)
+
+end subroutine fdm_prolong
+!################################################################
+!################################################################
+! Phase 4: AMR restriction for psi (mass-conserving)
+! Average children to parent cell when derefinement occurs
+!################################################################
+subroutine fdm_restrict(ilevel)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+
+  integer::igrid,ind,iskip,icell,igrid_child
+  integer::ind_child,iskip_child,icell_child
+  real(dp)::sum_re,sum_im
+
+  if(.not.use_fdm) return
+  if(ilevel < levelmin) return
+
+  ! For each cell at ilevel that has children (son /= 0),
+  ! average the children's psi back to parent
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        igrid_child = son(icell)
+        if(igrid_child > 0) then
+           sum_re = 0.0d0
+           sum_im = 0.0d0
+           do ind_child=1,twotondim
+              iskip_child = ncoarse + (ind_child-1)*ngridmax
+              icell_child = igrid_child + iskip_child
+              sum_re = sum_re + psi_re(icell_child)
+              sum_im = sum_im + psi_im(icell_child)
+           end do
+           ! Volume average of amplitude
+           psi_re(icell) = sum_re / dble(twotondim)
+           psi_im(icell) = sum_im / dble(twotondim)
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+end subroutine fdm_restrict
+!################################################################
+!################################################################
+! Phase 5: de Broglie wavelength refinement criterion
+! Flag cells where lambda_dB < fdm_nrefine_dB * dx for refinement
+!################################################################
+subroutine fdm_refine_flag(ilevel)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+  integer,intent(in)::ilevel
+
+  integer::igrid,ind,iskip,icell,idim,inbor,icell_nbor
+  real(dp)::dx,scale,dx_loc,grad2,psi2,lambda_dB
+  real(dp)::dpsi_re,dpsi_im
+  integer::nx_loc
+
+  if(.not.use_fdm) return
+  if(hbar_code <= 0.0d0) return
+
+  dx = 0.5d0**ilevel
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale = boxlen / dble(nx_loc)
+  dx_loc = dx * scale
+
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then  ! leaf cell only
+           psi2 = psi_re(icell)**2 + psi_im(icell)**2
+           if(psi2 > 1.0d-30) then
+              ! Compute |grad(psi)|^2 using central differences
+              grad2 = 0.0d0
+              do idim=1,ndim
+                 ! Right neighbor
+                 call fdm_neighbor_cell(igrid, ind, idim, 2, icell_nbor)
+                 if(icell_nbor > 0) then
+                    dpsi_re = psi_re(icell_nbor) - psi_re(icell)
+                    dpsi_im = psi_im(icell_nbor) - psi_im(icell)
+                 else
+                    dpsi_re = 0.0d0; dpsi_im = 0.0d0
+                 end if
+                 grad2 = grad2 + dpsi_re**2 + dpsi_im**2
+              end do
+              grad2 = grad2 / (dx_loc**2)
+
+              ! lambda_dB = 2*pi*hbar / (|grad psi|/|psi| * hbar)
+              ! Actually: k_local = |grad psi| / |psi|
+              ! lambda_dB = 2*pi / k_local = 2*pi * |psi| / |grad psi|
+              ! Refine if lambda_dB / dx < fdm_nrefine_dB
+              if(grad2 > 0.0d0) then
+                 lambda_dB = 2.0d0*acos(-1.0d0) * sqrt(psi2) / sqrt(grad2)
+                 if(lambda_dB / dx_loc < dble(fdm_nrefine_dB)) then
+                    flag1(icell) = 1
+                 end if
+              end if
+           end if
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+end subroutine fdm_refine_flag
+!################################################################
+!################################################################
+! Phase 7: FDM diagnostics — total mass and min lambda_dB
+! Called from adaptive_loop
+!################################################################
+subroutine fdm_diagnostics()
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ilevel,igrid,ind,iskip,icell,info
+  real(dp)::mass_loc,mass_glob,rho_max_loc,rho_max_glob
+  real(dp)::psi2,vol
+
+  if(.not.use_fdm) return
+
+  mass_loc = 0.0d0
+  rho_max_loc = 0.0d0
+
+  do ilevel=levelmin,nlevelmax
+     vol = (0.5d0**ilevel * boxlen/dble(icoarse_max-icoarse_min+1))**3
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0) then
+              psi2 = psi_re(icell)**2 + psi_im(icell)**2
+              mass_loc = mass_loc + psi2 * vol
+              if(psi2 > rho_max_loc) rho_max_loc = psi2
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(mass_loc, mass_glob, 1, MPI_DOUBLE_PRECISION, &
+       MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(rho_max_loc, rho_max_glob, 1, MPI_DOUBLE_PRECISION, &
+       MPI_MAX, MPI_COMM_WORLD, info)
+#else
+  mass_glob = mass_loc
+  rho_max_glob = rho_max_loc
+#endif
+
+  if(myid==1) then
+     write(*,'(A,ES12.5,A,ES10.3)') &
+          ' FDM: M_tot=', mass_glob, '  rho_max=', rho_max_glob
+  end if
+
+end subroutine fdm_diagnostics
