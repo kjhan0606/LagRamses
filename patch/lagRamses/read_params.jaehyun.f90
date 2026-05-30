@@ -75,7 +75,7 @@ subroutine read_params
        & sidm_vrel_max
 namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & adm_cross_section
-  namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order
+  namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
        & n_iter_mond,mond_eps,g_ext_mond
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
@@ -565,6 +565,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A,L1)')      '   hybrid   =', fdm_hybrid
         write(*,'(A,I2,A)')    '   split_order=', fdm_split_order, &
              & merge(' (Strang DKD)   ', merge(' (Yoshida 4th)  ', ' (UNKNOWN->DKD) ', fdm_split_order==4), fdm_split_order==2)
+        write(*,'(A,I2,A)')    '   kinetic   =', fdm_kinetic, &
+             & merge(' (explicit subcyc)', ' (Crank-Nicolson) ', fdm_kinetic==0)
      end if
   end if
 

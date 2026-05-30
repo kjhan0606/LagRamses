@@ -745,27 +745,387 @@ subroutine fdm_drift_fd(ilevel, dt_half)
   integer,intent(in)::ilevel
   real(dp),intent(in)::dt_half
 
-  integer::igrid,ind,iskip,icell,iter
-  real(dp)::dx,scale,dx_loc,alpha,a2p1
-  real(dp)::lap_re,lap_im,psi_re_c,psi_im_c
-  real(dp)::rhs_re,rhs_im,denom_re,denom_im
-  real(dp)::nbor_re,nbor_im
-  integer::nx_loc,idim,inbor,icell_nbor
-  integer,parameter::max_iter=10
+  ! Fine-level kinetic drift selector (fdm_kinetic key)
+  !   0 = explicit FD with automatic sub-cycling (default, dx^2-stable)
+  !   1 = Crank-Nicolson implicit (unconditionally stable; allows large dt)
+  if(fdm_kinetic == 1) then
+     call timer('fdm-drift-fd','start')
+     call fdm_drift_fd_cn(ilevel, dt_half)
+  else
+     call timer('fdm-drift-fd','start')
+     call fdm_drift_fd_explicit(ilevel, dt_half)
+  end if
 
-  ! Precompute alpha = hbar * dt_half / (4 * a^2 * dx^2)
-  ! (factor 4 because CN uses dt/2 in each half-step, and we split kinetic as -(hbar^2/2)*L)
+end subroutine fdm_drift_fd
+!################################################################
+! Crank-Nicolson (Cayley) implicit FD kinetic step, solved matrix-free
+! by a complex BiCGSTAB Krylov iteration.
+!
+! Approximates exp(i*alpha*L) by (1 - i*g*L)^{-1}(1 + i*g*L), g=alpha/2,
+! unitary (norm-preserving) and 2nd-order in dt for ANY alpha.
+! L = 7-point Laplacian (sum_nbr - 6*center); alpha = hbar*dt/(2 a^2 dx^2).
+!
+! We solve  A x = b  for the leaf-cell unknowns (x = correction to psi^n):
+!   A     = (1 + 6 i g) I - i g N        (N = sum of 6 same-level neighbours)
+!   b     = (1 - 6 i g) psi^n + i g N[psi^n]
+! Coarse-fine / physical boundaries are held at psi^n (Dirichlet); inter-rank
+! leaf neighbours are coupled EXACTLY through make_virtual_fine_dp inside every
+! matvec, so BiCGSTAB converges to the true distributed CN solution.
+!
+! Why BiCGSTAB instead of literal line-ADI: a tridiagonal line solve needs
+! structured 1-D lines, which the octree + MPI domain decomposition does not
+! provide (lines fragment at refinement and rank boundaries, and a parallel
+! cyclic-tridiagonal solver would itself need outer iteration). BiCGSTAB
+! reuses the existing matrix-free neighbour stencil + ghost exchange, converges
+! in ~sqrt(cond(A)) iterations even for large g (where the old Jacobi sweep,
+! spectral radius 6g/sqrt(1+36g^2) -> 1, stalled), and is fully parallel-exact.
+!################################################################
+subroutine fdm_drift_fd_cn(ilevel, dt_half)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::dt_half
+
+  integer::igrid,ind,iskip,icell,iter,nx_loc,ntot
+  integer,parameter::max_iter=300
+  real(dp)::dx,scale,dx_loc,alpha,g,cntol,bnorm,rnorm
+  real(dp)::omr,omi,betr,beti,alr,ali,tr1,ti1
+  complex(dp)::crho,crho_old,alp,om,bet,zrv,zts,ztt
+  ! x = correction; r,rhat,p,v,s,t = BiCGSTAB work vectors (real/imag split
+  ! so make_virtual_fine_dp can ghost-sync them like a grid array).
+  real(dp),dimension(:),allocatable::br,bi,rr,ri,rhr,rhi,pr,pi
+  real(dp),dimension(:),allocatable::vr,vi,sr,si,trr,tii,xr,xi
+
   dx = 0.5d0**ilevel
   nx_loc = icoarse_max - icoarse_min + 1
   scale = boxlen / dble(nx_loc)
   dx_loc = dx * scale
   alpha = hbar_code * dt_half / (2.0d0 * aexp**2 * dx_loc**2)
+  g = 0.5d0 * alpha
+  cntol = 1.0d-10
+  ntot = ncoarse + twotondim*ngridmax
 
-  ! Use explicit with automatic sub-cycling (stable for any alpha)
-  call timer('fdm-drift-fd','start')
-  call fdm_drift_fd_explicit(ilevel, dt_half)
+  allocate(br(ntot),bi(ntot),rr(ntot),ri(ntot),rhr(ntot),rhi(ntot))
+  allocate(pr(ntot),pi(ntot),vr(ntot),vi(ntot),sr(ntot),si(ntot))
+  allocate(trr(ntot),tii(ntot),xr(ntot),xi(ntot))
+  br=0d0;bi=0d0;rr=0d0;ri=0d0;rhr=0d0;rhi=0d0
+  pr=0d0;pi=0d0;vr=0d0;vi=0d0;sr=0d0;si=0d0
+  trr=0d0;tii=0d0;xr=0d0;xi=0d0
 
-end subroutine fdm_drift_fd
+  ! b = (1-6ig)psi + ig N[psi] = A_{-g}[psi]   (boundary psi included)
+  call cn_matvec(ilevel, -g, psi_re, psi_im, br, bi)
+  ! r0 = b - A_{g}[psi]  (x0 = 0 correction). Store A psi in r then subtract.
+  call cn_matvec(ilevel,  g, psi_re, psi_im, rr, ri)
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           rr(icell) = br(icell) - rr(icell)
+           ri(icell) = bi(icell) - ri(icell)
+           rhr(icell) = rr(icell)
+           rhi(icell) = ri(icell)
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+  call cn_cdot(ilevel, br,bi, br,bi, zts)   ! <b,b> (real part = |b|^2)
+  bnorm = sqrt(max(0.0d0, dble(zts)))
+  if(bnorm == 0.0d0) then
+     deallocate(br,bi,rr,ri,rhr,rhi,pr,pi,vr,vi,sr,si,trr,tii,xr,xi)
+     return
+  end if
+
+  crho_old=(1.0d0,0.0d0); alp=(1.0d0,0.0d0); om=(1.0d0,0.0d0)
+
+  do iter=1,max_iter
+     call cn_cdot(ilevel, rhr,rhi, rr,ri, crho)
+     if(abs(crho) == 0.0d0) exit                       ! breakdown
+     bet = (crho/crho_old)*(alp/om)
+     betr=dble(bet); beti=aimag(bet); omr=dble(om); omi=aimag(om)
+     ! p = r + bet*(p - om*v)
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0) then
+              tr1 = pr(icell) - (omr*vr(icell) - omi*vi(icell))
+              ti1 = pi(icell) - (omr*vi(icell) + omi*vr(icell))
+              pr(icell) = rr(icell) + (betr*tr1 - beti*ti1)
+              pi(icell) = ri(icell) + (betr*ti1 + beti*tr1)
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+     call cn_matvec(ilevel, g, pr,pi, vr,vi)           ! v = A p
+     call cn_cdot(ilevel, rhr,rhi, vr,vi, zrv)
+     alp = crho/zrv
+     alr=dble(alp); ali=aimag(alp)
+     ! s = r - alp*v
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0) then
+              sr(icell) = rr(icell) - (alr*vr(icell) - ali*vi(icell))
+              si(icell) = ri(icell) - (alr*vi(icell) + ali*vr(icell))
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+     call cn_cdot(ilevel, sr,si, sr,si, zts)
+     rnorm = sqrt(max(0.0d0, dble(zts)))
+     if(rnorm < cntol*bnorm) then
+        ! x = x + alp*p ; converged on the half-step
+        do ind=1,twotondim
+           iskip = ncoarse + (ind-1)*ngridmax
+           igrid = headl(myid, ilevel)
+           do while(igrid > 0)
+              icell = igrid + iskip
+              if(son(icell) == 0) then
+                 xr(icell) = xr(icell) + (alr*pr(icell) - ali*pi(icell))
+                 xi(icell) = xi(icell) + (alr*pi(icell) + ali*pr(icell))
+              end if
+              igrid = next(igrid)
+           end do
+        end do
+        exit
+     end if
+     call cn_matvec(ilevel, g, sr,si, trr,tii)          ! t = A s
+     call cn_cdot(ilevel, trr,tii, sr,si, zts)          ! <t,s>
+     call cn_cdot(ilevel, trr,tii, trr,tii, ztt)        ! <t,t>
+     if(abs(ztt) == 0.0d0) exit
+     om = zts/ztt
+     omr=dble(om); omi=aimag(om)
+     ! x = x + alp*p + om*s ;  r = s - om*t
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0) then
+              xr(icell) = xr(icell) + (alr*pr(icell) - ali*pi(icell)) &
+                                    + (omr*sr(icell) - omi*si(icell))
+              xi(icell) = xi(icell) + (alr*pi(icell) + ali*pr(icell)) &
+                                    + (omr*si(icell) + omi*sr(icell))
+              rr(icell) = sr(icell) - (omr*trr(icell) - omi*tii(icell))
+              ri(icell) = si(icell) - (omr*tii(icell) + omi*trr(icell))
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+     call cn_cdot(ilevel, rr,ri, rr,ri, zts)
+     rnorm = sqrt(max(0.0d0, dble(zts)))
+     if(rnorm < cntol*bnorm) exit
+     if(abs(om) == 0.0d0) exit
+     crho_old = crho
+  end do
+
+  ! Commit: psi^{n+1} = psi^n + x   (leaf cells)
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           psi_re(icell) = psi_re(icell) + xr(icell)
+           psi_im(icell) = psi_im(icell) + xi(icell)
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+  deallocate(br,bi,rr,ri,rhr,rhi,pr,pi,vr,vi,sr,si,trr,tii,xr,xi)
+
+end subroutine fdm_drift_fd_cn
+!################################################################
+! Matrix-free apply of the CN operator on leaf cells at ilevel:
+!   out = (1 + 6 i gg) in - i gg N[in]
+! N[in] = sum of 6 same-level neighbours (Neumann/zero-gradient fallback:
+! an absent neighbour contributes the centre value, matching the explicit
+! and old Jacobi stencils). Ghosts of `in` are synced first so inter-rank
+! leaf neighbours couple exactly. `in` must be 0 on non-leaf/boundary cells
+! (correction vectors satisfy this; for the b/Apsi calls `in`=psi is the
+! intended Dirichlet boundary data).
+!################################################################
+subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::gg
+  real(dp),dimension(*)::inr,ini
+  real(dp),dimension(*)::outr,outi
+  integer::igrid,ind,iskip,icell,idim,inbor,icn
+  real(dp)::nr,ni
+
+  call make_virtual_fine_dp(inr(1), ilevel)
+  call make_virtual_fine_dp(ini(1), ilevel)
+
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           nr = 0.0d0; ni = 0.0d0
+           do idim=1,ndim
+              do inbor=1,2
+                 call fdm_neighbor_cell(igrid, ind, idim, inbor, icn)
+                 if(icn > 0) then
+                    nr = nr + inr(icn); ni = ni + ini(icn)
+                 else
+                    nr = nr + inr(icell); ni = ni + ini(icell)
+                 end if
+              end do
+           end do
+           ! (1+6i gg)(inr+i ini) - i gg (nr + i ni)
+           outr(icell) = inr(icell) - 6.0d0*gg*ini(icell) + gg*ni
+           outi(icell) = ini(icell) + 6.0d0*gg*inr(icell) - gg*nr
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+end subroutine cn_matvec
+!################################################################
+! Complex inner product <a,b> = sum_leaf conj(a)*b over ilevel leaf cells,
+! reduced across ranks. Returns a complex(dp) scalar.
+!################################################################
+subroutine cn_cdot(ilevel, ar, ai, br, bi, res)
+  use amr_commons
+  use poisson_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),dimension(*)::ar,ai,br,bi
+  complex(dp),intent(out)::res
+  integer::igrid,ind,iskip,icell,info
+  real(dp)::loc(2),glob(2)
+
+  loc(1)=0.0d0; loc(2)=0.0d0
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           loc(1) = loc(1) + ar(icell)*br(icell) + ai(icell)*bi(icell)
+           loc(2) = loc(2) + ar(icell)*bi(icell) - ai(icell)*br(icell)
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+  glob = loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(loc, glob, 2, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, info)
+#endif
+  res = cmplx(glob(1), glob(2), kind=dp)
+
+end subroutine cn_cdot
+!################################################################
+! Copy scratch (new_re,new_im) back into psi_re,psi_im for leaf cells.
+!################################################################
+subroutine cn_copy_to_psi(ilevel, src_re, src_im)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),dimension(:),intent(in)::src_re,src_im
+  integer::igrid,ind,iskip,icell
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           psi_re(icell) = src_re(icell)
+           psi_im(icell) = src_im(icell)
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+end subroutine cn_copy_to_psi
+!################################################################
+! Maximum squared de Broglie wavenumber |grad theta|^2 over leaf cells at
+! ilevel, used by the Madelung/hybrid timestep (fdm_hybrid). theta is the
+! wavefunction phase; grad theta is the Madelung velocity field (up to hbar/a):
+!   d(theta)/dx_i = Im(conj(psi) d psi/dx_i)/|psi|^2
+!                 = (psi_re*d psi_im - psi_im*d psi_re)/(|psi|^2)
+! Computed branch-cut-free from central differences of psi (no atan2). A
+! density floor guards near-empty cells. Result is a global MPI max so the
+! timestep is set by the highest-k (most quantum) cell anywhere on the level.
+!################################################################
+subroutine fdm_kdb_max_level(ilevel, k2max)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(out)::k2max
+
+  integer::igrid,ind,iskip,icell,idim,icp,icm,nx_loc,info
+  real(dp)::dx,scale,dx_loc,inv2dx,rho2,rho_floor
+  real(dp)::dre,dim,dth,k2,k2loc,k2glob
+
+  dx = 0.5d0**ilevel
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale = boxlen / dble(nx_loc)
+  dx_loc = dx * scale
+  inv2dx = 0.5d0 / dx_loc
+  rho_floor = 1.0d-6            ! mean |psi|^2 = 1; ignore near-empty cells
+
+  call make_virtual_fine_dp(psi_re(1), ilevel)
+  call make_virtual_fine_dp(psi_im(1), ilevel)
+
+  k2loc = 0.0d0
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           rho2 = psi_re(icell)**2 + psi_im(icell)**2
+           if(rho2 > rho_floor) then
+              k2 = 0.0d0
+              do idim=1,ndim
+                 call fdm_neighbor_cell(igrid, ind, idim, 2, icp)
+                 call fdm_neighbor_cell(igrid, ind, idim, 1, icm)
+                 if(icp > 0 .and. icm > 0) then
+                    dre = (psi_re(icp) - psi_re(icm)) * inv2dx
+                    dim = (psi_im(icp) - psi_im(icm)) * inv2dx
+                    ! d(theta)/dx_i
+                    dth = (psi_re(icell)*dim - psi_im(icell)*dre) / rho2
+                    k2 = k2 + dth*dth
+                 end if
+              end do
+              if(k2 > k2loc) k2loc = k2
+           end if
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+  k2glob = k2loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(k2loc, k2glob, 1, MPI_DOUBLE_PRECISION, MPI_MAX, MPI_COMM_WORLD, info)
+#endif
+  k2max = k2glob
+
+end subroutine fdm_kdb_max_level
 !################################################################
 ! Explicit FD kinetic step (with automatic sub-cycling for stability)
 !################################################################

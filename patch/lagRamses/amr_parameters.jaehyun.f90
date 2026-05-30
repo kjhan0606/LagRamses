@@ -359,6 +359,7 @@ module amr_parameters
   integer ::fdm_nrefine_dB=4          ! Min cells per de Broglie wavelength
   logical ::fdm_hybrid=.false.        ! Hybrid: FDM + N-body particles (stars/sinks)
   integer ::fdm_split_order=2         ! Operator-split order: 2=Strang(DKD), 4=Yoshida
+  integer ::fdm_kinetic=0             ! Fine-level drift: 0=explicit subcycled, 1=Crank-Nicolson implicit
 
   ! MOND (Modified Newtonian Dynamics) parameters
   logical ::use_mond=.false.             ! Enable QUMOND acceleration correction
