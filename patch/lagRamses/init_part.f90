@@ -495,10 +495,53 @@ subroutine init_part
            !----------------------------------------------------------------
            ! Read genetIC Lagrangian particle IDs (ic_particle_ids), so idp
            ! carries the deterministic IC grid identity and z=0 haloes can be
-           ! back-tracked to the Lagrangian grid. Single-file grafic only.
+           ! back-tracked to the Lagrangian grid. Handles both single-file and
+           ! multiple (one-file-per-cpu) grafic layouts.
            !----------------------------------------------------------------
            read_ids=.false.
-           if(.not.multiple)then
+           if(multiple)then
+              ! One file per cpu: dir_particle_ids/ic_particle_ids.<nchar>, Fortran
+              ! unformatted full grid (header record then i8b planes), same layout
+              ! as the velc* per-cpu files.
+              call title(myid,nchar)
+              filename_id=TRIM(initfile(ilevel))//'/dir_particle_ids/ic_particle_ids.'//TRIM(nchar)
+              INQUIRE(file=filename_id,exist=ok)
+              if(ok)then
+                 read_ids=.true.
+                 if(myid==1)write(*,*)'Reading file '//TRIM(filename_id)
+                 ilun=myid+10
+#ifndef WITHOUTMPI
+                 if(IOGROUPSIZE>0) then
+                    if (mod(myid-1,IOGROUPSIZE)/=0) then
+                       call MPI_RECV(dummy_io,1,MPI_INTEGER,myid-1-1,tagg2,&
+                            & MPI_COMM_WORLD,MPI_STATUS_IGNORE,info2)
+                    end if
+                 endif
+#endif
+                 open(ilun,file=filename_id,form='unformatted')
+                 rewind ilun
+                 read(ilun) ! skip header record
+                 do i3=1,n3(ilevel)
+                    read(ilun)((init_plane_id(i1,i2),i1=1,n1(ilevel)),i2=1,n2(ilevel))
+                    if(active(ilevel)%ngrid>0)then
+                       if(i3.ge.i3_min.and.i3.le.i3_max)then
+                          init_array_id(i1_min:i1_max,i2_min:i2_max,i3) = &
+                               & init_plane_id(i1_min:i1_max,i2_min:i2_max)
+                       end if
+                    endif
+                 end do
+                 close(ilun)
+#ifndef WITHOUTMPI
+                 if(IOGROUPSIZE>0) then
+                    if(mod(myid,IOGROUPSIZE)/=0 .and.(myid.lt.ncpu))then
+                       dummy_io=1
+                       call MPI_SEND(dummy_io,1,MPI_INTEGER,myid-1+1,tagg2, &
+                            & MPI_COMM_WORLD,info2)
+                    end if
+                 endif
+#endif
+              endif
+           else
               filename_id=TRIM(initfile(ilevel))//'/ic_particle_ids'
               INQUIRE(file=filename_id,exist=ok)
               if(ok)then
