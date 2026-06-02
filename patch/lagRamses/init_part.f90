@@ -38,6 +38,11 @@ subroutine init_part
   logical,allocatable,dimension(:)::nb
   real(kind=4),allocatable,dimension(:,:)::init_plane,init_plane_x
   real(kind=4),allocatable,dimension(:,:,:)::init_array,init_array_x
+  integer(i8b),allocatable,dimension(:,:)::init_plane_id
+  integer(i8b),allocatable,dimension(:,:,:)::init_array_id
+  integer(kind=8)::plane_bytes_id
+  logical::read_ids=.false.
+  character(LEN=80)::filename_id
   real(kind=8),dimension(1:nvector,1:3)::xx,vv,xs
   real(dp),dimension(1:nvector,1:3)::xx_dp
   integer,dimension(1:nvector)::ixx,iyy,izz
@@ -478,11 +483,41 @@ subroutine init_part
            if(active(ilevel)%ngrid>0)then
               allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
               allocate(init_array_x(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
+              allocate(init_array_id(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
               init_array=0d0
               init_array_x=0d0
+              init_array_id=0_i8b
            end if
            allocate(init_plane(1:n1(ilevel),1:n2(ilevel)))
            allocate(init_plane_x(1:n1(ilevel),1:n2(ilevel)))
+           allocate(init_plane_id(1:n1(ilevel),1:n2(ilevel)))
+
+           !----------------------------------------------------------------
+           ! Read genetIC Lagrangian particle IDs (ic_particle_ids), so idp
+           ! carries the deterministic IC grid identity and z=0 haloes can be
+           ! back-tracked to the Lagrangian grid. Single-file grafic only.
+           !----------------------------------------------------------------
+           read_ids=.false.
+           if(.not.multiple)then
+              filename_id=TRIM(initfile(ilevel))//'/ic_particle_ids'
+              INQUIRE(file=filename_id,exist=ok)
+              if(ok)then
+                 read_ids=.true.
+                 if(myid==1)write(*,*)'Reading file '//TRIM(filename_id)
+                 if(active(ilevel)%ngrid>0)then
+                    open(10,file=filename_id,access='stream',form='unformatted',status='old')
+                    hdr_bytes = 52_8   ! 4 + 44 + 4 (GRAFIC2 header record)
+                    plane_bytes_id = int(n1(ilevel),8) * int(n2(ilevel),8) * 8_8 + 8_8
+                    do i3=max(1,i3_min),min(n3(ilevel),i3_max)
+                       byte_pos = hdr_bytes + int(i3-1,8)*plane_bytes_id + 5_8
+                       read(10, pos=byte_pos)((init_plane_id(i1,i2),i1=1,n1(ilevel)),i2=1,n2(ilevel))
+                       init_array_id(max(1,i1_min):min(n1(ilevel),i1_max),max(1,i2_min):min(n2(ilevel),i2_max),i3) = &
+                            & init_plane_id(max(1,i1_min):min(n1(ilevel),i1_max),max(1,i2_min):min(n2(ilevel),i2_max))
+                    end do
+                    close(10)
+                 endif
+              endif
+           endif
            
            ! Loop over input variables
            do idim=1,ndim
@@ -621,6 +656,7 @@ subroutine init_part
                           if(keep_part)then
                              ipart=ipart+1
                              vp(ipart,idim)=init_array(i1,i2,i3)
+                             if(idim==1 .and. read_ids)idp(ipart)=init_array_id(i1,i2,i3)
                              if(.not. read_pos)then
                                 dispmax=max(dispmax,abs(init_array(i1,i2,i3)/dx))
                              else
@@ -640,9 +676,9 @@ subroutine init_part
            
            ! Deallocate initial conditions array
            if(active(ilevel)%ngrid>0)then
-              deallocate(init_array,init_array_x)
+              deallocate(init_array,init_array_x,init_array_id)
            end if
-           deallocate(init_plane,init_plane_x)
+           deallocate(init_plane,init_plane_x,init_plane_id)
            
            if(debug)write(*,*)'npart=',ipart,'/',npartmax,' forPE=',myid,dispmax
       
@@ -698,10 +734,11 @@ subroutine init_part
         end do
            
         ! Allocate communication buffer in emission
+        ! (extra slot twondim+2 carries idp = genetIC Lagrangian ID across the redistribution)
         do icpu=1,ncpu
            ncache=sendbuf(icpu)
            if(ncache>0)then
-              allocate(emission(icpu,1)%up(1:ncache,1:twondim+1))
+              allocate(emission(icpu,1)%up(1:ncache,1:twondim+2))
            end if
         end do
 
@@ -723,11 +760,13 @@ subroutine init_part
               emission(icpu,1)%up(ibuf,5)=vp(ipart,2)
               emission(icpu,1)%up(ibuf,6)=vp(ipart,3)
               emission(icpu,1)%up(ibuf,7)=mp(ipart)
+              if(read_ids)emission(icpu,1)%up(ibuf,twondim+2)=dble(idp(ipart))
            else
               jpart=jpart+1
               xp(jpart,1:3)=xp(ipart,1:3)
               vp(jpart,1:3)=vp(ipart,1:3)
               mp(jpart)    =mp(ipart)
+              if(read_ids)idp(jpart)=idp(ipart)
            endif
         end do
 
@@ -777,7 +816,7 @@ subroutine init_part
         do icpu=1,ncpu
            ncache=recvbuf(icpu)
            if(ncache>0)then
-              allocate(reception(icpu,1)%up(1:ncache,1:twondim+1))
+              allocate(reception(icpu,1)%up(1:ncache,1:twondim+2))
            end if
         end do
 
@@ -786,7 +825,7 @@ subroutine init_part
         do icpu=1,ncpu
            ncache=recvbuf(icpu)
            if(ncache>0)then
-              buf_count=ncache*(twondim+1)
+              buf_count=ncache*(twondim+2)
               countrecv=countrecv+1
               call MPI_IRECV(reception(icpu,1)%up,buf_count, &
                    & MPI_DOUBLE_PRECISION,icpu-1,&
@@ -799,7 +838,7 @@ subroutine init_part
         do icpu=1,ncpu
            ncache=sendbuf(icpu)
            if(ncache>0)then
-              buf_count=ncache*(twondim+1)
+              buf_count=ncache*(twondim+2)
               countsend=countsend+1
               call MPI_ISEND(emission(icpu,1)%up,buf_count, &
                    & MPI_DOUBLE_PRECISION,icpu-1,&
@@ -824,6 +863,7 @@ subroutine init_part
               vp(jpart,2)=reception(icpu,1)%up(ibuf,5)
               vp(jpart,3)=reception(icpu,1)%up(ibuf,6)
               mp(jpart)  =reception(icpu,1)%up(ibuf,7)
+              if(read_ids)idp(jpart)=nint(reception(icpu,1)%up(ibuf,twondim+2),i8b)
               ptypep(jpart)=PTYPE_DM
            end do
         end do
@@ -883,7 +923,11 @@ subroutine init_part
         do icpu=2,ncpu
            npart_cpu(icpu)=npart_cpu(icpu-1)+npart_all(icpu)
         end do
-        if(myid==1)then
+        if(read_ids)then
+           ! idp already holds the genetIC Lagrangian ID (read from ic_particle_ids
+           ! and carried through the redistribution); do not overwrite it.
+           if(myid==1)write(*,*)'init_part: idp set from genetIC ic_particle_ids (Lagrangian IDs)'
+        else if(myid==1)then
            do ipart=1,npart
               idp(ipart)=ipart
            end do
