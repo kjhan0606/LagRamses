@@ -1360,6 +1360,14 @@ subroutine fdm_init_psi()
 
   if(.not.use_fdm) return
 
+#if defined(USE_FFTW) && !defined(WITHOUTMPI)
+  ! Multi-rank: fully distributed init (FFTW-MPI slabs, no full-grid arrays).
+  if(ncpu > 1) then
+     call fdm_init_psi_distributed()
+     return
+  end if
+#endif
+
   ! Base (levelmin) grafic grid dimensions
   ng1 = n1(levelmin); ng2 = n2(levelmin); ng3 = n3(levelmin)
   N_total = int(ng1,i8b)*int(ng2,i8b)*int(ng3,i8b)
@@ -1496,6 +1504,452 @@ subroutine fdm_init_psi()
   if(myid==1) write(*,'(A,ES12.5)') ' FDM: initial |psi|^2 total mass = ', mass_glob
 
 end subroutine fdm_init_psi
+#if defined(USE_FFTW) && !defined(WITHOUTMPI)
+!################################################################
+! Fully distributed Madelung init for psi (multi-rank).
+!
+! Memory model: NO full N_total array is ever held on any rank.
+!   * The levelmin grafic grid is decomposed into FFTW-MPI slabs along
+!     the i3 (plane) axis -- rank r owns planes [start0+1 .. start0+loc_n0].
+!   * Density (rho) and phase (theta) are computed only on the local slab.
+!   * psi = sqrt(rho)*exp(i*theta) is formed on the slab, then delivered to
+!     each rank's AMR leaf cells by a request/reply MPI_Alltoallv gather.
+!
+! This mirrors the slab decomposition of fdm_drift_fft_distributed but uses
+! a one-shot Alltoallv gather (init runs once) instead of cached sparse P2P.
+!################################################################
+subroutine fdm_init_psi_distributed()
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  use iso_c_binding
+  implicit none
+  include 'mpif.h'
+  include 'fftw3-mpi.f03'
+
+  integer::ng1,ng2,ng3,nx_loc
+  integer::ilevel,ind,iskip,icell,igrid,info
+  integer::i1,i2,i3,ix,iy,iz,zl
+  integer::owner,irank,p
+  integer(i8b)::N_total,gidx,locsize,lidx
+  integer(C_INTPTR_T)::loc_n0,start0,alloc_local
+  integer::loc_n0_i,start0_i
+  real(dp)::dx,dxL,scale,dx_loc,amp,rho_c,re,im,dvol
+  real(dp)::p1,p2,p3,xx1,xx2,xx3
+  real(dp),dimension(1:3)::skip_loc
+  real(dp),dimension(1:twotondim,1:3)::xc
+  real(dp)::mass_loc,mass_glob
+
+  real(dp),allocatable::theta_slab(:)      ! 0:locsize-1
+  real(dp),allocatable::rho_slab(:)
+  real(dp),allocatable::psislab_re(:),psislab_im(:)
+  real(kind=4),allocatable::init_plane(:,:)
+  character(LEN=256)::filename
+  logical::ok
+
+  integer,allocatable::start0_all(:),locn0_all(:)
+  integer,allocatable::scount(:),rcount(:),sdispls(:),rdispls(:),pos(:)
+  integer,allocatable::scount2(:),rcount2(:),sdispls2(:),rdispls2(:)
+  integer(i8b),allocatable::send_gidx(:),recv_gidx(:)
+  integer,allocatable::cellmap(:)
+  real(dp),allocatable::celldx(:)
+  real(dp),allocatable::reply(:),recvreply(:)
+  integer::n_leaf,n_recv,slot,s
+
+  ! ---- Grid / unit setup (identical to serial fdm_init_psi) ----
+  ng1 = n1(levelmin); ng2 = n2(levelmin); ng3 = n3(levelmin)
+  N_total = int(ng1,i8b)*int(ng2,i8b)*int(ng3,i8b)
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale = boxlen/dble(nx_loc)
+  dxL = 0.5d0**levelmin
+  dx_loc = dxL*scale
+  skip_loc=(/0.0d0,0.0d0,0.0d0/)
+  if(ndim>0)skip_loc(1)=dble(icoarse_min)
+  if(ndim>1)skip_loc(2)=dble(jcoarse_min)
+  if(ndim>2)skip_loc(3)=dble(kcoarse_min)
+
+  ! ---- FFTW-MPI slab decomposition along i3 (plane) axis ----
+  ! Logical FFT array has dims (ng3,ng2,ng1): first axis = i3 (distributed),
+  ! last axis = i1 (contiguous, matches grafic plane storage i1-fastest).
+  call fftw_mpi_init()
+  alloc_local = fftw_mpi_local_size_3d( &
+       int(ng3,C_INTPTR_T), int(ng2,C_INTPTR_T), int(ng1,C_INTPTR_T), &
+       MPI_COMM_WORLD, loc_n0, start0)
+  loc_n0_i = int(loc_n0); start0_i = int(start0)
+  locsize = int(loc_n0,i8b)*int(ng2,i8b)*int(ng1,i8b)
+
+  allocate(theta_slab(0:max(locsize,1_i8b)-1))
+  allocate(rho_slab(0:max(locsize,1_i8b)-1))
+  theta_slab = 0.0d0
+  rho_slab   = 1.0d0
+
+  ! ---- Phase: distributed velocity-potential FFT -> theta on slab ----
+  if(hbar_code <= 0.0d0)then
+     if(myid==1)write(*,*)' FDM WARNING: hbar_code <= 0, initializing psi with zero phase'
+  else
+     call fdm_init_phase_fft_dist(ng1,ng2,ng3,loc_n0,start0,alloc_local, &
+          dx_loc,theta_slab,locsize)
+  end if
+
+  ! ---- Amplitude: read density IC plane-by-plane, keep only local slab ----
+  allocate(init_plane(1:ng1,1:ng2))
+  filename = TRIM(initfile(levelmin))//'/ic_deltac'
+  INQUIRE(file=filename,exist=ok)
+  if(.not.ok)then
+     filename = TRIM(initfile(levelmin))//'/ic_deltab'
+     INQUIRE(file=filename,exist=ok)
+  end if
+  if(ok)then
+     if(myid==1)write(*,*)' FDM: reading density IC '//TRIM(filename)
+     if(myid==1)then
+        open(10,file=filename,form='unformatted')
+        rewind 10
+        read(10) ! skip header
+     end if
+     do i3=1,ng3
+        if(myid==1)then
+           read(10) ((init_plane(i1,i2),i1=1,ng1),i2=1,ng2)
+        else
+           init_plane = 0.0
+        end if
+        call MPI_BCAST(init_plane,ng1*ng2,MPI_REAL,0,MPI_COMM_WORLD,info)
+        if(i3-1>=start0_i .and. i3-1<start0_i+loc_n0_i)then
+           zl = i3-1-start0_i
+           do i2=1,ng2
+              do i1=1,ng1
+                 lidx = int(zl,i8b)*int(ng2,i8b)*int(ng1,i8b) &
+                      + int(i2-1,i8b)*int(ng1,i8b) + int(i1-1,i8b)
+                 rho_slab(lidx) = 1.0d0 + dfact(levelmin)*dble(init_plane(i1,i2))
+              end do
+           end do
+        end if
+     end do
+     if(myid==1)close(10)
+  else
+     if(myid==1)write(*,*)' FDM WARNING: no density IC (ic_deltac/ic_deltab) found, using rho=1'
+  end if
+  deallocate(init_plane)
+
+  ! ---- Form psi = sqrt(rho)*exp(i theta) on the slab ----
+  allocate(psislab_re(0:max(locsize,1_i8b)-1))
+  allocate(psislab_im(0:max(locsize,1_i8b)-1))
+  do lidx=0,locsize-1
+     rho_c = max(rho_slab(lidx),0.0d0)
+     amp = sqrt(rho_c)
+     psislab_re(lidx) = amp*cos(theta_slab(lidx))
+     psislab_im(lidx) = amp*sin(theta_slab(lidx))
+  end do
+  deallocate(theta_slab,rho_slab)
+
+  ! ---- Slab ownership table (which rank owns each i3 plane) ----
+  allocate(start0_all(ncpu),locn0_all(ncpu))
+  call MPI_ALLGATHER(start0_i,1,MPI_INTEGER,start0_all,1,MPI_INTEGER,MPI_COMM_WORLD,info)
+  call MPI_ALLGATHER(loc_n0_i,1,MPI_INTEGER,locn0_all,1,MPI_INTEGER,MPI_COMM_WORLD,info)
+
+  ! ================================================================
+  ! Gather slab psi -> local AMR leaf cells (request/reply Alltoallv)
+  ! ================================================================
+  allocate(scount(0:ncpu-1),rcount(0:ncpu-1))
+  allocate(sdispls(0:ncpu-1),rdispls(0:ncpu-1),pos(0:ncpu-1))
+  scount = 0
+
+  ! Pass 1: count requests per owning rank
+  n_leaf = 0
+  do ilevel=levelmin,nlevelmax
+     dx = 0.5d0**ilevel
+     do ind=1,twotondim
+        iz=(ind-1)/4; iy=(ind-1-4*iz)/2; ix=(ind-1-2*iy-4*iz)
+        if(ndim>0)xc(ind,1)=(dble(ix)-0.5d0)*dx
+        if(ndim>1)xc(ind,2)=(dble(iy)-0.5d0)*dx
+        if(ndim>2)xc(ind,3)=(dble(iz)-0.5d0)*dx
+     end do
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0)then
+              p1 = xg(igrid,1)+xc(ind,1)-skip_loc(1)
+              p2 = xg(igrid,2)+xc(ind,2)-skip_loc(2)
+              p3 = xg(igrid,3)+xc(ind,3)-skip_loc(3)
+              xx1=(p1*(dxini(levelmin)/dxL)-xoff1(levelmin))/dxini(levelmin)
+              xx2=(p2*(dxini(levelmin)/dxL)-xoff2(levelmin))/dxini(levelmin)
+              xx3=(p3*(dxini(levelmin)/dxL)-xoff3(levelmin))/dxini(levelmin)
+              i3=max(1,min(ng3,int(xx3)+1))
+              owner = slab_owner(i3,start0_all,locn0_all,ncpu)
+              scount(owner) = scount(owner) + 1
+              n_leaf = n_leaf + 1
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+  end do
+
+  sdispls(0) = 0
+  do irank=1,ncpu-1
+     sdispls(irank) = sdispls(irank-1) + scount(irank-1)
+  end do
+
+  allocate(send_gidx(max(n_leaf,1)))
+  allocate(cellmap(max(n_leaf,1)))
+  allocate(celldx(max(n_leaf,1)))
+  pos = sdispls
+
+  ! Pass 2: fill request buffers (bucketed by owner), record cell back-map
+  do ilevel=levelmin,nlevelmax
+     dx = 0.5d0**ilevel
+     dvol = dx**3
+     do ind=1,twotondim
+        iz=(ind-1)/4; iy=(ind-1-4*iz)/2; ix=(ind-1-2*iy-4*iz)
+        if(ndim>0)xc(ind,1)=(dble(ix)-0.5d0)*dx
+        if(ndim>1)xc(ind,2)=(dble(iy)-0.5d0)*dx
+        if(ndim>2)xc(ind,3)=(dble(iz)-0.5d0)*dx
+     end do
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0)then
+              p1 = xg(igrid,1)+xc(ind,1)-skip_loc(1)
+              p2 = xg(igrid,2)+xc(ind,2)-skip_loc(2)
+              p3 = xg(igrid,3)+xc(ind,3)-skip_loc(3)
+              xx1=(p1*(dxini(levelmin)/dxL)-xoff1(levelmin))/dxini(levelmin)
+              xx2=(p2*(dxini(levelmin)/dxL)-xoff2(levelmin))/dxini(levelmin)
+              xx3=(p3*(dxini(levelmin)/dxL)-xoff3(levelmin))/dxini(levelmin)
+              i1=max(1,min(ng1,int(xx1)+1))
+              i2=max(1,min(ng2,int(xx2)+1))
+              i3=max(1,min(ng3,int(xx3)+1))
+              gidx = int(i1-1,i8b)+int(i2-1,i8b)*int(ng1,i8b) &
+                   +int(i3-1,i8b)*int(ng1,i8b)*int(ng2,i8b)
+              owner = slab_owner(i3,start0_all,locn0_all,ncpu)
+              slot = pos(owner) + 1            ! 1-based slot
+              pos(owner) = pos(owner) + 1
+              send_gidx(slot) = gidx
+              cellmap(slot)   = icell
+              celldx(slot)    = dvol
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+  end do
+
+  ! Exchange request counts and build recv layout
+  call MPI_ALLTOALL(scount,1,MPI_INTEGER,rcount,1,MPI_INTEGER,MPI_COMM_WORLD,info)
+  rdispls(0) = 0
+  do irank=1,ncpu-1
+     rdispls(irank) = rdispls(irank-1) + rcount(irank-1)
+  end do
+  n_recv = rdispls(ncpu-1) + rcount(ncpu-1)
+
+  allocate(recv_gidx(max(n_recv,1)))
+  call MPI_ALLTOALLV(send_gidx,scount,sdispls,MPI_INTEGER8, &
+       recv_gidx,rcount,rdispls,MPI_INTEGER8,MPI_COMM_WORLD,info)
+
+  ! Owner side: look up psi for each requested grafic index
+  allocate(reply(0:max(2*n_recv,1)-1))
+  do p=1,n_recv
+     gidx = recv_gidx(p)
+     i3 = int(gidx/(int(ng1,i8b)*int(ng2,i8b)))
+     i2 = int( mod(gidx,int(ng1,i8b)*int(ng2,i8b)) / int(ng1,i8b) )
+     i1 = int( mod(gidx,int(ng1,i8b)) )
+     zl = i3 - start0_i
+     lidx = int(zl,i8b)*int(ng2,i8b)*int(ng1,i8b) &
+          + int(i2,i8b)*int(ng1,i8b) + int(i1,i8b)
+     reply(2*(p-1))   = psislab_re(lidx)
+     reply(2*(p-1)+1) = psislab_im(lidx)
+  end do
+
+  ! Reply path: counts/displs are doubled (2 reals per request)
+  allocate(scount2(0:ncpu-1),rcount2(0:ncpu-1))
+  allocate(sdispls2(0:ncpu-1),rdispls2(0:ncpu-1))
+  do irank=0,ncpu-1
+     scount2(irank)  = 2*scount(irank)
+     rcount2(irank)  = 2*rcount(irank)
+     sdispls2(irank) = 2*sdispls(irank)
+     rdispls2(irank) = 2*rdispls(irank)
+  end do
+  allocate(recvreply(0:max(2*n_leaf,1)-1))
+  ! owner -> requester: send rcount2 (from rdispls2), recv scount2 (into sdispls2)
+  call MPI_ALLTOALLV(reply,rcount2,rdispls2,MPI_DOUBLE_PRECISION, &
+       recvreply,scount2,sdispls2,MPI_DOUBLE_PRECISION,MPI_COMM_WORLD,info)
+
+  ! Scatter replies back into AMR cells (same order as send_gidx)
+  mass_loc = 0.0d0
+  do s=1,n_leaf
+     icell = cellmap(s)
+     re = recvreply(2*(s-1))
+     im = recvreply(2*(s-1)+1)
+     psi_re(icell) = re
+     psi_im(icell) = im
+     mass_loc = mass_loc + (re*re+im*im)*celldx(s)
+  end do
+
+  call MPI_ALLREDUCE(mass_loc,mass_glob,1,MPI_DOUBLE_PRECISION, &
+       MPI_SUM,MPI_COMM_WORLD,info)
+
+  ! Ghost zones for psi at every level
+  do ilevel=levelmin,nlevelmax
+     call make_virtual_fine_dp(psi_re(1), ilevel)
+     call make_virtual_fine_dp(psi_im(1), ilevel)
+  end do
+
+  if(myid==1) write(*,'(A,ES12.5)') ' FDM: initial |psi|^2 total mass = ', mass_glob
+
+  deallocate(psislab_re,psislab_im)
+  deallocate(start0_all,locn0_all)
+  deallocate(scount,rcount,sdispls,rdispls,pos)
+  deallocate(scount2,rcount2,sdispls2,rdispls2)
+  deallocate(send_gidx,recv_gidx,cellmap,celldx,reply,recvreply)
+
+contains
+  integer function slab_owner(i3,s0,l0,np)
+    integer,intent(in)::i3,np
+    integer,intent(in)::s0(np),l0(np)
+    integer::r
+    slab_owner = np-1
+    do r=1,np
+       if(i3-1>=s0(r) .and. i3-1<s0(r)+l0(r))then
+          slab_owner = r-1
+          return
+       end if
+    end do
+  end function slab_owner
+end subroutine fdm_init_psi_distributed
+!################################################################
+! Distributed velocity-potential FFT (FFTW-MPI slabs along i3).
+! Fills theta_slab(0:locsize-1) = (aexp^2/hbar_code)*phi_v on the local slab.
+! Logical FFT dims (ng3,ng2,ng1): i1 contiguous (last), i3 distributed (first).
+!   phi_v(k) = (i*dx_loc/denom)*[Sx*Vx + Sy*Vy + Sz*Vz]
+!   Sx=sin(2pi K1/ng1) (x-vel, last axis), Sz=sin(2pi K3/ng3) (z-vel, first axis)
+!   denom = 2(cosK1+cosK2+cosK3-3),  k=0 -> 0
+!################################################################
+subroutine fdm_init_phase_fft_dist(ng1,ng2,ng3,loc_n0,start0,alloc_local, &
+     dx_loc,theta_slab,locsize)
+  use amr_commons
+  use fdm_commons
+  use iso_c_binding
+  implicit none
+  include 'mpif.h'
+  include 'fftw3-mpi.f03'
+  integer,intent(in)::ng1,ng2,ng3
+  integer(C_INTPTR_T),intent(in)::loc_n0,start0,alloc_local
+  real(dp),intent(in)::dx_loc
+  integer(i8b),intent(in)::locsize
+  real(dp),intent(out)::theta_slab(0:locsize-1)
+
+  integer(i8b)::N_total,lidx
+  integer::i1,i2,i3,ivar,zl,info,al,b,c,start0_i,loc_n0_i
+  integer::K1,K3
+  real(dp)::twopi,Sx,Sy,Sz,denom,Xr,Xi,fac,vscale
+  real(kind=4),allocatable::plane(:,:)
+  type(C_PTR)::pvx,pvy,pvz,plan_fwd,plan_bwd
+  complex(C_DOUBLE_COMPLEX),pointer::cvx(:),cvy(:),cvz(:),cv(:)
+  character(LEN=256)::filename
+  logical::ok
+
+  twopi = 2.0d0*acos(-1.0d0)
+  N_total = int(ng1,i8b)*int(ng2,i8b)*int(ng3,i8b)
+  start0_i = int(start0); loc_n0_i = int(loc_n0)
+  vscale = dfact(levelmin)*vfact(1)*dx_loc/dxini(levelmin)/vfact(levelmin)
+
+  pvx = fftw_alloc_complex(alloc_local); call c_f_pointer(pvx,cvx,[int(alloc_local)])
+  pvy = fftw_alloc_complex(alloc_local); call c_f_pointer(pvy,cvy,[int(alloc_local)])
+  pvz = fftw_alloc_complex(alloc_local); call c_f_pointer(pvz,cvz,[int(alloc_local)])
+
+  plan_fwd = fftw_mpi_plan_dft_3d( &
+       int(ng3,C_INTPTR_T),int(ng2,C_INTPTR_T),int(ng1,C_INTPTR_T), &
+       cvx,cvx,MPI_COMM_WORLD,FFTW_FORWARD,FFTW_ESTIMATE)
+  plan_bwd = fftw_mpi_plan_dft_3d( &
+       int(ng3,C_INTPTR_T),int(ng2,C_INTPTR_T),int(ng1,C_INTPTR_T), &
+       cvx,cvx,MPI_COMM_WORLD,FFTW_BACKWARD,FFTW_ESTIMATE)
+
+  allocate(plane(1:ng1,1:ng2))
+
+  ! ---- Read each velocity component into its slab buffer ----
+  do ivar=1,3
+     if(ivar==1)then; cv=>cvx; filename=TRIM(initfile(levelmin))//'/ic_velcx'; end if
+     if(ivar==2)then; cv=>cvy; filename=TRIM(initfile(levelmin))//'/ic_velcy'; end if
+     if(ivar==3)then; cv=>cvz; filename=TRIM(initfile(levelmin))//'/ic_velcz'; end if
+     cv = (0.0d0,0.0d0)
+     INQUIRE(file=filename,exist=ok)
+     if(.not.ok)then
+        if(myid==1)write(*,*)' FDM WARNING: velocity IC missing '//TRIM(filename)//' -> treated as 0'
+        cycle
+     end if
+     if(myid==1)write(*,*)' FDM: reading velocity IC '//TRIM(filename)
+     if(myid==1)then
+        open(11,file=filename,form='unformatted')
+        rewind 11
+        read(11) ! skip header
+     end if
+     do i3=1,ng3
+        if(myid==1)then
+           read(11) ((plane(i1,i2),i1=1,ng1),i2=1,ng2)
+        else
+           plane = 0.0
+        end if
+        call MPI_BCAST(plane,ng1*ng2,MPI_REAL,0,MPI_COMM_WORLD,info)
+        if(i3-1>=start0_i .and. i3-1<start0_i+loc_n0_i)then
+           zl = i3-1-start0_i
+           do i2=1,ng2
+              do i1=1,ng1
+                 lidx = int(zl,i8b)*int(ng2,i8b)*int(ng1,i8b) &
+                      + int(i2-1,i8b)*int(ng1,i8b) + int(i1-1,i8b)
+                 cv(lidx+1) = cmplx(vscale*dble(plane(i1,i2)),0.0d0,C_DOUBLE_COMPLEX)
+              end do
+           end do
+        end if
+     end do
+     if(myid==1)close(11)
+  end do
+
+  ! ---- Forward FFTs (in-place, new-array execute) ----
+  call fftw_mpi_execute_dft(plan_fwd,cvx,cvx)
+  call fftw_mpi_execute_dft(plan_fwd,cvy,cvy)
+  call fftw_mpi_execute_dft(plan_fwd,cvz,cvz)
+
+  ! ---- Combine: phih = (i*dx/denom)(Sx Vx + Sy Vy + Sz Vz) into cvx ----
+  ! Local spectrum (non-transposed): first axis K3 = start0+al (z-vel),
+  ! middle K2 = b (y-vel), last K1 = c (x-vel).
+  do al=0,loc_n0_i-1
+     K3 = start0_i + al
+     Sz = sin(twopi*dble(K3)/dble(ng3))
+     do b=0,ng2-1
+        Sy = sin(twopi*dble(b)/dble(ng2))
+        do c=0,ng1-1
+           K1 = c
+           Sx = sin(twopi*dble(K1)/dble(ng1))
+           lidx = int(al,i8b)*int(ng2,i8b)*int(ng1,i8b) &
+                + int(b,i8b)*int(ng1,i8b) + int(c,i8b)
+           denom = 2.0d0*( cos(twopi*dble(c)/dble(ng1)) &
+                         + cos(twopi*dble(b)/dble(ng2)) &
+                         + cos(twopi*dble(K3)/dble(ng3)) - 3.0d0 )
+           if(abs(denom) < 1.0d-30)then
+              cvx(lidx+1) = (0.0d0,0.0d0)
+           else
+              Xr = Sx*dble(cvx(lidx+1)) + Sy*dble(cvy(lidx+1)) + Sz*dble(cvz(lidx+1))
+              Xi = Sx*aimag(cvx(lidx+1)) + Sy*aimag(cvy(lidx+1)) + Sz*aimag(cvz(lidx+1))
+              fac = dx_loc/denom
+              cvx(lidx+1) = cmplx(-fac*Xi, fac*Xr, C_DOUBLE_COMPLEX)
+           end if
+        end do
+     end do
+  end do
+
+  ! ---- Inverse FFT, normalize, theta = (aexp^2/hbar)*phi_v ----
+  call fftw_mpi_execute_dft(plan_bwd,cvx,cvx)
+  do lidx=0,locsize-1
+     theta_slab(lidx) = (aexp**2/hbar_code)*dble(cvx(lidx+1))/dble(N_total)
+  end do
+
+  deallocate(plane)
+  call fftw_destroy_plan(plan_fwd)
+  call fftw_destroy_plan(plan_bwd)
+  call fftw_free(pvx); call fftw_free(pvy); call fftw_free(pvz)
+
+end subroutine fdm_init_phase_fft_dist
+#endif
 #ifdef USE_FFTW
 !################################################################
 ! Solve the velocity potential phi_v (nabla phi_v = v_code) on the
