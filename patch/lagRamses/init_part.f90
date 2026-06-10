@@ -125,6 +125,11 @@ subroutine init_part
   if(use_adm) then
      allocate(edp(npartmax))
      ! edp: zero-initialized by mmap lazy pages
+     ! Dark-H2 nucleus fraction (Phase 2 non-equilibrium tracking):
+     ! seed every slot with the primordial value adm_fH2 (explicit init —
+     ! do NOT rely on mmap zero-pages for a non-zero seed).
+     allocate(xh2p(npartmax))
+     xh2p(1:npartmax) = adm_fH2
   end if
 
   if(star.or.sink)then

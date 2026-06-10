@@ -1,6 +1,6 @@
 program test_darkcool
   use amr_parameters
-  use dark_cooling_mod, only: dark_net_cooling
+  use dark_cooling_mod, only: dark_net_cooling, dark_h2_chem
   implicit none
   real(dp)::T, aex, Latom_lo, Lmol_lo, Lmol_hi, Ltmp
   real(dp)::n_lo, n_hi, x, logT0, logT1
@@ -27,9 +27,40 @@ program test_darkcool
   adm_me_ratio = 40.0d-6 / 40.0d0
   call sweep('darkcool_dark.dat')
 
-  write(*,*) 'done: darkcool_sm.dat, darkcool_dark.dat'
+  ! ---------- Phase 2: non-equilibrium x_H2' chemistry trajectory ----------
+  ! Evolve x_H2 at fixed (T, n) from a zero seed; verify it stays in [0,1]
+  ! and relaxes to a steady state. Column 2 = SM (r=1), column 3 = dark.
+  call chem_traj('darkcool_chem.dat')
+
+  write(*,*) 'done: darkcool_sm.dat, darkcool_dark.dat, darkcool_chem.dat'
 
 contains
+
+  subroutine chem_traj(fname)
+    character(len=*),intent(in)::fname
+    real(dp)::Tc, nc, dt, t_now, xsm, xdk
+    integer::it,ju
+    integer,parameter::nstep=60
+    Tc = 200.0d0       ! dark temperature [K]
+    nc = 10.0d0        ! dark number density [cm^-3]
+    dt = 3.0d13        ! ~1 Myr per step [s]
+    xsm = 0.0d0; xdk = 0.0d0; t_now = 0.0d0
+    open(newunit=ju,file=fname,status='replace')
+    write(ju,'(A)') '# t[s]  x_H2(SM,r=1)  x_H2(dark 40GeV/40keV/0.01)'
+    write(ju,'(3ES14.5)') t_now, xsm, xdk
+    do it=1,nstep
+       ! SM reference params
+       adm_alpha=7.2973525693d-3; adm_mp=0.9382720813d0
+       adm_me_ratio=0.5109989461d-3/0.9382720813d0
+       xsm = dark_h2_chem(xsm, Tc, nc, dt)
+       ! Dark params
+       adm_alpha=0.01d0; adm_mp=40.0d0; adm_me_ratio=40.0d-6/40.0d0
+       xdk = dark_h2_chem(xdk, Tc, nc, dt)
+       t_now = t_now + dt
+       write(ju,'(3ES14.5)') t_now, xsm, xdk
+    end do
+    close(ju)
+  end subroutine chem_traj
 
   subroutine sweep(fname)
     character(len=*),intent(in)::fname

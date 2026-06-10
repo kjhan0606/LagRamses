@@ -19,7 +19,7 @@ module dark_cooling_mod
   use amr_parameters, only: dp
   implicit none
   private
-  public :: dark_net_cooling, dark_cool_implicit
+  public :: dark_net_cooling, dark_cool_implicit, dark_h2_chem
 
   ! Physical constants (CGS)
   real(dp),parameter::pi_dc      = 3.141592653589793d0
@@ -103,10 +103,11 @@ end function saha_ionization
 ! Uses module-level parameters from amr_parameters:
 !   adm_alpha, adm_mp, adm_me_ratio, adm_xi
 !================================================================
-function dark_net_cooling(T_D, n_D, aexp) result(Lambda)
+function dark_net_cooling(T_D, n_D, aexp, x_H2_in) result(Lambda)
   use amr_parameters, only: adm_alpha, adm_mp, adm_me_ratio, adm_xi, adm_mol
   implicit none
   real(dp),intent(in)::T_D, n_D, aexp
+  real(dp),intent(in),optional::x_H2_in   ! tracked dark-H2 fraction (Phase 2)
   real(dp)::Lambda
 
   real(dp)::me_D_g, E_ion_erg, T_ion_K, sigma_T_D
@@ -208,7 +209,11 @@ function dark_net_cooling(T_D, n_D, aexp) result(Lambda)
   ! Dominant below the atomic floor; needs neutral dark hydrogen.
   Lambda_mol = 0.0d0
   if(adm_mol .and. T_D > 1.0d0) then
-     Lambda_mol = dark_mol_cooling(T_D, n_D, x_e)
+     if(present(x_H2_in)) then
+        Lambda_mol = dark_mol_cooling(T_D, n_D, x_e, x_H2_in)   ! Phase 2: tracked fraction
+     else
+        Lambda_mol = dark_mol_cooling(T_D, n_D, x_e)            ! Phase 1: equilibrium adm_fH2
+     end if
   end if
 
   Lambda = Lambda_brem + Lambda_compton + Lambda_recomb &
@@ -237,10 +242,11 @@ end function dark_net_cooling
 !     low-density fit (T0 -> infinity fallback, paper Sec 3.6)
 ! Phase-2 will replace adm_fH2 with a tracked non-equilibrium x_H2'.
 !================================================================
-function dark_mol_cooling(T_D, n_D, x_e) result(Lambda_mol)
+function dark_mol_cooling(T_D, n_D, x_e, x_H2_in) result(Lambda_mol)
   use amr_parameters, only: adm_alpha, adm_mp, adm_me_ratio, adm_fH2
   implicit none
   real(dp),intent(in)::T_D, n_D, x_e
+  real(dp),intent(in),optional::x_H2_in   ! tracked dark-H2 fraction (Phase 2)
   real(dp)::Lambda_mol
 
   ! SM reference micro-physics
@@ -248,20 +254,27 @@ function dark_mol_cooling(T_D, n_D, x_e) result(Lambda_mol)
   real(dp),parameter::me_SM    = 0.5109989461d-3   ! electron mass [GeV]
   real(dp),parameter::alpha_SM = 7.2973525693d-3   ! SM fine-structure constant
 
-  real(dp)::r_alf, r_me, r_mp
+  real(dp)::r_alf, r_me, r_mp, fH2
   real(dp)::n_neutral, n_H2, n_HI
   real(dp)::Tr, Tv, T3r, T3v
   real(dp)::amp_LD, amp_rotLTE, amp_vibLTE
   real(dp)::C_n0, C_rotLTE, C_vibLTE, C_LTE, C_per_mol
 
+  ! Molecular H-nucleus fraction: tracked value (Phase 2) or namelist (Phase 1)
+  if(present(x_H2_in)) then
+     fH2 = x_H2_in
+  else
+     fH2 = adm_fH2
+  end if
+
   Lambda_mol = 0.0d0
-  if(adm_fH2 <= 0.0d0) return
+  if(fH2 <= 0.0d0) return
 
   ! Neutral dark hydrogen: molecules + atomic collider
   n_neutral = (1.0d0 - x_e) * n_D
   if(n_neutral <= 0.0d0) return
-  n_H2 = 0.5d0 * adm_fH2 * n_neutral          ! 2 atoms per molecule
-  n_HI = (1.0d0 - adm_fH2) * n_neutral         ! atomic collider density
+  n_H2 = 0.5d0 * fH2 * n_neutral              ! 2 atoms per molecule
+  n_HI = (1.0d0 - fH2) * n_neutral             ! atomic collider density
   if(n_H2 <= 0.0d0 .or. n_HI <= 0.0d0) return
 
   ! Dark/SM parameter ratios
@@ -330,10 +343,11 @@ end function sm_h2_lowden
 !
 ! Returns edp_new [same units as edp_old]
 !================================================================
-function dark_cool_implicit(edp_old, rho_D, n_D, dt_phys, aexp) result(edp_new)
+function dark_cool_implicit(edp_old, rho_D, n_D, dt_phys, aexp, x_H2_in) result(edp_new)
   use amr_parameters, only: adm_mp
   implicit none
   real(dp),intent(in)::edp_old, rho_D, n_D, dt_phys, aexp
+  real(dp),intent(in),optional::x_H2_in   ! tracked dark-H2 fraction (Phase 2)
   real(dp)::edp_new
 
   real(dp)::T_D, Lambda, dE
@@ -358,7 +372,11 @@ function dark_cool_implicit(edp_old, rho_D, n_D, dt_phys, aexp) result(edp_new)
      if(T_D < T_floor) exit
 
      ! Cooling rate [erg/s/cm^3]
-     Lambda = dark_net_cooling(T_D, n_D, aexp)
+     if(present(x_H2_in)) then
+        Lambda = dark_net_cooling(T_D, n_D, aexp, x_H2_in)
+     else
+        Lambda = dark_net_cooling(T_D, n_D, aexp)
+     end if
      if(Lambda <= 0.0d0) exit  ! no cooling (could be heating from Compton if T < T_DCMB)
 
      ! Energy loss per unit mass: dE/dt = -Lambda / rho
@@ -377,5 +395,103 @@ function dark_cool_implicit(edp_old, rho_D, n_D, dt_phys, aexp) result(edp_new)
   if(edp_new < edp_floor) edp_new = edp_floor
 
 end function dark_cool_implicit
+
+!================================================================
+! Non-equilibrium dark-H2 fraction update (Phase 2)
+!
+! Tracks x_H2 = (molecular dark-H nuclei) / (neutral dark-H nuclei)
+! over one physical timestep via a rescaled two-reaction network:
+!
+!   formation (rate-limiting radiative attachment, H'+e' -> H'^- + gamma,
+!              followed by fast H'^- + H' -> H2' + e'):
+!        R_form = k_ra(T) * n_e * n_HI
+!   destruction (collisional dissociation, H2' + H' -> 3 H'):
+!        R_dest = k_cd(T) * n_H2 * n_HI
+!
+! SM base coefficients (Galli & Palla 1998 / Abel+ 1997) are evaluated
+! at the electronically-rescaled temperature  T_e = T / (r_alf^2 r_me)
+! and multiplied by DarkKROME-style sigma*v prefactors
+! (Gurian, Ryan, Shandera & Jeong 2022):
+!   sigma' / sigma_SM = (r_alf r_me)^-2   (Bohr-radius scaling a0' = a0/(r_alf r_me))
+!   v'(T) / v_SM(T_e) = r_alf             (electron channel)  or
+!                     = r_alf sqrt(r_me/r_mp)  (H'-collider channel)
+!   radiative attachment carries one extra photon vertex -> factor r_alf
+!     => P_form = r_me^-2
+!     => P_dest = r_alf^-1 r_me^-3/2 r_mp^-1/2
+!
+! The linearized ODE  dx/dt = (1-x)(a - b x)  is advanced with an
+! exponential-Euler step (unconditionally stable for large dt_phys).
+!
+!   x_H2    : current dark-H2 nucleus fraction [0,1]
+!   T_D     : dark temperature [K]
+!   n_D     : dark baryon number density [cm^-3]
+!   dt_phys : physical timestep [s]
+! The dark ionization fraction x_e is recomputed internally (Saha).
+! Returns the updated fraction, clamped to [0,1].
+!================================================================
+function dark_h2_chem(x_H2, T_D, n_D, dt_phys) result(x_H2_new)
+  use amr_parameters, only: adm_alpha, adm_mp, adm_me_ratio, adm_xi
+  implicit none
+  real(dp),intent(in)::x_H2, T_D, n_D, dt_phys
+  real(dp)::x_H2_new
+
+  real(dp),parameter::mp_SM    = 0.9382720813d0
+  real(dp),parameter::me_SM    = 0.5109989461d-3
+  real(dp),parameter::alpha_SM = 7.2973525693d-3
+
+  real(dp)::r_alf, r_me, r_mp
+  real(dp)::T_e, n_neutral, n_e, n_HI, x_e
+  real(dp)::me_D_g, E_ion_erg, T_ion_K, sigma_T_D
+  real(dp)::P_form, P_dest, k_ra, k_cd
+  real(dp)::a_form, b_dest, gx, gp, x0
+
+  x_H2_new = x_H2
+  if(T_D <= 1.0d0) return
+
+  ! Dark ionization fraction (Saha equilibrium)
+  call dark_params(adm_alpha, adm_mp, adm_me_ratio, adm_xi, &
+       me_D_g, E_ion_erg, T_ion_K, sigma_T_D)
+  x_e = saha_ionization(T_D, n_D, me_D_g, E_ion_erg)
+
+  n_neutral = (1.0d0 - x_e) * n_D
+  if(n_neutral <= 0.0d0) return
+  n_e  = x_e * n_D
+  n_HI = (1.0d0 - x_H2) * n_neutral
+
+  ! Dark/SM parameter ratios
+  r_alf = adm_alpha / alpha_SM
+  r_me  = (adm_mp * adm_me_ratio) / me_SM
+  r_mp  = adm_mp / mp_SM
+
+  ! Electronically-rescaled temperature for both rate fits
+  T_e = T_D / (r_alf**2 * r_me)
+  if(T_e < 1.0d0) T_e = 1.0d0
+
+  ! DarkKROME-style sigma*v prefactors
+  P_form = 1.0d0 / r_me**2
+  P_dest = 1.0d0 / (r_alf * r_me**1.5d0 * sqrt(r_mp))
+
+  ! SM rate coefficients [cm^3/s], evaluated at T_e
+  k_ra = P_form * 1.4d-18 * T_e**0.928d0 * exp(-T_e/16200.0d0)   ! H + e -> H- + gamma
+  k_cd = P_dest * 1.0d-8  * exp(-min(84100.0d0/T_e, 700.0d0))    ! H2 + H -> 3H
+
+  ! dx/dt = (1-x)(a - b x);  a = 2 k_ra n_e,  b = k_cd n_neutral
+  a_form = 2.0d0 * k_ra * n_e
+  b_dest = k_cd * n_neutral
+
+  x0 = x_H2
+  gx = (1.0d0 - x0) * (a_form - b_dest * x0)
+  gp = -(a_form + b_dest) + 2.0d0 * b_dest * x0        ! d/dx of RHS at x0
+
+  if(gp < -1.0d-300) then
+     x_H2_new = x0 + (gx / gp) * (exp(max(gp*dt_phys, -700.0d0)) - 1.0d0)
+  else
+     x_H2_new = x0 + gx * dt_phys
+  end if
+
+  if(x_H2_new < 0.0d0) x_H2_new = 0.0d0
+  if(x_H2_new > 1.0d0) x_H2_new = 1.0d0
+
+end function dark_h2_chem
 
 end module dark_cooling_mod
