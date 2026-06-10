@@ -351,6 +351,8 @@ module amr_parameters
   real(dp)::adm_me_ratio=0.01d0       ! m_e'/m_p' ratio
   real(dp)::adm_xi=0.5d0              ! T_dark/T_CMB ratio at recoupling
   real(dp)::adm_cross_section=1.0d0   ! sigma/m for aDM [cm^2/g] (Coulomb)
+  logical ::adm_mol=.false.           ! Enable dark molecular (H2') line cooling
+  real(dp)::adm_fH2=1.0d-3            ! Equilibrium dark-H2 fraction (n_H2'/n_neutral)
 
   ! Fuzzy Dark Matter (FDM) Schrödinger-Poisson parameters
   logical ::use_fdm=.false.           ! Enable FDM (Schrödinger-Poisson)

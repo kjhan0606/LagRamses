@@ -74,7 +74,7 @@ subroutine read_params
        & sidm_baryon,sidm_baryon_sigma,sidm_baryon_power, &
        & sidm_vrel_max
 namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
-       & adm_cross_section
+       & adm_cross_section,adm_mol,adm_fH2
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
        & n_iter_mond,mond_eps,g_ext_mond
@@ -538,6 +538,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A,ES10.3)') '   m_e''/m_p''=', adm_me_ratio
         write(*,'(A,F6.3)')   '   xi       =', adm_xi
         write(*,'(A,ES10.3,A)') '   sigma/m  =', adm_cross_section, ' cm^2/g'
+        if(adm_mol) then
+           write(*,'(A,ES10.3)') '   dark H2 cooling ON, fH2 =', adm_fH2
+        else
+           write(*,'(A)')        '   dark H2 cooling OFF'
+        end if
      end if
   end if
 
