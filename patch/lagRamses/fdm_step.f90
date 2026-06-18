@@ -29,13 +29,20 @@ subroutine fdm_step(ilevel)
 
   dt_loc = dtnew(ilevel)
 
+  ! ---- Hybrid HJM: fluid solver on coarse levels ----
+  if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
+     call fdm_hjm_step(ilevel, dt_loc)
+     call timer('fdm-ghost','start')
+     call make_virtual_fine_dp(psi_re(1), ilevel)
+     call make_virtual_fine_dp(psi_im(1), ilevel)
+     call timer('particles','start')
+     return
+  end if
+
+  ! ---- Schrödinger wave solver (existing) ----
   if(fdm_split_order == 4) then
-     ! Yoshida 4th-order triple-jump of the symmetric Strang(DKD) map.
-     ! S4(dt) = S2(w1 dt) S2(w0 dt) S2(w1 dt), 2*w1+w0 = 1.
-     ! Adjacent half-drifts merge -> 4 drifts + 3 kicks per step.
-     ! w0<0 => signed (backward) sub-steps; exact for unitary phase rotations.
-     yw1 = 1.0d0/(2.0d0 - 2.0d0**(1.0d0/3.0d0))  !  1.351207...
-     yw0 = 1.0d0 - 2.0d0*yw1                      ! -1.702414...
+     yw1 = 1.0d0/(2.0d0 - 2.0d0**(1.0d0/3.0d0))
+     yw0 = 1.0d0 - 2.0d0*yw1
      call fdm_drift(ilevel, 0.5d0*yw1*dt_loc)
      call timer('fdm-kick','start')
      call fdm_kick (ilevel,        yw1*dt_loc)
@@ -47,21 +54,16 @@ subroutine fdm_step(ilevel)
      call fdm_kick (ilevel,        yw1*dt_loc)
      call fdm_drift(ilevel, 0.5d0*yw1*dt_loc)
   else
-     ! Strang DKD splitting: Drift(dt/2) - Kick(dt) - Drift(dt/2)
-     ! (fdm_drift_fft sets its own finer-grained phase timers)
      call fdm_drift(ilevel, 0.5d0*dt_loc)
      call timer('fdm-kick','start')
      call fdm_kick(ilevel, dt_loc)
      call fdm_drift(ilevel, 0.5d0*dt_loc)
   end if
 
-  ! Update ghost zones for psi after evolution
   call timer('fdm-ghost','start')
   call make_virtual_fine_dp(psi_re(1), ilevel)
   call make_virtual_fine_dp(psi_im(1), ilevel)
 
-  ! Restore caller's timer ('particles' was running on entry) so that
-  ! work after fdm_step is attributed as before.
   call timer('particles','start')
 
 end subroutine fdm_step
@@ -978,7 +980,7 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi)
            nr = 0.0d0; ni = 0.0d0
            do idim=1,ndim
               do inbor=1,2
-                 call fdm_neighbor_cell(igrid, ind, idim, inbor, icn)
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icn)
                  if(icn > 0) then
                     nr = nr + inr(icn); ni = ni + ini(icn)
                  else
@@ -1102,8 +1104,8 @@ subroutine fdm_kdb_max_level(ilevel, k2max)
            if(rho2 > rho_floor) then
               k2 = 0.0d0
               do idim=1,ndim
-                 call fdm_neighbor_cell(igrid, ind, idim, 2, icp)
-                 call fdm_neighbor_cell(igrid, ind, idim, 1, icm)
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icp)
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icm)
                  if(icp > 0 .and. icm > 0) then
                     dre = (psi_re(icp) - psi_re(icm)) * inv2dx
                     dim = (psi_im(icp) - psi_im(icm)) * inv2dx
@@ -1174,7 +1176,7 @@ subroutine fdm_drift_fd_explicit(ilevel, dt_half)
               lap_im = -6.0d0 * psi_im_c
               do idim=1,ndim
                  do inbor=1,2
-                    call fdm_neighbor_cell(igrid, ind, idim, inbor, icell_nbor)
+                    call fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
                     if(icell_nbor > 0) then
                        lap_re = lap_re + psi_re(icell_nbor)
                        lap_im = lap_im + psi_im(icell_nbor)
@@ -1199,15 +1201,15 @@ end subroutine fdm_drift_fd_explicit
 ! Find the neighbor cell of subcell ind in grid igrid
 ! in direction (idim, inbor): idim=1,2,3; inbor=1(left),2(right)
 !################################################################
-subroutine fdm_neighbor_cell(igrid, ind, idim, inbor, icell_nbor)
+subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
   use amr_commons
+  use morton_hash
   implicit none
-  integer,intent(in)::igrid, ind, idim, inbor
+  integer,intent(in)::igrid, ilevel, ind, idim, inbor
   integer,intent(out)::icell_nbor
 
   integer::ind_bit, ind_nbor, igrid_nbor, iskip
 
-  ! Extract the bit for this dimension from ind (1-based, bits: x=bit0, y=bit1, z=bit2)
   ind_bit = iand(ishft(ind-1, -(idim-1)), 1)  ! 0 or 1
 
   if(inbor == 2) then
@@ -1218,8 +1220,8 @@ subroutine fdm_neighbor_cell(igrid, ind, idim, inbor, icell_nbor)
         iskip = ncoarse + (ind_nbor-1)*ngridmax
         icell_nbor = igrid + iskip
      else
-        ! Neighbor is in adjacent grid
-        igrid_nbor = son(nbor(igrid, 2*idim))
+        ! Neighbor is in adjacent grid (Morton lookup, defrag-safe)
+        igrid_nbor = morton_nbor_grid(igrid, ilevel, 2*idim)
         if(igrid_nbor == 0) then
            icell_nbor = 0; return
         end if
@@ -1235,8 +1237,8 @@ subroutine fdm_neighbor_cell(igrid, ind, idim, inbor, icell_nbor)
         iskip = ncoarse + (ind_nbor-1)*ngridmax
         icell_nbor = igrid + iskip
      else
-        ! Neighbor is in adjacent grid
-        igrid_nbor = son(nbor(igrid, 2*idim-1))
+        ! Neighbor is in adjacent grid (Morton lookup, defrag-safe)
+        igrid_nbor = morton_nbor_grid(igrid, ilevel, 2*idim-1)
         if(igrid_nbor == 0) then
            icell_nbor = 0; return
         end if
@@ -1323,6 +1325,9 @@ subroutine fdm_compute_hbar()
      write(*,'(A,ES10.3,A)') '   lambda_dB(100km/s) = ', &
           2.0d0*acos(-1.0d0)*hbar_code/(100.0d5/scale_v) * scale_l/3.0857d21, ' kpc'
   end if
+
+  ! Initialize HJM hybrid solver if enabled
+  call fdm_hjm_init()
 
 end subroutine fdm_compute_hbar
 !################################################################
@@ -2185,6 +2190,16 @@ subroutine fdm_refine_flag(ilevel)
 
   if(.not.use_fdm) return
   if(hbar_code <= 0.0d0) return
+  ! Without HJM: only flag at levelmin (prolongated levels have parent
+  ! gradients causing runaway cascade).
+  ! With HJM: flag at wave levels (>= fdm_first_wave_level) where psi
+  ! is actually evolved by the Schrodinger solver; skip fluid levels
+  ! (handled by fdm_madelung_refine_flag).
+  if(fdm_use_hjm) then
+     if(ilevel < fdm_first_wave_level) return
+  else
+     if(ilevel > levelmin) return
+  end if
 
   dx = 0.5d0**ilevel
   nx_loc = icoarse_max - icoarse_min + 1
@@ -2196,14 +2211,14 @@ subroutine fdm_refine_flag(ilevel)
      igrid = headl(myid, ilevel)
      do while(igrid > 0)
         icell = igrid + iskip
-        if(son(icell) == 0) then  ! leaf cell only
+        if(son(icell) > 0) then
+           flag1(icell) = 1
+        else
            psi2 = psi_re(icell)**2 + psi_im(icell)**2
-           if(psi2 > 1.0d-30) then
-              ! Compute |grad(psi)|^2 using central differences
+           if(psi2 > 1.0d-30 .and. psi2 >= fdm_refine_rho_min) then
               grad2 = 0.0d0
               do idim=1,ndim
-                 ! Right neighbor
-                 call fdm_neighbor_cell(igrid, ind, idim, 2, icell_nbor)
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icell_nbor)
                  if(icell_nbor > 0) then
                     dpsi_re = psi_re(icell_nbor) - psi_re(icell)
                     dpsi_im = psi_im(icell_nbor) - psi_im(icell)
@@ -2213,11 +2228,6 @@ subroutine fdm_refine_flag(ilevel)
                  grad2 = grad2 + dpsi_re**2 + dpsi_im**2
               end do
               grad2 = grad2 / (dx_loc**2)
-
-              ! lambda_dB = 2*pi*hbar / (|grad psi|/|psi| * hbar)
-              ! Actually: k_local = |grad psi| / |psi|
-              ! lambda_dB = 2*pi / k_local = 2*pi * |psi| / |grad psi|
-              ! Refine if lambda_dB / dx < fdm_nrefine_dB
               if(grad2 > 0.0d0) then
                  lambda_dB = 2.0d0*acos(-1.0d0) * sqrt(psi2) / sqrt(grad2)
                  if(lambda_dB / dx_loc < dble(fdm_nrefine_dB)) then

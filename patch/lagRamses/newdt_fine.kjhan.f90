@@ -68,6 +68,12 @@ subroutine newdt_fine(ilevel)
   if(cosmo)then
      dtnew(ilevel)=MIN(dtnew(ilevel),0.1/hexp)
   end if
+  ! HJM CFL debug: after gravity+cosmo constraints
+  if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin &
+     .and. fdm_use_hjm) then
+     write(*,'(" HJM_CFL[grav]: dt=",1PE12.5," tff=",1PE12.5," hexp=",1PE12.5)') &
+          dtnew(ilevel), courant_factor*tff, 0.1d0/hexp
+  end if
   ! FDM kinetic timestep. The classic CFL dt < fdm_courant*dx^2*a^2/(6*hbar)
   ! is the worst case: it equals fdm_courant*a^2/(hbar*k2) with k2 = 6/dx^2,
   ! the 7-point stencil's max eigenvalue (~Nyquist). Two knobs relax it:
@@ -82,26 +88,34 @@ subroutine newdt_fine(ilevel)
   if(use_fdm .and. hbar_code > 0.0d0)then
      dx_fdm  = 0.5d0**ilevel*boxlen/dble(icoarse_max-icoarse_min+1)
      k2_nyq  = 6.0d0/dx_fdm**2
-     if(fdm_hybrid)then
-        call fdm_kdb_max_level(ilevel, k2_dB)
-        k2_eff = max(1.0d-30, min(k2_dB, k2_nyq))
+
+     if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
+        ! HJM fluid level: quantum pressure CFL only
+        ! dt <= C_D * a^2 / (hbar * 6/dx^2) with C_D=0.2
+        dt_nyq = 0.2d0 * aexp**2 / (hbar_code * k2_nyq)
+        dtnew(ilevel) = MIN(dtnew(ilevel), dt_nyq)
+        if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin) then
+           write(*,'(" HJM_CFL[fdm]: dt_nyq=",1PE12.5," dt=",1PE12.5)') &
+                dt_nyq, dtnew(ilevel)
+        end if
      else
-        k2_eff = k2_nyq
-     end if
-     dt_acc = fdm_courant * aexp**2 / (hbar_code * k2_eff)
-     dt_nyq = fdm_courant * aexp**2 / (hbar_code * k2_nyq)
-     if(ilevel==levelmin)then
-        ! Base level: spectral (FFT) drift, stable -> accuracy limit only.
-        dtnew(ilevel)=MIN(dtnew(ilevel), dt_acc)
-     else
-        if(fdm_kinetic==1)then
-           ! CN fine level: unconditionally stable. Limit only if hybrid
-           ! (physical de Broglie accuracy); else inherit the base-level dt.
-           if(fdm_hybrid) dtnew(ilevel)=MIN(dtnew(ilevel), dt_acc)
+        ! Wave levels: existing Schrodinger CFL
+        if(fdm_hybrid)then
+           call fdm_kdb_max_level(ilevel, k2_dB)
+           k2_eff = max(1.0d-30, min(k2_dB, k2_nyq))
         else
-           ! Explicit FD fine level: Nyquist stability is mandatory; the
-           ! hybrid de Broglie relaxation cannot loosen a stability limit.
-           dtnew(ilevel)=MIN(dtnew(ilevel), dt_nyq)
+           k2_eff = k2_nyq
+        end if
+        dt_acc = fdm_courant * aexp**2 / (hbar_code * k2_eff)
+        dt_nyq = fdm_courant * aexp**2 / (hbar_code * k2_nyq)
+        if(ilevel==levelmin)then
+           dtnew(ilevel)=MIN(dtnew(ilevel), dt_acc)
+        else
+           if(fdm_kinetic==1)then
+              if(fdm_hybrid) dtnew(ilevel)=MIN(dtnew(ilevel), dt_acc)
+           else
+              dtnew(ilevel)=MIN(dtnew(ilevel), dt_nyq)
+           end if
         end if
      end if
   end if
@@ -191,6 +205,11 @@ subroutine newdt_fine(ilevel)
 #endif
      ekin_tot=ekin_tot+ekin_all
      dtnew(ilevel)=MIN(dtnew(ilevel),dt_all)
+     if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin &
+        .and. fdm_use_hjm) then
+        write(*,'(" HJM_CFL[pic]: dt_all=",1PE12.5," dt=",1PE12.5)') &
+             dt_all, dtnew(ilevel)
+     end if
 
   end if
 !jhshin1
@@ -200,6 +219,10 @@ subroutine newdt_fine(ilevel)
 !jhshin2
 
   if(hydro)call courant_fine(ilevel)
+  if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin &
+     .and. fdm_use_hjm) then
+     write(*,'(" HJM_CFL[hydro]: dt=",1PE12.5)') dtnew(ilevel)
+  end if
 
   ! SIDM timestep constraint: keep P_scatter < sidm_courant
   if(sidm .and. sidm_Pmax(ilevel) > 0.0d0) then
@@ -210,6 +233,13 @@ subroutine newdt_fine(ilevel)
   ! SGS dt diagnostic: print per-level dt for first 20 coarse steps
   if(myid==1 .and. nstep_coarse_old < 80) then
      write(*,'(" SGS_DT: level=",I2," dt=",1PE10.3)') ilevel, dtnew(ilevel)
+  end if
+
+  ! HJM CFL debug: print breakdown for first 5 steps at levelmin
+  if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin &
+     .and. fdm_use_hjm) then
+     write(*,'(" HJM_CFL_DBG: dtold=",1PE10.3," dt_final=",1PE10.3)') &
+          dtold(ilevel), dtnew(ilevel)
   end if
 
 #ifdef _OPENMP

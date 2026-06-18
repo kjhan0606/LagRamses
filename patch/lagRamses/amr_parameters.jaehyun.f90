@@ -362,6 +362,12 @@ module amr_parameters
   logical ::fdm_hybrid=.false.        ! Hybrid: FDM + N-body particles (stars/sinks)
   integer ::fdm_split_order=2         ! Operator-split order: 2=Strang(DKD), 4=Yoshida
   integer ::fdm_kinetic=0             ! Fine-level drift: 0=explicit subcycled, 1=Crank-Nicolson implicit
+  integer ::fdm_cost_mode=0           ! Load-balance cost: 0=memory, 1=wallclock
+  logical ::fdm_use_hjm=.false.        ! Enable hybrid HJM fluid (coarse) + wave (fine)
+  integer ::fdm_first_wave_level=0     ! First AMR level using wave solver (0=levelmin+2)
+  real(dp)::fdm_hjm_C1=0.03d0         ! Madelung refinement: quantum pressure threshold
+  real(dp)::fdm_hjm_C2=1.0d0          ! Madelung refinement: phase curvature threshold
+  real(dp)::fdm_refine_rho_min=8.0d0  ! de Broglie refinement density floor (units of mean)
 
   ! MOND (Modified Newtonian Dynamics) parameters
   logical ::use_mond=.false.             ! Enable QUMOND acceleration correction

@@ -546,7 +546,11 @@ subroutine multigrid_fine(ilevel,icount)
       end if
 
       ! Converged?
-      if(err<epsilon .or. iter>=MAXITER) exit
+      ! Also exit when absolute residual is below the rho_tot floor
+      ! (happens when fine-level density is injected from coarse and phi
+      !  is already the solution — i_res_norm2 ≈ 0 inflates relative err)
+      if(err<epsilon .or. res_norm2<1d-20*rho_tot**2 &
+           .or. iter>=MAXITER) exit
 
       ! Not converged, check error and possibly enable safe mode for the level
       if(err > last_err*SAFE_FACTOR .and. (.not. safe_mode(ilevel))) then

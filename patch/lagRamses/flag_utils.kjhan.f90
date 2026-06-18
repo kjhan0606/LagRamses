@@ -503,7 +503,16 @@ subroutine userflag_fine(ilevel)
      endif
   endif
 
-  if(prevent_refine) return
+  if(prevent_refine) then
+     call make_virtual_fine_int(flag1(1),ilevel)
+     if(simple_boundary)call make_boundary_flag(ilevel)
+     return
+  end if
+
+  ! FDM refinement: de Broglie (wave levels) + Madelung (fluid levels)
+  ! Placed after prevent_refine so gas holdback gates FDM refinement too
+  if(use_fdm) call fdm_refine_flag(ilevel)
+  if(use_fdm) call fdm_madelung_refine_flag(ilevel)
 
   ! Compute FPR-adjusted effective m_refine for this level
   call compute_fpr_m_refine_eff(ilevel)
@@ -540,9 +549,6 @@ subroutine userflag_fine(ilevel)
   if(rt)call rt_hydro_flag(ilevel)
 #endif
 
-  ! FDM de Broglie wavelength refinement
-  if(use_fdm) call fdm_refine_flag(ilevel)
-
   ! Update boundaries
   call make_virtual_fine_int(flag1(1),ilevel)
   if(simple_boundary)call make_boundary_flag(ilevel)
@@ -557,6 +563,7 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
   use pm_commons
   use hydro_commons
   use poisson_commons
+  use fdm_commons
   implicit none
   integer::ncell,ilevel
   integer,dimension(1:nvector)::ind_cell
@@ -595,15 +602,27 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
               end do
            end if
         else
-           do i=1,ncell
-              ok(i)=ok(i).or.(cpu_map2(ind_cell(i))==1)
-           end do
+           if(use_fdm)then
+              do i=1,ncell
+                 ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+              end do
+           else
+              do i=1,ncell
+                 ok(i)=ok(i).or.(cpu_map2(ind_cell(i))==1)
+              end do
+           end if
         end if
      else
         if(ivar_refine==0)then
-           do i=1,ncell
-              ok(i)=ok(i).or.(cpu_map2(ind_cell(i))==1)
-           end do
+           if(use_fdm)then
+              do i=1,ncell
+                 ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+              end do
+           else
+              do i=1,ncell
+                 ok(i)=ok(i).or.(cpu_map2(ind_cell(i))==1)
+              end do
+           end if
         else if(ivar_refine>0)then
            do i=1,ncell
               ok(i)=ok(i).or. &

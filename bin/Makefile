@@ -129,7 +129,7 @@ SIDM_OBJ = sidm_scatter.o
 # Atomic Dark Matter objects
 ADM_OBJ = dark_cooling_fine.o
 # Fuzzy Dark Matter objects
-FDM_OBJ = fdm_step.o output_fdm.o light_cone.fdm.o
+FDM_OBJ = fdm_step.o fdm_hjm.o output_fdm.o light_cone.fdm.o
 
 AMROBJ = read_params.jaehyun.o init_amr.o init_time.o init_refine.o adaptive_loop.jaehyun.o amr_step.jaehyun.o update_time.o \
          output_amr.kjhan.o flag_utils.kjhan.o physical_boundaries.kjhan.o virtual_boundaries.kjhan.o refine_utils.o nbors_utils.kjhan.o \

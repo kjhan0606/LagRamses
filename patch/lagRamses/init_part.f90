@@ -486,6 +486,23 @@ subroutine init_part
            !---------------------------------------------------------------------
            ! Allocate initial conditions array
            if(active(ilevel)%ngrid>0)then
+              !MEMPROBE: bounding-box pathology measurement (init_part / CDM)
+              block
+                integer(kind=8)::nbb1,nbb2,nbb3,ncell_bb
+                real(kind=8)::gb_alloc
+                nbb1=int(i1_max-i1_min+1,8)
+                nbb2=int(i2_max-i2_min+1,8)
+                nbb3=int(i3_max-i3_min+1,8)
+                ncell_bb=nbb1*nbb2*nbb3
+                ! 3 bbox arrays: init_array(r4)+init_array_x(r4)+init_array_id(i8)=16B/cell
+                gb_alloc=dble(ncell_bb)*16.d0/1.d9
+                write(*,'(A,I4,A,I3,A,3(I5,A),A,I12,A,F8.3,A,I12,A,F7.2)') &
+                  & '[MEMPROBE part] rank=',myid,' lvl=',ilevel, &
+                  & ' bbox=(',int(nbb1),',',int(nbb2),',',int(nbb3),')', &
+                  & ' bboxcells=',ncell_bb,' alloc_GB=',gb_alloc, &
+                  & ' ngrid=',int(active(ilevel)%ngrid,8), &
+                  & ' waste=',dble(ncell_bb)/max(dble(active(ilevel)%ngrid*8),1.d0)
+              end block
               allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
               allocate(init_array_x(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
               allocate(init_array_id(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))

@@ -481,8 +481,9 @@ subroutine cmp_new_cpu_map
   ! Time-based load balancing blend factor
   real(kind=8),dimension(1:MAXLEVEL) :: blend_factor
   real(kind=8),dimension(1:MAXLEVEL) :: my_cpc_arr, sum_cpc_arr
+  real(kind=8),dimension(1:MAXLEVEL) :: fdm_level_cost
   real(kind=8) :: avg_cpc, tf
-  logical :: do_time_blend
+  logical :: do_time_blend, need_cpc
 
   ! Local constants
   nxny=nx*ny
@@ -506,10 +507,13 @@ subroutine cmp_new_cpu_map
   ! applied. Skip the (cross-rank synchronizing) compute when use_cpubox_decomp
   ! is true to avoid N tiny allreduces with no effect.
   blend_factor = 1d0
+  fdm_level_cost = 1d0
   do_time_blend = (time_balance_alpha > 0d0) .and. (nstep_coarse > 0) &
        .and. (.not. use_cpubox_decomp)
+  need_cpc = (do_time_blend .or. (use_fdm .and. fdm_cost_mode==1)) &
+       .and. (nstep_coarse > 0) .and. (.not. use_cpubox_decomp)
 #ifndef WITHOUTMPI
-  if(do_time_blend) then
+  if(need_cpc) then
      ! Pack per-level cost-per-cell into one array; single batched allreduce.
      my_cpc_arr = 0d0
      do ilevel = levelmin, nlevelmax
@@ -519,17 +523,40 @@ subroutine cmp_new_cpu_map
      end do
      call MPI_ALLREDUCE(my_cpc_arr, sum_cpc_arr, MAXLEVEL, &
           & MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, info)
-     do ilevel = levelmin, nlevelmax
-        avg_cpc = sum_cpc_arr(ilevel) / dble(ncpu)
+     ! Per-rank time blend (time_balance_alpha)
+     if(do_time_blend) then
+        do ilevel = levelmin, nlevelmax
+           avg_cpc = sum_cpc_arr(ilevel) / dble(ncpu)
+           if(avg_cpc > 0d0) then
+              tf = my_cpc_arr(ilevel) / avg_cpc
+           else
+              tf = 1d0
+           end if
+           blend_factor(ilevel) = 1d0 + time_balance_alpha * (tf - 1d0)
+           blend_factor(ilevel) = max(0.5d0, min(2.0d0, blend_factor(ilevel)))
+        end do
+     end if
+     ! FDM wallclock cost ratio: per-level cost relative to levelmin
+     if(use_fdm .and. fdm_cost_mode==1) then
+        avg_cpc = sum_cpc_arr(levelmin) / dble(ncpu)
         if(avg_cpc > 0d0) then
-           tf = my_cpc_arr(ilevel) / avg_cpc   ! >1 means this rank is slower
-        else
-           tf = 1d0
+           do ilevel = levelmin+1, nlevelmax
+              tf = sum_cpc_arr(ilevel) / dble(ncpu)
+              if(tf > 0d0) then
+                 fdm_level_cost(ilevel) = max(1d0, tf / avg_cpc)
+              end if
+           end do
         end if
-        ! Blend: 1 + alpha*(tf - 1), clamped to [0.5, 2.0]
-        blend_factor(ilevel) = 1d0 + time_balance_alpha * (tf - 1d0)
-        blend_factor(ilevel) = max(0.5d0, min(2.0d0, blend_factor(ilevel)))
-     end do
+        if(myid==1) then
+           do ilevel = levelmin+1, nlevelmax
+              if(fdm_level_cost(ilevel) > 1d0) then
+                 write(*,'(A,I3,A,F8.1,A)') &
+                      ' FDM wallclock cost: level',ilevel,' =', &
+                      fdm_level_cost(ilevel),'x base'
+              end if
+           end do
+        end if
+     end if
   end if
 #endif
 
@@ -681,6 +708,9 @@ subroutine cmp_new_cpu_map
                  endif
                  if(allocated(sink_per_grid))then
                     flag1(my_idx)=flag1(my_idx)+sink_per_grid(ind_grid(i))*mem_weight_sink
+                 endif
+                 if(fdm_level_cost(ilevel) > 1d0) then
+                    flag1(my_idx)=nint(dble(flag1(my_idx))*fdm_level_cost(ilevel))
                  endif
                  wflag = flag1(my_idx)*niter_cost(ilevel)
                  if (wflag > 2147483647) then

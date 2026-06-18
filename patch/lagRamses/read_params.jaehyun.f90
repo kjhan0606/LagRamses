@@ -75,7 +75,8 @@ subroutine read_params
        & sidm_vrel_max
 namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & adm_cross_section,adm_mol,adm_fH2
-  namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic
+  namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
+       & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
        & n_iter_mond,mond_eps,g_ext_mond
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
@@ -359,12 +360,14 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   !   Topo:    5*4 (son,flag1,flag2,cpu_map,cpu_map2) + 8 (hilbert_key)
   !   PFix:    2*8 (enew,divu)  [pressure_fix, default for cosmo]
   !   Poisson: 7*8 (rho,rho_star,phi,phi_old,f*3)
+  !   FDM:     2*8 (psi_re,psi_im)  [use_fdm only]
   ! Per grid:
   !   AMR:  3*8+3*4+6*4 (xg,father/next/prev,nbor) = 48
   !   Part: 3*4 (headp,tailp,numbp) = 12
   !-------------------------------------------------
   if(memory_balance .and. mem_weight_grid <= 0) then
      mem_weight_grid = twotondim * (2*nvar*8 + 28 + 16 + 56) + 48 + 12
+     if(use_fdm) mem_weight_grid = mem_weight_grid + twotondim * 2 * 8
      if(myid==1) write(*,'(A,I6,A,I3,A)') &
           ' Memory balance: mem_weight_grid=',mem_weight_grid,' (nvar=',nvar,')'
   end if
@@ -572,6 +575,15 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
              & merge(' (Strang DKD)   ', merge(' (Yoshida 4th)  ', ' (UNKNOWN->DKD) ', fdm_split_order==4), fdm_split_order==2)
         write(*,'(A,I2,A)')    '   kinetic   =', fdm_kinetic, &
              & merge(' (explicit subcyc)', ' (Crank-Nicolson) ', fdm_kinetic==0)
+        write(*,'(A,I2,A)')    '   cost_mode =', fdm_cost_mode, &
+             & merge(' (memory)   ', ' (wallclock)', fdm_cost_mode==0)
+        if(fdm_use_hjm) then
+           write(*,'(A)')         '   HJM hybrid mode:'
+           write(*,'(A,I3)')      '     first_wave_level=', fdm_first_wave_level
+           write(*,'(A,ES10.3)')  '     C1 thresh  =', fdm_hjm_C1
+           write(*,'(A,ES10.3)')  '     C2 thresh  =', fdm_hjm_C2
+           write(*,'(A,ES10.3)')  '     rho_min(dB)=', fdm_refine_rho_min
+        end if
      end if
   end if
 
