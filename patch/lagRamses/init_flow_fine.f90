@@ -187,26 +187,32 @@ subroutine init_flow_fine(ilevel)
      ! Second step: read initial condition file
      !-----------------------------------------
      ! Allocate initial conditions array
-     if(ncache>0)then
-        !MEMPROBE: bounding-box pathology measurement (init_flow_fine / gas)
-        block
-          integer(kind=8)::nbb1,nbb2,nbb3,ncell_bb
-          real(kind=8)::gb_alloc
-          nbb1=int(i1_max-i1_min+1,8)
-          nbb2=int(i2_max-i2_min+1,8)
-          nbb3=int(i3_max-i3_min+1,8)
-          ncell_bb=nbb1*nbb2*nbb3
-          gb_alloc=dble(ncell_bb)*8.d0/1.d9
-          write(*,'(A,I4,A,I3,A,3(I5,A),A,I12,A,F8.3,A,I12,A,F7.2)') &
-            & '[MEMPROBE flow] rank=',myid,' lvl=',ilevel, &
-            & ' bbox=(',int(nbb1),',',int(nbb2),',',int(nbb3),')', &
-            & ' bboxcells=',ncell_bb,' alloc_GB=',gb_alloc, &
-            & ' ncache=',int(ncache,8), &
-            & ' waste=',dble(ncell_bb)/max(dble(ncache*8),1.d0)
-        end block
-     endif
-     if(ncache>0)allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
+     !
+     ! INCREMENTAL i3-SLAB READ (OOM fix, mirrors init_part). The Hilbert
+     ! sub-domain of a rank touching scattered void cells spans the whole union
+     ! bounding box; allocating init_array over the full (i1_min..i1_max,
+     ! i2_min..i2_max,i3_min..i3_max) costs 8 B/cell (~0.39 GB for a 364^3 union
+     ! per rank) even though almost all of it is masked background. We walk i3 in
+     ! slabs of NSLAB3 planes; per slab we (re-)read each ivar's planes into a
+     ! slab-sized init_array and scatter only the cells whose i3 falls in the
+     ! slab. Output (uold) is bit-identical to the original full-bbox code
+     ! because every cell is scattered exactly once, with the same value.
      allocate(init_plane(1:n1(ilevel),1:n2(ilevel)))
+     block
+       integer::nslab3,k0,k1
+       if(ncache>0)then
+          nslab3=max(1, 32*1024*1024 / max(1,(i1_max-i1_min+1)*(i2_max-i2_min+1)*8))
+          nslab3=min(nslab3, i3_max-i3_min+1)
+       else
+          ! Empty rank: run the ivar loop exactly once (one slab) so the
+          ! multiple-IC MPI token chain is preserved; all slab allocation and
+          ! scatter is guarded by ncache>0 and is skipped.
+          nslab3=1; i3_min=1; i3_max=1
+       endif
+
+     do k0=i3_min,i3_max,nslab3
+        k1=min(k0+nslab3-1,i3_max)
+        if(ncache>0)allocate(init_array(i1_min:i1_max,i2_min:i2_max,k0:k1))
      ! Loop over input variables
      do ivar=1,nvar
         if(cosmo)then
@@ -241,8 +247,8 @@ subroutine init_flow_fine(ilevel)
 
         INQUIRE(file=filename,exist=ok_file3)
         if(ok_file3)then
-           ! Reading the existing file   
-           if(myid==1)write(*,*)'Reading file '//TRIM(filename)
+           ! Reading the existing file
+           if(myid==1.and.k0==i3_min)write(*,*)'Reading file '//TRIM(filename)
            if(multiple)then
               ilun=ncpu+myid+10
 
@@ -262,7 +268,7 @@ subroutine init_flow_fine(ilevel)
               do i3=1,n3(ilevel)
                  read(ilun) ((init_plane(i1,i2),i1=1,n1(ilevel)),i2=1,n2(ilevel))
                  if(ncache>0)then
-                    if(i3.ge.i3_min.and.i3.le.i3_max)then
+                    if(i3.ge.k0.and.i3.le.k1)then
                        init_array(i1_min:i1_max,i2_min:i2_max,i3) = &
                             & init_plane(i1_min:i1_max,i2_min:i2_max)
                     end if
@@ -281,13 +287,13 @@ subroutine init_flow_fine(ilevel)
 #endif
            else
               if(ncache>0)then
-                 ! Stream access: jump directly to needed planes
+                 ! Stream access: jump directly to this slab's planes
                  ! Clamp to valid IC sub-grid range for zoom-in ICs
                  init_array=0d0
                  open(10,file=filename,access='stream',form='unformatted',status='old')
                  hdr_bytes = 52_8   ! 4 + 44 + 4 (GRAFIC2 header record)
                  plane_bytes = int(n1(ilevel),8) * int(n2(ilevel),8) * 4_8 + 8_8
-                 do i3=max(1,i3_min),min(n3(ilevel),i3_max)
+                 do i3=max(1,k0),min(n3(ilevel),k1)
                     byte_pos = hdr_bytes + int(i3-1,8)*plane_bytes + 5_8
                     read(10, pos=byte_pos) ((init_plane(i1,i2),i1=1,n1(ilevel)),i2=1,n2(ilevel))
                     init_array(max(1,i1_min):min(n1(ilevel),i1_max),max(1,i2_min):min(n2(ilevel),i2_max),i3) = &
@@ -297,16 +303,16 @@ subroutine init_flow_fine(ilevel)
               endif
            endif
         else
-           ! If file doesn't exist, initialize variable to default value 
+           ! If file doesn't exist, initialize variable to default value
            ! In most cases, this is zero (you can change that if necessary)
-           if(myid==1)write(*,*)'File '//TRIM(filename)//' not found'
-           if(myid==1)write(*,*)'Initialize corresponding variable to default value'
+           if(myid==1.and.k0==i3_min)write(*,*)'File '//TRIM(filename)//' not found'
+           if(myid==1.and.k0==i3_min)write(*,*)'Initialize corresponding variable to default value'
            if(ncache>0)then
               init_array=0d0
               ! Default value for metals
               if(cosmo.and.ivar==imetal.and.metal)init_array=z_ave*0.02 ! from solar units - not sure why this is here
               ! Initialize imetal and hydrogen values
-         
+
               if(cosmo.and.ivar==imetal)init_array=1d-50 ! Setting this as a floor value for metallicity
               if(cosmo.and.ivar==iHydrogen)init_array=0.76 ! Set the initial H abundance
               if(cosmo.and.ivar==iHelium)init_array=0.24 ! Set the initial He abundance
@@ -330,7 +336,7 @@ subroutine init_flow_fine(ilevel)
            if(ivar==ndim+2)init_array=(1.0+init_array)*T2_start/scale_T2
         endif
 
-        ! Loop over cells
+        ! Loop over cells; scatter only the cells whose i3 lies in this slab.
         do ind=1,twotondim
            iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ncache
@@ -343,13 +349,12 @@ subroutine init_flow_fine(ilevel)
               xx3=xg(igrid,3)+xc(ind,3)-skip_loc(3)
               xx3=(xx3*(dxini(ilevel)/dx)-xoff3(ilevel))/dxini(ilevel)
               i1=int(xx1)+1
-              i1=int(xx1)+1
-              i2=int(xx2)+1
               i2=int(xx2)+1
               i3=int(xx3)+1
-              i3=int(xx3)+1
-              ! Scatter to corresponding primitive variable
-              uold(icell,ivar)=init_array(i1,i2,i3)
+              if(i3.ge.k0.and.i3.le.k1)then
+                 ! Scatter to corresponding primitive variable
+                 uold(icell,ivar)=init_array(i1,i2,i3)
+              end if
            end do
         end do
         ! End loop over cells
@@ -357,9 +362,13 @@ subroutine init_flow_fine(ilevel)
      end do
      ! End loop over input variables
 
-     ! Deallocate initial conditions array
+     ! Deallocate this slab's initial conditions array
      if(ncache>0)deallocate(init_array)
-     deallocate(init_plane) 
+     end do
+     ! End loop over i3 slabs
+     end block
+
+     deallocate(init_plane)
 
      !----------------------------------------------------------------
      ! For cosmology runs: compute pressure, prevent negative density

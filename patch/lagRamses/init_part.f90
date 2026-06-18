@@ -483,53 +483,59 @@ subroutine init_part
            
            !---------------------------------------------------------------------
            ! Second step: read initial condition file and set particle velocities
+           !
+           ! INCREMENTAL i3-SLAB READ (OOM fix for multi-zoom union grafic ICs).
+           ! The Hilbert sub-domain of a rank that owns scattered void cells spans
+           ! the WHOLE union bounding box (i1_min..i1_max, i2_min..i2_max,
+           ! i3_min..i3_max). Allocating the full bbox for init_array(r4) +
+           ! init_array_x(r4) + init_array_id(i8) costs 16 B/cell, i.e. ~1.16 GB
+           ! for a 364^3 union per rank -- yet >99% of those cells are masked
+           ! background the rank never uses. Across 32 ranks this OOMs (SIGKILL-9).
+           !
+           ! Fix: walk i3 in slabs of NSLAB3 planes. Per slab allocate only
+           ! (i1_min:i1_max, i2_min:i2_max, k0:k1), read those planes, then assign
+           ! velocities/positions/ids to exactly the particles whose i3 cell falls
+           ! in [k0,k1] (the step-1 particle order is re-walked deterministically,
+           ! so ipart<->particle stays identical). Peak memory scales with one
+           ! slab, not the whole union. Output is bit-identical to the old code.
+           !
+           ! Only the single-file stream path (multiple=.false.) -- the one with
+           ! the union bbox pathology -- is slabbed. The per-cpu (multiple=.true.)
+           ! path reads small per-rank files and keeps the original full-bbox read.
            !---------------------------------------------------------------------
-           ! Allocate initial conditions array
-           if(active(ilevel)%ngrid>0)then
-              !MEMPROBE: bounding-box pathology measurement (init_part / CDM)
-              block
-                integer(kind=8)::nbb1,nbb2,nbb3,ncell_bb
-                real(kind=8)::gb_alloc
-                nbb1=int(i1_max-i1_min+1,8)
-                nbb2=int(i2_max-i2_min+1,8)
-                nbb3=int(i3_max-i3_min+1,8)
-                ncell_bb=nbb1*nbb2*nbb3
-                ! 3 bbox arrays: init_array(r4)+init_array_x(r4)+init_array_id(i8)=16B/cell
-                gb_alloc=dble(ncell_bb)*16.d0/1.d9
-                write(*,'(A,I4,A,I3,A,3(I5,A),A,I12,A,F8.3,A,I12,A,F7.2)') &
-                  & '[MEMPROBE part] rank=',myid,' lvl=',ilevel, &
-                  & ' bbox=(',int(nbb1),',',int(nbb2),',',int(nbb3),')', &
-                  & ' bboxcells=',ncell_bb,' alloc_GB=',gb_alloc, &
-                  & ' ngrid=',int(active(ilevel)%ngrid,8), &
-                  & ' waste=',dble(ncell_bb)/max(dble(active(ilevel)%ngrid*8),1.d0)
-              end block
-              allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
-              allocate(init_array_x(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
-              allocate(init_array_id(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
-              init_array=0d0
-              init_array_x=0d0
-              init_array_id=0_i8b
-           end if
-           allocate(init_plane(1:n1(ilevel),1:n2(ilevel)))
-           allocate(init_plane_x(1:n1(ilevel),1:n2(ilevel)))
-           allocate(init_plane_id(1:n1(ilevel),1:n2(ilevel)))
-
-           !----------------------------------------------------------------
-           ! Read genetIC Lagrangian particle IDs (ic_particle_ids), so idp
-           ! carries the deterministic IC grid identity and z=0 haloes can be
-           ! back-tracked to the Lagrangian grid. Handles both single-file and
-           ! multiple (one-file-per-cpu) grafic layouts.
-           !----------------------------------------------------------------
+           ! Determine whether IDs / positions are available (set read_ids/read_pos)
            read_ids=.false.
+           read_pos=.false.
            if(multiple)then
-              ! One file per cpu: dir_particle_ids/ic_particle_ids.<nchar>, Fortran
-              ! unformatted full grid (header record then i8b planes), same layout
-              ! as the velc* per-cpu files.
               call title(myid,nchar)
               filename_id=TRIM(initfile(ilevel))//'/dir_particle_ids/ic_particle_ids.'//TRIM(nchar)
               INQUIRE(file=filename_id,exist=ok)
-              if(ok)then
-                 read_ids=.true.
+              if(ok)read_ids=.true.
+           else
+              filename_id=TRIM(initfile(ilevel))//'/ic_particle_ids'
+              INQUIRE(file=filename_id,exist=ok)
+              if(ok)read_ids=.true.
+              INQUIRE(file=TRIM(initfile(ilevel))//'/ic_poscx',exist=ok)
+              if(ok)read_pos=.true.
+           endif
+
+           if(multiple .or. active(ilevel)%ngrid<=0)then
+              !================================================================
+              ! ORIGINAL FULL-BBOX READ (per-cpu files or empty rank): unchanged.
+              !================================================================
+              if(active(ilevel)%ngrid>0)then
+                 allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
+                 allocate(init_array_x(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
+                 allocate(init_array_id(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
+                 init_array=0d0
+                 init_array_x=0d0
+                 init_array_id=0_i8b
+              end if
+              allocate(init_plane(1:n1(ilevel),1:n2(ilevel)))
+              allocate(init_plane_x(1:n1(ilevel),1:n2(ilevel)))
+              allocate(init_plane_id(1:n1(ilevel),1:n2(ilevel)))
+
+              if(read_ids)then
                  if(myid==1)write(*,*)'Reading file '//TRIM(filename_id)
                  ilun=myid+10
 #ifndef WITHOUTMPI
@@ -563,60 +569,14 @@ subroutine init_part
                  endif
 #endif
               endif
-           else
-              filename_id=TRIM(initfile(ilevel))//'/ic_particle_ids'
-              INQUIRE(file=filename_id,exist=ok)
-              if(ok)then
-                 read_ids=.true.
-                 if(myid==1)write(*,*)'Reading file '//TRIM(filename_id)
-                 if(active(ilevel)%ngrid>0)then
-                    open(10,file=filename_id,access='stream',form='unformatted',status='old')
-                    hdr_bytes = 52_8   ! 4 + 44 + 4 (GRAFIC2 header record)
-                    plane_bytes_id = int(n1(ilevel),8) * int(n2(ilevel),8) * 8_8 + 8_8
-                    do i3=max(1,i3_min),min(n3(ilevel),i3_max)
-                       byte_pos = hdr_bytes + int(i3-1,8)*plane_bytes_id + 5_8
-                       read(10, pos=byte_pos)((init_plane_id(i1,i2),i1=1,n1(ilevel)),i2=1,n2(ilevel))
-                       init_array_id(max(1,i1_min):min(n1(ilevel),i1_max),max(1,i2_min):min(n2(ilevel),i2_max),i3) = &
-                            & init_plane_id(max(1,i1_min):min(n1(ilevel),i1_max),max(1,i2_min):min(n2(ilevel),i2_max))
-                    end do
-                    close(10)
-                 endif
-              endif
-           endif
-           
-           ! Loop over input variables
-           do idim=1,ndim
-              
-              ! Read dark matter initial displacement field
-              if(multiple)then
+
+              do idim=1,ndim
                  call title(myid,nchar)
                  if(idim==1)filename=TRIM(initfile(ilevel))//'/dir_velcx/ic_velcx.'//TRIM(nchar)
                  if(idim==2)filename=TRIM(initfile(ilevel))//'/dir_velcy/ic_velcy.'//TRIM(nchar)
                  if(idim==3)filename=TRIM(initfile(ilevel))//'/dir_velcz/ic_velcz.'//TRIM(nchar)
-              else
-                 if(idim==1)filename=TRIM(initfile(ilevel))//'/ic_velcx'
-                 if(idim==2)filename=TRIM(initfile(ilevel))//'/ic_velcy'
-                 if(idim==3)filename=TRIM(initfile(ilevel))//'/ic_velcz'
-
-                 if(idim==1)filename_x=TRIM(initfile(ilevel))//'/ic_poscx'
-                 if(idim==2)filename_x=TRIM(initfile(ilevel))//'/ic_poscy'
-                 if(idim==3)filename_x=TRIM(initfile(ilevel))//'/ic_poscz'
-
-                 INQUIRE(file=filename_x,exist=ok)
-                 if(.not.ok)then
-                    read_pos = .false.
-                 else
-                    read_pos = .true.
-                    if(myid==1)write(*,*)'Reading file '//TRIM(filename_x)
-                 end if
-
-              endif
-
-              if(myid==1)write(*,*)'Reading file '//TRIM(filename)
-                               
-              if(multiple)then
+                 if(myid==1)write(*,*)'Reading file '//TRIM(filename)
                  ilun=myid+10
-                 ! Wait for the token                                                                                                                                                        
 #ifndef WITHOUTMPI
                  if(IOGROUPSIZE>0) then
                     if (mod(myid-1,IOGROUPSIZE)/=0) then
@@ -638,7 +598,6 @@ subroutine init_part
                     endif
                  end do
                  close(ilun)
-                 ! Send the token                                                                                                                                                            
 #ifndef WITHOUTMPI
                  if(IOGROUPSIZE>0) then
                     if(mod(myid,IOGROUPSIZE)/=0 .and.(myid.lt.ncpu))then
@@ -649,101 +608,214 @@ subroutine init_part
                  endif
 #endif
 
-              else
-                 ! Parallel IC reading with stream access: jump directly to needed planes
                  if(active(ilevel)%ngrid>0)then
-                    init_array=0d0
-                    open(10,file=filename,access='stream',form='unformatted',status='old')
-                    hdr_bytes = 52_8   ! 4 + 44 + 4 (GRAFIC2 header record)
-                    plane_bytes = int(n1(ilevel),8) * int(n2(ilevel),8) * 4_8 + 8_8
-                    do i3=max(1,i3_min),min(n3(ilevel),i3_max)
-                       byte_pos = hdr_bytes + int(i3-1,8)*plane_bytes + 5_8
-                       read(10, pos=byte_pos)((init_plane(i1,i2),i1=1,n1(ilevel)),i2=1,n2(ilevel))
-                       init_array(max(1,i1_min):min(n1(ilevel),i1_max),max(1,i2_min):min(n2(ilevel),i2_max),i3) = &
-                            & init_plane(max(1,i1_min):min(n1(ilevel),i1_max),max(1,i2_min):min(n2(ilevel),i2_max))
-                    end do
-                    close(10)
-                 endif
-
-                 if(read_pos) then
-                    if(active(ilevel)%ngrid>0)then
-                       init_array_x=0d0
-                       open(10,file=filename_x,access='stream',form='unformatted',status='old')
-                       hdr_bytes = 52_8
-                       plane_bytes = int(n1(ilevel),8) * int(n2(ilevel),8) * 4_8 + 8_8
-                       do i3=max(1,i3_min),min(n3(ilevel),i3_max)
-                          byte_pos = hdr_bytes + int(i3-1,8)*plane_bytes + 5_8
-                          read(10, pos=byte_pos)((init_plane_x(i1,i2),i1=1,n1(ilevel)),i2=1,n2(ilevel))
-                          init_array_x(max(1,i1_min):min(n1(ilevel),i1_max),max(1,i2_min):min(n2(ilevel),i2_max),i3) = &
-                               & init_plane_x(max(1,i1_min):min(n1(ilevel),i1_max),max(1,i2_min):min(n2(ilevel),i2_max))
-                       end do
-                       close(10)
-                    endif
-                 end if
-
-              endif
-              
-              if(active(ilevel)%ngrid>0)then
-                 ! Rescale initial displacement field to code units
-                 init_array=dfact(ilevel)*dx/dxini(ilevel)*init_array/vfact(ilevel)
-                 if(read_pos)then
-                    init_array_x = init_array_x/boxlen_ini
-                 endif
-                 ! Loop over grids by vector sweeps
-                 ipart=ipart_old
-                 ncache=active(ilevel)%ngrid
-                 do igrid=1,ncache,nvector
-                    ngrid=MIN(nvector,ncache-igrid+1)
-                    do i=1,ngrid
-                       ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
-                    end do
-                    
-                    ! Loop over cells
-                    do ind=1,twotondim
-                       iskip=ncoarse+(ind-1)*ngridmax
+                    init_array=dfact(ilevel)*dx/dxini(ilevel)*init_array/vfact(ilevel)
+                    ipart=ipart_old
+                    ncache=active(ilevel)%ngrid
+                    do igrid=1,ncache,nvector
+                       ngrid=MIN(nvector,ncache-igrid+1)
                        do i=1,ngrid
-                          ind_cell(i)=iskip+ind_grid(i)
+                          ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
                        end do
-                       do i=1,ngrid
-                          xx1=xg(ind_grid(i),1)+xc(ind,1)
-                          xx1=(xx1*(dxini(ilevel)/dx)-xoff1(ilevel))/dxini(ilevel)
-                          xx2=xg(ind_grid(i),2)+xc(ind,2)
-                          xx2=(xx2*(dxini(ilevel)/dx)-xoff2(ilevel))/dxini(ilevel)
-                          xx3=xg(ind_grid(i),3)+xc(ind,3)
-                          xx3=(xx3*(dxini(ilevel)/dx)-xoff3(ilevel))/dxini(ilevel)
-                          i1=int(xx1)+1
-                          i1=int(xx1)+1
-                          i2=int(xx2)+1
-                          i2=int(xx2)+1
-                          i3=int(xx3)+1
-                          i3=int(xx3)+1
-                          keep_part=son(ind_cell(i))==0
-                          if(keep_part)then
-                             ipart=ipart+1
-                             vp(ipart,idim)=init_array(i1,i2,i3)
-                             if(idim==1 .and. read_ids)idp(ipart)=init_array_id(i1,i2,i3)
-                             if(.not. read_pos)then
+                       do ind=1,twotondim
+                          iskip=ncoarse+(ind-1)*ngridmax
+                          do i=1,ngrid
+                             ind_cell(i)=iskip+ind_grid(i)
+                          end do
+                          do i=1,ngrid
+                             xx1=xg(ind_grid(i),1)+xc(ind,1)
+                             xx1=(xx1*(dxini(ilevel)/dx)-xoff1(ilevel))/dxini(ilevel)
+                             xx2=xg(ind_grid(i),2)+xc(ind,2)
+                             xx2=(xx2*(dxini(ilevel)/dx)-xoff2(ilevel))/dxini(ilevel)
+                             xx3=xg(ind_grid(i),3)+xc(ind,3)
+                             xx3=(xx3*(dxini(ilevel)/dx)-xoff3(ilevel))/dxini(ilevel)
+                             i1=int(xx1)+1
+                             i2=int(xx2)+1
+                             i3=int(xx3)+1
+                             keep_part=son(ind_cell(i))==0
+                             if(keep_part)then
+                                ipart=ipart+1
+                                vp(ipart,idim)=init_array(i1,i2,i3)
+                                if(idim==1 .and. read_ids)idp(ipart)=init_array_id(i1,i2,i3)
                                 dispmax=max(dispmax,abs(init_array(i1,i2,i3)/dx))
-                             else
-                                xp(ipart,idim)=xg(ind_grid(i),idim)+xc(ind,idim)+init_array_x(i1,i2,i3)
-                                dispmax=max(dispmax,abs(init_array_x(i1,i2,i3)/dx))
-                             endif
-                          end if
+                             end if
+                          end do
                        end do
                     end do
-                    ! End loop over cells
-                 end do
-                 ! End loop over grids
-              endif
+                 endif
+              end do
 
-           end do
-           ! End loop over input variables
-           
-           ! Deallocate initial conditions array
-           if(active(ilevel)%ngrid>0)then
-              deallocate(init_array,init_array_x,init_array_id)
-           end if
-           deallocate(init_plane,init_plane_x,init_plane_id)
+              if(active(ilevel)%ngrid>0)deallocate(init_array,init_array_x,init_array_id)
+              deallocate(init_plane,init_plane_x,init_plane_id)
+
+           else
+              !================================================================
+              ! INCREMENTAL i3-SLAB READ (single-file stream, union pathology).
+              !================================================================
+              block
+                integer::nslab3,k0,k1,kk,nk
+                integer::ii1lo,ii1hi,ii2lo,ii2hi
+                integer(kind=8)::byte_pos_s,hdr_s,pb4,pb8
+                real(kind=4),allocatable,dimension(:,:,:)::vx_s,vy_s,vz_s
+                real(kind=4),allocatable,dimension(:,:,:)::px_s,py_s,pz_s
+                integer(i8b),allocatable,dimension(:,:,:)::id_s
+
+                if(read_ids.and.myid==1)write(*,*)'Reading file '//TRIM(filename_id)
+                if(read_pos.and.myid==1)then
+                   write(*,*)'Reading file '//TRIM(initfile(ilevel))//'/ic_poscx'
+                   write(*,*)'Reading file '//TRIM(initfile(ilevel))//'/ic_poscy'
+                   write(*,*)'Reading file '//TRIM(initfile(ilevel))//'/ic_poscz'
+                endif
+                if(myid==1)then
+                   write(*,*)'Reading file '//TRIM(initfile(ilevel))//'/ic_velcx'
+                   write(*,*)'Reading file '//TRIM(initfile(ilevel))//'/ic_velcy'
+                   write(*,*)'Reading file '//TRIM(initfile(ilevel))//'/ic_velcz'
+                endif
+
+                ! Clamp the i1/i2 window once (i3 clamped per slab).
+                ii1lo=max(1,i1_min); ii1hi=min(n1(ilevel),i1_max)
+                ii2lo=max(1,i2_min); ii2hi=min(n2(ilevel),i2_max)
+
+                hdr_s=52_8
+                pb4=int(n1(ilevel),8)*int(n2(ilevel),8)*4_8+8_8
+                pb8=int(n1(ilevel),8)*int(n2(ilevel),8)*8_8+8_8
+
+                ! Slab thickness: target ~64 MB working set for the velocity slab
+                ! (3 r4 + opt 3 r4 + opt i8 over the i1*i2 window). Always >=1.
+                nslab3=max(1, 64*1024*1024 / max(1, (i1_max-i1_min+1)*(i2_max-i2_min+1)*16))
+                nslab3=min(nslab3, i3_max-i3_min+1)
+
+                ! init_plane buffers (full n1*n2 plane, as the GRAFIC read needs)
+                allocate(init_plane(1:n1(ilevel),1:n2(ilevel)))
+
+                do k0=i3_min,i3_max,nslab3
+                   k1=min(k0+nslab3-1,i3_max)
+                   nk=k1-k0+1
+                   allocate(vx_s(i1_min:i1_max,i2_min:i2_max,k0:k1))
+                   allocate(vy_s(i1_min:i1_max,i2_min:i2_max,k0:k1))
+                   allocate(vz_s(i1_min:i1_max,i2_min:i2_max,k0:k1))
+                   vx_s=0.0; vy_s=0.0; vz_s=0.0
+                   if(read_pos)then
+                      allocate(px_s(i1_min:i1_max,i2_min:i2_max,k0:k1))
+                      allocate(py_s(i1_min:i1_max,i2_min:i2_max,k0:k1))
+                      allocate(pz_s(i1_min:i1_max,i2_min:i2_max,k0:k1))
+                      px_s=0.0; py_s=0.0; pz_s=0.0
+                   endif
+                   if(read_ids)then
+                      allocate(id_s(i1_min:i1_max,i2_min:i2_max,k0:k1))
+                      id_s=0_i8b
+                   endif
+
+                   ! --- read this slab's planes for all needed fields ---
+                   call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_velcx', &
+                        & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                        & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,vx_s)
+                   call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_velcy', &
+                        & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                        & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,vy_s)
+                   call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_velcz', &
+                        & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                        & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,vz_s)
+                   if(read_pos)then
+                      call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_poscx', &
+                           & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                           & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,px_s)
+                      call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_poscy', &
+                           & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                           & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,py_s)
+                      call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_poscz', &
+                           & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                           & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,pz_s)
+                   endif
+                   if(read_ids)then
+                      call read_grafic_slab_i8(TRIM(filename_id), &
+                           & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                           & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb8,id_s)
+                   endif
+
+                   ! Rescale velocity slab to code units; position slab to box units.
+                   ! Use the EXACT same dp expression order as the original full-bbox
+                   ! code (init_array=dfact*dx/dxini*init_array/vfact) so the stored
+                   ! real4 values are bit-identical.
+                   do i3=k0,k1
+                      do i2=ii2lo,ii2hi
+                         do i1=ii1lo,ii1hi
+                            vx_s(i1,i2,i3)=real(dfact(ilevel)*dx/dxini(ilevel)*dble(vx_s(i1,i2,i3))/vfact(ilevel),4)
+                            vy_s(i1,i2,i3)=real(dfact(ilevel)*dx/dxini(ilevel)*dble(vy_s(i1,i2,i3))/vfact(ilevel),4)
+                            vz_s(i1,i2,i3)=real(dfact(ilevel)*dx/dxini(ilevel)*dble(vz_s(i1,i2,i3))/vfact(ilevel),4)
+                         end do
+                      end do
+                   end do
+                   if(read_pos)then
+                      do i3=k0,k1
+                         do i2=ii2lo,ii2hi
+                            do i1=ii1lo,ii1hi
+                               px_s(i1,i2,i3)=real(dble(px_s(i1,i2,i3))/boxlen_ini,4)
+                               py_s(i1,i2,i3)=real(dble(py_s(i1,i2,i3))/boxlen_ini,4)
+                               pz_s(i1,i2,i3)=real(dble(pz_s(i1,i2,i3))/boxlen_ini,4)
+                            end do
+                         end do
+                      end do
+                   endif
+
+                   ! --- assign to particles whose i3 cell lies in [k0,k1] ---
+                   ! Re-walk the deterministic step-1 particle order; advance ipart
+                   ! for every keep_part, but write only the in-slab particles.
+                   ipart=ipart_old
+                   ncache=active(ilevel)%ngrid
+                   do igrid=1,ncache,nvector
+                      ngrid=MIN(nvector,ncache-igrid+1)
+                      do i=1,ngrid
+                         ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
+                      end do
+                      do ind=1,twotondim
+                         iskip=ncoarse+(ind-1)*ngridmax
+                         do i=1,ngrid
+                            ind_cell(i)=iskip+ind_grid(i)
+                         end do
+                         do i=1,ngrid
+                            xx1=xg(ind_grid(i),1)+xc(ind,1)
+                            xx1=(xx1*(dxini(ilevel)/dx)-xoff1(ilevel))/dxini(ilevel)
+                            xx2=xg(ind_grid(i),2)+xc(ind,2)
+                            xx2=(xx2*(dxini(ilevel)/dx)-xoff2(ilevel))/dxini(ilevel)
+                            xx3=xg(ind_grid(i),3)+xc(ind,3)
+                            xx3=(xx3*(dxini(ilevel)/dx)-xoff3(ilevel))/dxini(ilevel)
+                            i1=int(xx1)+1
+                            i2=int(xx2)+1
+                            i3=int(xx3)+1
+                            keep_part=son(ind_cell(i))==0
+                            if(keep_part)then
+                               ipart=ipart+1
+                               if(i3.ge.k0 .and. i3.le.k1)then
+                                  vp(ipart,1)=vx_s(i1,i2,i3)
+                                  vp(ipart,2)=vy_s(i1,i2,i3)
+                                  vp(ipart,3)=vz_s(i1,i2,i3)
+                                  if(read_ids)idp(ipart)=id_s(i1,i2,i3)
+                                  if(.not.read_pos)then
+                                     dispmax=max(dispmax,abs(vx_s(i1,i2,i3)/dx))
+                                     dispmax=max(dispmax,abs(vy_s(i1,i2,i3)/dx))
+                                     dispmax=max(dispmax,abs(vz_s(i1,i2,i3)/dx))
+                                  else
+                                     xp(ipart,1)=xg(ind_grid(i),1)+xc(ind,1)+px_s(i1,i2,i3)
+                                     xp(ipart,2)=xg(ind_grid(i),2)+xc(ind,2)+py_s(i1,i2,i3)
+                                     xp(ipart,3)=xg(ind_grid(i),3)+xc(ind,3)+pz_s(i1,i2,i3)
+                                     dispmax=max(dispmax,abs(px_s(i1,i2,i3)/dx))
+                                     dispmax=max(dispmax,abs(py_s(i1,i2,i3)/dx))
+                                     dispmax=max(dispmax,abs(pz_s(i1,i2,i3)/dx))
+                                  endif
+                               endif
+                            end if
+                         end do
+                      end do
+                   end do
+
+                   deallocate(vx_s,vy_s,vz_s)
+                   if(read_pos)deallocate(px_s,py_s,pz_s)
+                   if(read_ids)deallocate(id_s)
+                end do
+                deallocate(init_plane)
+              end block
+           endif
            
            if(debug)write(*,*)'npart=',ipart,'/',npartmax,' forPE=',myid,dispmax
       
@@ -1123,6 +1195,65 @@ subroutine init_part
   if(sink .and. .not. allocated(idsink)) call init_sink
 
 end subroutine init_part
+!################################################################
+!################################################################
+! Read a contiguous i3-slab [k0:k1] of a single-file GRAFIC2 r4 field
+! (stream access) into slab(:,:,k0:k1), copying only the [ii1lo:ii1hi,
+! ii2lo:ii2hi] window of each plane. Used by the incremental slab reader
+! in init_part to bound peak memory for multi-zoom union ICs.
+!################################################################
+subroutine read_grafic_slab_r4(fname,nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1, &
+     & ii1lo,ii1hi,ii2lo,ii2hi,hdr_bytes,plane_bytes,plane_buf,slab)
+  implicit none
+  character(LEN=*),intent(in)::fname
+  integer,intent(in)::nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1
+  integer,intent(in)::ii1lo,ii1hi,ii2lo,ii2hi
+  integer(kind=8),intent(in)::hdr_bytes,plane_bytes
+  real(kind=4),intent(inout)::plane_buf(1:nn1,1:nn2)
+  ! explicit-shape slab (no interface needed); matches caller's bounds exactly
+  real(kind=4),intent(inout)::slab(i1_min:i1_max,i2_min:i2_max,k0:k1)
+  integer::i3,i1,i2
+  integer(kind=8)::byte_pos
+  open(10,file=fname,access='stream',form='unformatted',status='old')
+  do i3=k0,k1
+     byte_pos=hdr_bytes+int(i3-1,8)*plane_bytes+5_8
+     read(10,pos=byte_pos)((plane_buf(i1,i2),i1=1,nn1),i2=1,nn2)
+     do i2=ii2lo,ii2hi
+        do i1=ii1lo,ii1hi
+           slab(i1,i2,i3)=plane_buf(i1,i2)
+        end do
+     end do
+  end do
+  close(10)
+end subroutine read_grafic_slab_r4
+!################################################################
+subroutine read_grafic_slab_i8(fname,nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1, &
+     & ii1lo,ii1hi,ii2lo,ii2hi,hdr_bytes,plane_bytes,slab)
+  use amr_parameters, ONLY: i8b
+  implicit none
+  character(LEN=*),intent(in)::fname
+  integer,intent(in)::nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1
+  integer,intent(in)::ii1lo,ii1hi,ii2lo,ii2hi
+  integer(kind=8),intent(in)::hdr_bytes,plane_bytes
+  integer(i8b),intent(inout)::slab(i1_min:i1_max,i2_min:i2_max,k0:k1)
+  integer(i8b),allocatable::plane_buf(:,:)
+  integer::i3,i1,i2
+  integer(kind=8)::byte_pos
+  allocate(plane_buf(1:nn1,1:nn2))
+  open(10,file=fname,access='stream',form='unformatted',status='old')
+  do i3=k0,k1
+     byte_pos=hdr_bytes+int(i3-1,8)*plane_bytes+5_8
+     read(10,pos=byte_pos)((plane_buf(i1,i2),i1=1,nn1),i2=1,nn2)
+     do i2=ii2lo,ii2hi
+        do i1=ii1lo,ii1hi
+           slab(i1,i2,i3)=plane_buf(i1,i2)
+        end do
+     end do
+  end do
+  close(10)
+  deallocate(plane_buf)
+end subroutine read_grafic_slab_i8
+!################################################################
 
 subroutine restore_part_binary_varcpu
   use amr_commons
