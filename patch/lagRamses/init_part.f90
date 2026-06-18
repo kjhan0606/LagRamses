@@ -519,9 +519,20 @@ subroutine init_part
               if(ok)read_pos=.true.
            endif
 
-           if(multiple .or. active(ilevel)%ngrid<=0)then
+           if(multiple)then
               !================================================================
-              ! ORIGINAL FULL-BBOX READ (per-cpu files or empty rank): unchanged.
+              ! ORIGINAL FULL-BBOX READ (per-cpu files): unchanged. EVERY rank
+              ! (incl. empty ones) enters so the IOGROUPSIZE MPI token chain stays
+              ! intact; only the init_array copy is guarded by ngrid>0.
+              !
+              ! NOTE: this branch hard-codes the per-cpu filenames (dir_velcx/
+              ! ic_velcx.<nchar>, ...), so it must NEVER be taken for a single-file
+              ! (multiple=.false.) IC. The earlier condition `.or. ngrid<=0` wrongly
+              ! routed EMPTY ranks of a single-file run here, making them open a
+              ! non-existent per-cpu file (severe 29). Single-file empty ranks now
+              ! fall through to the slab branch, where i3_min=n3+1>i3_max=0 makes the
+              ! slab loop a no-op -- exactly the original single-file behaviour (all
+              ! reads there were guarded by ngrid>0, with no MPI token to honour).
               !================================================================
               if(active(ilevel)%ngrid>0)then
                  allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
@@ -708,28 +719,28 @@ subroutine init_part
 
                    ! --- read this slab's planes for all needed fields ---
                    call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_velcx', &
-                        & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                        & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
                         & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,vx_s)
                    call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_velcy', &
-                        & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                        & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
                         & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,vy_s)
                    call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_velcz', &
-                        & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                        & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
                         & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,vz_s)
                    if(read_pos)then
                       call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_poscx', &
-                           & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                           & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
                            & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,px_s)
                       call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_poscy', &
-                           & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                           & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
                            & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,py_s)
                       call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_poscz', &
-                           & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                           & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
                            & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,pz_s)
                    endif
                    if(read_ids)then
                       call read_grafic_slab_i8(TRIM(filename_id), &
-                           & n1(ilevel),n2(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
+                           & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
                            & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb8,id_s)
                    endif
 
@@ -1202,11 +1213,11 @@ end subroutine init_part
 ! ii2lo:ii2hi] window of each plane. Used by the incremental slab reader
 ! in init_part to bound peak memory for multi-zoom union ICs.
 !################################################################
-subroutine read_grafic_slab_r4(fname,nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1, &
+subroutine read_grafic_slab_r4(fname,nn1,nn2,nn3,i1_min,i1_max,i2_min,i2_max,k0,k1, &
      & ii1lo,ii1hi,ii2lo,ii2hi,hdr_bytes,plane_bytes,plane_buf,slab)
   implicit none
   character(LEN=*),intent(in)::fname
-  integer,intent(in)::nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1
+  integer,intent(in)::nn1,nn2,nn3,i1_min,i1_max,i2_min,i2_max,k0,k1
   integer,intent(in)::ii1lo,ii1hi,ii2lo,ii2hi
   integer(kind=8),intent(in)::hdr_bytes,plane_bytes
   real(kind=4),intent(inout)::plane_buf(1:nn1,1:nn2)
@@ -1214,8 +1225,13 @@ subroutine read_grafic_slab_r4(fname,nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1, 
   real(kind=4),intent(inout)::slab(i1_min:i1_max,i2_min:i2_max,k0:k1)
   integer::i3,i1,i2
   integer(kind=8)::byte_pos
+  ! Only planes that EXIST in the IC sub-grid (i3 in [1,nn3]) are read; out-of-IC
+  ! i3 slices are left at the slab's pre-zeroed value, exactly as the original
+  ! full-bbox reader does (do i3=max(1,i3_min),min(n3,i3_max)). This avoids the
+  ! out-of-file byte_pos (severe 24 EOF) that a multi-zoom union offset level hits
+  ! when the rank bounding box runs below 1 or above n3.
   open(10,file=fname,access='stream',form='unformatted',status='old')
-  do i3=k0,k1
+  do i3=max(1,k0),min(nn3,k1)
      byte_pos=hdr_bytes+int(i3-1,8)*plane_bytes+5_8
      read(10,pos=byte_pos)((plane_buf(i1,i2),i1=1,nn1),i2=1,nn2)
      do i2=ii2lo,ii2hi
@@ -1227,12 +1243,12 @@ subroutine read_grafic_slab_r4(fname,nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1, 
   close(10)
 end subroutine read_grafic_slab_r4
 !################################################################
-subroutine read_grafic_slab_i8(fname,nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1, &
+subroutine read_grafic_slab_i8(fname,nn1,nn2,nn3,i1_min,i1_max,i2_min,i2_max,k0,k1, &
      & ii1lo,ii1hi,ii2lo,ii2hi,hdr_bytes,plane_bytes,slab)
   use amr_parameters, ONLY: i8b
   implicit none
   character(LEN=*),intent(in)::fname
-  integer,intent(in)::nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1
+  integer,intent(in)::nn1,nn2,nn3,i1_min,i1_max,i2_min,i2_max,k0,k1
   integer,intent(in)::ii1lo,ii1hi,ii2lo,ii2hi
   integer(kind=8),intent(in)::hdr_bytes,plane_bytes
   integer(i8b),intent(inout)::slab(i1_min:i1_max,i2_min:i2_max,k0:k1)
@@ -1240,8 +1256,10 @@ subroutine read_grafic_slab_i8(fname,nn1,nn2,i1_min,i1_max,i2_min,i2_max,k0,k1, 
   integer::i3,i1,i2
   integer(kind=8)::byte_pos
   allocate(plane_buf(1:nn1,1:nn2))
+  ! See read_grafic_slab_r4: clamp i3 to the IC sub-grid [1,nn3]; out-of-IC i3
+  ! planes are left pre-zeroed, matching the original full-bbox reader.
   open(10,file=fname,access='stream',form='unformatted',status='old')
-  do i3=k0,k1
+  do i3=max(1,k0),min(nn3,k1)
      byte_pos=hdr_bytes+int(i3-1,8)*plane_bytes+5_8
      read(10,pos=byte_pos)((plane_buf(i1,i2),i1=1,nn1),i2=1,nn2)
      do i2=ii2lo,ii2hi
