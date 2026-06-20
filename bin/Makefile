@@ -119,7 +119,7 @@ VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):
 #############################################################################
 # All objects
 MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
-	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o ksection.o sparse_mat.o \
+	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
 	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) dark_cooling_mod.o fdm_commons.o
@@ -191,7 +191,7 @@ sink_cuda_interface.o: cuda_commons.o
 cuda_commons.o: amr_commons.kjhan.o
 endif
 power_spectrum.o: amr_parameters.jaehyun.o amr_commons.kjhan.o poisson_commons.o
-output_fdm.o: amr_commons.kjhan.o poisson_commons.o
+output_fdm.o: amr_commons.kjhan.o poisson_commons.o ksection.o morton_keys.o morton_hash.o
 light_cone.fdm.o: amr_commons.kjhan.o pm_commons.o poisson_commons.o
 eunha_cooling_mod.o: amr_parameters.jaehyun.o amr_commons.kjhan.o
 dark_cooling_mod.o: amr_parameters.jaehyun.o

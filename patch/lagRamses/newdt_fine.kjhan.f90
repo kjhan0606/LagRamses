@@ -37,7 +37,8 @@ subroutine newdt_fine(ilevel)
   real(dp)::tff,fourpi,threepi2
   real(dp)::aton_time_step,dt_aton,dt_rt
   real(dp)::dx_min,dx,scale,dt_fact,limiting_dt_fact
-  real(dp)::dx_fdm,k2_nyq,k2_eff,k2_dB,dt_acc,dt_nyq
+  real(dp)::dx_fdm,k2_nyq,k2_eff,k2_dB,dt_acc,dt_nyq,dt_adv
+  real(dp)::dtheta_max,c1_max,eps_c1,dt_qp
   logical::highest_level
 
   if(numbtot(1,ilevel)==0)return
@@ -90,13 +91,19 @@ subroutine newdt_fine(ilevel)
      k2_nyq  = 6.0d0/dx_fdm**2
 
      if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
-        ! HJM fluid level: quantum pressure CFL only
-        ! dt <= C_D * a^2 / (hbar * 6/dx^2) with C_D=0.2
-        dt_nyq = 0.2d0 * aexp**2 / (hbar_code * k2_nyq)
-        dtnew(ilevel) = MIN(dtnew(ilevel), dt_nyq)
+        ! HJM fluid level: advection CFL from Madelung velocity
+        ! v = hbar*grad(theta)/a^2; cells with C1 > threshold excluded
+        ! (about to be refined to wave solver)
+        call fdm_vmax_level(ilevel, dtheta_max)
+        dt_adv = huge(1.0d0)
+        if(dtheta_max > 0.0d0) then
+           dt_adv = fdm_courant * dx_fdm * aexp**2 &
+                / (hbar_code * dtheta_max)
+           dtnew(ilevel) = MIN(dtnew(ilevel), dt_adv)
+        end if
         if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin) then
-           write(*,'(" HJM_CFL[fdm]: dt_nyq=",1PE12.5," dt=",1PE12.5)') &
-                dt_nyq, dtnew(ilevel)
+           write(*,'(" HJM_CFL[fdm]: dtheta=",1PE10.3," dt_adv=",1PE10.3,&
+                &" dt=",1PE10.3)') dtheta_max, dt_adv, dtnew(ilevel)
         end if
      else
         ! Wave levels: existing Schrodinger CFL

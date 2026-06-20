@@ -75,6 +75,11 @@ subroutine init_poisson
 #endif
      if(varcpu_restart) then
         call restore_poisson_binary_varcpu()
+        do ilevel=1,nlevelmax
+           if(allocated(varcpu_lvl(ilevel)%xg)) deallocate(varcpu_lvl(ilevel)%xg)
+        end do
+        if(allocated(varcpu_lvl)) deallocate(varcpu_lvl)
+        if(allocated(varcpu_file_start)) deallocate(varcpu_file_start)
 #ifndef WITHOUTMPI
         call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
@@ -400,16 +405,6 @@ subroutine restore_poisson_binary_varcpu
         if(allocated(chunk_gvl(ilevel)%gdata)) deallocate(chunk_gvl(ilevel)%gdata)
      end do
   end do  ! ichunk
-
-  ! Free all varcpu metadata — no longer needed
-  do ilevel = 1, nlevelmax
-     if(allocated(varcpu_lvl(ilevel)%xg)) deallocate(varcpu_lvl(ilevel)%xg)
-  end do
-  if(allocated(varcpu_lvl)) deallocate(varcpu_lvl)
-  if(allocated(varcpu_file_start)) deallocate(varcpu_file_start)
-  if(allocated(varcpu_nactive)) deallocate(varcpu_nactive)
-  if(allocated(varcpu_my_files)) deallocate(varcpu_my_files)
-  if(allocated(varcpu_ngrid_file)) deallocate(varcpu_ngrid_file)
 
   if(myid==1) write(*,*) 'Binary varcpu poisson restore done.'
 

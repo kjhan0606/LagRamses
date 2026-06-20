@@ -123,7 +123,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
         if(son(icell) == 0) then
            psi_re(icell) = rho_n(icell) + dt_loc * drho(icell)
            psi_im(icell) = S_n(icell)   + dt_loc * dS_arr(icell)
-           if(psi_re(icell) < 1.0d-30) psi_re(icell) = 1.0d-30
+           if(psi_re(icell) < 1.0d-10) psi_re(icell) = 1.0d-10
         end if
         igrid = next(igrid)
      end do
@@ -145,7 +145,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
                          + 0.25d0*dt_loc*drho(icell)
            psi_im(icell) = 0.75d0*S_n(icell)   + 0.25d0*S1 &
                          + 0.25d0*dt_loc*dS_arr(icell)
-           if(psi_re(icell) < 1.0d-30) psi_re(icell) = 1.0d-30
+           if(psi_re(icell) < 1.0d-10) psi_re(icell) = 1.0d-10
         end if
         igrid = next(igrid)
      end do
@@ -167,7 +167,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
                          + (2.0d0/3.0d0)*dt_loc*drho(icell)
            psi_im(icell) = (1.0d0/3.0d0)*S_n(icell)   + (2.0d0/3.0d0)*S1 &
                          + (2.0d0/3.0d0)*dt_loc*dS_arr(icell)
-           if(psi_re(icell) < 1.0d-30) psi_re(icell) = 1.0d-30
+           if(psi_re(icell) < 1.0d-10) psi_re(icell) = 1.0d-10
         end if
         igrid = next(igrid)
      end do
@@ -198,12 +198,11 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
 
   integer::igrid,ind,iskip,icell,idim
   integer::icL,icR
-  real(dp)::rho_c,S_c,lnrho_c
-  real(dp)::rho_L,rho_R,S_L,S_R,lnrho_L,lnrho_R
+  real(dp)::rho_c,S_c
+  real(dp)::rho_L,rho_R,S_L,S_R
   real(dp)::vel_L,vel_R
   real(dp)::flux_L,flux_R
-  real(dp)::grad2S,QP
-  real(dp)::d2lnrho,dlnrho2
+  real(dp)::grad2S
 
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
@@ -213,30 +212,24 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
         if(son(icell) == 0) then
            rho_c = psi_re(icell)
            S_c   = psi_im(icell)
-           lnrho_c = log(max(rho_c, 1.0d-30))
 
            grad2S  = 0.0d0
-           d2lnrho = 0.0d0
-           dlnrho2 = 0.0d0
            drho(icell) = 0.0d0
 
            do idim=1,ndim
               call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icL)
               call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icR)
 
-              if(icL > 0) then
+              if(icL > 0 .and. son(icL) == 0) then
                  rho_L = psi_re(icL); S_L = psi_im(icL)
               else
                  rho_L = rho_c; S_L = S_c
               end if
-              if(icR > 0) then
+              if(icR > 0 .and. son(icR) == 0) then
                  rho_R = psi_re(icR); S_R = psi_im(icR)
               else
                  rho_R = rho_c; S_R = S_c
               end if
-
-              lnrho_L = log(max(rho_L, 1.0d-30))
-              lnrho_R = log(max(rho_R, 1.0d-30))
 
               ! --- Continuity: upwind flux ---
               vel_L = (S_c - S_L) * dx_inv
@@ -260,12 +253,12 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
                                     min((S_R-S_c)*dx_inv, 0.0d0)**2)
 
               ! --- Quantum pressure: log-density form ---
-              d2lnrho = d2lnrho + (lnrho_R - 2.0d0*lnrho_c + lnrho_L) * dx2_inv
-              dlnrho2 = dlnrho2 + ((lnrho_R - lnrho_L) * 0.5d0 * dx_inv)**2
+              ! QP omitted at fluid levels: by Madelung criterion C1<threshold,
+              ! QP is O(C1/dx^2) — a small correction handled by wave solver
+              ! at fine levels. Including it here destabilizes oct boundaries.
            end do
 
-           QP = 0.5d0 * d2lnrho + 0.25d0 * dlnrho2
-           dS_arr(icell) = inv_a2 * (-0.5d0 * grad2S + hbar2_over_2 * QP)
+           dS_arr(icell) = inv_a2 * (-0.5d0 * grad2S)
 
         end if
         igrid = next(igrid)
@@ -365,7 +358,7 @@ subroutine fdm_madelung_refine_flag(ilevel)
   if(.not.use_fdm) return
   if(.not.fdm_use_hjm) return
   if(hbar_code <= 0.0d0) return
-  if(ilevel /= levelmin) return
+  if(ilevel >= fdm_first_wave_level) return
 
   nflag_loc = 0
   nflag_C1_loc = 0

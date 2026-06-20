@@ -172,8 +172,19 @@ recursive subroutine amr_step(ilevel,icount)
            call load_balance
            call defrag
            ok_defrag=.true.
+           if(use_fdm) then
+              call morton_hash_rebuild()
+              call restore_psi_postlb()
+           end if
+           if(allocated(varcpu_nactive)) deallocate(varcpu_nactive)
+           if(allocated(varcpu_my_files)) deallocate(varcpu_my_files)
+           if(allocated(varcpu_ngrid_file)) deallocate(varcpu_ngrid_file)
            varcpu_restart_done=.false.
            first_step=.false.
+           if(myid==1) then
+              write(*,*) 'Variable-ncpu restart block done, entering time step'
+              call flush(6)
+           end if
         else if(nremap>0)then
            ! Skip first load balance because it has been performed before file dump
            if(nrestart>0.and.first_step)then

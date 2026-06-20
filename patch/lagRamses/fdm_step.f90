@@ -21,8 +21,9 @@ subroutine fdm_step(ilevel)
 #endif
   integer,intent(in)::ilevel
 
-  real(dp)::dt_loc
+  real(dp)::dt_loc,dt_cfl,dt_sub
   real(dp)::yw0,yw1
+  integer::nsub_hjm,isub_hjm
 
   if(.not.use_fdm) return
   if(numbtot(1,ilevel)==0) return
@@ -31,7 +32,23 @@ subroutine fdm_step(ilevel)
 
   ! ---- Hybrid HJM: fluid solver on coarse levels ----
   if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
-     call fdm_hjm_step(ilevel, dt_loc)
+     call fdm_mass_check('PRE_HJM')
+     ! CFL guard: newly refined levels inherit parent dt which may violate CFL
+     call fdm_hjm_local_cfl(ilevel, dt_cfl)
+     nsub_hjm = 1
+     if(dt_cfl > 0.0d0 .and. dt_loc > dt_cfl) then
+        nsub_hjm = ceiling(dt_loc / dt_cfl)
+        if(myid==1) then
+           write(*,'(A,I2,A,I4,A,ES10.3,A,ES10.3)') &
+              ' HJM_SUBCYCLE: lv=',ilevel,' nsub=',nsub_hjm, &
+              ' dt_loc=',dt_loc,' dt_cfl=',dt_cfl
+        end if
+     end if
+     dt_sub = dt_loc / dble(nsub_hjm)
+     do isub_hjm = 1, nsub_hjm
+        call fdm_hjm_step(ilevel, dt_sub)
+     end do
+     call fdm_mass_check('POST_HJM')
      call timer('fdm-ghost','start')
      call make_virtual_fine_dp(psi_re(1), ilevel)
      call make_virtual_fine_dp(psi_im(1), ilevel)
@@ -54,10 +71,14 @@ subroutine fdm_step(ilevel)
      call fdm_kick (ilevel,        yw1*dt_loc)
      call fdm_drift(ilevel, 0.5d0*yw1*dt_loc)
   else
+     call fdm_mass_check('PRE_DRIFT1')
      call fdm_drift(ilevel, 0.5d0*dt_loc)
+     call fdm_mass_check('POST_DRIFT1')
      call timer('fdm-kick','start')
      call fdm_kick(ilevel, dt_loc)
+     call fdm_mass_check('POST_KICK')
      call fdm_drift(ilevel, 0.5d0*dt_loc)
+     call fdm_mass_check('POST_DRIFT2')
   end if
 
   call timer('fdm-ghost','start')
@@ -1129,6 +1150,196 @@ subroutine fdm_kdb_max_level(ilevel, k2max)
 
 end subroutine fdm_kdb_max_level
 !################################################################
+! Compute max Madelung phase gradient |nabla theta| at a level.
+! Phase gradient = Im(psi* nabla psi)/|psi|^2 — isolates velocity
+! from amplitude gradient noise.
+! Cells with C1 > fdm_hjm_C1 (about to be refined to wave solver)
+! are excluded — their interference-driven |nabla theta| is
+! unphysical for the fluid CFL.
+!################################################################
+subroutine fdm_vmax_level(ilevel, dtheta_max)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(out)::dtheta_max
+
+  integer::igrid,ind,iskip,icell,idim,icp,icm,nx_loc,info
+  real(dp)::dx,scale,dx_loc,inv2dx,rho2,sqrho_c,sqrho_L,sqrho_R
+  real(dp)::dre,dim,dth,dth2,dth2_loc,dth2_glob
+  real(dp)::c1_dim,c1_cell
+  integer::n_total,n_leaf,n_lowrho,n_c1skip,n_valid
+  integer::n_total_g,n_leaf_g,n_lowrho_g,n_c1skip_g,n_valid_g
+  integer,parameter::NBINS_C1=8
+  real(dp),parameter::c1_edges(NBINS_C1+1) = &
+       (/0.0d0, 0.01d0, 0.03d0, 0.1d0, 0.3d0, 1.0d0, 3.0d0, 10.0d0, 1.0d30/)
+  integer::c1_hist(NBINS_C1), c1_hist_g(NBINS_C1), ibin
+  real(dp)::c1_max_loc, c1_max_glob
+  real(dp)::dth_max_loc, dth_at_c1max
+
+  n_total=0; n_leaf=0; n_lowrho=0; n_c1skip=0; n_valid=0
+  c1_hist = 0; c1_max_loc = 0.0d0; dth_max_loc = 0.0d0
+  dx = 0.5d0**ilevel
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale = boxlen / dble(nx_loc)
+  dx_loc = dx * scale
+  inv2dx = 0.5d0 / dx_loc
+
+  call make_virtual_fine_dp(psi_re(1), ilevel)
+  call make_virtual_fine_dp(psi_im(1), ilevel)
+
+  dth2_loc = 0.0d0
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        n_total = n_total + 1
+        if(son(icell) == 0) then
+           n_leaf = n_leaf + 1
+           rho2 = psi_re(icell)**2 + psi_im(icell)**2
+           sqrho_c = sqrt(rho2)
+           if(sqrho_c > 1.0d-8) then
+              c1_cell = 0.0d0
+              dth2 = 0.0d0
+              do idim=1,ndim
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icp)
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icm)
+                 if(icp > 0 .and. icm > 0) then
+                    sqrho_R = sqrt(psi_re(icp)**2 + psi_im(icp)**2)
+                    sqrho_L = sqrt(psi_re(icm)**2 + psi_im(icm)**2)
+                    c1_dim = abs(sqrho_R - 2.0d0*sqrho_c + sqrho_L) / sqrho_c
+                    c1_cell = max(c1_cell, c1_dim)
+                    dre = (psi_re(icp) - psi_re(icm)) * inv2dx
+                    dim = (psi_im(icp) - psi_im(icm)) * inv2dx
+                    dth = (psi_re(icell)*dim - psi_im(icell)*dre) / rho2
+                    dth2 = dth2 + dth*dth
+                 end if
+              end do
+              do ibin=1,NBINS_C1
+                 if(c1_cell < c1_edges(ibin+1)) then
+                    c1_hist(ibin) = c1_hist(ibin) + 1
+                    exit
+                 end if
+              end do
+              if(c1_cell > c1_max_loc) then
+                 c1_max_loc = c1_cell
+                 dth_at_c1max = sqrt(dth2)
+              end if
+              if(c1_cell < fdm_hjm_C1) then
+                 n_valid = n_valid + 1
+                 if(dth2 > dth2_loc) then
+                    dth2_loc = dth2
+                    dth_max_loc = c1_cell
+                 end if
+              else
+                 n_c1skip = n_c1skip + 1
+              end if
+           else
+              n_lowrho = n_lowrho + 1
+           end if
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+  n_total_g=n_total; n_leaf_g=n_leaf; n_lowrho_g=n_lowrho
+  n_c1skip_g=n_c1skip; n_valid_g=n_valid
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(n_total,  n_total_g,  1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(n_leaf,   n_leaf_g,   1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(n_lowrho, n_lowrho_g, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(n_c1skip, n_c1skip_g, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(n_valid,  n_valid_g,  1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+#endif
+  c1_hist_g = c1_hist
+  c1_max_glob = c1_max_loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(c1_hist, c1_hist_g, NBINS_C1, MPI_INTEGER, &
+       MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(c1_max_loc, c1_max_glob, 1, MPI_DOUBLE_PRECISION, &
+       MPI_MAX, MPI_COMM_WORLD, info)
+#endif
+  if(myid==1 .and. nstep_coarse_old < 60) then
+     write(*,'(" VMAX_DBG: total=",I12," leaf=",I12," lowrho=",I12,&
+          &" c1skip=",I12," valid=",I12)') &
+          n_total_g, n_leaf_g, n_lowrho_g, n_c1skip_g, n_valid_g
+     write(*,'(" C1_HIST: <0.01=",I10," <0.03=",I10," <0.1=",I10,&
+          &" <0.3=",I10)') c1_hist_g(1),c1_hist_g(2),c1_hist_g(3),c1_hist_g(4)
+     write(*,'("          <1.0=",I10," <3.0=",I10," <10=",I10,&
+          &" >=10=",I10)') c1_hist_g(5),c1_hist_g(6),c1_hist_g(7),c1_hist_g(8)
+     write(*,'(" C1_MAX=",1PE10.3," dth_at_c1max=",1PE10.3,&
+          &" dth_max_c1=",1PE10.3)') c1_max_glob, dth_at_c1max, dth_max_loc
+  end if
+
+  dth2_glob = dth2_loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(dth2_loc, dth2_glob, 1, MPI_DOUBLE_PRECISION, MPI_MAX, MPI_COMM_WORLD, info)
+#endif
+  dtheta_max = sqrt(dth2_glob)
+
+end subroutine fdm_vmax_level
+!################################################################
+! Compute max Madelung C1 = |sqrt(rho)_R - 2 sqrt(rho)_C + sqrt(rho)_L| / sqrt(rho)_C
+! across all leaf cells at a level (for C1-adaptive quantum CFL).
+!################################################################
+subroutine fdm_c1max_level(ilevel, c1max)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(out)::c1max
+
+  integer::igrid,ind,iskip,icell,idim,icp,icm,info
+  real(dp)::sqrho_c,sqrho_L,sqrho_R,c1_dim,c1_cell
+  real(dp)::c1_loc,c1_glob
+
+  call make_virtual_fine_dp(psi_re(1), ilevel)
+  call make_virtual_fine_dp(psi_im(1), ilevel)
+
+  c1_loc = 0.0d0
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           sqrho_c = sqrt(psi_re(icell)**2 + psi_im(icell)**2)
+           if(sqrho_c > 1.0d-8) then
+              c1_cell = 0.0d0
+              do idim=1,ndim
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icm)
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icp)
+                 if(icm > 0 .and. icp > 0) then
+                    sqrho_L = sqrt(psi_re(icm)**2 + psi_im(icm)**2)
+                    sqrho_R = sqrt(psi_re(icp)**2 + psi_im(icp)**2)
+                    c1_dim = abs(sqrho_R - 2.0d0*sqrho_c + sqrho_L) / sqrho_c
+                    c1_cell = max(c1_cell, c1_dim)
+                 end if
+              end do
+              if(c1_cell > c1_loc) c1_loc = c1_cell
+           end if
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+  c1_glob = c1_loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(c1_loc, c1_glob, 1, MPI_DOUBLE_PRECISION, MPI_MAX, MPI_COMM_WORLD, info)
+#endif
+  c1max = c1_glob
+
+end subroutine fdm_c1max_level
+!################################################################
 ! Explicit FD kinetic step (with automatic sub-cycling for stability)
 !################################################################
 subroutine fdm_drift_fd_explicit(ilevel, dt_half)
@@ -2086,39 +2297,165 @@ end subroutine fdm_init_phase_fft
 subroutine fdm_prolong(ilevel)
   use amr_commons
   use poisson_commons
+  use fdm_commons
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,icell_coarse,ind,iskip,i
-  integer::ind_child,iskip_child,icell_child
-  real(dp)::mass_coarse,mass_fine,ratio
-  real(dp)::psi_re_parent,psi_im_parent
+  integer::igrid,icell_coarse,ind_child,iskip_child,icell_child
+  integer::igrid_p,ind_p,ival,idim,icL,icR,ix,iy,iz
+  real(dp)::psi_re_c,psi_im_c
+  real(dp)::grad_re(3),grad_im(3)
+  real(dp)::sx(3)
+  real(dp)::rho_c,S_c,rho_L,rho_R,S_L,S_R
+  real(dp)::grad_rho(3),grad_S(3)
+  real(dp)::rho_child,S_child,amp_child,theta_child,dS
+  real(dp)::pi_h,twopi_h
+  real(dp)::rho_parent,sum_rho_child,renorm
+  logical::use_rhoS
 
   if(.not.use_fdm) return
   if(ilevel <= levelmin) return
 
-  ! For each newly created grid at ilevel, initialize psi from parent cell
-  ! Simple injection: copy parent cell value to all 8 children
-  ! Then renormalize to conserve mass
+  use_rhoS = (fdm_use_hjm .and. ilevel < fdm_first_wave_level)
+  pi_h = 3.14159265358979d0 * hbar_code
+  twopi_h = 2.0d0 * pi_h
+
+  call make_virtual_fine_dp(psi_re(1), ilevel-1)
+  call make_virtual_fine_dp(psi_im(1), ilevel-1)
+
   igrid = headl(myid, ilevel)
   do while(igrid > 0)
-     ! Parent cell
      icell_coarse = father(igrid)
      if(icell_coarse <= 0) then
         igrid = next(igrid)
         cycle
      end if
 
-     psi_re_parent = psi_re(icell_coarse)
-     psi_im_parent = psi_im(icell_coarse)
+     psi_re_c = psi_re(icell_coarse)
+     psi_im_c = psi_im(icell_coarse)
 
-     ! Inject parent value to all children
-     do ind_child=1,twotondim
-        iskip_child = ncoarse + (ind_child-1)*ngridmax
-        icell_child = igrid + iskip_child
-        psi_re(icell_child) = psi_re_parent
-        psi_im(icell_child) = psi_im_parent
-     end do
+     ival = icell_coarse - ncoarse
+     ind_p = (ival - 1) / ngridmax + 1
+     igrid_p = ival - (ind_p - 1) * ngridmax
+
+     if(use_rhoS) then
+        ! (rho, S) interpolation for fluid levels — avoids interference nodes
+        rho_c = psi_re_c**2 + psi_im_c**2
+        S_c = hbar_code * atan2(psi_im_c, psi_re_c)
+
+        do idim=1,ndim
+           call fdm_neighbor_cell(igrid_p, ilevel-1, ind_p, idim, 1, icL)
+           call fdm_neighbor_cell(igrid_p, ilevel-1, ind_p, idim, 2, icR)
+
+           if(icL > 0) then
+              rho_L = psi_re(icL)**2 + psi_im(icL)**2
+              S_L = hbar_code * atan2(psi_im(icL), psi_re(icL))
+           else
+              rho_L = rho_c; S_L = S_c
+           end if
+           if(icR > 0) then
+              rho_R = psi_re(icR)**2 + psi_im(icR)**2
+              S_R = hbar_code * atan2(psi_im(icR), psi_re(icR))
+           else
+              rho_R = rho_c; S_R = S_c
+           end if
+
+           if(icL > 0 .and. icR > 0) then
+              grad_rho(idim) = (rho_R - rho_L) * 0.5d0
+              dS = S_R - S_L
+              if(dS >  pi_h) dS = dS - twopi_h
+              if(dS < -pi_h) dS = dS + twopi_h
+              grad_S(idim) = dS * 0.5d0
+           else if(icR > 0) then
+              grad_rho(idim) = rho_R - rho_c
+              dS = S_R - S_c
+              if(dS >  pi_h) dS = dS - twopi_h
+              if(dS < -pi_h) dS = dS + twopi_h
+              grad_S(idim) = dS
+           else if(icL > 0) then
+              grad_rho(idim) = rho_c - rho_L
+              dS = S_c - S_L
+              if(dS >  pi_h) dS = dS - twopi_h
+              if(dS < -pi_h) dS = dS + twopi_h
+              grad_S(idim) = dS
+           else
+              grad_rho(idim) = 0.0d0
+              grad_S(idim) = 0.0d0
+           end if
+        end do
+
+        do ind_child=1,twotondim
+           iskip_child = ncoarse + (ind_child-1)*ngridmax
+           icell_child = igrid + iskip_child
+           ix = ibits(ind_child-1, 0, 1)
+           iy = ibits(ind_child-1, 1, 1)
+           iz = ibits(ind_child-1, 2, 1)
+           sx(1) = dble(2*ix - 1)
+           sx(2) = dble(2*iy - 1)
+           sx(3) = dble(2*iz - 1)
+           rho_child = rho_c + 0.25d0 * &
+                (sx(1)*grad_rho(1) + sx(2)*grad_rho(2) + sx(3)*grad_rho(3))
+           S_child = S_c + 0.25d0 * &
+                (sx(1)*grad_S(1) + sx(2)*grad_S(2) + sx(3)*grad_S(3))
+           if(rho_child < 1.0d-15) rho_child = 1.0d-15
+           amp_child = sqrt(rho_child)
+           theta_child = S_child / hbar_code
+           psi_re(icell_child) = amp_child * cos(theta_child)
+           psi_im(icell_child) = amp_child * sin(theta_child)
+        end do
+     else
+        ! Standard (Re, Im) interpolation for wave levels
+        do idim=1,ndim
+           call fdm_neighbor_cell(igrid_p, ilevel-1, ind_p, idim, 1, icL)
+           call fdm_neighbor_cell(igrid_p, ilevel-1, ind_p, idim, 2, icR)
+           if(icL > 0 .and. icR > 0) then
+              grad_re(idim) = (psi_re(icR) - psi_re(icL)) * 0.5d0
+              grad_im(idim) = (psi_im(icR) - psi_im(icL)) * 0.5d0
+           else if(icR > 0) then
+              grad_re(idim) = psi_re(icR) - psi_re_c
+              grad_im(idim) = psi_im(icR) - psi_im_c
+           else if(icL > 0) then
+              grad_re(idim) = psi_re_c - psi_re(icL)
+              grad_im(idim) = psi_im_c - psi_im(icL)
+           else
+              grad_re(idim) = 0.0d0
+              grad_im(idim) = 0.0d0
+           end if
+        end do
+
+        do ind_child=1,twotondim
+           iskip_child = ncoarse + (ind_child-1)*ngridmax
+           icell_child = igrid + iskip_child
+           ix = ibits(ind_child-1, 0, 1)
+           iy = ibits(ind_child-1, 1, 1)
+           iz = ibits(ind_child-1, 2, 1)
+           sx(1) = dble(2*ix - 1)
+           sx(2) = dble(2*iy - 1)
+           sx(3) = dble(2*iz - 1)
+           psi_re(icell_child) = psi_re_c + 0.25d0 * &
+                (sx(1)*grad_re(1) + sx(2)*grad_re(2) + sx(3)*grad_re(3))
+           psi_im(icell_child) = psi_im_c + 0.25d0 * &
+                (sx(1)*grad_im(1) + sx(2)*grad_im(2) + sx(3)*grad_im(3))
+        end do
+        ! Renormalize to conserve mass: Σ|ψ_child|² = 8|ψ_parent|²
+        rho_parent = psi_re_c**2 + psi_im_c**2
+        sum_rho_child = 0.0d0
+        do ind_child=1,twotondim
+           iskip_child = ncoarse + (ind_child-1)*ngridmax
+           icell_child = igrid + iskip_child
+           sum_rho_child = sum_rho_child + &
+                psi_re(icell_child)**2 + psi_im(icell_child)**2
+        end do
+        if(sum_rho_child > 0.0d0) then
+           renorm = sqrt(8.0d0 * rho_parent / sum_rho_child)
+           do ind_child=1,twotondim
+              iskip_child = ncoarse + (ind_child-1)*ngridmax
+              icell_child = igrid + iskip_child
+              psi_re(icell_child) = psi_re(icell_child) * renorm
+              psi_im(icell_child) = psi_im(icell_child) * renorm
+           end do
+        end if
+     end if
 
      igrid = next(igrid)
   end do
@@ -2126,7 +2463,81 @@ subroutine fdm_prolong(ilevel)
   call make_virtual_fine_dp(psi_re(1), ilevel)
   call make_virtual_fine_dp(psi_im(1), ilevel)
 
+  call fdm_mass_check('POST_PROLONG')
+
 end subroutine fdm_prolong
+!################################################################
+!################################################################
+! Lightweight CFL check for HJM fluid levels.
+! Computes max |nabla theta| and returns the advection CFL dt.
+! Used to prevent CFL violation when newly refined levels inherit
+! the parent's (too large) dt.
+!################################################################
+subroutine fdm_hjm_local_cfl(ilevel, dt_cfl)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(out)::dt_cfl
+
+  integer::igrid,ind,iskip,icell,idim,icp,icm,nx_loc,info
+  real(dp)::dx,scale,dx_loc,inv2dx,rho2
+  real(dp)::dre,dim_val,dth,dth2,dth2_loc,dth2_glob
+
+  dx = 0.5d0**ilevel
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale = boxlen / dble(nx_loc)
+  dx_loc = dx * scale
+  inv2dx = 0.5d0 / dx_loc
+
+  call make_virtual_fine_dp(psi_re(1), ilevel)
+  call make_virtual_fine_dp(psi_im(1), ilevel)
+
+  dth2_loc = 0.0d0
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+     igrid = headl(myid, ilevel)
+     do while(igrid > 0)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           rho2 = psi_re(icell)**2 + psi_im(icell)**2
+           if(rho2 > 1.0d-16) then
+              dth2 = 0.0d0
+              do idim=1,ndim
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icp)
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icm)
+                 if(icp > 0 .and. icm > 0) then
+                    dre = (psi_re(icp) - psi_re(icm)) * inv2dx
+                    dim_val = (psi_im(icp) - psi_im(icm)) * inv2dx
+                    dth = (psi_re(icell)*dim_val - psi_im(icell)*dre) / rho2
+                    dth2 = dth2 + dth*dth
+                 end if
+              end do
+              if(dth2 > dth2_loc) dth2_loc = dth2
+           end if
+        end if
+        igrid = next(igrid)
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(dth2_loc, dth2_glob, 1, MPI_DOUBLE_PRECISION, &
+       MPI_MAX, MPI_COMM_WORLD, info)
+#else
+  dth2_glob = dth2_loc
+#endif
+
+  if(dth2_glob > 0.0d0) then
+     dt_cfl = fdm_courant * dx_loc * aexp**2 / (hbar_code * sqrt(dth2_glob))
+  else
+     dt_cfl = 1.0d30
+  end if
+
+end subroutine fdm_hjm_local_cfl
 !################################################################
 !################################################################
 ! Phase 4: AMR restriction for psi (mass-conserving)
@@ -2296,3 +2707,64 @@ subroutine fdm_diagnostics()
   end if
 
 end subroutine fdm_diagnostics
+!################################################################
+!################################################################
+! Per-operation mass check for debugging mass conservation.
+! Prints total mass and per-level breakdown.
+! label: short tag identifying the checkpoint location.
+!################################################################
+subroutine fdm_mass_check(label)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  character(len=*),intent(in)::label
+  integer::ilevel,igrid,ind,iskip,icell,info
+  real(dp)::mass8_loc,mass8_glob,mass9_loc,mass9_glob
+  real(dp)::psi2,vol8,vol9,total
+
+  mass8_loc = 0.0d0
+  mass9_loc = 0.0d0
+  vol8 = (0.5d0**levelmin * boxlen/dble(icoarse_max-icoarse_min+1))**3
+  vol9 = vol8 / 8.0d0
+
+  do ilevel=levelmin,min(levelmin+1,nlevelmax)
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0) then
+              psi2 = psi_re(icell)**2 + psi_im(icell)**2
+              if(ilevel == levelmin) then
+                 mass8_loc = mass8_loc + psi2 * vol8
+              else
+                 mass9_loc = mass9_loc + psi2 * vol9
+              end if
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(mass8_loc, mass8_glob, 1, MPI_DOUBLE_PRECISION, &
+       MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(mass9_loc, mass9_glob, 1, MPI_DOUBLE_PRECISION, &
+       MPI_SUM, MPI_COMM_WORLD, info)
+#else
+  mass8_glob = mass8_loc
+  mass9_glob = mass9_loc
+#endif
+
+  total = mass8_glob + mass9_glob
+  if(myid==1) then
+     write(*,'(A,A16,A,ES16.9,A,ES12.5,A,ES12.5)') &
+          ' MCHK:', label, ' tot=', total, &
+          ' L8=', mass8_glob, ' L9=', mass9_glob
+  end if
+
+end subroutine fdm_mass_check

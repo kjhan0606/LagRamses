@@ -578,6 +578,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A,I2,A)')    '   cost_mode =', fdm_cost_mode, &
              & merge(' (memory)   ', ' (wallclock)', fdm_cost_mode==0)
         if(fdm_use_hjm) then
+           if(fdm_kinetic /= 1) then
+              fdm_kinetic = 1
+              write(*,'(A)')      '   HJM: forcing fdm_kinetic=1 (Crank-Nicolson) for wave levels'
+           end if
            write(*,'(A)')         '   HJM hybrid mode:'
            write(*,'(A,I3)')      '     first_wave_level=', fdm_first_wave_level
            write(*,'(A,ES10.3)')  '     C1 thresh  =', fdm_hjm_C1
