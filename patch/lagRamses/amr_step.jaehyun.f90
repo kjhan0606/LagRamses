@@ -164,28 +164,50 @@ recursive subroutine amr_step(ilevel,icount)
   !--------------------------
                                call timer('loadbalance','start')
   ok_defrag=.false.
+  ! Variable-ncpu restart: must run even when levelmin==nlevelmax
+  if(ilevel==levelmin .and. varcpu_restart_done)then
+     if(myid==1) write(*,*) 'Forcing load_balance after variable-ncpu restart'
+     call load_balance
+     call defrag
+     ok_defrag=.true.
+     ! Rebuild communicators after defrag (defrag remaps grid indices,
+     ! invalidating emission/reception lists built inside load_balance).
+     ! The normal rebuild in the refine section is skipped when
+     ! levelmin==nlevelmax, so we must do it here.
+     do i=1,nlevelmax
+        call build_comm(i)
+     end do
+     do i=nlevelmax,1,-1
+        if(hydro)then
+           do ivar=1,nvar
+              call make_virtual_fine_dp(uold(1,ivar),i)
+           end do
+        end if
+        if(poisson .and. allocated(f))then
+           call make_virtual_fine_dp(phi(1),i)
+           do idim=1,ndim
+              call make_virtual_fine_dp(f(1,idim),i)
+           end do
+        end if
+     end do
+     if(use_fdm) then
+        call morton_hash_rebuild()
+        call restore_psi_postlb()
+     end if
+     if(allocated(varcpu_nactive)) deallocate(varcpu_nactive)
+     if(allocated(varcpu_my_files)) deallocate(varcpu_my_files)
+     if(allocated(varcpu_ngrid_file)) deallocate(varcpu_ngrid_file)
+     varcpu_restart_done=.false.
+     first_step=.false.
+     call diag_check_nan('post_defrag')
+     if(myid==1) then
+        write(*,*) 'Variable-ncpu restart block done, entering time step'
+        call flush(6)
+     end if
+  end if
   if(levelmin.lt.nlevelmax)then
      if(ilevel==levelmin)then
-        if(varcpu_restart_done)then
-           ! Force load balance after variable-ncpu restart
-           if(myid==1) write(*,*) 'Forcing load_balance after variable-ncpu restart'
-           call load_balance
-           call defrag
-           ok_defrag=.true.
-           if(use_fdm) then
-              call morton_hash_rebuild()
-              call restore_psi_postlb()
-           end if
-           if(allocated(varcpu_nactive)) deallocate(varcpu_nactive)
-           if(allocated(varcpu_my_files)) deallocate(varcpu_my_files)
-           if(allocated(varcpu_ngrid_file)) deallocate(varcpu_ngrid_file)
-           varcpu_restart_done=.false.
-           first_step=.false.
-           if(myid==1) then
-              write(*,*) 'Variable-ncpu restart block done, entering time step'
-              call flush(6)
-           end if
-        else if(nremap>0)then
+        if(nremap>0)then
            ! Skip first load balance because it has been performed before file dump
            if(nrestart>0.and.first_step)then
               first_step=.false.
@@ -216,6 +238,7 @@ recursive subroutine amr_step(ilevel,icount)
   if(pic)call make_tree_fine(ilevel)
   call system_clock(pt_t2)
   pt_mktree = pt_mktree + dble(pt_t2-pt_t1)/dble(pt_rate)
+  if(ilevel==levelmin) call diag_check_nan('post_maketree')
   
   !------------------------
   ! Output results to files
@@ -302,6 +325,7 @@ recursive subroutine amr_step(ilevel,icount)
         !----------------------------------------------------
      if(hydro.and.star.and.f_w>0.)call kinetic_feedback
      if(hydro.and.star.and.f_w>0.)call diag_check_eint('kinetic_fb',0)
+     call diag_check_nan('post_kinfb')
 
      call timer('sinks','start')
 #ifdef HYDRO_CUDA
@@ -323,6 +347,7 @@ recursive subroutine amr_step(ilevel,icount)
      call system_clock(sk_t1)
      if(sink .and. sink_AGN)call AGN_feedback
      if(sink .and. sink_AGN)call diag_check_eint('AGN_fb',0)
+     call diag_check_nan('post_agnfb')
      call system_clock(sk_t2)
      sk_agn_fb = sk_agn_fb + dble(sk_t2-sk_t1)/dble(pt_rate)
 #ifdef HYDRO_CUDA
@@ -389,6 +414,8 @@ recursive subroutine amr_step(ilevel,icount)
 
   endif
 
+  if(ilevel==levelmin) call diag_check_nan('pre_rho')
+
   !--------------------
   ! Poisson source term
   !--------------------
@@ -397,6 +424,7 @@ recursive subroutine amr_step(ilevel,icount)
      !save old potential for time-extrapolation at level boundaries
      call save_phi_old(ilevel)
      call rho_fine(ilevel,icount)
+     if(ilevel==levelmin) call diag_check_nan('post_rho')
   endif
 
   !-------------------------------------------
@@ -427,12 +455,16 @@ recursive subroutine amr_step(ilevel,icount)
   !---------------
   if(poisson)then
      call timer('poisson','start')
- 
+
+     if(ilevel==levelmin) call diag_check_nan('pre_sync1')
+
      ! Remove gravity source term with half time step and old force
 !    call MPI_BARRIER(MPI_COMM_WORLD,mpi_err)
      if(hydro)then
         call synchro_hydro_fine(ilevel,-0.5*dtnew(ilevel))
      endif
+
+     if(ilevel==levelmin) call diag_check_nan('post_sync1')
 !############################################################
 !       call getmem(real_mem)
 !       call MPI_ALLREDUCE(real_mem,real_mem_tot,1,MPI_REAL,MPI_MAX,MPI_COMM_WORLD,info)
@@ -533,6 +565,7 @@ recursive subroutine amr_step(ilevel,icount)
      ! Compute gravitational acceleration
 !    call MPI_BARRIER(MPI_COMM_WORLD,mpi_err)
      call force_fine(ilevel,icount)
+     if(ilevel==levelmin) call diag_check_nan('post_force')
 !############################################################
 !       call getmem(real_mem)
 !       call MPI_ALLREDUCE(real_mem,real_mem_tot,1,MPI_REAL,MPI_MAX,MPI_COMM_WORLD,info)
@@ -653,6 +686,8 @@ recursive subroutine amr_step(ilevel,icount)
 !    call MPI_BARRIER(MPI_COMM_WORLD,mpi_err)
         ! Add gravity source term with half time step and new force
         call synchro_hydro_fine(ilevel,+0.5*dtnew(ilevel))
+
+        if(ilevel==levelmin) call diag_check_nan('post_sync2')
 !############################################################
 !       call getmem(real_mem)
 !       call MPI_ALLREDUCE(real_mem,real_mem_tot,1,MPI_REAL,MPI_MAX,MPI_COMM_WORLD,info)

@@ -32,7 +32,6 @@ subroutine fdm_step(ilevel)
 
   ! ---- Hybrid HJM: fluid solver on coarse levels ----
   if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
-     call fdm_mass_check('PRE_HJM')
      ! CFL guard: newly refined levels inherit parent dt which may violate CFL
      call fdm_hjm_local_cfl(ilevel, dt_cfl)
      nsub_hjm = 1
@@ -48,7 +47,6 @@ subroutine fdm_step(ilevel)
      do isub_hjm = 1, nsub_hjm
         call fdm_hjm_step(ilevel, dt_sub)
      end do
-     call fdm_mass_check('POST_HJM')
      call timer('fdm-ghost','start')
      call make_virtual_fine_dp(psi_re(1), ilevel)
      call make_virtual_fine_dp(psi_im(1), ilevel)
@@ -71,14 +69,10 @@ subroutine fdm_step(ilevel)
      call fdm_kick (ilevel,        yw1*dt_loc)
      call fdm_drift(ilevel, 0.5d0*yw1*dt_loc)
   else
-     call fdm_mass_check('PRE_DRIFT1')
      call fdm_drift(ilevel, 0.5d0*dt_loc)
-     call fdm_mass_check('POST_DRIFT1')
      call timer('fdm-kick','start')
      call fdm_kick(ilevel, dt_loc)
-     call fdm_mass_check('POST_KICK')
      call fdm_drift(ilevel, 0.5d0*dt_loc)
-     call fdm_mass_check('POST_DRIFT2')
   end if
 
   call timer('fdm-ghost','start')
@@ -2462,8 +2456,6 @@ subroutine fdm_prolong(ilevel)
 
   call make_virtual_fine_dp(psi_re(1), ilevel)
   call make_virtual_fine_dp(psi_im(1), ilevel)
-
-  call fdm_mass_check('POST_PROLONG')
 
 end subroutine fdm_prolong
 !################################################################

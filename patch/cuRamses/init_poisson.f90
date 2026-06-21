@@ -78,6 +78,7 @@ subroutine init_poisson
 #ifndef WITHOUTMPI
         call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
+        call diag_check_nan('post_poisson_restore_vc')
         if(verbose)write(*,*)'Binary varcpu POISSON backup files read completed'
         return
      end if
@@ -175,6 +176,7 @@ subroutine init_poisson
      if(debug)write(*,*)'poisson.tmp read for processor ',myid
      call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
+     call diag_check_nan('post_poisson_restore_std')
      if(verbose)write(*,*)'POISSON backup files read completed'
   end if
 
@@ -222,8 +224,8 @@ subroutine restore_poisson_binary_varcpu
   ! Morton hash lookup
   integer(8) :: ixm, iym, izm
   type(mkey_t) :: mkey
-  real(dp) :: xg_recv(3), xx_father(1:1, 1:ndim), scale, twotol
-  integer :: c_tmp(1:1), nx_loc, nxny
+  real(dp) :: xg_recv(3), xx(1:nvector, 1:ndim), scale, twotol
+  integer :: c_tmp(1:nvector), nx_loc, nxny
 
   if(myid==1) write(*,*) 'Binary varcpu poisson restore (chunked ksection): ncpu_file=', ncpu_file
 
@@ -350,16 +352,13 @@ subroutine restore_poisson_binary_varcpu
               sendbuf_2d(3, k) = varcpu_lvl(ilevel)%xg(xg_base + i, 3)
               sendbuf_2d(ndim+1:nprops, k) = chunk_gvl(ilevel)%gdata(k, 1:nval_per_grid)
               ! Determine owner CPU
-              ixm = int(sendbuf_2d(1, k) * twotol, 8)
-              iym = int(sendbuf_2d(2, k) * twotol, 8)
-              izm = int(sendbuf_2d(3, k) * twotol, 8)
-              xx_father(1,1) = ((dble(ixm) + 0.5d0) / twotol - dble(icoarse_min)) * scale
-              xx_father(1,2) = ((dble(iym) + 0.5d0) / twotol - dble(jcoarse_min)) * scale
-              xx_father(1,3) = ((dble(izm) + 0.5d0) / twotol - dble(kcoarse_min)) * scale
+              xx(1,1) = (sendbuf_2d(1, k) - dble(icoarse_min)) * scale
+              xx(1,2) = (sendbuf_2d(2, k) - dble(jcoarse_min)) * scale
+              xx(1,3) = (sendbuf_2d(3, k) - dble(kcoarse_min)) * scale
               if(ordering == 'ksection') then
-                 call cmp_ksection_cpumap(xx_father, c_tmp, 1)
+                 call cmp_ksection_cpumap(xx, c_tmp, 1)
               else
-                 call cmp_cpumap(xx_father, c_tmp, 1)
+                 call cmp_cpumap(xx, c_tmp, 1)
               end if
               dest(k) = c_tmp(1)
            end do

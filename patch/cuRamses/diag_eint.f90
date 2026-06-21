@@ -112,3 +112,89 @@ subroutine diag_check_eint(label, ilev_check)
   endif
 
 end subroutine diag_check_eint
+
+subroutine diag_check_nan(label)
+  use amr_commons
+  use hydro_commons
+  use poisson_commons, only: f
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  character(len=*), intent(in) :: label
+
+  integer :: ilevel, igrid, ind, iskip, icell, ncache, info, ivar
+  integer :: nan_uold_loc, nan_f_loc
+  integer :: nan_uold_glob, nan_f_glob
+  integer :: dzero_loc, dzero_glob
+  integer :: first_lev, first_ivar
+  real(dp) :: first_d
+
+  if(.not. hydro) return
+
+  nan_uold_loc = 0
+  nan_f_loc = 0
+  dzero_loc = 0
+  first_lev = 0
+  first_ivar = 0
+  first_d = 0d0
+
+  do ilevel = levelmin, nlevelmax
+     ncache = active(ilevel)%ngrid
+     do igrid = 1, ncache
+        do ind = 1, twotondim
+           iskip = ncoarse + (ind-1)*ngridmax
+           icell = iskip + active(ilevel)%igrid(igrid)
+           if(uold(icell,1) <= 0d0) dzero_loc = dzero_loc + 1
+           do ivar = 1, nvar
+              if(uold(icell,ivar) /= uold(icell,ivar)) then
+                 nan_uold_loc = nan_uold_loc + 1
+                 if(first_lev == 0) then
+                    first_lev = ilevel
+                    first_ivar = ivar
+                    first_d = uold(icell,1)
+                 end if
+              end if
+           end do
+           if(poisson .and. allocated(f)) then
+              do ivar = 1, ndim
+                 if(f(icell,ivar) /= f(icell,ivar)) then
+                    nan_f_loc = nan_f_loc + 1
+                 end if
+              end do
+           end if
+        end do
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(nan_uold_loc, nan_uold_glob, 1, &
+       MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(nan_f_loc, nan_f_glob, 1, &
+       MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(dzero_loc, dzero_glob, 1, &
+       MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+#else
+  nan_uold_glob = nan_uold_loc
+  nan_f_glob = nan_f_loc
+  dzero_glob = dzero_loc
+#endif
+  if(myid == 1) then
+     write(*,'(A,A,A,I10,A,I10,A,I10)') &
+          ' NaN_CHK ', trim(label), &
+          ': uold=', nan_uold_glob, ' f=', nan_f_glob, &
+          ' d0=', dzero_glob
+  end if
+  if(nan_uold_loc > 0) then
+     write(*,'(A,I4,A,A,A,I10,A,I2,A,I2,A,ES11.3)') &
+          ' NaN_CHK rank=', myid, ' ', trim(label), &
+          ' uold_nan=', nan_uold_loc, &
+          ' first_lev=', first_lev, ' first_ivar=', first_ivar, &
+          ' d=', first_d
+  end if
+  if(dzero_loc > 0 .and. nan_uold_loc == 0) then
+     write(*,'(A,I4,A,A,A,I10)') &
+          ' NaN_CHK rank=', myid, ' ', trim(label), &
+          ' d<=0_cells=', dzero_loc
+  end if
+end subroutine diag_check_nan

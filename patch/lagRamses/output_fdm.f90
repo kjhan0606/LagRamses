@@ -243,8 +243,8 @@ subroutine restore_psi_binary_varcpu
 
   integer(8) :: ixm, iym, izm
   type(mkey_t) :: mkey
-  real(dp) :: xg_recv(3), xx_father(1:1, 1:ndim), scale, twotol
-  integer :: c_tmp(1:1), nx_loc
+  real(dp) :: xg_recv(3), xx(1:nvector, 1:ndim), scale, twotol
+  integer :: c_tmp(1:nvector), nx_loc
 
   integer :: nread_total, nrecv_total, nskip_total, info2
   integer :: nread_g, nrecv_g, nskip_g
@@ -374,16 +374,13 @@ subroutine restore_psi_binary_varcpu
               sendbuf_2d(2, k) = varcpu_lvl(ilevel)%xg(xg_base + i, 2)
               sendbuf_2d(3, k) = varcpu_lvl(ilevel)%xg(xg_base + i, 3)
               sendbuf_2d(ndim+1:nprops, k) = chunk_pvl(ilevel)%pdata(k, 1:nval_per_grid)
-              ixm = int(sendbuf_2d(1, k) * twotol, 8)
-              iym = int(sendbuf_2d(2, k) * twotol, 8)
-              izm = int(sendbuf_2d(3, k) * twotol, 8)
-              xx_father(1,1) = ((dble(ixm) + 0.5d0) / twotol - dble(icoarse_min)) * scale
-              xx_father(1,2) = ((dble(iym) + 0.5d0) / twotol - dble(jcoarse_min)) * scale
-              xx_father(1,3) = ((dble(izm) + 0.5d0) / twotol - dble(kcoarse_min)) * scale
+              xx(1,1) = (sendbuf_2d(1, k) - dble(icoarse_min)) * scale
+              xx(1,2) = (sendbuf_2d(2, k) - dble(jcoarse_min)) * scale
+              xx(1,3) = (sendbuf_2d(3, k) - dble(kcoarse_min)) * scale
               if(ordering == 'ksection') then
-                 call cmp_ksection_cpumap(xx_father, c_tmp, 1)
+                 call cmp_ksection_cpumap(xx, c_tmp, 1)
               else
-                 call cmp_cpumap(xx_father, c_tmp, 1)
+                 call cmp_cpumap(xx, c_tmp, 1)
               end if
               dest(k) = c_tmp(1)
            end do
@@ -474,8 +471,8 @@ subroutine restore_psi_postlb
 
   integer(8) :: ixm, iym, izm
   type(mkey_t) :: mkey
-  real(dp) :: xg_recv(3), xx_father(1:1, 1:ndim), scale, twotol
-  integer :: c_tmp(1:1), nx_loc
+  real(dp) :: xg_recv(3), xx(1:nvector, 1:ndim), scale, twotol
+  integer :: c_tmp(1:nvector), nx_loc
 
   integer :: nread_total, nrecv_total, nskip_total, info2
   integer :: nread_g, nrecv_g, nskip_g
@@ -485,7 +482,7 @@ subroutine restore_psi_postlb
 
   ! Repair pass variables
   real(dp), allocatable :: repair_buf(:,:), repair_all(:,:)
-  integer :: nrepair, nrepair_g, nrepair_matched
+  integer :: nrepair, nrepair_g, nrepair_matched, nrepair_global
   integer, allocatable :: repair_counts(:), repair_displs(:)
   integer :: repair_total, nrepair_matched_g
 
@@ -657,41 +654,43 @@ subroutine restore_psi_postlb
      end do
      nlevel_data = ilevel
   end if
+#ifndef WITHOUTMPI
+  ! All ranks must call the same collectives at each level.
+  ! nlevel_data is rank-local (depends on file assignment), so synchronize.
+  call MPI_ALLREDUCE(MPI_IN_PLACE, nlevel_data, 1, &
+       MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, info)
+#endif
   if(myid==1) then
      write(*,*) 'PSI_POSTLB: file reading done, starting exchange'
      call flush(6)
   end if
   do ilevel = 1, nlevel_data
-     if(.not. allocated(clvl(ilevel)%xg_file)) cycle
      nlocal = chunk_ngrids(ilevel)
-     if(nlocal <= 0) cycle
 
      if(myid==1) then
         write(*,'(A,I3,A,I12)') ' PSI_POSTLB: exchange lv=', ilevel, ' n=', nlocal
         call flush(6)
      end if
      twotol = 2.0d0**(ilevel-1)
-     allocate(sendbuf_2d(1:nprops, 1:nlocal))
-     allocate(dest(nlocal))
+     allocate(sendbuf_2d(1:nprops, 1:max(nlocal,1)))
+     allocate(dest(max(nlocal,1)))
      do i = 1, nlocal
         sendbuf_2d(1, i) = clvl(ilevel)%xg_file(i, 1)
         sendbuf_2d(2, i) = clvl(ilevel)%xg_file(i, 2)
         sendbuf_2d(3, i) = clvl(ilevel)%xg_file(i, 3)
         sendbuf_2d(ndim+1:nprops, i) = clvl(ilevel)%pdata(i, 1:nval_per_grid)
-        ixm = int(sendbuf_2d(1, i) * twotol, 8)
-        iym = int(sendbuf_2d(2, i) * twotol, 8)
-        izm = int(sendbuf_2d(3, i) * twotol, 8)
-        xx_father(1,1) = ((dble(ixm) + 0.5d0) / twotol - dble(icoarse_min)) * scale
-        xx_father(1,2) = ((dble(iym) + 0.5d0) / twotol - dble(jcoarse_min)) * scale
-        xx_father(1,3) = ((dble(izm) + 0.5d0) / twotol - dble(kcoarse_min)) * scale
+        xx(1,1) = (sendbuf_2d(1, i) - dble(icoarse_min)) * scale
+        xx(1,2) = (sendbuf_2d(2, i) - dble(jcoarse_min)) * scale
+        xx(1,3) = (sendbuf_2d(3, i) - dble(kcoarse_min)) * scale
         if(ordering == 'ksection') then
-           call cmp_ksection_cpumap(xx_father, c_tmp, 1)
+           call cmp_ksection_cpumap(xx, c_tmp, 1)
         else
-           call cmp_cpumap(xx_father, c_tmp, 1)
+           call cmp_cpumap(xx, c_tmp, 1)
         end if
         dest(i) = c_tmp(1)
      end do
-     deallocate(clvl(ilevel)%xg_file, clvl(ilevel)%pdata)
+     if(allocated(clvl(ilevel)%xg_file)) deallocate(clvl(ilevel)%xg_file)
+     if(allocated(clvl(ilevel)%pdata))   deallocate(clvl(ilevel)%pdata)
 
      if(myid==1) then
         write(*,'(A,I3,A)') ' PSI_POSTLB: lv=', ilevel, ' dest done, sorting'
@@ -706,7 +705,7 @@ subroutine restore_psi_postlb
         idest = dest(i) - 1
         sendcnt(idest) = sendcnt(idest) + 1
      end do
-     allocate(sorted_buf(1:nprops, 1:nlocal))
+     allocate(sorted_buf(1:nprops, 1:max(nlocal,1)))
      sdispls(0) = 0
      do i = 1, ncpu-1
         sdispls(i) = sdispls(i-1) + sendcnt(i-1)
@@ -780,68 +779,69 @@ subroutine restore_psi_postlb
 
      ! --- Repair pass: Allgatherv misrouted items ---
 #ifndef WITHOUTMPI
-     if(nrepair > 0 .or. nskip_total > 0) then
+     ! Sync nrepair across all ranks so conditional is uniform
+     call MPI_ALLREDUCE(nrepair, nrepair_global, 1, &
+          MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+     if(nrepair_global > 0) then
         allocate(repair_counts(0:ncpu-1), repair_displs(0:ncpu-1))
         call MPI_ALLGATHER(nrepair, 1, MPI_INTEGER, &
              repair_counts, 1, MPI_INTEGER, MPI_COMM_WORLD, info)
         repair_total = sum(repair_counts)
 
-        if(repair_total > 0) then
-           repair_displs(0) = 0
-           do i = 1, ncpu-1
-              repair_displs(i) = repair_displs(i-1) + repair_counts(i-1)
+        repair_displs(0) = 0
+        do i = 1, ncpu-1
+           repair_displs(i) = repair_displs(i-1) + repair_counts(i-1)
+        end do
+        allocate(repair_all(1:nprops, 1:repair_total))
+        ! Scale for dp Allgatherv
+        repair_counts = repair_counts * nprops
+        repair_displs = repair_displs * nprops
+        call MPI_ALLGATHERV(repair_buf, nrepair*nprops, &
+             MPI_DOUBLE_PRECISION, repair_all, repair_counts, &
+             repair_displs, MPI_DOUBLE_PRECISION, MPI_COMM_WORLD, info)
+        ! Restore counts (unscale)
+        repair_counts = repair_counts / nprops
+        repair_displs = repair_displs / nprops
+        repair_total = sum(repair_counts)
+
+        if(myid==1) then
+           write(*,'(A,I3,A,I10)') &
+                ' PSI_POSTLB: lv=', ilevel, ' repair pass, ntotal=', repair_total
+           call flush(6)
+        end if
+
+        nrepair_matched = 0
+        !$OMP PARALLEL DO DEFAULT(SHARED) &
+        !$OMP PRIVATE(xg_recv, ixm, iym, izm, mkey, igrid, iskip, icell, base) &
+        !$OMP REDUCTION(+:nrepair_matched) &
+        !$OMP SCHEDULE(STATIC, 4096)
+        do i = 1, repair_total
+           xg_recv(1:ndim) = repair_all(1:ndim, i)
+           ixm = int(xg_recv(1) * twotol, 8)
+           iym = int(xg_recv(2) * twotol, 8)
+           izm = int(xg_recv(3) * twotol, 8)
+           mkey = morton_encode(ixm, iym, izm)
+           igrid = morton_hash_lookup(mort_table(ilevel), mkey)
+           if(igrid <= 0 .or. igrid > ngridmax) cycle
+           nrepair_matched = nrepair_matched + 1
+           do iskip = 1, twotondim
+              icell = igrid + ncoarse + (iskip-1)*ngridmax
+              base = ndim + (iskip-1)*2
+              psi_re(icell) = repair_all(base + 1, i)
+              psi_im(icell) = repair_all(base + 2, i)
            end do
-           allocate(repair_all(1:nprops, 1:repair_total))
-           ! Scale for dp Allgatherv
-           repair_counts = repair_counts * nprops
-           repair_displs = repair_displs * nprops
-           call MPI_ALLGATHERV(repair_buf, nrepair*nprops, &
-                MPI_DOUBLE_PRECISION, repair_all, repair_counts, &
-                repair_displs, MPI_DOUBLE_PRECISION, MPI_COMM_WORLD, info)
-           ! Restore counts (unscale)
-           repair_counts = repair_counts / nprops
-           repair_displs = repair_displs / nprops
-           repair_total = sum(repair_counts)
+        end do
+        !$OMP END PARALLEL DO
 
-           if(myid==1) then
-              write(*,'(A,I3,A,I10)') &
-                   ' PSI_POSTLB: lv=', ilevel, ' repair pass, ntotal=', repair_total
-              call flush(6)
-           end if
+        nrecv_total = nrecv_total + nrepair_matched
+        deallocate(repair_all)
 
-           nrepair_matched = 0
-           !$OMP PARALLEL DO DEFAULT(SHARED) &
-           !$OMP PRIVATE(xg_recv, ixm, iym, izm, mkey, igrid, iskip, icell, base) &
-           !$OMP REDUCTION(+:nrepair_matched) &
-           !$OMP SCHEDULE(STATIC, 4096)
-           do i = 1, repair_total
-              xg_recv(1:ndim) = repair_all(1:ndim, i)
-              ixm = int(xg_recv(1) * twotol, 8)
-              iym = int(xg_recv(2) * twotol, 8)
-              izm = int(xg_recv(3) * twotol, 8)
-              mkey = morton_encode(ixm, iym, izm)
-              igrid = morton_hash_lookup(mort_table(ilevel), mkey)
-              if(igrid <= 0 .or. igrid > ngridmax) cycle
-              nrepair_matched = nrepair_matched + 1
-              do iskip = 1, twotondim
-                 icell = igrid + ncoarse + (iskip-1)*ngridmax
-                 base = ndim + (iskip-1)*2
-                 psi_re(icell) = repair_all(base + 1, i)
-                 psi_im(icell) = repair_all(base + 2, i)
-              end do
-           end do
-           !$OMP END PARALLEL DO
-
-           nrecv_total = nrecv_total + nrepair_matched
-           deallocate(repair_all)
-
-           call MPI_ALLREDUCE(nrepair_matched, nrepair_matched_g, 1, &
-                MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info2)
-           if(myid==1) then
-              write(*,'(A,I3,A,I10)') &
-                   ' PSI_POSTLB: lv=', ilevel, ' repair matched=', nrepair_matched_g
-              call flush(6)
-           end if
+        call MPI_ALLREDUCE(nrepair_matched, nrepair_matched_g, 1, &
+             MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info2)
+        if(myid==1) then
+           write(*,'(A,I3,A,I10)') &
+                ' PSI_POSTLB: lv=', ilevel, ' repair matched=', nrepair_matched_g
+           call flush(6)
         end if
         deallocate(repair_counts, repair_displs)
      end if

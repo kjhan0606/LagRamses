@@ -92,8 +92,6 @@ subroutine newdt_fine(ilevel)
 
      if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
         ! HJM fluid level: advection CFL from Madelung velocity
-        ! v = hbar*grad(theta)/a^2; cells with C1 > threshold excluded
-        ! (about to be refined to wave solver)
         call fdm_vmax_level(ilevel, dtheta_max)
         dt_adv = huge(1.0d0)
         if(dtheta_max > 0.0d0) then

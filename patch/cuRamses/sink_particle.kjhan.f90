@@ -30,10 +30,14 @@ subroutine create_sink
      call virtual_tree_fine(ilevel)
   end do
 
+  call diag_check_nan('sink_post_killtree')
+
   ! Get the star density value in each cell
   do ilevel=levelmin,nlevelmax
      call kjhan_get_rho_star(ilevel)
   enddo
+
+  call diag_check_nan('sink_post_rhostar')
 
   ! Create new sink particles
   ! and gather particle from the grid
@@ -42,6 +46,8 @@ subroutine create_sink
      if(ilevel>=levelmin)call kjhan_make_sink(ilevel)
      call merge_tree_fine(ilevel)
   end do
+
+  call diag_check_nan('sink_post_makesink')
 
   ! Remove particle clouds around old sinks
   call kjhan_kill_cloud(1)
@@ -62,6 +68,8 @@ subroutine create_sink
      call virtual_tree_fine(ilevel)
   end do
 
+  call diag_check_nan('sink_pre_virt')
+
   ! Update hydro quantities for split cells
   if(hydro)then
      do ilevel=nlevelmax,levelmin,-1
@@ -78,12 +86,16 @@ subroutine create_sink
      end do
   end if
 
+  call diag_check_nan('sink_post_virt')
+
   jsink=0d0
   ! Compute Bondi parameters and gather particle
   do ilevel=nlevelmax,levelmin,-1
      if(bondi)call bondi_hoyle(ilevel)
      call merge_tree_fine(ilevel)
   end do
+
+  call diag_check_nan('sink_post_bondi')
 
 end subroutine create_sink
 !################################################################
