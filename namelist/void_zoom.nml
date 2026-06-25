@@ -1,0 +1,90 @@
+!==============================================================================
+! VoidSim -- inverted-cluster void zoom, hydro evolution (lagRamses/cuRAMSES)
+!
+! Evolves a GenetIC "inverted IC" (delta -> -delta on the back-tracked
+! cluster Lagrangian patch, that patch set as the zoom region) down to z=0.
+! Demonstrates the void numerical-dissipation refinement keys added to
+! &REFINE_PARAMS: err_jump_u, ekin_flux_refine, d_keflux_max, floor_keflux.
+!
+! Grid:  levelmin=9 (512^3 parent)  ->  levelmax=14 (~0.5 h^-1 kpc zoom).
+! ICs:   GenetIC grafic output, one directory per refinement level.
+!==============================================================================
+
+&RUN_PARAMS
+cosmo=.true.
+pic=.true.
+poisson=.true.
+hydro=.true.
+nrestart=0
+nremap=10
+nsubcycle=1,2
+ncontrol=1
+use_fftw=.true.        ! built with make USE_FFTW=1 (direct Poisson)
+verbose=.false.
+/
+
+&OUTPUT_PARAMS
+noutput=6
+aout=0.1,0.2,0.33,0.5,0.71,1.0   ! z = 9,4,2,1,0.41,0
+/
+
+&INIT_PARAMS
+filetype='grafic'
+! One grafic directory per level produced by GenetIC (outformat grafic).
+! initfile(1) = coarse (levelmin) ... last = finest grafic level.
+initfile(1)='/scratch/voidsim/ic_inverted/level_009'
+initfile(2)='/scratch/voidsim/ic_inverted/level_010'
+initfile(3)='/scratch/voidsim/ic_inverted/level_011'
+initfile(4)='/scratch/voidsim/ic_inverted/level_012'
+initfile(5)='/scratch/voidsim/ic_inverted/level_013'
+/
+
+&AMR_PARAMS
+levelmin=9
+levelmax=14
+ngridmax=2000000
+npartmax=3000000
+nexpand=1
+boxlen=512.0           ! h^-1 Mpc (match the GenetIC parent box)
+/
+
+&POISSON_PARAMS
+epsilon=1.d-4
+/
+
+&HYDRO_PARAMS
+gamma=1.6666667
+courant_factor=0.8
+slope_type=1
+scheme='muscl'
+riemann='hllc'
+pressure_fix=.true.
+/
+
+&PHYSICS_PARAMS
+cooling=.true.
+metal=.true.
+haardt_madau=.true.    ! UV background; self_shielding below protects dense gas
+self_shielding=.true.
+T2_star=1.d4
+n_star=0.1
+eps_star=0.02
+T2thres_SF=1.d4
+/
+
+&REFINE_PARAMS
+! --- Lagrangian zoom mask (high-res region) + standard gradient AMR ---
+m_refine=9*8.          ! refine cells holding > 8 high-res particles (per level)
+err_grad_d=0.3         ! density-gradient refinement
+interpol_var=1
+interpol_type=0
+
+! --- Void numerical-dissipation control (NEW) ---------------------------
+! Eulerian advection truncation error spuriously heats fast, low-density
+! void gas. err_grad_u is bulk-velocity-suppressed and under-refines it,
+! so add two un-suppressed triggers, gated to void densities.
+err_jump_u=0.5         ! |dv|/c_s jump (Mach-of-jump); catches shear/shocks in fast flow
+ekin_flux_refine=4.0   ! |v|^2/c_s^2 (Mach^2) > 4 => supersonic cell (~rho|v|^3/dx dissipation)
+d_keflux_max=0.2       ! apply the two above ONLY where rho < 0.2 * mean (void gas)
+floor_keflux=1.d-30    ! denominator floor (leave at default)
+/

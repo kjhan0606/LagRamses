@@ -10,6 +10,11 @@ bin/ramses_final3d
 bin/ramses_final2d
 bin/ramses_final1d
 bin/*.exe
+bin/ramses_ref3d
+bin/ramses_slab3d
+bin/ramses_final2d
+bin/test_darkcool
+bin/darkcool_*.dat
 
 # CUDA build artifacts
 *.cu.o

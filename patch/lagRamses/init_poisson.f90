@@ -236,7 +236,7 @@ subroutine restore_poisson_binary_varcpu
   ! Morton hash lookup
   integer(8) :: ixm, iym, izm
   type(mkey_t) :: mkey
-  real(dp) :: xg_recv(3), xx(1:nvector, 1:ndim), scale, twotol
+  real(dp) :: xg_recv(3), xx_pos(1:nvector, 1:ndim), scale, twotol
   integer :: c_tmp(1:nvector), nx_loc, nxny
 
   if(myid==1) write(*,*) 'Binary varcpu poisson restore (chunked ksection): ncpu_file=', ncpu_file
@@ -364,11 +364,11 @@ subroutine restore_poisson_binary_varcpu
               sendbuf_2d(3, k) = varcpu_lvl(ilevel)%xg(xg_base + i, 3)
               sendbuf_2d(ndim+1:nprops, k) = chunk_gvl(ilevel)%gdata(k, 1:nval_per_grid)
               ! Determine owner CPU
-              xx(1,1) = (sendbuf_2d(1, k) - dble(icoarse_min)) * scale
-              xx(1,2) = (sendbuf_2d(2, k) - dble(jcoarse_min)) * scale
-              xx(1,3) = (sendbuf_2d(3, k) - dble(kcoarse_min)) * scale
+              xx_pos(1,1) = (sendbuf_2d(1, k) - dble(icoarse_min)) * scale
+              xx_pos(1,2) = (sendbuf_2d(2, k) - dble(jcoarse_min)) * scale
+              xx_pos(1,3) = (sendbuf_2d(3, k) - dble(kcoarse_min)) * scale
               if(ordering == 'ksection') then
-                 call cmp_ksection_cpumap(xx, c_tmp, 1)
+                 call cmp_ksection_cpumap(xx_pos, c_tmp, 1)
               else
                  call cmp_cpumap(xx, c_tmp, 1)
               end if

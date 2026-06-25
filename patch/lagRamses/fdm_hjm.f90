@@ -454,7 +454,7 @@ subroutine fdm_hjm_init()
 
   ! Clamp to valid range
   if(fdm_first_wave_level <= levelmin) fdm_first_wave_level = levelmin + 1
-  if(fdm_first_wave_level > nlevelmax) fdm_first_wave_level = nlevelmax
+  if(fdm_first_wave_level > nlevelmax) fdm_first_wave_level = nlevelmax + 1
 
   if(myid == 1) then
      write(*,'(A)')       ' ============================================'
