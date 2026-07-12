@@ -815,6 +815,11 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   ! so make_virtual_fine_dp can ghost-sync them like a grid array).
   real(dp),dimension(:),allocatable::br,bi,rr,ri,rhr,rhi,pr,pi
   real(dp),dimension(:),allocatable::vr,vi,sr,si,trr,tii,xr,xi
+  ! Conservative boundary bookkeeping (hybrid)
+  real(dp),dimension(:),allocatable::dmb
+  integer::idim,inbor,icn,icpn
+  real(dp)::cfac,vratio,psb_re,psb_im,drho_w,rho_old,sfac,gre,gim
+  logical::gfound
 
   dx = 0.5d0**ilevel
   nx_loc = icoarse_max - icoarse_min + 1
@@ -959,6 +964,74 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         igrid = next(igrid)
      end do
   end do
+
+  ! ================================================================
+  ! Conservative boundary bookkeeping (hybrid): CN with Dirichlet
+  ! ghosts exchanges mass through coarse-fine faces. The change of
+  ! |psi_i|^2 due to a ghost face is EXACTLY (identity, no approx)
+  !   drho_i = -(hbar*dt/dx^2) * Im(psibar_i^* psi_g)
+  ! with psibar = (psi^n + psi^{n+1})/2 = psi^{n+1} - x/2.
+  ! Credit -drho_i * (V_fine/V_parent) to the parent-level neighbour
+  ! cell so total fluid+wave mass is machine-conserved.
+  ! ================================================================
+  if(fdm_use_hjm) then
+     allocate(dmb(ntot)); dmb = 0.0d0
+     cfac = hbar_code * dt_half / dx_loc**2
+     vratio = 0.5d0**ndim
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0) then
+              do idim=1,ndim
+                 do inbor=1,2
+                    call fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icn)
+                    if(icn == 0) then
+                       call fdm_wave_ghost(igrid, ilevel, idim, inbor, gre, gim, gfound)
+                       if(gfound) then
+                          psb_re = psi_re(icell) - 0.5d0*xr(icell)
+                          psb_im = psi_im(icell) - 0.5d0*xi(icell)
+                          drho_w = -cfac * (psb_re*gim - psb_im*gre)
+                          icpn = nbor(igrid, 2*(idim-1)+inbor)
+                          if(icpn > 0) dmb(icpn) = dmb(icpn) - drho_w*vratio
+                       end if
+                    end if
+                 end do
+              end do
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+     ! Reduce contributions accumulated on virtual parent cells to owners
+     call make_virtual_reverse_dp(dmb(1), ilevel-1)
+     ! Apply to local leaf cells at the parent level
+     do ind=1,twotondim
+        iskip = ncoarse + (ind-1)*ngridmax
+        igrid = headl(myid, ilevel-1)
+        do while(igrid > 0)
+           icell = igrid + iskip
+           if(son(icell) == 0 .and. dmb(icell) /= 0.0d0) then
+              if(ilevel-1 < fdm_first_wave_level) then
+                 ! Fluid parent: psi_re IS rho
+                 psi_re(icell) = max(psi_re(icell) + dmb(icell), 1.0d-15)
+              else
+                 ! Wave parent: rescale amplitude, keep phase
+                 rho_old = psi_re(icell)**2 + psi_im(icell)**2
+                 if(rho_old > 0.0d0) then
+                    sfac = sqrt(max(0.0d0, (rho_old + dmb(icell))/rho_old))
+                    psi_re(icell) = psi_re(icell)*sfac
+                    psi_im(icell) = psi_im(icell)*sfac
+                 end if
+              end if
+           end if
+           igrid = next(igrid)
+        end do
+     end do
+     call make_virtual_fine_dp(psi_re(1), ilevel-1)
+     call make_virtual_fine_dp(psi_im(1), ilevel-1)
+     deallocate(dmb)
+  end if
 
   deallocate(br,bi,rr,ri,rhr,rhi,pr,pi,vr,vi,sr,si,trr,tii,xr,xi)
 
@@ -1424,7 +1497,9 @@ subroutine fdm_drift_fd_explicit(ilevel, dt_half)
                        lap_re = lap_re + psi_re(icell_nbor)
                        lap_im = lap_im + psi_im(icell_nbor)
                     else if(fdm_use_hjm) then
-                       ! Dirichlet ghost from the (fluid) parent level
+                       ! Dirichlet ghost from the (fluid) parent level.
+                       ! NOTE: no conservative bookkeeping here (only the CN
+                       ! path has it) — use fdm_kinetic=1 for hybrid runs.
                        call fdm_wave_ghost(igrid, ilevel, idim, inbor, gre, gim, gfound)
                        if(gfound) then
                           lap_re = lap_re + gre
