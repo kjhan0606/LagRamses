@@ -1729,6 +1729,7 @@ subroutine fdm_init_psi()
   integer::ix,iy,iz,nx_loc,ng1,ng2,ng3
   integer(i8b)::N_total,idx
   real(dp)::dx,dxL,scale,dx_loc,rho_cell,theta_cell,amp
+  real(dp)::dm_share
   real(dp)::xx1,xx2,xx3,p1,p2,p3,mass_loc,mass_glob
   real(dp),dimension(1:3)::skip_loc
   real(dp),dimension(1:twotondim,1:3)::xc
@@ -1759,6 +1760,13 @@ subroutine fdm_init_psi()
   if(ndim>0)skip_loc(1)=dble(icoarse_min)
   if(ndim>1)skip_loc(2)=dble(jcoarse_min)
   if(ndim>2)skip_loc(3)=dble(kcoarse_min)
+
+  ! DM share of total matter: with hydro the gas carries Omega_b, so
+  ! |psi|^2 must average (1 - Omega_b/Omega_m) for the total Poisson
+  ! source to have mean 1 (mirrors the particle-mass convention).
+  dm_share = 1.0d0
+  if(hydro .and. omega_m > 0.0d0) dm_share = 1.0d0 - omega_b/omega_m
+  if(myid==1) write(*,'(A,F8.5)') ' FDM: DM share of total matter = ', dm_share
 
   allocate(rho_3d(1:N_total))
   allocate(theta_3d(1:N_total))
@@ -1854,7 +1862,7 @@ subroutine fdm_init_psi()
               i3=max(1,min(ng3,int(xx3)+1))
               idx = int(i1,i8b)+int(i2-1,i8b)*int(ng1,i8b) &
                    +int(i3-1,i8b)*int(ng1,i8b)*int(ng2,i8b)
-              rho_cell = max(rho_3d(idx),0.0d0)
+              rho_cell = dm_share*max(rho_3d(idx),0.0d0)
               theta_cell = theta_3d(idx)
               if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
                  ! Fluid level: store (rho, S) with S unwrapped
@@ -1921,6 +1929,7 @@ subroutine fdm_init_psi_distributed()
   integer(C_INTPTR_T)::loc_n0,start0,alloc_local
   integer::loc_n0_i,start0_i
   real(dp)::dx,dxL,scale,dx_loc,amp,rho_c,re,im,dvol
+  real(dp)::dm_share
   real(dp)::p1,p2,p3,xx1,xx2,xx3
   real(dp),dimension(1:3)::skip_loc
   real(dp),dimension(1:twotondim,1:3)::xc
@@ -1944,6 +1953,10 @@ subroutine fdm_init_psi_distributed()
   integer::n_leaf,n_recv,slot,s
 
   ! ---- Grid / unit setup (identical to serial fdm_init_psi) ----
+  ! DM share: gas carries Omega_b under hydro (see serial routine)
+  dm_share = 1.0d0
+  if(hydro .and. omega_m > 0.0d0) dm_share = 1.0d0 - omega_b/omega_m
+  if(myid==1) write(*,'(A,F8.5)') ' FDM: DM share of total matter = ', dm_share
   ng1 = n1(levelmin); ng2 = n2(levelmin); ng3 = n3(levelmin)
   N_total = int(ng1,i8b)*int(ng2,i8b)*int(ng3,i8b)
   nx_loc = icoarse_max - icoarse_min + 1
@@ -2026,12 +2039,12 @@ subroutine fdm_init_psi_distributed()
   allocate(psislab_im(0:max(locsize,1_i8b)-1))
   if(fdm_use_hjm)then
      do lidx=0,locsize-1
-        psislab_re(lidx) = max(rho_slab(lidx),0.0d0)
+        psislab_re(lidx) = dm_share*max(rho_slab(lidx),0.0d0)
         psislab_im(lidx) = hbar_code*theta_slab(lidx)
      end do
   else
      do lidx=0,locsize-1
-        rho_c = max(rho_slab(lidx),0.0d0)
+        rho_c = dm_share*max(rho_slab(lidx),0.0d0)
         amp = sqrt(rho_c)
         psislab_re(lidx) = amp*cos(theta_slab(lidx))
         psislab_im(lidx) = amp*sin(theta_slab(lidx))

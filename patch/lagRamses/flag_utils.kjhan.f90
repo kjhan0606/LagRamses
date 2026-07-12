@@ -580,10 +580,11 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
   dx=0.5d0**ilevel
   dx_loc=dx*scale
   vol_loc=dx_loc**3
-  ! FDM quasi-Lagrangian reference: mass_sph uses omega_b (=0 here, hydro off),
-  ! so use the total-matter mean mass per levelmin cell instead (|psi|^2 IS the
-  ! total DM density, mean 1). Without this d_scale=0 -> refine everything.
+  ! FDM quasi-Lagrangian reference: mean DM mass per levelmin cell.
+  ! With hydro the gas carries Omega_b and |psi|^2 averages
+  ! (1 - Omega_b/Omega_m); without hydro |psi|^2 averages 1.
   d_scale_fdm=0.5d0**(ndim*levelmin)/vol_loc
+  if(hydro .and. omega_m > 0.0d0) d_scale_fdm = d_scale_fdm*(1.0d0-omega_b/omega_m)
 
   if(poisson)then
 
