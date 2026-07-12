@@ -1693,8 +1693,10 @@ subroutine fR_solve_level(ilevel, icount)
   logical,external::level_fft_ok
 #endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   ! Get background values
   call fR_background(aexp, R_bar, fR_bar)
@@ -2099,8 +2101,10 @@ subroutine nDGP_solve_level(ilevel, icount)
   logical,external::level_fft_ok
 #endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   ! Compute β(a)
   beta = nDGP_beta(aexp, omega_rc, nDGP_branch)
@@ -2460,8 +2464,10 @@ subroutine symmetron_solve_level(ilevel, icount)
   logical,external::level_fft_ok
 #endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   ! Seed the broken-phase VEV chi_bar(a) = sqrt(1-(a_ssb/a)^3) into
   ! cells still at exactly 0. The field equation is homogeneous in
@@ -2915,8 +2921,10 @@ subroutine dilaton_solve_level(ilevel, icount)
   logical,external::level_fft_ok
 #endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   ! Model constants from (beta0, range)
   xi_d = L_dilaton/2997.92458d0
@@ -3352,8 +3360,10 @@ subroutine galileon_solve_level(ilevel, icount)
   logical,external::level_fft_ok
 #endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   ! Compute β_G(a) and Vainshtein coeff
   if(galileon_tracker) then

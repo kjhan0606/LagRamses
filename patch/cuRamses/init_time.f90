@@ -508,6 +508,8 @@ subroutine init_cosmo
   ! Scale displacement in Mpc to code velocity (v=dx/dtau)
   ! in coarse cell units per conformal time
   vfact(1)=aexp*fpeebl(aexp)*sqrt(omega_m*mfac(aexp)/aexp+omega_l*f_de(aexp,w0,wa)*aexp*aexp+omega_k)
+  if(myid==1)write(*,'(A,ES14.6,A,ES14.6)') ' IC velocity factor: vfact(1)=',vfact(1), &
+       & '  fpeebl(aexp)=',fpeebl(aexp)
   ! This scale factor is different from vfact in grafic by h0/aexp
 
 contains
