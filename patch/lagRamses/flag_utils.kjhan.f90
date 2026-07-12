@@ -596,9 +596,17 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
               do i=1,ncell
                  ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
               end do
-           else
+           else if(hydro)then
               do i=1,ncell
                  ok(i)=ok(i).or.(uold(ind_cell(i),1)>=m_refine_eff(ilevel)*d_scale)
+              end do
+           else
+              ! dmonly: uold is NOT allocated (hydro=.false.) — use the
+              ! particle density rho (mean-density units, mean=1). The
+              ! particle-count criterion is rho >= m_refine * d_scale_fdm
+              ! (same reference mass per levelmin cell as the FDM branch).
+              do i=1,ncell
+                 ok(i)=ok(i).or.(rho(ind_cell(i))>=m_refine_eff(ilevel)*d_scale_fdm)
               end do
            end if
         else
@@ -641,9 +649,17 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
               do i=1,ncell
                  ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
               end do
-           else
+           else if(hydro)then
               do i=1,ncell
                  ok(i)=ok(i).or.(uold(ind_cell(i),1)>=m_refine_eff(ilevel)*d_scale)
+              end do
+           else
+              ! dmonly: uold is NOT allocated (hydro=.false.) — use the
+              ! particle density rho (mean-density units, mean=1). The
+              ! particle-count criterion is rho >= m_refine * d_scale_fdm
+              ! (same reference mass per levelmin cell as the FDM branch).
+              do i=1,ncell
+                 ok(i)=ok(i).or.(rho(ind_cell(i))>=m_refine_eff(ilevel)*d_scale_fdm)
               end do
            end if
         endif
