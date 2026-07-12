@@ -70,12 +70,12 @@ subroutine pbh_evap_fine(ilevel)
      nfall_all=pbh_nfallback_loc
 #endif
      pbh_einj_tot=einj_all
-     if(myid==1)write(*,112)aexp,wbeg*ratio,rho_tot,einj_all,nfall_all
+     if(myid==1)write(*,112)aexp,wbeg*ratio,rho_tot,einj_all,nfall_all,eint_tot
   end if
 
 111 format('   Entering pbh_evap_fine for level ',I2)
 112 format(' PBHDIAG aexp=',ES14.7,' w=',ES16.9,' rho_tot=',ES16.9, &
-         & ' einj[erg]=',ES14.7,' nfallback=',I12)
+         & ' einj[erg]=',ES14.7,' nfallback=',I12,' eint=',ES16.9)
 end subroutine pbh_evap_fine
 
 !=======================================================================
