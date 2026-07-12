@@ -1,18 +1,12 @@
 % cuRAMSES III — Avengers Assembly:
 % non-standard cosmological physics suite
 % (SIDM / dark energy & non-GR gravity / FDM / PBH)
+% JCAP style (jcappub.sty, SISSA Medialab)
 %
-% Title/subtitle per request:
-%   제목: 어벤저스 어셈블리  부제: 뭘 좋아할지 몰라서 다 넣었어
-%
-\documentclass[fleqn,usenatbib]{mnras}
-
-\usepackage{amsmath,amssymb}
-\usepackage{graphicx}
+\documentclass[11pt,a4paper]{article}
+\usepackage{jcappub}
 \usepackage{booktabs}
 \usepackage{multirow}
-\usepackage{xcolor}
-\usepackage{hyperref}
 
 \newcommand{\ramses}{\textsc{ramses}}
 \newcommand{\curamses}{\textsc{cuRAMSES}}
@@ -22,28 +16,17 @@
 \newcommand{\Mpl}{M_{\rm Pl}}
 \newcommand{\kms}{\,{\rm km\,s^{-1}}}
 
-\title[Avengers Assembly]
-{Avengers Assembly: We Didn't Know What You'd Like,\\
+\title{\boldmath Avengers Assembly: We Didn't Know What You'd Like,
 So We Put Everything In}
 
-\author[J.~Kim]{
-Juhan Kim$^{1}$\thanks{E-mail: kjhan@kias.re.kr}
-\\
-$^{1}$Center for Advanced Computation, Korea Institute for Advanced Study,
-85 Hoegiro, Dongdaemun-gu, Seoul 02455, Republic of Korea
-}
+\author[a,1]{Juhan Kim\note{Corresponding author.}}
 
-\date{Accepted XXX. Received YYY; in original form ZZZ}
-\pubyear{2026}
+\affiliation[a]{Center for Advanced Computation, Korea Institute for Advanced Study,\\
+85 Hoegiro, Dongdaemun-gu, Seoul 02455, Republic of Korea}
 
-\begin{document}
-\label{firstpage}
-\pagerange{\pageref{firstpage}--\pageref{lastpage}}
-\maketitle
+\emailAdd{kjhan@kias.re.kr}
 
-% ===================================================================
-\begin{abstract}
-We present the non-standard cosmology suite of the \curamses\
+\abstract{We present the non-standard cosmology suite of the \curamses\
 adaptive mesh refinement (AMR) code (\curamses~III), which
 assembles, within a single code base, essentially every popular
 extension of $\Lambda$CDM: (i) \textbf{self-interacting dark
@@ -73,13 +56,14 @@ model, agreeing to $2$--$5$ per cent with residual signs explained
 by screening. We document the algorithms, unit conventions,
 namelist interfaces and the verification methodology, providing a
 self-contained reference for non-standard cosmological simulations
-with AMR codes.
-\end{abstract}
+with AMR codes.}
 
-\begin{keywords}
-methods: numerical -- cosmology: simulations -- dark energy --
-dark matter -- gravitation -- neutrinos
-\end{keywords}
+\keywords{cosmological simulations, dark energy theory, modified gravity,
+dark matter theory}
+
+\begin{document}
+\maketitle
+
 
 % ===================================================================
 \section{Introduction}
@@ -167,10 +151,10 @@ possible partners. A scatter occurs when a uniform deviate falls
 below $P$; post-scattering velocities are constructed in the
 centre-of-mass frame,
 \begin{equation}
-\bmath{v}'_{i} = \bmath{v}_{\rm cm}
- + \frac{m_j}{m_i+m_j}\,|v'_{\rm rel}|\,\hat{\bmath{n}},\qquad
-\bmath{v}'_{j} = \bmath{v}_{\rm cm}
- - \frac{m_i}{m_i+m_j}\,|v'_{\rm rel}|\,\hat{\bmath{n}},
+\boldsymbol{v}'_{i} = \boldsymbol{v}_{\rm cm}
+ + \frac{m_j}{m_i+m_j}\,|v'_{\rm rel}|\,\hat{\boldsymbol{n}},\qquad
+\boldsymbol{v}'_{j} = \boldsymbol{v}_{\rm cm}
+ - \frac{m_i}{m_i+m_j}\,|v'_{\rm rel}|\,\hat{\boldsymbol{n}},
 \end{equation}
 which conserves momentum by construction and kinetic energy
 exactly for elastic scattering.
@@ -220,13 +204,15 @@ dark-energy and modified-gravity models sharing one solver
 infrastructure. Table~\ref{tab:models} summarises the models,
 their parameters and their verification status.
 
-\begin{table*}
+\begin{table}
 \centering
 \caption{The dark energy and gravity battery. ``Linear response''
 lists the analytically validated unscreened limit; the last column
 the accuracy achieved in dedicated unit tests of the discretised
 equations (see Section~\ref{sec:verification}).}
 \label{tab:models}
+\footnotesize
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{lllll}
 \toprule
 Model & Switch / namelist & Background & Linear response & Unit-test accuracy \\
@@ -245,8 +231,8 @@ Dilaton (Brax+12) & \code{use\_dilaton} & $\Lambda$CDM & $2\beta(a)^2 k^2/(k^2+m
 Cubic Galileon (tracker) & \code{use\_galileon} & tracker $E^2(a)$ & $\Geff/G(a{=}1)=1.844$ & 5 digits \\
 QUMOND & \code{use\_mond} & --- & $\nu(|g_N|/a_0)$ & $\mu\nu$ conjugacy $2\times10^{-16}$ \\
 \bottomrule
-\end{tabular}
-\end{table*}
+\end{tabular}}
+\end{table}
 
 \subsection{Unified Poisson-solver framework}
 \label{sec:unified}
@@ -364,7 +350,7 @@ expansion, including the DM mass-evolution factor in the
 detectable: an isolation run reproduced the inconsistent-$H$
 growth prediction to $0.2$ per cent); (ii) the same factor
 multiplying the Poisson source; (iii) the momentum-conservation
-velocity term $+\beta\dot\varphi\,\bmath{v}$, split across the two
+velocity term $+\beta\dot\varphi\,\boldsymbol{v}$, split across the two
 half-kicks of the KDK integrator; and (iv) the fifth-force
 enhancement $\Geff=G(1+2\beta^2)$ between matter particles.
 
@@ -801,5 +787,4 @@ Winther H.~A., et al., 2015, MNRAS, 454, 4208
 
 \end{thebibliography}
 
-\label{lastpage}
 \end{document}
