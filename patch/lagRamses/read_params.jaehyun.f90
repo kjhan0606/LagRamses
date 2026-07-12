@@ -82,7 +82,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   namelist/pbh_params/pbh_table_file,pbh_fraction,pbh_boost, &
        & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance, &
        & pbh_mf_model,pbh_spin_model,pbh_hawking_model, &
-       & pbh_epsdep_model,pbh_fheat_model
+       & pbh_epsdep_model,pbh_fheat_model,pbh_cr_ivar
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
        & n_iter_mond,mond_eps,g_ext_mond
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
@@ -883,6 +883,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(trim(pbh_energy_sink)/='local_heat' .and. &
           & trim(pbh_energy_sink)/='removed') then
         if(myid==1) write(*,*) 'ERROR: pbh_energy_sink must be local_heat or removed'
+        call clean_stop
+     end if
+     if(pbh_cr_ivar/=0 .and. (pbh_cr_ivar<=ndim+2 .or. pbh_cr_ivar>nvar)) then
+        if(myid==1) write(*,*) 'ERROR: pbh_cr_ivar must be 0 or a passive slot in (', &
+             & ndim+2, ',', nvar, ']'
         call clean_stop
      end if
      call pbh_read_table(myid)

@@ -29,11 +29,16 @@ module pbh_commons
   character(LEN=32)  :: pbh_hawking_model = 'any'
   character(LEN=32)  :: pbh_epsdep_model  = 'any'
   character(LEN=32)  :: pbh_fheat_model   = 'any'
+  ! T1 cosmic-ray tracking: deposit the hadronic-channel energy (table
+  ! column Qtilde_cr) into the passive scalar uold(:,pbh_cr_ivar) as a
+  ! passively advected reservoir (no pressure coupling; 0 = off)
+  integer            :: pbh_cr_ivar       = 0
 
   ! ---- loaded table (t stored in seconds) ----
   integer :: pbh_n = 0
   real(dp), allocatable :: tab_a(:), tab_la(:), tab_t(:), tab_g(:)
-  real(dp), allocatable :: tab_q(:), tab_lam(:), tab_qc(:)
+  real(dp), allocatable :: tab_q(:), tab_lam(:), tab_qc(:), tab_qcr(:)
+  integer :: pbh_ncol = 7
   integer(kind=8)    :: pbh_cksum = 0        ! adler32 of the data section
   character(LEN=256) :: pbh_model_line = ''  ! "# model: ..." header line
   logical :: pbh_table_loaded = .false.
@@ -44,9 +49,10 @@ module pbh_commons
   real(dp) :: pbh_gnorm  = 1.0d0   ! g_table(pbh_anorm)
   real(dp) :: pbh_qcnorm = 0.0d0   ! Qtilde_table(pbh_anorm)
 
-  ! ---- diagnostics (accumulated by pbh_evap_fine; einj in erg) ----
+  ! ---- diagnostics (accumulated by pbh_evap_fine; einj/ecr in erg) ----
   real(dp)        :: pbh_einj_loc     = 0.0d0
   real(dp)        :: pbh_einj_tot     = 0.0d0
+  real(dp)        :: pbh_ecr_loc      = 0.0d0
   integer(kind=8) :: pbh_nfallback_loc = 0
 
   ! ---- per-level epoch bookkeeping: the STARTING scale factor of the
@@ -67,6 +73,7 @@ module pbh_commons
      integer,         allocatable :: icell(:)
      integer(kind=8), allocatable :: pid(:)
      real(dp),        allocatable :: de(:)
+     real(dp),        allocatable :: dcr(:)
   end type pbh_rbuf_t
   type(pbh_rbuf_t), allocatable :: pbh_rbuf(:)
 
@@ -108,6 +115,7 @@ contains
           if(j > 0) call pbh_parse_hex(line(j+17:), ck_hdr)
        else if(len_trim(line) > 0) then
           n = n + 1
+          if(n == 1) pbh_ncol = pbh_count_tokens(line)
        end if
     end do
     if(n < 4) then
@@ -117,7 +125,8 @@ contains
 
     pbh_n = n
     allocate(tab_a(n), tab_la(n), tab_t(n), tab_g(n))
-    allocate(tab_q(n), tab_lam(n), tab_qc(n))
+    allocate(tab_q(n), tab_lam(n), tab_qc(n), tab_qcr(n))
+    tab_qcr = 0.0d0
 
     ! -- second pass: parse data + Adler-32 over data bytes (line+'\n') --
     rewind(u)
@@ -127,8 +136,13 @@ contains
        if(ios /= 0) exit
        if(line(1:1) == '#' .or. len_trim(line) == 0) cycle
        i = i + 1
-       read(line,*,iostat=ios) tab_a(i), tab_la(i), tab_t(i), tab_g(i), &
-            & tab_q(i), tab_lam(i), tab_qc(i)   ! tab_la holds z, unused; reset below
+       if(pbh_ncol >= 8) then
+          read(line,*,iostat=ios) tab_a(i), tab_la(i), tab_t(i), tab_g(i), &
+               & tab_q(i), tab_lam(i), tab_qc(i), tab_qcr(i)
+       else
+          read(line,*,iostat=ios) tab_a(i), tab_la(i), tab_t(i), tab_g(i), &
+               & tab_q(i), tab_lam(i), tab_qc(i)   ! tab_la holds z; reset below
+       end if
        if(ios /= 0) then
           if(myid==1) write(*,*) 'PBH ERROR: bad table row ', i
           call clean_stop
@@ -203,6 +217,23 @@ contains
        call clean_stop
     end if
   end subroutine pbh_check_key
+
+  !=====================================================================
+  function pbh_count_tokens(line) result(nt)
+    character(LEN=*), intent(in) :: line
+    integer :: nt, j
+    logical :: intok
+    nt = 0
+    intok = .false.
+    do j = 1, len_trim(line)
+       if(line(j:j) /= ' ') then
+          if(.not.intok) nt = nt + 1
+          intok = .true.
+       else
+          intok = .false.
+       end if
+    end do
+  end function pbh_count_tokens
 
   !=====================================================================
   subroutine pbh_parse_hex(str, val)
@@ -334,29 +365,31 @@ contains
   end subroutine pbh_lazy_init
 
   !=====================================================================
-  subroutine pbh_rbuf_push(b, icell, pid, de)
+  subroutine pbh_rbuf_push(b, icell, pid, de, dcr)
     ! Append one remote deposit to a thread-private buffer (geometric
     ! growth; only the owning thread ever touches b).
     type(pbh_rbuf_t), intent(inout) :: b
     integer,          intent(in)    :: icell
     integer(kind=8),  intent(in)    :: pid
-    real(dp),         intent(in)    :: de
+    real(dp),         intent(in)    :: de, dcr
     integer :: cap
     integer,         allocatable :: ti(:)
     integer(kind=8), allocatable :: tp(:)
-    real(dp),        allocatable :: td(:)
+    real(dp),        allocatable :: td(:), tc(:)
     if(.not.allocated(b%icell)) then
-       allocate(b%icell(64), b%pid(64), b%de(64))
+       allocate(b%icell(64), b%pid(64), b%de(64), b%dcr(64))
     else if(b%n == size(b%icell)) then
        cap = 2*size(b%icell)
        allocate(ti(cap)); ti(1:b%n)=b%icell(1:b%n); call move_alloc(ti,b%icell)
        allocate(tp(cap)); tp(1:b%n)=b%pid(1:b%n);   call move_alloc(tp,b%pid)
        allocate(td(cap)); td(1:b%n)=b%de(1:b%n);    call move_alloc(td,b%de)
+       allocate(tc(cap)); tc(1:b%n)=b%dcr(1:b%n);   call move_alloc(tc,b%dcr)
     end if
     b%n = b%n + 1
     b%icell(b%n) = icell
     b%pid(b%n)   = pid
     b%de(b%n)    = de
+    b%dcr(b%n)   = dcr
   end subroutine pbh_rbuf_push
 
   !=====================================================================
@@ -373,7 +406,7 @@ contains
   end subroutine pbh_mark_level
 
   !=====================================================================
-  subroutine pbh_step(ilevel, nlev, a_end, dtsec, ratio, dQ, w0)
+  subroutine pbh_step(ilevel, nlev, a_end, dtsec, ratio, dQ, w0, dQcr)
     ! Step-global factors for the level step that ENDS at a_end (aexp is
     ! already advanced when pbh_evap_fine runs). The step start a0 was
     ! recorded by pbh_mark_level at step entry, so the interval is exact
@@ -385,7 +418,7 @@ contains
     !   w0    = w(a0), needed for m_initial = mp/w0
     integer,  intent(in)  :: ilevel, nlev
     real(dp), intent(in)  :: a_end, dtsec
-    real(dp), intent(out) :: ratio, dQ, w0
+    real(dp), intent(out) :: ratio, dQ, w0, dQcr
     real(dp) :: a0, a1, g0, g1, w1, f
     if(.not.allocated(pbh_aold)) then
        allocate(pbh_aold(nlev))
@@ -405,10 +438,13 @@ contains
     if(w0 <= 1.0d-30) then
        ratio = 1.0d0
        dQ    = 0.0d0
+       dQcr  = 0.0d0
        w0    = 1.0d0
     else
        ratio = w1/w0
        dQ    = pbh_boost * (pbh_interp_la(tab_qc, a1) - pbh_interp_la(tab_qc, a0)) &
+             &           / pbh_gnorm
+       dQcr  = pbh_boost * (pbh_interp_la(tab_qcr, a1) - pbh_interp_la(tab_qcr, a0)) &
              &           / pbh_gnorm
     end if
   end subroutine pbh_step
