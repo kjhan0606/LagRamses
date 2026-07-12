@@ -124,16 +124,28 @@ on scalar-DE combos and warns on CPL/EDE).
    over-screening. Fixed to ρ·(a_ssb/a)³.
 Field equation structure (Davis+12/ISIS) otherwise verified OK.
 
-## 6. Dilaton — NOT THE ADVERTISED MODEL; mechanical bugs FIXED
+## 6. Dilaton — REIMPLEMENTED as the true Brax+ model
 
-The "dilaton" is a parameter-renamed symmetron clone (its own
-comment admits it), NOT the Brax+2010/11 environmentally-damped
-dilaton (no exponential potential, no A₂ coupling, spurious phase
-transition at a0_dilaton). The same three symmetron bugs were fixed
-(seeding, ρ double-count, force factor −2β² → dimensionally correct
-−6Ω_mβ²(L_dilaton/L_box)²a²/a0³), and the model-identity caveat is
-now stated in the code. A true Brax+ dilaton would be a separate
-implementation task.
+The original code was a parameter-renamed symmetron clone (its own
+comment admitted it), NOT the Brax+2010/11 environmentally-damped
+dilaton. After first fixing its mechanical bugs (seeding, ρ
+double-count, force normalization), the module was REWRITTEN as the
+original environment-dependent dilaton (Brax, van de Bruck, Davis,
+Shaw 2010; N-body form Brax+12, arXiv:1206.3568, r=3/2):
+- A(φ)=1+(A₂/2)φ²/Mpl², V=V₀e^{−γφ/Mpl}; m²(a)=3A₂H²(a),
+  β(a)=β₀a^s with s=3Ω_m; χ̄=β₀a^s/A₂ (minimum tracking).
+- Code-unit field eq: ∇̃²χ = (3Ω_mA₂B₂/a)(ρ̃χ−χ̄) +
+  a²B₂[v(χ)−v(χ̄)], v(χ)=−3Ω_mβ₀(A₂χ/β₀)^{1−3/s}; negative-definite
+  Newton Jacobian; χ>0 preserved. F5 = −c̃²a²A₂·χ∇̃χ.
+- Params: beta_dilaton=β₀, L_dilaton=2998ξ (range today, Mpc/h);
+  a0_dilaton ignored (legacy).
+Validated (aux/dilaton_check.py): background exact fixed point
+(residual ~1e-18); linear response = 2β(a)²k²/(k²+m²) to 5 digits
+(a=0.25/0.5/1, two k-modes); δ=10⁵ top-hat: χ→0.03χ̄, F5/F_N→0
+(Damour–Polyakov screening).
+The symmetron implementation was additionally cross-checked against
+Brax+12 eq. (68) and its force normalization: both match EXACTLY
+(with c̃ξ=λ⋆/L_box ≡ our L̃), independently confirming the §5 fixes.
 
 ## 7. Cubic Galileon — TRACKER REIMPLEMENTED (galileon_tracker=T)
 
@@ -201,3 +213,61 @@ Caveats (documented; larger design work if needed):
 **Any pre-fix production run of f(R)/nDGP/symmetron/dilaton/galileon
 (and the CPL kappa2/alpha fallback) is invalid and must be re-run.**
 MOND, EDE, CPL-background and CPL-table results are unaffected.
+
+---
+
+## 9. End-to-end simulation tests of the new DE models
+
+Protocol: 64³ particles, 100 Mpc/h, Zel'dovich grafic ICs at z=49
+from a CAMB LCDM P(k) (aux/make_ics.py), SAME velocity files for
+every model; dmonly, levelmin=6, levelmax=9, USE_FFTW build; P(k)
+from the built-in dump_pk. Comparison metric: P_model/P_LCDM
+averaged over k=0.05–0.12 h/Mpc at z≈0, against an IC-consistent
+linear forward model (aux/forward_model.py) that (i) rescales the
+initial displacements by the measured vfact ratio — RAMSES converts
+the shared velocities with each model's own vfact, printed at
+startup since this work — and (ii) evolves the exact (δ,θ) initial
+vector through each model's linear growth system.
+
+| model (params) | sim | forward model | sim/pred |
+|---|---|---|---|
+| quintessence (RP α=1) | 0.832 | 0.817 | 1.018 |
+| k-essence (x₀=1.0005/2) | 0.875 | 0.881 | 0.993 |
+| Horndeski (μ₀=0.2) | 1.036 | 1.052 | 0.985 |
+| coupled DE (β=0.1) A: G_eff only | 0.762 | 0.784 | 0.972 |
+| coupled DE C: +mass evol | 0.909/0.762=1.192 vs 1.199 | | 0.994 |
+| coupled DE B: +friction (fixed) | 1.044 vs 1.047 (ratio) | | 0.997 |
+| coupled DE full (z=0) | 0.966 | 1.005 | 0.961 |
+| galileon tracker (z=0) | 1.148 | 1.208 | 0.950* |
+| dilaton (β₀=0.5, L=20) | 1.039 | 1.071 | 0.970* |
+
+(*) The galileon/dilaton deficits relative to LINEAR theory carry
+the expected sign: Vainshtein and Damour–Polyakov screening remove
+part of the fifth-force boost already at quasi-linear k (cf.
+Barreira+13, where the nonlinear boost at k ≳ 0.1 h/Mpc falls well
+below the ~20% linear one).
+Residuals of 2–5% are consistent with screening, quasi-linear
+leakage into the k-band and the decaying-mode transient of the
+shared-IC protocol;
+every model-specific effect (background, μ(a), coupled source,
+friction, mass evolution) is verified at the ≤1% level in isolation.
+
+Bugs found and fixed BY these tests (each with its own commit):
+1. dmonly refinement crash — poisson_refine used unallocated uold
+   when hydro=F (pre-existing; every dmonly+m_refine run crashed).
+2. Coupled-DE Friedmann inconsistency — the matter term in
+   dadtau/dadt lacked the DM mass-evolution factor; isolation run
+   matched the inconsistent-H growth prediction to 0.2%, and the
+   fixed run matches the consistent one.
+3. Coupled-DE friction at half strength — applied only in
+   synchro_fine's half-kick; move_fine's half-kick now carries the
+   other half (isolation runs: 1.031→1.044 vs 1.047 predicted).
+4. MPI collective deadlock — all five scalar solve_levels returned
+   early on ranks with no grids on the level while the survivors
+   entered ALLREDUCEs (galileon hung at its gate-opening step).
+5. MPI Waitall abort — the fifth-force routines skipped the final
+   f-sync on empty ranks (mismatched point-to-point at sparse
+   refined levels).
+Also added: early-time gate for the tracker galileon (solver skipped
+while G_eff/G−1 < 1e-3, i.e. z ≳ 2.5 — the |coeff| ∝ a⁻⁴ regime is
+never entered) and the vfact/fpeebl startup diagnostic.
