@@ -1072,6 +1072,13 @@ subroutine compute_fifth_force(ilevel, factor)
      end do
   end do
 
+  ! Update MPI virtual boundaries: force_fine synced f BEFORE the
+  ! fifth force was added; without this, reception cells keep the
+  ! Newtonian-only force and boundary particles miss F5
+  do idim=1,ndim
+     call make_virtual_fine_dp(f(1,idim),ilevel)
+  end do
+
 end subroutine compute_fifth_force
 
 !=========================================================
@@ -1086,8 +1093,9 @@ subroutine fR_background(aa, R_bar, fR_bar)
   ! R_bar = 3*H0^2*(Omega_m/a^3 + 4*Omega_Lambda)
   ! In code units where H0=1:
   !   R_bar = 3*(omega_m/a^3 + 4*omega_l)
-  ! f_R_bar = -|fR0| * n * (R_bar0/R_bar)^(n+1)
-  !   where R_bar0 = R_bar(a=1)
+  ! f_R_bar = fR0 * (R_bar0/R_bar)^(n+1),  R_bar0 = R_bar(a=1)
+  ! Standard convention (Hu & Sawicki 2007): fR0 IS the field value
+  ! today, f_R_bar(a=1) = fR0 (no extra factor n).
   !-------------------------------------------------------
   real(dp)::R_bar0
   integer::np1
@@ -1095,7 +1103,7 @@ subroutine fR_background(aa, R_bar, fR_bar)
   np1 = fR_n + 1
   R_bar  = 3d0 * (omega_m / aa**3 + 4d0 * omega_l)
   R_bar0 = 3d0 * (omega_m + 4d0 * omega_l)
-  fR_bar = fR0 * dble(fR_n) * (R_bar0 / R_bar)**np1
+  fR_bar = fR0 * (R_bar0 / R_bar)**np1
 
 end subroutine fR_background
 
@@ -1128,11 +1136,11 @@ subroutine fR_solve_level(ilevel, icount)
   ! Get background values
   call fR_background(aexp, R_bar, fR_bar)
 
-  ! Initialize scalar_gr to background value on first call
-  ! (scalar_gr_old provides a warm start from previous step)
-  if(nstep==0) then
-     call fR_init_scalar(ilevel, fR_bar)
-  end if
+  ! Seed every cell still at exactly 0 with the background value.
+  ! Covers first step, restarts (scalar_gr is not checkpointed) and
+  ! cells created by refinement after step 0; converged f_R is
+  ! strictly negative so 0 uniquely marks uninitialized cells.
+  call fR_seed_scalar(ilevel, fR_bar)
 
   ! Newton-GS relaxation
   converged = .false.
@@ -1177,11 +1185,13 @@ subroutine fR_solve_level(ilevel, icount)
   ! Save scalar_gr for warm start next step
   call fR_save_old(ilevel)
 
-  ! Add fifth force: F5 = -(1/2) * grad(fR)
-  call compute_fifth_force(ilevel, -0.5d0)
-
-  ! Exchange f boundaries (force_fine will do this later, but be safe)
-  ! (No — force boundaries are exchanged by the caller in amr_step)
+  ! Add fifth force. Proper-frame F5 = +(c^2/2) grad(delta f_R);
+  ! with scalar_gr = f_R (dimensionless) and box-unit gradients this
+  ! becomes F5_code = +(a^2/2) (c/(H0*L_box))^2 * grad(f_R)
+  ! (background gradient vanishes spatially). Sub-Compton unscreened
+  ! limit recovers F5 = F_N/3 exactly.
+  call compute_fifth_force(ilevel, &
+       & 0.5d0*aexp**2*(2997.92458d0/boxlen_ini)**2)
 
 end subroutine fR_solve_level
 
@@ -1213,6 +1223,36 @@ subroutine fR_init_scalar(ilevel, fR_bar)
 end subroutine fR_init_scalar
 
 !=========================================================
+! fR_seed_scalar: set cells still at exactly 0 to fR_bar
+! (uninitialized: first step, restart, newly refined grids)
+!=========================================================
+subroutine fR_seed_scalar(ilevel, fR_bar)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::fR_bar
+
+  integer::igrid,i,ind,iskip,ncache,icell
+
+  ncache=active(ilevel)%ngrid
+!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     do i=1,MIN(nvector,ncache-igrid+1)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           if(scalar_gr(icell) == 0d0) then
+              scalar_gr(icell) = fR_bar
+              scalar_gr_old(icell) = fR_bar
+           end if
+        end do
+     end do
+  end do
+
+end subroutine fR_seed_scalar
+
+!=========================================================
 ! fR_save_old: save scalar_gr → scalar_gr_old
 !=========================================================
 subroutine fR_save_old(ilevel)
@@ -1239,12 +1279,19 @@ end subroutine fR_save_old
 
 !=========================================================
 ! fR_gauss_seidel: one Newton-GS sweep for f(R) equation
-! ∇²f_R = -(a²/3)[R(f_R) - R_bar] + (a²/3)*8πG*δρ
 !
-! In RAMSES code units (H0=1, fourpi=1.5*Ωm*a):
-!   ∇²f_R = -(a²/3)*[R(f_R) - R_bar] + 2*a*Ωm*δρ/ρ_bar
+! Physical quasi-static equation (Oyaizu 2008; ECOSMOG):
+!   nabla_com^2 delta f_R = (a^2/3c^2) [delta R - 8 pi G delta rho]
 !
-! Hu-Sawicki inversion: R(f_R) from f_R ↔ R relation
+! In supercomoving box units (x in L_box, R~ = R/H0^2, rho = 1+delta):
+!   lap f_R = +(a^2/3)*(H0*L/c)^2*(R~(f_R) - R~_bar)
+!             - omega_m*(H0*L/c)^2*(rho - rho_tot)/a
+! with (H0*L/c)^2 = (boxlen_ini/2997.92458)^2.
+! Linearized mass term is +Yukawa (dR/df_R > 0 for f_R < 0), so the
+! Newton Jacobian -6/dx^2 - (a^2/3)(H0L/c)^2 dR/df_R is negative
+! definite. Chameleon limit: R~(f_R) -> R~_bar + 3 omega_m delta/a^3.
+!
+! Hu-Sawicki inversion: R = R_bar0 * (fR0/f_R)^(1/(n+1))
 !=========================================================
 subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   use amr_commons
@@ -1266,7 +1313,7 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
   real(dp)::u_c,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u
-  real(dp)::a2_over_3,rho_bar
+  real(dp)::a2_over_3,rho_coeff,boxratio_sq
   real(dp)::R_bar0
   integer::np1,icolor
 
@@ -1288,10 +1335,13 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   dx2_inv=1d0/dx2
 
   np1 = fR_n + 1
-  a2_over_3 = aexp**2 / 3d0
+  ! (H0 L_box / c)^2 converts H0-unit curvature/density terms to
+  ! box-unit Laplacians (same pattern as dark_energy_commons)
+  boxratio_sq = (boxlen_ini / 2997.92458d0)**2
+  a2_over_3 = aexp**2 * boxratio_sq / 3d0
   R_bar0 = 3d0 * (omega_m + 4d0 * omega_l)
-  ! Mean density in code units: ρ_bar = Ω_m / a^3 (with H0=1)
-  rho_bar = omega_m / aexp**3
+  ! Matter source coefficient: omega_m*(H0 L/c)^2/a
+  rho_coeff = omega_m * boxratio_sq / aexp
 
   ! Neighbor lookup
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -1366,41 +1416,36 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
               end do
 
               ! R(f_R) from Hu-Sawicki inversion:
-              ! f_R = fR0 * n * (R_bar0/R)^(n+1)
-              ! → R = R_bar0 * (n*fR0/f_R)^(1/(n+1))
+              ! f_R = fR0 * (R_bar0/R)^(n+1)
+              ! → R = R_bar0 * (fR0/f_R)^(1/(n+1))
               ! Since fR0<0 and f_R<0, use absolute values
               if(abs(u_c) > 1d-30*abs(fR0)) then
-                 R_of_u = R_bar0 * (dble(fR_n)*abs(fR0)/abs(u_c))**(1d0/dble(np1))
+                 R_of_u = R_bar0 * (abs(fR0)/abs(u_c))**(1d0/dble(np1))
               else
                  R_of_u = R_bar  ! fallback to background
               end if
 
-              ! Source = -(a²/3)*[R(fR) - R_bar] + (a²/3)*8πG*δρ
-              ! In code units: δρ/ρ_bar = rho(cell)/rho_bar - 1
-              ! and 8πG*ρ_bar = 3*Ω_m*H0²/a³ = 3*omega_m/a³  (H0=1)
-              ! So (a²/3)*8πG*δρ = a²*omega_m/a³ * (rho(cell)/rho_bar - 1)
-              !                  = omega_m/(a) * (ρ/ρ_bar - 1)
-              ! But rho() in RAMSES code is overdensity: rho_code = ρ/ρ_bar - 1 when fourpi is set properly
-              ! Actually, in super-comoving coords, the Poisson source is:
-              !   ∇²Φ = 1.5*Ωm*a * (ρ/ρ_bar - 1) = fourpi * δ
-              ! So for f(R): source = -a²/3*(R(fR) - R_bar) + 2*fourpi/3 * δ
-              !   where fourpi = 1.5*Ωm*a and δ = rho(cell) (already overdensity)
-              source = -a2_over_3*(R_of_u - R_bar) + a2_over_3 * 2d0 * 1.5d0 * omega_m * aexp * rho(ind_cell_w(i))
+              ! Source (see subroutine header):
+              !   S = +(a²/3)(H0L/c)²*(R(fR)-R_bar) - Ωm(H0L/c)²*(rho-rho_tot)/a
+              ! rho has box mean rho_tot ≈ 1 (the Poisson solver subtracts
+              ! it too); a2_over_3 and rho_coeff carry the (H0L/c)² factor.
+              source = a2_over_3*(R_of_u - R_bar) &
+                   & - rho_coeff*(rho(ind_cell_w(i)) - rho_tot)
 
               ! Residual: F = laplacian - source
               residual = lapl - source
 
               ! Jacobian of source w.r.t. u_c:
-              ! dS/du = -(a²/3) * dR/dfR
-              ! dR/dfR = -R/(n+1)/fR  (from the inversion formula)
+              ! dS/du = +(a²/3)(H0L/c)² * dR/dfR
+              ! dR/dfR = -R/((n+1)*fR) > 0 for fR < 0
               if(abs(u_c) > 1d-30*abs(fR0)) then
                  dR_du = -R_of_u / (dble(np1) * u_c)
               else
                  dR_du = 0d0
               end if
 
-              ! Jacobian: J = -6/dx² - dSource/du = -6/dx² + (a²/3)*dR/du
-              jacobian = -6d0*dx2_inv + a2_over_3*dR_du
+              ! Jacobian: J = -6/dx² - dS/du < 0 (negative definite)
+              jacobian = -6d0*dx2_inv - a2_over_3*dR_du
 
               ! Newton update
               if(abs(jacobian) > 1d-30) then
@@ -1530,8 +1575,10 @@ subroutine nDGP_solve_level(ilevel, icount)
   ! Save scalar_gr for warm start
   call nDGP_save_old(ilevel)
 
-  ! Fifth force: F5 = -(1/(2β)) * grad(φ)
-  call compute_fifth_force(ilevel, -0.5d0/beta)
+  ! Fifth force: F5 = -(1/2) * grad(φ)
+  ! (the 1/β coupling is already in the field-equation source;
+  !  linear limit must give G_eff/G = 1 + 1/(3β), Winther+15 eq. 16-17)
+  call compute_fifth_force(ilevel, -0.5d0)
 
 end subroutine nDGP_solve_level
 
@@ -1642,12 +1689,11 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
   dx2=dx_loc**2
   dx2_inv=1d0/dx2
 
-  ! Vainshtein coefficient: r_c²/(3β a²)
-  ! r_c = 1/(2*sqrt(omega_rc)*H0), so r_c² = 1/(4*omega_rc*H0²)
-  ! coeff = 1/(12*omega_rc*beta*a²) in code units (H0=1, c=1)
-  ! But we need this in mesh units (dx_loc): divide by dx_loc⁴ for the bilinear terms
-  ! Actually the equation uses comoving ∇, so coeff stays in comoving
-  coeff = 1d0 / (12d0 * omega_rc * beta * aexp**2)
+  ! Vainshtein coefficient: physical r_c²/(3β a²) with
+  ! r_c² = 1/(4*omega_rc*H0²). In supercomoving units the quadratic
+  ! term carries one extra (H0²/a²) from the second Laplacian, so
+  ! coeff_code = [1/(12 omega_rc beta a²)]*(H0²/a²)/H0² = 1/(12 Ω_rc β a⁴)
+  coeff = 1d0 / (12d0 * omega_rc * beta * aexp**4)
 
   ! Neighbor lookup
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -1753,8 +1799,8 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
               vain_term = lapl2 - trace_ij2
 
               ! Source = Ωm*a/β * δ  (in code units)
-              ! rho(cell) is the overdensity δ in RAMSES
-              source = omega_m * aexp / beta * rho(ind_cell_w(i))
+              ! rho has box mean rho_tot ≈ 1; subtract it (δ = rho - rho_tot)
+              source = omega_m * aexp / beta * (rho(ind_cell_w(i)) - rho_tot)
 
               ! Residual: F = lapl + coeff * vain_term - source
               residual = lapl + coeff * vain_term - source
@@ -1819,10 +1865,13 @@ subroutine symmetron_solve_level(ilevel, icount)
   ncache=active(ilevel)%ngrid
   if(ncache==0) return
 
-  ! Initialize scalar_gr on first step
-  if(nstep==0) then
-     call symmetron_init_scalar(ilevel)
-  end if
+  ! Seed the broken-phase VEV chi_bar(a) = sqrt(1-(a_ssb/a)^3) into
+  ! cells still at exactly 0. The field equation is homogeneous in
+  ! chi, so chi=0 is an exact (unphysical) fixed point of Newton-GS:
+  ! without seeding the fifth force stays identically zero. Covers
+  ! first step, restarts and newly refined cells; pre-SSB (a<=a_ssb)
+  ! chi_bar=0 and chi=0 is the true solution.
+  call symmetron_seed_scalar(ilevel)
 
   ! Newton-GS relaxation
   converged = .false.
@@ -1865,7 +1914,7 @@ subroutine symmetron_solve_level(ilevel, icount)
   ! Save for warm start
   call symmetron_save_old(ilevel)
 
-  ! Fifth force: field-dependent F5 = -6*Ωm*β²*(a_ssb/a)*χ*∇χ
+  ! Fifth force: F5 = -6*Ωm*β²*(L/L_box)²*(a²/a_ssb³)*χ*∇χ
   call compute_fifth_force_symmetron(ilevel)
 
 end subroutine symmetron_solve_level
@@ -1897,6 +1946,42 @@ subroutine symmetron_init_scalar(ilevel)
 end subroutine symmetron_init_scalar
 
 !=========================================================
+! symmetron_seed_scalar: seed cells still at exactly 0 with
+! the broken-phase VEV chi_bar(a) (0 pre-SSB). chi=0 is an
+! exact fixed point of the homogeneous equation, so seeding
+! is required for the field to leave the symmetric phase.
+!=========================================================
+subroutine symmetron_seed_scalar(ilevel)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+
+  integer::igrid,i,ind,iskip,ncache,icell
+  real(dp)::chibar
+
+  chibar = 0d0
+  if(aexp > a_ssb) chibar = sqrt(max(1d0 - (a_ssb/aexp)**3, 0d0))
+  if(chibar == 0d0) return
+
+  ncache=active(ilevel)%ngrid
+!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     do i=1,MIN(nvector,ncache-igrid+1)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           if(scalar_gr(icell) == 0d0) then
+              scalar_gr(icell) = chibar
+              scalar_gr_old(icell) = chibar
+           end if
+        end do
+     end do
+  end do
+
+end subroutine symmetron_seed_scalar
+
+!=========================================================
 ! symmetron_save_old: save scalar_gr → scalar_gr_old
 !=========================================================
 subroutine symmetron_save_old(ilevel)
@@ -1923,19 +2008,17 @@ end subroutine symmetron_save_old
 
 !=========================================================
 ! symmetron_gauss_seidel: one Newton-GS sweep
+! (Davis, Li, Mota, Winther 2012 / ISIS conventions)
 !
-! ∇²χ = (a²/2L²)[(ρ/ρ_ssb) - (a_ssb/a)³]·χ + (a²/2L²)·χ³
+! ∇²χ = (a²/2L²)[(ρ/ρ_ssb) - 1]·χ + (a²/2L²)·χ³
 !
-! In code units (H0=1):
-!   L_code = L_symmetron / boxlen_ini (Mpc/h → code)
-!   ρ_ssb = 3*Ωm/(a_ssb³) (mean density at a_ssb)
-!   rho(cell) is overdensity δ = (ρ-ρ̄)/ρ̄
-!   ρ/ρ_ssb = (1+δ)*ρ̄/ρ_ssb = (1+δ)*(a_ssb/a)³
+! In code units:
+!   L_code = L_symmetron / boxlen_ini (Mpc/h → box units)
+!   ρ_ssb = mean matter density at a_ssb
+!   rho(cell) = ρ/ρ̄(a) = 1+δ (box mean rho_tot ≈ 1)
+!   ρ/ρ_ssb = rho(cell)*(a_ssb/a)³
 !
-! So source coefficient:
-!   mass_coeff = (a²/2L²)*[(1+δ)*(a_ssb/a)³ - (a_ssb/a)³]
-!              = (a²/2L²)*(a_ssb/a)³ * δ
-!   cubic_coeff = a²/2L²
+! Broken-phase VEV: χ̄² = 1-(a_ssb/a)³ for a > a_ssb.
 !=========================================================
 subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
   use amr_commons
@@ -2050,8 +2133,8 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
 
               lapl = (lapl - 6d0*u_c) * dx2_inv
 
-              ! ρ/ρ_ssb = (1+δ)*(a_ssb/a)³
-              rho_ratio = (1d0 + rho(ind_cell_w(i))) * (a_ssb/aexp)**3
+              ! ρ/ρ_ssb = rho*(a_ssb/a)³  (rho = ρ/ρ̄(a) = 1+δ already)
+              rho_ratio = rho(ind_cell_w(i)) * (a_ssb/aexp)**3
 
               ! mass_term = a2_over_2L2 * (rho_ratio - 1) (relative to VEV)
               mass_term = a2_over_2L2 * (rho_ratio - 1d0)
@@ -2109,8 +2192,12 @@ subroutine compute_fifth_force_symmetron(ilevel)
   scale=boxlen/dble(nx_loc)
   dx_loc=dx*scale
 
-  ! Factor: -6*Ωm*β²*(a_ssb/a)
-  factor = -6d0 * omega_m * beta_symmetron**2 * (a_ssb / aexp)
+  ! Factor: -6*Ωm*β²*(L_symmetron/L_box)²*a²/a_ssb³
+  ! Derived from A(φ)=1+φ²/2M², φ_ssb²/M² = 6Ωmβ²H0²λ0²/a_ssb³ and
+  ! the supercomoving force conversion f_code = a³ g/(L_box H0²);
+  ! unscreened small-scale limit then gives F5/F_N = 2β²χ̄² exactly.
+  factor = -6d0 * omega_m * beta_symmetron**2 &
+       & * (L_symmetron/boxlen_ini)**2 * aexp**2 / a_ssb**3
 
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
   ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -2166,6 +2253,11 @@ subroutine compute_fifth_force_symmetron(ilevel)
      end do
   end do
 
+  ! Update MPI virtual boundaries (f was synced before F5 was added)
+  do idim=1,ndim
+     call make_virtual_fine_dp(f(1,idim),ilevel)
+  end do
+
 end subroutine compute_fifth_force_symmetron
 
 !#########################################################
@@ -2195,9 +2287,12 @@ subroutine dilaton_solve_level(ilevel, icount)
   ncache=active(ilevel)%ngrid
   if(ncache==0) return
 
-  if(nstep==0) then
-     call dilaton_init_scalar(ilevel)
-  end if
+  ! Seed cells still at exactly 0 with the broken-phase VEV
+  ! (same zero-fixed-point issue as the symmetron; see there).
+  ! NOTE: this "dilaton" is a symmetron-type A(φ)∝φ² model with a
+  ! transition at a0_dilaton, NOT the Brax+2010/11 environmentally
+  ! damped dilaton (no exponential potential, no A2 parameter).
+  call dilaton_seed_scalar(ilevel)
 
   converged = .false.
   do iter=1,n_iter_dilaton
@@ -2238,7 +2333,7 @@ subroutine dilaton_solve_level(ilevel, icount)
 
   call dilaton_save_old(ilevel)
 
-  ! Fifth force: field-dependent F5 = -2β²·φ_D·∇φ_D
+  ! Fifth force: F5 = -6*Ωm*β²*(L_dilaton/L_box)²*(a²/a0³)*φ_D*∇φ_D
   call compute_fifth_force_dilaton(ilevel)
 
 end subroutine dilaton_solve_level
@@ -2266,6 +2361,40 @@ subroutine dilaton_init_scalar(ilevel)
      end do
   end do
 end subroutine dilaton_init_scalar
+
+!=========================================================
+! dilaton_seed_scalar: seed cells still at exactly 0 with the
+! broken-phase VEV (see symmetron_seed_scalar)
+!=========================================================
+subroutine dilaton_seed_scalar(ilevel)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+
+  integer::igrid,i,ind,iskip,ncache,icell
+  real(dp)::chibar
+
+  chibar = 0d0
+  if(aexp > a0_dilaton) chibar = sqrt(max(1d0 - (a0_dilaton/aexp)**3, 0d0))
+  if(chibar == 0d0) return
+
+  ncache=active(ilevel)%ngrid
+!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     do i=1,MIN(nvector,ncache-igrid+1)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           if(scalar_gr(icell) == 0d0) then
+              scalar_gr(icell) = chibar
+              scalar_gr_old(icell) = chibar
+           end if
+        end do
+     end do
+  end do
+
+end subroutine dilaton_seed_scalar
 
 subroutine dilaton_save_old(ilevel)
   use amr_commons
@@ -2398,8 +2527,8 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
 
               lapl = (lapl - 6d0*u_c) * dx2_inv
 
-              ! ρ/ρ₀ = (1+δ)*(a₀/a)³
-              rho_ratio = (1d0 + rho(ind_cell_w(i))) * (a0_dilaton/aexp)**3
+              ! ρ/ρ₀ = rho*(a₀/a)³  (rho = ρ/ρ̄(a) = 1+δ already)
+              rho_ratio = rho(ind_cell_w(i)) * (a0_dilaton/aexp)**3
               mass_term = a2_over_2L2 * (rho_ratio - 1d0)
 
               residual = lapl - mass_term * u_c - cubic_coeff * u_c**3
@@ -2450,8 +2579,11 @@ subroutine compute_fifth_force_dilaton(ilevel)
   scale=boxlen/dble(nx_loc)
   dx_loc=dx*scale
 
-  ! Factor: -2β²
-  factor = -2d0 * beta_dilaton**2
+  ! Factor: -6*Ωm*β²*(L_dilaton/L_box)²*a²/a0³
+  ! (same supercomoving derivation as the symmetron force; the old
+  !  -2β² was dimensionally inconsistent in code units)
+  factor = -6d0 * omega_m * beta_dilaton**2 &
+       & * (L_dilaton/boxlen_ini)**2 * aexp**2 / a0_dilaton**3
 
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
   ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -2505,6 +2637,11 @@ subroutine compute_fifth_force_dilaton(ilevel)
            end do
         end do
      end do
+  end do
+
+  ! Update MPI virtual boundaries (f was synced before F5 was added)
+  do idim=1,ndim
+     call make_virtual_fine_dp(f(1,idim),ilevel)
   end do
 
 end subroutine compute_fifth_force_dilaton
@@ -2562,11 +2699,11 @@ subroutine galileon_solve_level(ilevel, icount)
   ! coeff_G = c₃/(c₂·H₀²·a²) → in code units (H0=1):
   !   coeff_G = c3/(c2*a²)
   ! But using nDGP parameterization: coeff = 1/(12*omega_rc_eff*beta*a²)
-  ! Here we compute directly: coeff_G = c3_galileon / (c2_galileon * aexp**2)
-  ! But the sign/convention must match nDGP_gauss_seidel's Vainshtein term:
-  ! nDGP: coeff = 1/(12*omega_rc*beta*a²)
-  ! Galileon: coeff_G = c3_galileon / (c2_galileon * aexp**2)
-  coeff_G = c3_galileon / (c2_galileon * aexp**2)
+  ! WARNING: simplified nDGP-template coefficients, NOT the tracker
+  ! cubic Galileon of Barreira+13 (no background field evolution,
+  ! no b1/b2 coefficient functions, no Poisson back-reaction term).
+  ! Supercomoving a-power follows the corrected nDGP form (1/a⁴).
+  coeff_G = c3_galileon / (c2_galileon * aexp**4)
 
   if(myid==1 .and. nstep==0 .and. ilevel==levelmin) then
      write(*,'(A,F8.4,A,ES10.3,A,F8.4)') &
@@ -2616,8 +2753,9 @@ subroutine galileon_solve_level(ilevel, icount)
 
   call galileon_save_old(ilevel)
 
-  ! Fifth force: F5 = -(1/(2β_G)) * grad(φ_G)
-  call compute_fifth_force(ilevel, -0.5d0/beta_G)
+  ! Fifth force: F5 = -(1/2) * grad(φ_G)
+  ! (the 1/β_G coupling is already in the field-equation source)
+  call compute_fifth_force(ilevel, -0.5d0)
 
 end subroutine galileon_solve_level
 
@@ -2786,7 +2924,8 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
               vain_term = lapl2 - trace_ij2
 
               ! Source = Ωm*a/β_G * δ
-              source = omega_m * aexp / beta_G * rho(ind_cell_w(i))
+              ! rho has box mean rho_tot ≈ 1; subtract it (δ = rho - rho_tot)
+              source = omega_m * aexp / beta_G * (rho(ind_cell_w(i)) - rho_tot)
 
               residual = lapl + coeff_G * vain_term - source
 

@@ -739,6 +739,33 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   end if
 
   !-------------------------------------------------
+  ! MG solver backgrounds assume LCDM; DE-boost paths break
+  ! the QUMOND phantom cancellation in the FFT solver
+  !-------------------------------------------------
+  if(use_fR .or. use_nDGP .or. use_symmetron .or. use_dilaton .or. use_galileon) then
+     if(use_quintessence .or. use_kessence) then
+        if(myid==1) write(*,*) 'ERROR: scalar-field DE cannot be combined with the MG solvers (LCDM background assumed)'
+        call clean_stop
+     end if
+     if(w0 /= -1.0d0 .or. wa /= 0.0d0 .or. use_ede) then
+        if(myid==1) write(*,*) 'WARNING: MG solver backgrounds assume LCDM; CPL/EDE combination is inconsistent'
+     end if
+  end if
+  if(use_mond .and. (de_perturb .or. use_horndeski .or. use_coupled_de)) then
+     if(myid==1) write(*,*) 'ERROR: use_mond cannot be combined with de_perturb/use_horndeski/use_coupled_de'
+     if(myid==1) write(*,*) '  (DE source boosts break the QUMOND phantom-density cancellation)'
+     call clean_stop
+  end if
+  if(use_galileon .and. myid==1) then
+     write(*,*) 'WARNING: cubic Galileon uses simplified non-tracker coefficients'
+     write(*,*) '  (NOT Barreira+13; treat results as experimental)'
+  end if
+  if(use_galileon .and. c2_galileon == 0d0) then
+     if(myid==1) write(*,*) 'ERROR: c2_galileon must be nonzero'
+     call clean_stop
+  end if
+
+  !-------------------------------------------------
   ! Symmetron gravity
   !-------------------------------------------------
   if(use_symmetron) then
