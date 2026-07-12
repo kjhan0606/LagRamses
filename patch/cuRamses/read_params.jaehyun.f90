@@ -817,9 +817,12 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         call clean_stop
      end if
      if(myid==1) then
-        write(*,'(A)') ' Dilaton gravity enabled'
-        write(*,'(A,F6.3,A,F6.3,A,F8.3,A)') &
-             '   a0=', a0_dilaton, '  beta=', beta_dilaton, '  L=', L_dilaton, ' Mpc/h'
+        write(*,'(A)') ' Dilaton gravity enabled (Brax+12 environmentally-damped)'
+        write(*,'(A,F6.3,A,F8.3,A)') &
+             '   beta0=', beta_dilaton, '  range L=', L_dilaton, ' Mpc/h'
+        write(*,'(A,ES10.3,A,F7.4,A)') '   A2=', &
+             & 1d0/(3d0*(L_dilaton/2997.92458d0)**2), '  s=3*Om=', 3d0*omega_m, &
+             & '  (a0_dilaton is ignored)'
         write(*,'(A,I3,A,ES10.3)') '   max_iter=', n_iter_dilaton, '  eps=', dilaton_eps
      end if
   end if

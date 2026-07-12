@@ -1430,6 +1430,112 @@ subroutine sb_build_fft_rhs(ilevel, assb_in, L_in, m2bar)
 end subroutine sb_build_fft_rhs
 
 !=========================================================
+! dil_build_fft_rhs: Brax+12 dilaton Newton rhs;
+! b = -(lap chi - S(chi)) in scalar_gr_old,
+! m2bar = level-mean of dS/dchi (>0)
+!=========================================================
+subroutine dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
+  use amr_commons
+  use poisson_commons
+  use morton_hash
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::A2_d,s_d,chibar_d
+  real(dp),intent(out)::m2bar
+
+  integer::igrid,ngrid,ncache,i,ind,iskip,idim,info
+  integer::ig_left,ig_right,ih_left,ih_right
+  real(dp)::dx,scale,dx_loc,dx2_inv
+  integer::nx_loc
+  real(dp)::u_c,u_nb_l,u_nb_r,lapl
+  real(dp)::boxratio_sq,cA,cV,pexp,wfac,vphi,dvphi,vbar,source
+  real(dp),dimension(2)::acc_loc,acc_glob
+  integer,dimension(1:3,1:2,1:8)::ggg,hhh
+  integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
+  integer,dimension(1:nvector,0:twondim)::igridn_w
+
+  ncache=active(ilevel)%ngrid
+  dx=0.5D0**ilevel
+  nx_loc=(icoarse_max-icoarse_min+1)
+  scale=boxlen/dble(nx_loc)
+  dx_loc=dx*scale
+  dx2_inv=1d0/dx_loc**2
+
+  boxratio_sq=(boxlen_ini/2997.92458d0)**2
+  cA = 3d0*omega_m*A2_d*boxratio_sq/aexp
+  cV = aexp**2*boxratio_sq
+  pexp = 1d0 - 3d0/s_d
+  vbar = -3d0*omega_m*beta_dilaton*(A2_d*chibar_d/beta_dilaton)**pexp
+
+  ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(2,1,1:8)=(/3,3,0,0,3,3,0,0/); hhh(2,1,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(2,2,1:8)=(/0,0,4,4,0,0,4,4/); hhh(2,2,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
+  ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
+
+  acc_loc=0d0
+
+!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right,ih_left,ih_right, &
+!$omp&  u_c,u_nb_l,u_nb_r,lapl,wfac,vphi,dvphi,source) &
+!$omp& reduction(+:acc_loc) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     ngrid=MIN(nvector,ncache-igrid+1)
+     do i=1,ngrid
+        ind_grid_w(i)=active(ilevel)%igrid(igrid+i-1)
+     end do
+     do i=1,ngrid
+        igridn_w(i,0)=ind_grid_w(i)
+     end do
+     do idim=1,ndim
+        do i=1,ngrid
+           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
+           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+        end do
+     end do
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        do i=1,ngrid
+           ind_cell_w(i)=iskip+ind_grid_w(i)
+        end do
+        do i=1,ngrid
+           u_c = scalar_gr(ind_cell_w(i))
+           lapl = 0d0
+           do idim=1,ndim
+              ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
+              ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
+              ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
+              u_nb_l = u_c; u_nb_r = u_c
+              if(igridn_w(i,ig_left ) > 0) u_nb_l = scalar_gr(igridn_w(i,ig_left )+ih_left)
+              if(igridn_w(i,ig_right) > 0) u_nb_r = scalar_gr(igridn_w(i,ig_right)+ih_right)
+              lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
+           end do
+           wfac = A2_d*max(u_c,1d-30)/beta_dilaton
+           vphi = -3d0*omega_m*beta_dilaton*wfac**pexp
+           dvphi = -3d0*omega_m*A2_d*pexp*wfac**(pexp-1d0)
+           source = cA*(rho(ind_cell_w(i))*u_c - chibar_d) + cV*(vphi - vbar)
+           scalar_gr_old(ind_cell_w(i)) = -(lapl - source)
+           acc_loc(1) = acc_loc(1) + cA*rho(ind_cell_w(i)) + cV*dvphi
+           acc_loc(2) = acc_loc(2) + 1d0
+        end do
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(acc_loc,acc_glob,2,MPI_DOUBLE_PRECISION,MPI_SUM, &
+       & MPI_COMM_WORLD,info)
+#else
+  acc_glob=acc_loc
+#endif
+  m2bar = max(acc_glob(1)/max(acc_glob(2),1d0), 0d0)
+
+end subroutine dil_build_fft_rhs
+
+!=========================================================
 ! vain_build_fft_rhs: nDGP/galileon operator splitting;
 ! solve the local quadratic  coeff*A^2 + A = S + coeff*T
 ! for A = lap(phi) (branch A->S as coeff->0; clamped at the
@@ -2781,12 +2887,29 @@ subroutine dilaton_solve_level(ilevel, icount)
   include 'mpif.h'
 #endif
   integer,intent(in)::ilevel, icount
-
+  !-------------------------------------------------------
+  ! Environment-dependent dilaton (Brax, van de Bruck, Davis,
+  ! Shaw 2010; N-body form: Brax, Davis, Li, Winther, Zhao 2012,
+  ! arXiv:1206.3568, original r=3/2 model):
+  !   A(phi) = 1 + (A2/2) phi^2/Mpl^2,  V = V0 exp(-gamma phi/Mpl)
+  !   m^2(a) = 3 A2 H^2(a)  =>  xi = H0/m0 = 1/sqrt(3 A2)
+  !   beta(a) = beta0 * a^s,  s = 9 Omega_m A2 xi^2 = 3 Omega_m
+  ! Working variable chi = phi/Mpl; background chibar = beta0 a^s/A2.
+  ! Code-unit field equation (x in box units, rho mean-normalized):
+  !   lap chi = (3 Om A2 B2/a) (rho*chi - chibar)
+  !           + a^2 B2 [vphi(chi) - vphi(chibar)]
+  !   vphi(chi) = -3 Om beta0 (A2 chi/beta0)^(1-3/s)
+  ! with B2 = (boxlen_ini/2997.92458)^2 = 1/ctilde^2.
+  ! Parameters: beta_dilaton = beta0 (cosmological coupling today),
+  ! L_dilaton = 2998*xi = fifth-force range today [Mpc/h].
+  ! (a0_dilaton is ignored — legacy of the old symmetron-clone.)
+  !-------------------------------------------------------
   integer::iter,ncache,info
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
   logical::converged
+  real(dp)::xi_d,A2_d,s_d,chibar_d,fac5
 #ifdef USE_FFTW
   real(dp)::m2bar
   logical,external::level_fft_ok
@@ -2795,19 +2918,23 @@ subroutine dilaton_solve_level(ilevel, icount)
   ncache=active(ilevel)%ngrid
   if(ncache==0) return
 
-  ! Seed cells still at exactly 0 with the broken-phase VEV
-  ! (same zero-fixed-point issue as the symmetron; see there).
-  ! NOTE: this "dilaton" is a symmetron-type A(φ)∝φ² model with a
-  ! transition at a0_dilaton, NOT the Brax+2010/11 environmentally
-  ! damped dilaton (no exponential potential, no A2 parameter).
-  call dilaton_seed_scalar(ilevel)
+  ! Model constants from (beta0, range)
+  xi_d = L_dilaton/2997.92458d0
+  A2_d = 1d0/(3d0*xi_d**2)
+  s_d  = 3d0*omega_m
+  chibar_d = beta_dilaton*aexp**s_d/A2_d
+
+  ! Seed cells still at exactly 0 with the background value
+  ! (chi=0 is a singular point of vphi; also covers restarts and
+  ! newly refined cells)
+  call dilaton_seed_scalar(ilevel, chibar_d)
 
 #ifdef USE_FFTW
-  ! Spectral Newton on the uniform domain level (broken phase only)
-  if(level_fft_ok(ilevel) .and. aexp > a0_dilaton) then
+  ! Spectral Newton on the uniform domain level
+  if(level_fft_ok(ilevel)) then
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
      do iter=1,3
-        call sb_build_fft_rhs(ilevel, a0_dilaton, L_dilaton, m2bar)
+        call dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
         call level_fft_helmholtz(ilevel, m2bar)
         call make_virtual_fine_dp(scalar_gr(1), ilevel)
      end do
@@ -2817,7 +2944,8 @@ subroutine dilaton_solve_level(ilevel, icount)
   converged = .false.
   do iter=1,n_iter_dilaton
 
-     call dilaton_gauss_seidel(ilevel, res_max_local, src_max_local)
+     call dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, &
+          & res_max_local, src_max_local)
 
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
 
@@ -2853,8 +2981,10 @@ subroutine dilaton_solve_level(ilevel, icount)
 
   call dilaton_save_old(ilevel)
 
-  ! Fifth force: F5 = -6*Ωm*β²*(L_dilaton/L_box)²*(a²/a0³)*φ_D*∇φ_D
-  call compute_fifth_force_dilaton(ilevel)
+  ! Fifth force: F5 = -ctilde^2 a^2 A2 * chi * grad(chi)
+  ! (unscreened linear limit gives F5/FN = 2 beta(a)^2 exactly)
+  fac5 = -(2997.92458d0/boxlen_ini)**2 * aexp**2 * A2_d
+  call compute_fifth_force_dilaton(ilevel, fac5)
 
 end subroutine dilaton_solve_level
 
@@ -2886,18 +3016,14 @@ end subroutine dilaton_init_scalar
 ! dilaton_seed_scalar: seed cells still at exactly 0 with the
 ! broken-phase VEV (see symmetron_seed_scalar)
 !=========================================================
-subroutine dilaton_seed_scalar(ilevel)
+subroutine dilaton_seed_scalar(ilevel, chibar_in)
   use amr_commons
   use poisson_commons
   implicit none
   integer,intent(in)::ilevel
+  real(dp),intent(in)::chibar_in
 
   integer::igrid,i,ind,iskip,ncache,icell
-  real(dp)::chibar
-
-  chibar = 0d0
-  if(aexp > a0_dilaton) chibar = sqrt(max(1d0 - (a0_dilaton/aexp)**3, 0d0))
-  if(chibar == 0d0) return
 
   ncache=active(ilevel)%ngrid
 !$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
@@ -2907,8 +3033,8 @@ subroutine dilaton_seed_scalar(ilevel)
            iskip=ncoarse+(ind-1)*ngridmax
            icell=iskip+active(ilevel)%igrid(igrid+i-1)
            if(scalar_gr(icell) == 0d0) then
-              scalar_gr(icell) = chibar
-              scalar_gr_old(icell) = chibar
+              scalar_gr(icell) = chibar_in
+              scalar_gr_old(icell) = chibar_in
            end if
         end do
      end do
@@ -2937,21 +3063,21 @@ subroutine dilaton_save_old(ilevel)
 end subroutine dilaton_save_old
 
 !=========================================================
-! dilaton_gauss_seidel: one Newton-GS sweep
-!
-! Dilaton equation (Damour-Polyakov):
-! ∇²φ_D = (a²/2L_D²)[(ρ/ρ₀) - (a₀/a)³]·φ_D + (a²/2L_D²)·ξ₂·φ_D³
-!
-! Structurally identical to Symmetron with:
-!   a_ssb → a0_dilaton, L_symmetron → L_dilaton
-!   ξ₂ = 1 (default cubic self-interaction)
+! dilaton_gauss_seidel: one Newton-GS sweep for the Brax+12
+! dilaton equation (see dilaton_solve_level header):
+!   F = lap chi - cA*(rho*chi - chibar) - cV*[vphi(chi)-vphi(chibar)]
+!   vphi(chi) = -3 Om beta0 wfac^pexp, wfac = A2 chi/beta0,
+!   pexp = 1 - 3/s < 0  =>  dvphi/dchi > 0 and the Newton
+!   Jacobian -6/h^2 - dS/dchi is negative definite.
+! chi > 0 is enforced with the same halving guard as f(R).
 !=========================================================
-subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
+subroutine dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, res_max, src_max)
   use amr_commons
   use poisson_commons
   use morton_hash
   implicit none
   integer,intent(in)::ilevel
+  real(dp),intent(in)::A2_d,s_d,chibar_d
   real(dp),intent(out)::res_max, src_max
 
   integer::igrid,ngrid,ncache,i,ind,iskip,idim
@@ -2959,8 +3085,7 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
   real(dp)::u_c,lapl,residual,jacobian,delta_u
-  real(dp)::L_code,a2_over_2L2
-  real(dp)::rho_ratio,mass_term,cubic_coeff
+  real(dp)::boxratio_sq,cA,cV,pexp,wfac,vphi,dvphi,vbar,source
   integer::icolor
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
@@ -2980,9 +3105,11 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
   dx2=dx_loc**2
   dx2_inv=1d0/dx2
 
-  L_code = L_dilaton / boxlen_ini
-  a2_over_2L2 = aexp**2 / (2d0 * L_code**2)
-  cubic_coeff = a2_over_2L2  ! ξ₂ = 1
+  boxratio_sq=(boxlen_ini/2997.92458d0)**2
+  cA = 3d0*omega_m*A2_d*boxratio_sq/aexp
+  cV = aexp**2*boxratio_sq
+  pexp = 1d0 - 3d0/s_d
+  vbar = -3d0*omega_m*beta_dilaton*(A2_d*chibar_d/beta_dilaton)**pexp
 
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
   ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -3000,7 +3127,7 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  u_c,lapl,residual,jacobian,delta_u, &
-!$omp&  rho_ratio,mass_term) &
+!$omp&  wfac,vphi,dvphi,source) &
 !$omp& reduction(max:res_max,src_max) schedule(dynamic)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
@@ -3019,8 +3146,7 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
         end do
 
         do ind=1,twotondim
-           ! True 3D red-black: color = parity of (i+j+k) of the cell,
-           ! i.e. popcount of the oct-local index (oct origins are even)
+           ! True 3D red-black: color = parity of (i+j+k) of the cell
            if(mod(popcnt(ind-1), 2) /= icolor) cycle
 
            iskip=ncoarse+(ind-1)*ngridmax
@@ -3031,37 +3157,46 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
            do i=1,ngrid
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Compute Laplacian; Neumann closure at coarse-fine boundaries
+              ! Laplacian; Neumann closure at coarse-fine boundaries
               lapl = 0d0
               do idim=1,ndim
                  ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
+                 ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
+                 ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
                  if(igridn_w(i,ig_left) > 0) then
-                    lapl = lapl + scalar_gr(igridn_w(i,ig_left) + ncoarse+(hhh(idim,1,ind)-1)*ngridmax)
+                    lapl = lapl + scalar_gr(igridn_w(i,ig_left )+ih_left)
                  else
                     lapl = lapl + u_c
                  end if
                  if(igridn_w(i,ig_right) > 0) then
-                    lapl = lapl + scalar_gr(igridn_w(i,ig_right)+ ncoarse+(hhh(idim,2,ind)-1)*ngridmax)
+                    lapl = lapl + scalar_gr(igridn_w(i,ig_right)+ih_right)
                  else
                     lapl = lapl + u_c
                  end if
               end do
-
               lapl = (lapl - 6d0*u_c) * dx2_inv
 
-              ! ρ/ρ₀ = rho*(a₀/a)³  (rho = ρ/ρ̄(a) = 1+δ already)
-              rho_ratio = rho(ind_cell_w(i)) * (a0_dilaton/aexp)**3
-              mass_term = a2_over_2L2 * (rho_ratio - 1d0)
+              wfac = A2_d*max(u_c,1d-30)/beta_dilaton
+              vphi = -3d0*omega_m*beta_dilaton*wfac**pexp
+              dvphi = -3d0*omega_m*A2_d*pexp*wfac**(pexp-1d0)
 
-              residual = lapl - mass_term * u_c - cubic_coeff * u_c**3
-              jacobian = -6d0*dx2_inv - mass_term - 3d0*cubic_coeff*u_c**2
+              source = cA*(rho(ind_cell_w(i))*u_c - chibar_d) &
+                   & + cV*(vphi - vbar)
+
+              residual = lapl - source
+              jacobian = -6d0*dx2_inv - cA*rho(ind_cell_w(i)) - cV*dvphi
 
               if(abs(jacobian) > 1d-30) then
                  delta_u = -residual / jacobian
+                 ! Clamp and keep chi > 0 (vphi is singular at 0)
+                 if(abs(delta_u) > 0.5d0*abs(u_c)) &
+                      & delta_u = sign(0.5d0*abs(u_c), delta_u)
                  scalar_gr(ind_cell_w(i)) = u_c + delta_u
+                 if(scalar_gr(ind_cell_w(i)) <= 0d0) &
+                      & scalar_gr(ind_cell_w(i)) = 0.5d0*u_c
               end if
 
-              src_max = max(src_max, abs(mass_term*u_c) + abs(cubic_coeff*u_c**3))
+              src_max = max(src_max, abs(source))
               res_max = max(res_max, abs(residual))
 
            end do
@@ -3075,12 +3210,13 @@ end subroutine dilaton_gauss_seidel
 !=========================================================
 ! compute_fifth_force_dilaton: F₅ = -2β²·φ_D·∇φ_D
 !=========================================================
-subroutine compute_fifth_force_dilaton(ilevel)
+subroutine compute_fifth_force_dilaton(ilevel, factor_in)
   use amr_commons
   use poisson_commons
   use morton_hash
   implicit none
   integer,intent(in)::ilevel
+  real(dp),intent(in)::factor_in
 
   integer::igrid,ngrid,ncache,i,ind,iskip,idim
   integer::ig_left,ig_right,ih_left,ih_right
@@ -3101,11 +3237,8 @@ subroutine compute_fifth_force_dilaton(ilevel)
   scale=boxlen/dble(nx_loc)
   dx_loc=dx*scale
 
-  ! Factor: -6*Ωm*β²*(L_dilaton/L_box)²*a²/a0³
-  ! (same supercomoving derivation as the symmetron force; the old
-  !  -2β² was dimensionally inconsistent in code units)
-  factor = -6d0 * omega_m * beta_dilaton**2 &
-       & * (L_dilaton/boxlen_ini)**2 * aexp**2 / a0_dilaton**3
+  ! F5 = -ctilde^2 a^2 A2 * chi * grad(chi)  (see dilaton_solve_level)
+  factor = factor_in
 
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
   ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -3239,6 +3372,11 @@ subroutine galileon_solve_level(ilevel, icount)
      beta1_t = (xi_t/3d0)*(2d0*hd_t - 1d0 + (1d0-omega_m)/E2_t**2)
      beta_G  = 2d0*E2_t*beta1_t/xi_t**2      ! beta2: source coupling
      coeff_G = 1d0/(3d0*beta1_t*aexp**4)     ! Vainshtein coefficient
+     ! Skip the solve while the linear coupling is negligible: the
+     ! unscreened G_eff/G-1 = -xi/(9 beta2 E^2) decays as 1/E^4 into
+     ! the past (< 1e-3 for z > 2.5). This avoids both wasted work
+     ! and the pathological |coeff| ~ a^-4 regime at high redshift.
+     if(-xi_t/(9d0*beta_G*E2_t) < 1d-3) return
   else
      ! LEGACY simplified nDGP-template coefficients (experimental)
      beta_G = galileon_beta(aexp)
