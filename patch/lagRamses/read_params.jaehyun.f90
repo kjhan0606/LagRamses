@@ -3,6 +3,7 @@ subroutine read_params
   use pm_parameters
   use poisson_parameters
   use hydro_parameters
+  use pbh_commons
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -48,7 +49,8 @@ subroutine read_params
        & ,use_ede &
        & ,use_sgs &
        & ,use_adm &
-       & ,use_fdm
+       & ,use_fdm &
+       & ,use_pbh
   ! Non-standard model namelists (read only when enabled)
   namelist/cpl_params/w0,wa,cs2_de,de_table
   namelist/neutrino_params/omega_nu,neutrino_table
@@ -77,6 +79,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & adm_cross_section,adm_mol,adm_fH2
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
        & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min
+  namelist/pbh_params/pbh_table_file,pbh_fraction,pbh_boost, &
+       & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
        & n_iter_mond,mond_eps,g_ext_mond
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
@@ -243,6 +247,12 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      rewind(1)
      read(1,NML=fdm_params,END=176)
 176  continue
+  end if
+  ! Evaporating-PBH parameters
+  if(use_pbh) then
+     rewind(1)
+     read(1,NML=pbh_params,END=175)
+175  continue
   end if
   rewind(1)
   read(1,NML=mond_params,END=75)
@@ -842,9 +852,42 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         call clean_stop
      end if
      if(myid==1) then
-        write(*,'(A)') ' Early Dark Energy (Doran-Robbers) enabled'
+        write(*,'(A)') ' Early Dark Energy (Poulin+19 fluid form) enabled'
         write(*,'(A,F8.4,A,F10.1,A,F6.3)') &
              '   omega_ede=', omega_ede, '  z_ede=', z_ede, '  w_ede=', w_ede
+     end if
+  end if
+
+  !-------------------------------------------------
+  ! Evaporating primordial black hole dark matter
+  !-------------------------------------------------
+  if(use_pbh) then
+     if(.not. cosmo) then
+        if(myid==1) write(*,*) 'ERROR: use_pbh requires cosmo=.true.'
+        call clean_stop
+     end if
+     if(.not. pic) then
+        if(myid==1) write(*,*) 'ERROR: use_pbh requires pic=.true.'
+        call clean_stop
+     end if
+     if(pbh_fraction < 0d0 .or. pbh_fraction > 1d0) then
+        if(myid==1) write(*,*) 'ERROR: pbh_fraction must be in [0,1]'
+        call clean_stop
+     end if
+     if(pbh_boost <= 0d0) then
+        if(myid==1) write(*,*) 'ERROR: pbh_boost must be > 0'
+        call clean_stop
+     end if
+     if(trim(pbh_energy_sink)/='local_heat' .and. &
+          & trim(pbh_energy_sink)/='removed') then
+        if(myid==1) write(*,*) 'ERROR: pbh_energy_sink must be local_heat or removed'
+        call clean_stop
+     end if
+     call pbh_read_table(myid)
+     if(myid==1) then
+        write(*,'(A)') ' Evaporating-PBH dark matter enabled'
+        write(*,'(A,ES10.3,A,ES10.3,A)') '   pbh_fraction=', pbh_fraction, &
+             & '  pbh_boost=', pbh_boost, '  sink='//trim(pbh_energy_sink)
      end if
   end if
 

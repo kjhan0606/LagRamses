@@ -122,12 +122,14 @@ MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o random.o pm_parameters.o p
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
-	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) dark_cooling_mod.o fdm_commons.o
+	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) dark_cooling_mod.o fdm_commons.o pbh_commons.o
 
 # SIDM object (depends on amr_commons, pm_commons, random)
 SIDM_OBJ = sidm_scatter.o
 # Atomic Dark Matter objects
 ADM_OBJ = dark_cooling_fine.o
+# Evaporating primordial black hole objects
+PBH_OBJ = pbh_evap_fine.o
 # Fuzzy Dark Matter objects
 FDM_OBJ = fdm_step.o fdm_hjm.o output_fdm.o light_cone.fdm.o
 
@@ -151,7 +153,7 @@ HYDROOBJ = init_hydro.o init_flow_fine.o write_screen.o output_hydro.o courant_f
            uplmde.kjhan.o umuscl.kjhan.o interpol_hydro.kjhan.o godunov_utils.kjhan.o condinit.o hydro_flag.kjhan.o hydro_boundary.o \
            boundana.o read_hydro_params.o synchro_hydro_fine.kjhan.o
 # All objects
-AMRLIB = $(AMROBJ) $(HYDROOBJ) $(PMOBJ) $(POISSONOBJ) $(SIDM_OBJ) $(ADM_OBJ) $(FDM_OBJ)
+AMRLIB = $(AMROBJ) $(HYDROOBJ) $(PMOBJ) $(POISSONOBJ) $(SIDM_OBJ) $(ADM_OBJ) $(PBH_OBJ) $(FDM_OBJ)
 # ATON objects
 ATON_MODOBJ = timing.o radiation_commons.o rad_step.o
 ATON_OBJ = observe.o init_radiation.o rad_init.o rad_boundary.o rad_stars.o rad_backup.o ../aton/atonlib/libaton.a

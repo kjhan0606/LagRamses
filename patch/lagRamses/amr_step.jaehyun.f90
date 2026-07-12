@@ -3,6 +3,7 @@ recursive subroutine amr_step(ilevel,icount)
   use pm_commons
   use hydro_commons
   use poisson_commons
+  use pbh_commons, only: use_pbh, pbh_mark_level
 #ifdef HYDRO_CUDA
   use cuda_commons, only: cuda_pool_is_initialized_c
   use poisson_cuda_interface, only: cuda_mg_release_arrays_c
@@ -758,6 +759,11 @@ recursive subroutine amr_step(ilevel,icount)
   if(rt)call rt_set_unew(ilevel)
 #endif
 
+  ! Record this level step's starting scale factor for the PBH update
+  ! (aexp still holds the step-start value here; after the recursion
+  ! update_time has advanced it to the step end)
+  if(pic.and.use_pbh)call pbh_mark_level(ilevel,nlevelmax,aexp)
+
   !---------------------------
   ! Recursive call to amr_step
   !---------------------------
@@ -784,7 +790,14 @@ recursive subroutine amr_step(ilevel,icount)
                                call timer('feedback','start')
      call thermal_feedback(ilevel)
   endif
-  
+
+  ! Evaporating-PBH update: exact mass loss + local heating into unew
+  ! (must stay inside the set_unew/set_uold window, see paper appendix A)
+  if(pic.and.use_pbh) then
+                               call timer('pbh evap','start')
+     call pbh_evap_fine(ilevel)
+  endif
+
   !-----------
   ! Hydro step
   !-----------
