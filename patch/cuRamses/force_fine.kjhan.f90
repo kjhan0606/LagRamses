@@ -3210,6 +3210,7 @@ subroutine galileon_solve_level(ilevel, icount)
   real(dp)::beta_G,coeff_G
   real(dp)::galileon_beta  ! external function
   real(dp)::Ha
+  real(dp)::xi_t,E2_t,hd_t,beta1_t
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
@@ -3222,16 +3223,28 @@ subroutine galileon_solve_level(ilevel, icount)
   if(ncache==0) return
 
   ! Compute β_G(a) and Vainshtein coeff
-  beta_G = galileon_beta(aexp)
-
-  ! coeff_G = c₃/(c₂·H₀²·a²) → in code units (H0=1):
-  !   coeff_G = c3/(c2*a²)
-  ! But using nDGP parameterization: coeff = 1/(12*omega_rc_eff*beta*a²)
-  ! WARNING: simplified nDGP-template coefficients, NOT the tracker
-  ! cubic Galileon of Barreira+13 (no background field evolution,
-  ! no b1/b2 coefficient functions, no Poisson back-reaction term).
-  ! Supercomoving a-power follows the corrected nDGP form (1/a⁴).
-  coeff_G = c3_galileon / (c2_galileon * aexp**4)
+  if(galileon_tracker) then
+     ! Barreira+13 tracker (parameter-free): H*phidot = xi*H0^2*Mpl,
+     ! c2 = -6*c3*xi, xi = sqrt(6(1-Om)), c3 = 1/(6 xi). Closed forms:
+     !   E^2(a) = [Om a^-3 + sqrt(Om^2 a^-6 + 4(1-Om))]/2
+     !   Hdot/H^2 = -(3/2) Om a^-3 / (2E^2 - Om a^-3)
+     !   beta1 = (xi/3)[2 Hdot/H^2 - 1 + (1-Om)/E^4]   (Barreira eq. 14)
+     !   beta2 = 2 E^2 beta1 / xi^2                    (Barreira eq. 15)
+     ! Code-unit field eq (u = a^2 phi/(Mpl H0^2 L^2)):
+     !   lap u + [1/(3 beta1 a^4)][(lap u)^2-(didj u)^2] = (Om a/beta2) delta
+     xi_t   = sqrt(6d0*(1d0-omega_m))
+     E2_t   = 0.5d0*(omega_m/aexp**3 &
+          & + sqrt((omega_m/aexp**3)**2 + 4d0*(1d0-omega_m)))
+     hd_t   = -1.5d0*(omega_m/aexp**3)/(2d0*E2_t - omega_m/aexp**3)
+     beta1_t = (xi_t/3d0)*(2d0*hd_t - 1d0 + (1d0-omega_m)/E2_t**2)
+     beta_G  = 2d0*E2_t*beta1_t/xi_t**2      ! beta2: source coupling
+     coeff_G = 1d0/(3d0*beta1_t*aexp**4)     ! Vainshtein coefficient
+  else
+     ! LEGACY simplified nDGP-template coefficients (experimental)
+     beta_G = galileon_beta(aexp)
+     coeff_G = c3_galileon / (c2_galileon * aexp**4)
+     xi_t = 0d0; E2_t = 1d0
+  end if
 
   if(myid==1 .and. nstep==0 .and. ilevel==levelmin) then
      write(*,'(A,F8.4,A,ES10.3,A,F8.4)') &
@@ -3293,9 +3306,18 @@ subroutine galileon_solve_level(ilevel, icount)
 
   call galileon_save_old(ilevel)
 
-  ! Fifth force: F5 = -(1/2) * grad(φ_G)
-  ! (the 1/β_G coupling is already in the field-equation source)
-  call compute_fifth_force(ilevel, -0.5d0)
+  if(galileon_tracker) then
+     ! Poisson back-reaction (Barreira eq. 11): the extra term
+     ! -(kappa c3/M^3) phidot^2 lap(phi) integrates to a potential
+     ! -(c3 xi^2/E^2) u, so the WHOLE fifth force is a gradient of u:
+     !   F5 = +(xi/(6 E^2)) grad(u)   [c3 xi^2 = xi/6]
+     ! Unscreened linear limit: F5/FN = -xi/(9 beta2 E^2)
+     ! (= +0.84 at a=1 for Om=0.3, decaying as 1/E^4 into the past).
+     call compute_fifth_force(ilevel, xi_t/(6d0*E2_t))
+  else
+     ! LEGACY: F5 = -(1/2) grad(u)
+     call compute_fifth_force(ilevel, -0.5d0)
+  end if
 
 end subroutine galileon_solve_level
 

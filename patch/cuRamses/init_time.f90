@@ -576,13 +576,17 @@ contains
     !     Computes the growth factor f=d\log D1/d\log a.
     real(dp) :: fact,y,eps
     real(dp) :: f_de
-    real(dp) :: wa_eff, dyda
+    real(dp) :: wa_eff, dyda, e2g
 
     eps=1.0d-6
     y=omega_m/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
     fact=rombint(eps,a,eps)
     if(sde_active()) then
        wa_eff = sde_w_of_a(a)
+    else if(use_galileon .and. galileon_tracker) then
+       ! tracker: w = -1 + (2/3) Hdot/H^2
+       e2g = 0.5d0*(omega_m/a**3 + sqrt((omega_m/a**3)**2 + 4d0*(1d0-omega_m)))
+       wa_eff = -1.d0 - (omega_m/a**3)/(2.d0*e2g - omega_m/a**3)
     else
        wa_eff = w0 + wa*(1.d0-a)
     end if
@@ -806,11 +810,17 @@ function f_de(a, w0_in, wa_in)
   ! CPL: f_de = a^{-3(1+w0+wa)} * exp(-3*wa*(1-a))
   ! LCDM: w0=-1, wa=0 => f_de=1
   ! Quintessence/k-essence (scalar_de_commons): tabulated background
-  use amr_parameters, only: dp
+  ! Cubic Galileon tracker: rho_de ∝ 1/H^2 => f_de = 1/E^2(a) with
+  !   E^2(a) = [Om a^-3 + sqrt(Om^2 a^-6 + 4(1-Om))]/2  (flat)
+  use amr_parameters, only: dp, use_galileon, galileon_tracker, omega_m
   use scalar_de_commons, only: sde_active, sde_fde_of_a
   real(kind=8) :: f_de, a, w0_in, wa_in
+  real(kind=8) :: e2g
   if (sde_active()) then
      f_de = sde_fde_of_a(a)
+  else if (use_galileon .and. galileon_tracker) then
+     e2g = 0.5d0*(omega_m/a**3 + sqrt((omega_m/a**3)**2 + 4d0*(1d0-omega_m)))
+     f_de = 1.0d0/e2g
   else if (wa_in == 0.0D0 .and. w0_in == -1.0D0) then
      f_de = 1.0D0
   else if (wa_in == 0.0D0) then

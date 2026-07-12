@@ -402,8 +402,9 @@ module amr_parameters
 
   ! Galileon (cubic) gravity parameters
   logical ::use_galileon=.false.         ! Enable cubic Galileon scalar field
-  real(dp)::c2_galileon=-1.0d0          ! Kinetic coefficient
-  real(dp)::c3_galileon=1.0d0           ! Cubic coefficient
+  logical ::galileon_tracker=.true.      ! Barreira+13 tracker (parameter-free); F=legacy template
+  real(dp)::c2_galileon=-1.0d0          ! Kinetic coefficient (legacy template only)
+  real(dp)::c3_galileon=1.0d0           ! Cubic coefficient (legacy template only)
   integer ::n_iter_galileon=20           ! Max Newton-GS iterations
   real(dp)::galileon_eps=1.0d-6         ! Convergence threshold
 

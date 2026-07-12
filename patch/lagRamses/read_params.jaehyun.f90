@@ -63,7 +63,7 @@ subroutine read_params
        & n_iter_symmetron,symmetron_eps
   namelist/dilaton_params/beta_dilaton,L_dilaton,a0_dilaton, &
        & n_iter_dilaton,dilaton_eps
-  namelist/galileon_params/c2_galileon,c3_galileon, &
+  namelist/galileon_params/galileon_tracker,c2_galileon,c3_galileon, &
        & n_iter_galileon,galileon_eps
   namelist/coupled_de_params/beta_cde,cde_friction,cde_vary_mass
   namelist/quint_params/quint_pot,quint_alpha,quint_lambda,quint_phi_ini
@@ -792,11 +792,18 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1) write(*,*) '  (DE source boosts break the QUMOND phantom-density cancellation)'
      call clean_stop
   end if
-  if(use_galileon .and. myid==1) then
-     write(*,*) 'WARNING: cubic Galileon uses simplified non-tracker coefficients'
-     write(*,*) '  (NOT Barreira+13; treat results as experimental)'
+  if(use_galileon .and. .not. galileon_tracker .and. myid==1) then
+     write(*,*) 'WARNING: cubic Galileon LEGACY template (galileon_tracker=F):'
+     write(*,*) '  simplified non-tracker coefficients, NOT Barreira+13; experimental'
   end if
-  if(use_galileon .and. c2_galileon == 0d0) then
+  if(use_galileon .and. galileon_tracker .and. myid==1) then
+     write(*,'(A)') ' Cubic Galileon: Barreira+13 tracker (parameter-free)'
+     write(*,'(A,F8.4,A,F8.4)') '   xi=sqrt(6(1-Om))=', sqrt(6d0*(1d0-omega_m)), &
+          & '  Geff/G(a=1)=', 1d0+sqrt(6d0*(1d0-omega_m))**3 &
+          & /(18d0*(-(sqrt(6d0*(1d0-omega_m))/3d0) &
+          & *(2d0*(-1.5d0*omega_m/(2d0-omega_m))-1d0+(1d0-omega_m))))
+  end if
+  if(use_galileon .and. .not. galileon_tracker .and. c2_galileon == 0d0) then
      if(myid==1) write(*,*) 'ERROR: c2_galileon must be nonzero'
      call clean_stop
   end if

@@ -44,12 +44,16 @@ contains
   ! Matches f_de() in init_time.f90
   !--------------------------------------------------------------
   function f_de_val(a) result(fde)
-    use amr_parameters, only: w0, wa
+    use amr_parameters, only: w0, wa, use_galileon, galileon_tracker, omega_m
     use scalar_de_commons, only: sde_active, sde_fde_of_a
     real(dp), intent(in) :: a
-    real(dp) :: fde
+    real(dp) :: fde, e2g
     if (sde_active()) then
        fde = sde_fde_of_a(a)
+    else if (use_galileon .and. galileon_tracker) then
+       ! Cubic Galileon tracker: rho_de ∝ 1/E^2
+       e2g = 0.5d0*(omega_m/a**3 + sqrt((omega_m/a**3)**2 + 4d0*(1d0-omega_m)))
+       fde = 1.0d0/e2g
     else if (wa == 0.0d0 .and. w0 == -1.0d0) then
        fde = 1.0d0
     else if (wa == 0.0d0) then
@@ -63,12 +67,16 @@ contains
   ! de_w_val: DE equation of state w(a)
   !--------------------------------------------------------------
   function de_w_val(a) result(w_a)
-    use amr_parameters, only: w0, wa
+    use amr_parameters, only: w0, wa, use_galileon, galileon_tracker, omega_m
     use scalar_de_commons, only: sde_active, sde_w_of_a
     real(dp), intent(in) :: a
-    real(dp) :: w_a
+    real(dp) :: w_a, e2g
     if (sde_active()) then
        w_a = sde_w_of_a(a)
+    else if (use_galileon .and. galileon_tracker) then
+       ! tracker: w = -1 + (2/3) Hdot/H^2
+       e2g = 0.5d0*(omega_m/a**3 + sqrt((omega_m/a**3)**2 + 4d0*(1d0-omega_m)))
+       w_a = -1.0d0 - (omega_m/a**3)/(2.0d0*e2g - omega_m/a**3)
     else
        w_a = w0 + wa * (1.0d0 - a)
     end if

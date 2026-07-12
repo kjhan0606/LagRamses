@@ -135,18 +135,30 @@ transition at a0_dilaton). The same three symmetron bugs were fixed
 now stated in the code. A true Brax+ dilaton would be a separate
 implementation task.
 
-## 7. Cubic Galileon — NOT Barreira+13; marked EXPERIMENTAL
+## 7. Cubic Galileon — TRACKER REIMPLEMENTED (galileon_tracker=T)
 
-CONFIRMED: the coefficient functions are fabricated (no background
+The original coefficient functions were fabricated (no background
 Galileon evolution, no b1/b2 functions, no Poisson back-reaction);
 pre-fix linear G_eff/G−1 = 12c3²E²/c2² grew INTO the past (13× at
-z=0, ~10⁵× at z=49) instead of decaying to GR. The mechanical
-family bugs were fixed (ρ−ρ̄ source, single 1/β_G coupling → −0.5
-force factor, a⁴ Vainshtein power, c2≠0 guard), which makes the
-PDE machinery self-consistent, but the model remains a simplified
-nDGP-template — read_params now prints an EXPERIMENTAL warning.
-Implementing the true tracker cubic Galileon (Barreira+13 b1/b2 +
-back-reaction) is future work.
+z=0, ~10⁵× at z=49) instead of decaying to GR. After fixing the
+mechanical family bugs, the full Barreira+13 TRACKER model was
+implemented (default galileon_tracker=.true., parameter-free):
+- Tracker: H φ̇ = ξH0²Mpl, c2=−6c3ξ, ξ=√(6(1−Ω_m)), c3=1/(6ξ).
+- Background wired through the f_de dispatch: ρ_de ∝ 1/E²,
+  E²(a)=[Ω_m a⁻³+√(Ω_m²a⁻⁶+4(1−Ω_m))]/2, w(a)=−1+(2/3)Ḣ/H²
+  (phantom-like, w0≈−1.18) — modified expansion + growth included.
+- Perturbations (Barreira eqs. 11-15 reduced on the tracker):
+  β₁=(ξ/3)[2Ḣ/H²−1+(1−Ω_m)/E⁴], β₂=2E²β₁/ξ²; code-unit field eq
+  = nDGP template with coeff 1/(3β₁a⁴), source Ω_m a δ/β₂ (kernel
+  reused); Poisson back-reaction −(κc3/M³)φ̇²∇²φ integrates to a
+  potential ∝ u, so the total fifth force is a single gradient with
+  factor +ξ/(6E²).
+Validated (aux/galileon_tracker_check.py): unscreened F5/F_N equals
+the analytic −ξ/(9β₂E²) to 5 digits at a=1/0.5/0.25 — G_eff/G(a=1)
+= 1.844 (paper: "twice as large today"), decaying as 1/E⁴ into the
+past; Vainshtein screening suppresses F5/F_N to 0.006 for a δ=5e4
+top-hat. The legacy template remains available (galileon_tracker=F)
+with an EXPERIMENTAL warning.
 
 ## 8. MOND — VERIFIED (healthy core; caveats documented)
 
