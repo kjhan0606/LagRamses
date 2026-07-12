@@ -2761,7 +2761,7 @@ subroutine fdm_restrict(ilevel)
 
   integer::igrid,ind,iskip,icell,igrid_child
   integer::ind_child,iskip_child,icell_child
-  real(dp)::sum_re,sum_im,rho_avg,S_avg,S_old,twopi_h
+  real(dp)::sum_re,sum_im,rho_avg,S_avg,S_old,twopi_h,amp2,sfac
   logical::parent_fluid,child_fluid
 
   if(.not.use_fdm) return
@@ -2791,7 +2791,7 @@ subroutine fdm_restrict(ilevel)
               icell_child = igrid_child + iskip_child
               sum_re = sum_re + psi_re(icell_child)
               sum_im = sum_im + psi_im(icell_child)
-              if(parent_fluid .and. .not.child_fluid) then
+              if(.not.child_fluid) then
                  rho_avg = rho_avg + psi_re(icell_child)**2 + psi_im(icell_child)**2
               end if
            end do
@@ -2802,7 +2802,23 @@ subroutine fdm_restrict(ilevel)
               S_avg = S_avg + twopi_h * nint((S_old - S_avg)/twopi_h)
               psi_re(icell) = rho_avg
               psi_im(icell) = S_avg
+           else if(.not.child_fluid) then
+              ! wave->wave: plain complex averaging DESTROYS mass under
+              ! interference (|<psi>|^2 <= <|psi|^2>, Cauchy-Schwarz).
+              ! Conserve mass: amplitude from <|psi|^2>, phase from <psi>.
+              rho_avg = rho_avg / dble(twotondim)
+              amp2 = (sum_re**2 + sum_im**2)
+              if(amp2 > 0.0d0) then
+                 sfac = sqrt(rho_avg / amp2)
+                 psi_re(icell) = sum_re * sfac
+                 psi_im(icell) = sum_im * sfac
+              else
+                 ! perfect phase cancellation: keep mass, arbitrary phase
+                 psi_re(icell) = sqrt(rho_avg)
+                 psi_im(icell) = 0.0d0
+              end if
            else
+              ! fluid->fluid: (rho, S) average is linear and conservative
               psi_re(icell) = sum_re / dble(twotondim)
               psi_im(icell) = sum_im / dble(twotondim)
            end if
