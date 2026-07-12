@@ -75,8 +75,9 @@ subroutine newdt_fine(ilevel)
      write(*,'(" HJM_CFL[grav]: dt=",1PE12.5," tff=",1PE12.5," hexp=",1PE12.5)') &
           dtnew(ilevel), courant_factor*tff, 0.1d0/hexp
   end if
-  ! FDM kinetic timestep. The classic CFL dt < fdm_courant*dx^2*a^2/(6*hbar)
-  ! is the worst case: it equals fdm_courant*a^2/(hbar*k2) with k2 = 6/dx^2,
+  ! FDM kinetic timestep (supercomoving time: no aexp factors in code units).
+  ! The classic CFL dt < fdm_courant*dx^2/(6*hbar)
+  ! is the worst case: it equals fdm_courant/(hbar*k2) with k2 = 6/dx^2,
   ! the 7-point stencil's max eigenvalue (~Nyquist). Two knobs relax it:
   !   fdm_kinetic=1 (Crank-Nicolson): fine levels are unconditionally STABLE,
   !       so they need no dx^2 limit (only the base, spectral, sets accuracy).
@@ -95,7 +96,7 @@ subroutine newdt_fine(ilevel)
         call fdm_vmax_level(ilevel, dtheta_max)
         dt_adv = huge(1.0d0)
         if(dtheta_max > 0.0d0) then
-           dt_adv = fdm_courant * dx_fdm * aexp**2 &
+           dt_adv = fdm_courant * dx_fdm &
                 / (hbar_code * dtheta_max)
            dtnew(ilevel) = MIN(dtnew(ilevel), dt_adv)
         end if
@@ -111,8 +112,8 @@ subroutine newdt_fine(ilevel)
         else
            k2_eff = k2_nyq
         end if
-        dt_acc = fdm_courant * aexp**2 / (hbar_code * k2_eff)
-        dt_nyq = fdm_courant * aexp**2 / (hbar_code * k2_nyq)
+        dt_acc = fdm_courant / (hbar_code * k2_eff)
+        dt_nyq = fdm_courant / (hbar_code * k2_nyq)
         if(ilevel==levelmin)then
            dtnew(ilevel)=MIN(dtnew(ilevel), dt_acc)
         else

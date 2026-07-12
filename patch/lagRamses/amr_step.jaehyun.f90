@@ -775,7 +775,11 @@ recursive subroutine amr_step(ilevel,icount)
         else
            call amr_step(ilevel+1,1)
         endif
-     else 
+        ! Restrict FDM psi/(rho,S) from the completed finer level so
+        ! non-leaf cells stay fresh (derefinement resumes from restricted
+        ! values; wave->fluid parents get rho=<|psi|^2>, unwrapped S).
+        if(use_fdm) call fdm_restrict(ilevel)
+     else
         ! Otherwise, update time and finer level time-step
         dtold(ilevel+1)=dtnew(ilevel)/dble(nsubcycle(ilevel))
         dtnew(ilevel+1)=dtnew(ilevel)/dble(nsubcycle(ilevel))

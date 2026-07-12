@@ -137,8 +137,12 @@ subroutine compute_power_spectrum(ilevel, filedir, nchar)
            iz = modulo(iz, fft_Nz)
            idx_3d = int(ix, i8b) * int(fft_Ny, i8b) * int(fft_Nz, i8b) &
                   + int(iy, i8b) * int(fft_Nz, i8b) + int(iz, i8b)
-           rhs_local(idx_3d) = rhs_local(idx_3d) &
-                + psi_re(icell)**2 + psi_im(icell)**2
+           if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
+              rhs_local(idx_3d) = rhs_local(idx_3d) + psi_re(icell)
+           else
+              rhs_local(idx_3d) = rhs_local(idx_3d) &
+                   + psi_re(icell)**2 + psi_im(icell)**2
+           end if
            npart_loc = npart_loc + 1
         end do
      end do

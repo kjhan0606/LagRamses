@@ -31,10 +31,9 @@ subroutine fdm_hjm_step(ilevel, dt_loc)
   scale = boxlen / dble(nx_loc)
   dx_loc = dx * scale
 
-  ! --- Convert psi -> (rho, S) ---
-  call fdm_psi_to_rhoS(ilevel)
-
-  ! Sync ghost zones in (rho, S) representation
+  ! Fluid levels hold (rho, S) PERSISTENTLY: psi_re=rho, psi_im=S with S an
+  ! unwrapped real action. No psi<->rhoS conversion per step — atan2 would
+  ! wrap S to [-pi*hbar,pi*hbar] and break |dS| > pi*hbar flows (large boxes).
   call make_virtual_fine_dp(psi_re(1), ilevel)
   call make_virtual_fine_dp(psi_im(1), ilevel)
 
@@ -64,9 +63,6 @@ subroutine fdm_hjm_step(ilevel, dt_loc)
      end do
   end do
 
-  ! --- Convert (rho, S) -> psi ---
-  call fdm_rhoS_to_psi(ilevel)
-
 end subroutine fdm_hjm_step
 
 !################################################################
@@ -89,7 +85,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   integer::ntot
   real(dp)::rho1,S1,inv_a2,dx_inv,dx2_inv,hbar2_over_2
 
-  inv_a2  = 1.0d0 / aexp**2
+  inv_a2  = 1.0d0   ! supercomoving time absorbs all a factors
   dx_inv  = 1.0d0 / dx_loc
   dx2_inv = 1.0d0 / (dx_loc**2)
   hbar2_over_2 = 0.5d0 * hbar_code**2
@@ -203,6 +199,7 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
   real(dp)::vel_L,vel_R
   real(dp)::flux_L,flux_R
   real(dp)::grad2S
+  real(dp)::dS_bk,dS_fw
 
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
@@ -231,9 +228,13 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
                  rho_R = rho_c; S_R = S_c
               end if
 
+              ! S is an unwrapped real action — plain differences are exact
+              dS_bk = S_c - S_L
+              dS_fw = S_R - S_c
+
               ! --- Continuity: upwind flux ---
-              vel_L = (S_c - S_L) * dx_inv
-              vel_R = (S_R - S_c) * dx_inv
+              vel_L = dS_bk * dx_inv
+              vel_R = dS_fw * dx_inv
 
               if(vel_R >= 0.0d0) then
                  flux_R = rho_c * vel_R
@@ -249,8 +250,8 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
               drho(icell) = drho(icell) - inv_a2 * (flux_R - flux_L) * dx_inv
 
               ! --- Hamilton-Jacobi: Sethian-Osher ---
-              grad2S = grad2S + max(max((S_c-S_L)*dx_inv, 0.0d0)**2, &
-                                    min((S_R-S_c)*dx_inv, 0.0d0)**2)
+              grad2S = grad2S + max(max(dS_bk*dx_inv, 0.0d0)**2, &
+                                    min(dS_fw*dx_inv, 0.0d0)**2)
 
               ! --- Quantum pressure: log-density form ---
               ! QP omitted at fluid levels: by Madelung criterion C1<threshold,
@@ -364,41 +365,35 @@ subroutine fdm_madelung_refine_flag(ilevel)
   nflag_C1_loc = 0
   nflag_C2_loc = 0
 
+  ! Fluid levels store (rho, S) directly: psi_re=rho, psi_im=S (unwrapped)
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
      igrid = headl(myid, ilevel)
      do while(igrid > 0)
         icell = igrid + iskip
-        re_c = psi_re(icell)
-        im_c = psi_im(icell)
-        sqrho_c = sqrt(re_c**2 + im_c**2)
+        sqrho_c = sqrt(max(psi_re(icell),0.0d0))
 
         if(sqrho_c > 1.0d-15) then
            C1_max = 0.0d0
            C2_max = 0.0d0
-           S_c = hbar_code * atan2(im_c, re_c)
+           S_c = psi_im(icell)
 
            do idim=1,ndim
               call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icL)
               call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icR)
 
               if(icL > 0) then
-                 re_L = psi_re(icL); im_L = psi_im(icL)
+                 sqrho_L = sqrt(max(psi_re(icL),0.0d0)); S_L = psi_im(icL)
               else
-                 re_L = re_c; im_L = im_c
+                 sqrho_L = sqrho_c; S_L = S_c
               end if
               if(icR > 0) then
-                 re_R = psi_re(icR); im_R = psi_im(icR)
+                 sqrho_R = sqrt(max(psi_re(icR),0.0d0)); S_R = psi_im(icR)
               else
-                 re_R = re_c; im_R = im_c
+                 sqrho_R = sqrho_c; S_R = S_c
               end if
 
-              sqrho_L = sqrt(re_L**2 + im_L**2)
-              sqrho_R = sqrt(re_R**2 + im_R**2)
-
               C1_dim = abs(sqrho_R - 2.0d0*sqrho_c + sqrho_L) / sqrho_c
-              S_L = hbar_code * atan2(im_L, re_L)
-              S_R = hbar_code * atan2(im_R, re_R)
               C2_dim = abs(S_R - 2.0d0*S_c + S_L) / hbar_code
 
               C1_max = max(C1_max, C1_dim)

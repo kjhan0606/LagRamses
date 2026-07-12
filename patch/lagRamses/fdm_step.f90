@@ -36,9 +36,9 @@ subroutine fdm_step(ilevel)
      call fdm_hjm_local_cfl(ilevel, dt_cfl)
      nsub_hjm = 1
      if(dt_cfl > 0.0d0 .and. dt_loc > dt_cfl) then
-        nsub_hjm = ceiling(dt_loc / dt_cfl)
+        nsub_hjm = min(ceiling(dt_loc / dt_cfl), 10000)
         if(myid==1) then
-           write(*,'(A,I2,A,I4,A,ES10.3,A,ES10.3)') &
+           write(*,'(A,I2,A,I6,A,ES10.3,A,ES10.3)') &
               ' HJM_SUBCYCLE: lv=',ilevel,' nsub=',nsub_hjm, &
               ' dt_loc=',dt_loc,' dt_cfl=',dt_cfl
         end if
@@ -163,8 +163,9 @@ subroutine fdm_drift_fft(ilevel, dt_half)
   nx_loc = icoarse_max - icoarse_min + 1
   scale = boxlen / dble(nx_loc)
 
-  ! alpha = hbar_code * dt / (2 * a^2)
-  alpha = hbar_code * dt_half / (aexp**2)
+  ! Supercomoving time (dt_code = H0*dt/a^2) already absorbs the 1/a^2 of
+  ! the comoving kinetic term: no aexp factor in code units.
+  alpha = hbar_code * dt_half
 
 #ifndef WITHOUTMPI
   ! Large-grid / multi-rank: distributed FFTW-MPI slab path (no full-grid
@@ -370,7 +371,7 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
   dx_fft  = 0.5d0**ilevel
   dx2_fft = dx_fft * dx_fft
   twopi   = 2.0d0*acos(-1.0d0)
-  alpha   = hbar_code * dt_half / (aexp**2)
+  alpha   = hbar_code * dt_half   ! supercomoving time: no aexp factor
 
   call timer('fdm-plan','start')
 
@@ -819,7 +820,7 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   nx_loc = icoarse_max - icoarse_min + 1
   scale = boxlen / dble(nx_loc)
   dx_loc = dx * scale
-  alpha = hbar_code * dt_half / (2.0d0 * aexp**2 * dx_loc**2)
+  alpha = hbar_code * dt_half / (2.0d0 * dx_loc**2)
   g = 0.5d0 * alpha
   cntol = 1.0d-10
   ntot = ncoarse + twotondim*ngridmax
@@ -831,10 +832,11 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   pr=0d0;pi=0d0;vr=0d0;vi=0d0;sr=0d0;si=0d0
   trr=0d0;tii=0d0;xr=0d0;xi=0d0
 
-  ! b = (1-6ig)psi + ig N[psi] = A_{-g}[psi]   (boundary psi included)
-  call cn_matvec(ilevel, -g, psi_re, psi_im, br, bi)
+  ! b = (1-6ig)psi + ig N[psi] = A_{-g}[psi]   (boundary psi included;
+  ! hybrid: coarse-fine ghosts enter b with weight 2, see cn_matvec)
+  call cn_matvec(ilevel, -g, psi_re, psi_im, br, bi, 1)
   ! r0 = b - A_{g}[psi]  (x0 = 0 correction). Store A psi in r then subtract.
-  call cn_matvec(ilevel,  g, psi_re, psi_im, rr, ri)
+  call cn_matvec(ilevel,  g, psi_re, psi_im, rr, ri, 0)
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
      igrid = headl(myid, ilevel)
@@ -879,7 +881,7 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
            igrid = next(igrid)
         end do
      end do
-     call cn_matvec(ilevel, g, pr,pi, vr,vi)           ! v = A p
+     call cn_matvec(ilevel, g, pr,pi, vr,vi, 0)        ! v = A p
      call cn_cdot(ilevel, rhr,rhi, vr,vi, zrv)
      alp = crho/zrv
      alr=dble(alp); ali=aimag(alp)
@@ -914,7 +916,7 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         end do
         exit
      end if
-     call cn_matvec(ilevel, g, sr,si, trr,tii)          ! t = A s
+     call cn_matvec(ilevel, g, sr,si, trr,tii, 0)       ! t = A s
      call cn_cdot(ilevel, trr,tii, sr,si, zts)          ! <t,s>
      call cn_cdot(ilevel, trr,tii, trr,tii, ztt)        ! <t,t>
      if(abs(ztt) == 0.0d0) exit
@@ -971,7 +973,7 @@ end subroutine fdm_drift_fd_cn
 ! (correction vectors satisfy this; for the b/Apsi calls `in`=psi is the
 ! intended Dirichlet boundary data).
 !################################################################
-subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi)
+subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi, bmode)
   use amr_commons
   use poisson_commons
   use fdm_commons
@@ -980,8 +982,16 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi)
   real(dp),intent(in)::gg
   real(dp),dimension(*)::inr,ini
   real(dp),dimension(*)::outr,outi
+  ! bmode: closure at coarse-fine faces (missing same-level neighbour).
+  !   Hybrid (fdm_use_hjm):
+  !     0 = correction vector: Dirichlet, contributes 0
+  !     1 = b-build from psi^n: contributes 2*ghost (psi_g^n + psi_g^{n+1})
+  !         with the ghost interpolated/converted from the fluid parent
+  !   Legacy (no hybrid): Neumann (centre value), byte-identical to before
+  integer,intent(in)::bmode
   integer::igrid,ind,iskip,icell,idim,inbor,icn
-  real(dp)::nr,ni
+  real(dp)::nr,ni,gre,gim
+  logical::gfound
 
   call make_virtual_fine_dp(inr(1), ilevel)
   call make_virtual_fine_dp(ini(1), ilevel)
@@ -998,6 +1008,16 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi)
                  call fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icn)
                  if(icn > 0) then
                     nr = nr + inr(icn); ni = ni + ini(icn)
+                 else if(fdm_use_hjm) then
+                    if(bmode == 1) then
+                       call fdm_wave_ghost(igrid, ilevel, idim, inbor, gre, gim, gfound)
+                       if(gfound) then
+                          nr = nr + 2.0d0*gre; ni = ni + 2.0d0*gim
+                       else
+                          nr = nr + inr(icell); ni = ni + ini(icell)
+                       end if
+                    end if
+                    ! bmode==0: Dirichlet — missing link contributes nothing
                  else
                     nr = nr + inr(icell); ni = ni + ini(icell)
                  end if
@@ -1166,6 +1186,7 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   real(dp)::dx,scale,dx_loc,inv2dx,rho2,sqrho_c,sqrho_L,sqrho_R
   real(dp)::dre,dim,dth,dth2,dth2_loc,dth2_glob
   real(dp)::c1_dim,c1_cell
+  logical::is_fluid
   integer::n_total,n_leaf,n_lowrho,n_c1skip,n_valid
   integer::n_total_g,n_leaf_g,n_lowrho_g,n_c1skip_g,n_valid_g
   integer,parameter::NBINS_C1=8
@@ -1182,6 +1203,7 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   scale = boxlen / dble(nx_loc)
   dx_loc = dx * scale
   inv2dx = 0.5d0 / dx_loc
+  is_fluid = (fdm_use_hjm .and. ilevel < fdm_first_wave_level)
 
   call make_virtual_fine_dp(psi_re(1), ilevel)
   call make_virtual_fine_dp(psi_im(1), ilevel)
@@ -1195,7 +1217,11 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
         n_total = n_total + 1
         if(son(icell) == 0) then
            n_leaf = n_leaf + 1
-           rho2 = psi_re(icell)**2 + psi_im(icell)**2
+           if(is_fluid) then
+              rho2 = max(psi_re(icell),0.0d0)   ! psi_re = rho on fluid levels
+           else
+              rho2 = psi_re(icell)**2 + psi_im(icell)**2
+           end if
            sqrho_c = sqrt(rho2)
            if(sqrho_c > 1.0d-8) then
               c1_cell = 0.0d0
@@ -1204,14 +1230,24 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
                  call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icp)
                  call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icm)
                  if(icp > 0 .and. icm > 0) then
-                    sqrho_R = sqrt(psi_re(icp)**2 + psi_im(icp)**2)
-                    sqrho_L = sqrt(psi_re(icm)**2 + psi_im(icm)**2)
-                    c1_dim = abs(sqrho_R - 2.0d0*sqrho_c + sqrho_L) / sqrho_c
-                    c1_cell = max(c1_cell, c1_dim)
-                    dre = (psi_re(icp) - psi_re(icm)) * inv2dx
-                    dim = (psi_im(icp) - psi_im(icm)) * inv2dx
-                    dth = (psi_re(icell)*dim - psi_im(icell)*dre) / rho2
-                    dth2 = dth2 + dth*dth
+                    if(is_fluid) then
+                       sqrho_R = sqrt(max(psi_re(icp),0.0d0))
+                       sqrho_L = sqrt(max(psi_re(icm),0.0d0))
+                       c1_dim = abs(sqrho_R - 2.0d0*sqrho_c + sqrho_L) / sqrho_c
+                       c1_cell = max(c1_cell, c1_dim)
+                       ! dtheta = grad(S)/hbar (S unwrapped)
+                       dth = (psi_im(icp) - psi_im(icm)) * inv2dx / hbar_code
+                       dth2 = dth2 + dth*dth
+                    else
+                       sqrho_R = sqrt(psi_re(icp)**2 + psi_im(icp)**2)
+                       sqrho_L = sqrt(psi_re(icm)**2 + psi_im(icm)**2)
+                       c1_dim = abs(sqrho_R - 2.0d0*sqrho_c + sqrho_L) / sqrho_c
+                       c1_cell = max(c1_cell, c1_dim)
+                       dre = (psi_re(icp) - psi_re(icm)) * inv2dx
+                       dim = (psi_im(icp) - psi_im(icm)) * inv2dx
+                       dth = (psi_re(icell)*dim - psi_im(icell)*dre) / rho2
+                       dth2 = dth2 + dth*dth
+                    end if
                  end if
               end do
               do ibin=1,NBINS_C1
@@ -1347,6 +1383,8 @@ subroutine fdm_drift_fd_explicit(ilevel, dt_half)
   integer::igrid,ind,iskip,icell,isub,nsub
   real(dp)::dx,scale,dx_loc,alpha,alpha_sub,dt_sub
   real(dp)::lap_re,lap_im,psi_re_c,psi_im_c
+  real(dp)::gre,gim
+  logical::gfound
   integer::nx_loc,idim,inbor,icell_nbor
 
   dx = 0.5d0**ilevel
@@ -1355,7 +1393,7 @@ subroutine fdm_drift_fd_explicit(ilevel, dt_half)
   dx_loc = dx * scale
 
   ! Full alpha for the requested dt_half
-  alpha = hbar_code * dt_half / (2.0d0 * aexp**2 * dx_loc**2)
+  alpha = hbar_code * dt_half / (2.0d0 * dx_loc**2)
 
   ! Sub-cycle if alpha > 1/6 (CFL limit)
   nsub = max(1, int(6.0d0*alpha) + 1)
@@ -1385,6 +1423,16 @@ subroutine fdm_drift_fd_explicit(ilevel, dt_half)
                     if(icell_nbor > 0) then
                        lap_re = lap_re + psi_re(icell_nbor)
                        lap_im = lap_im + psi_im(icell_nbor)
+                    else if(fdm_use_hjm) then
+                       ! Dirichlet ghost from the (fluid) parent level
+                       call fdm_wave_ghost(igrid, ilevel, idim, inbor, gre, gim, gfound)
+                       if(gfound) then
+                          lap_re = lap_re + gre
+                          lap_im = lap_im + gim
+                       else
+                          lap_re = lap_re + psi_re_c
+                          lap_im = lap_im + psi_im_c
+                       end if
                     else
                        lap_re = lap_re + psi_re_c
                        lap_im = lap_im + psi_im_c
@@ -1454,6 +1502,53 @@ subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
   end if
 
 end subroutine fdm_neighbor_cell
+!################################################################
+! Dirichlet ghost value for a wave-level cell whose same-level
+! neighbour is missing (coarse-fine boundary, hybrid runs).
+! Interpolates the father-level field to the ghost fine-cell
+! position along the face normal (w=0.25 toward our own father)
+! and converts fluid (rho,S) -> psi when the parent is a fluid
+! level. The fluid HJ equation evolves the SAME action S as the
+! Schrodinger phase (up to QP), so the converted phase stays
+! coherent with the wave patch interior.
+! found=.false. -> caller falls back to the legacy closure.
+!################################################################
+subroutine fdm_wave_ghost(igrid, ilevel, idim, inbor, gre, gim, found)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+  integer,intent(in)::igrid, ilevel, idim, inbor
+  real(dp),intent(out)::gre, gim
+  logical,intent(out)::found
+
+  integer::icell_pf, icell_pn
+  real(dp)::rho_g, S_g, amp, theta
+  real(dp),parameter::w = 0.25d0
+
+  found = .false.
+  gre = 0.0d0; gim = 0.0d0
+
+  icell_pf = father(igrid)
+  icell_pn = nbor(igrid, 2*(idim-1)+inbor)
+  if(icell_pf <= 0 .or. icell_pn <= 0) return
+
+  if(fdm_use_hjm .and. ilevel-1 < fdm_first_wave_level) then
+     ! Parent holds (rho, S): interpolate, then convert to psi
+     rho_g = (1.0d0-w)*psi_re(icell_pn) + w*psi_re(icell_pf)
+     S_g   = (1.0d0-w)*psi_im(icell_pn) + w*psi_im(icell_pf)
+     amp = sqrt(max(rho_g, 0.0d0))
+     theta = S_g / hbar_code
+     gre = amp*cos(theta)
+     gim = amp*sin(theta)
+  else
+     ! Parent holds psi: interpolate (Re, Im) directly
+     gre = (1.0d0-w)*psi_re(icell_pn) + w*psi_re(icell_pf)
+     gim = (1.0d0-w)*psi_im(icell_pn) + w*psi_im(icell_pf)
+  end if
+  found = .true.
+
+end subroutine fdm_wave_ghost
 !################################################################
 !################################################################
 ! Potential operator (Kick): exp(-i Phi dt / hbar)
@@ -1686,9 +1781,15 @@ subroutine fdm_init_psi()
                    +int(i3-1,i8b)*int(ng1,i8b)*int(ng2,i8b)
               rho_cell = max(rho_3d(idx),0.0d0)
               theta_cell = theta_3d(idx)
-              amp = sqrt(rho_cell)
-              psi_re(icell) = amp*cos(theta_cell)
-              psi_im(icell) = amp*sin(theta_cell)
+              if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
+                 ! Fluid level: store (rho, S) with S unwrapped
+                 psi_re(icell) = rho_cell
+                 psi_im(icell) = hbar_code*theta_cell
+              else
+                 amp = sqrt(rho_cell)
+                 psi_re(icell) = amp*cos(theta_cell)
+                 psi_im(icell) = amp*sin(theta_cell)
+              end if
               mass_loc = mass_loc + rho_cell * dx**3
            end if
            igrid = next(igrid)
@@ -1762,6 +1863,7 @@ subroutine fdm_init_psi_distributed()
   integer,allocatable::scount2(:),rcount2(:),sdispls2(:),rdispls2(:)
   integer(i8b),allocatable::send_gidx(:),recv_gidx(:)
   integer,allocatable::cellmap(:)
+  integer,allocatable::leaflvl(:)
   real(dp),allocatable::celldx(:)
   real(dp),allocatable::reply(:),recvreply(:)
   integer::n_leaf,n_recv,slot,s
@@ -1840,15 +1942,26 @@ subroutine fdm_init_psi_distributed()
   end if
   deallocate(init_plane)
 
-  ! ---- Form psi = sqrt(rho)*exp(i theta) on the slab ----
+  ! ---- Form the slab field ----
+  ! Hybrid: ship (rho, S=hbar*theta) so fluid levels can store the
+  ! UNWRAPPED action directly (atan2 of psi would wrap S and break
+  ! HJM at large boxes where |dS| per cell > pi*hbar).
+  ! Pure wave: ship psi = sqrt(rho)*exp(i theta) as before.
   allocate(psislab_re(0:max(locsize,1_i8b)-1))
   allocate(psislab_im(0:max(locsize,1_i8b)-1))
-  do lidx=0,locsize-1
-     rho_c = max(rho_slab(lidx),0.0d0)
-     amp = sqrt(rho_c)
-     psislab_re(lidx) = amp*cos(theta_slab(lidx))
-     psislab_im(lidx) = amp*sin(theta_slab(lidx))
-  end do
+  if(fdm_use_hjm)then
+     do lidx=0,locsize-1
+        psislab_re(lidx) = max(rho_slab(lidx),0.0d0)
+        psislab_im(lidx) = hbar_code*theta_slab(lidx)
+     end do
+  else
+     do lidx=0,locsize-1
+        rho_c = max(rho_slab(lidx),0.0d0)
+        amp = sqrt(rho_c)
+        psislab_re(lidx) = amp*cos(theta_slab(lidx))
+        psislab_im(lidx) = amp*sin(theta_slab(lidx))
+     end do
+  end if
   deallocate(theta_slab,rho_slab)
 
   ! ---- Slab ownership table (which rank owns each i3 plane) ----
@@ -1903,6 +2016,7 @@ subroutine fdm_init_psi_distributed()
   allocate(send_gidx(max(n_leaf,1)))
   allocate(cellmap(max(n_leaf,1)))
   allocate(celldx(max(n_leaf,1)))
+  allocate(leaflvl(max(n_leaf,1)))
   pos = sdispls
 
   ! Pass 2: fill request buffers (bucketed by owner), record cell back-map
@@ -1938,6 +2052,7 @@ subroutine fdm_init_psi_distributed()
               send_gidx(slot) = gidx
               cellmap(slot)   = icell
               celldx(slot)    = dvol
+              leaflvl(slot)   = ilevel
            end if
            igrid = next(igrid)
         end do
@@ -1986,14 +2101,32 @@ subroutine fdm_init_psi_distributed()
 
   ! Scatter replies back into AMR cells (same order as send_gidx)
   mass_loc = 0.0d0
-  do s=1,n_leaf
-     icell = cellmap(s)
-     re = recvreply(2*(s-1))
-     im = recvreply(2*(s-1)+1)
-     psi_re(icell) = re
-     psi_im(icell) = im
-     mass_loc = mass_loc + (re*re+im*im)*celldx(s)
-  end do
+  if(fdm_use_hjm)then
+     ! reply carries (rho, S): fluid levels store as-is (S unwrapped);
+     ! wave levels convert to psi.
+     do s=1,n_leaf
+        icell = cellmap(s)
+        rho_c = recvreply(2*(s-1))
+        if(leaflvl(s) < fdm_first_wave_level)then
+           psi_re(icell) = rho_c
+           psi_im(icell) = recvreply(2*(s-1)+1)
+        else
+           amp = sqrt(max(rho_c,0.0d0))
+           psi_re(icell) = amp*cos(recvreply(2*(s-1)+1)/hbar_code)
+           psi_im(icell) = amp*sin(recvreply(2*(s-1)+1)/hbar_code)
+        end if
+        mass_loc = mass_loc + rho_c*celldx(s)
+     end do
+  else
+     do s=1,n_leaf
+        icell = cellmap(s)
+        re = recvreply(2*(s-1))
+        im = recvreply(2*(s-1)+1)
+        psi_re(icell) = re
+        psi_im(icell) = im
+        mass_loc = mass_loc + (re*re+im*im)*celldx(s)
+     end do
+  end if
 
   call MPI_ALLREDUCE(mass_loc,mass_glob,1,MPI_DOUBLE_PRECISION, &
        MPI_SUM,MPI_COMM_WORLD,info)
@@ -2010,7 +2143,7 @@ subroutine fdm_init_psi_distributed()
   deallocate(start0_all,locn0_all)
   deallocate(scount,rcount,sdispls,rdispls,pos)
   deallocate(scount2,rcount2,sdispls2,rdispls2)
-  deallocate(send_gidx,recv_gidx,cellmap,celldx,reply,recvreply)
+  deallocate(send_gidx,recv_gidx,cellmap,leaflvl,celldx,reply,recvreply)
 
 contains
   integer function slab_owner(i3,s0,l0,np)
@@ -2147,10 +2280,10 @@ subroutine fdm_init_phase_fft_dist(ng1,ng2,ng3,loc_n0,start0,alloc_local, &
      end do
   end do
 
-  ! ---- Inverse FFT, normalize, theta = (aexp^2/hbar)*phi_v ----
+  ! ---- Inverse FFT, normalize, theta = phi_v/hbar (v_code = hbar*grad theta) ----
   call fftw_mpi_execute_dft(plan_bwd,cvx,cvx)
   do lidx=0,locsize-1
-     theta_slab(lidx) = (aexp**2/hbar_code)*dble(cvx(lidx+1))/dble(N_total)
+     theta_slab(lidx) = dble(cvx(lidx+1))/(hbar_code*dble(N_total))
   end do
 
   deallocate(plane)
@@ -2264,7 +2397,7 @@ subroutine fdm_init_phase_fft(ng1,ng2,ng3,N_total,dx_loc,theta_3d)
      end do
   end do
 
-  ! Inverse C2R, normalize, theta = (aexp^2/hbar_code)*phi_v
+  ! Inverse C2R, normalize, theta = phi_v/hbar_code (v_code = hbar*grad theta)
   call dfftw_plan_dft_c2r_3d(plan_bwd, ng1, ng2, ng3, phih, phi_v, FFTW_ESTIMATE)
   call dfftw_execute_dft_c2r(plan_bwd, phih, phi_v)
   call dfftw_destroy_plan(plan_bwd)
@@ -2272,7 +2405,7 @@ subroutine fdm_init_phase_fft(ng1,ng2,ng3,N_total,dx_loc,theta_3d)
   fmin=1.0d30; fmax=-1.0d30
   do idx=1,N_total
      phi_v(idx) = phi_v(idx)/dble(N_total)
-     theta_3d(idx) = (aexp**2/hbar_code)*phi_v(idx)
+     theta_3d(idx) = phi_v(idx)/hbar_code
      if(theta_3d(idx)<fmin) fmin=theta_3d(idx)
      if(theta_3d(idx)>fmax) fmax=theta_3d(idx)
   end do
@@ -2305,12 +2438,14 @@ subroutine fdm_prolong(ilevel)
   real(dp)::rho_child,S_child,amp_child,theta_child,dS
   real(dp)::pi_h,twopi_h
   real(dp)::rho_parent,sum_rho_child,renorm
-  logical::use_rhoS
+  logical::use_rhoS,child_is_wave
 
   if(.not.use_fdm) return
   if(ilevel <= levelmin) return
 
-  use_rhoS = (fdm_use_hjm .and. ilevel < fdm_first_wave_level)
+  ! use_rhoS: the PARENT level (ilevel-1) is a fluid level holding (rho,S)
+  use_rhoS = (fdm_use_hjm .and. ilevel-1 < fdm_first_wave_level)
+  child_is_wave = (.not.fdm_use_hjm) .or. (ilevel >= fdm_first_wave_level)
   pi_h = 3.14159265358979d0 * hbar_code
   twopi_h = 2.0d0 * pi_h
 
@@ -2333,45 +2468,35 @@ subroutine fdm_prolong(ilevel)
      igrid_p = ival - (ind_p - 1) * ngridmax
 
      if(use_rhoS) then
-        ! (rho, S) interpolation for fluid levels — avoids interference nodes
-        rho_c = psi_re_c**2 + psi_im_c**2
-        S_c = hbar_code * atan2(psi_im_c, psi_re_c)
+        ! Parent is a fluid level: psi_re=rho, psi_im=S (unwrapped) — read
+        ! directly, no atan2. Plain S differences are exact.
+        rho_c = psi_re_c
+        S_c = psi_im_c
 
         do idim=1,ndim
            call fdm_neighbor_cell(igrid_p, ilevel-1, ind_p, idim, 1, icL)
            call fdm_neighbor_cell(igrid_p, ilevel-1, ind_p, idim, 2, icR)
 
            if(icL > 0) then
-              rho_L = psi_re(icL)**2 + psi_im(icL)**2
-              S_L = hbar_code * atan2(psi_im(icL), psi_re(icL))
+              rho_L = psi_re(icL); S_L = psi_im(icL)
            else
               rho_L = rho_c; S_L = S_c
            end if
            if(icR > 0) then
-              rho_R = psi_re(icR)**2 + psi_im(icR)**2
-              S_R = hbar_code * atan2(psi_im(icR), psi_re(icR))
+              rho_R = psi_re(icR); S_R = psi_im(icR)
            else
               rho_R = rho_c; S_R = S_c
            end if
 
            if(icL > 0 .and. icR > 0) then
               grad_rho(idim) = (rho_R - rho_L) * 0.5d0
-              dS = S_R - S_L
-              if(dS >  pi_h) dS = dS - twopi_h
-              if(dS < -pi_h) dS = dS + twopi_h
-              grad_S(idim) = dS * 0.5d0
+              grad_S(idim) = (S_R - S_L) * 0.5d0
            else if(icR > 0) then
               grad_rho(idim) = rho_R - rho_c
-              dS = S_R - S_c
-              if(dS >  pi_h) dS = dS - twopi_h
-              if(dS < -pi_h) dS = dS + twopi_h
-              grad_S(idim) = dS
+              grad_S(idim) = S_R - S_c
            else if(icL > 0) then
               grad_rho(idim) = rho_c - rho_L
-              dS = S_c - S_L
-              if(dS >  pi_h) dS = dS - twopi_h
-              if(dS < -pi_h) dS = dS + twopi_h
-              grad_S(idim) = dS
+              grad_S(idim) = S_c - S_L
            else
               grad_rho(idim) = 0.0d0
               grad_S(idim) = 0.0d0
@@ -2392,10 +2517,17 @@ subroutine fdm_prolong(ilevel)
            S_child = S_c + 0.25d0 * &
                 (sx(1)*grad_S(1) + sx(2)*grad_S(2) + sx(3)*grad_S(3))
            if(rho_child < 1.0d-15) rho_child = 1.0d-15
-           amp_child = sqrt(rho_child)
-           theta_child = S_child / hbar_code
-           psi_re(icell_child) = amp_child * cos(theta_child)
-           psi_im(icell_child) = amp_child * sin(theta_child)
+           if(child_is_wave) then
+              ! Fluid -> wave boundary: convert to psi
+              amp_child = sqrt(rho_child)
+              theta_child = S_child / hbar_code
+              psi_re(icell_child) = amp_child * cos(theta_child)
+              psi_im(icell_child) = amp_child * sin(theta_child)
+           else
+              ! Fluid -> fluid: store (rho, S) directly
+              psi_re(icell_child) = rho_child
+              psi_im(icell_child) = S_child
+           end if
         end do
      else
         ! Standard (Re, Im) interpolation for wave levels
@@ -2479,12 +2611,14 @@ subroutine fdm_hjm_local_cfl(ilevel, dt_cfl)
   integer::igrid,ind,iskip,icell,idim,icp,icm,nx_loc,info
   real(dp)::dx,scale,dx_loc,inv2dx,rho2
   real(dp)::dre,dim_val,dth,dth2,dth2_loc,dth2_glob
+  logical::is_fluid
 
   dx = 0.5d0**ilevel
   nx_loc = icoarse_max - icoarse_min + 1
   scale = boxlen / dble(nx_loc)
   dx_loc = dx * scale
   inv2dx = 0.5d0 / dx_loc
+  is_fluid = (fdm_use_hjm .and. ilevel < fdm_first_wave_level)
 
   call make_virtual_fine_dp(psi_re(1), ilevel)
   call make_virtual_fine_dp(psi_im(1), ilevel)
@@ -2496,16 +2630,24 @@ subroutine fdm_hjm_local_cfl(ilevel, dt_cfl)
      do while(igrid > 0)
         icell = igrid + iskip
         if(son(icell) == 0) then
-           rho2 = psi_re(icell)**2 + psi_im(icell)**2
+           if(is_fluid) then
+              rho2 = max(psi_re(icell),0.0d0)
+           else
+              rho2 = psi_re(icell)**2 + psi_im(icell)**2
+           end if
            if(rho2 > 1.0d-16) then
               dth2 = 0.0d0
               do idim=1,ndim
                  call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icp)
                  call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icm)
                  if(icp > 0 .and. icm > 0) then
-                    dre = (psi_re(icp) - psi_re(icm)) * inv2dx
-                    dim_val = (psi_im(icp) - psi_im(icm)) * inv2dx
-                    dth = (psi_re(icell)*dim_val - psi_im(icell)*dre) / rho2
+                    if(is_fluid) then
+                       dth = (psi_im(icp) - psi_im(icm)) * inv2dx / hbar_code
+                    else
+                       dre = (psi_re(icp) - psi_re(icm)) * inv2dx
+                       dim_val = (psi_im(icp) - psi_im(icm)) * inv2dx
+                       dth = (psi_re(icell)*dim_val - psi_im(icell)*dre) / rho2
+                    end if
                     dth2 = dth2 + dth*dth
                  end if
               end do
@@ -2524,7 +2666,7 @@ subroutine fdm_hjm_local_cfl(ilevel, dt_cfl)
 #endif
 
   if(dth2_glob > 0.0d0) then
-     dt_cfl = fdm_courant * dx_loc * aexp**2 / (hbar_code * sqrt(dth2_glob))
+     dt_cfl = fdm_courant * dx_loc / (hbar_code * sqrt(dth2_glob))
   else
      dt_cfl = 1.0d30
   end if
@@ -2538,18 +2680,27 @@ end subroutine fdm_hjm_local_cfl
 subroutine fdm_restrict(ilevel)
   use amr_commons
   use poisson_commons
+  use fdm_commons
   implicit none
   integer,intent(in)::ilevel
 
   integer::igrid,ind,iskip,icell,igrid_child
   integer::ind_child,iskip_child,icell_child
-  real(dp)::sum_re,sum_im
+  real(dp)::sum_re,sum_im,rho_avg,S_avg,S_old,twopi_h
+  logical::parent_fluid,child_fluid
 
   if(.not.use_fdm) return
   if(ilevel < levelmin) return
 
+  parent_fluid = (fdm_use_hjm .and. ilevel   < fdm_first_wave_level)
+  child_fluid  = (fdm_use_hjm .and. ilevel+1 < fdm_first_wave_level)
+  twopi_h = 2.0d0 * 3.14159265358979d0 * hbar_code
+
   ! For each cell at ilevel that has children (son /= 0),
-  ! average the children's psi back to parent
+  ! average the children back to parent.
+  ! fluid->fluid: plain (rho,S) average.  wave->wave: plain psi average.
+  ! wave child -> fluid parent: rho = <|psi|^2>, S = hbar*atan2(<psi>)
+  ! rebased onto the parent's previous unwrapped S by continuity.
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
      igrid = headl(myid, ilevel)
@@ -2559,15 +2710,27 @@ subroutine fdm_restrict(ilevel)
         if(igrid_child > 0) then
            sum_re = 0.0d0
            sum_im = 0.0d0
+           rho_avg = 0.0d0
            do ind_child=1,twotondim
               iskip_child = ncoarse + (ind_child-1)*ngridmax
               icell_child = igrid_child + iskip_child
               sum_re = sum_re + psi_re(icell_child)
               sum_im = sum_im + psi_im(icell_child)
+              if(parent_fluid .and. .not.child_fluid) then
+                 rho_avg = rho_avg + psi_re(icell_child)**2 + psi_im(icell_child)**2
+              end if
            end do
-           ! Volume average of amplitude
-           psi_re(icell) = sum_re / dble(twotondim)
-           psi_im(icell) = sum_im / dble(twotondim)
+           if(parent_fluid .and. .not.child_fluid) then
+              rho_avg = rho_avg / dble(twotondim)
+              S_avg = hbar_code * atan2(sum_im, sum_re)
+              S_old = psi_im(icell)
+              S_avg = S_avg + twopi_h * nint((S_old - S_avg)/twopi_h)
+              psi_re(icell) = rho_avg
+              psi_im(icell) = S_avg
+           else
+              psi_re(icell) = sum_re / dble(twotondim)
+              psi_im(icell) = sum_im / dble(twotondim)
+           end if
         end if
         igrid = next(igrid)
      end do
@@ -2674,7 +2837,11 @@ subroutine fdm_diagnostics()
         do while(igrid > 0)
            icell = igrid + iskip
            if(son(icell) == 0) then
-              psi2 = psi_re(icell)**2 + psi_im(icell)**2
+              if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
+                 psi2 = psi_re(icell)          ! fluid level: psi_re = rho
+              else
+                 psi2 = psi_re(icell)**2 + psi_im(icell)**2
+              end if
               mass_loc = mass_loc + psi2 * vol
               if(psi2 > rho_max_loc) rho_max_loc = psi2
            end if
@@ -2730,7 +2897,11 @@ subroutine fdm_mass_check(label)
         do while(igrid > 0)
            icell = igrid + iskip
            if(son(icell) == 0) then
-              psi2 = psi_re(icell)**2 + psi_im(icell)**2
+              if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
+                 psi2 = psi_re(icell)          ! fluid level: psi_re = rho
+              else
+                 psi2 = psi_re(icell)**2 + psi_im(icell)**2
+              end if
               if(ilevel == levelmin) then
                  mass8_loc = mass8_loc + psi2 * vol8
               else

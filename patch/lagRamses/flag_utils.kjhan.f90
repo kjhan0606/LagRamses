@@ -594,7 +594,11 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
            if(use_fdm)then
               ! FDM: density is |psi|^2; uold (hydro) is empty under hydro=.false.
               do i=1,ncell
-                 ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+                 if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
+                    ok(i)=ok(i).or.(psi_re(ind_cell(i))>=m_refine_eff(ilevel)*d_scale_fdm)
+                 else
+                    ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+                 end if
               end do
            else
               do i=1,ncell
@@ -604,7 +608,11 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
         else
            if(use_fdm)then
               do i=1,ncell
-                 ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+                 if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
+                    ok(i)=ok(i).or.(psi_re(ind_cell(i))>=m_refine_eff(ilevel)*d_scale_fdm)
+                 else
+                    ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+                 end if
               end do
            else
               do i=1,ncell
@@ -616,7 +624,11 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
         if(ivar_refine==0)then
            if(use_fdm)then
               do i=1,ncell
-                 ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+                 if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
+                    ok(i)=ok(i).or.(psi_re(ind_cell(i))>=m_refine_eff(ilevel)*d_scale_fdm)
+                 else
+                    ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+                 end if
               end do
            else
               do i=1,ncell
@@ -639,7 +651,11 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
            if(use_fdm)then
               ! FDM: density is |psi|^2; uold (hydro) is empty under hydro=.false.
               do i=1,ncell
-                 ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+                 if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
+                    ok(i)=ok(i).or.(psi_re(ind_cell(i))>=m_refine_eff(ilevel)*d_scale_fdm)
+                 else
+                    ok(i)=ok(i).or.((psi_re(ind_cell(i))**2+psi_im(ind_cell(i))**2)>=m_refine_eff(ilevel)*d_scale_fdm)
+                 end if
               end do
            else
               do i=1,ncell
