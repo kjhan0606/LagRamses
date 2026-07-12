@@ -80,7 +80,9 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
        & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min
   namelist/pbh_params/pbh_table_file,pbh_fraction,pbh_boost, &
-       & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance
+       & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance, &
+       & pbh_mf_model,pbh_spin_model,pbh_hawking_model, &
+       & pbh_epsdep_model,pbh_fheat_model
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
        & n_iter_mond,mond_eps,g_ext_mond
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
@@ -884,6 +886,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         call clean_stop
      end if
      call pbh_read_table(myid)
+     call pbh_validate_models(myid)
      if(myid==1) then
         write(*,'(A)') ' Evaporating-PBH dark matter enabled'
         write(*,'(A,ES10.3,A,ES10.3,A)') '   pbh_fraction=', pbh_fraction, &

@@ -22,6 +22,13 @@ module pbh_commons
   character(LEN=16)  :: pbh_energy_sink      = 'local_heat' ! local_heat | removed
   real(dp)           :: pbh_bkg_warn         = 1.0d-3  ! warn if f*(1-g(z=0)) exceeds
   logical            :: pbh_check_provenance = .true.
+  ! model keys: validated against the table header so the namelist choice
+  ! and the loaded table can never silently disagree ('any' skips the check)
+  character(LEN=32)  :: pbh_mf_model      = 'any'
+  character(LEN=32)  :: pbh_spin_model    = 'any'
+  character(LEN=32)  :: pbh_hawking_model = 'any'
+  character(LEN=32)  :: pbh_epsdep_model  = 'any'
+  character(LEN=32)  :: pbh_fheat_model   = 'any'
 
   ! ---- loaded table (t stored in seconds) ----
   integer :: pbh_n = 0
@@ -165,6 +172,37 @@ contains
             & '  a=[', tab_a(1), ',', tab_a(pbh_n), ']  adler32=0x', pbh_cksum
     end if
   end subroutine pbh_read_table
+
+  !=====================================================================
+  subroutine pbh_validate_models(myid)
+    ! Enforce that every requested model key appears in the table header
+    ! ("# model: kind=... spin=... hawking=... eps=... fheat=...").
+    integer, intent(in) :: myid
+    call pbh_check_key(myid, 'kind',    pbh_mf_model)
+    call pbh_check_key(myid, 'spin',    pbh_spin_model)
+    call pbh_check_key(myid, 'hawking', pbh_hawking_model)
+    call pbh_check_key(myid, 'eps',     pbh_epsdep_model)
+    call pbh_check_key(myid, 'fheat',   pbh_fheat_model)
+  end subroutine pbh_validate_models
+
+  subroutine pbh_check_key(myid, label, key)
+    integer, intent(in) :: myid
+    character(LEN=*), intent(in) :: label, key
+    if(trim(key) == 'any' .or. len_trim(key) == 0) return
+    if(len_trim(pbh_model_line) == 0) then
+       if(myid==1) write(*,*) 'PBH ERROR: table has no model header line, ', &
+            & 'cannot verify ', label, '=', trim(key)
+       call clean_stop
+    end if
+    if(index(pbh_model_line, ' '//trim(label)//'='//trim(key)) == 0) then
+       if(myid==1) then
+          write(*,*) 'PBH ERROR: namelist requests ', trim(label), '=', trim(key)
+          write(*,*) '           but the loaded table header says:'
+          write(*,'(A)') ' '//trim(pbh_model_line)
+       end if
+       call clean_stop
+    end if
+  end subroutine pbh_check_key
 
   !=====================================================================
   subroutine pbh_parse_hex(str, val)
