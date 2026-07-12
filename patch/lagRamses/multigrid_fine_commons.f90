@@ -2925,7 +2925,7 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
                end if
             else if(de_helmholtz_on()) then
                k_tilde_sq = twopi_fft * twopi_fft * dble(kx_i**2 + ky_i**2 + kz_i**2)
-               de_factor = (k_tilde_sq + de_kappa2) / (k_tilde_sq + de_kappa2 + de_alpha)
+               de_factor = 1.0d0 + de_alpha / (k_tilde_sq + de_kappa2)
             end if
          end if
 
@@ -3585,7 +3585,7 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
                else if(de_helmholtz_on()) then
                   ! Fallback: kappa2/alpha quasi-static method
                   k_tilde_sq = twopi * twopi * dble(kx_i**2 + ky_i**2 + kz_i**2)
-                  de_factor = (k_tilde_sq + de_kappa2) / (k_tilde_sq + de_kappa2 + de_alpha)
+                  de_factor = 1.0d0 + de_alpha / (k_tilde_sq + de_kappa2)
                end if
             end if
 
@@ -3778,7 +3778,7 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
                else if(de_helmholtz_on()) then
                   ! Fallback: kappa2/alpha quasi-static
                   k_tilde_sq = twopi * twopi * dble(kx_i**2 + ky_i**2 + kz_i**2)
-                  de_factor = (k_tilde_sq + de_kappa2) / (k_tilde_sq + de_kappa2 + de_alpha)
+                  de_factor = 1.0d0 + de_alpha / (k_tilde_sq + de_kappa2)
                end if
             end if
 

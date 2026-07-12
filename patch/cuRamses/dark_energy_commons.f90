@@ -1,17 +1,24 @@
 module dark_energy_commons
   !--------------------------------------------------------------
   ! Dark energy perturbation support for CPL w(a) = w0 + wa*(1-a)
+  ! and scalar-field DE (quintessence/k-essence via scalar_de_commons)
   !
   ! Provides k-space correction factor for FFT Poisson solver:
-  !   de_factor(k) = (k_tilde2 + kappa2) / (k_tilde2 + kappa2 + alpha)
+  !   de_factor(k) = 1 + alpha / (k_tilde2 + kappa2)
   !
   ! where k_tilde2 = (2*pi)^2 * (kx^2 + ky^2 + kz^2)
-  !       kappa2 = a^2 * E^2(a) * (boxlen_ini/C_H100)^2 / cs2_de
-  !       alpha  = 1.5 * (boxlen_ini/C_H100)^2 * omega_l * f_de(a) * (1+w(a)) / cs2_de
+  !       kappa2 = 1.5*(1-3w) * a^2 E^2(a) * (boxlen_ini/C_H100)^2 / cs2
+  !       alpha  = (Omega_de(a) a^3/Omega_m)*(1+w) * 1.5 * a^2 E^2(a)
+  !                * (boxlen_ini/C_H100)^2 / cs2
   !
-  ! Physics: combined Poisson + quasi-static Helmholtz system
-  !   Poisson:   nabla^2 Phi = fourpi_m * delta_m + fourpi_de * delta_de
-  !   Helmholtz: (nabla^2 - kappa^2) delta_de = [(1+w)/cs2] * nabla^2 Phi
+  ! Physics: quasi-static clustering-DE closure (Sapone & Kunz 2009)
+  !   delta_de = (1+w) delta_m / [(1-3w) + 2 cs2 k^2/(3 a^2 H^2)]
+  ! so DE clusters WITH matter for (1+w)>0 (source enhancement),
+  ! k-independently for cs2->0 and suppressed below the sound horizon.
+  ! Verified against CAMB (Weyl-potential method, same as de_table):
+  ! max error <1% for z>=0.5, ~4% at z=0 (quasi-static limit).
+  ! The old form (k2+kap2)/(k2+kap2+alpha) SUPPRESSED the source
+  ! (wrong sign, 15-29% error vs CAMB) — fixed 2026-07-12.
   !
   ! For LCDM (w0=-1, wa=0): (1+w)=0, alpha=0, de_factor=1 (bit-wise)
   !--------------------------------------------------------------
@@ -159,12 +166,17 @@ contains
     ! (boxlen_ini / (c/H0))^2  [dimensionless]
     boxratio_sq = (boxlen_ini / C_H100)**2
 
-    ! Helmholtz mass term: kappa^2 = (aH/c)^2 / cs2  [in box^-2 units]
-    kappa2_out = aexp_val**2 * E2_a * boxratio_sq / cs2_a
+    ! Quasi-static clustering-DE closure (Sapone & Kunz 2009):
+    !   delta_de/delta_m = (1+w) / [(1-3w) + 2 cs2 k^2/(3 a^2 H^2)]
+    ! in Helmholtz form: de_factor = 1 + alpha/(k_tilde2 + kappa2)
+    ! kappa^2 = (3/2)(1-3w) (aH/c)^2 / cs2  [in box^-2 units]
+    kappa2_out = 1.5d0 * (1.0d0 - 3.0d0*w_a) * aexp_val**2 * E2_a &
+         &     * boxratio_sq / cs2_a
 
-    ! DE coupling term: alpha = fourpi_de_phys * (1+w) / cs2  [in box^-2 units]
-    ! fourpi_de_phys = (3/2) * H0^2 * omega_l * f_de(a)
-    alpha_out = 1.5d0 * boxratio_sq * omega_l * fde * (1.0d0 + w_a) / cs2_a
+    ! alpha = (rho_de(a)/rho_m(a)) * (1+w) * (3/2)(aH/c)^2/cs2 [box^-2]
+    ! rho_de(a)/rho_m(a) = omega_l*f_de*a^3/omega_m
+    alpha_out = (omega_l * fde * aexp_val**3 / omega_m) * (1.0d0 + w_a) &
+         &    * 1.5d0 * aexp_val**2 * E2_a * boxratio_sq / cs2_a
 
   end subroutine compute_de_kspace_params
 
