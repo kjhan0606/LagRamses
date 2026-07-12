@@ -49,6 +49,20 @@ module pbh_commons
   !      the very first step and the first step after a restart ----
   real(dp), allocatable :: pbh_aold(:)
 
+  ! ---- remote-deposit buffers for the deterministic thread-safe deposit
+  !      scheme (owner-writes + deferred buffer, no atomics): deposits whose
+  !      target cell is not owned by the particle's own grid (parent-cell
+  !      fallback, boundary-drift neighbours) are queued per thread and
+  !      applied serially after the parallel loop, sorted by (cell, id) so
+  !      the result is bitwise independent of the thread count ----
+  type :: pbh_rbuf_t
+     integer :: n = 0
+     integer,         allocatable :: icell(:)
+     integer(kind=8), allocatable :: pid(:)
+     real(dp),        allocatable :: de(:)
+  end type pbh_rbuf_t
+  type(pbh_rbuf_t), allocatable :: pbh_rbuf(:)
+
   real(dp), parameter :: GYR2S = 3.155760d16  ! matches make_pbh_tables.py
 
   character(LEN=*), parameter :: pbh_prov_file = 'pbh_provenance.txt'
@@ -280,6 +294,32 @@ contains
     end if
     pbh_ready = .true.
   end subroutine pbh_lazy_init
+
+  !=====================================================================
+  subroutine pbh_rbuf_push(b, icell, pid, de)
+    ! Append one remote deposit to a thread-private buffer (geometric
+    ! growth; only the owning thread ever touches b).
+    type(pbh_rbuf_t), intent(inout) :: b
+    integer,          intent(in)    :: icell
+    integer(kind=8),  intent(in)    :: pid
+    real(dp),         intent(in)    :: de
+    integer :: cap
+    integer,         allocatable :: ti(:)
+    integer(kind=8), allocatable :: tp(:)
+    real(dp),        allocatable :: td(:)
+    if(.not.allocated(b%icell)) then
+       allocate(b%icell(64), b%pid(64), b%de(64))
+    else if(b%n == size(b%icell)) then
+       cap = 2*size(b%icell)
+       allocate(ti(cap)); ti(1:b%n)=b%icell(1:b%n); call move_alloc(ti,b%icell)
+       allocate(tp(cap)); tp(1:b%n)=b%pid(1:b%n);   call move_alloc(tp,b%pid)
+       allocate(td(cap)); td(1:b%n)=b%de(1:b%n);    call move_alloc(td,b%de)
+    end if
+    b%n = b%n + 1
+    b%icell(b%n) = icell
+    b%pid(b%n)   = pid
+    b%de(b%n)    = de
+  end subroutine pbh_rbuf_push
 
   !=====================================================================
   subroutine pbh_mark_level(ilevel, nlev, a)
