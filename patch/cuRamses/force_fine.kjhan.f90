@@ -1008,8 +1008,9 @@ subroutine compute_fifth_force(ilevel, factor)
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
 
+  ! NOTE: no early return on ncache==0 — the final make_virtual_fine_dp
+  ! must be entered by every rank (matched communication)
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   dx=0.5D0**ilevel
   nx_loc=(icoarse_max-icoarse_min+1)
@@ -2797,8 +2798,9 @@ subroutine compute_fifth_force_symmetron(ilevel)
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
 
+  ! NOTE: no early return on ncache==0 — the final make_virtual_fine_dp
+  ! must be entered by every rank (matched communication)
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   dx=0.5D0**ilevel
   nx_loc=(icoarse_max-icoarse_min+1)
@@ -3237,8 +3239,9 @@ subroutine compute_fifth_force_dilaton(ilevel, factor_in)
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
 
+  ! NOTE: no early return on ncache==0 — the final make_virtual_fine_dp
+  ! must be entered by every rank (matched communication)
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   dx=0.5D0**ilevel
   nx_loc=(icoarse_max-icoarse_min+1)
