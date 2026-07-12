@@ -561,29 +561,253 @@ all unit-test drivers ship with the code
 \section{Fuzzy Dark Matter}
 \label{sec:fdm}
 
-Ultralight scalar dark matter with
-$m_a\sim10^{-22}\,$eV \citep{Hui2017} is evolved as a classical
-field $\psi$ obeying the Schr\"odinger--Poisson system. The
-integrator uses drift--kick--drift operator splitting per AMR
-level: the kinetic half-steps apply
-$\exp(-{\rm i}\hbar k^2\Delta t/4a^2 m_a)$ spectrally on the base
-level (FFT) and an explicit finite-difference Laplacian on refined
-levels, while the potential kick applies
-$\exp(-{\rm i}m_a\Phi\Delta t/\hbar)$ in real space; a
-fourth-order Yoshida composition is optional
-(\code{fdm\_split\_order=4}). Refinement follows the de~Broglie
-wavelength (a minimum of \code{fdm\_nrefine\_dB} cells per
-$\lambda_{\rm dB}$, with a density floor), reproducing the
-solitonic cores and interference fringes characteristic of FDM
-haloes \citep{Schive2014}. A hybrid mode
-(\code{fdm\_use\_hjm}) evolves a Hamilton--Jacobi--Madelung fluid
-on coarse levels and switches to the wave solver above
-\code{fdm\_first\_wave\_level}, and \code{fdm\_hybrid} allows
-mixed FDM + particle (stars/sinks) runs. The wavefunction is
-stored as $(\psi_{\rm re},\psi_{\rm im})$ on the AMR mesh with
-$|\psi|^2$ the total DM density, and dedicated light-cone and
-output modules are provided. A detailed description and validation
-of the FDM solver is presented in a companion paper.
+\subsection{Physical motivation and equations}
+
+Ultralight scalar (``fuzzy'') dark matter with
+$m_a\sim10^{-23}$--$10^{-21}\,$eV \citep{Hui2017} behaves as cold
+dark matter on large scales while suppressing structure below its
+de~Broglie wavelength and producing solitonic halo cores and
+interference granules \citep{Schive2014}. On scales far below the
+Compton wavelength the field obeys the comoving
+Schr\"odinger--Poisson (SP) system \citep{WidrowKaiser1993},
+\begin{equation}
+{\rm i}\hbar\,\partial_t\psi
+ \;=\; -\frac{\hbar^2}{2m_a a^2}\,\nabla^2\psi \;+\; m_a\Phi\,\psi,
+\qquad
+\nabla^2\Phi \;=\; 4\pi G a^2\,\bar\rho_{\rm m}\,\delta,
+\label{eq:fdm_sp}
+\end{equation}
+with $|\psi|^2$ the comoving dark-matter density and $\Phi$ the
+peculiar potential.
+
+\subsection{Supercomoving formulation}
+
+\ramses\ integrates cosmology in the supercomoving variables of
+\citet{MartelShapiro1998}: code time obeys
+${\rm d}\tilde t=H_0\,{\rm d}t/a^2$ and positions are comoving box
+coordinates. A property of this gauge worth stating explicitly ---
+because overlooking it silently freezes structure formation ---
+is that \emph{every explicit scale factor drops out of the SP
+system}. In code units eq.~(\ref{eq:fdm_sp}) becomes
+\begin{equation}
+{\rm i}\,\partial_{\tilde t}\psi
+ \;=\; -\frac{\tilde\hbar}{2}\,\tilde\nabla^2\psi
+ \;+\; \frac{\tilde\Phi}{\tilde\hbar}\,\psi,
+\qquad
+\tilde\hbar \;\equiv\; \frac{\hbar}{m_a L^2 H_0} \;=\; {\rm const},
+\label{eq:fdm_super}
+\end{equation}
+where $L$ is the comoving box size: the kinetic $1/a^2$ is
+absorbed exactly by the supercomoving time, and the expansion
+enters only through the standard \ramses\ Poisson source
+$\tfrac32\Omega_{\rm m}a\,\delta$. The wave sector thereby mirrors
+the particle sector, where kicks and drifts likewise carry no
+scale factors. Retaining the naive $1/a^2$ of
+eq.~(\ref{eq:fdm_sp}) in the supercomoving drift boosts the
+effective $\tilde\hbar$ by $a^{-2}$ ($\sim\!10^3$ at $z=30$),
+which suppresses gravitational growth at all wavenumbers; we
+verified that with eq.~(\ref{eq:fdm_super}) the measured power
+spectrum growth between snapshots reproduces linear theory
+(section~\ref{sec:fdm_valid}).
+
+The integrator is drift--kick--drift per AMR level. On the
+(uniform) base level the kinetic half-step is applied spectrally,
+$\hat\psi(\boldsymbol k)\to
+\hat\psi(\boldsymbol k)\,e^{{\rm i}\tilde\hbar\lambda(\boldsymbol k)\Delta\tilde t/2}$,
+with $\lambda(\boldsymbol k)$ the discrete 7-point Laplacian
+eigenvalue, using a distributed in-place complex-to-complex FFT
+whose forward transform is left in transposed layout to halve the
+all-to-all volume. On refined levels the kinetic operator is the
+Crank--Nicolson (Cayley) form
+$(1-{\rm i}g\mathcal L)^{-1}(1+{\rm i}g\mathcal L)$,
+$g=\tilde\hbar\Delta\tilde t/4\Delta x^2$ --- unitary and
+unconditionally stable --- solved matrix-free with a complex
+BiCGSTAB iteration; a fourth-order Yoshida composition is optional
+(\code{fdm\_split\_order=4}). The potential kick multiplies
+$e^{-{\rm i}\tilde\Phi\Delta\tilde t/\tilde\hbar}$ in real space.
+Initial conditions are constructed by the Madelung map from the
+same \code{grafic} files used for particle runs:
+$|\psi|=\sqrt{1+\delta}$ and phase
+$S/\tilde\hbar$ with $\nabla S=\boldsymbol v$ obtained by an
+FFT inverse gradient of the velocity fields, discretely consistent
+with the particle initialisation.
+
+\subsection{Phase resolvability sets the box size}
+\label{sec:fdm_box}
+
+A wave discretisation must resolve the local phase gradient: a
+flow of peculiar velocity $v$ imprints
+$\Delta\theta = m_a a v\,\Delta x/\hbar$ radians per cell, and
+once $\Delta\theta>\pi$ the sampled phase aliases to a wrong
+velocity --- bulk transport, and with it large-scale growth, is
+corrupted \citep{MaySpringel2021}. Because the rms bulk velocity
+grows with box size while $\Delta x=L/N$ grows at fixed $N$, this
+imposes a joint limit on $(L,N,m_a,z)$; the constraint tightens
+$\propto a^{3/2}$, so late times are the bottleneck.
+Table~\ref{tab:fdm_box} lists the validity ranges for
+$N=1024^3$ and $m_a=10^{-22}\,$eV computed from the linear
+velocity power restricted to box modes: reaching $z=0$ requires
+$L\lesssim1$--$2\,h^{-1}$Mpc, in line with the box sizes of
+published wave simulations, and the reach scales as
+$L_{\max}\sigma_v(L_{\max})\propto N/m_a$. A
+$128\,h^{-1}$Mpc box at $1024^3$ carries an rms phase jump of
+$5.7\pi$ per cell already in the $z=30$ initial conditions ---
+pure wave evolution is excluded there at any redshift, motivating
+the hybrid scheme below.
+
+\begin{table}
+\centering
+\begin{tabular}{lcc}
+\toprule
+$L$ [$h^{-1}$Mpc] & valid range (rms $\Delta\theta<\pi$) &
+conservative ($<\pi/2$) \\
+\midrule
+1  & all $z$    & all $z$ \\
+2  & $z>0.7$    & $z>1.8$ \\
+4  & $z>3.0$    & $z>5.4$ \\
+8  & $z>7.8$    & $z>13$  \\
+16 & $z>18$     & $z>29$  \\
+$\ge$32 & --- (IC already aliased) & --- \\
+\bottomrule
+\end{tabular}
+\caption{Redshift range over which a $1024^3$ wave simulation with
+$m_a=10^{-22}$\,eV resolves the rms bulk-flow phase gradient, as a
+function of comoving box size. The limit scales as
+$L_{\max}\sigma_v(L_{\max})\propto N/m_a$.}
+\label{tab:fdm_box}
+\end{table}
+
+\subsection{Hybrid fluid--wave scheme}
+\label{sec:fdm_hybrid}
+
+Following the strategy of \textsc{gamer}-2
+\citep{Kunkel2024,Chan2025}, the hybrid mode
+(\code{fdm\_use\_hjm}) evolves coarse levels
+($\ell<\code{fdm\_first\_wave\_level}$) as a
+Hamilton--Jacobi--Madelung (HJM) fluid and fine levels with the
+wave solver. On fluid levels the state is stored
+\emph{persistently} as $(\rho,S)$ in the $(\psi_{\rm re},
+\psi_{\rm im})$ arrays, with the action $S$ kept as an
+\emph{unwrapped} real field: no ${\rm atan2}$ conversion ever
+occurs on fluid levels, so phase jumps
+$|\Delta S|\gg\pi\tilde\hbar$ pose no difficulty and the box-size
+limit of section~\ref{sec:fdm_box} does not apply. The fluid
+equations
+\begin{equation}
+\partial_{\tilde t}\rho = -\nabla\!\cdot\!(\rho\nabla S),
+\qquad
+\partial_{\tilde t}S = -\tfrac12|\nabla S|^2 - \tilde\Phi,
+\end{equation}
+are integrated with upwind fluxes (continuity), the
+Sethian--Osher Hamiltonian (Hamilton--Jacobi) and a three-stage
+SSP Runge--Kutta scheme; the quantum-pressure term is deliberately
+omitted on fluid levels, which are restricted by the Madelung
+refinement criteria
+$C_1=|\Delta_x\sqrt\rho|/\sqrt\rho$ and
+$C_2=|\Delta_x S|/\tilde\hbar$ to regions where it is negligible.
+The fluid timestep obeys the advection condition
+$\Delta\tilde t\le C\,\Delta x/|\nabla S|_{\max}$ --- linear in
+$\Delta x$, in contrast to the quadratic kinetic condition of
+explicit wave schemes.
+
+At fluid--wave boundaries three couplings are required.
+(i)~\emph{Prolongation} interpolates $(\rho,S)$ linearly and
+converts to $\psi=\sqrt\rho\,e^{{\rm i}S/\tilde\hbar}$ when the
+child is a wave level; interpolating the smooth $(\rho,S)$ rather
+than the oscillatory $\psi$ avoids creating interference artefacts.
+(ii)~\emph{Restriction} must conserve mass: plain complex
+averaging destroys it under interference
+($|\langle\psi\rangle|^2\le\langle|\psi|^2\rangle$), so wave
+children are restricted with amplitude
+$\sqrt{\langle|\psi|^2\rangle}$ and the phase of
+$\langle\psi\rangle$; wave-to-fluid restriction rebases the parent
+action by continuity. (iii)~\emph{Wave ghost cells} at coarse-fine
+faces are Dirichlet values interpolated from the parent $(\rho,S)$
+and converted to $\psi$; this is phase-coherent because the HJ
+equation evolves the same action as the Schr\"odinger phase up to
+the quantum-pressure correction. Since a Dirichlet boundary makes
+the Crank--Nicolson update non-unitary, we restore exact global
+conservation by flux bookkeeping: the discrete identity
+\begin{equation}
+\Delta|\psi_i|^2\big|_{\rm face}
+= -\frac{\tilde\hbar\,\Delta\tilde t}{\Delta x^2}\,
+{\rm Im}\!\left(\bar\psi_i^{\,*}\,\psi_{\rm g}\right),
+\qquad \bar\psi \equiv \tfrac12(\psi^{n}+\psi^{n+1}),
+\label{eq:fdm_flux}
+\end{equation}
+gives the exact mass exchanged through each ghost face, which is
+credited back to the adjacent parent cell (with an MPI reverse
+reduction for remote parents). In a deliberately hostile stress
+test ($15\,h^{-1}$Mpc, $256^3$ base, $m_a=10^{-23}$\,eV, wave
+levels covering the collapsed regions), total mass drift at fixed
+epoch improves from $12.2$ per cent (no coupling) to $0.12$ per
+cent with conservative restriction and flux bookkeeping; fluid-only
+configurations conserve mass to machine precision.
+
+\subsection{Validation}
+\label{sec:fdm_valid}
+
+Figure~\ref{fig:fdm_growth} shows the primary code test: power
+spectrum growth measured between snapshots of a
+$15\,h^{-1}$Mpc, $256^3$ run with $m_a=10^{-23}$\,eV started at
+$z=30$, compared with linear theory at the same epochs. Growth
+ratios relative to the initial snapshot are used throughout, which
+removes the overall normalisation of the initial conditions. The
+pure wave run (left) tracks linear theory (within
+$\sim\!15$ per cent, consistent with the onset of nonlinearity and
+the dark-matter/total growth difference) precisely until the
+velocity-Nyquist limit of section~\ref{sec:fdm_box} is reached at
+$z\simeq9$ for this configuration --- beyond it the aliased phase
+freezes and then scrambles the growth, an empirical confirmation
+of the criterion. The HJM fluid run (right) of the identical
+configuration continues to grow through $z=4$, with the late-time
+high-$k$ excess over linear theory reflecting genuine nonlinear
+growth ($\Delta^2\sim1$).
+
+\begin{figure}
+\centering
+\includegraphics[width=0.49\textwidth]{fig_fdm_wave_growth.png}
+\includegraphics[width=0.49\textwidth]{fig_fdm_fluid_growth.png}
+\caption{Growth validation on a $15\,h^{-1}$Mpc, $256^3$ grid with
+$m_a=10^{-23}$\,eV. Solid curves: measured $|\psi|^2$ power
+spectra; dashed: linear theory; bottom panels: measured growth
+relative to the $z=30$ snapshot divided by the linear-theory
+growth. \emph{Left}: pure wave solver --- growth follows linear
+theory until the velocity-Nyquist limit ($z\simeq9$ here,
+section~\ref{sec:fdm_box}) and freezes beyond it.
+\emph{Right}: HJM fluid solver on the same configuration ---
+growth continues through $z=4$; the high-$k$ excess at late times
+is nonlinear growth.}
+\label{fig:fdm_growth}
+\end{figure}
+
+The hybrid machinery was further exercised on a
+$128\,h^{-1}$Mpc, $1024^3$ fluid-level run with
+$m_a=10^{-22}$\,eV --- a configuration whose initial rms phase
+jump of $5.7\pi$ per cell excludes any pure wave treatment. With
+the persistent unwrapped action the measured growth between
+$z=30$ and $z=9$ is uniform in $k$ and consistent with linear
+theory (whereas a wrapped-phase treatment stalls entirely), total
+mass is conserved to machine precision over hundreds of steps, and
+the advection-limited timestep exceeds the explicit wave-kinetic
+condition by two to three orders of magnitude at high redshift.
+Figure~\ref{fig:fdm_slab} shows the density field at $z=3.5$.
+A full production hybrid configuration --- wave levels confined to
+collapsed regions by the $C_1$/$C_2$ criteria, with the associated
+refinement-cost controls --- together with FDM-specific science
+validation (soliton cores, interference statistics, suppressed
+small-scale power against \citet{Hu2000}-type transfer functions)
+is deferred to a companion paper.
+
+\begin{figure}
+\centering
+\includegraphics[width=0.8\textwidth]{fig_fdm_density128.png}
+\caption{Dark-matter density slice of the $128\,h^{-1}$Mpc,
+$1024^3$ hybrid-fluid FDM run ($m_a=10^{-22}$\,eV) at $z=3.5$,
+a regime inaccessible to pure wave discretisations at this
+resolution (section~\ref{sec:fdm_box}).}
+\label{fig:fdm_slab}
+\end{figure}
 
 % ===================================================================
 \section{Evaporating Primordial Black Holes}
@@ -677,6 +901,9 @@ Candlish G.~N., Smith R., Fellhauer M., 2015, MNRAS, 446, 1060
 \bibitem[\protect\citeauthoryear{Carr \& K\"uhnel}{2021}]{Carr2021}
 Carr B., K\"uhnel F., 2021, arXiv:2110.02821
 
+\bibitem[\protect\citeauthoryear{Chan et al.}{2025}]{Chan2025}
+Chan H.~Y.~J., et al., 2025, arXiv:2504.10387
+
 \bibitem[\protect\citeauthoryear{Chevallier \& Polarski}{2001}]{ChevallierPolarski2001}
 Chevallier M., Polarski D., 2001, Int. J. Mod. Phys. D, 10, 213
 
@@ -692,6 +919,9 @@ Hawking S.~W., 1975, Comm. Math. Phys., 43, 199
 \bibitem[\protect\citeauthoryear{Hinterbichler \& Khoury}{2010}]{HinterbichlerKhoury2010}
 Hinterbichler K., Khoury J., 2010, Phys. Rev. Lett., 104, 231301
 
+\bibitem[\protect\citeauthoryear{Hu et al.}{2000}]{Hu2000}
+Hu W., Barkana R., Gruzinov A., 2000, Phys. Rev. Lett., 85, 1158
+
 \bibitem[\protect\citeauthoryear{Hu \& Sawicki}{2007}]{HuSawicki2007}
 Hu W., Sawicki I., 2007, Phys. Rev. D, 76, 064004
 
@@ -706,6 +936,9 @@ Kaplinghat M., Tulin S., Yu H.-B., 2016, Phys. Rev. Lett., 116, 041302
 
 \bibitem[\protect\citeauthoryear{Kim}{2026}]{Kim2026}
 Kim J., 2026, MNRAS, submitted (cuRAMSES I)
+
+\bibitem[\protect\citeauthoryear{Kunkel et al.}{2024}]{Kunkel2024}
+Kunkel A., et al., 2024, arXiv:2411.17288
 
 \bibitem[\protect\citeauthoryear{Lesgourgues \& Pastor}{2006}]{LesgourguesPastor2006}
 Lesgourgues J., Pastor S., 2006, Phys. Rep., 429, 307
@@ -730,6 +963,9 @@ L\"ughausen F., Famaey B., Kroupa P., 2015, Canadian J. Phys., 93, 232
 
 \bibitem[\protect\citeauthoryear{Martel \& Shapiro}{1998}]{MartelShapiro1998}
 Martel H., Shapiro P.~R., 1998, MNRAS, 297, 467
+
+\bibitem[\protect\citeauthoryear{May \& Springel}{2021}]{MaySpringel2021}
+May S., Springel V., 2021, MNRAS, 506, 2603
 
 \bibitem[\protect\citeauthoryear{Milgrom}{1983}]{Milgrom1983}
 Milgrom M., 1983, ApJ, 270, 365
@@ -781,6 +1017,9 @@ Tulin S., Yu H.-B., Zurek K.~M., 2013, Phys. Rev. D, 87, 115007
 
 \bibitem[\protect\citeauthoryear{Vogelsberger et al.}{2019}]{Vogelsberger2019}
 Vogelsberger M., Zavala J., Schutz K., Slatyer T.~R., 2019, MNRAS, 484, 5437
+
+\bibitem[\protect\citeauthoryear{Widrow \& Kaiser}{1993}]{WidrowKaiser1993}
+Widrow L.~M., Kaiser N., 1993, ApJ, 416, L71
 
 \bibitem[\protect\citeauthoryear{Winther et al.}{2015}]{Winther2015}
 Winther H.~A., et al., 2015, MNRAS, 454, 4208
