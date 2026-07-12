@@ -38,6 +38,7 @@ subroutine multigrid_coarse(ilevel,icount)
   use amr_commons
   use pm_commons
   use poisson_commons
+  use dark_energy_commons, only: cosmo_poisson_fourpi
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -69,8 +70,7 @@ subroutine multigrid_coarse(ilevel,icount)
   ! Divide by 4PI
   nx_loc=icoarse_max-icoarse_min+1
   scale=boxlen/dble(nx_loc)
-  fourpi=4.D0*ACOS(-1.0D0)*scale
-  if(cosmo)fourpi=1.5D0*omega_m*aexp*scale
+  fourpi=cosmo_poisson_fourpi(aexp,scale)
 !$omp parallel do private(i,ind,iskip)
   do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
@@ -234,8 +234,7 @@ subroutine multigrid_coarse(ilevel,icount)
   ! Multiply by 4PI
   nx_loc=icoarse_max-icoarse_min+1
   scale=boxlen/dble(nx_loc)
-  fourpi=4.D0*ACOS(-1.0D0)*scale
-  if(cosmo)fourpi=1.5D0*omega_m*aexp*scale
+  fourpi=cosmo_poisson_fourpi(aexp,scale)
 !$omp parallel do private(ind,iskip,i)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim

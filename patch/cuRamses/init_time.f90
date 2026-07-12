@@ -751,18 +751,23 @@ function dadtau(axp_tau,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in)
   use amr_parameters, only: dp, use_ede, omega_ede, z_ede, w_ede
   real(kind=8)::dadtau,axp_tau,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in
   real(kind=8)::f_de, ede_term
-  real(kind=8)::a_c_ede, pw_ede, frac_ede
+  real(kind=8)::a_c_ede, pw_ede, e2std_c_ede
   dadtau = axp_tau*axp_tau*axp_tau *  &
        &   ( O_mat_0 + &
        &     O_vac_0 * axp_tau*axp_tau*axp_tau * f_de(axp_tau,w0_in,wa_in) + &
        &     O_k_0   * axp_tau )
-  ! Early Dark Energy contribution
+  ! Early Dark Energy (Poulin+19 fluid form): rho_EDE constant before
+  ! a_c=1/(1+z_ede), dilutes as a^{-3(1+w_ede)} after. Normalisation:
+  ! rho_EDE(a_c) = omega_ede * rho_std(a_c), i.e. omega_ede is the EDE
+  ! fraction of the standard (m+DE+k) density at the injection epoch.
+  ! ede_term = rho_EDE(a)/rho_crit0; (da/dtau)^2 needs a^6 * ede_term.
   if(use_ede .and. omega_ede > 0d0) then
      a_c_ede = 1d0 / (1d0 + z_ede)
      pw_ede = 3d0 * (1d0 + w_ede)
-     frac_ede = (a_c_ede / axp_tau)**pw_ede / (1d0 + (axp_tau / a_c_ede)**pw_ede)
-     ede_term = omega_ede * frac_ede * axp_tau**3
-     dadtau = dadtau + axp_tau**3 * ede_term
+     e2std_c_ede = O_mat_0/a_c_ede**3 + O_vac_0*f_de(a_c_ede,w0_in,wa_in) &
+          &      + O_k_0/a_c_ede**2
+     ede_term = omega_ede * e2std_c_ede * 2d0/(1d0 + (axp_tau/a_c_ede)**pw_ede)
+     dadtau = dadtau + axp_tau**6 * ede_term
   end if
   dadtau = sqrt(dadtau)
   return
@@ -772,18 +777,20 @@ function dadt(axp_t,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in)
   use amr_parameters, only: dp, use_ede, omega_ede, z_ede, w_ede
   real(kind=8)::dadt,axp_t,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in
   real(kind=8)::f_de, ede_term
-  real(kind=8)::a_c_ede, pw_ede, frac_ede
+  real(kind=8)::a_c_ede, pw_ede, e2std_c_ede
   dadt   = (1.0D0/axp_t)* &
        &   ( O_mat_0 + &
        &     O_vac_0 * axp_t*axp_t*axp_t * f_de(axp_t,w0_in,wa_in) + &
        &     O_k_0   * axp_t )
-  ! Early Dark Energy contribution
+  ! Early Dark Energy (Poulin+19 fluid form), same convention as dadtau:
+  ! ede_term = rho_EDE(a)/rho_crit0; (da/dt)^2 needs a^2 * ede_term.
   if(use_ede .and. omega_ede > 0d0) then
      a_c_ede = 1d0 / (1d0 + z_ede)
      pw_ede = 3d0 * (1d0 + w_ede)
-     frac_ede = (a_c_ede / axp_t)**pw_ede / (1d0 + (axp_t / a_c_ede)**pw_ede)
-     ede_term = omega_ede * frac_ede
-     dadt = dadt + (1d0/axp_t) * ede_term * axp_t**3
+     e2std_c_ede = O_mat_0/a_c_ede**3 + O_vac_0*f_de(a_c_ede,w0_in,wa_in) &
+          &      + O_k_0/a_c_ede**2
+     ede_term = omega_ede * e2std_c_ede * 2d0/(1d0 + (axp_t/a_c_ede)**pw_ede)
+     dadt = dadt + axp_t*axp_t * ede_term
   end if
   dadt = sqrt(dadt)
   return

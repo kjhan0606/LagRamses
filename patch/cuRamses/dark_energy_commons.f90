@@ -49,6 +49,35 @@ contains
   end function f_de_val
 
   !--------------------------------------------------------------
+  ! cosmo_poisson_fourpi: cosmological Poisson prefactor
+  !   1.5*Omega_cb*aexp*scale, with the same neutrino subtraction
+  !   and DE perturbation boost as the multigrid solver
+  !   (multigrid_fine_commons), so that the CG solver and the
+  !   force/epot factor stay consistent with it.
+  ! Non-cosmo: 4*pi*scale. LCDM with all flags off reproduces
+  ! 1.5*omega_m*aexp*scale bit-wise.
+  !--------------------------------------------------------------
+  function cosmo_poisson_fourpi(aexp_val, scale_in) result(fourpi)
+    use amr_parameters, only: cosmo, omega_m, omega_l, omega_nu, &
+         use_neutrino, de_perturb, cs2_de
+    real(dp), intent(in) :: aexp_val, scale_in
+    real(dp) :: fourpi, omega_de_a, omega_cb
+    fourpi = 4.0d0*ACOS(-1.0d0)*scale_in
+    if(.not. cosmo) return
+    if(use_neutrino .and. omega_nu > 0.0d0) then
+       omega_cb = omega_m - omega_nu
+    else
+       omega_cb = omega_m
+    end if
+    fourpi = 1.5d0*omega_cb*aexp_val*scale_in
+    ! DE perturbation boost (table-based, cs2_de~0 only)
+    if(de_perturb .and. de_table_loaded .and. cs2_de < 1.0d-4) then
+       omega_de_a = omega_l * f_de_val(aexp_val) * aexp_val**3
+       fourpi = fourpi * (1.0d0 + (omega_de_a/omega_cb) * get_de_ratio(1.0d-3, aexp_val))
+    end if
+  end function cosmo_poisson_fourpi
+
+  !--------------------------------------------------------------
   ! compute_de_kspace_params: precompute kappa2 and alpha
   ! for DE k-space correction in FFT Poisson solver
   !

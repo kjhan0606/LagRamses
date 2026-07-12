@@ -6,6 +6,7 @@ subroutine phi_fine_cg(ilevel,icount)
   use amr_commons
   use pm_commons
   use poisson_commons
+  use dark_energy_commons, only: cosmo_poisson_fourpi
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -36,8 +37,7 @@ subroutine phi_fine_cg(ilevel,icount)
   dx2=(0.5D0**ilevel)**2
   nx_loc=icoarse_max-icoarse_min+1
   scale=boxlen/dble(nx_loc)
-  fourpi=4.D0*ACOS(-1.0D0)*scale
-  if(cosmo)fourpi=1.5D0*omega_m*aexp*scale
+  fourpi=cosmo_poisson_fourpi(aexp,scale)
   oneoversix=1.0D0/dble(twondim)
   fact=oneoversix*fourpi*dx2
   fact2 = fact*fact
@@ -216,6 +216,7 @@ subroutine cmp_residual_cg(ilevel,icount)
   use pm_commons
   use hydro_commons
   use poisson_commons
+  use dark_energy_commons, only: cosmo_poisson_fourpi
   implicit none
   integer::ilevel,icount
   !------------------------------------------------------------------
@@ -231,8 +232,7 @@ subroutine cmp_residual_cg(ilevel,icount)
   dx2=(0.5D0**ilevel)**2
   nx_loc=icoarse_max-icoarse_min+1
   scale=boxlen/dble(nx_loc)
-  fourpi=4.D0*ACOS(-1.0D0)*scale
-  if(cosmo)fourpi=1.5D0*omega_m*aexp*scale
+  fourpi=cosmo_poisson_fourpi(aexp,scale)
   oneoversix=1.0D0/dble(twondim)
   fact=oneoversix*fourpi*dx2
 

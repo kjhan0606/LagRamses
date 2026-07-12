@@ -54,6 +54,7 @@ subroutine force_fine(ilevel,icount)
   use amr_commons
   use pm_commons
   use poisson_commons
+  use dark_energy_commons, only: cosmo_poisson_fourpi
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -179,8 +180,7 @@ subroutine force_fine(ilevel,icount)
   !----------------------------------------------
   rho_loc =0.0; rho_all =0.0
   epot_loc=0.0; epot_all=0.0
-  fourpi=4.0D0*ACOS(-1.0D0)
-  if(cosmo)fourpi=1.5D0*omega_m*aexp
+  fourpi=cosmo_poisson_fourpi(aexp,1.0d0)
   fact=-dx_loc**ndim/fourpi/2.0D0
 
   ncache=active(ilevel)%ngrid
@@ -642,6 +642,7 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use dark_energy_commons, only: cosmo_poisson_fourpi
   implicit none
   integer,intent(in)::ilevel
   logical,intent(in)::is_aqual
@@ -689,8 +690,7 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
   dx_loc=dx*scale
 
   ! 4piG factor (same convention as force_fine)
-  fourpi=4.0D0*ACOS(-1.0D0)
-  if(cosmo)fourpi=1.5D0*omega_m*aexp
+  fourpi=cosmo_poisson_fourpi(aexp,1.0d0)
 
   ! Neighbor lookup tables (left=1, right=2 per dimension)
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
