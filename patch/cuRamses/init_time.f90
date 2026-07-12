@@ -472,7 +472,7 @@ subroutine init_cosmo
   do ilevel=levelmin,nlevelmax_part
      dfact(ilevel)=d1a(aexp)/d1a(astart(ilevel))
      vfact(ilevel)=astart(ilevel)*fpeebl(astart(ilevel)) & ! Same scale factor as in grafic1
-          & *sqrt(omega_m/astart(ilevel)+omega_l*f_de(astart(ilevel),w0,wa)*astart(ilevel)*astart(ilevel)+omega_k) &
+          & *sqrt(omega_m*mfac(astart(ilevel))/astart(ilevel)+omega_l*f_de(astart(ilevel),w0,wa)*astart(ilevel)*astart(ilevel)+omega_k) &
           & /astart(ilevel)*h0
   end do
 
@@ -507,7 +507,7 @@ subroutine init_cosmo
 
   ! Scale displacement in Mpc to code velocity (v=dx/dtau)
   ! in coarse cell units per conformal time
-  vfact(1)=aexp*fpeebl(aexp)*sqrt(omega_m/aexp+omega_l*f_de(aexp,w0,wa)*aexp*aexp+omega_k)
+  vfact(1)=aexp*fpeebl(aexp)*sqrt(omega_m*mfac(aexp)/aexp+omega_l*f_de(aexp,w0,wa)*aexp*aexp+omega_k)
   ! This scale factor is different from vfact in grafic by h0/aexp
 
 contains
@@ -520,7 +520,7 @@ contains
     real(dp)::y,a
     real(dp)::f_de
 
-    y=omega_m/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
+    y=omega_m*mfac(a)/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
     fy=1.d0/y**1.5d0
 
     return
@@ -539,7 +539,7 @@ contains
        write(*,*)'a=',a
        call clean_stop
     end if
-    y=omega_m/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
+    y=omega_m*mfac(a)/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
     if(y .lt. 0.0D0)then
        write(*,*)'y=',y
        call clean_stop
@@ -579,7 +579,7 @@ contains
     real(dp) :: wa_eff, dyda, e2g
 
     eps=1.0d-6
-    y=omega_m/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
+    y=omega_m*mfac(a)/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
     fact=rombint(eps,a,eps)
     if(sde_active()) then
        wa_eff = sde_w_of_a(a)
@@ -594,6 +594,18 @@ contains
     fpeebl = 0.5d0*dyda/y - 1.d0 + a*fy(a)/fact
     return
   end function fpeebl
+  !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  function mfac(a)
+    ! Coupled quintessence: rho_dm*a^3/rho_dm0 = exp(-beta(phi-phi0));
+    ! keeps the IC growth/velocity factors consistent with dadtau.
+    use amr_parameters, only: use_coupled_de, use_quintessence
+    use scalar_de_commons, only: sde_dmcorr_of_a
+    implicit none
+    real(dp)::mfac,a
+    mfac=1.d0
+    if(use_coupled_de .and. use_quintessence) mfac=sde_dmcorr_of_a(a)
+    return
+  end function mfac
   !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   function rombint(a,b,tol)
     implicit none
@@ -757,12 +769,19 @@ subroutine friedman(O_mat_0,O_vac_0,O_k_0,alpha,axp_min, &
 end subroutine friedman
 
 function dadtau(axp_tau,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in)
-  use amr_parameters, only: dp, use_ede, omega_ede, z_ede, w_ede
+  use amr_parameters, only: dp, use_ede, omega_ede, z_ede, w_ede, &
+       & use_coupled_de, use_quintessence
+  use scalar_de_commons, only: sde_dmcorr_of_a
   real(kind=8)::dadtau,axp_tau,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in
-  real(kind=8)::f_de, ede_term
+  real(kind=8)::f_de, ede_term, mcorr
   real(kind=8)::a_c_ede, pw_ede, e2std_c_ede
+  ! Coupled quintessence: rho_dm*a^3 evolves as exp(-beta(phi-phi0));
+  ! the matter term must carry the same factor as the Poisson source,
+  ! otherwise H(a) is inconsistent with the field tables.
+  mcorr = 1d0
+  if(use_coupled_de .and. use_quintessence) mcorr = sde_dmcorr_of_a(axp_tau)
   dadtau = axp_tau*axp_tau*axp_tau *  &
-       &   ( O_mat_0 + &
+       &   ( O_mat_0*mcorr + &
        &     O_vac_0 * axp_tau*axp_tau*axp_tau * f_de(axp_tau,w0_in,wa_in) + &
        &     O_k_0   * axp_tau )
   ! Early Dark Energy (Poulin+19 fluid form): rho_EDE constant before
@@ -783,12 +802,16 @@ function dadtau(axp_tau,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in)
 end function dadtau
 
 function dadt(axp_t,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in)
-  use amr_parameters, only: dp, use_ede, omega_ede, z_ede, w_ede
+  use amr_parameters, only: dp, use_ede, omega_ede, z_ede, w_ede, &
+       & use_coupled_de, use_quintessence
+  use scalar_de_commons, only: sde_dmcorr_of_a
   real(kind=8)::dadt,axp_t,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in
-  real(kind=8)::f_de, ede_term
+  real(kind=8)::f_de, ede_term, mcorr
   real(kind=8)::a_c_ede, pw_ede, e2std_c_ede
+  mcorr = 1d0
+  if(use_coupled_de .and. use_quintessence) mcorr = sde_dmcorr_of_a(axp_t)
   dadt   = (1.0D0/axp_t)* &
-       &   ( O_mat_0 + &
+       &   ( O_mat_0*mcorr + &
        &     O_vac_0 * axp_t*axp_t*axp_t * f_de(axp_t,w0_in,wa_in) + &
        &     O_k_0   * axp_t )
   ! Early Dark Energy (Poulin+19 fluid form), same convention as dadtau:
