@@ -570,6 +570,7 @@ contains
 !!$  end function ad1
   !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   function fpeebl(a)
+    use scalar_de_commons, only: sde_active, sde_w_of_a
     implicit none
     real(dp) :: fpeebl,a
     !     Computes the growth factor f=d\log D1/d\log a.
@@ -580,7 +581,11 @@ contains
     eps=1.0d-6
     y=omega_m/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
     fact=rombint(eps,a,eps)
-    wa_eff = w0 + wa*(1.d0-a)
+    if(sde_active()) then
+       wa_eff = sde_w_of_a(a)
+    else
+       wa_eff = w0 + wa*(1.d0-a)
+    end if
     dyda = -omega_m/a + omega_l*a*a*f_de(a,w0,wa)*(-1.d0-3.d0*wa_eff)
     fpeebl = 0.5d0*dyda/y - 1.d0 + a*fy(a)/fact
     return
@@ -797,12 +802,16 @@ function dadt(axp_t,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in)
 end function dadt
 
 function f_de(a, w0_in, wa_in)
-  ! CPL dark energy density ratio: rho_de(a)/rho_de(1)
-  ! f_de = a^{-3(1+w0+wa)} * exp(-3*wa*(1-a))
+  ! DE density ratio rho_de(a)/rho_de(1)
+  ! CPL: f_de = a^{-3(1+w0+wa)} * exp(-3*wa*(1-a))
   ! LCDM: w0=-1, wa=0 => f_de=1
+  ! Quintessence/k-essence (scalar_de_commons): tabulated background
   use amr_parameters, only: dp
+  use scalar_de_commons, only: sde_active, sde_fde_of_a
   real(kind=8) :: f_de, a, w0_in, wa_in
-  if (wa_in == 0.0D0 .and. w0_in == -1.0D0) then
+  if (sde_active()) then
+     f_de = sde_fde_of_a(a)
+  else if (wa_in == 0.0D0 .and. w0_in == -1.0D0) then
      f_de = 1.0D0
   else if (wa_in == 0.0D0) then
      f_de = a**(-3.0D0*(1.0D0+w0_in))

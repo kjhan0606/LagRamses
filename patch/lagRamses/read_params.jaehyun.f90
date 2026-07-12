@@ -46,6 +46,9 @@ subroutine read_params
        & ,use_dilaton &
        & ,use_galileon &
        & ,use_coupled_de &
+       & ,use_quintessence &
+       & ,use_kessence &
+       & ,use_horndeski &
        & ,use_ede &
        & ,use_sgs &
        & ,use_adm &
@@ -62,7 +65,10 @@ subroutine read_params
        & n_iter_dilaton,dilaton_eps
   namelist/galileon_params/c2_galileon,c3_galileon, &
        & n_iter_galileon,galileon_eps
-  namelist/coupled_de_params/beta_cde
+  namelist/coupled_de_params/beta_cde,cde_friction,cde_vary_mass
+  namelist/quint_params/quint_pot,quint_alpha,quint_lambda,quint_phi_ini
+  namelist/kessence_params/kes_x0
+  namelist/horndeski_params/hs_mu0,hs_mass
   namelist/ede_params/omega_ede,z_ede,w_ede
   namelist/sgs_params/sgs_C_prod,sgs_C_diss,sgs_C_smag,sgs_floor,sgs_cap,sgs_e_init,sgs_hydro
   namelist/sidm_params/sidm_cross_section,sidm_npart_min, &
@@ -299,6 +305,24 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      read(1,NML=ede_params,END=68)
 68   continue
   end if
+  ! Quintessence parameters
+  if(use_quintessence) then
+     rewind(1)
+     read(1,NML=quint_params,END=561)
+561  continue
+  end if
+  ! k-essence parameters
+  if(use_kessence) then
+     rewind(1)
+     read(1,NML=kessence_params,END=562)
+562  continue
+  end if
+  ! Horndeski parameters
+  if(use_horndeski) then
+     rewind(1)
+     read(1,NML=horndeski_params,END=563)
+563  continue
+  end if
   ! SGS turbulence parameters
   if(use_sgs) then
      rewind(1)
@@ -407,6 +431,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
            write(*,'(A,ES10.3,A,F6.3,A,F6.3)') &
                 '   cs2_de=', cs2_de, ' w0=', w0, ' wa=', wa
         end if
+     else if(use_quintessence .or. use_kessence) then
+        ! Scalar-field DE provides model w(a), cs2(a) internally
+        if(myid==1) write(*,'(A)') &
+             ' DE perturbation (kappa2/alpha): cs2(a), w(a) from scalar-field DE model'
      else if(cs2_de <= 0.0d0) then
         if(myid==1) write(*,*) 'WARNING: de_perturb=T, no de_table, cs2_de<=0 -> disabling'
         de_perturb = .false.
@@ -832,6 +860,84 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1) then
         write(*,'(A,F8.4)') ' Coupled Dark Energy enabled: beta_cde=', beta_cde
         write(*,'(A,F10.6)') '   G_eff/G = ', 1d0 + 2d0*beta_cde**2
+        if(use_quintessence) then
+           write(*,'(A,L2,A,L2)') '   coupled quintessence: friction=', &
+                & cde_friction, '  vary_mass=', cde_vary_mass
+        else
+           write(*,'(A)') '   (no use_quintessence: constant G_eff boost only)'
+        end if
+     end if
+  end if
+
+  !-------------------------------------------------
+  ! Quintessence / k-essence scalar-field dark energy
+  !-------------------------------------------------
+  if(use_quintessence .and. use_kessence) then
+     if(myid==1) write(*,*) 'ERROR: use_quintessence and use_kessence are mutually exclusive'
+     call clean_stop
+  end if
+  if(use_quintessence .or. use_kessence) then
+     if(.not. cosmo) then
+        if(myid==1) write(*,*) 'ERROR: quintessence/k-essence requires cosmo=.true.'
+        call clean_stop
+     end if
+     if(w0 /= -1.0d0 .or. wa /= 0.0d0) then
+        if(myid==1) write(*,*) 'ERROR: scalar-field DE replaces CPL; keep w0=-1, wa=0'
+        call clean_stop
+     end if
+     if(use_ede) then
+        if(myid==1) write(*,*) 'ERROR: use_ede cannot be combined with scalar-field DE'
+        call clean_stop
+     end if
+  end if
+  if(use_quintessence) then
+     if(quint_pot /= 1 .and. quint_pot /= 2) then
+        if(myid==1) write(*,*) 'ERROR: quint_pot must be 1 (Ratra-Peebles) or 2 (exponential)'
+        call clean_stop
+     end if
+     if(quint_alpha <= 0d0 .or. quint_lambda <= 0d0 .or. quint_phi_ini <= 0d0) then
+        if(myid==1) write(*,*) 'ERROR: quint_alpha, quint_lambda, quint_phi_ini must be > 0'
+        call clean_stop
+     end if
+     if(myid==1) then
+        if(quint_pot == 1) then
+           write(*,'(A,F8.4)') ' Quintessence enabled: V=A*phi^-alpha, alpha=', quint_alpha
+        else
+           write(*,'(A,F8.4)') ' Quintessence enabled: V=A*exp(-lambda*phi), lambda=', quint_lambda
+        end if
+        write(*,'(A,ES10.3)') '   phi_ini [Mpl] =', quint_phi_ini
+     end if
+  end if
+  if(use_kessence) then
+     if(kes_x0 <= 0.5d0) then
+        if(myid==1) write(*,*) 'ERROR: kes_x0 must be > 0.5'
+        call clean_stop
+     end if
+     if(myid==1) write(*,'(A,F12.8)') &
+          & ' k-essence enabled: P(X)=-X+X^2, X(a=1)/M^4=', kes_x0
+  end if
+
+  !-------------------------------------------------
+  ! Horndeski quasi-static mu(a,k) gravity
+  !-------------------------------------------------
+  if(use_horndeski) then
+     if(.not. poisson) then
+        if(myid==1) write(*,*) 'ERROR: use_horndeski=T requires poisson=T'
+        call clean_stop
+     end if
+     if(hs_mass < 0d0) then
+        if(myid==1) write(*,*) 'ERROR: hs_mass must be >= 0'
+        call clean_stop
+     end if
+     if(use_fR .or. use_nDGP .or. use_symmetron .or. use_dilaton .or. use_galileon) then
+        if(myid==1) write(*,*) 'ERROR: use_horndeski cannot be combined with another MG solver'
+        call clean_stop
+     end if
+     if(myid==1) then
+        write(*,'(A,F8.4,A,ES10.3,A)') ' Horndeski mu(a,k) gravity enabled: mu0=', &
+             & hs_mu0, '  Compton mass=', hs_mass, ' h/Mpc'
+        if(hs_mass > 0d0) write(*,'(A)') &
+             & '   NOTE: k-dependence exact only in FFT Poisson paths; MG/CG use k->inf limit'
      end if
   end if
 

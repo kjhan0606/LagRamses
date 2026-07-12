@@ -144,7 +144,8 @@ subroutine sync(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use amr_commons
   use pm_commons
   use poisson_commons
-  use cooling_module, ONLY: XH=>X, rhoc, mH 
+  use cooling_module, ONLY: XH=>X, rhoc, mH
+  use scalar_de_commons, only: sde_phip_of_a
   implicit none
   integer::ng,np,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -164,6 +165,8 @@ subroutine sync(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! Particle-based arrays
   logical ,dimension(1:nvector)::ok
   real(dp),dimension(1:nvector)::dteff
+  real(dp),dimension(1:nvector)::fric_cde
+  real(dp)::phip_cde
   real(dp),dimension(1:nvector,1:ndim)::x,ff,new_vp,dd,dg
   integer ,dimension(1:nvector,1:ndim)::ig,id,igg,igd,icg,icd
   real(dp),dimension(1:nvector,1:twotondim)::vol
@@ -453,6 +456,17 @@ subroutine sync(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
      levelp(ind_part(j))=ilevel
   end do
 
+  ! Coupled quintessence (m_dm = m0*exp(-beta*phi)): velocity term
+  ! +beta*phidot*v from momentum conservation as the DM mass evolves;
+  ! v *= exp(+beta*dphi) over the kick interval, dphi = phi'(a)*hexp*dt
+  fric_cde(1:np)=1.0D0
+  if(use_coupled_de .and. cde_friction .and. use_quintessence .and. cosmo)then
+     phip_cde=sde_phip_of_a(aexp)
+     do j=1,np
+        fric_cde(j)=exp(beta_cde*phip_cde*hexp*0.5D0*dteff(j))
+     end do
+  end if
+
   ! Update 3-velocity
   do idim=1,ndim
      if(static)then
@@ -461,7 +475,7 @@ subroutine sync(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
         end do
      else
         do j=1,np
-           new_vp(j,idim)=vp(ind_part(j),idim)+ff(j,idim)*0.5D0*dteff(j)
+           new_vp(j,idim)=vp(ind_part(j),idim)*fric_cde(j)+ff(j,idim)*0.5D0*dteff(j)
         end do
      endif
   end do

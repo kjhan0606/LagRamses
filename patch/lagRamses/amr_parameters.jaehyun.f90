@@ -420,6 +420,24 @@ module amr_parameters
   ! Coupled Dark Energy parameters
   logical ::use_coupled_de=.false.       ! Enable DM-DE coupling
   real(dp)::beta_cde=0.1d0              ! DM-DE coupling constant
+  logical ::cde_friction=.true.          ! Apply -beta*phidot*v particle friction (needs use_quintessence)
+  logical ::cde_vary_mass=.true.         ! Apply DM mass evolution to Poisson source (needs use_quintessence)
+
+  ! Quintessence (field-level scalar DE) parameters
+  logical ::use_quintessence=.false.     ! Enable quintessence background
+  integer ::quint_pot=1                  ! 1=Ratra-Peebles A*phi^-alpha, 2=exponential A*exp(-lambda*phi)
+  real(dp)::quint_alpha=1.0d0           ! RP inverse power-law index
+  real(dp)::quint_lambda=1.0d0          ! Exponential potential slope
+  real(dp)::quint_phi_ini=0.01d0        ! Initial field value [Mpl] at a=1e-6
+
+  ! Purely kinetic k-essence P(X)=-X+X^2 parameters
+  logical ::use_kessence=.false.         ! Enable k-essence background
+  real(dp)::kes_x0=0.5001d0             ! X(a=1) in M^4 units (>0.5; ->0.5 gives w0->-1)
+
+  ! Horndeski quasi-static parametrized gravity
+  logical ::use_horndeski=.false.        ! Enable mu(a,k)-modified Poisson
+  real(dp)::hs_mu0=0.1d0                ! mu(a=1)-1 amplitude
+  real(dp)::hs_mass=0.0d0               ! Compton mass [h/Mpc]; 0=scale-independent
 
   ! Early Dark Energy (Doran-Robbers) parameters
   logical ::use_ede=.false.              ! Enable Early Dark Energy

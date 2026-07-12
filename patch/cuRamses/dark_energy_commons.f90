@@ -32,14 +32,18 @@ contains
 
   !--------------------------------------------------------------
   ! f_de: DE density ratio rho_de(a)/rho_de(1)
-  ! f_de = a^{-3(1+w0+wa)} * exp(-3*wa*(1-a))
+  ! CPL: f_de = a^{-3(1+w0+wa)} * exp(-3*wa*(1-a))
+  ! Quintessence/k-essence: tabulated background (scalar_de_commons)
   ! Matches f_de() in init_time.f90
   !--------------------------------------------------------------
   function f_de_val(a) result(fde)
     use amr_parameters, only: w0, wa
+    use scalar_de_commons, only: sde_active, sde_fde_of_a
     real(dp), intent(in) :: a
     real(dp) :: fde
-    if (wa == 0.0d0 .and. w0 == -1.0d0) then
+    if (sde_active()) then
+       fde = sde_fde_of_a(a)
+    else if (wa == 0.0d0 .and. w0 == -1.0d0) then
        fde = 1.0d0
     else if (wa == 0.0d0) then
        fde = a**(-3.0d0*(1.0d0 + w0))
@@ -47,6 +51,47 @@ contains
        fde = a**(-3.0d0*(1.0d0 + w0 + wa)) * exp(-3.0d0*wa*(1.0d0 - a))
     end if
   end function f_de_val
+
+  !--------------------------------------------------------------
+  ! de_w_val: DE equation of state w(a)
+  !--------------------------------------------------------------
+  function de_w_val(a) result(w_a)
+    use amr_parameters, only: w0, wa
+    use scalar_de_commons, only: sde_active, sde_w_of_a
+    real(dp), intent(in) :: a
+    real(dp) :: w_a
+    if (sde_active()) then
+       w_a = sde_w_of_a(a)
+    else
+       w_a = w0 + wa * (1.0d0 - a)
+    end if
+  end function de_w_val
+
+  !--------------------------------------------------------------
+  ! de_cs2_eff: effective DE rest-frame sound speed squared.
+  ! CPL: namelist cs2_de. Quintessence: 1. k-essence: model cs2(a).
+  !--------------------------------------------------------------
+  function de_cs2_eff(a) result(cs2)
+    use amr_parameters, only: cs2_de
+    use scalar_de_commons, only: sde_active, sde_cs2_of_a
+    real(dp), intent(in) :: a
+    real(dp) :: cs2
+    if (sde_active()) then
+       cs2 = sde_cs2_of_a(a)
+    else
+       cs2 = cs2_de
+    end if
+  end function de_cs2_eff
+
+  !--------------------------------------------------------------
+  ! de_helmholtz_on: whether the quasi-static kappa2/alpha DE
+  ! correction is applicable (positive sound speed available)
+  !--------------------------------------------------------------
+  logical function de_helmholtz_on()
+    use amr_parameters, only: cs2_de
+    use scalar_de_commons, only: sde_active
+    de_helmholtz_on = (cs2_de > 0.0d0) .or. sde_active()
+  end function de_helmholtz_on
 
   !--------------------------------------------------------------
   ! cosmo_poisson_fourpi: cosmological Poisson prefactor
@@ -59,7 +104,9 @@ contains
   !--------------------------------------------------------------
   function cosmo_poisson_fourpi(aexp_val, scale_in) result(fourpi)
     use amr_parameters, only: cosmo, omega_m, omega_l, omega_nu, &
-         use_neutrino, de_perturb, cs2_de
+         use_neutrino, de_perturb, cs2_de, use_coupled_de, cde_vary_mass, &
+         use_quintessence, use_horndeski
+    use scalar_de_commons, only: sde_dmcorr_of_a, horndeski_mu_of_a
     real(dp), intent(in) :: aexp_val, scale_in
     real(dp) :: fourpi, omega_de_a, omega_cb
     fourpi = 4.0d0*ACOS(-1.0d0)*scale_in
@@ -75,6 +122,14 @@ contains
        omega_de_a = omega_l * f_de_val(aexp_val) * aexp_val**3
        fourpi = fourpi * (1.0d0 + (omega_de_a/omega_cb) * get_de_ratio(1.0d-3, aexp_val))
     end if
+    ! Coupled quintessence: rho_dm*a^3 evolves as exp(beta*(phi-phi0))
+    if(use_coupled_de .and. cde_vary_mass .and. use_quintessence) then
+       fourpi = fourpi * sde_dmcorr_of_a(aexp_val)
+    end if
+    ! Horndeski quasi-static mu(a) (scale-independent limit)
+    if(use_horndeski) then
+       fourpi = fourpi * horndeski_mu_of_a(aexp_val)
+    end if
   end function cosmo_poisson_fourpi
 
   !--------------------------------------------------------------
@@ -87,29 +142,29 @@ contains
   ! alpha = 1.5 * (boxlen_ini/C_H100)^2 * omega_l * f_de(a) * (1+w(a)) / cs2_de
   !--------------------------------------------------------------
   subroutine compute_de_kspace_params(aexp_val, kappa2_out, alpha_out)
-    use amr_parameters, only: omega_m, omega_l, omega_k, w0, wa, &
-         cs2_de, boxlen_ini
+    use amr_parameters, only: omega_m, omega_l, omega_k, boxlen_ini
     real(dp), intent(in)  :: aexp_val
     real(dp), intent(out) :: kappa2_out, alpha_out
-    real(dp) :: fde, E2_a, w_a, boxratio_sq
+    real(dp) :: fde, E2_a, w_a, cs2_a, boxratio_sq
 
     fde = f_de_val(aexp_val)
 
     ! Friedmann equation: E^2(a) = H^2(a)/H0^2
     E2_a = omega_m / aexp_val**3 + omega_l * fde + omega_k / aexp_val**2
 
-    ! Current DE equation of state
-    w_a = w0 + wa * (1.0d0 - aexp_val)
+    ! Current DE equation of state and sound speed (CPL or scalar DE)
+    w_a   = de_w_val(aexp_val)
+    cs2_a = max(de_cs2_eff(aexp_val), 1.0d-30)
 
     ! (boxlen_ini / (c/H0))^2  [dimensionless]
     boxratio_sq = (boxlen_ini / C_H100)**2
 
-    ! Helmholtz mass term: kappa^2 = (aH/c)^2 / cs2_de  [in box^-2 units]
-    kappa2_out = aexp_val**2 * E2_a * boxratio_sq / cs2_de
+    ! Helmholtz mass term: kappa^2 = (aH/c)^2 / cs2  [in box^-2 units]
+    kappa2_out = aexp_val**2 * E2_a * boxratio_sq / cs2_a
 
-    ! DE coupling term: alpha = fourpi_de_phys * (1+w) / cs2_de  [in box^-2 units]
+    ! DE coupling term: alpha = fourpi_de_phys * (1+w) / cs2  [in box^-2 units]
     ! fourpi_de_phys = (3/2) * H0^2 * omega_l * f_de(a)
-    alpha_out = 1.5d0 * boxratio_sq * omega_l * fde * (1.0d0 + w_a) / cs2_de
+    alpha_out = 1.5d0 * boxratio_sq * omega_l * fde * (1.0d0 + w_a) / cs2_a
 
   end subroutine compute_de_kspace_params
 
