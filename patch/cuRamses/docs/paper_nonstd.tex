@@ -25,37 +25,42 @@
 
 \emailAdd{kjhan@kias.re.kr}
 
-\abstract{We present the non-standard cosmology suite of the \curamses\
-adaptive mesh refinement (AMR) code (\curamses~III), which
-assembles, within a single code base, essentially every popular
-extension of $\Lambda$CDM: (i) \textbf{self-interacting dark
-matter} (SIDM) with constant, velocity-dependent, anisotropic and
-inelastic (two-state) cross-sections, implemented as cell-based
-Monte Carlo scattering with machine-precision momentum and energy
-conservation; (ii) a \textbf{dark energy and non-GR gravity}
-battery comprising CPL dark energy with clustering perturbations,
-massive-neutrino linear response, early dark energy, field-level
-quintessence and purely kinetic k-essence, coupled quintessence,
-parametrized quasi-static Horndeski gravity, Hu--Sawicki $f(R)$,
-nDGP, symmetron, the environmentally damped dilaton, the
-parameter-free tracker cubic Galileon, and QUMOND --- all built on
-a unified Poisson-solver framework in which model corrections
-compose multiplicatively, with an FFT-accelerated Newton stage for
-the nonlinear scalar fields; (iii) \textbf{fuzzy dark matter}
-(FDM), a hybrid Schr\"odinger--Poisson integrator with a spectral
-kinetic operator on the base level and finite differences on
-refined levels; and (iv) \textbf{evaporating primordial black
-holes} (PBH), a table-driven global mass-function scheme with
-optional local heating. Every dark-energy and gravity module has
-been verified at the equation level against the literature, at the
-solver level against analytic linear responses (to $10^{-5}$ or
-better), and end-to-end with a controlled $64^3$ simulation suite
-compared against an initial-conditions-consistent linear forward
-model, agreeing to $2$--$5$ per cent with residual signs explained
-by screening. We document the algorithms, unit conventions,
-namelist interfaces and the verification methodology, providing a
-self-contained reference for non-standard cosmological simulations
-with AMR codes.}
+\abstract{We present \curamses~III, the non-standard cosmology
+suite of the \curamses\ adaptive mesh refinement (AMR) code. The
+suite collects the most widely studied extensions of $\Lambda$CDM
+within a single code. The first component treats
+\textbf{self-interacting dark matter} (SIDM). Scattering is
+realised as a Monte Carlo process between particle pairs in each
+cell. Constant, velocity-dependent, anisotropic, and inelastic
+(two-state) cross sections are supported. Momentum and energy are
+conserved at machine precision. The second component covers
+\textbf{dark energy and modified gravity}. It includes CPL dark
+energy with clustering perturbations, a linear response treatment
+of massive neutrinos, early dark energy, quintessence and
+k-essence fields, coupled quintessence, parametrized quasi-static
+Horndeski gravity, Hu--Sawicki $f(R)$, nDGP, the symmetron, the
+environmentally damped dilaton, the tracker cubic Galileon, and
+QUMOND. All of these models share one framework for the Poisson
+equation, and the model corrections combine multiplicatively
+within it. The third component follows \textbf{fuzzy dark matter}
+(FDM). The wavefunction is evolved in supercomoving variables, in
+which the Schr\"odinger--Poisson system contains no explicit scale
+factors. A hybrid scheme couples a Madelung fluid on coarse levels
+to the wave solver on refined levels. The fluid stores a
+continuous action and thereby removes the box-size limit of pure
+wave simulations. The fourth component models
+\textbf{evaporating primordial black holes} (PBH) with a global
+mass function drawn from a precomputed evaporation history, and
+the released energy can heat the surrounding gas. Each module was
+verified in three stages. The equations were checked against the
+published literature. The solvers reproduce analytic linear
+responses to better than $10^{-5}$. A controlled suite of $64^3$
+simulations agrees with a matched linear forward model at the two
+to five per cent level, and the residual differences carry the
+sign expected from screening. We document the algorithms, the
+unit conventions, the input interfaces, and the verification
+methodology. The paper is intended as a self-contained reference
+for non-standard cosmological simulations with AMR codes.}
 
 \keywords{cosmological simulations, dark energy theory, modified gravity,
 dark matter theory}
