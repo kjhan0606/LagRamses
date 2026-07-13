@@ -330,6 +330,7 @@ module amr_parameters
   integer ::sidm_nstates=2           ! Number of DM states (>=2)
   real(dp),dimension(0:9)::sidm_energy=0.0d0   ! State energies [keV]
   real(dp),dimension(0:9)::sidm_frac_init=0.0d0 ! Initial population fractions
+  real(dp)::sidm_mchi=1.0d0          ! DM particle mass [GeV/c^2] (iSIDM kinematics)
   ! Dark phase transition: sigma(v,a) = sigma(v) * g(a)
   character(len=16)::sidm_a_type='none'   ! 'none','step','sigmoid'
   real(dp)::sidm_a_transition=0.5d0       ! Scale factor of transition

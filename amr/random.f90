@@ -120,6 +120,11 @@ contains
 
   !=======================================================================
   subroutine rans( N, StartVal, SeedArray )
+    ! WARNING: SeedArray is hard-shaped (ncpu, IRandNumSize) below —
+    ! the leading dimension is the global ncpu, NOT the argument N.
+    ! Passing a buffer with a different leading dimension silently
+    ! overruns it (heap corruption). Callers must pass an
+    ! (ncpu, IRandNumSize) array and N <= ncpu.
     use amr_commons,only:ncpu
     implicit none
     integer :: N

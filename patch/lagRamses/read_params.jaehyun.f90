@@ -71,12 +71,12 @@ subroutine read_params
   namelist/horndeski_params/hs_mu0,hs_mass
   namelist/ede_params/omega_ede,z_ede,w_ede
   namelist/sgs_params/sgs_C_prod,sgs_C_diss,sgs_C_smag,sgs_floor,sgs_cap,sgs_e_init,sgs_hydro
-  namelist/sidm_params/sidm_cross_section,sidm_npart_min, &
+  namelist/sidm_params/sidm,sidm_cross_section,sidm_npart_min, &
        & sidm_type,sidm_v0,sidm_power, &
        & sidm_courant, &
        & sidm_angular,sidm_epsilon, &
        & sidm_inelastic,sidm_delta,sidm_frac_excited, &
-       & sidm_nstates,sidm_energy,sidm_frac_init, &
+       & sidm_nstates,sidm_energy,sidm_frac_init,sidm_mchi, &
        & sidm_a_type,sidm_a_transition,sidm_sigma_ratio,sidm_a_width, &
        & sidm_fdiss, &
        & sidm_baryon,sidm_baryon_sigma,sidm_baryon_power, &
@@ -483,6 +483,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(sidm_inelastic .and. sidm_delta <= 0.0d0 &
           .and. sidm_energy(1) <= 0.0d0) then
         if(myid==1) write(*,*) 'ERROR: sidm_inelastic=T but no energy splitting set'
+        call clean_stop
+     end if
+     if(sidm_inelastic .and. sidm_mchi <= 0.0d0) then
+        if(myid==1) write(*,*) 'ERROR: sidm_inelastic=T but sidm_mchi<=0 (DM mass in GeV)'
         call clean_stop
      end if
      ! Auto-populate multi-state arrays from 2-state shortcut

@@ -271,3 +271,93 @@ Bugs found and fixed BY these tests (each with its own commit):
 Also added: early-time gate for the tracker galileon (solver skipped
 while G_eff/G−1 < 1e-3, i.e. z ≳ 2.5 — the |coeff| ∝ a⁻⁴ regime is
 never entered) and the vfact/fpeebl startup diagnostic.
+
+## 10. SIDM Monte-Carlo scattering — fixes and validation (2026-07-13)
+
+Ownership of the SIDM module transferred to this project (original SIDM
+project is dead). A read-only review found five defects in
+`patch/cuRamses/sidm_scatter.f90`; all are now fixed on this branch.
+
+### 10.1 Defects fixed
+
+1. **Unit conversions (cosmo runs)** — three spurious `/aexp` factors:
+   velocities (`vp*scale_v/aexp`), cell volume (`(dx*scale_l/aexp)^3`)
+   and gas density (`uold*scale_d/aexp^3`). In RAMSES supercomoving
+   units `vp*scale_v` *is* the proper peculiar velocity and
+   `scale_l`/`scale_d` are already proper (verified against the gadget
+   IC conversion `vfact = sqrt(a)*a/(100 L)` in `init_part.f90` and the
+   `scale_nH` usage in cooling). Net effect: P_scatter was multiplied
+   by a^2 (4e-4 at z=49, 0.25 at z=1); the DM-baryon drag rate by
+   a^-4. All pre-fix cosmological SIDM runs are invalid; non-cosmo
+   (aexp=1) runs were unaffected.
+2. **nvector clamp** — cells with more than nvector(=32) DM particles
+   used (N-1)->31 and silently excluded particles beyond the first 32
+   in list order (up to ~10x rate undercount in halo cores at
+   levelmax). Replaced by a per-grid grown allocatable buffer; an
+   `N/(2 floor(N/2))` factor now makes odd-N sampling exact.
+3. **iSIDM kinematics** — the mass splitting delta [keV] was compared
+   against the kinetic energy of the ~1e44 g N-body macro-particle
+   (~1e55 erg), so thresholds never gated and kicks were ~1e-64:
+   label churn with zero dynamics. New parameter `sidm_mchi` [GeV];
+   all channel gating and velocity changes now use the microphysical
+   reduced mass mu_chi = m_chi/2.
+4. **iSIDM channels** — elastic scattering was excluded whenever any
+   inelastic channel was open (forced transitions), and single
+   excitations g+g->g+e opened at threshold delta. Now: 2-state model
+   allows only gg<->ee (threshold 2*delta) with mixed pairs elastic,
+   the elastic channel competes with equal weight, and N>2 states use
+   uniform branching over open pair channels.
+5. **DM-baryon drag** — gas momentum was updated without total energy
+   (internal-energy corruption, possible negative pressures) and the
+   backreaction was uncapped in DM-dominated cells. Now conserves
+   momentum and total energy exactly (frictional heat kept positive by
+   the twin caps dv <= 0.5 v_rel * min(1, m_gas/m_dm)), and the local
+   gas velocity is kept current between particles in a cell.
+
+Also: `sidm` master switch accepted in `&SIDM_PARAMS` (previously
+`&RUN_PARAMS` only); per-thread RNG streams are independent RANMAR
+states from `rans()` (previously 100-draw shifted copies of one
+stream, i.e. massively overlapping).
+
+### 10.2 Validation (64^3 unigrid LCDM, L=100 Mpc/h, sigma/m=1000 cm^2/g)
+
+* **Rate**: offline exact MC expectation from snapshots (cell-by-cell
+  pair sums of |dv|, aux script `predict_rate.py`) vs the code's
+  per-step `scattered=` counts: measured/predicted = 1.07+-0.06 at
+  a=0.3 and 1.006+-0.044 at a=0.6. Per-cell `pairs=` counts match
+  exactly. The two-epoch agreement kills the old a^2 error (would have
+  read 0.09/0.36).
+* **Conservation**: per-event |dp|/p ~ 1e-14, elastic dEk/KE ~ 1e-13
+  (machine precision).
+* **iSIDM** (delta=10 keV, m_chi=1 GeV, restart at a=0.6):
+  f_exc=0 stays exactly 0 (threshold gates; old code would up-scatter
+  immediately); a 50% excited population decays via down-scattering
+  with per-event macro energy release matching 2*delta*m_p/m_chi =
+  1.717e61 erg to 4 digits; late re-excitations appear only after
+  down-kicked particles exceed the threshold (physically correct).
+* **Drag smoke test** (hydro, sigma_b=1e5 cm^2/g): runs clean, all
+  particles dragged, no negative internal energies.
+
+### 10.3 rans() array-shape landmine (found and fixed)
+
+The first fixed build died deterministically at step ~115-136 under
+np=8 x OMP=4 with SIGSEGV inside `allocate` at
+`particle_tree.kjhan.f90:959`, no bounds violation, and nothing from
+plain valgrind (Intel's runtime allocates through the libiomp5
+rml/tbbmalloc pool, whose arenas valgrind cannot instrument). Routing
+`scalable_*` through glibc malloc with an LD_PRELOAD shim exposed the
+culprit: `rans(N,...)` in `amr/random.f90` declares its seed array as
+`dimension(ncpu, IRandNumSize)` — the leading dimension is the GLOBAL
+`ncpu`, not `N`. The new per-thread seeding called
+`rans(nthreads-1, ...)` with an `(nthreads-1, 4)` buffer, so rans
+wrote with stride ncpu past the buffer (seed components such as
+0x617 landed in pool metadata, e.g. a bin pointer became
+0x617_00000000, detonating a later allocate). This also explains why
+np=1 (stride 1) and OMP=1 (no rans call) were immune. Fixed by
+generating thread streams directly with the module's jump primitives
+(`ranfk`/`ranfkbinary`/`ranfatok`/`ranfmodmult` — the same
+construction rans uses internally, with correct array shapes); a
+warning comment was added to rans(). After the fix, np=8 x OMP=4 runs
+1088 steps to a=0.6 clean (production -O3 binary re-verified past the
+former crash point), with rate validation unchanged
+(1.0005+-0.058 at a=0.3, 0.986+-0.045 at a=0.6).
