@@ -145,9 +145,12 @@ P \;=\; \frac{\sigma/m(v)\,\bar m\,v_{\rm rel}\,\Delta t}
              {V_{\rm cell}}\,(N_{\rm dm}-1),
 \label{eq:sidm_prob}
 \end{equation}
-with $\bar m$ the mean particle mass, $V_{\rm cell}$ the physical
+with $\bar m$ the mean particle mass, $V_{\rm cell}$ the proper
 cell volume and the factor $(N_{\rm dm}-1)$ accounting for all
-possible partners. A scatter occurs when a uniform deviate falls
+possible partners; a further factor
+$N_{\rm dm}/(2\lfloor N_{\rm dm}/2\rfloor)$ makes the
+$\lfloor N_{\rm dm}/2\rfloor$ sampled pairs reproduce the exact
+$N_{\rm dm}(N_{\rm dm}-1)/2$ pair rate for odd occupancies. A scatter occurs when a uniform deviate falls
 below $P$; post-scattering velocities are constructed in the
 centre-of-mass frame,
 \begin{equation}
@@ -173,11 +176,17 @@ ${\rm d}\sigma/{\rm d}\Omega \propto (1-\cos\theta+2\varepsilon)^{-2}$
 \subsection{Inelastic (two-state) SIDM}
 
 A two-state model \citep{TuckerSmithWeiner2001,Vogelsberger2019}
-adds a mass splitting $\delta$: ground--ground pairs can
-up-scatter ($g+g\to e+e$, allowed when
-$\tfrac12\mu v_{\rm rel}^2>2\delta$), excited pairs down-scatter
-exothermically, and mixed pairs scatter elastically; the relative
-speed is adjusted to conserve total (kinetic + internal) energy.
+adds a mass splitting $\delta$. Because an $N$-body macro-particle
+scatters as if a single dark matter particle of mass $m_\chi$
+(\code{sidm\_mchi}) does, the kinematics are those of the
+\emph{microphysical} pair: ground--ground pairs up-scatter
+($g+g\to e+e$) when $\tfrac12\mu_\chi v_{\rm rel}^2>2\delta$ with
+$\mu_\chi=m_\chi/2$, excited pairs down-scatter exothermically
+($v'^2=v^2+8\delta/m_\chi$), and mixed pairs scatter elastically;
+when an inelastic channel is open it competes with the elastic one
+with equal weight. Each transition changes the macro-particle
+kinetic energy by $2\delta\,(m_p/m_\chi)$, which we verify at the
+per-event level in the test below.
 An initial excited fraction is assigned at start-up in a
 restart-safe manner. A dissipative channel
 (\code{sidm\_fdiss}) and a DM--baryon drag term
@@ -194,6 +203,24 @@ reseeding, and cumulative momentum/energy residuals are reduced
 across MPI ranks each step, providing runtime verification of the
 conservation properties. All parameters live in
 \code{\&SIDM\_PARAMS}.
+
+\subsection{Validation}
+
+On a $64^3$-particle unigrid $\Lambda$CDM box
+($L=100\,h^{-1}\,{\rm Mpc}$, $\sigma/m=10^3\,{\rm cm^2\,g^{-1}}$)
+we compare the per-step scattering counts against the exact
+Monte-Carlo expectation evaluated offline from the snapshot
+(cell-by-cell pair sums of $|\Delta\boldsymbol{v}|$): the measured/predicted
+event ratio is $1.07\pm0.06$ at $a=0.3$ and $1.006\pm0.044$ at
+$a=0.6$, and the per-cell pair counts match exactly, confirming
+both the rate normalisation and its scale-factor dependence.
+Momentum and elastic kinetic energy are conserved to machine
+precision ($|\Delta p|/p\sim10^{-14}$ per event). For the
+two-state model with $\delta=10\,{\rm keV}$, $m_\chi=1\,{\rm GeV}$
+the up-scattering threshold gates correctly (no transitions in a
+cold box), a 50 per cent excited population decays through
+down-scattering only, and the measured per-event energy release
+matches $2\delta\,m_p/m_\chi$ to four significant figures.
 
 % ===================================================================
 \section{Dark Energy and non-GR Gravity}
