@@ -391,7 +391,12 @@ subroutine fdm_madelung_refine_flag(ilevel)
   ! Mean fluid density: |psi|^2 averages the DM share when gas is present
   dm_share = 1.0d0
   if(hydro .and. omega_m > 0.0d0) dm_share = 1.0d0 - omega_b/omega_m
-  rho_gate = 0.1d0 * dm_share
+  ! Nonlinearity gate: C_Q must not fire on the linear cutoff-scale
+  ! amplitude structure of the IC (delta ~ 0.1 at high z), only where the
+  ! flow is entering the nonlinear / pre-caustic regime. rho > 2*rho_mean
+  ! is delta > 1. This makes fluid->wave refinement density-driven, so it
+  ! unlocks progressively with structure growth exactly as CDM does.
+  rho_gate = 2.0d0 * dm_share
 
   ! Time-to-caustic threshold (v = grad S, look-ahead fdm_nla steps)
   if(dt > 0.0d0) then
