@@ -353,8 +353,6 @@ subroutine sub_userflag_fine(ilevel,skip_loc,scale, igrid,ngrid,iflag)
   real(dp),dimension(1:twotondim,1:3)::xc
   real(dp),dimension(1:nvector,1:ndim)::xx
 
-  integer :: nlevel_collapse =3
-
   iflag = 0
 
   do i=1,ngrid
@@ -466,8 +464,6 @@ subroutine userflag_fine(ilevel)
   real(dp),dimension(1:twotondim,1:3)::xc
   real(dp),dimension(1:nvector,1:ndim)::xx
 
-  integer :: nlevel_collapse =3
-  
   logical::prevent_refine
 
   if(ilevel==nlevelmax)return

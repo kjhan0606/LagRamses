@@ -115,6 +115,8 @@ module amr_parameters
   integer::nx=1,ny=1,nz=1     ! Number of coarse cells in each dimension
   integer::levelmin=1         ! Full refinement up to levelmin
   integer::nlevelmax=1        ! Maximum number of level
+  integer::nlevel_collapse=0  ! Free-collapse levels above nlevelmax_part
+                              ! before the cosmological aexp holdback applies
   integer::ngridmax=0         ! Maximum number of grids
   integer,dimension(1:MAXLEVEL)::nexpand=1 ! Number of mesh expansion
   integer::nexpand_bound=1    ! Number of mesh expansion for virtual boundaries
@@ -365,8 +367,9 @@ module amr_parameters
   integer ::fdm_cost_mode=0           ! Load-balance cost: 0=memory, 1=wallclock
   logical ::fdm_use_hjm=.false.        ! Enable hybrid HJM fluid (coarse) + wave (fine)
   integer ::fdm_first_wave_level=0     ! First AMR level using wave solver (0=levelmin+2)
-  real(dp)::fdm_hjm_C1=0.03d0         ! Madelung refinement: quantum pressure threshold
-  real(dp)::fdm_hjm_C2=1.0d0          ! Madelung refinement: phase curvature threshold
+  real(dp)::fdm_hjm_C1=0.03d0         ! Fluid->wave refine: C_Q amplitude-curvature threshold
+  real(dp)::fdm_hjm_C2=1.0d0          ! (unused; former phase-curvature threshold, kept for compat)
+  real(dp)::fdm_nla=10.0d0            ! Fluid->wave refine: time-to-caustic look-ahead (steps)
   real(dp)::fdm_refine_rho_min=8.0d0  ! de Broglie refinement density floor (units of mean)
 
   ! MOND (Modified Newtonian Dynamics) parameters

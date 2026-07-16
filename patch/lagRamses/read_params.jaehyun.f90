@@ -78,7 +78,8 @@ subroutine read_params
 namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & adm_cross_section,adm_mol,adm_fH2
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
-       & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min
+       & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min, &
+       & fdm_nla
   namelist/pbh_params/pbh_table_file,pbh_fraction,pbh_boost, &
        & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
@@ -88,7 +89,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & ,tend,delta_tout,aend,delta_aout,gadget_output,walltime_hrs,minutes_dump &
        & ,informat,outformat
   namelist/amr_params/levelmin,levelmax,ngridmax,ngridtot &
-       & ,npartmax,nparttot,nexpand,boxlen,nsinkmax
+       & ,npartmax,nparttot,nexpand,boxlen,nsinkmax,nlevel_collapse
   namelist/poisson_params/epsilon,gravity_type,gravity_params &
        & ,cg_levelmin,cic_levelmax
   namelist/lightcone_params/zmax_cone  &

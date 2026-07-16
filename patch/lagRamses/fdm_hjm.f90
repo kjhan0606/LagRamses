@@ -334,10 +334,29 @@ end subroutine fdm_rhoS_to_psi
 
 !################################################################
 !################################################################
-! Madelung refinement criterion for fluid levels
-! C1: quantum pressure curvature of sqrt(rho)
-! C2: phase curvature of S
-! If either exceeds threshold, flag cell for refinement
+! Fluid -> wave refinement criterion (detect Madelung breakdown).
+!
+! The fluid (rho,S) form is exact only in the single-stream regime.
+! It fails at caustics / multi-streaming, where the wave solver is
+! mandatory. We flag a fluid cell where either
+!
+!   (1) C_Q = dx^2 |lap sqrt(rho)| / sqrt(rho)  >  fdm_hjm_C1
+!       Normalised amplitude curvature. Interference fringes raise it
+!       ahead of the first node. Dimensionless, boost- and box-size
+!       invariant (no m or dx in the threshold), and identical to the
+!       C1 CFL-exclusion quantity. Primary detector.
+!
+!   (2) min_axis( d2S )  <  -dx^2 / (fdm_nla * dt)
+!       Time-to-caustic look-ahead. v = grad S, so the second
+!       difference of S is dx^2 dv/dx; a converging axis reaches a
+!       caustic in ~ -1/(dv/dx). We refine fdm_nla steps early.
+!       Sign-gated (converging axes only). Predictive backstop.
+!
+! A mass gate rho > 0.1*rho_mean drops dynamically irrelevant void
+! interference. NOTE the old phase-Laplacian C2 = |d2S|/hbar was
+! removed: its threshold hbar/(m dx^2) tests WAVE RESOLVABILITY, not
+! fluid validity, so it fired on ordinary single-stream bulk
+! convergence and flooded ~5% of the box.
 !################################################################
 subroutine fdm_madelung_refine_flag(ilevel)
   use amr_commons
@@ -347,11 +366,12 @@ subroutine fdm_madelung_refine_flag(ilevel)
   integer,intent(in)::ilevel
 
   integer::igrid,ind,iskip,icell,idim,icL,icR
-  integer::nflag_loc,nflag_C1_loc,nflag_C2_loc,nflag_tot,info
-  integer::nflag_C1_tot,nflag_C2_tot
+  integer::nflag_loc,nflag_cq_loc,nflag_cs_loc,nflag_tot,info
+  integer::nflag_cq_tot,nflag_cs_tot
+  integer::nx_loc
   real(dp)::sqrho_c,sqrho_L,sqrho_R,S_c,S_L,S_R
-  real(dp)::C1_dim,C2_dim,C1_max,C2_max
-  real(dp)::re_c,im_c,re_L,im_L,re_R,im_R
+  real(dp)::lap_sq,d2S,d2S_min,CQ
+  real(dp)::dx,scale,dx_loc,dt,dm_share,rho_gate,cs_thresh,rho_c
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
@@ -361,9 +381,26 @@ subroutine fdm_madelung_refine_flag(ilevel)
   if(hbar_code <= 0.0d0) return
   if(ilevel >= fdm_first_wave_level) return
 
-  nflag_loc = 0
-  nflag_C1_loc = 0
-  nflag_C2_loc = 0
+  ! Geometry and time step
+  nx_loc = icoarse_max - icoarse_min + 1
+  scale  = boxlen / dble(nx_loc)
+  dx     = 0.5d0**ilevel
+  dx_loc = dx * scale
+  dt     = dtnew(ilevel)
+
+  ! Mean fluid density: |psi|^2 averages the DM share when gas is present
+  dm_share = 1.0d0
+  if(hydro .and. omega_m > 0.0d0) dm_share = 1.0d0 - omega_b/omega_m
+  rho_gate = 0.1d0 * dm_share
+
+  ! Time-to-caustic threshold (v = grad S, look-ahead fdm_nla steps)
+  if(dt > 0.0d0) then
+     cs_thresh = -dx_loc*dx_loc / (fdm_nla * dt)
+  else
+     cs_thresh = -huge(1.0d0)
+  end if
+
+  nflag_loc = 0; nflag_cq_loc = 0; nflag_cs_loc = 0
 
   ! Fluid levels store (rho, S) directly: psi_re=rho, psi_im=S (unwrapped)
   do ind=1,twotondim
@@ -371,12 +408,13 @@ subroutine fdm_madelung_refine_flag(ilevel)
      igrid = headl(myid, ilevel)
      do while(igrid > 0)
         icell = igrid + iskip
-        sqrho_c = sqrt(max(psi_re(icell),0.0d0))
+        rho_c = max(psi_re(icell),0.0d0)
+        sqrho_c = sqrt(rho_c)
 
-        if(sqrho_c > 1.0d-15) then
-           C1_max = 0.0d0
-           C2_max = 0.0d0
+        if(sqrho_c > 1.0d-15 .and. rho_c > rho_gate) then
            S_c = psi_im(icell)
+           lap_sq  = 0.0d0
+           d2S_min = 0.0d0
 
            do idim=1,ndim
               call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icL)
@@ -393,18 +431,20 @@ subroutine fdm_madelung_refine_flag(ilevel)
                  sqrho_R = sqrho_c; S_R = S_c
               end if
 
-              C1_dim = abs(sqrho_R - 2.0d0*sqrho_c + sqrho_L) / sqrho_c
-              C2_dim = abs(S_R - 2.0d0*S_c + S_L) / hbar_code
-
-              C1_max = max(C1_max, C1_dim)
-              C2_max = max(C2_max, C2_dim)
+              ! isotropic 7-point Laplacian of sqrt(rho)
+              lap_sq = lap_sq + (sqrho_L - sqrho_c) + (sqrho_R - sqrho_c)
+              ! per-axis second difference of the action (converging = negative)
+              d2S = S_L + S_R - 2.0d0*S_c
+              if(d2S < d2S_min) d2S_min = d2S
            end do
 
-           if(C1_max >= fdm_hjm_C1 .or. C2_max >= fdm_hjm_C2) then
+           CQ = abs(lap_sq) / sqrho_c
+
+           if(CQ >= fdm_hjm_C1 .or. d2S_min < cs_thresh) then
               flag1(icell) = 1
               nflag_loc = nflag_loc + 1
-              if(C1_max >= fdm_hjm_C1) nflag_C1_loc = nflag_C1_loc + 1
-              if(C2_max >= fdm_hjm_C2) nflag_C2_loc = nflag_C2_loc + 1
+              if(CQ >= fdm_hjm_C1)      nflag_cq_loc = nflag_cq_loc + 1
+              if(d2S_min < cs_thresh)   nflag_cs_loc = nflag_cs_loc + 1
            end if
         end if
         igrid = next(igrid)
@@ -413,16 +453,16 @@ subroutine fdm_madelung_refine_flag(ilevel)
 
 #ifndef WITHOUTMPI
   call MPI_ALLREDUCE(nflag_loc,nflag_tot,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
-  call MPI_ALLREDUCE(nflag_C1_loc,nflag_C1_tot,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
-  call MPI_ALLREDUCE(nflag_C2_loc,nflag_C2_tot,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(nflag_cq_loc,nflag_cq_tot,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(nflag_cs_loc,nflag_cs_tot,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
 #else
   nflag_tot = nflag_loc
-  nflag_C1_tot = nflag_C1_loc
-  nflag_C2_tot = nflag_C2_loc
+  nflag_cq_tot = nflag_cq_loc
+  nflag_cs_tot = nflag_cs_loc
 #endif
   if(myid==1 .and. nstep_coarse_old < 80) then
-     write(*,'(" MAD_FLAG lv=",I2," total=",I10," C1=",I10," C2=",I10)') &
-          ilevel, nflag_tot, nflag_C1_tot, nflag_C2_tot
+     write(*,'(" MAD_FLAG lv=",I2," total=",I10," CQ=",I10," caustic=",I10)') &
+          ilevel, nflag_tot, nflag_cq_tot, nflag_cs_tot
   end if
 
 end subroutine fdm_madelung_refine_flag
