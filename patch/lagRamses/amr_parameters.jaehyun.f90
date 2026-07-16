@@ -370,6 +370,12 @@ module amr_parameters
   real(dp)::fdm_hjm_C1=0.03d0         ! Fluid->wave refine: C_Q amplitude-curvature threshold
   real(dp)::fdm_hjm_C2=1.0d0          ! (unused; former phase-curvature threshold, kept for compat)
   real(dp)::fdm_nla=10.0d0            ! Fluid->wave refine: time-to-caustic look-ahead (steps)
+  logical::fdm_match_aout=.false.     ! Shrink dt so aexp lands on aout instead of
+                                      ! overshooting it. Runs whose timesteps differ
+                                      ! (wave dt ~ dx^2 vs fluid dt ~ dx) otherwise dump
+                                      ! at different redshifts and cannot be compared
+                                      ! epoch by epoch. Off by default: it costs a
+                                      ! shortened step before every output.
   real(dp)::fdm_refine_rho_min=8.0d0  ! de Broglie refinement density floor (units of mean)
 
   ! MOND (Modified Newtonian Dynamics) parameters

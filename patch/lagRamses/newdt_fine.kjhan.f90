@@ -31,7 +31,7 @@ subroutine newdt_fine(ilevel)
 !$omp threadprivate(/openmpthreads/)
 #endif
 
-  real(kind=8)::dt_loc,dt_all,ekin_loc,ekin_all,dt_acc_min
+  real(kind=8)::dt_loc,dt_all,ekin_loc,ekin_all,dt_acc_min,dt_to_out
   real(kind=8)::idt_loc,iekin_loc
   real(kind=8)::jdt_loc,jekin_loc
   real(dp)::tff,fourpi,threepi2
@@ -68,6 +68,18 @@ subroutine newdt_fine(ilevel)
   end if
   if(cosmo)then
      dtnew(ilevel)=MIN(dtnew(ilevel),0.1/hexp)
+  end if
+  ! Land on the next output epoch rather than stepping past it. hexp is
+  ! dln(a)/dt, as the 0.1/hexp cap above implies, so the time left to reach
+  ! aout(iout) is log(aout/aexp)/hexp. Overshoot it by a hair, otherwise the
+  ! aexp>=aout(iout) test in amr_step may miss and the next full step sails
+  ! past. Only useful when two runs with different timesteps must be compared
+  ! at identical redshifts, so it is off unless asked for.
+  if(cosmo .and. use_fdm .and. fdm_match_aout .and. iout<=noutput)then
+     if(aout(iout)>aexp .and. hexp>0.0d0)then
+        dt_to_out = log(aout(iout)*(1.0d0+1.0d-8)/aexp)/hexp
+        if(dt_to_out>0.0d0) dtnew(ilevel)=MIN(dtnew(ilevel),dt_to_out)
+     end if
   end if
   ! HJM CFL debug: after gravity+cosmo constraints
   if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin &

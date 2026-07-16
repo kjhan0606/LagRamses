@@ -79,7 +79,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & adm_cross_section,adm_mol,adm_fH2
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
        & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min, &
-       & fdm_nla
+       & fdm_nla,fdm_match_aout
   namelist/pbh_params/pbh_table_file,pbh_fraction,pbh_boost, &
        & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
