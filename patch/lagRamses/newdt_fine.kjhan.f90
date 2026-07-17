@@ -112,6 +112,11 @@ subroutine newdt_fine(ilevel)
                 / (hbar_code * dtheta_max)
            dtnew(ilevel) = MIN(dtnew(ilevel), dt_adv)
         end if
+        if(fdm_hjm_qp) then
+           ! QP is a Schrodinger diffusion term: bound by the Nyquist quantum CFL (dt_nyq form)
+           dt_qp = fdm_courant / (hbar_code * k2_nyq)
+           dtnew(ilevel) = MIN(dtnew(ilevel), dt_qp)
+        end if
         if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin) then
            write(*,'(" HJM_CFL[fdm]: dtheta=",1PE10.3," dt_adv=",1PE10.3,&
                 &" dt=",1PE10.3)') dtheta_max, dt_adv, dtnew(ilevel)

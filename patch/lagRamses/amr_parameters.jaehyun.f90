@@ -377,6 +377,8 @@ module amr_parameters
                                       ! epoch by epoch. Off by default: it costs a
                                       ! shortened step before every output.
   real(dp)::fdm_refine_rho_min=8.0d0  ! de Broglie refinement density floor (units of mean)
+  logical ::fdm_hjm_qp=.false.        ! Enable quantum pressure on HJM fluid levels (ilevel<first_wave_level)
+  real(dp)::fdm_qp_c1max=0.5d0        ! QP validity gate: zero QP where amplitude curvature C1 exceeds this
 
   ! MOND (Modified Newtonian Dynamics) parameters
   logical ::use_mond=.false.             ! Enable QUMOND acceleration correction

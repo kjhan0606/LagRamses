@@ -79,7 +79,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & adm_cross_section,adm_mol,adm_fH2
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
        & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min, &
-       & fdm_nla,fdm_match_aout
+       & fdm_nla,fdm_match_aout,fdm_hjm_qp,fdm_qp_c1max
   namelist/pbh_params/pbh_table_file,pbh_fraction,pbh_boost, &
        & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
@@ -598,6 +598,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
            write(*,'(A,ES10.3)')  '     C1 thresh  =', fdm_hjm_C1
            write(*,'(A,ES10.3)')  '     C2 thresh  =', fdm_hjm_C2
            write(*,'(A,ES10.3)')  '     rho_min(dB)=', fdm_refine_rho_min
+           write(*,'(A,L1)')      '     qp on fluid=', fdm_hjm_qp
+           if(fdm_hjm_qp) write(*,'(A,ES10.3)')  '     qp C1 gate =', fdm_qp_c1max
         end if
      end if
   end if

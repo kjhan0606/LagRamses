@@ -25,6 +25,8 @@ subroutine fdm_hjm_step(ilevel, dt_loc)
   integer::igrid,ind,iskip,icell
   real(dp)::dx,scale,dx_loc
   integer::nx_loc
+  integer::idim,icL,icR
+  real(dp)::sqrho_c,sqrho_L,sqrho_R,d2,sum_d2,c1_cell,qp
 
   dx = 0.5d0**ilevel
   nx_loc = icoarse_max - icoarse_min + 1
@@ -50,7 +52,11 @@ subroutine fdm_hjm_step(ilevel, dt_loc)
 
   call fdm_hjm_rk(ilevel, dx_loc, dt_loc)
 
-  ! --- Apply potential kick: S -> S - Phi*dt ---
+  ! --- Apply source kick to S: dS/dt += -Phi + QP ---
+  ! Same operator-split stage as the gravitational source. When fdm_hjm_qp is
+  ! on, we also add the Madelung quantum pressure QP = +(hbar^2/2) lap(sqrt rho)/sqrt rho.
+  ! Sync rho ghosts first so the QP Laplacian reads post-RK neighbour amplitudes.
+  if(fdm_hjm_qp) call make_virtual_fine_dp(psi_re(1), ilevel)
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
      igrid = headl(myid, ilevel)
@@ -58,6 +64,34 @@ subroutine fdm_hjm_step(ilevel, dt_loc)
         icell = igrid + iskip
         if(son(icell) == 0) then
            psi_im(icell) = psi_im(icell) - phi(icell) * dt_loc
+           if(fdm_hjm_qp) then
+              sqrho_c = sqrt(max(psi_re(icell), 1.0d-8))
+              sum_d2  = 0.0d0
+              c1_cell = 0.0d0
+              do idim=1,ndim
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icL)
+                 call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icR)
+                 ! son-guard Neumann mirror: missing or refined neighbour -> centre value
+                 if(icL > 0 .and. son(icL) == 0) then
+                    sqrho_L = sqrt(max(psi_re(icL), 1.0d-8))
+                 else
+                    sqrho_L = sqrho_c
+                 end if
+                 if(icR > 0 .and. son(icR) == 0) then
+                    sqrho_R = sqrt(max(psi_re(icR), 1.0d-8))
+                 else
+                    sqrho_R = sqrho_c
+                 end if
+                 d2      = sqrho_R - 2.0d0*sqrho_c + sqrho_L
+                 sum_d2  = sum_d2 + d2
+                 c1_cell = max(c1_cell, abs(d2)/sqrho_c)
+              end do
+              ! validity gate: caustic cells (C1>max) belong to the wave solver
+              if(c1_cell <= fdm_qp_c1max) then
+                 qp = 0.5d0 * hbar_code**2 * sum_d2 / (dx_loc**2 * sqrho_c)
+                 psi_im(icell) = psi_im(icell) + qp * dt_loc
+              end if
+           end if
         end if
         igrid = next(igrid)
      end do
