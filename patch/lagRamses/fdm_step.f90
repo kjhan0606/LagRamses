@@ -1259,7 +1259,8 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   real(dp)::dx,scale,dx_loc,inv2dx,rho2,sqrho_c,sqrho_L,sqrho_R
   real(dp)::dre,dim,dth,dth2,dth2_loc,dth2_glob
   real(dp)::c1_dim,c1_cell
-  logical::is_fluid
+  real(dp)::S_L,S_R,re_L,re_R,im_L,im_R
+  logical::is_fluid,ok_p,ok_m
   integer::n_total,n_leaf,n_lowrho,n_c1skip,n_valid
   integer::n_total_g,n_leaf_g,n_lowrho_g,n_c1skip_g,n_valid_g
   integer,parameter::NBINS_C1=8
@@ -1302,22 +1303,46 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
               do idim=1,ndim
                  call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icp)
                  call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icm)
-                 if(icp > 0 .and. icm > 0) then
+                 ! A refined neighbour is not a co-level cell. Its stored value
+                 ! is whatever the restriction left there, and on a fluid level
+                 ! that S was rebased onto the parent's own earlier value, which
+                 ! keeps it continuous in time but not with the neighbouring
+                 ! leaf's HJM action. Differencing across that seam manufactures
+                 ! a huge grad(S), which collapses dt_adv through dtheta_max.
+                 ! Mirror the centre instead, exactly as the HJM solver does.
+                 ok_p = .false.; ok_m = .false.
+                 if(icp > 0) ok_p = (son(icp) == 0)
+                 if(icm > 0) ok_m = (son(icm) == 0)
+                 if(ok_p .or. ok_m) then
                     if(is_fluid) then
-                       sqrho_R = sqrt(max(psi_re(icp),0.0d0))
-                       sqrho_L = sqrt(max(psi_re(icm),0.0d0))
+                       sqrho_R = sqrho_c; sqrho_L = sqrho_c
+                       S_R = psi_im(icell); S_L = psi_im(icell)
+                       if(ok_p)then
+                          sqrho_R = sqrt(max(psi_re(icp),0.0d0)); S_R = psi_im(icp)
+                       end if
+                       if(ok_m)then
+                          sqrho_L = sqrt(max(psi_re(icm),0.0d0)); S_L = psi_im(icm)
+                       end if
                        c1_dim = abs(sqrho_R - 2.0d0*sqrho_c + sqrho_L) / sqrho_c
                        c1_cell = max(c1_cell, c1_dim)
                        ! dtheta = grad(S)/hbar (S unwrapped)
-                       dth = (psi_im(icp) - psi_im(icm)) * inv2dx / hbar_code
+                       dth = (S_R - S_L) * inv2dx / hbar_code
                        dth2 = dth2 + dth*dth
                     else
-                       sqrho_R = sqrt(psi_re(icp)**2 + psi_im(icp)**2)
-                       sqrho_L = sqrt(psi_re(icm)**2 + psi_im(icm)**2)
+                       re_R = psi_re(icell); im_R = psi_im(icell)
+                       re_L = psi_re(icell); im_L = psi_im(icell)
+                       if(ok_p)then
+                          re_R = psi_re(icp); im_R = psi_im(icp)
+                       end if
+                       if(ok_m)then
+                          re_L = psi_re(icm); im_L = psi_im(icm)
+                       end if
+                       sqrho_R = sqrt(re_R**2 + im_R**2)
+                       sqrho_L = sqrt(re_L**2 + im_L**2)
                        c1_dim = abs(sqrho_R - 2.0d0*sqrho_c + sqrho_L) / sqrho_c
                        c1_cell = max(c1_cell, c1_dim)
-                       dre = (psi_re(icp) - psi_re(icm)) * inv2dx
-                       dim = (psi_im(icp) - psi_im(icm)) * inv2dx
+                       dre = (re_R - re_L) * inv2dx
+                       dim = (im_R - im_L) * inv2dx
                        dth = (psi_re(icell)*dim - psi_im(icell)*dre) / rho2
                        dth2 = dth2 + dth*dth
                     end if
