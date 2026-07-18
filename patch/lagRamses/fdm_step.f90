@@ -23,6 +23,7 @@ subroutine fdm_step(ilevel)
 
   real(dp)::dt_loc,dt_cfl,dt_sub
   real(dp)::yw0,yw1
+  real(dp)::dtheta_max,dx_hjm
   integer::nsub_hjm,isub_hjm
 
   if(.not.use_fdm) return
@@ -32,8 +33,18 @@ subroutine fdm_step(ilevel)
 
   ! ---- Hybrid HJM: fluid solver on coarse levels ----
   if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
-     ! CFL guard: newly refined levels inherit parent dt which may violate CFL
-     call fdm_hjm_local_cfl(ilevel, dt_cfl)
+     ! CFL guard: newly refined levels inherit parent dt which may violate CFL.
+     ! The advective bound uses the seam-mirror + C1-filtered phase gradient
+     ! (fdm_vmax_level), the same measure newdt_fine applies to dtnew. The older
+     ! fdm_hjm_local_cfl differenced the action across the fluid-wave seam and
+     ! manufactured a spurious grad(S), which force-subcycled the whole base
+     ! level about ten times without cause.
+     call fdm_vmax_level(ilevel, dtheta_max)
+     dt_cfl = 1.0d30
+     if(dtheta_max > 0.0d0) then
+        dx_hjm = 0.5d0**ilevel * boxlen / dble(icoarse_max - icoarse_min + 1)
+        dt_cfl = fdm_courant * dx_hjm / (hbar_code * dtheta_max)
+     end if
      nsub_hjm = 1
      if(dt_cfl > 0.0d0 .and. dt_loc > dt_cfl) then
         nsub_hjm = min(ceiling(dt_loc / dt_cfl), 10000)
