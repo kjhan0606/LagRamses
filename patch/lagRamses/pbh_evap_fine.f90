@@ -34,7 +34,7 @@ subroutine pbh_evap_fine(ilevel)
 #endif
   integer::ilevel
   integer::ichunk,ncache,info,nthr,nch,k,i,j,e,ntot
-  real(dp)::dt_phys,ratio,dQ,dQcr,wbeg,efac,efaccr,conv,dm_share
+  real(dp)::dt_phys,ratio,dQ,dQcr,wbeg,efac,efaccr,conv
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp)::einj_all,ecr_all,ecr_mesh,ecr_mesh_all
   integer(kind=8)::nfall_all
@@ -64,13 +64,14 @@ subroutine pbh_evap_fine(ilevel)
   call pbh_step(ilevel,nlevelmax,aexp,dt_phys,ratio,dQ,wbeg,dQcr)
   do_heat=hydro .and. trim(pbh_energy_sink)=='local_heat' .and. dQ>0.0d0
   do_cr=hydro .and. pbh_cr_ivar>ndim+2 .and. pbh_cr_ivar<=nvar .and. dQcr>0.0d0
-  ! f_PBH is the PBH fraction of DARK MATTER, so the injected energy must
-  ! track the dark-matter density, not the total matter density. The DM-share
-  ! factor (1 - Omega_b/Omega_m) brings the deposit from Omega_m/Omega_b down
-  ! to Omega_dm/Omega_b (uniform-box thermal history matched to <2%).
-  dm_share=1.0d0-omega_b/omega_m
-  efac=pbh_fraction*dQ*dm_share/(wbeg*scale_v**2)   ! per unit current code mass
-  efaccr=pbh_fraction*dQcr*dm_share/(wbeg*scale_v**2)
+  ! f_PBH is the PBH fraction of DARK MATTER. In hydro cosmological runs the
+  ! grafic IC already normalises the particle mass to the dark-matter share
+  ! (init_part: mp = 0.5**(3*ilevel)*(1-omega_b/omega_m)), so mp IS the DM
+  ! mass and f_PBH*mp*dQ is the PBH energy with no further share factor.
+  ! Adding (1-Omega_b/Omega_m) here double-counts the share and under-heats
+  ! by 15 percent (verified against f*M_dm*dQtilde on the P1 uniform box).
+  efac=pbh_fraction*dQ/(wbeg*scale_v**2)   ! per unit current code mass
+  efaccr=pbh_fraction*dQcr/(wbeg*scale_v**2)
   conv=scale_v**2*scale_d*scale_l**3        ! code energy -> erg
 
   ! thread-private remote-deposit buffers (one per possible thread)
