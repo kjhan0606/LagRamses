@@ -1002,14 +1002,15 @@ subroutine compute_fifth_force(ilevel, factor)
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc
   integer::nx_loc
-  real(dp)::grad_u
+  real(dp)::grad_u,u_cen
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
 
+  ! NOTE: no early return on ncache==0 — the final make_virtual_fine_dp
+  ! must be entered by every rank (matched communication)
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   dx=0.5D0**ilevel
   nx_loc=(icoarse_max-icoarse_min+1)
@@ -1027,7 +1028,7 @@ subroutine compute_fifth_force(ilevel, factor)
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
-!$omp&  ind_nb_left,ind_nb_right,grad_u) schedule(dynamic)
+!$omp&  ind_nb_left,ind_nb_right,grad_u,u_cen) schedule(dynamic)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -1052,27 +1053,593 @@ subroutine compute_fifth_force(ilevel, factor)
         end do
 
         do i=1,ngrid
+           u_cen = scalar_gr(ind_cell_w(i))
            do idim=1,ndim
               ig_left =ggg(idim,1,ind)
               ig_right=ggg(idim,2,ind)
-
-              ! Skip at coarse-fine boundaries
-              if(igridn_w(i,ig_left)==0 .or. igridn_w(i,ig_right)==0) cycle
-
               ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
 
-              ind_nb_left =igridn_w(i,ig_left )+ih_left
-              ind_nb_right=igridn_w(i,ig_right)+ih_right
-
-              grad_u = (scalar_gr(ind_nb_right) - scalar_gr(ind_nb_left)) / (2d0*dx_loc)
+              ! One-sided differences at coarse-fine boundaries
+              ! (previously the F5 component was silently dropped)
+              if(igridn_w(i,ig_left)==0 .and. igridn_w(i,ig_right)==0) cycle
+              if(igridn_w(i,ig_left)==0) then
+                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) - u_cen) / dx_loc
+              else if(igridn_w(i,ig_right)==0) then
+                 grad_u = (u_cen - scalar_gr(igridn_w(i,ig_left)+ih_left)) / dx_loc
+              else
+                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) &
+                      &  - scalar_gr(igridn_w(i,ig_left )+ih_left)) / (2d0*dx_loc)
+              end if
               f(ind_cell_w(i),idim) = f(ind_cell_w(i),idim) + factor * grad_u
            end do
         end do
      end do
   end do
 
+  ! Update MPI virtual boundaries: force_fine synced f BEFORE the
+  ! fifth force was added; without this, reception cells keep the
+  ! Newtonian-only force and boundary particles miss F5
+  do idim=1,ndim
+     call make_virtual_fine_dp(f(1,idim),ilevel)
+  end do
+
 end subroutine compute_fifth_force
+
+#ifdef USE_FFTW
+!#########################################################
+!  FFT ACCELERATION FOR THE SCALAR SOLVERS (domain level)
+!
+!  Plain level GS cannot converge wavelengths >> dx in
+!  n_iter sweeps. On the fully refined periodic domain
+!  level we solve the (linearized) equation spectrally:
+!    - f(R)/symmetron/dilaton: Newton step
+!        (lap - m2bar) du = -residual
+!      with m2bar the level-averaged Jacobian mass term
+!    - nDGP/galileon: operator splitting: solve the local
+!      cell quadratic for L = lap(phi) (branch with L->S
+!      as coeff->0; clamped at the extremum if the
+!      discriminant is negative), then invert lap du = L - lap(phi)
+!  The rhs is staged in scalar_gr_old (otherwise dead
+!  between solves); the correction is ADDED to scalar_gr.
+!  Discrete 7-point eigenvalues match the GS stencil.
+!  Strategy: gather the full level on every rank
+!  (MPI_ALLREDUCE) + serial FFTW: gated at <= 256^3.
+!#########################################################
+logical function level_fft_ok(ilevel)
+  use amr_commons
+  implicit none
+  integer,intent(in)::ilevel
+  integer(kind=8)::ntot
+  level_fft_ok = .false.
+  if(ilevel /= levelmin) return
+  ntot = int(nx,8)*int(ny,8)*int(nz,8)*(int(2,8)**(3*ilevel))
+  if(ntot > 16777216_8) return   ! > 256^3: gather-all too heavy
+  level_fft_ok = .true.
+end function level_fft_ok
+
+!=========================================================
+! level_fft_helmholtz: solve (lap - m2) x = b on the fully
+! refined periodic level; b read from scalar_gr_old, x is
+! ADDED into scalar_gr.
+!=========================================================
+subroutine level_fft_helmholtz(ilevel, m2)
+  use amr_commons
+  use poisson_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::m2
+
+  integer::fft_Nx,fft_Ny,fft_Nz,igrid,igrid_amr,ind,iskip,icell,info
+  integer::Kx,Ky,Kz,ix,iy,iz,i,j,k,ngrid_loc,nx_loc
+  integer(kind=8)::plan_f,plan_b,ntot
+  real(dp)::dx_loc,scale,kd2,denom,twopi,cx,cy,cz
+  real(dp),allocatable::b3(:,:,:),bl(:,:,:)
+  complex(kind=8),allocatable::bk(:,:,:)
+  integer,parameter::FFTW_EST=64
+
+  fft_Nx = nx*2**ilevel; fft_Ny = ny*2**ilevel; fft_Nz = nz*2**ilevel
+  ntot = int(fft_Nx,8)*int(fft_Ny,8)*int(fft_Nz,8)
+  nx_loc=(icoarse_max-icoarse_min+1)
+  scale=boxlen/dble(nx_loc)
+  dx_loc=0.5d0**ilevel*scale
+  twopi=2d0*acos(-1d0)
+
+  ! Gather the staged rhs to a full 3D array on every rank
+  allocate(bl(fft_Nx,fft_Ny,fft_Nz)); bl=0d0
+  ngrid_loc=active(ilevel)%ngrid
+  do igrid=1,ngrid_loc
+     igrid_amr=active(ilevel)%igrid(igrid)
+     Kx=nint(xg(igrid_amr,1)*dble(fft_Nx))
+     Ky=nint(xg(igrid_amr,2)*dble(fft_Ny))
+     Kz=nint(xg(igrid_amr,3)*dble(fft_Nz))
+     do ind=1,twotondim
+        ix=modulo(Kx-1+mod(ind-1,2),  fft_Nx)
+        iy=modulo(Ky-1+mod((ind-1)/2,2), fft_Ny)
+        iz=modulo(Kz-1+(ind-1)/4,     fft_Nz)
+        iskip=ncoarse+(ind-1)*ngridmax
+        icell=iskip+igrid_amr
+        bl(ix+1,iy+1,iz+1)=scalar_gr_old(icell)
+     end do
+  end do
+  allocate(b3(fft_Nx,fft_Ny,fft_Nz))
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(bl,b3,int(ntot),MPI_DOUBLE_PRECISION,MPI_SUM, &
+       & MPI_COMM_WORLD,info)
+#else
+  b3=bl
+#endif
+  deallocate(bl)
+
+  ! Spectral solve with the discrete 7-point eigenvalues
+  allocate(bk(fft_Nx/2+1,fft_Ny,fft_Nz))
+  call dfftw_plan_dft_r2c_3d(plan_f,fft_Nx,fft_Ny,fft_Nz,b3,bk,FFTW_EST)
+  call dfftw_execute_dft_r2c(plan_f,b3,bk)
+  call dfftw_destroy_plan(plan_f)
+!$omp parallel do private(i,j,k,cx,cy,cz,kd2,denom) collapse(2)
+  do k=1,fft_Nz
+     do j=1,fft_Ny
+        cy=(2d0-2d0*cos(twopi*dble(j-1)/dble(fft_Ny)))/dx_loc**2
+        cz=(2d0-2d0*cos(twopi*dble(k-1)/dble(fft_Nz)))/dx_loc**2
+        do i=1,fft_Nx/2+1
+           cx=(2d0-2d0*cos(twopi*dble(i-1)/dble(fft_Nx)))/dx_loc**2
+           kd2=cx+cy+cz
+           denom=-(kd2+m2)
+           if(abs(denom) > 1d-30) then
+              bk(i,j,k)=bk(i,j,k)/denom/dble(ntot)
+           else
+              bk(i,j,k)=(0d0,0d0)   ! k=0 with m2=0: gauge mode
+           end if
+        end do
+     end do
+  end do
+  call dfftw_plan_dft_c2r_3d(plan_b,fft_Nx,fft_Ny,fft_Nz,bk,b3,FFTW_EST)
+  call dfftw_execute_dft_c2r(plan_b,bk,b3)
+  call dfftw_destroy_plan(plan_b)
+  deallocate(bk)
+
+  ! Add the correction to the local cells
+  do igrid=1,ngrid_loc
+     igrid_amr=active(ilevel)%igrid(igrid)
+     Kx=nint(xg(igrid_amr,1)*dble(fft_Nx))
+     Ky=nint(xg(igrid_amr,2)*dble(fft_Ny))
+     Kz=nint(xg(igrid_amr,3)*dble(fft_Nz))
+     do ind=1,twotondim
+        ix=modulo(Kx-1+mod(ind-1,2),  fft_Nx)
+        iy=modulo(Ky-1+mod((ind-1)/2,2), fft_Ny)
+        iz=modulo(Kz-1+(ind-1)/4,     fft_Nz)
+        iskip=ncoarse+(ind-1)*ngridmax
+        icell=iskip+igrid_amr
+        scalar_gr(icell)=scalar_gr(icell)+b3(ix+1,iy+1,iz+1)
+     end do
+  end do
+  deallocate(b3)
+
+end subroutine level_fft_helmholtz
+
+!=========================================================
+! fR_build_fft_rhs: stage b = -(lap u - S(u)) in scalar_gr_old
+! and return the level-mean Newton mass term m2bar
+!=========================================================
+subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
+  use amr_commons
+  use poisson_commons
+  use morton_hash
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::R_bar, fR_bar
+  real(dp),intent(out)::m2bar
+
+  integer::igrid,ngrid,ncache,i,ind,iskip,idim,info
+  integer::ig_left,ig_right,ih_left,ih_right
+  real(dp)::dx,scale,dx_loc,dx2_inv,nx_frac
+  integer::nx_loc,np1
+  real(dp)::u_c,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du
+  real(dp)::a2_over_3,rho_coeff,boxratio_sq,R_bar0
+  real(dp),dimension(2)::acc_loc,acc_glob
+  integer,dimension(1:3,1:2,1:8)::ggg,hhh
+  integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
+  integer,dimension(1:nvector,0:twondim)::igridn_w
+
+  ncache=active(ilevel)%ngrid
+  dx=0.5D0**ilevel
+  nx_loc=(icoarse_max-icoarse_min+1)
+  scale=boxlen/dble(nx_loc)
+  dx_loc=dx*scale
+  dx2_inv=1d0/dx_loc**2
+
+  np1 = fR_n + 1
+  boxratio_sq = (boxlen_ini / 2997.92458d0)**2
+  a2_over_3 = aexp**2 * boxratio_sq / 3d0
+  R_bar0 = 3d0 * (omega_m + 4d0 * omega_l)
+  rho_coeff = omega_m * boxratio_sq / aexp
+
+  ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(2,1,1:8)=(/3,3,0,0,3,3,0,0/); hhh(2,1,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(2,2,1:8)=(/0,0,4,4,0,0,4,4/); hhh(2,2,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
+  ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
+
+  acc_loc=0d0
+
+!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right,ih_left,ih_right, &
+!$omp&  u_c,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du) &
+!$omp& reduction(+:acc_loc) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     ngrid=MIN(nvector,ncache-igrid+1)
+     do i=1,ngrid
+        ind_grid_w(i)=active(ilevel)%igrid(igrid+i-1)
+     end do
+     do i=1,ngrid
+        igridn_w(i,0)=ind_grid_w(i)
+     end do
+     do idim=1,ndim
+        do i=1,ngrid
+           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
+           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+        end do
+     end do
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        do i=1,ngrid
+           ind_cell_w(i)=iskip+ind_grid_w(i)
+        end do
+        do i=1,ngrid
+           u_c = scalar_gr(ind_cell_w(i))
+           lapl = 0d0
+           do idim=1,ndim
+              ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
+              ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
+              ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
+              u_nb_l = u_c; u_nb_r = u_c
+              if(igridn_w(i,ig_left ) > 0) u_nb_l = scalar_gr(igridn_w(i,ig_left )+ih_left)
+              if(igridn_w(i,ig_right) > 0) u_nb_r = scalar_gr(igridn_w(i,ig_right)+ih_right)
+              lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
+           end do
+           if(abs(u_c) > 1d-30*abs(fR0)) then
+              R_of_u = R_bar0 * (abs(fR0)/abs(u_c))**(1d0/dble(np1))
+              dR_du = -R_of_u / (dble(np1) * u_c)
+           else
+              R_of_u = R_bar
+              dR_du = 0d0
+           end if
+           source = a2_over_3*(R_of_u - R_bar) &
+                & - rho_coeff*(rho(ind_cell_w(i)) - rho_tot)
+           scalar_gr_old(ind_cell_w(i)) = -(lapl - source)
+           acc_loc(1) = acc_loc(1) + a2_over_3*dR_du
+           acc_loc(2) = acc_loc(2) + 1d0
+        end do
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(acc_loc,acc_glob,2,MPI_DOUBLE_PRECISION,MPI_SUM, &
+       & MPI_COMM_WORLD,info)
+#else
+  acc_glob=acc_loc
+#endif
+  m2bar = acc_glob(1)/max(acc_glob(2),1d0)
+  m2bar = max(m2bar, 0d0)
+
+end subroutine fR_build_fft_rhs
+
+!=========================================================
+! sb_build_fft_rhs: symmetron/dilaton Newton rhs (shared);
+! b = -(lap u - mass*u - cubic*u^3) in scalar_gr_old,
+! m2bar = level-mean of (mass + 3*cubic*u^2), clipped >= 0
+!=========================================================
+subroutine sb_build_fft_rhs(ilevel, assb_in, L_in, m2bar)
+  use amr_commons
+  use poisson_commons
+  use morton_hash
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::assb_in, L_in
+  real(dp),intent(out)::m2bar
+
+  integer::igrid,ngrid,ncache,i,ind,iskip,idim,info
+  integer::ig_left,ig_right,ih_left,ih_right
+  real(dp)::dx,scale,dx_loc,dx2_inv
+  integer::nx_loc
+  real(dp)::u_c,u_nb_l,u_nb_r,lapl,mass_term,cubic_coeff,a2_over_2L2
+  real(dp),dimension(2)::acc_loc,acc_glob
+  integer,dimension(1:3,1:2,1:8)::ggg,hhh
+  integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
+  integer,dimension(1:nvector,0:twondim)::igridn_w
+
+  ncache=active(ilevel)%ngrid
+  dx=0.5D0**ilevel
+  nx_loc=(icoarse_max-icoarse_min+1)
+  scale=boxlen/dble(nx_loc)
+  dx_loc=dx*scale
+  dx2_inv=1d0/dx_loc**2
+  a2_over_2L2 = aexp**2 / (2d0*(L_in/boxlen_ini)**2)
+  cubic_coeff = a2_over_2L2
+
+  ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(2,1,1:8)=(/3,3,0,0,3,3,0,0/); hhh(2,1,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(2,2,1:8)=(/0,0,4,4,0,0,4,4/); hhh(2,2,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
+  ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
+
+  acc_loc=0d0
+
+!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right,ih_left,ih_right, &
+!$omp&  u_c,u_nb_l,u_nb_r,lapl,mass_term) &
+!$omp& reduction(+:acc_loc) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     ngrid=MIN(nvector,ncache-igrid+1)
+     do i=1,ngrid
+        ind_grid_w(i)=active(ilevel)%igrid(igrid+i-1)
+     end do
+     do i=1,ngrid
+        igridn_w(i,0)=ind_grid_w(i)
+     end do
+     do idim=1,ndim
+        do i=1,ngrid
+           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
+           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+        end do
+     end do
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        do i=1,ngrid
+           ind_cell_w(i)=iskip+ind_grid_w(i)
+        end do
+        do i=1,ngrid
+           u_c = scalar_gr(ind_cell_w(i))
+           lapl = 0d0
+           do idim=1,ndim
+              ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
+              ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
+              ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
+              u_nb_l = u_c; u_nb_r = u_c
+              if(igridn_w(i,ig_left ) > 0) u_nb_l = scalar_gr(igridn_w(i,ig_left )+ih_left)
+              if(igridn_w(i,ig_right) > 0) u_nb_r = scalar_gr(igridn_w(i,ig_right)+ih_right)
+              lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
+           end do
+           mass_term = a2_over_2L2 * (rho(ind_cell_w(i))*(assb_in/aexp)**3 - 1d0)
+           scalar_gr_old(ind_cell_w(i)) = &
+                & -(lapl - mass_term*u_c - cubic_coeff*u_c**3)
+           acc_loc(1) = acc_loc(1) + mass_term + 3d0*cubic_coeff*u_c**2
+           acc_loc(2) = acc_loc(2) + 1d0
+        end do
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(acc_loc,acc_glob,2,MPI_DOUBLE_PRECISION,MPI_SUM, &
+       & MPI_COMM_WORLD,info)
+#else
+  acc_glob=acc_loc
+#endif
+  m2bar = max(acc_glob(1)/max(acc_glob(2),1d0), 0d0)
+
+end subroutine sb_build_fft_rhs
+
+!=========================================================
+! dil_build_fft_rhs: Brax+12 dilaton Newton rhs;
+! b = -(lap chi - S(chi)) in scalar_gr_old,
+! m2bar = level-mean of dS/dchi (>0)
+!=========================================================
+subroutine dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
+  use amr_commons
+  use poisson_commons
+  use morton_hash
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::A2_d,s_d,chibar_d
+  real(dp),intent(out)::m2bar
+
+  integer::igrid,ngrid,ncache,i,ind,iskip,idim,info
+  integer::ig_left,ig_right,ih_left,ih_right
+  real(dp)::dx,scale,dx_loc,dx2_inv
+  integer::nx_loc
+  real(dp)::u_c,u_nb_l,u_nb_r,lapl
+  real(dp)::boxratio_sq,cA,cV,pexp,wfac,vphi,dvphi,vbar,source
+  real(dp),dimension(2)::acc_loc,acc_glob
+  integer,dimension(1:3,1:2,1:8)::ggg,hhh
+  integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
+  integer,dimension(1:nvector,0:twondim)::igridn_w
+
+  ncache=active(ilevel)%ngrid
+  dx=0.5D0**ilevel
+  nx_loc=(icoarse_max-icoarse_min+1)
+  scale=boxlen/dble(nx_loc)
+  dx_loc=dx*scale
+  dx2_inv=1d0/dx_loc**2
+
+  boxratio_sq=(boxlen_ini/2997.92458d0)**2
+  cA = 3d0*omega_m*A2_d*boxratio_sq/aexp
+  cV = aexp**2*boxratio_sq
+  pexp = 1d0 - 3d0/s_d
+  vbar = -3d0*omega_m*beta_dilaton*(A2_d*chibar_d/beta_dilaton)**pexp
+
+  ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(2,1,1:8)=(/3,3,0,0,3,3,0,0/); hhh(2,1,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(2,2,1:8)=(/0,0,4,4,0,0,4,4/); hhh(2,2,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
+  ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
+
+  acc_loc=0d0
+
+!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right,ih_left,ih_right, &
+!$omp&  u_c,u_nb_l,u_nb_r,lapl,wfac,vphi,dvphi,source) &
+!$omp& reduction(+:acc_loc) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     ngrid=MIN(nvector,ncache-igrid+1)
+     do i=1,ngrid
+        ind_grid_w(i)=active(ilevel)%igrid(igrid+i-1)
+     end do
+     do i=1,ngrid
+        igridn_w(i,0)=ind_grid_w(i)
+     end do
+     do idim=1,ndim
+        do i=1,ngrid
+           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
+           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+        end do
+     end do
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        do i=1,ngrid
+           ind_cell_w(i)=iskip+ind_grid_w(i)
+        end do
+        do i=1,ngrid
+           u_c = scalar_gr(ind_cell_w(i))
+           lapl = 0d0
+           do idim=1,ndim
+              ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
+              ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
+              ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
+              u_nb_l = u_c; u_nb_r = u_c
+              if(igridn_w(i,ig_left ) > 0) u_nb_l = scalar_gr(igridn_w(i,ig_left )+ih_left)
+              if(igridn_w(i,ig_right) > 0) u_nb_r = scalar_gr(igridn_w(i,ig_right)+ih_right)
+              lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
+           end do
+           wfac = A2_d*max(u_c,1d-30)/beta_dilaton
+           vphi = -3d0*omega_m*beta_dilaton*wfac**pexp
+           dvphi = -3d0*omega_m*A2_d*pexp*wfac**(pexp-1d0)
+           source = cA*(rho(ind_cell_w(i))*u_c - chibar_d) + cV*(vphi - vbar)
+           scalar_gr_old(ind_cell_w(i)) = -(lapl - source)
+           acc_loc(1) = acc_loc(1) + cA*rho(ind_cell_w(i)) + cV*dvphi
+           acc_loc(2) = acc_loc(2) + 1d0
+        end do
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(acc_loc,acc_glob,2,MPI_DOUBLE_PRECISION,MPI_SUM, &
+       & MPI_COMM_WORLD,info)
+#else
+  acc_glob=acc_loc
+#endif
+  m2bar = max(acc_glob(1)/max(acc_glob(2),1d0), 0d0)
+
+end subroutine dil_build_fft_rhs
+
+!=========================================================
+! vain_build_fft_rhs: nDGP/galileon operator splitting;
+! solve the local quadratic  coeff*A^2 + A = S + coeff*T
+! for A = lap(phi) (branch A->S as coeff->0; clamped at the
+! extremum when the discriminant is negative) and stage
+! b = A - lap(phi) in scalar_gr_old (then lap(dphi) = b).
+!=========================================================
+subroutine vain_build_fft_rhs(ilevel, srcfac, coeff)
+  use amr_commons
+  use poisson_commons
+  use morton_hash
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::srcfac, coeff
+
+  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::ig_left,ig_right
+  real(dp)::dx,scale,dx_loc,dx2_inv
+  integer::nx_loc
+  real(dp)::u_c,lapl,s_src,t_ij,disc,a_tgt
+  real(dp)::phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp
+  real(dp)::phi_xx,phi_yy,phi_zz
+  integer,dimension(1:3,1:2,1:8)::ggg,hhh
+  integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
+  integer,dimension(1:nvector,0:twondim)::igridn_w
+
+  ncache=active(ilevel)%ngrid
+  dx=0.5D0**ilevel
+  nx_loc=(icoarse_max-icoarse_min+1)
+  scale=boxlen/dble(nx_loc)
+  dx_loc=dx*scale
+  dx2_inv=1d0/dx_loc**2
+
+  ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
+  ggg(2,1,1:8)=(/3,3,0,0,3,3,0,0/); hhh(2,1,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(2,2,1:8)=(/0,0,4,4,0,0,4,4/); hhh(2,2,1:8)=(/3,4,1,2,7,8,5,6/)
+  ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
+  ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
+
+!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right, &
+!$omp&  u_c,lapl,s_src,t_ij,disc,a_tgt, &
+!$omp&  phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp,phi_xx,phi_yy,phi_zz) &
+!$omp& schedule(dynamic)
+  do igrid=1,ncache,nvector
+     ngrid=MIN(nvector,ncache-igrid+1)
+     do i=1,ngrid
+        ind_grid_w(i)=active(ilevel)%igrid(igrid+i-1)
+     end do
+     do i=1,ngrid
+        igridn_w(i,0)=ind_grid_w(i)
+     end do
+     do idim=1,ndim
+        do i=1,ngrid
+           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
+           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+        end do
+     end do
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        do i=1,ngrid
+           ind_cell_w(i)=iskip+ind_grid_w(i)
+        end do
+        do i=1,ngrid
+           u_c = scalar_gr(ind_cell_w(i))
+
+           ig_left =ggg(1,1,ind); ig_right=ggg(1,2,ind)
+           phi_xm = u_c; phi_xp = u_c
+           if(igridn_w(i,ig_left ) > 0) phi_xm = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(1,1,ind)-1)*ngridmax)
+           if(igridn_w(i,ig_right) > 0) phi_xp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(1,2,ind)-1)*ngridmax)
+           ig_left =ggg(2,1,ind); ig_right=ggg(2,2,ind)
+           phi_ym = u_c; phi_yp = u_c
+           if(igridn_w(i,ig_left ) > 0) phi_ym = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(2,1,ind)-1)*ngridmax)
+           if(igridn_w(i,ig_right) > 0) phi_yp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(2,2,ind)-1)*ngridmax)
+           ig_left =ggg(3,1,ind); ig_right=ggg(3,2,ind)
+           phi_zm = u_c; phi_zp = u_c
+           if(igridn_w(i,ig_left ) > 0) phi_zm = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(3,1,ind)-1)*ngridmax)
+           if(igridn_w(i,ig_right) > 0) phi_zp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(3,2,ind)-1)*ngridmax)
+
+           lapl = (phi_xp+phi_xm+phi_yp+phi_ym+phi_zp+phi_zm-6d0*u_c)*dx2_inv
+           phi_xx = (phi_xp+phi_xm-2d0*u_c)*dx2_inv
+           phi_yy = (phi_yp+phi_ym-2d0*u_c)*dx2_inv
+           phi_zz = (phi_zp+phi_zm-2d0*u_c)*dx2_inv
+           t_ij = phi_xx**2 + phi_yy**2 + phi_zz**2
+
+           s_src = srcfac*(rho(ind_cell_w(i)) - rho_tot)
+           if(abs(coeff) > 1d-12) then
+              disc = 1d0 + 4d0*coeff*(s_src + coeff*t_ij)
+              if(disc > 0d0) then
+                 a_tgt = (-1d0 + sqrt(disc))/(2d0*coeff)
+              else
+                 a_tgt = -1d0/(2d0*coeff)
+              end if
+           else
+              a_tgt = s_src + coeff*t_ij
+           end if
+           scalar_gr_old(ind_cell_w(i)) = a_tgt - lapl
+        end do
+     end do
+  end do
+
+end subroutine vain_build_fft_rhs
+#endif
 
 !=========================================================
 ! fR_background: compute background Ricci scalar and f_R
@@ -1086,8 +1653,9 @@ subroutine fR_background(aa, R_bar, fR_bar)
   ! R_bar = 3*H0^2*(Omega_m/a^3 + 4*Omega_Lambda)
   ! In code units where H0=1:
   !   R_bar = 3*(omega_m/a^3 + 4*omega_l)
-  ! f_R_bar = -|fR0| * n * (R_bar0/R_bar)^(n+1)
-  !   where R_bar0 = R_bar(a=1)
+  ! f_R_bar = fR0 * (R_bar0/R_bar)^(n+1),  R_bar0 = R_bar(a=1)
+  ! Standard convention (Hu & Sawicki 2007): fR0 IS the field value
+  ! today, f_R_bar(a=1) = fR0 (no extra factor n).
   !-------------------------------------------------------
   real(dp)::R_bar0
   integer::np1
@@ -1095,7 +1663,7 @@ subroutine fR_background(aa, R_bar, fR_bar)
   np1 = fR_n + 1
   R_bar  = 3d0 * (omega_m / aa**3 + 4d0 * omega_l)
   R_bar0 = 3d0 * (omega_m + 4d0 * omega_l)
-  fR_bar = fR0 * dble(fR_n) * (R_bar0 / R_bar)**np1
+  fR_bar = fR0 * (R_bar0 / R_bar)**np1
 
 end subroutine fR_background
 
@@ -1121,18 +1689,37 @@ subroutine fR_solve_level(ilevel, icount)
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
   logical::converged
+#ifdef USE_FFTW
+  real(dp)::m2bar
+  logical,external::level_fft_ok
+#endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   ! Get background values
   call fR_background(aexp, R_bar, fR_bar)
 
-  ! Initialize scalar_gr to background value on first call
-  ! (scalar_gr_old provides a warm start from previous step)
-  if(nstep==0) then
-     call fR_init_scalar(ilevel, fR_bar)
+  ! Seed every cell still at exactly 0 with the background value.
+  ! Covers first step, restarts (scalar_gr is not checkpointed) and
+  ! cells created by refinement after step 0; converged f_R is
+  ! strictly negative so 0 uniquely marks uninitialized cells.
+  call fR_seed_scalar(ilevel, fR_bar)
+
+#ifdef USE_FFTW
+  ! Spectral Newton on the uniform domain level: converges the
+  ! long-wavelength modes that the GS sweeps below cannot reach
+  if(level_fft_ok(ilevel)) then
+     call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     do iter=1,3
+        call fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
+        call level_fft_helmholtz(ilevel, m2bar)
+        call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     end do
   end if
+#endif
 
   ! Newton-GS relaxation
   converged = .false.
@@ -1177,11 +1764,13 @@ subroutine fR_solve_level(ilevel, icount)
   ! Save scalar_gr for warm start next step
   call fR_save_old(ilevel)
 
-  ! Add fifth force: F5 = -(1/2) * grad(fR)
-  call compute_fifth_force(ilevel, -0.5d0)
-
-  ! Exchange f boundaries (force_fine will do this later, but be safe)
-  ! (No — force boundaries are exchanged by the caller in amr_step)
+  ! Add fifth force. Proper-frame F5 = +(c^2/2) grad(delta f_R);
+  ! with scalar_gr = f_R (dimensionless) and box-unit gradients this
+  ! becomes F5_code = +(a^2/2) (c/(H0*L_box))^2 * grad(f_R)
+  ! (background gradient vanishes spatially). Sub-Compton unscreened
+  ! limit recovers F5 = F_N/3 exactly.
+  call compute_fifth_force(ilevel, &
+       & 0.5d0*aexp**2*(2997.92458d0/boxlen_ini)**2)
 
 end subroutine fR_solve_level
 
@@ -1213,6 +1802,36 @@ subroutine fR_init_scalar(ilevel, fR_bar)
 end subroutine fR_init_scalar
 
 !=========================================================
+! fR_seed_scalar: set cells still at exactly 0 to fR_bar
+! (uninitialized: first step, restart, newly refined grids)
+!=========================================================
+subroutine fR_seed_scalar(ilevel, fR_bar)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::fR_bar
+
+  integer::igrid,i,ind,iskip,ncache,icell
+
+  ncache=active(ilevel)%ngrid
+!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     do i=1,MIN(nvector,ncache-igrid+1)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           if(scalar_gr(icell) == 0d0) then
+              scalar_gr(icell) = fR_bar
+              scalar_gr_old(icell) = fR_bar
+           end if
+        end do
+     end do
+  end do
+
+end subroutine fR_seed_scalar
+
+!=========================================================
 ! fR_save_old: save scalar_gr → scalar_gr_old
 !=========================================================
 subroutine fR_save_old(ilevel)
@@ -1239,12 +1858,19 @@ end subroutine fR_save_old
 
 !=========================================================
 ! fR_gauss_seidel: one Newton-GS sweep for f(R) equation
-! ∇²f_R = -(a²/3)[R(f_R) - R_bar] + (a²/3)*8πG*δρ
 !
-! In RAMSES code units (H0=1, fourpi=1.5*Ωm*a):
-!   ∇²f_R = -(a²/3)*[R(f_R) - R_bar] + 2*a*Ωm*δρ/ρ_bar
+! Physical quasi-static equation (Oyaizu 2008; ECOSMOG):
+!   nabla_com^2 delta f_R = (a^2/3c^2) [delta R - 8 pi G delta rho]
 !
-! Hu-Sawicki inversion: R(f_R) from f_R ↔ R relation
+! In supercomoving box units (x in L_box, R~ = R/H0^2, rho = 1+delta):
+!   lap f_R = +(a^2/3)*(H0*L/c)^2*(R~(f_R) - R~_bar)
+!             - omega_m*(H0*L/c)^2*(rho - rho_tot)/a
+! with (H0*L/c)^2 = (boxlen_ini/2997.92458)^2.
+! Linearized mass term is +Yukawa (dR/df_R > 0 for f_R < 0), so the
+! Newton Jacobian -6/dx^2 - (a^2/3)(H0L/c)^2 dR/df_R is negative
+! definite. Chameleon limit: R~(f_R) -> R~_bar + 3 omega_m delta/a^3.
+!
+! Hu-Sawicki inversion: R = R_bar0 * (fR0/f_R)^(1/(n+1))
 !=========================================================
 subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   use amr_commons
@@ -1266,7 +1892,8 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
   real(dp)::u_c,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u
-  real(dp)::a2_over_3,rho_bar
+  real(dp)::u_nb_l,u_nb_r
+  real(dp)::a2_over_3,rho_coeff,boxratio_sq
   real(dp)::R_bar0
   integer::np1,icolor
 
@@ -1288,10 +1915,13 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   dx2_inv=1d0/dx2
 
   np1 = fR_n + 1
-  a2_over_3 = aexp**2 / 3d0
+  ! (H0 L_box / c)^2 converts H0-unit curvature/density terms to
+  ! box-unit Laplacians (same pattern as dark_energy_commons)
+  boxratio_sq = (boxlen_ini / 2997.92458d0)**2
+  a2_over_3 = aexp**2 * boxratio_sq / 3d0
   R_bar0 = 3d0 * (omega_m + 4d0 * omega_l)
-  ! Mean density in code units: ρ_bar = Ω_m / a^3 (with H0=1)
-  rho_bar = omega_m / aexp**3
+  ! Matter source coefficient: omega_m*(H0 L/c)^2/a
+  rho_coeff = omega_m * boxratio_sq / aexp
 
   ! Neighbor lookup
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -1311,7 +1941,7 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right, &
-!$omp&  u_c,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u) &
+!$omp&  u_c,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u,u_nb_l,u_nb_r) &
 !$omp& reduction(max:res_max,src_max) schedule(dynamic)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
@@ -1332,7 +1962,9 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
 
         do ind=1,twotondim
            ! Red-black coloring
-           if(mod(ind-1, 2) /= icolor) cycle
+           ! True 3D red-black: color = parity of (i+j+k) of the cell,
+           ! i.e. popcount of the oct-local index (oct origins are even)
+           if(mod(popcnt(ind-1), 2) /= icolor) cycle
 
            iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
@@ -1340,67 +1972,60 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
            end do
 
            do i=1,ngrid
-              ! Check all neighbors exist
-              ig_left =ggg(1,1,ind)
-              ig_right=ggg(1,2,ind)
-              if(igridn_w(i,ig_left)==0 .or. igridn_w(i,ig_right)==0) cycle
-              ig_left =ggg(2,1,ind)
-              ig_right=ggg(2,2,ind)
-              if(igridn_w(i,ig_left)==0 .or. igridn_w(i,ig_right)==0) cycle
-              ig_left =ggg(3,1,ind)
-              ig_right=ggg(3,2,ind)
-              if(igridn_w(i,ig_left)==0 .or. igridn_w(i,ig_right)==0) cycle
-
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Compute Laplacian
+              ! Compute Laplacian; Neumann (zero-gradient) closure at
+              ! coarse-fine boundaries instead of freezing the cell
               lapl = 0d0
               do idim=1,ndim
                  ig_left =ggg(idim,1,ind)
                  ig_right=ggg(idim,2,ind)
                  ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
                  ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
-                 ind_nb_left =igridn_w(i,ig_left )+ih_left
-                 ind_nb_right=igridn_w(i,ig_right)+ih_right
-                 lapl = lapl + (scalar_gr(ind_nb_left) + scalar_gr(ind_nb_right) - 2d0*u_c) * dx2_inv
+                 if(igridn_w(i,ig_left) > 0) then
+                    u_nb_l = scalar_gr(igridn_w(i,ig_left )+ih_left)
+                 else
+                    u_nb_l = u_c
+                 end if
+                 if(igridn_w(i,ig_right) > 0) then
+                    u_nb_r = scalar_gr(igridn_w(i,ig_right)+ih_right)
+                 else
+                    u_nb_r = u_c
+                 end if
+                 lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
               end do
 
               ! R(f_R) from Hu-Sawicki inversion:
-              ! f_R = fR0 * n * (R_bar0/R)^(n+1)
-              ! → R = R_bar0 * (n*fR0/f_R)^(1/(n+1))
+              ! f_R = fR0 * (R_bar0/R)^(n+1)
+              ! → R = R_bar0 * (fR0/f_R)^(1/(n+1))
               ! Since fR0<0 and f_R<0, use absolute values
               if(abs(u_c) > 1d-30*abs(fR0)) then
-                 R_of_u = R_bar0 * (dble(fR_n)*abs(fR0)/abs(u_c))**(1d0/dble(np1))
+                 R_of_u = R_bar0 * (abs(fR0)/abs(u_c))**(1d0/dble(np1))
               else
                  R_of_u = R_bar  ! fallback to background
               end if
 
-              ! Source = -(a²/3)*[R(fR) - R_bar] + (a²/3)*8πG*δρ
-              ! In code units: δρ/ρ_bar = rho(cell)/rho_bar - 1
-              ! and 8πG*ρ_bar = 3*Ω_m*H0²/a³ = 3*omega_m/a³  (H0=1)
-              ! So (a²/3)*8πG*δρ = a²*omega_m/a³ * (rho(cell)/rho_bar - 1)
-              !                  = omega_m/(a) * (ρ/ρ_bar - 1)
-              ! But rho() in RAMSES code is overdensity: rho_code = ρ/ρ_bar - 1 when fourpi is set properly
-              ! Actually, in super-comoving coords, the Poisson source is:
-              !   ∇²Φ = 1.5*Ωm*a * (ρ/ρ_bar - 1) = fourpi * δ
-              ! So for f(R): source = -a²/3*(R(fR) - R_bar) + 2*fourpi/3 * δ
-              !   where fourpi = 1.5*Ωm*a and δ = rho(cell) (already overdensity)
-              source = -a2_over_3*(R_of_u - R_bar) + a2_over_3 * 2d0 * 1.5d0 * omega_m * aexp * rho(ind_cell_w(i))
+              ! Source (see subroutine header):
+              !   S = +(a²/3)(H0L/c)²*(R(fR)-R_bar) - Ωm(H0L/c)²*(rho-rho_tot)/a
+              ! rho has box mean rho_tot ≈ 1 (the Poisson solver subtracts
+              ! it too); a2_over_3 and rho_coeff carry the (H0L/c)² factor.
+              source = a2_over_3*(R_of_u - R_bar) &
+                   & - rho_coeff*(rho(ind_cell_w(i)) - rho_tot)
 
               ! Residual: F = laplacian - source
               residual = lapl - source
 
               ! Jacobian of source w.r.t. u_c:
-              ! dS/du = -(a²/3) * dR/dfR
-              ! dR/dfR = -R/(n+1)/fR  (from the inversion formula)
+              ! dS/du = +(a²/3)(H0L/c)² * dR/dfR
+              ! dR/dfR = -R/((n+1)*fR) > 0 for fR < 0
               if(abs(u_c) > 1d-30*abs(fR0)) then
                  dR_du = -R_of_u / (dble(np1) * u_c)
               else
                  dR_du = 0d0
               end if
 
-              ! Jacobian: J = -6/dx² - dSource/du = -6/dx² + (a²/3)*dR/du
-              jacobian = -6d0*dx2_inv + a2_over_3*dR_du
+              ! Jacobian: J = -6/dx² - dS/du < 0 (negative definite)
+              jacobian = -6d0*dx2_inv - a2_over_3*dR_du
 
               ! Newton update
               if(abs(jacobian) > 1d-30) then
@@ -1473,9 +2098,14 @@ subroutine nDGP_solve_level(ilevel, icount)
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
   logical::converged
+#ifdef USE_FFTW
+  logical,external::level_fft_ok
+#endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   ! Compute β(a)
   beta = nDGP_beta(aexp, omega_rc, nDGP_branch)
@@ -1488,6 +2118,19 @@ subroutine nDGP_solve_level(ilevel, icount)
   if(nstep==0) then
      call nDGP_init_scalar(ilevel)
   end if
+
+#ifdef USE_FFTW
+  ! Operator-split spectral solve on the uniform domain level
+  if(level_fft_ok(ilevel)) then
+     call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     do iter=1,5
+        call vain_build_fft_rhs(ilevel, omega_m*aexp/beta, &
+             & 1d0/(12d0*omega_rc*beta*aexp**4))
+        call level_fft_helmholtz(ilevel, 0d0)
+        call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     end do
+  end if
+#endif
 
   ! Newton-GS relaxation
   converged = .false.
@@ -1530,8 +2173,10 @@ subroutine nDGP_solve_level(ilevel, icount)
   ! Save scalar_gr for warm start
   call nDGP_save_old(ilevel)
 
-  ! Fifth force: F5 = -(1/(2β)) * grad(φ)
-  call compute_fifth_force(ilevel, -0.5d0/beta)
+  ! Fifth force: F5 = -(1/2) * grad(φ)
+  ! (the 1/β coupling is already in the field-equation source;
+  !  linear limit must give G_eff/G = 1 + 1/(3β), Winther+15 eq. 16-17)
+  call compute_fifth_force(ilevel, -0.5d0)
 
 end subroutine nDGP_solve_level
 
@@ -1614,7 +2259,7 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
-  real(dp)::u_c,lapl,source,residual,jacobian,delta_u
+  real(dp)::u_c,lapl,source,residual,jacobian,delta_u,sclamp
   real(dp)::coeff
   real(dp)::phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp
   real(dp)::phi_xx,phi_yy,phi_zz,phi_xy,phi_xz,phi_yz
@@ -1642,12 +2287,11 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
   dx2=dx_loc**2
   dx2_inv=1d0/dx2
 
-  ! Vainshtein coefficient: r_c²/(3β a²)
-  ! r_c = 1/(2*sqrt(omega_rc)*H0), so r_c² = 1/(4*omega_rc*H0²)
-  ! coeff = 1/(12*omega_rc*beta*a²) in code units (H0=1, c=1)
-  ! But we need this in mesh units (dx_loc): divide by dx_loc⁴ for the bilinear terms
-  ! Actually the equation uses comoving ∇, so coeff stays in comoving
-  coeff = 1d0 / (12d0 * omega_rc * beta * aexp**2)
+  ! Vainshtein coefficient: physical r_c²/(3β a²) with
+  ! r_c² = 1/(4*omega_rc*H0²). In supercomoving units the quadratic
+  ! term carries one extra (H0²/a²) from the second Laplacian, so
+  ! coeff_code = [1/(12 omega_rc beta a²)]*(H0²/a²)/H0² = 1/(12 Ω_rc β a⁴)
+  coeff = 1d0 / (12d0 * omega_rc * beta * aexp**4)
 
   ! Neighbor lookup
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -1691,7 +2335,9 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
         end do
 
         do ind=1,twotondim
-           if(mod(ind-1, 2) /= icolor) cycle
+           ! True 3D red-black: color = parity of (i+j+k) of the cell,
+           ! i.e. popcount of the oct-local index (oct origins are even)
+           if(mod(popcnt(ind-1), 2) /= icolor) cycle
 
            iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
@@ -1699,31 +2345,30 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
            end do
 
            do i=1,ngrid
-              ! Check face neighbors exist
-              if(igridn_w(i,1)==0 .or. igridn_w(i,2)==0 .or. &
-                 igridn_w(i,3)==0 .or. igridn_w(i,4)==0 .or. &
-                 igridn_w(i,5)==0 .or. igridn_w(i,6)==0) cycle
-
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Get face neighbor values
+              ! Face neighbor values; Neumann (zero-gradient) closure
+              ! at coarse-fine boundaries instead of freezing the cell
               ig_left =ggg(1,1,ind); ig_right=ggg(1,2,ind)
               ih_left =ncoarse+(hhh(1,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(1,2,ind)-1)*ngridmax
-              phi_xm = scalar_gr(igridn_w(i,ig_left )+ih_left)
-              phi_xp = scalar_gr(igridn_w(i,ig_right)+ih_right)
+              phi_xm = u_c; phi_xp = u_c
+              if(igridn_w(i,ig_left ) > 0) phi_xm = scalar_gr(igridn_w(i,ig_left )+ih_left)
+              if(igridn_w(i,ig_right) > 0) phi_xp = scalar_gr(igridn_w(i,ig_right)+ih_right)
 
               ig_left =ggg(2,1,ind); ig_right=ggg(2,2,ind)
               ih_left =ncoarse+(hhh(2,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(2,2,ind)-1)*ngridmax
-              phi_ym = scalar_gr(igridn_w(i,ig_left )+ih_left)
-              phi_yp = scalar_gr(igridn_w(i,ig_right)+ih_right)
+              phi_ym = u_c; phi_yp = u_c
+              if(igridn_w(i,ig_left ) > 0) phi_ym = scalar_gr(igridn_w(i,ig_left )+ih_left)
+              if(igridn_w(i,ig_right) > 0) phi_yp = scalar_gr(igridn_w(i,ig_right)+ih_right)
 
               ig_left =ggg(3,1,ind); ig_right=ggg(3,2,ind)
               ih_left =ncoarse+(hhh(3,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(3,2,ind)-1)*ngridmax
-              phi_zm = scalar_gr(igridn_w(i,ig_left )+ih_left)
-              phi_zp = scalar_gr(igridn_w(i,ig_right)+ih_right)
+              phi_zm = u_c; phi_zp = u_c
+              if(igridn_w(i,ig_left ) > 0) phi_zm = scalar_gr(igridn_w(i,ig_left )+ih_left)
+              if(igridn_w(i,ig_right) > 0) phi_zp = scalar_gr(igridn_w(i,ig_right)+ih_right)
 
               ! Laplacian
               lapl = (phi_xp + phi_xm + phi_yp + phi_ym + phi_zp + phi_zm - 6d0*u_c) * dx2_inv
@@ -1753,8 +2398,8 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
               vain_term = lapl2 - trace_ij2
 
               ! Source = Ωm*a/β * δ  (in code units)
-              ! rho(cell) is the overdensity δ in RAMSES
-              source = omega_m * aexp / beta * rho(ind_cell_w(i))
+              ! rho has box mean rho_tot ≈ 1; subtract it (δ = rho - rho_tot)
+              source = omega_m * aexp / beta * (rho(ind_cell_w(i)) - rho_tot)
 
               ! Residual: F = lapl + coeff * vain_term - source
               residual = lapl + coeff * vain_term - source
@@ -1774,10 +2419,10 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
               ! Newton update
               if(abs(jacobian) > 1d-30) then
                  delta_u = -residual / jacobian
-                 ! Damped Newton for stability
-                 if(abs(delta_u) > 0.5d0*dx2*abs(source) .and. abs(source) > 1d-30) then
-                    delta_u = sign(0.5d0*dx2*abs(source), delta_u)
-                 end if
+                 ! Damped Newton; floor the clamp scale at 1% of the
+                 ! delta=1 source so cells with delta~0 still relax
+                 sclamp = 0.5d0*dx2*max(abs(source), 1d-2*omega_m*aexp/beta)
+                 if(abs(delta_u) > sclamp) delta_u = sign(sclamp, delta_u)
                  scalar_gr(ind_cell_w(i)) = u_c + delta_u
               end if
 
@@ -1815,14 +2460,35 @@ subroutine symmetron_solve_level(ilevel, icount)
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
   logical::converged
+#ifdef USE_FFTW
+  real(dp)::m2bar
+  logical,external::level_fft_ok
+#endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
-  ! Initialize scalar_gr on first step
-  if(nstep==0) then
-     call symmetron_init_scalar(ilevel)
+  ! Seed the broken-phase VEV chi_bar(a) = sqrt(1-(a_ssb/a)^3) into
+  ! cells still at exactly 0. The field equation is homogeneous in
+  ! chi, so chi=0 is an exact (unphysical) fixed point of Newton-GS:
+  ! without seeding the fifth force stays identically zero. Covers
+  ! first step, restarts and newly refined cells; pre-SSB (a<=a_ssb)
+  ! chi_bar=0 and chi=0 is the true solution.
+  call symmetron_seed_scalar(ilevel)
+
+#ifdef USE_FFTW
+  ! Spectral Newton on the uniform domain level (broken phase only)
+  if(level_fft_ok(ilevel) .and. aexp > a_ssb) then
+     call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     do iter=1,3
+        call sb_build_fft_rhs(ilevel, a_ssb, L_symmetron, m2bar)
+        call level_fft_helmholtz(ilevel, m2bar)
+        call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     end do
   end if
+#endif
 
   ! Newton-GS relaxation
   converged = .false.
@@ -1865,7 +2531,7 @@ subroutine symmetron_solve_level(ilevel, icount)
   ! Save for warm start
   call symmetron_save_old(ilevel)
 
-  ! Fifth force: field-dependent F5 = -6*Ωm*β²*(a_ssb/a)*χ*∇χ
+  ! Fifth force: F5 = -6*Ωm*β²*(L/L_box)²*(a²/a_ssb³)*χ*∇χ
   call compute_fifth_force_symmetron(ilevel)
 
 end subroutine symmetron_solve_level
@@ -1897,6 +2563,42 @@ subroutine symmetron_init_scalar(ilevel)
 end subroutine symmetron_init_scalar
 
 !=========================================================
+! symmetron_seed_scalar: seed cells still at exactly 0 with
+! the broken-phase VEV chi_bar(a) (0 pre-SSB). chi=0 is an
+! exact fixed point of the homogeneous equation, so seeding
+! is required for the field to leave the symmetric phase.
+!=========================================================
+subroutine symmetron_seed_scalar(ilevel)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+
+  integer::igrid,i,ind,iskip,ncache,icell
+  real(dp)::chibar
+
+  chibar = 0d0
+  if(aexp > a_ssb) chibar = sqrt(max(1d0 - (a_ssb/aexp)**3, 0d0))
+  if(chibar == 0d0) return
+
+  ncache=active(ilevel)%ngrid
+!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     do i=1,MIN(nvector,ncache-igrid+1)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           if(scalar_gr(icell) == 0d0) then
+              scalar_gr(icell) = chibar
+              scalar_gr_old(icell) = chibar
+           end if
+        end do
+     end do
+  end do
+
+end subroutine symmetron_seed_scalar
+
+!=========================================================
 ! symmetron_save_old: save scalar_gr → scalar_gr_old
 !=========================================================
 subroutine symmetron_save_old(ilevel)
@@ -1923,19 +2625,17 @@ end subroutine symmetron_save_old
 
 !=========================================================
 ! symmetron_gauss_seidel: one Newton-GS sweep
+! (Davis, Li, Mota, Winther 2012 / ISIS conventions)
 !
-! ∇²χ = (a²/2L²)[(ρ/ρ_ssb) - (a_ssb/a)³]·χ + (a²/2L²)·χ³
+! ∇²χ = (a²/2L²)[(ρ/ρ_ssb) - 1]·χ + (a²/2L²)·χ³
 !
-! In code units (H0=1):
-!   L_code = L_symmetron / boxlen_ini (Mpc/h → code)
-!   ρ_ssb = 3*Ωm/(a_ssb³) (mean density at a_ssb)
-!   rho(cell) is overdensity δ = (ρ-ρ̄)/ρ̄
-!   ρ/ρ_ssb = (1+δ)*ρ̄/ρ_ssb = (1+δ)*(a_ssb/a)³
+! In code units:
+!   L_code = L_symmetron / boxlen_ini (Mpc/h → box units)
+!   ρ_ssb = mean matter density at a_ssb
+!   rho(cell) = ρ/ρ̄(a) = 1+δ (box mean rho_tot ≈ 1)
+!   ρ/ρ_ssb = rho(cell)*(a_ssb/a)³
 !
-! So source coefficient:
-!   mass_coeff = (a²/2L²)*[(1+δ)*(a_ssb/a)³ - (a_ssb/a)³]
-!              = (a²/2L²)*(a_ssb/a)³ * δ
-!   cubic_coeff = a²/2L²
+! Broken-phase VEV: χ̄² = 1-(a_ssb/a)³ for a > a_ssb.
 !=========================================================
 subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
   use amr_commons
@@ -2015,7 +2715,9 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
         end do
 
         do ind=1,twotondim
-           if(mod(ind-1, 2) /= icolor) cycle
+           ! True 3D red-black: color = parity of (i+j+k) of the cell,
+           ! i.e. popcount of the oct-local index (oct origins are even)
+           if(mod(popcnt(ind-1), 2) /= icolor) cycle
 
            iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
@@ -2023,35 +2725,30 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
            end do
 
            do i=1,ngrid
-              if(igridn_w(i,1)==0 .or. igridn_w(i,2)==0 .or. &
-                 igridn_w(i,3)==0 .or. igridn_w(i,4)==0 .or. &
-                 igridn_w(i,5)==0 .or. igridn_w(i,6)==0) cycle
-
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Compute Laplacian
-              ig_left =ggg(1,1,ind); ig_right=ggg(1,2,ind)
-              ih_left =ncoarse+(hhh(1,1,ind)-1)*ngridmax
-              ih_right=ncoarse+(hhh(1,2,ind)-1)*ngridmax
-              lapl = scalar_gr(igridn_w(i,ig_left )+ih_left) &
-                   + scalar_gr(igridn_w(i,ig_right)+ih_right)
-
-              ig_left =ggg(2,1,ind); ig_right=ggg(2,2,ind)
-              ih_left =ncoarse+(hhh(2,1,ind)-1)*ngridmax
-              ih_right=ncoarse+(hhh(2,2,ind)-1)*ngridmax
-              lapl = lapl + scalar_gr(igridn_w(i,ig_left )+ih_left) &
-                          + scalar_gr(igridn_w(i,ig_right)+ih_right)
-
-              ig_left =ggg(3,1,ind); ig_right=ggg(3,2,ind)
-              ih_left =ncoarse+(hhh(3,1,ind)-1)*ngridmax
-              ih_right=ncoarse+(hhh(3,2,ind)-1)*ngridmax
-              lapl = lapl + scalar_gr(igridn_w(i,ig_left )+ih_left) &
-                          + scalar_gr(igridn_w(i,ig_right)+ih_right)
+              ! Compute Laplacian; Neumann closure at coarse-fine boundaries
+              lapl = 0d0
+              do idim=1,ndim
+                 ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
+                 ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
+                 ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
+                 if(igridn_w(i,ig_left) > 0) then
+                    lapl = lapl + scalar_gr(igridn_w(i,ig_left )+ih_left)
+                 else
+                    lapl = lapl + u_c
+                 end if
+                 if(igridn_w(i,ig_right) > 0) then
+                    lapl = lapl + scalar_gr(igridn_w(i,ig_right)+ih_right)
+                 else
+                    lapl = lapl + u_c
+                 end if
+              end do
 
               lapl = (lapl - 6d0*u_c) * dx2_inv
 
-              ! ρ/ρ_ssb = (1+δ)*(a_ssb/a)³
-              rho_ratio = (1d0 + rho(ind_cell_w(i))) * (a_ssb/aexp)**3
+              ! ρ/ρ_ssb = rho*(a_ssb/a)³  (rho = ρ/ρ̄(a) = 1+δ already)
+              rho_ratio = rho(ind_cell_w(i)) * (a_ssb/aexp)**3
 
               ! mass_term = a2_over_2L2 * (rho_ratio - 1) (relative to VEV)
               mass_term = a2_over_2L2 * (rho_ratio - 1d0)
@@ -2101,16 +2798,21 @@ subroutine compute_fifth_force_symmetron(ilevel)
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
 
+  ! NOTE: no early return on ncache==0 — the final make_virtual_fine_dp
+  ! must be entered by every rank (matched communication)
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   dx=0.5D0**ilevel
   nx_loc=(icoarse_max-icoarse_min+1)
   scale=boxlen/dble(nx_loc)
   dx_loc=dx*scale
 
-  ! Factor: -6*Ωm*β²*(a_ssb/a)
-  factor = -6d0 * omega_m * beta_symmetron**2 * (a_ssb / aexp)
+  ! Factor: -6*Ωm*β²*(L_symmetron/L_box)²*a²/a_ssb³
+  ! Derived from A(φ)=1+φ²/2M², φ_ssb²/M² = 6Ωmβ²H0²λ0²/a_ssb³ and
+  ! the supercomoving force conversion f_code = a³ g/(L_box H0²);
+  ! unscreened small-scale limit then gives F5/F_N = 2β²χ̄² exactly.
+  factor = -6d0 * omega_m * beta_symmetron**2 &
+       & * (L_symmetron/boxlen_ini)**2 * aexp**2 / a_ssb**3
 
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
   ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -2150,20 +2852,28 @@ subroutine compute_fifth_force_symmetron(ilevel)
            do idim=1,ndim
               ig_left =ggg(idim,1,ind)
               ig_right=ggg(idim,2,ind)
-
-              if(igridn_w(i,ig_left)==0 .or. igridn_w(i,ig_right)==0) cycle
-
               ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
 
-              ind_nb_left =igridn_w(i,ig_left )+ih_left
-              ind_nb_right=igridn_w(i,ig_right)+ih_right
-
-              grad_u = (scalar_gr(ind_nb_right) - scalar_gr(ind_nb_left)) / (2d0*dx_loc)
+              ! One-sided differences at coarse-fine boundaries
+              if(igridn_w(i,ig_left)==0 .and. igridn_w(i,ig_right)==0) cycle
+              if(igridn_w(i,ig_left)==0) then
+                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) - chi_c) / dx_loc
+              else if(igridn_w(i,ig_right)==0) then
+                 grad_u = (chi_c - scalar_gr(igridn_w(i,ig_left)+ih_left)) / dx_loc
+              else
+                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) &
+                      &  - scalar_gr(igridn_w(i,ig_left )+ih_left)) / (2d0*dx_loc)
+              end if
               f(ind_cell_w(i),idim) = f(ind_cell_w(i),idim) + factor * chi_c * grad_u
            end do
         end do
      end do
+  end do
+
+  ! Update MPI virtual boundaries (f was synced before F5 was added)
+  do idim=1,ndim
+     call make_virtual_fine_dp(f(1,idim),ilevel)
   end do
 
 end subroutine compute_fifth_force_symmetron
@@ -2185,24 +2895,67 @@ subroutine dilaton_solve_level(ilevel, icount)
   include 'mpif.h'
 #endif
   integer,intent(in)::ilevel, icount
-
+  !-------------------------------------------------------
+  ! Environment-dependent dilaton (Brax, van de Bruck, Davis,
+  ! Shaw 2010; N-body form: Brax, Davis, Li, Winther, Zhao 2012,
+  ! arXiv:1206.3568, original r=3/2 model):
+  !   A(phi) = 1 + (A2/2) phi^2/Mpl^2,  V = V0 exp(-gamma phi/Mpl)
+  !   m^2(a) = 3 A2 H^2(a)  =>  xi = H0/m0 = 1/sqrt(3 A2)
+  !   beta(a) = beta0 * a^s,  s = 9 Omega_m A2 xi^2 = 3 Omega_m
+  ! Working variable chi = phi/Mpl; background chibar = beta0 a^s/A2.
+  ! Code-unit field equation (x in box units, rho mean-normalized):
+  !   lap chi = (3 Om A2 B2/a) (rho*chi - chibar)
+  !           + a^2 B2 [vphi(chi) - vphi(chibar)]
+  !   vphi(chi) = -3 Om beta0 (A2 chi/beta0)^(1-3/s)
+  ! with B2 = (boxlen_ini/2997.92458)^2 = 1/ctilde^2.
+  ! Parameters: beta_dilaton = beta0 (cosmological coupling today),
+  ! L_dilaton = 2998*xi = fifth-force range today [Mpc/h].
+  ! (a0_dilaton is ignored — legacy of the old symmetron-clone.)
+  !-------------------------------------------------------
   integer::iter,ncache,info
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
   logical::converged
+  real(dp)::xi_d,A2_d,s_d,chibar_d,fac5
+#ifdef USE_FFTW
+  real(dp)::m2bar
+  logical,external::level_fft_ok
+#endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
-  if(nstep==0) then
-     call dilaton_init_scalar(ilevel)
+  ! Model constants from (beta0, range)
+  xi_d = L_dilaton/2997.92458d0
+  A2_d = 1d0/(3d0*xi_d**2)
+  s_d  = 3d0*omega_m
+  chibar_d = beta_dilaton*aexp**s_d/A2_d
+
+  ! Seed cells still at exactly 0 with the background value
+  ! (chi=0 is a singular point of vphi; also covers restarts and
+  ! newly refined cells)
+  call dilaton_seed_scalar(ilevel, chibar_d)
+
+#ifdef USE_FFTW
+  ! Spectral Newton on the uniform domain level
+  if(level_fft_ok(ilevel)) then
+     call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     do iter=1,3
+        call dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
+        call level_fft_helmholtz(ilevel, m2bar)
+        call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     end do
   end if
+#endif
 
   converged = .false.
   do iter=1,n_iter_dilaton
 
-     call dilaton_gauss_seidel(ilevel, res_max_local, src_max_local)
+     call dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, &
+          & res_max_local, src_max_local)
 
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
 
@@ -2238,8 +2991,10 @@ subroutine dilaton_solve_level(ilevel, icount)
 
   call dilaton_save_old(ilevel)
 
-  ! Fifth force: field-dependent F5 = -2β²·φ_D·∇φ_D
-  call compute_fifth_force_dilaton(ilevel)
+  ! Fifth force: F5 = -ctilde^2 a^2 A2 * chi * grad(chi)
+  ! (unscreened linear limit gives F5/FN = 2 beta(a)^2 exactly)
+  fac5 = -(2997.92458d0/boxlen_ini)**2 * aexp**2 * A2_d
+  call compute_fifth_force_dilaton(ilevel, fac5)
 
 end subroutine dilaton_solve_level
 
@@ -2267,6 +3022,36 @@ subroutine dilaton_init_scalar(ilevel)
   end do
 end subroutine dilaton_init_scalar
 
+!=========================================================
+! dilaton_seed_scalar: seed cells still at exactly 0 with the
+! broken-phase VEV (see symmetron_seed_scalar)
+!=========================================================
+subroutine dilaton_seed_scalar(ilevel, chibar_in)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::chibar_in
+
+  integer::igrid,i,ind,iskip,ncache,icell
+
+  ncache=active(ilevel)%ngrid
+!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+  do igrid=1,ncache,nvector
+     do i=1,MIN(nvector,ncache-igrid+1)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           if(scalar_gr(icell) == 0d0) then
+              scalar_gr(icell) = chibar_in
+              scalar_gr_old(icell) = chibar_in
+           end if
+        end do
+     end do
+  end do
+
+end subroutine dilaton_seed_scalar
+
 subroutine dilaton_save_old(ilevel)
   use amr_commons
   use poisson_commons
@@ -2288,21 +3073,21 @@ subroutine dilaton_save_old(ilevel)
 end subroutine dilaton_save_old
 
 !=========================================================
-! dilaton_gauss_seidel: one Newton-GS sweep
-!
-! Dilaton equation (Damour-Polyakov):
-! ∇²φ_D = (a²/2L_D²)[(ρ/ρ₀) - (a₀/a)³]·φ_D + (a²/2L_D²)·ξ₂·φ_D³
-!
-! Structurally identical to Symmetron with:
-!   a_ssb → a0_dilaton, L_symmetron → L_dilaton
-!   ξ₂ = 1 (default cubic self-interaction)
+! dilaton_gauss_seidel: one Newton-GS sweep for the Brax+12
+! dilaton equation (see dilaton_solve_level header):
+!   F = lap chi - cA*(rho*chi - chibar) - cV*[vphi(chi)-vphi(chibar)]
+!   vphi(chi) = -3 Om beta0 wfac^pexp, wfac = A2 chi/beta0,
+!   pexp = 1 - 3/s < 0  =>  dvphi/dchi > 0 and the Newton
+!   Jacobian -6/h^2 - dS/dchi is negative definite.
+! chi > 0 is enforced with the same halving guard as f(R).
 !=========================================================
-subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
+subroutine dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, res_max, src_max)
   use amr_commons
   use poisson_commons
   use morton_hash
   implicit none
   integer,intent(in)::ilevel
+  real(dp),intent(in)::A2_d,s_d,chibar_d
   real(dp),intent(out)::res_max, src_max
 
   integer::igrid,ngrid,ncache,i,ind,iskip,idim
@@ -2310,8 +3095,7 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
   real(dp)::u_c,lapl,residual,jacobian,delta_u
-  real(dp)::L_code,a2_over_2L2
-  real(dp)::rho_ratio,mass_term,cubic_coeff
+  real(dp)::boxratio_sq,cA,cV,pexp,wfac,vphi,dvphi,vbar,source
   integer::icolor
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
@@ -2331,9 +3115,11 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
   dx2=dx_loc**2
   dx2_inv=1d0/dx2
 
-  L_code = L_dilaton / boxlen_ini
-  a2_over_2L2 = aexp**2 / (2d0 * L_code**2)
-  cubic_coeff = a2_over_2L2  ! ξ₂ = 1
+  boxratio_sq=(boxlen_ini/2997.92458d0)**2
+  cA = 3d0*omega_m*A2_d*boxratio_sq/aexp
+  cV = aexp**2*boxratio_sq
+  pexp = 1d0 - 3d0/s_d
+  vbar = -3d0*omega_m*beta_dilaton*(A2_d*chibar_d/beta_dilaton)**pexp
 
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
   ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -2351,7 +3137,7 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  u_c,lapl,residual,jacobian,delta_u, &
-!$omp&  rho_ratio,mass_term) &
+!$omp&  wfac,vphi,dvphi,source) &
 !$omp& reduction(max:res_max,src_max) schedule(dynamic)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
@@ -2370,7 +3156,8 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
         end do
 
         do ind=1,twotondim
-           if(mod(ind-1, 2) /= icolor) cycle
+           ! True 3D red-black: color = parity of (i+j+k) of the cell
+           if(mod(popcnt(ind-1), 2) /= icolor) cycle
 
            iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
@@ -2378,39 +3165,48 @@ subroutine dilaton_gauss_seidel(ilevel, res_max, src_max)
            end do
 
            do i=1,ngrid
-              if(igridn_w(i,1)==0 .or. igridn_w(i,2)==0 .or. &
-                 igridn_w(i,3)==0 .or. igridn_w(i,4)==0 .or. &
-                 igridn_w(i,5)==0 .or. igridn_w(i,6)==0) cycle
-
               u_c = scalar_gr(ind_cell_w(i))
 
-              ig_left =ggg(1,1,ind); ig_right=ggg(1,2,ind)
-              lapl = scalar_gr(igridn_w(i,ig_left) + ncoarse+(hhh(1,1,ind)-1)*ngridmax) &
-                   + scalar_gr(igridn_w(i,ig_right)+ ncoarse+(hhh(1,2,ind)-1)*ngridmax)
-
-              ig_left =ggg(2,1,ind); ig_right=ggg(2,2,ind)
-              lapl = lapl + scalar_gr(igridn_w(i,ig_left) + ncoarse+(hhh(2,1,ind)-1)*ngridmax) &
-                          + scalar_gr(igridn_w(i,ig_right)+ ncoarse+(hhh(2,2,ind)-1)*ngridmax)
-
-              ig_left =ggg(3,1,ind); ig_right=ggg(3,2,ind)
-              lapl = lapl + scalar_gr(igridn_w(i,ig_left) + ncoarse+(hhh(3,1,ind)-1)*ngridmax) &
-                          + scalar_gr(igridn_w(i,ig_right)+ ncoarse+(hhh(3,2,ind)-1)*ngridmax)
-
+              ! Laplacian; Neumann closure at coarse-fine boundaries
+              lapl = 0d0
+              do idim=1,ndim
+                 ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
+                 ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
+                 ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
+                 if(igridn_w(i,ig_left) > 0) then
+                    lapl = lapl + scalar_gr(igridn_w(i,ig_left )+ih_left)
+                 else
+                    lapl = lapl + u_c
+                 end if
+                 if(igridn_w(i,ig_right) > 0) then
+                    lapl = lapl + scalar_gr(igridn_w(i,ig_right)+ih_right)
+                 else
+                    lapl = lapl + u_c
+                 end if
+              end do
               lapl = (lapl - 6d0*u_c) * dx2_inv
 
-              ! ρ/ρ₀ = (1+δ)*(a₀/a)³
-              rho_ratio = (1d0 + rho(ind_cell_w(i))) * (a0_dilaton/aexp)**3
-              mass_term = a2_over_2L2 * (rho_ratio - 1d0)
+              wfac = A2_d*max(u_c,1d-30)/beta_dilaton
+              vphi = -3d0*omega_m*beta_dilaton*wfac**pexp
+              dvphi = -3d0*omega_m*A2_d*pexp*wfac**(pexp-1d0)
 
-              residual = lapl - mass_term * u_c - cubic_coeff * u_c**3
-              jacobian = -6d0*dx2_inv - mass_term - 3d0*cubic_coeff*u_c**2
+              source = cA*(rho(ind_cell_w(i))*u_c - chibar_d) &
+                   & + cV*(vphi - vbar)
+
+              residual = lapl - source
+              jacobian = -6d0*dx2_inv - cA*rho(ind_cell_w(i)) - cV*dvphi
 
               if(abs(jacobian) > 1d-30) then
                  delta_u = -residual / jacobian
+                 ! Clamp and keep chi > 0 (vphi is singular at 0)
+                 if(abs(delta_u) > 0.5d0*abs(u_c)) &
+                      & delta_u = sign(0.5d0*abs(u_c), delta_u)
                  scalar_gr(ind_cell_w(i)) = u_c + delta_u
+                 if(scalar_gr(ind_cell_w(i)) <= 0d0) &
+                      & scalar_gr(ind_cell_w(i)) = 0.5d0*u_c
               end if
 
-              src_max = max(src_max, abs(mass_term*u_c) + abs(cubic_coeff*u_c**3))
+              src_max = max(src_max, abs(source))
               res_max = max(res_max, abs(residual))
 
            end do
@@ -2424,12 +3220,13 @@ end subroutine dilaton_gauss_seidel
 !=========================================================
 ! compute_fifth_force_dilaton: F₅ = -2β²·φ_D·∇φ_D
 !=========================================================
-subroutine compute_fifth_force_dilaton(ilevel)
+subroutine compute_fifth_force_dilaton(ilevel, factor_in)
   use amr_commons
   use poisson_commons
   use morton_hash
   implicit none
   integer,intent(in)::ilevel
+  real(dp),intent(in)::factor_in
 
   integer::igrid,ngrid,ncache,i,ind,iskip,idim
   integer::ig_left,ig_right,ih_left,ih_right
@@ -2442,16 +3239,17 @@ subroutine compute_fifth_force_dilaton(ilevel)
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
 
+  ! NOTE: no early return on ncache==0 — the final make_virtual_fine_dp
+  ! must be entered by every rank (matched communication)
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   dx=0.5D0**ilevel
   nx_loc=(icoarse_max-icoarse_min+1)
   scale=boxlen/dble(nx_loc)
   dx_loc=dx*scale
 
-  ! Factor: -2β²
-  factor = -2d0 * beta_dilaton**2
+  ! F5 = -ctilde^2 a^2 A2 * chi * grad(chi)  (see dilaton_solve_level)
+  factor = factor_in
 
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
   ggg(1,2,1:8)=(/0,2,0,2,0,2,0,2/); hhh(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -2491,20 +3289,28 @@ subroutine compute_fifth_force_dilaton(ilevel)
            do idim=1,ndim
               ig_left =ggg(idim,1,ind)
               ig_right=ggg(idim,2,ind)
-
-              if(igridn_w(i,ig_left)==0 .or. igridn_w(i,ig_right)==0) cycle
-
               ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
 
-              ind_nb_left =igridn_w(i,ig_left )+ih_left
-              ind_nb_right=igridn_w(i,ig_right)+ih_right
-
-              grad_u = (scalar_gr(ind_nb_right) - scalar_gr(ind_nb_left)) / (2d0*dx_loc)
+              ! One-sided differences at coarse-fine boundaries
+              if(igridn_w(i,ig_left)==0 .and. igridn_w(i,ig_right)==0) cycle
+              if(igridn_w(i,ig_left)==0) then
+                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) - phi_c) / dx_loc
+              else if(igridn_w(i,ig_right)==0) then
+                 grad_u = (phi_c - scalar_gr(igridn_w(i,ig_left)+ih_left)) / dx_loc
+              else
+                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) &
+                      &  - scalar_gr(igridn_w(i,ig_left )+ih_left)) / (2d0*dx_loc)
+              end if
               f(ind_cell_w(i),idim) = f(ind_cell_w(i),idim) + factor * phi_c * grad_u
            end do
         end do
      end do
+  end do
+
+  ! Update MPI virtual boundaries (f was synced before F5 was added)
+  do idim=1,ndim
+     call make_virtual_fine_dp(f(1,idim),ilevel)
   end do
 
 end subroutine compute_fifth_force_dilaton
@@ -2548,25 +3354,48 @@ subroutine galileon_solve_level(ilevel, icount)
   real(dp)::beta_G,coeff_G
   real(dp)::galileon_beta  ! external function
   real(dp)::Ha
+  real(dp)::xi_t,E2_t,hd_t,beta1_t
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
   logical::converged
+#ifdef USE_FFTW
+  logical,external::level_fft_ok
+#endif
 
+  ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
+  ! FFT stage contain MPI collectives (ALLREDUCE) that every rank
+  ! must enter; ranks without grids on this level contribute nothing.
   ncache=active(ilevel)%ngrid
-  if(ncache==0) return
 
   ! Compute β_G(a) and Vainshtein coeff
-  beta_G = galileon_beta(aexp)
-
-  ! coeff_G = c₃/(c₂·H₀²·a²) → in code units (H0=1):
-  !   coeff_G = c3/(c2*a²)
-  ! But using nDGP parameterization: coeff = 1/(12*omega_rc_eff*beta*a²)
-  ! Here we compute directly: coeff_G = c3_galileon / (c2_galileon * aexp**2)
-  ! But the sign/convention must match nDGP_gauss_seidel's Vainshtein term:
-  ! nDGP: coeff = 1/(12*omega_rc*beta*a²)
-  ! Galileon: coeff_G = c3_galileon / (c2_galileon * aexp**2)
-  coeff_G = c3_galileon / (c2_galileon * aexp**2)
+  if(galileon_tracker) then
+     ! Barreira+13 tracker (parameter-free): H*phidot = xi*H0^2*Mpl,
+     ! c2 = -6*c3*xi, xi = sqrt(6(1-Om)), c3 = 1/(6 xi). Closed forms:
+     !   E^2(a) = [Om a^-3 + sqrt(Om^2 a^-6 + 4(1-Om))]/2
+     !   Hdot/H^2 = -(3/2) Om a^-3 / (2E^2 - Om a^-3)
+     !   beta1 = (xi/3)[2 Hdot/H^2 - 1 + (1-Om)/E^4]   (Barreira eq. 14)
+     !   beta2 = 2 E^2 beta1 / xi^2                    (Barreira eq. 15)
+     ! Code-unit field eq (u = a^2 phi/(Mpl H0^2 L^2)):
+     !   lap u + [1/(3 beta1 a^4)][(lap u)^2-(didj u)^2] = (Om a/beta2) delta
+     xi_t   = sqrt(6d0*(1d0-omega_m))
+     E2_t   = 0.5d0*(omega_m/aexp**3 &
+          & + sqrt((omega_m/aexp**3)**2 + 4d0*(1d0-omega_m)))
+     hd_t   = -1.5d0*(omega_m/aexp**3)/(2d0*E2_t - omega_m/aexp**3)
+     beta1_t = (xi_t/3d0)*(2d0*hd_t - 1d0 + (1d0-omega_m)/E2_t**2)
+     beta_G  = 2d0*E2_t*beta1_t/xi_t**2      ! beta2: source coupling
+     coeff_G = 1d0/(3d0*beta1_t*aexp**4)     ! Vainshtein coefficient
+     ! Skip the solve while the linear coupling is negligible: the
+     ! unscreened G_eff/G-1 = -xi/(9 beta2 E^2) decays as 1/E^4 into
+     ! the past (< 1e-3 for z > 2.5). This avoids both wasted work
+     ! and the pathological |coeff| ~ a^-4 regime at high redshift.
+     if(-xi_t/(9d0*beta_G*E2_t) < 1d-3) return
+  else
+     ! LEGACY simplified nDGP-template coefficients (experimental)
+     beta_G = galileon_beta(aexp)
+     coeff_G = c3_galileon / (c2_galileon * aexp**4)
+     xi_t = 0d0; E2_t = 1d0
+  end if
 
   if(myid==1 .and. nstep==0 .and. ilevel==levelmin) then
      write(*,'(A,F8.4,A,ES10.3,A,F8.4)') &
@@ -2576,6 +3405,18 @@ subroutine galileon_solve_level(ilevel, icount)
   if(nstep==0) then
      call galileon_init_scalar(ilevel)
   end if
+
+#ifdef USE_FFTW
+  ! Operator-split spectral solve on the uniform domain level
+  if(level_fft_ok(ilevel)) then
+     call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     do iter=1,5
+        call vain_build_fft_rhs(ilevel, omega_m*aexp/beta_G, coeff_G)
+        call level_fft_helmholtz(ilevel, 0d0)
+        call make_virtual_fine_dp(scalar_gr(1), ilevel)
+     end do
+  end if
+#endif
 
   converged = .false.
   do iter=1,n_iter_galileon
@@ -2616,8 +3457,18 @@ subroutine galileon_solve_level(ilevel, icount)
 
   call galileon_save_old(ilevel)
 
-  ! Fifth force: F5 = -(1/(2β_G)) * grad(φ_G)
-  call compute_fifth_force(ilevel, -0.5d0/beta_G)
+  if(galileon_tracker) then
+     ! Poisson back-reaction (Barreira eq. 11): the extra term
+     ! -(kappa c3/M^3) phidot^2 lap(phi) integrates to a potential
+     ! -(c3 xi^2/E^2) u, so the WHOLE fifth force is a gradient of u:
+     !   F5 = +(xi/(6 E^2)) grad(u)   [c3 xi^2 = xi/6]
+     ! Unscreened linear limit: F5/FN = -xi/(9 beta2 E^2)
+     ! (= +0.84 at a=1 for Om=0.3, decaying as 1/E^4 into the past).
+     call compute_fifth_force(ilevel, xi_t/(6d0*E2_t))
+  else
+     ! LEGACY: F5 = -(1/2) grad(u)
+     call compute_fifth_force(ilevel, -0.5d0)
+  end if
 
 end subroutine galileon_solve_level
 
@@ -2685,7 +3536,7 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
   integer::ig_left,ig_right,ih_left,ih_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
-  real(dp)::u_c,lapl,source,residual,jacobian,delta_u
+  real(dp)::u_c,lapl,source,residual,jacobian,delta_u,sclamp
   real(dp)::phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp
   real(dp)::phi_xx,phi_yy,phi_zz
   real(dp)::lapl2,trace_ij2,vain_term
@@ -2726,7 +3577,7 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
 !$omp&  u_c,lapl,source,residual,jacobian,delta_u, &
 !$omp&  phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp, &
 !$omp&  phi_xx,phi_yy,phi_zz, &
-!$omp&  lapl2,trace_ij2,vain_term) &
+!$omp&  lapl2,trace_ij2,vain_term,sclamp) &
 !$omp& reduction(max:res_max,src_max) schedule(dynamic)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
@@ -2745,7 +3596,9 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
         end do
 
         do ind=1,twotondim
-           if(mod(ind-1, 2) /= icolor) cycle
+           ! True 3D red-black: color = parity of (i+j+k) of the cell,
+           ! i.e. popcount of the oct-local index (oct origins are even)
+           if(mod(popcnt(ind-1), 2) /= icolor) cycle
 
            iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
@@ -2753,24 +3606,23 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
            end do
 
            do i=1,ngrid
-              if(igridn_w(i,1)==0 .or. igridn_w(i,2)==0 .or. &
-                 igridn_w(i,3)==0 .or. igridn_w(i,4)==0 .or. &
-                 igridn_w(i,5)==0 .or. igridn_w(i,6)==0) cycle
-
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Face neighbor values
+              ! Face neighbor values; Neumann closure at coarse-fine boundaries
               ig_left =ggg(1,1,ind); ig_right=ggg(1,2,ind)
-              phi_xm = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(1,1,ind)-1)*ngridmax)
-              phi_xp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(1,2,ind)-1)*ngridmax)
+              phi_xm = u_c; phi_xp = u_c
+              if(igridn_w(i,ig_left ) > 0) phi_xm = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(1,1,ind)-1)*ngridmax)
+              if(igridn_w(i,ig_right) > 0) phi_xp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(1,2,ind)-1)*ngridmax)
 
               ig_left =ggg(2,1,ind); ig_right=ggg(2,2,ind)
-              phi_ym = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(2,1,ind)-1)*ngridmax)
-              phi_yp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(2,2,ind)-1)*ngridmax)
+              phi_ym = u_c; phi_yp = u_c
+              if(igridn_w(i,ig_left ) > 0) phi_ym = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(2,1,ind)-1)*ngridmax)
+              if(igridn_w(i,ig_right) > 0) phi_yp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(2,2,ind)-1)*ngridmax)
 
               ig_left =ggg(3,1,ind); ig_right=ggg(3,2,ind)
-              phi_zm = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(3,1,ind)-1)*ngridmax)
-              phi_zp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(3,2,ind)-1)*ngridmax)
+              phi_zm = u_c; phi_zp = u_c
+              if(igridn_w(i,ig_left ) > 0) phi_zm = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(3,1,ind)-1)*ngridmax)
+              if(igridn_w(i,ig_right) > 0) phi_zp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(3,2,ind)-1)*ngridmax)
 
               ! Laplacian
               lapl = (phi_xp + phi_xm + phi_yp + phi_ym + phi_zp + phi_zm - 6d0*u_c) * dx2_inv
@@ -2786,7 +3638,8 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
               vain_term = lapl2 - trace_ij2
 
               ! Source = Ωm*a/β_G * δ
-              source = omega_m * aexp / beta_G * rho(ind_cell_w(i))
+              ! rho has box mean rho_tot ≈ 1; subtract it (δ = rho - rho_tot)
+              source = omega_m * aexp / beta_G * (rho(ind_cell_w(i)) - rho_tot)
 
               residual = lapl + coeff_G * vain_term - source
 
@@ -2795,9 +3648,10 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
 
               if(abs(jacobian) > 1d-30) then
                  delta_u = -residual / jacobian
-                 if(abs(delta_u) > 0.5d0*dx2*abs(source) .and. abs(source) > 1d-30) then
-                    delta_u = sign(0.5d0*dx2*abs(source), delta_u)
-                 end if
+                 ! Damped Newton; floor the clamp scale at 1% of the
+                 ! delta=1 source so cells with delta~0 still relax
+                 sclamp = 0.5d0*dx2*max(abs(source), 1d-2*omega_m*aexp/abs(beta_G))
+                 if(abs(delta_u) > sclamp) delta_u = sign(sclamp, delta_u)
                  scalar_gr(ind_cell_w(i)) = u_c + delta_u
               end if
 

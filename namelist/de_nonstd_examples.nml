@@ -1,0 +1,52 @@
+! ---------------------------------------------------------------------
+! Example namelist blocks for the nonstandard DE/gravity models added
+! on branch de-nonstd-dev. Copy the block you need into your run .nml
+! and set the matching use_* flag in &run_params.
+! ---------------------------------------------------------------------
+
+! --- Quintessence (field-level scalar DE) ---------------------------
+! &run_params  use_quintessence=.true.  (requires cosmo=.true., w0=-1, wa=0)
+! Background integrated from a=1e-6 (Klein-Gordon + Friedmann, shooting
+! to Omega_de(a=1)=omega_l). Ratra-Peebles tracker: w~-2/(alpha+2) in
+! the matter era. Optionally set de_perturb=.true. for DE clustering
+! (cs2=1, quasi-static kappa2/alpha method in the FFT Poisson solver).
+&quint_params
+   quint_pot=1          ! 1 = Ratra-Peebles V=A*phi^-alpha, 2 = exponential V=A*exp(-lambda*phi)
+   quint_alpha=1.0      ! RP index (pot=1)
+   quint_lambda=1.0     ! exponential slope (pot=2)
+   quint_phi_ini=0.01   ! initial field value [Mpl] at a=1e-6
+/
+
+! --- Purely kinetic k-essence P(X) = -X + X^2 ------------------------
+! &run_params  use_kessence=.true.
+! w -> 1/3 early (dark-radiation-like), w -> -1 late; cs2(a) from the
+! Lagrangian. kes_x0 -> 0.5 pushes w(z=0) -> -1 and suppresses the
+! early dark-radiation component (default 0.5001 gives w0=-0.9992 and
+! rho_de/rho_m ~ 8e-3 at z=99).
+&kessence_params
+   kes_x0=0.5001        ! X(a=1) in M^4 units, must be > 0.5
+/
+
+! --- Coupled quintessence (interacting DE) ---------------------------
+! &run_params  use_coupled_de=.true.  use_quintessence=.true.
+! DM mass m(phi)=m0*exp(-beta*phi/Mpl) (Amendola 2000): modified
+! expansion, DM mass evolution in the Poisson source, +beta*phidot*v
+! velocity term in the particle kick, and G_eff=G(1+2 beta^2) between
+! matter. Without use_quintessence only the constant G_eff boost is
+! applied (legacy behaviour).
+&coupled_de_params
+   beta_cde=0.1         ! coupling [1/Mpl]
+   cde_friction=.true.  ! velocity term in particle kick
+   cde_vary_mass=.true. ! DM mass evolution in Poisson source
+/
+
+! --- Horndeski quasi-static mu(a,k) parametrized gravity -------------
+! &run_params  use_horndeski=.true.  (not combinable with fR/nDGP/...)
+! mu(a) = 1 + hs_mu0 * Omega_de(a)/Omega_de(1) multiplies the Poisson
+! source. hs_mass > 0 adds Compton-scale k-dependence
+! mu(a,k) = 1 + (mu(a)-1) k^2/(k^2 + a^2 hs_mass^2), exact in the FFT
+! Poisson paths (MG/CG paths use the k->infinity limit).
+&horndeski_params
+   hs_mu0=0.1           ! mu(a=1) - 1
+   hs_mass=0.0          ! Compton mass [h/Mpc]; 0 = scale-independent
+/

@@ -332,6 +332,7 @@ module amr_parameters
   integer ::sidm_nstates=2           ! Number of DM states (>=2)
   real(dp),dimension(0:9)::sidm_energy=0.0d0   ! State energies [keV]
   real(dp),dimension(0:9)::sidm_frac_init=0.0d0 ! Initial population fractions
+  real(dp)::sidm_mchi=1.0d0          ! DM particle mass [GeV/c^2] (iSIDM kinematics)
   ! Dark phase transition: sigma(v,a) = sigma(v) * g(a)
   character(len=16)::sidm_a_type='none'   ! 'none','step','sigmoid'
   real(dp)::sidm_a_transition=0.5d0       ! Scale factor of transition
@@ -376,9 +377,9 @@ module amr_parameters
                                       ! at different redshifts and cannot be compared
                                       ! epoch by epoch. Off by default: it costs a
                                       ! shortened step before every output.
-  real(dp)::fdm_refine_rho_min=8.0d0  ! de Broglie refinement density floor (units of mean)
   logical ::fdm_hjm_qp=.false.        ! Enable quantum pressure on HJM fluid levels (ilevel<first_wave_level)
   real(dp)::fdm_qp_c1max=0.5d0        ! QP validity gate: zero QP where amplitude curvature C1 exceeds this
+  real(dp)::fdm_refine_rho_min=8.0d0  ! de Broglie refinement density floor (units of mean)
 
   ! MOND (Modified Newtonian Dynamics) parameters
   logical ::use_mond=.false.             ! Enable QUMOND acceleration correction
@@ -423,14 +424,33 @@ module amr_parameters
 
   ! Galileon (cubic) gravity parameters
   logical ::use_galileon=.false.         ! Enable cubic Galileon scalar field
-  real(dp)::c2_galileon=-1.0d0          ! Kinetic coefficient
-  real(dp)::c3_galileon=1.0d0           ! Cubic coefficient
+  logical ::galileon_tracker=.true.      ! Barreira+13 tracker (parameter-free); F=legacy template
+  real(dp)::c2_galileon=-1.0d0          ! Kinetic coefficient (legacy template only)
+  real(dp)::c3_galileon=1.0d0           ! Cubic coefficient (legacy template only)
   integer ::n_iter_galileon=20           ! Max Newton-GS iterations
   real(dp)::galileon_eps=1.0d-6         ! Convergence threshold
 
   ! Coupled Dark Energy parameters
   logical ::use_coupled_de=.false.       ! Enable DM-DE coupling
   real(dp)::beta_cde=0.1d0              ! DM-DE coupling constant
+  logical ::cde_friction=.true.          ! Apply -beta*phidot*v particle friction (needs use_quintessence)
+  logical ::cde_vary_mass=.true.         ! Apply DM mass evolution to Poisson source (needs use_quintessence)
+
+  ! Quintessence (field-level scalar DE) parameters
+  logical ::use_quintessence=.false.     ! Enable quintessence background
+  integer ::quint_pot=1                  ! 1=Ratra-Peebles A*phi^-alpha, 2=exponential A*exp(-lambda*phi)
+  real(dp)::quint_alpha=1.0d0           ! RP inverse power-law index
+  real(dp)::quint_lambda=1.0d0          ! Exponential potential slope
+  real(dp)::quint_phi_ini=0.01d0        ! Initial field value [Mpl] at a=1e-6
+
+  ! Purely kinetic k-essence P(X)=-X+X^2 parameters
+  logical ::use_kessence=.false.         ! Enable k-essence background
+  real(dp)::kes_x0=0.5001d0             ! X(a=1) in M^4 units (>0.5; ->0.5 gives w0->-1)
+
+  ! Horndeski quasi-static parametrized gravity
+  logical ::use_horndeski=.false.        ! Enable mu(a,k)-modified Poisson
+  real(dp)::hs_mu0=0.1d0                ! mu(a=1)-1 amplitude
+  real(dp)::hs_mass=0.0d0               ! Compton mass [h/Mpc]; 0=scale-independent
 
   ! Early Dark Energy (Doran-Robbers) parameters
   logical ::use_ede=.false.              ! Enable Early Dark Energy

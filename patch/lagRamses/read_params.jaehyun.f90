@@ -46,6 +46,9 @@ subroutine read_params
        & ,use_dilaton &
        & ,use_galileon &
        & ,use_coupled_de &
+       & ,use_quintessence &
+       & ,use_kessence &
+       & ,use_horndeski &
        & ,use_ede &
        & ,use_sgs &
        & ,use_adm &
@@ -60,17 +63,20 @@ subroutine read_params
        & n_iter_symmetron,symmetron_eps
   namelist/dilaton_params/beta_dilaton,L_dilaton,a0_dilaton, &
        & n_iter_dilaton,dilaton_eps
-  namelist/galileon_params/c2_galileon,c3_galileon, &
+  namelist/galileon_params/galileon_tracker,c2_galileon,c3_galileon, &
        & n_iter_galileon,galileon_eps
-  namelist/coupled_de_params/beta_cde
+  namelist/coupled_de_params/beta_cde,cde_friction,cde_vary_mass
+  namelist/quint_params/quint_pot,quint_alpha,quint_lambda,quint_phi_ini
+  namelist/kessence_params/kes_x0
+  namelist/horndeski_params/hs_mu0,hs_mass
   namelist/ede_params/omega_ede,z_ede,w_ede
   namelist/sgs_params/sgs_C_prod,sgs_C_diss,sgs_C_smag,sgs_floor,sgs_cap,sgs_e_init,sgs_hydro
-  namelist/sidm_params/sidm_cross_section,sidm_npart_min, &
+  namelist/sidm_params/sidm,sidm_cross_section,sidm_npart_min, &
        & sidm_type,sidm_v0,sidm_power, &
        & sidm_courant, &
        & sidm_angular,sidm_epsilon, &
        & sidm_inelastic,sidm_delta,sidm_frac_excited, &
-       & sidm_nstates,sidm_energy,sidm_frac_init, &
+       & sidm_nstates,sidm_energy,sidm_frac_init,sidm_mchi, &
        & sidm_a_type,sidm_a_transition,sidm_sigma_ratio,sidm_a_width, &
        & sidm_fdiss, &
        & sidm_baryon,sidm_baryon_sigma,sidm_baryon_power, &
@@ -302,6 +308,24 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      read(1,NML=ede_params,END=68)
 68   continue
   end if
+  ! Quintessence parameters
+  if(use_quintessence) then
+     rewind(1)
+     read(1,NML=quint_params,END=561)
+561  continue
+  end if
+  ! k-essence parameters
+  if(use_kessence) then
+     rewind(1)
+     read(1,NML=kessence_params,END=562)
+562  continue
+  end if
+  ! Horndeski parameters
+  if(use_horndeski) then
+     rewind(1)
+     read(1,NML=horndeski_params,END=563)
+563  continue
+  end if
   ! SGS turbulence parameters
   if(use_sgs) then
      rewind(1)
@@ -410,6 +434,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
            write(*,'(A,ES10.3,A,F6.3,A,F6.3)') &
                 '   cs2_de=', cs2_de, ' w0=', w0, ' wa=', wa
         end if
+     else if(use_quintessence .or. use_kessence) then
+        ! Scalar-field DE provides model w(a), cs2(a) internally
+        if(myid==1) write(*,'(A)') &
+             ' DE perturbation (kappa2/alpha): cs2(a), w(a) from scalar-field DE model'
      else if(cs2_de <= 0.0d0) then
         if(myid==1) write(*,*) 'WARNING: de_perturb=T, no de_table, cs2_de<=0 -> disabling'
         de_perturb = .false.
@@ -458,6 +486,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(sidm_inelastic .and. sidm_delta <= 0.0d0 &
           .and. sidm_energy(1) <= 0.0d0) then
         if(myid==1) write(*,*) 'ERROR: sidm_inelastic=T but no energy splitting set'
+        call clean_stop
+     end if
+     if(sidm_inelastic .and. sidm_mchi <= 0.0d0) then
+        if(myid==1) write(*,*) 'ERROR: sidm_inelastic=T but sidm_mchi<=0 (DM mass in GeV)'
         call clean_stop
      end if
      ! Auto-populate multi-state arrays from 2-state shortcut
@@ -752,6 +784,40 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   end if
 
   !-------------------------------------------------
+  ! MG solver backgrounds assume LCDM; DE-boost paths break
+  ! the QUMOND phantom cancellation in the FFT solver
+  !-------------------------------------------------
+  if(use_fR .or. use_nDGP .or. use_symmetron .or. use_dilaton .or. use_galileon) then
+     if(use_quintessence .or. use_kessence) then
+        if(myid==1) write(*,*) 'ERROR: scalar-field DE cannot be combined with the MG solvers (LCDM background assumed)'
+        call clean_stop
+     end if
+     if(w0 /= -1.0d0 .or. wa /= 0.0d0 .or. use_ede) then
+        if(myid==1) write(*,*) 'WARNING: MG solver backgrounds assume LCDM; CPL/EDE combination is inconsistent'
+     end if
+  end if
+  if(use_mond .and. (de_perturb .or. use_horndeski .or. use_coupled_de)) then
+     if(myid==1) write(*,*) 'ERROR: use_mond cannot be combined with de_perturb/use_horndeski/use_coupled_de'
+     if(myid==1) write(*,*) '  (DE source boosts break the QUMOND phantom-density cancellation)'
+     call clean_stop
+  end if
+  if(use_galileon .and. .not. galileon_tracker .and. myid==1) then
+     write(*,*) 'WARNING: cubic Galileon LEGACY template (galileon_tracker=F):'
+     write(*,*) '  simplified non-tracker coefficients, NOT Barreira+13; experimental'
+  end if
+  if(use_galileon .and. galileon_tracker .and. myid==1) then
+     write(*,'(A)') ' Cubic Galileon: Barreira+13 tracker (parameter-free)'
+     write(*,'(A,F8.4,A,F8.4)') '   xi=sqrt(6(1-Om))=', sqrt(6d0*(1d0-omega_m)), &
+          & '  Geff/G(a=1)=', 1d0+sqrt(6d0*(1d0-omega_m))**3 &
+          & /(18d0*(-(sqrt(6d0*(1d0-omega_m))/3d0) &
+          & *(2d0*(-1.5d0*omega_m/(2d0-omega_m))-1d0+(1d0-omega_m))))
+  end if
+  if(use_galileon .and. .not. galileon_tracker .and. c2_galileon == 0d0) then
+     if(myid==1) write(*,*) 'ERROR: c2_galileon must be nonzero'
+     call clean_stop
+  end if
+
+  !-------------------------------------------------
   ! Symmetron gravity
   !-------------------------------------------------
   if(use_symmetron) then
@@ -796,9 +862,12 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         call clean_stop
      end if
      if(myid==1) then
-        write(*,'(A)') ' Dilaton gravity enabled'
-        write(*,'(A,F6.3,A,F6.3,A,F8.3,A)') &
-             '   a0=', a0_dilaton, '  beta=', beta_dilaton, '  L=', L_dilaton, ' Mpc/h'
+        write(*,'(A)') ' Dilaton gravity enabled (Brax+12 environmentally-damped)'
+        write(*,'(A,F6.3,A,F8.3,A)') &
+             '   beta0=', beta_dilaton, '  range L=', L_dilaton, ' Mpc/h'
+        write(*,'(A,ES10.3,A,F7.4,A)') '   A2=', &
+             & 1d0/(3d0*(L_dilaton/2997.92458d0)**2), '  s=3*Om=', 3d0*omega_m, &
+             & '  (a0_dilaton is ignored)'
         write(*,'(A,I3,A,ES10.3)') '   max_iter=', n_iter_dilaton, '  eps=', dilaton_eps
      end if
   end if
@@ -837,6 +906,84 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1) then
         write(*,'(A,F8.4)') ' Coupled Dark Energy enabled: beta_cde=', beta_cde
         write(*,'(A,F10.6)') '   G_eff/G = ', 1d0 + 2d0*beta_cde**2
+        if(use_quintessence) then
+           write(*,'(A,L2,A,L2)') '   coupled quintessence: friction=', &
+                & cde_friction, '  vary_mass=', cde_vary_mass
+        else
+           write(*,'(A)') '   (no use_quintessence: constant G_eff boost only)'
+        end if
+     end if
+  end if
+
+  !-------------------------------------------------
+  ! Quintessence / k-essence scalar-field dark energy
+  !-------------------------------------------------
+  if(use_quintessence .and. use_kessence) then
+     if(myid==1) write(*,*) 'ERROR: use_quintessence and use_kessence are mutually exclusive'
+     call clean_stop
+  end if
+  if(use_quintessence .or. use_kessence) then
+     if(.not. cosmo) then
+        if(myid==1) write(*,*) 'ERROR: quintessence/k-essence requires cosmo=.true.'
+        call clean_stop
+     end if
+     if(w0 /= -1.0d0 .or. wa /= 0.0d0) then
+        if(myid==1) write(*,*) 'ERROR: scalar-field DE replaces CPL; keep w0=-1, wa=0'
+        call clean_stop
+     end if
+     if(use_ede) then
+        if(myid==1) write(*,*) 'ERROR: use_ede cannot be combined with scalar-field DE'
+        call clean_stop
+     end if
+  end if
+  if(use_quintessence) then
+     if(quint_pot /= 1 .and. quint_pot /= 2) then
+        if(myid==1) write(*,*) 'ERROR: quint_pot must be 1 (Ratra-Peebles) or 2 (exponential)'
+        call clean_stop
+     end if
+     if(quint_alpha <= 0d0 .or. quint_lambda <= 0d0 .or. quint_phi_ini <= 0d0) then
+        if(myid==1) write(*,*) 'ERROR: quint_alpha, quint_lambda, quint_phi_ini must be > 0'
+        call clean_stop
+     end if
+     if(myid==1) then
+        if(quint_pot == 1) then
+           write(*,'(A,F8.4)') ' Quintessence enabled: V=A*phi^-alpha, alpha=', quint_alpha
+        else
+           write(*,'(A,F8.4)') ' Quintessence enabled: V=A*exp(-lambda*phi), lambda=', quint_lambda
+        end if
+        write(*,'(A,ES10.3)') '   phi_ini [Mpl] =', quint_phi_ini
+     end if
+  end if
+  if(use_kessence) then
+     if(kes_x0 <= 0.5d0) then
+        if(myid==1) write(*,*) 'ERROR: kes_x0 must be > 0.5'
+        call clean_stop
+     end if
+     if(myid==1) write(*,'(A,F12.8)') &
+          & ' k-essence enabled: P(X)=-X+X^2, X(a=1)/M^4=', kes_x0
+  end if
+
+  !-------------------------------------------------
+  ! Horndeski quasi-static mu(a,k) gravity
+  !-------------------------------------------------
+  if(use_horndeski) then
+     if(.not. poisson) then
+        if(myid==1) write(*,*) 'ERROR: use_horndeski=T requires poisson=T'
+        call clean_stop
+     end if
+     if(hs_mass < 0d0) then
+        if(myid==1) write(*,*) 'ERROR: hs_mass must be >= 0'
+        call clean_stop
+     end if
+     if(use_fR .or. use_nDGP .or. use_symmetron .or. use_dilaton .or. use_galileon) then
+        if(myid==1) write(*,*) 'ERROR: use_horndeski cannot be combined with another MG solver'
+        call clean_stop
+     end if
+     if(myid==1) then
+        write(*,'(A,F8.4,A,ES10.3,A)') ' Horndeski mu(a,k) gravity enabled: mu0=', &
+             & hs_mu0, '  Compton mass=', hs_mass, ' h/Mpc'
+        if(hs_mass > 0d0) write(*,'(A)') &
+             & '   NOTE: k-dependence exact only in FFT Poisson paths; MG/CG use k->inf limit'
      end if
   end if
 

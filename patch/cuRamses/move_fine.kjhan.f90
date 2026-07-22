@@ -148,7 +148,8 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use pm_commons
   use poisson_commons
   use hydro_commons, ONLY: uold,smallr,gamma
-  use cooling_module, ONLY: XH=>X, rhoc, mH 
+  use cooling_module, ONLY: XH=>X, rhoc, mH
+  use scalar_de_commons, only: sde_phip_of_a
   implicit none
   integer::ng,np,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -164,6 +165,7 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   integer::i,j,ind,idim,nx_loc,isink
   integer(i8b):: ksink
   real(dp)::dx,length,dx_loc,scale,vol_loc,r2
+  real(dp)::fric_cde2
   ! Grid-based arrays
   integer ,dimension(1:nvector)::father_cell
   real(dp),dimension(1:nvector,1:ndim)::x0
@@ -465,6 +467,14 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
      end do
   endif
 
+  ! Coupled quintessence: second half of the +beta*phidot*v velocity
+  ! term (the first half is applied in synchro_fine; the KDK scheme
+  ! splits the kick into two 0.5*dt halves — here and there)
+  fric_cde2=1.0D0
+  if(use_coupled_de .and. cde_friction .and. use_quintessence .and. cosmo)then
+     fric_cde2=exp(beta_cde*sde_phip_of_a(aexp)*hexp*0.5D0*dtnew(ilevel))
+  end if
+
   ! Update velocity
   do idim=1,ndim
      if(static.or.tracer)then
@@ -473,7 +483,7 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
         end do
      else
         do j=1,np
-           new_vp(j,idim)=vp(ind_part(j),idim)+ff(j,idim)*0.5D0*dtnew(ilevel)
+           new_vp(j,idim)=vp(ind_part(j),idim)*fric_cde2+ff(j,idim)*0.5D0*dtnew(ilevel)
         end do
      endif
   end do

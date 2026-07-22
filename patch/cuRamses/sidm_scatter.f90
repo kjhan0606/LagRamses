@@ -20,7 +20,7 @@ subroutine sidm_scatter(ilevel)
 #endif
   integer,intent(in)::ilevel
 
-  integer::icpu,igrid,subnump,info,ith
+  integer::icpu,igrid,subnump,info,ith,ith2
   integer::mythread,nthreads
   integer,dimension(:),allocatable::nparticles,ptrhead
   integer::sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down
@@ -32,13 +32,13 @@ subroutine sidm_scatter(ilevel)
   integer,dimension(1:ncpu,1:IRandNumSize)::allseed
   ! Per-thread seed array (deterministic, avoids localseed race)
   integer,dimension(:,:),allocatable::sidm_seeds
+  integer,dimension(IRandNumSize)::kjump,atothek
+  integer,dimension(IBinarySize)::kbin
   logical,save::sidm_excited_init = .false.
-  common /sidm_omp/ mythread
   common /sidm_diag/ sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down,sidm_n_vrel_reject
   common /sidm_cons/ sidm_dp,sidm_dEk,sidm_dp_max,sidm_dEk_max
   common /sidm_pmax_c/ sidm_Pmax_level
   common /sidm_diss/ sidm_dEdiss
-!$omp threadprivate(/sidm_omp/)
 
   if(.not.sidm) return
   if(numbtot(1,ilevel)==0) return
@@ -50,10 +50,7 @@ subroutine sidm_scatter(ilevel)
      sidm_excited_init = .true.
   end if
 
-!$omp parallel
-  mythread = omp_get_thread_num()
-  if(mythread==0) nthreads = omp_get_num_threads()
-!$omp end parallel
+  nthreads = omp_get_max_threads()
   allocate(ptrhead(0:nthreads-1), nparticles(0:nthreads-1))
 
   ! Initialize localseed if first call
@@ -62,16 +59,22 @@ subroutine sidm_scatter(ilevel)
      localseed = allseed(myid,1:IRandNumSize)
   end if
 
-  ! Initialize per-thread seeds from localseed (deterministic)
+  ! Initialize per-thread seeds from localseed (deterministic).
+  ! Threads 1..n-1 get streams offset by period/nthreads jumps of the
+  ! CRAY-ranf generator — the same construction rans() uses. rans()
+  ! itself must NOT be called here: its dummy array is hard-shaped
+  ! (ncpu,IRandNumSize) regardless of its N argument, so any buffer
+  ! with a different leading dimension is silently overrun.
   allocate(sidm_seeds(IRandNumSize, 0:nthreads-1))
   sidm_seeds(:,0) = localseed
-  do ith=1,nthreads-1
-     sidm_seeds(:,ith) = sidm_seeds(:,ith-1)
-     ! Advance seed 100 steps to decorrelate streams
-     do igrid=1,100
-        call ranf(sidm_seeds(:,ith), R_dummy)
+  if(nthreads>1) then
+     call ranfk( nthreads, kjump )
+     call ranfkbinary( kjump, kbin )
+     call ranfatok( Multiplier, kbin, atothek )
+     do ith=1,nthreads-1
+        call ranfmodmult( sidm_seeds(:,ith-1), atothek, sidm_seeds(:,ith) )
      end do
-  end do
+  end if
 
   ! Reset level-wide counters
   sidm_n_scatter  = 0
@@ -87,23 +90,32 @@ subroutine sidm_scatter(ilevel)
   sidm_dEdiss     = 0.0d0
 
 #if NDIM==3
-  do icpu=1,ncpu
-     if(numbl(icpu,ilevel)<=0) cycle
+  ! Only local grids: after virtual_tree_fine all particles sit on
+  ! grids owned by myid (virtual grids carry no particles here)
+  icpu = myid
+  if(numbl(icpu,ilevel)>0) then
      call pthreadLinkedList(headl(icpu,ilevel),numbl(icpu,ilevel), &
           nthreads,nparticles,ptrhead,next)
-!$omp parallel private(subnump,igrid)
-     subnump = nparticles(mythread)
-     igrid   = ptrhead(mythread)
-     call sub_sidm_scatter(ilevel,icpu,igrid,subnump,sidm_seeds)
+     ! Thread id is re-read inside the region and passed explicitly:
+     ! threadprivate persistence across regions is not guaranteed if
+     ! the runtime rebuilds the worker team, and a stale id here
+     ! means an out-of-bounds seed write (heap corruption)
+!$omp parallel private(subnump,igrid,ith2)
+     ith2 = omp_get_thread_num()
+     if(ith2 < nthreads) then
+        subnump = nparticles(ith2)
+        igrid   = ptrhead(ith2)
+        call sub_sidm_scatter(ilevel,icpu,igrid,subnump,sidm_seeds, &
+             & ith2,nthreads)
+     end if
 !$omp end parallel
-  end do
+  end if
 #endif
 
-  ! Update localseed deterministically: advance last thread's seed
-  localseed = sidm_seeds(:,nthreads-1)
-  do igrid=1,100
-     call ranf(localseed, R_dummy)
-  end do
+  ! Continue the rank stream from thread 0's final state (advance once
+  ! so the seed always moves even if no pairs were processed)
+  localseed = sidm_seeds(:,0)
+  call ranf(localseed, R_dummy)
 
   deallocate(ptrhead, nparticles, sidm_seeds)
 
@@ -153,13 +165,15 @@ subroutine sidm_scatter(ilevel)
 end subroutine sidm_scatter
 !################################################################
 !################################################################
-subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
+subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
+     & mythread_loc,nthreads_in)
   use pm_commons
   use amr_commons
   use random
   implicit none
   integer,intent(in)::ilevel,icpu,kgrid,subnump
-  integer,dimension(IRandNumSize,0:*)::thread_seeds
+  integer,intent(in)::mythread_loc,nthreads_in
+  integer,dimension(IRandNumSize,0:nthreads_in-1)::thread_seeds
 
   ! External function
   integer,external::cell_index_from_part
@@ -175,11 +189,6 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
   common /sidm_pmax_c/ sidm_Pmax_level
   common /sidm_diss/ sidm_dEdiss
 
-  ! Thread ID from sidm_scatter wrapper
-  integer::mythread_loc
-  common /sidm_omp/ mythread_loc
-!$omp threadprivate(/sidm_omp/)
-
   ! Local variables
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp)::dx,dx_loc,scale,vol_phys,dt_phys,sigma_over_m
@@ -191,7 +200,10 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
   real(dp)::m1,m2,mtot,R1,R2
   integer::igrid,jgrid,ind,iskip,icell,nx_loc
   integer::ipart,jpart,npart1,ndm_cell,ip,jp,npairs
-  integer,dimension(1:nvector)::ind_dm
+  ! Per-cell particle index buffer (grown to numbp(igrid) as needed;
+  ! a fixed nvector-sized buffer silently dropped particles beyond
+  ! nvector and clamped the (N-1) rate factor in dense cells)
+  integer,dimension(:),allocatable::ind_dm
   integer::itemp,ipair
   integer,dimension(IRandNumSize)::seed_loc
 
@@ -210,6 +222,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
 
   ! Inelastic scattering variables
   real(dp)::mu,KE_cm,KE_cm_new,delta_KE,v_rel_new_mag
+  real(dp)::mchi_g,mu_chi
   logical::do_transition
   integer::istate_1,istate_2,new_state_1,new_state_2
   integer::n_channels,ichan,j1,j2
@@ -231,8 +244,8 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
   scale = boxlen/dble(nx_loc)
   dx_loc = dx*scale
 
-  ! Physical cell volume [cm^3]
-  vol_phys = (dx_loc*scale_l/aexp)**3
+  ! Physical (proper) cell volume [cm^3]: scale_l is already proper
+  vol_phys = (dx_loc*scale_l)**3
 
   ! Physical timestep [s]
   dt_phys = dtnew(ilevel)*scale_t
@@ -264,6 +277,8 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
   dEdiss_loc    = 0.0d0
   P_max_loc     = 0.0d0
 
+  allocate(ind_dm(1024))
+
   ! Loop over grids assigned to this thread
   igrid = kgrid
   do jgrid=1,subnump
@@ -272,6 +287,9 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
      if(npart1<sidm_npart_min) then
         igrid = next(igrid)
         cycle
+     end if
+     if(npart1>size(ind_dm)) then
+        deallocate(ind_dm); allocate(ind_dm(npart1))
      end if
 
      ! Loop over 8 subcells (twotondim=8 in 3D)
@@ -291,7 +309,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
            if(cell_index_from_part(ipart,igrid,ilevel)==ind) then
               if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. ptypep(ipart)/=PTYPE_SINK) then
                  ndm_cell = ndm_cell+1
-                 if(ndm_cell<=nvector) ind_dm(ndm_cell) = ipart
+                 ind_dm(ndm_cell) = ipart
               end if
            end if
            ipart = nextp(ipart)
@@ -299,9 +317,6 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
 
         ! Need at least sidm_npart_min DM particles
         if(ndm_cell<sidm_npart_min) cycle
-
-        ! Clamp to nvector
-        if(ndm_cell>nvector) ndm_cell = nvector
 
         ! Fisher-Yates shuffle
         do ip=ndm_cell,2,-1
@@ -327,9 +342,10 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
            m2 = mp(ind_dm(ipair+1)) * scale_d * scale_l**3
            mtot = m1 + m2
 
-           ! Particle velocities (code units -> physical [cm/s])
-           v1(1:3) = vp(ind_dm(ipair),   1:3) * scale_v / aexp
-           v2(1:3) = vp(ind_dm(ipair+1), 1:3) * scale_v / aexp
+           ! Particle velocities (code units -> proper peculiar [cm/s]);
+           ! scale_v already carries the full supercomoving conversion
+           v1(1:3) = vp(ind_dm(ipair),   1:3) * scale_v
+           v2(1:3) = vp(ind_dm(ipair+1), 1:3) * scale_v
 
            ! [DEBUG] PRE-scatter NaN trap
            if(v1(1)/=v1(1).or.v1(2)/=v1(2).or.v1(3)/=v1(3).or. &
@@ -395,10 +411,13 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
            end select
 
            ! Scattering probability
-           ! P = (sigma/m) * m_p * v_rel * dt / V_cell * (N_dm - 1)
+           ! P = (sigma/m) * m_p * v_rel * dt / V_cell * (N_dm - 1),
+           ! times N/(2*floor(N/2)) so that floor(N/2) sampled pairs
+           ! reproduce the exact N(N-1)/2 pair rate for odd N too
            mp_phys = 0.5d0*(m1+m2)  ! representative particle mass
            P_scatter = sigma_over_m * mp_phys * v_rel_mag * dt_phys &
-                     / vol_phys * dble(ndm_cell-1)
+                     / vol_phys * dble(ndm_cell-1) &
+                     * dble(ndm_cell)/dble(2*npairs)
 
            ! Track P_max for timestep constraint
            if(P_scatter > P_max_loc) P_max_loc = P_scatter
@@ -438,19 +457,33 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
               istate_2 = max(0, min(istate_2, sidm_nstates-1))
               Ei_1 = sidm_energy(istate_1) * 1.602d-9  ! keV -> erg
               Ei_2 = sidm_energy(istate_2) * 1.602d-9
-              mu = m1*m2/mtot
-              KE_cm = 0.5d0 * mu * v_rel_mag**2
+              ! Kinematics of the MICROPHYSICAL chi pair: an N-body
+              ! macro-particle scatters as if a single chi of mass
+              ! sidm_mchi [GeV] does (velocities are shared), so the
+              ! splitting compares against the per-chi-pair CM energy,
+              ! not the astronomical macro-particle KE
+              mchi_g = sidm_mchi * 1.783d-24  ! GeV -> g
+              mu_chi = 0.5d0*mchi_g
+              KE_cm = 0.5d0 * mu_chi * v_rel_mag**2
 
-              ! Enumerate all energetically accessible final channels
+              ! Enumerate energetically accessible inelastic channels.
+              ! 2-state model: the off-diagonal coupling flips both
+              ! particles (gg->ee at threshold 2*delta, ee->gg
+              ! exothermic); mixed pairs have no open channel and
+              ! scatter elastically. N>2 states: phenomenological
+              ! uniform branching over all open pair channels.
+              ! The elastic channel always competes with equal weight.
               n_channels = 0
               do j1=0,sidm_nstates-1
                  do j2=j1,sidm_nstates-1
+                    if(j1==istate_1 .and. j2==istate_2) cycle  ! elastic
+                    if(j1==istate_2 .and. j2==istate_1) cycle  ! trivial swap
+                    if(sidm_nstates==2 .and. &
+                       .not.(j1==j2 .and. istate_1==istate_2)) cycle
                     ! Energy change: dE = (E_j1+E_j2) - (E_i1+E_i2)
                     ! dE>0 = endothermic (costs KE), dE<0 = exothermic (releases KE)
                     dE = (sidm_energy(j1)+sidm_energy(j2) &
                          -sidm_energy(istate_1)-sidm_energy(istate_2)) * 1.602d-9
-                    if(j1==istate_1 .and. j2==istate_2) cycle  ! skip elastic
-                    if(j1==istate_2 .and. j2==istate_1) cycle  ! skip trivial swap
                     if(dE > 0.0d0 .and. KE_cm < dE) cycle     ! not enough energy
                     n_channels = n_channels + 1
                     chan_j1(n_channels) = j1
@@ -460,28 +493,32 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
               end do
 
               if(n_channels > 0) then
+                 ! ichan = 0 selects the elastic channel
                  call ranf(seed_loc, R_inel)
-                 ichan = min(int(R_inel*dble(n_channels))+1, n_channels)
-                 new_state_1 = chan_j1(ichan)
-                 new_state_2 = chan_j2(ichan)
-                 delta_KE = -chan_dE(ichan)  ! negative dE = KE gained
-                 do_transition = .true.
-                 ! Count up/down transitions
-                 if(new_state_1 > istate_1) n_up_loc = n_up_loc + 1
-                 if(new_state_1 < istate_1) n_down_loc = n_down_loc + 1
-                 if(new_state_2 > istate_2) n_up_loc = n_up_loc + 1
-                 if(new_state_2 < istate_2) n_down_loc = n_down_loc + 1
+                 ichan = min(int(R_inel*dble(n_channels+1)), n_channels)
+                 if(ichan >= 1) then
+                    new_state_1 = chan_j1(ichan)
+                    new_state_2 = chan_j2(ichan)
+                    delta_KE = -chan_dE(ichan)  ! negative dE = KE gained
+                    do_transition = .true.
+                    ! Count up/down transitions
+                    if(new_state_1 > istate_1) n_up_loc = n_up_loc + 1
+                    if(new_state_1 < istate_1) n_down_loc = n_down_loc + 1
+                    if(new_state_2 > istate_2) n_up_loc = n_up_loc + 1
+                    if(new_state_2 < istate_2) n_down_loc = n_down_loc + 1
+                 end if
               end if
            end if
 
-           ! New relative velocity magnitude
+           ! New relative velocity magnitude (per-chi kinematics:
+           ! v'^2 = v^2 + 2*delta_KE/mu_chi)
            mu = m1*m2/mtot
            if(delta_KE == 0.0d0) then
               v_rel_new_mag = v_rel_mag  ! elastic
            else
-              KE_cm_new = 0.5d0*mu*v_rel_mag**2 + delta_KE
+              KE_cm_new = 0.5d0*mu_chi*v_rel_mag**2 + delta_KE
               if(KE_cm_new < 0.0d0) cycle  ! safety
-              v_rel_new_mag = sqrt(2.0d0*KE_cm_new/mu)
+              v_rel_new_mag = sqrt(2.0d0*KE_cm_new/mu_chi)
            end if
 
            ! Dissipative SIDM: remove fraction f_diss of CM kinetic energy
@@ -600,14 +637,16 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds)
            if(abs(dEk_evt) > dEk_max_loc) dEk_max_loc = abs(dEk_evt)
 
            ! Write new velocities (physical -> code units)
-           vp(ind_dm(ipair),   1:3) = v1_new(1:3) * aexp / scale_v
-           vp(ind_dm(ipair+1), 1:3) = v2_new(1:3) * aexp / scale_v
+           vp(ind_dm(ipair),   1:3) = v1_new(1:3) / scale_v
+           vp(ind_dm(ipair+1), 1:3) = v2_new(1:3) / scale_v
         end do  ! pairs
 
      end do  ! subcells (ind)
 
      igrid = next(igrid)
   end do  ! grids
+
+  deallocate(ind_dm)
 
   ! Save seed back to per-thread array (no race)
   thread_seeds(:,mythread_loc) = seed_loc
@@ -836,9 +875,9 @@ subroutine sidm_baryon_drag(ilevel)
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp)::dx,dx_loc,scale,vol_phys,vol_code,dt_phys
   real(dp)::rho_b_phys,sigma_eff
-  real(dp),dimension(1:3)::v_gas_phys,v_dm_phys,v_rel,dv_dm
+  real(dp),dimension(1:3)::v_gas_phys,v_dm_phys,v_rel,dv_dm,dv_gas
   real(dp)::v_rel_mag,v_rel_kms,drag_coeff
-  real(dp)::m_dm_phys,dv_max,dv_mag
+  real(dp)::m_dm_phys,m_gas_phys,dEk_dm,dv_max,dv_mag
   integer::igrid,jgrid,ind,iskip,icell,nx_loc
   integer::ipart,jpart,npart1,info
   ! Diagnostics
@@ -856,7 +895,7 @@ subroutine sidm_baryon_drag(ilevel)
   scale = boxlen/dble(nx_loc)
   dx_loc = dx*scale
   vol_code = dx_loc**3
-  vol_phys = (dx_loc*scale_l/aexp)**3
+  vol_phys = (dx_loc*scale_l)**3  ! proper volume (scale_l is proper)
   dt_phys  = dtnew(ilevel)*scale_t
 
   n_drag_loc  = 0
@@ -881,13 +920,14 @@ subroutine sidm_baryon_drag(ilevel)
         ! Only leaf cells with gas
         if(son(icell)/=0) cycle
 
-        ! Gas density and velocity (code units)
-        rho_b_phys = uold(icell,1) * scale_d / aexp**3
+        ! Gas density and velocity (code units -> proper cgs)
         if(uold(icell,1) <= 0.0d0) cycle
+        rho_b_phys = uold(icell,1) * scale_d
+        m_gas_phys = rho_b_phys * vol_phys
 
-        v_gas_phys(1) = uold(icell,2)/uold(icell,1) * scale_v / aexp
-        v_gas_phys(2) = uold(icell,3)/uold(icell,1) * scale_v / aexp
-        v_gas_phys(3) = uold(icell,4)/uold(icell,1) * scale_v / aexp
+        v_gas_phys(1) = uold(icell,2)/uold(icell,1) * scale_v
+        v_gas_phys(2) = uold(icell,3)/uold(icell,1) * scale_v
+        v_gas_phys(3) = uold(icell,4)/uold(icell,1) * scale_v
 
         ! Loop over particles in this grid
         ipart = headp(igrid)
@@ -896,10 +936,10 @@ subroutine sidm_baryon_drag(ilevel)
            if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. ptypep(ipart)/=PTYPE_SINK) then
               ! Check subcell match
               if(cell_index_from_part_inline(ipart,igrid)==ind) then
-                 ! DM velocity (physical)
-                 v_dm_phys(1) = vp(ipart,1) * scale_v / aexp
-                 v_dm_phys(2) = vp(ipart,2) * scale_v / aexp
-                 v_dm_phys(3) = vp(ipart,3) * scale_v / aexp
+                 ! DM velocity (proper peculiar)
+                 v_dm_phys(1) = vp(ipart,1) * scale_v
+                 v_dm_phys(2) = vp(ipart,2) * scale_v
+                 v_dm_phys(3) = vp(ipart,3) * scale_v
 
                  ! Relative velocity
                  v_rel(1:3) = v_dm_phys(1:3) - v_gas_phys(1:3)
@@ -923,31 +963,42 @@ subroutine sidm_baryon_drag(ilevel)
                  drag_coeff = sigma_eff * rho_b_phys * v_rel_mag * dt_phys
                  dv_dm(1:3) = -drag_coeff * v_rel(1:3)
 
-                 ! Limit kick to avoid overshoot (cap at 50% of v_rel)
+                 ! Limit kick: <=50% of v_rel for the particle AND for
+                 ! the implied gas kick (gas inertia matters in
+                 ! DM-dominated cells); together the caps keep the
+                 ! frictional heating strictly positive
+                 m_dm_phys = mp(ipart) * scale_d * scale_l**3
                  dv_mag = sqrt(dv_dm(1)**2+dv_dm(2)**2+dv_dm(3)**2)
-                 dv_max = 0.5d0 * v_rel_mag
+                 dv_max = 0.5d0 * v_rel_mag * min(1.0d0, m_gas_phys/m_dm_phys)
                  if(dv_mag > dv_max) then
                     dv_dm(1:3) = dv_dm(1:3) * (dv_max/dv_mag)
                     dv_mag = dv_max
                  end if
 
                  ! Apply to DM particle (physical -> code)
-                 vp(ipart,1) = vp(ipart,1) + dv_dm(1)*aexp/scale_v
-                 vp(ipart,2) = vp(ipart,2) + dv_dm(2)*aexp/scale_v
-                 vp(ipart,3) = vp(ipart,3) + dv_dm(3)*aexp/scale_v
+                 vp(ipart,1) = vp(ipart,1) + dv_dm(1)/scale_v
+                 vp(ipart,2) = vp(ipart,2) + dv_dm(2)/scale_v
+                 vp(ipart,3) = vp(ipart,3) + dv_dm(3)/scale_v
 
-                 ! Backreaction on gas: dp_gas = -m_DM * dv_DM
-                 ! Update momentum density: d(rho*v) = m_DM * (-dv_DM) / V_cell
-                 m_dm_phys = mp(ipart) * scale_d * scale_l**3
+                 ! Backreaction on gas: momentum -m_DM*dv and total
+                 ! energy -dKE_DM, so total DM+gas momentum and energy
+                 ! are conserved (bulk + frictional heat)
+                 dEk_dm = m_dm_phys*( v_dm_phys(1)*dv_dm(1) &
+                        + v_dm_phys(2)*dv_dm(2) + v_dm_phys(3)*dv_dm(3) &
+                        + 0.5d0*(dv_dm(1)**2+dv_dm(2)**2+dv_dm(3)**2) )
                  uold(icell,2) = uold(icell,2) &
-                      - m_dm_phys*dv_dm(1) / (vol_phys*scale_d/aexp**3) &
-                      * (aexp/scale_v)
+                      - m_dm_phys*dv_dm(1)/vol_phys/(scale_d*scale_v)
                  uold(icell,3) = uold(icell,3) &
-                      - m_dm_phys*dv_dm(2) / (vol_phys*scale_d/aexp**3) &
-                      * (aexp/scale_v)
+                      - m_dm_phys*dv_dm(2)/vol_phys/(scale_d*scale_v)
                  uold(icell,4) = uold(icell,4) &
-                      - m_dm_phys*dv_dm(3) / (vol_phys*scale_d/aexp**3) &
-                      * (aexp/scale_v)
+                      - m_dm_phys*dv_dm(3)/vol_phys/(scale_d*scale_v)
+                 uold(icell,5) = uold(icell,5) &
+                      - dEk_dm/vol_phys/(scale_d*scale_v**2)
+
+                 ! Keep the local gas velocity current so subsequent
+                 ! particles in this cell see the updated bulk flow
+                 dv_gas(1:3) = -m_dm_phys*dv_dm(1:3)/m_gas_phys
+                 v_gas_phys(1:3) = v_gas_phys(1:3) + dv_gas(1:3)
 
                  ! Diagnostics
                  n_drag_loc = n_drag_loc + 1

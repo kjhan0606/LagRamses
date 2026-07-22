@@ -1682,6 +1682,7 @@ subroutine make_fine_bc_rhs(ilevel,icount)
    use poisson_commons
    use morton_hash
    use dark_energy_commons, only: de_table_loaded, get_de_ratio, f_de_val
+   use scalar_de_commons, only: sde_dmcorr_of_a, horndeski_mu_of_a
    implicit none
    integer, intent(in) :: ilevel,icount
 
@@ -1725,6 +1726,12 @@ subroutine make_fine_bc_rhs(ilevel,icount)
          end if
          fourpi = fourpi * (1.0d0 + (omega_de_a_mg / omega_cb_mg) * get_de_ratio(1.0d-3, aexp))
       end if
+      ! Coupled quintessence: DM mass evolution rho_dm*a^3/rho_dm0
+      if(use_coupled_de .and. cde_vary_mass .and. use_quintessence) then
+         fourpi = fourpi * sde_dmcorr_of_a(aexp)
+      end if
+      ! Horndeski quasi-static mu(a) (scale-independent limit)
+      if(use_horndeski) fourpi = fourpi * horndeski_mu_of_a(aexp)
    end if
 
    dx  = 0.5d0**ilevel
@@ -2479,7 +2486,8 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
    use poisson_cuda_interface
    use neutrino_commons, only: nu_table_loaded, get_nu_ratio
    use dark_energy_commons, only: de_table_loaded, get_de_ratio, &
-        f_de_val, compute_de_kspace_params
+        f_de_val, compute_de_kspace_params, de_helmholtz_on
+   use scalar_de_commons, only: sde_dmcorr_of_a, horndeski_mu_of_a
    use iso_c_binding
 
    implicit none
@@ -2504,6 +2512,7 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
    integer  :: nx_loc_fft
    real(dp) :: omega_cb_loc, nu_factor, R_nu_val, k_phys, twopi_fft
    real(dp) :: de_factor, R_DE_val, omega_de_a
+   real(dp) :: hs_factor, mu_a_hs
    real(dp) :: de_kappa2, de_alpha, k_tilde_sq
    integer  :: kx_i, ky_i, kz_i
    integer(i8b) :: N_complex_fft, idx_c
@@ -2802,6 +2811,13 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
       else
          fourpi_fft = 1.5D0 * omega_m * aexp * scale_fft
       end if
+      ! Coupled quintessence: DM mass evolution rho_dm*a^3/rho_dm0
+      if(use_coupled_de .and. cde_vary_mass .and. use_quintessence) &
+           & fourpi_fft = fourpi_fft * sde_dmcorr_of_a(aexp)
+      ! Horndeski scale-independent mu(a); k-dependent case (hs_mass>0)
+      ! is applied in the Green's-function correction instead
+      if(use_horndeski .and. hs_mass == 0.0d0) &
+           & fourpi_fft = fourpi_fft * horndeski_mu_of_a(aexp)
    else
       fourpi_fft = 4.D0 * ACOS(-1.0D0) * scale_fft
    end if
@@ -2858,7 +2874,9 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
    ! ------------------------------------------------------------------
    ! Step 3b: Compute and upload neutrino/DE correction factors to GPU
    ! ------------------------------------------------------------------
-   if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb) then
+   if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb &
+        & .or. (use_horndeski .and. hs_mass > 0.0d0)) then
+      mu_a_hs = horndeski_mu_of_a(aexp)
       twopi_fft = 2.0d0 * ACOS(-1.0D0)
       N_complex_fft = int(fft_Nx,i8b) * int(fft_Ny,i8b) * int(fft_Nz/2+1,i8b)
       if(use_neutrino .and. omega_nu > 0.0d0) omega_cb_loc = omega_m - omega_nu
@@ -2866,7 +2884,7 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
       ! Reuse rhs_local as scratch (it's already allocated >= N_complex)
 
       ! Precompute DE params
-      if(de_perturb .and. .not. de_table_loaded .and. cs2_de > 0.0d0) then
+      if(de_perturb .and. .not. de_table_loaded .and. de_helmholtz_on()) then
          call compute_de_kspace_params(aexp, de_kappa2, de_alpha)
       end if
       if(de_perturb .and. de_table_loaded) then
@@ -2905,13 +2923,21 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
                   R_DE_val = get_de_ratio(k_phys, aexp)
                   de_factor = 1.0d0 + (omega_de_a / omega_cb_loc) * R_DE_val
                end if
-            else if(cs2_de > 0.0d0) then
+            else if(de_helmholtz_on()) then
                k_tilde_sq = twopi_fft * twopi_fft * dble(kx_i**2 + ky_i**2 + kz_i**2)
-               de_factor = (k_tilde_sq + de_kappa2) / (k_tilde_sq + de_kappa2 + de_alpha)
+               de_factor = 1.0d0 + de_alpha / (k_tilde_sq + de_kappa2)
             end if
          end if
 
-         rhs_local(idx_c) = nu_factor * de_factor
+         ! Horndeski k-dependent mu(a,k)
+         hs_factor = 1.0d0
+         if(use_horndeski .and. hs_mass > 0.0d0) then
+            k_phys = twopi_fft * sqrt(dble(kx_i**2 + ky_i**2 + kz_i**2)) / boxlen_ini
+            hs_factor = 1.0d0 + (mu_a_hs - 1.0d0) * k_phys*k_phys / &
+                 & (k_phys*k_phys + (aexp*hs_mass)**2)
+         end if
+
+         rhs_local(idx_c) = nu_factor * de_factor * hs_factor
       end do
 
       call cuda_fft_set_correction_c(rhs_local, int(N_complex_fft, c_int))
@@ -2950,7 +2976,8 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
    use poisson_parameters
    use neutrino_commons, only: nu_table_loaded, read_neutrino_table, get_nu_ratio
    use dark_energy_commons, only: compute_de_kspace_params, de_table_loaded, &
-        read_de_table, get_de_ratio, f_de_val
+        read_de_table, get_de_ratio, f_de_val, de_helmholtz_on
+   use scalar_de_commons, only: sde_dmcorr_of_a, horndeski_mu_of_a
    use iso_c_binding
    use omp_lib
    implicit none
@@ -3015,6 +3042,7 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
 
    ! DE perturbation variables
    real(dp) :: de_kappa2, de_alpha, k_tilde_sq, de_factor
+   real(dp) :: hs_factor, mu_a_hs
    real(dp) :: R_DE_val, omega_de_a
 
    ! FFT RHS fourpi (without DE boost)
@@ -3239,6 +3267,13 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
       else
          fourpi_fft = 1.5D0 * omega_m * aexp * scale_fft
       end if
+      ! Coupled quintessence: DM mass evolution rho_dm*a^3/rho_dm0
+      if(use_coupled_de .and. cde_vary_mass .and. use_quintessence) &
+           & fourpi_fft = fourpi_fft * sde_dmcorr_of_a(aexp)
+      ! Horndeski scale-independent mu(a); k-dependent case (hs_mass>0)
+      ! is applied in the Green's-function correction instead
+      if(use_horndeski .and. hs_mass == 0.0d0) &
+           & fourpi_fft = fourpi_fft * horndeski_mu_of_a(aexp)
    else
       fourpi_fft = 4.D0 * ACOS(-1.0D0) * scale_fft
    end if
@@ -3495,7 +3530,7 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
       call fftw_mpi_execute_dft_r2c(plan_r2c, rdata_fftw, cdata_fftw)
 
       ! --- Precompute DE kspace params if needed (quasi-static fallback) ---
-      if(de_perturb .and. .not. de_table_loaded .and. cs2_de > 0.0d0) then
+      if(de_perturb .and. .not. de_table_loaded .and. de_helmholtz_on()) then
          call compute_de_kspace_params(aexp, de_kappa2, de_alpha)
       end if
       ! Precompute DE table params
@@ -3512,7 +3547,9 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
       ! TRANSPOSED complex layout (Ny-distributed):
       !   idx_c = ky_local*(Nx*(Nz/2+1)) + kx*(Nz/2+1) + kz, ky = ny_start+ky_local
       N_complex = int(local_ny_fftw,i8b) * int(fft_Nx,i8b) * int(fft_Nz/2+1,i8b)
-      if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb) then
+      if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb &
+           & .or. (use_horndeski .and. hs_mass > 0.0d0)) then
+         mu_a_hs = horndeski_mu_of_a(aexp)
          if(use_neutrino .and. omega_nu > 0.0d0) omega_cb_loc = omega_m - omega_nu
          do idx_c = 0, N_complex-1
             ! Compute integer wave numbers for this mode (transposed order)
@@ -3545,14 +3582,22 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
                      R_DE_val = get_de_ratio(k_phys, aexp)
                      de_factor = 1.0d0 + (omega_de_a / omega_cb_loc) * R_DE_val
                   end if
-               else if(cs2_de > 0.0d0) then
+               else if(de_helmholtz_on()) then
                   ! Fallback: kappa2/alpha quasi-static method
                   k_tilde_sq = twopi * twopi * dble(kx_i**2 + ky_i**2 + kz_i**2)
-                  de_factor = (k_tilde_sq + de_kappa2) / (k_tilde_sq + de_kappa2 + de_alpha)
+                  de_factor = 1.0d0 + de_alpha / (k_tilde_sq + de_kappa2)
                end if
             end if
 
-            cdata_fftw(idx_c + 1) = cdata_fftw(idx_c + 1) * green(idx_c) * nu_factor * de_factor
+            ! Horndeski k-dependent mu(a,k)
+            hs_factor = 1.0d0
+            if(use_horndeski .and. hs_mass > 0.0d0) then
+               k_phys = twopi * sqrt(dble(kx_i**2 + ky_i**2 + kz_i**2)) / boxlen_ini
+               hs_factor = 1.0d0 + (mu_a_hs - 1.0d0) * k_phys*k_phys / &
+                    & (k_phys*k_phys + (aexp*hs_mass)**2)
+            end if
+
+            cdata_fftw(idx_c + 1) = cdata_fftw(idx_c + 1) * green(idx_c) * nu_factor * de_factor * hs_factor
          end do
       else
          do idx_c = 0, N_complex-1
@@ -3682,7 +3727,7 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
       call fftw_execute_dft_r2c(plan_r2c, rhs_3d, cdata)
 
       ! --- Precompute DE kspace params if needed (quasi-static fallback) ---
-      if(de_perturb .and. .not. de_table_loaded .and. cs2_de > 0.0d0) then
+      if(de_perturb .and. .not. de_table_loaded .and. de_helmholtz_on()) then
          call compute_de_kspace_params(aexp, de_kappa2, de_alpha)
       end if
       ! Precompute DE table params
@@ -3697,7 +3742,9 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
 
       ! --- Step 4: Apply Green's function (+ neutrino/DE corrections) ---
       N_complex = int(fft_Nx,i8b) * int(fft_Ny,i8b) * int(fft_Nz/2+1,i8b)
-      if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb) then
+      if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb &
+           & .or. (use_horndeski .and. hs_mass > 0.0d0)) then
+         mu_a_hs = horndeski_mu_of_a(aexp)
          if(use_neutrino .and. omega_nu > 0.0d0) omega_cb_loc = omega_m - omega_nu
          do idx_c = 0, N_complex-1
             kx_i = int(idx_c / (int(fft_Ny,i8b)*int(fft_Nz/2+1,i8b)))
@@ -3728,14 +3775,22 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
                      R_DE_val = get_de_ratio(k_phys, aexp)
                      de_factor = 1.0d0 + (omega_de_a / omega_cb_loc) * R_DE_val
                   end if
-               else if(cs2_de > 0.0d0) then
+               else if(de_helmholtz_on()) then
                   ! Fallback: kappa2/alpha quasi-static
                   k_tilde_sq = twopi * twopi * dble(kx_i**2 + ky_i**2 + kz_i**2)
-                  de_factor = (k_tilde_sq + de_kappa2) / (k_tilde_sq + de_kappa2 + de_alpha)
+                  de_factor = 1.0d0 + de_alpha / (k_tilde_sq + de_kappa2)
                end if
             end if
 
-            cdata(idx_c) = cdata(idx_c) * green(idx_c) * nu_factor * de_factor
+            ! Horndeski k-dependent mu(a,k)
+            hs_factor = 1.0d0
+            if(use_horndeski .and. hs_mass > 0.0d0) then
+               k_phys = twopi * sqrt(dble(kx_i**2 + ky_i**2 + kz_i**2)) / boxlen_ini
+               hs_factor = 1.0d0 + (mu_a_hs - 1.0d0) * k_phys*k_phys / &
+                    & (k_phys*k_phys + (aexp*hs_mass)**2)
+            end if
+
+            cdata(idx_c) = cdata(idx_c) * green(idx_c) * nu_factor * de_factor * hs_factor
          end do
       else
          do idx_c = 0, N_complex-1

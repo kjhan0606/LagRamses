@@ -1,0 +1,33 @@
+\contentsline {section}{\numberline {1}Introduction}{1}{section.1}%
+\contentsline {section}{\numberline {2}Self-Interacting Dark Matter}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Physical motivation}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Monte Carlo scattering algorithm}{2}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Cross-sections and angular distributions}{3}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}Inelastic (two-state) SIDM}{3}{subsection.2.4}%
+\contentsline {subsection}{\numberline {2.5}Timestep, threading and diagnostics}{3}{subsection.2.5}%
+\contentsline {subsection}{\numberline {2.6}Validation}{3}{subsection.2.6}%
+\contentsline {section}{\numberline {3}Dark Energy and non-GR Gravity}{3}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Unified Poisson-solver framework}{4}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}CPL dark energy with clustering perturbations}{4}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Massive neutrino linear response}{5}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Early dark energy}{5}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Scalar-field dark energy: quintessence and k-essence}{5}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}Coupled quintessence}{5}{subsection.3.6}%
+\contentsline {subsection}{\numberline {3.7}Parametrized Horndeski gravity}{5}{subsection.3.7}%
+\contentsline {subsection}{\numberline {3.8}Screened modified gravity: the scalar-field solvers}{5}{subsection.3.8}%
+\contentsline {subsubsection}{\numberline {3.8.1}$f(R)$ Hu--Sawicki}{6}{subsubsection.3.8.1}%
+\contentsline {subsubsection}{\numberline {3.8.2}nDGP}{6}{subsubsection.3.8.2}%
+\contentsline {subsubsection}{\numberline {3.8.3}Symmetron}{6}{subsubsection.3.8.3}%
+\contentsline {subsubsection}{\numberline {3.8.4}Environmentally damped dilaton}{6}{subsubsection.3.8.4}%
+\contentsline {subsubsection}{\numberline {3.8.5}Tracker cubic Galileon}{6}{subsubsection.3.8.5}%
+\contentsline {subsubsection}{\numberline {3.8.6}QUMOND}{7}{subsubsection.3.8.6}%
+\contentsline {subsection}{\numberline {3.9}Numerical solution of the scalar equations}{7}{subsection.3.9}%
+\contentsline {subsection}{\numberline {3.10}Verification}{7}{subsection.3.10}%
+\contentsline {section}{\numberline {4}Fuzzy Dark Matter}{8}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Physical motivation and equations}{8}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Supercomoving formulation}{8}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Phase resolvability sets the box size}{9}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Hybrid fluid--wave scheme}{9}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Validation}{10}{subsection.4.5}%
+\contentsline {section}{\numberline {5}Evaporating Primordial Black Holes}{11}{section.5}%
+\contentsline {section}{\numberline {6}Conclusions}{12}{section.6}%

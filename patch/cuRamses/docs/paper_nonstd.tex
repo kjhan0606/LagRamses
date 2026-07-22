@@ -1,0 +1,1060 @@
+% cuRAMSES III — Avengers Assembly:
+% non-standard cosmological physics suite
+% (SIDM / dark energy & non-GR gravity / FDM / PBH)
+% JCAP style (jcappub.sty, SISSA Medialab)
+%
+\documentclass[11pt,a4paper]{article}
+\usepackage{jcappub}
+\usepackage{booktabs}
+\usepackage{multirow}
+
+\newcommand{\ramses}{\textsc{ramses}}
+\newcommand{\curamses}{\textsc{cuRAMSES}}
+\newcommand{\camb}{\textsc{camb}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\Geff}{G_{\rm eff}}
+\newcommand{\Mpl}{M_{\rm Pl}}
+\newcommand{\kms}{\,{\rm km\,s^{-1}}}
+
+\title{\boldmath Avengers Assembly: a suite of non-standard cosmologies}
+
+\author[a,1]{Juhan Kim\note{Corresponding author.}}
+
+\affiliation[a]{Center for Advanced Computation, Korea Institute for Advanced Study,\\
+85 Hoegiro, Dongdaemun-gu, Seoul 02455, Republic of Korea}
+
+\emailAdd{kjhan@kias.re.kr}
+
+\abstract{We present \curamses~III, the non-standard cosmology
+suite of the \curamses\ adaptive mesh refinement (AMR) code. The
+suite collects the most widely studied extensions of $\Lambda$CDM
+within a single code. The first component treats
+\textbf{self-interacting dark matter} (SIDM). Scattering is
+realised as a Monte Carlo process between particle pairs in each
+cell. Constant, velocity-dependent, anisotropic, and inelastic
+(two-state) cross sections are supported. Momentum and energy are
+conserved at machine precision. The second component covers
+\textbf{dark energy and modified gravity}. It includes CPL dark
+energy with clustering perturbations, a linear response treatment
+of massive neutrinos, early dark energy, quintessence and
+k-essence fields, coupled quintessence, parametrized quasi-static
+Horndeski gravity, Hu--Sawicki $f(R)$, nDGP, the symmetron, the
+environmentally damped dilaton, the tracker cubic Galileon, and
+QUMOND. All of these models share one framework for the Poisson
+equation, and the model corrections combine multiplicatively
+within it. The third component follows \textbf{fuzzy dark matter}
+(FDM). The wavefunction is evolved in supercomoving variables, in
+which the Schr\"odinger--Poisson system contains no explicit scale
+factors. A hybrid scheme couples a Madelung fluid on coarse levels
+to the wave solver on refined levels. The fluid stores a
+continuous action and thereby removes the box-size limit of pure
+wave simulations. The fourth component models
+\textbf{evaporating primordial black holes} (PBH) with a global
+mass function drawn from a precomputed evaporation history, and
+the released energy can heat the surrounding gas. Each module was
+verified in three stages. The equations were checked against the
+published literature. The solvers reproduce analytic linear
+responses to better than $10^{-5}$. A controlled suite of $64^3$
+simulations agrees with a matched linear forward model at the two
+to five per cent level, and the residual differences carry the
+sign expected from screening. We document the algorithms, the
+unit conventions, the input interfaces, and the verification
+methodology. The paper is intended as a self-contained reference
+for non-standard cosmological simulations with AMR codes.}
+
+\keywords{cosmological simulations, dark energy theory, modified gravity,
+dark matter theory}
+
+\begin{document}
+\maketitle
+
+
+% ===================================================================
+\section{Introduction}
+\label{sec:intro}
+
+The $\Lambda$CDM concordance model provides an excellent fit to a
+wide range of cosmological observations \citep{Planck2020}, yet the
+physical nature of both dark components remains unknown. On the
+dark-energy side, the cosmological constant may be replaced by a
+dynamical field with an evolving equation of state
+\citep{ChevallierPolarski2001,Linder2003}, by an early dark energy
+component \citep{Poulin2019}, or the acceleration may signal a
+breakdown of General Relativity on cosmological scales, as in
+$f(R)$ gravity \citep{HuSawicki2007}, braneworld models
+\citep{Schmidt2009}, Galileon \citep{Barreira2013}, symmetron and
+dilaton theories \citep{HinterbichlerKhoury2010,Brax2010}, or MOND
+\citep{Milgrom1983}. On the dark-matter side, small-scale tensions
+motivate self-interacting dark matter
+\citep{SpergelSteinhardt2000,TulinYu2018}, ultralight (fuzzy) dark
+matter \citep{Hui2017,Schive2014}, and primordial black holes
+\citep{Carr2021}, while neutrino oscillations guarantee a small
+but non-zero hot component \citep{LesgourguesPastor2006}.
+
+Stage-IV surveys will constrain all of these at the per-cent
+level, and their nonlinear signatures can only be predicted by
+simulations. Historically each extension has lived in its own
+specialised code; comparing models then convolves physical
+differences with code systematics. This paper describes the
+opposite approach: one AMR code, \curamses\ \citep{Kim2026},
+carrying \emph{all} of the above extensions behind uniform
+namelist switches, with shared infrastructure (domain
+decomposition, Morton-key octree, multigrid/CG/FFT Poisson
+solvers, OpenMP+MPI parallelism) and a common verification
+methodology. Hence the title\footnote{From the Korean
+``\emph{mwol joahalji mollaseo da neoeosseo}'' --- we didn't
+know what you'd like, so we put everything in.}.
+
+The paper is organised in four physics sections, one per family:
+Section~\ref{sec:sidm} describes self-interacting dark matter;
+Section~\ref{sec:denongr} the dark energy and non-GR gravity
+battery, including the unified Poisson framework, the nonlinear
+scalar-field solvers and their verification; Section~\ref{sec:fdm}
+fuzzy dark matter; and Section~\ref{sec:pbh} evaporating
+primordial black holes. Section~\ref{sec:conclusion} concludes.
+Throughout, code quantities use the supercomoving variables of
+\citet{MartelShapiro1998}: $\tilde x = x_{\rm com}/(aB)$
+(with $B$ the box size), $\tilde\rho = \rho a^3/(\rho_c\Omega_m)$
+(so $\bar{\tilde\rho}=1$), $\tilde\phi = a^2\phi/(BH_0)^2$ and
+${\rm d}\tilde t = H_0\,{\rm d}t/a^2$.
+
+% ===================================================================
+\section{Self-Interacting Dark Matter}
+\label{sec:sidm}
+
+\subsection{Physical motivation}
+
+SIDM models introduce a non-zero scattering cross-section
+$\sigma/m$ that allows dark matter particles to exchange momentum
+and energy, potentially resolving the core--cusp, missing
+satellites and too-big-to-fail problems
+\citep{SpergelSteinhardt2000,TulinYu2018}. Astrophysical
+constraints span dwarf galaxies ($v\sim30$--$100\kms$) to clusters
+($v\sim10^3$--$3\times10^3\kms$); a constant
+$\sigma/m\sim1\,{\rm cm^2\,g^{-1}}$ fits dwarf scales but may
+violate cluster bounds, motivating velocity-dependent
+cross-sections from light-mediator models
+\citep{Feng2009,Tulin2013,Kaplinghat2016}.
+
+\subsection{Monte Carlo scattering algorithm}
+
+We implement cell-based Monte Carlo scattering following the
+standard mesh/SPH approach \citep{Rocha2013,Robertson2017}. In
+every AMR leaf cell, dark matter particles are collected from the
+particle linked list, shuffled with the Fisher--Yates algorithm,
+and paired sequentially. For a pair with relative velocity
+$v_{\rm rel}$ the scattering probability per step is
+\begin{equation}
+P \;=\; \frac{\sigma/m(v)\,\bar m\,v_{\rm rel}\,\Delta t}
+             {V_{\rm cell}}\,(N_{\rm dm}-1),
+\label{eq:sidm_prob}
+\end{equation}
+with $\bar m$ the mean particle mass, $V_{\rm cell}$ the proper
+cell volume and the factor $(N_{\rm dm}-1)$ accounting for all
+possible partners; a further factor
+$N_{\rm dm}/(2\lfloor N_{\rm dm}/2\rfloor)$ makes the
+$\lfloor N_{\rm dm}/2\rfloor$ sampled pairs reproduce the exact
+$N_{\rm dm}(N_{\rm dm}-1)/2$ pair rate for odd occupancies. A scatter occurs when a uniform deviate falls
+below $P$; post-scattering velocities are constructed in the
+centre-of-mass frame,
+\begin{equation}
+\boldsymbol{v}'_{i} = \boldsymbol{v}_{\rm cm}
+ + \frac{m_j}{m_i+m_j}\,|v'_{\rm rel}|\,\hat{\boldsymbol{n}},\qquad
+\boldsymbol{v}'_{j} = \boldsymbol{v}_{\rm cm}
+ - \frac{m_i}{m_i+m_j}\,|v'_{\rm rel}|\,\hat{\boldsymbol{n}},
+\end{equation}
+which conserves momentum by construction and kinetic energy
+exactly for elastic scattering.
+
+\subsection{Cross-sections and angular distributions}
+
+Three velocity dependences are supported
+(\code{sidm\_type}): constant $\sigma/m=\sigma_0$; Yukawa
+(Born-regime) $\sigma(v)/m = \sigma_0[1+(v/v_0)^2]^{-2}$; and a
+generic power law $\sigma(v)/m=\sigma_0(v/v_0)^n$. The angular
+distribution is isotropic by default, or forward-peaked
+Rutherford-like,
+${\rm d}\sigma/{\rm d}\Omega \propto (1-\cos\theta+2\varepsilon)^{-2}$
+\citep{Kahlhoefer2014}, sampled by CDF inversion.
+
+\subsection{Inelastic (two-state) SIDM}
+
+A two-state model \citep{TuckerSmithWeiner2001,Vogelsberger2019}
+adds a mass splitting $\delta$. Because an $N$-body macro-particle
+scatters as if a single dark matter particle of mass $m_\chi$
+(\code{sidm\_mchi}) does, the kinematics are those of the
+\emph{microphysical} pair: ground--ground pairs up-scatter
+($g+g\to e+e$) when $\tfrac12\mu_\chi v_{\rm rel}^2>2\delta$ with
+$\mu_\chi=m_\chi/2$, excited pairs down-scatter exothermically
+($v'^2=v^2+8\delta/m_\chi$), and mixed pairs scatter elastically;
+when an inelastic channel is open it competes with the elastic one
+with equal weight. Each transition changes the macro-particle
+kinetic energy by $2\delta\,(m_p/m_\chi)$, which we verify at the
+per-event level in the test below.
+An initial excited fraction is assigned at start-up in a
+restart-safe manner. A dissipative channel
+(\code{sidm\_fdiss}) and a DM--baryon drag term
+(\code{sidm\_baryon}) are also available.
+
+\subsection{Timestep, threading and diagnostics}
+
+The maximum per-level probability $P_{\rm max}$ is fed back into
+the timestep as
+$\Delta t_{\rm new}\le (C_{\rm SIDM}/P_{\rm max})\,\Delta t_{\rm old}$
+(default $C_{\rm SIDM}=0.1$). The sweep is OpenMP-parallel over
+grids with per-thread decorrelated RNG streams and deterministic
+reseeding, and cumulative momentum/energy residuals are reduced
+across MPI ranks each step, providing runtime verification of the
+conservation properties. All parameters live in
+\code{\&SIDM\_PARAMS}.
+
+\subsection{Validation}
+
+On a $64^3$-particle unigrid $\Lambda$CDM box
+($L=100\,h^{-1}\,{\rm Mpc}$, $\sigma/m=10^3\,{\rm cm^2\,g^{-1}}$)
+we compare the per-step scattering counts against the exact
+Monte-Carlo expectation evaluated offline from the snapshot
+(cell-by-cell pair sums of $|\Delta\boldsymbol{v}|$): the measured/predicted
+event ratio is $1.07\pm0.06$ at $a=0.3$ and $1.006\pm0.044$ at
+$a=0.6$, and the per-cell pair counts match exactly, confirming
+both the rate normalisation and its scale-factor dependence.
+Momentum and elastic kinetic energy are conserved to machine
+precision ($|\Delta p|/p\sim10^{-14}$ per event). For the
+two-state model with $\delta=10\,{\rm keV}$, $m_\chi=1\,{\rm GeV}$
+the up-scattering threshold gates correctly (no transitions in a
+cold box), a 50 per cent excited population decays through
+down-scattering only, and the measured per-event energy release
+matches $2\delta\,m_p/m_\chi$ to four significant figures.
+
+% ===================================================================
+\section{Dark Energy and non-GR Gravity}
+\label{sec:denongr}
+
+This section describes the largest part of the suite: eleven
+dark-energy and modified-gravity models sharing one solver
+infrastructure. Table~\ref{tab:models} summarises the models,
+their parameters and their verification status.
+
+\begin{table}
+\centering
+\caption{The dark energy and gravity battery. ``Linear response''
+lists the analytically validated unscreened limit; the last column
+the accuracy achieved in dedicated unit tests of the discretised
+equations (see Section~\ref{sec:verification}).}
+\label{tab:models}
+\footnotesize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllll}
+\toprule
+Model & Switch / namelist & Background & Linear response & Unit-test accuracy \\
+\midrule
+CPL DE + perturbations & \code{w0,wa,cs2\_de,de\_table} & $w=w_0+w_a(1-a)$ & Sapone--Kunz closure & $\le0.1$--$0.8\%$ vs \camb\ ($z\ge0.5$) \\
+Massive $\nu$ linear response & \code{use\_neutrino} & --- & $1+(\Omega_\nu/\Omega_{cb})R_\nu(k,a)$ & table-exact \\
+Early dark energy & \code{use\_ede} & Poulin+19 fluid & smooth & analytic dilution exact \\
+Quintessence & \code{use\_quintessence} & Klein--Gordon (shooting) & smooth ($c_s^2=1$) & $w$-consistency $2\times10^{-5}$ \\
+k-essence & \code{use\_kessence} & $P(X)=-X+X^2$ (exact) & Helmholtz with $c_s^2(a)$ & analytic limits exact \\
+Coupled quintessence & \code{use\_coupled\_de} & KG + mass evolution & $\Geff=G(1+2\beta^2)$ & isolation runs $\le1\%$ \\
+Horndeski $\mu(a,k)$ & \code{use\_horndeski} & $\Lambda$CDM/CPL & $\mu=1+\mu_0\Omega_{\rm DE}(a)/\Omega_{\rm DE,0}$ & exact by construction \\
+$f(R)$ Hu--Sawicki & \code{use\_fR} & $\Lambda$CDM & $\mu=1+\frac13\frac{k^2}{k^2+m^2a^2}$ & $6\times10^{-7}$ \\
+nDGP & \code{use\_nDGP} & $\Lambda$CDM & $\Geff/G=1+1/(3\beta)$ & force field $1.5\times10^{-6}$ \\
+Symmetron & \code{use\_symmetron} & $\Lambda$CDM & $F_5/F_N=2\beta^2\bar\chi^2$ & exact (Brax+12 eq.~68 match) \\
+Dilaton (Brax+12) & \code{use\_dilaton} & $\Lambda$CDM & $2\beta(a)^2 k^2/(k^2+m^2a^2)$ & 5 digits \\
+Cubic Galileon (tracker) & \code{use\_galileon} & tracker $E^2(a)$ & $\Geff/G(a{=}1)=1.844$ & 5 digits \\
+QUMOND & \code{use\_mond} & --- & $\nu(|g_N|/a_0)$ & $\mu\nu$ conjugacy $2\times10^{-16}$ \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Unified Poisson-solver framework}
+\label{sec:unified}
+
+In supercomoving units the code solves
+$\tilde\nabla^2\tilde\phi = \tfrac32\Omega_m a(\tilde\rho-1)$.
+All smooth-dark-sector corrections enter this equation as
+multiplicative factors on the source. A single function,
+\code{cosmo\_poisson\_fourpi()}, provides the prefactor
+consistently to the multigrid, conjugate-gradient and coarse-level
+solvers, and the FFT solvers apply the same corrections per
+Fourier mode in the Green's function, so that scale-dependent
+responses cost nothing extra. The factors compose:
+\begin{equation}
+\frac32\Omega_{cb}\,a
+\;\times\;
+\underbrace{\bigl[1+\tfrac{\Omega_\nu}{\Omega_{cb}}R_\nu(k,a)\bigr]}_{\rm neutrinos}
+\underbrace{\bigl[1+\tfrac{\Omega_{\rm DE}(a)}{\Omega_{cb}}R_{\rm DE}(k,a)\bigr]}_{\rm DE\ clustering}
+\underbrace{\vphantom{\bigl[\tfrac00\bigr]}\mu(a,k)}_{\rm Horndeski}
+\underbrace{\vphantom{\bigl[\tfrac00\bigr]}e^{-\beta(\varphi-\varphi_0)}}_{\rm coupled\ DE}.
+\end{equation}
+
+\subsection{CPL dark energy with clustering perturbations}
+\label{sec:cpl}
+
+The background uses the exact CPL integral
+$f_{\rm DE}(a)=a^{-3(1+w_0+w_a)}e^{-3w_a(1-a)}$ in the
+supercomoving Friedmann factors, the growth factor and the initial
+velocity scaling. Perturbations are supported in two modes:
+
+\emph{(i) Table mode.} A \camb-derived table of the effective
+ratio $R_{\rm DE}(k,a)=\delta_{\rm DE}/\delta_m$ is measured with
+the Weyl-potential method (the ratio of potential per unit matter
+contrast between a clustering-DE and a smooth-DE universe), which
+yields the Newtonian-gauge response appropriate for the Poisson
+source; synchronous-gauge $\delta_{\rm DE}$ would over-correct by
+an order of magnitude.
+
+\emph{(ii) Quasi-static fallback.} When no table is supplied and
+$c_s^2>0$, the code applies the \citet{SaponeKunz2009} closure
+\begin{equation}
+\frac{\delta_{\rm DE}}{\delta_m}
+= \frac{1+w}{(1-3w) + \dfrac{2c_s^2 k^2}{3a^2H^2}},
+\qquad
+\mbox{i.e. } {\rm d.f.} = 1+\frac{\alpha}{k^2+\kappa^2},
+\label{eq:sk}
+\end{equation}
+with $\kappa^2=\tfrac32(1-3w)a^2E^2(L/\lambda_H)^2/c_s^2$ and
+$\alpha=(\Omega_\Lambda f_{\rm DE}a^3/\Omega_m)(1+w)\,
+\tfrac32 a^2E^2 (L/\lambda_H)^2/c_s^2$. Correct limits: a
+$k$-independent boost $1+(\rho_{\rm DE}/\rho_m)(1+w)/(1-3w)$ for
+$c_s^2\to0$, unity below the sound horizon, and bit-wise unity for
+$\Lambda$. Validated against \camb\ (same Weyl method) to
+$\le0.1$ per cent for $(w_0,w_a)=(-0.9,0.1)$ and $\le0.8$ per cent
+for $w_0=-0.8$ at $z\ge0.5$ ($\sim4$ per cent at $z=0$, where the
+quasi-static approximation degrades --- use the table mode for
+precision at low redshift). An earlier release used a closure with
+the opposite sign (a $15$--$29$ per cent source suppression);
+results obtained with it should be discarded.
+
+\subsection{Massive neutrino linear response}
+
+Neutrino perturbations are added without neutrino particles:
+$\delta_\nu(k,a) = R_\nu(k,a)\,\delta_{cb}(k,a)$ with
+$R_\nu$ precomputed from \camb\ \citep{Lewis2000}, entering the
+Poisson source as in Section~\ref{sec:unified}. This avoids
+neutrino shot noise entirely and is exact at linear order
+\citep[cf.][]{AliHaimoudBird2013}.
+
+\subsection{Early dark energy}
+
+The \citet{Poulin2019} fluid form
+$\rho_{\rm EDE}(a)=\omega_{\rm ede}\,\rho_{\rm std}(a_c)\,
+2/[1+(a/a_c)^{3(1+w_{\rm ede})}]$ is added to the Friedmann
+factors. The implementation reproduces the analytic dilution slope
+$-3(1+w)$ and the analytic peak
+$f_{\rm EDE}^{\rm max}=1.14\,\omega_{\rm ede}$ at $a=3^{1/4}a_c$
+exactly. Two conventions matter when mapping CMB constraints:
+$\omega_{\rm ede}$ is the fraction at $a_c$ (not the peak), and
+the background carries no radiation, so at $z_c\sim3000$ the
+fraction differs from Planck-style $f_{\rm EDE}$ by $\sim2\times$.
+
+\subsection{Scalar-field dark energy: quintessence and k-essence}
+\label{sec:sde}
+
+A dedicated module tabulates scalar-field backgrounds on a
+$\ln a$ grid ($a=10^{-6}$--$1.55$) with lazy, self-healing
+initialisation (the tables rebuild automatically if the cosmology
+is overridden by IC headers).
+
+\emph{Quintessence} \citep{RatraPeebles1988}: the Klein--Gordon
+and Friedmann equations are integrated with RK4 for
+Ratra--Peebles ($V\propto\varphi^{-\alpha}$) or exponential
+potentials, the amplitude fixed by shooting to
+$\Omega_\varphi(a{=}1)=\Omega_\Lambda$. The tabulated $w(a)$ obeys
+${\rm d}\ln f_{\rm DE}/{\rm d}\ln a=-3(1+w)$ to $2\times10^{-5}$,
+and the RP tracker attractor $w=-2/(\alpha+2)$ is recovered in the
+matter era.
+
+\emph{k-essence} \citep{ArmendarizPicon2001}: for the purely
+kinetic $P(X)=-X+X^2$ the shift-symmetry integral
+$P_{,X}\sqrt{2X}\,a^3={\rm const}$ gives $X(a)$ algebraically;
+$w\to1/3$ and $c_s^2\to1/3$ at early times (a dark-radiation-like
+component) and $w\to-1$ today. The model's $c_s^2(a)$ feeds the
+Helmholtz closure of equation~(\ref{eq:sk}) automatically.
+
+\subsection{Coupled quintessence}
+\label{sec:cde}
+
+Conformally coupled dark matter, $m_{\rm dm}\propto
+e^{-\beta\varphi/\Mpl}$ \citep{Amendola2000}, adds four effects,
+all implemented and individually verified: (i) the modified
+expansion, including the DM mass-evolution factor in the
+\emph{matter} term of the Friedmann integrals (its omission is
+detectable: an isolation run reproduced the inconsistent-$H$
+growth prediction to $0.2$ per cent); (ii) the same factor
+multiplying the Poisson source; (iii) the momentum-conservation
+velocity term $+\beta\dot\varphi\,\boldsymbol{v}$, split across the two
+half-kicks of the KDK integrator; and (iv) the fifth-force
+enhancement $\Geff=G(1+2\beta^2)$ between matter particles.
+
+\subsection{Parametrized Horndeski gravity}
+
+The quasi-static, scale-independent limit of Horndeski gravity is
+implemented as
+$\mu(a)=1+\mu_0\,\Omega_{\rm DE}(a)/\Omega_{\rm DE,0}$
+multiplying the Poisson source, with an optional Compton-mass
+$k$-dependence
+$\mu(a,k)=1+[\mu(a)-1]\,k^2/(k^2+a^2m^2)$ applied exactly in the
+FFT solver paths (the multigrid path uses the $k\to\infty$ limit).
+
+\subsection{Screened modified gravity: the scalar-field solvers}
+\label{sec:mg}
+
+Five models solve a nonlinear elliptic equation for an extra
+scalar degree of freedom on the AMR hierarchy, with the fifth
+force added to the particle acceleration.
+
+\subsubsection{$f(R)$ Hu--Sawicki}
+The quasi-static equation in code units is
+\begin{equation}
+\tilde\nabla^2 f_R
+= \frac{a^2}{3}\Bigl(\frac{H_0 B}{c}\Bigr)^{\!2}
+  \bigl[\tilde R(f_R)-\bar{\tilde R}\bigr]
+ -\Omega_m \Bigl(\frac{H_0 B}{c}\Bigr)^{\!2}\frac{\tilde\rho-1}{a},
+\end{equation}
+with the Hu--Sawicki inversion
+$\tilde R = \bar{\tilde R}_0 (f_{R0}/f_R)^{1/(n+1)}$ and force
+$F_5=+\tfrac{a^2}{2}(c/H_0B)^2\tilde\nabla f_R$
+\citep{HuSawicki2007,Oyaizu2008,Li2012}. The linearized mass term
+is a Yukawa (the Jacobian is negative definite) and the chameleon
+limit $\tilde R\to\bar{\tilde R}+3\Omega_m\delta/a^3$ is exact.
+The discretised linear response reproduces
+$\mu(k)-1=\tfrac13 k^2/(k^2+m^2a^2)$ to $6\times10^{-7}$ across
+$a\in[0.25,1]$, $f_{R0}\in\{-10^{-5},-10^{-6}\}$, $n\in\{1,2\}$.
+
+\subsubsection{nDGP}
+The brane-bending mode obeys the Vainshtein equation
+\citep{Schmidt2009,Li2013}; in code units
+\begin{equation}
+\tilde\nabla^2\varphi
++\frac{1}{12\,\Omega_{rc}\beta(a)\,a^4}
+\bigl[(\tilde\nabla^2\varphi)^2-(\tilde\nabla_i\tilde\nabla_j\varphi)^2\bigr]
+= \frac{\Omega_m a}{\beta(a)}(\tilde\rho-1),
+\end{equation}
+with $\beta=1+2Hr_c(1+\dot H/3H^2)$ and $F_5=-\tfrac12\tilde\nabla\varphi$,
+so that the unscreened limit is $\Geff/G=1+1/(3\beta)$
+\citep{Winther2015}.
+
+\subsubsection{Symmetron}
+The dimensionless field $\chi=\varphi/\varphi_\star$ obeys
+$\tilde\nabla^2\chi = \tfrac{a^2}{2\tilde\lambda^2}
+[\tilde\rho\,(a_{\rm ssb}/a)^3-1]\chi
++\tfrac{a^2}{2\tilde\lambda^2}\chi^3$
+\citep{HinterbichlerKhoury2010,Davis2012}, identical to eq.~(68)
+of \citet{Brax2012}, with force
+$F_5=-6\Omega_m\beta^2(\lambda/B)^2(a^2/a_{\rm ssb}^3)\,
+\chi\tilde\nabla\chi$, whose unscreened limit is the canonical
+$F_5/F_N=2\beta^2\bar\chi^2$. Because $\chi=0$ is an exact fixed
+point of the homogeneous equation, the broken-phase VEV
+$\bar\chi(a)=\sqrt{1-(a_{\rm ssb}/a)^3}$ is seeded into
+uninitialised cells at every solve (this also covers restarts and
+newly refined cells).
+
+\subsubsection{Environmentally damped dilaton}
+The original $r=3/2$ dilaton of \citet{Brax2010}, with
+$A(\varphi)=1+\tfrac{A_2}{2}\varphi^2/\Mpl^2$,
+$m^2(a)=3A_2H^2(a)$ and $\beta(a)=\beta_0 a^{3\Omega_m}$
+\citep{Brax2012}, is solved in $\chi=\varphi/\Mpl$:
+\begin{equation}
+\tilde\nabla^2\chi
+= \frac{3\Omega_m A_2 B_2}{a}\,(\tilde\rho\,\chi-\bar\chi)
++ a^2 B_2\bigl[v_\varphi(\chi)-v_\varphi(\bar\chi)\bigr],
+\end{equation}
+with $v_\varphi(\chi)=-3\Omega_m\beta_0(A_2\chi/\beta_0)^{1-3/s}$,
+$s=3\Omega_m$, $B_2=(H_0B/c)^2$ and
+$F_5=-(c/H_0B)^2a^2A_2\,\chi\tilde\nabla\chi$. The exponent
+$1-3/s<0$ makes the Newton Jacobian negative definite. The
+background is an exact fixed point of the discrete operator, the
+linear response matches $2\beta(a)^2k^2/(k^2+m^2a^2)$ to five
+digits, and a $\delta=10^5$ top-hat drives $\chi\to0.03\bar\chi$
+(Damour--Polyakov screening). User parameters are simply
+$\beta_0$ and the present force range
+$\lambda = 2998\,\xi\,h^{-1}$Mpc (then $A_2=1/3\xi^2$).
+
+\subsubsection{Tracker cubic Galileon}
+On the tracker, $H\dot\varphi=\xi H_0^2\Mpl$ with
+$c_2=-6c_3\xi$, the model is parameter-free:
+$\xi=\sqrt{6(1-\Omega_m)}$,
+$E^2(a)=\tfrac12[\Omega_ma^{-3}+\sqrt{\Omega_m^2a^{-6}+4(1-\Omega_m)}]$
+(wired through the background dispatch, so the modified expansion
+and growth are automatic; $w_0\simeq-1.18$), and the perturbation
+coefficients of \citet{Barreira2013} reduce to
+$\beta_1=\tfrac{\xi}{3}[2\dot H/H^2-1+(1-\Omega_m)/E^4]$,
+$\beta_2=2E^2\beta_1/\xi^2$. The field equation is the nDGP
+template with coefficient $1/(3\beta_1a^4)$ and source
+$\Omega_m a\,\delta/\beta_2$; the Poisson back-reaction term
+integrates to a potential proportional to the field, so the entire
+fifth force is one gradient, $F_5=+\tfrac{\xi}{6E^2}\tilde\nabla u$.
+The unscreened response matches the analytic
+$-\xi/(9\beta_2E^2)$ to five digits at $a=0.25$--$1$:
+$\Geff/G(a{=}1)=1.844$, decaying as $1/E^4$ into the past. Since
+$\Geff/G-1<10^{-3}$ for $z\gtrsim2.5$, the solver is skipped at
+early times.
+
+\subsubsection{QUMOND}
+The quasi-linear formulation of MOND \citep{Milgrom2010} defines a
+curl-free field via
+$\nabla^2\Phi=\nabla\cdot[\nu(|\nabla\Phi_N|/a_0)\nabla\Phi_N]$.
+Both an algebraic force-correction mode and the full
+phantom-density mode (compute $\rho_{\rm ph}=\nabla\cdot[(\nu-1)
+\nabla\Phi_N]/4\pi G$, re-solve Poisson) are implemented, with the
+simple and standard interpolation pairs (verified mutually
+conjugate to $2\times10^{-16}$), an external-field option, and
+$a_0$ converted to code units through the exact supercomoving
+acceleration factor (so the MOND scale is correctly constant in
+proper units at all redshifts). An AQUAL fixed-point mode is also
+available \citep[cf.][]{Lughausen2015,Candlish2015}.
+
+\subsection{Numerical solution of the scalar equations}
+\label{sec:solver}
+
+All five scalar solvers share one machinery: nonlinear
+Newton--Gauss--Seidel relaxation with true three-dimensional
+red--black colouring (cell parity $i{+}j{+}k$), Neumann closure of
+the stencil at coarse--fine boundaries, one-sided force gradients
+at level edges, and MPI ghost exchange each sweep. On the fully
+refined domain level the long-wavelength modes --- which plain
+relaxation cannot converge in $\mathcal{O}(10)$ sweeps --- are
+solved spectrally: a Newton--Helmholtz stage
+$(\tilde\nabla^2-\bar m^2)\,\delta u=-\mathcal{R}$ with the
+level-averaged Jacobian mass for $f(R)$/symmetron/dilaton, and a
+\citet{Winther2015}-style operator splitting for the
+Vainshtein-type models (solve the cell-local quadratic for
+$\tilde\nabla^2\varphi$, then invert the Laplacian by FFT). In a
+controlled test the operator-split stage reached a lower residual
+in five iterations than $2\times10^4$ damped relaxation sweeps.
+Two MPI subtleties deserve mention as a warning to implementers:
+every rank must enter the per-level ALLREDUCE of the convergence
+test and the final force ghost-exchange \emph{even when it owns no
+grids on that level}; early returns on empty ranks deadlock or
+abort the run at the first sparsely refined level.
+
+\subsection{Verification}
+\label{sec:verification}
+
+Verification proceeded on three levels.
+
+\emph{Equation level.} Every model was re-derived from its
+original reference (unit conversions included) and the code
+compared term by term; this stage found and fixed, among others, a
+wrong-sign DE-perturbation closure, a tachyonic (non-convergent)
+$f(R)$ operator, a double-counted nDGP coupling, a symmetron
+force normalisation missing the box-unit conversion, and a
+zero-pinned symmetron field.
+
+\emph{Solver level.} The discretised operators were exercised in
+isolation against analytic linear responses; the accuracies are
+listed in Table~\ref{tab:models}.
+
+\emph{End-to-end level.} A controlled suite of $64^3$, $100\,
+h^{-1}$Mpc dark-matter-only simulations was run from shared
+Zel'dovich initial conditions ($z=49$, \camb\ spectrum) for
+$\Lambda$CDM, quintessence, k-essence, Horndeski, coupled DE (plus
+per-effect isolation runs), the tracker Galileon and the dilaton.
+The measured $P_{\rm model}/P_{\Lambda{\rm CDM}}$ in the band
+$k=0.05$--$0.12\,h\,{\rm Mpc}^{-1}$ at $z\simeq0$ was compared
+against an \emph{initial-conditions-consistent} linear forward
+model, which (i) rescales the initial displacements by each
+model's own velocity conversion factor --- \ramses\ converts the
+shared velocity files with the model's $v_{\rm fact}$, an effect
+reaching $(1.077)^2$ for k-essence and $(1.109)^2$ for coupled DE
+--- and (ii) propagates the exact $(\delta,\theta)$ initial vector
+through each model's linear system. Results:
+
+\begin{table}
+\centering
+\caption{End-to-end suite: simulated vs.\ predicted
+$P/P_{\Lambda\rm CDM}$ ($k=0.05$--$0.12\,h/$Mpc, $z\simeq0$).}
+\label{tab:sims}
+\begin{tabular}{lccc}
+\toprule
+Model & Simulation & Forward model & Ratio \\
+\midrule
+Quintessence (RP $\alpha{=}1$) & 0.832 & 0.817 & 1.018 \\
+k-essence ($X_0/M^4{=}0.5005$) & 0.875 & 0.881 & 0.993 \\
+Horndeski ($\mu_0{=}0.2$)      & 1.036 & 1.052 & 0.985 \\
+Coupled DE ($\beta{=}0.1$)     & 0.966 & 1.005 & 0.961 \\
+Galileon (tracker)             & 1.148 & 1.208 & 0.950 \\
+Dilaton ($\beta_0{=}0.5$, $\lambda{=}20$) & 1.039 & 1.071 & 0.970 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All models agree to $2$--$5$ per cent; the Galileon and dilaton
+deficits carry the expected sign, since Vainshtein and
+Damour--Polyakov screening remove part of the fifth-force boost
+already at quasi-linear wavenumbers \citep[cf.][]{Barreira2013}.
+Each coupled-DE ingredient (mass evolution, friction, $\Geff$) was
+additionally isolated with toggle runs and verified at the
+$\sim1$ per cent level. The forward model, the IC generator and
+all unit-test drivers ship with the code
+(\code{patch/cuRamses/aux/}).
+
+% ===================================================================
+\section{Fuzzy Dark Matter}
+\label{sec:fdm}
+
+\subsection{Physical motivation and equations}
+
+Ultralight scalar dark matter with
+$m_a\sim10^{-23}$--$10^{-21}\,$eV, often called fuzzy dark matter
+(FDM), behaves as cold dark matter on large scales
+\citep{Hui2017}. Below the de~Broglie wavelength the wave nature
+of the field suppresses structure. The same physics produces
+solitonic halo cores and interference granules
+\citep{Schive2014}. On scales far below the Compton wavelength the
+field obeys the comoving Schr\"odinger--Poisson system
+\citep{WidrowKaiser1993},
+\begin{equation}
+{\rm i}\hbar\,\partial_t\psi
+ \;=\; -\frac{\hbar^2}{2m_a a^2}\,\nabla^2\psi \;+\; m_a\Phi\,\psi,
+\qquad
+\nabla^2\Phi \;=\; 4\pi G a^2\,\bar\rho_{\rm m}\,\delta.
+\label{eq:fdm_sp}
+\end{equation}
+Here $|\psi|^2$ is the comoving dark-matter density and $\Phi$ is
+the peculiar potential.
+
+\subsection{Supercomoving formulation}
+
+\ramses\ integrates cosmology in the supercomoving variables of
+\citet{MartelShapiro1998}. Code time obeys
+${\rm d}\tilde t=H_0\,{\rm d}t/a^2$ and positions are comoving box
+coordinates. In this gauge every explicit scale factor drops out
+of the Schr\"odinger--Poisson system. This point deserves emphasis
+because a stray factor of $a^{-2}$ silently freezes structure
+formation. In code units eq.~(\ref{eq:fdm_sp}) becomes
+\begin{equation}
+{\rm i}\,\partial_{\tilde t}\psi
+ \;=\; -\frac{\tilde\hbar}{2}\,\tilde\nabla^2\psi
+ \;+\; \frac{\tilde\Phi}{\tilde\hbar}\,\psi,
+\qquad
+\tilde\hbar \;\equiv\; \frac{\hbar}{m_a L^2 H_0},
+\label{eq:fdm_super}
+\end{equation}
+where $L$ is the comoving box size and $\tilde\hbar$ is a
+constant. The kinetic $1/a^2$ is absorbed exactly by the
+supercomoving time. The expansion enters only through the standard
+\ramses\ Poisson source $\tfrac32\Omega_{\rm m}a\,\delta$. The
+wave sector thus mirrors the particle sector, where kicks and
+drifts also carry no scale factors. If the $1/a^2$ of
+eq.~(\ref{eq:fdm_sp}) is retained in the supercomoving drift, the
+effective $\tilde\hbar$ is boosted by $a^{-2}$. The boost reaches
+$\sim\!10^3$ at $z=30$ and suppresses gravitational growth at all
+wavenumbers. We verified that with eq.~(\ref{eq:fdm_super}) the
+measured growth of the power spectrum reproduces linear theory
+(section~\ref{sec:fdm_valid}).
+
+The integrator applies a drift, a kick, and a second drift on each
+AMR level. On the uniform base level the kinetic half-step is
+applied in Fourier space. Each mode is rotated by the phase
+$\tilde\hbar\lambda(\boldsymbol k)\Delta\tilde t/2$, where
+$\lambda(\boldsymbol k)$ is the eigenvalue of the discrete
+seven-point Laplacian. On refined levels we use the
+Crank--Nicolson form
+$(1-{\rm i}g\mathcal L)^{-1}(1+{\rm i}g\mathcal L)$ with
+$g=\tilde\hbar\Delta\tilde t/4\Delta x^2$. This form is unitary
+and remains stable for any timestep. The linear system is solved
+with an iterative Krylov method. A fourth-order composition
+\citep{Yoshida1990} is optional (\code{fdm\_split\_order=4}). The
+potential kick multiplies $\psi$ by
+$e^{-{\rm i}\tilde\Phi\Delta\tilde t/\tilde\hbar}$ in real space.
+Initial conditions follow the Madelung form. The amplitude is
+$|\psi|=\sqrt{1+\delta}$ and the phase gradient equals the
+peculiar velocity. Both are constructed from the same
+\code{grafic} files used for particle runs.
+
+\subsection{Phase resolution limits the box size}
+\label{sec:fdm_box}
+
+A wave simulation must resolve the local phase gradient. A flow
+with peculiar velocity $v$ imprints
+$\Delta\theta = m_a a v\,\Delta x/\hbar$ radians per cell. Once
+$\Delta\theta>\pi$ the sampled phase aliases to a wrong velocity
+\citep{MaySpringel2021}. Bulk transport is then corrupted, and
+large-scale growth fails. The rms bulk velocity grows with box
+size, while the cell size grows with box size at fixed $N$. The
+two effects impose a joint limit on box size, resolution, axion
+mass, and redshift. The constraint tightens as $a^{3/2}$, so late
+times are the bottleneck. Table~\ref{tab:fdm_box} lists the
+validity ranges for $N=1024^3$ and $m_a=10^{-22}\,$eV, computed
+from the linear velocity power of the modes inside the box.
+Reaching $z=0$ requires $L\lesssim1$--$2\,h^{-1}$Mpc. This is in
+good agreement with the box sizes of published wave simulations.
+The reach scales as
+$L_{\max}\,\sigma_v(L_{\max})\propto N/m_a$. A $128\,h^{-1}$Mpc
+box at $1024^3$ already carries an rms phase jump of $5.7\pi$ per
+cell in the $z=30$ initial conditions. Pure wave evolution is
+excluded there at any redshift. This motivates the hybrid scheme
+described below.
+
+\begin{table}
+\centering
+\begin{tabular}{lcc}
+\toprule
+$L$ [$h^{-1}$Mpc] & valid range (rms $\Delta\theta<\pi$) &
+conservative ($<\pi/2$) \\
+\midrule
+1  & all $z$    & all $z$ \\
+2  & $z>0.7$    & $z>1.8$ \\
+4  & $z>3.0$    & $z>5.4$ \\
+8  & $z>7.8$    & $z>13$  \\
+16 & $z>18$     & $z>29$  \\
+$\ge$32 & aliased at $z=30$ & aliased at $z=30$ \\
+\bottomrule
+\end{tabular}
+\caption{Redshift range over which a $1024^3$ wave simulation with
+$m_a=10^{-22}$\,eV resolves the rms bulk-flow phase gradient. The
+limit scales as $L_{\max}\,\sigma_v(L_{\max})\propto N/m_a$.}
+\label{tab:fdm_box}
+\end{table}
+
+\subsection{Hybrid fluid--wave scheme}
+\label{sec:fdm_hybrid}
+
+We follow the strategy of \textsc{gamer}-2
+\citep{Kunkel2024,Chan2025}. The hybrid mode
+(\code{fdm\_use\_hjm}) evolves coarse levels as a Madelung fluid
+and fine levels with the wave solver. On fluid levels we store the
+density $\rho$ and the action $S$ instead of the wavefunction. The
+action is kept as a continuous real field and is never wrapped
+into $[-\pi\tilde\hbar,\pi\tilde\hbar]$. Phase jumps far larger
+than $\pi\tilde\hbar$ therefore pose no difficulty, and the limit
+of section~\ref{sec:fdm_box} does not apply to fluid levels. The
+fluid obeys
+\begin{equation}
+\partial_{\tilde t}\rho = -\nabla\!\cdot\!(\rho\nabla S),
+\qquad
+\partial_{\tilde t}S = -\tfrac12|\nabla S|^2 - \tilde\Phi.
+\end{equation}
+We integrate the continuity equation with upwind fluxes and the
+Hamilton--Jacobi equation with the monotone upwind scheme of
+\citet{OsherSethian1988}, using a three-stage
+strong-stability-preserving Runge--Kutta method. The quantum
+pressure term is omitted on fluid levels. The Madelung refinement
+criteria $C_1=|\Delta_x\sqrt\rho|/\sqrt\rho$ and
+$C_2=|\Delta_x S|/\tilde\hbar$ confine fluid levels to regions
+where the term is negligible. The fluid timestep obeys the
+advection condition
+$\Delta\tilde t\le C\,\Delta x/|\nabla S|_{\max}$. The condition
+is linear in $\Delta x$. Explicit wave schemes instead require
+$\Delta\tilde t\propto\Delta x^2$.
+
+Three couplings connect the fluid and wave levels. First,
+prolongation interpolates $\rho$ and $S$ and converts them to
+$\psi=\sqrt\rho\,e^{{\rm i}S/\tilde\hbar}$ when the child is a
+wave level. The smooth fields interpolate well. The oscillatory
+wavefunction does not. Second, restriction must conserve mass. A
+plain average of the complex wavefunction loses mass wherever the
+children interfere, because
+$|\langle\psi\rangle|^2\le\langle|\psi|^2\rangle$. We therefore
+restrict with the amplitude $\sqrt{\langle|\psi|^2\rangle}$ and
+the phase of $\langle\psi\rangle$. Third, the finite-difference
+operator needs ghost values at coarse-fine boundaries. We
+interpolate $\rho$ and $S$ from the parent level and convert them
+to $\psi$. The conversion preserves phase coherence because the
+Hamilton--Jacobi equation evolves the same action as the
+Schr\"odinger phase. A fixed boundary value makes the
+Crank--Nicolson update non-unitary. We therefore track the mass
+exchanged through each boundary face. The change of $|\psi_i|^2$
+through one face follows the exact identity
+\begin{equation}
+\Delta|\psi_i|^2
+= -\frac{\tilde\hbar\,\Delta\tilde t}{\Delta x^2}\,
+{\rm Im}\!\left(\bar\psi_i^{\,*}\,\psi_{\rm g}\right),
+\qquad \bar\psi \equiv \tfrac12(\psi^{n}+\psi^{n+1}),
+\label{eq:fdm_flux}
+\end{equation}
+where $\psi_{\rm g}$ is the ghost value. The same amount of mass
+is returned to the adjacent parent cell. We designed a demanding
+test with a $15\,h^{-1}$Mpc box, a $256^3$ base grid,
+$m_a=10^{-23}$\,eV, and wave levels covering the collapsed
+regions. In this test the total mass drift at fixed epoch improves
+from $12.2$ per cent to $0.12$ per cent. Fluid-only configurations
+conserve mass at machine precision.
+
+\subsection{Validation}
+\label{sec:fdm_valid}
+
+Figure~\ref{fig:fdm_growth} shows the primary code test. We
+measure the growth of the power spectrum between snapshots of a
+$15\,h^{-1}$Mpc, $256^3$ run with $m_a=10^{-23}$\,eV started at
+$z=30$. We compare the measured growth with linear theory at the
+same epochs. Growth ratios relative to the initial snapshot remove
+the overall normalisation of the initial conditions. The pure wave
+run follows linear theory until the phase resolution limit of
+section~\ref{sec:fdm_box} is reached at $z\simeq9$ for this
+configuration. Beyond the limit the aliased phase first freezes
+and then scrambles the growth. We regard this behaviour as an
+empirical confirmation of the criterion. The fluid run of the
+identical configuration continues to grow through $z=4$. The
+excess over linear theory at high $k$ and late times is consistent
+with the expected nonlinear growth.
+
+\begin{figure}
+\centering
+\includegraphics[width=0.49\textwidth]{fig_fdm_wave_growth.png}
+\includegraphics[width=0.49\textwidth]{fig_fdm_fluid_growth.png}
+\caption{Growth validation on a $15\,h^{-1}$Mpc, $256^3$ grid with
+$m_a=10^{-23}$\,eV. Solid curves show the measured $|\psi|^2$
+power spectra. Dashed curves show linear theory. The bottom panels
+show the measured growth relative to the $z=30$ snapshot, divided
+by the linear-theory growth. The left panels show the pure wave
+solver. Its growth follows linear theory until the phase
+resolution limit at $z\simeq9$
+(section~\ref{sec:fdm_box}) and freezes beyond it. The right
+panels show the fluid solver in the same configuration. Its growth
+continues through $z=4$. The excess at high $k$ and late times is
+nonlinear growth.}
+\label{fig:fdm_growth}
+\end{figure}
+
+The hybrid machinery was further exercised on a
+$128\,h^{-1}$Mpc, $1024^3$ fluid-level run with
+$m_a=10^{-22}$\,eV. The initial rms phase jump of $5.7\pi$ per
+cell excludes any pure wave treatment of this configuration. With
+the continuous action the measured growth between $z=30$ and
+$z=9$ is uniform in $k$ and consistent with linear theory. A
+wrapped-phase treatment stalls entirely. Total mass is conserved
+at machine precision over hundreds of steps. The advection-limited
+timestep exceeds the explicit wave-kinetic condition by two to
+three orders of magnitude at high redshift.
+Figure~\ref{fig:fdm_slab} shows the density field at $z=3.5$. We
+defer the full production hybrid configuration and the
+FDM-specific science validation to a companion paper. The latter
+includes soliton cores, interference statistics, and the
+suppression of small-scale power relative to the transfer function
+of \citet{Hu2000}.
+
+\begin{figure}
+\centering
+\includegraphics[width=0.8\textwidth]{fig_fdm_density128.png}
+\caption{Dark-matter density slice of the $128\,h^{-1}$Mpc,
+$1024^3$ hybrid-fluid FDM run with $m_a=10^{-22}$\,eV at $z=3.5$.
+Pure wave discretisations cannot reach this regime at this
+resolution (section~\ref{sec:fdm_box}).}
+\label{fig:fdm_slab}
+\end{figure}
+
+% ===================================================================
+\section{Evaporating Primordial Black Holes}
+\label{sec:pbh}
+
+The PBH module models dark matter that is partly composed of
+Hawking-evaporating primordial black holes \citep{Hawking1975,
+Carr2021}. Rather than tracking per-particle masses, it uses one
+global mass function: all DM particles share the mixed-mass factor
+\begin{equation}
+w(a) \;=\; 1-f_{\rm PBH} + f_{\rm PBH}\,g(a),
+\end{equation}
+where $g(a)$ is the surviving PBH mass fraction from a
+precomputed evaporation table and $f_{\rm PBH}$
+(\code{pbh\_fraction}) the initial PBH share of the dark matter.
+Particle masses are rescaled exactly by table arithmetic --- there
+is no per-particle state and no evaporation CFL constraint. The
+energy released between steps follows the cumulative heating
+kernel $\tilde Q(a)=\int q\,g\,{\rm d}t$; it is either deposited
+as local heat in the gas (\code{pbh\_energy\_sink='local\_heat'},
+optionally amplified by a linear-response boost factor) or removed
+from the simulation (\code{'removed'}, appropriate for free-streaming
+decay products). Restart provenance (table checksum,
+normalisation epoch) is persisted so that a run cannot silently
+continue with a different evaporation model. The table generator
+supports arbitrary monochromatic or extended PBH mass functions.
+
+% ===================================================================
+\section{Conclusions}
+\label{sec:conclusion}
+
+We have assembled, in one AMR code, the four families of
+non-standard cosmological physics most often invoked beyond
+$\Lambda$CDM --- self-interacting dark matter, a comprehensive
+dark-energy and modified-gravity battery, fuzzy dark matter, and
+evaporating primordial black holes --- behind uniform namelist
+switches and on shared solver infrastructure. Beyond the
+implementations themselves, we highlight the verification
+methodology: every model is checked at the equation level against
+its original reference, at the solver level against analytic
+linear responses, and end-to-end against an
+initial-conditions-consistent forward model, with per-effect
+isolation runs where a model bundles several couplings. We commend
+this three-level protocol to implementers of non-standard physics
+in any simulation code: in our experience each level catches
+defects invisible to the others, ranging from wrong-sign
+perturbation closures to factor-of-two integrator bookkeeping and
+MPI collective mismatches that only manifest on sparsely refined
+levels.
+
+All modules recover $\Lambda$CDM bit-wise when disabled. The
+namelist interfaces, verification scripts and the simulation-suite
+tooling are distributed with the code.
+
+\section*{Acknowledgements}
+The author thanks the KIAS Center for Advanced Computation for
+computing resources. Portions of the implementation and the
+verification campaign were carried out with the assistance of
+Claude (Anthropic).
+
+\section*{Data Availability}
+The code, namelist examples, verification drivers and the
+$64^3$ test-suite configuration are available from the
+\curamses\ repository. Simulation outputs will be shared on
+reasonable request.
+
+% ===================================================================
+\begin{thebibliography}{99}
+
+\bibitem[\protect\citeauthoryear{Ali-Ha\"imoud \& Bird}{2013}]{AliHaimoudBird2013}
+Ali-Ha\"imoud Y., Bird S., 2013, MNRAS, 428, 3375
+
+\bibitem[\protect\citeauthoryear{Amendola}{2000}]{Amendola2000}
+Amendola L., 2000, Phys. Rev. D, 62, 043511
+
+\bibitem[\protect\citeauthoryear{Armendariz-Picon et al.}{2001}]{ArmendarizPicon2001}
+Armendariz-Picon C., Mukhanov V., Steinhardt P.~J., 2001, Phys. Rev. D, 63, 103510
+
+\bibitem[\protect\citeauthoryear{Barreira et al.}{2013}]{Barreira2013}
+Barreira A., Li B., Hellwing W.~A., Baugh C.~M., Pascoli S., 2013, J. Cosmology Astropart. Phys., 10, 027
+
+\bibitem[\protect\citeauthoryear{Brax et al.}{2010}]{Brax2010}
+Brax P., van de Bruck C., Davis A.-C., Shaw D., 2010, Phys. Rev. D, 82, 063519
+
+\bibitem[\protect\citeauthoryear{Brax et al.}{2012}]{Brax2012}
+Brax P., Davis A.-C., Li B., Winther H.~A., Zhao G.-B., 2012, J. Cosmology Astropart. Phys., 10, 002
+
+\bibitem[\protect\citeauthoryear{Candlish et al.}{2015}]{Candlish2015}
+Candlish G.~N., Smith R., Fellhauer M., 2015, MNRAS, 446, 1060
+
+\bibitem[\protect\citeauthoryear{Carr \& K\"uhnel}{2021}]{Carr2021}
+Carr B., K\"uhnel F., 2021, arXiv:2110.02821
+
+\bibitem[\protect\citeauthoryear{Chan et al.}{2025}]{Chan2025}
+Chan H.~Y.~J., et al., 2025, arXiv:2504.10387
+
+\bibitem[\protect\citeauthoryear{Chevallier \& Polarski}{2001}]{ChevallierPolarski2001}
+Chevallier M., Polarski D., 2001, Int. J. Mod. Phys. D, 10, 213
+
+\bibitem[\protect\citeauthoryear{Davis et al.}{2012}]{Davis2012}
+Davis A.-C., Li B., Mota D.~F., Winther H.~A., 2012, ApJ, 748, 61
+
+\bibitem[\protect\citeauthoryear{Feng et al.}{2009}]{Feng2009}
+Feng J.~L., Kaplinghat M., Tu H., Yu H.-B., 2009, J. Cosmology Astropart. Phys., 07, 004
+
+\bibitem[\protect\citeauthoryear{Hawking}{1975}]{Hawking1975}
+Hawking S.~W., 1975, Comm. Math. Phys., 43, 199
+
+\bibitem[\protect\citeauthoryear{Hinterbichler \& Khoury}{2010}]{HinterbichlerKhoury2010}
+Hinterbichler K., Khoury J., 2010, Phys. Rev. Lett., 104, 231301
+
+\bibitem[\protect\citeauthoryear{Hu et al.}{2000}]{Hu2000}
+Hu W., Barkana R., Gruzinov A., 2000, Phys. Rev. Lett., 85, 1158
+
+\bibitem[\protect\citeauthoryear{Hu \& Sawicki}{2007}]{HuSawicki2007}
+Hu W., Sawicki I., 2007, Phys. Rev. D, 76, 064004
+
+\bibitem[\protect\citeauthoryear{Hui et al.}{2017}]{Hui2017}
+Hui L., Ostriker J.~P., Tremaine S., Witten E., 2017, Phys. Rev. D, 95, 043541
+
+\bibitem[\protect\citeauthoryear{Kahlhoefer et al.}{2014}]{Kahlhoefer2014}
+Kahlhoefer F., Schmidt-Hoberg K., Frandsen M.~T., Sarkar S., 2014, MNRAS, 437, 2865
+
+\bibitem[\protect\citeauthoryear{Kaplinghat et al.}{2016}]{Kaplinghat2016}
+Kaplinghat M., Tulin S., Yu H.-B., 2016, Phys. Rev. Lett., 116, 041302
+
+\bibitem[\protect\citeauthoryear{Kim}{2026}]{Kim2026}
+Kim J., 2026, MNRAS, submitted (cuRAMSES I)
+
+\bibitem[\protect\citeauthoryear{Kunkel et al.}{2024}]{Kunkel2024}
+Kunkel A., et al., 2024, arXiv:2411.17288
+
+\bibitem[\protect\citeauthoryear{Lesgourgues \& Pastor}{2006}]{LesgourguesPastor2006}
+Lesgourgues J., Pastor S., 2006, Phys. Rep., 429, 307
+
+\bibitem[\protect\citeauthoryear{Lewis et al.}{2000}]{Lewis2000}
+Lewis A., Challinor A., Lasenby A., 2000, ApJ, 538, 473
+
+\bibitem[\protect\citeauthoryear{Li et al.}{2012}]{Li2012}
+Li B., Zhao G.-B., Teyssier R., Koyama K., 2012, J. Cosmology Astropart. Phys., 01, 051
+
+\bibitem[\protect\citeauthoryear{Li et al.}{2013}]{Li2013}
+Li B., Zhao G.-B., Koyama K., 2013, J. Cosmology Astropart. Phys., 05, 023
+
+\bibitem[\protect\citeauthoryear{Linder}{2003}]{Linder2003}
+Linder E.~V., 2003, Phys. Rev. Lett., 90, 091301
+
+\bibitem[\protect\citeauthoryear{Llinares et al.}{2014}]{Llinares2014}
+Llinares C., Mota D.~F., Winther H.~A., 2014, A\&A, 562, A78
+
+\bibitem[\protect\citeauthoryear{L\"ughausen et al.}{2015}]{Lughausen2015}
+L\"ughausen F., Famaey B., Kroupa P., 2015, Canadian J. Phys., 93, 232
+
+\bibitem[\protect\citeauthoryear{Martel \& Shapiro}{1998}]{MartelShapiro1998}
+Martel H., Shapiro P.~R., 1998, MNRAS, 297, 467
+
+\bibitem[\protect\citeauthoryear{May \& Springel}{2021}]{MaySpringel2021}
+May S., Springel V., 2021, MNRAS, 506, 2603
+
+\bibitem[\protect\citeauthoryear{Milgrom}{1983}]{Milgrom1983}
+Milgrom M., 1983, ApJ, 270, 365
+
+\bibitem[\protect\citeauthoryear{Milgrom}{2010}]{Milgrom2010}
+Milgrom M., 2010, MNRAS, 403, 886
+
+\bibitem[\protect\citeauthoryear{Osher \& Sethian}{1988}]{OsherSethian1988}
+Osher S., Sethian J.~A., 1988, J. Comput. Phys., 79, 12
+
+\bibitem[\protect\citeauthoryear{Oyaizu}{2008}]{Oyaizu2008}
+Oyaizu H., 2008, Phys. Rev. D, 78, 123523
+
+\bibitem[\protect\citeauthoryear{Planck Collaboration}{2020}]{Planck2020}
+Planck Collaboration, 2020, A\&A, 641, A6
+
+\bibitem[\protect\citeauthoryear{Poulin et al.}{2019}]{Poulin2019}
+Poulin V., Smith T.~L., Karwal T., Kamionkowski M., 2019, Phys. Rev. Lett., 122, 221301
+
+\bibitem[\protect\citeauthoryear{Ratra \& Peebles}{1988}]{RatraPeebles1988}
+Ratra B., Peebles P.~J.~E., 1988, Phys. Rev. D, 37, 3406
+
+\bibitem[\protect\citeauthoryear{Robertson et al.}{2017}]{Robertson2017}
+Robertson A., Massey R., Eke V., 2017, MNRAS, 465, 569
+
+\bibitem[\protect\citeauthoryear{Rocha et al.}{2013}]{Rocha2013}
+Rocha M., Peter A.~H.~G., Bullock J.~S., et al., 2013, MNRAS, 430, 81
+
+\bibitem[\protect\citeauthoryear{Sapone \& Kunz}{2009}]{SaponeKunz2009}
+Sapone D., Kunz M., 2009, Phys. Rev. D, 80, 083519
+
+\bibitem[\protect\citeauthoryear{Schive et al.}{2014}]{Schive2014}
+Schive H.-Y., Chiueh T., Broadhurst T., 2014, Nature Physics, 10, 496
+
+\bibitem[\protect\citeauthoryear{Schmidt}{2009}]{Schmidt2009}
+Schmidt F., 2009, Phys. Rev. D, 80, 043001
+
+\bibitem[\protect\citeauthoryear{Spergel \& Steinhardt}{2000}]{SpergelSteinhardt2000}
+Spergel D.~N., Steinhardt P.~J., 2000, Phys. Rev. Lett., 84, 3760
+
+\bibitem[\protect\citeauthoryear{Teyssier}{2002}]{Teyssier2002}
+Teyssier R., 2002, A\&A, 385, 337
+
+\bibitem[\protect\citeauthoryear{Tucker-Smith \& Weiner}{2001}]{TuckerSmithWeiner2001}
+Tucker-Smith D., Weiner N., 2001, Phys. Rev. D, 64, 043502
+
+\bibitem[\protect\citeauthoryear{Tulin \& Yu}{2018}]{TulinYu2018}
+Tulin S., Yu H.-B., 2018, Phys. Rep., 730, 1
+
+\bibitem[\protect\citeauthoryear{Tulin et al.}{2013}]{Tulin2013}
+Tulin S., Yu H.-B., Zurek K.~M., 2013, Phys. Rev. D, 87, 115007
+
+\bibitem[\protect\citeauthoryear{Vogelsberger et al.}{2019}]{Vogelsberger2019}
+Vogelsberger M., Zavala J., Schutz K., Slatyer T.~R., 2019, MNRAS, 484, 5437
+
+\bibitem[\protect\citeauthoryear{Widrow \& Kaiser}{1993}]{WidrowKaiser1993}
+Widrow L.~M., Kaiser N., 1993, ApJ, 416, L71
+
+\bibitem[\protect\citeauthoryear{Winther et al.}{2015}]{Winther2015}
+Winther H.~A., et al., 2015, MNRAS, 454, 4208
+
+\bibitem[\protect\citeauthoryear{Yoshida}{1990}]{Yoshida1990}
+Yoshida H., 1990, Phys. Lett. A, 150, 262
+
+\end{thebibliography}
+
+\end{document}
