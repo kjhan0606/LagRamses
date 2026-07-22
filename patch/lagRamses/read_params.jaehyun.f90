@@ -81,7 +81,9 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min, &
        & fdm_nla,fdm_match_aout,fdm_hjm_qp,fdm_qp_c1max
   namelist/pbh_params/pbh_table_file,pbh_fraction,pbh_boost, &
-       & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance
+       & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance, &
+       & pbh_mf_model,pbh_spin_model,pbh_hawking_model, &
+       & pbh_epsdep_model,pbh_fheat_model,pbh_cr_ivar
   namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
        & n_iter_mond,mond_eps,g_ext_mond
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
@@ -886,7 +888,13 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         if(myid==1) write(*,*) 'ERROR: pbh_energy_sink must be local_heat or removed'
         call clean_stop
      end if
+     if(pbh_cr_ivar/=0 .and. (pbh_cr_ivar<=ndim+2 .or. pbh_cr_ivar>nvar)) then
+        if(myid==1) write(*,*) 'ERROR: pbh_cr_ivar must be 0 or a passive slot in (', &
+             & ndim+2, ',', nvar, ']'
+        call clean_stop
+     end if
      call pbh_read_table(myid)
+     call pbh_validate_models(myid)
      if(myid==1) then
         write(*,'(A)') ' Evaporating-PBH dark matter enabled'
         write(*,'(A,ES10.3,A,ES10.3,A)') '   pbh_fraction=', pbh_fraction, &
