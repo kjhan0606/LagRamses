@@ -380,7 +380,7 @@ subroutine restore_psi_binary_varcpu
               if(ordering == 'ksection') then
                  call cmp_ksection_cpumap(xx_pos, c_tmp, 1)
               else
-                 call cmp_cpumap(xx, c_tmp, 1)
+                 call cmp_cpumap(xx_pos, c_tmp, 1)
               end if
               dest(k) = c_tmp(1)
            end do
@@ -685,7 +685,7 @@ subroutine restore_psi_postlb
         if(ordering == 'ksection') then
            call cmp_ksection_cpumap(xx_pos, c_tmp, 1)
         else
-           call cmp_cpumap(xx, c_tmp, 1)
+           call cmp_cpumap(xx_pos, c_tmp, 1)
         end if
         dest(i) = c_tmp(1)
      end do
