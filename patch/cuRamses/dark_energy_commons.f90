@@ -44,7 +44,8 @@ contains
   ! Matches f_de() in init_time.f90
   !--------------------------------------------------------------
   function f_de_val(a) result(fde)
-    use amr_parameters, only: w0, wa, use_galileon, galileon_tracker, omega_m
+    use amr_parameters, only: w0, wa, use_galileon, galileon_tracker, omega_m, &
+         omega_l, use_chaplygin, chaplygin_As, chaplygin_alpha, use_rvm, rvm_nu
     use scalar_de_commons, only: sde_active, sde_fde_of_a
     real(dp), intent(in) :: a
     real(dp) :: fde, e2g
@@ -54,6 +55,14 @@ contains
        ! Cubic Galileon tracker: rho_de ∝ 1/E^2
        e2g = 0.5d0*(omega_m/a**3 + sqrt((omega_m/a**3)**2 + 4d0*(1d0-omega_m)))
        fde = 1.0d0/e2g
+    else if (use_chaplygin) then
+       ! Generalized Chaplygin gas: [A_s + (1-A_s) a^{-3(1+alpha)}]^{1/(1+alpha)}
+       fde = (chaplygin_As + (1.0d0-chaplygin_As)*a**(-3.0d0*(1.0d0+chaplygin_alpha))) &
+            &   **(1.0d0/(1.0d0+chaplygin_alpha))
+    else if (use_rvm) then
+       ! Running vacuum: rho_Lambda(a)/rho_Lambda0 with vacuum-CDM exchange
+       fde = 1.0d0 + rvm_nu/(1.0d0-rvm_nu)*(omega_m/omega_l) &
+            &   *(a**(-3.0d0*(1.0d0-rvm_nu)) - 1.0d0)
     else if (wa == 0.0d0 .and. w0 == -1.0d0) then
        fde = 1.0d0
     else if (wa == 0.0d0) then
@@ -67,7 +76,8 @@ contains
   ! de_w_val: DE equation of state w(a)
   !--------------------------------------------------------------
   function de_w_val(a) result(w_a)
-    use amr_parameters, only: w0, wa, use_galileon, galileon_tracker, omega_m
+    use amr_parameters, only: w0, wa, use_galileon, galileon_tracker, omega_m, &
+         use_chaplygin, chaplygin_As, chaplygin_alpha, use_rvm
     use scalar_de_commons, only: sde_active, sde_w_of_a
     real(dp), intent(in) :: a
     real(dp) :: w_a, e2g
@@ -77,6 +87,11 @@ contains
        ! tracker: w = -1 + (2/3) Hdot/H^2
        e2g = 0.5d0*(omega_m/a**3 + sqrt((omega_m/a**3)**2 + 4d0*(1d0-omega_m)))
        w_a = -1.0d0 - (omega_m/a**3)/(2.0d0*e2g - omega_m/a**3)
+    else if (use_chaplygin) then
+       w_a = -chaplygin_As / (chaplygin_As &
+            &   + (1.0d0-chaplygin_As)*a**(-3.0d0*(1.0d0+chaplygin_alpha)))
+    else if (use_rvm) then
+       w_a = -1.0d0
     else
        w_a = w0 + wa * (1.0d0 - a)
     end if
@@ -87,12 +102,16 @@ contains
   ! CPL: namelist cs2_de. Quintessence: 1. k-essence: model cs2(a).
   !--------------------------------------------------------------
   function de_cs2_eff(a) result(cs2)
-    use amr_parameters, only: cs2_de
+    use amr_parameters, only: cs2_de, use_chaplygin, chaplygin_As, chaplygin_alpha
     use scalar_de_commons, only: sde_active, sde_cs2_of_a
     real(dp), intent(in) :: a
     real(dp) :: cs2
     if (sde_active()) then
        cs2 = sde_cs2_of_a(a)
+    else if (use_chaplygin) then
+       ! adiabatic sound speed cs2 = -alpha*w = alpha*A_s/[A_s+(1-A_s)a^{-3(1+alpha)}]
+       cs2 = chaplygin_alpha * chaplygin_As / (chaplygin_As &
+            &   + (1.0d0-chaplygin_As)*a**(-3.0d0*(1.0d0+chaplygin_alpha)))
     else
        cs2 = cs2_de
     end if
@@ -103,9 +122,9 @@ contains
   ! correction is applicable (positive sound speed available)
   !--------------------------------------------------------------
   logical function de_helmholtz_on()
-    use amr_parameters, only: cs2_de
+    use amr_parameters, only: cs2_de, use_chaplygin
     use scalar_de_commons, only: sde_active
-    de_helmholtz_on = (cs2_de > 0.0d0) .or. sde_active()
+    de_helmholtz_on = (cs2_de > 0.0d0) .or. sde_active() .or. use_chaplygin
   end function de_helmholtz_on
 
   !--------------------------------------------------------------
@@ -120,7 +139,7 @@ contains
   function cosmo_poisson_fourpi(aexp_val, scale_in) result(fourpi)
     use amr_parameters, only: cosmo, omega_m, omega_l, omega_nu, &
          use_neutrino, de_perturb, cs2_de, use_coupled_de, cde_vary_mass, &
-         use_quintessence, use_horndeski
+         use_quintessence, use_horndeski, use_rvm, rvm_nu
     use scalar_de_commons, only: sde_dmcorr_of_a, horndeski_mu_of_a
     real(dp), intent(in) :: aexp_val, scale_in
     real(dp) :: fourpi, omega_de_a, omega_cb
@@ -140,6 +159,11 @@ contains
     ! Coupled quintessence: rho_dm*a^3 evolves as exp(beta*(phi-phi0))
     if(use_coupled_de .and. cde_vary_mass .and. use_quintessence) then
        fourpi = fourpi * sde_dmcorr_of_a(aexp_val)
+    end if
+    ! Running vacuum: CDM dilutes as rho_c ~ a^{-3(1-nu)}, so the mean matter
+    ! density feeding the Poisson source carries a^{3 nu}.
+    if(use_rvm) then
+       fourpi = fourpi * aexp_val**(3.0d0*rvm_nu)
     end if
     ! Horndeski quasi-static mu(a) (scale-independent limit)
     if(use_horndeski) then
