@@ -447,6 +447,15 @@ module amr_parameters
   logical ::use_kessence=.false.         ! Enable k-essence background
   real(dp)::kes_x0=0.5001d0             ! X(a=1) in M^4 units (>0.5; ->0.5 gives w0->-1)
 
+  ! Generalized Chaplygin gas dark energy: p = -A*rho^{-alpha}
+  logical ::use_chaplygin=.false.        ! Enable generalized Chaplygin gas DE
+  real(dp)::chaplygin_As=0.75d0          ! A_s = A/rho_de0^(1+alpha), in (0,1); w(a=1)=-A_s
+  real(dp)::chaplygin_alpha=1.0d-4       ! GCG index alpha (>=0); small keeps sound-speed oscillations sub-observable
+
+  ! Running vacuum Lambda(H^2) = c0 + nu*H^2 (vacuum-CDM energy exchange)
+  logical ::use_rvm=.false.              ! Enable running vacuum
+  real(dp)::rvm_nu=0.0d0                 ! Running coefficient nu (0=LCDM); rho_c ~ a^{-3(1-nu)}
+
   ! Horndeski quasi-static parametrized gravity
   logical ::use_horndeski=.false.        ! Enable mu(a,k)-modified Poisson
   real(dp)::hs_mu0=0.1d0                ! mu(a=1)-1 amplitude

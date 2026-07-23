@@ -315,6 +315,7 @@ subroutine init_cosmo
   integer,parameter::tag=1117
   integer::dummy_io,info2
   real(kind=8)::f_de  ! CPL dark energy density ratio (external function)
+  real(kind=8)::de_matfac  ! CDM density correction rho_c(a)a^3/rho_c0 (RVM; else 1)
 
   if(verbose)write(*,*)'Entering init_cosmo'
 
@@ -512,7 +513,7 @@ subroutine init_cosmo
   do ilevel=levelmin,nlevelmax_part
      dfact(ilevel)=d1a(aexp)/d1a(astart(ilevel))
      vfact(ilevel)=astart(ilevel)*fpeebl(astart(ilevel)) & ! Same scale factor as in grafic1
-          & *sqrt(omega_m/astart(ilevel)+omega_l*f_de(astart(ilevel),w0,wa)*astart(ilevel)*astart(ilevel)+omega_k) &
+          & *sqrt(omega_m*de_matfac(astart(ilevel))/astart(ilevel)+omega_l*f_de(astart(ilevel),w0,wa)*astart(ilevel)*astart(ilevel)+omega_k) &
           & /astart(ilevel)*h0
   end do
 
@@ -547,7 +548,7 @@ subroutine init_cosmo
 
   ! Scale displacement in Mpc to code velocity (v=dx/dtau)
   ! in coarse cell units per conformal time
-  vfact(1)=aexp*fpeebl(aexp)*sqrt(omega_m/aexp+omega_l*f_de(aexp,w0,wa)*aexp*aexp+omega_k)
+  vfact(1)=aexp*fpeebl(aexp)*sqrt(omega_m*de_matfac(aexp)/aexp+omega_l*f_de(aexp,w0,wa)*aexp*aexp+omega_k)
   ! This scale factor is different from vfact in grafic by h0/aexp
 
 contains
@@ -558,9 +559,9 @@ contains
     !      Computes the integrand
     real(dp)::fy
     real(dp)::y,a
-    real(dp)::f_de
+    real(dp)::f_de, de_matfac
 
-    y=omega_m/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
+    y=omega_m*de_matfac(a)/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
     fy=1.d0/y**1.5d0
 
     return
@@ -572,14 +573,14 @@ contains
     !     Computes the linear growing mode D1 in a Friedmann-Robertson-Walker
     !     universe. See Peebles LSSU sections 11 and 14.
     real(dp)::a,y12,y,eps
-    real(dp)::f_de
+    real(dp)::f_de, de_matfac
 
     eps=1.0d-6
     if(a .le. 0.0d0)then
        write(*,*)'a=',a
        call clean_stop
     end if
-    y=omega_m/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
+    y=omega_m*de_matfac(a)/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
     if(y .lt. 0.0D0)then
        write(*,*)'y=',y
        call clean_stop
@@ -614,14 +615,14 @@ contains
     real(dp) :: fpeebl,a
     !     Computes the growth factor f=d\log D1/d\log a.
     real(dp) :: fact,y,eps
-    real(dp) :: f_de
+    real(dp) :: f_de, de_matfac
     real(dp) :: wa_eff, dyda
 
     eps=1.0d-6
-    y=omega_m/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
+    y=omega_m*de_matfac(a)/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
     fact=rombint(eps,a,eps)
     wa_eff = w0 + wa*(1.d0-a)
-    dyda = -omega_m/a + omega_l*a*a*f_de(a,w0,wa)*(-1.d0-3.d0*wa_eff)
+    dyda = -omega_m*de_matfac(a)/a + omega_l*a*a*f_de(a,w0,wa)*(-1.d0-3.d0*wa_eff)
     fpeebl = 0.5d0*dyda/y - 1.d0 + a*fy(a)/fact
     return
   end function fpeebl
@@ -790,10 +791,10 @@ end subroutine friedman
 function dadtau(axp_tau,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in)
   use amr_parameters, only: dp, use_ede, omega_ede, z_ede, w_ede
   real(kind=8)::dadtau,axp_tau,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in
-  real(kind=8)::f_de, ede_term
+  real(kind=8)::f_de, de_matfac, ede_term
   real(kind=8)::a_c_ede, pw_ede, e2std_c_ede
   dadtau = axp_tau*axp_tau*axp_tau *  &
-       &   ( O_mat_0 + &
+       &   ( O_mat_0 * de_matfac(axp_tau) + &
        &     O_vac_0 * axp_tau*axp_tau*axp_tau * f_de(axp_tau,w0_in,wa_in) + &
        &     O_k_0   * axp_tau )
   ! Early Dark Energy (Poulin+19 fluid form): rho_EDE constant before
@@ -816,10 +817,10 @@ end function dadtau
 function dadt(axp_t,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in)
   use amr_parameters, only: dp, use_ede, omega_ede, z_ede, w_ede
   real(kind=8)::dadt,axp_t,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in
-  real(kind=8)::f_de, ede_term
+  real(kind=8)::f_de, de_matfac, ede_term
   real(kind=8)::a_c_ede, pw_ede, e2std_c_ede
   dadt   = (1.0D0/axp_t)* &
-       &   ( O_mat_0 + &
+       &   ( O_mat_0 * de_matfac(axp_t) + &
        &     O_vac_0 * axp_t*axp_t*axp_t * f_de(axp_t,w0_in,wa_in) + &
        &     O_k_0   * axp_t )
   ! Early Dark Energy (Poulin+19 fluid form), same convention as dadtau:
@@ -837,12 +838,22 @@ function dadt(axp_t,O_mat_0,O_vac_0,O_k_0,w0_in,wa_in)
 end function dadt
 
 function f_de(a, w0_in, wa_in)
-  ! CPL dark energy density ratio: rho_de(a)/rho_de(1)
-  ! f_de = a^{-3(1+w0+wa)} * exp(-3*wa*(1-a))
-  ! LCDM: w0=-1, wa=0 => f_de=1
-  use amr_parameters, only: dp
+  ! Dark energy density ratio rho_de(a)/rho_de(1).
+  ! CPL:  a^{-3(1+w0+wa)} * exp(-3*wa*(1-a));  LCDM (w0=-1,wa=0) => 1.
+  ! Generalized Chaplygin gas: [A_s + (1-A_s) a^{-3(1+alpha)}]^{1/(1+alpha)}.
+  ! Running vacuum: rho_Lambda(a)/rho_Lambda0 with vacuum-CDM exchange,
+  !   f_de = 1 + nu/(1-nu) * (Om/Ol) * (a^{-3(1-nu)} - 1).
+  use amr_parameters, only: dp, omega_m, omega_l, &
+       & use_chaplygin, chaplygin_As, chaplygin_alpha, use_rvm, rvm_nu
   real(kind=8) :: f_de, a, w0_in, wa_in
-  if (wa_in == 0.0D0 .and. w0_in == -1.0D0) then
+  real(kind=8) :: opa
+  if (use_chaplygin) then
+     opa = 1.0d0 + chaplygin_alpha
+     f_de = (chaplygin_As + (1.0d0-chaplygin_As)*a**(-3.0d0*opa))**(1.0d0/opa)
+  else if (use_rvm) then
+     f_de = 1.0d0 + rvm_nu/(1.0d0-rvm_nu)*(omega_m/omega_l) &
+          & *(a**(-3.0d0*(1.0d0-rvm_nu)) - 1.0d0)
+  else if (wa_in == 0.0D0 .and. w0_in == -1.0D0) then
      f_de = 1.0D0
   else if (wa_in == 0.0D0) then
      f_de = a**(-3.0D0*(1.0D0+w0_in))
@@ -850,6 +861,20 @@ function f_de(a, w0_in, wa_in)
      f_de = a**(-3.0D0*(1.0D0+w0_in+wa_in)) * exp(-3.0D0*wa_in*(1.0D0-a))
   end if
 end function f_de
+
+function de_matfac(a)
+  ! Cold-dark-matter density correction rho_c(a)*a^3/rho_c0 for models that
+  ! couple the CDM to the dark sector. Running vacuum dilutes the CDM as
+  ! rho_c ~ a^{-3(1-nu)}, so the factor is a^{3 nu}. Every uncoupled model
+  ! returns 1, which leaves the Friedmann matter term bit-for-bit unchanged.
+  use amr_parameters, only: dp, use_rvm, rvm_nu
+  real(kind=8) :: de_matfac, a
+  if (use_rvm) then
+     de_matfac = a**(3.0d0*rvm_nu)
+  else
+     de_matfac = 1.0d0
+  end if
+end function de_matfac
 
 
 
