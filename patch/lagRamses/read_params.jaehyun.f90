@@ -45,6 +45,7 @@ subroutine read_params
        & ,use_symmetron &
        & ,use_dilaton &
        & ,use_galileon &
+       & ,scalar_solver_strict &
        & ,use_coupled_de &
        & ,use_quintessence &
        & ,use_kessence &
@@ -958,7 +959,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1) then
         write(*,'(A)') ' Cubic Galileon gravity enabled'
         write(*,'(A,ES10.3,A,ES10.3)') '   c2=', c2_galileon, '  c3=', c3_galileon
-        write(*,'(A,I3,A,ES10.3)') '   max_iter=', n_iter_galileon, '  eps=', galileon_eps
+        write(*,'(A,I5,A,ES10.3)') '   max_iter=', n_iter_galileon, '  eps=', galileon_eps
      end if
   end if
 
@@ -1311,4 +1312,3 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
 #endif
 
 end subroutine read_params
-

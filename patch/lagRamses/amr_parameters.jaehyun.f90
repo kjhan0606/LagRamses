@@ -396,14 +396,14 @@ module amr_parameters
   logical ::use_fR=.false.               ! Enable f(R) gravity
   real(dp)::fR0=-1.0d-6                 ! f_{R,0} amplitude (< 0)
   integer ::fR_n=1                       ! Hu-Sawicki power-law index
-  integer ::n_iter_fR=20                 ! Max Newton-GS iterations per level
+  integer ::n_iter_fR=200                ! Max Newton-GS iterations per level
   real(dp)::fR_eps=1.0d-6               ! Convergence threshold
 
   ! nDGP gravity parameters
   logical ::use_nDGP=.false.             ! Enable nDGP gravity
   real(dp)::omega_rc=0.25d0             ! Omega_rc = 1/(4 r_c^2 H_0^2)
   integer ::nDGP_branch=1               ! 1=normal, -1=self-accelerating
-  integer ::n_iter_nDGP=20              ! Max Newton-GS iterations
+  integer ::n_iter_nDGP=100             ! Max Newton-GS iterations
   real(dp)::nDGP_eps=1.0d-6             ! Convergence threshold
 
   ! Symmetron gravity parameters
@@ -411,7 +411,7 @@ module amr_parameters
   real(dp)::a_ssb=0.5d0                 ! SSB scale factor
   real(dp)::beta_symmetron=1.0d0        ! Coupling strength
   real(dp)::L_symmetron=1.0d0           ! Compton wavelength [Mpc/h]
-  integer ::n_iter_symmetron=20          ! Max Newton-GS iterations
+  integer ::n_iter_symmetron=500         ! Max Newton-GS iterations
   real(dp)::symmetron_eps=1.0d-6        ! Convergence threshold
 
   ! Dilaton gravity parameters (Damour-Polyakov)
@@ -419,7 +419,7 @@ module amr_parameters
   real(dp)::beta_dilaton=1.0d0          ! Coupling strength
   real(dp)::L_dilaton=1.0d0             ! Compton wavelength [Mpc/h]
   real(dp)::a0_dilaton=0.5d0            ! Transition scale factor
-  integer ::n_iter_dilaton=20            ! Max Newton-GS iterations
+  integer ::n_iter_dilaton=100           ! Max Newton-GS iterations
   real(dp)::dilaton_eps=1.0d-6          ! Convergence threshold
 
   ! Galileon (cubic) gravity parameters
@@ -427,8 +427,9 @@ module amr_parameters
   logical ::galileon_tracker=.true.      ! Barreira+13 tracker (parameter-free); F=legacy template
   real(dp)::c2_galileon=-1.0d0          ! Kinetic coefficient (legacy template only)
   real(dp)::c3_galileon=1.0d0           ! Cubic coefficient (legacy template only)
-  integer ::n_iter_galileon=20           ! Max Newton-GS iterations
+  integer ::n_iter_galileon=1000         ! Max Newton-GS iterations
   real(dp)::galileon_eps=1.0d-6         ! Convergence threshold
+  logical ::scalar_solver_strict=.true. ! Stop before applying an unconverged fifth force
 
   ! Coupled Dark Energy parameters
   logical ::use_coupled_de=.false.       ! Enable DM-DE coupling
