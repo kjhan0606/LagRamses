@@ -838,7 +838,7 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   dx_loc = dx * scale
   alpha = hbar_code * dt_half / (2.0d0 * dx_loc**2)
   g = 0.5d0 * alpha
-  cntol = 1.0d-10
+  cntol = fdm_cn_tol
   ntot = ncoarse + twotondim*ngridmax
 
   allocate(br(ntot),bi(ntot),rr(ntot),ri(ntot),rhr(ntot),rhi(ntot))
