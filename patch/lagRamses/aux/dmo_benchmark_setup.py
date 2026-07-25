@@ -596,6 +596,7 @@ exchange_method='auto'
 noutput={len(outputs_z)}
 aout={outputs_a}
 foutput=100000
+match_aout=.true.
 /
 
 &COSMO_PARAMS

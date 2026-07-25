@@ -155,6 +155,7 @@ module amr_parameters
   integer::noutput=1          ! Total number of outputs
   integer::foutput=1000000    ! Frequency of outputs
   integer::output_mode=0      ! Output mode (for hires runs)
+  logical::match_aout=.false. ! Shorten cosmological coarse steps to hit aout
   logical::gadget_output=.false. ! Output in gadget format
   logical::output_now=.false. ! write output next step
   character(LEN=128)::jobcontrolfile='jobcontrol.txt'  ! Job control file for runtime stop/output

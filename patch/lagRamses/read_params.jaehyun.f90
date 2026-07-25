@@ -100,7 +100,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
   namelist/output_params/noutput,foutput,fbackup,aout,tout,output_mode &
        & ,tend,delta_tout,aend,delta_aout,gadget_output,walltime_hrs,minutes_dump &
-       & ,informat,outformat
+       & ,informat,outformat,match_aout
   namelist/amr_params/levelmin,levelmax,ngridmax,ngridtot &
        & ,npartmax,nparttot,nexpand,boxlen,nsinkmax,nlevel_collapse
   namelist/poisson_params/epsilon,gravity_type,gravity_params &
