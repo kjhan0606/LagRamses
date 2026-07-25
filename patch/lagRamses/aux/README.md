@@ -29,10 +29,11 @@ python3 patch/lagRamses/aux/dmo_benchmark_setup.py \
 
 ## `plot_dmo_pk_ratios.py`
 
-Plots matched-phase power-spectrum ratios and writes CSV and JSON validation
-products. By default it interpolates in `log(P)` and `log(a)` when legacy
-outputs do not share an exact epoch; use `--nearest` for campaigns generated
-with `match_aout`.
+Plots matched-phase power-spectrum ratios together with the parameter-matched
+lagCAMB linear prediction, and writes CSV and JSON validation products. By
+default it interpolates in `log(P)` and `log(a)` when legacy outputs do not
+share an exact epoch; use `--nearest` for campaigns generated with
+`match_aout`.
 
 ```bash
 python3 patch/lagRamses/aux/plot_dmo_pk_ratios.py CAMPAIGN \

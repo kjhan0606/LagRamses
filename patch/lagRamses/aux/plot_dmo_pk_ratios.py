@@ -13,6 +13,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 
 
@@ -39,6 +40,11 @@ def arguments() -> argparse.Namespace:
         "--nearest",
         action="store_true",
         help="use the nearest dump instead of interpolating P(k) to each target redshift",
+    )
+    parser.add_argument(
+        "--no-theory",
+        action="store_true",
+        help="do not calculate and overlay lagCAMB linear-theory ratios",
     )
     return parser.parse_args()
 
@@ -132,6 +138,59 @@ def log_warnings(model_dir: Path) -> dict:
     }
 
 
+def linear_theory(
+    campaign: Path,
+    model_names: list[str],
+    redshifts: list[float],
+    kmax: float,
+) -> dict[str, dict[float, dict[str, np.ndarray]]]:
+    """Calculate lagCAMB linear P(k) using the campaign's exact parameters."""
+    from dmo_benchmark_setup import configure_camb_dark_energy, load_local_camb
+
+    metadata = json.loads((campaign / "campaign.json").read_text())
+    camb = load_local_camb(Path(metadata["camb_dir"]))
+    h = metadata["H0"] / 100.0
+    spectra = {}
+    for name in model_names:
+        model_metadata = metadata["models"].get(name, {})
+        if name != "lcdm" and not model_metadata.get("ic_transfer_exact_match", False):
+            raise ValueError(
+                f"{name} has no parameter-matched lagCAMB theory in this campaign"
+            )
+        pars = camb.CAMBparams()
+        pars.set_cosmology(
+            H0=metadata["H0"],
+            ombh2=metadata["omega_b"] * h**2,
+            omch2=(metadata["omega_m"] - metadata["omega_b"]) * h**2,
+            mnu=0.0,
+        )
+        pars.InitPower.set_params(ns=metadata["n_s"], As=metadata["A_s"])
+        configure_camb_dark_energy(pars, name, camb)
+        pars.set_matter_power(redshifts=redshifts, kmax=max(2.0, 1.25 * kmax))
+        results = camb.get_results(pars)
+        kh, returned_z, pk = results.get_linear_matter_power_spectrum(
+            hubble_units=True, k_hunit=True
+        )
+        spectra[name] = {}
+        for target_z in redshifts:
+            iz = int(np.abs(returned_z - target_z).argmin())
+            if not np.isclose(returned_z[iz], target_z, rtol=0.0, atol=1.0e-8):
+                raise RuntimeError(
+                    f"lagCAMB did not return {name} P(k) at z={target_z:g}"
+                )
+            spectra[name][target_z] = {"k": kh.copy(), "pk": pk[iz].copy()}
+    return spectra
+
+
+def spectrum_ratio(sample: dict, reference: dict, k: np.ndarray) -> np.ndarray:
+    """Interpolate two positive spectra in log(k)-log(P) and return their ratio."""
+    sample_pk = np.exp(np.interp(np.log(k), np.log(sample["k"]), np.log(sample["pk"])))
+    reference_pk = np.exp(
+        np.interp(np.log(k), np.log(reference["k"]), np.log(reference["pk"]))
+    )
+    return sample_pk / reference_pk
+
+
 def main() -> int:
     args = arguments()
     campaign = args.campaign.resolve()
@@ -143,8 +202,13 @@ def main() -> int:
     missing = [name for name, values in all_snapshots.items() if not values]
     if missing:
         raise RuntimeError(f"missing P(k) outputs for: {', '.join(missing)}")
+    theory = (
+        {}
+        if args.no_theory
+        else linear_theory(campaign, model_names, args.redshifts, args.kmax)
+    )
 
-    ncols = 2
+    ncols = min(2, len(args.redshifts))
     nrows = (len(args.redshifts) + ncols - 1) // ncols
     fig, axes = plt.subplots(
         nrows, ncols, figsize=(7.2, 2.65 * nrows), sharex=True, sharey=True,
@@ -152,6 +216,7 @@ def main() -> int:
     )
     axes = np.atleast_1d(axes).ravel()
     rows = []
+    comparisons = []
 
     for ax, target_z in zip(axes, args.redshifts):
         reference = at_redshift(all_snapshots["lcdm"], target_z, args.nearest)
@@ -176,6 +241,7 @@ def main() -> int:
             for kval, value in zip(k, ratio):
                 rows.append(
                     (
+                        "simulation",
                         target_z,
                         reference["z"],
                         name,
@@ -186,11 +252,65 @@ def main() -> int:
                         ";".join(f"{value:.9g}" for value in sample["source_aexp"]),
                     )
                 )
+            if theory:
+                theory_reference = theory["lcdm"][target_z]
+                theory_sample = theory[name][target_z]
+                theory_k = np.geomspace(k.min(), args.kmax, 180)
+                theory_ratio = spectrum_ratio(
+                    theory_sample, theory_reference, theory_k
+                )
+                ax.plot(
+                    theory_k,
+                    theory_ratio,
+                    lw=1.25,
+                    ls=(0, (4, 2)),
+                    color=COLORS.get(name),
+                    alpha=0.95,
+                )
+                for kval, value in zip(theory_k, theory_ratio):
+                    rows.append(
+                        (
+                            "lagCAMB linear",
+                            target_z,
+                            target_z,
+                            name,
+                            target_z,
+                            kval,
+                            value,
+                            "",
+                            "",
+                        )
+                    )
+                theory_on_sim_k = spectrum_ratio(
+                    theory_sample, theory_reference, k
+                )
+                linear_mask = k <= min(0.25, args.kmax)
+                residual = ratio[linear_mask] / theory_on_sim_k[linear_mask] - 1.0
+                comparisons.append(
+                    {
+                        "redshift": target_z,
+                        "model": name,
+                        "k_linear_max_h_mpc": min(0.25, args.kmax),
+                        "n_bins": int(residual.size),
+                        "median_abs_fractional_residual": float(
+                            np.median(np.abs(residual))
+                        ),
+                        "rms_fractional_residual": float(
+                            np.sqrt(np.mean(residual**2))
+                        ),
+                    }
+                )
 
         ax.axhline(1.0, color="0.35", lw=0.8, ls="--")
         ax.set_xscale("log")
         ax.set_title(f"$z={target_z:.2f}$", fontsize=10)
         ax.grid(alpha=0.18)
+
+    if not any(row[0] == "simulation" for row in rows):
+        raise RuntimeError(
+            "no positive shot-noise-subtracted simulation P(k) bins at the "
+            "requested redshifts"
+        )
 
     for ax in axes[len(args.redshifts):]:
         ax.set_visible(False)
@@ -200,7 +320,28 @@ def main() -> int:
     for index, ax in enumerate(axes):
         if ax.get_visible() and index % ncols == 0:
             ax.set_ylabel(r"$P(k)/P_{\Lambda{\rm CDM}}(k)$")
-    axes[0].legend(frameon=False, fontsize=9, ncol=min(3, len(args.models)))
+    model_legend = axes[0].legend(
+        frameon=False, fontsize=9, ncol=min(3, len(args.models))
+    )
+    if theory:
+        axes[0].add_artist(model_legend)
+        axes[0].legend(
+            handles=[
+                Line2D([0], [0], color="0.2", lw=1.55, label="simulation"),
+                Line2D(
+                    [0],
+                    [0],
+                    color="0.2",
+                    lw=1.25,
+                    ls=(0, (4, 2)),
+                    label="lagCAMB linear",
+                ),
+            ],
+            frameon=False,
+            fontsize=8.5,
+            loc="center right",
+            bbox_to_anchor=(0.99, 0.66),
+        )
 
     png = figure_dir / f"{args.output_stem}.png"
     pdf = figure_dir / f"{args.output_stem}.pdf"
@@ -213,6 +354,7 @@ def main() -> int:
         writer = csv.writer(stream)
         writer.writerow(
             (
+                "series",
                 "target_z",
                 "lcdm_z",
                 "model",
@@ -237,11 +379,17 @@ def main() -> int:
         },
         "kmax_h_mpc": args.kmax,
         "epoch_sampling": "nearest dump" if args.nearest else "log-P/log-a interpolation",
+        "theory": (
+            "disabled"
+            if args.no_theory
+            else "lagCAMB linear P(k), campaign-matched parameters and primordial amplitude"
+        ),
+        "simulation_to_linear_comparison": comparisons,
         "figure_png": str(png),
         "figure_pdf": str(pdf),
         "ratio_csv": str(csv_path),
     }
-    report_path = figure_dir / "validation_report.json"
+    report_path = figure_dir / f"{args.output_stem}_validation.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
     return 0
