@@ -129,3 +129,32 @@ On the `64^3` N1 z=0 regression (4 MPI ranks x 4 OpenMP threads), these
 changes reduced the RAMSES total timer from 19.253 s to 8.052 s. The common
 CIC P(k) file was byte-identical. At `128^3`, the maximum CIC P(k) change was
 `1.31e-5%`, well below the 0.1% acceptance threshold.
+
+The remaining repeated work is cached at the scalar-solve scope. Six face
+and twelve edge grid neighbours are now constructed once at the beginning
+of each nDGP/Galileon solve and reused by all nonlinear corrections. The
+cache is conservatively rebuilt at the next coarse step so a load balance
+cannot leave stale active-grid indices.
+
+The shared spectral Helmholtz correction also retains its FFTW plans and
+real/complex work arrays, precomputes the one-dimensional discrete Laplacian
+eigenvalues, and gathers the right-hand side with an in-place allreduce. This
+removes one full real-grid buffer and avoids repeated plan construction,
+allocation, and millions of identical cosine evaluations. It does not yet
+replace the replicated scalar FFT with a distributed FFTW-MPI transform;
+that is the next scaling improvement above `256^3`.
+
+Controlled same-node baseline/candidate tests gave:
+
+- N1 `64^3` z=0: total 9.055 -> 6.671 s and nDGP 5.294 -> 2.960 s;
+- N1 `128^3` z=0: total 165.75 -> 125.04 s and nDGP
+  110.69 -> 69.96 s; and
+- N1 `256^3`, first 20 steps (8 MPI x 4 OpenMP): total
+  127.46 -> 101.06 s and nDGP 103.85 -> 76.51 s.
+
+For the full `64^3` and `128^3` runs, both the native spectra and common
+interlaced `256^3` CIC spectra were identical at z=5 and z=0. The L8 short
+test reproduced every timestep, nonlinear iteration count, and reported
+residual exactly. Full F5 and Symmetron-A `64^3` regressions also produced
+identical native and common-CIC spectra at both redshifts; their runtimes
+were unchanged within run-to-run noise.

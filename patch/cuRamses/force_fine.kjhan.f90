@@ -1303,10 +1303,14 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
 
   integer::fft_Nx,fft_Ny,fft_Nz,igrid,igrid_amr,ind,iskip,icell,info
   integer::Kx,Ky,Kz,ix,iy,iz,i,j,k,ngrid_loc,nx_loc
-  integer(kind=8)::plan_f,plan_b,ntot
-  real(dp)::dx_loc,scale,kd2,denom,twopi,cx,cy,cz,du,uold
-  real(dp),allocatable::b3(:,:,:),bl(:,:,:)
-  complex(kind=8),allocatable::bk(:,:,:)
+  integer(kind=8)::ntot
+  integer(kind=8),save::plan_f=0_8,plan_b=0_8
+  integer,save::saved_Nx=0,saved_Ny=0,saved_Nz=0
+  real(dp),save::saved_dx=-1d0
+  real(dp)::dx_loc,scale,kd2,denom,twopi,du,uold
+  real(dp),allocatable,save::b3(:,:,:)
+  real(dp),allocatable,save::eigx(:),eigy(:),eigz(:)
+  complex(kind=8),allocatable,save::bk(:,:,:)
   integer,parameter::FFTW_EST=64
 
   fft_Nx = nx*2**ilevel; fft_Ny = ny*2**ilevel; fft_Nz = nz*2**ilevel
@@ -1316,8 +1320,41 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
   dx_loc=0.5d0**ilevel*scale
   twopi=2d0*acos(-1d0)
 
-  ! Gather the staged rhs to a full 3D array on every rank
-  allocate(bl(fft_Nx,fft_Ny,fft_Nz)); bl=0d0
+  ! Cache FFT work arrays, plans, and discrete one-dimensional
+  ! eigenvalues.  The previous path allocated about 3*N^3 reals,
+  ! recreated both FFTW plans, and recomputed millions of cosines on
+  ! every nonlinear correction.
+  if(fft_Nx/=saved_Nx .or. fft_Ny/=saved_Ny .or. fft_Nz/=saved_Nz &
+       & .or. dx_loc/=saved_dx) then
+     if(plan_f/=0_8) call dfftw_destroy_plan(plan_f)
+     if(plan_b/=0_8) call dfftw_destroy_plan(plan_b)
+     plan_f=0_8
+     plan_b=0_8
+     if(allocated(b3)) deallocate(b3,bk,eigx,eigy,eigz)
+     allocate(b3(fft_Nx,fft_Ny,fft_Nz))
+     allocate(bk(fft_Nx/2+1,fft_Ny,fft_Nz))
+     allocate(eigx(fft_Nx/2+1),eigy(fft_Ny),eigz(fft_Nz))
+     do i=1,fft_Nx/2+1
+        eigx(i)=(2d0-2d0*cos(twopi*dble(i-1)/dble(fft_Nx)))/dx_loc**2
+     end do
+     do j=1,fft_Ny
+        eigy(j)=(2d0-2d0*cos(twopi*dble(j-1)/dble(fft_Ny)))/dx_loc**2
+     end do
+     do k=1,fft_Nz
+        eigz(k)=(2d0-2d0*cos(twopi*dble(k-1)/dble(fft_Nz)))/dx_loc**2
+     end do
+     call dfftw_plan_dft_r2c_3d(plan_f,fft_Nx,fft_Ny,fft_Nz,b3,bk,FFTW_EST)
+     call dfftw_plan_dft_c2r_3d(plan_b,fft_Nx,fft_Ny,fft_Nz,bk,b3,FFTW_EST)
+     saved_Nx=fft_Nx
+     saved_Ny=fft_Ny
+     saved_Nz=fft_Nz
+     saved_dx=dx_loc
+  end if
+
+  ! Gather the staged rhs in place.  Every active cell has a unique
+  ! owner, so zero-fill plus SUM is equivalent to the old bl -> b3
+  ! out-of-place allreduce while eliminating one full-grid work array.
+  b3=0d0
   ngrid_loc=active(ilevel)%ngrid
   do igrid=1,ngrid_loc
      igrid_amr=active(ilevel)%igrid(igrid)
@@ -1330,31 +1367,21 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
         iz=modulo(Kz-1+(ind-1)/4,     fft_Nz)
         iskip=ncoarse+(ind-1)*ngridmax
         icell=iskip+igrid_amr
-        bl(ix+1,iy+1,iz+1)=scalar_gr_old(icell)
+        b3(ix+1,iy+1,iz+1)=scalar_gr_old(icell)
      end do
   end do
-  allocate(b3(fft_Nx,fft_Ny,fft_Nz))
 #ifndef WITHOUTMPI
-  call MPI_ALLREDUCE(bl,b3,int(ntot),MPI_DOUBLE_PRECISION,MPI_SUM, &
+  call MPI_ALLREDUCE(MPI_IN_PLACE,b3,int(ntot),MPI_DOUBLE_PRECISION,MPI_SUM, &
        & MPI_COMM_WORLD,info)
-#else
-  b3=bl
 #endif
-  deallocate(bl)
 
   ! Spectral solve with the discrete 7-point eigenvalues
-  allocate(bk(fft_Nx/2+1,fft_Ny,fft_Nz))
-  call dfftw_plan_dft_r2c_3d(plan_f,fft_Nx,fft_Ny,fft_Nz,b3,bk,FFTW_EST)
   call dfftw_execute_dft_r2c(plan_f,b3,bk)
-  call dfftw_destroy_plan(plan_f)
-!$omp parallel do private(i,j,k,cx,cy,cz,kd2,denom) collapse(2)
+!$omp parallel do private(i,j,k,kd2,denom) collapse(2)
   do k=1,fft_Nz
      do j=1,fft_Ny
-        cy=(2d0-2d0*cos(twopi*dble(j-1)/dble(fft_Ny)))/dx_loc**2
-        cz=(2d0-2d0*cos(twopi*dble(k-1)/dble(fft_Nz)))/dx_loc**2
         do i=1,fft_Nx/2+1
-           cx=(2d0-2d0*cos(twopi*dble(i-1)/dble(fft_Nx)))/dx_loc**2
-           kd2=cx+cy+cz
+           kd2=eigx(i)+eigy(j)+eigz(k)
            denom=-(kd2+m2)
            if(abs(denom) > 1d-30) then
               bk(i,j,k)=bk(i,j,k)/denom/dble(ntot)
@@ -1364,10 +1391,7 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
         end do
      end do
   end do
-  call dfftw_plan_dft_c2r_3d(plan_b,fft_Nx,fft_Ny,fft_Nz,bk,b3,FFTW_EST)
   call dfftw_execute_dft_c2r(plan_b,bk,b3)
-  call dfftw_destroy_plan(plan_b)
-  deallocate(bk)
 
   ! Add the correction to the local cells
   do igrid=1,ngrid_loc
@@ -1389,7 +1413,6 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
         scalar_gr(icell)=uold+du
      end do
   end do
-  deallocate(b3)
 
 end subroutine level_fft_helmholtz
 
@@ -1722,6 +1745,80 @@ subroutine dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
 end subroutine dil_build_fft_rhs
 
 !=========================================================
+! vain_prepare_uniform_cache: build the face/edge grid topology once
+! for a uniform spectral scalar solve.  The active-grid order and domain
+! decomposition cannot change inside one nDGP/Galileon nonlinear loop.
+! Rebuilding once at the next coarse step is intentionally conservative:
+! it remains correct across a RAMSES load balance without signatures or
+! invalidation hooks.
+!=========================================================
+subroutine vain_prepare_uniform_cache(ilevel)
+  use amr_commons
+  use poisson_commons
+  use morton_hash
+  implicit none
+  integer,intent(in)::ilevel
+  integer::ia,igrid,idim,sx,sy,sz,ixside,iyside,izside,iedge,igrid_diag
+  integer::ncache,nalloc
+
+  ncache=active(ilevel)%ngrid
+  nalloc=max(ncache,1)
+  vain_cache_ready=.false.
+
+  if(allocated(vain_face_grid)) then
+     if(size(vain_face_grid,1)/=nalloc) then
+        deallocate(vain_face_grid,vain_xy_grid,vain_xz_grid,vain_yz_grid)
+     end if
+  end if
+  if(.not.allocated(vain_face_grid)) then
+     allocate(vain_face_grid(nalloc,6))
+     allocate(vain_xy_grid(nalloc,4),vain_xz_grid(nalloc,4),vain_yz_grid(nalloc,4))
+  end if
+
+!$omp parallel do private(ia,igrid,idim,sx,sy,sz,ixside,iyside,izside, &
+!$omp& iedge,igrid_diag) schedule(static)
+  do ia=1,ncache
+     igrid=active(ilevel)%igrid(ia)
+     do idim=1,ndim
+        vain_face_grid(ia,2*idim-1)=morton_nbor_grid(igrid,ilevel,2*idim-1)
+        vain_face_grid(ia,2*idim  )=morton_nbor_grid(igrid,ilevel,2*idim  )
+     end do
+     do sx=-1,1,2
+        ixside=merge(1,2,sx<0)
+        do sy=-1,1,2
+           iyside=merge(3,4,sy<0)
+           iedge=((sx+1)/2)*2+(sy+1)/2+1
+           igrid_diag=vain_face_grid(ia,ixside)
+           if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,iyside)
+           vain_xy_grid(ia,iedge)=igrid_diag
+        end do
+        do sz=-1,1,2
+           izside=merge(5,6,sz<0)
+           iedge=((sx+1)/2)*2+(sz+1)/2+1
+           igrid_diag=vain_face_grid(ia,ixside)
+           if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,izside)
+           vain_xz_grid(ia,iedge)=igrid_diag
+        end do
+     end do
+     do sy=-1,1,2
+        iyside=merge(3,4,sy<0)
+        do sz=-1,1,2
+           izside=merge(5,6,sz<0)
+           iedge=((sy+1)/2)*2+(sz+1)/2+1
+           igrid_diag=vain_face_grid(ia,iyside)
+           if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,izside)
+           vain_yz_grid(ia,iedge)=igrid_diag
+        end do
+     end do
+  end do
+!$omp end parallel do
+
+  vain_cache_level=ilevel
+  vain_cache_ngrid=ncache
+  vain_cache_ready=.true.
+end subroutine vain_prepare_uniform_cache
+
+!=========================================================
 ! vain_build_fft_rhs: nDGP/galileon operator splitting;
 ! split H_ij into trace and traceless pieces,
 !   H_ij H_ij = Hbar_ij Hbar_ij + A^2/3,
@@ -1780,6 +1877,9 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
   ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
   ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
 
+  if(.not.vain_cache_ready .or. vain_cache_level/=ilevel .or. &
+       & vain_cache_ngrid/=ncache) call vain_prepare_uniform_cache(ilevel)
+
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w,igridxy_w,igridxz_w,igridyz_w, &
 !$omp&  ind_diag_w,ig_left,ig_right, &
@@ -1800,46 +1900,14 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
      end do
      do idim=1,ndim
         do i=1,ngrid
-           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+           igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+           igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
         end do
      end do
-     ! The spectral path is used only on the fully refined periodic
-     ! domain level.  Cache its twelve edge-neighbour grids once per
-     ! oct instead of decoding and hashing a Morton key for every one
-     ! of the 12 diagonal samples in every cell and nonlinear iterate.
-     do sx=-1,1,2
-        ixside=merge(1,2,sx<0)
-        do sy=-1,1,2
-           iyside=merge(3,4,sy<0)
-           iedge=((sx+1)/2)*2+(sy+1)/2+1
-           do i=1,ngrid
-              igrid_diag=igridn_w(i,ixside)
-              if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,iyside)
-              igridxy_w(i,iedge)=igrid_diag
-           end do
-        end do
-        do sz=-1,1,2
-           izside=merge(5,6,sz<0)
-           iedge=((sx+1)/2)*2+(sz+1)/2+1
-           do i=1,ngrid
-              igrid_diag=igridn_w(i,ixside)
-              if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,izside)
-              igridxz_w(i,iedge)=igrid_diag
-           end do
-        end do
-     end do
-     do sy=-1,1,2
-        iyside=merge(3,4,sy<0)
-        do sz=-1,1,2
-           izside=merge(5,6,sz<0)
-           iedge=((sy+1)/2)*2+(sz+1)/2+1
-           do i=1,ngrid
-              igrid_diag=igridn_w(i,iyside)
-              if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,izside)
-              igridyz_w(i,iedge)=igrid_diag
-           end do
-        end do
+     do i=1,ngrid
+        igridxy_w(i,1:4)=vain_xy_grid(igrid+i-1,1:4)
+        igridxz_w(i,1:4)=vain_xz_grid(igrid+i-1,1:4)
+        igridyz_w(i,1:4)=vain_yz_grid(igrid+i-1,1:4)
      end do
      do ind=1,twotondim
         iskip=ncoarse+(ind-1)*ngridmax
@@ -2616,6 +2684,7 @@ subroutine nDGP_solve_level(ilevel, icount)
 #ifdef USE_FFTW
   ! Operator-split spectral solve on the uniform domain level
   if(level_fft_ok(ilevel)) then
+     call vain_prepare_uniform_cache(ilevel)
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
      do iter=1,50
         call vain_build_fft_rhs(ilevel, omega_m*aexp/beta, &
@@ -3889,6 +3958,7 @@ subroutine galileon_solve_level(ilevel, icount)
 #ifdef USE_FFTW
   ! Operator-split spectral solve on the uniform domain level
   if(level_fft_ok(ilevel)) then
+     call vain_prepare_uniform_cache(ilevel)
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
      ! The tracker becomes only weakly elliptic near a~0.8 and needs
      ! damped trace/traceless Picard steps.  Test the mean-projected
