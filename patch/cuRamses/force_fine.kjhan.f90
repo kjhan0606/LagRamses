@@ -1266,8 +1266,8 @@ end subroutine scalar_solver_abort
 !  The rhs is staged in scalar_gr_old (otherwise dead
 !  between solves); the correction is ADDED to scalar_gr.
 !  Discrete 7-point eigenvalues match the GS stencil.
-!  Strategy: gather the full level on every rank
-!  (MPI_ALLREDUCE) + serial FFTW: gated at <= 256^3.
+!  Strategy: retain the single-rank local FFT reference path through
+!  256^3 and use FFTW-MPI x-slabs on multi-rank runs through 512^3.
 !#########################################################
 logical function level_fft_ok(ilevel)
   use amr_commons
@@ -1277,7 +1277,10 @@ logical function level_fft_ok(ilevel)
   level_fft_ok = .false.
   if(ilevel /= levelmin) return
   ntot = int(nx,8)*int(ny,8)*int(nz,8)*(int(2,8)**(3*ilevel))
-  if(ntot > 16777216_8) return   ! > 256^3: gather-all too heavy
+  ! The local FFT path is capped at 256^3.  Above that size the
+  ! distributed FFTW-MPI path is mandatory.
+  if(ntot > 134217728_8) return  ! > 512^3 is outside the validated range
+  if(ntot > 16777216_8 .and. ncpu <= 1) return
   level_fft_ok = .true.
 end function level_fft_ok
 
@@ -1312,6 +1315,17 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
   real(dp),allocatable,save::eigx(:),eigy(:),eigz(:)
   complex(kind=8),allocatable,save::bk(:,:,:)
   integer,parameter::FFTW_EST=64
+
+#ifdef USE_FFTW
+  ! Avoid replicating a full scalar grid and identical serial transforms on
+  ! every rank.  The MPI slab path is also what makes a 512^3 uniform level
+  ! memory-feasible.  Keep the single-rank local implementation below as a
+  ! fallback and reference path.
+  if(ncpu > 1) then
+     call level_fft_helmholtz_mpi(ilevel,m2,step_frac,relax)
+     return
+  end if
+#endif
 
   fft_Nx = nx*2**ilevel; fft_Ny = ny*2**ilevel; fft_Nz = nz*2**ilevel
   ntot = int(fft_Nx,8)*int(fft_Ny,8)*int(fft_Nz,8)
@@ -1415,6 +1429,228 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
   end do
 
 end subroutine level_fft_helmholtz
+
+#ifdef USE_FFTW
+!=========================================================
+! level_fft_helmholtz_mpi: distributed FFTW-MPI solve of
+! (lap-m2) du = scalar_gr_old on a fully refined periodic
+! level.  RAMSES cells are exchanged with FFTW x-slabs as
+! (slab index,value) pairs and returned in the same packed
+! order after the inverse transform.
+!=========================================================
+subroutine level_fft_helmholtz_mpi(ilevel,m2,step_frac,relax)
+  use amr_commons
+  use poisson_commons
+  use iso_c_binding
+  use omp_lib
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  include 'fftw3-mpi.f03'
+
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::m2,step_frac,relax
+
+  logical,save::initialized=.false.
+  integer,save::saved_Nx=0,saved_Ny=0,saved_Nz=0
+  type(C_PTR),save::plan_f=C_NULL_PTR,plan_b=C_NULL_PTR,p_data=C_NULL_PTR
+  real(C_DOUBLE),pointer,save::rdata(:)=>null()
+  complex(C_DOUBLE_COMPLEX),pointer,save::cdata(:)=>null()
+  integer(C_INTPTR_T),save::local_nx=0,nx_start=0,alloc_local=0
+  real(dp),allocatable,save::eigx(:),eigy(:),eigz(:)
+
+  integer::fft_Nx,fft_Ny,fft_Nz,fftw_block,slab_real_size
+  integer::igrid,igrid_amr,ngrid_loc,ind,iskip,icell
+  integer::Kx,Ky,Kz,ix,iy,iz,x_local,dest,idx_3d
+  integer::irank,info,n_send,n_recv
+  integer::i,j,k
+  integer(kind=8)::ntot,ncomplex,idx_c
+  integer,allocatable::sendcounts(:),recvcounts(:),sdispls(:),rdispls(:)
+  integer,allocatable::sendpos(:)
+  real(dp),allocatable::sendbuf(:),recvbuf(:)
+  real(dp)::dx_loc,scale,kd2,denom,twopi,du,uold
+  integer::nx_loc
+  integer(C_INT)::thread_ok
+
+  fft_Nx=nx*2**ilevel
+  fft_Ny=ny*2**ilevel
+  fft_Nz=nz*2**ilevel
+  ntot=int(fft_Nx,8)*int(fft_Ny,8)*int(fft_Nz,8)
+  fftw_block=(fft_Nx+ncpu-1)/ncpu
+  nx_loc=icoarse_max-icoarse_min+1
+  scale=boxlen/dble(nx_loc)
+  dx_loc=0.5d0**ilevel*scale
+  twopi=2d0*acos(-1d0)
+
+  if(.not.initialized) then
+     thread_ok=fftw_init_threads()
+     call fftw_plan_with_nthreads(int(omp_get_max_threads(),C_INT))
+     call fftw_mpi_init()
+     initialized=.true.
+  end if
+
+  if(fft_Nx/=saved_Nx .or. fft_Ny/=saved_Ny .or. fft_Nz/=saved_Nz) then
+     if(c_associated(plan_f)) call fftw_destroy_plan(plan_f)
+     if(c_associated(plan_b)) call fftw_destroy_plan(plan_b)
+     if(c_associated(p_data)) call fftw_free(p_data)
+     plan_f=C_NULL_PTR
+     plan_b=C_NULL_PTR
+     p_data=C_NULL_PTR
+     nullify(rdata,cdata)
+     if(allocated(eigx)) deallocate(eigx,eigy,eigz)
+
+     alloc_local=fftw_mpi_local_size_3d( &
+          int(fft_Nx,C_INTPTR_T),int(fft_Ny,C_INTPTR_T), &
+          int(fft_Nz/2+1,C_INTPTR_T),MPI_COMM_WORLD,local_nx,nx_start)
+     p_data=fftw_alloc_complex(alloc_local)
+     slab_real_size=2*int(alloc_local)
+     call c_f_pointer(p_data,rdata,[slab_real_size])
+     call c_f_pointer(p_data,cdata,[int(alloc_local)])
+
+     plan_f=fftw_mpi_plan_dft_r2c_3d( &
+          int(fft_Nx,C_INTPTR_T),int(fft_Ny,C_INTPTR_T), &
+          int(fft_Nz,C_INTPTR_T),rdata,cdata,MPI_COMM_WORLD,FFTW_ESTIMATE)
+     plan_b=fftw_mpi_plan_dft_c2r_3d( &
+          int(fft_Nx,C_INTPTR_T),int(fft_Ny,C_INTPTR_T), &
+          int(fft_Nz,C_INTPTR_T),cdata,rdata,MPI_COMM_WORLD,FFTW_ESTIMATE)
+
+     allocate(eigx(0:int(local_nx)-1),eigy(0:fft_Ny-1),eigz(0:fft_Nz/2))
+     do i=0,int(local_nx)-1
+        eigx(i)=(2d0-2d0*cos(twopi*dble(int(nx_start)+i)/dble(fft_Nx))) &
+             & /dx_loc**2
+     end do
+     do j=0,fft_Ny-1
+        eigy(j)=(2d0-2d0*cos(twopi*dble(j)/dble(fft_Ny)))/dx_loc**2
+     end do
+     do k=0,fft_Nz/2
+        eigz(k)=(2d0-2d0*cos(twopi*dble(k)/dble(fft_Nz)))/dx_loc**2
+     end do
+     saved_Nx=fft_Nx
+     saved_Ny=fft_Ny
+     saved_Nz=fft_Nz
+     if(myid==1) write(*,'(A,I5,A,I5,A,I5,A)') &
+          ' scalar FFTW-MPI plan: ',fft_Nx,'x',fft_Ny,'x',fft_Nz,' grid'
+  end if
+
+  allocate(sendcounts(0:ncpu-1),recvcounts(0:ncpu-1))
+  allocate(sdispls(0:ncpu-1),rdispls(0:ncpu-1),sendpos(0:ncpu-1))
+  sendcounts=0
+  ngrid_loc=active(ilevel)%ngrid
+  do igrid=1,ngrid_loc
+     igrid_amr=active(ilevel)%igrid(igrid)
+     Kx=nint(xg(igrid_amr,1)*dble(fft_Nx))
+     do ind=1,twotondim
+        ix=modulo(Kx-1+mod(ind-1,2),fft_Nx)
+        dest=min(ix/fftw_block,ncpu-1)
+        sendcounts(dest)=sendcounts(dest)+1
+     end do
+  end do
+#ifndef WITHOUTMPI
+  call MPI_ALLTOALL(sendcounts,1,MPI_INTEGER,recvcounts,1,MPI_INTEGER, &
+       & MPI_COMM_WORLD,info)
+#else
+  recvcounts=sendcounts
+#endif
+  sdispls(0)=0
+  rdispls(0)=0
+  do irank=1,ncpu-1
+     sdispls(irank)=sdispls(irank-1)+sendcounts(irank-1)
+     rdispls(irank)=rdispls(irank-1)+recvcounts(irank-1)
+  end do
+  n_send=sdispls(ncpu-1)+sendcounts(ncpu-1)
+  n_recv=rdispls(ncpu-1)+recvcounts(ncpu-1)
+  allocate(sendbuf(0:max(1,2*n_send)-1),recvbuf(0:max(1,2*n_recv)-1))
+  sendpos=sdispls
+
+  do igrid=1,ngrid_loc
+     igrid_amr=active(ilevel)%igrid(igrid)
+     Kx=nint(xg(igrid_amr,1)*dble(fft_Nx))
+     Ky=nint(xg(igrid_amr,2)*dble(fft_Ny))
+     Kz=nint(xg(igrid_amr,3)*dble(fft_Nz))
+     do ind=1,twotondim
+        ix=modulo(Kx-1+mod(ind-1,2),fft_Nx)
+        iy=modulo(Ky-1+mod((ind-1)/2,2),fft_Ny)
+        iz=modulo(Kz-1+(ind-1)/4,fft_Nz)
+        dest=min(ix/fftw_block,ncpu-1)
+        x_local=ix-dest*fftw_block
+        idx_3d=x_local*fft_Ny*2*(fft_Nz/2+1) &
+             & +iy*2*(fft_Nz/2+1)+iz
+        iskip=ncoarse+(ind-1)*ngridmax
+        icell=iskip+igrid_amr
+        sendbuf(2*sendpos(dest))=dble(idx_3d)
+        sendbuf(2*sendpos(dest)+1)=scalar_gr_old(icell)
+        sendpos(dest)=sendpos(dest)+1
+     end do
+  end do
+
+  sendcounts=2*sendcounts
+  recvcounts=2*recvcounts
+  sdispls=2*sdispls
+  rdispls=2*rdispls
+#ifndef WITHOUTMPI
+  call MPI_ALLTOALLV(sendbuf,sendcounts,sdispls,MPI_DOUBLE_PRECISION, &
+       & recvbuf,recvcounts,rdispls,MPI_DOUBLE_PRECISION,MPI_COMM_WORLD,info)
+#else
+  recvbuf=sendbuf
+#endif
+
+  rdata=0d0
+  do i=0,n_recv-1
+     idx_3d=nint(recvbuf(2*i))
+     rdata(idx_3d+1)=rdata(idx_3d+1)+recvbuf(2*i+1)
+  end do
+  call fftw_mpi_execute_dft_r2c(plan_f,rdata,cdata)
+
+  ncomplex=int(local_nx,8)*int(fft_Ny,8)*int(fft_Nz/2+1,8)
+!$omp parallel do private(idx_c,i,j,k,kd2,denom) schedule(static)
+  do idx_c=0,ncomplex-1
+     i=int(idx_c/(int(fft_Ny,8)*int(fft_Nz/2+1,8)))
+     j=int(mod(idx_c/int(fft_Nz/2+1,8),int(fft_Ny,8)))
+     k=int(mod(idx_c,int(fft_Nz/2+1,8)))
+     kd2=eigx(i)+eigy(j)+eigz(k)
+     denom=-(kd2+m2)
+     if(abs(denom)>1d-30) then
+        cdata(idx_c+1)=cdata(idx_c+1)/denom/dble(ntot)
+     else
+        cdata(idx_c+1)=(0d0,0d0)
+     end if
+  end do
+  call fftw_mpi_execute_dft_c2r(plan_b,cdata,rdata)
+
+  do i=0,n_recv-1
+     idx_3d=nint(recvbuf(2*i))
+     recvbuf(2*i+1)=rdata(idx_3d+1)
+  end do
+#ifndef WITHOUTMPI
+  call MPI_ALLTOALLV(recvbuf,recvcounts,rdispls,MPI_DOUBLE_PRECISION, &
+       & sendbuf,sendcounts,sdispls,MPI_DOUBLE_PRECISION,MPI_COMM_WORLD,info)
+#else
+  sendbuf=recvbuf
+#endif
+
+  sendpos=sdispls/2
+  do igrid=1,ngrid_loc
+     igrid_amr=active(ilevel)%igrid(igrid)
+     Kx=nint(xg(igrid_amr,1)*dble(fft_Nx))
+     do ind=1,twotondim
+        ix=modulo(Kx-1+mod(ind-1,2),fft_Nx)
+        dest=min(ix/fftw_block,ncpu-1)
+        iskip=ncoarse+(ind-1)*ngridmax
+        icell=iskip+igrid_amr
+        uold=scalar_gr(icell)
+        du=relax*sendbuf(2*sendpos(dest)+1)
+        if(step_frac>0d0 .and. abs(uold)>0d0) then
+           du=max(-step_frac*abs(uold),min(step_frac*abs(uold),du))
+        end if
+        scalar_gr(icell)=uold+du
+        sendpos(dest)=sendpos(dest)+1
+     end do
+  end do
+
+  deallocate(sendcounts,recvcounts,sdispls,rdispls,sendpos,sendbuf,recvbuf)
+end subroutine level_fft_helmholtz_mpi
+#endif
 
 !=========================================================
 ! fR_build_fft_rhs: stage b = -(lap u - S(u)) in scalar_gr_old

@@ -343,6 +343,13 @@ def parse_args() -> argparse.Namespace:
         default=0.1,
         help="maximum fractional expansion-factor change per coarse step",
     )
+    parser.add_argument(
+        "--output-redshifts",
+        nargs="+",
+        type=float,
+        default=[5.0, 2.0, 1.0, 0.8, 0.5, 0.2, 0.0],
+        help="strictly decreasing output redshifts after the initial dump",
+    )
     parser.add_argument("--make-ics", action="store_true")
     parser.add_argument(
         "--force",
@@ -638,7 +645,7 @@ def effective_model_blocks(
 def namelist(
     args: argparse.Namespace, model: Dict[str, str], ic_dir: str, ic_model: str
 ) -> str:
-    outputs_z = [5.0, 2.0, 1.0, 0.8, 0.5, 0.2, 0.0]
+    outputs_z = args.output_redshifts
     outputs_a = ",".join(f"{1.0 / (1.0 + z):.9f}" for z in outputs_z)
     nlevels = args.levelmax - args.levelmin + 1
     nsubcycle = (
@@ -710,6 +717,7 @@ epsilon=1.0d-4
 
 
 def slurm_script(args: argparse.Namespace, model_name: str, model_dir: Path) -> str:
+    final_output = len(args.output_redshifts) + 1
     return f"""#!/bin/bash
 #SBATCH --job-name=dmo_{model_name}
 #SBATCH --partition=normal
@@ -731,7 +739,9 @@ export I_MPI_PIN_ORDER=compact
 cd {model_dir}
 echo "model={model_name} start=$(date --iso-8601=seconds)"
 echo "nodes=${{SLURM_NNODES:-1}} tasks=${{SLURM_NTASKS:-{args.slurm_tasks}}} omp=$OMP_NUM_THREADS"
+sha256sum {args.ramses}
 mpirun -np "${{SLURM_NTASKS:-{args.slurm_tasks}}}" {args.ramses} run.nml
+test -f output_{final_output:05d}/info_{final_output:05d}.txt
 echo "model={model_name} end=$(date --iso-8601=seconds)"
 """
 
@@ -867,6 +877,15 @@ def main() -> int:
         raise ValueError("music-tasks must be positive")
     if args.aexp_step_limit <= 0.0:
         raise ValueError("aexp-step-limit must be positive")
+    if any(z < 0.0 or z >= args.zstart for z in args.output_redshifts):
+        raise ValueError("output redshifts must satisfy 0 <= z < zstart")
+    if any(
+        left <= right
+        for left, right in zip(
+            args.output_redshifts, args.output_redshifts[1:]
+        )
+    ):
+        raise ValueError("output redshifts must be strictly decreasing")
     if args.slurm_tasks * args.omp_threads > 64:
         raise ValueError("requested Slurm CPU count exceeds one 64-core grammar node")
 
@@ -1005,6 +1024,7 @@ def main() -> int:
         "scalar_iters": args.scalar_iters,
         "scalar_eps": args.scalar_eps,
         "aexp_step_limit": args.aexp_step_limit,
+        "output_redshifts": args.output_redshifts,
         "models": model_metadata,
         "camb_dir": str(args.camb_dir.expanduser().resolve()),
         "camb_module": str(Path(camb.__file__).resolve()),

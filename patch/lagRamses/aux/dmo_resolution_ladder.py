@@ -14,7 +14,8 @@ MODELS = ("lcdm", "f5", "f6", "n1", "n5", "sym_a")
 RESOURCE_PRESETS = {
     6: {"slurm_tasks": 4, "omp_threads": 4, "memory": "32G", "music_tasks": 1},
     7: {"slurm_tasks": 8, "omp_threads": 4, "memory": "64G", "music_tasks": 2},
-    8: {"slurm_tasks": 16, "omp_threads": 4, "memory": "128G", "music_tasks": 8},
+    8: {"slurm_tasks": 4, "omp_threads": 4, "memory": "128G", "music_tasks": 8},
+    9: {"slurm_tasks": 8, "omp_threads": 2, "memory": "256G", "music_tasks": 16},
 }
 
 
@@ -22,6 +23,13 @@ def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--levels", nargs="+", type=int, default=[6, 7, 8])
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=MODELS,
+        default=list(MODELS),
+        help="model subset to generate; defaults to the full validation set",
+    )
     parser.add_argument("--boxlen", type=float, default=64.0)
     parser.add_argument("--zstart", type=float, default=49.0)
     parser.add_argument("--seed", type=int, default=20260726)
@@ -34,6 +42,14 @@ def arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--aexp-step-limit", type=float, default=0.1)
+    parser.add_argument(
+        "--output-redshifts",
+        nargs="+",
+        type=float,
+        default=[5.0, 2.0, 1.0, 0.8, 0.5, 0.2, 0.0],
+    )
+    parser.add_argument("--scalar-iters", type=int, default=6000)
+    parser.add_argument("--scalar-eps", type=float, default=1.0e-6)
     parser.add_argument(
         "--ramses",
         default="/home/kjhan/BACKUP/lagRamses-de-nonstd/bin/ramses_cosmo_model_test3d",
@@ -68,7 +84,13 @@ def ic_slurm_script(
     aexp_step_limit: float,
     phase_anchor_level: int,
     ramses: str,
+    models: list[str],
+    scalar_iters: int,
+    scalar_eps: float,
+    output_redshifts: list[float],
 ) -> str:
+    model_args = " ".join(models)
+    output_args = " ".join(f"{redshift:.15g}" for redshift in output_redshifts)
     return f"""#!/bin/bash
 #SBATCH --job-name=ic_L{level}_{2**level}
 #SBATCH --partition=normal
@@ -87,8 +109,11 @@ export OMP_STACKSIZE=256M
 export I_MPI_PIN_DOMAIN=omp
 export I_MPI_PIN_ORDER=compact
 {sys.executable} {Path(__file__).resolve()} --root {root} --levels {level} \
+  --models {model_args} \
   --boxlen {boxlen:.15g} --zstart {zstart:.15g} --seed {seed} \
   --aexp-step-limit {aexp_step_limit:.8g} \
+  --scalar-iters {scalar_iters} --scalar-eps {scalar_eps:.8e} \
+  --output-redshifts {output_args} \
   --phase-anchor-level {phase_anchor_level} --ramses {ramses} --make-ics
 """
 
@@ -100,6 +125,10 @@ def main() -> int:
         raise ValueError(f"no resource preset for levels: {unsupported}")
     if args.aexp_step_limit <= 0.0:
         raise ValueError("aexp-step-limit must be positive")
+    if args.scalar_iters <= 0:
+        raise ValueError("scalar-iters must be positive")
+    if args.scalar_eps <= 0.0:
+        raise ValueError("scalar-eps must be positive")
     phase_anchor_level = (
         args.phase_anchor_level
         if args.phase_anchor_level is not None
@@ -131,7 +160,7 @@ def main() -> int:
             "--outdir",
             str(campaign),
             "--models",
-            *MODELS,
+            *args.models,
             "--boxlen",
             str(args.boxlen),
             "--levelmin",
@@ -159,11 +188,13 @@ def main() -> int:
             "--slurm-memory",
             resources["memory"],
             "--scalar-iters",
-            "6000",
+            str(args.scalar_iters),
             "--scalar-eps",
-            "1e-6",
+            str(args.scalar_eps),
             "--aexp-step-limit",
             str(args.aexp_step_limit),
+            "--output-redshifts",
+            *(str(redshift) for redshift in args.output_redshifts),
             "--ic-mode",
             "model",
         ]
@@ -185,6 +216,10 @@ def main() -> int:
                 args.aexp_step_limit,
                 phase_anchor_level,
                 args.ramses,
+                args.models,
+                args.scalar_iters,
+                args.scalar_eps,
+                args.output_redshifts,
             )
         )
         ic_script.chmod(ic_script.stat().st_mode | 0o110)
@@ -196,7 +231,8 @@ def main() -> int:
                 "particle_nyquist_h_mpc": 3.141592653589793 * 2**level / args.boxlen,
                 "ngridtot": ngridtot,
                 "nparttot": nparttot,
-                "scalar_iters": 6000,
+                "scalar_iters": args.scalar_iters,
+                "scalar_eps": args.scalar_eps,
                 "aexp_step_limit": args.aexp_step_limit,
                 "phase_anchor_level": phase_anchor_level,
                 "campaign": str(campaign),
@@ -210,7 +246,8 @@ def main() -> int:
         "seed": args.seed,
         "phase_anchor_level": phase_anchor_level,
         "aexp_step_limit": args.aexp_step_limit,
-        "models": list(MODELS),
+        "output_redshifts": args.output_redshifts,
+        "models": args.models,
         "levels": records,
     }
     (root / "resolution_ladder.json").write_text(

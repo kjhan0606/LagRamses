@@ -58,6 +58,16 @@ python3 patch/lagRamses/aux/dmo_resolution_ladder.py \
   --root /gpfs/kjhan/Hydro/DE_nonstd/DMO_resolution_v1
 ```
 
+The ladder also supports targeted extensions. For example, a common-anchor
+L8--L9 F5 convergence pair with only the two required analysis dumps is:
+
+```bash
+python3 patch/lagRamses/aux/dmo_resolution_ladder.py \
+  --root /gpfs/kjhan/Hydro/DE_nonstd/DMO_f5_anchor9 \
+  --levels 8 9 --models lcdm f5 --phase-anchor-level 9 \
+  --scalar-eps 1e-5 --output-redshifts 5 0
+```
+
 Add `--make-ics` for resolutions that are safe to generate on the current
 host. By default the ladder places the random seed at the finest requested
 level and obtains every coarser white-noise field by LagMUSIC restriction.
@@ -145,13 +155,12 @@ of each nDGP/Galileon solve and reused by all nonlinear corrections. The
 cache is conservatively rebuilt at the next coarse step so a load balance
 cannot leave stale active-grid indices.
 
-The shared spectral Helmholtz correction also retains its FFTW plans and
-real/complex work arrays, precomputes the one-dimensional discrete Laplacian
-eigenvalues, and gathers the right-hand side with an in-place allreduce. This
-removes one full real-grid buffer and avoids repeated plan construction,
-allocation, and millions of identical cosine evaluations. It does not yet
-replace the replicated scalar FFT with a distributed FFTW-MPI transform;
-that is the next scaling improvement above `256^3`.
+The shared spectral Helmholtz correction retains its FFTW plans and
+real/complex work arrays and precomputes the one-dimensional discrete
+Laplacian eigenvalues. Multi-rank uniform grids now use a separate FFTW-MPI
+slab path through `512^3`: owned RAMSES cells are exchanged with the FFT
+slabs, transformed with the same seven-point eigenvalues, and returned
+without replicating the full field on every rank.
 
 Controlled same-node baseline/candidate tests gave:
 
@@ -167,6 +176,14 @@ test reproduced every timestep, nonlinear iteration count, and reported
 residual exactly. Full F5 and Symmetron-A `64^3` regressions also produced
 identical native and common-CIC spectra at both redshifts; their runtimes
 were unchanged within run-to-run noise.
+
+The distributed-path F5 `128^3` same-node A/B retained exactly the same
+210,464 Newton-GS sweeps and byte-identical z=5/z=0 common-CIC spectra while
+reducing total time from 762.35 to 519.99 seconds and `fR-solve` from
+727.22 to 487.04 seconds. The largest ID-matched z=0 particle-position
+difference was `3.21e-14` box units. Separate N1 and Symmetron-A `64^3`
+regressions were also byte-identical in common-CIC P(k), covering both the
+zero-mass Poisson and massive Helmholtz forms.
 
 ## Symmetron solver performance
 
@@ -216,5 +233,13 @@ At `128^3` on one node with 8 MPI ranks and 4 OpenMP threads per rank,
 the F5 timer from 710.66 to 353.71 seconds.  Newton-GS work fell from
 210,464 to 95,382 sweeps.  The maximum raw-spectrum change was negligible
 at z=5 and `0.01108%` at z=0 for `k <= 0.5 h Mpc^-1`.  This makes `1e-5`
-a promising performance setting, but it must pass an L8 A/B test before
-becoming the validation default.
+a promising performance setting.
+
+The full `256^3` A/B test subsequently passed: `1e-5` reduced total time
+from 13,831.17 to 5,425.03 seconds (2.55x) and Newton-GS work from
+1,043,465 to 316,122 sweeps. Relative to the strict `1e-6` run, the z=0
+raw P(k) changed by at most `0.03056%` over both `k <= 0.2` and
+`k <= 0.5 h Mpc^-1`; z=5 changed by less than `6e-8%`. Thus `1e-5` is
+approved for the targeted L8--L9 extension, while the strict run remains
+the numerical reference and the spatial-resolution residual is reported
+separately.
