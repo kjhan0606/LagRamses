@@ -187,3 +187,12 @@ same-node `64^3` A/B test reduced F5 from 101.49 to 22.54 seconds
 (`fR-solve`: 97.59 to 18.66 seconds) and the already optimized Symmetron run
 from 17.15 to 6.70 seconds (`symmetron`: 13.24 to 2.84 seconds). For both
 models, the z=5 and z=0 common CIC spectra remained byte-identical.
+
+At `128^3`, the fully optimized Symmetron-A run completed in 97.15 seconds
+instead of 1749.50 seconds; its Symmetron timer fell from 1718.34 to
+65.19 seconds. The exact z=5 and z=0 common CIC files were again
+byte-identical.
+
+The corresponding F5 `128^3` total timer fell from 2850.22 to 727.31
+seconds and `fR-solve` from 2815.58 to 694.45 seconds. Its exact z=5 and
+z=0 common CIC files were also byte-identical.
