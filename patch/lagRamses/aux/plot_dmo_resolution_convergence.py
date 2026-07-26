@@ -29,6 +29,13 @@ def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--levels", nargs="+", type=int, default=[6, 7, 8])
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=MODELS,
+        default=list(MODELS),
+        help="model subset to validate (default: all benchmark models)",
+    )
     parser.add_argument("--redshift", type=float, default=0.0)
     parser.add_argument("--kmax", type=float, default=0.5)
     parser.add_argument(
@@ -156,7 +163,7 @@ def main() -> int:
                     args.pk_estimator,
                     args.shot_noise,
                 )
-                for model in ("lcdm", *MODELS)
+                for model in ("lcdm", *args.models)
             }
         except RuntimeError as error:
             incomplete[level] = str(error)
@@ -167,13 +174,40 @@ def main() -> int:
         details = "; ".join(f"L{level}: {reason}" for level, reason in incomplete.items())
         raise RuntimeError(f"no resolution has complete exact-epoch P(k): {details}")
 
+    phase_records = {}
+    for level, campaign in available.items():
+        metadata = json.loads((campaign / "campaign.json").read_text())
+        phase_records[level] = {
+            "seed": metadata.get("seed"),
+            # Legacy campaigns placed the seed independently at levelmin.
+            "phase_anchor_level": metadata.get("phase_anchor_level", level),
+            "explicit_phase_anchor": "phase_anchor_level" in metadata,
+        }
+    phase_seeds = {record["seed"] for record in phase_records.values()}
+    phase_anchors = {
+        record["phase_anchor_level"] for record in phase_records.values()
+    }
+    phase_matched = (
+        len(phase_seeds) == 1
+        and None not in phase_seeds
+        and len(phase_anchors) == 1
+        and next(iter(phase_anchors)) >= max(available)
+        and all(
+            record["explicit_phase_anchor"]
+            for record in phase_records.values()
+        )
+    )
+
     finest_level = max(available)
     campaign_metadata = json.loads(
         (available[finest_level] / "campaign.json").read_text()
     )
     boxlen = float(campaign_metadata["boxlen_mpc_h"])
     theory = linear_theory(
-        available[finest_level], ["lcdm", *MODELS], [args.redshift], args.kmax
+        available[finest_level],
+        ["lcdm", *args.models],
+        [args.redshift],
+        args.kmax,
     )
     fig, axes = plt.subplots(
         2, 3, figsize=(10.0, 5.8), sharex=True, sharey=True,
@@ -186,7 +220,7 @@ def main() -> int:
     level_colors = plt.cm.viridis(np.linspace(0.18, 0.88, len(available)))
     level_color = dict(zip(sorted(available), level_colors))
 
-    for ax, model in zip(axes, MODELS):
+    for ax, model in zip(axes, args.models):
         theory_reference = theory["lcdm"][args.redshift]
         theory_sample = theory[model][args.redshift]
         theory_k = np.geomspace(
@@ -331,11 +365,20 @@ def main() -> int:
         ax.set_title(model)
         ax.grid(alpha=0.18)
 
-    axes[-1].set_visible(False)
-    for ax in axes[3:5]:
-        ax.set_xlabel(r"$k\ [h\,{\rm Mpc}^{-1}]$")
-    for ax in (axes[0], axes[3]):
-        ax.set_ylabel(r"$P(k)/P_{\Lambda{\rm CDM}}(k)$")
+    for ax in axes[len(args.models):]:
+        ax.set_visible(False)
+    if not phase_matched:
+        fig.suptitle(
+            "Diagnostic only: resolution ICs do not share one explicit "
+            "white-noise phase anchor",
+            color="firebrick",
+            fontsize=10,
+        )
+    for index, ax in enumerate(axes[:len(args.models)]):
+        if index >= 3 or index + 3 >= len(args.models):
+            ax.set_xlabel(r"$k\ [h\,{\rm Mpc}^{-1}]$")
+        if index % 3 == 0:
+            ax.set_ylabel(r"$P(k)/P_{\Lambda{\rm CDM}}(k)$")
     axes[0].legend(frameon=False, fontsize=8)
 
     figure_dir = root / "figures"
@@ -369,6 +412,7 @@ def main() -> int:
     report = {
         "root": str(root),
         "available_levels": sorted(available),
+        "models": list(args.models),
         "redshift": args.redshift,
         "pk_estimator": args.pk_estimator,
         "shot_noise": args.shot_noise,
@@ -378,6 +422,14 @@ def main() -> int:
         "residual_target_fraction": args.residual_target,
         "residual_target_percent": 100.0 * args.residual_target,
         "incomplete_levels": incomplete,
+        "phase_matching": {
+            "certified": phase_matched,
+            "levels": phase_records,
+            "requirement": (
+                "one explicit common phase_anchor_level at or above the "
+                "finest compared resolution, with one common seed"
+            ),
+        },
         "metrics": metrics,
         "resolution_pairs": resolution_pairs,
         "acceptance": {
@@ -403,6 +455,12 @@ def main() -> int:
                 bool(finest_pairs)
                 and all(item["large_scale_pass"] for item in finest_pairs)
             ),
+            "phase_matched_across_resolutions": phase_matched,
+            "resolution_convergence_certified": (
+                phase_matched
+                and bool(finest_pairs)
+                and all(item["full_range_pass"] for item in finest_pairs)
+            ),
             "finest_resolution_independently_certified": False,
             "note": (
                 "The finest level is not independently converged unless an "
@@ -417,7 +475,7 @@ def main() -> int:
     print(json.dumps(report, indent=2))
     if (
         args.require_resolution_pass
-        and not report["acceptance"]["finest_pair_full_range_all_pass"]
+        and not report["acceptance"]["resolution_convergence_certified"]
     ):
         return 2
     if (

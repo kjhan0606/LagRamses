@@ -292,6 +292,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--levelmax", type=int, default=14)
     parser.add_argument("--zstart", type=float, default=49.0)
     parser.add_argument("--seed", type=int, default=20260725)
+    parser.add_argument(
+        "--phase-anchor-level",
+        type=int,
+        help=(
+            "generate white noise at this level and restrict it to levelmin; "
+            "use one common finest anchor across a resolution ladder"
+        ),
+    )
     parser.add_argument("--ngridtot", type=int, default=80_000_000)
     parser.add_argument("--nparttot", type=int, default=25_000_000)
     parser.add_argument("--music", default=DEFAULT_MUSIC)
@@ -580,7 +588,7 @@ transfer        = camb_file
 transfer_file   = {transfer}
 
 [random]
-seed[{args.levelmin}] = {args.seed}
+seed[{args.phase_anchor_level or args.levelmin}] = {args.seed}
 
 [output]
 format          = grafic2
@@ -808,13 +816,19 @@ This is a matched-phase DMO benchmark. The transfer mode is `{args.ic_mode}`.
 - Particle Nyquist wavenumber: {kny:.6f} h/Mpc
 - Start: z={args.zstart:g}, 2LPT
 - Seed: {args.seed}
+- White-noise phase anchor: level {args.phase_anchor_level or args.levelmin}
 - Primordial amplitude: A_s={A_S:.8e}
 - LCDM sigma8(z=0), diagnostic only: {lcdm_sigma8:.8f}
 - Models: {", ".join(model_names)}
 - Scalar solver limit/tolerance: {args.scalar_iters} / {args.scalar_eps:.3e}
 - Maximum fractional expansion step: {args.aexp_step_limit:.6g}
 
-All ICs use the same random seed and phases. LagMUSIC's `force_pnorm` is
+All models in this campaign use the same random seed and phases. When the
+phase anchor is finer than the particle level, LagMUSIC generates the
+white-noise realization at the anchor and restricts it to the particle
+level. Using one common anchor across a resolution ladder preserves the
+shared long-wave realization; merely placing the same seed independently at
+each particle level does not. LagMUSIC's `force_pnorm` is
 derived directly from lagCAMB's linear P(k,zstart), so A_s fixes the absolute
 amplitude without sigma8 re-normalisation or MUSIC growth back-scaling.
 For DMO 2LPT, `vfact_scale` corrects the LCDM background velocity factor by
@@ -836,6 +850,11 @@ def main() -> int:
     args = parse_args()
     if args.levelmax < args.levelmin:
         raise ValueError("levelmax must be >= levelmin")
+    if (
+        args.phase_anchor_level is not None
+        and args.phase_anchor_level < args.levelmin
+    ):
+        raise ValueError("phase-anchor-level must be >= levelmin")
     if args.music_tasks < 1:
         raise ValueError("music-tasks must be positive")
     if args.aexp_step_limit <= 0.0:
@@ -960,6 +979,7 @@ def main() -> int:
         "levelmax": args.levelmax,
         "zstart": args.zstart,
         "seed": args.seed,
+        "phase_anchor_level": args.phase_anchor_level or args.levelmin,
         "omega_m": OMEGA_M,
         "omega_b": OMEGA_B,
         "H0": H0,

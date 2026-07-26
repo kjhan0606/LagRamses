@@ -59,7 +59,14 @@ python3 patch/lagRamses/aux/dmo_resolution_ladder.py \
 ```
 
 Add `--make-ics` for resolutions that are safe to generate on the current
-host. Each campaign contains `submit_all.sh` for concurrent Slurm submission.
+host. By default the ladder places the random seed at the finest requested
+level and obtains every coarser white-noise field by LagMUSIC restriction.
+This common phase anchor is required for a nonlinear convergence test:
+independently putting the same integer seed at L6, L7, and L8 generates
+different Fourier realizations. Override the default only with
+`--phase-anchor-level LEVEL`, where `LEVEL` must not be below the finest
+requested resolution. Each campaign contains `submit_all.sh` for concurrent
+Slurm submission.
 After runs complete, compare every resolution with lagCAMB at `z=0`:
 
 ```bash

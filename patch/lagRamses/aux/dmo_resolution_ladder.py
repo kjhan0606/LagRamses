@@ -25,6 +25,14 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--boxlen", type=float, default=64.0)
     parser.add_argument("--zstart", type=float, default=49.0)
     parser.add_argument("--seed", type=int, default=20260726)
+    parser.add_argument(
+        "--phase-anchor-level",
+        type=int,
+        help=(
+            "common white-noise level for all resolutions; defaults to the "
+            "finest requested level"
+        ),
+    )
     parser.add_argument("--aexp-step-limit", type=float, default=0.1)
     parser.add_argument(
         "--ramses",
@@ -55,6 +63,7 @@ def ic_slurm_script(
     level: int,
     resources: dict[str, object],
     aexp_step_limit: float,
+    phase_anchor_level: int,
 ) -> str:
     return f"""#!/bin/bash
 #SBATCH --job-name=ic_L{level}_{2**level}
@@ -74,7 +83,8 @@ export OMP_STACKSIZE=256M
 export I_MPI_PIN_DOMAIN=omp
 export I_MPI_PIN_ORDER=compact
 {sys.executable} {Path(__file__).resolve()} --root {root} --levels {level} \
-  --aexp-step-limit {aexp_step_limit:.8g} --make-ics
+  --aexp-step-limit {aexp_step_limit:.8g} \
+  --phase-anchor-level {phase_anchor_level} --make-ics
 """
 
 
@@ -85,6 +95,15 @@ def main() -> int:
         raise ValueError(f"no resource preset for levels: {unsupported}")
     if args.aexp_step_limit <= 0.0:
         raise ValueError("aexp-step-limit must be positive")
+    phase_anchor_level = (
+        args.phase_anchor_level
+        if args.phase_anchor_level is not None
+        else max(args.levels)
+    )
+    if phase_anchor_level < max(args.levels):
+        raise ValueError(
+            "phase-anchor-level must be >= the finest requested level"
+        )
 
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -111,6 +130,8 @@ def main() -> int:
             str(args.zstart),
             "--seed",
             str(args.seed),
+            "--phase-anchor-level",
+            str(phase_anchor_level),
             "--ngridtot",
             str(ngridtot),
             "--nparttot",
@@ -142,7 +163,12 @@ def main() -> int:
         ic_script = campaign / "make_ics.slurm"
         ic_script.write_text(
             ic_slurm_script(
-                root, campaign, level, resources, args.aexp_step_limit
+                root,
+                campaign,
+                level,
+                resources,
+                args.aexp_step_limit,
+                phase_anchor_level,
             )
         )
         ic_script.chmod(ic_script.stat().st_mode | 0o110)
@@ -156,6 +182,7 @@ def main() -> int:
                 "nparttot": nparttot,
                 "scalar_iters": 6000,
                 "aexp_step_limit": args.aexp_step_limit,
+                "phase_anchor_level": phase_anchor_level,
                 "campaign": str(campaign),
                 **resources,
             }
@@ -165,6 +192,7 @@ def main() -> int:
         "boxlen_mpc_h": args.boxlen,
         "zstart": args.zstart,
         "seed": args.seed,
+        "phase_anchor_level": phase_anchor_level,
         "aexp_step_limit": args.aexp_step_limit,
         "models": list(MODELS),
         "levels": records,
