@@ -677,6 +677,19 @@ done
 """
 
 
+def submit_all(models: list[str]) -> str:
+    quoted = " ".join(models)
+    return f"""#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")"
+: > submitted_jobs.tsv
+for model in {quoted}; do
+    jobid=$(cd "$model" && sbatch --parsable run.slurm)
+    printf '%s\\t%s\\n' "$model" "$jobid" | tee -a submitted_jobs.tsv
+done
+"""
+
+
 def manual_chain(args: argparse.Namespace, models: list[str]) -> str:
     quoted = " ".join(models)
     total_ranks = args.slurm_tasks
@@ -746,9 +759,10 @@ amplitude without sigma8 re-normalisation or MUSIC growth back-scaling.
 
 {transfer_summary}
 
-Run `./submit_chain.sh` on grammar. `./run_manual_chain.sh` is the sequential
-fallback for a non-Slurm host. Simulation outputs are written inside each
-model directory.
+Run `./submit_all.sh` on grammar for independent concurrent jobs, or
+`./submit_chain.sh` when the models must run sequentially. The
+`./run_manual_chain.sh` script is the sequential fallback for a non-Slurm
+host. Simulation outputs are written inside each model directory.
 """
 
 
@@ -821,6 +835,12 @@ def main() -> int:
     write_text(
         outdir / "submit_chain.sh",
         submit_chain(model_names),
+        args.force,
+        executable=True,
+    )
+    write_text(
+        outdir / "submit_all.sh",
+        submit_all(model_names),
         args.force,
         executable=True,
     )

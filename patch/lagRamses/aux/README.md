@@ -39,3 +39,26 @@ share an exact epoch; use `--nearest` for campaigns generated with
 python3 patch/lagRamses/aux/plot_dmo_pk_ratios.py CAMPAIGN \
   --models f5 f6 n1 n5 sym_a --nearest
 ```
+
+## Uniform-resolution convergence
+
+Generate consistent `64^3`, `128^3`, and `256^3` campaigns:
+
+```bash
+python3 patch/lagRamses/aux/dmo_resolution_ladder.py \
+  --root /gpfs/kjhan/Hydro/DE_nonstd/DMO_resolution_v1
+```
+
+Add `--make-ics` for resolutions that are safe to generate on the current
+host. Each campaign contains `submit_all.sh` for concurrent Slurm submission.
+After runs complete, compare every resolution with lagCAMB at `z=0`:
+
+```bash
+python3 patch/lagRamses/aux/plot_dmo_resolution_convergence.py \
+  /gpfs/kjhan/Hydro/DE_nonstd/DMO_resolution_v1
+```
+
+Only resolutions for which every model has a measured spectrum at the
+requested scale factor are included. The JSON report gives both the full
+`k <= 0.5 h Mpc^-1` residual and a separate large-scale residual (default
+`k <= 0.2 h Mpc^-1`); change the latter with `--large-scale-kmax`.
