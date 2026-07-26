@@ -351,6 +351,11 @@ def main() -> int:
             fine_on_k = np.interp(np.log(k), np.log(fine_k), fine_ratio)
             delta = coarse_ratio / fine_on_k - 1.0
             low = k <= min(args.large_scale_kmax, args.kmax)
+            absolute_delta = np.abs(delta)
+            prefix_pass = (
+                np.maximum.accumulate(absolute_delta)
+                <= args.residual_target
+            )
             worst_index = int(np.argmax(np.abs(delta)))
             max_abs = float(abs(delta[worst_index]))
             low_indices = np.flatnonzero(low)
@@ -371,6 +376,16 @@ def main() -> int:
                     "fine_level": fine_level,
                     "kmax_h_mpc": args.kmax,
                     "n_bins": int(k.size),
+                    "n_failing_bins": int(
+                        np.count_nonzero(
+                            absolute_delta > args.residual_target
+                        )
+                    ),
+                    "largest_contiguous_kmax_pass_h_mpc": (
+                        float(k[np.flatnonzero(prefix_pass)[-1]])
+                        if np.any(prefix_pass)
+                        else None
+                    ),
                     "rms_fractional_residual": float(
                         np.sqrt(np.mean(delta**2))
                     ),

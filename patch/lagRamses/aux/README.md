@@ -97,9 +97,11 @@ Only resolutions for which every model has a measured spectrum at the
 requested scale factor are included. The JSON report gives both the full
 `k <= 0.5 h Mpc^-1` residual and a separate large-scale residual (default
 `k <= 0.2 h Mpc^-1`), together with the worst shell's `k` and signed
-residual for each theory and adjacent-resolution comparison; change the
-large-scale limit with `--large-scale-kmax`. The default acceptance limit is
-0.1% (`--residual-target 0.001`). Use
+residual for each theory and adjacent-resolution comparison. Resolution-pair
+records also report the number of failing shells and the largest contiguous
+`kmax` for which every shell from the fundamental mode satisfies the target;
+change the large-scale limit with `--large-scale-kmax`. The default acceptance
+limit is 0.1% (`--residual-target 0.001`). Use
 `--require-resolution-pass` and/or `--require-theory-pass` when a failed
 P(k) check must also produce a nonzero process exit status.
 
