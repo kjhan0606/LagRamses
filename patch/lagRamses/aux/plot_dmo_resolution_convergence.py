@@ -263,10 +263,21 @@ def main() -> int:
             residual = ratio / predicted - 1.0
             large_scale = k <= min(args.large_scale_kmax, args.kmax)
             large_scale_residual = residual[large_scale]
-            max_abs_residual = float(np.max(np.abs(residual)))
+            worst_index = int(np.argmax(np.abs(residual)))
+            max_abs_residual = float(abs(residual[worst_index]))
+            large_scale_indices = np.flatnonzero(large_scale)
+            large_scale_worst_index = (
+                int(
+                    large_scale_indices[
+                        np.argmax(np.abs(residual[large_scale_indices]))
+                    ]
+                )
+                if large_scale_indices.size
+                else None
+            )
             large_scale_max_abs_residual = (
-                float(np.max(np.abs(large_scale_residual)))
-                if large_scale_residual.size
+                float(abs(residual[large_scale_worst_index]))
+                if large_scale_worst_index is not None
                 else None
             )
             metrics.append(
@@ -282,6 +293,10 @@ def main() -> int:
                     ),
                     "rms_theory_residual": float(np.sqrt(np.mean(residual**2))),
                     "max_abs_theory_residual": max_abs_residual,
+                    "worst_k_h_mpc": float(k[worst_index]),
+                    "worst_signed_theory_residual": float(
+                        residual[worst_index]
+                    ),
                     "theory_full_range_pass": (
                         max_abs_residual <= args.residual_target
                     ),
@@ -301,6 +316,16 @@ def main() -> int:
                     ),
                     "large_scale_max_abs_theory_residual": (
                         large_scale_max_abs_residual
+                    ),
+                    "large_scale_worst_k_h_mpc": (
+                        float(k[large_scale_worst_index])
+                        if large_scale_worst_index is not None
+                        else None
+                    ),
+                    "large_scale_worst_signed_theory_residual": (
+                        float(residual[large_scale_worst_index])
+                        if large_scale_worst_index is not None
+                        else None
                     ),
                     "theory_large_scale_pass": (
                         large_scale_max_abs_residual <= args.residual_target
@@ -326,9 +351,18 @@ def main() -> int:
             fine_on_k = np.interp(np.log(k), np.log(fine_k), fine_ratio)
             delta = coarse_ratio / fine_on_k - 1.0
             low = k <= min(args.large_scale_kmax, args.kmax)
-            max_abs = float(np.max(np.abs(delta)))
+            worst_index = int(np.argmax(np.abs(delta)))
+            max_abs = float(abs(delta[worst_index]))
+            low_indices = np.flatnonzero(low)
+            low_worst_index = (
+                int(low_indices[np.argmax(np.abs(delta[low_indices]))])
+                if low_indices.size
+                else None
+            )
             low_max_abs = (
-                float(np.max(np.abs(delta[low]))) if np.any(low) else None
+                float(abs(delta[low_worst_index]))
+                if low_worst_index is not None
+                else None
             )
             resolution_pairs.append(
                 {
@@ -341,6 +375,10 @@ def main() -> int:
                         np.sqrt(np.mean(delta**2))
                     ),
                     "max_abs_fractional_residual": max_abs,
+                    "worst_k_h_mpc": float(k[worst_index]),
+                    "worst_signed_fractional_residual": float(
+                        delta[worst_index]
+                    ),
                     "full_range_pass": max_abs <= args.residual_target,
                     "large_scale_kmax_h_mpc": min(
                         args.large_scale_kmax, args.kmax
@@ -352,6 +390,16 @@ def main() -> int:
                         else None
                     ),
                     "large_scale_max_abs_fractional_residual": low_max_abs,
+                    "large_scale_worst_k_h_mpc": (
+                        float(k[low_worst_index])
+                        if low_worst_index is not None
+                        else None
+                    ),
+                    "large_scale_worst_signed_fractional_residual": (
+                        float(delta[low_worst_index])
+                        if low_worst_index is not None
+                        else None
+                    ),
                     "large_scale_pass": (
                         low_max_abs <= args.residual_target
                         if low_max_abs is not None
