@@ -115,3 +115,17 @@ Solver completion and performance are not validation criteria by themselves.
 Any optimization must be checked against an unmodified matched-phase run
 with `measure_dmo_pk.py`; the maximum shell residual, not an RMS summary,
 must remain below the campaign's 0.1% acceptance threshold.
+
+## nDGP solver performance
+
+The uniform-domain nDGP operator split needs twelve diagonal scalar samples
+per cell to construct the mixed Hessian. The FFT path caches the twelve
+edge-neighbour octs once per vector chunk and then reads the corresponding
+cells directly. The general Morton/parent-CIC sampler remains the fallback
+when an AMR neighbour is genuinely absent. The fifth-force gradient likewise
+reuses the six face neighbours already gathered by the routine.
+
+On the `64^3` N1 z=0 regression (4 MPI ranks x 4 OpenMP threads), these
+changes reduced the RAMSES total timer from 19.253 s to 8.052 s. The common
+CIC P(k) file was byte-identical. At `128^3`, the maximum CIC P(k) change was
+`1.31e-5%`, well below the 0.1% acceptance threshold.

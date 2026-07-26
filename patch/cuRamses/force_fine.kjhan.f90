@@ -983,7 +983,8 @@ end subroutine aqual_iterate
 
 !=========================================================
 ! compute_fifth_force: add gradient of scalar_gr to f()
-! factor = -0.5 for f(R), -1/(2*beta) for nDGP
+! factor = -0.5 for f(R) and nDGP; the nDGP 1/beta
+! coupling is already part of the solved field equation.
 !=========================================================
 subroutine compute_fifth_force(ilevel, factor)
   use amr_commons
@@ -1028,7 +1029,7 @@ subroutine compute_fifth_force(ilevel, factor)
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
-!$omp&  ind_nb_left,ind_nb_right,grad_u,u_cen,u_left,u_right) schedule(dynamic)
+!$omp&  ind_nb_left,ind_nb_right,grad_u,u_cen,u_left,u_right) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -1060,8 +1061,23 @@ subroutine compute_fifth_force(ilevel, factor)
               ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
 
-              call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,u_cen,u_left)
-              call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim, 1,u_cen,u_right)
+              ! Same-level neighbours are already cached above.  The old
+              ! path decoded the cell Morton coordinate and performed a
+              ! hash lookup six times per active cell even on a complete
+              ! uniform level.  Retain parent-CIC only for a genuinely
+              ! missing AMR neighbour.
+              if(igridn_w(i,ig_left)>0) then
+                 u_left=scalar_gr(igridn_w(i,ig_left)+ih_left)
+              else
+                 call scalar_sample_axis( &
+                      & ind_grid_w(i),ind,ilevel,idim,-1,u_cen,u_left)
+              end if
+              if(igridn_w(i,ig_right)>0) then
+                 u_right=scalar_gr(igridn_w(i,ig_right)+ih_right)
+              else
+                 call scalar_sample_axis( &
+                      & ind_grid_w(i),ind,ilevel,idim,1,u_cen,u_right)
+              end if
               grad_u=(u_right-u_left)/(2d0*dx_loc)
               f(ind_cell_w(i),idim) = f(ind_cell_w(i),idim) + factor * grad_u
            end do
@@ -1482,7 +1498,7 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
            end if
            source = a2_over_3*(R_of_u - R_bar) &
                 & - rho_coeff*(rho(ind_cell_w(i)) - rho_tot)
-           scalar_gr_old(ind_cell_w(i)) = -(lapl - source)
+           scalar_gr_old(ind_cell_w(i))=-(lapl-source)
            acc_loc(1) = acc_loc(1) + a2_over_3*dR_du
            acc_loc(2) = acc_loc(2) + 1d0
         end do
@@ -1730,6 +1746,8 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
 
   integer::igrid,ngrid,ncache,i,ind,iskip,idim,icell,info
   integer::ig_left,ig_right
+  integer::d,bx,by,bz,tx,ty,tz,sx,sy,sz,ixside,iyside,izside
+  integer::iedge,igrid_diag,ind_diag
   real(dp)::dx,scale,dx_loc,dx2_inv
   integer::nx_loc
   real(dp)::u_c,lapl,s_src,t_ij,tbar_ij,qcoeff,disc,a_tgt
@@ -1742,6 +1760,11 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
+  integer,dimension(1:nvector,1:4)::igridxy_w,igridxz_w,igridyz_w
+  integer,dimension(1:nvector,1:12)::ind_diag_w
+  integer,dimension(12),parameter::odx=(/ 1, 1,-1,-1, 1, 1,-1,-1, 0, 0, 0, 0/)
+  integer,dimension(12),parameter::ody=(/ 1,-1, 1,-1, 0, 0, 0, 0, 1, 1,-1,-1/)
+  integer,dimension(12),parameter::odz=(/ 0, 0, 0, 0, 1,-1, 1,-1, 1,-1, 1,-1/)
 
   ncache=active(ilevel)%ngrid
   dx=0.5D0**ilevel
@@ -1758,12 +1781,15 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
   ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
 
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
-!$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right, &
+!$omp&  ind_grid_w,ind_cell_w,igridn_w,igridxy_w,igridxz_w,igridyz_w, &
+!$omp&  ind_diag_w,ig_left,ig_right, &
+!$omp&  d,bx,by,bz,tx,ty,tz,sx,sy,sz,ixside,iyside,izside, &
+!$omp&  iedge,igrid_diag,ind_diag, &
 !$omp&  u_c,lapl,s_src,t_ij,tbar_ij,qcoeff,disc,a_tgt, &
 !$omp&  phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp,phi_xx,phi_yy,phi_zz, &
 !$omp&  mix_xy2,mix_xz2,mix_yz2,phi_pp,phi_pm,phi_mp,phi_mm, &
 !$omp&  dpp,dpm,dmp,dmm) &
-!$omp& schedule(dynamic)
+!$omp& schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -1778,10 +1804,90 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
            igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
         end do
      end do
+     ! The spectral path is used only on the fully refined periodic
+     ! domain level.  Cache its twelve edge-neighbour grids once per
+     ! oct instead of decoding and hashing a Morton key for every one
+     ! of the 12 diagonal samples in every cell and nonlinear iterate.
+     do sx=-1,1,2
+        ixside=merge(1,2,sx<0)
+        do sy=-1,1,2
+           iyside=merge(3,4,sy<0)
+           iedge=((sx+1)/2)*2+(sy+1)/2+1
+           do i=1,ngrid
+              igrid_diag=igridn_w(i,ixside)
+              if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,iyside)
+              igridxy_w(i,iedge)=igrid_diag
+           end do
+        end do
+        do sz=-1,1,2
+           izside=merge(5,6,sz<0)
+           iedge=((sx+1)/2)*2+(sz+1)/2+1
+           do i=1,ngrid
+              igrid_diag=igridn_w(i,ixside)
+              if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,izside)
+              igridxz_w(i,iedge)=igrid_diag
+           end do
+        end do
+     end do
+     do sy=-1,1,2
+        iyside=merge(3,4,sy<0)
+        do sz=-1,1,2
+           izside=merge(5,6,sz<0)
+           iedge=((sy+1)/2)*2+(sz+1)/2+1
+           do i=1,ngrid
+              igrid_diag=igridn_w(i,iyside)
+              if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,izside)
+              igridyz_w(i,iedge)=igrid_diag
+           end do
+        end do
+     end do
      do ind=1,twotondim
         iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
            ind_cell_w(i)=iskip+ind_grid_w(i)
+        end do
+        bx=mod(ind-1,2)
+        by=mod((ind-1)/2,2)
+        bz=(ind-1)/4
+        do d=1,12
+           tx=bx+odx(d); ty=by+ody(d); tz=bz+odz(d)
+           sx=0; sy=0; sz=0
+           if(tx<0) sx=-1
+           if(tx>1) sx= 1
+           if(ty<0) sy=-1
+           if(ty>1) sy= 1
+           if(tz<0) sz=-1
+           if(tz>1) sz= 1
+           tx=modulo(tx,2); ty=modulo(ty,2); tz=modulo(tz,2)
+           ind_diag=1+tx+2*ty+4*tz
+           do i=1,ngrid
+              if(sx/=0 .and. sy/=0) then
+                 iedge=((sx+1)/2)*2+(sy+1)/2+1
+                 igrid_diag=igridxy_w(i,iedge)
+              else if(sx/=0 .and. sz/=0) then
+                 iedge=((sx+1)/2)*2+(sz+1)/2+1
+                 igrid_diag=igridxz_w(i,iedge)
+              else if(sy/=0 .and. sz/=0) then
+                 iedge=((sy+1)/2)*2+(sz+1)/2+1
+                 igrid_diag=igridyz_w(i,iedge)
+              else if(sx/=0) then
+                 ixside=merge(1,2,sx<0)
+                 igrid_diag=igridn_w(i,ixside)
+              else if(sy/=0) then
+                 iyside=merge(3,4,sy<0)
+                 igrid_diag=igridn_w(i,iyside)
+              else if(sz/=0) then
+                 izside=merge(5,6,sz<0)
+                 igrid_diag=igridn_w(i,izside)
+              else
+                 igrid_diag=ind_grid_w(i)
+              end if
+              if(igrid_diag>0) then
+                 ind_diag_w(i,d)=ncoarse+(ind_diag-1)*ngridmax+igrid_diag
+              else
+                 ind_diag_w(i,d)=0
+              end if
+           end do
         end do
         do i=1,ngrid
            u_c = scalar_gr(ind_cell_w(i))
@@ -1803,10 +1909,26 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
            phi_xx = (phi_xp+phi_xm-2d0*u_c)*dx2_inv
            phi_yy = (phi_yp+phi_ym-2d0*u_c)*dx2_inv
            phi_zz = (phi_zp+phi_zm-2d0*u_c)*dx2_inv
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 1, 0,u_c,phi_pp)
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1,-1, 0,u_c,phi_pm)
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 1, 0,u_c,phi_mp)
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1,-1, 0,u_c,phi_mm)
+           if(ind_diag_w(i,1)>0) then
+              phi_pp=scalar_gr(ind_diag_w(i,1))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 1, 0,u_c,phi_pp)
+           end if
+           if(ind_diag_w(i,2)>0) then
+              phi_pm=scalar_gr(ind_diag_w(i,2))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1,-1, 0,u_c,phi_pm)
+           end if
+           if(ind_diag_w(i,3)>0) then
+              phi_mp=scalar_gr(ind_diag_w(i,3))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 1, 0,u_c,phi_mp)
+           end if
+           if(ind_diag_w(i,4)>0) then
+              phi_mm=scalar_gr(ind_diag_w(i,4))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1,-1, 0,u_c,phi_mm)
+           end if
            if(centered_mixed) then
               mix_xy2=(0.25d0*(phi_pp-phi_pm-phi_mp+phi_mm)*dx2_inv)**2
            else
@@ -1816,10 +1938,26 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
               dmm=(u_c-phi_ym-phi_xm+phi_mm)*dx2_inv
               mix_xy2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
            end if
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0, 1,u_c,phi_pp)
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0,-1,u_c,phi_pm)
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0, 1,u_c,phi_mp)
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0,-1,u_c,phi_mm)
+           if(ind_diag_w(i,5)>0) then
+              phi_pp=scalar_gr(ind_diag_w(i,5))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0, 1,u_c,phi_pp)
+           end if
+           if(ind_diag_w(i,6)>0) then
+              phi_pm=scalar_gr(ind_diag_w(i,6))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0,-1,u_c,phi_pm)
+           end if
+           if(ind_diag_w(i,7)>0) then
+              phi_mp=scalar_gr(ind_diag_w(i,7))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0, 1,u_c,phi_mp)
+           end if
+           if(ind_diag_w(i,8)>0) then
+              phi_mm=scalar_gr(ind_diag_w(i,8))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0,-1,u_c,phi_mm)
+           end if
            if(centered_mixed) then
               mix_xz2=(0.25d0*(phi_pp-phi_pm-phi_mp+phi_mm)*dx2_inv)**2
            else
@@ -1829,10 +1967,26 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
               dmm=(u_c-phi_zm-phi_xm+phi_mm)*dx2_inv
               mix_xz2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
            end if
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1, 1,u_c,phi_pp)
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1,-1,u_c,phi_pm)
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1, 1,u_c,phi_mp)
-           call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1,-1,u_c,phi_mm)
+           if(ind_diag_w(i,9)>0) then
+              phi_pp=scalar_gr(ind_diag_w(i,9))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1, 1,u_c,phi_pp)
+           end if
+           if(ind_diag_w(i,10)>0) then
+              phi_pm=scalar_gr(ind_diag_w(i,10))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1,-1,u_c,phi_pm)
+           end if
+           if(ind_diag_w(i,11)>0) then
+              phi_mp=scalar_gr(ind_diag_w(i,11))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1, 1,u_c,phi_mp)
+           end if
+           if(ind_diag_w(i,12)>0) then
+              phi_mm=scalar_gr(ind_diag_w(i,12))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1,-1,u_c,phi_mm)
+           end if
            if(centered_mixed) then
               mix_yz2=(0.25d0*(phi_pp-phi_pm-phi_mp+phi_mm)*dx2_inv)**2
            else
