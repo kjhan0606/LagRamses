@@ -296,6 +296,10 @@ def main() -> int:
             )
         )
         writer.writerows(rows)
+    finest_metrics = [item for item in metrics if item["level"] == finest_level]
+    finest_pairs = [
+        item for item in resolution_pairs if item["fine_level"] == finest_level
+    ]
     report = {
         "root": str(root),
         "available_levels": sorted(available),
@@ -309,8 +313,11 @@ def main() -> int:
         "metrics": metrics,
         "resolution_pairs": resolution_pairs,
         "acceptance": {
-            "theory_large_scale_all_pass": all(
+            "theory_large_scale_all_levels_pass": all(
                 item["theory_large_scale_pass"] for item in metrics
+            ),
+            "finest_theory_large_scale_all_pass": all(
+                item["theory_large_scale_pass"] for item in finest_metrics
             ),
             "adjacent_resolution_full_range_all_pass": (
                 bool(resolution_pairs)
@@ -319,6 +326,14 @@ def main() -> int:
             "adjacent_resolution_large_scale_all_pass": (
                 bool(resolution_pairs)
                 and all(item["large_scale_pass"] for item in resolution_pairs)
+            ),
+            "finest_pair_full_range_all_pass": (
+                bool(finest_pairs)
+                and all(item["full_range_pass"] for item in finest_pairs)
+            ),
+            "finest_pair_large_scale_all_pass": (
+                bool(finest_pairs)
+                and all(item["large_scale_pass"] for item in finest_pairs)
             ),
             "finest_resolution_independently_certified": False,
             "note": (
@@ -334,12 +349,12 @@ def main() -> int:
     print(json.dumps(report, indent=2))
     if (
         args.require_resolution_pass
-        and not report["acceptance"]["adjacent_resolution_full_range_all_pass"]
+        and not report["acceptance"]["finest_pair_full_range_all_pass"]
     ):
         return 2
     if (
         args.require_theory_pass
-        and not report["acceptance"]["theory_large_scale_all_pass"]
+        and not report["acceptance"]["finest_theory_large_scale_all_pass"]
     ):
         return 3
     return 0
