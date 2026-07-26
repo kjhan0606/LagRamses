@@ -196,3 +196,25 @@ byte-identical.
 The corresponding F5 `128^3` total timer fell from 2850.22 to 727.31
 seconds and `fR-solve` from 2815.58 to 694.45 seconds. Its exact z=5 and
 z=0 common CIC files were also byte-identical.
+
+### F5 residual-tolerance audit
+
+The production validation runs retain the strict relative field residual
+`fR_eps=1e-6`.  Controlled same-node tests quantify the possible speed and
+power-spectrum cost of relaxing that stopping criterion; they do not redefine
+the 0.1% power-spectrum validation target.
+
+At `64^3`, changing `fR_eps` from `1e-6` to `1e-5` reduced the total timer
+from 43.57 to 28.18 seconds and the F5 timer from 39.29 to 23.68 seconds.
+The z=0 common-`256^3` CIC spectrum changed by at most `0.00398%`.  A more
+aggressive `1e-4` tolerance reduced the total timer to 15.12 seconds but
+changed z=0 P(k) by as much as `0.03614%`, consuming too much of the 0.1%
+error budget to adopt without finer-resolution tests.
+
+At `128^3` on one node with 8 MPI ranks and 4 OpenMP threads per rank,
+`1e-6 -> 1e-5` reduced the total timer from 744.06 to 386.98 seconds and
+the F5 timer from 710.66 to 353.71 seconds.  Newton-GS work fell from
+210,464 to 95,382 sweeps.  The maximum raw-spectrum change was negligible
+at z=5 and `0.01108%` at z=0 for `k <= 0.5 h Mpc^-1`.  This makes `1e-5`
+a promising performance setting, but it must pass an L8 A/B test before
+becoming the validation default.

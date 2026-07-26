@@ -605,20 +605,10 @@ grad_order      = 6
 """
 
 
-def namelist(
-    args: argparse.Namespace, model: Dict[str, str], ic_dir: str, ic_model: str
+def effective_model_blocks(
+    args: argparse.Namespace, model: Dict[str, str]
 ) -> str:
-    outputs_z = [5.0, 2.0, 1.0, 0.8, 0.5, 0.2, 0.0]
-    outputs_a = ",".join(f"{1.0 / (1.0 + z):.9f}" for z in outputs_z)
-    nlevels = args.levelmax - args.levelmin + 1
-    nsubcycle = (
-        "1"
-        if args.levelmax == args.levelmin
-        else f"1,{args.levelmax - args.levelmin}*2"
-    )
-    flags = model["flags"]
-    if flags:
-        flags += "\n"
+    """Return model blocks after applying the requested solver controls."""
     blocks = model["blocks"]
     blocks = blocks.replace("n_iter_fR=20", f"n_iter_fR={args.scalar_iters}")
     blocks = blocks.replace("n_iter_nDGP=20", f"n_iter_nDGP={args.scalar_iters}")
@@ -642,6 +632,24 @@ def namelist(
     blocks = blocks.replace(
         "galileon_eps=1.0d-6", f"galileon_eps={args.scalar_eps:.8e}"
     )
+    return blocks
+
+
+def namelist(
+    args: argparse.Namespace, model: Dict[str, str], ic_dir: str, ic_model: str
+) -> str:
+    outputs_z = [5.0, 2.0, 1.0, 0.8, 0.5, 0.2, 0.0]
+    outputs_a = ",".join(f"{1.0 / (1.0 + z):.9f}" for z in outputs_z)
+    nlevels = args.levelmax - args.levelmin + 1
+    nsubcycle = (
+        "1"
+        if args.levelmax == args.levelmin
+        else f"1,{args.levelmax - args.levelmin}*2"
+    )
+    flags = model["flags"]
+    if flags:
+        flags += "\n"
+    blocks = effective_model_blocks(args, model)
     return f"""! {model['description']}
 ! 2LPT IC transfer source: {ic_model}; all models use the same random phases.
 &RUN_PARAMS
@@ -964,6 +972,7 @@ def main() -> int:
     for name in model_names:
         model_metadata[name] = {
             **MODELS[name],
+            "blocks": effective_model_blocks(args, MODELS[name]),
             "ic_transfer_model": ic_models[name],
             "ic_transfer_exact_match": ic_models[name] == name,
         }
