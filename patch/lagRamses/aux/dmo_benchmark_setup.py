@@ -7,9 +7,9 @@ initial conditions retain the same random phases. Models without an exact
 lagCAMB counterpart use the LCDM transfer at the high starting redshift and
 are identified explicitly in the campaign metadata.
 
-Models
-------
-lcdm, q1, cde10, f5, f6, n1, n5, sym_a
+Default validation models
+-------------------------
+lcdm, f5, f6, n1, n5, sym_a
 
 Example
 -------
@@ -29,6 +29,8 @@ import stat
 import subprocess
 import sys
 from typing import Dict
+
+import numpy as np
 
 
 OMEGA_M = 0.3111
@@ -242,7 +244,7 @@ galileon_eps=1.0d-6
     },
 }
 
-DEFAULT_MODELS = ("lcdm", "q1", "cde10", "f5", "f6", "n1", "n5", "sym_a")
+DEFAULT_MODELS = ("lcdm", "f5", "f6", "n1", "n5", "sym_a")
 
 # These models have parameter-for-parameter counterparts in the local lagCAMB.
 # All other models intentionally fall back to the LCDM high-redshift transfer.
@@ -326,6 +328,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0e-6,
         help="relative residual tolerance for nonlinear scalar solvers",
+    )
+    parser.add_argument(
+        "--aexp-step-limit",
+        type=float,
+        default=0.1,
+        help="maximum fractional expansion-factor change per coarse step",
     )
     parser.add_argument("--make-ics", action="store_true")
     parser.add_argument(
@@ -481,11 +489,63 @@ def make_transfer(
     return transfer_path, diagnostics
 
 
+def velocity_growth_scale(
+    model_transfer: Path, lcdm_transfer: Path
+) -> tuple[float, float, float]:
+    """Return the DMO velocity-growth correction relative to LCDM.
+
+    LagMUSIC's DMO 2LPT path derives velocities from the total-density
+    displacement potential and its background (LCDM/w0-wa) growth factor.
+    The CAMB Newtonian velocity transfers therefore supply only the relative
+    correction f_model/f_LCDM.  Keeping this as a scalar preserves the density
+    transfer used for both 1LPT and 2LPT displacements.
+    """
+    model = np.loadtxt(model_transfer)
+    lcdm = np.loadtxt(lcdm_transfer)
+    if model.shape[1] < 12 or lcdm.shape[1] < 12:
+        raise RuntimeError("CAMB transfer tables must contain at least 12 columns")
+
+    omega_c = OMEGA_M - OMEGA_B
+    model_vtotal = (omega_c * model[:, 10] + OMEGA_B * model[:, 11]) / OMEGA_M
+    lcdm_vtotal = (omega_c * lcdm[:, 10] + OMEGA_B * lcdm[:, 11]) / OMEGA_M
+    model_growth = model_vtotal / model[:, 6]
+    lcdm_growth = lcdm_vtotal / lcdm[:, 6]
+    if np.any(model_growth <= 0.0) or np.any(lcdm_growth <= 0.0):
+        raise RuntimeError("CAMB velocity-to-density transfer must be positive")
+    mask = (
+        (model[:, 0] >= 1.0e-3)
+        & (model[:, 0] <= 1.0)
+        & (model[:, 0] >= lcdm[:, 0].min())
+        & (model[:, 0] <= lcdm[:, 0].max())
+    )
+    model_k = model[mask, 0]
+    lcdm_on_model_k = np.exp(
+        np.interp(np.log(model_k), np.log(lcdm[:, 0]), np.log(lcdm_growth))
+    )
+    samples = model_growth[mask] / lcdm_on_model_k
+    if samples.size == 0 or not np.all(np.isfinite(samples)):
+        raise RuntimeError("cannot derive a finite velocity-growth correction")
+
+    scale = float(samples.mean())
+    relative_scatter = float(samples.std() / scale)
+    maximum_deviation = float(np.max(np.abs(samples / scale - 1.0)))
+    if scale <= 0.0:
+        raise RuntimeError(f"invalid velocity-growth correction: {scale}")
+    if maximum_deviation > 1.0e-4:
+        raise RuntimeError(
+            "DMO velocity growth is too scale-dependent for one vfact_scale: "
+            f"{model_transfer}, maximum fractional "
+            f"deviation={maximum_deviation:.3e}"
+        )
+    return scale, relative_scatter, maximum_deviation
+
+
 def music_config(
     args: argparse.Namespace,
     transfer: Path,
     sigma8_z0: float,
     force_pnorm: float,
+    vfact_scale: float,
     ic_dir: str,
 ) -> str:
     legacy_keys = "LagMUSIC" in str(Path(args.music).expanduser().resolve())
@@ -502,6 +562,7 @@ use_2LPT        = yes
 use_LLA         = no
 padding         = 8
 force_pnorm     = {force_pnorm:.15e}
+vfact_scale     = {vfact_scale:.15e}
 
 [cosmology]
 Omega_m         = {OMEGA_M}
@@ -584,6 +645,7 @@ sink=.false.
 nrestart=0
 nstepmax=1000000
 nsubcycle={nsubcycle}
+aexp_step_limit={args.aexp_step_limit:.8g}
 ordering='ksection'
 memory_balance=.true.
 use_fftw=.true.
@@ -750,10 +812,14 @@ This is a matched-phase DMO benchmark. The transfer mode is `{args.ic_mode}`.
 - LCDM sigma8(z=0), diagnostic only: {lcdm_sigma8:.8f}
 - Models: {", ".join(model_names)}
 - Scalar solver limit/tolerance: {args.scalar_iters} / {args.scalar_eps:.3e}
+- Maximum fractional expansion step: {args.aexp_step_limit:.6g}
 
 All ICs use the same random seed and phases. LagMUSIC's `force_pnorm` is
 derived directly from lagCAMB's linear P(k,zstart), so A_s fixes the absolute
 amplitude without sigma8 re-normalisation or MUSIC growth back-scaling.
+For DMO 2LPT, `vfact_scale` corrects the LCDM background velocity factor by
+the model/LCDM ratio of CAMB's total velocity-to-density transfer. The
+density transfer—and therefore the displacement field—is unchanged.
 
 ## Transfer source
 
@@ -772,6 +838,8 @@ def main() -> int:
         raise ValueError("levelmax must be >= levelmin")
     if args.music_tasks < 1:
         raise ValueError("music-tasks must be positive")
+    if args.aexp_step_limit <= 0.0:
+        raise ValueError("aexp-step-limit must be positive")
     if args.slurm_tasks * args.omp_threads > 64:
         raise ValueError("requested Slurm CPU count exceeds one 64-core grammar node")
 
@@ -792,6 +860,23 @@ def main() -> int:
         name: make_transfer(outdir, name, args.zstart, args.force, camb)
         for name in transfer_models
     }
+    lcdm_transfer = transfer_data["lcdm"][0]
+    for name, (transfer, diagnostics) in transfer_data.items():
+        scale, scatter, maximum_deviation = velocity_growth_scale(
+            transfer, lcdm_transfer
+        )
+        diagnostics.update(
+            {
+                "vfact_scale": scale,
+                "vfact_scale_relative_scatter": scatter,
+                "vfact_scale_maximum_deviation": maximum_deviation,
+                "vfact_scale_k_range_h_mpc": [1.0e-3, 1.0],
+            }
+        )
+        diagnostics_path = transfer.with_suffix(".json")
+        diagnostics_path.write_text(
+            json.dumps(diagnostics, indent=2, sort_keys=True) + "\n"
+        )
     transfer_diagnostics = {
         name: diagnostics for name, (_, diagnostics) in transfer_data.items()
     }
@@ -808,6 +893,7 @@ def main() -> int:
                 transfer,
                 diagnostics["sigma8_z0"],
                 diagnostics["force_pnorm"],
+                diagnostics["vfact_scale"],
                 ic_dir,
             ),
             args.force,
@@ -880,11 +966,16 @@ def main() -> int:
         "n_s": N_S,
         "A_s": A_S,
         "amplitude_normalization": "lagCAMB P(k,zstart) via LagMUSIC force_pnorm",
+        "velocity_normalization": (
+            "lagCAMB (T_v,total/T_density,total)_model relative to LCDM "
+            "via LagMUSIC vfact_scale"
+        ),
         "ic_mode": args.ic_mode,
         "shared_lcdm_ic": args.ic_mode == "shared",
         "transfer_diagnostics": transfer_diagnostics,
         "scalar_iters": args.scalar_iters,
         "scalar_eps": args.scalar_eps,
+        "aexp_step_limit": args.aexp_step_limit,
         "models": model_metadata,
         "camb_dir": str(args.camb_dir.expanduser().resolve()),
         "camb_module": str(Path(camb.__file__).resolve()),

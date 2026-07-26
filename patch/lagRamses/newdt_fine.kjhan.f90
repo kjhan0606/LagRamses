@@ -16,7 +16,7 @@ subroutine newdt_fine(ilevel)
   ! This routine compute the time step using 3 constraints:
   ! 1- a Courant-type condition using particle velocity
   ! 2- the gravity free-fall time
-  ! 3- 10% maximum variation for aexp 
+  ! 3- configurable maximum fractional variation for aexp
   ! 4- maximum step time for ATON
   ! This routine also compute the particle kinetic energy.
   !-----------------------------------------------------------
@@ -67,7 +67,7 @@ subroutine newdt_fine(ilevel)
      dtnew(ilevel)=MIN(dtnew(ilevel),courant_factor*tff)
   end if
   if(cosmo)then
-     dtnew(ilevel)=MIN(dtnew(ilevel),0.1/hexp)
+     dtnew(ilevel)=MIN(dtnew(ilevel),aexp_step_limit/hexp)
   end if
   ! Land the coarse step on the next requested cosmological output epoch.
   ! Invert the same piecewise-linear a(tau) table used by update_time, rather
@@ -97,7 +97,7 @@ subroutine newdt_fine(ilevel)
   if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin &
      .and. fdm_use_hjm) then
      write(*,'(" HJM_CFL[grav]: dt=",1PE12.5," tff=",1PE12.5," hexp=",1PE12.5)') &
-          dtnew(ilevel), courant_factor*tff, 0.1d0/hexp
+          dtnew(ilevel), courant_factor*tff, aexp_step_limit/hexp
   end if
   ! FDM kinetic timestep (supercomoving time: no aexp factors in code units).
   ! The classic CFL dt < fdm_courant*dx^2/(6*hbar)
@@ -303,7 +303,7 @@ subroutine sub_newdt_fine(ilevel, igrid, subnump, dt_loc, ekin_loc,dt_all)
   ! This routine compute the time step using 3 constraints:
   ! 1- a Courant-type condition using particle velocity
   ! 2- the gravity free-fall time
-  ! 3- 10% maximum variation for aexp 
+  ! 3- configurable maximum fractional variation for aexp
   ! 4- maximum step time for ATON
   ! This routine also compute the particle kinetic energy.
   !-----------------------------------------------------------
@@ -390,6 +390,5 @@ subroutine newdt2(ind_part,dt_loc,ekin_loc,nn,ilevel)
   end do
     
 end subroutine newdt2
-
 
 

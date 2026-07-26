@@ -13,6 +13,12 @@ The generator uses `/home/kjhan/BACKUP/LagMUSIC/music/build/MUSIC` and fixes
 the absolute amplitude through `force_pnorm`. The normalization is derived
 from the lagCAMB linear spectrum at the starting redshift and retains the
 common primordial amplitude rather than imposing a common `sigma_8`.
+For DMO 2LPT ICs, the generator also derives `vfact_scale` from the
+model-to-LCDM ratio of lagCAMB's total velocity-to-density transfer. This
+corrects the initial velocity without changing the density or displacement
+field. Generation stops if that ratio varies by more than `1e-4` over
+`0.001 <= k <= 1 h/Mpc`; such a model needs a scale-dependent velocity
+kernel rather than one scalar correction.
 
 ```bash
 python3 patch/lagRamses/aux/dmo_benchmark_setup.py \
@@ -21,9 +27,12 @@ python3 patch/lagRamses/aux/dmo_benchmark_setup.py \
 ```
 
 - Default: `500 Mpc/h`, `256^3`, `levelmax=14`, 2LPT at `z=49`
+- Default validation suite: LCDM, F5, F6, N1, N5, and Symmetron A
 - Uses one random seed and identical phases for all model-specific ICs
 - Supports the old shared LCDM protocol through `--ic-mode shared`
 - Enables `match_aout` so every model is dumped at the same expansion factor
+- Exposes the coarse cosmological step through `--aexp-step-limit`
+  (default `0.1`; reduce it for temporal-convergence tests)
 - Records every exact transfer match and LCDM fallback in `campaign.json`
 - Uses `mpirun -np 1` for IC generation by default
 
@@ -54,9 +63,23 @@ host. Each campaign contains `submit_all.sh` for concurrent Slurm submission.
 After runs complete, compare every resolution with lagCAMB at `z=0`:
 
 ```bash
+python3 patch/lagRamses/aux/measure_dmo_pk.py \
+  CAMPAIGN/L8_256/lcdm/output_00008 \
+  --nmesh 256 --kmax 0.5
+
 python3 patch/lagRamses/aux/plot_dmo_resolution_convergence.py \
   /gpfs/kjhan/Hydro/DE_nonstd/DMO_resolution_v1
 ```
+
+`measure_dmo_pk.py` is the precision DMO estimator: it deposits particles on
+a common CIC mesh, interlaces a half-cell-shifted mesh, deconvolves the CIC
+window, and writes both raw and mass-weighted Poisson-shot-subtracted spectra
+on identical integer-|k| shells at every simulation resolution. Validation
+uses the raw spectrum by default because these ICs are perturbed particle
+lattices, not Poisson samples; `--shot-noise poisson` is an optional
+diagnostic only. The cheap on-the-fly RAMSES diagnostic is NGP on the base
+grid and should only be selected with `--pk-estimator runtime-ngp`; it is not
+suitable for a 0.1% convergence claim.
 
 Only resolutions for which every model has a measured spectrum at the
 requested scale factor are included. The JSON report gives both the full

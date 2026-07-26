@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
+import re
 
 import matplotlib
 
@@ -31,6 +32,21 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--redshift", type=float, default=0.0)
     parser.add_argument("--kmax", type=float, default=0.5)
     parser.add_argument(
+        "--pk-estimator",
+        choices=("cic", "runtime-ngp"),
+        default="cic",
+        help="spectrum source; CIC is required for precision validation",
+    )
+    parser.add_argument(
+        "--shot-noise",
+        choices=("none", "poisson"),
+        default="none",
+        help=(
+            "CIC spectrum convention; matched perturbed-lattice DMO "
+            "validation should normally use 'none'"
+        ),
+    )
+    parser.add_argument(
         "--large-scale-kmax",
         type=float,
         default=0.2,
@@ -51,21 +67,60 @@ def arguments() -> argparse.Namespace:
     parser.add_argument(
         "--require-resolution-pass",
         action="store_true",
-        help="return a nonzero status unless every adjacent pair passes",
+        help="return a nonzero status unless every finest adjacent pair passes",
     )
     parser.add_argument(
         "--require-theory-pass",
         action="store_true",
-        help="return a nonzero status unless every large-scale theory test passes",
+        help="return nonzero unless every finest-level large-scale theory test passes",
     )
     parser.add_argument("--output-stem", default="z0_resolution_convergence")
     return parser.parse_args()
 
 
-def exact_snapshot(model_dir: Path, redshift: float, tolerance: float) -> dict:
+def cic_snapshots(model_dir: Path, shot_noise: str) -> list[dict]:
+    """Read common-mesh, CIC-deconvolved spectra."""
+    result = []
+    for path in sorted(model_dir.glob("output_*/pk_cic_*.dat")):
+        header = "\n".join(path.read_text().splitlines()[:9])
+        match = re.search(r"a_exp\s*=\s*([0-9.Ee+-]+)", header)
+        if not match:
+            raise ValueError(f"missing a_exp header in {path}")
+        shot_match = re.search(
+            r"shot_noise.*=\s*([0-9.Ee+-]+)", header
+        )
+        data = np.loadtxt(path)
+        result.append(
+            {
+                "path": str(path),
+                "aexp": float(match.group(1)),
+                "z": 1.0 / float(match.group(1)) - 1.0,
+                "k": data[:, 0],
+                "pk_raw": data[:, 1],
+                "pk": data[:, 2] if shot_noise == "poisson" else data[:, 1],
+                "nmodes": data[:, 3],
+                "shot_noise": (
+                    float(shot_match.group(1)) if shot_match else None
+                ),
+            }
+        )
+    return result
+
+
+def exact_snapshot(
+    model_dir: Path,
+    redshift: float,
+    tolerance: float,
+    estimator: str,
+    shot_noise: str,
+) -> dict:
     """Return a measured spectrum only when it matches the requested epoch."""
     target_aexp = 1.0 / (1.0 + redshift)
-    candidates = snapshots(model_dir)
+    candidates = (
+        cic_snapshots(model_dir, shot_noise)
+        if estimator == "cic"
+        else snapshots(model_dir)
+    )
     if not candidates:
         raise RuntimeError(f"no P(k) snapshots in {model_dir}")
     result = min(candidates, key=lambda item: abs(item["aexp"] - target_aexp))
@@ -95,7 +150,11 @@ def main() -> int:
         try:
             selected = {
                 model: exact_snapshot(
-                    campaign / model, args.redshift, args.aexp_tolerance
+                    campaign / model,
+                    args.redshift,
+                    args.aexp_tolerance,
+                    args.pk_estimator,
+                    args.shot_noise,
                 )
                 for model in ("lcdm", *MODELS)
             }
@@ -142,6 +201,13 @@ def main() -> int:
         for level in sorted(available):
             reference = snapshots_by_level[level]["lcdm"]
             sample = snapshots_by_level[level][model]
+            if not np.allclose(
+                reference["k"], sample["k"], rtol=1.0e-10, atol=0.0
+            ):
+                raise ValueError(
+                    f"incompatible k grids: {reference['path']} and "
+                    f"{sample['path']}"
+                )
             good = (
                 (reference["pk"] > 0.0)
                 & (sample["pk"] > 0.0)
@@ -304,6 +370,8 @@ def main() -> int:
         "root": str(root),
         "available_levels": sorted(available),
         "redshift": args.redshift,
+        "pk_estimator": args.pk_estimator,
+        "shot_noise": args.shot_noise,
         "boxlen_mpc_h": boxlen,
         "kmax_h_mpc": args.kmax,
         "large_scale_kmax_h_mpc": min(args.large_scale_kmax, args.kmax),

@@ -25,6 +25,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--boxlen", type=float, default=64.0)
     parser.add_argument("--zstart", type=float, default=49.0)
     parser.add_argument("--seed", type=int, default=20260726)
+    parser.add_argument("--aexp-step-limit", type=float, default=0.1)
     parser.add_argument(
         "--ramses",
         default="/home/kjhan/BACKUP/lagRamses-de-nonstd/bin/ramses_cosmo_model_test3d",
@@ -49,7 +50,11 @@ def capacities(level: int) -> tuple[int, int]:
 
 
 def ic_slurm_script(
-    root: Path, campaign: Path, level: int, resources: dict[str, object]
+    root: Path,
+    campaign: Path,
+    level: int,
+    resources: dict[str, object],
+    aexp_step_limit: float,
 ) -> str:
     return f"""#!/bin/bash
 #SBATCH --job-name=ic_L{level}_{2**level}
@@ -68,7 +73,8 @@ export OMP_NUM_THREADS={resources["omp_threads"]}
 export OMP_STACKSIZE=256M
 export I_MPI_PIN_DOMAIN=omp
 export I_MPI_PIN_ORDER=compact
-{sys.executable} {Path(__file__).resolve()} --root {root} --levels {level} --make-ics
+{sys.executable} {Path(__file__).resolve()} --root {root} --levels {level} \
+  --aexp-step-limit {aexp_step_limit:.8g} --make-ics
 """
 
 
@@ -77,6 +83,8 @@ def main() -> int:
     unsupported = [level for level in args.levels if level not in RESOURCE_PRESETS]
     if unsupported:
         raise ValueError(f"no resource preset for levels: {unsupported}")
+    if args.aexp_step_limit <= 0.0:
+        raise ValueError("aexp-step-limit must be positive")
 
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -121,6 +129,8 @@ def main() -> int:
             "6000",
             "--scalar-eps",
             "1e-6",
+            "--aexp-step-limit",
+            str(args.aexp_step_limit),
             "--ic-mode",
             "model",
         ]
@@ -130,7 +140,11 @@ def main() -> int:
             command.append("--force")
         subprocess.run(command, check=True)
         ic_script = campaign / "make_ics.slurm"
-        ic_script.write_text(ic_slurm_script(root, campaign, level, resources))
+        ic_script.write_text(
+            ic_slurm_script(
+                root, campaign, level, resources, args.aexp_step_limit
+            )
+        )
         ic_script.chmod(ic_script.stat().st_mode | 0o110)
         records.append(
             {
@@ -141,6 +155,7 @@ def main() -> int:
                 "ngridtot": ngridtot,
                 "nparttot": nparttot,
                 "scalar_iters": 6000,
+                "aexp_step_limit": args.aexp_step_limit,
                 "campaign": str(campaign),
                 **resources,
             }
@@ -150,6 +165,7 @@ def main() -> int:
         "boxlen_mpc_h": args.boxlen,
         "zstart": args.zstart,
         "seed": args.seed,
+        "aexp_step_limit": args.aexp_step_limit,
         "models": list(MODELS),
         "levels": records,
     }

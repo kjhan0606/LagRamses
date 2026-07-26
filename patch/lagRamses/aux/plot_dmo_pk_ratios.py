@@ -69,7 +69,11 @@ def read_pk(path: Path) -> dict:
 def snapshots(model_dir: Path) -> list[dict]:
     return [
         read_pk(path)
-        for path in sorted(model_dir.glob("output_*/pk_*.dat"))
+        for path in sorted(
+            model_dir.glob(
+                "output_*/pk_[0-9][0-9][0-9][0-9][0-9].dat"
+            )
+        )
     ]
 
 
