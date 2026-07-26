@@ -65,8 +65,13 @@ This common phase anchor is required for a nonlinear convergence test:
 independently putting the same integer seed at L6, L7, and L8 generates
 different Fourier realizations. Override the default only with
 `--phase-anchor-level LEVEL`, where `LEVEL` must not be below the finest
-requested resolution. Each campaign contains `submit_all.sh` for concurrent
-Slurm submission.
+requested resolution. LagMUSIC's distributed restriction RNG is not yet
+decomposition independent, so the ladder uses one MUSIC rank at every level
+below the phase anchor; the anchor-level IC may still use its parallel
+resource preset. `check_grafic_phase_matching.py` directly verifies the
+generated `ic_deltab` low-k Fourier phases after correcting the deterministic
+cell-centre offset between grid resolutions. Each campaign contains
+`submit_all.sh` for concurrent Slurm submission.
 After runs complete, compare every resolution with lagCAMB at `z=0`:
 
 ```bash

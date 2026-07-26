@@ -62,8 +62,12 @@ def ic_slurm_script(
     campaign: Path,
     level: int,
     resources: dict[str, object],
+    boxlen: float,
+    zstart: float,
+    seed: int,
     aexp_step_limit: float,
     phase_anchor_level: int,
+    ramses: str,
 ) -> str:
     return f"""#!/bin/bash
 #SBATCH --job-name=ic_L{level}_{2**level}
@@ -83,8 +87,9 @@ export OMP_STACKSIZE=256M
 export I_MPI_PIN_DOMAIN=omp
 export I_MPI_PIN_ORDER=compact
 {sys.executable} {Path(__file__).resolve()} --root {root} --levels {level} \
+  --boxlen {boxlen:.15g} --zstart {zstart:.15g} --seed {seed} \
   --aexp-step-limit {aexp_step_limit:.8g} \
-  --phase-anchor-level {phase_anchor_level} --make-ics
+  --phase-anchor-level {phase_anchor_level} --ramses {ramses} --make-ics
 """
 
 
@@ -110,7 +115,14 @@ def main() -> int:
     setup = Path(__file__).with_name("dmo_benchmark_setup.py")
     records = []
     for level in args.levels:
-        resources = RESOURCE_PRESETS[level]
+        resources = dict(RESOURCE_PRESETS[level])
+        # LagMUSIC's slab RNG is decomposition-independent at the phase-anchor
+        # level, but restricting a finer anchor onto a coarser particle level
+        # is not currently reproducible with more than one MUSIC rank. These
+        # IC jobs are short, so use the serial RNG path below the anchor until
+        # the distributed restriction path is made phase preserving.
+        if level < phase_anchor_level:
+            resources["music_tasks"] = 1
         ngridtot, nparttot = capacities(level)
         campaign = root / f"L{level}_{2**level:03d}"
         command = [
@@ -167,8 +179,12 @@ def main() -> int:
                 campaign,
                 level,
                 resources,
+                args.boxlen,
+                args.zstart,
+                args.seed,
                 args.aexp_step_limit,
                 phase_anchor_level,
+                args.ramses,
             )
         )
         ic_script.chmod(ic_script.stat().st_mode | 0o110)
