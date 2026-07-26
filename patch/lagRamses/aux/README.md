@@ -178,3 +178,10 @@ On a controlled same-node Symmetron-A `64^3` z=0 A/B run (4 MPI ranks x
 4 OpenMP threads), the total timer fell from 68.89 to 17.03 seconds and the
 Symmetron timer from 65.01 to 13.12 seconds. The z=5 and z=0 common
 interlaced `256^3` CIC spectra were byte-identical.
+
+The face-grid topology is now also built once per scalar solve and reused by
+all f(R)/Symmetron spectral corrections and Newton-GS sweeps. A second
+same-node `64^3` A/B test reduced F5 from 101.49 to 22.54 seconds
+(`fR-solve`: 97.59 to 18.66 seconds) and the already optimized Symmetron run
+from 17.15 to 6.70 seconds (`symmetron`: 13.24 to 2.84 seconds). For both
+models, the z=5 and z=0 common CIC spectra remained byte-identical.

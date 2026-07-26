@@ -1483,8 +1483,8 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
      end do
      do idim=1,ndim
         do i=1,ngrid
-           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+           igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+           igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
         end do
      end do
      do ind=1,twotondim
@@ -1598,8 +1598,8 @@ subroutine sb_build_fft_rhs(ilevel, assb_in, L_in, m2bar)
      end do
      do idim=1,ndim
         do i=1,ngrid
-           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+           igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+           igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
         end do
      end do
      do ind=1,twotondim
@@ -2227,6 +2227,7 @@ subroutine fR_solve_level(ilevel, icount)
   ! cells created by refinement after step 0; converged f_R is
   ! strictly negative so 0 uniquely marks uninitialized cells.
   call fR_seed_scalar(ilevel, fR_bar)
+  call vain_prepare_uniform_cache(ilevel)
 
 #ifdef USE_FFTW
   ! Spectral Newton on the uniform domain level: converges the
@@ -2507,8 +2508,8 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
         end do
         do idim=1,ndim
            do i=1,ngrid
-              igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-              igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+              igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+              igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
            end do
         end do
 
@@ -3057,6 +3058,7 @@ subroutine symmetron_solve_level(ilevel, icount)
   ! first step, restarts and newly refined cells; pre-SSB (a<=a_ssb)
   ! chi_bar=0 and chi=0 is the true solution.
   call symmetron_seed_scalar(ilevel)
+  call vain_prepare_uniform_cache(ilevel)
 
 #ifdef USE_FFTW
   ! Spectral Newton on the uniform domain level (broken phase only)
@@ -3290,8 +3292,8 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
         end do
         do idim=1,ndim
            do i=1,ngrid
-              igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-              igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+              igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+              igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
            end do
         end do
 
@@ -3420,8 +3422,8 @@ subroutine compute_fifth_force_symmetron(ilevel)
      end do
      do idim=1,ndim
         do i=1,ngrid
-           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+           igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+           igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
         end do
      end do
 
