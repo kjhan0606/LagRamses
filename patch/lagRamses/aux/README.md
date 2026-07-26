@@ -165,3 +165,16 @@ test reproduced every timestep, nonlinear iteration count, and reported
 residual exactly. Full F5 and Symmetron-A `64^3` regressions also produced
 identical native and common-CIC spectra at both redshifts; their runtimes
 were unchanged within run-to-run noise.
+
+## Symmetron solver performance
+
+After symmetry breaking, the strict `1e-6` field residual can require
+hundreds of Newton-GS sweeps. Each sweep already gathers the six same-level
+neighbour grids, so the uniform-domain path now reads those cells directly
+and calls the Morton/parent-CIC sampler only at a genuine AMR boundary. The
+fifth-force gradient uses the same direct-neighbour rule.
+
+On a controlled same-node Symmetron-A `64^3` z=0 A/B run (4 MPI ranks x
+4 OpenMP threads), the total timer fell from 68.89 to 17.03 seconds and the
+Symmetron timer from 65.01 to 13.12 seconds. The z=5 and z=0 common
+interlaced `256^3` CIC spectra were byte-identical.

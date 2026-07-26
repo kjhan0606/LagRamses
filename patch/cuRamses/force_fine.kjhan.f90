@@ -3096,14 +3096,14 @@ subroutine symmetron_solve_level(ilevel, icount)
 
      if(rel_res < symmetron_eps) then
         converged = .true.
-        if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+        if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
              ' Symmetron level ',ilevel,' converged in ',iter,' iters, res=',rel_res
         exit
      end if
   end do
 
   if(.not. converged) then
-     if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+     if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
           & ' WARNING: Symmetron level ',ilevel,' NOT converged after ', &
           & n_iter_symmetron,' iters, res=',rel_res
      if(scalar_solver_strict) call scalar_solver_abort
@@ -3278,7 +3278,7 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
 !$omp&  ind_nb_left,ind_nb_right, &
 !$omp&  u_c,lapl,residual,jacobian,delta_u,u_nb_l,u_nb_r, &
 !$omp&  rho_ratio,mass_term) &
-!$omp& reduction(max:res_max,src_max) schedule(dynamic)
+!$omp& reduction(max:res_max,src_max) schedule(static)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
@@ -3308,11 +3308,24 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
            do i=1,ngrid
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Parent-CIC Dirichlet data at coarse-fine interfaces.
+              ! Same-level neighbours are already gathered for this vector.
+              ! Use the Morton/parent-CIC path only at a true AMR boundary.
               lapl = 0d0
               do idim=1,ndim
-                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,u_c,u_nb_l)
-                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim, 1,u_c,u_nb_r)
+                 ig_left =ggg(idim,1,ind)
+                 ig_right=ggg(idim,2,ind)
+                 ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
+                 ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
+                 if(igridn_w(i,ig_left) > 0) then
+                    u_nb_l=scalar_gr(igridn_w(i,ig_left)+ih_left)
+                 else
+                    call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,u_c,u_nb_l)
+                 end if
+                 if(igridn_w(i,ig_right) > 0) then
+                    u_nb_r=scalar_gr(igridn_w(i,ig_right)+ih_right)
+                 else
+                    call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,1,u_c,u_nb_r)
+                 end if
                  lapl=lapl+u_nb_l+u_nb_r
               end do
 
@@ -3395,7 +3408,7 @@ subroutine compute_fifth_force_symmetron(ilevel)
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
-!$omp&  ind_nb_left,ind_nb_right,grad_u,chi_c,u_left,u_right) schedule(dynamic)
+!$omp&  ind_nb_left,ind_nb_right,grad_u,chi_c,u_left,u_right) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -3426,8 +3439,16 @@ subroutine compute_fifth_force_symmetron(ilevel)
               ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
 
-              call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,chi_c,u_left)
-              call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim, 1,chi_c,u_right)
+              if(igridn_w(i,ig_left) > 0) then
+                 u_left=scalar_gr(igridn_w(i,ig_left)+ih_left)
+              else
+                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,chi_c,u_left)
+              end if
+              if(igridn_w(i,ig_right) > 0) then
+                 u_right=scalar_gr(igridn_w(i,ig_right)+ih_right)
+              else
+                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,1,chi_c,u_right)
+              end if
               grad_u=(u_right-u_left)/(2d0*dx_loc)
               f(ind_cell_w(i),idim) = f(ind_cell_w(i),idim) + factor * chi_c * grad_u
            end do
