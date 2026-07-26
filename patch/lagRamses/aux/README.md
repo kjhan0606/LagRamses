@@ -61,4 +61,7 @@ python3 patch/lagRamses/aux/plot_dmo_resolution_convergence.py \
 Only resolutions for which every model has a measured spectrum at the
 requested scale factor are included. The JSON report gives both the full
 `k <= 0.5 h Mpc^-1` residual and a separate large-scale residual (default
-`k <= 0.2 h Mpc^-1`); change the latter with `--large-scale-kmax`.
+`k <= 0.2 h Mpc^-1`); change the latter with `--large-scale-kmax`. The
+default acceptance limit is 0.1% (`--residual-target 0.001`). Use
+`--require-resolution-pass` and/or `--require-theory-pass` when a failed
+P(k) check must also produce a nonzero process exit status.

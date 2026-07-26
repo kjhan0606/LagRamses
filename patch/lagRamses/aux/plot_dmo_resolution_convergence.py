@@ -42,6 +42,22 @@ def arguments() -> argparse.Namespace:
         default=1.0e-6,
         help="absolute scale-factor tolerance for accepting a completed epoch",
     )
+    parser.add_argument(
+        "--residual-target",
+        type=float,
+        default=1.0e-3,
+        help="fractional PASS threshold (default: 1e-3 = 0.1 percent)",
+    )
+    parser.add_argument(
+        "--require-resolution-pass",
+        action="store_true",
+        help="return a nonzero status unless every adjacent pair passes",
+    )
+    parser.add_argument(
+        "--require-theory-pass",
+        action="store_true",
+        help="return a nonzero status unless every large-scale theory test passes",
+    )
     parser.add_argument("--output-stem", default="z0_resolution_convergence")
     return parser.parse_args()
 
@@ -107,6 +123,7 @@ def main() -> int:
     axes = axes.ravel()
     rows = []
     metrics = []
+    resolution_pairs = []
     level_colors = plt.cm.viridis(np.linspace(0.18, 0.88, len(available)))
     level_color = dict(zip(sorted(available), level_colors))
 
@@ -146,6 +163,12 @@ def main() -> int:
             residual = ratio / predicted - 1.0
             large_scale = k <= min(args.large_scale_kmax, args.kmax)
             large_scale_residual = residual[large_scale]
+            max_abs_residual = float(np.max(np.abs(residual)))
+            large_scale_max_abs_residual = (
+                float(np.max(np.abs(large_scale_residual)))
+                if large_scale_residual.size
+                else None
+            )
             metrics.append(
                 {
                     "level": level,
@@ -158,6 +181,10 @@ def main() -> int:
                         np.median(np.abs(residual))
                     ),
                     "rms_theory_residual": float(np.sqrt(np.mean(residual**2))),
+                    "max_abs_theory_residual": max_abs_residual,
+                    "theory_full_range_pass": (
+                        max_abs_residual <= args.residual_target
+                    ),
                     "large_scale_kmax_h_mpc": min(
                         args.large_scale_kmax, args.kmax
                     ),
@@ -172,6 +199,14 @@ def main() -> int:
                         if large_scale_residual.size
                         else None
                     ),
+                    "large_scale_max_abs_theory_residual": (
+                        large_scale_max_abs_residual
+                    ),
+                    "theory_large_scale_pass": (
+                        large_scale_max_abs_residual <= args.residual_target
+                        if large_scale_max_abs_residual is not None
+                        else False
+                    ),
                 }
             )
             rows.extend(
@@ -179,27 +214,51 @@ def main() -> int:
                 for kval, value, pred in zip(k, ratio, predicted)
             )
 
-        if len(level_ratios) > 1:
-            fine_k, fine_ratio = level_ratios[finest_level]
-            for level, (k, ratio) in level_ratios.items():
-                if level == finest_level:
-                    continue
-                fine_on_k = np.interp(np.log(k), np.log(fine_k), fine_ratio)
-                delta = ratio / fine_on_k - 1.0
-                metric = next(
-                    item
-                    for item in metrics
-                    if item["level"] == level and item["model"] == model
-                )
-                metric["rms_residual_to_finest"] = float(
-                    np.sqrt(np.mean(delta**2))
-                )
-                low = k <= min(args.large_scale_kmax, args.kmax)
-                metric["large_scale_rms_residual_to_finest"] = (
-                    float(np.sqrt(np.mean(delta[low] ** 2)))
-                    if np.any(low)
-                    else None
-                )
+        ordered_levels = sorted(level_ratios)
+        for coarse_level, fine_level in zip(
+            ordered_levels[:-1], ordered_levels[1:]
+        ):
+            k, coarse_ratio = level_ratios[coarse_level]
+            fine_k, fine_ratio = level_ratios[fine_level]
+            overlap = (k >= fine_k.min()) & (k <= fine_k.max())
+            k = k[overlap]
+            coarse_ratio = coarse_ratio[overlap]
+            fine_on_k = np.interp(np.log(k), np.log(fine_k), fine_ratio)
+            delta = coarse_ratio / fine_on_k - 1.0
+            low = k <= min(args.large_scale_kmax, args.kmax)
+            max_abs = float(np.max(np.abs(delta)))
+            low_max_abs = (
+                float(np.max(np.abs(delta[low]))) if np.any(low) else None
+            )
+            resolution_pairs.append(
+                {
+                    "model": model,
+                    "coarse_level": coarse_level,
+                    "fine_level": fine_level,
+                    "kmax_h_mpc": args.kmax,
+                    "n_bins": int(k.size),
+                    "rms_fractional_residual": float(
+                        np.sqrt(np.mean(delta**2))
+                    ),
+                    "max_abs_fractional_residual": max_abs,
+                    "full_range_pass": max_abs <= args.residual_target,
+                    "large_scale_kmax_h_mpc": min(
+                        args.large_scale_kmax, args.kmax
+                    ),
+                    "large_scale_n_bins": int(np.count_nonzero(low)),
+                    "large_scale_rms_fractional_residual": (
+                        float(np.sqrt(np.mean(delta[low] ** 2)))
+                        if np.any(low)
+                        else None
+                    ),
+                    "large_scale_max_abs_fractional_residual": low_max_abs,
+                    "large_scale_pass": (
+                        low_max_abs <= args.residual_target
+                        if low_max_abs is not None
+                        else False
+                    ),
+                }
+            )
 
         ax.axhline(1.0, color="0.5", lw=0.7, ls=":")
         ax.set_xscale("log")
@@ -244,14 +303,45 @@ def main() -> int:
         "boxlen_mpc_h": boxlen,
         "kmax_h_mpc": args.kmax,
         "large_scale_kmax_h_mpc": min(args.large_scale_kmax, args.kmax),
+        "residual_target_fraction": args.residual_target,
+        "residual_target_percent": 100.0 * args.residual_target,
         "incomplete_levels": incomplete,
         "metrics": metrics,
+        "resolution_pairs": resolution_pairs,
+        "acceptance": {
+            "theory_large_scale_all_pass": all(
+                item["theory_large_scale_pass"] for item in metrics
+            ),
+            "adjacent_resolution_full_range_all_pass": (
+                bool(resolution_pairs)
+                and all(item["full_range_pass"] for item in resolution_pairs)
+            ),
+            "adjacent_resolution_large_scale_all_pass": (
+                bool(resolution_pairs)
+                and all(item["large_scale_pass"] for item in resolution_pairs)
+            ),
+            "finest_resolution_independently_certified": False,
+            "note": (
+                "The finest level is not independently converged unless an "
+                "additional finer level or a validated extrapolation is used."
+            ),
+        },
         "figure_png": str(png),
         "figure_pdf": str(pdf),
         "csv": str(csv_path),
     }
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
+    if (
+        args.require_resolution_pass
+        and not report["acceptance"]["adjacent_resolution_full_range_all_pass"]
+    ):
+        return 2
+    if (
+        args.require_theory_pass
+        and not report["acceptance"]["theory_large_scale_all_pass"]
+    ):
+        return 3
     return 0
 
 
