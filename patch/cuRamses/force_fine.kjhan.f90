@@ -1397,8 +1397,9 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
   integer::ig_left,ig_right,ih_left,ih_right
   real(dp)::dx,scale,dx_loc,dx2_inv,nx_frac
   integer::nx_loc,np1
-  real(dp)::u_c,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du
+  real(dp)::u_c,u_abs,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du
   real(dp)::a2_over_3,rho_coeff,boxratio_sq,R_bar0
+  real(dp)::fR0_abs,small_fR,inv_np1
   real(dp),dimension(2)::acc_loc,acc_glob
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
@@ -1412,6 +1413,9 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
   dx2_inv=1d0/dx_loc**2
 
   np1 = fR_n + 1
+  fR0_abs=abs(fR0)
+  small_fR=1d-30*fR0_abs
+  inv_np1=1d0/dble(np1)
   boxratio_sq = (boxlen_ini / 2997.92458d0)**2
   a2_over_3 = aexp**2 * boxratio_sq / 3d0
   R_bar0 = 3d0 * (omega_m + 4d0 * omega_l)
@@ -1428,8 +1432,8 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
 
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right,ih_left,ih_right, &
-!$omp&  u_c,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du) &
-!$omp& reduction(+:acc_loc) schedule(dynamic)
+!$omp&  u_c,u_abs,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du) &
+!$omp& reduction(+:acc_loc) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -1451,6 +1455,7 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
         end do
         do i=1,ngrid
            u_c = scalar_gr(ind_cell_w(i))
+           u_abs = abs(u_c)
            lapl = 0d0
            do idim=1,ndim
               ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
@@ -1461,8 +1466,15 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
               if(igridn_w(i,ig_right) > 0) u_nb_r = scalar_gr(igridn_w(i,ig_right)+ih_right)
               lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
            end do
-           if(abs(u_c) > 1d-30*abs(fR0)) then
-              R_of_u = R_bar0 * (abs(fR0)/abs(u_c))**(1d0/dble(np1))
+           if(u_abs > small_fR) then
+              select case(np1)
+              case(1)
+                 R_of_u = R_bar0 * fR0_abs/u_abs
+              case(2)
+                 R_of_u = R_bar0 * sqrt(fR0_abs/u_abs)
+              case default
+                 R_of_u = R_bar0 * (fR0_abs/u_abs)**inv_np1
+              end select
               dR_du = -R_of_u / (dble(np1) * u_c)
            else
               R_of_u = R_bar
@@ -1959,7 +1971,9 @@ subroutine fR_solve_level(ilevel, icount)
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
+  real(dp)::background_ratio
   logical::converged
+  real(dp),save::fR_bar_previous(1:MAXLEVEL)=0d0
 #ifdef USE_FFTW
   real(dp)::m2bar
   logical,external::level_fft_ok
@@ -1973,6 +1987,19 @@ subroutine fR_solve_level(ilevel, icount)
   ! Get background values
   call fR_background(aexp, R_bar, fR_bar)
 
+  ! Predict the new-time solution by evolving the previous solution with
+  ! the homogeneous background.  In Hu-Sawicki gravity fR_bar changes
+  ! rapidly at early times; reusing the absolute old field without this
+  ! rescaling can leave Newton-GS thousands of sweeps away from the new
+  ! solution.  A zero previous value marks the first solve on this rank
+  ! (including a restart, because scalar_gr is not checkpointed).
+  if(fR_bar_previous(ilevel) /= 0d0) then
+     background_ratio=fR_bar/fR_bar_previous(ilevel)
+     if(background_ratio > 0d0) &
+          & call fR_rescale_warm_start(ilevel,background_ratio)
+  end if
+  fR_bar_previous(ilevel)=fR_bar
+
   ! Seed every cell still at exactly 0 with the background value.
   ! Covers first step, restarts (scalar_gr is not checkpointed) and
   ! cells created by refinement after step 0; converged f_R is
@@ -1984,7 +2011,7 @@ subroutine fR_solve_level(ilevel, icount)
   ! long-wavelength modes that the GS sweeps below cannot reach
   if(level_fft_ok(ilevel)) then
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
-     do iter=1,3
+     do iter=1,8
         call fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
         call level_fft_helmholtz(ilevel, m2bar, 0.25d0, 1d0)
         call make_virtual_fine_dp(scalar_gr(1), ilevel)
@@ -2020,14 +2047,14 @@ subroutine fR_solve_level(ilevel, icount)
 
      if(rel_res < fR_eps) then
         converged = .true.
-        if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+        if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
              ' f(R) level ',ilevel,' converged in ',iter,' iters, res=',rel_res
         exit
      end if
   end do
 
   if(.not. converged) then
-     if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+     if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
           & ' WARNING: f(R) level ',ilevel,' NOT converged after ', &
           & n_iter_fR,' iters, res=',rel_res
      if(scalar_solver_strict) call scalar_solver_abort
@@ -2045,6 +2072,34 @@ subroutine fR_solve_level(ilevel, icount)
        & 0.5d0*aexp**2*(2997.92458d0/boxlen_ini)**2)
 
 end subroutine fR_solve_level
+
+!=========================================================
+! fR_rescale_warm_start: advance an initialized f_R field
+! with the homogeneous-background ratio before Newton solve.
+!=========================================================
+subroutine fR_rescale_warm_start(ilevel, ratio)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::ratio
+
+  integer::igrid,i,ind,iskip,ncache,icell
+
+  ncache=active(ilevel)%ngrid
+!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(static)
+  do igrid=1,ncache,nvector
+     do i=1,MIN(nvector,ncache-igrid+1)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           if(scalar_gr(icell) /= 0d0) &
+                & scalar_gr(icell)=scalar_gr(icell)*ratio
+        end do
+     end do
+  end do
+
+end subroutine fR_rescale_warm_start
 
 !=========================================================
 ! fR_init_scalar: initialize scalar_gr at a level
@@ -2163,10 +2218,10 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
-  real(dp)::u_c,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u
+  real(dp)::u_c,u_abs,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u
   real(dp)::u_nb_l,u_nb_r
   real(dp)::a2_over_3,rho_coeff,boxratio_sq
-  real(dp)::R_bar0
+  real(dp)::R_bar0,fR0_abs,small_fR,inv_np1
   integer::np1,icolor
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
@@ -2187,6 +2242,9 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   dx2_inv=1d0/dx2
 
   np1 = fR_n + 1
+  fR0_abs=abs(fR0)
+  small_fR=1d-30*fR0_abs
+  inv_np1=1d0/dble(np1)
   ! (H0 L_box / c)^2 converts H0-unit curvature/density terms to
   ! box-unit Laplacians (same pattern as dark_energy_commons)
   boxratio_sq = (boxlen_ini / 2997.92458d0)**2
@@ -2213,8 +2271,8 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right, &
-!$omp&  u_c,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u,u_nb_l,u_nb_r) &
-!$omp& reduction(max:res_max,src_max) schedule(dynamic)
+!$omp&  u_c,u_abs,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u,u_nb_l,u_nb_r) &
+!$omp& reduction(max:res_max,src_max) schedule(static)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
@@ -2245,13 +2303,26 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
 
            do i=1,ngrid
               u_c = scalar_gr(ind_cell_w(i))
+              u_abs = abs(u_c)
 
               ! Same-level neighbors, or parent-CIC Dirichlet data at
               ! a coarse-fine interface.
               lapl = 0d0
               do idim=1,ndim
-                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,u_c,u_nb_l)
-                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim, 1,u_c,u_nb_r)
+                 ig_left =ggg(idim,1,ind)
+                 ig_right=ggg(idim,2,ind)
+                 ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
+                 ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
+                 if(igridn_w(i,ig_left) > 0) then
+                    u_nb_l=scalar_gr(igridn_w(i,ig_left)+ih_left)
+                 else
+                    call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,u_c,u_nb_l)
+                 end if
+                 if(igridn_w(i,ig_right) > 0) then
+                    u_nb_r=scalar_gr(igridn_w(i,ig_right)+ih_right)
+                 else
+                    call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,1,u_c,u_nb_r)
+                 end if
                  lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
               end do
 
@@ -2259,8 +2330,15 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
               ! f_R = fR0 * (R_bar0/R)^(n+1)
               ! → R = R_bar0 * (fR0/f_R)^(1/(n+1))
               ! Since fR0<0 and f_R<0, use absolute values
-              if(abs(u_c) > 1d-30*abs(fR0)) then
-                 R_of_u = R_bar0 * (abs(fR0)/abs(u_c))**(1d0/dble(np1))
+              if(u_abs > small_fR) then
+                 select case(np1)
+                 case(1)
+                    R_of_u = R_bar0 * fR0_abs/u_abs
+                 case(2)
+                    R_of_u = R_bar0 * sqrt(fR0_abs/u_abs)
+                 case default
+                    R_of_u = R_bar0 * (fR0_abs/u_abs)**inv_np1
+                 end select
               else
                  R_of_u = R_bar  ! fallback to background
               end if
@@ -2278,7 +2356,7 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
               ! Jacobian of source w.r.t. u_c:
               ! dS/du = +(a²/3)(H0L/c)² * dR/dfR
               ! dR/dfR = -R/((n+1)*fR) > 0 for fR < 0
-              if(abs(u_c) > 1d-30*abs(fR0)) then
+              if(u_abs > small_fR) then
                  dR_du = -R_of_u / (dble(np1) * u_c)
               else
                  dR_du = 0d0
@@ -2291,13 +2369,13 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
               if(abs(jacobian) > 1d-30) then
                  delta_u = -residual / jacobian
                  ! Clamp update to prevent overshoot
-                 if(abs(delta_u) > 0.5d0*abs(u_c) .and. abs(u_c) > 1d-30*abs(fR0)) then
-                    delta_u = sign(0.5d0*abs(u_c), delta_u)
+                 if(abs(delta_u) > 0.5d0*u_abs .and. u_abs > small_fR) then
+                    delta_u = sign(0.5d0*u_abs, delta_u)
                  end if
                  scalar_gr(ind_cell_w(i)) = u_c + delta_u
                  ! Enforce f_R < 0 (physical constraint)
                  if(scalar_gr(ind_cell_w(i)) > 0d0) &
-                      & scalar_gr(ind_cell_w(i)) = -0.5d0*max(abs(u_c),1d-30*abs(fR0))
+                      & scalar_gr(ind_cell_w(i)) = -0.5d0*max(u_abs,small_fR)
               end if
 
               ! Track convergence

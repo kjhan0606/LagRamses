@@ -88,3 +88,23 @@ requested scale factor are included. The JSON report gives both the full
 default acceptance limit is 0.1% (`--residual-target 0.001`). Use
 `--require-resolution-pass` and/or `--require-theory-pass` when a failed
 P(k) check must also produce a nonzero process exit status.
+
+## Hu-Sawicki f(R) solver performance
+
+The f(R) implementation is resolved by `bin/Makefile` through VPATH from
+`patch/cuRamses/force_fine.kjhan.f90`.  Its uniform-domain fast path:
+
+- rescales the previous scalar field by the change in the homogeneous
+  `fR_bar` before using it as the next Newton initial guess;
+- performs eight spectral Newton/Helmholtz corrections before local
+  red-black Newton-GS relaxation;
+- reads existing same-level neighbors directly and invokes the Morton/CIC
+  coarse-fine lookup only when a same-level cell is absent;
+- uses static OpenMP scheduling for equal-size uniform-grid chunks; and
+- evaluates the common Hu-Sawicki `n=0` and `n=1` inversions with division
+  and `sqrt`, retaining the general real-power expression for other `n`.
+
+Solver completion and performance are not validation criteria by themselves.
+Any optimization must be checked against an unmodified matched-phase run
+with `measure_dmo_pk.py`; the maximum shell residual, not an RMS summary,
+must remain below the campaign's 0.1% acceptance threshold.
