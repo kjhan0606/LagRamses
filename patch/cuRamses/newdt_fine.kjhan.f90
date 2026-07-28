@@ -16,7 +16,7 @@ subroutine newdt_fine(ilevel)
   ! This routine compute the time step using 3 constraints:
   ! 1- a Courant-type condition using particle velocity
   ! 2- the gravity free-fall time
-  ! 3- 10% maximum variation for aexp 
+  ! 3- configurable maximum fractional variation for aexp
   ! 4- maximum step time for ATON
   ! This routine also compute the particle kinetic energy.
   !-----------------------------------------------------------
@@ -65,7 +65,7 @@ subroutine newdt_fine(ilevel)
      dtnew(ilevel)=MIN(dtnew(ilevel),courant_factor*tff)
   end if
   if(cosmo)then
-     dtnew(ilevel)=MIN(dtnew(ilevel),0.1/hexp)
+     dtnew(ilevel)=MIN(dtnew(ilevel),aexp_step_limit/hexp)
   end if
   ! FDM kinetic CFL: dt < fdm_courant * dx^2 * a^2 / (6 * hbar_code)
   if(use_fdm .and. hbar_code > 0.0d0)then
@@ -206,7 +206,7 @@ subroutine sub_newdt_fine(ilevel, igrid, subnump, dt_loc, ekin_loc,dt_all)
   ! This routine compute the time step using 3 constraints:
   ! 1- a Courant-type condition using particle velocity
   ! 2- the gravity free-fall time
-  ! 3- 10% maximum variation for aexp 
+  ! 3- configurable maximum fractional variation for aexp
   ! 4- maximum step time for ATON
   ! This routine also compute the particle kinetic energy.
   !-----------------------------------------------------------
@@ -293,7 +293,6 @@ subroutine newdt2(ind_part,dt_loc,ekin_loc,nn,ilevel)
   end do
     
 end subroutine newdt2
-
 
 
 

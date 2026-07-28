@@ -464,6 +464,22 @@ subroutine backup_poisson_hdf5()
              pbuf, ngrid_loc * twotondim, offset_cells, ncells_total)
      end do
 
+     ! Modified-gravity scalar field.  scalar_gr_old is deliberately not
+     ! stored: all scalar solvers synchronize it with scalar_gr after a
+     ! converged solve, so the restart reader reconstructs it exactly.
+     if(allocated(scalar_gr)) then
+        igrid = headl(myid, ilevel)
+        do i = 1, ngrid_loc
+           do ind = 1, twotondim
+              iskip = ncoarse + (ind - 1) * ngridmax
+              pbuf((i-1)*twotondim + ind) = scalar_gr(igrid + iskip)
+           end do
+           igrid = next(igrid)
+        end do
+        call hdf5_write_dataset_1d_dp(lvl_grp_id, 'scalar_gr', &
+             pbuf, ngrid_loc * twotondim, offset_cells, ncells_total)
+     end if
+
      ! Write FDM psi fields if enabled
      if(use_fdm) then
         igrid = headl(myid, ilevel)
@@ -509,7 +525,7 @@ subroutine backup_part_hdf5()
   include 'mpif.h'
 #endif
   integer :: i, idim, ipart, info
-  integer :: npart_loc
+  integer :: npart_loc, npart_active
   integer(i8b) :: npart_total, offset_part, tmp_long
   integer, allocatable :: npart_all(:)
   real(dp), allocatable :: dbuf(:)
@@ -521,6 +537,12 @@ subroutine backup_part_hdf5()
 
   ! Gather particle counts
   npart_loc = npart
+  npart_active = count(levelp(1:npartmax) > 0)
+  if(npart_active /= npart_loc) then
+     write(*,*) 'ERROR: active HDF5 particle count differs from npart'
+     write(*,*) 'myid, active, npart=', myid, npart_active, npart_loc
+     call clean_stop
+  end if
 #ifndef WITHOUTMPI
   call MPI_ALLGATHER(npart_loc, 1, MPI_INTEGER, npart_all, 1, MPI_INTEGER, &
        MPI_COMM_WORLD, info)

@@ -983,7 +983,8 @@ end subroutine aqual_iterate
 
 !=========================================================
 ! compute_fifth_force: add gradient of scalar_gr to f()
-! factor = -0.5 for f(R), -1/(2*beta) for nDGP
+! factor = -0.5 for f(R) and nDGP; the nDGP 1/beta
+! coupling is already part of the solved field equation.
 !=========================================================
 subroutine compute_fifth_force(ilevel, factor)
   use amr_commons
@@ -1002,7 +1003,7 @@ subroutine compute_fifth_force(ilevel, factor)
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc
   integer::nx_loc
-  real(dp)::grad_u,u_cen
+  real(dp)::grad_u,u_cen,u_left,u_right
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
@@ -1028,7 +1029,7 @@ subroutine compute_fifth_force(ilevel, factor)
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
-!$omp&  ind_nb_left,ind_nb_right,grad_u,u_cen) schedule(dynamic)
+!$omp&  ind_nb_left,ind_nb_right,grad_u,u_cen,u_left,u_right) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -1060,17 +1061,24 @@ subroutine compute_fifth_force(ilevel, factor)
               ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
 
-              ! One-sided differences at coarse-fine boundaries
-              ! (previously the F5 component was silently dropped)
-              if(igridn_w(i,ig_left)==0 .and. igridn_w(i,ig_right)==0) cycle
-              if(igridn_w(i,ig_left)==0) then
-                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) - u_cen) / dx_loc
-              else if(igridn_w(i,ig_right)==0) then
-                 grad_u = (u_cen - scalar_gr(igridn_w(i,ig_left)+ih_left)) / dx_loc
+              ! Same-level neighbours are already cached above.  The old
+              ! path decoded the cell Morton coordinate and performed a
+              ! hash lookup six times per active cell even on a complete
+              ! uniform level.  Retain parent-CIC only for a genuinely
+              ! missing AMR neighbour.
+              if(igridn_w(i,ig_left)>0) then
+                 u_left=scalar_gr(igridn_w(i,ig_left)+ih_left)
               else
-                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) &
-                      &  - scalar_gr(igridn_w(i,ig_left )+ih_left)) / (2d0*dx_loc)
+                 call scalar_sample_axis( &
+                      & ind_grid_w(i),ind,ilevel,idim,-1,u_cen,u_left)
               end if
+              if(igridn_w(i,ig_right)>0) then
+                 u_right=scalar_gr(igridn_w(i,ig_right)+ih_right)
+              else
+                 call scalar_sample_axis( &
+                      & ind_grid_w(i),ind,ilevel,idim,1,u_cen,u_right)
+              end if
+              grad_u=(u_right-u_left)/(2d0*dx_loc)
               f(ind_cell_w(i),idim) = f(ind_cell_w(i),idim) + factor * grad_u
            end do
         end do
@@ -1085,6 +1093,161 @@ subroutine compute_fifth_force(ilevel, factor)
   end do
 
 end subroutine compute_fifth_force
+
+!=========================================================
+! scalar_lookup_cell: look up a scalar cell by its integer
+! coordinates at an AMR level.  Coordinates are periodic.
+!=========================================================
+subroutine scalar_lookup_cell(ilevel, ix_in, iy_in, iz_in, value, found)
+  use amr_commons
+  use poisson_commons
+  use morton_hash
+  use morton_keys, only: mkey_t, morton_encode
+  implicit none
+  integer,intent(in)::ilevel
+  integer(8),intent(in)::ix_in,iy_in,iz_in
+  real(dp),intent(out)::value
+  logical,intent(out)::found
+  integer(8)::ix,iy,iz,ncx,ncy,ncz,gx,gy,gz
+  integer::igrid,ind,icell
+  type(mkey_t)::key
+
+  found=.false.
+  value=0d0
+  if(.not. allocated(mort_table)) return
+  if(ilevel < 1 .or. ilevel > size(mort_table)) return
+
+  ncx=int(nx,8)*2_8**ilevel
+  ncy=int(ny,8)*2_8**ilevel
+  ncz=int(nz,8)*2_8**ilevel
+  ix=modulo(ix_in,ncx)
+  iy=modulo(iy_in,ncy)
+  iz=modulo(iz_in,ncz)
+  gx=ix/2_8
+  gy=iy/2_8
+  gz=iz/2_8
+  key=morton_encode(gx,gy,gz)
+  igrid=morton_hash_lookup(mort_table(ilevel),key)
+  if(igrid <= 0) return
+
+  ind=1+int(modulo(ix,2_8))+2*int(modulo(iy,2_8))+4*int(modulo(iz,2_8))
+  icell=ncoarse+(ind-1)*ngridmax+igrid
+  value=scalar_gr(icell)
+  found=.true.
+end subroutine scalar_lookup_cell
+
+!=========================================================
+! scalar_sample_offset: sample a same-level scalar neighbor.
+! If that fine cell does not exist, impose a CIC-interpolated
+! Dirichlet value from the parent level instead of the old
+! zero-gradient closure.  This is also used for diagonal Hessian
+! samples in Vainshtein operators.
+!=========================================================
+subroutine scalar_sample_offset(igrid, ind, ilevel, ox, oy, oz, fallback, value)
+  use amr_commons
+  use morton_hash
+  use morton_keys, only: mkey_t, grid_to_morton, morton_decode
+  implicit none
+  integer,intent(in)::igrid,ind,ilevel,ox,oy,oz
+  real(dp),intent(in)::fallback
+  real(dp),intent(out)::value
+  integer(8)::gx,gy,gz,cx,cy,cz,tx,ty,tz,x0,y0,z0
+  integer::bx,by,bz
+  real(dp)::wx,wy,wz,w,val
+  logical::found
+  type(mkey_t)::key
+
+  key=grid_to_morton(igrid,ilevel)
+  call morton_decode(key,gx,gy,gz)
+  cx=2_8*gx+int(mod(ind-1,2),8)
+  cy=2_8*gy+int(mod((ind-1)/2,2),8)
+  cz=2_8*gz+int((ind-1)/4,8)
+  tx=cx+int(ox,8)
+  ty=cy+int(oy,8)
+  tz=cz+int(oz,8)
+
+  call scalar_lookup_cell(ilevel,tx,ty,tz,value,found)
+  if(found) return
+  if(ilevel <= 1) then
+     value=fallback
+     return
+  end if
+
+  if(modulo(tx,2_8)==0_8) then
+     x0=tx/2_8-1_8
+     wx=0.75d0
+  else
+     x0=(tx-1_8)/2_8
+     wx=0.25d0
+  end if
+  if(modulo(ty,2_8)==0_8) then
+     y0=ty/2_8-1_8
+     wy=0.75d0
+  else
+     y0=(ty-1_8)/2_8
+     wy=0.25d0
+  end if
+  if(modulo(tz,2_8)==0_8) then
+     z0=tz/2_8-1_8
+     wz=0.75d0
+  else
+     z0=(tz-1_8)/2_8
+     wz=0.25d0
+  end if
+
+  value=0d0
+  do bz=0,1
+     do by=0,1
+        do bx=0,1
+           call scalar_lookup_cell(ilevel-1,x0+bx,y0+by,z0+bz,val,found)
+           if(.not. found) then
+              value=fallback
+              return
+           end if
+           w=merge(wx,1d0-wx,bx==1)*merge(wy,1d0-wy,by==1) &
+                & *merge(wz,1d0-wz,bz==1)
+           value=value+w*val
+        end do
+     end do
+  end do
+end subroutine scalar_sample_offset
+
+subroutine scalar_sample_axis(igrid,ind,ilevel,idim,side,fallback,value)
+  use amr_parameters, only: dp
+  implicit none
+  integer,intent(in)::igrid,ind,ilevel,idim,side
+  real(dp),intent(in)::fallback
+  real(dp),intent(out)::value
+  integer::ox,oy,oz
+
+  ox=0; oy=0; oz=0
+  select case(idim)
+  case(1)
+     ox=side
+  case(2)
+     oy=side
+  case(3)
+     oz=side
+  end select
+  call scalar_sample_offset(igrid,ind,ilevel,ox,oy,oz,fallback,value)
+end subroutine scalar_sample_axis
+
+!=========================================================
+! Stop a strict scalar solve with a non-zero scheduler status.
+! The cuRamses VPATH clean_stop finalizes MPI and executes a
+! status-zero STOP, which can make a failed production run look
+! successful to Slurm.
+!=========================================================
+subroutine scalar_solver_abort
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+  integer::info
+  call MPI_ABORT(MPI_COMM_WORLD,92,info)
+#else
+  stop 92
+#endif
+end subroutine scalar_solver_abort
 
 #ifdef USE_FFTW
 !#########################################################
@@ -1103,8 +1266,8 @@ end subroutine compute_fifth_force
 !  The rhs is staged in scalar_gr_old (otherwise dead
 !  between solves); the correction is ADDED to scalar_gr.
 !  Discrete 7-point eigenvalues match the GS stencil.
-!  Strategy: gather the full level on every rank
-!  (MPI_ALLREDUCE) + serial FFTW: gated at <= 256^3.
+!  Strategy: retain the single-rank local FFT reference path through
+!  256^3 and use FFTW-MPI x-slabs on multi-rank runs through 512^3.
 !#########################################################
 logical function level_fft_ok(ilevel)
   use amr_commons
@@ -1114,16 +1277,24 @@ logical function level_fft_ok(ilevel)
   level_fft_ok = .false.
   if(ilevel /= levelmin) return
   ntot = int(nx,8)*int(ny,8)*int(nz,8)*(int(2,8)**(3*ilevel))
-  if(ntot > 16777216_8) return   ! > 256^3: gather-all too heavy
+  ! The local FFT path is capped at 256^3.  Above that size the
+  ! distributed FFTW-MPI path is mandatory.
+  if(ntot > 134217728_8) return  ! > 512^3 is outside the validated range
+  if(ntot > 16777216_8 .and. ncpu <= 1) return
   level_fft_ok = .true.
 end function level_fft_ok
 
 !=========================================================
 ! level_fft_helmholtz: solve (lap - m2) x = b on the fully
 ! refined periodic level; b read from scalar_gr_old, x is
-! ADDED into scalar_gr.
+! ADDED into scalar_gr.  relax multiplies the correction;
+! step_frac>0 additionally applies a pointwise
+! trust region |du| <= step_frac*|u|.  This is required for
+! fields with a one-sided physical branch (f_R<0, dilaton>0):
+! a spatially averaged Newton mass is only a preconditioner and
+! its unrestricted correction can cross the singular branch.
 !=========================================================
-subroutine level_fft_helmholtz(ilevel, m2)
+subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
   use amr_commons
   use poisson_commons
   implicit none
@@ -1131,15 +1302,30 @@ subroutine level_fft_helmholtz(ilevel, m2)
   include 'mpif.h'
 #endif
   integer,intent(in)::ilevel
-  real(dp),intent(in)::m2
+  real(dp),intent(in)::m2,step_frac,relax
 
   integer::fft_Nx,fft_Ny,fft_Nz,igrid,igrid_amr,ind,iskip,icell,info
   integer::Kx,Ky,Kz,ix,iy,iz,i,j,k,ngrid_loc,nx_loc
-  integer(kind=8)::plan_f,plan_b,ntot
-  real(dp)::dx_loc,scale,kd2,denom,twopi,cx,cy,cz
-  real(dp),allocatable::b3(:,:,:),bl(:,:,:)
-  complex(kind=8),allocatable::bk(:,:,:)
+  integer(kind=8)::ntot
+  integer(kind=8),save::plan_f=0_8,plan_b=0_8
+  integer,save::saved_Nx=0,saved_Ny=0,saved_Nz=0
+  real(dp),save::saved_dx=-1d0
+  real(dp)::dx_loc,scale,kd2,denom,twopi,du,uold
+  real(dp),allocatable,save::b3(:,:,:)
+  real(dp),allocatable,save::eigx(:),eigy(:),eigz(:)
+  complex(kind=8),allocatable,save::bk(:,:,:)
   integer,parameter::FFTW_EST=64
+
+#ifdef USE_FFTW
+  ! Avoid replicating a full scalar grid and identical serial transforms on
+  ! every rank.  The MPI slab path is also what makes a 512^3 uniform level
+  ! memory-feasible.  Keep the single-rank local implementation below as a
+  ! fallback and reference path.
+  if(ncpu > 1) then
+     call level_fft_helmholtz_mpi(ilevel,m2,step_frac,relax)
+     return
+  end if
+#endif
 
   fft_Nx = nx*2**ilevel; fft_Ny = ny*2**ilevel; fft_Nz = nz*2**ilevel
   ntot = int(fft_Nx,8)*int(fft_Ny,8)*int(fft_Nz,8)
@@ -1148,8 +1334,41 @@ subroutine level_fft_helmholtz(ilevel, m2)
   dx_loc=0.5d0**ilevel*scale
   twopi=2d0*acos(-1d0)
 
-  ! Gather the staged rhs to a full 3D array on every rank
-  allocate(bl(fft_Nx,fft_Ny,fft_Nz)); bl=0d0
+  ! Cache FFT work arrays, plans, and discrete one-dimensional
+  ! eigenvalues.  The previous path allocated about 3*N^3 reals,
+  ! recreated both FFTW plans, and recomputed millions of cosines on
+  ! every nonlinear correction.
+  if(fft_Nx/=saved_Nx .or. fft_Ny/=saved_Ny .or. fft_Nz/=saved_Nz &
+       & .or. dx_loc/=saved_dx) then
+     if(plan_f/=0_8) call dfftw_destroy_plan(plan_f)
+     if(plan_b/=0_8) call dfftw_destroy_plan(plan_b)
+     plan_f=0_8
+     plan_b=0_8
+     if(allocated(b3)) deallocate(b3,bk,eigx,eigy,eigz)
+     allocate(b3(fft_Nx,fft_Ny,fft_Nz))
+     allocate(bk(fft_Nx/2+1,fft_Ny,fft_Nz))
+     allocate(eigx(fft_Nx/2+1),eigy(fft_Ny),eigz(fft_Nz))
+     do i=1,fft_Nx/2+1
+        eigx(i)=(2d0-2d0*cos(twopi*dble(i-1)/dble(fft_Nx)))/dx_loc**2
+     end do
+     do j=1,fft_Ny
+        eigy(j)=(2d0-2d0*cos(twopi*dble(j-1)/dble(fft_Ny)))/dx_loc**2
+     end do
+     do k=1,fft_Nz
+        eigz(k)=(2d0-2d0*cos(twopi*dble(k-1)/dble(fft_Nz)))/dx_loc**2
+     end do
+     call dfftw_plan_dft_r2c_3d(plan_f,fft_Nx,fft_Ny,fft_Nz,b3,bk,FFTW_EST)
+     call dfftw_plan_dft_c2r_3d(plan_b,fft_Nx,fft_Ny,fft_Nz,bk,b3,FFTW_EST)
+     saved_Nx=fft_Nx
+     saved_Ny=fft_Ny
+     saved_Nz=fft_Nz
+     saved_dx=dx_loc
+  end if
+
+  ! Gather the staged rhs in place.  Every active cell has a unique
+  ! owner, so zero-fill plus SUM is equivalent to the old bl -> b3
+  ! out-of-place allreduce while eliminating one full-grid work array.
+  b3=0d0
   ngrid_loc=active(ilevel)%ngrid
   do igrid=1,ngrid_loc
      igrid_amr=active(ilevel)%igrid(igrid)
@@ -1162,31 +1381,21 @@ subroutine level_fft_helmholtz(ilevel, m2)
         iz=modulo(Kz-1+(ind-1)/4,     fft_Nz)
         iskip=ncoarse+(ind-1)*ngridmax
         icell=iskip+igrid_amr
-        bl(ix+1,iy+1,iz+1)=scalar_gr_old(icell)
+        b3(ix+1,iy+1,iz+1)=scalar_gr_old(icell)
      end do
   end do
-  allocate(b3(fft_Nx,fft_Ny,fft_Nz))
 #ifndef WITHOUTMPI
-  call MPI_ALLREDUCE(bl,b3,int(ntot),MPI_DOUBLE_PRECISION,MPI_SUM, &
+  call MPI_ALLREDUCE(MPI_IN_PLACE,b3,int(ntot),MPI_DOUBLE_PRECISION,MPI_SUM, &
        & MPI_COMM_WORLD,info)
-#else
-  b3=bl
 #endif
-  deallocate(bl)
 
   ! Spectral solve with the discrete 7-point eigenvalues
-  allocate(bk(fft_Nx/2+1,fft_Ny,fft_Nz))
-  call dfftw_plan_dft_r2c_3d(plan_f,fft_Nx,fft_Ny,fft_Nz,b3,bk,FFTW_EST)
   call dfftw_execute_dft_r2c(plan_f,b3,bk)
-  call dfftw_destroy_plan(plan_f)
-!$omp parallel do private(i,j,k,cx,cy,cz,kd2,denom) collapse(2)
+!$omp parallel do private(i,j,k,kd2,denom) collapse(2)
   do k=1,fft_Nz
      do j=1,fft_Ny
-        cy=(2d0-2d0*cos(twopi*dble(j-1)/dble(fft_Ny)))/dx_loc**2
-        cz=(2d0-2d0*cos(twopi*dble(k-1)/dble(fft_Nz)))/dx_loc**2
         do i=1,fft_Nx/2+1
-           cx=(2d0-2d0*cos(twopi*dble(i-1)/dble(fft_Nx)))/dx_loc**2
-           kd2=cx+cy+cz
+           kd2=eigx(i)+eigy(j)+eigz(k)
            denom=-(kd2+m2)
            if(abs(denom) > 1d-30) then
               bk(i,j,k)=bk(i,j,k)/denom/dble(ntot)
@@ -1196,10 +1405,7 @@ subroutine level_fft_helmholtz(ilevel, m2)
         end do
      end do
   end do
-  call dfftw_plan_dft_c2r_3d(plan_b,fft_Nx,fft_Ny,fft_Nz,bk,b3,FFTW_EST)
   call dfftw_execute_dft_c2r(plan_b,bk,b3)
-  call dfftw_destroy_plan(plan_b)
-  deallocate(bk)
 
   ! Add the correction to the local cells
   do igrid=1,ngrid_loc
@@ -1213,12 +1419,238 @@ subroutine level_fft_helmholtz(ilevel, m2)
         iz=modulo(Kz-1+(ind-1)/4,     fft_Nz)
         iskip=ncoarse+(ind-1)*ngridmax
         icell=iskip+igrid_amr
-        scalar_gr(icell)=scalar_gr(icell)+b3(ix+1,iy+1,iz+1)
+        uold=scalar_gr(icell)
+        du=relax*b3(ix+1,iy+1,iz+1)
+        if(step_frac > 0d0 .and. abs(uold) > 0d0) then
+           du=max(-step_frac*abs(uold),min(step_frac*abs(uold),du))
+        end if
+        scalar_gr(icell)=uold+du
      end do
   end do
-  deallocate(b3)
 
 end subroutine level_fft_helmholtz
+
+#ifdef USE_FFTW
+!=========================================================
+! level_fft_helmholtz_mpi: distributed FFTW-MPI solve of
+! (lap-m2) du = scalar_gr_old on a fully refined periodic
+! level.  RAMSES cells are exchanged with FFTW x-slabs as
+! (slab index,value) pairs and returned in the same packed
+! order after the inverse transform.
+!=========================================================
+subroutine level_fft_helmholtz_mpi(ilevel,m2,step_frac,relax)
+  use amr_commons
+  use poisson_commons
+  use iso_c_binding
+  use omp_lib
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  include 'fftw3-mpi.f03'
+
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::m2,step_frac,relax
+
+  logical,save::initialized=.false.
+  integer,save::saved_Nx=0,saved_Ny=0,saved_Nz=0
+  type(C_PTR),save::plan_f=C_NULL_PTR,plan_b=C_NULL_PTR,p_data=C_NULL_PTR
+  real(C_DOUBLE),pointer,save::rdata(:)=>null()
+  complex(C_DOUBLE_COMPLEX),pointer,save::cdata(:)=>null()
+  integer(C_INTPTR_T),save::local_nx=0,nx_start=0,alloc_local=0
+  real(dp),allocatable,save::eigx(:),eigy(:),eigz(:)
+
+  integer::fft_Nx,fft_Ny,fft_Nz,fftw_block,slab_real_size
+  integer::igrid,igrid_amr,ngrid_loc,ind,iskip,icell
+  integer::Kx,Ky,Kz,ix,iy,iz,x_local,dest,idx_3d
+  integer::irank,info,n_send,n_recv
+  integer::i,j,k
+  integer(kind=8)::ntot,ncomplex,idx_c
+  integer,allocatable::sendcounts(:),recvcounts(:),sdispls(:),rdispls(:)
+  integer,allocatable::sendpos(:)
+  real(dp),allocatable::sendbuf(:),recvbuf(:)
+  real(dp)::dx_loc,scale,kd2,denom,twopi,du,uold
+  integer::nx_loc
+  integer(C_INT)::thread_ok
+
+  fft_Nx=nx*2**ilevel
+  fft_Ny=ny*2**ilevel
+  fft_Nz=nz*2**ilevel
+  ntot=int(fft_Nx,8)*int(fft_Ny,8)*int(fft_Nz,8)
+  fftw_block=(fft_Nx+ncpu-1)/ncpu
+  nx_loc=icoarse_max-icoarse_min+1
+  scale=boxlen/dble(nx_loc)
+  dx_loc=0.5d0**ilevel*scale
+  twopi=2d0*acos(-1d0)
+
+  if(.not.initialized) then
+     thread_ok=fftw_init_threads()
+     call fftw_plan_with_nthreads(int(omp_get_max_threads(),C_INT))
+     call fftw_mpi_init()
+     initialized=.true.
+  end if
+
+  if(fft_Nx/=saved_Nx .or. fft_Ny/=saved_Ny .or. fft_Nz/=saved_Nz) then
+     if(c_associated(plan_f)) call fftw_destroy_plan(plan_f)
+     if(c_associated(plan_b)) call fftw_destroy_plan(plan_b)
+     if(c_associated(p_data)) call fftw_free(p_data)
+     plan_f=C_NULL_PTR
+     plan_b=C_NULL_PTR
+     p_data=C_NULL_PTR
+     nullify(rdata,cdata)
+     if(allocated(eigx)) deallocate(eigx,eigy,eigz)
+
+     alloc_local=fftw_mpi_local_size_3d( &
+          int(fft_Nx,C_INTPTR_T),int(fft_Ny,C_INTPTR_T), &
+          int(fft_Nz/2+1,C_INTPTR_T),MPI_COMM_WORLD,local_nx,nx_start)
+     p_data=fftw_alloc_complex(alloc_local)
+     slab_real_size=2*int(alloc_local)
+     call c_f_pointer(p_data,rdata,[slab_real_size])
+     call c_f_pointer(p_data,cdata,[int(alloc_local)])
+
+     plan_f=fftw_mpi_plan_dft_r2c_3d( &
+          int(fft_Nx,C_INTPTR_T),int(fft_Ny,C_INTPTR_T), &
+          int(fft_Nz,C_INTPTR_T),rdata,cdata,MPI_COMM_WORLD,FFTW_ESTIMATE)
+     plan_b=fftw_mpi_plan_dft_c2r_3d( &
+          int(fft_Nx,C_INTPTR_T),int(fft_Ny,C_INTPTR_T), &
+          int(fft_Nz,C_INTPTR_T),cdata,rdata,MPI_COMM_WORLD,FFTW_ESTIMATE)
+
+     allocate(eigx(0:int(local_nx)-1),eigy(0:fft_Ny-1),eigz(0:fft_Nz/2))
+     do i=0,int(local_nx)-1
+        eigx(i)=(2d0-2d0*cos(twopi*dble(int(nx_start)+i)/dble(fft_Nx))) &
+             & /dx_loc**2
+     end do
+     do j=0,fft_Ny-1
+        eigy(j)=(2d0-2d0*cos(twopi*dble(j)/dble(fft_Ny)))/dx_loc**2
+     end do
+     do k=0,fft_Nz/2
+        eigz(k)=(2d0-2d0*cos(twopi*dble(k)/dble(fft_Nz)))/dx_loc**2
+     end do
+     saved_Nx=fft_Nx
+     saved_Ny=fft_Ny
+     saved_Nz=fft_Nz
+     if(myid==1) write(*,'(A,I5,A,I5,A,I5,A)') &
+          ' scalar FFTW-MPI plan: ',fft_Nx,'x',fft_Ny,'x',fft_Nz,' grid'
+  end if
+
+  allocate(sendcounts(0:ncpu-1),recvcounts(0:ncpu-1))
+  allocate(sdispls(0:ncpu-1),rdispls(0:ncpu-1),sendpos(0:ncpu-1))
+  sendcounts=0
+  ngrid_loc=active(ilevel)%ngrid
+  do igrid=1,ngrid_loc
+     igrid_amr=active(ilevel)%igrid(igrid)
+     Kx=nint(xg(igrid_amr,1)*dble(fft_Nx))
+     do ind=1,twotondim
+        ix=modulo(Kx-1+mod(ind-1,2),fft_Nx)
+        dest=min(ix/fftw_block,ncpu-1)
+        sendcounts(dest)=sendcounts(dest)+1
+     end do
+  end do
+#ifndef WITHOUTMPI
+  call MPI_ALLTOALL(sendcounts,1,MPI_INTEGER,recvcounts,1,MPI_INTEGER, &
+       & MPI_COMM_WORLD,info)
+#else
+  recvcounts=sendcounts
+#endif
+  sdispls(0)=0
+  rdispls(0)=0
+  do irank=1,ncpu-1
+     sdispls(irank)=sdispls(irank-1)+sendcounts(irank-1)
+     rdispls(irank)=rdispls(irank-1)+recvcounts(irank-1)
+  end do
+  n_send=sdispls(ncpu-1)+sendcounts(ncpu-1)
+  n_recv=rdispls(ncpu-1)+recvcounts(ncpu-1)
+  allocate(sendbuf(0:max(1,2*n_send)-1),recvbuf(0:max(1,2*n_recv)-1))
+  sendpos=sdispls
+
+  do igrid=1,ngrid_loc
+     igrid_amr=active(ilevel)%igrid(igrid)
+     Kx=nint(xg(igrid_amr,1)*dble(fft_Nx))
+     Ky=nint(xg(igrid_amr,2)*dble(fft_Ny))
+     Kz=nint(xg(igrid_amr,3)*dble(fft_Nz))
+     do ind=1,twotondim
+        ix=modulo(Kx-1+mod(ind-1,2),fft_Nx)
+        iy=modulo(Ky-1+mod((ind-1)/2,2),fft_Ny)
+        iz=modulo(Kz-1+(ind-1)/4,fft_Nz)
+        dest=min(ix/fftw_block,ncpu-1)
+        x_local=ix-dest*fftw_block
+        idx_3d=x_local*fft_Ny*2*(fft_Nz/2+1) &
+             & +iy*2*(fft_Nz/2+1)+iz
+        iskip=ncoarse+(ind-1)*ngridmax
+        icell=iskip+igrid_amr
+        sendbuf(2*sendpos(dest))=dble(idx_3d)
+        sendbuf(2*sendpos(dest)+1)=scalar_gr_old(icell)
+        sendpos(dest)=sendpos(dest)+1
+     end do
+  end do
+
+  sendcounts=2*sendcounts
+  recvcounts=2*recvcounts
+  sdispls=2*sdispls
+  rdispls=2*rdispls
+#ifndef WITHOUTMPI
+  call MPI_ALLTOALLV(sendbuf,sendcounts,sdispls,MPI_DOUBLE_PRECISION, &
+       & recvbuf,recvcounts,rdispls,MPI_DOUBLE_PRECISION,MPI_COMM_WORLD,info)
+#else
+  recvbuf=sendbuf
+#endif
+
+  rdata=0d0
+  do i=0,n_recv-1
+     idx_3d=nint(recvbuf(2*i))
+     rdata(idx_3d+1)=rdata(idx_3d+1)+recvbuf(2*i+1)
+  end do
+  call fftw_mpi_execute_dft_r2c(plan_f,rdata,cdata)
+
+  ncomplex=int(local_nx,8)*int(fft_Ny,8)*int(fft_Nz/2+1,8)
+!$omp parallel do private(idx_c,i,j,k,kd2,denom) schedule(static)
+  do idx_c=0,ncomplex-1
+     i=int(idx_c/(int(fft_Ny,8)*int(fft_Nz/2+1,8)))
+     j=int(mod(idx_c/int(fft_Nz/2+1,8),int(fft_Ny,8)))
+     k=int(mod(idx_c,int(fft_Nz/2+1,8)))
+     kd2=eigx(i)+eigy(j)+eigz(k)
+     denom=-(kd2+m2)
+     if(abs(denom)>1d-30) then
+        cdata(idx_c+1)=cdata(idx_c+1)/denom/dble(ntot)
+     else
+        cdata(idx_c+1)=(0d0,0d0)
+     end if
+  end do
+  call fftw_mpi_execute_dft_c2r(plan_b,cdata,rdata)
+
+  do i=0,n_recv-1
+     idx_3d=nint(recvbuf(2*i))
+     recvbuf(2*i+1)=rdata(idx_3d+1)
+  end do
+#ifndef WITHOUTMPI
+  call MPI_ALLTOALLV(recvbuf,recvcounts,rdispls,MPI_DOUBLE_PRECISION, &
+       & sendbuf,sendcounts,sdispls,MPI_DOUBLE_PRECISION,MPI_COMM_WORLD,info)
+#else
+  sendbuf=recvbuf
+#endif
+
+  sendpos=sdispls/2
+  do igrid=1,ngrid_loc
+     igrid_amr=active(ilevel)%igrid(igrid)
+     Kx=nint(xg(igrid_amr,1)*dble(fft_Nx))
+     do ind=1,twotondim
+        ix=modulo(Kx-1+mod(ind-1,2),fft_Nx)
+        dest=min(ix/fftw_block,ncpu-1)
+        iskip=ncoarse+(ind-1)*ngridmax
+        icell=iskip+igrid_amr
+        uold=scalar_gr(icell)
+        du=relax*sendbuf(2*sendpos(dest)+1)
+        if(step_frac>0d0 .and. abs(uold)>0d0) then
+           du=max(-step_frac*abs(uold),min(step_frac*abs(uold),du))
+        end if
+        scalar_gr(icell)=uold+du
+        sendpos(dest)=sendpos(dest)+1
+     end do
+  end do
+
+  deallocate(sendcounts,recvcounts,sdispls,rdispls,sendpos,sendbuf,recvbuf)
+end subroutine level_fft_helmholtz_mpi
+#endif
 
 !=========================================================
 ! fR_build_fft_rhs: stage b = -(lap u - S(u)) in scalar_gr_old
@@ -1240,8 +1672,9 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
   integer::ig_left,ig_right,ih_left,ih_right
   real(dp)::dx,scale,dx_loc,dx2_inv,nx_frac
   integer::nx_loc,np1
-  real(dp)::u_c,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du
+  real(dp)::u_c,u_abs,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du
   real(dp)::a2_over_3,rho_coeff,boxratio_sq,R_bar0
+  real(dp)::fR0_abs,small_fR,inv_np1
   real(dp),dimension(2)::acc_loc,acc_glob
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
@@ -1255,6 +1688,9 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
   dx2_inv=1d0/dx_loc**2
 
   np1 = fR_n + 1
+  fR0_abs=abs(fR0)
+  small_fR=1d-30*fR0_abs
+  inv_np1=1d0/dble(np1)
   boxratio_sq = (boxlen_ini / 2997.92458d0)**2
   a2_over_3 = aexp**2 * boxratio_sq / 3d0
   R_bar0 = 3d0 * (omega_m + 4d0 * omega_l)
@@ -1271,8 +1707,8 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
 
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right,ih_left,ih_right, &
-!$omp&  u_c,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du) &
-!$omp& reduction(+:acc_loc) schedule(dynamic)
+!$omp&  u_c,u_abs,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du) &
+!$omp& reduction(+:acc_loc) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -1283,8 +1719,8 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
      end do
      do idim=1,ndim
         do i=1,ngrid
-           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+           igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+           igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
         end do
      end do
      do ind=1,twotondim
@@ -1294,6 +1730,7 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
         end do
         do i=1,ngrid
            u_c = scalar_gr(ind_cell_w(i))
+           u_abs = abs(u_c)
            lapl = 0d0
            do idim=1,ndim
               ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
@@ -1304,8 +1741,15 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
               if(igridn_w(i,ig_right) > 0) u_nb_r = scalar_gr(igridn_w(i,ig_right)+ih_right)
               lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
            end do
-           if(abs(u_c) > 1d-30*abs(fR0)) then
-              R_of_u = R_bar0 * (abs(fR0)/abs(u_c))**(1d0/dble(np1))
+           if(u_abs > small_fR) then
+              select case(np1)
+              case(1)
+                 R_of_u = R_bar0 * fR0_abs/u_abs
+              case(2)
+                 R_of_u = R_bar0 * sqrt(fR0_abs/u_abs)
+              case default
+                 R_of_u = R_bar0 * (fR0_abs/u_abs)**inv_np1
+              end select
               dR_du = -R_of_u / (dble(np1) * u_c)
            else
               R_of_u = R_bar
@@ -1313,7 +1757,7 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
            end if
            source = a2_over_3*(R_of_u - R_bar) &
                 & - rho_coeff*(rho(ind_cell_w(i)) - rho_tot)
-           scalar_gr_old(ind_cell_w(i)) = -(lapl - source)
+           scalar_gr_old(ind_cell_w(i))=-(lapl-source)
            acc_loc(1) = acc_loc(1) + a2_over_3*dR_du
            acc_loc(2) = acc_loc(2) + 1d0
         end do
@@ -1390,8 +1834,8 @@ subroutine sb_build_fft_rhs(ilevel, assb_in, L_in, m2bar)
      end do
      do idim=1,ndim
         do i=1,ngrid
-           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+           igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+           igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
         end do
      end do
      do ind=1,twotondim
@@ -1537,30 +1981,123 @@ subroutine dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
 end subroutine dil_build_fft_rhs
 
 !=========================================================
-! vain_build_fft_rhs: nDGP/galileon operator splitting;
-! solve the local quadratic  coeff*A^2 + A = S + coeff*T
-! for A = lap(phi) (branch A->S as coeff->0; clamped at the
-! extremum when the discriminant is negative) and stage
-! b = A - lap(phi) in scalar_gr_old (then lap(dphi) = b).
+! vain_prepare_uniform_cache: build the face/edge grid topology once
+! for a uniform spectral scalar solve.  The active-grid order and domain
+! decomposition cannot change inside one nDGP/Galileon nonlinear loop.
+! Rebuilding once at the next coarse step is intentionally conservative:
+! it remains correct across a RAMSES load balance without signatures or
+! invalidation hooks.
 !=========================================================
-subroutine vain_build_fft_rhs(ilevel, srcfac, coeff)
+subroutine vain_prepare_uniform_cache(ilevel)
   use amr_commons
   use poisson_commons
   use morton_hash
   implicit none
   integer,intent(in)::ilevel
-  real(dp),intent(in)::srcfac, coeff
+  integer::ia,igrid,idim,sx,sy,sz,ixside,iyside,izside,iedge,igrid_diag
+  integer::ncache,nalloc
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  ncache=active(ilevel)%ngrid
+  nalloc=max(ncache,1)
+  vain_cache_ready=.false.
+
+  if(allocated(vain_face_grid)) then
+     if(size(vain_face_grid,1)/=nalloc) then
+        deallocate(vain_face_grid,vain_xy_grid,vain_xz_grid,vain_yz_grid)
+     end if
+  end if
+  if(.not.allocated(vain_face_grid)) then
+     allocate(vain_face_grid(nalloc,6))
+     allocate(vain_xy_grid(nalloc,4),vain_xz_grid(nalloc,4),vain_yz_grid(nalloc,4))
+  end if
+
+!$omp parallel do private(ia,igrid,idim,sx,sy,sz,ixside,iyside,izside, &
+!$omp& iedge,igrid_diag) schedule(static)
+  do ia=1,ncache
+     igrid=active(ilevel)%igrid(ia)
+     do idim=1,ndim
+        vain_face_grid(ia,2*idim-1)=morton_nbor_grid(igrid,ilevel,2*idim-1)
+        vain_face_grid(ia,2*idim  )=morton_nbor_grid(igrid,ilevel,2*idim  )
+     end do
+     do sx=-1,1,2
+        ixside=merge(1,2,sx<0)
+        do sy=-1,1,2
+           iyside=merge(3,4,sy<0)
+           iedge=((sx+1)/2)*2+(sy+1)/2+1
+           igrid_diag=vain_face_grid(ia,ixside)
+           if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,iyside)
+           vain_xy_grid(ia,iedge)=igrid_diag
+        end do
+        do sz=-1,1,2
+           izside=merge(5,6,sz<0)
+           iedge=((sx+1)/2)*2+(sz+1)/2+1
+           igrid_diag=vain_face_grid(ia,ixside)
+           if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,izside)
+           vain_xz_grid(ia,iedge)=igrid_diag
+        end do
+     end do
+     do sy=-1,1,2
+        iyside=merge(3,4,sy<0)
+        do sz=-1,1,2
+           izside=merge(5,6,sz<0)
+           iedge=((sy+1)/2)*2+(sz+1)/2+1
+           igrid_diag=vain_face_grid(ia,iyside)
+           if(igrid_diag>0) igrid_diag=morton_nbor_grid(igrid_diag,ilevel,izside)
+           vain_yz_grid(ia,iedge)=igrid_diag
+        end do
+     end do
+  end do
+!$omp end parallel do
+
+  vain_cache_level=ilevel
+  vain_cache_ngrid=ncache
+  vain_cache_ready=.true.
+end subroutine vain_prepare_uniform_cache
+
+!=========================================================
+! vain_build_fft_rhs: nDGP/galileon operator splitting;
+! split H_ij into trace and traceless pieces,
+!   H_ij H_ij = Hbar_ij Hbar_ij + A^2/3,
+! and solve the local quadratic
+!   (2 coeff/3)*A^2 + A = S + coeff*Hbar_ij Hbar_ij
+! for A = lap(phi) (branch A->S as coeff->0; clamped at the
+! extremum when the discriminant is negative) and stage
+! b = A - lap(phi) in scalar_gr_old (then lap(dphi) = b).
+!=========================================================
+subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
+  use amr_commons
+  use poisson_commons
+  use morton_hash
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::srcfac, coeff
+  logical,intent(in)::centered_mixed
+  real(dp),intent(out)::rhs_rel
+
+  integer::igrid,ngrid,ncache,i,ind,iskip,idim,icell,info
   integer::ig_left,ig_right
+  integer::d,bx,by,bz,tx,ty,tz,sx,sy,sz,ixside,iyside,izside
+  integer::iedge,igrid_diag,ind_diag
   real(dp)::dx,scale,dx_loc,dx2_inv
   integer::nx_loc
-  real(dp)::u_c,lapl,s_src,t_ij,disc,a_tgt
+  real(dp)::u_c,lapl,s_src,t_ij,tbar_ij,qcoeff,disc,a_tgt
+  real(dp)::rhs_sum_local,rhs_sum_global,ncell_local,ncell_global,rhs_mean
+  real(dp)::rhs_max_local,rhs_max_global,src_max_local,src_max_global
   real(dp)::phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp
-  real(dp)::phi_xx,phi_yy,phi_zz
+  real(dp)::phi_xx,phi_yy,phi_zz,mix_xy2,mix_xz2,mix_yz2
+  real(dp)::phi_pp,phi_pm,phi_mp,phi_mm
+  real(dp)::dpp,dpm,dmp,dmm
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
+  integer,dimension(1:nvector,1:4)::igridxy_w,igridxz_w,igridyz_w
+  integer,dimension(1:nvector,1:12)::ind_diag_w
+  integer,dimension(12),parameter::odx=(/ 1, 1,-1,-1, 1, 1,-1,-1, 0, 0, 0, 0/)
+  integer,dimension(12),parameter::ody=(/ 1,-1, 1,-1, 0, 0, 0, 0, 1, 1,-1,-1/)
+  integer,dimension(12),parameter::odz=(/ 0, 0, 0, 0, 1,-1, 1,-1, 1,-1, 1,-1/)
 
   ncache=active(ilevel)%ngrid
   dx=0.5D0**ilevel
@@ -1576,11 +2113,19 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff)
   ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
   ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
 
+  if(.not.vain_cache_ready .or. vain_cache_level/=ilevel .or. &
+       & vain_cache_ngrid/=ncache) call vain_prepare_uniform_cache(ilevel)
+
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
-!$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right, &
-!$omp&  u_c,lapl,s_src,t_ij,disc,a_tgt, &
-!$omp&  phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp,phi_xx,phi_yy,phi_zz) &
-!$omp& schedule(dynamic)
+!$omp&  ind_grid_w,ind_cell_w,igridn_w,igridxy_w,igridxz_w,igridyz_w, &
+!$omp&  ind_diag_w,ig_left,ig_right, &
+!$omp&  d,bx,by,bz,tx,ty,tz,sx,sy,sz,ixside,iyside,izside, &
+!$omp&  iedge,igrid_diag,ind_diag, &
+!$omp&  u_c,lapl,s_src,t_ij,tbar_ij,qcoeff,disc,a_tgt, &
+!$omp&  phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp,phi_xx,phi_yy,phi_zz, &
+!$omp&  mix_xy2,mix_xz2,mix_yz2,phi_pp,phi_pm,phi_mp,phi_mm, &
+!$omp&  dpp,dpm,dmp,dmm) &
+!$omp& schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -1591,14 +2136,62 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff)
      end do
      do idim=1,ndim
         do i=1,ngrid
-           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+           igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+           igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
         end do
+     end do
+     do i=1,ngrid
+        igridxy_w(i,1:4)=vain_xy_grid(igrid+i-1,1:4)
+        igridxz_w(i,1:4)=vain_xz_grid(igrid+i-1,1:4)
+        igridyz_w(i,1:4)=vain_yz_grid(igrid+i-1,1:4)
      end do
      do ind=1,twotondim
         iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
            ind_cell_w(i)=iskip+ind_grid_w(i)
+        end do
+        bx=mod(ind-1,2)
+        by=mod((ind-1)/2,2)
+        bz=(ind-1)/4
+        do d=1,12
+           tx=bx+odx(d); ty=by+ody(d); tz=bz+odz(d)
+           sx=0; sy=0; sz=0
+           if(tx<0) sx=-1
+           if(tx>1) sx= 1
+           if(ty<0) sy=-1
+           if(ty>1) sy= 1
+           if(tz<0) sz=-1
+           if(tz>1) sz= 1
+           tx=modulo(tx,2); ty=modulo(ty,2); tz=modulo(tz,2)
+           ind_diag=1+tx+2*ty+4*tz
+           do i=1,ngrid
+              if(sx/=0 .and. sy/=0) then
+                 iedge=((sx+1)/2)*2+(sy+1)/2+1
+                 igrid_diag=igridxy_w(i,iedge)
+              else if(sx/=0 .and. sz/=0) then
+                 iedge=((sx+1)/2)*2+(sz+1)/2+1
+                 igrid_diag=igridxz_w(i,iedge)
+              else if(sy/=0 .and. sz/=0) then
+                 iedge=((sy+1)/2)*2+(sz+1)/2+1
+                 igrid_diag=igridyz_w(i,iedge)
+              else if(sx/=0) then
+                 ixside=merge(1,2,sx<0)
+                 igrid_diag=igridn_w(i,ixside)
+              else if(sy/=0) then
+                 iyside=merge(3,4,sy<0)
+                 igrid_diag=igridn_w(i,iyside)
+              else if(sz/=0) then
+                 izside=merge(5,6,sz<0)
+                 igrid_diag=igridn_w(i,izside)
+              else
+                 igrid_diag=ind_grid_w(i)
+              end if
+              if(igrid_diag>0) then
+                 ind_diag_w(i,d)=ncoarse+(ind_diag-1)*ngridmax+igrid_diag
+              else
+                 ind_diag_w(i,d)=0
+              end if
+           end do
         end do
         do i=1,ngrid
            u_c = scalar_gr(ind_cell_w(i))
@@ -1620,23 +2213,171 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff)
            phi_xx = (phi_xp+phi_xm-2d0*u_c)*dx2_inv
            phi_yy = (phi_yp+phi_ym-2d0*u_c)*dx2_inv
            phi_zz = (phi_zp+phi_zm-2d0*u_c)*dx2_inv
-           t_ij = phi_xx**2 + phi_yy**2 + phi_zz**2
+           if(ind_diag_w(i,1)>0) then
+              phi_pp=scalar_gr(ind_diag_w(i,1))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 1, 0,u_c,phi_pp)
+           end if
+           if(ind_diag_w(i,2)>0) then
+              phi_pm=scalar_gr(ind_diag_w(i,2))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1,-1, 0,u_c,phi_pm)
+           end if
+           if(ind_diag_w(i,3)>0) then
+              phi_mp=scalar_gr(ind_diag_w(i,3))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 1, 0,u_c,phi_mp)
+           end if
+           if(ind_diag_w(i,4)>0) then
+              phi_mm=scalar_gr(ind_diag_w(i,4))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1,-1, 0,u_c,phi_mm)
+           end if
+           if(centered_mixed) then
+              mix_xy2=(0.25d0*(phi_pp-phi_pm-phi_mp+phi_mm)*dx2_inv)**2
+           else
+              dpp=(phi_pp-phi_xp-phi_yp+u_c)*dx2_inv
+              dpm=(phi_xp-phi_pm-u_c+phi_ym)*dx2_inv
+              dmp=(phi_yp-phi_mp-u_c+phi_xm)*dx2_inv
+              dmm=(u_c-phi_ym-phi_xm+phi_mm)*dx2_inv
+              mix_xy2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
+           end if
+           if(ind_diag_w(i,5)>0) then
+              phi_pp=scalar_gr(ind_diag_w(i,5))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0, 1,u_c,phi_pp)
+           end if
+           if(ind_diag_w(i,6)>0) then
+              phi_pm=scalar_gr(ind_diag_w(i,6))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0,-1,u_c,phi_pm)
+           end if
+           if(ind_diag_w(i,7)>0) then
+              phi_mp=scalar_gr(ind_diag_w(i,7))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0, 1,u_c,phi_mp)
+           end if
+           if(ind_diag_w(i,8)>0) then
+              phi_mm=scalar_gr(ind_diag_w(i,8))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0,-1,u_c,phi_mm)
+           end if
+           if(centered_mixed) then
+              mix_xz2=(0.25d0*(phi_pp-phi_pm-phi_mp+phi_mm)*dx2_inv)**2
+           else
+              dpp=(phi_pp-phi_xp-phi_zp+u_c)*dx2_inv
+              dpm=(phi_xp-phi_pm-u_c+phi_zm)*dx2_inv
+              dmp=(phi_zp-phi_mp-u_c+phi_xm)*dx2_inv
+              dmm=(u_c-phi_zm-phi_xm+phi_mm)*dx2_inv
+              mix_xz2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
+           end if
+           if(ind_diag_w(i,9)>0) then
+              phi_pp=scalar_gr(ind_diag_w(i,9))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1, 1,u_c,phi_pp)
+           end if
+           if(ind_diag_w(i,10)>0) then
+              phi_pm=scalar_gr(ind_diag_w(i,10))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1,-1,u_c,phi_pm)
+           end if
+           if(ind_diag_w(i,11)>0) then
+              phi_mp=scalar_gr(ind_diag_w(i,11))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1, 1,u_c,phi_mp)
+           end if
+           if(ind_diag_w(i,12)>0) then
+              phi_mm=scalar_gr(ind_diag_w(i,12))
+           else
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1,-1,u_c,phi_mm)
+           end if
+           if(centered_mixed) then
+              mix_yz2=(0.25d0*(phi_pp-phi_pm-phi_mp+phi_mm)*dx2_inv)**2
+           else
+              dpp=(phi_pp-phi_yp-phi_zp+u_c)*dx2_inv
+              dpm=(phi_yp-phi_pm-u_c+phi_zm)*dx2_inv
+              dmp=(phi_zp-phi_mp-u_c+phi_ym)*dx2_inv
+              dmm=(u_c-phi_zm-phi_ym+phi_mm)*dx2_inv
+              mix_yz2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
+           end if
+           t_ij = phi_xx**2 + phi_yy**2 + phi_zz**2 &
+                & + 2d0*(mix_xy2+mix_xz2+mix_yz2)
+           tbar_ij=max(t_ij-lapl**2/3d0,0d0)
 
            s_src = srcfac*(rho(ind_cell_w(i)) - rho_tot)
            if(abs(coeff) > 1d-12) then
-              disc = 1d0 + 4d0*coeff*(s_src + coeff*t_ij)
+              qcoeff=2d0*coeff/3d0
+              disc = 1d0 + 4d0*qcoeff*(s_src + coeff*tbar_ij)
               if(disc > 0d0) then
-                 a_tgt = (-1d0 + sqrt(disc))/(2d0*coeff)
+                 a_tgt = (-1d0 + sqrt(disc))/(2d0*qcoeff)
               else
-                 a_tgt = -1d0/(2d0*coeff)
+                 a_tgt = -1d0/(2d0*qcoeff)
               end if
            else
-              a_tgt = s_src + coeff*t_ij
+              a_tgt = s_src + coeff*tbar_ij
            end if
            scalar_gr_old(ind_cell_w(i)) = a_tgt - lapl
         end do
      end do
   end do
+
+  ! A periodic Laplacian has no k=0 mode.  The nonlinear local
+  ! quadratic solve does not preserve this compatibility condition
+  ! at an intermediate operator-split iterate, so explicitly project
+  ! the staged correction onto its zero-mean subspace.  FFTW would
+  ! otherwise discard the same mode silently.
+  rhs_sum_local=0d0
+  ncell_local=0d0
+!$omp parallel do private(igrid,ngrid,i,ind,iskip,icell) &
+!$omp& reduction(+:rhs_sum_local,ncell_local) schedule(static)
+  do igrid=1,ncache,nvector
+     ngrid=MIN(nvector,ncache-igrid+1)
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        do i=1,ngrid
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           rhs_sum_local=rhs_sum_local+scalar_gr_old(icell)
+           ncell_local=ncell_local+1d0
+        end do
+     end do
+  end do
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(rhs_sum_local,rhs_sum_global,1,MPI_DOUBLE_PRECISION, &
+       & MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(ncell_local,ncell_global,1,MPI_DOUBLE_PRECISION, &
+       & MPI_SUM,MPI_COMM_WORLD,info)
+#else
+  rhs_sum_global=rhs_sum_local
+  ncell_global=ncell_local
+#endif
+  rhs_mean=rhs_sum_global/max(ncell_global,1d0)
+  rhs_max_local=0d0
+  src_max_local=0d0
+!$omp parallel do private(igrid,ngrid,i,ind,iskip,icell,s_src) &
+!$omp& reduction(max:rhs_max_local,src_max_local) schedule(static)
+  do igrid=1,ncache,nvector
+     ngrid=MIN(nvector,ncache-igrid+1)
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        do i=1,ngrid
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           scalar_gr_old(icell)=scalar_gr_old(icell)-rhs_mean
+           rhs_max_local=max(rhs_max_local,abs(scalar_gr_old(icell)))
+           s_src=srcfac*(rho(icell)-rho_tot)
+           src_max_local=max(src_max_local,abs(s_src))
+        end do
+     end do
+  end do
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(rhs_max_local,rhs_max_global,1,MPI_DOUBLE_PRECISION, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(src_max_local,src_max_global,1,MPI_DOUBLE_PRECISION, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+#else
+  rhs_max_global=rhs_max_local
+  src_max_global=src_max_local
+#endif
+  rhs_rel=rhs_max_global/max(src_max_global,1d-30)
 
 end subroutine vain_build_fft_rhs
 #endif
@@ -1688,7 +2429,9 @@ subroutine fR_solve_level(ilevel, icount)
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
+  real(dp)::background_ratio
   logical::converged
+  real(dp),save::fR_bar_previous(1:MAXLEVEL)=0d0
 #ifdef USE_FFTW
   real(dp)::m2bar
   logical,external::level_fft_ok
@@ -1702,20 +2445,35 @@ subroutine fR_solve_level(ilevel, icount)
   ! Get background values
   call fR_background(aexp, R_bar, fR_bar)
 
+  ! Predict the new-time solution by evolving the previous solution with
+  ! the homogeneous background.  In Hu-Sawicki gravity fR_bar changes
+  ! rapidly at early times; reusing the absolute old field without this
+  ! rescaling can leave Newton-GS thousands of sweeps away from the new
+  ! solution.  A zero previous value marks the first solve on this rank.
+  ! On restart scalar_gr itself is restored, while this level-local
+  ! background predictor is rebuilt on the first post-restart solve.
+  if(fR_bar_previous(ilevel) /= 0d0) then
+     background_ratio=fR_bar/fR_bar_previous(ilevel)
+     if(background_ratio > 0d0) &
+          & call fR_rescale_warm_start(ilevel,background_ratio)
+  end if
+  fR_bar_previous(ilevel)=fR_bar
+
   ! Seed every cell still at exactly 0 with the background value.
-  ! Covers first step, restarts (scalar_gr is not checkpointed) and
-  ! cells created by refinement after step 0; converged f_R is
+  ! Covers first step, legacy restarts without scalar data, and cells
+  ! created by refinement after step 0; converged f_R is
   ! strictly negative so 0 uniquely marks uninitialized cells.
   call fR_seed_scalar(ilevel, fR_bar)
+  call vain_prepare_uniform_cache(ilevel)
 
 #ifdef USE_FFTW
   ! Spectral Newton on the uniform domain level: converges the
   ! long-wavelength modes that the GS sweeps below cannot reach
   if(level_fft_ok(ilevel)) then
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
-     do iter=1,3
+     do iter=1,8
         call fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
-        call level_fft_helmholtz(ilevel, m2bar)
+        call level_fft_helmholtz(ilevel, m2bar, 0.25d0, 1d0)
         call make_virtual_fine_dp(scalar_gr(1), ilevel)
      end do
   end if
@@ -1749,16 +2507,17 @@ subroutine fR_solve_level(ilevel, icount)
 
      if(rel_res < fR_eps) then
         converged = .true.
-        if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+        if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
              ' f(R) level ',ilevel,' converged in ',iter,' iters, res=',rel_res
         exit
      end if
   end do
 
-  if(.not. converged .and. myid==1) then
-     write(*,'(A,I2,A,I3,A,ES10.3)') &
-          ' WARNING: f(R) level ',ilevel,' NOT converged after ', &
-          n_iter_fR,' iters, res=',rel_res
+  if(.not. converged) then
+     if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
+          & ' WARNING: f(R) level ',ilevel,' NOT converged after ', &
+          & n_iter_fR,' iters, res=',rel_res
+     if(scalar_solver_strict) call scalar_solver_abort
   end if
 
   ! Save scalar_gr for warm start next step
@@ -1773,6 +2532,34 @@ subroutine fR_solve_level(ilevel, icount)
        & 0.5d0*aexp**2*(2997.92458d0/boxlen_ini)**2)
 
 end subroutine fR_solve_level
+
+!=========================================================
+! fR_rescale_warm_start: advance an initialized f_R field
+! with the homogeneous-background ratio before Newton solve.
+!=========================================================
+subroutine fR_rescale_warm_start(ilevel, ratio)
+  use amr_commons
+  use poisson_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::ratio
+
+  integer::igrid,i,ind,iskip,ncache,icell
+
+  ncache=active(ilevel)%ngrid
+!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(static)
+  do igrid=1,ncache,nvector
+     do i=1,MIN(nvector,ncache-igrid+1)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           if(scalar_gr(icell) /= 0d0) &
+                & scalar_gr(icell)=scalar_gr(icell)*ratio
+        end do
+     end do
+  end do
+
+end subroutine fR_rescale_warm_start
 
 !=========================================================
 ! fR_init_scalar: initialize scalar_gr at a level
@@ -1891,10 +2678,10 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
-  real(dp)::u_c,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u
+  real(dp)::u_c,u_abs,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u
   real(dp)::u_nb_l,u_nb_r
   real(dp)::a2_over_3,rho_coeff,boxratio_sq
-  real(dp)::R_bar0
+  real(dp)::R_bar0,fR0_abs,small_fR,inv_np1
   integer::np1,icolor
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
@@ -1915,6 +2702,9 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   dx2_inv=1d0/dx2
 
   np1 = fR_n + 1
+  fR0_abs=abs(fR0)
+  small_fR=1d-30*fR0_abs
+  inv_np1=1d0/dble(np1)
   ! (H0 L_box / c)^2 converts H0-unit curvature/density terms to
   ! box-unit Laplacians (same pattern as dark_energy_commons)
   boxratio_sq = (boxlen_ini / 2997.92458d0)**2
@@ -1941,8 +2731,8 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right, &
-!$omp&  u_c,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u,u_nb_l,u_nb_r) &
-!$omp& reduction(max:res_max,src_max) schedule(dynamic)
+!$omp&  u_c,u_abs,lapl,source,R_of_u,dR_du,residual,jacobian,delta_u,u_nb_l,u_nb_r) &
+!$omp& reduction(max:res_max,src_max) schedule(static)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
@@ -1955,8 +2745,8 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
         end do
         do idim=1,ndim
            do i=1,ngrid
-              igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-              igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+              igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+              igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
            end do
         end do
 
@@ -1973,9 +2763,10 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
 
            do i=1,ngrid
               u_c = scalar_gr(ind_cell_w(i))
+              u_abs = abs(u_c)
 
-              ! Compute Laplacian; Neumann (zero-gradient) closure at
-              ! coarse-fine boundaries instead of freezing the cell
+              ! Same-level neighbors, or parent-CIC Dirichlet data at
+              ! a coarse-fine interface.
               lapl = 0d0
               do idim=1,ndim
                  ig_left =ggg(idim,1,ind)
@@ -1983,14 +2774,14 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
                  ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
                  ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
                  if(igridn_w(i,ig_left) > 0) then
-                    u_nb_l = scalar_gr(igridn_w(i,ig_left )+ih_left)
+                    u_nb_l=scalar_gr(igridn_w(i,ig_left)+ih_left)
                  else
-                    u_nb_l = u_c
+                    call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,u_c,u_nb_l)
                  end if
                  if(igridn_w(i,ig_right) > 0) then
-                    u_nb_r = scalar_gr(igridn_w(i,ig_right)+ih_right)
+                    u_nb_r=scalar_gr(igridn_w(i,ig_right)+ih_right)
                  else
-                    u_nb_r = u_c
+                    call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,1,u_c,u_nb_r)
                  end if
                  lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
               end do
@@ -1999,8 +2790,15 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
               ! f_R = fR0 * (R_bar0/R)^(n+1)
               ! → R = R_bar0 * (fR0/f_R)^(1/(n+1))
               ! Since fR0<0 and f_R<0, use absolute values
-              if(abs(u_c) > 1d-30*abs(fR0)) then
-                 R_of_u = R_bar0 * (abs(fR0)/abs(u_c))**(1d0/dble(np1))
+              if(u_abs > small_fR) then
+                 select case(np1)
+                 case(1)
+                    R_of_u = R_bar0 * fR0_abs/u_abs
+                 case(2)
+                    R_of_u = R_bar0 * sqrt(fR0_abs/u_abs)
+                 case default
+                    R_of_u = R_bar0 * (fR0_abs/u_abs)**inv_np1
+                 end select
               else
                  R_of_u = R_bar  ! fallback to background
               end if
@@ -2018,7 +2816,7 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
               ! Jacobian of source w.r.t. u_c:
               ! dS/du = +(a²/3)(H0L/c)² * dR/dfR
               ! dR/dfR = -R/((n+1)*fR) > 0 for fR < 0
-              if(abs(u_c) > 1d-30*abs(fR0)) then
+              if(u_abs > small_fR) then
                  dR_du = -R_of_u / (dble(np1) * u_c)
               else
                  dR_du = 0d0
@@ -2031,12 +2829,13 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
               if(abs(jacobian) > 1d-30) then
                  delta_u = -residual / jacobian
                  ! Clamp update to prevent overshoot
-                 if(abs(delta_u) > 0.5d0*abs(u_c) .and. abs(u_c) > 1d-30*abs(fR0)) then
-                    delta_u = sign(0.5d0*abs(u_c), delta_u)
+                 if(abs(delta_u) > 0.5d0*u_abs .and. u_abs > small_fR) then
+                    delta_u = sign(0.5d0*u_abs, delta_u)
                  end if
                  scalar_gr(ind_cell_w(i)) = u_c + delta_u
                  ! Enforce f_R < 0 (physical constraint)
-                 if(scalar_gr(ind_cell_w(i)) > 0d0) scalar_gr(ind_cell_w(i)) = 0.5d0*u_c
+                 if(scalar_gr(ind_cell_w(i)) > 0d0) &
+                      & scalar_gr(ind_cell_w(i)) = -0.5d0*max(u_abs,small_fR)
               end if
 
               ! Track convergence
@@ -2096,7 +2895,7 @@ subroutine nDGP_solve_level(ilevel, icount)
   real(dp)::nDGP_beta  ! external function
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
-  real(dp)::rel_res
+  real(dp)::rel_res,fft_rel
   logical::converged
 #ifdef USE_FFTW
   logical,external::level_fft_ok
@@ -2119,21 +2918,30 @@ subroutine nDGP_solve_level(ilevel, icount)
      call nDGP_init_scalar(ilevel)
   end if
 
+  converged = .false.
 #ifdef USE_FFTW
   ! Operator-split spectral solve on the uniform domain level
   if(level_fft_ok(ilevel)) then
+     call vain_prepare_uniform_cache(ilevel)
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
-     do iter=1,5
+     do iter=1,50
         call vain_build_fft_rhs(ilevel, omega_m*aexp/beta, &
-             & 1d0/(12d0*omega_rc*beta*aexp**4))
-        call level_fft_helmholtz(ilevel, 0d0)
+             & 1d0/(12d0*omega_rc*beta*aexp**4), .false., fft_rel)
+        if(fft_rel < nDGP_eps) then
+           converged=.true.
+           if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+                & ' nDGP level ',ilevel,' FFT converged in ',iter-1, &
+                & ' iters, res=',fft_rel
+           exit
+        end if
+        call level_fft_helmholtz(ilevel, 0d0, 0d0, 1d0)
         call make_virtual_fine_dp(scalar_gr(1), ilevel)
      end do
   end if
 #endif
 
   ! Newton-GS relaxation
-  converged = .false.
+  if(.not.converged) then
   do iter=1,n_iter_nDGP
 
      call nDGP_gauss_seidel(ilevel, beta, res_max_local, src_max_local)
@@ -2163,11 +2971,13 @@ subroutine nDGP_solve_level(ilevel, icount)
         exit
      end if
   end do
+  end if
 
-  if(.not. converged .and. myid==1) then
-     write(*,'(A,I2,A,I3,A,ES10.3)') &
-          ' WARNING: nDGP level ',ilevel,' NOT converged after ', &
-          n_iter_nDGP,' iters, res=',rel_res
+  if(.not. converged) then
+     if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+          & ' WARNING: nDGP level ',ilevel,' NOT converged after ', &
+          & n_iter_nDGP,' iters, res=',rel_res
+     if(scalar_solver_strict) call scalar_solver_abort
   end if
 
   ! Save scalar_gr for warm start
@@ -2262,12 +3072,11 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
   real(dp)::u_c,lapl,source,residual,jacobian,delta_u,sclamp
   real(dp)::coeff
   real(dp)::phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp
-  real(dp)::phi_xx,phi_yy,phi_zz,phi_xy,phi_xz,phi_yz
+  real(dp)::phi_xx,phi_yy,phi_zz,mix_xy2,mix_xz2,mix_yz2
   real(dp)::lapl2,trace_ij2,vain_term
+  real(dp)::dpp,dpm,dmp,dmm,dmix_du
   integer::icolor
 
-  ! Diagonal neighbor grids
-  integer::ig_diag_pp,ig_diag_pm,ig_diag_mp,ig_diag_mm
   real(dp)::phi_pp,phi_pm,phi_mp,phi_mm
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
@@ -2312,9 +3121,8 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
 !$omp&  ind_nb_left,ind_nb_right, &
 !$omp&  u_c,lapl,source,residual,jacobian,delta_u, &
 !$omp&  phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp, &
-!$omp&  phi_xx,phi_yy,phi_zz,phi_xy,phi_xz,phi_yz, &
-!$omp&  lapl2,trace_ij2,vain_term, &
-!$omp&  ig_diag_pp,ig_diag_pm,ig_diag_mp,ig_diag_mm, &
+!$omp&  phi_xx,phi_yy,phi_zz,mix_xy2,mix_xz2,mix_yz2, &
+!$omp&  lapl2,trace_ij2,vain_term,dpp,dpm,dmp,dmm,dmix_du, &
 !$omp&  phi_pp,phi_pm,phi_mp,phi_mm) &
 !$omp& reduction(max:res_max,src_max) schedule(dynamic)
      do igrid=1,ncache,nvector
@@ -2335,9 +3143,9 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
         end do
 
         do ind=1,twotondim
-           ! True 3D red-black: color = parity of (i+j+k) of the cell,
-           ! i.e. popcount of the oct-local index (oct origins are even)
-           if(mod(popcnt(ind-1), 2) /= icolor) cycle
+           ! Compatible mixed-derivative squares are relaxed with the
+           ! same red-black ordering used by the original nDGP path.
+           if(mod(popcnt(ind-1),2) /= icolor) cycle
 
            iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
@@ -2347,28 +3155,13 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
            do i=1,ngrid
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Face neighbor values; Neumann (zero-gradient) closure
-              ! at coarse-fine boundaries instead of freezing the cell
-              ig_left =ggg(1,1,ind); ig_right=ggg(1,2,ind)
-              ih_left =ncoarse+(hhh(1,1,ind)-1)*ngridmax
-              ih_right=ncoarse+(hhh(1,2,ind)-1)*ngridmax
-              phi_xm = u_c; phi_xp = u_c
-              if(igridn_w(i,ig_left ) > 0) phi_xm = scalar_gr(igridn_w(i,ig_left )+ih_left)
-              if(igridn_w(i,ig_right) > 0) phi_xp = scalar_gr(igridn_w(i,ig_right)+ih_right)
-
-              ig_left =ggg(2,1,ind); ig_right=ggg(2,2,ind)
-              ih_left =ncoarse+(hhh(2,1,ind)-1)*ngridmax
-              ih_right=ncoarse+(hhh(2,2,ind)-1)*ngridmax
-              phi_ym = u_c; phi_yp = u_c
-              if(igridn_w(i,ig_left ) > 0) phi_ym = scalar_gr(igridn_w(i,ig_left )+ih_left)
-              if(igridn_w(i,ig_right) > 0) phi_yp = scalar_gr(igridn_w(i,ig_right)+ih_right)
-
-              ig_left =ggg(3,1,ind); ig_right=ggg(3,2,ind)
-              ih_left =ncoarse+(hhh(3,1,ind)-1)*ngridmax
-              ih_right=ncoarse+(hhh(3,2,ind)-1)*ngridmax
-              phi_zm = u_c; phi_zp = u_c
-              if(igridn_w(i,ig_left ) > 0) phi_zm = scalar_gr(igridn_w(i,ig_left )+ih_left)
-              if(igridn_w(i,ig_right) > 0) phi_zp = scalar_gr(igridn_w(i,ig_right)+ih_right)
+              ! Parent-CIC Dirichlet closure at coarse-fine interfaces.
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0, 0,u_c,phi_xm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0, 0,u_c,phi_xp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1, 0,u_c,phi_ym)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1, 0,u_c,phi_yp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 0,-1,u_c,phi_zm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 0, 1,u_c,phi_zp)
 
               ! Laplacian
               lapl = (phi_xp + phi_xm + phi_yp + phi_ym + phi_zp + phi_zm - 6d0*u_c) * dx2_inv
@@ -2378,23 +3171,48 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
               phi_yy = (phi_yp + phi_ym - 2d0*u_c) * dx2_inv
               phi_zz = (phi_zp + phi_zm - 2d0*u_c) * dx2_inv
 
-              ! Mixed derivatives via diagonal neighbors
-              ! ∂²φ/∂x∂y: need (+x,+y), (+x,-y), (-x,+y), (-x,-y)
-              ! These are obtained by double morton_nbor_grid calls
-              ! For simplicity and robustness at coarse-fine boundaries,
-              ! approximate mixed derivatives using only face neighbors:
-              ! (∇²φ)² - Tr = φ_xx² + φ_yy² + φ_zz² + 2(φ_xy² + φ_xz² + φ_yz²)
-              ! = lapl² - (lapl² - φ_xx² - φ_yy² - φ_zz² - 2*cross_terms)
-              ! Without diagonal: set cross_terms ≈ 0
-              ! Then Vainshtein = lapl² - (φ_xx² + φ_yy² + φ_zz²)
-              !   = (φ_xx+φ_yy+φ_zz)² - (φ_xx²+φ_yy²+φ_zz²)
-              !   = 2*(φ_xx*φ_yy + φ_xx*φ_zz + φ_yy*φ_zz)
+              ! Full mixed Hessian from centered diagonal samples.
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 1, 0,u_c,phi_pp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1,-1, 0,u_c,phi_pm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 1, 0,u_c,phi_mp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1,-1, 0,u_c,phi_mm)
+              dpp=(phi_pp-phi_xp-phi_yp+u_c)*dx2_inv
+              dpm=(phi_xp-phi_pm-u_c+phi_ym)*dx2_inv
+              dmp=(phi_yp-phi_mp-u_c+phi_xm)*dx2_inv
+              dmm=(u_c-phi_ym-phi_xm+phi_mm)*dx2_inv
+              mix_xy2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
+              if(galileon_tracker) &
+                   & mix_xy2=(0.25d0*(phi_pp-phi_pm-phi_mp+phi_mm)*dx2_inv)**2
+              dmix_du=0.5d0*dx2_inv*(dpp-dpm-dmp+dmm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0, 1,u_c,phi_pp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0,-1,u_c,phi_pm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0, 1,u_c,phi_mp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0,-1,u_c,phi_mm)
+              dpp=(phi_pp-phi_xp-phi_zp+u_c)*dx2_inv
+              dpm=(phi_xp-phi_pm-u_c+phi_zm)*dx2_inv
+              dmp=(phi_zp-phi_mp-u_c+phi_xm)*dx2_inv
+              dmm=(u_c-phi_zm-phi_xm+phi_mm)*dx2_inv
+              mix_xz2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
+              if(galileon_tracker) &
+                   & mix_xz2=(0.25d0*(phi_pp-phi_pm-phi_mp+phi_mm)*dx2_inv)**2
+              dmix_du=dmix_du+0.5d0*dx2_inv*(dpp-dpm-dmp+dmm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1, 1,u_c,phi_pp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1,-1,u_c,phi_pm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1, 1,u_c,phi_mp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1,-1,u_c,phi_mm)
+              dpp=(phi_pp-phi_yp-phi_zp+u_c)*dx2_inv
+              dpm=(phi_yp-phi_pm-u_c+phi_zm)*dx2_inv
+              dmp=(phi_zp-phi_mp-u_c+phi_ym)*dx2_inv
+              dmm=(u_c-phi_zm-phi_ym+phi_mm)*dx2_inv
+              mix_yz2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
+              if(galileon_tracker) &
+                   & mix_yz2=(0.25d0*(phi_pp-phi_pm-phi_mp+phi_mm)*dx2_inv)**2
+              dmix_du=dmix_du+0.5d0*dx2_inv*(dpp-dpm-dmp+dmm)
 
-              ! Vainshtein operator: (∇²φ)² - Σ(∂ᵢ∂ⱼφ)²
-              ! Approximated as: lapl² - (φ_xx² + φ_yy² + φ_zz²) (ignoring off-diag)
-              ! = 2*(φ_xx*φ_yy + φ_xx*φ_zz + φ_yy*φ_zz)
+              ! Vainshtein operator: (trace H)^2 - trace(H^2).
               lapl2 = lapl**2
-              trace_ij2 = phi_xx**2 + phi_yy**2 + phi_zz**2
+              trace_ij2 = phi_xx**2 + phi_yy**2 + phi_zz**2 &
+                   & + 2d0*(mix_xy2+mix_xz2+mix_yz2)
               vain_term = lapl2 - trace_ij2
 
               ! Source = Ωm*a/β * δ  (in code units)
@@ -2412,9 +3230,9 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
               ! d(lapl²)/du = 2*lapl*(-6/dx²)
               ! d(phi_xx²)/du = 2*phi_xx*(-2/dx²), similarly for yy, zz
               ! d(trace_ij2)/du = 2*(-2/dx²)*(phi_xx+phi_yy+phi_zz) = 2*(-2/dx²)*lapl
-              ! d(vain_term)/du = 2*lapl*(-6/dx²) - 2*lapl*(-2/dx²)
-              !                 = 2*lapl*(-6/dx² + 2/dx²) = 2*lapl*(-4/dx²)
-              jacobian = -6d0*dx2_inv + coeff * 2d0 * lapl * (-4d0*dx2_inv)
+              ! The compatible mixed stencil contributes dmix_du.
+              jacobian = -6d0*dx2_inv + coeff * &
+                   & (-8d0*lapl*dx2_inv-2d0*dmix_du)
 
               ! Newton update
               if(abs(jacobian) > 1d-30) then
@@ -2477,6 +3295,7 @@ subroutine symmetron_solve_level(ilevel, icount)
   ! first step, restarts and newly refined cells; pre-SSB (a<=a_ssb)
   ! chi_bar=0 and chi=0 is the true solution.
   call symmetron_seed_scalar(ilevel)
+  call vain_prepare_uniform_cache(ilevel)
 
 #ifdef USE_FFTW
   ! Spectral Newton on the uniform domain level (broken phase only)
@@ -2484,7 +3303,7 @@ subroutine symmetron_solve_level(ilevel, icount)
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
      do iter=1,3
         call sb_build_fft_rhs(ilevel, a_ssb, L_symmetron, m2bar)
-        call level_fft_helmholtz(ilevel, m2bar)
+        call level_fft_helmholtz(ilevel, m2bar, 0d0, 1d0)
         call make_virtual_fine_dp(scalar_gr(1), ilevel)
      end do
   end if
@@ -2516,16 +3335,17 @@ subroutine symmetron_solve_level(ilevel, icount)
 
      if(rel_res < symmetron_eps) then
         converged = .true.
-        if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+        if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
              ' Symmetron level ',ilevel,' converged in ',iter,' iters, res=',rel_res
         exit
      end if
   end do
 
-  if(.not. converged .and. myid==1) then
-     write(*,'(A,I2,A,I3,A,ES10.3)') &
-          ' WARNING: Symmetron level ',ilevel,' NOT converged after ', &
-          n_iter_symmetron,' iters, res=',rel_res
+  if(.not. converged) then
+     if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
+          & ' WARNING: Symmetron level ',ilevel,' NOT converged after ', &
+          & n_iter_symmetron,' iters, res=',rel_res
+     if(scalar_solver_strict) call scalar_solver_abort
   end if
 
   ! Save for warm start
@@ -2650,7 +3470,7 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
-  real(dp)::u_c,lapl,residual,jacobian,delta_u
+  real(dp)::u_c,lapl,residual,jacobian,delta_u,u_nb_l,u_nb_r
   real(dp)::L_code,L2_inv,a2_over_2L2
   real(dp)::rho_ratio,mass_term,cubic_coeff
   integer::icolor
@@ -2695,9 +3515,9 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right, &
-!$omp&  u_c,lapl,residual,jacobian,delta_u, &
+!$omp&  u_c,lapl,residual,jacobian,delta_u,u_nb_l,u_nb_r, &
 !$omp&  rho_ratio,mass_term) &
-!$omp& reduction(max:res_max,src_max) schedule(dynamic)
+!$omp& reduction(max:res_max,src_max) schedule(static)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
@@ -2709,8 +3529,8 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
         end do
         do idim=1,ndim
            do i=1,ngrid
-              igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-              igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+              igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+              igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
            end do
         end do
 
@@ -2727,22 +3547,25 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
            do i=1,ngrid
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Compute Laplacian; Neumann closure at coarse-fine boundaries
+              ! Same-level neighbours are already gathered for this vector.
+              ! Use the Morton/parent-CIC path only at a true AMR boundary.
               lapl = 0d0
               do idim=1,ndim
-                 ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
+                 ig_left =ggg(idim,1,ind)
+                 ig_right=ggg(idim,2,ind)
                  ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
                  ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
                  if(igridn_w(i,ig_left) > 0) then
-                    lapl = lapl + scalar_gr(igridn_w(i,ig_left )+ih_left)
+                    u_nb_l=scalar_gr(igridn_w(i,ig_left)+ih_left)
                  else
-                    lapl = lapl + u_c
+                    call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,u_c,u_nb_l)
                  end if
                  if(igridn_w(i,ig_right) > 0) then
-                    lapl = lapl + scalar_gr(igridn_w(i,ig_right)+ih_right)
+                    u_nb_r=scalar_gr(igridn_w(i,ig_right)+ih_right)
                  else
-                    lapl = lapl + u_c
+                    call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,1,u_c,u_nb_r)
                  end if
+                 lapl=lapl+u_nb_l+u_nb_r
               end do
 
               lapl = (lapl - 6d0*u_c) * dx2_inv
@@ -2792,7 +3615,7 @@ subroutine compute_fifth_force_symmetron(ilevel)
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc
   integer::nx_loc
-  real(dp)::grad_u,chi_c,factor
+  real(dp)::grad_u,chi_c,factor,u_left,u_right
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
@@ -2824,7 +3647,7 @@ subroutine compute_fifth_force_symmetron(ilevel)
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
-!$omp&  ind_nb_left,ind_nb_right,grad_u,chi_c) schedule(dynamic)
+!$omp&  ind_nb_left,ind_nb_right,grad_u,chi_c,u_left,u_right) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -2836,8 +3659,8 @@ subroutine compute_fifth_force_symmetron(ilevel)
      end do
      do idim=1,ndim
         do i=1,ngrid
-           igridn_w(i,2*idim-1)=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim-1)
-           igridn_w(i,2*idim  )=morton_nbor_grid(ind_grid_w(i),ilevel,2*idim  )
+           igridn_w(i,2*idim-1)=vain_face_grid(igrid+i-1,2*idim-1)
+           igridn_w(i,2*idim  )=vain_face_grid(igrid+i-1,2*idim  )
         end do
      end do
 
@@ -2855,16 +3678,17 @@ subroutine compute_fifth_force_symmetron(ilevel)
               ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
 
-              ! One-sided differences at coarse-fine boundaries
-              if(igridn_w(i,ig_left)==0 .and. igridn_w(i,ig_right)==0) cycle
-              if(igridn_w(i,ig_left)==0) then
-                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) - chi_c) / dx_loc
-              else if(igridn_w(i,ig_right)==0) then
-                 grad_u = (chi_c - scalar_gr(igridn_w(i,ig_left)+ih_left)) / dx_loc
+              if(igridn_w(i,ig_left) > 0) then
+                 u_left=scalar_gr(igridn_w(i,ig_left)+ih_left)
               else
-                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) &
-                      &  - scalar_gr(igridn_w(i,ig_left )+ih_left)) / (2d0*dx_loc)
+                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,chi_c,u_left)
               end if
+              if(igridn_w(i,ig_right) > 0) then
+                 u_right=scalar_gr(igridn_w(i,ig_right)+ih_right)
+              else
+                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,1,chi_c,u_right)
+              end if
+              grad_u=(u_right-u_left)/(2d0*dx_loc)
               f(ind_cell_w(i),idim) = f(ind_cell_w(i),idim) + factor * chi_c * grad_u
            end do
         end do
@@ -2945,7 +3769,7 @@ subroutine dilaton_solve_level(ilevel, icount)
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
      do iter=1,3
         call dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
-        call level_fft_helmholtz(ilevel, m2bar)
+        call level_fft_helmholtz(ilevel, m2bar, 0.25d0, 1d0)
         call make_virtual_fine_dp(scalar_gr(1), ilevel)
      end do
   end if
@@ -2983,10 +3807,11 @@ subroutine dilaton_solve_level(ilevel, icount)
      end if
   end do
 
-  if(.not. converged .and. myid==1) then
-     write(*,'(A,I2,A,I3,A,ES10.3)') &
-          ' WARNING: Dilaton level ',ilevel,' NOT converged after ', &
-          n_iter_dilaton,' iters, res=',rel_res
+  if(.not. converged) then
+     if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+          & ' WARNING: Dilaton level ',ilevel,' NOT converged after ', &
+          & n_iter_dilaton,' iters, res=',rel_res
+     if(scalar_solver_strict) call scalar_solver_abort
   end if
 
   call dilaton_save_old(ilevel)
@@ -3094,7 +3919,7 @@ subroutine dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, res_max, src_max)
   integer::ig_left,ig_right,ih_left,ih_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
-  real(dp)::u_c,lapl,residual,jacobian,delta_u
+  real(dp)::u_c,lapl,residual,jacobian,delta_u,u_nb_l,u_nb_r
   real(dp)::boxratio_sq,cA,cV,pexp,wfac,vphi,dvphi,vbar,source
   integer::icolor
 
@@ -3136,7 +3961,7 @@ subroutine dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, res_max, src_max)
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
-!$omp&  u_c,lapl,residual,jacobian,delta_u, &
+!$omp&  u_c,lapl,residual,jacobian,delta_u,u_nb_l,u_nb_r, &
 !$omp&  wfac,vphi,dvphi,source) &
 !$omp& reduction(max:res_max,src_max) schedule(dynamic)
      do igrid=1,ncache,nvector
@@ -3167,22 +3992,12 @@ subroutine dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, res_max, src_max)
            do i=1,ngrid
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Laplacian; Neumann closure at coarse-fine boundaries
+              ! Parent-CIC Dirichlet data at coarse-fine interfaces.
               lapl = 0d0
               do idim=1,ndim
-                 ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
-                 ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
-                 ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
-                 if(igridn_w(i,ig_left) > 0) then
-                    lapl = lapl + scalar_gr(igridn_w(i,ig_left )+ih_left)
-                 else
-                    lapl = lapl + u_c
-                 end if
-                 if(igridn_w(i,ig_right) > 0) then
-                    lapl = lapl + scalar_gr(igridn_w(i,ig_right)+ih_right)
-                 else
-                    lapl = lapl + u_c
-                 end if
+                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,u_c,u_nb_l)
+                 call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim, 1,u_c,u_nb_r)
+                 lapl=lapl+u_nb_l+u_nb_r
               end do
               lapl = (lapl - 6d0*u_c) * dx2_inv
 
@@ -3203,7 +4018,7 @@ subroutine dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, res_max, src_max)
                       & delta_u = sign(0.5d0*abs(u_c), delta_u)
                  scalar_gr(ind_cell_w(i)) = u_c + delta_u
                  if(scalar_gr(ind_cell_w(i)) <= 0d0) &
-                      & scalar_gr(ind_cell_w(i)) = 0.5d0*u_c
+                      & scalar_gr(ind_cell_w(i)) = 0.5d0*max(abs(u_c),1d-30*chibar_d)
               end if
 
               src_max = max(src_max, abs(source))
@@ -3233,7 +4048,7 @@ subroutine compute_fifth_force_dilaton(ilevel, factor_in)
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc
   integer::nx_loc
-  real(dp)::grad_u,phi_c,factor
+  real(dp)::grad_u,phi_c,factor,u_left,u_right
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
@@ -3261,7 +4076,7 @@ subroutine compute_fifth_force_dilaton(ilevel, factor_in)
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
-!$omp&  ind_nb_left,ind_nb_right,grad_u,phi_c) schedule(dynamic)
+!$omp&  ind_nb_left,ind_nb_right,grad_u,phi_c,u_left,u_right) schedule(dynamic)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -3292,16 +4107,9 @@ subroutine compute_fifth_force_dilaton(ilevel, factor_in)
               ih_left =ncoarse+(hhh(idim,1,ind)-1)*ngridmax
               ih_right=ncoarse+(hhh(idim,2,ind)-1)*ngridmax
 
-              ! One-sided differences at coarse-fine boundaries
-              if(igridn_w(i,ig_left)==0 .and. igridn_w(i,ig_right)==0) cycle
-              if(igridn_w(i,ig_left)==0) then
-                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) - phi_c) / dx_loc
-              else if(igridn_w(i,ig_right)==0) then
-                 grad_u = (phi_c - scalar_gr(igridn_w(i,ig_left)+ih_left)) / dx_loc
-              else
-                 grad_u = (scalar_gr(igridn_w(i,ig_right)+ih_right) &
-                      &  - scalar_gr(igridn_w(i,ig_left )+ih_left)) / (2d0*dx_loc)
-              end if
+              call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,phi_c,u_left)
+              call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim, 1,phi_c,u_right)
+              grad_u=(u_right-u_left)/(2d0*dx_loc)
               f(ind_cell_w(i),idim) = f(ind_cell_w(i),idim) + factor * phi_c * grad_u
            end do
         end do
@@ -3357,7 +4165,7 @@ subroutine galileon_solve_level(ilevel, icount)
   real(dp)::xi_t,E2_t,hd_t,beta1_t
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
-  real(dp)::rel_res
+  real(dp)::rel_res,fft_rel
   logical::converged
 #ifdef USE_FFTW
   logical,external::level_fft_ok
@@ -3406,19 +4214,35 @@ subroutine galileon_solve_level(ilevel, icount)
      call galileon_init_scalar(ilevel)
   end if
 
+  converged = .false.
 #ifdef USE_FFTW
   ! Operator-split spectral solve on the uniform domain level
   if(level_fft_ok(ilevel)) then
+     call vain_prepare_uniform_cache(ilevel)
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
-     do iter=1,5
-        call vain_build_fft_rhs(ilevel, omega_m*aexp/beta_G, coeff_G)
-        call level_fft_helmholtz(ilevel, 0d0)
+     ! The tracker becomes only weakly elliptic near a~0.8 and needs
+     ! damped trace/traceless Picard steps.  Test the mean-projected
+     ! residual staged for the periodic FFT: after the negative-
+     ! discriminant prescription the unprojected local targets need
+     ! not have zero mean and therefore cannot themselves be a
+     ! periodic Laplacian.
+     do iter=1,500
+        call vain_build_fft_rhs(ilevel, omega_m*aexp/beta_G, coeff_G, &
+             & .true., fft_rel)
+        if(fft_rel < galileon_eps) then
+           converged=.true.
+           if(myid==1) write(*,'(A,I2,A,I5,A,ES10.3)') &
+                & ' Galileon level ',ilevel,' FFT converged in ',iter-1, &
+                & ' iters, res=',fft_rel
+           exit
+        end if
+        call level_fft_helmholtz(ilevel, 0d0, 0d0, 0.25d0)
         call make_virtual_fine_dp(scalar_gr(1), ilevel)
      end do
   end if
 #endif
 
-  converged = .false.
+  if(.not.converged) then
   do iter=1,n_iter_galileon
 
      call galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max_local, src_max_local)
@@ -3443,16 +4267,18 @@ subroutine galileon_solve_level(ilevel, icount)
 
      if(rel_res < galileon_eps) then
         converged = .true.
-        if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+        if(myid==1) write(*,'(A,I2,A,I5,A,ES10.3)') &
              ' Galileon level ',ilevel,' converged in ',iter,' iters, res=',rel_res
         exit
      end if
   end do
+  end if
 
-  if(.not. converged .and. myid==1) then
-     write(*,'(A,I2,A,I3,A,ES10.3)') &
-          ' WARNING: Galileon level ',ilevel,' NOT converged after ', &
-          n_iter_galileon,' iters, res=',rel_res
+  if(.not. converged) then
+     if(myid==1) write(*,'(A,I2,A,I5,A,ES10.3)') &
+          & ' WARNING: Galileon level ',ilevel,' NOT converged after ', &
+          & n_iter_galileon,' iters, res=',rel_res
+     if(scalar_solver_strict) call scalar_solver_abort
   end if
 
   call galileon_save_old(ilevel)
@@ -3538,8 +4364,11 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
   integer::nx_loc
   real(dp)::u_c,lapl,source,residual,jacobian,delta_u,sclamp
   real(dp)::phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp
-  real(dp)::phi_xx,phi_yy,phi_zz
+  real(dp)::phi_xx,phi_yy,phi_zz,mix_xy2,mix_xz2,mix_yz2
+  real(dp)::phi_pp,phi_pm,phi_mp,phi_mm
   real(dp)::lapl2,trace_ij2,vain_term
+  real(dp)::dpp,dpm,dmp,dmm,dmix_du
+  real(dp)::tbar_ij,qcoeff,disc,a_tgt
   integer::icolor
 
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
@@ -3569,15 +4398,18 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
   res_max = 0d0
   src_max = 0d0
 
-  do icolor=0,1
+  ! Mixed Hessian terms couple checkerboard-equal edge diagonals.
+  ! Eight cell-parity colours remove that same-sweep dependence.
+  do icolor=0,7
 
 !$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  u_c,lapl,source,residual,jacobian,delta_u, &
 !$omp&  phi_xm,phi_xp,phi_ym,phi_yp,phi_zm,phi_zp, &
-!$omp&  phi_xx,phi_yy,phi_zz, &
-!$omp&  lapl2,trace_ij2,vain_term,sclamp) &
+!$omp&  phi_xx,phi_yy,phi_zz,mix_xy2,mix_xz2,mix_yz2, &
+!$omp&  phi_pp,phi_pm,phi_mp,phi_mm,dpp,dpm,dmp,dmm,dmix_du, &
+!$omp&  lapl2,trace_ij2,vain_term,tbar_ij,qcoeff,disc,a_tgt,sclamp) &
 !$omp& reduction(max:res_max,src_max) schedule(dynamic)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
@@ -3596,9 +4428,7 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
         end do
 
         do ind=1,twotondim
-           ! True 3D red-black: color = parity of (i+j+k) of the cell,
-           ! i.e. popcount of the oct-local index (oct origins are even)
-           if(mod(popcnt(ind-1), 2) /= icolor) cycle
+           if(ind-1 /= icolor) cycle
 
            iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
@@ -3608,21 +4438,13 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
            do i=1,ngrid
               u_c = scalar_gr(ind_cell_w(i))
 
-              ! Face neighbor values; Neumann closure at coarse-fine boundaries
-              ig_left =ggg(1,1,ind); ig_right=ggg(1,2,ind)
-              phi_xm = u_c; phi_xp = u_c
-              if(igridn_w(i,ig_left ) > 0) phi_xm = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(1,1,ind)-1)*ngridmax)
-              if(igridn_w(i,ig_right) > 0) phi_xp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(1,2,ind)-1)*ngridmax)
-
-              ig_left =ggg(2,1,ind); ig_right=ggg(2,2,ind)
-              phi_ym = u_c; phi_yp = u_c
-              if(igridn_w(i,ig_left ) > 0) phi_ym = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(2,1,ind)-1)*ngridmax)
-              if(igridn_w(i,ig_right) > 0) phi_yp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(2,2,ind)-1)*ngridmax)
-
-              ig_left =ggg(3,1,ind); ig_right=ggg(3,2,ind)
-              phi_zm = u_c; phi_zp = u_c
-              if(igridn_w(i,ig_left ) > 0) phi_zm = scalar_gr(igridn_w(i,ig_left) +ncoarse+(hhh(3,1,ind)-1)*ngridmax)
-              if(igridn_w(i,ig_right) > 0) phi_zp = scalar_gr(igridn_w(i,ig_right)+ncoarse+(hhh(3,2,ind)-1)*ngridmax)
+              ! Parent-CIC Dirichlet closure at coarse-fine interfaces.
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0, 0,u_c,phi_xm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0, 0,u_c,phi_xp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1, 0,u_c,phi_ym)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1, 0,u_c,phi_yp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 0,-1,u_c,phi_zm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 0, 1,u_c,phi_zp)
 
               ! Laplacian
               lapl = (phi_xp + phi_xm + phi_yp + phi_ym + phi_zp + phi_zm - 6d0*u_c) * dx2_inv
@@ -3632,25 +4454,90 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
               phi_yy = (phi_yp + phi_ym - 2d0*u_c) * dx2_inv
               phi_zz = (phi_zp + phi_zm - 2d0*u_c) * dx2_inv
 
-              ! Vainshtein: (∇²φ)² - (φ_xx² + φ_yy² + φ_zz²)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 1, 0,u_c,phi_pp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1,-1, 0,u_c,phi_pm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 1, 0,u_c,phi_mp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1,-1, 0,u_c,phi_mm)
+              dpp=(phi_pp-phi_xp-phi_yp+u_c)*dx2_inv
+              dpm=(phi_xp-phi_pm-u_c+phi_ym)*dx2_inv
+              dmp=(phi_yp-phi_mp-u_c+phi_xm)*dx2_inv
+              dmm=(u_c-phi_ym-phi_xm+phi_mm)*dx2_inv
+              mix_xy2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
+              dmix_du=0.5d0*dx2_inv*(dpp-dpm-dmp+dmm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0, 1,u_c,phi_pp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 1, 0,-1,u_c,phi_pm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0, 1,u_c,phi_mp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel,-1, 0,-1,u_c,phi_mm)
+              dpp=(phi_pp-phi_xp-phi_zp+u_c)*dx2_inv
+              dpm=(phi_xp-phi_pm-u_c+phi_zm)*dx2_inv
+              dmp=(phi_zp-phi_mp-u_c+phi_xm)*dx2_inv
+              dmm=(u_c-phi_zm-phi_xm+phi_mm)*dx2_inv
+              mix_xz2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
+              dmix_du=dmix_du+0.5d0*dx2_inv*(dpp-dpm-dmp+dmm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1, 1,u_c,phi_pp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0, 1,-1,u_c,phi_pm)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1, 1,u_c,phi_mp)
+              call scalar_sample_offset(ind_grid_w(i),ind,ilevel, 0,-1,-1,u_c,phi_mm)
+              dpp=(phi_pp-phi_yp-phi_zp+u_c)*dx2_inv
+              dpm=(phi_yp-phi_pm-u_c+phi_zm)*dx2_inv
+              dmp=(phi_zp-phi_mp-u_c+phi_ym)*dx2_inv
+              dmm=(u_c-phi_zm-phi_ym+phi_mm)*dx2_inv
+              mix_yz2=0.25d0*(dpp**2+dpm**2+dmp**2+dmm**2)
+              dmix_du=dmix_du+0.5d0*dx2_inv*(dpp-dpm-dmp+dmm)
+
+              ! Vainshtein: (trace H)^2 - trace(H^2)
               lapl2 = lapl**2
-              trace_ij2 = phi_xx**2 + phi_yy**2 + phi_zz**2
+              trace_ij2 = phi_xx**2 + phi_yy**2 + phi_zz**2 &
+                   & + 2d0*(mix_xy2+mix_xz2+mix_yz2)
               vain_term = lapl2 - trace_ij2
 
               ! Source = Ωm*a/β_G * δ
               ! rho has box mean rho_tot ≈ 1; subtract it (δ = rho - rho_tot)
               source = omega_m * aexp / beta_G * (rho(ind_cell_w(i)) - rho_tot)
 
-              residual = lapl + coeff_G * vain_term - source
-
-              ! Jacobian (same form as nDGP)
-              jacobian = -6d0*dx2_inv + coeff_G * 2d0 * lapl * (-4d0*dx2_inv)
+              ! Cubic-Galileon QSA loses real roots in sufficiently
+              ! underdense cells at late times (Barreira et al. 2013).
+              ! Match their ECOSMOG prescription: when the local
+              ! trace/traceless discriminant is negative, set its
+              ! square root to zero and relax to the double root.
+              ! The FFT preconditioner applies the identical projection.
+              tbar_ij=max(trace_ij2-lapl2/3d0,0d0)
+              qcoeff=2d0*coeff_G/3d0
+              disc=1d0+4d0*qcoeff*(source+coeff_G*tbar_ij)
+              a_tgt=source
+              if(abs(qcoeff)>1d-30) then
+                 if(disc>0d0) then
+                    a_tgt=(-1d0+sqrt(disc))/(2d0*qcoeff)
+                 else
+                    a_tgt=-1d0/(2d0*qcoeff)
+                 end if
+              end if
+              if(galileon_tracker .and. abs(qcoeff)>1d-30) then
+                 ! With epsilon=1/3 and centered mixed derivatives,
+                 ! the trace-free quadratic target is independent of
+                 ! the centre cell.  Relax the analytic physical root;
+                 ! a negative discriminant is projected to its double
+                 ! root exactly as in the ECOSMOG prescription.
+                 residual=lapl-a_tgt
+                 jacobian=-6d0*dx2_inv
+              else
+                 residual = lapl + coeff_G * vain_term - source
+                 ! Exact local Jacobian of the compatible Vainshtein stencil.
+                 jacobian = -6d0*dx2_inv + coeff_G * &
+                      & (-8d0*lapl*dx2_inv-2d0*dmix_du)
+              end if
 
               if(abs(jacobian) > 1d-30) then
                  delta_u = -residual / jacobian
                  ! Damped Newton; floor the clamp scale at 1% of the
                  ! delta=1 source so cells with delta~0 still relax
-                 sclamp = 0.5d0*dx2*max(abs(source), 1d-2*omega_m*aexp/abs(beta_G))
+                 if(galileon_tracker) then
+                    sclamp=0.5d0*dx2*max(abs(a_tgt),abs(source), &
+                         & 1d-2*omega_m*aexp/abs(beta_G))
+                 else
+                    sclamp=0.5d0*dx2*max(abs(source), &
+                         & 1d-2*omega_m*aexp/abs(beta_G))
+                 end if
                  if(abs(delta_u) > sclamp) delta_u = sign(sclamp, delta_u)
                  scalar_gr(ind_cell_w(i)) = u_c + delta_u
               end if

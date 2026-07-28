@@ -350,49 +350,80 @@ function dark_cool_implicit(edp_old, rho_D, n_D, dt_phys, aexp, x_H2_in) result(
   real(dp),intent(in),optional::x_H2_in   ! tracked dark-H2 fraction (Phase 2)
   real(dp)::edp_new
 
-  real(dp)::T_D, Lambda, dE
+  real(dp)::T_D, Lambda
   real(dp)::T_floor, edp_floor
+  real(dp)::edp_lo, edp_hi, edp_mid
+  real(dp)::res_lo, res_hi, res_mid, scale
   integer::iter
-  integer,parameter::max_iter = 10
-  real(dp),parameter::tol = 1.0d-4
+  integer,parameter::max_iter = 80
+  real(dp),parameter::tol = 1.0d-10
 
   ! Temperature floor: 1 K
   T_floor = 1.0d0
   ! edp = (3/2) * n_D * kB * T_D / rho_D  (energy per unit mass)
   edp_floor = 1.5d0 * n_D * kB_cgs * T_floor / rho_D
 
-  edp_new = edp_old
-  if(edp_new < edp_floor) edp_new = edp_floor
+  edp_new = max(edp_old, edp_floor)
+  if(rho_D <= 0.0d0 .or. n_D <= 0.0d0 .or. dt_phys <= 0.0d0) return
+  if(edp_old <= edp_floor) return
 
-  ! Simple backward Euler with subcycling if needed
+  ! Solve the backward Euler residual
+  !
+  !   R(e_new) = e_new - e_old + Lambda[T(e_new)] dt / rho = 0
+  !
+  ! on the physically allowed interval [e_floor,e_old].  Bisection is
+  ! slower than a Newton iteration but remains robust across the sharp
+  ! atomic and molecular cooling thresholds.
+  edp_lo = edp_floor
+  edp_hi = edp_old
+
+  T_D = T_floor
+  if(present(x_H2_in)) then
+     Lambda = dark_net_cooling(T_D, n_D, aexp, x_H2_in)
+  else
+     Lambda = dark_net_cooling(T_D, n_D, aexp)
+  end if
+  res_lo = edp_lo - edp_old + max(Lambda, 0.0d0) * dt_phys / rho_D
+
+  T_D = (2.0d0/3.0d0) * edp_hi * rho_D / (n_D * kB_cgs)
+  if(present(x_H2_in)) then
+     Lambda = dark_net_cooling(T_D, n_D, aexp, x_H2_in)
+  else
+     Lambda = dark_net_cooling(T_D, n_D, aexp)
+  end if
+  res_hi = max(Lambda, 0.0d0) * dt_phys / rho_D
+
+  if(res_hi <= 0.0d0) then
+     edp_new = edp_old
+     return
+  end if
+  if(res_lo >= 0.0d0) then
+     edp_new = edp_floor
+     return
+  end if
+
+  scale = max(edp_old, edp_floor)
   do iter = 1, max_iter
-     ! Current dark temperature from internal energy
-     ! edp = (3/2) * n_D * kB * T / rho   =>  T = (2/3) * edp * rho / (n_D * kB)
-     T_D = (2.0d0/3.0d0) * edp_new * rho_D / (n_D * kB_cgs)
-     if(T_D < T_floor) exit
-
-     ! Cooling rate [erg/s/cm^3]
+     edp_mid = 0.5d0 * (edp_lo + edp_hi)
+     T_D = (2.0d0/3.0d0) * edp_mid * rho_D / (n_D * kB_cgs)
      if(present(x_H2_in)) then
         Lambda = dark_net_cooling(T_D, n_D, aexp, x_H2_in)
      else
         Lambda = dark_net_cooling(T_D, n_D, aexp)
      end if
-     if(Lambda <= 0.0d0) exit  ! no cooling (could be heating from Compton if T < T_DCMB)
+     res_mid = edp_mid - edp_old + max(Lambda, 0.0d0) * dt_phys / rho_D
 
-     ! Energy loss per unit mass: dE/dt = -Lambda / rho
-     dE = Lambda * dt_phys / rho_D
-
-     edp_new = edp_new - dE
-     if(edp_new < edp_floor) then
-        edp_new = edp_floor
-        exit
+     if(res_mid > 0.0d0) then
+        edp_hi = edp_mid
+        res_hi = res_mid
+     else
+        edp_lo = edp_mid
+        res_lo = res_mid
      end if
-
-     ! Check convergence
-     if(abs(dE) < tol * edp_new) exit
+     if((edp_hi-edp_lo) <= tol*scale) exit
   end do
 
-  if(edp_new < edp_floor) edp_new = edp_floor
+  edp_new = max(edp_floor, 0.5d0*(edp_lo+edp_hi))
 
 end function dark_cool_implicit
 

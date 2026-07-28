@@ -29,6 +29,7 @@ subroutine read_params
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
        & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
        & ,time_balance_alpha &
+       & ,aexp_step_limit &
        & ,jobcontrolfile &
        & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_auto_tune,n_cuda_streams &
        & ,use_fftw &
@@ -208,6 +209,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   open(1,file=infile)
   rewind(1)
   read(1,NML=run_params)
+  if(aexp_step_limit<=0.0d0)then
+     if(myid==1)write(*,*)'ERROR: aexp_step_limit must be positive'
+     call clean_stop
+  endif
   rewind(1)
   read(1,NML=output_params)
   rewind(1)
@@ -1164,4 +1169,3 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
 #endif
 
 end subroutine read_params
-

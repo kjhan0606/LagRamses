@@ -189,6 +189,10 @@ recursive subroutine amr_step(ilevel,icount)
            do idim=1,ndim
               call make_virtual_fine_dp(f(1,idim),i)
            end do
+           if(allocated(scalar_gr))then
+              call make_virtual_fine_dp(scalar_gr(1),i)
+              call make_virtual_fine_dp(scalar_gr_old(1),i)
+           end if
         end if
      end do
      if(use_fdm) then

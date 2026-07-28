@@ -30,6 +30,7 @@ subroutine read_params
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
        & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
        & ,time_balance_alpha &
+       & ,aexp_step_limit &
        & ,jobcontrolfile &
        & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_auto_tune,n_cuda_streams &
        & ,use_fftw &
@@ -45,9 +46,12 @@ subroutine read_params
        & ,use_symmetron &
        & ,use_dilaton &
        & ,use_galileon &
+       & ,scalar_solver_strict &
        & ,use_coupled_de &
        & ,use_quintessence &
        & ,use_kessence &
+       & ,use_chaplygin &
+       & ,use_rvm &
        & ,use_horndeski &
        & ,use_ede &
        & ,use_sgs &
@@ -68,6 +72,8 @@ subroutine read_params
   namelist/coupled_de_params/beta_cde,cde_friction,cde_vary_mass
   namelist/quint_params/quint_pot,quint_alpha,quint_lambda,quint_phi_ini
   namelist/kessence_params/kes_x0
+  namelist/chaplygin_params/chaplygin_As,chaplygin_alpha
+  namelist/rvm_params/rvm_nu
   namelist/horndeski_params/hs_mu0,hs_mass
   namelist/ede_params/omega_ede,z_ede,w_ede
   namelist/sgs_params/sgs_C_prod,sgs_C_diss,sgs_C_smag,sgs_floor,sgs_cap,sgs_e_init,sgs_hydro
@@ -95,7 +101,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
   namelist/output_params/noutput,foutput,fbackup,aout,tout,output_mode &
        & ,tend,delta_tout,aend,delta_aout,gadget_output,walltime_hrs,minutes_dump &
-       & ,informat,outformat
+       & ,informat,outformat,match_aout
   namelist/amr_params/levelmin,levelmax,ngridmax,ngridtot &
        & ,npartmax,nparttot,nexpand,boxlen,nsinkmax,nlevel_collapse
   namelist/poisson_params/epsilon,gravity_type,gravity_params &
@@ -217,6 +223,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   open(1,file=infile)
   rewind(1)
   read(1,NML=run_params)
+  if(aexp_step_limit<=0.0d0)then
+     if(myid==1)write(*,*)'ERROR: aexp_step_limit must be positive'
+     call clean_stop
+  endif
   rewind(1)
   read(1,NML=output_params)
   rewind(1)
@@ -319,6 +329,18 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      rewind(1)
      read(1,NML=kessence_params,END=562)
 562  continue
+  end if
+  ! Chaplygin gas parameters
+  if(use_chaplygin) then
+     rewind(1)
+     read(1,NML=chaplygin_params,END=564)
+564  continue
+  end if
+  ! Running vacuum parameters
+  if(use_rvm) then
+     rewind(1)
+     read(1,NML=rvm_params,END=565)
+565  continue
   end if
   ! Horndeski parameters
   if(use_horndeski) then
@@ -449,6 +471,57 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
                 ' w0=', w0, ' wa=', wa
         end if
      end if
+  end if
+
+  !-------------------------------------------------
+  ! Chaplygin gas / running-vacuum smooth dark energy
+  !-------------------------------------------------
+  if(use_chaplygin .or. use_rvm) then
+     if(use_chaplygin .and. use_rvm) then
+        if(myid==1) write(*,*) 'ERROR: use_chaplygin and use_rvm are mutually exclusive'
+        call clean_stop
+     end if
+     if(.not. cosmo) then
+        if(myid==1) write(*,*) 'ERROR: use_chaplygin/use_rvm require cosmo=.true.'
+        call clean_stop
+     end if
+     if(use_quintessence .or. use_kessence .or. use_coupled_de .or. use_ede &
+          & .or. use_galileon) then
+        if(myid==1) write(*,*) &
+             & 'ERROR: Chaplygin/running vacuum redefine the DE background; disable ', &
+             & 'quintessence, k-essence, coupled DE, EDE and the Galileon'
+        call clean_stop
+     end if
+     if(w0 /= -1.0d0 .or. wa /= 0.0d0) then
+        if(myid==1) write(*,*) &
+             & 'ERROR: Chaplygin/running vacuum set their own w(a); leave w0=-1, wa=0'
+        call clean_stop
+     end if
+     if(use_fR .or. use_nDGP .or. use_symmetron .or. use_dilaton .or. use_horndeski) then
+        if(myid==1) write(*,*) &
+             & 'ERROR: screened/Horndeski gravity assumes a LCDM background; ', &
+             & 'incompatible with Chaplygin/running vacuum'
+        call clean_stop
+     end if
+  end if
+  if(use_chaplygin) then
+     if(chaplygin_As <= 0.0d0 .or. chaplygin_As >= 1.0d0) then
+        if(myid==1) write(*,*) 'ERROR: chaplygin_As must lie in (0,1), got', chaplygin_As
+        call clean_stop
+     end if
+     if(chaplygin_alpha < 0.0d0) then
+        if(myid==1) write(*,*) 'ERROR: chaplygin_alpha must be >= 0, got', chaplygin_alpha
+        call clean_stop
+     end if
+     if(myid==1) write(*,'(A,F7.4,A,ES10.3)') &
+          & ' Generalized Chaplygin gas DE: A_s=', chaplygin_As, ' alpha=', chaplygin_alpha
+  end if
+  if(use_rvm) then
+     if(abs(rvm_nu) >= 1.0d0) then
+        if(myid==1) write(*,*) 'ERROR: rvm_nu must satisfy |nu|<1, got', rvm_nu
+        call clean_stop
+     end if
+     if(myid==1) write(*,'(A,ES12.4)') ' Running vacuum Lambda(H^2)=c0+nu*H^2: nu=', rvm_nu
   end if
 
   !-------------------------------------------------
@@ -891,7 +964,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1) then
         write(*,'(A)') ' Cubic Galileon gravity enabled'
         write(*,'(A,ES10.3,A,ES10.3)') '   c2=', c2_galileon, '  c3=', c3_galileon
-        write(*,'(A,I3,A,ES10.3)') '   max_iter=', n_iter_galileon, '  eps=', galileon_eps
+        write(*,'(A,I5,A,ES10.3)') '   max_iter=', n_iter_galileon, '  eps=', galileon_eps
      end if
   end if
 
@@ -1244,4 +1317,3 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
 #endif
 
 end subroutine read_params
-

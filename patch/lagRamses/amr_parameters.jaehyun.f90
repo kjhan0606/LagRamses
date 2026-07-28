@@ -155,6 +155,7 @@ module amr_parameters
   integer::noutput=1          ! Total number of outputs
   integer::foutput=1000000    ! Frequency of outputs
   integer::output_mode=0      ! Output mode (for hires runs)
+  logical::match_aout=.false. ! Shorten cosmological coarse steps to hit aout
   logical::gadget_output=.false. ! Output in gadget format
   logical::output_now=.false. ! write output next step
   character(LEN=128)::jobcontrolfile='jobcontrol.txt'  ! Job control file for runtime stop/output
@@ -396,14 +397,14 @@ module amr_parameters
   logical ::use_fR=.false.               ! Enable f(R) gravity
   real(dp)::fR0=-1.0d-6                 ! f_{R,0} amplitude (< 0)
   integer ::fR_n=1                       ! Hu-Sawicki power-law index
-  integer ::n_iter_fR=20                 ! Max Newton-GS iterations per level
+  integer ::n_iter_fR=200                ! Max Newton-GS iterations per level
   real(dp)::fR_eps=1.0d-6               ! Convergence threshold
 
   ! nDGP gravity parameters
   logical ::use_nDGP=.false.             ! Enable nDGP gravity
   real(dp)::omega_rc=0.25d0             ! Omega_rc = 1/(4 r_c^2 H_0^2)
   integer ::nDGP_branch=1               ! 1=normal, -1=self-accelerating
-  integer ::n_iter_nDGP=20              ! Max Newton-GS iterations
+  integer ::n_iter_nDGP=100             ! Max Newton-GS iterations
   real(dp)::nDGP_eps=1.0d-6             ! Convergence threshold
 
   ! Symmetron gravity parameters
@@ -411,7 +412,7 @@ module amr_parameters
   real(dp)::a_ssb=0.5d0                 ! SSB scale factor
   real(dp)::beta_symmetron=1.0d0        ! Coupling strength
   real(dp)::L_symmetron=1.0d0           ! Compton wavelength [Mpc/h]
-  integer ::n_iter_symmetron=20          ! Max Newton-GS iterations
+  integer ::n_iter_symmetron=500         ! Max Newton-GS iterations
   real(dp)::symmetron_eps=1.0d-6        ! Convergence threshold
 
   ! Dilaton gravity parameters (Damour-Polyakov)
@@ -419,7 +420,7 @@ module amr_parameters
   real(dp)::beta_dilaton=1.0d0          ! Coupling strength
   real(dp)::L_dilaton=1.0d0             ! Compton wavelength [Mpc/h]
   real(dp)::a0_dilaton=0.5d0            ! Transition scale factor
-  integer ::n_iter_dilaton=20            ! Max Newton-GS iterations
+  integer ::n_iter_dilaton=100           ! Max Newton-GS iterations
   real(dp)::dilaton_eps=1.0d-6          ! Convergence threshold
 
   ! Galileon (cubic) gravity parameters
@@ -427,8 +428,9 @@ module amr_parameters
   logical ::galileon_tracker=.true.      ! Barreira+13 tracker (parameter-free); F=legacy template
   real(dp)::c2_galileon=-1.0d0          ! Kinetic coefficient (legacy template only)
   real(dp)::c3_galileon=1.0d0           ! Cubic coefficient (legacy template only)
-  integer ::n_iter_galileon=20           ! Max Newton-GS iterations
+  integer ::n_iter_galileon=1000         ! Max Newton-GS iterations
   real(dp)::galileon_eps=1.0d-6         ! Convergence threshold
+  logical ::scalar_solver_strict=.true. ! Stop before applying an unconverged fifth force
 
   ! Coupled Dark Energy parameters
   logical ::use_coupled_de=.false.       ! Enable DM-DE coupling
@@ -446,6 +448,15 @@ module amr_parameters
   ! Purely kinetic k-essence P(X)=-X+X^2 parameters
   logical ::use_kessence=.false.         ! Enable k-essence background
   real(dp)::kes_x0=0.5001d0             ! X(a=1) in M^4 units (>0.5; ->0.5 gives w0->-1)
+
+  ! Generalized Chaplygin gas dark energy: p = -A*rho^{-alpha}
+  logical ::use_chaplygin=.false.        ! Enable generalized Chaplygin gas DE
+  real(dp)::chaplygin_As=0.75d0          ! A_s = A/rho_de0^(1+alpha), in (0,1); w(a=1)=-A_s
+  real(dp)::chaplygin_alpha=1.0d-4       ! GCG index alpha (>=0); small keeps sound-speed oscillations sub-observable
+
+  ! Running vacuum Lambda(H^2) = c0 + nu*H^2 (vacuum-CDM energy exchange)
+  logical ::use_rvm=.false.              ! Enable running vacuum
+  real(dp)::rvm_nu=0.0d0                 ! Running coefficient nu (0=LCDM); rho_c ~ a^{-3(1-nu)}
 
   ! Horndeski quasi-static parametrized gravity
   logical ::use_horndeski=.false.        ! Enable mu(a,k)-modified Poisson

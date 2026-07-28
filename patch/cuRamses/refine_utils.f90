@@ -585,7 +585,7 @@ end subroutine refine_fine
 subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region)
   use amr_commons
   use hydro_commons
-  use poisson_commons, ONLY:f, phi,phi_old
+  use poisson_commons, ONLY:f,phi,phi_old,scalar_gr,scalar_gr_old
   use morton_keys
   use morton_hash
 #ifdef RT
@@ -893,6 +893,19 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
            do i=1,nn
               phi(iskip+ind_grid_son(i))=phi(ind_fathers(i,0))
               phi_old(iskip+ind_grid_son(i))=phi_old(ind_fathers(i,0))
+           end do
+        end do
+     end if
+     ! A newly refined scalar patch must inherit the converged coarse
+     ! solution.  Leaving mmap-zeroed children in place creates an
+     ! artificial field discontinuity (and chi=0 is an exact,
+     ! unphysical Symmetron fixed point after symmetry breaking).
+     if(allocated(scalar_gr)) then
+        do j=1,twotondim
+           iskip=ncoarse+(j-1)*ngridmax
+           do i=1,nn
+              scalar_gr(iskip+ind_grid_son(i))=scalar_gr(ind_fathers(i,0))
+              scalar_gr_old(iskip+ind_grid_son(i))=scalar_gr_old(ind_fathers(i,0))
            end do
         end do
      end if

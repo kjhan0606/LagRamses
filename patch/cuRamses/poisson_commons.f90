@@ -51,6 +51,17 @@ module poisson_commons
   real(dp),allocatable,dimension(:)  ::scalar_gr       ! Scalar field
   real(dp),allocatable,dimension(:)  ::scalar_gr_old   ! Previous step (initial guess)
 
+  ! Uniform Vainshtein-stencil topology.  nDGP/Galileon nonlinear
+  ! corrections reuse an unchanged active-grid layout many times within
+  ! one scalar solve, so build these Morton neighbours once per solve.
+  integer,allocatable,dimension(:,:) ::vain_face_grid  ! (active grid, 6 faces)
+  integer,allocatable,dimension(:,:) ::vain_xy_grid    ! (active grid, 4 xy edges)
+  integer,allocatable,dimension(:,:) ::vain_xz_grid    ! (active grid, 4 xz edges)
+  integer,allocatable,dimension(:,:) ::vain_yz_grid    ! (active grid, 4 yz edges)
+  integer ::vain_cache_level=-1
+  integer ::vain_cache_ngrid=-1
+  logical ::vain_cache_ready=.false.
+
   ! Fuzzy Dark Matter (FDM) wavefunction
   real(dp),allocatable,dimension(:)  ::psi_re          ! Re(psi)
   real(dp),allocatable,dimension(:)  ::psi_im          ! Im(psi)

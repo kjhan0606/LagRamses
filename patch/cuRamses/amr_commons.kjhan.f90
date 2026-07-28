@@ -26,6 +26,7 @@ module amr_commons
   real(dp)::aexp_old=1.0D0                      ! Old expansion factor
   real(dp)::aexp_old2=0.0D0                      ! Old expansion factor at just before coarse time step
   real(dp)::aexp_old_fine=1.0D0                 ! Old expansion factor in fine steps
+  real(dp)::aexp_step_limit=0.1D0               ! Maximum fractional aexp change per coarse step
   real(dp)::rho_tot=0.0D0                       ! Mean density in the box
   real(dp)::t=0.0D0                             ! Time variable
 
@@ -184,4 +185,3 @@ module amr_commons
   real(dp)::units_length=1.0   ! [cm]
 
 end module amr_commons
-
