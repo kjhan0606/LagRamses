@@ -1529,6 +1529,10 @@ subroutine restore_part_hdf5()
      call clean_stop
   end if
 
+  ! HDF5 particles are restored contiguously into slots 1:npart_loc.
+  ! Mark every remaining slot as free before any full-array occupancy scan.
+  if(npart_loc < npartmax) levelp(npart_loc+1:npartmax) = 0
+
   ! Allocate buffers
   allocate(dbuf(npart_loc))
   allocate(ibuf8(npart_loc))

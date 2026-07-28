@@ -525,7 +525,7 @@ subroutine backup_part_hdf5()
   include 'mpif.h'
 #endif
   integer :: i, idim, ipart, info
-  integer :: npart_loc
+  integer :: npart_loc, npart_active
   integer(i8b) :: npart_total, offset_part, tmp_long
   integer, allocatable :: npart_all(:)
   real(dp), allocatable :: dbuf(:)
@@ -537,6 +537,12 @@ subroutine backup_part_hdf5()
 
   ! Gather particle counts
   npart_loc = npart
+  npart_active = count(levelp(1:npartmax) > 0)
+  if(npart_active /= npart_loc) then
+     write(*,*) 'ERROR: active HDF5 particle count differs from npart'
+     write(*,*) 'myid, active, npart=', myid, npart_active, npart_loc
+     call clean_stop
+  end if
 #ifndef WITHOUTMPI
   call MPI_ALLGATHER(npart_loc, 1, MPI_INTEGER, npart_all, 1, MPI_INTEGER, &
        MPI_COMM_WORLD, info)
