@@ -352,7 +352,8 @@ struct particle_data
 
 int ReadRamses(KD kd,char *inputfile)
 {
-  int dummy,npart,npart2,i,j,icpu,ncpu,ndim,ncurr,nstar_tot,nsink,nstar;
+  int dummy,npart,npart2,i,j,icpu,ncpu,ndim,ncurr,nsink,nstar;
+  long long nstar_tot;
   int localseed[4];
   double mstar_tot,mstar_lost,m_tot;
   float *temp;
@@ -391,8 +392,9 @@ int ReadRamses(KD kd,char *inputfile)
   fread(&localseed[0], sizeof(int), 4, fp);
   fread(&dummy, sizeof(dummy), 1, fp);
   fread(&dummy, sizeof(dummy), 1, fp);
-  fread(&nstar, sizeof(nstar), 1, fp);
+  fread(&nstar_tot, sizeof(nstar_tot), 1, fp);
   fread(&dummy, sizeof(dummy), 1, fp);
+  nstar=(nstar_tot>0);
 
   printf("Number of Ramses files = %d \n",ncpu);
   /*  printf("ndim = %d \n",ndim);
