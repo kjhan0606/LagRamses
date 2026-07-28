@@ -9,6 +9,7 @@ subroutine init_poisson
   integer::ncell,ncache,iskip,igrid,i,ilevel,ind,ivar
   integer::nvar2,ilevel2,numbl2,ilun,ibound,istart,info
   integer::ncpu2,ndim2,nlevelmax2,nboundary2
+  logical::scalar_in_checkpoint
   integer ,dimension(:),allocatable::ind_grid
   real(dp),dimension(:),allocatable::xx
   character(LEN=80)::fileloc
@@ -116,11 +117,16 @@ subroutine init_poisson
      read(ilun)ndim2
      read(ilun)nlevelmax2
      read(ilun)nboundary2
-     if(ndim2.ne.ndim+1)then
+     scalar_in_checkpoint=(ndim2.eq.ndim+2)
+     if(ndim2.ne.ndim+1 .and. .not.scalar_in_checkpoint)then
         write(*,*)'File poisson.tmp is not compatible'
         write(*,*)'Found   =',ndim2
-        write(*,*)'Expected=',ndim+1
+        write(*,*)'Expected=',ndim+1,' or ',ndim+2
         call clean_stop
+     end if
+     if(myid==1 .and. allocated(scalar_gr) .and. &
+          & .not.scalar_in_checkpoint)then
+        write(*,*)'Scalar field absent from legacy checkpoint; solver will initialize it'
      end if
      do ilevel=1,nlevelmax2
         do ibound=1,nboundary+ncpu
@@ -162,6 +168,18 @@ subroutine init_poisson
                        f(ind_grid(i)+iskip,ivar)=xx(i)
                     end do
                  end do
+                 ! New-format gravity checkpoints append scalar_gr after
+                 ! each cell's force components.  Always consume the
+                 ! record, even if this run has no scalar model enabled.
+                 if(scalar_in_checkpoint)then
+                    read(ilun)xx
+                    if(allocated(scalar_gr))then
+                       do i=1,ncache
+                          scalar_gr(ind_grid(i)+iskip)=xx(i)
+                          scalar_gr_old(ind_grid(i)+iskip)=xx(i)
+                       end do
+                    end if
+                 end if
               end do
               deallocate(ind_grid,xx)
            end if
@@ -185,6 +203,8 @@ subroutine init_poisson
      call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
      call diag_check_nan('post_poisson_restore_std')
+     if(myid==1 .and. scalar_in_checkpoint .and. allocated(scalar_gr)) &
+          & write(*,*)'Modified-gravity scalar field restored from checkpoint'
      if(verbose)write(*,*)'POISSON backup files read completed'
 
      ! FDM binary restart: read the wavefunction psi from fdm_<nrestart>.out.
@@ -214,6 +234,7 @@ subroutine restore_poisson_binary_varcpu
   integer :: ncache, ilun, ndim2, nlevelmax2, nboundary2, ncpu2
   integer :: igrid, iskip, icell, nval_per_grid, ngrav_per_oct, nprops, base
   integer :: nlocal, nrecv
+  logical :: scalar_in_checkpoint
   real(dp), allocatable :: xx(:)
   character(LEN=80) :: fileloc
   character(LEN=5) :: nchar, ncharcpu
@@ -246,7 +267,38 @@ subroutine restore_poisson_binary_varcpu
   nx_loc = icoarse_max - icoarse_min + 1
   scale = boxlen / dble(nx_loc)
   nxny = nx * ny
-  ngrav_per_oct = 1 + ndim  ! phi + force(1:ndim)
+
+  ! Read the payload version from the first gravity file before sizing
+  ! exchange buffers.  This keeps variable-ncpu restarts compatible with
+  ! both legacy (phi+force) and scalar-aware checkpoints.
+  ndim2=ndim+1
+  if(myid==1)then
+     if(IOGROUPSIZEREP>0)then
+        call title(1,ncharcpu)
+        fileloc='output_'//TRIM(nchar)//'/group_'//TRIM(ncharcpu)//'/grav_'//TRIM(nchar)//'.out'
+     else
+        fileloc='output_'//TRIM(nchar)//'/grav_'//TRIM(nchar)//'.out'
+     end if
+     call title(1,ncharcpu)
+     fileloc=TRIM(fileloc)//TRIM(ncharcpu)
+     open(unit=ilun,file=fileloc,form='unformatted',status='old')
+     read(ilun) ncpu2
+     read(ilun) ndim2
+     close(ilun)
+  end if
+#ifndef WITHOUTMPI
+  call MPI_BCAST(ndim2,1,MPI_INTEGER,0,MPI_COMM_WORLD,info)
+#endif
+  scalar_in_checkpoint=(ndim2.eq.ndim+2)
+  if(ndim2.ne.ndim+1 .and. .not.scalar_in_checkpoint)then
+     if(myid==1) write(*,*)'Incompatible gravity checkpoint payload count=',ndim2
+     call clean_stop
+  end if
+  if(myid==1 .and. allocated(scalar_gr) .and. &
+       & .not.scalar_in_checkpoint)then
+     write(*,*)'Scalar field absent from legacy checkpoint; solver will initialize it'
+  end if
+  ngrav_per_oct = ndim2  ! phi + force(1:ndim) [+ scalar_gr]
   nval_per_grid = twotondim * ngrav_per_oct
   nprops = ndim + nval_per_grid  ! xg(1:3) prepended to data
 
@@ -327,6 +379,13 @@ subroutine restore_poisson_binary_varcpu
                              chunk_gvl(ilevel)%gdata(ind+i, (iskip-1)*ngrav_per_oct+1+ivar) = xx(i)
                           end do
                        end do
+                       if(scalar_in_checkpoint)then
+                          read(ilun) xx
+                          do i = 1, ncache
+                             chunk_gvl(ilevel)%gdata(ind+i, &
+                                  (iskip-1)*ngrav_per_oct+ndim+2) = xx(i)
+                          end do
+                       end if
                     end do
                     chunk_lvl_offset(ilevel) = ind + ncache
                     deallocate(xx)
@@ -399,6 +458,10 @@ subroutine restore_poisson_binary_varcpu
               do ivar = 1, ndim
                  f(icell, ivar) = recvbuf_2d(base + 1 + ivar, i)
               end do
+              if(scalar_in_checkpoint .and. allocated(scalar_gr))then
+                 scalar_gr(icell) = recvbuf_2d(base + ndim + 2, i)
+                 scalar_gr_old(icell) = scalar_gr(icell)
+              end if
            end do
         end do
         deallocate(recvbuf_2d)
@@ -408,7 +471,8 @@ subroutine restore_poisson_binary_varcpu
      end do
   end do  ! ichunk
 
+  if(myid==1 .and. scalar_in_checkpoint .and. allocated(scalar_gr)) &
+       & write(*,*)'Modified-gravity scalar field restored from checkpoint'
   if(myid==1) write(*,*) 'Binary varcpu poisson restore done.'
 
 end subroutine restore_poisson_binary_varcpu
-

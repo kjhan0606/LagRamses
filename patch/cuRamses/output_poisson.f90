@@ -8,6 +8,7 @@ subroutine backup_poisson(filename)
   character(LEN=80)::filename
 
   integer::i,ivar,ncache,ind,ilevel,igrid,iskip,ilun,istart,ibound
+  integer::nvar_checkpoint
   integer,allocatable,dimension(:)::ind_grid
   real(dp),allocatable,dimension(:)::xdp
   character(LEN=5)::nchar
@@ -35,7 +36,12 @@ subroutine backup_poisson(filename)
 
   open(unit=ilun,file=fileloc,form='unformatted')
   write(ilun)ncpu
-  write(ilun)ndim+1
+  ! Version the gravity payload through its variable count.  Legacy
+  ! checkpoints contain phi+ndim force components (ndim+1); screened
+  ! gravity checkpoints additionally contain scalar_gr (ndim+2).
+  nvar_checkpoint=ndim+1
+  if(allocated(scalar_gr)) nvar_checkpoint=nvar_checkpoint+1
+  write(ilun)nvar_checkpoint
   write(ilun)nlevelmax
   write(ilun)nboundary
   do ilevel=1,nlevelmax
@@ -72,6 +78,16 @@ subroutine backup_poisson(filename)
                  end do
                  write(ilun)xdp
               end do
+              ! Write the converged modified-gravity scalar field.  Its
+              ! previous-step copy is reconstructed from this field on
+              ! restart because all scalar solvers save identical values
+              ! into scalar_gr_old at the end of a solve.
+              if(allocated(scalar_gr))then
+                 do i=1,ncache
+                    xdp(i)=scalar_gr(ind_grid(i)+iskip)
+                 end do
+                 write(ilun)xdp
+              end if
            end do
            deallocate(ind_grid, xdp)
         end if
@@ -90,7 +106,6 @@ subroutine backup_poisson(filename)
 #endif
      
 end subroutine backup_poisson
-
 
 
 

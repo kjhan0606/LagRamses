@@ -1167,6 +1167,8 @@ subroutine restore_poisson_hdf5()
   integer :: n_chunk_grids, igrid_w, j
   integer, allocatable :: chunk_igrids(:), chunk_fidx_offset(:)
   integer(i8b) :: i_global
+  logical :: scalar_dset_exists, scalar_restored_any
+  integer :: h5err_scalar
 
   call title(nrestart, nchar)
   h5filename = 'output_'//trim(nchar)//'/data_'//trim(nchar)//'.h5'
@@ -1177,6 +1179,7 @@ subroutine restore_poisson_hdf5()
 
   ! Suppress HDF5 error messages for missing level groups
   call hdf5_suppress_errors()
+  scalar_restored_any=.false.
 
   if(varcpu_restart) then
      !===================================================
@@ -1199,6 +1202,12 @@ subroutine restore_poisson_hdf5()
            call h5gopen_f(hdf5_file_id, trim(grp_name), lvl_grp_id, h5err)
            if(h5err /= 0) cycle
         end block
+        scalar_dset_exists=.false.
+        if(allocated(scalar_gr)) then
+           call h5lexists_f(lvl_grp_id,'scalar_gr',scalar_dset_exists,h5err_scalar)
+           scalar_dset_exists=scalar_dset_exists.and.h5err_scalar.eq.0
+           scalar_restored_any=scalar_restored_any.or.scalar_dset_exists
+        end if
 
         ngrid_file_lvl = varcpu_ngrid_file(ilevel)
         chunk_size = min(1048576, ngrid_file_lvl)
@@ -1256,6 +1265,24 @@ subroutine restore_poisson_hdf5()
               end do
 !$OMP END PARALLEL DO
            end do
+
+           if(scalar_dset_exists) then
+              call hdf5_read_dataset_chunk_dp(lvl_grp_id, 'scalar_gr', &
+                   pbuf_chunk, this_chunk * twotondim, &
+                   i_global * int(twotondim, i8b))
+!$OMP PARALLEL DO PRIVATE(j,igrid_w,local_idx,ind,iskip) SCHEDULE(STATIC)
+              do j = 1, n_chunk_grids
+                 igrid_w = chunk_igrids(j)
+                 local_idx = chunk_fidx_offset(j)
+                 do ind = 1, twotondim
+                    iskip = ncoarse + (ind - 1) * ngridmax
+                    scalar_gr(igrid_w + iskip) = &
+                         pbuf_chunk((local_idx-1)*twotondim + ind)
+                    scalar_gr_old(igrid_w + iskip) = scalar_gr(igrid_w + iskip)
+                 end do
+              end do
+!$OMP END PARALLEL DO
+           end if
            i_global = i_global + int(this_chunk, i8b)
         end do
 
@@ -1333,6 +1360,28 @@ subroutine restore_poisson_hdf5()
            end do
         end do
 
+        ! Read the scalar field when present.  Missing datasets identify
+        ! legacy checkpoints and intentionally leave zero sentinels for
+        ! the model-specific initialization routines.
+        if(allocated(scalar_gr)) then
+           scalar_dset_exists=.false.
+           call h5lexists_f(lvl_grp_id,'scalar_gr',scalar_dset_exists,h5err_scalar)
+           if(scalar_dset_exists .and. h5err_scalar.eq.0) then
+              scalar_restored_any=.true.
+              call hdf5_read_dataset_1d_dp(lvl_grp_id, 'scalar_gr', &
+                   pbuf, ngrid_loc * twotondim, offset_cells)
+              igrid = headl(myid, ilevel)
+              do i = 1, ngrid_loc
+                 do ind = 1, twotondim
+                    iskip = ncoarse + (ind - 1) * ngridmax
+                    scalar_gr(igrid + iskip) = pbuf((i-1)*twotondim + ind)
+                    scalar_gr_old(igrid + iskip) = scalar_gr(igrid + iskip)
+                 end do
+                 igrid = next(igrid)
+              end do
+           end if
+        end if
+
         ! Read FDM psi if enabled
         if(use_fdm) then
            block
@@ -1385,8 +1434,16 @@ subroutine restore_poisson_hdf5()
         call make_virtual_fine_dp(psi_re(1), ilevel)
         call make_virtual_fine_dp(psi_im(1), ilevel)
      end if
+     if(allocated(scalar_gr)) then
+        call make_virtual_fine_dp(scalar_gr(1), ilevel)
+        call make_virtual_fine_dp(scalar_gr_old(1), ilevel)
+     end if
   end do
 
+  if(myid==1 .and. scalar_restored_any) &
+       & write(*,*)'Modified-gravity scalar field restored from HDF5 checkpoint'
+  if(myid==1 .and. allocated(scalar_gr) .and. .not.scalar_restored_any) &
+       & write(*,*)'Scalar field absent from legacy HDF5 checkpoint; solver will initialize it'
   if(myid==1) write(*,*) 'HDF5 poisson restore done.'
 
 end subroutine restore_poisson_hdf5

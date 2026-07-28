@@ -2449,8 +2449,9 @@ subroutine fR_solve_level(ilevel, icount)
   ! the homogeneous background.  In Hu-Sawicki gravity fR_bar changes
   ! rapidly at early times; reusing the absolute old field without this
   ! rescaling can leave Newton-GS thousands of sweeps away from the new
-  ! solution.  A zero previous value marks the first solve on this rank
-  ! (including a restart, because scalar_gr is not checkpointed).
+  ! solution.  A zero previous value marks the first solve on this rank.
+  ! On restart scalar_gr itself is restored, while this level-local
+  ! background predictor is rebuilt on the first post-restart solve.
   if(fR_bar_previous(ilevel) /= 0d0) then
      background_ratio=fR_bar/fR_bar_previous(ilevel)
      if(background_ratio > 0d0) &
@@ -2459,8 +2460,8 @@ subroutine fR_solve_level(ilevel, icount)
   fR_bar_previous(ilevel)=fR_bar
 
   ! Seed every cell still at exactly 0 with the background value.
-  ! Covers first step, restarts (scalar_gr is not checkpointed) and
-  ! cells created by refinement after step 0; converged f_R is
+  ! Covers first step, legacy restarts without scalar data, and cells
+  ! created by refinement after step 0; converged f_R is
   ! strictly negative so 0 uniquely marks uninitialized cells.
   call fR_seed_scalar(ilevel, fR_bar)
   call vain_prepare_uniform_cache(ilevel)

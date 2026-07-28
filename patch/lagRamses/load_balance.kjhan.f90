@@ -9,7 +9,7 @@ subroutine load_balance
 #ifdef RT
   use rt_hydro_commons, ONLY: nrtvar, rtuold
 #endif
-  use poisson_commons, ONLY: phi, f, psi_re, psi_im
+  use poisson_commons, ONLY: phi, f, scalar_gr, scalar_gr_old, psi_re, psi_im
   use bisection
   use ksection
   use iso_c_binding, only: c_int, c_size_t
@@ -211,6 +211,10 @@ subroutine load_balance
      if(poisson)then
         call make_virtual_fine_dp(phi(1),ilevel)
         call make_virtual_fine_dp_bulk(f,ndim,ilevel)
+        if(allocated(scalar_gr))then
+           call make_virtual_fine_dp(scalar_gr(1),ilevel)
+           call make_virtual_fine_dp(scalar_gr_old(1),ilevel)
+        end if
      end if
      if(use_fdm)then
         call make_virtual_fine_dp(psi_re(1),ilevel)
@@ -1745,6 +1749,71 @@ subroutine defrag
   end do
   end do
   end do
+
+  ! Modified-gravity scalar fields follow the AMR octs through
+  ! defragmentation just like phi and f.  This is required both after a
+  ! variable-ncpu checkpoint restore and during ordinary load balancing.
+  if(allocated(scalar_gr))then
+  do ind=1,twotondim
+  iskip2=ncoarse+(ind-1)*ngridmax
+  ngrid2=0
+  do igrid=1,igridmax
+     defrag_dp(igrid)=0.0D0
+  end do
+  do ilevel=1,nlevelmax
+     do ibound=1,nboundary+ncpu
+        if(ibound<=ncpu)then
+           ncache=numbl(ibound,ilevel)
+           istart=headl(ibound,ilevel)
+        else
+           ncache=numbb(ibound-ncpu,ilevel)
+           istart=headb(ibound-ncpu,ilevel)
+        end if
+        if(ncache>0)then
+           igrid=istart
+           do i=1,ncache
+              defrag_dp(ngrid2+i)=scalar_gr(iskip2+igrid)
+              igrid=next(igrid)
+           end do
+           ngrid2=ngrid2+ncache
+        end if
+     end do
+  end do
+  do igrid=1,igridmax
+     scalar_gr(iskip2+igrid)=defrag_dp(igrid)
+  end do
+  end do
+
+  do ind=1,twotondim
+  iskip2=ncoarse+(ind-1)*ngridmax
+  ngrid2=0
+  do igrid=1,igridmax
+     defrag_dp(igrid)=0.0D0
+  end do
+  do ilevel=1,nlevelmax
+     do ibound=1,nboundary+ncpu
+        if(ibound<=ncpu)then
+           ncache=numbl(ibound,ilevel)
+           istart=headl(ibound,ilevel)
+        else
+           ncache=numbb(ibound-ncpu,ilevel)
+           istart=headb(ibound-ncpu,ilevel)
+        end if
+        if(ncache>0)then
+           igrid=istart
+           do i=1,ncache
+              defrag_dp(ngrid2+i)=scalar_gr_old(iskip2+igrid)
+              igrid=next(igrid)
+           end do
+           ngrid2=ngrid2+ncache
+        end if
+     end do
+  end do
+  do igrid=1,igridmax
+     scalar_gr_old(iskip2+igrid)=defrag_dp(igrid)
+  end do
+  end do
+  end if
 
   end if
 

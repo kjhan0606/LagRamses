@@ -464,6 +464,22 @@ subroutine backup_poisson_hdf5()
              pbuf, ngrid_loc * twotondim, offset_cells, ncells_total)
      end do
 
+     ! Modified-gravity scalar field.  scalar_gr_old is deliberately not
+     ! stored: all scalar solvers synchronize it with scalar_gr after a
+     ! converged solve, so the restart reader reconstructs it exactly.
+     if(allocated(scalar_gr)) then
+        igrid = headl(myid, ilevel)
+        do i = 1, ngrid_loc
+           do ind = 1, twotondim
+              iskip = ncoarse + (ind - 1) * ngridmax
+              pbuf((i-1)*twotondim + ind) = scalar_gr(igrid + iskip)
+           end do
+           igrid = next(igrid)
+        end do
+        call hdf5_write_dataset_1d_dp(lvl_grp_id, 'scalar_gr', &
+             pbuf, ngrid_loc * twotondim, offset_cells, ncells_total)
+     end if
+
      ! Write FDM psi fields if enabled
      if(use_fdm) then
         igrid = headl(myid, ilevel)
