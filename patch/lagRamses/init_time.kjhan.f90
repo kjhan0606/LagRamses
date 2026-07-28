@@ -611,6 +611,7 @@ contains
 !!$  end function ad1
   !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   function fpeebl(a)
+    use scalar_de_commons, only: sde_active, sde_w_of_a
     implicit none
     real(dp) :: fpeebl,a
     !     Computes the growth factor f=d\log D1/d\log a.
@@ -621,7 +622,11 @@ contains
     eps=1.0d-6
     y=omega_m*de_matfac(a)/a + omega_k + omega_l*f_de(a,w0,wa)*a*a
     fact=rombint(eps,a,eps)
-    wa_eff = w0 + wa*(1.d0-a)
+    if(sde_active()) then
+       wa_eff = sde_w_of_a(a)
+    else
+       wa_eff = w0 + wa*(1.d0-a)
+    end if
     dyda = -omega_m*de_matfac(a)/a + omega_l*a*a*f_de(a,w0,wa)*(-1.d0-3.d0*wa_eff)
     fpeebl = 0.5d0*dyda/y - 1.d0 + a*fy(a)/fact
     return
@@ -845,9 +850,12 @@ function f_de(a, w0_in, wa_in)
   !   f_de = 1 + nu/(1-nu) * (Om/Ol) * (a^{-3(1-nu)} - 1).
   use amr_parameters, only: dp, omega_m, omega_l, &
        & use_chaplygin, chaplygin_As, chaplygin_alpha, use_rvm, rvm_nu
+  use scalar_de_commons, only: sde_active, sde_fde_of_a
   real(kind=8) :: f_de, a, w0_in, wa_in
   real(kind=8) :: opa
-  if (use_chaplygin) then
+  if (sde_active()) then
+     f_de = sde_fde_of_a(a)
+  else if (use_chaplygin) then
      opa = 1.0d0 + chaplygin_alpha
      f_de = (chaplygin_As + (1.0d0-chaplygin_As)*a**(-3.0d0*opa))**(1.0d0/opa)
   else if (use_rvm) then
@@ -867,15 +875,18 @@ function de_matfac(a)
   ! couple the CDM to the dark sector. Running vacuum dilutes the CDM as
   ! rho_c ~ a^{-3(1-nu)}, so the factor is a^{3 nu}. Every uncoupled model
   ! returns 1, which leaves the Friedmann matter term bit-for-bit unchanged.
-  use amr_parameters, only: dp, use_rvm, rvm_nu
+  use amr_parameters, only: dp, use_rvm, rvm_nu, use_coupled_de, &
+       & use_quintessence
+  use scalar_de_commons, only: sde_dmcorr_of_a
   real(kind=8) :: de_matfac, a
-  if (use_rvm) then
+  if (use_coupled_de .and. use_quintessence) then
+     de_matfac = sde_dmcorr_of_a(a)
+  else if (use_rvm) then
      de_matfac = a**(3.0d0*rvm_nu)
   else
      de_matfac = 1.0d0
   end if
 end function de_matfac
-
 
 
 
