@@ -70,7 +70,7 @@ subroutine read_params
   namelist/galileon_params/galileon_tracker,c2_galileon,c3_galileon, &
        & n_iter_galileon,galileon_eps
   namelist/coupled_de_params/beta_cde,cde_friction,cde_vary_mass
-  namelist/quint_params/quint_pot,quint_alpha,quint_lambda,quint_phi_ini
+  namelist/quint_params/quint_pot,quint_ic_mode,quint_alpha,quint_lambda,quint_phi_ini
   namelist/kessence_params/kes_x0
   namelist/chaplygin_params/chaplygin_As,chaplygin_alpha
   namelist/rvm_params/rvm_nu
@@ -1014,8 +1014,21 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         if(myid==1) write(*,*) 'ERROR: quint_pot must be 1 (Ratra-Peebles) or 2 (exponential)'
         call clean_stop
      end if
-     if(quint_alpha <= 0d0 .or. quint_lambda <= 0d0 .or. quint_phi_ini <= 0d0) then
-        if(myid==1) write(*,*) 'ERROR: quint_alpha, quint_lambda, quint_phi_ini must be > 0'
+     if(quint_ic_mode < 0 .or. quint_ic_mode > 1) then
+        if(myid==1) write(*,*) 'ERROR: quint_ic_mode must be 0 (frozen) or 1 (RP tracker)'
+        call clean_stop
+     end if
+     if(quint_ic_mode == 1 .and. quint_pot /= 1) then
+        if(myid==1) write(*,*) 'ERROR: quint_ic_mode=1 is defined only for Ratra-Peebles phiCDM'
+        call clean_stop
+     end if
+     if(quint_ic_mode == 1 .and. use_coupled_de) then
+        if(myid==1) write(*,*) 'ERROR: RP tracker IC is not defined for coupled quintessence'
+        call clean_stop
+     end if
+     if(quint_alpha <= 0d0 .or. quint_lambda <= 0d0 .or. &
+          & (quint_ic_mode == 0 .and. quint_phi_ini <= 0d0)) then
+        if(myid==1) write(*,*) 'ERROR: active quintessence potential/initial parameters must be > 0'
         call clean_stop
      end if
      if(myid==1) then
@@ -1024,7 +1037,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         else
            write(*,'(A,F8.4)') ' Quintessence enabled: V=A*exp(-lambda*phi), lambda=', quint_lambda
         end if
-        write(*,'(A,ES10.3)') '   phi_ini [Mpl] =', quint_phi_ini
+        if(quint_ic_mode == 1) then
+           write(*,'(A)') '   initial condition: matter-era Ratra-Peebles tracker (phiCDM)'
+        else
+           write(*,'(A,ES10.3)') '   frozen phi_ini [Mpl] =', quint_phi_ini
+        end if
      end if
   end if
   if(use_kessence) then

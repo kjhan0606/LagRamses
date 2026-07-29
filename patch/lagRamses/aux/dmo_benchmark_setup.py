@@ -53,13 +53,28 @@ MODELS: Dict[str, Dict[str, str]] = {
         "blocks": "",
     },
     "q1": {
-        "description": "Ratra-Peebles quintessence, alpha=1",
+        "description": "legacy frozen-field Ratra-Peebles quintessence, alpha=1",
         "flags": "use_quintessence=.true.",
         "blocks": """&QUINT_PARAMS
 quint_pot=1
+quint_ic_mode=0
 quint_alpha=1.0
 quint_lambda=1.0
 quint_phi_ini=0.01
+/
+""",
+    },
+    "phicdm_a01": {
+        "description": (
+            "Ratra-Peebles phiCDM matter-era tracker, alpha=0.1 "
+            "(production benchmark)"
+        ),
+        "flags": "use_quintessence=.true.",
+        "blocks": """&QUINT_PARAMS
+quint_pot=1
+quint_ic_mode=1
+quint_alpha=0.1
+quint_lambda=1.0
 /
 """,
     },
@@ -251,6 +266,7 @@ DEFAULT_MODELS = ("lcdm", "f5", "f6", "n1", "n5", "sym_a")
 CAMB_MATCHED_MODELS = {
     "lcdm",
     "q1",
+    "phicdm_a01",
     "cde10",
     "w09",
     "cpl_m09_p02",
@@ -400,7 +416,12 @@ def configure_camb_dark_energy(pars, model_name: str, camb) -> None:
         pars.set_dark_energy(w=-0.9, wa=0.2, dark_energy_model="fluid")
     elif model_name == "q1":
         pars.DarkEnergy = de.TrackerQuintessence()
-        pars.DarkEnergy.set_params(pot_type=1, alpha=1.0, lam=1.0, phi_ini=0.01)
+        pars.DarkEnergy.set_params(
+            pot_type=1, ic_mode=0, alpha=1.0, lam=1.0, phi_ini=0.01
+        )
+    elif model_name == "phicdm_a01":
+        pars.DarkEnergy = de.TrackerQuintessence()
+        pars.DarkEnergy.set_params(pot_type=1, ic_mode=1, alpha=0.1, lam=1.0)
     elif model_name == "cde10":
         pars.DarkEnergy = de.CoupledQuintessence()
         pars.DarkEnergy.set_params(

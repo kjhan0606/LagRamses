@@ -6,6 +6,9 @@ module scalar_de_commons
   !    integrated from a=1e-6, potential selected by quint_pot:
   !      1 = Ratra-Peebles  V = A * phi^(-quint_alpha)
   !      2 = Exponential    V = A * exp(-quint_lambda*phi)
+  !    Initial conditions selected by quint_ic_mode:
+  !      0 = legacy frozen field, phi=quint_phi_ini and dphi/dln(a)=0
+  !      1 = matter-era RP tracker, computed from A at every shooting step
   !    Amplitude A fixed by shooting so that Omega_phi(a=1)=omega_l.
   !    Rest-frame sound speed cs2 = 1.
   !
@@ -60,7 +63,10 @@ module scalar_de_commons
   real(dp) :: sde_om_used = -1d0, sde_ol_used = -1d0, sde_ok_used = -1d0
   real(dp) :: sde_par1_used = -1d99, sde_par2_used = -1d99
   real(dp) :: sde_par3_used = -1d99, sde_beta_used = -1d99
-  integer  :: sde_pot_used = -1
+  real(dp) :: sde_lnA_solved = 0d0
+  real(dp) :: sde_phi_ini_solved = 0d0, sde_phip_ini_solved = 0d0
+  real(dp) :: sde_phi0_solved = 0d0, sde_phip0_solved = 0d0
+  integer  :: sde_pot_used = -1, sde_ic_used = -1
 
 contains
 
@@ -77,7 +83,7 @@ contains
   subroutine sde_check_init()
     use amr_parameters, only: omega_m, omega_l, omega_k, &
          use_quintessence, use_coupled_de, quint_pot, quint_alpha, &
-         quint_lambda, quint_phi_ini, kes_x0, beta_cde
+         quint_ic_mode, quint_lambda, quint_phi_ini, kes_x0, beta_cde
     real(dp) :: p1, p2, p3, bet
     integer  :: ip
     if(use_quintessence) then
@@ -93,12 +99,14 @@ contains
     if(sde_loaded) then
        if(omega_m == sde_om_used .and. omega_l == sde_ol_used .and. &
             omega_k == sde_ok_used .and. ip == sde_pot_used .and. &
+            quint_ic_mode == sde_ic_used .and. &
             p1 == sde_par1_used .and. p2 == sde_par2_used .and. &
             p3 == sde_par3_used .and. bet == sde_beta_used) return
     end if
     call sde_init()
     sde_om_used = omega_m; sde_ol_used = omega_l; sde_ok_used = omega_k
-    sde_pot_used = ip; sde_par1_used = p1; sde_par2_used = p2
+    sde_pot_used = ip; sde_ic_used = quint_ic_mode
+    sde_par1_used = p1; sde_par2_used = p2
     sde_par3_used = p3; sde_beta_used = bet
   end subroutine sde_check_init
 
@@ -174,7 +182,8 @@ contains
     end do
 
     ! Final pass: fill the module tables
-    call quint_integrate(0.5d0*(lnA_lo+lnA_hi), cm, bet, .true., rphi_end, u0, ok)
+    sde_lnA_solved = 0.5d0*(lnA_lo+lnA_hi)
+    call quint_integrate(sde_lnA_solved, cm, bet, .true., rphi_end, u0, ok)
     if(.not. ok) then
        if(myid==1) write(*,*) 'ERROR: quintessence background integration failed'
        call clean_stop
@@ -184,19 +193,42 @@ contains
   !--------------------------------------------------------------
   subroutine quint_integrate(lnA, cm, bet, fill, rphi_end, u_end, ok)
     use amr_parameters, only: quint_pot, quint_alpha, quint_lambda, &
-         quint_phi_ini
+         quint_ic_mode, quint_phi_ini, omega_m, omega_k
     real(dp), intent(in)  :: lnA, cm, bet
     logical,  intent(in)  :: fill
     real(dp), intent(out) :: rphi_end, u_end
     logical,  intent(out) :: ok
     real(dp) :: u, v, xn, h, e2, rphi, rphi0, u0
+    real(dp) :: qtrack, e2bg, lnphi
     real(dp) :: k1u,k1v,k2u,k2v,k3u,k3v,k4u,k4v
     integer  :: i
 
     sde_dlna = -sde_lna_min/dble(sde_i0-1)
     h = sde_dlna
-    u = max(quint_phi_ini, 1d-8)
-    v = 0d0
+    if(quint_ic_mode == 1) then
+       ! Exact power-law attractor for an RP field in a matter-dominated
+       ! background. Since A is the shooting variable, phi_ini must be
+       ! recomputed for every trial:
+       !   phi^(alpha+2) =
+       !     3 alpha A / [E_m^2 (q^2 + 3q/2)], q=3/(alpha+2).
+       ! This makes uncoupled phiCDM a one-parameter family (alpha), rather
+       ! than retaining the arbitrary frozen-field value of the legacy path.
+       qtrack = 3d0/(quint_alpha+2d0)
+       e2bg = omega_m*exp(-3d0*sde_lna_min) + &
+            & omega_k*exp(-2d0*sde_lna_min)
+       lnphi = (log(3d0*quint_alpha) + lnA - &
+            & log(e2bg*(qtrack*qtrack+1.5d0*qtrack))) / &
+            & (quint_alpha+2d0)
+       u = exp(lnphi)
+       v = qtrack*u
+    else
+       u = max(quint_phi_ini, 1d-8)
+       v = 0d0
+    end if
+    if(fill) then
+       sde_phi_ini_solved = u
+       sde_phip_ini_solved = v
+    end if
     ok = .true.
     rphi0 = 1d0
 
@@ -219,6 +251,10 @@ contains
           rphi_end = rphi
           u_end = u
           u0 = u
+          if(fill) then
+             sde_phi0_solved = u
+             sde_phip0_solved = v
+          end if
        end if
        if(i == sde_na) exit
        ! RK4 step from xn to xn+h
@@ -443,9 +479,13 @@ contains
   !--------------------------------------------------------------
   subroutine sde_report()
     use amr_parameters, only: use_quintessence, use_kessence, &
-         use_coupled_de, beta_cde, omega_m, omega_l
+         use_coupled_de, beta_cde, omega_m, omega_l, omega_k, &
+         quint_ic_mode, quint_alpha
     use amr_commons, only: aexp_ini
     real(dp) :: w0_eff, wz1, fde_i, ode_i, ai
+    real(dp) :: asamp, fsamp, wsamp, e2samp, wtrack
+    real(dp), dimension(7) :: sample_a
+    integer :: i
     ai = max(aexp_ini, 1d-6)
     w0_eff = sde_interp(sde_tab_w, 1d0)
     wz1    = sde_interp(sde_tab_w, 0.5d0)
@@ -459,6 +499,26 @@ contains
     write(*,'("   w(z=0) =",F9.5,"   w(z=1) =",F9.5)') w0_eff, wz1
     write(*,'("   rho_de(a_ini)/rho_m(a_ini) =",1pe11.3," at a_ini =",1pe11.3)') &
          & ode_i/max(1d0-ode_i,1d-30), ai
+    if(use_quintessence) then
+       write(*,'("   ln(A/rho_crit0) =",1pe16.8)') sde_lnA_solved
+       write(*,'("   phi_ini, dphi/dlna_ini =",2(1pe16.8,1x))') &
+            & sde_phi_ini_solved, sde_phip_ini_solved
+       write(*,'("   phi_0, dphi/dlna_0 =",2(1pe16.8,1x))') &
+            & sde_phi0_solved, sde_phip0_solved
+       if(quint_ic_mode == 1) then
+          wtrack = -2d0/(quint_alpha+2d0)
+          write(*,'("   phiCDM matter-era tracker target w =",F11.8)') wtrack
+       end if
+       sample_a = (/1d-3, 2d-2, 1d-1, 1d0/3d0, 5d-1, 2d0/3d0, 1d0/)
+       do i = 1, size(sample_a)
+          asamp = sample_a(i)
+          fsamp = sde_interp(sde_tab_fde, asamp)
+          wsamp = sde_interp(sde_tab_w, asamp)
+          e2samp = omega_m/asamp**3 + omega_k/asamp**2 + omega_l*fsamp
+          write(*,'(" PHICDM_BG a=",F12.9," fde=",1pe16.8," w=",0pf13.9," E2=",1pe16.8)') &
+               & asamp, fsamp, wsamp, e2samp
+       end do
+    end if
     if(use_coupled_de .and. use_quintessence) then
        write(*,'("   coupled DE: beta =",F8.4,"  dm mass corr(a_ini) =",F10.6)') &
             & beta_cde, sde_interp(sde_tab_dmcorr, ai)

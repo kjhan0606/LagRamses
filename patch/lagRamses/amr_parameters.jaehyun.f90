@@ -441,6 +441,7 @@ module amr_parameters
   ! Quintessence (field-level scalar DE) parameters
   logical ::use_quintessence=.false.     ! Enable quintessence background
   integer ::quint_pot=1                  ! 1=Ratra-Peebles A*phi^-alpha, 2=exponential A*exp(-lambda*phi)
+  integer ::quint_ic_mode=0              ! 0=legacy frozen phi_ini, 1=RP matter-era tracker (phiCDM)
   real(dp)::quint_alpha=1.0d0           ! RP inverse power-law index
   real(dp)::quint_lambda=1.0d0          ! Exponential potential slope
   real(dp)::quint_phi_ini=0.01d0        ! Initial field value [Mpl] at a=1e-6

@@ -20,6 +20,7 @@ import numpy as np
 DEFAULT_MODELS = ("q1", "cde10", "sym_a")
 COLORS = {
     "q1": "#2878b5",
+    "phicdm_a01": "#1d91c0",
     "cde10": "#d95319",
     "f5": "#d62728",
     "f6": "#ff9896",

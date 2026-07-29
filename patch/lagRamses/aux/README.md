@@ -26,6 +26,28 @@ python3 patch/lagRamses/aux/dmo_benchmark_setup.py \
   --make-ics
 ```
 
+The production Ratra--Peebles scalar-field benchmark is `phicdm_a01`.
+It uses `quint_ic_mode=1`, which computes the matter-era tracker initial
+condition during every potential-amplitude shooting iteration. The older
+`q1` model is retained as an explicit frozen-field (`quint_ic_mode=0`)
+regression case and must not be labelled as physical tracker \(\phi\)CDM.
+
+Run its complete low-resolution production gate after measuring the common
+CIC spectra:
+
+```bash
+python3 patch/lagRamses/aux/validate_phicdm.py CAMPAIGN
+```
+
+The gate checks the compiled lagRamses background records, tracker and
+present-day closure relations, the parameter-matched lagCAMB background and
+shooting solution, doubled-accuracy linear power ratios, transfer amplitude
+and velocity diagnostics, exact outputs through z=0, and the initial
+common-phase `P_phiCDM/P_LCDM` ratio. CAMB retains radiation whereas the
+standard RAMSES N-body background starts with matter plus dark energy; the
+default gate therefore assigns a documented 0.2% background-density budget
+at z=49 while retaining a 0.1% initial power-ratio threshold.
+
 - Default: `500 Mpc/h`, `256^3`, `levelmax=14`, 2LPT at `z=49`
 - Default validation suite: LCDM, F5, F6, N1, N5, and Symmetron A
 - Uses one random seed and identical phases for all model-specific ICs
