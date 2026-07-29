@@ -173,10 +173,18 @@ module amr_commons
   CHARACTER(LEN=20)::type_accel  ='accel'
   CHARACTER(LEN=20)::type_flag   ='flag'
 
-  ! Per-level wall-clock timing for time-based load balancing
-  ! Accumulated between load_balance calls, reset after each remap
-  real(dp),dimension(1:MAXLEVEL) :: level_time_loc = 0d0    ! godunov+cooling+particles+feedback+flag
-  integer,dimension(1:MAXLEVEL)  :: level_ncells_loc = 0     ! local leaf cells per level
+  ! Sparse rank x level work measurements and exponentially smoothed model.
+  ! Raw samples are accumulated only every lb_timing_interval coarse steps.
+  real(dp),dimension(1:MAXLEVEL) :: level_time_loc = 0d0
+  integer(kind=8),dimension(1:MAXLEVEL) :: level_ncells_loc = 0_8
+  real(dp),dimension(1:MAXLEVEL) :: level_cell_time_ema = 0d0
+  real(dp),dimension(1:MAXLEVEL) :: level_mesh_scale_ema = 1d0
+  real(dp),dimension(1:MAXLEVEL) :: level_rank_scale_ema = 1d0
+  real(dp)::lb_step_time_ema=0d0
+  real(dp)::lb_remap_time_ema=0d0
+  real(dp)::lb_imbalance_ema=0d0
+  logical::lb_imbalance_ema_valid=.false.
+  integer::lb_last_remap_step=-1000000000
 
   ! Units specified by the user in the UNITS_PARAMS namelist for non-cosmo runs.
   ! These values shouldn't be used directly. Instead call units() in amr/units.f90.

@@ -31,6 +31,7 @@ subroutine load_balance
   integer,dimension(MPI_STATUS_SIZE,ncpu)::statuses
   integer,dimension(ncpu)::reqsend,reqrecv
   real(dp)::t_lb_start,t_lb_end
+  real(dp)::remap_elapsed,remap_elapsed_max
   real(dp)::t0,t1,t2,t3,t4,t5,t6
   real(dp)::te_flag,te_refine,te_bcomm,te_virt,te_phys
   real(dp)::ts_flag,ts_refine,ts_bcomm
@@ -395,6 +396,17 @@ subroutine load_balance
 
   t6 = MPI_WTIME()
   t_lb_end = t6
+  remap_elapsed=t_lb_end-t_lb_start
+  call MPI_ALLREDUCE(remap_elapsed,remap_elapsed_max,1, &
+       MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+  if(lb_remap_time_ema<=0d0)then
+     lb_remap_time_ema=remap_elapsed_max
+  else
+     lb_remap_time_ema=(1d0-lb_timing_ema_alpha)*lb_remap_time_ema+ &
+          lb_timing_ema_alpha*remap_elapsed_max
+  end if
+  lb_last_remap_step=nstep_coarse
+  lb_imbalance_ema_valid=.false.
   if(myid==1) then
      write(*,'(A,F8.3,A)') ' load_balance total:         ', t_lb_end - t_lb_start, ' s'
      write(*,'(A,F8.3,A)') '   numbp_sync:               ', t1 - t0, ' s'
@@ -454,7 +466,9 @@ subroutine cmp_new_cpu_map
   integer::nxny,ix,iy,iz,iskip
   integer::ind_long
   integer::isink,igrid_sink,ind_sink,icell_sink,isubcell_sink
+  integer::npair_cell
   integer,dimension(1:nvector)::ind_grid,ind_cell
+  integer,dimension(1:nvector,1:twotondim)::npart_leaf,ndm_leaf
   integer,allocatable::sink_per_grid(:)
 
   real(dp)::dx,scale,weight
@@ -470,7 +484,7 @@ subroutine cmp_new_cpu_map
   real(kind=8),dimension(0:ndomain)::bigdbl,bigtmp
   integer,dimension(1:nvector)::dom
   real(qdp),dimension(1:nvector)::order_min,order_max
-  integer,dimension(1:MAXLEVEL)::niter_cost
+  integer(kind=8),dimension(1:MAXLEVEL)::niter_cost
 
   real(dp),dimension(1:1,1:ndim) :: xx_tmp
   integer,dimension(1:1) :: c_tmp
@@ -482,87 +496,38 @@ subroutine cmp_new_cpu_map
   integer,dimension(1:overload)::ncell_sub_t
   integer(kind=8),dimension(1:overload)::npart_sub_t
 
-  ! Time-based load balancing blend factor
-  real(kind=8),dimension(1:MAXLEVEL) :: blend_factor
-  real(kind=8),dimension(1:MAXLEVEL) :: my_cpc_arr, sum_cpc_arr
-  real(kind=8),dimension(1:MAXLEVEL) :: fdm_level_cost
-  real(kind=8) :: avg_cpc, tf
-  logical :: do_time_blend, need_cpc
+  ! Smoothed rank correction from sparse rank x level measurements
+  real(kind=8),dimension(1:MAXLEVEL) :: rank_scale
 
   ! Local constants
   nxny=nx*ny
   nx_loc=icoarse_max-icoarse_min+1
   scale=boxlen/dble(nx_loc)
   
-  ! Compute time step related cost
-  if(cost_weighting)then
-     niter_cost(levelmin)=1
-     if (nlevelmax - levelmin - 1 > 31) write(*,*) 'Warning load_balance: niter_cost may need to become a kind=8 integer'
+  ! Compute AMR subcycle work factors.  Memory balance deliberately ignores
+  ! these factors because allocated memory does not grow with update count.
+  niter_cost=1_8
+  if((.not.memory_balance).and.cost_weighting)then
+     niter_cost(levelmin)=1_8
      do ilevel=levelmin+1,nlevelmax
-        niter_cost(ilevel)=nsubcycle(ilevel-1)*niter_cost(ilevel-1)
+        if(niter_cost(ilevel-1)>huge(niter_cost(ilevel))/ &
+             int(max(1,nsubcycle(ilevel-1)),kind=8))then
+           if(myid==1)write(*,*)'load_balance: AMR subcycle cost overflow'
+           stop
+        end if
+        niter_cost(ilevel)=int(max(1,nsubcycle(ilevel-1)),kind=8)* &
+             niter_cost(ilevel-1)
      end do
-  else
-     niter_cost(levelmin:nlevelmax)=1
   endif
 
-  ! Time-based load balancing: compute per-level blend factor.
-  ! Only meaningful for hilbert ordering — ksection/bisection rebuild cost
-  ! histograms in build_ksection/build_bisection where blend_factor is not
-  ! applied. Skip the (cross-rank synchronizing) compute when use_cpubox_decomp
-  ! is true to avoid N tiny allreduces with no effect.
-  blend_factor = 1d0
-  fdm_level_cost = 1d0
-  do_time_blend = (time_balance_alpha > 0d0) .and. (nstep_coarse > 0) &
-       .and. (.not. use_cpubox_decomp)
-  need_cpc = (do_time_blend .or. (use_fdm .and. fdm_cost_mode==1)) &
-       .and. (nstep_coarse > 0) .and. (.not. use_cpubox_decomp)
-#ifndef WITHOUTMPI
-  if(need_cpc) then
-     ! Pack per-level cost-per-cell into one array; single batched allreduce.
-     my_cpc_arr = 0d0
-     do ilevel = levelmin, nlevelmax
-        if(level_ncells_loc(ilevel) > 0) then
-           my_cpc_arr(ilevel) = level_time_loc(ilevel) / dble(level_ncells_loc(ilevel))
-        end if
+  rank_scale=1d0
+  if((.not.memory_balance).and.time_balance_alpha>0d0)then
+     do ilevel=levelmin,nlevelmax
+        rank_scale(ilevel)=1d0+time_balance_alpha* &
+             (level_rank_scale_ema(ilevel)-1d0)
+        rank_scale(ilevel)=max(0.5d0,min(2d0,rank_scale(ilevel)))
      end do
-     call MPI_ALLREDUCE(my_cpc_arr, sum_cpc_arr, MAXLEVEL, &
-          & MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, info)
-     ! Per-rank time blend (time_balance_alpha)
-     if(do_time_blend) then
-        do ilevel = levelmin, nlevelmax
-           avg_cpc = sum_cpc_arr(ilevel) / dble(ncpu)
-           if(avg_cpc > 0d0) then
-              tf = my_cpc_arr(ilevel) / avg_cpc
-           else
-              tf = 1d0
-           end if
-           blend_factor(ilevel) = 1d0 + time_balance_alpha * (tf - 1d0)
-           blend_factor(ilevel) = max(0.5d0, min(2.0d0, blend_factor(ilevel)))
-        end do
-     end if
-     ! FDM wallclock cost ratio: per-level cost relative to levelmin
-     if(use_fdm .and. fdm_cost_mode==1) then
-        avg_cpc = sum_cpc_arr(levelmin) / dble(ncpu)
-        if(avg_cpc > 0d0) then
-           do ilevel = levelmin+1, nlevelmax
-              tf = sum_cpc_arr(ilevel) / dble(ncpu)
-              if(tf > 0d0) then
-                 fdm_level_cost(ilevel) = max(1d0, tf / avg_cpc)
-              end if
-           end do
-        end if
-        if(myid==1) then
-           do ilevel = levelmin+1, nlevelmax
-              if(fdm_level_cost(ilevel) > 1d0) then
-                 write(*,'(A,I3,A,F8.1,A)') &
-                      ' FDM wallclock cost: level',ilevel,' =', &
-                      fdm_level_cost(ilevel),'x base'
-              end if
-           end do
-        end if
-     end if
   end if
-#endif
 
   if(verbose) print *,"Entering cmp_new_cpu_map"
 
@@ -626,7 +591,13 @@ subroutine cmp_new_cpu_map
         ncell=ncell+1
         isub=(dom(1)-1)/ncpu+1
         ncell_sub(isub)=ncell_sub(isub)+1
-        flag1(ncell)=0
+        wflag=domain_leaf_cost(0,0,1_8,level_mesh_scale_ema(levelmin))
+        wflag=max(1_8,nint(dble(wflag)*rank_scale(levelmin),kind=8))
+        if(wflag>huge(flag1(ncell)))then
+           write(*,*)'load_balance: coarse leaf cost exceeds flag1 range: ',wflag
+           stop
+        end if
+        flag1(ncell)=int(wflag)
         hilbert_key(ncell)=order_max(1)
      end if
   end do
@@ -636,7 +607,7 @@ subroutine cmp_new_cpu_map
   !$OMP PARALLEL DEFAULT(SHARED) &
   !$OMP PRIVATE(igrid,ngrid,ind,iskip,idim,ncell_loc,batch_size,my_base,my_idx, &
   !$OMP         ind_grid,ind_cell,xx,order_min,order_max,dom,isub,wflag, &
-  !$OMP         ncell_sub_t,npart_sub_t,i)
+  !$OMP         ncell_sub_t,npart_sub_t,npart_leaf,ndm_leaf,npair_cell,i)
   ncell_sub_t=0
   npart_sub_t=0
   do ilevel=1,nlevelmax
@@ -668,6 +639,14 @@ subroutine cmp_new_cpu_map
         do i=1,ngrid
            ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
         end do
+        npart_leaf=0
+        ndm_leaf=0
+        if(pic)then
+           do i=1,ngrid
+              call count_particles_by_leaf(ind_grid(i), &
+                   npart_leaf(i,:),ndm_leaf(i,:))
+           end do
+        end if
         ! Loop over cells
         do ind=1,twotondim
            iskip=ncoarse+(ind-1)*ngridmax
@@ -702,30 +681,19 @@ subroutine cmp_new_cpu_map
                  my_idx=my_base+ncell_loc
                  isub=(dom(ncell_loc)-1)/ncpu+1
                  ncell_sub_t(isub)=ncell_sub_t(isub)+1
-                 if(memory_balance) then
-                    flag1(my_idx)=mem_weight_grid
-                 else
-                    flag1(my_idx)=8*10 ! Original magic number
-                 endif
-                 if(pic)then
-                    flag1(my_idx)=flag1(my_idx)+numbp(ind_grid(i))
-                 endif
+                 npair_cell=domain_sidm_pair_count(ndm_leaf(i,ind))
+                 wflag=domain_leaf_cost(npart_leaf(i,ind),npair_cell, &
+                      niter_cost(ilevel),level_mesh_scale_ema(ilevel))
                  if(allocated(sink_per_grid))then
-                    flag1(my_idx)=flag1(my_idx)+sink_per_grid(ind_grid(i))*mem_weight_sink
+                    wflag=wflag+int(sink_per_grid(ind_grid(i)),kind=8)* &
+                         int(mem_weight_sink,kind=8)/int(twotondim,kind=8)
                  endif
-                 if(fdm_level_cost(ilevel) > 1d0) then
-                    flag1(my_idx)=nint(dble(flag1(my_idx))*fdm_level_cost(ilevel))
-                 endif
-                 wflag = flag1(my_idx)*niter_cost(ilevel)
-                 if (wflag > 2147483647) then
-                    write(*,*) ' wrong type for flag1 --> change to integer kind=8: ',wflag
+                 wflag=max(1_8,nint(dble(wflag)*rank_scale(ilevel),kind=8))
+                 if(wflag>huge(flag1(my_idx)))then
+                    write(*,*)'load_balance: leaf cost exceeds flag1 range: ',wflag
                     stop
                  endif
-                 flag1(my_idx)=flag1(my_idx)*niter_cost(ilevel)
-                 ! Time-based blend (hilbert path only; gated by do_time_blend)
-                 if(do_time_blend) then
-                    flag1(my_idx)=nint(dble(flag1(my_idx)) * blend_factor(ilevel))
-                 end if
+                 flag1(my_idx)=int(wflag)
                  npart_sub_t(isub)=npart_sub_t(isub)+flag1(my_idx)
                  hilbert_key(my_idx)=order_max(ncell_loc)
               end if

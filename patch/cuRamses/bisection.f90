@@ -6,7 +6,7 @@
 module bisection
    use amr_parameters
    use amr_commons
-   use pm_commons, only: numbp, xsink
+   use pm_commons, only: numbp, xsink, count_particles_by_leaf
    use pm_parameters, only: nsink
 
    implicit none
@@ -467,7 +467,11 @@ contains
       integer::nxny,ix,iy,iz,iskip
       integer::icell_tmp,igrid_tmp,isubcell_tmp
       integer::isink
+      integer::npair_cell
       integer,allocatable::sink_per_grid(:),sink_coarse(:)
+      integer(kind=8),dimension(1:MAXLEVEL)::niter_cost
+      integer,dimension(1:nvector,1:twotondim)::npart_leaf,ndm_leaf
+      real(dp)::rank_scale
 
       integer,dimension(1:nvector),save::ind_grid,ind_cell
 
@@ -481,6 +485,22 @@ contains
       nx_loc=icoarse_max-icoarse_min+1
       scale=boxlen/dble(nx_loc)
       ncell=ncoarse+twotondim*ngridmax
+
+      ! Use the same AMR subcycle factors as the Hilbert decomposition.
+      ! domain_leaf_cost ignores them in memory-balance mode.
+      niter_cost=1_8
+      if((.not.memory_balance).and.cost_weighting)then
+         niter_cost(levelmin)=1_8
+         do ilevel=levelmin+1,nlevelmax
+            if(niter_cost(ilevel-1)>huge(niter_cost(ilevel))/ &
+                 int(max(1,nsubcycle(ilevel-1)),kind=8))then
+               if(myid==1)write(*,*)'bisection: AMR subcycle cost overflow'
+               stop
+            end if
+            niter_cost(ilevel)=int(max(1,nsubcycle(ilevel-1)),kind=8)* &
+                 niter_cost(ilevel-1)
+         end do
+      end if
 
       ! --- Pass 1: count leaf cells for compact allocation ---
       ncell = 0
@@ -521,6 +541,7 @@ contains
 
       ! --- Pass 2: fill arrays with sequential indexing ---
       bisec_ind_cell=0
+      bisec_cell_cost=0_8
       ncell=0
       ncell_loc=1
       dx=1.0*scale
@@ -533,6 +554,15 @@ contains
             flag1(ncell)=ind
             bisec_ind_cell(ncell)=ind
             bisec_cell_level(ncell)=0   ! 0 for coarse levels (sequential indexing)
+            bisec_cell_cost(ncell)=domain_leaf_cost(0,0,1_8, &
+                 level_mesh_scale_ema(levelmin))
+            if((.not.memory_balance).and.time_balance_alpha>0d0)then
+               rank_scale=1d0+time_balance_alpha* &
+                    (level_rank_scale_ema(levelmin)-1d0)
+               rank_scale=max(0.5d0,min(2d0,rank_scale))
+               bisec_cell_cost(ncell)=max(1_8,nint( &
+                    dble(bisec_cell_cost(ncell))*rank_scale,kind=8))
+            end if
          end if
       end do
       end do
@@ -561,6 +591,14 @@ contains
                   ind_grid(i)=reception(icpu,ilevel)%igrid(igrid+i-1)
                end do
                end if
+               npart_leaf=0
+               ndm_leaf=0
+               if(pic.and.icpu==myid)then
+                  do i=1,ngrid
+                     call count_particles_by_leaf(ind_grid(i), &
+                          npart_leaf(i,:),ndm_leaf(i,:))
+                  end do
+               end if
                ! Loop over cells
                cell_loop: do ind=1,twotondim
                   iskip=ncoarse+(ind-1)*ngridmax
@@ -576,6 +614,17 @@ contains
                         bisec_cell_level(ncell)=ilevel  ! sequential indexing
                         flag1(ncell)=ind_cell(i)
                         bisec_ind_cell(ncell)=ind_cell(i)
+                        npair_cell=domain_sidm_pair_count(ndm_leaf(i,ind))
+                        bisec_cell_cost(ncell)=domain_leaf_cost( &
+                             npart_leaf(i,ind),npair_cell,niter_cost(ilevel), &
+                             level_mesh_scale_ema(ilevel))
+                        if((.not.memory_balance).and.time_balance_alpha>0d0)then
+                           rank_scale=1d0+time_balance_alpha* &
+                                (level_rank_scale_ema(ilevel)-1d0)
+                           rank_scale=max(0.5d0,min(2d0,rank_scale))
+                           bisec_cell_cost(ncell)=max(1_8,nint( &
+                                dble(bisec_cell_cost(ncell))*rank_scale,kind=8))
+                        end if
                      end if
                   end do
                end do cell_loop
@@ -590,21 +639,6 @@ contains
 
       ! Store local cell count for cache arrays
       bisec_ncells_loc = ncell
-
-      ! Compute cell costs (direction-independent, done once)
-      do i = 1, bisec_ncells_loc
-         icell_tmp = bisec_ind_cell(i)
-         if (memory_balance) then
-            bisec_cell_cost(i) = mem_weight_grid / twotondim
-            if (icell_tmp > ncoarse .and. pic) then
-               isubcell_tmp = ((icell_tmp - ncoarse) / ngridmax) + 1
-               igrid_tmp = icell_tmp - ncoarse - ngridmax * (isubcell_tmp - 1)
-               bisec_cell_cost(i) = bisec_cell_cost(i) + numbp(igrid_tmp) * mem_weight_part / twotondim
-            end if
-         else
-            bisec_cell_cost(i) = 1
-         end if
-      end do
 
       ! Add sink particle cost (computational weight near sinks)
       if (memory_balance .and. sink .and. nsink > 0 .and. mem_weight_sink > 0) then
@@ -737,4 +771,3 @@ contains
    end subroutine compute_bisec_cell_coords
 
 end module bisection
-

@@ -29,7 +29,9 @@ subroutine read_params
        & ,nrestart,ncontrol,nstepmax,nsubcycle,nremap,remap_thresh,ordering &
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
        & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
-       & ,time_balance_alpha &
+       & ,work_weight_grid,work_weight_part,work_weight_sidm_pair &
+       & ,time_balance_alpha,lb_timing_interval,lb_timing_ema_alpha &
+       & ,lb_remap_min_interval,lb_remap_horizon,lb_remap_safety &
        & ,aexp_step_limit &
        & ,jobcontrolfile &
        & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_auto_tune,n_cuda_streams &
@@ -429,6 +431,26 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(use_fdm) mem_weight_grid = mem_weight_grid + twotondim * 2 * 8
      if(myid==1) write(*,'(A,I6,A,I3,A)') &
           ' Memory balance: mem_weight_grid=',mem_weight_grid,' (nvar=',nvar,')'
+  end if
+
+  !-------------------------------------------------
+  ! Work-balance model validation
+  !-------------------------------------------------
+  work_weight_grid=max(0,work_weight_grid)
+  work_weight_part=max(0,work_weight_part)
+  work_weight_sidm_pair=max(0,work_weight_sidm_pair)
+  lb_timing_interval=max(0,lb_timing_interval)
+  lb_timing_ema_alpha=max(0d0,min(1d0,lb_timing_ema_alpha))
+  lb_remap_min_interval=max(0,lb_remap_min_interval)
+  lb_remap_horizon=max(1,lb_remap_horizon)
+  lb_remap_safety=max(0d0,lb_remap_safety)
+  if((.not.memory_balance).and.myid==1)then
+     write(*,'(A,3(I0,1X))') ' Work balance weights grid/part/SIDM-pair: ', &
+          work_weight_grid,work_weight_part,merge(work_weight_sidm_pair,0,sidm)
+     write(*,'(A,I0,A,F5.2,A,I0,A,I0,A,F5.2)') &
+          ' Work timing: every ',lb_timing_interval,' steps, EMA=', &
+          lb_timing_ema_alpha,', remap min/horizon=',lb_remap_min_interval, &
+          '/',lb_remap_horizon,', safety=',lb_remap_safety
   end if
 
   !-------------------------------------------------

@@ -122,7 +122,7 @@ module amr_parameters
   integer::nexpand_bound=1    ! Number of mesh expansion for virtual boundaries
   real(dp)::boxlen=1.0D0      ! Box length along x direction
   character(len=128)::ordering='hilbert'
-  logical::cost_weighting=.true. ! Activate load balancing according to cpu time
+  logical::cost_weighting=.true. ! Apply AMR subcycle weights in work-balance mode
   ! Recursive bisection tree parameters
   integer::nbilevelmax=1      ! Max steps of bisection partitioning
   integer::nbinodes=3         ! Max number of internal nodes
@@ -133,7 +133,15 @@ module amr_parameters
   integer::mem_weight_grid=0          ! 0 = auto from nvar; >0 = user override
   integer::mem_weight_part=12        ! Memory per particle in dp-equivalents
   integer::mem_weight_sink=500      ! Computational weight per sink particle
-  real(dp)::time_balance_alpha=0d0  ! Time-based LB blend: 0=memory-only, 0.3-0.5=hybrid
+  integer::work_weight_grid=80       ! Work proxy per complete AMR grid
+  integer::work_weight_part=1        ! Work proxy per particle in its leaf cell
+  integer::work_weight_sidm_pair=8   ! Extra work per sampled SIDM pair
+  real(dp)::time_balance_alpha=0d0  ! Work-mode wall-time blend: 0=off, 0.3-0.5=hybrid
+  integer::lb_timing_interval=4      ! Measure rank x level work every N coarse steps
+  real(dp)::lb_timing_ema_alpha=0.25d0 ! EMA update fraction for timing/imbalance
+  integer::lb_remap_min_interval=8   ! Minimum coarse steps between auto remaps
+  integer::lb_remap_horizon=16       ! Steps over which predicted savings repay remap
+  real(dp)::lb_remap_safety=1.20d0   ! Require benefit > safety times remap cost
 
   ! Step parameters
   integer::nrestart=0         ! New run or backup file number
@@ -647,5 +655,86 @@ module amr_parameters
   real(dp)::n_gmc=1D-1
   ! Star particle mass in units of the number of SN:
   integer ::nsn2mass=-1
+
+contains
+
+  integer function domain_sidm_pair_count(ndm)
+    implicit none
+    integer,intent(in)::ndm
+
+    domain_sidm_pair_count=0
+    if(sidm.and.ndm>=sidm_npart_min) &
+         domain_sidm_pair_count=max(0,ndm)/2
+  end function domain_sidm_pair_count
+
+  ! Return the common load-balancing cost assigned to one leaf cell.
+  !
+  ! Grid weight describes an entire 2^ndim-cell AMR grid and is distributed
+  ! over its children.  Particle and SIDM-pair weights are already counts for
+  ! this actual leaf and must not be divided again.  Memory cost is independent
+  ! of the AMR time-stepping hierarchy; work cost optionally includes niter.
+  integer(kind=8) function domain_leaf_cost(npart,npair,niter,mesh_scale)
+    implicit none
+    integer,intent(in)::npart,npair
+    integer(kind=8),intent(in)::niter
+    real(dp),intent(in)::mesh_scale
+    integer(kind=8)::grid_cost,part_cost,pair_cost
+    real(dp)::scaled_grid
+
+    if(memory_balance)then
+       grid_cost=(int(max(0,mem_weight_grid),kind=8) + &
+            int(twotondim-1,kind=8))/int(twotondim,kind=8)
+       part_cost=int(max(0,mem_weight_part),kind=8)* &
+            int(max(0,npart),kind=8)
+       pair_cost=0_8
+    else
+       scaled_grid=dble(max(0,work_weight_grid))*max(0d0,mesh_scale)
+       if(scaled_grid>dble(huge(grid_cost)))then
+          grid_cost=huge(grid_cost)
+       else
+          grid_cost=ceiling(scaled_grid/dble(twotondim),kind=8)
+       end if
+       part_cost=int(max(0,work_weight_part),kind=8)* &
+            int(max(0,npart),kind=8)
+       pair_cost=int(max(0,work_weight_sidm_pair),kind=8)* &
+            int(max(0,npair),kind=8)
+    end if
+
+    if(part_cost>huge(domain_leaf_cost)-grid_cost .or. &
+         pair_cost>huge(domain_leaf_cost)-grid_cost-part_cost)then
+       domain_leaf_cost=huge(domain_leaf_cost)
+    else
+       domain_leaf_cost=max(1_8,grid_cost+part_cost+pair_cost)
+    end if
+    if((.not.memory_balance).and.cost_weighting)then
+       if(domain_leaf_cost>huge(domain_leaf_cost)/max(1_8,niter))then
+          domain_leaf_cost=huge(domain_leaf_cost)
+       else
+          domain_leaf_cost=domain_leaf_cost*max(1_8,niter)
+       end if
+    end if
+  end function domain_leaf_cost
+
+  logical function work_remap_is_economic(imbalance,step_time,remap_time, &
+       steps_since,predicted,required)
+    implicit none
+    real(dp),intent(in)::imbalance,step_time,remap_time
+    integer,intent(in)::steps_since
+    real(dp),intent(out),optional::predicted,required
+    real(dp)::predicted_loc,required_loc,saving_fraction
+
+    predicted_loc=0d0
+    required_loc=0d0
+    work_remap_is_economic=imbalance>remap_thresh .and. &
+         steps_since>=lb_remap_min_interval
+    if(work_remap_is_economic.and.step_time>0d0.and.remap_time>0d0)then
+       saving_fraction=imbalance/(1d0+imbalance)
+       predicted_loc=step_time*saving_fraction*dble(lb_remap_horizon)
+       required_loc=lb_remap_safety*remap_time
+       work_remap_is_economic=predicted_loc>=required_loc
+    end if
+    if(present(predicted))predicted=predicted_loc
+    if(present(required))required=required_loc
+  end function work_remap_is_economic
 
 end module amr_parameters

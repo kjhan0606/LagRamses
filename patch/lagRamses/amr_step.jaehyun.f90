@@ -4,6 +4,7 @@ recursive subroutine amr_step(ilevel,icount)
   use hydro_commons
   use poisson_commons
   use pbh_commons, only: use_pbh, pbh_mark_level
+  use omp_lib, only: omp_get_wtime
 #ifdef HYDRO_CUDA
   use cuda_commons, only: cuda_pool_is_initialized_c
   use poisson_cuda_interface, only: cuda_mg_release_arrays_c
@@ -26,8 +27,9 @@ recursive subroutine amr_step(ilevel,icount)
   ! Each routine is called using a specific order, don't change it,   !
   ! unless you check all consequences first                           !
   !-------------------------------------------------------------------!
-  integer::i,idim,ivar,mpi_err
-  logical::ok_defrag,output_now_all
+  integer::i,idim,ivar,mpi_err,jgrid,igrid_lb,ind_lb,iskip_lb
+  integer(kind=8)::nleaf_lb
+  logical::ok_defrag,output_now_all,lb_timing_sample
 !!$  integer::i,idim,ivar
 !!$  logical::ok_defrag
   logical,save::first_step=.true.
@@ -35,6 +37,7 @@ recursive subroutine amr_step(ilevel,icount)
 
   real(kind=4):: real_mem, real_mem_tot
   real(kind=8):: t_lb_level_start, t_lb_level_end
+  real(kind=8):: t_lb_child_start, t_lb_child_time
 
   ! Particle sub-timers
   integer(kind=8) :: pt_t1, pt_t2, pt_rate
@@ -234,6 +237,14 @@ recursive subroutine amr_step(ilevel,icount)
         end if
      endif
   end if
+
+  ! Sparse measurement starts after any coarse-level remap.  It is outside
+  ! the hydro block so DMO, SIDM, and modified-gravity runs are all sampled.
+  lb_timing_sample=(.not.memory_balance).and.lb_timing_interval>0
+  if(lb_timing_sample) lb_timing_sample= &
+       mod(nstep_coarse,lb_timing_interval)==0
+  if(lb_timing_sample)t_lb_level_start=omp_get_wtime()
+  t_lb_child_time=0d0
 
   !-----------------
   ! Particle leakage
@@ -771,6 +782,7 @@ recursive subroutine amr_step(ilevel,icount)
   !---------------------------
   ! Recursive call to amr_step
   !---------------------------
+  if(lb_timing_sample)t_lb_child_start=omp_get_wtime()
   if(ilevel<nlevelmax)then
      if(numbtot(1,ilevel+1)>0)then
         if(nsubcycle(ilevel)==2)then
@@ -792,6 +804,7 @@ recursive subroutine amr_step(ilevel,icount)
   else
      call update_time(ilevel)
   end if
+  if(lb_timing_sample)t_lb_child_time=omp_get_wtime()-t_lb_child_start
 
   ! Thermal feedback from stars (also call if no feedback, for bookkeeping)
   if(hydro.and.star) then
@@ -813,7 +826,6 @@ recursive subroutine amr_step(ilevel,icount)
 
      ! Hyperbolic solver
                                call timer('hydro - godunov','start')
-     t_lb_level_start = MPI_WTIME()
 #ifdef HYDRO_CUDA
      ! --- GPU auto-tuning for hydro: flags set at levelmin entry ---
      ! (actual flag setting is done at start of amr_step(levelmin))
@@ -957,10 +969,25 @@ recursive subroutine amr_step(ilevel,icount)
                                call timer('flag','start')
   if(.not.static) call flag_fine(ilevel,icount)
 
-  ! Accumulate per-level timing for time-based load balancing
-  t_lb_level_end = MPI_WTIME()
-  level_time_loc(ilevel) = level_time_loc(ilevel) + (t_lb_level_end - t_lb_level_start)
-  level_ncells_loc(ilevel) = numbl(myid,ilevel) * twotondim
+  ! Accumulate exclusive rank x level work only on sparse sample steps.
+  ! Count actual leaf cells, not all children of every AMR grid.
+  if(lb_timing_sample)then
+     t_lb_level_end=omp_get_wtime()
+     level_time_loc(ilevel)=level_time_loc(ilevel)+ &
+          max(0d0,t_lb_level_end-t_lb_level_start-t_lb_child_time)
+     nleaf_lb=0_8
+     igrid_lb=headl(myid,ilevel)
+     do jgrid=1,numbl(myid,ilevel)
+        do ind_lb=1,twotondim
+           iskip_lb=ncoarse+(ind_lb-1)*ngridmax
+           if(cpu_map(igrid_lb+iskip_lb)==myid.and. &
+                son(igrid_lb+iskip_lb)==0)nleaf_lb=nleaf_lb+1_8
+        end do
+        igrid_lb=next(igrid_lb)
+     end do
+     level_ncells_loc(ilevel)=level_ncells_loc(ilevel)+nleaf_lb
+     if(ilevel==levelmin)call update_work_timing_ema
+  end if
 
   !----------------------------
   ! Merge finer level particles
@@ -1167,58 +1194,182 @@ end subroutine rt_step
 #endif
 !###########################################################
 !###########################################################
+subroutine update_work_timing_ema
+  ! Reduce one sparse rank x level sample and update the persistent work
+  ! model.  No collective is performed on non-sample coarse steps.
+  use amr_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ilevel,info,iref
+  real(dp)::alpha,global_cpc,local_cpc,ref_cpc,rank_ratio
+  real(dp)::local_step_time,global_step_time,scale_min,scale_max
+  real(dp),dimension(1:MAXLEVEL)::global_time,local_count,global_count
+
+  alpha=max(0d0,min(1d0,lb_timing_ema_alpha))
+  local_count=dble(level_ncells_loc)
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(level_time_loc,global_time,MAXLEVEL, &
+       MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(local_count,global_count,MAXLEVEL, &
+       MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+  local_step_time=sum(level_time_loc(levelmin:nlevelmax))
+  call MPI_ALLREDUCE(local_step_time,global_step_time,1, &
+       MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+#else
+  global_time=level_time_loc
+  global_count=local_count
+  global_step_time=sum(level_time_loc(levelmin:nlevelmax))
+#endif
+
+  do ilevel=levelmin,nlevelmax
+     if(global_count(ilevel)>0d0.and.global_time(ilevel)>0d0)then
+        global_cpc=global_time(ilevel)/global_count(ilevel)
+        if(level_cell_time_ema(ilevel)<=0d0)then
+           level_cell_time_ema(ilevel)=global_cpc
+        else
+           level_cell_time_ema(ilevel)=(1d0-alpha)* &
+                level_cell_time_ema(ilevel)+alpha*global_cpc
+        end if
+        if(level_ncells_loc(ilevel)>0_8)then
+           local_cpc=level_time_loc(ilevel)/dble(level_ncells_loc(ilevel))
+           rank_ratio=max(0.25d0,min(4d0,local_cpc/global_cpc))
+        else
+           rank_ratio=1d0
+        end if
+        level_rank_scale_ema(ilevel)=(1d0-alpha)* &
+             level_rank_scale_ema(ilevel)+alpha*rank_ratio
+     end if
+  end do
+
+  iref=0
+  do ilevel=levelmin,nlevelmax
+     if(level_cell_time_ema(ilevel)>0d0)then
+        iref=ilevel
+        exit
+     end if
+  end do
+  if(iref>0)then
+     ref_cpc=level_cell_time_ema(iref)
+     do ilevel=levelmin,nlevelmax
+        if(level_cell_time_ema(ilevel)>0d0) &
+             level_mesh_scale_ema(ilevel)=max(0.25d0,min(8d0, &
+             level_cell_time_ema(ilevel)/ref_cpc))
+     end do
+  end if
+
+  if(global_step_time>0d0)then
+     if(lb_step_time_ema<=0d0)then
+        lb_step_time_ema=global_step_time
+     else
+        lb_step_time_ema=(1d0-alpha)*lb_step_time_ema+ &
+             alpha*global_step_time
+     end if
+  end if
+
+  if(myid==1.and.iref>0)then
+     scale_min=minval(level_mesh_scale_ema(levelmin:nlevelmax))
+     scale_max=maxval(level_mesh_scale_ema(levelmin:nlevelmax))
+     write(*,'(A,I8,A,F8.2,A,2F7.3)') &
+          ' LB timing sample step=',nstep_coarse,' measured=', &
+          global_step_time,' s, level-scale range=',scale_min,scale_max
+  end if
+
+  level_time_loc=0d0
+  level_ncells_loc=0_8
+end subroutine update_work_timing_ema
+!###########################################################
+!###########################################################
 subroutine check_load_imbalance(did_remap)
   ! Check weight inhomogeneity and trigger load_balance if
   ! max/avg - 1 > remap_thresh.
   ! Called every coarse step when nremap==0 and remap_thresh>0.
   !
-  ! Metric matches bisection.f90 cost when memory_balance=.true.:
-  !   mem_weight_grid * n_grids + mem_weight_part * n_particles
-  ! so the trigger fires on the same imbalance that the cut tries to fix.
-  ! When memory_balance=.false., falls back to grid-count × subcycle (compute cost).
+  ! The trigger and both decomposition algorithms use domain_leaf_cost, so
+  ! remapping is judged with the same cost that the new domain cut balances.
   use amr_commons
-  use pm_commons, only: numbp
+  use pm_commons, only: count_particles_by_leaf
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   logical,intent(out)::did_remap
 
-  real(dp)::my_cost,max_cost,sum_cost,imbalance
-  integer::ilevel,info,nsub,jgrid,igrid
-  integer(i8b)::ngrids_loc,npart_loc
+  real(dp)::my_cost,max_cost,sum_cost,imbalance,effective_imbalance
+  real(dp)::rank_scale,predicted_saving,required_saving
+  real(dp)::alpha
+  integer::ilevel,info,jgrid,igrid,ind,iskip,npair_cell,steps_since
+  integer,dimension(1:twotondim)::npart_leaf,ndm_leaf
+  integer(kind=8)::my_cost_i8
+  integer(kind=8)::cell_cost_i8
+  integer(kind=8),dimension(1:MAXLEVEL)::niter_cost
+  logical::worth_remap
 #ifndef WITHOUTMPI
   real(dp)::buf(2),gbuf(2)
 #endif
 
   did_remap=.false.
 
-  if(use_fdm .and. fdm_cost_mode==1 .and. nstep_coarse>0) then
-     ! FDM wallclock mode: use actual accumulated time as cost
-     my_cost=sum(level_time_loc(levelmin:nlevelmax))
-  else if(memory_balance .and. pic)then
-     ! Memory-weighted cost (matches bisection cut metric)
-     ngrids_loc=0
-     npart_loc=0
-     do ilevel=levelmin,nlevelmax
-        ngrids_loc=ngrids_loc+numbl(myid,ilevel)
-        igrid=headl(myid,ilevel)
-        do jgrid=1,numbl(myid,ilevel)
-           npart_loc=npart_loc+numbp(igrid)
-           igrid=next(igrid)
-        end do
-     end do
-     my_cost=dble(mem_weight_grid)*dble(ngrids_loc) &
-          +  dble(mem_weight_part)*dble(npart_loc)
-  else
-     ! Compute-cost fallback: grid-count × subcycle weight
-     my_cost=0d0
-     nsub=1
-     do ilevel=levelmin,nlevelmax
-        my_cost=my_cost+dble(numbl(myid,ilevel))*dble(nsub)
-        nsub=nsub*nsubcycle(ilevel)
+  niter_cost=1_8
+  if((.not.memory_balance).and.cost_weighting)then
+     niter_cost(levelmin)=1_8
+     do ilevel=levelmin+1,nlevelmax
+        if(niter_cost(ilevel-1)>huge(niter_cost(ilevel))/ &
+             int(max(1,nsubcycle(ilevel-1)),kind=8))then
+           if(myid==1)write(*,*)'check_load_imbalance: subcycle cost overflow'
+           stop
+        end if
+        niter_cost(ilevel)=int(max(1,nsubcycle(ilevel-1)),kind=8)* &
+             niter_cost(ilevel-1)
      end do
   end if
+
+  my_cost_i8=0_8
+
+  ! Coarse leaf cells are part of the domain ordering too.
+  rank_scale=1d0
+  if((.not.memory_balance).and.time_balance_alpha>0d0)then
+     rank_scale=1d0+time_balance_alpha* &
+          (level_rank_scale_ema(levelmin)-1d0)
+     rank_scale=max(0.5d0,min(2d0,rank_scale))
+  end if
+  do ind=1,ncoarse
+     if(cpu_map(ind)==myid.and.son(ind)==0)then
+        cell_cost_i8=domain_leaf_cost(0,0,1_8, &
+             level_mesh_scale_ema(levelmin))
+        my_cost_i8=my_cost_i8+max(1_8,nint( &
+             dble(cell_cost_i8)*rank_scale,kind=8))
+     end if
+  end do
+
+  ! Sum the same actual-leaf particle and SIDM-pair proxy used by the cut.
+  do ilevel=1,nlevelmax
+     rank_scale=1d0
+     if((.not.memory_balance).and.time_balance_alpha>0d0)then
+        rank_scale=1d0+time_balance_alpha* &
+             (level_rank_scale_ema(max(levelmin,ilevel))-1d0)
+        rank_scale=max(0.5d0,min(2d0,rank_scale))
+     end if
+     igrid=headl(myid,ilevel)
+     do jgrid=1,numbl(myid,ilevel)
+        npart_leaf=0
+        ndm_leaf=0
+        if(pic)call count_particles_by_leaf(igrid,npart_leaf,ndm_leaf)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           if(cpu_map(igrid+iskip)/=myid.or.son(igrid+iskip)/=0)cycle
+           npair_cell=domain_sidm_pair_count(ndm_leaf(ind))
+           cell_cost_i8=domain_leaf_cost(npart_leaf(ind),npair_cell, &
+                niter_cost(max(levelmin,ilevel)), &
+                level_mesh_scale_ema(max(levelmin,ilevel)))
+           my_cost_i8=my_cost_i8+max(1_8,nint( &
+                dble(cell_cost_i8)*rank_scale,kind=8))
+        end do
+        igrid=next(igrid)
+     end do
+  end do
+  my_cost=dble(my_cost_i8)
 
 #ifndef WITHOUTMPI
   buf(1)=my_cost
@@ -1236,13 +1387,35 @@ subroutine check_load_imbalance(did_remap)
      imbalance=0d0
   end if
 
-  if(imbalance>remap_thresh)then
-     if(myid==1) write(*,'(A,F6.2,A,F6.2,A)') &
-          ' Load imbalance ',imbalance*100d0,'% > threshold ', &
-          remap_thresh*100d0,'% -> rebalancing'
+  alpha=max(0d0,min(1d0,lb_timing_ema_alpha))
+  if(.not.lb_imbalance_ema_valid)then
+     lb_imbalance_ema=imbalance
+     lb_imbalance_ema_valid=.true.
+  else
+     lb_imbalance_ema=(1d0-alpha)*lb_imbalance_ema+alpha*imbalance
+  end if
+  effective_imbalance=lb_imbalance_ema
+
+  steps_since=nstep_coarse-lb_last_remap_step
+  worth_remap=work_remap_is_economic(effective_imbalance, &
+       lb_step_time_ema,lb_remap_time_ema,steps_since, &
+       predicted_saving,required_saving)
+
+  if(worth_remap)then
+     if(myid==1) write(*,'(A,F6.2,A,F6.2,A,F8.1,A,F8.1,A)') &
+          ' Load imbalance EMA ',effective_imbalance*100d0, &
+          '% > threshold ',remap_thresh*100d0, &
+          '%, predicted/required saving=',predicted_saving,'/', &
+          required_saving,' s -> rebalancing'
      call load_balance
      call defrag
      did_remap=.true.
+  else if(verbose.and.myid==1.and.effective_imbalance>remap_thresh)then
+     write(*,'(A,F6.2,A,I0,A,F8.1,A,F8.1,A)') &
+          ' Load imbalance EMA ',effective_imbalance*100d0, &
+          '%; steps since remap=',steps_since, &
+          ', predicted/required=',predicted_saving,'/',required_saving, &
+          ' s -> keep current domains'
   end if
 
 end subroutine check_load_imbalance

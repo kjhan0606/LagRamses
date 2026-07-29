@@ -82,6 +82,46 @@ module pm_commons
 
 
   contains
+
+  ! Count particles in the actual child cell that contains them.  numbp is
+  ! a grid total and must not be charged to every leaf cell during domain
+  ! decomposition.  The SIDM count follows sidm_scatter's definition of a
+  ! DM-like particle so the pair proxy represents the work really attempted.
+  subroutine count_particles_by_leaf(igrid,npart_leaf,ndm_leaf)
+    use amr_commons, only: xg
+    implicit none
+    integer,intent(in)::igrid
+    integer,dimension(1:twotondim),intent(out)::npart_leaf,ndm_leaf
+    integer::ipart,jpart,ind,ix,iy,iz
+
+    npart_leaf=0
+    ndm_leaf=0
+    if(igrid<=0 .or. .not.allocated(headp) .or. .not.allocated(numbp) .or. &
+         .not.allocated(nextp) .or. .not.allocated(xp))return
+
+    ipart=headp(igrid)
+    do jpart=1,numbp(igrid)
+       if(ipart<=0)exit
+       ix=0
+       iy=0
+       iz=0
+       if(xp(ipart,1)>xg(igrid,1))ix=1
+#if NDIM>1
+       if(xp(ipart,2)>xg(igrid,2))iy=1
+#endif
+#if NDIM>2
+       if(xp(ipart,3)>xg(igrid,3))iz=1
+#endif
+       ind=1+ix+2*iy+4*iz
+       npart_leaf(ind)=npart_leaf(ind)+1
+       if(allocated(idp).and.allocated(ptypep))then
+          if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. &
+               ptypep(ipart)/=PTYPE_SINK) ndm_leaf(ind)=ndm_leaf(ind)+1
+       end if
+       ipart=nextp(ipart)
+    end do
+  end subroutine count_particles_by_leaf
+
   function cross(a,b)
     use amr_parameters, only:dp
     real(dp),dimension(1:3)::a,b
