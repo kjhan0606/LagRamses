@@ -23,6 +23,7 @@ from plot_dmo_pk_ratios import (
 
 
 MODELS = ("f5", "f6", "n1", "n5", "sym_a")
+MODEL_CHOICES = (*MODELS, "phicdm_a01", "cde10")
 
 
 def arguments() -> argparse.Namespace:
@@ -32,7 +33,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument(
         "--models",
         nargs="+",
-        choices=MODELS,
+        choices=MODEL_CHOICES,
         default=list(MODELS),
         help="model subset to validate (default: all benchmark models)",
     )

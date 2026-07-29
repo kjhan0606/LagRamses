@@ -29,7 +29,9 @@ subroutine read_params
        & ,nrestart,ncontrol,nstepmax,nsubcycle,nremap,remap_thresh,ordering &
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
        & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
-       & ,time_balance_alpha &
+       & ,work_weight_grid,work_weight_part,work_weight_sidm_pair &
+       & ,time_balance_alpha,lb_timing_interval,lb_timing_ema_alpha &
+       & ,lb_remap_min_interval,lb_remap_horizon,lb_remap_safety &
        & ,aexp_step_limit &
        & ,jobcontrolfile &
        & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_auto_tune,n_cuda_streams &
@@ -70,7 +72,7 @@ subroutine read_params
   namelist/galileon_params/galileon_tracker,c2_galileon,c3_galileon, &
        & n_iter_galileon,galileon_eps
   namelist/coupled_de_params/beta_cde,cde_friction,cde_vary_mass
-  namelist/quint_params/quint_pot,quint_alpha,quint_lambda,quint_phi_ini
+  namelist/quint_params/quint_pot,quint_ic_mode,quint_alpha,quint_lambda,quint_phi_ini
   namelist/kessence_params/kes_x0
   namelist/chaplygin_params/chaplygin_As,chaplygin_alpha
   namelist/rvm_params/rvm_nu
@@ -429,6 +431,26 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(use_fdm) mem_weight_grid = mem_weight_grid + twotondim * 2 * 8
      if(myid==1) write(*,'(A,I6,A,I3,A)') &
           ' Memory balance: mem_weight_grid=',mem_weight_grid,' (nvar=',nvar,')'
+  end if
+
+  !-------------------------------------------------
+  ! Work-balance model validation
+  !-------------------------------------------------
+  work_weight_grid=max(0,work_weight_grid)
+  work_weight_part=max(0,work_weight_part)
+  work_weight_sidm_pair=max(0,work_weight_sidm_pair)
+  lb_timing_interval=max(0,lb_timing_interval)
+  lb_timing_ema_alpha=max(0d0,min(1d0,lb_timing_ema_alpha))
+  lb_remap_min_interval=max(0,lb_remap_min_interval)
+  lb_remap_horizon=max(1,lb_remap_horizon)
+  lb_remap_safety=max(0d0,lb_remap_safety)
+  if((.not.memory_balance).and.myid==1)then
+     write(*,'(A,3(I0,1X))') ' Work balance weights grid/part/SIDM-pair: ', &
+          work_weight_grid,work_weight_part,merge(work_weight_sidm_pair,0,sidm)
+     write(*,'(A,I0,A,F5.2,A,I0,A,I0,A,F5.2)') &
+          ' Work timing: every ',lb_timing_interval,' steps, EMA=', &
+          lb_timing_ema_alpha,', remap min/horizon=',lb_remap_min_interval, &
+          '/',lb_remap_horizon,', safety=',lb_remap_safety
   end if
 
   !-------------------------------------------------
@@ -1014,8 +1036,21 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         if(myid==1) write(*,*) 'ERROR: quint_pot must be 1 (Ratra-Peebles) or 2 (exponential)'
         call clean_stop
      end if
-     if(quint_alpha <= 0d0 .or. quint_lambda <= 0d0 .or. quint_phi_ini <= 0d0) then
-        if(myid==1) write(*,*) 'ERROR: quint_alpha, quint_lambda, quint_phi_ini must be > 0'
+     if(quint_ic_mode < 0 .or. quint_ic_mode > 1) then
+        if(myid==1) write(*,*) 'ERROR: quint_ic_mode must be 0 (frozen) or 1 (RP tracker)'
+        call clean_stop
+     end if
+     if(quint_ic_mode == 1 .and. quint_pot /= 1) then
+        if(myid==1) write(*,*) 'ERROR: quint_ic_mode=1 is defined only for Ratra-Peebles phiCDM'
+        call clean_stop
+     end if
+     if(quint_ic_mode == 1 .and. use_coupled_de) then
+        if(myid==1) write(*,*) 'ERROR: RP tracker IC is not defined for coupled quintessence'
+        call clean_stop
+     end if
+     if(quint_alpha <= 0d0 .or. quint_lambda <= 0d0 .or. &
+          & (quint_ic_mode == 0 .and. quint_phi_ini <= 0d0)) then
+        if(myid==1) write(*,*) 'ERROR: active quintessence potential/initial parameters must be > 0'
         call clean_stop
      end if
      if(myid==1) then
@@ -1024,7 +1059,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         else
            write(*,'(A,F8.4)') ' Quintessence enabled: V=A*exp(-lambda*phi), lambda=', quint_lambda
         end if
-        write(*,'(A,ES10.3)') '   phi_ini [Mpl] =', quint_phi_ini
+        if(quint_ic_mode == 1) then
+           write(*,'(A)') '   initial condition: matter-era Ratra-Peebles tracker (phiCDM)'
+        else
+           write(*,'(A,ES10.3)') '   frozen phi_ini [Mpl] =', quint_phi_ini
+        end if
      end if
   end if
   if(use_kessence) then
