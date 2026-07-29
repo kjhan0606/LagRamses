@@ -333,6 +333,15 @@ def parse_args() -> argparse.Namespace:
         help="model: lagCAMB-matched transfers; shared: one LCDM transfer for triage",
     )
     parser.add_argument(
+        "--dmo-velocity-source",
+        choices=("transfer", "density_2lpt"),
+        default="transfer",
+        help=(
+            "transfer: use CAMB vtotal plus MUSIC's 2LPT term (default); "
+            "density_2lpt: derive velocities from the density potential"
+        ),
+    )
+    parser.add_argument(
         "--music-tasks",
         type=int,
         default=1,
@@ -525,16 +534,20 @@ def make_transfer(
     return transfer_path, diagnostics
 
 
-def velocity_growth_scale(
+def velocity_growth_correction(
     model_transfer: Path, lcdm_transfer: Path
-) -> tuple[float, float, float]:
-    """Return the DMO velocity-growth correction relative to LCDM.
+) -> tuple[np.ndarray, float, float, float]:
+    """Return the mode-by-mode DMO velocity-growth correction to LCDM.
 
     LagMUSIC's DMO 2LPT path derives velocities from the total-density
     displacement potential and its background (LCDM/w0-wa) growth factor.
-    The CAMB Newtonian velocity transfers therefore supply only the relative
-    correction f_model/f_LCDM.  Keeping this as a scalar preserves the density
-    transfer used for both 1LPT and 2LPT displacements.
+    The CAMB Newtonian velocity transfers therefore supply the relative
+    correction
+
+        [(T_v/T_delta)_model / (T_v/T_delta)_LCDM](k).
+
+    The ratio is a diagnostic only. LagMUSIC consumes the original CAMB
+    ``vtotal`` transfer directly in its opt-in DMO 2LPT velocity solve.
     """
     model = np.loadtxt(model_transfer)
     lcdm = np.loadtxt(lcdm_transfer)
@@ -548,17 +561,21 @@ def velocity_growth_scale(
     lcdm_growth = lcdm_vtotal / lcdm[:, 6]
     if np.any(model_growth <= 0.0) or np.any(lcdm_growth <= 0.0):
         raise RuntimeError("CAMB velocity-to-density transfer must be positive")
+    lcdm_on_model_k_all = np.exp(
+        np.interp(
+            np.log(model[:, 0]),
+            np.log(lcdm[:, 0]),
+            np.log(lcdm_growth),
+        )
+    )
+    correction = model_growth / lcdm_on_model_k_all
     mask = (
         (model[:, 0] >= 1.0e-3)
         & (model[:, 0] <= 1.0)
         & (model[:, 0] >= lcdm[:, 0].min())
         & (model[:, 0] <= lcdm[:, 0].max())
     )
-    model_k = model[mask, 0]
-    lcdm_on_model_k = np.exp(
-        np.interp(np.log(model_k), np.log(lcdm[:, 0]), np.log(lcdm_growth))
-    )
-    samples = model_growth[mask] / lcdm_on_model_k
+    samples = correction[mask]
     if samples.size == 0 or not np.all(np.isfinite(samples)):
         raise RuntimeError("cannot derive a finite velocity-growth correction")
 
@@ -567,13 +584,7 @@ def velocity_growth_scale(
     maximum_deviation = float(np.max(np.abs(samples / scale - 1.0)))
     if scale <= 0.0:
         raise RuntimeError(f"invalid velocity-growth correction: {scale}")
-    if maximum_deviation > 1.0e-4:
-        raise RuntimeError(
-            "DMO velocity growth is too scale-dependent for one vfact_scale: "
-            f"{model_transfer}, maximum fractional "
-            f"deviation={maximum_deviation:.3e}"
-        )
-    return scale, relative_scatter, maximum_deviation
+    return correction, scale, relative_scatter, maximum_deviation
 
 
 def music_config(
@@ -582,6 +593,7 @@ def music_config(
     sigma8_z0: float,
     force_pnorm: float,
     vfact_scale: float,
+    dmo_velocity_source: str,
     ic_dir: str,
 ) -> str:
     legacy_keys = "LagMUSIC" in str(Path(args.music).expanduser().resolve())
@@ -599,6 +611,7 @@ use_LLA         = no
 padding         = 8
 force_pnorm     = {force_pnorm:.15e}
 vfact_scale     = {vfact_scale:.15e}
+dmo_velocity_source = {dmo_velocity_source}
 
 [cosmology]
 Omega_m         = {OMEGA_M}
@@ -929,12 +942,28 @@ def main() -> int:
     }
     lcdm_transfer = transfer_data["lcdm"][0]
     for name, (transfer, diagnostics) in transfer_data.items():
-        scale, scatter, maximum_deviation = velocity_growth_scale(
+        _, scale, scatter, maximum_deviation = velocity_growth_correction(
             transfer, lcdm_transfer
         )
+        use_velocity_transfer = args.dmo_velocity_source == "transfer"
         diagnostics.update(
             {
-                "vfact_scale": scale,
+                # LagMUSIC now consumes CAMB's vtotal directly in the DMO
+                # 2LPT velocity solve.  The model/LCDM growth ratio below is
+                # retained as a diagnostic, not collapsed into one scalar.
+                "dmo_velocity_mode": (
+                    "camb_vtotal"
+                    if use_velocity_transfer
+                    else "density_2lpt"
+                ),
+                "dmo_velocity_source": args.dmo_velocity_source,
+                "dmo_velocity_transfer_enabled": use_velocity_transfer,
+                "vfact_scale": 1.0 if use_velocity_transfer else scale,
+                "velocity_growth_ratio_mean": scale,
+                "velocity_growth_ratio_relative_scatter": scatter,
+                "velocity_growth_ratio_maximum_deviation": maximum_deviation,
+                "velocity_growth_ratio_k_range_h_mpc": [1.0e-3, 1.0],
+                # Backward-compatible diagnostic names.
                 "vfact_scale_relative_scatter": scatter,
                 "vfact_scale_maximum_deviation": maximum_deviation,
                 "vfact_scale_k_range_h_mpc": [1.0e-3, 1.0],
@@ -961,6 +990,7 @@ def main() -> int:
                 diagnostics["sigma8_z0"],
                 diagnostics["force_pnorm"],
                 diagnostics["vfact_scale"],
+                args.dmo_velocity_source,
                 ic_dir,
             ),
             args.force,

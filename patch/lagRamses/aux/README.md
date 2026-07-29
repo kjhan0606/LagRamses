@@ -13,18 +13,33 @@ The generator uses `/home/kjhan/BACKUP/LagMUSIC/music/build/MUSIC` and fixes
 the absolute amplitude through `force_pnorm`. The normalization is derived
 from the lagCAMB linear spectrum at the starting redshift and retains the
 common primordial amplitude rather than imposing a common `sigma_8`.
-For DMO 2LPT ICs, the generator also derives `vfact_scale` from the
-model-to-LCDM ratio of lagCAMB's total velocity-to-density transfer. This
-corrects the initial velocity without changing the density or displacement
-field. Generation stops if that ratio varies by more than `1e-4` over
-`0.001 <= k <= 1 h/Mpc`; such a model needs a scale-dependent velocity
-kernel rather than one scalar correction.
+For DMO 2LPT ICs, the default `--dmo-velocity-source transfer` makes
+LagMUSIC use lagCAMB's mass-weighted `vtotal(k)` directly for the first-order
+velocity potential, then add MUSIC's high-redshift 2LPT velocity term.
+Density and particle displacements continue to use the density transfer.
+The alternative `--dmo-velocity-source density_2lpt` selects the legacy
+single-`vfact_scale` path. The model/LCDM velocity-to-density ratio and its
+scale dependence are always recorded in `campaign.json`.
 
 ```bash
 python3 patch/lagRamses/aux/dmo_benchmark_setup.py \
   --outdir /gpfs/kjhan/Hydro/DE_nonstd/DMO_bench_v1 \
   --make-ics
 ```
+
+For coupled-DE, validate the actual GRAFIC velocity divergence, density
+transfer, exact outputs and \(z=0\) completion with
+
+```bash
+python3 patch/lagRamses/aux/validate_cde_velocity.py CAMPAIGN
+```
+
+The velocity gate compares shell-weighted, common-phase
+`theta_cDE/theta_LCDM` directly with lagCAMB's mass-weighted `vtotal` ratio.
+The strict default tolerance is 0.1%. The particle CIC field at the initial
+dump already contains the requested 2LPT displacement, so its difference
+from linear CAMB is retained as a diagnostic rather than mislabelled as a
+linear-transfer failure.
 
 The production Ratra--Peebles scalar-field benchmark is `phicdm_a01`.
 It uses `quint_ic_mode=1`, which computes the matter-era tracker initial

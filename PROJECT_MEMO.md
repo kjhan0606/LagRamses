@@ -117,3 +117,22 @@ internal halo structure.
   over \(k\leq0.2\,h\,{\rm Mpc}^{-1}\) (maximum 0.0412%) and the 1% gate over
   \(k\leq0.5\,h\,{\rm Mpc}^{-1}\) (maximum 0.6003%). This is a low-resolution
   code gate, not a replacement for the production-volume resolution audit.
+
+### Coupled-DE velocity gate
+
+- LagMUSIC DMO 2LPT now offers `dmo_velocity_source=transfer|density_2lpt`.
+  The default `transfer` path uses lagCAMB's mass-weighted `vtotal(k)` for
+  the linear velocity and adds MUSIC's 2LPT velocity term; the legacy
+  density-derived path remains user-selectable.
+- `cde10` has a 1.7467% scale dependence in its velocity-growth correction,
+  so it must use the default transfer path rather than one scalar
+  `vfact_scale`.
+- The phase-anchored L6 gate completed through \(z=0\) with all eight checks:
+  `/gpfs/kjhan/Hydro/DE_nonstd/CDE_velocity_validation_20260729/resolution_anchor6/L6_64/cde10_velocity_validation.json`.
+  The maximum lagMUSIC/lagCAMB velocity-ratio residual is 0.0433%, and the
+  initial density-transfer residual is 0.0324%.
+- The L5->L6 \(z=0\) ratio comparison is not yet a resolution certificate:
+  its maximum residual is 0.230% over \(k\leq0.2\,h\,{\rm Mpc}^{-1}\) and
+  7.29% over \(k\leq0.5\,h\,{\rm Mpc}^{-1}\). This does not invalidate the
+  velocity kernel, which independently passes the 0.1% linear gate, but a
+  production-scale resolution audit remains required.

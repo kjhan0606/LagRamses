@@ -23,7 +23,7 @@ from plot_dmo_pk_ratios import (
 
 
 MODELS = ("f5", "f6", "n1", "n5", "sym_a")
-MODEL_CHOICES = (*MODELS, "phicdm_a01")
+MODEL_CHOICES = (*MODELS, "phicdm_a01", "cde10")
 
 
 def arguments() -> argparse.Namespace:
