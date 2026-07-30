@@ -172,15 +172,11 @@ recursive subroutine amr_step(ilevel,icount)
   if(ilevel==levelmin .and. varcpu_restart_done)then
      if(myid==1) write(*,*) 'Forcing load_balance after variable-ncpu restart'
      call load_balance
-     call defrag
-     ok_defrag=.true.
-     ! Rebuild communicators after defrag (defrag remaps grid indices,
-     ! invalidating emission/reception lists built inside load_balance).
-     ! The normal rebuild in the refine section is skipped when
-     ! levelmin==nlevelmax, so we must do it here.
-     do i=1,nlevelmax
-        call build_comm(i)
-     end do
+     ! Do not defragment the cross-ordering/variable-ncpu intermediate
+     ! hierarchy here.  load_balance has already rebuilt valid sparse-grid
+     ! communicators, whereas defrag assumes that every remote parent/son
+     ! link is locally complete.  Normal evolution or the next output can
+     ! compact the now-consistent hierarchy later.
      do i=nlevelmax,1,-1
         if(hydro)then
            do ivar=1,nvar
@@ -207,7 +203,7 @@ recursive subroutine amr_step(ilevel,icount)
      if(allocated(varcpu_ngrid_file)) deallocate(varcpu_ngrid_file)
      varcpu_restart_done=.false.
      first_step=.false.
-     call diag_check_nan('post_defrag')
+     call diag_check_nan('post_varcpu_load_balance')
      if(myid==1) then
         write(*,*) 'Variable-ncpu restart block done, entering time step'
         call flush(6)

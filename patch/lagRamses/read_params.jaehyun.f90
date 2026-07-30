@@ -31,6 +31,7 @@ subroutine read_params
        & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
        & ,work_weight_grid,work_weight_part,work_weight_sidm_pair &
        & ,time_balance_alpha,lb_timing_interval,lb_timing_ema_alpha &
+       & ,ksec_level_balance_alpha,ksec_level_min_fraction,ksec_level_bins &
        & ,lb_remap_min_interval,lb_remap_horizon,lb_remap_safety &
        & ,aexp_step_limit &
        & ,jobcontrolfile &
@@ -439,6 +440,9 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   work_weight_grid=max(0,work_weight_grid)
   work_weight_part=max(0,work_weight_part)
   work_weight_sidm_pair=max(0,work_weight_sidm_pair)
+  ksec_level_balance_alpha=max(0d0,min(1d0,ksec_level_balance_alpha))
+  ksec_level_min_fraction=max(0d0,min(1d0,ksec_level_min_fraction))
+  ksec_level_bins=max(64,ksec_level_bins)
   lb_timing_interval=max(0,lb_timing_interval)
   lb_timing_ema_alpha=max(0d0,min(1d0,lb_timing_ema_alpha))
   lb_remap_min_interval=max(0,lb_remap_min_interval)
@@ -458,6 +462,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   !-------------------------------------------------
   if(ordering=='ksection' .and. myid==1) then
      write(*,'(A,A)') ' Exchange method: ', trim(exchange_method)
+     write(*,'(A,F5.2,A,F6.3,A,I0)') &
+          ' K-section level balance: alpha=',ksec_level_balance_alpha, &
+          ', min fraction=',ksec_level_min_fraction, &
+          ', bins=',ksec_level_bins
   end if
 
   !-------------------------------------------------
