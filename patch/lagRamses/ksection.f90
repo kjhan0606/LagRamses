@@ -191,8 +191,10 @@ contains
 
          do part = 1, kfac - 1
             rmost = bisec_hist_bounds(i + 1) - 1
-            do while (rmost - lmost > 0)
-               if (bisec_cell_coord(lmost) < all_walls(i, part)) then
+            do while (lmost <= rmost)
+               ! Match cmp_ksection_cpumap: points exactly on a wall belong
+               ! to the lower-index partition.
+               if (bisec_cell_coord(lmost) <= all_walls(i, part)) then
                   lmost = lmost + 1
                else
                   ! swap lmost and rmost: ind_cell, coord, cost
@@ -225,6 +227,311 @@ contains
       bisec_hist_bounds = new_hist_bounds
 
    end subroutine splitsort_ksection_histogram
+
+
+   !================================================================
+   ! Select all walls at one K-section depth using a hybrid objective:
+   !
+   !   (1-alpha) * scalar imbalance
+   !     + alpha  * worst weighted active-level imbalance.
+   !
+   ! A compact histogram is used here instead of duplicating the full
+   ! bisec_hist array for every AMR level.  bisec_cell_cost already contains
+   ! the grid, particle, SIDM-pair, subcycle, and timing-model weights.
+   !================================================================
+   subroutine choose_level_aware_walls(nc,k,dir,cur_levelstart, &
+        tmp_imin,tmp_imax,tmp_bxmin,tmp_bxmax,cum_load_global,walls_2d)
+#ifndef WITHOUTMPI
+      include 'mpif.h'
+#endif
+      integer,intent(in)::nc,k,dir,cur_levelstart
+      integer,intent(in),dimension(:)::tmp_imin,tmp_imax
+      real(dp),intent(in),dimension(:,:)::tmp_bxmin,tmp_bxmax
+      integer(i8b),intent(out),dimension(:)::cum_load_global
+      real(dp),intent(out),dimension(:,:)::walls_2d
+
+      integer(i8b),allocatable,dimension(:,:,:)::hist_local,hist_global
+      integer(i8b)::level_total,level_left,scalar_total,scalar_left
+      integer::nbin,nlev,nvalue,i,j,l,idx,ibin,best_bin
+      integer::bin_lo,bin_hi,bin_hi_node,fw,cur_cell,lncpu
+      integer::base_ncpu,rem_ncpu,cum_ncpu,ierr
+      real(dp)::scale,bin_width,target,frac,max_frac,level_weight
+      real(dp)::left_err,right_err,scalar_score,level_score
+      real(dp)::score,best_score,best_scalar,best_level
+      real(dp)::alpha,min_fraction,wall
+      real(dp)::chosen_scalar_max,chosen_level_max
+
+      scale=boxlen/dble(icoarse_max-icoarse_min+1)
+      nbin=max(64,min(ksec_level_bins,bisec_nres))
+      nlev=max(1,nlevelmax)
+      bin_width=scale/dble(nbin)
+      alpha=max(0d0,min(1d0,ksec_level_balance_alpha))
+      min_fraction=max(0d0,min(1d0,ksec_level_min_fraction))
+
+      allocate(hist_local(1:nc,1:nbin,1:nlev))
+      allocate(hist_global(1:nc,1:nbin,1:nlev))
+      hist_local=0_i8b
+
+      ! The compact cell arrays have already been split into the nc parent
+      ! nodes by the previous K-section depth.
+      do i=1,nc
+         do idx=bisec_hist_bounds(i),bisec_hist_bounds(i+1)-1
+            l=bisec_cell_level(idx)
+            if(l<=0)l=levelmin
+            l=max(1,min(nlev,l))
+            ! A candidate wall is best_bin*bin_width and cpumap uses <=.
+            ! CEILING therefore keeps wall-coincident cells on its left.
+            ibin=ceiling(bisec_cell_coord(idx)/bin_width)
+            ibin=max(1,min(nbin,ibin))
+            if(huge(hist_local(i,ibin,l))-hist_local(i,ibin,l) < &
+                 bisec_cell_cost(idx))then
+               if(myid==1)write(*,*) &
+                    'K-section level histogram integer overflow'
+#ifndef WITHOUTMPI
+               call MPI_ABORT(MPI_COMM_WORLD,1,ierr)
+#endif
+               stop
+            end if
+            hist_local(i,ibin,l)=hist_local(i,ibin,l)+ &
+                 bisec_cell_cost(idx)
+         end do
+      end do
+
+#ifndef WITHOUTMPI
+      nvalue=size(hist_local)
+      call MPI_ALLREDUCE(hist_local,hist_global,nvalue,MPI_INTEGER8, &
+           MPI_SUM,MPI_COMM_WORLD,ierr)
+#else
+      hist_global=hist_local
+#endif
+
+      ! Prefix sums make evaluation of every coarse candidate wall O(Nlevel).
+      do l=1,nlev
+         do i=1,nc
+            do ibin=2,nbin
+               hist_global(i,ibin,l)=hist_global(i,ibin,l)+ &
+                    hist_global(i,ibin-1,l)
+            end do
+         end do
+      end do
+
+      chosen_scalar_max=0d0
+      chosen_level_max=0d0
+      do i=1,nc
+         cur_cell=cur_levelstart+i-1
+         if(tmp_imax(cur_cell)<=tmp_imin(cur_cell))cycle
+         lncpu=tmp_imax(cur_cell)-tmp_imin(cur_cell)+1
+         base_ncpu=lncpu/k
+         rem_ncpu=mod(lncpu,k)
+         cum_ncpu=0
+
+         scalar_total=sum(hist_global(i,nbin,1:nlev))
+         if(scalar_total<=0_i8b)cycle
+         max_frac=0d0
+         do l=1,nlev
+            level_total=hist_global(i,nbin,l)
+            if(level_total>0_i8b)then
+               frac=dble(level_total)/dble(scalar_total)
+               if(frac>=min_fraction)max_frac=max(max_frac,frac)
+            end if
+         end do
+
+         bin_lo=max(1,int(floor(tmp_bxmin(cur_cell,dir)/bin_width))+1)
+         bin_hi_node=min(nbin-1, &
+              int(ceiling(tmp_bxmax(cur_cell,dir)/bin_width))-1)
+
+         do j=1,k-1
+            if(j<=rem_ncpu)then
+               cum_ncpu=cum_ncpu+base_ncpu+1
+            else
+               cum_ncpu=cum_ncpu+base_ncpu
+            end if
+            target=dble(cum_ncpu)/dble(lncpu)
+
+            ! Reserve at least one coarse bin for every wall still to come.
+            bin_hi=bin_hi_node-(k-1-j)
+            best_bin=0
+            best_score=huge(1d0)
+            best_scalar=huge(1d0)
+            best_level=huge(1d0)
+            do ibin=bin_lo,bin_hi
+               scalar_left=sum(hist_global(i,ibin,1:nlev))
+               left_err=abs(dble(scalar_left)/ &
+                    max(target*dble(scalar_total),1d0)-1d0)
+               right_err=abs(dble(scalar_total-scalar_left)/ &
+                    max((1d0-target)*dble(scalar_total),1d0)-1d0)
+               scalar_score=max(left_err,right_err)
+
+               level_score=0d0
+               l=1
+               do while(l<=nlev)
+                  level_total=hist_global(i,nbin,l)
+                  if(level_total>0_i8b.and.max_frac>0d0)then
+                     frac=dble(level_total)/dble(scalar_total)
+                     if(frac>=min_fraction)then
+                        level_left=hist_global(i,ibin,l)
+                        left_err=abs(dble(level_left)/ &
+                             max(target*dble(level_total),1d0)-1d0)
+                        right_err=abs(dble(level_total-level_left)/ &
+                             max((1d0-target)*dble(level_total),1d0)-1d0)
+                        level_weight=frac/max_frac
+                        if(level_weight*max(left_err,right_err)> &
+                             level_score)then
+                           level_score=level_weight*max(left_err,right_err)
+                        end if
+                     end if
+                  end if
+                  l=l+1
+               end do
+
+               if(max_frac<=0d0)level_score=scalar_score
+               score=(1d0-alpha)*scalar_score+alpha*level_score
+               if(score<best_score.or. &
+                    (score==best_score.and.scalar_score<best_scalar))then
+                  best_score=score
+                  best_scalar=scalar_score
+                  best_level=level_score
+                  best_bin=ibin
+               end if
+            end do
+
+            if(best_bin==0)then
+               ! Resolution is too coarse for this node: retain a legal,
+               ! approximately volume-balanced wall.
+               best_bin=max(bin_lo,min(bin_hi_node, &
+                    nint((tmp_bxmin(cur_cell,dir)+target* &
+                    (tmp_bxmax(cur_cell,dir)-tmp_bxmin(cur_cell,dir)))/ &
+                    bin_width)))
+               best_scalar=1d0
+               best_level=1d0
+            end if
+
+            wall=round_to_bisec_res(dble(best_bin)*bin_width)
+            wall=max(tmp_bxmin(cur_cell,dir)+bisec_res, &
+                 min(tmp_bxmax(cur_cell,dir)-bisec_res,wall))
+            ksec_wall(cur_cell,j)=wall
+            walls_2d(i,j)=wall
+            fw=(i-1)*(k-1)+j
+            cum_load_global(fw)=sum(hist_global(i,best_bin,1:nlev))
+            chosen_scalar_max=max(chosen_scalar_max,best_scalar)
+            chosen_level_max=max(chosen_level_max,best_level)
+            bin_lo=best_bin+1
+         end do
+      end do
+
+      if(myid==1)write(*,'(A,F5.2,A,I0,A,2F8.4)') &
+           ' K-section level-aware walls: alpha=',alpha,', bins=',nbin, &
+           ', max scalar/level score=',chosen_scalar_max,chosen_level_max
+
+      deallocate(hist_local,hist_global)
+   end subroutine choose_level_aware_walls
+
+
+   !================================================================
+   ! Report the predicted rank-by-level cost of the final K-section tree.
+   ! This diagnostic is emitted for both legacy scalar and level-aware runs
+   ! so that identical-checkpoint A/B tests can be compared directly.
+   !================================================================
+   subroutine report_ksection_level_balance
+#ifndef WITHOUTMPI
+      include 'mpif.h'
+#endif
+      integer(i8b),allocatable,dimension(:,:)::cost_local,cost_global
+      integer(i8b),allocatable,dimension(:)::rank_total
+      integer::icpu,idx,l,nlev,ierr,imax,idim,jdim
+      real(dp)::total_cost,level_total,mean_cost,imbalance,share
+      real(dp)::scalar_mean,scalar_imbalance
+      real(dp)::edge(1:ndim),volume,equal_volume,volume_ratio
+      real(dp)::aspect,max_aspect,min_volume_ratio,max_volume_ratio
+      real(dp)::surface,total_surface,equal_surface
+
+      nlev=max(1,nlevelmax)
+      allocate(cost_local(1:ncpu,1:nlev))
+      allocate(cost_global(1:ncpu,1:nlev))
+      allocate(rank_total(1:ncpu))
+      cost_local=0_i8b
+
+      do icpu=1,ncpu
+         do idx=bisec_hist_bounds(icpu),bisec_hist_bounds(icpu+1)-1
+            l=bisec_cell_level(idx)
+            if(l<=0)l=levelmin
+            l=max(1,min(nlev,l))
+            cost_local(icpu,l)=cost_local(icpu,l)+bisec_cell_cost(idx)
+         end do
+      end do
+#ifndef WITHOUTMPI
+      call MPI_ALLREDUCE(cost_local,cost_global,size(cost_local), &
+           MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,ierr)
+#else
+      cost_global=cost_local
+#endif
+
+      rank_total=sum(cost_global,dim=2)
+      total_cost=dble(sum(rank_total))
+      scalar_mean=total_cost/dble(max(1,ncpu))
+      if(scalar_mean>0d0)then
+         scalar_imbalance=dble(maxval(rank_total))/scalar_mean-1d0
+      else
+         scalar_imbalance=0d0
+      end if
+
+      if(myid==1)then
+         write(*,'(A,F8.3,A)') &
+              ' K-section predicted scalar max/mean imbalance=', &
+              100d0*scalar_imbalance,' %'
+         write(*,'(A)') &
+              ' K-section predicted level balance: level share max/mean rank'
+         do l=1,nlev
+            level_total=dble(sum(cost_global(:,l)))
+            if(level_total<=0d0)cycle
+            mean_cost=level_total/dble(max(1,ncpu))
+            imbalance=dble(maxval(cost_global(:,l)))/mean_cost-1d0
+            imax=maxloc(cost_global(:,l),dim=1)
+            share=level_total/max(total_cost,1d0)
+            write(*,'(A,I3,A,F7.3,A,F8.3,A,I4)') &
+                 '   L=',l,' share=',100d0*share, &
+                 '% imbalance=',100d0*imbalance,'% rank=',imax
+         end do
+
+         ! A level-aware objective can move walls into very unequal-volume
+         ! boxes.  Report a compact locality/communication proxy so that a
+         ! lower compute-cost imbalance is not mistaken for a faster layout.
+         equal_volume=(boxlen/dble(icoarse_max-icoarse_min+1))**ndim / &
+              dble(max(1,ncpu))
+         max_aspect=1d0
+         min_volume_ratio=huge(1d0)
+         max_volume_ratio=0d0
+         total_surface=0d0
+         do icpu=1,ncpu
+            edge=max(bisec_cpubox_max2(icpu,1:ndim)- &
+                 bisec_cpubox_min2(icpu,1:ndim),bisec_res)
+            volume=product(edge)
+            volume_ratio=volume/max(equal_volume,tiny(1d0))
+            min_volume_ratio=min(min_volume_ratio,volume_ratio)
+            max_volume_ratio=max(max_volume_ratio,volume_ratio)
+            aspect=maxval(edge)/max(minval(edge),bisec_res)
+            max_aspect=max(max_aspect,aspect)
+            surface=0d0
+            do idim=1,ndim
+               volume=1d0
+               do jdim=1,ndim
+                  if(jdim/=idim)volume=volume*edge(jdim)
+               end do
+               surface=surface+2d0*volume
+            end do
+            total_surface=total_surface+surface
+         end do
+         equal_surface=dble(max(1,ncpu))*2d0*dble(ndim)* &
+              ((boxlen/dble(icoarse_max-icoarse_min+1))/ &
+              dble(max(1,ncpu))**(1d0/dble(ndim)))**(ndim-1)
+         write(*,'(A,F9.3,A,2F9.3,A,F9.3)') &
+              ' K-section geometry: max aspect=',max_aspect, &
+              ', volume/equal min,max=',min_volume_ratio,max_volume_ratio, &
+              ', surface/equal=',total_surface/max(equal_surface,tiny(1d0))
+      end if
+
+      deallocate(cost_local,cost_global,rank_total)
+   end subroutine report_ksection_level_balance
 
 
    !================================================================
@@ -444,6 +751,13 @@ contains
             t0 = MPI_WTIME()
 #endif
 
+            if(ksec_level_balance_alpha>0d0.and. &
+                 (.not.memory_balance))then
+               call choose_level_aware_walls(nc,k,dir,cur_levelstart, &
+                    tmp_imin,tmp_imax,tmp_bxmin,tmp_bxmax, &
+                    cum_load_global,walls_2d)
+            else
+
             ! Compute target cumulative fractions
             do i = 1, nc
                cur_cell = cur_levelstart + (i - 1)
@@ -606,6 +920,7 @@ contains
                end do
 
             end do dichotomy_loop
+            end if
 
             ! Copy final walls for splitsort
             do i = 1, nc
@@ -734,6 +1049,8 @@ contains
             ksec_next(cur_cell, :) = 0
          end if
       end do
+
+      if(update)call report_ksection_level_balance
 
       ! Statistics
       mean  = sum(dble(bisec_cpu_load)) / ncpu

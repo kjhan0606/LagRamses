@@ -137,6 +137,9 @@ module amr_parameters
   integer::work_weight_part=1        ! Work proxy per particle in its leaf cell
   integer::work_weight_sidm_pair=8   ! Extra work per sampled SIDM pair
   real(dp)::time_balance_alpha=0d0  ! Work-mode wall-time blend: 0=off, 0.3-0.5=hybrid
+  real(dp)::ksec_level_balance_alpha=0d0 ! K-section scalar/level-minimax blend (0=legacy)
+  real(dp)::ksec_level_min_fraction=0.03d0 ! Ignore levels below this node-cost fraction
+  integer::ksec_level_bins=2048      ! Coarse bins for level-aware K-section wall search
   integer::lb_timing_interval=4      ! Measure rank x level work every N coarse steps
   real(dp)::lb_timing_ema_alpha=0.25d0 ! EMA update fraction for timing/imbalance
   integer::lb_remap_min_interval=8   ! Minimum coarse steps between auto remaps
