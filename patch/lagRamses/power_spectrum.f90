@@ -32,6 +32,7 @@ subroutine compute_power_spectrum(ilevel, filedir, nchar)
   ! Grid dimensions
   integer :: fft_Nx, fft_Ny, fft_Nz
   integer(i8b) :: N_total, N_complex
+  integer(i8b), parameter :: MAX_REPLICATED_FFT_CELLS = 134217728_i8b
 
   ! FFTW arrays
   real(C_DOUBLE), allocatable :: rhs_3d(:)
@@ -94,6 +95,19 @@ subroutine compute_power_spectrum(ilevel, filedir, nchar)
   if(myid==1) write(*,'(A,I3,A,I5,A,I5,A,I5)') &
        ' Power spectrum: level=', ilevel, &
        ' grid=', fft_Nx, 'x', fft_Ny, 'x', fft_Nz
+
+  ! The current estimator replicates the real-space density arrays on every
+  ! MPI rank.  Refuse grids larger than 512^3 instead of exhausting node
+  ! memory; production-scale spectra must be measured by distributed
+  ! post-processing.
+  if(N_total > MAX_REPLICATED_FFT_CELLS)then
+     if(myid==1)then
+        write(*,'(A,I0,A)') ' WARNING: dump_pk skipped for ', N_total, &
+             ' cells; replicated in-situ FFT is limited to 512^3.'
+        write(*,'(A)') '          Use distributed snapshot post-processing.'
+     end if
+     return
+  end if
 
   ! ================================================================
   ! Step 1: Density deposit
