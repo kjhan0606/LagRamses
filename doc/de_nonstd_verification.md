@@ -19,6 +19,19 @@ tests where feasible. Started 2026-07-12.
   `D ∝ (sqrt(y)/a)∫da/y^{3/2}`, exact only for w=-1. At IC redshifts
   (z≳50) dark energy is negligible, so the vfact error is ≪0.1%.
 
+**LagMUSIC background hand-off — BUG CONFIRMED AND FIXED
+(2026-07-31).** The campaign generator supplied the correct model-specific
+lagCAMB density and velocity transfers but hard-coded `w0=-1`, `wa=0` in
+every LagMUSIC configuration. The existing \(1024^3\) CPL IC therefore has
+the correct scale-dependent CPL transfer but an LCDM background velocity
+factor and 2LPT velocity term. At \(z_{\rm start}=49\), correcting the input
+changes LagMUSIC's velocity factor from `394.397958311` to `394.377241378`,
+or 0.00525%. The error is too small to explain the production FFT crash, but
+the CPL production IC must be regenerated for parameter consistency.
+`dmo_benchmark_setup.py` now passes `(-0.9,0.0)` for the constant-\(w\)
+benchmark and `(-0.9,0.2)` for the CPL benchmark. Generation tests for
+LCDM, constant-\(w\), and CPL pass.
+
 **Perturbation, table mode (OK).** `R_DE(k,a)` from CAMB via the
 Weyl-potential method (aux/generate_de_table.py); applied as
 `1 + (Ω_de(a)/Ω_cb) R_DE` in MG/CG (cs2≈0) and per-k in FFT paths.

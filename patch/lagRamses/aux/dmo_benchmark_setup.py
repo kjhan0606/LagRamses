@@ -155,6 +155,8 @@ symmetron_eps=1.0d-6
     "w09": {
         "description": "smooth constant-w dark energy, w=-0.9",
         "flags": "",
+        "music_w0": -0.9,
+        "music_wa": 0.0,
         "blocks": """&CPL_PARAMS
 w0=-0.9
 wa=0.0
@@ -165,6 +167,8 @@ cs2_de=1.0
     "cpl_m09_p02": {
         "description": "smooth CPL dark energy, w0=-0.9, wa=+0.2",
         "flags": "",
+        "music_w0": -0.9,
+        "music_wa": 0.2,
         "blocks": """&CPL_PARAMS
 w0=-0.9
 wa=0.2
@@ -346,6 +350,22 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="MPI ranks used while generating ICs",
+    )
+    parser.add_argument(
+        "--music-unigrid-slab",
+        action="store_true",
+        help=(
+            "use LagMUSIC's distributed slab FFT and 2LPT paths; "
+            "recommended for uniform 512^3 and larger ICs"
+        ),
+    )
+    parser.add_argument(
+        "--reuse-white-noise",
+        action="store_true",
+        help=(
+            "generate the first IC from the seed, then make every later "
+            "model read the stored wnoise_LEVEL.bin realization"
+        ),
     )
     parser.add_argument("--slurm-tasks", type=int, default=32)
     parser.add_argument("--omp-threads", type=int, default=2)
@@ -589,17 +609,31 @@ def velocity_growth_correction(
 
 def music_config(
     args: argparse.Namespace,
+    model_name: str,
     transfer: Path,
     sigma8_z0: float,
     force_pnorm: float,
     vfact_scale: float,
     dmo_velocity_source: str,
     ic_dir: str,
+    random_source: str,
 ) -> str:
     legacy_keys = "LagMUSIC" in str(Path(args.music).expanduser().resolve())
     spectral_key = "nspec" if legacy_keys else "n_s"
     w0_key = "w0" if legacy_keys else "w_0"
     wa_key = "wa" if legacy_keys else "w_a"
+    music_w0 = float(MODELS[model_name].get("music_w0", -1.0))
+    music_wa = float(MODELS[model_name].get("music_wa", 0.0))
+    slab_setup = ""
+    poisson_mode = "fft_fine        = yes"
+    if args.music_unigrid_slab:
+        slab_setup = """kspace_TF       = yes
+slab_solve_unigrid = yes
+slab_2lpt_unigrid = yes
+lpt2_boost_threads = auto
+"""
+        poisson_mode = """fft_fine        = no
+kspace           = yes"""
     return f"""[setup]
 boxlength       = {args.boxlen}
 zstart          = {args.zstart}
@@ -612,6 +646,7 @@ padding         = 8
 force_pnorm     = {force_pnorm:.15e}
 vfact_scale     = {vfact_scale:.15e}
 dmo_velocity_source = {dmo_velocity_source}
+{slab_setup}
 
 [cosmology]
 Omega_m         = {OMEGA_M}
@@ -623,20 +658,21 @@ sigma_8         = {sigma8_z0:.10f}
 m_nu1           = 0.0
 m_nu2           = 0.0
 m_nu3           = 0.0
-{w0_key}        = -1.0
-{wa_key}        = 0.0
+{w0_key}        = {music_w0:.16g}
+{wa_key}        = {music_wa:.16g}
 transfer        = camb_file
 transfer_file   = {transfer}
 
 [random]
-seed[{args.phase_anchor_level or args.levelmin}] = {args.seed}
+disk_cached     = yes
+seed[{args.phase_anchor_level or args.levelmin}] = {random_source}
 
 [output]
 format          = grafic2
 filename        = {ic_dir}
 
 [poisson]
-fft_fine        = yes
+{poisson_mode}
 accuracy        = 1e-5
 pre_smooth      = 3
 post_smooth     = 3
@@ -883,9 +919,13 @@ shared long-wave realization; merely placing the same seed independently at
 each particle level does not. LagMUSIC's `force_pnorm` is
 derived directly from lagCAMB's linear P(k,zstart), so A_s fixes the absolute
 amplitude without sigma8 re-normalisation or MUSIC growth back-scaling.
-For DMO 2LPT, `vfact_scale` corrects the LCDM background velocity factor by
-the model/LCDM ratio of CAMB's total velocity-to-density transfer. The
-density transfer—and therefore the displacement field—is unchanged.
+For DMO 2LPT, `dmo_velocity_source=transfer` constructs the first-order
+velocity field from lagCAMB's model-specific `vtotal` transfer and retains
+LagMUSIC's high-redshift 2LPT velocity term. LagMUSIC also receives the
+model's CPL `w0` and `wa` values when applicable, so its background velocity
+factor is consistent with the simulation namelist. In the legacy
+`density_2lpt` mode, `vfact_scale` applies the model/LCDM
+velocity-to-density growth ratio to the density-derived velocity field.
 
 ## Transfer source
 
@@ -981,17 +1021,28 @@ def main() -> int:
     for name in transfer_models:
         transfer, diagnostics = transfer_data[name]
         ic_dir = "ics_common" if args.ic_mode == "shared" else f"ics_{name}"
+        first_transfer_model = transfer_models[0]
+        white_noise = outdir / (
+            f"wnoise_{args.phase_anchor_level or args.levelmin:04d}.bin"
+        )
+        random_source = (
+            str(white_noise)
+            if args.reuse_white_noise and name != first_transfer_model
+            else str(args.seed)
+        )
         config_path = outdir / f"music_{name}.conf"
         write_text(
             config_path,
             music_config(
                 args,
+                name,
                 transfer,
                 diagnostics["sigma8_z0"],
                 diagnostics["force_pnorm"],
                 diagnostics["vfact_scale"],
                 args.dmo_velocity_source,
                 ic_dir,
+                random_source,
             ),
             args.force,
         )
@@ -1066,7 +1117,11 @@ def main() -> int:
         "A_s": A_S,
         "amplitude_normalization": "lagCAMB P(k,zstart) via LagMUSIC force_pnorm",
         "velocity_normalization": (
-            "lagCAMB (T_v,total/T_density,total)_model relative to LCDM "
+            "lagCAMB model-specific vtotal transfer with LagMUSIC "
+            "model-background vfact and vfact_scale=1"
+            if args.dmo_velocity_source == "transfer"
+            else
+            "density-derived 2LPT velocity with model/LCDM growth ratio "
             "via LagMUSIC vfact_scale"
         ),
         "ic_mode": args.ic_mode,
@@ -1082,6 +1137,8 @@ def main() -> int:
         "camb_version": getattr(camb, "__version__", "unknown"),
         "music": args.music,
         "music_tasks": args.music_tasks,
+        "music_unigrid_slab": args.music_unigrid_slab,
+        "reuse_white_noise": args.reuse_white_noise,
         "ramses": args.ramses,
     }
     write_text(
