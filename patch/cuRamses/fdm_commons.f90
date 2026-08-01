@@ -9,6 +9,10 @@ module fdm_commons
   ! Computed at runtime from m_axion and code units
   real(dp)::hbar_code = 0.0d0   ! Effective hbar in code units
 
+  ! FDM drift ghost-exchange A/B switches (legacy paths by default)
+  logical::fdm_ghost2 = .false.
+  logical::fdm_ghost2_rev = .false.
+
   ! Physical constants (CGS)
   real(dp),parameter::hbar_cgs = 1.0545718d-27   ! erg s
   real(dp),parameter::eV_to_erg = 1.602176634d-12 ! erg/eV

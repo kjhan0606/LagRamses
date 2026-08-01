@@ -1021,7 +1021,11 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         end do
      end do
      ! Reduce contributions accumulated on virtual parent cells to owners
-     call make_virtual_reverse_dp(dmb(1), ilevel-1)
+     if(fdm_ghost2_rev) then
+        call make_virtual_reverse_dp2(dmb(1), ilevel-1)
+     else
+        call make_virtual_reverse_dp(dmb(1), ilevel-1)
+     end if
      ! Apply to local leaf cells at the parent level
      do ind=1,twotondim
         iskip = ncoarse + (ind-1)*ngridmax
@@ -1045,8 +1049,12 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
            igrid = next(igrid)
         end do
      end do
-     call make_virtual_fine_dp(psi_re(1), ilevel-1)
-     call make_virtual_fine_dp(psi_im(1), ilevel-1)
+     if(fdm_ghost2) then
+        call make_virtual_fine_dp2(psi_re(1), psi_im(1), ilevel-1)
+     else
+        call make_virtual_fine_dp(psi_re(1), ilevel-1)
+        call make_virtual_fine_dp(psi_im(1), ilevel-1)
+     end if
      deallocate(dmb)
   end if
 
@@ -1083,8 +1091,12 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi, bmode)
   real(dp)::nr,ni,gre,gim
   logical::gfound
 
-  call make_virtual_fine_dp(inr(1), ilevel)
-  call make_virtual_fine_dp(ini(1), ilevel)
+  if(fdm_ghost2) then
+     call make_virtual_fine_dp2(inr(1), ini(1), ilevel)
+  else
+     call make_virtual_fine_dp(inr(1), ilevel)
+     call make_virtual_fine_dp(ini(1), ilevel)
+  end if
 
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
