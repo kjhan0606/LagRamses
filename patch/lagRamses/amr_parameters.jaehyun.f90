@@ -133,6 +133,7 @@ module amr_parameters
   integer::mem_weight_grid=0          ! 0 = auto from nvar; >0 = user override
   integer::mem_weight_part=12        ! Memory per particle in dp-equivalents
   integer::mem_weight_sink=500      ! Computational weight per sink particle
+  real(dp)::lb_grid_headroom=0.85d0   ! load-balance grid-count safety margin (fraction of ngridmax)
   real(dp)::time_balance_alpha=0d0  ! Time-based LB blend: 0=memory-only, 0.3-0.5=hybrid
 
   ! Step parameters

@@ -468,11 +468,18 @@ contains
       integer::icell_tmp,igrid_tmp,isubcell_tmp
       integer::isink
       integer,allocatable::sink_per_grid(:),sink_coarse(:)
+      integer::guard_iter
+      integer(kind=8)::cell_cost_tot_loc,cell_cost_tot
+      integer(kind=8)::ntot_loc,ntot,nraised_loc,nraised
+      integer(kind=8)::min_cost_loc,min_cost_global,floor_cost
+      integer,parameter::LB_CELL_GUARD_MAXITER=3
 
       integer,dimension(1:nvector),save::ind_grid,ind_cell
 
-      real(dp)::dx,scale
+      real(dp)::dx,scale,floor_c,cell_cap,guard_denom
+      real(dp)::predicted_max_cells
       real(dp),dimension(1:twotondim,1:3)::xc
+      logical::guard_applied
       
       if(verbose) print *,'entering init_bisection_histogram'
 
@@ -662,6 +669,125 @@ contains
          deallocate(sink_per_grid, sink_coarse)
       end if
 
+      ! Shared bisection/ksection safety guard.  The cached entries are leaf
+      ! cells: one AMR grid contributes twotondim cells and its grid cost is
+      ! divided by twotondim above.  Thus the per-domain grid capacity becomes
+      ! a cell capacity of lb_grid_headroom*ngridmax*twotondim.  With the
+      ! current bounded memory-cost model this is normally a no-op; keeping the
+      ! guard here protects both decompositions if their cost model is extended.
+      guard_applied = .false.
+      if(lb_grid_headroom > 0d0 .and. ngridmax > 0) then
+         cell_cost_tot_loc = 0_8
+         ntot_loc = 0_8
+         min_cost_loc = huge(min_cost_loc)
+         do i=1,bisec_ncells_loc
+            if(bisec_cell_cost(i) > 0) then
+               cell_cost_tot_loc = cell_cost_tot_loc+ &
+                    int(bisec_cell_cost(i),kind=8)
+               ntot_loc = ntot_loc+1_8
+               min_cost_loc = min(min_cost_loc, &
+                    int(bisec_cell_cost(i),kind=8))
+            end if
+         end do
+#ifndef WITHOUTMPI
+         call MPI_ALLREDUCE(cell_cost_tot_loc,cell_cost_tot,1, &
+              MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,ierr)
+         call MPI_ALLREDUCE(ntot_loc,ntot,1, &
+              MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,ierr)
+         call MPI_ALLREDUCE(min_cost_loc,min_cost_global,1, &
+              MPI_INTEGER8,MPI_MIN,MPI_COMM_WORLD,ierr)
+#else
+         cell_cost_tot = cell_cost_tot_loc
+         ntot = ntot_loc
+         min_cost_global = min_cost_loc
+#endif
+
+         ! Both split trees terminate in exactly ncpu domains.
+         cell_cap = lb_grid_headroom*dble(ngridmax)*dble(twotondim)
+         guard_denom = dble(ncpu)*cell_cap
+         floor_c = dble(cell_cost_tot)/guard_denom
+         if(ntot > 0_8 .and. cell_cost_tot > 0_8 .and. &
+              floor_c > dble(min_cost_global)) then
+            do guard_iter=1,LB_CELL_GUARD_MAXITER
+               floor_c = dble(cell_cost_tot)/guard_denom
+               if(floor_c <= dble(min_cost_global)) exit
+
+               ! On the final pass choose floor >= T/(D-K).  Then raising at
+               ! most K positive entries gives T_new <= D*floor.  D<=K means
+               ! the requested occupancy cap cannot contain the current cells.
+               if(guard_iter == LB_CELL_GUARD_MAXITER) then
+                  if(guard_denom <= dble(ntot)) then
+                     if(myid==1) write(*,*) &
+                          ' LB cell guard (bisection/ksection): occupancy exceeds', &
+                          ' the headroom; falling back to pure count balancing'
+                     ! Headroom is unreachable, but an equal-count split is
+                     ! still the best partition for the count limit and stays
+                     ! feasible while occupancy is under the cell capacity.
+                     do i=1,bisec_ncells_loc
+                        if(bisec_cell_cost(i) > 0_i8b) bisec_cell_cost(i) = 1_i8b
+                     end do
+                     guard_applied = .true.
+                     min_cost_global = 1_i8b
+                     exit
+                  end if
+                  floor_c = max(floor_c,dble(cell_cost_tot)/ &
+                       (guard_denom-dble(ntot)))
+               end if
+
+               if(floor_c > dble(huge(0_i8b))) then
+                  if(myid==1) write(*,*) &
+                       ' LB cell guard (bisection/ksection): integer cost overflow, floor=',floor_c
+#ifndef WITHOUTMPI
+                  call MPI_ABORT(MPI_COMM_WORLD,1,ierr)
+#endif
+                  stop
+               end if
+               floor_cost = ceiling(floor_c,kind=8)
+
+               nraised_loc = 0_8
+               do i=1,bisec_ncells_loc
+                  if(bisec_cell_cost(i) > 0 .and. &
+                       bisec_cell_cost(i) < floor_cost) then
+                     bisec_cell_cost(i) = floor_cost
+                     nraised_loc = nraised_loc+1_8
+                  end if
+               end do
+#ifndef WITHOUTMPI
+               call MPI_ALLREDUCE(nraised_loc,nraised,1, &
+                    MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,ierr)
+#else
+               nraised = nraised_loc
+#endif
+               guard_applied = guard_applied .or. (nraised > 0_8)
+               min_cost_global = max(min_cost_global,floor_cost)
+
+               cell_cost_tot_loc = 0_8
+               do i=1,bisec_ncells_loc
+                  if(bisec_cell_cost(i) > 0) cell_cost_tot_loc = &
+                       cell_cost_tot_loc+int(bisec_cell_cost(i),kind=8)
+               end do
+#ifndef WITHOUTMPI
+               call MPI_ALLREDUCE(cell_cost_tot_loc,cell_cost_tot,1, &
+                    MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,ierr)
+#else
+               cell_cost_tot = cell_cost_tot_loc
+#endif
+            end do
+
+            predicted_max_cells = (dble(cell_cost_tot)/dble(ncpu))/ &
+                 dble(min_cost_global)
+            if(myid==1 .and. guard_applied) then
+               write(*,'(A,ES12.4,A,I0,A,I0,A,F12.2,A,F12.2)') &
+                    ' LB cell guard (bisection/ksection): floor=',floor_c, &
+                    ' raised=',nraised,'/',ntot, &
+                    ' predicted max cells=',predicted_max_cells, &
+                    ' / cap=',cell_cap
+            end if
+         else if(myid==1 .and. verbose) then
+            write(*,'(A)') ' LB cell guard (bisection/ksection): not needed'
+         end if
+      end if
+
    end subroutine
 
 
@@ -737,4 +863,3 @@ contains
    end subroutine compute_bisec_cell_coords
 
 end module bisection
-

@@ -29,7 +29,7 @@ subroutine read_params
   namelist/run_params/clumpfind,cosmo,pic,sink,sinkprops,lightcone,poisson,hydro,rt,verbose,debug &
        & ,nrestart,ncontrol,nstepmax,nsubcycle,nremap,remap_thresh,ordering &
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
-       & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
+       & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink,lb_grid_headroom &
        & ,time_balance_alpha &
        & ,jobcontrolfile &
        & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_auto_tune,n_cuda_streams &
@@ -1313,4 +1313,3 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
 #endif
 
 end subroutine read_params
-

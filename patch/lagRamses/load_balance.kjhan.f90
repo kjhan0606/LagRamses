@@ -460,6 +460,7 @@ subroutine cmp_new_cpu_map
   real(kind=8),dimension(0:ndomain)::incost_new,incost_old
   integer(kind=8),dimension(1:overload)::npart_sub
   integer(kind=8)::wflag
+  integer(kind=8)::nraised_loc,nraised,ntot_grids_loc,ntot_grids
   integer,dimension(1:overload)::ncell_sub
   real(kind=8),dimension(1:ndomain)::cost_loc,cost_old,cost_new
   real(qdp),dimension(0:ndomain)::bound_key_loc
@@ -483,7 +484,11 @@ subroutine cmp_new_cpu_map
   real(kind=8),dimension(1:MAXLEVEL) :: my_cpc_arr, sum_cpc_arr
   real(kind=8),dimension(1:MAXLEVEL) :: fdm_level_cost
   real(kind=8) :: avg_cpc, tf
-  logical :: do_time_blend, need_cpc
+  real(kind=8) :: floor_w,min_weight_loc,min_weight_global
+  real(kind=8) :: grid_cap,guard_denom,predicted_maxcount,cost_imbalance
+  integer :: guard_iter,floor_flag
+  integer,parameter :: LB_GRID_GUARD_MAXITER=3
+  logical :: do_time_blend,need_cpc,guard_applied
 
   ! Local constants
   nxny=nx*ny
@@ -712,7 +717,7 @@ subroutine cmp_new_cpu_map
                  if(fdm_level_cost(ilevel) > 1d0) then
                     flag1(my_idx)=nint(dble(flag1(my_idx))*fdm_level_cost(ilevel))
                  endif
-                 wflag = flag1(my_idx)*niter_cost(ilevel)
+                 wflag = int(flag1(my_idx),kind=8)*int(niter_cost(ilevel),kind=8)
                  if (wflag > 2147483647) then
                     write(*,*) ' wrong type for flag1 --> change to integer kind=8: ',wflag
                     stop
@@ -770,6 +775,132 @@ subroutine cmp_new_cpu_map
      incost_tot = incost_tot + cost_old(idom)
      incost_old(idom) = incost_tot
   end do
+
+  ! A cost-only partition can put too many cheap cells in one domain.  Impose
+  ! a lower bound on every positive cost so that the equal domain budget
+  ! cannot represent more than grid_cap entries.  flag1 carries one entry per
+  ! leaf cell, not per grid, so the per-rank capacity ngridmax is converted to
+  ! cells by twotondim before the cap is formed.  Zero-cost entries are not
+  ! AMR cells and retain their historical zero cost.
+  guard_applied = .false.
+  if(lb_grid_headroom > 0d0 .and. ngridmax > 0 .and. incost_tot > 0d0) then
+     grid_cap = lb_grid_headroom*dble(ngridmax)*dble(twotondim)/dble(overload)
+     guard_denom = dble(ndomain)*grid_cap
+
+     min_weight_loc = huge(1d0)
+     ntot_grids_loc = 0_8
+     do i=1,ncell
+        if(flag1(i) > 0) then
+           min_weight_loc = min(min_weight_loc,dble(flag1(i)))
+           ntot_grids_loc = ntot_grids_loc+1_8
+        end if
+     end do
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(min_weight_loc,min_weight_global,1, &
+          & MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,info)
+     call MPI_ALLREDUCE(ntot_grids_loc,ntot_grids,1, &
+          & MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+     min_weight_global = min_weight_loc
+     ntot_grids = ntot_grids_loc
+#endif
+
+     floor_w = incost_tot/guard_denom
+     if(ntot_grids > 0_8 .and. floor_w > min_weight_global) then
+        do guard_iter=1,LB_GRID_GUARD_MAXITER
+           floor_w = incost_tot/guard_denom
+           if(floor_w <= min_weight_global) exit
+
+           ! Close the fixed-point iteration conservatively on the last pass.
+           ! For current total T, K positive entries and denominator D, choosing
+           ! floor >= T/(D-K) guarantees T_new <= D*floor.
+           if(guard_iter == LB_GRID_GUARD_MAXITER) then
+              if(guard_denom <= dble(ntot_grids)) then
+                 if(myid==1) write(*,*) &
+                      ' LB grid guard: occupancy exceeds the headroom;', &
+                      ' falling back to pure count balancing'
+                 ! The headroom target is out of reach, but an equal-count
+                 ! split is still the best partition for the count limit and
+                 ! remains feasible whenever occupancy stays under ngridmax.
+                 ! Give every positive entry the same cost and stop iterating.
+                 do i=1,ncell
+                    if(flag1(i) > 0) flag1(i) = 1
+                 end do
+                 guard_applied = .true.
+                 min_weight_global = 1d0
+                 exit
+              end if
+              floor_w = max(floor_w,incost_tot/ &
+                   & (guard_denom-dble(ntot_grids)))
+           end if
+
+           if(floor_w > dble(huge(flag1(1)))) then
+              if(myid==1) write(*,*) &
+                   ' wrong type for flag1 --> change to integer kind=8: floor=',floor_w
+#ifndef WITHOUTMPI
+              call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#endif
+              stop
+           end if
+           floor_flag = ceiling(floor_w)
+
+           nraised_loc = 0_8
+           do i=1,ncell
+              if(flag1(i) > 0 .and. flag1(i) < floor_flag) then
+                 flag1(i) = floor_flag
+                 nraised_loc = nraised_loc+1_8
+              end if
+           end do
+#ifndef WITHOUTMPI
+           call MPI_ALLREDUCE(nraised_loc,nraised,1, &
+                & MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+           nraised = nraised_loc
+#endif
+           guard_applied = guard_applied .or. (nraised > 0_8)
+           min_weight_global = max(min_weight_global,dble(floor_flag))
+
+           ! Rebuild every local subdomain sum because flag1 changed.
+           npart_sub = 0_8
+           ncell_loc = 0
+           do isub=1,overload
+              do i=1,ncell_sub(isub)
+                 npart_sub(isub) = npart_sub(isub) + &
+                      & int(flag1(flag2(ncell_loc+i)),kind=8)
+              end do
+              ncell_loc = ncell_loc+ncell_sub(isub)
+           end do
+           cost_loc = 0d0
+           do isub=1,overload
+              cost_loc(myid+(isub-1)*ncpu) = dble(npart_sub(isub))
+           end do
+#ifndef WITHOUTMPI
+           call MPI_ALLREDUCE(cost_loc,cost_old,ndomain, &
+                & MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+           cost_old = cost_loc
+#endif
+           incost_tot = 0d0
+           incost_old(0) = 0d0
+           do idom=1,ndomain
+              incost_tot = incost_tot+cost_old(idom)
+              incost_old(idom) = incost_tot
+           end do
+        end do
+
+        predicted_maxcount = (incost_tot/dble(ndomain))/min_weight_global
+        cost_imbalance = maxval(cost_old)/(incost_tot/dble(ndomain))
+        if(myid==1 .and. guard_applied) then
+           write(*,'(A,ES12.4,A,I0,A,I0,A,F12.2,A,F12.2,A,F10.4)') &
+                ' LB grid guard: floor=',floor_w,' raised=',nraised,'/',ntot_grids, &
+                ' predicted max count=',predicted_maxcount,' / cap=',grid_cap, &
+                ' cost imbalance=',cost_imbalance
+        end if
+     else if(myid==1 .and. verbose) then
+        write(*,'(A)') ' LB grid guard: not needed'
+     end if
+  end if
+
   incost_new(0) = 0D0
   do idom = 1,ndomain
      cost_new(idom) = incost_tot/dble(ndomain) ! Exact load balancing
