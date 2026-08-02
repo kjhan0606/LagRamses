@@ -507,8 +507,8 @@ subroutine userflag_fine(ilevel)
 
   ! FDM refinement: de Broglie (wave levels) + Madelung (fluid levels)
   ! Placed after prevent_refine so gas holdback gates FDM refinement too
-  if(use_fdm) call fdm_refine_flag(ilevel)
-  if(use_fdm) call fdm_madelung_refine_flag(ilevel)
+  if(use_fdm .and. .not.fdm_refine_matched) call fdm_refine_flag(ilevel)
+  if(use_fdm .and. .not.fdm_refine_matched) call fdm_madelung_refine_flag(ilevel)
 
   ! Compute FPR-adjusted effective m_refine for this level
   call compute_fpr_m_refine_eff(ilevel)

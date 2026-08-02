@@ -381,6 +381,13 @@ module amr_parameters
   logical ::fdm_hjm_qp=.false.        ! Enable quantum pressure on HJM fluid levels (ilevel<first_wave_level)
   real(dp)::fdm_qp_c1max=0.5d0        ! QP validity gate: zero QP where amplitude curvature C1 exceeds this
   real(dp)::fdm_refine_rho_min=8.0d0  ! de Broglie refinement density floor (units of mean)
+  ! Matched-refinement control for solver-comparison experiments.  The wave and
+  ! fluid arms normally refine on different criteria (de Broglie gradient vs
+  ! Madelung nonlinearity), so a three-way comparison measures solver and
+  ! refinement policy together.  Setting this true drops both solver-specific
+  ! flags and leaves the density criterion, which is common to every arm, so the
+  ! arms differ only in how they evolve psi.
+  logical ::fdm_refine_matched=.false.
 
   ! MOND (Modified Newtonian Dynamics) parameters
   logical ::use_mond=.false.             ! Enable QUMOND acceleration correction
