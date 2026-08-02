@@ -777,6 +777,233 @@ contains
    end subroutine build_ksection
 
    !================================================================
+   ! Build a k-section tree from variable-ncpu checkpoint grid centers.
+   ! At each tree level all node histograms share a fixed-size flattened
+   ! buffer, so storage remains O(max(65536,ncpu*256)) integer(kind=8).
+   !================================================================
+   subroutine build_ksection_varcpu(nlevelmax_file)
+#ifndef WITHOUTMPI
+      include 'mpif.h'
+#endif
+      integer, intent(in) :: nlevelmax_file
+
+      integer, parameter :: min_nbin = 65536
+      integer, parameter :: bins_per_domain = 256
+      integer :: total_nbin, node_nbin, hist_size
+      integer :: ilevel, igrid, i, idim, lvl, depth, nc, k, dir
+      integer :: cur, cur_cell, cur_levelstart, node_slot, child_idx
+      integer :: ibin, j, child, cpuid, info, ngrid
+      integer :: lncpu, base_ncpu, rem_ncpu, cum_ncpu
+      integer :: icoarse_array(1:3)
+      integer, allocatable :: tmp_imin(:), tmp_imax(:), ncpu_part(:)
+      integer(kind=8), allocatable :: hist(:), domain_load(:)
+      integer(kind=8), allocatable :: tmp_load(:)
+      integer(kind=8) :: node_total, cumulative
+      real(dp), allocatable :: tmp_bxmin(:,:), tmp_bxmax(:,:)
+      real(dp) :: scale, coord, span, target, fraction, wall
+      real(dp) :: gmean, imbalance
+      integer(kind=8) :: total_grids, gmin, gmax
+      real(dp) :: xx(1:nvector,1:ndim)
+      integer :: cpu(1:nvector)
+
+      scale = boxlen / dble(icoarse_max - icoarse_min + 1)
+      icoarse_array = (/ icoarse_min, jcoarse_min, kcoarse_min /)
+      total_nbin = max(min_nbin, ncpu * bins_per_domain)
+
+      allocate(tmp_imin(1:ksec_nbinodes), tmp_imax(1:ksec_nbinodes))
+      allocate(tmp_load(1:ksec_nbinodes))
+      allocate(tmp_bxmin(1:ksec_nbinodes,1:ndim))
+      allocate(tmp_bxmax(1:ksec_nbinodes,1:ndim))
+      allocate(hist(1:total_nbin+ncpu))
+
+      ksec_root = 1
+      ksec_next = 0
+      ksec_indx = 0
+      ksec_wall = 0.0d0
+      tmp_imin = 0
+      tmp_imax = 0
+      tmp_load = 0_8
+      tmp_bxmin = 0.0d0
+      tmp_bxmax = 0.0d0
+      tmp_imin(1) = 1
+      tmp_imax(1) = ncpu
+      tmp_bxmin(1,:) = 0.0d0
+      tmp_bxmax(1,:) = scale
+
+      cur_levelstart = 1
+      nc = 1
+      do lvl = 0, nksec_levels - 1
+         k = ksec_factor(lvl+1)
+         dir = ksec_dir(lvl+1)
+         node_nbin = max(bins_per_domain, total_nbin / nc)
+         hist_size = nc * node_nbin
+         hist(1:hist_size) = 0_8
+
+         ! One pass over local checkpoint grids fills every node histogram
+         ! at this tree level.  Coordinates exactly match Step 7 ownership.
+         do ilevel = 1, nlevelmax_file
+            do igrid = 1, varcpu_lvl(ilevel)%ngrids
+               cur = ksec_root
+               do depth = 1, lvl
+                  child_idx = ksec_factor(depth)
+                  coord = (varcpu_lvl(ilevel)%xg(igrid,ksec_dir(depth)) - &
+                       dble(icoarse_array(ksec_dir(depth)))) * scale
+                  do j = 1, ksec_factor(depth) - 1
+                     if(coord <= ksec_wall(cur,j)) then
+                        child_idx = j
+                        exit
+                     end if
+                  end do
+                  cur = ksec_next(cur,child_idx)
+               end do
+
+               node_slot = cur - cur_levelstart + 1
+               coord = (varcpu_lvl(ilevel)%xg(igrid,dir) - &
+                    dble(icoarse_array(dir))) * scale
+               span = tmp_bxmax(cur,dir) - tmp_bxmin(cur,dir)
+               if(span > 0.0d0) then
+                  ibin = int(dble(node_nbin) * (coord-tmp_bxmin(cur,dir)) / span) + 1
+               else
+                  ibin = 1
+               end if
+               ibin = min(node_nbin, max(1,ibin))
+               hist((node_slot-1)*node_nbin+ibin) = &
+                    hist((node_slot-1)*node_nbin+ibin) + 1_8
+            end do
+         end do
+
+#ifndef WITHOUTMPI
+         call MPI_ALLREDUCE(MPI_IN_PLACE, hist, hist_size, MPI_INTEGER8, MPI_SUM, &
+              MPI_COMM_WORLD, info)
+#endif
+
+         allocate(ncpu_part(1:k))
+         do i = 1, nc
+            cur_cell = cur_levelstart + i - 1
+            node_total = sum(hist((i-1)*node_nbin+1:i*node_nbin))
+            tmp_load(cur_cell) = node_total
+            lncpu = tmp_imax(cur_cell) - tmp_imin(cur_cell) + 1
+            base_ncpu = lncpu / k
+            rem_ncpu = mod(lncpu,k)
+            cum_ncpu = 0
+            cumulative = 0_8
+            ibin = 1
+            span = tmp_bxmax(cur_cell,dir) - tmp_bxmin(cur_cell,dir)
+
+            do j = 1, k - 1
+               if(j <= rem_ncpu) then
+                  cum_ncpu = cum_ncpu + base_ncpu + 1
+               else
+                  cum_ncpu = cum_ncpu + base_ncpu
+               end if
+               if(node_total > 0_8) then
+                  target = dble(node_total) * dble(cum_ncpu) / dble(lncpu)
+                  do while(ibin < node_nbin .and. &
+                       dble(cumulative+hist((i-1)*node_nbin+ibin)) < target)
+                     cumulative = cumulative + hist((i-1)*node_nbin+ibin)
+                     ibin = ibin + 1
+                  end do
+                  if(hist((i-1)*node_nbin+ibin) > 0_8) then
+                     fraction = (target-dble(cumulative)) / &
+                          dble(hist((i-1)*node_nbin+ibin))
+                     fraction = min(1.0d0,max(0.0d0,fraction))
+                  else
+                     fraction = 0.5d0
+                  end if
+                  wall = tmp_bxmin(cur_cell,dir) + &
+                       (dble(ibin-1)+fraction) * span / dble(node_nbin)
+               else
+                  wall = tmp_bxmin(cur_cell,dir) + &
+                       dble(cum_ncpu) * span / dble(lncpu)
+               end if
+               if(j > 1 .and. wall <= ksec_wall(cur_cell,j-1)) &
+                    wall = nearest(ksec_wall(cur_cell,j-1),1.0d0)
+               ksec_wall(cur_cell,j) = wall
+            end do
+            do j = k - 1, 1, -1
+               if(j == k-1) then
+                  wall = tmp_bxmax(cur_cell,dir)
+               else
+                  wall = ksec_wall(cur_cell,j+1)
+               end if
+               if(ksec_wall(cur_cell,j) >= wall) &
+                    ksec_wall(cur_cell,j) = nearest(wall,-1.0d0)
+            end do
+
+            cum_ncpu = 0
+            do j = 1, k
+               child = cur_levelstart + nc + (i-1)*k + j - 1
+               ksec_next(cur_cell,j) = child
+               tmp_bxmin(child,:) = tmp_bxmin(cur_cell,:)
+               tmp_bxmax(child,:) = tmp_bxmax(cur_cell,:)
+               if(j > 1) tmp_bxmin(child,dir) = ksec_wall(cur_cell,j-1)
+               if(j < k) tmp_bxmax(child,dir) = ksec_wall(cur_cell,j)
+               if(j <= rem_ncpu) then
+                  ncpu_part(j) = base_ncpu + 1
+               else
+                  ncpu_part(j) = base_ncpu
+               end if
+               tmp_imin(child) = tmp_imin(cur_cell) + cum_ncpu
+               cum_ncpu = cum_ncpu + ncpu_part(j)
+               tmp_imax(child) = tmp_imin(cur_cell) + cum_ncpu - 1
+            end do
+         end do
+         deallocate(ncpu_part)
+         cur_levelstart = cur_levelstart + nc
+         nc = nc * k
+      end do
+
+      ! The final level has one leaf per CPU for the factorized ncpu tree.
+      do i = 1, nc
+         cur_cell = cur_levelstart + i - 1
+         cpuid = tmp_imin(cur_cell)
+         ksec_indx(cur_cell) = cpuid
+         ksec_next(cur_cell,:) = 0
+         bisec_cpubox_min(cpuid,:) = tmp_bxmin(cur_cell,:)
+         bisec_cpubox_max(cpuid,:) = tmp_bxmax(cur_cell,:)
+      end do
+
+      ! Exact post-tree ownership counts provide the required validation line.
+      allocate(domain_load(1:ncpu))
+      domain_load = 0_8
+      total_grids = 0_8
+      do ilevel = 1, nlevelmax_file
+         total_grids = total_grids + int(varcpu_lvl(ilevel)%ngrids,kind=8)
+         do igrid = 1, varcpu_lvl(ilevel)%ngrids, nvector
+            ngrid = min(nvector,varcpu_lvl(ilevel)%ngrids-igrid+1)
+            do idim = 1, ndim
+               do i = 1, ngrid
+                  xx(i,idim) = (varcpu_lvl(ilevel)%xg(igrid+i-1,idim) - &
+                       dble(icoarse_array(idim))) * scale
+               end do
+            end do
+            call cmp_ksection_cpumap(xx,cpu,ngrid)
+            do i = 1, ngrid
+               domain_load(cpu(i)) = domain_load(cpu(i)) + 1_8
+            end do
+         end do
+      end do
+#ifndef WITHOUTMPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE, domain_load, ncpu, MPI_INTEGER8, MPI_SUM, &
+           MPI_COMM_WORLD, info)
+      call MPI_ALLREDUCE(MPI_IN_PLACE, total_grids, 1, MPI_INTEGER8, MPI_SUM, &
+           MPI_COMM_WORLD, info)
+#endif
+      bisec_cpu_load(1:ncpu) = domain_load(1:ncpu)
+      gmin = minval(domain_load)
+      gmax = maxval(domain_load)
+      gmean = dble(total_grids) / dble(max(ncpu,1))
+      imbalance = 0.0d0
+      if(gmean > 0.0d0) imbalance = dble(gmax) / gmean
+      if(myid == 1) write(*,'(A,I0,A,I0,A,I0,A,I0,A,ES14.6,A,F10.6)') &
+           ' VARCPU balance: ndomain=', ncpu, ' total_grids=', total_grids, &
+           ' per-domain min/max/mean=', gmin, '/', gmax, '/', gmean, &
+           ' imbalance=', imbalance
+
+      deallocate(tmp_imin,tmp_imax,tmp_load,tmp_bxmin,tmp_bxmax,hist,domain_load)
+   end subroutine build_ksection_varcpu
+
+   !================================================================
    ! Rebuild ksec_cpumin/cpumax from the tree structure (for restart)
    ! Walks the tree recursively and sets min/max CPU from ksec_indx
    !================================================================

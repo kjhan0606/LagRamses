@@ -865,21 +865,17 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
   son(1:ncoarse) = 0  ! Reset (set when level-1 grids are created)
 
   ! ============================================================
-  ! Step 3: Rebuild domain decomposition for new ncpu
+  ! Step 3: Prepare Hilbert key range for the new decomposition.
+  ! The actual decomposition is built after Step 6, once all grid positions
+  ! assigned to this rank have been read.
   ! ============================================================
-  if(ordering == 'ksection') then
-     call build_ksection(update=.false.)
-     call rebuild_ksec_cpuranges()
-     call compute_ksec_cpu_path()
-     bisec_cpubox_min2 = bisec_cpubox_min
-     bisec_cpubox_max2 = bisec_cpubox_max
-  else
-     ! Hilbert ordering: compute bound_key for new ncpu
+  if(ordering /= 'ksection') then
+     ! Hilbert ordering: compute the global key extent now; grid-balanced
+     ! bound_key values are computed after the checkpoint grids are read.
      ndomain = ncpu * overload
      block
        real(dp) :: x_tmp(1,3), dx_loc
        real(qdp) :: order_min_tmp(1), order_max_tmp(1)
-       integer :: idom
        dx_loc = scale
        order_all_min = huge(order_all_min)
        order_all_max = 0.0
@@ -897,47 +893,8 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
        end do
        if(.not. allocated(bound_key)) allocate(bound_key(0:ndomain))
        if(.not. allocated(bound_key2)) allocate(bound_key2(0:ndomain))
-       do idom = 0, ndomain - 1
-#ifdef QUADHILBERT
-          bound_key(idom) = order_all_min + real(idom, 16) / real(ndomain, 16) * &
-               (order_all_max - order_all_min)
-#else
-          bound_key(idom) = order_all_min + real(idom, 8) / real(ndomain, 8) * &
-               (order_all_max - order_all_min)
-#endif
-       end do
-       bound_key(ndomain) = order_all_max
-       bound_key2 = bound_key
-       if(myid==1) then
-          write(*,*) 'Hilbert varcpu: ndomain=', ndomain, ' nlevelmax=', nlevelmax
-          write(*,*) 'Hilbert varcpu: order_all_min=', order_all_min
-          write(*,*) 'Hilbert varcpu: order_all_max=', order_all_max
-          do idom = 0, ndomain
-             write(*,'(A,I3,A,E20.10)') '  bound_key(', idom, ')=', dble(bound_key(idom))
-          end do
-       end if
      end block
   end if
-
-  ! Recompute coarse cpu_map
-  do iz = kcoarse_min, kcoarse_max
-  do iy = jcoarse_min, jcoarse_max
-  do ix = icoarse_min, icoarse_max
-     ind = 1 + int(ix) + int(iy) * nx + int(iz) * nxny
-     xx_cell(1,1) = (dble(ix) + 0.5d0 - dble(icoarse_min)) * scale
-     xx_cell(1,2) = (dble(iy) + 0.5d0 - dble(jcoarse_min)) * scale
-     xx_cell(1,3) = (dble(iz) + 0.5d0 - dble(kcoarse_min)) * scale
-     if(ordering == 'ksection') then
-        call cmp_ksection_cpumap(xx_cell, c_tmp, 1)
-     else
-        call cmp_cpumap(xx_cell, c_tmp, 1)
-     end if
-     cpu_map(ind) = c_tmp(1)
-  end do
-  end do
-  end do
-  cpu_map2(1:ncoarse) = cpu_map(1:ncoarse)
-  if(myid==1) write(*,*) 'Binary varcpu: domain decomposition rebuilt, coarse cpu_map recomputed'
 
   ! ============================================================
   ! Step 4: Initialize Morton hash tables
@@ -1105,6 +1062,39 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
      end do
      close(ilun)
   end do
+
+  ! ============================================================
+  ! Step 6b: Build the new decomposition from all checkpoint grids
+  ! ============================================================
+  if(ordering == 'ksection') then
+     call build_ksection_varcpu(nlevelmax_file)
+     call rebuild_ksec_cpuranges()
+     call compute_ksec_cpu_path()
+     bisec_cpubox_min2 = bisec_cpubox_min
+     bisec_cpubox_max2 = bisec_cpubox_max
+  else
+     call build_hilbert_varcpu(nlevelmax_file, scale)
+  end if
+
+  ! Recompute the coarse map only after the grid-balanced boundaries exist.
+  do iz = kcoarse_min, kcoarse_max
+  do iy = jcoarse_min, jcoarse_max
+  do ix = icoarse_min, icoarse_max
+     ind = 1 + int(ix) + int(iy) * nx + int(iz) * nxny
+     xx_cell(1,1) = (dble(ix) + 0.5d0 - dble(icoarse_min)) * scale
+     xx_cell(1,2) = (dble(iy) + 0.5d0 - dble(jcoarse_min)) * scale
+     xx_cell(1,3) = (dble(iz) + 0.5d0 - dble(kcoarse_min)) * scale
+     if(ordering == 'ksection') then
+        call cmp_ksection_cpumap(xx_cell, c_tmp, 1)
+     else
+        call cmp_cpumap(xx_cell, c_tmp, 1)
+     end if
+     cpu_map(ind) = c_tmp(1)
+  end do
+  end do
+  end do
+  cpu_map2(1:ncoarse) = cpu_map(1:ncoarse)
+  if(myid==1) write(*,*) 'Binary varcpu: domain decomposition rebuilt, coarse cpu_map recomputed'
 
   ! ============================================================
   ! Step 7: Level-by-level ksection exchange + grid creation
@@ -1304,3 +1294,150 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
 
 end subroutine restore_amr_binary_varcpu
 
+
+!###########################################################################
+! Build Hilbert boundaries from the grid centers read by a variable-ncpu
+! binary restart.  This routine is called only from that restart branch.
+!###########################################################################
+subroutine build_hilbert_varcpu(nlevelmax_file, scale)
+  use amr_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+
+  integer, intent(in) :: nlevelmax_file
+  real(dp), intent(in) :: scale
+
+  integer, parameter :: min_nbin = 65536
+  integer, parameter :: bins_per_domain = 256
+  integer :: nbin, ilevel, igrid, ngrid, i, idim, ibin, idom
+  integer :: ilo, ihi, imid, info
+  integer :: icoarse_array(1:3)
+  integer(kind=8), allocatable :: hist(:), domain_load(:)
+  integer(kind=8) :: total_grids, cumulative, previous
+  integer(kind=8) :: gmin, gmax
+  real(dp) :: gmean, imbalance
+  real(dp) :: xx(1:nvector,1:ndim)
+  real(qdp) :: key(1:nvector), key_span, target, fraction, candidate
+
+  nbin = max(min_nbin, ndomain * bins_per_domain)
+  allocate(hist(1:nbin))
+  hist = 0_8
+  icoarse_array = (/ icoarse_min, jcoarse_min, kcoarse_min /)
+  key_span = order_all_max - order_all_min
+
+  ! Use cmp_ordering itself so QUADHILBERT and non-quad builds follow exactly
+  ! the same coordinate-to-key transformation as cmp_cpumap in Step 7.
+  do ilevel = 1, nlevelmax_file
+     do igrid = 1, varcpu_lvl(ilevel)%ngrids, nvector
+        ngrid = min(nvector, varcpu_lvl(ilevel)%ngrids - igrid + 1)
+        do idim = 1, ndim
+           do i = 1, ngrid
+              xx(i,idim) = (varcpu_lvl(ilevel)%xg(igrid+i-1,idim) - &
+                   dble(icoarse_array(idim))) * scale
+           end do
+        end do
+        call cmp_ordering(xx, key, ngrid)
+        do i = 1, ngrid
+           if(key_span > 0.0_qdp) then
+              ibin = int(real(nbin,qdp) * (key(i)-order_all_min) / key_span) + 1
+           else
+              ibin = 1
+           end if
+           ibin = min(nbin, max(1, ibin))
+           hist(ibin) = hist(ibin) + 1_8
+        end do
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(MPI_IN_PLACE, hist, nbin, MPI_INTEGER8, MPI_SUM, MPI_COMM_WORLD, info)
+#endif
+  total_grids = sum(hist)
+
+  bound_key(0) = order_all_min
+  bound_key(ndomain) = order_all_max
+  if(total_grids > 0_8 .and. key_span > 0.0_qdp) then
+     cumulative = 0_8
+     ibin = 1
+     do idom = 1, ndomain - 1
+        target = real(idom,qdp) * real(total_grids,qdp) / real(ndomain,qdp)
+        do while(ibin < nbin .and. real(cumulative+hist(ibin),qdp) < target)
+           cumulative = cumulative + hist(ibin)
+           ibin = ibin + 1
+        end do
+        previous = cumulative
+        if(hist(ibin) > 0_8) then
+           fraction = (target-real(previous,qdp)) / real(hist(ibin),qdp)
+           fraction = min(1.0_qdp, max(0.0_qdp, fraction))
+        else
+           fraction = 0.5_qdp
+        end if
+        candidate = order_all_min + &
+             (real(ibin-1,qdp)+fraction) * key_span / real(nbin,qdp)
+        bound_key(idom) = candidate
+     end do
+  else
+     do idom = 1, ndomain - 1
+        bound_key(idom) = order_all_min + real(idom,qdp) / real(ndomain,qdp) * key_span
+     end do
+  end if
+
+  ! Preserve strict ordering even when several quantiles fall in one bin.
+  do idom = 1, ndomain - 1
+     if(bound_key(idom) <= bound_key(idom-1)) &
+          bound_key(idom) = nearest(bound_key(idom-1), 1.0_qdp)
+  end do
+  do idom = ndomain - 1, 1, -1
+     if(bound_key(idom) >= bound_key(idom+1)) &
+          bound_key(idom) = nearest(bound_key(idom+1), -1.0_qdp)
+  end do
+  bound_key2 = bound_key
+
+  ! Count exact predicted domain ownership (including overload domains), rather
+  ! than estimating the diagnostic from partially occupied boundary bins.
+  allocate(domain_load(1:ndomain))
+  domain_load = 0_8
+  do ilevel = 1, nlevelmax_file
+     do igrid = 1, varcpu_lvl(ilevel)%ngrids, nvector
+        ngrid = min(nvector, varcpu_lvl(ilevel)%ngrids - igrid + 1)
+        do idim = 1, ndim
+           do i = 1, ngrid
+              xx(i,idim) = (varcpu_lvl(ilevel)%xg(igrid+i-1,idim) - &
+                   dble(icoarse_array(idim))) * scale
+           end do
+        end do
+        call cmp_ordering(xx, key, ngrid)
+        do i = 1, ngrid
+           ilo = 1
+           ihi = ndomain
+           do while(ilo < ihi)
+              imid = (ilo + ihi) / 2
+              if(key(i) < bound_key(imid)) then
+                 ihi = imid
+              else
+                 ilo = imid + 1
+              end if
+           end do
+           domain_load(ilo) = domain_load(ilo) + 1_8
+        end do
+     end do
+  end do
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(MPI_IN_PLACE, domain_load, ndomain, MPI_INTEGER8, MPI_SUM, &
+       MPI_COMM_WORLD, info)
+#endif
+
+  gmin = minval(domain_load)
+  gmax = maxval(domain_load)
+  gmean = dble(total_grids) / dble(max(ndomain,1))
+  imbalance = 0.0d0
+  if(gmean > 0.0d0) imbalance = dble(gmax) / gmean
+  if(myid == 1) write(*,'(A,I0,A,I0,A,I0,A,I0,A,ES14.6,A,F10.6)') &
+       ' VARCPU balance: ndomain=', ndomain, ' total_grids=', total_grids, &
+       ' per-domain min/max/mean=', gmin, '/', gmax, '/', gmean, &
+       ' imbalance=', imbalance
+
+  deallocate(hist, domain_load)
+end subroutine build_hilbert_varcpu
