@@ -1311,15 +1311,15 @@ subroutine build_hilbert_varcpu(nlevelmax_file, scale)
 
   integer, parameter :: min_nbin = 65536
   integer, parameter :: bins_per_domain = 256
-  integer :: nbin, ilevel, igrid, ngrid, i, idim, ibin, idom
+  integer :: nbin, ilevel, igrid, ngrid, i, idim, ibin
   integer :: ilo, ihi, imid, info
   integer :: icoarse_array(1:3)
   integer(kind=8), allocatable :: hist(:), domain_load(:)
-  integer(kind=8) :: total_grids, cumulative, previous
+  integer(kind=8) :: total_grids
   integer(kind=8) :: gmin, gmax
   real(dp) :: gmean, imbalance
   real(dp) :: xx(1:nvector,1:ndim)
-  real(qdp) :: key(1:nvector), key_span, target, fraction, candidate
+  real(qdp) :: key(1:nvector), key_span
 
   nbin = max(min_nbin, ndomain * bins_per_domain)
   allocate(hist(1:nbin))
@@ -1355,45 +1355,7 @@ subroutine build_hilbert_varcpu(nlevelmax_file, scale)
   call MPI_ALLREDUCE(MPI_IN_PLACE, hist, nbin, MPI_INTEGER8, MPI_SUM, MPI_COMM_WORLD, info)
 #endif
   total_grids = sum(hist)
-
-  bound_key(0) = order_all_min
-  bound_key(ndomain) = order_all_max
-  if(total_grids > 0_8 .and. key_span > 0.0_qdp) then
-     cumulative = 0_8
-     ibin = 1
-     do idom = 1, ndomain - 1
-        target = real(idom,qdp) * real(total_grids,qdp) / real(ndomain,qdp)
-        do while(ibin < nbin .and. real(cumulative+hist(ibin),qdp) < target)
-           cumulative = cumulative + hist(ibin)
-           ibin = ibin + 1
-        end do
-        previous = cumulative
-        if(hist(ibin) > 0_8) then
-           fraction = (target-real(previous,qdp)) / real(hist(ibin),qdp)
-           fraction = min(1.0_qdp, max(0.0_qdp, fraction))
-        else
-           fraction = 0.5_qdp
-        end if
-        candidate = order_all_min + &
-             (real(ibin-1,qdp)+fraction) * key_span / real(nbin,qdp)
-        bound_key(idom) = candidate
-     end do
-  else
-     do idom = 1, ndomain - 1
-        bound_key(idom) = order_all_min + real(idom,qdp) / real(ndomain,qdp) * key_span
-     end do
-  end if
-
-  ! Preserve strict ordering even when several quantiles fall in one bin.
-  do idom = 1, ndomain - 1
-     if(bound_key(idom) <= bound_key(idom-1)) &
-          bound_key(idom) = nearest(bound_key(idom-1), 1.0_qdp)
-  end do
-  do idom = ndomain - 1, 1, -1
-     if(bound_key(idom) >= bound_key(idom+1)) &
-          bound_key(idom) = nearest(bound_key(idom+1), -1.0_qdp)
-  end do
-  bound_key2 = bound_key
+  call hilbert_bounds_from_hist(hist, nbin, total_grids)
 
   ! Count exact predicted domain ownership (including overload domains), rather
   ! than estimating the diagnostic from partially occupied boundary bins.
@@ -1441,3 +1403,62 @@ subroutine build_hilbert_varcpu(nlevelmax_file, scale)
 
   deallocate(hist, domain_load)
 end subroutine build_hilbert_varcpu
+
+
+!###########################################################################
+! Place Hilbert boundaries at cumulative histogram quantiles.  Both binary
+! and HDF5 variable-ncpu restart paths call this routine after their kind=8
+! histogram has been globally reduced.
+!###########################################################################
+subroutine hilbert_bounds_from_hist(hist, nbin, total_grids)
+  use amr_commons
+  implicit none
+
+  integer, intent(in) :: nbin
+  integer(kind=8), intent(in) :: hist(1:nbin)
+  integer(kind=8), intent(in) :: total_grids
+
+  integer :: ibin, idom
+  integer(kind=8) :: cumulative, previous
+  real(qdp) :: key_span, target, fraction, candidate
+
+  key_span = order_all_max - order_all_min
+  bound_key(0) = order_all_min
+  bound_key(ndomain) = order_all_max
+  if(total_grids > 0_8 .and. key_span > 0.0_qdp) then
+     cumulative = 0_8
+     ibin = 1
+     do idom = 1, ndomain - 1
+        target = real(idom,qdp) * real(total_grids,qdp) / real(ndomain,qdp)
+        do while(ibin < nbin .and. real(cumulative+hist(ibin),qdp) < target)
+           cumulative = cumulative + hist(ibin)
+           ibin = ibin + 1
+        end do
+        previous = cumulative
+        if(hist(ibin) > 0_8) then
+           fraction = (target-real(previous,qdp)) / real(hist(ibin),qdp)
+           fraction = min(1.0_qdp, max(0.0_qdp, fraction))
+        else
+           fraction = 0.5_qdp
+        end if
+        candidate = order_all_min + &
+             (real(ibin-1,qdp)+fraction) * key_span / real(nbin,qdp)
+        bound_key(idom) = candidate
+     end do
+  else
+     do idom = 1, ndomain - 1
+        bound_key(idom) = order_all_min + real(idom,qdp) / real(ndomain,qdp) * key_span
+     end do
+  end if
+
+  ! Preserve strict ordering even when several quantiles fall in one bin.
+  do idom = 1, ndomain - 1
+     if(bound_key(idom) <= bound_key(idom-1)) &
+          bound_key(idom) = nearest(bound_key(idom-1), 1.0_qdp)
+  end do
+  do idom = ndomain - 1, 1, -1
+     if(bound_key(idom) >= bound_key(idom+1)) &
+          bound_key(idom) = nearest(bound_key(idom+1), -1.0_qdp)
+  end do
+  bound_key2 = bound_key
+end subroutine hilbert_bounds_from_hist
