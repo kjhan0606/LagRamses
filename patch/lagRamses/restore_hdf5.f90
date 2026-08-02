@@ -8,12 +8,13 @@
 !   - Particles (xp, vp, mp, idp, levelp, tp, zp)
 !   - Sinks
 !
-! Supports variable-ncpu restart (ncpu_file != ncpu) for any ordering:
-!   - Ksection: builds uniform tree for new ncpu
-!   - Hilbert: computes uniform bound_key for new ncpu
+! Supports distributed variable-ncpu/cross-ordering restart to Hilbert:
+!   - An xg-only pre-pass builds grid-load-balanced Hilbert bounds
 !   - Recomputes cpu_map via generic cmp_cpumap
-!   - ALL ranks read ALL data, scatter to locally owned grids
+!   - Ranks read disjoint row slices and redistribute locally owned grids
 !   - First coarse step forces load_balance for optimal rebalancing
+! HDF5 variable-ncpu/cross-ordering restart to ksection is rejected explicitly;
+! the existing same-ncpu ksection distributed path remains available.
 !###########################################################################
 #ifdef HDF5
 
@@ -79,6 +80,15 @@ subroutine restore_amr_hdf5()
   integer :: nchunk_local, nchunk_global, ichunk, nprops_pack, nrecv
   real(dp), allocatable :: sendbuf(:,:), recvbuf(:,:)
   integer,  allocatable :: dest_cpu_arr(:)
+  ! Hilbert varcpu xg-only pre-pass and exact main-pass diagnostic
+  integer, parameter :: varcpu_min_nbin = 65536
+  integer, parameter :: varcpu_bins_per_domain = 256
+  integer :: varcpu_nbin, varcpu_ibin, varcpu_ilo, varcpu_ihi, varcpu_imid
+  integer :: varcpu_nvec, varcpu_j0
+  integer(kind=8), allocatable :: varcpu_hist(:), varcpu_domain_load(:)
+  integer(kind=8) :: varcpu_total_grids, varcpu_gmin, varcpu_gmax
+  real(dp) :: varcpu_gmean, varcpu_imbalance
+  real(qdp) :: varcpu_key_span, varcpu_key(1:nvector)
 
   call title(nrestart, nchar)
   h5filename = 'output_'//trim(nchar)//'/data_'//trim(nchar)//'.h5'
@@ -203,7 +213,17 @@ subroutine restore_amr_hdf5()
      scale = boxlen / dble(nx_loc)
 
      if(ordering == 'ksection') then
-        ! Build uniform ksection tree (volume-balanced)
+        ! The checkpoint ksection tree is tied to ncpu_file.  Rebuilding it
+        ! from streamed HDF5 coordinates would require retaining all xg or
+        ! rereading xg once per tree depth; neither is acceptable at scale.
+        if(ncpu_file /= ncpu .or. trim(ordering_file) /= trim(ordering)) then
+           if(myid==1) then
+              write(*,*) 'ERROR: HDF5 variable-ncpu/cross-ordering restart to ksection is unsupported.'
+              write(*,*) '       Restart with Hilbert ordering or the checkpoint ncpu/ordering.'
+           end if
+           call clean_stop
+        end if
+        ! Preserve the existing same-ncpu ksection distributed restore path.
         call build_ksection(update=.false.)
         call rebuild_ksec_cpuranges()
         call compute_ksec_cpu_path()
@@ -211,12 +231,11 @@ subroutine restore_amr_hdf5()
         bisec_cpubox_max2 = bisec_cpubox_max
         if(myid==1) write(*,*) 'HDF5: ksection tree rebuilt for ncpu=', ncpu
      else
-        ! Hilbert ordering: compute uniform bound_key for new ncpu
+        ! Hilbert ordering: compute the global key extent now.  The actual
+        ! grid-balanced bounds are placed by the xg-only pre-pass below.
         block
-           real(qdp) :: order_all_min, order_all_max
            real(qdp), dimension(1:1) :: order_min_tmp, order_max_tmp
            real(dp) :: x_tmp(1:1,1:3), dx_loc
-           integer :: idom
            integer(8) :: iix, iiy, iiz
 
            order_all_min =  huge(0.0_qdp)
@@ -236,35 +255,8 @@ subroutine restore_amr_hdf5()
            end do
            if(.not. allocated(bound_key)) allocate(bound_key(0:ndomain))
            if(.not. allocated(bound_key2)) allocate(bound_key2(0:ndomain))
-           do idom = 0, ndomain - 1
-#ifdef QUADHILBERT
-              bound_key(idom) = order_all_min + real(idom, 16) / real(ndomain, 16) * &
-                   (order_all_max - order_all_min)
-#else
-              bound_key(idom) = order_all_min + real(idom, 8) / real(ndomain, 8) * &
-                   (order_all_max - order_all_min)
-#endif
-           end do
-           bound_key(ndomain) = order_all_max
-           bound_key2 = bound_key
-           if(myid==1) write(*,*) 'HDF5: Hilbert bound_key rebuilt for ncpu=', ncpu
         end block
      end if
-
-     ! Recompute coarse cpu_map via generic dispatcher
-     do iz = kcoarse_min, kcoarse_max
-     do iy = jcoarse_min, jcoarse_max
-     do ix = icoarse_min, icoarse_max
-        ind = 1 + int(ix) + int(iy) * nx + int(iz) * nxny
-        xx_cell(1,1) = (dble(ix) + 0.5d0 - dble(icoarse_min)) * scale
-        xx_cell(1,2) = (dble(iy) + 0.5d0 - dble(jcoarse_min)) * scale
-        xx_cell(1,3) = (dble(iz) + 0.5d0 - dble(kcoarse_min)) * scale
-        call cmp_cpumap(xx_cell, c_tmp, 1)
-        cpu_map(ind) = c_tmp(1)
-     end do
-     end do
-     end do
-     if(myid==1) write(*,*) 'HDF5: coarse cpu_map recomputed'
   else
      !--- Same ncpu: read ksection tree from file ---
      call hdf5_open_group('/domain', grp_id)
@@ -348,6 +340,136 @@ subroutine restore_amr_hdf5()
   ! Compute scale for cell coordinate computation
   nx_loc = icoarse_max - icoarse_min + 1
   scale = boxlen / dble(nx_loc)
+
+  if(varcpu_restart) then
+     !===================================================
+     ! Hilbert xg-only pre-pass.  The level discovery, global row split, and
+     ! collective chunk schedule deliberately mirror Stage A below.  No AMR
+     ! payload other than xg_1/xg_2/xg_3 is read here.
+     !===================================================
+     if(ordering /= 'ksection') then
+        varcpu_nbin = max(varcpu_min_nbin, ndomain * varcpu_bins_per_domain)
+        allocate(varcpu_hist(1:varcpu_nbin))
+        varcpu_hist = 0_8
+        varcpu_key_span = order_all_max - order_all_min
+
+        do ilevel = 1, nlevelmax_file
+           write(lvl_str, '(I0)') ilevel
+           grp_name = '/amr/level_'//trim(lvl_str)
+
+           block
+              integer(HID_T) :: test_grp_id
+              integer :: h5err
+              logical :: grp_exists
+              call h5lexists_f(hdf5_file_id, trim(grp_name), grp_exists, h5err)
+              if(.not. grp_exists .or. h5err /= 0) cycle
+              call h5gopen_f(hdf5_file_id, trim(grp_name), test_grp_id, h5err)
+              if(h5err /= 0) cycle
+              lvl_grp_id = test_grp_id
+           end block
+
+           allocate(ngrid_per_cpu(ncpu_file))
+           call hdf5_read_dataset_all_int(lvl_grp_id, 'ngrid_per_cpu', &
+                ngrid_per_cpu, ncpu_file)
+           ngrid_total = 0_i8b
+           do i = 1, ncpu_file
+              ngrid_total = ngrid_total + int(ngrid_per_cpu(i), i8b)
+           end do
+           deallocate(ngrid_per_cpu)
+           ngrid_all_int = int(ngrid_total)
+           varcpu_ngrid_file(ilevel) = ngrid_all_int
+
+           if(ngrid_all_int == 0) then
+              call hdf5_close_group(lvl_grp_id)
+              cycle
+           end if
+
+           chunk_size = min(1048576, ngrid_all_int)
+           my_offset_i8 = int(myid-1, i8b) * int(ngrid_all_int, i8b) / int(ncpu, i8b)
+           my_end_i8    = int(myid,   i8b) * int(ngrid_all_int, i8b) / int(ncpu, i8b)
+           my_count_i8  = my_end_i8 - my_offset_i8
+           nchunk_local = int((my_count_i8 + int(chunk_size,i8b) - 1_i8b) / &
+                int(chunk_size,i8b))
+#ifndef WITHOUTMPI
+           call MPI_ALLREDUCE(nchunk_local, nchunk_global, 1, MPI_INTEGER, &
+                MPI_MAX, MPI_COMM_WORLD, info)
+#else
+           nchunk_global = nchunk_local
+#endif
+           if(nchunk_global < 1) nchunk_global = 1
+
+           allocate(xg_chunk(max(chunk_size,1), ndim))
+           do ichunk = 0, nchunk_global - 1
+              chunk_off_i8 = int(ichunk, i8b) * int(chunk_size, i8b)
+              if(chunk_off_i8 >= my_count_i8) then
+                 this_chunk = 0
+                 global_off_i8 = my_offset_i8
+              else
+                 this_chunk = int(min(int(chunk_size,i8b), &
+                      my_count_i8 - chunk_off_i8))
+                 global_off_i8 = my_offset_i8 + chunk_off_i8
+              end if
+
+              do idim = 1, ndim
+                 write(lvl_str, '(I0)') idim
+                 call hdf5_read_dataset_collective_dp(lvl_grp_id, &
+                      'xg_'//trim(lvl_str), xg_chunk(:,idim), this_chunk, &
+                      global_off_i8)
+              end do
+
+              do varcpu_j0 = 1, this_chunk, nvector
+                 varcpu_nvec = min(nvector, this_chunk-varcpu_j0+1)
+                 do j = 1, varcpu_nvec
+                    xx_cell(j,1) = (xg_chunk(varcpu_j0+j-1,1) - dble(icoarse_min)) * scale
+                    xx_cell(j,2) = (xg_chunk(varcpu_j0+j-1,2) - dble(jcoarse_min)) * scale
+                    xx_cell(j,3) = (xg_chunk(varcpu_j0+j-1,3) - dble(kcoarse_min)) * scale
+                 end do
+                 call cmp_ordering(xx_cell, varcpu_key, varcpu_nvec)
+                 do j = 1, varcpu_nvec
+                    if(varcpu_key_span > 0.0_qdp) then
+                       varcpu_ibin = int(real(varcpu_nbin,qdp) * &
+                            (varcpu_key(j)-order_all_min) / varcpu_key_span) + 1
+                    else
+                       varcpu_ibin = 1
+                    end if
+                    varcpu_ibin = min(varcpu_nbin, max(1,varcpu_ibin))
+                    varcpu_hist(varcpu_ibin) = varcpu_hist(varcpu_ibin) + 1_8
+                 end do
+              end do
+           end do
+           deallocate(xg_chunk)
+           call hdf5_close_group(lvl_grp_id)
+        end do
+
+#ifndef WITHOUTMPI
+        call MPI_ALLREDUCE(MPI_IN_PLACE, varcpu_hist, varcpu_nbin, MPI_INTEGER8, &
+             MPI_SUM, MPI_COMM_WORLD, info)
+#endif
+        varcpu_total_grids = sum(varcpu_hist)
+        call hilbert_bounds_from_hist(varcpu_hist, varcpu_nbin, varcpu_total_grids)
+        deallocate(varcpu_hist)
+        allocate(varcpu_domain_load(1:ndomain))
+        varcpu_domain_load = 0_8
+        if(myid==1) write(*,*) 'HDF5: grid-balanced Hilbert bound_key rebuilt for ncpu=', ncpu
+     end if
+
+     ! The decomposition must exist before either coarse ownership or streamed
+     ! grid redistribution is computed.
+     do iz = kcoarse_min, kcoarse_max
+     do iy = jcoarse_min, jcoarse_max
+     do ix = icoarse_min, icoarse_max
+        ind = 1 + int(ix) + int(iy) * nx + int(iz) * nxny
+        xx_cell(1,1) = (dble(ix) + 0.5d0 - dble(icoarse_min)) * scale
+        xx_cell(1,2) = (dble(iy) + 0.5d0 - dble(jcoarse_min)) * scale
+        xx_cell(1,3) = (dble(iz) + 0.5d0 - dble(kcoarse_min)) * scale
+        call cmp_cpumap(xx_cell, c_tmp, 1)
+        cpu_map(ind) = c_tmp(1)
+     end do
+     end do
+     end do
+     cpu_map2(1:ncoarse) = cpu_map(1:ncoarse)
+     if(myid==1) write(*,*) 'HDF5: coarse cpu_map recomputed'
+  end if
 
   if(varcpu_restart) then
      !===================================================
@@ -484,6 +606,34 @@ subroutine restore_amr_hdf5()
               ! exactly representable as dp up to 2^53)
               sendbuf(nprops_pack, j) = dble(global_off_i8 + int(j, i8b))
            end do
+
+           ! Exact Hilbert domain loads for the binary-compatible diagnostic.
+           ! This reuses xg already resident in the main pass and performs no
+           ! additional HDF5 reads.
+           if(ordering /= 'ksection') then
+              do varcpu_j0 = 1, this_chunk, nvector
+                 varcpu_nvec = min(nvector, this_chunk-varcpu_j0+1)
+                 do j = 1, varcpu_nvec
+                    xx_cell(j,1) = (xg_chunk(varcpu_j0+j-1,1) - dble(icoarse_min)) * scale
+                    xx_cell(j,2) = (xg_chunk(varcpu_j0+j-1,2) - dble(jcoarse_min)) * scale
+                    xx_cell(j,3) = (xg_chunk(varcpu_j0+j-1,3) - dble(kcoarse_min)) * scale
+                 end do
+                 call cmp_ordering(xx_cell, varcpu_key, varcpu_nvec)
+                 do j = 1, varcpu_nvec
+                    varcpu_ilo = 1
+                    varcpu_ihi = ndomain
+                    do while(varcpu_ilo < varcpu_ihi)
+                       varcpu_imid = (varcpu_ilo + varcpu_ihi) / 2
+                       if(varcpu_key(j) < bound_key(varcpu_imid)) then
+                          varcpu_ihi = varcpu_imid
+                       else
+                          varcpu_ilo = varcpu_imid + 1
+                       end if
+                    end do
+                    varcpu_domain_load(varcpu_ilo) = varcpu_domain_load(varcpu_ilo) + 1_8
+                 end do
+              end do
+           end if
 
            !--- Stage B: recursive k-section redistribution ---
            call ksection_exchange_dp(sendbuf, this_chunk, dest_cpu_arr, &
@@ -657,6 +807,25 @@ subroutine restore_amr_hdf5()
              ' HDF5 level ', ilevel, ' active: ', numbl(myid, ilevel), &
              ' total: ', numbtot(1, ilevel)
      end do
+
+     if(ordering /= 'ksection') then
+#ifndef WITHOUTMPI
+        call MPI_ALLREDUCE(MPI_IN_PLACE, varcpu_domain_load, ndomain, MPI_INTEGER8, &
+             MPI_SUM, MPI_COMM_WORLD, info)
+#endif
+        varcpu_total_grids = sum(varcpu_domain_load)
+        varcpu_gmin = minval(varcpu_domain_load)
+        varcpu_gmax = maxval(varcpu_domain_load)
+        varcpu_gmean = dble(varcpu_total_grids) / dble(max(ndomain,1))
+        varcpu_imbalance = 0.0d0
+        if(varcpu_gmean > 0.0d0) &
+             varcpu_imbalance = dble(varcpu_gmax) / varcpu_gmean
+        if(myid == 1) write(*,'(A,I0,A,I0,A,I0,A,I0,A,ES14.6,A,F10.6)') &
+             ' VARCPU balance: ndomain=', ndomain, ' total_grids=', varcpu_total_grids, &
+             ' per-domain min/max/mean=', varcpu_gmin, '/', varcpu_gmax, '/', &
+             varcpu_gmean, ' imbalance=', varcpu_imbalance
+        deallocate(varcpu_domain_load)
+     end if
 
      balance = .false.
      shrink = .false.

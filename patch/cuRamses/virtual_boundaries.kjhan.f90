@@ -561,6 +561,120 @@ end subroutine make_virtual_fine_dp
 !################################################################
 !################################################################
 !################################################################
+subroutine make_virtual_fine_dp2(xx1,xx2,ilevel)
+  use amr_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+  integer,dimension(MPI_STATUS_SIZE,ncpu)::statuses
+#endif
+  integer::ilevel
+  real(dp),dimension(1:ncoarse+ngridmax*twotondim)::xx1,xx2
+  ! -------------------------------------------------------------------
+  ! FDM drift-only paired forward ghost exchange.  The two fields use
+  ! the same emission/reception grid mapping and travel in one message.
+  ! Unlike the legacy routine, its private dispatch may use the already
+  ! initialized K-Section tree with Hilbert ordering.
+  ! -------------------------------------------------------------------
+  integer::icpu,i,j,ncache,iskip,step
+  integer::countsend,countrecv
+  integer::info,tag=101
+  integer,dimension(ncpu)::reqsend,reqrecv
+  logical::use_ksec,ksec_available
+  real(dp)::t1
+
+  if(numbtot(1,ilevel)==0)return
+
+  ! Auto-tune dispatch (comp 8: paired fine_dp drift exchange).
+  ksec_available = ordering=='ksection' .or. ordering=='hilbert'
+  use_ksec = .false.
+  if(ksec_available) then
+     if(exchange_method=='ksection') then
+        use_ksec = .true.
+     else if(exchange_method=='auto') then
+        use_ksec = (xchg_phase(8)==1) .or. &
+                   (xchg_phase(8)==2 .and. xchg_chosen(8)==1) .or. &
+                   (xchg_phase(8)==3 .and. xchg_chosen(8)==0)
+     end if
+  end if
+  if(use_ksec) then
+#ifndef WITHOUTMPI
+     t1 = MPI_WTIME()
+#endif
+     call make_virtual_fine_dp2_ksec(xx1,xx2,ilevel)
+#ifndef WITHOUTMPI
+     if(exchange_method=='auto') call xchg_autotune_update(8, MPI_WTIME()-t1)
+#endif
+     return
+  end if
+
+#ifndef WITHOUTMPI
+  if(ksec_available .and. exchange_method=='auto') t1 = MPI_WTIME()
+
+  ! Receive both fields in a single contiguous message: column 1 then 2.
+  countrecv=0
+  do icpu=1,ncpu
+     ncache=reception(icpu,ilevel)%ngrid
+     if(ncache>0) then
+        countrecv=countrecv+1
+        call MPI_IRECV(reception(icpu,ilevel)%u,2*ncache*twotondim, &
+             & MPI_DOUBLE_PRECISION,icpu-1,tag,MPI_COMM_WORLD,reqrecv(countrecv),info)
+     end if
+  end do
+
+  ! Preserve the legacy cell-to-buffer order independently in each column.
+  do icpu=1,ncpu
+     if(emission(icpu,ilevel)%ngrid>0) then
+        do j=1,twotondim
+           step=(j-1)*emission(icpu,ilevel)%ngrid
+           iskip=ncoarse+(j-1)*ngridmax
+           do i=1,emission(icpu,ilevel)%ngrid
+              emission(icpu,ilevel)%u(i+step,1)= &
+                   & xx1(emission(icpu,ilevel)%igrid(i)+iskip)
+              emission(icpu,ilevel)%u(i+step,2)= &
+                   & xx2(emission(icpu,ilevel)%igrid(i)+iskip)
+           end do
+        end do
+     end if
+  end do
+
+  countsend=0
+  do icpu=1,ncpu
+     ncache=emission(icpu,ilevel)%ngrid
+     if(ncache>0) then
+        countsend=countsend+1
+        call MPI_ISEND(emission(icpu,ilevel)%u,2*ncache*twotondim, &
+             & MPI_DOUBLE_PRECISION,icpu-1,tag,MPI_COMM_WORLD,reqsend(countsend),info)
+     end if
+  end do
+
+  call MPI_WAITALL(countrecv,reqrecv,statuses,info)
+
+  do icpu=1,ncpu
+     if(reception(icpu,ilevel)%ngrid>0) then
+        do j=1,twotondim
+           step=(j-1)*reception(icpu,ilevel)%ngrid
+           iskip=ncoarse+(j-1)*ngridmax
+           do i=1,reception(icpu,ilevel)%ngrid
+              xx1(reception(icpu,ilevel)%igrid(i)+iskip)= &
+                   & reception(icpu,ilevel)%u(i+step,1)
+              xx2(reception(icpu,ilevel)%igrid(i)+iskip)= &
+                   & reception(icpu,ilevel)%u(i+step,2)
+           end do
+        end do
+     end if
+  end do
+
+  call MPI_WAITALL(countsend,reqsend,statuses,info)
+  if(ksec_available .and. exchange_method=='auto') &
+     call xchg_autotune_update(8, MPI_WTIME()-t1)
+#endif
+
+end subroutine make_virtual_fine_dp2
+!################################################################
+!################################################################
+!################################################################
+!################################################################
 subroutine make_virtual_fine_int(xx,ilevel)
   use amr_commons
   implicit none
@@ -857,6 +971,56 @@ subroutine make_virtual_reverse_dp(xx,ilevel)
 111 format('   Entering make_virtual_reverse for level ',I2)
 
 end subroutine make_virtual_reverse_dp
+!################################################################
+!################################################################
+!################################################################
+!################################################################
+subroutine make_virtual_reverse_dp2(xx,ilevel)
+  use amr_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ilevel
+  real(dp),dimension(1:ncoarse+ngridmax*twotondim)::xx
+  ! -------------------------------------------------------------------
+  ! FDM drift-only reverse dispatcher.  The payload and accumulation are
+  ! unchanged, so reuse reverse_dp's component 3 and implementations while
+  ! admitting its K-Section implementation for the initialized Hilbert tree.
+  ! -------------------------------------------------------------------
+  logical::use_ksec
+  real(dp)::t1
+
+  if(numbtot(1,ilevel)==0)return
+
+  if(ordering/='hilbert') then
+     call make_virtual_reverse_dp(xx,ilevel)
+     return
+  end if
+
+  use_ksec = .false.
+  if(exchange_method=='ksection') then
+     use_ksec = .true.
+  else if(exchange_method=='auto') then
+     use_ksec = (xchg_phase(3)==1) .or. &
+                (xchg_phase(3)==2 .and. xchg_chosen(3)==1) .or. &
+                (xchg_phase(3)==3 .and. xchg_chosen(3)==0)
+  end if
+
+#ifndef WITHOUTMPI
+  if(exchange_method=='auto') t1 = MPI_WTIME()
+#endif
+  if(use_ksec) then
+     call make_virtual_reverse_dp_ksec(xx,ilevel)
+  else
+     ! The legacy dispatcher selects P2P for Hilbert ordering.
+     call make_virtual_reverse_dp(xx,ilevel)
+  end if
+#ifndef WITHOUTMPI
+  if(exchange_method=='auto') call xchg_autotune_update(3, MPI_WTIME()-t1)
+#endif
+
+end subroutine make_virtual_reverse_dp2
 !################################################################
 !################################################################
 !################################################################
@@ -1309,12 +1473,12 @@ subroutine build_comm(ilevel)
   do icpu=1,ncpu
      ncache=emission(icpu,ilevel)%ngrid
      if(ncache>0)then
-        allocate(emission(icpu,ilevel)%u(1:ncache*twotondim,1:1))
+        allocate(emission(icpu,ilevel)%u(1:ncache*twotondim,1:2))
         allocate(emission(icpu,ilevel)%f(1:ncache*twotondim,1:1))
      endif
      ncache=reception(icpu,ilevel)%ngrid
      if(ncache>0)then
-        allocate(reception(icpu,ilevel)%u(1:ncache*twotondim,1:1))
+        allocate(reception(icpu,ilevel)%u(1:ncache*twotondim,1:2))
         allocate(reception(icpu,ilevel)%f(1:ncache*twotondim,1:1))
      endif
   end do
@@ -1393,6 +1557,69 @@ subroutine make_virtual_fine_dp_ksec(xx,ilevel)
 #endif
 
 end subroutine make_virtual_fine_dp_ksec
+!################################################################
+!################################################################
+!################################################################
+!################################################################
+subroutine make_virtual_fine_dp2_ksec(xx1,xx2,ilevel)
+  use amr_commons
+  use ksection
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ilevel
+  real(dp),dimension(1:ncoarse+ngridmax*twotondim)::xx1,xx2
+  ! -------------------------------------------------------------------
+  ! K-Section paired forward exchange.  Sender id and the sender-local
+  ! emission index identify the exact reception grid independent of tree
+  ! reordering; both fields are carried as separate exact dp properties.
+  ! -------------------------------------------------------------------
+  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid
+  real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
+  integer,allocatable::dest_cpu(:)
+
+#ifndef WITHOUTMPI
+  nprops_ksec = 2*twotondim + 2
+
+  ntotal = 0
+  do icpu=1,ncpu
+     ntotal = ntotal + emission(icpu,ilevel)%ngrid
+  end do
+
+  allocate(sendbuf(1:nprops_ksec,1:max(ntotal,1)))
+  allocate(dest_cpu(1:max(ntotal,1)))
+  idx = 0
+  do icpu=1,ncpu
+     do i=1,emission(icpu,ilevel)%ngrid
+        idx = idx + 1
+        dest_cpu(idx) = icpu
+        do j=1,twotondim
+           igrid = emission(icpu,ilevel)%igrid(i) + ncoarse + (j-1)*ngridmax
+           sendbuf(j,idx) = xx1(igrid)
+           sendbuf(twotondim+j,idx) = xx2(igrid)
+        end do
+        sendbuf(2*twotondim+1,idx) = dble(myid)
+        sendbuf(2*twotondim+2,idx) = dble(i)
+     end do
+  end do
+
+  call ksection_exchange_dp(sendbuf,ntotal,dest_cpu,nprops_ksec,recvbuf,nrecv)
+
+  do i=1,nrecv
+     sender = nint(recvbuf(2*twotondim+1,i))
+     ridx = nint(recvbuf(2*twotondim+2,i))
+     igrid = reception(sender,ilevel)%igrid(ridx)
+     do j=1,twotondim
+        xx1(igrid+ncoarse+(j-1)*ngridmax) = recvbuf(j,i)
+        xx2(igrid+ncoarse+(j-1)*ngridmax) = recvbuf(twotondim+j,i)
+     end do
+  end do
+
+  deallocate(sendbuf,dest_cpu,recvbuf)
+#endif
+
+end subroutine make_virtual_fine_dp2_ksec
 !################################################################
 !################################################################
 !################################################################
@@ -2015,7 +2242,7 @@ subroutine xchg_autotune_update(icomp, elapsed)
   comp_names(5) = 'pair_int'
   comp_names(6) = 'bulk_dp'
   comp_names(7) = 'bulk_rev_dp'
-  comp_names(8) = 'reserved'
+  comp_names(8) = 'fine_dp2'
 
   xchg_ncall(icomp) = xchg_ncall(icomp) + 1
 

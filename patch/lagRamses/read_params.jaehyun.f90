@@ -4,6 +4,7 @@ subroutine read_params
   use poisson_parameters
   use hydro_parameters
   use pbh_commons
+  use fdm_commons, only: fdm_ghost2, fdm_ghost2_rev
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -94,7 +95,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & adm_cross_section,adm_mol,adm_fH2
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
        & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min, &
-       & fdm_nla,fdm_match_aout,fdm_hjm_qp,fdm_qp_c1max,fdm_cn_tol
+       & fdm_nla,fdm_match_aout,fdm_hjm_qp,fdm_qp_c1max,fdm_cn_tol, &
+       & fdm_ghost2,fdm_ghost2_rev
   namelist/pbh_params/pbh_table_file,pbh_fraction,pbh_boost, &
        & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance, &
        & pbh_mf_model,pbh_spin_model,pbh_hawking_model, &

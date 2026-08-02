@@ -817,7 +817,7 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   integer,intent(in)::ilevel
   real(dp),intent(in)::dt_half
 
-  integer::igrid,ind,iskip,icell,iter,nx_loc,ntot
+  integer::igrid,ind,iskip,icell,iter,nx_loc,ntot,i
   integer,parameter::max_iter=300
   real(dp)::dx,scale,dx_loc,alpha,g,cntol,bnorm,rnorm
   real(dp)::omr,omi,betr,beti,alr,ali,tr1,ti1
@@ -855,8 +855,9 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   call cn_matvec(ilevel,  g, psi_re, psi_im, rr, ri, 0)
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
-     igrid = headl(myid, ilevel)
-     do while(igrid > 0)
+!$omp parallel do private(i,igrid,icell) schedule(static)
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
         icell = igrid + iskip
         if(son(icell) == 0) then
            rr(icell) = br(icell) - rr(icell)
@@ -864,8 +865,8 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
            rhr(icell) = rr(icell)
            rhi(icell) = ri(icell)
         end if
-        igrid = next(igrid)
      end do
+!$omp end parallel do
   end do
 
   call cn_cdot(ilevel, br,bi, br,bi, zts)   ! <b,b> (real part = |b|^2)
@@ -885,8 +886,9 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      ! p = r + bet*(p - om*v)
      do ind=1,twotondim
         iskip = ncoarse + (ind-1)*ngridmax
-        igrid = headl(myid, ilevel)
-        do while(igrid > 0)
+!$omp parallel do private(i,igrid,icell,tr1,ti1) schedule(static)
+        do i=1,active(ilevel)%ngrid
+           igrid = active(ilevel)%igrid(i)
            icell = igrid + iskip
            if(son(icell) == 0) then
               tr1 = pr(icell) - (omr*vr(icell) - omi*vi(icell))
@@ -894,8 +896,8 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
               pr(icell) = rr(icell) + (betr*tr1 - beti*ti1)
               pi(icell) = ri(icell) + (betr*ti1 + beti*tr1)
            end if
-           igrid = next(igrid)
         end do
+!$omp end parallel do
      end do
      call cn_matvec(ilevel, g, pr,pi, vr,vi, 0)        ! v = A p
      call cn_cdot(ilevel, rhr,rhi, vr,vi, zrv)
@@ -904,15 +906,16 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      ! s = r - alp*v
      do ind=1,twotondim
         iskip = ncoarse + (ind-1)*ngridmax
-        igrid = headl(myid, ilevel)
-        do while(igrid > 0)
+!$omp parallel do private(i,igrid,icell) schedule(static)
+        do i=1,active(ilevel)%ngrid
+           igrid = active(ilevel)%igrid(i)
            icell = igrid + iskip
            if(son(icell) == 0) then
               sr(icell) = rr(icell) - (alr*vr(icell) - ali*vi(icell))
               si(icell) = ri(icell) - (alr*vi(icell) + ali*vr(icell))
            end if
-           igrid = next(igrid)
         end do
+!$omp end parallel do
      end do
      call cn_cdot(ilevel, sr,si, sr,si, zts)
      rnorm = sqrt(max(0.0d0, dble(zts)))
@@ -920,15 +923,16 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         ! x = x + alp*p ; converged on the half-step
         do ind=1,twotondim
            iskip = ncoarse + (ind-1)*ngridmax
-           igrid = headl(myid, ilevel)
-           do while(igrid > 0)
+!$omp parallel do private(i,igrid,icell) schedule(static)
+           do i=1,active(ilevel)%ngrid
+              igrid = active(ilevel)%igrid(i)
               icell = igrid + iskip
               if(son(icell) == 0) then
                  xr(icell) = xr(icell) + (alr*pr(icell) - ali*pi(icell))
                  xi(icell) = xi(icell) + (alr*pi(icell) + ali*pr(icell))
               end if
-              igrid = next(igrid)
            end do
+!$omp end parallel do
         end do
         exit
      end if
@@ -941,8 +945,9 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      ! x = x + alp*p + om*s ;  r = s - om*t
      do ind=1,twotondim
         iskip = ncoarse + (ind-1)*ngridmax
-        igrid = headl(myid, ilevel)
-        do while(igrid > 0)
+!$omp parallel do private(i,igrid,icell) schedule(static)
+        do i=1,active(ilevel)%ngrid
+           igrid = active(ilevel)%igrid(i)
            icell = igrid + iskip
            if(son(icell) == 0) then
               xr(icell) = xr(icell) + (alr*pr(icell) - ali*pi(icell)) &
@@ -952,8 +957,8 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
               rr(icell) = sr(icell) - (omr*trr(icell) - omi*tii(icell))
               ri(icell) = si(icell) - (omr*tii(icell) + omi*trr(icell))
            end if
-           igrid = next(igrid)
         end do
+!$omp end parallel do
      end do
      call cn_cdot(ilevel, rr,ri, rr,ri, zts)
      rnorm = sqrt(max(0.0d0, dble(zts)))
@@ -965,15 +970,16 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   ! Commit: psi^{n+1} = psi^n + x   (leaf cells)
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
-     igrid = headl(myid, ilevel)
-     do while(igrid > 0)
+!$omp parallel do private(i,igrid,icell) schedule(static)
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
         icell = igrid + iskip
         if(son(icell) == 0) then
            psi_re(icell) = psi_re(icell) + xr(icell)
            psi_im(icell) = psi_im(icell) + xi(icell)
         end if
-        igrid = next(igrid)
      end do
+!$omp end parallel do
   end do
 
   ! ================================================================
@@ -1015,7 +1021,11 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         end do
      end do
      ! Reduce contributions accumulated on virtual parent cells to owners
-     call make_virtual_reverse_dp(dmb(1), ilevel-1)
+     if(fdm_ghost2_rev) then
+        call make_virtual_reverse_dp2(dmb(1), ilevel-1)
+     else
+        call make_virtual_reverse_dp(dmb(1), ilevel-1)
+     end if
      ! Apply to local leaf cells at the parent level
      do ind=1,twotondim
         iskip = ncoarse + (ind-1)*ngridmax
@@ -1039,8 +1049,12 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
            igrid = next(igrid)
         end do
      end do
-     call make_virtual_fine_dp(psi_re(1), ilevel-1)
-     call make_virtual_fine_dp(psi_im(1), ilevel-1)
+     if(fdm_ghost2) then
+        call make_virtual_fine_dp2(psi_re(1), psi_im(1), ilevel-1)
+     else
+        call make_virtual_fine_dp(psi_re(1), ilevel-1)
+        call make_virtual_fine_dp(psi_im(1), ilevel-1)
+     end if
      deallocate(dmb)
   end if
 
@@ -1073,17 +1087,22 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi, bmode)
   !         with the ghost interpolated/converted from the fluid parent
   !   Legacy (no hybrid): Neumann (centre value), byte-identical to before
   integer,intent(in)::bmode
-  integer::igrid,ind,iskip,icell,idim,inbor,icn
+  integer::igrid,ind,iskip,icell,idim,inbor,icn,i
   real(dp)::nr,ni,gre,gim
   logical::gfound
 
-  call make_virtual_fine_dp(inr(1), ilevel)
-  call make_virtual_fine_dp(ini(1), ilevel)
+  if(fdm_ghost2) then
+     call make_virtual_fine_dp2(inr(1), ini(1), ilevel)
+  else
+     call make_virtual_fine_dp(inr(1), ilevel)
+     call make_virtual_fine_dp(ini(1), ilevel)
+  end if
 
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
-     igrid = headl(myid, ilevel)
-     do while(igrid > 0)
+!$omp parallel do private(i,igrid,icell,idim,inbor,icn,nr,ni,gre,gim,gfound) schedule(static)
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
         icell = igrid + iskip
         if(son(icell) == 0) then
            nr = 0.0d0; ni = 0.0d0
@@ -1111,8 +1130,8 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi, bmode)
            outr(icell) = inr(icell) - 6.0d0*gg*ini(icell) + gg*ni
            outi(icell) = ini(icell) + 6.0d0*gg*inr(icell) - gg*nr
         end if
-        igrid = next(igrid)
      end do
+!$omp end parallel do
   end do
 
 end subroutine cn_matvec
@@ -1130,22 +1149,24 @@ subroutine cn_cdot(ilevel, ar, ai, br, bi, res)
   integer,intent(in)::ilevel
   real(dp),dimension(*)::ar,ai,br,bi
   complex(dp),intent(out)::res
-  integer::igrid,ind,iskip,icell,info
-  real(dp)::loc(2),glob(2)
+  integer::igrid,ind,iskip,icell,info,i
+  real(dp)::loc(2),glob(2),s1,s2
 
-  loc(1)=0.0d0; loc(2)=0.0d0
+  s1=0.0d0; s2=0.0d0
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
-     igrid = headl(myid, ilevel)
-     do while(igrid > 0)
+!$omp parallel do private(i,igrid,icell) reduction(+:s1,s2) schedule(static)
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
         icell = igrid + iskip
         if(son(icell) == 0) then
-           loc(1) = loc(1) + ar(icell)*br(icell) + ai(icell)*bi(icell)
-           loc(2) = loc(2) + ar(icell)*bi(icell) - ai(icell)*br(icell)
+           s1 = s1 + ar(icell)*br(icell) + ai(icell)*bi(icell)
+           s2 = s2 + ar(icell)*bi(icell) - ai(icell)*br(icell)
         end if
-        igrid = next(igrid)
      end do
+!$omp end parallel do
   end do
+  loc(1)=s1; loc(2)=s2
   glob = loc
 #ifndef WITHOUTMPI
   call MPI_ALLREDUCE(loc, glob, 2, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, info)
