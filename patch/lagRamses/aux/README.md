@@ -17,6 +17,9 @@ For DMO 2LPT ICs, the default `--dmo-velocity-source transfer` makes
 LagMUSIC use lagCAMB's mass-weighted `vtotal(k)` directly for the first-order
 velocity potential, then add MUSIC's high-redshift 2LPT velocity term.
 Density and particle displacements continue to use the density transfer.
+For constant-\(w\) and CPL models, the generator also passes the same `w0`
+and `wa` values to LagMUSIC. These parameters enter LagMUSIC's background
+growth and velocity conversion and must match the lagRamses namelist.
 The alternative `--dmo-velocity-source density_2lpt` selects the legacy
 single-`vfact_scale` path. The model/LCDM velocity-to-density ratio and its
 scale dependence are always recorded in `campaign.json`.
