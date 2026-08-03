@@ -23,7 +23,7 @@ PATCH = ../patch/lagRamses
 EXEC = ramses_final
 #############################################################################
 GITBRANCH = $(shell git rev-parse --abbrev-ref HEAD)
-GITHASH = $(shell git log --pretty=format:'%H' -n 1)
+GITHASH = $(shell git rev-parse HEAD)$(shell git diff-index --quiet HEAD -- || printf '%s' '-dirty')
 GITREPO = $(shell git config --get remote.origin.url)
 BUILDDATE = $(shell date +"%D-%T")
 DEFINES = -DNVECTOR=$(NVECTOR) -DNDIM=$(NDIM) -DNPRE=$(NPRE) -DNENER=$(NENER) -DNVAR=$(NVAR) \

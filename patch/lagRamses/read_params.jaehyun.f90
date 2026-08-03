@@ -426,6 +426,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1) write(*,'(A,I6,A,I3,A)') &
           ' Memory balance: mem_weight_grid=',mem_weight_grid,' (nvar=',nvar,')'
   end if
+  if(myid==1) write(*,'(A,F6.3,A)') &
+       ' Load-balance grid headroom=',lb_grid_headroom,' x ngridmax'
 
   !-------------------------------------------------
   ! Exchange method auto-tune
@@ -691,6 +693,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
              & merge(' (explicit subcyc)', ' (Crank-Nicolson) ', fdm_kinetic==0)
         write(*,'(A,I2,A)')    '   cost_mode =', fdm_cost_mode, &
              & merge(' (memory)   ', ' (wallclock)', fdm_cost_mode==0)
+        write(*,'(A,L1)')      '   use_hjm   =', fdm_use_hjm
+        write(*,'(A,L1)')      '   refine matched=', fdm_refine_matched
+        write(*,'(A,L1)')      '   match aout=', fdm_match_aout
+        write(*,'(A,ES10.3)')  '   CN tolerance=', fdm_cn_tol
         if(fdm_use_hjm) then
            if(fdm_kinetic /= 1) then
               fdm_kinetic = 1
