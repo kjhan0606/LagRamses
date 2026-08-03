@@ -844,9 +844,32 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   allocate(br(ntot),bi(ntot),rr(ntot),ri(ntot),rhr(ntot),rhi(ntot))
   allocate(pr(ntot),pi(ntot),vr(ntot),vi(ntot),sr(ntot),si(ntot))
   allocate(trr(ntot),tii(ntot),xr(ntot),xi(ntot))
-  br=0d0;bi=0d0;rr=0d0;ri=0d0;rhr=0d0;rhi=0d0
-  pr=0d0;pi=0d0;vr=0d0;vi=0d0;sr=0d0;si=0d0
-  trr=0d0;tii=0d0;xr=0d0;xi=0d0
+
+  ! The Krylov vectors use AMR cell indices, so their allocated extent follows
+  ! ngridmax rather than the number of grids present on this level.  Zeroing
+  ! every element touched sixteen capacity-sized arrays on every CN half-step;
+  ! production runs deliberately leave substantial grid headroom, making most
+  ! of that memory traffic useless.  Initialize all locally owned level cells
+  ! instead.  Leaf entries are the Krylov unknowns, refined entries must remain
+  ! zero, and make_virtual_fine_dp[2] overwrites the remote ghost entries before
+  ! every matvec reads them.
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+!$omp parallel do private(i,igrid,icell) schedule(static)
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
+        icell = igrid + iskip
+        br(icell)=0.0d0;  bi(icell)=0.0d0
+        rr(icell)=0.0d0;  ri(icell)=0.0d0
+        rhr(icell)=0.0d0; rhi(icell)=0.0d0
+        pr(icell)=0.0d0;  pi(icell)=0.0d0
+        vr(icell)=0.0d0;  vi(icell)=0.0d0
+        sr(icell)=0.0d0;  si(icell)=0.0d0
+        trr(icell)=0.0d0; tii(icell)=0.0d0
+        xr(icell)=0.0d0;  xi(icell)=0.0d0
+     end do
+!$omp end parallel do
+  end do
 
   ! b = (1-6ig)psi + ig N[psi] = A_{-g}[psi]   (boundary psi included;
   ! hybrid: coarse-fine ghosts enter b with weight 2, see cn_matvec)
@@ -937,8 +960,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         exit
      end if
      call cn_matvec(ilevel, g, sr,si, trr,tii, 0)       ! t = A s
-     call cn_cdot(ilevel, trr,tii, sr,si, zts)          ! <t,s>
-     call cn_cdot(ilevel, trr,tii, trr,tii, ztt)        ! <t,t>
+     ! One grid traversal and one collective for the two products needed by
+     ! omega.  Keeping them separate doubled both memory traffic and global
+     ! reduction latency in every full BiCGSTAB iteration.
+     call cn_cdot2(ilevel, trr,tii, sr,si, trr,tii, zts,ztt) ! <t,s>, <t,t>
      if(abs(ztt) == 0.0d0) exit
      om = zts/ztt
      omr=dble(om); omi=aimag(om)
@@ -1174,6 +1199,49 @@ subroutine cn_cdot(ilevel, ar, ai, br, bi, res)
   res = cmplx(glob(1), glob(2), kind=dp)
 
 end subroutine cn_cdot
+!################################################################
+! Two complex inner products sharing the same left vector.  This is used for
+! <t,s> and <t,t> in BiCGSTAB so both reductions travel in one MPI collective.
+! Each accumulator retains the same cell order as cn_cdot.
+!################################################################
+subroutine cn_cdot2(ilevel, ar, ai, br, bi, cr, ci, res_ab, res_ac)
+  use amr_commons
+  use poisson_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),dimension(*)::ar,ai,br,bi,cr,ci
+  complex(dp),intent(out)::res_ab,res_ac
+  integer::igrid,ind,iskip,icell,info,i
+  real(dp)::loc(4),glob(4),sabr,sabi,sacr,saci
+
+  sabr=0.0d0; sabi=0.0d0; sacr=0.0d0; saci=0.0d0
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+!$omp parallel do private(i,igrid,icell) reduction(+:sabr,sabi,sacr,saci) schedule(static)
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           sabr = sabr + ar(icell)*br(icell) + ai(icell)*bi(icell)
+           sabi = sabi + ar(icell)*bi(icell) - ai(icell)*br(icell)
+           sacr = sacr + ar(icell)*cr(icell) + ai(icell)*ci(icell)
+           saci = saci + ar(icell)*ci(icell) - ai(icell)*cr(icell)
+        end if
+     end do
+!$omp end parallel do
+  end do
+  loc(1)=sabr; loc(2)=sabi; loc(3)=sacr; loc(4)=saci
+  glob = loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(loc, glob, 4, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, info)
+#endif
+  res_ab = cmplx(glob(1), glob(2), kind=dp)
+  res_ac = cmplx(glob(3), glob(4), kind=dp)
+
+end subroutine cn_cdot2
 !################################################################
 ! Copy scratch (new_re,new_im) back into psi_re,psi_im for leaf cells.
 !################################################################
