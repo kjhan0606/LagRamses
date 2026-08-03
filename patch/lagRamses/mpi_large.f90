@@ -3,6 +3,12 @@ module mpi_large
 
 contains
 
+  logical function mpi_large_dp_needed(ncount, nprops)
+    integer, intent(in) :: ncount, nprops
+
+    mpi_large_dp_needed = int(ncount, 8) * int(nprops, 8) > 2147483647_8
+  end function mpi_large_dp_needed
+
 #ifndef WITHOUTMPI
   subroutine mpi_large_isend_dp(buf, ncount, nprops, dest, tag, comm, request, ierr)
     include 'mpif.h'
@@ -13,7 +19,7 @@ contains
     integer(8) :: total8
 
     total8 = int(ncount, 8) * int(nprops, 8)
-    if(total8 <= 2147483647_8) then
+    if(.not.mpi_large_dp_needed(ncount,nprops)) then
        call MPI_ISEND(buf(1), int(total8), MPI_DOUBLE_PRECISION, &
             dest, tag, comm, request, ierr)
     else
@@ -34,7 +40,7 @@ contains
     integer(8) :: total8
 
     total8 = int(ncount, 8) * int(nprops, 8)
-    if(total8 <= 2147483647_8) then
+    if(.not.mpi_large_dp_needed(ncount,nprops)) then
        call MPI_IRECV(buf(1), int(total8), MPI_DOUBLE_PRECISION, &
             source, tag, comm, request, ierr)
     else

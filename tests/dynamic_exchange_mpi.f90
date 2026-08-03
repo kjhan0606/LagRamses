@@ -3,6 +3,7 @@ program test_dynamic_exchange_mpi
   use amr_commons, only: myid, ncpu, ksec_root
   use ksection, only: init_ksection_comm_tree
   use dynamic_exchange
+  use mpi_large, only: mpi_large_dp_needed
   implicit none
   include 'mpif.h'
 
@@ -17,6 +18,14 @@ program test_dynamic_exchange_mpi
   call init_ksection_comm_tree()
 
   nfail_local = 0
+  if(mpi_large_dp_needed(23598721,91)) then
+     write(*,*) 'large-count threshold false positive',myid
+     nfail_local=nfail_local+1
+  end if
+  if(.not.mpi_large_dp_needed(23598722,91)) then
+     write(*,*) 'large-count threshold false negative',myid
+     nfail_local=nfail_local+1
+  end if
   call run_pattern('sparse', 1, EXCHANGE_SPARSE_P2P, 1000, nfail_local)
   call run_pattern('medium', min(6,ncpu-1), EXCHANGE_KSECTION, 1100, nfail_local)
   call run_pattern('dense', ncpu-1, EXCHANGE_ALLTOALLV, 1200, nfail_local)

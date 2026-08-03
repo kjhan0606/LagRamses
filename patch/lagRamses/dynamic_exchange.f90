@@ -11,6 +11,8 @@
 module dynamic_exchange
   use amr_parameters, only: dp, i8b, exchange_method
   use amr_commons, only: myid, ncpu
+  use mpi_large, only: mpi_large_isend_dp, mpi_large_irecv_dp, &
+       mpi_large_dp_needed
   implicit none
 
   integer, parameter :: EXCHANGE_SPARSE_P2P = 1
@@ -37,7 +39,7 @@ contains
 #endif
     integer :: ns(ncpu), nr(ncpu), sd(ncpu), rd(ncpu), offsets(ncpu)
     integer :: nse(ncpu), nre(ncpu), sde(ncpu), rde(ncpu)
-    integer :: i, icpu, ierr, nq, req(2*ncpu)
+    integer :: i, icpu, ierr, nq, req(2*ncpu), unsafe_local, unsafe_global
     real(dp), allocatable :: sorted(:,:)
 
     ns=0
@@ -61,6 +63,30 @@ contains
     else
        call choose_exchange_backend(ns,nr,8*nprops,backend)
     end if
+
+    ! Alltoallv and the flat sectioned schedule use default-integer element
+    ! counts and displacements.  A record count can be perfectly valid while
+    ! count*nprops overflows 32 bits, especially after k-section aggregation.
+    ! Direct P2P retains record counts and lets mpi_large construct a record
+    ! datatype, so force that path before doing any default-integer product.
+    unsafe_local=0
+    do icpu=1,ncpu
+       if(mpi_large_dp_needed(ns(icpu),nprops) .or. &
+            mpi_large_dp_needed(nr(icpu),nprops) .or. &
+            mpi_large_dp_needed(sd(icpu),nprops) .or. &
+            mpi_large_dp_needed(rd(icpu),nprops)) unsafe_local=1
+    end do
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(unsafe_local,unsafe_global,1,MPI_INTEGER,MPI_MAX, &
+         MPI_COMM_WORLD,ierr)
+#else
+    unsafe_global=unsafe_local
+#endif
+    if(unsafe_global/=0 .and. backend/=EXCHANGE_SPARSE_P2P)then
+       backend=EXCHANGE_SPARSE_P2P
+       if(myid==1) write(*,*) &
+            ' Dynamic exchange: forcing large-count P2P (32-bit element limit)'
+    end if
     allocate(sorted(nprops,max(nitem,1)))
     offsets=sd
     do i=1,nitem
@@ -72,28 +98,30 @@ contains
     ! attributable failure instead of delayed allocator corruption.
     allocate(recvbuf(nprops,max(nrecv,1)+RECV_GUARD_COLUMNS))
     recvbuf(:,max(nrecv,1)+1:max(nrecv,1)+RECV_GUARD_COLUMNS)=RECV_GUARD_VALUE
-    nse=ns*nprops; nre=nr*nprops
-    sde=sd*nprops; rde=rd*nprops
 #ifndef WITHOUTMPI
     if(backend==EXCHANGE_ALLTOALLV) then
+       nse=ns*nprops; nre=nr*nprops
+       sde=sd*nprops; rde=rd*nprops
        call MPI_ALLTOALLV(sorted,nse,sde,MPI_DOUBLE_PRECISION, &
             recvbuf,nre,rde,MPI_DOUBLE_PRECISION,MPI_COMM_WORLD,ierr)
     else if(backend==EXCHANGE_KSECTION) then
+       nse=ns*nprops; nre=nr*nprops
+       sde=sd*nprops; rde=rd*nprops
        call exchange_sectioned_dp(sorted,recvbuf,nse,nre,sde,rde,701)
     else
        nq=0
        do icpu=1,ncpu
           if(icpu/=myid.and.nr(icpu)>0) then
              nq=nq+1
-             call MPI_IRECV(recvbuf(1,rd(icpu)+1),nre(icpu), &
-                  MPI_DOUBLE_PRECISION,icpu-1,700,MPI_COMM_WORLD,req(nq),ierr)
+             call mpi_large_irecv_dp(recvbuf(1,rd(icpu)+1),nr(icpu), &
+                  nprops,icpu-1,700,MPI_COMM_WORLD,req(nq),ierr)
           end if
        end do
        do icpu=1,ncpu
           if(icpu/=myid.and.ns(icpu)>0) then
              nq=nq+1
-             call MPI_ISEND(sorted(1,sd(icpu)+1),nse(icpu), &
-                  MPI_DOUBLE_PRECISION,icpu-1,700,MPI_COMM_WORLD,req(nq),ierr)
+             call mpi_large_isend_dp(sorted(1,sd(icpu)+1),ns(icpu), &
+                  nprops,icpu-1,700,MPI_COMM_WORLD,req(nq),ierr)
           end if
        end do
        if(ns(myid)>0) recvbuf(:,rd(myid)+1:rd(myid)+nr(myid)) = &

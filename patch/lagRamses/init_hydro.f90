@@ -228,6 +228,14 @@ subroutine init_hydro
 end subroutine init_hydro
 
 subroutine restore_hydro_binary_varcpu
+  implicit none
+  call restore_hydro_binary_varcpu_streaming
+end subroutine restore_hydro_binary_varcpu
+!################################################################
+! Kept temporarily as a reference for binary-format compatibility.  The
+! production entry point above uses the bounded field-streaming implementation
+! below instead of constructing one 91-double record per grid.
+subroutine restore_hydro_binary_varcpu_legacy
   !--------------------------------------------------------------
   ! Chunked distributed I/O version: reads hydro files in chunks,
   ! exchanges via ksection_exchange_dp (O(log_k ncpu) memory),
@@ -498,5 +506,283 @@ subroutine restore_hydro_binary_varcpu
 
   if(myid==1) write(*,*) 'Binary varcpu hydro restore done.'
 
-end subroutine restore_hydro_binary_varcpu
+end subroutine restore_hydro_binary_varcpu_legacy
+!################################################################
+subroutine restore_hydro_binary_varcpu_streaming
+  ! Stream one scalar field at a time from each old-CPU file.  Direct P2P uses
+  ! known peer counts, so k-section ranks never aggregate 91-double records.
+  use amr_commons
+  use hydro_commons
+  use dynamic_exchange, only: EXCHANGE_SPARSE_P2P, exchange_dp_sorted
+  use morton_keys
+  use morton_hash
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer :: ilun,info,nvar2,ncpu2,ndim2,nlevelmax2,nboundary2
+  integer :: icpu_file,nslot,islot,ilevel,ilevel_file,ibound,ncache
+  integer :: i,j,k,idim,ivar,iskip,irad,nvec,nlocal,nrecv
+  integer :: nvar_send,xg_base,icpu,icell,igrid,tag
+  integer :: nlocal_global,nrecv_global,nmissing_local,nmissing_global
+  integer :: ns(1:ncpu),nr(1:ncpu),sd(1:ncpu),rd(1:ncpu),offsets(1:ncpu)
+  integer,allocatable :: target_cpu(:),sort_index(:),recv_grid(:)
+  real(dp),allocatable :: file_value(:),send_value(:),recv_value(:)
+  real(dp),allocatable :: recv_xg(:,:)
+  real(dp) :: gamma2,rho_val,eval,twotol,scale
+  real(dp) :: xpos(1:nvector,1:ndim)
+  integer :: ctmp(1:nvector)
+  integer(8) :: ixm,iym,izm
+  type(mkey_t) :: mkey
+  character(len=80) :: fileloc
+  character(len=5) :: nchar,ncharcpu
+  logical :: have_file
 
+  if(myid==1) write(*,*) &
+       'Binary varcpu hydro restore (field-streamed large-count P2P): ncpu_file=',ncpu_file
+  ilun=99
+  call title(nrestart,nchar)
+  scale=boxlen/dble(icoarse_max-icoarse_min+1)
+
+  ! Read and broadcast the common header.  Reader ranks reopen their assigned
+  ! file below and advance through it exactly once.
+  if(myid==1)then
+     if(IOGROUPSIZEREP>0)then
+        call title(1,ncharcpu)
+        fileloc='output_'//trim(nchar)//'/group_'//trim(ncharcpu)// &
+             '/hydro_'//trim(nchar)//'.out'
+     else
+        fileloc='output_'//trim(nchar)//'/hydro_'//trim(nchar)//'.out'
+     endif
+     call title(1,ncharcpu)
+     fileloc=trim(fileloc)//trim(ncharcpu)
+     open(unit=ilun,file=fileloc,form='unformatted')
+     read(ilun)ncpu2; read(ilun)nvar2; read(ilun)ndim2
+     read(ilun)nlevelmax2; read(ilun)nboundary2; read(ilun)gamma2
+     close(ilun)
+  endif
+#ifndef WITHOUTMPI
+  call MPI_BCAST(ncpu2,1,MPI_INTEGER,0,MPI_COMM_WORLD,info)
+  call MPI_BCAST(nvar2,1,MPI_INTEGER,0,MPI_COMM_WORLD,info)
+  call MPI_BCAST(ndim2,1,MPI_INTEGER,0,MPI_COMM_WORLD,info)
+  call MPI_BCAST(nlevelmax2,1,MPI_INTEGER,0,MPI_COMM_WORLD,info)
+  call MPI_BCAST(nboundary2,1,MPI_INTEGER,0,MPI_COMM_WORLD,info)
+  call MPI_BCAST(gamma2,1,MPI_DOUBLE_PRECISION,0,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(varcpu_nfiles_local,nslot,1,MPI_INTEGER,MPI_MAX, &
+       MPI_COMM_WORLD,info)
+#else
+  nslot=varcpu_nfiles_local
+#endif
+  nvar_send=min(nvar,nvar2)
+
+  ! One slot contains at most one old file per reader.  For 32 -> 128 all old
+  ! files therefore stream in parallel in slot one.
+  do islot=1,nslot
+     have_file=islot<=varcpu_nfiles_local
+     icpu_file=0
+     if(have_file)then
+        icpu_file=varcpu_my_files(islot)
+        if(IOGROUPSIZEREP>0)then
+           call title(((icpu_file-1)/IOGROUPSIZEREP)+1,ncharcpu)
+           fileloc='output_'//trim(nchar)//'/group_'//trim(ncharcpu)// &
+                '/hydro_'//trim(nchar)//'.out'
+        else
+           fileloc='output_'//trim(nchar)//'/hydro_'//trim(nchar)//'.out'
+        endif
+        call title(icpu_file,ncharcpu)
+        fileloc=trim(fileloc)//trim(ncharcpu)
+        open(unit=ilun,file=fileloc,form='unformatted')
+        read(ilun)ncpu2; read(ilun)nvar2; read(ilun)ndim2
+        read(ilun)nlevelmax2; read(ilun)nboundary2; read(ilun)gamma2
+     endif
+
+     do ilevel=1,nlevelmax2
+        nlocal=0
+        ! Reach this file's active-domain record.  Ranks arrive at the first
+        ! coordinate exchange together even though their old-domain index is
+        ! different.
+        if(have_file)then
+           do ibound=1,icpu_file-1
+              read(ilun)ilevel_file; read(ilun)ncache
+              call skip_hydro_records(ilun,ncache,nvar2)
+           enddo
+           read(ilun)ilevel_file; read(ilun)nlocal
+           if(ilevel_file/=ilevel)then
+              write(*,*)'FATAL streamed hydro level mismatch',myid,ilevel_file,ilevel
+              call clean_stop
+           endif
+           if(nlocal/=varcpu_nactive(icpu_file,ilevel))then
+              write(*,*)'FATAL streamed hydro grid-count mismatch',myid, &
+                   icpu_file,ilevel,nlocal,varcpu_nactive(icpu_file,ilevel)
+              call clean_stop
+           endif
+        endif
+
+        allocate(target_cpu(max(nlocal,1)),sort_index(max(nlocal,1)))
+        xg_base=0
+        if(have_file)xg_base=varcpu_file_start(islot-1,ilevel)
+        do i=1,nlocal,nvector
+           nvec=min(nvector,nlocal-i+1)
+           do k=1,nvec
+              xpos(k,1)=(varcpu_lvl(ilevel)%xg(xg_base+i+k-1,1)- &
+                   dble(icoarse_min))*scale
+#if NDIM>1
+              xpos(k,2)=(varcpu_lvl(ilevel)%xg(xg_base+i+k-1,2)- &
+                   dble(jcoarse_min))*scale
+#endif
+#if NDIM>2
+              xpos(k,3)=(varcpu_lvl(ilevel)%xg(xg_base+i+k-1,3)- &
+                   dble(kcoarse_min))*scale
+#endif
+           enddo
+           call cmp_cpumap(xpos,ctmp,nvec)
+           target_cpu(i:i+nvec-1)=ctmp(1:nvec)
+        enddo
+
+        ns=0
+        do i=1,nlocal
+           ns(target_cpu(i))=ns(target_cpu(i))+1
+        enddo
+#ifndef WITHOUTMPI
+        call MPI_ALLTOALL(ns,1,MPI_INTEGER,nr,1,MPI_INTEGER, &
+             MPI_COMM_WORLD,info)
+#else
+        nr=ns
+#endif
+        sd(1)=0; rd(1)=0
+        do icpu=2,ncpu
+           sd(icpu)=sd(icpu-1)+ns(icpu-1)
+           rd(icpu)=rd(icpu-1)+nr(icpu-1)
+        enddo
+        nrecv=sum(nr)
+        offsets=sd
+        do i=1,nlocal
+           icpu=target_cpu(i)
+           offsets(icpu)=offsets(icpu)+1
+           sort_index(offsets(icpu))=i
+        enddo
+
+        allocate(send_value(max(nlocal,1)),recv_value(max(nrecv,1)))
+        allocate(recv_xg(max(nrecv,1),ndim),recv_grid(max(nrecv,1)))
+        do idim=1,ndim
+           do i=1,nlocal
+              send_value(i)=varcpu_lvl(ilevel)%xg(xg_base+sort_index(i),idim)
+           enddo
+           call exchange_dp_sorted(send_value,recv_value,ns,nr,sd,rd, &
+                EXCHANGE_SPARSE_P2P,900+idim)
+           if(nrecv>0)recv_xg(1:nrecv,idim)=recv_value(1:nrecv)
+        enddo
+
+        twotol=2.0d0**(ilevel-1)
+        do i=1,nrecv
+           ixm=int(recv_xg(i,1)*twotol,8)
+           iym=int(recv_xg(i,2)*twotol,8)
+           izm=int(recv_xg(i,3)*twotol,8)
+           mkey=morton_encode(ixm,iym,izm)
+           recv_grid(i)=morton_hash_lookup(mort_table(ilevel),mkey)
+        enddo
+        nmissing_local=count(recv_grid(1:nrecv)==0)
+#ifndef WITHOUTMPI
+        call MPI_ALLREDUCE(nmissing_local,nmissing_global,1,MPI_INTEGER, &
+             MPI_SUM,MPI_COMM_WORLD,info)
+#else
+        nmissing_global=nmissing_local
+#endif
+        if(nmissing_global/=0)then
+           if(myid==1)write(*,*)'FATAL streamed hydro Morton misses=', &
+                nmissing_global,' slot=',islot,' level=',ilevel
+           call clean_stop
+        endif
+        deallocate(recv_xg,target_cpu)
+
+        ! The file is primitive.  Density and momenta arrive before pressure,
+        ! so total energy can be assembled immediately without retaining a
+        ! multi-field record.
+        allocate(file_value(max(nlocal,1)))
+        do iskip=1,twotondim
+           do ivar=1,nvar2
+              if(have_file.and.nlocal>0)read(ilun)file_value(1:nlocal)
+              if(ivar<=nvar_send)then
+                 do i=1,nlocal
+                    send_value(i)=file_value(sort_index(i))
+                 enddo
+                 tag=920+(iskip-1)*nvar2+ivar
+                 call exchange_dp_sorted(send_value,recv_value,ns,nr,sd,rd, &
+                      EXCHANGE_SPARSE_P2P,tag)
+                 do i=1,nrecv
+                    igrid=recv_grid(i)
+                    if(igrid==0)cycle
+                    icell=igrid+ncoarse+(iskip-1)*ngridmax
+                    if(ivar==1)then
+                       uold(icell,1)=recv_value(i)
+                    else if(ivar>=2.and.ivar<=ndim+1)then
+                       uold(icell,ivar)=recv_value(i)*max(uold(icell,1),smallr)
+#if NENER>0
+                    else if(ivar>=ndim+2.and.ivar<=ndim+1+nener)then
+                       irad=ivar-(ndim+1)
+                       uold(icell,ndim+2+irad)=recv_value(i)/ &
+                            (gamma_rad(irad)-1d0)
+#endif
+                    else if(ivar==ndim+2+nener)then
+                       rho_val=uold(icell,1)
+                       eval=recv_value(i)/(gamma-1d0)
+                       if(rho_val>0d0)then
+                          do j=2,ndim+1
+                             eval=eval+0.5d0*uold(icell,j)**2/max(rho_val,smallr)
+                          enddo
+#if NENER>0
+                          do irad=1,nener
+                             eval=eval+uold(icell,ndim+2+irad)
+                          enddo
+#endif
+                       else
+                          eval=0d0
+                       endif
+                       uold(icell,ndim+2)=eval
+#if NVAR>NDIM+2+NENER
+                    else if(ivar>=ndim+3+nener)then
+                       uold(icell,ivar)=recv_value(i)*max(uold(icell,1),smallr)
+#endif
+                    endif
+                 enddo
+              endif
+              if(myid==1.and.(mod(ivar,8)==0.or.ivar==nvar2)) &
+                   write(*,'(A,I0,A,I0,A,I0,A,I0)') &
+                   ' Hydro stream slot ',islot,' level ',ilevel,' field ', &
+                   (iskip-1)*nvar2+ivar,'/',twotondim*nvar2
+           enddo
+        enddo
+        deallocate(file_value,send_value,recv_value,recv_grid,sort_index)
+
+        if(have_file)then
+           do ibound=icpu_file+1,nboundary2+ncpu2
+              read(ilun)ilevel_file; read(ilun)ncache
+              call skip_hydro_records(ilun,ncache,nvar2)
+           enddo
+        endif
+#ifndef WITHOUTMPI
+        call MPI_ALLREDUCE(nlocal,nlocal_global,1,MPI_INTEGER,MPI_SUM, &
+             MPI_COMM_WORLD,info)
+        call MPI_ALLREDUCE(nrecv,nrecv_global,1,MPI_INTEGER,MPI_SUM, &
+             MPI_COMM_WORLD,info)
+#else
+        nlocal_global=nlocal; nrecv_global=nrecv
+#endif
+        if(myid==1)write(*,'(A,I0,A,I0,A,I0,A,I0)') &
+             ' Hydro stream completed slot ',islot,' level ',ilevel, &
+             ' sent grids=',nlocal_global,' received grids=',nrecv_global
+     enddo
+     if(have_file)close(ilun)
+  enddo
+  if(myid==1)write(*,*)'Binary varcpu hydro restore done.'
+
+contains
+  subroutine skip_hydro_records(iunit,ngrid_file,nvar_file)
+    integer,intent(in)::iunit,ngrid_file,nvar_file
+    integer::irec
+    if(ngrid_file<=0)return
+    do irec=1,twotondim*nvar_file
+       read(iunit)
+    enddo
+  end subroutine skip_hydro_records
+end subroutine restore_hydro_binary_varcpu_streaming

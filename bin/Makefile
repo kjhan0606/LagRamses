@@ -199,8 +199,9 @@ init_time.o: scalar_de_commons.o
 multigrid_fine_commons.o: scalar_de_commons.o dark_energy_commons.o
 synchro_fine.kjhan.o: scalar_de_commons.o
 output_fdm.o: amr_commons.kjhan.o poisson_commons.o ksection.o morton_keys.o morton_hash.o
-dynamic_exchange.o: amr_parameters.jaehyun.o amr_commons.kjhan.o
+dynamic_exchange.o: amr_parameters.jaehyun.o amr_commons.kjhan.o mpi_large.o
 init_part.o: dynamic_exchange.o
+init_hydro.o: dynamic_exchange.o
 virtual_boundaries.kjhan.o: dynamic_exchange.o
 dynamic_exchange_mpi_test: amr_parameters.jaehyun.o amr_commons.kjhan.o pm_parameters.o pm_commons.o bisection.o mpi_large.o ksection.o dynamic_exchange.o ../tests/dynamic_exchange_mpi.f90
 	$(F90) $(FFLAGS) amr_parameters.jaehyun.o amr_commons.kjhan.o pm_parameters.o pm_commons.o bisection.o mpi_large.o ksection.o dynamic_exchange.o \
