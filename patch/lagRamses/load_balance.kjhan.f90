@@ -486,6 +486,15 @@ subroutine cmp_new_cpu_map
   real(kind=8) :: avg_cpc, tf
   real(kind=8) :: floor_w,min_weight_loc,min_weight_global
   real(kind=8) :: grid_cap,guard_denom,predicted_maxcount,cost_imbalance
+  real(kind=8) :: grid_avail
+  integer(kind=8)::ngrid_own_loc,ngrid_own_max,ngrid_ext_loc,ngrid_ext_max
+  integer::ilev_g,icpu_g,ibnd_g
+  ! Every grid but the root is the child of exactly one refined cell, so an AMR
+  ! tree of G grids carries 8G-(G-1) = 7G+1 leaf cells.  flag1 holds one entry
+  ! per leaf cell, so this is the constant that converts a grid budget into the
+  ! cell budget the guard works in.  Using twotondim here overstates capacity by
+  ! 8/7 and helped sink job 399652 on 2026-08-03.
+  real(kind=8),parameter :: LB_LEAF_PER_GRID=7d0
   integer :: guard_iter,floor_flag
   integer,parameter :: LB_GRID_GUARD_MAXITER=3
   logical :: do_time_blend,need_cpc,guard_applied
@@ -784,8 +793,50 @@ subroutine cmp_new_cpu_map
   ! AMR cells and retain their historical zero cost.
   guard_applied = .false.
   if(lb_grid_headroom > 0d0 .and. ngridmax > 0 .and. incost_tot > 0d0) then
-     grid_cap = lb_grid_headroom*dble(ngridmax)*dble(twotondim)/dble(overload)
+
+     ! Grid slots already spent on ghost copies of neighbouring domains and on
+     ! physical boundaries.  A rank must fit its own grids into whatever is
+     ! left.  The ghost layer follows the surface of the partition rather than
+     ! its volume, so no cell budget can predict it; measure what the previous
+     ! balance actually produced and subtract that, which lets each balance
+     ! correct the one before it.  Job 399652 died precisely here: the guard
+     ! predicted 6.8M grids against a 9.3M cap and the rank still ran out,
+     ! because the ghost layer alone needed another 40 per cent on top.
+     ngrid_own_loc = 0_8
+     ngrid_ext_loc = 0_8
+     do ilev_g = 1,nlevelmax
+        ngrid_own_loc = ngrid_own_loc+int(numbl(myid,ilev_g),kind=8)
+        do icpu_g = 1,ncpu
+           if(icpu_g /= myid) &
+                & ngrid_ext_loc = ngrid_ext_loc+int(numbl(icpu_g,ilev_g),kind=8)
+        end do
+        do ibnd_g = 1,nboundary
+           ngrid_ext_loc = ngrid_ext_loc+int(numbb(ibnd_g,ilev_g),kind=8)
+        end do
+     end do
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(ngrid_own_loc,ngrid_own_max,1, &
+          & MPI_INTEGER8,MPI_MAX,MPI_COMM_WORLD,info)
+     call MPI_ALLREDUCE(ngrid_ext_loc,ngrid_ext_max,1, &
+          & MPI_INTEGER8,MPI_MAX,MPI_COMM_WORLD,info)
+#else
+     ngrid_own_max = ngrid_own_loc
+     ngrid_ext_max = ngrid_ext_loc
+#endif
+
+     grid_avail = lb_grid_headroom*dble(ngridmax)-dble(ngrid_ext_max)
+     ! Never let a huge ghost measurement drive the budget to nothing; the
+     ! fallback below is a better answer than an unsatisfiable target.
+     grid_avail = max(grid_avail,0.1d0*lb_grid_headroom*dble(ngridmax))
+     grid_cap = LB_LEAF_PER_GRID*grid_avail/dble(overload)
      guard_denom = dble(ndomain)*grid_cap
+
+     if(myid==1)then
+        write(*,'(A,I0,A,I0,A,I0,A,F6.1,A)') &
+             ' LB grid usage: own=',ngrid_own_max,' ghost+bnd=',ngrid_ext_max, &
+             ' ngridmax=',ngridmax,' ghost share=', &
+             1d2*dble(ngrid_ext_max)/dble(max(ngrid_own_max+ngrid_ext_max,1_8)),'%'
+     end if
 
      min_weight_loc = huge(1d0)
      ntot_grids_loc = 0_8
@@ -891,10 +942,14 @@ subroutine cmp_new_cpu_map
         predicted_maxcount = (incost_tot/dble(ndomain))/min_weight_global
         cost_imbalance = maxval(cost_old)/(incost_tot/dble(ndomain))
         if(myid==1 .and. guard_applied) then
-           write(*,'(A,ES12.4,A,I0,A,I0,A,F12.2,A,F12.2,A,F10.4)') &
+           write(*,'(A,ES12.4,A,I0,A,I0,A,F14.0,A,F14.0,A,F10.4)') &
                 ' LB grid guard: floor=',floor_w,' raised=',nraised,'/',ntot_grids, &
-                ' predicted max count=',predicted_maxcount,' / cap=',grid_cap, &
+                ' predicted max cells=',predicted_maxcount,' / cap=',grid_cap, &
                 ' cost imbalance=',cost_imbalance
+           write(*,'(A,F14.0,A,F14.0,A,I0)') &
+                '                in grids: predicted own=', &
+                predicted_maxcount/LB_LEAF_PER_GRID,' + measured ghost=', &
+                dble(ngrid_ext_max),' vs ngridmax=',ngridmax
         end if
      else if(myid==1 .and. verbose) then
         write(*,'(A)') ' LB grid guard: not needed'
