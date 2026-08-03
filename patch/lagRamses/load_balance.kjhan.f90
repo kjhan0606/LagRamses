@@ -494,6 +494,7 @@ subroutine cmp_new_cpu_map
   integer,dimension(1:overload)::ncell_sub
   real(kind=8),dimension(1:ndomain)::cost_loc,cost_old,cost_new
   real(qdp),dimension(0:ndomain)::bound_key_loc
+  real(qdp),dimension(0:ndomain)::lb_bound_key_target
   real(kind=8),dimension(0:ndomain)::bigdbl,bigtmp
   integer,dimension(1:nvector)::dom
   real(qdp),dimension(1:nvector)::order_min,order_max
@@ -530,7 +531,7 @@ subroutine cmp_new_cpu_map
   real(kind=8),parameter :: LB_REMAP_SLOT_SHARE=0.5d0
   logical :: do_time_blend,need_cpc,guard_applied
   integer,dimension(1:ncpu)::lb_nsend,lb_nrecv
-  integer::lb_incoming,lb_free_slots,lb_allowed,lb_target_cpu
+  integer::lb_incoming,lb_free_slots,lb_allowed,lb_target_cpu,lb_limit_iter
   real(kind=8)::lb_fraction_local,lb_fraction_global
   logical::lb_boundary_limited
 
@@ -540,6 +541,8 @@ subroutine cmp_new_cpu_map
   scale=boxlen/dble(nx_loc)
   lb_remap_fraction=1d0
   lb_boundary_limited=.false.
+  lb_limit_iter=0
+  lb_bound_key_target=0.0_qdp
   
   ! Compute time step related cost
   if(cost_weighting)then
@@ -1182,7 +1185,7 @@ subroutine cmp_new_cpu_map
   ! for the new ghost surface and physical boundaries.
   ! Interpolating bound_key is a Hilbert-only operation.  Other orderings use
   ! their own domain descriptors and must retain their normal remap path.
-  if(trim(ordering)=='hilbert' .and. (.not.lb_boundary_limited))then
+  if(trim(ordering)=='hilbert' .and. lb_remap_fraction>0d0)then
      lb_nsend=0
      do ilevel=1,nlevelmax
         do i=1,active(ilevel)%ngrid
@@ -1220,28 +1223,41 @@ subroutine cmp_new_cpu_map
      lb_fraction_global=lb_fraction_local
 #endif
      if(lb_fraction_global<0.999999d0)then
-        lb_boundary_limited=.true.
-        if(lb_fraction_global<0.01d0)then
+        if(.not.lb_boundary_limited)then
+           lb_bound_key_target=bound_key2
+           lb_boundary_limited=.true.
+        endif
+        ! Hilbert occupancy is not linear in boundary-key distance.  Recount
+        ! the actual candidate after every reduction rather than assuming a
+        ! fraction of the full key motion moves the same fraction of grids.
+        lb_remap_fraction=lb_remap_fraction*lb_fraction_global
+        if(lb_remap_fraction<0.01d0 .or. lb_limit_iter>=12)then
            lb_remap_fraction=0d0
            bound_key2=bound_key
            if(myid==1) write(*,'(A,I0,A,I0,A)') &
                 ' Bounded remap deferred: incoming=',lb_incoming, &
                 ' allowed=',lb_allowed,' (insufficient free slots)'
         else
-           lb_remap_fraction=lb_fraction_global
+           lb_limit_iter=lb_limit_iter+1
            do idom=1,ndomain-1
               bound_key2(idom)=bound_key(idom)+ &
-                   real(lb_fraction_global,kind=qdp)* &
-                   (bound_key2(idom)-bound_key(idom))
+                   real(lb_remap_fraction,kind=qdp)* &
+                   (lb_bound_key_target(idom)-bound_key(idom))
            end do
            bound_key2(0)=order_all_min
            bound_key2(ndomain)=order_all_max
-           if(myid==1) write(*,'(A,F7.3,A,I0,A,I0,A,I0)') &
-                ' Bounded remap fraction=',lb_fraction_global, &
+           if(myid==1) write(*,'(A,I0,A,F7.3,A,I0,A,I0,A,I0)') &
+                ' Bounded remap candidate ',lb_limit_iter, &
+                ' fraction=',lb_remap_fraction, &
                 ' incoming=',lb_incoming,' allowed=',lb_allowed, &
                 ' free=',lb_free_slots
         end if
         goto 210
+     else if(lb_boundary_limited .and. myid==1)then
+        write(*,'(A,F7.3,A,I0,A,I0,A,I0)') &
+             ' Bounded remap accepted fraction=',lb_remap_fraction, &
+             ' actual incoming=',lb_incoming,' allowed=',lb_allowed, &
+             ' free=',lb_free_slots
      end if
   end if
 

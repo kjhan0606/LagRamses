@@ -25,7 +25,10 @@ ln -s /gpfs/kjhan/Hydro/FDM/lbguard_test2/noop_old/yield_table.asc "$run_dir/yie
 # tighter physical grid capacity than the production run.  Its ownership is
 # already nearly balanced, so it validates the remap but does not guarantee
 # that the multi-round limiter is activated; production is the trigger case.
-sed -i '/^nremap=/a lb_grid_headroom=1.0' "$run_dir/cosmo.nml"
+sed -i "/^nremap=/a lb_grid_headroom=${LB_HEADROOM:-1.0}" "$run_dir/cosmo.nml"
+if [[ -n "${MEM_WEIGHT_SINK:-}" ]]; then
+  sed -i "/^memory_balance=/a mem_weight_sink=${MEM_WEIGHT_SINK}" "$run_dir/cosmo.nml"
+fi
 : > "$run_dir/jobcontrol.txt"
 cd "$run_dir"
 srun --kill-on-bad-exit=1 --mpi=pmi2 -n 16 -c 2 --cpu-bind=cores \
