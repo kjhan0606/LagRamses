@@ -100,7 +100,10 @@ subroutine init_part
   allocate(levelp(npartmax))
   allocate(idp   (npartmax))
   allocate(ptypep(npartmax))
-  ! ptypep: mmap zero pages == PTYPE_DM (0). Restart/IC readers overwrite for non-DM.
+  ! ALLOCATE does not initialize reused heap pages.  Grafic ICs are DM unless
+  ! a reader explicitly supplies another type, so establish that invariant
+  ! before particle-tree communication or output touches ptypep.
+  ptypep=PTYPE_DM
 #ifdef OUTPUT_PARTICLE_POTENTIAL
   allocate(ptcl_phi(npartmax))
 #endif
@@ -303,7 +306,10 @@ subroutine init_part
      ptypep(1:npart2)=isp1
      deallocate(isp1)
 #ifdef OUTPUT_PARTICLE_POTENTIAL
-      read(ilun)
+     allocate(xdp(1:npart2))
+     read(ilun)xdp
+     ptcl_phi(1:npart2)=xdp
+     deallocate(xdp)
 #endif
      
      
@@ -1444,7 +1450,10 @@ subroutine restore_part_binary_varcpu
      deallocate(isp1)
 
 #ifdef OUTPUT_PARTICLE_POTENTIAL
-     read(ilun)
+     allocate(xdp(1:npart_this))
+     read(ilun) xdp
+     ptcl_phi(ipart+1:ipart+nread) = xdp(read_start:read_end)
+     deallocate(xdp)
 #endif
 
      if(star .or. sink) then
@@ -1505,16 +1514,18 @@ subroutine redistribute_particles_by_position()
   ! index (not position), so some particles may be on the wrong CPU.
   ! This routine redistributes them by position using cmp_cpumap,
   ! so that init_tree works correctly.
-  ! Uses sparse P2P (ISEND/IRECV) instead of ALLTOALLV to avoid
-  ! InfiniBand overload with large particle counts.
+  ! Uses the shared adaptive sparse-P2P/k-section/Alltoallv router.
   use amr_commons
   use pm_commons
+  use dynamic_exchange, only: choose_exchange_backend, exchange_dp_sorted, &
+       exchange_i8_sorted, exchange_int_sorted, exchange_i1_sorted
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer :: ipart, icpu, i, info, idim, npart1, npart_new
-  integer, allocatable :: target_cpu(:), sort_index(:)
+  integer :: ipart, icpu, i, info, idim, npart1, npart_new, nsource
+  integer :: exchange_backend, record_bytes
+  integer, allocatable :: target_cpu(:), sort_index(:), source_index(:)
   integer :: nsend(1:ncpu), nrecv(1:ncpu)
   integer :: sdispls(1:ncpu), rdispls(1:ncpu)
   integer :: offsets(1:ncpu)
@@ -1525,19 +1536,23 @@ subroutine redistribute_particles_by_position()
   real(dp), dimension(1:nvector, 1:ndim) :: xtmp
   integer, dimension(1:nvector) :: ctmp
   integer :: nlocal
-  ! P2P variables
-  integer :: n_send_partners, n_recv_partners, nreq, itag
-  integer :: send_partners(1:ncpu), recv_partners(1:ncpu)
-  integer, allocatable :: req(:)
+  integer :: itag
 
-  if(myid==1) write(*,*) 'Redistributing particles by position for varcpu restart...'
+  ! This routine is called during initialization, before the particle tree and
+  ! its free-list holes exist.  Restart/IC readers populate the dense range
+  ! 1:npart; scanning npartmax would inspect untouched capacity and can mistake
+  ! dirty allocator pages for particles.
+  nsource = npart
+  allocate(source_index(max(nsource,1)))
+  do ipart=1,nsource; source_index(ipart)=ipart; end do
+  if(myid==1) write(*,*) 'Redistributing particles by position...'
 
   ! Step 1: Compute target CPU for each particle
-  allocate(target_cpu(1:npart))
-  do ipart = 1, npart, nvector
-     npart1 = min(nvector, npart - ipart + 1)
+  allocate(target_cpu(max(nsource,1)))
+  do ipart = 1, nsource, nvector
+     npart1 = min(nvector, nsource - ipart + 1)
      do i = 1, npart1
-        xtmp(i, 1:ndim) = xp(ipart + i - 1, 1:ndim)
+        xtmp(i, 1:ndim) = xp(source_index(ipart+i-1), 1:ndim)
      end do
      call cmp_cpumap(xtmp, ctmp, npart1)
      do i = 1, npart1
@@ -1547,7 +1562,7 @@ subroutine redistribute_particles_by_position()
 
   ! Step 2: Count particles going to each CPU
   nsend = 0
-  do ipart = 1, npart
+  do ipart = 1, nsource
      nsend(target_cpu(ipart)) = nsend(target_cpu(ipart)) + 1
   end do
 
@@ -1561,25 +1576,16 @@ subroutine redistribute_particles_by_position()
      call MPI_ABORT(MPI_COMM_WORLD, 1, info)
   end if
 
-  ! Build sparse partner lists (skip self and zero-count partners)
-  n_send_partners = 0
-  n_recv_partners = 0
-  do icpu = 1, ncpu
-     if(icpu == myid) cycle
-     if(nsend(icpu) > 0) then
-        n_send_partners = n_send_partners + 1
-        send_partners(n_send_partners) = icpu
-     end if
-     if(nrecv(icpu) > 0) then
-        n_recv_partners = n_recv_partners + 1
-        recv_partners(n_recv_partners) = icpu
-     end if
-  end do
-
-  if(myid==1) write(*,'(A,I8,A,I8,A,I12,A,I12)') &
-       ' P2P redistribute: n_send=', n_send_partners, &
-       ' n_recv=', n_recv_partners, &
-       ' npart_old=', npart, ' npart_new=', npart_new
+  ! Estimate the complete particle record size.  The chosen backend is reused
+  ! for every property so integer IDs/species tags remain aligned with phase
+  ! space data even when k-section routing is selected.
+  record_bytes = 8*(2*ndim+1) + 8 + 4 + 1
+#ifdef OUTPUT_PARTICLE_POTENTIAL
+  record_bytes = record_bytes + 8
+#endif
+  if(star .or. sink) record_bytes = record_bytes + 8*(4+merge(1,0,metal))
+  if(use_adm) record_bytes = record_bytes + 16
+  call choose_exchange_backend(nsend, nrecv, record_bytes, exchange_backend, 'particles')
 
   ! Step 4: Compute displacements
   sdispls(1) = 0
@@ -1590,137 +1596,86 @@ subroutine redistribute_particles_by_position()
   end do
 
   ! Step 5: Create sort index (partition particles by target CPU)
-  allocate(sort_index(1:npart))
+  allocate(sort_index(max(nsource,1)))
   offsets = sdispls
-  do ipart = 1, npart
+  do ipart = 1, nsource
      icpu = target_cpu(ipart)
      offsets(icpu) = offsets(icpu) + 1
-     sort_index(offsets(icpu)) = ipart
+     sort_index(offsets(icpu)) = source_index(ipart)
   end do
   deallocate(target_cpu)
 
-  ! Allocate request array for P2P
-  allocate(req(1:n_send_partners + n_recv_partners))
-
-  ! Step 6: Exchange each property using sparse P2P (ISEND/IRECV)
+  ! Step 6: Exchange each property using the common adaptive backend.
 
   ! --- xp (ndim dimensions) ---
-  allocate(sendbuf_dp(1:npart))
-  allocate(recvbuf_dp(1:npart_new))
+  allocate(sendbuf_dp(max(nsource,1)))
+  allocate(recvbuf_dp(max(npart_new,1)))
   do idim = 1, ndim
      itag = 800 + idim
-     do i = 1, npart
+     do i = 1, nsource
         sendbuf_dp(i) = xp(sort_index(i), idim)
      end do
-     call p2p_exchange_dp(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
-          sdispls, rdispls, send_partners, recv_partners, &
-          n_send_partners, n_recv_partners, req, itag, info)
+     call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+          sdispls, rdispls, exchange_backend, itag)
      xp(1:npart_new, idim) = recvbuf_dp(1:npart_new)
   end do
 
   ! --- vp (ndim dimensions) ---
   do idim = 1, ndim
      itag = 810 + idim
-     do i = 1, npart
+     do i = 1, nsource
         sendbuf_dp(i) = vp(sort_index(i), idim)
      end do
-     call p2p_exchange_dp(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
-          sdispls, rdispls, send_partners, recv_partners, &
-          n_send_partners, n_recv_partners, req, itag, info)
+     call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+          sdispls, rdispls, exchange_backend, itag)
      vp(1:npart_new, idim) = recvbuf_dp(1:npart_new)
   end do
 
   ! --- mp ---
   itag = 820
-  do i = 1, npart
+  do i = 1, nsource
      sendbuf_dp(i) = mp(sort_index(i))
   end do
-  call p2p_exchange_dp(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
-       sdispls, rdispls, send_partners, recv_partners, &
-       n_send_partners, n_recv_partners, req, itag, info)
+  call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+       sdispls, rdispls, exchange_backend, itag)
   mp(1:npart_new) = recvbuf_dp(1:npart_new)
 
   ! --- idp (integer(i8b)) ---
   itag = 821
-  allocate(sendbuf_i8(1:npart))
-  allocate(recvbuf_i8(1:npart_new))
-  do i = 1, npart
+  allocate(sendbuf_i8(max(nsource,1)))
+  allocate(recvbuf_i8(max(npart_new,1)))
+  do i = 1, nsource
      sendbuf_i8(i) = idp(sort_index(i))
   end do
-  nreq = 0
-  do i = 1, n_recv_partners
-     icpu = recv_partners(i)
-     nreq = nreq + 1
-     call MPI_IRECV(recvbuf_i8(rdispls(icpu)+1), nrecv(icpu), MPI_INTEGER8, &
-          icpu-1, itag, MPI_COMM_WORLD, req(nreq), info)
-  end do
-  do i = 1, n_send_partners
-     icpu = send_partners(i)
-     nreq = nreq + 1
-     call MPI_ISEND(sendbuf_i8(sdispls(icpu)+1), nsend(icpu), MPI_INTEGER8, &
-          icpu-1, itag, MPI_COMM_WORLD, req(nreq), info)
-  end do
-  if(nsend(myid) > 0) then
-     recvbuf_i8(rdispls(myid)+1:rdispls(myid)+nrecv(myid)) = &
-          sendbuf_i8(sdispls(myid)+1:sdispls(myid)+nsend(myid))
-  end if
-  call MPI_WAITALL(nreq, req, MPI_STATUSES_IGNORE, info)
+  call exchange_i8_sorted(sendbuf_i8, recvbuf_i8, nsend, nrecv, &
+       sdispls, rdispls, exchange_backend, itag)
   idp(1:npart_new) = recvbuf_i8(1:npart_new)
   deallocate(sendbuf_i8, recvbuf_i8)
 
   ! --- levelp (integer) ---
   itag = 822
-  allocate(sendbuf_int(1:npart))
-  allocate(recvbuf_int(1:npart_new))
-  do i = 1, npart
+  allocate(sendbuf_int(max(nsource,1)))
+  allocate(recvbuf_int(max(npart_new,1)))
+  do i = 1, nsource
      sendbuf_int(i) = levelp(sort_index(i))
   end do
-  nreq = 0
-  do i = 1, n_recv_partners
-     icpu = recv_partners(i)
-     nreq = nreq + 1
-     call MPI_IRECV(recvbuf_int(rdispls(icpu)+1), nrecv(icpu), MPI_INTEGER, &
-          icpu-1, itag, MPI_COMM_WORLD, req(nreq), info)
-  end do
-  do i = 1, n_send_partners
-     icpu = send_partners(i)
-     nreq = nreq + 1
-     call MPI_ISEND(sendbuf_int(sdispls(icpu)+1), nsend(icpu), MPI_INTEGER, &
-          icpu-1, itag, MPI_COMM_WORLD, req(nreq), info)
-  end do
-  if(nsend(myid) > 0) then
-     recvbuf_int(rdispls(myid)+1:rdispls(myid)+nrecv(myid)) = &
-          sendbuf_int(sdispls(myid)+1:sdispls(myid)+nsend(myid))
-  end if
-  call MPI_WAITALL(nreq, req, MPI_STATUSES_IGNORE, info)
+  ! Clear only the old occupied slots.  The dense receive set below becomes
+  ! 1:npart_new, after which init_tree recreates the particle free list.
+  do i=1,nsource; levelp(source_index(i))=0; end do
+  call exchange_int_sorted(sendbuf_int, recvbuf_int, nsend, nrecv, &
+       sdispls, rdispls, exchange_backend, itag)
   levelp(1:npart_new) = recvbuf_int(1:npart_new)
   deallocate(sendbuf_int, recvbuf_int)
 
   ! --- ptypep (integer(kind=1)) ---
   itag = 823
-  allocate(sendbuf_i1(1:npart))
-  allocate(recvbuf_i1(1:npart_new))
-  do i = 1, npart
+  allocate(sendbuf_i1(max(nsource,1)))
+  allocate(recvbuf_i1(max(npart_new,1)))
+  do i = 1, nsource
      sendbuf_i1(i) = ptypep(sort_index(i))
   end do
-  nreq = 0
-  do i = 1, n_recv_partners
-     icpu = recv_partners(i)
-     nreq = nreq + 1
-     call MPI_IRECV(recvbuf_i1(rdispls(icpu)+1), nrecv(icpu), MPI_INTEGER1, &
-          icpu-1, itag, MPI_COMM_WORLD, req(nreq), info)
-  end do
-  do i = 1, n_send_partners
-     icpu = send_partners(i)
-     nreq = nreq + 1
-     call MPI_ISEND(sendbuf_i1(sdispls(icpu)+1), nsend(icpu), MPI_INTEGER1, &
-          icpu-1, itag, MPI_COMM_WORLD, req(nreq), info)
-  end do
-  if(nsend(myid) > 0) then
-     recvbuf_i1(rdispls(myid)+1:rdispls(myid)+nrecv(myid)) = &
-          sendbuf_i1(sdispls(myid)+1:sdispls(myid)+nsend(myid))
-  end if
-  call MPI_WAITALL(nreq, req, MPI_STATUSES_IGNORE, info)
+  call exchange_i1_sorted(sendbuf_i1, recvbuf_i1, nsend, nrecv, &
+       sdispls, rdispls, exchange_backend, itag)
   ptypep(1:npart_new) = recvbuf_i1(1:npart_new)
   deallocate(sendbuf_i1, recvbuf_i1)
 
@@ -1728,93 +1683,82 @@ subroutine redistribute_particles_by_position()
   if(star .or. sink) then
      ! tp
      itag = 830
-     do i = 1, npart
+     do i = 1, nsource
         sendbuf_dp(i) = tp(sort_index(i))
      end do
-     call p2p_exchange_dp(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
-          sdispls, rdispls, send_partners, recv_partners, &
-          n_send_partners, n_recv_partners, req, itag, info)
+     call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+          sdispls, rdispls, exchange_backend, itag)
      tp(1:npart_new) = recvbuf_dp(1:npart_new)
 
      ! zp (if metal)
      if(metal) then
         itag = 831
-        do i = 1, npart
+        do i = 1, nsource
            sendbuf_dp(i) = zp(sort_index(i))
         end do
-        call p2p_exchange_dp(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
-             sdispls, rdispls, send_partners, recv_partners, &
-             n_send_partners, n_recv_partners, req, itag, info)
+        call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+             sdispls, rdispls, exchange_backend, itag)
         zp(1:npart_new) = recvbuf_dp(1:npart_new)
      end if
 
      ! tpp
      itag = 832
-     do i = 1, npart
+     do i = 1, nsource
         sendbuf_dp(i) = tpp(sort_index(i))
      end do
-     call p2p_exchange_dp(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
-          sdispls, rdispls, send_partners, recv_partners, &
-          n_send_partners, n_recv_partners, req, itag, info)
+     call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+          sdispls, rdispls, exchange_backend, itag)
      tpp(1:npart_new) = recvbuf_dp(1:npart_new)
 
      ! mp0
      itag = 833
-     do i = 1, npart
+     do i = 1, nsource
         sendbuf_dp(i) = mp0(sort_index(i))
      end do
-     call p2p_exchange_dp(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
-          sdispls, rdispls, send_partners, recv_partners, &
-          n_send_partners, n_recv_partners, req, itag, info)
+     call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+          sdispls, rdispls, exchange_backend, itag)
      mp0(1:npart_new) = recvbuf_dp(1:npart_new)
 
      ! indtab
      itag = 834
-     do i = 1, npart
+     do i = 1, nsource
         sendbuf_dp(i) = indtab(sort_index(i))
      end do
-     call p2p_exchange_dp(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
-          sdispls, rdispls, send_partners, recv_partners, &
-          n_send_partners, n_recv_partners, req, itag, info)
+     call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+          sdispls, rdispls, exchange_backend, itag)
      indtab(1:npart_new) = recvbuf_dp(1:npart_new)
   end if
 
-  deallocate(sendbuf_dp, recvbuf_dp, sort_index, req)
+  ! Model-specific particle state uses the same permutation/backend.  SIDM's
+  ! internal state is carried by ptypep above; atomic-DM has two extra fields.
+  if(use_adm) then
+     itag = 840
+     do i = 1, nsource; sendbuf_dp(i) = edp(sort_index(i)); end do
+     call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+          sdispls, rdispls, exchange_backend, itag)
+     edp(1:npart_new) = recvbuf_dp(1:npart_new)
+
+     itag = 841
+     do i = 1, nsource; sendbuf_dp(i) = xh2p(sort_index(i)); end do
+     call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+          sdispls, rdispls, exchange_backend, itag)
+     xh2p(1:npart_new) = recvbuf_dp(1:npart_new)
+  end if
+
+#ifdef OUTPUT_PARTICLE_POTENTIAL
+  itag = 842
+  do i = 1, nsource; sendbuf_dp(i) = ptcl_phi(sort_index(i)); end do
+  call exchange_dp_sorted(sendbuf_dp, recvbuf_dp, nsend, nrecv, &
+       sdispls, rdispls, exchange_backend, itag)
+  ptcl_phi(1:npart_new) = recvbuf_dp(1:npart_new)
+#endif
+
+  deallocate(sendbuf_dp, recvbuf_dp, sort_index, source_index)
 
   nlocal = nsend(myid)
   npart = npart_new
   if(myid==1) write(*,'(A,I12,A,I12)') &
        ' Particle redistribution done. local_kept=', nlocal, ' total=', npart_new
-
-contains
-  subroutine p2p_exchange_dp(sbuf, rbuf, ns, nr, sd, rd, sp, rp, nsp, nrp, rq, tag, inf)
-    real(dp), intent(in)    :: sbuf(:)
-    real(dp), intent(inout) :: rbuf(:)
-    integer,  intent(in)    :: ns(:), nr(:), sd(:), rd(:)
-    integer,  intent(in)    :: sp(:), rp(:), nsp, nrp, tag
-    integer,  intent(inout) :: rq(:), inf
-    integer :: j, ic, nq
-    nq = 0
-    ! Post receives
-    do j = 1, nrp
-       ic = rp(j)
-       nq = nq + 1
-       call MPI_IRECV(rbuf(rd(ic)+1), nr(ic), MPI_DOUBLE_PRECISION, &
-            ic-1, tag, MPI_COMM_WORLD, rq(nq), inf)
-    end do
-    ! Post sends
-    do j = 1, nsp
-       ic = sp(j)
-       nq = nq + 1
-       call MPI_ISEND(sbuf(sd(ic)+1), ns(ic), MPI_DOUBLE_PRECISION, &
-            ic-1, tag, MPI_COMM_WORLD, rq(nq), inf)
-    end do
-    ! Local copy (self)
-    if(ns(myid) > 0) then
-       rbuf(rd(myid)+1:rd(myid)+nr(myid)) = sbuf(sd(myid)+1:sd(myid)+ns(myid))
-    end if
-    call MPI_WAITALL(nq, rq, MPI_STATUSES_IGNORE, inf)
-  end subroutine p2p_exchange_dp
 
 end subroutine redistribute_particles_by_position
 !################################################################

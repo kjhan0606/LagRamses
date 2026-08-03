@@ -134,6 +134,7 @@ module amr_parameters
   integer::mem_weight_part=12        ! Memory per particle in dp-equivalents
   integer::mem_weight_sink=500      ! Computational weight per sink particle
   real(dp)::lb_grid_headroom=0.85d0   ! load-balance grid-count safety margin (fraction of ngridmax)
+  real(dp)::lb_remap_fraction=1.0d0   ! fraction of requested boundary motion used by current remap
   real(dp)::time_balance_alpha=0d0  ! Time-based LB blend: 0=memory-only, 0.3-0.5=hybrid
 
   ! Step parameters

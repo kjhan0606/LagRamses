@@ -2,7 +2,7 @@
 !#########################################################################
 !#########################################################################
 !#########################################################################
-subroutine load_balance
+recursive subroutine load_balance
   use amr_commons
   use pm_commons
   use hydro_commons, ONLY: nvar, uold
@@ -26,6 +26,8 @@ subroutine load_balance
   integer(i8b),dimension(nlevelmax,3)::comm_buffin,comm_buffout
   integer,allocatable::numbp_save(:)
   integer::nsave,isave
+  integer,save::lb_chain_depth=0
+  logical::continue_bounded_remap
 #ifndef WITHOUTMPI
   integer::countsend,countrecv
   integer,dimension(MPI_STATUS_SIZE,ncpu)::statuses
@@ -38,6 +40,8 @@ subroutine load_balance
 #endif
 
   if(ncpu==1)return
+
+  lb_chain_depth=lb_chain_depth+1
 
 #ifndef WITHOUTMPI
   t_lb_start = MPI_WTIME()
@@ -146,6 +150,17 @@ subroutine load_balance
      end do
      if(allocated(numbp_save)) deallocate(numbp_save)
   end if
+
+  ! No ownership boundary moved when the preflight found too little working
+  ! space.  Avoid an otherwise pointless expand/shrink cycle: even a no-op
+  ! remap temporarily consumes ghost slots and is exactly what the guard is
+  ! intended to defer.
+  if(lb_remap_fraction<=0d0)then
+     balance=.false.
+     if(myid==1) write(*,*) 'Bounded remap: no safe progress; keeping current map'
+     lb_chain_depth=lb_chain_depth-1
+     return
+  endif
 
   t2 = MPI_WTIME()
 
@@ -415,6 +430,19 @@ subroutine load_balance
   ! Return freed heap pages to OS (reduces RSS after bulk dealloc/realloc)
   call fortran_malloc_trim()
 
+  ! A bounded remap deliberately moves only part of a large ownership change.
+  ! The standard shrink pass above has now returned the old virtual grids to
+  ! the free list, so another ordinary remap can safely advance the boundary.
+  continue_bounded_remap = lb_remap_fraction>0d0 .and. &
+       lb_remap_fraction<0.999999d0 .and. lb_chain_depth<16
+  if(continue_bounded_remap)then
+     if(myid==1) write(*,'(A,I0,A)') ' Bounded remap: starting round ', &
+          lb_chain_depth+1,' after releasing old grid slots'
+     call load_balance
+  else if(lb_remap_fraction>0d0 .and. lb_remap_fraction<0.999999d0)then
+     if(myid==1) write(*,*) ' Bounded remap: round limit reached; remaining motion deferred'
+  end if
+
   if(verbose)then
      write(*,*)'Output mesh structure'
      do ilevel=1,nlevelmax
@@ -422,6 +450,8 @@ subroutine load_balance
      end do
   end if
 #endif
+
+  lb_chain_depth=lb_chain_depth-1
 
 999 format(' Level ',I2,' has ',I10,' grids (',3(I8,','),')')
 
@@ -497,12 +527,19 @@ subroutine cmp_new_cpu_map
   real(kind=8),parameter :: LB_LEAF_PER_GRID=7d0
   integer :: guard_iter,floor_flag
   integer,parameter :: LB_GRID_GUARD_MAXITER=3
+  real(kind=8),parameter :: LB_REMAP_SLOT_SHARE=0.5d0
   logical :: do_time_blend,need_cpc,guard_applied
+  integer,dimension(1:ncpu)::lb_nsend,lb_nrecv
+  integer::lb_incoming,lb_free_slots,lb_allowed,lb_target_cpu
+  real(kind=8)::lb_fraction_local,lb_fraction_global
+  logical::lb_boundary_limited
 
   ! Local constants
   nxny=nx*ny
   nx_loc=icoarse_max-icoarse_min+1
   scale=boxlen/dble(nx_loc)
+  lb_remap_fraction=1d0
+  lb_boundary_limited=.false.
   
   ! Compute time step related cost
   if(cost_weighting)then
@@ -1028,6 +1065,7 @@ subroutine cmp_new_cpu_map
   !----------------------------------------
   ! Compute new cpu map
   !----------------------------------------
+210 continue
   cpu_map2=0
   ncell_loc=1
   do iz=0,nz-1
@@ -1132,6 +1170,80 @@ subroutine cmp_new_cpu_map
      ! End loop over grids
   end do
   ! End loop over levels
+
+  ! Bound a large ordered-domain move by the grid slots that are free now.
+  ! This leaves the existing refine/build_comm/Morton machinery untouched:
+  ! each pass performs a normal remap, shrinks the old boundary, and only then
+  ! advances farther toward the requested boundary in the next pass.
+  !
+  ! Count complete source grids rather than particles or leaf cells.  The
+  ! incoming count is a conservative upper bound because some incoming grids
+  ! may already exist locally as virtual grids.  Half of the headroom is kept
+  ! for the new ghost surface and physical boundaries.
+  ! Interpolating bound_key is a Hilbert-only operation.  Other orderings use
+  ! their own domain descriptors and must retain their normal remap path.
+  if(trim(ordering)=='hilbert' .and. (.not.lb_boundary_limited))then
+     lb_nsend=0
+     do ilevel=1,nlevelmax
+        do i=1,active(ilevel)%ngrid
+           igrid=active(ilevel)%igrid(i)
+           ! Before the expand pass, a small number of coarse/root grids can
+           ! still have no parent cell.  The normal remap assigns those
+           ! fathers during refine_coarse; they must not index cpu_map2(0)
+           ! in this preflight estimate.  Omitting them is harmless because
+           ! half of the available slots is already reserved as margin.
+           if(father(igrid)<=0) cycle
+           lb_target_cpu=cpu_map2(father(igrid))
+           if(lb_target_cpu<1.or.lb_target_cpu>ncpu) cycle
+           if(lb_target_cpu/=myid) lb_nsend(lb_target_cpu)= &
+                lb_nsend(lb_target_cpu)+1
+        end do
+     end do
+#ifndef WITHOUTMPI
+     call MPI_ALLTOALL(lb_nsend,1,MPI_INTEGER,lb_nrecv,1,MPI_INTEGER, &
+          MPI_COMM_WORLD,info)
+#else
+     lb_nrecv=lb_nsend
+#endif
+     lb_incoming=sum(lb_nrecv)-lb_nrecv(myid)
+     lb_free_slots=max(0,int(lb_grid_headroom*dble(ngridmax))-used_mem)
+     lb_allowed=max(0,int(LB_REMAP_SLOT_SHARE*dble(lb_free_slots)))
+     if(lb_incoming>0)then
+        lb_fraction_local=min(1d0,dble(lb_allowed)/dble(lb_incoming))
+     else
+        lb_fraction_local=1d0
+     end if
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(lb_fraction_local,lb_fraction_global,1, &
+          MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,info)
+#else
+     lb_fraction_global=lb_fraction_local
+#endif
+     if(lb_fraction_global<0.999999d0)then
+        lb_boundary_limited=.true.
+        if(lb_fraction_global<0.01d0)then
+           lb_remap_fraction=0d0
+           bound_key2=bound_key
+           if(myid==1) write(*,'(A,I0,A,I0,A)') &
+                ' Bounded remap deferred: incoming=',lb_incoming, &
+                ' allowed=',lb_allowed,' (insufficient free slots)'
+        else
+           lb_remap_fraction=lb_fraction_global
+           do idom=1,ndomain-1
+              bound_key2(idom)=bound_key(idom)+ &
+                   real(lb_fraction_global,kind=qdp)* &
+                   (bound_key2(idom)-bound_key(idom))
+           end do
+           bound_key2(0)=order_all_min
+           bound_key2(ndomain)=order_all_max
+           if(myid==1) write(*,'(A,F7.3,A,I0,A,I0,A,I0)') &
+                ' Bounded remap fraction=',lb_fraction_global, &
+                ' incoming=',lb_incoming,' allowed=',lb_allowed, &
+                ' free=',lb_free_slots
+        end if
+        goto 210
+     end if
+  end if
 
   ! Update virtual boundaries for new cpu map
   call make_virtual_coarse_int(cpu_map2(1))
