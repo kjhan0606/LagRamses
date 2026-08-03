@@ -586,16 +586,18 @@ end subroutine fdm_init_psi
 !################################################################
 !################################################################
 ! Phase 4: AMR prolongation for psi (mass-conserving)
-! Called when new refined grids are created at ilevel from ilevel-1
+! Called by make_grid_fine for exactly the grids just created at ilevel.
 ! Trilinear interpolation + renormalization to preserve |psi|^2 integral
 !################################################################
-subroutine fdm_prolong(ilevel)
+subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
   use amr_commons
   use poisson_commons
   implicit none
   integer,intent(in)::ilevel
+  integer,intent(in)::ngrid_new
+  integer,dimension(1:nvector),intent(in)::ind_grid_new
 
-  integer::igrid,icell_coarse,ind,iskip,i
+  integer::inew,igrid,icell_coarse,ind,iskip,i
   integer::ind_child,iskip_child,icell_child
   real(dp)::mass_coarse,mass_fine,ratio
   real(dp)::psi_re_parent,psi_im_parent
@@ -606,14 +608,12 @@ subroutine fdm_prolong(ilevel)
   ! For each newly created grid at ilevel, initialize psi from parent cell
   ! Simple injection: copy parent cell value to all 8 children
   ! Then renormalize to conserve mass
-  igrid = headl(myid, ilevel)
-  do while(igrid > 0)
+  do inew=1,ngrid_new
+     igrid = ind_grid_new(inew)
      ! Parent cell
      icell_coarse = father(igrid)
-     if(icell_coarse <= 0) then
-        igrid = next(igrid)
-        cycle
-     end if
+     if(icell_coarse <= 0) cycle
+     if(cpu_map(icell_coarse) /= myid) cycle
 
      psi_re_parent = psi_re(icell_coarse)
      psi_im_parent = psi_im(icell_coarse)
@@ -626,13 +626,9 @@ subroutine fdm_prolong(ilevel)
         psi_im(icell_child) = psi_im_parent
      end do
 
-     igrid = next(igrid)
   end do
 
-  call make_virtual_fine_dp(psi_re(1), ilevel)
-  call make_virtual_fine_dp(psi_im(1), ilevel)
-
-end subroutine fdm_prolong
+end subroutine fdm_prolong_grids
 !################################################################
 !################################################################
 ! Phase 4: AMR restriction for psi (mass-conserving)
@@ -792,7 +788,7 @@ subroutine fdm_diagnostics()
 #endif
 
   if(myid==1) then
-     write(*,'(A,ES12.5,A,ES10.3)') &
+     write(*,'(A,ES20.12,A,ES12.4)') &
           ' FDM: M_tot=', mass_glob, '  rho_max=', rho_max_glob
   end if
 

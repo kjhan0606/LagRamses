@@ -2631,17 +2631,19 @@ end subroutine fdm_init_phase_fft
 !################################################################
 !################################################################
 ! Phase 4: AMR prolongation for psi (mass-conserving)
-! Called when new refined grids are created at ilevel from ilevel-1
+! Called by make_grid_fine for exactly the grids just created at ilevel.
 ! Trilinear interpolation + renormalization to preserve |psi|^2 integral
 !################################################################
-subroutine fdm_prolong(ilevel)
+subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
   use amr_commons
   use poisson_commons
   use fdm_commons
   implicit none
   integer,intent(in)::ilevel
+  integer,intent(in)::ngrid_new
+  integer,dimension(1:nvector),intent(in)::ind_grid_new
 
-  integer::igrid,icell_coarse,ind_child,iskip_child,icell_child
+  integer::inew,igrid,icell_coarse,ind_child,iskip_child,icell_child
   integer::igrid_p,ind_p,ival,idim,icL,icR,ix,iy,iz
   real(dp)::psi_re_c,psi_im_c
   real(dp)::grad_re(3),grad_im(3)
@@ -2662,16 +2664,14 @@ subroutine fdm_prolong(ilevel)
   pi_h = 3.14159265358979d0 * hbar_code
   twopi_h = 2.0d0 * pi_h
 
-  call make_virtual_fine_dp(psi_re(1), ilevel-1)
-  call make_virtual_fine_dp(psi_im(1), ilevel-1)
-
-  igrid = headl(myid, ilevel)
-  do while(igrid > 0)
+  do inew=1,ngrid_new
+     igrid = ind_grid_new(inew)
      icell_coarse = father(igrid)
-     if(icell_coarse <= 0) then
-        igrid = next(igrid)
-        cycle
-     end if
+     if(icell_coarse <= 0) cycle
+     ! Remote and physical-boundary copies are filled by the normal virtual
+     ! exchange/boundary path.  Only locally owned children enter the leaf
+     ! mass and must be initialized here.
+     if(cpu_map(icell_coarse) /= myid) cycle
 
      psi_re_c = psi_re(icell_coarse)
      psi_im_c = psi_im(icell_coarse)
@@ -2796,13 +2796,9 @@ subroutine fdm_prolong(ilevel)
         end if
      end if
 
-     igrid = next(igrid)
   end do
 
-  call make_virtual_fine_dp(psi_re(1), ilevel)
-  call make_virtual_fine_dp(psi_im(1), ilevel)
-
-end subroutine fdm_prolong
+end subroutine fdm_prolong_grids
 !################################################################
 !################################################################
 ! Lightweight CFL check for HJM fluid levels.
@@ -3090,7 +3086,7 @@ subroutine fdm_diagnostics()
 #endif
 
   if(myid==1) then
-     write(*,'(A,ES12.5,A,ES10.3)') &
+     write(*,'(A,ES20.12,A,ES12.4)') &
           ' FDM: M_tot=', mass_glob, '  rho_max=', rho_max_glob
   end if
 

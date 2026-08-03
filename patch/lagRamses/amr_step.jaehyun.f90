@@ -153,9 +153,15 @@ recursive subroutine amr_step(ilevel,icount)
            !--------------------------
            ! Refine grids
            !--------------------------
+           ! refine_fine(i) creates children at i+1.  Synchronize the parent
+           ! FDM field once before make_grid_fine invokes the new-grid-only
+           ! prolongation hook.  The old post-refine fdm_prolong(i) call was
+           ! both off by one and overwrote every pre-existing grid at level i.
+           if(use_fdm .and. i<nlevelmax)then
+              call make_virtual_fine_dp(psi_re(1),i)
+              call make_virtual_fine_dp(psi_im(1),i)
+           end if
            call refine_fine(i)
-           ! Prolong FDM psi to newly created cells
-           if(use_fdm) call fdm_prolong(i)
         end do
      end if
   end if
