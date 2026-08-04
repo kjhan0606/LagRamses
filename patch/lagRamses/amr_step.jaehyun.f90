@@ -35,6 +35,7 @@ recursive subroutine amr_step(ilevel,icount)
 
   real(kind=4):: real_mem, real_mem_tot
   real(kind=8):: t_lb_level_start, t_lb_level_end
+  real(dp)::restart_imbalance
 
   ! Particle sub-timers
   integer(kind=8) :: pt_t1, pt_t2, pt_rate
@@ -153,15 +154,13 @@ recursive subroutine amr_step(ilevel,icount)
            !--------------------------
            ! Refine grids
            !--------------------------
-           ! refine_fine(i) creates children at i+1.  Synchronize the parent
-           ! FDM field once before make_grid_fine invokes the new-grid-only
-           ! prolongation hook.  The old post-refine fdm_prolong(i) call was
-           ! both off by one and overwrote every pre-existing grid at level i.
-           if(use_fdm .and. i<nlevelmax)then
-              call make_virtual_fine_dp(psi_re(1),i)
-              call make_virtual_fine_dp(psi_im(1),i)
-           end if
+#ifdef FDMDEBUG
+           if(use_fdm .and. i>=levelmin) call fdm_mass_check('pre-refine',i)
+#endif
            call refine_fine(i)
+#ifdef FDMDEBUG
+           if(use_fdm .and. i>=levelmin) call fdm_mass_check('post-refine',i)
+#endif
         end do
      end if
   end if
@@ -173,8 +172,18 @@ recursive subroutine amr_step(ilevel,icount)
   ok_defrag=.false.
   ! Variable-ncpu restart: must run even when levelmin==nlevelmax
   if(ilevel==levelmin .and. varcpu_restart_done)then
-     if(myid==1) write(*,*) 'Forcing load_balance after variable-ncpu restart'
-     call load_balance
+     call measure_load_imbalance(restart_imbalance)
+     if(remap_thresh<=0d0 .or. restart_imbalance>remap_thresh)then
+        if(myid==1) write(*,'(A,F8.4,A)') &
+             ' Variable-ncpu restart imbalance=',restart_imbalance*100d0, &
+             '% -> rebuilding CPU map'
+        call load_balance
+     else if(myid==1)then
+        write(*,'(A,F8.4,A,F8.4,A)') &
+             ' Variable-ncpu restart imbalance=',restart_imbalance*100d0, &
+             '% <= threshold ',remap_thresh*100d0, &
+             '%; keeping restored CPU map'
+     end if
      call defrag
      ok_defrag=.true.
      ! Rebuild communicators after defrag (defrag remaps grid indices,
@@ -957,6 +966,14 @@ recursive subroutine amr_step(ilevel,icount)
   ! Compute refinement map
   !-----------------------
                                call timer('flag','start')
+  ! Keep the parent FDM ghosts current for the next coarse-step's
+  ! new-grid-only prolongation.  This must happen before flag_fine: the
+  ! refinement map is state carried across the step boundary, so no unrelated
+  ! communication belongs between flag_fine and the following refine_fine.
+  if(use_fdm .and. ilevel<nlevelmax)then
+     call make_virtual_fine_dp(psi_re(1),ilevel)
+     call make_virtual_fine_dp(psi_im(1),ilevel)
+  end if
   if(.not.static) call flag_fine(ilevel,icount)
 
   ! Accumulate per-level timing for time-based load balancing
@@ -1169,31 +1186,25 @@ end subroutine rt_step
 #endif
 !###########################################################
 !###########################################################
-subroutine check_load_imbalance(did_remap)
-  ! Check weight inhomogeneity and trigger load_balance if
-  ! max/avg - 1 > remap_thresh.
-  ! Called every coarse step when nremap==0 and remap_thresh>0.
-  !
-  ! Metric matches bisection.f90 cost when memory_balance=.true.:
-  !   mem_weight_grid * n_grids + mem_weight_part * n_particles
-  ! so the trigger fires on the same imbalance that the cut tries to fix.
-  ! When memory_balance=.false., falls back to grid-count × subcycle (compute cost).
+subroutine measure_load_imbalance(imbalance)
+  ! Return max/mean-1 for the same inexpensive rank-local weight used by the
+  ! automatic remap trigger.  This query is also used after a variable-ncpu
+  ! restore so an already balanced decomposition does not pay for a complete
+  ! Hilbert/k-section rebuild merely to obtain the same CPU map.
   use amr_commons
   use pm_commons, only: numbp
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  logical,intent(out)::did_remap
+  real(dp),intent(out)::imbalance
 
-  real(dp)::my_cost,max_cost,sum_cost,imbalance
+  real(dp)::my_cost,max_cost,sum_cost
   integer::ilevel,info,nsub,jgrid,igrid
   integer(i8b)::ngrids_loc,npart_loc
 #ifndef WITHOUTMPI
   real(dp)::buf(2),gbuf(2)
 #endif
-
-  did_remap=.false.
 
   if(use_fdm .and. fdm_cost_mode==1 .and. nstep_coarse>0) then
      ! FDM wallclock mode: use actual accumulated time as cost
@@ -1237,6 +1248,20 @@ subroutine check_load_imbalance(did_remap)
   else
      imbalance=0d0
   end if
+
+end subroutine measure_load_imbalance
+!###########################################################
+!###########################################################
+subroutine check_load_imbalance(did_remap)
+  ! Check weight inhomogeneity and trigger load_balance if
+  ! max/avg - 1 > remap_thresh.
+  use amr_commons
+  implicit none
+  logical,intent(out)::did_remap
+  real(dp)::imbalance
+
+  did_remap=.false.
+  call measure_load_imbalance(imbalance)
 
   if(imbalance>remap_thresh)then
      if(myid==1) write(*,'(A,F6.2,A,F6.2,A)') &

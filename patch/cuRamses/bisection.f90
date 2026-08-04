@@ -453,6 +453,8 @@ contains
       ! This sets up bisec_ind_cell, bisec_hist_bounds ready to start a level-0 hist build
       ! by looping over all AMR cells
 
+      use omp_lib, only: omp_get_max_threads, omp_get_thread_num
+
 #ifndef WITHOUTMPI
       include 'mpif.h'
 #endif
@@ -460,7 +462,7 @@ contains
       integer::igrid,ncache,ngrid,ierr
       integer::ilevel,i,ind,idim
 
-      integer::nc,ibcell,p,slot
+      integer::nc,ibcell,p
 
       integer::nx_loc
       integer::icpu,ncell,ncell_loc,ncell_max
@@ -469,6 +471,8 @@ contains
       integer::isink
       integer,allocatable::sink_per_grid(:),sink_coarse(:)
       integer::guard_iter
+      integer::nthreads,tid,slot,cell_count
+      integer,allocatable::thread_count(:,:),thread_offset(:,:)
       integer(kind=8)::cell_cost_tot_loc,cell_cost_tot
       integer(kind=8)::ntot_loc,ntot,nraised_loc,nraised
       integer(kind=8)::min_cost_loc,min_cost_global,floor_cost
@@ -478,6 +482,8 @@ contains
 
       real(dp)::dx,scale,floor_c,cell_cap,guard_denom
       real(dp)::predicted_max_cells
+      real(dp)::t_compact0,t_compact1,t_compact2,t_compact3
+      integer(kind=8)::scratch_bytes,omp_scratch_bytes
       real(dp),dimension(1:twotondim,1:3)::xc
       logical::guard_applied
       
@@ -489,107 +495,121 @@ contains
       scale=boxlen/dble(nx_loc)
       ncell=ncoarse+twotondim*ngridmax
 
-      ! --- Pass 1: count leaf cells for compact allocation ---
-      ncell = 0
-      ! Count coarse leaf cells
+#ifndef WITHOUTMPI
+      t_compact0=MPI_WTIME()
+#endif
+
+      ! --- Pass 1: exact per-thread leaf counts.  Reception grids cannot own
+      ! myid cells by the build_comm invariant, so only active grids are needed.
+      ! Keeping counts per (thread,level) lets Pass 2 fill compact arrays using
+      ! prefix offsets, without an atomic increment in the hot loop.
+      nthreads=max(1,omp_get_max_threads())
+      allocate(thread_count(0:nthreads-1,0:nlevelmax))
+      allocate(thread_offset(0:nthreads-1,0:nlevelmax))
+      thread_count=0
+      thread_offset=0
+
+      !$OMP PARALLEL DEFAULT(SHARED) NUM_THREADS(nthreads) &
+      !$OMP PRIVATE(tid,cell_count,ind)
+      tid=omp_get_thread_num()
+      cell_count=0
+      !$OMP DO SCHEDULE(STATIC)
       do ind=1,ncoarse
-         if(cpu_map(ind)==myid .and. son(ind)==0) ncell=ncell+1
+         if(cpu_map(ind)==myid .and. son(ind)==0) cell_count=cell_count+1
       end do
-      ! Count AMR leaf cells
+      !$OMP END DO
+      thread_count(tid,0)=cell_count
+      !$OMP END PARALLEL
+
       do ilevel=1,nlevelmax
-         do icpu=1,ncpu
-            if(icpu==myid)then
-               ncache=active(ilevel)%ngrid
-            else
-               ncache=reception(icpu,ilevel)%ngrid
-            end if
-            do igrid=1,ncache
-               if(icpu==myid)then
-                  igrid_tmp=active(ilevel)%igrid(igrid)
-               else
-                  igrid_tmp=reception(icpu,ilevel)%igrid(igrid)
-               end if
-               do ind=1,twotondim
-                  iskip=ncoarse+(ind-1)*ngridmax
-                  icell_tmp=igrid_tmp+iskip
-                  if(cpu_map(icell_tmp)==myid .and. son(icell_tmp)==0) ncell=ncell+1
-               end do
+         ncache=active(ilevel)%ngrid
+         !$OMP PARALLEL DEFAULT(SHARED) NUM_THREADS(nthreads) &
+         !$OMP PRIVATE(tid,cell_count,igrid,igrid_tmp,ind,iskip,icell_tmp)
+         tid=omp_get_thread_num()
+         cell_count=0
+         !$OMP DO SCHEDULE(STATIC)
+         do igrid=1,ncache
+            igrid_tmp=active(ilevel)%igrid(igrid)
+            do ind=1,twotondim
+               iskip=ncoarse+(ind-1)*ngridmax
+               icell_tmp=igrid_tmp+iskip
+               if(cpu_map(icell_tmp)==myid .and. son(icell_tmp)==0) &
+                    cell_count=cell_count+1
             end do
          end do
+         !$OMP END DO
+         thread_count(tid,ilevel)=cell_count
+         !$OMP END PARALLEL
       end do
 
-      ncell_max = ncell  ! exact leaf cell count (not theoretical max)
-
-      ! On-demand compact allocation to exact leaf cell count
-      if(.not. allocated(bisec_ind_cell))  allocate(bisec_ind_cell(1:ncell_max))
-      if(.not. allocated(bisec_cell_level))allocate(bisec_cell_level(1:ncell_max))
-      if(.not. allocated(bisec_cell_cost)) allocate(bisec_cell_cost(1:ncell_max))
-      if(.not. allocated(bisec_cell_coord))allocate(bisec_cell_coord(1:ncell_max))
-
-      ! --- Pass 2: fill arrays with sequential indexing ---
-      bisec_ind_cell=0
       ncell=0
-      ncell_loc=1
-      dx=1.0*scale
-      do iz=0,nz-1
-      do iy=0,ny-1
-      do ix=0,nx-1
-         ind=1+ix+iy*nx+iz*nxny
+      do ilevel=0,nlevelmax
+         do tid=0,nthreads-1
+            thread_offset(tid,ilevel)=ncell
+            ncell=ncell+thread_count(tid,ilevel)
+         end do
+      end do
+      ncell_max=ncell
+
+      ! On-demand compact allocation to the exact leaf count.  Use a one-item
+      ! allocation for a genuinely empty mesh so lower bounds remain valid.
+      if(.not. allocated(bisec_ind_cell)) &
+           allocate(bisec_ind_cell(1:max(ncell_max,1)))
+      if(.not. allocated(bisec_cell_level)) &
+           allocate(bisec_cell_level(1:max(ncell_max,1)))
+      if(.not. allocated(bisec_cell_cost)) &
+           allocate(bisec_cell_cost(1:max(ncell_max,1)))
+      if(.not. allocated(bisec_cell_coord)) &
+           allocate(bisec_cell_coord(1:max(ncell_max,1)))
+#ifndef WITHOUTMPI
+      t_compact1=MPI_WTIME()
+#endif
+
+      ! --- Pass 2: deterministic thread-private compact fill. ---
+      !$OMP PARALLEL DEFAULT(SHARED) NUM_THREADS(nthreads) &
+      !$OMP PRIVATE(tid,slot,ind)
+      tid=omp_get_thread_num()
+      slot=thread_offset(tid,0)
+      !$OMP DO SCHEDULE(STATIC)
+      do ind=1,ncoarse
          if(cpu_map(ind)==myid.and.son(ind)==0)then
-            ncell=ncell+1
-            flag1(ncell)=ind
-            bisec_ind_cell(ncell)=ind
-            bisec_cell_level(ncell)=0   ! 0 for coarse levels (sequential indexing)
+            slot=slot+1
+            flag1(slot)=ind
+            bisec_ind_cell(slot)=ind
+            bisec_cell_level(slot)=0
          end if
       end do
-      end do
-      end do
+      !$OMP END DO
+      !$OMP END PARALLEL
 
-      ! LOOP OVER ALL CPU AMR CELLS
-      ! Loop over levels
-      level_loop: do ilevel=1,nlevelmax
-         ! Loop over cpus
-         cpu_loop: do icpu=1,ncpu
-               if(icpu==myid)then
-               ncache=active(ilevel)%ngrid
-            else
-               ncache=reception(icpu,ilevel)%ngrid
-            end if
-            ! Loop over grids by vector sweeps
-            grid_loop: do igrid=1,ncache,nvector
-               ! Gather nvector grids
-               ngrid=MIN(nvector,ncache-igrid+1)
-               if(icpu==myid)then
-                  do i=1,ngrid
-                  ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
-               end do
-               else
-               do i=1,ngrid
-                  ind_grid(i)=reception(icpu,ilevel)%igrid(igrid+i-1)
-               end do
+      do ilevel=1,nlevelmax
+         ncache=active(ilevel)%ngrid
+         !$OMP PARALLEL DEFAULT(SHARED) NUM_THREADS(nthreads) &
+         !$OMP PRIVATE(tid,slot,igrid,igrid_tmp,ind,iskip,icell_tmp)
+         tid=omp_get_thread_num()
+         slot=thread_offset(tid,ilevel)
+         !$OMP DO SCHEDULE(STATIC)
+         do igrid=1,ncache
+            igrid_tmp=active(ilevel)%igrid(igrid)
+            do ind=1,twotondim
+               iskip=ncoarse+(ind-1)*ngridmax
+               icell_tmp=igrid_tmp+iskip
+               if(cpu_map(icell_tmp)==myid.and.son(icell_tmp)==0)then
+                  slot=slot+1
+                  bisec_cell_level(slot)=ilevel
+                  flag1(slot)=icell_tmp
+                  bisec_ind_cell(slot)=icell_tmp
                end if
-               ! Loop over cells
-               cell_loop: do ind=1,twotondim
-                  iskip=ncoarse+(ind-1)*ngridmax
-                  ! setup ind_grid
-                  do i=1,ngrid
-                     ind_cell(i)=ind_grid(i)+iskip
-                  end do
-                  ncell_loc=0
-                  do i=1,ngrid
-                     if(cpu_map(ind_cell(i))==myid.and.son(ind_cell(i))==0)then
-                        ncell=ncell+1
-                        ncell_loc=ncell_loc+1
-                        bisec_cell_level(ncell)=ilevel  ! sequential indexing
-                        flag1(ncell)=ind_cell(i)
-                        bisec_ind_cell(ncell)=ind_cell(i)
-                     end if
-                  end do
-               end do cell_loop
-            end do grid_loop
-         end do cpu_loop
-      end do level_loop
-      ! End loop over levels
+            end do
+         end do
+         !$OMP END DO
+         !$OMP END PARALLEL
+      end do
+      ncell=ncell_max
+      deallocate(thread_count,thread_offset)
+#ifndef WITHOUTMPI
+      t_compact2=MPI_WTIME()
+#endif
       ! Ok, bisec_ind_cell is good, init the bound arrays for a level-0 histogram
       bisec_hist_bounds=0
       ! only one region (region id=1) at level 0
@@ -599,6 +619,8 @@ contains
       bisec_ncells_loc = ncell
 
       ! Compute cell costs (direction-independent, done once)
+      !$OMP PARALLEL DO DEFAULT(SHARED) &
+      !$OMP PRIVATE(i,icell_tmp,isubcell_tmp,igrid_tmp) SCHEDULE(STATIC)
       do i = 1, bisec_ncells_loc
          icell_tmp = bisec_ind_cell(i)
          if (memory_balance) then
@@ -612,6 +634,7 @@ contains
             bisec_cell_cost(i) = 1
          end if
       end do
+      !$OMP END PARALLEL DO
 
       ! Add sink particle cost (computational weight near sinks)
       if (memory_balance .and. sink .and. nsink > 0 .and. mem_weight_sink > 0) then
@@ -653,6 +676,8 @@ contains
          end do
 
          ! Add sink cost to bisec_cell_cost
+         !$OMP PARALLEL DO DEFAULT(SHARED) &
+         !$OMP PRIVATE(i,icell_tmp,isubcell_tmp,igrid_tmp) SCHEDULE(STATIC)
          do i = 1, bisec_ncells_loc
             icell_tmp = bisec_ind_cell(i)
             if(icell_tmp > ncoarse) then
@@ -665,6 +690,7 @@ contains
                     sink_coarse(icell_tmp) * mem_weight_sink
             end if
          end do
+         !$OMP END PARALLEL DO
 
          deallocate(sink_per_grid, sink_coarse)
       end if
@@ -788,6 +814,24 @@ contains
          end if
       end if
 
+#ifndef WITHOUTMPI
+      t_compact3=MPI_WTIME()
+      scratch_bytes=int(ncell_max,kind=8)*24_8
+      omp_scratch_bytes=max( &
+           int(2*nthreads*(nlevelmax+1),kind=8)*int(storage_size(0)/8,kind=8), &
+           int(nthreads,kind=8)*int(bisec_nres,kind=8)*8_8)
+      if(myid==1)then
+         write(*,'(A,I0,A,F10.2,A,F8.3,A,I0,A)') &
+              ' LB compact scratch: leaves/rank=',ncell_max,' compact=', &
+              dble(scratch_bytes)/1048576d0,' MiB omp_tmp=', &
+              dble(omp_scratch_bytes)/1048576d0,' MiB threads=',nthreads, &
+              ' atomic=0'
+         write(*,'(A,3(F9.3,A))') ' LB compact stages: count=', &
+              t_compact1-t_compact0,' s fill=',t_compact2-t_compact1, &
+              ' s cost/guard=',t_compact3-t_compact2,' s'
+      end if
+#endif
+
    end subroutine
 
 
@@ -797,30 +841,66 @@ contains
       ! nc_in = number of domains at this level (2**lev for bisection, product of factors for ksection)
       ! Uses pre-computed bisec_cell_coord and bisec_cell_cost cache arrays.
 
+      use omp_lib, only: omp_get_max_threads, omp_get_thread_num
+
       integer, intent(in) :: lev, dir, nc_in
       integer :: nc
-      integer :: i, ibicell
+      integer :: i, ibicell,ithread,nthreads
       integer :: cell_slot
+      integer(i8b),allocatable::thread_hist(:,:)
 
       nc=nc_in
 
       ! reset histograms before adding up loads
       bisec_hist=0
 
-      ! This is the histogram-building loop on bisection cells
-      bisection_domains_loop: do ibicell=1,nc
-
-         ! loop over all cells of the ibicell domain using cached coord/cost
-         do i=bisec_hist_bounds(ibicell),bisec_hist_bounds(ibicell+1)-1
-            cell_slot = floor(bisec_cell_coord(i)/bisec_res)+1
-            bisec_hist(ibicell,cell_slot) = bisec_hist(ibicell,cell_slot)+bisec_cell_cost(i)
+      nthreads=max(1,omp_get_max_threads())
+      if(nc<nthreads .and. bisec_ncells_loc>0)then
+         ! At the root (nc=1) a parallel-over-domain loop is serial.  Give each
+         ! thread a small private 1-D histogram, then reduce it without atomics.
+         ! Storage is O(nthreads*bisec_nres), independent of the leaf count.
+         allocate(thread_hist(1:bisec_nres,0:nthreads-1))
+         do ibicell=1,nc
+            thread_hist=0_i8b
+            !$OMP PARALLEL DEFAULT(SHARED) NUM_THREADS(nthreads) &
+            !$OMP PRIVATE(ithread,i,cell_slot)
+            ithread=omp_get_thread_num()
+            !$OMP DO SCHEDULE(STATIC)
+            do i=bisec_hist_bounds(ibicell),bisec_hist_bounds(ibicell+1)-1
+               cell_slot=floor(bisec_cell_coord(i)/bisec_res)+1
+               thread_hist(cell_slot,ithread)=thread_hist(cell_slot,ithread)+ &
+                    bisec_cell_cost(i)
+            end do
+            !$OMP END DO
+            !$OMP END PARALLEL
+            do ithread=0,nthreads-1
+               do i=1,bisec_nres
+                  bisec_hist(ibicell,i)=bisec_hist(ibicell,i)+ &
+                       thread_hist(i,ithread)
+               end do
+            end do
+            do i=2,bisec_nres
+               bisec_hist(ibicell,i)=bisec_hist(ibicell,i)+bisec_hist(ibicell,i-1)
+            end do
          end do
-
-         ! cumulate histogram
-         do i=2,bisec_nres
-            bisec_hist(ibicell,i) = bisec_hist(ibicell,i) + bisec_hist(ibicell,i-1)
+         deallocate(thread_hist)
+      else
+         ! Once there are at least as many domains as threads, rows are
+         ! independent and can be built without atomics or private copies.
+         !$OMP PARALLEL DO DEFAULT(SHARED) &
+         !$OMP PRIVATE(ibicell,i,cell_slot) SCHEDULE(DYNAMIC,1)
+         do ibicell=1,nc
+            do i=bisec_hist_bounds(ibicell),bisec_hist_bounds(ibicell+1)-1
+               cell_slot=floor(bisec_cell_coord(i)/bisec_res)+1
+               bisec_hist(ibicell,cell_slot)=bisec_hist(ibicell,cell_slot)+ &
+                    bisec_cell_cost(i)
+            end do
+            do i=2,bisec_nres
+               bisec_hist(ibicell,i)=bisec_hist(ibicell,i)+bisec_hist(ibicell,i-1)
+            end do
          end do
-      end do bisection_domains_loop
+         !$OMP END PARALLEL DO
+      end if
 
    end subroutine build_bisection_histogram
 
@@ -838,6 +918,8 @@ contains
       nx_loc = icoarse_max - icoarse_min + 1
       scale = boxlen / dble(nx_loc)
 
+      !$OMP PARALLEL DO DEFAULT(SHARED) &
+      !$OMP PRIVATE(i,ix,iy,iz,icell,igrid,isubcell,iarray,dx,subcell_c) SCHEDULE(STATIC)
       do i = 1, bisec_ncells_loc
          icell = bisec_ind_cell(i)
          dx = 0.5d0**bisec_cell_level(i)
@@ -859,6 +941,7 @@ contains
             bisec_cell_coord(i) = scale * (xg(igrid, dir) + subcell_c)
          end if
       end do
+      !$OMP END PARALLEL DO
 
    end subroutine compute_bisec_cell_coords
 

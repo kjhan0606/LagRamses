@@ -61,6 +61,8 @@ subroutine init_poisson
   end do
   allocate(safe_mode(1:nlevelmax))
   safe_mode = .false.
+  allocate(phi_restart_available(1:nlevelmax))
+  phi_restart_available = .false.
 
   !--------------------------------
   ! For a restart, read poisson file
@@ -69,12 +71,18 @@ subroutine init_poisson
 #ifdef HDF5
      if(informat == 'hdf5') then
         call restore_poisson_hdf5()
+        do ilevel=1,nlevelmax
+           phi_restart_available(ilevel) = numbtot(1,ilevel)>0
+        end do
         if(verbose)write(*,*)'HDF5 POISSON backup files read completed'
         return
      end if
 #endif
      if(varcpu_restart) then
         call restore_poisson_binary_varcpu()
+        do ilevel=1,nlevelmax
+           phi_restart_available(ilevel) = numbtot(1,ilevel)>0
+        end do
         ! Free grid-mapping metadata (not needed after poisson restore).
         ! varcpu_nactive/my_files/ngrid_file are kept alive for
         ! restore_psi_postlb after load_balance in amr_step.
@@ -185,6 +193,9 @@ subroutine init_poisson
      call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
      call diag_check_nan('post_poisson_restore_std')
+     do ilevel=1,nlevelmax
+        phi_restart_available(ilevel) = numbtot(1,ilevel)>0
+     end do
      if(verbose)write(*,*)'POISSON backup files read completed'
 
      ! FDM binary restart: read the wavefunction psi from fdm_<nrestart>.out.
@@ -411,4 +422,3 @@ subroutine restore_poisson_binary_varcpu
   if(myid==1) write(*,*) 'Binary varcpu poisson restore done.'
 
 end subroutine restore_poisson_binary_varcpu
-

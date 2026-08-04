@@ -24,6 +24,7 @@ subroutine phi_fine_cg(ilevel,icount)
   !=========================================================
   integer::i,ind,iter,iskip,itermax,nx_loc
   integer::idx
+  logical::use_restored_phi
   real(dp)::error,error_ini
   real(dp)::dx2,fourpi,scale,oneoversix,fact,fact2
   real(dp)::r2_old=0,alpha_cg,beta_cg
@@ -49,7 +50,15 @@ subroutine phi_fine_cg(ilevel,icount)
   !===============================
   ! Compute initial phi
   !===============================
-   if(ilevel>levelmin)then
+   use_restored_phi=.false.
+   if(allocated(phi_restart_available))then
+      use_restored_phi=phi_restart_available(ilevel)
+   endif
+   if(use_restored_phi)then
+      phi_restart_available(ilevel)=.false.
+      if(myid==1)write(*,'(A,I3)') &
+           ' Poisson warm start from restored phi at level ',ilevel
+   else if(ilevel>levelmin)then
       call make_initial_phi(ilevel,icount)              ! Interpolate phi down
    else
       call make_multipole_phi(ilevel)            ! Fill up with simple initial guess

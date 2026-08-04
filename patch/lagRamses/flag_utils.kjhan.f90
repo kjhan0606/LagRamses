@@ -1054,6 +1054,7 @@ subroutine init_refmap_fine(ilevel)
   integer::i,icell,igrid,ncache,iskip,ngrid,ilun
   integer::ind,idim,ivar,ix,iy,iz,nx_loc
   integer::i1,i2,i3,i1_min,i1_max,i2_min,i2_max,i3_min,i3_max
+  integer::i1_lo,i1_hi,i2_lo,i2_hi
   integer::buf_count,info,nvar_in
   integer ,dimension(1:nvector)::ind_grid,ind_cell
 
@@ -1160,7 +1161,15 @@ subroutine init_refmap_fine(ilevel)
   ! Second step: read initial condition file
   !-----------------------------------------
   ! Allocate initial conditions array
-  if(ncache>0)allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
+  if(ncache>0)then
+     allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
+     ! A rank may own coarse background cells outside a zoom IC sub-volume.
+     ! Those cells must retain the default (unrefined) map value; copying the
+     ! full rank bounding box from init_plane used to read outside its bounds.
+     init_array=0.0_dp
+     i1_lo=max(1,i1_min); i1_hi=min(n1(ilevel),i1_max)
+     i2_lo=max(1,i2_min); i2_hi=min(n2(ilevel),i2_max)
+  endif
   allocate(init_plane(1:n1(ilevel),1:n2(ilevel)))
 
   if(myid==1)write(*,*)'Reading file '//TRIM(filename)
@@ -1181,9 +1190,10 @@ subroutine init_refmap_fine(ilevel)
      read(ilun) ! skip first line
      do i3=1,n3(ilevel)
         read(ilun) ((init_plane(i1,i2),i1=1,n1(ilevel)),i2=1,n2(ilevel))
-        if(i3.ge.i3_min.and.i3.le.i3_max)then
-           init_array(i1_min:i1_max,i2_min:i2_max,i3) = &
-                & init_plane(i1_min:i1_max,i2_min:i2_max)
+        if(i3.ge.i3_min.and.i3.le.i3_max.and. &
+             & i1_lo.le.i1_hi.and.i2_lo.le.i2_hi)then
+           init_array(i1_lo:i1_hi,i2_lo:i2_hi,i3) = &
+                & init_plane(i1_lo:i1_hi,i2_lo:i2_hi)
         end if
      end do
      close(ilun)
@@ -1216,9 +1226,10 @@ subroutine init_refmap_fine(ilevel)
         call MPI_BCAST(init_plane,buf_count,MPI_REAL,0,MPI_COMM_WORLD,info)
 #endif
         if(ncache>0)then
-           if(i3.ge.i3_min.and.i3.le.i3_max)then
-              init_array(i1_min:i1_max,i2_min:i2_max,i3) = &
-                   & init_plane(i1_min:i1_max,i2_min:i2_max)
+           if(i3.ge.i3_min.and.i3.le.i3_max.and. &
+                & i1_lo.le.i1_hi.and.i2_lo.le.i2_hi)then
+              init_array(i1_lo:i1_hi,i2_lo:i2_hi,i3) = &
+                   & init_plane(i1_lo:i1_hi,i2_lo:i2_hi)
            end if
         endif
      end do

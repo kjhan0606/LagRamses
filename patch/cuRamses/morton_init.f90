@@ -63,6 +63,8 @@ subroutine morton_hash_rebuild
      end do
   end do
 
+  morton_hash_epoch = amr_mesh_epoch
+
 end subroutine morton_hash_rebuild
 !################################################################
 !################################################################

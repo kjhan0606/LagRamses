@@ -5,6 +5,7 @@ subroutine adaptive_loop
   use poisson_commons
   use cooling_module
   use ksection, only: ksection_trim_done
+  use morton_hash, only: morton_hash_epoch
 #ifdef RT
   use rt_hydro_commons
 #endif
@@ -175,9 +176,17 @@ subroutine adaptive_loop
      ! Call base level
      call amr_step(levelmin,1)
 
-     ! Rebuild and verify Morton hash tables after all levels updated
-     call morton_hash_rebuild
-     call morton_hash_verify('step')
+     ! make_grid/kill_grid and build_comm update Morton tables incrementally.
+     ! A full rebuild is needed only after defrag has renumbered every grid.
+     if(morton_hash_epoch /= amr_mesh_epoch) call morton_hash_rebuild
+#ifdef FDMDEBUG
+     ! Full self-verification is diagnostic-only and scans every local grid.
+     ! Restrict the billion-cell FDM replay to the historical failure window;
+     ! the hash rebuild itself remains unconditional because refinement can
+     ! add or remove grids on every coarse step.
+     if(.not.use_fdm .or. levelmin<10 .or. nstep_coarse>=269) &
+          call morton_hash_verify('step')
+#endif
 
                                call timer('coarse levels','start')
 

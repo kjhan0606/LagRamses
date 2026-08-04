@@ -66,6 +66,10 @@ subroutine fdm_step(ilevel)
   end if
 
   ! ---- Schrödinger wave solver (existing) ----
+#ifdef FDMDEBUG
+  if(ilevel == levelmin .and. nstep_coarse >= 269) &
+       call fdm_mass_check('fdm-entry',ilevel)
+#endif
   if(fdm_split_order == 4) then
      yw1 = 1.0d0/(2.0d0 - 2.0d0**(1.0d0/3.0d0))
      yw0 = 1.0d0 - 2.0d0*yw1
@@ -81,9 +85,21 @@ subroutine fdm_step(ilevel)
      call fdm_drift(ilevel, 0.5d0*yw1*dt_loc)
   else
      call fdm_drift(ilevel, 0.5d0*dt_loc)
+#ifdef FDMDEBUG
+     if(ilevel == levelmin .and. nstep_coarse >= 269) &
+          call fdm_mass_check('after-drift-1',ilevel)
+#endif
      call timer('fdm-kick','start')
      call fdm_kick(ilevel, dt_loc)
+#ifdef FDMDEBUG
+     if(ilevel == levelmin .and. nstep_coarse >= 269) &
+          call fdm_mass_check('after-kick',ilevel)
+#endif
      call fdm_drift(ilevel, 0.5d0*dt_loc)
+#ifdef FDMDEBUG
+     if(ilevel == levelmin .and. nstep_coarse >= 269) &
+          call fdm_mass_check('after-drift-2',ilevel)
+#endif
   end if
 
   call timer('fdm-ghost','start')
@@ -354,6 +370,7 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
   integer,allocatable,save::pack_slot(:), pack_icell(:), pack_idx3d(:)
   logical,save::cache_done = .false.
   integer,save::cached_ngrid = -1, M_cache = 0
+  integer(i8b),save::cached_mesh_epoch = -1_i8b
 
   ! Locals
   integer::igrid, ngrid_loc, igrid_amr, icell_amr
@@ -362,6 +379,7 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
   integer::info, irank, ip, nreq, dest_rank, x_local
   integer::n_send_total, n_recv_total
   integer::m, slot
+  integer(i8b)::map_bad_loc,map_bad_glob
   integer::slab_x_lo, slab_x_hi
   integer(i8b)::idx_c
   real(dp)::denom, phase, cos_p, sin_p
@@ -582,7 +600,12 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
   ! changed. Stores, in cell-instance order, the absolute sendbuf slot, the
   ! slab idx_3d, and the AMR cell -- everything that does NOT depend on psi.
   ! ================================================================
-  if(.not. cache_done .or. global_changed .or. ngrid_loc /= cached_ngrid) then
+  if(.not. cache_done .or. global_changed .or. ngrid_loc /= cached_ngrid .or. &
+       amr_mesh_epoch /= cached_mesh_epoch) then
+#ifdef FDMDEBUG
+     if(myid == 1) write(*,'(A,I0,A,I0)') ' FDM FFT map rebuild: epoch ', &
+          cached_mesh_epoch, ' -> ', amr_mesh_epoch
+#endif
      if(allocated(pack_slot)) deallocate(pack_slot, pack_icell, pack_idx3d)
      M_cache = ngrid_loc * twotondim
      allocate(pack_slot(M_cache), pack_icell(M_cache), pack_idx3d(M_cache))
@@ -611,8 +634,45 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
         end do
      end do
      deallocate(send_idx)
-     cached_ngrid = ngrid_loc; cache_done = .true.
+     cached_ngrid = ngrid_loc
+     cached_mesh_epoch = amr_mesh_epoch
+     cache_done = .true.
   end if
+
+#ifdef FDMDEBUG
+  ! The cached AMR-cell indices are invalid after defrag even if the local
+  ! grid count and spatial bounds happen to be unchanged.  Validate the
+  ! production failure window so a stale map is caught before corrupting psi.
+  if(nstep_coarse >= 269) then
+     map_bad_loc = 0_i8b
+     m = 0
+     do igrid = 1, ngrid_loc
+        igrid_amr = active(ilevel)%igrid(igrid)
+        Kx = nint(xg(igrid_amr,1) * dble(fft_Nx))
+        Ky = nint(xg(igrid_amr,2) * dble(fft_Ny))
+        Kz = nint(xg(igrid_amr,3) * dble(fft_Nz))
+        do ind = 1, twotondim
+           ix = modulo(Kx - 1 + mod(ind-1,2),     fft_Nx)
+           iy = modulo(Ky - 1 + mod((ind-1)/2,2), fft_Ny)
+           iz = modulo(Kz - 1 + (ind-1)/4,        fft_Nz)
+           dest_rank = min(ix / fftw_block, ncpu-1)
+           x_local = ix - dest_rank * fftw_block
+           idx_3d = x_local * fft_Ny * fft_Nz + iy * fft_Nz + iz
+           iskip = ncoarse + (ind-1)*ngridmax
+           icell_amr = iskip + igrid_amr
+           m = m + 1
+           if(pack_icell(m) /= icell_amr .or. pack_idx3d(m) /= idx_3d) &
+                map_bad_loc = map_bad_loc + 1_i8b
+        end do
+     end do
+     call MPI_ALLREDUCE(map_bad_loc, map_bad_glob, 1, MPI_INTEGER8, &
+          MPI_SUM, MPI_COMM_WORLD, info)
+     if(myid == 1) write(*,'(A,I0,A,I0,A,I0)') &
+          ' FDM FFT map check: step=', nstep_coarse, ' epoch=', &
+          amr_mesh_epoch, ' mismatch=', map_bad_glob
+     if(map_bad_glob /= 0_i8b) call MPI_ABORT(MPI_COMM_WORLD, 913, info)
+  end if
+#endif
 
   ! ================================================================
   ! Pack (idx_3d, psi_re, psi_im) triples via the cached mapping.
@@ -3097,7 +3157,7 @@ end subroutine fdm_diagnostics
 ! Prints total mass and per-level breakdown.
 ! label: short tag identifying the checkpoint location.
 !################################################################
-subroutine fdm_mass_check(label)
+subroutine fdm_mass_check(label,refine_level)
   use amr_commons
   use poisson_commons
   use fdm_commons
@@ -3106,16 +3166,15 @@ subroutine fdm_mass_check(label)
   include 'mpif.h'
 #endif
   character(len=*),intent(in)::label
+  integer,intent(in)::refine_level
   integer::ilevel,igrid,ind,iskip,icell,info
-  real(dp)::mass8_loc,mass8_glob,mass9_loc,mass9_glob
-  real(dp)::psi2,vol8,vol9,total
+  real(dp)::mass_loc(levelmin:nlevelmax),mass_glob(levelmin:nlevelmax)
+  real(dp)::psi2,vol,total
 
-  mass8_loc = 0.0d0
-  mass9_loc = 0.0d0
-  vol8 = (0.5d0**levelmin * boxlen/dble(icoarse_max-icoarse_min+1))**3
-  vol9 = vol8 / 8.0d0
+  mass_loc = 0.0d0
 
-  do ilevel=levelmin,min(levelmin+1,nlevelmax)
+  do ilevel=levelmin,nlevelmax
+     vol = (0.5d0**ilevel * boxlen/dble(icoarse_max-icoarse_min+1))**3
      do ind=1,twotondim
         iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
@@ -3127,11 +3186,7 @@ subroutine fdm_mass_check(label)
               else
                  psi2 = psi_re(icell)**2 + psi_im(icell)**2
               end if
-              if(ilevel == levelmin) then
-                 mass8_loc = mass8_loc + psi2 * vol8
-              else
-                 mass9_loc = mass9_loc + psi2 * vol9
-              end if
+              mass_loc(ilevel) = mass_loc(ilevel) + psi2 * vol
            end if
            igrid = next(igrid)
         end do
@@ -3139,20 +3194,18 @@ subroutine fdm_mass_check(label)
   end do
 
 #ifndef WITHOUTMPI
-  call MPI_ALLREDUCE(mass8_loc, mass8_glob, 1, MPI_DOUBLE_PRECISION, &
-       MPI_SUM, MPI_COMM_WORLD, info)
-  call MPI_ALLREDUCE(mass9_loc, mass9_glob, 1, MPI_DOUBLE_PRECISION, &
+  call MPI_ALLREDUCE(mass_loc, mass_glob, nlevelmax-levelmin+1, &
+       MPI_DOUBLE_PRECISION, &
        MPI_SUM, MPI_COMM_WORLD, info)
 #else
-  mass8_glob = mass8_loc
-  mass9_glob = mass9_loc
+  mass_glob = mass_loc
 #endif
 
-  total = mass8_glob + mass9_glob
+  total = sum(mass_glob)
   if(myid==1) then
-     write(*,'(A,A16,A,ES16.9,A,ES12.5,A,ES12.5)') &
-          ' MCHK:', label, ' tot=', total, &
-          ' L8=', mass8_glob, ' L9=', mass9_glob
+     write(*,'(A,A16,A,I3,A,ES20.12,100(A,I2,A,ES14.6))') &
+          ' MCHK:', label, ' parent=', refine_level, ' total=', total, &
+          (' L',ilevel,'=',mass_glob(ilevel),ilevel=levelmin,nlevelmax)
   end if
 
 end subroutine fdm_mass_check

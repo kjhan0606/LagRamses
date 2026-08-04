@@ -793,3 +793,47 @@ subroutine fdm_diagnostics()
   end if
 
 end subroutine fdm_diagnostics
+!################################################################
+! Debug-only refinement mass accounting.  The caller is guarded by
+! FDMDEBUG, so this collective is absent from production builds.
+!################################################################
+subroutine fdm_mass_check(label,refine_level)
+  use amr_commons
+  use poisson_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  character(len=*),intent(in)::label
+  integer,intent(in)::refine_level
+  integer::ilevel,igrid,ind,iskip,icell,info
+  real(dp)::mass_loc(levelmin:nlevelmax),mass_glob(levelmin:nlevelmax)
+  real(dp)::psi2,vol,total
+
+  mass_loc=0.0d0
+  do ilevel=levelmin,nlevelmax
+     vol=(0.5d0**ilevel*boxlen/dble(icoarse_max-icoarse_min+1))**3
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        igrid=headl(myid,ilevel)
+        do while(igrid>0)
+           icell=igrid+iskip
+           if(son(icell)==0)then
+              psi2=psi_re(icell)**2+psi_im(icell)**2
+              mass_loc(ilevel)=mass_loc(ilevel)+psi2*vol
+           end if
+           igrid=next(igrid)
+        end do
+     end do
+  end do
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(mass_loc,mass_glob,nlevelmax-levelmin+1, &
+       MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+  mass_glob=mass_loc
+#endif
+  total=sum(mass_glob)
+  if(myid==1)write(*,'(A,A16,A,I3,A,ES20.12,100(A,I2,A,ES14.6))') &
+       ' MCHK:',label,' parent=',refine_level,' total=',total, &
+       (' L',ilevel,'=',mass_glob(ilevel),ilevel=levelmin,nlevelmax)
+end subroutine fdm_mass_check

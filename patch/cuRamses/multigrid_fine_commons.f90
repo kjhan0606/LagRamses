@@ -61,7 +61,7 @@ subroutine multigrid_fine(ilevel,icount)
    real(kind=8) :: debug_norm2, debug_norm2_tot
    real(kind=8) :: err, last_err
 
-   logical :: allmasked, allmasked_tot
+   logical :: allmasked, allmasked_tot, use_restored_phi
 
    ! FFT direct solve variables (shared by FFTW3 and cuFFT)
    logical :: is_uniform_fft
@@ -86,7 +86,15 @@ subroutine multigrid_fine(ilevel,icount)
    ! Prepare first guess, mask and BCs at finest level
    ! ---------------------------------------------------------------------
 
-   if(ilevel>levelmin)then
+   use_restored_phi=.false.
+   if(allocated(phi_restart_available))then
+      use_restored_phi=phi_restart_available(ilevel)
+   endif
+   if(use_restored_phi)then
+      phi_restart_available(ilevel)=.false.
+      if(myid==1)write(*,'(A,I3)') &
+           ' Poisson warm start from restored phi at level ',ilevel
+   else if(ilevel>levelmin)then
       call make_initial_phi(ilevel,icount)         ! Interpolate phi down
    else
       call make_multipole_phi(ilevel)       ! Fill with simple initial guess

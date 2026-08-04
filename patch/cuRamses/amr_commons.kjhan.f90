@@ -15,6 +15,7 @@ module amr_commons
   integer::nflag,ncreate,nkill                  ! Refinements
   integer::ncoarse                              ! nx.ny.nz
   integer::ngrid_current                        ! Actual number of octs
+  integer(i8b)::amr_mesh_epoch=0_i8b            ! Incremented whenever defrag renumbers grids
 
   real(dp)::emag_tot=0.0D0                      ! Total magnetic energy
   real(dp)::ekin_tot=0.0D0                      ! Total kinetic energy
@@ -184,4 +185,3 @@ module amr_commons
   real(dp)::units_length=1.0   ! [cm]
 
 end module amr_commons
-

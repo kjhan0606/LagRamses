@@ -477,7 +477,7 @@ subroutine cmp_new_cpu_map
   integer::ncode,bit_length,ilevel,i,ind,idim
   integer::nx_loc,ny_loc,nz_loc,nfar
   integer::info,icpu,jcpu,isub,idom,jdom
-  integer::nxny,ix,iy,iz,iskip
+  integer::nxny,ix,iy,iz,iskip,ilo,ihi,imid
   integer::ind_long
   integer::isink,igrid_sink,ind_sink,icell_sink,isubcell_sink
   integer,dimension(1:nvector)::ind_grid,ind_cell
@@ -534,6 +534,9 @@ subroutine cmp_new_cpu_map
   integer::lb_incoming,lb_free_slots,lb_allowed,lb_target_cpu,lb_limit_iter
   real(kind=8)::lb_fraction_local,lb_fraction_global
   logical::lb_boundary_limited
+#ifndef WITHOUTMPI
+  real(dp)::tcmp_start,tcmp_key,tcmp_sort,tcmp_bound,tcmp_map,tcmp_virtual
+#endif
 
   ! Local constants
   nxny=nx*ny
@@ -616,6 +619,15 @@ subroutine cmp_new_cpu_map
 
   if(verbose) print *,"Entering cmp_new_cpu_map"
 
+#ifndef WITHOUTMPI
+  tcmp_start=MPI_WTIME()
+  tcmp_key=tcmp_start
+  tcmp_sort=tcmp_start
+  tcmp_bound=tcmp_start
+  tcmp_map=tcmp_start
+  tcmp_virtual=tcmp_start
+#endif
+
   if(.not.use_cpubox_decomp) then      ! begin if not bisection/ksection
 
   ! Build per-grid sink particle count for cost weighting
@@ -672,7 +684,11 @@ subroutine cmp_new_cpu_map
         xx(1,3)=(dble(iz)+0.5d0-dble(kcoarse_min))*scale
 #endif
         call cmp_minmaxorder(xx,order_min,order_max,dx,ncell_loc)
-        call cmp_dommap(xx,dom,ncell_loc)
+        if(overload>1)then
+           call cmp_dommap(xx,dom,ncell_loc)
+        else
+           dom(1)=1
+        end if
         ncell=ncell+1
         isub=(dom(1)-1)/ncpu+1
         ncell_sub(isub)=ncell_sub(isub)+1
@@ -735,7 +751,11 @@ subroutine cmp_new_cpu_map
            end do
            if(ncell_loc>0)then
               call cmp_minmaxorder(xx,order_min,order_max,dx*scale,ncell_loc)
-              call cmp_dommap(xx,dom,ncell_loc)
+              if(overload>1)then
+                 call cmp_dommap(xx,dom,ncell_loc)
+              else
+                 dom(1:ncell_loc)=1
+              end if
            end if
            ! Reserve batch of indices atomically
            batch_size=ncell_loc
@@ -796,6 +816,10 @@ subroutine cmp_new_cpu_map
   !$OMP END CRITICAL(merge_remap_cost)
   !$OMP END PARALLEL
 
+#ifndef WITHOUTMPI
+  tcmp_key=MPI_WTIME()
+#endif
+
   ! Clean up sink cost array
   if(allocated(sink_per_grid)) deallocate(sink_per_grid)
 
@@ -807,6 +831,10 @@ subroutine cmp_new_cpu_map
   ! Sort ordering key and store new index in flag2
   !------------------------------------------------
   if (ncell>0) call quick_sort_omp(hilbert_key(1),flag2(1),ncell)
+
+#ifndef WITHOUTMPI
+  tcmp_sort=MPI_WTIME()
+#endif
 
   !-----------------------------
   ! Balance cost across cpus
@@ -1053,6 +1081,10 @@ subroutine cmp_new_cpu_map
      call build_ksection(update=.true.)
   end if   ! end if not bisection/ksection
 
+#ifndef WITHOUTMPI
+  tcmp_bound=MPI_WTIME()
+#endif
+
   ! Reset time-based load balancing accumulators (ksection/bisection path)
   if(use_cpubox_decomp) then
      level_time_loc = 0d0
@@ -1087,12 +1119,17 @@ subroutine cmp_new_cpu_map
      if(.not.use_cpubox_decomp) then
         call cmp_ordering(xx,order_max,ncell_loc)
         cpu_map2(ind)=ncpu ! default value
-        do idom=1,ndomain
-           if( order_max(1).ge.bound_key2(idom-1).and. &
-                & order_max(1).lt.bound_key2(idom))then
-              cpu_map2(ind)=mod(idom-1,ncpu)+1
-           endif
+        ilo=1
+        ihi=ndomain
+        do while(ilo<ihi)
+           imid=(ilo+ihi)/2
+           if(order_max(1)<bound_key2(imid))then
+              ihi=imid
+           else
+              ilo=imid+1
+           end if
         end do
+        cpu_map2(ind)=mod(ilo-1,ncpu)+1
      else if(ordering=='bisection') then
         xx_tmp(1,:) = xx(1,:)
         call cmp_bisection_cpumap(xx_tmp,c_tmp,1)
@@ -1124,7 +1161,8 @@ subroutine cmp_new_cpu_map
      ncache=active(ilevel)%ngrid
      ! Loop over grids by vector sweeps (OMP parallelized)
      !$OMP PARALLEL DO DEFAULT(SHARED) &
-     !$OMP PRIVATE(igrid,ngrid,ind_grid,ind_cell,xx,order_max,i,ind,iskip,idim,idom,xx_tmp,c_tmp,c_tmp_v) &
+     !$OMP PRIVATE(igrid,ngrid,ind_grid,ind_cell,xx,order_max,i,ind,iskip,idim,idom, &
+     !$OMP         ilo,ihi,imid,xx_tmp,c_tmp,c_tmp_v) &
      !$OMP SCHEDULE(DYNAMIC,4)
      do igrid=1,ncache,nvector
         ! Gather nvector grids
@@ -1146,13 +1184,17 @@ subroutine cmp_new_cpu_map
            if(.not.use_cpubox_decomp) then
               if(ngrid>0)call cmp_ordering(xx,order_max,ngrid)
               do i=1,ngrid
-                 cpu_map2(ind_cell(i))=ncpu ! default value
-                 do idom=1,ndomain
-                    if( order_max(i).ge.bound_key2(idom-1).and. &
-                         & order_max(i).lt.bound_key2(idom))then
-                       cpu_map2(ind_cell(i))=mod(idom-1,ncpu)+1
-                    endif
+                 ilo=1
+                 ihi=ndomain
+                 do while(ilo<ihi)
+                    imid=(ilo+ihi)/2
+                    if(order_max(i)<bound_key2(imid))then
+                       ihi=imid
+                    else
+                       ilo=imid+1
+                    end if
                  end do
+                 cpu_map2(ind_cell(i))=mod(ilo-1,ncpu)+1
               end do
            else if(ordering=='bisection') then
               do i=1,ngrid
@@ -1261,11 +1303,25 @@ subroutine cmp_new_cpu_map
      end if
   end if
 
+#ifndef WITHOUTMPI
+  tcmp_map=MPI_WTIME()
+#endif
+
   ! Update virtual boundaries for new cpu map
   call make_virtual_coarse_int(cpu_map2(1))
   do ilevel=1,nlevelmax
      call make_virtual_fine_int(cpu_map2(1),ilevel)
   end do 
+
+#ifndef WITHOUTMPI
+  tcmp_virtual=MPI_WTIME()
+  if(myid==1)then
+     write(*,'(A,A,A,5(F9.3,A))') ' cmp_new_cpu_map stages [',trim(ordering), &
+          ']: key/cost=',tcmp_key-tcmp_start,' s sort=',tcmp_sort-tcmp_key, &
+          ' s boundary=',tcmp_bound-tcmp_sort,' s cpumap=',tcmp_map-tcmp_bound, &
+          ' s virtual=',tcmp_virtual-tcmp_map,' s'
+  end if
+#endif
 
 end subroutine cmp_new_cpu_map
 !#########################################################################
@@ -1282,19 +1338,23 @@ subroutine cmp_cpumap(x,c,nn)
   integer ,dimension(1:nvector)::c
   real(dp),dimension(1:nvector,1:ndim)::x
 
-  integer::i,idom
+  integer::i,ilo,ihi,imid
   real(qdp),dimension(1:nvector)::order
 
   if(.not.use_cpubox_decomp) then
      call cmp_ordering(x,order,nn)
      do i=1,nn
-        c(i)=ndomain ! default value
-        do idom=1,ndomain
-           if(    order(i).ge.bound_key(idom-1).and. &
-                & order(i).lt.bound_key(idom  ))then
-              c(i)=idom
-           endif
+        ilo=1
+        ihi=ndomain
+        do while(ilo<ihi)
+           imid=(ilo+ihi)/2
+           if(order(i)<bound_key(imid))then
+              ihi=imid
+           else
+              ilo=imid+1
+           end if
         end do
+        c(i)=ilo
      end do
      do i=1,nn
         c(i)=MOD(c(i)-1,ncpu)+1
@@ -1319,18 +1379,22 @@ subroutine cmp_dommap(x,c,nn)
   integer ,dimension(1:nvector)::c
   real(dp),dimension(1:nvector,1:ndim)::x
 
-  integer::i,idom
+  integer::i,ilo,ihi,imid
   real(qdp),dimension(1:nvector)::order
 
   call cmp_ordering(x,order,nn)
   do i=1,nn
-     c(i)=ndomain ! default value
-     do idom=1,ndomain
-        if(    order(i).ge.bound_key(idom-1).and. &
-             & order(i).lt.bound_key(idom  ))then
-           c(i)=idom
-        endif
+     ilo=1
+     ihi=ndomain
+     do while(ilo<ihi)
+        imid=(ilo+ihi)/2
+        if(order(i)<bound_key(imid))then
+           ihi=imid
+        else
+           ilo=imid+1
+        end if
      end do
+     c(i)=ilo
   end do
   
 end subroutine cmp_dommap
@@ -2174,6 +2238,9 @@ subroutine defrag
   end do
 
   ngrid_current=ngrid2
+  ! Cached cell-index maps (notably the distributed FDM FFT pack map) must
+  ! never survive grid renumbering, even when local counts and bounds match.
+  amr_mesh_epoch=amr_mesh_epoch+1_i8b
 
 #ifndef WITHOUTMPI
   t_defrag_end = MPI_WTIME()
