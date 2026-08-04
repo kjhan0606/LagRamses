@@ -1267,7 +1267,9 @@ end subroutine scalar_solver_abort
 !  between solves); the correction is ADDED to scalar_gr.
 !  Discrete 7-point eigenvalues match the GS stencil.
 !  Strategy: retain the single-rank local FFT reference path through
-!  256^3 and use FFTW-MPI x-slabs on multi-rank runs through 512^3.
+!  256^3.  Multi-rank runs reuse the production base-Poisson FFTW-MPI+OMP
+!  engine, including its in-place transposed plan and sparse slab exchange;
+!  the distributed path has no physics-motivated mesh-size ceiling.
 !#########################################################
 logical function level_fft_ok(ilevel)
   use amr_commons
@@ -1277,10 +1279,11 @@ logical function level_fft_ok(ilevel)
   level_fft_ok = .false.
   if(ilevel /= levelmin) return
   ntot = int(nx,8)*int(ny,8)*int(nz,8)*(int(2,8)**(3*ilevel))
-  ! The local FFT path is capped at 256^3.  Above that size the
-  ! distributed FFTW-MPI path is mandatory.
-  if(ntot > 134217728_8) return  ! > 512^3 is outside the validated range
-  if(ntot > 16777216_8 .and. ncpu <= 1) return
+  ! The local path replicates the complete transform and remains capped at
+  ! 256^3.  Multi-rank jobs use the shared distributed Poisson FFT engine.
+  if(ncpu <= 1) then
+     if(ntot > 16777216_8) return
+  end if
   level_fft_ok = .true.
 end function level_fft_ok
 
@@ -1317,12 +1320,12 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
   integer,parameter::FFTW_EST=64
 
 #ifdef USE_FFTW
-  ! Avoid replicating a full scalar grid and identical serial transforms on
-  ! every rank.  The MPI slab path is also what makes a 512^3 uniform level
-  ! memory-feasible.  Keep the single-rank local implementation below as a
-  ! fallback and reference path.
+  ! Reuse the production Poisson FFTW-MPI+OMP engine on multi-rank jobs.
+  ! This shares its in-place transposed plans, sparse slab communication and
+  ! validated 1024^3 path.  Keep the single-rank local implementation below
+  ! only as a compact reference path.
   if(ncpu > 1) then
-     call level_fft_helmholtz_mpi(ilevel,m2,step_frac,relax)
+     call fftw_scalar_solve_uniform(ilevel,m2,step_frac,relax)
      return
   end if
 #endif
@@ -2890,7 +2893,7 @@ subroutine nDGP_solve_level(ilevel, icount)
 #endif
   integer,intent(in)::ilevel, icount
 
-  integer::iter,ncache,info
+  integer::iter,ncache,info,gs_iter_max
   real(dp)::beta
   real(dp)::nDGP_beta  ! external function
   real(dp)::res_max_local,res_max_global
@@ -2898,6 +2901,7 @@ subroutine nDGP_solve_level(ilevel, icount)
   real(dp)::rel_res,fft_rel
   logical::converged
 #ifdef USE_FFTW
+  logical::fft_attempted
   logical,external::level_fft_ok
 #endif
 
@@ -2920,13 +2924,18 @@ subroutine nDGP_solve_level(ilevel, icount)
 
   converged = .false.
 #ifdef USE_FFTW
+  fft_attempted = .false.
   ! Operator-split spectral solve on the uniform domain level
   if(level_fft_ok(ilevel)) then
+     fft_attempted = .true.
      call vain_prepare_uniform_cache(ilevel)
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
      do iter=1,50
         call vain_build_fft_rhs(ilevel, omega_m*aexp/beta, &
              & 1d0/(12d0*omega_rc*beta*aexp**4), .false., fft_rel)
+        if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+             & ' nDGP level ',ilevel,' FFT iteration ',iter-1, &
+             & ' residual=',fft_rel
         if(fft_rel < nDGP_eps) then
            converged=.true.
            if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
@@ -2938,11 +2947,38 @@ subroutine nDGP_solve_level(ilevel, icount)
         call make_virtual_fine_dp(scalar_gr(1), ilevel)
      end do
   end if
+
+  ! On the fully refined periodic base level the distributed spectral
+  ! solver is the production algorithm.  Silently starting thousands of
+  ! global Newton-GS sweeps after a failed FFT iteration made 1024^3 runs
+  ! look hung while consuming an entire node.  Strict production runs now
+  ! stop with the last residual; non-strict diagnostic runs retain only a
+  ! bounded GS safety path below.
+  if(ilevel==levelmin .and. .not.fft_attempted .and. scalar_solver_strict) then
+     if(myid==1) write(*,'(A,I2,A)') &
+          & ' ERROR: nDGP level ',ilevel, &
+          & ' scalar FFT unavailable for this MPI layout; refusing global GS fallback'
+     call scalar_solver_abort
+  end if
+  if(fft_attempted .and. .not.converged .and. scalar_solver_strict) then
+     if(myid==1) write(*,'(A,I2,A,ES10.3)') &
+          & ' ERROR: nDGP level ',ilevel, &
+          & ' scalar FFT failed; refusing global GS fallback, residual=',fft_rel
+     call scalar_solver_abort
+  end if
 #endif
 
   ! Newton-GS relaxation
+  gs_iter_max=n_iter_nDGP
+#ifdef USE_FFTW
+  if(fft_attempted) gs_iter_max=min(gs_iter_max,100)
+#endif
   if(.not.converged) then
-  do iter=1,n_iter_nDGP
+  do iter=1,gs_iter_max
+
+     if(myid==1 .and. (iter==1 .or. mod(iter,10)==0)) &
+          & write(*,'(A,I2,A,I5,A,I5)') ' nDGP level ',ilevel, &
+          & ' starting GS iteration ',iter,' / ',gs_iter_max
 
      call nDGP_gauss_seidel(ilevel, beta, res_max_local, src_max_local)
 
@@ -2976,7 +3012,7 @@ subroutine nDGP_solve_level(ilevel, icount)
   if(.not. converged) then
      if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
           & ' WARNING: nDGP level ',ilevel,' NOT converged after ', &
-          & n_iter_nDGP,' iters, res=',rel_res
+          & gs_iter_max,' iters, res=',rel_res
      if(scalar_solver_strict) call scalar_solver_abort
   end if
 

@@ -2971,6 +2971,23 @@ end subroutine fft_poisson_solve_uniform
 ! ########################################################################
 
 subroutine fftw_poisson_solve_uniform(ilevel, icount)
+   use amr_commons, only: dp
+   implicit none
+   integer,intent(in)::ilevel,icount
+
+   call fftw_uniform_solve_engine(ilevel,icount,0,0d0,0d0,1d0)
+end subroutine fftw_poisson_solve_uniform
+
+subroutine fftw_scalar_solve_uniform(ilevel,m2,step_frac,relax)
+   use amr_commons, only: dp
+   implicit none
+   integer,intent(in)::ilevel
+   real(dp),intent(in)::m2,step_frac,relax
+
+   call fftw_uniform_solve_engine(ilevel,0,1,m2,step_frac,relax)
+end subroutine fftw_scalar_solve_uniform
+
+subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax)
    use amr_commons
    use poisson_commons
    use poisson_parameters
@@ -2986,7 +3003,8 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
 #endif
    include 'fftw3-mpi.f03'
 
-   integer, intent(in) :: ilevel, icount
+   integer, intent(in) :: ilevel,icount,solve_mode
+   real(dp),intent(in)::m2,step_frac,relax
 
    ! === Grid dimensions ===
    integer :: fft_Nx, fft_Ny, fft_Nz
@@ -3034,7 +3052,7 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
    integer :: Kx, Ky, Kz
    integer :: info, ierr
    integer :: kx_i, ky_i, kz_i
-   real(dp) :: denom, twopi
+   real(dp) :: denom, twopi, scalar_green, uold, du
    integer(i8b) :: idx_c
 
    ! Neutrino linear response variables
@@ -3080,8 +3098,8 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
    twopi   = 2.0d0 * acos(-1.0d0)
    use_distributed = (N_total >= 256_i8b**3 .and. ncpu > 1)
 
-   if(myid==1) write(*,'(A,I3,A,I5,A,I5,A,I5,A,I15,A,L1)') &
-        ' FFTW3 Poisson: level=', ilevel, &
+   if(myid==1) write(*,'(A,A,A,I3,A,I5,A,I5,A,I5,A,I15,A,L1)') &
+        ' FFTW3 ',merge('scalar ','Poisson',solve_mode==1),': level=',ilevel, &
         ' grid=', fft_Nx, 'x', fft_Ny, 'x', fft_Nz, &
         ' N=', N_total, ' distributed=', use_distributed
 
@@ -3480,8 +3498,12 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
             iskip = ncoarse + (ind - 1) * ngridmax
             icell_amr = iskip + igrid_amr
 
-            sendbuf(2*send_idx(dest_rank))     = dble(idx_3d)
-            sendbuf(2*send_idx(dest_rank) + 1) = fourpi_fft * (rho(icell_amr) - rho_tot)
+            sendbuf(2*send_idx(dest_rank)) = dble(idx_3d)
+            if(solve_mode==0) then
+               sendbuf(2*send_idx(dest_rank)+1)=fourpi_fft*(rho(icell_amr)-rho_tot)
+            else
+               sendbuf(2*send_idx(dest_rank)+1)=scalar_gr_old(icell_amr)
+            end if
             send_idx(dest_rank) = send_idx(dest_rank) + 1
          end do
       end do
@@ -3547,7 +3569,22 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
       ! TRANSPOSED complex layout (Ny-distributed):
       !   idx_c = ky_local*(Nx*(Nz/2+1)) + kx*(Nz/2+1) + kz, ky = ny_start+ky_local
       N_complex = int(local_ny_fftw,i8b) * int(fft_Nx,i8b) * int(fft_Nz/2+1,i8b)
-      if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb &
+      if(solve_mode==1) then
+         do idx_c=0,N_complex-1
+            ky_i=int(ny_start_fftw)+int(idx_c/(int(fft_Nx,i8b)*int(fft_Nz/2+1,i8b)))
+            kx_i=int(mod(idx_c/int(fft_Nz/2+1,i8b),int(fft_Nx,i8b)))
+            kz_i=int(mod(idx_c,int(fft_Nz/2+1,i8b)))
+            denom=2d0*(cos(twopi*dble(kx_i)/dble(fft_Nx)) &
+                 +cos(twopi*dble(ky_i)/dble(fft_Ny)) &
+                 +cos(twopi*dble(kz_i)/dble(fft_Nz))-3d0)-m2*dx2_fft
+            if(abs(denom)>1d-30) then
+               scalar_green=dx2_fft/denom
+            else
+               scalar_green=0d0
+            end if
+            cdata_fftw(idx_c+1)=cdata_fftw(idx_c+1)*scalar_green
+         end do
+      else if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb &
            & .or. (use_horndeski .and. hs_mass > 0.0d0)) then
          mu_a_hs = horndeski_mu_of_a(aexp)
          if(use_neutrino .and. omega_nu > 0.0d0) omega_cb_loc = omega_m - omega_nu
@@ -3661,7 +3698,15 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
             iskip = ncoarse + (ind - 1) * ngridmax
             icell_amr = iskip + igrid_amr
 
-            phi(icell_amr) = sendbuf(2*send_idx(dest_rank) + 1)
+            if(solve_mode==0) then
+               phi(icell_amr)=sendbuf(2*send_idx(dest_rank)+1)
+            else
+               uold=scalar_gr(icell_amr)
+               du=relax*sendbuf(2*send_idx(dest_rank)+1)
+               if(step_frac>0d0 .and. abs(uold)>0d0) &
+                    du=max(-step_frac*abs(uold),min(step_frac*abs(uold),du))
+               scalar_gr(icell_amr)=uold+du
+            end if
             send_idx(dest_rank) = send_idx(dest_rank) + 1
          end do
       end do
@@ -3710,8 +3755,12 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
             icell_amr = iskip + igrid_amr
 
             fft_map(idx_3d) = icell_amr
-            ! Use un-boosted fourpi (corrections in Green's function)
-            rhs_local(idx_3d) = fourpi_fft * (rho(icell_amr) - rho_tot)
+            if(solve_mode==0) then
+               ! Use un-boosted fourpi (corrections in Green's function)
+               rhs_local(idx_3d)=fourpi_fft*(rho(icell_amr)-rho_tot)
+            else
+               rhs_local(idx_3d)=scalar_gr_old(icell_amr)
+            end if
          end do
       end do
 
@@ -3742,7 +3791,22 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
 
       ! --- Step 4: Apply Green's function (+ neutrino/DE corrections) ---
       N_complex = int(fft_Nx,i8b) * int(fft_Ny,i8b) * int(fft_Nz/2+1,i8b)
-      if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb &
+      if(solve_mode==1) then
+         do idx_c=0,N_complex-1
+            kx_i=int(idx_c/(int(fft_Ny,i8b)*int(fft_Nz/2+1,i8b)))
+            ky_i=int(mod(idx_c/int(fft_Nz/2+1,i8b),int(fft_Ny,i8b)))
+            kz_i=int(mod(idx_c,int(fft_Nz/2+1,i8b)))
+            denom=2d0*(cos(twopi*dble(kx_i)/dble(fft_Nx)) &
+                 +cos(twopi*dble(ky_i)/dble(fft_Ny)) &
+                 +cos(twopi*dble(kz_i)/dble(fft_Nz))-3d0)-m2*dx2_fft
+            if(abs(denom)>1d-30) then
+               scalar_green=dx2_fft/denom
+            else
+               scalar_green=0d0
+            end if
+            cdata(idx_c)=cdata(idx_c)*scalar_green
+         end do
+      else if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb &
            & .or. (use_horndeski .and. hs_mass > 0.0d0)) then
          mu_a_hs = horndeski_mu_of_a(aexp)
          if(use_neutrino .and. omega_nu > 0.0d0) omega_cb_loc = omega_m - omega_nu
@@ -3807,12 +3871,22 @@ subroutine fftw_poisson_solve_uniform(ilevel, icount)
       ! --- Step 7: Scatter to phi via fft_map ---
       do idx_3d = 0, int(N_total-1)
          icell_amr = fft_map(idx_3d)
-         if(icell_amr > 0) phi(icell_amr) = rhs_3d(idx_3d)
+         if(icell_amr>0) then
+            if(solve_mode==0) then
+               phi(icell_amr)=rhs_3d(idx_3d)
+            else
+               uold=scalar_gr(icell_amr)
+               du=relax*rhs_3d(idx_3d)
+               if(step_frac>0d0 .and. abs(uold)>0d0) &
+                    du=max(-step_frac*abs(uold),min(step_frac*abs(uold),du))
+               scalar_gr(icell_amr)=uold+du
+            end if
+         end if
       end do
 
    end if  ! use_distributed
 
-end subroutine fftw_poisson_solve_uniform
+end subroutine fftw_uniform_solve_engine
 #endif
 
 ! ########################################################################
