@@ -1308,6 +1308,37 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   ! Initialize m_refine_eff from m_refine (FPR adjusts at runtime)
   m_refine_eff = m_refine
 
+  ! Validate the opt-in mesh-level floor for the void target.  Refining a
+  ! level creates cells at ilevel+1, hence the geometric region must be
+  ! defined from levelmin through void_refine_min_level-1.
+  if(void_refine)then
+     if(void_refine_min_level<=levelmin)then
+        if(myid==1)write(*,*)'Error in the namelist:'
+        if(myid==1)write(*,*)'void_refine_min_level must exceed levelmin'
+        nml_ok=.false.
+     else if(void_refine_min_level>nlevelmax)then
+        if(myid==1)write(*,*)'Error in the namelist:'
+        if(myid==1)write(*,*)'void_refine_min_level must not exceed levelmax'
+        nml_ok=.false.
+     else
+        do i=levelmin,void_refine_min_level-1
+           if(r_refine(i)<=0.0d0)then
+              if(myid==1)write(*,*)'Error in the namelist:'
+              if(myid==1)write(*,*)'void refinement requires r_refine>0 at level ',i
+              nml_ok=.false.
+           end if
+           if(a_refine(i)<=0.0d0 .or. b_refine(i)<=0.0d0 .or. exp_refine(i)<=0.0d0)then
+              if(myid==1)write(*,*)'Error in the namelist:'
+              if(myid==1)write(*,*)'void refinement shape parameters must be positive at level ',i
+              nml_ok=.false.
+           end if
+        end do
+        if(myid==1 .and. nml_ok)then
+           write(*,'(A,I3)')' Void refinement floor enabled at level ',void_refine_min_level
+        end if
+     end if
+  end if
+
   if(.not. nml_ok)then
      if(myid==1)write(*,*)'Too many errors in the namelist'
      if(myid==1)write(*,*)'Aborting...'

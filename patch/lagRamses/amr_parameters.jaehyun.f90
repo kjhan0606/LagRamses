@@ -556,7 +556,7 @@ module amr_parameters
 
   ! Refinement parameters for each level
   real(dp),dimension(1:MAXLEVEL)::m_refine =-1.0 ! Lagrangian threshold
-  real(dp),dimension(1:MAXLEVEL)::r_refine =-1.0 ! Radius of refinement region
+  real(dp),dimension(1:MAXLEVEL)::r_refine =-1.0 ! Diameter of refinement region
   real(dp),dimension(1:MAXLEVEL)::x_refine = 0.0 ! Center of refinement region
   real(dp),dimension(1:MAXLEVEL)::y_refine = 0.0 ! Center of refinement region
   real(dp),dimension(1:MAXLEVEL)::z_refine = 0.0 ! Center of refinement region
@@ -567,6 +567,8 @@ module amr_parameters
   real(dp)::mass_cut_refine=-1.0 ! Mass threshold for particle-based refinement
   integer::ivar_refine=-1 ! Variable index for refinement
   logical::sink_refine=.false. ! Fully refine on sink particles
+  logical::void_refine=.false. ! Enforce a mesh-level floor inside r_refine
+  integer::void_refine_min_level=-1 ! Target minimum level inside the void region
   real(dp),dimension(1:MAXLEVEL)::m_basic_refine=-1 ! Lagrangian threshold default ! (ONS)  
   real(dp)::m_refine_effective = 10000 ! (ONS)
   logical::q_refine_holdback=.true. !(ONS) ! default to the original form
