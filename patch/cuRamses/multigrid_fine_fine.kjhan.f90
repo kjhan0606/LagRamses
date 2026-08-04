@@ -147,6 +147,9 @@ subroutine cmp_residual_mg_fine(ilevel)
    integer  :: ind, igrid_mg, idim, inbor
    integer  :: igrid_amr, icell_amr, iskip_amr
    integer  :: igshift, igrid_nbor_amr, icell_nbor_amr
+#ifdef FDMDEBUG
+   integer(kind=8) :: residual_clock0, residual_clock1, residual_clock_rate
+#endif
 
    real(dp) :: dtwondim = (twondim)
 
@@ -163,13 +166,18 @@ subroutine cmp_residual_mg_fine(ilevel)
 
    ngrid=active(ilevel)%ngrid
 
-   ! Loop over cells
+#ifdef FDMDEBUG
+   call system_clock(residual_clock0, residual_clock_rate)
+#endif
+
+   ! Boundary cells take the checked Morton path while interior cells use
+   ! the fast path.  Guided chunks balance that variable cost without a
+   ! compact work array or per-cell flattening arithmetic.
 !$omp parallel default(firstprivate) shared(active,flag2,son,phi,f)
    do ind=1,twotondim
       iskip_amr = ncoarse+(ind-1)*ngridmax
 
-      ! Loop over active grids
-!$omp do
+!$omp do schedule(guided,256)
       do igrid_mg=1,ngrid
          igrid_amr = active(ilevel)%igrid(igrid_mg)
          icell_amr = iskip_amr + igrid_amr
@@ -227,9 +235,17 @@ subroutine cmp_residual_mg_fine(ilevel)
          ! Store ***MINUS THE RESIDUAL*** in f(:,1), using BC-modified RHS
          f(icell_amr,1) = -oneoverdx2*( nb_sum - dtwondim*phi_c )+f(icell_amr,2)
       end do
-!$omp end do
+!$omp end do nowait
    end do
 !$omp end parallel
+
+#ifdef FDMDEBUG
+   call system_clock(residual_clock1)
+   if(myid==1) write(*,'(A,I3,A,I12,A,F10.4,A)') &
+        ' MG residual profile: level=',ilevel,' cells=', &
+        int(ngrid,kind=8)*int(twotondim,kind=8),' wall=', &
+        dble(residual_clock1-residual_clock0)/dble(residual_clock_rate),' s'
+#endif
 
 end subroutine cmp_residual_mg_fine
 
@@ -335,6 +351,9 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
    integer  :: ind, ind0, igrid_mg, idim, inbor
    integer  :: igrid_amr, icell_amr, iskip_amr
    integer  :: igshift, igrid_nbor_amr, icell_nbor_amr
+#ifdef FDMDEBUG
+   integer(kind=8) :: smooth_clock0, smooth_clock1, smooth_clock_rate
+#endif
 
    real(dp) :: dtwondim = (twondim)
 
@@ -356,9 +375,13 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
    iii(3,2,1:8)=(/0,0,0,0,6,6,6,6/); jjj(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
 
    ngrid=active(ilevel)%ngrid
-   ! Loop over cells, with red/black ordering
+#ifdef FDMDEBUG
+   call system_clock(smooth_clock0, smooth_clock_rate)
+#endif
+   ! Cells within one red or black color do not share faces.  Guided chunks
+   ! distribute the checked boundary path without allocating a work buffer.
 !$omp parallel default(firstprivate) shared(active,flag2,son,phi,f,safe_mode)
-   do ind0=1,twotondim/2      ! Only half of the cells for a red or black sweep
+   do ind0=1,twotondim/2
       if(redstep) then
          ind = ired  (ndim,ind0)
       else
@@ -367,8 +390,7 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
 
       iskip_amr = ncoarse+(ind-1)*ngridmax
 
-      ! Loop over active grids
-!$omp do
+!$omp do schedule(guided,256)
       do igrid_mg=1,ngrid
          igrid_amr = active(ilevel)%igrid(igrid_mg)
          icell_amr = iskip_amr + igrid_amr
@@ -441,6 +463,13 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
 !$omp end do nowait
    end do
 !$omp end parallel
+#ifdef FDMDEBUG
+   call system_clock(smooth_clock1)
+   if(myid==1) write(*,'(A,I3,A,L1,A,I12,A,F10.4,A)') &
+        ' MG smooth profile: level=',ilevel,' red=',redstep,' cells=', &
+        int(ngrid,kind=8)*int(twotondim/2,kind=8),' wall=', &
+        dble(smooth_clock1-smooth_clock0)/dble(smooth_clock_rate),' s'
+#endif
 end subroutine gauss_seidel_mg_fine
 
 ! ------------------------------------------------------------------------
@@ -688,6 +717,9 @@ subroutine set_scan_flag_fine(ilevel)
    integer :: iskip_amr, icell_amr, icell_nbor_amr
 
    integer, dimension(1:3,1:2,1:8) :: iii, jjj
+#ifdef FDMDEBUG
+   integer(kind=8) :: scan_clock0, scan_clock1, scan_clock_rate
+#endif
 
    iii(1,1,1:8)=(/1,0,1,0,1,0,1,0/); jjj(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
    iii(1,2,1:8)=(/0,2,0,2,0,2,0,2/); jjj(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -698,10 +730,20 @@ subroutine set_scan_flag_fine(ilevel)
 
    ngrid = active(ilevel)%ngrid
 
-   ! Loop over cells and set fine SCAN flag
+#ifdef FDMDEBUG
+   call system_clock(scan_clock0, scan_clock_rate)
+#endif
+
+   ! Loop over cells and set fine SCAN flag.  Every (ind,igrid_mg) pair
+   ! updates a distinct flag2 cell and all Morton/hash accesses are read-only,
+   ! so this scan needs neither an atomic nor a thread-private cell buffer.
+   ! The guided chunks absorb the variable cost of masked/boundary cells.
+!$omp parallel do collapse(2) default(shared) &
+!$omp private(iskip_amr,igrid_amr,icell_amr,scan_flag,inbor,idim,igshift, &
+!$omp         igrid_nbor_amr,icell_nbor_amr) schedule(guided,1024)
    do ind=1,twotondim
-      iskip_amr = ncoarse+(ind-1)*ngridmax
       do igrid_mg=1,ngrid
+         iskip_amr = ncoarse+(ind-1)*ngridmax
          igrid_amr = active(ilevel)%igrid(igrid_mg)
          icell_amr = iskip_amr + igrid_amr
 
@@ -740,6 +782,15 @@ subroutine set_scan_flag_fine(ilevel)
          flag2(icell_amr)=flag2(icell_amr)+ngridmax*scan_flag
       end do
    end do
+!$omp end parallel do
+
+#ifdef FDMDEBUG
+   call system_clock(scan_clock1)
+   if(myid==1) write(*,'(A,I3,A,I12,A,F10.4,A)') &
+        ' MG set_scan profile: level=',ilevel,' cells=', &
+        int(ngrid,kind=8)*int(twotondim,kind=8),' wall=', &
+        dble(scan_clock1-scan_clock0)/dble(scan_clock_rate),' s'
+#endif
 end subroutine set_scan_flag_fine
 
 subroutine get3cubefather_fine_mg(ind_cell_father,nbors_father_cells,&
