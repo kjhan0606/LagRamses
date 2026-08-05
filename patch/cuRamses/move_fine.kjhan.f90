@@ -1,13 +1,21 @@
 subroutine move_fine(ilevel)
   use amr_commons
   use pm_commons
+#ifdef HYDRO_CUDA
+  use poisson_commons, only: f, phi
+  use pm_gpu_commons
+  use pm_gpu_dispatch
+  use particle_cuda_interface
+  use cuda_commons
+  use iso_c_binding
+#endif
   implicit none
 #ifndef WITHOUTMPI
-  include 'mpif.h' 
+  include 'mpif.h'
 #endif
   integer::ilevel
   !----------------------------------------------------------------------
-  ! Update particle position and time-centred velocity at level ilevel. 
+  ! Update particle position and time-centred velocity at level ilevel.
   ! If particle sits entirely in level ilevel, then use fine grid force
   ! for CIC interpolation. Otherwise, use coarse grid (ilevel-1) force.
   !----------------------------------------------------------------------
@@ -15,6 +23,18 @@ subroutine move_fine(ilevel)
   integer::npack,ip_buf,idim
   real(dp),allocatable,dimension(:)::sink_sbuf,sink_rbuf
 
+#ifdef HYDRO_CUDA
+  ! Strategy-A hybrid: threads that acquire a CUDA stream run the CIC
+  ! math on the GPU, the others call the unchanged move1. Batches are
+  ! independent so schedule(dynamic) balances the split at run time.
+  logical::pm_gpu
+  integer::nvec,gi,slot,with_phi
+  integer,allocatable::gvec(:)
+  integer(c_long_long)::pm_ncell
+  integer,dimension(1:nvector)::Lind_grid,Lind_part,Lind_grid_part
+#endif
+
+#ifndef HYDRO_CUDA
 #ifndef _OPENMP
   integer,dimension(1:nvector)::ind_grid,ind_part,ind_grid_part
 #else
@@ -41,6 +61,7 @@ subroutine move_fine(ilevel)
   ind_grid_part => Pind_grid_part(:, mythread)
 !$omp end parallel
 #endif
+#endif
 
 
   if(numbtot(1,ilevel)==0)return
@@ -53,6 +74,97 @@ subroutine move_fine(ilevel)
      sink_stat(:,ilevel,:)=0d0
   endif
 
+#ifdef HYDRO_CUDA
+  ! ---- Strategy-A hybrid dispatch (GPU streams + CPU fallback) ----
+  pm_gpu=.false.
+  with_phi=0
+#ifdef OUTPUT_PARTICLE_POTENTIAL
+  with_phi=1
+#endif
+  if(gpu_particle .and. poisson .and. .not.sink .and. &
+       & .not.(tracer.and.hydro) .and. .not.pm_gpu_dead .and. &
+       & cuda_pool_is_initialized_c()/=0 .and. numbl(myid,ilevel)>0)then
+     pm_ncell=int(ncoarse,c_long_long) &
+          & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
+     call cuda_pm_mesh_upload_c(f, son, phi, pm_ncell, int(with_phi,c_int))
+     pm_gpu=(cuda_pm_is_ready_c()/=0)
+     if(pm_gpu)then
+        call pm_gpu_alloc()
+        pm_with_phi=with_phi
+     end if
+  end if
+
+  nvec=0
+  allocate(gvec(1:max(numbl(myid,ilevel),1)))
+  igrid=headl(myid,ilevel)
+  do jgrid=1,numbl(myid,ilevel)
+     if(numbp(igrid)>0)then
+        nvec=nvec+1
+        gvec(nvec)=igrid
+     end if
+     igrid=next(igrid)
+  end do
+
+!$omp parallel private(slot,ig,ip,gi,igrid,ipart,jpart,npart1,next_part, &
+!$omp& Lind_grid,Lind_part,Lind_grid_part)
+  slot=-1
+  if(pm_gpu)then
+     slot=int(cuda_acquire_stream_c())
+     if(slot>=PM_MAX_SLOT)then
+        call cuda_release_stream_c(int(slot,c_int))
+        slot=-1
+     end if
+     if(slot>=0)call pm_gpu_reset(slot)
+  end if
+  ig=0
+  ip=0
+!$omp do schedule(dynamic,8)
+  do gi=1,nvec
+     igrid=gvec(gi)
+     npart1=numbp(igrid)
+     ig=ig+1
+     Lind_grid(ig)=igrid
+     ipart=headp(igrid)
+     ! Loop over particles
+     do jpart=1,npart1
+        ! Save next particle  <---- Very important !!!
+        next_part=nextp(ipart)
+        if(ig==0)then
+           ig=1
+           Lind_grid(ig)=igrid
+        end if
+        ip=ip+1
+        Lind_part(ip)=ipart
+        Lind_grid_part(ip)=ig
+        if(ip==nvector)then
+           if(slot>=0)then
+              call pm_gpu_append(slot,PM_MODE_MOVE,Lind_grid,Lind_part, &
+                   & Lind_grid_part,ig,ip,ilevel)
+           else
+              call move1(Lind_grid,Lind_part,Lind_grid_part,ig,ip,ilevel)
+           end if
+           ip=0
+           ig=0
+        end if
+        ipart=next_part  ! Go to next particle
+     end do
+  end do
+!$omp end do nowait
+  if(ip>0)then
+     if(slot>=0)then
+        call pm_gpu_append(slot,PM_MODE_MOVE,Lind_grid,Lind_part, &
+             & Lind_grid_part,ig,ip,ilevel)
+     else
+        call move1(Lind_grid,Lind_part,Lind_grid_part,ig,ip,ilevel)
+     end if
+  end if
+  if(slot>=0)then
+     call pm_gpu_flush(slot,PM_MODE_MOVE,ilevel)
+     call cuda_release_stream_c(int(slot,c_int))
+  end if
+!$omp end parallel
+  deallocate(gvec)
+#else
 #ifdef _OPENMP
   call pthreadLinkedList(headl(myid,ilevel), numbl(myid,ilevel), nthreads,nparticles, ptrhead, next)
   ! Update particles position and velocity
@@ -70,7 +182,7 @@ subroutine move_fine(ilevel)
   do jgrid=1,numbl(myid,ilevel)
 #endif
      npart1=numbp(igrid)  ! Number of particles in the grid
-     if(npart1>0)then        
+     if(npart1>0)then
         ig=ig+1
         ind_grid(ig)=igrid
         ipart=headp(igrid)
@@ -84,7 +196,7 @@ subroutine move_fine(ilevel)
            end if
            ip=ip+1
            ind_part(ip)=ipart
-           ind_grid_part(ip)=ig   
+           ind_grid_part(ip)=ig
            if(ip==nvector)then
               call move1(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
               ip=0
@@ -102,6 +214,7 @@ subroutine move_fine(ilevel)
 !$omp end parallel
   deallocate(nparticles, ptrhead)
   deallocate(Pind_part, Pind_grid,Pind_grid_part)
+#endif
 #endif
 
   if(sink)then

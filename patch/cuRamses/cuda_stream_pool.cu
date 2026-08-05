@@ -368,6 +368,11 @@ void cuda_pool_finalize(void) {
         extern void cuda_scal_finalize(void);
         cuda_scal_finalize();
     }
+    // Free particle-CIC GPU arrays
+    {
+        extern void cuda_pm_finalize(void);
+        cuda_pm_finalize();
+    }
     pool_initialized = false;
     printf("CUDA pool: finalized.\n");
 }

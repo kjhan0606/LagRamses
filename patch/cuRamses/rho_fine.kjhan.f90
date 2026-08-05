@@ -251,7 +251,7 @@ end subroutine rho_fine
 !##############################################################################
 !##############################################################################
 !##############################################################################
-#ifdef _OPENMP
+#if defined(_OPENMP) && !defined(HYDRO_CUDA)
 subroutine rho_from_current_level(ilevel)
   use amr_commons
   use pm_commons
@@ -357,6 +357,13 @@ subroutine rho_from_current_level(ilevel)
   use pm_commons
   use hydro_commons
   use poisson_commons
+#ifdef HYDRO_CUDA
+  use pm_gpu_commons
+  use pm_gpu_dispatch
+  use particle_cuda_interface
+  use cuda_commons
+  use iso_c_binding
+#endif
   implicit none
   integer::ilevel
   !------------------------------------------------------------------
@@ -367,17 +374,144 @@ subroutine rho_from_current_level(ilevel)
   !------------------------------------------------------------------
   integer::igrid,jgrid,ipart,jpart,icpu
   integer::i,ig,ip,subnump
+#ifdef HYDRO_CUDA
+  integer::npart1,idim,gi,slot,nvec,ngtot
+  logical::rho_gpu
+  integer,allocatable::gvec(:)
+  integer(c_long_long)::pm_ncell
+  integer,dimension(1:nvector)::Lind_grid,Lind_cell,Lind_part,Lind_grid_part
+  real(dp),dimension(1:nvector,1:ndim)::Lx0
+  real(dp)::dx
+#endif
 !  integer, dimension(:), allocatable:: nparticles, ptrhead
 !  integer mythread, nthreads,nwork,icount,jcount,npart3
 !  common /openmpthreads/ mythread, nthreads
 !!$omp threadprivate(/openmpthreads/)
 
-!!$omp parallel
-!   mythread = omp_get_thread_num()
-!   nthreads = omp_get_num_threads()
-!!$omp end parallel
-!  allocate(ptrhead(0:nthreads-1), nparticles(0:nthreads-1))
+#ifdef HYDRO_CUDA
+  ! ---- Strategy-A hybrid deposit (GPU atomicAdd + serialized CPU) ----
+  ! The CPU baseline is serial (the OpenMP variant below is commented
+  ! out because concurrent cic_amr calls race on rho/phi); GPU workers
+  ! deposit into device accumulators merged once at the end, CPU
+  ! workers keep the original semantics inside a critical section.
+  dx=0.5D0**ilevel
+  rho_gpu=.false.
+#ifndef TSC
+  if(gpu_particle .and. .not.pm_gpu_dead .and. .not.star .and. .not.sink &
+       & .and. (cic_levelmax==0 .or. ilevel<cic_levelmax) &
+       & .and. cuda_pool_is_initialized_c()/=0)then
+     pm_ncell=int(ncoarse,c_long_long) &
+          & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
+     call cuda_pm_rho_begin_c(son, pm_ncell)
+     rho_gpu=(cuda_pm_rho_is_ready_c()/=0)
+     if(rho_gpu)call pm_gpu_alloc()
+  end if
+#endif
 
+  ngtot=0
+  do icpu=1,ncpu
+     ngtot=ngtot+numbl(icpu,ilevel)
+  end do
+  allocate(gvec(1:max(ngtot,1)))
+  nvec=0
+  do icpu=1,ncpu
+     igrid=headl(icpu,ilevel)
+     do jgrid=1,numbl(icpu,ilevel)
+        if(numbp(igrid)>0)then
+           nvec=nvec+1
+           gvec(nvec)=igrid
+        end if
+        igrid=next(igrid)
+     end do
+  end do
+
+!$omp parallel private(slot,ig,ip,gi,igrid,ipart,jpart,npart1,idim,i, &
+!$omp& Lind_grid,Lind_cell,Lind_part,Lind_grid_part,Lx0)
+  slot=-1
+  if(rho_gpu)then
+     slot=int(cuda_acquire_stream_c())
+     if(slot>=PM_MAX_SLOT)then
+        call cuda_release_stream_c(int(slot,c_int))
+        slot=-1
+     end if
+     if(slot>=0)call pm_gpu_reset(slot)
+  end if
+  ig=0
+  ip=0
+!$omp do schedule(dynamic,8)
+  do gi=1,nvec
+     igrid=gvec(gi)
+     npart1=numbp(igrid)
+     ig=ig+1
+     Lind_grid(ig)=igrid
+     ipart=headp(igrid)
+     do jpart=1,npart1
+        if(ig==0)then
+           ig=1
+           Lind_grid(ig)=igrid
+        end if
+        ip=ip+1
+        Lind_part(ip)=ipart
+        Lind_grid_part(ip)=ig
+        if(ip==nvector)then
+           if(slot>=0)then
+              call pm_gpu_append(slot,PM_MODE_RHO,Lind_grid,Lind_part, &
+                   & Lind_grid_part,ig,ip,ilevel)
+           else
+              do idim=1,ndim
+                 do i=1,ig
+                    Lx0(i,idim)=xg(Lind_grid(i),idim)-3.0D0*dx
+                 end do
+              end do
+              do i=1,ig
+                 Lind_cell(i)=father(Lind_grid(i))
+              end do
+!$omp critical (cic_deposit)
+#ifdef TSC
+              call tsc_amr(Lind_cell,Lind_part,Lind_grid_part,Lx0,ig,ip,ilevel)
+#else
+              call cic_amr(Lind_cell,Lind_part,Lind_grid_part,Lx0,ig,ip,ilevel)
+#endif
+!$omp end critical (cic_deposit)
+           end if
+           ip=0
+           ig=0
+        end if
+        ipart=nextp(ipart)
+     end do
+  end do
+!$omp end do nowait
+  if(ip>0)then
+     if(slot>=0)then
+        call pm_gpu_append(slot,PM_MODE_RHO,Lind_grid,Lind_part, &
+             & Lind_grid_part,ig,ip,ilevel)
+     else
+        do idim=1,ndim
+           do i=1,ig
+              Lx0(i,idim)=xg(Lind_grid(i),idim)-3.0D0*dx
+           end do
+        end do
+        do i=1,ig
+           Lind_cell(i)=father(Lind_grid(i))
+        end do
+!$omp critical (cic_deposit)
+#ifdef TSC
+        call tsc_amr(Lind_cell,Lind_part,Lind_grid_part,Lx0,ig,ip,ilevel)
+#else
+        call cic_amr(Lind_cell,Lind_part,Lind_grid_part,Lx0,ig,ip,ilevel)
+#endif
+!$omp end critical (cic_deposit)
+     end if
+  end if
+  if(slot>=0)then
+     call pm_gpu_flush(slot,PM_MODE_RHO,ilevel)
+     call cuda_release_stream_c(int(slot,c_int))
+  end if
+!$omp end parallel
+  deallocate(gvec)
+
+  if(rho_gpu)call pm_rho_merge()
+#else
 
   ! Loop over cpus
   do icpu=1,ncpu
@@ -388,7 +522,7 @@ subroutine rho_from_current_level(ilevel)
          call  sub_rho_from_current_level(ilevel,igrid,subnump)
 !       else
 !         call pthreadLinkedList(headl(icpu,ilevel),numbl(icpu,ilevel),nthreads, nparticles, ptrhead,next)
-!!$omp parallel private(subnump, igrid) 
+!!$omp parallel private(subnump, igrid)
 !         subnump = nparticles(mythread)
 !         igrid = ptrhead(mythread)
 !         call  sub_rho_from_current_level(ilevel,igrid,subnump)
@@ -396,7 +530,7 @@ subroutine rho_from_current_level(ilevel)
 !       endif
      endif
   enddo
-!  deallocate(ptrhead, nparticles)
+#endif
 end subroutine rho_from_current_level
 !##############################################
 !##############################################

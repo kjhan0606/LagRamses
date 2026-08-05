@@ -118,7 +118,8 @@ subroutine adaptive_loop
   ! Early CUDA pool init: must happen before first multigrid_fine call so the
   ! cuFFT direct-solve gate (cuda_pool_is_initialized_c()/=0) passes on every
   ! rank. Previously init was lazy in godunov_fine, missing the first force solve.
-  if(gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink .or. gpu_scalar) then
+  if(gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink .or. gpu_scalar &
+       & .or. gpu_particle) then
      call cuda_pool_init_f()
      if(myid==1) write(*,'(A,L1)') ' Adaptive loop: CUDA pool early-init, available=', cuda_available
   end if
