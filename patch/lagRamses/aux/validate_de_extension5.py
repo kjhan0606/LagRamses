@@ -94,6 +94,20 @@ def main() -> int:
             if not path.is_file() or path.stat().st_size < 1_000_000:
                 failures.append(f"{model_name}: incomplete IC component {component}")
 
+        music_log_path = validation / f"music_{model_name}.conf_log.txt"
+        music_log = music_log_path.read_text() if music_log_path.is_file() else ""
+        if model_name == MODELS[0]:
+            if "RNG-slab:" not in music_log:
+                failures.append(f"{model_name}: distributed numeric-seed RNG path not exercised")
+        else:
+            phase_markers = (
+                "white-noise filename is an explicit phase anchor",
+                "Reading compact MUSIC white noise file",
+            )
+            for marker in phase_markers:
+                if marker not in music_log:
+                    failures.append(f"{model_name}: phase-anchor reader marker missing: {marker}")
+
         model_dir = validation / model_name
         stdout = model_dir / "run-gate.out"
         stderr = model_dir / "run-gate.err"

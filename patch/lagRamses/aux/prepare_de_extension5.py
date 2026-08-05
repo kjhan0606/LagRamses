@@ -257,6 +257,7 @@ def music_config(
     boxlen: float,
     output_dir: str,
     random_source: str,
+    cubesize: int,
 ) -> str:
     w0, wa = (-0.9, 0.2) if model_name == "cpl_cluster_m09_p02" else (-1.0, 0.0)
     masses = (SUM_MNU, 0.0, 0.0) if model_name in {"nu_lcdm", "f6_nu"} else (0.0, 0.0, 0.0)
@@ -294,6 +295,7 @@ transfer_file   = {campaign / 'transfers' / f'transfer_{model_name}_z49.dat'}
 
 [random]
 disk_cached     = yes
+cubesize        = {cubesize}
 seed[{level}]        = {random_source}
 
 [output]
@@ -516,6 +518,7 @@ def write_layout(args: argparse.Namespace, diagnostics: dict[str, dict[str, floa
                     512.0,
                     f"ics_{model_name}",
                     prod_random,
+                    32,
                 ),
                 args.force,
             )
@@ -530,6 +533,7 @@ def write_layout(args: argparse.Namespace, diagnostics: dict[str, dict[str, floa
                     64.0,
                     f"ics_{model_name}",
                     val_random,
+                    8,
                 ),
                 args.force,
             )
