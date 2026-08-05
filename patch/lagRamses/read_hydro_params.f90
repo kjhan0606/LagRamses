@@ -118,6 +118,46 @@ subroutine read_hydro_params(nml_ok)
   if(aton)call read_radiation_params(1)
 #endif
 
+  select case(scheme)
+  case('muscl','plmde')
+  case('weno3')
+#if NDIM != 3
+     if(myid==1)write(*,*)'scheme=weno3 is currently available only with NDIM=3'
+     nml_ok=.false.
+#endif
+     if(slope_type.ne.2)then
+        if(myid==1)write(*,*)'scheme=weno3 requires slope_type=2 for the time predictor'
+        nml_ok=.false.
+     end if
+  case('weno5','weno5ppm','ppm')
+#if NDIM != 3
+     if(myid==1)write(*,*)'scheme=',trim(scheme),' is currently available only with NDIM=3'
+     nml_ok=.false.
+#endif
+     if(slope_type.ne.2)then
+        if(myid==1)write(*,*)'scheme=',trim(scheme),' requires slope_type=2 for the predictor'
+        nml_ok=.false.
+     end if
+     if(levelmin.ne.nlevelmax)then
+        if(myid==1)write(*,*)'scheme=',trim(scheme),' prototype currently requires a uniform grid'
+        nml_ok=.false.
+     end if
+     if(poisson)then
+        if(myid==1)write(*,*)'scheme=',trim(scheme),' prototype currently requires poisson=.false.'
+        nml_ok=.false.
+     end if
+     if(nboundary.ne.0)then
+        if(myid==1)write(*,*)'scheme=',trim(scheme),' prototype currently requires periodic boundaries'
+        nml_ok=.false.
+     end if
+     ! A five-point reconstruction needs two fine-cell layers across MPI
+     ! ownership boundaries.  Expand the virtual mesh accordingly.
+     nexpand_bound=max(nexpand_bound,2)
+  case default
+     if(myid==1)write(*,*)'unknown hydro scheme: ',trim(scheme)
+     nml_ok=.false.
+  end select
+
   !--------------------------------------------------
   ! Check for star formation
   !--------------------------------------------------

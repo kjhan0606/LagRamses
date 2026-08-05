@@ -19,7 +19,7 @@
 !  ngrid       => (const)  number of sub-grids
 !  ndim        => (const)  number of dimensions
 ! ----------------------------------------------------------------
-subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid)
+subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid,uouter)
   use amr_parameters
   use const             
   use hydro_parameters
@@ -31,6 +31,8 @@ subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid)
   ! Input states
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar)::uin 
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:ndim)::gravin 
+  real(dp),dimension(1:nvector,1:2,0:3,0:3,1:nvar,1:ndim),intent(in)::uouter
+  real(dp),dimension(1:nvector,1:2,0:3,0:3,1:nvar,1:ndim)::qouter
 
   ! Output fluxes
   real(dp),dimension(1:nvector,if1:if2,jf1:jf2,kf1:kf2,1:nvar,1:ndim)::flux
@@ -81,6 +83,11 @@ subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid)
 
   ! Translate to primative variables, compute sound speeds  
   call ctoprim(uin,qin,cin,gravin,dt,ngrid)
+  if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+     call ctoprim_outer(uouter,qouter,ngrid)
+  else
+     qouter=zero
+  end if
 
   ! Compute TVD slopes
   call uslope(qin,dq,dx,dt,ngrid)
@@ -88,7 +95,8 @@ subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid)
 
 
   ! Compute 3D traced-states in all three directions
-  if(scheme=='muscl')then
+  if(scheme=='muscl'.or.scheme=='weno3'.or.scheme=='weno5'.or. &
+       & scheme=='weno5ppm'.or.scheme=='ppm')then
 #if NDIM==1
      call trace1d(qin,dq,qm,qp,dx      ,dt,ngrid)
 #endif
@@ -96,7 +104,7 @@ subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid)
      call trace2d(qin,dq,qm,qp,dx,dy   ,dt,ngrid)
 #endif
 #if NDIM==3
-     call trace3d(qin,dq,qm,qp,dx,dy,dz,dt,ngrid)
+     call trace3d(qin,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
 #endif
   endif
   if(scheme=='plmde')then
@@ -488,7 +496,7 @@ end subroutine trace2d
 !###########################################################
 !###########################################################
 #if NDIM>2
-subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
+subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
   use amr_parameters
   use hydro_parameters
   use const
@@ -501,17 +509,24 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim)::dq 
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim)::qm 
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim)::qp 
+  real(dp),dimension(1:nvector,1:2,0:3,0:3,1:nvar,1:ndim)::qouter
 
   ! declare local variables
-  integer ::i, j, k, l, n
+  integer ::i, j, k, l, n, ivar_rec, idim_trace
   integer ::ilo,ihi,jlo,jhi,klo,khi
   integer ::ir, iu, iv, iw, ip, irad
   real(dp)::dtdx, dtdy, dtdz
-  real(dp)::r, u, v, w, p, a
+  real(dp)::r, u, v, w, p, a, aleft, aright
+  real(dp)::vmm,vm,v0,vp,vpp
+  logical::troubled_x,troubled_y,troubled_z
+  logical,dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::troubled_x_cache
+  logical,dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::troubled_y_cache
+  logical,dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::troubled_z_cache
   real(dp)::drx, dux, dvx, dwx, dpx, dax
   real(dp)::dry, duy, dvy, dwy, dpy, day
   real(dp)::drz, duz, dvz, dwz, dpz, daz
   real(dp)::sr0, su0, sv0, sw0, sp0, sa0
+  real(dp),dimension(1:nvar,1:ndim)::qedge_left,qedge_right
 #if NENER>0
   real(dp),dimension(1:nener)::e, dex, dey, dez, se0
 #endif
@@ -575,6 +590,126 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
               end do
 #endif
 
+              ! Reconstruct primitive states at each cell edge.  WENO5 and
+              ! PPM use five cell averages along each coordinate line; only
+              ! the i/j/k=0 and 3 trace cells touch the extra axial slabs.
+              ! In WENO5-PPM, discontinuities in any hydro primitive select
+              ! the same monotone PPM fallback for all reconstructed fields.
+              troubled_x=.false.; troubled_y=.false.; troubled_z=.false.
+              if(scheme=='weno5ppm')then
+                 do ivar_rec=1,ndim+2+nener
+                    if(i==0)then
+                       vmm=qouter(l,1,j,k,ivar_rec,1)
+                    else
+                       vmm=q(l,i-2,j,k,ivar_rec)
+                    end if
+                    vm=q(l,i-1,j,k,ivar_rec); v0=q(l,i,j,k,ivar_rec)
+                    vp=q(l,i+1,j,k,ivar_rec)
+                    if(i==3)then
+                       vpp=qouter(l,2,j,k,ivar_rec,1)
+                    else
+                       vpp=q(l,i+2,j,k,ivar_rec)
+                    end if
+                    call detect_five_trouble(vmm,vm,v0,vp,vpp,troubled_x)
+
+                    if(j==0)then
+                       vmm=qouter(l,1,i,k,ivar_rec,2)
+                    else
+                       vmm=q(l,i,j-2,k,ivar_rec)
+                    end if
+                    vm=q(l,i,j-1,k,ivar_rec); v0=q(l,i,j,k,ivar_rec)
+                    vp=q(l,i,j+1,k,ivar_rec)
+                    if(j==3)then
+                       vpp=qouter(l,2,i,k,ivar_rec,2)
+                    else
+                       vpp=q(l,i,j+2,k,ivar_rec)
+                    end if
+                    call detect_five_trouble(vmm,vm,v0,vp,vpp,troubled_y)
+
+                    if(k==0)then
+                       vmm=qouter(l,1,i,j,ivar_rec,3)
+                    else
+                       vmm=q(l,i,j,k-2,ivar_rec)
+                    end if
+                    vm=q(l,i,j,k-1,ivar_rec); v0=q(l,i,j,k,ivar_rec)
+                    vp=q(l,i,j,k+1,ivar_rec)
+                    if(k==3)then
+                       vpp=qouter(l,2,i,j,ivar_rec,3)
+                    else
+                       vpp=q(l,i,j,k+2,ivar_rec)
+                    end if
+                    call detect_five_trouble(vmm,vm,v0,vp,vpp,troubled_z)
+                 end do
+              end if
+              troubled_x_cache(l,i,j,k)=troubled_x
+              troubled_y_cache(l,i,j,k)=troubled_y
+              troubled_z_cache(l,i,j,k)=troubled_z
+              do ivar_rec=1,nvar
+                 if(scheme=='weno3')then
+                    call reconstruct_weno3(q(l,i-1,j,k,ivar_rec), &
+                         & q(l,i,j,k,ivar_rec),q(l,i+1,j,k,ivar_rec), &
+                         & qedge_left(ivar_rec,1),qedge_right(ivar_rec,1))
+                    call reconstruct_weno3(q(l,i,j-1,k,ivar_rec), &
+                         & q(l,i,j,k,ivar_rec),q(l,i,j+1,k,ivar_rec), &
+                         & qedge_left(ivar_rec,2),qedge_right(ivar_rec,2))
+                    call reconstruct_weno3(q(l,i,j,k-1,ivar_rec), &
+                         & q(l,i,j,k,ivar_rec),q(l,i,j,k+1,ivar_rec), &
+                         & qedge_left(ivar_rec,3),qedge_right(ivar_rec,3))
+                 else if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+                    if(i==0)then
+                       vmm=qouter(l,1,j,k,ivar_rec,1)
+                    else
+                       vmm=q(l,i-2,j,k,ivar_rec)
+                    end if
+                    vm=q(l,i-1,j,k,ivar_rec); v0=q(l,i,j,k,ivar_rec)
+                    vp=q(l,i+1,j,k,ivar_rec)
+                    if(i==3)then
+                       vpp=qouter(l,2,j,k,ivar_rec,1)
+                    else
+                       vpp=q(l,i+2,j,k,ivar_rec)
+                    end if
+                    call reconstruct_five(vmm,vm,v0,vp,vpp, &
+                         & qedge_left(ivar_rec,1),qedge_right(ivar_rec,1),troubled_x)
+
+                    if(j==0)then
+                       vmm=qouter(l,1,i,k,ivar_rec,2)
+                    else
+                       vmm=q(l,i,j-2,k,ivar_rec)
+                    end if
+                    vm=q(l,i,j-1,k,ivar_rec); v0=q(l,i,j,k,ivar_rec)
+                    vp=q(l,i,j+1,k,ivar_rec)
+                    if(j==3)then
+                       vpp=qouter(l,2,i,k,ivar_rec,2)
+                    else
+                       vpp=q(l,i,j+2,k,ivar_rec)
+                    end if
+                    call reconstruct_five(vmm,vm,v0,vp,vpp, &
+                         & qedge_left(ivar_rec,2),qedge_right(ivar_rec,2),troubled_y)
+
+                    if(k==0)then
+                       vmm=qouter(l,1,i,j,ivar_rec,3)
+                    else
+                       vmm=q(l,i,j,k-2,ivar_rec)
+                    end if
+                    vm=q(l,i,j,k-1,ivar_rec); v0=q(l,i,j,k,ivar_rec)
+                    vp=q(l,i,j,k+1,ivar_rec)
+                    if(k==3)then
+                       vpp=qouter(l,2,i,j,ivar_rec,3)
+                    else
+                       vpp=q(l,i,j,k+2,ivar_rec)
+                    end if
+                    call reconstruct_five(vmm,vm,v0,vp,vpp, &
+                         & qedge_left(ivar_rec,3),qedge_right(ivar_rec,3),troubled_z)
+                 else
+                    qedge_left (ivar_rec,1)=q(l,i,j,k,ivar_rec)-half*dq(l,i,j,k,ivar_rec,1)
+                    qedge_right(ivar_rec,1)=q(l,i,j,k,ivar_rec)+half*dq(l,i,j,k,ivar_rec,1)
+                    qedge_left (ivar_rec,2)=q(l,i,j,k,ivar_rec)-half*dq(l,i,j,k,ivar_rec,2)
+                    qedge_right(ivar_rec,2)=q(l,i,j,k,ivar_rec)+half*dq(l,i,j,k,ivar_rec,2)
+                    qedge_left (ivar_rec,3)=q(l,i,j,k,ivar_rec)-half*dq(l,i,j,k,ivar_rec,3)
+                    qedge_right(ivar_rec,3)=q(l,i,j,k,ivar_rec)+half*dq(l,i,j,k,ivar_rec,3)
+                 end if
+              end do
+
               ! Source terms (including transverse derivatives)
               sr0 = -u*drx-v*dry-w*drz - (dux+dvy+dwz)*r
               sp0 = -u*dpx-v*dpy-w*dpz - (dux+dvy+dwz)*gamma*p
@@ -592,88 +727,107 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
 #endif
 
               ! Right state at left interface
-              qp(l,i,j,k,ir,1) = r - half*drx + sr0*dtdx*half
-              qp(l,i,j,k,ip,1) = p - half*dpx + sp0*dtdx*half
-              qp(l,i,j,k,iu,1) = u - half*dux + su0*dtdx*half
-              qp(l,i,j,k,iv,1) = v - half*dvx + sv0*dtdx*half
-              qp(l,i,j,k,iw,1) = w - half*dwx + sw0*dtdx*half
+              qp(l,i,j,k,ir,1) = qedge_left(ir,1) + sr0*dtdx*half
+              qp(l,i,j,k,ip,1) = qedge_left(ip,1) + sp0*dtdx*half
+              qp(l,i,j,k,iu,1) = qedge_left(iu,1) + su0*dtdx*half
+              qp(l,i,j,k,iv,1) = qedge_left(iv,1) + sv0*dtdx*half
+              qp(l,i,j,k,iw,1) = qedge_left(iw,1) + sw0*dtdx*half
 !              qp(l,i,j,k,ir,1) = max(smallr, qp(l,i,j,k,ir,1))
               if(qp(l,i,j,k,ir,1)<smallr)qp(l,i,j,k,ir,1)=r
 #if NENER>0
               do irad=1,nener
-                 qp(l,i,j,k,ip+irad,1) = e(irad) - half*dex(irad) + se0(irad)*dtdx*half
+                 qp(l,i,j,k,ip+irad,1) = qedge_left(ip+irad,1) + se0(irad)*dtdx*half
               end do
 #endif
 
               ! Left state at left interface
-              qm(l,i,j,k,ir,1) = r + half*drx + sr0*dtdx*half
-              qm(l,i,j,k,ip,1) = p + half*dpx + sp0*dtdx*half
-              qm(l,i,j,k,iu,1) = u + half*dux + su0*dtdx*half
-              qm(l,i,j,k,iv,1) = v + half*dvx + sv0*dtdx*half
-              qm(l,i,j,k,iw,1) = w + half*dwx + sw0*dtdx*half
+              qm(l,i,j,k,ir,1) = qedge_right(ir,1) + sr0*dtdx*half
+              qm(l,i,j,k,ip,1) = qedge_right(ip,1) + sp0*dtdx*half
+              qm(l,i,j,k,iu,1) = qedge_right(iu,1) + su0*dtdx*half
+              qm(l,i,j,k,iv,1) = qedge_right(iv,1) + sv0*dtdx*half
+              qm(l,i,j,k,iw,1) = qedge_right(iw,1) + sw0*dtdx*half
 !              qm(l,i,j,k,ir,1) = max(smallr, qm(l,i,j,k,ir,1))
               if(qm(l,i,j,k,ir,1)<smallr)qm(l,i,j,k,ir,1)=r
 #if NENER>0
               do irad=1,nener
-                 qm(l,i,j,k,ip+irad,1) = e(irad) + half*dex(irad) + se0(irad)*dtdx*half
+                 qm(l,i,j,k,ip+irad,1) = qedge_right(ip+irad,1) + se0(irad)*dtdx*half
               end do
 #endif
 
               ! Top state at bottom interface
-              qp(l,i,j,k,ir,2) = r - half*dry + sr0*dtdy*half
-              qp(l,i,j,k,ip,2) = p - half*dpy + sp0*dtdy*half
-              qp(l,i,j,k,iu,2) = u - half*duy + su0*dtdy*half
-              qp(l,i,j,k,iv,2) = v - half*dvy + sv0*dtdy*half
-              qp(l,i,j,k,iw,2) = w - half*dwy + sw0*dtdy*half
+              qp(l,i,j,k,ir,2) = qedge_left(ir,2) + sr0*dtdy*half
+              qp(l,i,j,k,ip,2) = qedge_left(ip,2) + sp0*dtdy*half
+              qp(l,i,j,k,iu,2) = qedge_left(iu,2) + su0*dtdy*half
+              qp(l,i,j,k,iv,2) = qedge_left(iv,2) + sv0*dtdy*half
+              qp(l,i,j,k,iw,2) = qedge_left(iw,2) + sw0*dtdy*half
 !              qp(l,i,j,k,ir,2) = max(smallr, qp(l,i,j,k,ir,2))
               if(qp(l,i,j,k,ir,2)<smallr)qp(l,i,j,k,ir,2)=r
 #if NENER>0
               do irad=1,nener
-                 qp(l,i,j,k,ip+irad,2) = e(irad) - half*dey(irad) + se0(irad)*dtdy*half
+                 qp(l,i,j,k,ip+irad,2) = qedge_left(ip+irad,2) + se0(irad)*dtdy*half
               end do
 #endif
 
               ! Bottom state at top interface
-              qm(l,i,j,k,ir,2) = r + half*dry + sr0*dtdy*half
-              qm(l,i,j,k,ip,2) = p + half*dpy + sp0*dtdy*half
-              qm(l,i,j,k,iu,2) = u + half*duy + su0*dtdy*half
-              qm(l,i,j,k,iv,2) = v + half*dvy + sv0*dtdy*half
-              qm(l,i,j,k,iw,2) = w + half*dwy + sw0*dtdy*half
+              qm(l,i,j,k,ir,2) = qedge_right(ir,2) + sr0*dtdy*half
+              qm(l,i,j,k,ip,2) = qedge_right(ip,2) + sp0*dtdy*half
+              qm(l,i,j,k,iu,2) = qedge_right(iu,2) + su0*dtdy*half
+              qm(l,i,j,k,iv,2) = qedge_right(iv,2) + sv0*dtdy*half
+              qm(l,i,j,k,iw,2) = qedge_right(iw,2) + sw0*dtdy*half
 !              qm(l,i,j,k,ir,2) = max(smallr, qm(l,i,j,k,ir,2))
               if(qm(l,i,j,k,ir,2)<smallr)qm(l,i,j,k,ir,2)=r
 #if NENER>0
               do irad=1,nener
-                 qm(l,i,j,k,ip+irad,2) = e(irad) + half*dey(irad) + se0(irad)*dtdy*half
+                 qm(l,i,j,k,ip+irad,2) = qedge_right(ip+irad,2) + se0(irad)*dtdy*half
               end do
 #endif
 
               ! Back state at front interface
-              qp(l,i,j,k,ir,3) = r - half*drz + sr0*dtdz*half
-              qp(l,i,j,k,ip,3) = p - half*dpz + sp0*dtdz*half
-              qp(l,i,j,k,iu,3) = u - half*duz + su0*dtdz*half
-              qp(l,i,j,k,iv,3) = v - half*dvz + sv0*dtdz*half
-              qp(l,i,j,k,iw,3) = w - half*dwz + sw0*dtdz*half
+              qp(l,i,j,k,ir,3) = qedge_left(ir,3) + sr0*dtdz*half
+              qp(l,i,j,k,ip,3) = qedge_left(ip,3) + sp0*dtdz*half
+              qp(l,i,j,k,iu,3) = qedge_left(iu,3) + su0*dtdz*half
+              qp(l,i,j,k,iv,3) = qedge_left(iv,3) + sv0*dtdz*half
+              qp(l,i,j,k,iw,3) = qedge_left(iw,3) + sw0*dtdz*half
 !              qp(l,i,j,k,ir,3) = max(smallr, qp(l,i,j,k,ir,3))
               if(qp(l,i,j,k,ir,3)<smallr)qp(l,i,j,k,ir,3)=r
 #if NENER>0
               do irad=1,nener
-                 qp(l,i,j,k,ip+irad,3) = e(irad) - half*dez(irad) + se0(irad)*dtdz*half
+                 qp(l,i,j,k,ip+irad,3) = qedge_left(ip+irad,3) + se0(irad)*dtdz*half
               end do
 #endif
 
               ! Front state at back interface
-              qm(l,i,j,k,ir,3) = r + half*drz + sr0*dtdz*half
-              qm(l,i,j,k,ip,3) = p + half*dpz + sp0*dtdz*half
-              qm(l,i,j,k,iu,3) = u + half*duz + su0*dtdz*half
-              qm(l,i,j,k,iv,3) = v + half*dvz + sv0*dtdz*half
-              qm(l,i,j,k,iw,3) = w + half*dwz + sw0*dtdz*half
+              qm(l,i,j,k,ir,3) = qedge_right(ir,3) + sr0*dtdz*half
+              qm(l,i,j,k,ip,3) = qedge_right(ip,3) + sp0*dtdz*half
+              qm(l,i,j,k,iu,3) = qedge_right(iu,3) + su0*dtdz*half
+              qm(l,i,j,k,iv,3) = qedge_right(iv,3) + sv0*dtdz*half
+              qm(l,i,j,k,iw,3) = qedge_right(iw,3) + sw0*dtdz*half
 !              qm(l,i,j,k,ir,3) = max(smallr, qm(l,i,j,k,ir,3))
               if(qm(l,i,j,k,ir,3)<smallr)qm(l,i,j,k,ir,3)=r
 #if NENER>0
               do irad=1,nener
-                 qm(l,i,j,k,ip+irad,3) = e(irad) + half*dez(irad) + se0(irad)*dtdz*half
+                 qm(l,i,j,k,ip+irad,3) = qedge_right(ip+irad,3) + se0(irad)*dtdz*half
               end do
 #endif
+
+              ! The stencil clamp below is applied before the Hancock
+              ! predictor.  Guard the two thermodynamic variables again
+              ! afterwards; this is a robustness check, not a proof of a
+              ! discrete maximum principle for the full update.
+              if(scheme=='weno5ppm')then
+                 do idim_trace=1,ndim
+                    if(qp(l,i,j,k,ir,idim_trace)<smallr) &
+                         & qp(l,i,j,k,ir,idim_trace)=r
+                    if(qm(l,i,j,k,ir,idim_trace)<smallr) &
+                         & qm(l,i,j,k,ir,idim_trace)=r
+                    if(qp(l,i,j,k,ip,idim_trace)< &
+                         & max(qp(l,i,j,k,ir,idim_trace),smallr)*smallc**2/gamma) &
+                         & qp(l,i,j,k,ip,idim_trace)=p
+                    if(qm(l,i,j,k,ip,idim_trace)< &
+                         & max(qm(l,i,j,k,ir,idim_trace),smallr)*smallc**2/gamma) &
+                         & qm(l,i,j,k,ip,idim_trace)=p
+                 end do
+              end if
 
            end do
         end do
@@ -687,6 +841,9 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
         do j = jlo, jhi
            do i = ilo, ihi
               do l = 1, ngrid
+                 troubled_x=troubled_x_cache(l,i,j,k)
+                 troubled_y=troubled_y_cache(l,i,j,k)
+                 troubled_z=troubled_z_cache(l,i,j,k)
                  a   = q(l,i,j,k,n)       ! Cell centered values
                  u   = q(l,i,j,k,iu)
                  v   = q(l,i,j,k,iv)
@@ -695,12 +852,69 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
                  day = dq(l,i,j,k,n,2)
                  daz = dq(l,i,j,k,n,3)
                  sa0 = -u*dax-v*day-w*daz     ! Source terms
-                 qp(l,i,j,k,n,1) = a - half*dax + sa0*dtdx*half  ! Right state
-                 qm(l,i,j,k,n,1) = a + half*dax + sa0*dtdx*half  ! Left state
-                 qp(l,i,j,k,n,2) = a - half*day + sa0*dtdy*half  ! Bottom state
-                 qm(l,i,j,k,n,2) = a + half*day + sa0*dtdy*half  ! Upper state
-                 qp(l,i,j,k,n,3) = a - half*daz + sa0*dtdz*half  ! Front state
-                 qm(l,i,j,k,n,3) = a + half*daz + sa0*dtdz*half  ! Back state
+                 if(scheme=='weno3')then
+                    call reconstruct_weno3(q(l,i-1,j,k,n),a,q(l,i+1,j,k,n),aleft,aright)
+                 else if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+                    if(i==0)then
+                       vmm=qouter(l,1,j,k,n,1)
+                    else
+                       vmm=q(l,i-2,j,k,n)
+                    end if
+                    vm=q(l,i-1,j,k,n); vp=q(l,i+1,j,k,n)
+                    if(i==3)then
+                       vpp=qouter(l,2,j,k,n,1)
+                    else
+                       vpp=q(l,i+2,j,k,n)
+                    end if
+                    call reconstruct_five(vmm,vm,a,vp,vpp,aleft,aright,troubled_x)
+                 else
+                    aleft=a-half*dax
+                    aright=a+half*dax
+                 end if
+                 qp(l,i,j,k,n,1) = aleft  + sa0*dtdx*half  ! Right state
+                 qm(l,i,j,k,n,1) = aright + sa0*dtdx*half  ! Left state
+                 if(scheme=='weno3')then
+                    call reconstruct_weno3(q(l,i,j-1,k,n),a,q(l,i,j+1,k,n),aleft,aright)
+                 else if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+                    if(j==0)then
+                       vmm=qouter(l,1,i,k,n,2)
+                    else
+                       vmm=q(l,i,j-2,k,n)
+                    end if
+                    vm=q(l,i,j-1,k,n); vp=q(l,i,j+1,k,n)
+                    if(j==3)then
+                       vpp=qouter(l,2,i,k,n,2)
+                    else
+                       vpp=q(l,i,j+2,k,n)
+                    end if
+                    call reconstruct_five(vmm,vm,a,vp,vpp,aleft,aright,troubled_y)
+                 else
+                    aleft=a-half*day
+                    aright=a+half*day
+                 end if
+                 qp(l,i,j,k,n,2) = aleft  + sa0*dtdy*half  ! Bottom state
+                 qm(l,i,j,k,n,2) = aright + sa0*dtdy*half  ! Upper state
+                 if(scheme=='weno3')then
+                    call reconstruct_weno3(q(l,i,j,k-1,n),a,q(l,i,j,k+1,n),aleft,aright)
+                 else if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+                    if(k==0)then
+                       vmm=qouter(l,1,i,j,n,3)
+                    else
+                       vmm=q(l,i,j,k-2,n)
+                    end if
+                    vm=q(l,i,j,k-1,n); vp=q(l,i,j,k+1,n)
+                    if(k==3)then
+                       vpp=qouter(l,2,i,j,n,3)
+                    else
+                       vpp=q(l,i,j,k+2,n)
+                    end if
+                    call reconstruct_five(vmm,vm,a,vp,vpp,aleft,aright,troubled_z)
+                 else
+                    aleft=a-half*daz
+                    aright=a+half*daz
+                 end if
+                 qp(l,i,j,k,n,3) = aleft  + sa0*dtdz*half  ! Front state
+                 qm(l,i,j,k,n,3) = aright + sa0*dtdz*half  ! Back state
               end do
            end do
         end do
@@ -710,6 +924,204 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
 
 end subroutine trace3d
 #endif
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine reconstruct_weno3(qminus,qzero,qplus,qleft,qright)
+  use amr_parameters, only:dp
+  implicit none
+
+  real(dp),intent(in)::qminus,qzero,qplus
+  real(dp),intent(out)::qleft,qright
+  real(dp)::beta_minus,beta_plus,eps
+  real(dp)::alpha0,alpha1,weight0,weight1
+  real(dp)::candidate0,candidate1,qmin,qmax
+
+  beta_minus=(qzero-qminus)**2
+  beta_plus =(qplus-qzero)**2
+  eps=1.0d-12*max(1.0d0,qminus*qminus,qzero*qzero,qplus*qplus)
+
+  ! State at the left edge of the central cell.
+  alpha0=(2.0d0/3.0d0)/(eps+beta_minus)**2
+  alpha1=(1.0d0/3.0d0)/(eps+beta_plus )**2
+  weight0=alpha0/(alpha0+alpha1)
+  weight1=alpha1/(alpha0+alpha1)
+  candidate0=0.5d0*(qminus+qzero)
+  candidate1=1.5d0*qzero-0.5d0*qplus
+  qleft=weight0*candidate0+weight1*candidate1
+
+  ! State at the right edge of the central cell.
+  alpha0=(1.0d0/3.0d0)/(eps+beta_minus)**2
+  alpha1=(2.0d0/3.0d0)/(eps+beta_plus )**2
+  weight0=alpha0/(alpha0+alpha1)
+  weight1=alpha1/(alpha0+alpha1)
+  candidate0=1.5d0*qzero-0.5d0*qminus
+  candidate1=0.5d0*(qzero+qplus)
+  qright=weight0*candidate0+weight1*candidate1
+
+  ! Preserve local bounds near strong contacts and shocks.
+  qmin=min(qminus,qzero,qplus)
+  qmax=max(qminus,qzero,qplus)
+  qleft =min(qmax,max(qmin,qleft ))
+  qright=min(qmax,max(qmin,qright))
+
+end subroutine reconstruct_weno3
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine reconstruct_five(qmm,qm,qzero,qp,qpp,qleft,qright,use_ppm)
+  use amr_parameters, only:dp
+  use hydro_parameters, only:scheme
+  implicit none
+
+  real(dp),intent(in)::qmm,qm,qzero,qp,qpp
+  real(dp),intent(out)::qleft,qright
+  logical,intent(in)::use_ppm
+  real(dp)::qmin,qmax
+
+  if(scheme=='ppm'.or.use_ppm)then
+     call reconstruct_ppm(qmm,qm,qzero,qp,qpp,qleft,qright)
+  else
+     call reconstruct_weno5(qmm,qm,qzero,qp,qpp,qleft,qright)
+  end if
+
+  ! The hybrid is explicitly local-bound limited.  This does not make the
+  ! complete Hancock update maximum-principle preserving, hence the scheme
+  ! name describes its WENO5--PPM composition rather than claiming "BP".
+  if(scheme=='weno5ppm')then
+     qmin=min(qmm,qm,qzero,qp,qpp)
+     qmax=max(qmm,qm,qzero,qp,qpp)
+     qleft =min(qmax,max(qmin,qleft ))
+     qright=min(qmax,max(qmin,qright))
+  end if
+
+end subroutine reconstruct_five
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine detect_five_trouble(qmm,qm,qzero,qp,qpp,troubled)
+  use amr_parameters, only:dp
+  implicit none
+
+  real(dp),intent(in)::qmm,qm,qzero,qp,qpp
+  logical,intent(inout)::troubled
+  real(dp)::qmin,qmax,qrange,qscale,third_difference
+
+  qmin=min(qmm,qm,qzero,qp,qpp)
+  qmax=max(qmm,qm,qzero,qp,qpp)
+  qrange=qmax-qmin
+  qscale=max(1.0d-30,abs(qmm),abs(qm),abs(qzero),abs(qp),abs(qpp))
+  third_difference=max(abs(qp-3.0d0*qzero+3.0d0*qm-qmm), &
+       & abs(qpp-3.0d0*qp+3.0d0*qzero-qm))
+
+  ! A third difference distinguishes an unresolved jump or kink from a
+  ! resolved quadratic extremum (whose third difference vanishes).  Once
+  ! any hydro primitive is troubled, retain that flag for the direction.
+  troubled=troubled .or. (qrange>1.0d-10*qscale .and. &
+       & third_difference>0.2d0*qrange)
+
+end subroutine detect_five_trouble
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine reconstruct_weno5(qmm,qm,qzero,qp,qpp,qleft,qright)
+  use amr_parameters, only:dp
+  implicit none
+
+  real(dp),intent(in)::qmm,qm,qzero,qp,qpp
+  real(dp),intent(out)::qleft,qright
+  real(dp)::qmin,qmax,qscale
+
+  qmin=min(qmm,qm,qzero,qp,qpp)
+  qmax=max(qmm,qm,qzero,qp,qpp)
+  qscale=max(1.0d0,abs(qmm),abs(qm),abs(qzero),abs(qp),abs(qpp))
+  if(qmax-qmin<=1.0d-14*qscale)then
+     qleft=qzero
+     qright=qzero
+     return
+  end if
+
+  ! WENO-Z nonlinear weights.  Reversing the stencil gives the state at
+  ! the left edge of the same cell without a second set of coefficients.
+  call weno5z_face(qmm,qm,qzero,qp,qpp,qright)
+  call weno5z_face(qpp,qp,qzero,qm,qmm,qleft)
+
+end subroutine reconstruct_weno5
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine weno5z_face(qmm,qm,qzero,qp,qpp,qface)
+  use amr_parameters, only:dp
+  implicit none
+
+  real(dp),intent(in)::qmm,qm,qzero,qp,qpp
+  real(dp),intent(out)::qface
+  real(dp)::b0,b1,b2,tau5,eps
+  real(dp)::a0,a1,a2,asum,w0,w1,w2
+  real(dp)::p0,p1,p2,qscale
+
+  b0=(13.0d0/12.0d0)*(qmm-2.0d0*qm+qzero)**2 &
+       & +0.25d0*(qmm-4.0d0*qm+3.0d0*qzero)**2
+  b1=(13.0d0/12.0d0)*(qm-2.0d0*qzero+qp)**2 &
+       & +0.25d0*(qm-qp)**2
+  b2=(13.0d0/12.0d0)*(qzero-2.0d0*qp+qpp)**2 &
+       & +0.25d0*(3.0d0*qzero-4.0d0*qp+qpp)**2
+  tau5=abs(b0-b2)
+  qscale=max(1.0d0,qmm*qmm,qm*qm,qzero*qzero,qp*qp,qpp*qpp)
+  eps=1.0d-14*qscale
+
+  a0=0.1d0*(1.0d0+(tau5/(b0+eps))**2)
+  a1=0.6d0*(1.0d0+(tau5/(b1+eps))**2)
+  a2=0.3d0*(1.0d0+(tau5/(b2+eps))**2)
+  asum=a0+a1+a2
+  w0=a0/asum; w1=a1/asum; w2=a2/asum
+
+  p0=(1.0d0/3.0d0)*qmm-(7.0d0/6.0d0)*qm+(11.0d0/6.0d0)*qzero
+  p1=-(1.0d0/6.0d0)*qm+(5.0d0/6.0d0)*qzero+(1.0d0/3.0d0)*qp
+  p2=(1.0d0/3.0d0)*qzero+(5.0d0/6.0d0)*qp-(1.0d0/6.0d0)*qpp
+  qface=w0*p0+w1*p1+w2*p2
+
+end subroutine weno5z_face
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine reconstruct_ppm(qmm,qm,qzero,qp,qpp,qleft,qright)
+  use amr_parameters, only:dp
+  implicit none
+
+  real(dp),intent(in)::qmm,qm,qzero,qp,qpp
+  real(dp),intent(out)::qleft,qright
+  real(dp)::dqcell,q6
+
+  ! Fourth-order interface interpolation followed by the original PPM
+  ! monotonicity constraints.  Contact steepening and shock flattening are
+  ! deliberately left out of this first controlled comparison.
+  qleft =(7.0d0/12.0d0)*(qm+qzero)-(1.0d0/12.0d0)*(qmm+qp)
+  qright=(7.0d0/12.0d0)*(qzero+qp)-(1.0d0/12.0d0)*(qm+qpp)
+
+  qleft =min(max(qm,qzero),max(min(qm,qzero),qleft))
+  qright=min(max(qzero,qp),max(min(qzero,qp),qright))
+
+  if((qright-qzero)*(qzero-qleft)<=0.0d0)then
+     qleft=qzero
+     qright=qzero
+  else
+     dqcell=qright-qleft
+     q6=6.0d0*qzero-3.0d0*(qleft+qright)
+     if(dqcell*q6>dqcell*dqcell)then
+        qleft=3.0d0*qzero-2.0d0*qright
+     else if(dqcell*q6<-(dqcell*dqcell))then
+        qright=3.0d0*qzero-2.0d0*qleft
+     end if
+  end if
+
+end subroutine reconstruct_ppm
 !###########################################################
 !###########################################################
 !###########################################################
@@ -975,6 +1387,89 @@ subroutine ctoprim(uin,q,c,gravin,dt,ngrid)
 #endif
  
 end subroutine ctoprim
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine ctoprim_outer(uin,q,ngrid)
+  use amr_parameters
+  use hydro_parameters
+  use const
+  implicit none
+
+  integer,intent(in)::ngrid
+  real(dp),dimension(1:nvector,1:2,0:3,0:3,1:nvar,1:ndim),intent(in)::uin
+  real(dp),dimension(1:nvector,1:2,0:3,0:3,1:nvar,1:ndim),intent(out)::q
+
+  integer::l,idim,iside,it1,it2,n,irad
+  real(dp)::rho,oneoverrho,eken,erad,eint,smalle,smalle_poly
+
+  smalle=smallc**2/gamma/(gamma-one)
+  do idim=1,ndim
+     do iside=1,2
+        do it2=0,3
+           do it1=0,3
+              do l=1,ngrid
+                 rho=max(uin(l,iside,it1,it2,1,idim),smallr)
+                 q(l,iside,it1,it2,1,idim)=rho
+                 oneoverrho=one/rho
+                 q(l,iside,it1,it2,2,idim)= &
+                      & uin(l,iside,it1,it2,2,idim)*oneoverrho
+#if NDIM>1
+                 q(l,iside,it1,it2,3,idim)= &
+                      & uin(l,iside,it1,it2,3,idim)*oneoverrho
+#endif
+#if NDIM>2
+                 q(l,iside,it1,it2,4,idim)= &
+                      & uin(l,iside,it1,it2,4,idim)*oneoverrho
+#endif
+                 eken=half*q(l,iside,it1,it2,2,idim)**2
+#if NDIM>1
+                 eken=eken+half*q(l,iside,it1,it2,3,idim)**2
+#endif
+#if NDIM>2
+                 eken=eken+half*q(l,iside,it1,it2,4,idim)**2
+#endif
+                 erad=zero
+#if NENER>0
+                 do irad=1,nener
+                    q(l,iside,it1,it2,ndim+2+irad,idim)= &
+                         & (gamma_rad(irad)-one)* &
+                         & uin(l,iside,it1,it2,ndim+2+irad,idim)
+                    erad=erad+uin(l,iside,it1,it2,ndim+2+irad,idim)*oneoverrho
+                 end do
+#endif
+                 smalle_poly=smalle
+                 if(eeos_poly_coeff>0.0d0)then
+                    smalle_poly=max(smalle,eeos_poly_coeff*rho**(eeos_poly_alpha-1.0d0))
+                 end if
+                 eint=max(uin(l,iside,it1,it2,ndim+2,idim)*oneoverrho &
+                      & -eken-erad,smalle_poly)
+                 q(l,iside,it1,it2,ndim+2,idim)=(gamma-one)*rho*eint
+              end do
+           end do
+        end do
+     end do
+  end do
+
+#if NVAR > NDIM + 2 + NENER
+  do idim=1,ndim
+     do n=ndim+nener+3,nvar
+        do iside=1,2
+           do it2=0,3
+              do it1=0,3
+                 do l=1,ngrid
+                    q(l,iside,it1,it2,n,idim)=uin(l,iside,it1,it2,n,idim) &
+                         & /q(l,iside,it1,it2,1,idim)
+                 end do
+              end do
+           end do
+        end do
+     end do
+  end do
+#endif
+
+end subroutine ctoprim_outer
 !###########################################################
 !###########################################################
 !###########################################################
