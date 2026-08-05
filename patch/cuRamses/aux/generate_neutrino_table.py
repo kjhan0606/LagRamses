@@ -25,12 +25,12 @@ except ImportError:
 def generate_neutrino_table(
     output_file="neutrino_table.dat",
     # Cosmological parameters (Planck 2018 + minimal neutrino mass)
-    omega_b=0.0486,
-    omega_m=0.3089,
-    h0=0.6774,
+    omega_b=0.049,
+    omega_m=0.3111,
+    h0=0.6766,
     sum_mnu=0.06,     # eV, minimal normal hierarchy
-    n_s=0.9667,
-    A_s=2.142e-9,
+    n_s=0.9665,
+    A_s=2.1e-9,
     # Table grid
     nk=200,
     na=50,
@@ -51,13 +51,24 @@ def generate_neutrino_table(
     a_arr = np.logspace(np.log10(a_min), np.log10(a_max), na)
     z_arr = 1.0 / a_arr - 1.0  # redshifts (descending in a, ascending in z)
 
-    # omega_cdm = omega_m - omega_b - omega_nu
-    omega_nu = sum_mnu / (93.14 * h0**2)
-    omega_cdm = omega_m - omega_b - omega_nu
-    print(f"  omega_nu={omega_nu:.6f}, omega_cdm={omega_cdm:.6f}")
-
     # Setup CAMB parameters
     pars = camb.CAMBparams()
+    # Let CAMB derive Omega_nu from the requested physical mass, then use that
+    # same value for Omega_cdm. This avoids a small mismatch between the old
+    # 93.14-eV approximation and CAMB's thermal-neutrino conversion.
+    pars.set_cosmology(
+        H0=h0 * 100,
+        ombh2=omega_b * h0**2,
+        omch2=(omega_m - omega_b) * h0**2,
+        mnu=sum_mnu,
+        neutrino_hierarchy="degenerate",
+    )
+    omega_nu = pars.omnuh2 / h0**2
+    omega_cdm = omega_m - omega_b - omega_nu
+    print(f"  omega_nu={omega_nu:.9f}, omega_cdm={omega_cdm:.9f}")
+
+    # Reapply the cosmology with the cb density reduced by exactly the CAMB
+    # neutrino density so Omega_m remains the production value.
     pars.set_cosmology(
         H0=h0 * 100,
         ombh2=omega_b * h0**2,
@@ -86,18 +97,17 @@ def generate_neutrino_table(
 
         # Transfer function variables:
         #   trans.transfer_data[var_index, k_index, z_index]
-        # Variable indices: 0=CDM, 1=baryon, 2=photon, 3=massless nu,
-        #                   4=massive nu, 5=total, 6=no-nu, 7=total de
-        # CDM+baryon weighted transfer: use model.Transfer_cdm (=0) and Transfer_b (=1)
-        # Or use Transfer_nonu (=6) for CDM+baryon combined
+        # CAMB's transfer_data includes k/h in column 0. The component indices
+        # are therefore 1=CDM, 2=baryon, 4=massless nu, 5=massive nu,
+        # 6=total matter and 7=non-neutrino matter (cb).
 
         k_camb = trans.transfer_data[0, :, 0]  # k/h values (same for all z)
 
         # T_cb = CDM+baryon (no neutrino) transfer
-        T_cb = trans.transfer_data[6, :, iz_camb]  # Transfer_nonu
+        T_cb = trans.transfer_data[7, :, iz_camb]  # Transfer_nonu
 
         # T_nu = massive neutrino transfer
-        T_nu = trans.transfer_data[4, :, iz_camb]  # Transfer_nu
+        T_nu = trans.transfer_data[5, :, iz_camb]  # Transfer_nu
 
         # Interpolate to our k grid
         T_cb_interp = np.interp(np.log10(k_arr), np.log10(k_camb), T_cb)
