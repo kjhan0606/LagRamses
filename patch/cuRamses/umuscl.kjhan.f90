@@ -519,6 +519,7 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
   real(dp)::r, u, v, w, p, a, aleft, aright
   real(dp)::vmm,vm,v0,vp,vpp
   logical::troubled_x,troubled_y,troubled_z
+  logical::rec_weno3,rec_five,rec_ppm,rec_hybrid
   logical,dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::troubled_x_cache
   logical,dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::troubled_y_cache
   logical,dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::troubled_z_cache
@@ -538,6 +539,13 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
   jlo=MIN(1,ju1+1); jhi=MAX(1,ju2-1)
   klo=MIN(1,ku1+1); khi=MAX(1,ku2-1)
   ir=1; iu=2; iv=3; iw=4; ip=5
+
+  ! The scheme name is constant over the whole sweep; compare it once
+  ! instead of inside the innermost reconstruction loops.
+  rec_weno3 =scheme=='weno3'
+  rec_five  =scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm'
+  rec_ppm   =scheme=='ppm'
+  rec_hybrid=scheme=='weno5ppm'
 
   do k = klo, khi
      do j = jlo, jhi
@@ -596,7 +604,7 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
               ! In WENO5-PPM, discontinuities in any hydro primitive select
               ! the same monotone PPM fallback for all reconstructed fields.
               troubled_x=.false.; troubled_y=.false.; troubled_z=.false.
-              if(scheme=='weno5ppm')then
+              if(rec_hybrid)then
                  do ivar_rec=1,ndim+2+nener
                     if(i==0)then
                        vmm=qouter(l,1,j,k,ivar_rec,1)
@@ -644,8 +652,11 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
               troubled_x_cache(l,i,j,k)=troubled_x
               troubled_y_cache(l,i,j,k)=troubled_y
               troubled_z_cache(l,i,j,k)=troubled_z
-              do ivar_rec=1,nvar
-                 if(scheme=='weno3')then
+              ! Only the ndim+2+nener hydro fields feed the Hancock update
+              ! below; passive scalars are reconstructed once, in their own
+              ! loop after this one.
+              do ivar_rec=1,ndim+2+nener
+                 if(rec_weno3)then
                     call reconstruct_weno3(q(l,i-1,j,k,ivar_rec), &
                          & q(l,i,j,k,ivar_rec),q(l,i+1,j,k,ivar_rec), &
                          & qedge_left(ivar_rec,1),qedge_right(ivar_rec,1))
@@ -655,7 +666,7 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
                     call reconstruct_weno3(q(l,i,j,k-1,ivar_rec), &
                          & q(l,i,j,k,ivar_rec),q(l,i,j,k+1,ivar_rec), &
                          & qedge_left(ivar_rec,3),qedge_right(ivar_rec,3))
-                 else if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+                 else if(rec_five)then
                     if(i==0)then
                        vmm=qouter(l,1,j,k,ivar_rec,1)
                     else
@@ -669,7 +680,8 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
                        vpp=q(l,i+2,j,k,ivar_rec)
                     end if
                     call reconstruct_five(vmm,vm,v0,vp,vpp, &
-                         & qedge_left(ivar_rec,1),qedge_right(ivar_rec,1),troubled_x)
+                         & qedge_left(ivar_rec,1),qedge_right(ivar_rec,1), &
+                         & troubled_x.or.rec_ppm,rec_hybrid)
 
                     if(j==0)then
                        vmm=qouter(l,1,i,k,ivar_rec,2)
@@ -684,7 +696,8 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
                        vpp=q(l,i,j+2,k,ivar_rec)
                     end if
                     call reconstruct_five(vmm,vm,v0,vp,vpp, &
-                         & qedge_left(ivar_rec,2),qedge_right(ivar_rec,2),troubled_y)
+                         & qedge_left(ivar_rec,2),qedge_right(ivar_rec,2), &
+                         & troubled_y.or.rec_ppm,rec_hybrid)
 
                     if(k==0)then
                        vmm=qouter(l,1,i,j,ivar_rec,3)
@@ -699,7 +712,8 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
                        vpp=q(l,i,j,k+2,ivar_rec)
                     end if
                     call reconstruct_five(vmm,vm,v0,vp,vpp, &
-                         & qedge_left(ivar_rec,3),qedge_right(ivar_rec,3),troubled_z)
+                         & qedge_left(ivar_rec,3),qedge_right(ivar_rec,3), &
+                         & troubled_z.or.rec_ppm,rec_hybrid)
                  else
                     qedge_left (ivar_rec,1)=q(l,i,j,k,ivar_rec)-half*dq(l,i,j,k,ivar_rec,1)
                     qedge_right(ivar_rec,1)=q(l,i,j,k,ivar_rec)+half*dq(l,i,j,k,ivar_rec,1)
@@ -814,7 +828,7 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
               ! predictor.  Guard the two thermodynamic variables again
               ! afterwards; this is a robustness check, not a proof of a
               ! discrete maximum principle for the full update.
-              if(scheme=='weno5ppm')then
+              if(rec_hybrid)then
                  do idim_trace=1,ndim
                     if(qp(l,i,j,k,ir,idim_trace)<smallr) &
                          & qp(l,i,j,k,ir,idim_trace)=r
@@ -852,9 +866,9 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
                  day = dq(l,i,j,k,n,2)
                  daz = dq(l,i,j,k,n,3)
                  sa0 = -u*dax-v*day-w*daz     ! Source terms
-                 if(scheme=='weno3')then
+                 if(rec_weno3)then
                     call reconstruct_weno3(q(l,i-1,j,k,n),a,q(l,i+1,j,k,n),aleft,aright)
-                 else if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+                 else if(rec_five)then
                     if(i==0)then
                        vmm=qouter(l,1,j,k,n,1)
                     else
@@ -866,16 +880,17 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
                     else
                        vpp=q(l,i+2,j,k,n)
                     end if
-                    call reconstruct_five(vmm,vm,a,vp,vpp,aleft,aright,troubled_x)
+                    call reconstruct_five(vmm,vm,a,vp,vpp,aleft,aright, &
+                         & troubled_x.or.rec_ppm,rec_hybrid)
                  else
                     aleft=a-half*dax
                     aright=a+half*dax
                  end if
                  qp(l,i,j,k,n,1) = aleft  + sa0*dtdx*half  ! Right state
                  qm(l,i,j,k,n,1) = aright + sa0*dtdx*half  ! Left state
-                 if(scheme=='weno3')then
+                 if(rec_weno3)then
                     call reconstruct_weno3(q(l,i,j-1,k,n),a,q(l,i,j+1,k,n),aleft,aright)
-                 else if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+                 else if(rec_five)then
                     if(j==0)then
                        vmm=qouter(l,1,i,k,n,2)
                     else
@@ -887,16 +902,17 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
                     else
                        vpp=q(l,i,j+2,k,n)
                     end if
-                    call reconstruct_five(vmm,vm,a,vp,vpp,aleft,aright,troubled_y)
+                    call reconstruct_five(vmm,vm,a,vp,vpp,aleft,aright, &
+                         & troubled_y.or.rec_ppm,rec_hybrid)
                  else
                     aleft=a-half*day
                     aright=a+half*day
                  end if
                  qp(l,i,j,k,n,2) = aleft  + sa0*dtdy*half  ! Bottom state
                  qm(l,i,j,k,n,2) = aright + sa0*dtdy*half  ! Upper state
-                 if(scheme=='weno3')then
+                 if(rec_weno3)then
                     call reconstruct_weno3(q(l,i,j,k-1,n),a,q(l,i,j,k+1,n),aleft,aright)
-                 else if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+                 else if(rec_five)then
                     if(k==0)then
                        vmm=qouter(l,1,i,j,n,3)
                     else
@@ -908,7 +924,8 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid,qouter)
                     else
                        vpp=q(l,i,j,k+2,n)
                     end if
-                    call reconstruct_five(vmm,vm,a,vp,vpp,aleft,aright,troubled_z)
+                    call reconstruct_five(vmm,vm,a,vp,vpp,aleft,aright, &
+                         & troubled_z.or.rec_ppm,rec_hybrid)
                  else
                     aleft=a-half*daz
                     aright=a+half*daz
@@ -971,17 +988,18 @@ end subroutine reconstruct_weno3
 !###########################################################
 !###########################################################
 !###########################################################
-subroutine reconstruct_five(qmm,qm,qzero,qp,qpp,qleft,qright,use_ppm)
+subroutine reconstruct_five(qmm,qm,qzero,qp,qpp,qleft,qright,use_ppm,hybrid)
   use amr_parameters, only:dp
-  use hydro_parameters, only:scheme
   implicit none
 
   real(dp),intent(in)::qmm,qm,qzero,qp,qpp
   real(dp),intent(out)::qleft,qright
-  logical,intent(in)::use_ppm
+  ! use_ppm is scheme=='ppm' .or. the troubled-cell flag, and hybrid is
+  ! scheme=='weno5ppm', both evaluated once per sweep by the caller.
+  logical,intent(in)::use_ppm,hybrid
   real(dp)::qmin,qmax
 
-  if(scheme=='ppm'.or.use_ppm)then
+  if(use_ppm)then
      call reconstruct_ppm(qmm,qm,qzero,qp,qpp,qleft,qright)
   else
      call reconstruct_weno5(qmm,qm,qzero,qp,qpp,qleft,qright)
@@ -990,7 +1008,7 @@ subroutine reconstruct_five(qmm,qm,qzero,qp,qpp,qleft,qright,use_ppm)
   ! The hybrid is explicitly local-bound limited.  This does not make the
   ! complete Hancock update maximum-principle preserving, hence the scheme
   ! name describes its WENO5--PPM composition rather than claiming "BP".
-  if(scheme=='weno5ppm')then
+  if(hybrid)then
      qmin=min(qmm,qm,qzero,qp,qpp)
      qmax=max(qmm,qm,qzero,qp,qpp)
      qleft =min(qmax,max(qmin,qleft ))

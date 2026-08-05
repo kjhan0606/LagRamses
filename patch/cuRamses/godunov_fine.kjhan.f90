@@ -806,7 +806,7 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
   ! each end of every coordinate line.  Gather only those six 4x4 slabs,
   ! rather than expanding every local work array to a full 8x8x8 cube.
   if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
-     call gather_five_point_outer(ilevel,ind_grid,uloc,uouter,ngrid,outer_complete)
+     call gather_five_point_outer(ilevel,ind_grid,uouter,ngrid,outer_complete)
      if(.not.outer_complete)then
         write(*,*)'FATAL: incomplete five-point hydro halo',myid,ilevel
         stop 2
@@ -1098,7 +1098,7 @@ end subroutine godfine1
 !###########################################################
 !###########################################################
 !###########################################################
-subroutine gather_five_point_outer(ilevel,ind_grid,uloc,uouter,ngrid,complete)
+subroutine gather_five_point_outer(ilevel,ind_grid,uouter,ngrid,complete)
   use amr_commons
   use hydro_commons
   use hydro_parameters
@@ -1107,47 +1107,48 @@ subroutine gather_five_point_outer(ilevel,ind_grid,uloc,uouter,ngrid,complete)
 
   integer,intent(in)::ilevel,ngrid
   integer,dimension(1:nvector),intent(in)::ind_grid
-  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar),intent(in)::uloc
   real(dp),dimension(1:nvector,1:2,0:3,0:3,1:nvar,1:ndim),intent(out)::uouter
   logical,intent(out)::complete
 
-  integer::l,idim,iside,it1,it2,ivar,istep,face
+  integer::l,idim,iside,it1,it2,ivar
   integer::ox,oy,oz,ix,iy,iz,igrid_nbor,ind_son,icell
   integer::off1,off2,bit1,bit2
+  integer,dimension(1:nvector,-2:2,-2:2,-2:2)::gtab
 
   complete=.true.
 
-  ! Deterministic nearest-cell fallback.  A missing value in the supported
-  ! uniform/periodic configuration is reported as fatal by the caller.
-  do idim=1,ndim
-     do iside=1,2
-        do it2=0,3
-           do it1=0,3
-              do ivar=1,nvar
-                 do l=1,ngrid
-                    select case(idim)
-                    case(1)
-                       if(iside==1)then
-                          uouter(l,iside,it1,it2,ivar,idim)=uloc(l,iu1,it1,it2,ivar)
-                       else
-                          uouter(l,iside,it1,it2,ivar,idim)=uloc(l,iu2,it1,it2,ivar)
-                       end if
-                    case(2)
-                       if(iside==1)then
-                          uouter(l,iside,it1,it2,ivar,idim)=uloc(l,it1,ju1,it2,ivar)
-                       else
-                          uouter(l,iside,it1,it2,ivar,idim)=uloc(l,it1,ju2,it2,ivar)
-                       end if
-                    case(3)
-                       if(iside==1)then
-                          uouter(l,iside,it1,it2,ivar,idim)=uloc(l,it1,it2,ku1,ivar)
-                       else
-                          uouter(l,iside,it1,it2,ivar,idim)=uloc(l,it1,it2,ku2,ivar)
-                       end if
-                    end select
-                 end do
-              end do
-           end do
+  ! Every slab entry below reaches its neighbor grid by a chained walk of
+  ! x steps, then y steps, then z steps, each stopping at a missing link.
+  ! Many entries share walk prefixes, so compute each chained offset once
+  ! per grid instead of re-walking it for all 96 (idim,iside,it1,it2)
+  ! combinations.  Only offsets on the needed lattice are filled; the walk
+  ! order and the stop-at-zero guards match the original per-entry walks
+  ! exactly.  A missing final grid in the supported uniform/periodic
+  ! configuration is reported as fatal by the caller.
+  gtab=0
+  do l=1,ngrid
+     gtab(l,0,0,0)=ind_grid(l)
+     gtab(l, 1,0,0)=chain_nbor(gtab(l, 0,0,0),2)
+     gtab(l, 2,0,0)=chain_nbor(gtab(l, 1,0,0),2)
+     gtab(l,-1,0,0)=chain_nbor(gtab(l, 0,0,0),1)
+     gtab(l,-2,0,0)=chain_nbor(gtab(l,-1,0,0),1)
+     do ox=-2,2
+        gtab(l,ox, 1,0)=chain_nbor(gtab(l,ox, 0,0),4)
+        gtab(l,ox,-1,0)=chain_nbor(gtab(l,ox, 0,0),3)
+        if(abs(ox)<=1)then
+           gtab(l,ox, 2,0)=chain_nbor(gtab(l,ox, 1,0),4)
+           gtab(l,ox,-2,0)=chain_nbor(gtab(l,ox,-1,0),3)
+        end if
+     end do
+     do oy=-2,2
+        do ox=-2,2
+           if(abs(ox)==2.and.abs(oy)==2)cycle
+           gtab(l,ox,oy, 1)=chain_nbor(gtab(l,ox,oy, 0),6)
+           gtab(l,ox,oy,-1)=chain_nbor(gtab(l,ox,oy, 0),5)
+           if(abs(ox)<=1.and.abs(oy)<=1)then
+              gtab(l,ox,oy, 2)=chain_nbor(gtab(l,ox,oy, 1),6)
+              gtab(l,ox,oy,-2)=chain_nbor(gtab(l,ox,oy,-1),5)
+           end if
         end do
      end do
   end do
@@ -1195,32 +1196,7 @@ subroutine gather_five_point_outer(ilevel,ind_grid,uloc,uouter,ngrid,complete)
               end select
 
               do l=1,ngrid
-                 igrid_nbor=ind_grid(l)
-
-                 if(ox<0)then
-                    face=1
-                 else
-                    face=2
-                 end if
-                 do istep=1,abs(ox)
-                    if(igrid_nbor>0)igrid_nbor=morton_nbor_grid(igrid_nbor,ilevel,face)
-                 end do
-                 if(oy<0)then
-                    face=3
-                 else
-                    face=4
-                 end if
-                 do istep=1,abs(oy)
-                    if(igrid_nbor>0)igrid_nbor=morton_nbor_grid(igrid_nbor,ilevel,face)
-                 end do
-                 if(oz<0)then
-                    face=5
-                 else
-                    face=6
-                 end if
-                 do istep=1,abs(oz)
-                    if(igrid_nbor>0)igrid_nbor=morton_nbor_grid(igrid_nbor,ilevel,face)
-                 end do
+                 igrid_nbor=gtab(l,ox,oy,oz)
 
                  if(igrid_nbor>0)then
                     ind_son=1+ix+2*iy+4*iz
@@ -1236,6 +1212,18 @@ subroutine gather_five_point_outer(ilevel,ind_grid,uloc,uouter,ngrid,complete)
         end do
      end do
   end do
+
+contains
+
+  function chain_nbor(g,face) result(gn)
+    integer,intent(in)::g,face
+    integer::gn
+    if(g>0)then
+       gn=morton_nbor_grid(g,ilevel,face)
+    else
+       gn=0
+    end if
+  end function chain_nbor
 
 end subroutine gather_five_point_outer
 #ifdef HYDRO_CUDA
