@@ -9,7 +9,7 @@ subroutine init_poisson
   integer::ncell,ncache,iskip,igrid,i,ilevel,ind,ivar
   integer::nvar2,ilevel2,numbl2,ilun,ibound,istart,info
   integer::ncpu2,ndim2,nlevelmax2,nboundary2
-  logical::scalar_in_checkpoint
+  logical::scalar_in_checkpoint,valid_restart_phi
   integer ,dimension(:),allocatable::ind_grid
   real(dp),dimension(:),allocatable::xx
   character(LEN=80)::fileloc
@@ -64,6 +64,13 @@ subroutine init_poisson
   safe_mode = .false.
   allocate(phi_restart_available(1:nlevelmax))
   phi_restart_available = .false.
+  ! output_00001 written at nstep_coarse=0 precedes the first Poisson solve,
+  ! so its gravity payload is not a valid warm-start guess.  Later outputs
+  ! are written after completed coarse steps and can safely seed the solver.
+  valid_restart_phi=nstep_coarse>0
+  if(nrestart>0 .and. .not.valid_restart_phi .and. myid==1)then
+     write(*,*)'Poisson restart: ignoring unsolved initial-output phi'
+  end if
 
   !--------------------------------
   ! For a restart, read poisson file
@@ -73,7 +80,7 @@ subroutine init_poisson
      if(informat == 'hdf5') then
         call restore_poisson_hdf5()
         do ilevel=1,nlevelmax
-           phi_restart_available(ilevel) = numbtot(1,ilevel)>0
+           phi_restart_available(ilevel) = valid_restart_phi .and. numbtot(1,ilevel)>0
         end do
         if(verbose)write(*,*)'HDF5 POISSON backup files read completed'
         return
@@ -82,7 +89,7 @@ subroutine init_poisson
      if(varcpu_restart) then
         call restore_poisson_binary_varcpu()
         do ilevel=1,nlevelmax
-           phi_restart_available(ilevel) = numbtot(1,ilevel)>0
+           phi_restart_available(ilevel) = valid_restart_phi .and. numbtot(1,ilevel)>0
         end do
         ! Free grid-mapping metadata (not needed after poisson restore).
         ! varcpu_nactive/my_files/ngrid_file are kept alive for
@@ -214,7 +221,7 @@ subroutine init_poisson
   if(myid==1 .and. scalar_in_checkpoint .and. allocated(scalar_gr)) &
        & write(*,*)'Modified-gravity scalar field restored from checkpoint'
   do ilevel=1,nlevelmax
-     phi_restart_available(ilevel) = numbtot(1,ilevel)>0
+     phi_restart_available(ilevel) = valid_restart_phi .and. numbtot(1,ilevel)>0
   end do
   if(verbose)write(*,*)'POISSON backup files read completed'
 
