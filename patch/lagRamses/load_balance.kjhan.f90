@@ -155,8 +155,32 @@ recursive subroutine load_balance
   ! No ownership boundary moved when the preflight found too little working
   ! space.  Avoid an otherwise pointless expand/shrink cycle: even a no-op
   ! remap temporarily consumes ghost slots and is exactly what the guard is
-  ! intended to defer.
+  ! intended to defer.  cmp_new_cpu_map is called only after the particle
+  ! tree has been collapsed to the level-1 trunk above.  A normal remap
+  ! scatters the particles again before returning (see the matching block
+  ! below); the no-op path must do the same with the still-current cpu map.
+  ! Otherwise real and virtual particles remain mixed in the trunk and a
+  ! later sink-cloud rebuild can spend an unbounded time walking inconsistent
+  ! particle lists.
   if(lb_remap_fraction<=0d0)then
+     if(pic.and.(.not.init))then
+        if(myid==1) then
+           write(*,*) 'Bounded remap: restoring particle tree before no-op return'
+           call flush(6)
+        end if
+        do ilevel=1,nlevelmax-1
+           call kill_tree_fine(ilevel)
+           call virtual_tree_fine(ilevel)
+        end do
+        call virtual_tree_fine(nlevelmax)
+        do ilevel=nlevelmax-1,levelmin,-1
+           call merge_tree_fine(ilevel)
+        end do
+        if(myid==1) then
+           write(*,*) 'Bounded remap: particle tree restore complete'
+           call flush(6)
+        end if
+     end if
      balance=.false.
      if(myid==1) write(*,*) 'Bounded remap: no safe progress; keeping current map'
      lb_chain_depth=lb_chain_depth-1
