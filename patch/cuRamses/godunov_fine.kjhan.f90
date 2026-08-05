@@ -199,7 +199,8 @@ subroutine godunov_fine(ilevel)
   ncache=active(ilevel)%ngrid
 
 #ifdef HYDRO_CUDA
-  if (cuda_available .and. hydro_cuda_initialized) then
+  if (cuda_available .and. hydro_cuda_initialized .and. &
+       & scheme/='weno5' .and. scheme/='weno5ppm' .and. scheme/='ppm') then
      call godunov_fine_hybrid(ilevel, ncache)
   else
 #endif
@@ -645,6 +646,9 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
 
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar)::uloc
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:ndim)::gloc
+  ! Extra axial slabs used only by five-point reconstructions.  The two
+  ! transverse indices cover trace cells 0:3; the final index is direction.
+  real(dp),dimension(1:nvector,1:2,0:3,0:3,1:nvar,1:ndim)::uouter
   real(dp),dimension(1:nvector,if1:if2,jf1:jf2,kf1:kf2,1:nvar,1:ndim)::flux
   real(dp),dimension(1:nvector,if1:if2,jf1:jf2,kf1:kf2,1:2,1:ndim)::tmp
   logical ,dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::ok
@@ -655,6 +659,7 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
   integer::i0,j0,k0,i1,j1,k1,i2,j2,k2,i3,j3,k3,nx_loc,nb_noneigh,nb_noneigh2,nexist
   integer::igridn_tmp
   integer::icell_nbor,idx
+  logical::outer_complete
   real(dp)::acc_unew(1:nvar),acc_ddivu,acc_denew
   integer::i1min,i1max,j1min,j1max,k1min,k1max
   integer::i2min,i2max,j2min,j2max,k2min,k2max
@@ -797,12 +802,24 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
   end do
   ! End loop over neighboring grids
 
+  ! WENO5 and PPM require one cell beyond the ordinary 6-cell stencil at
+  ! each end of every coordinate line.  Gather only those six 4x4 slabs,
+  ! rather than expanding every local work array to a full 8x8x8 cube.
+  if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
+     call gather_five_point_outer(ilevel,ind_grid,uouter,ngrid,outer_complete)
+     if(.not.outer_complete)then
+        write(*,*)'FATAL: incomplete five-point hydro halo',myid,ilevel
+        stop 2
+     end if
+  end if
+
   !-----------------------------------------------
   ! Compute flux using second-order Godunov method
   !-----------------------------------------------
 #ifdef HYDRO_CUDA
   use_gpu = .false.
-  if (cuda_available .and. hydro_cuda_initialized) then
+  if (cuda_available .and. hydro_cuda_initialized .and. &
+       & scheme/='weno5' .and. scheme/='weno5ppm' .and. scheme/='ppm') then
      stream_slot = int(cuda_acquire_stream_c())
      if (stream_slot >= 0) then
         use_gpu = .true.
@@ -817,10 +834,10 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
      end if
   end if
   if (.not. use_gpu) then
-     call unsplit(uloc,gloc,flux,tmp,dx,dx,dx,dtnew(ilevel),ngrid)
+     call unsplit(uloc,gloc,flux,tmp,dx,dx,dx,dtnew(ilevel),ngrid,uouter)
   end if
 #else
-  call unsplit(uloc,gloc,flux,tmp,dx,dx,dx,dtnew(ilevel),ngrid)
+  call unsplit(uloc,gloc,flux,tmp,dx,dx,dx,dtnew(ilevel),ngrid,uouter)
 #endif
 
   !------------------------------------------------
@@ -1077,6 +1094,138 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
 #endif
 
 end subroutine godfine1
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine gather_five_point_outer(ilevel,ind_grid,uouter,ngrid,complete)
+  use amr_commons
+  use hydro_commons
+  use hydro_parameters
+  use morton_hash
+  implicit none
+
+  integer,intent(in)::ilevel,ngrid
+  integer,dimension(1:nvector),intent(in)::ind_grid
+  real(dp),dimension(1:nvector,1:2,0:3,0:3,1:nvar,1:ndim),intent(out)::uouter
+  logical,intent(out)::complete
+
+  integer::l,idim,iside,it1,it2,ivar
+  integer::ox,oy,oz,ix,iy,iz,igrid_nbor,ind_son,icell
+  integer::off1,off2,bit1,bit2
+  integer,dimension(1:nvector,-2:2,-2:2,-2:2)::gtab
+
+  complete=.true.
+
+  ! Every slab entry below reaches its neighbor grid by a chained walk of
+  ! x steps, then y steps, then z steps, each stopping at a missing link.
+  ! Many entries share walk prefixes, so compute each chained offset once
+  ! per grid instead of re-walking it for all 96 (idim,iside,it1,it2)
+  ! combinations.  Only offsets on the needed lattice are filled; the walk
+  ! order and the stop-at-zero guards match the original per-entry walks
+  ! exactly.  A missing final grid in the supported uniform/periodic
+  ! configuration is reported as fatal by the caller.
+  gtab=0
+  do l=1,ngrid
+     gtab(l,0,0,0)=ind_grid(l)
+     gtab(l, 1,0,0)=chain_nbor(gtab(l, 0,0,0),2)
+     gtab(l, 2,0,0)=chain_nbor(gtab(l, 1,0,0),2)
+     gtab(l,-1,0,0)=chain_nbor(gtab(l, 0,0,0),1)
+     gtab(l,-2,0,0)=chain_nbor(gtab(l,-1,0,0),1)
+     do ox=-2,2
+        gtab(l,ox, 1,0)=chain_nbor(gtab(l,ox, 0,0),4)
+        gtab(l,ox,-1,0)=chain_nbor(gtab(l,ox, 0,0),3)
+        if(abs(ox)<=1)then
+           gtab(l,ox, 2,0)=chain_nbor(gtab(l,ox, 1,0),4)
+           gtab(l,ox,-2,0)=chain_nbor(gtab(l,ox,-1,0),3)
+        end if
+     end do
+     do oy=-2,2
+        do ox=-2,2
+           if(abs(ox)==2.and.abs(oy)==2)cycle
+           gtab(l,ox,oy, 1)=chain_nbor(gtab(l,ox,oy, 0),6)
+           gtab(l,ox,oy,-1)=chain_nbor(gtab(l,ox,oy, 0),5)
+           if(abs(ox)<=1.and.abs(oy)<=1)then
+              gtab(l,ox,oy, 2)=chain_nbor(gtab(l,ox,oy, 1),6)
+              gtab(l,ox,oy,-2)=chain_nbor(gtab(l,ox,oy,-1),5)
+           end if
+        end do
+     end do
+  end do
+
+  do idim=1,ndim
+     do iside=1,2
+        do it2=0,3
+           select case(it2)
+           case(0); off2=-1; bit2=1
+           case(1); off2= 0; bit2=0
+           case(2); off2= 0; bit2=1
+           case(3); off2= 1; bit2=0
+           end select
+           do it1=0,3
+              select case(it1)
+              case(0); off1=-1; bit1=1
+              case(1); off1= 0; bit1=0
+              case(2); off1= 0; bit1=1
+              case(3); off1= 1; bit1=0
+              end select
+
+              select case(idim)
+              case(1)
+                 if(iside==1)then
+                    ox=-2; ix=1
+                 else
+                    ox= 2; ix=0
+                 end if
+                 oy=off1; iy=bit1; oz=off2; iz=bit2
+              case(2)
+                 ox=off1; ix=bit1
+                 if(iside==1)then
+                    oy=-2; iy=1
+                 else
+                    oy= 2; iy=0
+                 end if
+                 oz=off2; iz=bit2
+              case(3)
+                 ox=off1; ix=bit1; oy=off2; iy=bit2
+                 if(iside==1)then
+                    oz=-2; iz=1
+                 else
+                    oz= 2; iz=0
+                 end if
+              end select
+
+              do l=1,ngrid
+                 igrid_nbor=gtab(l,ox,oy,oz)
+
+                 if(igrid_nbor>0)then
+                    ind_son=1+ix+2*iy+4*iz
+                    icell=ncoarse+(ind_son-1)*ngridmax+igrid_nbor
+                    do ivar=1,nvar
+                       uouter(l,iside,it1,it2,ivar,idim)=uold(icell,ivar)
+                    end do
+                 else
+                    complete=.false.
+                 end if
+              end do
+           end do
+        end do
+     end do
+  end do
+
+contains
+
+  function chain_nbor(g,face) result(gn)
+    integer,intent(in)::g,face
+    integer::gn
+    if(g>0)then
+       gn=morton_nbor_grid(g,ilevel,face)
+    else
+       gn=0
+    end if
+  end function chain_nbor
+
+end subroutine gather_five_point_outer
 #ifdef HYDRO_CUDA
 !###########################################################
 !###########################################################
@@ -1271,6 +1420,7 @@ subroutine hybrid_cpu_process_batch(ilevel, igrid_start, ngrid, sbuf)
   real(dp),dimension(1:nvector,1:twotondim,1:nvar)::u2
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar)::uloc
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:ndim)::gloc
+  real(dp),dimension(1:nvector,1:2,0:3,0:3,1:nvar,1:ndim)::uouter
   real(dp),dimension(1:nvector,if1:if2,jf1:jf2,kf1:kf2,1:nvar,1:ndim)::flux
   real(dp),dimension(1:nvector,if1:if2,jf1:jf2,kf1:kf2,1:2,1:ndim)::tmp
   logical ,dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::ok
@@ -1405,7 +1555,7 @@ subroutine hybrid_cpu_process_batch(ilevel, igrid_start, ngrid, sbuf)
   !-----------------------------------------------
   ! Compute flux using second-order Godunov method
   !-----------------------------------------------
-  call unsplit(uloc,gloc,flux,tmp,dx,dx,dx,dtnew(ilevel),ngrid)
+  call unsplit(uloc,gloc,flux,tmp,dx,dx,dx,dtnew(ilevel),ngrid,uouter)
 
   !------------------------------------------------
   ! Reset flux along direction at refined interface

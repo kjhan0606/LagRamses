@@ -23,6 +23,10 @@ module poisson_commons
   ! Multigrid safety switch
   logical, allocatable, dimension(:) :: safe_mode
 
+  ! A restart restores phi from the gravity dump.  Consume it once per level
+  ! as the first Poisson initial guess; fresh runs retain the normal predictor.
+  logical, allocatable, dimension(:) :: phi_restart_available
+
   ! Pre-computed neighbor grids for fine-level MG solver
   integer, allocatable, dimension(:,:) :: nbor_grid_fine
 

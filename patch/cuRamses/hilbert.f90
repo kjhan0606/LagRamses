@@ -33,7 +33,6 @@ subroutine hilbert2d(x,y,order,bit_length,npoint)
   integer     ,INTENT(IN) ,dimension(1:npoint)::x,y
   real(qdp),INTENT(OUT),dimension(1:npoint)::order
 
-  logical,dimension(0:2*bit_length-1)::i_bit_mask 
   logical,dimension(0:1*bit_length-1)::x_bit_mask,y_bit_mask
   integer,dimension(0:3,0:1,0:3)::state_diagram
   integer::i,ip,cstate,nstate,b0,b1,sdigit,hdigit
@@ -62,35 +61,20 @@ subroutine hilbert2d(x,y,order,bit_length,npoint)
         y_bit_mask(i)=btest(y(ip),i)
      enddo
      
-     ! interleave bits
-     do i=0,bit_length-1
-        i_bit_mask(2*i+1)=x_bit_mask(i)
-        i_bit_mask(2*i  )=y_bit_mask(i)
-     end do
-     
      ! build Hilbert ordering using state diagram
      cstate=0
+     order(ip)=0.
      do i=bit_length-1,0,-1
-        b1=0 ; if(i_bit_mask(2*i+1))b1=1
-        b0=0 ; if(i_bit_mask(2*i)  )b0=1
+        b1=0 ; if(x_bit_mask(i))b1=1
+        b0=0 ; if(y_bit_mask(i))b0=1
         sdigit=b1*2+b0
         nstate=state_diagram(sdigit,0,cstate)
         hdigit=state_diagram(sdigit,1,cstate)
-        i_bit_mask(2*i+1)=btest(hdigit,1)
-        i_bit_mask(2*i  )=btest(hdigit,0)
+        ! Direct base-4 accumulation avoids REAL(16) exponentiation for every
+        ! output bit while preserving the exact integer-valued Hilbert key.
+        order(ip)=order(ip)*real(4,kind=qdp)+real(hdigit,kind=qdp)
         cstate=nstate
      enddo
-
-     ! save Hilbert key as double precision real
-     order(ip)=0.
-     do i=0,2*bit_length-1
-        b0=0 ; if(i_bit_mask(i))b0=1
-#ifdef QUADHILBERT
-        order(ip)=order(ip)+real(b0,kind=16)*real(2,kind=16)**i
-#else
-        order(ip)=order(ip)+real(b0,kind=8)*real(2,kind=8)**i
-#endif
-     end do
 
   end do
 
@@ -107,7 +91,6 @@ subroutine hilbert3d(x,y,z,order,bit_length,npoint)
   integer     ,INTENT(IN) ,dimension(1:npoint)::x,y,z
   real(qdp),INTENT(OUT),dimension(1:npoint)::order
 
-  logical,dimension(0:3*bit_length-1)::i_bit_mask
   logical,dimension(0:1*bit_length-1)::x_bit_mask,y_bit_mask,z_bit_mask
   integer,dimension(0:7,0:1,0:11)::state_diagram
   integer::i,ip,cstate,nstate,b0,b1,b2,sdigit,hdigit
@@ -153,38 +136,21 @@ subroutine hilbert3d(x,y,z,order,bit_length,npoint)
         z_bit_mask(i)=btest(z(ip),i)
      enddo
      
-     ! interleave bits
-     do i=0,bit_length-1
-        i_bit_mask(3*i+2)=x_bit_mask(i)
-        i_bit_mask(3*i+1)=y_bit_mask(i)
-        i_bit_mask(3*i  )=z_bit_mask(i)
-     end do
-     
      ! build Hilbert ordering using state diagram
      cstate=0
+     order(ip)=0.
      do i=bit_length-1,0,-1
-        b2=0 ; if(i_bit_mask(3*i+2))b2=1
-        b1=0 ; if(i_bit_mask(3*i+1))b1=1
-        b0=0 ; if(i_bit_mask(3*i  ))b0=1
+        b2=0 ; if(x_bit_mask(i))b2=1
+        b1=0 ; if(y_bit_mask(i))b1=1
+        b0=0 ; if(z_bit_mask(i))b0=1
         sdigit=b2*4+b1*2+b0
         nstate=state_diagram(sdigit,0,cstate)
         hdigit=state_diagram(sdigit,1,cstate)
-        i_bit_mask(3*i+2)=btest(hdigit,2)
-        i_bit_mask(3*i+1)=btest(hdigit,1)
-        i_bit_mask(3*i  )=btest(hdigit,0)
+        ! Direct base-8 accumulation avoids software quad-precision 2**i in
+        ! the hot load-balance loop and preserves the exact Hilbert key.
+        order(ip)=order(ip)*real(8,kind=qdp)+real(hdigit,kind=qdp)
         cstate=nstate
      enddo
-
-     ! save Hilbert key as double precision real
-     order(ip)=0.
-     do i=0,3*bit_length-1
-        b0=0 ; if(i_bit_mask(i))b0=1
-#ifdef QUADHILBERT
-        order(ip)=order(ip)+real(b0,kind=16)*real(2,kind=16)**i
-#else
-        order(ip)=order(ip)+real(b0,kind=8)*real(2,kind=8)**i
-#endif
-     end do
 
   end do
 
@@ -193,4 +159,3 @@ end subroutine hilbert3d
 !================================================================
 !================================================================
 !================================================================
-

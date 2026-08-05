@@ -221,6 +221,24 @@ subroutine read_hydro_params(nml_ok)
   nexpand_bound=2
 #endif
 
+#ifdef SOLVERhydro
+  SELECT CASE (scheme)
+  CASE ('muscl','plmde')
+  CASE ('weno3')
+#if NDIM != 3
+    write(*,*)'scheme=weno3 is currently available only with NDIM=3'
+    nml_ok=.false.
+#endif
+    if(slope_type.ne.2)then
+      write(*,*)'scheme=weno3 requires slope_type=2 for the time predictor'
+      nml_ok=.false.
+    end if
+  CASE DEFAULT
+    write(*,*)'unknown hydro scheme: ',trim(scheme)
+    nml_ok=.false.
+  END SELECT
+#endif
+
   !--------------------------------------------------
   ! Check for dm only cosmo run
   !--------------------------------------------------

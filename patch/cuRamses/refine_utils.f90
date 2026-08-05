@@ -924,6 +924,14 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
 #endif
   endif
 
+  ! FDM is not part of the generic hydro interpolation above.  Initialize
+  ! exactly the grids allocated by this make_grid_fine call while their list
+  ! is still available.  Calling a level-wide prolongation after refine_fine
+  ! missed the actual child level and rewrote evolved grids on later levels.
+  if(use_fdm .and. .not.init .and. .not.balance)then
+     call fdm_prolong_grids(ilevel,ind_grid_son,nn)
+  end if
+
 end subroutine make_grid_fine
 !###############################################################
 !###############################################################

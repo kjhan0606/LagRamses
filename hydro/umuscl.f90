@@ -67,7 +67,7 @@ subroutine unsplit(uin,gravin,pin,flux,tmp,dx,dy,dz,dt,ngrid)
   call uslope(qin,dq,dx,dt,ngrid)
 
   ! Compute 3D traced-states in all three directions
-  if(scheme=='muscl')then
+  if(scheme=='muscl'.or.scheme=='weno3')then
 #if NDIM==1
      call trace1d(qin,dq,qm,qp,dx      ,dt,ngrid)
 #endif
@@ -444,7 +444,7 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
   real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim)::qp
 
   ! declare local variables
-  integer ::i, j, k, l
+  integer ::i, j, k, l, ivar_rec
   integer ::ilo,ihi,jlo,jhi,klo,khi
   integer ::ir, iu, iv, iw, ip
   real(dp)::dtdx, dtdy, dtdz
@@ -453,13 +453,14 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
   real(dp)::dry, duy, dvy, dwy, dpy
   real(dp)::drz, duz, dvz, dwz, dpz
   real(dp)::sr0, su0, sv0, sw0, sp0
+  real(dp),dimension(1:nvar,1:ndim)::qedge_left,qedge_right
 #if NENER>0
   integer ::irad
   real(dp),dimension(1:nener)::e, dex, dey, dez, se0
 #endif
 #if NVAR > NHYDRO + NENER
   integer ::n
-  real(dp)::a, dax, day, daz, sa0
+  real(dp)::a, dax, day, daz, sa0, aleft, aright
 #endif
 
   dtdx = dt/dx
@@ -521,6 +522,31 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
               end do
 #endif
 
+              ! Reconstruct primitive states at each cell edge.  MUSCL uses
+              ! the limited linear profile.  WENO3 uses two second-order
+              ! candidate stencils whose nonlinear weights recover the
+              ! third-order interface value in smooth flow.
+              do ivar_rec=1,nvar
+                 if(scheme=='weno3')then
+                    call reconstruct_weno3(q(l,i-1,j,k,ivar_rec), &
+                         & q(l,i,j,k,ivar_rec),q(l,i+1,j,k,ivar_rec), &
+                         & qedge_left(ivar_rec,1),qedge_right(ivar_rec,1))
+                    call reconstruct_weno3(q(l,i,j-1,k,ivar_rec), &
+                         & q(l,i,j,k,ivar_rec),q(l,i,j+1,k,ivar_rec), &
+                         & qedge_left(ivar_rec,2),qedge_right(ivar_rec,2))
+                    call reconstruct_weno3(q(l,i,j,k-1,ivar_rec), &
+                         & q(l,i,j,k,ivar_rec),q(l,i,j,k+1,ivar_rec), &
+                         & qedge_left(ivar_rec,3),qedge_right(ivar_rec,3))
+                 else
+                    qedge_left (ivar_rec,1)=q(l,i,j,k,ivar_rec)-half*dq(l,i,j,k,ivar_rec,1)
+                    qedge_right(ivar_rec,1)=q(l,i,j,k,ivar_rec)+half*dq(l,i,j,k,ivar_rec,1)
+                    qedge_left (ivar_rec,2)=q(l,i,j,k,ivar_rec)-half*dq(l,i,j,k,ivar_rec,2)
+                    qedge_right(ivar_rec,2)=q(l,i,j,k,ivar_rec)+half*dq(l,i,j,k,ivar_rec,2)
+                    qedge_left (ivar_rec,3)=q(l,i,j,k,ivar_rec)-half*dq(l,i,j,k,ivar_rec,3)
+                    qedge_right(ivar_rec,3)=q(l,i,j,k,ivar_rec)+half*dq(l,i,j,k,ivar_rec,3)
+                 end if
+              end do
+
               ! Source terms (including transverse derivatives)
               sr0 = -u*drx-v*dry-w*drz - (dux+dvy+dwz)*r
               sp0 = -u*dpx-v*dpy-w*dpz - (dux+dvy+dwz)*gamma*p
@@ -538,86 +564,86 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
 #endif
 
               ! Right state at left interface
-              qp(l,i,j,k,ir,1) = r - half*drx + sr0*dtdx*half
-              qp(l,i,j,k,ip,1) = p - half*dpx + sp0*dtdx*half
-              qp(l,i,j,k,iu,1) = u - half*dux + su0*dtdx*half
-              qp(l,i,j,k,iv,1) = v - half*dvx + sv0*dtdx*half
-              qp(l,i,j,k,iw,1) = w - half*dwx + sw0*dtdx*half
+              qp(l,i,j,k,ir,1) = qedge_left(ir,1) + sr0*dtdx*half
+              qp(l,i,j,k,ip,1) = qedge_left(ip,1) + sp0*dtdx*half
+              qp(l,i,j,k,iu,1) = qedge_left(iu,1) + su0*dtdx*half
+              qp(l,i,j,k,iv,1) = qedge_left(iv,1) + sv0*dtdx*half
+              qp(l,i,j,k,iw,1) = qedge_left(iw,1) + sw0*dtdx*half
 !              qp(l,i,j,k,ir,1) = max(smallr, qp(l,i,j,k,ir,1))
               if(qp(l,i,j,k,ir,1)<smallr)qp(l,i,j,k,ir,1)=r
 #if NENER>0
               do irad=1,nener
-                 qp(l,i,j,k,ip+irad,1) = e(irad) - half*dex(irad) + se0(irad)*dtdx*half
+                 qp(l,i,j,k,ip+irad,1) = qedge_left(ip+irad,1) + se0(irad)*dtdx*half
               end do
 #endif
 
               ! Left state at left interface
-              qm(l,i,j,k,ir,1) = r + half*drx + sr0*dtdx*half
-              qm(l,i,j,k,ip,1) = p + half*dpx + sp0*dtdx*half
-              qm(l,i,j,k,iu,1) = u + half*dux + su0*dtdx*half
-              qm(l,i,j,k,iv,1) = v + half*dvx + sv0*dtdx*half
-              qm(l,i,j,k,iw,1) = w + half*dwx + sw0*dtdx*half
+              qm(l,i,j,k,ir,1) = qedge_right(ir,1) + sr0*dtdx*half
+              qm(l,i,j,k,ip,1) = qedge_right(ip,1) + sp0*dtdx*half
+              qm(l,i,j,k,iu,1) = qedge_right(iu,1) + su0*dtdx*half
+              qm(l,i,j,k,iv,1) = qedge_right(iv,1) + sv0*dtdx*half
+              qm(l,i,j,k,iw,1) = qedge_right(iw,1) + sw0*dtdx*half
 !              qm(l,i,j,k,ir,1) = max(smallr, qm(l,i,j,k,ir,1))
               if(qm(l,i,j,k,ir,1)<smallr)qm(l,i,j,k,ir,1)=r
 #if NENER>0
               do irad=1,nener
-                 qm(l,i,j,k,ip+irad,1) = e(irad) + half*dex(irad) + se0(irad)*dtdx*half
+                 qm(l,i,j,k,ip+irad,1) = qedge_right(ip+irad,1) + se0(irad)*dtdx*half
               end do
 #endif
 
               ! Top state at bottom interface
-              qp(l,i,j,k,ir,2) = r - half*dry + sr0*dtdy*half
-              qp(l,i,j,k,ip,2) = p - half*dpy + sp0*dtdy*half
-              qp(l,i,j,k,iu,2) = u - half*duy + su0*dtdy*half
-              qp(l,i,j,k,iv,2) = v - half*dvy + sv0*dtdy*half
-              qp(l,i,j,k,iw,2) = w - half*dwy + sw0*dtdy*half
+              qp(l,i,j,k,ir,2) = qedge_left(ir,2) + sr0*dtdy*half
+              qp(l,i,j,k,ip,2) = qedge_left(ip,2) + sp0*dtdy*half
+              qp(l,i,j,k,iu,2) = qedge_left(iu,2) + su0*dtdy*half
+              qp(l,i,j,k,iv,2) = qedge_left(iv,2) + sv0*dtdy*half
+              qp(l,i,j,k,iw,2) = qedge_left(iw,2) + sw0*dtdy*half
 !              qp(l,i,j,k,ir,2) = max(smallr, qp(l,i,j,k,ir,2))
               if(qp(l,i,j,k,ir,2)<smallr)qp(l,i,j,k,ir,2)=r
 #if NENER>0
               do irad=1,nener
-                 qp(l,i,j,k,ip+irad,2) = e(irad) - half*dey(irad) + se0(irad)*dtdy*half
+                 qp(l,i,j,k,ip+irad,2) = qedge_left(ip+irad,2) + se0(irad)*dtdy*half
               end do
 #endif
 
               ! Bottom state at top interface
-              qm(l,i,j,k,ir,2) = r + half*dry + sr0*dtdy*half
-              qm(l,i,j,k,ip,2) = p + half*dpy + sp0*dtdy*half
-              qm(l,i,j,k,iu,2) = u + half*duy + su0*dtdy*half
-              qm(l,i,j,k,iv,2) = v + half*dvy + sv0*dtdy*half
-              qm(l,i,j,k,iw,2) = w + half*dwy + sw0*dtdy*half
+              qm(l,i,j,k,ir,2) = qedge_right(ir,2) + sr0*dtdy*half
+              qm(l,i,j,k,ip,2) = qedge_right(ip,2) + sp0*dtdy*half
+              qm(l,i,j,k,iu,2) = qedge_right(iu,2) + su0*dtdy*half
+              qm(l,i,j,k,iv,2) = qedge_right(iv,2) + sv0*dtdy*half
+              qm(l,i,j,k,iw,2) = qedge_right(iw,2) + sw0*dtdy*half
 !              qm(l,i,j,k,ir,2) = max(smallr, qm(l,i,j,k,ir,2))
               if(qm(l,i,j,k,ir,2)<smallr)qm(l,i,j,k,ir,2)=r
 #if NENER>0
               do irad=1,nener
-                 qm(l,i,j,k,ip+irad,2) = e(irad) + half*dey(irad) + se0(irad)*dtdy*half
+                 qm(l,i,j,k,ip+irad,2) = qedge_right(ip+irad,2) + se0(irad)*dtdy*half
               end do
 #endif
 
               ! Back state at front interface
-              qp(l,i,j,k,ir,3) = r - half*drz + sr0*dtdz*half
-              qp(l,i,j,k,ip,3) = p - half*dpz + sp0*dtdz*half
-              qp(l,i,j,k,iu,3) = u - half*duz + su0*dtdz*half
-              qp(l,i,j,k,iv,3) = v - half*dvz + sv0*dtdz*half
-              qp(l,i,j,k,iw,3) = w - half*dwz + sw0*dtdz*half
+              qp(l,i,j,k,ir,3) = qedge_left(ir,3) + sr0*dtdz*half
+              qp(l,i,j,k,ip,3) = qedge_left(ip,3) + sp0*dtdz*half
+              qp(l,i,j,k,iu,3) = qedge_left(iu,3) + su0*dtdz*half
+              qp(l,i,j,k,iv,3) = qedge_left(iv,3) + sv0*dtdz*half
+              qp(l,i,j,k,iw,3) = qedge_left(iw,3) + sw0*dtdz*half
 !              qp(l,i,j,k,ir,3) = max(smallr, qp(l,i,j,k,ir,3))
               if(qp(l,i,j,k,ir,3)<smallr)qp(l,i,j,k,ir,3)=r
 #if NENER>0
               do irad=1,nener
-                 qp(l,i,j,k,ip+irad,3) = e(irad) - half*dez(irad) + se0(irad)*dtdz*half
+                 qp(l,i,j,k,ip+irad,3) = qedge_left(ip+irad,3) + se0(irad)*dtdz*half
               end do
 #endif
 
               ! Front state at back interface
-              qm(l,i,j,k,ir,3) = r + half*drz + sr0*dtdz*half
-              qm(l,i,j,k,ip,3) = p + half*dpz + sp0*dtdz*half
-              qm(l,i,j,k,iu,3) = u + half*duz + su0*dtdz*half
-              qm(l,i,j,k,iv,3) = v + half*dvz + sv0*dtdz*half
-              qm(l,i,j,k,iw,3) = w + half*dwz + sw0*dtdz*half
+              qm(l,i,j,k,ir,3) = qedge_right(ir,3) + sr0*dtdz*half
+              qm(l,i,j,k,ip,3) = qedge_right(ip,3) + sp0*dtdz*half
+              qm(l,i,j,k,iu,3) = qedge_right(iu,3) + su0*dtdz*half
+              qm(l,i,j,k,iv,3) = qedge_right(iv,3) + sv0*dtdz*half
+              qm(l,i,j,k,iw,3) = qedge_right(iw,3) + sw0*dtdz*half
 !              qm(l,i,j,k,ir,3) = max(smallr, qm(l,i,j,k,ir,3))
               if(qm(l,i,j,k,ir,3)<smallr)qm(l,i,j,k,ir,3)=r
 #if NENER>0
               do irad=1,nener
-                 qm(l,i,j,k,ip+irad,3) = e(irad) + half*dez(irad) + se0(irad)*dtdz*half
+                 qm(l,i,j,k,ip+irad,3) = qedge_right(ip+irad,3) + se0(irad)*dtdz*half
               end do
 #endif
 
@@ -641,12 +667,30 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
                  day = dq(l,i,j,k,n,2)
                  daz = dq(l,i,j,k,n,3)
                  sa0 = -u*dax-v*day-w*daz     ! Source terms
-                 qp(l,i,j,k,n,1) = a - half*dax + sa0*dtdx*half  ! Right state
-                 qm(l,i,j,k,n,1) = a + half*dax + sa0*dtdx*half  ! Left state
-                 qp(l,i,j,k,n,2) = a - half*day + sa0*dtdy*half  ! Bottom state
-                 qm(l,i,j,k,n,2) = a + half*day + sa0*dtdy*half  ! Upper state
-                 qp(l,i,j,k,n,3) = a - half*daz + sa0*dtdz*half  ! Front state
-                 qm(l,i,j,k,n,3) = a + half*daz + sa0*dtdz*half  ! Back state
+                 if(scheme=='weno3')then
+                    call reconstruct_weno3(q(l,i-1,j,k,n),a,q(l,i+1,j,k,n),aleft,aright)
+                 else
+                    aleft=a-half*dax
+                    aright=a+half*dax
+                 end if
+                 qp(l,i,j,k,n,1) = aleft  + sa0*dtdx*half  ! Right state
+                 qm(l,i,j,k,n,1) = aright + sa0*dtdx*half  ! Left state
+                 if(scheme=='weno3')then
+                    call reconstruct_weno3(q(l,i,j-1,k,n),a,q(l,i,j+1,k,n),aleft,aright)
+                 else
+                    aleft=a-half*day
+                    aright=a+half*day
+                 end if
+                 qp(l,i,j,k,n,2) = aleft  + sa0*dtdy*half  ! Bottom state
+                 qm(l,i,j,k,n,2) = aright + sa0*dtdy*half  ! Upper state
+                 if(scheme=='weno3')then
+                    call reconstruct_weno3(q(l,i,j,k-1,n),a,q(l,i,j,k+1,n),aleft,aright)
+                 else
+                    aleft=a-half*daz
+                    aright=a+half*daz
+                 end if
+                 qp(l,i,j,k,n,3) = aleft  + sa0*dtdz*half  ! Front state
+                 qm(l,i,j,k,n,3) = aright + sa0*dtdz*half  ! Back state
               end do
            end do
         end do
@@ -656,6 +700,49 @@ subroutine trace3d(q,dq,qm,qp,dx,dy,dz,dt,ngrid)
 
 end subroutine trace3d
 #endif
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine reconstruct_weno3(qminus,qzero,qplus,qleft,qright)
+  use amr_parameters, only:dp
+  implicit none
+
+  real(dp),intent(in)::qminus,qzero,qplus
+  real(dp),intent(out)::qleft,qright
+  real(dp)::beta_minus,beta_plus,eps
+  real(dp)::alpha0,alpha1,weight0,weight1
+  real(dp)::candidate0,candidate1,qmin,qmax
+
+  beta_minus=(qzero-qminus)**2
+  beta_plus =(qplus-qzero)**2
+  eps=1.0d-12*max(1.0d0,qminus*qminus,qzero*qzero,qplus*qplus)
+
+  ! State at the left edge of the central cell.
+  alpha0=(2.0d0/3.0d0)/(eps+beta_minus)**2
+  alpha1=(1.0d0/3.0d0)/(eps+beta_plus )**2
+  weight0=alpha0/(alpha0+alpha1)
+  weight1=alpha1/(alpha0+alpha1)
+  candidate0=0.5d0*(qminus+qzero)
+  candidate1=1.5d0*qzero-0.5d0*qplus
+  qleft=weight0*candidate0+weight1*candidate1
+
+  ! State at the right edge of the central cell.
+  alpha0=(1.0d0/3.0d0)/(eps+beta_minus)**2
+  alpha1=(2.0d0/3.0d0)/(eps+beta_plus )**2
+  weight0=alpha0/(alpha0+alpha1)
+  weight1=alpha1/(alpha0+alpha1)
+  candidate0=1.5d0*qzero-0.5d0*qminus
+  candidate1=0.5d0*(qzero+qplus)
+  qright=weight0*candidate0+weight1*candidate1
+
+  ! Preserve local bounds near strong contacts and shocks.
+  qmin=min(qminus,qzero,qplus)
+  qmax=max(qminus,qzero,qplus)
+  qleft =min(qmax,max(qmin,qleft ))
+  qright=min(qmax,max(qmin,qright))
+
+end subroutine reconstruct_weno3
 !###########################################################
 !###########################################################
 !###########################################################

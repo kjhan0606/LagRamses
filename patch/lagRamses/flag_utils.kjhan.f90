@@ -484,6 +484,17 @@ subroutine userflag_fine(ilevel)
   scale=boxlen/dble(nx_loc)
   dx_loc=dx*scale
 
+  ! Set positions of cell centers relative to each grid center.  The void
+  ! floor is evaluated before the cooling holdback check below.
+  do ind=1,twotondim
+     iz=(ind-1)/4
+     iy=(ind-1-4*iz)/2
+     ix=(ind-1-2*iy-4*iz)
+     if(ndim>0)xc(ind,1)=(dble(ix)-0.5D0)*dx
+     if(ndim>1)xc(ind,2)=(dble(iy)-0.5D0)*dx
+     if(ndim>2)xc(ind,3)=(dble(iz)-0.5D0)*dx
+  end do
+
   ! Do we prevent the whole level from refining ?
   prevent_refine=.false.
   
@@ -499,6 +510,13 @@ subroutine userflag_fine(ilevel)
      endif
   endif
 
+  ! The void floor is independent of density and remains active during the
+  ! cooling holdback.  It is evaluated first so the early return below only
+  ! suppresses the ordinary high-level criteria.
+  if(void_refine .and. ilevel<void_refine_min_level)then
+     call voidflag_fine(ilevel,skip_loc,scale,xc)
+  end if
+
   if(prevent_refine) then
      call make_virtual_fine_int(flag1(1),ilevel)
      if(simple_boundary)call make_boundary_flag(ilevel)
@@ -507,21 +525,11 @@ subroutine userflag_fine(ilevel)
 
   ! FDM refinement: de Broglie (wave levels) + Madelung (fluid levels)
   ! Placed after prevent_refine so gas holdback gates FDM refinement too
-  if(use_fdm) call fdm_refine_flag(ilevel)
-  if(use_fdm) call fdm_madelung_refine_flag(ilevel)
+  if(use_fdm .and. .not.fdm_refine_matched) call fdm_refine_flag(ilevel)
+  if(use_fdm .and. .not.fdm_refine_matched) call fdm_madelung_refine_flag(ilevel)
 
   ! Compute FPR-adjusted effective m_refine for this level
   call compute_fpr_m_refine_eff(ilevel)
-
-  ! Set position of cell centers relative to grid center
-  do ind=1,twotondim
-     iz=(ind-1)/4
-     iy=(ind-1-4*iz)/2
-     ix=(ind-1-2*iy-4*iz)
-     if(ndim>0)xc(ind,1)=(dble(ix)-0.5D0)*dx
-     if(ndim>1)xc(ind,2)=(dble(iy)-0.5D0)*dx
-     if(ndim>2)xc(ind,3)=(dble(iz)-0.5D0)*dx
-  end do
 
   ! Loop over active grids
   ncache=active(ilevel)%ngrid
@@ -550,6 +558,43 @@ subroutine userflag_fine(ilevel)
   if(simple_boundary)call make_boundary_flag(ilevel)
 
 end subroutine userflag_fine
+!#####################################################################
+!#####################################################################
+!#####################################################################
+!#####################################################################
+subroutine voidflag_fine(ilevel,skip_loc,scale,xc)
+  use amr_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::scale
+  real(dp),dimension(1:3),intent(in)::skip_loc
+  real(dp),dimension(1:twotondim,1:3),intent(in)::xc
+  integer::i,ind,idim,iskip,ind_grid,ind_cell,nnew
+  real(dp),dimension(1:ndim)::xx
+  logical::refine_region_contains
+
+  nnew=0
+!$omp parallel do private(i,ind,idim,iskip,ind_grid,ind_cell,xx) reduction(+:nnew)
+  do i=1,active(ilevel)%ngrid
+     ind_grid=active(ilevel)%igrid(i)
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        ind_cell=ind_grid+iskip
+        do idim=1,ndim
+           xx(idim)=(xg(ind_grid,idim)+xc(ind,idim)-skip_loc(idim))*scale
+        end do
+        if(refine_region_contains(xx,ilevel))then
+           if(flag1(ind_cell)==0)then
+              flag1(ind_cell)=1
+              nnew=nnew+1
+           end if
+        end if
+     end do
+  end do
+!$omp end parallel do
+  nflag=nflag+nnew
+
+end subroutine voidflag_fine
 !#####################################################################
 !#####################################################################
 !#####################################################################
@@ -708,50 +753,65 @@ subroutine geometry_refine(xx,ind_cell,ok,ncell,ilevel)
   ! This routine sets flag1 to 1 if cell statisfy
   ! user-defined physical criterion for refinement.
   !-------------------------------------------------
-  real(dp)::er,xr,yr,zr,rr,xn,yn,zn,r,aa,bb
   integer ::i
+  logical::refine_region_contains
 
   ! Authorize refinement if cell lies within region,
   ! otherwise unmark cell (no refinement outside region)
   if(r_refine(ilevel)>-1.0)then
-     er=exp_refine(ilevel) ! Exponent defining norm
-     xr=x_refine  (ilevel) ! Region centre
-     yr=y_refine  (ilevel)
-     zr=z_refine  (ilevel)
-     rr=r_refine  (ilevel) ! Region DIAMETER (beware !)
-     aa=a_refine  (ilevel) ! Ellipticity (Y/X)
-     bb=b_refine  (ilevel) ! Ellipticity (Z/X)
      do i=1,ncell
-        xn=0.0d0; yn=0.0d0; zn=0.0d0
-        xn=abs(xx(i,1)-xr)
-        if(cosmo .and. xn>0.5) then
-           xn=1.0-xn
-        endif
-        xn=2.0d0*xn/rr
-#if NDIM > 1
-        yn=abs(xx(i,2)-yr)
-        if(cosmo .and. yn>0.5) then
-           yn=1.0-yn
-        endif
-        yn=2.0d0*yn/(aa*rr)
-#endif
-#if NDIM >2
-        zn=abs(xx(i,3)-zr)
-        if(cosmo .and. zn>0.5) then
-           zn=1.0-zn
-        endif
-        zn=2.0d0*zn/(bb*rr)
-#endif
-        if(er<10)then
-           r=(xn**er+yn**er+zn**er)**(1.0/er)
-        else
-           r=max(xn,yn,zn)
-        end if
-        ok(i)=ok(i).and.(r < 1.0)
+        ok(i)=ok(i).and.refine_region_contains(xx(i,1:ndim),ilevel)
      end do
   endif
 
 end subroutine geometry_refine
+!############################################################
+!############################################################
+!############################################################
+!############################################################
+logical function refine_region_contains(xx,ilevel)
+  use amr_commons
+  implicit none
+  integer,intent(in)::ilevel
+  real(dp),dimension(1:ndim),intent(in)::xx
+  real(dp)::er,xr,yr,zr,rr,xn,yn,zn,r,aa,bb
+
+  er=exp_refine(ilevel)
+  xr=x_refine(ilevel)
+  yr=y_refine(ilevel)
+  zr=z_refine(ilevel)
+  rr=r_refine(ilevel)
+  aa=a_refine(ilevel)
+  bb=b_refine(ilevel)
+
+  if(rr<=0.0d0 .or. er<=0.0d0 .or. aa<=0.0d0 .or. bb<=0.0d0)then
+     refine_region_contains=.false.
+     return
+  end if
+
+  xn=abs(xx(1)-xr)
+  if(cosmo .and. xn>0.5d0)xn=1.0d0-xn
+  xn=2.0d0*xn/rr
+  yn=0.0d0
+  zn=0.0d0
+#if NDIM > 1
+  yn=abs(xx(2)-yr)
+  if(cosmo .and. yn>0.5d0)yn=1.0d0-yn
+  yn=2.0d0*yn/(aa*rr)
+#endif
+#if NDIM > 2
+  zn=abs(xx(3)-zr)
+  if(cosmo .and. zn>0.5d0)zn=1.0d0-zn
+  zn=2.0d0*zn/(bb*rr)
+#endif
+  if(er<10.0d0)then
+     r=(xn**er+yn**er+zn**er)**(1.0d0/er)
+  else
+     r=max(xn,yn,zn)
+  end if
+  refine_region_contains=(r<1.0d0)
+
+end function refine_region_contains
 !############################################################
 !############################################################
 !############################################################
@@ -1054,6 +1114,7 @@ subroutine init_refmap_fine(ilevel)
   integer::i,icell,igrid,ncache,iskip,ngrid,ilun
   integer::ind,idim,ivar,ix,iy,iz,nx_loc
   integer::i1,i2,i3,i1_min,i1_max,i2_min,i2_max,i3_min,i3_max
+  integer::i1_lo,i1_hi,i2_lo,i2_hi
   integer::buf_count,info,nvar_in
   integer ,dimension(1:nvector)::ind_grid,ind_cell
 
@@ -1160,7 +1221,15 @@ subroutine init_refmap_fine(ilevel)
   ! Second step: read initial condition file
   !-----------------------------------------
   ! Allocate initial conditions array
-  if(ncache>0)allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
+  if(ncache>0)then
+     allocate(init_array(i1_min:i1_max,i2_min:i2_max,i3_min:i3_max))
+     ! A rank may own coarse background cells outside a zoom IC sub-volume.
+     ! Those cells must retain the default (unrefined) map value; copying the
+     ! full rank bounding box from init_plane used to read outside its bounds.
+     init_array=0.0_dp
+     i1_lo=max(1,i1_min); i1_hi=min(n1(ilevel),i1_max)
+     i2_lo=max(1,i2_min); i2_hi=min(n2(ilevel),i2_max)
+  endif
   allocate(init_plane(1:n1(ilevel),1:n2(ilevel)))
 
   if(myid==1)write(*,*)'Reading file '//TRIM(filename)
@@ -1181,9 +1250,10 @@ subroutine init_refmap_fine(ilevel)
      read(ilun) ! skip first line
      do i3=1,n3(ilevel)
         read(ilun) ((init_plane(i1,i2),i1=1,n1(ilevel)),i2=1,n2(ilevel))
-        if(i3.ge.i3_min.and.i3.le.i3_max)then
-           init_array(i1_min:i1_max,i2_min:i2_max,i3) = &
-                & init_plane(i1_min:i1_max,i2_min:i2_max)
+        if(i3.ge.i3_min.and.i3.le.i3_max.and. &
+             & i1_lo.le.i1_hi.and.i2_lo.le.i2_hi)then
+           init_array(i1_lo:i1_hi,i2_lo:i2_hi,i3) = &
+                & init_plane(i1_lo:i1_hi,i2_lo:i2_hi)
         end if
      end do
      close(ilun)
@@ -1216,9 +1286,10 @@ subroutine init_refmap_fine(ilevel)
         call MPI_BCAST(init_plane,buf_count,MPI_REAL,0,MPI_COMM_WORLD,info)
 #endif
         if(ncache>0)then
-           if(i3.ge.i3_min.and.i3.le.i3_max)then
-              init_array(i1_min:i1_max,i2_min:i2_max,i3) = &
-                   & init_plane(i1_min:i1_max,i2_min:i2_max)
+           if(i3.ge.i3_min.and.i3.le.i3_max.and. &
+                & i1_lo.le.i1_hi.and.i2_lo.le.i2_hi)then
+              init_array(i1_lo:i1_hi,i2_lo:i2_hi,i3) = &
+                   & init_plane(i1_lo:i1_hi,i2_lo:i2_hi)
            end if
         endif
      end do

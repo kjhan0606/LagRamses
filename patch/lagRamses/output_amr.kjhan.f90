@@ -225,6 +225,24 @@ subroutine dump_all
         if(myid==1.and.print_when_io) write(*,*)'End power spectrum'
      end if
 
+     ! Completion marker, written only once every rank has flushed every
+     ! component of this dump.  A backup interrupted part way through leaves the
+     ! output directory in place with its tail files truncated or missing, and a
+     ! restart that trusts the highest numbered directory then reads garbage: on
+     ! 2026-08-03 a filesystem stall during the poisson write cost two runs six
+     ! hours each, because every retry restarted from the same broken snapshot.
+     ! The marker replaces guesswork about completeness with a fact.  It sits
+     ! after label 998 so that the HDF5 path is covered as well.
+#ifndef WITHOUTMPI
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+     if(myid==1)then
+        filename='output_'//TRIM(nchar)//'/COMPLETE'
+        open(unit=11,file=TRIM(filename),form='formatted')
+        write(11,'(A)')TRIM(nchar)
+        close(11)
+     endif
+
   end if
 
 end subroutine dump_all

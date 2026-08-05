@@ -66,6 +66,10 @@ subroutine fdm_step(ilevel)
   end if
 
   ! ---- Schrödinger wave solver (existing) ----
+#ifdef FDMDEBUG
+  if(ilevel == levelmin .and. nstep_coarse >= 269) &
+       call fdm_mass_check('fdm-entry',ilevel)
+#endif
   if(fdm_split_order == 4) then
      yw1 = 1.0d0/(2.0d0 - 2.0d0**(1.0d0/3.0d0))
      yw0 = 1.0d0 - 2.0d0*yw1
@@ -81,9 +85,21 @@ subroutine fdm_step(ilevel)
      call fdm_drift(ilevel, 0.5d0*yw1*dt_loc)
   else
      call fdm_drift(ilevel, 0.5d0*dt_loc)
+#ifdef FDMDEBUG
+     if(ilevel == levelmin .and. nstep_coarse >= 269) &
+          call fdm_mass_check('after-drift-1',ilevel)
+#endif
      call timer('fdm-kick','start')
      call fdm_kick(ilevel, dt_loc)
+#ifdef FDMDEBUG
+     if(ilevel == levelmin .and. nstep_coarse >= 269) &
+          call fdm_mass_check('after-kick',ilevel)
+#endif
      call fdm_drift(ilevel, 0.5d0*dt_loc)
+#ifdef FDMDEBUG
+     if(ilevel == levelmin .and. nstep_coarse >= 269) &
+          call fdm_mass_check('after-drift-2',ilevel)
+#endif
   end if
 
   call timer('fdm-ghost','start')
@@ -354,6 +370,7 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
   integer,allocatable,save::pack_slot(:), pack_icell(:), pack_idx3d(:)
   logical,save::cache_done = .false.
   integer,save::cached_ngrid = -1, M_cache = 0
+  integer(i8b),save::cached_mesh_epoch = -1_i8b
 
   ! Locals
   integer::igrid, ngrid_loc, igrid_amr, icell_amr
@@ -362,6 +379,7 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
   integer::info, irank, ip, nreq, dest_rank, x_local
   integer::n_send_total, n_recv_total
   integer::m, slot
+  integer(i8b)::map_bad_loc,map_bad_glob
   integer::slab_x_lo, slab_x_hi
   integer(i8b)::idx_c
   real(dp)::denom, phase, cos_p, sin_p
@@ -582,7 +600,12 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
   ! changed. Stores, in cell-instance order, the absolute sendbuf slot, the
   ! slab idx_3d, and the AMR cell -- everything that does NOT depend on psi.
   ! ================================================================
-  if(.not. cache_done .or. global_changed .or. ngrid_loc /= cached_ngrid) then
+  if(.not. cache_done .or. global_changed .or. ngrid_loc /= cached_ngrid .or. &
+       amr_mesh_epoch /= cached_mesh_epoch) then
+#ifdef FDMDEBUG
+     if(myid == 1) write(*,'(A,I0,A,I0)') ' FDM FFT map rebuild: epoch ', &
+          cached_mesh_epoch, ' -> ', amr_mesh_epoch
+#endif
      if(allocated(pack_slot)) deallocate(pack_slot, pack_icell, pack_idx3d)
      M_cache = ngrid_loc * twotondim
      allocate(pack_slot(M_cache), pack_icell(M_cache), pack_idx3d(M_cache))
@@ -611,8 +634,45 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
         end do
      end do
      deallocate(send_idx)
-     cached_ngrid = ngrid_loc; cache_done = .true.
+     cached_ngrid = ngrid_loc
+     cached_mesh_epoch = amr_mesh_epoch
+     cache_done = .true.
   end if
+
+#ifdef FDMDEBUG
+  ! The cached AMR-cell indices are invalid after defrag even if the local
+  ! grid count and spatial bounds happen to be unchanged.  Validate the
+  ! production failure window so a stale map is caught before corrupting psi.
+  if(nstep_coarse >= 269) then
+     map_bad_loc = 0_i8b
+     m = 0
+     do igrid = 1, ngrid_loc
+        igrid_amr = active(ilevel)%igrid(igrid)
+        Kx = nint(xg(igrid_amr,1) * dble(fft_Nx))
+        Ky = nint(xg(igrid_amr,2) * dble(fft_Ny))
+        Kz = nint(xg(igrid_amr,3) * dble(fft_Nz))
+        do ind = 1, twotondim
+           ix = modulo(Kx - 1 + mod(ind-1,2),     fft_Nx)
+           iy = modulo(Ky - 1 + mod((ind-1)/2,2), fft_Ny)
+           iz = modulo(Kz - 1 + (ind-1)/4,        fft_Nz)
+           dest_rank = min(ix / fftw_block, ncpu-1)
+           x_local = ix - dest_rank * fftw_block
+           idx_3d = x_local * fft_Ny * fft_Nz + iy * fft_Nz + iz
+           iskip = ncoarse + (ind-1)*ngridmax
+           icell_amr = iskip + igrid_amr
+           m = m + 1
+           if(pack_icell(m) /= icell_amr .or. pack_idx3d(m) /= idx_3d) &
+                map_bad_loc = map_bad_loc + 1_i8b
+        end do
+     end do
+     call MPI_ALLREDUCE(map_bad_loc, map_bad_glob, 1, MPI_INTEGER8, &
+          MPI_SUM, MPI_COMM_WORLD, info)
+     if(myid == 1) write(*,'(A,I0,A,I0,A,I0)') &
+          ' FDM FFT map check: step=', nstep_coarse, ' epoch=', &
+          amr_mesh_epoch, ' mismatch=', map_bad_glob
+     if(map_bad_glob /= 0_i8b) call MPI_ABORT(MPI_COMM_WORLD, 913, info)
+  end if
+#endif
 
   ! ================================================================
   ! Pack (idx_3d, psi_re, psi_im) triples via the cached mapping.
@@ -844,9 +904,32 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   allocate(br(ntot),bi(ntot),rr(ntot),ri(ntot),rhr(ntot),rhi(ntot))
   allocate(pr(ntot),pi(ntot),vr(ntot),vi(ntot),sr(ntot),si(ntot))
   allocate(trr(ntot),tii(ntot),xr(ntot),xi(ntot))
-  br=0d0;bi=0d0;rr=0d0;ri=0d0;rhr=0d0;rhi=0d0
-  pr=0d0;pi=0d0;vr=0d0;vi=0d0;sr=0d0;si=0d0
-  trr=0d0;tii=0d0;xr=0d0;xi=0d0
+
+  ! The Krylov vectors use AMR cell indices, so their allocated extent follows
+  ! ngridmax rather than the number of grids present on this level.  Zeroing
+  ! every element touched sixteen capacity-sized arrays on every CN half-step;
+  ! production runs deliberately leave substantial grid headroom, making most
+  ! of that memory traffic useless.  Initialize all locally owned level cells
+  ! instead.  Leaf entries are the Krylov unknowns, refined entries must remain
+  ! zero, and make_virtual_fine_dp[2] overwrites the remote ghost entries before
+  ! every matvec reads them.
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+!$omp parallel do private(i,igrid,icell) schedule(static)
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
+        icell = igrid + iskip
+        br(icell)=0.0d0;  bi(icell)=0.0d0
+        rr(icell)=0.0d0;  ri(icell)=0.0d0
+        rhr(icell)=0.0d0; rhi(icell)=0.0d0
+        pr(icell)=0.0d0;  pi(icell)=0.0d0
+        vr(icell)=0.0d0;  vi(icell)=0.0d0
+        sr(icell)=0.0d0;  si(icell)=0.0d0
+        trr(icell)=0.0d0; tii(icell)=0.0d0
+        xr(icell)=0.0d0;  xi(icell)=0.0d0
+     end do
+!$omp end parallel do
+  end do
 
   ! b = (1-6ig)psi + ig N[psi] = A_{-g}[psi]   (boundary psi included;
   ! hybrid: coarse-fine ghosts enter b with weight 2, see cn_matvec)
@@ -937,8 +1020,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         exit
      end if
      call cn_matvec(ilevel, g, sr,si, trr,tii, 0)       ! t = A s
-     call cn_cdot(ilevel, trr,tii, sr,si, zts)          ! <t,s>
-     call cn_cdot(ilevel, trr,tii, trr,tii, ztt)        ! <t,t>
+     ! One grid traversal and one collective for the two products needed by
+     ! omega.  Keeping them separate doubled both memory traffic and global
+     ! reduction latency in every full BiCGSTAB iteration.
+     call cn_cdot2(ilevel, trr,tii, sr,si, trr,tii, zts,ztt) ! <t,s>, <t,t>
      if(abs(ztt) == 0.0d0) exit
      om = zts/ztt
      omr=dble(om); omi=aimag(om)
@@ -1174,6 +1259,49 @@ subroutine cn_cdot(ilevel, ar, ai, br, bi, res)
   res = cmplx(glob(1), glob(2), kind=dp)
 
 end subroutine cn_cdot
+!################################################################
+! Two complex inner products sharing the same left vector.  This is used for
+! <t,s> and <t,t> in BiCGSTAB so both reductions travel in one MPI collective.
+! Each accumulator retains the same cell order as cn_cdot.
+!################################################################
+subroutine cn_cdot2(ilevel, ar, ai, br, bi, cr, ci, res_ab, res_ac)
+  use amr_commons
+  use poisson_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),dimension(*)::ar,ai,br,bi,cr,ci
+  complex(dp),intent(out)::res_ab,res_ac
+  integer::igrid,ind,iskip,icell,info,i
+  real(dp)::loc(4),glob(4),sabr,sabi,sacr,saci
+
+  sabr=0.0d0; sabi=0.0d0; sacr=0.0d0; saci=0.0d0
+  do ind=1,twotondim
+     iskip = ncoarse + (ind-1)*ngridmax
+!$omp parallel do private(i,igrid,icell) reduction(+:sabr,sabi,sacr,saci) schedule(static)
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
+        icell = igrid + iskip
+        if(son(icell) == 0) then
+           sabr = sabr + ar(icell)*br(icell) + ai(icell)*bi(icell)
+           sabi = sabi + ar(icell)*bi(icell) - ai(icell)*br(icell)
+           sacr = sacr + ar(icell)*cr(icell) + ai(icell)*ci(icell)
+           saci = saci + ar(icell)*ci(icell) - ai(icell)*cr(icell)
+        end if
+     end do
+!$omp end parallel do
+  end do
+  loc(1)=sabr; loc(2)=sabi; loc(3)=sacr; loc(4)=saci
+  glob = loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(loc, glob, 4, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, info)
+#endif
+  res_ab = cmplx(glob(1), glob(2), kind=dp)
+  res_ac = cmplx(glob(3), glob(4), kind=dp)
+
+end subroutine cn_cdot2
 !################################################################
 ! Copy scratch (new_re,new_im) back into psi_re,psi_im for leaf cells.
 !################################################################
@@ -2563,17 +2691,19 @@ end subroutine fdm_init_phase_fft
 !################################################################
 !################################################################
 ! Phase 4: AMR prolongation for psi (mass-conserving)
-! Called when new refined grids are created at ilevel from ilevel-1
+! Called by make_grid_fine for exactly the grids just created at ilevel.
 ! Trilinear interpolation + renormalization to preserve |psi|^2 integral
 !################################################################
-subroutine fdm_prolong(ilevel)
+subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
   use amr_commons
   use poisson_commons
   use fdm_commons
   implicit none
   integer,intent(in)::ilevel
+  integer,intent(in)::ngrid_new
+  integer,dimension(1:nvector),intent(in)::ind_grid_new
 
-  integer::igrid,icell_coarse,ind_child,iskip_child,icell_child
+  integer::inew,igrid,icell_coarse,ind_child,iskip_child,icell_child
   integer::igrid_p,ind_p,ival,idim,icL,icR,ix,iy,iz
   real(dp)::psi_re_c,psi_im_c
   real(dp)::grad_re(3),grad_im(3)
@@ -2594,16 +2724,14 @@ subroutine fdm_prolong(ilevel)
   pi_h = 3.14159265358979d0 * hbar_code
   twopi_h = 2.0d0 * pi_h
 
-  call make_virtual_fine_dp(psi_re(1), ilevel-1)
-  call make_virtual_fine_dp(psi_im(1), ilevel-1)
-
-  igrid = headl(myid, ilevel)
-  do while(igrid > 0)
+  do inew=1,ngrid_new
+     igrid = ind_grid_new(inew)
      icell_coarse = father(igrid)
-     if(icell_coarse <= 0) then
-        igrid = next(igrid)
-        cycle
-     end if
+     if(icell_coarse <= 0) cycle
+     ! Remote and physical-boundary copies are filled by the normal virtual
+     ! exchange/boundary path.  Only locally owned children enter the leaf
+     ! mass and must be initialized here.
+     if(cpu_map(icell_coarse) /= myid) cycle
 
      psi_re_c = psi_re(icell_coarse)
      psi_im_c = psi_im(icell_coarse)
@@ -2728,13 +2856,9 @@ subroutine fdm_prolong(ilevel)
         end if
      end if
 
-     igrid = next(igrid)
   end do
 
-  call make_virtual_fine_dp(psi_re(1), ilevel)
-  call make_virtual_fine_dp(psi_im(1), ilevel)
-
-end subroutine fdm_prolong
+end subroutine fdm_prolong_grids
 !################################################################
 !################################################################
 ! Lightweight CFL check for HJM fluid levels.
@@ -3022,7 +3146,7 @@ subroutine fdm_diagnostics()
 #endif
 
   if(myid==1) then
-     write(*,'(A,ES12.5,A,ES10.3)') &
+     write(*,'(A,ES20.12,A,ES12.4)') &
           ' FDM: M_tot=', mass_glob, '  rho_max=', rho_max_glob
   end if
 
@@ -3033,7 +3157,7 @@ end subroutine fdm_diagnostics
 ! Prints total mass and per-level breakdown.
 ! label: short tag identifying the checkpoint location.
 !################################################################
-subroutine fdm_mass_check(label)
+subroutine fdm_mass_check(label,refine_level)
   use amr_commons
   use poisson_commons
   use fdm_commons
@@ -3042,16 +3166,15 @@ subroutine fdm_mass_check(label)
   include 'mpif.h'
 #endif
   character(len=*),intent(in)::label
+  integer,intent(in)::refine_level
   integer::ilevel,igrid,ind,iskip,icell,info
-  real(dp)::mass8_loc,mass8_glob,mass9_loc,mass9_glob
-  real(dp)::psi2,vol8,vol9,total
+  real(dp)::mass_loc(levelmin:nlevelmax),mass_glob(levelmin:nlevelmax)
+  real(dp)::psi2,vol,total
 
-  mass8_loc = 0.0d0
-  mass9_loc = 0.0d0
-  vol8 = (0.5d0**levelmin * boxlen/dble(icoarse_max-icoarse_min+1))**3
-  vol9 = vol8 / 8.0d0
+  mass_loc = 0.0d0
 
-  do ilevel=levelmin,min(levelmin+1,nlevelmax)
+  do ilevel=levelmin,nlevelmax
+     vol = (0.5d0**ilevel * boxlen/dble(icoarse_max-icoarse_min+1))**3
      do ind=1,twotondim
         iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
@@ -3063,11 +3186,7 @@ subroutine fdm_mass_check(label)
               else
                  psi2 = psi_re(icell)**2 + psi_im(icell)**2
               end if
-              if(ilevel == levelmin) then
-                 mass8_loc = mass8_loc + psi2 * vol8
-              else
-                 mass9_loc = mass9_loc + psi2 * vol9
-              end if
+              mass_loc(ilevel) = mass_loc(ilevel) + psi2 * vol
            end if
            igrid = next(igrid)
         end do
@@ -3075,20 +3194,18 @@ subroutine fdm_mass_check(label)
   end do
 
 #ifndef WITHOUTMPI
-  call MPI_ALLREDUCE(mass8_loc, mass8_glob, 1, MPI_DOUBLE_PRECISION, &
-       MPI_SUM, MPI_COMM_WORLD, info)
-  call MPI_ALLREDUCE(mass9_loc, mass9_glob, 1, MPI_DOUBLE_PRECISION, &
+  call MPI_ALLREDUCE(mass_loc, mass_glob, nlevelmax-levelmin+1, &
+       MPI_DOUBLE_PRECISION, &
        MPI_SUM, MPI_COMM_WORLD, info)
 #else
-  mass8_glob = mass8_loc
-  mass9_glob = mass9_loc
+  mass_glob = mass_loc
 #endif
 
-  total = mass8_glob + mass9_glob
+  total = sum(mass_glob)
   if(myid==1) then
-     write(*,'(A,A16,A,ES16.9,A,ES12.5,A,ES12.5)') &
-          ' MCHK:', label, ' tot=', total, &
-          ' L8=', mass8_glob, ' L9=', mass9_glob
+     write(*,'(A,A16,A,I3,A,ES20.12,100(A,I2,A,ES14.6))') &
+          ' MCHK:', label, ' parent=', refine_level, ' total=', total, &
+          (' L',ilevel,'=',mass_glob(ilevel),ilevel=levelmin,nlevelmax)
   end if
 
 end subroutine fdm_mass_check

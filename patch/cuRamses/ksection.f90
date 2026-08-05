@@ -186,6 +186,15 @@ contains
 
       new_hist_bounds = 0
 
+      ! Adjacent domains share endpoint entries; initialize those serially,
+      ! then partition disjoint compact-array ranges in parallel.
+      do i = 1, nc
+         new_hist_bounds(kfac * (i - 1) + 1) = bisec_hist_bounds(i)
+         new_hist_bounds(kfac * i + 1) = bisec_hist_bounds(i + 1)
+      end do
+
+      !$OMP PARALLEL DO DEFAULT(SHARED) &
+      !$OMP PRIVATE(i,lmost,rmost,part,tmp,tmp_coord,tmp_cost,tmp_level) SCHEDULE(DYNAMIC,1)
       do i = 1, nc
          lmost = bisec_hist_bounds(i)
 
@@ -216,11 +225,8 @@ contains
             new_hist_bounds(kfac * (i - 1) + part + 1) = lmost
          end do
 
-         ! First bound for domain i (start of partition 1)
-         new_hist_bounds(kfac * (i - 1) + 1) = bisec_hist_bounds(i)
-         ! Last bound for domain i (end of last partition)
-         new_hist_bounds(kfac * i + 1) = bisec_hist_bounds(i + 1)
       end do
+      !$OMP END PARALLEL DO
 
       bisec_hist_bounds = new_hist_bounds
 

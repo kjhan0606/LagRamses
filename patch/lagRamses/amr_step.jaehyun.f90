@@ -156,9 +156,13 @@ recursive subroutine amr_step(ilevel,icount)
            !--------------------------
            ! Refine grids
            !--------------------------
+#ifdef FDMDEBUG
+           if(use_fdm .and. i>=levelmin) call fdm_mass_check('pre-refine',i)
+#endif
            call refine_fine(i)
-           ! Prolong FDM psi to newly created cells
-           if(use_fdm) call fdm_prolong(i)
+#ifdef FDMDEBUG
+           if(use_fdm .and. i>=levelmin) call fdm_mass_check('post-refine',i)
+#endif
         end do
      end if
   end if
@@ -963,6 +967,14 @@ recursive subroutine amr_step(ilevel,icount)
   ! Compute refinement map
   !-----------------------
                                call timer('flag','start')
+  ! Keep the parent FDM ghosts current for the next coarse-step's
+  ! new-grid-only prolongation.  This must happen before flag_fine: the
+  ! refinement map is state carried across the step boundary, so no unrelated
+  ! communication belongs between flag_fine and the following refine_fine.
+  if(use_fdm .and. ilevel<nlevelmax)then
+     call make_virtual_fine_dp(psi_re(1),ilevel)
+     call make_virtual_fine_dp(psi_im(1),ilevel)
+  end if
   if(.not.static) call flag_fine(ilevel,icount)
 
   ! Accumulate exclusive rank x level work only on sparse sample steps.

@@ -133,6 +133,8 @@ module amr_parameters
   integer::mem_weight_grid=0          ! 0 = auto from nvar; >0 = user override
   integer::mem_weight_part=12        ! Memory per particle in dp-equivalents
   integer::mem_weight_sink=500      ! Computational weight per sink particle
+  real(dp)::lb_grid_headroom=0.85d0   ! load-balance grid-count safety margin (fraction of ngridmax)
+  real(dp)::lb_remap_fraction=1.0d0   ! fraction of requested boundary motion used by current remap
   integer::work_weight_grid=80       ! Work proxy per complete AMR grid
   integer::work_weight_part=1        ! Work proxy per particle in its leaf cell
   integer::work_weight_sidm_pair=8   ! Extra work per sampled SIDM pair
@@ -393,6 +395,13 @@ module amr_parameters
   logical ::fdm_hjm_qp=.false.        ! Enable quantum pressure on HJM fluid levels (ilevel<first_wave_level)
   real(dp)::fdm_qp_c1max=0.5d0        ! QP validity gate: zero QP where amplitude curvature C1 exceeds this
   real(dp)::fdm_refine_rho_min=8.0d0  ! de Broglie refinement density floor (units of mean)
+  ! Matched-refinement control for solver-comparison experiments.  The wave and
+  ! fluid arms normally refine on different criteria (de Broglie gradient vs
+  ! Madelung nonlinearity), so a three-way comparison measures solver and
+  ! refinement policy together.  Setting this true drops both solver-specific
+  ! flags and leaves the density criterion, which is common to every arm, so the
+  ! arms differ only in how they evolve psi.
+  logical ::fdm_refine_matched=.false.
 
   ! MOND (Modified Newtonian Dynamics) parameters
   logical ::use_mond=.false.             ! Enable QUMOND acceleration correction
@@ -561,7 +570,7 @@ module amr_parameters
 
   ! Refinement parameters for each level
   real(dp),dimension(1:MAXLEVEL)::m_refine =-1.0 ! Lagrangian threshold
-  real(dp),dimension(1:MAXLEVEL)::r_refine =-1.0 ! Radius of refinement region
+  real(dp),dimension(1:MAXLEVEL)::r_refine =-1.0 ! Diameter of refinement region
   real(dp),dimension(1:MAXLEVEL)::x_refine = 0.0 ! Center of refinement region
   real(dp),dimension(1:MAXLEVEL)::y_refine = 0.0 ! Center of refinement region
   real(dp),dimension(1:MAXLEVEL)::z_refine = 0.0 ! Center of refinement region
@@ -572,6 +581,8 @@ module amr_parameters
   real(dp)::mass_cut_refine=-1.0 ! Mass threshold for particle-based refinement
   integer::ivar_refine=-1 ! Variable index for refinement
   logical::sink_refine=.false. ! Fully refine on sink particles
+  logical::void_refine=.false. ! Enforce a mesh-level floor inside r_refine
+  integer::void_refine_min_level=-1 ! Target minimum level inside the void region
   real(dp),dimension(1:MAXLEVEL)::m_basic_refine=-1 ! Lagrangian threshold default ! (ONS)  
   real(dp)::m_refine_effective = 10000 ! (ONS)
   logical::q_refine_holdback=.true. !(ONS) ! default to the original form

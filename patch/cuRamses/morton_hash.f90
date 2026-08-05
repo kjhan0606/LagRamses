@@ -34,6 +34,11 @@ module morton_hash
   ! Maintained by make_grid_coarse/fine, kill_grid, and morton_hash_rebuild
   integer, allocatable :: grid_level(:)
 
+  ! Epoch of the last full rebuild.  Incremental refine/kill operations keep
+  ! the tables current; only defrag renumbers every grid and requires a full
+  ! rebuild.
+  integer(8) :: morton_hash_epoch = -1_8
+
 contains
 
   !--------------------------------------------------------------

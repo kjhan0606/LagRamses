@@ -2,7 +2,7 @@
 !#########################################################################
 !#########################################################################
 !#########################################################################
-subroutine load_balance
+recursive subroutine load_balance
   use amr_commons
   use pm_commons
   use hydro_commons, ONLY: nvar, uold
@@ -26,6 +26,8 @@ subroutine load_balance
   integer(i8b),dimension(nlevelmax,3)::comm_buffin,comm_buffout
   integer,allocatable::numbp_save(:)
   integer::nsave,isave
+  integer,save::lb_chain_depth=0
+  logical::continue_bounded_remap
 #ifndef WITHOUTMPI
   integer::countsend,countrecv
   integer,dimension(MPI_STATUS_SIZE,ncpu)::statuses
@@ -39,6 +41,8 @@ subroutine load_balance
 #endif
 
   if(ncpu==1)return
+
+  lb_chain_depth=lb_chain_depth+1
 
 #ifndef WITHOUTMPI
   t_lb_start = MPI_WTIME()
@@ -147,6 +151,17 @@ subroutine load_balance
      end do
      if(allocated(numbp_save)) deallocate(numbp_save)
   end if
+
+  ! No ownership boundary moved when the preflight found too little working
+  ! space.  Avoid an otherwise pointless expand/shrink cycle: even a no-op
+  ! remap temporarily consumes ghost slots and is exactly what the guard is
+  ! intended to defer.
+  if(lb_remap_fraction<=0d0)then
+     balance=.false.
+     if(myid==1) write(*,*) 'Bounded remap: no safe progress; keeping current map'
+     lb_chain_depth=lb_chain_depth-1
+     return
+  endif
 
   t2 = MPI_WTIME()
 
@@ -431,6 +446,19 @@ subroutine load_balance
   ! Return freed heap pages to OS (reduces RSS after bulk dealloc/realloc)
   call fortran_malloc_trim()
 
+  ! A bounded remap deliberately moves only part of a large ownership change.
+  ! The standard shrink pass above has now returned the old virtual grids to
+  ! the free list, so another ordinary remap can safely advance the boundary.
+  continue_bounded_remap = lb_remap_fraction>0d0 .and. &
+       lb_remap_fraction<0.999999d0 .and. lb_chain_depth<16
+  if(continue_bounded_remap)then
+     if(myid==1) write(*,'(A,I0,A)') ' Bounded remap: starting round ', &
+          lb_chain_depth+1,' after releasing old grid slots'
+     call load_balance
+  else if(lb_remap_fraction>0d0 .and. lb_remap_fraction<0.999999d0)then
+     if(myid==1) write(*,*) ' Bounded remap: round limit reached; remaining motion deferred'
+  end if
+
   if(verbose)then
      write(*,*)'Output mesh structure'
      do ilevel=1,nlevelmax
@@ -438,6 +466,8 @@ subroutine load_balance
      end do
   end if
 #endif
+
+  lb_chain_depth=lb_chain_depth-1
 
 999 format(' Level ',I2,' has ',I10,' grids (',3(I8,','),')')
 
@@ -463,7 +493,7 @@ subroutine cmp_new_cpu_map
   integer::ncode,bit_length,ilevel,i,ind,idim
   integer::nx_loc,ny_loc,nz_loc,nfar
   integer::info,icpu,jcpu,isub,idom,jdom
-  integer::nxny,ix,iy,iz,iskip
+  integer::nxny,ix,iy,iz,iskip,ilo,ihi,imid
   integer::ind_long
   integer::isink,igrid_sink,ind_sink,icell_sink,isubcell_sink
   integer::npair_cell
@@ -478,9 +508,11 @@ subroutine cmp_new_cpu_map
   real(kind=8),dimension(0:ndomain)::incost_new,incost_old
   integer(kind=8),dimension(1:overload)::npart_sub
   integer(kind=8)::wflag
+  integer(kind=8)::nraised_loc,nraised,ntot_grids_loc,ntot_grids
   integer,dimension(1:overload)::ncell_sub
   real(kind=8),dimension(1:ndomain)::cost_loc,cost_old,cost_new
   real(qdp),dimension(0:ndomain)::bound_key_loc
+  real(qdp),dimension(0:ndomain)::lb_bound_key_target
   real(kind=8),dimension(0:ndomain)::bigdbl,bigtmp
   integer,dimension(1:nvector)::dom
   real(qdp),dimension(1:nvector)::order_min,order_max
@@ -498,11 +530,37 @@ subroutine cmp_new_cpu_map
 
   ! Smoothed rank correction from sparse rank x level measurements
   real(kind=8),dimension(1:MAXLEVEL) :: rank_scale
+  real(kind=8) :: floor_w,min_weight_loc,min_weight_global
+  real(kind=8) :: grid_cap,guard_denom,predicted_maxcount,cost_imbalance
+  real(kind=8) :: grid_avail
+  integer(kind=8)::ngrid_own_loc,ngrid_own_max,ngrid_ext_loc,ngrid_ext_max
+  integer::ilev_g,icpu_g,ibnd_g
+  ! Every grid but the root is the child of exactly one refined cell, so an AMR
+  ! tree of G grids carries 8G-(G-1) = 7G+1 leaf cells.  flag1 holds one entry
+  ! per leaf cell, so this is the constant that converts a grid budget into the
+  ! cell budget the guard works in.  Using twotondim here overstates capacity by
+  ! 8/7 and helped sink job 399652 on 2026-08-03.
+  real(kind=8),parameter :: LB_LEAF_PER_GRID=7d0
+  integer :: guard_iter,floor_flag
+  integer,parameter :: LB_GRID_GUARD_MAXITER=3
+  real(kind=8),parameter :: LB_REMAP_SLOT_SHARE=0.5d0
+  logical :: guard_applied
+  integer,dimension(1:ncpu)::lb_nsend,lb_nrecv
+  integer::lb_incoming,lb_free_slots,lb_allowed,lb_target_cpu,lb_limit_iter
+  real(kind=8)::lb_fraction_local,lb_fraction_global
+  logical::lb_boundary_limited
+#ifndef WITHOUTMPI
+  real(dp)::tcmp_start,tcmp_key,tcmp_sort,tcmp_bound,tcmp_map,tcmp_virtual
+#endif
 
   ! Local constants
   nxny=nx*ny
   nx_loc=icoarse_max-icoarse_min+1
   scale=boxlen/dble(nx_loc)
+  lb_remap_fraction=1d0
+  lb_boundary_limited=.false.
+  lb_limit_iter=0
+  lb_bound_key_target=0.0_qdp
   
   ! Compute AMR subcycle work factors.  Memory balance deliberately ignores
   ! these factors because allocated memory does not grow with update count.
@@ -530,6 +588,15 @@ subroutine cmp_new_cpu_map
   end if
 
   if(verbose) print *,"Entering cmp_new_cpu_map"
+
+#ifndef WITHOUTMPI
+  tcmp_start=MPI_WTIME()
+  tcmp_key=tcmp_start
+  tcmp_sort=tcmp_start
+  tcmp_bound=tcmp_start
+  tcmp_map=tcmp_start
+  tcmp_virtual=tcmp_start
+#endif
 
   if(.not.use_cpubox_decomp) then      ! begin if not bisection/ksection
 
@@ -587,7 +654,11 @@ subroutine cmp_new_cpu_map
         xx(1,3)=(dble(iz)+0.5d0-dble(kcoarse_min))*scale
 #endif
         call cmp_minmaxorder(xx,order_min,order_max,dx,ncell_loc)
-        call cmp_dommap(xx,dom,ncell_loc)
+        if(overload>1)then
+           call cmp_dommap(xx,dom,ncell_loc)
+        else
+           dom(1)=1
+        end if
         ncell=ncell+1
         isub=(dom(1)-1)/ncpu+1
         ncell_sub(isub)=ncell_sub(isub)+1
@@ -664,7 +735,11 @@ subroutine cmp_new_cpu_map
            end do
            if(ncell_loc>0)then
               call cmp_minmaxorder(xx,order_min,order_max,dx*scale,ncell_loc)
-              call cmp_dommap(xx,dom,ncell_loc)
+              if(overload>1)then
+                 call cmp_dommap(xx,dom,ncell_loc)
+              else
+                 dom(1:ncell_loc)=1
+              end if
            end if
            ! Reserve batch of indices atomically
            batch_size=ncell_loc
@@ -714,6 +789,10 @@ subroutine cmp_new_cpu_map
   !$OMP END CRITICAL(merge_remap_cost)
   !$OMP END PARALLEL
 
+#ifndef WITHOUTMPI
+  tcmp_key=MPI_WTIME()
+#endif
+
   ! Clean up sink cost array
   if(allocated(sink_per_grid)) deallocate(sink_per_grid)
 
@@ -725,6 +804,10 @@ subroutine cmp_new_cpu_map
   ! Sort ordering key and store new index in flag2
   !------------------------------------------------
   if (ncell>0) call quick_sort_omp(hilbert_key(1),flag2(1),ncell)
+
+#ifndef WITHOUTMPI
+  tcmp_sort=MPI_WTIME()
+#endif
 
   !-----------------------------
   ! Balance cost across cpus
@@ -742,6 +825,178 @@ subroutine cmp_new_cpu_map
      incost_tot = incost_tot + cost_old(idom)
      incost_old(idom) = incost_tot
   end do
+
+  ! A cost-only partition can put too many cheap cells in one domain.  Impose
+  ! a lower bound on every positive cost so that the equal domain budget
+  ! cannot represent more than grid_cap entries.  flag1 carries one entry per
+  ! leaf cell, not per grid, so the per-rank capacity ngridmax is converted to
+  ! cells by twotondim before the cap is formed.  Zero-cost entries are not
+  ! AMR cells and retain their historical zero cost.
+  guard_applied = .false.
+  if(lb_grid_headroom > 0d0 .and. ngridmax > 0 .and. incost_tot > 0d0) then
+
+     ! Grid slots already spent on ghost copies of neighbouring domains and on
+     ! physical boundaries.  A rank must fit its own grids into whatever is
+     ! left.  The ghost layer follows the surface of the partition rather than
+     ! its volume, so no cell budget can predict it; measure what the previous
+     ! balance actually produced and subtract that, which lets each balance
+     ! correct the one before it.  Job 399652 died precisely here: the guard
+     ! predicted 6.8M grids against a 9.3M cap and the rank still ran out,
+     ! because the ghost layer alone needed another 40 per cent on top.
+     ngrid_own_loc = 0_8
+     ngrid_ext_loc = 0_8
+     do ilev_g = 1,nlevelmax
+        ngrid_own_loc = ngrid_own_loc+int(numbl(myid,ilev_g),kind=8)
+        do icpu_g = 1,ncpu
+           if(icpu_g /= myid) &
+                & ngrid_ext_loc = ngrid_ext_loc+int(numbl(icpu_g,ilev_g),kind=8)
+        end do
+        do ibnd_g = 1,nboundary
+           ngrid_ext_loc = ngrid_ext_loc+int(numbb(ibnd_g,ilev_g),kind=8)
+        end do
+     end do
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(ngrid_own_loc,ngrid_own_max,1, &
+          & MPI_INTEGER8,MPI_MAX,MPI_COMM_WORLD,info)
+     call MPI_ALLREDUCE(ngrid_ext_loc,ngrid_ext_max,1, &
+          & MPI_INTEGER8,MPI_MAX,MPI_COMM_WORLD,info)
+#else
+     ngrid_own_max = ngrid_own_loc
+     ngrid_ext_max = ngrid_ext_loc
+#endif
+
+     grid_avail = lb_grid_headroom*dble(ngridmax)-dble(ngrid_ext_max)
+     ! Never let a huge ghost measurement drive the budget to nothing; the
+     ! fallback below is a better answer than an unsatisfiable target.
+     grid_avail = max(grid_avail,0.1d0*lb_grid_headroom*dble(ngridmax))
+     grid_cap = LB_LEAF_PER_GRID*grid_avail/dble(overload)
+     guard_denom = dble(ndomain)*grid_cap
+
+     if(myid==1)then
+        write(*,'(A,I0,A,I0,A,I0,A,F6.1,A)') &
+             ' LB grid usage: own=',ngrid_own_max,' ghost+bnd=',ngrid_ext_max, &
+             ' ngridmax=',ngridmax,' ghost share=', &
+             1d2*dble(ngrid_ext_max)/dble(max(ngrid_own_max+ngrid_ext_max,1_8)),'%'
+     end if
+
+     min_weight_loc = huge(1d0)
+     ntot_grids_loc = 0_8
+     do i=1,ncell
+        if(flag1(i) > 0) then
+           min_weight_loc = min(min_weight_loc,dble(flag1(i)))
+           ntot_grids_loc = ntot_grids_loc+1_8
+        end if
+     end do
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(min_weight_loc,min_weight_global,1, &
+          & MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,info)
+     call MPI_ALLREDUCE(ntot_grids_loc,ntot_grids,1, &
+          & MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+     min_weight_global = min_weight_loc
+     ntot_grids = ntot_grids_loc
+#endif
+
+     floor_w = incost_tot/guard_denom
+     if(ntot_grids > 0_8 .and. floor_w > min_weight_global) then
+        do guard_iter=1,LB_GRID_GUARD_MAXITER
+           floor_w = incost_tot/guard_denom
+           if(floor_w <= min_weight_global) exit
+
+           ! Close the fixed-point iteration conservatively on the last pass.
+           ! For current total T, K positive entries and denominator D, choosing
+           ! floor >= T/(D-K) guarantees T_new <= D*floor.
+           if(guard_iter == LB_GRID_GUARD_MAXITER) then
+              if(guard_denom <= dble(ntot_grids)) then
+                 if(myid==1) write(*,*) &
+                      ' LB grid guard: occupancy exceeds the headroom;', &
+                      ' falling back to pure count balancing'
+                 ! The headroom target is out of reach, but an equal-count
+                 ! split is still the best partition for the count limit and
+                 ! remains feasible whenever occupancy stays under ngridmax.
+                 ! Give every positive entry the same cost and stop iterating.
+                 do i=1,ncell
+                    if(flag1(i) > 0) flag1(i) = 1
+                 end do
+                 guard_applied = .true.
+                 min_weight_global = 1d0
+                 exit
+              end if
+              floor_w = max(floor_w,incost_tot/ &
+                   & (guard_denom-dble(ntot_grids)))
+           end if
+
+           if(floor_w > dble(huge(flag1(1)))) then
+              if(myid==1) write(*,*) &
+                   ' wrong type for flag1 --> change to integer kind=8: floor=',floor_w
+#ifndef WITHOUTMPI
+              call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#endif
+              stop
+           end if
+           floor_flag = ceiling(floor_w)
+
+           nraised_loc = 0_8
+           do i=1,ncell
+              if(flag1(i) > 0 .and. flag1(i) < floor_flag) then
+                 flag1(i) = floor_flag
+                 nraised_loc = nraised_loc+1_8
+              end if
+           end do
+#ifndef WITHOUTMPI
+           call MPI_ALLREDUCE(nraised_loc,nraised,1, &
+                & MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+           nraised = nraised_loc
+#endif
+           guard_applied = guard_applied .or. (nraised > 0_8)
+           min_weight_global = max(min_weight_global,dble(floor_flag))
+
+           ! Rebuild every local subdomain sum because flag1 changed.
+           npart_sub = 0_8
+           ncell_loc = 0
+           do isub=1,overload
+              do i=1,ncell_sub(isub)
+                 npart_sub(isub) = npart_sub(isub) + &
+                      & int(flag1(flag2(ncell_loc+i)),kind=8)
+              end do
+              ncell_loc = ncell_loc+ncell_sub(isub)
+           end do
+           cost_loc = 0d0
+           do isub=1,overload
+              cost_loc(myid+(isub-1)*ncpu) = dble(npart_sub(isub))
+           end do
+#ifndef WITHOUTMPI
+           call MPI_ALLREDUCE(cost_loc,cost_old,ndomain, &
+                & MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+           cost_old = cost_loc
+#endif
+           incost_tot = 0d0
+           incost_old(0) = 0d0
+           do idom=1,ndomain
+              incost_tot = incost_tot+cost_old(idom)
+              incost_old(idom) = incost_tot
+           end do
+        end do
+
+        predicted_maxcount = (incost_tot/dble(ndomain))/min_weight_global
+        cost_imbalance = maxval(cost_old)/(incost_tot/dble(ndomain))
+        if(myid==1 .and. guard_applied) then
+           write(*,'(A,ES12.4,A,I0,A,I0,A,F14.0,A,F14.0,A,F10.4)') &
+                ' LB grid guard: floor=',floor_w,' raised=',nraised,'/',ntot_grids, &
+                ' predicted max cells=',predicted_maxcount,' / cap=',grid_cap, &
+                ' cost imbalance=',cost_imbalance
+           write(*,'(A,F14.0,A,F14.0,A,I0)') &
+                '                in grids: predicted own=', &
+                predicted_maxcount/LB_LEAF_PER_GRID,' + measured ghost=', &
+                dble(ngrid_ext_max),' vs ngridmax=',ngridmax
+        end if
+     else if(myid==1 .and. verbose) then
+        write(*,'(A)') ' LB grid guard: not needed'
+     end if
+  end if
+
   incost_new(0) = 0D0
   do idom = 1,ndomain
      cost_new(idom) = incost_tot/dble(ndomain) ! Exact load balancing
@@ -799,6 +1054,10 @@ subroutine cmp_new_cpu_map
      call build_ksection(update=.true.)
   end if   ! end if not bisection/ksection
 
+#ifndef WITHOUTMPI
+  tcmp_bound=MPI_WTIME()
+#endif
+
   ! Reset time-based load balancing accumulators (ksection/bisection path)
   if(use_cpubox_decomp) then
      level_time_loc = 0d0
@@ -814,6 +1073,7 @@ subroutine cmp_new_cpu_map
   !----------------------------------------
   ! Compute new cpu map
   !----------------------------------------
+210 continue
   cpu_map2=0
   ncell_loc=1
   do iz=0,nz-1
@@ -832,12 +1092,17 @@ subroutine cmp_new_cpu_map
      if(.not.use_cpubox_decomp) then
         call cmp_ordering(xx,order_max,ncell_loc)
         cpu_map2(ind)=ncpu ! default value
-        do idom=1,ndomain
-           if( order_max(1).ge.bound_key2(idom-1).and. &
-                & order_max(1).lt.bound_key2(idom))then
-              cpu_map2(ind)=mod(idom-1,ncpu)+1
-           endif
+        ilo=1
+        ihi=ndomain
+        do while(ilo<ihi)
+           imid=(ilo+ihi)/2
+           if(order_max(1)<bound_key2(imid))then
+              ihi=imid
+           else
+              ilo=imid+1
+           end if
         end do
+        cpu_map2(ind)=mod(ilo-1,ncpu)+1
      else if(ordering=='bisection') then
         xx_tmp(1,:) = xx(1,:)
         call cmp_bisection_cpumap(xx_tmp,c_tmp,1)
@@ -869,7 +1134,8 @@ subroutine cmp_new_cpu_map
      ncache=active(ilevel)%ngrid
      ! Loop over grids by vector sweeps (OMP parallelized)
      !$OMP PARALLEL DO DEFAULT(SHARED) &
-     !$OMP PRIVATE(igrid,ngrid,ind_grid,ind_cell,xx,order_max,i,ind,iskip,idim,idom,xx_tmp,c_tmp,c_tmp_v) &
+     !$OMP PRIVATE(igrid,ngrid,ind_grid,ind_cell,xx,order_max,i,ind,iskip,idim,idom, &
+     !$OMP         ilo,ihi,imid,xx_tmp,c_tmp,c_tmp_v) &
      !$OMP SCHEDULE(DYNAMIC,4)
      do igrid=1,ncache,nvector
         ! Gather nvector grids
@@ -891,13 +1157,17 @@ subroutine cmp_new_cpu_map
            if(.not.use_cpubox_decomp) then
               if(ngrid>0)call cmp_ordering(xx,order_max,ngrid)
               do i=1,ngrid
-                 cpu_map2(ind_cell(i))=ncpu ! default value
-                 do idom=1,ndomain
-                    if( order_max(i).ge.bound_key2(idom-1).and. &
-                         & order_max(i).lt.bound_key2(idom))then
-                       cpu_map2(ind_cell(i))=mod(idom-1,ncpu)+1
-                    endif
+                 ilo=1
+                 ihi=ndomain
+                 do while(ilo<ihi)
+                    imid=(ilo+ihi)/2
+                    if(order_max(i)<bound_key2(imid))then
+                       ihi=imid
+                    else
+                       ilo=imid+1
+                    end if
                  end do
+                 cpu_map2(ind_cell(i))=mod(ilo-1,ncpu)+1
               end do
            else if(ordering=='bisection') then
               do i=1,ngrid
@@ -919,11 +1189,112 @@ subroutine cmp_new_cpu_map
   end do
   ! End loop over levels
 
+  ! Bound a large ordered-domain move by the grid slots that are free now.
+  ! This leaves the existing refine/build_comm/Morton machinery untouched:
+  ! each pass performs a normal remap, shrinks the old boundary, and only then
+  ! advances farther toward the requested boundary in the next pass.
+  !
+  ! Count complete source grids rather than particles or leaf cells.  The
+  ! incoming count is a conservative upper bound because some incoming grids
+  ! may already exist locally as virtual grids.  Half of the headroom is kept
+  ! for the new ghost surface and physical boundaries.
+  ! Interpolating bound_key is a Hilbert-only operation.  Other orderings use
+  ! their own domain descriptors and must retain their normal remap path.
+  if(trim(ordering)=='hilbert' .and. lb_remap_fraction>0d0)then
+     lb_nsend=0
+     do ilevel=1,nlevelmax
+        do i=1,active(ilevel)%ngrid
+           igrid=active(ilevel)%igrid(i)
+           ! Before the expand pass, a small number of coarse/root grids can
+           ! still have no parent cell.  The normal remap assigns those
+           ! fathers during refine_coarse; they must not index cpu_map2(0)
+           ! in this preflight estimate.  Omitting them is harmless because
+           ! half of the available slots is already reserved as margin.
+           if(father(igrid)<=0) cycle
+           lb_target_cpu=cpu_map2(father(igrid))
+           if(lb_target_cpu<1.or.lb_target_cpu>ncpu) cycle
+           if(lb_target_cpu/=myid) lb_nsend(lb_target_cpu)= &
+                lb_nsend(lb_target_cpu)+1
+        end do
+     end do
+#ifndef WITHOUTMPI
+     call MPI_ALLTOALL(lb_nsend,1,MPI_INTEGER,lb_nrecv,1,MPI_INTEGER, &
+          MPI_COMM_WORLD,info)
+#else
+     lb_nrecv=lb_nsend
+#endif
+     lb_incoming=sum(lb_nrecv)-lb_nrecv(myid)
+     lb_free_slots=max(0,int(lb_grid_headroom*dble(ngridmax))-used_mem)
+     lb_allowed=max(0,int(LB_REMAP_SLOT_SHARE*dble(lb_free_slots)))
+     if(lb_incoming>0)then
+        lb_fraction_local=min(1d0,dble(lb_allowed)/dble(lb_incoming))
+     else
+        lb_fraction_local=1d0
+     end if
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(lb_fraction_local,lb_fraction_global,1, &
+          MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,info)
+#else
+     lb_fraction_global=lb_fraction_local
+#endif
+     if(lb_fraction_global<0.999999d0)then
+        if(.not.lb_boundary_limited)then
+           lb_bound_key_target=bound_key2
+           lb_boundary_limited=.true.
+        endif
+        ! Hilbert occupancy is not linear in boundary-key distance.  Recount
+        ! the actual candidate after every reduction rather than assuming a
+        ! fraction of the full key motion moves the same fraction of grids.
+        lb_remap_fraction=lb_remap_fraction*lb_fraction_global
+        if(lb_remap_fraction<0.01d0 .or. lb_limit_iter>=12)then
+           lb_remap_fraction=0d0
+           bound_key2=bound_key
+           if(myid==1) write(*,'(A,I0,A,I0,A)') &
+                ' Bounded remap deferred: incoming=',lb_incoming, &
+                ' allowed=',lb_allowed,' (insufficient free slots)'
+        else
+           lb_limit_iter=lb_limit_iter+1
+           do idom=1,ndomain-1
+              bound_key2(idom)=bound_key(idom)+ &
+                   real(lb_remap_fraction,kind=qdp)* &
+                   (lb_bound_key_target(idom)-bound_key(idom))
+           end do
+           bound_key2(0)=order_all_min
+           bound_key2(ndomain)=order_all_max
+           if(myid==1) write(*,'(A,I0,A,F7.3,A,I0,A,I0,A,I0)') &
+                ' Bounded remap candidate ',lb_limit_iter, &
+                ' fraction=',lb_remap_fraction, &
+                ' incoming=',lb_incoming,' allowed=',lb_allowed, &
+                ' free=',lb_free_slots
+        end if
+        goto 210
+     else if(lb_boundary_limited .and. myid==1)then
+        write(*,'(A,F7.3,A,I0,A,I0,A,I0)') &
+             ' Bounded remap accepted fraction=',lb_remap_fraction, &
+             ' actual incoming=',lb_incoming,' allowed=',lb_allowed, &
+             ' free=',lb_free_slots
+     end if
+  end if
+
+#ifndef WITHOUTMPI
+  tcmp_map=MPI_WTIME()
+#endif
+
   ! Update virtual boundaries for new cpu map
   call make_virtual_coarse_int(cpu_map2(1))
   do ilevel=1,nlevelmax
      call make_virtual_fine_int(cpu_map2(1),ilevel)
   end do 
+
+#ifndef WITHOUTMPI
+  tcmp_virtual=MPI_WTIME()
+  if(myid==1)then
+     write(*,'(A,A,A,5(F9.3,A))') ' cmp_new_cpu_map stages [',trim(ordering), &
+          ']: key/cost=',tcmp_key-tcmp_start,' s sort=',tcmp_sort-tcmp_key, &
+          ' s boundary=',tcmp_bound-tcmp_sort,' s cpumap=',tcmp_map-tcmp_bound, &
+          ' s virtual=',tcmp_virtual-tcmp_map,' s'
+  end if
+#endif
 
 end subroutine cmp_new_cpu_map
 !#########################################################################
@@ -940,19 +1311,23 @@ subroutine cmp_cpumap(x,c,nn)
   integer ,dimension(1:nvector)::c
   real(dp),dimension(1:nvector,1:ndim)::x
 
-  integer::i,idom
+  integer::i,ilo,ihi,imid
   real(qdp),dimension(1:nvector)::order
 
   if(.not.use_cpubox_decomp) then
      call cmp_ordering(x,order,nn)
      do i=1,nn
-        c(i)=ndomain ! default value
-        do idom=1,ndomain
-           if(    order(i).ge.bound_key(idom-1).and. &
-                & order(i).lt.bound_key(idom  ))then
-              c(i)=idom
-           endif
+        ilo=1
+        ihi=ndomain
+        do while(ilo<ihi)
+           imid=(ilo+ihi)/2
+           if(order(i)<bound_key(imid))then
+              ihi=imid
+           else
+              ilo=imid+1
+           end if
         end do
+        c(i)=ilo
      end do
      do i=1,nn
         c(i)=MOD(c(i)-1,ncpu)+1
@@ -977,18 +1352,22 @@ subroutine cmp_dommap(x,c,nn)
   integer ,dimension(1:nvector)::c
   real(dp),dimension(1:nvector,1:ndim)::x
 
-  integer::i,idom
+  integer::i,ilo,ihi,imid
   real(qdp),dimension(1:nvector)::order
 
   call cmp_ordering(x,order,nn)
   do i=1,nn
-     c(i)=ndomain ! default value
-     do idom=1,ndomain
-        if(    order(i).ge.bound_key(idom-1).and. &
-             & order(i).lt.bound_key(idom  ))then
-           c(i)=idom
-        endif
+     ilo=1
+     ihi=ndomain
+     do while(ilo<ihi)
+        imid=(ilo+ihi)/2
+        if(order(i)<bound_key(imid))then
+           ihi=imid
+        else
+           ilo=imid+1
+        end if
      end do
+     c(i)=ilo
   end do
   
 end subroutine cmp_dommap
@@ -1897,6 +2276,9 @@ subroutine defrag
   end do
 
   ngrid_current=ngrid2
+  ! Cached cell-index maps (notably the distributed FDM FFT pack map) must
+  ! never survive grid renumbering, even when local counts and bounds match.
+  amr_mesh_epoch=amr_mesh_epoch+1_i8b
 
 #ifndef WITHOUTMPI
   t_defrag_end = MPI_WTIME()

@@ -1667,6 +1667,7 @@ subroutine defrag
   end do
 
   ngrid_current=ngrid2
+  amr_mesh_epoch=amr_mesh_epoch+1_i8b
 
 end subroutine defrag
 !#########################################################################

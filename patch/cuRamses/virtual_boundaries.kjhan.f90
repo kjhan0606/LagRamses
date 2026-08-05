@@ -484,6 +484,7 @@ subroutine make_virtual_fine_dp(xx,ilevel)
                    (xchg_phase(1)==3 .and. xchg_chosen(1)==0)
      end if
   end if
+  if(balance) use_ksec=.true.
   if(use_ksec) then
 #ifndef WITHOUTMPI
      t1 = MPI_WTIME()
@@ -1435,8 +1436,8 @@ subroutine build_comm(ilevel)
      end do
   end do
 
-  call ksection_exchange_dp(sendbuf_bc, ntotal_bc, destcpu_bc, 3, &
-       & recvbuf_bc, nrecv_bc)
+  call ksection_exchange_dp(sendbuf_bc,ntotal_bc,destcpu_bc,3, &
+       recvbuf_bc,nrecv_bc)
   deallocate(sendbuf_bc, destcpu_bc)
 
   ! Count emission grids per sender
@@ -1497,7 +1498,7 @@ end subroutine build_comm
 !################################################################
 subroutine make_virtual_fine_dp_ksec(xx,ilevel)
   use amr_commons
-  use ksection
+  use dynamic_exchange, only: choose_exchange_backend, exchange_dp_sorted
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1505,55 +1506,73 @@ subroutine make_virtual_fine_dp_ksec(xx,ilevel)
   integer::ilevel
   real(dp),dimension(1:ncoarse+ngridmax*twotondim)::xx
   ! -------------------------------------------------------------------
-  ! Ksection-based forward ghost zone exchange for double precision.
-  ! Packs emission data with metadata, exchanges via ksection tree,
-  ! then scatters to reception grids using metadata.
+  ! Adaptive forward ghost exchange.  build_comm already grouped both sides by
+  ! peer in matching grid order, so no Morton/Hilbert metadata belongs in this
+  ! network layer.  Pack one contiguous property-major segment per peer, route
+  ! it with the selected backend, and scatter the matching source segment.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid
-  real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
-  integer,allocatable::dest_cpu(:)
+  integer::icpu,i,j,ntotal,nrecv,nelem_send,nelem_recv,igrid,exchange_backend
+  integer::nsend(1:ncpu),nrecv_peer(1:ncpu),sdisp(1:ncpu),rdisp(1:ncpu)
+  integer::nsend_elem(1:ncpu),nrecv_elem(1:ncpu),sdisp_elem(1:ncpu),rdisp_elem(1:ncpu)
+  integer,parameter::guard_records=8
+  integer,save::last_log_step=-1,last_log_level=-1
+  real(dp),parameter::guard_value=-huge(1.0_dp)
+  real(dp),allocatable::sendbuf(:),recvbuf(:)
 
 #ifndef WITHOUTMPI
-  nprops_ksec = twotondim + 2
-
-  ! Count total emission items
-  ntotal = 0
-  do icpu = 1, ncpu
-     ntotal = ntotal + emission(icpu,ilevel)%ngrid
+  do icpu=1,ncpu
+     nsend(icpu)=emission(icpu,ilevel)%ngrid
+     nrecv_peer(icpu)=reception(icpu,ilevel)%ngrid
   end do
+  sdisp(1)=0; rdisp(1)=0
+  do icpu=2,ncpu
+     sdisp(icpu)=sdisp(icpu-1)+nsend(icpu-1)
+     rdisp(icpu)=rdisp(icpu-1)+nrecv_peer(icpu-1)
+  end do
+  ntotal=sum(nsend); nrecv=sum(nrecv_peer)
+  nsend_elem=nsend*twotondim; nrecv_elem=nrecv_peer*twotondim
+  sdisp_elem=sdisp*twotondim; rdisp_elem=rdisp*twotondim
+  nelem_send=ntotal*twotondim; nelem_recv=nrecv*twotondim
 
-  ! Pack sendbuf + dest_cpu
-  allocate(sendbuf(1:nprops_ksec, 1:max(ntotal,1)))
-  allocate(dest_cpu(1:max(ntotal,1)))
-  idx = 0
-  do icpu = 1, ncpu
-     do i = 1, emission(icpu,ilevel)%ngrid
-        idx = idx + 1
-        dest_cpu(idx) = icpu
-        do j = 1, twotondim
-           sendbuf(j, idx) = xx(emission(icpu,ilevel)%igrid(i) &
-                & + ncoarse + (j-1)*ngridmax)
+  allocate(sendbuf(max(nelem_send,1)))
+  allocate(recvbuf(max(nelem_recv,1)+guard_records*twotondim))
+  recvbuf(max(nelem_recv,1)+1:max(nelem_recv,1)+guard_records*twotondim)=guard_value
+  do icpu=1,ncpu
+     do j=1,twotondim
+        do i=1,nsend(icpu)
+           sendbuf(sdisp_elem(icpu)+(j-1)*nsend(icpu)+i)= &
+                xx(emission(icpu,ilevel)%igrid(i)+ncoarse+(j-1)*ngridmax)
         end do
-        sendbuf(twotondim+1, idx) = dble(myid)
-        sendbuf(twotondim+2, idx) = dble(i)
      end do
   end do
 
-  ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
+  if(nstep/=last_log_step.or.ilevel/=last_log_level)then
+     call choose_exchange_backend(nsend,nrecv_peer,8*twotondim, &
+          exchange_backend,'grid-forward-dp')
+     last_log_step=nstep
+     last_log_level=ilevel
+  else
+     call choose_exchange_backend(nsend,nrecv_peer,8*twotondim,exchange_backend)
+  endif
+  call exchange_dp_sorted(sendbuf,recvbuf,nsend_elem,nrecv_elem, &
+       sdisp_elem,rdisp_elem,exchange_backend,701)
 
-  ! Scatter received data to reception grids
-  do i = 1, nrecv
-     sender = nint(recvbuf(twotondim+1, i))
-     ridx   = nint(recvbuf(twotondim+2, i))
-     igrid  = reception(sender, ilevel)%igrid(ridx)
-     do j = 1, twotondim
-        xx(igrid + ncoarse + (j-1)*ngridmax) = recvbuf(j, i)
+  if(any(recvbuf(max(nelem_recv,1)+1:max(nelem_recv,1)+guard_records*twotondim) &
+       /=guard_value))then
+     write(*,*)'FATAL: grid-forward-dp receive guard overwritten',myid,ilevel,nelem_recv
+     call clean_stop
+  endif
+  do icpu=1,ncpu
+     do j=1,twotondim
+        do i=1,nrecv_peer(icpu)
+           igrid=reception(icpu,ilevel)%igrid(i)
+           xx(igrid+ncoarse+(j-1)*ngridmax)= &
+                recvbuf(rdisp_elem(icpu)+(j-1)*nrecv_peer(icpu)+i)
+        end do
      end do
   end do
 
-  deallocate(sendbuf, dest_cpu, recvbuf)
+  deallocate(sendbuf,recvbuf)
 #endif
 
 end subroutine make_virtual_fine_dp_ksec
@@ -1563,7 +1582,7 @@ end subroutine make_virtual_fine_dp_ksec
 !################################################################
 subroutine make_virtual_fine_dp2_ksec(xx1,xx2,ilevel)
   use amr_commons
-  use ksection
+  use dynamic_exchange, only: exchange_dp_records
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1571,11 +1590,11 @@ subroutine make_virtual_fine_dp2_ksec(xx1,xx2,ilevel)
   integer::ilevel
   real(dp),dimension(1:ncoarse+ngridmax*twotondim)::xx1,xx2
   ! -------------------------------------------------------------------
-  ! K-Section paired forward exchange.  Sender id and the sender-local
+  ! Adaptive paired forward exchange.  Sender id and the sender-local
   ! emission index identify the exact reception grid independent of tree
   ! reordering; both fields are carried as separate exact dp properties.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid
+  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid,exchange_backend
   real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
   integer,allocatable::dest_cpu(:)
 
@@ -1604,7 +1623,8 @@ subroutine make_virtual_fine_dp2_ksec(xx1,xx2,ilevel)
      end do
   end do
 
-  call ksection_exchange_dp(sendbuf,ntotal,dest_cpu,nprops_ksec,recvbuf,nrecv)
+  call exchange_dp_records(sendbuf,ntotal,dest_cpu,nprops_ksec, &
+       recvbuf,nrecv,exchange_backend,'grid-forward-dp2')
 
   do i=1,nrecv
      sender = nint(recvbuf(2*twotondim+1,i))
@@ -1626,7 +1646,7 @@ end subroutine make_virtual_fine_dp2_ksec
 !################################################################
 subroutine make_virtual_reverse_dp_ksec(xx,ilevel)
   use amr_commons
-  use ksection
+  use dynamic_exchange, only: exchange_dp_records
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1634,11 +1654,11 @@ subroutine make_virtual_reverse_dp_ksec(xx,ilevel)
   integer::ilevel
   real(dp),dimension(1:ncoarse+ngridmax*twotondim)::xx
   ! -------------------------------------------------------------------
-  ! Ksection-based reverse ghost zone exchange for double precision.
-  ! Packs reception data with metadata, exchanges via ksection tree,
+  ! Adaptive reverse ghost-zone exchange for double precision.
+  ! Packs reception data with metadata and uses the selected backend,
   ! then accumulates (+=) into owner's emission grids.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,eidx,igrid
+  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,eidx,igrid,exchange_backend
   real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
   integer,allocatable::dest_cpu(:)
 
@@ -1668,9 +1688,9 @@ subroutine make_virtual_reverse_dp_ksec(xx,ilevel)
      end do
   end do
 
-  ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
+  ! Exchange via the adaptive backend
+  call exchange_dp_records(sendbuf,ntotal,dest_cpu,nprops_ksec, &
+       recvbuf,nrecv,exchange_backend,'grid-reverse-dp')
 
   ! Accumulate received data into emission grids
   do i = 1, nrecv
@@ -1693,7 +1713,7 @@ end subroutine make_virtual_reverse_dp_ksec
 !################################################################
 subroutine make_virtual_fine_int_ksec(xx,ilevel)
   use amr_commons
-  use ksection
+  use dynamic_exchange, only: exchange_dp_records
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1701,10 +1721,10 @@ subroutine make_virtual_fine_int_ksec(xx,ilevel)
   integer::ilevel
   integer,dimension(1:ncoarse+ngridmax*twotondim)::xx
   ! -------------------------------------------------------------------
-  ! Ksection-based forward ghost zone exchange for integer arrays.
-  ! Converts int to dp, exchanges via ksection tree, converts back.
+  ! Adaptive forward ghost-zone exchange for integer arrays.
+  ! Converts int to dp for record routing, exchanges, then converts back.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid
+  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid,exchange_backend
   real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
   integer,allocatable::dest_cpu(:)
 
@@ -1734,9 +1754,9 @@ subroutine make_virtual_fine_int_ksec(xx,ilevel)
      end do
   end do
 
-  ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
+  ! Exchange via the adaptive backend
+  call exchange_dp_records(sendbuf,ntotal,dest_cpu,nprops_ksec, &
+       recvbuf,nrecv,exchange_backend,'grid-forward-int')
 
   ! Scatter received data (dp->int) to reception grids
   do i = 1, nrecv
@@ -1813,7 +1833,7 @@ end subroutine make_virtual_fine_int_pair
 !################################################################
 subroutine make_virtual_fine_int_pair_ksec(xx1,xx2,ilevel)
   use amr_commons
-  use ksection
+  use dynamic_exchange, only: exchange_dp_records
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1824,7 +1844,7 @@ subroutine make_virtual_fine_int_pair_ksec(xx1,xx2,ilevel)
   ! Ksection-based forward exchange for two integer arrays at once.
   ! Packs 2*twotondim cells + 2 metadata per emission grid.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid
+  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid,exchange_backend
   real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
   integer,allocatable::dest_cpu(:)
 
@@ -1857,8 +1877,8 @@ subroutine make_virtual_fine_int_pair_ksec(xx1,xx2,ilevel)
   end do
 
   ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
+  call exchange_dp_records(sendbuf,ntotal,dest_cpu,nprops_ksec, &
+       recvbuf,nrecv,exchange_backend,'grid-forward-int2')
 
   ! Scatter received data (dp->int) to reception grids
   do i = 1, nrecv
@@ -1881,7 +1901,7 @@ end subroutine make_virtual_fine_int_pair_ksec
 !################################################################
 subroutine make_virtual_reverse_int_ksec(xx,ilevel)
   use amr_commons
-  use ksection
+  use dynamic_exchange, only: exchange_dp_records
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1892,7 +1912,7 @@ subroutine make_virtual_reverse_int_ksec(xx,ilevel)
   ! Ksection-based reverse ghost zone exchange for integer arrays.
   ! Converts int to dp, exchanges via ksection tree, then accumulates.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,eidx,igrid
+  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,eidx,igrid,exchange_backend
   real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
   integer,allocatable::dest_cpu(:)
 
@@ -1923,8 +1943,8 @@ subroutine make_virtual_reverse_int_ksec(xx,ilevel)
   end do
 
   ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
+  call exchange_dp_records(sendbuf,ntotal,dest_cpu,nprops_ksec, &
+       recvbuf,nrecv,exchange_backend,'grid-reverse-int')
 
   ! Accumulate received data (dp->int) into emission grids
   do i = 1, nrecv
@@ -1978,7 +1998,12 @@ subroutine make_virtual_fine_dp_bulk(xx,ncols,ilevel)
 #ifndef WITHOUTMPI
      t1 = MPI_WTIME()
 #endif
-     call make_virtual_fine_dp_bulk_ksec(xx,ncols,ilevel)
+     ! Keep records narrow.  Large multi-column records trigger unstable
+     ! allocator behaviour in ifx/Intel MPI; column-sized batches retain the
+     ! same grid ordering and bound the temporary receive storage.
+     do ivar=1,ncols
+        call make_virtual_fine_dp_ksec(xx(1,ivar),ilevel)
+     end do
 #ifndef WITHOUTMPI
      if(exchange_method=='auto') call xchg_autotune_update(6, MPI_WTIME()-t1)
 #endif
@@ -2004,7 +2029,7 @@ end subroutine make_virtual_fine_dp_bulk
 !################################################################
 subroutine make_virtual_fine_dp_bulk_ksec(xx,ncols,ilevel)
   use amr_commons
-  use ksection
+  use dynamic_exchange, only: exchange_dp_records
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2016,7 +2041,8 @@ subroutine make_virtual_fine_dp_bulk_ksec(xx,ncols,ilevel)
   ! Packs all ncols variables per emission grid into a single buffer,
   ! exchanges once via ksection tree, then scatters to reception grids.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,iv,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid
+  integer::icpu,i,j,iv,idx,ntotal,nrecv,nprops_ksec,sender,ridx,igrid,exchange_backend
+  integer::nexpected
   real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
   integer,allocatable::dest_cpu(:)
 
@@ -2050,14 +2076,36 @@ subroutine make_virtual_fine_dp_bulk_ksec(xx,ncols,ilevel)
   end do
 
   ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
+  call exchange_dp_records(sendbuf,ntotal,dest_cpu,nprops_ksec, &
+       recvbuf,nrecv,exchange_backend,'grid-forward-bulk')
+
+  nexpected=0
+  do icpu=1,ncpu
+     nexpected=nexpected+reception(icpu,ilevel)%ngrid
+  end do
+  if(nrecv/=nexpected)then
+     write(*,*)'FATAL: grid-forward-bulk receive count mismatch',myid,ilevel,nrecv,nexpected
+     call clean_stop
+  endif
 
   ! Scatter received data to reception grids
   do i = 1, nrecv
      sender = nint(recvbuf(ncols*twotondim + 1, i))
      ridx   = nint(recvbuf(ncols*twotondim + 2, i))
+     if(sender<1.or.sender>ncpu)then
+        write(*,*)'FATAL: grid-forward-bulk invalid sender',myid,ilevel,i,sender
+        call clean_stop
+     endif
+     if(ridx<1.or.ridx>reception(sender,ilevel)%ngrid)then
+        write(*,*)'FATAL: grid-forward-bulk invalid reception index', &
+             myid,ilevel,i,sender,ridx,reception(sender,ilevel)%ngrid
+        call clean_stop
+     endif
      igrid  = reception(sender, ilevel)%igrid(ridx)
+     if(igrid<1.or.igrid>ngridmax)then
+        write(*,*)'FATAL: grid-forward-bulk invalid grid',myid,ilevel,i,sender,ridx,igrid
+        call clean_stop
+     endif
      do iv = 1, ncols
         do j = 1, twotondim
            xx(igrid + ncoarse + (j-1)*ngridmax, iv) = &
@@ -2133,7 +2181,7 @@ end subroutine make_virtual_reverse_dp_bulk
 !################################################################
 subroutine make_virtual_reverse_dp_bulk_ksec(xx,ncols,ilevel)
   use amr_commons
-  use ksection
+  use dynamic_exchange, only: exchange_dp_records
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2146,7 +2194,7 @@ subroutine make_virtual_reverse_dp_bulk_ksec(xx,ncols,ilevel)
   ! exchanges once via ksection tree, then accumulates (+=) into
   ! owner's emission grids.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,iv,idx,ntotal,nrecv,nprops_ksec,sender,eidx,igrid
+  integer::icpu,i,j,iv,idx,ntotal,nrecv,nprops_ksec,sender,eidx,igrid,exchange_backend
   real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
   integer,allocatable::dest_cpu(:)
 
@@ -2180,8 +2228,8 @@ subroutine make_virtual_reverse_dp_bulk_ksec(xx,ncols,ilevel)
   end do
 
   ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
+  call exchange_dp_records(sendbuf,ntotal,dest_cpu,nprops_ksec, &
+       recvbuf,nrecv,exchange_backend,'grid-reverse-bulk')
 
   ! Accumulate received data into emission grids
   do i = 1, nrecv

@@ -29,13 +29,14 @@ subroutine read_params
   namelist/run_params/clumpfind,cosmo,pic,sink,sinkprops,lightcone,poisson,hydro,rt,verbose,debug &
        & ,nrestart,ncontrol,nstepmax,nsubcycle,nremap,remap_thresh,ordering &
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
-       & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
-       & ,work_weight_grid,work_weight_part,work_weight_sidm_pair &
+  & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
+       & ,lb_grid_headroom &
+  & ,work_weight_grid,work_weight_part,work_weight_sidm_pair &
        & ,time_balance_alpha,lb_timing_interval,lb_timing_ema_alpha &
        & ,ksec_level_balance_alpha,ksec_level_min_fraction,ksec_level_bins &
        & ,lb_remap_min_interval,lb_remap_horizon,lb_remap_safety &
        & ,aexp_step_limit &
-       & ,jobcontrolfile &
+  & ,jobcontrolfile &
        & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_auto_tune,n_cuda_streams &
        & ,use_fftw &
        & ,mg_merged_rb &
@@ -95,7 +96,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & adm_cross_section,adm_mol,adm_fH2
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
        & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min, &
-       & fdm_nla,fdm_match_aout,fdm_hjm_qp,fdm_qp_c1max,fdm_cn_tol, &
+       & fdm_nla,fdm_match_aout,fdm_hjm_qp,fdm_qp_c1max,fdm_cn_tol,fdm_refine_matched, &
        & fdm_ghost2,fdm_ghost2_rev
   namelist/pbh_params/pbh_table_file,pbh_fraction,pbh_boost, &
        & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance, &
@@ -421,7 +422,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   ! Auto-compute mem_weight_grid from nvar if sentinel (0)
   ! Per cell (×twotondim per grid):
   !   Hydro:   2*nvar*8 (uold+unew)
-  !   Topo:    5*4 (son,flag1,flag2,cpu_map,cpu_map2) + 8 (hilbert_key)
+  !   Topo:    5*4 (son,flag1,flag2,cpu_map,cpu_map2) + sizeof(qdp) (hilbert_key)
   !   PFix:    2*8 (enew,divu)  [pressure_fix, default for cosmo]
   !   Poisson: 7*8 (rho,rho_star,phi,phi_old,f*3)
   !   FDM:     2*8 (psi_re,psi_im)  [use_fdm only]
@@ -430,11 +431,13 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   !   Part: 3*4 (headp,tailp,numbp) = 12
   !-------------------------------------------------
   if(memory_balance .and. mem_weight_grid <= 0) then
-     mem_weight_grid = twotondim * (2*nvar*8 + 28 + 16 + 56) + 48 + 12
+     mem_weight_grid = twotondim * (2*nvar*8 + 20 + storage_size(0.0_qdp)/8 + 16 + 56) + 48 + 12
      if(use_fdm) mem_weight_grid = mem_weight_grid + twotondim * 2 * 8
      if(myid==1) write(*,'(A,I6,A,I3,A)') &
           ' Memory balance: mem_weight_grid=',mem_weight_grid,' (nvar=',nvar,')'
   end if
+  if(myid==1) write(*,'(A,F6.3,A)') &
+       ' Load-balance grid headroom=',lb_grid_headroom,' x ngridmax'
 
   !-------------------------------------------------
   ! Work-balance model validation
@@ -727,6 +730,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
              & merge(' (explicit subcyc)', ' (Crank-Nicolson) ', fdm_kinetic==0)
         write(*,'(A,I2,A)')    '   cost_mode =', fdm_cost_mode, &
              & merge(' (memory)   ', ' (wallclock)', fdm_cost_mode==0)
+        write(*,'(A,L1)')      '   use_hjm   =', fdm_use_hjm
+        write(*,'(A,L1)')      '   refine matched=', fdm_refine_matched
+        write(*,'(A,L1)')      '   match aout=', fdm_match_aout
+        write(*,'(A,ES10.3)')  '   CN tolerance=', fdm_cn_tol
         if(fdm_use_hjm) then
            if(fdm_kinetic /= 1) then
               fdm_kinetic = 1
@@ -1354,6 +1361,37 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   end do
   ! Initialize m_refine_eff from m_refine (FPR adjusts at runtime)
   m_refine_eff = m_refine
+
+  ! Validate the opt-in mesh-level floor for the void target.  Refining a
+  ! level creates cells at ilevel+1, hence the geometric region must be
+  ! defined from levelmin through void_refine_min_level-1.
+  if(void_refine)then
+     if(void_refine_min_level<=levelmin)then
+        if(myid==1)write(*,*)'Error in the namelist:'
+        if(myid==1)write(*,*)'void_refine_min_level must exceed levelmin'
+        nml_ok=.false.
+     else if(void_refine_min_level>nlevelmax)then
+        if(myid==1)write(*,*)'Error in the namelist:'
+        if(myid==1)write(*,*)'void_refine_min_level must not exceed levelmax'
+        nml_ok=.false.
+     else
+        do i=levelmin,void_refine_min_level-1
+           if(r_refine(i)<=0.0d0)then
+              if(myid==1)write(*,*)'Error in the namelist:'
+              if(myid==1)write(*,*)'void refinement requires r_refine>0 at level ',i
+              nml_ok=.false.
+           end if
+           if(a_refine(i)<=0.0d0 .or. b_refine(i)<=0.0d0 .or. exp_refine(i)<=0.0d0)then
+              if(myid==1)write(*,*)'Error in the namelist:'
+              if(myid==1)write(*,*)'void refinement shape parameters must be positive at level ',i
+              nml_ok=.false.
+           end if
+        end do
+        if(myid==1 .and. nml_ok)then
+           write(*,'(A,I3)')' Void refinement floor enabled at level ',void_refine_min_level
+        end if
+     end if
+  end if
 
   if(.not. nml_ok)then
      if(myid==1)write(*,*)'Too many errors in the namelist'
