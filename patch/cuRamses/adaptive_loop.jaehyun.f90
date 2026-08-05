@@ -11,6 +11,7 @@ subroutine adaptive_loop
 #endif
 #ifdef HYDRO_CUDA
   use poisson_cuda_interface, only: cuda_fft_print_timers_c
+  use particle_cuda_interface, only: cuda_pm_report_c
   use cuda_commons, only: cuda_pool_init_f, cuda_available
   use iso_c_binding, only: c_int
 #endif
@@ -118,7 +119,8 @@ subroutine adaptive_loop
   ! Early CUDA pool init: must happen before first multigrid_fine call so the
   ! cuFFT direct-solve gate (cuda_pool_is_initialized_c()/=0) passes on every
   ! rank. Previously init was lazy in godunov_fine, missing the first force solve.
-  if(gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink) then
+  if(gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink .or. gpu_scalar &
+       & .or. gpu_particle) then
      call cuda_pool_init_f()
      if(myid==1) write(*,'(A,L1)') ' Adaptive loop: CUDA pool early-init, available=', cuda_available
   end if
@@ -288,6 +290,7 @@ subroutine adaptive_loop
            write(*,*)'Total running time:', NINT((tt2-tstart)*100.0)*0.01,'s'
 #ifdef HYDRO_CUDA
            if(gpu_fft) call cuda_fft_print_timers_c(int(myid, c_int))
+           if(gpu_particle .and. myid==1) call cuda_pm_report_c()
 #endif
            ! SFR diagnostic
            if(nstar_tot>0)then

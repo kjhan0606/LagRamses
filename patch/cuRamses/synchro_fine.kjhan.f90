@@ -1,15 +1,23 @@
 subroutine synchro_fine(ilevel)
   use pm_commons
   use amr_commons
+#ifdef HYDRO_CUDA
+  use poisson_commons, only: f, phi
+  use pm_gpu_commons
+  use pm_gpu_dispatch
+  use particle_cuda_interface
+  use cuda_commons
+  use iso_c_binding
+#endif
   implicit none
 #ifndef WITHOUTMPI
-  include 'mpif.h' 
+  include 'mpif.h'
 #endif
   integer::ilevel
   !--------------------------------------------------------------------
   ! This routine synchronizes particle velocity with particle
-  ! position for ilevel particle only. If particle sits entirely 
-  ! in level ilevel, then use inverse CIC at fine level to compute 
+  ! position for ilevel particle only. If particle sits entirely
+  ! in level ilevel, then use inverse CIC at fine level to compute
   ! the force. Otherwise, use coarse level force and coarse level CIC.
   !--------------------------------------------------------------------
   integer::igrid,jgrid,ipart,jpart
@@ -20,16 +28,25 @@ subroutine synchro_fine(ilevel)
   integer mythread, nthreads,nwork,icount,jcount,npart3,subnump
   common /openmpthreads_sf/ mythread
 !$omp threadprivate(/openmpthreads_sf/)
+#ifdef HYDRO_CUDA
+  logical::pm_gpu
+  integer::nvec,gi,slot,pm_hw
+  integer,allocatable::gvec(:)
+  integer(c_long_long)::pm_ncell
+  integer,dimension(1:nvector)::Lind_grid,Lind_part,Lind_grid_part
+#endif
   call MPI_BARRIER(MPI_COMM_WORLD,info)
 
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
+#ifndef HYDRO_CUDA
 #ifdef _OPENMP
 !$omp parallel shared(nthreads)
   mythread = omp_get_thread_num()
   if(mythread.eq.0) nthreads = omp_get_num_threads()
 !$omp end parallel
   allocate(ptrhead(0:nthreads-1), nparticles(0:nthreads-1))
+#endif
 #endif
 
 
@@ -38,6 +55,90 @@ subroutine synchro_fine(ilevel)
      vsink_new=0d0; oksink_new=0d0
   endif
 
+#ifdef HYDRO_CUDA
+  ! ---- Strategy-A hybrid dispatch (GPU streams + CPU fallback) ----
+  pm_gpu=.false.
+  if(gpu_particle .and. poisson .and. .not.sink .and. &
+       & .not.(tracer.and.hydro) .and. .not.pm_gpu_dead .and. &
+       & cuda_pool_is_initialized_c()/=0 .and. numbl(myid,ilevel)>0 .and. &
+       & pm_level_npart(ilevel)>=pm_gpu_min_part)then
+     pm_ncell=int(ncoarse,c_long_long) &
+          & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
+     pm_hw=pm_grid_high_water()
+     call cuda_pm_mesh_upload_c(f, son, phi, pm_ncell, 0_c_int, &
+          & int(ncoarse,c_long_long), int(ngridmax,c_int), int(pm_hw,c_int))
+     pm_gpu=(cuda_pm_is_ready_c()/=0)
+     if(pm_gpu)call pm_gpu_alloc()
+  end if
+
+  nvec=0
+  allocate(gvec(1:max(numbl(myid,ilevel),1)))
+  igrid=headl(myid,ilevel)
+  do jgrid=1,numbl(myid,ilevel)
+     if(numbp(igrid)>0)then
+        nvec=nvec+1
+        gvec(nvec)=igrid
+     end if
+     igrid=next(igrid)
+  end do
+
+!$omp parallel private(slot,ig,ip,gi,igrid,ipart,jpart,npart1, &
+!$omp& Lind_grid,Lind_part,Lind_grid_part)
+  slot=-1
+  if(pm_gpu)then
+     slot=int(cuda_acquire_stream_c())
+     if(slot>=PM_MAX_SLOT)then
+        call cuda_release_stream_c(int(slot,c_int))
+        slot=-1
+     end if
+     if(slot>=0)call pm_gpu_reset(slot)
+  end if
+  ig=0
+  ip=0
+!$omp do schedule(dynamic,8)
+  do gi=1,nvec
+     igrid=gvec(gi)
+     npart1=numbp(igrid)
+     ig=ig+1
+     Lind_grid(ig)=igrid
+     ipart=headp(igrid)
+     do jpart=1,npart1
+        if(ig==0)then
+           ig=1
+           Lind_grid(ig)=igrid
+        end if
+        ip=ip+1
+        Lind_part(ip)=ipart
+        Lind_grid_part(ip)=ig
+        if(ip==nvector)then
+           if(slot>=0)then
+              call pm_gpu_append(slot,PM_MODE_SYNC,Lind_grid,Lind_part, &
+                   & Lind_grid_part,ig,ip,ilevel)
+           else
+              call sync(Lind_grid,Lind_part,Lind_grid_part,ig,ip,ilevel)
+           end if
+           ip=0
+           ig=0
+        end if
+        ipart=nextp(ipart)
+     end do
+  end do
+!$omp end do nowait
+  if(ip>0)then
+     if(slot>=0)then
+        call pm_gpu_append(slot,PM_MODE_SYNC,Lind_grid,Lind_part, &
+             & Lind_grid_part,ig,ip,ilevel)
+     else
+        call sync(Lind_grid,Lind_part,Lind_grid_part,ig,ip,ilevel)
+     end if
+  end if
+  if(slot>=0)then
+     call pm_gpu_flush(slot,PM_MODE_SYNC,ilevel)
+     call cuda_release_stream_c(int(slot,c_int))
+  end if
+!$omp end parallel
+  deallocate(gvec)
+#else
   ! Loop over grids
   call pthreadLinkedList(headl(myid,ilevel),numbl(myid,ilevel),nthreads,nparticles,ptrhead,next)
 !$omp parallel private(subnump,igrid)
@@ -46,6 +147,7 @@ subroutine synchro_fine(ilevel)
   call sub_synchro_fine(ilevel, igrid,subnump)
 !$omp end parallel
   deallocate(ptrhead, nparticles)
+#endif
   if(sink)then
      if(nsink>0)then
 #ifndef WITHOUTMPI

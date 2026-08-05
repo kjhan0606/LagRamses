@@ -72,8 +72,8 @@ ifdef USE_CUDA
   NVCCFLAGS = -O3 $(CUDA_ARCH) -DNDIM=$(NDIM) -DNVAR=$(NVAR) -DNVECTOR=$(NVECTOR) -DN_STREAMS=$(N_CUDA_STREAMS)
   FFLAGS += -DHYDRO_CUDA
   LIBS_CUDA = -L$(CUDA_DIR)/lib64 -lcudart -lcufft -lstdc++ -Wl,-rpath,$(CUDA_DIR)/lib64
-  CUDA_MODOBJ = cuda_commons.o hydro_cuda_interface.o poisson_cuda_interface.o sink_cuda_interface.o
-  CUDA_OBJS = cuda_stream_pool.o hydro_cuda_kernels.o poisson_cuda_kernels.o sink_cuda_kernels.o
+  CUDA_MODOBJ = cuda_commons.o hydro_cuda_interface.o poisson_cuda_interface.o sink_cuda_interface.o scalar_cuda_interface.o particle_cuda_interface.o
+  CUDA_OBJS = cuda_stream_pool.o hydro_cuda_kernels.o poisson_cuda_kernels.o sink_cuda_kernels.o scalar_cuda_kernels.o particle_cuda_kernels.o
 ifdef USE_CUFFTMP
   CUFFTMP_DIR = $(HOME)/miniconda3/lib/python3.13/site-packages/nvidia/cufftmp/cu12
   FFLAGS += -DUSE_CUFFTMP
@@ -190,9 +190,13 @@ ifdef USE_CUDA
 hydro_cuda_kernels.o: cuda_stream_pool.o
 poisson_cuda_kernels.o: cuda_stream_pool.o
 sink_cuda_kernels.o: cuda_stream_pool.o
+scalar_cuda_kernels.o: cuda_stream_pool.o
+particle_cuda_kernels.o: cuda_stream_pool.o
 hydro_cuda_interface.o: cuda_commons.o
 poisson_cuda_interface.o: cuda_commons.o
 sink_cuda_interface.o: cuda_commons.o
+scalar_cuda_interface.o: cuda_commons.o
+particle_cuda_interface.o: cuda_commons.o
 cuda_commons.o: amr_commons.kjhan.o
 endif
 power_spectrum.o: amr_parameters.jaehyun.o amr_commons.kjhan.o poisson_commons.o
