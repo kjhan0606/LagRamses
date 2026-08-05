@@ -2417,6 +2417,9 @@ end subroutine fR_background
 subroutine fR_solve_level(ilevel, icount)
   use amr_commons
   use poisson_commons
+#ifdef HYDRO_CUDA
+  use scalar_cuda_interface, only: SCAL_MODEL_FR
+#endif
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2429,6 +2432,9 @@ subroutine fR_solve_level(ilevel, icount)
   !-------------------------------------------------------
   integer::iter,ncache,info
   real(dp)::R_bar,fR_bar
+  logical::gscal_ok
+  real(dp),dimension(1:12)::sparams
+  real(dp)::gs_dx2
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
@@ -2482,14 +2488,41 @@ subroutine fR_solve_level(ilevel, icount)
   end if
 #endif
 
-  ! Newton-GS relaxation
+  ! Newton-GS relaxation (GPU sweeps when gpu_scalar is active)
+  gscal_ok=.false.
+#ifdef HYDRO_CUDA
+  call scalar_gpu_begin(ilevel, .false., gscal_ok)
+  if(gscal_ok) then
+     gs_dx2=(0.5d0**ilevel*boxlen/dble(icoarse_max-icoarse_min+1))**2
+     sparams=0d0
+     sparams(1)=1d0/gs_dx2
+     sparams(2)=aexp**2*(boxlen_ini/2997.92458d0)**2/3d0
+     sparams(3)=omega_m*(boxlen_ini/2997.92458d0)**2/aexp
+     sparams(4)=R_bar
+     sparams(5)=3d0*(omega_m+4d0*omega_l)
+     sparams(6)=abs(fR0)
+     sparams(7)=1d-30*abs(fR0)
+     sparams(8)=1d0/dble(fR_n+1)
+     sparams(9)=dble(fR_n+1)
+     sparams(10)=rho_tot
+  end if
+#endif
   converged = .false.
   do iter=1,n_iter_fR
 
+#ifdef HYDRO_CUDA
+     if(gscal_ok) then
+        call scalar_gpu_sweep_halo(ilevel, SCAL_MODEL_FR, sparams, 0, &
+             & res_max_local, src_max_local)
+     else
+#endif
      call fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max_local, src_max_local)
 
      ! Exchange boundaries after each sweep
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
+#ifdef HYDRO_CUDA
+     end if
+#endif
 
      ! Global convergence check
 #ifndef WITHOUTMPI
@@ -2515,6 +2548,9 @@ subroutine fR_solve_level(ilevel, icount)
         exit
      end if
   end do
+#ifdef HYDRO_CUDA
+  if(gscal_ok) call scalar_gpu_end(ilevel)
+#endif
 
   if(.not. converged) then
      if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
@@ -2887,6 +2923,9 @@ end function nDGP_beta
 subroutine nDGP_solve_level(ilevel, icount)
   use amr_commons
   use poisson_commons
+#ifdef HYDRO_CUDA
+  use scalar_cuda_interface, only: SCAL_MODEL_NDGP
+#endif
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2896,6 +2935,10 @@ subroutine nDGP_solve_level(ilevel, icount)
   integer::iter,ncache,info,gs_iter_max
   real(dp)::beta
   real(dp)::nDGP_beta  ! external function
+  logical::gscal_ok
+  real(dp),dimension(1:12)::sparams
+  real(dp)::gs_dx2
+  integer::trk
   real(dp)::res_max_local,res_max_global
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res,fft_rel
@@ -2973,16 +3016,41 @@ subroutine nDGP_solve_level(ilevel, icount)
 #ifdef USE_FFTW
   if(fft_attempted) gs_iter_max=min(gs_iter_max,100)
 #endif
+  gscal_ok=.false.
+  trk=0
   if(.not.converged) then
+#ifdef HYDRO_CUDA
+  call scalar_gpu_begin(ilevel, .true., gscal_ok)
+  if(gscal_ok) then
+     gs_dx2=(0.5d0**ilevel*boxlen/dble(icoarse_max-icoarse_min+1))**2
+     sparams=0d0
+     sparams(1)=1d0/gs_dx2
+     sparams(2)=1d0/(12d0*omega_rc*beta*aexp**4)
+     sparams(3)=omega_m*aexp/beta
+     sparams(4)=rho_tot
+     sparams(5)=1d-2*omega_m*aexp/beta
+     sparams(6)=gs_dx2
+     if(galileon_tracker) trk=1
+  end if
+#endif
   do iter=1,gs_iter_max
 
      if(myid==1 .and. (iter==1 .or. mod(iter,10)==0)) &
           & write(*,'(A,I2,A,I5,A,I5)') ' nDGP level ',ilevel, &
           & ' starting GS iteration ',iter,' / ',gs_iter_max
 
+#ifdef HYDRO_CUDA
+     if(gscal_ok) then
+        call scalar_gpu_sweep_halo(ilevel, SCAL_MODEL_NDGP, sparams, trk, &
+             & res_max_local, src_max_local)
+     else
+#endif
      call nDGP_gauss_seidel(ilevel, beta, res_max_local, src_max_local)
 
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
+#ifdef HYDRO_CUDA
+     end if
+#endif
 
 #ifndef WITHOUTMPI
      call MPI_ALLREDUCE(res_max_local, res_max_global, 1, &
@@ -3007,6 +3075,9 @@ subroutine nDGP_solve_level(ilevel, icount)
         exit
      end if
   end do
+#ifdef HYDRO_CUDA
+  if(gscal_ok) call scalar_gpu_end(ilevel)
+#endif
   end if
 
   if(.not. converged) then
@@ -3303,6 +3374,9 @@ end subroutine nDGP_gauss_seidel
 subroutine symmetron_solve_level(ilevel, icount)
   use amr_commons
   use poisson_commons
+#ifdef HYDRO_CUDA
+  use scalar_cuda_interface, only: SCAL_MODEL_SYMMETRON
+#endif
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -3314,6 +3388,9 @@ subroutine symmetron_solve_level(ilevel, icount)
   real(dp)::src_max_local,src_max_global
   real(dp)::rel_res
   logical::converged
+  logical::gscal_ok
+  real(dp),dimension(1:12)::sparams
+  real(dp)::gs_dx2
 #ifdef USE_FFTW
   real(dp)::m2bar
   logical,external::level_fft_ok
@@ -3345,13 +3422,33 @@ subroutine symmetron_solve_level(ilevel, icount)
   end if
 #endif
 
-  ! Newton-GS relaxation
+  ! Newton-GS relaxation (GPU sweeps when gpu_scalar is active)
+  gscal_ok=.false.
+#ifdef HYDRO_CUDA
+  call scalar_gpu_begin(ilevel, .false., gscal_ok)
+  if(gscal_ok) then
+     gs_dx2=(0.5d0**ilevel*boxlen/dble(icoarse_max-icoarse_min+1))**2
+     sparams=0d0
+     sparams(1)=1d0/gs_dx2
+     sparams(2)=aexp**2/(2d0*(L_symmetron/boxlen_ini)**2)
+     sparams(3)=(a_ssb/aexp)**3
+  end if
+#endif
   converged = .false.
   do iter=1,n_iter_symmetron
 
+#ifdef HYDRO_CUDA
+     if(gscal_ok) then
+        call scalar_gpu_sweep_halo(ilevel, SCAL_MODEL_SYMMETRON, sparams, 0, &
+             & res_max_local, src_max_local)
+     else
+#endif
      call symmetron_gauss_seidel(ilevel, res_max_local, src_max_local)
 
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
+#ifdef HYDRO_CUDA
+     end if
+#endif
 
 #ifndef WITHOUTMPI
      call MPI_ALLREDUCE(res_max_local, res_max_global, 1, &
@@ -3376,6 +3473,9 @@ subroutine symmetron_solve_level(ilevel, icount)
         exit
      end if
   end do
+#ifdef HYDRO_CUDA
+  if(gscal_ok) call scalar_gpu_end(ilevel)
+#endif
 
   if(.not. converged) then
      if(myid==1) write(*,'(A,I2,A,I6,A,ES10.3)') &
@@ -3750,6 +3850,9 @@ end subroutine compute_fifth_force_symmetron
 subroutine dilaton_solve_level(ilevel, icount)
   use amr_commons
   use poisson_commons
+#ifdef HYDRO_CUDA
+  use scalar_cuda_interface, only: SCAL_MODEL_DILATON
+#endif
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -3778,6 +3881,9 @@ subroutine dilaton_solve_level(ilevel, icount)
   real(dp)::rel_res
   logical::converged
   real(dp)::xi_d,A2_d,s_d,chibar_d,fac5
+  logical::gscal_ok
+  real(dp),dimension(1:12)::sparams
+  real(dp)::gs_dx2
 #ifdef USE_FFTW
   real(dp)::m2bar
   logical,external::level_fft_ok
@@ -3811,13 +3917,41 @@ subroutine dilaton_solve_level(ilevel, icount)
   end if
 #endif
 
+  gscal_ok=.false.
+#ifdef HYDRO_CUDA
+  call scalar_gpu_begin(ilevel, .false., gscal_ok)
+  if(gscal_ok) then
+     gs_dx2=(0.5d0**ilevel*boxlen/dble(icoarse_max-icoarse_min+1))**2
+     sparams=0d0
+     sparams(1)=1d0/gs_dx2
+     sparams(2)=3d0*omega_m*A2_d*(boxlen_ini/2997.92458d0)**2/aexp
+     sparams(3)=aexp**2*(boxlen_ini/2997.92458d0)**2
+     sparams(4)=1d0-3d0/s_d
+     sparams(5)=-3d0*omega_m*beta_dilaton &
+          & *(A2_d*chibar_d/beta_dilaton)**(1d0-3d0/s_d)
+     sparams(6)=chibar_d
+     sparams(7)=A2_d/beta_dilaton
+     sparams(8)=-3d0*omega_m*beta_dilaton
+     sparams(9)=-3d0*omega_m*A2_d*(1d0-3d0/s_d)
+     sparams(10)=1d-30*chibar_d
+  end if
+#endif
   converged = .false.
   do iter=1,n_iter_dilaton
 
+#ifdef HYDRO_CUDA
+     if(gscal_ok) then
+        call scalar_gpu_sweep_halo(ilevel, SCAL_MODEL_DILATON, sparams, 0, &
+             & res_max_local, src_max_local)
+     else
+#endif
      call dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, &
           & res_max_local, src_max_local)
 
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
+#ifdef HYDRO_CUDA
+     end if
+#endif
 
 #ifndef WITHOUTMPI
      call MPI_ALLREDUCE(res_max_local, res_max_global, 1, &
@@ -3842,6 +3976,9 @@ subroutine dilaton_solve_level(ilevel, icount)
         exit
      end if
   end do
+#ifdef HYDRO_CUDA
+  if(gscal_ok) call scalar_gpu_end(ilevel)
+#endif
 
   if(.not. converged) then
      if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
@@ -4188,6 +4325,9 @@ end function galileon_beta
 subroutine galileon_solve_level(ilevel, icount)
   use amr_commons
   use poisson_commons
+#ifdef HYDRO_CUDA
+  use scalar_cuda_interface, only: SCAL_MODEL_GALILEON
+#endif
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -4197,6 +4337,10 @@ subroutine galileon_solve_level(ilevel, icount)
   integer::iter,ncache,info
   real(dp)::beta_G,coeff_G
   real(dp)::galileon_beta  ! external function
+  logical::gscal_ok
+  real(dp),dimension(1:12)::sparams
+  real(dp)::gs_dx2
+  integer::trk
   real(dp)::Ha
   real(dp)::xi_t,E2_t,hd_t,beta1_t
   real(dp)::res_max_local,res_max_global
@@ -4278,12 +4422,37 @@ subroutine galileon_solve_level(ilevel, icount)
   end if
 #endif
 
+  gscal_ok=.false.
+  trk=0
   if(.not.converged) then
+#ifdef HYDRO_CUDA
+  call scalar_gpu_begin(ilevel, .true., gscal_ok)
+  if(gscal_ok) then
+     gs_dx2=(0.5d0**ilevel*boxlen/dble(icoarse_max-icoarse_min+1))**2
+     sparams=0d0
+     sparams(1)=1d0/gs_dx2
+     sparams(2)=coeff_G
+     sparams(3)=omega_m*aexp/beta_G
+     sparams(4)=rho_tot
+     sparams(5)=1d-2*omega_m*aexp/abs(beta_G)
+     sparams(6)=gs_dx2
+     if(galileon_tracker) trk=1
+  end if
+#endif
   do iter=1,n_iter_galileon
 
+#ifdef HYDRO_CUDA
+     if(gscal_ok) then
+        call scalar_gpu_sweep_halo(ilevel, SCAL_MODEL_GALILEON, sparams, trk, &
+             & res_max_local, src_max_local)
+     else
+#endif
      call galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max_local, src_max_local)
 
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
+#ifdef HYDRO_CUDA
+     end if
+#endif
 
 #ifndef WITHOUTMPI
      call MPI_ALLREDUCE(res_max_local, res_max_global, 1, &
@@ -4308,6 +4477,9 @@ subroutine galileon_solve_level(ilevel, icount)
         exit
      end if
   end do
+#ifdef HYDRO_CUDA
+  if(gscal_ok) call scalar_gpu_end(ilevel)
+#endif
   end if
 
   if(.not. converged) then
@@ -4633,3 +4805,394 @@ subroutine apply_coupled_de_force(ilevel)
   end do
 
 end subroutine apply_coupled_de_force
+
+#ifdef HYDRO_CUDA
+!#########################################################
+!#########################################################
+! GPU scalar-solver support (scalar_cuda_kernels.cu).
+! The Newton-GS sweeps run on the GPU; boundary Dirichlet
+! data and halo cell lists are prepared here once per
+! level solve (the parent level is frozen during a solve).
+!#########################################################
+!#########################################################
+
+!=========================================================
+! scalar_lookup_icell: same-level cell lookup returning the
+! cell index (index-returning variant of scalar_lookup_cell)
+!=========================================================
+subroutine scalar_lookup_icell(ilevel, ix_in, iy_in, iz_in, icell_out, found)
+  use amr_commons
+  use morton_hash
+  use morton_keys, only: mkey_t, morton_encode
+  implicit none
+  integer,intent(in)::ilevel
+  integer(8),intent(in)::ix_in,iy_in,iz_in
+  integer,intent(out)::icell_out
+  logical,intent(out)::found
+  integer(8)::ix,iy,iz,ncx,ncy,ncz,gx,gy,gz
+  integer::igrid,ind
+  type(mkey_t)::key
+
+  found=.false.
+  icell_out=0
+  if(.not. allocated(mort_table)) return
+  if(ilevel < 1 .or. ilevel > size(mort_table)) return
+
+  ncx=int(nx,8)*2_8**ilevel
+  ncy=int(ny,8)*2_8**ilevel
+  ncz=int(nz,8)*2_8**ilevel
+  ix=modulo(ix_in,ncx)
+  iy=modulo(iy_in,ncy)
+  iz=modulo(iz_in,ncz)
+  key=morton_encode(ix/2_8,iy/2_8,iz/2_8)
+  igrid=morton_hash_lookup(mort_table(ilevel),key)
+  if(igrid <= 0) return
+
+  ind=1+int(modulo(ix,2_8))+2*int(modulo(iy,2_8))+4*int(modulo(iz,2_8))
+  icell_out=ncoarse+(ind-1)*ngridmax+igrid
+  found=.true.
+end subroutine scalar_lookup_icell
+
+!=========================================================
+! build_scalar_halo_indices: flat emission/reception cell
+! lists for the GPU scalar halo (same enumeration as
+! make_virtual_fine_dp packing; see build_mg_halo_indices)
+!=========================================================
+subroutine build_scalar_halo_indices(ilevel)
+  use amr_commons
+  use scalar_gpu_commons
+  use scalar_cuda_interface
+  use iso_c_binding
+  implicit none
+  integer,intent(in)::ilevel
+  integer::icpu,i,j,idx,iskip
+
+  sgpu_n_emit = 0
+  sgpu_n_recv = 0
+  do icpu = 1, ncpu
+     sgpu_n_emit = sgpu_n_emit + emission(icpu,ilevel)%ngrid * twotondim
+     sgpu_n_recv = sgpu_n_recv + reception(icpu,ilevel)%ngrid * twotondim
+  end do
+
+  if(allocated(sgpu_emit_cells)) deallocate(sgpu_emit_cells)
+  if(allocated(sgpu_recv_cells)) deallocate(sgpu_recv_cells)
+  if(allocated(sgpu_emit_buf))   deallocate(sgpu_emit_buf)
+  if(allocated(sgpu_recv_buf))   deallocate(sgpu_recv_buf)
+  allocate(sgpu_emit_cells(1:max(sgpu_n_emit,1)))
+  allocate(sgpu_recv_cells(1:max(sgpu_n_recv,1)))
+  allocate(sgpu_emit_buf(1:max(sgpu_n_emit,1)))
+  allocate(sgpu_recv_buf(1:max(sgpu_n_recv,1)))
+
+  idx = 0
+  do icpu = 1, ncpu
+     if(emission(icpu,ilevel)%ngrid > 0) then
+        do j = 1, twotondim
+           iskip = ncoarse + (j-1)*ngridmax
+           do i = 1, emission(icpu,ilevel)%ngrid
+              idx = idx + 1
+              sgpu_emit_cells(idx) = emission(icpu,ilevel)%igrid(i) + iskip
+           end do
+        end do
+     end if
+  end do
+
+  idx = 0
+  do icpu = 1, ncpu
+     if(reception(icpu,ilevel)%ngrid > 0) then
+        do j = 1, twotondim
+           iskip = ncoarse + (j-1)*ngridmax
+           do i = 1, reception(icpu,ilevel)%ngrid
+              idx = idx + 1
+              sgpu_recv_cells(idx) = reception(icpu,ilevel)%igrid(i) + iskip
+           end do
+        end do
+     end if
+  end do
+
+  call cuda_scal_halo_setup_c( &
+       sgpu_emit_cells, int(sgpu_n_emit, c_int), &
+       sgpu_recv_cells, int(sgpu_n_recv, c_int))
+
+end subroutine build_scalar_halo_indices
+
+!=========================================================
+! make_virtual_scalar_gpu: scalar_gr halo exchange with the
+! field resident on the GPU (gather emission cells to host,
+! standard MPI exchange, scatter reception cells back)
+!=========================================================
+subroutine make_virtual_scalar_gpu(ilevel)
+  use amr_commons
+  use poisson_commons
+  use scalar_gpu_commons
+  use scalar_cuda_interface
+  use iso_c_binding
+  implicit none
+  integer,intent(in)::ilevel
+  integer::i
+
+  if(sgpu_n_emit == 0 .and. sgpu_n_recv == 0) return
+
+  if(sgpu_n_emit > 0) then
+     call cuda_scal_halo_gather_c(sgpu_emit_buf, int(sgpu_n_emit, c_int))
+     do i = 1, sgpu_n_emit
+        scalar_gr(sgpu_emit_cells(i)) = sgpu_emit_buf(i)
+     end do
+  end if
+
+  call make_virtual_fine_dp(scalar_gr(1), ilevel)
+
+  if(sgpu_n_recv > 0) then
+     do i = 1, sgpu_n_recv
+        sgpu_recv_buf(i) = scalar_gr(sgpu_recv_cells(i))
+     end do
+     call cuda_scal_halo_scatter_c(sgpu_recv_buf, int(sgpu_n_recv, c_int))
+  end if
+
+end subroutine make_virtual_scalar_gpu
+
+!=========================================================
+! scalar_gpu_begin: decide (collectively) to run this level
+! solve on the GPU, prepare grid tables, coarse-fine
+! Dirichlet blocks and halo lists, and upload the field.
+! MPI-collective — every rank must call at the same point.
+!=========================================================
+subroutine scalar_gpu_begin(ilevel, need18, ok)
+  use amr_commons
+  use poisson_commons
+  use scalar_gpu_commons
+  use scalar_cuda_interface
+  use cuda_commons
+  use morton_keys, only: mkey_t, grid_to_morton, morton_decode
+  use iso_c_binding
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  logical,intent(in)::need18
+  logical,intent(out)::ok
+
+  integer::ncache,ia,igrid_amr,jf,je,ind,io,slot,info,flag,flag_all
+  integer::noff,k,nbnd,base
+  integer::bx,by,bz,ox,oy,oz,tx,ty,tz,dxs,dys,dzs,nnz,gtab,idx2
+  integer::icell_live
+  integer(8)::gx,gy,gz,cx,cy,cz,txa,tya,tza
+  logical::found,has_missing
+  real(dp)::val
+  integer(c_long_long)::ncell_c
+  type(mkey_t)::key
+
+  ok=.false.
+  scal_gpu_active=.false.
+
+  flag=0
+  if(gpu_scalar .and. cuda_pool_is_initialized_c()/=0) flag=1
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(flag,flag_all,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,info)
+  flag=flag_all
+#endif
+  if(flag==0) return
+
+  ncache=active(ilevel)%ngrid
+  noff=6
+  if(need18) noff=18
+
+  if(ncache > 0) then
+     call vain_prepare_uniform_cache(ilevel)
+
+     if(allocated(sgpu_face)) then
+        if(size(sgpu_face) < 6*ncache) then
+           deallocate(sgpu_face,sgpu_edge,sgpu_bnd_slot)
+        end if
+     end if
+     if(.not.allocated(sgpu_face)) then
+        allocate(sgpu_face(1:6*max(ncache,1)))
+        allocate(sgpu_edge(1:12*max(ncache,1)))
+        allocate(sgpu_bnd_slot(1:max(ncache,1)))
+     end if
+
+     ! Pack per-grid neighbor tables and count boundary grids
+     nbnd=0
+     do ia=1,ncache
+        has_missing=.false.
+        do jf=1,6
+           sgpu_face((ia-1)*6+jf)=vain_face_grid(ia,jf)
+           if(vain_face_grid(ia,jf)<=0) has_missing=.true.
+        end do
+        do je=1,4
+           sgpu_edge((ia-1)*12+je)  =vain_xy_grid(ia,je)
+           sgpu_edge((ia-1)*12+4+je)=vain_xz_grid(ia,je)
+           sgpu_edge((ia-1)*12+8+je)=vain_yz_grid(ia,je)
+        end do
+        if(need18) then
+           do je=1,4
+              if(vain_xy_grid(ia,je)<=0) has_missing=.true.
+              if(vain_xz_grid(ia,je)<=0) has_missing=.true.
+              if(vain_yz_grid(ia,je)<=0) has_missing=.true.
+           end do
+        end if
+        if(has_missing) then
+           sgpu_bnd_slot(ia)=nbnd
+           nbnd=nbnd+1
+        else
+           sgpu_bnd_slot(ia)=-1
+        end if
+     end do
+     sgpu_nbnd=nbnd
+     sgpu_noff=noff
+
+     if(allocated(sgpu_bnd_live)) deallocate(sgpu_bnd_live)
+     if(allocated(sgpu_bnd_val))  deallocate(sgpu_bnd_val)
+     allocate(sgpu_bnd_live(1:max(nbnd*8*noff,1)))
+     allocate(sgpu_bnd_val (1:max(nbnd*8*noff,1)))
+     sgpu_bnd_live=0
+     sgpu_bnd_val=scal_gpu_sentinel
+
+     ! Fill boundary closures: live same-level cell index where the cell
+     ! exists but the grid tables cannot reach it, frozen parent-CIC
+     ! Dirichlet value otherwise (sentinel = zero-gradient fallback).
+!$omp parallel do private(ia,slot,igrid_amr,key,gx,gy,gz,ind,bx,by,bz, &
+!$omp& cx,cy,cz,io,ox,oy,oz,tx,ty,tz,dxs,dys,dzs,nnz,gtab,idx2,base,k, &
+!$omp& txa,tya,tza,icell_live,found,val) schedule(dynamic)
+     do ia=1,ncache
+        slot=sgpu_bnd_slot(ia)
+        if(slot<0) cycle
+        igrid_amr=active(ilevel)%igrid(ia)
+        key=grid_to_morton(igrid_amr,ilevel)
+        call morton_decode(key,gx,gy,gz)
+        base=slot*8*noff
+        do ind=1,twotondim
+           bx=mod(ind-1,2); by=mod((ind-1)/2,2); bz=(ind-1)/4
+           cx=2_8*gx+int(bx,8); cy=2_8*gy+int(by,8); cz=2_8*gz+int(bz,8)
+           do io=1,noff
+              ox=sgpu_off(1,io); oy=sgpu_off(2,io); oz=sgpu_off(3,io)
+              tx=bx+ox; ty=by+oy; tz=bz+oz
+              dxs=0; if(tx<0) dxs=-1; if(tx>1) dxs=1
+              dys=0; if(ty<0) dys=-1; if(ty>1) dys=1
+              dzs=0; if(tz<0) dzs=-1; if(tz>1) dzs=1
+              nnz=abs(dxs)+abs(dys)+abs(dzs)
+              if(nnz==0) then
+                 gtab=igrid_amr
+              else if(nnz==1) then
+                 if(dxs/=0) then
+                    idx2=merge(1,2,dxs<0)
+                 else if(dys/=0) then
+                    idx2=merge(3,4,dys<0)
+                 else
+                    idx2=merge(5,6,dzs<0)
+                 end if
+                 gtab=sgpu_face((ia-1)*6+idx2)
+              else
+                 if(dzs==0) then
+                    idx2=((dxs+1)/2)*2+((dys+1)/2)+1
+                 else if(dys==0) then
+                    idx2=4+((dxs+1)/2)*2+((dzs+1)/2)+1
+                 else
+                    idx2=8+((dys+1)/2)*2+((dzs+1)/2)+1
+                 end if
+                 gtab=sgpu_edge((ia-1)*12+idx2)
+              end if
+              if(gtab>0) cycle
+
+              k=base+(ind-1)*noff+io
+              txa=cx+int(ox,8); tya=cy+int(oy,8); tza=cz+int(oz,8)
+              call scalar_lookup_icell(ilevel,txa,tya,tza,icell_live,found)
+              if(found) then
+                 sgpu_bnd_live(k)=icell_live
+              else
+                 call scalar_sample_offset(igrid_amr,ind,ilevel,ox,oy,oz, &
+                      & scal_gpu_sentinel,val)
+                 sgpu_bnd_val(k)=val
+              end if
+           end do
+        end do
+     end do
+!$omp end parallel do
+
+     call build_scalar_halo_indices(ilevel)
+
+     ncell_c=int(ncoarse,c_long_long) &
+          & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
+     call cuda_scal_upload_c(scalar_gr, rho, ncell_c, &
+          & active(ilevel)%igrid, sgpu_face, sgpu_edge, sgpu_bnd_slot, &
+          & sgpu_bnd_live, sgpu_bnd_val, &
+          & int(ncache,c_int), int(nbnd,c_int), int(noff,c_int))
+  else
+     sgpu_n_emit=0
+     sgpu_n_recv=0
+  end if
+
+  ! Collective agreement on upload success (ranks without grids
+  ! participate trivially in the halo/ALLREDUCE steps)
+  flag=0
+  if(ncache==0 .or. cuda_scal_is_ready_c()/=0) flag=1
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(flag,flag_all,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,info)
+  flag=flag_all
+#endif
+  if(flag==0) then
+     call cuda_scal_release_c()
+     return
+  end if
+
+  ok=.true.
+  scal_gpu_active=.true.
+  scal_gpu_level=ilevel
+
+end subroutine scalar_gpu_begin
+
+!=========================================================
+! scalar_gpu_sweep_halo: one red+black Newton-GS sweep on
+! the GPU followed by the scalar halo exchange (mirrors the
+! CPU sweep + make_virtual_fine_dp pair in the solve loops)
+!=========================================================
+subroutine scalar_gpu_sweep_halo(ilevel, model, params, tracker, &
+     & res_max, src_max)
+  use amr_commons
+  use scalar_cuda_interface
+  use iso_c_binding
+  implicit none
+  integer,intent(in)::ilevel,model,tracker
+  real(dp),dimension(1:12),intent(in)::params
+  real(dp),intent(out)::res_max,src_max
+  real(c_double)::res_c,src_c
+
+  res_max=0d0
+  src_max=0d0
+  if(active(ilevel)%ngrid > 0) then
+     call cuda_scal_sweep_c(int(model,c_int), params, &
+          & int(ngridmax,c_int), int(ncoarse,c_int), &
+          & int(tracker,c_int), res_c, src_c)
+     res_max=res_c
+     src_max=src_c
+  end if
+
+  call make_virtual_scalar_gpu(ilevel)
+
+end subroutine scalar_gpu_sweep_halo
+
+!=========================================================
+! scalar_gpu_end: download the converged field and release
+! the per-solve GPU arrays
+!=========================================================
+subroutine scalar_gpu_end(ilevel)
+  use amr_commons
+  use poisson_commons
+  use scalar_gpu_commons
+  use scalar_cuda_interface
+  use iso_c_binding
+  implicit none
+  integer,intent(in)::ilevel
+  integer(c_long_long)::ncell_c
+
+  if(scal_gpu_active .and. active(ilevel)%ngrid > 0) then
+     ncell_c=int(ncoarse,c_long_long) &
+          & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
+     call cuda_scal_download_c(scalar_gr, ncell_c)
+  end if
+  call cuda_scal_release_c()
+  scal_gpu_active=.false.
+  scal_gpu_level=-1
+
+end subroutine scalar_gpu_end
+#endif

@@ -31,7 +31,7 @@ subroutine read_params
        & ,time_balance_alpha &
        & ,aexp_step_limit &
        & ,jobcontrolfile &
-       & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_auto_tune,n_cuda_streams &
+       & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_scalar,gpu_auto_tune,n_cuda_streams &
        & ,use_fftw &
        & ,mg_merged_rb &
        & ,dump_pk &
@@ -339,18 +339,21 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   ! GPU acceleration: disable if not compiled with USE_CUDA
   !-------------------------------------------------
 #ifndef HYDRO_CUDA
-  if(gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink) then
+  if(gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink .or. gpu_scalar) then
      if(myid==1) write(*,*) 'WARNING: gpu_* options ignored (not compiled with USE_CUDA)'
      gpu_hydro = .false.
      gpu_poisson = .false.
      gpu_fft = .false.
      gpu_sink = .false.
+     gpu_scalar = .false.
   end if
 #else
-  if(myid==1 .and. (gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink)) then
-     write(*,'(A,L1,A,L1,A,L1,A,L1,A,I0)') &
+  if(myid==1 .and. (gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink &
+       & .or. gpu_scalar)) then
+     write(*,'(A,L1,A,L1,A,L1,A,L1,A,L1,A,I0)') &
           ' GPU acceleration: hydro=',gpu_hydro, &
           ' poisson=',gpu_poisson,' fft=',gpu_fft,' sink=',gpu_sink, &
+          ' scalar=',gpu_scalar, &
           ' streams=',n_cuda_streams
   end if
 #endif

@@ -363,6 +363,11 @@ void cuda_pool_finalize(void) {
     g_mesh_ncell = 0;
     // Free Poisson MG GPU arrays
     cuda_mg_finalize();
+    // Free scalar-solver GPU arrays
+    {
+        extern void cuda_scal_finalize(void);
+        cuda_scal_finalize();
+    }
     pool_initialized = false;
     printf("CUDA pool: finalized.\n");
 }
