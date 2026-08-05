@@ -12,13 +12,13 @@ module particle_cuda_interface
 
   interface
 
-     subroutine cuda_pm_mesh_upload_c(f, son, phi, ncell, with_phi) &
-          & bind(C, name='cuda_pm_mesh_upload')
+     subroutine cuda_pm_mesh_upload_c(f, son, phi, ncell, with_phi, &
+          & ncoarse_c, ngridmax_c, hw) bind(C, name='cuda_pm_mesh_upload')
        import :: c_double, c_int, c_long_long
        real(c_double), dimension(*), intent(in) :: f, phi
        integer(c_int), dimension(*), intent(in) :: son
-       integer(c_long_long), value :: ncell
-       integer(c_int), value :: with_phi
+       integer(c_long_long), value :: ncell, ncoarse_c
+       integer(c_int), value :: with_phi, ngridmax_c, hw
      end subroutine cuda_pm_mesh_upload_c
 
      function cuda_pm_is_ready_c() result(ready) &
@@ -38,11 +38,12 @@ module particle_cuda_interface
        integer(c_int) :: ierr
      end function cuda_pm_flush_c
 
-     subroutine cuda_pm_rho_begin_c(son, ncell) &
+     subroutine cuda_pm_rho_begin_c(son, ncell, ncoarse_c, ngridmax_c, hw) &
           & bind(C, name='cuda_pm_rho_begin')
        import :: c_int, c_long_long
        integer(c_int), dimension(*), intent(in) :: son
-       integer(c_long_long), value :: ncell
+       integer(c_long_long), value :: ncell, ncoarse_c
+       integer(c_int), value :: ngridmax_c, hw
      end subroutine cuda_pm_rho_begin_c
 
      function cuda_pm_rho_is_ready_c() result(ready) &
@@ -67,6 +68,9 @@ module particle_cuda_interface
        real(c_double), dimension(*), intent(out) :: rho_add, phiw_add
        integer(c_long_long), value :: ncell
      end subroutine cuda_pm_rho_end_c
+
+     subroutine cuda_pm_report_c() bind(C, name='cuda_pm_report')
+     end subroutine cuda_pm_report_c
 
      subroutine cuda_pm_finalize_c() bind(C, name='cuda_pm_finalize')
      end subroutine cuda_pm_finalize_c
@@ -166,6 +170,60 @@ module pm_gpu_dispatch
   integer :: pm_with_phi = 0   ! set at mesh upload (move only)
 
 contains
+
+  !------------------------------------------------------------------
+  ! Highest grid index in use, over every level and every cpu (plus
+  ! non-periodic boundary grids). ngridmax is only an allocation
+  ! ceiling, so the mesh upload copies [1..hw] of each oct slot
+  ! instead of the whole array. Cost is one pass over the grid lists.
+  !------------------------------------------------------------------
+  integer function pm_grid_high_water() result(hw)
+    use amr_commons
+    implicit none
+    integer :: ilev, icpu, ibnd, i, igrid
+
+    hw = 0
+    do ilev = 1, nlevelmax
+       do icpu = 1, ncpu
+          igrid = headl(icpu,ilev)
+          do i = 1, numbl(icpu,ilev)
+             if (igrid <= 0) exit
+             if (igrid > hw) hw = igrid
+             igrid = next(igrid)
+          end do
+       end do
+    end do
+    do ibnd = 1, nboundary
+       do ilev = 1, nlevelmax
+          igrid = headb(ibnd,ilev)
+          do i = 1, numbb(ibnd,ilev)
+             if (igrid <= 0) exit
+             if (igrid > hw) hw = igrid
+             igrid = next(igrid)
+          end do
+       end do
+    end do
+  end function pm_grid_high_water
+
+  !------------------------------------------------------------------
+  ! Particles on this level, used to decide whether the GPU can earn
+  ! back its per-call mesh upload.
+  !------------------------------------------------------------------
+  integer function pm_level_npart(ilevel) result(np)
+    use amr_commons
+    use pm_commons
+    implicit none
+    integer, intent(in) :: ilevel
+    integer :: jgrid, igrid
+
+    np = 0
+    igrid = headl(myid,ilevel)
+    do jgrid = 1, numbl(myid,ilevel)
+       if (igrid <= 0) exit
+       np = np + numbp(igrid)
+       igrid = next(igrid)
+    end do
+  end function pm_level_npart
 
   subroutine pm_gpu_append(slot, mode, ind_grid, ind_part, ind_grid_part, &
        & ng, np, ilevel)

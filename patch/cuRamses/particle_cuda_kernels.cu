@@ -18,6 +18,23 @@
 
 #include "cuda_stream_pool.h"
 #include <cstdio>
+#include <ctime>
+
+// Accumulated cost split, used to locate the CPU/GPU crossover:
+//   npart_crit = t_upload_per_call / (t_cpu_per_part - t_gpu_per_part)
+static double    g_pm_t_upload = 0.0;   // seconds in mesh/son uploads
+static double    g_pm_t_flush  = 0.0;   // seconds in H2D + kernel + D2H
+static long long g_pm_n_upload = 0;     // upload calls
+static long long g_pm_n_flush  = 0;     // flush calls
+static long long g_pm_n_part   = 0;     // particles processed on the GPU
+static long long g_pm_up_bytes = 0;     // bytes uploaded
+
+static double pm_now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + 1e-9 * (double)ts.tv_nsec;
+}
 
 #define PM_MODE_MOVE 0
 #define PM_MODE_SYNC 1
@@ -298,8 +315,36 @@ __global__ void pm_cic_kernel(
 // --------------------------------------------------------------------------
 extern "C" {
 
+// Upload only the cells that exist: the coarse block plus, for each of the
+// twotondim oct slots, the first `hw` grids (hw = highest grid index in use).
+// ngridmax is an allocation ceiling that is typically ~50x the grids actually
+// present, so copying the whole array wastes almost all of the transfer.
+static void pm_upload_sliced(void* dst, const void* src, size_t elemsz,
+                             long long ncoarse, int ngridmax, int hw,
+                             int ncomp, long long ncell)
+{
+    if (hw > ngridmax) hw = ngridmax;
+    g_pm_up_bytes += (long long)ncomp * (ncoarse + 8LL * hw) * (long long)elemsz;
+    // The eight oct slots are evenly strided by ngridmax, so one strided 2D
+    // copy replaces eight separate transfers. At these sizes the slices are
+    // ~100 kB each and per-call latency, not bandwidth, sets the cost.
+    for (int c = 0; c < ncomp; c++) {
+        const char* hp = (const char*)src + (size_t)c * ncell * elemsz;
+        char*       dp = (char*)dst       + (size_t)c * ncell * elemsz;
+        if (ncoarse > 0)
+            cudaMemcpy(dp, hp, (size_t)ncoarse * elemsz, cudaMemcpyHostToDevice);
+        if (hw > 0) {
+            size_t off   = (size_t)ncoarse * elemsz;
+            size_t pitch = (size_t)ngridmax * elemsz;
+            cudaMemcpy2D(dp + off, pitch, hp + off, pitch,
+                         (size_t)hw * elemsz, 8, cudaMemcpyHostToDevice);
+        }
+    }
+}
+
 void cuda_pm_mesh_upload(const double* f, const int* son, const double* phi,
-                         long long ncell, int with_phi)
+                         long long ncell, int with_phi,
+                         long long ncoarse, int ngridmax, int hw)
 {
     g_pm_ready = false;
     if (!is_pool_initialized()) return;
@@ -333,11 +378,15 @@ void cuda_pm_mesh_upload(const double* f, const int* son, const double* phi,
     }
     g_pm_ncell = ncell;
 
-    cudaMemcpy(d_pm_f,   f,   (size_t)ncell * 3 * sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_pm_son, son, (size_t)ncell * sizeof(int),        cudaMemcpyHostToDevice);
+    double t0 = pm_now();
+    pm_upload_sliced(d_pm_f,   f,   sizeof(double), ncoarse, ngridmax, hw, 3, ncell);
+    pm_upload_sliced(d_pm_son, son, sizeof(int),    ncoarse, ngridmax, hw, 1, ncell);
     g_pm_has_phi = (with_phi != 0);
     if (g_pm_has_phi && phi)
-        cudaMemcpy(d_pm_phi, phi, (size_t)ncell * sizeof(double), cudaMemcpyHostToDevice);
+        pm_upload_sliced(d_pm_phi, phi, sizeof(double), ncoarse, ngridmax, hw, 1, ncell);
+    cudaDeviceSynchronize();
+    g_pm_t_upload += pm_now() - t0;
+    g_pm_n_upload++;
 
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -363,6 +412,7 @@ int cuda_pm_flush(int slot, int ng, int np,
     if (!g_pm_ready || slot < 0 || np <= 0 || ng <= 0) return -1;
     if (!pm_ensure_slot(slot, ng, np)) return -1;
 
+    double t_f0 = pm_now();
     PmSlot* p = &g_pm_slot[slot];
     cudaStream_t st = cuda_get_stream_internal(slot);
 
@@ -426,7 +476,29 @@ int cuda_pm_flush(int slot, int ng, int np,
         memcpy(out_new_x, p->h_new_x, (size_t)np * 3 * sizeof(double));
     if (pp.store_phi)
         memcpy(out_phi, p->h_phi_out, (size_t)np * sizeof(double));
+    g_pm_t_flush += pm_now() - t_f0;
+    g_pm_n_flush++;
+    g_pm_n_part += np;
     return 0;
+}
+
+// Cost split for tuning pm_gpu_min_part. The crossover follows from
+//   npart_crit = t_upload_per_call / (t_cpu_per_part - t_gpu_per_part)
+// where t_cpu_per_part comes from the same run with the GPU path disabled.
+void cuda_pm_report(void)
+{
+    if (g_pm_n_upload == 0 && g_pm_n_flush == 0) return;
+    printf(" === GPU particle path cost split ===\n");
+    printf("   uploads    : %lld calls, %.3f s total, %.3f ms/call, %.1f MB/call\n",
+           g_pm_n_upload, g_pm_t_upload,
+           g_pm_n_upload ? 1e3 * g_pm_t_upload / (double)g_pm_n_upload : 0.0,
+           g_pm_n_upload ? (double)g_pm_up_bytes / (double)g_pm_n_upload / 1048576.0 : 0.0);
+    printf("   flushes    : %lld calls, %.3f s total, %lld particles\n",
+           g_pm_n_flush, g_pm_t_flush, g_pm_n_part);
+    printf("   per particle: %.1f ns on the GPU path\n",
+           g_pm_n_part ? 1e9 * g_pm_t_flush / (double)g_pm_n_part : 0.0);
+    printf("   upload amortises once npart/call exceeds t_up/(t_cpu-t_gpu)\n");
+    fflush(stdout);
 }
 
 // --------------------------------------------------------------------------
@@ -536,7 +608,8 @@ __global__ void pm_deposit_kernel(
 
 extern "C" {
 
-void cuda_pm_rho_begin(const int* son, long long ncell)
+void cuda_pm_rho_begin(const int* son, long long ncell,
+                       long long ncoarse, int ngridmax, int hw)
 {
     g_pm_rho_ready = false;
     if (!is_pool_initialized()) return;
@@ -569,9 +642,13 @@ void cuda_pm_rho_begin(const int* son, long long ncell)
     }
     g_pm_rho_ncell = ncell;
 
-    cudaMemcpy(d_pm_son, son, (size_t)ncell * sizeof(int), cudaMemcpyHostToDevice);
+    double t0 = pm_now();
+    pm_upload_sliced(d_pm_son, son, sizeof(int), ncoarse, ngridmax, hw, 1, ncell);
     cudaMemset(d_pm_rho,  0, (size_t)ncell * sizeof(double));
     cudaMemset(d_pm_phiw, 0, (size_t)ncell * sizeof(double));
+    cudaDeviceSynchronize();
+    g_pm_t_upload += pm_now() - t0;
+    g_pm_n_upload++;
 
     cudaDeviceSynchronize();
     if (cudaGetLastError() != cudaSuccess) return;
@@ -640,6 +717,7 @@ void cuda_pm_rho_end(double* rho_add, double* phiw_add, long long ncell)
 
 extern "C" void cuda_pm_finalize(void)
 {
+    cuda_pm_report();
     g_pm_ready = false;
     g_pm_rho_ready = false;
     if (d_pm_f)    { cudaFree(d_pm_f);    d_pm_f    = nullptr; }

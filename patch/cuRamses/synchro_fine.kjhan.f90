@@ -30,7 +30,7 @@ subroutine synchro_fine(ilevel)
 !$omp threadprivate(/openmpthreads_sf/)
 #ifdef HYDRO_CUDA
   logical::pm_gpu
-  integer::nvec,gi,slot
+  integer::nvec,gi,slot,pm_hw
   integer,allocatable::gvec(:)
   integer(c_long_long)::pm_ncell
   integer,dimension(1:nvector)::Lind_grid,Lind_part,Lind_grid_part
@@ -60,10 +60,13 @@ subroutine synchro_fine(ilevel)
   pm_gpu=.false.
   if(gpu_particle .and. poisson .and. .not.sink .and. &
        & .not.(tracer.and.hydro) .and. .not.pm_gpu_dead .and. &
-       & cuda_pool_is_initialized_c()/=0 .and. numbl(myid,ilevel)>0)then
+       & cuda_pool_is_initialized_c()/=0 .and. numbl(myid,ilevel)>0 .and. &
+       & pm_level_npart(ilevel)>=pm_gpu_min_part)then
      pm_ncell=int(ncoarse,c_long_long) &
           & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
-     call cuda_pm_mesh_upload_c(f, son, phi, pm_ncell, 0_c_int)
+     pm_hw=pm_grid_high_water()
+     call cuda_pm_mesh_upload_c(f, son, phi, pm_ncell, 0_c_int, &
+          & int(ncoarse,c_long_long), int(ngridmax,c_int), int(pm_hw,c_int))
      pm_gpu=(cuda_pm_is_ready_c()/=0)
      if(pm_gpu)call pm_gpu_alloc()
   end if

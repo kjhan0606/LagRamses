@@ -37,7 +37,7 @@ subroutine read_params
        & ,lb_remap_min_interval,lb_remap_horizon,lb_remap_safety &
        & ,aexp_step_limit &
   & ,jobcontrolfile &
-       & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_scalar,gpu_particle,gpu_auto_tune,n_cuda_streams &
+       & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_scalar,gpu_particle,pm_gpu_min_part,gpu_auto_tune,n_cuda_streams &
        & ,use_fftw &
        & ,mg_merged_rb &
        & ,dump_pk &
@@ -377,16 +377,14 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   ! GPU acceleration: disable if not compiled with USE_CUDA
   !-------------------------------------------------
 #ifndef HYDRO_CUDA
-  if(gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink .or. gpu_scalar &
-       & .or. gpu_particle) then
-     if(myid==1) write(*,*) 'WARNING: gpu_* options ignored (not compiled with USE_CUDA)'
-     gpu_hydro = .false.
-     gpu_poisson = .false.
-     gpu_fft = .false.
-     gpu_sink = .false.
-     gpu_scalar = .false.
-     gpu_particle = .false.
-  end if
+  ! Most gpu_* switches default on, so a build without USE_CUDA turns them
+  ! off silently; warning here would fire on every CPU run.
+  gpu_hydro = .false.
+  gpu_poisson = .false.
+  gpu_fft = .false.
+  gpu_sink = .false.
+  gpu_scalar = .false.
+  gpu_particle = .false.
 #else
   if(myid==1 .and. (gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink &
        & .or. gpu_scalar .or. gpu_particle)) then

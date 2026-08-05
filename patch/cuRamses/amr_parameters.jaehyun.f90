@@ -64,12 +64,27 @@ module amr_parameters
   logical::aton=.false.       ! Enable ATON coarse grid radiation transfer
 
   ! GPU acceleration (requires USE_CUDA compilation)
-  logical::gpu_hydro=.false.   ! GPU hydro solver (hybrid CPU/GPU)
+  logical::gpu_hydro=.true.    ! GPU hydro solver (hybrid CPU/GPU).
+                               ! On by default: gpu_auto_tune benchmarks both
+                               ! paths and keeps whichever is faster.
   logical::gpu_poisson=.false. ! GPU Poisson MG for AMR levels
   logical::gpu_fft=.false.     ! cuFFT direct solve for uniform base level
-  logical::gpu_sink=.false.    ! GPU AGN feedback (average_AGN + AGN_blast)
-  logical::gpu_scalar=.false.  ! GPU nGR scalar-field Newton-GS sweeps
-  logical::gpu_particle=.false.! GPU particle CIC kick/drift (move/synchro)
+  logical::gpu_sink=.true.     ! GPU AGN feedback (average_AGN + AGN_blast).
+                               ! On by default, also guarded by gpu_auto_tune.
+  logical::gpu_scalar=.true.   ! GPU nGR scalar-field Newton-GS sweeps.
+                               ! On by default: measured 1.8x (f(R), 6-point) to
+                               ! 13.7x (Galileon, 18-point) on an A100, and the
+                               ! solve falls back to the CPU without a GPU.
+  logical::gpu_particle=.true. ! GPU particle CIC kick/drift + CIC deposit.
+                               ! On by default: pm_gpu_min_part below keeps
+                               ! small runs on the CPU, and a build without
+                               ! USE_CUDA disables it silently.
+  integer::pm_gpu_min_part=100000 ! Particles per level below which the
+                                 ! particle GPU path is skipped. At 20k-40k
+                                 ! per level per rank the GPU only broke even
+                                 ! (A100, 64^3 zoom), so the default sits well
+                                 ! above that; measure the crossover on the
+                                 ! production configuration and adjust.
   logical::gpu_auto_tune=.true.! Auto-tune CPU vs GPU (disable for benchmarks)
   integer::n_cuda_streams=1   ! Number of CUDA streams (runtime, max 16)
 

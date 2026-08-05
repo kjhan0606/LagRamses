@@ -28,7 +28,7 @@ subroutine move_fine(ilevel)
   ! math on the GPU, the others call the unchanged move1. Batches are
   ! independent so schedule(dynamic) balances the split at run time.
   logical::pm_gpu
-  integer::nvec,gi,slot,with_phi
+  integer::nvec,gi,slot,with_phi,pm_hw
   integer,allocatable::gvec(:)
   integer(c_long_long)::pm_ncell
   integer,dimension(1:nvector)::Lind_grid,Lind_part,Lind_grid_part
@@ -83,10 +83,13 @@ subroutine move_fine(ilevel)
 #endif
   if(gpu_particle .and. poisson .and. .not.sink .and. &
        & .not.(tracer.and.hydro) .and. .not.pm_gpu_dead .and. &
-       & cuda_pool_is_initialized_c()/=0 .and. numbl(myid,ilevel)>0)then
+       & cuda_pool_is_initialized_c()/=0 .and. numbl(myid,ilevel)>0 .and. &
+       & pm_level_npart(ilevel)>=pm_gpu_min_part)then
      pm_ncell=int(ncoarse,c_long_long) &
           & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
-     call cuda_pm_mesh_upload_c(f, son, phi, pm_ncell, int(with_phi,c_int))
+     pm_hw=pm_grid_high_water()
+     call cuda_pm_mesh_upload_c(f, son, phi, pm_ncell, int(with_phi,c_int), &
+          & int(ncoarse,c_long_long), int(ngridmax,c_int), int(pm_hw,c_int))
      pm_gpu=(cuda_pm_is_ready_c()/=0)
      if(pm_gpu)then
         call pm_gpu_alloc()

@@ -11,6 +11,7 @@ subroutine adaptive_loop
 #endif
 #ifdef HYDRO_CUDA
   use poisson_cuda_interface, only: cuda_fft_print_timers_c
+  use particle_cuda_interface, only: cuda_pm_report_c
   use cuda_commons, only: cuda_pool_init_f, cuda_available
   use iso_c_binding, only: c_int
 #endif
@@ -289,6 +290,7 @@ subroutine adaptive_loop
            write(*,*)'Total running time:', NINT((tt2-tstart)*100.0)*0.01,'s'
 #ifdef HYDRO_CUDA
            if(gpu_fft) call cuda_fft_print_timers_c(int(myid, c_int))
+           if(gpu_particle .and. myid==1) call cuda_pm_report_c()
 #endif
            ! SFR diagnostic
            if(nstar_tot>0)then

@@ -375,7 +375,7 @@ subroutine rho_from_current_level(ilevel)
   integer::igrid,jgrid,ipart,jpart,icpu
   integer::i,ig,ip,subnump
 #ifdef HYDRO_CUDA
-  integer::npart1,idim,gi,slot,nvec,ngtot
+  integer::npart1,idim,gi,slot,nvec,ngtot,pm_hw,nptot
   logical::rho_gpu
   integer,allocatable::gvec(:)
   integer(c_long_long)::pm_ncell
@@ -397,12 +397,26 @@ subroutine rho_from_current_level(ilevel)
   dx=0.5D0**ilevel
   rho_gpu=.false.
 #ifndef TSC
+  ! rho deposits from every cpu's grids at this level, so count them all
+  nptot=0
+  do icpu=1,ncpu
+     igrid=headl(icpu,ilevel)
+     do jgrid=1,numbl(icpu,ilevel)
+        if(igrid<=0)exit
+        nptot=nptot+numbp(igrid)
+        igrid=next(igrid)
+     end do
+  end do
+
   if(gpu_particle .and. .not.pm_gpu_dead .and. .not.star .and. .not.sink &
        & .and. (cic_levelmax==0 .or. ilevel<cic_levelmax) &
+       & .and. nptot>=pm_gpu_min_part &
        & .and. cuda_pool_is_initialized_c()/=0)then
      pm_ncell=int(ncoarse,c_long_long) &
           & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
-     call cuda_pm_rho_begin_c(son, pm_ncell)
+     pm_hw=pm_grid_high_water()
+     call cuda_pm_rho_begin_c(son, pm_ncell, int(ncoarse,c_long_long), &
+          & int(ngridmax,c_int), int(pm_hw,c_int))
      rho_gpu=(cuda_pm_rho_is_ready_c()/=0)
      if(rho_gpu)call pm_gpu_alloc()
   end if
