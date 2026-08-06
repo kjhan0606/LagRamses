@@ -1,13 +1,15 @@
 !==============================================================================
-! VoidSim -- inverted-cluster void zoom, hydro evolution (lagRamses/cuRAMSES)
+! VoidSim -- inverted-cluster void zoom staging template (lagRamses/cuRAMSES)
 !
 ! Evolves a GenetIC "inverted IC" (delta -> -delta on the back-tracked
 ! cluster Lagrangian patch, that patch set as the zoom region) down to z=0.
 ! Demonstrates the void numerical-dissipation refinement keys added to
 ! &REFINE_PARAMS: err_jump_u, ekin_flux_refine, d_keflux_max, floor_keflux.
 !
-! Grid:  levelmin=9 (512^3 parent)  ->  levelmax=14 (~0.5 h^-1 kpc zoom).
-! ICs:   GenetIC grafic output, one directory per refinement level.
+! Grid: levelmin=9 (512^3 parent), particle load through level 14, and
+! adaptive hydro refinement through level 21 (0.244 h^-1 kpc comoving).
+! The target-specific staging step must replace every illustrative IC path
+! and set the measured void center, diameter, and converged floor level.
 !==============================================================================
 
 &RUN_PARAMS
@@ -23,6 +25,10 @@ use_fftw=.true.        ! built with make USE_FFTW=1 (direct Poisson)
 verbose=.false.
 /
 
+&COSMO_PARAMS
+omega_b=0.048891054    ! must agree with the extended GRAFIC header
+/
+
 &OUTPUT_PARAMS
 noutput=6
 aout=0.1,0.2,0.33,0.5,0.71,1.0   ! z = 9,4,2,1,0.41,0
@@ -32,20 +38,21 @@ aout=0.1,0.2,0.33,0.5,0.71,1.0   ! z = 9,4,2,1,0.41,0
 filetype='grafic'
 ! One grafic directory per level produced by GenetIC (outformat grafic).
 ! initfile(1) = coarse (levelmin) ... last = finest grafic level.
-initfile(1)='/scratch/voidsim/ic_inverted/level_009'
-initfile(2)='/scratch/voidsim/ic_inverted/level_010'
-initfile(3)='/scratch/voidsim/ic_inverted/level_011'
-initfile(4)='/scratch/voidsim/ic_inverted/level_012'
-initfile(5)='/scratch/voidsim/ic_inverted/level_013'
+initfile(1)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_009'
+initfile(2)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_010'
+initfile(3)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_011'
+initfile(4)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_012'
+initfile(5)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_013'
+initfile(6)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_014'
 /
 
 &AMR_PARAMS
 levelmin=9
-levelmax=14
+levelmax=21
 ngridmax=2000000
 npartmax=3000000
 nexpand=1
-boxlen=512.0           ! h^-1 Mpc (match the GenetIC parent box)
+boxlen=1.0             ! code-domain length; GRAFIC supplies 512 h^-1 Mpc
 /
 
 &POISSON_PARAMS
@@ -55,8 +62,8 @@ epsilon=1.d-4
 &HYDRO_PARAMS
 gamma=1.6666667
 courant_factor=0.8
-slope_type=1
-scheme='muscl'
+slope_type=2           ! MC limiter, validated with AMR and Poisson
+scheme='muscl'         ! PPM remains test-only until AMR support is complete
 riemann='hllc'
 pressure_fix=.true.
 /
@@ -78,6 +85,14 @@ m_refine=9*8.          ! refine cells holding > 8 high-res particles (per level)
 err_grad_d=0.3         ! density-gradient refinement
 interpol_var=1
 interpol_type=0
+
+! --- Target-dependent void floor --------------------------------------
+! Keep this guard disabled in the unrendered template. The staging step
+! must enable void_refine and provide void_refine_min_level together with
+! positive r_refine and measured x/y/z_refine values for every forced parent
+! level. r_refine is the full diameter in code-box units.
+void_refine=.false.
+void_refine_min_level=-1
 
 ! --- Void numerical-dissipation control (NEW) ---------------------------
 ! Eulerian advection truncation error spuriously heats fast, low-density
