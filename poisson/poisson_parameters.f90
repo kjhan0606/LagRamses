@@ -4,6 +4,10 @@ module poisson_parameters
   ! Convergence criterion for Poisson solvers
   real(dp)::epsilon=1.0D-4
 
+  ! Maximum number of fine-level multigrid V-cycles.  Keep the historical
+  ! default, but allow difficult production meshes to request more cycles.
+  integer :: maxiter_fine=10
+
   ! Type of force computation
   integer ::gravity_type=0
 

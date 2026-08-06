@@ -53,7 +53,6 @@ subroutine multigrid_fine(ilevel,icount)
       end subroutine
    end interface
 
-   integer, parameter  :: MAXITER  = 10
    real(dp), parameter :: SAFE_FACTOR = 0.5
 
    integer  :: ifine, i, iter, info, icpu
@@ -558,7 +557,7 @@ subroutine multigrid_fine(ilevel,icount)
       ! (happens when fine-level density is injected from coarse and phi
       !  is already the solution — i_res_norm2 ≈ 0 inflates relative err)
       if(err<epsilon .or. res_norm2<1d-20*rho_tot**2 &
-           .or. iter>=MAXITER) exit
+           .or. iter>=max(1,maxiter_fine)) exit
 
       ! Not converged, check error and possibly enable safe mode for the level
       if(err > last_err*SAFE_FACTOR .and. (.not. safe_mode(ilevel))) then
@@ -606,7 +605,9 @@ subroutine multigrid_fine(ilevel,icount)
 
    if(myid==1) print '(A,I5,A,I5,A,1pE10.3)','   ==> Level=',ilevel, ' Step=', &
             iter,' Error=',err
-   if(myid==1 .and. iter==MAXITER) print *,'WARN: Fine multigrid &
+   if(myid==1 .and. iter>=max(1,maxiter_fine) .and. err>=epsilon &
+        & .and. res_norm2>=1d-20*rho_tot**2) &
+      & print *,'WARN: Fine multigrid &
       &Poisson failed to converge...'
 
    ! ---------------------------------------------------------------------

@@ -110,7 +110,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & ,informat,outformat,match_aout
   namelist/amr_params/levelmin,levelmax,ngridmax,ngridtot &
        & ,npartmax,nparttot,nexpand,boxlen,nsinkmax,nlevel_collapse
-  namelist/poisson_params/epsilon,gravity_type,gravity_params &
+  namelist/poisson_params/epsilon,maxiter_fine,gravity_type,gravity_params &
        & ,cg_levelmin,cic_levelmax
   namelist/lightcone_params/zmax_cone  &
        & ,elongated_axis_cone1,observer_cone1,minboxr_cone1,maxboxr_cone1 &
@@ -249,6 +249,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   rewind(1)
   read(1,NML=poisson_params,END=81)
 81 continue
+  if(myid==1) write(*,'(A,I0)') ' Fine MG max iterations = ',maxiter_fine
   rewind(1)
   read(1,NML=cosmo_params,END=80)
 80 continue
