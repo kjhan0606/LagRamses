@@ -6,8 +6,12 @@
 ! existing make_virtual_reverse_dp(unew) collects cross-domain deposits.
 !
 ! Per step (paper appendix A):
-!   heat : dE = mp*efac/vol  ->  unew(:,ndim+2) (+enew if pressure_fix)
-!          with efac = f_PBH*boost*dQtilde / (w0*scale_v**2)
+!   local heat : dE = mp*efac/vol
+!                -> unew(:,ndim+2) (+enew if pressure_fix)
+!                with efac = f_PBH*boost*dQtilde / (w0*scale_v**2)
+!   uniform heat: dE/vol = eps*rho_gas in every active leaf cell, with
+!                 eps = efac*M_dm,glob/M_gas,glob. The global masses are
+!                 cached at coarse-step entry, before fine-level recursion.
 !   mass : mp = mp * w(a1)/w(a0)          (exact mixed-mass table ratio)
 ! Deposit uses the step-start mp (m_initial = mp/w0), then the mass is
 ! updated, so the bookkeeping matches the cumulative table exactly.
@@ -22,6 +26,66 @@
 ! grid chunk and summed in chunk order. The result is therefore bitwise
 ! independent of the OpenMP thread count and schedule.
 !=======================================================================
+subroutine pbh_cache_uniform_masses
+  ! Cache total DM and leaf-cell gas masses at coarse-step entry. This is
+  ! called by pbh_mark_level(levelmin), before amr_step recurses, because
+  ! pbh_evap_fine itself is reached in fine-to-coarse order.
+  !
+  ! The cache is taken at the START of the coarse step while the deposits
+  ! happen after refine_fine may have moved gas between levels. Refinement
+  ! conserves the summed leaf gas mass, so eps*Sum_l M_gas,l still returns
+  ! the intended total and the residual is second order. That argument
+  ! FAILS once gas is removed from the mesh, i.e. with star formation or
+  ! sink accretion active, where the deposited total would drift from
+  ! f*dQ*M_dm/w by the fraction of gas converted during the step. Refresh
+  ! the cache per level (or subtract the converted mass) before running
+  ! uniform_heat together with star=.true.
+  use amr_commons
+  use pm_commons
+  use hydro_commons
+  use pbh_commons, only: pbh_mdm_glob,pbh_mgas_glob
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ilevel,igrid,jgrid,ind,icell,jpart,ipart,next_part,info,nx_loc
+  real(dp)::vol_cell,mass_loc(2),mass_glob(2)
+
+  mass_loc=0.0d0
+  nx_loc=icoarse_max-icoarse_min+1
+  do ilevel=levelmin,nlevelmax
+     vol_cell=(0.5d0**ilevel*boxlen/dble(nx_loc))**ndim
+     do jgrid=1,active(ilevel)%ngrid
+        igrid=active(ilevel)%igrid(jgrid)
+        if(hydro)then
+           do ind=1,twotondim
+              icell=ncoarse+(ind-1)*ngridmax+igrid
+              if(son(icell)==0) &
+                   & mass_loc(2)=mass_loc(2)+uold(icell,1)*vol_cell
+           end do
+        end if
+        ipart=headp(igrid)
+        do jpart=1,numbp(igrid)
+           next_part=nextp(ipart)
+           if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. &
+                & ptypep(ipart)/=PTYPE_SINK)then
+              mass_loc(1)=mass_loc(1)+mp(ipart)
+           end if
+           ipart=next_part
+        end do
+     end do
+  end do
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(mass_loc,mass_glob,2,MPI_DOUBLE_PRECISION, &
+       & MPI_SUM,MPI_COMM_WORLD,info)
+#else
+  mass_glob=mass_loc
+#endif
+  pbh_mdm_glob=mass_glob(1)
+  pbh_mgas_glob=mass_glob(2)
+end subroutine pbh_cache_uniform_masses
+
+!=======================================================================
 subroutine pbh_evap_fine(ilevel)
   use amr_commons
   use pm_commons
@@ -33,12 +97,13 @@ subroutine pbh_evap_fine(ilevel)
   include 'mpif.h'
 #endif
   integer::ilevel
-  integer::ichunk,ncache,info,nthr,nch,k,i,j,e,ntot
-  real(dp)::dt_phys,ratio,dQ,dQcr,wbeg,efac,efaccr,conv
+  integer::ichunk,ncache,info,nthr,nch,k,i,j,e,ntot,icell,nx_loc
+  real(dp)::dt_phys,ratio,dQ,dQcr,wbeg,efac,efaccr,eps,epscr,conv
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
-  real(dp)::einj_all,ecr_all,ecr_mesh,ecr_mesh_all
+  real(dp)::einj_all,ecr_all,ecr_mesh,ecr_mesh_all,vol_cell
+  real(dp)::einj_uniform,ecr_uniform,dE,dEcr
   integer(kind=8)::nfall_all
-  logical::do_heat,do_cr
+  logical::do_heat,do_cr,do_uniform_heat,do_uniform_cr
   integer,parameter::NGRID_CHUNK=64
   real(dp),allocatable::einj_ch(:),ecr_ch(:)
   integer(kind=8),allocatable::nfall_ch(:)
@@ -52,7 +117,8 @@ subroutine pbh_evap_fine(ilevel)
 
   if(.not.use_pbh)return
   if(.not.pic)return
-  if(numbtot(1,ilevel)==0)return
+  if(numbtot(1,ilevel)==0 .and. &
+       & trim(pbh_energy_sink)/='uniform_heat')return
   if(verbose)write(*,111)ilevel
 
   call pbh_lazy_init(aexp,aexp_ini,nrestart,myid,cosmo)
@@ -63,7 +129,12 @@ subroutine pbh_evap_fine(ilevel)
   dt_phys=dtnew(ilevel)*scale_t
   call pbh_step(ilevel,nlevelmax,aexp,dt_phys,ratio,dQ,wbeg,dQcr)
   do_heat=hydro .and. trim(pbh_energy_sink)=='local_heat' .and. dQ>0.0d0
-  do_cr=hydro .and. pbh_cr_ivar>ndim+2 .and. pbh_cr_ivar<=nvar .and. dQcr>0.0d0
+  do_cr=hydro .and. trim(pbh_energy_sink)/='uniform_heat' .and. &
+       & pbh_cr_ivar>ndim+2 .and. pbh_cr_ivar<=nvar .and. dQcr>0.0d0
+  do_uniform_heat=hydro .and. trim(pbh_energy_sink)=='uniform_heat' &
+       & .and. dQ>0.0d0
+  do_uniform_cr=hydro .and. trim(pbh_energy_sink)=='uniform_heat' .and. &
+       & pbh_cr_ivar>ndim+2 .and. pbh_cr_ivar<=nvar .and. dQcr>0.0d0
   ! f_PBH is the PBH fraction of DARK MATTER. In hydro cosmological runs the
   ! grafic IC already normalises the particle mass to the dark-matter share
   ! (init_part: mp = 0.5**(3*ilevel)*(1-omega_b/omega_m)), so mp IS the DM
@@ -149,11 +220,52 @@ subroutine pbh_evap_fine(ilevel)
   end do
   deallocate(einj_ch,ecr_ch,nfall_ch)
 
-  ! coarse-step diagnostics (all ranks reach this when numbtot>0)
+  ! Optically thin deposition: one serial, fixed-order pass over this
+  ! level's active leaf cells. The particle pass above still performs every
+  ! mass update, but do_heat/do_cr keep all per-particle deposits disabled.
+  if(do_uniform_heat.or.do_uniform_cr)then
+     if(.not.pbh_uniform_cache_ready)then
+        ! Defensive fallback for callers that bypass pbh_mark_level.
+        call pbh_cache_uniform_masses
+        pbh_uniform_cache_ready=.true.
+     end if
+     eps=0.0d0
+     epscr=0.0d0
+     if(pbh_mgas_glob>0.0d0)then
+        if(do_uniform_heat)eps=efac*pbh_mdm_glob/pbh_mgas_glob
+        if(do_uniform_cr)epscr=efaccr*pbh_mdm_glob/pbh_mgas_glob
+     end if
+     einj_uniform=0.0d0
+     ecr_uniform=0.0d0
+     nx_loc=icoarse_max-icoarse_min+1
+     vol_cell=(0.5d0**ilevel*boxlen/dble(nx_loc))**ndim
+     do i=1,active(ilevel)%ngrid
+        do j=1,twotondim
+           icell=ncoarse+(j-1)*ngridmax+active(ilevel)%igrid(i)
+           if(son(icell)==0)then
+              dE=eps*uold(icell,1)
+              dEcr=epscr*uold(icell,1)
+              if(do_uniform_heat)then
+                 unew(icell,ndim+2)=unew(icell,ndim+2)+dE
+                 if(pressure_fix)enew(icell)=enew(icell)+dE
+                 einj_uniform=einj_uniform+dE*vol_cell
+              end if
+              if(do_uniform_cr)then
+                 unew(icell,pbh_cr_ivar)=unew(icell,pbh_cr_ivar)+dEcr
+                 ecr_uniform=ecr_uniform+dEcr*vol_cell
+              end if
+           end if
+        end do
+     end do
+     pbh_einj_loc=pbh_einj_loc+einj_uniform*conv
+     pbh_ecr_loc=pbh_ecr_loc+ecr_uniform*conv
+  end if
+
+  ! coarse-step diagnostics (uniform mode also reaches this with no particles)
   if(ilevel==levelmin)then
      ! in-situ mesh content of the CR reservoir (code units, this level)
      ecr_mesh=0.0d0
-     if(do_cr)then
+     if(do_cr.or.do_uniform_cr)then
         do i=1,active(ilevel)%ngrid
            do j=1,twotondim
               e=ncoarse+(j-1)*ngridmax+active(ilevel)%igrid(i)

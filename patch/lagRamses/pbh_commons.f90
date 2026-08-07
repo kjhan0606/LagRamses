@@ -19,7 +19,7 @@ module pbh_commons
   character(LEN=512) :: pbh_table_file       = 'pbh_evap_table.dat'
   real(dp)           :: pbh_fraction         = 1.0d0   ! f_PBH of the DM
   real(dp)           :: pbh_boost            = 1.0d0   ! linear-response boost, q only
-  character(LEN=16)  :: pbh_energy_sink      = 'local_heat' ! local_heat | removed
+  character(LEN=16)  :: pbh_energy_sink      = 'local_heat' ! local_heat | uniform_heat | removed
   real(dp)           :: pbh_bkg_warn         = 1.0d-3  ! warn if f*(1-g(z=0)) exceeds
   logical            :: pbh_check_provenance = .true.
   ! model keys: validated against the table header so the namelist choice
@@ -54,6 +54,14 @@ module pbh_commons
   real(dp)        :: pbh_einj_tot     = 0.0d0
   real(dp)        :: pbh_ecr_loc      = 0.0d0
   integer(kind=8) :: pbh_nfallback_loc = 0
+
+  ! ---- coarse-step global masses for uniform_heat. The cache is refreshed
+  !      at the levelmin entry marker, before the fine-level recursion, so
+  !      every level step in that coarse step uses the same normalisation ----
+  real(dp) :: pbh_mdm_glob  = 0.0d0
+  real(dp) :: pbh_mgas_glob = 0.0d0
+  logical  :: pbh_uniform_cache_ready = .false.
+  integer  :: pbh_coarse_level = -1
 
   ! ---- per-level epoch bookkeeping: the STARTING scale factor of the
   !      current level step, recorded by amr_step (via pbh_mark_level)
@@ -403,6 +411,17 @@ contains
        pbh_aold = -1.0d0
     end if
     pbh_aold(ilevel) = a
+    ! amr_step enters at levelmin before recursing. Remember that first
+    ! (coarsest) level and refresh the uniform-deposit masses there, while
+    ! all particle masses and uold fields still represent the step start.
+    if(trim(pbh_energy_sink) == 'uniform_heat') then
+       if(pbh_coarse_level < 0 .or. ilevel < pbh_coarse_level) &
+            & pbh_coarse_level = ilevel
+       if(ilevel == pbh_coarse_level) then
+          call pbh_cache_uniform_masses
+          pbh_uniform_cache_ready = .true.
+       end if
+    end if
   end subroutine pbh_mark_level
 
   !=====================================================================
