@@ -33,6 +33,9 @@ subroutine fdm_step(ilevel)
 
   ! ---- Hybrid HJM: fluid solver on coarse levels ----
   if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
+#ifdef FDMDEBUG
+     call fdm_mass_check('hjm-entry',ilevel)
+#endif
      ! CFL guard: newly refined levels inherit parent dt which may violate CFL.
      ! The advective bound uses the seam-mirror + C1-filtered phase gradient
      ! (fdm_vmax_level), the same measure newdt_fine applies to dtnew. The older
@@ -58,6 +61,9 @@ subroutine fdm_step(ilevel)
      do isub_hjm = 1, nsub_hjm
         call fdm_hjm_step(ilevel, dt_sub)
      end do
+#ifdef FDMDEBUG
+     call fdm_mass_check('hjm-exit',ilevel)
+#endif
      call timer('fdm-ghost','start')
      call make_virtual_fine_dp(psi_re(1), ilevel)
      call make_virtual_fine_dp(psi_im(1), ilevel)
@@ -67,8 +73,7 @@ subroutine fdm_step(ilevel)
 
   ! ---- Schrödinger wave solver (existing) ----
 #ifdef FDMDEBUG
-  if(ilevel == levelmin .and. nstep_coarse >= 269) &
-       call fdm_mass_check('fdm-entry',ilevel)
+  call fdm_mass_check('fdm-entry',ilevel)
 #endif
   if(fdm_split_order == 4) then
      yw1 = 1.0d0/(2.0d0 - 2.0d0**(1.0d0/3.0d0))
@@ -86,19 +91,16 @@ subroutine fdm_step(ilevel)
   else
      call fdm_drift(ilevel, 0.5d0*dt_loc)
 #ifdef FDMDEBUG
-     if(ilevel == levelmin .and. nstep_coarse >= 269) &
-          call fdm_mass_check('after-drift-1',ilevel)
+     call fdm_mass_check('after-drift-1',ilevel)
 #endif
      call timer('fdm-kick','start')
      call fdm_kick(ilevel, dt_loc)
 #ifdef FDMDEBUG
-     if(ilevel == levelmin .and. nstep_coarse >= 269) &
-          call fdm_mass_check('after-kick',ilevel)
+     call fdm_mass_check('after-kick',ilevel)
 #endif
      call fdm_drift(ilevel, 0.5d0*dt_loc)
 #ifdef FDMDEBUG
-     if(ilevel == levelmin .and. nstep_coarse >= 269) &
-          call fdm_mass_check('after-drift-2',ilevel)
+     call fdm_mass_check('after-drift-2',ilevel)
 #endif
   end if
 
@@ -126,13 +128,164 @@ subroutine fdm_drift(ilevel, dt_half)
 
 #ifdef USE_FFTW
   if(ilevel == levelmin) then
-     call fdm_drift_fft(ilevel, dt_half)
+     call fdm_drift_fft_reflux(ilevel, dt_half)
      return
   end if
 #endif
   call fdm_drift_fd(ilevel, dt_half)
 
 end subroutine fdm_drift
+!################################################################
+!################################################################
+! The base FFT evolves the complete uniform level, including parent cells that
+! are replaced by finer leaves in the AMR composite solution.  Without a
+! correction, FFT flux into/out of those parents changes the unrefined base
+! mass while the corresponding refined mass is left unchanged.  Transfer each
+! refined parent's amplitude change down its complete fine subtree before the
+! fine level advances.  The propagation follows active child grids one level
+! at a time and uses the normal virtual exchange at every ownership boundary.
+! It is therefore exact after load balancing as well as before it.
+!################################################################
+#ifdef USE_FFTW
+subroutine fdm_drift_fft_reflux(ilevel, dt_half)
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::dt_half
+
+  integer::child_level,igrid_child,icell_child,icell_parent
+  integer::ind_child,iskip_child,i,nchild,nchild_global,info
+  real(dp),dimension(:),allocatable::rho_parent_old,rho_parent_next
+  real(dp)::rho_old,rho_new,scale_amp,reflux_tol
+#ifdef FDMDEBUG
+  real(dp)::max_scale_loc,max_scale_glob
+#endif
+
+  if(ilevel >= nlevelmax) then
+     call fdm_drift_fft(ilevel,dt_half)
+     return
+  end if
+
+  nchild = active(ilevel+1)%ngrid
+  nchild_global = nchild
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(nchild,nchild_global,1,MPI_INTEGER,MPI_SUM, &
+       MPI_COMM_WORLD,info)
+#endif
+  if(nchild_global == 0) then
+     call fdm_drift_fft(ilevel,dt_half)
+     return
+  end if
+
+  ! A child grid may be owned by a different rank than its parent cell.  Sync
+  ! the parent field, then save one density per locally owned child grid.  This
+  ! compact array is the only persistent scratch needed for each level.
+  if(fdm_ghost2) then
+     call make_virtual_fine_dp2(psi_re(1),psi_im(1),ilevel)
+  else
+     call make_virtual_fine_dp(psi_re(1),ilevel)
+     call make_virtual_fine_dp(psi_im(1),ilevel)
+  end if
+  allocate(rho_parent_old(nchild))
+  do i=1,nchild
+     igrid_child = active(ilevel+1)%igrid(i)
+     icell_parent = father(igrid_child)
+     rho_parent_old(i) = psi_re(icell_parent)**2 + psi_im(icell_parent)**2
+  end do
+
+  call fdm_drift_fft(ilevel,dt_half)
+
+  if(fdm_ghost2) then
+     call make_virtual_fine_dp2(psi_re(1),psi_im(1),ilevel)
+  else
+     call make_virtual_fine_dp(psi_re(1),ilevel)
+     call make_virtual_fine_dp(psi_im(1),ilevel)
+  end if
+
+#ifdef FDMDEBUG
+  max_scale_loc = 0.0d0
+#endif
+  do child_level=ilevel+1,nlevelmax
+     nchild = active(child_level)%ngrid
+
+     ! Save the next generation's parent density before changing this level.
+     ! A sync is required because father(grid) can be a virtual cell whose
+     ! physical owner was updated by restriction after the preceding step.
+     if(child_level < nlevelmax) then
+        if(fdm_ghost2) then
+           call make_virtual_fine_dp2(psi_re(1),psi_im(1),child_level)
+        else
+           call make_virtual_fine_dp(psi_re(1),child_level)
+           call make_virtual_fine_dp(psi_im(1),child_level)
+        end if
+        allocate(rho_parent_next(active(child_level+1)%ngrid))
+        do i=1,active(child_level+1)%ngrid
+           igrid_child = active(child_level+1)%igrid(i)
+           icell_parent = father(igrid_child)
+           rho_parent_next(i) = psi_re(icell_parent)**2 + &
+                psi_im(icell_parent)**2
+        end do
+     end if
+
+     do i=1,nchild
+        igrid_child = active(child_level)%igrid(i)
+        icell_parent = father(igrid_child)
+        rho_old = rho_parent_old(i)
+        rho_new = psi_re(icell_parent)**2 + psi_im(icell_parent)**2
+        reflux_tol = 1.0d-30*max(1.0d0,rho_new)
+        if(rho_old > reflux_tol) then
+           scale_amp = sqrt(rho_new/rho_old)
+        else if(rho_new <= reflux_tol) then
+           scale_amp = 1.0d0
+        else
+           write(*,'(A,I8,A,I4,A,I12,2(A,ES20.12))') &
+                ' FATAL FDM FFT reflux: rank=',myid,' level=',child_level, &
+                ' parent=',icell_parent,' rho_old=',rho_old, &
+                ' rho_new=',rho_new
+           call clean_stop
+        end if
+#ifdef FDMDEBUG
+        max_scale_loc = max(max_scale_loc,abs(scale_amp-1.0d0))
+#endif
+        do ind_child=1,twotondim
+           iskip_child = ncoarse + (ind_child-1)*ngridmax
+           icell_child = igrid_child + iskip_child
+           psi_re(icell_child) = psi_re(icell_child)*scale_amp
+           psi_im(icell_child) = psi_im(icell_child)*scale_amp
+        end do
+     end do
+
+     if(fdm_ghost2) then
+        call make_virtual_fine_dp2(psi_re(1),psi_im(1),child_level)
+     else
+        call make_virtual_fine_dp(psi_re(1),child_level)
+        call make_virtual_fine_dp(psi_im(1),child_level)
+     end if
+
+     deallocate(rho_parent_old)
+     if(child_level < nlevelmax) then
+        call move_alloc(rho_parent_next,rho_parent_old)
+     end if
+  end do
+
+#ifdef FDMDEBUG
+  max_scale_glob = max_scale_loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(max_scale_loc,max_scale_glob,1,MPI_DOUBLE_PRECISION, &
+       MPI_MAX,MPI_COMM_WORLD,info)
+#endif
+  if(myid == 1) write(*,'(A,I4,A,ES12.4)') &
+       ' FDM_FFT_REFLUX base=',ilevel,' max_amplitude_scale_delta=', &
+       max_scale_glob
+#endif
+
+end subroutine fdm_drift_fft_reflux
+#endif
 !################################################################
 !################################################################
 ! FFT kinetic operator for base level (spectral accuracy)
@@ -1400,9 +1553,11 @@ end subroutine fdm_kdb_max_level
 ! Compute max Madelung phase gradient |nabla theta| at a level.
 ! Phase gradient = Im(psi* nabla psi)/|psi|^2 — isolates velocity
 ! from amplitude gradient noise.
-! Cells with C1 > fdm_hjm_C1 (about to be refined to wave solver)
-! are excluded — their interference-driven |nabla theta| is
-! unphysical for the fluid CFL.
+! Every fluid leaf enters the CFL maximum.  A C1-large leaf may be flagged for
+! refinement, but it is still advanced by HJM in the current step; excluding
+! it can violate the multidimensional upwind positivity bound.  Refined
+! neighbours remain mirrored so a stale restricted phase across the seam does
+! not manufacture a velocity.
 !################################################################
 subroutine fdm_vmax_level(ilevel, dtheta_max)
   use amr_commons
@@ -1421,8 +1576,8 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   real(dp)::c1_dim,c1_cell
   real(dp)::S_L,S_R,re_L,re_R,im_L,im_R
   logical::is_fluid,ok_p,ok_m
-  integer::n_total,n_leaf,n_lowrho,n_c1skip,n_valid
-  integer::n_total_g,n_leaf_g,n_lowrho_g,n_c1skip_g,n_valid_g
+  integer::n_total,n_leaf,n_lowrho,n_c1high,n_valid
+  integer::n_total_g,n_leaf_g,n_lowrho_g,n_c1high_g,n_valid_g
   integer,parameter::NBINS_C1=8
   real(dp),parameter::c1_edges(NBINS_C1+1) = &
        (/0.0d0, 0.01d0, 0.03d0, 0.1d0, 0.3d0, 1.0d0, 3.0d0, 10.0d0, 1.0d30/)
@@ -1430,7 +1585,7 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   real(dp)::c1_max_loc, c1_max_glob
   real(dp)::dth_max_loc, dth_at_c1max
 
-  n_total=0; n_leaf=0; n_lowrho=0; n_c1skip=0; n_valid=0
+  n_total=0; n_leaf=0; n_lowrho=0; n_c1high=0; n_valid=0
   c1_hist = 0; c1_max_loc = 0.0d0; dth_max_loc = 0.0d0
   dx = 0.5d0**ilevel
   nx_loc = icoarse_max - icoarse_min + 1
@@ -1520,12 +1675,12 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
               end if
               if(c1_cell < fdm_hjm_C1) then
                  n_valid = n_valid + 1
-                 if(dth2 > dth2_loc) then
-                    dth2_loc = dth2
-                    dth_max_loc = c1_cell
-                 end if
               else
-                 n_c1skip = n_c1skip + 1
+                 n_c1high = n_c1high + 1
+              end if
+              if(dth2 > dth2_loc) then
+                 dth2_loc = dth2
+                 dth_max_loc = c1_cell
               end if
            else
               n_lowrho = n_lowrho + 1
@@ -1536,12 +1691,12 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   end do
 
   n_total_g=n_total; n_leaf_g=n_leaf; n_lowrho_g=n_lowrho
-  n_c1skip_g=n_c1skip; n_valid_g=n_valid
+  n_c1high_g=n_c1high; n_valid_g=n_valid
 #ifndef WITHOUTMPI
   call MPI_ALLREDUCE(n_total,  n_total_g,  1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
   call MPI_ALLREDUCE(n_leaf,   n_leaf_g,   1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
   call MPI_ALLREDUCE(n_lowrho, n_lowrho_g, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
-  call MPI_ALLREDUCE(n_c1skip, n_c1skip_g, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
+  call MPI_ALLREDUCE(n_c1high, n_c1high_g, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
   call MPI_ALLREDUCE(n_valid,  n_valid_g,  1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, info)
 #endif
   c1_hist_g = c1_hist
@@ -1554,8 +1709,8 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
 #endif
   if(myid==1 .and. nstep_coarse_old < 60) then
      write(*,'(" VMAX_DBG: total=",I12," leaf=",I12," lowrho=",I12,&
-          &" c1skip=",I12," valid=",I12)') &
-          n_total_g, n_leaf_g, n_lowrho_g, n_c1skip_g, n_valid_g
+          &" c1high=",I12," c1low=",I12)') &
+          n_total_g, n_leaf_g, n_lowrho_g, n_c1high_g, n_valid_g
      write(*,'(" C1_HIST: <0.01=",I10," <0.03=",I10," <0.1=",I10,&
           &" <0.3=",I10)') c1_hist_g(1),c1_hist_g(2),c1_hist_g(3),c1_hist_g(4)
      write(*,'("          <1.0=",I10," <3.0=",I10," <10=",I10,&
@@ -2714,6 +2869,10 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
   real(dp)::pi_h,twopi_h
   real(dp)::rho_parent,sum_rho_child,renorm
   logical::use_rhoS,child_is_wave
+#ifdef FDMDEBUG
+  integer::nclip_debug
+  real(dp)::max_scale_debug
+#endif
 
   if(.not.use_fdm) return
   if(ilevel <= levelmin) return
@@ -2723,6 +2882,10 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
   child_is_wave = (.not.fdm_use_hjm) .or. (ilevel >= fdm_first_wave_level)
   pi_h = 3.14159265358979d0 * hbar_code
   twopi_h = 2.0d0 * pi_h
+#ifdef FDMDEBUG
+  nclip_debug = 0
+  max_scale_debug = 0.0d0
+#endif
 
   do inew=1,ngrid_new
      igrid = ind_grid_new(inew)
@@ -2745,6 +2908,16 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
         ! directly, no atan2. Plain S differences are exact.
         rho_c = psi_re_c
         S_c = psi_im_c
+
+        ! A negative parent density cannot be prolonged into positive children
+        ! while preserving mass.  Fail here instead of silently turning a
+        ! corrupted parent into a finite child patch.
+        if(rho_c < 0.0d0) then
+           write(*,'(A,I8,A,I4,A,I12,A,ES20.12)') &
+                ' FATAL FDM prolong: rank=',myid,' level=',ilevel, &
+                ' grid=',igrid,' parent rho=',rho_c
+           call clean_stop
+        end if
 
         do idim=1,ndim
            call fdm_neighbor_cell(igrid_p, ilevel-1, ind_p, idim, 1, icL)
@@ -2776,6 +2949,7 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
            end if
         end do
 
+        sum_rho_child = 0.0d0
         do ind_child=1,twotondim
            iskip_child = ncoarse + (ind_child-1)*ngridmax
            icell_child = igrid + iskip_child
@@ -2789,7 +2963,15 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
                 (sx(1)*grad_rho(1) + sx(2)*grad_rho(2) + sx(3)*grad_rho(3))
            S_child = S_c + 0.25d0 * &
                 (sx(1)*grad_S(1) + sx(2)*grad_S(2) + sx(3)*grad_S(3))
+           ! The centred slope can undershoot in a steep or nearly empty
+           ! parent.  Clipping is required by the HJM density solver, but
+           ! clipping alone injects mass whenever a child is lifted to the
+           ! floor.  Accumulate the clipped patch and renormalize it below.
+#ifdef FDMDEBUG
+           if(rho_child < 1.0d-15) nclip_debug = nclip_debug + 1
+#endif
            if(rho_child < 1.0d-15) rho_child = 1.0d-15
+           sum_rho_child = sum_rho_child + rho_child
            if(child_is_wave) then
               ! Fluid -> wave boundary: convert to psi
               amp_child = sqrt(rho_child)
@@ -2802,6 +2984,25 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
               psi_im(icell_child) = S_child
            end if
         end do
+
+        ! Preserve the parent integral exactly after positivity clipping:
+        ! sum(rho_child) = 2^ndim * rho_parent.  A single positive factor
+        ! retains the interpolated shape and positivity.  At a fluid->wave
+        ! seam the factor acts on the amplitude, whereas a fluid child stores
+        ! rho directly in psi_re.
+        if(sum_rho_child > 0.0d0) then
+           renorm = dble(twotondim) * rho_c / sum_rho_child
+#ifdef FDMDEBUG
+           max_scale_debug = max(max_scale_debug,abs(renorm-1.0d0))
+#endif
+           if(child_is_wave) renorm = sqrt(max(0.0d0,renorm))
+           do ind_child=1,twotondim
+              iskip_child = ncoarse + (ind_child-1)*ngridmax
+              icell_child = igrid + iskip_child
+              psi_re(icell_child) = psi_re(icell_child) * renorm
+              if(child_is_wave) psi_im(icell_child) = psi_im(icell_child) * renorm
+           end do
+        end if
      else
         ! Standard (Re, Im) interpolation for wave levels
         do idim=1,ndim
@@ -2857,6 +3058,14 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
      end if
 
   end do
+
+#ifdef FDMDEBUG
+  if(nclip_debug > 0) then
+     write(*,'(A,I8,A,I4,A,I10,A,ES12.4)') &
+          ' FDM_PROLONG_POSFIX rank=',myid,' level=',ilevel, &
+          ' clipped=',nclip_debug,' max_density_scale_delta=',max_scale_debug
+  end if
+#endif
 
 end subroutine fdm_prolong_grids
 !################################################################
