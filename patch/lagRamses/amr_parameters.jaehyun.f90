@@ -606,6 +606,7 @@ module amr_parameters
   integer::void_web_env_level=-1   ! Velocity-shear level (-1 selects levelmin)
   integer::void_web_base_level=-1  ! Minimum level throughout the void scope
   integer::void_web_wall_level=-1  ! Minimum level in compressive web cells
+  integer::void_web_hydro_max_level=-1 ! Highest level opened by scoped hydro triggers
   integer::void_web_scope_ivar=0   ! 0: IC refmap, -1: global, >0: passive scalar
   real(dp)::void_web_scope_cut=0.5d0 ! Passive-scalar mass-fraction threshold
   real(dp)::void_web_lambda_on=0.6d0 ! Compression threshold to enter wall state

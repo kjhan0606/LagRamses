@@ -1430,11 +1430,25 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         if(myid==1)write(*,*)'void_web_wall_level must be in [base_level, levelmax]'
         nml_ok=.false.
      end if
+     if(void_web_hydro_max_level<0) &
+          & void_web_hydro_max_level=min(nlevelmax,void_web_wall_level+1)
+     if(void_web_hydro_max_level<void_web_wall_level .or. &
+          & void_web_hydro_max_level>nlevelmax)then
+        if(myid==1)write(*,*)'void_web_hydro_max_level must be in [wall_level, levelmax]'
+        nml_ok=.false.
+     end if
      if(void_web_scope_ivar>nvar .or. void_web_scope_ivar<-1)then
         if(myid==1)write(*,*)'void_web_scope_ivar must be -1, 0, or a valid hydro variable'
         nml_ok=.false.
      else if(void_web_scope_ivar>0 .and. void_web_scope_ivar<=ndim+2)then
         if(myid==1)write(*,*)'void_web_scope_ivar must select a passive scalar, not a hydro variable'
+        nml_ok=.false.
+     end if
+     if((err_grad_d>=0.0d0 .or. err_grad_p>=0.0d0 .or. &
+          & err_grad_u>=0.0d0 .or. err_jump_u>=0.0d0 .or. &
+          & ekin_flux_refine>=0.0d0) .and. &
+          & void_web_scope_ivar<=ndim+2)then
+        if(myid==1)write(*,*)'Void-web hydro triggers require a passive-scalar scope'
         nml_ok=.false.
      end if
      if(void_web_scope_cut<0.0d0 .or. void_web_scope_cut>1.0d0)then
@@ -1454,6 +1468,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A)')' Void-only V-web refinement enabled'
         write(*,'(A,I3,A,I3,A,I3)')'   environment/base/wall levels = ', &
              & void_web_env_level,' / ',void_web_base_level,' / ',void_web_wall_level
+        write(*,'(A,I3)')'   scoped hydro-trigger maximum level = ', &
+             & void_web_hydro_max_level
         write(*,'(A,2F8.3)')'   lambda on/off = ',void_web_lambda_on,void_web_lambda_off
         if(void_web_scope_ivar==-1)then
            write(*,'(A)')'   WARNING: global scope selected; the base floor covers the full box'

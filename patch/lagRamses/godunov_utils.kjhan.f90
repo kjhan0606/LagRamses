@@ -133,7 +133,7 @@ end subroutine cmpdt
 !###########################################################
 !###########################################################
 !###########################################################
-subroutine hydro_refine(ug,um,ud,ok,nn)
+subroutine hydro_refine(ug,um,ud,ok,nn,ilevel)
   use amr_parameters
   use hydro_parameters
   use const
@@ -142,11 +142,12 @@ subroutine hydro_refine(ug,um,ud,ok,nn)
 #endif
   implicit none
   ! dummy arguments
-  integer nn
+  integer nn,ilevel
   real(dp)::ug(1:nvector,1:nvar)
   real(dp)::um(1:nvector,1:nvar)
   real(dp)::ud(1:nvector,1:nvar)
   logical ::ok(1:nvector)
+  logical ::void_scope(1:nvector)
   
   integer::k,idim,irad
 #ifndef _OPENMP
@@ -208,9 +209,21 @@ subroutine hydro_refine(ug,um,ud,ok,nn)
   end do
 #endif
 
-  ! Compute errors
-  if(err_grad_d >= 0.)then
+  ! In the opt-in V-web mode, hydro triggers are restricted to the advected
+  ! target scope and to a finite range of levels.  The ordinary path retains
+  ! the historical all-domain, all-level behaviour.
+  void_scope(1:nn)=.true.
+  if(void_web_refine .and. void_web_scope_ivar>ndim+2)then
      do k=1,nn
+        void_scope(k)=um(k,void_web_scope_ivar)>void_web_scope_cut
+     end do
+  end if
+
+  ! Compute errors
+  if(err_grad_d >= 0. .and. &
+       & (.not.void_web_refine .or. ilevel<void_web_hydro_max_level))then
+     do k=1,nn
+        if(.not.void_scope(k))cycle
         dg=ug(k,1); dm=um(k,1); dd=ud(k,1)
         error=2.0d0*MAX( &
              & ABS((dd-dm)/(dd+dm+floor_d)) , &
@@ -219,8 +232,10 @@ subroutine hydro_refine(ug,um,ud,ok,nn)
      end do
   end if
 
-  if(err_grad_p >= 0.)then
+  if(err_grad_p >= 0. .and. &
+       & (.not.void_web_refine .or. ilevel<void_web_hydro_max_level))then
      do k=1,nn
+        if(.not.void_scope(k))cycle
         pg=ug(k,ndim+2); pm=um(k,ndim+2); pd=ud(k,ndim+2)
         error=2.0d0*MAX( &
              & ABS((pd-pm)/(pd+pm+floor_p)), &
@@ -229,9 +244,11 @@ subroutine hydro_refine(ug,um,ud,ok,nn)
      end do
   end if
 
-  if(err_grad_u >= 0.)then
+  if(err_grad_u >= 0. .and. &
+       & (.not.void_web_refine .or. ilevel<void_web_hydro_max_level))then
      do idim = 1,ndim
         do k=1,nn
+           if(.not.void_scope(k))cycle
            vg=ug(k,idim+1); vm=um(k,idim+1); vd=ud(k,idim+1)
            cg=sqrt(max(gamma*ug(k,ndim+2)/ug(k,1),floor_u**2))
            cm=sqrt(max(gamma*um(k,ndim+2)/um(k,1),floor_u**2))
@@ -253,9 +270,11 @@ subroutine hydro_refine(ug,um,ud,ok,nn)
   !   the local advective KE-dissipation rate ~ rho|v|^3/dx.
   ! d_keflux_max optionally restricts both to low-density (void) gas.
   ! ------------------------------------------------------------------
-  if(err_jump_u >= 0.)then
+  if(err_jump_u >= 0. .and. &
+       & (.not.void_web_refine .or. ilevel<void_web_hydro_max_level))then
      do idim = 1,ndim
         do k=1,nn
+           if(.not.void_scope(k))cycle
            if(d_keflux_max>0.0 .and. um(k,1)>=d_keflux_max) cycle
            vg=ug(k,idim+1); vm=um(k,idim+1); vd=ud(k,idim+1)
            cg=sqrt(max(gamma*ug(k,ndim+2)/ug(k,1),floor_u**2))
@@ -269,8 +288,10 @@ subroutine hydro_refine(ug,um,ud,ok,nn)
      end do
   end if
 
-  if(ekin_flux_refine >= 0.)then
+  if(ekin_flux_refine >= 0. .and. &
+       & (.not.void_web_refine .or. ilevel<void_web_hydro_max_level))then
      do k=1,nn
+        if(.not.void_scope(k))cycle
         if(d_keflux_max>0.0 .and. um(k,1)>=d_keflux_max) cycle
         vm=zero
         do idim=1,ndim
@@ -1367,5 +1388,4 @@ end subroutine riemann_hllc
 !###########################################################
 !###########################################################
   
-
 

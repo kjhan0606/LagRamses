@@ -40,6 +40,7 @@ subroutine read_hydro_params(nml_ok)
        & ,void_refine,void_refine_min_level &
        & ,void_web_refine,void_web_env_level &
        & ,void_web_base_level,void_web_wall_level &
+       & ,void_web_hydro_max_level &
        & ,void_web_scope_ivar,void_web_scope_cut &
        & ,void_web_lambda_on,void_web_lambda_off &
        & ,void_web_update_interval &

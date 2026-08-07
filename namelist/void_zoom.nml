@@ -9,7 +9,7 @@
 ! Grid: levelmin=9 (512^3 parent), particle load through level 14, and
 ! adaptive hydro refinement through level 21 (0.244 h^-1 kpc comoving).
 ! The target-specific staging step must replace every illustrative IC path
-! and set the measured void center, diameter, and converged floor level.
+! and set the advected target mask and converged floor level.
 !==============================================================================
 
 &RUN_PARAMS
@@ -87,19 +87,30 @@ interpol_var=1
 interpol_type=0
 
 ! --- Target-dependent void floor --------------------------------------
-! Keep this guard disabled in the unrendered template. The staging step
-! must enable void_refine and provide void_refine_min_level together with
-! positive r_refine and measured x/y/z_refine values for every forced parent
-! level. r_refine is the full diameter in code-box units.
+! Keep the V-web guard disabled in the unrendered template. The staged IC
+! must carry the advected target mask in passive variable 6 before enabling
+! it. The eigenvalue and hydro thresholds remain calibration values.
 void_refine=.false.
 void_refine_min_level=-1
+void_web_refine=.false.
+void_web_env_level=9
+void_web_base_level=12
+void_web_wall_level=13
+void_web_hydro_max_level=14
+void_web_scope_ivar=6
+void_web_scope_cut=0.5
+void_web_lambda_on=1.0
+void_web_lambda_off=0.8
+void_web_update_interval=4
 
 ! --- Void numerical-dissipation control (NEW) ---------------------------
 ! Eulerian advection truncation error spuriously heats fast, low-density
 ! void gas. err_grad_u is bulk-velocity-suppressed and under-refines it,
-! so add two un-suppressed triggers, gated to void densities.
-err_jump_u=0.5         ! |dv|/c_s jump (Mach-of-jump); catches shear/shocks in fast flow
-ekin_flux_refine=4.0   ! |v|^2/c_s^2 (Mach^2) > 4 => supersonic cell (~rho|v|^3/dx dissipation)
-d_keflux_max=0.2       ! apply the two above ONLY where rho < 0.2 * mean (void gas)
+! so add two un-suppressed triggers. V-web mode also restricts all hydro
+! triggers to the passive-scalar scope and prevents them from opening levels
+! above void_web_hydro_max_level. The values below are high-redshift pilots.
+err_jump_u=32.0        ! |dv|/c_s jump threshold after the level-14 online test
+ekin_flux_refine=-1.0  ! bulk Mach^2 over-selects smooth cold void flow
+d_keflux_max=0.2       ! density gate in RAMSES cosmological code units
 floor_keflux=1.d-30    ! denominator floor (leave at default)
 /
