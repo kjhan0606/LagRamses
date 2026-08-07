@@ -118,9 +118,21 @@ decreased by 4.6 percentage points.  The run completed with all 54 explicit
 NaN checks at zero and without a negative-energy, Poisson, or grid-pool error.
 The combination `err_grad_d=0.5, err_jump_u=32` is therefore the preferred
 high-redshift preflight setting.  It is not a production calibration.
-Low-redshift profile convergence, a density-only control, and convergence
-with the adopted production reconstruction still have to set the final
-thresholds.
+
+A matched density-only control set `err_jump_u=-1` and changed no other
+parameter.  Its level-14 counts were 123,663, 656,781, and 942,903 at main
+steps 3 through 5.  The final count was 23.4 per cent below the jump-32 result
+and used 31.4 per cent of the grid pool.  Launcher time decreased by 5.1 per
+cent and the maximum RAMSES memory diagnostic decreased by 3.8 percentage
+points.  The central slice placed 352 of 376 level-14 pixels inside the
+advected scope.  The large late increase shows that the density-gradient
+condition drives continuing mesh growth even without the jump trigger.  The
+jump trigger advances the onset and adds complementary cells, so its physical
+value must be judged from low-redshift shock, thermal, and velocity profiles.
+If the added cells do not improve those profiles, production should use
+`err_jump_u=-1`.  If they do, the trigger needs an additional convergent-flow
+or pressure-jump gate.  The five-point PPM prototype cannot provide the AMR
+comparison yet because it intentionally rejects AMR and self-gravity.
 
 The feature requires a three-dimensional, periodic, cosmological hydro run.
 It is intentionally rejected for DMO and non-cosmological simulations.  One
