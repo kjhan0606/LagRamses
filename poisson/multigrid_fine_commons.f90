@@ -34,7 +34,7 @@ subroutine multigrid_fine(ilevel,icount)
    real(dp), parameter :: SAFE_FACTOR = 0.5d0
 
    integer :: ifine, i, iter, icpu
-   logical :: allmasked
+   logical :: allmasked, mg_failed
    real(kind=8) :: err, last_err
    real(kind=8) :: res_norm2, i_res_norm2
    type(communicator_mg):: active_local
@@ -282,9 +282,17 @@ subroutine multigrid_fine(ilevel,icount)
 
    if(myid==1) print '(A,I5,A,I5,A,1pE10.3)','   ==> Level=',ilevel, ' Step=', &
             iter,' Error=',err
-   if(myid==1 .and. iter>=max(1,maxiter_fine) .and. err>=epsilon) &
-      & print *,'WARN: Fine multigrid &
-      &Poisson failed to converge...'
+   mg_failed=iter>=max(1,maxiter_fine) .and. err>=epsilon
+   if(myid==1 .and. mg_failed) &
+      print *,'WARN: Fine multigrid Poisson failed to converge...'
+   if(mg_failed .and. abort_on_mg_nonconvergence)then
+      if(myid==1) print *,'FATAL: abort_on_mg_nonconvergence is enabled'
+#ifndef WITHOUTMPI
+      call MPI_ABORT(MPI_COMM_WORLD,914,info)
+#else
+      stop 914
+#endif
+   end if
 
    ! ---------------------------------------------------------------------
    ! Cleanup MG levels after solve complete
