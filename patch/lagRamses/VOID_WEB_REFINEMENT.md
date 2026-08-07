@@ -80,7 +80,7 @@ values rather than final production choices.
   void_web_lambda_on=1.0
   void_web_lambda_off=0.8
   void_web_update_interval=4
-  err_grad_d=0.3
+  err_grad_d=0.5
   err_jump_u=32.0
   ekin_flux_refine=-1.0
   d_keflux_max=0.2
@@ -101,15 +101,26 @@ in smooth cold flow and is therefore disabled in the staging template.  A
 level-13 audit of `err_grad_d=0.3, err_jump_u=16` selected 5.79 per cent of
 active scoped cells.  AMR expansion raised the realized level-14 grid count
 to 31.4 per cent of the audited active scope, so that choice was rejected.
-Raising the jump threshold to 32 reduced the raw union to 2.49 per cent and
-the realized level-14 grid count to 11.1 per cent of the audited active scope
-at its first settled mesh.  A five-step online test completed without a
-grid-pool, NaN, negative-energy, or Poisson-convergence error.  Its level-14
-count nevertheless grew from 833,212 to 1,259,622 and 1,956,627 grids.  The
-final count used 65.2 per cent of the grid pool.  The value 32 is therefore a
-high-redshift preflight upper bound rather than a production calibration.
-Low-redshift profile convergence and a separate density-gradient sweep still
-have to set the production thresholds.
+Raising the jump threshold to 32 reduced the raw union to 2.49 per cent.  A
+five-step online test completed without a grid-pool, NaN, negative-energy, or
+Poisson-convergence error.  Its level-14 count nevertheless grew from 833,212
+to 1,259,622 and 1,956,627 grids, and the final count used 65.2 per cent of the
+grid pool.
+
+A matched density-gradient sweep selected `err_grad_d=0.5` for the next
+preflight.  At level 13, density or jump 32 then selected 104,112 cells, or
+1.385 per cent of the active scope.  Only 349 cells passed both conditions.
+The matched online run contained 667,957, 831,812, and 1,230,549 level-14
+grids at main steps 3 through 5.  The final count was 37.1 per cent below the
+`err_grad_d=0.3` result and used 41.0 per cent of the grid pool.  Launcher
+time decreased by 17.3 per cent and the maximum RAMSES memory diagnostic
+decreased by 4.6 percentage points.  The run completed with all 54 explicit
+NaN checks at zero and without a negative-energy, Poisson, or grid-pool error.
+The combination `err_grad_d=0.5, err_jump_u=32` is therefore the preferred
+high-redshift preflight setting.  It is not a production calibration.
+Low-redshift profile convergence, a density-only control, and convergence
+with the adopted production reconstruction still have to set the final
+thresholds.
 
 The feature requires a three-dimensional, periodic, cosmological hydro run.
 It is intentionally rejected for DMO and non-cosmological simulations.  One

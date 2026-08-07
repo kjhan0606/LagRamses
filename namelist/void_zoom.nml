@@ -82,7 +82,7 @@ T2thres_SF=1.d4
 &REFINE_PARAMS
 ! --- Lagrangian zoom mask (high-res region) + standard gradient AMR ---
 m_refine=9*8.          ! refine cells holding > 8 high-res particles (per level)
-err_grad_d=0.3         ! density-gradient refinement
+err_grad_d=0.5         ! preferred high-z preflight density threshold
 interpol_var=1
 interpol_type=0
 
