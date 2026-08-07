@@ -1396,6 +1396,76 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      end if
   end if
 
+  ! The V-web path is deliberately restricted to cosmological void runs.
+  ! Ordinary simulations do not allocate its state or execute its analysis.
+  if(void_web_refine)then
+     if(void_web_env_level<0)void_web_env_level=levelmin
+     if(.not.hydro)then
+        if(myid==1)write(*,*)'void_web_refine requires hydro=.true.'
+        nml_ok=.false.
+     end if
+     if(.not.cosmo)then
+        if(myid==1)write(*,*)'void_web_refine is only available for cosmo=.true.'
+        nml_ok=.false.
+     end if
+     if(simple_boundary)then
+        if(myid==1)write(*,*)'void_web_refine currently requires periodic boundaries'
+        nml_ok=.false.
+     end if
+#if NDIM != 3
+     if(myid==1)write(*,*)'void_web_refine requires NDIM=3'
+     nml_ok=.false.
+#endif
+     if(void_web_env_level/=levelmin)then
+        if(myid==1)write(*,*)'void_web_env_level must equal levelmin in this implementation'
+        nml_ok=.false.
+     end if
+     if(void_web_base_level<=void_web_env_level .or. &
+          & void_web_base_level>nlevelmax)then
+        if(myid==1)write(*,*)'void_web_base_level must be in (env_level, levelmax]'
+        nml_ok=.false.
+     end if
+     if(void_web_wall_level<void_web_base_level .or. &
+          & void_web_wall_level>nlevelmax)then
+        if(myid==1)write(*,*)'void_web_wall_level must be in [base_level, levelmax]'
+        nml_ok=.false.
+     end if
+     if(void_web_scope_ivar>nvar .or. void_web_scope_ivar<-1)then
+        if(myid==1)write(*,*)'void_web_scope_ivar must be -1, 0, or a valid hydro variable'
+        nml_ok=.false.
+     else if(void_web_scope_ivar>0 .and. void_web_scope_ivar<=ndim+2)then
+        if(myid==1)write(*,*)'void_web_scope_ivar must select a passive scalar, not a hydro variable'
+        nml_ok=.false.
+     end if
+     if(void_web_scope_cut<0.0d0 .or. void_web_scope_cut>1.0d0)then
+        if(myid==1)write(*,*)'void_web_scope_cut must lie between zero and one'
+        nml_ok=.false.
+     end if
+     if(void_web_lambda_off<0.0d0 .or. &
+          & void_web_lambda_on<=void_web_lambda_off)then
+        if(myid==1)write(*,*)'Require 0 <= void_web_lambda_off < void_web_lambda_on'
+        nml_ok=.false.
+     end if
+     if(void_web_update_interval<1)then
+        if(myid==1)write(*,*)'void_web_update_interval must be positive'
+        nml_ok=.false.
+     end if
+     if(myid==1 .and. nml_ok)then
+        write(*,'(A)')' Void-only V-web refinement enabled'
+        write(*,'(A,I3,A,I3,A,I3)')'   environment/base/wall levels = ', &
+             & void_web_env_level,' / ',void_web_base_level,' / ',void_web_wall_level
+        write(*,'(A,2F8.3)')'   lambda on/off = ',void_web_lambda_on,void_web_lambda_off
+        if(void_web_scope_ivar==-1)then
+           write(*,'(A)')'   WARNING: global scope selected; the base floor covers the full box'
+        else if(void_web_scope_ivar==0)then
+           write(*,'(A)')'   scope = IC Lagrangian refinement map (cpu_map2)'
+        else
+           write(*,'(A,I3,A,F8.3)')'   scope passive variable = ', &
+                & void_web_scope_ivar,' cut = ',void_web_scope_cut
+        end if
+     end if
+  end if
+
   if(.not. nml_ok)then
      if(myid==1)write(*,*)'Too many errors in the namelist'
      if(myid==1)write(*,*)'Aborting...'

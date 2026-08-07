@@ -38,6 +38,11 @@ subroutine read_hydro_params(nml_ok)
        & ,pressure_fix,beta_fix,scheme,riemann
   namelist/refine_params/x_refine,y_refine,z_refine,r_refine &
        & ,void_refine,void_refine_min_level &
+       & ,void_web_refine,void_web_env_level &
+       & ,void_web_base_level,void_web_wall_level &
+       & ,void_web_scope_ivar,void_web_scope_cut &
+       & ,void_web_lambda_on,void_web_lambda_off &
+       & ,void_web_update_interval &
        & ,a_refine,b_refine,exp_refine,jeans_refine,mass_cut_refine &
        & ,m_refine,mass_sph,err_grad_d,err_grad_p,err_grad_u &
        & ,err_jump_u,ekin_flux_refine,d_keflux_max,floor_keflux &
