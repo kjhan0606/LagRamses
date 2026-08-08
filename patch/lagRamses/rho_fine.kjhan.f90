@@ -4,6 +4,7 @@
 !##############################################################################
 subroutine rho_fine(ilevel,icount)
   use amr_commons
+  use amr_parameters, only: MAXLEVEL
   use pm_commons
   use hydro_commons
   use poisson_commons
@@ -25,6 +26,8 @@ subroutine rho_fine(ilevel,icount)
   !   number density criterion (quasi Lagrangian mesh).
   !------------------------------------------------------------------
   integer::iskip,icpu,ind,i,info,nx_loc,ibound,idim
+  integer,save,dimension(1:MAXLEVEL)::void_map_report_step=-huge(1)
+  integer(kind=8),dimension(1:3)::void_map_count,void_map_count_all
   real(dp)::dx,d_scale,scale,dx_loc,scalar
   real(dp)::d0,m_refine_loc,dx_min,vol_min,mstar,msnk,nISM,nCOM
   real(kind=8)::total,total_all,total2,total2_all,tms
@@ -190,6 +193,26 @@ subroutine rho_fine(ilevel,icount)
      call make_virtual_fine_dp   (phi(1),ilevel)
   endif
 
+  ! In the void workflow, the passive scalar is the advected Lagrangian
+  ! support of the target. Apply the same support to the ordinary mass map.
+  ! This prevents coarse gas outside a multilevel zoom from being measured in
+  ! units of the finest-level mass_sph and opening the full box. The V-web
+  ! base and wall floors are added independently in flag_utils. This branch
+  ! is a strict no-op for ordinary simulations.
+  if(m_refine_eff(ilevel)>-1.0d0 .and. void_web_refine .and. &
+       & void_web_scope_ivar>ndim+2)then
+!$omp parallel do private(ind,iskip,i,scalar)
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        do i=1,active(ilevel)%ngrid
+           scalar=uold(active(ilevel)%igrid(i)+iskip,void_web_scope_ivar) &
+                & /max(uold(active(ilevel)%igrid(i)+iskip,1),smallr)
+           if(scalar<=void_web_scope_cut) &
+                & phi(active(ilevel)%igrid(i)+iskip)=0.0d0
+        end do
+     end do
+  end if
+
   ! FPR Poisson source smoothing (Gnedin 2016)
   if(cosmo .and. dr_proper > 0.0d0 .and. ilevel > levelmin) then
      call fpr_smooth_rho(ilevel)
@@ -242,6 +265,39 @@ subroutine rho_fine(ilevel,icount)
      end do
      ! Update boundaries
      call make_virtual_fine_int(cpu_map2(1),ilevel)
+
+     ! Report the localized mass map once per level and coarse step. Besides
+     ! documenting production runs, this makes a full-box refinement leak
+     ! visible before the next level is allocated.
+     if(void_web_refine .and. void_web_scope_ivar>ndim+2 .and. &
+          & void_map_report_step(ilevel)/=nstep_coarse)then
+        void_map_count=0_8
+!$omp parallel do private(ind,iskip,i,scalar) reduction(+:void_map_count)
+        do ind=1,twotondim
+           iskip=ncoarse+(ind-1)*ngridmax
+           do i=1,active(ilevel)%ngrid
+              void_map_count(1)=void_map_count(1)+1_8
+              scalar=uold(active(ilevel)%igrid(i)+iskip,void_web_scope_ivar) &
+                   & /max(uold(active(ilevel)%igrid(i)+iskip,1),smallr)
+              if(scalar>void_web_scope_cut) &
+                   & void_map_count(2)=void_map_count(2)+1_8
+              if(cpu_map2(active(ilevel)%igrid(i)+iskip)==1) &
+                   & void_map_count(3)=void_map_count(3)+1_8
+           end do
+        end do
+#ifndef WITHOUTMPI
+        call MPI_ALLREDUCE(void_map_count,void_map_count_all,3,MPI_INTEGER8, &
+             & MPI_SUM,MPI_COMM_WORLD,info)
+#else
+        void_map_count_all=void_map_count
+#endif
+        if(myid==1)write(*,'(A,I3,A,I8,A,3I14,A,F9.6)') &
+             & ' Void scoped mass map: level=',ilevel,' step=',nstep_coarse, &
+             & ' active/scope/flag=',void_map_count_all, &
+             & ' flag_fraction=',dble(void_map_count_all(3))/ &
+             & dble(max(void_map_count_all(1),1_8))
+        void_map_report_step(ilevel)=nstep_coarse
+     end if
   end if
 
 !!$  do ind=1,twotondim

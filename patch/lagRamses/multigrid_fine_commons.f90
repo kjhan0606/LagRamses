@@ -53,15 +53,19 @@ subroutine multigrid_fine(ilevel,icount)
       end subroutine
    end interface
 
-   integer, parameter  :: MAXITER  = 10
+   ! Keep the historical iteration cap outside the void-refinement path.
+   ! Multilevel void zooms can need a few extra cycles immediately after
+   ! their fine hierarchy is restored.
+   integer, parameter  :: MAXITER_DEFAULT = 10
+   integer, parameter  :: MAXITER_VOID = 20
    real(dp), parameter :: SAFE_FACTOR = 0.5
 
-   integer  :: ifine, i, iter, info, icpu
+   integer  :: ifine, i, iter, info, icpu, maxiter
    real(kind=8) :: res_norm2, i_res_norm2, i_res_norm2_tot, res_norm2_tot
    real(kind=8) :: debug_norm2, debug_norm2_tot
    real(kind=8) :: err, last_err
 
-   logical :: allmasked, allmasked_tot, use_restored_phi
+   logical :: allmasked, allmasked_tot, use_restored_phi, converged
 
    ! FFT direct solve variables (shared by FFTW3 and cuFFT)
    logical :: is_uniform_fft
@@ -79,6 +83,9 @@ subroutine multigrid_fine(ilevel,icount)
 
    if(gravity_type>0)return
    if(numbtot(1,ilevel)==0)return
+
+   maxiter=MAXITER_DEFAULT
+   if(void_web_refine)maxiter=MAXITER_VOID
 
    if(verbose) print '(A,I2)','Entering fine multigrid at level ',ilevel
 
@@ -557,8 +564,8 @@ subroutine multigrid_fine(ilevel,icount)
       ! Also exit when absolute residual is below the rho_tot floor
       ! (happens when fine-level density is injected from coarse and phi
       !  is already the solution — i_res_norm2 ≈ 0 inflates relative err)
-      if(err<epsilon .or. res_norm2<1d-20*rho_tot**2 &
-           .or. iter>=MAXITER) exit
+      converged=err<epsilon .or. res_norm2<1d-20*rho_tot**2
+      if(converged .or. iter>=maxiter) exit
 
       ! Not converged, check error and possibly enable safe mode for the level
       if(err > last_err*SAFE_FACTOR .and. (.not. safe_mode(ilevel))) then
@@ -606,7 +613,7 @@ subroutine multigrid_fine(ilevel,icount)
 
    if(myid==1) print '(A,I5,A,I5,A,1pE10.3)','   ==> Level=',ilevel, ' Step=', &
             iter,' Error=',err
-   if(myid==1 .and. iter==MAXITER) print *,'WARN: Fine multigrid &
+   if(myid==1 .and. .not.converged) print *,'WARN: Fine multigrid &
       &Poisson failed to converge...'
 
    ! ---------------------------------------------------------------------

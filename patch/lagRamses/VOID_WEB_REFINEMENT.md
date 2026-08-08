@@ -48,6 +48,16 @@ requires `void_web_scope_ivar` to select a passive scalar.  With
 `void_web_refine=.false.`, these restrictions are bypassed and the historical
 all-domain hydro refinement path is unchanged.
 
+The quasi-Lagrangian mass map is also restricted to that passive-scalar scope
+when `void_web_refine=.true.` and `void_web_scope_ivar` selects a passive
+variable.  This restriction is essential for multilevel hydrodynamic ICs.
+RAMSES defines `mass_sph` from the finest IC level, so an unmasked coarse gas
+cell can otherwise appear to contain many thousands of resolution elements
+and refine the full box.  The V-web base and wall floors remain independent of
+this mask.  Ordinary simulations retain the historical mass-map calculation.
+At run time, one `Void scoped mass map` record per level and coarse step reports
+the active, in-scope, and mass-flagged cell counts.
+
 The void mode can gate `err_jump_u` with two additional local conditions.
 `void_web_jump_compression_gate=.true.` requires the normal velocity on the
 plus side of the current stencil to be smaller than the normal velocity on
@@ -170,3 +180,24 @@ It is intentionally rejected for DMO and non-cosmological simulations.  One
 integer cell-state array is allocated only while enabled, costing approximately
 `4*(ncoarse + 8*ngridmax)` bytes per rank in 3D.  Each state update uses one
 integer ghost exchange and two packed MPI reductions.
+
+Multilevel void zooms retain the historical 10-cycle fine-multigrid limit when
+`void_web_refine=.false.`.  Void mode allows up to 20 cycles because the first
+fine solve after restoring a multilevel hierarchy can need one or more extra
+cycles.  The convergence warning is emitted only when neither the relative
+criterion nor the absolute residual floor has been reached at the active cap.
+
+## Multilevel acceptance test
+
+A 64-rank restart of the 260,317,198-particle V4 hierarchy tested levels 9
+through 14 for one complete coarse step.  Before the scope restriction, the
+finest-level `mass_sph` made every level-9 gas cell exceed `m_refine=8`.  The
+run opened a full `1024^3` level-10 FFT mesh and wrote a 227 GiB checkpoint.
+
+With the scope restriction, the level-9 active, scoped, and mass-flagged cell
+counts were 134,217,728, 3,493, and 3,493 at both coarse boundaries.  The
+final mesh retained 18,470 level-10 grids and wrote a complete 63 GiB
+checkpoint.  The run completed normally with `ngridmax=4,000,000`.  The
+coarse step took 1,710.07 seconds and the maximum rank memory was 3.8 GiB.
+Every multigrid solve met `epsilon=1e-4`; the marginal level-14 solve required
+11 cycles and reached `9.604e-5`.
