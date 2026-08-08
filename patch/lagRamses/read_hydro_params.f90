@@ -47,6 +47,7 @@ subroutine read_hydro_params(nml_ok)
        & ,a_refine,b_refine,exp_refine,jeans_refine,mass_cut_refine &
        & ,m_refine,mass_sph,err_grad_d,err_grad_p,err_grad_u &
        & ,err_jump_u,ekin_flux_refine,d_keflux_max,floor_keflux &
+       & ,void_web_jump_compression_gate,void_web_jump_pressure_min &
        & ,floor_d,floor_u,floor_p,ivar_refine,var_cut_refine &
        & ,interpol_var,interpol_type,sink_refine,d_jeans_thre &
        & ,q_refine_holdback,m_refine_effective,ref_fall_rate & !(ONS)

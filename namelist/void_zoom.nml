@@ -103,13 +103,15 @@ void_web_lambda_on=1.0
 void_web_lambda_off=0.8
 void_web_update_interval=4
 
-! --- Void numerical-dissipation control (NEW) ---------------------------
+! --- Void numerical-dissipation control -------------------------------
 ! Eulerian advection truncation error spuriously heats fast, low-density
-! void gas. err_grad_u is bulk-velocity-suppressed and under-refines it,
-! so add two un-suppressed triggers. V-web mode also restricts all hydro
-! triggers to the passive-scalar scope and prevents them from opening levels
-! above void_web_hydro_max_level. The values below are high-redshift pilots.
-err_jump_u=32.0        ! |dv|/c_s jump threshold after the level-14 online test
+! void gas. V-web mode restricts hydro triggers to the passive-scalar scope
+! and prevents them from opening levels above void_web_hydro_max_level.
+! The jump trigger additionally requires converging normal flow and a
+! symmetric pressure jump. These gates affect only void_web_refine runs.
+err_jump_u=32.0        ! |dv|/c_s jump threshold
+void_web_jump_compression_gate=.true.
+void_web_jump_pressure_min=0.05
 ekin_flux_refine=-1.0  ! bulk Mach^2 over-selects smooth cold void flow
 d_keflux_max=0.2       ! density gate in RAMSES cosmological code units
 floor_keflux=1.d-30    ! denominator floor (leave at default)

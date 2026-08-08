@@ -133,7 +133,7 @@ end subroutine cmpdt
 !###########################################################
 !###########################################################
 !###########################################################
-subroutine hydro_refine(ug,um,ud,ok,nn,ilevel)
+subroutine hydro_refine(ug,um,ud,ok,nn,ilevel,idir)
   use amr_parameters
   use hydro_parameters
   use const
@@ -142,12 +142,13 @@ subroutine hydro_refine(ug,um,ud,ok,nn,ilevel)
 #endif
   implicit none
   ! dummy arguments
-  integer nn,ilevel
+  integer nn,ilevel,idir
   real(dp)::ug(1:nvector,1:nvar)
   real(dp)::um(1:nvector,1:nvar)
   real(dp)::ud(1:nvector,1:nvar)
   logical ::ok(1:nvector)
   logical ::void_scope(1:nvector)
+  logical ::compression_ok,pressure_ok
   
   integer::k,idim,irad
 #ifndef _OPENMP
@@ -155,7 +156,7 @@ subroutine hydro_refine(ug,um,ud,ok,nn,ilevel)
 #else
   real(dp),dimension(1:nvector)::eking,ekinm,ekind
 #endif
-  real(dp)::dg,dm,dd,pg,pm,pd,vg,vm,vd,cg,cm,cd,error
+  real(dp)::dg,dm,dd,pg,pm,pd,vg,vm,vd,cg,cm,cd,error,pressure_error
   
   ! Convert to primitive variables
   do k = 1,nn
@@ -269,6 +270,9 @@ subroutine hydro_refine(ug,um,ud,ok,nn,ilevel)
   ! ekin_flux_refine: flags supersonic (KE >> thermal) cells, a proxy for
   !   the local advective KE-dissipation rate ~ rho|v|^3/dx.
   ! d_keflux_max optionally restricts both to low-density (void) gas.
+  ! In V-web mode, optional normal-compression and pressure-jump gates reject
+  ! shear and smooth cold-flow differences.  Ordinary simulations bypass
+  ! both gates and retain the historical velocity-jump criterion.
   ! ------------------------------------------------------------------
   if(err_jump_u >= 0. .and. &
        & (.not.void_web_refine .or. ilevel<void_web_hydro_max_level))then
@@ -276,6 +280,20 @@ subroutine hydro_refine(ug,um,ud,ok,nn,ilevel)
         do k=1,nn
            if(.not.void_scope(k))cycle
            if(d_keflux_max>0.0 .and. um(k,1)>=d_keflux_max) cycle
+           compression_ok=.true.
+           pressure_ok=.true.
+           if(void_web_refine)then
+              if(void_web_jump_compression_gate) &
+                   & compression_ok=ud(k,idir+1)<ug(k,idir+1)
+              if(void_web_jump_pressure_min>=0.0d0)then
+                 pg=ug(k,ndim+2); pm=um(k,ndim+2); pd=ud(k,ndim+2)
+                 pressure_error=2.0d0*MAX( &
+                      & ABS((pd-pm)/(pd+pm+floor_p)), &
+                      & ABS((pm-pg)/(pm+pg+floor_p)) )
+                 pressure_ok=pressure_error>void_web_jump_pressure_min
+              end if
+           end if
+           if(.not.(compression_ok.and.pressure_ok))cycle
            vg=ug(k,idim+1); vm=um(k,idim+1); vd=ud(k,idim+1)
            cg=sqrt(max(gamma*ug(k,ndim+2)/ug(k,1),floor_u**2))
            cm=sqrt(max(gamma*um(k,ndim+2)/um(k,1),floor_u**2))
@@ -1388,4 +1406,3 @@ end subroutine riemann_hllc
 !###########################################################
 !###########################################################
   
-

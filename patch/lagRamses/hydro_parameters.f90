@@ -55,6 +55,8 @@ module hydro_parameters
   real(dp)::ekin_flux_refine=-1.0 ! KE-flux refinement: |v|^2/c_s^2 (kinetic/thermal) threshold
   real(dp)::d_keflux_max=-1.0   ! Density gate: jump/KE-flux act only where rho<d_keflux_max (<=0 disables gate)
   real(dp)::floor_keflux=1.d-30 ! Floor for KE-flux denominator
+  logical::void_web_jump_compression_gate=.false. ! Void-only: require convergent normal flow
+  real(dp)::void_web_jump_pressure_min=-1.0 ! Void-only: minimum symmetric pressure jump (<0 disables)
 #if NENER>0
   real(dp),dimension(1:NENER)::err_grad_prad=-1.0
 #endif

@@ -73,7 +73,7 @@ subroutine sub_hydro_flag(ilevel,igrid,ngrid,iflag)
               uud(i,ivar)=uold(indn(i,2*idim  ),ivar)
            end do
         end do
-        call hydro_refine(uug,uum,uud,ok,ngrid,ilevel)
+        call hydro_refine(uug,uum,uud,ok,ngrid,ilevel,idim)
      end do
   
      if(poisson.and.jeans_refine(ilevel)>0.0)then

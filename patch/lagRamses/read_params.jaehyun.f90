@@ -1464,6 +1464,14 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         if(myid==1)write(*,*)'void_web_update_interval must be positive'
         nml_ok=.false.
      end if
+     if(void_web_jump_pressure_min>=0.0d0 .and. err_jump_u<0.0d0)then
+        if(myid==1)write(*,*)'void_web_jump_pressure_min requires err_jump_u>=0'
+        nml_ok=.false.
+     end if
+     if(void_web_jump_compression_gate .and. err_jump_u<0.0d0)then
+        if(myid==1)write(*,*)'void_web_jump_compression_gate requires err_jump_u>=0'
+        nml_ok=.false.
+     end if
      if(myid==1 .and. nml_ok)then
         write(*,'(A)')' Void-only V-web refinement enabled'
         write(*,'(A,I3,A,I3,A,I3)')'   environment/base/wall levels = ', &
@@ -1478,6 +1486,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         else
            write(*,'(A,I3,A,F8.3)')'   scope passive variable = ', &
                 & void_web_scope_ivar,' cut = ',void_web_scope_cut
+        end if
+        if(err_jump_u>=0.0d0)then
+           write(*,'(A,L1,A,F8.3)')'   jump compression gate = ', &
+                & void_web_jump_compression_gate,' pressure minimum = ', &
+                & void_web_jump_pressure_min
         end if
      end if
   end if

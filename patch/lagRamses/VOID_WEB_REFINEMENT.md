@@ -48,6 +48,16 @@ requires `void_web_scope_ivar` to select a passive scalar.  With
 `void_web_refine=.false.`, these restrictions are bypassed and the historical
 all-domain hydro refinement path is unchanged.
 
+The void mode can gate `err_jump_u` with two additional local conditions.
+`void_web_jump_compression_gate=.true.` requires the normal velocity on the
+plus side of the current stencil to be smaller than the normal velocity on
+the minus side.  `void_web_jump_pressure_min>=0` requires the symmetric
+three-cell pressure error to exceed the given value.  Both conditions are
+combined with the existing jump threshold, density ceiling, passive-scalar
+scope, and hydro-level ceiling.  The gates are disabled by default.  Their
+values are ignored when `void_web_refine=.false.`, which preserves the
+ordinary RAMSES velocity-jump rule.
+
 ## Scope choices
 
 - `void_web_scope_ivar=-1`: whole box.  This is useful only for small tests and
@@ -82,6 +92,8 @@ values rather than final production choices.
   void_web_update_interval=4
   err_grad_d=0.5
   err_jump_u=32.0
+  void_web_jump_compression_gate=.true.
+  void_web_jump_pressure_min=0.05
   ekin_flux_refine=-1.0
   d_keflux_max=0.2
 /
@@ -116,23 +128,42 @@ grids at main steps 3 through 5.  The final count was 37.1 per cent below the
 time decreased by 17.3 per cent and the maximum RAMSES memory diagnostic
 decreased by 4.6 percentage points.  The run completed with all 54 explicit
 NaN checks at zero and without a negative-energy, Poisson, or grid-pool error.
-The combination `err_grad_d=0.5, err_jump_u=32` is therefore the preferred
-high-redshift preflight setting.  It is not a production calibration.
+The combination `err_grad_d=0.5, err_jump_u=32` defined the ungated candidate
+for the subsequent physical-gate test.
 
 A matched density-only control set `err_jump_u=-1` and changed no other
 parameter.  Its level-14 counts were 123,663, 656,781, and 942,903 at main
-steps 3 through 5.  The final count was 23.4 per cent below the jump-32 result
-and used 31.4 per cent of the grid pool.  Launcher time decreased by 5.1 per
-cent and the maximum RAMSES memory diagnostic decreased by 3.8 percentage
-points.  The central slice placed 352 of 376 level-14 pixels inside the
-advected scope.  The large late increase shows that the density-gradient
-condition drives continuing mesh growth even without the jump trigger.  The
-jump trigger advances the onset and adds complementary cells, so its physical
-value must be judged from low-redshift shock, thermal, and velocity profiles.
-If the added cells do not improve those profiles, production should use
-`err_jump_u=-1`.  If they do, the trigger needs an additional convergent-flow
-or pressure-jump gate.  The five-point PPM prototype cannot provide the AMR
-comparison yet because it intentionally rejects AMR and self-gravity.
+steps 3 through 5.  The final count was 23.4 per cent below the ungated
+jump-32 result and used 31.4 per cent of the grid pool.  The central slice
+placed 352 of 376 level-14 pixels inside the advected scope.  The large late
+increase shows that the density-gradient condition drives continuing mesh
+growth even without the jump trigger.
+
+An offline audit then tested normal compression and symmetric pressure-jump
+gates.  The raw jump-32 condition selected 43,228 of 7,516,743 active scoped
+level-13 cells.  Normal compression retained 9,738 cells.  Adding a pressure
+error threshold of 0.05 retained 682 cells, or 1.58 per cent of the raw jump
+population.  Their union with the density-gradient condition selected 61,716
+cells, or 0.821 per cent of the active scope.  Density alone selected 61,233
+cells, or 0.815 per cent.
+
+The matched gated calculation contained 215,408, 637,702, and 944,693
+level-14 grids at main steps 3 through 5.  The final count was 23.2 per cent
+below the ungated result and only 0.19 per cent above the density-only control.
+It used 31.5 per cent of the grid pool, and the maximum RAMSES memory
+diagnostic was 63.3 per cent.  All 54 NaN checks were zero.  The run completed
+without a negative-energy, Poisson, or grid-pool error and wrote a complete
+35 GB final snapshot.  An ordinary-mode regression produced bit-identical AMR
+and hydro output files with and without gate values in the namelist.
+
+The preferred high-redshift preflight therefore uses `err_grad_d=0.5`,
+`err_jump_u=32`, the normal-compression gate, and
+`void_web_jump_pressure_min=0.05`.  It adds a sparse set of pressure-supported
+convergent candidates at essentially the density-only mesh cost.  This is not
+a production calibration.  Low-redshift shock, thermal, and velocity profiles
+must establish whether these cells improve the solution.  The five-point PPM
+prototype cannot provide the AMR comparison yet because it intentionally
+rejects AMR and self-gravity.
 
 The feature requires a three-dimensional, periodic, cosmological hydro run.
 It is intentionally rejected for DMO and non-cosmological simulations.  One
