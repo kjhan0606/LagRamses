@@ -65,10 +65,17 @@ subroutine init_poisson
   allocate(phi_restart_available(1:nlevelmax))
   phi_restart_available = .false.
   ! output_00001 written at nstep_coarse=0 precedes the first Poisson solve,
-  ! so its gravity payload is not a valid warm-start guess.  Later outputs
-  ! are written after completed coarse steps and can safely seed the solver.
+  ! so its gravity payload is not a valid warm-start guess.  A void V-web
+  ! output can also follow a mesh-changing regrid before the new hierarchy
+  ! receives its next Poisson solve.  Reconstruct phi from the parent level
+  ! on the first restarted solve in that mode.  Ordinary runs retain the
+  ! existing checkpoint warm start.
   valid_restart_phi=nstep_coarse>0
-  if(nrestart>0 .and. .not.valid_restart_phi .and. myid==1)then
+  if(nrestart>0 .and. void_web_refine .and. valid_restart_phi)then
+     valid_restart_phi=.false.
+     if(myid==1)write(*,*) &
+          'Void Poisson restart: rebuilding phi after adaptive regrid'
+  else if(nrestart>0 .and. .not.valid_restart_phi .and. myid==1)then
      write(*,*)'Poisson restart: ignoring unsolved initial-output phi'
   end if
 
