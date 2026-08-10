@@ -1163,8 +1163,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         call clean_stop
      end if
      if(trim(pbh_energy_sink)/='local_heat' .and. &
+          & trim(pbh_energy_sink)/='uniform_heat' .and. &
           & trim(pbh_energy_sink)/='removed') then
-        if(myid==1) write(*,*) 'ERROR: pbh_energy_sink must be local_heat or removed'
+        if(myid==1) write(*,*) &
+             & 'ERROR: pbh_energy_sink must be local_heat, uniform_heat, or removed'
         call clean_stop
      end if
      if(pbh_cr_ivar/=0 .and. (pbh_cr_ivar<=ndim+2 .or. pbh_cr_ivar>nvar)) then
