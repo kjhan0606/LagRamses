@@ -53,7 +53,8 @@ subroutine init_flow_fine(ilevel)
   real(dp),allocatable,dimension(:,:,:)::init_array
   real(kind=4),allocatable,dimension(:,:)  ::init_plane
 
-  logical::error,ok_file1,ok_file2,ok_file3,ok_file
+  logical::error,ok_file1,ok_file2,ok_file3,ok_file,ok_velb,ok_velc
+  logical::void_web_use_velc_ic
   character(LEN=80)::filename
   character(LEN=5)::nchar,ncharvar
 
@@ -132,12 +133,70 @@ subroutine init_flow_fine(ilevel)
   !--------------------------------------
   filename=TRIM(initfile(ilevel))//'/ic_d'
   INQUIRE(file=filename,exist=ok_file1)
+  void_web_use_velc_ic=.false.
   if(multiple)then
      filename=TRIM(initfile(ilevel))//'/dir_deltab/ic_deltab.00001'
      INQUIRE(file=filename,exist=ok_file2)
+     if(void_web_refine)then
+        ! A V-web update needs a non-zero initial gas velocity.  Prefer the
+        ! two-fluid baryon field; only this opt-in void mode may fall back to
+        ! the conventional single-fluid CDM field.
+        filename=TRIM(initfile(ilevel))//'/dir_velbx/ic_velbx.00001'
+        INQUIRE(file=filename,exist=ok_velb)
+        filename=TRIM(initfile(ilevel))//'/dir_velby/ic_velby.00001'
+        INQUIRE(file=filename,exist=ok_file3)
+        ok_velb=ok_velb.and.ok_file3
+        filename=TRIM(initfile(ilevel))//'/dir_velbz/ic_velbz.00001'
+        INQUIRE(file=filename,exist=ok_file3)
+        ok_velb=ok_velb.and.ok_file3
+        if(.not.ok_velb)then
+           filename=TRIM(initfile(ilevel))//'/dir_velcx/ic_velcx.00001'
+           INQUIRE(file=filename,exist=ok_velc)
+           filename=TRIM(initfile(ilevel))//'/dir_velcy/ic_velcy.00001'
+           INQUIRE(file=filename,exist=ok_file3)
+           ok_velc=ok_velc.and.ok_file3
+           filename=TRIM(initfile(ilevel))//'/dir_velcz/ic_velcz.00001'
+           INQUIRE(file=filename,exist=ok_file3)
+           ok_velc=ok_velc.and.ok_file3
+           if(.not.ok_velc)then
+              if(myid==1)write(*,*)'void_web_refine requires ic_velb* or ic_velc*'
+              call clean_stop
+           endif
+           void_web_use_velc_ic=.true.
+        endif
+     endif
   else
      filename=TRIM(initfile(ilevel))//'/ic_deltab'
      INQUIRE(file=filename,exist=ok_file2)
+     if(void_web_refine)then
+        filename=TRIM(initfile(ilevel))//'/ic_velbx'
+        INQUIRE(file=filename,exist=ok_velb)
+        filename=TRIM(initfile(ilevel))//'/ic_velby'
+        INQUIRE(file=filename,exist=ok_file3)
+        ok_velb=ok_velb.and.ok_file3
+        filename=TRIM(initfile(ilevel))//'/ic_velbz'
+        INQUIRE(file=filename,exist=ok_file3)
+        ok_velb=ok_velb.and.ok_file3
+        if(.not.ok_velb)then
+           filename=TRIM(initfile(ilevel))//'/ic_velcx'
+           INQUIRE(file=filename,exist=ok_velc)
+           filename=TRIM(initfile(ilevel))//'/ic_velcy'
+           INQUIRE(file=filename,exist=ok_file3)
+           ok_velc=ok_velc.and.ok_file3
+           filename=TRIM(initfile(ilevel))//'/ic_velcz'
+           INQUIRE(file=filename,exist=ok_file3)
+           ok_velc=ok_velc.and.ok_file3
+           if(.not.ok_velc)then
+              if(myid==1)write(*,*)'void_web_refine requires ic_velb* or ic_velc*'
+              call clean_stop
+           endif
+           void_web_use_velc_ic=.true.
+        endif
+     endif
+  endif
+  if(void_web_refine.and.void_web_use_velc_ic.and.myid==1)then
+     write(*,*)'void_web_refine: ic_velb* absent; using ic_velc* for initial gas velocity'
+     write(*,*)'void_web_refine: this is a single-fluid IC approximation'
   endif
   ok_file = ok_file1 .or. ok_file2
   if(ok_file)then
@@ -220,15 +279,33 @@ subroutine init_flow_fine(ilevel)
            if(multiple)then
               call title(myid,nchar)
               if(ivar==1)filename=TRIM(initfile(ilevel))//'/dir_deltab/ic_deltab.'//TRIM(nchar)
-              if(ivar==2)filename=TRIM(initfile(ilevel))//'/dir_velcx/ic_velbx.'//TRIM(nchar)
-              if(ivar==3)filename=TRIM(initfile(ilevel))//'/dir_velcy/ic_velby.'//TRIM(nchar)
-              if(ivar==4)filename=TRIM(initfile(ilevel))//'/dir_velcz/ic_velbz.'//TRIM(nchar)
+              if(void_web_refine)then
+                 if(void_web_use_velc_ic)then
+                    if(ivar==2)filename=TRIM(initfile(ilevel))//'/dir_velcx/ic_velcx.'//TRIM(nchar)
+                    if(ivar==3)filename=TRIM(initfile(ilevel))//'/dir_velcy/ic_velcy.'//TRIM(nchar)
+                    if(ivar==4)filename=TRIM(initfile(ilevel))//'/dir_velcz/ic_velcz.'//TRIM(nchar)
+                 else
+                    if(ivar==2)filename=TRIM(initfile(ilevel))//'/dir_velbx/ic_velbx.'//TRIM(nchar)
+                    if(ivar==3)filename=TRIM(initfile(ilevel))//'/dir_velby/ic_velby.'//TRIM(nchar)
+                    if(ivar==4)filename=TRIM(initfile(ilevel))//'/dir_velbz/ic_velbz.'//TRIM(nchar)
+                 endif
+              else
+                 if(ivar==2)filename=TRIM(initfile(ilevel))//'/dir_velcx/ic_velbx.'//TRIM(nchar)
+                 if(ivar==3)filename=TRIM(initfile(ilevel))//'/dir_velcy/ic_velby.'//TRIM(nchar)
+                 if(ivar==4)filename=TRIM(initfile(ilevel))//'/dir_velcz/ic_velbz.'//TRIM(nchar)
+              endif
               if(ivar==5)filename=TRIM(initfile(ilevel))//'/dir_tempb/ic_tempb.'//TRIM(nchar)
            else
               if(ivar==1)filename=TRIM(initfile(ilevel))//'/ic_deltab'
-              if(ivar==2)filename=TRIM(initfile(ilevel))//'/ic_velbx'
-              if(ivar==3)filename=TRIM(initfile(ilevel))//'/ic_velby'
-              if(ivar==4)filename=TRIM(initfile(ilevel))//'/ic_velbz'
+              if(void_web_refine.and.void_web_use_velc_ic)then
+                 if(ivar==2)filename=TRIM(initfile(ilevel))//'/ic_velcx'
+                 if(ivar==3)filename=TRIM(initfile(ilevel))//'/ic_velcy'
+                 if(ivar==4)filename=TRIM(initfile(ilevel))//'/ic_velcz'
+              else
+                 if(ivar==2)filename=TRIM(initfile(ilevel))//'/ic_velbx'
+                 if(ivar==3)filename=TRIM(initfile(ilevel))//'/ic_velby'
+                 if(ivar==4)filename=TRIM(initfile(ilevel))//'/ic_velbz'
+              endif
               if(ivar==5)filename=TRIM(initfile(ilevel))//'/ic_tempb'
            endif
         else

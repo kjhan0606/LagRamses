@@ -1,13 +1,15 @@
 !==============================================================================
-! VoidSim -- inverted-cluster void zoom, hydro evolution (lagRamses/cuRAMSES)
+! VoidSim -- inverted-cluster void zoom staging template (lagRamses/cuRAMSES)
 !
 ! Evolves a GenetIC "inverted IC" (delta -> -delta on the back-tracked
 ! cluster Lagrangian patch, that patch set as the zoom region) down to z=0.
 ! Demonstrates the void numerical-dissipation refinement keys added to
 ! &REFINE_PARAMS: err_jump_u, ekin_flux_refine, d_keflux_max, floor_keflux.
 !
-! Grid:  levelmin=9 (512^3 parent)  ->  levelmax=14 (~0.5 h^-1 kpc zoom).
-! ICs:   GenetIC grafic output, one directory per refinement level.
+! Grid: levelmin=9 (512^3 parent), particle load through level 14, and
+! adaptive hydro refinement through level 21 (0.244 h^-1 kpc comoving).
+! The target-specific staging step must replace every illustrative IC path
+! and set the advected target mask and converged floor level.
 !==============================================================================
 
 &RUN_PARAMS
@@ -23,6 +25,10 @@ use_fftw=.true.        ! built with make USE_FFTW=1 (direct Poisson)
 verbose=.false.
 /
 
+&COSMO_PARAMS
+omega_b=0.048891054    ! must agree with the extended GRAFIC header
+/
+
 &OUTPUT_PARAMS
 noutput=6
 aout=0.1,0.2,0.33,0.5,0.71,1.0   ! z = 9,4,2,1,0.41,0
@@ -32,31 +38,33 @@ aout=0.1,0.2,0.33,0.5,0.71,1.0   ! z = 9,4,2,1,0.41,0
 filetype='grafic'
 ! One grafic directory per level produced by GenetIC (outformat grafic).
 ! initfile(1) = coarse (levelmin) ... last = finest grafic level.
-initfile(1)='/scratch/voidsim/ic_inverted/level_009'
-initfile(2)='/scratch/voidsim/ic_inverted/level_010'
-initfile(3)='/scratch/voidsim/ic_inverted/level_011'
-initfile(4)='/scratch/voidsim/ic_inverted/level_012'
-initfile(5)='/scratch/voidsim/ic_inverted/level_013'
+initfile(1)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_009'
+initfile(2)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_010'
+initfile(3)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_011'
+initfile(4)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_012'
+initfile(5)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_013'
+initfile(6)='/gpfs/kjhan/VoidSim/TARGET/ic_inverted/level_014'
 /
 
 &AMR_PARAMS
 levelmin=9
-levelmax=14
+levelmax=21
 ngridmax=2000000
 npartmax=3000000
 nexpand=1
-boxlen=512.0           ! h^-1 Mpc (match the GenetIC parent box)
+boxlen=1.0             ! code-domain length; GRAFIC supplies 512 h^-1 Mpc
 /
 
 &POISSON_PARAMS
 epsilon=1.d-4
+maxiter_fine=20       ! restored multilevel void hierarchies may need >10 cycles
 /
 
 &HYDRO_PARAMS
 gamma=1.6666667
 courant_factor=0.8
-slope_type=1
-scheme='muscl'
+slope_type=2           ! MC limiter, validated with AMR and Poisson
+scheme='muscl'         ! PPM remains test-only until AMR support is complete
 riemann='hllc'
 pressure_fix=.true.
 /
@@ -75,16 +83,37 @@ T2thres_SF=1.d4
 &REFINE_PARAMS
 ! --- Lagrangian zoom mask (high-res region) + standard gradient AMR ---
 m_refine=9*8.          ! refine cells holding > 8 high-res particles (per level)
-err_grad_d=0.3         ! density-gradient refinement
+err_grad_d=0.5         ! preferred high-z preflight density threshold
 interpol_var=1
 interpol_type=0
 
-! --- Void numerical-dissipation control (NEW) ---------------------------
+! --- Target-dependent void floor --------------------------------------
+! Keep the V-web guard disabled in the unrendered template. The staged IC
+! must carry the advected target mask in passive variable 6 before enabling
+! it. The eigenvalue and hydro thresholds remain calibration values.
+void_refine=.false.
+void_refine_min_level=-1
+void_web_refine=.false.
+void_web_env_level=9
+void_web_base_level=12
+void_web_wall_level=13
+void_web_hydro_max_level=14
+void_web_scope_ivar=6
+void_web_scope_cut=0.5
+void_web_lambda_on=1.0
+void_web_lambda_off=0.8
+void_web_update_interval=4
+
+! --- Void numerical-dissipation control -------------------------------
 ! Eulerian advection truncation error spuriously heats fast, low-density
-! void gas. err_grad_u is bulk-velocity-suppressed and under-refines it,
-! so add two un-suppressed triggers, gated to void densities.
-err_jump_u=0.5         ! |dv|/c_s jump (Mach-of-jump); catches shear/shocks in fast flow
-ekin_flux_refine=4.0   ! |v|^2/c_s^2 (Mach^2) > 4 => supersonic cell (~rho|v|^3/dx dissipation)
-d_keflux_max=0.2       ! apply the two above ONLY where rho < 0.2 * mean (void gas)
+! void gas. V-web mode restricts hydro triggers to the passive-scalar scope
+! and prevents them from opening levels above void_web_hydro_max_level.
+! The jump trigger additionally requires converging normal flow and a
+! symmetric pressure jump. These gates affect only void_web_refine runs.
+err_jump_u=32.0        ! |dv|/c_s jump threshold
+void_web_jump_compression_gate=.true.
+void_web_jump_pressure_min=0.05
+ekin_flux_refine=-1.0  ! bulk Mach^2 over-selects smooth cold void flow
+d_keflux_max=0.2       ! density gate in RAMSES cosmological code units
 floor_keflux=1.d-30    ! denominator floor (leave at default)
 /

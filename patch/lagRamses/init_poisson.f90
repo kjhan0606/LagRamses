@@ -68,9 +68,15 @@ subroutine init_poisson
   ! solve for the restored density and AMR topology.  Their dump occurs at
   ! coarse-step entry, before that step's Poisson solve, so the safe default
   ! is the standard predictor.  The override exists only for controlled A/B
-  ! diagnostics with the same executable and checkpoint.
+  ! diagnostics with the same executable and checkpoint.  A void V-web
+  ! restart can also follow a mesh-changing regrid, so it always rebuilds phi
+  ! even when the diagnostic override is enabled.
   valid_restart_phi=restart_phi_warm_start .and. nstep_coarse>0
-  if(nrestart>0 .and. .not.restart_phi_warm_start .and. myid==1)then
+  if(nrestart>0 .and. void_web_refine .and. valid_restart_phi)then
+     valid_restart_phi=.false.
+     if(myid==1)write(*,*) &
+          'Void Poisson restart: rebuilding phi after adaptive regrid'
+  else if(nrestart>0 .and. .not.restart_phi_warm_start .and. myid==1)then
      write(*,*)'Poisson restart: no solve-valid marker; using predictor'
   else if(nrestart>0 .and. .not.valid_restart_phi .and. myid==1)then
      write(*,*)'Poisson restart: ignoring unsolved initial-output phi'

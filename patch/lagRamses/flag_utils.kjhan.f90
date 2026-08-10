@@ -517,6 +517,13 @@ subroutine userflag_fine(ilevel)
      call voidflag_fine(ilevel,skip_loc,scale,xc)
   end if
 
+  ! This is a separate, opt-in path for the void simulations.  Its mesh
+  ! floors remain active during the ordinary cooling holdback, but it is a
+  ! complete no-op (including no allocation or communication) when disabled.
+  if(void_web_refine .and. ilevel<void_web_wall_level)then
+     call void_webflag_fine(ilevel)
+  end if
+
   if(prevent_refine) then
      call make_virtual_fine_int(flag1(1),ilevel)
      if(simple_boundary)call make_boundary_flag(ilevel)
@@ -595,6 +602,329 @@ subroutine voidflag_fine(ilevel,skip_loc,scale,xc)
   nflag=nflag+nnew
 
 end subroutine voidflag_fine
+!#####################################################################
+!#####################################################################
+!#####################################################################
+!#####################################################################
+subroutine void_webflag_fine(ilevel)
+  use amr_commons
+  implicit none
+  integer,intent(in)::ilevel
+  integer::i,ind,iskip,ind_grid,ind_cell,ancestor_cell
+  integer::ancestor_level,ancestor_grid,state,nnew
+  logical::refine_cell
+
+  if(.not.void_web_refine)return
+  if(ilevel>=void_web_wall_level)return
+
+  call ensure_void_web_state
+  if(.not.void_web_state_valid)return
+
+  nnew=0
+!$omp parallel do private(i,ind,iskip,ind_grid,ind_cell,ancestor_cell) &
+!$omp& private(ancestor_level,ancestor_grid,state,refine_cell) reduction(+:nnew)
+  do i=1,active(ilevel)%ngrid
+     ind_grid=active(ilevel)%igrid(i)
+     do ind=1,twotondim
+        iskip=ncoarse+(ind-1)*ngridmax
+        ind_cell=ind_grid+iskip
+
+        ! Follow the AMR tree to the fixed environmental scale.  The state
+        ! therefore does not depend on the current leaf level.
+        ancestor_cell=ind_cell
+        ancestor_level=ilevel
+        do while(ancestor_level>void_web_env_level .and. ancestor_cell>ncoarse)
+           ancestor_grid=mod(ancestor_cell-ncoarse-1,ngridmax)+1
+           ancestor_cell=father(ancestor_grid)
+           ancestor_level=ancestor_level-1
+        end do
+
+        state=0
+        if(ancestor_level==void_web_env_level .and. ancestor_cell>0) &
+             & state=void_web_state(ancestor_cell)
+        refine_cell=.false.
+        if(ilevel<void_web_base_level .and. iand(state,1)/=0)refine_cell=.true.
+        if(ilevel<void_web_wall_level .and. iand(state,2)/=0)refine_cell=.true.
+        if(refine_cell .and. flag1(ind_cell)==0)then
+           flag1(ind_cell)=1
+           nnew=nnew+1
+        end if
+     end do
+  end do
+!$omp end parallel do
+  nflag=nflag+nnew
+
+end subroutine void_webflag_fine
+!#####################################################################
+!#####################################################################
+!#####################################################################
+!#####################################################################
+subroutine ensure_void_web_state
+  use amr_commons
+  implicit none
+  logical::update_due
+
+  if(.not.void_web_refine)return
+
+  update_due=.not.void_web_state_valid
+  update_due=update_due.or.(void_web_state_epoch/=amr_mesh_epoch)
+  if(void_web_state_valid)then
+     update_due=update_due.or. &
+          & (nstep_coarse-void_web_state_step>=void_web_update_interval)
+  end if
+  if(update_due)call update_void_web_state
+
+end subroutine ensure_void_web_state
+!#####################################################################
+!#####################################################################
+!#####################################################################
+!#####################################################################
+subroutine update_void_web_state
+  use amr_commons
+  use hydro_commons
+  use omp_lib, only: omp_get_wtime
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::igrid,ngrid,ncache,array_size,mpi_err
+  integer::nscope_chunk,nwall_chunk,nvalid_chunk
+  integer::nscope_loc,nwall_loc,nvalid_loc
+  integer::nscope_all,nwall_all,nvalid_all
+  integer,dimension(1:3)::count_loc,count_all
+  real(dp)::dx_loc,rate_norm,lambda_min_chunk,lambda_max_chunk
+  real(dp)::lambda_min_loc,lambda_max_loc,lambda_min_all,lambda_max_all
+  real(dp)::update_time_start,update_time_loc,update_time_all
+  real(dp),dimension(1:3)::diagnostic_loc,diagnostic_all
+  logical::reset_state
+
+  if(.not.void_web_refine)return
+  update_time_start=omp_get_wtime()
+
+  array_size=ncoarse+twotondim*ngridmax
+  reset_state=.not.allocated(void_web_state)
+  if(allocated(void_web_state))then
+     if(size(void_web_state)/=array_size)then
+        deallocate(void_web_state)
+        reset_state=.true.
+     end if
+  end if
+  if(.not.allocated(void_web_state))allocate(void_web_state(1:array_size))
+  if(void_web_state_epoch/=amr_mesh_epoch)reset_state=.true.
+  if(reset_state)void_web_state=0
+
+  ! In RAMSES cosmological units v_code/x_code divided by a*hexp is
+  ! (dv_phys/dx_comoving)/(a H/h).  This makes the eigenvalue threshold
+  ! dimensionless and identical at all epochs.
+  dx_loc=0.5d0**void_web_env_level*boxlen/dble(icoarse_max-icoarse_min+1)
+  rate_norm=aexp*hexp
+  if(rate_norm<=tiny(1.0d0))then
+     if(myid==1)write(*,*)'Invalid aexp*hexp in void V-web calculation'
+     call clean_stop
+  end if
+
+  nscope_loc=0
+  nwall_loc=0
+  nvalid_loc=0
+  lambda_min_loc=huge(1.0d0)
+  lambda_max_loc=-huge(1.0d0)
+  ncache=active(void_web_env_level)%ngrid
+!$omp parallel do private(igrid,ngrid,nscope_chunk,nwall_chunk,nvalid_chunk) &
+!$omp& private(lambda_min_chunk,lambda_max_chunk) &
+!$omp& reduction(+:nscope_loc,nwall_loc,nvalid_loc) &
+!$omp& reduction(min:lambda_min_loc) reduction(max:lambda_max_loc)
+  do igrid=1,ncache,nvector
+     ngrid=min(nvector,ncache-igrid+1)
+     call sub_update_void_web_state(igrid,ngrid,dx_loc,rate_norm, &
+          & nscope_chunk,nwall_chunk,nvalid_chunk, &
+          & lambda_min_chunk,lambda_max_chunk)
+     nscope_loc=nscope_loc+nscope_chunk
+     nwall_loc=nwall_loc+nwall_chunk
+     nvalid_loc=nvalid_loc+nvalid_chunk
+     lambda_min_loc=min(lambda_min_loc,lambda_min_chunk)
+     lambda_max_loc=max(lambda_max_loc,lambda_max_chunk)
+  end do
+!$omp end parallel do
+
+  call make_virtual_fine_int(void_web_state(1),void_web_env_level)
+  if(simple_boundary)then
+     if(myid==1)write(*,*)'void_web_refine currently expects periodic boundaries'
+     call clean_stop
+  end if
+
+#ifndef WITHOUTMPI
+  update_time_loc=omp_get_wtime()-update_time_start
+  ! Pack diagnostics to keep the feature at two scalar collectives per update:
+  ! one sum and one minimum (maxima are represented by their negatives).
+  count_loc=(/nscope_loc,nwall_loc,nvalid_loc/)
+  call MPI_ALLREDUCE(count_loc,count_all,3,MPI_INTEGER,MPI_SUM, &
+       & MPI_COMM_WORLD,mpi_err)
+  nscope_all=count_all(1)
+  nwall_all=count_all(2)
+  nvalid_all=count_all(3)
+  diagnostic_loc=(/lambda_min_loc,-lambda_max_loc,-update_time_loc/)
+  call MPI_ALLREDUCE(diagnostic_loc,diagnostic_all,3,MPI_DOUBLE_PRECISION, &
+       & MPI_MIN,MPI_COMM_WORLD,mpi_err)
+  lambda_min_all=diagnostic_all(1)
+  lambda_max_all=-diagnostic_all(2)
+  update_time_all=-diagnostic_all(3)
+#else
+  nscope_all=nscope_loc
+  nwall_all=nwall_loc
+  nvalid_all=nvalid_loc
+  lambda_min_all=lambda_min_loc
+  lambda_max_all=lambda_max_loc
+  update_time_all=omp_get_wtime()-update_time_start
+#endif
+
+  void_web_state_step=nstep_coarse
+  void_web_state_epoch=amr_mesh_epoch
+  void_web_state_valid=.true.
+  if(myid==1)then
+     write(*,'(A,I8,A,I3,A,I12,A,I12)')' Void V-web update: step=', &
+          & nstep_coarse,' level=',void_web_env_level,' scope=',nscope_all, &
+          & ' wall=',nwall_all
+     if(nvalid_all>0)write(*,'(A,2ES12.4)')'   lambda_max range = ', &
+          & lambda_min_all,lambda_max_all
+     write(*,'(A,F10.4,A)')'   V-web update wall time = ',update_time_all,' s'
+     if(nscope_all==0)write(*,'(A)') &
+          & '   WARNING: void V-web scope is empty; no mesh floor will be applied'
+  end if
+
+end subroutine update_void_web_state
+!#####################################################################
+!#####################################################################
+!#####################################################################
+!#####################################################################
+subroutine sub_update_void_web_state(igrid_start,ngrid,dx_loc,rate_norm, &
+     & nscope,nwall,nvalid,lambda_min,lambda_max)
+  use amr_commons
+  use hydro_commons
+  use hydro_parameters, only: smallr
+  implicit none
+  integer,intent(in)::igrid_start,ngrid
+  real(dp),intent(in)::dx_loc,rate_norm
+  integer,intent(out)::nscope,nwall,nvalid
+  real(dp),intent(out)::lambda_min,lambda_max
+  integer::i,ind,idim,jdim,iskip,ind_cell,old_state,new_state
+  integer::cell_minus,cell_plus
+  integer,dimension(1:nvector)::ind_grid
+  integer,dimension(1:nvector,0:twondim)::igridn
+  integer,dimension(1:nvector,1:twondim)::indn
+  real(dp)::rho_minus,rho_plus,lambda
+  real(dp),dimension(1:ndim,1:ndim)::grad,sigma
+  logical::in_scope,neighbors_ok,wall_on
+  real(dp)::void_web_lambda_max_3d
+
+  do i=1,ngrid
+     ind_grid(i)=active(void_web_env_level)%igrid(igrid_start+i-1)
+  end do
+  call getnborgrids(ind_grid,igridn,ngrid)
+
+  nscope=0
+  nwall=0
+  nvalid=0
+  lambda_min=huge(1.0d0)
+  lambda_max=-huge(1.0d0)
+  do ind=1,twotondim
+     iskip=ncoarse+(ind-1)*ngridmax
+     call getnborcells(igridn,ind,indn,ngrid)
+     do i=1,ngrid
+        ind_cell=ind_grid(i)+iskip
+        select case(void_web_scope_ivar)
+        case(-1)
+           in_scope=.true.
+        case(0)
+           in_scope=(cpu_map2(ind_cell)==1)
+        case default
+           in_scope=(uold(ind_cell,void_web_scope_ivar) / &
+                & max(uold(ind_cell,1),smallr)>void_web_scope_cut)
+        end select
+
+        old_state=void_web_state(ind_cell)
+        new_state=0
+        if(in_scope)then
+           new_state=1
+           nscope=nscope+1
+           neighbors_ok=.true.
+           grad=0.0d0
+           do jdim=1,ndim
+              cell_minus=indn(i,2*jdim-1)
+              cell_plus =indn(i,2*jdim)
+              if(cell_minus<=0 .or. cell_plus<=0)then
+                 neighbors_ok=.false.
+              else
+                 rho_minus=max(uold(cell_minus,1),smallr)
+                 rho_plus =max(uold(cell_plus ,1),smallr)
+                 do idim=1,ndim
+                    grad(idim,jdim)= &
+                         & (uold(cell_plus,idim+1)/rho_plus- &
+                         &  uold(cell_minus,idim+1)/rho_minus)/(2.0d0*dx_loc)
+                 end do
+              end if
+           end do
+
+           if(neighbors_ok)then
+              do jdim=1,ndim
+                 do idim=1,ndim
+                    sigma(idim,jdim)=-0.5d0*(grad(idim,jdim)+ &
+                         & grad(jdim,idim))/rate_norm
+                 end do
+              end do
+              lambda=void_web_lambda_max_3d(sigma)
+              nvalid=nvalid+1
+              lambda_min=min(lambda_min,lambda)
+              lambda_max=max(lambda_max,lambda)
+              wall_on=(iand(old_state,2)/=0)
+              if(wall_on)then
+                 wall_on=(lambda>=void_web_lambda_off)
+              else
+                 wall_on=(lambda>=void_web_lambda_on)
+              end if
+              if(wall_on)then
+                 new_state=ior(new_state,2)
+                 nwall=nwall+1
+              end if
+           end if
+        end if
+        void_web_state(ind_cell)=new_state
+     end do
+  end do
+
+end subroutine sub_update_void_web_state
+!#####################################################################
+!#####################################################################
+!#####################################################################
+!#####################################################################
+function void_web_lambda_max_3d(a) result(lambda_max)
+  use amr_parameters, only: dp
+  implicit none
+  real(dp),dimension(1:3,1:3),intent(in)::a
+  real(dp)::lambda_max
+  real(dp)::q,p2,p,r,phi,detb
+  real(dp),dimension(1:3,1:3)::b
+  ! Stable closed-form eigenvalue for a real symmetric 3x3 matrix.
+  q=(a(1,1)+a(2,2)+a(3,3))/3.0d0
+  p2=(a(1,1)-q)**2+(a(2,2)-q)**2+(a(3,3)-q)**2+ &
+       & 2.0d0*(a(1,2)**2+a(1,3)**2+a(2,3)**2)
+  if(p2<=tiny(1.0d0))then
+     lambda_max=q
+     return
+  end if
+  p=sqrt(p2/6.0d0)
+  b=a
+  b(1,1)=b(1,1)-q
+  b(2,2)=b(2,2)-q
+  b(3,3)=b(3,3)-q
+  b=b/p
+  detb=b(1,1)*(b(2,2)*b(3,3)-b(2,3)*b(3,2))- &
+       & b(1,2)*(b(2,1)*b(3,3)-b(2,3)*b(3,1))+ &
+       & b(1,3)*(b(2,1)*b(3,2)-b(2,2)*b(3,1))
+  r=max(-1.0d0,min(1.0d0,0.5d0*detb))
+  phi=acos(r)/3.0d0
+  lambda_max=q+2.0d0*p*cos(phi)
+
+end function void_web_lambda_max_3d
 !#####################################################################
 !#####################################################################
 !#####################################################################

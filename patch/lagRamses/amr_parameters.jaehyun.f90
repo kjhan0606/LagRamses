@@ -600,6 +600,22 @@ module amr_parameters
   logical::sink_refine=.false. ! Fully refine on sink particles
   logical::void_refine=.false. ! Enforce a mesh-level floor inside r_refine
   integer::void_refine_min_level=-1 ! Target minimum level inside the void region
+  ! Void-only, environment-aware mesh floors.  This path is opt-in and leaves
+  ! the standard RAMSES refinement calculation untouched when disabled.
+  logical::void_web_refine=.false. ! Enable fixed-scale V-web refinement floors
+  integer::void_web_env_level=-1   ! Velocity-shear level (-1 selects levelmin)
+  integer::void_web_base_level=-1  ! Minimum level throughout the void scope
+  integer::void_web_wall_level=-1  ! Minimum level in compressive web cells
+  integer::void_web_hydro_max_level=-1 ! Highest level opened by scoped hydro triggers
+  integer::void_web_scope_ivar=0   ! 0: IC refmap, -1: global, >0: passive scalar
+  real(dp)::void_web_scope_cut=0.5d0 ! Passive-scalar mass-fraction threshold
+  real(dp)::void_web_lambda_on=0.6d0 ! Compression threshold to enter wall state
+  real(dp)::void_web_lambda_off=0.4d0 ! Lower threshold to leave wall state
+  integer::void_web_update_interval=1 ! Coarse steps between V-web updates
+  integer,allocatable,dimension(:)::void_web_state ! Bit 0: scope; bit 1: wall
+  integer::void_web_state_step=-2147483647
+  integer(i8b)::void_web_state_epoch=-1_i8b
+  logical::void_web_state_valid=.false.
   real(dp),dimension(1:MAXLEVEL)::m_basic_refine=-1 ! Lagrangian threshold default ! (ONS)  
   real(dp)::m_refine_effective = 10000 ! (ONS)
   logical::q_refine_holdback=.true. !(ONS) ! default to the original form
