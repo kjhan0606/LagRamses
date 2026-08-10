@@ -181,11 +181,12 @@ integer cell-state array is allocated only while enabled, costing approximately
 `4*(ncoarse + 8*ngridmax)` bytes per rank in 3D.  Each state update uses one
 integer ghost exchange and two packed MPI reductions.
 
-Multilevel void zooms retain the historical 10-cycle fine-multigrid limit when
-`void_web_refine=.false.`.  Void mode allows up to 20 cycles because the first
-fine solve after restoring a multilevel hierarchy can need one or more extra
-cycles.  The convergence warning is emitted only when neither the relative
-criterion nor the absolute residual floor has been reached at the active cap.
+The fine-multigrid cycle limit is controlled by `maxiter_fine` in
+`POISSON_PARAMS` and remains 10 by default.  The void zoom template sets it to
+20 because the first fine solve after restoring a multilevel hierarchy can
+need one or more extra cycles.  The convergence warning is emitted only when
+neither the relative criterion nor the absolute residual floor has been
+reached at the active cap.
 
 ## Multilevel acceptance test
 

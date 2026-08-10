@@ -57,6 +57,7 @@ boxlen=1.0             ! code-domain length; GRAFIC supplies 512 h^-1 Mpc
 
 &POISSON_PARAMS
 epsilon=1.d-4
+maxiter_fine=20       ! restored multilevel void hierarchies may need >10 cycles
 /
 
 &HYDRO_PARAMS

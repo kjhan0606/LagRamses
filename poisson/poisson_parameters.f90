@@ -4,6 +4,19 @@ module poisson_parameters
   ! Convergence criterion for Poisson solvers
   real(dp)::epsilon=1.0D-4
 
+  ! Maximum number of fine-level multigrid V-cycles.  Keep the historical
+  ! default, but allow difficult production meshes to request more cycles.
+  integer :: maxiter_fine=10
+
+  ! Legacy checkpoints do not record whether phi belongs to a completed
+  ! Poisson solve for the restored density and AMR topology.  Keep restart
+  ! warm-starting opt-in until such a solve-valid marker exists on disk.
+  logical :: restart_phi_warm_start=.false.
+
+  ! Production jobs can fail closed when fine MG reaches maxiter_fine while
+  ! still above epsilon.  The default remains backward compatible.
+  logical :: abort_on_mg_nonconvergence=.false.
+
   ! Type of force computation
   integer ::gravity_type=0
 

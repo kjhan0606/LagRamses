@@ -64,19 +64,24 @@ subroutine init_poisson
   safe_mode = .false.
   allocate(phi_restart_available(1:nlevelmax))
   phi_restart_available = .false.
-  ! output_00001 written at nstep_coarse=0 precedes the first Poisson solve,
-  ! so its gravity payload is not a valid warm-start guess.  A void V-web
-  ! output can also follow a mesh-changing regrid before the new hierarchy
-  ! receives its next Poisson solve.  Reconstruct phi from the parent level
-  ! on the first restarted solve in that mode.  Ordinary runs retain the
-  ! existing checkpoint warm start.
-  valid_restart_phi=nstep_coarse>0
+  ! Checkpoints currently carry no marker proving that phi is a completed
+  ! solve for the restored density and AMR topology.  Their dump occurs at
+  ! coarse-step entry, before that step's Poisson solve, so the safe default
+  ! is the standard predictor.  The override exists only for controlled A/B
+  ! diagnostics with the same executable and checkpoint.  A void V-web
+  ! restart can also follow a mesh-changing regrid, so it always rebuilds phi
+  ! even when the diagnostic override is enabled.
+  valid_restart_phi=restart_phi_warm_start .and. nstep_coarse>0
   if(nrestart>0 .and. void_web_refine .and. valid_restart_phi)then
      valid_restart_phi=.false.
      if(myid==1)write(*,*) &
           'Void Poisson restart: rebuilding phi after adaptive regrid'
+  else if(nrestart>0 .and. .not.restart_phi_warm_start .and. myid==1)then
+     write(*,*)'Poisson restart: no solve-valid marker; using predictor'
   else if(nrestart>0 .and. .not.valid_restart_phi .and. myid==1)then
      write(*,*)'Poisson restart: ignoring unsolved initial-output phi'
+  else if(nrestart>0 .and. myid==1)then
+     write(*,*)'Poisson restart: diagnostic warm-start override enabled'
   end if
 
   !--------------------------------
