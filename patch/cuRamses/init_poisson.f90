@@ -64,12 +64,18 @@ subroutine init_poisson
   safe_mode = .false.
   allocate(phi_restart_available(1:nlevelmax))
   phi_restart_available = .false.
-  ! output_00001 written at nstep_coarse=0 precedes the first Poisson solve,
-  ! so its gravity payload is not a valid warm-start guess.  Later outputs
-  ! are written after completed coarse steps and can safely seed the solver.
-  valid_restart_phi=nstep_coarse>0
-  if(nrestart>0 .and. .not.valid_restart_phi .and. myid==1)then
+  ! Checkpoints currently carry no marker proving that phi is a completed
+  ! solve for the restored density and AMR topology.  Their dump occurs at
+  ! coarse-step entry, before that step's Poisson solve, so the safe default
+  ! is the standard predictor.  The override exists only for controlled A/B
+  ! diagnostics with the same executable and checkpoint.
+  valid_restart_phi=restart_phi_warm_start .and. nstep_coarse>0
+  if(nrestart>0 .and. .not.restart_phi_warm_start .and. myid==1)then
+     write(*,*)'Poisson restart: no solve-valid marker; using predictor'
+  else if(nrestart>0 .and. .not.valid_restart_phi .and. myid==1)then
      write(*,*)'Poisson restart: ignoring unsolved initial-output phi'
+  else if(nrestart>0 .and. myid==1)then
+     write(*,*)'Poisson restart: diagnostic warm-start override enabled'
   end if
 
   !--------------------------------

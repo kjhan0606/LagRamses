@@ -73,13 +73,21 @@ subroutine fdm_hjm_step(ilevel, dt_loc)
                  call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icL)
                  call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icR)
                  ! son-guard Neumann mirror: missing or refined neighbour -> centre value
-                 if(icL > 0 .and. son(icL) == 0) then
-                    sqrho_L = sqrt(max(psi_re(icL), 1.0d-8))
+                 if(icL > 0) then
+                    if(son(icL) == 0) then
+                       sqrho_L = sqrt(max(psi_re(icL), 1.0d-8))
+                    else
+                       sqrho_L = sqrho_c
+                    end if
                  else
                     sqrho_L = sqrho_c
                  end if
-                 if(icR > 0 .and. son(icR) == 0) then
-                    sqrho_R = sqrt(max(psi_re(icR), 1.0d-8))
+                 if(icR > 0) then
+                    if(son(icR) == 0) then
+                       sqrho_R = sqrt(max(psi_re(icR), 1.0d-8))
+                    else
+                       sqrho_R = sqrho_c
+                    end if
                  else
                     sqrho_R = sqrho_c
                  end if
@@ -112,13 +120,18 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   use poisson_commons
   use fdm_commons
   implicit none
+#if defined(FDMDEBUG) && !defined(WITHOUTMPI)
+  include 'mpif.h'
+#endif
   integer,intent(in)::ilevel
   real(dp),intent(in)::dx_loc,dt_loc
 
   real(dp),allocatable,dimension(:)::rho_n,S_n,drho,dS_arr
   integer::igrid,ind,iskip,icell,i
-  integer::ntot
+  integer::ntot,nclip_loc,nclip_glob,info
   real(dp)::rho1,S1,inv_a2,dx_inv,dx2_inv,hbar2_over_2
+  real(dp)::clip_added_loc,clip_added_glob
+  real(dp),parameter::rho_floor_hjm=1.0d-15
 
   inv_a2  = 1.0d0   ! supercomoving time absorbs all a factors
   dx_inv  = 1.0d0 / dx_loc
@@ -147,28 +160,50 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
 
   ! --- Stage 1: u1 = un + dt*L(un) ---
   call fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho, dS_arr)
+  nclip_loc = 0
+  clip_added_loc = 0.0d0
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
-!$omp parallel do private(i,igrid,icell) schedule(static)
+!$omp parallel do private(i,igrid,icell) reduction(+:nclip_loc,clip_added_loc) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = igrid + iskip
         if(son(icell) == 0) then
            psi_re(icell) = rho_n(icell) + dt_loc * drho(icell)
            psi_im(icell) = S_n(icell)   + dt_loc * dS_arr(icell)
-           if(psi_re(icell) < 1.0d-10) psi_re(icell) = 1.0d-10
+           if(psi_re(icell) < rho_floor_hjm) then
+              clip_added_loc = clip_added_loc + rho_floor_hjm-psi_re(icell)
+              nclip_loc = nclip_loc + 1
+              psi_re(icell) = rho_floor_hjm
+           end if
         end if
      end do
 !$omp end parallel do
   end do
+#ifdef FDMDEBUG
+  nclip_glob = nclip_loc
+  clip_added_glob = clip_added_loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(nclip_loc,nclip_glob,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(clip_added_loc,clip_added_glob,1,MPI_DOUBLE_PRECISION, &
+       MPI_SUM,MPI_COMM_WORLD,info)
+#endif
+  if(myid == 1) write(*,'(A,I4,A,I1,A,I12,A,ES12.4)') &
+       ' HJM_CLIP level=',ilevel,' stage=',1,' cells=',nclip_glob, &
+       ' mass_added=',clip_added_glob*dx_loc**ndim
+  call fdm_mass_check('hjm-rk1',ilevel)
+#endif
   call make_virtual_fine_dp(psi_re(1), ilevel)
   call make_virtual_fine_dp(psi_im(1), ilevel)
 
   ! --- Stage 2: u2 = 3/4*un + 1/4*u1 + 1/4*dt*L(u1) ---
   call fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho, dS_arr)
+  nclip_loc = 0
+  clip_added_loc = 0.0d0
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
-!$omp parallel do private(i,igrid,icell,rho1,S1) schedule(static)
+!$omp parallel do private(i,igrid,icell,rho1,S1) &
+!$omp reduction(+:nclip_loc,clip_added_loc) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = igrid + iskip
@@ -179,19 +214,39 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
                          + 0.25d0*dt_loc*drho(icell)
            psi_im(icell) = 0.75d0*S_n(icell)   + 0.25d0*S1 &
                          + 0.25d0*dt_loc*dS_arr(icell)
-           if(psi_re(icell) < 1.0d-10) psi_re(icell) = 1.0d-10
+           if(psi_re(icell) < rho_floor_hjm) then
+              clip_added_loc = clip_added_loc + rho_floor_hjm-psi_re(icell)
+              nclip_loc = nclip_loc + 1
+              psi_re(icell) = rho_floor_hjm
+           end if
         end if
      end do
 !$omp end parallel do
   end do
+#ifdef FDMDEBUG
+  nclip_glob = nclip_loc
+  clip_added_glob = clip_added_loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(nclip_loc,nclip_glob,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(clip_added_loc,clip_added_glob,1,MPI_DOUBLE_PRECISION, &
+       MPI_SUM,MPI_COMM_WORLD,info)
+#endif
+  if(myid == 1) write(*,'(A,I4,A,I1,A,I12,A,ES12.4)') &
+       ' HJM_CLIP level=',ilevel,' stage=',2,' cells=',nclip_glob, &
+       ' mass_added=',clip_added_glob*dx_loc**ndim
+  call fdm_mass_check('hjm-rk2',ilevel)
+#endif
   call make_virtual_fine_dp(psi_re(1), ilevel)
   call make_virtual_fine_dp(psi_im(1), ilevel)
 
   ! --- Stage 3: u^{n+1} = 1/3*un + 2/3*u2 + 2/3*dt*L(u2) ---
   call fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho, dS_arr)
+  nclip_loc = 0
+  clip_added_loc = 0.0d0
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
-!$omp parallel do private(i,igrid,icell,rho1,S1) schedule(static)
+!$omp parallel do private(i,igrid,icell,rho1,S1) &
+!$omp reduction(+:nclip_loc,clip_added_loc) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = igrid + iskip
@@ -202,11 +257,28 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
                          + (2.0d0/3.0d0)*dt_loc*drho(icell)
            psi_im(icell) = (1.0d0/3.0d0)*S_n(icell)   + (2.0d0/3.0d0)*S1 &
                          + (2.0d0/3.0d0)*dt_loc*dS_arr(icell)
-           if(psi_re(icell) < 1.0d-10) psi_re(icell) = 1.0d-10
+           if(psi_re(icell) < rho_floor_hjm) then
+              clip_added_loc = clip_added_loc + rho_floor_hjm-psi_re(icell)
+              nclip_loc = nclip_loc + 1
+              psi_re(icell) = rho_floor_hjm
+           end if
         end if
      end do
 !$omp end parallel do
   end do
+#ifdef FDMDEBUG
+  nclip_glob = nclip_loc
+  clip_added_glob = clip_added_loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(nclip_loc,nclip_glob,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(clip_added_loc,clip_added_glob,1,MPI_DOUBLE_PRECISION, &
+       MPI_SUM,MPI_COMM_WORLD,info)
+#endif
+  if(myid == 1) write(*,'(A,I4,A,I1,A,I12,A,ES12.4)') &
+       ' HJM_CLIP level=',ilevel,' stage=',3,' cells=',nclip_glob, &
+       ' mass_added=',clip_added_glob*dx_loc**ndim
+  call fdm_mass_check('hjm-rk3',ilevel)
+#endif
 
   deallocate(rho_n, S_n, drho, dS_arr)
 
@@ -258,13 +330,21 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
               call fdm_neighbor_cell(igrid, ilevel, ind, idim, 1, icL)
               call fdm_neighbor_cell(igrid, ilevel, ind, idim, 2, icR)
 
-              if(icL > 0 .and. son(icL) == 0) then
-                 rho_L = psi_re(icL); S_L = psi_im(icL)
+              if(icL > 0) then
+                 if(son(icL) == 0) then
+                    rho_L = psi_re(icL); S_L = psi_im(icL)
+                 else
+                    rho_L = rho_c; S_L = S_c
+                 end if
               else
                  rho_L = rho_c; S_L = S_c
               end if
-              if(icR > 0 .and. son(icR) == 0) then
-                 rho_R = psi_re(icR); S_R = psi_im(icR)
+              if(icR > 0) then
+                 if(son(icR) == 0) then
+                    rho_R = psi_re(icR); S_R = psi_im(icR)
+                 else
+                    rho_R = rho_c; S_R = S_c
+                 end if
               else
                  rho_R = rho_c; S_R = S_c
               end if
