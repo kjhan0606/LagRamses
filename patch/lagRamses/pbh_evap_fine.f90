@@ -83,6 +83,8 @@ subroutine pbh_cache_uniform_masses
 #endif
   pbh_mdm_glob=mass_glob(1)
   pbh_mgas_glob=mass_glob(2)
+  if(myid==1)write(*,'(A,ES16.9,A,ES16.9)') &
+       & ' PBHCACHE mdm_code=',pbh_mdm_glob,' mgas_code=',pbh_mgas_glob
 end subroutine pbh_cache_uniform_masses
 
 !=======================================================================
