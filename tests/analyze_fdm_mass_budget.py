@@ -106,6 +106,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("run_root", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--require-clean-budget", action="store_true")
+    parser.add_argument("--mass-rel-tol", type=float, default=1.0e-10)
+    parser.add_argument("--budget-abs-tol", type=float, default=1.0e-14)
     args = parser.parse_args()
 
     cases = [
@@ -130,6 +133,32 @@ def main() -> int:
 
     if args.output:
         args.output.write_text(json.dumps(report, indent=2, allow_nan=True) + "\n")
+
+    if args.require_clean_budget:
+        failures: list[str] = []
+        for case in cases:
+            name = str(case.get("case", "unknown"))
+            budget = dict(case.get("cn_budget", {}))
+            if not case.get("completed") or case.get("fatal"):
+                failures.append(f"{name}: run incomplete or fatal")
+            if int(case.get("cn_budget_count", 0)) == 0:
+                failures.append(f"{name}: no CN budget samples")
+            drift = abs(float(case.get("mass_drift_rel", math.inf)))
+            if not math.isfinite(drift) or drift > args.mass_rel_tol:
+                failures.append(
+                    f"{name}: |mass drift|={drift:.3e} > {args.mass_rel_tol:.3e}"
+                )
+            for field in ("closure", "comm_gap", "nonleaf"):
+                value = abs(float(budget.get(field, math.inf)))
+                if not math.isfinite(value) or value > args.budget_abs_tol:
+                    failures.append(
+                        f"{name}: |CN {field}|={value:.3e} > "
+                        f"{args.budget_abs_tol:.3e}"
+                    )
+        for failure in failures:
+            print(f"FAIL: {failure}")
+        if failures:
+            return 1
     return 0
 
 

@@ -1026,6 +1026,7 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   use amr_commons
   use poisson_commons
   use fdm_commons
+  use morton_hash, only: morton_nbor_cell
   implicit none
 #if defined(FDMDEBUG) && !defined(WITHOUTMPI)
   include 'mpif.h'
@@ -1264,7 +1265,12 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
                           psb_re = psi_re(icell) - 0.5d0*xr(icell)
                           psb_im = psi_im(icell) - 0.5d0*xi(icell)
                           drho_w = -cfac * (psb_re*gim - psb_im*gre)
-                          icpn = nbor(igrid, 2*(idim-1)+inbor)
+                          ! Use the same defrag-safe Morton topology as the
+                          ! stencil/ghost lookup.  nbor() can retain a stale
+                          ! parent-cell index after remap and silently place
+                          ! the compensating credit outside every active grid.
+                          icpn = morton_nbor_cell(igrid, ilevel, &
+                               2*(idim-1)+inbor)
                           if(icpn > 0) dmb(icpn) = dmb(icpn) - drho_w*vratio
 #ifdef FDMDEBUG
                           cn_budget_loc(1) = cn_budget_loc(1) + &
@@ -1935,7 +1941,7 @@ subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
   integer,intent(in)::igrid, ilevel, ind, idim, inbor
   integer,intent(out)::icell_nbor
 
-  integer::ind_bit, ind_nbor, igrid_nbor, icell_parent_nbor, iskip
+  integer::ind_bit, ind_nbor, igrid_nbor, iskip
 
   ind_bit = iand(ishft(ind-1, -(idim-1)), 1)  ! 0 or 1
 
@@ -1947,15 +1953,8 @@ subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
         iskip = ncoarse + (ind_nbor-1)*ngridmax
         icell_nbor = igrid + iskip
      else
-        ! Morton is needed at periodic/base boundaries where nbor can be zero.
-        ! After AMR/remap it can temporarily miss a valid adjacent grid; use
-        ! the canonical RAMSES father-cell topology as a guarded fallback so
-        ! that a wave-wave face is not mistaken for a hybrid coarse boundary.
+        ! Morton is defrag-safe and handles periodic/base boundaries directly.
         igrid_nbor = morton_nbor_grid(igrid, ilevel, 2*idim)
-        if(igrid_nbor == 0) then
-           icell_parent_nbor = nbor(igrid, 2*idim)
-           if(icell_parent_nbor > 0) igrid_nbor = son(icell_parent_nbor)
-        end if
         if(igrid_nbor == 0) then
            icell_nbor = 0; return
         end if
@@ -1971,12 +1970,8 @@ subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
         iskip = ncoarse + (ind_nbor-1)*ngridmax
         icell_nbor = igrid + iskip
      else
-        ! Morton-primary, guarded topology fallback; see the right branch.
+        ! Morton-primary topology; see the right branch.
         igrid_nbor = morton_nbor_grid(igrid, ilevel, 2*idim-1)
-        if(igrid_nbor == 0) then
-           icell_parent_nbor = nbor(igrid, 2*idim-1)
-           if(icell_parent_nbor > 0) igrid_nbor = son(icell_parent_nbor)
-        end if
         if(igrid_nbor == 0) then
            icell_nbor = 0; return
         end if
@@ -2002,6 +1997,7 @@ subroutine fdm_wave_ghost(igrid, ilevel, idim, inbor, gre, gim, found)
   use amr_commons
   use poisson_commons
   use fdm_commons
+  use morton_hash, only: morton_nbor_cell
   implicit none
   integer,intent(in)::igrid, ilevel, idim, inbor
   real(dp),intent(out)::gre, gim
@@ -2015,7 +2011,10 @@ subroutine fdm_wave_ghost(igrid, ilevel, idim, inbor, gre, gim, found)
   gre = 0.0d0; gim = 0.0d0
 
   icell_pf = father(igrid)
-  icell_pn = nbor(igrid, 2*(idim-1)+inbor)
+  ! Keep ghost interpolation and conservative credit on the identical,
+  ! defrag-safe parent cell.  Mixing Morton neighbors with legacy nbor()
+  ! produced stale targets after remap and secular hybrid mass drift.
+  icell_pn = morton_nbor_cell(igrid, ilevel, 2*(idim-1)+inbor)
   if(icell_pf <= 0 .or. icell_pn <= 0) return
 
   if(fdm_use_hjm .and. ilevel-1 < fdm_first_wave_level) then

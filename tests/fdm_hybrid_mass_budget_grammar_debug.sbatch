@@ -79,6 +79,8 @@ failures=0
 run_case hybrid_l7_target_budget .true. 7 0.30 p2p || failures=$((failures+1))
 
 python3 "${repo}/tests/analyze_fdm_mass_budget.py" "${run_root}" \
-  --output "${run_root}/report.json" | tee "${run_root}/report.txt"
+  --output "${run_root}/report.json" \
+  --require-clean-budget --mass-rel-tol 1e-10 --budget-abs-tol 1e-14 \
+  | tee "${run_root}/report.txt"
 test "${failures}" -eq 0
 echo "FDM_HYBRID_MASS_BUDGET_DONE $(date --iso-8601=seconds)"
