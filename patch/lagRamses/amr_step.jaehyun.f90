@@ -30,6 +30,7 @@ recursive subroutine amr_step(ilevel,icount)
   integer::i,idim,ivar,mpi_err,jgrid,igrid_lb,ind_lb,iskip_lb
   integer(kind=8)::nleaf_lb
   logical::ok_defrag,output_now_all,lb_timing_sample
+  logical::phi_topology_changed,phi_topology_changed_all
 !!$  integer::i,idim,ivar
 !!$  logical::ok_defrag
   logical,save::first_step=.true.
@@ -160,6 +161,21 @@ recursive subroutine amr_step(ilevel,icount)
            if(use_fdm .and. i>=levelmin) call fdm_mass_check('pre-refine',i)
 #endif
            call refine_fine(i)
+           if(poisson .and. i<nlevelmax .and. &
+                allocated(phi_checkpoint_level_valid))then
+              phi_topology_changed=ncreate>0 .or. nkill>0
+#ifndef WITHOUTMPI
+              call MPI_ALLREDUCE(phi_topology_changed,phi_topology_changed_all, &
+                   1,MPI_LOGICAL,MPI_LOR,MPI_COMM_WORLD,mpi_err)
+#else
+              phi_topology_changed_all=phi_topology_changed
+#endif
+              if(phi_topology_changed_all)then
+                 phi_checkpoint_level_valid(i+1:nlevelmax)=.false.
+                 if(allocated(phi_restart_available)) &
+                      phi_restart_available(i+1:nlevelmax)=.false.
+              end if
+           end if
 #ifdef FDMDEBUG
            if(use_fdm .and. i>=levelmin) call fdm_mass_check('post-refine',i)
 #endif
@@ -547,6 +563,12 @@ recursive subroutine amr_step(ilevel,icount)
 #endif
         call multigrid_fine(levelmin,icount)
      end if
+     if(allocated(phi_checkpoint_level_valid)) &
+          phi_checkpoint_level_valid(ilevel)=.true.
+     ! FFT direct solves bypass the generic initial-guess block, so consume
+     ! the one-shot restored-phi flag here for every solver backend.
+     if(allocated(phi_restart_available)) &
+          phi_restart_available(ilevel)=.false.
 #ifdef HYDRO_CUDA
      call system_clock(mg_t2)
      if(mg_auto_init) then

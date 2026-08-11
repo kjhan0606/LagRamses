@@ -6,6 +6,7 @@ subroutine dump_all
   use amr_commons
   use pm_commons
   use hydro_commons
+  use poisson_commons, only: phi_checkpoint_level_valid
   use cooling_module
   use power_spectrum_mod, only: compute_power_spectrum
   implicit none
@@ -15,7 +16,8 @@ subroutine dump_all
   character::nml_char
   character(LEN=5)::nchar,ncharcpu
   character(LEN=80)::filename,filedir,filedirini,filecmd
-  integer::i,itest,info,irec,ierr
+  integer::i,itest,info,irec,ierr,ilevel
+  logical::marker_exists,phi_marker_valid,phi_marker_valid_all
 
   if(nstep_coarse==nstep_coarse_old.and.nstep_coarse>0)return
   if(nstep_coarse==0.and.nrestart>0)return
@@ -52,6 +54,26 @@ subroutine dump_all
 #endif
      endif
      
+#ifndef WITHOUTMPI
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+     ! Remove markers from a pre-existing directory before any component is
+     ! rewritten.  A failed replacement dump must never inherit validity or
+     ! completion state from an older snapshot with the same output number.
+     if(myid==1)then
+        filename='output_'//TRIM(nchar)//'/POISSON_PHI_VALID'
+        inquire(file=TRIM(filename),exist=marker_exists)
+        if(marker_exists)then
+           open(unit=11,file=TRIM(filename),status='old')
+           close(11,status='delete')
+        end if
+        filename='output_'//TRIM(nchar)//'/COMPLETE'
+        inquire(file=TRIM(filename),exist=marker_exists)
+        if(marker_exists)then
+           open(unit=11,file=TRIM(filename),status='old')
+           close(11,status='delete')
+        end if
+     end if
 #ifndef WITHOUTMPI
      call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
@@ -223,6 +245,40 @@ subroutine dump_all
         if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
         if(myid==1.and.print_when_io) write(*,*)'End power spectrum'
+     end if
+
+     ! Advertise phi only when every active AMR level has completed a solve
+     ! since its most recent topology change.  The marker is separate from
+     ! the gravity payload so legacy and interrupted outputs fail closed.
+     phi_marker_valid=poisson .and. allocated(phi_checkpoint_level_valid)
+     if(phi_marker_valid)then
+        do ilevel=levelmin,nlevelmax
+           if(numbtot(1,ilevel)>0)then
+              phi_marker_valid=phi_marker_valid .and. &
+                   phi_checkpoint_level_valid(ilevel)
+           end if
+        end do
+     end if
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(phi_marker_valid,phi_marker_valid_all,1,MPI_LOGICAL, &
+          MPI_LAND,MPI_COMM_WORLD,info)
+#else
+     phi_marker_valid_all=phi_marker_valid
+#endif
+     if(myid==1 .and. phi_marker_valid_all)then
+        filename='output_'//TRIM(nchar)//'/POISSON_PHI_VALID'
+        open(unit=11,file=TRIM(filename),form='formatted',status='replace', &
+             iostat=ierr)
+        if(ierr==0)then
+           write(11,'(A)')'LAGRAMSES_POISSON_PHI_VALID_V1'
+           write(11,*)nstep_coarse,nlevelmax,t,aexp
+           close(11)
+           write(*,*)'Poisson checkpoint marker: valid warm-start phi'
+        else
+           write(*,*)'WARNING: could not write Poisson phi validity marker'
+        end if
+     else if(myid==1 .and. poisson)then
+        write(*,*)'Poisson checkpoint marker omitted: predictor required on restart'
      end if
 
      ! Completion marker, written only once every rank has flushed every
@@ -718,4 +774,3 @@ subroutine savegadget(filename)
   deallocate(pos, vel, ids)
 
 end subroutine savegadget
-

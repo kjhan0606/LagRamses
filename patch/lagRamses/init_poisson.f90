@@ -9,10 +9,14 @@ subroutine init_poisson
   integer::ncell,ncache,iskip,igrid,i,ilevel,ind,ivar
   integer::nvar2,ilevel2,numbl2,ilun,ibound,istart,info
   integer::ncpu2,ndim2,nlevelmax2,nboundary2
+  integer::marker_step,marker_levelmax,marker_iostat
   logical::scalar_in_checkpoint,valid_restart_phi
+  logical::marker_exists,complete_exists
   integer ,dimension(:),allocatable::ind_grid
   real(dp),dimension(:),allocatable::xx
+  real(dp)::marker_t,marker_aexp
   character(LEN=80)::fileloc
+  character(LEN=128)::marker_file,complete_file,marker_magic
   character(LEN=5)::nchar,ncharcpu
   integer,parameter::tag=1114
   integer::dummy_io,info2
@@ -64,24 +68,63 @@ subroutine init_poisson
   safe_mode = .false.
   allocate(phi_restart_available(1:nlevelmax))
   phi_restart_available = .false.
-  ! Checkpoints currently carry no marker proving that phi is a completed
-  ! solve for the restored density and AMR topology.  Their dump occurs at
-  ! coarse-step entry, before that step's Poisson solve, so the safe default
-  ! is the standard predictor.  The override exists only for controlled A/B
-  ! diagnostics with the same executable and checkpoint.  A void V-web
-  ! restart can also follow a mesh-changing regrid, so it always rebuilds phi
-  ! even when the diagnostic override is enabled.
-  valid_restart_phi=restart_phi_warm_start .and. nstep_coarse>0
-  if(nrestart>0 .and. void_web_refine .and. valid_restart_phi)then
-     valid_restart_phi=.false.
-     if(myid==1)write(*,*) &
-          'Void Poisson restart: rebuilding phi after adaptive regrid'
-  else if(nrestart>0 .and. .not.restart_phi_warm_start .and. myid==1)then
-     write(*,*)'Poisson restart: no solve-valid marker; using predictor'
-  else if(nrestart>0 .and. .not.valid_restart_phi .and. myid==1)then
-     write(*,*)'Poisson restart: ignoring unsolved initial-output phi'
-  else if(nrestart>0 .and. myid==1)then
-     write(*,*)'Poisson restart: diagnostic warm-start override enabled'
+  allocate(phi_checkpoint_level_valid(1:nlevelmax))
+  phi_checkpoint_level_valid = .false.
+
+  ! Warm-starting is selected by a versioned checkpoint marker, never by
+  ! merely finding a gravity payload.  A COMPLETE marker is required as well
+  ! so an interrupted dump cannot advertise a partially written potential.
+  ! Legacy checkpoints therefore fail closed to the standard predictor.
+  valid_restart_phi=.false.
+  marker_exists=.false.
+  complete_exists=.false.
+  marker_iostat=-1
+  marker_step=-1
+  marker_levelmax=-1
+  marker_t=0d0
+  marker_aexp=0d0
+  marker_magic=''
+  if(nrestart>0 .and. myid==1)then
+     call title(nrestart,nchar)
+     marker_file='output_'//TRIM(nchar)//'/POISSON_PHI_VALID'
+     complete_file='output_'//TRIM(nchar)//'/COMPLETE'
+     inquire(file=TRIM(marker_file),exist=marker_exists)
+     inquire(file=TRIM(complete_file),exist=complete_exists)
+     if(marker_exists .and. complete_exists)then
+        open(unit=99,file=TRIM(marker_file),status='old',action='read', &
+             iostat=marker_iostat)
+        if(marker_iostat==0)then
+           read(99,'(A)',iostat=marker_iostat)marker_magic
+           if(marker_iostat==0)then
+              read(99,*,iostat=marker_iostat)marker_step,marker_levelmax, &
+                   marker_t,marker_aexp
+           end if
+           close(99)
+        end if
+        valid_restart_phi=marker_iostat==0
+        valid_restart_phi=valid_restart_phi .and. &
+             TRIM(marker_magic)=='LAGRAMSES_POISSON_PHI_VALID_V1'
+        valid_restart_phi=valid_restart_phi .and. marker_step==nstep_coarse
+        valid_restart_phi=valid_restart_phi .and. marker_levelmax==nlevelmax
+        valid_restart_phi=valid_restart_phi .and. &
+             ABS(marker_t-t)<=1d-12*MAX(1d0,ABS(t))
+        valid_restart_phi=valid_restart_phi .and. &
+             ABS(marker_aexp-aexp)<=1d-12*MAX(1d0,ABS(aexp))
+     end if
+  end if
+#ifndef WITHOUTMPI
+  call MPI_BCAST(valid_restart_phi,1,MPI_LOGICAL,0,MPI_COMM_WORLD,info)
+#endif
+  if(nrestart>0 .and. myid==1)then
+     if(valid_restart_phi)then
+        write(*,*)'Poisson restart: valid phi marker accepted; warm start enabled'
+     else if(marker_exists .and. .not.complete_exists)then
+        write(*,*)'Poisson restart: phi marker belongs to incomplete output; using predictor'
+     else if(marker_exists)then
+        write(*,*)'Poisson restart: invalid phi marker; using predictor'
+     else
+        write(*,*)'Poisson restart: no valid phi marker; using predictor'
+     end if
   end if
 
   !--------------------------------
