@@ -1027,6 +1027,9 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   use poisson_commons
   use fdm_commons
   implicit none
+#if defined(FDMDEBUG) && !defined(WITHOUTMPI)
+  include 'mpif.h'
+#endif
   integer,intent(in)::ilevel
   real(dp),intent(in)::dt_half
 
@@ -1044,6 +1047,11 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   integer::idim,inbor,icn,icpn
   real(dp)::cfac,vratio,psb_re,psb_im,drho_w,rho_old,sfac,gre,gim
   logical::gfound
+#ifdef FDMDEBUG
+  integer::budget_info
+  real(dp)::pvol,rho_new
+  real(dp)::cn_budget_loc(3),cn_budget_glob(3)
+#endif
 
   dx = 0.5d0**ilevel
   nx_loc = icoarse_max - icoarse_min + 1
@@ -1233,6 +1241,13 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      allocate(dmb(ntot)); dmb = 0.0d0
      cfac = hbar_code * dt_half / dx_loc**2
      vratio = 0.5d0**ndim
+#ifdef FDMDEBUG
+     ! (1) wave mass exchanged through unresolved coarse-fine faces,
+     ! (2) compensating parent mass requested after reverse exchange,
+     ! (3) parent mass actually applied after positivity handling.
+     cn_budget_loc = 0.0d0
+     pvol = (2.0d0*dx_loc)**ndim
+#endif
      do ind=1,twotondim
         iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
@@ -1250,6 +1265,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
                           drho_w = -cfac * (psb_re*gim - psb_im*gre)
                           icpn = nbor(igrid, 2*(idim-1)+inbor)
                           if(icpn > 0) dmb(icpn) = dmb(icpn) - drho_w*vratio
+#ifdef FDMDEBUG
+                          cn_budget_loc(1) = cn_budget_loc(1) + &
+                               drho_w*dx_loc**ndim
+#endif
                        end if
                     end if
                  end do
@@ -1271,9 +1290,18 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         do while(igrid > 0)
            icell = igrid + iskip
            if(son(icell) == 0 .and. dmb(icell) /= 0.0d0) then
+#ifdef FDMDEBUG
+              cn_budget_loc(2) = cn_budget_loc(2) + dmb(icell)*pvol
+#endif
               if(ilevel-1 < fdm_first_wave_level) then
                  ! Fluid parent: psi_re IS rho
+#ifdef FDMDEBUG
+                 rho_old = psi_re(icell)
+#endif
                  psi_re(icell) = max(psi_re(icell) + dmb(icell), 1.0d-15)
+#ifdef FDMDEBUG
+                 rho_new = psi_re(icell)
+#endif
               else
                  ! Wave parent: rescale amplitude, keep phase
                  rho_old = psi_re(icell)**2 + psi_im(icell)**2
@@ -1282,7 +1310,13 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
                     psi_re(icell) = psi_re(icell)*sfac
                     psi_im(icell) = psi_im(icell)*sfac
                  end if
+#ifdef FDMDEBUG
+                 rho_new = psi_re(icell)**2 + psi_im(icell)**2
+#endif
               end if
+#ifdef FDMDEBUG
+              cn_budget_loc(3) = cn_budget_loc(3) + (rho_new-rho_old)*pvol
+#endif
            end if
            igrid = next(igrid)
         end do
@@ -1293,6 +1327,21 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         call make_virtual_fine_dp(psi_re(1), ilevel-1)
         call make_virtual_fine_dp(psi_im(1), ilevel-1)
      end if
+#ifdef FDMDEBUG
+     cn_budget_glob = cn_budget_loc
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(cn_budget_loc,cn_budget_glob,3,MPI_DOUBLE_PRECISION, &
+          MPI_SUM,MPI_COMM_WORLD,budget_info)
+#endif
+     if(myid == 1) then
+        write(*,'(A,I3,5(A,ES20.12))') ' FDM_CN_BUDGET level=',ilevel, &
+             ' wave=',cn_budget_glob(1), &
+             ' requested=',cn_budget_glob(2), &
+             ' applied=',cn_budget_glob(3), &
+             ' closure=',cn_budget_glob(1)+cn_budget_glob(3), &
+             ' unapplied=',cn_budget_glob(2)-cn_budget_glob(3)
+     end if
+#endif
      deallocate(dmb)
   end if
 
