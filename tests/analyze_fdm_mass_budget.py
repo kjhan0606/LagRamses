@@ -18,11 +18,11 @@ MCHK_RE = re.compile(
 )
 CN_RE = re.compile(
     rf"FDM_CN_BUDGET\s+level=\s*(?P<level>\d+)"
-    rf"\s+wave=(?P<wave>{NUMBER})"
-    rf"\s+requested=(?P<requested>{NUMBER})"
-    rf"\s+applied=(?P<applied>{NUMBER})"
-    rf"\s+closure=(?P<closure>{NUMBER})"
-    rf"\s+unapplied=(?P<unapplied>{NUMBER})"
+    rf"\s+wave=\s*(?P<wave>{NUMBER})"
+    rf"\s+requested=\s*(?P<requested>{NUMBER})"
+    rf"\s+applied=\s*(?P<applied>{NUMBER})"
+    rf"\s+closure=\s*(?P<closure>{NUMBER})"
+    rf"\s+unapplied=\s*(?P<unapplied>{NUMBER})"
 )
 
 

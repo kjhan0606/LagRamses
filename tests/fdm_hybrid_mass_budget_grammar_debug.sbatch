@@ -49,6 +49,7 @@ run_case () {
   use_hjm=$2
   first_wave=$3
   courant=$4
+  method=$5
   case_dir=${run_root}/${arm}
 
   mkdir -p "${case_dir}"
@@ -63,6 +64,7 @@ run_case () {
   sed -i "s/fdm_use_hjm=.true./fdm_use_hjm=${use_hjm}/" "${case_dir}/cosmo.nml"
   sed -i "s/fdm_first_wave_level=99/fdm_first_wave_level=${first_wave}/" \
     "${case_dir}/cosmo.nml"
+  sed -i "/&RUN_PARAMS/a exchange_method='${method}'" "${case_dir}/cosmo.nml"
   sed -i '/&FDM_PARAMS/a fdm_refine_matched=.true.\nfdm_ghost2=.true.\nfdm_ghost2_rev=.true.' \
     "${case_dir}/cosmo.nml"
   sed -i '/&POISSON_PARAMS/a maxiter_fine=40\nrestart_phi_warm_start=.false.\nabort_on_mg_nonconvergence=.true.' \
@@ -74,9 +76,9 @@ run_case () {
 }
 
 failures=0
-run_case hybrid_l7_cfl030 .true. 7 0.30 || failures=$((failures+1))
-run_case hybrid_l7_cfl015 .true. 7 0.15 || failures=$((failures+1))
-run_case wave_l6_control .false. 6 0.30 || failures=$((failures+1))
+run_case hybrid_l7_p2p .true. 7 0.30 p2p || failures=$((failures+1))
+run_case hybrid_l7_ksection .true. 7 0.30 ksection || failures=$((failures+1))
+run_case hybrid_l7_auto .true. 7 0.30 auto || failures=$((failures+1))
 
 python3 "${repo}/tests/analyze_fdm_mass_budget.py" "${run_root}" \
   --output "${run_root}/report.json" | tee "${run_root}/report.txt"
