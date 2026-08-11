@@ -1930,7 +1930,6 @@ end subroutine fdm_drift_fd_explicit
 !################################################################
 subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
   use amr_commons
-  use morton_hash
   implicit none
   integer,intent(in)::igrid, ilevel, ind, idim, inbor
   integer,intent(out)::icell_nbor
@@ -1947,8 +1946,12 @@ subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
         iskip = ncoarse + (ind_nbor-1)*ngridmax
         icell_nbor = igrid + iskip
      else
-        ! Neighbor is in adjacent grid (Morton lookup, defrag-safe)
-        igrid_nbor = morton_nbor_grid(igrid, ilevel, 2*idim)
+        ! nbor stores the adjacent father cell and is rebuilt by the normal
+        ! RAMSES remap/defrag path.  son(nbor) therefore distinguishes a real
+        ! same-level neighbour from a genuine coarse-fine interface.  A
+        ! Morton-hash lookup here used to miss valid grids after AMR changes,
+        ! turning wave-wave faces into spurious hybrid boundaries.
+        igrid_nbor = son(nbor(igrid, 2*idim))
         if(igrid_nbor == 0) then
            icell_nbor = 0; return
         end if
@@ -1964,8 +1967,8 @@ subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
         iskip = ncoarse + (ind_nbor-1)*ngridmax
         icell_nbor = igrid + iskip
      else
-        ! Neighbor is in adjacent grid (Morton lookup, defrag-safe)
-        igrid_nbor = morton_nbor_grid(igrid, ilevel, 2*idim-1)
+        ! Canonical RAMSES topology lookup; see the right-neighbour branch.
+        igrid_nbor = son(nbor(igrid, 2*idim-1))
         if(igrid_nbor == 0) then
            icell_nbor = 0; return
         end if
