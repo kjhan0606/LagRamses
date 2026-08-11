@@ -19,9 +19,12 @@ MCHK_RE = re.compile(
 CN_RE = re.compile(
     rf"FDM_CN_BUDGET\s+level=\s*(?P<level>\d+)"
     rf"\s+wave=\s*(?P<wave>{NUMBER})"
-    rf"\s+requested=\s*(?P<requested>{NUMBER})"
+    rf"\s+expected=\s*(?P<expected>{NUMBER})"
+    rf"\s+received=\s*(?P<received>{NUMBER})"
     rf"\s+applied=\s*(?P<applied>{NUMBER})"
     rf"\s+closure=\s*(?P<closure>{NUMBER})"
+    rf"\s+comm_gap=\s*(?P<comm_gap>{NUMBER})"
+    rf"\s+nonleaf=\s*(?P<nonleaf>{NUMBER})"
     rf"\s+unapplied=\s*(?P<unapplied>{NUMBER})"
 )
 
@@ -59,14 +62,20 @@ def analyze(case_dir: Path) -> dict[str, object]:
             "level": int(match.group("level")),
             **{
                 field: ffloat(match.group(field))
-                for field in ("wave", "requested", "applied", "closure", "unapplied")
+                for field in (
+                    "wave", "expected", "received", "applied", "closure",
+                    "comm_gap", "nonleaf", "unapplied",
+                )
             },
         }
         for match in CN_RE.finditer(text)
     ]
     cn_summary = {
         field: sum(float(row[field]) for row in cn_rows)
-        for field in ("wave", "requested", "applied", "closure", "unapplied")
+        for field in (
+            "wave", "expected", "received", "applied", "closure",
+            "comm_gap", "nonleaf", "unapplied",
+        )
     }
     initial = mchk[0][2] if mchk else math.nan
     final = mchk[-1][2] if mchk else math.nan

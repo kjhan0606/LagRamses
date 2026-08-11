@@ -1050,7 +1050,7 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
 #ifdef FDMDEBUG
   integer::budget_info
   real(dp)::pvol,rho_new
-  real(dp)::cn_budget_loc(3),cn_budget_glob(3)
+  real(dp)::cn_budget_loc(5),cn_budget_glob(5)
 #endif
 
   dx = 0.5d0**ilevel
@@ -1243,8 +1243,9 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      vratio = 0.5d0**ndim
 #ifdef FDMDEBUG
      ! (1) wave mass exchanged through unresolved coarse-fine faces,
-     ! (2) compensating parent mass requested after reverse exchange,
-     ! (3) parent mass actually applied after positivity handling.
+     ! (2) exact compensating mass packed locally, (3) mass received on all
+     ! owned parent cells after reverse exchange, (4) mass actually applied
+     ! to leaf parents, and (5) received mass stranded on non-leaf parents.
      cn_budget_loc = 0.0d0
      pvol = (2.0d0*dx_loc)**ndim
 #endif
@@ -1268,6 +1269,8 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
 #ifdef FDMDEBUG
                           cn_budget_loc(1) = cn_budget_loc(1) + &
                                drho_w*dx_loc**ndim
+                          cn_budget_loc(2) = cn_budget_loc(2) - &
+                               drho_w*dx_loc**ndim
 #endif
                        end if
                     end if
@@ -1289,10 +1292,14 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
         igrid = headl(myid, ilevel-1)
         do while(igrid > 0)
            icell = igrid + iskip
-           if(son(icell) == 0 .and. dmb(icell) /= 0.0d0) then
+           if(dmb(icell) /= 0.0d0) then
 #ifdef FDMDEBUG
-              cn_budget_loc(2) = cn_budget_loc(2) + dmb(icell)*pvol
+              cn_budget_loc(3) = cn_budget_loc(3) + dmb(icell)*pvol
+              if(son(icell) /= 0) cn_budget_loc(5) = cn_budget_loc(5) + &
+                   dmb(icell)*pvol
 #endif
+           end if
+           if(son(icell) == 0 .and. dmb(icell) /= 0.0d0) then
               if(ilevel-1 < fdm_first_wave_level) then
                  ! Fluid parent: psi_re IS rho
 #ifdef FDMDEBUG
@@ -1315,7 +1322,7 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
 #endif
               end if
 #ifdef FDMDEBUG
-              cn_budget_loc(3) = cn_budget_loc(3) + (rho_new-rho_old)*pvol
+              cn_budget_loc(4) = cn_budget_loc(4) + (rho_new-rho_old)*pvol
 #endif
            end if
            igrid = next(igrid)
@@ -1330,16 +1337,19 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
 #ifdef FDMDEBUG
      cn_budget_glob = cn_budget_loc
 #ifndef WITHOUTMPI
-     call MPI_ALLREDUCE(cn_budget_loc,cn_budget_glob,3,MPI_DOUBLE_PRECISION, &
+     call MPI_ALLREDUCE(cn_budget_loc,cn_budget_glob,5,MPI_DOUBLE_PRECISION, &
           MPI_SUM,MPI_COMM_WORLD,budget_info)
 #endif
      if(myid == 1) then
-        write(*,'(A,I3,5(A,ES20.12))') ' FDM_CN_BUDGET level=',ilevel, &
+        write(*,'(A,I3,8(A,ES20.12))') ' FDM_CN_BUDGET level=',ilevel, &
              ' wave=',cn_budget_glob(1), &
-             ' requested=',cn_budget_glob(2), &
-             ' applied=',cn_budget_glob(3), &
-             ' closure=',cn_budget_glob(1)+cn_budget_glob(3), &
-             ' unapplied=',cn_budget_glob(2)-cn_budget_glob(3)
+             ' expected=',cn_budget_glob(2), &
+             ' received=',cn_budget_glob(3), &
+             ' applied=',cn_budget_glob(4), &
+             ' closure=',cn_budget_glob(1)+cn_budget_glob(4), &
+             ' comm_gap=',cn_budget_glob(2)-cn_budget_glob(3), &
+             ' nonleaf=',cn_budget_glob(5), &
+             ' unapplied=',cn_budget_glob(3)-cn_budget_glob(4)
      end if
 #endif
      deallocate(dmb)

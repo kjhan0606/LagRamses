@@ -76,9 +76,7 @@ run_case () {
 }
 
 failures=0
-run_case hybrid_l7_p2p .true. 7 0.30 p2p || failures=$((failures+1))
-run_case hybrid_l7_ksection .true. 7 0.30 ksection || failures=$((failures+1))
-run_case hybrid_l7_auto .true. 7 0.30 auto || failures=$((failures+1))
+run_case hybrid_l7_target_budget .true. 7 0.30 p2p || failures=$((failures+1))
 
 python3 "${repo}/tests/analyze_fdm_mass_budget.py" "${run_root}" \
   --output "${run_root}/report.json" | tee "${run_root}/report.txt"
