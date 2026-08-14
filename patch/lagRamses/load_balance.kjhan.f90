@@ -552,8 +552,6 @@ subroutine cmp_new_cpu_map
   integer,dimension(1:overload)::ncell_sub_t
   integer(kind=8),dimension(1:overload)::npart_sub_t
 
-  ! Smoothed rank correction from sparse rank x level measurements
-  real(kind=8),dimension(1:MAXLEVEL) :: rank_scale
   real(kind=8) :: floor_w,min_weight_loc,min_weight_global
   real(kind=8) :: grid_cap,guard_denom,predicted_maxcount,cost_imbalance
   real(kind=8) :: grid_avail
@@ -601,15 +599,6 @@ subroutine cmp_new_cpu_map
              niter_cost(ilevel-1)
      end do
   endif
-
-  rank_scale=1d0
-  if((.not.memory_balance).and.time_balance_alpha>0d0)then
-     do ilevel=levelmin,nlevelmax
-        rank_scale(ilevel)=1d0+time_balance_alpha* &
-             (level_rank_scale_ema(ilevel)-1d0)
-        rank_scale(ilevel)=max(0.5d0,min(2d0,rank_scale(ilevel)))
-     end do
-  end if
 
   if(verbose) print *,"Entering cmp_new_cpu_map"
 
@@ -687,7 +676,6 @@ subroutine cmp_new_cpu_map
         isub=(dom(1)-1)/ncpu+1
         ncell_sub(isub)=ncell_sub(isub)+1
         wflag=domain_leaf_cost(0,0,1_8,level_mesh_scale_ema(levelmin))
-        wflag=max(1_8,nint(dble(wflag)*rank_scale(levelmin),kind=8))
         if(wflag>huge(flag1(ncell)))then
            write(*,*)'load_balance: coarse leaf cost exceeds flag1 range: ',wflag
            stop
@@ -787,7 +775,6 @@ subroutine cmp_new_cpu_map
                     wflag=wflag+int(sink_per_grid(ind_grid(i)),kind=8)* &
                          int(mem_weight_sink,kind=8)/int(twotondim,kind=8)
                  endif
-                 wflag=max(1_8,nint(dble(wflag)*rank_scale(ilevel),kind=8))
                  if(wflag>huge(flag1(my_idx)))then
                     write(*,*)'load_balance: leaf cost exceeds flag1 range: ',wflag
                     stop

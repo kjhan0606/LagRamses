@@ -155,7 +155,7 @@ module amr_parameters
   integer::work_weight_grid=80       ! Work proxy per complete AMR grid
   integer::work_weight_part=1        ! Work proxy per particle in its leaf cell
   integer::work_weight_sidm_pair=8   ! Extra work per sampled SIDM pair
-  real(dp)::time_balance_alpha=0d0  ! Work-mode wall-time blend: 0=off, 0.3-0.5=hybrid
+  real(dp)::time_balance_alpha=0d0  ! Blend measured process-CPU level cost into work model
   real(dp)::ksec_level_balance_alpha=0d0 ! K-section scalar/level-minimax blend (0=legacy)
   real(dp)::ksec_level_min_fraction=0.03d0 ! Ignore levels below this node-cost fraction
   integer::ksec_level_bins=2048      ! Coarse bins for level-aware K-section wall search
@@ -399,6 +399,11 @@ module amr_parameters
   integer ::fdm_kinetic=0             ! Fine-level drift: 0=explicit subcycled, 1=Crank-Nicolson implicit
   real(dp)::fdm_cn_tol=1.0d-10        ! CN BiCGSTAB relative-residual tolerance (fine-level kinetic drift)
   integer ::fdm_cost_mode=0           ! Deprecated FDM alias: 0=unchanged, 1=timed work balance
+  ! Compute-only counters sampled with the load-balance CPU timer.  They are
+  ! diagnostics for calibrating the level model, not direct domain weights.
+  integer(kind=8),dimension(1:MAXLEVEL)::lb_cn_matvec_loc=0_8
+  integer(kind=8),dimension(1:MAXLEVEL)::lb_cn_iter_loc=0_8
+  integer(kind=8),dimension(1:MAXLEVEL)::lb_hjm_subcycle_loc=0_8
   logical ::fdm_use_hjm=.false.        ! Enable hybrid HJM fluid (coarse) + wave (fine)
   integer ::fdm_first_wave_level=0     ! First AMR level using wave solver (0=levelmin+2)
   real(dp)::fdm_hjm_C1=0.03d0         ! Fluid->wave refine: C_Q amplitude-curvature threshold

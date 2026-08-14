@@ -58,6 +58,10 @@ subroutine fdm_step(ilevel)
         end if
      end if
      dt_sub = dt_loc / dble(nsub_hjm)
+     if((.not.memory_balance).and.lb_timing_interval>0.and. &
+          mod(nstep_coarse,lb_timing_interval)==0) &
+          lb_hjm_subcycle_loc(ilevel)=lb_hjm_subcycle_loc(ilevel)+ &
+          int(nsub_hjm,kind=8)
      do isub_hjm = 1, nsub_hjm
         call fdm_hjm_step(ilevel, dt_sub)
      end do
@@ -1205,6 +1209,11 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      crho_old = crho
   end do
 
+  if((.not.memory_balance).and.lb_timing_interval>0.and. &
+       mod(nstep_coarse,lb_timing_interval)==0) &
+       lb_cn_iter_loc(ilevel)=lb_cn_iter_loc(ilevel)+ &
+       int(min(iter,max_iter),kind=8)
+
   ! Commit: psi^{n+1} = psi^n + x   (leaf cells)
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
@@ -1328,6 +1337,10 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi, bmode)
   integer::igrid,ind,iskip,icell,idim,inbor,icn,i
   real(dp)::nr,ni,gre,gim
   logical::gfound
+
+  if((.not.memory_balance).and.lb_timing_interval>0.and. &
+       mod(nstep_coarse,lb_timing_interval)==0) &
+       lb_cn_matvec_loc(ilevel)=lb_cn_matvec_loc(ilevel)+1_8
 
   if(fdm_ghost2) then
      call make_virtual_fine_dp2(inr(1), ini(1), ilevel)

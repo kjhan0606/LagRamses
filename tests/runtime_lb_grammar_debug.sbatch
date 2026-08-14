@@ -22,6 +22,14 @@ repo=/home/kjhan/BACKUP/lagRamses
 run_root=/home/kjhan/BACKUP/FDM/runtime_lb_${SLURM_JOB_ID}
 mkdir -p "${run_root}/cdm" "${run_root}/fdm_alias"
 
+# Verify the clock semantics assumed by the timed model on the production
+# compiler/runtime.  Sleeping in MPI must not count, while both OMP workers do.
+mpiifx -qopenmp -O2 "${repo}/tests/load_balance/test_process_cpu_time.f90" \
+  -o "${run_root}/test_process_cpu_time"
+srun --kill-on-bad-exit=1 --mpi=none -n 1 -c 2 --cpu-bind=cores \
+  "${run_root}/test_process_cpu_time" | tee "${run_root}/process_cpu_time.log"
+grep -Fq 'PROCESS_CPU_TIME_RATIO=' "${run_root}/process_cpu_time.log"
+
 cd "${repo}/bin"
 make clean
 make HDF5=1 USE_FFTW=1
@@ -53,6 +61,9 @@ srun --kill-on-bad-exit=1 --mpi=pmi2 -n 16 -c 2 --cpu-bind=cores \
   ../ramses_final3d cosmo.nml | tee run.log
 grep -Fq 'fdm_cost_mode=1 (deprecated alias): selecting timed work balance' run.log
 grep -Fq 'effective LB=timed work' run.log
+grep -Fq 'LB process timing step=' run.log
+grep -Fq 'LB rank process-CPU min/mean/max=' run.log
+grep -Fq 'LB FDM work ranges:' run.log
 grep -q 'Run completed' run.log
 test -f output_00001/COMPLETE
 if grep -Eq 'No more free|FATAL|mismatch=[[:space:]]*[1-9]|NaN_CHK.*=[[:space:]]*[1-9]' run.log; then
