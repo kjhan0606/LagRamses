@@ -128,8 +128,12 @@ subroutine multigrid_fine(ilevel,icount)
    call make_virtual_fine_dp(f(:,3),ilevel) ! Communicate mask
    call make_boundary_mask(ilevel)          ! Set mask to -1 in phys bounds
 
-   ! Pre-compute neighbor grids BEFORE bc_rhs so it can use the array
+   ! The flat neighbor cache is consumed only by the CUDA MG upload path.
+   ! CPU MG performs its own Morton lookup and must not pay this serial setup
+   ! or retain the otherwise-unused (twondim+1)*ngrid integer array.
+#ifdef HYDRO_CUDA
    call precompute_nbor_grid_fine(ilevel)
+#endif
 
    call make_fine_bc_rhs(ilevel,icount)            ! Fill BC-modified RHS
 
@@ -219,9 +223,7 @@ subroutine multigrid_fine(ilevel,icount)
    end if
    if(nboundary>0)levelmin_mg=max(levelmin_mg,2)
 
-   ! nbor_grid_fine already precomputed before make_fine_bc_rhs
-
-   ! Update flag with scan flag (uses nbor_grid_fine if available)
+   ! Update flag with scan flag
    call set_scan_flag_fine(ilevel)
    do ifine=levelmin_mg,ilevel-1
       call set_scan_flag_coarse(ifine)
