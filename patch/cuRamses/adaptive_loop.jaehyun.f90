@@ -396,28 +396,60 @@ subroutine check_jobcontrol
   include 'mpif.h'
   integer::mpi_err
 #endif
-  integer::istep,iaction,ios,action_todo
+  integer::istep,iaction,ios,action_todo,lb_mode_todo,lb_force_todo
+  integer::lb_mode_old,ipos
   logical::fexist
+  character(len=256)::line
+  character(len=8)::old_mode,new_mode
 
   if(len_trim(jobcontrolfile)==0) return
 
   action_todo = 0  ! default: do nothing
+  lb_mode_todo = -1 ! 0=memory, 1=work, 2=timed work
+  lb_force_todo = 0
 
   if(myid==1) then
     inquire(file=trim(jobcontrolfile), exist=fexist)
     if(fexist) then
       open(unit=99, file=trim(jobcontrolfile), form='formatted', status='old', iostat=ios)
       if(ios==0) then
-        do  ! read all lines
-          read(99, *, iostat=ios) istep, iaction
-          if(ios /= 0) exit
+        do  ! read all lines; blank lines, comments, and malformed lines are skipped
+          read(99, '(A)', iostat=ios) line
+          if(ios < 0) exit
+          if(ios > 0) cycle
+          ipos=index(line,'#')
+          if(ipos==1)then
+            line=''
+          else if(ipos>1)then
+            line=line(:ipos-1)
+          endif
+          if(len_trim(line)==0) cycle
+          read(line, *, iostat=ios) istep, iaction
+          if(ios /= 0) then
+            write(*,'(A,A)') ' Job control: ignoring malformed line: ',trim(line)
+            cycle
+          end if
           if(istep == 0 .or. istep == nstep_coarse) then
-            ! Match: take the strongest action (-1 > 1 > 0)
-            if(iaction == -1) then
+            select case(iaction)
+            case(0)
+              continue
+            case(-1)
               action_todo = -1  ! stop always wins
-            else if(iaction == 1 .and. action_todo /= -1) then
-              action_todo = 1
-            endif
+            case(1)
+              if(action_todo /= -1) action_todo = 1
+            case(2:4)
+              lb_mode_todo=iaction-2
+            case(5)
+              ! A wildcard force-remap would repeat forever because the file is
+              ! intentionally persistent.  Require an explicit coarse step.
+              if(istep>0) then
+                lb_force_todo=1
+              else
+                write(*,'(A)') ' Job control: ignoring wildcard (step 0) force-remap action'
+              end if
+            case default
+              write(*,'(A,I0)') ' Job control: ignoring unknown action ',iaction
+            end select
           endif
         end do
         close(99)
@@ -427,7 +459,58 @@ subroutine check_jobcontrol
 
 #ifndef WITHOUTMPI
   call MPI_BCAST(action_todo, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, mpi_err)
+  call MPI_BCAST(lb_mode_todo, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, mpi_err)
+  call MPI_BCAST(lb_force_todo, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, mpi_err)
 #endif
+
+  if(memory_balance)then
+    lb_mode_old=0
+    old_mode='memory'
+  else if(time_balance_alpha>0d0)then
+    lb_mode_old=2
+    old_mode='timed'
+  else
+    lb_mode_old=1
+    old_mode='work'
+  endif
+
+  if(lb_mode_todo>=0 .and. lb_mode_todo/=lb_mode_old)then
+    select case(lb_mode_todo)
+    case(0)
+      memory_balance=.true.
+      time_balance_alpha=0d0
+      new_mode='memory'
+    case(1)
+      memory_balance=.false.
+      cost_weighting=.true.
+      time_balance_alpha=0d0
+      new_mode='work'
+    case(2)
+      memory_balance=.false.
+      cost_weighting=.true.
+      time_balance_alpha=0.3d0
+      new_mode='timed'
+    end select
+    ! Samples gathered under another cost model are not comparable.  Reset
+    ! only the work/imbalance history; the measured remap cost remains useful.
+    level_time_loc=0d0
+    level_ncells_loc=0_8
+    level_cell_time_ema=0d0
+    level_mesh_scale_ema=1d0
+    level_rank_scale_ema=1d0
+    lb_step_time_ema=0d0
+    lb_imbalance_ema=0d0
+    lb_imbalance_ema_valid=.false.
+    lb_force_remap=.true.
+    if(myid==1) write(*,'(A,A,A,A,A,I0)') &
+         ' Job control: load-balance mode ',trim(old_mode),' -> ', &
+         trim(new_mode),' at step ',nstep_coarse
+  endif
+  if(lb_force_todo==1)then
+    lb_force_remap=.true.
+    if(myid==1) write(*,'(A,I0)') &
+         ' Job control: forced load balance requested at step ',nstep_coarse
+  endif
 
   if(action_todo == 1) then
     output_now = .true.

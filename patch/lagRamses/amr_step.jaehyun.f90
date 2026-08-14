@@ -231,7 +231,15 @@ recursive subroutine amr_step(ilevel,icount)
   end if
   if(levelmin.lt.nlevelmax)then
      if(ilevel==levelmin)then
-        if(nremap>0)then
+        if(lb_force_remap)then
+           if(myid==1) write(*,'(A,I0)') &
+                ' Runtime load balance: forcing remap at coarse step ',nstep_coarse
+           call load_balance
+           call defrag
+           lb_force_remap=.false.
+           first_step=.false.
+           ok_defrag=.true.
+        else if(nremap>0)then
            ! Skip first load balance because it has been performed before file dump
            if(nrestart>0.and.first_step)then
               first_step=.false.

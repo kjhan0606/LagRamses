@@ -440,7 +440,23 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   !   AMR:  3*8+3*4+6*4 (xg,father/next/prev,nbor) = 48
   !   Part: 3*4 (headp,tailp,numbp) = 12
   !-------------------------------------------------
-  if(memory_balance .and. mem_weight_grid <= 0) then
+  if(fdm_cost_mode < 0 .or. fdm_cost_mode > 1) then
+     if(myid==1) write(*,'(A,I0)') ' ERROR: fdm_cost_mode must be 0 or 1; got ',fdm_cost_mode
+     call clean_stop
+  end if
+  ! Backward-compatible alias for FDM input files written before the generic
+  ! runtime load-balance controls existed.  Mode 0 leaves RUN_PARAMS intact;
+  ! mode 1 selects the timed work model for the initial mode only.
+  if(use_fdm .and. fdm_cost_mode==1) then
+     memory_balance=.false.
+     cost_weighting=.true.
+     if(time_balance_alpha<=0d0) time_balance_alpha=0.3d0
+     if(myid==1) write(*,'(A)') &
+          ' FDM fdm_cost_mode=1 (deprecated alias): selecting timed work balance'
+  end if
+  ! Compute this even when the initial mode is work-based: job control may
+  ! switch to memory mode later without rereading the namelist.
+  if(mem_weight_grid <= 0) then
      mem_weight_grid = twotondim * (2*nvar*8 + 20 + storage_size(0.0_qdp)/8 + 16 + 56) + 48 + 12
      if(use_fdm) mem_weight_grid = mem_weight_grid + twotondim * 2 * 8
      if(myid==1) write(*,'(A,I6,A,I3,A)') &
@@ -738,8 +754,14 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
              & merge(' (Strang DKD)   ', merge(' (Yoshida 4th)  ', ' (UNKNOWN->DKD) ', fdm_split_order==4), fdm_split_order==2)
         write(*,'(A,I2,A)')    '   kinetic   =', fdm_kinetic, &
              & merge(' (explicit subcyc)', ' (Crank-Nicolson) ', fdm_kinetic==0)
-        write(*,'(A,I2,A)')    '   cost_mode =', fdm_cost_mode, &
-             & merge(' (memory)   ', ' (wallclock)', fdm_cost_mode==0)
+        write(*,'(A,I2)')      '   cost_mode (deprecated alias)=',fdm_cost_mode
+        if(memory_balance) then
+           write(*,'(A)')      '   effective LB=memory'
+        else if(time_balance_alpha>0d0) then
+           write(*,'(A,F5.2,A)') '   effective LB=timed work (alpha=',time_balance_alpha,')'
+        else
+           write(*,'(A)')      '   effective LB=work'
+        end if
         write(*,'(A,L1)')      '   use_hjm   =', fdm_use_hjm
         write(*,'(A,L1)')      '   refine matched=', fdm_refine_matched
         write(*,'(A,L1)')      '   match aout=', fdm_match_aout

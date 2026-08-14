@@ -399,7 +399,9 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   !   AMR:  3*8+3*4+6*4 (xg,father/next/prev,nbor) = 48
   !   Part: 3*4 (headp,tailp,numbp) = 12
   !-------------------------------------------------
-  if(memory_balance .and. mem_weight_grid <= 0) then
+  ! Compute this even when the initial mode is work-based: job control may
+  ! switch to memory mode later without rereading the namelist.
+  if(mem_weight_grid <= 0) then
      mem_weight_grid = twotondim * (2*nvar*8 + 20 + storage_size(0.0_qdp)/8 + 16 + 56) + 48 + 12
      if(myid==1) write(*,'(A,I6,A,I3,A)') &
           ' Memory balance: mem_weight_grid=',mem_weight_grid,' (nvar=',nvar,')'

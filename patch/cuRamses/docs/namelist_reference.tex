@@ -452,11 +452,21 @@ whitespace:
   \item \texttt{action\_code = 1} --- write an extra snapshot and continue.
   \item \texttt{action\_code = -1} --- write an extra snapshot and stop
         gracefully (sets \paramref{nstepmax}\texttt{= nstep\_coarse}).
+  \item \texttt{action\_code = 2} --- select memory load balancing.
+  \item \texttt{action\_code = 3} --- select analytic work load balancing.
+  \item \texttt{action\_code = 4} --- select timed work load balancing
+        (wall-time blend $\alpha=0.3$).
+  \item \texttt{action\_code = 5} --- force one load balance at the next safe
+        coarse AMR entry.  This action requires an explicit positive step.
 \end{itemize}
 If multiple lines match, \texttt{-1} (stop) takes priority over
-\texttt{1} (output).  The file is \emph{not} deleted after reading;
-lines with \texttt{step\_number = 0} re-trigger every step until the
-file is removed or modified by the user.
+\texttt{1} (output), while the last matching load-balance mode wins.
+Changing the mode also queues one load balance at the next safe coarse AMR
+entry and clears timing samples gathered under the previous cost model.
+The file is \emph{not} deleted after reading; persistent mode actions with
+\texttt{step\_number = 0} are idempotent, but output and stop actions
+re-trigger every step until the file is removed or modified by the user.
+Blank lines and text following \texttt{\#} are ignored.
 
 \textbf{Example.}\quad  To request a graceful stop at the next coarse step:
 \begin{verbatim}
@@ -467,6 +477,11 @@ To schedule extra outputs at specific steps:
 100 1
 200 1
 500 -1
+\end{verbatim}
+To switch once to timed work balance and later request an additional remap:
+\begin{verbatim}
+100 4
+250 5
 \end{verbatim}
 
 \apinote{Output numbering (\texttt{ifout}) continues incrementally;

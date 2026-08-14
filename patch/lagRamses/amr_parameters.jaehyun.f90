@@ -164,6 +164,7 @@ module amr_parameters
   integer::lb_remap_min_interval=8   ! Minimum coarse steps between auto remaps
   integer::lb_remap_horizon=16       ! Steps over which predicted savings repay remap
   real(dp)::lb_remap_safety=1.20d0   ! Require benefit > safety times remap cost
+  logical::lb_force_remap=.false.    ! Job-control request, consumed at next coarse AMR entry
 
   ! Step parameters
   integer::nrestart=0         ! New run or backup file number
@@ -397,7 +398,7 @@ module amr_parameters
   integer ::fdm_split_order=2         ! Operator-split order: 2=Strang(DKD), 4=Yoshida
   integer ::fdm_kinetic=0             ! Fine-level drift: 0=explicit subcycled, 1=Crank-Nicolson implicit
   real(dp)::fdm_cn_tol=1.0d-10        ! CN BiCGSTAB relative-residual tolerance (fine-level kinetic drift)
-  integer ::fdm_cost_mode=0           ! Load-balance cost: 0=memory, 1=wallclock
+  integer ::fdm_cost_mode=0           ! Deprecated FDM alias: 0=unchanged, 1=timed work balance
   logical ::fdm_use_hjm=.false.        ! Enable hybrid HJM fluid (coarse) + wave (fine)
   integer ::fdm_first_wave_level=0     ! First AMR level using wave solver (0=levelmin+2)
   real(dp)::fdm_hjm_C1=0.03d0         ! Fluid->wave refine: C_Q amplitude-curvature threshold

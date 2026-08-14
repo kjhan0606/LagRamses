@@ -1,0 +1,5 @@
+# step action: 2=memory, 3=work, 4=timed work, 5=one forced remap
+1 4
+3 3
+4 2
+5 5

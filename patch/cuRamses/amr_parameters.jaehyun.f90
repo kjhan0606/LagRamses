@@ -149,6 +149,7 @@ module amr_parameters
   integer::mem_weight_part=12        ! Memory per particle in dp-equivalents
   integer::mem_weight_sink=500      ! Computational weight per sink particle
   real(dp)::time_balance_alpha=0d0  ! Time-based LB blend: 0=memory-only, 0.3-0.5=hybrid
+  logical::lb_force_remap=.false.   ! Job-control request, consumed at next coarse AMR entry
 
   ! Step parameters
   integer::nrestart=0         ! New run or backup file number
