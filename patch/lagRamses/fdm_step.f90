@@ -1513,7 +1513,7 @@ subroutine fdm_kdb_max_level(ilevel, k2max)
   integer,intent(in)::ilevel
   real(dp),intent(out)::k2max
 
-  integer::igrid,ind,iskip,icell,idim,icp,icm,nx_loc,info
+  integer::igrid,ind,i,icell,idim,icp,icm,nx_loc,info
   real(dp)::dx,scale,dx_loc,inv2dx,rho2,rho_floor
   real(dp)::dre,dim,dth,k2,k2loc,k2glob
 
@@ -1528,11 +1528,13 @@ subroutine fdm_kdb_max_level(ilevel, k2max)
   call make_virtual_fine_dp(psi_im(1), ilevel)
 
   k2loc = 0.0d0
+!$omp parallel do collapse(2) &
+!$omp& private(igrid,icell,rho2,k2,idim,icp,icm,dre,dim,dth) &
+!$omp& reduction(max:k2loc) schedule(static)
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
-     igrid = headl(myid, ilevel)
-     do while(igrid > 0)
-        icell = igrid + iskip
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
+        icell = igrid + ncoarse + (ind-1)*ngridmax
         if(son(icell) == 0) then
            rho2 = psi_re(icell)**2 + psi_im(icell)**2
            if(rho2 > rho_floor) then
@@ -1551,9 +1553,9 @@ subroutine fdm_kdb_max_level(ilevel, k2max)
               if(k2 > k2loc) k2loc = k2
            end if
         end if
-        igrid = next(igrid)
      end do
   end do
+!$omp end parallel do
 
   k2glob = k2loc
 #ifndef WITHOUTMPI
@@ -1583,7 +1585,7 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   integer,intent(in)::ilevel
   real(dp),intent(out)::dtheta_max
 
-  integer::igrid,ind,iskip,icell,idim,icp,icm,nx_loc,info
+  integer::igrid,ind,i,icell,idim,icp,icm,nx_loc,info
   real(dp)::dx,scale,dx_loc,inv2dx,rho2,sqrho_c,sqrho_L,sqrho_R
   real(dp)::dre,dim,dth,dth2,dth2_loc,dth2_glob
   real(dp)::c1_dim,c1_cell
@@ -1595,11 +1597,15 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   real(dp),parameter::c1_edges(NBINS_C1+1) = &
        (/0.0d0, 0.01d0, 0.03d0, 0.1d0, 0.3d0, 1.0d0, 3.0d0, 10.0d0, 1.0d30/)
   integer::c1_hist(NBINS_C1), c1_hist_g(NBINS_C1), ibin
+  integer::c1_hist_thr(NBINS_C1)
+  integer::n_total_thr,n_leaf_thr,n_lowrho_thr,n_c1high_thr,n_valid_thr
   real(dp)::c1_max_loc, c1_max_glob
   real(dp)::dth_max_loc, dth_at_c1max
+  real(dp)::c1_max_thr,dth_at_c1max_thr,dth2_max_thr,c1_at_dthmax_thr
 
   n_total=0; n_leaf=0; n_lowrho=0; n_c1high=0; n_valid=0
-  c1_hist = 0; c1_max_loc = 0.0d0; dth_max_loc = 0.0d0
+  c1_hist = 0; c1_max_loc = 0.0d0
+  dth_max_loc = 0.0d0; dth_at_c1max = 0.0d0
   dx = 0.5d0**ilevel
   nx_loc = icoarse_max - icoarse_min + 1
   scale = boxlen / dble(nx_loc)
@@ -1611,14 +1617,24 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   call make_virtual_fine_dp(psi_im(1), ilevel)
 
   dth2_loc = 0.0d0
+!$omp parallel default(shared) &
+!$omp& private(ind,i,igrid,icell,idim,icp,icm,rho2,sqrho_c,sqrho_L,sqrho_R, &
+!$omp& dre,dim,dth,dth2,c1_dim,c1_cell,S_L,S_R,re_L,re_R,im_L,im_R, &
+!$omp& ok_p,ok_m,ibin,c1_hist_thr,n_total_thr,n_leaf_thr,n_lowrho_thr, &
+!$omp& n_c1high_thr,n_valid_thr,c1_max_thr,dth_at_c1max_thr, &
+!$omp& dth2_max_thr,c1_at_dthmax_thr)
+  n_total_thr=0; n_leaf_thr=0; n_lowrho_thr=0
+  n_c1high_thr=0; n_valid_thr=0; c1_hist_thr=0
+  c1_max_thr=0.0d0; dth_at_c1max_thr=0.0d0
+  dth2_max_thr=0.0d0; c1_at_dthmax_thr=0.0d0
+!$omp do collapse(2) schedule(static)
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
-     igrid = headl(myid, ilevel)
-     do while(igrid > 0)
-        icell = igrid + iskip
-        n_total = n_total + 1
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
+        icell = igrid + ncoarse + (ind-1)*ngridmax
+        n_total_thr = n_total_thr + 1
         if(son(icell) == 0) then
-           n_leaf = n_leaf + 1
+           n_leaf_thr = n_leaf_thr + 1
            if(is_fluid) then
               rho2 = max(psi_re(icell),0.0d0)   ! psi_re = rho on fluid levels
            else
@@ -1678,30 +1694,47 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
               end do
               do ibin=1,NBINS_C1
                  if(c1_cell < c1_edges(ibin+1)) then
-                    c1_hist(ibin) = c1_hist(ibin) + 1
+                    c1_hist_thr(ibin) = c1_hist_thr(ibin) + 1
                     exit
                  end if
               end do
-              if(c1_cell > c1_max_loc) then
-                 c1_max_loc = c1_cell
-                 dth_at_c1max = sqrt(dth2)
+              if(c1_cell > c1_max_thr) then
+                 c1_max_thr = c1_cell
+                 dth_at_c1max_thr = sqrt(dth2)
               end if
               if(c1_cell < fdm_hjm_C1) then
-                 n_valid = n_valid + 1
+                 n_valid_thr = n_valid_thr + 1
               else
-                 n_c1high = n_c1high + 1
+                 n_c1high_thr = n_c1high_thr + 1
               end if
-              if(dth2 > dth2_loc) then
-                 dth2_loc = dth2
-                 dth_max_loc = c1_cell
+              if(dth2 > dth2_max_thr) then
+                 dth2_max_thr = dth2
+                 c1_at_dthmax_thr = c1_cell
               end if
            else
-              n_lowrho = n_lowrho + 1
+              n_lowrho_thr = n_lowrho_thr + 1
            end if
         end if
-        igrid = next(igrid)
      end do
   end do
+!$omp end do
+!$omp critical(fdm_vmax_merge)
+  n_total = n_total + n_total_thr
+  n_leaf = n_leaf + n_leaf_thr
+  n_lowrho = n_lowrho + n_lowrho_thr
+  n_c1high = n_c1high + n_c1high_thr
+  n_valid = n_valid + n_valid_thr
+  c1_hist = c1_hist + c1_hist_thr
+  if(c1_max_thr > c1_max_loc) then
+     c1_max_loc = c1_max_thr
+     dth_at_c1max = dth_at_c1max_thr
+  end if
+  if(dth2_max_thr > dth2_loc) then
+     dth2_loc = dth2_max_thr
+     dth_max_loc = c1_at_dthmax_thr
+  end if
+!$omp end critical(fdm_vmax_merge)
+!$omp end parallel
 
   n_total_g=n_total; n_leaf_g=n_leaf; n_lowrho_g=n_lowrho
   n_c1high_g=n_c1high; n_valid_g=n_valid
@@ -1990,17 +2023,18 @@ subroutine fdm_kick(ilevel, dt_loc)
   integer,intent(in)::ilevel
   real(dp),intent(in)::dt_loc
 
-  integer::igrid,ind,iskip,icell
+  integer::igrid,ind,i,icell
   real(dp)::phase,cos_p,sin_p,re_old,im_old
 
   if(hbar_code <= 0.0d0) return
 
   ! Loop over all leaf cells at this level
+!$omp parallel do collapse(2) &
+!$omp& private(igrid,icell,phase,cos_p,sin_p,re_old,im_old) schedule(static)
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
-     igrid = headl(myid, ilevel)
-     do while(igrid > 0)
-        icell = igrid + iskip
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
+        icell = igrid + ncoarse + (ind-1)*ngridmax
         if(son(icell) == 0) then
            ! Schrödinger: i*hbar*dpsi/dt = m*Phi*psi
            ! => dpsi/dt = -i*(Phi/hbar)*psi
@@ -2019,9 +2053,9 @@ subroutine fdm_kick(ilevel, dt_loc)
            psi_re(icell) =  re_old*cos_p + im_old*sin_p
            psi_im(icell) = -re_old*sin_p + im_old*cos_p
         end if
-        igrid = next(igrid)
      end do
   end do
+!$omp end parallel do
 
 end subroutine fdm_kick
 !################################################################
@@ -3175,7 +3209,7 @@ subroutine fdm_restrict(ilevel)
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,ind,iskip,icell,igrid_child
+  integer::igrid,ind,i,icell,igrid_child
   integer::ind_child,iskip_child,icell_child
   real(dp)::sum_re,sum_im,rho_avg,S_avg,S_old,twopi_h,amp2,sfac
   logical::parent_fluid,child_fluid
@@ -3192,11 +3226,13 @@ subroutine fdm_restrict(ilevel)
   ! fluid->fluid: plain (rho,S) average.  wave->wave: plain psi average.
   ! wave child -> fluid parent: rho = <|psi|^2>, S = hbar*atan2(<psi>)
   ! rebased onto the parent's previous unwrapped S by continuity.
+!$omp parallel do collapse(2) &
+!$omp& private(igrid,icell,igrid_child,ind_child,iskip_child,icell_child, &
+!$omp& sum_re,sum_im,rho_avg,S_avg,S_old,amp2,sfac) schedule(static)
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
-     igrid = headl(myid, ilevel)
-     do while(igrid > 0)
-        icell = igrid + iskip
+     do i=1,active(ilevel)%ngrid
+        igrid = active(ilevel)%igrid(i)
+        icell = igrid + ncoarse + (ind-1)*ngridmax
         igrid_child = son(icell)
         if(igrid_child > 0) then
            sum_re = 0.0d0
@@ -3239,9 +3275,9 @@ subroutine fdm_restrict(ilevel)
               psi_im(icell) = sum_im / dble(twotondim)
            end if
         end if
-        igrid = next(igrid)
      end do
   end do
+!$omp end parallel do
 
 end subroutine fdm_restrict
 !################################################################

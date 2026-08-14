@@ -25,7 +25,7 @@ subroutine rho_fine(ilevel,icount)
   ! - cpu_map2 containing the refinement map due to particle
   !   number density criterion (quasi Lagrangian mesh).
   !------------------------------------------------------------------
-  integer::iskip,icpu,ind,i,info,nx_loc,ibound,idim
+  integer::iskip,icpu,ind,i,info,nx_loc,ibound,idim,icell
   integer,save,dimension(1:MAXLEVEL)::void_map_report_step=-huge(1)
   integer(kind=8),dimension(1:3)::void_map_count,void_map_count_all
   real(dp)::dx,d_scale,scale,dx_loc,scalar
@@ -159,24 +159,23 @@ subroutine rho_fine(ilevel,icount)
   ! HJM fluid levels store (rho, S) so psi_re IS the density.
   if(use_fdm)then
      if(fdm_use_hjm .and. ilevel < fdm_first_wave_level)then
+!$omp parallel do collapse(2) private(icell) schedule(static)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,active(ilevel)%ngrid
-              rho(active(ilevel)%igrid(i)+iskip) = &
-                   rho(active(ilevel)%igrid(i)+iskip) &
-                   + max(psi_re(active(ilevel)%igrid(i)+iskip),0.0d0)
+              icell=active(ilevel)%igrid(i)+ncoarse+(ind-1)*ngridmax
+              rho(icell) = rho(icell) + max(psi_re(icell),0.0d0)
            end do
         end do
+!$omp end parallel do
      else
+!$omp parallel do collapse(2) private(icell) schedule(static)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,active(ilevel)%ngrid
-              rho(active(ilevel)%igrid(i)+iskip) = &
-                   rho(active(ilevel)%igrid(i)+iskip) &
-                   + psi_re(active(ilevel)%igrid(i)+iskip)**2 &
-                   + psi_im(active(ilevel)%igrid(i)+iskip)**2
+              icell=active(ilevel)%igrid(i)+ncoarse+(ind-1)*ngridmax
+              rho(icell) = rho(icell) + psi_re(icell)**2 + psi_im(icell)**2
            end do
         end do
+!$omp end parallel do
      end if
   end if
   ! Update boudaries
