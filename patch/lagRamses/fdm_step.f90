@@ -1030,6 +1030,7 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   use amr_commons
   use poisson_commons
   use fdm_commons
+  use morton_hash, only: morton_nbor_cell
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::dt_half
@@ -1257,7 +1258,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
                           psb_re = psi_re(icell) - 0.5d0*xr(icell)
                           psb_im = psi_im(icell) - 0.5d0*xi(icell)
                           drho_w = -cfac * (psb_re*gim - psb_im*gre)
-                          icpn = nbor(igrid, 2*(idim-1)+inbor)
+                          ! Use the same defrag-safe topology for the ghost
+                          ! interpolation and its conservative parent credit.
+                          icpn = morton_nbor_cell(igrid, ilevel, &
+                               2*(idim-1)+inbor)
                           if(icpn > 0) dmb(icpn) = dmb(icpn) - drho_w*vratio
                        end if
                     end if
@@ -1978,6 +1982,7 @@ subroutine fdm_wave_ghost(igrid, ilevel, idim, inbor, gre, gim, found)
   use amr_commons
   use poisson_commons
   use fdm_commons
+  use morton_hash, only: morton_nbor_cell
   implicit none
   integer,intent(in)::igrid, ilevel, idim, inbor
   real(dp),intent(out)::gre, gim
@@ -1991,7 +1996,9 @@ subroutine fdm_wave_ghost(igrid, ilevel, idim, inbor, gre, gim, found)
   gre = 0.0d0; gim = 0.0d0
 
   icell_pf = father(igrid)
-  icell_pn = nbor(igrid, 2*(idim-1)+inbor)
+  ! Keep the interpolation and compensating credit on the identical,
+  ! defrag-safe parent cell after load-balance remapping.
+  icell_pn = morton_nbor_cell(igrid, ilevel, 2*(idim-1)+inbor)
   if(icell_pf <= 0 .or. icell_pn <= 0) return
 
   if(fdm_use_hjm .and. ilevel-1 < fdm_first_wave_level) then
