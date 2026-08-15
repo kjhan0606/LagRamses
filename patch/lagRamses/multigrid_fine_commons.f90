@@ -135,6 +135,127 @@ contains
    end subroutine mgp_report
 
 end module mg_omp_profile_m
+
+module fftw_omp_profile_m
+   use omp_lib, only: omp_get_wtime
+   implicit none
+
+   integer, parameter :: FFTP_NPHASE=12, FFTP_NPATH=2
+   integer, parameter :: FFTP_TOTAL=1, FFTP_SETUP=2, FFTP_PARTNER=3
+   integer, parameter :: FFTP_COUNT=4, FFTP_COUNTCOMM=5, FFTP_PACK=6
+   integer, parameter :: FFTP_FWDCOMM=7, FFTP_R2C=8, FFTP_GREEN=9
+   integer, parameter :: FFTP_C2R=10, FFTP_REVCOMM=11, FFTP_SCATTER=12
+
+   real(kind=8), save :: fftp_wall(FFTP_NPHASE,FFTP_NPATH)=0d0
+   real(kind=8), save :: fftp_cpu(FFTP_NPHASE,FFTP_NPATH)=0d0
+   integer(kind=8), save :: fftp_calls(FFTP_NPHASE,FFTP_NPATH)=0_8
+   integer(kind=8), save :: fftp_work(FFTP_NPHASE,FFTP_NPATH)=0_8
+   integer, save :: fftp_last_report=-1
+
+contains
+
+   subroutine fftp_start(wall_start,cpu_start)
+      real(kind=8), intent(out) :: wall_start,cpu_start
+      wall_start=omp_get_wtime()
+      call cpu_time(cpu_start)
+   end subroutine fftp_start
+
+   subroutine fftp_stop(ipath,iphase,wall_start,cpu_start,nwork)
+      integer, intent(in) :: ipath,iphase
+      real(kind=8), intent(in) :: wall_start,cpu_start
+      integer(kind=8), intent(in), optional :: nwork
+      real(kind=8) :: wall_stop,cpu_stop
+
+      wall_stop=omp_get_wtime()
+      call cpu_time(cpu_stop)
+      fftp_wall(iphase,ipath)=fftp_wall(iphase,ipath)+wall_stop-wall_start
+      fftp_cpu(iphase,ipath)=fftp_cpu(iphase,ipath)+cpu_stop-cpu_start
+      fftp_calls(iphase,ipath)=fftp_calls(iphase,ipath)+1_8
+      if(present(nwork))fftp_work(iphase,ipath)=fftp_work(iphase,ipath)+nwork
+   end subroutine fftp_stop
+
+   function fftp_label(iphase) result(label)
+      integer, intent(in) :: iphase
+      character(len=20) :: label
+
+      select case(iphase)
+      case(FFTP_TOTAL);     label='total'
+      case(FFTP_SETUP);     label='setup/plan'
+      case(FFTP_PARTNER);   label='partner discovery'
+      case(FFTP_COUNT);     label='cell count'
+      case(FFTP_COUNTCOMM); label='count exchange'
+      case(FFTP_PACK);      label='gather/pack'
+      case(FFTP_FWDCOMM);   label='forward exchange'
+      case(FFTP_R2C);       label='forward FFT'
+      case(FFTP_GREEN);     label='spectral kernel'
+      case(FFTP_C2R);       label='inverse FFT'
+      case(FFTP_REVCOMM);   label='reverse exchange'
+      case(FFTP_SCATTER);   label='normalize/scatter'
+      case default;         label='other'
+      end select
+   end function fftp_label
+
+   subroutine fftp_report(step,myid,ncpu,nthreads)
+      integer, intent(in) :: step,myid,ncpu,nthreads
+      real(kind=8) :: wall_sum(FFTP_NPHASE,FFTP_NPATH)
+      real(kind=8) :: wall_max(FFTP_NPHASE,FFTP_NPATH)
+      real(kind=8) :: cpu_sum(FFTP_NPHASE,FFTP_NPATH)
+      real(kind=8) :: wall_avg,eff,balance
+      integer(kind=8) :: calls_sum(FFTP_NPHASE,FFTP_NPATH)
+      integer(kind=8) :: work_sum(FFTP_NPHASE,FFTP_NPATH)
+      integer :: iphase,ipath,info
+      character(len=11) :: path_label
+#ifndef WITHOUTMPI
+      include 'mpif.h'
+#endif
+
+      if(step<3 .or. fftp_last_report>=0)return
+#ifndef WITHOUTMPI
+      call MPI_REDUCE(fftp_wall,wall_sum,FFTP_NPHASE*FFTP_NPATH, &
+           MPI_DOUBLE_PRECISION,MPI_SUM,0,MPI_COMM_WORLD,info)
+      call MPI_REDUCE(fftp_wall,wall_max,FFTP_NPHASE*FFTP_NPATH, &
+           MPI_DOUBLE_PRECISION,MPI_MAX,0,MPI_COMM_WORLD,info)
+      call MPI_REDUCE(fftp_cpu,cpu_sum,FFTP_NPHASE*FFTP_NPATH, &
+           MPI_DOUBLE_PRECISION,MPI_SUM,0,MPI_COMM_WORLD,info)
+      call MPI_REDUCE(fftp_calls,calls_sum,FFTP_NPHASE*FFTP_NPATH, &
+           MPI_INTEGER8,MPI_SUM,0,MPI_COMM_WORLD,info)
+      call MPI_REDUCE(fftp_work,work_sum,FFTP_NPHASE*FFTP_NPATH, &
+           MPI_INTEGER8,MPI_SUM,0,MPI_COMM_WORLD,info)
+#else
+      wall_sum=fftp_wall
+      wall_max=fftp_wall
+      cpu_sum=fftp_cpu
+      calls_sum=fftp_calls
+      work_sum=fftp_work
+#endif
+      if(myid==1)then
+         write(*,'(A,I0,A,I0,A)') &
+              ' FFTW_OMP_PROFILE step=',step,' threads=',nthreads, &
+              ' (cumulative; CPU/(threads*wall))'
+         write(*,'(A)') &
+              ' FFTPROF path        phase                 wall-avg wall-max  omp-eff balance calls/rank work/rank'
+         do ipath=1,FFTP_NPATH
+            path_label=merge('distributed','replicated ',ipath==2)
+            do iphase=1,FFTP_NPHASE
+               if(calls_sum(iphase,ipath)==0_8)cycle
+               wall_avg=wall_sum(iphase,ipath)/dble(ncpu)
+               eff=0d0
+               if(wall_sum(iphase,ipath)>0d0)eff=cpu_sum(iphase,ipath)/ &
+                    (dble(max(1,nthreads))*wall_sum(iphase,ipath))
+               balance=0d0
+               if(wall_max(iphase,ipath)>0d0)balance=wall_avg/wall_max(iphase,ipath)
+               write(*,'(A,A11,1X,A20,2F10.4,2F9.3,2F12.1)') &
+                    ' FFTPROF ',path_label,fftp_label(iphase), &
+                    wall_avg,wall_max(iphase,ipath),eff,balance, &
+                    dble(calls_sum(iphase,ipath))/dble(ncpu), &
+                    dble(work_sum(iphase,ipath))/dble(ncpu)
+            end do
+         end do
+      end if
+      fftp_last_report=step
+   end subroutine fftp_report
+
+end module fftw_omp_profile_m
 #endif
 
 
@@ -3559,6 +3680,9 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
    use scalar_de_commons, only: sde_dmcorr_of_a, horndeski_mu_of_a
    use iso_c_binding
    use omp_lib
+#ifdef FDMDEBUG
+   use fftw_omp_profile_m
+#endif
    implicit none
 #ifndef WITHOUTMPI
    include "mpif.h"
@@ -3633,10 +3757,11 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
    integer, allocatable :: sendcounts(:), sdispls(:)
    integer, allocatable :: recvcounts(:), rdispls(:)
    real(dp), allocatable :: sendbuf(:), recvbuf(:)
-   integer, allocatable :: send_idx(:)
+   integer, allocatable :: thread_counts(:,:), thread_offsets(:,:)
    integer :: dest_rank, x_local, base_Nx, rem_Nx
    integer :: n_send_total, n_recv_total, irank
    integer :: local_Nz_half, slab_real_size
+   integer :: nthreads_fft, tid, slot
 
    ! Sparse P2P variables
    integer, allocatable :: reqs(:)
@@ -3647,6 +3772,11 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
    real(dp) :: my_xmin, my_xmax
    logical :: overlap
    logical :: local_changed, global_changed
+#ifdef FDMDEBUG
+   integer :: fftp_path
+   real(kind=8) :: fftp_total_wall,fftp_total_cpu
+   real(kind=8) :: fftp_phase_wall,fftp_phase_cpu
+#endif
 
    ! ================================================================
    ! Step 0: Grid dimensions
@@ -3659,6 +3789,11 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
    dx2_fft = dx_fft * dx_fft
    twopi   = 2.0d0 * acos(-1.0d0)
    use_distributed = (N_total >= 256_i8b**3 .and. ncpu > 1)
+#ifdef FDMDEBUG
+   fftp_path=merge(2,1,use_distributed)
+   call fftp_start(fftp_total_wall,fftp_total_cpu)
+   call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
    if(myid==1) write(*,'(A,A,A,I3,A,I5,A,I5,A,I5,A,I15,A,L1)') &
         ' FFTW3 ',merge('scalar ','Poisson',solve_mode==1),': level=',ilevel, &
@@ -3837,6 +3972,12 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
       end if
    end if  ! plan creation
 
+   ! alloc_local is cached with the distributed FFTW plans, whereas
+   ! slab_real_size is a local scratch scalar.  Reconstruct it on every
+   ! solve so the OpenMP zero/normalization loops cover the complete
+   ! in-place FFTW allocation after the first call as well.
+   if(use_distributed) slab_real_size = 2 * int(alloc_local)
+
 
    ! Compute FFT RHS fourpi (NO DE boost — corrections go in Green's function)
    nx_loc_fft = icoarse_max - icoarse_min + 1
@@ -3857,6 +3998,9 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
    else
       fourpi_fft = 4.D0 * ACOS(-1.0D0) * scale_fft
    end if
+#ifdef FDMDEBUG
+   call fftp_stop(fftp_path,FFTP_SETUP,fftp_phase_wall,fftp_phase_cpu,N_total)
+#endif
 
    if(use_distributed) then
       ! ============================================================
@@ -3867,6 +4011,9 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
 
       ! --- Precompute P2P partner lists (cached, recomputed on rebalance) ---
       ! Compute my spatial x-bounding box from active grid positions
+#ifdef FDMDEBUG
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
       my_xmin = 1.0d0
       my_xmax = 0.0d0
       ngrid_loc = active(ilevel)%ngrid
@@ -3976,8 +4123,15 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
               '   FFTW3 sparse P2P: n_send=', n_fftw_send, &
               ', n_recv=', n_fftw_recv, ' partners'
       end if
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_PARTNER,fftp_phase_wall,fftp_phase_cpu, &
+           int(ngrid_loc,kind=8))
+#endif
 
       ! --- Step 1: Compute sendcounts ---
+#ifdef FDMDEBUG
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
       allocate(sendcounts(0:ncpu-1))
       allocate(recvcounts(0:ncpu-1))
       allocate(sdispls(0:ncpu-1))
@@ -3986,16 +4140,37 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
       sendcounts = 0
       recvcounts = 0
       ngrid_loc = active(ilevel)%ngrid
+      nthreads_fft = omp_get_max_threads()
+      allocate(thread_counts(0:ncpu-1,0:nthreads_fft-1))
+      allocate(thread_offsets(0:ncpu-1,0:nthreads_fft-1))
+      thread_counts = 0
+!$omp parallel num_threads(nthreads_fft) default(shared) &
+!$omp private(tid,igrid,igrid_amr,Kx,ind,ix,dest_rank)
+      tid = omp_get_thread_num()
+!$omp do schedule(static)
       do igrid = 1, ngrid_loc
          igrid_amr = active(ilevel)%igrid(igrid)
          Kx = nint(xg(igrid_amr, 1) * dble(fft_Nx))
-         do ind = 1, twotondim
-            ix = Kx - 1 + mod(ind-1, 2)
-            ix = modulo(ix, fft_Nx)
-            dest_rank = min(ix / fftw_block, ncpu-1)
-            sendcounts(dest_rank) = sendcounts(dest_rank) + 1
-         end do
+         ! Half of a grid's children have each of the two x offsets.  Count
+         ! those two destinations directly instead of repeating the same
+         ! rank lookup for every y/z child.
+         ix = modulo(Kx - 1, fft_Nx)
+         dest_rank = min(ix / fftw_block, ncpu-1)
+         thread_counts(dest_rank,tid) = thread_counts(dest_rank,tid) + twotondim/2
+         ix = modulo(Kx, fft_Nx)
+         dest_rank = min(ix / fftw_block, ncpu-1)
+         thread_counts(dest_rank,tid) = thread_counts(dest_rank,tid) + twotondim/2
       end do
+!$omp end do
+!$omp end parallel
+      do tid = 0, nthreads_fft-1
+         sendcounts = sendcounts + thread_counts(:,tid)
+      end do
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_COUNT,fftp_phase_wall,fftp_phase_cpu, &
+           int(ngrid_loc,kind=8)*int(twotondim,kind=8))
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 2: Exchange counts via sparse P2P ---
       nreq = 0
@@ -4028,14 +4203,29 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
       end do
       n_send_total = sdispls(ncpu-1) + sendcounts(ncpu-1)
       n_recv_total = rdispls(ncpu-1) + recvcounts(ncpu-1)
+      do irank = 0, ncpu-1
+         thread_offsets(irank,0) = sdispls(irank)
+         do tid = 1, nthreads_fft-1
+            thread_offsets(irank,tid) = thread_offsets(irank,tid-1) + &
+                 thread_counts(irank,tid-1)
+         end do
+      end do
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_COUNTCOMM,fftp_phase_wall,fftp_phase_cpu, &
+           int(n_fftw_send+n_fftw_recv,kind=8))
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 3: Pack send buffer: (slab_idx, rhs_value) pairs ---
       ! RHS uses un-boosted fourpi (corrections applied in Green's function)
       allocate(sendbuf(0:2*n_send_total-1))
       allocate(recvbuf(0:2*n_recv_total-1))
-      allocate(send_idx(0:ncpu-1))
-      send_idx = sdispls
 
+!$omp parallel num_threads(nthreads_fft) default(shared) &
+!$omp private(tid,igrid,igrid_amr,Kx,Ky,Kz,ind,ix,iy,iz,dest_rank, &
+!$omp x_local,idx_3d,iskip,icell_amr,slot)
+      tid = omp_get_thread_num()
+!$omp do schedule(static)
       do igrid = 1, ngrid_loc
          igrid_amr = active(ilevel)%igrid(igrid)
          Kx = nint(xg(igrid_amr, 1) * dble(fft_Nx))
@@ -4060,15 +4250,23 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
             iskip = ncoarse + (ind - 1) * ngridmax
             icell_amr = iskip + igrid_amr
 
-            sendbuf(2*send_idx(dest_rank)) = dble(idx_3d)
+            slot = thread_offsets(dest_rank,tid)
+            sendbuf(2*slot) = dble(idx_3d)
             if(solve_mode==0) then
-               sendbuf(2*send_idx(dest_rank)+1)=fourpi_fft*(rho(icell_amr)-rho_tot)
+               sendbuf(2*slot+1)=fourpi_fft*(rho(icell_amr)-rho_tot)
             else
-               sendbuf(2*send_idx(dest_rank)+1)=scalar_gr_old(icell_amr)
+               sendbuf(2*slot+1)=scalar_gr_old(icell_amr)
             end if
-            send_idx(dest_rank) = send_idx(dest_rank) + 1
+            thread_offsets(dest_rank,tid) = slot + 1
          end do
       end do
+!$omp end do
+!$omp end parallel
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_PACK,fftp_phase_wall,fftp_phase_cpu, &
+           int(n_send_total,kind=8))
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 4: Forward data exchange via sparse P2P ---
       sendcounts = sendcounts * 2
@@ -4104,14 +4302,29 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
       deallocate(reqs)
 
       ! Unpack into FFTW real data array
-      rdata_fftw = 0.0d0
+!$omp parallel do schedule(static)
+      do ix = 1, slab_real_size
+         rdata_fftw(ix) = 0.0d0
+      end do
+!$omp end parallel do
+      ! Preserve the serial accumulation order: reception/boundary entries
+      ! can share a slab index even on a fully uniform solve.
       do ix = 0, n_recv_total - 1
          idx_3d = nint(recvbuf(2*ix))
          rdata_fftw(idx_3d + 1) = rdata_fftw(idx_3d + 1) + recvbuf(2*ix + 1)
       end do
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_FWDCOMM,fftp_phase_wall,fftp_phase_cpu, &
+           int(n_recv_total,kind=8))
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 5: Forward R2C FFT ---
       call fftw_mpi_execute_dft_r2c(plan_r2c, rdata_fftw, cdata_fftw)
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_R2C,fftp_phase_wall,fftp_phase_cpu,N_total)
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Precompute DE kspace params if needed (quasi-static fallback) ---
       if(de_perturb .and. .not. de_table_loaded .and. de_helmholtz_on()) then
@@ -4132,6 +4345,7 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
       !   idx_c = ky_local*(Nx*(Nz/2+1)) + kx*(Nz/2+1) + kz, ky = ny_start+ky_local
       N_complex = int(local_ny_fftw,i8b) * int(fft_Nx,i8b) * int(fft_Nz/2+1,i8b)
       if(solve_mode==1) then
+!$omp parallel do private(ky_i,kx_i,kz_i,denom,scalar_green) schedule(static)
          do idx_c=0,N_complex-1
             ky_i=int(ny_start_fftw)+int(idx_c/(int(fft_Nx,i8b)*int(fft_Nz/2+1,i8b)))
             kx_i=int(mod(idx_c/int(fft_Nz/2+1,i8b),int(fft_Nx,i8b)))
@@ -4146,10 +4360,13 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
             end if
             cdata_fftw(idx_c+1)=cdata_fftw(idx_c+1)*scalar_green
          end do
+!$omp end parallel do
       else if((use_neutrino .and. omega_nu > 0.0d0) .or. de_perturb &
            & .or. (use_horndeski .and. hs_mass > 0.0d0)) then
          mu_a_hs = horndeski_mu_of_a(aexp)
          if(use_neutrino .and. omega_nu > 0.0d0) omega_cb_loc = omega_m - omega_nu
+!$omp parallel do private(ky_i,kx_i,kz_i,nu_factor,de_factor,k_phys, &
+!$omp R_nu_val,R_DE_val,k_tilde_sq,hs_factor) schedule(static)
          do idx_c = 0, N_complex-1
             ! Compute integer wave numbers for this mode (transposed order)
             ky_i = int(ny_start_fftw) + int(idx_c / (int(fft_Nx,i8b)*int(fft_Nz/2+1,i8b)))
@@ -4198,24 +4415,41 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
 
             cdata_fftw(idx_c + 1) = cdata_fftw(idx_c + 1) * green(idx_c) * nu_factor * de_factor * hs_factor
          end do
+!$omp end parallel do
       else
+!$omp parallel do schedule(static)
          do idx_c = 0, N_complex-1
             cdata_fftw(idx_c + 1) = cdata_fftw(idx_c + 1) * green(idx_c)
          end do
+!$omp end parallel do
       end if
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_GREEN,fftp_phase_wall,fftp_phase_cpu,N_complex)
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 7: Inverse C2R FFT ---
       call fftw_mpi_execute_dft_c2r(plan_c2r, cdata_fftw, rdata_fftw)
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_C2R,fftp_phase_wall,fftp_phase_cpu,N_total)
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 8: Normalize ---
-      rdata_fftw = rdata_fftw / dble(N_total)
+!$omp parallel do schedule(static)
+      do ix = 1, slab_real_size
+         rdata_fftw(ix) = rdata_fftw(ix) / dble(N_total)
+      end do
+!$omp end parallel do
 
       ! --- Step 9: Reverse transfer via sparse P2P ---
       ! Replace rhs values in recvbuf with phi from rdata_fftw
+!$omp parallel do private(idx_3d) schedule(static)
       do ix = 0, n_recv_total - 1
          idx_3d = nint(recvbuf(2*ix))
          recvbuf(2*ix + 1) = rdata_fftw(idx_3d + 1)
       end do
+!$omp end parallel do
 
       nreq = 0
       allocate(reqs(n_fftw_send + n_fftw_recv))
@@ -4245,10 +4479,26 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
          deallocate(mpi_stat)
       end if
       deallocate(reqs)
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_REVCOMM,fftp_phase_wall,fftp_phase_cpu, &
+           int(n_recv_total,kind=8))
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! Unpack phi to RAMSES cells
-      send_idx = sdispls / 2
+      do irank = 0, ncpu-1
+         thread_offsets(irank,0) = sdispls(irank) / 2
+         do tid = 1, nthreads_fft-1
+            thread_offsets(irank,tid) = thread_offsets(irank,tid-1) + &
+                 thread_counts(irank,tid-1)
+         end do
+      end do
 
+!$omp parallel num_threads(nthreads_fft) default(shared) &
+!$omp private(tid,igrid,igrid_amr,Kx,ind,ix,dest_rank,iskip, &
+!$omp icell_amr,slot,uold,du)
+      tid = omp_get_thread_num()
+!$omp do schedule(static)
       do igrid = 1, ngrid_loc
          igrid_amr = active(ilevel)%igrid(igrid)
          Kx = nint(xg(igrid_amr, 1) * dble(fft_Nx))
@@ -4259,22 +4509,29 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
 
             iskip = ncoarse + (ind - 1) * ngridmax
             icell_amr = iskip + igrid_amr
+            slot = thread_offsets(dest_rank,tid)
 
             if(solve_mode==0) then
-               phi(icell_amr)=sendbuf(2*send_idx(dest_rank)+1)
+               phi(icell_amr)=sendbuf(2*slot+1)
             else
                uold=scalar_gr(icell_amr)
-               du=relax*sendbuf(2*send_idx(dest_rank)+1)
+               du=relax*sendbuf(2*slot+1)
                if(step_frac>0d0 .and. abs(uold)>0d0) &
                     du=max(-step_frac*abs(uold),min(step_frac*abs(uold),du))
                scalar_gr(icell_amr)=uold+du
             end if
-            send_idx(dest_rank) = send_idx(dest_rank) + 1
+            thread_offsets(dest_rank,tid) = slot + 1
          end do
       end do
+!$omp end do
+!$omp end parallel
 
       deallocate(sendcounts, sdispls, recvcounts, rdispls)
-      deallocate(sendbuf, recvbuf, send_idx)
+      deallocate(sendbuf, recvbuf, thread_counts, thread_offsets)
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_SCATTER,fftp_phase_wall,fftp_phase_cpu, &
+           int(ngrid_loc,kind=8)*int(twotondim,kind=8))
+#endif
 
    else
       ! ============================================================
@@ -4293,6 +4550,9 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
       end if
 
       ! --- Step 1: Build fft_map and gather local RHS ---
+#ifdef FDMDEBUG
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
       fft_map   = 0
       rhs_local = 0.0d0
 
@@ -4325,6 +4585,11 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
             end if
          end do
       end do
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_PACK,fftp_phase_wall,fftp_phase_cpu, &
+           int(ngrid_loc,kind=8)*int(twotondim,kind=8))
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 2: MPI_ALLREDUCE ---
 #ifndef WITHOUTMPI
@@ -4333,9 +4598,17 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
 #else
       rhs_3d = rhs_local
 #endif
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_FWDCOMM,fftp_phase_wall,fftp_phase_cpu,N_total)
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 3: Forward R2C FFT ---
       call fftw_execute_dft_r2c(plan_r2c, rhs_3d, cdata)
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_R2C,fftp_phase_wall,fftp_phase_cpu,N_total)
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Precompute DE kspace params if needed (quasi-static fallback) ---
       if(de_perturb .and. .not. de_table_loaded .and. de_helmholtz_on()) then
@@ -4423,9 +4696,17 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
             cdata(idx_c) = cdata(idx_c) * green(idx_c)
          end do
       end if
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_GREEN,fftp_phase_wall,fftp_phase_cpu,N_complex)
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 5: Inverse C2R FFT ---
       call fftw_execute_dft_c2r(plan_c2r, cdata, rhs_3d)
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_C2R,fftp_phase_wall,fftp_phase_cpu,N_total)
+      call fftp_start(fftp_phase_wall,fftp_phase_cpu)
+#endif
 
       ! --- Step 6: Normalize ---
       rhs_3d = rhs_3d / dble(N_total)
@@ -4445,8 +4726,16 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
             end if
          end if
       end do
+#ifdef FDMDEBUG
+      call fftp_stop(fftp_path,FFTP_SCATTER,fftp_phase_wall,fftp_phase_cpu,N_total)
+#endif
 
    end if  ! use_distributed
+
+#ifdef FDMDEBUG
+   call fftp_stop(fftp_path,FFTP_TOTAL,fftp_total_wall,fftp_total_cpu,N_total)
+   call fftp_report(nstep_coarse,myid,ncpu,omp_get_max_threads())
+#endif
 
 end subroutine fftw_uniform_solve_engine
 #endif
