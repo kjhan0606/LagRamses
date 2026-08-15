@@ -160,6 +160,7 @@ module amr_parameters
   real(dp)::ksec_level_min_fraction=0.03d0 ! Ignore levels below this node-cost fraction
   integer::ksec_level_bins=2048      ! Coarse bins for level-aware K-section wall search
   integer::lb_timing_interval=4      ! Measure rank x level work every N coarse steps
+  integer::timer_report_interval=0   ! Periodic phase timer table; 0 disables
   real(dp)::lb_timing_ema_alpha=0.25d0 ! EMA update fraction for timing/imbalance
   integer::lb_remap_min_interval=8   ! Minimum coarse steps between auto remaps
   integer::lb_remap_horizon=16       ! Steps over which predicted savings repay remap

@@ -467,6 +467,7 @@ recursive subroutine amr_step(ilevel,icount)
                                call timer('poisson','start')
      !save old potential for time-extrapolation at level boundaries
      call save_phi_old(ilevel)
+     if(timer_report_interval>0) call timer('rho','start')
      call rho_fine(ilevel,icount)
      if(ilevel==levelmin) call diag_check_nan('post_rho')
   endif
@@ -1019,8 +1020,10 @@ recursive subroutine amr_step(ilevel,icount)
   ! refinement map is state carried across the step boundary, so no unrelated
   ! communication belongs between flag_fine and the following refine_fine.
   if(use_fdm .and. ilevel<nlevelmax)then
+     if(timer_report_interval>0) call timer('fdm-psi-ghost','start')
      call make_virtual_fine_dp(psi_re(1),ilevel)
      call make_virtual_fine_dp(psi_im(1),ilevel)
+     if(timer_report_interval>0) call timer('flag','start')
   end if
   if(.not.static) call flag_fine(ilevel,icount)
 
@@ -1160,6 +1163,23 @@ recursive subroutine amr_step(ilevel,icount)
      ! Reset for next coarse step
      pt_mktree=0; pt_killtree=0; pt_synchro=0; pt_move=0; pt_merge=0
      sk_agn_fb=0; sk_create_sink=0; sk_grow=0; sk_bondi_hoyle=0
+  end if
+
+  ! Periodically emit and reset the existing mutually-exclusive phase timers.
+  ! nstep_coarse is incremented by adaptive_loop after this routine returns,
+  ! hence +1 identifies the coarse step that has just completed.  Starting
+  ! timer-report first closes the currently active phase so the table does not
+  ! lose the tail of this step.  The second start charges report overhead to
+  ! the following interval instead of hiding it in a physics phase.
+  if(ilevel==levelmin .and. timer_report_interval>0)then
+     if(mod(nstep_coarse+1,timer_report_interval)==0)then
+        call timer('timer-report','start')
+        if(myid==1) write(*,'(A,I0,A,I0)') &
+             ' PERF_TIMER_REPORT step=',nstep_coarse+1, &
+             ' interval=',timer_report_interval
+        call finalize_timer
+        call fdm_reset_timer_running('timer-report')
+     end if
   end if
 
 999 format(' Entering amr_step',i1,' for level',i2, '  for a levelmin ',i3)

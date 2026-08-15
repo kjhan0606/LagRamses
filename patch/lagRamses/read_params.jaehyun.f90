@@ -32,7 +32,7 @@ subroutine read_params
   & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
        & ,lb_grid_headroom &
   & ,work_weight_grid,work_weight_part,work_weight_sidm_pair &
-       & ,time_balance_alpha,lb_timing_interval,lb_timing_ema_alpha &
+       & ,time_balance_alpha,lb_timing_interval,timer_report_interval,lb_timing_ema_alpha &
        & ,ksec_level_balance_alpha,ksec_level_min_fraction,ksec_level_bins &
        & ,lb_remap_min_interval,lb_remap_horizon,lb_remap_safety &
        & ,aexp_step_limit &
@@ -475,6 +475,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   ksec_level_min_fraction=max(0d0,min(1d0,ksec_level_min_fraction))
   ksec_level_bins=max(64,ksec_level_bins)
   lb_timing_interval=max(0,lb_timing_interval)
+  timer_report_interval=max(0,timer_report_interval)
   lb_timing_ema_alpha=max(0d0,min(1d0,lb_timing_ema_alpha))
   lb_remap_min_interval=max(0,lb_remap_min_interval)
   lb_remap_horizon=max(1,lb_remap_horizon)
@@ -487,6 +488,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
           lb_timing_ema_alpha,', remap min/horizon=',lb_remap_min_interval, &
           '/',lb_remap_horizon,', safety=',lb_remap_safety
   end if
+  if(myid==1 .and. timer_report_interval>0) write(*,'(A,I0,A)') &
+       ' Phase timer report: every ',timer_report_interval,' coarse steps'
 
   !-------------------------------------------------
   ! Exchange method auto-tune

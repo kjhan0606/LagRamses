@@ -33,6 +33,7 @@ subroutine fdm_step(ilevel)
 
   ! ---- Hybrid HJM: fluid solver on coarse levels ----
   if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
+     if(timer_report_interval>0) call timer('fdm-hjm','start')
 #ifdef FDMDEBUG
      call fdm_mass_check('hjm-entry',ilevel)
 #endif
@@ -58,10 +59,11 @@ subroutine fdm_step(ilevel)
         end if
      end if
      dt_sub = dt_loc / dble(nsub_hjm)
-     if((.not.memory_balance).and.lb_timing_interval>0.and. &
-          mod(nstep_coarse,lb_timing_interval)==0) &
-          lb_hjm_subcycle_loc(ilevel)=lb_hjm_subcycle_loc(ilevel)+ &
-          int(nsub_hjm,kind=8)
+     if((.not.memory_balance).and.lb_timing_interval>0)then
+        if(mod(nstep_coarse,lb_timing_interval)==0) &
+             lb_hjm_subcycle_loc(ilevel)=lb_hjm_subcycle_loc(ilevel)+ &
+             int(nsub_hjm,kind=8)
+     end if
      do isub_hjm = 1, nsub_hjm
         call fdm_hjm_step(ilevel, dt_sub)
      end do
@@ -1210,10 +1212,11 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      crho_old = crho
   end do
 
-  if((.not.memory_balance).and.lb_timing_interval>0.and. &
-       mod(nstep_coarse,lb_timing_interval)==0) &
-       lb_cn_iter_loc(ilevel)=lb_cn_iter_loc(ilevel)+ &
-       int(min(iter,max_iter),kind=8)
+  if((.not.memory_balance).and.lb_timing_interval>0)then
+     if(mod(nstep_coarse,lb_timing_interval)==0) &
+          lb_cn_iter_loc(ilevel)=lb_cn_iter_loc(ilevel)+ &
+          int(min(iter,max_iter),kind=8)
+  end if
 
   ! Commit: psi^{n+1} = psi^n + x   (leaf cells)
   do ind=1,twotondim
@@ -1342,16 +1345,20 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi, bmode)
   real(dp)::nr,ni,gre,gim
   logical::gfound
 
-  if((.not.memory_balance).and.lb_timing_interval>0.and. &
-       mod(nstep_coarse,lb_timing_interval)==0) &
-       lb_cn_matvec_loc(ilevel)=lb_cn_matvec_loc(ilevel)+1_8
+  if((.not.memory_balance).and.lb_timing_interval>0)then
+     if(mod(nstep_coarse,lb_timing_interval)==0) &
+          lb_cn_matvec_loc(ilevel)=lb_cn_matvec_loc(ilevel)+1_8
+  end if
 
   if(fdm_ghost2) then
+     if(timer_report_interval>0) call timer('fdm-cn-ghost','start')
      call make_virtual_fine_dp2(inr(1), ini(1), ilevel)
   else
+     if(timer_report_interval>0) call timer('fdm-cn-ghost','start')
      call make_virtual_fine_dp(inr(1), ilevel)
      call make_virtual_fine_dp(ini(1), ilevel)
   end if
+  if(timer_report_interval>0) call timer('fdm-drift-fd','start')
 
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
@@ -1407,6 +1414,7 @@ subroutine cn_cdot(ilevel, ar, ai, br, bi, res)
   integer::igrid,ind,iskip,icell,info,i
   real(dp)::loc(2),glob(2),s1,s2
 
+  if(timer_report_interval>0) call timer('fdm-cn-dot','start')
   s1=0.0d0; s2=0.0d0
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
@@ -1427,6 +1435,7 @@ subroutine cn_cdot(ilevel, ar, ai, br, bi, res)
   call MPI_ALLREDUCE(loc, glob, 2, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, info)
 #endif
   res = cmplx(glob(1), glob(2), kind=dp)
+  if(timer_report_interval>0) call timer('fdm-drift-fd','start')
 
 end subroutine cn_cdot
 !################################################################
@@ -1447,6 +1456,7 @@ subroutine cn_cdot2(ilevel, ar, ai, br, bi, cr, ci, res_ab, res_ac)
   integer::igrid,ind,iskip,icell,info,i
   real(dp)::loc(4),glob(4),sabr,sabi,sacr,saci
 
+  if(timer_report_interval>0) call timer('fdm-cn-dot','start')
   sabr=0.0d0; sabi=0.0d0; sacr=0.0d0; saci=0.0d0
   do ind=1,twotondim
      iskip = ncoarse + (ind-1)*ngridmax
@@ -1470,8 +1480,27 @@ subroutine cn_cdot2(ilevel, ar, ai, br, bi, cr, ci, res_ab, res_ac)
 #endif
   res_ab = cmplx(glob(1), glob(2), kind=dp)
   res_ac = cmplx(glob(3), glob(4), kind=dp)
+  if(timer_report_interval>0) call timer('fdm-drift-fd','start')
 
 end subroutine cn_cdot2
+!################################################################
+! Clear a completed timing window and begin the next one without inheriting
+! finalize_timer/reset_timer's loop-mutated global timer index.  Keeping this
+! helper in the FDM patch avoids changing the shared cuRamses timer backend.
+!################################################################
+subroutine fdm_reset_timer_running(label)
+  use timer_m, only: timer_time=>time,ntimer,itimer
+  implicit none
+  character(len=*),intent(in)::label
+  integer::i
+
+  do i=1,ntimer
+     timer_time(i)=0.0d0
+  end do
+  itimer=0
+  call timer(label,'start')
+
+end subroutine fdm_reset_timer_running
 !################################################################
 ! Copy scratch (new_re,new_im) back into psi_re,psi_im for leaf cells.
 !################################################################
