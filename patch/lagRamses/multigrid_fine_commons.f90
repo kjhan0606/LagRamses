@@ -18,6 +18,125 @@
 !
 ! ------------------------------------------------------------------------
 
+#ifdef FDMDEBUG
+module mg_omp_profile_m
+   use omp_lib, only: omp_get_wtime
+   implicit none
+
+   integer, parameter :: MGP_NPHASE = 14
+   integer, parameter :: MGP_TOTAL=1, MGP_BUILD=2, MGP_MASK=3
+   integer, parameter :: MGP_SCAN=4, MGP_BCRHS=5, MGP_FINE_SMOOTH=6
+   integer, parameter :: MGP_FINE_RESID=7, MGP_FINE_COMM=8
+   integer, parameter :: MGP_COARSE_SMOOTH=9, MGP_COARSE_RESID=10
+   integer, parameter :: MGP_MG_FORWARD=11, MGP_MG_REVERSE=12
+   integer, parameter :: MGP_RESTRICT=13, MGP_INTERP=14
+
+   real(kind=8), save :: mgp_wall(MGP_NPHASE)=0d0
+   real(kind=8), save :: mgp_cpu(MGP_NPHASE)=0d0
+   integer(kind=8), save :: mgp_calls(MGP_NPHASE)=0_8
+   integer(kind=8), save :: mgp_work(MGP_NPHASE)=0_8
+   integer, save :: mgp_last_report=-1
+
+contains
+
+   subroutine mgp_start(wall_start,cpu_start)
+      real(kind=8), intent(out) :: wall_start,cpu_start
+      wall_start=omp_get_wtime()
+      call cpu_time(cpu_start)
+   end subroutine mgp_start
+
+   subroutine mgp_stop(iphase,wall_start,cpu_start,nwork)
+      integer, intent(in) :: iphase
+      real(kind=8), intent(in) :: wall_start,cpu_start
+      integer(kind=8), intent(in), optional :: nwork
+      real(kind=8) :: wall_stop,cpu_stop
+
+      wall_stop=omp_get_wtime()
+      call cpu_time(cpu_stop)
+      mgp_wall(iphase)=mgp_wall(iphase)+wall_stop-wall_start
+      mgp_cpu(iphase)=mgp_cpu(iphase)+cpu_stop-cpu_start
+      mgp_calls(iphase)=mgp_calls(iphase)+1_8
+      if(present(nwork))mgp_work(iphase)=mgp_work(iphase)+nwork
+   end subroutine mgp_stop
+
+   function mgp_label(iphase) result(label)
+      integer, intent(in) :: iphase
+      character(len=24) :: label
+
+      select case(iphase)
+      case(MGP_TOTAL);         label='multigrid total'
+      case(MGP_BUILD);         label='build parent comms'
+      case(MGP_MASK);          label='make fine mask'
+      case(MGP_SCAN);          label='coarse scan flags'
+      case(MGP_BCRHS);         label='fine BC RHS'
+      case(MGP_FINE_SMOOTH);   label='fine smoother'
+      case(MGP_FINE_RESID);    label='fine residual'
+      case(MGP_FINE_COMM);     label='fine ghost exchange'
+      case(MGP_COARSE_SMOOTH); label='coarse smoother'
+      case(MGP_COARSE_RESID);  label='coarse residual'
+      case(MGP_MG_FORWARD);    label='MG forward exchange'
+      case(MGP_MG_REVERSE);    label='MG reverse exchange'
+      case(MGP_RESTRICT);      label='restriction'
+      case(MGP_INTERP);        label='interpolation'
+      case default;            label='other/setup'
+      end select
+   end function mgp_label
+
+   subroutine mgp_report(step,myid,ncpu,nthreads)
+      integer, intent(in) :: step,myid,ncpu,nthreads
+      real(kind=8) :: wall_sum(MGP_NPHASE),wall_max(MGP_NPHASE)
+      real(kind=8) :: cpu_sum(MGP_NPHASE),wall_avg,eff,balance
+      integer(kind=8) :: calls_sum(MGP_NPHASE),work_sum(MGP_NPHASE)
+      integer :: iphase,info
+#ifndef WITHOUTMPI
+      include 'mpif.h'
+#endif
+
+      if(step<5 .or. mgp_last_report>=0)return
+#ifndef WITHOUTMPI
+      call MPI_REDUCE(mgp_wall,wall_sum,MGP_NPHASE,MPI_DOUBLE_PRECISION, &
+           MPI_SUM,0,MPI_COMM_WORLD,info)
+      call MPI_REDUCE(mgp_wall,wall_max,MGP_NPHASE,MPI_DOUBLE_PRECISION, &
+           MPI_MAX,0,MPI_COMM_WORLD,info)
+      call MPI_REDUCE(mgp_cpu,cpu_sum,MGP_NPHASE,MPI_DOUBLE_PRECISION, &
+           MPI_SUM,0,MPI_COMM_WORLD,info)
+      call MPI_REDUCE(mgp_calls,calls_sum,MGP_NPHASE,MPI_INTEGER8, &
+           MPI_SUM,0,MPI_COMM_WORLD,info)
+      call MPI_REDUCE(mgp_work,work_sum,MGP_NPHASE,MPI_INTEGER8, &
+           MPI_SUM,0,MPI_COMM_WORLD,info)
+#else
+      wall_sum=mgp_wall
+      wall_max=mgp_wall
+      cpu_sum=mgp_cpu
+      calls_sum=mgp_calls
+      work_sum=mgp_work
+#endif
+      if(myid==1)then
+         write(*,'(A,I0,A,I0,A)') &
+              ' MG_OMP_PROFILE step=',step,' threads=',nthreads, &
+              ' (cumulative; CPU/(threads*wall))'
+         write(*,'(A)') &
+              ' MGPROF phase                     wall-avg wall-max  omp-eff balance calls/rank work/rank'
+         do iphase=1,MGP_NPHASE
+            if(calls_sum(iphase)==0_8)cycle
+            wall_avg=wall_sum(iphase)/dble(ncpu)
+            eff=0d0
+            if(wall_sum(iphase)>0d0)eff=cpu_sum(iphase)/ &
+                 (dble(max(1,nthreads))*wall_sum(iphase))
+            balance=0d0
+            if(wall_max(iphase)>0d0)balance=wall_avg/wall_max(iphase)
+            write(*,'(A,A24,2F10.4,2F9.3,2F12.1)') ' MGPROF ', &
+                 mgp_label(iphase),wall_avg,wall_max(iphase),eff,balance, &
+                 dble(calls_sum(iphase))/dble(ncpu), &
+                 dble(work_sum(iphase))/dble(ncpu)
+         end do
+      end if
+      mgp_last_report=step
+   end subroutine mgp_report
+
+end module mg_omp_profile_m
+#endif
+
 
 ! ------------------------------------------------------------------------
 ! Main multigrid routine, called by amr_step
@@ -27,6 +146,10 @@ subroutine multigrid_fine(ilevel,icount)
    use amr_commons
    use poisson_commons
    use poisson_parameters
+#ifdef FDMDEBUG
+   use mg_omp_profile_m
+   use omp_lib, only: omp_get_max_threads
+#endif
 #ifdef HYDRO_CUDA
    use poisson_cuda_interface
    use iso_c_binding
@@ -61,6 +184,9 @@ subroutine multigrid_fine(ilevel,icount)
    real(kind=8) :: err, last_err
 
    logical :: allmasked, allmasked_tot, use_restored_phi, mg_failed
+#ifdef FDMDEBUG
+   real(kind=8) :: mgp_wall_start,mgp_cpu_start,mgp_phase_wall,mgp_phase_cpu
+#endif
 
    ! FFT direct solve variables (shared by FFTW3 and cuFFT)
    logical :: is_uniform_fft
@@ -79,6 +205,10 @@ subroutine multigrid_fine(ilevel,icount)
    if(gravity_type>0)return
    if(numbtot(1,ilevel)==0)return
 
+#ifdef FDMDEBUG
+   call mgp_start(mgp_wall_start,mgp_cpu_start)
+#endif
+
    if(verbose) print '(A,I2)','Entering fine multigrid at level ',ilevel
 
    ! ---------------------------------------------------------------------
@@ -96,7 +226,7 @@ subroutine multigrid_fine(ilevel,icount)
       expected_grids = int(nx,i8b)*int(ny,i8b)*int(nz,i8b)*8_i8b**(ilevel-1)
       if(numbtot(1,ilevel) == expected_grids) then
          call fftw_poisson_solve_uniform(ilevel, icount)
-         call make_virtual_fine_dp(phi(1), ilevel)   ! ghost update for force_fine
+         call make_virtual_fine_dp_mg_profile(phi(1), ilevel) ! ghost update for force_fine
          if(myid==1) write(*,'(A,I5,A)') &
               '   ==> Level=',ilevel,' FFT direct solve DONE (fast path)'
          return
@@ -121,11 +251,11 @@ subroutine multigrid_fine(ilevel,icount)
    else
       call make_multipole_phi(ilevel)       ! Fill with simple initial guess
    endif
-   call make_virtual_fine_dp(phi(1),ilevel) ! Update boundaries
+   call make_virtual_fine_dp_mg_profile(phi(1),ilevel) ! Update boundaries
    call make_boundary_phi(ilevel)           ! Update physical boundaries
 
    call make_fine_mask  (ilevel)            ! Fill the fine mask
-   call make_virtual_fine_dp(f(:,3),ilevel) ! Communicate mask
+   call make_virtual_fine_dp_mg_profile(f(:,3),ilevel) ! Communicate mask
    call make_boundary_mask(ilevel)          ! Set mask to -1 in phys bounds
 
    ! The flat neighbor cache is consumed only by the CUDA MG upload path.
@@ -155,7 +285,14 @@ subroutine multigrid_fine(ilevel,icount)
 
    if(ilevel>1) then
       ! Restrict and communicate mask
+#ifdef FDMDEBUG
+      call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
       call restrict_mask_fine_reverse(ilevel)
+#ifdef FDMDEBUG
+      call mgp_stop(MGP_RESTRICT,mgp_phase_wall,mgp_phase_cpu, &
+           int(active(ilevel)%ngrid,kind=8)*int(twotondim,kind=8))
+#endif
       call make_reverse_mg_dp(4,ilevel-1)
       call make_virtual_mg_dp(4,ilevel-1)
 
@@ -189,7 +326,14 @@ subroutine multigrid_fine(ilevel,icount)
       do ifine=(ilevel-1),2,-1
 
          ! Restrict and communicate mask
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call restrict_mask_coarse_reverse(ifine)
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_RESTRICT,mgp_phase_wall,mgp_phase_cpu, &
+              int(active_mg(myid,ifine)%ngrid,kind=8)*int(twotondim,kind=8))
+#endif
          call make_reverse_mg_dp(4,ifine-1)
          call make_virtual_mg_dp(4,ifine-1)
 
@@ -226,7 +370,7 @@ subroutine multigrid_fine(ilevel,icount)
    ! Update flag with scan flag
    call set_scan_flag_fine(ilevel)
    do ifine=levelmin_mg,ilevel-1
-      call set_scan_flag_coarse(ifine)
+      call set_scan_flag_coarse_omp(ifine)
    end do
 
    ! Precompute neighbor grids for coarse MG levels
@@ -331,7 +475,7 @@ subroutine multigrid_fine(ilevel,icount)
       end if
 #endif
       ! phi is already scattered by the FFT solver
-      call make_virtual_fine_dp(phi(1), ilevel)
+      call make_virtual_fine_dp_mg_profile(phi(1), ilevel)
 #ifdef HYDRO_CUDA
       ! Cleanup GPU state
       if(use_mg_gpu) then
@@ -389,10 +533,24 @@ subroutine multigrid_fine(ilevel,icount)
             call make_virtual_fine_dp_gpu(ilevel)
          else
 #endif
+#ifdef FDMDEBUG
+            call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
             call gauss_seidel_mg_fine(ilevel,.true. )  ! Red step
-            if(.not.mg_merged_rb) call make_virtual_fine_dp(phi(1),ilevel)   ! Communicate phi (Red)
+#ifdef FDMDEBUG
+            call mgp_stop(MGP_FINE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+                 int(active(ilevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
+            if(.not.mg_merged_rb) call make_virtual_fine_dp_mg_profile(phi(1),ilevel) ! Communicate phi (Red)
+#ifdef FDMDEBUG
+            call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
             call gauss_seidel_mg_fine(ilevel,.false.)  ! Black step
-            call make_virtual_fine_dp(phi(1),ilevel)   ! Communicate phi (Black)
+#ifdef FDMDEBUG
+            call mgp_stop(MGP_FINE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+                 int(active(ilevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
+            call make_virtual_fine_dp_mg_profile(phi(1),ilevel) ! Communicate phi (Black)
 #ifdef HYDRO_CUDA
          end if
 #endif
@@ -422,11 +580,18 @@ subroutine multigrid_fine(ilevel,icount)
          if(.not. use_ri_gpu) call cuda_mg_download_f1_c(f, ncell_tot_c)
       else
 #endif
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call cmp_residual_mg_fine(ilevel)
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_FINE_RESID,mgp_phase_wall,mgp_phase_cpu, &
+              int(active(ilevel)%ngrid,kind=8)*int(twotondim,kind=8))
+#endif
 #ifdef HYDRO_CUDA
       end if
 #endif
-      call make_virtual_fine_dp(f(1,1),ilevel) ! communicate residual
+      call make_virtual_fine_dp_mg_profile(f(1,1),ilevel) ! communicate residual
       ! Compute norm AFTER communication (SRC-compatible ordering)
       if(iter==1) then
          call cmp_residual_norm2_fine(ilevel, i_res_norm2)
@@ -454,7 +619,14 @@ subroutine multigrid_fine(ilevel,icount)
             active_mg(icpu,ilevel-1)%u(:,2)=0.0d0
          end do
          ! Restrict
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call restrict_residual_fine_reverse(ilevel)
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_RESTRICT,mgp_phase_wall,mgp_phase_cpu, &
+              int(active(ilevel)%ngrid,kind=8)*int(twotondim,kind=8))
+#endif
 #ifdef HYDRO_CUDA
       end if
 #endif
@@ -487,8 +659,15 @@ subroutine multigrid_fine(ilevel,icount)
                call cuda_mg_download_phi_c(phi, ncell_tot_c)
             end if
 #endif
+#ifdef FDMDEBUG
+            call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
             call interpolate_and_correct_fine(ilevel)
-            call make_virtual_fine_dp(phi(1),ilevel)
+#ifdef FDMDEBUG
+            call mgp_stop(MGP_INTERP,mgp_phase_wall,mgp_phase_cpu, &
+                 int(active(ilevel)%ngrid,kind=8)*int(twotondim,kind=8))
+#endif
+            call make_virtual_fine_dp_mg_profile(phi(1),ilevel)
 #ifdef HYDRO_CUDA
             if(use_mg_gpu) then
                call cuda_mg_upload_phi_c(phi, ncell_tot_c)
@@ -511,10 +690,24 @@ subroutine multigrid_fine(ilevel,icount)
             call make_virtual_fine_dp_gpu(ilevel)
          else
 #endif
+#ifdef FDMDEBUG
+            call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
             call gauss_seidel_mg_fine(ilevel,.true. )  ! Red step
-            if(.not.mg_merged_rb) call make_virtual_fine_dp(phi(1),ilevel)   ! Communicate phi (Red)
+#ifdef FDMDEBUG
+            call mgp_stop(MGP_FINE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+                 int(active(ilevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
+            if(.not.mg_merged_rb) call make_virtual_fine_dp_mg_profile(phi(1),ilevel) ! Communicate phi (Red)
+#ifdef FDMDEBUG
+            call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
             call gauss_seidel_mg_fine(ilevel,.false.)  ! Black step
-            call make_virtual_fine_dp(phi(1),ilevel)   ! Communicate phi (Black)
+#ifdef FDMDEBUG
+            call mgp_stop(MGP_FINE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+                 int(active(ilevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
+            call make_virtual_fine_dp_mg_profile(phi(1),ilevel) ! Communicate phi (Black)
 #ifdef HYDRO_CUDA
          end if
 #endif
@@ -531,11 +724,18 @@ subroutine multigrid_fine(ilevel,icount)
          res_norm2 = gpu_norm2
       else
 #endif
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call cmp_residual_mg_fine(ilevel)
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_FINE_RESID,mgp_phase_wall,mgp_phase_cpu, &
+              int(active(ilevel)%ngrid,kind=8)*int(twotondim,kind=8))
+#endif
 #ifdef HYDRO_CUDA
       end if
 #endif
-      call make_virtual_fine_dp(f(1,1),ilevel) ! communicate residual
+      call make_virtual_fine_dp_mg_profile(f(1,1),ilevel) ! communicate residual
       ! Compute norm AFTER communication (SRC-compatible ordering)
       call cmp_residual_norm2_fine(ilevel, res_norm2)
 #ifndef WITHOUTMPI
@@ -627,6 +827,12 @@ subroutine multigrid_fine(ilevel,icount)
       call cleanup_mg_level(ifine)
    end do
 
+#ifdef FDMDEBUG
+   call mgp_stop(MGP_TOTAL,mgp_wall_start,mgp_cpu_start, &
+        int(active(ilevel)%ngrid,kind=8)*int(twotondim,kind=8))
+   call mgp_report(nstep_coarse,myid,ncpu,omp_get_max_threads())
+#endif
+
 end subroutine multigrid_fine
 
 
@@ -714,6 +920,39 @@ end subroutine build_mg_halo_indices
 #endif
 
 
+subroutine make_virtual_fine_dp_mg_profile(xx,ilevel)
+   use amr_commons
+#ifdef FDMDEBUG
+   use mg_omp_profile_m
+#endif
+   implicit none
+
+   integer, intent(in) :: ilevel
+   real(dp), dimension(1:ncoarse+ngridmax*twotondim) :: xx
+#ifdef FDMDEBUG
+   real(kind=8) :: wall_start,cpu_start
+   integer(kind=8) :: nwork_total
+   integer :: icpu
+#endif
+
+   if(numbtot(1,ilevel)==0)return
+#ifdef FDMDEBUG
+   nwork_total=0_8
+   do icpu=1,ncpu
+      nwork_total=nwork_total+int(emission(icpu,ilevel)%ngrid,kind=8) &
+           +int(reception(icpu,ilevel)%ngrid,kind=8)
+   end do
+   nwork_total=nwork_total*int(twotondim,kind=8)
+   call mgp_start(wall_start,cpu_start)
+#endif
+
+   call make_virtual_fine_dp(xx,ilevel)
+#ifdef FDMDEBUG
+   call mgp_stop(MGP_FINE_COMM,wall_start,cpu_start,nwork_total)
+#endif
+
+end subroutine make_virtual_fine_dp_mg_profile
+
 ! ------------------------------------------------------------------------
 ! GPU phi exchange for MG smoothing
 ! Full D2H → MPI exchange → full H2D
@@ -741,7 +980,7 @@ subroutine make_virtual_fine_dp_gpu(ilevel)
    end if
 
    ! Step 3: MPI exchange (packs phi at emission cells, unpacks to reception cells)
-   call make_virtual_fine_dp(phi(1), ilevel)
+   call make_virtual_fine_dp_mg_profile(phi(1), ilevel)
 
    ! Step 4: Gather host phi at reception positions → flat buffer
    if(mg_halo_n_recv > 0) then
@@ -989,6 +1228,9 @@ end subroutine gather_coarse_phi_to_flat
 recursive subroutine recursive_multigrid_coarse(ifinelevel, safe)
    use amr_commons
    use poisson_commons
+#ifdef FDMDEBUG
+   use mg_omp_profile_m
+#endif
    implicit none
 #ifndef WITHOUTMPI
    include "mpif.h"
@@ -999,13 +1241,30 @@ recursive subroutine recursive_multigrid_coarse(ifinelevel, safe)
 
    real(dp) :: debug_norm2, debug_norm2_tot
    integer :: i, icpu, info, icycle, ncycle
+#ifdef FDMDEBUG
+   real(kind=8) :: mgp_phase_wall,mgp_phase_cpu
+#endif
 
    if(ifinelevel<=levelmin_mg) then
       ! Solve 'directly'
       do i=1,2*ngs_coarse
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call gauss_seidel_mg_coarse(ifinelevel,safe,.true. )  ! Red step
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_COARSE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+              int(active_mg(myid,ifinelevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
          call make_virtual_mg_dp(1,ifinelevel)  ! Communicate solution (Red)
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call gauss_seidel_mg_coarse(ifinelevel,safe,.false.)  ! Black step
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_COARSE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+              int(active_mg(myid,ifinelevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
          call make_virtual_mg_dp(1,ifinelevel)  ! Communicate solution (Black)
       end do
       return
@@ -1021,14 +1280,35 @@ recursive subroutine recursive_multigrid_coarse(ifinelevel, safe)
 
       ! Pre-smoothing
       do i=1,ngs_coarse
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call gauss_seidel_mg_coarse(ifinelevel,safe,.true. )  ! Red step
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_COARSE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+              int(active_mg(myid,ifinelevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
          call make_virtual_mg_dp(1,ifinelevel)  ! Communicate solution (Red)
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call gauss_seidel_mg_coarse(ifinelevel,safe,.false.)  ! Black step
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_COARSE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+              int(active_mg(myid,ifinelevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
          call make_virtual_mg_dp(1,ifinelevel)  ! Communicate solution (Black)
       end do
 
       ! Compute residual and restrict into upper level RHS
+#ifdef FDMDEBUG
+      call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
       call cmp_residual_mg_coarse(ifinelevel)
+#ifdef FDMDEBUG
+      call mgp_stop(MGP_COARSE_RESID,mgp_phase_wall,mgp_phase_cpu, &
+           int(active_mg(myid,ifinelevel)%ngrid,kind=8)*int(twotondim,kind=8))
+#endif
       call make_virtual_mg_dp(3,ifinelevel)  ! Communicate residual
 
       ! First clear the rhs in coarser reception comms
@@ -1038,7 +1318,14 @@ recursive subroutine recursive_multigrid_coarse(ifinelevel, safe)
       end do
 
       ! Restrict and do reverse-comm
+#ifdef FDMDEBUG
+      call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
       call restrict_residual_coarse_reverse(ifinelevel)
+#ifdef FDMDEBUG
+      call mgp_stop(MGP_RESTRICT,mgp_phase_wall,mgp_phase_cpu, &
+           int(active_mg(myid,ifinelevel)%ngrid,kind=8)*int(twotondim,kind=8))
+#endif
       call make_reverse_mg_dp(2,ifinelevel-1) ! communicate rhs
 
       ! Reset correction from upper level before solve
@@ -1051,14 +1338,35 @@ recursive subroutine recursive_multigrid_coarse(ifinelevel, safe)
       call recursive_multigrid_coarse(ifinelevel-1, safe)
 
       ! Interpolate coarse solution and correct back into fine solution
+#ifdef FDMDEBUG
+      call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
       call interpolate_and_correct_coarse(ifinelevel)
+#ifdef FDMDEBUG
+      call mgp_stop(MGP_INTERP,mgp_phase_wall,mgp_phase_cpu, &
+           int(active_mg(myid,ifinelevel)%ngrid,kind=8)*int(twotondim,kind=8))
+#endif
       call make_virtual_mg_dp(1,ifinelevel)  ! Communicate solution
 
       ! Post-smoothing
       do i=1,ngs_coarse
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call gauss_seidel_mg_coarse(ifinelevel,safe,.true. )  ! Red step
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_COARSE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+              int(active_mg(myid,ifinelevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
          call make_virtual_mg_dp(1,ifinelevel)  ! Communicate solution (Red)
+#ifdef FDMDEBUG
+         call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
          call gauss_seidel_mg_coarse(ifinelevel,safe,.false.)  ! Black step
+#ifdef FDMDEBUG
+         call mgp_stop(MGP_COARSE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+              int(active_mg(myid,ifinelevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
          call make_virtual_mg_dp(1,ifinelevel)  ! Communicate solution (Black)
       end do
 
@@ -1078,6 +1386,9 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    use amr_commons
    use poisson_commons
    use ksection
+#ifdef FDMDEBUG
+   use mg_omp_profile_m
+#endif
    implicit none
 
 #ifndef WITHOUTMPI
@@ -1117,9 +1428,15 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    integer, dimension(1:ncpu) :: reqsend, reqrecv
    integer :: countrecv, countsend
    integer :: tag = 777
+#ifdef FDMDEBUG
+   real(kind=8) :: mgp_wall_start,mgp_cpu_start
+#endif
 
 
    icoarselevel=ifinelevel-1
+#ifdef FDMDEBUG
+   call mgp_start(mgp_wall_start,mgp_cpu_start)
+#endif
 
    nact_tot=0
    nreq_tot=0; nreq=0
@@ -1557,6 +1874,10 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
 #endif
 
    deallocate(P_icf_bp, P_nfg_bp, P_nfc_bp)
+#ifdef FDMDEBUG
+   call mgp_stop(MGP_BUILD,mgp_wall_start,mgp_cpu_start, &
+        int(active_f_comm%ngrid,kind=8))
+#endif
 
 end subroutine build_parent_comms_mg
 
@@ -1627,14 +1948,27 @@ subroutine make_fine_mask(ilevel)
    use amr_commons
    use pm_commons
    use poisson_commons
+#ifdef FDMDEBUG
+   use mg_omp_profile_m
+#endif
    implicit none
    integer, intent(in) :: ilevel
 
    integer  :: ngrid
    integer  :: ind, igrid_mg, icpu, ibound
    integer  :: igrid_amr, icell_amr, iskip_amr
+#ifdef FDMDEBUG
+   real(kind=8) :: mgp_wall_start,mgp_cpu_start
+   integer(kind=8) :: mgp_nwork
+#endif
 
    ngrid=active(ilevel)%ngrid
+#ifdef FDMDEBUG
+   mgp_nwork=int(ngrid,kind=8)*int(twotondim,kind=8)
+   call mgp_start(mgp_wall_start,mgp_cpu_start)
+#endif
+!$omp parallel do if(ngrid*twotondim>=4096) collapse(2) &
+!$omp private(iskip_amr,igrid_amr,icell_amr) schedule(static)
    do ind=1,twotondim
       iskip_amr = ncoarse+(ind-1)*ngridmax
       do igrid_mg=1,ngrid
@@ -1644,6 +1978,7 @@ subroutine make_fine_mask(ilevel)
          f(icell_amr,3) = 1.0d0
       end do
    end do
+!$omp end parallel do
 
    do icpu=1,ncpu
       ngrid=reception(icpu,ilevel)%ngrid
@@ -1670,8 +2005,120 @@ subroutine make_fine_mask(ilevel)
          end do
       end do
    end do
+#ifdef FDMDEBUG
+   call mgp_stop(MGP_MASK,mgp_wall_start,mgp_cpu_start,mgp_nwork)
+#endif
 
 end subroutine make_fine_mask
+
+! ########################################################################
+! ########################################################################
+! ########################################################################
+! ########################################################################
+
+! ------------------------------------------------------------------------
+! Coarse-level scan flag setting
+! ------------------------------------------------------------------------
+subroutine set_scan_flag_coarse_omp(ilevel)
+   use amr_commons
+   use poisson_commons
+   use morton_hash
+#ifdef FDMDEBUG
+   use mg_omp_profile_m
+#endif
+   implicit none
+
+   integer, intent(in) :: ilevel
+
+   integer :: ind, ngrid, scan_flag
+   integer :: igrid_mg, inbor, idim, igshift
+   integer :: igrid_amr, igrid_nbor_amr, cpu_nbor_amr
+   integer :: icell_nbor_amr
+   integer :: iskip_mg, icell_mg, igrid_nbor_mg, icell_nbor_mg
+   integer, dimension(1:3,1:2,1:8) :: iii, jjj
+#ifdef FDMDEBUG
+   real(kind=8) :: mgp_wall_start,mgp_cpu_start
+#endif
+
+   iii(1,1,1:8)=(/1,0,1,0,1,0,1,0/); jjj(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
+   iii(1,2,1:8)=(/0,2,0,2,0,2,0,2/); jjj(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
+   iii(2,1,1:8)=(/3,3,0,0,3,3,0,0/); jjj(2,1,1:8)=(/3,4,1,2,7,8,5,6/)
+   iii(2,2,1:8)=(/0,0,4,4,0,0,4,4/); jjj(2,2,1:8)=(/3,4,1,2,7,8,5,6/)
+   iii(3,1,1:8)=(/5,5,5,5,0,0,0,0/); jjj(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
+   iii(3,2,1:8)=(/0,0,0,0,6,6,6,6/); jjj(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
+
+   ngrid=active_mg(myid,ilevel)%ngrid
+   if(ngrid==0)return
+#ifdef FDMDEBUG
+   call mgp_start(mgp_wall_start,mgp_cpu_start)
+#endif
+   ! Avoid fork/join overhead on the tiny bottom levels where one serial
+   ! vector sweep is cheaper than starting an OMP team.
+   if(ngrid*twotondim<4096)then
+      call set_scan_flag_coarse(ilevel)
+#ifdef FDMDEBUG
+      call mgp_stop(MGP_SCAN,mgp_wall_start,mgp_cpu_start, &
+           int(ngrid,kind=8)*int(twotondim,kind=8))
+#endif
+      return
+   end if
+
+   ! Every (cell-within-grid, MG-grid) pair owns a distinct flag entry.
+   ! Morton/hash and communicator data are read-only during this phase.
+!$omp parallel do collapse(2) default(shared) &
+!$omp private(iskip_mg,icell_mg,igrid_amr,scan_flag,inbor,idim,igshift, &
+!$omp         igrid_nbor_amr,cpu_nbor_amr,icell_nbor_amr, &
+!$omp         igrid_nbor_mg,icell_nbor_mg) schedule(static)
+   do ind=1,twotondim
+      do igrid_mg=1,ngrid
+         iskip_mg=(ind-1)*ngrid
+         igrid_amr=active_mg(myid,ilevel)%igrid(igrid_mg)
+         icell_mg=iskip_mg+igrid_mg
+
+         if(active_mg(myid,ilevel)%u(icell_mg,4)==1d0)then
+            scan_flag=0
+            scan_flag_loop: do inbor=1,2
+               do idim=1,ndim
+                  igshift=iii(idim,inbor,ind)
+                  if(igshift==0)then
+                     igrid_nbor_amr=igrid_amr
+                     cpu_nbor_amr=myid
+                  else
+                     igrid_nbor_amr=morton_nbor_grid(igrid_amr,ilevel,igshift)
+                     icell_nbor_amr=morton_nbor_cell(igrid_amr,ilevel,igshift)
+                     cpu_nbor_amr=cpu_map(icell_nbor_amr)
+                  end if
+
+                  if(igrid_nbor_amr==0)then
+                     scan_flag=1
+                     exit scan_flag_loop
+                  end if
+                  igrid_nbor_mg=lookup_mg(igrid_nbor_amr)
+                  if(igrid_nbor_mg<=0)then
+                     scan_flag=1
+                     exit scan_flag_loop
+                  end if
+                  icell_nbor_mg=igrid_nbor_mg+(jjj(idim,inbor,ind)-1)* &
+                       active_mg(cpu_nbor_amr,ilevel)%ngrid
+                  if(active_mg(cpu_nbor_amr,ilevel)%u(icell_nbor_mg,4)<=0d0)then
+                     scan_flag=1
+                     exit scan_flag_loop
+                  end if
+               end do
+            end do scan_flag_loop
+         else
+            scan_flag=1
+         end if
+         active_mg(myid,ilevel)%f(icell_mg,1)=scan_flag
+      end do
+   end do
+!$omp end parallel do
+#ifdef FDMDEBUG
+   call mgp_stop(MGP_SCAN,mgp_wall_start,mgp_cpu_start, &
+        int(ngrid,kind=8)*int(twotondim,kind=8))
+#endif
+
+end subroutine set_scan_flag_coarse_omp
 
 ! ########################################################################
 ! ########################################################################
@@ -1702,6 +2149,9 @@ subroutine make_fine_bc_rhs(ilevel,icount)
    use morton_hash
    use dark_energy_commons, only: de_table_loaded, get_de_ratio, f_de_val
    use scalar_de_commons, only: sde_dmcorr_of_a, horndeski_mu_of_a
+#ifdef FDMDEBUG
+   use mg_omp_profile_m
+#endif
    implicit none
    integer, intent(in) :: ilevel,icount
 
@@ -1723,6 +2173,11 @@ subroutine make_fine_bc_rhs(ilevel,icount)
    integer  :: nx_loc
    real(dp) :: scale, fourpi
    real(dp) :: omega_de_a_mg, omega_cb_mg
+#ifdef FDMDEBUG
+   real(kind=8) :: mgp_wall_start,mgp_cpu_start
+
+   call mgp_start(mgp_wall_start,mgp_cpu_start)
+#endif
 
    ! Set constants
    nx_loc = icoarse_max-icoarse_min+1
@@ -1825,6 +2280,10 @@ subroutine make_fine_bc_rhs(ilevel,icount)
       end do
 !$omp end parallel do
    end do
+#ifdef FDMDEBUG
+   call mgp_stop(MGP_BCRHS,mgp_wall_start,mgp_cpu_start, &
+        int(ngrid,kind=8)*int(twotondim,kind=8))
+#endif
 
 end subroutine make_fine_bc_rhs
 
@@ -1843,6 +2302,9 @@ subroutine make_virtual_mg_dp(ivar,ilevel)
   use amr_commons
   use poisson_commons
   use ksection
+#ifdef FDMDEBUG
+  use mg_omp_profile_m
+#endif
 
   implicit none
 #ifndef WITHOUTMPI
@@ -1854,10 +2316,24 @@ subroutine make_virtual_mg_dp(ivar,ilevel)
   integer::countsend,countrecv
   integer::info,tag=101
   integer,dimension(ncpu)::reqsend,reqrecv
+#ifdef FDMDEBUG
+  real(kind=8) :: mgp_wall_start,mgp_cpu_start
+  integer(kind=8) :: mgp_nwork
+
+  mgp_nwork=0_8
+  do icpu=1,ncpu
+     mgp_nwork=mgp_nwork+int(emission_mg(icpu,ilevel)%ngrid,kind=8)
+  end do
+  mgp_nwork=mgp_nwork*int(twotondim,kind=8)
+  call mgp_start(mgp_wall_start,mgp_cpu_start)
+#endif
 
 #ifndef WITHOUTMPI
   if(ordering=='ksection') then
      call make_virtual_mg_dp_ksec(ivar,ilevel)
+#ifdef FDMDEBUG
+     call mgp_stop(MGP_MG_FORWARD,mgp_wall_start,mgp_cpu_start,mgp_nwork)
+#endif
      return
   end if
 
@@ -1906,6 +2382,10 @@ subroutine make_virtual_mg_dp(ivar,ilevel)
 
 #endif
 
+#ifdef FDMDEBUG
+  call mgp_stop(MGP_MG_FORWARD,mgp_wall_start,mgp_cpu_start,mgp_nwork)
+#endif
+
 111 format('   Entering make_virtual_mg for level ',I2)
 
 end subroutine make_virtual_mg_dp
@@ -1917,6 +2397,9 @@ subroutine make_virtual_mg_int(ilevel)
   use amr_commons
   use poisson_commons
   use ksection
+#ifdef FDMDEBUG
+  use mg_omp_profile_m
+#endif
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1927,10 +2410,24 @@ subroutine make_virtual_mg_int(ilevel)
   integer::countsend,countrecv
   integer::info,tag=101
   integer,dimension(ncpu)::reqsend,reqrecv
+#ifdef FDMDEBUG
+  real(kind=8) :: mgp_wall_start,mgp_cpu_start
+  integer(kind=8) :: mgp_nwork
+
+  mgp_nwork=0_8
+  do icpu=1,ncpu
+     mgp_nwork=mgp_nwork+int(emission_mg(icpu,ilevel)%ngrid,kind=8)
+  end do
+  mgp_nwork=mgp_nwork*int(twotondim,kind=8)
+  call mgp_start(mgp_wall_start,mgp_cpu_start)
+#endif
 
 #ifndef WITHOUTMPI
   if(ordering=='ksection') then
      call make_virtual_mg_int_ksec(ilevel)
+#ifdef FDMDEBUG
+     call mgp_stop(MGP_MG_FORWARD,mgp_wall_start,mgp_cpu_start,mgp_nwork)
+#endif
      return
   end if
 
@@ -1979,6 +2476,10 @@ subroutine make_virtual_mg_int(ilevel)
 
 #endif
 
+#ifdef FDMDEBUG
+  call mgp_stop(MGP_MG_FORWARD,mgp_wall_start,mgp_cpu_start,mgp_nwork)
+#endif
+
 111 format('   Entering make_virtual_mg for level ',I2)
 
 end subroutine make_virtual_mg_int
@@ -1990,6 +2491,9 @@ subroutine make_reverse_mg_dp(ivar,ilevel)
   use amr_commons
   use poisson_commons
   use ksection
+#ifdef FDMDEBUG
+  use mg_omp_profile_m
+#endif
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2000,10 +2504,24 @@ subroutine make_reverse_mg_dp(ivar,ilevel)
   integer::countsend,countrecv
   integer::info,tag=101
   integer,dimension(ncpu)::reqsend,reqrecv
+#ifdef FDMDEBUG
+  real(kind=8) :: mgp_wall_start,mgp_cpu_start
+  integer(kind=8) :: mgp_nwork
+
+  mgp_nwork=0_8
+  do icpu=1,ncpu
+     mgp_nwork=mgp_nwork+int(emission_mg(icpu,ilevel)%ngrid,kind=8)
+  end do
+  mgp_nwork=mgp_nwork*int(twotondim,kind=8)
+  call mgp_start(mgp_wall_start,mgp_cpu_start)
+#endif
 
 #ifndef WITHOUTMPI
   if(ordering=='ksection') then
      call make_reverse_mg_dp_ksec(ivar,ilevel)
+#ifdef FDMDEBUG
+     call mgp_stop(MGP_MG_REVERSE,mgp_wall_start,mgp_cpu_start,mgp_nwork)
+#endif
      return
   end if
 
@@ -2053,6 +2571,10 @@ subroutine make_reverse_mg_dp(ivar,ilevel)
 
 #endif
 
+#ifdef FDMDEBUG
+  call mgp_stop(MGP_MG_REVERSE,mgp_wall_start,mgp_cpu_start,mgp_nwork)
+#endif
+
 111 format('   Entering make_reverse_mg for level ',I2)
 
 end subroutine make_reverse_mg_dp
@@ -2064,6 +2586,9 @@ subroutine make_reverse_mg_int(ilevel)
   use amr_commons
   use poisson_commons
   use ksection
+#ifdef FDMDEBUG
+  use mg_omp_profile_m
+#endif
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2074,10 +2599,24 @@ subroutine make_reverse_mg_int(ilevel)
   integer::countsend,countrecv
   integer::info,tag=101
   integer,dimension(ncpu)::reqsend,reqrecv
+#ifdef FDMDEBUG
+  real(kind=8) :: mgp_wall_start,mgp_cpu_start
+  integer(kind=8) :: mgp_nwork
+
+  mgp_nwork=0_8
+  do icpu=1,ncpu
+     mgp_nwork=mgp_nwork+int(emission_mg(icpu,ilevel)%ngrid,kind=8)
+  end do
+  mgp_nwork=mgp_nwork*int(twotondim,kind=8)
+  call mgp_start(mgp_wall_start,mgp_cpu_start)
+#endif
 
 #ifndef WITHOUTMPI
   if(ordering=='ksection') then
      call make_reverse_mg_int_ksec(ilevel)
+#ifdef FDMDEBUG
+     call mgp_stop(MGP_MG_REVERSE,mgp_wall_start,mgp_cpu_start,mgp_nwork)
+#endif
      return
   end if
 
@@ -2125,6 +2664,10 @@ subroutine make_reverse_mg_int(ilevel)
   ! Wait for full completion of sends
   call MPI_WAITALL(countsend,reqsend,statuses,info)
 
+#endif
+
+#ifdef FDMDEBUG
+  call mgp_stop(MGP_MG_REVERSE,mgp_wall_start,mgp_cpu_start,mgp_nwork)
 #endif
 
 111 format('   Entering make_reverse_mg for level ',I2)
