@@ -18,6 +18,13 @@ Logging is enabled by default.  Give every independent simulation a separate
 ledger path; provenance also remains tied to the RAMSES output directory and
 its `info`/build metadata.
 
+The writer is invoked only when `smbh = .true.`.  In other sink modes the
+ledger controls are ignored.  When enabled for an SMBH run, failure to open,
+write, flush, or close the ledger is fatal: RAMSES calls `clean_stop` before
+any rank enters the irreversible sink-compaction section.  A partially
+written tail from that failed run remains invalid and must not be consumed as
+a capture event.
+
 ## Transaction layout
 
 Every event is a contiguous JSONL transaction:

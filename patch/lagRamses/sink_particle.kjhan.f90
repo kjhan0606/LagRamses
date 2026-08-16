@@ -1072,6 +1072,15 @@ subroutine merge_sink(ilevel)
   integer, dimension(:,:), allocatable:: GroupData
   integer:: ngrp,sisink, fisink,ijsink
 !#endif
+  interface
+     subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG)
+       import :: dp
+       integer,intent(in)::ilevel,ngrp
+       integer,dimension(:),intent(in)::gsink
+       real(dp),intent(in)::dx_min,scale,factG
+       real(dp),dimension(1:3),intent(in)::xbound
+     end subroutine write_smbh_capture_ledger
+  end interface
   pi=twopi/2.0d0
   factG=1d0
   if(cosmo)factG=3d0/8d0/pi*omega_m*aexp
@@ -1216,9 +1225,14 @@ subroutine merge_sink(ilevel)
   ! Record every member of each group before the irreversible COM
   ! compaction below.  The ledger is diagnostic only: it does not alter
   ! the existing FOF grouping or sink dynamics.
-  if(smbh_capture_ledger .and. new_sink < nsink) then
+  if(smbh .and. smbh_capture_ledger .and. new_sink < nsink) then
      call write_smbh_capture_ledger(ilevel,new_sink,gsink,dx_min,scale, &
           & xbound,factG)
+#ifndef WITHOUTMPI
+     ! Rank 1 performs the I/O.  Do not let any rank enter irreversible
+     ! compaction until the complete transaction has been flushed and closed.
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
   endif
 
 
@@ -1615,6 +1629,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   use pm_commons
   use amr_commons
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use, intrinsic :: iso_fortran_env, only: error_unit
   implicit none
 
   integer,intent(in)::ilevel,ngrp
@@ -1638,6 +1653,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   logical::bondi_context_available
   character(len=96)::event_uid
   character(len=8)::classification
+  character(len=512)::iomsg
 
   if(myid /= 1 .or. nsink < 2) return
 
@@ -1646,13 +1662,12 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   redshift=0d0
   if(aexp > 0d0) redshift=1d0/aexp-1d0
 
+  iomsg=''
   open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file), &
        & status='unknown',position='append',action='write', &
-       & form='formatted',iostat=ios)
+       & form='formatted',iostat=ios,iomsg=iomsg)
   if(ios /= 0) then
-     write(*,'(A,1X,A,1X,A,I0)') 'WARNING: cannot open SMBH capture ledger', &
-          & trim(smbh_capture_ledger_file),'iostat=',ios
-     return
+     call ledger_io_fatal('open','',ios,iomsg)
   endif
 
   do igrp=1,ngrp
@@ -1723,7 +1738,8 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      endif
      expected_pairs=nmember*(nmember-1)/2
 
-     write(ledger_unit,'(A)') &
+     iomsg=''
+     write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
           & '{"schema_version":1,"record_type":"event_begin","event_uid":"'// &
           & trim(event_uid)//'","classification":"'//trim(classification)// &
           & '","nstep_coarse":'//trim(json_int(nstep_coarse))// &
@@ -1760,6 +1776,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
           & trim(json_real(com_vel(2)))//','//trim(json_real(com_vel(3)))//']'// &
           & ',"max_pair_separation_code":'//trim(json_real(max_separation))// &
           & ',"complete":false}'
+     if(ios /= 0) call ledger_io_fatal('write event_begin',event_uid,ios,iomsg)
 
      member_index=0
      do isink=1,nsink
@@ -1774,7 +1791,8 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
            last_sound_speed=c_avgptr(isink)
            last_gas_vrel=v_avgptr(isink)
         endif
-        write(ledger_unit,'(A)') &
+        iomsg=''
+        write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
              & '{"schema_version":1,"record_type":"member","event_uid":"'// &
              & trim(event_uid)//'","member_index":'//trim(json_int(member_index))// &
              & ',"sink_id":'//trim(json_int(idsink(isink)))// &
@@ -1800,6 +1818,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
              & trim(json_optional_real(last_sound_speed,bondi_context_available))// &
              & ',"last_bondi_gas_vrel_code":'// &
              & trim(json_optional_real(last_gas_vrel,bondi_context_available))//'}'
+        if(ios /= 0) call ledger_io_fatal('write member',event_uid,ios,iomsg)
      enddo
 
      pair_index=0
@@ -1845,7 +1864,8 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
            specific_h(3)=delta_pos(1)*delta_vel(2)-delta_pos(2)*delta_vel(1)
            relative_L=reduced_mass*specific_h
 
-           write(ledger_unit,'(A)') &
+           iomsg=''
+           write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
                 & '{"schema_version":1,"record_type":"pair","event_uid":"'// &
                 & trim(event_uid)//'","pair_index":'//trim(json_int(pair_index))// &
                 & ',"sink_id_1":'//trim(json_int(idsink(isink)))// &
@@ -1871,19 +1891,44 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
                 & ',"legacy_binding_proxy_1overr2_code":'// &
                 & trim(json_optional_real(legacy_binding_proxy,pair_finite))// &
                 & ',"legacy_pair_bound":'//trim(json_logical(legacy_pair_bound))//'}'
+           if(ios /= 0) call ledger_io_fatal('write pair',event_uid,ios,iomsg)
         enddo
      enddo
 
-     write(ledger_unit,'(A)') &
+     iomsg=''
+     write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
           & '{"schema_version":1,"record_type":"event_end","event_uid":"'// &
           & trim(event_uid)//'","nmember":'//trim(json_int(nmember))// &
           & ',"npair":'//trim(json_int(pair_index))//',"complete":true}'
-     flush(ledger_unit)
+     if(ios /= 0) call ledger_io_fatal('write event_end',event_uid,ios,iomsg)
+     iomsg=''
+     flush(ledger_unit,iostat=ios,iomsg=iomsg)
+     if(ios /= 0) call ledger_io_fatal('flush transaction',event_uid,ios,iomsg)
   enddo
 
-  close(ledger_unit)
+  iomsg=''
+  close(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call ledger_io_fatal('close','',ios,iomsg)
 
 contains
+
+  subroutine ledger_io_fatal(operation,uid,status,message)
+    character(len=*),intent(in)::operation,uid,message
+    integer,intent(in)::status
+    integer::log_ios
+
+    if(len_trim(uid) > 0) then
+       write(error_unit,'(A,1X,A,1X,A,1X,A,I0,1X,A)') &
+            & 'FATAL: SMBH capture ledger I/O failure during',trim(operation), &
+            & 'event_uid='//trim(uid),'iostat=',status,trim(message)
+    else
+       write(error_unit,'(A,1X,A,1X,A,1X,A,I0,1X,A)') &
+            & 'FATAL: SMBH capture ledger I/O failure during',trim(operation), &
+            & 'file='//trim(smbh_capture_ledger_file),'iostat=',status,trim(message)
+    endif
+    flush(error_unit,iostat=log_ios)
+    call clean_stop
+  end subroutine ledger_io_fatal
 
   function json_int(value) result(text)
     integer,intent(in)::value
