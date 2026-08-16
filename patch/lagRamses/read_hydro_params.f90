@@ -74,6 +74,7 @@ subroutine read_hydro_params(nml_ok)
        & ,n_sink,sink_AGN,rAGN,eAGN_K,eAGN_T,TAGN,X_floor,r_gal,boost_acc,Mseed    &
        & ,sigmav_max,star_ratio_floor,mloadAGN,T2maxAGN,f_bondi,random_jet         &
        & ,drag,boost_drag,selfgrav,spin_bh,bhspinmerge,vrel_merge,rmerge,omega_b   &
+       & ,smbh_capture_ledger,smbh_capture_ledger_file                            &
        & ,bondi,mad_jet,eps_sn1,eps_sn2,tol                             &
        & ,sf_virial,sf_trelax,sf_model,sf_birth_properties &
        & ,cooling_method,grackle_table

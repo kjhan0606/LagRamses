@@ -307,6 +307,8 @@ module amr_parameters
   real(dp)::rmerge=1.0d0      ! Number of dx_min to allow for BH coalescence
   real(dp)::star_ratio_floor=0.25d0
   real(dp)::d_jeans_thre=0.d0 ! Gas density threshold to trigger Jeans-based refinement criterion
+  logical ::smbh_capture_ledger=.true. ! Log complete pre-compaction sink groups
+  character(len=256)::smbh_capture_ledger_file='smbh_capture_ledger_v1.jsonl'
 
   logical ::self_shielding=.false.
   logical ::pressure_fix=.false.
