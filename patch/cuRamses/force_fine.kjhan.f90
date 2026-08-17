@@ -2893,24 +2893,24 @@ end subroutine fR_gauss_seidel
 ! nDGP_beta: compute β(a) parameter
 !=========================================================
 function nDGP_beta(aa, orc, branch) result(beta)
-  use amr_parameters, only: dp, omega_m, omega_l
+  use amr_parameters, only: dp, omega_m, omega_l, omega_k
   implicit none
   real(dp),intent(in)::aa, orc
   integer,intent(in)::branch
   real(dp)::beta
   !-------------------------------------------------------
-  ! H(a) = H0 * sqrt(Ω_m/a³ + Ω_Λ)  [flat ΛCDM]
-  ! Ḣ/H² = -(3/2)*(Ω_m/a³)/(Ω_m/a³ + Ω_Λ)
+  ! H(a) = H0 * sqrt(Ω_m/a³ + Ω_Λ + Ω_k/a²)  [curved ΛCDM]
+  ! Ḣ/H² = -((3/2)*Ω_m/a³ + Ω_k/a²)/(Ω_m/a³ + Ω_Λ + Ω_k/a²)
   ! r_c = 1/(2*sqrt(omega_rc)) / H0
   ! β = 1 + branch * 2*H*r_c*(1 + Ḣ/(3H²))
-  !   = 1 + branch / sqrt(omega_rc) * sqrt(Ω_m/a³+Ω_Λ)
-  !         * (1 - (Ω_m/a³)/(2*(Ω_m/a³+Ω_Λ)))
+  !   = 1 + branch / sqrt(omega_rc) * sqrt(Ω_m/a³+Ω_Λ+Ω_k/a²)
+  !         * (1 - ((3/2)*Ω_m/a³+Ω_k/a²)/(3*(Ω_m/a³+Ω_Λ+Ω_k/a²)))
   !-------------------------------------------------------
   real(dp)::Oma3, E2, Hdot_over_H2, HrC
 
   Oma3 = omega_m / aa**3
-  E2   = Oma3 + omega_l          ! H²/H0²
-  Hdot_over_H2 = -1.5d0 * Oma3 / E2
+  E2   = Oma3 + omega_l + omega_k / aa**2          ! H²/H0²
+  Hdot_over_H2 = -1.5d0 * Oma3 / E2 - omega_k / aa**2 / E2 ! Ω_k coefficient is 1, not 3/2
   ! H*r_c = sqrt(E2)/H0 * 1/(2*sqrt(omega_rc)*H0) = sqrt(E2)/(2*sqrt(omega_rc))
   HrC = sqrt(E2) / (2d0 * sqrt(orc))
   beta = 1d0 + dble(branch) * 2d0 * HrC * (1d0 + Hdot_over_H2 / 3d0)
