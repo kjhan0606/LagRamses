@@ -100,6 +100,23 @@ Per file, mechanical, no reformatting, no logic changes:
 8. End of chunk: for each touched object run `cd bin && make <obj>.o` and
    report compile status per file. Do not run make clean.
 
+Two variant idioms found during the pilot (2026-08-18), add them to every
+chunk's checklist:
+
+- **Reverse child WITHOUT the -1**: `(icell-ncoarse)/ngridmax + 1` (seen in
+  bisection.f90). This is a latent off-by-one in the ORIGINAL code: it returns
+  child+1 whenever igrid==ngridmax, and the paired grid recovery then goes
+  nonpositive. Convert it to ichild_of anyway and RECORD the site in the
+  commit message as a semantic fix; the bitwise gate is unaffected because
+  the last grid slot is never populated at our capacities (and bisection runs
+  only under ordering='bisection', which no gate run uses).
+- **Reverse grid with swapped operands**: `icell - ncoarse - ngridmax*(ind-1)`
+  (the census regex only matched `(ind-1)*ngridmax`). Same quantity; convert
+  to igrid_of when ind is the child of that same icell.
+
+The census regexes in the driver's completeness check must cover both
+variants.
+
 Known trap for reviewers: with the legacy layout, a WRONG conversion can
 still be numerically right in small tests (the aliasing degeneracy discussed
 in the plan). Phase 1's shield is bitwise identity on runs that refine plus
