@@ -36,6 +36,10 @@ CAP = re.compile(r'twotondim\s*\*\s*ngridmax\b|ngridmax\b\s*\*\s*twotondim', re.
 def sources():
     root = pathlib.Path('.')
     mk = (root/'bin/Makefile').read_text()
+    # Makefile comments list alternative object sets (e.g. the .kisti variants).
+    # Parsing them pulls in sources the build never compiles, which cannot be
+    # gate-verified, so drop commented lines before extracting object names.
+    mk = '\n'.join(l for l in mk.split('\n') if not l.lstrip().startswith('#'))
     vp = [p.replace('$(PATCH)','../patch/lagRamses').replace('../$(SOLVER)','../hydro')
           for p in re.search(r'^VPATH\s*=\s*(.+)$', mk, re.M).group(1).split(':')]
     vp = [(root/'bin'/p).resolve() for p in vp]

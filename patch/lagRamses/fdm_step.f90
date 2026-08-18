@@ -157,6 +157,7 @@ subroutine fdm_drift_fft_reflux(ilevel, dt_half)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -165,7 +166,7 @@ subroutine fdm_drift_fft_reflux(ilevel, dt_half)
   real(dp),intent(in)::dt_half
 
   integer::child_level,igrid_child,icell_child,icell_parent
-  integer::ind_child,iskip_child,i,nchild,nchild_global,info
+  integer::ind_child,i,nchild,nchild_global,info
   real(dp),dimension(:),allocatable::rho_parent_old,rho_parent_next
   real(dp)::rho_old,rho_new,scale_amp,reflux_tol
 #ifdef FDMDEBUG
@@ -259,8 +260,7 @@ subroutine fdm_drift_fft_reflux(ilevel, dt_half)
         max_scale_loc = max(max_scale_loc,abs(scale_amp-1.0d0))
 #endif
         do ind_child=1,twotondim
-           iskip_child = ncoarse + (ind_child-1)*ngridmax
-           icell_child = igrid_child + iskip_child
+           icell_child = ICELL_OF(igrid_child,ind_child)
            psi_re(icell_child) = psi_re(icell_child)*scale_amp
            psi_im(icell_child) = psi_im(icell_child)*scale_amp
         end do
@@ -305,6 +305,7 @@ subroutine fdm_drift_fft(ilevel, dt_half)
   use fdm_commons
   use iso_c_binding
   use omp_lib
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -334,7 +335,7 @@ subroutine fdm_drift_fft(ilevel, dt_half)
   integer,allocatable,save::fft_map(:)
 
   ! Loop vars
-  integer::igrid,ind,iskip,icell,ix,iy,iz,idx_3d,info
+  integer::igrid,ind,icell,ix,iy,iz,idx_3d,info
   integer(i8b)::idx_c
   real(dp)::cr, ci, new_re, new_im
   real(dp)::scale
@@ -372,10 +373,9 @@ subroutine fdm_drift_fft(ilevel, dt_half)
      ! Build AMR cell -> flat 3D index map
      fft_map = 0
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
         do while(igrid > 0)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            ix = int((xg(igrid,1) + (dble(iand(ind-1,1)) - 0.5d0)*dx_fft &
                 - dble(icoarse_min)*scale) / dx_fft / scale) + 1
            iy = int((xg(igrid,2) + (dble(iand(ishft(ind-1,-1),1)) - 0.5d0)*dx_fft &
@@ -489,6 +489,7 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
   use fdm_commons
   use iso_c_binding
   use omp_lib
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -533,7 +534,7 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
 
   ! Locals
   integer::igrid, ngrid_loc, igrid_amr, icell_amr
-  integer::ind, iskip, ix, iy, iz, idx_3d, slab_real_size
+  integer::ind, ix, iy, iz, idx_3d, slab_real_size
   integer::Kx, Ky, Kz, kx_i, ky_i, kz_i
   integer::info, irank, ip, nreq, dest_rank, x_local
   integer::n_send_total, n_recv_total
@@ -783,8 +784,7 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
            dest_rank = min(ix / fftw_block, ncpu-1)
            x_local = ix - dest_rank * fftw_block
            idx_3d = x_local * fft_Ny * fft_Nz + iy * fft_Nz + iz
-           iskip = ncoarse + (ind-1)*ngridmax
-           icell_amr = iskip + igrid_amr
+           icell_amr = ICELL_OF(igrid_amr,ind)
            m = m + 1
            pack_slot(m)  = send_idx(dest_rank)
            pack_idx3d(m) = idx_3d
@@ -817,8 +817,7 @@ subroutine fdm_drift_fft_distributed(ilevel, dt_half)
            dest_rank = min(ix / fftw_block, ncpu-1)
            x_local = ix - dest_rank * fftw_block
            idx_3d = x_local * fft_Ny * fft_Nz + iy * fft_Nz + iz
-           iskip = ncoarse + (ind-1)*ngridmax
-           icell_amr = iskip + igrid_amr
+           icell_amr = ICELL_OF(igrid_amr,ind)
            m = m + 1
            if(pack_icell(m) /= icell_amr .or. pack_idx3d(m) /= idx_3d) &
                 map_bad_loc = map_bad_loc + 1_i8b
@@ -1033,11 +1032,12 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   use poisson_commons
   use fdm_commons
   use morton_hash, only: morton_nbor_cell
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::dt_half
 
-  integer::igrid,ind,iskip,icell,iter,nx_loc,ntot,i
+  integer::igrid,ind,icell,iter,nx_loc,ntot,i
   integer,parameter::max_iter=300
   real(dp)::dx,scale,dx_loc,alpha,g,cntol,bnorm,rnorm
   real(dp)::omr,omi,betr,beti,alr,ali,tr1,ti1
@@ -1074,11 +1074,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   ! zero, and make_virtual_fine_dp[2] overwrites the remote ghost entries before
   ! every matvec reads them.
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         br(icell)=0.0d0;  bi(icell)=0.0d0
         rr(icell)=0.0d0;  ri(icell)=0.0d0
         rhr(icell)=0.0d0; rhi(icell)=0.0d0
@@ -1097,11 +1096,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
   ! r0 = b - A_{g}[psi]  (x0 = 0 correction). Store A psi in r then subtract.
   call cn_matvec(ilevel,  g, psi_re, psi_im, rr, ri, 0)
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            rr(icell) = br(icell) - rr(icell)
            ri(icell) = bi(icell) - ri(icell)
@@ -1128,11 +1126,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      betr=dble(bet); beti=aimag(bet); omr=dble(om); omi=aimag(om)
      ! p = r + bet*(p - om*v)
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell,tr1,ti1) schedule(static)
         do i=1,active(ilevel)%ngrid
            igrid = active(ilevel)%igrid(i)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0) then
               tr1 = pr(icell) - (omr*vr(icell) - omi*vi(icell))
               ti1 = pi(icell) - (omr*vi(icell) + omi*vr(icell))
@@ -1148,11 +1145,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      alr=dble(alp); ali=aimag(alp)
      ! s = r - alp*v
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) schedule(static)
         do i=1,active(ilevel)%ngrid
            igrid = active(ilevel)%igrid(i)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0) then
               sr(icell) = rr(icell) - (alr*vr(icell) - ali*vi(icell))
               si(icell) = ri(icell) - (alr*vi(icell) + ali*vr(icell))
@@ -1165,11 +1161,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      if(rnorm < cntol*bnorm) then
         ! x = x + alp*p ; converged on the half-step
         do ind=1,twotondim
-           iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) schedule(static)
            do i=1,active(ilevel)%ngrid
               igrid = active(ilevel)%igrid(i)
-              icell = igrid + iskip
+              icell = ICELL_OF(igrid,ind)
               if(son(icell) == 0) then
                  xr(icell) = xr(icell) + (alr*pr(icell) - ali*pi(icell))
                  xi(icell) = xi(icell) + (alr*pi(icell) + ali*pr(icell))
@@ -1189,11 +1184,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      omr=dble(om); omi=aimag(om)
      ! x = x + alp*p + om*s ;  r = s - om*t
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) schedule(static)
         do i=1,active(ilevel)%ngrid
            igrid = active(ilevel)%igrid(i)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0) then
               xr(icell) = xr(icell) + (alr*pr(icell) - ali*pi(icell)) &
                                     + (omr*sr(icell) - omi*si(icell))
@@ -1220,11 +1214,10 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
 
   ! Commit: psi^{n+1} = psi^n + x   (leaf cells)
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            psi_re(icell) = psi_re(icell) + xr(icell)
            psi_im(icell) = psi_im(icell) + xi(icell)
@@ -1247,10 +1240,9 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      cfac = hbar_code * dt_half / dx_loc**2
      vratio = 0.5d0**ndim
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
         do while(igrid > 0)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0) then
               do idim=1,ndim
                  do inbor=1,2
@@ -1282,10 +1274,9 @@ subroutine fdm_drift_fd_cn(ilevel, dt_half)
      end if
      ! Apply to local leaf cells at the parent level
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel-1)
         do while(igrid > 0)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0 .and. dmb(icell) /= 0.0d0) then
               if(ilevel-1 < fdm_first_wave_level) then
                  ! Fluid parent: psi_re IS rho
@@ -1329,6 +1320,7 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi, bmode)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::gg
@@ -1341,7 +1333,7 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi, bmode)
   !         with the ghost interpolated/converted from the fluid parent
   !   Legacy (no hybrid): Neumann (centre value), byte-identical to before
   integer,intent(in)::bmode
-  integer::igrid,ind,iskip,icell,idim,inbor,icn,i
+  integer::igrid,ind,icell,idim,inbor,icn,i
   real(dp)::nr,ni,gre,gim
   logical::gfound
 
@@ -1361,11 +1353,10 @@ subroutine cn_matvec(ilevel, gg, inr, ini, outr, outi, bmode)
   if(timer_report_interval>0) call timer('fdm-drift-fd','start')
 
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell,idim,inbor,icn,nr,ni,gre,gim,gfound) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            nr = 0.0d0; ni = 0.0d0
            do idim=1,ndim
@@ -1404,6 +1395,7 @@ end subroutine cn_matvec
 subroutine cn_cdot(ilevel, ar, ai, br, bi, res)
   use amr_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1411,17 +1403,16 @@ subroutine cn_cdot(ilevel, ar, ai, br, bi, res)
   integer,intent(in)::ilevel
   real(dp),dimension(*)::ar,ai,br,bi
   complex(dp),intent(out)::res
-  integer::igrid,ind,iskip,icell,info,i
+  integer::igrid,ind,icell,info,i
   real(dp)::loc(2),glob(2),s1,s2
 
   if(timer_report_interval>0) call timer('fdm-cn-dot','start')
   s1=0.0d0; s2=0.0d0
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) reduction(+:s1,s2) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            s1 = s1 + ar(icell)*br(icell) + ai(icell)*bi(icell)
            s2 = s2 + ar(icell)*bi(icell) - ai(icell)*br(icell)
@@ -1446,6 +1437,7 @@ end subroutine cn_cdot
 subroutine cn_cdot2(ilevel, ar, ai, br, bi, cr, ci, res_ab, res_ac)
   use amr_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1453,17 +1445,16 @@ subroutine cn_cdot2(ilevel, ar, ai, br, bi, cr, ci, res_ab, res_ac)
   integer,intent(in)::ilevel
   real(dp),dimension(*)::ar,ai,br,bi,cr,ci
   complex(dp),intent(out)::res_ab,res_ac
-  integer::igrid,ind,iskip,icell,info,i
+  integer::igrid,ind,icell,info,i
   real(dp)::loc(4),glob(4),sabr,sabi,sacr,saci
 
   if(timer_report_interval>0) call timer('fdm-cn-dot','start')
   sabr=0.0d0; sabi=0.0d0; sacr=0.0d0; saci=0.0d0
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) reduction(+:sabr,sabi,sacr,saci) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            sabr = sabr + ar(icell)*br(icell) + ai(icell)*bi(icell)
            sabi = sabi + ar(icell)*bi(icell) - ai(icell)*br(icell)
@@ -1508,15 +1499,15 @@ subroutine cn_copy_to_psi(ilevel, src_re, src_im)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
   real(dp),dimension(:),intent(in)::src_re,src_im
-  integer::igrid,ind,iskip,icell
+  integer::igrid,ind,icell
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
      igrid = headl(myid, ilevel)
      do while(igrid > 0)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            psi_re(icell) = src_re(icell)
            psi_im(icell) = src_im(icell)
@@ -1539,6 +1530,7 @@ subroutine fdm_kdb_max_level(ilevel, k2max)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1567,7 +1559,7 @@ subroutine fdm_kdb_max_level(ilevel, k2max)
   do ind=1,twotondim
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + ncoarse + (ind-1)*ngridmax
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            rho2 = psi_re(icell)**2 + psi_im(icell)**2
            if(rho2 > rho_floor) then
@@ -1611,6 +1603,7 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1664,7 +1657,7 @@ subroutine fdm_vmax_level(ilevel, dtheta_max)
   do ind=1,twotondim
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + ncoarse + (ind-1)*ngridmax
+        icell = ICELL_OF(igrid,ind)
         n_total_thr = n_total_thr + 1
         if(son(icell) == 0) then
            n_leaf_thr = n_leaf_thr + 1
@@ -1813,6 +1806,7 @@ subroutine fdm_c1max_level(ilevel, c1max)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1820,7 +1814,7 @@ subroutine fdm_c1max_level(ilevel, c1max)
   integer,intent(in)::ilevel
   real(dp),intent(out)::c1max
 
-  integer::igrid,ind,iskip,icell,idim,icp,icm,info
+  integer::igrid,ind,icell,idim,icp,icm,info
   real(dp)::sqrho_c,sqrho_L,sqrho_R,c1_dim,c1_cell
   real(dp)::c1_loc,c1_glob
 
@@ -1829,10 +1823,9 @@ subroutine fdm_c1max_level(ilevel, c1max)
 
   c1_loc = 0.0d0
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
      igrid = headl(myid, ilevel)
      do while(igrid > 0)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            sqrho_c = sqrt(psi_re(icell)**2 + psi_im(icell)**2)
            if(sqrho_c > 1.0d-8) then
@@ -1868,11 +1861,12 @@ subroutine fdm_drift_fd_explicit(ilevel, dt_half)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::dt_half
 
-  integer::igrid,ind,iskip,icell,isub,nsub
+  integer::igrid,ind,icell,isub,nsub
   real(dp)::dx,scale,dx_loc,alpha,alpha_sub,dt_sub
   real(dp)::lap_re,lap_im,psi_re_c,psi_im_c
   real(dp)::gre,gim
@@ -1898,10 +1892,9 @@ subroutine fdm_drift_fd_explicit(ilevel, dt_half)
      call make_virtual_fine_dp(psi_im(1), ilevel)
 
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
         do while(igrid > 0)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0) then
               psi_re_c = psi_re(icell)
               psi_im_c = psi_im(icell)
@@ -1951,11 +1944,12 @@ end subroutine fdm_drift_fd_explicit
 subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
   use amr_commons
   use morton_hash
+#include "amr_index.h"
   implicit none
   integer,intent(in)::igrid, ilevel, ind, idim, inbor
   integer,intent(out)::icell_nbor
 
-  integer::ind_bit, ind_nbor, igrid_nbor, iskip
+  integer::ind_bit, ind_nbor, igrid_nbor
 
   ind_bit = iand(ishft(ind-1, -(idim-1)), 1)  ! 0 or 1
 
@@ -1964,8 +1958,7 @@ subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
      if(ind_bit == 0) then
         ! Neighbor is in same grid, flip this dimension bit
         ind_nbor = ind + ishft(1, idim-1)
-        iskip = ncoarse + (ind_nbor-1)*ngridmax
-        icell_nbor = igrid + iskip
+        icell_nbor = ICELL_OF(igrid,ind_nbor)
      else
         ! Neighbor is in adjacent grid (Morton lookup, defrag-safe)
         igrid_nbor = morton_nbor_grid(igrid, ilevel, 2*idim)
@@ -1973,16 +1966,14 @@ subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
            icell_nbor = 0; return
         end if
         ind_nbor = ind - ishft(1, idim-1)
-        iskip = ncoarse + (ind_nbor-1)*ngridmax
-        icell_nbor = igrid_nbor + iskip
+        icell_nbor = ICELL_OF(igrid_nbor,ind_nbor)
      end if
   else
      ! Left neighbor
      if(ind_bit == 1) then
         ! Neighbor is in same grid
         ind_nbor = ind - ishft(1, idim-1)
-        iskip = ncoarse + (ind_nbor-1)*ngridmax
-        icell_nbor = igrid + iskip
+        icell_nbor = ICELL_OF(igrid,ind_nbor)
      else
         ! Neighbor is in adjacent grid (Morton lookup, defrag-safe)
         igrid_nbor = morton_nbor_grid(igrid, ilevel, 2*idim-1)
@@ -1990,8 +1981,7 @@ subroutine fdm_neighbor_cell(igrid, ilevel, ind, idim, inbor, icell_nbor)
            icell_nbor = 0; return
         end if
         ind_nbor = ind + ishft(1, idim-1)
-        iskip = ncoarse + (ind_nbor-1)*ngridmax
-        icell_nbor = igrid_nbor + iskip
+        icell_nbor = ICELL_OF(igrid_nbor,ind_nbor)
      end if
   end if
 
@@ -2055,6 +2045,7 @@ subroutine fdm_kick(ilevel, dt_loc)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::dt_loc
@@ -2070,7 +2061,7 @@ subroutine fdm_kick(ilevel, dt_loc)
   do ind=1,twotondim
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + ncoarse + (ind-1)*ngridmax
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            ! Schrödinger: i*hbar*dpsi/dt = m*Phi*psi
            ! => dpsi/dt = -i*(Phi/hbar)*psi
@@ -2144,11 +2135,12 @@ subroutine fdm_init_psi()
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer::ilevel,igrid,ind,iskip,icell,info,i1,i2,i3
+  integer::ilevel,igrid,ind,icell,info,i1,i2,i3
   integer::ix,iy,iz,nx_loc,ng1,ng2,ng3
   integer(i8b)::N_total,idx
   real(dp)::dx,dxL,scale,dx_loc,rho_cell,theta_cell,amp
@@ -2268,10 +2260,9 @@ subroutine fdm_init_psi()
         if(ndim>2)xc(ind,3)=(dble(iz)-0.5d0)*dx
      end do
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
         do while(igrid > 0)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0)then
               ! Map cell centre onto the levelmin grafic grid
               p1 = xg(igrid,1)+xc(ind,1)-skip_loc(1)
@@ -2340,12 +2331,13 @@ subroutine fdm_init_psi_distributed()
   use poisson_commons
   use fdm_commons
   use iso_c_binding
+#include "amr_index.h"
   implicit none
   include 'mpif.h'
   include 'fftw3-mpi.f03'
 
   integer::ng1,ng2,ng3,nx_loc
-  integer::ilevel,ind,iskip,icell,igrid,info
+  integer::ilevel,ind,icell,igrid,info
   integer::i1,i2,i3,ix,iy,iz,zl
   integer::owner,irank,p
   integer(i8b)::N_total,gidx,locsize,lidx
@@ -2498,10 +2490,9 @@ subroutine fdm_init_psi_distributed()
         if(ndim>2)xc(ind,3)=(dble(iz)-0.5d0)*dx
      end do
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
         do while(igrid > 0)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0)then
               p1 = xg(igrid,1)+xc(ind,1)-skip_loc(1)
               p2 = xg(igrid,2)+xc(ind,2)-skip_loc(2)
@@ -2541,10 +2532,9 @@ subroutine fdm_init_psi_distributed()
         if(ndim>2)xc(ind,3)=(dble(iz)-0.5d0)*dx
      end do
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
         do while(igrid > 0)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0)then
               p1 = xg(igrid,1)+xc(ind,1)-skip_loc(1)
               p2 = xg(igrid,2)+xc(ind,2)-skip_loc(2)
@@ -2936,12 +2926,13 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
   integer,intent(in)::ngrid_new
   integer,dimension(1:nvector),intent(in)::ind_grid_new
 
-  integer::inew,igrid,icell_coarse,ind_child,iskip_child,icell_child
+  integer::inew,igrid,icell_coarse,ind_child,icell_child
   integer::igrid_p,ind_p,ival,idim,icL,icR,ix,iy,iz
   real(dp)::psi_re_c,psi_im_c
   real(dp)::grad_re(3),grad_im(3)
@@ -3034,8 +3025,7 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
 
         sum_rho_child = 0.0d0
         do ind_child=1,twotondim
-           iskip_child = ncoarse + (ind_child-1)*ngridmax
-           icell_child = igrid + iskip_child
+           icell_child = ICELL_OF(igrid,ind_child)
            ix = ibits(ind_child-1, 0, 1)
            iy = ibits(ind_child-1, 1, 1)
            iz = ibits(ind_child-1, 2, 1)
@@ -3080,8 +3070,7 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
 #endif
            if(child_is_wave) renorm = sqrt(max(0.0d0,renorm))
            do ind_child=1,twotondim
-              iskip_child = ncoarse + (ind_child-1)*ngridmax
-              icell_child = igrid + iskip_child
+              icell_child = ICELL_OF(igrid,ind_child)
               psi_re(icell_child) = psi_re(icell_child) * renorm
               if(child_is_wave) psi_im(icell_child) = psi_im(icell_child) * renorm
            end do
@@ -3107,8 +3096,7 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
         end do
 
         do ind_child=1,twotondim
-           iskip_child = ncoarse + (ind_child-1)*ngridmax
-           icell_child = igrid + iskip_child
+           icell_child = ICELL_OF(igrid,ind_child)
            ix = ibits(ind_child-1, 0, 1)
            iy = ibits(ind_child-1, 1, 1)
            iz = ibits(ind_child-1, 2, 1)
@@ -3124,16 +3112,14 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
         rho_parent = psi_re_c**2 + psi_im_c**2
         sum_rho_child = 0.0d0
         do ind_child=1,twotondim
-           iskip_child = ncoarse + (ind_child-1)*ngridmax
-           icell_child = igrid + iskip_child
+           icell_child = ICELL_OF(igrid,ind_child)
            sum_rho_child = sum_rho_child + &
                 psi_re(icell_child)**2 + psi_im(icell_child)**2
         end do
         if(sum_rho_child > 0.0d0) then
            renorm = sqrt(8.0d0 * rho_parent / sum_rho_child)
            do ind_child=1,twotondim
-              iskip_child = ncoarse + (ind_child-1)*ngridmax
-              icell_child = igrid + iskip_child
+              icell_child = ICELL_OF(igrid,ind_child)
               psi_re(icell_child) = psi_re(icell_child) * renorm
               psi_im(icell_child) = psi_im(icell_child) * renorm
            end do
@@ -3162,6 +3148,7 @@ subroutine fdm_hjm_local_cfl(ilevel, dt_cfl)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -3169,7 +3156,7 @@ subroutine fdm_hjm_local_cfl(ilevel, dt_cfl)
   integer,intent(in)::ilevel
   real(dp),intent(out)::dt_cfl
 
-  integer::igrid,ind,iskip,icell,idim,icp,icm,nx_loc,info
+  integer::igrid,ind,icell,idim,icp,icm,nx_loc,info
   real(dp)::dx,scale,dx_loc,inv2dx,rho2
   real(dp)::dre,dim_val,dth,dth2,dth2_loc,dth2_glob
   logical::is_fluid
@@ -3186,10 +3173,9 @@ subroutine fdm_hjm_local_cfl(ilevel, dt_cfl)
 
   dth2_loc = 0.0d0
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
      igrid = headl(myid, ilevel)
      do while(igrid > 0)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            if(is_fluid) then
               rho2 = max(psi_re(icell),0.0d0)
@@ -3242,11 +3228,12 @@ subroutine fdm_restrict(ilevel)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
 
   integer::igrid,ind,i,icell,igrid_child
-  integer::ind_child,iskip_child,icell_child
+  integer::ind_child,icell_child
   real(dp)::sum_re,sum_im,rho_avg,S_avg,S_old,twopi_h,amp2,sfac
   logical::parent_fluid,child_fluid
 
@@ -3263,20 +3250,19 @@ subroutine fdm_restrict(ilevel)
   ! wave child -> fluid parent: rho = <|psi|^2>, S = hbar*atan2(<psi>)
   ! rebased onto the parent's previous unwrapped S by continuity.
 !$omp parallel do collapse(2) &
-!$omp& private(igrid,icell,igrid_child,ind_child,iskip_child,icell_child, &
+!$omp& private(igrid,icell,igrid_child,ind_child,icell_child, &
 !$omp& sum_re,sum_im,rho_avg,S_avg,S_old,amp2,sfac) schedule(static)
   do ind=1,twotondim
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + ncoarse + (ind-1)*ngridmax
+        icell = ICELL_OF(igrid,ind)
         igrid_child = son(icell)
         if(igrid_child > 0) then
            sum_re = 0.0d0
            sum_im = 0.0d0
            rho_avg = 0.0d0
            do ind_child=1,twotondim
-              iskip_child = ncoarse + (ind_child-1)*ngridmax
-              icell_child = igrid_child + iskip_child
+              icell_child = ICELL_OF(igrid_child,ind_child)
               sum_re = sum_re + psi_re(icell_child)
               sum_im = sum_im + psi_im(icell_child)
               if(.not.child_fluid) then
@@ -3325,10 +3311,11 @@ subroutine fdm_refine_flag(ilevel)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,ind,iskip,icell,idim,inbor,icell_nbor
+  integer::igrid,ind,icell,idim,inbor,icell_nbor
   real(dp)::dx,scale,dx_loc,grad2,psi2,lambda_dB
   real(dp)::dpsi_re,dpsi_im
   integer::nx_loc
@@ -3352,10 +3339,9 @@ subroutine fdm_refine_flag(ilevel)
   dx_loc = dx * scale
 
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
      igrid = headl(myid, ilevel)
      do while(igrid > 0)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) > 0) then
            flag1(icell) = 1
         else
@@ -3395,11 +3381,12 @@ subroutine fdm_diagnostics()
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer::ilevel,igrid,ind,iskip,icell,info
+  integer::ilevel,igrid,ind,icell,info
   real(dp)::mass_loc,mass_glob,rho_max_loc,rho_max_glob
   real(dp)::psi2,vol
 
@@ -3411,10 +3398,9 @@ subroutine fdm_diagnostics()
   do ilevel=levelmin,nlevelmax
      vol = (0.5d0**ilevel * boxlen/dble(icoarse_max-icoarse_min+1))**3
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
         do while(igrid > 0)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0) then
               if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
                  psi2 = psi_re(icell)          ! fluid level: psi_re = rho
@@ -3455,13 +3441,14 @@ subroutine fdm_mass_check(label,refine_level)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   character(len=*),intent(in)::label
   integer,intent(in)::refine_level
-  integer::ilevel,igrid,ind,iskip,icell,info
+  integer::ilevel,igrid,ind,icell,info
   real(dp)::mass_loc(levelmin:nlevelmax),mass_glob(levelmin:nlevelmax)
   real(dp)::psi2,vol,total
 
@@ -3470,10 +3457,9 @@ subroutine fdm_mass_check(label,refine_level)
   do ilevel=levelmin,nlevelmax
      vol = (0.5d0**ilevel * boxlen/dble(icoarse_max-icoarse_min+1))**3
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         igrid = headl(myid, ilevel)
         do while(igrid > 0)
-           icell = igrid + iskip
+           icell = ICELL_OF(igrid,ind)
            if(son(icell) == 0) then
               if(fdm_use_hjm .and. ilevel < fdm_first_wave_level) then
                  psi2 = psi_re(icell)          ! fluid level: psi_re = rho

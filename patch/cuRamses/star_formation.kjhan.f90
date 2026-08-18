@@ -9,6 +9,7 @@ subroutine star_formation(ilevel)
   use poisson_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH , twopi
   use random
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -33,7 +34,7 @@ subroutine star_formation(ilevel)
 !  integer ::ncache,nnew,ivar,irad,ngrid,icpu,index_star,ilun
 ! integer ::ncache,nnew,ivar,irad,ngrid,icpu,ilun
   integer(i8b):: index_star
-  integer ::igrid,ix,iy,iz,ind,i,j,n,iskip,istar,inew,nx_loc,ielt
+  integer ::igrid,ix,iy,iz,ind,i,j,n,istar,inew,nx_loc,ielt
   integer ::ntot,intot,jntot,ntot_all,info,nstar_corrected,ideb,ndeb,ncell
   logical ::ok_free,ok_all
   real(dp)::d,x,y,z,u,v,w,e,tg,zg,vdisp,dgas
@@ -288,9 +289,8 @@ subroutine star_formation(ilevel)
 
      ! Loop over cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
         ! Flag cells with at least one new star
         do i=1,ngrid
@@ -429,6 +429,7 @@ end subroutine star_formation
 !################################################################
 subroutine getnbor(ind_cell,ind_father,ncell,ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ncell,ilevel
   integer,dimension(1:nvector)::ind_cell
@@ -459,12 +460,12 @@ subroutine getnbor(ind_cell,ind_father,ncell,ilevel)
   
   ! Get father cell position in the grid
   do i=1,ncell
-     pos(i)=(ind_father(i,0)-ncoarse-1)/ngridmax+1
+     pos(i)=ICHILD_OF(ind_father(i,0))
   end do
   
   ! Get father grid
   do i=1,ncell
-     ind_grid_father(i)=ind_father(i,0)-ncoarse-(pos(i)-1)*ngridmax
+     ind_grid_father(i)=IGRID_OF(ind_father(i,0))
   end do
   
   ! Get neighboring father grids
@@ -552,10 +553,11 @@ subroutine sub1_star_formation(ilevel, igrid,ngrid)
   use poisson_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH , twopi
   use random
+#include "amr_index.h"
   implicit none
   integer:: ilevel, igrid,ngrid
   integer ,dimension(1:nvector)::ind_grid,ind_cell,ind_cell2,nstar
-  integer:: i,ind,iskip,ivar
+  integer:: i,ind,ivar
   real(dp)::d,x,y,z,u,v,w,e,tg,zg,vdisp,dgas
   real(dp)::bx1,bx2,by1,by2,bz1,bz2,A,B,C,emag,beta,fbeta
 
@@ -563,9 +565,8 @@ subroutine sub1_star_formation(ilevel, igrid,ngrid)
      ind_grid(i) = active(ilevel)%igrid(igrid+i-1)
   enddo
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-         ind_cell(i)=iskip+ind_grid(i)
+         ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      do i=1,ngrid
         d=uold(ind_cell(i),1)
@@ -611,6 +612,7 @@ subroutine sub2_star_formation(ilevel, igrid,ngrid,ntot,imstar_lost,imstar_tot)
   use poisson_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH , twopi
   use random
+#include "amr_index.h"
   implicit none
   integer:: ilevel
   real(dp):: imstar_lost,imstar_tot
@@ -624,7 +626,7 @@ subroutine sub2_star_formation(ilevel, igrid,ngrid,ntot,imstar_lost,imstar_tot)
 
   integer ::ncache,nnew,ivar,irad,ngrid,icpu,ilun
 !  integer :: index_star
-  integer ::igrid,ix,iy,iz,ind,i,j,n,iskip,istar,inew,nx_loc,ielt
+  integer ::igrid,ix,iy,iz,ind,i,j,n,istar,inew,nx_loc,ielt
   integer ::ntot,ntot_all,info,nstar_corrected,ideb,ndeb,ncell
   logical ::ok_free,ok_all
   real(dp)::d,x,y,z,u,v,w,e,tg,zg,vdisp,dgas
@@ -660,13 +662,12 @@ subroutine sub2_star_formation(ilevel, igrid,ngrid,ntot,imstar_lost,imstar_tot)
      ind_grid(i) = active(ilevel)%igrid(igrid+i-1)
   enddo
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      ! Oct sub-cell indices for cell_seed
      iiz=(ind-1)/4
      iiy=(ind-1-4*iiz)/2
      iix=(ind-1-2*iiy-4*iiz)
      do i=1,ngrid
-         ind_cell(i)=iskip+ind_grid(i)
+         ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      ! Flag leaf cells
      do i=1,ngrid
@@ -973,10 +974,11 @@ subroutine sub3_star_formation(ilevel, igrid,ngrid)
   use poisson_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH , twopi
   use random
+#include "amr_index.h"
   implicit none
   integer:: ilevel, igrid,ngrid
   integer ,dimension(1:nvector)::ind_grid,ind_cell,ind_cell2,nstar
-  integer:: i,ind,iskip,ivar
+  integer:: i,ind,ivar
   real(dp)::d,x,y,z,u,v,w,e,tg,zg,vdisp,dgas
   real(dp)::bx1,bx2,by1,by2,bz1,bz2,A,B,C,emag,beta,fbeta
 
@@ -984,9 +986,8 @@ subroutine sub3_star_formation(ilevel, igrid,ngrid)
      ind_grid(i) = active(ilevel)%igrid(igrid+i-1)
   enddo
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-         ind_cell(i)=iskip+ind_grid(i)
+         ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      do i=1,ngrid
 

@@ -316,6 +316,7 @@ end subroutine clump_finder
 subroutine count_test_particle(xx,ilevel,nskip,action)
   use amr_commons
   use clfind_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -332,7 +333,7 @@ subroutine count_test_particle(xx,ilevel,nskip,action)
   !----------------------------------------------------------------------
 
   integer ::ncache,ngrid
-  integer ::igrid,ind,i,iskip
+  integer ::igrid,ind,i
   integer ,dimension(1:nvector)::ind_grid,ind_cell
   logical ,dimension(1:nvector)::ok
 
@@ -353,9 +354,8 @@ subroutine count_test_particle(xx,ilevel,nskip,action)
      end do
      ! loop over cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         !checks
@@ -537,6 +537,7 @@ end subroutine saddlepoint_search
 subroutine neighborsearch(xx,ind_cell,ind_max,np,count,ilevel,action)
   use amr_commons
   use clfind_commons,ONLY:ipeak_start
+#include "amr_index.h"
   implicit none
   integer::np,count,ilevel,action
   integer,dimension(1:nvector)::ind_max,ind_cell
@@ -608,8 +609,8 @@ subroutine neighborsearch(xx,ind_cell,ind_max,np,count,ilevel,action)
   
   ! some preliminary action...
   do j=1,np
-     indv(j)=(ind_cell(j)-ncoarse-1)/ngridmax+1 ! cell position in grid
-     ind_grid(j)=ind_cell(j)-ncoarse-(indv(j)-1)*ngridmax ! grid index
+     indv(j)=ICHILD_OF(ind_cell(j)) ! cell position in grid
+     ind_grid(j)=IGRID_OF(ind_cell(j)) ! grid index
      density_max(j)=xx(ind_cell(j))*1.0001 ! get cell density (1.0001 probably not necessary)
      ind_max(j)=ind_cell(j) !save cell index   
      if (action.ge.4)clump_nr(j)=flag2(ind_cell(j)) ! save clump number
@@ -799,6 +800,7 @@ end subroutine saddlecheck
 !#########################################################################
 subroutine get_cell_index(cell_index,cell_levl,xpart,ilevel,n)
   use amr_commons
+#include "amr_index.h"
   implicit none
 
   integer::n,ilevel
@@ -811,7 +813,7 @@ subroutine get_cell_index(cell_index,cell_levl,xpart,ilevel,n)
   !----------------------------------------------------------------------------
 
   real(dp)::xx,yy,zz
-  integer::i,j,ii,jj,kk,ind,iskip,igrid,ind_cell,igrid0
+  integer::i,j,ii,jj,kk,ind,igrid,ind_cell,igrid0
 
   if ((nx.eq.1).and.(ny.eq.1).and.(nz.eq.1)) then
   else if ((nx.eq.3).and.(ny.eq.3).and.(nz.eq.3)) then
@@ -841,8 +843,7 @@ subroutine get_cell_index(cell_index,cell_levl,xpart,ilevel,n)
         if(yy<xg(igrid,2))jj=0
         if(zz<xg(igrid,3))kk=0
         ind=1+ii+2*jj+4*kk
-        iskip=ncoarse+(ind-1)*ngridmax
-        ind_cell=iskip+igrid
+        ind_cell=ICELL_OF(igrid,ind)
         igrid=son(ind_cell)
         if(igrid==0.or.j==ilevel)exit
      end do
@@ -926,6 +927,7 @@ subroutine get_cell_index_fast(indp,cell_lev,xpart,ind_grid,nbors_father_cells,n
   use amr_commons
   use pm_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel,ind_grid
   integer,dimension(1:99)::indp,cell_lev
@@ -1049,7 +1051,7 @@ subroutine get_cell_index_fast(indp,cell_lev,xpart,ind_grid,nbors_father_cells,n
   ! Compute parent cell adress
   do j=1,np
      if(ok(j))then
-        indp(j)=ncoarse+(icell(j)-1)*ngridmax+igrid(j)
+        indp(j)=ICELL_OF(igrid(j),icell(j))
      end if
   end do
 
@@ -1063,7 +1065,7 @@ subroutine get_cell_index_fast(indp,cell_lev,xpart,ind_grid,nbors_father_cells,n
               icd_fine(1,idim)=int(2*(x(j,idim)-int(x(j,idim))))
            end do
            call geticell99(icell_fine,icd_fine,1)
-           indp(j)=ncoarse+(icell_fine(1)-1)*ngridmax+son(indp(j))
+           indp(j)=ICELL_OF(son(indp(j)),icell_fine(1))
         end if
      endif
   end do
@@ -1114,6 +1116,7 @@ subroutine rho_only(ilevel)
   use pm_commons
   use hydro_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1125,7 +1128,7 @@ subroutine rho_only(ilevel)
   ! level ilevel contribute also to the level density field
   ! (boundary particles) using buffer grids.
   !------------------------------------------------------------------
-  integer::iskip,icpu,ind,i,info,nx_loc,ibound,idim
+  integer::icpu,ind,i,info,nx_loc,ibound,idim
   real(dp)::dx,scale,dx_loc
 
   if(.not. poisson)return
@@ -1168,9 +1171,8 @@ subroutine rho_only(ilevel)
   !-------------------------------------------------------
   do icpu=1,ncpu
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,reception(icpu,ilevel)%ngrid
-           rho(reception(icpu,ilevel)%igrid(i)+iskip)=0.0D0
+           rho(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
         end do
      end do
   end do
@@ -1191,9 +1193,8 @@ subroutine rho_only(ilevel)
   !----------------------------------------------------
   do ibound=1,nboundary
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,boundary(ibound,ilevel)%ngrid
-           rho(boundary(ibound,ilevel)%igrid(i)+iskip)=0.0
+           rho(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0.0
         end do
      end do
   end do
@@ -1357,6 +1358,7 @@ subroutine cic_only(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
   use amr_commons
   use pm_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer ,dimension(1:nvector)::ind_cell,ind_grid_part,ind_part
@@ -1589,7 +1591,7 @@ subroutine cic_only(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
   do ind=1,twotondim
 !$omp parallel do private(j)
      do j=1,np
-        indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+        indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
      end do
 !$omp end parallel do 
   end do
@@ -1625,6 +1627,7 @@ subroutine tsc_only(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
   use amr_commons
   use pm_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer ,dimension(1:nvector)::ind_cell,ind_grid_part,ind_part
@@ -1873,7 +1876,7 @@ subroutine tsc_only(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
   do ind=1,threetondim
      do j=1,np
         if(.not.abandoned(j)) then
-           indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+           indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
         end if
      end do
   end do
@@ -1902,7 +1905,7 @@ subroutine tsc_only(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
 !$omp parallel do private (j)
      do j=1,np
         if(.not.abandoned(j)) then
-           indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+           indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
            ok(j)=igrid(j,ind)>0
            vol2(j)=mmm(j)*vol(j,ind)/vol_loc
            if(ok(j)) then
@@ -1919,8 +1922,8 @@ subroutine tsc_only(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
 
 #endif
 end subroutine tsc_only
-!###########################################################
-!###########################################################
-!###########################################################
-!###########################################################
 
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################

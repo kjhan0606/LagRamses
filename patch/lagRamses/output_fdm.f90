@@ -1,6 +1,7 @@
 subroutine backup_psi(filename)
   use amr_commons
   use poisson_commons, only: psi_re, psi_im
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -8,7 +9,7 @@ subroutine backup_psi(filename)
 
   character(LEN=80)::filename
 
-  integer::i,ncache,ind,ilevel,igrid,iskip,ilun,istart,ibound
+  integer::i,ncache,ind,ilevel,igrid,ilun,istart,ibound
   integer,allocatable,dimension(:)::ind_grid
   real(dp),allocatable,dimension(:)::xdp
   character(LEN=5)::nchar
@@ -60,15 +61,14 @@ subroutine backup_psi(filename)
            end do
            ! Loop over cells
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               ! Write Re(psi)
               do i=1,ncache
-                 xdp(i)=psi_re(ind_grid(i)+iskip)
+                 xdp(i)=psi_re(ICELL_OF(ind_grid(i),ind))
               end do
               write(ilun)xdp
               ! Write Im(psi)
               do i=1,ncache
-                 xdp(i)=psi_im(ind_grid(i)+iskip)
+                 xdp(i)=psi_im(ICELL_OF(ind_grid(i),ind))
               end do
               write(ilun)xdp
            end do
@@ -102,11 +102,12 @@ subroutine restore_psi
   !--------------------------------------------------------------
   use amr_commons
   use poisson_commons, only: psi_re, psi_im
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer::ncache,iskip,igrid,i,ilevel,ind,ilun,ibound,istart,info
+  integer::ncache,igrid,i,ilevel,ind,ilun,ibound,istart,info
   integer::ncpu2,ndim2,nlevelmax2,nboundary2,ilevel2,numbl2
   integer,dimension(:),allocatable::ind_grid
   real(dp),dimension(:),allocatable::xx
@@ -172,16 +173,15 @@ subroutine restore_psi
            end do
            ! Loop over cells
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               ! Read Re(psi)
               read(ilun)xx
               do i=1,ncache
-                 psi_re(ind_grid(i)+iskip)=xx(i)
+                 psi_re(ICELL_OF(ind_grid(i),ind))=xx(i)
               end do
               ! Read Im(psi)
               read(ilun)xx
               do i=1,ncache
-                 psi_im(ind_grid(i)+iskip)=xx(i)
+                 psi_im(ICELL_OF(ind_grid(i),ind))=xx(i)
               end do
            end do
            deallocate(ind_grid,xx)
@@ -217,6 +217,7 @@ subroutine restore_psi_binary_varcpu
   use ksection
   use morton_keys
   use morton_hash
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -403,7 +404,7 @@ subroutine restore_psi_binary_varcpu
            nrecv_total = nrecv_total + 1
 
            do iskip = 1, twotondim
-              icell = igrid + ncoarse + (iskip-1)*ngridmax
+              icell = ICELL_OF(igrid,iskip)
               base = ndim + (iskip-1)*2
               psi_re(icell) = recvbuf_2d(base + 1, i)
               psi_im(icell) = recvbuf_2d(base + 2, i)
@@ -441,6 +442,7 @@ subroutine restore_psi_postlb
   use ksection
   use morton_keys
   use morton_hash
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -769,7 +771,7 @@ subroutine restore_psi_postlb
         end if
         nrecv_total = nrecv_total + 1
         do iskip = 1, twotondim
-           icell = igrid + ncoarse + (iskip-1)*ngridmax
+           icell = ICELL_OF(igrid,iskip)
            base = ndim + (iskip-1)*2
            psi_re(icell) = recvbuf_2d(base + 1, i)
            psi_im(icell) = recvbuf_2d(base + 2, i)
@@ -825,7 +827,7 @@ subroutine restore_psi_postlb
            if(igrid <= 0 .or. igrid > ngridmax) cycle
            nrepair_matched = nrepair_matched + 1
            do iskip = 1, twotondim
-              icell = igrid + ncoarse + (iskip-1)*ngridmax
+              icell = ICELL_OF(igrid,iskip)
               base = ndim + (iskip-1)*2
               psi_re(icell) = repair_all(base + 1, i)
               psi_im(icell) = repair_all(base + 2, i)

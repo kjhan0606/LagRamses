@@ -8,6 +8,7 @@ subroutine init_part
 #ifdef RT
   use rt_parameters,only: convert_birth_times
 #endif
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -18,7 +19,7 @@ subroutine init_part
   !------------------------------------------------------------
   integer::npart2,ndim2,ncpu2
   integer::ipart,jpart,ipart_old,ilevel,idim
-  integer::i,igrid,ncache,ngrid,iskip,isink
+  integer::i,igrid,ncache,ngrid,isink
   integer::ind,ix,iy,iz,ilun,info,icpu,nx_loc
   integer::i1,i2,i3,i1_min,i1_max,i2_min,i2_max,i3_min,i3_max
   integer(kind=8)::byte_pos,hdr_bytes,plane_bytes
@@ -429,9 +430,8 @@ subroutine init_part
               
               ! Loop over cells
               do ind=1,twotondim
-                 iskip=ncoarse+(ind-1)*ngridmax
                  do i=1,ngrid
-                    ind_cell(i)=iskip+ind_grid(i)
+                    ind_cell(i)=ICELL_OF(ind_grid(i),ind)
                  end do
                  do i=1,ngrid
                     xx1=xg(ind_grid(i),1)+xc(ind,1)
@@ -635,9 +635,8 @@ subroutine init_part
                           ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
                        end do
                        do ind=1,twotondim
-                          iskip=ncoarse+(ind-1)*ngridmax
                           do i=1,ngrid
-                             ind_cell(i)=iskip+ind_grid(i)
+                             ind_cell(i)=ICELL_OF(ind_grid(i),ind)
                           end do
                           do i=1,ngrid
                              xx1=xg(ind_grid(i),1)+xc(ind,1)
@@ -786,9 +785,8 @@ subroutine init_part
                          ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
                       end do
                       do ind=1,twotondim
-                         iskip=ncoarse+(ind-1)*ngridmax
                          do i=1,ngrid
-                            ind_cell(i)=iskip+ind_grid(i)
+                            ind_cell(i)=ICELL_OF(ind_grid(i),ind)
                          end do
                          do i=1,ngrid
                             xx1=xg(ind_grid(i),1)+xc(ind,1)

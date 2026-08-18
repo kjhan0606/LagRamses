@@ -3,6 +3,7 @@ subroutine compute_clump_properties(xx)
   use hydro_commons, ONLY:uold
   use clfind_commons
   use poisson_commons, ONLY:phi,f
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -88,8 +89,8 @@ subroutine compute_clump_properties(xx)
         call get_local_peak_id(global_peak_id,peak_nr)
         
         ! Cell coordinates
-        ind=(icellp(ipart)-ncoarse-1)/ngridmax+1 ! cell position
-        grid=icellp(ipart)-ncoarse-(ind-1)*ngridmax ! grid index
+        ind=ICHILD_OF(icellp(ipart)) ! cell position
+        grid=IGRID_OF(icellp(ipart)) ! grid index
         dx=0.5D0**levp(ipart)
         xcell(1:ndim)=(xg(grid,1:ndim)+xc(ind,1:ndim)*dx-skip_loc(1:ndim))*scale
         
@@ -139,8 +140,8 @@ subroutine compute_clump_properties(xx)
   !--------------------------------------------------------------------------
   do ipeak=1,npeaks
      ! Peak cell coordinates
-     ind=(peak_cell(ipeak)-ncoarse-1)/ngridmax+1    ! cell position
-     grid=peak_cell(ipeak)-ncoarse-(ind-1)*ngridmax ! grid index
+     ind=ICHILD_OF(peak_cell(ipeak))    ! cell position
+     grid=IGRID_OF(peak_cell(ipeak)) ! grid index
      plevel=peak_cell_level(ipeak)
      dx=0.5D0**plevel
      xcell(1:ndim)=(xg(grid,1:ndim)+xc(ind,1:ndim)*dx-skip_loc(1:ndim))*scale
@@ -206,8 +207,8 @@ subroutine compute_clump_properties(xx)
            call get_local_peak_id(global_peak_id,peak_nr)
            
            ! Cell coordinates
-           ind=(icellp(ipart)-ncoarse-1)/ngridmax+1 ! cell position
-           grid=icellp(ipart)-ncoarse-(ind-1)*ngridmax ! grid index
+           ind=ICHILD_OF(icellp(ipart)) ! cell position
+           grid=IGRID_OF(icellp(ipart)) ! grid index
            dx=0.5D0**levp(ipart)
            xcell(1:ndim)=(xg(grid,1:ndim)+xc(ind,1:ndim)*dx-skip_loc(1:ndim))*scale
 
@@ -1313,8 +1314,8 @@ subroutine write_clump_map
      peak_nr=flag2(icellp(ipart)) 
      if (peak_nr /=0 ) then
         ! Cell coordinates
-        ind=(icellp(ipart)-ncoarse-1)/ngridmax+1 ! cell position
-        grid=icellp(ipart)-ncoarse-(ind-1)*ngridmax ! grid index
+        ind=ICHILD_OF(icellp(ipart)) ! cell position
+        grid=IGRID_OF(icellp(ipart)) ! grid index
         dx=0.5D0**levp(ipart)
         xcell(1:ndim)=(xg(grid,1:ndim)+xc(ind,1:ndim)*dx-skip_loc(1:ndim))*scale
         !peak_map

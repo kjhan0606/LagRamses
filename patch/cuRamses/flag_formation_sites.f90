@@ -196,7 +196,7 @@ subroutine compute_clump_properties_round2(xx)
   use rt_hydro_commons, only:rtuold
   use rt_cooling_module, only:kappaAbs,kappaSc
 #endif
-
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -310,8 +310,8 @@ subroutine compute_clump_properties_round2(xx)
         call get_local_peak_id(global_peak_id,peak_nr)
         
         ! Cell coordinates
-        ind=(icellp(ipart)-ncoarse-1)/ngridmax+1 ! cell position
-        grid=icellp(ipart)-ncoarse-(ind-1)*ngridmax ! grid index
+        ind=ICHILD_OF(icellp(ipart)) ! cell position
+        grid=IGRID_OF(icellp(ipart)) ! grid index
         dx=0.5D0**levp(ipart)
         xcell(1:ndim)=(xg(grid,1:ndim)+xc(ind,1:ndim)*dx-skip_loc(1:ndim))*scale
 
@@ -506,6 +506,7 @@ subroutine trim_clumps
   use amr_commons
   use clfind_commons
   use pm_commons, only:ir_cloud
+#include "amr_index.h"
   implicit none
 
   !---------------------------------------------------------------------------
@@ -563,8 +564,8 @@ subroutine trim_clumps
      glob_peak_nr=flag2(icellp(ipart))
      if (glob_peak_nr /=0 ) then
         call get_local_peak_id(glob_peak_nr,peak_nr)
-        ind=(icellp(ipart)-ncoarse-1)/ngridmax+1 ! cell position
-        grid=icellp(ipart)-ncoarse-(ind-1)*ngridmax ! grid index
+        ind=ICHILD_OF(icellp(ipart)) ! cell position
+        grid=IGRID_OF(icellp(ipart)) ! grid index
         dx=0.5D0**levp(ipart)
         xcell(1:ndim)=(xg(grid,1:ndim)+xc(ind,1:ndim)*dx-skip_loc(1:ndim))*scale
         rrel=xcell(1:ndim)-peak_pos(peak_nr,1:ndim)
@@ -727,6 +728,7 @@ subroutine surface_int_np(ind_cell,np,ilevel)
   use amr_commons
   use clfind_commons, ONLY: center_of_mass,Psurf,MagPsurf,MagTsurf
   use hydro_commons, ONLY: uold,gamma,nvar,nener,inener,smallr
+#include "amr_index.h"
   implicit none
   integer::np,ilevel
   integer,dimension(1:nvector)::ind_grid,ind_cell
@@ -793,8 +795,8 @@ subroutine surface_int_np(ind_cell,np,ilevel)
 
   ! some preliminary action...
   do j=1,np
-     indv(j)=(ind_cell(j)-ncoarse-1)/ngridmax+1           ! cell position in grid
-     ind_grid(j)=ind_cell(j)-ncoarse-(indv(j)-1)*ngridmax ! grid index
+     indv(j)=ICHILD_OF(ind_cell(j))           ! cell position in grid
+     ind_grid(j)=IGRID_OF(ind_cell(j)) ! grid index
      clump_nr(j)=flag2(ind_cell(j))                       ! save clump number
 
      ! compute pressure in cell
@@ -1096,4 +1098,3 @@ subroutine surface_int_np(ind_cell,np,ilevel)
 #endif
      
 end subroutine surface_int_np
-

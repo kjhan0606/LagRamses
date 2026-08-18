@@ -18,11 +18,12 @@ subroutine fdm_hjm_step(ilevel, dt_loc)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::dt_loc
 
-  integer::igrid,ind,iskip,icell,i
+  integer::igrid,ind,icell,i
   real(dp)::dx,scale,dx_loc
   integer::nx_loc
   integer::idim,icL,icR
@@ -58,11 +59,10 @@ subroutine fdm_hjm_step(ilevel, dt_loc)
   ! Sync rho ghosts first so the QP Laplacian reads post-RK neighbour amplitudes.
   if(fdm_hjm_qp) call make_virtual_fine_dp(psi_re(1), ilevel)
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell,idim,icL,icR,sqrho_c,sqrho_L,sqrho_R,d2,sum_d2,c1_cell,qp) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            psi_im(icell) = psi_im(icell) - phi(icell) * dt_loc
            if(fdm_hjm_qp) then
@@ -119,6 +119,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
 #if defined(FDMDEBUG) && !defined(WITHOUTMPI)
   include 'mpif.h'
@@ -127,7 +128,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   real(dp),intent(in)::dx_loc,dt_loc
 
   real(dp),allocatable,dimension(:)::rho_n,S_n,drho,dS_arr
-  integer::igrid,ind,iskip,icell,i
+  integer::igrid,ind,icell,i
   integer::ntot,nclip_loc,nclip_glob,info
   real(dp)::rho1,S1,inv_a2,dx_inv,dx2_inv,hbar2_over_2
   real(dp)::clip_added_loc,clip_added_glob
@@ -145,11 +146,10 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
 
   ! Save u^n
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            rho_n(icell) = psi_re(icell)
            S_n(icell)   = psi_im(icell)
@@ -163,11 +163,10 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   nclip_loc = 0
   clip_added_loc = 0.0d0
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell) reduction(+:nclip_loc,clip_added_loc) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            psi_re(icell) = rho_n(icell) + dt_loc * drho(icell)
            psi_im(icell) = S_n(icell)   + dt_loc * dS_arr(icell)
@@ -201,12 +200,11 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   nclip_loc = 0
   clip_added_loc = 0.0d0
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell,rho1,S1) &
 !$omp reduction(+:nclip_loc,clip_added_loc) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            rho1 = psi_re(icell)
            S1   = psi_im(icell)
@@ -244,12 +242,11 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   nclip_loc = 0
   clip_added_loc = 0.0d0
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell,rho1,S1) &
 !$omp reduction(+:nclip_loc,clip_added_loc) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            rho1 = psi_re(icell)
            S1   = psi_im(icell)
@@ -298,12 +295,13 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::dx_inv,dx2_inv,inv_a2,hbar2_over_2
   real(dp),dimension(*),intent(out)::drho,dS_arr
 
-  integer::igrid,ind,iskip,icell,idim,i
+  integer::igrid,ind,icell,idim,i
   integer::icL,icR
   real(dp)::rho_c,S_c
   real(dp)::rho_L,rho_R,S_L,S_R
@@ -313,12 +311,11 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
   real(dp)::dS_bk,dS_fw
 
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell,idim,icL,icR,rho_c,S_c,rho_L,rho_R,S_L,S_R, &
 !$omp                     vel_L,vel_R,flux_L,flux_R,grad2S,dS_bk,dS_fw) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         if(son(icell) == 0) then
            rho_c = psi_re(icell)
            S_c   = psi_im(icell)
@@ -399,18 +396,18 @@ subroutine fdm_psi_to_rhoS(ilevel)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,ind,iskip,icell,i
+  integer::igrid,ind,icell,i
   real(dp)::re_val,im_val
 
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell,re_val,im_val) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         re_val = psi_re(icell)
         im_val = psi_im(icell)
         psi_re(icell) = re_val**2 + im_val**2          ! rho = |psi|^2
@@ -431,18 +428,18 @@ subroutine fdm_rhoS_to_psi(ilevel)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,ind,iskip,icell,i
+  integer::igrid,ind,icell,i
   real(dp)::rho_val,S_val,amp,theta
 
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell,rho_val,S_val,amp,theta) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         rho_val = psi_re(icell)
         S_val   = psi_im(icell)
         amp   = sqrt(max(rho_val, 0.0d0))
@@ -485,10 +482,11 @@ subroutine fdm_madelung_refine_flag(ilevel)
   use amr_commons
   use poisson_commons
   use fdm_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,ind,iskip,icell,idim,icL,icR,i
+  integer::igrid,ind,icell,idim,icL,icR,i
   integer::nflag_loc,nflag_cq_loc,nflag_cs_loc,nflag_tot,info
   integer::nflag_cq_tot,nflag_cs_tot
   integer::nx_loc
@@ -532,13 +530,12 @@ subroutine fdm_madelung_refine_flag(ilevel)
 
   ! Fluid levels store (rho, S) directly: psi_re=rho, psi_im=S (unwrapped)
   do ind=1,twotondim
-     iskip = ncoarse + (ind-1)*ngridmax
 !$omp parallel do private(i,igrid,icell,idim,icL,icR,rho_c,sqrho_c,S_c,sqrho_L,sqrho_R, &
 !$omp                     S_L,S_R,lap_sq,d2S,d2S_min,CQ) &
 !$omp             reduction(+:nflag_loc,nflag_cq_loc,nflag_cs_loc) schedule(static)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
-        icell = igrid + iskip
+        icell = ICELL_OF(igrid,ind)
         rho_c = max(psi_re(icell),0.0d0)
         sqrho_c = sqrt(rho_c)
 

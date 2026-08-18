@@ -108,6 +108,7 @@ subroutine kjhan_make_sink(ilevel)
   use hydro_commons
   use poisson_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH, twopi
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -123,7 +124,7 @@ subroutine kjhan_make_sink(ilevel)
   ! local constants
   real(dp),dimension(1:twotondim,1:3)::xc
   integer ::ncache,nnew,mnew,ivar,ngrid,icpu,index_sink,index_sink_tot,icloud
-  integer ::igrid,ix,iy,iz,ind,i,j,n,iskip,isink,inew,nx_loc
+  integer ::igrid,ix,iy,iz,ind,i,j,n,isink,inew,nx_loc
   integer ::ii,jj,kk,ind_cloud,ncloud
   integer ::ntot,ntot_all,info,ilun,ntot_tmp,izero_myid,ninc,ntot_myid
   integer ::npack,npack_int,ip_buf,idim2
@@ -267,16 +268,15 @@ subroutine kjhan_make_sink(ilevel)
   ! Convert hydro variables to primitive variables
   !------------------------------------------------
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,iskip,ind,i,d,u,v,w,e,bx1,by1,bz1,bx2,by2,bz2)
+!$omp parallel do private(igrid,ngrid,ind,i,d,u,v,w,e,bx1,by1,bz1,bx2,by2,bz2)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
         ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
      end do
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
         do i=1,ngrid
            d=uold(ind_cell(i),1)
@@ -323,7 +323,7 @@ subroutine kjhan_make_sink(ilevel)
   ntot=0
   ! Loop over grids
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind,iskip, d, star_ratio, temp, d_jeans, d_thres, x,y,z,isink, dxx, dr_sink, dyy, dzz ) reduction(+: ntot) schedule(static)
+!$omp parallel do private(igrid,ngrid,i,ind, d, star_ratio, temp, d_jeans, d_thres, x,y,z,isink, dxx, dr_sink, dyy, dzz ) reduction(+: ntot) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -331,9 +331,8 @@ subroutine kjhan_make_sink(ilevel)
      end do
      ! Density threshold crossed ---> logical array ok(i)
      do ind=1,twotondim
-       iskip=ncoarse+(ind-1)*ngridmax
        do i=1,ngrid
-          ind_cell(i)=iskip+ind_grid(i)
+          ind_cell(i)=ICELL_OF(ind_grid(i),ind)
        end do
        ! Flag leaf cells
        do i=1,ngrid
@@ -450,7 +449,7 @@ subroutine kjhan_make_sink(ilevel)
 #endif
   ! Loop over grids
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind,iskip) firstprivate(ninc) schedule(static)
+!$omp parallel do private(igrid,ngrid,i,ind) firstprivate(ninc) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -458,9 +457,8 @@ subroutine kjhan_make_sink(ilevel)
      end do
      ! Loop over cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
    ! Gather cells with a new sink
         do i=1,ngrid
@@ -639,9 +637,8 @@ subroutine kjhan_make_sink(ilevel)
      end do
      ! Loop over cells
      do ind=1,twotondim
-       iskip=ncoarse+(ind-1)*ngridmax
        do i=1,ngrid
-          ind_cell(i)=iskip+ind_grid(i)
+          ind_cell(i)=ICELL_OF(ind_grid(i),ind)
        end do
 
    ! Gather cells with a new sink
@@ -727,7 +724,7 @@ subroutine kjhan_make_sink(ilevel)
 #else
   iokthread=0
   nnew = 0
-!$omp parallel do private(igrid,ngrid,ind,iskip,i) reduction(+:nnew) schedule(static)
+!$omp parallel do private(igrid,ngrid,ind,i) reduction(+:nnew) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -735,9 +732,8 @@ subroutine kjhan_make_sink(ilevel)
      end do
      ! Loop over cells
      do ind=1,twotondim
-       iskip=ncoarse+(ind-1)*ngridmax
        do i=1,ngrid
-          ind_cell(i)=iskip+ind_grid(i)
+          ind_cell(i)=ICELL_OF(ind_grid(i),ind)
        end do
 
    ! Gather cells with a new sink
@@ -769,7 +765,7 @@ subroutine kjhan_make_sink(ilevel)
 
   nnew = 0
   if(mnew .ge. 1) then
-!$omp parallel do private(igrid,ngrid,ind,iskip,i) firstprivate(nnew) schedule(static)
+!$omp parallel do private(igrid,ngrid,ind,i) firstprivate(nnew) schedule(static)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
@@ -777,9 +773,8 @@ subroutine kjhan_make_sink(ilevel)
         end do
         ! Loop over cells
         do ind=1,twotondim
-          iskip=ncoarse+(ind-1)*ngridmax
           do i=1,ngrid
-             ind_cell(i)=iskip+ind_grid(i)
+             ind_cell(i)=ICELL_OF(ind_grid(i),ind)
           end do
 
       ! Gather cells with a new sink
@@ -807,7 +802,7 @@ subroutine kjhan_make_sink(ilevel)
 
   if(mnew .ge.1) then
 
-!$omp parallel private(igrid,ngrid,ind,iskip,i, nnew,d,u,v,w,e,x,y,z,&
+!$omp parallel private(igrid,ngrid,ind,i, nnew,d,u,v,w,e,x,y,z,&
 !$omp                  temp,d_jeans,d_thres, ind_cloud) &
 !$omp          firstprivate(index_sink,index_sink_tot)
       nnew = iokthread(mythread)
@@ -891,7 +886,7 @@ subroutine kjhan_make_sink(ilevel)
   ! Convert hydro variables back to conservative variables
   !---------------------------------------------------------
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid, ngrid, i, ind, iskip, d,u,v,w,e,&
+!$omp parallel do private(igrid, ngrid, i, ind, d,u,v,w,e,&
 !$omp                     bx1,by1,bz1,bx2,by2, bz2) schedule(dynamic)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
@@ -899,9 +894,8 @@ subroutine kjhan_make_sink(ilevel)
        ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
      end do
      do ind=1,twotondim
-       iskip=ncoarse+(ind-1)*ngridmax
        do i=1,ngrid
-          ind_cell(i)=iskip+ind_grid(i)
+          ind_cell(i)=ICELL_OF(ind_grid(i),ind)
        end do
        do i=1,ngrid
           d=uold(ind_cell(i),1)
@@ -2810,6 +2804,7 @@ subroutine kjhan_bondi_velocity(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use pm_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -2957,7 +2952,7 @@ subroutine kjhan_bondi_velocity(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! Compute parent cell adress
   do j=1,np
      if(ok(j))then
-       indp(j)=ncoarse+(icell(j)-1)*ngridmax+igrid(j)
+       indp(j)=ICELL_OF(igrid(j),icell(j))
      end if
   end do
 
@@ -3007,6 +3002,7 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use pm_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH
+#include "amr_index.h"
   implicit none
   integer, intent(in)::ng,np,ilevel
   integer,dimension(1:nvector), intent(in)::ind_grid
@@ -3234,7 +3230,7 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   do ind=1,twotondim
      do j=1,np
        if(ok(j))then
-         indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+         indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
        else
          indp(j,ind)=nbors_father_cells(ind_grid_part(j),icell(j,ind))
        end if
@@ -3338,6 +3334,7 @@ subroutine grow_bondi(ilevel)
   use amr_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH, twopi
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -3355,7 +3352,7 @@ subroutine grow_bondi(ilevel)
   integer,dimension(1:nvector)::ind_grid,ind_part,ind_grid_part
   real(dp)::r2,density,volume
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
-  integer::ind,ivar,iskip
+  integer::ind,ivar
   real(dp)::alpha,d_star,pi,factG,c2mean,nfloor,sigmav2,v2mean
   real(dp)::ZZ1,ZZ2,r_lso,epsilon_r,onethird
   real(dp),dimension(1:3)::xdum,vdum,jdum
@@ -3391,12 +3388,11 @@ subroutine grow_bondi(ilevel)
 
   ! Set unew to uold for myid cells
   ! Need unew to get initial density before Bondi accreting mass
-  !$omp parallel do private(ind,iskip,ivar,i)
+  !$omp parallel do private(ind,ivar,i)
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do ivar=1,nvar
         do i=1,active(ilevel)%ngrid
-           unew(active(ilevel)%igrid(i)+iskip,ivar) = uold(active(ilevel)%igrid(i)+iskip,ivar)
+           unew(ICELL_OF(active(ilevel)%igrid(i),ind),ivar) = uold(ICELL_OF(active(ilevel)%igrid(i),ind),ivar)
         enddo
      enddo
   enddo
@@ -3597,6 +3593,7 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use pm_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH, twopi
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -3798,7 +3795,7 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! Compute parent cell adress
   do j=1,np
      if(ok(j))then
-        indp(j)=ncoarse+(icell(j)-1)*ngridmax+igrid(j)
+        indp(j)=ICELL_OF(igrid(j),icell(j))
      end if
   end do
 
@@ -4162,6 +4159,7 @@ subroutine kjhan_accrete_jeans(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use pm_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH, twopi
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -4342,7 +4340,7 @@ subroutine kjhan_accrete_jeans(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! Compute parent cell adress
   do j=1,np
      if(ok(j))then
-   indp(j)=ncoarse+(icell(j)-1)*ngridmax+igrid(j)
+   indp(j)=ICELL_OF(igrid(j),icell(j))
      end if
   end do
 
@@ -4435,6 +4433,7 @@ subroutine kjhan_jet_AGN(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use amr_commons
   use pm_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -4591,7 +4590,7 @@ subroutine kjhan_jet_AGN(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! Compute parent cell adress
   do j=1,np
      if(ok(j))then
-        indp(j)=ncoarse+(icell(j)-1)*ngridmax+igrid(j)
+        indp(j)=ICELL_OF(igrid(j),icell(j))
      end if
   end do
 
@@ -4647,6 +4646,7 @@ subroutine kjhan_get_rho_star(ilevel)
   use hydro_commons
   use poisson_commons
   use cooling_module
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !------------------------------------------------------------------
@@ -4657,7 +4657,7 @@ subroutine kjhan_get_rho_star(ilevel)
   ! Array rho_star is stored with:
   ! - rho_star containing the poisson source term fo stars
   !------------------------------------------------------------------
-  integer::iskip,icpu,ind,i,info,nx_loc,ibound,idim
+  integer::icpu,ind,i,info,nx_loc,ibound,idim
   real(dp)::dx,d_scale,scale,dx_loc
   real(dp)::dx_min,vol_min
   real(kind=8)::total,total_all,total2,total2_all,tms
@@ -4677,17 +4677,15 @@ subroutine kjhan_get_rho_star(ilevel)
   !--------------------------
 #ifndef _OPENMP
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,active(ilevel)%ngrid
-   rho_star(active(ilevel)%igrid(i)+iskip)=0.0D0
+   rho_star(ICELL_OF(active(ilevel)%igrid(i),ind))=0.0D0
      end do
   end do
 #else
-!$omp parallel do private(i,ind,iskip)
+!$omp parallel do private(i,ind)
   do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-        rho_star(active(ilevel)%igrid(i)+iskip)=0.0D0
+        rho_star(ICELL_OF(active(ilevel)%igrid(i),ind))=0.0D0
      end do
   end do
 #endif
@@ -4696,11 +4694,10 @@ subroutine kjhan_get_rho_star(ilevel)
   ! Initialize rho_star to zero in virtual boundaries
   !-------------------------------------------------------
   do icpu=1,ncpu
-!$omp parallel do private(i,ind,iskip)
+!$omp parallel do private(i,ind)
    do i=1,reception(icpu,ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-        rho_star(reception(icpu,ilevel)%igrid(i)+iskip)=0.0D0
+        rho_star(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
      end do
    end do
   end do
@@ -4719,9 +4716,8 @@ subroutine kjhan_get_rho_star(ilevel)
   !----------------------------------------------------
   do ibound=1,nboundary
      do ind=1,twotondim
-   iskip=ncoarse+(ind-1)*ngridmax
    do i=1,boundary(ibound,ilevel)%ngrid
-      rho_star(boundary(ibound,ilevel)%igrid(i)+iskip)=0.0
+      rho_star(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0.0
    end do
      end do
   end do
@@ -4878,6 +4874,7 @@ subroutine cic_star(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
   use pm_commons
   use poisson_commons
   use hydro_commons, ONLY: mass_sph
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer ,dimension(1:nvector)::ind_cell,ind_grid_part,ind_part
@@ -5125,7 +5122,7 @@ subroutine cic_star(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
   ! Compute parent cell adress
   do ind=1,twotondim
      do j=1,np
-        indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+        indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
      end do
   end do
 
@@ -5158,6 +5155,7 @@ subroutine kjhan_quenching(ilevel)
   use amr_commons
   use pm_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !------------------------------------------------------------------------
@@ -5169,7 +5167,7 @@ subroutine kjhan_quenching(ilevel)
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp)::dx,dx_loc,scale,vol_loc
   real(dp)::str_d,tot_m,ave_u,ave_v,ave_w,sig_u,sig_v,sig_w
-  integer::igrid,jgrid,ipart,jpart,next_part,ind_cell,iskip,ind
+  integer::igrid,jgrid,ipart,jpart,next_part,ind_cell,ind
   integer::i,ig,ip,npart1,npart2,icpu,nx_loc
   real(dp),dimension(1:3)::skip_loc
   integer,dimension(1:nvector)::ind_grid,ind_part,ind_grid_part
@@ -5196,7 +5194,7 @@ subroutine kjhan_quenching(ilevel)
 
   ! Loop over grids
 !$omp parallel do private(i,igrid,npart1,npart2, str_d, tot_m,ave_u, ave_v, ave_w,&
-!$omp                   sig_u,sig_v,sig_w,ipart,jpart,next_part,ind,iskip,ind_cell)
+!$omp                   sig_u,sig_v,sig_w,ipart,jpart,next_part,ind,ind_cell)
   do i=1,active(ilevel)%ngrid
      igrid=active(ilevel)%igrid(i)
      ! Number of particles in the grid
@@ -5247,8 +5245,7 @@ subroutine kjhan_quenching(ilevel)
 
      ! Loop over cells
      do ind=1,twotondim
-       iskip=ncoarse+(ind-1)*ngridmax
-       ind_cell=iskip+igrid
+       ind_cell=ICELL_OF(igrid,ind)
        ! AGN formation sites
        ! if n_star>0.1 H/cc and v_disp>75 km/s
        if(str_d>0.1.and.MAX(sig_u,sig_v,sig_w)>20.)then
@@ -5716,6 +5713,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
   use pm_commons
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -5726,7 +5724,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
   ! Thermal case: get the mass of gas in the AGN bubble
   ! Yohan Dubois, December 15th, 2010
   !------------------------------------------------------------------------
-  integer::ilevel,ncache,nAGN,j,iAGN,ind,ix,iy,iz,ngrid,iskip
+  integer::ilevel,ncache,nAGN,j,iAGN,ind,ix,iy,iz,ngrid
   integer::i,isink,nx_loc,igrid,info
 ! integer,dimension(1:nvector)::ind_grid,ind_cell
 ! logical ,dimension(1:nvector)::ok
@@ -5892,7 +5890,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
      end do
      ! Loop over grids
      ncache=active(ilevel)%ngrid
-!$omp parallel do private(iAGN,igrid,ngrid,i,ind, iskip,x,y,z,dxx,dyy,dzz,&
+!$omp parallel do private(iAGN,igrid,ngrid,i,ind,x,y,z,dxx,dyy,dzz,&
 !$omp                  dr_AGN,dr_cell,jtot,j_x,j_y,j_z,dzjet,drjet,psy,d,u,v,w,&
 !$omp                  ekk,eint,ibx,iby,ibz,jbx,jby,jbz) schedule(dynamic)
      do igrid=1,ncache,nvector
@@ -5902,9 +5900,8 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
        end do
        ! Loop over cells
        do ind=1,twotondim
-          iskip=ncoarse+(ind-1)*ngridmax
           do i=1,ngrid
-             ind_cell(i)=iskip+ind_grid(i)
+             ind_cell(i)=ICELL_OF(ind_grid(i),ind)
           enddo
           ! Flag leaf cells
           do i=1,ngrid
@@ -6115,6 +6112,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
   use amr_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -6127,7 +6125,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
   ! by depositing internal energy into small bubble
   ! Yohan Dubois, December 15th, 2010
   !------------------------------------------------------------------------
-  integer::ilevel,j,iAGN,nAGN,ind,ix,iy,iz,ngrid,iskip
+  integer::ilevel,j,iAGN,nAGN,ind,ix,iy,iz,ngrid
   integer::i,nx_loc,igrid,info,ncache
   real(dp)::x,y,z,dx,dxx,dyy,dzz,dr_AGN,d,u,v,w,ek,u_r,d_gas,dT
   real(dp)::scale,dx_min,dx_loc,vol_loc,rmax2,rmax,x_half,y_half,z_half,x_box,y_box,z_box
@@ -6315,7 +6313,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
 !###############################################################################################
      ! Loop over grids
      ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,x,y,z,iAGN,dxx,dyy,dzz,&
+!$omp parallel do private(igrid,ngrid,i,ind,x,y,z,iAGN,dxx,dyy,dzz,&
 !$omp               dr_AGN,ekk,d,idim,etot,eint,T2_1,T2_2,jtot,j_x,j_y,j_z,&
 !$omp               dzjet,drjet,psy,u,v,w,ekkold,d_gas,&
 !$omp               ibx,iby,ibz,jbx,jby,jbz) schedule(dynamic)
@@ -6327,9 +6325,8 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
 
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
 
            ! Flag leaf cells

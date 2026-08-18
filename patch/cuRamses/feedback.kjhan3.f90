@@ -346,6 +346,7 @@ subroutine feedbk(ind_grid,ind_part,ind_grid_part,mej,nbsn1,nbsn2,zej,ceej,ESN1,
   use pm_commons
   use hydro_commons
   use random
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -483,7 +484,7 @@ subroutine feedbk(ind_grid,ind_part,ind_grid_part,mej,nbsn1,nbsn2,zej,ceej,ESN1,
   ! Compute parent cell adresses
   do j=1,np
      if(ok(j))then
-        indp(j)=ncoarse+(icell(j)-1)*ngridmax+igrid(j)
+        indp(j)=ICELL_OF(igrid(j),icell(j))
 !     else THIS SECTION DOES EXIST IN THE LAST VERSION BUT WAS REMOVED IN THE CHEMO PATCH
 !        indp(j) = nbors_father_cells(ind_grid_part(j),kg(j))
 !        vol_loc(j)=vol_loc(j)*2**ndim ! ilevel-1 cell volume
@@ -1538,6 +1539,7 @@ subroutine average_SN(xSN,vSN,NbSN,vol_gas,dq,ekBlast,ind_blast,nSN,nSN_tot,iSN_
   use pm_commons
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1545,7 +1547,7 @@ subroutine average_SN(xSN,vSN,NbSN,vol_gas,dq,ekBlast,ind_blast,nSN,nSN_tot,iSN_
   !------------------------------------------------------------------------
   ! This routine average the hydro quantities inside the SN bubble
   !------------------------------------------------------------------------
-  integer::ilevel,ncache,nSN,j,iSN,ind,ix,iy,iz,ngrid,iskip,nSN_tot,ielt
+  integer::ilevel,ncache,nSN,j,iSN,ind,ix,iy,iz,ngrid,nSN_tot,ielt
   integer::i,nx_loc,igrid,info
   integer::nbin,ibx,iby,ibz,jbx,jby,jbz
   real(dp)::bin_size,inv_bin_size
@@ -1655,7 +1657,7 @@ subroutine average_SN(xSN,vSN,NbSN,vol_gas,dq,ekBlast,ind_blast,nSN,nSN_tot,iSN_
 
      ! Loop over grids
      ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,iskip,ind_cell,ok,x,y,z, &
+!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,ind_cell,ok,x,y,z, &
 !$omp       ibx,iby,ibz,jbx,jby,jbz,iSN,dxx,dyy,dzz,dr_SN,dr_cell, &
 !$omp       d,u,v,w,ekk,eint,mload,Zload,ceload,ielt) schedule(dynamic,16)
      do igrid=1,ncache,nvector
@@ -1665,9 +1667,8 @@ subroutine average_SN(xSN,vSN,NbSN,vol_gas,dq,ekBlast,ind_blast,nSN,nSN_tot,iSN_
         end do
         !    Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            ! Flag leaf cells
            do i=1,ngrid
@@ -1903,6 +1904,7 @@ subroutine Sedov_blast(xSN,mSN,NbSN,indSN,vol_gas,dq,ekBlast,nSN,mloadSN,ZloadSN
   use pm_commons
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1910,7 +1912,7 @@ subroutine Sedov_blast(xSN,mSN,NbSN,indSN,vol_gas,dq,ekBlast,nSN,mloadSN,ZloadSN
   !------------------------------------------------------------------------
   ! This routine merges SN using the FOF algorithm.
   !------------------------------------------------------------------------
-  integer::ilevel,j,iSN,nSN,ind,ix,iy,iz,ngrid,iskip,ielt
+  integer::ilevel,j,iSN,nSN,ind,ix,iy,iz,ngrid,ielt
   integer::i,nx_loc,igrid,info,ncache
   integer::nbin,ibx,iby,ibz,jbx,jby,jbz
   real(dp)::bin_size,inv_bin_size
@@ -1997,7 +1999,7 @@ subroutine Sedov_blast(xSN,mSN,NbSN,indSN,vol_gas,dq,ekBlast,nSN,mloadSN,ZloadSN
 
      ! Loop over grids
      ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,iskip,ind_cell, &
+!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,ind_cell, &
 !$omp       ok,x,y,z,ibx,iby,ibz,jbx,jby,jbz,iSN,dxx,dyy,dzz,dr_SN, &
 !$omp       d_gas,ielt,u,v,w) schedule(dynamic,16)
      do igrid=1,ncache,nvector
@@ -2008,9 +2010,8 @@ subroutine Sedov_blast(xSN,mSN,NbSN,indSN,vol_gas,dq,ekBlast,nSN,mloadSN,ZloadSN
 
         ! Loop over cells
         do ind=1,twotondim  
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
 
            ! Flag leaf cells
@@ -2273,6 +2274,7 @@ subroutine average_SN_ksec(xSN,vSN,vol_gas,dq,u2Blast,ind_blast,nSN, &
   use pm_commons
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2281,7 +2283,7 @@ subroutine average_SN_ksec(xSN,vSN,vol_gas,dq,u2Blast,ind_blast,nSN, &
   ! K-section version of average_SN: local cell contributions only.
   ! No MPI_ALLREDUCE. Results are sent back to owner via Exchange 2.
   !------------------------------------------------------------------------
-  integer::ilevel,ncache,nSN,iSN,ind,ix,iy,iz,ngrid,iskip,ielt
+  integer::ilevel,ncache,nSN,iSN,ind,ix,iy,iz,ngrid,ielt
   integer::i,nx_loc,igrid
   integer::nbin,nbx,nby,nbz,ibx,iby,ibz,jbx,jby,jbz
   real(dp)::bin_size,inv_bin_size,bin_xmin,bin_ymin,bin_zmin
@@ -2366,7 +2368,7 @@ subroutine average_SN_ksec(xSN,vSN,vol_gas,dq,u2Blast,ind_blast,nSN, &
 
      ! Loop over grids
      ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,iskip,ind_cell,ok,x,y,z, &
+!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,ind_cell,ok,x,y,z, &
 !$omp       ibx,iby,ibz,jbx,jby,jbz,iSN,dxx,dyy,dzz,dr_SN,dr_cell, &
 !$omp       d,u,v,w,mload,Zload,ceload,ielt) schedule(dynamic,16)
      do igrid=1,ncache,nvector
@@ -2376,9 +2378,8 @@ subroutine average_SN_ksec(xSN,vSN,vol_gas,dq,u2Blast,ind_blast,nSN, &
         end do
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            ! Flag leaf cells
            do i=1,ngrid
@@ -2510,6 +2511,7 @@ subroutine Sedov_blast_ksec(recvbuf,nrecv,nprops, &
   use pm_commons
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2528,7 +2530,7 @@ subroutine Sedov_blast_ksec(recvbuf,nrecv,nprops, &
   integer,intent(in)::owner_cpu_ex1(1:max(1,nSN_ex1))
   integer,intent(in)::owner_idx_ex1(1:max(1,nSN_ex1))
 
-  integer::ilevel,iSN,ind,ix,iy,iz,ngrid,iskip,ielt
+  integer::ilevel,iSN,ind,ix,iy,iz,ngrid,ielt
   integer::i,nx_loc,igrid,ncache
   integer::nbin,nbx,nby,nbz,ibx,iby,ibz,jbx,jby,jbz,j
   integer::blast_cpu,owner_cpu_val,owner_idx_val,ind_blast_cell
@@ -2631,7 +2633,7 @@ subroutine Sedov_blast_ksec(recvbuf,nrecv,nprops, &
 
      ! Loop over grids
      ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,iskip,ind_cell, &
+!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,ind_cell, &
 !$omp       ok,x,y,z,ibx,iby,ibz,jbx,jby,jbz,iSN,dxx,dyy,dzz,dr_SN, &
 !$omp       d_gas,ielt,u,v,w) schedule(dynamic,16)
      do igrid=1,ncache,nvector
@@ -2642,9 +2644,8 @@ subroutine Sedov_blast_ksec(recvbuf,nrecv,nprops, &
 
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
 
            ! Flag leaf cells

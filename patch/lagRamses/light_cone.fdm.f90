@@ -22,7 +22,7 @@ subroutine output_cone_fdm(obs)
   use amr_commons
   use pm_commons
   use poisson_commons
-
+#include "amr_index.h"
   implicit none
 
 #ifndef WITHOUTMPI
@@ -48,7 +48,7 @@ subroutine output_cone_fdm(obs)
   real(kind=8),dimension(:,:),allocatable::gposout,gvelout,getcout
   real(kind=8),dimension(:,:),allocatable::gpos_out,gvel_out,getc_out
   real(kind=8),dimension(:),allocatable::gzout,gz_out
-  integer::nleaf,ncache,ibound,iskip,ngout,istart,iglun,ind,nhvar,ivar
+  integer::nleaf,ncache,ibound,ngout,istart,iglun,ind,nhvar,ivar
   integer::end_tag,print_mark,mncell,tngout,elongated_axis_cone,obs,nprint
   real(kind=8) :: cpi(8,3),dx,coord_distance,Omega0,OmegaL,OmegaR,coverH0
   real(kind=8) :: dist1,dist2,lboxz(3),minboxr(3),maxboxr(3)
@@ -196,9 +196,8 @@ subroutine output_cone_fdm(obs)
               enddo
 
               do ind=1,twotondim
-                 iskip=ncoarse+(ind-1)*ngridmax
                  do i=1,ncache
-                    if(son(ind_grid(i)+iskip)==0) then
+                    if(son(ICELL_OF(ind_grid(i),ind))==0) then
                        nleaf=nleaf+1
                     endif
                  enddo
@@ -206,18 +205,17 @@ subroutine output_cone_fdm(obs)
               j=0
               if(nleaf .gt. 0) then
                  do ind=1,twotondim
-                    iskip=ncoarse+(ind-1)*ngridmax
                     do i=1,ncache
-                       if(son(ind_grid(i)+iskip)==0) then
+                       if(son(ICELL_OF(ind_grid(i),ind))==0) then
                           j=j+1
                           do idim=1,ndim
                              gpos(idim,j)=(xg(ind_grid(i),idim)+(cpi(ind,idim)-0.5)*dx)*Lbox-minboxr(idim)
                              gvel(idim,j)=0.0d0
                           enddo
                           getc(1,j)=dx
-                          getc(2,j)=psi_re(ind_grid(i)+iskip)**2 &
-                               &   + psi_im(ind_grid(i)+iskip)**2
-                          getc(3,j)=phi(ind_grid(i)+iskip)
+                          getc(2,j)=psi_re(ICELL_OF(ind_grid(i),ind))**2 &
+                               &   + psi_im(ICELL_OF(ind_grid(i),ind))**2
+                          getc(3,j)=phi(ICELL_OF(ind_grid(i),ind))
                        endif
                        if(j==mncell) then
                           print_mark=1
