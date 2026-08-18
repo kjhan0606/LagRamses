@@ -17,7 +17,7 @@
 1. `ngridmax`와 `npartmax`를 필수 입력값에서 제외한다.
 2. grid와 particle capacity를 실행 중 안전하게 확장한다.
 3. 기존 checkpoint를 그대로 읽는다.
-4. output grid format은 namelist에서 선택하며, 기본값은 block grid-major로 한다.
+4. output grid format은 namelist에서 선택하며, 기본값은 기존(legacy) format으로 한다.
 5. 기존 solver의 수치 결과와 성능을 보존한다.
 
 이 문서는 구현 계획이다. 승인 전에는 lagRamses 소스코드를 변경하지 않는다.
@@ -160,16 +160,19 @@ communicator를 만들고, 합산 capacity가 node budget을 넘지 않도록 �
 다음 namelist key를 추가하는 설계를 사용한다.
 
 ```fortran
-amr_output_layout = 'block_grid_major'  ! default
+amr_output_layout = 'legacy'            ! default
 ! or
-amr_output_layout = 'legacy'
+amr_output_layout = 'block_grid_major'
 ```
 
-- `block_grid_major`: 새 index layout을 기록한다.
 - `legacy`: 저장 직전에 index와 cell field를 기존 layout으로 변환한다.
+- `block_grid_major`: 새 index layout을 기록한다.
 
-기본 output은 `block_grid_major`이다. 기존 외부 도구나 구버전 lagRamses로
-읽어야 할 때만 `legacy`를 선택한다.
+기본 output은 `legacy`이다 (2026-08-18 사용자 결정). 기존 분석 도구
+(utils/f90 reader, HOP 파이프라인 등)와 구버전 lagRamses가 모든 checkpoint를
+그대로 읽어야 하고, format 이행은 도구 정비가 끝난 뒤 별도 결정으로 한다.
+새 layout의 이점(변환 비용 없는 저장)이 필요한 대규모 실행에서만
+`block_grid_major`를 명시적으로 선택한다.
 
 ### 7.2 Input 자동 판별
 
@@ -203,8 +206,8 @@ solver 내부에서는 block grid-major만 사용한다. 변환은 I/O 경계에
 
 - legacy input -> block grid-major internal
 - block input -> block grid-major internal
-- block internal -> legacy output (선택 시)
-- block internal -> block output (기본)
+- block internal -> legacy output (기본)
+- block internal -> block output (선택 시)
 
 변환 대상에는 field 배열뿐 아니라 `father`, `son`, `nbor`, particle cell link 등
 cell index를 값으로 저장하는 모든 record가 포함된다. legacy output 변환은
@@ -335,8 +338,8 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 
 - `ngridmax`, `npartmax` 없이 시작하고 최소 두 번의 growth를 거쳐 완주
 - 기존 checkpoint 자동 인식 및 restart 성공
-- `amr_output_layout='legacy'` 파일을 기존 reader가 읽음
-- 기본 block output의 same-rank/different-rank restart 성공
+- 기본값인 legacy output 파일을 기존 reader가 읽음
+- `block_grid_major` output 선택 시 same-rank/different-rank restart 성공
 - 기준 계산과 보존량 및 과학 결과가 합의된 허용 오차 안에서 일치
 - MPI, OpenMP, MPI+OpenMP 시험 통과
 - memory limit 접근 시 OOM kill 대신 예측 가능한 진단과 종료
@@ -349,7 +352,7 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 
 - 내부 layout은 block grid-major 방향으로 개발한다.
 - output layout은 namelist로 선택한다.
-- output 기본값은 `block_grid_major`이다.
+- output 기본값은 `legacy`(기존 format)이다. (2026-08-18 변경)
 - input layout은 자동 판별한다.
 - 기존 checkpoint 호환성을 유지한다.
 - 구현 파일은 모두 `patch/lagRamses/`에 둔다.
