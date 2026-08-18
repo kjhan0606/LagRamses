@@ -140,6 +140,86 @@ in the plan). Phase 1's shield is bitwise identity on runs that refine plus
 the driver-side census re-run: after all chunks, the census regexes must
 return ZERO index-arithmetic sites outside amr_index.f90.
 
+## REVISION 2026-08-18: switch the API from module functions to fpp macros
+
+Fable's review of 20d0893+45ecb5d found zero wrong-meaning conversions but
+established that **`icell_of` is never inlined**: FFLAGS carries no `-ipo`, so
+cross-file inlining cannot happen, and phi_fine_cg's disassembly contains 31
+`callq amr_index_mp_icell_of_@PLT`. An opaque call in the Poisson hot loop
+kills vectorisation, which both explains the -O3 divergence (FP reduction
+order changes, last-ulp drift amplified by gravity, with -O0 identity proving
+the arithmetic exact) and is a real per-step regression. Acceptance criterion
+"hot loops still vectorised" currently FAILS.
+
+Decision: **implement the mapping as fpp macros in a shared include**, keeping
+the module only for the checked build.
+
+    patch/lagRamses/amr_index.h        (new, fpp include)
+    #ifdef AMR_INDEX_CHECK
+    #  define ICELL_OF(g,c)   icell_of(g,c)
+    #  define IGRID_OF(k)     igrid_of(k)
+    #  define ICHILD_OF(k)    ichild_of(k)
+    #else
+    #  define ICELL_OF(g,c)   (ncoarse+((c)-1)*ngridmax+(g))
+    #  define IGRID_OF(k)     (mod((k)-ncoarse-1,ngridmax)+1)
+    #  define ICHILD_OF(k)    (((k)-ncoarse-1)/ngridmax+1)
+    #endif
+
+Rationale: textual substitution reproduces the original expression exactly, so
+codegen is unchanged, the performance regression disappears, and **-O3 bitwise
+identity is restored as the acceptance gate** — which retires the 1 h/chunk
+-O0 run. Type safety is not lost outright: the AMR_INDEX_CHECK build still
+routes through the existing pure elemental functions with their assertions.
+`-qipo` was rejected as it perturbs codegen across the whole build.
+
+Conversion rules for the macro form: parenthesise every macro argument (done
+above), keep `use amr_index` ONLY in units compiled for the checked build,
+and add `#include "amr_index.h"` after the last `use` and before
+`implicit none` (the placement rule below still applies). Every source using
+the macros must be compiled with `-fpp`, which this Makefile already does
+globally.
+
+Rework scope: the 15 files already converted must be re-expressed in macro
+form, and the 43 sites listed below folded in at the same time.
+
+## The 43 sites the v1 census missed (Fable, reproduced by tests/phase1_census.py)
+
+Two blind spots: array-element child operands `(hhh(idim,1,ind)-1)*ngridmax`
+and `&`-continuation-split expressions. `tests/phase1_census.py` is the
+corrected matcher — it joins continuations and accepts array-element
+operands, and it independently reproduces Fable's count of 43 in 7 files.
+Tree-wide remaining after chunks 0/A/B: **365 sites in 58 files**.
+
+| file | count | note |
+|---|---|---|
+| force_fine.kjhan.f90 | 24 | ih_left/ih_right hoists + 6 inline scalar_gr |
+| multigrid_fine_fine.kjhan.f90 | 7 | 198,221,414,446 are neighbour indices in the SAME loops whose central cells were converted — the worst Phase-2 landmine, no compile error would flag the mixed layout |
+| rho_fine.kjhan.f90 | 4 | `indp(j,ind)=...+igrid(j,ind)`; `igrid` can be 0 on masked paths, so a naive ICELL_OF trips AMR_INDEX_CHECK on legitimate runs |
+| nbors_utils.kjhan.f90 | 4 | reverse pairs; v1 census scored this file 0 |
+| multigrid_fine_coarse.kjhan.f90 | 2 | reverse pair |
+| boundary_potential.kjhan.f90 | 1 | `ind_ref(ind)` operand |
+| multigrid_fine_commons.f90 | 1 | continuation-split neighbour site |
+
+## Corrections to earlier claims in this brief
+
+- The no-minus-1 corner is **reachable**, contrary to what the pilot commit
+  message says. The free list is FIFO: init builds 1..ngridmax
+  (init_amr.f90:314-317), allocation pops the head, `kill_grid` appends at
+  the tail (refine_utils.f90:1138-1146). Slot ngridmax is handed out once
+  cumulative grid creations exceed the list length — a churn condition,
+  reachable in long production runs, invisible to short gates. The
+  conversions to ICHILD_OF at bisection and multigrid_fine_coarse:698 fix a
+  real latent `sink_per_grid(0)` / `lookup_mg(0)` access.
+- Phase 2 must separately inventory the **flag2 packing**
+  (`flag2(icell)/ngridmax`, `flag2+ngridmax*scan_flag`, `flag2(ngridmax+i)`
+  scratch at multigrid_fine_fine 188,400,778-780 and
+  multigrid_fine_commons 1562,1618-1970,2034). These use ngridmax as a
+  packing base, not a cell stride, and must NOT be converted.
+- Pre-existing, not part of this work: multigrid_coarse.kjhan.f90:85,243,675
+  have `do i=1,boundary(ibound,ilevel)%ngrid` outside `do ibound=...`, so the
+  bound reads an undefined ibound. Harmless in periodic runs because the
+  inner loop never executes, but `-check bounds` builds abort there.
+
 ## Chunk map (one Codex invocation each, sites from the census)
 
 | chunk | theme | sites | files |
