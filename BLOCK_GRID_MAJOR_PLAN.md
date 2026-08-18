@@ -111,11 +111,29 @@ nonblocking MPI request가 있는 동안에는 재할당하지 않는다.
 
 ### 5.2 Particle capacity
 
-particle index는 `npartmax`가 cell index 식에 포함되는 구조가 아니므로 grid보다
-독립적으로 전환할 수 있다. particle 배열은 같은 capacity를 공유하는 하나의
-bundle로 관리하며, star formation, sink/feedback, tracer 생성 또는 load
-balance 전에 필요한 수를 확인한다. bundle의 일부 배열만 확장된 상태는 허용하지
-않는다.
+**`nparttot`은 `ngridtot`과 동등한 1급 목표이며, block layout 작업에 종속되지
+않는다** (2026-08-19 사용자 지시). 근거는 구조적이다. cell index 식
+`ncoarse+(ichild-1)*ngridmax+igrid`에 `npartmax`가 들어가지 않고, 트리 전체
+정적 검색에서도 `npartmax`와 `ncoarse`가 함께 나타나는 식은 존재하지 않는다.
+즉 particle capacity 확장은 index layout 변경과 **완전히 직교**하며, Phase 1의
+index API나 Phase 2의 block layout을 기다릴 이유가 없다.
+
+따라서 구현 순서에서 particle growth(Phase 3)는 grid growth(Phase 4)의 선행
+조건이 아니라 **병렬 트랙**으로 취급한다. Phase 1이 끝나는 즉시 착수할 수 있고,
+Phase 2와 동시에 진행해도 충돌하지 않는다.
+
+particle 배열은 같은 capacity를 공유하는 하나의 bundle로 관리하며, star
+formation, sink/feedback, tracer 생성 또는 load balance 전에 필요한 수를
+확인한다. bundle의 일부 배열만 확장된 상태는 허용하지 않는다. 확장 시
+`move_alloc` 복사가 순간적으로 구·신 배열을 동시에 점유하므로, admission
+control은 정상 상태가 아니라 **transient peak**를 기준으로 판정하거나 bundle을
+배열 단위로 staggered copy하여 peak를 최대 단일 배열 크기로 묶는다.
+
+현재 두 capacity는 `read_params.jaehyun.f90:1290-1301`에서 대칭적으로 유도된다.
+`ngridmax==0`이면 `ngridtot/ncpu`, `npartmax==0`이면 `nparttot/ncpu`이다. 다만
+`ngridtot==0`은 오류로 처리되는 반면 `nparttot==0`은 조용히 `npartmax=0`을
+남긴다. 자동 모드에서는 두 경로 모두 "미지정 = 자동"으로 동일하게 해석하고,
+어느 쪽도 침묵하는 0을 남기지 않는다.
 
 ### 5.3 메모리 backend
 
@@ -252,11 +270,15 @@ build system에서 patch 파일이 원본보다 우선하도록 한다. 이 문�
 - hydro/gravity/refinement/MPI kernel 성능 비교
 - 아직 실행 중 growth는 사용하지 않음
 
-### Phase 3: particle dynamic growth
+### Phase 3: particle dynamic growth (Phase 2와 병렬 가능)
+
+`npartmax`는 cell index 식에 없으므로 이 단계는 block layout과 독립이다.
+Phase 1 완료 직후 착수하며 Phase 2를 기다리지 않는다.
 
 - particle bundle allocator 도입
 - creation, deletion, load balance, restart 시험
-- `npartmax`를 optional initial hint로 전환
+- `npartmax`와 `nparttot`을 optional initial hint로 전환
+- 확장 시 transient peak 메모리를 admission control에 반영
 
 ### Phase 4: grid dynamic growth
 
@@ -336,7 +358,8 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 
 다음 조건을 모두 만족해야 production 기본값으로 채택한다.
 
-- `ngridmax`, `npartmax` 없이 시작하고 최소 두 번의 growth를 거쳐 완주
+- `ngridtot`/`ngridmax`, `nparttot`/`npartmax` 넷 다 없이 시작하고, grid와
+  particle 각각 최소 두 번의 growth를 거쳐 완주
 - 기존 checkpoint 자동 인식 및 restart 성공
 - 기본값인 legacy output 파일을 기존 reader가 읽음
 - `block_grid_major` output 선택 시 same-rank/different-rank restart 성공
@@ -360,6 +383,8 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 구현 전에 결정하거나 측정할 사항:
 
 - 기본 block 크기: `B=64` 또는 `B=128`
+- particle bundle 확장 backend: `move_alloc` 전체 복사(peak 2x)를 감수할지,
+  배열 단위 staggered copy로 peak를 낮출지
 - 성장 계수와 최소 headroom
 - C-managed backend를 기본으로 할지, Fortran backend를 fallback으로 둘지
 - binary magic tag의 실제 값과 version header 상세 규격
