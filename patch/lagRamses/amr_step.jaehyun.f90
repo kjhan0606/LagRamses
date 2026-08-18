@@ -17,6 +17,7 @@ recursive subroutine amr_step(ilevel,icount)
   use coolrates_module, only: update_coolrates_tables
   use rt_cooling_module, only: update_UVrates
 #endif
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -27,7 +28,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! Each routine is called using a specific order, don't change it,   !
   ! unless you check all consequences first                           !
   !-------------------------------------------------------------------!
-  integer::i,idim,ivar,mpi_err,jgrid,igrid_lb,ind_lb,iskip_lb
+  integer::i,idim,ivar,mpi_err,jgrid,igrid_lb,ind_lb
   integer(kind=8)::nleaf_lb
   logical::ok_defrag,output_now_all,lb_timing_sample
   logical::phi_topology_changed,phi_topology_changed_all
@@ -1039,9 +1040,8 @@ recursive subroutine amr_step(ilevel,icount)
      igrid_lb=headl(myid,ilevel)
      do jgrid=1,numbl(myid,ilevel)
         do ind_lb=1,twotondim
-           iskip_lb=ncoarse+(ind_lb-1)*ngridmax
-           if(cpu_map(igrid_lb+iskip_lb)==myid.and. &
-                son(igrid_lb+iskip_lb)==0)nleaf_lb=nleaf_lb+1_8
+           if(cpu_map(ICELL_OF(igrid_lb,ind_lb))==myid.and. &
+                son(ICELL_OF(igrid_lb,ind_lb))==0)nleaf_lb=nleaf_lb+1_8
         end do
         igrid_lb=next(igrid_lb)
      end do
@@ -1437,6 +1437,7 @@ subroutine check_load_imbalance(did_remap)
   ! remapping is judged with the same cost that the new domain cut balances.
   use amr_commons
   use pm_commons, only: count_particles_by_leaf
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1446,7 +1447,7 @@ subroutine check_load_imbalance(did_remap)
   real(dp)::my_cost,max_cost,sum_cost,imbalance,effective_imbalance
   real(dp)::predicted_saving,required_saving
   real(dp)::alpha
-  integer::ilevel,info,jgrid,igrid,ind,iskip,npair_cell,steps_since
+  integer::ilevel,info,jgrid,igrid,ind,npair_cell,steps_since
   integer,dimension(1:twotondim)::npart_leaf,ndm_leaf
   integer(kind=8)::my_cost_i8
   integer(kind=8)::cell_cost_i8
@@ -1491,8 +1492,8 @@ subroutine check_load_imbalance(did_remap)
         ndm_leaf=0
         if(pic)call count_particles_by_leaf(igrid,npart_leaf,ndm_leaf)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           if(cpu_map(igrid+iskip)/=myid.or.son(igrid+iskip)/=0)cycle
+           if(cpu_map(ICELL_OF(igrid,ind))/=myid.or. &
+                son(ICELL_OF(igrid,ind))/=0)cycle
            npair_cell=domain_sidm_pair_count(ndm_leaf(ind))
            cell_cost_i8=domain_leaf_cost(npart_leaf(ind),npair_cell, &
                 niter_cost(max(levelmin,ilevel)), &

@@ -15,6 +15,7 @@ subroutine adaptive_loop
   use cuda_commons, only: cuda_pool_init_f, cuda_available
   use iso_c_binding, only: c_int
 #endif
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -35,7 +36,7 @@ subroutine adaptive_loop
   ! SGS diagnostics
   real(dp)::sgs_loc(4),sgs_glob(4)
   real(dp)::esgs_tot,pturb_max,pth_at_max,csgs_ratio_max
-  integer::icell,igrid_sgs,ind_sgs,iskip_sgs,ncell_sgs
+  integer::icell,igrid_sgs,ind_sgs,ncell_sgs
   ! Sink/AGN coarse-step log
   integer::isink_log
 
@@ -341,8 +342,7 @@ subroutine adaptive_loop
            do ilevel=levelmin,nlevelmax
               do igrid_sgs=1,active(ilevel)%ngrid
                  do ind_sgs=1,twotondim
-                    iskip_sgs=ncoarse+(ind_sgs-1)*ngridmax
-                    icell=iskip_sgs+active(ilevel)%igrid(igrid_sgs)
+                    icell=ICELL_OF(active(ilevel)%igrid(igrid_sgs),ind_sgs)
                     if(son(icell)/=0) cycle
                     sgs_loc(3)=sgs_loc(3)+1d0
                     sgs_loc(1)=sgs_loc(1)+uold(icell,isgs)  ! sum(rho*esgs)

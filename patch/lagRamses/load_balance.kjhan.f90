@@ -13,6 +13,7 @@ recursive subroutine load_balance
   use bisection
   use ksection
   use iso_c_binding, only: c_int, c_size_t
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -22,7 +23,7 @@ recursive subroutine load_balance
   !------------------------------------------------
   integer::igrid,ncache,ilevel,i,ind,jlevel,info
   integer::idim,ivar,icpu,jcpu,kcpu
-  integer::nxny,ix,iy,iz,iskip
+  integer::nxny,ix,iy,iz
   integer(i8b),dimension(nlevelmax,3)::comm_buffin,comm_buffout
   integer,allocatable::numbp_save(:)
   integer::nsave,isave
@@ -382,9 +383,9 @@ recursive subroutine load_balance
      ! Build new communicators
      call build_comm(ilevel)
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,active(ilevel)%ngrid
-           cpu_map(active(ilevel)%igrid(i)+iskip)=cpu_map2(active(ilevel)%igrid(i)+iskip)
+           cpu_map(ICELL_OF(active(ilevel)%igrid(i),ind))= &
+                cpu_map2(ICELL_OF(active(ilevel)%igrid(i),ind))
         end do
      end do
      call make_virtual_fine_int(cpu_map(1),ilevel)
@@ -505,6 +506,7 @@ subroutine cmp_new_cpu_map
   use pm_commons
   use bisection
   use ksection
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -517,7 +519,7 @@ subroutine cmp_new_cpu_map
   integer::ncode,bit_length,ilevel,i,ind,idim
   integer::nx_loc,ny_loc,nz_loc,nfar
   integer::info,icpu,jcpu,isub,idom,jdom
-  integer::nxny,ix,iy,iz,iskip,ilo,ihi,imid
+  integer::nxny,ix,iy,iz,ilo,ihi,imid
   integer::ind_long
   integer::isink,igrid_sink,ind_sink,icell_sink,isubcell_sink
   integer::npair_cell
@@ -633,11 +635,11 @@ subroutine cmp_new_cpu_map
            if(ndim > 2) then
               if(xsink(isink,3) >= xg(igrid_sink,3)) ind_sink = ind_sink + 4
            end if
-           icell_sink = igrid_sink + ncoarse + (ind_sink-1)*ngridmax
+           icell_sink = ICELL_OF(igrid_sink,ind_sink)
         end do
         if(icell_sink > ncoarse) then
-           isubcell_sink = ((icell_sink - ncoarse) / ngridmax) + 1
-           igrid_sink = icell_sink - ncoarse - ngridmax * (isubcell_sink - 1)
+           isubcell_sink = ICHILD_OF(icell_sink)
+           igrid_sink = IGRID_OF(icell_sink)
            sink_per_grid(igrid_sink) = sink_per_grid(igrid_sink) + 1
         end if
      end do
@@ -688,7 +690,7 @@ subroutine cmp_new_cpu_map
   end do
   ! Loop over levels (OMP parallelized on igrid loop)
   !$OMP PARALLEL DEFAULT(SHARED) &
-  !$OMP PRIVATE(igrid,ngrid,ind,iskip,idim,ncell_loc,batch_size,my_base,my_idx, &
+  !$OMP PRIVATE(igrid,ngrid,ind,idim,ncell_loc,batch_size,my_base,my_idx, &
   !$OMP         ind_grid,ind_cell,xx,order_min,order_max,dom,isub,wflag, &
   !$OMP         ncell_sub_t,npart_sub_t,npart_leaf,ndm_leaf,npair_cell,i)
   ncell_sub_t=0
@@ -732,9 +734,8 @@ subroutine cmp_new_cpu_map
         end if
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=ind_grid(i)+iskip
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do idim=1,ndim
            ncell_loc=0
@@ -1145,7 +1146,7 @@ subroutine cmp_new_cpu_map
      ncache=active(ilevel)%ngrid
      ! Loop over grids by vector sweeps (OMP parallelized)
      !$OMP PARALLEL DO DEFAULT(SHARED) &
-     !$OMP PRIVATE(igrid,ngrid,ind_grid,ind_cell,xx,order_max,i,ind,iskip,idim,idom, &
+     !$OMP PRIVATE(igrid,ngrid,ind_grid,ind_cell,xx,order_max,i,ind,idim,idom, &
      !$OMP         ilo,ihi,imid,xx_tmp,c_tmp,c_tmp_v) &
      !$OMP SCHEDULE(DYNAMIC,4)
      do igrid=1,ncache,nvector
@@ -1156,9 +1157,8 @@ subroutine cmp_new_cpu_map
         end do
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=ind_grid(i)+iskip
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do idim=1,ndim
               do i=1,ngrid
@@ -1647,13 +1647,14 @@ subroutine defrag
 #ifdef RT
   use rt_hydro_commons
 #endif
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
 
   integer::ncache,ngrid2,igridmax,i,igrid,ibound,ilevel
-  integer::iskip1,iskip2,igrid1,igrid2,ind1,ind2,icell1,icell2
+  integer::igrid1,igrid2,ind1,ind2,icell1,icell2
   integer::ind,idim,ivar,istart
   real(dp),allocatable::defrag_dp(:)
   integer,allocatable::defrag_map(:)
@@ -1731,12 +1732,10 @@ subroutine defrag
            do i=1,ncache
               icell1=father(igrid)
               if(icell1>ncoarse)then
-                 ind1=(icell1-ncoarse-1)/ngridmax+1
-                 iskip1=ncoarse+(ind1-1)*ngridmax
-                 igrid1=(icell1-iskip1)
+                 ind1=ICHILD_OF(icell1)
+                 igrid1=IGRID_OF(icell1)
                  igrid2=defrag_map(igrid1)
-                 iskip2=ncoarse+(ind1-1)*ngridmax
-                 icell2=iskip2+igrid2
+                 icell2=ICELL_OF(igrid2,ind1)
               else
                  icell2=icell1
               end if
@@ -1871,7 +1870,6 @@ subroutine defrag
   endif
 
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      flag2(igrid)=0
@@ -1888,7 +1886,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              igrid1=son(iskip2+igrid)
+              igrid1=son(ICELL_OF(igrid,ind))
               if(igrid1>0)then
                  igrid2=defrag_map(igrid1)
               else
@@ -1902,12 +1900,11 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     son(iskip2+igrid)=flag2(igrid)
+     son(ICELL_OF(igrid,ind))=flag2(igrid)
   end do
   end do
 
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      flag2(igrid)=0
@@ -1924,7 +1921,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              flag2(ngrid2+i)=cpu_map(iskip2+igrid)
+              flag2(ngrid2+i)=cpu_map(ICELL_OF(igrid,ind))
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -1932,12 +1929,11 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     cpu_map(iskip2+igrid)=flag2(igrid)
+     cpu_map(ICELL_OF(igrid,ind))=flag2(igrid)
   end do
   end do
 
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      flag2(igrid)=0
@@ -1954,7 +1950,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              flag2(ngrid2+i)=flag1(iskip2+igrid)
+              flag2(ngrid2+i)=flag1(ICELL_OF(igrid,ind))
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -1962,7 +1958,7 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     flag1(iskip2+igrid)=flag2(igrid)
+     flag1(ICELL_OF(igrid,ind))=flag2(igrid)
   end do
   end do
 
@@ -1974,7 +1970,6 @@ subroutine defrag
   do ivar=1,nvar
 #endif
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      defrag_dp(igrid)=0.0D0
@@ -1991,7 +1986,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              defrag_dp(ngrid2+i)=uold(iskip2+igrid,ivar)
+              defrag_dp(ngrid2+i)=uold(ICELL_OF(igrid,ind),ivar)
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -1999,7 +1994,7 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     uold(iskip2+igrid,ivar)=defrag_dp(igrid)
+     uold(ICELL_OF(igrid,ind),ivar)=defrag_dp(igrid)
   end do
   end do
   end do
@@ -2011,7 +2006,6 @@ subroutine defrag
 
   do ivar=1,nrtvar
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      defrag_dp(igrid)=0.0D0
@@ -2028,7 +2022,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              defrag_dp(ngrid2+i)=rtuold(iskip2+igrid,ivar)
+              defrag_dp(ngrid2+i)=rtuold(ICELL_OF(igrid,ind),ivar)
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -2036,7 +2030,7 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     rtuold(iskip2+igrid,ivar)=defrag_dp(igrid)
+     rtuold(ICELL_OF(igrid,ind),ivar)=defrag_dp(igrid)
   end do
   end do
   end do
@@ -2047,7 +2041,6 @@ subroutine defrag
   if(poisson)then
 
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      defrag_dp(igrid)=0.0D0
@@ -2064,7 +2057,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              defrag_dp(ngrid2+i)=phi(iskip2+igrid)
+              defrag_dp(ngrid2+i)=phi(ICELL_OF(igrid,ind))
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -2072,13 +2065,12 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     phi(iskip2+igrid)=defrag_dp(igrid)
+     phi(ICELL_OF(igrid,ind))=defrag_dp(igrid)
   end do
   end do
 
   do idim=1,ndim
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      defrag_dp(igrid)=0.0D0
@@ -2095,7 +2087,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              defrag_dp(ngrid2+i)=f(iskip2+igrid,idim)
+              defrag_dp(ngrid2+i)=f(ICELL_OF(igrid,ind),idim)
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -2103,7 +2095,7 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     f(iskip2+igrid,idim)=defrag_dp(igrid)
+     f(ICELL_OF(igrid,ind),idim)=defrag_dp(igrid)
   end do
   end do
   end do
@@ -2113,7 +2105,6 @@ subroutine defrag
   ! variable-ncpu checkpoint restore and during ordinary load balancing.
   if(allocated(scalar_gr))then
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      defrag_dp(igrid)=0.0D0
@@ -2130,7 +2121,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              defrag_dp(ngrid2+i)=scalar_gr(iskip2+igrid)
+              defrag_dp(ngrid2+i)=scalar_gr(ICELL_OF(igrid,ind))
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -2138,12 +2129,11 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     scalar_gr(iskip2+igrid)=defrag_dp(igrid)
+     scalar_gr(ICELL_OF(igrid,ind))=defrag_dp(igrid)
   end do
   end do
 
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      defrag_dp(igrid)=0.0D0
@@ -2160,7 +2150,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              defrag_dp(ngrid2+i)=scalar_gr_old(iskip2+igrid)
+              defrag_dp(ngrid2+i)=scalar_gr_old(ICELL_OF(igrid,ind))
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -2168,7 +2158,7 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     scalar_gr_old(iskip2+igrid)=defrag_dp(igrid)
+     scalar_gr_old(ICELL_OF(igrid,ind))=defrag_dp(igrid)
   end do
   end do
   end if
@@ -2178,7 +2168,6 @@ subroutine defrag
   if(use_fdm)then
 
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      defrag_dp(igrid)=0.0D0
@@ -2195,7 +2184,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              defrag_dp(ngrid2+i)=psi_re(iskip2+igrid)
+              defrag_dp(ngrid2+i)=psi_re(ICELL_OF(igrid,ind))
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -2203,12 +2192,11 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     psi_re(iskip2+igrid)=defrag_dp(igrid)
+     psi_re(ICELL_OF(igrid,ind))=defrag_dp(igrid)
   end do
   end do
 
   do ind=1,twotondim
-  iskip2=ncoarse+(ind-1)*ngridmax
   ngrid2=0
   do igrid=1,igridmax
      defrag_dp(igrid)=0.0D0
@@ -2225,7 +2213,7 @@ subroutine defrag
         if(ncache>0)then
            igrid=istart
            do i=1,ncache
-              defrag_dp(ngrid2+i)=psi_im(iskip2+igrid)
+              defrag_dp(ngrid2+i)=psi_im(ICELL_OF(igrid,ind))
               igrid=next(igrid)
            end do
            ngrid2=ngrid2+ncache
@@ -2233,7 +2221,7 @@ subroutine defrag
      end do
   end do
   do igrid=1,igridmax
-     psi_im(iskip2+igrid)=defrag_dp(igrid)
+     psi_im(ICELL_OF(igrid,ind))=defrag_dp(igrid)
   end do
   end do
 

@@ -163,6 +163,7 @@ subroutine make_grid_coarse(ind_cell,ibound,boundary_region)
   use amr_commons
   use morton_keys
   use morton_hash
+#include "amr_index.h"
   implicit none
   integer::ind_cell,ibound
   logical::boundary_region
@@ -171,7 +172,7 @@ subroutine make_grid_coarse(ind_cell,ibound,boundary_region)
   ! in father cells where ind_cell=1+ix+iy*nx+iz*nxny
   ! is the actual cell number of the father coarse cell.
   !----------------------------------------------------------
-  integer::j,igrid,nxny,iskip,icpu,nx_loc
+  integer::j,igrid,nxny,icpu,nx_loc
   integer::ix,iy,iz,ind_grid_son,idim
   integer,dimension(1:twondim)::ixn,iyn,izn
 
@@ -272,12 +273,10 @@ subroutine make_grid_coarse(ind_cell,ibound,boundary_region)
   ! Update cpu map
   if(boundary_region)then
      do j=1,twotondim
-        iskip=ncoarse+(j-1)*ngridmax
-        cpu_map(iskip+ind_grid_son)=0
+        cpu_map(ICELL_OF(ind_grid_son,j))=0
      end do
   else
      do j=1,twotondim
-        iskip=ncoarse+(j-1)*ngridmax
         iz=(j-1)/4
         iy=(j-1-4*iz)/2
         ix=(j-1-2*iy-4*iz)
@@ -293,7 +292,7 @@ subroutine make_grid_coarse(ind_cell,ibound,boundary_region)
            xx(1,idim)=(xx(1,idim)-skip_loc(idim))*scale
         end do
         call cmp_cpumap(xx,cc,1)
-        cpu_map(iskip+ind_grid_son)=cc(1)
+        cpu_map(ICELL_OF(ind_grid_son,j))=cc(1)
      end do
   end if
 
@@ -338,6 +337,7 @@ end subroutine make_grid_coarse
 !###############################################################
 subroutine refine_fine(ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -354,7 +354,7 @@ subroutine refine_fine(ilevel)
   !---------------------------------------------------------
   integer::ncache,ngrid
   integer::igrid,icell,i
-  integer::ind,iskip,info,icpu,ibound
+  integer::ind,info,icpu,ibound
   integer::ncreate_tmp,nkill_tmp
   logical::boundary_region
   integer,dimension(1:nvector),save::ind_grid,ind_cell
@@ -421,9 +421,8 @@ subroutine refine_fine(ilevel)
         end if
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            ! Gather flagged, unrefined and authorized cells
            do i=1,ngrid
@@ -505,9 +504,8 @@ subroutine refine_fine(ilevel)
            end do
         end if
         do ind=1,twotondim     ! Loop over cells
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            if(shrink)then
               ! Gather unauthorized and refined cells
@@ -594,6 +592,7 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
 #ifdef ATON
   use radiation_commons, ONLY:Erad
 #endif
+#include "amr_index.h"
   implicit none
   integer::nn,ind,ilevel,ibound
   logical::boundary_region
@@ -608,7 +607,7 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
   ! WARNING: USE THIS ROUTINE WITH CARE, SINCE IT ASSUMES THAT
   ! ALL FATHER CELL'S NEIGHBORS DO EXIST !!!
   !--------------------------------------------------------------
-  integer ::idim,igrid,iskip,icpu
+  integer ::idim,igrid,icpu
   integer ::i,j,ix,iy,iz,ivar,nx_loc
   integer ,dimension(1:nvector)          ,save::ind_grid_son
   integer ,dimension(1:nvector,0:twondim),save::ind_fathers
@@ -720,9 +719,8 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
   ! Update cpu map
   if(boundary_region)then
      do j=1,twotondim
-        iskip=ncoarse+(j-1)*ngridmax
         do i=1,nn
-           cpu_map(iskip+ind_grid_son(i))=0
+           cpu_map(ICELL_OF(ind_grid_son(i),j))=0
         end do
      end do
   else
@@ -746,9 +744,8 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
            end do
         end do
         call cmp_cpumap(xx,cc,nn)
-        iskip=ncoarse+(j-1)*ngridmax
         do i=1,nn
-           cpu_map(iskip+ind_grid_son(i))=cc(i)
+           cpu_map(ICELL_OF(ind_grid_son(i),j))=cc(i)
         end do
      end do
   end if
@@ -836,14 +833,13 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
 #endif
         ! Scatter to children cells
         do j=1,twotondim
-           iskip=ncoarse+(j-1)*ngridmax
 #ifdef SOLVERmhd
            do ivar=1,nvar+3
 #else
               do ivar=1,nvar
 #endif
                  do i=1,nn
-                    uold(iskip+ind_grid_son(i),ivar)=u2(i,j,ivar)
+                    uold(ICELL_OF(ind_grid_son(i),j),ivar)=u2(i,j,ivar)
                  end do
 #ifdef SOLVERmhd
               end do
@@ -869,10 +865,9 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
         call rt_interpol_hydro(urt1,urt2,nn)
         ! Scatter to children cells
         do j=1,twotondim
-           iskip=ncoarse+(j-1)*ngridmax
            do ivar=1,nrtvar
               do i=1,nn
-                 rtuold(iskip+ind_grid_son(i),ivar)=urt2(i,j,ivar)
+                 rtuold(ICELL_OF(ind_grid_son(i),j),ivar)=urt2(i,j,ivar)
               end do
            end do
         enddo
@@ -884,15 +879,14 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
      if(poisson)then
         ! Scatter to children cells
         do j=1,twotondim
-           iskip=ncoarse+(j-1)*ngridmax
            do idim=1,ndim
               do i=1,nn
-                 f(iskip+ind_grid_son(i),idim)=f(ind_fathers(i,0),idim)
+                 f(ICELL_OF(ind_grid_son(i),j),idim)=f(ind_fathers(i,0),idim)
               end do
            end do
            do i=1,nn
-              phi(iskip+ind_grid_son(i))=phi(ind_fathers(i,0))
-              phi_old(iskip+ind_grid_son(i))=phi_old(ind_fathers(i,0))
+              phi(ICELL_OF(ind_grid_son(i),j))=phi(ind_fathers(i,0))
+              phi_old(ICELL_OF(ind_grid_son(i),j))=phi_old(ind_fathers(i,0))
            end do
         end do
      end if
@@ -902,10 +896,9 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
      ! unphysical Symmetron fixed point after symmetry breaking).
      if(allocated(scalar_gr)) then
         do j=1,twotondim
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,nn
-              scalar_gr(iskip+ind_grid_son(i))=scalar_gr(ind_fathers(i,0))
-              scalar_gr_old(iskip+ind_grid_son(i))=scalar_gr_old(ind_fathers(i,0))
+              scalar_gr(ICELL_OF(ind_grid_son(i),j))=scalar_gr(ind_fathers(i,0))
+              scalar_gr_old(ICELL_OF(ind_grid_son(i),j))=scalar_gr_old(ind_fathers(i,0))
            end do
         end do
      end if
@@ -915,9 +908,8 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
 #ifdef ATON
      if(aton)then
         do j=1,twotondim
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,nn
-              Erad(iskip+ind_grid_son(i))=Erad(ind_fathers(i,0))
+              Erad(ICELL_OF(ind_grid_son(i),j))=Erad(ind_fathers(i,0))
            end do
         enddo
      end if
@@ -951,6 +943,7 @@ subroutine kill_grid(ind_cell,ilevel,nn,ibound,boundary_region)
 #ifdef ATON
   use radiation_commons, ONLY:Erad
 #endif
+#include "amr_index.h"
   implicit none
   integer::nn,ilevel,ibound
   logical::boundary_region
@@ -959,7 +952,7 @@ subroutine kill_grid(ind_cell,ilevel,nn,ibound,boundary_region)
   ! This routine destroy the grids at level ilevel
   ! contained in father cell ind_cell(:)
   !----------------------------------------------------
-  integer::igrid,iskip,icpu
+  integer::igrid,icpu
   integer::i,j,idim,ind,ivar
   integer,dimension(1:nvector),save::ind_grid_son,ind_cell_son
 #ifdef RT
@@ -1073,9 +1066,8 @@ subroutine kill_grid(ind_cell,ilevel,nn,ibound,boundary_region)
 
   ! Reset cell variables
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,nn
-        ind_cell_son(i)=iskip+ind_grid_son(i)
+        ind_cell_son(i)=ICELL_OF(ind_grid_son(i),ind)
      end do
      ! Tree variables
      do i=1,nn

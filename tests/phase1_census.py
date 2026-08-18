@@ -24,14 +24,14 @@ def logical_lines(text):
 
 ATOM = r'[A-Za-z_]\w*(?:\((?:[^()]|\([^()]*\))*\))?'
 PATS = [
- ('stride',      re.compile(r'ncoarse\s*\+\s*\(\s*'+ATOM+r'\s*-\s*1\s*\)\s*\*\s*ngridmax', re.I)),
- ('stride_swap', re.compile(r'ncoarse\s*\+\s*ngridmax\s*\*\s*\(\s*'+ATOM+r'\s*-\s*1\s*\)', re.I)),
- ('rev_child',   re.compile(r'\(\s*'+ATOM+r'\s*-\s*ncoarse\s*(?:-\s*1\s*)?\)\s*/\s*ngridmax', re.I)),
- ('rev_grid',    re.compile(r'-\s*ncoarse\s*-\s*\(\s*'+ATOM+r'\s*-\s*1\s*\)\s*\*\s*ngridmax', re.I)),
- ('rev_grid_sw', re.compile(r'-\s*ncoarse\s*-\s*ngridmax\s*\*\s*\(\s*'+ATOM+r'\s*-\s*1\s*\)', re.I)),
- ('mod_form',    re.compile(r'mod\s*\(\s*'+ATOM+r'\s*-\s*ncoarse[^)]*ngridmax', re.I)),
+ ('stride',      re.compile(r'ncoarse\s*\+\s*\(\s*'+ATOM+r'\s*-\s*1\s*\)\s*\*\s*ngridmax\b', re.I)),
+ ('stride_swap', re.compile(r'ncoarse\s*\+\s*ngridmax\b\s*\*\s*\(\s*'+ATOM+r'\s*-\s*1\s*\)', re.I)),
+ ('rev_child',   re.compile(r'\(\s*'+ATOM+r'\s*-\s*ncoarse\s*(?:-\s*1\s*)?\)\s*/\s*ngridmax\b', re.I)),
+ ('rev_grid',    re.compile(r'-\s*ncoarse\s*-\s*\(\s*'+ATOM+r'\s*-\s*1\s*\)\s*\*\s*ngridmax\b', re.I)),
+ ('rev_grid_sw', re.compile(r'-\s*ncoarse\s*-\s*ngridmax\b\s*\*\s*\(\s*'+ATOM+r'\s*-\s*1\s*\)', re.I)),
+ ('mod_form',    re.compile(r'mod\s*\(\s*'+ATOM+r'\s*-\s*ncoarse[^)]*ngridmax\b', re.I)),
 ]
-CAP = re.compile(r'twotondim\s*\*\s*ngridmax|ngridmax\s*\*\s*twotondim', re.I)
+CAP = re.compile(r'twotondim\s*\*\s*ngridmax\b|ngridmax\b\s*\*\s*twotondim', re.I)
 
 def sources():
     root = pathlib.Path('.')

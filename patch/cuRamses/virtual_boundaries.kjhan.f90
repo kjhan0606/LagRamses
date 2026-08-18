@@ -35,6 +35,7 @@ end subroutine authorize_coarse
 subroutine sub2_authorize_fine(ibound,ismooth,icpu,ilevel, igrid,ngrid)
   use amr_commons
   use bisection
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -45,7 +46,7 @@ subroutine sub2_authorize_fine(ibound,ismooth,icpu,ilevel, igrid,ngrid)
   ! a dilatation of the authorization map of one cell width.
   ! Array flag1 for virtual cells is used as temporary work space.
   ! -------------------------------------------------------------------
-  integer::ismooth,ibound,ngrid,i,ncache,iskip,igrid,ind,icpu
+  integer::ismooth,ibound,ngrid,i,ncache,igrid,ind,icpu
   integer::ix,iy,iz,idim,nx_loc,isub
   integer,dimension(1:3)::n_nbor
   integer,dimension(1:nvector)::ind_grid,ind_cell
@@ -62,9 +63,8 @@ subroutine sub2_authorize_fine(ibound,ismooth,icpu,ilevel, igrid,ngrid)
      ind_grid(i)=reception(icpu,ilevel)%igrid(igrid+i-1)
   end do
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      do i=1,ngrid
         flag1(ind_cell(i))=0
@@ -75,9 +75,8 @@ subroutine sub2_authorize_fine(ibound,ismooth,icpu,ilevel, igrid,ngrid)
      call count_nbors2(igridn,ind,n_nbor(ismooth),ngrid)
   end do
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      do i=1,ngrid
         if(flag1(ind_cell(i))==1)flag2(ind_cell(i))=1
@@ -91,6 +90,7 @@ end subroutine sub2_authorize_fine
 subroutine sub1_authorize_fine(icpu,ilevel, igrid,ngrid, dx_loc,xc,skip_loc, scale)
   use amr_commons
   use bisection
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -101,7 +101,7 @@ subroutine sub1_authorize_fine(icpu,ilevel, igrid,ngrid, dx_loc,xc,skip_loc, sca
   ! a dilatation of the authorization map of one cell width.
   ! Array flag1 for virtual cells is used as temporary work space.
   ! -------------------------------------------------------------------
-  integer::ismooth,ibound,ngrid,i,ncache,iskip,igrid,ind,icpu
+  integer::ismooth,ibound,ngrid,i,ncache,igrid,ind,icpu
   integer::ix,iy,iz,idim,nx_loc,isub
   integer,dimension(1:3)::n_nbor
   integer,dimension(1:nvector)::ind_grid,ind_cell
@@ -120,9 +120,8 @@ subroutine sub1_authorize_fine(icpu,ilevel, igrid,ngrid, dx_loc,xc,skip_loc, sca
   ! Loop over cells
   do ind=1,twotondim
      ! Gather cell indices
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      ! Gather cell centre positions
      do idim=1,ndim
@@ -211,6 +210,7 @@ end subroutine sub1_authorize_fine
 subroutine authorize_fine(ilevel)
   use amr_commons
   use bisection
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -221,7 +221,7 @@ subroutine authorize_fine(ilevel)
   ! a dilatation of the authorization map of one cell width.
   ! Array flag1 for virtual cells is used as temporary work space.
   ! -------------------------------------------------------------------
-  integer::ismooth,ibound,ngrid,i,ncache,iskip,igrid,ind,icpu
+  integer::ismooth,ibound,ngrid,i,ncache,igrid,ind,icpu
   integer::ix,iy,iz,idim,nx_loc,isub,indgrid
   integer,dimension(1:3)::n_nbor
   integer,dimension(1:nvector)::ind_grid,ind_cell
@@ -263,7 +263,7 @@ subroutine authorize_fine(ilevel)
   ncache=active(ilevel)%ngrid
   ! Loop over grids by vector sweeps
 
-!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,iskip,ind_cell)
+!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,ind_cell)
   do igrid=1,ncache,nvector
      ! Gather nvector grids
      ngrid=MIN(nvector,ncache-igrid+1)
@@ -273,9 +273,8 @@ subroutine authorize_fine(ilevel)
      ! Loop over cells
      do ind=1,twotondim
         ! Gather cell indices
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
         do i=1,ngrid
            flag2(ind_cell(i))=1
@@ -302,12 +301,11 @@ subroutine authorize_fine(ilevel)
      
   flag2(0)=0
   ! Set flag2 to 0 for physical boundary grids
-!$omp parallel do private(ibound,ind,iskip,i)
+!$omp parallel do private(ibound,ind,i)
   do ibound=1,nboundary
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,boundary(ibound,ilevel)%ngrid
-        flag2(boundary(ibound,ilevel)%igrid(i)+iskip)=0
+        flag2(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0
      end do
   end do
   end do
@@ -317,7 +315,7 @@ subroutine authorize_fine(ilevel)
   n_nbor(1:3)=(/1,2,3/)
   do ismooth=1,ndim
      ! Initialize flag1 to 0 in virtual cells
-!$omp parallel do private(icpu) firstprivate(ncache,igrid,ngrid,i,ind_grid,ind,iskip,ind_cell)
+!$omp parallel do private(icpu) firstprivate(ncache,igrid,ngrid,i,ind_grid,ind,ind_cell)
      do icpu=1,ncpu
         ncache=reception(icpu,ilevel)%ngrid
         do igrid=1,ncache,nvector
@@ -326,9 +324,8 @@ subroutine authorize_fine(ilevel)
               ind_grid(i)=reception(icpu,ilevel)%igrid(igrid+i-1)
            end do
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
               do i=1,ngrid
                  flag1(ind_cell(i))=0
@@ -354,7 +351,7 @@ subroutine authorize_fine(ilevel)
      end do
 
      ! Set flag2=1 for cells with flag1=1
-!$omp parallel do private(icpu) firstprivate(ncache,igrid,ngrid,i,ind_grid,ind,iskip,ind_cell)
+!$omp parallel do private(icpu) firstprivate(ncache,igrid,ngrid,i,ind_grid,ind,ind_cell)
      do icpu=1,ncpu
         ncache=reception(icpu,ilevel)%ngrid
         do igrid=1,ncache,nvector
@@ -363,9 +360,8 @@ subroutine authorize_fine(ilevel)
               ind_grid(i)=reception(icpu,ilevel)%igrid(igrid+i-1)
            end do
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
               do i=1,ngrid
                  if(flag1(ind_cell(i))==1)flag2(ind_cell(i))=1
@@ -453,6 +449,7 @@ end subroutine make_virtual_coarse_int
 !################################################################
 subroutine make_virtual_fine_dp(xx,ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -464,7 +461,7 @@ subroutine make_virtual_fine_dp(xx,ilevel)
   ! This routine communicates virtual boundaries among all cpu's.
   ! at level ilevel for any double precision array in the AMR grid.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,ncache,ind,iskip,step
+  integer::icpu,i,j,ncache,ind,step
   integer::countsend,countrecv
   integer::info,buf_count,tag=101
   integer,dimension(ncpu)::reqsend,reqrecv
@@ -514,9 +511,8 @@ subroutine make_virtual_fine_dp(xx,ilevel)
     if (emission(icpu,ilevel)%ngrid>0) then
       do j=1,twotondim
         step=(j-1)*emission(icpu,ilevel)%ngrid
-        iskip=ncoarse+(j-1)*ngridmax
         do i=1,emission(icpu,ilevel)%ngrid
-          emission(icpu,ilevel)%u(i+step,1)=xx(emission(icpu,ilevel)%igrid(i)+iskip)
+          emission(icpu,ilevel)%u(i+step,1)=xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j))
         end do
       end do
     end if
@@ -541,9 +537,8 @@ subroutine make_virtual_fine_dp(xx,ilevel)
     if (reception(icpu,ilevel)%ngrid>0) then
       do j=1,twotondim
         step=(j-1)*reception(icpu,ilevel)%ngrid
-        iskip=ncoarse+(j-1)*ngridmax
         do i=1,reception(icpu,ilevel)%ngrid
-          xx(reception(icpu,ilevel)%igrid(i)+iskip)=reception(icpu,ilevel)%u(i+step,1)
+          xx(ICELL_OF(reception(icpu,ilevel)%igrid(i),j))=reception(icpu,ilevel)%u(i+step,1)
         end do
       end do 
     end if
@@ -564,6 +559,7 @@ end subroutine make_virtual_fine_dp
 !################################################################
 subroutine make_virtual_fine_dp2(xx1,xx2,ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -577,7 +573,7 @@ subroutine make_virtual_fine_dp2(xx1,xx2,ilevel)
   ! Unlike the legacy routine, its private dispatch may use the already
   ! initialized K-Section tree with Hilbert ordering.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,ncache,iskip,step
+  integer::icpu,i,j,ncache,step
   integer::countsend,countrecv
   integer::info,tag=101
   integer,dimension(ncpu)::reqsend,reqrecv
@@ -628,12 +624,11 @@ subroutine make_virtual_fine_dp2(xx1,xx2,ilevel)
      if(emission(icpu,ilevel)%ngrid>0) then
         do j=1,twotondim
            step=(j-1)*emission(icpu,ilevel)%ngrid
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,emission(icpu,ilevel)%ngrid
               emission(icpu,ilevel)%u(i+step,1)= &
-                   & xx1(emission(icpu,ilevel)%igrid(i)+iskip)
+                   & xx1(ICELL_OF(emission(icpu,ilevel)%igrid(i),j))
               emission(icpu,ilevel)%u(i+step,2)= &
-                   & xx2(emission(icpu,ilevel)%igrid(i)+iskip)
+                   & xx2(ICELL_OF(emission(icpu,ilevel)%igrid(i),j))
            end do
         end do
      end if
@@ -655,11 +650,10 @@ subroutine make_virtual_fine_dp2(xx1,xx2,ilevel)
      if(reception(icpu,ilevel)%ngrid>0) then
         do j=1,twotondim
            step=(j-1)*reception(icpu,ilevel)%ngrid
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,reception(icpu,ilevel)%ngrid
-              xx1(reception(icpu,ilevel)%igrid(i)+iskip)= &
+              xx1(ICELL_OF(reception(icpu,ilevel)%igrid(i),j))= &
                    & reception(icpu,ilevel)%u(i+step,1)
-              xx2(reception(icpu,ilevel)%igrid(i)+iskip)= &
+              xx2(ICELL_OF(reception(icpu,ilevel)%igrid(i),j))= &
                    & reception(icpu,ilevel)%u(i+step,2)
            end do
         end do
@@ -678,6 +672,7 @@ end subroutine make_virtual_fine_dp2
 !################################################################
 subroutine make_virtual_fine_int(xx,ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -689,7 +684,7 @@ subroutine make_virtual_fine_int(xx,ilevel)
   ! This routine communicates virtual boundaries among all cpu's.
   ! at level ilevel for any integer array in the AMR grid.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,ncache,ind,iskip,step
+  integer::icpu,i,j,ncache,ind,step
   integer::countsend,countrecv
   integer::info,buf_count,tag=101
   integer,dimension(ncpu)::reqsend,reqrecv
@@ -738,9 +733,8 @@ subroutine make_virtual_fine_int(xx,ilevel)
     if (emission(icpu,ilevel)%ngrid>0) then
       do j=1,twotondim
         step=(j-1)*emission(icpu,ilevel)%ngrid
-        iskip=ncoarse+(j-1)*ngridmax
         do i=1,emission(icpu,ilevel)%ngrid
-          emission(icpu,ilevel)%f(i+step,1)=xx(emission(icpu,ilevel)%igrid(i)+iskip)
+          emission(icpu,ilevel)%f(i+step,1)=xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j))
         end do
       end do
     end if
@@ -765,9 +759,8 @@ subroutine make_virtual_fine_int(xx,ilevel)
     if (reception(icpu,ilevel)%ngrid>0) then
       do j=1,twotondim
         step=(j-1)*reception(icpu,ilevel)%ngrid
-        iskip=ncoarse+(j-1)*ngridmax
         do i=1,reception(icpu,ilevel)%ngrid
-          xx(reception(icpu,ilevel)%igrid(i)+iskip)=reception(icpu,ilevel)%f(i+step,1)
+          xx(ICELL_OF(reception(icpu,ilevel)%igrid(i),j))=reception(icpu,ilevel)%f(i+step,1)
         end do
       end do 
     end if
@@ -788,6 +781,7 @@ end subroutine make_virtual_fine_int
 !################################################################
 subroutine make_virtual_reverse_dp(xx,ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -798,7 +792,7 @@ subroutine make_virtual_reverse_dp(xx,ilevel)
   ! This routine communicates virtual boundaries among all cpu's.
   ! at level ilevel in a reverse way for double precision arrays.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,ncache,ind,iskip,step,icell,ibuf
+  integer::icpu,i,j,ncache,ind,step,icell,ibuf
   integer::countsend,countrecv
   integer::info,buf_count,tag=101
   integer,dimension(ncpu)::reqsend,reqrecv
@@ -842,9 +836,8 @@ subroutine make_virtual_reverse_dp(xx,ilevel)
      if (reception(icpu,ilevel)%ngrid>0) then
         do j=1,twotondim
            step=(j-1)*reception(icpu,ilevel)%ngrid
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,reception(icpu,ilevel)%ngrid
-              icell=reception(icpu,ilevel)%igrid(i)+iskip
+              icell=ICELL_OF(reception(icpu,ilevel)%igrid(i),j)
               ibuf=i+step
               reception(icpu,ilevel)%u(ibuf,1)=xx(icell)
            end do
@@ -897,10 +890,9 @@ subroutine make_virtual_reverse_dp(xx,ilevel)
      if (emission(icpu,ilevel)%ngrid>0) then
         do j=1,twotondim
            step=(j-1)*emission(icpu,ilevel)%ngrid
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,emission(icpu,ilevel)%ngrid
-              xx(emission(icpu,ilevel)%igrid(i)+iskip)= &
-                   & xx(emission(icpu,ilevel)%igrid(i)+iskip) + emission(icpu,ilevel)%u(i+step,1)
+              xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j))= &
+                   & xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j)) + emission(icpu,ilevel)%u(i+step,1)
            end do
         end do
      end if
@@ -924,9 +916,8 @@ subroutine make_virtual_reverse_dp(xx,ilevel)
      if (reception(icpu,ilevel)%ngrid>0) then
         do j=1,twotondim
            step=(j-1)*reception(icpu,ilevel)%ngrid
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,reception(icpu,ilevel)%ngrid
-              reception(icpu,ilevel)%u(i+step,1)=xx(reception(icpu,ilevel)%igrid(i)+iskip)
+              reception(icpu,ilevel)%u(i+step,1)=xx(ICELL_OF(reception(icpu,ilevel)%igrid(i),j))
            end do
         end do
      end if
@@ -951,10 +942,9 @@ subroutine make_virtual_reverse_dp(xx,ilevel)
     if (emission(icpu,ilevel)%ngrid>0) then
       do j=1,twotondim
         step=(j-1)*emission(icpu,ilevel)%ngrid
-        iskip=ncoarse+(j-1)*ngridmax
         do i=1,emission(icpu,ilevel)%ngrid
-           xx(emission(icpu,ilevel)%igrid(i)+iskip)= &
-                & xx(emission(icpu,ilevel)%igrid(i)+iskip) + emission(icpu,ilevel)%u(i+step,1)
+           xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j))= &
+                & xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j)) + emission(icpu,ilevel)%u(i+step,1)
         end do
       end do 
     end if
@@ -1028,6 +1018,7 @@ end subroutine make_virtual_reverse_dp2
 !################################################################
 subroutine make_virtual_reverse_int(xx,ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1038,7 +1029,7 @@ subroutine make_virtual_reverse_int(xx,ilevel)
   ! This routine communicates virtual boundaries among all cpu's.
   ! at level ilevel in a reverse way for integer arrays.
   ! -------------------------------------------------------------------
-  integer::icpu,i,j,ncache,ind,iskip,step,icell,ibuf
+  integer::icpu,i,j,ncache,ind,step,icell,ibuf
   integer::countsend,countrecv
   integer::info,buf_count,tag=101
   integer,dimension(ncpu)::reqsend,reqrecv
@@ -1083,9 +1074,8 @@ subroutine make_virtual_reverse_int(xx,ilevel)
      if (reception(icpu,ilevel)%ngrid>0) then
         do j=1,twotondim
            step=(j-1)*reception(icpu,ilevel)%ngrid
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,reception(icpu,ilevel)%ngrid
-              icell=reception(icpu,ilevel)%igrid(i)+iskip
+              icell=ICELL_OF(reception(icpu,ilevel)%igrid(i),j)
               ibuf=i+step
               reception(icpu,ilevel)%f(ibuf,1)=xx(icell)
            end do
@@ -1138,10 +1128,9 @@ subroutine make_virtual_reverse_int(xx,ilevel)
      if (emission(icpu,ilevel)%ngrid>0) then
         do j=1,twotondim
            step=(j-1)*emission(icpu,ilevel)%ngrid
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,emission(icpu,ilevel)%ngrid
-              xx(emission(icpu,ilevel)%igrid(i)+iskip)= &
-                   & xx(emission(icpu,ilevel)%igrid(i)+iskip) + emission(icpu,ilevel)%f(i+step,1)
+              xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j))= &
+                   & xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j)) + emission(icpu,ilevel)%f(i+step,1)
            end do
         end do
      end if
@@ -1165,9 +1154,8 @@ subroutine make_virtual_reverse_int(xx,ilevel)
      if (reception(icpu,ilevel)%ngrid>0) then
         do j=1,twotondim
            step=(j-1)*reception(icpu,ilevel)%ngrid
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,reception(icpu,ilevel)%ngrid
-              reception(icpu,ilevel)%f(i+step,1)=xx(reception(icpu,ilevel)%igrid(i)+iskip)
+              reception(icpu,ilevel)%f(i+step,1)=xx(ICELL_OF(reception(icpu,ilevel)%igrid(i),j))
            end do
         end do
      end if
@@ -1192,10 +1180,9 @@ subroutine make_virtual_reverse_int(xx,ilevel)
      if (emission(icpu,ilevel)%ngrid>0) then
         do j=1,twotondim
            step=(j-1)*emission(icpu,ilevel)%ngrid
-           iskip=ncoarse+(j-1)*ngridmax
            do i=1,emission(icpu,ilevel)%ngrid
-              xx(emission(icpu,ilevel)%igrid(i)+iskip)= &
-                   & xx(emission(icpu,ilevel)%igrid(i)+iskip) + emission(icpu,ilevel)%f(i+step,1)
+              xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j))= &
+                   & xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j)) + emission(icpu,ilevel)%f(i+step,1)
            end do
         end do
      end if
@@ -1221,6 +1208,7 @@ subroutine build_comm(ilevel)
   use amr_commons
   use poisson_commons, only: lookup_mg
   use ksection
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1231,7 +1219,7 @@ subroutine build_comm(ilevel)
   ! Array flag2 is used as temporary work space.
   ! -------------------------------------------------------------------
   integer::icpu,ibound
-  integer::ncache,ind,iskip
+  integer::ncache,ind
   integer::i,j,k,nxny
   integer::igrid,jgrid,ngrid
   integer::info,tag=101
@@ -1276,9 +1264,8 @@ subroutine build_comm(ilevel)
            ind_grid(i)=active(ilevel-1)%igrid(igrid+i-1)
         end do
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ngrid
               if(cpu_map(ind_cell(i))==myid)then
@@ -1297,9 +1284,8 @@ subroutine build_comm(ilevel)
               ind_grid(i)=reception(icpu,ilevel-1)%igrid(igrid+i-1)
            end do
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
               do i=1,ngrid
                  if(cpu_map(ind_cell(i))==myid)then
@@ -1499,6 +1485,7 @@ end subroutine build_comm
 subroutine make_virtual_fine_dp_ksec(xx,ilevel)
   use amr_commons
   use dynamic_exchange, only: choose_exchange_backend, exchange_dp_sorted
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1541,7 +1528,7 @@ subroutine make_virtual_fine_dp_ksec(xx,ilevel)
      do j=1,twotondim
         do i=1,nsend(icpu)
            sendbuf(sdisp_elem(icpu)+(j-1)*nsend(icpu)+i)= &
-                xx(emission(icpu,ilevel)%igrid(i)+ncoarse+(j-1)*ngridmax)
+                xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j))
         end do
      end do
   end do
@@ -1566,7 +1553,7 @@ subroutine make_virtual_fine_dp_ksec(xx,ilevel)
      do j=1,twotondim
         do i=1,nrecv_peer(icpu)
            igrid=reception(icpu,ilevel)%igrid(i)
-           xx(igrid+ncoarse+(j-1)*ngridmax)= &
+           xx(ICELL_OF(igrid,j))= &
                 recvbuf(rdisp_elem(icpu)+(j-1)*nrecv_peer(icpu)+i)
         end do
      end do
@@ -1583,6 +1570,7 @@ end subroutine make_virtual_fine_dp_ksec
 subroutine make_virtual_fine_dp2_ksec(xx1,xx2,ilevel)
   use amr_commons
   use dynamic_exchange, only: exchange_dp_records
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1614,7 +1602,7 @@ subroutine make_virtual_fine_dp2_ksec(xx1,xx2,ilevel)
         idx = idx + 1
         dest_cpu(idx) = icpu
         do j=1,twotondim
-           igrid = emission(icpu,ilevel)%igrid(i) + ncoarse + (j-1)*ngridmax
+           igrid = ICELL_OF(emission(icpu,ilevel)%igrid(i),j)
            sendbuf(j,idx) = xx1(igrid)
            sendbuf(twotondim+j,idx) = xx2(igrid)
         end do
@@ -1631,8 +1619,8 @@ subroutine make_virtual_fine_dp2_ksec(xx1,xx2,ilevel)
      ridx = nint(recvbuf(2*twotondim+2,i))
      igrid = reception(sender,ilevel)%igrid(ridx)
      do j=1,twotondim
-        xx1(igrid+ncoarse+(j-1)*ngridmax) = recvbuf(j,i)
-        xx2(igrid+ncoarse+(j-1)*ngridmax) = recvbuf(twotondim+j,i)
+        xx1(ICELL_OF(igrid,j)) = recvbuf(j,i)
+        xx2(ICELL_OF(igrid,j)) = recvbuf(twotondim+j,i)
      end do
   end do
 
@@ -1647,6 +1635,7 @@ end subroutine make_virtual_fine_dp2_ksec
 subroutine make_virtual_reverse_dp_ksec(xx,ilevel)
   use amr_commons
   use dynamic_exchange, only: exchange_dp_records
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1680,8 +1669,7 @@ subroutine make_virtual_reverse_dp_ksec(xx,ilevel)
         idx = idx + 1
         dest_cpu(idx) = icpu
         do j = 1, twotondim
-           sendbuf(j, idx) = xx(reception(icpu,ilevel)%igrid(i) &
-                & + ncoarse + (j-1)*ngridmax)
+           sendbuf(j, idx) = xx(ICELL_OF(reception(icpu,ilevel)%igrid(i),j))
         end do
         sendbuf(twotondim+1, idx) = dble(myid)
         sendbuf(twotondim+2, idx) = dble(i)
@@ -1698,8 +1686,8 @@ subroutine make_virtual_reverse_dp_ksec(xx,ilevel)
      eidx   = nint(recvbuf(twotondim+2, i))
      igrid  = emission(sender, ilevel)%igrid(eidx)
      do j = 1, twotondim
-        xx(igrid + ncoarse + (j-1)*ngridmax) = &
-             & xx(igrid + ncoarse + (j-1)*ngridmax) + recvbuf(j, i)
+        xx(ICELL_OF(igrid,j)) = &
+             & xx(ICELL_OF(igrid,j)) + recvbuf(j, i)
      end do
   end do
 
@@ -1714,6 +1702,7 @@ end subroutine make_virtual_reverse_dp_ksec
 subroutine make_virtual_fine_int_ksec(xx,ilevel)
   use amr_commons
   use dynamic_exchange, only: exchange_dp_records
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1746,8 +1735,7 @@ subroutine make_virtual_fine_int_ksec(xx,ilevel)
         idx = idx + 1
         dest_cpu(idx) = icpu
         do j = 1, twotondim
-           sendbuf(j, idx) = dble(xx(emission(icpu,ilevel)%igrid(i) &
-                & + ncoarse + (j-1)*ngridmax))
+           sendbuf(j, idx) = dble(xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j)))
         end do
         sendbuf(twotondim+1, idx) = dble(myid)
         sendbuf(twotondim+2, idx) = dble(i)
@@ -1764,7 +1752,7 @@ subroutine make_virtual_fine_int_ksec(xx,ilevel)
      ridx   = nint(recvbuf(twotondim+2, i))
      igrid  = reception(sender, ilevel)%igrid(ridx)
      do j = 1, twotondim
-        xx(igrid + ncoarse + (j-1)*ngridmax) = nint(recvbuf(j, i))
+        xx(ICELL_OF(igrid,j)) = nint(recvbuf(j, i))
      end do
   end do
 
@@ -1834,6 +1822,7 @@ end subroutine make_virtual_fine_int_pair
 subroutine make_virtual_fine_int_pair_ksec(xx1,xx2,ilevel)
   use amr_commons
   use dynamic_exchange, only: exchange_dp_records
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1866,10 +1855,8 @@ subroutine make_virtual_fine_int_pair_ksec(xx1,xx2,ilevel)
         idx = idx + 1
         dest_cpu(idx) = icpu
         do j = 1, twotondim
-           sendbuf(j, idx) = dble(xx1(emission(icpu,ilevel)%igrid(i) &
-                & + ncoarse + (j-1)*ngridmax))
-           sendbuf(twotondim + j, idx) = dble(xx2(emission(icpu,ilevel)%igrid(i) &
-                & + ncoarse + (j-1)*ngridmax))
+           sendbuf(j, idx) = dble(xx1(ICELL_OF(emission(icpu,ilevel)%igrid(i),j)))
+           sendbuf(twotondim + j, idx) = dble(xx2(ICELL_OF(emission(icpu,ilevel)%igrid(i),j)))
         end do
         sendbuf(2*twotondim + 1, idx) = dble(myid)
         sendbuf(2*twotondim + 2, idx) = dble(i)
@@ -1886,8 +1873,8 @@ subroutine make_virtual_fine_int_pair_ksec(xx1,xx2,ilevel)
      ridx   = nint(recvbuf(2*twotondim + 2, i))
      igrid  = reception(sender, ilevel)%igrid(ridx)
      do j = 1, twotondim
-        xx1(igrid + ncoarse + (j-1)*ngridmax) = nint(recvbuf(j, i))
-        xx2(igrid + ncoarse + (j-1)*ngridmax) = nint(recvbuf(twotondim + j, i))
+        xx1(ICELL_OF(igrid,j)) = nint(recvbuf(j, i))
+        xx2(ICELL_OF(igrid,j)) = nint(recvbuf(twotondim + j, i))
      end do
   end do
 
@@ -1902,6 +1889,7 @@ end subroutine make_virtual_fine_int_pair_ksec
 subroutine make_virtual_reverse_int_ksec(xx,ilevel)
   use amr_commons
   use dynamic_exchange, only: exchange_dp_records
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1934,8 +1922,7 @@ subroutine make_virtual_reverse_int_ksec(xx,ilevel)
         idx = idx + 1
         dest_cpu(idx) = icpu
         do j = 1, twotondim
-           sendbuf(j, idx) = dble(xx(reception(icpu,ilevel)%igrid(i) &
-                & + ncoarse + (j-1)*ngridmax))
+           sendbuf(j, idx) = dble(xx(ICELL_OF(reception(icpu,ilevel)%igrid(i),j)))
         end do
         sendbuf(twotondim+1, idx) = dble(myid)
         sendbuf(twotondim+2, idx) = dble(i)
@@ -1952,8 +1939,8 @@ subroutine make_virtual_reverse_int_ksec(xx,ilevel)
      eidx   = nint(recvbuf(twotondim+2, i))
      igrid  = emission(sender, ilevel)%igrid(eidx)
      do j = 1, twotondim
-        xx(igrid + ncoarse + (j-1)*ngridmax) = &
-             & xx(igrid + ncoarse + (j-1)*ngridmax) + nint(recvbuf(j, i))
+        xx(ICELL_OF(igrid,j)) = &
+             & xx(ICELL_OF(igrid,j)) + nint(recvbuf(j, i))
      end do
   end do
 
@@ -2030,6 +2017,7 @@ end subroutine make_virtual_fine_dp_bulk
 subroutine make_virtual_fine_dp_bulk_ksec(xx,ncols,ilevel)
   use amr_commons
   use dynamic_exchange, only: exchange_dp_records
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2066,8 +2054,7 @@ subroutine make_virtual_fine_dp_bulk_ksec(xx,ncols,ilevel)
         do iv = 1, ncols
            do j = 1, twotondim
               sendbuf((iv-1)*twotondim + j, idx) = &
-                   & xx(emission(icpu,ilevel)%igrid(i) &
-                   & + ncoarse + (j-1)*ngridmax, iv)
+                   & xx(ICELL_OF(emission(icpu,ilevel)%igrid(i),j), iv)
            end do
         end do
         sendbuf(ncols*twotondim + 1, idx) = dble(myid)
@@ -2108,7 +2095,7 @@ subroutine make_virtual_fine_dp_bulk_ksec(xx,ncols,ilevel)
      endif
      do iv = 1, ncols
         do j = 1, twotondim
-           xx(igrid + ncoarse + (j-1)*ngridmax, iv) = &
+           xx(ICELL_OF(igrid,j), iv) = &
                 & recvbuf((iv-1)*twotondim + j, i)
         end do
      end do
@@ -2182,6 +2169,7 @@ end subroutine make_virtual_reverse_dp_bulk
 subroutine make_virtual_reverse_dp_bulk_ksec(xx,ncols,ilevel)
   use amr_commons
   use dynamic_exchange, only: exchange_dp_records
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2218,8 +2206,7 @@ subroutine make_virtual_reverse_dp_bulk_ksec(xx,ncols,ilevel)
         do iv = 1, ncols
            do j = 1, twotondim
               sendbuf((iv-1)*twotondim + j, idx) = &
-                   & xx(reception(icpu,ilevel)%igrid(i) &
-                   & + ncoarse + (j-1)*ngridmax, iv)
+                   & xx(ICELL_OF(reception(icpu,ilevel)%igrid(i),j), iv)
            end do
         end do
         sendbuf(ncols*twotondim + 1, idx) = dble(myid)
@@ -2238,8 +2225,8 @@ subroutine make_virtual_reverse_dp_bulk_ksec(xx,ncols,ilevel)
      igrid  = emission(sender, ilevel)%igrid(eidx)
      do iv = 1, ncols
         do j = 1, twotondim
-           xx(igrid + ncoarse + (j-1)*ngridmax, iv) = &
-                & xx(igrid + ncoarse + (j-1)*ngridmax, iv) + &
+           xx(ICELL_OF(igrid,j), iv) = &
+                & xx(ICELL_OF(igrid,j), iv) + &
                 & recvbuf((iv-1)*twotondim + j, i)
         end do
      end do

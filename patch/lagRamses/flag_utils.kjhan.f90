@@ -116,6 +116,7 @@ end subroutine flag_fine
 !################################################################
 subroutine init_flag(ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !-------------------------------------------
@@ -123,7 +124,7 @@ subroutine init_flag(ilevel)
   ! to a minimal state in order to satisfy the
   ! refinement rules.
   !-------------------------------------------
-  integer::i,ind,iskip,mflag
+  integer::i,ind,mflag
 
   ! Initialize flag1 to 0
   nflag=0
@@ -162,23 +163,21 @@ subroutine init_flag(ilevel)
 !       end do
 !    end if
 ! end if
-!$omp parallel do private(i,ind,iskip)
+!$omp parallel do private(i,ind)
   do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-        flag1(active(ilevel)%igrid(i)+iskip)=0
+        flag1(ICELL_OF(active(ilevel)%igrid(i),ind))=0
      end do
   end do
 
   ! If load balancing operations, flag only refined cells
   if(balance)then
      mflag = 0
-!$omp parallel do private(ind,iskip,i) reduction(+: mflag)
+!$omp parallel do private(ind,i) reduction(+: mflag)
      do i=1,active(ilevel)%ngrid
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           if(son(active(ilevel)%igrid(i)+iskip)>0)then
-              flag1(active(ilevel)%igrid(i)+iskip)=1
+           if(son(ICELL_OF(active(ilevel)%igrid(i),ind))>0)then
+              flag1(ICELL_OF(active(ilevel)%igrid(i),ind))=1
               mflag=mflag+1
            end if
         end do
@@ -192,11 +191,10 @@ subroutine init_flag(ilevel)
      else
         ! If ilevel < levelmin, set flag to 1 for all cells
         mflag = 0
-!$omp parallel do private(ind,iskip,i) reduction(+: mflag)
+!$omp parallel do private(ind,i) reduction(+: mflag)
         do i=1,active(ilevel)%ngrid
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
-              flag1(active(ilevel)%igrid(i)+iskip)=1
+              flag1(ICELL_OF(active(ilevel)%igrid(i),ind))=1
            end do
            mflag=mflag+twotondim
         end do
@@ -215,6 +213,7 @@ end subroutine init_flag
 !################################################################
 subroutine test_flag(ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !---------------------------------------------------------
@@ -222,31 +221,29 @@ subroutine test_flag(ilevel)
   ! contains a flagged son or a refined son.
   ! This ensures that refinement rules are satisfied.
   !---------------------------------------------------------
-  integer::i,ind_son,ind,iskip
-  integer::iskip_son,ind_grid_son,ind_cell_son
+  integer::i,ind_son,ind
+  integer::ind_grid_son,ind_cell_son
   logical::ok
 
   ! Loop over cells
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      ! Test all refined cells
      do i=1,active(ilevel)%ngrid
         ! Gather child grid number
-        ind_grid_son=son(active(ilevel)%igrid(i)+iskip)
+        ind_grid_son=son(ICELL_OF(active(ilevel)%igrid(i),ind))
         ! Test child if it exists
         ok=.false.
         if(ind_grid_son>0)then
            ! Loop over children cells
            do ind_son=1,twotondim
-              iskip_son=ncoarse+(ind_son-1)*ngridmax
-              ind_cell_son=iskip_son+ind_grid_son
+              ind_cell_son=ICELL_OF(ind_grid_son,ind_son)
               ok=(ok.or.(son  (ind_cell_son)> 0))
               ok=(ok.or.(flag1(ind_cell_son)==1))
            end do
         end if
         ! If ok, then flag1 cells.
         if(ok)then
-           flag1(active(ilevel)%igrid(i)+iskip)=1
+           flag1(ICELL_OF(active(ilevel)%igrid(i),ind))=1
            nflag=nflag+1
         end if
      end do
@@ -260,6 +257,7 @@ end subroutine test_flag
 !################################################################
 subroutine ensure_ref_rules(ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !-----------------------------------------------------------------
@@ -268,7 +266,7 @@ subroutine ensure_ref_rules(ilevel)
   ! strict refinement rule. 
   ! Used in case of adaptive time steps only.
   !-----------------------------------------------------------------
-  integer::i,ind,iskip,igrid,ngrid,ncache
+  integer::i,ind,igrid,ngrid,ncache
   integer,dimension(1:nvector)::ind_cell,ind_grid
   integer,dimension(1:nvector,1:threetondim)::nbors_father_cells
   integer,dimension(1:nvector,1:twotondim)::nbors_father_grids
@@ -306,9 +304,8 @@ subroutine ensure_ref_rules(ilevel)
      end do
      
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
         do i=1,ngrid
            if(.not.ok(i))flag1(ind_cell(i))=0
@@ -331,13 +328,14 @@ subroutine sub_userflag_fine(ilevel,skip_loc,scale, igrid,ngrid,iflag)
   use hydro_commons
   use pm_commons    ! headp, nextp, idp, tp, xp for sink particle check
   use cooling_module
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
   ! This routine flag for refinement cells that satisfies
   ! some user-defined physical criteria at the level ilevel.
   ! -------------------------------------------------------------------
-  integer::i,j,ncache,nok,ix,iy,iz,iskip,iflag,jflag
+  integer::i,j,ncache,nok,ix,iy,iz,iflag,jflag
   integer::igrid,ind,idim,ngrid,ivar
   integer::nx_loc
   integer::ipart,ind_part
@@ -381,9 +379,8 @@ subroutine sub_userflag_fine(ilevel,skip_loc,scale, igrid,ngrid,iflag)
   ! Loop over cells
   do ind=1,twotondim
 
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
 
      ! Initialize refinement to false
@@ -571,22 +568,22 @@ end subroutine userflag_fine
 !#####################################################################
 subroutine voidflag_fine(ilevel,skip_loc,scale,xc)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::scale
   real(dp),dimension(1:3),intent(in)::skip_loc
   real(dp),dimension(1:twotondim,1:3),intent(in)::xc
-  integer::i,ind,idim,iskip,ind_grid,ind_cell,nnew
+  integer::i,ind,idim,ind_grid,ind_cell,nnew
   real(dp),dimension(1:ndim)::xx
   logical::refine_region_contains
 
   nnew=0
-!$omp parallel do private(i,ind,idim,iskip,ind_grid,ind_cell,xx) reduction(+:nnew)
+!$omp parallel do private(i,ind,idim,ind_grid,ind_cell,xx) reduction(+:nnew)
   do i=1,active(ilevel)%ngrid
      ind_grid=active(ilevel)%igrid(i)
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-        ind_cell=ind_grid+iskip
+        ind_cell=ICELL_OF(ind_grid,ind)
         do idim=1,ndim
            xx(idim)=(xg(ind_grid,idim)+xc(ind,idim)-skip_loc(idim))*scale
         end do
@@ -608,9 +605,10 @@ end subroutine voidflag_fine
 !#####################################################################
 subroutine void_webflag_fine(ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
-  integer::i,ind,iskip,ind_grid,ind_cell,ancestor_cell
+  integer::i,ind,ind_grid,ind_cell,ancestor_cell
   integer::ancestor_level,ancestor_grid,state,nnew
   logical::refine_cell
 
@@ -621,20 +619,19 @@ subroutine void_webflag_fine(ilevel)
   if(.not.void_web_state_valid)return
 
   nnew=0
-!$omp parallel do private(i,ind,iskip,ind_grid,ind_cell,ancestor_cell) &
+!$omp parallel do private(i,ind,ind_grid,ind_cell,ancestor_cell) &
 !$omp& private(ancestor_level,ancestor_grid,state,refine_cell) reduction(+:nnew)
   do i=1,active(ilevel)%ngrid
      ind_grid=active(ilevel)%igrid(i)
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-        ind_cell=ind_grid+iskip
+        ind_cell=ICELL_OF(ind_grid,ind)
 
         ! Follow the AMR tree to the fixed environmental scale.  The state
         ! therefore does not depend on the current leaf level.
         ancestor_cell=ind_cell
         ancestor_level=ilevel
         do while(ancestor_level>void_web_env_level .and. ancestor_cell>ncoarse)
-           ancestor_grid=mod(ancestor_cell-ncoarse-1,ngridmax)+1
+           ancestor_grid=IGRID_OF(ancestor_cell)
            ancestor_cell=father(ancestor_grid)
            ancestor_level=ancestor_level-1
         end do
@@ -801,12 +798,13 @@ subroutine sub_update_void_web_state(igrid_start,ngrid,dx_loc,rate_norm, &
   use amr_commons
   use hydro_commons
   use hydro_parameters, only: smallr
+#include "amr_index.h"
   implicit none
   integer,intent(in)::igrid_start,ngrid
   real(dp),intent(in)::dx_loc,rate_norm
   integer,intent(out)::nscope,nwall,nvalid
   real(dp),intent(out)::lambda_min,lambda_max
-  integer::i,ind,idim,jdim,iskip,ind_cell,old_state,new_state
+  integer::i,ind,idim,jdim,ind_cell,old_state,new_state
   integer::cell_minus,cell_plus
   integer,dimension(1:nvector)::ind_grid
   integer,dimension(1:nvector,0:twondim)::igridn
@@ -827,10 +825,9 @@ subroutine sub_update_void_web_state(igrid_start,ngrid,dx_loc,rate_norm, &
   lambda_min=huge(1.0d0)
   lambda_max=-huge(1.0d0)
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      call getnborcells(igridn,ind,indn,ngrid)
      do i=1,ngrid
-        ind_cell=ind_grid(i)+iskip
+        ind_cell=ICELL_OF(ind_grid(i),ind)
         select case(void_web_scope_ivar)
         case(-1)
            in_scope=.true.
@@ -1148,6 +1145,7 @@ end function refine_region_contains
 !############################################################
 subroutine sub1_smooth_fine(ilevel, igrid,ngrid)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -1160,16 +1158,15 @@ subroutine sub1_smooth_fine(ilevel, igrid,ngrid)
   ! Array flag2 is used as temporary workspace.
   ! -------------------------------------------------------------------
   integer::ismooth
-  integer::i,ncache,iskip,ngrid
+  integer::i,ncache,ngrid
   integer::igrid,ind
   integer,dimension(1:nvector)::ind_grid,ind_cell
   do i=1,ngrid
      ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
   end do
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      do i=1,ngrid
         flag2(ind_cell(i))=0
@@ -1183,6 +1180,7 @@ end subroutine sub1_smooth_fine
 !############################################################
 subroutine sub2_smooth_fine(ilevel, igrid,ngrid,iflag)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel,iflag
   ! -------------------------------------------------------------------
@@ -1195,7 +1193,7 @@ subroutine sub2_smooth_fine(ilevel, igrid,ngrid,iflag)
   ! Array flag2 is used as temporary workspace.
   ! -------------------------------------------------------------------
   integer::ismooth
-  integer::i,ncache,iskip,ngrid
+  integer::i,ncache,ngrid
   integer::igrid,ind
   integer,dimension(1:nvector)::ind_grid,ind_cell
   iflag = 0
@@ -1203,9 +1201,8 @@ subroutine sub2_smooth_fine(ilevel, igrid,ngrid,iflag)
      ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
   end do
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      do i=1,ngrid
         if(flag1(ind_cell(i))==1)flag2(ind_cell(i))=0
@@ -1224,6 +1221,7 @@ end subroutine sub2_smooth_fine
 !############################################################
 subroutine smooth_fine(ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -1236,7 +1234,7 @@ subroutine smooth_fine(ilevel)
   ! Array flag2 is used as temporary workspace.
   ! -------------------------------------------------------------------
   integer::ismooth,mflag
-  integer::i,j,ncache,iskip,ngrid,iflag,jflag
+  integer::i,j,ncache,ngrid,iflag,jflag
   integer::igrid,ind
   integer,dimension(1:3)::n_nbor
 ! integer,dimension(1:nvector),save::ind_grid,ind_cell
@@ -1271,16 +1269,15 @@ subroutine smooth_fine(ilevel)
   ! Loop over steps
   do ismooth=1,ndim
      ! Initialize flag2 to 0
-!$omp parallel do private(igrid,ngrid,i,ind,iskip)
+!$omp parallel do private(igrid,ngrid,i,ind)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
            ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
         end do
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ngrid
               flag2(ind_cell(i))=0
@@ -1302,16 +1299,15 @@ subroutine smooth_fine(ilevel)
      end do
      ! Set flag1=1 for cells with flag2=1
      mflag = 0
-!$omp parallel do private(igrid,ngrid,i,ind,iskip) reduction(+:mflag)
+!$omp parallel do private(igrid,ngrid,i,ind) reduction(+:mflag)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
            ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
         end do
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ngrid
               if(flag1(ind_cell(i))==1)flag2(ind_cell(i))=0
@@ -1339,6 +1335,7 @@ end subroutine smooth_fine
 !############################################################
 subroutine count_nbors(igridn,ind,n_nbor,nn)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ind,nn,n_nbor
   integer,dimension(1:nvector,0:twondim)::igridn
@@ -1350,13 +1347,12 @@ subroutine count_nbors(igridn,ind,n_nbor,nn)
   ! If the number of flag1 neighbors exceeds n_nbor, 
   ! then cell is marked with flag2=1
   !----------------------------------------------------
-  integer::i,in,iskip
+  integer::i,in
   integer,dimension(1:nvector)::ind_cell,i_nbor
   integer,dimension(1:nvector,1:twondim)::indn
   ! Compute cell number
-  iskip=ncoarse+(ind-1)*ngridmax
   do i=1,nn
-     ind_cell(i)=iskip+igridn(i,0)
+     ind_cell(i)=ICELL_OF(igridn(i,0),ind)
   end do
   ! Gather neighbors
   call getnborcells(igridn,ind,indn,nn)
@@ -1378,6 +1374,7 @@ end subroutine count_nbors
 !############################################################
 subroutine count_nbors2(igridn,ind,n_nbor,nn)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ind,nn,n_nbor
   integer,dimension(1:nvector,0:twondim)::igridn
@@ -1389,13 +1386,12 @@ subroutine count_nbors2(igridn,ind,n_nbor,nn)
   ! If the number of flag2 neighbors exceeds n_nbor, 
   ! then cell is marked with flag1=1
   !----------------------------------------------------
-  integer::i,in,iskip
+  integer::i,in
   integer,dimension(1:nvector)::ind_cell,i_nbor
   integer,dimension(1:nvector,1:twondim)::indn
   ! Compute cell number
-  iskip=ncoarse+(ind-1)*ngridmax
   do i=1,nn
-     ind_cell(i)=iskip+igridn(i,0)
+     ind_cell(i)=ICELL_OF(igridn(i,0),ind)
   end do
   ! Gather neighbors
   call getnborcells(igridn,ind,indn,nn)
@@ -1435,13 +1431,14 @@ end subroutine init_refmap
 subroutine init_refmap_fine(ilevel)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   integer::ilevel
   
-  integer::i,icell,igrid,ncache,iskip,ngrid,ilun
+  integer::i,icell,igrid,ncache,ngrid,ilun
   integer::ind,idim,ivar,ix,iy,iz,nx_loc
   integer::i1,i2,i3,i1_min,i1_max,i2_min,i2_max,i3_min,i3_max
   integer::i1_lo,i1_hi,i2_lo,i2_hi
@@ -1629,12 +1626,11 @@ subroutine init_refmap_fine(ilevel)
   if(ncache>0)then
      
      ! Loop over cells
-!$omp parallel do private(ind,iskip,i,igrid,icell,xx1,xx2,xx3,i1,i2,i3)
+!$omp parallel do private(ind,i,igrid,icell,xx1,xx2,xx3,i1,i2,i3)
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ncache
            igrid=active(ilevel)%igrid(i)
-           icell=igrid+iskip
+           icell=ICELL_OF(igrid,ind)
            xx1=xg(igrid,1)+xc(ind,1)-skip_loc(1)
            xx1=(xx1*(dxini(ilevel)/dx)-xoff1(ilevel))/dxini(ilevel)
            xx2=xg(igrid,2)+xc(ind,2)-skip_loc(2)

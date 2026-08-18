@@ -5,11 +5,12 @@ subroutine init_amr
   use poisson_commons
   use bisection
   use ksection
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'  
 #endif
-  integer::i,idim,ncell,iskip,ind,ncache,ilevel,ibound,nboundary2
+  integer::i,idim,ncell,ind,ncache,ilevel,ibound,nboundary2
   integer::ncpu2,ndim2,nx2,ny2,nz2,ngridmax2,nlevelmax2
   integer::noutput2,iout2,ifout2,ilun,info
   integer::ix,iy,iz,ix_max,iy_max,iz_max,nxny,nx_loc
@@ -610,26 +611,23 @@ subroutine init_amr
               end do
               ! Read son index
               do ind=1,twotondim
-                 iskip=ncoarse+(ind-1)*ngridmax
                  read(ilun)iig
                  do i=1,ncache
-                    son(ind_grid(i)+iskip)=iig(i)
+                    son(ICELL_OF(ind_grid(i),ind))=iig(i)
                  end do
               end do
               ! Read cpu map
               do ind=1,twotondim
-                 iskip=ncoarse+(ind-1)*ngridmax
                  read(ilun)iig
                  do i=1,ncache
-                    cpu_map(ind_grid(i)+iskip)=iig(i)
+                    cpu_map(ICELL_OF(ind_grid(i),ind))=iig(i)
                  end do
               end do
               ! Read refinement map
               do ind=1,twotondim
-                 iskip=ncoarse+(ind-1)*ngridmax
                  read(ilun)iig
                  do i=1,ncache
-                    flag1(ind_grid(i)+iskip)=iig(i)
+                    flag1(ICELL_OF(ind_grid(i),ind))=iig(i)
                  end do
               end do
               deallocate(xxg,iig,pos,grid,ind_grid)
@@ -693,6 +691,7 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
   use ksection
   use morton_keys
   use morton_hash
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1190,7 +1189,7 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
               cycle  ! Father not in hash (virtual); handled by refine_fine
            end if
            ind_cell = 1 + int(mod(ix, 2_8)) + 2 * int(mod(iy, 2_8)) + 4 * int(mod(iz, 2_8))
-           igrid_father = ncoarse + (ind_cell - 1) * ngridmax + igrid_father
+           igrid_father = ICELL_OF(igrid_father,ind_cell)
         end if
 
         ! Allocate grid from free list
@@ -1209,7 +1208,7 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
 
         ! Unpack son_flag → flag1
         do iskip = 1, twotondim
-           ind_cell = ncoarse + (iskip - 1) * ngridmax + igrid_new
+           ind_cell = ICELL_OF(igrid_new,iskip)
            son(ind_cell) = 0
            if(btest(ipacked, iskip-1)) then
               flag1(ind_cell) = 1
@@ -1220,7 +1219,7 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
 
         ! Set cpu_map for each child cell
         do iskip = 1, twotondim
-           ind_cell = ncoarse + (iskip - 1) * ngridmax + igrid_new
+           ind_cell = ICELL_OF(igrid_new,iskip)
            iz = (iskip - 1) / 4
            iy = (iskip - 1 - 4 * iz) / 2
            ix = (iskip - 1 - 2 * iy - 4 * iz)

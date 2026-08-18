@@ -105,6 +105,7 @@ end subroutine init_boundary_coarse
 !################################################################
 subroutine init_boundary_fine(ilevel)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -115,7 +116,7 @@ subroutine init_boundary_fine(ilevel)
   ! -------------------------------------------------------------------
   integer::ismooth,ibound
   integer,dimension(1:3)::n_nbor
-  integer::i,ncache,iskip
+  integer::i,ncache
   integer::igrid,ind,ngrid
   integer,dimension(1:nvector),save::ind_grid,ind_cell
   integer,dimension(1:nvector,0:twondim),save::igridn
@@ -133,9 +134,8 @@ subroutine init_boundary_fine(ilevel)
            ind_grid(i)=boundary(ibound,ilevel)%igrid(igrid+i-1)
         end do
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ngrid
               flag2(ind_cell(i))=0
@@ -157,9 +157,8 @@ subroutine init_boundary_fine(ilevel)
               ind_grid(i)=boundary(ibound,ilevel)%igrid(igrid+i-1)
            end do
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
               do i=1,ngrid
                  flag1(ind_cell(i))=0
@@ -190,9 +189,8 @@ subroutine init_boundary_fine(ilevel)
               ind_grid(i)=boundary(ibound,ilevel)%igrid(igrid+i-1)
            end do
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
               do i=1,ngrid
                  if(flag1(ind_cell(i))==1)flag2(ind_cell(i))=1
@@ -261,6 +259,7 @@ subroutine make_boundary_flag(ilevel)
   use hydro_commons
   use poisson_parameters
   use morton_hash
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -268,7 +267,7 @@ subroutine make_boundary_flag(ilevel)
   ! -------------------------------------------------------------------
   integer::ibound,boundary_dir,idim,inbor
   integer::i,ncache,ivar,igrid,ngrid,ind
-  integer::iskip,iskip_ref,gdim,nx_loc,ix,iy,iz
+  integer::gdim,nx_loc,ix,iy,iz
   integer,dimension(1:8)::ind_ref,alt
   integer,dimension(1:nvector)::ind_grid,ind_grid_ref
   integer,dimension(1:nvector)::ind_cell,ind_cell_ref
@@ -315,7 +314,7 @@ subroutine make_boundary_flag(ilevel)
 
      ! Loop over grids by vector sweeps
      ncache=boundary(ibound,ilevel)%ngrid
-!$omp parallel do default(shared) private(igrid,ngrid,i,ind_grid,ind_grid_ref, ind,iskip,ind_cell,iskip_ref,ind_cell_ref,fff)
+!$omp parallel do default(shared) private(igrid,ngrid,i,ind_grid,ind_grid_ref, ind,ind_cell,ind_cell_ref,fff)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
@@ -329,15 +328,13 @@ subroutine make_boundary_flag(ilevel)
 
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
-              
+
            ! Gather neighboring reference cell
-           iskip_ref=ncoarse+(ind_ref(ind)-1)*ngridmax
            do i=1,ngrid
-              ind_cell_ref(i)=iskip_ref+ind_grid_ref(i)
+              ind_cell_ref(i)=ICELL_OF(ind_grid_ref(i),ind_ref(ind))
            end do
 
            do i=1,ngrid
@@ -359,5 +356,4 @@ subroutine make_boundary_flag(ilevel)
 111 format('  +Entering make_boundary_flag for level ',I2)
 
 end subroutine make_boundary_flag
-
 
