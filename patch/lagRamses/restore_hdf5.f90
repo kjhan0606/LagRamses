@@ -28,6 +28,7 @@ subroutine restore_amr_hdf5()
   use morton_keys
   use morton_hash
   use ramses_hdf5_io
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -661,7 +662,7 @@ subroutine restore_amr_hdf5()
                  igrid_father = morton_hash_lookup(mort_table(ilevel-1), mkey)
                  if(igrid_father == 0) cycle  ! parent not on this rank
                  ind_cell = 1 + int(mod(ix,2_8)) + 2*int(mod(iy,2_8)) + 4*int(mod(iz,2_8))
-                 father_cell = ncoarse + (ind_cell - 1) * ngridmax + igrid_father
+                 father_cell = ICELL_OF(igrid_father,ind_cell)
               end if
 
               ! Defensive: ksection routing matches cpu_map decomposition,
@@ -681,7 +682,7 @@ subroutine restore_amr_hdf5()
               xg(igrid_new, 1:ndim) = recvbuf(1:ndim, j)
 
               do iskip = 1, twotondim
-                 ind_cell = ncoarse + (iskip - 1) * ngridmax + igrid_new
+                 ind_cell = ICELL_OF(igrid_new,iskip)
                  son(ind_cell) = 0
                  flag1(ind_cell) = nint(recvbuf(ndim + iskip, j))
               end do
@@ -700,7 +701,7 @@ subroutine restore_amr_hdf5()
               end do
               call cmp_cpumap(xx_cells, c_cells, twotondim)
               do iskip = 1, twotondim
-                 ind_cell = ncoarse + (iskip - 1) * ngridmax + igrid_new
+                 ind_cell = ICELL_OF(igrid_new,iskip)
                  cpu_map(ind_cell)  = c_cells(iskip)
                  cpu_map2(ind_cell) = c_cells(iskip)
               end do
@@ -795,7 +796,7 @@ subroutine restore_amr_hdf5()
            igrid = headl(icpu, ilevel)
            do while(igrid > 0)
               do iskip = 1, twotondim
-                 ind_cell = ncoarse + (iskip - 1) * ngridmax + igrid
+                 ind_cell = ICELL_OF(igrid,iskip)
                  cpu_map2(ind_cell) = cpu_map(ind_cell)
               end do
               igrid = next(igrid)
@@ -923,7 +924,7 @@ subroutine restore_amr_hdf5()
               ind = grid_offset + i
               xg(igrid_new, 1:ndim) = xg_all(ind, 1:ndim)
               do iskip = 1, twotondim
-                 ind_cell = ncoarse + (iskip - 1) * ngridmax + igrid_new
+                 ind_cell = ICELL_OF(igrid_new,iskip)
                  cpu_map(ind_cell) = cpu_map_buf((ind-1)*twotondim + iskip)
                  cpu_map2(ind_cell) = cpu_map_buf((ind-1)*twotondim + iskip)
                  son(ind_cell) = 0
@@ -954,7 +955,7 @@ subroutine restore_amr_hdf5()
                     call clean_stop
                  end if
                  ind_cell = 1 + int(mod(ix, 2_8)) + 2 * int(mod(iy, 2_8)) + 4 * int(mod(iz, 2_8))
-                 father(igrid_new) = ncoarse + (ind_cell - 1) * ngridmax + igrid_father
+                 father(igrid_new) = ICELL_OF(igrid_father,ind_cell)
               end if
 
               ! Set son in parent cell
@@ -1052,8 +1053,8 @@ subroutine restore_amr_hdf5()
            igrid = headl(icpu, ilevel)
            do while(igrid > 0)
               ! Extract father grid and oct position from father cell index
-              ind_oct_nb = (father(igrid) - ncoarse - 1) / ngridmax + 1
-              igrid_par_nb = father(igrid) - ncoarse - (ind_oct_nb - 1) * ngridmax
+              ind_oct_nb = ICHILD_OF(father(igrid))
+              igrid_par_nb = IGRID_OF(father(igrid))
 
               do j_nb = 1, twondim
                  ig_nb = ggg_nb(ind_oct_nb, j_nb)
@@ -1068,7 +1069,7 @@ subroutine restore_amr_hdf5()
                     end if
                  end if
                  if(nbor_grid > 0) then
-                    nbor(igrid, j_nb) = ncoarse + (ih_nb - 1) * ngridmax + nbor_grid
+                    nbor(igrid, j_nb) = ICELL_OF(nbor_grid,ih_nb)
                  else
                     nbor(igrid, j_nb) = 0
                  end if
@@ -1117,11 +1118,12 @@ subroutine restore_hydro_hdf5()
   use hydro_commons
   use ramses_hdf5_io
   ! varcpu variables now in amr_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer :: ilevel, i, igrid, ind, iskip, ivar, info
+  integer :: ilevel, i, igrid, ind, ivar, info
   integer :: ngrid_loc, nvar_file, fidx
   integer, allocatable :: ngrid_all(:)
   integer(i8b) :: ncells_total, offset_cells, ngrid_total
@@ -1212,13 +1214,12 @@ subroutine restore_hydro_hdf5()
                    'uold_'//trim(var_str), ubuf_chunk, &
                    this_chunk * twotondim, i_global * int(twotondim, i8b))
 
-!$OMP PARALLEL DO PRIVATE(j,igrid_w,local_idx,ind,iskip) SCHEDULE(STATIC)
+!$OMP PARALLEL DO PRIVATE(j,igrid_w,local_idx,ind) SCHEDULE(STATIC)
               do j = 1, n_chunk_grids
                  igrid_w = chunk_igrids(j)
                  local_idx = chunk_fidx_offset(j)
                  do ind = 1, twotondim
-                    iskip = ncoarse + (ind - 1) * ngridmax
-                    uold(igrid_w + iskip, ivar) = &
+                    uold(ICELL_OF(igrid_w,ind), ivar) = &
                          ubuf_chunk((local_idx-1)*twotondim + ind)
                  end do
               end do
@@ -1280,8 +1281,7 @@ subroutine restore_hydro_hdf5()
            igrid = headl(myid, ilevel)
            do i = 1, ngrid_loc
               do ind = 1, twotondim
-                 iskip = ncoarse + (ind - 1) * ngridmax
-                 uold(igrid + iskip, ivar) = ubuf((i-1)*twotondim + ind)
+                 uold(ICELL_OF(igrid,ind), ivar) = ubuf((i-1)*twotondim + ind)
               end do
               igrid = next(igrid)
            end do
@@ -1317,11 +1317,12 @@ subroutine restore_poisson_hdf5()
   use poisson_commons
   use ramses_hdf5_io
   ! varcpu variables now in amr_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer :: ilevel, i, igrid, ind, iskip, idim, info, fidx
+  integer :: ilevel, i, igrid, ind, idim, info, fidx
   integer :: ngrid_loc
   integer, allocatable :: ngrid_all(:)
   integer(i8b) :: ncells_total, offset_cells, ngrid_total
@@ -1405,13 +1406,12 @@ subroutine restore_poisson_hdf5()
            ! phi
            call hdf5_read_dataset_chunk_dp(lvl_grp_id, 'phi', pbuf_chunk, &
                 this_chunk * twotondim, i_global * int(twotondim, i8b))
-!$OMP PARALLEL DO PRIVATE(j,igrid_w,local_idx,ind,iskip) SCHEDULE(STATIC)
+!$OMP PARALLEL DO PRIVATE(j,igrid_w,local_idx,ind) SCHEDULE(STATIC)
            do j = 1, n_chunk_grids
               igrid_w = chunk_igrids(j)
               local_idx = chunk_fidx_offset(j)
               do ind = 1, twotondim
-                 iskip = ncoarse + (ind - 1) * ngridmax
-                 phi(igrid_w + iskip) = pbuf_chunk((local_idx-1)*twotondim + ind)
+                 phi(ICELL_OF(igrid_w,ind)) = pbuf_chunk((local_idx-1)*twotondim + ind)
               end do
            end do
 !$OMP END PARALLEL DO
@@ -1422,13 +1422,12 @@ subroutine restore_poisson_hdf5()
               call hdf5_read_dataset_chunk_dp(lvl_grp_id, &
                    'f_'//trim(dim_str), pbuf_chunk, &
                    this_chunk * twotondim, i_global * int(twotondim, i8b))
-!$OMP PARALLEL DO PRIVATE(j,igrid_w,local_idx,ind,iskip) SCHEDULE(STATIC)
+!$OMP PARALLEL DO PRIVATE(j,igrid_w,local_idx,ind) SCHEDULE(STATIC)
               do j = 1, n_chunk_grids
                  igrid_w = chunk_igrids(j)
                  local_idx = chunk_fidx_offset(j)
                  do ind = 1, twotondim
-                    iskip = ncoarse + (ind - 1) * ngridmax
-                    f(igrid_w + iskip, idim) = &
+                    f(ICELL_OF(igrid_w,ind), idim) = &
                          pbuf_chunk((local_idx-1)*twotondim + ind)
                  end do
               end do
@@ -1439,15 +1438,14 @@ subroutine restore_poisson_hdf5()
               call hdf5_read_dataset_chunk_dp(lvl_grp_id, 'scalar_gr', &
                    pbuf_chunk, this_chunk * twotondim, &
                    i_global * int(twotondim, i8b))
-!$OMP PARALLEL DO PRIVATE(j,igrid_w,local_idx,ind,iskip) SCHEDULE(STATIC)
+!$OMP PARALLEL DO PRIVATE(j,igrid_w,local_idx,ind) SCHEDULE(STATIC)
               do j = 1, n_chunk_grids
                  igrid_w = chunk_igrids(j)
                  local_idx = chunk_fidx_offset(j)
                  do ind = 1, twotondim
-                    iskip = ncoarse + (ind - 1) * ngridmax
-                    scalar_gr(igrid_w + iskip) = &
+                    scalar_gr(ICELL_OF(igrid_w,ind)) = &
                          pbuf_chunk((local_idx-1)*twotondim + ind)
-                    scalar_gr_old(igrid_w + iskip) = scalar_gr(igrid_w + iskip)
+                    scalar_gr_old(ICELL_OF(igrid_w,ind)) = scalar_gr(ICELL_OF(igrid_w,ind))
                  end do
               end do
 !$OMP END PARALLEL DO
@@ -1508,8 +1506,7 @@ subroutine restore_poisson_hdf5()
         igrid = headl(myid, ilevel)
         do i = 1, ngrid_loc
            do ind = 1, twotondim
-              iskip = ncoarse + (ind - 1) * ngridmax
-              phi(igrid + iskip) = pbuf((i-1)*twotondim + ind)
+              phi(ICELL_OF(igrid,ind)) = pbuf((i-1)*twotondim + ind)
            end do
            igrid = next(igrid)
         end do
@@ -1522,8 +1519,7 @@ subroutine restore_poisson_hdf5()
            igrid = headl(myid, ilevel)
            do i = 1, ngrid_loc
               do ind = 1, twotondim
-                 iskip = ncoarse + (ind - 1) * ngridmax
-                 f(igrid + iskip, idim) = pbuf((i-1)*twotondim + ind)
+                 f(ICELL_OF(igrid,ind), idim) = pbuf((i-1)*twotondim + ind)
               end do
               igrid = next(igrid)
            end do
@@ -1542,9 +1538,8 @@ subroutine restore_poisson_hdf5()
               igrid = headl(myid, ilevel)
               do i = 1, ngrid_loc
                  do ind = 1, twotondim
-                    iskip = ncoarse + (ind - 1) * ngridmax
-                    scalar_gr(igrid + iskip) = pbuf((i-1)*twotondim + ind)
-                    scalar_gr_old(igrid + iskip) = scalar_gr(igrid + iskip)
+                    scalar_gr(ICELL_OF(igrid,ind)) = pbuf((i-1)*twotondim + ind)
+                    scalar_gr_old(ICELL_OF(igrid,ind)) = scalar_gr(ICELL_OF(igrid,ind))
                  end do
                  igrid = next(igrid)
               end do
@@ -1563,8 +1558,7 @@ subroutine restore_poisson_hdf5()
                  igrid = headl(myid, ilevel)
                  do i = 1, ngrid_loc
                     do ind = 1, twotondim
-                       iskip = ncoarse + (ind - 1) * ngridmax
-                       psi_re(igrid + iskip) = pbuf((i-1)*twotondim + ind)
+                       psi_re(ICELL_OF(igrid,ind)) = pbuf((i-1)*twotondim + ind)
                     end do
                     igrid = next(igrid)
                  end do
@@ -1573,8 +1567,7 @@ subroutine restore_poisson_hdf5()
                  igrid = headl(myid, ilevel)
                  do i = 1, ngrid_loc
                     do ind = 1, twotondim
-                       iskip = ncoarse + (ind - 1) * ngridmax
-                       psi_im(igrid + iskip) = pbuf((i-1)*twotondim + ind)
+                       psi_im(ICELL_OF(igrid,ind)) = pbuf((i-1)*twotondim + ind)
                     end do
                     igrid = next(igrid)
                  end do

@@ -18,12 +18,13 @@ subroutine observe_level(ilevel)
   use cooling_module
   use observe_commons
   use radiation_commons, ONLY: Erad
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   integer::ilevel
-  integer::i,ivar,idim,ind,ncache,igrid,iskip
+  integer::i,ivar,idim,ind,ncache,igrid
   integer::info,nleaf,ngrid,nx_loc
   integer,dimension(1:nvector),save::ind_grid,ind_cell,ind_leaf
 
@@ -60,9 +61,8 @@ subroutine observe_level(ilevel)
      
      ! Loop over cells
      do ind=1,twotondim        
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=ind_grid(i)+iskip
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
         
         ! Gather leaf cells

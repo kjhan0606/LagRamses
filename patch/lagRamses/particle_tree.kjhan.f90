@@ -707,13 +707,14 @@ end subroutine kill_tree
 subroutine merge_tree_fine(ilevel)
   use pm_commons
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !--------------------------------------------------------------------
   ! This routine disconnects all particles contained in children grids
   ! and connects them to their parent grid linked list.
   !---------------------------------------------------------------
-  integer::igrid,iskip,icpu
+  integer::igrid,icpu
   integer::i,ind,ncache,ngrid
 #ifndef _OPENMP
   integer,dimension(1:nvector),save::ind_grid,ind_cell,ind_grid_son
@@ -758,7 +759,7 @@ subroutine merge_tree_fine(ilevel)
         ncache=reception(icpu,ilevel)%ngrid
      end if
      ! Loop over grids by vector sweeps
-!$omp parallel do private(igrid, ngrid, i,ind, iskip)
+!$omp parallel do private(igrid, ngrid, i,ind)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         if(icpu==myid)then
@@ -772,9 +773,8 @@ subroutine merge_tree_fine(ilevel)
         end if
         ! Loop over children grids
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ngrid
               ind_grid_son(i)=son(ind_cell(i))

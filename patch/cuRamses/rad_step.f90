@@ -789,6 +789,7 @@ end subroutine
 ! Returns the index of the smallest AMR cell containing the given point.
 subroutine aton_get_cell_index(cell_index,cell_levl,xpart,ilevel,np)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::np,ilevel
   integer,dimension(1:nvector)::cell_index,cell_levl
@@ -796,7 +797,7 @@ subroutine aton_get_cell_index(cell_index,cell_levl,xpart,ilevel,np)
   ! This function returns the index of the cell, at maximum level
   ! ilevel, in which the input particle sits
   real(dp)::xx,yy,zz
-  integer::i,j,ii,jj,kk,ind,iskip,igrid,ind_cell,igrid0
+  integer::i,j,ii,jj,kk,ind,igrid,ind_cell,igrid0
 
   if ((nx.eq.1).and.(ny.eq.1).and.(nz.eq.1)) then
   else if ((nx.eq.3).and.(ny.eq.3).and.(nz.eq.3)) then
@@ -819,8 +820,7 @@ subroutine aton_get_cell_index(cell_index,cell_levl,xpart,ilevel,np)
         if(yy<xg(igrid,2))jj=0
         if(zz<xg(igrid,3))kk=0
         ind=1+ii+2*jj+4*kk
-        iskip=ncoarse+(ind-1)*ngridmax
-        ind_cell=iskip+igrid
+        ind_cell=ICELL_OF(igrid,ind)
         igrid=son(ind_cell)
         if(igrid==0.or.j==ilevel)exit
      end do

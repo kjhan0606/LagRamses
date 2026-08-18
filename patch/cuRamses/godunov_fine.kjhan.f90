@@ -225,62 +225,61 @@ end subroutine godunov_fine
 subroutine set_unew(ilevel)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !--------------------------------------------------------------------------
   ! This routine sets array unew to its initial value uold before calling
   ! the hydro scheme. unew is set to zero in virtual boundaries.
   !--------------------------------------------------------------------------
-  integer::i,ivar,irad,ind,icpu,iskip
+  integer::i,ivar,irad,ind,icpu
   real(dp)::d,u,v,w,e
 
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
 
   ! Set unew to uold for myid cells
-!$omp parallel do private(ind,iskip,ivar,i,d,u,v,w,e,irad) schedule(dynamic)
+!$omp parallel do private(ind,ivar,i,d,u,v,w,e,irad) schedule(dynamic)
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do ivar=1,nvar
         do i=1,active(ilevel)%ngrid
-           unew(active(ilevel)%igrid(i)+iskip,ivar) = uold(active(ilevel)%igrid(i)+iskip,ivar)
+           unew(ICELL_OF(active(ilevel)%igrid(i),ind),ivar) = uold(ICELL_OF(active(ilevel)%igrid(i),ind),ivar)
         end do
      end do
      if(pressure_fix)then
         do i=1,active(ilevel)%ngrid
-           divu(active(ilevel)%igrid(i)+iskip) = 0.0
+           divu(ICELL_OF(active(ilevel)%igrid(i),ind)) = 0.0
         end do
         do i=1,active(ilevel)%ngrid
-           d=max(uold(active(ilevel)%igrid(i)+iskip,1),smallr)
+           d=max(uold(ICELL_OF(active(ilevel)%igrid(i),ind),1),smallr)
            u=0.0; v=0.0; w=0.0
-           if(ndim>0)u=uold(active(ilevel)%igrid(i)+iskip,2)/d
-           if(ndim>1)v=uold(active(ilevel)%igrid(i)+iskip,3)/d
-           if(ndim>2)w=uold(active(ilevel)%igrid(i)+iskip,4)/d
-           e=uold(active(ilevel)%igrid(i)+iskip,ndim+2)-0.5*d*(u**2+v**2+w**2)
+           if(ndim>0)u=uold(ICELL_OF(active(ilevel)%igrid(i),ind),2)/d
+           if(ndim>1)v=uold(ICELL_OF(active(ilevel)%igrid(i),ind),3)/d
+           if(ndim>2)w=uold(ICELL_OF(active(ilevel)%igrid(i),ind),4)/d
+           e=uold(ICELL_OF(active(ilevel)%igrid(i),ind),ndim+2)-0.5*d*(u**2+v**2+w**2)
 #if NENER>0
            do irad=1,nener
-              e=e-uold(active(ilevel)%igrid(i)+iskip,ndim+2+irad)
+              e=e-uold(ICELL_OF(active(ilevel)%igrid(i),ind),ndim+2+irad)
            end do
 #endif
-           enew(active(ilevel)%igrid(i)+iskip)=e
+           enew(ICELL_OF(active(ilevel)%igrid(i),ind))=e
         end do
      end if
   end do
 
   ! Set unew to 0 for virtual boundary cells
   do icpu=1,ncpu
-!$omp parallel do private(ind,iskip,ivar,i) schedule(dynamic)
+!$omp parallel do private(ind,ivar,i) schedule(dynamic)
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do ivar=1,nvar
         do i=1,reception(icpu,ilevel)%ngrid
-           unew(reception(icpu,ilevel)%igrid(i)+iskip,ivar)=0.0
+           unew(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind),ivar)=0.0
         end do
      end do
      if(pressure_fix)then
         do i=1,reception(icpu,ilevel)%ngrid
-           divu(reception(icpu,ilevel)%igrid(i)+iskip) = 0.0
-           enew(reception(icpu,ilevel)%igrid(i)+iskip) = 0.0
+           divu(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind)) = 0.0
+           enew(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind)) = 0.0
         end do
      end if
   end do
@@ -297,13 +296,14 @@ subroutine set_uold(ilevel)
   use amr_commons
   use hydro_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !---------------------------------------------------------
   ! This routine sets array uold to its new value unew
   ! after the hydro step.
   !---------------------------------------------------------
-  integer::i,ivar,irad,ind,iskip,nx_loc,ind_cell
+  integer::i,ivar,irad,ind,nx_loc,ind_cell
   real(dp)::scale,d,u,v,w
   real(dp)::e_kin,e_cons,e_prim,e_trunc,div,dx,fact,d_old
 
@@ -326,18 +326,17 @@ subroutine set_uold(ilevel)
   endif
 
   ! Set uold to unew for myid cells
-!$omp parallel do private(ind,iskip,ivar,i,ind_cell,d,u,v,w,e_kin,e_cons,e_prim,div,e_trunc)
+!$omp parallel do private(ind,ivar,i,ind_cell,d,u,v,w,e_kin,e_cons,e_prim,div,e_trunc)
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do ivar=1,nvar
         do i=1,active(ilevel)%ngrid
-           uold(active(ilevel)%igrid(i)+iskip,ivar) = unew(active(ilevel)%igrid(i)+iskip,ivar)
+           uold(ICELL_OF(active(ilevel)%igrid(i),ind),ivar) = unew(ICELL_OF(active(ilevel)%igrid(i),ind),ivar)
         end do
      end do
      if(pressure_fix)then
         ! Correct total energy if internal energy is too small
         do i=1,active(ilevel)%ngrid
-           ind_cell=active(ilevel)%igrid(i)+iskip
+           ind_cell=ICELL_OF(active(ilevel)%igrid(i),ind)
            d=max(uold(ind_cell,1),smallr)
            u=0.0; v=0.0; w=0.0
            if(ndim>0)u=uold(ind_cell,2)/d
@@ -362,7 +361,7 @@ subroutine set_uold(ilevel)
      ! Apply eEOS polytropic floor to conserved energy after hydro update
      if(eeos_poly_coeff > 0d0)then
         do i=1,active(ilevel)%ngrid
-           ind_cell=active(ilevel)%igrid(i)+iskip
+           ind_cell=ICELL_OF(active(ilevel)%igrid(i),ind)
            d=max(uold(ind_cell,1),smallr)
            u=0.0; v=0.0; w=0.0
            if(ndim>0)u=uold(ind_cell,2)/d
@@ -393,6 +392,7 @@ subroutine add_gravity_source_terms(ilevel)
   use amr_commons
   use hydro_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !--------------------------------------------------------------------------
@@ -400,7 +400,7 @@ subroutine add_gravity_source_terms(ilevel)
   ! with only half a time step. Only the momentum and the
   ! total energy are modified in array unew.
   !--------------------------------------------------------------------------
-  integer::i,ivar,ind,iskip,nx_loc,ind_cell
+  integer::i,ivar,ind,nx_loc,ind_cell
   real(dp)::d,u,v,w,e_kin,e_prim,d_old,fact
 
   if(numbtot(1,ilevel)==0)return
@@ -410,11 +410,10 @@ subroutine add_gravity_source_terms(ilevel)
 ! do ind=1,twotondim
 !    iskip=ncoarse+(ind-1)*ngridmax
 !    do i=1,active(ilevel)%ngrid
-!$omp parallel do private(ind,iskip,i,ind_cell,d,u,v,w,e_kin,d_old,e_prim,fact)
+!$omp parallel do private(ind,i,ind_cell,d,u,v,w,e_kin,d_old,e_prim,fact)
   do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-        ind_cell=active(ilevel)%igrid(i)+iskip
+        ind_cell=ICELL_OF(active(ilevel)%igrid(i),ind)
         d=max(unew(ind_cell,1),smallr)
         u=0.0; v=0.0; w=0.0
         if(ndim>0)u=unew(ind_cell,2)/d
@@ -470,14 +469,15 @@ subroutine sub_add_pdv_source_terms(ilevel,igrid,ngrid)
   use amr_commons
   use hydro_commons
   use morton_hash
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !---------------------------------------------------------
   ! This routine adds the pdV source term to the internal
   ! energy equation and to the non-thermal energy equations.
   !---------------------------------------------------------
-  integer::i,ivar,irad,ind,iskip,nx_loc,ind_cell1
-  integer::ncache,igrid,ngrid,idim,id1,ig1,ih1,id2,ig2,ih2
+  integer::i,ivar,irad,ind,nx_loc,ind_cell1
+  integer::ncache,igrid,ngrid,idim,id1,ig1,id2,ig2
   integer,dimension(1:3,1:2,1:8)::iii,jjj
   real(dp)::scale,dx,dx_loc,d,u,v,w,eold
 
@@ -524,18 +524,16 @@ subroutine sub_add_pdv_source_terms(ilevel,igrid,ngrid)
      do ind=1,twotondim
 
         ! Compute central cell index
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Gather all neighboring velocities
         do idim=1,ndim
            id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
-           ih1=ncoarse+(id1-1)*ngridmax
            do i=1,ngrid
               if(igridn(i,ig1)>0)then
-                 velg(i,idim,1:ndim) = uold(igridn(i,ig1)+ih1,2:ndim+1)/max(uold(igridn(i,ig1)+ih1,1),smallr)
+                 velg(i,idim,1:ndim) = uold(ICELL_OF(igridn(i,ig1),id1),2:ndim+1)/max(uold(ICELL_OF(igridn(i,ig1),id1),1),smallr)
                  dx_g(i,idim) = dx_loc
               else
                  velg(i,idim,1:ndim) = uold(ind_left(i,idim),2:ndim+1)/max(uold(ind_left(i,idim),1),smallr)
@@ -543,10 +541,9 @@ subroutine sub_add_pdv_source_terms(ilevel,igrid,ngrid)
               end if
            enddo
            id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
-           ih2=ncoarse+(id2-1)*ngridmax
            do i=1,ngrid
               if(igridn(i,ig2)>0)then
-                 veld(i,idim,1:ndim)= uold(igridn(i,ig2)+ih2,2:ndim+1)/max(uold(igridn(i,ig2)+ih2,1),smallr)
+                 veld(i,idim,1:ndim)= uold(ICELL_OF(igridn(i,ig2),id2),2:ndim+1)/max(uold(ICELL_OF(igridn(i,ig2),id2),1),smallr)
                  dx_d(i,idim)=dx_loc
               else
                  veld(i,idim,1:ndim)= uold(ind_right(i,idim),2:ndim+1)/max(uold(ind_right(i,idim),1),smallr)
@@ -621,6 +618,7 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
   use cuda_commons
   use hydro_cuda_interface
 #endif
+#include "amr_index.h"
   implicit none
   integer, intent(in) :: ilevel, jgrid, mgrid
   type(scatter_buf_t), intent(inout), optional :: sbuf
@@ -655,7 +653,7 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
 
   integer,dimension(1:nvector)::igrid_nbor,ind_cell,ind_cell2,ind_buffer, ind_buffer2,ind_exist,ind_nexist
 
-  integer::i,j,ivar,idim,ind_son,ind_father,iskip,nbuffer,ibuffer
+  integer::i,j,ivar,idim,ind_son,ind_father,nbuffer,ibuffer
   integer::i0,j0,k0,i1,j1,k1,i2,j2,k2,i3,j3,k3,nx_loc,nb_noneigh,nb_noneigh2,nexist
   integer::igridn_tmp
   integer::icell_nbor,idx
@@ -751,9 +749,8 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
      do i2=i2min,i2max
 
         ind_son=1+i2+2*j2+4*k2
-        iskip=ncoarse+(ind_son-1)*ngridmax
         do i=1,nexist
-           ind_cell(i)=iskip+igrid_nbor(ind_exist(i))
+           ind_cell(i)=ICELL_OF(igrid_nbor(ind_exist(i)),ind_son)
         end do
 
         i3=1; j3=1; k3=1
@@ -887,9 +884,8 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
      do j2=j2min,j2max
      do i2=i2min,i2max
         ind_son=1+i2+2*j2+4*k2
-        iskip=ncoarse+(ind_son-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind_son)
         end do
         i3=1+i2
         j3=1+j2
@@ -1103,6 +1099,7 @@ subroutine gather_five_point_outer(ilevel,ind_grid,uouter,ngrid,complete)
   use hydro_commons
   use hydro_parameters
   use morton_hash
+#include "amr_index.h"
   implicit none
 
   integer,intent(in)::ilevel,ngrid
@@ -1200,7 +1197,7 @@ subroutine gather_five_point_outer(ilevel,ind_grid,uouter,ngrid,complete)
 
                  if(igrid_nbor>0)then
                     ind_son=1+ix+2*iy+4*iz
-                    icell=ncoarse+(ind_son-1)*ngridmax+igrid_nbor
+                    icell=ICELL_OF(igrid_nbor,ind_son)
                     do ivar=1,nvar
                        uouter(l,iside,it1,it2,ivar,idim)=uold(icell,ivar)
                     end do
@@ -1404,6 +1401,7 @@ subroutine hybrid_cpu_process_batch(ilevel, igrid_start, ngrid, sbuf)
   use poisson_commons
   use morton_hash
   use hydro_hybrid_commons
+#include "amr_index.h"
   implicit none
   integer, intent(in) :: ilevel, igrid_start, ngrid
   type(scatter_buf_t), intent(inout) :: sbuf
@@ -1426,7 +1424,7 @@ subroutine hybrid_cpu_process_batch(ilevel, igrid_start, ngrid, sbuf)
   logical ,dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::ok
   integer ,dimension(1:nvector)::igrid_nbor,ind_cell,ind_buffer,ind_exist,ind_nexist
 
-  integer :: i,j,ivar,idim,ind_son,ind_father,iskip,nbuffer,nexist
+  integer :: i,j,ivar,idim,ind_son,ind_father,nbuffer,nexist
   integer :: i0,j0,k0,i1,j1,k1,i2,j2,k2,i3,j3,k3,nx_loc
   integer :: igridn_tmp, icell_nbor, idx
   integer :: i1min,i1max,j1min,j1max,k1min,k1max
@@ -1507,9 +1505,8 @@ subroutine hybrid_cpu_process_batch(ilevel, igrid_start, ngrid, sbuf)
      do i2=i2min,i2max
 
         ind_son=1+i2+2*j2+4*k2
-        iskip=ncoarse+(ind_son-1)*ngridmax
         do i=1,nexist
-           ind_cell(i)=iskip+igrid_nbor(ind_exist(i))
+           ind_cell(i)=ICELL_OF(igrid_nbor(ind_exist(i)),ind_son)
         end do
 
         i3=1; j3=1; k3=1
@@ -1601,9 +1598,8 @@ subroutine hybrid_cpu_process_batch(ilevel, igrid_start, ngrid, sbuf)
      do j2=j2min,j2max
      do i2=i2min,i2max
         ind_son=1+i2+2*j2+4*k2
-        iskip=ncoarse+(ind_son-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind_son)
         end do
         i3=1+i2
         j3=1+j2
@@ -1721,6 +1717,7 @@ subroutine hybrid_gpu_stencil_batch(gstate, ilevel, igrid_start, ngrid, sbuf, st
   use hydro_parameters
   use poisson_commons
   use hydro_hybrid_commons
+#include "amr_index.h"
   implicit none
   type(gpu_state_t), intent(inout) :: gstate
   integer, intent(in) :: ilevel, igrid_start, ngrid, stream_slot
@@ -1739,7 +1736,7 @@ subroutine hybrid_gpu_stencil_batch(gstate, ilevel, igrid_start, ngrid, sbuf, st
   real(dp),dimension(1:nvector,0:twondim,1:nvar)::u1
   real(dp),dimension(1:nvector,1:twotondim,1:nvar)::u2
 
-  integer :: off, i, j, ivar, ind_son, iskip, ind_father, nbuffer, nexist
+  integer :: off, i, j, ivar, ind_son, ind_father, nbuffer, nexist
   integer :: i1,j1,k1,i2,j2,k2,i3,j3,k3, cell_idx, n_interp_slot
   integer :: i1min,i1max,j1min,j1max,k1min,k1max
   integer :: i2min,i2max,j2min,j2max,k2min,k2max
@@ -1814,8 +1811,6 @@ subroutine hybrid_gpu_stencil_batch(gstate, ilevel, igrid_start, ngrid, sbuf, st
      do j2=j2min,j2max
      do i2=i2min,i2max
         ind_son=1+i2+2*j2+4*k2
-        iskip=ncoarse+(ind_son-1)*ngridmax
-
         i3=1; j3=1; k3=1
         if(ndim>0)i3=1+2*(i1-1)+i2
         if(ndim>1)j3=1+2*(j1-1)+j2
@@ -1823,7 +1818,7 @@ subroutine hybrid_gpu_stencil_batch(gstate, ilevel, igrid_start, ngrid, sbuf, st
 
         ! Existing fine grids: store cell index (positive)
         do i=1,nexist
-           cell_idx = iskip + igrid_nbor(ind_exist(i))
+           cell_idx = ICELL_OF(igrid_nbor(ind_exist(i)),ind_son)
            gstate%super_stencil_idx(off+ind_exist(i),i3,j3,k3) = cell_idx
            if(poisson) gstate%super_stencil_grav(off+ind_exist(i),i3,j3,k3) = cell_idx
         end do
@@ -1873,6 +1868,7 @@ subroutine hybrid_gpu_gather_flush_scatter(gstate, stream_slot, ilevel, sbuf)
   use iso_c_binding, only: c_int, c_double
   use cuda_commons
   use hydro_cuda_interface
+#include "amr_index.h"
   implicit none
   type(gpu_state_t), intent(inout) :: gstate
   integer, intent(in) :: stream_slot, ilevel
@@ -1885,7 +1881,7 @@ subroutine hybrid_gpu_gather_flush_scatter(gstate, stream_slot, ilevel, sbuf)
   ! CPU applies results to unew/sbuf.
   !-------------------------------------------------------------------
   integer :: super_total, g, ig, ic, igridn_tmp, icell_nbor, idx
-  integer :: ind_son, iskip, ivar, face
+  integer :: ind_son, ivar, face
   integer :: nx_loc
   real(dp) :: dx, scale, dt_val
   integer(kind=8) :: t_start, t_now, clock_rate
@@ -1926,8 +1922,7 @@ subroutine hybrid_gpu_gather_flush_scatter(gstate, stream_slot, ilevel, sbuf)
   do g = 1, super_total
      ig = gstate%super_ind_grid(g)
      do ind_son = 1, 8
-        iskip = ncoarse + (ind_son-1)*ngridmax
-        ic = iskip + ig
+        ic = ICELL_OF(ig,ind_son)
         do ivar = 1, nvar
            unew(ic, ivar) = unew(ic, ivar) + gstate%super_add_unew(g, ind_son, ivar)
         end do

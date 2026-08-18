@@ -98,6 +98,7 @@ subroutine courant_fine_hybrid(ilevel, ncache, dx, vol, &
   use cuda_commons
   use hydro_cuda_interface
   use iso_c_binding
+#include "amr_index.h"
   implicit none
   integer, intent(in) :: ilevel, ncache
   real(dp), intent(in) :: dx, vol
@@ -105,7 +106,7 @@ subroutine courant_fine_hybrid(ilevel, ncache, dx, vol, &
 
   integer, parameter :: CFL_SUPER_SIZE = 32768
   integer :: igrid, ngrid, stream_slot
-  integer :: i, ivar, idim, ind, iskip, nleaf
+  integer :: i, ivar, idim, ind, nleaf
   integer, dimension(1:nvector) :: ind_grid, ind_cell, ind_leaf
   real(dp), dimension(1:nvector, 1:nvar) :: uu
   real(dp), dimension(1:nvector, 1:ndim) :: gg
@@ -122,7 +123,7 @@ subroutine courant_fine_hybrid(ilevel, ncache, dx, vol, &
   mass_loc = 0.0d0; ekin_loc = 0.0d0; eint_loc = 0.0d0
   dt_loc = dtnew(ilevel)
 
-!$omp parallel private(igrid, ngrid, stream_slot, i, ivar, idim, ind, iskip, &
+!$omp parallel private(igrid, ngrid, stream_slot, i, ivar, idim, ind, &
 !$omp&   nleaf, ind_grid, ind_cell, ind_leaf, uu, gg, dt_lev, &
 !$omp&   sbuf, dt_buf, scount, scap, lmass, lekin, leint, ldt) &
 !$omp& reduction(+:mass_loc,ekin_loc,eint_loc) reduction(min:dt_loc)
@@ -143,9 +144,8 @@ subroutine courant_fine_hybrid(ilevel, ncache, dx, vol, &
      end do
 
      do ind = 1, twotondim
-        iskip = ncoarse + (ind - 1) * ngridmax
         do i = 1, ngrid
-           ind_cell(i) = ind_grid(i) + iskip
+           ind_cell(i) = ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Gather leaf cells
@@ -275,12 +275,13 @@ subroutine sub_courant_fine(ilevel,igrid,ngrid, mass_loc,ekin_loc,eint_loc,dt_lo
   use amr_commons
   use hydro_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   integer::ilevel
-  integer::i,ivar,idim,ind,ncache,igrid,iskip
+  integer::i,ivar,idim,ind,ncache,igrid
   integer::info,nleaf,ngrid,nx_loc
   integer,dimension(1:nvector)::ind_grid,ind_cell,ind_leaf
 
@@ -305,9 +306,8 @@ subroutine sub_courant_fine(ilevel,igrid,ngrid, mass_loc,ekin_loc,eint_loc,dt_lo
 
      ! Loop over cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=ind_grid(i)+iskip
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Gather leaf cells
@@ -444,9 +444,10 @@ subroutine sub_check_cons(ilevel,igrid,ngrid,mass_loc,ekin_loc,eint_loc)
   use amr_commons
   use hydro_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
-  integer::i,ivar,idim,ind,igrid,iskip
+  integer::i,ivar,idim,ind,igrid
   integer::nleaf,ngrid
   integer,dimension(1:nvector)::ind_grid,ind_cell,ind_leaf
 
@@ -466,9 +467,8 @@ subroutine sub_check_cons(ilevel,igrid,ngrid,mass_loc,ekin_loc,eint_loc)
   end do
 
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=ind_grid(i)+iskip
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
 
      nleaf=0

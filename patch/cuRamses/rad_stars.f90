@@ -118,6 +118,7 @@ subroutine process_particle(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use hydro_parameters, ONLY: imetal
   use observe_commons
   use radiation_commons
+#include "amr_index.h"
   implicit none
   real(kind=8),parameter ::mH      = 1.6600000d-24  ! from cooling_module.f90
   integer::ng,np,ilevel
@@ -254,7 +255,7 @@ subroutine process_particle(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! Compute parent cell adresses
   do j=1,np
      if(ok(j))then
-        indp(j)=ncoarse+(icell(j)-1)*ngridmax+igrid(j)
+        indp(j)=ICELL_OF(igrid(j),icell(j))
 
         ! Move up to levelmin.
         do i = 1,ilevel-levelmin

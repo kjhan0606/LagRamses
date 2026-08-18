@@ -125,11 +125,12 @@ subroutine backup_amr_hdf5()
   use amr_commons
   use ksection
   use ramses_hdf5_io
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer :: ilevel, i, igrid, ind, iskip, idim, info
+  integer :: ilevel, i, igrid, ind, idim, info
   integer :: ngrid_loc, ncache, nlevelmax_file
   integer, allocatable :: ngrid_all(:)
   integer(i8b) :: ngrid_total, offset_grid
@@ -283,14 +284,13 @@ subroutine backup_amr_hdf5()
      igrid = headl(myid, ilevel)
      do i = 1, ngrid_loc
         do ind = 1, twotondim
-           iskip = ncoarse + (ind - 1) * ngridmax
            ! son_flag: 0 if no son, 1 if has son
-           if(son(igrid + iskip) > 0) then
+           if(son(ICELL_OF(igrid,ind)) > 0) then
               son_flag_buf((i-1)*twotondim + ind) = 1
            else
               son_flag_buf((i-1)*twotondim + ind) = 0
            end if
-           cpu_map_buf((i-1)*twotondim + ind) = cpu_map(igrid + iskip)
+           cpu_map_buf((i-1)*twotondim + ind) = cpu_map(ICELL_OF(igrid,ind))
         end do
         igrid = next(igrid)
      end do
@@ -318,11 +318,12 @@ subroutine backup_hydro_hdf5()
   use amr_commons
   use hydro_commons
   use ramses_hdf5_io
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer :: ilevel, i, igrid, ind, iskip, ivar, info
+  integer :: ilevel, i, igrid, ind, ivar, info
   integer :: ngrid_loc
   integer, allocatable :: ngrid_all(:)
   integer(i8b) :: ncells_total, offset_cells, ngrid_total
@@ -368,8 +369,7 @@ subroutine backup_hydro_hdf5()
         igrid = headl(myid, ilevel)
         do i = 1, ngrid_loc
            do ind = 1, twotondim
-              iskip = ncoarse + (ind - 1) * ngridmax
-              ubuf((i-1)*twotondim + ind) = uold(igrid + iskip, ivar)
+              ubuf((i-1)*twotondim + ind) = uold(ICELL_OF(igrid,ind), ivar)
            end do
            igrid = next(igrid)
         end do
@@ -393,11 +393,12 @@ subroutine backup_poisson_hdf5()
   use amr_commons
   use poisson_commons
   use ramses_hdf5_io
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer :: ilevel, i, igrid, ind, iskip, idim, info
+  integer :: ilevel, i, igrid, ind, idim, info
   integer :: ngrid_loc
   integer, allocatable :: ngrid_all(:)
   integer(i8b) :: ncells_total, offset_cells, ngrid_total
@@ -441,8 +442,7 @@ subroutine backup_poisson_hdf5()
      igrid = headl(myid, ilevel)
      do i = 1, ngrid_loc
         do ind = 1, twotondim
-           iskip = ncoarse + (ind - 1) * ngridmax
-           pbuf((i-1)*twotondim + ind) = phi(igrid + iskip)
+           pbuf((i-1)*twotondim + ind) = phi(ICELL_OF(igrid,ind))
         end do
         igrid = next(igrid)
      end do
@@ -454,8 +454,7 @@ subroutine backup_poisson_hdf5()
         igrid = headl(myid, ilevel)
         do i = 1, ngrid_loc
            do ind = 1, twotondim
-              iskip = ncoarse + (ind - 1) * ngridmax
-              pbuf((i-1)*twotondim + ind) = f(igrid + iskip, idim)
+              pbuf((i-1)*twotondim + ind) = f(ICELL_OF(igrid,ind), idim)
            end do
            igrid = next(igrid)
         end do
@@ -471,8 +470,7 @@ subroutine backup_poisson_hdf5()
         igrid = headl(myid, ilevel)
         do i = 1, ngrid_loc
            do ind = 1, twotondim
-              iskip = ncoarse + (ind - 1) * ngridmax
-              pbuf((i-1)*twotondim + ind) = scalar_gr(igrid + iskip)
+              pbuf((i-1)*twotondim + ind) = scalar_gr(ICELL_OF(igrid,ind))
            end do
            igrid = next(igrid)
         end do
@@ -485,8 +483,7 @@ subroutine backup_poisson_hdf5()
         igrid = headl(myid, ilevel)
         do i = 1, ngrid_loc
            do ind = 1, twotondim
-              iskip = ncoarse + (ind - 1) * ngridmax
-              pbuf((i-1)*twotondim + ind) = psi_re(igrid + iskip)
+              pbuf((i-1)*twotondim + ind) = psi_re(ICELL_OF(igrid,ind))
            end do
            igrid = next(igrid)
         end do
@@ -496,8 +493,7 @@ subroutine backup_poisson_hdf5()
         igrid = headl(myid, ilevel)
         do i = 1, ngrid_loc
            do ind = 1, twotondim
-              iskip = ncoarse + (ind - 1) * ngridmax
-              pbuf((i-1)*twotondim + ind) = psi_im(igrid + iskip)
+              pbuf((i-1)*twotondim + ind) = psi_im(ICELL_OF(igrid,ind))
            end do
            igrid = next(igrid)
         end do

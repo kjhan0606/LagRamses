@@ -14,6 +14,7 @@ subroutine sidm_scatter(ilevel)
   use pm_parameters, only: iseed
   use amr_commons
   use random
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -294,8 +295,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
 
      ! Loop over 8 subcells (twotondim=8 in 3D)
      do ind=1,twotondim
-        iskip = ncoarse+(ind-1)*ngridmax
-        icell = iskip+igrid
+        icell = ICELL_OF(igrid,ind)
 
         ! Only process leaf cells
         if(son(icell)/=0) cycle
@@ -866,6 +866,7 @@ subroutine sidm_baryon_drag(ilevel)
   use pm_commons
   use amr_commons
   use hydro_commons, only: uold,nvar,gamma
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -914,8 +915,7 @@ subroutine sidm_baryon_drag(ilevel)
 
      ! Loop over 8 subcells
      do ind=1,twotondim
-        iskip = ncoarse+(ind-1)*ngridmax
-        icell = iskip+igrid
+        icell = ICELL_OF(igrid,ind)
 
         ! Only leaf cells with gas
         if(son(icell)/=0) cycle

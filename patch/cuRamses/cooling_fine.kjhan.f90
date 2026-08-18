@@ -115,12 +115,13 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
   use rt_cooling_module, only: rt_solve_cooling,iIR,rt_isIRtrap &
        ,rt_pressBoost,iIRtrapVar,kappaSc,a_r,is_kIR_T,rt_vc
 #endif
+#include "amr_index.h"
   implicit none
   integer::ilevel,ngrid
   integer,dimension(1:nvector)::ind_grid
   !-------------------------------------------------------------------
   !-------------------------------------------------------------------
-  integer::i,ind,iskip,idim,nleaf,nx_loc,ix,iy,iz
+  integer::i,ind,idim,nleaf,nx_loc,ix,iy,iz
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(kind=8)::dtcool,nISM,nCOM,damp_factor,cooling_switch,t_blast
   real(dp)::polytropic_constant,dx_phys_cm
@@ -192,9 +193,8 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
 
   ! Loop over cells
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
 
      ! Gather leaf cells
@@ -522,8 +522,9 @@ subroutine enforce_eeos_after_sink
   ! which is valid when the jet cooling length << cell size.
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
-  integer::ilevel,igrid,ngrid,ncache,ind,iskip,i,idim
+  integer::ilevel,igrid,ngrid,ncache,ind,i,idim
   integer,dimension(1:nvector)::ind_grid,ind_cell
   logical,dimension(1:nvector)::ok
   real(dp)::d,e_kin,e_kin_pure,e_total,e_int,e_floor
@@ -544,9 +545,8 @@ subroutine enforce_eeos_after_sink
            ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
         end do
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=ind_grid(i)+iskip
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ngrid
               ok(i)=son(ind_cell(i))==0

@@ -10,6 +10,7 @@ subroutine diag_check_eint(label, ilev_check)
   !------------------------------------------------------------------------
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -17,7 +18,7 @@ subroutine diag_check_eint(label, ilev_check)
   character(len=*), intent(in) :: label
   integer, intent(in) :: ilev_check
 
-  integer :: ilevel, igrid, ind, iskip, icell, ncache, info
+  integer :: ilevel, igrid, ind, icell, ncache, info
   integer :: lmin, lmax
   real(dp) :: d, u, v, w, etot, eint
   real(dp) :: eint_min_loc, eint_min_glob
@@ -48,8 +49,7 @@ subroutine diag_check_eint(label, ilev_check)
      ncache = active(ilevel)%ngrid
      do igrid = 1, ncache
         do ind = 1, twotondim
-           iskip = ncoarse + (ind-1)*ngridmax
-           icell = iskip + active(ilevel)%igrid(igrid)
+           icell = ICELL_OF(active(ilevel)%igrid(igrid),ind)
            if(son(icell) /= 0) cycle  ! skip non-leaf
            d = uold(icell,1)
            if(d <= 0d0) cycle
@@ -117,13 +117,14 @@ subroutine diag_check_nan(label)
   use amr_commons
   use hydro_commons
   use poisson_commons, only: f
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   character(len=*), intent(in) :: label
 
-  integer :: ilevel, igrid, ind, iskip, icell, ncache, info, ivar
+  integer :: ilevel, igrid, ind, icell, ncache, info, ivar
   integer :: nan_uold_loc, nan_f_loc
   integer :: nan_uold_glob, nan_f_glob
   integer :: dzero_loc, dzero_glob
@@ -143,8 +144,7 @@ subroutine diag_check_nan(label)
      ncache = active(ilevel)%ngrid
      do igrid = 1, ncache
         do ind = 1, twotondim
-           iskip = ncoarse + (ind-1)*ngridmax
-           icell = iskip + active(ilevel)%igrid(igrid)
+           icell = ICELL_OF(active(ilevel)%igrid(igrid),ind)
            if(uold(icell,1) <= 0d0) dzero_loc = dzero_loc + 1
            do ivar = 1, nvar
               if(uold(icell,ivar) /= uold(icell,ivar)) then

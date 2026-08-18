@@ -4,11 +4,12 @@ subroutine init_hydro
 #ifdef RT      
   use rt_parameters,only: convert_birth_times
 #endif
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer::ncell,ncache,iskip,igrid,i,ilevel,ind,ivar,irad
+  integer::ncell,ncache,igrid,i,ilevel,ind,ivar,irad
   integer::nvar2,ilevel2,numbl2,ilun,ibound,istart,info
   integer::ncpu2,ndim2,nlevelmax2,nboundary2
   integer ,dimension(:),allocatable::ind_grid
@@ -141,18 +142,16 @@ subroutine init_hydro
               end do
               ! Loop over cells
               do ind=1,twotondim
-                 iskip=ncoarse+(ind-1)*ngridmax
-
                  ! Read density and velocities --> density and momenta
                  do ivar=1,ndim+1
                     read(ilun)xx
                     if(ivar==1)then
                        do i=1,ncache
-                          uold(ind_grid(i)+iskip,1)=xx(i)
+                          uold(ICELL_OF(ind_grid(i),ind),1)=xx(i)
                        end do
                     else if(ivar>=2.and.ivar<=ndim+1)then
                        do i=1,ncache
-                          uold(ind_grid(i)+iskip,ivar)=xx(i)*max(uold(ind_grid(i)+iskip,1),smallr)
+                          uold(ICELL_OF(ind_grid(i),ind),ivar)=xx(i)*max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
                        end do
                     endif
                  end do
@@ -162,7 +161,7 @@ subroutine init_hydro
                  do ivar=ndim+3,ndim+2+nener
                     read(ilun)xx
                     do i=1,ncache
-                       uold(ind_grid(i)+iskip,ivar)=xx(i)/(gamma_rad(ivar-ndim-2)-1d0)
+                       uold(ICELL_OF(ind_grid(i),ind),ivar)=xx(i)/(gamma_rad(ivar-ndim-2)-1d0)
                     end do
                  end do
 #endif
@@ -170,30 +169,30 @@ subroutine init_hydro
                  read(ilun)xx
                  do i=1,ncache
                     xx(i)=xx(i)/(gamma-1d0)
-                    if (uold(ind_grid(i)+iskip,1)>0.)then
-                    xx(i)=xx(i)+0.5d0*uold(ind_grid(i)+iskip,2)**2/max(uold(ind_grid(i)+iskip,1),smallr)
+                    if (uold(ICELL_OF(ind_grid(i),ind),1)>0.)then
+                    xx(i)=xx(i)+0.5d0*uold(ICELL_OF(ind_grid(i),ind),2)**2/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 #if NDIM>1
-                    xx(i)=xx(i)+0.5d0*uold(ind_grid(i)+iskip,3)**2/max(uold(ind_grid(i)+iskip,1),smallr)
+                    xx(i)=xx(i)+0.5d0*uold(ICELL_OF(ind_grid(i),ind),3)**2/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 #endif
 #if NDIM>2
-                    xx(i)=xx(i)+0.5d0*uold(ind_grid(i)+iskip,4)**2/max(uold(ind_grid(i)+iskip,1),smallr)
+                    xx(i)=xx(i)+0.5d0*uold(ICELL_OF(ind_grid(i),ind),4)**2/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 #endif
 #if NENER>0
                     do irad=1,nener
-                       xx(i)=xx(i)+uold(ind_grid(i)+iskip,ndim+2+irad)
+                       xx(i)=xx(i)+uold(ICELL_OF(ind_grid(i),ind),ndim+2+irad)
                     end do
 #endif
                  else
                     xx(i)=0.
                  end if
-                    uold(ind_grid(i)+iskip,ndim+2)=xx(i)
+                    uold(ICELL_OF(ind_grid(i),ind),ndim+2)=xx(i)
                  end do
 #if NVAR>NDIM+2+NENER
                  ! Read passive scalars
                  do ivar=ndim+3+nener,min(nvar,nvar2)
                     read(ilun)xx
                     do i=1,ncache
-                       uold(ind_grid(i)+iskip,ivar)=xx(i)*max(uold(ind_grid(i)+iskip,1),smallr)
+                       uold(ICELL_OF(ind_grid(i),ind),ivar)=xx(i)*max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
                     end do
                  end do
 #endif
@@ -246,6 +245,7 @@ subroutine restore_hydro_binary_varcpu_legacy
   use ksection
   use morton_keys
   use morton_hash
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -453,7 +453,7 @@ subroutine restore_hydro_binary_varcpu_legacy
            if(igrid == 0) cycle
 
            do iskip = 1, twotondim
-              icell = igrid + ncoarse + (iskip-1)*ngridmax
+              icell = ICELL_OF(igrid,iskip)
               base = ndim + (iskip-1)*nvar_send
 
               ! Density (file record 1)
@@ -516,6 +516,7 @@ subroutine restore_hydro_binary_varcpu_streaming
   use dynamic_exchange, only: EXCHANGE_SPARSE_P2P, exchange_dp_sorted
   use morton_keys
   use morton_hash
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -712,7 +713,7 @@ subroutine restore_hydro_binary_varcpu_streaming
                  do i=1,nrecv
                     igrid=recv_grid(i)
                     if(igrid==0)cycle
-                    icell=igrid+ncoarse+(iskip-1)*ngridmax
+                    icell=ICELL_OF(igrid,iskip)
                     if(ivar==1)then
                        uold(icell,1)=recv_value(i)
                     else if(ivar>=2.and.ivar<=ndim+1)then

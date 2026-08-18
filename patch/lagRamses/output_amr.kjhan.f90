@@ -311,6 +311,7 @@ subroutine backup_amr(filename)
   use hydro_commons
   use pm_commons
   use morton_hash
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -318,7 +319,7 @@ subroutine backup_amr(filename)
   character(LEN=80)::filename
 
   integer::nx_loc,ny_loc,nz_loc,ilun
-  integer::ilevel,ibound,ncache,istart,i,igrid,idim,ind,iskip
+  integer::ilevel,ibound,ncache,istart,i,igrid,idim,ind
   integer,allocatable,dimension(:)::ind_grid,iig
   real(dp),allocatable,dimension(:)::xdp
   real(sp),allocatable,dimension(:)::xsp
@@ -475,25 +476,22 @@ subroutine backup_amr(filename)
            end do
            ! Write son index
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ncache
-                 iig(i)=son(ind_grid(i)+iskip)
+                 iig(i)=son(ICELL_OF(ind_grid(i),ind))
               end do
               write(ilun)iig
            end do
            ! Write cpu map
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ncache
-                 iig(i)=cpu_map(ind_grid(i)+iskip)
+                 iig(i)=cpu_map(ICELL_OF(ind_grid(i),ind))
               end do
               write(ilun)iig
            end do
            ! Write refinement map
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ncache
-                 iig(i)=flag1(ind_grid(i)+iskip)
+                 iig(i)=flag1(ICELL_OF(ind_grid(i),ind))
               end do
               write(ilun)iig
            end do

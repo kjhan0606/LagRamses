@@ -39,19 +39,19 @@ end subroutine synchro_hydro_fine
 subroutine sub_synchro_hydro_fine(ilevel, igrid, ngrid, dteff)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer, intent(in) :: ilevel, igrid, ngrid
   real(dp), intent(in) :: dteff
-  integer :: i, ind, iskip
+  integer :: i, ind
   integer, dimension(1:nvector) :: ind_grid, ind_cell
 
   do i=1,ngrid
      ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
   end do
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=ind_grid(i)+iskip
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      call synchydrofine1(ind_cell,ngrid,dteff)
   end do
@@ -69,13 +69,14 @@ subroutine synchro_hydro_hybrid(ilevel, ncache, dteff)
   use cuda_commons
   use hydro_cuda_interface
   use iso_c_binding
+#include "amr_index.h"
   implicit none
   integer, intent(in) :: ilevel, ncache
   real(dp), intent(in) :: dteff
 
   integer, parameter :: SYNC_SUPER_SIZE = 16384
   integer :: igrid, ngrid, stream_slot
-  integer :: i, ind, iskip, nprops
+  integer :: i, ind, nprops
   integer, dimension(1:nvector) :: ind_grid, ind_cell
 
   ! Superbatch buffers (per-thread via OMP private)
@@ -85,7 +86,7 @@ subroutine synchro_hydro_hybrid(ilevel, ncache, dteff)
 
   nprops = ndim + 2 + ndim  ! rho + mom(ndim) + E + f(ndim)
 
-!$omp parallel private(igrid, ngrid, stream_slot, i, ind, iskip, &
+!$omp parallel private(igrid, ngrid, stream_slot, i, ind, &
 !$omp&   ind_grid, ind_cell, sbuf, sidx, scount, scap)
   stream_slot = cuda_acquire_stream_c()
 
@@ -108,10 +109,9 @@ subroutine synchro_hydro_hybrid(ilevel, ncache, dteff)
            ind_grid(i) = active(ilevel)%igrid(igrid+i-1)
         end do
         do ind = 1, twotondim
-           iskip = ncoarse + (ind - 1) * ngridmax
            do i = 1, ngrid
               scount = scount + 1
-              ind_cell(i) = ind_grid(i) + iskip
+              ind_cell(i) = ICELL_OF(ind_grid(i),ind)
               sidx(scount) = ind_cell(i)
               ! Gather uold(1:ndim+2)
               sbuf(scount, 1) = uold(ind_cell(i), 1)

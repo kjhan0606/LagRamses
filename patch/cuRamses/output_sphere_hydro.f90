@@ -2,13 +2,14 @@ subroutine output_sphere_hydro(isphere)
   use amr_commons
   use hydro_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'  
 #endif
 
 
-  integer::i,ivar,ncache,ind,ilevel,igrid,iskip,ilun,istart,ibound,irad,nprint,j,nleaf,cpi(8,3),idim,k,isphere
+  integer::i,ivar,ncache,ind,ilevel,igrid,ilun,istart,ibound,irad,nprint,j,nleaf,cpi(8,3),idim,k,isphere
   integer,allocatable,dimension(:)::ind_grid,ttag
   integer(kind=2),allocatable,dimension(:)::stag
   real(dp),allocatable,dimension(:)::xdp
@@ -125,9 +126,8 @@ subroutine output_sphere_hydro(isphere)
               end do
 
               do ind=1,twotondim
-                 iskip=ncoarse+(ind-1)*ngridmax
                  do i=1,ncache
-                    if(son(ind_grid(i)+iskip)==0)then
+                    if(son(ICELL_OF(ind_grid(i),ind))==0)then
 				       nleaf=nleaf+1
 					endif
 				 enddo
@@ -140,9 +140,8 @@ subroutine output_sphere_hydro(isphere)
 				 nprint=0
                  j=0
                  do ind=1, twotondim
-	                iskip=ncoarse+(ind-1)*ngridmax
                     do i=1,ncache
-                       if(son(ind_grid(i)+iskip)==0)then
+                       if(son(ICELL_OF(ind_grid(i),ind))==0)then
 			              j=j+1
 					      do idim=1,ndim
 					         xdp(j)=xdp(j)+(xg(ind_grid(i),idim)+(cpi(ind,idim)-0.5)*dx-scenter(idim))**2
@@ -176,13 +175,12 @@ subroutine output_sphere_hydro(isphere)
 					   j=0
 					   k=0
 					   do ind=1, twotondim
-				          iskip=ncoarse+(ind-1)*ngridmax
 					      do i=1,ncache
-					         if(son(ind_grid(i)+iskip)==0) then
+					         if(son(ICELL_OF(ind_grid(i),ind))==0) then
 							    k=k+1
 							    if(stag(k) .eq. 1) then
 								   j=j+1
-							       if(idim .eq. 1) ttag(j)=ind_grid(i)+iskip
+							       if(idim .eq. 1) ttag(j)=ICELL_OF(ind_grid(i),ind)
 								   xdp(j)=xg(ind_grid(i),idim)+(cpi(ind,idim)-0.5)*dx
 							    endif
 						     endif

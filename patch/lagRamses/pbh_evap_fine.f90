@@ -44,6 +44,7 @@ subroutine pbh_cache_uniform_masses
   use pm_commons
   use hydro_commons
   use pbh_commons, only: pbh_mdm_glob,pbh_mgas_glob
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -59,7 +60,7 @@ subroutine pbh_cache_uniform_masses
         igrid=active(ilevel)%igrid(jgrid)
         if(hydro)then
            do ind=1,twotondim
-              icell=ncoarse+(ind-1)*ngridmax+igrid
+              icell=ICELL_OF(igrid,ind)
               if(son(icell)==0) &
                    & mass_loc(2)=mass_loc(2)+uold(icell,1)*vol_cell
            end do
@@ -95,6 +96,7 @@ subroutine pbh_evap_fine(ilevel)
   use hydro_commons
   use pbh_commons
 !$ use omp_lib
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -244,7 +246,7 @@ subroutine pbh_evap_fine(ilevel)
      vol_cell=(0.5d0**ilevel*boxlen/dble(nx_loc))**ndim
      do i=1,active(ilevel)%ngrid
         do j=1,twotondim
-           icell=ncoarse+(j-1)*ngridmax+active(ilevel)%igrid(i)
+           icell=ICELL_OF(active(ilevel)%igrid(i),j)
            if(son(icell)==0)then
               dE=eps*uold(icell,1)
               dEcr=epscr*uold(icell,1)
@@ -271,7 +273,7 @@ subroutine pbh_evap_fine(ilevel)
      if(do_cr.or.do_uniform_cr)then
         do i=1,active(ilevel)%ngrid
            do j=1,twotondim
-              e=ncoarse+(j-1)*ngridmax+active(ilevel)%igrid(i)
+              e=ICELL_OF(active(ilevel)%igrid(i),j)
               ecr_mesh=ecr_mesh+uold(e,pbh_cr_ivar)
            end do
         end do
@@ -310,6 +312,7 @@ subroutine sub_pbh_evap_fine(ilevel,istart,nchunk,ratio,efac,efaccr, &
   ! batches (classic feedback pattern) and hand them to pbh_dump.
   use amr_commons
   use pm_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel,istart,nchunk
   real(dp)::ratio,efac,efaccr,einj_c,ecr_c
@@ -468,7 +471,7 @@ subroutine pbh_dump(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
      do j=1,np
         if(ok(j))then
            icell(j)=1+icd(j,1)+2*icd(j,2)+4*icd(j,3)
-           indp(j)=ncoarse+(icell(j)-1)*ngridmax+igrid(j)
+           indp(j)=ICELL_OF(igrid(j),icell(j))
         else
            ! fallback: deposit into the coarser parent cell (ilevel-1)
            ! so that no particle's heat is ever silently dropped

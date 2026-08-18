@@ -3,6 +3,7 @@ subroutine write_screen
   use hydro_commons
   use pm_commons
   use poisson_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -43,7 +44,7 @@ subroutine write_screen
         ! Count leaf cells
         do ind=1,twotondim
            do i=1,ncache
-              ind_cell(i)=ncoarse+(ind-1)*ngridmax+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ncache
               if(son(ind_cell(i))== 0)then
@@ -109,7 +110,7 @@ subroutine write_screen
         icell=icellmin
         do ind=1,twotondim
            do i=1,ncache
-              ind_cell(i)=ncoarse+(ind-1)*ngridmax+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ncache
               if(son(ind_cell(i))==0)then
@@ -123,7 +124,7 @@ subroutine write_screen
            icell=icellmin
            do ind=1,twotondim
               do i=1,ncache
-                 ind_cell(i)=ncoarse+(ind-1)*ngridmax+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
               do i=1,ncache
                  if(son(ind_cell(i))==0)then
@@ -148,7 +149,7 @@ subroutine write_screen
            icell=icellmin
            do ind=1,twotondim
               do i=1,ncache
-                 ind_cell(i)=ncoarse+(ind-1)*ngridmax+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
               do i=1,ncache
                  if(son(ind_cell(i))==0)then

@@ -5,13 +5,14 @@ subroutine sub_hydro_flag(ilevel,igrid,ngrid,iflag)
 #ifdef RT
   use rt_parameters
 #endif
+#include "amr_index.h"
   implicit none
   integer::ilevel,iflag
   ! -------------------------------------------------------------------
   ! This routine flag for refinement cells that satisfies
   ! some user-defined physical criteria at the level ilevel. 
   ! -------------------------------------------------------------------
-  integer::i,j,ncache,nok,ix,iy,iz,iskip
+  integer::i,j,ncache,nok,ix,iy,iz
   integer::igrid,ind,idim,ngrid,ivar
   integer::nx_loc
   integer,dimension(1:nvector)::ind_grid,ind_cell
@@ -40,9 +41,8 @@ subroutine sub_hydro_flag(ilevel,igrid,ngrid,iflag)
   ! Loop over cells
   do ind=1,twotondim
 
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
 
      ! Initialize refinement to false

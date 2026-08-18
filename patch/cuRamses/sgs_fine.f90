@@ -48,12 +48,13 @@ subroutine sgs_source(ilevel,istart,ngrid)
   use amr_commons
   use hydro_commons
   use cooling_module, ONLY: twopi
+#include "amr_index.h"
   implicit none
 
   integer::ilevel,istart,ngrid
 
   ! Local variables
-  integer::i,j,ind,iskip
+  integer::i,j,ind
   integer,dimension(1:nvector)::ind_grid,ind_cell
   integer,dimension(1:nvector,0:twondim)::igridn
   integer,dimension(1:nvector,1:twondim)::indn
@@ -98,9 +99,8 @@ subroutine sgs_source(ilevel,istart,ngrid)
 
   ! Loop over cells
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
 
      ! Get face-neighbor cells for this oct position
@@ -268,12 +268,13 @@ end subroutine sgs_source
 subroutine sgs_init_restart
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
 
-  integer::ilevel,igrid,ind,iskip,icell,ncache,info
+  integer::ilevel,igrid,ind,icell,ncache,info
   real(dp)::rho,ek,eint_loc,esgs_init_val
   integer(kind=8)::ninit_loc,ninit_glob
 
@@ -287,8 +288,7 @@ subroutine sgs_init_restart
      ncache = active(ilevel)%ngrid
      do igrid = 1, ncache
         do ind = 1, twotondim
-           iskip = ncoarse + (ind-1)*ngridmax
-           icell = iskip + active(ilevel)%igrid(igrid)
+           icell = ICELL_OF(active(ilevel)%igrid(igrid),ind)
            if(son(icell) /= 0) cycle
 
            ! Only initialize cells where e_sgs is effectively zero

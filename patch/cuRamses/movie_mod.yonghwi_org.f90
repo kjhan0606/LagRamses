@@ -12,6 +12,7 @@ subroutine output_frame()
   use rt_parameters
   use rt_hydro_commons
 #endif
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include "mpif.h"
@@ -27,7 +28,7 @@ subroutine output_frame()
 #else
   character(len=100),dimension(0:NVAR+2) :: moviefiles
 #endif
-  integer::icell,ncache,iskip,irad,ngrid,nlevelmax_frame
+  integer::icell,ncache,irad,ngrid,nlevelmax_frame
   integer::ilun,nx_loc,ipout,npout,npart_out,ind,ix,iy,iz
   integer::imin,imax,jmin,jmax,ii,jj,kk,ll
   character(LEN=80)::fileloc
@@ -304,9 +305,8 @@ subroutine output_frame()
            ! Loop over cells
            do ind=1,twotondim
               ! Gather cell indices
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
               ! Gather cell centre positions
               do idim=1,ndim

@@ -54,6 +54,7 @@ end subroutine file_descriptor_hydro
 subroutine backup_hydro(filename)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'  
@@ -61,7 +62,7 @@ subroutine backup_hydro(filename)
 
   character(LEN=80)::filename
 
-  integer::i,ivar,ncache,ind,ilevel,igrid,iskip,ilun,istart,ibound,irad
+  integer::i,ivar,ncache,ind,ilevel,igrid,ilun,istart,ibound,irad
   integer,allocatable,dimension(:)::ind_grid
   real(dp),allocatable,dimension(:)::xdp
   character(LEN=5)::nchar
@@ -114,17 +115,16 @@ subroutine backup_hydro(filename)
            end do
            ! Loop over cells
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do ivar=1,ndim+1
                  if(ivar==1)then
                     ! Write density
                     do i=1,ncache
-                       xdp(i)=uold(ind_grid(i)+iskip,1)
+                       xdp(i)=uold(ICELL_OF(ind_grid(i),ind),1)
                     end do
                  else if(ivar>=2.and.ivar<=ndim+1)then
                     ! Write velocity field
                     do i=1,ncache
-                       xdp(i)=uold(ind_grid(i)+iskip,ivar)/max(uold(ind_grid(i)+iskip,1),smallr)
+                       xdp(i)=uold(ICELL_OF(ind_grid(i),ind),ivar)/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
                     end do
                  endif
                  write(ilun)xdp
@@ -133,24 +133,24 @@ subroutine backup_hydro(filename)
               ! Write non-thermal pressures
               do ivar=ndim+3,ndim+2+nener
                  do i=1,ncache
-                    xdp(i)=(gamma_rad(ivar-ndim-2)-1d0)*uold(ind_grid(i)+iskip,ivar)
+                    xdp(i)=(gamma_rad(ivar-ndim-2)-1d0)*uold(ICELL_OF(ind_grid(i),ind),ivar)
                  end do
                  write(ilun)xdp
               end do
 #endif
               ! Write thermal pressure
               do i=1,ncache
-                 xdp(i)=uold(ind_grid(i)+iskip,ndim+2)
-                 xdp(i)=xdp(i)-0.5d0*uold(ind_grid(i)+iskip,2)**2/max(uold(ind_grid(i)+iskip,1),smallr)
+                 xdp(i)=uold(ICELL_OF(ind_grid(i),ind),ndim+2)
+                 xdp(i)=xdp(i)-0.5d0*uold(ICELL_OF(ind_grid(i),ind),2)**2/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 #if NDIM>1
-                 xdp(i)=xdp(i)-0.5d0*uold(ind_grid(i)+iskip,3)**2/max(uold(ind_grid(i)+iskip,1),smallr)
+                 xdp(i)=xdp(i)-0.5d0*uold(ICELL_OF(ind_grid(i),ind),3)**2/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 #endif
 #if NDIM>2
-                 xdp(i)=xdp(i)-0.5d0*uold(ind_grid(i)+iskip,4)**2/max(uold(ind_grid(i)+iskip,1),smallr)
+                 xdp(i)=xdp(i)-0.5d0*uold(ICELL_OF(ind_grid(i),ind),4)**2/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 #endif
 #if NENER>0
                  do irad=1,nener
-                    xdp(i)=xdp(i)-uold(ind_grid(i)+iskip,ndim+2+irad)
+                    xdp(i)=xdp(i)-uold(ICELL_OF(ind_grid(i),ind),ndim+2+irad)
                  end do
 #endif
                  xdp(i)=(gamma-1d0)*xdp(i)
@@ -160,7 +160,7 @@ subroutine backup_hydro(filename)
               ! Write passive scalars
               do ivar=ndim+3+nener,nvar
                  do i=1,ncache
-                    xdp(i)=uold(ind_grid(i)+iskip,ivar)/max(uold(ind_grid(i)+iskip,1),smallr)
+                    xdp(i)=uold(ICELL_OF(ind_grid(i),ind),ivar)/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
                  end do
                  write(ilun)xdp
               end do
@@ -185,7 +185,6 @@ subroutine backup_hydro(filename)
   
   
 end subroutine backup_hydro
-
 
 
 

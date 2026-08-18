@@ -15,6 +15,7 @@ module morton_hash
        MORTON_MAXBITS, grid_to_morton, morton_neighbor, &
        morton_decode, morton_encode, &
        operator(==), operator(/=)
+#include "amr_index.h"
   implicit none
 
   type(mkey_t), parameter :: MHASH_EMPTY   = MK_MINUS1
@@ -300,7 +301,7 @@ contains
        pkey = morton_encode(pix, piy, piz)
        igrid_parent = morton_hash_lookup(mort_table(ilevel-1), pkey)
        if (igrid_parent > 0) then
-          icell = ncoarse + (ind_oct-1)*ngridmax + igrid_parent
+          icell = ICELL_OF(igrid_parent,ind_oct)
        else
           icell = 0
        end if

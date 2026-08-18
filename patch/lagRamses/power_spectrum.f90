@@ -20,6 +20,7 @@ subroutine compute_power_spectrum(ilevel, filedir, nchar)
   use poisson_commons, only: psi_re, psi_im
   use iso_c_binding
   use omp_lib
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include "mpif.h"
@@ -48,7 +49,7 @@ subroutine compute_power_spectrum(ilevel, filedir, nchar)
   real(dp) :: twopi, mean_count
 
   ! FDM field deposit
-  integer :: ind, iskip, igrid_loc, icell, nx_loc
+  integer :: ind, igrid_loc, icell, nx_loc
   real(dp) :: dx_lev
   real(dp), dimension(1:3) :: skip_loc
   real(dp), dimension(1:twotondim,1:3) :: xc
@@ -136,9 +137,8 @@ subroutine compute_power_spectrum(ilevel, filedir, nchar)
         xc(ind,3) = (dble(iz)-0.5d0)*dx_lev
      end do
      do ind=1,twotondim
-        iskip = ncoarse + (ind-1)*ngridmax
         do igrid_loc = 1, active(ilevel)%ngrid
-           icell = active(ilevel)%igrid(igrid_loc) + iskip
+           icell = ICELL_OF(active(ilevel)%igrid(igrid_loc),ind)
            ! Normalized cell-center position in [0,1)
            ix = int(((xg(active(ilevel)%igrid(igrid_loc),1)+xc(ind,1)-skip_loc(1)) &
                 & / dble(nx_loc)) * dble(fft_Nx))

@@ -8,6 +8,7 @@ subroutine output_cone_hydro(obs)
   use pm_commons
   use poisson_commons
 
+#include "amr_index.h"
   implicit none
 
 #ifndef WITHOUTMPI
@@ -35,7 +36,7 @@ subroutine output_cone_hydro(obs)
   real(kind=8),dimension(:,:),allocatable::gposout,gvelout,getcout
   real(kind=8),dimension(:,:),allocatable::gpos_out,gvel_out,getc_out
   real(kind=8),dimension(:),allocatable::gzout,gz_out
-  integer::nleaf,ncache,ibound,iskip,ngout,istart,iglun,ind,nhvar,ivar,irad,end_tag,zoomed_level,print_mark,mncell,tngout,elongated_axis_cone,obs,nprint
+  integer::nleaf,ncache,ibound,ngout,istart,iglun,ind,nhvar,ivar,irad,end_tag,zoomed_level,print_mark,mncell,tngout,elongated_axis_cone,obs,nprint
   real(kind=8) :: cpi(8,3),dx,coord_distance,Omega0,OmegaL,OmegaR,coverH0,dist1,dist2,lboxz(3),minboxr(3),maxboxr(3),observer_cone(3),minboxr_cone(3),maxboxr_cone(3)
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp)::nfine,dist10,dist20,daexp,z10,z20
@@ -196,9 +197,8 @@ subroutine output_cone_hydro(obs)
 		      enddo
 			
 		      do ind=1,twotondim
-		         iskip=ncoarse+(ind-1)*ngridmax
 			     do i=1,ncache
-			        if(son(ind_grid(i)+iskip)==0) then
+			        if(son(ICELL_OF(ind_grid(i),ind))==0) then
 				       nleaf=nleaf+1
 			        endif
 			     enddo
@@ -206,43 +206,42 @@ subroutine output_cone_hydro(obs)
 	          j=0	
 		      if(nleaf .gt. 0) then
 		         do ind=1,twotondim
-		            iskip=ncoarse+(ind-1)*ngridmax
 		  	        do i=1,ncache
-			           if(son(ind_grid(i)+iskip)==0) then
+			           if(son(ICELL_OF(ind_grid(i),ind))==0) then
 			              j=j+1
 				          do idim=1,ndim
 				             gpos(idim,j)=(xg(ind_grid(i),idim)+(cpi(ind,idim)-0.5)*dx)*Lbox-minboxr(idim)
-				             gvel(idim,j)=uold(ind_grid(i)+iskip,idim+1)/max(uold(ind_grid(i)+iskip,1),smallr)
+				             gvel(idim,j)=uold(ICELL_OF(ind_grid(i),ind),idim+1)/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 				          enddo
 				          getc(1,j)=dx
-				          getc(2,j)=uold(ind_grid(i)+iskip,1)
+				          getc(2,j)=uold(ICELL_OF(ind_grid(i),ind),1)
                           k=2
 #if NENER>0
 				          do ivar=ndim+3,ndim+2+nener
-				             getc(3+ivar-ndim-3,j)=(gamma_rad(ivar-ndim-2)-1d0)*uold(ind_grid(i)+iskip,ivar)
+				             getc(3+ivar-ndim-3,j)=(gamma_rad(ivar-ndim-2)-1d0)*uold(ICELL_OF(ind_grid(i),ind),ivar)
 				          enddo
 				          k=k+nener
 #endif
-				          getc(k+1,j)=uold(ind_grid(i)+iskip,ndim+2)
-				          getc(k+1,j)=getc(k+1,j)-0.5d0*uold(ind_grid(i)+iskip,2)**2/max(uold(ind_grid(i)+iskip,1),smallr)
+				          getc(k+1,j)=uold(ICELL_OF(ind_grid(i),ind),ndim+2)
+				          getc(k+1,j)=getc(k+1,j)-0.5d0*uold(ICELL_OF(ind_grid(i),ind),2)**2/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 #if NDIM>1
-                          getc(k+1,j)=getc(k+1,j)-0.5d0*uold(ind_grid(i)+iskip,3)**2/max(uold(ind_grid(i)+iskip,1),smallr)
+                          getc(k+1,j)=getc(k+1,j)-0.5d0*uold(ICELL_OF(ind_grid(i),ind),3)**2/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 #endif
 #if NDIM>2
-                          getc(k+1,j)=getc(k+1,j)-0.5d0*uold(ind_grid(i)+iskip,4)**2/max(uold(ind_grid(i)+iskip,1),smallr)
+                          getc(k+1,j)=getc(k+1,j)-0.5d0*uold(ICELL_OF(ind_grid(i),ind),4)**2/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 #endif
 #if NENER>0
                           do irad=1,nener
-                             getc(k+1,j)=getc(k+1,j)-uold(ind_grid(i)+iskip,ndim+2+irad)
+                             getc(k+1,j)=getc(k+1,j)-uold(ICELL_OF(ind_grid(i),ind),ndim+2+irad)
                           end do
 #endif
                           getc(k+1,j)=(gamma-1d0)*getc(k+1,j)
 #if NVAR>NDIM+2+NENER
                           do ivar=ndim+3+nener,nvar
-                             getc(k+2+ivar-ndim-3-nener,j)=uold(ind_grid(i)+iskip,ivar)/max(uold(ind_grid(i)+iskip,1),smallr)
+                             getc(k+2+ivar-ndim-3-nener,j)=uold(ICELL_OF(ind_grid(i),ind),ivar)/max(uold(ICELL_OF(ind_grid(i),ind),1),smallr)
 			              enddo
 #endif
-				          getc(nhvar,j)=phi(ind_grid(i)+iskip)
+				          getc(nhvar,j)=phi(ICELL_OF(ind_grid(i),ind))
 				       endif
 				       if(j==mncell) then
                           print_mark=1

@@ -29,13 +29,14 @@ subroutine init_flow_fine(ilevel)
   use amr_commons
   use hydro_commons
   use cooling_module
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   integer::ilevel
   
-  integer::i,icell,igrid,ncache,iskip,ngrid,ilun
+  integer::i,icell,igrid,ncache,ngrid,ilun
   integer::ind,idim,ivar,ix,iy,iz,nx_loc
   integer::i1,i2,i3,i1_min,i1_max,i2_min,i2_max,i3_min,i3_max
   integer::buf_count,info,nvar_in
@@ -415,10 +416,9 @@ subroutine init_flow_fine(ilevel)
 
         ! Loop over cells; scatter only the cells whose i3 lies in this slab.
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ncache
               igrid=active(ilevel)%igrid(i)
-              icell=igrid+iskip
+              icell=ICELL_OF(igrid,ind)
               xx1=xg(igrid,1)+xc(ind,1)-skip_loc(1)
               xx1=(xx1*(dxini(ilevel)/dx)-xoff1(ilevel))/dxini(ilevel)
               xx2=xg(igrid,2)+xc(ind,2)-skip_loc(2)
@@ -460,9 +460,8 @@ subroutine init_flow_fine(ilevel)
            ! Loop over cells
            do ind=1,twotondim
               ! Gather cell indices
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
               ! Prevent negative density
               do i=1,ngrid
@@ -493,9 +492,8 @@ subroutine init_flow_fine(ilevel)
         ! Loop over cells
         do ind=1,twotondim
            ! Gather cell indices
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            ! Compute total energy density
            do i=1,ngrid
@@ -557,9 +555,8 @@ subroutine init_flow_fine(ilevel)
         ! Loop over cells
         do ind=1,twotondim
            ! Gather cell indices
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            ! Gather cell centre positions
            do idim=1,ndim

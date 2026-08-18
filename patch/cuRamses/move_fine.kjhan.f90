@@ -266,6 +266,7 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use hydro_commons, ONLY: uold,smallr,gamma
   use cooling_module, ONLY: XH=>X, rhoc, mH
   use scalar_de_commons, only: sde_phip_of_a
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -522,7 +523,7 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   do ind=1,twotondim
      do j=1,np
         if(ok(j))then
-           indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+           indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
         else
            indp(j,ind)=nbors_father_cells(ind_grid_part(j),icell(j,ind))
         end if

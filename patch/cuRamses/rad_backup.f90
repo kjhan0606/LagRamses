@@ -2,13 +2,14 @@ subroutine backup_radiation(filename)
   use amr_commons
   use hydro_commons
   use radiation_commons, ONLY: Erad
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'  
 #endif
   character(LEN=80)::filename
 
-  integer::i,ivar,ncache,ind,ilevel,igrid,iskip,ilun,istart,ibound,nvar_rad
+  integer::i,ivar,ncache,ind,ilevel,igrid,ilun,istart,ibound,nvar_rad
   integer,allocatable,dimension(:)::ind_grid
   real(dp),allocatable,dimension(:)::xdp
   character(LEN=5)::nchar
@@ -61,10 +62,9 @@ subroutine backup_radiation(filename)
            end do
            ! Loop over cells
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               ! Output the radiation photon density.
               do i=1,ncache
-                 xdp(i)=Erad(ind_grid(i)+iskip)
+                 xdp(i)=Erad(ICELL_OF(ind_grid(i),ind))
               end do
               write(ilun)xdp
            end do

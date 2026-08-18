@@ -3,11 +3,12 @@ subroutine init_radiation
   use hydro_commons
   use cooling_module, ONLY: force_j0_one
   use radiation_commons, ONLY: Erad,Srad
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer::ncell,ncache,iskip,igrid,i,ilevel,ind,ivar
+  integer::ncell,ncache,igrid,i,ilevel,ind,ivar
   integer::nvar2,ilevel2,numbl2,ilun,ibound,istart,info
   integer::ncpu2,ndim2,nlevelmax2,nboundary2
   integer::nvar_expected
@@ -102,10 +103,9 @@ subroutine init_radiation
               end do
               ! Loop over cells
               do ind=1,twotondim
-                 iskip=ncoarse+(ind-1)*ngridmax
                  read(ilun)xx
                  do i=1,ncache
-                    Erad(ind_grid(i)+iskip)=xx(i)
+                    Erad(ICELL_OF(ind_grid(i),ind))=xx(i)
                  end do
               end do
               deallocate(ind_grid,xx)
@@ -133,7 +133,6 @@ subroutine init_radiation
   end if
 
 end subroutine init_radiation
-
 
 
 
