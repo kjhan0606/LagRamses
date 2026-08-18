@@ -52,6 +52,8 @@ def main():
     total = 0; per = {}
     for o, f in sorted(sources().items()):
         if only and str(f) not in only and o not in only: continue
+        # amr_index.f90 IS the one legitimate home of the arithmetic
+        if f.name == 'amr_index.f90': continue
         hits = []
         for ln, joined, raw in logical_lines(f.read_text(errors='replace')):
             s = raw.lstrip()

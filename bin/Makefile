@@ -35,9 +35,9 @@ DEFINES = -DNVECTOR=$(NVECTOR) -DNDIM=$(NDIM) -DNPRE=$(NPRE) -DNENER=$(NENER) -D
 #############################################################################
 F90 = mpiifx -qopenmp
 ifdef FDMDEBUG
-  FFLAGS = -fpp -O2 -check bounds -traceback -g $(DEFINES) -DFDMDEBUG -DLONGINT -DQUADHILBERT -DOUTPUT_PARTICLE_POTENTIAL
+  FFLAGS = -fpp -I../patch/lagRamses -O2 -check bounds -traceback -g $(DEFINES) -DFDMDEBUG -DLONGINT -DQUADHILBERT -DOUTPUT_PARTICLE_POTENTIAL
 else
-  FFLAGS = -fpp -O3 $(DEFINES) -DLONGINT -DQUADHILBERT -DOUTPUT_PARTICLE_POTENTIAL
+  FFLAGS = -fpp -I../patch/lagRamses -O3 $(DEFINES) -DLONGINT -DQUADHILBERT -DOUTPUT_PARTICLE_POTENTIAL
 endif
 ifdef FDMTRACE
   FFLAGS += -DFDMDEBUG

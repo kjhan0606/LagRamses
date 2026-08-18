@@ -2,7 +2,7 @@ subroutine init_poisson
   use pm_commons
   use amr_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -229,13 +229,13 @@ subroutine init_poisson
                  ! Read potential
                  read(ilun)xx
                  do i=1,ncache
-                    phi(icell_of(ind_grid(i),ind))=xx(i)
+                    phi(ICELL_OF(ind_grid(i),ind))=xx(i)
                  end do
                  ! Read force
                  do ivar=1,ndim
                     read(ilun)xx
                     do i=1,ncache
-                       f(icell_of(ind_grid(i),ind),ivar)=xx(i)
+                       f(ICELL_OF(ind_grid(i),ind),ivar)=xx(i)
                     end do
                  end do
                  ! New-format gravity checkpoints append scalar_gr after
@@ -245,8 +245,8 @@ subroutine init_poisson
                     read(ilun)xx
                     if(allocated(scalar_gr))then
                        do i=1,ncache
-                          scalar_gr(icell_of(ind_grid(i),ind))=xx(i)
-                          scalar_gr_old(icell_of(ind_grid(i),ind))=xx(i)
+                          scalar_gr(ICELL_OF(ind_grid(i),ind))=xx(i)
+                          scalar_gr_old(ICELL_OF(ind_grid(i),ind))=xx(i)
                        end do
                     end if
                  end if
@@ -299,7 +299,7 @@ subroutine restore_poisson_binary_varcpu
   use ksection
   use morton_keys
   use morton_hash
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -526,7 +526,7 @@ subroutine restore_poisson_binary_varcpu
            if(igrid == 0) cycle
 
            do iskip = 1, twotondim
-              icell = icell_of(igrid, iskip)
+              icell = ICELL_OF(igrid, iskip)
               base = ndim + (iskip-1)*ngrav_per_oct
               phi(icell) = recvbuf_2d(base + 1, i)
               do ivar = 1, ndim

@@ -91,7 +91,7 @@ subroutine interpol_phi(ind_cell,phi_int,ncell,ilevel,icount)
 subroutine save_phi_old(ilevel)
   use amr_commons
   use poisson_commons, only:phi,phi_old
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer ilevel
 
@@ -120,7 +120,7 @@ subroutine save_phi_old(ilevel)
         do ind=1,twotondim
            ! save phi      
            do i=1,ncache
-              phi_old(icell_of(ind_grid(i),ind))=phi(icell_of(ind_grid(i),ind))
+              phi_old(ICELL_OF(ind_grid(i),ind))=phi(ICELL_OF(ind_grid(i),ind))
            end do
         end do
         deallocate(ind_grid)

@@ -973,7 +973,7 @@ subroutine build_mg_halo_indices(ilevel)
    use poisson_commons
    use poisson_cuda_interface
    use iso_c_binding
-  use amr_index, only: icell_of
+#include "amr_index.h"
    implicit none
 
    integer, intent(in) :: ilevel
@@ -1008,7 +1008,7 @@ subroutine build_mg_halo_indices(ilevel)
          do j = 1, twotondim
             do i = 1, emission(icpu,ilevel)%ngrid
                idx = idx + 1
-               mg_halo_emit_cells(idx) = icell_of(emission(icpu,ilevel)%igrid(i),j)
+               mg_halo_emit_cells(idx) = ICELL_OF(emission(icpu,ilevel)%igrid(i),j)
             end do
          end do
       end if
@@ -1021,7 +1021,7 @@ subroutine build_mg_halo_indices(ilevel)
          do j = 1, twotondim
             do i = 1, reception(icpu,ilevel)%ngrid
                idx = idx + 1
-               mg_halo_recv_cells(idx) = icell_of(reception(icpu,ilevel)%igrid(i),j)
+               mg_halo_recv_cells(idx) = ICELL_OF(reception(icpu,ilevel)%igrid(i),j)
             end do
          end do
       end if
@@ -1131,7 +1131,7 @@ subroutine precompute_mg_gpu_restrict_interp(ilevel)
    use poisson_commons
    use poisson_cuda_interface
    use iso_c_binding
-  use amr_index, only: ichild_of, igrid_of
+#include "amr_index.h"
    implicit none
 
    integer, intent(in) :: ilevel
@@ -1207,8 +1207,8 @@ subroutine precompute_mg_gpu_restrict_interp(ilevel)
    do igrid_f_mg = 1, ngrid_fine
       igrid_f_amr = active(ilevel)%igrid(igrid_f_mg)
       icell_c_amr = father(igrid_f_amr)
-      ind_c_cell  = ichild_of(icell_c_amr)
-      igrid_c_amr = igrid_of(icell_c_amr)
+      ind_c_cell  = ICHILD_OF(icell_c_amr)
+      igrid_c_amr = IGRID_OF(icell_c_amr)
       cpu_amr     = cpu_map(father(igrid_c_amr))
       igrid_c_mg  = lookup_mg(igrid_c_amr)
 
@@ -1247,8 +1247,8 @@ subroutine precompute_mg_gpu_restrict_interp(ilevel)
          do i = 1, nbatch
             igrid_f_mg  = istart + i - 1
             icell_c_amr = nbors_father_cells_loc(i, j)
-            ind_c_cell  = ichild_of(icell_c_amr)
-            igrid_c_amr = igrid_of(icell_c_amr)
+            ind_c_cell  = ICHILD_OF(icell_c_amr)
+            igrid_c_amr = IGRID_OF(icell_c_amr)
             cpu_amr     = cpu_map(father(igrid_c_amr))
             igrid_c_mg  = lookup_mg(igrid_c_amr)
 
@@ -2072,7 +2072,7 @@ subroutine make_fine_mask(ilevel)
 #ifdef FDMDEBUG
    use mg_omp_profile_m
 #endif
-  use amr_index, only: icell_of
+#include "amr_index.h"
    implicit none
    integer, intent(in) :: ilevel
 
@@ -2094,7 +2094,7 @@ subroutine make_fine_mask(ilevel)
    do ind=1,twotondim
       do igrid_mg=1,ngrid
          igrid_amr = active(ilevel)%igrid(igrid_mg)
-         icell_amr = icell_of(igrid_amr,ind)
+         icell_amr = ICELL_OF(igrid_amr,ind)
          ! Init mask to 1.0 on active cells :
          f(icell_amr,3) = 1.0d0
       end do
@@ -2106,7 +2106,7 @@ subroutine make_fine_mask(ilevel)
       do ind=1,twotondim
          do igrid_mg=1,ngrid
             igrid_amr = reception(icpu,ilevel)%igrid(igrid_mg)
-            icell_amr = icell_of(igrid_amr,ind)
+            icell_amr = ICELL_OF(igrid_amr,ind)
             ! Init mask to 1.0 on virtual cells :
             f(icell_amr,3) = 1.0d0
          end do
@@ -2118,7 +2118,7 @@ subroutine make_fine_mask(ilevel)
       do ind=1,twotondim
          do igrid_mg=1,ngrid
             igrid_amr = boundary(ibound,ilevel)%igrid(igrid_mg)
-            icell_amr = icell_of(igrid_amr,ind)
+            icell_amr = ICELL_OF(igrid_amr,ind)
             ! Init mask to -1.0 on boundary cells :
             f(icell_amr,3) = -1.0d0
          end do
@@ -2271,7 +2271,7 @@ subroutine make_fine_bc_rhs(ilevel,icount)
 #ifdef FDMDEBUG
    use mg_omp_profile_m
 #endif
-  use amr_index, only: icell_of
+#include "amr_index.h"
    implicit none
    integer, intent(in) :: ilevel,icount
 
@@ -2351,7 +2351,7 @@ subroutine make_fine_bc_rhs(ilevel,icount)
 !$omp schedule(dynamic,1024)
       do igrid_mg=1,ngrid
          igrid_amr = active(ilevel)%igrid(igrid_mg)
-         icell_amr = icell_of(igrid_amr,ind)
+         icell_amr = ICELL_OF(igrid_amr,ind)
 
          ! Init BC-modified RHS to rho - rho_tot :
          f(icell_amr,2) = fourpi*(rho(icell_amr) - rho_tot)
@@ -2382,7 +2382,7 @@ subroutine make_fine_bc_rhs(ilevel,icount)
                   nb_phi = phi_int(1,jjj(idim,inbor,ind))
                else
                   ! Fetch neighbor cell id
-                  icell_nbor_amr = igrid_nbor_amr + (ncoarse + (jjj(idim,inbor,ind)-1)*ngridmax)
+                  icell_nbor_amr = ICELL_OF(igrid_nbor_amr,jjj(idim,inbor,ind))
                   ! Check neighbor cell mask
                   nb_mask = f(icell_nbor_amr,3)
                   if(nb_mask>0) cycle ! Neighbor cell is active too: cycle
@@ -3171,7 +3171,7 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
    use scalar_de_commons, only: sde_dmcorr_of_a, horndeski_mu_of_a
    use iso_c_binding
 
-  use amr_index, only: icell_of
+#include "amr_index.h"
    implicit none
 #ifndef WITHOUTMPI
    include "mpif.h"
@@ -3374,7 +3374,7 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
             ! Slab-local row-major index
             idx_3d = x_local * fft_Ny * fft_Nz + iy * fft_Nz + iz
 
-            icell_amr = icell_of(igrid_amr,ind)
+            icell_amr = ICELL_OF(igrid_amr,ind)
 
             sendbuf(2*send_idx(dest_rank))     = dble(idx_3d)
             sendbuf(2*send_idx(dest_rank) + 1) = f(icell_amr, 2)
@@ -3441,7 +3441,7 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
             end if
             dest_rank = min(dest_rank, ncpu-1)
 
-            icell_amr = icell_of(igrid_amr,ind)
+            icell_amr = ICELL_OF(igrid_amr,ind)
 
             ! phi value is in sendbuf at the same position we packed it
             phi(icell_amr) = sendbuf(2*send_idx(dest_rank) + 1)
@@ -3526,7 +3526,7 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
          idx_3d = ix * fft_Ny * fft_Nz + iy * fft_Nz + iz
 
          ! RAMSES cell index
-         icell_amr = icell_of(igrid_amr,ind)
+         icell_amr = ICELL_OF(igrid_amr,ind)
 
          fft_map(idx_3d) = icell_amr
          ! Use un-boosted fourpi (corrections in Green's function)
@@ -3679,7 +3679,7 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
 #ifdef FDMDEBUG
    use fftw_omp_profile_m
 #endif
-  use amr_index, only: icell_of
+#include "amr_index.h"
    implicit none
 #ifndef WITHOUTMPI
    include "mpif.h"
@@ -4244,7 +4244,7 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
             ! Slab-local row-major index (in-place R2C: padded last dim)
             idx_3d = x_local * fft_Ny * 2*(fft_Nz/2+1) + iy * 2*(fft_Nz/2+1) + iz
 
-            icell_amr = icell_of(igrid_amr,ind)
+            icell_amr = ICELL_OF(igrid_amr,ind)
 
             slot = thread_offsets(dest_rank,tid)
             sendbuf(2*slot) = dble(idx_3d)
@@ -4503,7 +4503,7 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
             ix = modulo(ix, fft_Nx)
             dest_rank = min(ix / fftw_block, ncpu-1)
 
-            icell_amr = icell_of(igrid_amr,ind)
+            icell_amr = ICELL_OF(igrid_amr,ind)
             slot = thread_offsets(dest_rank,tid)
 
             if(solve_mode==0) then
@@ -4568,7 +4568,7 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
             ! C row-major index
             idx_3d = ix * fft_Ny * fft_Nz + iy * fft_Nz + iz
 
-            icell_amr = icell_of(igrid_amr,ind)
+            icell_amr = ICELL_OF(igrid_amr,ind)
 
             fft_map(idx_3d) = icell_amr
             if(solve_mode==0) then

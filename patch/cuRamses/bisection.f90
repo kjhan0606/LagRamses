@@ -6,10 +6,10 @@
 module bisection
    use amr_parameters
    use amr_commons
-   use amr_index, only: icell_of, ichild_of, igrid_of
    use pm_commons, only: numbp, xsink, count_particles_by_leaf
    use pm_parameters, only: nsink
 
+#include "amr_index.h"
    implicit none
 
 contains
@@ -561,7 +561,7 @@ contains
          do igrid=1,ncache
             igrid_tmp=active(ilevel)%igrid(igrid)
             do ind=1,twotondim
-               icell_tmp=icell_of(igrid_tmp,ind)
+               icell_tmp=ICELL_OF(igrid_tmp,ind)
                if(cpu_map(icell_tmp)==myid .and. son(icell_tmp)==0) &
                     cell_count=cell_count+1
             end do
@@ -630,7 +630,7 @@ contains
             ndm_leaf=0
             if(pic) call count_particles_by_leaf(igrid_tmp,npart_leaf,ndm_leaf)
             do ind=1,twotondim
-               icell_tmp=icell_of(igrid_tmp,ind)
+               icell_tmp=ICELL_OF(igrid_tmp,ind)
                if(cpu_map(icell_tmp)==myid.and.son(icell_tmp)==0)then
                   slot=slot+1
                   bisec_cell_level(slot)=ilevel
@@ -687,13 +687,13 @@ contains
                if(ndim > 2) then
                   if(xsink(isink,3) >= xg(igrid_tmp,3)) ind = ind + 4
                end if
-               icell_tmp = icell_of(igrid_tmp, ind)
+               icell_tmp = ICELL_OF(igrid_tmp, ind)
             end do
 
             ! Accumulate in grid or coarse cell
             if(icell_tmp > ncoarse) then
-               isubcell_tmp = ichild_of(icell_tmp)
-               igrid_tmp = igrid_of(icell_tmp)
+               isubcell_tmp = ICHILD_OF(icell_tmp)
+               igrid_tmp = IGRID_OF(icell_tmp)
                sink_per_grid(igrid_tmp) = sink_per_grid(igrid_tmp) + 1
             else
                sink_coarse(icell_tmp) = sink_coarse(icell_tmp) + 1
@@ -706,8 +706,8 @@ contains
          do i = 1, bisec_ncells_loc
             icell_tmp = bisec_ind_cell(i)
             if(icell_tmp > ncoarse) then
-               isubcell_tmp = ichild_of(icell_tmp)
-               igrid_tmp = igrid_of(icell_tmp)
+               isubcell_tmp = ICHILD_OF(icell_tmp)
+               igrid_tmp = IGRID_OF(icell_tmp)
                bisec_cell_cost(i) = bisec_cell_cost(i) + &
                     sink_per_grid(igrid_tmp) * mem_weight_sink / twotondim
             else
@@ -956,8 +956,8 @@ contains
             iarray = (/ ix, iy, iz /)
             bisec_cell_coord(i) = scale * (dble(iarray(dir)) - 0.5d0) * dx
          else
-            isubcell = ichild_of(icell)
-            igrid = igrid_of(icell)
+            isubcell = ICHILD_OF(icell)
+            igrid = IGRID_OF(icell)
             iz = (isubcell - 1) / 4
             iy = (isubcell - 1 - 4 * iz) / 2
             ix = (isubcell - 1 - 2 * iy - 4 * iz)

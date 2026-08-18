@@ -9,7 +9,7 @@ subroutine rho_fine(ilevel,icount)
   use hydro_commons
   use poisson_commons
   use cooling_module
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -81,11 +81,11 @@ subroutine rho_fine(ilevel,icount)
 !$omp parallel do private(ind,i)
   do ind=1,twotondim
      do i=1,active(ilevel)%ngrid
-        phi(icell_of(active(ilevel)%igrid(i),ind))=0.0D0
+        phi(ICELL_OF(active(ilevel)%igrid(i),ind))=0.0D0
      end do
      if(ilevel==cic_levelmax)then
         do i=1,active(ilevel)%ngrid
-           rho_top(icell_of(active(ilevel)%igrid(i),ind))=0.0D0
+           rho_top(ICELL_OF(active(ilevel)%igrid(i),ind))=0.0D0
         end do
      endif
   end do
@@ -93,9 +93,9 @@ subroutine rho_fine(ilevel,icount)
 !$omp parallel do private(ind,i)
      do ind=1,twotondim
         do i=1,active(ilevel)%ngrid
-           rho_top(icell_of(active(ilevel)%igrid(i),ind))=rho_top(father(active(ilevel)%igrid(i)))
-           rho(icell_of(active(ilevel)%igrid(i),ind))=rho(icell_of(active(ilevel)%igrid(i),ind))+ &
-                & rho_top(icell_of(active(ilevel)%igrid(i),ind))
+           rho_top(ICELL_OF(active(ilevel)%igrid(i),ind))=rho_top(father(active(ilevel)%igrid(i)))
+           rho(ICELL_OF(active(ilevel)%igrid(i),ind))=rho(ICELL_OF(active(ilevel)%igrid(i),ind))+ &
+                & rho_top(ICELL_OF(active(ilevel)%igrid(i),ind))
         end do
      end do
   endif
@@ -110,17 +110,17 @@ subroutine rho_fine(ilevel,icount)
         if(hydro)then
            if(ivar_refine>0)then
               do i=1,active(ilevel)%ngrid
-                 scalar=uold(icell_of(active(ilevel)%igrid(i),ind),ivar_refine) &
-                      & /max(uold(icell_of(active(ilevel)%igrid(i),ind),1),smallr)
+                 scalar=uold(ICELL_OF(active(ilevel)%igrid(i),ind),ivar_refine) &
+                      & /max(uold(ICELL_OF(active(ilevel)%igrid(i),ind),1),smallr)
                  if(scalar>var_cut_refine)then
-                    phi(icell_of(active(ilevel)%igrid(i),ind))= &
-                         & rho(icell_of(active(ilevel)%igrid(i),ind))/d_scale
+                    phi(ICELL_OF(active(ilevel)%igrid(i),ind))= &
+                         & rho(ICELL_OF(active(ilevel)%igrid(i),ind))/d_scale
                  endif
               end do
            else
               do i=1,active(ilevel)%ngrid
-                 phi(icell_of(active(ilevel)%igrid(i),ind))= &
-                      & rho(icell_of(active(ilevel)%igrid(i),ind))/d_scale
+                 phi(ICELL_OF(active(ilevel)%igrid(i),ind))= &
+                      & rho(ICELL_OF(active(ilevel)%igrid(i),ind))/d_scale
               end do
            endif
         endif
@@ -134,12 +134,12 @@ subroutine rho_fine(ilevel,icount)
   do icpu=1,ncpu
      do ind=1,twotondim
         do i=1,reception(icpu,ilevel)%ngrid
-           rho(icell_of(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
-           phi(icell_of(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
+           rho(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
+           phi(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
         end do
         if(ilevel==cic_levelmax)then
            do i=1,reception(icpu,ilevel)%ngrid
-              rho_top(icell_of(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
+              rho_top(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
            end do
         endif
      end do
@@ -159,7 +159,7 @@ subroutine rho_fine(ilevel,icount)
 !$omp parallel do collapse(2) private(icell) schedule(static)
         do ind=1,twotondim
            do i=1,active(ilevel)%ngrid
-              icell=icell_of(active(ilevel)%igrid(i),ind)
+              icell=ICELL_OF(active(ilevel)%igrid(i),ind)
               rho(icell) = rho(icell) + max(psi_re(icell),0.0d0)
            end do
         end do
@@ -168,7 +168,7 @@ subroutine rho_fine(ilevel,icount)
 !$omp parallel do collapse(2) private(icell) schedule(static)
         do ind=1,twotondim
            do i=1,active(ilevel)%ngrid
-              icell=icell_of(active(ilevel)%igrid(i),ind)
+              icell=ICELL_OF(active(ilevel)%igrid(i),ind)
               rho(icell) = rho(icell) + psi_re(icell)**2 + psi_im(icell)**2
            end do
         end do
@@ -200,10 +200,10 @@ subroutine rho_fine(ilevel,icount)
 !$omp parallel do private(ind,i,scalar)
      do ind=1,twotondim
         do i=1,active(ilevel)%ngrid
-           scalar=uold(icell_of(active(ilevel)%igrid(i),ind),void_web_scope_ivar) &
-                & /max(uold(icell_of(active(ilevel)%igrid(i),ind),1),smallr)
+           scalar=uold(ICELL_OF(active(ilevel)%igrid(i),ind),void_web_scope_ivar) &
+                & /max(uold(ICELL_OF(active(ilevel)%igrid(i),ind),1),smallr)
            if(scalar<=void_web_scope_cut) &
-                & phi(icell_of(active(ilevel)%igrid(i),ind))=0.0d0
+                & phi(ICELL_OF(active(ilevel)%igrid(i),ind))=0.0d0
         end do
      end do
   end if
@@ -236,8 +236,8 @@ subroutine rho_fine(ilevel,icount)
   do ibound=1,nboundary
      do ind=1,twotondim
         do i=1,boundary(ibound,ilevel)%ngrid
-           phi(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0.0
-           rho(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0.0
+           phi(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0.0
+           rho(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0.0
         end do
      end do
   end do
@@ -249,10 +249,10 @@ subroutine rho_fine(ilevel,icount)
 !$omp parallel do private(ind,i)
      do ind=1,twotondim
         do i=1,active(ilevel)%ngrid
-           if(phi(icell_of(active(ilevel)%igrid(i),ind))>=m_refine_eff(ilevel))then
-              cpu_map2(icell_of(active(ilevel)%igrid(i),ind))=1
+           if(phi(ICELL_OF(active(ilevel)%igrid(i),ind))>=m_refine_eff(ilevel))then
+              cpu_map2(ICELL_OF(active(ilevel)%igrid(i),ind))=1
            else
-              cpu_map2(icell_of(active(ilevel)%igrid(i),ind))=0
+              cpu_map2(ICELL_OF(active(ilevel)%igrid(i),ind))=0
            end if
         end do
      end do
@@ -269,11 +269,11 @@ subroutine rho_fine(ilevel,icount)
         do ind=1,twotondim
            do i=1,active(ilevel)%ngrid
               void_map_count(1)=void_map_count(1)+1_8
-              scalar=uold(icell_of(active(ilevel)%igrid(i),ind),void_web_scope_ivar) &
-                   & /max(uold(icell_of(active(ilevel)%igrid(i),ind),1),smallr)
+              scalar=uold(ICELL_OF(active(ilevel)%igrid(i),ind),void_web_scope_ivar) &
+                   & /max(uold(ICELL_OF(active(ilevel)%igrid(i),ind),1),smallr)
               if(scalar>void_web_scope_cut) &
                    & void_map_count(2)=void_map_count(2)+1_8
-              if(cpu_map2(icell_of(active(ilevel)%igrid(i),ind))==1) &
+              if(cpu_map2(ICELL_OF(active(ilevel)%igrid(i),ind))==1) &
                    & void_map_count(3)=void_map_count(3)+1_8
            end do
         end do
@@ -824,7 +824,7 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
   ! Compute parent cell adress
   do ind=1,twotondim
      do j=1,np
-        indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+        indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
      end do
   end do
 
@@ -966,7 +966,7 @@ subroutine multipole_fine(ilevel)
   use amr_commons
   use hydro_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1015,11 +1015,11 @@ subroutine multipole_fine(ilevel)
   ! Initialize fields to zero
   do ind=1,twotondim
      do i=1,active(ilevel)%ngrid
-        unew(icell_of(active(ilevel)%igrid(i),ind),1)=0.0D0
+        unew(ICELL_OF(active(ilevel)%igrid(i),ind),1)=0.0D0
      end do
      do idim=1,ndim
         do i=1,active(ilevel)%ngrid
-           unew(icell_of(active(ilevel)%igrid(i),ind),idim+1)=0.0D0
+           unew(ICELL_OF(active(ilevel)%igrid(i),ind),idim+1)=0.0D0
         end do
      end do
   end do
@@ -1036,7 +1036,7 @@ subroutine multipole_fine(ilevel)
      do ind=1,twotondim
         ! Gather cell indices
         do i=1,ngrid
-           ind_cell(i)=icell_of(ind_grid(i),ind)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Gather leaf cells and compute cell centers
@@ -1094,13 +1094,13 @@ subroutine multipole_fine(ilevel)
         do ind_son=1,twotondim
            do i=1,nsplit
               ind_grid_son=son(ind_split(i))
-              ind_cell_son=icell_of(ind_grid_son,ind_son)
+              ind_cell_son=ICELL_OF(ind_grid_son,ind_son)
               unew(ind_split(i),1)=unew(ind_split(i),1)+unew(ind_cell_son,1)
            end do
            do idim=1,ndim
               do i=1,nsplit
                  ind_grid_son=son(ind_split(i))
-                 ind_cell_son=icell_of(ind_grid_son,ind_son)
+                 ind_cell_son=ICELL_OF(ind_grid_son,ind_son)
                  unew(ind_split(i),idim+1)=unew(ind_split(i),idim+1)+unew(ind_cell_son,idim+1)
               end do
            end do
@@ -1122,7 +1122,7 @@ subroutine multipole_fine(ilevel)
   use amr_commons
   use hydro_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1160,11 +1160,11 @@ subroutine multipole_fine(ilevel)
 !$omp parallel do private(ind,i,idim)
   do ind=1,twotondim
      do i=1,active(ilevel)%ngrid
-        unew(icell_of(active(ilevel)%igrid(i),ind),1)=0.0D0
+        unew(ICELL_OF(active(ilevel)%igrid(i),ind),1)=0.0D0
      end do
      do idim=1,ndim
         do i=1,active(ilevel)%ngrid
-           unew(icell_of(active(ilevel)%igrid(i),ind),idim+1)=0.0D0
+           unew(ICELL_OF(active(ilevel)%igrid(i),ind),idim+1)=0.0D0
         end do
      end do
   end do
@@ -1187,7 +1187,7 @@ subroutine sub_multipole_fine(ilevel, igrid,ngrid,xc)
   use amr_commons
   use hydro_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1232,7 +1232,7 @@ subroutine sub_multipole_fine(ilevel, igrid,ngrid,xc)
      do ind=1,twotondim
         ! Gather cell indices
         do i=1,ngrid
-           ind_cell(i)=icell_of(ind_grid(i),ind)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Gather leaf cells and compute cell centers
@@ -1290,13 +1290,13 @@ subroutine sub_multipole_fine(ilevel, igrid,ngrid,xc)
         do ind_son=1,twotondim
            do i=1,nsplit
               ind_grid_son=son(ind_split(i))
-              ind_cell_son=icell_of(ind_grid_son,ind_son)
+              ind_cell_son=ICELL_OF(ind_grid_son,ind_son)
               unew(ind_split(i),1)=unew(ind_split(i),1)+unew(ind_cell_son,1)
            end do
            do idim=1,ndim
               do i=1,nsplit
                  ind_grid_son=son(ind_split(i))
-                 ind_cell_son=icell_of(ind_grid_son,ind_son)
+                 ind_cell_son=ICELL_OF(ind_grid_son,ind_son)
                  unew(ind_split(i),idim+1)=unew(ind_split(i),idim+1)+unew(ind_cell_son,idim+1)
               end do
            end do
@@ -1316,7 +1316,7 @@ subroutine cic_from_multipole(ilevel)
   use amr_commons
   use hydro_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1348,14 +1348,14 @@ subroutine cic_from_multipole(ilevel)
   do icpu=1,ncpu
      do ind=1,twotondim
         do i=1,reception(icpu,ilevel)%ngrid
-           rho(icell_of(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
+           rho(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
         end do
      end do
   end do
 !$omp parallel do private(ind,i)
   do ind=1,twotondim
      do i=1,active(ilevel)%ngrid
-        rho(icell_of(active(ilevel)%igrid(i),ind))=0.0D0
+        rho(ICELL_OF(active(ilevel)%igrid(i),ind))=0.0D0
      end do
   end do
   ! Reset rho in physical boundaries
@@ -1363,7 +1363,7 @@ subroutine cic_from_multipole(ilevel)
   do ibound=1,nboundary
      do ind=1,twotondim
         do i=1,boundary(ibound,ilevel)%ngrid
-           rho(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0.0
+           rho(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0.0
         end do
      end do
   end do
@@ -1393,7 +1393,7 @@ subroutine cic_cell(ilevel,jgrid,ngrid)
   use amr_commons
   use poisson_commons
   use hydro_commons, ONLY: unew
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ngrid,ilevel,jgrid
   integer,dimension(1:nvector)::ind_grid
@@ -1448,7 +1448,7 @@ subroutine cic_cell(ilevel,jgrid,ngrid)
      ! Compute pseudo particle (centre of mass) position
      do idim=1,ndim
         do j=1,np
-           ind_cell_son=icell_of(ind_grid(j),ind_son)
+           ind_cell_son=ICELL_OF(ind_grid(j),ind_son)
            x(j,idim)=unew(ind_cell_son,idim+1)/unew(ind_cell_son,1)
         end do
      end do
@@ -1458,7 +1458,7 @@ subroutine cic_cell(ilevel,jgrid,ngrid)
 !!$omp critical
         do idim=1,ndim+1
            do j=1,np
-              ind_cell_son=icell_of(ind_grid(j),ind_son)
+              ind_cell_son=ICELL_OF(ind_grid(j),ind_son)
 !!$omp atomic
               multipole(idim)=multipole(idim)+unew(ind_cell_son,idim)
            end do
@@ -1485,7 +1485,7 @@ subroutine cic_cell(ilevel,jgrid,ngrid)
      
      ! Gather particle mass
      do j=1,np
-        ind_cell_son=icell_of(ind_grid(j),ind_son)
+        ind_cell_son=ICELL_OF(ind_grid(j),ind_son)
         mmm(j)=unew(ind_cell_son,1)
      end do
      
@@ -1623,7 +1623,7 @@ subroutine cic_cell(ilevel,jgrid,ngrid)
      ! Compute parent cell adress
      do ind=1,twotondim
         do j=1,np
-           indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+           indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
         end do
      end do
      
@@ -1910,7 +1910,7 @@ subroutine tsc_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
   do ind=1,threetondim
      do j=1,np
         if(.not.abandoned(j)) then
-           indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+           indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
         end if
      end do
   end do
@@ -2010,7 +2010,7 @@ subroutine tsc_from_multipole(ilevel)
   use amr_commons
   use hydro_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2039,20 +2039,20 @@ subroutine tsc_from_multipole(ilevel)
   do icpu=1,ncpu
      do ind=1,twotondim
         do i=1,reception(icpu,ilevel)%ngrid
-           rho(icell_of(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
+           rho(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
         end do
      end do
   end do
   do ind=1,twotondim
      do i=1,active(ilevel)%ngrid
-        rho(icell_of(active(ilevel)%igrid(i),ind))=0.0D0
+        rho(ICELL_OF(active(ilevel)%igrid(i),ind))=0.0D0
      end do
   end do
   ! Reset rho in physical boundaries
   do ibound=1,nboundary
      do ind=1,twotondim
         do i=1,boundary(ibound,ilevel)%ngrid
-           rho(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0.0
+           rho(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0.0
         end do
      end do
   end do
@@ -2081,7 +2081,7 @@ subroutine tsc_cell(ind_grid,ngrid,ilevel)
   use amr_commons
   use poisson_commons
   use hydro_commons, ONLY: unew
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ngrid,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -2132,7 +2132,7 @@ subroutine tsc_cell(ind_grid,ngrid,ilevel)
      ! Compute pseudo particle (centre of mass) position
      do idim=1,ndim
         do j=1,np
-           ind_cell_son=icell_of(ind_grid(j),ind_son)
+           ind_cell_son=ICELL_OF(ind_grid(j),ind_son)
            x(j,idim)=unew(ind_cell_son,idim+1)/unew(ind_cell_son,1)
         end do
      end do
@@ -2141,7 +2141,7 @@ subroutine tsc_cell(ind_grid,ngrid,ilevel)
      if(ilevel==levelmin)then
         do idim=1,ndim+1
            do j=1,np
-              ind_cell_son=icell_of(ind_grid(j),ind_son)
+              ind_cell_son=ICELL_OF(ind_grid(j),ind_son)
               multipole(idim)=multipole(idim)+unew(ind_cell_son,idim)
            end do
         end do
@@ -2166,7 +2166,7 @@ subroutine tsc_cell(ind_grid,ngrid,ilevel)
      
      ! Gather particle mass
      do j=1,np
-        ind_cell_son=icell_of(ind_grid(j),ind_son)
+        ind_cell_son=ICELL_OF(ind_grid(j),ind_son)
         mmm(j)=unew(ind_cell_son,1)
      end do
      
@@ -2323,7 +2323,7 @@ subroutine tsc_cell(ind_grid,ngrid,ilevel)
      ! Compute parent cell adress
      do ind=1,threetondim
         do j=1,np
-           indp(j,ind)=ncoarse+(icell(j,ind)-1)*ngridmax+igrid(j,ind)
+           indp(j,ind)=ICELL_OF(igrid(j,ind),icell(j,ind))
         end do
      end do
     
@@ -2362,7 +2362,7 @@ subroutine fpr_smooth_rho(ilevel)
   !-----------------------------------------------------------------
   use amr_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer,intent(in)::ilevel
 
@@ -2392,12 +2392,12 @@ subroutine fpr_smooth_rho(ilevel)
      igrid_amr = active(ilevel)%igrid(i)
      ! Gather 8 sibling cell densities
      do jnd=1,twotondim
-        rho_siblings(jnd) = rho(icell_of(igrid_amr,jnd))
+        rho_siblings(jnd) = rho(ICELL_OF(igrid_amr,jnd))
      end do
      rho_avg = sum(rho_siblings) / dble(twotondim)
      ! Apply smoothing to each cell
      do ind=1,twotondim
-        rho(icell_of(igrid_amr,ind)) = (1.0d0-w_fpr)*rho(icell_of(igrid_amr,ind)) + w_fpr*rho_avg
+        rho(ICELL_OF(igrid_amr,ind)) = (1.0d0-w_fpr)*rho(ICELL_OF(igrid_amr,ind)) + w_fpr*rho_avg
      end do
   end do
 

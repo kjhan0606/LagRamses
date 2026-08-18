@@ -22,7 +22,7 @@
 subroutine restrict_mask_coarse(ifinelevel,allmasked)
    use amr_commons
    use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
    implicit none
    integer, intent(in) :: ifinelevel
    logical, intent(out) :: allmasked
@@ -51,7 +51,7 @@ subroutine restrict_mask_coarse(ifinelevel,allmasked)
       ! Loop over coarse grids of myid
       do igrid_c_mg=1,active_mg(myid,icoarselevel)%ngrid
          igrid_c_amr=active_mg(myid,icoarselevel)%igrid(igrid_c_mg)
-         icell_c_amr=icell_of(igrid_c_amr,ind_c_cell)
+         icell_c_amr=ICELL_OF(igrid_c_amr,ind_c_cell)
          icell_c_mg =iskip_c_mg +igrid_c_mg
          igrid_f_amr=son(icell_c_amr)
          cpu_amr=cpu_map(icell_c_amr)
@@ -93,7 +93,7 @@ end subroutine restrict_mask_coarse
 subroutine restrict_mask_coarse_reverse(ifinelevel)
    use amr_commons
    use poisson_commons
-  use amr_index, only: ichild_of, igrid_of
+#include "amr_index.h"
    implicit none
    integer, intent(in) :: ifinelevel
 
@@ -123,8 +123,8 @@ subroutine restrict_mask_coarse_reverse(ifinelevel)
          igrid_f_amr=active_mg(myid,ifinelevel)%igrid(igrid_f_mg)
          ! Get coarse grid AMR index and CPU id
          icell_c_amr=father(igrid_f_amr)
-         ind_c_cell=ichild_of(icell_c_amr)
-         igrid_c_amr=igrid_of(icell_c_amr)
+         ind_c_cell=ICHILD_OF(icell_c_amr)
+         igrid_c_amr=IGRID_OF(icell_c_amr)
          cpu_amr=cpu_map(father(igrid_c_amr))
          ! Convert to MG index, get MG coarse cell id
          igrid_c_mg=lookup_mg(igrid_c_amr)
@@ -148,7 +148,7 @@ subroutine cmp_residual_mg_coarse(ilevel)
    use amr_commons
    use poisson_commons
    use morton_hash
-  use amr_index, only: icell_of
+#include "amr_index.h"
    implicit none
    integer, intent(in) :: ilevel
 
@@ -489,7 +489,7 @@ subroutine restrict_residual_coarse(ifinelevel)
    use amr_commons
    use pm_commons
    use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
    implicit none
    integer, intent(in) :: ifinelevel
 
@@ -507,7 +507,7 @@ subroutine restrict_residual_coarse(ifinelevel)
 
       do igrid_c_mg=1,ngrid_c
          igrid_c_amr = active_mg(myid,icoarselevel)%igrid(igrid_c_mg)
-         icell_c_amr = icell_of(igrid_c_amr,ind_c)
+         icell_c_amr = ICELL_OF(igrid_c_amr,ind_c)
          cpu_amr     = cpu_map(icell_c_amr)
          icell_c_mg  = igrid_c_mg  + iskip_c_mg
 
@@ -555,7 +555,7 @@ end subroutine restrict_residual_coarse
 subroutine restrict_residual_coarse_reverse(ifinelevel)
    use amr_commons
    use poisson_commons
-  use amr_index, only: ichild_of, igrid_of
+#include "amr_index.h"
    implicit none
    integer, intent(in) :: ifinelevel
 
@@ -590,8 +590,8 @@ subroutine restrict_residual_coarse_reverse(ifinelevel)
          ! Get coarse grid AMR index and CPU id
          igrid_f_amr=active_mg(myid,ifinelevel)%igrid(igrid_f_mg)
          icell_c_amr=father(igrid_f_amr)
-         ind_c_cell=ichild_of(icell_c_amr)
-         igrid_c_amr=igrid_of(icell_c_amr)
+         ind_c_cell=ICHILD_OF(icell_c_amr)
+         igrid_c_amr=IGRID_OF(icell_c_amr)
          cpu_amr=cpu_map(father(igrid_c_amr))
 
          ! Convert to MG index, get MG coarse cell id
@@ -620,7 +620,7 @@ end subroutine restrict_residual_coarse_reverse
 subroutine interpolate_and_correct_coarse(ifinelevel)
    use amr_commons
    use poisson_commons
-  use amr_index, only: icell_of, ichild_of, igrid_of
+#include "amr_index.h"
    implicit none
    integer, intent(in) :: ifinelevel
 
@@ -682,7 +682,7 @@ subroutine interpolate_and_correct_coarse(ifinelevel)
 
          do i=1,nbatch
             ! Compute fine cell indices
-            icell_amr(i) = icell_of(igrid_f_amr(i),ind_f)
+            icell_amr(i) = ICELL_OF(igrid_f_amr(i),ind_f)
          end do
          corr=0.0d0
 
@@ -697,8 +697,8 @@ subroutine interpolate_and_correct_coarse(ifinelevel)
                   cycle
                end if
                icell_c_amr = nbors_father_cells(i,ind_father)
-               ind_c       = ichild_of(icell_c_amr)
-               igrid_c_amr = igrid_of(icell_c_amr)
+               ind_c       = ICHILD_OF(icell_c_amr)
+               igrid_c_amr = IGRID_OF(icell_c_amr)
                igrid_c_mg  = lookup_mg(igrid_c_amr)
                cpu_c_amr   = cpu_map(father(igrid_c_amr))
                if(igrid_c_mg<=0) cycle
@@ -896,11 +896,11 @@ subroutine get3cubefather_mg(ind_cell_father,nbors_father_cells,&
 
      ! Get father cell position in the grid
      do i=1,ncell
-        pos(i)=(ind_cell_father(i)-ncoarse-1)/ngridmax+1
+        pos(i)=ICHILD_OF(ind_cell_father(i))
      end do
      ! Get father grid
      do i=1,ncell
-        ind_grid_father(i)=ind_cell_father(i)-ncoarse-(pos(i)-1)*ngridmax
+        ind_grid_father(i)=IGRID_OF(ind_cell_father(i))
      end do
 
      ! Loop over position
@@ -949,7 +949,7 @@ end subroutine get3cubefather_mg
 subroutine get3cubepos_mg(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng,ilevel)
   use amr_commons
   use morton_hash
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ng,ind,ilevel
   integer, parameter::nvector_cg=32
@@ -1089,7 +1089,7 @@ subroutine get3cubepos_mg(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng,
      icell=mmm(j,ind,ndim)
      do i=1,ng
         if(nbors_grids(i,igrid)>0)then
-           nbors_father_cells(i,j)=icell_of(nbors_grids(i,igrid),icell)
+           nbors_father_cells(i,j)=ICELL_OF(nbors_grids(i,igrid),icell)
         else
            nbors_father_cells(i,j)=0
         endif

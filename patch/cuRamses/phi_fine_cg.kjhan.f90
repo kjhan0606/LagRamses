@@ -7,7 +7,7 @@ subroutine phi_fine_cg(ilevel,icount)
   use pm_commons
   use poisson_commons
   use dark_energy_commons, only: cosmo_poisson_fourpi
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -70,7 +70,7 @@ subroutine phi_fine_cg(ilevel,icount)
 !$omp parallel do private(ind,i,idx) reduction(+:rhs_norm)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-        idx=icell_of(active(ilevel)%igrid(i),ind)
+        idx=ICELL_OF(active(ilevel)%igrid(i),ind)
         rhs_norm=rhs_norm+fact2*(rho(idx)-rho_tot)*(rho(idx)-rho_tot)
      end do
   end do
@@ -104,7 +104,7 @@ subroutine phi_fine_cg(ilevel,icount)
 !$omp parallel do private(ind,i,idx) reduction(+:r2)
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-           idx=icell_of(active(ilevel)%igrid(i),ind)
+           idx=ICELL_OF(active(ilevel)%igrid(i),ind)
            r2=r2+f(idx,1)*f(idx,1)
         end do
      end do
@@ -131,7 +131,7 @@ subroutine phi_fine_cg(ilevel,icount)
 !$omp parallel do private(ind,i,idx) 
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-           idx=icell_of(active(ilevel)%igrid(i),ind)
+           idx=ICELL_OF(active(ilevel)%igrid(i),ind)
            f(idx,2)=f(idx,1)+beta_cg*f(idx,2)
         end do
      end do
@@ -150,7 +150,7 @@ subroutine phi_fine_cg(ilevel,icount)
 !$omp parallel do private(ind,i,idx) reduction(+:pAp)
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-           idx=icell_of(active(ilevel)%igrid(i),ind)
+           idx=ICELL_OF(active(ilevel)%igrid(i),ind)
            pAp=pAp+f(idx,2)*f(idx,3)
         end do
      end do
@@ -172,7 +172,7 @@ subroutine phi_fine_cg(ilevel,icount)
 !$omp parallel do private(ind,i,idx) 
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-           idx=icell_of(active(ilevel)%igrid(i),ind)
+           idx=ICELL_OF(active(ilevel)%igrid(i),ind)
            phi(idx)=phi(idx)+alpha_cg*f(idx,2)
         end do
      end do
@@ -183,7 +183,7 @@ subroutine phi_fine_cg(ilevel,icount)
 !$omp parallel do private(ind,i,idx) 
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-           idx=icell_of(active(ilevel)%igrid(i),ind)
+           idx=ICELL_OF(active(ilevel)%igrid(i),ind)
            f(idx,1)=f(idx,1)-alpha_cg*f(idx,3)
         end do
      end do
@@ -264,7 +264,7 @@ subroutine sub_cmp_residual_cg(ilevel,icount, igrid,ngrid,iii,jjj,oneoversix,fac
   use hydro_commons
   use poisson_commons
   use morton_hash
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel,icount
   !------------------------------------------------------------------
@@ -315,7 +315,7 @@ subroutine sub_cmp_residual_cg(ilevel,icount, igrid,ngrid,iii,jjj,oneoversix,fac
            id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
            do i=1,ngrid
               if(igridn(i,ig1)>0)then
-                 phig(i,idim)=phi(icell_of(igridn(i,ig1),id1))
+                 phig(i,idim)=phi(ICELL_OF(igridn(i,ig1),id1))
               else
                  phig(i,idim)=phi_left(i,id1,idim)
               end if
@@ -323,7 +323,7 @@ subroutine sub_cmp_residual_cg(ilevel,icount, igrid,ngrid,iii,jjj,oneoversix,fac
            id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
            do i=1,ngrid
               if(igridn(i,ig2)>0)then
-                 phid(i,idim)=phi(icell_of(igridn(i,ig2),id2))
+                 phid(i,idim)=phi(ICELL_OF(igridn(i,ig2),id2))
               else
                  phid(i,idim)=phi_right(i,id2,idim)
               end if
@@ -332,7 +332,7 @@ subroutine sub_cmp_residual_cg(ilevel,icount, igrid,ngrid,iii,jjj,oneoversix,fac
 
         ! Compute central cell index
         do i=1,ngrid
-           ind_cell(i)=icell_of(ind_grid(i),ind)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Compute residual using 6 neighbors potential
@@ -412,7 +412,7 @@ subroutine sub_cmp_Ap_cg(ilevel,iii,jjj,igrid,ngrid,oneoversix)
   use hydro_commons
   use poisson_commons
   use morton_hash
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !------------------------------------------------------------------
@@ -452,7 +452,7 @@ subroutine sub_cmp_Ap_cg(ilevel,iii,jjj,igrid,ngrid,oneoversix)
            id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
            do i=1,ngrid
               if(igridn(i,ig1)>0)then
-                 phig(i,idim)=f(icell_of(igridn(i,ig1),id1),2)
+                 phig(i,idim)=f(ICELL_OF(igridn(i,ig1),id1),2)
               else
                  phig(i,idim)=0.
               end if
@@ -460,7 +460,7 @@ subroutine sub_cmp_Ap_cg(ilevel,iii,jjj,igrid,ngrid,oneoversix)
            id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
            do i=1,ngrid
               if(igridn(i,ig2)>0)then
-                 phid(i,idim)=f(icell_of(igridn(i,ig2),id2),2)
+                 phid(i,idim)=f(ICELL_OF(igridn(i,ig2),id2),2)
               else
                  phid(i,idim)=0.
               end if
@@ -469,7 +469,7 @@ subroutine sub_cmp_Ap_cg(ilevel,iii,jjj,igrid,ngrid,oneoversix)
 
         ! Compute central cell index
         do i=1,ngrid
-           ind_cell(i)=icell_of(ind_grid(i),ind)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Compute Ap using neighbors potential
@@ -524,7 +524,7 @@ subroutine sub_make_initial_phi(ilevel,icount,igrid,ngrid)
   use amr_commons
   use pm_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel,icount
   !
@@ -543,7 +543,7 @@ subroutine sub_make_initial_phi(ilevel,icount,igrid,ngrid)
         ! Loop over cells
         do ind=1,twotondim
            do i=1,ngrid
-              ind_cell(i)=icell_of(ind_grid(i),ind)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ngrid
               phi(ind_cell(i))=0.0d0
@@ -567,7 +567,7 @@ subroutine sub_make_initial_phi(ilevel,icount,igrid,ngrid)
         ! Loop over cells
         do ind=1,twotondim
            do i=1,ngrid
-              ind_cell(i)=icell_of(ind_grid(i),ind)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
            do i=1,ngrid
               phi(ind_cell(i))=phi_int(i,ind)
@@ -647,7 +647,7 @@ subroutine sub_make_multipole_phi(ilevel, igrid,ngrid, scale, eps,xc,skip_loc)
   use amr_commons
   use pm_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !
@@ -673,7 +673,7 @@ subroutine sub_make_multipole_phi(ilevel, igrid,ngrid, scale, eps,xc,skip_loc)
      ! Loop over cells
      do ind=1,twotondim
         do i=1,ngrid
-           ind_cell(i)=icell_of(ind_grid(i),ind)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
         
         if(simple_boundary)then

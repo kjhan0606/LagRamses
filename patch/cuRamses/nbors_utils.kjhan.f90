@@ -9,6 +9,7 @@ subroutine get3cubefather(ind_cell_father,nbors_father_cells,&
   use amr_commons
   use morton_keys
   use morton_hash
+#include "amr_index.h"
   implicit none
   integer::ncell,ilevel
   integer,dimension(1:nvector)::ind_cell_father
@@ -154,11 +155,11 @@ subroutine get3cubefather(ind_cell_father,nbors_father_cells,&
 
      ! Get father cell position in the grid
      do i=1,ncell
-        pos(i)=(ind_cell_father(i)-ncoarse-1)/ngridmax+1
+        pos(i)=ICHILD_OF(ind_cell_father(i))
      end do
      ! Get father grid
      do i=1,ncell
-        ind_grid_father(i)=ind_cell_father(i)-ncoarse-(pos(i)-1)*ngridmax
+        ind_grid_father(i)=IGRID_OF(ind_cell_father(i))
      end do
 
      ! Loop over position
@@ -211,8 +212,8 @@ subroutine get3cubepos(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng)
 ! Chained morton_nbor_grid version: matches SRC's son(nbor()) chain
 ! but uses Morton hash for neighbor lookup (nbor array removed).
   use amr_commons
-  use amr_index, only: icell_of
   use morton_hash
+#include "amr_index.h"
   implicit none
   integer::ng,ind
   integer,dimension(1:nvector)::ind_grid
@@ -325,7 +326,7 @@ subroutine get3cubepos(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng)
      icell=mmm(j,ind,ndim)
      do i=1,ng
         if(nbors_grids(i,igrid)>0)then
-           nbors_father_cells(i,j)=icell_of(nbors_grids(i,igrid),icell)
+           nbors_father_cells(i,j)=ICELL_OF(nbors_grids(i,igrid),icell)
         else
            nbors_father_cells(i,j)=0
         endif
@@ -397,7 +398,7 @@ end subroutine getindices3cube
 !##############################################################
 subroutine getnborcells(igridn,ind,icelln,ng)
   use amr_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ng,ind
   integer,dimension(1:nvector,0:twondim)::igridn
@@ -426,7 +427,7 @@ subroutine getnborcells(igridn,ind,icelln,ng)
      ih=hhh(ind,in)
      do i=1,ng
         if(igridn(i,ig)>0)then
-           icelln(i,in)=icell_of(igridn(i,ig),ih)
+           icelln(i,in)=ICELL_OF(igridn(i,ig),ih)
         end if
      end do
   end do
@@ -439,9 +440,9 @@ end subroutine getnborcells
 subroutine getnborfather(ind_cell,ind_father,ncell,ilevel)
 ! Morton-based version: uses hash table for neighbor finding.
   use amr_commons
-  use amr_index, only: icell_of
   use morton_keys
   use morton_hash
+#include "amr_index.h"
   implicit none
   integer::ncell,ilevel
   integer,dimension(1:nvector)::ind_cell
@@ -528,12 +529,12 @@ subroutine getnborfather(ind_cell,ind_father,ncell,ilevel)
 
      ! Get father cell position in the grid
      do i=1,ncell
-        pos(i)=(ind_father(i,0)-ncoarse-1)/ngridmax+1
+        pos(i)=ICHILD_OF(ind_father(i,0))
      end do
 
      ! Get father grid
      do i=1,ncell
-        ind_grid_father(i)=ind_father(i,0)-ncoarse-(pos(i)-1)*ngridmax
+        ind_grid_father(i)=IGRID_OF(ind_father(i,0))
      end do
 
      ! Get neighboring father grids
@@ -587,7 +588,7 @@ subroutine getnborfather(ind_cell,ind_father,ncell,ilevel)
                           pkey = morton_encode(pix, piy, piz)
                           igrid_parent = morton_hash_lookup(mort_table(ilevel-1), pkey)
                           if (igrid_parent > 0) then
-                             ind_father(i,j) = icell_of(igrid_parent, ind_oct)
+                             ind_father(i,j) = ICELL_OF(igrid_parent, ind_oct)
                           else
                              ind_father(i,j) = 0
                           end if
@@ -755,4 +756,3 @@ subroutine getnborgrids_check(igrid,igridn,ngrid)
   end if
 
 end subroutine getnborgrids_check
-

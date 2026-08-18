@@ -6,7 +6,7 @@ subroutine make_boundary_force(ilevel)
   use amr_commons
   use poisson_commons
   use morton_hash
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -107,11 +107,11 @@ subroutine make_boundary_force(ilevel)
         ! Loop over cells
         do ind=1,twotondim
            do i=1,ngrid
-              ind_cell(i)=icell_of(ind_grid(i),ind)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
               
            ! Gather neighboring reference cell
-           iskip_ref=ncoarse+(ind_ref(ind)-1)*ngridmax
+           iskip_ref=ICELL_OF(1,ind_ref(ind))-1
            do i=1,ngrid
               ind_cell_ref(i)=iskip_ref+ind_grid_ref(i)
            end do
@@ -180,7 +180,7 @@ end subroutine make_boundary_force
 subroutine make_boundary_phi(ilevel)
   use amr_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -241,7 +241,7 @@ subroutine make_boundary_phi(ilevel)
         ! Loop over cells
         do ind=1,twotondim
            do i=1,ngrid
-              ind_cell(i)=icell_of(ind_grid(i),ind)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
               
            ! Compute cell center in code units
@@ -290,7 +290,7 @@ end subroutine make_boundary_phi
 subroutine make_boundary_mask(ilevel)
   use amr_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -318,7 +318,7 @@ subroutine make_boundary_mask(ilevel)
         ! Loop over cells
         do ind=1,twotondim
            do i=1,ngrid
-              ind_cell(i)=icell_of(ind_grid(i),ind)
+              ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
 
            ! Set mask to -1d0

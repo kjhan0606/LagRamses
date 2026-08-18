@@ -315,11 +315,15 @@ the mcons conservation diagnostic (1.76e-16 -> 3.52e-16), and a maximum
 hydro relative difference of 1.9e-8 after ~20 coarse steps of gravitational
 amplification.
 
-1. Census returns zero convertible sites outside amr_index.f90.
-2. **-O0 bitwise identity** between reference and candidate on the refining
-   64^3 run. This is the semantic proof and is mandatory per chunk (~1 h).
-3. **-O3 sanity**: identical SGS_DT timestep sequence, and conservation
-   diagnostics agreeing to rounding. Payload bitwise identity is NOT required.
+**Confirmed 2026-08-18**: with the macro form, the -O3 gate passes bitwise
+(job 449202). The regression really was the un-inlined call, so the criteria
+revert to the original, cheap form:
+
+1. Census returns zero convertible sites (tests/phase1_census.py; the
+   definition site amr_index.f90 is exempt).
+2. **-O3 bitwise identity** between reference and candidate on the refining
+   64^3 run, ~8 min per chunk. The -O0 route is retained only as a fallback
+   diagnostic if a future chunk fails this.
 4. `-qopt-report` on godunov_fine.kjhan and force_fine.kjhan shows the hot
    loops still vectorised.
 5. AMR_INDEX_CHECK debug build passes the same runs with zero assertions.

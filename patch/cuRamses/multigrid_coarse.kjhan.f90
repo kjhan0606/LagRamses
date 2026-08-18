@@ -39,7 +39,7 @@ subroutine multigrid_coarse(ilevel,icount)
   use pm_commons
   use poisson_commons
   use dark_energy_commons, only: cosmo_poisson_fourpi
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -75,7 +75,7 @@ subroutine multigrid_coarse(ilevel,icount)
 !$omp parallel do private(i,ind)
   do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        phi(icell_of(active(ilevel)%igrid(i),ind))=phi(icell_of(active(ilevel)%igrid(i),ind))/fourpi
+        phi(ICELL_OF(active(ilevel)%igrid(i),ind))=phi(ICELL_OF(active(ilevel)%igrid(i),ind))/fourpi
      end do
   end do
   ! Update boundaries for phi
@@ -85,7 +85,7 @@ subroutine multigrid_coarse(ilevel,icount)
         do i=1,boundary(ibound,ilevel)%ngrid
   do ibound=1,nboundary
      do ind=1,twotondim
-           phi(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0d0
+           phi(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0d0
         end do
      end do
   end do
@@ -94,7 +94,7 @@ subroutine multigrid_coarse(ilevel,icount)
 !$omp parallel do private(i,ind)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-        rho(icell_of(active(ilevel)%igrid(i),ind))=rho(icell_of(active(ilevel)%igrid(i),ind))-rho_tot
+        rho(ICELL_OF(active(ilevel)%igrid(i),ind))=rho(ICELL_OF(active(ilevel)%igrid(i),ind))-rho_tot
      end do
   end do
 
@@ -116,7 +116,7 @@ subroutine multigrid_coarse(ilevel,icount)
 !$omp parallel do private(i,ind) reduction(+:rhs_norm)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-        rhs_norm=rhs_norm+fact*rho(icell_of(active(ilevel)%igrid(i),ind))*rho(icell_of(active(ilevel)%igrid(i),ind))
+        rhs_norm=rhs_norm+fact*rho(ICELL_OF(active(ilevel)%igrid(i),ind))*rho(ICELL_OF(active(ilevel)%igrid(i),ind))
      end do
   end do
   ! Compute global norms
@@ -149,7 +149,7 @@ subroutine multigrid_coarse(ilevel,icount)
 !$omp parallel do private(i,ind) reduction(+:error)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-        error=error+fact*f(icell_of(active(ilevel)%igrid(i),ind),1)*f(icell_of(active(ilevel)%igrid(i),ind),1)
+        error=error+fact*f(ICELL_OF(active(ilevel)%igrid(i),ind),1)*f(ICELL_OF(active(ilevel)%igrid(i),ind),1)
      end do
   end do
   ! Compute global norms
@@ -205,7 +205,7 @@ subroutine multigrid_coarse(ilevel,icount)
 !$omp parallel do private(i,ind) reduction(+:error)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-        error=error+fact*f(icell_of(active(ilevel)%igrid(i),ind),1)*f(icell_of(active(ilevel)%igrid(i),ind),1)
+        error=error+fact*f(ICELL_OF(active(ilevel)%igrid(i),ind),1)*f(ICELL_OF(active(ilevel)%igrid(i),ind),1)
      end do
   end do
   ! Compute global norms
@@ -233,7 +233,7 @@ subroutine multigrid_coarse(ilevel,icount)
 !$omp parallel do private(ind,i)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-        phi(icell_of(active(ilevel)%igrid(i),ind))=phi(icell_of(active(ilevel)%igrid(i),ind))*fourpi
+        phi(ICELL_OF(active(ilevel)%igrid(i),ind))=phi(ICELL_OF(active(ilevel)%igrid(i),ind))*fourpi
      end do
   end do
   ! Update boundaries for phi
@@ -243,7 +243,7 @@ subroutine multigrid_coarse(ilevel,icount)
         do i=1,boundary(ibound,ilevel)%ngrid
   do ibound=1,nboundary
      do ind=1,twotondim
-           phi(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0d0
+           phi(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0d0
         end do
      end do
   end do
@@ -251,7 +251,7 @@ subroutine multigrid_coarse(ilevel,icount)
 !$omp parallel do private(ind,i)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-        rho(icell_of(active(ilevel)%igrid(i),ind))=rho(icell_of(active(ilevel)%igrid(i),ind))+rho_tot
+        rho(ICELL_OF(active(ilevel)%igrid(i),ind))=rho(ICELL_OF(active(ilevel)%igrid(i),ind))+rho_tot
      end do
   end do
 
@@ -269,7 +269,7 @@ recursive subroutine multigrid_iterator(ilevel)
   use amr_commons
   use pm_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !--------------------------------------------------------
@@ -294,7 +294,7 @@ recursive subroutine multigrid_iterator(ilevel)
 !$omp parallel do private(i,ind)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-        phi(icell_of(active(ilevel)%igrid(i),ind))=-fact*rho(icell_of(active(ilevel)%igrid(i),ind))
+        phi(ICELL_OF(active(ilevel)%igrid(i),ind))=-fact*rho(ICELL_OF(active(ilevel)%igrid(i),ind))
      end do
   end do
   ! Update boundaries for phi
@@ -345,7 +345,7 @@ subroutine sub1_gauss_seidel(ilevel,redstep,igrid,ngrid)
   use pm_commons
   use poisson_commons
   use morton_hash, only: morton_nbor_grid
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel
   logical::redstep
@@ -392,16 +392,16 @@ subroutine sub1_gauss_seidel(ilevel,redstep,igrid,ngrid)
      do idim=1,ndim
         id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
         do i=1,ngrid
-           phig(i,idim)=phi(icell_of(igridn(i,ig1),id1))
+           phig(i,idim)=phi(ICELL_OF(igridn(i,ig1),id1))
         end do
         id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
         do i=1,ngrid
-           phid(i,idim)=phi(icell_of(igridn(i,ig2),id2))
+           phid(i,idim)=phi(ICELL_OF(igridn(i,ig2),id2))
         end do
      end do
 
      do i=1,ngrid
-        ind_cell(i)=icell_of(ind_grid(i),ind)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
 
      ! Compute new potential using old neighbors potential
@@ -494,7 +494,7 @@ subroutine sub_cmp_residual_mg(ilevel, igrid,ngrid)
   use pm_commons
   use poisson_commons
   use morton_hash, only: morton_nbor_grid
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !------------------------------------------------------------------
@@ -531,15 +531,15 @@ subroutine sub_cmp_residual_mg(ilevel, igrid,ngrid)
      do idim=1,ndim
         id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
         do i=1,ngrid
-           phig(i,idim)=phi(icell_of(igridn(i,ig1),id1))
+           phig(i,idim)=phi(ICELL_OF(igridn(i,ig1),id1))
         end do
         id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
         do i=1,ngrid
-           phid(i,idim)=phi(icell_of(igridn(i,ig2),id2))
+           phid(i,idim)=phi(ICELL_OF(igridn(i,ig2),id2))
         end do
      end do
      do i=1,ngrid
-        ind_cell(i)=icell_of(ind_grid(i),ind)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      ! Compute residual
      do i=1,ngrid
@@ -621,7 +621,7 @@ subroutine restriction_fine(ilevel,multigrid)
   use amr_commons
   use hydro_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -661,21 +661,21 @@ subroutine restriction_fine(ilevel,multigrid)
   do icpu=1,ncpu
      do ind=1,twotondim
         do i=1,reception(icpu,ilevel)%ngrid
-           rho(icell_of(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
+           rho(ICELL_OF(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
         end do
      end do
   end do
 !$omp parallel do private(ind,i)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-        rho(icell_of(active(ilevel)%igrid(i),ind))=0.0D0
+        rho(ICELL_OF(active(ilevel)%igrid(i),ind))=0.0D0
      end do
   end do
 !$omp parallel do private(ibound,ind,i)
         do i=1,boundary(ibound,ilevel)%ngrid
   do ibound=1,nboundary
      do ind=1,twotondim
-           rho(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0.0D0
+           rho(ICELL_OF(boundary(ibound,ilevel)%igrid(i),ind))=0.0D0
         end do
      end do
   end do
@@ -703,7 +703,7 @@ end subroutine restriction_fine
 subroutine restrict(ilevel,igrid,ngrid,multigrid)
   use amr_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ngrid,ilevel,igrid
   logical::multigrid
@@ -752,7 +752,7 @@ subroutine restrict(ilevel,igrid,ngrid,multigrid)
   ! Update residual for coarse grid cells
   do ind=1,twotondim
      do i=1,ngrid
-        ind_cell(i)=icell_of(ind_grid(i),ind)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind)
      end do
      ! Loop over relevant parent cells
      do ind_average=1,twotondim
@@ -791,7 +791,7 @@ end subroutine restrict
 subroutine prolong(ilevel)
   use amr_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! This routine updates the current solution using the correction
@@ -848,7 +848,7 @@ subroutine prolong(ilevel)
      ! Update solution for fine grid cells
      do ind=1,twotondim
         do i=1,ngrid
-           ind_cell(i)=icell_of(ind_grid(i),ind)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
         new_rho=0.0d0
 
@@ -874,7 +874,6 @@ subroutine prolong(ilevel)
   ! End loop over grids
 
 end subroutine prolong
-
 
 
 

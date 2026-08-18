@@ -1,7 +1,7 @@
 subroutine backup_poisson(filename)
   use amr_commons
   use poisson_commons
-  use amr_index, only: icell_of
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -68,13 +68,13 @@ subroutine backup_poisson(filename)
            do ind=1,twotondim
               ! Write potential
               do i=1,ncache
-                 xdp(i)=phi(icell_of(ind_grid(i),ind))
+                 xdp(i)=phi(ICELL_OF(ind_grid(i),ind))
               end do
               write(ilun)xdp
               ! Write force
               do ivar=1,ndim
                  do i=1,ncache
-                    xdp(i)=f(icell_of(ind_grid(i),ind),ivar)
+                    xdp(i)=f(ICELL_OF(ind_grid(i),ind),ivar)
                  end do
                  write(ilun)xdp
               end do
@@ -84,7 +84,7 @@ subroutine backup_poisson(filename)
               ! into scalar_gr_old at the end of a solve.
               if(allocated(scalar_gr))then
                  do i=1,ncache
-                    xdp(i)=scalar_gr(icell_of(ind_grid(i),ind))
+                    xdp(i)=scalar_gr(ICELL_OF(ind_grid(i),ind))
                  end do
                  write(ilun)xdp
               end if
@@ -106,7 +106,6 @@ subroutine backup_poisson(filename)
 #endif
      
 end subroutine backup_poisson
-
 
 
 
