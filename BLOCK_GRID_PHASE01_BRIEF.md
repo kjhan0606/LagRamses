@@ -117,6 +117,23 @@ chunk's checklist:
 The census regexes in the driver's completeness check must cover both
 variants.
 
+Chunk-B lessons (2026-08-18), binding on every later chunk:
+
+- When a converted variable's declaration is removed, its mentions in OMP
+  `private` clauses must be removed in the SAME operation, keyed to that
+  exact variable and unit. Never run a general "strip undeclared names from
+  private lists" sweep afterwards: names in private lists may be
+  host/module-associated arrays or `type()` variables a naive declaration
+  scan cannot see, and stripping one (e.g. a GPU state struct) silently turns
+  it shared and creates a race. The safe repair when in doubt is to take the
+  pre-conversion OMP line and drop only names with zero non-OMP references
+  left in the unit.
+- OMP directives start with `!` and must be exempted from any comment filter,
+  or the clause cleanup silently stops firing.
+- A third no-minus-1 reverse-child was found at multigrid_fine_coarse:698 and
+  fixed via ichild_of, same as bisection. Three independent copies of the
+  same off-by-one is the strongest argument yet for the API.
+
 Known trap for reviewers: with the legacy layout, a WRONG conversion can
 still be numerically right in small tests (the aliasing degeneracy discussed
 in the plan). Phase 1's shield is bitwise identity on runs that refine plus
@@ -204,9 +221,29 @@ Full per-file census:
 
 ## Acceptance (drives the Phase 1 -> Phase 2 gate)
 
+**Amended 2026-08-18 after chunk B.** Bitwise identity at -O3 is NOT a valid
+acceptance criterion for this conversion and was withdrawn. Replacing an
+explicit `iskip` invariant with a function call changes what ifx hoists and
+how it reassociates, so the generated code differs even when the arithmetic
+is identical. Chunk B diverged from the reference at -O3 while being provably
+exact: rebuilt at -O0, where inlining, vectorisation and FP reassociation are
+all off, reference and candidate were bitwise identical on the refining run
+(job 448708, 1h00m). The -O3 divergence pattern is consistent with codegen
+and not physics: output_00001 identical before any evolution, the SGS_DT
+timestep sequence identical throughout, the first difference the last ulp of
+the mcons conservation diagnostic (1.76e-16 -> 3.52e-16), and a maximum
+hydro relative difference of 1.9e-8 after ~20 coarse steps of gravitational
+amplification.
+
 1. Census returns zero convertible sites outside amr_index.f90.
-2. Reference vs candidate: bitwise-identical payload outputs on PBH smoke A/B
-   AND the refining 64^3 run.
-3. `-qopt-report` on godunov_fine.kjhan and force_fine.kjhan shows the hot
+2. **-O0 bitwise identity** between reference and candidate on the refining
+   64^3 run. This is the semantic proof and is mandatory per chunk (~1 h).
+3. **-O3 sanity**: identical SGS_DT timestep sequence, and conservation
+   diagnostics agreeing to rounding. Payload bitwise identity is NOT required.
+4. `-qopt-report` on godunov_fine.kjhan and force_fine.kjhan shows the hot
    loops still vectorised.
-4. AMR_INDEX_CHECK debug build passes the same runs with zero assertions.
+5. AMR_INDEX_CHECK debug build passes the same runs with zero assertions.
+6. Fable reviews the chunk diff. The -O0 gate proves behavioural equivalence
+   on the exercised paths; it cannot prove a site was converted with the
+   right meaning where the values happen to coincide, nor find sites the
+   census regexes never matched. Those are review questions.

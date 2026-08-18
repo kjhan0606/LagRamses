@@ -2,11 +2,12 @@ subroutine init_poisson
   use pm_commons
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer::ncell,ncache,iskip,igrid,i,ilevel,ind,ivar
+  integer::ncell,ncache,igrid,i,ilevel,ind,ivar
   integer::nvar2,ilevel2,numbl2,ilun,ibound,istart,info
   integer::ncpu2,ndim2,nlevelmax2,nboundary2
   integer::marker_step,marker_levelmax,marker_iostat
@@ -225,17 +226,16 @@ subroutine init_poisson
               end do
               ! Loop over cells
               do ind=1,twotondim
-                 iskip=ncoarse+(ind-1)*ngridmax
                  ! Read potential
                  read(ilun)xx
                  do i=1,ncache
-                    phi(ind_grid(i)+iskip)=xx(i)
+                    phi(icell_of(ind_grid(i),ind))=xx(i)
                  end do
                  ! Read force
                  do ivar=1,ndim
                     read(ilun)xx
                     do i=1,ncache
-                       f(ind_grid(i)+iskip,ivar)=xx(i)
+                       f(icell_of(ind_grid(i),ind),ivar)=xx(i)
                     end do
                  end do
                  ! New-format gravity checkpoints append scalar_gr after
@@ -245,8 +245,8 @@ subroutine init_poisson
                     read(ilun)xx
                     if(allocated(scalar_gr))then
                        do i=1,ncache
-                          scalar_gr(ind_grid(i)+iskip)=xx(i)
-                          scalar_gr_old(ind_grid(i)+iskip)=xx(i)
+                          scalar_gr(icell_of(ind_grid(i),ind))=xx(i)
+                          scalar_gr_old(icell_of(ind_grid(i),ind))=xx(i)
                        end do
                     end if
                  end if
@@ -299,6 +299,7 @@ subroutine restore_poisson_binary_varcpu
   use ksection
   use morton_keys
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -525,7 +526,7 @@ subroutine restore_poisson_binary_varcpu
            if(igrid == 0) cycle
 
            do iskip = 1, twotondim
-              icell = igrid + ncoarse + (iskip-1)*ngridmax
+              icell = icell_of(igrid, iskip)
               base = ndim + (iskip-1)*ngrav_per_oct
               phi(icell) = recvbuf_2d(base + 1, i)
               do ivar = 1, ndim

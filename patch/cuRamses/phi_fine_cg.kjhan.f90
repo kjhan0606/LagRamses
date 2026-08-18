@@ -7,6 +7,7 @@ subroutine phi_fine_cg(ilevel,icount)
   use pm_commons
   use poisson_commons
   use dark_energy_commons, only: cosmo_poisson_fourpi
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -21,7 +22,7 @@ subroutine phi_fine_cg(ilevel,icount)
   ! x  : stored in phi(i)
   ! b  : stored in rho(i)
   !=========================================================
-  integer::i,idim,info,ind,iter,iskip,itermax,nx_loc
+  integer::i,idim,info,ind,iter,itermax,nx_loc
   integer::idx
   logical::use_restored_phi
   real(dp)::error,error_ini
@@ -66,11 +67,10 @@ subroutine phi_fine_cg(ilevel,icount)
   ! Compute right-hand side norm
   !===============================
   rhs_norm=0.d0
-!$omp parallel do private(ind,iskip,i,idx) reduction(+:rhs_norm)
+!$omp parallel do private(ind,i,idx) reduction(+:rhs_norm)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
-        idx=active(ilevel)%igrid(i)+iskip
+        idx=icell_of(active(ilevel)%igrid(i),ind)
         rhs_norm=rhs_norm+fact2*(rho(idx)-rho_tot)*(rho(idx)-rho_tot)
      end do
   end do
@@ -101,11 +101,10 @@ subroutine phi_fine_cg(ilevel,icount)
      ! Compute residual norm
      !====================================
      r2=0.0d0
-!$omp parallel do private(ind,iskip,i,idx) reduction(+:r2)
+!$omp parallel do private(ind,i,idx) reduction(+:r2)
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-           idx=active(ilevel)%igrid(i)+iskip
+           idx=icell_of(active(ilevel)%igrid(i),ind)
            r2=r2+f(idx,1)*f(idx,1)
         end do
      end do
@@ -129,11 +128,10 @@ subroutine phi_fine_cg(ilevel,icount)
      !====================================
      ! Recurrence on p
      !====================================
-!$omp parallel do private(ind,iskip,i,idx) 
+!$omp parallel do private(ind,i,idx) 
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-           idx=active(ilevel)%igrid(i)+iskip
+           idx=icell_of(active(ilevel)%igrid(i),ind)
            f(idx,2)=f(idx,1)+beta_cg*f(idx,2)
         end do
      end do
@@ -149,11 +147,10 @@ subroutine phi_fine_cg(ilevel,icount)
      ! Compute p.Ap scalar product
      !====================================
      pAp=0.0d0
-!$omp parallel do private(ind,iskip,i,idx) reduction(+:pAp)
+!$omp parallel do private(ind,i,idx) reduction(+:pAp)
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-           idx=active(ilevel)%igrid(i)+iskip
+           idx=icell_of(active(ilevel)%igrid(i),ind)
            pAp=pAp+f(idx,2)*f(idx,3)
         end do
      end do
@@ -172,11 +169,10 @@ subroutine phi_fine_cg(ilevel,icount)
      !====================================
      ! Recurrence on x
      !====================================
-!$omp parallel do private(ind,iskip,i,idx) 
+!$omp parallel do private(ind,i,idx) 
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-           idx=active(ilevel)%igrid(i)+iskip
+           idx=icell_of(active(ilevel)%igrid(i),ind)
            phi(idx)=phi(idx)+alpha_cg*f(idx,2)
         end do
      end do
@@ -184,11 +180,10 @@ subroutine phi_fine_cg(ilevel,icount)
      !====================================
      ! Recurrence on r
      !====================================
-!$omp parallel do private(ind,iskip,i,idx) 
+!$omp parallel do private(ind,i,idx) 
         do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-           idx=active(ilevel)%igrid(i)+iskip
+           idx=icell_of(active(ilevel)%igrid(i),ind)
            f(idx,1)=f(idx,1)-alpha_cg*f(idx,3)
         end do
      end do
@@ -269,14 +264,15 @@ subroutine sub_cmp_residual_cg(ilevel,icount, igrid,ngrid,iii,jjj,oneoversix,fac
   use hydro_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel,icount
   !------------------------------------------------------------------
   ! This routine computes the residual for the Conjugate Gradient
   ! Poisson solver. The residual is stored in f(i,1).
   !------------------------------------------------------------------
-  integer::i,idim,igrid,ngrid,ncache,ind,iskip,nx_loc
-  integer::id1,id2,ig1,ig2,ih1,ih2
+  integer::i,idim,igrid,ngrid,ncache,ind,nx_loc
+  integer::id1,id2,ig1,ig2
   real(dp)::dx2,fourpi,scale,oneoversix,fact
   integer,dimension(1:3,1:2,1:8)::iii,jjj
 
@@ -317,19 +313,17 @@ subroutine sub_cmp_residual_cg(ilevel,icount, igrid,ngrid,iii,jjj,oneoversix,fac
         ! Gather neighboring potential
         do idim=1,ndim
            id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
-           ih1=ncoarse+(id1-1)*ngridmax
            do i=1,ngrid
               if(igridn(i,ig1)>0)then
-                 phig(i,idim)=phi(igridn(i,ig1)+ih1)
+                 phig(i,idim)=phi(icell_of(igridn(i,ig1),id1))
               else
                  phig(i,idim)=phi_left(i,id1,idim)
               end if
            end do
            id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
-           ih2=ncoarse+(id2-1)*ngridmax
            do i=1,ngrid
               if(igridn(i,ig2)>0)then
-                 phid(i,idim)=phi(igridn(i,ig2)+ih2)
+                 phid(i,idim)=phi(icell_of(igridn(i,ig2),id2))
               else
                  phid(i,idim)=phi_right(i,id2,idim)
               end if
@@ -337,9 +331,8 @@ subroutine sub_cmp_residual_cg(ilevel,icount, igrid,ngrid,iii,jjj,oneoversix,fac
         end do
 
         ! Compute central cell index
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=icell_of(ind_grid(i),ind)
         end do
 
         ! Compute residual using 6 neighbors potential
@@ -419,14 +412,15 @@ subroutine sub_cmp_Ap_cg(ilevel,iii,jjj,igrid,ngrid,oneoversix)
   use hydro_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel
   !------------------------------------------------------------------
   ! This routine computes Ap for the Conjugate Gradient
   ! Poisson Solver and store the result into f(i,3).
   !------------------------------------------------------------------
-  integer::i,idim,igrid,ngrid,ncache,ind,iskip
-  integer::id1,id2,ig1,ig2,ih1,ih2
+  integer::i,idim,igrid,ngrid,ncache,ind
+  integer::id1,id2,ig1,ig2
   real(dp)::oneoversix
   integer,dimension(1:3,1:2,1:8)::iii,jjj
 
@@ -456,19 +450,17 @@ subroutine sub_cmp_Ap_cg(ilevel,iii,jjj,igrid,ngrid,oneoversix)
         ! Gather neighboring potential
         do idim=1,ndim
            id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
-           ih1=ncoarse+(id1-1)*ngridmax
            do i=1,ngrid
               if(igridn(i,ig1)>0)then
-                 phig(i,idim)=f(igridn(i,ig1)+ih1,2)
+                 phig(i,idim)=f(icell_of(igridn(i,ig1),id1),2)
               else
                  phig(i,idim)=0.
               end if
            end do
            id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
-           ih2=ncoarse+(id2-1)*ngridmax
            do i=1,ngrid
               if(igridn(i,ig2)>0)then
-                 phid(i,idim)=f(igridn(i,ig2)+ih2,2)
+                 phid(i,idim)=f(icell_of(igridn(i,ig2),id2),2)
               else
                  phid(i,idim)=0.
               end if
@@ -476,9 +468,8 @@ subroutine sub_cmp_Ap_cg(ilevel,iii,jjj,igrid,ngrid,oneoversix)
         end do
 
         ! Compute central cell index
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=icell_of(ind_grid(i),ind)
         end do
 
         ! Compute Ap using neighbors potential
@@ -533,12 +524,13 @@ subroutine sub_make_initial_phi(ilevel,icount,igrid,ngrid)
   use amr_commons
   use pm_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel,icount
   !
   !
   !
-  integer::igrid,ncache,i,ngrid,ind,iskip,idim,ibound
+  integer::igrid,ncache,i,ngrid,ind,idim,ibound
   integer ,dimension(1:nvector)::ind_grid,ind_cell,ind_cell_father
   real(dp),dimension(1:nvector,1:twotondim)::phi_int
 
@@ -550,9 +542,8 @@ subroutine sub_make_initial_phi(ilevel,icount,igrid,ngrid)
      if(ilevel==1)then
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=icell_of(ind_grid(i),ind)
            end do
            do i=1,ngrid
               phi(ind_cell(i))=0.0d0
@@ -575,9 +566,8 @@ subroutine sub_make_initial_phi(ilevel,icount,igrid,ngrid)
         
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=icell_of(ind_grid(i),ind)
            end do
            do i=1,ngrid
               phi(ind_cell(i))=phi_int(i,ind)
@@ -657,6 +647,7 @@ subroutine sub_make_multipole_phi(ilevel, igrid,ngrid, scale, eps,xc,skip_loc)
   use amr_commons
   use pm_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel
   !
@@ -664,7 +655,7 @@ subroutine sub_make_multipole_phi(ilevel, igrid,ngrid, scale, eps,xc,skip_loc)
   !
   integer::ibound,boundary_dir,idim,inbor
   integer::i,ncache,ivar,igrid,ngrid,ind
-  integer::iskip,iskip_ref,gdim,nx_loc,ix,iy,iz
+  integer::iskip_ref,gdim,nx_loc,ix,iy,iz
   integer,dimension(1:nvector)::ind_grid,ind_cell
 
   real(dp)::dx,dx_loc,scale,fourpi,boxlen2,eps,r2
@@ -681,9 +672,8 @@ subroutine sub_make_multipole_phi(ilevel, igrid,ngrid, scale, eps,xc,skip_loc)
  
      ! Loop over cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=icell_of(ind_grid(i),ind)
         end do
         
         if(simple_boundary)then

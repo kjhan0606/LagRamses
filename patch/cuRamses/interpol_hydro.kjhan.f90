@@ -138,9 +138,9 @@ end subroutine upload_fine_hybrid
 !###########################################################
 subroutine upload_gpu_gather_batch(gs, ilevel, igrid_start, ngrid, stream_slot)
   use amr_commons
-  use amr_index, only: icell_of
   use hydro_commons
   use upload_hybrid_commons
+  use amr_index, only: icell_of
   implicit none
 
   type(upload_gpu_state_t), intent(inout) :: gs

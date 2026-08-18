@@ -23,13 +23,14 @@
 subroutine restrict_mask_fine(ifinelevel,allmasked)
    use amr_commons
    use poisson_commons
+  use amr_index, only: icell_of
    implicit none
    integer, intent(in)  :: ifinelevel
    logical, intent(out) :: allmasked
 
    integer :: ind_c_cell,ind_f_cell
 
-   integer :: iskip_f_amr, iskip_c_amr, iskip_c_mg
+   integer ::  iskip_c_mg
    integer :: igrid_f_amr, igrid_c_amr, igrid_c_mg
    integer :: icell_f_amr, icell_c_amr, icell_c_mg
 
@@ -44,13 +45,12 @@ subroutine restrict_mask_fine(ifinelevel,allmasked)
 
    ! Loop over coarse cells of the coarse active comm for myid
    do ind_c_cell=1,twotondim
-      iskip_c_amr=ncoarse+(ind_c_cell-1)*ngridmax
       iskip_c_mg =(ind_c_cell-1)*active_mg(myid,icoarselevel)%ngrid
 
       ! Loop over coarse grids
       do igrid_c_mg=1,active_mg(myid,icoarselevel)%ngrid
          igrid_c_amr=active_mg(myid,icoarselevel)%igrid(igrid_c_mg)
-         icell_c_amr=iskip_c_amr+igrid_c_amr
+         icell_c_amr=icell_of(igrid_c_amr,ind_c_cell)
          icell_c_mg =iskip_c_mg +igrid_c_mg
 
          if(son(icell_c_amr)==0) then
@@ -60,8 +60,7 @@ subroutine restrict_mask_fine(ifinelevel,allmasked)
             igrid_f_amr=son(icell_c_amr)
             ngpmask = 0.0d0
             do ind_f_cell=1,twotondim
-               iskip_f_amr=ncoarse+(ind_f_cell-1)*ngridmax
-               icell_f_amr=iskip_f_amr+igrid_f_amr
+               icell_f_amr=icell_of(igrid_f_amr,ind_f_cell)
                ngpmask=ngpmask+f(icell_f_amr,3)
             end do
             ngpmask=ngpmask/dtwotondim
@@ -81,6 +80,7 @@ end subroutine restrict_mask_fine
 subroutine restrict_mask_fine_reverse(ifinelevel)
    use amr_commons
    use poisson_commons
+  use amr_index, only: icell_of, ichild_of, igrid_of
    implicit none
    integer, intent(in) :: ifinelevel
 
@@ -102,17 +102,16 @@ subroutine restrict_mask_fine_reverse(ifinelevel)
 
    ! Loop over fine cells of the myid active comm
    do ind_f_cell=1,twotondim
-      iskip_f_amr=ncoarse+(ind_f_cell-1)*ngridmax
 
       ! Loop over fine grids of myid
       do igrid_f_mg=1,active(ifinelevel)%ngrid
          igrid_f_amr=active(ifinelevel)%igrid(igrid_f_mg)
-         icell_f_amr=igrid_f_amr+iskip_f_amr
+         icell_f_amr=icell_of(igrid_f_amr,ind_f_cell)
 
          ! Get coarse grid AMR index and CPU id
          icell_c_amr=father(igrid_f_amr)
-         ind_c_cell=(icell_c_amr-ncoarse-1)/ngridmax+1
-         igrid_c_amr=icell_c_amr-ncoarse-(ind_c_cell-1)*ngridmax
+         ind_c_cell=ichild_of(icell_c_amr)
+         igrid_c_amr=igrid_of(icell_c_amr)
          cpu_amr=cpu_map(father(igrid_c_amr))
 
          ! Convert to MG index, get MG coarse cell id
@@ -137,6 +136,7 @@ subroutine cmp_residual_mg_fine(ilevel)
    use amr_commons
    use poisson_commons
    use morton_hash
+  use amr_index, only: icell_of
    implicit none
    integer, intent(in) :: ilevel
 
@@ -145,7 +145,7 @@ subroutine cmp_residual_mg_fine(ilevel)
    real(dp) :: dx, oneoverdx2, phi_c, nb_sum
    integer  :: ngrid
    integer  :: ind, igrid_mg, idim, inbor
-   integer  :: igrid_amr, icell_amr, iskip_amr
+   integer  :: igrid_amr, icell_amr
    integer  :: igshift, igrid_nbor_amr, icell_nbor_amr
 #ifdef FDMDEBUG
    integer(kind=8) :: residual_clock0, residual_clock1, residual_clock_rate
@@ -175,12 +175,11 @@ subroutine cmp_residual_mg_fine(ilevel)
    ! compact work array or per-cell flattening arithmetic.
 !$omp parallel default(firstprivate) shared(active,flag2,son,phi,f)
    do ind=1,twotondim
-      iskip_amr = ncoarse+(ind-1)*ngridmax
 
 !$omp do schedule(guided,256)
       do igrid_mg=1,ngrid
          igrid_amr = active(ilevel)%igrid(igrid_mg)
-         icell_amr = iskip_amr + igrid_amr
+         icell_amr = icell_of(igrid_amr,ind)
 
          phi_c = phi(icell_amr)           ! Value of potential on center cell
          nb_sum=0.0d0                     ! Sum of phi on neighbors
@@ -255,6 +254,7 @@ end subroutine cmp_residual_mg_fine
 subroutine cmp_residual_norm2_fine(ilevel, norm2)
    use amr_commons
    use poisson_commons
+  use amr_index, only: icell_of
    implicit none
 
    integer,  intent(in)  :: ilevel
@@ -263,7 +263,7 @@ subroutine cmp_residual_norm2_fine(ilevel, norm2)
    real(kind=8) :: dx2
    integer  :: ngrid
    integer  :: ind, igrid_mg
-   integer  :: igrid_amr, icell_amr, iskip_amr
+   integer  :: igrid_amr, icell_amr
 
    ! Set constants
    dx2  = (0.5d0**ilevel)**ndim
@@ -273,12 +273,11 @@ subroutine cmp_residual_norm2_fine(ilevel, norm2)
    ! Loop over cells
 !$omp parallel default(firstprivate) shared(active,f) reduction(+:norm2)
    do ind=1,twotondim
-      iskip_amr = ncoarse+(ind-1)*ngridmax
       ! Loop over active grids
 !$omp do
       do igrid_mg=1,ngrid
          igrid_amr = active(ilevel)%igrid(igrid_mg)
-         icell_amr = iskip_amr + igrid_amr
+         icell_amr = icell_of(igrid_amr,ind)
          if(f(icell_amr,3)<=0.0) then      ! Do not count masked cells
             cycle
          end if
@@ -294,6 +293,7 @@ end subroutine cmp_residual_norm2_fine
 subroutine cmp_ivar_norm2_fine(ilevel, ivar, norm2)
    use amr_commons
    use poisson_commons
+  use amr_index, only: icell_of
    implicit none
 
    integer,  intent(in)  :: ilevel, ivar
@@ -302,7 +302,7 @@ subroutine cmp_ivar_norm2_fine(ilevel, ivar, norm2)
    real(kind=8) :: dx2
    integer  :: ngrid
    integer  :: ind, igrid_mg
-   integer  :: igrid_amr, icell_amr, iskip_amr
+   integer  :: igrid_amr, icell_amr
 
    ! Set constants
    dx2  = (0.5d0**ilevel)**ndim
@@ -311,11 +311,10 @@ subroutine cmp_ivar_norm2_fine(ilevel, ivar, norm2)
    norm2 = 0.0d0
    ! Loop over cells
    do ind=1,twotondim
-      iskip_amr = ncoarse+(ind-1)*ngridmax
       ! Loop over active grids
       do igrid_mg=1,ngrid
          igrid_amr = active(ilevel)%igrid(igrid_mg)
-         icell_amr = iskip_amr + igrid_amr
+         icell_amr = icell_of(igrid_amr,ind)
          if(f(icell_amr,3)<=0.0) then      ! Do not count masked cells
             cycle
          end if
@@ -339,6 +338,7 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
    use pm_commons
    use poisson_commons
    use morton_hash
+  use amr_index, only: icell_of
    implicit none
    integer, intent(in) :: ilevel
    logical, intent(in) :: redstep
@@ -349,7 +349,7 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
    real(dp) :: dx2, nb_sum, weight
    integer  :: ngrid
    integer  :: ind, ind0, igrid_mg, idim, inbor
-   integer  :: igrid_amr, icell_amr, iskip_amr
+   integer  :: igrid_amr, icell_amr
    integer  :: igshift, igrid_nbor_amr, icell_nbor_amr
 #ifdef FDMDEBUG
    integer(kind=8) :: smooth_clock0, smooth_clock1, smooth_clock_rate
@@ -388,12 +388,11 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
          ind = iblack(ndim,ind0)
       end if
 
-      iskip_amr = ncoarse+(ind-1)*ngridmax
 
 !$omp do schedule(guided,256)
       do igrid_mg=1,ngrid
          igrid_amr = active(ilevel)%igrid(igrid_mg)
-         icell_amr = iskip_amr + igrid_amr
+         icell_amr = icell_of(igrid_amr,ind)
 
          nb_sum=0.0d0                       ! Sum of phi on neighbors
 
@@ -480,6 +479,7 @@ subroutine restrict_residual_fine(ifinelevel)
    use amr_commons
    use pm_commons
    use poisson_commons
+  use amr_index, only: icell_of
    implicit none
    integer, intent(in) :: ifinelevel
 
@@ -487,21 +487,20 @@ subroutine restrict_residual_fine(ifinelevel)
    real(dp) :: dtwotondim = (twotondim)
 
    integer  :: icoarselevel
-   integer  :: ngrid_c, ind_c, iskip_c_amr, iskip_c_mg
+   integer  :: ngrid_c, ind_c, iskip_c_mg
    integer  :: igrid_c_amr, icell_c_amr, icell_c_mg, igrid_c_mg
-   integer  :: ind_f, igrid_f_amr, iskip_f_amr, icell_f_amr
+   integer  :: ind_f, igrid_f_amr, icell_f_amr
 
    icoarselevel=ifinelevel-1
 
    ! Loop over coarse MG cells
    ngrid_c=active_mg(myid,icoarselevel)%ngrid
    do ind_c=1,twotondim
-      iskip_c_amr = ncoarse + (ind_c-1)*ngridmax
       iskip_c_mg  = (ind_c-1)*ngrid_c
 
       do igrid_c_mg=1,ngrid_c
          igrid_c_amr = active_mg(myid,icoarselevel)%igrid(igrid_c_mg)
-         icell_c_amr = igrid_c_amr + iskip_c_amr
+         icell_c_amr = icell_of(igrid_c_amr,ind_c)
          icell_c_mg  = igrid_c_mg  + iskip_c_mg
 
          ! Get AMR child grid
@@ -515,8 +514,7 @@ subroutine restrict_residual_fine(ifinelevel)
          val = 0.0d0
          ! Loop over child (fine MG) cells
          do ind_f=1,twotondim
-            iskip_f_amr = ncoarse + (ind_f-1)*ngridmax
-            icell_f_amr = igrid_f_amr + iskip_f_amr
+            icell_f_amr = icell_of(igrid_f_amr,ind_f)
 
             if (f(icell_f_amr,3)<=0.0) cycle
             val = val + f(icell_f_amr,1)
@@ -535,6 +533,7 @@ end subroutine restrict_residual_fine
 subroutine restrict_residual_fine_reverse(ifinelevel)
    use amr_commons
    use poisson_commons
+  use amr_index, only: icell_of, ichild_of, igrid_of
    implicit none
    integer, intent(in) :: ifinelevel
 
@@ -557,20 +556,19 @@ subroutine restrict_residual_fine_reverse(ifinelevel)
    ! Loop over fine cells of the myid active comm
 !$omp parallel default(firstprivate) shared(active,active_mg,f,cpu_map,father,lookup_mg)
    do ind_f_cell=1,twotondim
-      iskip_f_amr=ncoarse+(ind_f_cell-1)*ngridmax
 
       ! Loop over fine grids of myid
 !$omp do
       do igrid_f_mg=1,active(ifinelevel)%ngrid
          igrid_f_amr=active(ifinelevel)%igrid(igrid_f_mg)
-         icell_f_amr=igrid_f_amr+iskip_f_amr
+         icell_f_amr=icell_of(igrid_f_amr,ind_f_cell)
          ! Is fine cell masked?
          if(f(icell_f_amr,3)<=0d0) cycle
 
          ! Get coarse grid AMR index and CPU id
          icell_c_amr=father(igrid_f_amr)
-         ind_c_cell=(icell_c_amr-ncoarse-1)/ngridmax+1
-         igrid_c_amr=icell_c_amr-ncoarse-(ind_c_cell-1)*ngridmax
+         ind_c_cell=ichild_of(icell_c_amr)
+         igrid_c_amr=igrid_of(icell_c_amr)
          cpu_amr=cpu_map(father(igrid_c_amr))
 
          ! Convert to MG index, get MG coarse cell id
@@ -598,10 +596,11 @@ end subroutine restrict_residual_fine_reverse
 subroutine interpolate_and_correct_fine(ifinelevel)
    use amr_commons
    use poisson_commons
+  use amr_index, only: icell_of, ichild_of, igrid_of
    implicit none
    integer, intent(in) :: ifinelevel
 
-   integer  :: i, ind_father, ind_average, ind_f, iskip_f_amr
+   integer  :: i, ind_father, ind_average, ind_f
    integer  :: ngrid_f, istart, nbatch
    integer  :: icell_c_amr, igrid_c_amr, igrid_c_mg, icell_c_mg
    integer  :: icoarselevel, ind_c, cpu_amr
@@ -655,11 +654,10 @@ subroutine interpolate_and_correct_fine(ifinelevel)
 
       ! Update solution for fine grid cells
       do ind_f=1,twotondim
-         iskip_f_amr = ncoarse+(ind_f-1)*ngridmax
 
          do i=1,nbatch
             ! Compute fine cell indices
-            icell_amr(i) = iskip_f_amr + igrid_f_amr(i)
+            icell_amr(i) = icell_of(igrid_f_amr(i),ind_f)
          end do
          corr=0.0d0
 
@@ -673,8 +671,8 @@ subroutine interpolate_and_correct_fine(ifinelevel)
                   cycle
                end if
                icell_c_amr = nbors_father_cells(i,ind_father)
-               ind_c       = (icell_c_amr-ncoarse-1)/ngridmax + 1
-               igrid_c_amr = icell_c_amr - ncoarse - (ind_c-1)*ngridmax
+               ind_c       = ichild_of(icell_c_amr)
+               igrid_c_amr = igrid_of(icell_c_amr)
                cpu_amr     = cpu_map(father(igrid_c_amr))
                igrid_c_mg  = lookup_mg(igrid_c_amr)
                if(igrid_c_mg<=0) cycle
@@ -706,6 +704,7 @@ subroutine set_scan_flag_fine(ilevel)
    use amr_commons
    use poisson_commons
    use morton_hash
+  use amr_index, only: icell_of
    implicit none
 
    integer, intent(in) :: ilevel
@@ -714,7 +713,7 @@ subroutine set_scan_flag_fine(ilevel)
    integer :: igrid_mg, inbor, idim, igshift
    integer :: igrid_amr, igrid_nbor_amr
 
-   integer :: iskip_amr, icell_amr, icell_nbor_amr
+   integer ::  icell_amr, icell_nbor_amr
 
    integer, dimension(1:3,1:2,1:8) :: iii, jjj
 #ifdef FDMDEBUG
@@ -739,13 +738,12 @@ subroutine set_scan_flag_fine(ilevel)
    ! so this scan needs neither an atomic nor a thread-private cell buffer.
    ! The guided chunks absorb the variable cost of masked/boundary cells.
 !$omp parallel do collapse(2) default(shared) &
-!$omp private(iskip_amr,igrid_amr,icell_amr,scan_flag,inbor,idim,igshift, &
+!$omp private(igrid_amr,icell_amr,scan_flag,inbor,idim,igshift, &
 !$omp         igrid_nbor_amr,icell_nbor_amr) schedule(guided,1024)
    do ind=1,twotondim
       do igrid_mg=1,ngrid
-         iskip_amr = ncoarse+(ind-1)*ngridmax
          igrid_amr = active(ilevel)%igrid(igrid_mg)
-         icell_amr = iskip_amr + igrid_amr
+         icell_amr = icell_of(igrid_amr,ind)
 
          if(f(icell_amr,3)==1.0) then
             scan_flag=0       ! Init flag to 'no scan needed'
@@ -973,13 +971,14 @@ end subroutine get3cubefather_fine_mg
 subroutine get3cubepos_fine_mg(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng,ilevel)
   use amr_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer::ng,ind,ilevel
   integer, parameter::nvector_cg=32
   integer,dimension(1:nvector_cg)::ind_grid
   integer,dimension(1:nvector_cg,1:threetondim)::nbors_father_cells
   integer,dimension(1:nvector_cg,1:twotondim)::nbors_father_grids
-  integer::i,j,iskip
+  integer::i,j
   integer::ii,iimin,iimax
   integer::jj,jjmin,jjmax
   integer::kk,kkmin,kkmax
@@ -1087,10 +1086,9 @@ subroutine get3cubepos_fine_mg(ind_grid,ind,nbors_father_cells,nbors_father_grid
   do j=1,threetondim
      igrid=lll(j,ind,ndim)
      icell=mmm(j,ind,ndim)
-     iskip=ncoarse+(icell-1)*ngridmax
      do i=1,ng
         if(nbors_grids(i,igrid)>0)then
-           nbors_father_cells(i,j)=iskip+nbors_grids(i,igrid)
+           nbors_father_cells(i,j)=icell_of(nbors_grids(i,igrid),icell)
         else
            nbors_father_cells(i,j)=0
         endif

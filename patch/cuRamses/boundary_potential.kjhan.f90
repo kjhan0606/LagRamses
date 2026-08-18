@@ -6,6 +6,7 @@ subroutine make_boundary_force(ilevel)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -13,7 +14,7 @@ subroutine make_boundary_force(ilevel)
   ! -------------------------------------------------------------------
   integer::ibound,boundary_dir,idim,inbor
   integer::i,ncache,ivar,igrid,ngrid,ind
-  integer::iskip,iskip_ref,gdim,nx_loc,ix,iy,iz
+  integer::iskip_ref,gdim,nx_loc,ix,iy,iz
   integer,dimension(1:8)::ind_ref,alt
   integer,dimension(1:nvector),save::ind_grid,ind_grid_ref
   integer,dimension(1:nvector),save::ind_cell,ind_cell_ref
@@ -105,9 +106,8 @@ subroutine make_boundary_force(ilevel)
 
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=icell_of(ind_grid(i),ind)
            end do
               
            ! Gather neighboring reference cell
@@ -180,6 +180,7 @@ end subroutine make_boundary_force
 subroutine make_boundary_phi(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -187,7 +188,7 @@ subroutine make_boundary_phi(ilevel)
   ! -------------------------------------------------------------------
   integer::ibound,boundary_dir,idim,inbor
   integer::i,ncache,ivar,igrid,ngrid,ind
-  integer::iskip,iskip_ref,gdim,nx_loc,ix,iy,iz
+  integer::iskip_ref,gdim,nx_loc,ix,iy,iz
   integer,dimension(1:8)::ind_ref,alt
   integer,dimension(1:nvector),save::ind_grid,ind_cell
 
@@ -230,7 +231,7 @@ subroutine make_boundary_phi(ilevel)
 
      ! Loop over grids by vector sweeps
      ncache=boundary(ibound,ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,iskip,ind_cell,idim,xx,rr)
+!$omp parallel do private(igrid,ngrid,i,ind_grid,ind,ind_cell,idim,xx,rr)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
@@ -239,9 +240,8 @@ subroutine make_boundary_phi(ilevel)
         
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=icell_of(ind_grid(i),ind)
            end do
               
            ! Compute cell center in code units
@@ -290,6 +290,7 @@ end subroutine make_boundary_phi
 subroutine make_boundary_mask(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -316,9 +317,8 @@ subroutine make_boundary_mask(ilevel)
 
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell(i)=iskip+ind_grid(i)
+              ind_cell(i)=icell_of(ind_grid(i),ind)
            end do
 
            ! Set mask to -1d0

@@ -687,7 +687,7 @@ contains
                if(ndim > 2) then
                   if(xsink(isink,3) >= xg(igrid_tmp,3)) ind = ind + 4
                end if
-               icell_tmp = igrid_tmp + ncoarse + (ind-1)*ngridmax
+               icell_tmp = icell_of(igrid_tmp, ind)
             end do
 
             ! Accumulate in grid or coarse cell
@@ -957,7 +957,7 @@ contains
             bisec_cell_coord(i) = scale * (dble(iarray(dir)) - 0.5d0) * dx
          else
             isubcell = ichild_of(icell)
-            igrid = icell - ncoarse - ngridmax * (isubcell - 1)
+            igrid = igrid_of(icell)
             iz = (isubcell - 1) / 4
             iy = (isubcell - 1 - 4 * iz) / 2
             ix = (isubcell - 1 - 2 * iy - 4 * iz)

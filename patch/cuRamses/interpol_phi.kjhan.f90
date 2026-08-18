@@ -91,12 +91,13 @@ subroutine interpol_phi(ind_cell,phi_int,ncell,ilevel,icount)
 subroutine save_phi_old(ilevel)
   use amr_commons
   use poisson_commons, only:phi,phi_old
+  use amr_index, only: icell_of
   implicit none
   integer ilevel
 
   !save the old potential for time extrapolation in case of subcycling
 
-  integer::i,ncache,ind,igrid,iskip,istart,ibound
+  integer::i,ncache,ind,igrid,istart,ibound
   integer,allocatable,dimension(:)::ind_grid
 
   do ibound=1,nboundary+ncpu
@@ -117,10 +118,9 @@ subroutine save_phi_old(ilevel)
         end do
         ! Loop over cells
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            ! save phi      
            do i=1,ncache
-              phi_old(ind_grid(i)+iskip)=phi(ind_grid(i)+iskip)
+              phi_old(icell_of(ind_grid(i),ind))=phi(icell_of(ind_grid(i),ind))
            end do
         end do
         deallocate(ind_grid)

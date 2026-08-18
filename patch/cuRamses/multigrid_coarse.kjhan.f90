@@ -39,6 +39,7 @@ subroutine multigrid_coarse(ilevel,icount)
   use pm_commons
   use poisson_commons
   use dark_energy_commons, only: cosmo_poisson_fourpi
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -48,7 +49,7 @@ subroutine multigrid_coarse(ilevel,icount)
   ! Multigrid Poisson solver using Gauss-Seidel smoother
   ! with Red-Black ordering.
   !--------------------------------------------------------
-  integer::i,idim,info,ind,iter,iterj,itermax,niter_jacobi,iskip,ibound,nx_loc
+  integer::i,idim,info,ind,iter,iterj,itermax,niter_jacobi,ibound,nx_loc
   logical::multigrid=.true.,redstep=.true.,blackstep=.false.
   real(kind=8)::dx2,oneoversix,fourpi,scale,fact,error_ini,floor,tms
   real(kind=8)::error,rhs_norm,error_all,rhs_norm_all,prec
@@ -71,32 +72,29 @@ subroutine multigrid_coarse(ilevel,icount)
   nx_loc=icoarse_max-icoarse_min+1
   scale=boxlen/dble(nx_loc)
   fourpi=cosmo_poisson_fourpi(aexp,scale)
-!$omp parallel do private(i,ind,iskip)
+!$omp parallel do private(i,ind)
   do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-        phi(active(ilevel)%igrid(i)+iskip)=phi(active(ilevel)%igrid(i)+iskip)/fourpi
+        phi(icell_of(active(ilevel)%igrid(i),ind))=phi(icell_of(active(ilevel)%igrid(i),ind))/fourpi
      end do
   end do
   ! Update boundaries for phi
   call make_virtual_fine_dp(phi(1),ilevel)
   ! Update physical boundaries for phi
-!$omp parallel do private(i,ibound,ind,iskip)
+!$omp parallel do private(i,ibound,ind)
         do i=1,boundary(ibound,ilevel)%ngrid
   do ibound=1,nboundary
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-           phi(boundary(ibound,ilevel)%igrid(i)+iskip)=0d0
+           phi(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0d0
         end do
      end do
   end do
 
   ! Substract rho_tot to rho
-!$omp parallel do private(i,ind,iskip)
+!$omp parallel do private(i,ind)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
-        rho(active(ilevel)%igrid(i)+iskip)=rho(active(ilevel)%igrid(i)+iskip)-rho_tot
+        rho(icell_of(active(ilevel)%igrid(i),ind))=rho(icell_of(active(ilevel)%igrid(i),ind))-rho_tot
      end do
   end do
 
@@ -115,11 +113,10 @@ subroutine multigrid_coarse(ilevel,icount)
 #endif
 #endif
   floor=prec*sqrt(fact*dble(twotondim*numbtot(1,ilevel)))*rho_tot
-!$omp parallel do private(i,ind,iskip) reduction(+:rhs_norm)
+!$omp parallel do private(i,ind) reduction(+:rhs_norm)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
-        rhs_norm=rhs_norm+fact*rho(active(ilevel)%igrid(i)+iskip)*rho(active(ilevel)%igrid(i)+iskip)
+        rhs_norm=rhs_norm+fact*rho(icell_of(active(ilevel)%igrid(i),ind))*rho(icell_of(active(ilevel)%igrid(i),ind))
      end do
   end do
   ! Compute global norms
@@ -149,11 +146,10 @@ subroutine multigrid_coarse(ilevel,icount)
   !----------------------------------------
   error=0.0d0; error_all=0.0d0
   fact=(oneoversix*dx2)**2/dble(twotondim*numbtot(1,ilevel))
-!$omp parallel do private(i,ind,iskip) reduction(+:error)
+!$omp parallel do private(i,ind) reduction(+:error)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
-        error=error+fact*f(active(ilevel)%igrid(i)+iskip,1)*f(active(ilevel)%igrid(i)+iskip,1)
+        error=error+fact*f(icell_of(active(ilevel)%igrid(i),ind),1)*f(icell_of(active(ilevel)%igrid(i),ind),1)
      end do
   end do
   ! Compute global norms
@@ -206,11 +202,10 @@ subroutine multigrid_coarse(ilevel,icount)
   !----------------------------------------
   error=0.0d0; error_all=0.0d0
   fact=(oneoversix*dx2)**2/dble(twotondim*numbtot(1,ilevel))
-!$omp parallel do private(i,ind,iskip) reduction(+:error)
+!$omp parallel do private(i,ind) reduction(+:error)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
-        error=error+fact*f(active(ilevel)%igrid(i)+iskip,1)*f(active(ilevel)%igrid(i)+iskip,1)
+        error=error+fact*f(icell_of(active(ilevel)%igrid(i),ind),1)*f(icell_of(active(ilevel)%igrid(i),ind),1)
      end do
   end do
   ! Compute global norms
@@ -235,31 +230,28 @@ subroutine multigrid_coarse(ilevel,icount)
   nx_loc=icoarse_max-icoarse_min+1
   scale=boxlen/dble(nx_loc)
   fourpi=cosmo_poisson_fourpi(aexp,scale)
-!$omp parallel do private(ind,iskip,i)
+!$omp parallel do private(ind,i)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
-        phi(active(ilevel)%igrid(i)+iskip)=phi(active(ilevel)%igrid(i)+iskip)*fourpi
+        phi(icell_of(active(ilevel)%igrid(i),ind))=phi(icell_of(active(ilevel)%igrid(i),ind))*fourpi
      end do
   end do
   ! Update boundaries for phi
   call make_virtual_fine_dp(phi(1),ilevel)
   ! Update physical boundaries for phi
-!$omp parallel do private(ibound,ind,iskip,i)
+!$omp parallel do private(ibound,ind,i)
         do i=1,boundary(ibound,ilevel)%ngrid
   do ibound=1,nboundary
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-           phi(boundary(ibound,ilevel)%igrid(i)+iskip)=0d0
+           phi(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0d0
         end do
      end do
   end do
   ! Add rho_tot to rho
-!$omp parallel do private(ind,iskip,i)
+!$omp parallel do private(ind,i)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
-        rho(active(ilevel)%igrid(i)+iskip)=rho(active(ilevel)%igrid(i)+iskip)+rho_tot
+        rho(icell_of(active(ilevel)%igrid(i),ind))=rho(icell_of(active(ilevel)%igrid(i),ind))+rho_tot
      end do
   end do
 
@@ -277,13 +269,14 @@ recursive subroutine multigrid_iterator(ilevel)
   use amr_commons
   use pm_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel
   !--------------------------------------------------------
   ! Multigrid Poisson solver using Gauss-Seidel smoother
   ! with Red-Black ordering
   !--------------------------------------------------------
-  integer::i,ind,iter,niter_jacobi,iskip
+  integer::i,ind,iter,niter_jacobi
   logical::multigrid=.true.,redstep=.true.,blackstep=.false.
   real(kind=8)::dx2,oneoversix,fact,tms
  
@@ -298,11 +291,10 @@ recursive subroutine multigrid_iterator(ilevel)
   ! Compute first guess as the diagonal solution
   !---------------------------------------------
   fact=oneoversix*dx2
-!$omp parallel do private(i,ind,iskip)
+!$omp parallel do private(i,ind)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
-        phi(active(ilevel)%igrid(i)+iskip)=-fact*rho(active(ilevel)%igrid(i)+iskip)
+        phi(icell_of(active(ilevel)%igrid(i),ind))=-fact*rho(icell_of(active(ilevel)%igrid(i),ind))
      end do
   end do
   ! Update boundaries for phi
@@ -353,6 +345,7 @@ subroutine sub1_gauss_seidel(ilevel,redstep,igrid,ngrid)
   use pm_commons
   use poisson_commons
   use morton_hash, only: morton_nbor_grid
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel
   logical::redstep
@@ -360,8 +353,8 @@ subroutine sub1_gauss_seidel(ilevel,redstep,igrid,ngrid)
   ! This routine computes one relaxation sweep 
   ! for one Gauss-Seidel iteration.
   !------------------------------------------------------------------
-  integer::i,ind0,idim,igrid,ngrid,ncache,ind,iskip
-  integer::id1,id2,ig1,ig2,ih1,ih2
+  integer::i,ind0,idim,igrid,ngrid,ncache,ind
+  integer::id1,id2,ig1,ig2
   real(kind=8)::oneoversix,dx,dx2
   integer,dimension(1:3,1:4)::ired,iblack
   integer,dimension(1:3,1:2,1:8)::iii,jjj
@@ -398,20 +391,17 @@ subroutine sub1_gauss_seidel(ilevel,redstep,igrid,ngrid)
      
      do idim=1,ndim
         id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
-        ih1=ncoarse+(id1-1)*ngridmax
         do i=1,ngrid
-           phig(i,idim)=phi(igridn(i,ig1)+ih1)
+           phig(i,idim)=phi(icell_of(igridn(i,ig1),id1))
         end do
         id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
-        ih2=ncoarse+(id2-1)*ngridmax
         do i=1,ngrid
-           phid(i,idim)=phi(igridn(i,ig2)+ih2)
+           phid(i,idim)=phi(icell_of(igridn(i,ig2),id2))
         end do
      end do
 
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=icell_of(ind_grid(i),ind)
      end do
 
      ! Compute new potential using old neighbors potential
@@ -504,14 +494,15 @@ subroutine sub_cmp_residual_mg(ilevel, igrid,ngrid)
   use pm_commons
   use poisson_commons
   use morton_hash, only: morton_nbor_grid
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel
   !------------------------------------------------------------------
   ! This routine computes the residual r = b - A x
   ! and stores it in f(i,1)
   !------------------------------------------------------------------
-  integer::i,idim,igrid,ngrid,ncache,ind,iskip
-  integer::id1,id2,ig1,ig2,ih1,ih2
+  integer::i,idim,igrid,ngrid,ncache,ind
+  integer::id1,id2,ig1,ig2
   real(kind=8)::oneoversix,dx,dx2
   integer,dimension(1:3,1:2,1:8)::iii,jjj
 
@@ -539,19 +530,16 @@ subroutine sub_cmp_residual_mg(ilevel, igrid,ngrid)
   do ind=1,twotondim        
      do idim=1,ndim
         id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
-        ih1=ncoarse+(id1-1)*ngridmax
         do i=1,ngrid
-           phig(i,idim)=phi(igridn(i,ig1)+ih1)
+           phig(i,idim)=phi(icell_of(igridn(i,ig1),id1))
         end do
         id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
-        ih2=ncoarse+(id2-1)*ngridmax
         do i=1,ngrid
-           phid(i,idim)=phi(igridn(i,ig2)+ih2)
+           phid(i,idim)=phi(icell_of(igridn(i,ig2),id2))
         end do
      end do
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=icell_of(ind_grid(i),ind)
      end do
      ! Compute residual
      do i=1,ngrid
@@ -633,6 +621,7 @@ subroutine restriction_fine(ilevel,multigrid)
   use amr_commons
   use hydro_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -648,7 +637,7 @@ subroutine restriction_fine(ilevel,multigrid)
   ! routine only set rho to zero. On the other hand, for the Multigrid
   ! solver, the restriction is necessary in any case.
   !-------------------------------------------------------------------
-  integer ::ind,i,icpu,ncache,igrid,ngrid,iskip,info,ibound,nx_loc
+  integer ::ind,i,icpu,ncache,igrid,ngrid,info,ibound,nx_loc
   integer ::idim,nleaf,ix,iy,iz
   integer,dimension(1:nvector)::ind_grid, ind_cell, ind_leaf
   real(dp),dimension(1:nvector,1:ndim)::xx
@@ -668,28 +657,25 @@ subroutine restriction_fine(ilevel,multigrid)
   vol_loc=dx_loc**ndim
 
   ! Initialize density field to zero
-!$omp parallel do private(icpu,ind,iskip,i)
+!$omp parallel do private(icpu,ind,i)
   do icpu=1,ncpu
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,reception(icpu,ilevel)%ngrid
-           rho(reception(icpu,ilevel)%igrid(i)+iskip)=0.0D0
+           rho(icell_of(reception(icpu,ilevel)%igrid(i),ind))=0.0D0
         end do
      end do
   end do
-!$omp parallel do private(ind,iskip,i)
+!$omp parallel do private(ind,i)
      do i=1,active(ilevel)%ngrid
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
-        rho(active(ilevel)%igrid(i)+iskip)=0.0D0
+        rho(icell_of(active(ilevel)%igrid(i),ind))=0.0D0
      end do
   end do
-!$omp parallel do private(ibound,ind,iskip,i)
+!$omp parallel do private(ibound,ind,i)
         do i=1,boundary(ibound,ilevel)%ngrid
   do ibound=1,nboundary
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
-           rho(boundary(ibound,ilevel)%igrid(i)+iskip)=0.0D0
+           rho(icell_of(boundary(ibound,ilevel)%igrid(i),ind))=0.0D0
         end do
      end do
   end do
@@ -717,6 +703,7 @@ end subroutine restriction_fine
 subroutine restrict(ilevel,igrid,ngrid,multigrid)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer::ngrid,ilevel,igrid
   logical::multigrid
@@ -732,7 +719,7 @@ subroutine restrict(ilevel,igrid,ngrid,multigrid)
   real(dp),dimension(1:8)::bbb
   integer ,dimension(1:8,1:8)::ccc
 
-  integer::i,ind_father,ind_average,ind,iskip
+  integer::i,ind_father,ind_average,ind
   do i=1,ngrid
      ind_grid(i)=active(ilevel-1)%igrid(igrid+i-1)
   end do
@@ -764,9 +751,8 @@ subroutine restrict(ilevel,igrid,ngrid,multigrid)
 
   ! Update residual for coarse grid cells
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=icell_of(ind_grid(i),ind)
      end do
      ! Loop over relevant parent cells
      do ind_average=1,twotondim
@@ -805,11 +791,12 @@ end subroutine restrict
 subroutine prolong(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer::ilevel
   ! This routine updates the current solution using the correction
   ! given by the prolongated solution at the finer level.
-  integer::i,ind_father,ind_average,ind,iskip,ncache,igrid,ngrid
+  integer::i,ind_father,ind_average,ind,ncache,igrid,ngrid
 
   real(dp)::a,b,c,d,coeff
   real(dp),dimension(1:8)::bbb
@@ -841,7 +828,7 @@ subroutine prolong(ilevel)
 
   ! Loop over myid grids by vector sweeps
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind,iskip, ind_average, ind_father, coeff)
+!$omp parallel do private(igrid,ngrid,i,ind, ind_average, ind_father, coeff)
   do igrid=1,ncache,nvector
 
      ! Gather nvector grids
@@ -860,9 +847,8 @@ subroutine prolong(ilevel)
      
      ! Update solution for fine grid cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=icell_of(ind_grid(i),ind)
         end do
         new_rho=0.0d0
 

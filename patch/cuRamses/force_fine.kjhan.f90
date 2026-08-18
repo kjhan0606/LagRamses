@@ -55,6 +55,7 @@ subroutine force_fine(ilevel,icount)
   use pm_commons
   use poisson_commons
   use dark_energy_commons, only: cosmo_poisson_fourpi
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -64,7 +65,7 @@ subroutine force_fine(ilevel,icount)
   ! This routine computes the gravitational acceleration,
   ! the maximum density rho_max, and the potential energy
   !----------------------------------------------------------
-  integer::igrid,ngrid,ncache,i,ind,iskip,ix,iy,iz
+  integer::igrid,ngrid,ncache,i,ind,ix,iy,iz
   integer::info,ibound,nx_loc,idim
   real(dp)::dx,dx_loc,scale,fact,fourpi
   real(kind=8)::rho_loc,rho_all,epot_loc,epot_all
@@ -106,16 +107,15 @@ subroutine force_fine(ilevel,icount)
   if(gravity_type>0)then
 
      ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim,ind_grid_w,ind_cell_w,xx_w,ff_w) schedule(dynamic)
+!$omp parallel do private(igrid,ngrid,i,ind,idim,ind_grid_w,ind_cell_w,xx_w,ff_w) schedule(dynamic)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
         do i=1,ngrid
            ind_grid_w(i)=active(ilevel)%igrid(igrid+i-1)
         end do
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell_w(i)=iskip+ind_grid_w(i)
+              ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
            end do
            do idim=1,ndim
               do i=1,ngrid
@@ -184,7 +184,7 @@ subroutine force_fine(ilevel,icount)
   fact=-dx_loc**ndim/fourpi/2.0D0
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim,ind_grid_w,ind_cell_w) &
+!$omp parallel do private(igrid,ngrid,i,ind,idim,ind_grid_w,ind_cell_w) &
 !$omp& reduction(+:epot_loc) reduction(max:rho_loc)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
@@ -192,9 +192,8 @@ subroutine force_fine(ilevel,icount)
         ind_grid_w(i)=active(ilevel)%igrid(igrid+i-1)
      end do
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell_w(i)=iskip+ind_grid_w(i)
+           ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
         end do
         do idim=1,ndim
            do i=1,ngrid
@@ -281,15 +280,16 @@ subroutine force_gpu_gather_batch(gs, ilevel, icount, igrid_start, ngrid, stream
   use poisson_commons
   use morton_hash
   use force_hybrid_commons
+  use amr_index, only: icell_of
   implicit none
 
   type(force_gpu_state_t), intent(inout) :: gs
   integer, intent(in) :: ilevel, icount, igrid_start, ngrid, stream_slot
 
-  integer :: i, ind, idim, nx_loc, iskip
+  integer :: i, ind, idim, nx_loc
   integer :: id1, id2, id3, id4
   integer :: ig1, ig2, ig3, ig4
-  integer :: ih1, ih2, ih3, ih4
+  integer ::    ih4
   real(dp) :: dx, scale, dx_loc
   integer, dimension(1:3,1:4,1:8) :: ggg, hhh
 
@@ -349,16 +349,15 @@ subroutine force_gpu_gather_batch(gs, ilevel, icount, igrid_start, ngrid, stream
   ! Fill phi_buf and cell_buf
   off = gs%off
   do ind = 1, twotondim
-     iskip = ncoarse + (ind - 1) * ngridmax
      do i = 1, ngrid
-        gs%cell_buf(off + i, ind) = iskip + ind_grid(i)
+        gs%cell_buf(off + i, ind) = icell_of(ind_grid(i),ind)
      end do
 
      do idim = 1, ndim
-        id1 = hhh(idim,1,ind); ig1 = ggg(idim,1,ind); ih1 = ncoarse+(id1-1)*ngridmax
-        id2 = hhh(idim,2,ind); ig2 = ggg(idim,2,ind); ih2 = ncoarse+(id2-1)*ngridmax
-        id3 = hhh(idim,3,ind); ig3 = ggg(idim,3,ind); ih3 = ncoarse+(id3-1)*ngridmax
-        id4 = hhh(idim,4,ind); ig4 = ggg(idim,4,ind); ih4 = ncoarse+(id4-1)*ngridmax
+        id1 = hhh(idim,1,ind); ig1 = ggg(idim,1,ind)
+        id2 = hhh(idim,2,ind); ig2 = ggg(idim,2,ind)
+        id3 = hhh(idim,3,ind); ig3 = ggg(idim,3,ind)
+        id4 = hhh(idim,4,ind); ig4 = ggg(idim,4,ind)
 
         do i = 1, ngrid
            g = off + i
@@ -366,25 +365,25 @@ subroutine force_gpu_gather_batch(gs, ilevel, icount, igrid_start, ngrid, stream
 
            ! phi1
            if (igridn(i, ig1) > 0) then
-              gs%phi_buf(1, slot) = phi(igridn(i, ig1) + ih1)
+              gs%phi_buf(1, slot) = phi(icell_of(igridn(i, ig1),id1))
            else
               gs%phi_buf(1, slot) = phi_left(i, id1, idim)
            end if
            ! phi2
            if (igridn(i, ig2) > 0) then
-              gs%phi_buf(2, slot) = phi(igridn(i, ig2) + ih2)
+              gs%phi_buf(2, slot) = phi(icell_of(igridn(i, ig2),id2))
            else
               gs%phi_buf(2, slot) = phi_right(i, id2, idim)
            end if
            ! phi3
            if (igridn(i, ig3) > 0) then
-              gs%phi_buf(3, slot) = phi(igridn(i, ig3) + ih3)
+              gs%phi_buf(3, slot) = phi(icell_of(igridn(i, ig3),id3))
            else
               gs%phi_buf(3, slot) = phi_left(i, id3, idim)
            end if
            ! phi4
            if (igridn(i, ig4) > 0) then
-              gs%phi_buf(4, slot) = phi(igridn(i, ig4) + ih4)
+              gs%phi_buf(4, slot) = phi(icell_of(igridn(i, ig4),id4))
            else
               gs%phi_buf(4, slot) = phi_right(i, id4, idim)
            end if
@@ -455,6 +454,7 @@ subroutine gradient_phi(ilevel,igrid,ngrid,icount)
   use hydro_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer::ngrid,ilevel,icount
   integer,dimension(1:nvector)::ind_grid
@@ -463,10 +463,10 @@ subroutine gradient_phi(ilevel,igrid,ngrid,icount)
   ! in grids ind_grid(:) at level ilevel, using a
   ! 5 nodes kernel (5 points FDA).
   !-------------------------------------------------
-  integer::i,idim,ind,iskip,nx_loc,igrid
+  integer::i,idim,ind,nx_loc,igrid
   integer::id1,id2,id3,id4
   integer::ig1,ig2,ig3,ig4
-  integer::ih1,ih2,ih3,ih4
+  integer::ih4
   real(dp)::dx,a,b,scale,dx_loc
   integer,dimension(1:3,1:4,1:8)::ggg,hhh
   integer ,dimension(1:nvector)::ind_cell
@@ -524,45 +524,44 @@ subroutine gradient_phi(ilevel,igrid,ngrid,icount)
   end if
   ! Loop over cells
   do ind=1,twotondim
-     iskip=ncoarse+(ind-1)*ngridmax
      do i=1,ngrid
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=icell_of(ind_grid(i),ind)
      end do
 
      ! Loop over dimensions
      do idim=1,ndim
 
         ! Loop over nodes
-        id1=hhh(idim,1,ind); ig1=ggg(idim,1,ind); ih1=ncoarse+(id1-1)*ngridmax
-        id2=hhh(idim,2,ind); ig2=ggg(idim,2,ind); ih2=ncoarse+(id2-1)*ngridmax
-        id3=hhh(idim,3,ind); ig3=ggg(idim,3,ind); ih3=ncoarse+(id3-1)*ngridmax
-        id4=hhh(idim,4,ind); ig4=ggg(idim,4,ind); ih4=ncoarse+(id4-1)*ngridmax
+        id1=hhh(idim,1,ind); ig1=ggg(idim,1,ind)
+        id2=hhh(idim,2,ind); ig2=ggg(idim,2,ind)
+        id3=hhh(idim,3,ind); ig3=ggg(idim,3,ind)
+        id4=hhh(idim,4,ind); ig4=ggg(idim,4,ind)
 
         ! Gather potential
         do i=1,ngrid
            if(igridn(i,ig1)>0)then
-              phi1(i)=phi(igridn(i,ig1)+ih1)
+              phi1(i)=phi(icell_of(igridn(i,ig1),id1))
            else
               phi1(i)=phi_left(i,id1,idim)
            end if
         end do
         do i=1,ngrid
            if(igridn(i,ig2)>0)then
-              phi2(i)=phi(igridn(i,ig2)+ih2)
+              phi2(i)=phi(icell_of(igridn(i,ig2),id2))
            else
               phi2(i)=phi_right(i,id2,idim)
            end if
         end do
         do i=1,ngrid
            if(igridn(i,ig3)>0)then
-              phi3(i)=phi(igridn(i,ig3)+ih3)
+              phi3(i)=phi(icell_of(igridn(i,ig3),id3))
            else
               phi3(i)=phi_left(i,id3,idim)
            end if
         end do
         do i=1,ngrid
            if(igridn(i,ig4)>0)then
-              phi4(i)=phi(igridn(i,ig4)+ih4)
+              phi4(i)=phi(icell_of(igridn(i,ig4),id4))
            else
               phi4(i)=phi_right(i,id4,idim)
            end if
@@ -580,13 +579,14 @@ end subroutine gradient_phi
 subroutine apply_mond_force(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   !-------------------------------------------------------
   ! QUMOND: multiply Newtonian force by nu(|g_N+g_ext|/a0)
   ! With EFE: f_d = nu * f_d + (nu-1) * g_ext_d
   !-------------------------------------------------------
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   real(dp)::scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2
   real(dp)::scale_a,a0_code,gnorm,x,nu
   real(dp)::g_ext_code(1:3)
@@ -601,15 +601,14 @@ subroutine apply_mond_force(ilevel)
   a0_code = a0_mond / scale_a
   g_ext_code(1:3) = g_ext_mond(1:3) / scale_a
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim,ind_cell, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim,ind_cell, &
 !$omp&  gnorm,x,nu) schedule(dynamic)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
 
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+active(ilevel)%igrid(igrid+i-1)
+           ind_cell(i)=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
         end do
 
         do i=1,ngrid
@@ -643,6 +642,7 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
   use poisson_commons
   use morton_hash
   use dark_energy_commons, only: cosmo_poisson_fourpi
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   logical,intent(in)::is_aqual
@@ -658,7 +658,7 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
   ! with 6-neighbor centered difference for divergence.
   ! Cells at coarse-fine boundaries (igridn=0) are skipped.
   !-------------------------------------------------------
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   real(dp)::scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2
   real(dp)::scale_a,a0_code
   real(dp)::g_ext_code(1:3)
@@ -700,7 +700,7 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
   ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
   ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right, &
@@ -724,9 +724,8 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
      end do
 
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell_w(i)=iskip+ind_grid_w(i)
+           ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
         end do
 
         do i=1,ngrid
@@ -841,6 +840,7 @@ end subroutine get_mond_mu_minus1
 subroutine aqual_iterate(ilevel, icount)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -855,7 +855,7 @@ subroutine aqual_iterate(ilevel, icount)
   !   3. Re-compute forces
   !   4. Check convergence: max|f_new - f_old| / max|f_new|
   !-------------------------------------------------------
-  integer :: iter, ncache, ind, iskip, i, idx, idim, info
+  integer :: iter, ncache, ind, i, idx, idim, info
   real(dp) :: delta_f_local, f_norm_local
   real(dp) :: delta_f_global, f_norm_global, rel_change
   logical :: converged
@@ -876,10 +876,9 @@ subroutine aqual_iterate(ilevel, icount)
   ! Build cell list and save rho_bary
   idx = 0
   do ind = 1, twotondim
-     iskip = ncoarse + (ind-1) * ngridmax
      do i = 1, ncache
         idx = idx + 1
-        ind_cell_list(idx) = iskip + active(ilevel)%igrid(i)
+        ind_cell_list(idx) = icell_of(active(ilevel)%igrid(i),ind)
         rho_bary(idx) = rho(ind_cell_list(idx))
      end do
   end do
@@ -990,6 +989,7 @@ subroutine compute_fifth_force(ilevel, factor)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::factor
@@ -998,7 +998,7 @@ subroutine compute_fifth_force(ilevel, factor)
   ! and add to f(icell, idim).
   ! Uses simple 2-point centered difference (same as rho divergence).
   !-------------------------------------------------------
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   integer::ig_left,ig_right,ih_left,ih_right
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc
@@ -1026,7 +1026,7 @@ subroutine compute_fifth_force(ilevel, factor)
   ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
   ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right,grad_u,u_cen,u_left,u_right) schedule(static)
@@ -1048,9 +1048,8 @@ subroutine compute_fifth_force(ilevel, factor)
      end do
 
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell_w(i)=iskip+ind_grid_w(i)
+           ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
         end do
 
         do i=1,ngrid
@@ -1103,6 +1102,7 @@ subroutine scalar_lookup_cell(ilevel, ix_in, iy_in, iz_in, value, found)
   use poisson_commons
   use morton_hash
   use morton_keys, only: mkey_t, morton_encode
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   integer(8),intent(in)::ix_in,iy_in,iz_in
@@ -1131,7 +1131,7 @@ subroutine scalar_lookup_cell(ilevel, ix_in, iy_in, iz_in, value, found)
   if(igrid <= 0) return
 
   ind=1+int(modulo(ix,2_8))+2*int(modulo(iy,2_8))+4*int(modulo(iz,2_8))
-  icell=ncoarse+(ind-1)*ngridmax+igrid
+  icell=icell_of(igrid,ind)
   value=scalar_gr(icell)
   found=.true.
 end subroutine scalar_lookup_cell
@@ -1300,6 +1300,7 @@ end function level_fft_ok
 subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1307,7 +1308,7 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
   integer,intent(in)::ilevel
   real(dp),intent(in)::m2,step_frac,relax
 
-  integer::fft_Nx,fft_Ny,fft_Nz,igrid,igrid_amr,ind,iskip,icell,info
+  integer::fft_Nx,fft_Ny,fft_Nz,igrid,igrid_amr,ind,icell,info
   integer::Kx,Ky,Kz,ix,iy,iz,i,j,k,ngrid_loc,nx_loc
   integer(kind=8)::ntot
   integer(kind=8),save::plan_f=0_8,plan_b=0_8
@@ -1382,8 +1383,7 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
         ix=modulo(Kx-1+mod(ind-1,2),  fft_Nx)
         iy=modulo(Ky-1+mod((ind-1)/2,2), fft_Ny)
         iz=modulo(Kz-1+(ind-1)/4,     fft_Nz)
-        iskip=ncoarse+(ind-1)*ngridmax
-        icell=iskip+igrid_amr
+        icell=icell_of(igrid_amr,ind)
         b3(ix+1,iy+1,iz+1)=scalar_gr_old(icell)
      end do
   end do
@@ -1420,8 +1420,7 @@ subroutine level_fft_helmholtz(ilevel, m2, step_frac, relax)
         ix=modulo(Kx-1+mod(ind-1,2),  fft_Nx)
         iy=modulo(Ky-1+mod((ind-1)/2,2), fft_Ny)
         iz=modulo(Kz-1+(ind-1)/4,     fft_Nz)
-        iskip=ncoarse+(ind-1)*ngridmax
-        icell=iskip+igrid_amr
+        icell=icell_of(igrid_amr,ind)
         uold=scalar_gr(icell)
         du=relax*b3(ix+1,iy+1,iz+1)
         if(step_frac > 0d0 .and. abs(uold) > 0d0) then
@@ -1446,6 +1445,7 @@ subroutine level_fft_helmholtz_mpi(ilevel,m2,step_frac,relax)
   use poisson_commons
   use iso_c_binding
   use omp_lib
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1464,7 +1464,7 @@ subroutine level_fft_helmholtz_mpi(ilevel,m2,step_frac,relax)
   real(dp),allocatable,save::eigx(:),eigy(:),eigz(:)
 
   integer::fft_Nx,fft_Ny,fft_Nz,fftw_block,slab_real_size
-  integer::igrid,igrid_amr,ngrid_loc,ind,iskip,icell
+  integer::igrid,igrid_amr,ngrid_loc,ind,icell
   integer::Kx,Ky,Kz,ix,iy,iz,x_local,dest,idx_3d
   integer::irank,info,n_send,n_recv
   integer::i,j,k
@@ -1579,8 +1579,7 @@ subroutine level_fft_helmholtz_mpi(ilevel,m2,step_frac,relax)
         x_local=ix-dest*fftw_block
         idx_3d=x_local*fft_Ny*2*(fft_Nz/2+1) &
              & +iy*2*(fft_Nz/2+1)+iz
-        iskip=ncoarse+(ind-1)*ngridmax
-        icell=iskip+igrid_amr
+        icell=icell_of(igrid_amr,ind)
         sendbuf(2*sendpos(dest))=dble(idx_3d)
         sendbuf(2*sendpos(dest)+1)=scalar_gr_old(icell)
         sendpos(dest)=sendpos(dest)+1
@@ -1639,8 +1638,7 @@ subroutine level_fft_helmholtz_mpi(ilevel,m2,step_frac,relax)
      do ind=1,twotondim
         ix=modulo(Kx-1+mod(ind-1,2),fft_Nx)
         dest=min(ix/fftw_block,ncpu-1)
-        iskip=ncoarse+(ind-1)*ngridmax
-        icell=iskip+igrid_amr
+        icell=icell_of(igrid_amr,ind)
         uold=scalar_gr(icell)
         du=relax*sendbuf(2*sendpos(dest)+1)
         if(step_frac>0d0 .and. abs(uold)>0d0) then
@@ -1663,6 +1661,7 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1671,7 +1670,7 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
   real(dp),intent(in)::R_bar, fR_bar
   real(dp),intent(out)::m2bar
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim,info
+  integer::igrid,ngrid,ncache,i,ind,idim,info
   integer::ig_left,ig_right,ih_left,ih_right
   real(dp)::dx,scale,dx_loc,dx2_inv,nx_frac
   integer::nx_loc,np1
@@ -1708,7 +1707,7 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
 
   acc_loc=0d0
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right,ih_left,ih_right, &
 !$omp&  u_c,u_abs,u_nb_l,u_nb_r,lapl,source,R_of_u,dR_du) &
 !$omp& reduction(+:acc_loc) schedule(static)
@@ -1727,9 +1726,8 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
         end do
      end do
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell_w(i)=iskip+ind_grid_w(i)
+           ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
         end do
         do i=1,ngrid
            u_c = scalar_gr(ind_cell_w(i))
@@ -1787,6 +1785,7 @@ subroutine sb_build_fft_rhs(ilevel, assb_in, L_in, m2bar)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1795,7 +1794,7 @@ subroutine sb_build_fft_rhs(ilevel, assb_in, L_in, m2bar)
   real(dp),intent(in)::assb_in, L_in
   real(dp),intent(out)::m2bar
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim,info
+  integer::igrid,ngrid,ncache,i,ind,idim,info
   integer::ig_left,ig_right,ih_left,ih_right
   real(dp)::dx,scale,dx_loc,dx2_inv
   integer::nx_loc
@@ -1823,7 +1822,7 @@ subroutine sb_build_fft_rhs(ilevel, assb_in, L_in, m2bar)
 
   acc_loc=0d0
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right,ih_left,ih_right, &
 !$omp&  u_c,u_nb_l,u_nb_r,lapl,mass_term) &
 !$omp& reduction(+:acc_loc) schedule(dynamic)
@@ -1842,9 +1841,8 @@ subroutine sb_build_fft_rhs(ilevel, assb_in, L_in, m2bar)
         end do
      end do
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell_w(i)=iskip+ind_grid_w(i)
+           ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
         end do
         do i=1,ngrid
            u_c = scalar_gr(ind_cell_w(i))
@@ -1886,6 +1884,7 @@ subroutine dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -1894,7 +1893,7 @@ subroutine dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
   real(dp),intent(in)::A2_d,s_d,chibar_d
   real(dp),intent(out)::m2bar
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim,info
+  integer::igrid,ngrid,ncache,i,ind,idim,info
   integer::ig_left,ig_right,ih_left,ih_right
   real(dp)::dx,scale,dx_loc,dx2_inv
   integer::nx_loc
@@ -1927,7 +1926,7 @@ subroutine dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
 
   acc_loc=0d0
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w,ig_left,ig_right,ih_left,ih_right, &
 !$omp&  u_c,u_nb_l,u_nb_r,lapl,wfac,vphi,dvphi,source) &
 !$omp& reduction(+:acc_loc) schedule(dynamic)
@@ -1946,9 +1945,8 @@ subroutine dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
         end do
      end do
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell_w(i)=iskip+ind_grid_w(i)
+           ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
         end do
         do i=1,ngrid
            u_c = scalar_gr(ind_cell_w(i))
@@ -2071,6 +2069,7 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -2080,7 +2079,7 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
   logical,intent(in)::centered_mixed
   real(dp),intent(out)::rhs_rel
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim,icell,info
+  integer::igrid,ngrid,ncache,i,ind,idim,icell,info
   integer::ig_left,ig_right
   integer::d,bx,by,bz,tx,ty,tz,sx,sy,sz,ixside,iyside,izside
   integer::iedge,igrid_diag,ind_diag
@@ -2119,7 +2118,7 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
   if(.not.vain_cache_ready .or. vain_cache_level/=ilevel .or. &
        & vain_cache_ngrid/=ncache) call vain_prepare_uniform_cache(ilevel)
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w,igridxy_w,igridxz_w,igridyz_w, &
 !$omp&  ind_diag_w,ig_left,ig_right, &
 !$omp&  d,bx,by,bz,tx,ty,tz,sx,sy,sz,ixside,iyside,izside, &
@@ -2149,9 +2148,8 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
         igridyz_w(i,1:4)=vain_yz_grid(igrid+i-1,1:4)
      end do
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell_w(i)=iskip+ind_grid_w(i)
+           ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
         end do
         bx=mod(ind-1,2)
         by=mod((ind-1)/2,2)
@@ -2190,7 +2188,7 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
                  igrid_diag=ind_grid_w(i)
               end if
               if(igrid_diag>0) then
-                 ind_diag_w(i,d)=ncoarse+(ind_diag-1)*ngridmax+igrid_diag
+                 ind_diag_w(i,d)=icell_of(igrid_diag,ind_diag)
               else
                  ind_diag_w(i,d)=0
               end if
@@ -2331,14 +2329,13 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
   ! otherwise discard the same mode silently.
   rhs_sum_local=0d0
   ncell_local=0d0
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,icell) &
+!$omp parallel do private(igrid,ngrid,i,ind,icell) &
 !$omp& reduction(+:rhs_sum_local,ncell_local) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            rhs_sum_local=rhs_sum_local+scalar_gr_old(icell)
            ncell_local=ncell_local+1d0
         end do
@@ -2356,14 +2353,13 @@ subroutine vain_build_fft_rhs(ilevel, srcfac, coeff, centered_mixed, rhs_rel)
   rhs_mean=rhs_sum_global/max(ncell_global,1d0)
   rhs_max_local=0d0
   src_max_local=0d0
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,icell,s_src) &
+!$omp parallel do private(igrid,ngrid,i,ind,icell,s_src) &
 !$omp& reduction(max:rhs_max_local,src_max_local) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr_old(icell)=scalar_gr_old(icell)-rhs_mean
            rhs_max_local=max(rhs_max_local,abs(scalar_gr_old(icell)))
            s_src=srcfac*(rho(icell)-rho_tot)
@@ -2579,19 +2575,19 @@ end subroutine fR_solve_level
 subroutine fR_rescale_warm_start(ilevel, ratio)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::ratio
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(static)
+!$omp parallel do private(igrid,i,ind,icell) schedule(static)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            if(scalar_gr(icell) /= 0d0) &
                 & scalar_gr(icell)=scalar_gr(icell)*ratio
         end do
@@ -2606,19 +2602,19 @@ end subroutine fR_rescale_warm_start
 subroutine fR_init_scalar(ilevel, fR_bar)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::fR_bar
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr(icell) = fR_bar
            scalar_gr_old(icell) = fR_bar
         end do
@@ -2634,19 +2630,19 @@ end subroutine fR_init_scalar
 subroutine fR_seed_scalar(ilevel, fR_bar)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::fR_bar
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            if(scalar_gr(icell) == 0d0) then
               scalar_gr(icell) = fR_bar
               scalar_gr_old(icell) = fR_bar
@@ -2663,18 +2659,18 @@ end subroutine fR_seed_scalar
 subroutine fR_save_old(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr_old(icell) = scalar_gr(icell)
         end do
      end do
@@ -2702,6 +2698,7 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::R_bar, fR_bar
@@ -2712,7 +2709,7 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   !   J = -6/dx² - dS/du
   ! Red-black ordering
   !-------------------------------------------------------
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   integer::ig_left,ig_right,ih_left,ih_right
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
@@ -2766,7 +2763,7 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
   ! Red-black sweep (icolor=0: red, icolor=1: black)
   do icolor=0,1
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right, &
@@ -2795,9 +2792,8 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
            ! i.e. popcount of the oct-local index (oct origins are even)
            if(mod(popcnt(ind-1), 2) /= icolor) cycle
 
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell_w(i)=iskip+ind_grid_w(i)
+              ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
            end do
 
            do i=1,ngrid
@@ -3103,18 +3099,18 @@ end subroutine nDGP_solve_level
 subroutine nDGP_init_scalar(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr(icell) = 0d0
            scalar_gr_old(icell) = 0d0
         end do
@@ -3129,18 +3125,18 @@ end subroutine nDGP_init_scalar
 subroutine nDGP_save_old(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr_old(icell) = scalar_gr(icell)
         end do
      end do
@@ -3166,12 +3162,13 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::beta
   real(dp),intent(out)::res_max, src_max
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   integer::ig_left,ig_right,ih_left,ih_right
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
@@ -3222,7 +3219,7 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
 
   do icolor=0,1
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right, &
@@ -3254,9 +3251,8 @@ subroutine nDGP_gauss_seidel(ilevel, beta, res_max, src_max)
            ! same red-black ordering used by the original nDGP path.
            if(mod(popcnt(ind-1),2) /= icolor) cycle
 
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell_w(i)=iskip+ind_grid_w(i)
+              ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
            end do
 
            do i=1,ngrid
@@ -3498,18 +3494,18 @@ end subroutine symmetron_solve_level
 subroutine symmetron_init_scalar(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr(icell) = 0d0
            scalar_gr_old(icell) = 0d0
         end do
@@ -3527,10 +3523,11 @@ end subroutine symmetron_init_scalar
 subroutine symmetron_seed_scalar(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
   real(dp)::chibar
 
   chibar = 0d0
@@ -3538,12 +3535,11 @@ subroutine symmetron_seed_scalar(ilevel)
   if(chibar == 0d0) return
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            if(scalar_gr(icell) == 0d0) then
               scalar_gr(icell) = chibar
               scalar_gr_old(icell) = chibar
@@ -3560,18 +3556,18 @@ end subroutine symmetron_seed_scalar
 subroutine symmetron_save_old(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr_old(icell) = scalar_gr(icell)
         end do
      end do
@@ -3597,11 +3593,12 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(out)::res_max, src_max
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   integer::ig_left,ig_right,ih_left,ih_right
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
@@ -3647,7 +3644,7 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
 
   do icolor=0,1
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right, &
@@ -3675,9 +3672,8 @@ subroutine symmetron_gauss_seidel(ilevel, res_max, src_max)
            ! i.e. popcount of the oct-local index (oct origins are even)
            if(mod(popcnt(ind-1), 2) /= icolor) cycle
 
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell_w(i)=iskip+ind_grid_w(i)
+              ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
            end do
 
            do i=1,ngrid
@@ -3743,10 +3739,11 @@ subroutine compute_fifth_force_symmetron(ilevel)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   integer::ig_left,ig_right,ih_left,ih_right
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc
@@ -3780,7 +3777,7 @@ subroutine compute_fifth_force_symmetron(ilevel)
   ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
   ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right,grad_u,chi_c,u_left,u_right) schedule(static)
@@ -3801,9 +3798,8 @@ subroutine compute_fifth_force_symmetron(ilevel)
      end do
 
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell_w(i)=iskip+ind_grid_w(i)
+           ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
         end do
 
         do i=1,ngrid
@@ -4002,17 +3998,17 @@ end subroutine dilaton_solve_level
 subroutine dilaton_init_scalar(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr(icell) = 0d0
            scalar_gr_old(icell) = 0d0
         end do
@@ -4027,19 +4023,19 @@ end subroutine dilaton_init_scalar
 subroutine dilaton_seed_scalar(ilevel, chibar_in)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::chibar_in
 
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            if(scalar_gr(icell) == 0d0) then
               scalar_gr(icell) = chibar_in
               scalar_gr_old(icell) = chibar_in
@@ -4053,17 +4049,17 @@ end subroutine dilaton_seed_scalar
 subroutine dilaton_save_old(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr_old(icell) = scalar_gr(icell)
         end do
      end do
@@ -4083,12 +4079,13 @@ subroutine dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, res_max, src_max)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::A2_d,s_d,chibar_d
   real(dp),intent(out)::res_max, src_max
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   integer::ig_left,ig_right,ih_left,ih_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
@@ -4131,7 +4128,7 @@ subroutine dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, res_max, src_max)
 
   do icolor=0,1
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  u_c,lapl,residual,jacobian,delta_u,u_nb_l,u_nb_r, &
@@ -4157,9 +4154,8 @@ subroutine dilaton_gauss_seidel(ilevel, A2_d, s_d, chibar_d, res_max, src_max)
            ! True 3D red-black: color = parity of (i+j+k) of the cell
            if(mod(popcnt(ind-1), 2) /= icolor) cycle
 
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell_w(i)=iskip+ind_grid_w(i)
+              ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
            end do
 
            do i=1,ngrid
@@ -4212,11 +4208,12 @@ subroutine compute_fifth_force_dilaton(ilevel, factor_in)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::factor_in
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   integer::ig_left,ig_right,ih_left,ih_right
   integer::ind_nb_left,ind_nb_right
   real(dp)::dx,scale,dx_loc
@@ -4246,7 +4243,7 @@ subroutine compute_fifth_force_dilaton(ilevel, factor_in)
   ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
   ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  ind_nb_left,ind_nb_right,grad_u,phi_c,u_left,u_right) schedule(dynamic)
@@ -4267,9 +4264,8 @@ subroutine compute_fifth_force_dilaton(ilevel, factor_in)
      end do
 
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell_w(i)=iskip+ind_grid_w(i)
+           ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
         end do
 
         do i=1,ngrid
@@ -4512,17 +4508,17 @@ end subroutine galileon_solve_level
 subroutine galileon_init_scalar(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr(icell) = 0d0
            scalar_gr_old(icell) = 0d0
         end do
@@ -4533,17 +4529,17 @@ end subroutine galileon_init_scalar
 subroutine galileon_save_old(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
-  integer::igrid,i,ind,iskip,ncache,icell
+  integer::igrid,i,ind,ncache,icell
 
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,i,ind,iskip,icell) schedule(dynamic)
+!$omp parallel do private(igrid,i,ind,icell) schedule(dynamic)
   do igrid=1,ncache,nvector
      do i=1,MIN(nvector,ncache-igrid+1)
         do ind=1,twotondim
-           iskip=ncoarse+(ind-1)*ngridmax
-           icell=iskip+active(ilevel)%igrid(igrid+i-1)
+           icell=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
            scalar_gr_old(icell) = scalar_gr(icell)
         end do
      end do
@@ -4561,12 +4557,13 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   real(dp),intent(in)::beta_G, coeff_G
   real(dp),intent(out)::res_max, src_max
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   integer::ig_left,ig_right,ih_left,ih_right
   real(dp)::dx,scale,dx_loc,dx2,dx2_inv
   integer::nx_loc
@@ -4610,7 +4607,7 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
   ! Eight cell-parity colours remove that same-sweep dependence.
   do icolor=0,7
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim, &
+!$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
 !$omp&  u_c,lapl,source,residual,jacobian,delta_u, &
@@ -4638,9 +4635,8 @@ subroutine galileon_gauss_seidel(ilevel, beta_G, coeff_G, res_max, src_max)
         do ind=1,twotondim
            if(ind-1 /= icolor) cycle
 
-           iskip=ncoarse+(ind-1)*ngridmax
            do i=1,ngrid
-              ind_cell_w(i)=iskip+ind_grid_w(i)
+              ind_cell_w(i)=icell_of(ind_grid_w(i),ind)
            end do
 
            do i=1,ngrid
@@ -4774,10 +4770,11 @@ end subroutine galileon_gauss_seidel
 subroutine apply_coupled_de_force(ilevel)
   use amr_commons
   use poisson_commons
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
 
-  integer::igrid,ngrid,ncache,i,ind,iskip,idim
+  integer::igrid,ngrid,ncache,i,ind,idim
   real(dp)::enhancement
   integer,dimension(1:nvector)::ind_cell
 
@@ -4786,14 +4783,13 @@ subroutine apply_coupled_de_force(ilevel)
 
   enhancement = 1d0 + 2d0 * beta_cde**2
 
-!$omp parallel do private(igrid,ngrid,i,ind,iskip,idim,ind_cell) schedule(dynamic)
+!$omp parallel do private(igrid,ngrid,i,ind,idim,ind_cell) schedule(dynamic)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
 
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+active(ilevel)%igrid(igrid+i-1)
+           ind_cell(i)=icell_of(active(ilevel)%igrid(igrid+i-1),ind)
         end do
 
         do i=1,ngrid
@@ -4824,6 +4820,7 @@ subroutine scalar_lookup_icell(ilevel, ix_in, iy_in, iz_in, icell_out, found)
   use amr_commons
   use morton_hash
   use morton_keys, only: mkey_t, morton_encode
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
   integer(8),intent(in)::ix_in,iy_in,iz_in
@@ -4849,7 +4846,7 @@ subroutine scalar_lookup_icell(ilevel, ix_in, iy_in, iz_in, icell_out, found)
   if(igrid <= 0) return
 
   ind=1+int(modulo(ix,2_8))+2*int(modulo(iy,2_8))+4*int(modulo(iz,2_8))
-  icell_out=ncoarse+(ind-1)*ngridmax+igrid
+  icell_out=icell_of(igrid,ind)
   found=.true.
 end subroutine scalar_lookup_icell
 
@@ -4863,9 +4860,10 @@ subroutine build_scalar_halo_indices(ilevel)
   use scalar_gpu_commons
   use scalar_cuda_interface
   use iso_c_binding
+  use amr_index, only: icell_of
   implicit none
   integer,intent(in)::ilevel
-  integer::icpu,i,j,idx,iskip
+  integer::icpu,i,j,idx
 
   sgpu_n_emit = 0
   sgpu_n_recv = 0
@@ -4887,10 +4885,9 @@ subroutine build_scalar_halo_indices(ilevel)
   do icpu = 1, ncpu
      if(emission(icpu,ilevel)%ngrid > 0) then
         do j = 1, twotondim
-           iskip = ncoarse + (j-1)*ngridmax
            do i = 1, emission(icpu,ilevel)%ngrid
               idx = idx + 1
-              sgpu_emit_cells(idx) = emission(icpu,ilevel)%igrid(i) + iskip
+              sgpu_emit_cells(idx) = icell_of(emission(icpu,ilevel)%igrid(i),j)
            end do
         end do
      end if
@@ -4900,10 +4897,9 @@ subroutine build_scalar_halo_indices(ilevel)
   do icpu = 1, ncpu
      if(reception(icpu,ilevel)%ngrid > 0) then
         do j = 1, twotondim
-           iskip = ncoarse + (j-1)*ngridmax
            do i = 1, reception(icpu,ilevel)%ngrid
               idx = idx + 1
-              sgpu_recv_cells(idx) = reception(icpu,ilevel)%igrid(i) + iskip
+              sgpu_recv_cells(idx) = icell_of(reception(icpu,ilevel)%igrid(i),j)
            end do
         end do
      end if
