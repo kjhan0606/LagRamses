@@ -18,6 +18,8 @@ for rdir in "$ref"/output_*; do
   if [[ ! -d $cdir ]]; then echo "MISSING $odir in candidate"; fail=1; continue; fi
   while IFS= read -r f; do
     rel=${f#"$rdir"/}
+    # build provenance differs between builds by design, not physics
+    case $(basename "$f") in compilation.txt|makefile.txt|patches.txt) continue;; esac
     if ! cmp -s "$f" "$cdir/$rel"; then
       echo "DIFFER  $odir/$rel"
       fail=1

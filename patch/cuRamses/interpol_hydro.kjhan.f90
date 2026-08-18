@@ -138,6 +138,7 @@ end subroutine upload_fine_hybrid
 !###########################################################
 subroutine upload_gpu_gather_batch(gs, ilevel, igrid_start, ngrid, stream_slot)
   use amr_commons
+  use amr_index, only: icell_of
   use hydro_commons
   use upload_hybrid_commons
   implicit none
@@ -145,7 +146,7 @@ subroutine upload_gpu_gather_batch(gs, ilevel, igrid_start, ngrid, stream_slot)
   type(upload_gpu_state_t), intent(inout) :: gs
   integer, intent(in) :: ilevel, igrid_start, ngrid, stream_slot
 
-  integer :: i, ind, ind_son, iskip, iskip_son, ivar
+  integer :: i, ind, ind_son, ivar
   integer, dimension(1:nvector) :: ind_grid, ind_cell
   integer :: igrid_son, ns
 
@@ -156,9 +157,8 @@ subroutine upload_gpu_gather_batch(gs, ilevel, igrid_start, ngrid, stream_slot)
 
   ! Loop over cells in each grid
   do ind = 1, twotondim
-     iskip = ncoarse + (ind - 1) * ngridmax
      do i = 1, ngrid
-        ind_cell(i) = iskip + ind_grid(i)
+        ind_cell(i) = icell_of(ind_grid(i), ind)
      end do
 
      ! Process split cells (cells with children)
@@ -170,10 +170,9 @@ subroutine upload_gpu_gather_batch(gs, ilevel, igrid_start, ngrid, stream_slot)
 
            ! Gather 8 children's uold values
            do ind_son = 1, twotondim
-              iskip_son = ncoarse + (ind_son - 1) * ngridmax
               do ivar = 1, nvar
                  gs%child_buf(ivar, ind_son, ns) = &
-                      uold(iskip_son + igrid_son, ivar)
+                      uold(icell_of(igrid_son, ind_son), ivar)
               end do
            end do
 
@@ -263,10 +262,11 @@ end subroutine upload_gpu_flush_scatter
 !##########################################################################
 subroutine sub_upload_fine(ilevel,igrid,ngrid)
   use amr_commons
+  use amr_index, only: icell_of
   use hydro_commons
   implicit none
   integer::ilevel
-  integer::i,ncache,igrid,ngrid,ind,iskip,nsplit,icell
+  integer::i,ncache,igrid,ngrid,ind,nsplit,icell
   integer,dimension(1:nvector)::ind_grid,ind_cell,ind_split
   logical,dimension(1:nvector)::ok
      do i=1,ngrid
@@ -275,9 +275,8 @@ subroutine sub_upload_fine(ilevel,igrid,ngrid)
 
      ! Loop over cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=icell_of(ind_grid(i),ind)
         end do
 
         ! Gather split cells
@@ -310,6 +309,7 @@ end subroutine sub_upload_fine
 !##########################################################################
 subroutine upl(ind_cell,ncell)
   use amr_commons
+  use amr_index, only: icell_of
   use hydro_commons
   implicit none
   integer::ncell
@@ -317,7 +317,7 @@ subroutine upl(ind_cell,ncell)
   !---------------------------------------------------------------------
   ! This routine performs a restriction operation (averaging down)
   !---------------------------------------------------------------------
-  integer ::ivar,irad,i,idim,ind_son,iskip_son
+  integer ::ivar,irad,i,idim,ind_son
   integer ,dimension(1:nvector)::igrid_son,ind_cell_son
   real(dp),dimension(1:nvector)::getx,ekin,erad
 
@@ -331,9 +331,8 @@ subroutine upl(ind_cell,ncell)
 
      getx(1:ncell)=0.0d0
      do ind_son=1,twotondim
-        iskip_son=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncell
-           ind_cell_son(i)=iskip_son+igrid_son(i)
+           ind_cell_son(i)=icell_of(igrid_son(i),ind_son)
         end do
         do i=1,ncell
            getx(i)=getx(i)+uold(ind_cell_son(i),ivar)
@@ -351,9 +350,8 @@ subroutine upl(ind_cell,ncell)
 
      getx(1:ncell)=0.0d0
      do ind_son=1,twotondim
-        iskip_son=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncell
-           ind_cell_son(i)=iskip_son+igrid_son(i)
+           ind_cell_son(i)=icell_of(igrid_son(i),ind_son)
         end do
         ekin(1:ncell)=0.0d0
         do idim=1,ndim

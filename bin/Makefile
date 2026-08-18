@@ -121,7 +121,7 @@ LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_FFTW)
 VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):../aton:../hydro:../pm:../poisson:../amr
 #############################################################################
 # All objects
-MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
+MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
@@ -199,6 +199,7 @@ scalar_cuda_interface.o: cuda_commons.o
 particle_cuda_interface.o: cuda_commons.o
 cuda_commons.o: amr_commons.kjhan.o
 endif
+amr_index.o: amr_commons.kjhan.o
 power_spectrum.o: amr_parameters.jaehyun.o amr_commons.kjhan.o poisson_commons.o
 scalar_de_commons.o: amr_parameters.jaehyun.o amr_commons.kjhan.o
 dark_energy_commons.o: scalar_de_commons.o
