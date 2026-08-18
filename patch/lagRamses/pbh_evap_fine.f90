@@ -48,7 +48,7 @@ subroutine pbh_cache_uniform_masses
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer::ilevel,igrid,jgrid,ind,icell,jpart,ipart,next_part,info,nx_loc
+  integer::ilevel,igrid,jgrid,ind,icell,ipart,info,nx_loc
   real(dp)::vol_cell,mass_loc(2),mass_glob(2)
 
   mass_loc=0.0d0
@@ -64,16 +64,17 @@ subroutine pbh_cache_uniform_masses
                    & mass_loc(2)=mass_loc(2)+uold(icell,1)*vol_cell
            end do
         end if
-        ipart=headp(igrid)
-        do jpart=1,numbp(igrid)
-           next_part=nextp(ipart)
-           if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. &
-                & ptypep(ipart)/=PTYPE_SINK)then
-              mass_loc(1)=mass_loc(1)+mp(ipart)
-           end if
-           ipart=next_part
-        end do
      end do
+  end do
+  ! merge_tree_fine leaves son-grid lists populated but disconnected;
+  ! load_balance re-stales them, and only levelmin+1 is refreshed before
+  ! this point. The flat sweep also counts particles on reception grids
+  ! before they reach their owner in virtual_tree_fine.
+  do ipart=1,npartmax
+     if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. &
+          & ptypep(ipart)/=PTYPE_SINK)then
+        mass_loc(1)=mass_loc(1)+mp(ipart)
+     end if
   end do
 #ifndef WITHOUTMPI
   call MPI_ALLREDUCE(mass_loc,mass_glob,2,MPI_DOUBLE_PRECISION, &
