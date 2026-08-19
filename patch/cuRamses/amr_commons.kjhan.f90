@@ -71,6 +71,9 @@ module amr_commons
 
   ! Pointers for free memory grid linked list
   integer::headf,tailf,numbf,used_mem,used_mem_tot
+  ! True when read_params derived ngridmax from ngridtot.  Explicit positive
+  ! ngridmax values retain the fixed-capacity behaviour.
+  logical::ngridmax_auto=.false.
 
   ! Tree arrays
   real(dp),allocatable,dimension(:,:)::xg      ! grids position

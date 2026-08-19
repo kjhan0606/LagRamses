@@ -24,12 +24,14 @@ end subroutine refine
 !###############################################################
 subroutine refine_coarse
   use amr_commons
+  use pm_commons, only: grow_grid_capacity
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   integer::nxny,i,j,k
   integer::ind,info,ibound
+  integer::needed,headroom,growth_chunk,growth_target
   logical::boundary_region
   logical::ok_free,ok_all
   integer,dimension(1:nvector),save::ind_cell_tmp
@@ -59,13 +61,25 @@ subroutine refine_coarse
   ! Check for free memory
   ok_free=(numbf-ncreate)>0
   if(.not. ok_free)then
-     write(*,*)'No more free memory'
-     write(*,*)'Increase ngridmax'
+     if(ngridmax_auto)then
+        needed=max(1,ncreate-numbf+1)
+        headroom=max(1,needed/4)
+        growth_chunk=max(amr_block_size,max(1,ngridmax/4))
+        growth_target=ngridmax+max(growth_chunk,needed+headroom)
+        call grow_grid_capacity(growth_target)
+        ok_free=(numbf-ncreate)>0
+     endif
+     if(ok_free)then
+        ! Capacity was extended above; continue with the same refinement pass.
+     else
+        write(*,*)'No more free memory'
+        write(*,*)'Increase ngridmax'
 #ifndef WITHOUTMPI
-     call MPI_ABORT(MPI_COMM_WORLD,1,info)
+        call MPI_ABORT(MPI_COMM_WORLD,1,info)
 #else
-     stop
+        stop
 #endif
+     endif
   end if
 
   ! Refine marked cells
@@ -337,6 +351,7 @@ end subroutine make_grid_coarse
 !###############################################################
 subroutine refine_fine(ilevel)
   use amr_commons
+  use pm_commons, only: grow_grid_capacity
 #include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
@@ -356,6 +371,7 @@ subroutine refine_fine(ilevel)
   integer::igrid,icell,i
   integer::ind,info,icpu,ibound
   integer::ncreate_tmp,nkill_tmp
+  integer::needed,headroom,growth_chunk,growth_target
   logical::boundary_region
   integer,dimension(1:nvector),save::ind_grid,ind_cell
   integer,dimension(1:nvector),save::ind_grid_tmp,ind_cell_tmp
@@ -439,13 +455,24 @@ subroutine refine_fine(ilevel)
 
            ! Check for free memory
            if(ncreate_tmp>=numbf) then
-              write(*,*)'No more free memory', ncreate_tmp, numbf
-              write(*,*)'Increase ngridmax', ngrid
+              if(ngridmax_auto)then
+                 needed=max(1,ncreate_tmp-numbf+1)
+                 headroom=max(1,needed/4)
+                 growth_chunk=max(amr_block_size,max(1,ngridmax/4))
+                 growth_target=ngridmax+max(growth_chunk,needed+headroom)
+                 call grow_grid_capacity(growth_target)
+              endif
+              if(ncreate_tmp<numbf)then
+                 ! Capacity was extended above; continue with this batch.
+              else
+                 write(*,*)'No more free memory', ncreate_tmp, numbf
+                 write(*,*)'Increase ngridmax', ngrid
 #ifndef WITHOUTMPI
-              call MPI_ABORT(MPI_COMM_WORLD,1,info)
+                 call MPI_ABORT(MPI_COMM_WORLD,1,info)
 #else
-              stop
+                 stop
 #endif
+              endif
            end if
 
            ! Refine selected cells

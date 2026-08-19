@@ -203,6 +203,12 @@ particle_cuda_interface.o: cuda_commons.o
 cuda_commons.o: amr_commons.kjhan.o
 endif
 amr_index.o: amr_commons.kjhan.o
+# grow_grid_capacity in pm_commons preserves the AMR, hydro, Poisson, and
+# Morton capacity arrays; build those module files before pm_commons.mod.
+pm_commons.o: amr_commons.kjhan.o pm_parameters.o hydro_commons.o poisson_commons.o morton_hash.o
+morton_hash.o: morton_keys.o amr_index.o
+hydro_commons.o: hydro_parameters.o
+poisson_commons.o: poisson_parameters.o
 power_spectrum.o: amr_parameters.jaehyun.o amr_commons.kjhan.o poisson_commons.o
 scalar_de_commons.o: amr_parameters.jaehyun.o amr_commons.kjhan.o
 dark_energy_commons.o: scalar_de_commons.o
