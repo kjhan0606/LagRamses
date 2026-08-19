@@ -263,6 +263,37 @@ build system에서 patch 파일이 원본보다 우선하도록 한다. 이 문�
 이 단계에서는 메모리 layout을 바꾸지 않는다. API 전환 자체와 layout 변경의
 오류를 분리하기 위한 단계다.
 
+### Phase 2 이후 남은 파손 목록 (2026-08-19 Fable 감사 + 실측, 사전등록)
+
+B=64 활성화(main 55a38bd)는 CPU·fresh-start·바이너리 출력 구성에서 물리량
+비트 동일로 검증됐다. 그 밖의 경로는 아직 legacy contiguous를 가정한다.
+위험순 목록과 각각의 처리 방침:
+
+1. **바이너리 체크포인트 재시작.** 헤더(output_amr.kjhan.f90:373)에 layout
+   표시가 없고, init_amr의 remap은 파일이 legacy stride라고 가정해 디코드한다.
+   양방향 파손이며, 특히 ngridmax가 이미 B의 배수면(예: 1000000=64x15625)
+   `ngridmax.ne.ngridmax2` 가드가 remap을 건너뛰어 legacy 파일을 block으로
+   조용히 오독한다. **수정 방향**: 헤더에 amr_block_size를 기록하고, remap을
+   파일의 (B2, ngridmax2) 쌍으로 디코드하도록 바꾼다. 이는 외부 reader와
+   defrag/dbl2sng에도 포맷 판별 수단을 준다. Phase 5의 핵심 작업.
+2. **CUDA 커널 3종**: poisson(8곳), particle(3곳), scalar(2곳)이 device 코드에
+   legacy stride를 하드코딩한다. Fortran 매크로가 보이지 않으므로 B와 C를
+   커널 인자로 넘기고 device 인라인 함수로 같은 식을 구현해야 한다. GPU 기본
+   스위치가 켜져 있어(hydro/sink/scalar/particle) **CUDA 빌드는 B<ngridmax에서
+   즉시 오주소**. nGR-GPU 작업과 직접 충돌하므로 그 트랙과 함께 처리한다.
+3. **체크포인트 재작성 유틸리티**: utils/f90/defrag.f90, dbl2sng.f90이 각각
+   46곳에서 raw stride로 father/nbor를 디코드·재인코딩한다. B=64 파일을 조용히
+   손상시킨다. 1번의 헤더 마커가 들어가면 이들은 "미지원 layout이면 중단"으로
+   먼저 막고, 이후 매크로와 동일한 식으로 옮긴다.
+4. 미컴파일 디렉토리(rt/, pario/, mhd/, rhd/, aton/ 및 VPATH 그림자 사본)는
+   전부 legacy이며 센서스 스캔 대상 밖이다. 해당 SOLVER/타깃을 되살릴 때
+   반드시 함께 변환한다.
+
+**게이트 원칙 확정**: layout을 바꾸는 청크는 amr_* 파일이 설계상 달라지므로
+`tests/phase2_layout_gate.sh`(hydro/part/grav 비트 동일 + 에너지·타임스텝
+일치)로 판정한다. 용량이 다르면 부하분산 이력이 달라져 물리량이 반올림
+수준으로 흔들리므로, 비교는 **반드시 같은 용량**에서 한다.
+
 ### Phase 2 chunk 2 설계 (2026-08-19 운전자 판단, 사전등록)
 
 인벤토리 결과 37곳이 `ncoarse+twotondim*ngridmax`를 전체 셀 배열 크기로
