@@ -36,7 +36,10 @@ subroutine init_amr
 
   ! Constants
   ncoarse=nx*ny*nz
-  if(amr_block_size==0) amr_block_size=ngridmax
+  ! Phase 2 chunk 2: fixed block size for now; make this a namelist key later.
+  amr_block_size=64
+  if(mod(ngridmax,amr_block_size)/=0) &
+       ngridmax=((ngridmax/amr_block_size)+1)*amr_block_size
   ncell=ncoarse+twotondim*ngridmax
   nxny=nx*ny
   ix_max=0; iy_max=0; iz_max=0
