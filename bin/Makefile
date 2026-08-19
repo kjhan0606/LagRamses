@@ -42,6 +42,9 @@ endif
 ifdef FDMTRACE
   FFLAGS += -DFDMDEBUG
 endif
+ifdef AMR_INDEX_CHECK
+  FFLAGS += -DAMR_INDEX_CHECK
+endif
 ifdef MORTON128
   FFLAGS += -DMORTON128
 endif

@@ -19,7 +19,9 @@ for rdir in "$ref"/output_*; do
   while IFS= read -r f; do
     rel=${f#"$rdir"/}
     # build provenance differs between builds by design, not physics
-    case $(basename "$f") in compilation.txt|makefile.txt|patches.txt) continue;; esac
+    # Build provenance and the echoed namelist differ by construction when the
+    # runs differ in a namelist value; they carry no physics.
+    case $(basename "$f") in compilation.txt|makefile.txt|patches.txt|namelist.txt) continue;; esac
     if ! cmp -s "$f" "$cdir/$rel"; then
       echo "DIFFER  $odir/$rel"
       fail=1
@@ -34,7 +36,11 @@ done
 
 # 2. physics lines of the log (timings vary run to run, physics must not)
 filt() {
+  # mem=..% on the Fine step lines is occupancy relative to the allocated
+  # capacity, so two runs with different npartmax/ngridmax report different
+  # percentages for identical physics. Strip it.
   grep -E "PBHDIAG|PBHCACHE|SGS_DT|Main step=|Fine step=|aexp=| Error=" "$1" \
+    | sed 's/mem=[0-9.]*% *[0-9.]*%//' \
     | sed 's/[[:space:]]\+/ /g'
 }
 if ! diff -q <(filt "$ref/run.log") <(filt "$cand/run.log") >/dev/null; then
