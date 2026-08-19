@@ -1296,6 +1296,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         ngridmax=ngridtot/int(ncpu,kind=8)
      endif
   end if
+  if(amr_block_size==0) amr_block_size=ngridmax
   if(npartmax==0)then
      npartmax=nparttot/int(ncpu,kind=8)
   endif

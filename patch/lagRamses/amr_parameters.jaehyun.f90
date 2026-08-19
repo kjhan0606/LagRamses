@@ -135,6 +135,7 @@ module amr_parameters
   integer::nlevel_collapse=0  ! Free-collapse levels above nlevelmax_part
                               ! before the cosmological aexp holdback applies
   integer::ngridmax=0         ! Maximum number of grids
+  integer::amr_block_size=0   ! Number of grids per block in cell indexing
   integer,dimension(1:MAXLEVEL)::nexpand=1 ! Number of mesh expansion
   integer::nexpand_bound=1    ! Number of mesh expansion for virtual boundaries
   real(dp)::boxlen=1.0D0      ! Box length along x direction
