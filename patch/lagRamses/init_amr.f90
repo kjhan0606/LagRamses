@@ -581,15 +581,13 @@ subroutine init_amr
               end do
               ! Read father index
               read(ilun)iig
-              if(ngridmax.ne.ngridmax2.and.ilevel>1)then
+              if(ilevel>1)then
                  do i=1,ncache
-                    pos(i)=(iig(i)-ncoarse-1)/ngridmax2
-                 end do
-                 do i=1,ncache
-                    grid(i)=iig(i)-ncoarse-pos(i)*ngridmax2
-                 end do
-                 do i=1,ncache
-                    iig(i)=ICELL_OF(grid(i),pos(i)+1)
+                    if(iig(i)>ncoarse)then
+                       pos(i)=(iig(i)-ncoarse-1)/ngridmax2
+                       grid(i)=iig(i)-ncoarse-pos(i)*ngridmax2
+                       iig(i)=ICELL_OF(grid(i),pos(i)+1)
+                    end if
                  end do
               end if
               do i=1,ncache
@@ -598,15 +596,13 @@ subroutine init_amr
               ! Read nbor index
               do ind=1,twondim
                  read(ilun)iig
-                 if(ngridmax.ne.ngridmax2.and.ilevel>1)then
+                 if(ilevel>1)then
                     do i=1,ncache
-                       pos(i)=(iig(i)-ncoarse-1)/ngridmax2
-                    end do
-                    do i=1,ncache
-                       grid(i)=iig(i)-ncoarse-pos(i)*ngridmax2
-                    end do
-                    do i=1,ncache
-                       iig(i)=ICELL_OF(grid(i),pos(i)+1)
+                       if(iig(i)>ncoarse)then
+                          pos(i)=(iig(i)-ncoarse-1)/ngridmax2
+                          grid(i)=iig(i)-ncoarse-pos(i)*ngridmax2
+                          iig(i)=ICELL_OF(grid(i),pos(i)+1)
+                       end if
                     end do
                  end if
                  do i=1,ncache

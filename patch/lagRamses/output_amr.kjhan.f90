@@ -311,6 +311,7 @@ subroutine backup_amr(filename)
   use hydro_commons
   use pm_commons
   use morton_hash
+  use amr_index, only: icell_legacy
 #include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
@@ -464,13 +465,13 @@ subroutine backup_amr(filename)
            end do
            ! Write father index
            do i=1,ncache
-              iig(i)=father(ind_grid(i))
+              iig(i)=icell_legacy(father(ind_grid(i)))
            end do
            write(ilun)iig
            ! Write nbor index
            do ind=1,twondim
               do i=1,ncache
-                 iig(i)=morton_nbor_cell(ind_grid(i),ilevel,ind)
+                 iig(i)=icell_legacy(morton_nbor_cell(ind_grid(i),ilevel,ind))
               end do
               write(ilun)iig
            end do
