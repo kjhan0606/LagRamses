@@ -2973,9 +2973,9 @@ subroutine fdm_prolong_grids(ilevel,ind_grid_new,ngrid_new)
      psi_re_c = psi_re(icell_coarse)
      psi_im_c = psi_im(icell_coarse)
 
-     ival = icell_coarse - ncoarse
-     ind_p = (ival - 1) / ngridmax + 1
-     igrid_p = ival - (ind_p - 1) * ngridmax
+     ival = icell_coarse
+     ind_p = ICHILD_OF(ival)
+     igrid_p = IGRID_OF(ival)
 
      if(use_rhoS) then
         ! Parent is a fluid level: psi_re=rho, psi_im=S (unwrapped) — read

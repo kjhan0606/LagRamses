@@ -586,7 +586,7 @@ subroutine init_amr
                     grid(i)=iig(i)-ncoarse-pos(i)*ngridmax2
                  end do
                  do i=1,ncache
-                    iig(i)=ncoarse+pos(i)*ngridmax+grid(i)
+                    iig(i)=ICELL_OF(grid(i),pos(i)+1)
                  end do
               end if
               do i=1,ncache
@@ -603,7 +603,7 @@ subroutine init_amr
                        grid(i)=iig(i)-ncoarse-pos(i)*ngridmax2
                     end do
                     do i=1,ncache
-                       iig(i)=ncoarse+pos(i)*ngridmax+grid(i)
+                       iig(i)=ICELL_OF(grid(i),pos(i)+1)
                     end do
                  end if
                  do i=1,ncache

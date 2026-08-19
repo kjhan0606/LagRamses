@@ -616,6 +616,7 @@ end subroutine kill_tree_fine
 subroutine kill_tree(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use amr_commons
   use pm_commons
+#include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
   integer,dimension(1:nvector)::ind_grid
@@ -674,7 +675,7 @@ subroutine kill_tree(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
      end do
   end do
   do j=1,np
-     ind_son(j)=ncoarse+ind_son(j)*ngridmax+ind_grid(ind_grid_part(j))
+     ind_son(j)=ICELL_OF(ind_grid(ind_grid_part(j)),ind_son(j)+1)
   end do
 
   ! Determine which son cell is refined
