@@ -1298,7 +1298,12 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   end if
   if(amr_block_size==0) amr_block_size=ngridmax
   if(npartmax==0)then
-     npartmax=nparttot/int(ncpu,kind=8)
+     if(nparttot==0)then
+        ! Keep zero legal for now; attach the auto-growth default here later.
+        npartmax=0
+     else
+        npartmax=nparttot/int(ncpu,kind=8)
+     endif
   endif
   if(myid>1)verbose=.false.
   if(sink.and.(.not.pic))then
