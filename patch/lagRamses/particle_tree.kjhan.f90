@@ -61,6 +61,7 @@ subroutine init_tree
 #ifdef WITHOUTMPI
   numbp_free_tot=numbp_free
 #endif
+  particle_free_list_ready=.true.
 
   !--------------
   ! Periodic box
@@ -1026,14 +1027,19 @@ subroutine virtual_tree_fine(ilevel)
        & MPI_COMM_WORLD,info)
   ok_free=(numbp_free-ncache_tot)>=0
   if(.not. ok_free)then
-     write(*,*)'No more free memory for particles'
-     write(*,*)'Increase npartmax'
-     write(*,*)numbp_free,ncache_tot, ilevel
-     write(*,*)myid
-     write(*,*)emission(1:ncpu,ilevel)%npart
-     write(*,*)'============================'
-     write(*,*)reception(1:ncpu,ilevel)%npart
-     call MPI_ABORT(MPI_COMM_WORLD,1,info)
+     if(cosmo.and.pic.and.npartmax_auto)then
+        ! MPI requests are complete above; this is the particle-tree safe point.
+        call grow_particle_bundle(npartmax-numbp_free+ncache_tot)
+     else
+        write(*,*)'No more free memory for particles'
+        write(*,*)'Increase npartmax'
+        write(*,*)numbp_free,ncache_tot, ilevel
+        write(*,*)myid
+        write(*,*)emission(1:ncpu,ilevel)%npart
+        write(*,*)'============================'
+        write(*,*)reception(1:ncpu,ilevel)%npart
+        call MPI_ABORT(MPI_COMM_WORLD,1,info)
+     endif
   end if
 
   ! Scatter new particles from communication buffer

@@ -43,6 +43,8 @@ module pm_commons
   integer ,allocatable,dimension(:)  ::prevp    ! Previous particle in list
   integer ,allocatable,dimension(:)  ::levelp   ! Current level of particle
   integer(i8b),allocatable,dimension(:)::idp    ! Identity of particle
+  ! This patch uses compact ptypep in place of the baseline typep/FAM_UNDEF
+  ! structure; its empty-slot/default value is PTYPE_DM.
   integer(kind=1),allocatable,dimension(:)::ptypep  ! Particle type code (see PTYPE_* below)
 
   ! Particle type codes — authoritative species tag for each particle
@@ -59,6 +61,13 @@ module pm_commons
   integer ,allocatable,dimension(:)  ::numbp    ! Number of particles in grid
   ! Global particle linked lists
   integer::headp_free,tailp_free,numbp_free=0,numbp_free_tot=0
+  ! Set by read_params when npartmax was supplied as the automatic-capacity
+  ! sentinel.  Explicit positive npartmax values retain the fixed-capacity
+  ! behaviour.
+  logical::npartmax_auto=.false.
+  ! The free list is built by init_tree after IC/restart loading.  Growth can
+  ! therefore happen before it exists, but must append new slots once it does.
+  logical::particle_free_list_ready=.false.
   ! Local and current seed for random number generator
   integer,dimension(IRandNumSize) :: localseed=-1
 
@@ -82,6 +91,167 @@ module pm_commons
 
 
   contains
+
+  subroutine grow_particle_bundle(new_npartmax)
+    ! Grow every particle-sized array as one logical bundle.  The arrays are
+    ! resized one at a time: move_alloc briefly retains the old and new copy
+    ! of only the current array, bounding transient extra memory by one array
+    ! rather than the whole particle bundle.
+    integer,intent(in)::new_npartmax
+    integer::old_npartmax,target_npartmax,needed,headroom,chunk
+    integer::old_tail,nnew,ip
+    real(dp),allocatable::new_xp(:,:),new_vp(:,:),new_mp(:)
+    real(dp),allocatable::new_tp(:),new_zp(:),new_edp(:),new_xh2p(:)
+    real(dp),allocatable::new_tpp(:),new_mp0(:),new_indtab(:)
+    real(dp),allocatable::new_ptcl_phi(:)
+    real(dp),allocatable::new_weightp(:,:)
+    integer,allocatable::new_nextp(:),new_prevp(:),new_levelp(:)
+    integer(i8b),allocatable::new_idp(:)
+    integer(kind=1),allocatable::new_ptypep(:)
+
+    if(new_npartmax<=npartmax)return
+
+    old_npartmax=npartmax
+    needed=new_npartmax-old_npartmax
+    headroom=max(1,needed/4)
+    chunk=max(1,old_npartmax/2)
+    target_npartmax=max(new_npartmax,old_npartmax+chunk, &
+         old_npartmax+needed+headroom)
+
+    ! The old bundle remains untouched until each replacement has been fully
+    ! allocated, copied, and initialized.  No capacity scalar is changed
+    ! until the final array below has been moved into place.
+    allocate(new_xp(target_npartmax,ndim))
+    if(old_npartmax>0)new_xp(1:old_npartmax,:)=xp
+    if(target_npartmax>old_npartmax)new_xp(old_npartmax+1:target_npartmax,:)=0d0
+    call move_alloc(new_xp,xp)
+
+    allocate(new_vp(target_npartmax,ndim))
+    if(old_npartmax>0)new_vp(1:old_npartmax,:)=vp
+    if(target_npartmax>old_npartmax)new_vp(old_npartmax+1:target_npartmax,:)=0d0
+    call move_alloc(new_vp,vp)
+
+    allocate(new_mp(target_npartmax))
+    if(old_npartmax>0)new_mp(1:old_npartmax)=mp
+    new_mp(old_npartmax+1:target_npartmax)=0d0
+    call move_alloc(new_mp,mp)
+
+    allocate(new_nextp(target_npartmax))
+    if(old_npartmax>0)new_nextp(1:old_npartmax)=nextp
+    new_nextp(old_npartmax+1:target_npartmax)=0
+    call move_alloc(new_nextp,nextp)
+
+    allocate(new_prevp(target_npartmax))
+    if(old_npartmax>0)new_prevp(1:old_npartmax)=prevp
+    new_prevp(old_npartmax+1:target_npartmax)=0
+    call move_alloc(new_prevp,prevp)
+
+    allocate(new_levelp(target_npartmax))
+    if(old_npartmax>0)new_levelp(1:old_npartmax)=levelp
+    new_levelp(old_npartmax+1:target_npartmax)=0
+    call move_alloc(new_levelp,levelp)
+
+    allocate(new_idp(target_npartmax))
+    if(old_npartmax>0)new_idp(1:old_npartmax)=idp
+    new_idp(old_npartmax+1:target_npartmax)=0_i8b
+    call move_alloc(new_idp,idp)
+
+    allocate(new_ptypep(target_npartmax))
+    if(old_npartmax>0)new_ptypep(1:old_npartmax)=ptypep
+    new_ptypep(old_npartmax+1:target_npartmax)=PTYPE_DM
+    call move_alloc(new_ptypep,ptypep)
+
+#ifdef OUTPUT_PARTICLE_POTENTIAL
+    if(allocated(ptcl_phi))then
+       allocate(new_ptcl_phi(target_npartmax))
+       if(old_npartmax>0)new_ptcl_phi(1:old_npartmax)=ptcl_phi
+       new_ptcl_phi(old_npartmax+1:target_npartmax)=0d0
+       call move_alloc(new_ptcl_phi,ptcl_phi)
+    endif
+#endif
+
+    if(allocated(tp))then
+       allocate(new_tp(target_npartmax))
+       if(old_npartmax>0)new_tp(1:old_npartmax)=tp
+       new_tp(old_npartmax+1:target_npartmax)=0d0
+       call move_alloc(new_tp,tp)
+    endif
+
+    if(allocated(zp))then
+       allocate(new_zp(target_npartmax))
+       if(old_npartmax>0)new_zp(1:old_npartmax)=zp
+       new_zp(old_npartmax+1:target_npartmax)=0d0
+       call move_alloc(new_zp,zp)
+    endif
+
+    if(allocated(edp))then
+       allocate(new_edp(target_npartmax))
+       if(old_npartmax>0)new_edp(1:old_npartmax)=edp
+       new_edp(old_npartmax+1:target_npartmax)=0d0
+       call move_alloc(new_edp,edp)
+    endif
+
+    if(allocated(xh2p))then
+       allocate(new_xh2p(target_npartmax))
+       if(old_npartmax>0)new_xh2p(1:old_npartmax)=xh2p
+       new_xh2p(old_npartmax+1:target_npartmax)=adm_fH2
+       call move_alloc(new_xh2p,xh2p)
+    endif
+
+    if(allocated(tpp))then
+       allocate(new_tpp(target_npartmax))
+       if(old_npartmax>0)new_tpp(1:old_npartmax)=tpp
+       new_tpp(old_npartmax+1:target_npartmax)=0d0
+       call move_alloc(new_tpp,tpp)
+    endif
+
+    if(allocated(mp0))then
+       allocate(new_mp0(target_npartmax))
+       if(old_npartmax>0)new_mp0(1:old_npartmax)=mp0
+       new_mp0(old_npartmax+1:target_npartmax)=0d0
+       call move_alloc(new_mp0,mp0)
+    endif
+
+    if(allocated(indtab))then
+       allocate(new_indtab(target_npartmax))
+       if(old_npartmax>0)new_indtab(1:old_npartmax)=indtab
+       new_indtab(old_npartmax+1:target_npartmax)=0d0
+       call move_alloc(new_indtab,indtab)
+    endif
+
+    ! weightp is a particle-sized extension in pm_commons but is not allocated
+    ! by this branch.  Preserve and grow it if a sink backend has allocated it.
+    if(allocated(weightp))then
+       allocate(new_weightp(target_npartmax,size(weightp,2)))
+       if(old_npartmax>0)new_weightp(1:old_npartmax,:)=weightp
+       new_weightp(old_npartmax+1:target_npartmax,:)=0d0
+       call move_alloc(new_weightp,weightp)
+    endif
+
+    if(particle_free_list_ready)then
+       nnew=target_npartmax-old_npartmax
+       old_tail=tailp_free
+       if(numbp_free>0)then
+          nextp(old_tail)=old_npartmax+1
+          prevp(old_npartmax+1)=old_tail
+       else
+          headp_free=old_npartmax+1
+          prevp(headp_free)=0
+       endif
+       do ip=old_npartmax+1,target_npartmax-1
+          nextp(ip)=ip+1
+          prevp(ip+1)=ip
+       enddo
+       tailp_free=target_npartmax
+       nextp(tailp_free)=0
+       numbp_free=numbp_free+nnew
+    endif
+
+    ! This is deliberately the last capacity update: all allocated bundle
+    ! members have the same extent before npartmax changes.
+    npartmax=target_npartmax
+    if(particle_free_list_ready)npart=npartmax-numbp_free
+  end subroutine grow_particle_bundle
 
   ! Count particles in the actual child cell that contains them.  numbp is
   ! a grid total and must not be charged to every leaf cell during domain

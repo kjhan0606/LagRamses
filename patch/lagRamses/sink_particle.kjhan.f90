@@ -566,14 +566,19 @@ subroutine kjhan_make_sink(ilevel)
   numbp_free_tot=numbp_free
 #endif
   if(.not. ok_free)then
-     write(*,*)'No more free memory for particles'
-     write(*,*)ncloud,ntot
-     write(*,*)'Increase npartmax'
+     if(cosmo.and.pic.and.npartmax_auto)then
+        ! All OpenMP discovery loops have completed; grow before creation.
+        call grow_particle_bundle(npartmax-numbp_free+ntot*ncloud)
+     else
+        write(*,*)'No more free memory for particles'
+        write(*,*)ncloud,ntot
+        write(*,*)'Increase npartmax'
 #ifndef WITHOUTMPI
-    call MPI_ABORT(MPI_COMM_WORLD,1,info)
+        call MPI_ABORT(MPI_COMM_WORLD,1,info)
 #else
-    stop
+        stop
 #endif
+     endif
   end if
 
   !---------------------------------
@@ -2030,7 +2035,8 @@ subroutine kjhan_create_cloud(ilevel)
   ! This routine creates a cloud of test particle around each sink particle.
   !------------------------------------------------------------------------
   integer::igrid,jgrid,ipart,jpart,next_part,info
-  integer::i,ig,ip,npart1,npart2,icpu,nx_loc
+  integer::i,ig,ip,npart1,npart2,icpu,nx_loc,ncloud,ncloud_needed,ii,jj,kk
+  real(dp)::dx_min,rmax,xx,yy,zz,rr
 #ifndef _OPENMP
   integer,dimension(1:nvector),save::ind_grid,ind_part,ind_grid_part
 #else
@@ -2046,6 +2052,56 @@ subroutine kjhan_create_cloud(ilevel)
 
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
+
+  if(cosmo.and.pic.and.npartmax_auto)then
+     ! Cloud creation below may run in an OpenMP region.  Count its complete
+     ! demand first and grow here, before entering that region, so remove_free
+     ! never has to reallocate while threads are active.
+     dx_min=(boxlen/dble(icoarse_max-icoarse_min+1))*0.5D0**nlevelmax/aexp
+     rmax=4.0D0*dx_min
+     xx=0d0; yy=0d0; zz=0d0
+     ncloud=0
+#if NDIM==3
+  do kk=-8,8
+     zz=dble(kk)*dx_min/2.0D0
+#endif
+#if NDIM>1
+     do jj=-8,8
+        yy=dble(jj)*dx_min/2.0D0
+#endif
+        do ii=-8,8
+           xx=dble(ii)*dx_min/2.0D0
+           rr=sqrt(xx*xx+yy*yy+zz*zz)
+           if(rr<=rmax)ncloud=ncloud+1
+        end do
+#if NDIM>1
+     end do
+#endif
+#if NDIM==3
+  end do
+#endif
+     ncloud_needed=0
+     do icpu=1,ncpu
+        if(numbl(icpu,ilevel)==0)cycle
+        igrid=headl(icpu,ilevel)
+        do jgrid=1,numbl(icpu,ilevel)
+           npart1=numbp(igrid)
+           if(npart1>0)then
+              ipart=headp(igrid)
+              do jpart=1,npart1
+                 next_part=nextp(ipart)
+                 if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart).ge.-nsinkmax) &
+                      ncloud_needed=ncloud_needed+ncloud-1
+                 ipart=next_part
+              end do
+           endif
+           igrid=next(igrid)
+        end do
+     end do
+     if(ncloud_needed>numbp_free)then
+        call grow_particle_bundle(npartmax-numbp_free+ncloud_needed)
+     endif
+  endif
 #ifdef _OPENMP
 !$omp parallel shared(nthreads)
   mythread = omp_get_thread_num()

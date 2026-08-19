@@ -1,6 +1,7 @@
 subroutine read_params
   use amr_commons
   use pm_parameters
+  use pm_commons, only: npartmax_auto
   use poisson_parameters
   use hydro_parameters
   use pbh_commons
@@ -1298,12 +1299,15 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   end if
   if(amr_block_size==0) amr_block_size=ngridmax
   if(npartmax==0)then
+     npartmax_auto=.true.
      if(nparttot==0)then
-        ! Keep zero legal for now; attach the auto-growth default here later.
+        ! Keep zero as the initial capacity; the bundle grows on first demand.
         npartmax=0
      else
         npartmax=nparttot/int(ncpu,kind=8)
      endif
+  else
+     npartmax_auto=.false.
   endif
   if(myid>1)verbose=.false.
   if(sink.and.(.not.pic))then

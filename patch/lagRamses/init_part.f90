@@ -270,12 +270,22 @@ subroutine init_part
      read(ilun)mstar_tot
      read(ilun)mstar_lost
      read(ilun)nsink
-     if(ncpu2.ne.ncpu.or.ndim2.ne.ndim.or.npart2.gt.npartmax)then
+     if(ncpu2.ne.ncpu.or.ndim2.ne.ndim)then
         write(*,*)'File part.tmp not compatible'
         write(*,*)'Found   =',ncpu2,ndim2,npart2
         write(*,*)'Expected=',ncpu,ndim,npartmax
         call clean_stop
      end if
+     if(npart2.gt.npartmax)then
+        if(cosmo.and.pic.and.npartmax_auto)then
+           call grow_particle_bundle(npart2)
+        else
+           write(*,*)'File part.tmp not compatible'
+           write(*,*)'Found   =',ncpu2,ndim2,npart2
+           write(*,*)'Expected=',ncpu,ndim,npartmax
+           call clean_stop
+        endif
+     endif
      ! Read position
      allocate(xdp(1:npart2))
      do idim=1,ndim
@@ -450,9 +460,13 @@ subroutine init_part
                     if(keep_part)then
                        ipart=ipart+1
                        if(ipart>npartmax)then
-                          write(*,*)'Maximum number of particles incorrect'
-                          write(*,*)'npartmax should be greater than',ipart
-                          call clean_stop
+                          if(cosmo.and.pic.and.npartmax_auto)then
+                             call grow_particle_bundle(ipart)
+                          else
+                             write(*,*)'Maximum number of particles incorrect'
+                             write(*,*)'npartmax should be greater than',ipart
+                             call clean_stop
+                          endif
                        endif
                        if(ndim>0)xp(ipart,1)=xg(ind_grid(i),1)+xc(ind,1)
                        if(ndim>1)xp(ipart,2)=xg(ind_grid(i),2)+xc(ind,2)
@@ -956,12 +970,16 @@ subroutine init_part
         end do
 
         if(jpart+npart_new.gt.npartmax)then
-           write(*,*)'No more free memory for particles'
-           write(*,*)'Increase npartmax'
-           write(*,*)myid
-           write(*,*)jpart,npart_new
-           write(*,*)bound_key
-           call MPI_ABORT(MPI_COMM_WORLD,1,info)
+           if(cosmo.and.pic.and.npartmax_auto)then
+              call grow_particle_bundle(jpart+npart_new)
+           else
+              write(*,*)'No more free memory for particles'
+              write(*,*)'Increase npartmax'
+              write(*,*)myid
+              write(*,*)jpart,npart_new
+              write(*,*)bound_key
+              call MPI_ABORT(MPI_COMM_WORLD,1,info)
+           endif
         end if
 
         ! Allocate communication buffer in reception
@@ -1141,12 +1159,16 @@ subroutine init_part
 #ifndef WITHOUTMPI
               if(cc(i)==myid)then
 #endif
-                 ipart=ipart+1
-                 if(ipart>npartmax)then
-                    write(*,*)'Maximum number of particles incorrect'
-                    write(*,*)'npartmax should be greater than',ipart
-                    call clean_stop
-                 endif
+                ipart=ipart+1
+                if(ipart>npartmax)then
+                    if(cosmo.and.pic.and.npartmax_auto)then
+                       call grow_particle_bundle(ipart)
+                    else
+                       write(*,*)'Maximum number of particles incorrect'
+                       write(*,*)'npartmax should be greater than',ipart
+                       call clean_stop
+                    endif
+                endif
                  xp(ipart,1:3)=xx(i,1:3)
                  vp(ipart,1:3)=vv(i,1:3)
                  mp(ipart)    =mm(i)
@@ -1367,8 +1389,12 @@ subroutine restore_part_binary_varcpu
   end if
 
   if(my_npart > npartmax) then
-     write(*,*) 'ERROR: my_npart > npartmax', my_npart, npartmax, ' myid=', myid
-     call clean_stop
+     if(cosmo.and.pic.and.npartmax_auto)then
+        call grow_particle_bundle(my_npart)
+     else
+        write(*,*) 'ERROR: my_npart > npartmax', my_npart, npartmax, ' myid=', myid
+        call clean_stop
+     endif
   end if
 
   if(myid==1) write(*,*) 'Binary varcpu particles: total=', npart_total, &
@@ -1570,8 +1596,12 @@ subroutine redistribute_particles_by_position()
 
   npart_new = sum(nrecv)
   if(npart_new > npartmax) then
-     write(*,*) 'ERROR redistribute: npart_new > npartmax', npart_new, npartmax, myid
-     call MPI_ABORT(MPI_COMM_WORLD, 1, info)
+     if(cosmo.and.pic.and.npartmax_auto)then
+        call grow_particle_bundle(npart_new)
+     else
+        write(*,*) 'ERROR redistribute: npart_new > npartmax', npart_new, npartmax, myid
+        call MPI_ABORT(MPI_COMM_WORLD, 1, info)
+     endif
   end if
 
   ! Estimate the complete particle record size.  The chosen backend is reused
@@ -1832,8 +1862,12 @@ subroutine load_gadget
 #endif
               ipart=ipart+1
               if (ipart .ge. size(mp)) then
-                 write(*,*) "For ", myid, ipart, " exceeds ", size(mp)
-                 call clean_stop
+                 if(cosmo.and.pic.and.npartmax_auto)then
+                    call grow_particle_bundle(ipart+1)
+                 else
+                    write(*,*) "For ", myid, ipart, " exceeds ", size(mp)
+                    call clean_stop
+                 endif
               end if
               xp(ipart,1:3)=xx_dp(1,1:3)
               vp(ipart,1)  =vel(1, i) * gadgetvfact

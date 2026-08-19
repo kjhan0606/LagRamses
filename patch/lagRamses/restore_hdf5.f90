@@ -1687,8 +1687,12 @@ subroutine restore_part_hdf5()
   end if
 
   if(npart_loc > npartmax) then
-     write(*,*) 'ERROR: npart_loc > npartmax', npart_loc, npartmax
-     call clean_stop
+     if(cosmo.and.pic.and.npartmax_auto)then
+        call grow_particle_bundle(npart_loc)
+     else
+        write(*,*) 'ERROR: npart_loc > npartmax', npart_loc, npartmax
+        call clean_stop
+     endif
   end if
 
   ! HDF5 particles are restored contiguously into slots 1:npart_loc.
