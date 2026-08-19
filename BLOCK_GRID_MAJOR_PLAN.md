@@ -393,6 +393,27 @@ Phase 1 완료 직후 착수하며 Phase 2를 기다리지 않는다.
 - 두 output layout 구현
 - legacy <-> block restart matrix 검증
 
+### Phase 6 대상 확정 (2026-08-20 사용자 지시): lageunha의 VoidSim 시뮬레이션
+
+Phase 6은 합성 벤치마크가 아니라 **VoidSim의 실제 생산 실행**으로 수행한다.
+근거: 이 계획이 푸는 고통이 바로 그 규모에서 나온다. VoidSim의
+compact726_level14 실행은 7.7일 연속으로 64 물리코어를 만재해 돌았고,
+`ngridtot`/`nparttot`을 실행 전에 정확히 맞춰야 하는 부담이 가장 큰 종류의
+작업이다. 합성 64^3 게이트가 못 보는 것 — 반복 성장, 장시간 실행, load
+balance churn 하의 free-list 재사용, 메모리 한계 근접 — 이 전부 여기서
+자연히 발생한다.
+
+검증 설계: 같은 IC와 같은 코드로 (a) 현재처럼 용량을 넉넉히 지정한 실행,
+(b) 용량을 부족하게 주어 grid와 particle이 각각 최소 두 번 성장하게 만든
+실행을 돌리고, 물리량이 일치하는지 본다. 완료 조건 §13의 "grid와 particle
+각각 최소 두 번의 growth를 거쳐 완주"를 실제 생산 규모에서 만족시키는 것이
+목표다. 실행 호스트는 lageunha (64 물리코어, HT 켜짐이므로 CPU 0-63에 코어당
+1랭크로 pin, [[lageunha-cpu-policy]]).
+
+주의: VoidSim은 다른 프로젝트의 활성 작업이다. 그 실행 디렉토리에 쓰지 말고
+별도 디렉토리로 복제해서 돌린다. 같은 디렉토리에 두 호스트가 동시에 쓰는
+사고가 이미 한 번 있었다(DE 대조군, 2026-08-20).
+
 ### Phase 6: 대규모 성능 및 안정성 검증
 
 - MPI rank 수를 바꾼 restart
