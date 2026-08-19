@@ -31,6 +31,7 @@ PATS = [
  ('rev_grid_sw', re.compile(r'-\s*ncoarse\s*-\s*ngridmax\b\s*\*\s*\(\s*'+ATOM+r'\s*-\s*1\s*\)', re.I)),
  ('stride_0based', re.compile(r'ncoarse\s*\+\s*'+ATOM+r'\s*\*\s*ngridmax\b\s*\+', re.I)),
  ('rev_child_0b', re.compile(r'\(\s*'+ATOM+r'\s*-\s*ncoarse\s*\)\s*/\s*ngridmax\b', re.I)),
+ ('stride_gridfirst', re.compile(ATOM+r'\s*\+\s*ncoarse\s*\+\s*'+ATOM+r'\s*\*\s*ngridmax\b', re.I)),
  ('mod_form',    re.compile(r'mod\s*\(\s*'+ATOM+r'\s*-\s*ncoarse[^)]*ngridmax\b', re.I)),
 ]
 CAP = re.compile(r'twotondim\s*\*\s*ngridmax\b|ngridmax\b\s*\*\s*twotondim', re.I)

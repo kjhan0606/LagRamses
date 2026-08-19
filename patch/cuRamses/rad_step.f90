@@ -506,6 +506,7 @@ recursive subroutine update_rad_quantities_in_cell(cell_index,photon_density,xio
   use cooling_module
   use hydro_commons
   use radiation_commons
+#include "amr_index.h"
   implicit none
 
   integer::cell_index
@@ -553,7 +554,7 @@ recursive subroutine update_rad_quantities_in_cell(cell_index,photon_density,xio
   if (son(cell_index).ne.0) then
      do ichild=0,7
         call update_rad_quantities_in_cell( &
-             & son(cell_index) + ncoarse + ichild*ngridmax, &
+             & ICELL_OF(son(cell_index),ichild+1), &
              & photon_density, &
              & xion, &
              & temperature)
