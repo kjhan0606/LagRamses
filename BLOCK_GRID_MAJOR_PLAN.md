@@ -263,12 +263,40 @@ build system에서 patch 파일이 원본보다 우선하도록 한다. 이 문�
 이 단계에서는 메모리 layout을 바꾸지 않는다. API 전환 자체와 layout 변경의
 오류를 분리하기 위한 단계다.
 
+### Phase 2 진입 판정 (2026-08-19 운전자 판단, 사전등록)
+
+Phase 2의 첫 청크는 layout을 실제로 바꾸지 않고, index 식만 block
+일반식으로 재작성한 뒤 **block 크기 B를 ngridmax로 설정**한다. 이때 block
+식은 legacy 식과 항등이다: iblock=(igrid-1)/B, igrid<=ngridmax<=B 이므로
+iblock=0, islot=igrid-1 이 되어
+
+  icell = ncoarse + iblock*(C*B) + (ichild-1)*B + islot + 1
+        = ncoarse + (ichild-1)*ngridmax + igrid
+
+로 legacy와 완전히 일치한다. 역변환(IGRID_OF/ICHILD_OF)도 같은 대입으로
+항등임을 확인했다. 따라서 이 청크의 게이트는 **Phase 1과 동일한 -O3 bitwise**
+이며, block 인프라(B 파라미터, 일반식, 배열 정렬 규칙)를 legacy 결과를 한
+비트도 바꾸지 않고 트리에 들일 수 있다. 통과하면 layout 코드는 검증된 채로
+자리를 잡고, 다음 청크에서 비로소 B를 64/128로 줄여 실제 block 배치를
+켠다. B를 줄이는 청크부터는 셀의 메모리 순회 순서가 바뀌어 FP 합산 순서가
+달라질 수 있으므로 게이트를 **보존량 tolerance + -O0 재현**으로 전환하고,
+그 설계는 Fable 검수를 거친다.
+
 ### Phase 2: 고정 capacity block layout
 
 - block grid-major 배열 배치 도입
 - `B=64`, `B=128` 정확성 시험
 - hydro/gravity/refinement/MPI kernel 성능 비교
 - 아직 실행 중 growth는 사용하지 않음
+
+### Phase 3 병렬 착수 (2026-08-19 사용자 지시로 Phase 2와 동시 시작)
+
+Phase 2와 Phase 3는 npartmax가 cell index 식에 없다는 점에서 직교하므로,
+각각 detached worktree(`lagRamses-p2`, `lagRamses-p3`)에서 병렬로 진행하고
+완료 단계마다 main에 순차 머지한다. 주로 건드리는 파일이 겹치지 않는다
+(Phase 2: amr_index.h, amr_commons, 배열 할당; Phase 3: read_params, pm
+배열, star/sink/feedback 경로). Phase 3의 첫 청크는 read_params의 nparttot
+대칭화이며, 그 자체로 동작을 바꾸지 않는 정리이므로 게이트는 -O3 bitwise.
 
 ### Phase 3: particle dynamic growth (Phase 2와 병렬 가능)
 
