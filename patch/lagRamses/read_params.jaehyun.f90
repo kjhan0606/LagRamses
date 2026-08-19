@@ -1289,6 +1289,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      nml_ok=.false.
   end if
   if(ngridmax==0)then
+     ngridmax_auto=.true.
      if(ngridtot==0)then
         if(myid==1)write(*,*)'Error in the namelist:'
         if(myid==1)write(*,*)'Allocate some space for refinements !!!'
@@ -1296,6 +1297,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      else
         ngridmax=ngridtot/int(ncpu,kind=8)
      endif
+  else
+     ngridmax_auto=.false.
   end if
   ! Phase 2 chunk 2: fixed block size for now; make this a namelist key later.
   amr_block_size=64

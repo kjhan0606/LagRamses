@@ -253,6 +253,306 @@ module pm_commons
     if(particle_free_list_ready)npart=npartmax-numbp_free
   end subroutine grow_particle_bundle
 
+  subroutine grow_grid_capacity(new_ngridmax)
+    use amr_commons, only: ncoarse, ngridmax, twotondim, amr_block_size, &
+         xg, nbor, father, next, prev, son, flag1, flag2, cpu_map, cpu_map2, &
+         varcpu_grid_file_idx, hilbert_key, headf, tailf, numbf, used_mem
+    use hydro_commons, only: uold, unew, divu, enew
+    use poisson_commons, only: lookup_mg, rho, rho_star, phi, phi_old, f, &
+         scalar_gr, scalar_gr_old, psi_re, psi_im, rho_top
+    use morton_hash, only: grid_level
+    implicit none
+    ! Grow the AMR grid/cell storage one array at a time.  Each replacement
+    ! retains the old allocation until its replacement has been copied and
+    ! moved into place, so the transient extra memory is bounded by one array.
+    ! Callers must enter this routine at a serial AMR safe point.
+    integer,intent(in)::new_ngridmax
+    integer::old_ngridmax,target_ngridmax,old_ncell,new_ncell,nnew,igrid
+    integer::old_tail
+    real(dp),allocatable::new_xg(:,:)
+    integer,allocatable::new_nbor(:,:),new_father(:),new_next(:),new_prev(:)
+    integer,allocatable::new_son(:),new_flag1(:),new_flag2(:)
+    integer,allocatable::new_cpu_map(:),new_cpu_map2(:)
+    integer,allocatable::new_headp(:),new_tailp(:),new_numbp(:)
+    integer,allocatable::new_lookup_mg(:),new_grid_level(:)
+    integer,allocatable::new_varcpu_grid_file_idx(:)
+    real(qdp),allocatable::new_hilbert_key(:)
+    real(dp),allocatable::new_uold(:,:),new_unew(:,:),new_divu(:),new_enew(:)
+    real(dp),allocatable::new_rho(:),new_rho_star(:),new_phi(:),new_phi_old(:)
+    real(dp),allocatable::new_f(:,:),new_rho_top(:)
+    real(dp),allocatable::new_scalar_gr(:),new_scalar_gr_old(:)
+    real(dp),allocatable::new_psi_re(:),new_psi_im(:)
+
+    if(new_ngridmax<=ngridmax)return
+    if(amr_block_size<=0)stop 'grow_grid_capacity: invalid amr_block_size'
+    if(mod(ngridmax,amr_block_size)/=0)stop &
+         'grow_grid_capacity: ngridmax is not a whole number of blocks'
+
+    old_ngridmax=ngridmax
+    target_ngridmax=max(new_ngridmax,old_ngridmax)
+    if(mod(target_ngridmax,amr_block_size)/=0)then
+       target_ngridmax=((target_ngridmax/amr_block_size)+1)*amr_block_size
+    endif
+    if(target_ngridmax<=old_ngridmax)return
+
+    old_ncell=ncoarse+twotondim*old_ngridmax
+    new_ncell=ncoarse+twotondim*target_ngridmax
+    nnew=target_ngridmax-old_ngridmax
+
+    ! Grid-indexed AMR arrays.
+    if(allocated(xg))then
+       allocate(new_xg(target_ngridmax,size(xg,2)))
+       new_xg=0.0d0
+       if(old_ngridmax>0)new_xg(1:old_ngridmax,:)=xg
+       call move_alloc(new_xg,xg)
+    endif
+
+    if(allocated(father))then
+       allocate(new_father(target_ngridmax))
+       new_father=0
+       if(old_ngridmax>0)new_father(1:old_ngridmax)=father
+       call move_alloc(new_father,father)
+    endif
+
+    if(allocated(nbor))then
+       allocate(new_nbor(target_ngridmax,size(nbor,2)))
+       new_nbor=0
+       if(old_ngridmax>0)new_nbor(1:old_ngridmax,:)=nbor
+       call move_alloc(new_nbor,nbor)
+    endif
+
+    if(allocated(next))then
+       allocate(new_next(target_ngridmax))
+       new_next=0
+       if(old_ngridmax>0)new_next(1:old_ngridmax)=next
+       call move_alloc(new_next,next)
+    endif
+
+    if(allocated(prev))then
+       allocate(new_prev(target_ngridmax))
+       new_prev=0
+       if(old_ngridmax>0)new_prev(1:old_ngridmax)=prev
+       call move_alloc(new_prev,prev)
+    endif
+
+    if(allocated(headp))then
+       allocate(new_headp(target_ngridmax))
+       new_headp=0
+       if(old_ngridmax>0)new_headp(1:old_ngridmax)=headp
+       call move_alloc(new_headp,headp)
+    endif
+
+    if(allocated(tailp))then
+       allocate(new_tailp(target_ngridmax))
+       new_tailp=0
+       if(old_ngridmax>0)new_tailp(1:old_ngridmax)=tailp
+       call move_alloc(new_tailp,tailp)
+    endif
+
+    if(allocated(numbp))then
+       allocate(new_numbp(target_ngridmax))
+       new_numbp=0
+       if(old_ngridmax>0)new_numbp(1:old_ngridmax)=numbp
+       call move_alloc(new_numbp,numbp)
+    endif
+
+    if(allocated(lookup_mg))then
+       allocate(new_lookup_mg(target_ngridmax))
+       new_lookup_mg=0
+       if(old_ngridmax>0)new_lookup_mg(1:old_ngridmax)=lookup_mg
+       call move_alloc(new_lookup_mg,lookup_mg)
+    endif
+
+    if(allocated(grid_level))then
+       allocate(new_grid_level(target_ngridmax))
+       new_grid_level=0
+       if(old_ngridmax>0)new_grid_level(1:old_ngridmax)=grid_level
+       call move_alloc(new_grid_level,grid_level)
+    endif
+
+    ! This HDF5 restart-only mapping is normally released before refinement,
+    ! but it is capacity-indexed if a caller grows while it is still live.
+    if(allocated(varcpu_grid_file_idx))then
+       allocate(new_varcpu_grid_file_idx(target_ngridmax))
+       new_varcpu_grid_file_idx=0
+       if(old_ngridmax>0)new_varcpu_grid_file_idx(1:old_ngridmax)= &
+            varcpu_grid_file_idx
+       call move_alloc(new_varcpu_grid_file_idx,varcpu_grid_file_idx)
+    endif
+
+    ! hilbert_key(1:1) is a k-section scratch allocation, not a cell array.
+   if(allocated(hilbert_key).and.size(hilbert_key)>1.and.&
+      size(hilbert_key)==old_ncell)then
+       allocate(new_hilbert_key(new_ncell))
+       new_hilbert_key=0.0_qdp
+       if(old_ncell>0)new_hilbert_key(1:old_ncell)=hilbert_key
+       call move_alloc(new_hilbert_key,hilbert_key)
+    endif
+
+    ! Cell-indexed AMR topology and domain-decomposition arrays.  flag1 and
+    ! flag2 retain their index-zero sentinel; all newly appended cells start
+    ! with the same zero state as a fresh init_amr allocation.
+    if(allocated(son))then
+       allocate(new_son(new_ncell))
+       new_son=0
+       if(old_ncell>0)new_son(1:old_ncell)=son
+       call move_alloc(new_son,son)
+    endif
+
+    if(allocated(flag1))then
+       allocate(new_flag1(0:new_ncell))
+       new_flag1=0
+       if(old_ncell>=0)new_flag1(0:old_ncell)=flag1
+       call move_alloc(new_flag1,flag1)
+    endif
+
+    if(allocated(flag2))then
+       allocate(new_flag2(0:new_ncell))
+       new_flag2=0
+       if(old_ncell>=0)new_flag2(0:old_ncell)=flag2
+       call move_alloc(new_flag2,flag2)
+    endif
+
+    if(allocated(cpu_map))then
+       allocate(new_cpu_map(new_ncell))
+       new_cpu_map=0
+       if(old_ncell>0)new_cpu_map(1:old_ncell)=cpu_map
+       call move_alloc(new_cpu_map,cpu_map)
+    endif
+
+    if(allocated(cpu_map2))then
+       allocate(new_cpu_map2(new_ncell))
+       new_cpu_map2=0
+       if(old_ncell>0)new_cpu_map2(1:old_ncell)=cpu_map2
+       call move_alloc(new_cpu_map2,cpu_map2)
+    endif
+
+    ! Hydro fields are allocated only when the corresponding configuration is
+    ! active.  Their first dimension is the AMR cell capacity.
+    if(allocated(uold))then
+       allocate(new_uold(new_ncell,size(uold,2)))
+       new_uold=0.0d0
+       if(old_ncell>0)new_uold(1:old_ncell,:)=uold
+       call move_alloc(new_uold,uold)
+    endif
+
+    if(allocated(unew))then
+       allocate(new_unew(new_ncell,size(unew,2)))
+       new_unew=0.0d0
+       if(old_ncell>0)new_unew(1:old_ncell,:)=unew
+       call move_alloc(new_unew,unew)
+    endif
+
+    if(allocated(divu))then
+       allocate(new_divu(new_ncell))
+       new_divu=0.0d0
+       if(old_ncell>0)new_divu(1:old_ncell)=divu
+       call move_alloc(new_divu,divu)
+    endif
+
+    if(allocated(enew))then
+       allocate(new_enew(new_ncell))
+       new_enew=0.0d0
+       if(old_ncell>0)new_enew(1:old_ncell)=enew
+       call move_alloc(new_enew,enew)
+    endif
+
+    ! Poisson fields, including the conditional modified-gravity, FDM, and
+    ! CIC arrays, are grown only when init_poisson actually allocated them.
+    if(allocated(rho))then
+       allocate(new_rho(new_ncell))
+       new_rho=0.0d0
+       if(old_ncell>0)new_rho(1:old_ncell)=rho
+       call move_alloc(new_rho,rho)
+    endif
+
+    if(allocated(rho_star))then
+       allocate(new_rho_star(new_ncell))
+       new_rho_star=0.0d0
+       if(old_ncell>0)new_rho_star(1:old_ncell)=rho_star
+       call move_alloc(new_rho_star,rho_star)
+    endif
+
+    if(allocated(phi))then
+       allocate(new_phi(new_ncell))
+       new_phi=0.0d0
+       if(old_ncell>0)new_phi(1:old_ncell)=phi
+       call move_alloc(new_phi,phi)
+    endif
+
+    if(allocated(phi_old))then
+       allocate(new_phi_old(new_ncell))
+       new_phi_old=0.0d0
+       if(old_ncell>0)new_phi_old(1:old_ncell)=phi_old
+       call move_alloc(new_phi_old,phi_old)
+    endif
+
+    if(allocated(f))then
+       allocate(new_f(new_ncell,size(f,2)))
+       new_f=0.0d0
+       if(old_ncell>0)new_f(1:old_ncell,:)=f
+       call move_alloc(new_f,f)
+    endif
+
+    if(allocated(scalar_gr))then
+       allocate(new_scalar_gr(new_ncell))
+       new_scalar_gr=0.0d0
+       if(old_ncell>0)new_scalar_gr(1:old_ncell)=scalar_gr
+       call move_alloc(new_scalar_gr,scalar_gr)
+    endif
+
+    if(allocated(scalar_gr_old))then
+       allocate(new_scalar_gr_old(new_ncell))
+       new_scalar_gr_old=0.0d0
+       if(old_ncell>0)new_scalar_gr_old(1:old_ncell)=scalar_gr_old
+       call move_alloc(new_scalar_gr_old,scalar_gr_old)
+    endif
+
+    if(allocated(psi_re))then
+       allocate(new_psi_re(new_ncell))
+       new_psi_re=0.0d0
+       if(old_ncell>0)new_psi_re(1:old_ncell)=psi_re
+       call move_alloc(new_psi_re,psi_re)
+    endif
+
+    if(allocated(psi_im))then
+       allocate(new_psi_im(new_ncell))
+       new_psi_im=0.0d0
+       if(old_ncell>0)new_psi_im(1:old_ncell)=psi_im
+       call move_alloc(new_psi_im,psi_im)
+    endif
+
+    if(allocated(rho_top))then
+       allocate(new_rho_top(new_ncell))
+       new_rho_top=0.0d0
+       if(old_ncell>0)new_rho_top(1:old_ncell)=rho_top
+       call move_alloc(new_rho_top,rho_top)
+    endif
+
+    ! Append the new grid indices after the existing free-list tail.  The
+    ! appended chain has exactly the ascending order used by init_amr.
+    old_tail=tailf
+    if(numbf>0)then
+       next(old_tail)=old_ngridmax+1
+       prev(old_ngridmax+1)=old_tail
+    else
+       headf=old_ngridmax+1
+       prev(headf)=0
+    endif
+    do igrid=old_ngridmax+1,target_ngridmax-1
+       next(igrid)=igrid+1
+       prev(igrid+1)=igrid
+    enddo
+    tailf=target_ngridmax
+    next(tailf)=0
+    numbf=numbf+nnew
+    used_mem=target_ngridmax-numbf
+
+    ! Capacity is deliberately updated last, after every capacity-indexed
+    ! array and the free-grid list have reached the new extent.
+    ngridmax=target_ngridmax
+  end subroutine grow_grid_capacity
+
   ! Count particles in the actual child cell that contains them.  numbp is
   ! a grid total and must not be charged to every leaf cell during domain
   ! decomposition.  The SIDM count follows sidm_scatter's definition of a
