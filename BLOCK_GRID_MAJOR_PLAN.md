@@ -263,6 +263,20 @@ build system에서 patch 파일이 원본보다 우선하도록 한다. 이 문�
 이 단계에서는 메모리 layout을 바꾸지 않는다. API 전환 자체와 layout 변경의
 오류를 분리하기 위한 단계다.
 
+### Phase 2 chunk 2 설계 (2026-08-19 운전자 판단, 사전등록)
+
+인벤토리 결과 37곳이 `ncoarse+twotondim*ngridmax`를 전체 셀 배열 크기로
+쓴다. block 크기 B가 ngridmax를 나누면 nblocks=ngridmax/B 이고
+nblocks*C*B = C*ngridmax 이므로 배열 크기가 불변이다. 최대 셀 인덱스도
+ncoarse+nblocks*C*B = ncoarse+C*ngridmax 로 기존 배열 경계에 정확히 맞는다.
+따라서 chunk 2는 (a) setup에서 ngridmax를 amr_block_size의 배수로 올림,
+(b) amr_block_size를 B(기본 64)로 설정, 이 둘뿐이며 37곳 할당·루프 변경이
+불필요하다. 셀 값은 동일하고 메모리 슬롯 순서만 바뀌므로, 전체 셀 배열을
+메모리 순서로 순회하는 감산/영기화 루프의 FP 합산 순서가 달라져 결과가
+반올림 수준으로 흔들린다. 게이트는 bitwise가 아니라 **보존량 tolerance**:
+완주 + mcons/econs/총질량/총운동량의 legacy(B=ngridmax) 대비 상대차 < 1e-8,
+그리고 halo 구조가 tolerance 내 일치. 결과 diff는 Fable 검수를 거친다.
+
 ### Phase 2 진입 판정 (2026-08-19 운전자 판단, 사전등록)
 
 Phase 2의 첫 청크는 layout을 실제로 바꾸지 않고, index 식만 block
