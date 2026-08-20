@@ -124,7 +124,7 @@ LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_FFTW)
 VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):../aton:../hydro:../pm:../poisson:../amr
 #############################################################################
 # All objects
-MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
+MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
@@ -161,7 +161,7 @@ HYDROOBJ = init_hydro.o init_flow_fine.o write_screen.o output_hydro.o courant_f
 # All objects
 AMRLIB = $(AMROBJ) $(HYDROOBJ) $(PMOBJ) $(POISSONOBJ) $(SIDM_OBJ) $(ADM_OBJ) $(PBH_OBJ) $(FDM_OBJ)
 # ATON objects
-ATON_MODOBJ = timing.o radiation_commons.o rad_step.o
+ATON_MODOBJ = rad_step.o
 ATON_OBJ = observe.o init_radiation.o rad_init.o rad_boundary.o rad_stars.o rad_backup.o ../aton/atonlib/libaton.a
 #############################################################################
 ramses:	$(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o
@@ -203,9 +203,10 @@ particle_cuda_interface.o: cuda_commons.o
 cuda_commons.o: amr_commons.kjhan.o
 endif
 amr_index.o: amr_commons.kjhan.o
-# grow_grid_capacity in pm_commons preserves the AMR, hydro, Poisson, and
-# Morton capacity arrays; build those module files before pm_commons.mod.
-pm_commons.o: amr_commons.kjhan.o pm_parameters.o hydro_commons.o poisson_commons.o morton_hash.o
+# [RESIZABLE] grow_grid_capacity preserves every capacity bundle, including
+# the optional radiation fields; build those modules before pm_commons.mod.
+pm_commons.o: amr_commons.kjhan.o pm_parameters.o hydro_commons.o poisson_commons.o morton_hash.o radiation_commons.o
+radiation_commons.o: amr_commons.kjhan.o timing.o
 morton_hash.o: morton_keys.o amr_index.o
 hydro_commons.o: hydro_parameters.o
 poisson_commons.o: poisson_parameters.o

@@ -1288,6 +1288,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1)write(*,*)'levelmax should not be lower than levelmin'
      nml_ok=.false.
   end if
+  ! [RESIZABLE] A derived grid capacity may grow; an explicit one stays fixed.
   if(ngridmax==0)then
      ngridmax_auto=.true.
      if(ngridtot==0)then

@@ -253,13 +253,15 @@ module pm_commons
     if(particle_free_list_ready)npart=npartmax-numbp_free
   end subroutine grow_particle_bundle
 
+  ! [RESIZABLE] Grow every grid- and cell-capacity array as one bundle.
   subroutine grow_grid_capacity(new_ngridmax)
-    use amr_commons, only: ncoarse, ngridmax, twotondim, amr_block_size, &
+    use amr_commons, only: myid, ncoarse, ngridmax, twotondim, amr_block_size, &
          xg, nbor, father, next, prev, son, flag1, flag2, cpu_map, cpu_map2, &
          varcpu_grid_file_idx, hilbert_key, headf, tailf, numbf, used_mem
     use hydro_commons, only: uold, unew, divu, enew
     use poisson_commons, only: lookup_mg, rho, rho_star, phi, phi_old, f, &
          scalar_gr, scalar_gr_old, psi_re, psi_im, rho_top
+    use radiation_commons, only: Erad, Srad
     use morton_hash, only: grid_level
     implicit none
     ! Grow the AMR grid/cell storage one array at a time.  Each replacement
@@ -282,6 +284,7 @@ module pm_commons
     real(dp),allocatable::new_f(:,:),new_rho_top(:)
     real(dp),allocatable::new_scalar_gr(:),new_scalar_gr_old(:)
     real(dp),allocatable::new_psi_re(:),new_psi_im(:)
+    real(dp),allocatable::new_Erad(:),new_Srad(:)
 
     if(new_ngridmax<=ngridmax)return
     if(amr_block_size<=0)stop 'grow_grid_capacity: invalid amr_block_size'
@@ -529,6 +532,22 @@ module pm_commons
        call move_alloc(new_rho_top,rho_top)
     endif
 
+    ! Radiation fields are linked into every build but remain unallocated
+    ! unless the ATON/radiation path is active.
+    if(allocated(Erad))then
+       allocate(new_Erad(new_ncell))
+       new_Erad=0.0d0
+       if(old_ncell>0)new_Erad(1:old_ncell)=Erad
+       call move_alloc(new_Erad,Erad)
+    endif
+
+    if(allocated(Srad))then
+       allocate(new_Srad(new_ncell))
+       new_Srad=0.0d0
+       if(old_ncell>0)new_Srad(1:old_ncell)=Srad
+       call move_alloc(new_Srad,Srad)
+    endif
+
     ! Append the new grid indices after the existing free-list tail.  The
     ! appended chain has exactly the ascending order used by init_amr.
     old_tail=tailf
@@ -550,8 +569,79 @@ module pm_commons
 
     ! Capacity is deliberately updated last, after every capacity-indexed
     ! array and the free-grid list have reached the new extent.
+    if(myid==1) write(*,'(A,I0,A,I0,A,I0)') &
+         '[RESIZABLE] GRID_GROW rank=',myid,' old=',old_ngridmax, &
+         ' new=',target_ngridmax
     ngridmax=target_ngridmax
   end subroutine grow_grid_capacity
+
+  ! [RESIZABLE] Choose one capacity collectively, then resize every rank at
+  ! the common safe point selected by the caller.
+  subroutine ensure_grid_capacity_collective(required_local,context)
+    use amr_commons, only: myid, ngridmax, amr_block_size, ngridmax_auto
+    implicit none
+#ifndef WITHOUTMPI
+    include 'mpif.h'
+#endif
+    integer,intent(in)::required_local
+    character(len=*),intent(in)::context
+    integer::target_local,target_global,growth_chunk
+    integer::capacity_min,capacity_max,info
+
+    if(amr_block_size<=0)stop &
+         'ensure_grid_capacity_collective: invalid amr_block_size'
+
+    target_local=ngridmax
+    if(required_local>ngridmax)then
+       growth_chunk=max(amr_block_size,max(1,ngridmax/4))
+       target_local=max(required_local,ngridmax+growth_chunk)
+       if(mod(target_local,amr_block_size)/=0) &
+            target_local=((target_local/amr_block_size)+1)*amr_block_size
+    endif
+
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(target_local,target_global,1,MPI_INTEGER,MPI_MAX, &
+         MPI_COMM_WORLD,info)
+#else
+    target_global=target_local
+#endif
+
+    if(target_global>ngridmax)then
+       if(.not.ngridmax_auto)then
+          if(required_local>ngridmax) write(*,'(A,I0,A,A,A,I0,A,I0)') &
+               '[RESIZABLE] GRID_CAPACITY_FIXED rank=',myid, &
+               ' context=',trim(context),' required=',required_local, &
+               ' capacity=',ngridmax
+#ifndef WITHOUTMPI
+          call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#else
+          stop 'Increase ngridmax'
+#endif
+       else
+          call grow_grid_capacity(target_global)
+       endif
+    endif
+
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(ngridmax,capacity_min,1,MPI_INTEGER,MPI_MIN, &
+         MPI_COMM_WORLD,info)
+    call MPI_ALLREDUCE(ngridmax,capacity_max,1,MPI_INTEGER,MPI_MAX, &
+         MPI_COMM_WORLD,info)
+#else
+    capacity_min=ngridmax
+    capacity_max=ngridmax
+#endif
+    if(capacity_min/=capacity_max)then
+       write(*,'(A,I0,A,A,A,I0,A,I0)') &
+            '[RESIZABLE] GRID_CAPACITY_MISMATCH rank=',myid, &
+            ' context=',trim(context),' min=',capacity_min,' max=',capacity_max
+#ifndef WITHOUTMPI
+       call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#else
+       stop 'grid capacity mismatch'
+#endif
+    endif
+  end subroutine ensure_grid_capacity_collective
 
   ! Count particles in the actual child cell that contains them.  numbp is
   ! a grid total and must not be charged to every leaf cell during domain

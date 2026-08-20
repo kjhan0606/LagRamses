@@ -24,14 +24,13 @@ end subroutine refine
 !###############################################################
 subroutine refine_coarse
   use amr_commons
-  use pm_commons, only: grow_grid_capacity
+  use pm_commons, only: ensure_grid_capacity_collective
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   integer::nxny,i,j,k
   integer::ind,info,ibound
-  integer::needed,headroom,growth_chunk,growth_target
   logical::boundary_region
   logical::ok_free,ok_all
   integer,dimension(1:nvector),save::ind_cell_tmp
@@ -58,28 +57,20 @@ subroutine refine_coarse
   end do
   end do
 
-  ! Check for free memory
+  ! [RESIZABLE] Every rank reaches this safe point once, before any grid is
+  ! created, and grows to the same collective capacity if one rank needs it.
+  call ensure_grid_capacity_collective(used_mem+ncreate+1,'refine_coarse')
+
+  ! Check the collective capacity decision before changing topology.
   ok_free=(numbf-ncreate)>0
   if(.not. ok_free)then
-     if(ngridmax_auto)then
-        needed=max(1,ncreate-numbf+1)
-        headroom=max(1,needed/4)
-        growth_chunk=max(amr_block_size,max(1,ngridmax/4))
-        growth_target=ngridmax+max(growth_chunk,needed+headroom)
-        call grow_grid_capacity(growth_target)
-        ok_free=(numbf-ncreate)>0
-     endif
-     if(ok_free)then
-        ! Capacity was extended above; continue with the same refinement pass.
-     else
-        write(*,*)'No more free memory'
-        write(*,*)'Increase ngridmax'
+     write(*,*)'[RESIZABLE] collective capacity pre-count mismatch'
+     write(*,*)'No more free memory'
 #ifndef WITHOUTMPI
-        call MPI_ABORT(MPI_COMM_WORLD,1,info)
+     call MPI_ABORT(MPI_COMM_WORLD,1,info)
 #else
-        stop
+     stop
 #endif
-     endif
   end if
 
   ! Refine marked cells
@@ -351,7 +342,7 @@ end subroutine make_grid_coarse
 !###############################################################
 subroutine refine_fine(ilevel)
   use amr_commons
-  use pm_commons, only: grow_grid_capacity
+  use pm_commons, only: ensure_grid_capacity_collective
 #include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
@@ -370,8 +361,7 @@ subroutine refine_fine(ilevel)
   integer::ncache,ngrid
   integer::igrid,icell,i
   integer::ind,info,icpu,ibound
-  integer::ncreate_tmp,nkill_tmp
-  integer::needed,headroom,growth_chunk,growth_target
+  integer::ncreate_tmp,ncreate_plan,nkill_tmp
   logical::boundary_region
   integer,dimension(1:nvector),save::ind_grid,ind_cell
   integer,dimension(1:nvector),save::ind_grid_tmp,ind_cell_tmp
@@ -389,6 +379,62 @@ subroutine refine_fine(ilevel)
   ! Compute authorization map
   !--------------------------
   call authorize_fine(ilevel)
+
+  ! [RESIZABLE] Count the whole refinement pass before changing topology.
+  ! The subsequent collective is outside the rank-dependent batch loops, so
+  ! every rank calls it exactly once and no MPI call-count mismatch is possible.
+  if(.not.shrink)then
+     ncreate_plan=0
+     do icpu=1,ncpu+nboundary
+        if(icpu==myid)then
+           ibound=0
+           ncache=active(ilevel)%ngrid
+        else if(icpu<=ncpu)then
+           ibound=0
+           ncache=reception(icpu,ilevel)%ngrid
+        else
+           ibound=icpu-ncpu
+           ncache=boundary(ibound,ilevel)%ngrid
+        end if
+        if(ncache<0)then
+           write(*,*)'[RESIZABLE] wrong ncache in refinement pre-count', &
+                myid,icpu,ilevel,ncache
+#ifndef WITHOUTMPI
+           call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#else
+           stop
+#endif
+        endif
+        do igrid=1,ncache,nvector
+           ngrid=MIN(nvector,ncache-igrid+1)
+           if(myid==icpu)then
+              do i=1,ngrid
+                 ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
+              end do
+           else if(icpu<=ncpu)then
+              do i=1,ngrid
+                 ind_grid(i)=reception(icpu,ilevel)%igrid(igrid+i-1)
+              end do
+           else
+              do i=1,ngrid
+                 ind_grid(i)=boundary(ibound,ilevel)%igrid(igrid+i-1)
+              end do
+           end if
+           do ind=1,twotondim
+              do i=1,ngrid
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
+              end do
+              do i=1,ngrid
+                 if(flag2(ind_cell(i))==1 .and. &
+                      flag1(ind_cell(i))==1 .and. &
+                      son(ind_cell(i))==0) ncreate_plan=ncreate_plan+1
+              end do
+           end do
+        end do
+     end do
+     call ensure_grid_capacity_collective(used_mem+ncreate_plan+1, &
+          'refine_fine')
+  endif
 
   if(.not. shrink)then
   !---------------------------------------------------
@@ -453,26 +499,16 @@ subroutine refine_fine(ilevel)
            end do
            ncreate=ncreate+ncreate_tmp
 
-           ! Check for free memory
+           ! The collective pre-count reserved the whole pass.  Reaching this
+           ! branch means topology changed between the count and create passes.
            if(ncreate_tmp>=numbf) then
-              if(ngridmax_auto)then
-                 needed=max(1,ncreate_tmp-numbf+1)
-                 headroom=max(1,needed/4)
-                 growth_chunk=max(amr_block_size,max(1,ngridmax/4))
-                 growth_target=ngridmax+max(growth_chunk,needed+headroom)
-                 call grow_grid_capacity(growth_target)
-              endif
-              if(ncreate_tmp<numbf)then
-                 ! Capacity was extended above; continue with this batch.
-              else
-                 write(*,*)'No more free memory', ncreate_tmp, numbf
-                 write(*,*)'Increase ngridmax', ngrid
+              write(*,*)'[RESIZABLE] refinement pre-count mismatch', &
+                   ncreate_tmp,numbf
 #ifndef WITHOUTMPI
-                 call MPI_ABORT(MPI_COMM_WORLD,1,info)
+              call MPI_ABORT(MPI_COMM_WORLD,1,info)
 #else
-                 stop
+              stop
 #endif
-              endif
            end if
 
            ! Refine selected cells
@@ -492,6 +528,14 @@ subroutine refine_fine(ilevel)
         end do
      end do
   end do
+  if(ncreate/=ncreate_plan)then
+     write(*,*)'[RESIZABLE] refinement count changed',ncreate_plan,ncreate
+#ifndef WITHOUTMPI
+     call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#else
+     stop
+#endif
+  endif
   call MPI_Barrier(MPI_COMM_WORLD,info)
   if(verbose)write(*,112)ncreate
   endif
