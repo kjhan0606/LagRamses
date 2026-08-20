@@ -14,6 +14,8 @@ set -uo pipefail
 
 code=/home/kjhan/BACKUP/lagRamses-RESIZABLE/code
 qa=/home/kjhan/BACKUP/lagramses_qa
+pbh_table=/home/kjhan/BACKUP/lagRamses-PBH/papers/pbh_working/tables/pbh_evap_table_ast_s1.dat
+pbh_table_sha=204888b8d5154785b837db280f9b06d2d55caf9a0583fbc0877292da521e906c
 job_root="$qa/gridgrow_jobs/${SLURM_JOB_ID:?}"
 logs="$job_root/logs"
 mkdir -p "$logs"
@@ -37,6 +39,28 @@ branch=$(git -C "$code" branch --show-current)
   echo "commit=$commit"
   echo "started=$(date --iso-8601=seconds)"
 } | tee "$logs/provenance.txt"
+
+# [RESIZABLE] The split PBH project is a read-only input dependency.  Pin the
+# exact clean tracked table so a moved symlink or regenerated table cannot
+# silently change this allocator-equivalence test.
+if [ ! -r "$pbh_table" ]; then
+  echo "PHASE4: PBH table is not readable: $pbh_table" | \
+    tee -a "$logs/provenance.txt"
+  exit 1
+fi
+actual_pbh_sha=$(sha256sum "$pbh_table" | awk '{print $1}')
+echo "pbh_table=$pbh_table sha256=$actual_pbh_sha" | tee -a "$logs/provenance.txt"
+if [ "$actual_pbh_sha" != "$pbh_table_sha" ]; then
+  echo "PHASE4: PBH table checksum mismatch" | tee -a "$logs/provenance.txt"
+  exit 1
+fi
+for nml in "$code/tests/phase4_roomy.nml" "$code/tests/phase4_tight.nml"; do
+  if ! grep -Fq "pbh_table_file='$pbh_table'" "$nml"; then
+    echo "PHASE4: $nml does not reference the pinned PBH table" | \
+      tee -a "$logs/provenance.txt"
+    exit 1
+  fi
+done
 
 syntax_files=(
   patch/cuRamses/timing.f90

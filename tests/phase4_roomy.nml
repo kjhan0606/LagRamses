@@ -39,7 +39,7 @@ nexpand=1
 /
 
 &PBH_PARAMS
-pbh_table_file='/home/kjhan/PBH/tables/pbh_evap_table_ast_s1.dat'
+pbh_table_file='/home/kjhan/BACKUP/lagRamses-PBH/papers/pbh_working/tables/pbh_evap_table_ast_s1.dat'
 pbh_fraction=0.05
 pbh_energy_sink='uniform_heat'
 pbh_mf_model='lognormal'
