@@ -25,8 +25,10 @@ export LD_LIBRARY_PATH=/home/kjhan/local/hdf5/lib:/home/kjhan/local/lib:${LD_LIB
 export OMP_NUM_THREADS=1
 export OMP_PLACES=cores
 export OMP_WAIT_POLICY=passive
-export I_MPI_PIN=1
-export I_MPI_PIN_DOMAIN=core
+# [RESIZABLE] Slurm is the sole binding authority.  Intel MPI pinning combined
+# with srun collapsed all 32 ranks onto CPU 0 in invalid job 321015.
+export I_MPI_PIN=0
+unset I_MPI_PIN_DOMAIN I_MPI_PIN_PROCESSOR_LIST
 export I_MPI_FABRICS=shm
 
 commit=$(git -C "$code" rev-parse HEAD)
@@ -61,6 +63,45 @@ for nml in "$code/tests/phase4_roomy.nml" "$code/tests/phase4_tight.nml"; do
     exit 1
   fi
 done
+
+# [RESIZABLE] Check affinity after MPI_Init, where Intel MPI previously
+# narrowed every task mask to CPU 0 despite a valid 32-core Slurm allocation.
+affinity_dir="$job_root/affinity"
+affinity_probe="$job_root/mpi_affinity_probe"
+mkdir -p "$affinity_dir"
+if ! mpiifx -O2 "$code/tests/mpi_affinity_probe.f90" -o "$affinity_probe" \
+    >"$logs/affinity_build.log" 2>&1; then
+  echo 'PHASE4: affinity probe build failed' | tee -a "$logs/provenance.txt"
+  exit 1
+fi
+if ! srun --kill-on-bad-exit=1 --mpi=pmi2 -n 32 -c 1 \
+    --cpu-bind=verbose,cores "$affinity_probe" "$affinity_dir" \
+    >"$logs/affinity_run.log" 2>&1; then
+  echo 'PHASE4: affinity probe execution failed' | tee -a "$logs/provenance.txt"
+  exit 1
+fi
+find "$affinity_dir" -maxdepth 1 -type f -name 'rank_*.txt' -print0 | \
+  sort -z | xargs -0 cat | sort -n >"$logs/affinity_map.txt"
+if ! awk '
+  NF!=2 || $1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ || $1<0 || $1>31 {bad=1}
+  {rank[$1]++; mask[$2]++}
+  END {
+    if(NR!=32) bad=1
+    for(i=0;i<32;i++) if(rank[i]!=1) bad=1
+    nmask=0
+    for(m in mask) nmask++
+    if(nmask!=32) bad=1
+    exit(bad ? 1 : 0)
+  }
+' "$logs/affinity_map.txt"; then
+  echo 'PHASE4: affinity masks are not 32 unique single CPUs' | \
+    tee -a "$logs/provenance.txt"
+  cat "$logs/affinity_map.txt" | tee -a "$logs/provenance.txt"
+  exit 1
+fi
+echo 'affinity=PASS ranks=32 unique_single_cpu_masks=32' | \
+  tee -a "$logs/provenance.txt"
+cat "$logs/affinity_map.txt" | tee -a "$logs/provenance.txt"
 
 syntax_files=(
   patch/cuRamses/timing.f90
@@ -111,7 +152,8 @@ for variant in roomy tight; do
 
   (
     cd "$run_dir" || exit 2
-    srun --kill-on-bad-exit=1 --mpi=pmi2 -n 32 -c 1 --cpu-bind=cores \
+    srun --kill-on-bad-exit=1 --mpi=pmi2 -n 32 -c 1 \
+      --cpu-bind=verbose,cores \
       "$exe" run.nml >run.log 2>&1
   )
   rc=$?
