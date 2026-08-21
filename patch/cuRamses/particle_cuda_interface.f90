@@ -13,12 +13,14 @@ module particle_cuda_interface
   interface
 
      subroutine cuda_pm_mesh_upload_c(f, son, phi, ncell, with_phi, &
-          & ncoarse_c, ngridmax_c, hw) bind(C, name='cuda_pm_mesh_upload')
+          & ncoarse_c, ngridmax_c, hw, block_size, child_count) &
+          & bind(C, name='cuda_pm_mesh_upload')
        import :: c_double, c_int, c_long_long
        real(c_double), dimension(*), intent(in) :: f, phi
        integer(c_int), dimension(*), intent(in) :: son
        integer(c_long_long), value :: ncell, ncoarse_c
        integer(c_int), value :: with_phi, ngridmax_c, hw
+       integer(c_int), value :: block_size, child_count
      end subroutine cuda_pm_mesh_upload_c
 
      function cuda_pm_is_ready_c() result(ready) &
@@ -28,22 +30,25 @@ module particle_cuda_interface
      end function cuda_pm_is_ready_c
 
      function cuda_pm_flush_c(slot, ng, np, x0, nbf, px, pv, pg, dteff, &
-          & params, ngridmax_c, ncoarse_c, new_v, new_x, phi_out) &
+          & params, ngridmax_c, ncoarse_c, block_size, child_count, &
+          & new_v, new_x, phi_out) &
           & result(ierr) bind(C, name='cuda_pm_flush')
        import :: c_double, c_int
        integer(c_int), value :: slot, ng, np, ngridmax_c, ncoarse_c
+       integer(c_int), value :: block_size, child_count
        real(c_double), dimension(*), intent(in) :: x0, px, pv, dteff, params
        integer(c_int), dimension(*), intent(in) :: nbf, pg
        real(c_double), dimension(*), intent(out) :: new_v, new_x, phi_out
        integer(c_int) :: ierr
      end function cuda_pm_flush_c
 
-     subroutine cuda_pm_rho_begin_c(son, ncell, ncoarse_c, ngridmax_c, hw) &
+     subroutine cuda_pm_rho_begin_c(son, ncell, ncoarse_c, ngridmax_c, hw, &
+          & block_size, child_count) &
           & bind(C, name='cuda_pm_rho_begin')
        import :: c_int, c_long_long
        integer(c_int), dimension(*), intent(in) :: son
        integer(c_long_long), value :: ncell, ncoarse_c
-       integer(c_int), value :: ngridmax_c, hw
+       integer(c_int), value :: ngridmax_c, hw, block_size, child_count
      end subroutine cuda_pm_rho_begin_c
 
      function cuda_pm_rho_is_ready_c() result(ready) &
@@ -53,10 +58,12 @@ module particle_cuda_interface
      end function cuda_pm_rho_is_ready_c
 
      function cuda_pm_deposit_flush_c(slot, ng, np, x0, nbf, px, mass, pg, &
-          & params, ngridmax_c, ncoarse_c) result(ierr) &
+          & params, ngridmax_c, ncoarse_c, block_size, child_count) &
+          & result(ierr) &
           & bind(C, name='cuda_pm_deposit_flush')
        import :: c_double, c_int
        integer(c_int), value :: slot, ng, np, ngridmax_c, ncoarse_c
+       integer(c_int), value :: block_size, child_count
        real(c_double), dimension(*), intent(in) :: x0, px, mass, params
        integer(c_int), dimension(*), intent(in) :: nbf, pg
        integer(c_int) :: ierr
@@ -364,6 +371,7 @@ contains
          & pmg_x0(:,slot), pmg_nbf(:,slot), pmg_px(:,slot), pmg_pv(:,slot), &
          & pmg_pg(:,slot), pmg_dt(:,slot), params, &
          & int(ngridmax,c_int), int(ncoarse,c_int), &
+         & int(amr_block_size,c_int), int(twotondim,c_int), &
          & pmg_nv(:,slot), pmg_nx(:,slot), pmg_pho(:,slot))
 
     if (ierr == 0) then
@@ -463,7 +471,8 @@ contains
     ierr = cuda_pm_deposit_flush_c(int(slot,c_int), int(pmg_ng(slot),c_int), &
          & int(pmg_np(slot),c_int), &
          & pmg_x0(:,slot), pmg_nbf(:,slot), pmg_px(:,slot), pmg_dt(:,slot), &
-         & pmg_pg(:,slot), params, int(ngridmax,c_int), int(ncoarse,c_int))
+         & pmg_pg(:,slot), params, int(ngridmax,c_int), int(ncoarse,c_int), &
+         & int(amr_block_size,c_int), int(twotondim,c_int))
 
     if (ierr == 1) then
        write(*,*) 'problem in cic (gpu path): particle outside 0.5..5.5'

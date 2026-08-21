@@ -33,9 +33,11 @@ module scalar_cuda_interface
      end function cuda_scal_is_ready_c
 
      subroutine cuda_scal_sweep_c(model, params, ngridmax, ncoarse, &
-          & tracker, res_max, src_max) bind(C, name='cuda_scal_sweep')
+          & block_size, child_count, tracker, res_max, src_max) &
+          & bind(C, name='cuda_scal_sweep')
        import :: c_double, c_int
-       integer(c_int), value :: model, ngridmax, ncoarse, tracker
+       integer(c_int), value :: model, ngridmax, ncoarse
+       integer(c_int), value :: block_size, child_count, tracker
        real(c_double), dimension(*), intent(in) :: params
        real(c_double), intent(out) :: res_max, src_max
      end subroutine cuda_scal_sweep_c

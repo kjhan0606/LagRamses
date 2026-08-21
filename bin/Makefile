@@ -191,16 +191,19 @@ ifdef USE_CUDA
 %.o:%.cu
 	$(NVCC) $(NVCCFLAGS) -c $< -o $@
 hydro_cuda_kernels.o: cuda_stream_pool.o
-poisson_cuda_kernels.o: cuda_stream_pool.o
+poisson_cuda_kernels.o: cuda_stream_pool.o ../patch/cuRamses/amr_cuda_index.cuh
 sink_cuda_kernels.o: cuda_stream_pool.o
-scalar_cuda_kernels.o: cuda_stream_pool.o
-particle_cuda_kernels.o: cuda_stream_pool.o
+scalar_cuda_kernels.o: cuda_stream_pool.o ../patch/cuRamses/amr_cuda_index.cuh
+particle_cuda_kernels.o: cuda_stream_pool.o ../patch/cuRamses/amr_cuda_index.cuh
 hydro_cuda_interface.o: cuda_commons.o
 poisson_cuda_interface.o: cuda_commons.o
 sink_cuda_interface.o: cuda_commons.o
 scalar_cuda_interface.o: cuda_commons.o
 particle_cuda_interface.o: cuda_commons.o
 cuda_commons.o: amr_commons.kjhan.o
+rho_fine.kjhan.o move_fine.kjhan.o synchro_fine.kjhan.o: particle_cuda_interface.o
+force_fine.kjhan.o: scalar_cuda_interface.o
+multigrid_fine_commons.o: poisson_cuda_interface.o
 endif
 amr_index.o: amr_commons.kjhan.o
 # [RESIZABLE] grow_grid_capacity preserves every capacity bundle, including

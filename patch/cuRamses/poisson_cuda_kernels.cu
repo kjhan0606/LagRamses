@@ -4,6 +4,7 @@
 // ==========================================================================
 
 #include "cuda_stream_pool.h"
+#include "amr_cuda_index.cuh"
 #include <cufft.h>
 #include <cufftXt.h>
 #include <cstdio>
@@ -63,6 +64,12 @@ static double* d_mg_partial_norm2 = nullptr; // partial norm2 for reduction
 static long long g_mg_ncell = 0;
 static int     g_mg_alloc_ngrid = 0;  // allocated capacity for grid arrays
 static bool    g_mg_ready  = false;
+static long long g_mg_gs_launches = 0;
+static long long g_mg_res_launches = 0;
+static long long g_mg_restrict_launches = 0;
+static long long g_mg_interp_launches = 0;
+static int g_mg_block_size = 0;
+static int g_mg_child_count = 0;
 
 // Pinned host buffer for partial norm2 reduction
 static double* h_mg_partial_norm2 = nullptr;
@@ -88,6 +95,41 @@ static double* h_coarse_phi_pinned  = nullptr;
 
 static int     g_ri_ngrid  = 0;
 static int     g_ri_ncells = 0;
+
+static void mg_require_block_layout(
+    int ngridmax, int ncoarse, int block_size, int child_count,
+    const char* context)
+{
+    const long long expected =
+        (long long)ncoarse + (long long)child_count * ngridmax;
+    if (!amr_cuda_layout_valid(g_mg_ncell, ncoarse, ngridmax,
+                               block_size, child_count, (1 << NDIM)) ||
+        (g_mg_block_size != 0 && g_mg_block_size != block_size) ||
+        (g_mg_child_count != 0 && g_mg_child_count != child_count)) {
+        fprintf(stderr,
+                "CUDA MG invalid block layout context=%s B=%d C=%d "
+                "ngm=%d ncell=%lld expected=%lld\n",
+                context, block_size, child_count, ngridmax,
+                g_mg_ncell, expected);
+        fflush(stderr);
+        std::abort();
+    }
+    g_mg_block_size = block_size;
+    g_mg_child_count = child_count;
+}
+
+static void mg_require_launch(const char* context, cudaError_t sync_error)
+{
+    const cudaError_t launch_error = cudaGetLastError();
+    const cudaError_t err =
+        sync_error != cudaSuccess ? sync_error : launch_error;
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA MG %s launch error: %s\n",
+                context, cudaGetErrorString(err));
+        fflush(stderr);
+        std::abort();
+    }
+}
 
 // ==========================================================================
 // GPU-resident halo exchange arrays for MG phi
@@ -149,7 +191,7 @@ __global__ void gauss_seidel_mg_fine_kernel(
     const int* __restrict__ flag2,
     const int* __restrict__ nbor_grid,  // (7, ngrid) — nbor_grid[igrid_mg*7 + j]
     const int* __restrict__ igrid_arr,
-    int ngrid, int ngridmax, int ncoarse,
+    int ngrid, int ngridmax, int ncoarse, int block_size, int child_count,
     double dx2, int color, int safe_mode_flag)
 {
     // NOTE: All cell/grid indices (icell, igrid_amr, etc.) are 1-based Fortran indices.
@@ -168,8 +210,8 @@ __global__ void gauss_seidel_mg_fine_kernel(
     // Process 4 cells (red or black)
     for (int ind0 = 0; ind0 < 4; ind0++) {
         int ind = (color == 0) ? d_ired[ind0] : d_iblack[ind0]; // 1-based
-        int iskip = ncoarse + (ind - 1) * ngridmax;
-        int icell = iskip + igrid_amr; // 1-based Fortran cell index
+        long long icell = amr_cuda_cell_1based(
+            igrid_amr, ind, ncoarse, block_size, child_count);
 
         double nb_sum = 0.0;
 
@@ -182,7 +224,8 @@ __global__ void gauss_seidel_mg_fine_kernel(
                     int igshift = d_iii[idim][inbor][ind-1];
                     int jj = d_jjj[idim][inbor][ind-1]; // 1-based
                     int igrid_nbor = nbors[igshift]; // 1-based
-                    int icell_nbor = igrid_nbor + ncoarse + (jj - 1) * ngridmax; // 1-based
+                    long long icell_nbor = amr_cuda_cell_1based(
+                        igrid_nbor, jj, ncoarse, block_size, child_count);
                     nb_sum += phi[icell_nbor - 1];
                 }
             }
@@ -204,7 +247,8 @@ __global__ void gauss_seidel_mg_fine_kernel(
                         // No neighbor cell
                         weight -= 1.0 / mask_c;
                     } else {
-                        int icell_nbor = igrid_nbor + ncoarse + (jj - 1) * ngridmax;
+                        long long icell_nbor = amr_cuda_cell_1based(
+                            igrid_nbor, jj, ncoarse, block_size, child_count);
                         double mask_nbor = f3[icell_nbor - 1];
                         if (mask_nbor <= 0.0) {
                             weight += mask_nbor / mask_c;
@@ -231,7 +275,7 @@ __global__ void cmp_residual_mg_fine_kernel(
     const int* __restrict__ flag2,
     const int* __restrict__ nbor_grid,
     const int* __restrict__ igrid_arr,
-    int ngrid, int ngridmax, int ncoarse,
+    int ngrid, int ngridmax, int ncoarse, int block_size, int child_count,
     double oneoverdx2, double dtwondim,
     double* __restrict__ partial_norm2,
     int compute_norm)
@@ -254,8 +298,8 @@ __global__ void cmp_residual_mg_fine_kernel(
 
         // Process all 8 cells
         for (int ind = 1; ind <= 8; ind++) {
-            int iskip = ncoarse + (ind - 1) * ngridmax;
-            int icell = iskip + igrid_amr; // 1-based Fortran cell index
+            long long icell = amr_cuda_cell_1based(
+                igrid_amr, ind, ncoarse, block_size, child_count);
 
             double phi_c = phi[icell - 1];
             double nb_sum = 0.0;
@@ -268,7 +312,8 @@ __global__ void cmp_residual_mg_fine_kernel(
                         int igshift = d_iii[idim][inbor][ind-1];
                         int jj = d_jjj[idim][inbor][ind-1]; // 1-based
                         int igrid_nbor = nbors[igshift]; // 1-based
-                        int icell_nbor = igrid_nbor + ncoarse + (jj - 1) * ngridmax; // 1-based
+                        long long icell_nbor = amr_cuda_cell_1based(
+                            igrid_nbor, jj, ncoarse, block_size, child_count);
                         nb_sum += phi[icell_nbor - 1];
                     }
                 }
@@ -287,7 +332,8 @@ __global__ void cmp_residual_mg_fine_kernel(
                         if (igrid_nbor == 0) {
                             nb_sum -= phi_c / mask_c;
                         } else {
-                            int icell_nbor = igrid_nbor + ncoarse + (jj - 1) * ngridmax; // 1-based
+                            long long icell_nbor = amr_cuda_cell_1based(
+                                igrid_nbor, jj, ncoarse, block_size, child_count);
                             double mask_nbor = f3[icell_nbor - 1];
                             if (mask_nbor <= 0.0) {
                                 nb_sum += phi_c * (mask_nbor / mask_c);
@@ -363,6 +409,12 @@ void cuda_mg_upload(const double* phi, const double* f,
                     const int* nbor_grid, const int* igrid, int ngrid)
 {
     if (!is_pool_initialized()) return;
+    g_mg_gs_launches = 0;
+    g_mg_res_launches = 0;
+    g_mg_restrict_launches = 0;
+    g_mg_interp_launches = 0;
+    g_mg_block_size = 0;
+    g_mg_child_count = 0;
 
     // Clear any stale CUDA error from previous operations (e.g., mesh_upload SKIP)
     cudaGetLastError();
@@ -487,9 +539,12 @@ void cuda_mg_download_f1(double* f1, long long ncell)
 }
 
 void cuda_mg_gauss_seidel(int ngrid, int ngridmax, int ncoarse,
+                          int block_size, int child_count,
                           double dx2, int color, int safe_mode)
 {
     if (!g_mg_ready || ngrid <= 0) return;
+    mg_require_block_layout(
+        ngridmax, ncoarse, block_size, child_count, "gauss_seidel");
 
     int block = 256;
     int grid = (ngrid + block - 1) / block;
@@ -497,18 +552,23 @@ void cuda_mg_gauss_seidel(int ngrid, int ngridmax, int ncoarse,
     gauss_seidel_mg_fine_kernel<<<grid, block, 0, g_mg_stream>>>(
         d_mg_phi, d_mg_f2, d_mg_f3, d_mg_flag2,
         d_mg_nbor, d_mg_igrid,
-        ngrid, ngridmax, ncoarse,
+        ngrid, ngridmax, ncoarse, block_size, child_count,
         dx2, color, safe_mode);
 
     // Sync after kernel (phi is needed by next color sweep)
-    cudaStreamSynchronize(g_mg_stream);
+    const cudaError_t sync_error = cudaStreamSynchronize(g_mg_stream);
+    mg_require_launch("gauss_seidel", sync_error);
+    g_mg_gs_launches++;
 }
 
 void cuda_mg_residual(int ngrid, int ngridmax, int ncoarse,
+                      int block_size, int child_count,
                       double oneoverdx2, double dtwondim, double dx2_norm,
                       double* norm2, int compute_norm)
 {
     if (!g_mg_ready || ngrid <= 0) return;
+    mg_require_block_layout(
+        ngridmax, ncoarse, block_size, child_count, "residual");
 
     int block = 256;
     int grid = (ngrid + block - 1) / block;
@@ -530,11 +590,13 @@ void cuda_mg_residual(int ngrid, int ngridmax, int ncoarse,
     cmp_residual_mg_fine_kernel<<<grid, block, smem, g_mg_stream>>>(
         d_mg_phi, d_mg_f1, d_mg_f2, d_mg_f3, d_mg_flag2,
         d_mg_nbor, d_mg_igrid,
-        ngrid, ngridmax, ncoarse,
+        ngrid, ngridmax, ncoarse, block_size, child_count,
         oneoverdx2, dtwondim,
         d_mg_partial_norm2, compute_norm);
 
-    cudaStreamSynchronize(g_mg_stream);
+    const cudaError_t sync_error = cudaStreamSynchronize(g_mg_stream);
+    mg_require_launch("residual", sync_error);
+    g_mg_res_launches++;
 
     if (compute_norm && norm2) {
         cudaMemcpy(h_mg_partial_norm2, d_mg_partial_norm2,
@@ -548,6 +610,14 @@ void cuda_mg_residual(int ngrid, int ngridmax, int ncoarse,
 
 void cuda_mg_free(void)
 {
+    if (g_mg_gs_launches + g_mg_res_launches +
+        g_mg_restrict_launches + g_mg_interp_launches > 0) {
+        printf("[CUDA_MG] B=%d C=%d gs=%lld residual=%lld restrict=%lld interp=%lld\n",
+               g_mg_block_size, g_mg_child_count,
+               g_mg_gs_launches, g_mg_res_launches,
+               g_mg_restrict_launches, g_mg_interp_launches);
+        fflush(stdout);
+    }
     g_mg_ready = false;
 
     // Free cell arrays to avoid GPU OOM when hydro mesh also needs GPU memory
@@ -782,7 +852,7 @@ __global__ void restrict_residual_fine_kernel(
     const int* __restrict__ igrid_arr,
     const int* __restrict__ restrict_target,
     double* __restrict__ coarse_rhs_flat,
-    int ngrid, int ngridmax, int ncoarse)
+    int ngrid, int ngridmax, int ncoarse, int block_size, int child_count)
 {
     int igrid_f_mg = blockIdx.x * blockDim.x + threadIdx.x;
     if (igrid_f_mg >= ngrid) return;
@@ -794,7 +864,8 @@ __global__ void restrict_residual_fine_kernel(
 
     double sum = 0.0;
     for (int ind_f = 0; ind_f < 8; ind_f++) {
-        int icell_f = ncoarse + ind_f * ngridmax + igrid_amr; // 1-based
+        long long icell_f = amr_cuda_cell_1based(
+            igrid_amr, ind_f + 1, ncoarse, block_size, child_count);
         if (f3[icell_f - 1] > 0.0) {
             sum += f1[icell_f - 1];
         }
@@ -813,7 +884,7 @@ __global__ void interpolate_correct_fine_kernel(
     const int* __restrict__ igrid_arr,
     const int* __restrict__ interp_nbor_flat,
     const double* __restrict__ coarse_phi_flat,
-    int ngrid, int ngridmax, int ncoarse)
+    int ngrid, int ngridmax, int ncoarse, int block_size, int child_count)
 {
     int igrid_f_mg = blockIdx.x * blockDim.x + threadIdx.x;
     if (igrid_f_mg >= ngrid) return;
@@ -829,7 +900,8 @@ __global__ void interpolate_correct_fine_kernel(
 
     // Process 8 children
     for (int ind_f = 0; ind_f < 8; ind_f++) {
-        int icell_f = ncoarse + ind_f * ngridmax + igrid_amr; // 1-based
+        long long icell_f = amr_cuda_cell_1based(
+            igrid_amr, ind_f + 1, ncoarse, block_size, child_count);
         if (f3[icell_f - 1] <= 0.0) continue;  // fine cell masked
 
         double corr = 0.0;
@@ -928,9 +1000,12 @@ void cuda_mg_ri_setup(const int* restrict_target, const int* interp_nbor_flat,
     fflush(stdout);
 }
 
-void cuda_mg_restrict_execute(int ngrid, int ngridmax, int ncoarse)
+void cuda_mg_restrict_execute(int ngrid, int ngridmax, int ncoarse,
+                              int block_size, int child_count)
 {
     if (g_ri_ngrid <= 0 || !g_mg_ready || !d_coarse_rhs_flat) return;
+    mg_require_block_layout(
+        ngridmax, ncoarse, block_size, child_count, "restrict");
 
     // Clear coarse RHS
     cudaMemsetAsync(d_coarse_rhs_flat, 0,
@@ -942,9 +1017,11 @@ void cuda_mg_restrict_execute(int ngrid, int ngridmax, int ncoarse)
     restrict_residual_fine_kernel<<<grid, block, 0, g_mg_stream>>>(
         d_mg_f1, d_mg_f3, d_mg_igrid, d_restrict_target,
         d_coarse_rhs_flat,
-        ngrid, ngridmax, ncoarse);
+        ngrid, ngridmax, ncoarse, block_size, child_count);
 
-    cudaStreamSynchronize(g_mg_stream);
+    const cudaError_t sync_error = cudaStreamSynchronize(g_mg_stream);
+    mg_require_launch("restrict", sync_error);
+    g_mg_restrict_launches++;
 }
 
 void cuda_mg_restrict_download(double* h_coarse_rhs, int total_cells)
@@ -971,9 +1048,12 @@ void cuda_mg_interp_upload(const double* h_coarse_phi, int total_cells)
     cudaStreamSynchronize(g_mg_stream);
 }
 
-void cuda_mg_interp_execute(int ngrid, int ngridmax, int ncoarse)
+void cuda_mg_interp_execute(int ngrid, int ngridmax, int ncoarse,
+                            int block_size, int child_count)
 {
     if (g_ri_ngrid <= 0 || !g_mg_ready || !d_coarse_phi_flat) return;
+    mg_require_block_layout(
+        ngridmax, ncoarse, block_size, child_count, "interp");
 
     int block = 256;
     int grid = (ngrid + block - 1) / block;
@@ -981,9 +1061,11 @@ void cuda_mg_interp_execute(int ngrid, int ngridmax, int ncoarse)
     interpolate_correct_fine_kernel<<<grid, block, 0, g_mg_stream>>>(
         d_mg_phi, d_mg_f3, d_mg_igrid, d_interp_nbor_flat,
         d_coarse_phi_flat,
-        ngrid, ngridmax, ncoarse);
+        ngrid, ngridmax, ncoarse, block_size, child_count);
 
-    cudaStreamSynchronize(g_mg_stream);
+    const cudaError_t sync_error = cudaStreamSynchronize(g_mg_stream);
+    mg_require_launch("interp", sync_error);
+    g_mg_interp_launches++;
 }
 
 int cuda_mg_ri_is_ready(void)

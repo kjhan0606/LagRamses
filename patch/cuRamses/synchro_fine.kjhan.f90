@@ -66,7 +66,8 @@ subroutine synchro_fine(ilevel)
           & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
      pm_hw=pm_grid_high_water()
      call cuda_pm_mesh_upload_c(f, son, phi, pm_ncell, 0_c_int, &
-          & int(ncoarse,c_long_long), int(ngridmax,c_int), int(pm_hw,c_int))
+          & int(ncoarse,c_long_long), int(ngridmax,c_int), int(pm_hw,c_int), &
+          & int(amr_block_size,c_int), int(twotondim,c_int))
      pm_gpu=(cuda_pm_is_ready_c()/=0)
      if(pm_gpu)call pm_gpu_alloc()
   end if

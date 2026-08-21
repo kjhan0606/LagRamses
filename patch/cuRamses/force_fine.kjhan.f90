@@ -5158,6 +5158,7 @@ subroutine scalar_gpu_sweep_halo(ilevel, model, params, tracker, &
   if(active(ilevel)%ngrid > 0) then
      call cuda_scal_sweep_c(int(model,c_int), params, &
           & int(ngridmax,c_int), int(ncoarse,c_int), &
+          & int(amr_block_size,c_int), int(twotondim,c_int), &
           & int(tracker,c_int), res_c, src_c)
      res_max=res_c
      src_max=src_c

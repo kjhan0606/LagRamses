@@ -311,7 +311,7 @@ end subroutine rho_fine
 !##############################################################################
 !##############################################################################
 !##############################################################################
-#ifdef _OPENMP
+#if defined(_OPENMP) && !defined(HYDRO_CUDA)
 subroutine rho_from_current_level(ilevel)
   use amr_commons
   use pm_commons
@@ -417,6 +417,13 @@ subroutine rho_from_current_level(ilevel)
   use pm_commons
   use hydro_commons
   use poisson_commons
+#ifdef HYDRO_CUDA
+  use pm_gpu_commons
+  use pm_gpu_dispatch
+  use particle_cuda_interface
+  use cuda_commons
+  use iso_c_binding
+#endif
   implicit none
   integer::ilevel
   !------------------------------------------------------------------
@@ -427,10 +434,149 @@ subroutine rho_from_current_level(ilevel)
   !------------------------------------------------------------------
   integer::igrid,jgrid,ipart,jpart,icpu
   integer::i,ig,ip,subnump
+#ifdef HYDRO_CUDA
+  integer::npart1,idim,gi,slot,nvec,ngtot,pm_hw,nptot
+  logical::rho_gpu
+  integer,allocatable::gvec(:)
+  integer(c_long_long)::pm_ncell
+  integer,dimension(1:nvector)::Lind_grid,Lind_cell,Lind_part,Lind_grid_part
+  real(dp),dimension(1:nvector,1:ndim)::Lx0
+  real(dp)::dx
+#endif
 !  integer, dimension(:), allocatable:: nparticles, ptrhead
 !  integer mythread, nthreads,nwork,icount,jcount,npart3
 !  common /openmpthreads/ mythread, nthreads
 !!$omp threadprivate(/openmpthreads/)
+
+#ifdef HYDRO_CUDA
+  ! [RESIZABLE] Keep the legacy serial path unchanged unless the particle
+  ! deposit mesh is resident and ready on the GPU.  The active GPU path uses
+  ! device accumulators while any thread without a stream replays CIC under a
+  ! critical section; the two contributions are merged once at the end.
+  dx=0.5D0**ilevel
+  rho_gpu=.false.
+#ifndef TSC
+  nptot=0
+  do icpu=1,ncpu
+     igrid=headl(icpu,ilevel)
+     do jgrid=1,numbl(icpu,ilevel)
+        if(igrid<=0)exit
+        nptot=nptot+numbp(igrid)
+        igrid=next(igrid)
+     end do
+  end do
+
+  if(gpu_particle .and. .not.pm_gpu_dead .and. .not.star .and. .not.sink &
+       & .and. (cic_levelmax==0 .or. ilevel<cic_levelmax) &
+       & .and. nptot>=pm_gpu_min_part &
+       & .and. cuda_pool_is_initialized_c()/=0)then
+     pm_ncell=int(ncoarse,c_long_long) &
+          & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
+     pm_hw=pm_grid_high_water()
+     call cuda_pm_rho_begin_c(son, pm_ncell, int(ncoarse,c_long_long), &
+          & int(ngridmax,c_int), int(pm_hw,c_int), &
+          & int(amr_block_size,c_int), int(twotondim,c_int))
+     rho_gpu=(cuda_pm_rho_is_ready_c()/=0)
+     if(rho_gpu)call pm_gpu_alloc()
+  end if
+#endif
+
+  if(rho_gpu)then
+     ngtot=0
+     do icpu=1,ncpu
+        ngtot=ngtot+numbl(icpu,ilevel)
+     end do
+     allocate(gvec(1:max(ngtot,1)))
+     nvec=0
+     do icpu=1,ncpu
+        igrid=headl(icpu,ilevel)
+        do jgrid=1,numbl(icpu,ilevel)
+           if(numbp(igrid)>0)then
+              nvec=nvec+1
+              gvec(nvec)=igrid
+           end if
+           igrid=next(igrid)
+        end do
+     end do
+
+!$omp parallel private(slot,ig,ip,gi,igrid,ipart,jpart,npart1,idim,i, &
+!$omp& Lind_grid,Lind_cell,Lind_part,Lind_grid_part,Lx0)
+     slot=int(cuda_acquire_stream_c())
+     if(slot>=PM_MAX_SLOT)then
+        call cuda_release_stream_c(int(slot,c_int))
+        slot=-1
+     end if
+     if(slot>=0)call pm_gpu_reset(slot)
+     ig=0
+     ip=0
+!$omp do schedule(dynamic,8)
+     do gi=1,nvec
+        igrid=gvec(gi)
+        npart1=numbp(igrid)
+        ig=ig+1
+        Lind_grid(ig)=igrid
+        ipart=headp(igrid)
+        do jpart=1,npart1
+           if(ig==0)then
+              ig=1
+              Lind_grid(ig)=igrid
+           end if
+           ip=ip+1
+           Lind_part(ip)=ipart
+           Lind_grid_part(ip)=ig
+           if(ip==nvector)then
+              if(slot>=0)then
+                 call pm_gpu_append(slot,PM_MODE_RHO,Lind_grid,Lind_part, &
+                      & Lind_grid_part,ig,ip,ilevel)
+              else
+                 do idim=1,ndim
+                    do i=1,ig
+                       Lx0(i,idim)=xg(Lind_grid(i),idim)-3.0D0*dx
+                    end do
+                 end do
+                 do i=1,ig
+                    Lind_cell(i)=father(Lind_grid(i))
+                 end do
+!$omp critical (cic_deposit)
+                 call cic_amr(Lind_cell,Lind_part,Lind_grid_part,Lx0, &
+                      & ig,ip,ilevel)
+!$omp end critical (cic_deposit)
+              end if
+              ip=0
+              ig=0
+           end if
+           ipart=nextp(ipart)
+        end do
+     end do
+!$omp end do nowait
+     if(ip>0)then
+        if(slot>=0)then
+           call pm_gpu_append(slot,PM_MODE_RHO,Lind_grid,Lind_part, &
+                & Lind_grid_part,ig,ip,ilevel)
+        else
+           do idim=1,ndim
+              do i=1,ig
+                 Lx0(i,idim)=xg(Lind_grid(i),idim)-3.0D0*dx
+              end do
+           end do
+           do i=1,ig
+              Lind_cell(i)=father(Lind_grid(i))
+           end do
+!$omp critical (cic_deposit)
+           call cic_amr(Lind_cell,Lind_part,Lind_grid_part,Lx0,ig,ip,ilevel)
+!$omp end critical (cic_deposit)
+        end if
+     end if
+     if(slot>=0)then
+        call pm_gpu_flush(slot,PM_MODE_RHO,ilevel)
+        call cuda_release_stream_c(int(slot,c_int))
+     end if
+!$omp end parallel
+     deallocate(gvec)
+     call pm_rho_merge()
+     return
+  end if
+#endif
 
 !!$omp parallel
 !   mythread = omp_get_thread_num()

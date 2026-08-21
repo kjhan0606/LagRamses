@@ -163,8 +163,10 @@ extern "C" {
     void cuda_mg_upload_phi(const double* phi, long long ncell);
     void cuda_mg_download_f1(double* f1, long long ncell);
     void cuda_mg_gauss_seidel(int ngrid, int ngridmax, int ncoarse,
+                              int block_size, int child_count,
                               double dx2, int color, int safe_mode);
     void cuda_mg_residual(int ngrid, int ngridmax, int ncoarse,
+                          int block_size, int child_count,
                           double oneoverdx2, double dtwondim, double dx2_norm,
                           double* norm2, int compute_norm);
     void cuda_mg_free(void);

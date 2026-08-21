@@ -20,8 +20,10 @@
 // ==========================================================================
 
 #include "cuda_stream_pool.h"
+#include "amr_cuda_index.cuh"
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 #define SCAL_SENTINEL 1.0e299
 
@@ -74,6 +76,10 @@ static int g_sc_n_emit = 0, g_sc_n_recv = 0;
 static int g_sc_emit_cap = 0, g_sc_recv_cap = 0;
 
 static bool g_sc_ready = false;
+static long long g_sc_uploads = 0;
+static long long g_sc_sweeps = 0;
+static int g_sc_block_size = 0;
+static int g_sc_child_count = 0;
 
 // --------------------------------------------------------------------------
 // Device helpers
@@ -97,7 +103,7 @@ __device__ __forceinline__ double scal_nb_val(
     const int* __restrict__ face6, const int* __restrict__ edge12,
     int bnd_base, const int* __restrict__ bnd_live,
     const double* __restrict__ bnd_val,
-    int ngridmax, int ncoarse, int noff)
+    int ngridmax, int ncoarse, int block_size, int child_count, int noff)
 {
     int ox = c_sc_off[off_id][0];
     int oy = c_sc_off[off_id][1];
@@ -137,7 +143,9 @@ __device__ __forceinline__ double scal_nb_val(
     }
 
     if (g > 0) {
-        return field[ncoarse + nb_ind0 * ngridmax + g - 1];
+        const long long cell = amr_cuda_cell_1based(
+            g, nb_ind0 + 1, ncoarse, block_size, child_count);
+        return field[cell - 1];
     }
 
     // Boundary closure (precomputed on CPU)
@@ -171,7 +179,8 @@ __global__ void scal_gs_kernel(
     const int* __restrict__ bnd_slot,
     const int* __restrict__ bnd_live,
     const double* __restrict__ bnd_val,
-    int ngrid, int ngridmax, int ncoarse, int noff,
+    int ngrid, int ngridmax, int ncoarse, int block_size, int child_count,
+    int noff,
     int model, int color, int tracker,
     ScalParams sp,
     unsigned long long* __restrict__ maxred)
@@ -196,11 +205,13 @@ __global__ void scal_gs_kernel(
         for (int ind0 = 0; ind0 < 8; ind0++) {
             if ((__popc(ind0) & 1) != color) continue;
 
-            int icell = ncoarse + ind0 * ngridmax + my_grid; // 1-based
+            long long icell = amr_cuda_cell_1based(
+                my_grid, ind0 + 1, ncoarse, block_size, child_count);
             double u_c = field[icell - 1];
 
 #define NBV(oid) scal_nb_val(field, my_grid, ind0, (oid), u_c, face6, edge12, \
-                             bnd_base, bnd_live, bnd_val, ngridmax, ncoarse, noff)
+                             bnd_base, bnd_live, bnd_val, ngridmax, ncoarse, \
+                             block_size, child_count, noff)
 
             if (model == SCAL_MODEL_FR) {
                 // p: 0=dx2_inv 1=a2_over_3 2=rho_coeff 3=R_bar 4=R_bar0
@@ -440,6 +451,10 @@ void cuda_scal_upload(const double* field, const double* rho,
                       int ngrid, int nbnd, int noff)
 {
     g_sc_ready = false;
+    g_sc_uploads = 0;
+    g_sc_sweeps = 0;
+    g_sc_block_size = 0;
+    g_sc_child_count = 0;
     if (!is_pool_initialized()) return;
     cudaGetLastError();
 
@@ -532,6 +547,7 @@ void cuda_scal_upload(const double* field, const double* rho,
         return;
     }
     g_sc_ready = true;
+    g_sc_uploads = 1;
 }
 
 int cuda_scal_is_ready(void) { return g_sc_ready ? 1 : 0; }
@@ -539,12 +555,28 @@ int cuda_scal_is_ready(void) { return g_sc_ready ? 1 : 0; }
 // One full sweep: red then black (halo exchange happens after both,
 // mirroring the CPU solve loop).
 void cuda_scal_sweep(int model, const double* params,
-                     int ngridmax, int ncoarse, int tracker,
+                     int ngridmax, int ncoarse, int block_size, int child_count,
+                     int tracker,
                      double* res_max, double* src_max)
 {
     *res_max = 0.0;
     *src_max = 0.0;
     if (!g_sc_ready || g_sc_ngrid <= 0) return;
+    const long long expected =
+        (long long)ncoarse + (long long)child_count * ngridmax;
+    if (!amr_cuda_layout_valid(g_sc_ncell, ncoarse, ngridmax,
+                               block_size, child_count, (1 << NDIM)) ||
+        (g_sc_block_size != 0 && g_sc_block_size != block_size) ||
+        (g_sc_child_count != 0 && g_sc_child_count != child_count)) {
+        fprintf(stderr,
+                "CUDA scalar invalid block layout B=%d C=%d "
+                "ngm=%d ncell=%lld expected=%lld\n",
+                block_size, child_count, ngridmax, g_sc_ncell, expected);
+        fflush(stderr);
+        std::abort();
+    }
+    g_sc_block_size = block_size;
+    g_sc_child_count = child_count;
 
     ScalParams sp;
     for (int i = 0; i < 12; i++) sp.p[i] = params[i];
@@ -559,21 +591,26 @@ void cuda_scal_sweep(int model, const double* params,
         scal_gs_kernel<<<grid, block, smem, g_sc_stream>>>(
             d_sc_field, d_sc_rho, d_sc_igrid, d_sc_face, d_sc_edge,
             d_sc_bnd_slot, d_sc_bnd_live, d_sc_bnd_val,
-            g_sc_ngrid, ngridmax, ncoarse, g_sc_noff,
+            g_sc_ngrid, ngridmax, ncoarse, block_size, child_count, g_sc_noff,
             model, color, tracker, sp, d_sc_maxred);
     }
-    cudaStreamSynchronize(g_sc_stream);
+    const cudaError_t sync_error = cudaStreamSynchronize(g_sc_stream);
 
     unsigned long long h_red[2];
-    cudaMemcpy(h_red, d_sc_maxred, 2 * sizeof(unsigned long long),
-               cudaMemcpyDeviceToHost);
-    *res_max = scal_ull_to_double(h_red[0]);
-    *src_max = scal_ull_to_double(h_red[1]);
+    const cudaError_t copy_error = cudaMemcpy(
+        h_red, d_sc_maxred, 2 * sizeof(unsigned long long),
+        cudaMemcpyDeviceToHost);
 
-    cudaError_t err = cudaGetLastError();
+    const cudaError_t launch_error = cudaGetLastError();
+    const cudaError_t err = sync_error != cudaSuccess ? sync_error :
+                            (copy_error != cudaSuccess ? copy_error : launch_error);
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA scalar sweep error: %s\n", cudaGetErrorString(err));
         g_sc_ready = false;
+    } else {
+        *res_max = scal_ull_to_double(h_red[0]);
+        *src_max = scal_ull_to_double(h_red[1]);
+        g_sc_sweeps++;
     }
 }
 
@@ -641,6 +678,13 @@ void cuda_scal_halo_scatter(const double* buf, int n)
 // Free the big per-solve arrays (grid/bnd/halo tables keep capacity)
 void cuda_scal_release(void)
 {
+    if (g_sc_uploads + g_sc_sweeps > 0) {
+        printf("[CUDA_NGR] B=%d C=%d uploads=%lld scalar_sweeps=%lld\n",
+               g_sc_block_size, g_sc_child_count, g_sc_uploads, g_sc_sweeps);
+        fflush(stdout);
+    }
+    g_sc_uploads = 0;
+    g_sc_sweeps = 0;
     g_sc_ready = false;
     if (d_sc_field) { cudaFree(d_sc_field); d_sc_field = nullptr; }
     if (d_sc_rho)   { cudaFree(d_sc_rho);   d_sc_rho   = nullptr; }

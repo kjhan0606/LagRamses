@@ -43,19 +43,22 @@ module poisson_cuda_interface
      end subroutine
 
      subroutine cuda_mg_gauss_seidel_c(ngrid, ngridmax_c, ncoarse_c, &
-          dx2, color, safe_mode) &
+          block_size_c, child_count_c, dx2, color, safe_mode) &
           bind(C, name='cuda_mg_gauss_seidel')
        import :: c_int, c_double
        integer(c_int), value :: ngrid, ngridmax_c, ncoarse_c
+       integer(c_int), value :: block_size_c, child_count_c
        real(c_double), value :: dx2
        integer(c_int), value :: color, safe_mode
      end subroutine
 
      subroutine cuda_mg_residual_c(ngrid, ngridmax_c, ncoarse_c, &
-          oneoverdx2, dtwondim, dx2_norm, norm2, compute_norm) &
+          block_size_c, child_count_c, oneoverdx2, dtwondim, dx2_norm, &
+          norm2, compute_norm) &
           bind(C, name='cuda_mg_residual')
        import :: c_int, c_double
        integer(c_int), value :: ngrid, ngridmax_c, ncoarse_c
+       integer(c_int), value :: block_size_c, child_count_c
        real(c_double), value :: oneoverdx2, dtwondim, dx2_norm
        real(c_double) :: norm2
        integer(c_int), value :: compute_norm
@@ -116,10 +119,12 @@ module poisson_cuda_interface
      end subroutine
 
      ! Restrict: memset coarse RHS + run kernel
-     subroutine cuda_mg_restrict_execute_c(ngrid, ngridmax_c, ncoarse_c) &
+     subroutine cuda_mg_restrict_execute_c(ngrid, ngridmax_c, ncoarse_c, &
+          block_size_c, child_count_c) &
           bind(C, name='cuda_mg_restrict_execute')
        import :: c_int
        integer(c_int), value :: ngrid, ngridmax_c, ncoarse_c
+       integer(c_int), value :: block_size_c, child_count_c
      end subroutine
 
      ! Restrict: download coarse RHS to host
@@ -139,10 +144,12 @@ module poisson_cuda_interface
      end subroutine
 
      ! Interp: run kernel
-     subroutine cuda_mg_interp_execute_c(ngrid, ngridmax_c, ncoarse_c) &
+     subroutine cuda_mg_interp_execute_c(ngrid, ngridmax_c, ncoarse_c, &
+          block_size_c, child_count_c) &
           bind(C, name='cuda_mg_interp_execute')
        import :: c_int
        integer(c_int), value :: ngrid, ngridmax_c, ncoarse_c
+       integer(c_int), value :: block_size_c, child_count_c
      end subroutine
 
      ! Check if restrict/interp GPU is ready

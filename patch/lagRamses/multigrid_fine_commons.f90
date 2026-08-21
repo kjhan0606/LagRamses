@@ -647,10 +647,14 @@ subroutine multigrid_fine(ilevel,icount)
             safe_int = 0
             if(safe_mode(ilevel)) safe_int = 1
             call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
-                 int(ngridmax,c_int), int(ncoarse,c_int), dx2_mg, 0, safe_int)
+                 int(ngridmax,c_int), int(ncoarse,c_int), &
+                 int(amr_block_size,c_int), int(twotondim,c_int), &
+                 dx2_mg, 0, safe_int)
             if(.not.mg_merged_rb) call make_virtual_fine_dp_gpu(ilevel)
             call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
-                 int(ngridmax,c_int), int(ncoarse,c_int), dx2_mg, 1, safe_int)
+                 int(ngridmax,c_int), int(ncoarse,c_int), &
+                 int(amr_block_size,c_int), int(twotondim,c_int), &
+                 dx2_mg, 1, safe_int)
             call make_virtual_fine_dp_gpu(ilevel)
          else
 #endif
@@ -684,6 +688,7 @@ subroutine multigrid_fine(ilevel,icount)
          if(iter==1) then
             call cuda_mg_residual_c(int(active(ilevel)%ngrid,c_int), &
                  int(ngridmax,c_int), int(ncoarse,c_int), &
+                 int(amr_block_size,c_int), int(twotondim,c_int), &
                  oneoverdx2_mg, dble(twondim), dx2_norm_mg, &
                  gpu_norm2, 1)
             i_res_norm2 = gpu_norm2
@@ -695,6 +700,7 @@ subroutine multigrid_fine(ilevel,icount)
          else
             call cuda_mg_residual_c(int(active(ilevel)%ngrid,c_int), &
                  int(ngridmax,c_int), int(ncoarse,c_int), &
+                 int(amr_block_size,c_int), int(twotondim,c_int), &
                  oneoverdx2_mg, dble(twondim), dx2_norm_mg, &
                  dummy_norm2, 0)
          end if
@@ -728,7 +734,8 @@ subroutine multigrid_fine(ilevel,icount)
       if(use_ri_gpu) then
          ! GPU restriction: d_mg_f1 → d_coarse_rhs_flat → host → active_mg
          call cuda_mg_restrict_execute_c(int(active(ilevel)%ngrid,c_int), &
-              int(ngridmax,c_int), int(ncoarse,c_int))
+              int(ngridmax,c_int), int(ncoarse,c_int), &
+              int(amr_block_size,c_int), int(twotondim,c_int))
          call cuda_mg_restrict_download_c(mg_ri_coarse_rhs, &
               int(mg_ri_total_coarse,c_int))
          call scatter_coarse_rhs_from_flat(ilevel)
@@ -771,7 +778,8 @@ subroutine multigrid_fine(ilevel,icount)
             call cuda_mg_interp_upload_c(mg_ri_coarse_phi, &
                  int(mg_ri_total_coarse,c_int))
             call cuda_mg_interp_execute_c(int(active(ilevel)%ngrid,c_int), &
-                 int(ngridmax,c_int), int(ncoarse,c_int))
+                 int(ngridmax,c_int), int(ncoarse,c_int), &
+                 int(amr_block_size,c_int), int(twotondim,c_int))
             call make_virtual_fine_dp_gpu(ilevel)
          else
 #endif
@@ -804,10 +812,14 @@ subroutine multigrid_fine(ilevel,icount)
             safe_int = 0
             if(safe_mode(ilevel)) safe_int = 1
             call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
-                 int(ngridmax,c_int), int(ncoarse,c_int), dx2_mg, 0, safe_int)
+                 int(ngridmax,c_int), int(ncoarse,c_int), &
+                 int(amr_block_size,c_int), int(twotondim,c_int), &
+                 dx2_mg, 0, safe_int)
             if(.not.mg_merged_rb) call make_virtual_fine_dp_gpu(ilevel)
             call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
-                 int(ngridmax,c_int), int(ncoarse,c_int), dx2_mg, 1, safe_int)
+                 int(ngridmax,c_int), int(ncoarse,c_int), &
+                 int(amr_block_size,c_int), int(twotondim,c_int), &
+                 dx2_mg, 1, safe_int)
             call make_virtual_fine_dp_gpu(ilevel)
          else
 #endif
@@ -840,6 +852,7 @@ subroutine multigrid_fine(ilevel,icount)
          gpu_norm2 = 0.0d0
          call cuda_mg_residual_c(int(active(ilevel)%ngrid,c_int), &
               int(ngridmax,c_int), int(ncoarse,c_int), &
+              int(amr_block_size,c_int), int(twotondim,c_int), &
               oneoverdx2_mg, dble(twondim), dx2_norm_mg, &
               gpu_norm2, 1)
          res_norm2 = gpu_norm2

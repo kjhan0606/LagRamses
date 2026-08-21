@@ -416,7 +416,8 @@ subroutine rho_from_current_level(ilevel)
           & +int(twotondim,c_long_long)*int(ngridmax,c_long_long)
      pm_hw=pm_grid_high_water()
      call cuda_pm_rho_begin_c(son, pm_ncell, int(ncoarse,c_long_long), &
-          & int(ngridmax,c_int), int(pm_hw,c_int))
+          & int(ngridmax,c_int), int(pm_hw,c_int), &
+          & int(amr_block_size,c_int), int(twotondim,c_int))
      rho_gpu=(cuda_pm_rho_is_ready_c()/=0)
      if(rho_gpu)call pm_gpu_alloc()
   end if

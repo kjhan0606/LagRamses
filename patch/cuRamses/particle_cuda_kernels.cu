@@ -17,6 +17,8 @@
 // ==========================================================================
 
 #include "cuda_stream_pool.h"
+#include "amr_cuda_index.cuh"
+#include <atomic>
 #include <cstdio>
 #include <ctime>
 
@@ -28,6 +30,20 @@ static long long g_pm_n_upload = 0;     // upload calls
 static long long g_pm_n_flush  = 0;     // flush calls
 static long long g_pm_n_part   = 0;     // particles processed on the GPU
 static long long g_pm_up_bytes = 0;     // bytes uploaded
+static long long g_pm_mesh_uploads = 0;
+static std::atomic<long long> g_pm_gather_launches{0};
+static long long g_pm_rho_uploads = 0;
+static std::atomic<long long> g_pm_deposit_launches{0};
+static std::atomic<long long> g_pm_deposit_parts{0};
+static int g_pm_block_size = 0;
+static int g_pm_child_count = 0;
+
+static bool pm_layout_valid(long long ncell, long long ncoarse,
+                            int ngridmax, int block_size, int child_count)
+{
+    return amr_cuda_layout_valid(
+        ncell, ncoarse, ngridmax, block_size, child_count, (1 << NDIM));
+}
 
 static double pm_now(void)
 {
@@ -171,6 +187,7 @@ __global__ void pm_cic_kernel(
     const double* __restrict__ mesh_phi,
     const int*    __restrict__ mesh_son,
     long long ncell, int ngridmax, int ncoarse,
+    int block_size, int child_count,
     int np, PmParams pp,
     int* __restrict__ err_flag)
 {
@@ -263,9 +280,10 @@ __global__ void pm_cic_kernel(
         icell[7] = 1 + icd[0] + 3*icd[1] + 9*icd[2];
     }
 
-    int indp[8];
+    long long indp[8];
     for (int ind = 0; ind < 8; ind++) {
-        if (ok) indp[ind] = ncoarse + (icell[ind]-1)*ngridmax + igr[ind];
+        if (ok) indp[ind] = amr_cuda_cell_1based(
+            igr[ind], icell[ind], ncoarse, block_size, child_count);
         else    indp[ind] = gnbf[g*27 + icell[ind] - 1];
     }
 
@@ -319,32 +337,36 @@ extern "C" {
 // twotondim oct slots, the first `hw` grids (hw = highest grid index in use).
 // ngridmax is an allocation ceiling that is typically ~50x the grids actually
 // present, so copying the whole array wastes almost all of the transfer.
-static void pm_upload_sliced(void* dst, const void* src, size_t elemsz,
+static bool pm_upload_sliced(void* dst, const void* src, size_t elemsz,
                              long long ncoarse, int ngridmax, int hw,
+                             int block_size, int child_count,
                              int ncomp, long long ncell)
 {
-    if (hw > ngridmax) hw = ngridmax;
-    g_pm_up_bytes += (long long)ncomp * (ncoarse + 8LL * hw) * (long long)elemsz;
-    // The eight oct slots are evenly strided by ngridmax, so one strided 2D
-    // copy replaces eight separate transfers. At these sizes the slices are
-    // ~100 kB each and per-call latency, not bandwidth, sets the cost.
+    // [RESIZABLE] Block grid-major storage makes every complete block through
+    // the high-water grid a single contiguous prefix.  Copy each component's
+    // prefix using the full allocated component stride.
+    if (!pm_layout_valid(
+            ncell, ncoarse, ngridmax, block_size, child_count) ||
+        hw < 0 || hw > ngridmax)
+        return false;
+    const long long live_ncell = amr_cuda_live_cell_prefix(
+        ncoarse, hw, block_size, child_count);
+    if (live_ncell < ncoarse || live_ncell > ncell) return false;
+    g_pm_up_bytes += (long long)ncomp * live_ncell * (long long)elemsz;
     for (int c = 0; c < ncomp; c++) {
         const char* hp = (const char*)src + (size_t)c * ncell * elemsz;
         char*       dp = (char*)dst       + (size_t)c * ncell * elemsz;
-        if (ncoarse > 0)
-            cudaMemcpy(dp, hp, (size_t)ncoarse * elemsz, cudaMemcpyHostToDevice);
-        if (hw > 0) {
-            size_t off   = (size_t)ncoarse * elemsz;
-            size_t pitch = (size_t)ngridmax * elemsz;
-            cudaMemcpy2D(dp + off, pitch, hp + off, pitch,
-                         (size_t)hw * elemsz, 8, cudaMemcpyHostToDevice);
-        }
+        if (live_ncell > 0 && cudaMemcpy(dp, hp, (size_t)live_ncell * elemsz,
+                                        cudaMemcpyHostToDevice) != cudaSuccess)
+            return false;
     }
+    return true;
 }
 
 void cuda_pm_mesh_upload(const double* f, const int* son, const double* phi,
                          long long ncell, int with_phi,
-                         long long ncoarse, int ngridmax, int hw)
+                         long long ncoarse, int ngridmax, int hw,
+                         int block_size, int child_count)
 {
     g_pm_ready = false;
     if (!is_pool_initialized()) return;
@@ -379,22 +401,35 @@ void cuda_pm_mesh_upload(const double* f, const int* son, const double* phi,
     g_pm_ncell = ncell;
 
     double t0 = pm_now();
-    pm_upload_sliced(d_pm_f,   f,   sizeof(double), ncoarse, ngridmax, hw, 3, ncell);
-    pm_upload_sliced(d_pm_son, son, sizeof(int),    ncoarse, ngridmax, hw, 1, ncell);
+    bool upload_ok =
+        pm_upload_sliced(d_pm_f, f, sizeof(double), ncoarse, ngridmax, hw,
+                         block_size, child_count, 3, ncell) &&
+        pm_upload_sliced(d_pm_son, son, sizeof(int), ncoarse, ngridmax, hw,
+                         block_size, child_count, 1, ncell);
     g_pm_has_phi = (with_phi != 0);
     if (g_pm_has_phi && phi)
-        pm_upload_sliced(d_pm_phi, phi, sizeof(double), ncoarse, ngridmax, hw, 1, ncell);
-    cudaDeviceSynchronize();
+        upload_ok = upload_ok &&
+            pm_upload_sliced(d_pm_phi, phi, sizeof(double), ncoarse, ngridmax, hw,
+                             block_size, child_count, 1, ncell);
+    const cudaError_t sync_error = cudaDeviceSynchronize();
     g_pm_t_upload += pm_now() - t0;
     g_pm_n_upload++;
 
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
+    const cudaError_t launch_error = cudaGetLastError();
+    if (!upload_ok) {
+        fprintf(stderr, "CUDA pm mesh upload error: invalid block layout or copy\n");
+        return;
+    }
+    const cudaError_t err =
+        sync_error != cudaSuccess ? sync_error : launch_error;
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA pm mesh upload error: %s\n", cudaGetErrorString(err));
         return;
     }
     g_pm_ready = true;
+    g_pm_mesh_uploads++;
+    g_pm_block_size = block_size;
+    g_pm_child_count = child_count;
 }
 
 int cuda_pm_is_ready(void) { return g_pm_ready ? 1 : 0; }
@@ -407,9 +442,14 @@ int cuda_pm_flush(int slot, int ng, int np,
                   const double* h_px, const double* h_pv,
                   const int* h_pg, const double* h_dteff,
                   const double* params, int ngridmax, int ncoarse,
+                  int block_size, int child_count,
                   double* out_new_v, double* out_new_x, double* out_phi)
 {
     if (!g_pm_ready || slot < 0 || np <= 0 || ng <= 0) return -1;
+    if (!pm_layout_valid(
+            g_pm_ncell, ncoarse, ngridmax, block_size, child_count) ||
+        block_size != g_pm_block_size || child_count != g_pm_child_count)
+        return -1;
     if (!pm_ensure_slot(slot, ng, np)) return -1;
 
     double t_f0 = pm_now();
@@ -451,7 +491,7 @@ int cuda_pm_flush(int slot, int ng, int np,
         p->d_x0, p->d_nbf,
         p->d_new_v, p->d_new_x, p->d_phi_out,
         d_pm_f, d_pm_phi, d_pm_son,
-        g_pm_ncell, ngridmax, ncoarse,
+        g_pm_ncell, ngridmax, ncoarse, block_size, child_count,
         np, pp, p->d_err);
 
     cudaMemcpyAsync(p->h_new_v, p->d_new_v, (size_t)np * 3 * sizeof(double), cudaMemcpyDeviceToHost, st);
@@ -462,9 +502,11 @@ int cuda_pm_flush(int slot, int ng, int np,
 
     int h_err = 0;
     cudaMemcpyAsync(&h_err, p->d_err, sizeof(int), cudaMemcpyDeviceToHost, st);
-    cudaStreamSynchronize(st);
+    const cudaError_t sync_error = cudaStreamSynchronize(st);
 
-    cudaError_t cerr = cudaGetLastError();
+    const cudaError_t launch_error = cudaGetLastError();
+    const cudaError_t cerr =
+        sync_error != cudaSuccess ? sync_error : launch_error;
     if (cerr != cudaSuccess) {
         fprintf(stderr, "CUDA pm flush error: %s\n", cudaGetErrorString(cerr));
         return -1;
@@ -479,6 +521,14 @@ int cuda_pm_flush(int slot, int ng, int np,
     g_pm_t_flush += pm_now() - t_f0;
     g_pm_n_flush++;
     g_pm_n_part += np;
+    const long long gather_count =
+        g_pm_gather_launches.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (gather_count == 1) {
+        printf("[CUDA_PM_GATHER] B=%d C=%d mesh_upload=%lld gather=%lld particles=%lld\n",
+               block_size, child_count, g_pm_mesh_uploads,
+               gather_count, (long long)np);
+        fflush(stdout);
+    }
     return 0;
 }
 
@@ -498,6 +548,15 @@ void cuda_pm_report(void)
     printf("   per particle: %.1f ns on the GPU path\n",
            g_pm_n_part ? 1e9 * g_pm_t_flush / (double)g_pm_n_part : 0.0);
     printf("   upload amortises once npart/call exceeds t_up/(t_cpu-t_gpu)\n");
+    printf("[CUDA_PM] B=%d C=%d mesh_upload=%lld gather=%lld "
+           "rho_upload=%lld deposit=%lld gather_particles=%lld "
+           "deposit_particles=%lld\n",
+           g_pm_block_size, g_pm_child_count, g_pm_mesh_uploads,
+           g_pm_gather_launches.load(std::memory_order_relaxed),
+           g_pm_rho_uploads,
+           g_pm_deposit_launches.load(std::memory_order_relaxed),
+           g_pm_n_part,
+           g_pm_deposit_parts.load(std::memory_order_relaxed));
     fflush(stdout);
 }
 
@@ -524,7 +583,7 @@ __global__ void pm_deposit_kernel(
     double* __restrict__ rho_acc,
     double* __restrict__ phiw_acc,
     const int* __restrict__ mesh_son,
-    int ngridmax, int ncoarse,
+    int ngridmax, int ncoarse, int block_size, int child_count,
     int np,
     double scale, double dx, double skip0, double skip1, double skip2,
     double vol_loc, int is_static, double mass_cut,
@@ -600,7 +659,8 @@ __global__ void pm_deposit_kernel(
         int fc = gnbf[g*27 + kg[ind] - 1];
         int igr = mesh_son[fc - 1];
         if (igr <= 0) continue;
-        long long c = (long long)(ncoarse + (icell[ind]-1)*ngridmax + igr) - 1;
+        long long c = (long long)amr_cuda_cell_1based(
+            igr, icell[ind], ncoarse, block_size, child_count) - 1;
         atomicAdd(&rho_acc[c], m * vol[ind] / vol_loc);
         if (ok2_scalar) atomicAdd(&phiw_acc[c], vol[ind]);
     }
@@ -609,7 +669,8 @@ __global__ void pm_deposit_kernel(
 extern "C" {
 
 void cuda_pm_rho_begin(const int* son, long long ncell,
-                       long long ncoarse, int ngridmax, int hw)
+                       long long ncoarse, int ngridmax, int hw,
+                       int block_size, int child_count)
 {
     g_pm_rho_ready = false;
     if (!is_pool_initialized()) return;
@@ -643,16 +704,22 @@ void cuda_pm_rho_begin(const int* son, long long ncell,
     g_pm_rho_ncell = ncell;
 
     double t0 = pm_now();
-    pm_upload_sliced(d_pm_son, son, sizeof(int), ncoarse, ngridmax, hw, 1, ncell);
+    bool upload_ok = pm_upload_sliced(
+        d_pm_son, son, sizeof(int), ncoarse, ngridmax, hw,
+        block_size, child_count, 1, ncell);
     cudaMemset(d_pm_rho,  0, (size_t)ncell * sizeof(double));
     cudaMemset(d_pm_phiw, 0, (size_t)ncell * sizeof(double));
-    cudaDeviceSynchronize();
+    const cudaError_t sync_error = cudaDeviceSynchronize();
     g_pm_t_upload += pm_now() - t0;
     g_pm_n_upload++;
 
-    cudaDeviceSynchronize();
-    if (cudaGetLastError() != cudaSuccess) return;
+    const cudaError_t launch_error = cudaGetLastError();
+    if (!upload_ok || sync_error != cudaSuccess || launch_error != cudaSuccess)
+        return;
     g_pm_rho_ready = true;
+    g_pm_rho_uploads++;
+    g_pm_block_size = block_size;
+    g_pm_child_count = child_count;
 }
 
 int cuda_pm_rho_is_ready(void) { return g_pm_rho_ready ? 1 : 0; }
@@ -661,9 +728,14 @@ int cuda_pm_deposit_flush(int slot, int ng, int np,
                           const double* h_x0, const int* h_nbf,
                           const double* h_px, const double* h_mass,
                           const int* h_pg,
-                          const double* params, int ngridmax, int ncoarse)
+                          const double* params, int ngridmax, int ncoarse,
+                          int block_size, int child_count)
 {
     if (!g_pm_rho_ready || slot < 0 || np <= 0 || ng <= 0) return -1;
+    if (!pm_layout_valid(
+            g_pm_rho_ncell, ncoarse, ngridmax, block_size, child_count) ||
+        block_size != g_pm_block_size || child_count != g_pm_child_count)
+        return -1;
     if (!pm_ensure_slot(slot, ng, np)) return -1;
 
     PmSlot* p = &g_pm_slot[slot];
@@ -687,21 +759,34 @@ int cuda_pm_deposit_flush(int slot, int ng, int np,
     pm_deposit_kernel<<<grid, block, 0, st>>>(
         p->d_px, p->d_dteff, p->d_pg, p->d_x0, p->d_nbf,
         d_pm_rho, d_pm_phiw, d_pm_son,
-        ngridmax, ncoarse, np,
+        ngridmax, ncoarse, block_size, child_count, np,
         params[0], params[1], params[2], params[3], params[4],
         params[5], (int)params[6], params[7],
         p->d_err);
 
     int h_err = 0;
     cudaMemcpyAsync(&h_err, p->d_err, sizeof(int), cudaMemcpyDeviceToHost, st);
-    cudaStreamSynchronize(st);
+    const cudaError_t sync_error = cudaStreamSynchronize(st);
 
-    cudaError_t cerr = cudaGetLastError();
+    const cudaError_t launch_error = cudaGetLastError();
+    const cudaError_t cerr =
+        sync_error != cudaSuccess ? sync_error : launch_error;
     if (cerr != cudaSuccess) {
         fprintf(stderr, "CUDA pm deposit error: %s\n", cudaGetErrorString(cerr));
         return -1;
     }
-    return h_err ? 1 : 0;
+    if (h_err) return 1;
+    const long long deposit_count =
+        g_pm_deposit_launches.fetch_add(1, std::memory_order_relaxed) + 1;
+    const long long deposit_parts =
+        g_pm_deposit_parts.fetch_add(np, std::memory_order_relaxed) + np;
+    if (deposit_count == 1) {
+        printf("[CUDA_PM_DEPOSIT] B=%d C=%d rho_upload=%lld deposit=%lld particles=%lld\n",
+               block_size, child_count, g_pm_rho_uploads,
+               deposit_count, deposit_parts);
+        fflush(stdout);
+    }
+    return 0;
 }
 
 // Download the accumulated GPU deposits for the host-side merge
