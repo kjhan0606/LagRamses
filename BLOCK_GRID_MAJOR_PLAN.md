@@ -393,6 +393,14 @@ Phase 1 완료 직후 착수하며 Phase 2를 기다리지 않는다.
 - 두 output layout 구현
 - legacy <-> block restart matrix 검증
 
+2026-08-22 legacy AMR canonical comparator를 완료했다.
+`tests/compare_amr_canonical.py`는 각 파일의 `ngridmax`로 legacy cell index를
+해독하고 전역 dyadic geometry로 father/nbor/son/flag1을 비교한다. capacity,
+free/list 상태, local grid 번호와 rank decomposition은 제외한다. Job 321554와
+321942의 output 3개씩(총 6 pair)이 모두 PASS했으며 JSON 보고서는 각 QA job
+디렉터리에 보존한다. 이 도구는 topology equivalence용이며 HDF5/restart matrix를
+대체하지 않는다.
+
 ### Phase 6 범위 확정 (2026-08-22 사용자 지시): CUDA/nGR 소형 결정적 게이트
 
 VoidSim과 대형 production 실행은 이 프로젝트의 선행조건·완료조건·테스트
