@@ -16,7 +16,7 @@ import numpy as np
 
 
 APPROVED_ESTIMATOR_SHA256 = (
-    "f82279067ea69c26f0d9a85c8ff5b14b70bce16bae0a6ccde1626480db106f27"
+    "6638ac68b095d43be0edc6a71b8441d9078558d775b97fdb6a9095984fe18b18"
 )
 REQUIRED_CONTROL_MODEL = "lcdm_phase_matched"
 PRIMARY_FIELDS = ("p_delta_theta", "p_theta_theta")

@@ -25,7 +25,17 @@ import time
 import numpy as np
 from numba import njit
 
-from measure_dmo_pk import FortranReader, boxlen_from_runtime_pk, read_info
+import measure_dmo_pk
+
+
+FortranReader = measure_dmo_pk.FortranReader
+read_info = measure_dmo_pk.read_info
+MEASURE_DMO_PK_PATH = Path(measure_dmo_pk.__file__).resolve()
+EXPECTED_MEASURE_DMO_PK_PATH = Path(__file__).with_name("measure_dmo_pk.py").resolve()
+if MEASURE_DMO_PK_PATH != EXPECTED_MEASURE_DMO_PK_PATH:
+    raise RuntimeError(
+        f"measure_dmo_pk import is not source-bound: {MEASURE_DMO_PK_PATH}"
+    )
 
 
 def sha256(path: Path) -> str:
@@ -34,6 +44,60 @@ def sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1 << 20), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def runtime_pk_preflight(
+    output_dir: Path, info: dict, snapshot: dict, expected_boxlen_mpc_h: float,
+) -> dict[str, int | float | str | bool]:
+    """Validate the exact on-the-fly CIC spectrum used for physical box units."""
+    number = output_dir.name.rsplit("_", 1)[-1]
+    path = output_dir / f"pk_cic_{number}.dat"
+    if not path.is_file() or path.stat().st_size == 0:
+        raise FileNotFoundError(f"missing or empty source-bound runtime P(k): {path}")
+    header = "\n".join(path.read_text(errors="strict").splitlines()[:12])
+
+    def field(pattern: str, label: str) -> str:
+        match = re.search(pattern, header, re.MULTILINE)
+        if not match:
+            raise ValueError(f"missing {label} in {path}")
+        return match.group(1).strip()
+
+    aexp = float(field(r"^# Power spectrum at a_exp\s*=\s*([0-9.Ee+-]+)$", "aexp"))
+    boxlen = float(field(r"^# boxlen \(Mpc/h\)\s*=\s*([0-9.Ee+-]+)$", "boxlen"))
+    nmesh = int(field(r"^# N_mesh\s*=\s*(\d+)$", "N_mesh"))
+    npart = int(field(r"^# N_part\s*=\s*(\d+)$", "N_part"))
+    assignment = field(r"^# assignment\s*=\s*(\S+)$", "assignment")
+    interlaced_text = field(r"^# interlaced\s*=\s*(\S+)$", "interlaced").lower()
+    if interlaced_text not in {"true", "false"}:
+        raise ValueError(f"invalid interlaced flag in {path}: {interlaced_text}")
+    interlaced = interlaced_text == "true"
+    values = (aexp, boxlen, expected_boxlen_mpc_h)
+    if not all(math.isfinite(value) and value > 0.0 for value in values):
+        raise ValueError(f"non-positive or non-finite runtime P(k) metadata in {path}")
+    if not math.isclose(aexp, float(info["aexp"]), rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError(f"runtime P(k) aexp mismatch in {path}: {aexp}")
+    if not math.isclose(
+        boxlen, expected_boxlen_mpc_h, rel_tol=0.0, abs_tol=1e-10,
+    ):
+        raise ValueError(
+            f"runtime P(k) box length {boxlen} != expected {expected_boxlen_mpc_h}"
+        )
+    if npart != int(snapshot["particle_count"]):
+        raise ValueError(f"runtime P(k) particle count mismatch in {path}: {npart}")
+    base_mesh = 1 << int(info["levelmin"])
+    if nmesh != base_mesh:
+        raise ValueError(f"runtime P(k) mesh {nmesh} != base mesh {base_mesh}")
+    if assignment != "CIC-deconvolved" or not interlaced:
+        raise ValueError(
+            f"unsupported runtime P(k) estimator in {path}: "
+            f"assignment={assignment}, interlaced={interlaced}"
+        )
+    return {
+        "path": str(path.resolve()), "sha256": sha256(path),
+        "aexp": aexp, "boxlen_mpc_h": boxlen, "nmesh": nmesh,
+        "particle_count": npart, "assignment": assignment,
+        "interlaced": interlaced,
+    }
 
 
 def exact_record(reader: FortranReader, dtype: str, count: int, name: str) -> np.ndarray:
@@ -508,6 +572,12 @@ def snapshot_preflight(
         "particle_count": particle_count, "particle_headers": headers,
         "max_npart_local": max(int(header["npart"]) for header in headers),
         "particle_files": files, "provenance_files": provenance,
+        "python_dependencies": {
+            "measure_dmo_pk": {
+                "path": str(MEASURE_DMO_PK_PATH),
+                "sha256": sha256(MEASURE_DMO_PK_PATH),
+            },
+        },
         "expansion": expansion, "expansion_crosscheck": crosscheck,
     }
 
@@ -894,8 +964,11 @@ def write_synthetic_snapshot(
 
     aexp, hubble, h, growth = 0.5, 120.0, 0.6766, 0.8
     h0, omega_m, omega_l = 100.0 * h, 0.3111, 0.6889
+    level = int(round(math.log2(nmesh)))
+    if 1 << level != nmesh:
+        raise ValueError("synthetic nmesh must be a power of two")
     info_text = (
-        "ncpu = 1\nndim = 3\nlevelmin = 4\nlevelmax = 4\n"
+        f"ncpu = 1\nndim = 3\nlevelmin = {level}\nlevelmax = {level}\n"
         f"boxlen = 1.0\naexp = {aexp}\nH0 = {h0}\n"
         f"omega_m = {omega_m}\nomega_l = {omega_l}\nomega_k = 0.0\n"
         "omega_b = 0.0\nunit_l = 1.0e5\nunit_d = 1.0\nunit_t = 1.0\n"
@@ -921,6 +994,16 @@ def write_synthetic_snapshot(
         f" Total number of dark matter particles\n {npart}\n"
         " Total number of star particles\n 0\n Total number of sink particles\n 0\n"
     )
+    (output / "pk_cic_00001.dat").write_text(
+        f"# Power spectrum at a_exp = {aexp:.12E}\n"
+        f"# boxlen (Mpc/h) = {boxlen:.12E}\n"
+        f"# N_mesh = {nmesh}\n"
+        f"# N_part = {npart}\n"
+        "# shot_noise (Mpc/h)^3 = 1.0\n"
+        "# assignment = CIC-deconvolved\n"
+        "# interlaced = true\n"
+        "# kmax (h/Mpc) = 1.0\n"
+    )
     part = output / "part_00001.out00001"
     with part.open("wb") as handle:
         write_fortran_record(handle, np.asarray([header_ncpu], dtype="=i4"))
@@ -937,7 +1020,7 @@ def write_synthetic_snapshot(
             write_fortran_record(handle, velocities[:, axis].astype("=f8"))
         write_fortran_record(handle, masses.astype("=f8"))
         write_fortran_record(handle, np.arange(1, npart + 1, dtype="=i8"))
-        write_fortran_record(handle, np.full(npart, 4, dtype="=i4"))
+        write_fortran_record(handle, np.full(npart, level, dtype="=i4"))
         write_fortran_record(handle, np.full(npart, particle_type, dtype="i1"))
         write_fortran_record(handle, np.zeros(npart, dtype="=f8"))
 
@@ -1000,6 +1083,15 @@ def synthetic_particle_test():
                 Path(name), nmesh, mode
             )
             preflight = snapshot_preflight(output, info, True)
+            runtime = runtime_pk_preflight(output, info, preflight, boxlen)
+            if runtime["boxlen_mpc_h"] != boxlen:
+                raise RuntimeError("synthetic runtime P(k) box length mismatch")
+            try:
+                runtime_pk_preflight(output, info, preflight, boxlen + 1.0)
+            except ValueError:
+                pass
+            else:
+                raise RuntimeError("runtime P(k) expected-box mismatch was accepted")
             deposited = deposit_output(output, info, nmesh, preflight)
             mass_a, mass_b, mom_a, mom_b, count, mass_sum = deposited
             if count != nmesh**3:
@@ -1170,6 +1262,7 @@ def main():
     parser.add_argument("--kmax", type=float, default=0.2)
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--memory-limit-gb", type=float)
+    parser.add_argument("--expected-boxlen-mpc-h", type=float)
     parser.add_argument("--particle-hashes", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-legacy-completion", action="store_true")
     parser.add_argument("--run-log", type=Path)
@@ -1185,10 +1278,15 @@ def main():
         parser.error(
             "output and --destination are required unless preflight/benchmark mode is used"
         )
+    if args.expected_boxlen_mpc_h is None:
+        parser.error("--expected-boxlen-mpc-h is required for snapshot measurements")
     output = args.output.resolve(); info = read_info(output)
     preflight = snapshot_preflight(
         output, info, args.particle_hashes, args.allow_legacy_completion,
         args.run_log.resolve() if args.run_log else None,
+    )
+    preflight["runtime_pk"] = runtime_pk_preflight(
+        output, info, preflight, args.expected_boxlen_mpc_h
     )
     memory = memory_preflight(
         args.nmesh, args.memory_limit_gb, preflight["max_npart_local"]
@@ -1202,7 +1300,7 @@ def main():
         )
         print(json.dumps({"memory": memory, "benchmark": benchmark}, indent=2))
         return
-    boxlen = boxlen_from_runtime_pk(output)
+    boxlen = float(preflight["runtime_pk"]["boxlen_mpc_h"])
     mass_a, mass_b, mom_a, mom_b, count, mass_sum = deposit_output(
         output, info, args.nmesh, preflight
     )
