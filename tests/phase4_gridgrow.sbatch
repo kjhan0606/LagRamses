@@ -24,12 +24,44 @@ export PATH=/opt/ohpc/pub/intel/oneapi/mpi/2021.17/bin:/opt/ohpc/pub/intel/oneap
 export LD_LIBRARY_PATH=/home/kjhan/local/hdf5/lib:/home/kjhan/local/lib:${LD_LIBRARY_PATH:-}
 export OMP_NUM_THREADS=1
 export OMP_PLACES=cores
+export OMP_PROC_BIND=false
 export OMP_WAIT_POLICY=passive
-# [RESIZABLE] Slurm is the sole binding authority.  Intel MPI pinning combined
-# with srun collapsed all 32 ranks onto CPU 0 in invalid job 321015.
+# [RESIZABLE] This site has task/cgroup but not task/affinity.  Slurm owns the
+# allocation boundary; slurm_rank_bind.sh is the sole per-rank authority.
+# Intel MPI pinning combined with srun collapsed all 32 ranks onto CPU 0 in
+# invalid job 321015, so it must stay disabled.
 export I_MPI_PIN=0
-unset I_MPI_PIN_DOMAIN I_MPI_PIN_PROCESSOR_LIST
+unset I_MPI_PIN_DOMAIN I_MPI_PIN_PROCESSOR_LIST I_MPI_PIN_RESPECT_CPUSET
+unset KMP_AFFINITY KMP_HW_SUBSET GOMP_CPU_AFFINITY
 export I_MPI_FABRICS=shm
+
+cpuset_expander="$code/tests/expand_cpuset.sh"
+rank_bind="$code/tests/slurm_rank_bind.sh"
+affinity_validator="$code/tests/validate_affinity_map.sh"
+if [ ! -x /usr/bin/taskset ] || [ ! -x "$cpuset_expander" ] || \
+   [ ! -x "$rank_bind" ] || [ ! -x "$affinity_validator" ]; then
+  echo 'PHASE4: taskset or CPU-binding helper is not executable'
+  exit 1
+fi
+
+allocation_cpu_mask=$(awk -F: '
+  /^Cpus_allowed_list:/ {
+    gsub(/[[:space:]]/,"",$2)
+    print $2
+    exit
+  }
+' /proc/self/status)
+if [ -z "$allocation_cpu_mask" ]; then
+  echo 'PHASE4: could not read the batch allocation CPU mask'
+  exit 1
+fi
+if phase4_cpu_list=$("$cpuset_expander" "$allocation_cpu_mask" 32); then
+  export PHASE4_CPU_LIST=$phase4_cpu_list
+else
+  parse_rc=$?
+  echo "PHASE4: allocation mask is not 32 canonical unique CPUs: $allocation_cpu_mask (rc=$parse_rc)"
+  exit 1
+fi
 
 commit=$(git -C "$code" rev-parse HEAD)
 branch=$(git -C "$code" branch --show-current)
@@ -39,6 +71,9 @@ branch=$(git -C "$code" branch --show-current)
   echo "workdir=$code"
   echo "branch=$branch"
   echo "commit=$commit"
+  echo "allocation_cpu_mask=$allocation_cpu_mask"
+  echo "phase4_cpu_list=$PHASE4_CPU_LIST"
+  echo 'binding=taskset_by_SLURM_LOCALID'
   echo "started=$(date --iso-8601=seconds)"
 } | tee "$logs/provenance.txt"
 
@@ -75,31 +110,28 @@ if ! mpiifx -O2 "$code/tests/mpi_affinity_probe.f90" -o "$affinity_probe" \
   exit 1
 fi
 if ! srun --kill-on-bad-exit=1 --mpi=pmi2 -n 32 -c 1 \
-    --cpu-bind=verbose,cores "$affinity_probe" "$affinity_dir" \
+    --cpu-bind=none "$rank_bind" "$affinity_probe" "$affinity_dir" \
     >"$logs/affinity_run.log" 2>&1; then
   echo 'PHASE4: affinity probe execution failed' | tee -a "$logs/provenance.txt"
   exit 1
 fi
+affinity_file_count=$(find "$affinity_dir" -maxdepth 1 -type f \
+  -name 'rank_*.txt' | wc -l)
+if [ "$affinity_file_count" -ne 32 ]; then
+  echo "PHASE4: affinity probe wrote $affinity_file_count files, expected 32" | \
+    tee -a "$logs/provenance.txt"
+  exit 1
+fi
 find "$affinity_dir" -maxdepth 1 -type f -name 'rank_*.txt' -print0 | \
   sort -z | xargs -0 cat | sort -n >"$logs/affinity_map.txt"
-if ! awk '
-  NF!=2 || $1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ || $1<0 || $1>31 {bad=1}
-  {rank[$1]++; mask[$2]++}
-  END {
-    if(NR!=32) bad=1
-    for(i=0;i<32;i++) if(rank[i]!=1) bad=1
-    nmask=0
-    for(m in mask) nmask++
-    if(nmask!=32) bad=1
-    exit(bad ? 1 : 0)
-  }
-' "$logs/affinity_map.txt"; then
-  echo 'PHASE4: affinity masks are not 32 unique single CPUs' | \
+if ! "$affinity_validator" "$PHASE4_CPU_LIST" \
+    "$logs/affinity_map.txt" 32; then
+  echo 'PHASE4: rank/localid affinity does not match the expected CPU map' | \
     tee -a "$logs/provenance.txt"
   cat "$logs/affinity_map.txt" | tee -a "$logs/provenance.txt"
   exit 1
 fi
-echo 'affinity=PASS ranks=32 unique_single_cpu_masks=32' | \
+echo 'affinity=PASS ranks=32 localids=32 expected_unique_single_cpu_masks=32' | \
   tee -a "$logs/provenance.txt"
 cat "$logs/affinity_map.txt" | tee -a "$logs/provenance.txt"
 
@@ -153,8 +185,7 @@ for variant in roomy tight; do
   (
     cd "$run_dir" || exit 2
     srun --kill-on-bad-exit=1 --mpi=pmi2 -n 32 -c 1 \
-      --cpu-bind=verbose,cores \
-      "$exe" run.nml >run.log 2>&1
+      --cpu-bind=none "$rank_bind" "$exe" run.nml >run.log 2>&1
   )
   rc=$?
   outputs=$(find "$run_dir" -mindepth 1 -maxdepth 1 -type d -name 'output_*' | wc -l)

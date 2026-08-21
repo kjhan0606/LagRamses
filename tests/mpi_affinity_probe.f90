@@ -3,8 +3,9 @@ program mpi_affinity_probe
   use mpi
   implicit none
 
-  integer :: ierr, rank, nproc, unit, ios
+  integer :: ierr, rank, nproc, unit, ios, env_status, localid
   character(len=1024) :: output_dir, output_file, line, cpu_mask
+  character(len=64) :: localid_text
 
   call MPI_Init(ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
@@ -13,6 +14,18 @@ program mpi_affinity_probe
   call get_command_argument(1,output_dir)
   if(len_trim(output_dir)==0 .or. nproc/=32)then
      call MPI_Abort(MPI_COMM_WORLD,10,ierr)
+  endif
+
+  localid_text=''
+  call get_environment_variable('SLURM_LOCALID',localid_text, &
+       status=env_status)
+  if(env_status/=0 .or. len_trim(localid_text)==0)then
+     call MPI_Abort(MPI_COMM_WORLD,14,ierr)
+  endif
+  read(localid_text,*,iostat=ios)localid
+  if(ios/=0)call MPI_Abort(MPI_COMM_WORLD,15,ierr)
+  if(localid<0 .or. localid>=nproc)then
+     call MPI_Abort(MPI_COMM_WORLD,16,ierr)
   endif
 
   cpu_mask=''
@@ -34,7 +47,7 @@ program mpi_affinity_probe
   open(newunit=unit,file=trim(output_file),status='replace',action='write', &
        iostat=ios)
   if(ios/=0)call MPI_Abort(MPI_COMM_WORLD,13,ierr)
-  write(unit,'(I0,1X,A)')rank,trim(cpu_mask)
+  write(unit,'(I0,1X,I0,1X,A)')rank,localid,trim(cpu_mask)
   close(unit)
 
   call MPI_Barrier(MPI_COMM_WORLD,ierr)
