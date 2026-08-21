@@ -24,6 +24,7 @@ recursive subroutine load_balance
   integer::igrid,ncache,ilevel,i,ind,jlevel,info
   integer::idim,ivar,icpu,jcpu,kcpu
   integer::nxny,ix,iy,iz
+  integer::required_grid_capacity
   integer(i8b),dimension(nlevelmax,3)::comm_buffin,comm_buffout
   integer,allocatable::numbp_save(:)
   integer::nsave,isave
@@ -42,6 +43,19 @@ recursive subroutine load_balance
 #endif
 
   if(ncpu==1)return
+
+  ! [RESIZABLE] Production load balancing reserves grid headroom using the
+  ! same capacity on every rank.  Do this before particle-tree changes or
+  ! nonblocking communication so the collective has a rank-symmetric safe
+  ! point.  The extra grid preserves the existing strict free-slot guard at
+  ! an exact headroom boundary.
+  if(ngridmax_auto .and. lb_grid_headroom>0d0 .and. &
+       lb_grid_headroom<1d0)then
+     required_grid_capacity=ceiling((dble(used_mem)+1d0)/ &
+          lb_grid_headroom)
+     call ensure_grid_capacity_collective(required_grid_capacity, &
+          'load_balance_headroom')
+  endif
 
   lb_chain_depth=lb_chain_depth+1
 
