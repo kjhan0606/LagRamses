@@ -1,6 +1,6 @@
 # Block grid-major 동적 메모리 개편 계획
 
-- 상태: 설계 단계, 구현 미승인
+- 상태: Phase 0--4 구현·기본/production-LB gate 승인, 잔여 검증 진행 중
 - 작성일: 2026-08-11
 - 대상 브랜치: `main` (2026-08-18 단일 브랜치 통합에 따라 갱신; 원문은 fdm-dev)
 - 구현 위치: `patch/lagRamses/`만 사용
@@ -393,34 +393,28 @@ Phase 1 완료 직후 착수하며 Phase 2를 기다리지 않는다.
 - 두 output layout 구현
 - legacy <-> block restart matrix 검증
 
-### Phase 6 대상 확정 (2026-08-20 사용자 지시): lageunha의 VoidSim 시뮬레이션
+### Phase 6 범위 확정 (2026-08-22 사용자 지시): CUDA/nGR 소형 결정적 게이트
 
-Phase 6은 합성 벤치마크가 아니라 **VoidSim의 실제 생산 실행**으로 수행한다.
-근거: 이 계획이 푸는 고통이 바로 그 규모에서 나온다. VoidSim의
-compact726_level14 실행은 7.7일 연속으로 64 물리코어를 만재해 돌았고,
-`ngridtot`/`nparttot`을 실행 전에 정확히 맞춰야 하는 부담이 가장 큰 종류의
-작업이다. 합성 64^3 게이트가 못 보는 것 — 반복 성장, 장시간 실행, load
-balance churn 하의 free-list 재사용, 메모리 한계 근접 — 이 전부 여기서
-자연히 발생한다.
+VoidSim과 대형 production 실행은 이 프로젝트의 선행조건·완료조건·테스트
+자산에서 제외한다. Phase 6은 device측 legacy stride 13곳(poisson 8,
+particle 3, scalar 2)을 block grid-major로 교정하고, 작은 고정 zoom IC에서
+CPU와 GPU를 직접 대조하는 단계다.
 
-검증 설계: 같은 IC와 같은 코드로 (a) 현재처럼 용량을 넉넉히 지정한 실행,
-(b) 용량을 부족하게 주어 grid와 particle이 각각 최소 두 번 성장하게 만든
-실행을 돌리고, 물리량이 일치하는지 본다. 완료 조건 §13의 "grid와 particle
-각각 최소 두 번의 growth를 거쳐 완주"를 실제 생산 규모에서 만족시키는 것이
-목표다. 실행 호스트는 lageunha (64 물리코어, HT 켜짐이므로 CPU 0-63에 코어당
-1랭크로 pin, [[lageunha-cpu-policy]]).
+최소 실행은 1 node, 2 MPI ranks, OMP=1, A10 1개로 한다. CPU와 GPU는 같은
+USE_CUDA binary·IC·물리 입력을 쓰고 accelerator flag만 달라야 한다. IC는 QA
+아래 project-local snapshot과 SHA manifest로 고정한다. GPU run은 flag만 켜는
+것으로 부족하며 Poisson, scalar, particle CUDA 경로가 실제 실행됐다는 양의
+counter/marker를 각각 남겨야 한다.
 
-주의: VoidSim은 다른 프로젝트의 활성 작업이다. 그 실행 디렉토리에 쓰지 말고
-별도 디렉토리로 복제해서 돌린다. 같은 디렉토리에 두 호스트가 동시에 쓰는
-사고가 이미 한 번 있었다(DE 대조군, 2026-08-20).
+nGR GPU는 색 내부 계산 순서가 달라질 수 있으므로 CPU↔GPU bitwise를 요구하지
+않는다. particle ID/count와 topology는 exact, post-step 위치는
+`max|dx| <= 2e-6`, 상대 속도 오차는 `<= 2e-3`을 1차 사전등록 한계로 둔다.
+Poisson residual 정상 수렴, CUDA error/OOM/fallback/NaN/fatal 0도 필수다.
+scalar/force L2 한계는 첫 characterization 뒤 baseline의 2배 이내로 고정한다.
 
-### Phase 6: 대규모 성능 및 안정성 검증
-
-- MPI rank 수를 바꾼 restart
-- MPI+OpenMP 혼합 실행
-- 반복 growth와 장시간 실행
-- node memory limit 근접 시험
-- production-size load imbalance 시험
+반복 growth, MPI rank 수가 다른 restart, MPI+OpenMP, 작은 2-node smoke는 각각
+독립된 짧은 gate로 수행한다. 장시간·production-size 실행으로 이 검증을 대신하지
+않는다.
 
 ## 10. 필수 검증 행렬
 
@@ -488,6 +482,9 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 - memory limit 접근 시 OOM kill 대신 예측 가능한 진단과 종료
 - 성능 및 I/O 변환 비용이 측정되어 문서화됨
 - 변경 파일이 모두 `patch/lagRamses/`에만 존재
+- 작은 고정 IC의 CUDA/nGR CPU↔GPU gate에서 Poisson·scalar·particle GPU 실제
+  실행 증거, 정상 수렴, exact topology/ID 및 사전등록 수치 허용오차를 모두 통과
+- VoidSim 또는 다른 프로젝트의 production 자산에 의존하지 않음
 
 ## 14. 현재 결정 사항과 미결 사항
 
@@ -510,4 +507,3 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 - binary magic tag의 실제 값과 version header 상세 규격
 - HDF5 legacy writer가 지원해야 하는 정확한 외부 reader 범위
 - 허용 가능한 kernel 성능 회귀와 legacy 변환 비용의 정량 기준
-
