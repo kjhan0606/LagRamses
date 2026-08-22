@@ -1,7 +1,7 @@
 # Block grid-major 동적 메모리 개편 계획
 
-- 상태: Phase 0--4와 production-LB gate 승인, Phase 5 canonical comparator 완료,
-  Phase 6 CUDA block-index 코드·빌드 승인(소형 CPU/GPU runtime gate 대기)
+- 상태: **CLOSED** (2026-08-22, 사용자 승인 기본 범위)
+- 최종 결론: [`BLOCK_GRID_MAJOR_CONCLUSION.md`](BLOCK_GRID_MAJOR_CONCLUSION.md)
 - 작성일: 2026-08-11
 - 대상 브랜치: `main` (2026-08-18 단일 브랜치 통합에 따라 갱신; 원문은 fdm-dev)
 - 구현 위치: CPU/AMR source winner는 `patch/lagRamses/`, CUDA kernel/interface는
@@ -22,8 +22,12 @@
 4. output grid format은 namelist에서 선택하며, 기본값은 기존(legacy) format으로 한다.
 5. 기존 solver의 수치 결과와 성능을 보존한다.
 
-이 문서는 구현 계획과 완료된 gate의 상태 기록을 함께 유지한다. HDF5/restart
-실행은 사용자의 별도 승인 전에는 시작하거나 제출하지 않는다.
+이 문서는 개편 당시의 계획과 gate 설계를 보존하는 역사 기록이다. 최종 승인 범위,
+실행 결과와 알려진 제한은 `BLOCK_GRID_MAJOR_CONCLUSION.md`를 정본으로 삼는다.
+아래에 남은 후속 항목은 폐문 뒤의 필수 작업을 뜻하지 않는다.
+이번 CLOSED 판정은 아래 §10/§13의 원래 production qualification matrix를 모두
+충족했다는 뜻이 아니다. 사용자가 축소·확정한 기본 범위에 대한 폐문이며, 원래
+조건 중 미충족 항목은 승인 비주장 또는 알려진 제한으로 남는다.
 
 ## 2. 현재 구조의 제약
 
@@ -311,8 +315,8 @@ B=64 활성화(main 55a38bd)는 CPU·fresh-start·바이너리 출력 구성에�
    packing 2곳은 cell stride가 아니므로 whitelist로 유지한다. active VPATH source
    winner와 cuRamses shadow ABI를 함께 맞췄고, host/device unit, static census,
    전처리 reachability, full `USE_CUDA=1 HDF5=1 USE_FFTW=1` build가 PASS했다.
-   Fable의 코드·빌드 감리는 승인됐지만, 실제 CUDA/nGR 기능 승인은 아래 Phase 6
-   소형 paired runtime gate가 끝날 때까지 보류한다.
+   Fable의 코드·빌드 감리는 승인됐다. Phase 6 job 322420에서는 CUDA 기능 경로
+   실행 증거를 확보했지만 batch/strict numerical-parity gate는 FAIL했다.
 3. **체크포인트 재작성 유틸리티**: utils/f90/defrag.f90, dbl2sng.f90이 각각
    46곳에서 raw stride로 father/nbor를 디코드·재인코딩한다. B=64 파일을 조용히
    손상시킨다. 1번의 헤더 마커가 들어가면 이들은 "미지원 layout이면 중단"으로
@@ -414,8 +418,9 @@ VoidSim과 대형 production 실행은 이 프로젝트의 선행조건·완료�
 공용 helper는 Fortran `amr_index::icell_of`와 같은 block grid-major 식을 쓰며,
 device측 13곳(poisson 8, particle 3, scalar 2), B/C ABI, active rho particle
 deposit dispatch를 함께 교정했다. `tests/cuda_block_index_check.sh`와 full CUDA
-build가 PASS했고 Fable은 코드 commit/main 반영을 승인했다. 남은 일은 작은 고정
-zoom IC에서 CPU와 GPU를 직접 대조하는 runtime gate다.
+build가 PASS했고 Fable은 코드 commit/main 반영을 승인했다. 작은 고정 zoom IC의
+runtime gate는 job 322420에서 실행했으며, child run 완주와 기능 marker는 확인했지만
+전체 batch와 strict numerical-parity gate는 FAIL했다.
 
 최소 실행은 1 node, 2 MPI ranks, OMP=1, A10 1개로 한다. CPU와 GPU는 같은
 USE_CUDA binary·IC·물리 입력을 쓰고 accelerator flag만 달라야 한다. IC는 QA
@@ -437,7 +442,8 @@ scalar/force L2 한계는 첫 characterization 뒤 baseline의 2배 이내로 �
 
 반복 growth, MPI rank 수가 다른 restart, MPI+OpenMP, 작은 2-node smoke는 각각
 독립된 짧은 gate로 수행한다. 장시간·production-size 실행으로 이 검증을 대신하지
-않는다. 특히 HDF5/restart gate는 사용자 승인 전에는 실행·제출하지 않는다.
+않는다. HDF5/restart gate는 사용자 승인 뒤 job 322426/322427에서 실행했으며,
+restore 경로는 관측했지만 one-step exact continuity는 FAIL했다.
 
 ## 10. 필수 검증 행렬
 
@@ -491,9 +497,10 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 8. **format 오판**: 명시적인 magic/version만 사용하고 heuristic index 판정을
    금지한다.
 
-## 13. 완료 조건
+## 13. 원래 production qualification 조건 (이번 폐문 범위에서는 superseded)
 
-다음 조건을 모두 만족해야 production 기본값으로 채택한다.
+다음 조건은 원래 production 기본값 채택을 위해 작성한 행렬이다. 2026-08-22의
+사용자 승인 기본 범위 폐문이 이 조건을 모두 충족했다는 뜻은 아니다.
 
 - `ngridtot`/`ngridmax`, `nparttot`/`npartmax` 넷 다 없이 시작하고, grid와
   particle 각각 최소 두 번의 growth를 거쳐 완주
@@ -522,7 +529,8 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 - 기존 checkpoint 호환성을 유지한다.
 - CPU/AMR 구현은 `patch/lagRamses/`, CUDA 전용 구현은 실제 build VPATH의
   `patch/cuRamses/`에 둔다. source winner와 shadow ABI는 static census로 확인한다.
-- HDF5/restart 실행은 사용자 별도 승인 뒤에만 시작한다.
+- HDF5/restart는 사용자 승인 뒤 job 322426/322427에서 실행했다. restore 경로는
+  확인했지만 one-step exact continuity는 FAIL로 남겼다.
 
 구현 전에 결정하거나 측정할 사항:
 
