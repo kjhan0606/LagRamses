@@ -42,13 +42,13 @@ Coord = tuple[int, int, int]
 SourceMap = dict[Coord, SourceCell]
 HEADER = re.compile(
     r"^# schema=ndgp-source-v1 rank=(\d+) level=(\d+) "
-    r"nstep=(\d+) icount=(\d+) rho_tot=(\S+)$"
+    r"nstep=(\d+) icount=(\d+) rho_tot=\s*(\S+)$"
 )
 FATAL = re.compile(
     r"(?i)MPI_ABORT|forrtl: severe|segmentation fault|error stop|FATAL:|ERROR:"
 )
-MASS_RTOL = 5.0e-12
-MASS_ATOL = 5.0e-12
+CIC_RTOL = 5.0e-12
+CIC_ATOL = 5.0e-12
 COMMON_NML_SETTINGS = (
     "cosmo=.true.",
     "pic=.true.",
@@ -294,7 +294,9 @@ def validate_log(
         "WARNING: IC header carries no omega_b (legacy grafic); "
         "using namelist omega_b"
     )
-    if text.splitlines().count(legacy_warning) != len(expected_levels):
+    if sum(line.strip() == legacy_warning for line in text.splitlines()) != len(
+        expected_levels
+    ):
         raise SourceDiagnosticError(f"{run_dir}: legacy IC warning count differs")
     marker_rows = re.findall(
         r"\[NDGP_SOURCE_DIAG\]\s+rank=(\d+)\s+level=(\d+)\s+owned_cells=(\d+)",
@@ -380,10 +382,13 @@ def validate_particle_values(
             raise SourceDiagnosticError(f"{output}: particle {identity} has nonpositive mass")
 
 
-def validate_outputs(run_dir: pathlib.Path, expected_ids: set[int]) -> None:
+def validate_outputs(
+    run_dir: pathlib.Path, expected_ids: set[int]
+) -> dict[int, Particle]:
     outputs = sorted(path for path in run_dir.glob("output_*") if path.is_dir())
     if [path.name for path in outputs] != ["output_00001", "output_00002"]:
         raise SourceDiagnosticError(f"{run_dir}: output set differs")
+    initial_particles: dict[int, Particle] | None = None
     for output in outputs:
         if not (output / "COMPLETE").is_file():
             raise SourceDiagnosticError(f"{output}: COMPLETE is absent")
@@ -396,6 +401,101 @@ def validate_outputs(run_dir: pathlib.Path, expected_ids: set[int]) -> None:
         if len(per_rank) != 2 or any(count <= 0 for count in per_rank.values()):
             raise SourceDiagnosticError(f"{output}: both ranks must own particles")
         validate_particle_values(particles, output)
+        if initial_particles is None:
+            initial_particles = particles
+    if initial_particles is None:
+        raise SourceDiagnosticError(f"{run_dir}: initial particles are absent")
+    return initial_particles
+
+
+def cic_project(
+    particles: dict[int, Particle], ncell: int, accepted: set[Coord]
+) -> SourceMap:
+    accum = {key: 0.0 for key in accepted}
+    cell_volume_inverse = float(ncell**3)
+    for particle in particles.values():
+        axes: list[tuple[tuple[int, float], tuple[int, float]]] = []
+        for position in particle.position:
+            scaled = (position % 1.0) * ncell - 0.5
+            left_raw = math.floor(scaled)
+            fraction = scaled - left_raw
+            axes.append(
+                (
+                    (left_raw % ncell, 1.0 - fraction),
+                    ((left_raw + 1) % ncell, fraction),
+                )
+            )
+        density_scale = particle.mass * cell_volume_inverse
+        for x, y, z in itertools.product(*axes):
+            key = (x[0], y[0], z[0])
+            if key in accum:
+                accum[key] += density_scale * x[1] * y[1] * z[1]
+    return {
+        key: SourceCell(value, 0.0, False, 0) for key, value in accum.items()
+    }
+
+
+def direct_cic_report(
+    actual: SourceMap, projected: SourceMap, ncell: int
+) -> dict[str, object]:
+    if set(actual) != set(projected):
+        raise SourceDiagnosticError("direct CIC oracle coordinate set differs")
+    differences = {
+        key: actual[key].rho - projected[key].rho for key in actual
+    }
+    metrics = metric_summary(differences)
+    metrics["actual_integral"] = math.fsum(
+        cell.rho for cell in actual.values()
+    ) / ncell**3
+    metrics["projected_integral"] = math.fsum(
+        cell.rho for cell in projected.values()
+    ) / ncell**3
+    metrics["within_tolerance"] = all(
+        math.isclose(
+            actual[key].rho,
+            projected[key].rho,
+            rel_tol=CIC_RTOL,
+            abs_tol=CIC_ATOL,
+        )
+        for key in actual
+    )
+    return metrics
+
+
+def fixture_mass_report(
+    uniform_particles: dict[int, Particle], amr_particles: dict[int, Particle]
+) -> dict[str, object]:
+    uniform_total = math.fsum(particle.mass for particle in uniform_particles.values())
+    amr_base = math.fsum(
+        particle.mass
+        for identity, particle in amr_particles.items()
+        if identity <= 32**3
+    )
+    amr_fine = math.fsum(
+        particle.mass
+        for identity, particle in amr_particles.items()
+        if 32**3 < identity <= 2 * 32**3
+    )
+    amr_total = math.fsum(particle.mass for particle in amr_particles.values())
+    expected = {
+        "uniform_total": 1.0,
+        "amr_total": 1.0,
+        "amr_base": 7.0 / 8.0,
+        "amr_fine": 1.0 / 8.0,
+    }
+    actual = {
+        "uniform_total": uniform_total,
+        "amr_total": amr_total,
+        "amr_base": amr_base,
+        "amr_fine": amr_fine,
+    }
+    checks = {
+        name: math.isclose(
+            actual[name], value, rel_tol=CIC_RTOL, abs_tol=CIC_ATOL
+        )
+        for name, value in expected.items()
+    }
+    return {"actual": actual, "expected": expected, "checks": checks}
 
 
 def validate(
@@ -411,8 +511,8 @@ def validate(
     )
     validate_amr_report(uniform_amr_report, uniform_dir / "output_00001", 0)
     validate_amr_report(amr_amr_report, amr_dir / "output_00001", 4096)
-    validate_outputs(uniform_dir, set(range(1, 32**3 + 1)))
-    validate_outputs(amr_dir, pinned_particle_ids())
+    uniform_particles = validate_outputs(uniform_dir, set(range(1, 32**3 + 1)))
+    amr_particles = validate_outputs(amr_dir, pinned_particle_ids())
 
     uniform_l5 = read_source_level(uniform_dir, 5)
     amr_l5 = read_source_level(amr_dir, 5)
@@ -431,22 +531,47 @@ def validate(
     )
     all_rho_tot = rho_tot_value(uniform_l5, amr_l5, amr_l6)
     uniform_mean = math.fsum(cell.rho for cell in uniform_l5.values()) / 32**3
+    amr_l5_mean = math.fsum(cell.rho for cell in amr_l5.values()) / 32**3
     amr_composite_mean = (
         math.fsum(amr_l5[key].rho for key in set(amr_l5) - refined)
         + math.fsum(cell.rho for cell in amr_l6.values()) / 8.0
     ) / 32**3
-    mass_checks = {
-        "uniform_mean_vs_rho_tot": math.isclose(
-            uniform_mean, all_rho_tot, rel_tol=MASS_RTOL, abs_tol=MASS_ATOL
-        ),
-        "amr_composite_mean_vs_rho_tot": math.isclose(
-            amr_composite_mean, all_rho_tot, rel_tol=MASS_RTOL, abs_tol=MASS_ATOL
-        ),
-        "uniform_vs_amr_composite_mean": math.isclose(
-            uniform_mean, amr_composite_mean, rel_tol=MASS_RTOL, abs_tol=MASS_ATOL
-        ),
+    uniform_direct = direct_cic_report(
+        uniform_l5, cic_project(uniform_particles, 32, set(uniform_l5)), 32
+    )
+    amr_l5_direct = direct_cic_report(
+        amr_l5, cic_project(amr_particles, 32, set(amr_l5)), 32
+    )
+    fine_particles = {
+        identity: particle
+        for identity, particle in amr_particles.items()
+        if 32**3 < identity <= 2 * 32**3
     }
-    invariant_failures = [name for name, passed in mass_checks.items() if not passed]
+    if set(fine_particles) != set(range(32**3 + 1, 2 * 32**3 + 1)):
+        raise SourceDiagnosticError("AMR fine-particle ID set differs")
+    amr_l6_direct = direct_cic_report(
+        amr_l6, cic_project(fine_particles, 64, set(amr_l6)), 64
+    )
+    direct_reports = {
+        "uniform_l5": uniform_direct,
+        "amr_l5": amr_l5_direct,
+        "amr_l6_active_patch": amr_l6_direct,
+    }
+    invariant_failures = [
+        name
+        for name, direct in direct_reports.items()
+        if not bool(direct["within_tolerance"])
+    ]
+    if not math.isclose(uniform_mean, all_rho_tot, rel_tol=CIC_RTOL, abs_tol=CIC_ATOL):
+        invariant_failures.append("uniform_l5_mean_vs_rho_tot")
+    if not math.isclose(amr_l5_mean, all_rho_tot, rel_tol=CIC_RTOL, abs_tol=CIC_ATOL):
+        invariant_failures.append("amr_l5_mean_vs_rho_tot")
+    fixture_masses = fixture_mass_report(uniform_particles, amr_particles)
+    invariant_failures.extend(
+        f"fixture_mass_{name}"
+        for name, passed in fixture_masses["checks"].items()
+        if not passed
+    )
 
     map_difference = {
         key: uniform_l5[key].rho - amr_l5[key].rho for key in uniform_l5
@@ -463,13 +588,16 @@ def validate(
         "schema": "lagRamses-ndgp-amr-source-diagnostic-v1",
         "status": "DIAGNOSTIC_COMPLETE" if not invariant_failures else "INVARIANT_FAIL",
         "source_map_difference_is_characterization_only": True,
-        "mass_tolerance": {"relative": MASS_RTOL, "absolute": MASS_ATOL},
+        "direct_cic_tolerance": {"relative": CIC_RTOL, "absolute": CIC_ATOL},
         "rho_tot": all_rho_tot,
-        "mass": {
+        "projection_metrics": {
             "uniform_l5_mean": uniform_mean,
+            "amr_l5_mean": amr_l5_mean,
             "amr_composite_mean": amr_composite_mean,
-            "checks": mass_checks,
+            "amr_composite_is_not_a_conservation_oracle": True,
         },
+        "fixture_particle_masses": fixture_masses,
+        "direct_cic_oracle": direct_reports,
         "counts": {
             "uniform_l5": len(uniform_l5),
             "amr_l5": len(amr_l5),

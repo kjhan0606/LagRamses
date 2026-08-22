@@ -12,7 +12,9 @@ from validate_ndgp_source_diagnostic import (
     COMMON_NML_SETTINGS,
     SourceCell,
     SourceDiagnosticError,
+    cic_project,
     cube,
+    fixture_mass_report,
     metric_summary,
     read_source_file,
     validate_geometry,
@@ -28,7 +30,7 @@ class SourceDiagnosticTests(unittest.TestCase):
             path = pathlib.Path(raw) / "ndgp_source_l005_rank00001.tsv"
             path.write_text(
                 "# schema=ndgp-source-v1 rank=1 level=5 nstep=0 icount=1 "
-                "rho_tot=1.00000000000000000E+000\n"
+                "rho_tot=  1.00000000000000000E+000\n"
                 "# level x y z rho rho_tot refined\n"
                 "5 0 1 2 1.25 1.0 0\n",
                 encoding="ascii",
@@ -117,7 +119,7 @@ class SourceDiagnosticTests(unittest.TestCase):
 
     def test_log_requires_solver_rows_ids_and_no_outside_ic(self) -> None:
         legacy = (
-            "WARNING: IC header carries no omega_b (legacy grafic); "
+            " WARNING: IC header carries no omega_b (legacy grafic); "
             "using namelist omega_b\n"
         )
         solver = "WARNING: nDGP level 5 NOT converged after 1 iters, res= 1.0E-1\n"
@@ -156,6 +158,50 @@ class SourceDiagnosticTests(unittest.TestCase):
         for particle in (bad_nan, bad_mass):
             with self.assertRaises(SourceDiagnosticError):
                 validate_particle_values({1: particle}, pathlib.Path("output"))
+
+    def test_cell_centred_periodic_cic_projection(self) -> None:
+        centre = Particle((0.25, 0.25, 0.25), (0.0, 0.0, 0.0), 1.0, 1, 0, 0.0)
+        accepted = cube(0, 2)
+        projected = cic_project({1: centre}, 2, accepted)
+        self.assertEqual(projected[(0, 0, 0)].rho, 8.0)
+        self.assertEqual(
+            sum(cell.rho for cell in projected.values()) / 2**3, 1.0
+        )
+        periodic = Particle((0.0, 0.0, 0.0), centre.velocity, 1.0, 1, 0, 0.0)
+        projected = cic_project({1: periodic}, 2, accepted)
+        self.assertTrue(all(cell.rho == 1.0 for cell in projected.values()))
+
+    def test_fixture_mass_oracle_rejects_joint_particle_source_scaling(self) -> None:
+        base_mass = 1.0 / 32**3
+        fine_mass = base_mass / 8.0
+        zero = (0.0, 0.0, 0.0)
+        uniform = {
+            identity: Particle(zero, zero, base_mass, 5, 0, 0.0)
+            for identity in range(1, 32**3 + 1)
+        }
+        amr = {
+            identity: Particle(zero, zero, base_mass, 5, 0, 0.0)
+            for identity in range(1, 7 * 32**3 // 8 + 1)
+        }
+        amr.update(
+            {
+                identity: Particle(zero, zero, fine_mass, 6, 0, 0.0)
+                for identity in range(32**3 + 1, 2 * 32**3 + 1)
+            }
+        )
+        self.assertTrue(all(fixture_mass_report(uniform, amr)["checks"].values()))
+        scaled = {
+            identity: Particle(
+                particle.position,
+                particle.velocity,
+                particle.mass * 1.01,
+                particle.level,
+                particle.particle_type,
+                particle.potential,
+            )
+            for identity, particle in amr.items()
+        }
+        self.assertFalse(all(fixture_mass_report(uniform, scaled)["checks"].values()))
 
 
 if __name__ == "__main__":
