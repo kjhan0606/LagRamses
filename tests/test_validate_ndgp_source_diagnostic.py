@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from validate_ndgp_source_diagnostic import (
     COMMON_NML_SETTINGS,
     SourceCell,
     SourceDiagnosticError,
+    assess_matched_solver,
     cic_project,
     cube,
     fixture_mass_report,
@@ -19,8 +21,10 @@ from validate_ndgp_source_diagnostic import (
     read_source_file,
     validate_geometry,
     validate_log,
+    validate_matched_config,
     validate_nml_pair,
     validate_particle_values,
+    validate_solver_sequence,
 )
 
 
@@ -99,7 +103,7 @@ class SourceDiagnosticTests(unittest.TestCase):
             amr = root / "source_amr"
             uniform.mkdir()
             amr.mkdir()
-            common = "\n".join(COMMON_NML_SETTINGS) + "\n"
+            common = "\n".join(COMMON_NML_SETTINGS) + "\nn_iter_nDGP=1\n"
             l5 = root / "ic" / "level_005"
             l6 = root / "ic" / "level_006"
             uniform_text = common + f"levelmax=5\ninitfile(1)='{l5}'\n"
@@ -116,6 +120,78 @@ class SourceDiagnosticTests(unittest.TestCase):
             )
             with self.assertRaises(SourceDiagnosticError):
                 validate_nml_pair(uniform, amr)
+            uniform_800 = uniform_text.replace("n_iter_nDGP=1", "n_iter_nDGP=800")
+            amr_800 = amr_text.replace("n_iter_nDGP=1", "n_iter_nDGP=800")
+            (uniform / "run.nml").write_text(uniform_800, encoding="ascii")
+            (amr / "run.nml").write_text(amr_800, encoding="ascii")
+            validate_nml_pair(uniform, amr, 800)
+
+    def test_matched_config_and_cap_are_fail_closed(self) -> None:
+        config = {
+            "schema": "matched-coarse-global-k2-a1_16",
+            "profile": "matched-coarse-v3",
+            "matched_coarse_cic": {
+                "l1": 1.0e-9,
+                "l2": 2.0e-9,
+                "linf": 3.0e-8,
+                "uniform_integral": 1.0,
+                "matched_integral": 1.0,
+                "hard_ceiling": 1.0e-6,
+            },
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "ic_config.json"
+            path.write_text(json.dumps(config), encoding="utf-8")
+            self.assertEqual(validate_matched_config(path)["linf"], 3.0e-8)
+            config["matched_coarse_cic"]["linf"] = 2.0e-6
+            path.write_text(json.dumps(config), encoding="utf-8")
+            with self.assertRaises(SourceDiagnosticError):
+                validate_matched_config(path)
+
+    def test_matched_science_uses_only_first_amr_l5(self) -> None:
+        rows = {
+            "5": [
+                {"outcome": "converged", "iterations": 200, "residual": 9.0e-5},
+                {"outcome": "capped", "iterations": 800, "residual": 2.0},
+            ],
+            "6": [{"outcome": "capped", "iterations": 800, "residual": 3.0}],
+        }
+        uniform = {
+            "5": [
+                {"outcome": "converged", "iterations": 192, "residual": 9.0e-5},
+                {"outcome": "converged", "iterations": 30, "residual": 9.0e-5},
+            ]
+        }
+        result = assess_matched_solver(uniform, rows)
+        self.assertEqual(result["status"], "L5_SOLVER_PASS")
+        self.assertTrue(result["uniform_control_valid"])
+        rows["5"][0] = {
+            "outcome": "capped",
+            "iterations": 800,
+            "residual": 2.0e-4,
+        }
+        self.assertEqual(
+            assess_matched_solver(uniform, rows)["status"], "L5_SOLVER_FAIL"
+        )
+        uniform["5"][1] = {
+            "outcome": "capped",
+            "iterations": 800,
+            "residual": 2.0e-4,
+        }
+        self.assertFalse(assess_matched_solver(uniform, rows)["uniform_control_valid"])
+
+    def test_amr_solver_sequence_requires_pre_l6_first_l5(self) -> None:
+        rows = "\n".join(
+            f"nDGP level {level} converged in 10 iters, res= 1.0E-5"
+            for level in (5, 6, 5, 6)
+        )
+        validate_solver_sequence(rows, (5, 6, 5, 6), pathlib.Path("run.log"))
+        with self.assertRaises(SourceDiagnosticError):
+            validate_solver_sequence(
+                rows.replace("level 5", "level 6", 1),
+                (5, 6, 5, 6),
+                pathlib.Path("run.log"),
+            )
 
     def test_log_requires_solver_rows_ids_and_no_outside_ic(self) -> None:
         legacy = (

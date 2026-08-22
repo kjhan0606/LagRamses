@@ -85,7 +85,6 @@ COMMON_NML_SETTINGS = (
     "nrestart=0",
     "nexpand=0",
     "nDGP_eps=1.0d-4",
-    "n_iter_nDGP=1",
     "scalar_solver_strict=.false.",
     "static=.false.",
     "use_fftw=.false.",
@@ -253,7 +252,9 @@ def require_setting(text: str, setting: str, path: pathlib.Path) -> None:
         raise SourceDiagnosticError(f"{path}: setting is not pinned exactly once: {setting}")
 
 
-def validate_nml_pair(uniform_dir: pathlib.Path, amr_dir: pathlib.Path) -> None:
+def validate_nml_pair(
+    uniform_dir: pathlib.Path, amr_dir: pathlib.Path, cap: int = 1
+) -> None:
     uniform_path = uniform_dir / "run.nml"
     amr_path = amr_dir / "run.nml"
     uniform = uniform_path.read_text(encoding="ascii")
@@ -261,6 +262,7 @@ def validate_nml_pair(uniform_dir: pathlib.Path, amr_dir: pathlib.Path) -> None:
     for path, text in ((uniform_path, uniform), (amr_path, amr)):
         for setting in COMMON_NML_SETTINGS:
             require_setting(text, setting, path)
+        require_setting(text, f"n_iter_nDGP={cap}", path)
     expected_ic = uniform_dir.parent / "ic"
     expected_l5 = f"initfile(1)='{expected_ic / 'level_005'}'"
     expected_l6 = f"initfile(2)='{expected_ic / 'level_006'}'"
@@ -281,7 +283,10 @@ def validate_nml_pair(uniform_dir: pathlib.Path, amr_dir: pathlib.Path) -> None:
 
 
 def validate_log(
-    run_dir: pathlib.Path, expected_markers: set[tuple[int, int]], expected_levels: tuple[int, ...]
+    run_dir: pathlib.Path,
+    expected_markers: set[tuple[int, int]],
+    expected_levels: tuple[int, ...],
+    cap: int = 1,
 ) -> dict[str, list[dict[str, float | int | str]]]:
     text = (run_dir / "run.log").read_text(errors="replace")
     if text.count("Run completed") != 1 or FATAL.search(text):
@@ -289,7 +294,7 @@ def validate_log(
     if "Some grid are outside initial conditions sub-volume" in text:
         raise SourceDiagnosticError(f"{run_dir}: refinement exceeds the pinned IC")
     validate_cpu_only_markers(text)
-    validate_warnings(text, 1)
+    validate_warnings(text, cap)
     legacy_warning = (
         "WARNING: IC header carries no omega_b (legacy grafic); "
         "using namelist omega_b"
@@ -329,13 +334,30 @@ def validate_log(
             int(value) != 0 for value in values.values()
         ):
             raise SourceDiagnosticError(f"{run_dir}: malformed/nonzero finite marker")
-    rows = {str(level): residuals(text, level, 1) for level in expected_levels}
+    rows = {str(level): residuals(text, level, cap) for level in expected_levels}
     for level, level_rows in rows.items():
         if len(level_rows) != 2:
             raise SourceDiagnosticError(
                 f"{run_dir}: expected two level-{level} solver rows, got {len(level_rows)}"
             )
+    expected_sequence = (5, 5) if expected_levels == (5,) else (5, 6, 5, 6)
+    validate_solver_sequence(text, expected_sequence, run_dir)
     return rows
+
+
+def validate_solver_sequence(
+    text: str, expected_sequence: tuple[int, ...], source: pathlib.Path
+) -> None:
+    actual_sequence = tuple(
+        int(level)
+        for level in re.findall(
+            r"nDGP level\s+([56])\s+(?:converged in|NOT converged after)", text
+        )
+    )
+    if actual_sequence != expected_sequence:
+        raise SourceDiagnosticError(
+            f"{source}: solver sequence {actual_sequence} differs from {expected_sequence}"
+        )
 
 
 def validate_amr_report(
@@ -498,16 +520,83 @@ def fixture_mass_report(
     return {"actual": actual, "expected": expected, "checks": checks}
 
 
+def validate_matched_config(path: pathlib.Path) -> dict[str, float]:
+    config = json.loads(path.read_text(encoding="utf-8"))
+    if (
+        config.get("schema") != "matched-coarse-global-k2-a1_16"
+        or config.get("profile") != "matched-coarse-v3"
+    ):
+        raise SourceDiagnosticError(f"{path}: matched profile/schema differs")
+    raw = config.get("matched_coarse_cic")
+    if not isinstance(raw, dict):
+        raise SourceDiagnosticError(f"{path}: matched coarse CIC metrics are absent")
+    required = (
+        "l1",
+        "l2",
+        "linf",
+        "uniform_integral",
+        "matched_integral",
+        "hard_ceiling",
+    )
+    try:
+        metrics = {name: float(raw[name]) for name in required}
+    except (KeyError, TypeError, ValueError) as error:
+        raise SourceDiagnosticError(f"{path}: malformed matched coarse metrics") from error
+    if not all(math.isfinite(value) for value in metrics.values()):
+        raise SourceDiagnosticError(f"{path}: non-finite matched coarse metric")
+    if metrics["hard_ceiling"] != 1.0e-6 or metrics["linf"] > metrics["hard_ceiling"]:
+        raise SourceDiagnosticError(f"{path}: matched coarse ceiling is not satisfied")
+    for name in ("uniform_integral", "matched_integral"):
+        if not math.isclose(metrics[name], 1.0, rel_tol=CIC_RTOL, abs_tol=CIC_ATOL):
+            raise SourceDiagnosticError(f"{path}: {name} differs from one")
+    return metrics
+
+
+def rows_converged(
+    rows: list[dict[str, float | int | str]], cap: int = 800
+) -> bool:
+    return len(rows) == 2 and all(
+        row["outcome"] == "converged"
+        and float(row["residual"]) < 1.0e-4
+        and int(row["iterations"]) <= cap
+        for row in rows
+    )
+
+
+def assess_matched_solver(
+    uniform_solver: dict[str, list[dict[str, float | int | str]]],
+    amr_solver: dict[str, list[dict[str, float | int | str]]],
+) -> dict[str, object]:
+    first_l5 = amr_solver["5"][0]
+    solver_pass = (
+        first_l5["outcome"] == "converged"
+        and float(first_l5["residual"]) < 1.0e-4
+        and int(first_l5["iterations"]) <= 800
+    )
+    return {
+        "status": "L5_SOLVER_PASS" if solver_pass else "L5_SOLVER_FAIL",
+        "uniform_control_valid": rows_converged(uniform_solver["5"]),
+        "first_amr_l5": first_l5,
+        "l6_and_second_l5_are_characterization_only": True,
+    }
+
+
 def validate(
     uniform_dir: pathlib.Path,
     amr_dir: pathlib.Path,
     uniform_amr_report: pathlib.Path,
     amr_amr_report: pathlib.Path,
+    cap: int = 1,
+    profile: str = "projection-v2",
+    ic_config: pathlib.Path | None = None,
 ) -> tuple[dict[str, object], list[str]]:
-    validate_nml_pair(uniform_dir, amr_dir)
-    uniform_solver = validate_log(uniform_dir, {(1, 5), (2, 5)}, (5,))
+    matched = profile == "matched-coarse-v3"
+    if matched != (cap == 800):
+        raise SourceDiagnosticError("matched profile requires cap=800; projection requires cap=1")
+    validate_nml_pair(uniform_dir, amr_dir, cap)
+    uniform_solver = validate_log(uniform_dir, {(1, 5), (2, 5)}, (5,), cap)
     amr_solver = validate_log(
-        amr_dir, {(1, 5), (2, 5), (1, 6), (2, 6)}, (5, 6)
+        amr_dir, {(1, 5), (2, 5), (1, 6), (2, 6)}, (5, 6), cap
     )
     validate_amr_report(uniform_amr_report, uniform_dir / "output_00001", 0)
     validate_amr_report(amr_amr_report, amr_dir / "output_00001", 4096)
@@ -584,10 +673,28 @@ def validate(
         ) / 8.0
         restriction_difference[(x, y, z)] = amr_l5[(x, y, z)].rho - child_mean
 
+    map_difference_metrics = metric_summary(map_difference)
+    matched_config: dict[str, float] | None = None
+    scientific_assessment: dict[str, object] | None = None
+    if matched:
+        expected_config = uniform_dir.parent / "ic" / "ic_config.json"
+        if ic_config is None or ic_config.resolve() != expected_config.resolve():
+            raise SourceDiagnosticError("matched IC config path differs from the job IC")
+        matched_config = validate_matched_config(ic_config)
+        if float(map_difference_metrics["linf"]) > matched_config["hard_ceiling"]:
+            invariant_failures.append("runtime_matched_l5_source_linf")
+        scientific_assessment = assess_matched_solver(uniform_solver, amr_solver)
+        if not bool(scientific_assessment["uniform_control_valid"]):
+            invariant_failures.append("uniform_l5_solver_control")
+
     report: dict[str, object] = {
-        "schema": "lagRamses-ndgp-amr-source-diagnostic-v1",
+        "schema": "lagRamses-ndgp-amr-source-diagnostic-v2",
         "status": "DIAGNOSTIC_COMPLETE" if not invariant_failures else "INVARIANT_FAIL",
-        "source_map_difference_is_characterization_only": True,
+        "profile": profile,
+        "cap": cap,
+        "source_map_difference_role": (
+            "matched-hard-gate" if matched else "characterization-only"
+        ),
         "direct_cic_tolerance": {"relative": CIC_RTOL, "absolute": CIC_ATOL},
         "rho_tot": all_rho_tot,
         "projection_metrics": {
@@ -598,6 +705,8 @@ def validate(
         },
         "fixture_particle_masses": fixture_masses,
         "direct_cic_oracle": direct_reports,
+        "matched_generator_metrics": matched_config,
+        "scientific_assessment": scientific_assessment,
         "counts": {
             "uniform_l5": len(uniform_l5),
             "amr_l5": len(amr_l5),
@@ -619,7 +728,7 @@ def validate(
                 {key: map_difference[key] for key in interface}
             ),
             "exterior": metric_summary({key: map_difference[key] for key in exterior}),
-            "all": metric_summary(map_difference),
+            "all": map_difference_metrics,
         },
         "amr_l5_minus_mean_children": {
             "refined_all": metric_summary(restriction_difference),
@@ -642,6 +751,13 @@ def main() -> int:
     parser.add_argument("--uniform-amr-report", type=pathlib.Path, required=True)
     parser.add_argument("--amr-amr-report", type=pathlib.Path, required=True)
     parser.add_argument("--report", type=pathlib.Path, required=True)
+    parser.add_argument("--cap", type=int, choices=(1, 800), default=1)
+    parser.add_argument(
+        "--profile",
+        choices=("projection-v2", "matched-coarse-v3"),
+        default="projection-v2",
+    )
+    parser.add_argument("--ic-config", type=pathlib.Path)
     args = parser.parse_args()
     try:
         report, invariant_failures = validate(
@@ -649,6 +765,9 @@ def main() -> int:
             args.amr_dir.resolve(),
             args.uniform_amr_report.resolve(),
             args.amr_amr_report.resolve(),
+            args.cap,
+            args.profile,
+            args.ic_config.resolve() if args.ic_config else None,
         )
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(

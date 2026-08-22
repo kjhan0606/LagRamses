@@ -4,13 +4,16 @@
 ``harsh-v1`` deliberately puts particles at the same position and is retained
 as the exact reproducer for job 322117.  ``smooth-v2`` uses a global-phase,
 sub-cell sinusoidal displacement that is continuous across the level-5/6
-boundary.  Both profiles use the same fixed refinement map and particle IDs.
+boundary.  ``matched-coarse-v3`` co-locates each group of eight fine particles
+with the displaced coarse particle it replaces, providing a matched L5 source.
+All profiles use the same fixed refinement map and particle IDs.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import math
 import pathlib
@@ -27,9 +30,12 @@ OMEGA_L = 0.7
 H0 = 70.0
 HARSH_PROFILE = "harsh-v1"
 SMOOTH_PROFILE = "smooth-v2"
+MATCHED_PROFILE = "matched-coarse-v3"
 SMOOTH_SCHEMA = "smooth-global-k2-a1_16"
+MATCHED_SCHEMA = "matched-coarse-global-k2-a1_16"
 SMOOTH_MODE = 2
 SMOOTH_AMPLITUDE = 1.0 / 16.0
+MATCHED_COARSE_CEILING = 1.0e-6
 
 
 def record(payload: bytes) -> bytes:
@@ -161,6 +167,117 @@ def smooth_position_value(index: int, dx_mpc: float, offset_mpc: float) -> float
     return smooth_displacement_base_cells(index, dx_mpc, offset_mpc) * (H0 / 100.0)
 
 
+def float32(value: float) -> float:
+    return struct.unpack("<f", struct.pack("<f", value))[0]
+
+
+def decoded_position_base_cells(
+    index: int, dx_mpc: float, offset_mpc: float, position_value: float
+) -> float:
+    """Model the legacy GRAFIC float32 displacement decode used by init_part."""
+
+    centre = smooth_coordinate(index, dx_mpc, offset_mpc)
+    return centre + float32(position_value) / (H0 / 100.0)
+
+
+def matched_parent_index(index: int) -> int:
+    return 8 + index // 2
+
+
+def matched_position_value(index: int) -> float:
+    parent = matched_parent_index(index)
+    parent_centre = parent + 0.5
+    displacement = SMOOTH_AMPLITUDE * math.sin(
+        2.0 * math.pi * SMOOTH_MODE * parent_centre / N
+    )
+    fine_centre = smooth_coordinate(index, 0.5, 8.0)
+    return (parent_centre + displacement - fine_centre) * (H0 / 100.0)
+
+
+def matched_cic_axis_weights() -> list[float]:
+    """Deposit the quantized matched particles onto active global L6 cells."""
+
+    weights = [0.0] * N
+    for index in range(N):
+        position = decoded_position_base_cells(
+            index, 0.5, 8.0, matched_position_value(index)
+        )
+        scaled = 2.0 * position - 0.5
+        left = math.floor(scaled)
+        fraction = scaled - left
+        for global_cell, weight in (
+            (left % (2 * N), 1.0 - fraction),
+            ((left + 1) % (2 * N), fraction),
+        ):
+            local_cell = global_cell - 16
+            if not 0 <= local_cell < N:
+                raise RuntimeError(
+                    f"matched fine CIC leaves active patch: cell={global_cell}"
+                )
+            weights[local_cell] += weight
+    return weights
+
+
+def deposit_coarse_cic(
+    field: list[float], position: tuple[float, float, float], mass_ratio: float
+) -> None:
+    axes = []
+    for coordinate in position:
+        scaled = (coordinate % N) - 0.5
+        left = math.floor(scaled)
+        fraction = scaled - left
+        axes.append(
+            (
+                (left % N, 1.0 - fraction),
+                ((left + 1) % N, fraction),
+            )
+        )
+    for x, y, z in itertools.product(*axes):
+        field[x[0] + N * (y[0] + N * z[0])] += (
+            mass_ratio * x[1] * y[1] * z[1]
+        )
+
+
+def matched_coarse_diagnostics() -> dict[str, float]:
+    """Compare decoded uniform and matched-AMR particle projections on L5."""
+
+    uniform = [0.0] * N**3
+    matched = [0.0] * N**3
+    base_positions = [
+        decoded_position_base_cells(i, 1.0, 0.0, smooth_position_value(i, 1.0, 0.0))
+        for i in range(N)
+    ]
+    fine_positions = [
+        decoded_position_base_cells(i, 0.5, 8.0, matched_position_value(i))
+        for i in range(N)
+    ]
+    for iz in range(N):
+        for iy in range(N):
+            for ix in range(N):
+                position = (base_positions[ix], base_positions[iy], base_positions[iz])
+                deposit_coarse_cic(uniform, position, 1.0)
+                if not (8 <= ix < 24 and 8 <= iy < 24 and 8 <= iz < 24):
+                    deposit_coarse_cic(matched, position, 1.0)
+                fine_position = (
+                    fine_positions[ix],
+                    fine_positions[iy],
+                    fine_positions[iz],
+                )
+                deposit_coarse_cic(matched, fine_position, 1.0 / 8.0)
+    differences = [left - right for left, right in zip(uniform, matched)]
+    result = {
+        "l1": math.fsum(abs(value) for value in differences) / N**3,
+        "l2": math.sqrt(math.fsum(value * value for value in differences) / N**3),
+        "linf": max(abs(value) for value in differences),
+        "uniform_integral": math.fsum(uniform) / N**3,
+        "matched_integral": math.fsum(matched) / N**3,
+        "hard_ceiling": MATCHED_COARSE_CEILING,
+    }
+    if result["linf"] > MATCHED_COARSE_CEILING:
+        raise RuntimeError(f"matched coarse CIC exceeds ceiling: {result}")
+    return result
+
+
 def smooth_cic_axis_weights(dx_mpc: float, offset_mpc: float) -> list[float]:
     """Deposit the displaced 1-D lattice with periodic CIC weights."""
 
@@ -195,7 +312,7 @@ def sha256(path: pathlib.Path) -> str:
 def generate(root: pathlib.Path, profile: str = HARSH_PROFILE) -> str:
     if root.exists() and any(root.iterdir()):
         raise RuntimeError(f"refusing non-empty output directory: {root}")
-    if profile not in (HARSH_PROFILE, SMOOTH_PROFILE):
+    if profile not in (HARSH_PROFILE, SMOOTH_PROFILE, MATCHED_PROFILE):
         raise RuntimeError(f"unsupported profile: {profile}")
     zero = lambda _x, _y, _z: 0.0
     level_specs = (
@@ -220,7 +337,7 @@ def generate(root: pathlib.Path, profile: str = HARSH_PROFILE) -> str:
                 one_cell_displacement(dx) if iz % 4 == 0 else 0.0
             )
             delta = density_contrast
-        else:
+        elif profile == SMOOTH_PROFILE or level_number == LEVELMIN:
             axis_weights = smooth_cic_axis_weights(dx_mpc, offset_mpc)
             posx = lambda ix, _iy, _iz, dx=dx_mpc, off=offset_mpc: (
                 smooth_position_value(ix, dx, off)
@@ -231,6 +348,14 @@ def generate(root: pathlib.Path, profile: str = HARSH_PROFILE) -> str:
             posz = lambda _ix, _iy, iz, dx=dx_mpc, off=offset_mpc: (
                 smooth_position_value(iz, dx, off)
             )
+            delta = lambda ix, iy, iz, weights=axis_weights: (
+                smooth_density_contrast(ix, iy, iz, weights)
+            )
+        else:
+            axis_weights = matched_cic_axis_weights()
+            posx = lambda ix, _iy, _iz: matched_position_value(ix)
+            posy = lambda _ix, iy, _iz: matched_position_value(iy)
+            posz = lambda _ix, _iy, iz: matched_position_value(iz)
             delta = lambda ix, iy, iz, weights=axis_weights: (
                 smooth_density_contrast(ix, iy, iz, weights)
             )
@@ -287,15 +412,24 @@ def generate(root: pathlib.Path, profile: str = HARSH_PROFILE) -> str:
         "occupancy_histogram": {str(key): occupancy[key] for key in sorted(occupancy)},
         "header": "legacy GRAFIC 3i+8f (44-byte payload; no omega_b extension)",
     }
-    if profile == SMOOTH_PROFILE:
+    if profile in (SMOOTH_PROFILE, MATCHED_PROFILE):
         metadata.pop("occupancy_histogram")
         level_diagnostics: dict[str, dict[str, float]] = {}
         for level_number, dx_mpc, offset_mpc, _identity_offset in level_specs:
-            shifts = [
-                smooth_displacement_base_cells(index, dx_mpc, offset_mpc) / dx_mpc
-                for index in range(N)
-            ]
-            weights = smooth_cic_axis_weights(dx_mpc, offset_mpc)
+            if profile == MATCHED_PROFILE and level_number == LEVELMAX:
+                shifts = [
+                    float32(matched_position_value(index))
+                    / (H0 / 100.0)
+                    / dx_mpc
+                    for index in range(N)
+                ]
+                weights = matched_cic_axis_weights()
+            else:
+                shifts = [
+                    smooth_displacement_base_cells(index, dx_mpc, offset_mpc) / dx_mpc
+                    for index in range(N)
+                ]
+                weights = smooth_cic_axis_weights(dx_mpc, offset_mpc)
             delta_values = [
                 smooth_density_contrast(ix, iy, iz, weights)
                 for iz in range(N)
@@ -335,6 +469,22 @@ def generate(root: pathlib.Path, profile: str = HARSH_PROFILE) -> str:
                 "level_diagnostics": level_diagnostics,
             }
         )
+        if profile == MATCHED_PROFILE:
+            metadata.update(
+                {
+                    "schema": MATCHED_SCHEMA,
+                    "profile": MATCHED_PROFILE,
+                    "position_rule": (
+                        "each 2x2x2 L6 group is co-located with its decoded "
+                        "displaced L5 parent; each child retains mass m5/8"
+                    ),
+                    "density_rule": (
+                        "active-patch CIC tensor product of decoded float32 "
+                        "matched-particle positions"
+                    ),
+                    "matched_coarse_cic": matched_coarse_diagnostics(),
+                }
+            )
     metadata_path = root / "ic_config.json"
     metadata_path.write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -353,7 +503,7 @@ def main() -> int:
     parser.add_argument("output", type=pathlib.Path)
     parser.add_argument(
         "--profile",
-        choices=(HARSH_PROFILE, SMOOTH_PROFILE),
+        choices=(HARSH_PROFILE, SMOOTH_PROFILE, MATCHED_PROFILE),
         default=HARSH_PROFILE,
     )
     parser.add_argument("--verify-manifest", type=pathlib.Path)

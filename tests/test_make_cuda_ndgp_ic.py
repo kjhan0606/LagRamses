@@ -80,6 +80,7 @@ class SmoothProfileTest(unittest.TestCase):
         cases = (
             (fixture.HARSH_PROFILE, "cuda_ndgp_ic.sha256"),
             (fixture.SMOOTH_PROFILE, "cuda_ndgp_smooth_ic.sha256"),
+            (fixture.MATCHED_PROFILE, "cuda_ndgp_matched_ic.sha256"),
         )
         with tempfile.TemporaryDirectory() as temporary:
             for profile, manifest_name in cases:
@@ -93,6 +94,7 @@ class SmoothProfileTest(unittest.TestCase):
     def test_ids_refmap_and_velocities_are_byte_identical_between_profiles(self) -> None:
         harsh = self.manifest_entries("cuda_ndgp_ic.sha256")
         smooth = self.manifest_entries("cuda_ndgp_smooth_ic.sha256")
+        matched = self.manifest_entries("cuda_ndgp_matched_ic.sha256")
         common = [
             path
             for path in harsh
@@ -110,6 +112,31 @@ class SmoothProfileTest(unittest.TestCase):
         self.assertEqual(len(common), 10)
         for path in common:
             self.assertEqual(harsh[path], smooth[path], path)
+            self.assertEqual(harsh[path], matched[path], path)
+
+    def test_matched_children_reconstruct_the_coarse_source(self) -> None:
+        for parent_local in range(16):
+            parent = 8 + parent_local
+            base_position = fixture.decoded_position_base_cells(
+                parent,
+                1.0,
+                0.0,
+                fixture.smooth_position_value(parent, 1.0, 0.0),
+            )
+            children = [
+                fixture.decoded_position_base_cells(
+                    2 * parent_local + bit,
+                    0.5,
+                    8.0,
+                    fixture.matched_position_value(2 * parent_local + bit),
+                )
+                for bit in (0, 1)
+            ]
+            self.assertLess(max(abs(value - base_position) for value in children), 1.0e-7)
+        metrics = fixture.matched_coarse_diagnostics()
+        self.assertEqual(metrics["uniform_integral"], 1.0)
+        self.assertEqual(metrics["matched_integral"], 1.0)
+        self.assertLess(metrics["linf"], fixture.MATCHED_COARSE_CEILING)
 
 
 if __name__ == "__main__":
