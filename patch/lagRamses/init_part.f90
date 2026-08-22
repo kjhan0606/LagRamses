@@ -43,7 +43,10 @@ subroutine init_part
   integer(i8b),allocatable,dimension(:,:,:)::init_array_id
   integer(kind=8)::plane_bytes_id
   logical::read_ids=.false.
-  character(LEN=80)::filename_id
+  ! [RESIZABLE] initfile may occupy all 80 characters; leave room for the
+  ! `/ic_particle_ids` suffix so project-local QA paths are not truncated
+  ! into a silent read_ids=.false. fallback.
+  character(LEN=256)::filename_id
   real(kind=8),dimension(1:nvector,1:3)::xx,vv,xs
   real(dp),dimension(1:nvector,1:3)::xx_dp
   integer,dimension(1:nvector)::ixx,iyy,izz
