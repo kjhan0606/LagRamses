@@ -292,6 +292,10 @@ subroutine rho_fine(ilevel,icount)
      end if
   end if
 
+  ! Opt-in diagnostic used by the small nDGP AMR source characterization.
+  ! It observes the completed Poisson density map without changing it.
+  call dump_ndgp_source_diag(ilevel,icount)
+
 !!$  do ind=1,twotondim
 !!$     iskip=ncoarse+(ind-1)*ngridmax
 !!$     do i=1,active(ilevel)%ngrid
@@ -307,6 +311,78 @@ subroutine rho_fine(ilevel,icount)
 #endif
   
 end subroutine rho_fine
+!##############################################################################
+!##############################################################################
+!##############################################################################
+!##############################################################################
+subroutine dump_ndgp_source_diag(ilevel,icount)
+  use amr_commons
+  use amr_parameters, only: MAXLEVEL
+  use poisson_commons
+#include "amr_index.h"
+  implicit none
+  integer,intent(in)::ilevel,icount
+  logical,save,dimension(1:MAXLEVEL)::dumped=.false.
+  character(len=32)::env
+  character(len=128)::filename
+  integer::env_status,unit,ios,i,ind,igrid,icell,refined
+  integer::ix,iy,iz
+  integer(kind=8)::twotol
+  integer(kind=8),dimension(1:3)::grid_key,cell_key,period
+
+  if(dumped(ilevel))return
+  if(nstep/=0 .or. icount/=1)return
+  env=''
+  call get_environment_variable('RAMSES_NDGP_SOURCE_DIAG',env,status=env_status)
+  if(env_status/=0 .or. trim(env)/='1')return
+  if(ndim/=3)then
+     if(myid==1)write(*,*)'NDGP source diagnostic requires ndim=3'
+     call clean_stop
+  endif
+
+  twotol=ishft(1_8,ilevel)
+  period=(/int(nx,8),int(ny,8),int(nz,8)/)*twotol
+  write(filename,'("ndgp_source_l",I3.3,"_rank",I5.5,".tsv")') ilevel,myid
+  open(newunit=unit,file=trim(filename),status='new',action='write', &
+       & form='formatted',iostat=ios)
+  if(ios/=0)then
+     write(*,*)'Cannot create nDGP source diagnostic file ',trim(filename), &
+          & ' rank=',myid,' iostat=',ios
+     call clean_stop
+  endif
+  write(unit,'(A,I0,A,I0,A,I0,A,I0,A,ES26.17E3)') &
+       & '# schema=ndgp-source-v1 rank=',myid,' level=',ilevel, &
+       & ' nstep=',nstep,' icount=',icount,' rho_tot=',rho_tot
+  write(unit,'(A)') '# level x y z rho rho_tot refined'
+  do i=1,active(ilevel)%ngrid
+     igrid=active(ilevel)%igrid(i)
+     grid_key(1)=nint(xg(igrid,1)*dble(twotol),kind=8)
+     grid_key(2)=nint(xg(igrid,2)*dble(twotol),kind=8)
+     grid_key(3)=nint(xg(igrid,3)*dble(twotol),kind=8)
+     do ind=1,twotondim
+        ix=mod(ind-1,2)
+        iy=mod((ind-1)/2,2)
+        iz=mod((ind-1)/4,2)
+        cell_key(1)=modulo(grid_key(1)+int(ix,8)-1_8,period(1))
+        cell_key(2)=modulo(grid_key(2)+int(iy,8)-1_8,period(2))
+        cell_key(3)=modulo(grid_key(3)+int(iz,8)-1_8,period(3))
+        icell=ICELL_OF(igrid,ind)
+        refined=merge(1,0,son(icell)>0)
+        write(unit,'(I0,3(1X,I0),2(1X,ES26.17E3),1X,I0)') &
+             & ilevel,cell_key,rho(icell),rho_tot,refined
+     end do
+  end do
+  close(unit,iostat=ios)
+  if(ios/=0)then
+     write(*,*)'Cannot close nDGP source diagnostic file ',trim(filename), &
+          & ' rank=',myid,' iostat=',ios
+     call clean_stop
+  endif
+  dumped(ilevel)=.true.
+  write(*,'(A,I0,A,I0,A,I0)') &
+       & ' [NDGP_SOURCE_DIAG] rank=',myid,' level=',ilevel, &
+       & ' owned_cells=',active(ilevel)%ngrid*twotondim
+end subroutine dump_ndgp_source_diag
 !##############################################################################
 !##############################################################################
 !##############################################################################

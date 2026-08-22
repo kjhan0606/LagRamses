@@ -19,6 +19,7 @@ cpu_probe=${CUDA_NDGP_CPU_PROBE:-0}
 diag_sweep=${CUDA_NDGP_DIAG_SWEEP:-0}
 smooth_diag=${CUDA_NDGP_SMOOTH_DIAG:-0}
 l5_diag=${CUDA_NDGP_L5_DIAG:-0}
+source_diag=${CUDA_NDGP_SOURCE_DIAG:-0}
 case "$cpu_probe" in
   0|1) ;;
   *) echo 'CUDA-NDGP: CUDA_NDGP_CPU_PROBE must be 0 or 1'; exit 2 ;;
@@ -35,7 +36,11 @@ case "$l5_diag" in
   0|1) ;;
   *) echo 'CUDA-NDGP: CUDA_NDGP_L5_DIAG must be 0 or 1'; exit 2 ;;
 esac
-if [ $((cpu_probe + diag_sweep + smooth_diag + l5_diag)) -gt 1 ]; then
+case "$source_diag" in
+  0|1) ;;
+  *) echo 'CUDA-NDGP: CUDA_NDGP_SOURCE_DIAG must be 0 or 1'; exit 2 ;;
+esac
+if [ $((cpu_probe + diag_sweep + smooth_diag + l5_diag + source_diag)) -gt 1 ]; then
   echo 'CUDA-NDGP: CPU probe and diagnostic modes are mutually exclusive'
   exit 2
 fi
@@ -44,6 +49,7 @@ if [ "$cpu_probe" -eq 1 ]; then run_mode=cpu_structure_probe; fi
 if [ "$diag_sweep" -eq 1 ]; then run_mode=cpu_solver_diagnostic_sweep; fi
 if [ "$smooth_diag" -eq 1 ]; then run_mode=cpu_smooth_solver_diagnostic; fi
 if [ "$l5_diag" -eq 1 ]; then run_mode=cpu_smooth_l5_control; fi
+if [ "$source_diag" -eq 1 ]; then run_mode=cpu_amr_source_diagnostic; fi
 job_root="$qa/cuda_ndgp_jobs/${SLURM_JOB_ID:?}"
 logs="$job_root/logs"
 snapshot="$job_root/snapshot"
@@ -70,6 +76,8 @@ snapshot_files=(
   tests/validate_cuda_ndgp_logs.py
   tests/validate_cuda_ndgp_diagnostic.py
   tests/test_validate_cuda_ndgp_diagnostic.py
+  tests/validate_ndgp_source_diagnostic.py
+  tests/test_validate_ndgp_source_diagnostic.py
   tests/test_make_cuda_ndgp_ic.py
   tests/test_validate_cuda_ndgp_logs.py
   tests/preflight.sh
@@ -88,6 +96,7 @@ snapshot_files=(
   tests/mpi_affinity_probe.f90
   patch/cuRamses/force_fine.kjhan.f90
   patch/cuRamses/diag_eint.f90
+  patch/lagRamses/rho_fine.kjhan.f90
 )
 for relative in "${snapshot_files[@]}"; do
   cp -p "$code/$relative" "$snapshot/$(basename "$relative")"
@@ -103,6 +112,7 @@ done
   echo 'build=make -B USE_CUDA=1 HDF5= USE_FFTW= USE_CUFFTMP= FDMDEBUG= FDMTRACE= AMR_INDEX_CHECK= MORTON128='
   echo 'cuda_streams_compile_default=16 cuda_streams_runtime=1'
   echo 'dmo_finite_diagnostic=RAMSES_DMO_FINITE_DIAG=1'
+  echo "ndgp_source_diagnostic=$source_diag"
   echo "started=$(date --iso-8601=seconds)"
 } | tee "$logs/provenance.txt"
 sha256sum "$snapshot"/* | tee -a "$logs/provenance.txt"
@@ -113,6 +123,8 @@ export OMP_NUM_THREADS=1
 export OMP_PROC_BIND=false
 export OMP_WAIT_POLICY=passive
 export RAMSES_DMO_FINITE_DIAG=1
+unset RAMSES_NDGP_SOURCE_DIAG
+if [ "$source_diag" -eq 1 ]; then export RAMSES_NDGP_SOURCE_DIAG=1; fi
 export I_MPI_PIN=0
 unset I_MPI_PIN_DOMAIN I_MPI_PIN_PROCESSOR_LIST I_MPI_PIN_RESPECT_CPUSET
 unset KMP_AFFINITY KMP_HW_SUBSET GOMP_CPU_AFFINITY
@@ -210,7 +222,8 @@ cat "$logs/device_map.txt" | tee -a "$logs/provenance.txt"
 ic_root="$job_root/ic"
 ic_profile=harsh-v1
 ic_manifest="$snapshot/cuda_ndgp_ic.sha256"
-if [ "$smooth_diag" -eq 1 ] || [ "$l5_diag" -eq 1 ]; then
+if [ "$smooth_diag" -eq 1 ] || [ "$l5_diag" -eq 1 ] || \
+   [ "$source_diag" -eq 1 ]; then
   ic_profile=smooth-v2
   ic_manifest="$snapshot/cuda_ndgp_smooth_ic.sha256"
 fi
@@ -259,6 +272,14 @@ render_nml() {
       -e 's/^levelmax=6$/levelmax=5/' \
       -e '/^initfile(2)=/d' "$target"
   fi
+  if [ "$source_diag" -eq 1 ]; then
+    sed -i -e 's/^nstepmax=4$/nstepmax=1/' \
+      -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
+      -e 's/^n_iter_nDGP=100$/n_iter_nDGP=1/' "$target"
+    if [ "$variant" = source_uniform ]; then
+      sed -i -e 's/^levelmax=6$/levelmax=5/' -e '/^initfile(2)=/d' "$target"
+    fi
+  fi
 }
 
 variants=(cpu gpu)
@@ -268,6 +289,7 @@ if [ "$diag_sweep" -eq 1 ]; then
 fi
 if [ "$smooth_diag" -eq 1 ]; then variants=(cpu_smooth_1600); fi
 if [ "$l5_diag" -eq 1 ]; then variants=(cpu_l5_1600); fi
+if [ "$source_diag" -eq 1 ]; then variants=(source_uniform source_amr); fi
 for variant in "${variants[@]}"; do
   run_dir="$job_root/$variant"
   mkdir -p "$run_dir"
@@ -278,7 +300,8 @@ if ! (
   cd "$snapshot"
   python3 -m unittest -v test_compare_amr_canonical.py \
     test_compare_cuda_ndgp_outputs.py test_validate_cuda_ndgp_logs.py \
-    test_validate_cuda_ndgp_diagnostic.py test_make_cuda_ndgp_ic.py
+    test_validate_cuda_ndgp_diagnostic.py test_validate_ndgp_source_diagnostic.py \
+    test_make_cuda_ndgp_ic.py
 ) >"$logs/unit_tests.log" 2>&1; then
   echo 'CUDA-NDGP: comparator/validator unit tests failed'
   exit 1
@@ -347,6 +370,44 @@ for variant in "${variants[@]}"; do
     exit 1
   fi
 done
+
+if [ "$source_diag" -eq 1 ]; then
+  uniform_dir="$job_root/source_uniform"
+  amr_dir="$job_root/source_amr"
+  uniform_amr_report="$reports/source_uniform_amr_00001.json"
+  amr_amr_report="$reports/source_amr_amr_00001.json"
+  if ! python3 "$snapshot/compare_amr_canonical.py" --topology-only \
+      --require-same-local-layout \
+      --scratch "$reports/scratch_source_uniform_00001" \
+      --json "$uniform_amr_report" \
+      "$uniform_dir/output_00001" "$uniform_dir/output_00001" \
+      >"$reports/source_uniform_amr_00001.txt" 2>&1; then
+    echo 'CUDA-NDGP: uniform source topology validation failed'
+    exit 1
+  fi
+  if ! python3 "$snapshot/compare_amr_canonical.py" --topology-only \
+      --require-same-local-layout \
+      --scratch "$reports/scratch_source_amr_00001" \
+      --json "$amr_amr_report" \
+      "$amr_dir/output_00001" "$amr_dir/output_00001" \
+      >"$reports/source_amr_amr_00001.txt" 2>&1; then
+    echo 'CUDA-NDGP: AMR source topology validation failed'
+    exit 1
+  fi
+  if ! python3 "$snapshot/validate_ndgp_source_diagnostic.py" \
+      "$uniform_dir" "$amr_dir" \
+      --uniform-amr-report "$uniform_amr_report" \
+      --amr-amr-report "$amr_amr_report" \
+      --report "$reports/amr_source_diagnostic.json" \
+      >"$reports/amr_source_diagnostic.txt" 2>&1; then
+    echo 'CUDA-NDGP: AMR source diagnostic validation failed'
+    exit 1
+  fi
+  touch "$job_root/AMR_SOURCE_DIAGNOSTIC_COMPLETE"
+  echo 'finished='"$(date --iso-8601=seconds)" \
+    'rc=0 status=AMR_SOURCE_DIAGNOSTIC_COMPLETE' | tee -a "$logs/provenance.txt"
+  exit 0
+fi
 
 if [ "$diag_sweep" -eq 1 ] || [ "$smooth_diag" -eq 1 ] || \
    [ "$l5_diag" -eq 1 ]; then
