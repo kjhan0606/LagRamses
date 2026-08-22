@@ -38,4 +38,5 @@ ivar_refine=0
 
 &POISSON_PARAMS
 epsilon=1.d-4
+restart_phi_warm_start=.true.
 /

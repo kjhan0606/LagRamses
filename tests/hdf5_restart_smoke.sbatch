@@ -234,7 +234,7 @@ restore_markers=(
   'HDF5 particle restore done.'
   'HDF5 poisson restore done.'
   'Modified-gravity scalar field restored from HDF5 checkpoint'
-  'Poisson restart: valid phi marker accepted; warm start enabled'
+  'Poisson restart: valid phi marker found; warm start disabled, using predictor'
 )
 for marker in "${restore_markers[@]}"; do
   [ "$(grep -F -c "$marker" "$restart/run.log" || true)" -eq 1 ] || {
@@ -242,8 +242,8 @@ for marker in "${restore_markers[@]}"; do
     exit 1
   }
 done
-if grep -iEq 'VARIABLE NCPU / CROSS-ORDERING RESTART|using variable-ncpu path|Forcing load_balance after variable-ncpu restart|using predictor|Scalar field absent' "$restart/run.log"; then
-  echo 'HDF5-RESTART: unexpected variable-ncpu/predictor/scalar fallback'
+if grep -iEq 'VARIABLE NCPU / CROSS-ORDERING RESTART|using variable-ncpu path|Forcing load_balance after variable-ncpu restart|Scalar field absent|valid phi marker accepted; warm start enabled|Poisson warm start from restored phi' "$restart/run.log"; then
+  echo 'HDF5-RESTART: unexpected variable-ncpu/scalar fallback or phi warm start'
   exit 1
 fi
 

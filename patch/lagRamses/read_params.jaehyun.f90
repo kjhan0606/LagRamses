@@ -252,9 +252,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   read(1,NML=poisson_params,END=81)
 81 continue
   if(myid==1) write(*,'(A,I0)') ' Fine MG max iterations = ',maxiter_fine
-  if(myid==1) write(*,'(A)') ' Restart phi policy = automatic checkpoint marker'
   if(myid==1 .and. restart_phi_warm_start) write(*,'(A)') &
-       ' WARNING: restart_phi_warm_start is deprecated and ignored'
+       ' Restart phi policy = valid-marker warm start (explicit opt-in)'
+  if(myid==1 .and. .not.restart_phi_warm_start) write(*,'(A)') &
+       ' Restart phi policy = predictor (default)'
   if(myid==1) write(*,'(A,L1)') ' Abort on fine MG nonconvergence = ', &
        abort_on_mg_nonconvergence
   rewind(1)

@@ -8,8 +8,9 @@ module poisson_parameters
   ! default, but allow difficult production meshes to request more cycles.
   integer :: maxiter_fine=10
 
-  ! Deprecated namelist compatibility key.  Restart warm-start selection is
-  ! automatic and depends only on the checkpoint validity marker.
+  ! Restarts use the standard predictor by default.  A valid checkpoint
+  ! marker is necessary but not sufficient for the restored-phi warm start;
+  ! this explicit diagnostic opt-in is also required.
   logical :: restart_phi_warm_start=.false.
 
   ! Production jobs can fail closed when fine MG reaches maxiter_fine while

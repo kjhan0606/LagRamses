@@ -96,6 +96,7 @@ ivar_refine=0
 &POISSON_PARAMS
 epsilon=1.0d-4
 maxiter_fine=100
+restart_phi_warm_start=.false.
 abort_on_mg_nonconvergence=.true.
 cg_levelmin=999
 cic_levelmax=0

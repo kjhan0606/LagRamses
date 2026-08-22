@@ -72,10 +72,10 @@ subroutine init_poisson
   allocate(phi_checkpoint_level_valid(1:nlevelmax))
   phi_checkpoint_level_valid = .false.
 
-  ! Warm-starting is selected by a versioned checkpoint marker, never by
-  ! merely finding a gravity payload.  A COMPLETE marker is required as well
-  ! so an interrupted dump cannot advertise a partially written potential.
-  ! Legacy checkpoints therefore fail closed to the standard predictor.
+  ! A COMPLETE, versioned checkpoint marker is required before restored phi
+  ! can be considered.  The standard predictor remains the safe default:
+  ! restored phi is used only with the explicit diagnostic opt-in because a
+  ! solve/topology marker does not prove RHS or periodic-gauge compatibility.
   valid_restart_phi=.false.
   marker_exists=.false.
   complete_exists=.false.
@@ -118,7 +118,11 @@ subroutine init_poisson
 #endif
   if(nrestart>0 .and. myid==1)then
      if(valid_restart_phi)then
-        write(*,*)'Poisson restart: valid phi marker accepted; warm start enabled'
+        if(restart_phi_warm_start)then
+           write(*,*)'Poisson restart: valid phi marker accepted; warm start enabled'
+        else
+           write(*,*)'Poisson restart: valid phi marker found; warm start disabled, using predictor'
+        end if
      else if(marker_exists .and. .not.complete_exists)then
         write(*,*)'Poisson restart: phi marker belongs to incomplete output; using predictor'
      else if(marker_exists)then
@@ -136,7 +140,8 @@ subroutine init_poisson
      if(informat == 'hdf5') then
         call restore_poisson_hdf5()
         do ilevel=1,nlevelmax
-           phi_restart_available(ilevel) = valid_restart_phi .and. numbtot(1,ilevel)>0
+           phi_restart_available(ilevel) = restart_phi_warm_start .and. &
+                valid_restart_phi .and. numbtot(1,ilevel)>0
         end do
         if(verbose)write(*,*)'HDF5 POISSON backup files read completed'
         return
@@ -145,7 +150,8 @@ subroutine init_poisson
      if(varcpu_restart) then
         call restore_poisson_binary_varcpu()
         do ilevel=1,nlevelmax
-           phi_restart_available(ilevel) = valid_restart_phi .and. numbtot(1,ilevel)>0
+           phi_restart_available(ilevel) = restart_phi_warm_start .and. &
+                valid_restart_phi .and. numbtot(1,ilevel)>0
         end do
         ! Free grid-mapping metadata (not needed after poisson restore).
         ! varcpu_nactive/my_files/ngrid_file are kept alive for
@@ -276,7 +282,8 @@ subroutine init_poisson
   if(myid==1 .and. scalar_in_checkpoint .and. allocated(scalar_gr)) &
        & write(*,*)'Modified-gravity scalar field restored from checkpoint'
   do ilevel=1,nlevelmax
-     phi_restart_available(ilevel) = valid_restart_phi .and. numbtot(1,ilevel)>0
+     phi_restart_available(ilevel) = restart_phi_warm_start .and. &
+          valid_restart_phi .and. numbtot(1,ilevel)>0
   end do
   if(verbose)write(*,*)'POISSON backup files read completed'
 
