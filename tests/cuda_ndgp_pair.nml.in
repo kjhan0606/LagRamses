@@ -84,7 +84,7 @@ levelmin=5
 levelmax=6
 ngridtot=40000
 nparttot=131072
-nexpand=1
+nexpand=0
 /
 
 &REFINE_PARAMS

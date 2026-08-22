@@ -58,7 +58,7 @@ if [ -f "$cpu/run.nml" ] && [ -f "$gpu/run.nml" ]; then
       'gpu_fft=.false.' 'gpu_sink=.false.' 'gpu_auto_tune=.false.'
       'pm_gpu_min_part=1' 'n_cuda_streams=1' "outformat='original'"
       'levelmin=5' 'levelmax=6' 'ngridtot=40000' 'nparttot=131072'
-      'ivar_refine=0' 'cg_levelmin=999' 'cic_levelmax=0'
+      'nexpand=0' 'ivar_refine=0' 'cg_levelmin=999' 'cic_levelmax=0'
     )
     for requirement in "${required_settings[@]}"; do
       grep -Fqx "$requirement" "$nml" || bad "$nml lacks pinned $requirement"
@@ -76,7 +76,7 @@ for run in "$cpu" "$gpu"; do
   warning_count=$(grep -F -c "$legacy_header_warning" "$run/run.log" 2>/dev/null || true)
   [ "$warning_count" -eq 2 ] || \
     bad "$label has legacy-header warning count $warning_count (expected 2)"
-  if grep -iE 'warning|WARN:|FATAL:|ERROR:|increase ngridmax|increase npartmax|MPI_ABORT|forrtl: severe|segmentation fault|error stop|allocation FAILED|upload error|replaying.*CPU|CUDA.*error|out of memory|OOM|NOT converged|failed to converge' \
+  if grep -iE 'warning|WARN:|FATAL:|ERROR:|increase ngridmax|increase npartmax|MPI_ABORT|forrtl: severe|segmentation fault|error stop|allocation FAILED|upload error|replaying.*CPU|CUDA.*error|out of memory|OOM|NOT converged|failed to converge|Some grid are outside initial conditions sub-volume' \
       "$run/run.log" | grep -Fv "$legacy_header_warning" >/dev/null; then
     bad "$label contains a non-whitelisted warning/fatal/fallback marker"
   fi
@@ -85,6 +85,8 @@ for run in "$cpu" "$gpu"; do
     bad "$label reports nonzero NaN counters"
   fi
   grep -Eq 'Fine step=' "$run/run.log" || bad "$label never executed a fine step"
+  grep -Eq 'Level +6 has +4096 grids' "$run/run.log" || \
+    bad "$label initial level-6 topology is not the pinned 16^3 grid cube"
   grep -Eq 'nDGP level +6 .*converged' "$run/run.log" || \
     bad "$label has no converged level-6 nDGP solve"
   grep -Eq '==> Level= *6 Step=' "$run/run.log" || \
