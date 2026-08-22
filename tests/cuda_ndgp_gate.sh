@@ -59,6 +59,7 @@ if [ -f "$cpu/run.nml" ] && [ -f "$gpu/run.nml" ]; then
       'pm_gpu_min_part=1' 'n_cuda_streams=1' "outformat='original'"
       'levelmin=5' 'levelmax=6' 'ngridtot=40000' 'nparttot=131072'
       'nexpand=0' 'ivar_refine=0' 'cg_levelmin=999' 'cic_levelmax=0'
+      'nstepmax=4' 'n_iter_nDGP=1600' 'nDGP_eps=1.0d-4'
     )
     for requirement in "${required_settings[@]}"; do
       grep -Fqx "$requirement" "$nml" || bad "$nml lacks pinned $requirement"

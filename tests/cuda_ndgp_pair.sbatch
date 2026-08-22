@@ -230,8 +230,12 @@ echo 'cuda_device=PASS ranks=2 visible_device_count=1 shared_uuid=1 free_each_ge
 cat "$logs/device_map.txt" | tee -a "$logs/provenance.txt"
 
 ic_root="$job_root/ic"
-ic_profile=harsh-v1
-ic_manifest="$snapshot/cuda_ndgp_ic.sha256"
+ic_profile=matched-coarse-v3
+ic_manifest="$snapshot/cuda_ndgp_matched_ic.sha256"
+if [ "$cpu_probe" -eq 1 ] || [ "$diag_sweep" -eq 1 ]; then
+  ic_profile=harsh-v1
+  ic_manifest="$snapshot/cuda_ndgp_ic.sha256"
+fi
 if [ "$smooth_diag" -eq 1 ] || [ "$l5_diag" -eq 1 ] || \
    [ "$source_diag" -eq 1 ]; then
   ic_profile=smooth-v2
@@ -272,24 +276,22 @@ render_nml() {
     cap=${variant##*_}
     sed -i -e 's/^nstepmax=4$/nstepmax=1/' \
       -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
-      -e "s/^n_iter_nDGP=100$/n_iter_nDGP=$cap/" "$target"
+      -e "s/^n_iter_nDGP=1600$/n_iter_nDGP=$cap/" "$target"
   fi
   if [ "$smooth_diag" -eq 1 ]; then
     sed -i -e 's/^nstepmax=4$/nstepmax=1/' \
-      -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
-      -e 's/^n_iter_nDGP=100$/n_iter_nDGP=1600/' "$target"
+      -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' "$target"
   fi
   if [ "$l5_diag" -eq 1 ]; then
     sed -i -e 's/^nstepmax=4$/nstepmax=1/' \
       -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
-      -e 's/^n_iter_nDGP=100$/n_iter_nDGP=1600/' \
       -e 's/^levelmax=6$/levelmax=5/' \
       -e '/^initfile(2)=/d' "$target"
   fi
   if [ "$source_diag" -eq 1 ]; then
     sed -i -e 's/^nstepmax=4$/nstepmax=1/' \
       -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
-      -e 's/^n_iter_nDGP=100$/n_iter_nDGP=1/' "$target"
+      -e 's/^n_iter_nDGP=1600$/n_iter_nDGP=1/' "$target"
     if [ "$variant" = source_uniform ]; then
       sed -i -e 's/^levelmax=6$/levelmax=5/' -e '/^initfile(2)=/d' "$target"
     fi
@@ -297,7 +299,7 @@ render_nml() {
   if [ "$matched_diag" -eq 1 ]; then
     sed -i -e 's/^nstepmax=4$/nstepmax=1/' \
       -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
-      -e 's/^n_iter_nDGP=100$/n_iter_nDGP=800/' "$target"
+      -e 's/^n_iter_nDGP=1600$/n_iter_nDGP=800/' "$target"
     if [ "$variant" = matched_uniform ]; then
       sed -i -e 's/^levelmax=6$/levelmax=5/' -e '/^initfile(2)=/d' "$target"
     fi

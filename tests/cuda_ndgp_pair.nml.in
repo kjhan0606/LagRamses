@@ -103,6 +103,6 @@ cic_levelmax=0
 &NDGP_PARAMS
 omega_rc=0.25
 nDGP_branch=1
-n_iter_nDGP=100
+n_iter_nDGP=1600
 nDGP_eps=1.0d-4
 /
