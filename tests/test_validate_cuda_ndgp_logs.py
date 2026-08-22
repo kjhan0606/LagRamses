@@ -21,6 +21,8 @@ SOLVER_LOG = """\
 """ + "".join(
     f" Main step={step:7d} mcons= 0.00E+00 econs= 0.00E+00 "
     f"epot=-1.00E-01 ekin= 1.00E-02\n"
+    for step in range(1, 5)
+) + "".join(
     f" Fine step={step:7d} t= {step + 1:.5E} dt= 1.000E-03 "
     f"a= {0.1 + 0.001 * step:.3E} mem=10.0% 10.0%\n"
     for step in range(5)
@@ -60,7 +62,7 @@ class LogValidatorTest(unittest.TestCase):
             validator.validate_rank_logs(root / "cpu", root / "gpu")
             state = validator.convergence(root / "cpu" / "run.log", 1.0e-4)
             self.assertEqual(state[:3], (4, 4, 0.104))
-            self.assertEqual([row[0] for row in state[3]], list(range(5)))
+            self.assertEqual([row[0] for row in state[3]], list(range(1, 5)))
             conservation = validator.conservation_difference(state[3], state[3])
             self.assertEqual(conservation["mcons"]["max_abs_difference"], 0.0)
             report = root / "report.json"
@@ -97,6 +99,17 @@ class LogValidatorTest(unittest.TestCase):
             log.write_text("NaN_CHK uold=0 f=0 d0=0\n" + SOLVER_LOG, encoding="ascii")
             validator.convergence(log, 1.0e-4)
             log.write_text(SOLVER_LOG + "residual=Inf\n", encoding="ascii")
+            with self.assertRaises(validator.ValidationError):
+                validator.convergence(log, 1.0e-4)
+
+    def test_missing_main_step_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = pathlib.Path(temporary) / "run.log"
+            missing = next(
+                line for line in SOLVER_LOG.splitlines(keepends=True)
+                if "Main step=" in line and "      2" in line
+            )
+            log.write_text(SOLVER_LOG.replace(missing, ""), encoding="ascii")
             with self.assertRaises(validator.ValidationError):
                 validator.convergence(log, 1.0e-4)
 

@@ -77,9 +77,12 @@ for run in "$cpu" "$gpu"; do
   warning_count=$(grep -F -c "$legacy_header_warning" "$run/run.log" 2>/dev/null || true)
   [ "$warning_count" -eq 2 ] || \
     bad "$label has legacy-header warning count $warning_count (expected 2)"
-  if grep -iE 'warning|WARN:|FATAL:|ERROR:|increase ngridmax|increase npartmax|MPI_ABORT|forrtl: severe|segmentation fault|error stop|allocation FAILED|upload error|replaying.*CPU|CUDA.*error|out of memory|OOM|NOT converged|failed to converge|Some grid are outside initial conditions sub-volume' \
+  if grep -iE 'warning|WARN:|FATAL:|ERROR:|increase ngridmax|increase npartmax|MPI_ABORT|forrtl: severe|segmentation fault|error stop|allocation FAILED|upload error|replaying.*CPU|CUDA.*error|out of memory|NOT converged|failed to converge|Some grid are outside initial conditions sub-volume' \
       "$run/run.log" | grep -Fv "$legacy_header_warning" >/dev/null; then
     bad "$label contains a non-whitelisted warning/fatal/fallback marker"
+  fi
+  if grep -iE '(^|[^[:alnum:]_])OOM([^[:alnum:]_]|$)' "$run/run.log" >/dev/null; then
+    bad "$label contains an OOM marker"
   fi
   if grep -E 'NaN_CHK.*(uold= *[1-9]|f= *[1-9]|d0= *[1-9])' \
       "$run/run.log" >/dev/null; then

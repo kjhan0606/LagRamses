@@ -109,12 +109,13 @@ def convergence(
             rf"Fine step=\s*(\d+)\s+t=\s*({NUMBER}).*?\ba=\s*({NUMBER})", text
         )
     ]
-    expected_steps = list(range(5))
-    if [row[0] for row in main_rows] != expected_steps:
+    expected_main_steps = list(range(1, 5))
+    expected_fine_steps = list(range(5))
+    if [row[0] for row in main_rows] != expected_main_steps:
         raise ValidationError(
-            f"{path}: Main steps are {[row[0] for row in main_rows]}, expected 0..4"
+            f"{path}: Main steps are {[row[0] for row in main_rows]}, expected 1..4"
         )
-    if [row[0] for row in fine] != expected_steps:
+    if [row[0] for row in fine] != expected_fine_steps:
         raise ValidationError(
             f"{path}: Fine steps are {[row[0] for row in fine]}, expected 0..4"
         )
