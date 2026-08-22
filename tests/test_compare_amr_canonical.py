@@ -38,7 +38,7 @@ class LegacyWriter:
         self.record(struct.pack("<" + "q" * len(values), *values))
 
 
-def write_info(path: pathlib.Path, capacity: int) -> None:
+def write_info(path: pathlib.Path, capacity: int, time: float = 0.25) -> None:
     path.write_text(
         "\n".join(
             (
@@ -50,7 +50,7 @@ def write_info(path: pathlib.Path, capacity: int) -> None:
                 "nstep_coarse=          4",
                 "",
                 "boxlen      =  0.100000000000000E+01",
-                "time        =  0.250000000000000E+00",
+                f"time        = {time:24.15E}",
                 "aexp        =  0.500000000000000E+00",
                 "H0          =  0.700000000000000E+02",
                 "omega_m     =  0.300000000000000E+00",
@@ -81,6 +81,7 @@ def write_amr(
     numbtot_rank_noise: int = 0,
     level_total_delta: int = 0,
     nbor_flip: bool = False,
+    time: float = 0.25,
 ) -> None:
     writer = LegacyWriter(path)
     try:
@@ -96,7 +97,7 @@ def write_amr(
         writer.ints(1, 1, 2)
         writer.doubles(0.0)
         writer.doubles(0.5)
-        writer.doubles(0.25)
+        writer.doubles(time)
         writer.doubles(0.1, 0.05)
         writer.doubles(0.09, 0.04)
         writer.ints(4, 4)
@@ -168,6 +169,7 @@ def write_output(
     numbtot_rank_noise: int = 0,
     level_total_delta: int = 0,
     nbor_flip: bool = False,
+    time: float = 0.25,
 ) -> None:
     directory.mkdir()
     write_amr(
@@ -179,16 +181,17 @@ def write_output(
         numbtot_rank_noise=numbtot_rank_noise,
         level_total_delta=level_total_delta,
         nbor_flip=nbor_flip,
+        time=time,
     )
-    write_info(directory / "info_00001.txt", capacity)
+    write_info(directory / "info_00001.txt", capacity, time)
 
 
 class ComparatorTest(unittest.TestCase):
     def run_comparator(
-        self, left: pathlib.Path, right: pathlib.Path
+        self, left: pathlib.Path, right: pathlib.Path, *options: str
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            (sys.executable, str(COMPARATOR), str(left), str(right)),
+            (sys.executable, str(COMPARATOR), *options, str(left), str(right)),
             check=False,
             text=True,
             stdout=subprocess.PIPE,
@@ -205,6 +208,24 @@ class ComparatorTest(unittest.TestCase):
             result = self.run_comparator(left, right)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("AMR_CANONICAL PASS", result.stdout)
+
+    def test_topology_only_allows_state_change_and_proves_local_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            left = root / "left"
+            right = root / "right"
+            write_output(left, capacity=8, level1_id=2, level2_id=3, time=0.25)
+            write_output(right, capacity=8, level1_id=2, level2_id=3, time=0.5)
+            strict = self.run_comparator(left, right)
+            self.assertEqual(strict.returncode, 1, strict.stderr)
+            topology = self.run_comparator(
+                left,
+                right,
+                "--topology-only",
+                "--require-same-local-layout",
+            )
+            self.assertEqual(topology.returncode, 0, topology.stderr)
+            self.assertIn("AMR_CANONICAL PASS", topology.stdout)
 
     def test_semantic_flag_corruption_is_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

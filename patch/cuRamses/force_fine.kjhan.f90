@@ -1981,8 +1981,10 @@ subroutine dil_build_fft_rhs(ilevel, A2_d, s_d, chibar_d, m2bar)
 
 end subroutine dil_build_fft_rhs
 
+#endif
+
 !=========================================================
-! vain_prepare_uniform_cache: build the face/edge grid topology once
+! [RESIZABLE] vain_prepare_uniform_cache: build the face/edge grid topology once
 ! for a uniform spectral scalar solve.  The active-grid order and domain
 ! decomposition cannot change inside one nDGP/Galileon nonlinear loop.
 ! Rebuilding once at the next coarse step is intentionally conservative:
@@ -2054,6 +2056,8 @@ subroutine vain_prepare_uniform_cache(ilevel)
   vain_cache_ngrid=ncache
   vain_cache_ready=.true.
 end subroutine vain_prepare_uniform_cache
+
+#ifdef USE_FFTW
 
 !=========================================================
 ! vain_build_fft_rhs: nDGP/galileon operator splitting;

@@ -116,7 +116,8 @@ end subroutine diag_check_eint
 subroutine diag_check_nan(label)
   use amr_commons
   use hydro_commons
-  use poisson_commons, only: f
+  use poisson_commons, only: f,rho,phi,scalar_gr
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
@@ -129,9 +130,66 @@ subroutine diag_check_nan(label)
   integer :: nan_uold_glob, nan_f_glob
   integer :: dzero_loc, dzero_glob
   integer :: first_lev, first_ivar
+  integer,dimension(4) :: dmo_bad_loc,dmo_bad_glob
   real(dp) :: first_d
+  logical,save :: dmo_diag_initialized=.false.
+  logical,save :: dmo_diag_enabled=.false.
+  character(len=32) :: dmo_diag_env
+  integer :: dmo_diag_status,dmo_diag_length
 
-  if(.not. hydro) return
+  ! [RESIZABLE] DMO/CUDA gates have no uold allocation.  Still emit a
+  ! fail-closed finite-value census over every live gravity/scalar cell so a
+  ! missing hydro diagnostic cannot turn into a false PASS.
+  if(.not.hydro)then
+     if(.not.poisson)return
+     ! Keep the additional full-cell scans out of ordinary DMO production.
+     ! The CUDA/nGR gate opts in explicitly and records this environment bit.
+     if(.not.dmo_diag_initialized)then
+        dmo_diag_env=''
+        call get_environment_variable('RAMSES_DMO_FINITE_DIAG',dmo_diag_env, &
+             length=dmo_diag_length,status=dmo_diag_status)
+        dmo_diag_enabled=dmo_diag_status==0 .and. dmo_diag_length==1 .and. &
+             dmo_diag_env(1:1)=='1'
+        dmo_diag_initialized=.true.
+     endif
+     if(.not.dmo_diag_enabled)return
+     dmo_bad_loc=0
+     do ilevel=levelmin,nlevelmax
+        ncache=active(ilevel)%ngrid
+        do igrid=1,ncache
+           do ind=1,twotondim
+              icell=ICELL_OF(active(ilevel)%igrid(igrid),ind)
+              if(allocated(rho))then
+                 if(.not.ieee_is_finite(rho(icell)))dmo_bad_loc(1)=dmo_bad_loc(1)+1
+              endif
+              if(allocated(phi))then
+                 if(.not.ieee_is_finite(phi(icell)))dmo_bad_loc(2)=dmo_bad_loc(2)+1
+              endif
+              if(allocated(f))then
+                 do ivar=1,ndim
+                    if(.not.ieee_is_finite(f(icell,ivar))) &
+                         dmo_bad_loc(3)=dmo_bad_loc(3)+1
+                 enddo
+              endif
+              if(allocated(scalar_gr))then
+                 if(.not.ieee_is_finite(scalar_gr(icell))) &
+                      dmo_bad_loc(4)=dmo_bad_loc(4)+1
+              endif
+           enddo
+        enddo
+     enddo
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(dmo_bad_loc,dmo_bad_glob,4,MPI_INTEGER,MPI_SUM, &
+          MPI_COMM_WORLD,info)
+#else
+     dmo_bad_glob=dmo_bad_loc
+#endif
+     if(myid==1)write(*,'(A,A,A,I0,A,I0,A,I0,A,I0)') &
+          ' NaN_CHK_DMO ',trim(label),': rho=',dmo_bad_glob(1), &
+          ' phi=',dmo_bad_glob(2),' f=',dmo_bad_glob(3), &
+          ' scalar=',dmo_bad_glob(4)
+     return
+  endif
 
   nan_uold_loc = 0
   nan_f_loc = 0

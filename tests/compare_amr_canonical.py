@@ -134,6 +134,7 @@ class OutputIndex:
     level_counts: dict[int, int]
     coarse_digest: str
     topology_digest: str
+    local_layout_digests: dict[int, str]
     input_files: list[dict[str, object]]
 
     def report(self) -> dict[str, object]:
@@ -145,6 +146,7 @@ class OutputIndex:
             "level_counts": self.level_counts,
             "coarse_sha256": self.coarse_digest,
             "topology_sha256": self.topology_digest,
+            "local_layout_sha256": self.local_layout_digests,
             "inputs": self.input_files,
         }
 
@@ -416,13 +418,18 @@ def _skip_topology_records(reader: FortranSequentialReader, layout: FileLayout) 
 
 def _build_local_map(
     path: pathlib.Path,
-) -> tuple[FileLayout, dict[int, GridKey], str]:
+) -> tuple[FileLayout, dict[int, GridKey], str, str]:
     local_map: dict[int, GridKey] = {}
+    layout_digest = hashlib.sha256(b"local-block-order-v1\0")
     with FortranSequentialReader(path, calculate_sha256=True) as reader:
         layout = _read_layout(reader)
+        layout_digest.update(
+            _pack_i64((layout.ncpu, layout.nboundary, layout.nlevelmax))
+        )
         for level in range(1, layout.nlevelmax + 1):
             for owner in range(1, layout.ncpu + layout.nboundary + 1):
                 count = _block_count(layout, level, owner)
+                layout_digest.update(_pack_i64((level, owner, count)))
                 if not count:
                     continue
                 indices = reader.ints(count)
@@ -445,10 +452,13 @@ def _build_local_map(
                         raise AmrFormatError(
                             f"{path}: local grid {local_id} has conflicting geometry"
                         )
+                    # Gravity payloads use this exact level/owner/linked-list order.
+                    # Canonical keys make the proof independent of local grid IDs.
+                    layout_digest.update(_serialize_grid(key))
                 _skip_topology_records(reader, layout)
         reader.expect_eof()
         file_sha256 = reader.sha256
-    return layout, local_map, file_sha256
+    return layout, local_map, file_sha256, layout_digest.hexdigest()
 
 
 def _child_bits(child0: int, ndim: int) -> tuple[int, int, int]:
@@ -652,8 +662,9 @@ def _emit_owner_rows(
     expected_layout: FileLayout,
     local_map: dict[int, GridKey],
     connection: sqlite3.Connection,
-) -> tuple[int, str]:
+) -> tuple[int, dict[int, int], str]:
     inserted = 0
+    inserted_by_level: dict[int, int] = {}
     with FortranSequentialReader(path, calculate_sha256=True) as reader:
         layout = _read_layout(reader)
         if layout != expected_layout:
@@ -716,9 +727,10 @@ def _emit_owner_rows(
                             f"{path}: duplicate canonical owner-grid key"
                         ) from error
                     inserted += len(rows)
+                    inserted_by_level[level] = inserted_by_level.get(level, 0) + len(rows)
         reader.expect_eof()
         second_pass_sha256 = reader.sha256
-    return inserted, second_pass_sha256
+    return inserted, inserted_by_level, second_pass_sha256
 
 
 _AMR_NAME = re.compile(r"^amr_([0-9]{5})\.out([0-9]{5})$")
@@ -884,9 +896,10 @@ def build_output_index(
     first_ngridmax: int | None = None
     first_coarse: tuple[tuple[GridKey, GridKey | None, int], ...] | None = None
     input_files: list[dict[str, object]] = []
+    local_layout_digests: dict[int, str] = {}
     try:
         for path, source_cpu in zip(files, source_cpus, strict=True):
-            layout, local_map, file_sha256 = _build_local_map(path)
+            layout, local_map, file_sha256, local_layout_digest = _build_local_map(path)
             if source_cpu < 1 or source_cpu > layout.ncpu:
                 raise AmrFormatError(
                     f"{path}: source CPU {source_cpu} outside 1..{layout.ncpu}"
@@ -915,7 +928,7 @@ def build_output_index(
             elif coarse != first_coarse:
                 raise AmrFormatError(f"{path}: coarse topology differs within output")
 
-            owner_count, second_pass_sha256 = _emit_owner_rows(
+            owner_count, owner_level_counts, second_pass_sha256 = _emit_owner_rows(
                 path, source_cpu, layout, local_map, connection
             )
             if second_pass_sha256 != file_sha256:
@@ -930,8 +943,10 @@ def build_output_index(
                     "source_cpu": source_cpu,
                     "local_map_grids": len(local_map),
                     "owner_grids": owner_count,
+                    "owner_level_counts": owner_level_counts,
                 }
             )
+            local_layout_digests[source_cpu] = local_layout_digest
         assert (
             first_header is not None
             and first_ncpu is not None
@@ -967,6 +982,7 @@ def build_output_index(
             level_counts=level_counts,
             coarse_digest=_coarse_digest(first_coarse),
             topology_digest=_topology_digest(connection),
+            local_layout_digests=local_layout_digests,
             input_files=input_files,
         )
     finally:
@@ -1041,6 +1057,62 @@ def compare_indices(left: OutputIndex, right: OutputIndex) -> None:
     _compare_databases(left, right)
 
 
+def compare_topology_indices(left: OutputIndex, right: OutputIndex) -> None:
+    """Compare topology while allowing physical time/state headers to differ."""
+    left_geometry = (
+        left.header.ndim,
+        left.header.coarse_shape,
+        left.header.nlevelmax,
+        left.header.nboundary,
+        left.header.boxlen,
+    )
+    right_geometry = (
+        right.header.ndim,
+        right.header.coarse_shape,
+        right.header.nlevelmax,
+        right.header.nboundary,
+        right.header.boxlen,
+    )
+    if left_geometry != right_geometry:
+        raise CanonicalMismatch(
+            f"AMR geometry differs: left={left_geometry} right={right_geometry}"
+        )
+    if left.coarse_digest != right.coarse_digest:
+        raise CanonicalMismatch(
+            f"coarse topology differs: left={left.coarse_digest} "
+            f"right={right.coarse_digest}"
+        )
+    if left.level_counts != right.level_counts:
+        raise CanonicalMismatch(
+            f"level owner-grid counts differ: left={left.level_counts} "
+            f"right={right.level_counts}"
+        )
+    _compare_databases(left, right)
+
+
+def compare_local_layout(left: OutputIndex, right: OutputIndex) -> None:
+    """Require identical canonical grid order in every rank/owner block.
+
+    Legacy grav files contain no grid IDs and follow the AMR linked-list order.
+    This optional condition proves that a record-by-record grav comparison is
+    topology keyed rather than an accidental comparison of different cells.
+    """
+    if left.ncpu != right.ncpu:
+        raise CanonicalMismatch(
+            f"local layout requires equal ncpu: left={left.ncpu} right={right.ncpu}"
+        )
+    if left.local_layout_digests != right.local_layout_digests:
+        ranks = sorted(
+            rank
+            for rank in set(left.local_layout_digests) | set(right.local_layout_digests)
+            if left.local_layout_digests.get(rank)
+            != right.local_layout_digests.get(rank)
+        )
+        raise CanonicalMismatch(
+            f"canonical per-rank/owner grid order differs for ranks {ranks[:8]}"
+        )
+
+
 def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("left", type=pathlib.Path, help="left output_NNNNN directory")
@@ -1049,6 +1121,16 @@ def _argument_parser() -> argparse.ArgumentParser:
         "--scratch", type=pathlib.Path, help="parent for temporary SQLite databases"
     )
     parser.add_argument("--json", type=pathlib.Path, help="write a JSON report")
+    parser.add_argument(
+        "--topology-only",
+        action="store_true",
+        help="compare geometry/topology but not time, dt, cosmology, or info state",
+    )
+    parser.add_argument(
+        "--require-same-local-layout",
+        action="store_true",
+        help="also require identical canonical grid order for legacy grav payloads",
+    )
     return parser
 
 
@@ -1063,9 +1145,16 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
         temporary_path = pathlib.Path(temporary)
         left = build_output_index(args.left, temporary_path / "left.sqlite3")
         right = build_output_index(args.right, temporary_path / "right.sqlite3")
-        compare_indices(left, right)
+        if args.topology_only:
+            compare_topology_indices(left, right)
+        else:
+            compare_indices(left, right)
+        if args.require_same_local_layout:
+            compare_local_layout(left, right)
         return {
             "schema": SCHEMA_VERSION,
+            "mode": "topology-only" if args.topology_only else "semantic-exact",
+            "same_local_layout": bool(args.require_same_local_layout),
             "status": "PASS",
             "left": left.report(),
             "right": right.report(),
