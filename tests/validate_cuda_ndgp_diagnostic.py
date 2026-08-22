@@ -10,7 +10,12 @@ import pathlib
 import re
 import sys
 
-from compare_cuda_ndgp_outputs import pinned_particle_ids, read_particles
+from compare_cuda_ndgp_outputs import (
+    FormatError,
+    pinned_particle_ids,
+    read_gravity,
+    read_particles,
+)
 
 
 class DiagnosticError(RuntimeError):
@@ -72,7 +77,54 @@ def validate_cpu_only_markers(text: str) -> None:
         raise DiagnosticError("CPU diagnostic initialized the CUDA pool")
 
 
-def validate(run_dir: pathlib.Path, cap: int, amr_report: pathlib.Path) -> dict[str, object]:
+def validate_smooth_residuals(
+    level_rows: dict[str, list[dict[str, float | int | str]]], eps: float
+) -> int:
+    iterations: list[int] = []
+    for level in ("5", "6"):
+        rows = level_rows[level]
+        if len(rows) != 2:
+            raise DiagnosticError(
+                f"smooth level {level}: expected two solve rows, got {len(rows)}"
+            )
+        for row in rows:
+            if row["outcome"] != "converged":
+                raise DiagnosticError(f"smooth level {level}: capped solve: {row}")
+            residual = float(row["residual"])
+            iteration = int(row["iterations"])
+            if not math.isfinite(residual) or residual >= eps:
+                raise DiagnosticError(
+                    f"smooth level {level}: residual does not satisfy eps={eps}: {row}"
+                )
+            if iteration > 800:
+                raise DiagnosticError(
+                    f"smooth level {level}: convergence exceeds 800 iterations: {row}"
+                )
+            iterations.append(iteration)
+    return max(iterations)
+
+
+def finite_nonzero_field_norms(output: pathlib.Path) -> dict[str, float | int]:
+    gravity = read_gravity(output)
+    result: dict[str, float | int] = {}
+    for field in ("force", "scalar"):
+        values = gravity[field]
+        if not values or not all(math.isfinite(value) for value in values):
+            raise DiagnosticError(f"{output}: {field} field is empty or non-finite")
+        norm = math.sqrt(math.fsum(value * value for value in values))
+        if not math.isfinite(norm) or norm <= 1.0e-300:
+            raise DiagnosticError(f"{output}: {field} field norm is zero/non-finite")
+        result[f"{field}_count"] = len(values)
+        result[f"{field}_l2"] = norm
+    return result
+
+
+def validate(
+    run_dir: pathlib.Path,
+    cap: int,
+    amr_report: pathlib.Path,
+    profile: str = "harsh-v1",
+) -> dict[str, object]:
     nml_text = (run_dir / "run.nml").read_text(encoding="ascii")
     for setting in (
         "scalar_solver_strict=.false.",
@@ -153,7 +205,12 @@ def validate(run_dir: pathlib.Path, cap: int, amr_report: pathlib.Path) -> dict[
         )
 
     level_rows = {str(level): residuals(text, level, cap) for level in (5, 6)}
-    if cap == 100:
+    max_convergence_iteration: int | None = None
+    field_norms: dict[str, float | int] | None = None
+    if profile == "smooth-v2":
+        max_convergence_iteration = validate_smooth_residuals(level_rows, 1.0e-4)
+        field_norms = finite_nonzero_field_norms(outputs[-1])
+    elif cap == 100:
         first = level_rows["5"][0]
         if first["outcome"] != "capped" or not math.isclose(
             float(first["residual"]), 1.721e-1, rel_tol=0.0, abs_tol=5.0e-5
@@ -162,10 +219,13 @@ def validate(run_dir: pathlib.Path, cap: int, amr_report: pathlib.Path) -> dict[
     return {
         "schema": "lagRamses-cuda-ndgp-cpu-diagnostic-v1",
         "status": "DIAGNOSTIC_COMPLETE",
+        "profile": profile,
         "cap": cap,
         "levels": level_rows,
         "outputs": output_rows,
         "canonical_level_counts": counts,
+        "max_convergence_iteration": max_convergence_iteration,
+        "final_field_norms": field_norms,
     }
 
 
@@ -173,20 +233,28 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("run_dir", type=pathlib.Path)
     parser.add_argument("--cap", type=int, required=True)
+    parser.add_argument(
+        "--profile", choices=("harsh-v1", "smooth-v2"), default="harsh-v1"
+    )
     parser.add_argument("--amr-report", type=pathlib.Path, required=True)
     parser.add_argument("--report", type=pathlib.Path, required=True)
     args = parser.parse_args()
-    if args.cap not in (100, 200, 400, 800):
+    if args.cap not in (100, 200, 400, 800, 1600):
         print("CUDA-NDGP diagnostic: ERROR: unsupported cap", file=sys.stderr)
         return 2
+    if args.profile == "smooth-v2" and args.cap != 1600:
+        print("CUDA-NDGP diagnostic: ERROR: smooth-v2 requires cap 1600", file=sys.stderr)
+        return 2
     try:
-        report = validate(args.run_dir.resolve(), args.cap, args.amr_report.resolve())
+        report = validate(
+            args.run_dir.resolve(), args.cap, args.amr_report.resolve(), args.profile
+        )
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(
             json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         print(json.dumps(report, indent=2, sort_keys=True))
-    except (DiagnosticError, OSError, ValueError, KeyError, TypeError) as error:
+    except (DiagnosticError, FormatError, OSError, ValueError, KeyError, TypeError) as error:
         print(f"CUDA-NDGP diagnostic: ERROR: {error}", file=sys.stderr)
         return 1
     return 0

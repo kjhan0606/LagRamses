@@ -17,6 +17,7 @@ code=/home/kjhan/BACKUP/lagRamses-RESIZABLE/code
 qa=/home/kjhan/BACKUP/lagramses_qa
 cpu_probe=${CUDA_NDGP_CPU_PROBE:-0}
 diag_sweep=${CUDA_NDGP_DIAG_SWEEP:-0}
+smooth_diag=${CUDA_NDGP_SMOOTH_DIAG:-0}
 case "$cpu_probe" in
   0|1) ;;
   *) echo 'CUDA-NDGP: CUDA_NDGP_CPU_PROBE must be 0 or 1'; exit 2 ;;
@@ -25,13 +26,18 @@ case "$diag_sweep" in
   0|1) ;;
   *) echo 'CUDA-NDGP: CUDA_NDGP_DIAG_SWEEP must be 0 or 1'; exit 2 ;;
 esac
-if [ "$cpu_probe" -eq 1 ] && [ "$diag_sweep" -eq 1 ]; then
-  echo 'CUDA-NDGP: CPU probe and diagnostic sweep modes are mutually exclusive'
+case "$smooth_diag" in
+  0|1) ;;
+  *) echo 'CUDA-NDGP: CUDA_NDGP_SMOOTH_DIAG must be 0 or 1'; exit 2 ;;
+esac
+if [ $((cpu_probe + diag_sweep + smooth_diag)) -gt 1 ]; then
+  echo 'CUDA-NDGP: CPU probe and diagnostic modes are mutually exclusive'
   exit 2
 fi
 run_mode=characterize
 if [ "$cpu_probe" -eq 1 ]; then run_mode=cpu_structure_probe; fi
 if [ "$diag_sweep" -eq 1 ]; then run_mode=cpu_solver_diagnostic_sweep; fi
+if [ "$smooth_diag" -eq 1 ]; then run_mode=cpu_smooth_solver_diagnostic; fi
 job_root="$qa/cuda_ndgp_jobs/${SLURM_JOB_ID:?}"
 logs="$job_root/logs"
 snapshot="$job_root/snapshot"
@@ -52,11 +58,13 @@ snapshot_files=(
   tests/cuda_ndgp_pair.nml.in
   tests/make_cuda_ndgp_ic.py
   tests/cuda_ndgp_ic.sha256
+  tests/cuda_ndgp_smooth_ic.sha256
   tests/cuda_device_probe.cu
   tests/cuda_ndgp_gate.sh
   tests/validate_cuda_ndgp_logs.py
   tests/validate_cuda_ndgp_diagnostic.py
   tests/test_validate_cuda_ndgp_diagnostic.py
+  tests/test_make_cuda_ndgp_ic.py
   tests/test_validate_cuda_ndgp_logs.py
   tests/preflight.sh
   tests/compare_cuda_ndgp_outputs.py
@@ -194,8 +202,15 @@ echo 'cuda_device=PASS ranks=2 visible_device_count=1 shared_uuid=1 free_each_ge
 cat "$logs/device_map.txt" | tee -a "$logs/provenance.txt"
 
 ic_root="$job_root/ic"
+ic_profile=harsh-v1
+ic_manifest="$snapshot/cuda_ndgp_ic.sha256"
+if [ "$smooth_diag" -eq 1 ]; then
+  ic_profile=smooth-v2
+  ic_manifest="$snapshot/cuda_ndgp_smooth_ic.sha256"
+fi
+echo "ic_profile=$ic_profile" | tee -a "$logs/provenance.txt"
 if ! python3 "$snapshot/make_cuda_ndgp_ic.py" "$ic_root" \
-    --verify-manifest "$snapshot/cuda_ndgp_ic.sha256" \
+    --profile "$ic_profile" --verify-manifest "$ic_manifest" \
     >"$logs/ic_generation.log" 2>&1; then
   echo 'CUDA-NDGP: deterministic IC generation or manifest validation failed'
   exit 1
@@ -226,6 +241,11 @@ render_nml() {
       -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
       -e "s/^n_iter_nDGP=100$/n_iter_nDGP=$cap/" "$target"
   fi
+  if [ "$smooth_diag" -eq 1 ]; then
+    sed -i -e 's/^nstepmax=4$/nstepmax=1/' \
+      -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
+      -e 's/^n_iter_nDGP=100$/n_iter_nDGP=1600/' "$target"
+  fi
 }
 
 variants=(cpu gpu)
@@ -233,6 +253,7 @@ if [ "$cpu_probe" -eq 1 ]; then variants=(cpu); fi
 if [ "$diag_sweep" -eq 1 ]; then
   variants=(cpu_diag_100 cpu_diag_200 cpu_diag_400 cpu_diag_800)
 fi
+if [ "$smooth_diag" -eq 1 ]; then variants=(cpu_smooth_1600); fi
 for variant in "${variants[@]}"; do
   run_dir="$job_root/$variant"
   mkdir -p "$run_dir"
@@ -243,7 +264,7 @@ if ! (
   cd "$snapshot"
   python3 -m unittest -v test_compare_amr_canonical.py \
     test_compare_cuda_ndgp_outputs.py test_validate_cuda_ndgp_logs.py \
-    test_validate_cuda_ndgp_diagnostic.py
+    test_validate_cuda_ndgp_diagnostic.py test_make_cuda_ndgp_ic.py
 ) >"$logs/unit_tests.log" 2>&1; then
   echo 'CUDA-NDGP: comparator/validator unit tests failed'
   exit 1
@@ -313,7 +334,7 @@ for variant in "${variants[@]}"; do
   fi
 done
 
-if [ "$diag_sweep" -eq 1 ]; then
+if [ "$diag_sweep" -eq 1 ] || [ "$smooth_diag" -eq 1 ]; then
   for variant in "${variants[@]}"; do
     cap=${variant##*_}
     run_dir="$job_root/$variant"
@@ -326,16 +347,22 @@ if [ "$diag_sweep" -eq 1 ]; then
       echo "CUDA-NDGP: cap=$cap self-canonical AMR validation failed"
       exit 1
     fi
-    if ! python3 "$snapshot/validate_cuda_ndgp_diagnostic.py" "$run_dir" \
-        --cap "$cap" --amr-report "$amr_report" \
-        --report "$reports/diagnostic_${cap}.json" \
+    diagnostic_args=("$run_dir" --cap "$cap" --amr-report "$amr_report" \
+      --report "$reports/diagnostic_${cap}.json")
+    if [ "$smooth_diag" -eq 1 ]; then diagnostic_args+=(--profile smooth-v2); fi
+    if ! python3 "$snapshot/validate_cuda_ndgp_diagnostic.py" \
+        "${diagnostic_args[@]}" \
         >"$reports/diagnostic_${cap}.txt" 2>&1; then
       echo "CUDA-NDGP: cap=$cap diagnostic validation failed"
       exit 1
     fi
   done
-  touch "$job_root/DIAGNOSTIC_SWEEP_RUNTIME_COMPLETE"
-  echo "finished=$(date --iso-8601=seconds) rc=0 status=DIAGNOSTIC_SWEEP_RUNTIME_COMPLETE" | \
+  diagnostic_marker=DIAGNOSTIC_SWEEP_RUNTIME_COMPLETE
+  if [ "$smooth_diag" -eq 1 ]; then
+    diagnostic_marker=SMOOTH_DIAGNOSTIC_RUNTIME_COMPLETE
+  fi
+  touch "$job_root/$diagnostic_marker"
+  echo "finished=$(date --iso-8601=seconds) rc=0 status=$diagnostic_marker" | \
     tee -a "$logs/provenance.txt"
   exit 0
 fi

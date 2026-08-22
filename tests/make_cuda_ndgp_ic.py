@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the small deterministic GRAFIC IC used by the CUDA/nGR gate.
+"""Generate deterministic GRAFIC IC profiles used by the CUDA/nGR gate.
 
-The fixture deliberately puts pairs of particles at the same position in a
-periodic 32^3 lattice.  The resulting density field creates selective level-6
-AMR while remaining small enough for a two-rank correctness test.
+``harsh-v1`` deliberately puts particles at the same position and is retained
+as the exact reproducer for job 322117.  ``smooth-v2`` uses a global-phase,
+sub-cell sinusoidal displacement that is continuous across the level-5/6
+boundary.  Both profiles use the same fixed refinement map and particle IDs.
 """
 
 from __future__ import annotations
@@ -24,6 +25,11 @@ ASTART = 0.1
 OMEGA_M = 0.3
 OMEGA_L = 0.7
 H0 = 70.0
+HARSH_PROFILE = "harsh-v1"
+SMOOTH_PROFILE = "smooth-v2"
+SMOOTH_SCHEMA = "smooth-global-k2-a1_16"
+SMOOTH_MODE = 2
+SMOOTH_AMPLITUDE = 1.0 / 16.0
 
 
 def record(payload: bytes) -> bytes:
@@ -136,6 +142,48 @@ def one_cell_displacement(dx_mpc: float) -> float:
     return dx_mpc * (H0 / 100.0)
 
 
+def smooth_coordinate(index: int, dx_mpc: float, offset_mpc: float) -> float:
+    """Return the global base-cell coordinate of a GRAFIC cell centre."""
+
+    return offset_mpc + dx_mpc * (index + 0.5)
+
+
+def smooth_displacement_base_cells(
+    index: int, dx_mpc: float, offset_mpc: float
+) -> float:
+    q = smooth_coordinate(index, dx_mpc, offset_mpc)
+    return SMOOTH_AMPLITUDE * math.sin(2.0 * math.pi * SMOOTH_MODE * q / N)
+
+
+def smooth_position_value(index: int, dx_mpc: float, offset_mpc: float) -> float:
+    """Return a physical GRAFIC displacement, independent of level spacing."""
+
+    return smooth_displacement_base_cells(index, dx_mpc, offset_mpc) * (H0 / 100.0)
+
+
+def smooth_cic_axis_weights(dx_mpc: float, offset_mpc: float) -> list[float]:
+    """Deposit the displaced 1-D lattice with periodic CIC weights."""
+
+    weights = [0.0] * N
+    for index in range(N):
+        shift = smooth_displacement_base_cells(index, dx_mpc, offset_mpc) / dx_mpc
+        if not -1.0 < shift < 1.0:
+            raise RuntimeError(f"smooth displacement crosses a cell: {shift}")
+        if shift >= 0.0:
+            weights[index] += 1.0 - shift
+            weights[(index + 1) % N] += shift
+        else:
+            weights[index] += 1.0 + shift
+            weights[(index - 1) % N] += -shift
+    return weights
+
+
+def smooth_density_contrast(
+    ix: int, iy: int, iz: int, axis_weights: list[float]
+) -> float:
+    return axis_weights[ix] * axis_weights[iy] * axis_weights[iz] - 1.0
+
+
 def sha256(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -144,9 +192,11 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def generate(root: pathlib.Path) -> str:
+def generate(root: pathlib.Path, profile: str = HARSH_PROFILE) -> str:
     if root.exists() and any(root.iterdir()):
         raise RuntimeError(f"refusing non-empty output directory: {root}")
+    if profile not in (HARSH_PROFILE, SMOOTH_PROFILE):
+        raise RuntimeError(f"unsupported profile: {profile}")
     zero = lambda _x, _y, _z: 0.0
     level_specs = (
         (LEVELMIN, 1.0, 0.0, 0),
@@ -159,28 +209,35 @@ def generate(root: pathlib.Path) -> str:
         write_float_field(level / "ic_velcx", grafic_header, zero)
         write_float_field(level / "ic_velcy", grafic_header, zero)
         write_float_field(level / "ic_velcz", grafic_header, zero)
-        write_float_field(
-            level / "ic_poscx",
-            grafic_header,
-            lambda ix, _iy, _iz, dx=dx_mpc: (
+        if profile == HARSH_PROFILE:
+            posx = lambda ix, _iy, _iz, dx=dx_mpc: (
                 one_cell_displacement(dx) if ix % 4 == 0 else 0.0
-            ),
-        )
-        write_float_field(
-            level / "ic_poscy",
-            grafic_header,
-            lambda _ix, iy, _iz, dx=dx_mpc: (
+            )
+            posy = lambda _ix, iy, _iz, dx=dx_mpc: (
                 one_cell_displacement(dx) if iy % 4 == 0 else 0.0
-            ),
-        )
-        write_float_field(
-            level / "ic_poscz",
-            grafic_header,
-            lambda _ix, _iy, iz, dx=dx_mpc: (
+            )
+            posz = lambda _ix, _iy, iz, dx=dx_mpc: (
                 one_cell_displacement(dx) if iz % 4 == 0 else 0.0
-            ),
-        )
-        write_float_field(level / "ic_deltab", grafic_header, density_contrast)
+            )
+            delta = density_contrast
+        else:
+            axis_weights = smooth_cic_axis_weights(dx_mpc, offset_mpc)
+            posx = lambda ix, _iy, _iz, dx=dx_mpc, off=offset_mpc: (
+                smooth_position_value(ix, dx, off)
+            )
+            posy = lambda _ix, iy, _iz, dx=dx_mpc, off=offset_mpc: (
+                smooth_position_value(iy, dx, off)
+            )
+            posz = lambda _ix, _iy, iz, dx=dx_mpc, off=offset_mpc: (
+                smooth_position_value(iz, dx, off)
+            )
+            delta = lambda ix, iy, iz, weights=axis_weights: (
+                smooth_density_contrast(ix, iy, iz, weights)
+            )
+        write_float_field(level / "ic_poscx", grafic_header, posx)
+        write_float_field(level / "ic_poscy", grafic_header, posy)
+        write_float_field(level / "ic_poscz", grafic_header, posz)
+        write_float_field(level / "ic_deltab", grafic_header, delta)
         if level_number == LEVELMIN:
             refmap = lambda ix, iy, iz: float(
                 8 <= ix < 24 and 8 <= iy < 24 and 8 <= iz < 24
@@ -193,25 +250,10 @@ def generate(root: pathlib.Path) -> str:
             ("ic_velcx", zero),
             ("ic_velcy", zero),
             ("ic_velcz", zero),
-            (
-                "ic_poscx",
-                lambda ix, _iy, _iz, dx=dx_mpc: (
-                    one_cell_displacement(dx) if ix % 4 == 0 else 0.0
-                ),
-            ),
-            (
-                "ic_poscy",
-                lambda _ix, iy, _iz, dx=dx_mpc: (
-                    one_cell_displacement(dx) if iy % 4 == 0 else 0.0
-                ),
-            ),
-            (
-                "ic_poscz",
-                lambda _ix, _iy, iz, dx=dx_mpc: (
-                    one_cell_displacement(dx) if iz % 4 == 0 else 0.0
-                ),
-            ),
-            ("ic_deltab", density_contrast),
+            ("ic_poscx", posx),
+            ("ic_poscy", posy),
+            ("ic_poscz", posz),
+            ("ic_deltab", delta),
             ("ic_refmap", refmap),
         ):
             validate_float_field(level / name, grafic_header, expected)
@@ -245,6 +287,54 @@ def generate(root: pathlib.Path) -> str:
         "occupancy_histogram": {str(key): occupancy[key] for key in sorted(occupancy)},
         "header": "legacy GRAFIC 3i+8f (44-byte payload; no omega_b extension)",
     }
+    if profile == SMOOTH_PROFILE:
+        metadata.pop("occupancy_histogram")
+        level_diagnostics: dict[str, dict[str, float]] = {}
+        for level_number, dx_mpc, offset_mpc, _identity_offset in level_specs:
+            shifts = [
+                smooth_displacement_base_cells(index, dx_mpc, offset_mpc) / dx_mpc
+                for index in range(N)
+            ]
+            weights = smooth_cic_axis_weights(dx_mpc, offset_mpc)
+            delta_values = [
+                smooth_density_contrast(ix, iy, iz, weights)
+                for iz in range(N)
+                for iy in range(N)
+                for ix in range(N)
+            ]
+            if not all(math.isfinite(value) for value in delta_values):
+                raise RuntimeError(f"level {level_number}: non-finite smooth density")
+            if not min(delta_values) < 0.0 < max(delta_values):
+                raise RuntimeError(f"level {level_number}: smooth density lacks both signs")
+            if math.fsum(value * value for value in delta_values) <= 0.0:
+                raise RuntimeError(f"level {level_number}: smooth density has zero norm")
+            if not math.isclose(
+                math.fsum(delta_values) / len(delta_values),
+                0.0,
+                rel_tol=0.0,
+                abs_tol=5.0e-15,
+            ):
+                raise RuntimeError(f"level {level_number}: smooth density mean is nonzero")
+            level_diagnostics[str(level_number)] = {
+                "max_abs_cell_shift": max(abs(value) for value in shifts),
+                "density_min": min(delta_values),
+                "density_max": max(delta_values),
+                "density_l2": math.sqrt(math.fsum(v * v for v in delta_values)),
+            }
+        metadata.update(
+            {
+                "schema": SMOOTH_SCHEMA,
+                "profile": SMOOTH_PROFILE,
+                "wave_mode": SMOOTH_MODE,
+                "amplitude_base_cells": SMOOTH_AMPLITUDE,
+                "position_rule": (
+                    "A*(H0/100)*sin(4*pi*q/32), q=offset+dx*(i+1/2), "
+                    "A=1/16 base cell"
+                ),
+                "density_rule": "periodic CIC tensor product of displaced lattice",
+                "level_diagnostics": level_diagnostics,
+            }
+        )
     metadata_path = root / "ic_config.json"
     metadata_path.write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -261,10 +351,15 @@ def generate(root: pathlib.Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=pathlib.Path)
+    parser.add_argument(
+        "--profile",
+        choices=(HARSH_PROFILE, SMOOTH_PROFILE),
+        default=HARSH_PROFILE,
+    )
     parser.add_argument("--verify-manifest", type=pathlib.Path)
     args = parser.parse_args()
     try:
-        manifest = generate(args.output.resolve())
+        manifest = generate(args.output.resolve(), args.profile)
         if args.verify_manifest:
             expected = args.verify_manifest.read_text(encoding="ascii")
             if manifest != expected:

@@ -55,6 +55,32 @@ class DiagnosticParserTest(unittest.TestCase):
                 with self.assertRaises(diagnostic.DiagnosticError):
                     diagnostic.validate_cpu_only_markers(marker)
 
+    def test_smooth_residual_acceptance(self) -> None:
+        rows = {
+            "5": [
+                {"outcome": "converged", "iterations": 300, "residual": 9.0e-5},
+                {"outcome": "converged", "iterations": 250, "residual": 8.0e-5},
+            ],
+            "6": [
+                {"outcome": "converged", "iterations": 700, "residual": 9.9e-5},
+                {"outcome": "converged", "iterations": 600, "residual": 7.0e-5},
+            ],
+        }
+        self.assertEqual(diagnostic.validate_smooth_residuals(rows, 1.0e-4), 700)
+
+    def test_smooth_rejects_capped_or_slow_or_missing_solves(self) -> None:
+        good = {"outcome": "converged", "iterations": 300, "residual": 9.0e-5}
+        cases = (
+            {"5": [good, good], "6": [good, {**good, "outcome": "capped"}]},
+            {"5": [good, good], "6": [good, {**good, "iterations": 801}]},
+            {"5": [good], "6": [good, good]},
+            {"5": [good, good], "6": [good, {**good, "residual": 1.0e-4}]},
+        )
+        for rows in cases:
+            with self.subTest(rows=rows):
+                with self.assertRaises(diagnostic.DiagnosticError):
+                    diagnostic.validate_smooth_residuals(rows, 1.0e-4)
+
     def test_pinned_particle_set_is_noncontiguous_and_exact_size(self) -> None:
         identities = comparator.pinned_particle_ids()
         self.assertEqual(len(identities), 61440)
