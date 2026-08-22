@@ -1,9 +1,11 @@
 # Block grid-major 동적 메모리 개편 계획
 
-- 상태: Phase 0--4 구현·기본/production-LB gate 승인, 잔여 검증 진행 중
+- 상태: Phase 0--4와 production-LB gate 승인, Phase 5 canonical comparator 완료,
+  Phase 6 CUDA block-index 코드·빌드 승인(소형 CPU/GPU runtime gate 대기)
 - 작성일: 2026-08-11
 - 대상 브랜치: `main` (2026-08-18 단일 브랜치 통합에 따라 갱신; 원문은 fdm-dev)
-- 구현 위치: `patch/lagRamses/`만 사용
+- 구현 위치: CPU/AMR source winner는 `patch/lagRamses/`, CUDA kernel/interface는
+  audited VPATH에 따라 `patch/cuRamses/` 사용
 
 ## 1. 목적
 
@@ -20,7 +22,8 @@
 4. output grid format은 namelist에서 선택하며, 기본값은 기존(legacy) format으로 한다.
 5. 기존 solver의 수치 결과와 성능을 보존한다.
 
-이 문서는 구현 계획이다. 승인 전에는 lagRamses 소스코드를 변경하지 않는다.
+이 문서는 구현 계획과 완료된 gate의 상태 기록을 함께 유지한다. HDF5/restart
+실행은 사용자의 별도 승인 전에는 시작하거나 제출하지 않는다.
 
 ## 2. 현재 구조의 제약
 
@@ -302,11 +305,14 @@ B=64 활성화(main 55a38bd)는 CPU·fresh-start·바이너리 출력 구성에�
    조용히 오독한다. **수정 방향**: 헤더에 amr_block_size를 기록하고, remap을
    파일의 (B2, ngridmax2) 쌍으로 디코드하도록 바꾼다. 이는 외부 reader와
    defrag/dbl2sng에도 포맷 판별 수단을 준다. Phase 5의 핵심 작업.
-2. **CUDA 커널 3종**: poisson(8곳), particle(3곳), scalar(2곳)이 device 코드에
-   legacy stride를 하드코딩한다. Fortran 매크로가 보이지 않으므로 B와 C를
-   커널 인자로 넘기고 device 인라인 함수로 같은 식을 구현해야 한다. GPU 기본
-   스위치가 켜져 있어(hydro/sink/scalar/particle) **CUDA 빌드는 B<ngridmax에서
-   즉시 오주소**. nGR-GPU 작업과 직접 충돌하므로 그 트랙과 함께 처리한다.
+2. **CUDA 커널 3종 — 코드 교정 완료(2026-08-22, `23e2942`)**: poisson 8곳,
+   particle 3곳(그중 1곳은 live-cell upload prefix), scalar 2곳의 legacy stride를
+   공용 device helper와 명시적 B/C ABI로 교체했다. Poisson의 `flag2/ngridmax`
+   packing 2곳은 cell stride가 아니므로 whitelist로 유지한다. active VPATH source
+   winner와 cuRamses shadow ABI를 함께 맞췄고, host/device unit, static census,
+   전처리 reachability, full `USE_CUDA=1 HDF5=1 USE_FFTW=1` build가 PASS했다.
+   Fable의 코드·빌드 감리는 승인됐지만, 실제 CUDA/nGR 기능 승인은 아래 Phase 6
+   소형 paired runtime gate가 끝날 때까지 보류한다.
 3. **체크포인트 재작성 유틸리티**: utils/f90/defrag.f90, dbl2sng.f90이 각각
    46곳에서 raw stride로 father/nbor를 디코드·재인코딩한다. B=64 파일을 조용히
    손상시킨다. 1번의 헤더 마커가 들어가면 이들은 "미지원 layout이면 중단"으로
@@ -404,15 +410,24 @@ free/list 상태, local grid 번호와 rank decomposition은 제외한다. Job 3
 ### Phase 6 범위 확정 (2026-08-22 사용자 지시): CUDA/nGR 소형 결정적 게이트
 
 VoidSim과 대형 production 실행은 이 프로젝트의 선행조건·완료조건·테스트
-자산에서 제외한다. Phase 6은 device측 legacy stride 13곳(poisson 8,
-particle 3, scalar 2)을 block grid-major로 교정하고, 작은 고정 zoom IC에서
-CPU와 GPU를 직접 대조하는 단계다.
+자산에서 제외한다. Phase 6의 코드 교정은 commit `23e2942`에서 완료됐다.
+공용 helper는 Fortran `amr_index::icell_of`와 같은 block grid-major 식을 쓰며,
+device측 13곳(poisson 8, particle 3, scalar 2), B/C ABI, active rho particle
+deposit dispatch를 함께 교정했다. `tests/cuda_block_index_check.sh`와 full CUDA
+build가 PASS했고 Fable은 코드 commit/main 반영을 승인했다. 남은 일은 작은 고정
+zoom IC에서 CPU와 GPU를 직접 대조하는 runtime gate다.
 
 최소 실행은 1 node, 2 MPI ranks, OMP=1, A10 1개로 한다. CPU와 GPU는 같은
 USE_CUDA binary·IC·물리 입력을 쓰고 accelerator flag만 달라야 한다. IC는 QA
 아래 project-local snapshot과 SHA manifest로 고정한다. GPU run은 flag만 켜는
 것으로 부족하며 Poisson, scalar, particle CUDA 경로가 실제 실행됐다는 양의
 counter/marker를 각각 남겨야 한다.
+
+필수 양성 증거는 `[CUDA_MG]`의 gs/residual/restrict/interp가 모두 0보다 큼,
+`[CUDA_NGR]`의 uploads/scalar_sweeps가 모두 0보다 큼, 그리고
+`[CUDA_PM_GATHER]`·`[CUDA_PM_DEPOSIT]`의 B=64, C=8, count>0이다. CPU control은
+`gpu_particle=.false.`를 포함해 모든 accelerator flag를 끄고 기존 fallback을
+검증한다. warning/fallback/CUDA error/OOM/NaN/fatal은 모두 0이어야 한다.
 
 nGR GPU는 색 내부 계산 순서가 달라질 수 있으므로 CPU↔GPU bitwise를 요구하지
 않는다. particle ID/count와 topology는 exact, post-step 위치는
@@ -422,7 +437,7 @@ scalar/force L2 한계는 첫 characterization 뒤 baseline의 2배 이내로 �
 
 반복 growth, MPI rank 수가 다른 restart, MPI+OpenMP, 작은 2-node smoke는 각각
 독립된 짧은 gate로 수행한다. 장시간·production-size 실행으로 이 검증을 대신하지
-않는다.
+않는다. 특히 HDF5/restart gate는 사용자 승인 전에는 실행·제출하지 않는다.
 
 ## 10. 필수 검증 행렬
 
@@ -489,7 +504,9 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 - MPI, OpenMP, MPI+OpenMP 시험 통과
 - memory limit 접근 시 OOM kill 대신 예측 가능한 진단과 종료
 - 성능 및 I/O 변환 비용이 측정되어 문서화됨
-- 변경 파일이 모두 `patch/lagRamses/`에만 존재
+- CPU allocator/layout 변경은 `patch/lagRamses/`의 audited source winner에,
+  CUDA 전용 kernel/interface 변경은 `patch/cuRamses/`의 audited source winner에
+  존재하며, `lagRamses-DE`와 다른 프로젝트는 수정하지 않음
 - 작은 고정 IC의 CUDA/nGR CPU↔GPU gate에서 Poisson·scalar·particle GPU 실제
   실행 증거, 정상 수렴, exact topology/ID 및 사전등록 수치 허용오차를 모두 통과
 - VoidSim 또는 다른 프로젝트의 production 자산에 의존하지 않음
@@ -503,7 +520,9 @@ growth 구현으로 넘어가기 전에 block 크기나 loop ordering을 다시 
 - output 기본값은 `legacy`(기존 format)이다. (2026-08-18 변경)
 - input layout은 자동 판별한다.
 - 기존 checkpoint 호환성을 유지한다.
-- 구현 파일은 모두 `patch/lagRamses/`에 둔다.
+- CPU/AMR 구현은 `patch/lagRamses/`, CUDA 전용 구현은 실제 build VPATH의
+  `patch/cuRamses/`에 둔다. source winner와 shadow ABI는 static census로 확인한다.
+- HDF5/restart 실행은 사용자 별도 승인 뒤에만 시작한다.
 
 구현 전에 결정하거나 측정할 사항:
 
