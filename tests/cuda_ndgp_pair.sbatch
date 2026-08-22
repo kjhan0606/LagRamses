@@ -16,12 +16,22 @@ set -euo pipefail
 code=/home/kjhan/BACKUP/lagRamses-RESIZABLE/code
 qa=/home/kjhan/BACKUP/lagramses_qa
 cpu_probe=${CUDA_NDGP_CPU_PROBE:-0}
+diag_sweep=${CUDA_NDGP_DIAG_SWEEP:-0}
 case "$cpu_probe" in
   0|1) ;;
   *) echo 'CUDA-NDGP: CUDA_NDGP_CPU_PROBE must be 0 or 1'; exit 2 ;;
 esac
+case "$diag_sweep" in
+  0|1) ;;
+  *) echo 'CUDA-NDGP: CUDA_NDGP_DIAG_SWEEP must be 0 or 1'; exit 2 ;;
+esac
+if [ "$cpu_probe" -eq 1 ] && [ "$diag_sweep" -eq 1 ]; then
+  echo 'CUDA-NDGP: CPU probe and diagnostic sweep modes are mutually exclusive'
+  exit 2
+fi
 run_mode=characterize
 if [ "$cpu_probe" -eq 1 ]; then run_mode=cpu_structure_probe; fi
+if [ "$diag_sweep" -eq 1 ]; then run_mode=cpu_solver_diagnostic_sweep; fi
 job_root="$qa/cuda_ndgp_jobs/${SLURM_JOB_ID:?}"
 logs="$job_root/logs"
 snapshot="$job_root/snapshot"
@@ -45,6 +55,8 @@ snapshot_files=(
   tests/cuda_device_probe.cu
   tests/cuda_ndgp_gate.sh
   tests/validate_cuda_ndgp_logs.py
+  tests/validate_cuda_ndgp_diagnostic.py
+  tests/test_validate_cuda_ndgp_diagnostic.py
   tests/test_validate_cuda_ndgp_logs.py
   tests/preflight.sh
   tests/compare_cuda_ndgp_outputs.py
@@ -194,10 +206,10 @@ cat "$logs/ic_manifest.sha256" | tee -a "$logs/provenance.txt"
 render_nml() {
   variant=$1
   target=$2
-  if [ "$variant" = cpu ]; then
-    poisson=.false.; scalar=.false.; particle=.false.
-  else
+  if [ "$variant" = gpu ]; then
     poisson=.true.; scalar=.true.; particle=.true.
+  else
+    poisson=.false.; scalar=.false.; particle=.false.
   fi
   sed -e "s|__IC_LEVEL__|$ic_root/level_005|g" \
       -e "s|__IC_LEVEL6__|$ic_root/level_006|g" \
@@ -208,10 +220,19 @@ render_nml() {
   if [ "$cpu_probe" -eq 1 ] && [ "$variant" = cpu ]; then
     sed -i 's/^nstepmax=4$/nstepmax=1/' "$target"
   fi
+  if [ "$diag_sweep" -eq 1 ]; then
+    cap=${variant##*_}
+    sed -i -e 's/^nstepmax=4$/nstepmax=1/' \
+      -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
+      -e "s/^n_iter_nDGP=100$/n_iter_nDGP=$cap/" "$target"
+  fi
 }
 
 variants=(cpu gpu)
 if [ "$cpu_probe" -eq 1 ]; then variants=(cpu); fi
+if [ "$diag_sweep" -eq 1 ]; then
+  variants=(cpu_diag_100 cpu_diag_200 cpu_diag_400 cpu_diag_800)
+fi
 for variant in "${variants[@]}"; do
   run_dir="$job_root/$variant"
   mkdir -p "$run_dir"
@@ -221,7 +242,8 @@ done
 if ! (
   cd "$snapshot"
   python3 -m unittest -v test_compare_amr_canonical.py \
-    test_compare_cuda_ndgp_outputs.py test_validate_cuda_ndgp_logs.py
+    test_compare_cuda_ndgp_outputs.py test_validate_cuda_ndgp_logs.py \
+    test_validate_cuda_ndgp_diagnostic.py
 ) >"$logs/unit_tests.log" 2>&1; then
   echo 'CUDA-NDGP: comparator/validator unit tests failed'
   exit 1
@@ -290,6 +312,33 @@ for variant in "${variants[@]}"; do
     exit 1
   fi
 done
+
+if [ "$diag_sweep" -eq 1 ]; then
+  for variant in "${variants[@]}"; do
+    cap=${variant##*_}
+    run_dir="$job_root/$variant"
+    initial="$run_dir/output_00001"
+    amr_report="$reports/amr_self_${cap}.json"
+    if ! python3 "$snapshot/compare_amr_canonical.py" --topology-only \
+        --require-same-local-layout --scratch "$reports/scratch_self_${cap}" \
+        --json "$amr_report" "$initial" "$initial" \
+        >"$reports/amr_self_${cap}.txt" 2>&1; then
+      echo "CUDA-NDGP: cap=$cap self-canonical AMR validation failed"
+      exit 1
+    fi
+    if ! python3 "$snapshot/validate_cuda_ndgp_diagnostic.py" "$run_dir" \
+        --cap "$cap" --amr-report "$amr_report" \
+        --report "$reports/diagnostic_${cap}.json" \
+        >"$reports/diagnostic_${cap}.txt" 2>&1; then
+      echo "CUDA-NDGP: cap=$cap diagnostic validation failed"
+      exit 1
+    fi
+  done
+  touch "$job_root/DIAGNOSTIC_SWEEP_RUNTIME_COMPLETE"
+  echo "finished=$(date --iso-8601=seconds) rc=0 status=DIAGNOSTIC_SWEEP_RUNTIME_COMPLETE" | \
+    tee -a "$logs/provenance.txt"
+  exit 0
+fi
 
 if [ "$cpu_probe" -eq 1 ]; then
   probe_log="$job_root/cpu/run.log"

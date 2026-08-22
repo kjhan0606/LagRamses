@@ -234,6 +234,18 @@ def relative_l2(left: list[float], right: list[float]) -> tuple[float, float]:
     return math.sqrt(difference / norm), max_abs
 
 
+def pinned_particle_ids() -> set[int]:
+    expected = {
+        1 + ix + 32 * (iy + 32 * iz)
+        for iz in range(32)
+        for iy in range(32)
+        for ix in range(32)
+        if not (8 <= ix < 24 and 8 <= iy < 24 and 8 <= iz < 24)
+    }
+    expected.update(range(32**3 + 1, 2 * 32**3 + 1))
+    return expected
+
+
 def compare_particles(
     left: dict[int, Particle], right: dict[int, Particle]
 ) -> dict[str, float | int]:
@@ -241,14 +253,7 @@ def compare_particles(
         missing = sorted(set(left) - set(right))[:5]
         extra = sorted(set(right) - set(left))[:5]
         raise FormatError(f"particle ID sets differ, left_only={missing}, right_only={extra}")
-    expected_ids = {
-        1 + ix + 32 * (iy + 32 * iz)
-        for iz in range(32)
-        for iy in range(32)
-        for ix in range(32)
-        if not (8 <= ix < 24 and 8 <= iy < 24 and 8 <= iz < 24)
-    }
-    expected_ids.update(range(32**3 + 1, 2 * 32**3 + 1))
+    expected_ids = pinned_particle_ids()
     if set(left) != expected_ids:
         raise FormatError("particle IDs do not match the pinned base-leaf plus zoom set")
     position_max = 0.0

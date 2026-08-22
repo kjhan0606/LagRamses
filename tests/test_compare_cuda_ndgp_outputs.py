@@ -13,28 +13,14 @@ class ParticleFiniteTest(unittest.TestCase):
     @staticmethod
     def particles() -> dict[int, comparator.Particle]:
         result: dict[int, comparator.Particle] = {}
-        for iz in range(32):
-            for iy in range(32):
-                for ix in range(32):
-                    if 8 <= ix < 24 and 8 <= iy < 24 and 8 <= iz < 24:
-                        continue
-                    identity = 1 + ix + 32 * (iy + 32 * iz)
-                    result[identity] = comparator.Particle(
-                        (0.01, 0.02, 0.03),
-                        (0.1, 0.2, 0.3),
-                        1.0,
-                        5,
-                        1,
-                        -0.5,
-                    )
-        for identity in range(32**3 + 1, 2 * 32**3 + 1):
+        for identity in comparator.pinned_particle_ids():
             result[identity] = comparator.Particle(
-                (0.51, 0.52, 0.53),
+                (0.01, 0.02, 0.03),
                 (0.1, 0.2, 0.3),
-                0.125,
-                6,
+                1.0,
+                5 if identity <= 32**3 else 6,
                 1,
-                -0.25,
+                -0.5,
             )
         return result
 
