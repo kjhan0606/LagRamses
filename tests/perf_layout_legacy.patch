@@ -1,0 +1,26 @@
+diff --git a/patch/lagRamses/init_amr.f90 b/patch/lagRamses/init_amr.f90
+index dd2e49c..e893b32 100755
+--- a/patch/lagRamses/init_amr.f90
++++ b/patch/lagRamses/init_amr.f90
+@@ -37,7 +37,7 @@ subroutine init_amr
+   ! Constants
+   ncoarse=nx*ny*nz
+   ! Phase 2 chunk 2: fixed block size for now; make this a namelist key later.
+-  amr_block_size=64
++  amr_block_size=ngridmax
+   if(mod(ngridmax,amr_block_size)/=0) &
+        ngridmax=((ngridmax/amr_block_size)+1)*amr_block_size
+   ncell=ncoarse+twotondim*ngridmax
+diff --git a/patch/lagRamses/read_params.jaehyun.f90 b/patch/lagRamses/read_params.jaehyun.f90
+index e3d4bab..516b039 100755
+--- a/patch/lagRamses/read_params.jaehyun.f90
++++ b/patch/lagRamses/read_params.jaehyun.f90
+@@ -1303,7 +1303,7 @@ subroutine read_params
+      ngridmax_auto=.false.
+   end if
+   ! Phase 2 chunk 2: fixed block size for now; make this a namelist key later.
+-  amr_block_size=64
++  amr_block_size=ngridmax
+   if(mod(ngridmax,amr_block_size)/=0) &
+        ngridmax=((ngridmax/amr_block_size)+1)*amr_block_size
+   if(npartmax==0)then
