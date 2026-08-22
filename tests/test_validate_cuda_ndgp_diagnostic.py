@@ -28,6 +28,17 @@ class DiagnosticParserTest(unittest.TestCase):
                 "nDGP level 5 converged in 101 iters, res=1.0E-5", 5, 100
             )
 
+    def test_four_digit_converged_and_capped_rows(self) -> None:
+        text = (
+            "nDGP level 5 converged in 1047 iters, res=9.9E-5\n"
+            "WARNING: nDGP level 5 NOT converged after 1600 iters, res=2.7E-4\n"
+        )
+        rows = diagnostic.residuals(text, 5, 1600)
+        self.assertEqual(rows[0]["iterations"], 1047)
+        self.assertEqual(rows[0]["outcome"], "converged")
+        self.assertEqual(rows[1]["iterations"], 1600)
+        self.assertEqual(rows[1]["outcome"], "capped")
+
     def test_unknown_warning_spelling_is_rejected(self) -> None:
         with self.assertRaises(diagnostic.DiagnosticError):
             diagnostic.validate_warnings("WARN: unexpected fallback\n", 100)
@@ -80,6 +91,56 @@ class DiagnosticParserTest(unittest.TestCase):
             with self.subTest(rows=rows):
                 with self.assertRaises(diagnostic.DiagnosticError):
                     diagnostic.validate_smooth_residuals(rows, 1.0e-4)
+
+    def test_l5_control_separates_diagnostic_from_scientific_status(self) -> None:
+        passed = [
+            {"outcome": "converged", "iterations": 700, "residual": 9.0e-5},
+            {"outcome": "converged", "iterations": 400, "residual": 8.0e-5},
+        ]
+        failed = [
+            {"outcome": "capped", "iterations": 1600, "residual": 2.7e-4},
+            {"outcome": "converged", "iterations": 100, "residual": 8.0e-5},
+        ]
+        self.assertEqual(
+            diagnostic.assess_l5_control_residuals(passed, 1.0e-4)["status"],
+            "BASE_SOLVER_PASS",
+        )
+        assessment = diagnostic.assess_l5_control_residuals(failed, 1.0e-4)
+        self.assertEqual(assessment["status"], "BASE_SOLVER_FAIL")
+        self.assertEqual(assessment["max_iteration"], 1600)
+
+    def test_l5_control_requires_exactly_two_rows(self) -> None:
+        with self.assertRaises(diagnostic.DiagnosticError):
+            diagnostic.assess_l5_control_residuals(
+                [{"outcome": "converged", "iterations": 1, "residual": 0.0}],
+                1.0e-4,
+            )
+
+    def test_l5_control_requires_both_rank_owners_and_no_l6(self) -> None:
+        valid = [
+            {"source_cpu": 1, "owner_level_counts": {"5": 2048}},
+            {"source_cpu": 2, "owner_level_counts": {"5": 2048, "6": 0}},
+            {"kind": "info"},
+        ]
+        diagnostic.validate_l5_owner_inputs(valid)
+        invalid_cases = (
+            [
+                {"source_cpu": 1, "owner_level_counts": {"5": 4096}},
+                {"source_cpu": 2, "owner_level_counts": {"5": 0}},
+            ],
+            [
+                {"source_cpu": 1, "owner_level_counts": {"5": 2048, "6": 1}},
+                {"source_cpu": 2, "owner_level_counts": {"5": 2048}},
+            ],
+            [
+                {"source_cpu": 1, "owner_level_counts": {"5": 2048}},
+                {"source_cpu": 1, "owner_level_counts": {"5": 2048}},
+            ],
+        )
+        for owners in invalid_cases:
+            with self.subTest(owners=owners):
+                with self.assertRaises(diagnostic.DiagnosticError):
+                    diagnostic.validate_l5_owner_inputs(owners)
 
     def test_pinned_particle_set_is_noncontiguous_and_exact_size(self) -> None:
         identities = comparator.pinned_particle_ids()

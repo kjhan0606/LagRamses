@@ -18,6 +18,7 @@ qa=/home/kjhan/BACKUP/lagramses_qa
 cpu_probe=${CUDA_NDGP_CPU_PROBE:-0}
 diag_sweep=${CUDA_NDGP_DIAG_SWEEP:-0}
 smooth_diag=${CUDA_NDGP_SMOOTH_DIAG:-0}
+l5_diag=${CUDA_NDGP_L5_DIAG:-0}
 case "$cpu_probe" in
   0|1) ;;
   *) echo 'CUDA-NDGP: CUDA_NDGP_CPU_PROBE must be 0 or 1'; exit 2 ;;
@@ -30,7 +31,11 @@ case "$smooth_diag" in
   0|1) ;;
   *) echo 'CUDA-NDGP: CUDA_NDGP_SMOOTH_DIAG must be 0 or 1'; exit 2 ;;
 esac
-if [ $((cpu_probe + diag_sweep + smooth_diag)) -gt 1 ]; then
+case "$l5_diag" in
+  0|1) ;;
+  *) echo 'CUDA-NDGP: CUDA_NDGP_L5_DIAG must be 0 or 1'; exit 2 ;;
+esac
+if [ $((cpu_probe + diag_sweep + smooth_diag + l5_diag)) -gt 1 ]; then
   echo 'CUDA-NDGP: CPU probe and diagnostic modes are mutually exclusive'
   exit 2
 fi
@@ -38,6 +43,7 @@ run_mode=characterize
 if [ "$cpu_probe" -eq 1 ]; then run_mode=cpu_structure_probe; fi
 if [ "$diag_sweep" -eq 1 ]; then run_mode=cpu_solver_diagnostic_sweep; fi
 if [ "$smooth_diag" -eq 1 ]; then run_mode=cpu_smooth_solver_diagnostic; fi
+if [ "$l5_diag" -eq 1 ]; then run_mode=cpu_smooth_l5_control; fi
 job_root="$qa/cuda_ndgp_jobs/${SLURM_JOB_ID:?}"
 logs="$job_root/logs"
 snapshot="$job_root/snapshot"
@@ -204,7 +210,7 @@ cat "$logs/device_map.txt" | tee -a "$logs/provenance.txt"
 ic_root="$job_root/ic"
 ic_profile=harsh-v1
 ic_manifest="$snapshot/cuda_ndgp_ic.sha256"
-if [ "$smooth_diag" -eq 1 ]; then
+if [ "$smooth_diag" -eq 1 ] || [ "$l5_diag" -eq 1 ]; then
   ic_profile=smooth-v2
   ic_manifest="$snapshot/cuda_ndgp_smooth_ic.sha256"
 fi
@@ -246,6 +252,13 @@ render_nml() {
       -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
       -e 's/^n_iter_nDGP=100$/n_iter_nDGP=1600/' "$target"
   fi
+  if [ "$l5_diag" -eq 1 ]; then
+    sed -i -e 's/^nstepmax=4$/nstepmax=1/' \
+      -e 's/^scalar_solver_strict=.true.$/scalar_solver_strict=.false./' \
+      -e 's/^n_iter_nDGP=100$/n_iter_nDGP=1600/' \
+      -e 's/^levelmax=6$/levelmax=5/' \
+      -e '/^initfile(2)=/d' "$target"
+  fi
 }
 
 variants=(cpu gpu)
@@ -254,6 +267,7 @@ if [ "$diag_sweep" -eq 1 ]; then
   variants=(cpu_diag_100 cpu_diag_200 cpu_diag_400 cpu_diag_800)
 fi
 if [ "$smooth_diag" -eq 1 ]; then variants=(cpu_smooth_1600); fi
+if [ "$l5_diag" -eq 1 ]; then variants=(cpu_l5_1600); fi
 for variant in "${variants[@]}"; do
   run_dir="$job_root/$variant"
   mkdir -p "$run_dir"
@@ -334,22 +348,34 @@ for variant in "${variants[@]}"; do
   fi
 done
 
-if [ "$diag_sweep" -eq 1 ] || [ "$smooth_diag" -eq 1 ]; then
+if [ "$diag_sweep" -eq 1 ] || [ "$smooth_diag" -eq 1 ] || \
+   [ "$l5_diag" -eq 1 ]; then
   for variant in "${variants[@]}"; do
     cap=${variant##*_}
     run_dir="$job_root/$variant"
-    initial="$run_dir/output_00001"
-    amr_report="$reports/amr_self_${cap}.json"
-    if ! python3 "$snapshot/compare_amr_canonical.py" --topology-only \
-        --require-same-local-layout --scratch "$reports/scratch_self_${cap}" \
-        --json "$amr_report" "$initial" "$initial" \
-        >"$reports/amr_self_${cap}.txt" 2>&1; then
-      echo "CUDA-NDGP: cap=$cap self-canonical AMR validation failed"
-      exit 1
+    amr_outputs=("$run_dir/output_00001")
+    if [ "$l5_diag" -eq 1 ]; then
+      amr_outputs+=("$run_dir/output_00002")
     fi
-    diagnostic_args=("$run_dir" --cap "$cap" --amr-report "$amr_report" \
+    diagnostic_args=("$run_dir" --cap "$cap" \
       --report "$reports/diagnostic_${cap}.json")
+    for amr_output in "${amr_outputs[@]}"; do
+      output_number=${amr_output##*_}
+      amr_report="$reports/amr_self_${cap}_${output_number}.json"
+      if ! python3 "$snapshot/compare_amr_canonical.py" --topology-only \
+          --require-same-local-layout \
+          --scratch "$reports/scratch_self_${cap}_${output_number}" \
+          --json "$amr_report" "$amr_output" "$amr_output" \
+          >"$reports/amr_self_${cap}_${output_number}.txt" 2>&1; then
+        echo "CUDA-NDGP: cap=$cap output=$output_number canonical validation failed"
+        exit 1
+      fi
+      diagnostic_args+=(--amr-report "$amr_report")
+    done
     if [ "$smooth_diag" -eq 1 ]; then diagnostic_args+=(--profile smooth-v2); fi
+    if [ "$l5_diag" -eq 1 ]; then
+      diagnostic_args+=(--profile smooth-l5-control)
+    fi
     if ! python3 "$snapshot/validate_cuda_ndgp_diagnostic.py" \
         "${diagnostic_args[@]}" \
         >"$reports/diagnostic_${cap}.txt" 2>&1; then
@@ -360,6 +386,9 @@ if [ "$diag_sweep" -eq 1 ] || [ "$smooth_diag" -eq 1 ]; then
   diagnostic_marker=DIAGNOSTIC_SWEEP_RUNTIME_COMPLETE
   if [ "$smooth_diag" -eq 1 ]; then
     diagnostic_marker=SMOOTH_DIAGNOSTIC_RUNTIME_COMPLETE
+  fi
+  if [ "$l5_diag" -eq 1 ]; then
+    diagnostic_marker=L5_CONTROL_DIAGNOSTIC_COMPLETE
   fi
   touch "$job_root/$diagnostic_marker"
   echo "finished=$(date --iso-8601=seconds) rc=0 status=$diagnostic_marker" | \

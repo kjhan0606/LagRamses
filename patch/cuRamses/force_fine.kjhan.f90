@@ -3070,7 +3070,7 @@ subroutine nDGP_solve_level(ilevel, icount)
 
      if(rel_res < nDGP_eps) then
         converged = .true.
-        if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+        if(myid==1) write(*,'(A,I2,A,I5,A,ES10.3)') &
              ' nDGP level ',ilevel,' converged in ',iter,' iters, res=',rel_res
         exit
      end if
@@ -3081,7 +3081,7 @@ subroutine nDGP_solve_level(ilevel, icount)
   end if
 
   if(.not. converged) then
-     if(myid==1) write(*,'(A,I2,A,I3,A,ES10.3)') &
+     if(myid==1) write(*,'(A,I2,A,I5,A,ES10.3)') &
           & ' WARNING: nDGP level ',ilevel,' NOT converged after ', &
           & gs_iter_max,' iters, res=',rel_res
      if(scalar_solver_strict) call scalar_solver_abort

@@ -104,6 +104,41 @@ def validate_smooth_residuals(
     return max(iterations)
 
 
+def assess_l5_control_residuals(
+    rows: list[dict[str, float | int | str]], eps: float
+) -> dict[str, int | str]:
+    if len(rows) != 2:
+        raise DiagnosticError(f"L5 control: expected two solve rows, got {len(rows)}")
+    maximum = max(int(row["iterations"]) for row in rows)
+    passed = all(
+        row["outcome"] == "converged"
+        and float(row["residual"]) < eps
+        and int(row["iterations"]) <= 800
+        for row in rows
+    )
+    return {
+        "status": "BASE_SOLVER_PASS" if passed else "BASE_SOLVER_FAIL",
+        "max_iteration": maximum,
+    }
+
+
+def validate_l5_owner_inputs(inputs: list[dict[str, object]]) -> None:
+    owners = [item for item in inputs if "source_cpu" in item]
+    source_cpus = {int(item["source_cpu"]) for item in owners}
+    if (
+        len(owners) != 2
+        or source_cpus != {1, 2}
+        or any(
+            int(item.get("owner_level_counts", {}).get("5", 0)) <= 0
+            or int(item.get("owner_level_counts", {}).get("6", 0)) != 0
+            for item in owners
+        )
+    ):
+        raise DiagnosticError(
+            f"both ranks must own level-5 and no level-6 grids: {owners}"
+        )
+
+
 def finite_nonzero_field_norms(output: pathlib.Path) -> dict[str, float | int]:
     gravity = read_gravity(output)
     result: dict[str, float | int] = {}
@@ -122,9 +157,10 @@ def finite_nonzero_field_norms(output: pathlib.Path) -> dict[str, float | int]:
 def validate(
     run_dir: pathlib.Path,
     cap: int,
-    amr_report: pathlib.Path,
+    amr_reports: list[pathlib.Path],
     profile: str = "harsh-v1",
 ) -> dict[str, object]:
+    l5_control = profile == "smooth-l5-control"
     nml_text = (run_dir / "run.nml").read_text(encoding="ascii")
     for setting in (
         "scalar_solver_strict=.false.",
@@ -137,17 +173,32 @@ def validate(
     ):
         if nml_text.splitlines().count(setting) != 1:
             raise DiagnosticError(f"run.nml does not pin {setting}")
+    if l5_control:
+        if nml_text.splitlines().count("levelmax=5") != 1:
+            raise DiagnosticError("L5 control does not pin levelmax=5")
+        if "initfile(2)" in nml_text or "level_006" in nml_text:
+            raise DiagnosticError("L5 control still references the level-6 IC")
     log = run_dir / "run.log"
     text = log.read_text(errors="replace")
     if text.count("Run completed") != 1:
         raise DiagnosticError("Run completed count is not one")
     if "Some grid are outside initial conditions sub-volume" in text:
         raise DiagnosticError("refinement exceeds the pinned IC volume")
-    for level in (5, 6):
+    expected_levels = (5,) if l5_control else (5, 6)
+    for level in expected_levels:
         if not re.search(rf"Level\s+{level}\s+has\s+4096\s+grids", text):
             raise DiagnosticError(f"initial level-{level} grid count is not 4096")
-    if text.count("/ic_particle_ids") != 2:
-        raise DiagnosticError("both GRAFIC particle-ID files were not read")
+    if l5_control and (
+        re.search(r"Level\s+6\s+has", text)
+        or re.search(r"nDGP level\s+6\b", text)
+        or "/level_006" in text
+    ):
+        raise DiagnosticError("L5 control entered a level-6 path")
+    expected_id_reads = 1 if l5_control else 2
+    if text.count("/ic_particle_ids") != expected_id_reads:
+        raise DiagnosticError(
+            f"GRAFIC particle-ID read count differs: expected {expected_id_reads}"
+        )
     if text.count("init_part: idp set from genetIC ic_particle_ids") != 1:
         raise DiagnosticError("GRAFIC particle-ID positive marker count is not one")
     if re.search(
@@ -167,17 +218,41 @@ def validate(
         ):
             raise DiagnosticError(f"nonzero/malformed DMO finite marker: {line}")
 
-    canonical = json.loads(amr_report.read_text(encoding="utf-8"))
-    if canonical.get("status") != "PASS":
-        raise DiagnosticError("self-canonical AMR report is not PASS")
-    counts = canonical.get("left", {}).get("level_counts", {})
-    if int(counts.get("5", 0)) != 4096 or int(counts.get("6", 0)) != 4096:
-        raise DiagnosticError(f"canonical level counts differ: {counts}")
-
     outputs = sorted(path for path in run_dir.glob("output_*" ) if path.is_dir())
     if len(outputs) != 2:
         raise DiagnosticError(f"expected two outputs for nstepmax=1, got {len(outputs)}")
-    expected = pinned_particle_ids()
+    expected_report_count = 2 if l5_control else 1
+    if len(amr_reports) != expected_report_count:
+        raise DiagnosticError(
+            f"expected {expected_report_count} AMR reports, got {len(amr_reports)}"
+        )
+    canonical_counts: dict[str, dict[str, int]] = {}
+    for index, amr_report in enumerate(amr_reports):
+        canonical = json.loads(amr_report.read_text(encoding="utf-8"))
+        if canonical.get("status") != "PASS":
+            raise DiagnosticError(f"{amr_report}: self-canonical AMR report is not PASS")
+        expected_output = outputs[index].resolve()
+        if any(
+            pathlib.Path(canonical.get(side, {}).get("path", "")).resolve()
+            != expected_output
+            for side in ("left", "right")
+        ):
+            raise DiagnosticError(f"{amr_report}: report does not name {expected_output}")
+        counts = canonical.get("left", {}).get("level_counts", {})
+        if int(counts.get("5", 0)) != 4096:
+            raise DiagnosticError(f"{amr_report}: level-5 count differs: {counts}")
+        if l5_control:
+            if int(counts.get("6", 0)) != 0:
+                raise DiagnosticError(f"{amr_report}: unexpected level-6 grids: {counts}")
+            try:
+                validate_l5_owner_inputs(canonical.get("left", {}).get("inputs", []))
+            except DiagnosticError as error:
+                raise DiagnosticError(f"{amr_report}: {error}") from error
+        elif int(counts.get("6", 0)) != 4096:
+            raise DiagnosticError(f"{amr_report}: level-6 count differs: {counts}")
+        canonical_counts[outputs[index].name] = counts
+
+    expected = set(range(1, 32**3 + 1)) if l5_control else pinned_particle_ids()
     output_rows: list[dict[str, object]] = []
     for output in outputs:
         if not (output / "COMPLETE").is_file():
@@ -204,11 +279,16 @@ def validate(
             {"name": output.name, "particle_count": len(actual), "per_rank": per_rank}
         )
 
-    level_rows = {str(level): residuals(text, level, cap) for level in (5, 6)}
+    level_rows = {str(level): residuals(text, level, cap) for level in expected_levels}
     max_convergence_iteration: int | None = None
     field_norms: dict[str, float | int] | None = None
+    scientific_assessment: dict[str, int | str] | None = None
     if profile == "smooth-v2":
         max_convergence_iteration = validate_smooth_residuals(level_rows, 1.0e-4)
+        field_norms = finite_nonzero_field_norms(outputs[-1])
+    elif l5_control:
+        scientific_assessment = assess_l5_control_residuals(level_rows["5"], 1.0e-4)
+        max_convergence_iteration = int(scientific_assessment["max_iteration"])
         field_norms = finite_nonzero_field_norms(outputs[-1])
     elif cap == 100:
         first = level_rows["5"][0]
@@ -223,9 +303,10 @@ def validate(
         "cap": cap,
         "levels": level_rows,
         "outputs": output_rows,
-        "canonical_level_counts": counts,
+        "canonical_level_counts": canonical_counts,
         "max_convergence_iteration": max_convergence_iteration,
         "final_field_norms": field_norms,
+        "scientific_assessment": scientific_assessment,
     }
 
 
@@ -234,20 +315,27 @@ def main() -> int:
     parser.add_argument("run_dir", type=pathlib.Path)
     parser.add_argument("--cap", type=int, required=True)
     parser.add_argument(
-        "--profile", choices=("harsh-v1", "smooth-v2"), default="harsh-v1"
+        "--profile",
+        choices=("harsh-v1", "smooth-v2", "smooth-l5-control"),
+        default="harsh-v1",
     )
-    parser.add_argument("--amr-report", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--amr-report", type=pathlib.Path, action="append", required=True
+    )
     parser.add_argument("--report", type=pathlib.Path, required=True)
     args = parser.parse_args()
     if args.cap not in (100, 200, 400, 800, 1600):
         print("CUDA-NDGP diagnostic: ERROR: unsupported cap", file=sys.stderr)
         return 2
-    if args.profile == "smooth-v2" and args.cap != 1600:
-        print("CUDA-NDGP diagnostic: ERROR: smooth-v2 requires cap 1600", file=sys.stderr)
+    if args.profile in ("smooth-v2", "smooth-l5-control") and args.cap != 1600:
+        print("CUDA-NDGP diagnostic: ERROR: smooth profile requires cap 1600", file=sys.stderr)
         return 2
     try:
         report = validate(
-            args.run_dir.resolve(), args.cap, args.amr_report.resolve(), args.profile
+            args.run_dir.resolve(),
+            args.cap,
+            [path.resolve() for path in args.amr_report],
+            args.profile,
         )
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(
