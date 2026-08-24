@@ -1,0 +1,19 @@
+{
+  "group": 1,
+  "npart": 3577413,
+  "mass_code": 0.0004165,
+  "mass_hinv_msun": 75416301733444.42,
+  "contamination_group": 0.0,
+  "center": [
+    0.4994,
+    0.4713,
+    0.4913
+  ],
+  "periodic_distance_from_expected": 0.00019172327062722834,
+  "mass_ratio_to_target": 0.9509004383566457,
+  "score": 6.373535314160798e-06,
+  "r200_hinv_mpc": 0.6870823202991064,
+  "r200_box": 0.005367830627336769,
+  "two_r200_box": 0.010735661254673538,
+  "box_mass_hinv_msun": 1.8107155278137917e+17
+}

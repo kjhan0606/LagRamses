@@ -1,0 +1,69 @@
+{
+  "snapshot": "/gpfs/kjhan/Hydro/Sidm/Agn/Zoom0/zoom_run_cdm/output_00003",
+  "aexp": 0.100525513209594,
+  "files_scanned": 32,
+  "npart": 31981734,
+  "total_mass_code": 1.0,
+  "highres_mass_code": 1.1641532182693481e-10,
+  "highres_count": 13699720,
+  "highres_circular_center": [
+    0.4996831883207332,
+    0.4997099138014706,
+    0.5009821218267082
+  ],
+  "highres_bounds_naive": [
+    [
+      0.433932717105052,
+      0.5682154645246652
+    ],
+    [
+      0.41277965690434876,
+      0.5797258499872738
+    ],
+    [
+      0.4373174326147077,
+      0.5617287695216794
+    ]
+  ],
+  "mass_tiers": [
+    {
+      "mass_code": 1.1641532182693481e-10,
+      "npart": 13699720
+    },
+    {
+      "mass_code": 9.313225746154785e-10,
+      "npart": 1184863
+    },
+    {
+      "mass_code": 7.450580596923828e-09,
+      "npart": 417378
+    },
+    {
+      "mass_code": 5.960464477539063e-08,
+      "npart": 16679773
+    }
+  ],
+  "center": [
+    0.4992375,
+    0.4714,
+    0.49128125
+  ],
+  "spheres": [
+    {
+      "radius_box": 0.0054586735,
+      "npart": 5648,
+      "coarse_npart": 0,
+      "total_mass_code": 6.575137376785278e-07,
+      "coarse_mass_code": 0.0,
+      "coarse_mass_fraction": 0.0
+    },
+    {
+      "radius_box": 0.010917347,
+      "npart": 66917,
+      "coarse_npart": 0,
+      "total_mass_code": 7.790164090692997e-06,
+      "coarse_mass_code": 0.0,
+      "coarse_mass_fraction": 0.0
+    }
+  ]
+}

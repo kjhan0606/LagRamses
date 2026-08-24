@@ -1,0 +1,2 @@
+# Preserve the byte-for-byte Lageunha metadata snapshot, including whitespace.
+runs/lageunha/snapshot-2026-08-24/** -whitespace
