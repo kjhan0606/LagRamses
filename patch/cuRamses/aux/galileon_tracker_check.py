@@ -8,7 +8,8 @@ i=np.arange(N); kd1=(2-2*np.cos(2*np.pi*i/N))/dx**2
 def helm(b,m2):
     bk=np.fft.rfftn(b)
     den=-(kd1[:,None,None]+kd1[None,:,None]+kd1[None,None,:N//2+1]+m2)
-    xk=np.where(np.abs(den)>1e-30,bk/den,0)
+    xk=np.zeros_like(bk)
+    np.divide(bk,den,out=xk,where=np.abs(den)>1e-30)
     return np.fft.irfftn(xk,s=(N,N,N),axes=(0,1,2))
 def sd(u):
     xx=(np.roll(u,1,0)+np.roll(u,-1,0)-2*u)/dx**2
@@ -42,7 +43,9 @@ for a,amp in [(1.0,1e-4),(0.5,1e-4),(0.25,1e-4)]:
     phi=helm(1.5*Om*a*delta,0.0)*-1  # helm solves (lap)x=b as x=-b/k2... careful
     # direct: lap phi = 1.5 Om a delta -> phik = -(1.5 Om a) deltak/kd2
     dk=np.fft.rfftn(delta); den=(kd1[:,None,None]+kd1[None,:,None]+kd1[None,None,:N//2+1])
-    phik=np.where(den>0,-1.5*Om*a*dk/den,0); phi=np.fft.irfftn(phik,s=(N,N,N),axes=(0,1,2))
+    phik=np.zeros_like(dk)
+    np.divide(-1.5*Om*a*dk,den,out=phik,where=den>0)
+    phi=np.fft.irfftn(phik,s=(N,N,N),axes=(0,1,2))
     gu=np.gradient(u,dx,axis=0); gp=np.gradient(phi,dx,axis=0)
     m=np.abs(gp)>0.3*np.max(np.abs(gp))
     ratio=np.median((xi/(6*E2))*gu[m]/(-gp[m]))
@@ -59,7 +62,9 @@ for it in range(30):
     A=np.where(disc>0,(-1+np.sqrt(np.maximum(disc,0)))/(2*coeff),-1/(2*coeff))
     u=0.5*u+0.5*(u+helm(A-l,0.0))
 dk=np.fft.rfftn(delta); den=(kd1[:,None,None]+kd1[None,:,None]+kd1[None,None,:N//2+1])
-phik=np.where(den>0,-1.5*Om*dk/den,0); phi=np.fft.irfftn(phik,s=(N,N,N),axes=(0,1,2))
+phik=np.zeros_like(dk)
+np.divide(-1.5*Om*dk,den,out=phik,where=den>0)
+phi=np.fft.irfftn(phik,s=(N,N,N),axes=(0,1,2))
 gu=np.gradient(u,dx,axis=0); gp=np.gradient(phi,dx,axis=0)
 m=np.abs(gp)>0.5*np.max(np.abs(gp))
 print(f"screened top-hat (delta=5e4): median F5/FN = {np.median((xi/(6*E2))*gu[m]/(-gp[m])):.4f}  (unscreened would be {-xi/(9*b2*E2):.3f})")

@@ -355,3 +355,21 @@ internal halo structure.
   coarse steps against the pre-fix reference of roughly 432 s (SIDM1) and
   396 s (SIDM3), and separately report load-balance wall time and whether
   repeated remapping ceased.
+
+## DE/nGR validation Level-up (2026-08-25)
+
+- Every Paper-I DE/nGR entry formerly at Level 1 or 2 now has Level 3 or
+  stronger evidence. The gate root is
+  `/gpfs/kjhan/Hydro/DE_nonstd/DE_level3_solver_gate_20260825`.
+- Massive-neutrino response and F6+neutrino are Level 3 diagnostics. Future
+  tables must be generated with CAMB
+  `accurate_massive_neutrino_transfers=True`; the independent CLASS gate has
+  maximum per-redshift median `R_nu` error 0.765% and maximum applied-source
+  error 0.00349% over the paper domain.
+- QUMOND is Level 3 on a uniform isolated spherical two-Poisson test. Dilaton
+  and tracker Galileon are Level 4 uniform diagnostics after isolated
+  screening tests and residual-qualified 32-cubed end-to-end runs.
+- Machine records are `patch/cuRamses/aux/DE_NGR_LEVEL3_SOLVER_AUDIT.json`,
+  `COSMOLOGICAL_SOLVER_GATE_AUDIT.json`, and
+  `NEUTRINO_CLASS_LEVEL3_AUDIT.json`. These levels do not certify AMR
+  coarse--fine behaviour or agreement with an independent nonlinear code.

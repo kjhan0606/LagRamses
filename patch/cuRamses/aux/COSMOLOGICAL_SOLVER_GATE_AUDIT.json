@@ -1,0 +1,31 @@
+{
+  "binary": "/home/kjhan/BACKUP/lagRamses-DE/code/bin/ramses_final3d",
+  "binary_sha256": "7caa3c82c4a2699145ed96ca3ca9e69f88883b8ee616d93ca52d6a6a1c4ece08",
+  "campaign": "/gpfs/kjhan/Hydro/DE_nonstd/DE_level3_solver_gate_20260825",
+  "level_contract": "Level 4 requires completed cosmological evolution plus residual-qualified solves; termination alone does not pass.",
+  "models": {
+    "dilaton_a": {
+      "completed": true,
+      "converged_solves": 39,
+      "exit_code": 0,
+      "failures": [],
+      "max_residual": 9.708e-07,
+      "output_count": 8,
+      "passed": true,
+      "required_residual_tolerance": 1e-06,
+      "stdout_sha256": "128785fbc8053c9b43cc260f864b611ec6324cb4db1e4a6a73b4f9609433ba66"
+    },
+    "gal_tracker": {
+      "completed": true,
+      "converged_solves": 13,
+      "exit_code": 0,
+      "failures": [],
+      "max_residual": 9.91e-07,
+      "output_count": 8,
+      "passed": true,
+      "required_residual_tolerance": 1e-06,
+      "stdout_sha256": "11cd5b1416c7e93ae2bdea799424b7d8be95e996cd1cfc129413ac2accda678c"
+    }
+  },
+  "passed": true
+}
