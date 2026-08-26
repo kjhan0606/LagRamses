@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "campaign": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729",
+  "campaign_manifest_sha256": "d989edb66909fbfa1f9f1689edf6c9edb02807f82079eea6dbba6e0d3bbe7bcd",
+  "phase_audit": {
+    "path": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/analysis_pk/IC_PHASE_AUDIT.json",
+    "sha256": "fafe3c6d28e4328034670dfb759f73dbada0fa0b10ca9b3ed2ce44743e9be4e7",
+    "minimum_correlation": 0.999
+  },
+  "extension_manifest": {
+    "path": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/extension5_20260805/manifest.json",
+    "sha256": "5612bcb727826c26824b7682c304ae69f84eaae0c252487ee5b12d07af5b1e86"
+  },
+  "models": {
+    "lcdm_phase_matched": {
+      "source_output": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/lcdm_phase_matched/output_00002",
+      "run_namelist_sha256": "aff3e5317f0a1b229626207335a4b69b1d05bacaccb917a8424f5108f6edd4f7",
+      "completion_path": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/lcdm_phase_matched/run-412554.out",
+      "completion_sha256": "477a984e4ea7e4fd569ac5d1ad6289fc106202f9df18835bb02730a9a7a82552",
+      "source_commit": "e964a947dac33969b4958d5bd5b80c30900dc7cf",
+      "binary_sha256": "59890a47b3e300a7534cbed904fbce838c373631228cd9d41c0fe2d50ffe3b15",
+      "parameters": {"de_perturb": ".false."}
+    },
+    "cpl_cluster_m09_p02": {
+      "source_output": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/cpl_cluster_m09_p02/output_00002",
+      "run_namelist_sha256": "c6af521d39d75ad5a08b71936190081370f6fb264535d7c3e4df2ff2127f6c6f",
+      "completion_path": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/cpl_cluster_m09_p02/run-402642.out",
+      "completion_sha256": "6d13a7ca80fef26a489533144a59041c84069371788f2a2c8aa3032fb1c4c288",
+      "source_commit": "e964a947dac33969b4958d5bd5b80c30900dc7cf",
+      "binary_sha256": "59890a47b3e300a7534cbed904fbce838c373631228cd9d41c0fe2d50ffe3b15",
+      "parameters": {"de_perturb": ".true.", "w0": "-0.9", "wa": "0.2", "cs2_de": "0.0"}
+    },
+    "f5": {
+      "source_output": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/f5/output_00002",
+      "run_namelist_sha256": "4f7ea2372885e070fa74eae28f6157263f452a63140653d1926ee6a78cb2d562",
+      "completion_path": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/analysis_velocity/attestations/f5_run_395980_completion_attestation.log",
+      "completion_sha256": "7a4c7fc38de0d5d40469ff892cf299dc9e59adf16f6aab08bcb26ce204021e01",
+      "original_run_log": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/f5/run-395980.out",
+      "original_run_log_sha256": "59e0808996bd927518abbba69f45ed5e3f955ee4792f32fddd7c0102655c7285",
+      "source_commit": "0a9d76850aca265e53cebc36843e00c184592318",
+      "binary_sha256": "11512da6bd277b5e79f5f908a48beed716cf7c06db1abf189ec905828cff7f60",
+      "parameters": {"use_fr": ".true.", "fr0": "-1.0d-5", "fr_n": "1"}
+    },
+    "f6": {
+      "source_output": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/f6/output_00002",
+      "run_namelist_sha256": "09b80e43493e56b78b1bfd65bba7c3d349a7841aa6d9ca3acdea71974a0b4ad8",
+      "completion_path": "/gpfs/kjhan/Hydro/DE_nonstd/DMO_production_L512_N1024_20260729/f6/run-401000.out",
+      "completion_sha256": "4b21d47f6b71c5e5a15b307bd5f8f95a1909a1d04e23245fd40a9f2ab1df8e9d",
+      "source_commit": "e964a947dac33969b4958d5bd5b80c30900dc7cf",
+      "binary_sha256": "59890a47b3e300a7534cbed904fbce838c373631228cd9d41c0fe2d50ffe3b15",
+      "parameters": {"use_fr": ".true.", "fr0": "-1.0d-6", "fr_n": "1"}
+    }
+  }
+}

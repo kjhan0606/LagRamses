@@ -1,0 +1,39 @@
+{
+  "checks": [
+    {
+      "max_absolute_linear_force_error": 0.0,
+      "max_background_residual": 3.47e-18,
+      "model": "environmentally dependent dilaton",
+      "passed": true,
+      "screened_center_to_background_field": 0.02855,
+      "screened_fifth_to_newtonian_force": 0.0,
+      "source_sha256": "40233851e958795799ab22a2a8b1e11b67203d6297aaf8a52943a2c1546d0a42",
+      "stdout": "a=1.0: bg residual=3.47e-18  k=2: F5/FN=0.14022 theory=0.14022 (2b^2=0.5000)  k=8: F5/FN=0.41830 theory=0.41830 (2b^2=0.5000)\na=0.5: bg residual=1.73e-18  k=2: F5/FN=0.02257 theory=0.02257 (2b^2=0.1384)  k=8: F5/FN=0.09950 theory=0.09950 (2b^2=0.1384)\na=0.25: bg residual=8.67e-19  k=2: F5/FN=0.00340 theory=0.00340 (2b^2=0.0383)  k=8: F5/FN=0.02150 theory=0.02150 (2b^2=0.0383)\nscreening: chi_center/chibar = 2.855e-02 (should be <<1)\nscreening: median F5/FN near tophat = 0.0000 (unscreened 0.5)\n",
+      "test": "periodic nonlinear field solve: background, Fourier response, top-hat screening"
+    },
+    {
+      "max_absolute_linear_force_error": 0.0,
+      "model": "tracker cubic Galileon",
+      "passed": true,
+      "screened_fifth_to_newtonian_force": 0.0063,
+      "source_sha256": "be3868c5e4c559795ab70576d7b456ff11b1b6811fa6f02d85a24debc1b78bc9",
+      "stdout": "     a       E2     beta1     beta2  F5/FN meas  analytic\n  1.00   1.0000   -0.5666   -0.2698     0.84397   0.84397\n  0.50   2.6629   -2.2968   -2.9124     0.02936   0.02936\n  0.25  19.2364   -2.7235  -24.9477     0.00047   0.00047\nscreened top-hat (delta=5e4): median F5/FN = 0.0063  (unscreened would be 0.844)\n",
+      "test": "periodic operator-split solve: Fourier response and top-hat Vainshtein screening"
+    },
+    {
+      "a0_code": 1.3111625804418867,
+      "max_relative_force_error": 0.010381208803054121,
+      "median_measured_to_spherical_target": 0.9992295767983552,
+      "median_relative_force_error": 0.0013353513442607519,
+      "model": "QUMOND",
+      "nmesh": 64,
+      "p90_relative_force_error": 0.004768150634121507,
+      "passed": true,
+      "phantom_density_mean_abs": 5.551115123125783e-17,
+      "source_sha256": "fcae4a6d4cb0c5badca8976b190352c43f62761c0ba76dbd7d6c646e84311991",
+      "test": "periodic spherical two-Poisson isolated solver"
+    }
+  ],
+  "contract": "Level 3 requires an isolated solver test; successful termination alone is insufficient.",
+  "passed": true
+}
