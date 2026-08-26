@@ -212,6 +212,15 @@ subroutine dump_all
 #endif
         if(myid==1) write(*,*)'End backup fdm (psi)'
         if(myid==1) call flush(6)
+        if(fdm_outer_ledger)then
+           if(myid==1) write(*,*)'Start FDM outer-wave provenance'
+           call output_fdm_outer_wave_provenance(nchar)
+#ifndef WITHOUTMPI
+           if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+           if(myid==1) write(*,*)'End FDM outer-wave provenance'
+           if(myid==1) call flush(6)
+        end if
      end if
 #ifdef ATON
      if(aton)then

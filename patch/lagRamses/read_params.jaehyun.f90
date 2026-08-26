@@ -96,6 +96,10 @@ subroutine read_params
 namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & adm_cross_section,adm_mol,adm_fH2
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
+       & fdm_outer_ledger, &
+       & fdm_dual_soliton_ic,fdm_dual_soliton_rho0,fdm_dual_soliton_rc_box, &
+       & fdm_dual_soliton_center_box,fdm_dual_soliton_velocity,fdm_dual_soliton_phase, &
+       & fdm_dual_soliton_profile_c, &
        & fdm_cost_mode,fdm_use_hjm,fdm_first_wave_level,fdm_hjm_C1,fdm_hjm_C2,fdm_refine_rho_min, &
        & fdm_nla,fdm_match_aout,fdm_hjm_qp,fdm_qp_c1max,fdm_cn_tol,fdm_refine_matched, &
        & fdm_ghost2,fdm_ghost2_rev
@@ -755,6 +759,12 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A,F5.2)')    '   courant  =', fdm_courant
         write(*,'(A,I3)')      '   nrefine_dB=', fdm_nrefine_dB
         write(*,'(A,L1)')      '   hybrid   =', fdm_hybrid
+        write(*,'(A,L1)')      '   outer wave provenance=', fdm_outer_ledger
+        write(*,'(A,L1)')      '   dual soliton IC=', fdm_dual_soliton_ic
+        if(fdm_dual_soliton_ic)then
+           write(*,'(A,2(1X,ES10.3))') '     rho0=',fdm_dual_soliton_rho0
+           write(*,'(A,2(1X,ES10.3))') '     rc/box=',fdm_dual_soliton_rc_box
+        end if
         write(*,'(A,I2,A)')    '   split_order=', fdm_split_order, &
              & merge(' (Strang DKD)   ', merge(' (Yoshida 4th)  ', ' (UNKNOWN->DKD) ', fdm_split_order==4), fdm_split_order==2)
         write(*,'(A,I2,A)')    '   kinetic   =', fdm_kinetic, &

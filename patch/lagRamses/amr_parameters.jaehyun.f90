@@ -399,6 +399,20 @@ module amr_parameters
   real(dp)::fdm_courant=0.5d0         ! CFL factor for SP kinetic step
   integer ::fdm_nrefine_dB=4          ! Min cells per de Broglie wavelength
   logical ::fdm_hybrid=.false.        ! Hybrid: FDM + N-body particles (stars/sinks)
+  ! Write raw wave/provenance diagnostics at selected outputs. Disabled by
+  ! default; this changes no force or dynamical subgrid calculation.
+  logical ::fdm_outer_ledger=.false.
+  ! Opt-in, all-wave dual-soliton seed for controlled pure-FDM merger zooms.
+  ! Centres and core radii are fractions of the periodic box length; velocities
+  ! are code-coordinate velocities.  Sink initial conditions remain the
+  ! existing two-row ic_sink input and are never manufactured here.
+  logical ::fdm_dual_soliton_ic=.false.
+  real(dp),dimension(1:2)::fdm_dual_soliton_rho0=0.0d0
+  real(dp),dimension(1:2)::fdm_dual_soliton_rc_box=0.0d0
+  real(dp),dimension(1:2,1:3)::fdm_dual_soliton_center_box=0.0d0
+  real(dp),dimension(1:2,1:3)::fdm_dual_soliton_velocity=0.0d0
+  real(dp),dimension(1:2)::fdm_dual_soliton_phase=0.0d0
+  real(dp)::fdm_dual_soliton_profile_c=9.1d-2
   integer ::fdm_split_order=2         ! Operator-split order: 2=Strang(DKD), 4=Yoshida
   integer ::fdm_kinetic=0             ! Fine-level drift: 0=explicit subcycled, 1=Crank-Nicolson implicit
   real(dp)::fdm_cn_tol=1.0d-10        ! CN BiCGSTAB relative-residual tolerance (fine-level kinetic drift)
