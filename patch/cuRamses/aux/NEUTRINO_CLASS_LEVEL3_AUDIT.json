@@ -1,0 +1,65 @@
+{
+  "accuracy_contract": {
+    "maximum_applied_source_relative_error": 5e-05,
+    "maximum_median_R_nu_relative_error": 0.02,
+    "rationale": "R_nu approaches zero at high k, so its pointwise relative error is ill-conditioned; the full physical source factor is bounded over the complete domain."
+  },
+  "accurate_massive_neutrino_transfers_marker": true,
+  "camb_table": "/gpfs/kjhan/Hydro/DE_nonstd/DE_level3_solver_gate_20260825/neutrino_mnu006_accurate.dat",
+  "camb_table_sha256": "edadf19c2ba4f0ec4d68f3056038a6ce5cd688d00f8b603cfa9f6a210a2eef3d",
+  "class_executable": "/home/kjhan/BACKUP/lagCAMB_validation/class_public/class",
+  "class_executable_sha256": "b0362a744afe10c38abc7752b42779e0bf96dda069f4566488ae0881714fbcbf",
+  "class_stdout_tail": [],
+  "domain": {
+    "k_hmpc": [
+      0.001,
+      0.5
+    ],
+    "redshifts": [
+      0.0,
+      0.5,
+      1.0,
+      2.0
+    ]
+  },
+  "maximum_applied_source_relative_error": 3.4858094786205385e-05,
+  "maximum_median_relative_error": 0.007651610630757699,
+  "maximum_relative_error": 0.11840453995273492,
+  "model": "massive-neutrino linear response and F6+neutrino inherited component",
+  "passed": true,
+  "quantity": "R_nu(k,a)=T_nu/T_cb",
+  "records": [
+    {
+      "max_applied_source_relative_error": 3.428593370236044e-05,
+      "max_relative_error": 0.09213617657584217,
+      "median_relative_error": 0.005913791380990796,
+      "p95_relative_error": 0.08636236483226867,
+      "points": 81,
+      "redshift": 0.0
+    },
+    {
+      "max_applied_source_relative_error": 3.4858094786205385e-05,
+      "max_relative_error": 0.10246937123514321,
+      "median_relative_error": 0.006133260058017953,
+      "p95_relative_error": 0.09667296032487571,
+      "points": 81,
+      "redshift": 0.5
+    },
+    {
+      "max_applied_source_relative_error": 3.449103741481885e-05,
+      "max_relative_error": 0.10927872229904856,
+      "median_relative_error": 0.006951446975748565,
+      "p95_relative_error": 0.10358977485988796,
+      "points": 81,
+      "redshift": 1.0
+    },
+    {
+      "max_applied_source_relative_error": 3.31329460152574e-05,
+      "max_relative_error": 0.11840453995273492,
+      "median_relative_error": 0.007651610630757699,
+      "p95_relative_error": 0.11275819899618211,
+      "points": 81,
+      "redshift": 2.0
+    }
+  ]
+}

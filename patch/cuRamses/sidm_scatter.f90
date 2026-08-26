@@ -12,6 +12,7 @@
 subroutine sidm_scatter(ilevel)
   use pm_commons
   use pm_parameters, only: iseed
+  use amr_parameters, only: sidm_estimator_diagnostics
   use amr_commons
   use random
 #include "amr_index.h"
@@ -26,9 +27,11 @@ subroutine sidm_scatter(ilevel)
   integer,dimension(:),allocatable::nparticles,ptrhead
   integer::sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down
   integer::sidm_n_vrel_reject
+  integer::sidm_n_leaf_occupied,sidm_n_leaf_active,sidm_n_dm_leaf
   real(dp)::sidm_dp(3),sidm_dEk,sidm_dp_max,sidm_dEk_max
   real(dp)::sidm_Pmax_level
   real(dp)::sidm_dEdiss  ! Cumulative dissipated energy (dSIDM)
+  real(dp)::sidm_expected_rate
   real(dp)::R_dummy
   integer,dimension(1:ncpu,1:IRandNumSize)::allseed
   ! Per-thread seed array (deterministic, avoids localseed race)
@@ -40,6 +43,9 @@ subroutine sidm_scatter(ilevel)
   common /sidm_cons/ sidm_dp,sidm_dEk,sidm_dp_max,sidm_dEk_max
   common /sidm_pmax_c/ sidm_Pmax_level
   common /sidm_diss/ sidm_dEdiss
+  common /sidm_estimator_counts/ sidm_n_leaf_occupied, &
+       & sidm_n_leaf_active,sidm_n_dm_leaf
+  common /sidm_estimator_rate/ sidm_expected_rate
 
   if(.not.sidm) return
   if(numbtot(1,ilevel)==0) return
@@ -83,12 +89,16 @@ subroutine sidm_scatter(ilevel)
   sidm_n_up       = 0
   sidm_n_down     = 0
   sidm_n_vrel_reject = 0
+  sidm_n_leaf_occupied = 0
+  sidm_n_leaf_active = 0
+  sidm_n_dm_leaf = 0
   sidm_dp(:)      = 0.0d0
   sidm_dEk        = 0.0d0
   sidm_dp_max     = 0.0d0
   sidm_dEk_max    = 0.0d0
   sidm_Pmax_level = 0.0d0
   sidm_dEdiss     = 0.0d0
+  sidm_expected_rate = 0.0d0
 
 #if NDIM==3
   ! Only local grids: after virtual_tree_fine all particles sit on
@@ -126,12 +136,16 @@ subroutine sidm_scatter(ilevel)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_n_up,     1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_n_down,   1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_n_vrel_reject,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_n_leaf_occupied,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_n_leaf_active,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_n_dm_leaf,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_dp,   3,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_dEk,  1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_dp_max, 1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_dEk_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_Pmax_level,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_dEdiss,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_expected_rate,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
 
   ! Store P_max for timestep constraint in newdt_fine
   sidm_Pmax(ilevel) = sidm_Pmax_level
@@ -161,6 +175,13 @@ subroutine sidm_scatter(ilevel)
              ' (cap=', sidm_vrel_max, ' cm/s)'
      end if
   end if
+  if(myid==1 .and. sidm_estimator_diagnostics) then
+     write(*,'(A,I2,A,I10,A,I10,A,I10,A,I10,A,ES12.4,A)') &
+          ' SIDM estimator level ',ilevel,': dm=',sidm_n_dm_leaf, &
+          ' occupied=',sidm_n_leaf_occupied, &
+          ' active=',sidm_n_leaf_active,' sampled=',sidm_n_pairs, &
+          ' rate=',sidm_expected_rate,' s^-1'
+  end if
 
 111 format('   Entering sidm_scatter for level ',I2)
 end subroutine sidm_scatter
@@ -175,6 +196,8 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   integer,intent(in)::ilevel,icpu,kgrid,subnump
   integer,intent(in)::mythread_loc,nthreads_in
   integer,dimension(IRandNumSize,0:nthreads_in-1)::thread_seeds
+  external sidm_sample_rutherford_cosine,sidm_rotate_scattered_direction
+  external sidm_pair_probability
 
   ! External function
   integer,external::cell_index_from_part
@@ -182,18 +205,23 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   ! Shared counters (common with sidm_scatter)
   integer::sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down
   integer::sidm_n_vrel_reject
+  integer::sidm_n_leaf_occupied,sidm_n_leaf_active,sidm_n_dm_leaf
   real(dp)::sidm_dp(3),sidm_dEk,sidm_dp_max,sidm_dEk_max
   real(dp)::sidm_Pmax_level
   real(dp)::sidm_dEdiss
+  real(dp)::sidm_expected_rate
   common /sidm_diag/ sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down,sidm_n_vrel_reject
   common /sidm_cons/ sidm_dp,sidm_dEk,sidm_dp_max,sidm_dEk_max
   common /sidm_pmax_c/ sidm_Pmax_level
   common /sidm_diss/ sidm_dEdiss
+  common /sidm_estimator_counts/ sidm_n_leaf_occupied, &
+       & sidm_n_leaf_active,sidm_n_dm_leaf
+  common /sidm_estimator_rate/ sidm_expected_rate
 
   ! Local variables
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp)::dx,dx_loc,scale,vol_phys,dt_phys,sigma_over_m
-  real(dp)::mp_phys,P_scatter,twopi
+  real(dp)::P_scatter,twopi
   real(dp)::cos_theta,sin_theta,phi_rand,v_rel_mag,v_rel_kms
   real(dp),dimension(1:3)::v1,v2,v_cm,v_rel_vec,nhat,v_rel_new
   real(dp),dimension(1:3)::p_before,p_after,v1_new,v2_new
@@ -211,14 +239,15 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   ! Scattering counters (thread-local)
   integer::n_scatter_loc,n_pairs_loc,n_up_loc,n_down_loc
   integer::n_vrel_reject_loc
+  integer::n_leaf_occupied_loc,n_leaf_active_loc,n_dm_leaf_loc
   ! Conservation diagnostics (thread-local)
   real(dp)::dp_loc(3),dEk_loc,dp_max_loc,dEk_max_loc
   real(dp)::P_max_loc
   real(dp)::dEdiss_loc,KE_cm_before_diss
+  real(dp)::expected_rate_loc
 
   ! Anisotropic scattering variables
-  real(dp)::eps2,a_ruth,b_ruth,e1_mag
-  real(dp),dimension(1:3)::v_hat,e1,e2
+  real(dp)::eps2
   logical::yukawa_angular  ! velocity-dependent angular distribution
 
   ! Inelastic scattering variables
@@ -258,10 +287,8 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   yukawa_angular = (trim(sidm_angular) == 'yukawa')
   if(trim(sidm_angular) == 'rutherford') then
      eps2 = 2.0d0*sidm_epsilon
-     a_ruth = 1.0d0/eps2
-     b_ruth = 1.0d0/(2.0d0+eps2)
   end if
-  ! For 'yukawa' angular: eps2, a_ruth, b_ruth computed per pair below
+  ! For 'yukawa' angular, eps2 is computed per pair below.
 
   ! Use per-thread seed from thread_seeds array
   seed_loc = thread_seeds(:,mythread_loc)
@@ -271,12 +298,16 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   n_up_loc      = 0
   n_down_loc    = 0
   n_vrel_reject_loc = 0
+  n_leaf_occupied_loc = 0
+  n_leaf_active_loc = 0
+  n_dm_leaf_loc = 0
   dp_loc(:)     = 0.0d0
   dEk_loc       = 0.0d0
   dp_max_loc    = 0.0d0
   dEk_max_loc   = 0.0d0
   dEdiss_loc    = 0.0d0
   P_max_loc     = 0.0d0
+  expected_rate_loc = 0.0d0
 
   allocate(ind_dm(1024))
 
@@ -315,8 +346,14 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
            ipart = nextp(ipart)
         end do
 
+        if(ndm_cell>0) then
+           n_leaf_occupied_loc = n_leaf_occupied_loc + 1
+           n_dm_leaf_loc = n_dm_leaf_loc + ndm_cell
+        end if
+
         ! Need at least sidm_npart_min DM particles
         if(ndm_cell<sidm_npart_min) cycle
+        n_leaf_active_loc = n_leaf_active_loc + 1
 
         ! Fisher-Yates shuffle
         do ip=ndm_cell,2,-1
@@ -414,10 +451,11 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
            ! P = (sigma/m) * m_p * v_rel * dt / V_cell * (N_dm - 1),
            ! times N/(2*floor(N/2)) so that floor(N/2) sampled pairs
            ! reproduce the exact N(N-1)/2 pair rate for odd N too
-           mp_phys = 0.5d0*(m1+m2)  ! representative particle mass
-           P_scatter = sigma_over_m * mp_phys * v_rel_mag * dt_phys &
-                     / vol_phys * dble(ndm_cell-1) &
-                     * dble(ndm_cell)/dble(2*npairs)
+           call sidm_pair_probability(sigma_over_m,m1,m2,v_rel_mag, &
+                & dt_phys,vol_phys,ndm_cell,npairs,P_scatter)
+           if(dt_phys>0.0d0) then
+              expected_rate_loc = expected_rate_loc + P_scatter/dt_phys
+           end if
 
            ! Track P_max for timestep constraint
            if(P_scatter > P_max_loc) P_max_loc = P_scatter
@@ -534,45 +572,22 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
               ! equivalent to Rutherford with eps = v0^2/v_rel^2
               ! R = v_rel/v0 (physical km/s)
               eps2 = 2.0d0*sidm_v0**2/max(v_rel_kms**2, 1.0d0)
-              a_ruth = 1.0d0/eps2
-              b_ruth = 1.0d0/(2.0d0+eps2)
            end if
 
            select case(trim(sidm_angular))
            case('rutherford','yukawa')
               ! Rutherford-like: dsigma/dOmega ~ 1/(1-cos_theta+2*eps)^2
               ! For 'yukawa': eps = v0^2/v_rel^2 (velocity-dependent)
-              ! CDF inversion: cos_theta = 1+2*eps - 1/(b + R*(a-b))
+              ! The CDF inversion is tested independently in sidm_angular.
               call ranf(seed_loc, R1)
               call ranf(seed_loc, R2)
-              cos_theta = 1.0d0 + eps2 &
-                   - 1.0d0/(b_ruth + R1*(a_ruth - b_ruth))
-              cos_theta = max(-1.0d0, min(1.0d0, cos_theta))
+              call sidm_sample_rutherford_cosine(R1,eps2,cos_theta)
               sin_theta = sqrt(max(0.0d0, 1.0d0 - cos_theta**2))
               phi_rand = twopi*R2
 
               ! Rotate scattering angle from v_rel frame to lab frame
-              v_hat(1:3) = v_rel_vec(1:3) / v_rel_mag
-              ! Orthonormal basis: e1 perp to v_hat
-              if(abs(v_hat(3)) < 0.9d0) then
-                 e1(1) =  v_hat(2)
-                 e1(2) = -v_hat(1)
-                 e1(3) =  0.0d0
-              else
-                 e1(1) =  0.0d0
-                 e1(2) =  v_hat(3)
-                 e1(3) = -v_hat(2)
-              end if
-              e1_mag = sqrt(e1(1)**2 + e1(2)**2 + e1(3)**2)
-              e1(1:3) = e1(1:3) / e1_mag
-              ! e2 = v_hat x e1
-              e2(1) = v_hat(2)*e1(3) - v_hat(3)*e1(2)
-              e2(2) = v_hat(3)*e1(1) - v_hat(1)*e1(3)
-              e2(3) = v_hat(1)*e1(2) - v_hat(2)*e1(1)
-              ! Scattered direction in lab frame
-              nhat(1:3) = sin_theta*cos(phi_rand)*e1(1:3) &
-                        + sin_theta*sin(phi_rand)*e2(1:3) &
-                        + cos_theta*v_hat(1:3)
+              call sidm_rotate_scattered_direction(v_rel_vec,v_rel_mag, &
+                   & cos_theta,sin_theta,phi_rand,nhat)
 
            case default  ! 'isotropic'
               ! Random unit vector (isotropic)
@@ -658,12 +673,16 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   sidm_n_up      = sidm_n_up + n_up_loc
   sidm_n_down    = sidm_n_down + n_down_loc
   sidm_n_vrel_reject = sidm_n_vrel_reject + n_vrel_reject_loc
+  sidm_n_leaf_occupied = sidm_n_leaf_occupied + n_leaf_occupied_loc
+  sidm_n_leaf_active = sidm_n_leaf_active + n_leaf_active_loc
+  sidm_n_dm_leaf = sidm_n_dm_leaf + n_dm_leaf_loc
   sidm_dp(1:3)   = sidm_dp(1:3) + dp_loc(1:3)
   sidm_dEk       = sidm_dEk + dEk_loc
   if(dp_max_loc > sidm_dp_max) sidm_dp_max = dp_max_loc
   if(dEk_max_loc > sidm_dEk_max) sidm_dEk_max = dEk_max_loc
   if(P_max_loc > sidm_Pmax_level) sidm_Pmax_level = P_max_loc
   sidm_dEdiss = sidm_dEdiss + dEdiss_loc
+  sidm_expected_rate = sidm_expected_rate + expected_rate_loc
   !$omp end critical
 
 end subroutine sub_sidm_scatter

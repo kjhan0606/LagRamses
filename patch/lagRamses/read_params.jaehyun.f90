@@ -85,7 +85,7 @@ subroutine read_params
   namelist/sgs_params/sgs_C_prod,sgs_C_diss,sgs_C_smag,sgs_floor,sgs_cap,sgs_e_init,sgs_hydro
   namelist/sidm_params/sidm,sidm_cross_section,sidm_npart_min, &
        & sidm_type,sidm_v0,sidm_power, &
-       & sidm_courant, &
+       & sidm_courant,sidm_estimator_diagnostics, &
        & sidm_angular,sidm_epsilon, &
        & sidm_inelastic,sidm_delta,sidm_frac_excited, &
        & sidm_nstates,sidm_energy,sidm_frac_init,sidm_mchi, &
@@ -94,7 +94,8 @@ subroutine read_params
        & sidm_baryon,sidm_baryon_sigma,sidm_baryon_power, &
        & sidm_vrel_max
 namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
-       & adm_cross_section,adm_mol,adm_fH2
+       & adm_cross_section,adm_T_init,adm_T_floor,adm_adiabatic, &
+       & adm_hpm,adm_hpm_gamma,adm_hpm_courant,adm_mol,adm_fH2
   namelist/fdm_params/m_axion,fdm_courant,fdm_nrefine_dB,fdm_hybrid,fdm_split_order,fdm_kinetic, &
        & fdm_outer_ledger, &
        & fdm_dual_soliton_ic,fdm_dual_soliton_rho0,fdm_dual_soliton_rc_box, &
@@ -722,6 +723,35 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         if(myid==1) write(*,*) 'ERROR: adm_xi must be > 0'
         call clean_stop
      end if
+     if(adm_T_init < adm_T_floor) then
+        if(myid==1) write(*,*) 'ERROR: adm_T_init must be >= adm_T_floor'
+        call clean_stop
+     end if
+     if(adm_T_floor <= 0.0d0) then
+        if(myid==1) write(*,*) 'ERROR: adm_T_floor must be positive'
+        call clean_stop
+     end if
+     if(adm_hpm) then
+        if(.not.poisson) then
+           if(myid==1) write(*,*) 'ERROR: adm_hpm requires poisson=T'
+           call clean_stop
+        end if
+        if(adm_hpm_gamma <= 1.0d0) then
+           if(myid==1) write(*,*) 'ERROR: adm_hpm_gamma must exceed 1'
+           call clean_stop
+        end if
+        if(adm_hpm_courant <= 0.0d0 .or. adm_hpm_courant > 1.0d0) then
+           if(myid==1) write(*,*) 'ERROR: adm_hpm_courant must be in (0,1]'
+           call clean_stop
+        end if
+        ! The first HPM implementation applies the mesh kick through f(),
+        ! which is shared by the collisionless particle population.  Do not
+        ! silently accelerate stellar or sink particles as ADM.
+        if(star .or. sink) then
+           if(myid==1) write(*,*) 'ERROR: adm_hpm currently requires star=F and sink=F'
+           call clean_stop
+        end if
+     end if
      if(myid==1) then
         write(*,'(A)') ' Atomic Dark Matter (aDM) enabled:'
         write(*,'(A,ES10.3)') '   alpha_D  =', adm_alpha
@@ -729,6 +759,12 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A,ES10.3)') '   m_e''/m_p''=', adm_me_ratio
         write(*,'(A,F6.3)')   '   xi       =', adm_xi
         write(*,'(A,ES10.3,A)') '   sigma/m  =', adm_cross_section, ' cm^2/g'
+        write(*,'(A,ES10.3,A)') '   T_init   =', adm_T_init, ' K (new runs)'
+        write(*,'(A,ES10.3,A,L1)') '   T_floor  =', adm_T_floor, &
+             & ' K; adiabatic=',adm_adiabatic
+        if(adm_hpm) write(*,'(A,F6.3,A,F6.3)') &
+             & '   HPM pressure ON: gamma=',adm_hpm_gamma, &
+             & '; CFL=',adm_hpm_courant
         if(adm_mol) then
            write(*,'(A,ES10.3)') '   dark H2 cooling ON, fH2 =', adm_fH2
         else

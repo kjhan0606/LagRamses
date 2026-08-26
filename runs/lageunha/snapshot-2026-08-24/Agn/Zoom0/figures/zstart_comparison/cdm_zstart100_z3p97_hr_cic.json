@@ -1,0 +1,28 @@
+{
+  "snapshot": "/gpfs/kjhan/Hydro/Sidm/Agn/Zoom0/zoom_run_cdm/output_00004",
+  "aexp": 0.201062932270112,
+  "redshift": 3.9735671747618797,
+  "particles": 13699720,
+  "unfiltered_particles": 31981734,
+  "part_files": 32,
+  "assignment": "cic",
+  "max_particle_mass": 2e-10,
+  "coordinate_shift_box": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "zoom_bounds_box": [
+    0.4259755,
+    0.5738515,
+    0.410299,
+    0.596606
+  ],
+  "expected_z0_halo_center_box": [
+    0.4992375,
+    0.4714
+  ],
+  "vmin_log10": 0.018865203414931142,
+  "vmax_log10": 2.71703002039342,
+  "gas_present": false
+}

@@ -155,6 +155,23 @@ limit is 0.1% (`--residual-target 0.001`). Use
 `--require-resolution-pass` and/or `--require-theory-pass` when a failed
 P(k) check must also produce a nonzero process exit status.
 
+## DE/nGR Level-3 and Level-4 gates
+
+The low-validation-level models have machine-readable gates under
+`patch/cuRamses/aux`:
+
+- `validate_level3_scalar_solvers.py` audits the Dilaton and tracker-Galileon
+  Fourier/screening tests and the spherical QUMOND two-Poisson benchmark;
+- `audit_level3_cosmological_runs.py` requires completed outputs and checks
+  every reported Dilaton/Galileon residual rather than accepting termination;
+- `validate_neutrino_response_class.py` compares the accurate CAMB
+  `T_nu/T_cb` table with an independent high-precision CLASS hierarchy.
+
+`generate_neutrino_table.py` enables CAMB's
+`accurate_massive_neutrino_transfers` option. Future simulations must use a
+table carrying that marker. The 2026-08-25 reference gate is
+`/gpfs/kjhan/Hydro/DE_nonstd/DE_level3_solver_gate_20260825`.
+
 ## Hu-Sawicki f(R) solver performance
 
 The f(R) implementation is resolved by `bin/Makefile` through VPATH from

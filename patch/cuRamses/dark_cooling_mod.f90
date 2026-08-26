@@ -19,7 +19,7 @@ module dark_cooling_mod
   use amr_parameters, only: dp
   implicit none
   private
-  public :: dark_net_cooling, dark_cool_implicit
+  public :: dark_net_cooling, dark_cool_implicit, dark_adiabatic_expand
 
   ! Physical constants (CGS)
   real(dp),parameter::pi_dc      = 3.141592653589793d0
@@ -36,6 +36,24 @@ module dark_cooling_mod
   real(dp),parameter::T_CMB0     = 2.7255d0         ! CMB temperature today [K]
 
 contains
+
+!================================================================
+! Exact non-relativistic adiabatic cooling between two scale factors.
+! The stored quantity is a specific energy, hence u_D scales as a^-2.
+!================================================================
+function dark_adiabatic_expand(edp_old, a_old, a_new) result(edp_new)
+  use amr_parameters, only: adm_mp, adm_T_floor
+  implicit none
+  real(dp),intent(in)::edp_old, a_old, a_new
+  real(dp)::edp_new, edp_floor
+
+  edp_floor = 1.5d0*kB_cgs*adm_T_floor/(adm_mp*GeV_to_g)
+  if(a_old <= 0.0d0 .or. a_new <= 0.0d0) then
+     edp_new = max(edp_old, edp_floor)
+  else
+     edp_new = max(edp_floor, edp_old*(a_old/a_new)**2)
+  end if
+end function dark_adiabatic_expand
 
 !================================================================
 ! Dark sector derived quantities
@@ -86,9 +104,11 @@ function saha_ionization(T_D, n_D, me_D_g, E_ion_erg) result(x_e)
   ! Saha: x_e^2/(1-x_e) = n_Q/n_D * exp(-E_ion/(kB*T))
   ratio = (n_Q / n_D) * exp(-E_ion_erg / (kB_cgs * T_D))
 
-  ! Solve x_e^2 + ratio*x_e - ratio = 0
+  ! Solve x_e^2 + ratio*x_e - ratio = 0.  Rationalize the
+  ! positive root: the direct form loses all significant digits when the
+  ! gas is nearly fully ionized (ratio >> 1).
   disc = ratio**2 + 4.0d0*ratio
-  x_e = 0.5d0*(-ratio + sqrt(disc))
+  x_e = 2.0d0*ratio / (ratio + sqrt(disc))
   x_e = max(0.0d0, min(1.0d0, x_e))
 
 end function saha_ionization
@@ -154,7 +174,7 @@ function dark_net_cooling(T_D, n_D, aexp) result(Lambda)
   !----- 2. Dark Compton Cooling -----
   ! Lambda_C = (4*sigma_T'*a_rad'*T_DCMB^4)/(m_e'*c) * n_e * kB*(T_D - T_DCMB)
   ! where a_rad' = a_rad (same Stefan-Boltzmann for dark photon)
-  if(x_e > 1.0d-10 .and. T_D > T_D_CMB) then
+  if(x_e > 1.0d-10) then
      Lambda_compton = 4.0d0 * sigma_T_D * a_rad * T_D_CMB**4 &
           / (me_D_g * c_cgs) * n_e * kB_cgs * (T_D - T_D_CMB)
   else
@@ -220,50 +240,72 @@ end function dark_net_cooling
 ! Returns edp_new [same units as edp_old]
 !================================================================
 function dark_cool_implicit(edp_old, rho_D, n_D, dt_phys, aexp) result(edp_new)
-  use amr_parameters, only: adm_mp
+  use amr_parameters, only: adm_mp, adm_T_floor
   implicit none
   real(dp),intent(in)::edp_old, rho_D, n_D, dt_phys, aexp
   real(dp)::edp_new
 
-  real(dp)::T_D, Lambda, dE
+  real(dp)::T_D, Lambda
   real(dp)::T_floor, edp_floor
+  real(dp)::edp_lo, edp_hi, edp_mid
+  real(dp)::res_lo, res_hi, res_mid, scale
   integer::iter
-  integer,parameter::max_iter = 10
-  real(dp),parameter::tol = 1.0d-4
+  integer,parameter::max_iter = 80
+  real(dp),parameter::tol = 1.0d-10
 
-  ! Temperature floor: 1 K
-  T_floor = 1.0d0
-  ! edp = (3/2) * n_D * kB * T_D / rho_D  (energy per unit mass)
+  T_floor = adm_T_floor
+  if(rho_D <= 0.0d0 .or. n_D <= 0.0d0 .or. dt_phys <= 0.0d0) then
+     edp_new = edp_old
+     return
+  end if
   edp_floor = 1.5d0 * n_D * kB_cgs * T_floor / rho_D
 
-  edp_new = edp_old
-  if(edp_new < edp_floor) edp_new = edp_floor
+  edp_new = max(edp_old, edp_floor)
 
-  ! Simple backward Euler with subcycling if needed
-  do iter = 1, max_iter
-     ! Current dark temperature from internal energy
-     ! edp = (3/2) * n_D * kB * T / rho   =>  T = (2/3) * edp * rho / (n_D * kB)
-     T_D = (2.0d0/3.0d0) * edp_new * rho_D / (n_D * kB_cgs)
-     if(T_D < T_floor) exit
+  edp_lo = edp_floor
+  edp_hi = max(edp_old, edp_floor)
 
-     ! Cooling rate [erg/s/cm^3]
-     Lambda = dark_net_cooling(T_D, n_D, aexp)
-     if(Lambda <= 0.0d0) exit  ! no cooling (could be heating from Compton if T < T_DCMB)
+  T_D = T_floor
+  Lambda = dark_net_cooling(T_D, n_D, aexp)
+  res_lo = edp_lo - edp_old + Lambda * dt_phys / rho_D
 
-     ! Energy loss per unit mass: dE/dt = -Lambda / rho
-     dE = Lambda * dt_phys / rho_D
+  T_D = (2.0d0/3.0d0) * edp_hi * rho_D / (n_D * kB_cgs)
+  Lambda = dark_net_cooling(T_D, n_D, aexp)
+  res_hi = edp_hi - edp_old + Lambda * dt_phys / rho_D
 
-     edp_new = edp_new - dE
-     if(edp_new < edp_floor) then
-        edp_new = edp_floor
-        exit
+  if(res_lo >= 0.0d0) then
+     edp_new = edp_floor
+     return
+  end if
+  if(res_hi < 0.0d0) then
+     do iter = 1, max_iter
+        edp_hi = 2.0d0*edp_hi
+        T_D = (2.0d0/3.0d0) * edp_hi * rho_D / (n_D * kB_cgs)
+        Lambda = dark_net_cooling(T_D, n_D, aexp)
+        res_hi = edp_hi - edp_old + Lambda * dt_phys / rho_D
+        if(res_hi >= 0.0d0) exit
+     end do
+     if(res_hi < 0.0d0) then
+        edp_new = edp_hi
+        return
      end if
+  end if
 
-     ! Check convergence
-     if(abs(dE) < tol * edp_new) exit
+  scale = max(edp_hi, edp_floor)
+  do iter = 1, max_iter
+     edp_mid = 0.5d0 * (edp_lo + edp_hi)
+     T_D = (2.0d0/3.0d0) * edp_mid * rho_D / (n_D * kB_cgs)
+     Lambda = dark_net_cooling(T_D, n_D, aexp)
+     res_mid = edp_mid - edp_old + Lambda * dt_phys / rho_D
+     if(res_mid > 0.0d0) then
+        edp_hi = edp_mid
+     else
+        edp_lo = edp_mid
+     end if
+     if((edp_hi-edp_lo) <= tol*scale) exit
   end do
 
-  if(edp_new < edp_floor) edp_new = edp_floor
+  edp_new = max(edp_floor, 0.5d0*(edp_lo+edp_hi))
 
 end function dark_cool_implicit
 

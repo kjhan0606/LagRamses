@@ -156,6 +156,10 @@ Validated (aux/dilaton_check.py): background exact fixed point
 (residual ~1e-18); linear response = 2β(a)²k²/(k²+m²) to 5 digits
 (a=0.25/0.5/1, two k-modes); δ=10⁵ top-hat: χ→0.03χ̄, F5/F_N→0
 (Damour–Polyakov screening).
+The 2026-08-25 current-binary gate additionally completed a uniform 32³
+cosmological evolution with eight outputs and 39 residual-qualified solves;
+the maximum relative residual was 9.708e-7. This is Level 4 diagnostic
+evidence, not a precision production spectrum.
 The symmetron implementation was additionally cross-checked against
 Brax+12 eq. (68) and its force normalization: both match EXACTLY
 (with c̃ξ=λ⋆/L_box ≡ our L̃), independently confirming the §5 fixes.
@@ -184,6 +188,10 @@ the analytic −ξ/(9β₂E²) to 5 digits at a=1/0.5/0.25 — G_eff/G(a=1)
 past; Vainshtein screening suppresses F5/F_N to 0.006 for a δ=5e4
 top-hat. The legacy template remains available (galileon_tracker=F)
 with an EXPERIMENTAL warning.
+The 2026-08-25 current-binary gate completed a uniform 32³ tracker evolution
+with eight outputs and 13 active residual-qualified solves; the maximum
+relative residual was 9.910e-7. This is Level 4 diagnostic evidence. An
+independent nonlinear-code benchmark remains outstanding.
 
 ## 8. MOND — VERIFIED (healthy core; caveats documented)
 
@@ -193,6 +201,11 @@ units at all a, both cosmo and non-cosmo), μ/ν conjugate pairs
 (consistent to 2e-16), QUMOND phantom-density sign and 4πG factor
 chain (including boxlen≠1 and DE-boost cancellation in MG/CG paths),
 single application of the algebraic correction, solve ordering.
+The spherical periodic two-Poisson benchmark in
+`aux/qumond_isolated_check.py` exercises the discrete Newtonian solve,
+phantom-density construction, and second solve. It reproduces the spherical
+target with 0.134% median, 0.477% 90th-percentile, and 1.038% maximum force
+error in the comparison shell, establishing Level 3 on a uniform mesh.
 Caveats (documented; larger design work if needed):
 - Single-phi AMR design: on refined levels the "Newtonian" field
   feeding ν̃ inherits MOND-contaminated boundary conditions →
@@ -219,9 +232,9 @@ Caveats (documented; larger design work if needed):
 | f(R) Hu–Sawicki | wrong PDE (no chameleon/Compton) | FIXED + validated (μ(k) ≤6e-7) |
 | nDGP | force 1/β weak, ρ−δ, a²/a⁴ | FIXED |
 | Symmetron | F5≡0 (fatal), norm 625×+, ρ−δ | FIXED |
-| Dilaton | symmetron clone + same bugs | mech. FIXED, identity documented |
-| Cubic Galileon | fabricated coefficients | mech. FIXED, EXPERIMENTAL flag |
-| MOND | core correct | guards added, caveats documented |
+| Dilaton | symmetron clone + same bugs | FIXED + Level 4 uniform diagnostic |
+| Cubic Galileon | fabricated coefficients | FIXED + Level 4 tracker diagnostic |
+| MOND | core correct | Level 3 uniform isolated; AMR caveats documented |
 
 **Any pre-fix production run of f(R)/nDGP/symmetron/dilaton/galileon
 (and the CPL kappa2/alpha fallback) is invalid and must be re-run.**

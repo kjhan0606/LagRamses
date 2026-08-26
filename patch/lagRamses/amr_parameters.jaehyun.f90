@@ -357,6 +357,7 @@ module amr_parameters
   ! Timestep constraint
   real(dp)::sidm_courant=0.1d0      ! Max allowed scattering probability per step
   real(dp),dimension(1:MAXLEVEL)::sidm_Pmax=0.0d0  ! Max P per level (runtime)
+  logical::sidm_estimator_diagnostics=.false. ! Emit AMR estimator diagnostics
   ! Angular distribution: 'isotropic' or 'rutherford'
   character(len=16)::sidm_angular='isotropic'
   real(dp)::sidm_epsilon=0.01d0     ! Rutherford regularization (small=forward-peaked)
@@ -390,6 +391,12 @@ module amr_parameters
   real(dp)::adm_me_ratio=0.01d0       ! m_e'/m_p' ratio
   real(dp)::adm_xi=0.5d0              ! T_dark/T_CMB ratio at recoupling
   real(dp)::adm_cross_section=1.0d0   ! sigma/m for aDM [cm^2/g] (Coulomb)
+  real(dp)::adm_T_init=1.0d0          ! Initial dark temperature [K] for new runs
+  real(dp)::adm_T_floor=1.0d0         ! Numerical dark-temperature floor [K]
+  logical ::adm_adiabatic=.true.      ! Apply u_D proportional to a^-2 in cosmological runs
+  logical ::adm_hpm=.false.           ! Particle-mesh ADM pressure closure (controlled approximation)
+  real(dp)::adm_hpm_gamma=5.0d0/3.0d0 ! Adiabatic index used by the HPM pressure closure
+  real(dp)::adm_hpm_courant=0.25d0    ! HPM sound-crossing CFL factor
   logical ::adm_mol=.false.           ! Enable dark molecular (H2') line cooling
   real(dp)::adm_fH2=1.0d-3            ! Equilibrium dark-H2 fraction (n_H2'/n_neutral)
 
