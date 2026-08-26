@@ -354,6 +354,14 @@ subroutine init_amr
      end if
      call MPI_BCAST(ncpu2,1,MPI_INTEGER,0,MPI_COMM_WORLD,info2)
      call MPI_BCAST(nlevelmax2,1,MPI_INTEGER,0,MPI_COMM_WORLD,info2)
+     ! The restart reader uses checkpoint-level array bounds below.  Reject a
+     ! down-level restart before entering either the same- or variable-ncpu path.
+     if(nlevelmax2>nlevelmax)then
+        if(myid==1) write(*,'(A,I4,A,I4)') &
+             ' Restart level guard: checkpoint levelmax=', nlevelmax2, &
+             ' exceeds requested levelmax=', nlevelmax
+        call clean_stop
+     end if
      if(ncpu2.ne.ncpu)then
         if(myid==1 .and. ncpu2.ne.ncpu) &
            write(*,'(A,I5,A,I5)') ' Variable-ncpu restart: ncpu_old=', ncpu2, ' ncpu_new=', ncpu

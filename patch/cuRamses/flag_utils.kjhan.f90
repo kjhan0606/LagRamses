@@ -326,7 +326,7 @@ end subroutine ensure_ref_rules
 !###############################################################
 !###############################################################
 !###############################################################
-subroutine sub_userflag_fine(ilevel,skip_loc,scale, igrid,ngrid,iflag)
+subroutine sub_userflag_fine(ilevel,skip_loc,scale,xc,igrid,ngrid,iflag)
   use amr_commons
   use hydro_commons
   use pm_commons    ! headp, nextp, idp, tp, xp for sink particle check
@@ -350,7 +350,7 @@ subroutine sub_userflag_fine(ilevel,skip_loc,scale, igrid,ngrid,iflag)
   real(dp)::d0,dx_min,vol_min,mstar,msnk,nISM,nCOM
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp),dimension(1:3)::skip_loc
-  real(dp),dimension(1:twotondim,1:3)::xc
+  real(dp),dimension(1:twotondim,1:3),intent(in)::xc
   real(dp),dimension(1:nvector,1:ndim)::xx
 
   integer :: nlevel_collapse =3
@@ -525,8 +525,8 @@ subroutine userflag_fine(ilevel)
   do igrid=1,ncache,nvector
      ! Gather nvector grids
      ngrid=MIN(nvector,ncache-igrid+1)
-	 call sub_userflag_fine(ilevel, skip_loc,scale, igrid,ngrid,jflag)
-	 iflag = iflag + jflag
+     call sub_userflag_fine(ilevel,skip_loc,scale,xc,igrid,ngrid,jflag)
+     iflag = iflag + jflag
   enddo
   nflag = nflag + iflag
 

@@ -628,6 +628,9 @@ recursive subroutine amr_step(ilevel,icount)
         call timer('poisson','start')
      end if
 
+     ! ADM hydro-particle-mesh closure; see the matching lagRamses patch.
+     if(use_adm .and. adm_hpm) call adm_hpm_force_fine(ilevel)
+
      ! Synchronize remaining particles for gravity
      if(pic)then
                                call timer('particles','start')

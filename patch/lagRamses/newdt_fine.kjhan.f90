@@ -254,6 +254,7 @@ subroutine newdt_fine(ilevel)
 !jhshin2
 
   if(hydro)call courant_fine(ilevel)
+  if(use_adm .and. adm_hpm) call adm_hpm_timestep(ilevel)
   if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin &
      .and. fdm_use_hjm) then
      write(*,'(" HJM_CFL[hydro]: dt=",1PE12.5)') dtnew(ilevel)
@@ -390,5 +391,4 @@ subroutine newdt2(ind_part,dt_loc,ekin_loc,nn,ilevel)
   end do
     
 end subroutine newdt2
-
 

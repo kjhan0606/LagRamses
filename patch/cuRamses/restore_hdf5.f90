@@ -32,7 +32,7 @@ subroutine restore_amr_hdf5()
   include 'mpif.h'
 #endif
   integer :: ilevel, i, igrid, ind, iskip, idim, info
-  integer :: nlevelmax_file
+  integer :: nlevelmax_file, nlevelmax_header
   integer(i8b) :: ngrid_total
   integer, allocatable :: ngrid_per_cpu(:)
   integer, allocatable :: son_flag_buf(:), cpu_map_buf(:)
@@ -94,6 +94,15 @@ subroutine restore_amr_hdf5()
   !=====================================================
   call hdf5_open_group('/header', grp_id)
   call hdf5_read_attr_int(grp_id, 'ncpu', ncpu_file)
+  call hdf5_read_attr_int(grp_id, 'nlevelmax', nlevelmax_header)
+  if(nlevelmax_header>nlevelmax) then
+     if(myid==1) write(*,'(A,I4,A,I4)') &
+          ' HDF5 restart level guard: checkpoint levelmax=', nlevelmax_header, &
+          ' exceeds requested levelmax=', nlevelmax
+     call hdf5_close_group(grp_id)
+     call hdf5_close_file()
+     call clean_stop
+  end if
   call hdf5_read_attr_dp(grp_id, 'time', t)
   call hdf5_read_attr_int(grp_id, 'nstep', nstep)
   call hdf5_read_attr_int(grp_id, 'nstep_coarse', nstep_coarse)

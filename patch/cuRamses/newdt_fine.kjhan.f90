@@ -168,6 +168,7 @@ subroutine newdt_fine(ilevel)
 !jhshin2
 
   if(hydro)call courant_fine(ilevel)
+  if(use_adm .and. adm_hpm) call adm_hpm_timestep(ilevel)
 
   ! SIDM timestep constraint: keep P_scatter < sidm_courant
   if(sidm .and. sidm_Pmax(ilevel) > 0.0d0) then
@@ -293,6 +294,5 @@ subroutine newdt2(ind_part,dt_loc,ekin_loc,nn,ilevel)
   end do
     
 end subroutine newdt2
-
 
 

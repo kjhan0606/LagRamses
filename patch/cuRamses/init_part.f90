@@ -71,6 +71,8 @@ subroutine init_part
   real,allocatable,dimension(:)::yield_table_readline
   real(dp)::astarconv
   real(dp) :: scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2
+  real(dp)::edp_init
+  real(dp),parameter::kB_cgs=1.380649d-16, GeV_to_g=1.78266192d-24
   character(LEN=1)::a1
   character(LEN=2)::nelt_str
   character(LEN=11)::format_string
@@ -114,7 +116,8 @@ subroutine init_part
   ! Atomic Dark Matter: dark internal energy per particle
   if(use_adm) then
      allocate(edp(npartmax))
-     ! edp: zero-initialized by mmap lazy pages
+     ! New-run particle energies are initialized after the IC reader.  HDF5
+     ! restarts restore edp directly; binary backups do not serialize it.
   end if
 
   if(star.or.sink)then
@@ -199,6 +202,10 @@ subroutine init_part
   ! Read part.tmp file
   !--------------------
   if(nrestart>0)then
+     if(use_adm .and. informat /= 'hdf5') then
+        if(myid==1) write(*,*) 'ERROR: ADM restarts require informat=''hdf5'' (binary particle backups omit edp)'
+        call clean_stop
+     end if
 #ifdef HDF5
      if(informat == 'hdf5') then
         if(sink) call init_sink_alloc
@@ -990,6 +997,20 @@ subroutine init_part
   end if
 
 999 continue  ! HDF5 restore jumps here
+
+  ! Set the specific internal energy of newly created ADM macro-particles.
+  ! dark_cooling_fine uses T_D=(2/3) edp rho/(n_D k_B); n_D/rho=1/m_p'.
+  ! Do not overwrite HDF5-restored thermodynamic state.
+  if(use_adm .and. nrestart==0) then
+     call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
+     edp_init = 1.5d0*kB_cgs*adm_T_init/(adm_mp*GeV_to_g*scale_v**2)
+     do ipart=1,npart
+        if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. &
+             & ptypep(ipart)/=PTYPE_SINK) edp(ipart)=edp_init
+     end do
+     if(myid==1) write(*,'(A,ES12.4,A,ES12.4)') &
+          ' ADM new-run temperature initialized: T_D=',adm_T_init,' K, edp=',edp_init
+  end if
 
   call getmem(real_mem)
   call MPI_ALLREDUCE(real_mem,real_mem_tot,1,MPI_REAL,MPI_MAX,MPI_COMM_WORLD,info)

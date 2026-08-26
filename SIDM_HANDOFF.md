@@ -69,6 +69,33 @@ atomic dark matter 냉각도 포함한다. 핵심 구현 커밋은 다음과 같
   internal energy를 만들지 않는다.
 - ADM implicit cooling은 2,000-step 결과가 200,000-step explicit reference와
   `1.3e-5`의 상대 차이로 수렴한다.
+- 신규 ADM 실행은 `adm_T_init` (기본 `1 K`)에서 particle internal energy를
+  명시적으로 초기화한다. 이 값은 과학 실행에서 반드시 의도한 thermal initial
+  condition으로 설정해야 한다. HDF5 checkpoint는 이를 보존하지만 legacy binary
+  particle backup은 `edp`를 저장하지 않으므로 ADM binary restart는 명시적으로
+  거부된다.
+- `tests/adm/test_adm_leaf_density.py`는 leaf 내 macro-particle 질량 합과 proper
+  volume의 density 변환을 검사하고,
+  `tests/adm/test_adm_initial_temperature.py`는 신규 초기화와 restart guard를
+  검사한다. `tests/adm/run_adm_amr_leaf_temperature_smoke.sbatch`는 1, 2, 4, 8
+  particle/leaf에서 총 leaf mass를 고정한 runtime smoke다.
+  2026-08-26의 job `324433`은 HDF5 출력에서 각각 4,096, 8,192, 16,384, 32,768
+  macro-particle과 동일한 총질량 `4.096e-3`을 확인했고, fully refined cooling
+  step 뒤의 질량가중 평균 온도는 모두 `941.7222186--941.7222188 K`였다.
+- `tests/adm/run_adm_hdf5_restart_smoke.sbatch`는 연속 실행과 HDF5 restart를
+  particle ID별로 비교한다.  2026-08-26의 job `324439`은 16,384 particle에서
+  `dark_energy_int`와 `dark_h2_frac`가 bitwise 동일함을 확인했다. 위치와 속도는
+  restart 후 force reconstruction의 순서 차이만 남았고 최대 상대 차이는
+  `6.499e-9`였다.
+- `tests/adm/adm_thermal_history.py`는 dark radiation과의 kinetic decoupling
+  뒤에 $T_D\propto a^{-2}$라고 두고 `adm_T_init` 후보를 계산한다. 이 도구는
+  decoupling redshift `z_kd`를 미시 파라미터만으로 추정하지 않는다. 그 값에는
+  별도의 dark recombination 및 kinetic-coupling 계산이 필요하다. Production zoom의
+  $z_{\rm init}=100$, $\xi=0.5$에서 job `324452`는
+  `z_kd=100,300,1000,3000,10000`을 각각 `137.64,46.18,13.89,4.63,1.39 K`로
+  변환했다. 다섯 AMR runtime case는 모두 완료했고 두 step 뒤의 온도 변화는
+  $8\times10^{-16}$ 이하의 round-off 수준이었다. 현재 $1\,\mathrm{K}$ floor는
+  이 가정에서 `z_kd=1.39e4`에 해당한다.
 
 직접 관련된 테스트와 입력은 `bin/test_darkcool.f90`,
 `tests/load_balance/preflight_sidm_work.nml`,
@@ -166,10 +193,44 @@ SIDM core 측정이 아니다. 다음 주 그림은 아직 완성되지 않았�
 ## 7. 물리적 한계
 
 ADM 부분은 아직 full cosmological validation을 거치지 않았다. 현재 모형은
-macro-particle에 internal energy를 부여하고 single-particle-per-cell density
-estimate와 Saha ionisation equilibrium을 사용한다. Dark pressure, photo-heating,
-resolved dark shock, 그리고 fully coupled chemical network는 포함하지 않는다.
+macro-particle에 internal energy를 부여하고 leaf cell 안의 eligible
+macro-particle 질량 합으로 density를 추정하며 Saha ionisation equilibrium을
+사용한다. Dark pressure, photo-heating, resolved dark shock, 그리고 fully
+coupled chemical network는 포함하지 않는다.
 따라서 fragmentation과 dark-disc vertical structure는 검증 범위 밖이다.
+`adm_T_init`의 과학적 선택과 cosmological thermal history의 일관성도 아직
+별도 검증이 필요하다. Job `324452`가 탐색한 physically labelled initial
+temperatures는 atomic cooling을 전혀 유발하지 않았다. Source audit에서 `edp`는
+초기화, checkpoint와 particle migration, 그리고 `dark_cooling_fine`에만 연결된다.
+Dark pressure, adiabatic compression, shock heating, 그리고 Compton heating이
+없으므로 이 particle-only implementation에서 그 초기온도 후보들은 gravitational
+zoom 결과를 바꾸지 않는다. 따라서 현 구현으로 ADM cosmological zoom을 science
+production으로 제출하지 않는다. 의미 있는 다음 단계는 dark kinetic thermal history와
+pressure 또는 energy-coupling prescription을 설계하고 별도 검증하는 것이다.
+2026-08-26에 `adm_adiabatic`과 `adm_T_floor`를 추가했다. Cosmological ADM run은
+기본적으로 step 시작과 끝의 Friedmann scale factor 사이에서
+$u_D\propto a^{-2}$를 적용한다. `adm_T_floor`는 기본 `1 K`를 보존하지만 더 이른
+kinetic decoupling history를 위해 양의 값으로 낮출 수 있다. Compton term은 이제
+signed net rate로 계산하고 implicit solve가 heating branch도 bracket한다. 이 변경은
+dark pressure force나 $P\,dV$ work를 아직 제공하지 않는다. 그 둘은 AMR 경계를
+넘는 보존적 dark-fluid solver 또는 명시적으로 근사한 HPM closure를 선택한 뒤에만
+추가한다.
+
+2026-08-26에 그 HPM closure의 첫 구현을 추가했다. `adm_hpm=.true.`이면 leaf cell에
+$P_D=(\gamma_D-1)\rho_D e_D$를 NGP로 deposit하고, 중앙차분
+$-\nabla P_D/\rho_D$를 기존 particle-mesh force에 더한다. pressure working field는
+새 대형 배열을 만들지 않고 이미 예약된 `rho_star`를 재사용한다. 이 초기 경로는
+모든 collisionless macro-particle을 ADM으로 취급하므로 `poisson=T`, `star=F`,
+`sink=F`에서만 허용된다. `adm_hpm_courant`는 $c_s^2=\gamma_D(\gamma_D-1)e_D$의
+sound-crossing CFL을 추가한다. `tests/adm/run_adm_hpm_unit.sh`는 pressure law와
+gradient sign을, `tests/adm/test_adm_hpm_wiring.py`는 force/KDK/CFL 연결을 검사한다.
+독립 실행 smoke (`tests/adm/run_adm_hpm_gradient_smoke.sbatch`)는 8-cell periodic
+pressure gradient에서 HPM on/off의 최대 $x$-velocity 차이
+$2.586\times10^{-7}$와 총 momentum kick 차이 $7.024\times10^{-19}$를 확인했다.
+이는 force-operator 검증일 뿐, production cosmological result는 아니다. 이 HPM은
+Riemann flux, shock capture, compressional $P\,dV$ heating, 그리고 full chemical
+network를 풀지 않는다. 따라서 dark-disc thickness나 fragmentation의 정량 예측에는
+사용하지 않고, 우선 pressure-suppression 및 controlled convergence 연구에 한정한다.
 
 ## 8. 권장 작업 순서
 

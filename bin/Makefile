@@ -131,9 +131,9 @@ MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons
 	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) dark_cooling_mod.o fdm_commons.o pbh_commons.o
 
 # SIDM object (depends on amr_commons, pm_commons, random)
-SIDM_OBJ = sidm_scatter.o
+SIDM_OBJ = sidm_scatter.o sidm_angular.o sidm_estimator.o
 # Atomic Dark Matter objects
-ADM_OBJ = dark_cooling_fine.o
+ADM_OBJ = dark_cooling_fine.o adm_hpm_mod.o adm_hpm_fine.o
 # Evaporating primordial black hole objects
 PBH_OBJ = pbh_evap_fine.o
 # Fuzzy Dark Matter objects
