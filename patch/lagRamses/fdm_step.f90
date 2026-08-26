@@ -2156,6 +2156,14 @@ subroutine fdm_init_psi()
 
   if(.not.use_fdm) return
 
+  ! A controlled two-soliton seed bypasses grafic density/velocity fields.
+  ! It is intentionally all-wave: a coherent superposition has no unique
+  ! single-stream Madelung representation in the overlap region.
+  if(fdm_dual_soliton_ic)then
+     call fdm_init_dual_soliton_psi()
+     return
+  end if
+
 #if defined(USE_FFTW) && !defined(WITHOUTMPI)
   ! Multi-rank: fully distributed init (FFTW-MPI slabs, no full-grid arrays).
   if(ncpu > 1) then
@@ -2312,6 +2320,123 @@ subroutine fdm_init_psi()
   if(myid==1) write(*,'(A,ES12.5)') ' FDM: initial |psi|^2 total mass = ', mass_glob
 
 end subroutine fdm_init_psi
+!################################################################
+!################################################################
+! Controlled all-wave dual-soliton initial condition for pure-FDM zooms.
+!
+! The seed is psi=psi_1+psi_2, where each density profile is
+! rho_i=rho0_i/[1+c(r/rc_i)^2]^8 and its phase contains an independently
+! specified bulk velocity and relative phase.  It is a parameterized seed,
+! not a claim that the two-core state is already a relaxed merger remnant.
+! A relaxation/conservation check and the ordinary two-row ic_sink input are
+! mandatory before it can be used for a physical outer-halo calibration.
+!################################################################
+subroutine fdm_init_dual_soliton_psi()
+  use amr_commons
+  use poisson_commons
+  use fdm_commons
+#include "amr_index.h"
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ilevel,igrid,ind,icell,i,idim,info
+  integer::ix,iy,iz
+  real(dp)::dx,rho1,rho2,amp1,amp2,theta1,theta2,r1sq,r2sq
+  real(dp)::mass_loc,mass_glob,psi_r,psi_i
+  real(dp),dimension(1:3)::xcell,delta1,delta2
+  real(dp),dimension(1:twotondim,1:3)::xc
+
+  if(.not.use_fdm) return
+  if(ndim/=3)then
+     if(myid==1) write(*,'(A)') 'ERROR: dual-soliton FDM IC requires NDIM=3'
+     call clean_stop
+  end if
+  if(hbar_code<=0.0d0)then
+     if(myid==1) write(*,'(A)') 'ERROR: dual-soliton FDM IC requires hbar_code > 0'
+     call clean_stop
+  end if
+  if(any(fdm_dual_soliton_rho0<=0.0d0) .or. &
+       & any(fdm_dual_soliton_rc_box<=0.0d0) .or. &
+       & any(fdm_dual_soliton_rc_box>=0.5d0) .or. &
+       & fdm_dual_soliton_profile_c<=0.0d0)then
+     if(myid==1) write(*,'(A)') 'ERROR: invalid dual-soliton FDM IC profile'
+     call clean_stop
+  end if
+  if(any(fdm_dual_soliton_center_box<0.0d0) .or. &
+       & any(fdm_dual_soliton_center_box>=1.0d0))then
+     if(myid==1) write(*,'(A)') 'ERROR: dual-soliton centres must lie in [0,1)'
+     call clean_stop
+  end if
+  if(fdm_use_hjm .and. fdm_first_wave_level>levelmin)then
+     if(myid==1) write(*,'(A)') &
+          'ERROR: coherent dual-soliton IC requires all-wave levels (no HJM seam)'
+     call clean_stop
+  end if
+
+  mass_loc=0.0d0
+  do ilevel=levelmin,nlevelmax
+     dx=0.5d0**ilevel
+     do ind=1,twotondim
+        iz=(ind-1)/4
+        iy=(ind-1-4*iz)/2
+        ix=ind-1-2*iy-4*iz
+        xc(ind,1)=(dble(ix)-0.5d0)*dx
+        xc(ind,2)=(dble(iy)-0.5d0)*dx
+        xc(ind,3)=(dble(iz)-0.5d0)*dx
+     end do
+     do ind=1,twotondim
+        igrid=headl(myid,ilevel)
+        do while(igrid>0)
+           icell=ICELL_OF(igrid,ind)
+           if(son(icell)==0)then
+              xcell(1:3)=xg(igrid,1:3)+xc(ind,1:3)
+              delta1=xcell-fdm_dual_soliton_center_box(1,1:3)
+              delta2=xcell-fdm_dual_soliton_center_box(2,1:3)
+              do idim=1,3
+                 delta1(idim)=delta1(idim)-dnint(delta1(idim))
+                 delta2(idim)=delta2(idim)-dnint(delta2(idim))
+              end do
+              r1sq=sum(delta1**2)
+              r2sq=sum(delta2**2)
+              rho1=fdm_dual_soliton_rho0(1)/ &
+                   & (1.0d0+fdm_dual_soliton_profile_c*r1sq/ &
+                   & fdm_dual_soliton_rc_box(1)**2)**8
+              rho2=fdm_dual_soliton_rho0(2)/ &
+                   & (1.0d0+fdm_dual_soliton_profile_c*r2sq/ &
+                   & fdm_dual_soliton_rc_box(2)**2)**8
+              amp1=sqrt(rho1)
+              amp2=sqrt(rho2)
+              theta1=fdm_dual_soliton_phase(1)+sum( &
+                   & fdm_dual_soliton_velocity(1,1:3)*delta1)/hbar_code
+              theta2=fdm_dual_soliton_phase(2)+sum( &
+                   & fdm_dual_soliton_velocity(2,1:3)*delta2)/hbar_code
+              psi_r=amp1*cos(theta1)+amp2*cos(theta2)
+              psi_i=amp1*sin(theta1)+amp2*sin(theta2)
+              psi_re(icell)=psi_r
+              psi_im(icell)=psi_i
+              mass_loc=mass_loc+(psi_r**2+psi_i**2)*dx**ndim
+           end if
+           igrid=next(igrid)
+        end do
+     end do
+  end do
+
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(mass_loc,mass_glob,1,MPI_DOUBLE_PRECISION, &
+       & MPI_SUM,MPI_COMM_WORLD,info)
+#else
+  mass_glob=mass_loc
+#endif
+  do ilevel=levelmin,nlevelmax
+     call make_virtual_fine_dp(psi_re(1),ilevel)
+     call make_virtual_fine_dp(psi_im(1),ilevel)
+  end do
+  if(myid==1)then
+     write(*,'(A,ES12.5)') ' FDM: dual-soliton initial |psi|^2 mass = ',mass_glob
+     write(*,'(A)') ' FDM: dual-soliton seed requires relaxation/conservation validation'
+  end if
+end subroutine fdm_init_dual_soliton_psi
 #if defined(USE_FFTW) && !defined(WITHOUTMPI)
 !################################################################
 ! Fully distributed Madelung init for psi (multi-rank).

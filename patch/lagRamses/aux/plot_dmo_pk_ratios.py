@@ -149,7 +149,7 @@ def linear_theory(
     redshifts: list[float],
     kmax: float,
 ) -> dict[str, dict[float, dict[str, np.ndarray]]]:
-    """Calculate lagCAMB linear P(k) using the campaign's exact parameters."""
+    """Calculate lagCAMB linear P(k) from the recorded linear-model parameters."""
     from dmo_benchmark_setup import configure_camb_dark_energy, load_local_camb
 
     metadata = json.loads((campaign / "campaign.json").read_text())
@@ -158,9 +158,13 @@ def linear_theory(
     spectra = {}
     for name in model_names:
         model_metadata = metadata["models"].get(name, {})
-        if name != "lcdm" and not model_metadata.get("ic_transfer_exact_match", False):
+        transfer_matches = model_metadata.get(
+            "ic_transfer_matches_lagcamb_at_zstart",
+            model_metadata.get("ic_transfer_exact_match", False),
+        )
+        if name != "lcdm" and not transfer_matches:
             raise ValueError(
-                f"{name} has no parameter-matched lagCAMB theory in this campaign"
+                f"{name} has no model-specific lagCAMB transfer in this campaign"
             )
         pars = camb.CAMBparams()
         pars.set_cosmology(
@@ -203,6 +207,7 @@ def main() -> int:
     figure_dir.mkdir(exist_ok=True)
 
     model_names = ["lcdm", *args.models]
+    metadata = json.loads((campaign / "campaign.json").read_text())
     all_snapshots = {name: snapshots(campaign / name) for name in model_names}
     missing = [name for name, values in all_snapshots.items() if not values]
     if missing:
@@ -226,6 +231,7 @@ def main() -> int:
     for ax, target_z in zip(axes, args.redshifts):
         reference = at_redshift(all_snapshots["lcdm"], target_z, args.nearest)
         for name in args.models:
+            model_metadata = metadata.get("models", {}).get(name, {})
             sample = at_redshift(all_snapshots[name], target_z, args.nearest)
             good_ref = (reference["pk"] > 0.0) & (reference["nmodes"] > 0.0)
             good_mod = (sample["pk"] > 0.0) & (sample["nmodes"] > 0.0)
@@ -302,6 +308,18 @@ def main() -> int:
                         ),
                         "rms_fractional_residual": float(
                             np.sqrt(np.mean(residual**2))
+                        ),
+                        "forward_species_contract_match": model_metadata.get(
+                            "forward_species_contract_match"
+                        ),
+                        "claim_scope": model_metadata.get(
+                            "claim_scope", "legacy_unspecified"
+                        ),
+                        "interpretation": (
+                            "linear_reference_only_species_contract_mismatch_included"
+                            if model_metadata.get("forward_species_contract_match")
+                            is False
+                            else "linear_response_comparison"
                         ),
                     }
                 )
@@ -387,7 +405,7 @@ def main() -> int:
         "theory": (
             "disabled"
             if args.no_theory
-            else "lagCAMB linear P(k), campaign-matched parameters and primordial amplitude"
+            else "lagCAMB linear P(k), recorded linear-model parameters and primordial amplitude"
         ),
         "simulation_to_linear_comparison": comparisons,
         "figure_png": str(png),

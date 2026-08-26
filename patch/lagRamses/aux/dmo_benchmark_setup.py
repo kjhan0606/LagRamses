@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Build a matched-phase DMO benchmark campaign for lagRamses/cuRAMSES.
 
-The default campaign uses model-consistent transfer functions from the local
-lagCAMB tree whenever lagCAMB and lagRamses implement the same model. All
-initial conditions retain the same random phases. Models without an exact
-lagCAMB counterpart use the LCDM transfer at the high starting redshift and
-are identified explicitly in the campaign metadata.
+The default campaign uses model-specific transfer functions from the local
+lagCAMB tree when the requested linear model is available. All initial
+conditions retain the same random phases. Models without a corresponding
+lagCAMB transfer use the LCDM transfer at the high starting redshift and are
+identified explicitly in the campaign metadata. The metadata records the
+forward species contract separately from the initial transfer selection.
 
 Default validation models
 -------------------------
@@ -21,6 +22,7 @@ python3 dmo_benchmark_setup.py \
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import math
@@ -48,7 +50,7 @@ DEFAULT_CAMB = "/home/kjhan/BACKUP/CAMB/CAMB"
 
 MODELS: Dict[str, Dict[str, str]] = {
     "lcdm": {
-        "description": "LCDM control; every non-standard switch disabled",
+        "description": "LCDM control with every non-standard switch disabled",
         "flags": "",
         "blocks": "",
     },
@@ -79,7 +81,10 @@ quint_lambda=1.0
 """,
     },
     "cde10": {
-        "description": "Coupled quintessence, beta=0.1, full effects",
+        "description": (
+            "Effective one-fluid coupled-quintessence DMO model, beta=0.1, "
+            "with mass, friction, and fifth-force terms"
+        ),
         "flags": """use_quintessence=.true.
 use_coupled_de=.true.""",
         "blocks": """&QUINT_PARAMS
@@ -286,6 +291,66 @@ CAMB_MATCHED_MODELS = {
     "sym_a",
 }
 
+SINGLE_FLUID_DYNAMICS_NOTES = {
+    "cde10": (
+        "lagCAMB couples the scalar field to CDM, while the one-species DMO "
+        "forward model applies the effective coupled dynamics to the full "
+        "CDM+baryon proxy fluid"
+    ),
+    "rvm001": (
+        "lagCAMB exchanges vacuum energy with CDM, while the one-species DMO "
+        "forward model applies the effective running-matter law to the full "
+        "CDM+baryon proxy fluid"
+    ),
+}
+
+SINGLE_FLUID_SPECIES_CONTRACT = {
+    "cde10": {
+        "linear_exchange_species": "cdm_only",
+        "nbody_evolved_species": "single_cdm_baryon_proxy_fluid",
+        "nbody_exchange_species": "single_cdm_baryon_proxy_fluid",
+        "forward_species_contract_match": False,
+        "claim_scope": "effective_one_fluid_response",
+        "physical_precision_claim_allowed": False,
+        "validation_status": "level_4_internal_effective_one_fluid",
+    },
+    "rvm001": {
+        "linear_exchange_species": "cdm_only",
+        "nbody_evolved_species": "single_cdm_baryon_proxy_fluid",
+        "nbody_exchange_species": "single_cdm_baryon_proxy_fluid",
+        "forward_species_contract_match": False,
+        "claim_scope": "effective_one_fluid_response",
+        "physical_precision_claim_allowed": False,
+        "validation_status": "level_4_internal_effective_one_fluid",
+    },
+}
+
+SPECIES_BACKGROUND_PREFLIGHT = {
+    "file": "BACKGROUND_PREFLIGHT.md",
+    "method": "fixed-total-matter comparison of species-resolved and effective one-fluid backgrounds",
+    "quantity": "H_species_resolved/H_effective_one_fluid - 1",
+    "redshifts": [49.0, 10.0, 2.0, 1.0, 0.5, 0.0],
+    "delta_h_over_h": {
+        "cde10": [-0.010609, -0.006705, -0.001629, 0.001259, 0.002676, 0.0],
+        "rvm001": [0.0008287, 0.0004818, 0.0001681, 0.0000735, 0.00002412, 0.0],
+    },
+    "interpretation": "approximation_diagnostic_not_correction",
+    "derivation_mode": "manually_tabulated_from_direct_background_evaluations",
+    "derivation_procedure": (
+        "At fixed H0=67.66, Omega_m=0.3111, and Omega_b=0.049, evaluate H(z) "
+        "with the lagCAMB CDM-only exchange and with the corresponding "
+        "effective law applied to the full proxy matter density, then form "
+        "H_species_resolved/H_effective_one_fluid - 1 at the listed redshifts"
+    ),
+    "derivation_inputs": {
+        "H0_km_s_Mpc": H0,
+        "Omega_m": OMEGA_M,
+        "Omega_b": OMEGA_B,
+        "cde10_beta": 0.1,
+        "rvm001_nu": 0.001,
+    },
+}
+
 LCDM_TRANSFER_REASONS = {
     "ede03": "lagRamses EDE dispatch model has no parameter-identical lagCAMB counterpart",
     "hs10_m01": "lagRamses quasi-static mu(k,a) does not match lagCAMB Bellini-alpha Horndeski",
@@ -367,9 +432,27 @@ def parse_args() -> argparse.Namespace:
             "model read the stored wnoise_LEVEL.bin realization"
         ),
     )
+    parser.add_argument(
+        "--white-noise-file",
+        type=Path,
+        help=(
+            "read this existing white-noise realization for every generated IC; "
+            "the file is never copied or modified"
+        ),
+    )
     parser.add_argument("--slurm-tasks", type=int, default=32)
     parser.add_argument("--omp-threads", type=int, default=2)
     parser.add_argument("--slurm-memory", default="420G")
+    parser.add_argument(
+        "--slurm-exclude",
+        default="",
+        help="comma-separated Slurm nodes to exclude from IC and simulation jobs",
+    )
+    parser.add_argument(
+        "--dump-pk",
+        action="store_true",
+        help="measure spectra in situ (disabled by default for production memory safety)",
+    )
     parser.add_argument(
         "--scalar-iters",
         type=int,
@@ -418,6 +501,51 @@ def write_text(path: Path, content: str, force: bool, executable: bool = False) 
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
 
 
+def file_sha256(path: Path) -> str | None:
+    """Return a binary digest when the generated campaign can read the file."""
+    path = path.expanduser().resolve()
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def git_revision(path: Path) -> str | None:
+    """Return the source revision that contains path, without changing state."""
+    path = path.expanduser().resolve()
+    workdir = path if path.is_dir() else path.parent
+    result = subprocess.run(
+        ["git", "-C", str(workdir), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def git_tracked_worktree_dirty(path: Path) -> bool | None:
+    """Report whether tracked source differs from HEAD."""
+    path = path.expanduser().resolve()
+    workdir = path if path.is_dir() else path.parent
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workdir),
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return bool(result.stdout.strip()) if result.returncode == 0 else None
+
+
 def load_local_camb(camb_dir: Path):
     """Import CAMB from the requested tree, never silently from site-packages."""
     camb_dir = camb_dir.expanduser().resolve()
@@ -435,7 +563,7 @@ def load_local_camb(camb_dir: Path):
 
 
 def configure_camb_dark_energy(pars, model_name: str, camb) -> None:
-    """Apply the lagCAMB model that exactly matches the lagRamses namelist."""
+    """Apply the lagCAMB parameterization associated with a campaign model."""
     de = camb.dark_energy
     if model_name == "lcdm":
         return
@@ -549,6 +677,9 @@ def make_transfer(
         "sigma8_zstart": float(sigma8_values[0]),
         "sigma8_z0": float(sigma8_values[-1]),
         "zstart": zstart,
+        "omega_b": OMEGA_B,
+        "omega_cdm": OMEGA_M - OMEGA_B,
+        "species_convention": "single_fluid_total_matter",
     }
     diagnostics_path.write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
     return transfer_path, diagnostics
@@ -728,7 +859,8 @@ def namelist(
         flags += "\n"
     blocks = effective_model_blocks(args, model)
     return f"""! {model['description']}
-! 2LPT IC transfer source: {ic_model}; all models use the same random phases.
+! 2LPT IC transfer source = {ic_model}
+! All models use the same random phases.
 &RUN_PARAMS
 cosmo=.true.
 pic=.true.
@@ -742,7 +874,7 @@ aexp_step_limit={args.aexp_step_limit:.8g}
 ordering='ksection'
 memory_balance=.true.
 use_fftw=.true.
-dump_pk=.true.
+dump_pk={'.true.' if args.dump_pk else '.false.'}
 de_perturb=.false.
 exchange_method='auto'
 {flags}/
@@ -788,11 +920,14 @@ epsilon=1.0d-4
 
 def slurm_script(args: argparse.Namespace, model_name: str, model_dir: Path) -> str:
     final_output = len(args.output_redshifts) + 1
+    exclude_line = (
+        f"#SBATCH --exclude={args.slurm_exclude}\n" if args.slurm_exclude else ""
+    )
     return f"""#!/bin/bash
 #SBATCH --job-name=dmo_{model_name}
 #SBATCH --partition=normal
 #SBATCH --nodes=1
-#SBATCH --ntasks={args.slurm_tasks}
+{exclude_line}#SBATCH --ntasks={args.slurm_tasks}
 #SBATCH --cpus-per-task={args.omp_threads}
 #SBATCH --mem={args.slurm_memory}
 #SBATCH --time=7-00:00:00
@@ -813,6 +948,75 @@ sha256sum {args.ramses}
 mpirun -np "${{SLURM_NTASKS:-{args.slurm_tasks}}}" {args.ramses} run.nml
 test -f output_{final_output:05d}/info_{final_output:05d}.txt
 echo "model={model_name} end=$(date --iso-8601=seconds)"
+"""
+
+
+def ic_slurm_script(
+    args: argparse.Namespace,
+    outdir: Path,
+    transfer_models: list[str],
+    ic_dirs: dict[str, str],
+) -> str:
+    """Return a memory-qualified production IC job for the generated configs."""
+    exclude_line = (
+        f"#SBATCH --exclude={args.slurm_exclude}\n" if args.slurm_exclude else ""
+    )
+    models = " ".join(transfer_models)
+    checks = " ".join(
+        ("ic_deltab", "ic_poscx", "ic_poscy", "ic_poscz", "ic_velcx", "ic_velcy", "ic_velcz")
+    )
+    ic_case = "\n".join(
+        f'    {name}) ic_dir="{ic_dirs[name]}" ;;' for name in transfer_models
+    )
+    white_noise_check = ""
+    if args.white_noise_file is not None:
+        source = args.white_noise_file.expanduser().resolve()
+        white_noise_check = f'test -r "{source}"\nsha256sum "{source}"\n'
+    return f"""#!/bin/bash
+#SBATCH --job-name=dmo_species_ics
+#SBATCH --partition=normal
+#SBATCH --nodes=1
+{exclude_line}#SBATCH --ntasks={args.music_tasks}
+#SBATCH --cpus-per-task={args.omp_threads}
+#SBATCH --mem={args.slurm_memory}
+#SBATCH --time=2-00:00:00
+#SBATCH --chdir={outdir}
+#SBATCH --output=logs/make-ics-%j.out
+#SBATCH --error=logs/make-ics-%j.err
+
+set -euo pipefail
+export OMP_NUM_THREADS={args.omp_threads}
+export OMP_STACKSIZE=256M
+export I_MPI_PIN_DOMAIN=omp
+export I_MPI_PIN_ORDER=compact
+
+cd {outdir}
+mkdir -p logs transfers
+echo "IC campaign start=$(date --iso-8601=seconds)"
+sha256sum {args.music}
+{white_noise_check}for model in {models}; do
+  case "$model" in
+{ic_case}
+    *) echo "unknown IC model: $model" >&2; exit 2 ;;
+  esac
+  echo "IC model=$model start=$(date --iso-8601=seconds)"
+  mpirun -np "${{SLURM_NTASKS:-{args.music_tasks}}}" {args.music} "music_${{model}}.conf"
+  level_dir="{outdir}/${{ic_dir}}/level_{args.levelmin:03d}"
+  for component in {checks}; do
+    test -s "$level_dir/$component"
+  done
+  for diagnostic in input_powerspec.txt dump_transfer.txt; do
+    if [[ -f "$diagnostic" ]]; then
+      stem="${{diagnostic%.*}}"
+      suffix="${{diagnostic##*.}}"
+      mv "$diagnostic" "transfers/${{stem}}_${{model}}.${{suffix}}"
+    fi
+  done
+  echo "IC model=$model bytes=$(du -sb "{outdir}/${{ic_dir}}" | awk '{{print $1}}') end=$(date --iso-8601=seconds)"
+done
+
+touch ICS_COMPLETE
+echo "IC campaign end=$(date --iso-8601=seconds)"
 """
 
 
@@ -869,6 +1073,55 @@ done
 """
 
 
+def manual_all() -> str:
+    """Run IC generation and all simulations sequentially without Slurm."""
+    return """#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")"
+if [[ ! -f ICS_COMPLETE ]]; then
+    bash ./make_ics.slurm
+fi
+exec ./run_manual_chain.sh
+"""
+
+
+def background_preflight() -> str:
+    """Describe the quantified species-contract approximation."""
+    redshifts = SPECIES_BACKGROUND_PREFLIGHT["redshifts"]
+    cde = SPECIES_BACKGROUND_PREFLIGHT["delta_h_over_h"]["cde10"]
+    rvm = SPECIES_BACKGROUND_PREFLIGHT["delta_h_over_h"]["rvm001"]
+    header = "| model | " + " | ".join(f"z={z:g}" for z in redshifts) + " |"
+    rule = "|---|" + "---:|" * len(redshifts)
+
+    def row(name: str, values: list[float]) -> str:
+        percentages = " | ".join(f"{100.0 * value:+.5g}%" for value in values)
+        return f"| {name} | {percentages} |"
+
+    return f"""# Background species-contract preflight
+
+The particle load follows the standard one-species DMO convention.  lagCAMB
+retains `Omega_b={OMEGA_B}` and supplies the mass-weighted CDM+baryon density
+and velocity transfers.  RAMSES evolves one collisionless proxy fluid with
+`omega_m={OMEGA_M}` and no separate baryon component.
+
+The lagCAMB `cde10` and `rvm001` models assign the dark-sector exchange to CDM
+alone.  The DMO forward model applies the corresponding effective dynamics to
+the full proxy fluid.  At fixed total matter, the table reports
+`H_species_resolved/H_effective_one_fluid - 1`.
+
+{header}
+{rule}
+{row("cde10", cde)}
+{row("rvm001", rvm)}
+
+The values diagnose a deliberate single-fluid dynamics approximation.  They
+are not corrections to the transfer, phase, normalization, or numerical
+integration.  The LCDM control uses the same total-matter loading convention.
+The values were manually tabulated from direct background evaluations at the
+parameters recorded in `campaign.json`.
+"""
+
+
 def readme(
     args: argparse.Namespace,
     model_names: list[str],
@@ -879,6 +1132,7 @@ def readme(
     dx_fine_kpc = 1000.0 * args.boxlen / (2**args.levelmax)
     kny = 3.141592653589793 * (2**args.levelmin) / args.boxlen
     transfer_lines = []
+    dynamics_lines = []
     for name in model_names:
         source = ic_models[name]
         suffix = ""
@@ -890,7 +1144,17 @@ def readme(
             )
             suffix = f" ({reason})"
         transfer_lines.append(f"- `{name}`: `{source}` lagCAMB transfer{suffix}")
+        if name in SINGLE_FLUID_DYNAMICS_NOTES:
+            dynamics_lines.append(
+                f"- `{name}`: {SINGLE_FLUID_DYNAMICS_NOTES[name]}. "
+                "The claim is limited to an effective one-fluid response."
+            )
     transfer_summary = "\n".join(transfer_lines)
+    dynamics_summary = (
+        "\n".join(dynamics_lines)
+        if dynamics_lines
+        else "- No model in this campaign has a recorded one-fluid species-contract qualification."
+    )
     lcdm_sigma8 = transfer_diagnostics["lcdm"]["sigma8_z0"]
     return f"""# cuRAMSES DMO benchmark campaign
 
@@ -906,6 +1170,12 @@ This is a matched-phase DMO benchmark. The transfer mode is `{args.ic_mode}`.
 - Seed: {args.seed}
 - White-noise phase anchor: level {args.phase_anchor_level or args.levelmin}
 - Primordial amplitude: A_s={A_S:.8e}
+- CAMB Omega_b: {OMEGA_B:.8f}
+- Species convention: single DMO fluid loaded from the mass-weighted CDM+baryon transfer
+- RAMSES `omega_b=0` means that no separate baryon particle or fluid is
+  evolved. Its `omega_m` still contains the full CDM+baryon density
+  represented by one collisionless particle species. It does not mean that
+  CAMB was run with zero baryons.
 - LCDM sigma8(z=0), diagnostic only: {lcdm_sigma8:.8f}
 - Models: {", ".join(model_names)}
 - Scalar solver limit/tolerance: {args.scalar_iters} / {args.scalar_eps:.3e}
@@ -915,14 +1185,15 @@ All models in this campaign use the same random seed and phases. When the
 phase anchor is finer than the particle level, LagMUSIC generates the
 white-noise realization at the anchor and restricts it to the particle
 level. Using one common anchor across a resolution ladder preserves the
-shared long-wave realization; merely placing the same seed independently at
-each particle level does not. LagMUSIC's `force_pnorm` is
-derived directly from lagCAMB's linear P(k,zstart), so A_s fixes the absolute
-amplitude without sigma8 re-normalisation or MUSIC growth back-scaling.
+shared long-wave realization. Placing the same seed independently at each
+particle level does not preserve the realization. LagMUSIC derives
+`force_pnorm` directly from lagCAMB's linear P(k,zstart). The common A_s fixes
+the absolute amplitude without sigma8 re-normalisation or MUSIC growth
+back-scaling.
 For DMO 2LPT, `dmo_velocity_source=transfer` constructs the first-order
 velocity field from lagCAMB's model-specific `vtotal` transfer and retains
 LagMUSIC's high-redshift 2LPT velocity term. LagMUSIC also receives the
-model's CPL `w0` and `wa` values when applicable, so its background velocity
+model's CPL `w0` and `wa` values when applicable. Its background velocity
 factor is consistent with the simulation namelist. In the legacy
 `density_2lpt` mode, `vfact_scale` applies the model/LCDM
 velocity-to-density growth ratio to the density-derived velocity field.
@@ -931,7 +1202,18 @@ velocity-to-density growth ratio to the density-derived velocity field.
 
 {transfer_summary}
 
-Run `./submit_all.sh` on grammar for independent concurrent jobs, or
+## Species-contract qualification
+
+{dynamics_summary}
+
+The file `BACKGROUND_PREFLIGHT.md` quantifies the background difference for
+the qualified models.  The values are approximation diagnostics and are not
+applied as corrections.
+
+On a dedicated non-Slurm host, run `./run_manual_all.sh` to generate ICs
+and execute every simulation sequentially. Under Slurm, submit
+`make_ics.slurm` first.  After it creates `ICS_COMPLETE`, run
+`./submit_all.sh` on grammar for independent concurrent jobs, or
 `./submit_chain.sh` when the models must run sequentially. The
 `./run_manual_chain.sh` script is the sequential fallback for a non-Slurm
 host. Simulation outputs are written inside each model directory.
@@ -965,7 +1247,17 @@ def main() -> int:
 
     outdir = args.outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
+    (outdir / "logs").mkdir(parents=True, exist_ok=True)
+    if args.white_noise_file is not None:
+        args.white_noise_file = args.white_noise_file.expanduser().resolve()
+        if not args.white_noise_file.is_file():
+            raise FileNotFoundError(
+                f"white-noise realization not found: {args.white_noise_file}"
+            )
     model_names = list(dict.fromkeys(args.models))
+    species_contract_models = [
+        name for name in model_names if name in SINGLE_FLUID_SPECIES_CONTRACT
+    ]
     ic_models = {
         name: (
             name
@@ -1025,11 +1317,14 @@ def main() -> int:
         white_noise = outdir / (
             f"wnoise_{args.phase_anchor_level or args.levelmin:04d}.bin"
         )
-        random_source = (
-            str(white_noise)
-            if args.reuse_white_noise and name != first_transfer_model
-            else str(args.seed)
-        )
+        if args.white_noise_file is not None:
+            random_source = str(args.white_noise_file)
+        else:
+            random_source = (
+                str(white_noise)
+                if args.reuse_white_noise and name != first_transfer_model
+                else str(args.seed)
+            )
         config_path = outdir / f"music_{name}.conf"
         write_text(
             config_path,
@@ -1067,6 +1362,12 @@ def main() -> int:
         )
 
     write_text(
+        outdir / "make_ics.slurm",
+        ic_slurm_script(args, outdir, transfer_models, ic_dirs),
+        args.force,
+        executable=True,
+    )
+    write_text(
         outdir / "submit_chain.sh",
         submit_chain(model_names),
         args.force,
@@ -1085,23 +1386,49 @@ def main() -> int:
         executable=True,
     )
     write_text(
+        outdir / "run_manual_all.sh",
+        manual_all(),
+        args.force,
+        executable=True,
+    )
+    write_text(
         outdir / "README.md",
         readme(args, model_names, ic_models, transfer_diagnostics),
         args.force,
     )
+    if species_contract_models:
+        write_text(
+            outdir / SPECIES_BACKGROUND_PREFLIGHT["file"],
+            background_preflight(),
+            args.force,
+        )
     model_metadata = {}
     for name in model_names:
+        transfer_matches = ic_models[name] == name
         model_metadata[name] = {
             **MODELS[name],
             "blocks": effective_model_blocks(args, MODELS[name]),
             "ic_transfer_model": ic_models[name],
-            "ic_transfer_exact_match": ic_models[name] == name,
+            "ic_transfer_matches_lagcamb_at_zstart": transfer_matches,
+            "ic_transfer_match_scope": (
+                "mass_weighted_total_matter_density_and_velocity"
+                if transfer_matches
+                else "shared_or_proxy_transfer"
+            ),
         }
         if ic_models[name] != name:
             model_metadata[name]["ic_transfer_note"] = (
                 "shared-IC triage mode"
                 if args.ic_mode == "shared"
                 else LCDM_TRANSFER_REASONS[name]
+            )
+        if name in SINGLE_FLUID_DYNAMICS_NOTES:
+            model_metadata[name]["single_fluid_dynamics_approximation"] = (
+                SINGLE_FLUID_DYNAMICS_NOTES[name]
+            )
+            model_metadata[name].update(SINGLE_FLUID_SPECIES_CONTRACT[name])
+            model_metadata[name]["background_species_contract_preflight"] = (
+                SPECIES_BACKGROUND_PREFLIGHT["file"]
             )
     metadata = {
         "boxlen_mpc_h": args.boxlen,
@@ -1112,6 +1439,7 @@ def main() -> int:
         "phase_anchor_level": args.phase_anchor_level or args.levelmin,
         "omega_m": OMEGA_M,
         "omega_b": OMEGA_B,
+        "species_convention": "single_fluid_total_matter",
         "H0": H0,
         "n_s": N_S,
         "A_s": A_S,
@@ -1138,8 +1466,45 @@ def main() -> int:
         "music": args.music,
         "music_tasks": args.music_tasks,
         "music_unigrid_slab": args.music_unigrid_slab,
-        "reuse_white_noise": args.reuse_white_noise,
+        "reuse_white_noise": args.reuse_white_noise or args.white_noise_file is not None,
+        "white_noise_file": (
+            str(args.white_noise_file) if args.white_noise_file is not None else None
+        ),
         "ramses": args.ramses,
+        "species_contract_preflight": (
+            SPECIES_BACKGROUND_PREFLIGHT if species_contract_models else None
+        ),
+        "provenance": {
+            "lagcamb": {
+                "path": str(args.camb_dir.expanduser().resolve()),
+                "git_revision": git_revision(args.camb_dir),
+                "tracked_worktree_dirty": git_tracked_worktree_dirty(args.camb_dir),
+                "omega_b": OMEGA_B,
+                "omega_b_meaning": "separate baryon component in the linear calculation",
+            },
+            "lagmusic": {
+                "binary": str(Path(args.music).expanduser().resolve()),
+                "binary_sha256": file_sha256(Path(args.music)),
+                "source_git_revision": git_revision(Path(args.music)),
+                "source_tracked_worktree_dirty": git_tracked_worktree_dirty(
+                    Path(args.music)
+                ),
+            },
+            "curamses": {
+                "binary": str(Path(args.ramses).expanduser().resolve()),
+                "binary_sha256": file_sha256(Path(args.ramses)),
+                "omega_b": 0.0,
+                "omega_b_meaning": "no separately evolved baryon species. omega_m is the full proxy fluid",
+            },
+            "campaign_generator": {
+                "path": str(Path(__file__).resolve()),
+                "source_git_revision": git_revision(Path(__file__)),
+                "source_sha256": file_sha256(Path(__file__)),
+                "working_tree_dirty_at_generation": git_tracked_worktree_dirty(
+                    Path(__file__)
+                ),
+            },
+        },
     }
     write_text(
         outdir / "campaign.json",

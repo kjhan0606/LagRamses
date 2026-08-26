@@ -93,6 +93,163 @@ end subroutine backup_psi
 !#########################################################################
 !#########################################################################
 !#########################################################################
+subroutine output_fdm_outer_wave_provenance(output_char)
+  !-----------------------------------------------------------------------
+  ! Raw provenance for a pure-FDM outer zoom.  This routine changes neither
+  ! psi, phi, sinks, nor forces.  It records a compact global code-unit mass
+  ! and current diagnostic at a normal output; backup_psi remains the full
+  ! field source for radial profiles, core modes, granules, and local wakes.
+  !
+  ! HJM levels store (rho,S) in (psi_re,psi_im), so j=rho grad(S).  Wave
+  ! levels store psi, so j=hbar Im(psi^* grad psi).  A current contribution is
+  ! retained only for a complete same-level central stencil, and its coverage
+  ! fraction is written explicitly rather than silently treated as zero.
+  !-----------------------------------------------------------------------
+  use amr_commons
+  use poisson_commons, only: psi_re, psi_im
+  use fdm_commons, only: hbar_code, fdm_ghost2
+#include "amr_index.h"
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  character(len=*),intent(in)::output_char
+  integer::ilevel,i,ind,igrid,icell,idim,icm,icp,info,ilun,ios
+  real(dp)::dx,dx_loc,volume,inv2dx,rho,dre,dim,grad_s
+  real(dp)::mass_loc,mass_glob,leaf_loc,leaf_glob,stencil_loc,stencil_glob
+  real(dp),dimension(3)::current_loc,current_glob,current_cell
+  logical::have_stencil
+  character(len=160)::fileloc
+
+  if(.not.use_fdm) return
+  mass_loc=0.0d0
+  leaf_loc=0.0d0
+  stencil_loc=0.0d0
+  current_loc=0.0d0
+  do ilevel=1,nlevelmax
+     if(active(ilevel)%ngrid<=0) cycle
+     dx=0.5d0**ilevel
+     dx_loc=dx*boxlen/dble(icoarse_max-icoarse_min+1)
+     volume=dx_loc**ndim
+     inv2dx=0.5d0/dx_loc
+     if(fdm_ghost2)then
+        call make_virtual_fine_dp2(psi_re(1),psi_im(1),ilevel)
+     else
+        call make_virtual_fine_dp(psi_re(1),ilevel)
+        call make_virtual_fine_dp(psi_im(1),ilevel)
+     end if
+     do ind=1,twotondim
+        do i=1,active(ilevel)%ngrid
+           igrid=active(ilevel)%igrid(i)
+           icell=ICELL_OF(igrid,ind)
+           if(son(icell)/=0) cycle
+           if(fdm_use_hjm .and. ilevel<fdm_first_wave_level)then
+              rho=max(psi_re(icell),0.0d0)
+           else
+              rho=psi_re(icell)**2+psi_im(icell)**2
+           end if
+           mass_loc=mass_loc+rho*volume
+           leaf_loc=leaf_loc+1.0d0
+           current_cell=0.0d0
+           have_stencil=.true.
+           do idim=1,ndim
+              call fdm_neighbor_cell(igrid,ilevel,ind,idim,1,icm)
+              call fdm_neighbor_cell(igrid,ilevel,ind,idim,2,icp)
+              if(icm<=0 .or. icp<=0)then
+                 have_stencil=.false.
+                 exit
+              end if
+              if(fdm_use_hjm .and. ilevel<fdm_first_wave_level)then
+                 grad_s=(psi_im(icp)-psi_im(icm))*inv2dx
+                 current_cell(idim)=rho*grad_s
+              else
+                 dre=(psi_re(icp)-psi_re(icm))*inv2dx
+                 dim=(psi_im(icp)-psi_im(icm))*inv2dx
+                 current_cell(idim)=hbar_code*(psi_re(icell)*dim- &
+                      & psi_im(icell)*dre)
+              end if
+           end do
+           if(have_stencil)then
+              current_loc=current_loc+current_cell*volume
+              stencil_loc=stencil_loc+1.0d0
+           end if
+        end do
+     end do
+  end do
+
+  mass_glob=mass_loc
+  leaf_glob=leaf_loc
+  stencil_glob=stencil_loc
+  current_glob=current_loc
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(mass_loc,mass_glob,1,MPI_DOUBLE_PRECISION,MPI_SUM, &
+       & MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(leaf_loc,leaf_glob,1,MPI_DOUBLE_PRECISION,MPI_SUM, &
+       & MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(stencil_loc,stencil_glob,1,MPI_DOUBLE_PRECISION,MPI_SUM, &
+       & MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(current_loc,current_glob,3,MPI_DOUBLE_PRECISION,MPI_SUM, &
+       & MPI_COMM_WORLD,info)
+#endif
+  if(myid/=1) return
+
+  fileloc='output_'//trim(output_char)//'/fdm_outer_wave_provenance_'// &
+       & trim(output_char)//'.txt'
+  ilun=91
+  open(unit=ilun,file=trim(fileloc),status='replace',form='formatted', &
+       & action='write',iostat=ios)
+  if(ios/=0)then
+     write(*,'(A,A,A,I0)') 'ERROR: cannot write FDM outer-wave provenance ', &
+          trim(fileloc),' iostat=',ios
+     call flush(6)
+     call clean_stop
+  end if
+  write(ilun,'(A)') '# fdm_outer_wave_provenance_v2'
+  write(ilun,'(A)') '# Raw code-unit diagnostics; no calibrated drag or delay.'
+  write(ilun,'(A)') '# Full psi snapshots are the required field source.'
+  write(ilun,'(A,ES24.16)') 'time_code = ',t
+  write(ilun,'(A,ES24.16)') 'aexp = ',aexp
+  write(ilun,'(A,I0)') 'nstep_coarse = ',nstep_coarse
+  write(ilun,'(A,ES24.16)') 'm_axion_ev = ',m_axion
+  write(ilun,'(A,ES24.16)') 'hbar_code = ',hbar_code
+  write(ilun,'(A,L1)') 'fdm_use_hjm = ',fdm_use_hjm
+  write(ilun,'(A,I0)') 'fdm_first_wave_level = ',fdm_first_wave_level
+  write(ilun,'(A,L1)') 'fdm_dual_soliton_ic = ',fdm_dual_soliton_ic
+  write(ilun,'(A,ES24.16)') 'fdm_dual_soliton_profile_c = ', &
+       & fdm_dual_soliton_profile_c
+  write(ilun,'(A,2(1X,ES24.16))') 'fdm_dual_soliton_rho0 = ', &
+       & fdm_dual_soliton_rho0
+  write(ilun,'(A,2(1X,ES24.16))') 'fdm_dual_soliton_rc_box = ', &
+       & fdm_dual_soliton_rc_box
+  write(ilun,'(A,3(1X,ES24.16))') 'fdm_dual_soliton_center_box_1 = ', &
+       & fdm_dual_soliton_center_box(1,:)
+  write(ilun,'(A,3(1X,ES24.16))') 'fdm_dual_soliton_center_box_2 = ', &
+       & fdm_dual_soliton_center_box(2,:)
+  write(ilun,'(A,3(1X,ES24.16))') 'fdm_dual_soliton_velocity_1 = ', &
+       & fdm_dual_soliton_velocity(1,:)
+  write(ilun,'(A,3(1X,ES24.16))') 'fdm_dual_soliton_velocity_2 = ', &
+       & fdm_dual_soliton_velocity(2,:)
+  write(ilun,'(A,2(1X,ES24.16))') 'fdm_dual_soliton_phase = ', &
+       & fdm_dual_soliton_phase
+  write(ilun,'(A,L1)') 'analytic_fdm_drag_enabled = .false.'
+  write(ilun,'(A)') 'force_accounting = resolved_wave_only'
+  write(ilun,'(A,ES24.16)') 'leaf_mass_code = ',mass_glob
+  write(ilun,'(A,3(1X,ES24.16))') 'integrated_current_code = ',current_glob
+  write(ilun,'(A,ES24.16)') 'leaf_cell_count = ',leaf_glob
+  write(ilun,'(A,ES24.16)') 'complete_current_stencil_cell_count = ',stencil_glob
+  if(leaf_glob>0.0d0)then
+     write(ilun,'(A,ES24.16)') 'complete_current_stencil_fraction = ', &
+          stencil_glob/leaf_glob
+  else
+     write(ilun,'(A,ES24.16)') 'complete_current_stencil_fraction = ',0.0d0
+  end if
+  write(ilun,'(A)') 'psi_snapshot_prefix = fdm_'//trim(output_char)//'.out'
+  close(ilun)
+  call flush(6)
+end subroutine output_fdm_outer_wave_provenance
+!#########################################################################
+!#########################################################################
+!#########################################################################
 subroutine restore_psi
   !--------------------------------------------------------------
   ! Binary-mode restart reader for the FDM wavefunction psi.

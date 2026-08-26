@@ -219,7 +219,8 @@ dark_energy_commons.o: scalar_de_commons.o
 init_time.o: scalar_de_commons.o
 multigrid_fine_commons.o: scalar_de_commons.o dark_energy_commons.o
 synchro_fine.kjhan.o: scalar_de_commons.o
-output_fdm.o: amr_commons.kjhan.o poisson_commons.o ksection.o morton_keys.o morton_hash.o
+output_fdm.o: amr_commons.kjhan.o poisson_commons.o ksection.o morton_keys.o morton_hash.o fdm_commons.o
+output_amr.kjhan.o: amr_parameters.jaehyun.o amr_commons.kjhan.o
 dynamic_exchange.o: amr_parameters.jaehyun.o amr_commons.kjhan.o mpi_large.o
 init_part.o: dynamic_exchange.o
 init_hydro.o: dynamic_exchange.o
