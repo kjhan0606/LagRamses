@@ -23,6 +23,7 @@
 !###########################################################################
 subroutine restore_amr_hdf5()
   use amr_commons
+  use amr_parameters, only: restart_output_index
   use hydro_commons
   use ksection
   use morton_keys
@@ -152,6 +153,7 @@ subroutine restore_amr_hdf5()
   call hdf5_read_attr_string(grp_id, 'ordering', ordering_file)
   call hdf5_close_group(grp_id)
 
+  iout=restart_output_index(cosmo,noutput,aout,tout,aexp,t)
   nstep_coarse_old = nstep_coarse
 
   if(myid==1) write(*,*) 'Restarting at t=', t, ' nstep_coarse=', nstep_coarse

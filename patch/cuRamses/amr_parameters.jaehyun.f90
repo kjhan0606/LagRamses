@@ -641,4 +641,38 @@ module amr_parameters
   ! Star particle mass in units of the number of SN:
   integer ::nsn2mass=-1
 
+contains
+
+  ! The output timetable belongs to the active namelist, not to the checkpoint
+  ! from which a run happens to restart.  Find its first still-future entry so
+  ! a seed produced with a shorter/different timetable cannot skip outputs.
+  integer function restart_output_index(is_cosmological,nout,aout_values, &
+       & tout_values,aexp_now,time_now)
+    implicit none
+    logical,intent(in)::is_cosmological
+    integer,intent(in)::nout
+    real(dp),intent(in)::aout_values(:),tout_values(:),aexp_now,time_now
+    integer::i
+    real(dp)::tolerance
+
+    restart_output_index=max(1,nout)
+    if(nout<=0)return
+    tolerance=1d-12
+    if(is_cosmological)then
+       do i=1,nout
+          if(aout_values(i)>aexp_now+max(tolerance,abs(aexp_now)*tolerance))then
+             restart_output_index=i
+             return
+          end if
+       end do
+    else
+       do i=1,nout
+          if(tout_values(i)>time_now+max(tolerance,abs(time_now)*tolerance))then
+             restart_output_index=i
+             return
+          end if
+       end do
+    end if
+  end function restart_output_index
+
 end module amr_parameters

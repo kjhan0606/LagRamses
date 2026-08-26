@@ -1,5 +1,6 @@
 subroutine init_amr
   use amr_commons
+  use amr_parameters, only: restart_output_index
   use hydro_commons
   use pm_commons  
   use poisson_commons
@@ -447,7 +448,6 @@ subroutine init_amr
      !tout(1:noutput2)=tout2(1:noutput2)
      !aout(1:noutput2)=aout2(1:noutput2)
      !jhshin2
-     iout=iout2
      ifout=ifout2
      if(ifout.gt.nrestart+1) ifout=nrestart+1
      read(ilun)t
@@ -463,6 +463,7 @@ subroutine init_amr
      else
         read(ilun)mass_sph2
      endif
+     iout=restart_output_index(cosmo,noutput,aout,tout,aexp,t)
      if(myid==1)write(*,*)'Restarting at t=',t,' nstep_coarse=',nstep_coarse
 
      ! Compute movie frame number if applicable
@@ -693,6 +694,7 @@ end subroutine init_amr
 !###########################################################################
 subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
   use amr_commons
+  use amr_parameters, only: restart_output_index
   use hydro_commons
   use pm_commons
   use poisson_commons
@@ -810,7 +812,7 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
     integer :: nout_tmp, iout_tmp, ifout_tmp
     real(dp), allocatable :: dp_tmp(:)
     read(ilun) nout_tmp, iout_tmp, ifout_tmp
-    iout = iout_tmp; ifout = ifout_tmp
+    ifout = ifout_tmp
     if(ifout.gt.nrestart+1) ifout=nrestart+1
     allocate(dp_tmp(max(nout_tmp,1)))
     read(ilun) dp_tmp(1:nout_tmp)  ! tout
@@ -830,6 +832,7 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
   else
      read(ilun) mass_sph2
   endif
+  iout=restart_output_index(cosmo,noutput,aout,tout,aexp,t)
   if(myid==1) write(*,*) 'Restarting at t=', t, ' nstep_coarse=', nstep_coarse
 
   ! Level linked lists (ncpu_file × nlevelmax_file) — just for file 00001 header
