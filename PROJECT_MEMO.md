@@ -102,6 +102,15 @@ monitoring.
 
 ## Paper split and TeX source locations
 
+> **Legacy numbering notice (superseded 2026-08-22):** The `Paper I` and
+> `Paper II` labels in this section and in the historical SIDM figure plan
+> below belong to the pre-split series and are retained only as provenance.
+> Within `/home/kjhan/BACKUP/lagRamses-DE`, the canonical project names are
+> **Paper-I: DE+nonlinear**, **Paper-II: AP--RSD**, and
+> **Paper-III: DE Bayesian**, as defined in
+> `../papers/PAPER_PROJECT_MAP.md`.  New code, calculations, artifacts,
+> reports, commits, and progress updates must use the canonical names.
+
 - Paper I: SIDM
   - Overleaf/source directory: `/home/kjhan/paper_sidm_overleaf`
   - Main TeX source: `/home/kjhan/paper_sidm_overleaf/main.tex`
