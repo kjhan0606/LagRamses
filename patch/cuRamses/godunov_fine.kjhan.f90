@@ -1,3 +1,4 @@
+#define CPU_GODUNOV_COMPACT
 !###########################################################
 ! Module for scatter buffer (always compiled, no #ifdef)
 !###########################################################
@@ -205,12 +206,42 @@ subroutine godunov_fine(ilevel)
   else
 #endif
 
-  ! Use critical section path (no scatter buffer) to match SRC FP order
-  !$omp parallel do private(igrid,ngrid) schedule(dynamic)
+  ! Experimental CPU path: keep the expensive gather/solve/scatter
+  ! computation parallel and defer only conflicting coarse-cell additions.
+  nthreads=1
+!$ nthreads=omp_get_max_threads()
+  allocate(cpu_scatter_bufs(0:nthreads-1))
+  do it=0,nthreads-1
+     call scatter_buf_init(cpu_scatter_bufs(it),SBUF_INIT_CAP,nvar)
+  end do
+!$omp parallel private(igrid,ngrid,tid)
+  tid=0
+!$ tid=omp_get_thread_num()
+!$omp do schedule(dynamic)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
-     call godfine1(ilevel, igrid, ngrid)
+     call godfine1(ilevel,igrid,ngrid,cpu_scatter_bufs(tid))
   end do
+!$omp end do
+!$omp end parallel
+
+  ! Conflict-only serial merge.  Level-L cells are disjoint between grid
+  ! batches; only coarse-neighbour contributions enter these compact buffers.
+  do it=0,nthreads-1
+     do i=1,cpu_scatter_bufs(it)%count
+        ic=cpu_scatter_bufs(it)%icell(i)
+        do ivar=1,nvar
+           unew(ic,ivar)=unew(ic,ivar)+cpu_scatter_bufs(it)%dunew(i,ivar)
+        end do
+        if(pressure_fix)then
+           divu(ic)=divu(ic)+cpu_scatter_bufs(it)%ddivu(i)
+           enew(ic)=enew(ic)+cpu_scatter_bufs(it)%denew(i)
+        end if
+     end do
+     deallocate(cpu_scatter_bufs(it)%icell,cpu_scatter_bufs(it)%dunew, &
+          cpu_scatter_bufs(it)%ddivu,cpu_scatter_bufs(it)%denew)
+  end do
+  deallocate(cpu_scatter_bufs)
 
 #ifdef HYDRO_CUDA
   end if
@@ -871,7 +902,7 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
   !--------------------------------------
   ! Conservative update at level ilevel
   !--------------------------------------
-#ifndef OMP_TEST
+#ifndef CPU_GODUNOV_COMPACT
 !$omp flush
 !$omp critical (godunov)
 #endif
@@ -1084,7 +1115,7 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
         end if
      end do
   end if
-#ifndef OMP_TEST
+#ifndef CPU_GODUNOV_COMPACT
 !$omp flush
 !$omp end critical (godunov)
 #endif
