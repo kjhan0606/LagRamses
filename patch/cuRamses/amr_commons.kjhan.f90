@@ -71,9 +71,9 @@ module amr_commons
 
   ! Pointers for free memory grid linked list
   integer::headf,tailf,numbf,used_mem,used_mem_tot
-  ! [RESIZABLE] True when read_params derived ngridmax from ngridtot.  Explicit positive
-  ! ngridmax values retain the fixed-capacity behaviour.
-  logical::ngridmax_auto=.false.
+  ! [RESIZABLE] Grow grid storage at runtime when the current capacity is
+  ! exhausted.  This is the default; AMR_PARAMS can disable it explicitly.
+  logical::ngridmax_auto=.true.
 
   ! Tree arrays
   real(dp),allocatable,dimension(:,:)::xg      ! grids position

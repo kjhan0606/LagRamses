@@ -61,10 +61,9 @@ module pm_commons
   integer ,allocatable,dimension(:)  ::numbp    ! Number of particles in grid
   ! Global particle linked lists
   integer::headp_free,tailp_free,numbp_free=0,numbp_free_tot=0
-  ! Set by read_params when npartmax was supplied as the automatic-capacity
-  ! sentinel.  Explicit positive npartmax values retain the fixed-capacity
-  ! behaviour.
-  logical::npartmax_auto=.false.
+  ! Grow particle storage at runtime when the current capacity is exhausted.
+  ! This is the default; AMR_PARAMS can disable it explicitly.
+  logical::npartmax_auto=.true.
   ! The free list is built by init_tree after IC/restart loading.  Growth can
   ! therefore happen before it exists, but must append new slots once it does.
   logical::particle_free_list_ready=.false.
