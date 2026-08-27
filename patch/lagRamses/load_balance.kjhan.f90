@@ -482,6 +482,15 @@ recursive subroutine load_balance
   ! Release grow-only buffers after rebalancing (comm patterns changed)
   call ksection_trim_buffers()
 
+  ! Particle migration updates the free list, but not every remap path updates
+  ! the cached local count.  Output and restart buffers are sized from npart,
+  ! so synchronize it before returning from the load-balance safe point.
+  if(pic.and.particle_free_list_ready)then
+     npart=npartmax-numbp_free
+     call MPI_ALLREDUCE(numbp_free,numbp_free_tot,1,MPI_INTEGER,MPI_MIN, &
+          MPI_COMM_WORLD,info)
+  endif
+
   ! Return freed heap pages to OS (reduces RSS after bulk dealloc/realloc)
   call fortran_malloc_trim()
 
