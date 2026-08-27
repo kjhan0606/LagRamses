@@ -31,7 +31,8 @@ Every event is a contiguous JSONL transaction:
 
 1. `event_begin`: integration time, cosmology, code-unit conversions, merge
    radius, FOF group size, classification, group COM, and maximum separation.
-2. one `member` row for every original sink: ID, mass, position, velocity,
+2. one `member` row for every original sink: ID, the surviving primary ID,
+   a primary flag, mass, position, velocity,
    formation time, accretion/feedback accumulators, BH spin, gas angular
    momentum, and the last available Bondi gas context.
 3. one `pair` row for every unordered member pair: minimum-image separation,
@@ -42,6 +43,12 @@ Every event is a contiguous JSONL transaction:
 
 Two-member groups are `BINARY`; larger transitive FOF groups are `MULTIPLE`.
 No arbitrary binary ordering is inferred for a multiple.
+
+`primary_sink_id` is the global ID retained by `merge_sink`: the most massive
+member, with the lowest pre-compaction sink index breaking exact mass ties.
+It is stored in both `event_begin` and every `member` row.  Thus each captured
+sink row carries the requested `(sink_id, primary_sink_id)` relation without
+having to reconstruct the compaction order.
 
 The deterministic event UID contains coarse step, level, minimum/maximum sink
 ID, and member count.  A restart may append the same complete transaction

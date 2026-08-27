@@ -10,6 +10,7 @@
 #SOLVER = hydro
 #PATCH = ../patch/Horizon5-master
 #EXEC = ramses_ch
+USE_FFTW ?= 1
 ##################################
 # Yohan's patch
 #NVECTOR = 32
@@ -96,9 +97,9 @@ endif
 EUNHA_MODOBJ = eunha_cooling_mod.o
 
 #############################################################################
-# FFTW3 CPU direct Poisson solver (build with: make USE_FFTW=1)
+# FFTW3 CPU direct Poisson solver (project default; disable with USE_FFTW=0)
 #############################################################################
-ifdef USE_FFTW
+ifeq ($(USE_FFTW),1)
   FFTW3_DIR = $(HOME)/local
   FFLAGS += -DUSE_FFTW -I$(FFTW3_DIR)/include
   LIBS_FFTW = -L$(FFTW3_DIR)/lib -lfftw3_mpi -lfftw3_omp -lfftw3 -lm \

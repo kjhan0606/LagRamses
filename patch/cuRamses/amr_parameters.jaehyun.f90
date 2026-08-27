@@ -89,7 +89,7 @@ module amr_parameters
   integer::n_cuda_streams=1   ! Number of CUDA streams (runtime, max 16)
 
   ! FFTW3 CPU direct Poisson solver (requires USE_FFTW compilation)
-  logical::use_fftw=.false.    ! FFTW3 CPU direct solve for uniform base level
+  logical::use_fftw=.true.     ! Project baseline: direct solve on uniform base level
 
   ! Multigrid merged red/black smoother
   ! .true.  -> GPU MG performs red then black with a single phi communication

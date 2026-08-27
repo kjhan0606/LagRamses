@@ -405,6 +405,42 @@ def _validate_complete_block(
         _require_vector(member, "position_code", uid, errors)
         _require_vector(member, "velocity_code", uid, errors)
 
+    # Schema-v1 ledgers written before the primary-ID extension remain valid.
+    # When the extension is present, validate the exact merge_sink survivor
+    # rule and every requested (sink_id, primary_sink_id) relation.
+    if "primary_sink_id" in begin:
+        primary_id = _require_integer(begin, "primary_sink_id", uid, errors)
+        expected_primary: int | None = None
+        expected_mass = -math.inf
+        for member in block.members:
+            member_id = member.get("sink_id")
+            member_mass = member.get("mass_code")
+            if (
+                isinstance(member_id, int)
+                and not isinstance(member_id, bool)
+                and isinstance(member_mass, (int, float))
+                and not isinstance(member_mass, bool)
+                and math.isfinite(float(member_mass))
+                and float(member_mass) > expected_mass
+            ):
+                expected_primary = member_id
+                expected_mass = float(member_mass)
+        if primary_id not in member_by_id:
+            errors.append(f"{uid}: primary_sink_id does not name a member")
+        if primary_id is not None and primary_id != expected_primary:
+            errors.append(f"{uid}: primary_sink_id violates the survivor rule")
+        for member in block.members:
+            member_primary = _require_integer(
+                member, "primary_sink_id", uid, errors
+            )
+            is_primary = _require_logical(member, "is_primary", uid, errors)
+            if member_primary != primary_id:
+                errors.append(f"{uid}: member primary_sink_id is inconsistent")
+            if is_primary is not None and is_primary != (
+                member.get("sink_id") == primary_id
+            ):
+                errors.append(f"{uid}: member is_primary flag is inconsistent")
+
     boxlen, fact_g, merge_radius = _validate_event_invariants(
         uid, begin, block.members, errors
     )

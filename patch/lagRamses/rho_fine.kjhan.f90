@@ -387,103 +387,6 @@ end subroutine dump_ndgp_source_diag
 !##############################################################################
 !##############################################################################
 !##############################################################################
-#if defined(_OPENMP) && !defined(HYDRO_CUDA)
-subroutine rho_from_current_level(ilevel)
-  use amr_commons
-  use pm_commons
-  use hydro_commons
-  use poisson_commons
-  implicit none
-  integer::ilevel
-  !------------------------------------------------------------------
-  ! This routine computes the density field at level ilevel using
-  ! the CIC scheme from particles that are not entirely in
-  ! level ilevel (boundary particles).
-  ! Arrays flag1 and flag2 are used as temporary work space.
-  !------------------------------------------------------------------
-  integer::igrid,jgrid,ipart,jpart,idim,icpu
-  integer::i,ig,ip,npart1
-  real(dp)::dx
-
-  integer,dimension(1:nvector),save::ind_grid,ind_cell
-  integer,dimension(1:nvector),save::ind_part,ind_grid_part
-  real(dp),dimension(1:nvector,1:ndim),save::x0
-    
-  ! Mesh spacing in that level
-  dx=0.5D0**ilevel 
-  
-  ! Loop over cpus
-  do icpu=1,ncpu
-     ! Loop over grids
-     igrid=headl(icpu,ilevel)
-     ig=0
-     ip=0   
-     do jgrid=1,numbl(icpu,ilevel)
-        npart1=numbp(igrid)  ! Number of particles in the grid
-        if(npart1>0)then        
-           ig=ig+1
-           ind_grid(ig)=igrid
-           ipart=headp(igrid)
-           
-           ! Loop over particles
-           do jpart=1,npart1
-              if(ig==0)then
-                 ig=1
-                 ind_grid(ig)=igrid
-              end if
-              ip=ip+1
-              ind_part(ip)=ipart
-              ind_grid_part(ip)=ig
-              if(ip==nvector)then
-                 ! Lower left corner of 3x3x3 grid-cube
-                 do idim=1,ndim
-                    do i=1,ig
-                       x0(i,idim)=xg(ind_grid(i),idim)-3.0D0*dx
-                    end do
-                 end do
-                 do i=1,ig
-                    ind_cell(i)=father(ind_grid(i))
-                 end do
-#ifdef TSC
-                 call tsc_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
-#else
-                 call cic_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
-#endif
-                 ip=0
-                 ig=0
-              end if
-              ipart=nextp(ipart)  ! Go to next particle
-           end do
-           ! End loop over particles
-           
-        end if
-
-        igrid=next(igrid)   ! Go to next grid
-     end do
-     ! End loop over grids
-
-     if(ip>0)then
-        ! Lower left corner of 3x3x3 grid-cube
-        do idim=1,ndim
-           do i=1,ig
-              x0(i,idim)=xg(ind_grid(i),idim)-3.0D0*dx
-           end do
-        end do
-        do i=1,ig
-           ind_cell(i)=father(ind_grid(i))
-        end do
-#ifdef TSC
-        call tsc_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
-#else
-        call cic_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
-#endif
-     end if
-
-  end do
-  ! End loop over cpus
-
-end subroutine rho_from_current_level
-#else
 !##############################################
 !##############################################
 !##############################################
@@ -510,6 +413,10 @@ subroutine rho_from_current_level(ilevel)
   !------------------------------------------------------------------
   integer::igrid,jgrid,ipart,jpart,icpu
   integer::i,ig,ip,subnump
+#if defined(_OPENMP) && !defined(TSC)
+  integer::mythread,nthreads
+  integer,allocatable::nparticles(:),ptrhead(:)
+#endif
 #ifdef HYDRO_CUDA
   integer::npart1,idim,gi,slot,nvec,ngtot,pm_hw,nptot
   logical::rho_gpu
@@ -661,24 +568,42 @@ subroutine rho_from_current_level(ilevel)
 !  allocate(ptrhead(0:nthreads-1), nparticles(0:nthreads-1))
 
 
+  ! CIC batches belonging to different grids can update the same mesh cell.
+  ! Split the linked grid list between threads, while cic_amr protects only
+  ! the shared density/multipole additions with atomic updates.
+#if defined(_OPENMP) && !defined(TSC)
+  nthreads=1
+!$omp parallel shared(nthreads) private(mythread)
+  mythread=omp_get_thread_num()
+!$omp single
+  nthreads=omp_get_num_threads()
+!$omp end single
+!$omp end parallel
+  allocate(nparticles(0:nthreads-1),ptrhead(0:nthreads-1))
+#endif
+
   ! Loop over cpus
   do icpu=1,ncpu
      if(numbl(icpu,ilevel) .gt.0) then
-!       if(numbl(icpu,ilevel) .lt. 4) then
+#if defined(_OPENMP) && !defined(TSC)
+        call pthreadLinkedList(headl(icpu,ilevel),numbl(icpu,ilevel), &
+             & nthreads,nparticles,ptrhead,next)
+!$omp parallel private(mythread,subnump,igrid)
+        mythread=omp_get_thread_num()
+        subnump=nparticles(mythread)
+        igrid=ptrhead(mythread)
+        if(subnump>0)call sub_rho_from_current_level(ilevel,igrid,subnump)
+!$omp end parallel
+#else
          igrid = headl(icpu,ilevel)
          subnump = numbl(icpu,ilevel)
          call  sub_rho_from_current_level(ilevel,igrid,subnump)
-!       else
-!         call pthreadLinkedList(headl(icpu,ilevel),numbl(icpu,ilevel),nthreads, nparticles, ptrhead,next)
-!!$omp parallel private(subnump, igrid) 
-!         subnump = nparticles(mythread)
-!         igrid = ptrhead(mythread)
-!         call  sub_rho_from_current_level(ilevel,igrid,subnump)
-!!$omp end parallel
-!       endif
+#endif
      endif
   enddo
-!  deallocate(ptrhead, nparticles)
+#if defined(_OPENMP) && !defined(TSC)
+  deallocate(ptrhead,nparticles)
+#endif
 end subroutine rho_from_current_level
 !##############################################
 !##############################################
@@ -783,7 +708,6 @@ subroutine sub_rho_from_current_level(ilevel, igrid, nump)
   ! End loop over cpus
 
 end subroutine sub_rho_from_current_level
-#endif
 !##############################################################################
 !##############################################################################
 !##############################################################################
@@ -879,10 +803,12 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
 
   if(ilevel==levelmin)then
      do j=1,np
+!$omp atomic update
         multipole(1)=multipole(1)+mp(ind_part(j))
      end do
      do idim=1,ndim
         do j=1,np
+!$omp atomic update
            multipole(idim+1)=multipole(idim+1)+mp(ind_part(j))*xp(ind_part(j),idim)
         end do
      end do
@@ -1064,6 +990,7 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
      if(cic_levelmax==0.or.ilevel<=cic_levelmax)then
     do j=1,np
        if(ok(j))then
+!$omp atomic update
           rho(indp(j,ind))=rho(indp(j,ind))+vol2(j)
        end if
     end do
@@ -1071,12 +998,14 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
     if(sink)then
        do j=1,np
           if(ok(j).and. ( pt_arr(j)==PTYPE_STAR .or. pt_arr(j)==PTYPE_SINK ))then
+!$omp atomic update
          rho(indp(j,ind))=rho(indp(j,ind))+vol2(j)
           endif
        enddo
     else
        do j=1,np
           if(ok(j).and.pt_arr(j)==PTYPE_STAR)then
+!$omp atomic update
          rho(indp(j,ind))=rho(indp(j,ind))+vol2(j)
           end if
        enddo
@@ -1087,12 +1016,14 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
     if(sink)then
        do j=1,np
           if(ok(j).and.pt_arr(j)/=PTYPE_STAR.and.pt_arr(j)/=PTYPE_SINK)then
+!$omp atomic update
          rho_top(indp(j,ind))=rho_top(indp(j,ind))+vol2(j)
           end if
        enddo
     else
        do j=1,np
           if(ok(j).and.pt_arr(j)/=PTYPE_STAR)then
+!$omp atomic update
          rho_top(indp(j,ind))=rho_top(indp(j,ind))+vol2(j)
           end if
        end do
@@ -1148,6 +1079,7 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
      if(cic_levelmax==0.or.ilevel<cic_levelmax)then
     do j=1,np
        if(ok(j))then
+!$omp atomic update
           phi(indp(j,ind))=phi(indp(j,ind))+vol2(j)
        end if
     end do
@@ -1155,12 +1087,14 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
     if(sink)then
        do j=1,np
           if(ok(j).and. ( pt_arr(j)==PTYPE_STAR .or. pt_arr(j)==PTYPE_SINK ))then
+!$omp atomic update
          phi(indp(j,ind))=phi(indp(j,ind))+vol2(j)
           endif
        enddo
     else
        do j=1,np
           if(ok(j).and.pt_arr(j)==PTYPE_STAR)then
+!$omp atomic update
          phi(indp(j,ind))=phi(indp(j,ind))+vol2(j)
           end if
        enddo
@@ -1172,6 +1106,7 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
      if(sink_refine)then
         do j=1,np
            if(pt_arr(j)==PTYPE_SINK)then
+!$omp atomic update
               phi(indp(j,ind))=phi(indp(j,ind))+m_refine_eff(ilevel)
            end if
         end do

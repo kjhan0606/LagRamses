@@ -1722,6 +1722,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
 
   integer::ledger_unit,ios,igrp,isink,jsink_member,idim
   integer::nmember,member_index,pair_index,anchor,min_id,max_id
+  integer::primary_index,primary_sink_id
   integer::expected_pairs
   real(dp)::box_size,total_mass,max_separation
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
@@ -1758,6 +1759,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      if(nmember < 2) cycle
 
      anchor=0
+     primary_index=0
      min_id=huge(min_id)
      max_id=-huge(max_id)
      total_mass=0d0
@@ -1766,16 +1768,25 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      do isink=1,nsink
         if(gsink(isink) /= igrp) cycle
         if(anchor == 0) anchor=isink
+        ! This is exactly the survivor rule used by merge_sink below:
+        ! strictly larger mass replaces the primary; a mass tie keeps the
+        ! first member, and members are traversed in increasing sink index.
+        if(primary_index == 0) then
+           primary_index=isink
+        else if(msink(isink) > msink(primary_index)) then
+           primary_index=isink
+        endif
         min_id=min(min_id,idsink(isink))
         max_id=max(max_id,idsink(isink))
         total_mass=total_mass+msink(isink)
      enddo
 
-     if(total_mass <= 0d0 .or. anchor == 0) then
+     if(total_mass <= 0d0 .or. anchor == 0 .or. primary_index == 0) then
         write(*,'(A,I0,A,I0)') 'WARNING: invalid SMBH capture group ',igrp, &
              & ' at coarse step ',nstep_coarse
         cycle
      endif
+     primary_sink_id=idsink(primary_index)
 
      do isink=1,nsink
         if(gsink(isink) /= igrp) cycle
@@ -1828,6 +1839,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
           & '","nstep_coarse":'//trim(json_int(nstep_coarse))// &
           & ',"ilevel":'//trim(json_int(ilevel))// &
           & ',"group_index":'//trim(json_int(igrp))// &
+          & ',"primary_sink_id":'//trim(json_int(primary_sink_id))// &
           & ',"nmember":'//trim(json_int(nmember))// &
           & ',"expected_pairs":'//trim(json_int(expected_pairs))// &
           & ',"aexp":'//trim(json_real(aexp))// &
@@ -1879,6 +1891,8 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
              & '{"schema_version":1,"record_type":"member","event_uid":"'// &
              & trim(event_uid)//'","member_index":'//trim(json_int(member_index))// &
              & ',"sink_id":'//trim(json_int(idsink(isink)))// &
+             & ',"primary_sink_id":'//trim(json_int(primary_sink_id))// &
+             & ',"is_primary":'//trim(json_logical(isink == primary_index))// &
              & ',"mass_code":'//trim(json_real(msink(isink)))// &
              & ',"position_code":['//trim(json_real(xsink(isink,1)))//','// &
              & trim(json_real(xsink(isink,2)))//','//trim(json_real(xsink(isink,3)))//']'// &
@@ -2053,6 +2067,255 @@ contains
   end function json_logical
 
 end subroutine write_smbh_capture_ledger
+!################################################################
+!################################################################
+!################################################################
+!################################################################
+subroutine dump_agn_coarse_state
+  use pm_commons
+  use amr_commons
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+
+  integer::isink,ilun,ios
+  real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
+  real(dp)::mass_g,mass_msun,bondi_rate,edd_rate,inflow_rate,mdot_msun_yr
+  real(dp)::edd_ratio,coarse_edd_ratio,epsilon_r,epsilon_eff,luminosity
+  real(dp)::jgas_norm,jbh_norm,cos_angle,angle_rad,angle_deg
+  real(dp)::jbh_physical_norm,jbh_physical(1:3)
+  real(dp)::alpha_visc,nu_ratio,amod,chieps,mass_8,t_nu1
+  real(dp)::rwarp,rsg,msg,dmacc,disk_mass_g,disk_mass_msun
+  real(dp)::prefact,redshift
+  logical::angle_valid,disk_valid
+  integer,save::last_dump_step=-huge(0)
+  character(len=8)::feedback_mode
+  character(len=512)::iomsg
+  ! Keep the legacy constants used by kjhan_growspin so the diagnostic disk
+  ! episode follows the same analytic prescription as the state-update model.
+  real(dp),parameter::solar_mass_g=2d33
+  real(dp),parameter::year_s=3600d0*24d0*365d0
+  real(dp),parameter::clight_cgs=2.99792458d10
+  real(dp),parameter::proton_mass_cgs=1.66d-24
+  real(dp),parameter::sigma_thomson_cgs=6.652d-25
+  real(dp),parameter::grav_cgs=6.67d-8
+
+  if(.not.agn_coarse_dump .or. myid /= 1 .or. nsink <= 0) return
+  ! AGN_feedback is a coarse-step routine.  Preserve its restart guard so a
+  ! repeated entry in the same in-memory step cannot emit a duplicate block.
+  if(nstep_coarse == nstep_coarse_old .and. nstep_coarse > 0) return
+  if(nstep_coarse == last_dump_step) return
+
+  call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
+  scale_m=scale_d*scale_l**3
+  redshift=0d0
+  if(aexp > 0d0) redshift=1d0/aexp-1d0
+  prefact=4d0*acos(-1d0)*grav_cgs*proton_mass_cgs/ &
+       & (sigma_thomson_cgs*clight_cgs)
+  alpha_visc=0.1d0
+  nu_ratio=4d0*(1d0+7d0*alpha_visc**2)/ &
+       & (4d0+alpha_visc**2)/(2d0*alpha_visc**2)
+
+  iomsg=''
+  open(newunit=ilun,file=trim(agn_coarse_dump_file),status='unknown', &
+       & position='append',action='write',form='formatted',iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call agn_dump_io_fatal('open',ios,iomsg)
+
+  do isink=1,nsink
+     mass_g=msink(isink)*scale_m
+     mass_msun=mass_g/solar_mass_g
+     bondi_rate=max(dMBHoverdt(isink),0d0)
+     edd_rate=max(dMEdoverdt(isink),0d0)
+     inflow_rate=min(bondi_rate,edd_rate)
+     mdot_msun_yr=inflow_rate*scale_m/scale_t*year_s/solar_mass_g
+     edd_ratio=0d0
+     if(edd_rate > tiny(edd_rate)) edd_ratio=bondi_rate/edd_rate
+     coarse_edd_ratio=0d0
+     if(dMEd_coarse(isink) > tiny(dMEd_coarse(isink))) &
+          & coarse_edd_ratio=dMBH_coarse(isink)/dMEd_coarse(isink)
+
+     epsilon_r=0.1d0
+     if(allocated(eps_sink)) then
+        if(ieee_is_finite(eps_sink(isink)) .and. eps_sink(isink)>0d0) &
+             & epsilon_r=eps_sink(isink)
+     endif
+     epsilon_eff=epsilon_r
+     if(mad_jet .and. X_floor>0d0 .and. edd_ratio<X_floor) &
+          & epsilon_eff=epsilon_r*max(edd_ratio,0d0)/X_floor
+     luminosity=epsilon_eff*inflow_rate*scale_m/scale_t*clight_cgs**2
+
+     jgas_norm=sqrt(sum(jsink(isink,1:ndim)**2))
+     jbh_norm=sqrt(sum(bhspin(isink,1:ndim)**2))
+     jbh_physical=0d0
+     jbh_physical_norm=abs(spinmag(isink))*grav_cgs*mass_g**2/clight_cgs
+     if(jbh_norm>tiny(jbh_norm)) &
+          & jbh_physical(1:ndim)=bhspin(isink,1:ndim)/jbh_norm*jbh_physical_norm
+     angle_valid=jgas_norm>tiny(jgas_norm) .and. jbh_norm>tiny(jbh_norm)
+     angle_rad=0d0
+     angle_deg=0d0
+     if(angle_valid) then
+        cos_angle=sum(jsink(isink,1:ndim)*bhspin(isink,1:ndim))/ &
+             & (jgas_norm*jbh_norm)
+        cos_angle=max(-1d0,min(1d0,cos_angle))
+        angle_rad=acos(cos_angle)
+        angle_deg=angle_rad*180d0/acos(-1d0)
+     endif
+
+     ! Re-evaluate the coherent accretion-episode disk model used by
+     ! kjhan_growspin.  This is a diagnostic episode mass, not a persistent
+     ! sub-grid disk reservoir.
+     amod=abs(spinmag(isink))
+     disk_valid=mass_g>0d0 .and. amod>tiny(amod) .and. &
+          & edd_ratio>tiny(edd_ratio) .and. epsilon_r>tiny(epsilon_r)
+     disk_mass_g=0d0
+     disk_mass_msun=0d0
+     t_nu1=0d0
+     rwarp=0d0
+     rsg=0d0
+     if(disk_valid) then
+        chieps=min(edd_ratio,1d0)/(epsilon_r/0.1d0)
+        mass_8=mass_g/(1d8*2d33)
+        if(chieps>tiny(chieps) .and. mass_8>tiny(mass_8)) then
+           t_nu1=5.3d5*amod**0.875d0*chieps**(-0.75d0)* &
+                & nu_ratio**(-0.875d0)*mass_8**1.375d0
+           rwarp=6.4d3*amod**0.625d0*mass_8**0.125d0* &
+                & chieps**(-0.25d0)*nu_ratio**(-0.625d0)
+           dmacc=prefact*mass_g/epsilon_r*min(edd_ratio,1d0)
+           if(selfgrav) then
+              rsg=5d2*mass_8**(-52d0/45d0)*chieps**(-22d0/45d0)
+              if(rsg<rwarp) then
+                 msg=6d5*mass_8**(34d0/45d0)*chieps**(4d0/45d0)*2d33
+                 disk_mass_g=msg
+              else
+                 disk_mass_g=dmacc*t_nu1*year_s
+              endif
+           else
+              disk_mass_g=dmacc*t_nu1*year_s
+           endif
+           disk_valid=ieee_is_finite(disk_mass_g) .and. disk_mass_g>=0d0
+           if(disk_valid) disk_mass_msun=disk_mass_g/solar_mass_g
+        else
+           disk_valid=.false.
+        endif
+     endif
+
+     feedback_mode='INACTIVE'
+     if(dMsmbh(isink)>0d0 .and. dMEd_coarse(isink)>tiny(dMEd_coarse(isink))) then
+        feedback_mode='THERMAL'
+        if(coarse_edd_ratio<X_floor) feedback_mode='JET'
+     endif
+     iomsg=''
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) &
+          & '{"schema_version":1,"record_type":"agn_coarse_state"'// &
+          & ',"nstep_coarse":'//trim(agn_json_int(nstep_coarse))// &
+          & ',"sink_id":'//trim(agn_json_int(idsink(isink)))// &
+          & ',"aexp":'//trim(agn_json_real(aexp))// &
+          & ',"redshift":'//trim(agn_json_real(redshift))// &
+          & ',"t_code":'//trim(agn_json_real(t))// &
+          & ',"mass_code":'//trim(agn_json_real(msink(isink)))// &
+          & ',"mass_msun":'//trim(agn_json_real(mass_msun))// &
+          & ',"gas_angular_momentum_code":['//trim(agn_json_real(jsink(isink,1)))//','// &
+          & trim(agn_json_real(jsink(isink,2)))//','//trim(agn_json_real(jsink(isink,3)))//']'// &
+          & ',"gas_angular_momentum_norm_code":'//trim(agn_json_real(jgas_norm))// &
+          & ',"bh_spin_direction":['//trim(agn_json_real(bhspin(isink,1)))//','// &
+          & trim(agn_json_real(bhspin(isink,2)))//','//trim(agn_json_real(bhspin(isink,3)))//']'// &
+          & ',"bh_spin_magnitude":'//trim(agn_json_real(spinmag(isink)))// &
+          & ',"bh_angular_momentum_cgs":['//trim(agn_json_real(jbh_physical(1)))//','// &
+          & trim(agn_json_real(jbh_physical(2)))//','// &
+          & trim(agn_json_real(jbh_physical(3)))//']'// &
+          & ',"bh_angular_momentum_norm_cgs":'//trim(agn_json_real(jbh_physical_norm))// &
+          & ',"spin_gas_angle_rad":'//trim(agn_json_optional(angle_rad,angle_valid))// &
+          & ',"spin_gas_angle_deg":'//trim(agn_json_optional(angle_deg,angle_valid))// &
+          & ',"bondi_rate_code":'//trim(agn_json_real(bondi_rate))// &
+          & ',"eddington_rate_code":'//trim(agn_json_real(edd_rate))// &
+          & ',"inflow_rate_code":'//trim(agn_json_real(inflow_rate))// &
+          & ',"inflow_rate_msun_per_yr":'//trim(agn_json_real(mdot_msun_yr))// &
+          & ',"eddington_ratio":'//trim(agn_json_real(edd_ratio))// &
+          & ',"coarse_bondi_supply_mass_code":'// &
+          & trim(agn_json_real(dMBH_coarse(isink)))// &
+          & ',"coarse_eddington_limit_mass_code":'// &
+          & trim(agn_json_real(dMEd_coarse(isink)))// &
+          & ',"coarse_accreted_bh_mass_code":'//trim(agn_json_real(dMsmbh(isink)))// &
+          & ',"coarse_eddington_ratio":'//trim(agn_json_real(coarse_edd_ratio))// &
+          & ',"radiative_efficiency":'//trim(agn_json_real(epsilon_r))// &
+          & ',"effective_radiative_efficiency":'//trim(agn_json_real(epsilon_eff))// &
+          & ',"bolometric_luminosity_erg_s":'//trim(agn_json_real(luminosity))// &
+          & ',"feedback_mode":"'//trim(feedback_mode)//'"'// &
+          & ',"feedback_energy_deferred":'//trim(agn_json_logical(Esave(isink)>0d0))// &
+          & ',"disk_model":"coherent_episode"'// &
+          & ',"disk_model_valid":'//trim(agn_json_logical(disk_valid))// &
+          & ',"disk_episode_mass_g":'//trim(agn_json_optional(disk_mass_g,disk_valid))// &
+          & ',"disk_episode_mass_msun":'//trim(agn_json_optional(disk_mass_msun,disk_valid))// &
+          & ',"disk_viscous_time_yr":'//trim(agn_json_optional(t_nu1,disk_valid))// &
+          & ',"disk_warp_radius_rg":'//trim(agn_json_optional(rwarp,disk_valid))// &
+          & ',"disk_self_gravity_radius_rg":'// &
+          & trim(agn_json_optional(rsg,disk_valid .and. selfgrav))// &
+          & ',"saved_feedback_energy_code":'//trim(agn_json_real(Esave(isink)))// &
+          & ',"mean_gas_density_code":'//trim(agn_json_real(d_avgptr(isink)))// &
+          & ',"mean_sound_speed_code":'//trim(agn_json_real(c_avgptr(isink)))// &
+          & ',"gas_relative_speed_code":'//trim(agn_json_real(v_avgptr(isink)))// &
+          & ',"unit_mass_cgs":'//trim(agn_json_real(scale_m))// &
+          & ',"unit_time_cgs":'//trim(agn_json_real(scale_t))//'}'
+     if(ios /= 0) call agn_dump_io_fatal('write',ios,iomsg)
+  enddo
+
+  flush(ilun,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call agn_dump_io_fatal('flush',ios,iomsg)
+  close(ilun,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call agn_dump_io_fatal('close',ios,iomsg)
+  last_dump_step=nstep_coarse
+
+contains
+
+  function agn_json_int(value) result(text)
+    integer,intent(in)::value
+    character(len=32)::text
+    write(text,'(I0)') value
+  end function agn_json_int
+
+  function agn_json_real(value) result(text)
+    real(dp),intent(in)::value
+    character(len=40)::text
+    if(.not.ieee_is_finite(value)) then
+       text='null'
+    else
+       write(text,'(ES24.16E3)') value
+       text=adjustl(text)
+    endif
+  end function agn_json_real
+
+  function agn_json_optional(value,available) result(text)
+    real(dp),intent(in)::value
+    logical,intent(in)::available
+    character(len=40)::text
+    if(available .and. ieee_is_finite(value)) then
+       write(text,'(ES24.16E3)') value
+       text=adjustl(text)
+    else
+       text='null'
+    endif
+  end function agn_json_optional
+
+  function agn_json_logical(value) result(text)
+    logical,intent(in)::value
+    character(len=5)::text
+    if(value) then
+       text='true'
+    else
+       text='false'
+    endif
+  end function agn_json_logical
+
+  subroutine agn_dump_io_fatal(operation,status,message)
+    character(len=*),intent(in)::operation,message
+    integer,intent(in)::status
+    write(error_unit,'(A,1X,A,1X,A,1X,I0,1X,A)') &
+         & 'FATAL: AGN coarse-state dump I/O failure during',trim(operation), &
+         & trim(agn_coarse_dump_file),status,trim(message)
+    call clean_stop
+  end subroutine agn_dump_io_fatal
+
+end subroutine dump_agn_coarse_state
 !################################################################
 !################################################################
 !################################################################
@@ -5670,6 +5933,12 @@ subroutine AGN_feedback
 
   ! Conversion factor from user units to cgs units
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
+
+  ! Persist the complete pre-feedback AGN state once per coarse step.  This
+  ! call precedes the feedback/reset section below, so rates, saved energy,
+  ! gas angular momentum and the disk/spin diagnostics describe the same
+  ! physical state.
+  call dump_agn_coarse_state
 
   if(myid==1.and.nsink>0.and.sinkprops)then
      if(.not.(nstep_coarse==nstep_coarse_old.and.nstep_coarse>0))then
