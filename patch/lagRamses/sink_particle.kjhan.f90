@@ -1067,7 +1067,14 @@ subroutine merge_sink(ilevel)
 !  integer:: nthreads,mythread,npart3
 !  common /omp1_threads/ mythread
 !!$omp threadprivate(/omp1_threads/)
-  integer, external:: Do_FoF_Tree
+  integer, external:: Do_FoF_Tree, Do_FoF_Sequential, Omp_Do_FoF_Tree
+  integer:: icanon_pos, icanon_grp
+  integer, allocatable:: icanon_cnt(:), icanon_off(:), icanon_new(:)
+  ! Below this many sinks the sequential O(N^2) search is the fastest of the
+  ! three FoF implementations; above it the OMP tree is.  A fixed threshold
+  ! rather than a timing probe, so which sinks coalesce cannot depend on how
+  ! busy the machine was when the run happened to measure itself.
+  integer, parameter:: FOF_OMP_MIN = 300
   integer, dimension(:,:), allocatable:: GroupData
   integer:: ngrp,sisink, fisink,ijsink
 !#endif
@@ -1206,7 +1213,84 @@ subroutine merge_sink(ilevel)
     end do
 #else
 ! if(myid==1) then
-     igrp = Do_FoF_Tree(nsink, psink, gsink, dx_min2, factG)
+     if(nsink < FOF_OMP_MIN)then
+        igrp = Do_FoF_Sequential(nsink, psink, gsink, dx_min2, factG)
+     else
+        igrp = Omp_Do_FoF_Tree(nsink, psink, gsink, dx_min2, factG)
+     endif
+
+     ! Canonicalise the grouping, so that nothing downstream depends on which
+     ! FoF implementation ran.  Two things vary between them.
+     !
+     ! The member order: the loop further down walks psink under _OPENMP but
+     ! plain sink index otherwise, and gives the group identity to the first
+     ! strictly-heavier member, so an exact mass tie is decided by whichever
+     ! member is met first.  With every sink seeded at exactly Mseed those ties
+     ! are ordinary, and a measured 13 per cent of groups changed which sink
+     ! survived purely from that order.
+     !
+     ! The group number: Do_FoF_Sequential numbers groups in the order its own
+     ! tail-swapped psink presents them, while both tree methods number them by
+     ! increasing lowest member.  Group numbers become slots in the compacted
+     ! sink arrays and then the new sink indices, so a call in which nothing
+     ! merges at all can still permute every sink index.
+     !
+     ! Renumber groups by their lowest member, then emit each group's members in
+     ! increasing sink index.  Counting sort, linear in nsink.
+     allocate(icanon_cnt(0:igrp), icanon_off(0:igrp), icanon_new(0:igrp))
+
+     icanon_new = 0
+     icanon_pos = 0
+     do isink = 1, nsink
+        icanon_grp = gsink(isink)
+        if(icanon_grp >= 1 .and. icanon_grp <= igrp) then
+           if(icanon_new(icanon_grp) == 0) then
+              icanon_pos = icanon_pos + 1
+              icanon_new(icanon_grp) = icanon_pos
+           end if
+        end if
+     end do
+     if(icanon_pos /= igrp) then
+        if(myid == 1) write(*,*) 'merge_sink: FoF returned ', igrp, &
+             & ' groups but only ', icanon_pos, ' are occupied'
+        call clean_stop
+     end if
+     do isink = 1, nsink
+        icanon_grp = gsink(isink)
+        if(icanon_grp >= 1 .and. icanon_grp <= igrp) &
+             & gsink(isink) = icanon_new(icanon_grp)
+     end do
+
+     icanon_cnt = 0
+     do isink = 1, nsink
+        icanon_grp = gsink(isink)
+        if(icanon_grp >= 1 .and. icanon_grp <= igrp) &
+             & icanon_cnt(icanon_grp) = icanon_cnt(icanon_grp) + 1
+     end do
+     icanon_pos = 0
+     do icanon_grp = 1, igrp
+        icanon_off(icanon_grp) = icanon_pos
+        icanon_pos = icanon_pos + icanon_cnt(icanon_grp)
+     end do
+     icanon_pos = 0
+     do isink = 1, nsink
+        icanon_grp = gsink(isink)
+        if(icanon_grp >= 1 .and. icanon_grp <= igrp) then
+           icanon_off(icanon_grp) = icanon_off(icanon_grp) + 1
+           psink(icanon_off(icanon_grp)) = isink
+           icanon_pos = icanon_pos + 1
+        end if
+     end do
+     ! Every sink must land in exactly one group.  A sink with gsink outside
+     ! 1..igrp would previously have indexed GroupData out of bounds further
+     ! down; here it would instead be dropped from psink and leave a stale
+     ! entry behind, which is quieter and worse.  Stop instead.
+     if(icanon_pos /= nsink) then
+        if(myid == 1) write(*,*) 'merge_sink: ', icanon_pos, ' of ', nsink, &
+             & ' sinks carry a group id in 1..', igrp
+        call clean_stop
+     end if
+     deallocate(icanon_cnt, icanon_off, icanon_new)
 ! endif
 ! call MPI_Bcast(igrp, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, info)
 ! call MPI_Bcast(psink, nsink, MPI_INTEGER, 0, MPI_COMM_WORLD, info)
