@@ -59,7 +59,7 @@ subroutine fdm_hjm_step(ilevel, dt_loc)
   ! Sync rho ghosts first so the QP Laplacian reads post-RK neighbour amplitudes.
   if(fdm_hjm_qp) call make_virtual_fine_dp(psi_re(1), ilevel)
   do ind=1,twotondim
-!$omp parallel do private(i,igrid,icell,idim,icL,icR,sqrho_c,sqrho_L,sqrho_R,d2,sum_d2,c1_cell,qp) schedule(static)
+!$omp parallel do private(i,igrid,icell,idim,icL,icR,sqrho_c,sqrho_L,sqrho_R,d2,sum_d2,c1_cell,qp) schedule(runtime)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = ICELL_OF(igrid,ind)
@@ -146,7 +146,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
 
   ! Save u^n
   do ind=1,twotondim
-!$omp parallel do private(i,igrid,icell) schedule(static)
+!$omp parallel do private(i,igrid,icell) schedule(runtime)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = ICELL_OF(igrid,ind)
@@ -163,7 +163,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   nclip_loc = 0
   clip_added_loc = 0.0d0
   do ind=1,twotondim
-!$omp parallel do private(i,igrid,icell) reduction(+:nclip_loc,clip_added_loc) schedule(static)
+!$omp parallel do private(i,igrid,icell) reduction(+:nclip_loc,clip_added_loc) schedule(runtime)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = ICELL_OF(igrid,ind)
@@ -201,7 +201,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   clip_added_loc = 0.0d0
   do ind=1,twotondim
 !$omp parallel do private(i,igrid,icell,rho1,S1) &
-!$omp reduction(+:nclip_loc,clip_added_loc) schedule(static)
+!$omp reduction(+:nclip_loc,clip_added_loc) schedule(runtime)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = ICELL_OF(igrid,ind)
@@ -243,7 +243,7 @@ subroutine fdm_hjm_rk(ilevel, dx_loc, dt_loc)
   clip_added_loc = 0.0d0
   do ind=1,twotondim
 !$omp parallel do private(i,igrid,icell,rho1,S1) &
-!$omp reduction(+:nclip_loc,clip_added_loc) schedule(static)
+!$omp reduction(+:nclip_loc,clip_added_loc) schedule(runtime)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = ICELL_OF(igrid,ind)
@@ -312,7 +312,7 @@ subroutine fdm_hjm_rhs_grid(ilevel, dx_inv, dx2_inv, inv_a2, hbar2_over_2, drho,
 
   do ind=1,twotondim
 !$omp parallel do private(i,igrid,icell,idim,icL,icR,rho_c,S_c,rho_L,rho_R,S_L,S_R, &
-!$omp                     vel_L,vel_R,flux_L,flux_R,grad2S,dS_bk,dS_fw) schedule(static)
+!$omp                     vel_L,vel_R,flux_L,flux_R,grad2S,dS_bk,dS_fw) schedule(runtime)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = ICELL_OF(igrid,ind)
@@ -404,7 +404,7 @@ subroutine fdm_psi_to_rhoS(ilevel)
   real(dp)::re_val,im_val
 
   do ind=1,twotondim
-!$omp parallel do private(i,igrid,icell,re_val,im_val) schedule(static)
+!$omp parallel do private(i,igrid,icell,re_val,im_val) schedule(runtime)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = ICELL_OF(igrid,ind)
@@ -436,7 +436,7 @@ subroutine fdm_rhoS_to_psi(ilevel)
   real(dp)::rho_val,S_val,amp,theta
 
   do ind=1,twotondim
-!$omp parallel do private(i,igrid,icell,rho_val,S_val,amp,theta) schedule(static)
+!$omp parallel do private(i,igrid,icell,rho_val,S_val,amp,theta) schedule(runtime)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = ICELL_OF(igrid,ind)
@@ -532,7 +532,7 @@ subroutine fdm_madelung_refine_flag(ilevel)
   do ind=1,twotondim
 !$omp parallel do private(i,igrid,icell,idim,icL,icR,rho_c,sqrho_c,S_c,sqrho_L,sqrho_R, &
 !$omp                     S_L,S_R,lap_sq,d2S,d2S_min,CQ) &
-!$omp             reduction(+:nflag_loc,nflag_cq_loc,nflag_cs_loc) schedule(static)
+!$omp             reduction(+:nflag_loc,nflag_cq_loc,nflag_cs_loc) schedule(runtime)
      do i=1,active(ilevel)%ngrid
         igrid = active(ilevel)%igrid(i)
         icell = ICELL_OF(igrid,ind)
