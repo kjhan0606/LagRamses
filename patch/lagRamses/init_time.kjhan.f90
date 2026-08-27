@@ -466,15 +466,19 @@ subroutine init_cosmo
      call gadgetreadheader(TRIM(initfile(levelmin)), 0, gadgetheader, ok)
      if(.not.ok) call clean_stop
      do i=1,6
-        if (i .ne. 2) then
+        if (i .ne. 2 .and. i .ne. 3) then
            if (gadgetheader%nparttotal(i) .ne. 0) then
-              write(*,*) 'Non DM particles present in bin ', i
+              write(*,*) 'Unsupported Gadget particle type in bin ', i
               call clean_stop
            endif
         endif
      enddo
      if (gadgetheader%mass(2) == 0) then
-        write(*,*) 'Particles have different masses, not supported'
+        write(*,*) 'Per-particle Gadget masses are not supported for type 1'
+        call clean_stop
+     endif
+     if (gadgetheader%nparttotal(3) .ne. 0 .and. gadgetheader%mass(3) == 0) then
+        write(*,*) 'Per-particle Gadget masses are not supported for type 2'
         call clean_stop
      endif
      omega_m = gadgetheader%omega0
@@ -887,6 +891,5 @@ function de_matfac(a)
      de_matfac = 1.0d0
   end if
 end function de_matfac
-
 
 

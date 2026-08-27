@@ -194,7 +194,10 @@ CONTAINS
          header%flag_stellarage,header%flag_metals,header%totalhighword, &
          header%flag_entropy_instead_u, header%flag_doubleprecision, &
          header%flag_ic_info, header%lpt_scalingfactor
-    np=header%npart(2)
+    ! Read Gadget type 1 and type 2 contiguously.  Both are interpreted as
+    ! collisionless matter by load_gadget; type 2 is used for a bounded
+    ! two-species DMO validation, not as RAMSES gas.
+    np=header%npart(2)+header%npart(3)
     READ(1)pos(1:3,1:np)
     READ(1)vel(1:3,1:np)
     READ(1)id(1:np)
