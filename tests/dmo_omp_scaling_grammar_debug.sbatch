@@ -5,6 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=4
 #SBATCH --cpus-per-task=8
+#SBATCH --exclusive
 #SBATCH --mem=80G
 #SBATCH --time=00:10:00
 #SBATCH --output=/home/kjhan/BACKUP/lagRamses-DE/dmo_omp8_%j.slurm
@@ -65,8 +66,9 @@ import statistics
 import sys
 
 root = pathlib.Path(sys.argv[1])
-step_re = re.compile(r"Time elapsed since last coarse step:\s+([0-9.]+) s")
+elapsed_re = re.compile(r"Time elapsed since last coarse step:\s+([0-9.]+) s")
 rho_re = re.compile(r"^\s*([0-9.]+)\s+[0-9.]+\s+[0-9.]+.*\brho\s*$", re.M)
+total_re = re.compile(r"^\s*([0-9.]+)\s+100\.0\s+TOTAL\s*$", re.M)
 state_re = re.compile(
     r"Mtot=\s*([^ ]+)\s+Ekin_tot=\s*([^ ]+)\s+Epop_tot=\s*([^ ]+)\s+Eint_tot=\s*([^ ]+)"
 )
@@ -74,30 +76,35 @@ arms = ("t1", "t4_a", "t8_a", "t8_b", "t4_b")
 data = {}
 for arm in arms:
     text = (root / arm / "run.log").read_text(errors="replace")
-    steps = [float(value) for value in step_re.findall(text)]
+    elapsed = [float(value) for value in elapsed_re.findall(text)]
     rho = [float(value) for value in rho_re.findall(text)]
+    totals = [float(value) for value in total_re.findall(text)]
     states = state_re.findall(text)
-    if len(steps) != 1 or not rho or not states:
+    if len(elapsed) != 1 or not rho or not totals or not states:
         raise SystemExit(f"{arm}: incomplete timing/state evidence")
-    data[arm] = {"step": steps[-1], "rho": rho[-1], "state": states[-1]}
+    data[arm] = {
+        "timer_total": totals[-1], "restart_elapsed": elapsed[-1],
+        "rho": rho[-1], "state": states[-1]
+    }
 
 states = {data[name]["state"] for name in arms}
 if len(states) != 1:
     raise SystemExit(f"printed final conservation state differs: {states}")
 
-t1 = data["t1"]["step"]
-t4 = statistics.mean(data[name]["step"] for name in ("t4_a", "t4_b"))
-t8 = statistics.mean(data[name]["step"] for name in ("t8_a", "t8_b"))
+t1 = data["t1"]["timer_total"]
+t4 = statistics.mean(data[name]["timer_total"] for name in ("t4_a", "t4_b"))
+t8 = statistics.mean(data[name]["timer_total"] for name in ("t8_a", "t8_b"))
 rho4 = statistics.mean(data[name]["rho"] for name in ("t4_a", "t4_b"))
 rho8 = statistics.mean(data[name]["rho"] for name in ("t8_a", "t8_b"))
 
 with (root / "summary.txt").open("w") as stream:
     for arm in arms:
-        stream.write(f"{arm}_step_seconds {data[arm]['step']:.6f}\n")
+        stream.write(f"{arm}_timer_total_seconds {data[arm]['timer_total']:.6f}\n")
+        stream.write(f"{arm}_restart_elapsed_seconds {data[arm]['restart_elapsed']:.6f}\n")
         stream.write(f"{arm}_rho_seconds {data[arm]['rho']:.6f}\n")
-    stream.write(f"omp1_mean_step_seconds {t1:.6f}\n")
-    stream.write(f"omp4_mean_step_seconds {t4:.6f}\n")
-    stream.write(f"omp8_mean_step_seconds {t8:.6f}\n")
+    stream.write(f"omp1_timer_total_seconds {t1:.6f}\n")
+    stream.write(f"omp4_mean_timer_total_seconds {t4:.6f}\n")
+    stream.write(f"omp8_mean_timer_total_seconds {t8:.6f}\n")
     stream.write(f"omp4_speedup {t1 / t4:.6f}\n")
     stream.write(f"omp8_speedup {t1 / t8:.6f}\n")
     stream.write(f"omp4_efficiency_percent {100.0 * t1 / (4.0 * t4):.3f}\n")

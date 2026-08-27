@@ -32,11 +32,25 @@ uniform-level dispatch, `cg_levelmin` selects the iterative solver as follows:
 | `cic_levelmax`      |	`integer`  | 0	 | Maximum level for CIC dark matter interpolation (default `cic_levelmax=nlevelmax`)
 | `use_fftw`          | `logical`  | `.true.` | Use the FFTW3 direct Poisson solver on fully uniform levels. Requires the default FFTW-enabled build; set `.false.` only to request MG explicitly.
 
-For the Paper-Ib $256^3$ DMO restart on `grammar-debug` (4 MPI ranks), OpenMP
-CIC linked-list partitioning reduced the four-thread density-deposition phase
-from 2.192 s to 1.275 s.  Coarse-step times were 60.500, 15.620, and 9.455 s
-with 1, 4, and 8 threads per rank, respectively.  The corresponding parallel
-efficiencies were 96.83% and 79.98%; going from 4 to 8 threads reduced the
-wall time by 39.47%.  At eight threads, atomic mesh contention increased the
-density-deposition phase to 1.558 s, identifying the current scaling limit.
-The reported final conservation state was identical in all three runs.
+The default OpenMP CIC path uses atomic-free spatially colored scatter.  A
+particle grid can touch only its $3^3$ neighboring-grid stencil.  Grid
+coordinates modulo four therefore define 64 phases in which no two source
+grids can update the same target cell, including across the periodic
+power-of-two mesh.  One-thread and sparse-level paths bypass the color setup.
+The former atomic implementation remains available for controlled regression
+tests with `make CIC_ATOMIC_SCATTER=1`.
+
+An exclusive-node Paper-Ib $256^3$ DMO restart benchmark on `grammar-debug`
+compared the two implementations with identical executables apart from that
+build switch.  At 8 MPI ranks x 8 OpenMP threads, the colored path reduced
+the final timer total from 5.903 to 4.470 s (1.32x) and the `rho` phase from
+0.827 to 0.310 s (2.67x).  At 16x4 the corresponding values were
+4.094 to 4.046 s and 0.325 to 0.277 s; at 32x2 they were 4.437 to
+4.444 s and 0.267 to 0.252 s.  Thus 16x4 was the fastest tested 64-core
+layout, while 32x2 had the highest colored-path OpenMP efficiencies among
+those layouts (89.3% for the full timer and 69.2% for `rho`).  A separate
+fixed-four-rank test measured full-timer efficiencies of 87.5% and 76.9% at
+four and eight threads, with the eight-thread run still reducing wall time by
+43.1% relative to four threads.  All runs printed the same final conservation
+state.  `Time elapsed since last coarse step` includes restart preparation;
+these comparisons use the final timer `TOTAL` and report `rho` separately.

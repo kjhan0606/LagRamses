@@ -2018,17 +2018,51 @@ Use \texttt{USE\_FFTW=0} only for an explicit multigrid diagnostic build.
 
 \section{OpenMP particle-to-mesh deposition}
 
-The CIC density deposition partitions each rank's linked grid list between
-OpenMP threads.  Contributions that can overlap in a mesh cell use atomic
-updates for \texttt{rho}, \texttt{rho\_top}, \texttt{phi}, and the mass
-multipole.  On the Paper-Ib $256^3$ DMO restart on \texttt{grammar-debug}
-(four MPI ranks), the coarse-step times with one, four, and eight threads per
-rank were 60.500, 15.620, and 9.455 seconds.  The corresponding efficiencies
-were 96.83\% and 79.98\%; increasing from four to eight threads reduced the
-wall time by 39.47\%.  The \texttt{rho} phase took 1.275 seconds at four
-threads but 1.558 seconds at eight threads, showing that atomic mesh
-contention is the current scaling limit.  The reported final conservation
-state was identical in all three runs.
+The default CIC density deposition uses atomic-free spatially colored
+scatter.  A source grid can update only its $3^3$ neighboring-grid stencil.
+Coloring each grid coordinate modulo four therefore creates 64 phases in
+which target stencils do not overlap, including at the periodic boundary of
+the power-of-two mesh.  Threads divide the grids within each phase, so
+\texttt{rho}, \texttt{rho\_top}, and \texttt{phi} have a single writer.
+The mass multipole uses padded per-thread accumulators.  One-thread runs and
+sparse AMR levels bypass color construction and its barriers.  The previous
+atomic path can be built for regression tests with
+\texttt{make CIC\_ATOMIC\_SCATTER=1}; it is not the default.
+
+Table~\ref{tab:cic-colored-scaling} compares both paths on an exclusive
+\texttt{grammar-debug} node using the Paper-Ib $256^3$ DMO restart.  The two
+executables differed only by the build switch, and variants were run in
+alternating order.  The final timer \texttt{TOTAL} excludes the ambiguity of
+restart preparation time; the \texttt{rho} timer isolates deposition.
+
+\begin{table}[htbp]
+\caption{Atomic versus colored CIC at fixed 64 physical cores.  Efficiency is
+relative to the corresponding one-thread run at the same MPI rank count.}
+\label{tab:cic-colored-scaling}
+\begin{center}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{2}{c}{Atomic scatter} & \multicolumn{2}{c}{Colored scatter} & \multicolumn{2}{c}{Colored efficiency} \\
+\textbf{MPI$\times$OMP} & \textbf{Total (s)} & \textbf{$\rho$ (s)} & \textbf{Total (s)} & \textbf{$\rho$ (s)} & \textbf{Total} & \textbf{$\rho$} \\
+\midrule
+8$\times$8  & 5.903 & 0.827 & 4.470 & 0.310 & 81.9\% & 52.9\% \\
+16$\times$4 & 4.094 & 0.325 & 4.046 & 0.277 & 86.8\% & 59.7\% \\
+32$\times$2 & 4.437 & 0.267 & 4.444 & 0.252 & 89.3\% & 69.2\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
+
+The largest contention removal occurs at 8$\times$8: colored deposition is
+2.67$\times$ faster and the full timer is 1.32$\times$ faster.  At lower
+thread counts the full application is already limited by other phases;
+16$\times$4 is the fastest tested 64-core layout.  In a separate fixed-four-
+rank test, total-timer efficiencies were 87.5\% and 76.9\% at four and eight
+threads, and eight threads reduced wall time by 43.1\% relative to four.
+These measurements show a real multi-thread speedup but do not support a
+95\% efficiency claim.  All configurations printed the same final
+conservation state.
 
 \section{Two-Path Architecture}
 

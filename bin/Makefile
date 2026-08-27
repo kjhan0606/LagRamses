@@ -11,6 +11,7 @@
 #PATCH = ../patch/Horizon5-master
 #EXEC = ramses_ch
 USE_FFTW ?= 1
+CIC_ATOMIC_SCATTER ?= 0
 ##################################
 # Yohan's patch
 #NVECTOR = 32
@@ -48,6 +49,9 @@ ifdef AMR_INDEX_CHECK
 endif
 ifdef MORTON128
   FFLAGS += -DMORTON128
+endif
+ifeq ($(CIC_ATOMIC_SCATTER),1)
+  FFLAGS += -DCIC_ATOMIC_SCATTER
 endif
 
 #############################################################################
