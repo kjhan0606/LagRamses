@@ -93,6 +93,7 @@ module pm_commons
   contains
 
   subroutine grow_particle_bundle(new_npartmax)
+    use amr_commons, only: myid
     ! Grow every particle-sized array as one logical bundle.  The arrays are
     ! resized one at a time: move_alloc briefly retains the old and new copy
     ! of only the current array, bounding transient extra memory by one array
@@ -249,6 +250,9 @@ module pm_commons
 
     ! This is deliberately the last capacity update: all allocated bundle
     ! members have the same extent before npartmax changes.
+    write(*,'(A,I0,A,I0,A,I0)') &
+         '[RESIZABLE] PARTICLE_GROW rank=',myid,' old=',old_npartmax, &
+         ' new=',target_npartmax
     npartmax=target_npartmax
     if(particle_free_list_ready)npart=npartmax-numbp_free
   end subroutine grow_particle_bundle
