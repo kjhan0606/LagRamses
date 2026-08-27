@@ -1819,6 +1819,8 @@ end subroutine redistribute_particles_by_position
 #define TIME_END(ce) call SYSTEM_CLOCK(COUNT=ce)
 #define TIME_SPENT(cs,ce,cr) REAL((ce-cs)/cr)
 subroutine load_gadget
+  ! Gadget type 1 and type 2 are both collisionless FAM_DM here.  Type 2
+  ! supplies the low-mass X component in the Paper-Ib bounded species test.
   use amr_commons
   use pm_commons
   use gadgetreadfilemod
@@ -1833,11 +1835,12 @@ subroutine load_gadget
   integer::ifile
   real(dp),dimension(1:nvector,1:3)::xx_dp
   real, dimension(:, :), allocatable:: pos, vel
-  real(dp)::massparticles
-  integer(kind=8)::allparticles
+  real(dp),dimension(2)::massparticles
+  integer(kind=8),dimension(2)::allparticles
+  real(dp)::totalmass
   integer(i8b) :: tmp_long
   integer(i8b), dimension(:), allocatable:: ids  
-  integer::nparticles, arraysize
+  integer::nparticles,nparticles_type1,arraysize
   integer::i, icpu, ipart, info, np, start
   integer(i8b),dimension(1:ncpu)::npart_cpu,npart_all
   character(LEN=256)::filename
@@ -1857,15 +1860,26 @@ subroutine load_gadget
      numfiles = gadgetheader%numfiles
      gadgetvfact = SQRT(aexp) / gadgetheader%boxsize * aexp / 100.
 #ifndef LONGINT
-     allparticles=int(gadgetheader%nparttotal(2),kind=8)
+     allparticles(1)=int(gadgetheader%nparttotal(2),kind=8)
+     allparticles(2)=int(gadgetheader%nparttotal(3),kind=8)
 #else
-     allparticles=int(gadgetheader%nparttotal(2),kind=8) &
+     allparticles(1)=int(gadgetheader%nparttotal(2),kind=8) &
           & +int(gadgetheader%totalhighword(2),kind=8)*4294967296_8 !2^32
+     allparticles(2)=int(gadgetheader%nparttotal(3),kind=8) &
+          & +int(gadgetheader%totalhighword(3),kind=8)*4294967296_8 !2^32
 #endif
-     massparticles=1d0/dble(allparticles)
+     totalmass=dble(allparticles(1))*gadgetheader%mass(2) &
+          & +dble(allparticles(2))*gadgetheader%mass(3)
+     if(totalmass<=0d0)then
+        write(*,*) 'Invalid total collisionless mass in Gadget header'
+        call clean_stop
+     endif
+     massparticles(1)=gadgetheader%mass(2)/totalmass
+     massparticles(2)=gadgetheader%mass(3)/totalmass
      do ifile=0,numfiles-1
         call gadgetreadheader(filename, ifile, gadgetheader, ok)
-        nparticles = gadgetheader%npart(2)
+        nparticles_type1 = gadgetheader%npart(2)
+        nparticles = nparticles_type1+gadgetheader%npart(3)
         allocate(pos(3,nparticles))
         allocate(vel(3,nparticles))
         allocate(ids(nparticles))
@@ -1897,7 +1911,11 @@ subroutine load_gadget
               vp(ipart,1)  =vel(1, i) * gadgetvfact
               vp(ipart,2)  =vel(2, i) * gadgetvfact
               vp(ipart,3)  =vel(3, i) * gadgetvfact
-              mp(ipart)    = massparticles
+              if(i<=nparticles_type1)then
+                 mp(ipart)=massparticles(1)
+              else
+                 mp(ipart)=massparticles(2)
+              endif
               levelp(ipart)=levelmin
               idp(ipart)   =ids(i)
 #ifndef WITHOUTMPI
