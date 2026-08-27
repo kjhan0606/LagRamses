@@ -140,35 +140,46 @@ CONTAINS
     INTEGER*4, DIMENSION(*) :: id
 #else
     INTEGER*8, DIMENSION(*) :: id
+    INTEGER*4, ALLOCATABLE, DIMENSION(:) :: id4
 #endif
 ! Internal variables
     CHARACTER(LEN=256) :: filename
     CHARACTER(LEN=6) :: fileno
-    INTEGER :: np
+    INTEGER :: np,ios
     logical::ok
      integer,parameter::tag=1105
     integer::dummy_io,info2
 
-    !     Generate the number to go on the end of the filename
-    IF(ifile.LT.10)THEN
-       WRITE(fileno,'(".",1i1.1)')ifile
-    ELSE IF (ifile.LT.100)THEN
-       WRITE(fileno,'(".",1i2.2)')ifile
-    ELSE IF (ifile.LT.1000)THEN
-       WRITE(fileno,'(".",1i3.3)')ifile
-    ELSE IF (ifile.LT.10000)THEN
-       WRITE(fileno,'(".",1i4.4)')ifile
-    ELSE
-       WRITE(fileno,'(".",1i5.5)')ifile
-    END IF
+    ! A single-file Gadget IC is conventionally stored exactly at basename,
+    ! whereas a multi-file IC uses basename.0, basename.1, ... .  The header
+    ! reader already accepts both forms; resolve the particle-data path with
+    ! the same convention so a valid single file is not silently skipped.
+    ok=.false.
+    if(header%numfiles == 1) then
+       filename = TRIM(basename)
+       INQUIRE(file=filename, exist=ok)
+    endif
 
-    filename = TRIM(basename) // fileno
-
-    INQUIRE(file=filename, exist=ok)
+    if(.not.ok)then
+       ! Generate the number to go on the end of the filename.
+       IF(ifile.LT.10)THEN
+          WRITE(fileno,'(".",1i1.1)')ifile
+       ELSE IF (ifile.LT.100)THEN
+          WRITE(fileno,'(".",1i2.2)')ifile
+       ELSE IF (ifile.LT.1000)THEN
+          WRITE(fileno,'(".",1i3.3)')ifile
+       ELSE IF (ifile.LT.10000)THEN
+          WRITE(fileno,'(".",1i4.4)')ifile
+       ELSE
+          WRITE(fileno,'(".",1i5.5)')ifile
+       END IF
+       filename = TRIM(basename) // fileno
+       INQUIRE(file=filename, exist=ok)
+    endif
 
     if(.not.ok) then
         write(*,*) 'No file '//filename
-        RETURN
+        call clean_stop
     end if
     
     ! Wait for the token (this token might be moved to init_part for best performance)
@@ -196,7 +207,42 @@ CONTAINS
     np=header%npart(2)+header%npart(3)
     READ(1)pos(1:3,1:np)
     READ(1)vel(1:3,1:np)
-    READ(1)id(1:np)
+#ifndef LONGINT
+    READ(1,IOSTAT=ios)id(1:np)
+    if(ios.ne.0)then
+       write(*,*)'Unable to read 32-bit Gadget particle IDs from '//TRIM(filename)
+       close(1)
+       call clean_stop
+    endif
+#else
+    ! Gadget does not record the ID integer width in its header.  Prefer the
+    ! 64-bit block requested by a LONGINT build, then retry the same record as
+    ! the common 32-bit representation and widen it without changing values.
+    READ(1,IOSTAT=ios)id(1:np)
+    if(ios.ne.0)then
+       close(1)
+       OPEN(unit=1,file=filename,status='old',action='read',form='unformatted')
+       READ(1)header%npart,header%mass,header%time,header%redshift, &
+            header%flag_sfr,header%flag_feedback,header%nparttotal, &
+            header%flag_cooling,header%numfiles,header%boxsize, &
+            header%omega0,header%omegalambda,header%hubbleparam, &
+            header%flag_stellarage,header%flag_metals,header%totalhighword, &
+            header%flag_entropy_instead_u,header%flag_doubleprecision, &
+            header%flag_ic_info,header%lpt_scalingfactor
+       READ(1)pos(1:3,1:np)
+       READ(1)vel(1:3,1:np)
+       allocate(id4(np))
+       READ(1,IOSTAT=ios)id4
+       if(ios.ne.0)then
+          write(*,*)'Unable to read Gadget particle IDs from '//TRIM(filename)
+          deallocate(id4)
+          close(1)
+          call clean_stop
+       endif
+       id(1:np)=int(id4,kind=8)
+       deallocate(id4)
+    endif
+#endif
     CLOSE(1)
 
     ! Send the token
