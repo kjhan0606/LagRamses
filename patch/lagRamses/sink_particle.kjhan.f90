@@ -32,18 +32,21 @@ subroutine create_sink
 
   call diag_check_nan('sink_post_killtree')
 
-  ! Get the star density value in each cell
-  do ilevel=levelmin,nlevelmax
-     call kjhan_get_rho_star(ilevel)
-  enddo
+  ! Star density and formation-site scans are needed only when new sinks
+  ! may be created.  Existing sinks still pass through the merge/cloud and
+  ! Bondi maintenance below when create_sinks is false.
+  if(create_sinks)then
+     do ilevel=levelmin,nlevelmax
+        call kjhan_get_rho_star(ilevel)
+     enddo
+  endif
 
   call diag_check_nan('sink_post_rhostar')
 
-  ! Create new sink particles
-  ! and gather particle from the grid
-  call kjhan_make_sink(nlevelmax)
+  ! Create new sink particles and gather all particles back to level 1.
+  if(create_sinks)call kjhan_make_sink(nlevelmax)
   do ilevel=nlevelmax-1,1,-1
-     if(ilevel>=levelmin)call kjhan_make_sink(ilevel)
+     if(create_sinks.and.ilevel>=levelmin)call kjhan_make_sink(ilevel)
      call merge_tree_fine(ilevel)
   end do
 
@@ -2870,9 +2873,10 @@ subroutine bondi_hoyle(ilevel)
   common /openmp_b_h/ ind_grid, ind_part, ind_grid_part
 !$omp threadprivate(/openmp_b_h/)
   integer, dimension(:), allocatable:: nparticles, ptrhead
-  integer:: mythread, nthreads,npart3
+  integer:: mythread, nthreads,npart3,ithread
   common /omp1_threads/ mythread
 !$omp threadprivate(/omp1_threads/)
+  real(dp),allocatable::density_thread(:,:,:)
 
   real(dp)::r2,dx_loc,dx_min,scale
   real(dp)::dx,factG,pi
@@ -2898,6 +2902,8 @@ subroutine bondi_hoyle(ilevel)
 !$omp end parallel
 ! allocate(Pind_grid(1:nvector, 0: nthreads-1), Pind_part(1:nvector, 0: nthreads-1),Pind_grid_part(1:nvector, 0: nthreads-1))
   allocate(nparticles(0:nthreads-1), ptrhead(0:nthreads-1))
+  allocate(density_thread(1:max(nsink,1),1:3+ndim,0:nthreads-1))
+  density_thread=0d0
 !!$omp parallel
 ! ind_grid => Pind_grid(:, mythread)
 ! ind_part => Pind_part(:, mythread)
@@ -3096,7 +3102,8 @@ subroutine bondi_hoyle(ilevel)
                  ind_grid_part(ip)=ig
               endif
               if(ip==nvector)then
-                 call kjhan_average_density(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+                 call kjhan_average_density(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
+                      & density_thread(:,:,mythread))
                  if((.not.random_jet)) call kjhan_jet_AGN(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
                  ip=0
                  ig=0
@@ -3109,13 +3116,31 @@ subroutine bondi_hoyle(ilevel)
         igrid=next(igrid)   ! Go to next grid
      end do
      ! End loop over grids
-     if(ip>0)call kjhan_average_density(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+     if(ip>0)call kjhan_average_density(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
+          & density_thread(:,:,mythread))
      if(ip>0 .and.(.not.random_jet)) call kjhan_jet_AGN(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
 #ifndef OMP_TEST
 !$omp end parallel
 #endif
 12  end do
   ! End loop over cpus
+
+  ! Deterministic reduction of thread-private cloud samples.  Keeping the
+  ! particle interpolation outside a global critical lets independent sink
+  ! clouds progress concurrently.
+  wdens=0d0; wvol=0d0; wc2=0d0; wmom=0d0
+  !$omp parallel do schedule(static) private(isink,ithread)
+  do isink=1,nsink
+     do ithread=0,nthreads-1
+        wdens(isink)=wdens(isink)+density_thread(isink,1,ithread)
+        wvol (isink)=wvol (isink)+density_thread(isink,2,ithread)
+        wc2  (isink)=wc2  (isink)+density_thread(isink,3,ithread)
+        wmom(isink,1:ndim)=wmom(isink,1:ndim) &
+             & +density_thread(isink,4:3+ndim,ithread)
+     end do
+  end do
+  !$omp end parallel do
+  deallocate(density_thread)
 
   if(random_jet)then
      if(myid==1)then
@@ -3400,7 +3425,8 @@ end subroutine kjhan_bondi_velocity
 !################################################################
 !################################################################
 !################################################################
-subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
+subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
+     & density_thread)
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -3410,6 +3436,7 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   integer, intent(in)::ng,np,ilevel
   integer,dimension(1:nvector), intent(in)::ind_grid
   integer,dimension(1:nvector), intent(in)::ind_grid_part,ind_part
+  real(dp),dimension(1:max(nsink,1),1:3+ndim),intent(inout)::density_thread
   !-----------------------------------------------------------------------
   ! This routine is called by subroutine bondi_hoyle. Each cloud particle
   ! reads up the value of density, sound speed and velocity from its
@@ -3710,7 +3737,6 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
         c2gas(j)=c2gas(j)+d*c2*vol(j,ind)
      end do
   end do
-!$omp critical (average_density)
   do j=1,np
      ksink=-idp(ind_part(j))
      r2=0d0
@@ -3718,14 +3744,17 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
         r2=r2+(xp(ind_part(j),idim)-xsink(ksink,idim))**2
      end do
      weight=exp(-r2/r2k(ksink))
-     wdens(ksink)=wdens(ksink)+weight*dgas(j)
-     wmom(ksink,1)=wmom(ksink,1)+weight*ugas(j)
-     wmom(ksink,2)=wmom(ksink,2)+weight*vgas(j)
-     wmom(ksink,3)=wmom(ksink,3)+weight*wgas(j)
-     wc2  (ksink)=wc2  (ksink)+weight*c2gas(j)
-     wvol (ksink)=wvol (ksink)+weight
+     density_thread(ksink,1)=density_thread(ksink,1)+weight*dgas(j)
+     density_thread(ksink,2)=density_thread(ksink,2)+weight
+     density_thread(ksink,3)=density_thread(ksink,3)+weight*c2gas(j)
+     density_thread(ksink,4)=density_thread(ksink,4)+weight*ugas(j)
+#if NDIM>1
+     density_thread(ksink,5)=density_thread(ksink,5)+weight*vgas(j)
+#endif
+#if NDIM>2
+     density_thread(ksink,6)=density_thread(ksink,6)+weight*wgas(j)
+#endif
   end do
-!$omp end critical (average_density)
 
 end subroutine kjhan_average_density
 !################################################################
@@ -3737,6 +3766,8 @@ subroutine grow_bondi(ilevel)
   use amr_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH, twopi
+  use omp_lib, ONLY: omp_get_thread_num, omp_get_num_threads, omp_lock_kind, &
+       & omp_init_lock
 #include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
@@ -3762,16 +3793,28 @@ subroutine grow_bondi(ilevel)
   real(dp)::dmaccdum,cdum,vvdum,dmEdddum,mbhdum,ddum,fourpi,prefact
   integer:: mythread, nthreads,npart3
   integer,allocatable,dimension(:)::nparticles_omp,ptrhead_omp
+  integer,parameter::n_bondi_locks=4096
+  integer(omp_lock_kind),save::bondi_cell_locks(1:n_bondi_locks)
+  logical,save::bondi_locks_initialized=.false.
+  real(dp),allocatable::sink_thread(:,:,:)
 
   call MPI_BARRIER(MPI_COMM_WORLD,info)
 
   if(numbtot(1,ilevel)==0)return
 
-  !$omp parallel shared(nthreads)
+  !$omp parallel shared(nthreads) private(mythread)
      mythread = omp_get_thread_num()
      if(mythread==0) nthreads = omp_get_num_threads()
   !$omp end parallel
   allocate(nparticles_omp(0:nthreads-1), ptrhead_omp(0:nthreads-1))
+  allocate(sink_thread(1:max(nsink,1),1:4+ndim,0:nthreads-1))
+  sink_thread=0d0
+  if(.not.bondi_locks_initialized)then
+     do i=1,n_bondi_locks
+        call omp_init_lock(bondi_cell_locks(i))
+     end do
+     bondi_locks_initialized=.true.
+  endif
   if(verbose)write(*,111)ilevel
 
   ! Conversion factor from user units to cgs units
@@ -3808,6 +3851,8 @@ subroutine grow_bondi(ilevel)
   c_avgptr=0d0;v_avgptr=0d0;d_avgptr=0d0
 
   ! Compute Bondi-Hoyle accretion rate
+  !$omp parallel do schedule(static) private(isink,density,c2mean,velocity, &
+  !$omp & volume,i,v2mean,alpha,ZZ1,ZZ2,r_lso,epsilon_r)
   do isink=1,nsink
      density=0d0
      c2mean=0d0
@@ -3865,6 +3910,7 @@ subroutine grow_bondi(ilevel)
      c_avgptr(isink)=dsqrt(c2mean)
      d_avgptr(isink)=density
   end do
+  !$omp end parallel do
 
   ! Loop over cpus
   do icpu=1,ncpu
@@ -3916,7 +3962,8 @@ subroutine grow_bondi(ilevel)
                     ind_grid_part(ip)=ig
                  endif
                  if(ip==nvector)then
-                    call accrete_bondi(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+                    call accrete_bondi(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
+                         & bondi_cell_locks,n_bondi_locks,sink_thread(:,:,mythread))
                     ip=0
                     ig=0
                  end if
@@ -3929,12 +3976,32 @@ subroutine grow_bondi(ilevel)
         end do
         ! End loop over grids
         if(ip>0) then
-           call accrete_bondi(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+           call accrete_bondi(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
+                & bondi_cell_locks,n_bondi_locks,sink_thread(:,:,mythread))
         endif
      !$omp end parallel
 102  end do
   ! End loop over cpus
   deallocate(nparticles_omp, ptrhead_omp)
+
+  ! Deterministic per-sink reduction of thread-private accretion ledgers.
+  msink_new=0d0; vsink_new=0d0; dMBH_coarse_new=0d0; dMEd_coarse_new=0d0; dMsmbh_new=0d0
+  !$omp parallel do schedule(static) private(isink,mythread)
+  do isink=1,nsink
+     do mythread=0,nthreads-1
+        msink_new(isink)=msink_new(isink)+sink_thread(isink,1,mythread)
+        vsink_new(isink,1:ndim)=vsink_new(isink,1:ndim) &
+             & +sink_thread(isink,2:1+ndim,mythread)
+        dMBH_coarse_new(isink)=dMBH_coarse_new(isink) &
+             & +sink_thread(isink,2+ndim,mythread)
+        dMEd_coarse_new(isink)=dMEd_coarse_new(isink) &
+             & +sink_thread(isink,3+ndim,mythread)
+        dMsmbh_new(isink)=dMsmbh_new(isink) &
+             & +sink_thread(isink,4+ndim,mythread)
+     end do
+  end do
+  !$omp end parallel do
+  deallocate(sink_thread)
 
   if(nsink>0)then
 #ifndef WITHOUTMPI
@@ -3965,11 +4032,11 @@ subroutine grow_bondi(ilevel)
      vsink_all=vsink_new
      dMBH_coarse_all=dMBH_coarse_new
      dMEd_coarse_all=dMEd_coarse_new
-     dMsmbh_all       =dMBsmbh_new
+     dMsmbh_all       =dMsmbh_new
 #endif
   endif
 
-!!$omp parallel do private(isink)
+  !$omp parallel do schedule(static) private(isink)
   do isink=1,nsink
      vsink(isink,1:ndim)=vsink(isink,1:ndim)*msink(isink)+vsink_all(isink,1:ndim)
      msink(isink)   =msink(isink)       +msink_all(isink)
@@ -3978,11 +4045,11 @@ subroutine grow_bondi(ilevel)
      dMEd_coarse(isink)=dMEd_coarse(isink)+dMEd_coarse_all(isink)
      dMsmbh   (isink)=dMsmbh      (isink)+dMsmbh_all     (isink)
   end do
+  !$omp end parallel do
 
   ! YDspin
   if(spin_bh)call kjhan_growspin
   ! YDspin
-
 
 111 format('  +Entering grow_bondi for level ',I2)
 
@@ -3991,20 +4058,24 @@ end subroutine grow_bondi
 !################################################################
 !################################################################
 !################################################################
-subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
+subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
+     & bondi_cell_locks,n_bondi_locks,sink_thread)
   use amr_commons
   use pm_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH, twopi
+  use omp_lib, ONLY: omp_lock_kind, omp_set_lock, omp_unset_lock
 #include "amr_index.h"
   implicit none
-  integer::ng,np,ilevel
+  integer::ng,np,ilevel,n_bondi_locks
   integer,dimension(1:nvector)::ind_grid
   integer,dimension(1:nvector)::ind_grid_part,ind_part
+  integer(omp_lock_kind),dimension(1:n_bondi_locks),intent(inout)::bondi_cell_locks
+  real(dp),dimension(1:max(nsink,1),1:4+ndim),intent(inout)::sink_thread
   !-----------------------------------------------------------------------
   ! This routine is called by subroutine bondi_hoyle.
   !-----------------------------------------------------------------------
-  integer::i,j,idim,nx_loc,isink
+  integer::i,j,idim,nx_loc,isink,ilock
   integer(i8b)::ksink
   real(dp)::xxx,mmm,r2,v2,c2,d,u,v,w,e,bx1,bx2,by1,by2,bz1,bz2,z
   real(dp)::dx,dx_loc,scale,vol_loc,weight,acc_mass,temp
@@ -4032,6 +4103,11 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   real(dp),dimension(1:ndim)::dpdrag,vrel,fdrag
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,pi,d_star
   real(dp)::epsilon_r
+  logical,dimension(1:nvector)::event_ok
+  integer,dimension(1:nvector)::event_sink
+  real(dp),dimension(1:nvector)::event_mp,event_dmbh,event_dmed,event_dmsmbh
+  real(dp),dimension(1:nvector,1:ndim)::event_vp,event_momentum
+  real(dp)::dmsink_net,mp_old
 
   ! Conversion factor from user units to cgs units
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
@@ -4202,18 +4278,31 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
      end if
   end do
 
-  ! Remove mass from hydro cells
-  ! Critical section protects uold R-M-W against cross-grid cell races
-  ! (cloud particles from different grids can NGP-map to the same cell)
-!$omp critical (accrete_bondi_kjhan)
+  ! Build one event record per cloud particle.  The coupled hydro state
+  ! update remains atomic at cell granularity, while unrelated cells can
+  ! proceed concurrently.  Particle and sink updates are deferred until
+  ! after the cell lock is released.
+  event_ok(1:np)=.false.
+  event_mp(1:np)=0d0
+  event_vp(1:np,1:ndim)=0d0
+  event_momentum(1:np,1:ndim)=0d0
+  event_dmbh(1:np)=0d0
+  event_dmed(1:np)=0d0
+  event_dmsmbh(1:np)=0d0
   do j=1,np
      if(ok(j))then
         ksink=-idp(ind_part(j))
+        event_sink(j)=ksink
         r2=0d0
         do idim=1,ndim
            r2=r2+(xp(ind_part(j),idim)-xsink(ksink,idim))**2
         end do
         weight=exp(-r2/r2k(ksink))
+
+        ! A striped lock is sufficient: collisions merely serialize two
+        ! unrelated cells, whereas equal cell indices always share a lock.
+        ilock=1+mod(indp(j)-1,n_bondi_locks)
+        call omp_set_lock(bondi_cell_locks(ilock))
 
         d=uold(indp(j),1)
         u=uold(indp(j),2)/d
@@ -4253,31 +4342,30 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
            endif
         endif
         dmsink=dmsink*(1d0-epsilon_r)
+        dmsink_net=dmsink
 
-        ! Add the accreted mass to the total accreted mass over
-        ! a coarse time step
-        dMBH_coarse_new(ksink)=dMBH_coarse_new(ksink) + &
-             & dMBHoverdt(ksink)*weight/total_volume(ksink)*dtnew(ilevel)
-        dMEd_coarse_new(ksink)=dMEd_coarse_new(ksink) + &
-             & dMEdoverdt(ksink)*weight/total_volume(ksink)*dtnew(ilevel)
-        dMsmbh_new     (ksink)=dMsmbh_new     (ksink) + dmsink
-
-        msink_new(ksink    )=msink_new(ksink  )+dmsink
-        vsink_new(ksink,1)=vsink_new(ksink,1)+dmsink*u
+        ! Save the sink ledger contribution in this event.  It is reduced
+        ! into a thread-private sink array after the hydro transaction.
+        event_dmbh(j)=dMBHoverdt(ksink)*weight/total_volume(ksink)*dtnew(ilevel)
+        event_dmed(j)=dMEdoverdt(ksink)*weight/total_volume(ksink)*dtnew(ilevel)
+        event_dmsmbh(j)=dmsink_net
+        event_momentum(j,1)=dmsink_net*u
 #if NDIM>1
-        vsink_new(ksink,2)=vsink_new(ksink,2)+dmsink*v
+        event_momentum(j,2)=dmsink_net*v
 #endif
 #if NDIM>2
-        vsink_new(ksink,3)=vsink_new(ksink,3)+dmsink*w
+        event_momentum(j,3)=dmsink_net*w
 #endif
 
-        vp(ind_part(j),1)=mp(ind_part(j))*vp(ind_part(j),1)+dmsink*u
-        vp(ind_part(j),2)=mp(ind_part(j))*vp(ind_part(j),2)+dmsink*v
-        vp(ind_part(j),3)=mp(ind_part(j))*vp(ind_part(j),3)+dmsink*w
-        mp(ind_part(j))=mp(ind_part(j))+dmsink
-        vp(ind_part(j),1)=vp(ind_part(j),1)/mp(ind_part(j))
-        vp(ind_part(j),2)=vp(ind_part(j),2)/mp(ind_part(j))
-        vp(ind_part(j),3)=vp(ind_part(j),3)/mp(ind_part(j))
+        mp_old=mp(ind_part(j))
+        event_mp(j)=mp_old+dmsink_net
+        event_vp(j,1)=(mp_old*vp(ind_part(j),1)+dmsink_net*u)/event_mp(j)
+#if NDIM>1
+        event_vp(j,2)=(mp_old*vp(ind_part(j),2)+dmsink_net*v)/event_mp(j)
+#endif
+#if NDIM>2
+        event_vp(j,3)=(mp_old*vp(ind_part(j),3)+dmsink_net*w)/event_mp(j)
+#endif
 
         dmsink=dmsink/(1d0-epsilon_r)
         d=d-dmsink/vol_loc
@@ -4310,9 +4398,9 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
 #endif
            cgas=sqrt(gamma*(gamma-1d0)*e/d)
            ! Compute the drag force exerted by the gas on the sink particle
-           vrel(1)=vp(ind_part(j),1)-u
-           vrel(2)=vp(ind_part(j),2)-v
-           vrel(3)=vp(ind_part(j),3)-w
+           vrel(1)=event_vp(j,1)-u
+           vrel(2)=event_vp(j,2)-v
+           vrel(3)=event_vp(j,3)-w
            vnorm_rel=sqrt( vrel(1)**2 + vrel(2)**2 + vrel(3)**2 )
            mach=vnorm_rel/cgas
            alpha=max((d/d_star)**boost_drag,1d0)
@@ -4325,9 +4413,9 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
            enddo
            do idim=1,ndim
               dvdrag=fdrag(idim)*dtnew(ilevel)
-              dpdrag(idim)=mp(ind_part(j))*dvdrag
-              vp(ind_part(j),idim)=vp(ind_part(j),idim)+dvdrag
-              vsink_new(ksink,idim)=vsink_new(ksink,idim)+dvdrag*mp(ind_part(j))
+              dpdrag(idim)=event_mp(j)*dvdrag
+              event_vp(j,idim)=event_vp(j,idim)+dvdrag
+              event_momentum(j,idim)=event_momentum(j,idim)+dpdrag(idim)
            enddo
 
            ekk=0.0d0
@@ -4344,10 +4432,27 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
            uold(indp(j),ndim+2)=e
 
         endif
+        event_ok(j)=.true.
+        call omp_unset_lock(bondi_cell_locks(ilock))
      endif
 
   end do
-!$omp end critical (accrete_bondi_kjhan)
+
+  ! The cloud particles are unique entries in the linked lists, and this
+  ! sink ledger belongs to the calling thread.  No atomics are required.
+  do j=1,np
+     if(event_ok(j))then
+        ksink=event_sink(j)
+        mp(ind_part(j))=event_mp(j)
+        vp(ind_part(j),1:ndim)=event_vp(j,1:ndim)
+        sink_thread(ksink,1)=sink_thread(ksink,1)+event_dmsmbh(j)
+        sink_thread(ksink,2:1+ndim)=sink_thread(ksink,2:1+ndim) &
+             & +event_momentum(j,1:ndim)
+        sink_thread(ksink,2+ndim)=sink_thread(ksink,2+ndim)+event_dmbh(j)
+        sink_thread(ksink,3+ndim)=sink_thread(ksink,3+ndim)+event_dmed(j)
+        sink_thread(ksink,4+ndim)=sink_thread(ksink,4+ndim)+event_dmsmbh(j)
+     endif
+  end do
 
 end subroutine accrete_bondi
 !################################################################
