@@ -596,6 +596,7 @@ subroutine interpolate_and_correct_coarse(ifinelevel)
    integer,  dimension(1:nvector_mg)                 :: igrid_f_amr, icell_amr, cpu_amr
    integer,  dimension(1:nvector_mg,1:threetondim)  :: nbors_father_cells
    integer,  dimension(1:nvector_mg,1:twotondim)    :: nbors_father_grids
+   integer,  dimension(1:nvector_mg,1:threetondim)  :: coarse_cell_mg, coarse_cpu_mg
    real(dp), dimension(1:nvector_mg)                :: corr
 
    ! Local constants
@@ -636,6 +637,22 @@ subroutine interpolate_and_correct_coarse(ifinelevel)
       ! Gather 3x3x3 neighboring parent cells
       call get3cubefather_mg(icell_amr,nbors_father_cells,nbors_father_grids,nbatch,ifinelevel)
 
+      ! Cache the MG address of each of the 27 parent cells once per batch.
+      do ind_father=1,threetondim
+         do i=1,nbatch
+            coarse_cell_mg(i,ind_father)=0
+            icell_c_amr = nbors_father_cells(i,ind_father)
+            if(icell_c_amr<=0) cycle
+            ind_c       = ICHILD_OF(icell_c_amr)
+            igrid_c_amr = IGRID_OF(icell_c_amr)
+            igrid_c_mg  = lookup_mg(igrid_c_amr)
+            cpu_c_amr   = cpu_map(father(igrid_c_amr))
+            if(igrid_c_mg<=0) cycle
+            coarse_cpu_mg(i,ind_father)=cpu_c_amr
+            coarse_cell_mg(i,ind_father)=(ind_c-1)*active_mg(cpu_c_amr,icoarselevel)%ngrid+igrid_c_mg
+         end do
+      end do
+
       ! Update solution for fine grid cells
       do ind_f=1,twotondim
          iskip_f_mg  = (ind_f-1)*ngrid_f
@@ -656,14 +673,9 @@ subroutine interpolate_and_correct_coarse(ifinelevel)
                   corr(i)=0.0d0        ! Fine cell is masked : no correction
                   cycle
                end if
-               icell_c_amr = nbors_father_cells(i,ind_father)
-               ind_c       = ICHILD_OF(icell_c_amr)
-               igrid_c_amr = IGRID_OF(icell_c_amr)
-               igrid_c_mg  = lookup_mg(igrid_c_amr)
-               cpu_c_amr   = cpu_map(father(igrid_c_amr))
-               if(igrid_c_mg<=0) cycle
-
-               icell_c_mg  = (ind_c-1)*active_mg(cpu_c_amr,icoarselevel)%ngrid + igrid_c_mg
+               icell_c_mg = coarse_cell_mg(i,ind_father)
+               if(icell_c_mg<=0) cycle
+               cpu_c_amr = coarse_cpu_mg(i,ind_father)
                corr(i)=corr(i)+coeff*active_mg(cpu_c_amr,icoarselevel)%u(icell_c_mg,1)
             end do
          end do

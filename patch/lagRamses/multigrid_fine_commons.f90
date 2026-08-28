@@ -1545,6 +1545,8 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    use amr_commons
    use poisson_commons
    use ksection
+   use omp_lib, only: omp_lock_kind, omp_init_lock, omp_destroy_lock, &
+        omp_set_lock, omp_unset_lock
 #ifdef FDMDEBUG
    use mg_omp_profile_m
 #endif
@@ -1563,7 +1565,9 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
 
    integer :: icoarselevel
    integer :: ngrids, cur_grid, cur_cpu, cur_cell, newgrids
-   integer :: i, nbatch, ind, icpu, istart, info
+   integer :: i, nbatch, ind, icpu, istart, info, ilock, islot
+   integer, parameter :: nbuild_locks=256
+   integer(omp_lock_kind), allocatable :: build_locks(:)
 
    integer :: nact_tot, nreq_tot, nreq_tot2
    integer, dimension(1:ncpu) :: nreq, nreq2
@@ -1609,6 +1613,10 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    allocate(P_icf_bp(1:nvector, 0:nthreads-1))
    allocate(P_nfg_bp(1:nvector, 1:twotondim, 0:nthreads-1))
    allocate(P_nfc_bp(1:nvector, 1:threetondim, 0:nthreads-1))
+   allocate(build_locks(0:nbuild_locks-1))
+   do i=0,nbuild_locks-1
+      call omp_init_lock(build_locks(i))
+   end do
 !$omp parallel
    ind_cell_father => P_icf_bp(:, mythread)
    nbors_father_grids => P_nfg_bp(:, :, mythread)
@@ -1621,7 +1629,7 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
 
    ! Loop over the AMR active communicator first
    ngrids = active_f_comm%ngrid
-!$omp parallel do private(istart,nbatch,i,ind,cur_grid,cur_cpu) schedule(dynamic,128)
+!$omp parallel do private(istart,nbatch,i,ind,cur_grid,cur_cpu,ilock,islot) schedule(dynamic,128)
    do istart=1,ngrids,nvector
       nbatch=min(nvector,ngrids-istart+1)
       ! Gather grid indices and retrieve parent cells
@@ -1642,22 +1650,30 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
             cur_cpu=cpu_map(father(cur_grid))
             if(cur_cpu==0) cycle
 
-            !$omp critical(stage1_update)
+            ilock=mod(cur_grid,nbuild_locks)
+            call omp_set_lock(build_locks(ilock))
             if(lookup_mg(cur_grid)<=0) then  ! Definitive check under lock
                if(cur_cpu==myid) then
                   ! Stack grid for local activation
+                  !$omp atomic capture
                   nact_tot=nact_tot+1
-                  flag2(nact_tot)=cur_grid
-                  lookup_mg(cur_grid)=nact_tot
+                  islot=nact_tot
+                  !$omp end atomic
+                  flag2(islot)=cur_grid
+                  lookup_mg(cur_grid)=islot
                else
                   ! Stack grid for remote activation
+                  !$omp atomic capture
                   nreq_tot=nreq_tot+1
+                  islot=nreq_tot
+                  !$omp end atomic
+                  !$omp atomic update
                   nreq(cur_cpu)=nreq(cur_cpu)+1
-                  flag2(ngridmax+nreq_tot)=cur_grid
+                  flag2(ngridmax+islot)=cur_grid
                   lookup_mg(cur_grid)=abs(lookup_mg(cur_grid))
                end if
             end if
-            !$omp end critical(stage1_update)
+            call omp_unset_lock(build_locks(ilock))
          end do
       end do
    end do
@@ -1785,7 +1801,7 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    ngrids = active_mg(myid,icoarselevel)%ngrid
    nreq2 = 0
    nreq_tot2 = 0
-!$omp parallel do private(istart,nbatch,i,ind,cur_cell,cur_cpu,cur_grid) schedule(dynamic,128)
+!$omp parallel do private(istart,nbatch,i,ind,cur_cell,cur_cpu,cur_grid,ilock,islot) schedule(dynamic,128)
    do istart=1,ngrids,nvector
       nbatch=min(nvector,ngrids-istart+1)
       ! Gather grid indices and retrieve parent cells
@@ -1807,14 +1823,19 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
                ! Neighbor cell is not managed by current CPU
                if (cur_grid==0) cycle              ! No grid there
                if (lookup_mg(cur_grid)>0) cycle    ! Already selected (pre-check)
-               !$omp critical(stage4_update)
+               ilock=mod(cur_grid,nbuild_locks)
+               call omp_set_lock(build_locks(ilock))
                if(lookup_mg(cur_grid)<=0) then  ! Definitive check under lock
+                  !$omp atomic capture
                   nreq_tot2=nreq_tot2+1
+                  islot=nreq_tot2
+                  !$omp end atomic
+                  !$omp atomic update
                   nreq2(cur_cpu)=nreq2(cur_cpu)+1
-                  flag2(ngridmax+nreq_tot+nreq_tot2)=cur_grid
+                  flag2(ngridmax+nreq_tot+islot)=cur_grid
                   lookup_mg(cur_grid)=abs(lookup_mg(cur_grid))
                end if
-               !$omp end critical(stage4_update)
+               call omp_unset_lock(build_locks(ilock))
             end if
          end do
       end do
@@ -2032,6 +2053,10 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    end do
 #endif
 
+   do i=0,nbuild_locks-1
+      call omp_destroy_lock(build_locks(i))
+   end do
+   deallocate(build_locks)
    deallocate(P_icf_bp, P_nfg_bp, P_nfc_bp)
 #ifdef FDMDEBUG
    call mgp_stop(MGP_BUILD,mgp_wall_start,mgp_cpu_start, &
@@ -2403,12 +2428,10 @@ subroutine make_fine_bc_rhs(ilevel,icount)
                ! Get neighbor grid shift
                igshift = iii(idim,inbor,ind)
 
-               ! Get neighbor grid using precomputed array
-               if(igshift==0) then
-                  igrid_nbor_amr = igrid_amr
-               else
-                  igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-               end if
+               ! Reuse the face-neighbor cache built before this routine.
+               ! Slot zero is the grid itself; slots 1:twondim are Morton
+               ! neighbors, so this also removes the per-cell hash lookup.
+               igrid_nbor_amr = nbor_grid_fine(igshift,igrid_mg)
 
                if(igrid_nbor_amr==0) then
                   ! No neighbor (rare boundary case): interp. phi
