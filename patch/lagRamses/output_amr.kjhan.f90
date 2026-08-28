@@ -13,10 +13,11 @@ subroutine dump_all
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  character::nml_char
+  character,dimension(:),allocatable::nml_bytes
   character(LEN=5)::nchar,ncharcpu
   character(LEN=80)::filename,filedir,filedirini,filecmd
-  integer::i,itest,info,irec,ierr,ilevel
+  integer::i,itest,info,ierr,ilevel
+  integer(kind=8)::nml_size
   logical::marker_exists,phi_marker_valid,phi_marker_valid_all
 
   if(nstep_coarse==nstep_coarse_old.and.nstep_coarse>0)return
@@ -111,17 +112,42 @@ subroutine dump_all
         endif
         ! Copy namelist file to output directory
         filename=TRIM(filedir)//'namelist.txt'
-        OPEN(UNIT=10, FILE=namelist_file, ACCESS='DIRECT', STATUS='OLD', &
-             & ACTION='READ',  IOSTAT=IERR, RECL=1)
-        OPEN(UNIT=11, FILE=filename, ACCESS='DIRECT', STATUS='REPLACE', &
-             & ACTION='WRITE', IOSTAT=IERR, RECL=1)
-        IREC = 1
-        DO
-           READ(UNIT=10, REC=IREC, IOSTAT=IERR)nml_char
-           IF (IERR.NE.0) EXIT
-           WRITE(UNIT=11, REC=IREC)nml_char
-           IREC = IREC + 1
-        END DO
+        OPEN(UNIT=10, FILE=namelist_file, ACCESS='STREAM', FORM='UNFORMATTED', STATUS='OLD', &
+             & ACTION='READ', IOSTAT=IERR)
+        if(IERR/=0)then
+           write(*,*)'Cannot open namelist for provenance copy: ',TRIM(namelist_file)
+           call clean_stop
+        endif
+        INQUIRE(UNIT=10, SIZE=nml_size, IOSTAT=IERR)
+        if(IERR/=0 .or. nml_size<=0)then
+           write(*,*)'Cannot size namelist for provenance copy: ',TRIM(namelist_file)
+           close(10)
+           call clean_stop
+        endif
+        allocate(nml_bytes(nml_size))
+        READ(UNIT=10, POS=1, IOSTAT=IERR)nml_bytes
+        if(IERR/=0)then
+           write(*,*)'Cannot read namelist for provenance copy: ',TRIM(namelist_file)
+           deallocate(nml_bytes)
+           close(10)
+           call clean_stop
+        endif
+        OPEN(UNIT=11, FILE=filename, ACCESS='STREAM', FORM='UNFORMATTED', STATUS='REPLACE', &
+             & ACTION='WRITE', IOSTAT=IERR)
+        if(IERR/=0)then
+           write(*,*)'Cannot create namelist provenance copy: ',TRIM(filename)
+           close(10)
+           call clean_stop
+        endif
+        WRITE(UNIT=11, POS=1, IOSTAT=IERR)nml_bytes
+        if(IERR/=0)then
+           write(*,*)'Cannot write namelist provenance copy: ',TRIM(filename)
+           deallocate(nml_bytes)
+           close(10)
+           close(11)
+           call clean_stop
+        endif
+        deallocate(nml_bytes)
         CLOSE(10)
         CLOSE(11)
         ! Copy compilation details to output directory
