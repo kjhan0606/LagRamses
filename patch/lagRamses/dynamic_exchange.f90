@@ -143,10 +143,12 @@ contains
     deallocate(sorted)
   end subroutine exchange_dp_records
 
-  subroutine choose_exchange_backend(nsend, nrecv, record_bytes, backend, label)
+  subroutine choose_exchange_backend(nsend, nrecv, record_bytes, backend, label, &
+       p2p_payload_limit)
     integer, intent(in) :: nsend(:), nrecv(:), record_bytes
     integer, intent(out) :: backend
     character(len=*), intent(in), optional :: label
+    integer(i8b), intent(in), optional :: p2p_payload_limit
 #ifndef WITHOUTMPI
     include 'mpif.h'
 #endif
@@ -189,6 +191,13 @@ contains
        backend=EXCHANGE_ALLTOALLV
     else if(ncpu <= 1) then
        density = 0.0_dp
+       backend = EXCHANGE_SPARSE_P2P
+    else if(present(p2p_payload_limit) .and. &
+         max_rank_bytes <= p2p_payload_limit) then
+       ! Repeated exchanges with pre-existing rank buffers should not pay a
+       ! collective pack/unpack penalty for tiny payloads, even when their
+       ! rank graph is topologically dense.
+       density = real(global_edges, dp) / real(int(ncpu, i8b)*int(ncpu-1, i8b), dp)
        backend = EXCHANGE_SPARSE_P2P
     else
        density = real(global_edges, dp) / real(int(ncpu, i8b)*int(ncpu-1, i8b), dp)

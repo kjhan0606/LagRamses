@@ -62,6 +62,31 @@ configuration uses the Intel `ifx` compiler with HDF5 parallel I/O and
 optional CUDA acceleration (`make HDF5=1 USE_CUDA=1`). 128-bit Morton
 keys for deep-AMR runs are enabled with `MORTON128=1`.
 
+Refined-level multigrid phase profiling can be enabled independently with
+`make MG_PROFILE=1 HDF5=1 USE_FFTW=1`. This retains the production `-O3`
+flags and adds cumulative `MGPROF` reports; it does not enable the broader
+debug instrumentation.
+
+The CPU refined-level multigrid solver caches the centre and six face-neighbour
+grid indices for the duration of each solve. Coarse MG levels also cache the
+owner rank. The caches are rebuilt after the MG topology is constructed and
+released during MG cleanup; their storage cost is 28 bytes per active fine grid
+and 56 bytes per coarse MG grid when default four-byte integers are used. This
+removes repeated Morton/hash lookups without changing the stencil or MPI
+exchange backend. The fine-grid cache is shared with the optional CUDA upload
+path.
+
+Refined-MG halo exchanges honor the global `exchange_method` policy. With
+`exchange_method='auto'`, the solver measures each level's fixed communication
+graph once after constructing the MG hierarchy, caches separate forward and
+reverse choices, and reuses them throughout the V-cycle. Sparse graphs use
+nonblocking P2P. MG also keeps P2P for aggregate rank payloads up to 1 MiB,
+because its existing rank buffers avoid the extra collective packing cost.
+Larger intermediate graphs use the sectioned k-section schedule, while dense
+bounded messages may use `MPI_Alltoallv`. The explicit values `p2p`, `ksection`,
+and `alltoallv` force the corresponding backend. Backend selection is not
+repeated inside the MG iteration.
+
 ### Sink and AGN JSONL diagnostics
 
 The active [`patch/lagRamses/`](./patch/lagRamses/) sink implementation writes

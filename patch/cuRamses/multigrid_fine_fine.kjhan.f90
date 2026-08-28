@@ -135,7 +135,6 @@ subroutine cmp_residual_mg_fine(ilevel)
    ! Computes the residual the fine (AMR) level, and stores it into f(:,1)
    use amr_commons
    use poisson_commons
-   use morton_hash
 #include "amr_index.h"
    implicit none
    integer, intent(in) :: ilevel
@@ -173,7 +172,8 @@ subroutine cmp_residual_mg_fine(ilevel)
    ! Boundary cells take the checked Morton path while interior cells use
    ! the fast path.  Guided chunks balance that variable cost without a
    ! compact work array or per-cell flattening arithmetic.
-!$omp parallel default(firstprivate) shared(active,flag2,son,phi,f)
+!$omp parallel default(firstprivate) &
+!$omp shared(active,flag2,son,phi,f,nbor_grid_fine)
    do ind=1,twotondim
 
 !$omp do schedule(guided,256)
@@ -190,11 +190,7 @@ subroutine cmp_residual_mg_fine(ilevel)
                do idim=1,ndim
                   ! Get neighbor grid
                   igshift = iii(idim,inbor,ind)
-                  if(igshift==0) then
-                     igrid_nbor_amr = igrid_amr
-                  else
-                     igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-                  end if
+                  igrid_nbor_amr = nbor_grid_fine(igshift,igrid_mg)
                   icell_nbor_amr = ICELL_OF(igrid_nbor_amr,jjj(idim,inbor,ind))
                   nb_sum = nb_sum + phi(icell_nbor_amr)
                end do
@@ -208,11 +204,7 @@ subroutine cmp_residual_mg_fine(ilevel)
                do inbor=1,2
                   ! Get neighbor grid
                   igshift = iii(idim,inbor,ind)
-                  if(igshift==0) then
-                     igrid_nbor_amr = igrid_amr
-                  else
-                     igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-                  end if
+                  igrid_nbor_amr = nbor_grid_fine(igshift,igrid_mg)
 
                   if(igrid_nbor_amr==0) then
                      nb_sum = nb_sum - phi_c/f(icell_amr,3)
@@ -335,7 +327,6 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
    use amr_commons
    use pm_commons
    use poisson_commons
-   use morton_hash
 #include "amr_index.h"
    implicit none
    integer, intent(in) :: ilevel
@@ -378,7 +369,8 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
 #endif
    ! Cells within one red or black color do not share faces.  Guided chunks
    ! distribute the checked boundary path without allocating a work buffer.
-!$omp parallel default(firstprivate) shared(active,flag2,son,phi,f,safe_mode)
+!$omp parallel default(firstprivate) &
+!$omp shared(active,flag2,son,phi,f,safe_mode,nbor_grid_fine)
    do ind0=1,twotondim/2
       if(redstep) then
          ind = ired  (ndim,ind0)
@@ -403,12 +395,7 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
                do idim=1,ndim
                   ! Get neighbor grid shift
                   igshift = iii(idim,inbor,ind)
-                  ! Get neighbor grid
-                  if(igshift==0) then
-                     igrid_nbor_amr = igrid_amr
-                  else
-                     igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-                  end if
+                  igrid_nbor_amr = nbor_grid_fine(igshift,igrid_mg)
                   icell_nbor_amr = ICELL_OF(igrid_nbor_amr,jjj(idim,inbor,ind))
                   nb_sum = nb_sum + phi(icell_nbor_amr)
                end do
@@ -426,13 +413,7 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
                do idim=1,ndim
                   ! Get neighbor grid shift
                   igshift = iii(idim,inbor,ind)
-
-                  ! Get neighbor grid
-                  if(igshift==0) then
-                     igrid_nbor_amr = igrid_amr
-                  else
-                     igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-                  end if
+                  igrid_nbor_amr = nbor_grid_fine(igshift,igrid_mg)
 
                   if(igrid_nbor_amr==0) then
                      ! No neighbor cell,
@@ -699,7 +680,6 @@ end subroutine interpolate_and_correct_fine
 subroutine set_scan_flag_fine(ilevel)
    use amr_commons
    use poisson_commons
-   use morton_hash
 #include "amr_index.h"
    implicit none
 
@@ -746,11 +726,7 @@ subroutine set_scan_flag_fine(ilevel)
             scan_flag_loop: do inbor=1,2
                do idim=1,ndim
                   igshift = iii(idim,inbor,ind)
-                  if(igshift==0) then
-                     igrid_nbor_amr = igrid_amr
-                  else
-                     igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-                  end if
+                  igrid_nbor_amr = nbor_grid_fine(igshift,igrid_mg)
 
                   if(igrid_nbor_amr==0) then
                      scan_flag=1
@@ -1093,8 +1069,8 @@ subroutine get3cubepos_fine_mg(ind_grid,ind,nbors_father_cells,nbors_father_grid
 end subroutine get3cubepos_fine_mg
 
 ! ------------------------------------------------------------------------
-! Precompute neighbor grid cache for GPU MG Poisson
-! Builds nbor_grid_fine(0:twondim, 1:ngrid) for cuda_mg_upload
+! Precompute neighbor grid cache for CPU and GPU fine-level MG Poisson
+! Builds nbor_grid_fine(0:twondim, 1:ngrid) for hot CPU loops and cuda upload
 ! ------------------------------------------------------------------------
 subroutine precompute_nbor_grid_fine(ilevel)
    use amr_commons
@@ -1115,6 +1091,8 @@ subroutine precompute_nbor_grid_fine(ilevel)
    if(allocated(nbor_grid_fine)) deallocate(nbor_grid_fine)
    allocate(nbor_grid_fine(0:twondim, 1:ngrid))
 
+!$omp parallel do default(shared) private(igrid_mg,igrid_amr,j,igridn) &
+!$omp schedule(static)
    do igrid_mg = 1, ngrid
       igrid_amr = active(ilevel)%igrid(igrid_mg)
       nbor_grid_fine(0, igrid_mg) = igrid_amr  ! Self-reference
@@ -1123,4 +1101,5 @@ subroutine precompute_nbor_grid_fine(ilevel)
          nbor_grid_fine(j, igrid_mg) = igridn
       end do
    end do
+!$omp end parallel do
 end subroutine precompute_nbor_grid_fine

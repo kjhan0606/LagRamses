@@ -44,6 +44,10 @@ endif
 ifdef FDMTRACE
   FFLAGS += -DFDMDEBUG
 endif
+ifeq ($(MG_PROFILE),1)
+  # Refined-level multigrid phase timers only; retain the production -O3 flags.
+  FFLAGS += -DMG_PROFILE
+endif
 ifdef AMR_INDEX_CHECK
   FFLAGS += -DAMR_INDEX_CHECK
 endif

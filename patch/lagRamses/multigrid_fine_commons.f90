@@ -18,6 +18,14 @@
 !
 ! ------------------------------------------------------------------------
 
+#if defined(MG_PROFILE) && !defined(FDMDEBUG)
+! Reuse the existing MG-only instrumentation guards without enabling the
+! debug compiler flags or diagnostics in any other translation unit.  The
+! alias is removed below before the independent FFTW profiler section.
+#define MG_PROFILE_ONLY
+#define FDMDEBUG
+#endif
+
 #ifdef FDMDEBUG
 module mg_omp_profile_m
    use omp_lib, only: omp_get_wtime
@@ -379,12 +387,9 @@ subroutine multigrid_fine(ilevel,icount)
    call make_virtual_fine_dp_mg_profile(f(:,3),ilevel) ! Communicate mask
    call make_boundary_mask(ilevel)          ! Set mask to -1 in phys bounds
 
-   ! The flat neighbor cache is consumed only by the CUDA MG upload path.
-   ! CPU MG performs its own Morton lookup and must not pay this serial setup
-   ! or retain the otherwise-unused (twondim+1)*ngrid integer array.
-#ifdef HYDRO_CUDA
+   ! Cache the six face-neighbor grids once for both CPU MG kernels and the
+   ! optional CUDA upload path.  The V-cycle reuses this topology many times.
    call precompute_nbor_grid_fine(ilevel)
-#endif
 
    call make_fine_bc_rhs(ilevel,icount)            ! Fill BC-modified RHS
 
@@ -398,6 +403,7 @@ subroutine multigrid_fine(ilevel,icount)
    do ifine=(ilevel-1),2,-1
       call build_parent_comms_mg(active_mg(myid,ifine),ifine)
    end do
+   call configure_mg_exchange_backends(1,ilevel-1)
 
    ! ---------------------------------------------------------------------
    ! Restrict mask up, then set scan flag
@@ -624,6 +630,7 @@ subroutine multigrid_fine(ilevel,icount)
       do ifine=1,ilevel-1
          call cleanup_mg_level(ifine)
       end do
+      call cleanup_mg_exchange_backends()
       if(myid==1) write(*,'(A,I5,A)') &
            '   ==> Level=',ilevel,' FFT direct solve DONE'
 #ifdef HYDRO_CUDA
@@ -977,6 +984,7 @@ subroutine multigrid_fine(ilevel,icount)
    do ifine=1,ilevel-1
       call cleanup_mg_level(ifine)
    end do
+   call cleanup_mg_exchange_backends()
 
 #ifdef FDMDEBUG
    call mgp_stop(MGP_TOTAL,mgp_wall_start,mgp_cpu_start, &
@@ -2443,6 +2451,110 @@ end subroutine make_fine_bc_rhs
 ! ########################################################################
 
 ! ------------------------------------------------------------------------
+! Select and retain one communication backend per MG level and direction.
+! The communicator topology is unchanged inside a V-cycle, so repeating the
+! global density decision in every halo exchange would only add collectives.
+! ------------------------------------------------------------------------
+subroutine configure_mg_exchange_backends(lmin,lmax)
+  use amr_commons
+  use amr_parameters,only:i8b
+  use poisson_commons
+  use dynamic_exchange, only: choose_exchange_backend
+  implicit none
+  integer,intent(in)::lmin,lmax
+  integer::ilevel,icpu
+  integer,dimension(ncpu)::nsend,nrecv
+  integer(i8b),parameter::MG_P2P_PAYLOAD_LIMIT=1024_i8b*1024_i8b
+  character(len=48)::label
+
+  call cleanup_mg_exchange_backends()
+  if(lmax<lmin) return
+  allocate(mg_forward_backend(lmin:lmax),mg_reverse_backend(lmin:lmax))
+
+  do ilevel=lmin,lmax
+     nsend=0
+     nrecv=0
+     do icpu=1,ncpu
+        if(icpu==myid) cycle
+        nsend(icpu)=emission_mg(icpu,ilevel)%ngrid
+        nrecv(icpu)=active_mg(icpu,ilevel)%ngrid
+     end do
+     write(label,'(A,I0,A)') 'MG forward L',ilevel,' cached'
+     call choose_exchange_backend(nsend,nrecv,8*twotondim, &
+          mg_forward_backend(ilevel),trim(label),MG_P2P_PAYLOAD_LIMIT)
+     write(label,'(A,I0,A)') 'MG reverse L',ilevel,' cached'
+     call choose_exchange_backend(nrecv,nsend,8*twotondim, &
+          mg_reverse_backend(ilevel),trim(label),MG_P2P_PAYLOAD_LIMIT)
+  end do
+end subroutine configure_mg_exchange_backends
+
+! ########################################################################
+! ########################################################################
+
+subroutine cleanup_mg_exchange_backends()
+  use poisson_commons
+  implicit none
+
+  if(allocated(mg_forward_backend)) deallocate(mg_forward_backend)
+  if(allocated(mg_reverse_backend)) deallocate(mg_reverse_backend)
+  if(allocated(mg_exchange_send_dp)) deallocate(mg_exchange_send_dp)
+  if(allocated(mg_exchange_recv_dp)) deallocate(mg_exchange_recv_dp)
+  if(allocated(mg_exchange_send_int)) deallocate(mg_exchange_send_int)
+  if(allocated(mg_exchange_recv_int)) deallocate(mg_exchange_recv_int)
+end subroutine cleanup_mg_exchange_backends
+
+! ########################################################################
+! ########################################################################
+
+subroutine ensure_mg_exchange_dp(nsend,nrecv)
+  use amr_parameters,only:dp
+  use poisson_commons
+  implicit none
+  integer,intent(in)::nsend,nrecv
+  integer::send_need,recv_need
+
+  send_need=max(1,nsend)
+  recv_need=max(1,nrecv)
+  if(.not.allocated(mg_exchange_send_dp))then
+     allocate(mg_exchange_send_dp(send_need))
+  else if(size(mg_exchange_send_dp)<send_need)then
+     deallocate(mg_exchange_send_dp)
+     allocate(mg_exchange_send_dp(send_need))
+  end if
+  if(.not.allocated(mg_exchange_recv_dp))then
+     allocate(mg_exchange_recv_dp(recv_need))
+  else if(size(mg_exchange_recv_dp)<recv_need)then
+     deallocate(mg_exchange_recv_dp)
+     allocate(mg_exchange_recv_dp(recv_need))
+  end if
+end subroutine ensure_mg_exchange_dp
+
+! ########################################################################
+! ########################################################################
+
+subroutine ensure_mg_exchange_int(nsend,nrecv)
+  use poisson_commons
+  implicit none
+  integer,intent(in)::nsend,nrecv
+  integer::send_need,recv_need
+
+  send_need=max(1,nsend)
+  recv_need=max(1,nrecv)
+  if(.not.allocated(mg_exchange_send_int))then
+     allocate(mg_exchange_send_int(send_need))
+  else if(size(mg_exchange_send_int)<send_need)then
+     deallocate(mg_exchange_send_int)
+     allocate(mg_exchange_send_int(send_need))
+  end if
+  if(.not.allocated(mg_exchange_recv_int))then
+     allocate(mg_exchange_recv_int(recv_need))
+  else if(size(mg_exchange_recv_int)<recv_need)then
+     deallocate(mg_exchange_recv_int)
+     allocate(mg_exchange_recv_int(recv_need))
+  end if
+end subroutine ensure_mg_exchange_int
+
+! ------------------------------------------------------------------------
 ! MPI routines for MG communication for CPU boundaries,
 ! Those are the MG versions of the make_virtual_* AMR routines
 ! ------------------------------------------------------------------------
@@ -2450,7 +2562,7 @@ end subroutine make_fine_bc_rhs
 subroutine make_virtual_mg_dp(ivar,ilevel)
   use amr_commons
   use poisson_commons
-  use ksection
+  use dynamic_exchange,only:EXCHANGE_SPARSE_P2P
 #ifdef FDMDEBUG
   use mg_omp_profile_m
 #endif
@@ -2463,7 +2575,7 @@ subroutine make_virtual_mg_dp(ivar,ilevel)
   integer::ilevel,ivar,icell
   integer::icpu,i,j,ncache,iskip,step
   integer::countsend,countrecv
-  integer::info,tag=101
+  integer::info,tag=101,backend
   integer,dimension(ncpu)::reqsend,reqrecv
 #ifdef FDMDEBUG
   real(kind=8) :: mgp_wall_start,mgp_cpu_start
@@ -2478,8 +2590,10 @@ subroutine make_virtual_mg_dp(ivar,ilevel)
 #endif
 
 #ifndef WITHOUTMPI
-  if(ordering=='ksection') then
-     call make_virtual_mg_dp_ksec(ivar,ilevel)
+  backend=EXCHANGE_SPARSE_P2P
+  if(allocated(mg_forward_backend)) backend=mg_forward_backend(ilevel)
+  if(backend/=EXCHANGE_SPARSE_P2P) then
+     call make_virtual_mg_dp_dynamic(ivar,ilevel,backend)
 #ifdef FDMDEBUG
      call mgp_stop(MGP_MG_FORWARD,mgp_wall_start,mgp_cpu_start,mgp_nwork)
 #endif
@@ -2545,7 +2659,7 @@ end subroutine make_virtual_mg_dp
 subroutine make_virtual_mg_int(ilevel)
   use amr_commons
   use poisson_commons
-  use ksection
+  use dynamic_exchange,only:EXCHANGE_SPARSE_P2P
 #ifdef FDMDEBUG
   use mg_omp_profile_m
 #endif
@@ -2557,7 +2671,7 @@ subroutine make_virtual_mg_int(ilevel)
   integer::ilevel
   integer::icpu,i,j,ncache,iskip,step,icell
   integer::countsend,countrecv
-  integer::info,tag=101
+  integer::info,tag=101,backend
   integer,dimension(ncpu)::reqsend,reqrecv
 #ifdef FDMDEBUG
   real(kind=8) :: mgp_wall_start,mgp_cpu_start
@@ -2572,8 +2686,10 @@ subroutine make_virtual_mg_int(ilevel)
 #endif
 
 #ifndef WITHOUTMPI
-  if(ordering=='ksection') then
-     call make_virtual_mg_int_ksec(ilevel)
+  backend=EXCHANGE_SPARSE_P2P
+  if(allocated(mg_forward_backend)) backend=mg_forward_backend(ilevel)
+  if(backend/=EXCHANGE_SPARSE_P2P) then
+     call make_virtual_mg_int_dynamic(ilevel,backend)
 #ifdef FDMDEBUG
      call mgp_stop(MGP_MG_FORWARD,mgp_wall_start,mgp_cpu_start,mgp_nwork)
 #endif
@@ -2639,7 +2755,7 @@ end subroutine make_virtual_mg_int
 subroutine make_reverse_mg_dp(ivar,ilevel)
   use amr_commons
   use poisson_commons
-  use ksection
+  use dynamic_exchange,only:EXCHANGE_SPARSE_P2P
 #ifdef FDMDEBUG
   use mg_omp_profile_m
 #endif
@@ -2651,7 +2767,7 @@ subroutine make_reverse_mg_dp(ivar,ilevel)
   integer::ilevel,ivar,icell
   integer::icpu,i,j,ncache,iskip,step
   integer::countsend,countrecv
-  integer::info,tag=101
+  integer::info,tag=101,backend
   integer,dimension(ncpu)::reqsend,reqrecv
 #ifdef FDMDEBUG
   real(kind=8) :: mgp_wall_start,mgp_cpu_start
@@ -2666,8 +2782,10 @@ subroutine make_reverse_mg_dp(ivar,ilevel)
 #endif
 
 #ifndef WITHOUTMPI
-  if(ordering=='ksection') then
-     call make_reverse_mg_dp_ksec(ivar,ilevel)
+  backend=EXCHANGE_SPARSE_P2P
+  if(allocated(mg_reverse_backend)) backend=mg_reverse_backend(ilevel)
+  if(backend/=EXCHANGE_SPARSE_P2P) then
+     call make_reverse_mg_dp_dynamic(ivar,ilevel,backend)
 #ifdef FDMDEBUG
      call mgp_stop(MGP_MG_REVERSE,mgp_wall_start,mgp_cpu_start,mgp_nwork)
 #endif
@@ -2734,7 +2852,7 @@ end subroutine make_reverse_mg_dp
 subroutine make_reverse_mg_int(ilevel)
   use amr_commons
   use poisson_commons
-  use ksection
+  use dynamic_exchange,only:EXCHANGE_SPARSE_P2P
 #ifdef FDMDEBUG
   use mg_omp_profile_m
 #endif
@@ -2746,7 +2864,7 @@ subroutine make_reverse_mg_int(ilevel)
   integer::ilevel,icell
   integer::icpu,i,j,ncache,iskip,step
   integer::countsend,countrecv
-  integer::info,tag=101
+  integer::info,tag=101,backend
   integer,dimension(ncpu)::reqsend,reqrecv
 #ifdef FDMDEBUG
   real(kind=8) :: mgp_wall_start,mgp_cpu_start
@@ -2761,8 +2879,10 @@ subroutine make_reverse_mg_int(ilevel)
 #endif
 
 #ifndef WITHOUTMPI
-  if(ordering=='ksection') then
-     call make_reverse_mg_int_ksec(ilevel)
+  backend=EXCHANGE_SPARSE_P2P
+  if(allocated(mg_reverse_backend)) backend=mg_reverse_backend(ilevel)
+  if(backend/=EXCHANGE_SPARSE_P2P) then
+     call make_reverse_mg_int_dynamic(ilevel,backend)
 #ifdef FDMDEBUG
      call mgp_stop(MGP_MG_REVERSE,mgp_wall_start,mgp_cpu_start,mgp_nwork)
 #endif
@@ -2825,279 +2945,195 @@ end subroutine make_reverse_mg_int
 
 ! ########################################################################
 ! ########################################################################
-! Ksection-based MG communication routines
+! Cached non-P2P MG communication routines.  Buffers are destination-sorted
+! once per call, while the selected k-section or Alltoallv backend is reused.
 ! ########################################################################
 ! ########################################################################
 
-subroutine make_virtual_mg_dp_ksec(ivar,ilevel)
+subroutine make_virtual_mg_dp_dynamic(ivar,ilevel,backend)
   use amr_commons
   use poisson_commons
-  use ksection
+  use dynamic_exchange,only:exchange_dp_sorted
   implicit none
-#ifndef WITHOUTMPI
-  include 'mpif.h'
-#endif
-  integer,intent(in)::ivar,ilevel
-  ! -------------------------------------------------------------------
-  ! Ksection-based forward MG ghost zone exchange for double precision.
-  ! Packs emission_mg data with metadata, exchanges via ksection tree,
-  ! then scatters to active_mg(sender) grids on the receiver.
-  ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,step
-  real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
-  integer,allocatable::dest_cpu(:)
+  integer,intent(in)::ivar,ilevel,backend
+  integer::icpu,i,j,step,iskip,ngrid
+  integer,dimension(ncpu)::ns,nr,sd,rd
 
-#ifndef WITHOUTMPI
-  nprops_ksec = twotondim + 2
-
-  ! Count total emission items
-  ntotal = 0
-  do icpu = 1, ncpu
-     ntotal = ntotal + emission_mg(icpu,ilevel)%ngrid
+  ns=0; nr=0
+  do icpu=1,ncpu
+     if(icpu==myid) cycle
+     ns(icpu)=emission_mg(icpu,ilevel)%ngrid*twotondim
+     nr(icpu)=active_mg(icpu,ilevel)%ngrid*twotondim
   end do
+  sd(1)=0; rd(1)=0
+  do icpu=2,ncpu
+     sd(icpu)=sd(icpu-1)+ns(icpu-1)
+     rd(icpu)=rd(icpu-1)+nr(icpu-1)
+  end do
+  call ensure_mg_exchange_dp(sum(ns),sum(nr))
 
-  ! Pack sendbuf + dest_cpu
-  allocate(sendbuf(1:nprops_ksec, 1:max(ntotal,1)))
-  allocate(dest_cpu(1:max(ntotal,1)))
-  idx = 0
-  do icpu = 1, ncpu
-     do i = 1, emission_mg(icpu,ilevel)%ngrid
-        idx = idx + 1
-        dest_cpu(idx) = icpu
-        do j = 1, twotondim
-           step = (j-1)*active_mg(myid,ilevel)%ngrid
-           sendbuf(j, idx) = active_mg(myid,ilevel)%u( &
-                & emission_mg(icpu,ilevel)%igrid(i) + step, ivar)
+  do icpu=1,ncpu
+     if(icpu==myid) cycle
+     ngrid=emission_mg(icpu,ilevel)%ngrid
+     do j=1,twotondim
+        step=(j-1)*ngrid
+        iskip=(j-1)*active_mg(myid,ilevel)%ngrid
+        do i=1,ngrid
+           mg_exchange_send_dp(sd(icpu)+step+i)=active_mg(myid,ilevel)%u( &
+                emission_mg(icpu,ilevel)%igrid(i)+iskip,ivar)
         end do
-        sendbuf(twotondim+1, idx) = dble(myid)
-        sendbuf(twotondim+2, idx) = dble(i)
      end do
   end do
-
-  ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
-
-  ! Scatter received data to active_mg(sender) on this CPU
-  do i = 1, nrecv
-     sender = nint(recvbuf(twotondim+1, i))
-     ridx   = nint(recvbuf(twotondim+2, i))
-     do j = 1, twotondim
-        step = (j-1)*active_mg(sender,ilevel)%ngrid
-        active_mg(sender,ilevel)%u(ridx + step, ivar) = recvbuf(j, i)
-     end do
+  call exchange_dp_sorted(mg_exchange_send_dp,mg_exchange_recv_dp, &
+       ns,nr,sd,rd,backend,611)
+  do icpu=1,ncpu
+     if(icpu==myid .or. nr(icpu)==0) cycle
+     active_mg(icpu,ilevel)%u(1:nr(icpu),ivar)= &
+          mg_exchange_recv_dp(rd(icpu)+1:rd(icpu)+nr(icpu))
   end do
-
-  deallocate(sendbuf, dest_cpu, recvbuf)
-#endif
-
-end subroutine make_virtual_mg_dp_ksec
+end subroutine make_virtual_mg_dp_dynamic
 
 ! ########################################################################
 ! ########################################################################
 
-subroutine make_virtual_mg_int_ksec(ilevel)
+subroutine make_virtual_mg_int_dynamic(ilevel,backend)
   use amr_commons
   use poisson_commons
-  use ksection
+  use dynamic_exchange,only:exchange_int_sorted
   implicit none
-#ifndef WITHOUTMPI
-  include 'mpif.h'
-#endif
-  integer,intent(in)::ilevel
-  ! -------------------------------------------------------------------
-  ! Ksection-based forward MG ghost zone exchange for integer arrays.
-  ! Converts int to dp, exchanges via ksection tree, converts back.
-  ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,step
-  real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
-  integer,allocatable::dest_cpu(:)
+  integer,intent(in)::ilevel,backend
+  integer::icpu,i,j,step,iskip,ngrid
+  integer,dimension(ncpu)::ns,nr,sd,rd
 
-#ifndef WITHOUTMPI
-  nprops_ksec = twotondim + 2
-
-  ! Count total emission items
-  ntotal = 0
-  do icpu = 1, ncpu
-     ntotal = ntotal + emission_mg(icpu,ilevel)%ngrid
+  ns=0; nr=0
+  do icpu=1,ncpu
+     if(icpu==myid) cycle
+     ns(icpu)=emission_mg(icpu,ilevel)%ngrid*twotondim
+     nr(icpu)=active_mg(icpu,ilevel)%ngrid*twotondim
   end do
+  sd(1)=0; rd(1)=0
+  do icpu=2,ncpu
+     sd(icpu)=sd(icpu-1)+ns(icpu-1)
+     rd(icpu)=rd(icpu-1)+nr(icpu-1)
+  end do
+  call ensure_mg_exchange_int(sum(ns),sum(nr))
 
-  ! Pack sendbuf (int->dp) + dest_cpu
-  allocate(sendbuf(1:nprops_ksec, 1:max(ntotal,1)))
-  allocate(dest_cpu(1:max(ntotal,1)))
-  idx = 0
-  do icpu = 1, ncpu
-     do i = 1, emission_mg(icpu,ilevel)%ngrid
-        idx = idx + 1
-        dest_cpu(idx) = icpu
-        do j = 1, twotondim
-           step = (j-1)*active_mg(myid,ilevel)%ngrid
-           sendbuf(j, idx) = dble(active_mg(myid,ilevel)%f( &
-                & emission_mg(icpu,ilevel)%igrid(i) + step, 1))
+  do icpu=1,ncpu
+     if(icpu==myid) cycle
+     ngrid=emission_mg(icpu,ilevel)%ngrid
+     do j=1,twotondim
+        step=(j-1)*ngrid
+        iskip=(j-1)*active_mg(myid,ilevel)%ngrid
+        do i=1,ngrid
+           mg_exchange_send_int(sd(icpu)+step+i)=active_mg(myid,ilevel)%f( &
+                emission_mg(icpu,ilevel)%igrid(i)+iskip,1)
         end do
-        sendbuf(twotondim+1, idx) = dble(myid)
-        sendbuf(twotondim+2, idx) = dble(i)
      end do
   end do
-
-  ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
-
-  ! Scatter received data (dp->int) to active_mg(sender)%f
-  do i = 1, nrecv
-     sender = nint(recvbuf(twotondim+1, i))
-     ridx   = nint(recvbuf(twotondim+2, i))
-     do j = 1, twotondim
-        step = (j-1)*active_mg(sender,ilevel)%ngrid
-        active_mg(sender,ilevel)%f(ridx + step, 1) = nint(recvbuf(j, i))
-     end do
+  call exchange_int_sorted(mg_exchange_send_int,mg_exchange_recv_int, &
+       ns,nr,sd,rd,backend,612)
+  do icpu=1,ncpu
+     if(icpu==myid .or. nr(icpu)==0) cycle
+     active_mg(icpu,ilevel)%f(1:nr(icpu),1)= &
+          mg_exchange_recv_int(rd(icpu)+1:rd(icpu)+nr(icpu))
   end do
-
-  deallocate(sendbuf, dest_cpu, recvbuf)
-#endif
-
-end subroutine make_virtual_mg_int_ksec
+end subroutine make_virtual_mg_int_dynamic
 
 ! ########################################################################
 ! ########################################################################
 
-subroutine make_reverse_mg_dp_ksec(ivar,ilevel)
+subroutine make_reverse_mg_dp_dynamic(ivar,ilevel,backend)
   use amr_commons
   use poisson_commons
-  use ksection
+  use dynamic_exchange,only:exchange_dp_sorted
   implicit none
-#ifndef WITHOUTMPI
-  include 'mpif.h'
-#endif
-  integer,intent(in)::ivar,ilevel
-  ! -------------------------------------------------------------------
-  ! Ksection-based reverse MG ghost zone exchange for double precision.
-  ! Packs active_mg(icpu) data, exchanges via ksection tree,
-  ! then accumulates (+=) into local active_mg(myid) using emission_mg.
-  ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,step,icell
-  real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
-  integer,allocatable::dest_cpu(:)
+  integer,intent(in)::ivar,ilevel,backend
+  integer::icpu,i,j,step,iskip,icell,ngrid
+  integer,dimension(ncpu)::ns,nr,sd,rd
 
-#ifndef WITHOUTMPI
-  nprops_ksec = twotondim + 2
-
-  ! Count total items from remote active_mg
-  ntotal = 0
-  do icpu = 1, ncpu
-     if(icpu == myid) cycle
-     ntotal = ntotal + active_mg(icpu,ilevel)%ngrid
+  ns=0; nr=0
+  do icpu=1,ncpu
+     if(icpu==myid) cycle
+     ns(icpu)=active_mg(icpu,ilevel)%ngrid*twotondim
+     nr(icpu)=emission_mg(icpu,ilevel)%ngrid*twotondim
   end do
+  sd(1)=0; rd(1)=0
+  do icpu=2,ncpu
+     sd(icpu)=sd(icpu-1)+ns(icpu-1)
+     rd(icpu)=rd(icpu-1)+nr(icpu-1)
+  end do
+  call ensure_mg_exchange_dp(sum(ns),sum(nr))
 
-  ! Pack sendbuf from active_mg(icpu) + dest_cpu
-  allocate(sendbuf(1:nprops_ksec, 1:max(ntotal,1)))
-  allocate(dest_cpu(1:max(ntotal,1)))
-  idx = 0
-  do icpu = 1, ncpu
-     if(icpu == myid) cycle
-     do i = 1, active_mg(icpu,ilevel)%ngrid
-        idx = idx + 1
-        dest_cpu(idx) = icpu
-        do j = 1, twotondim
-           step = (j-1)*active_mg(icpu,ilevel)%ngrid
-           sendbuf(j, idx) = active_mg(icpu,ilevel)%u(i + step, ivar)
+  do icpu=1,ncpu
+     if(icpu==myid .or. ns(icpu)==0) cycle
+     mg_exchange_send_dp(sd(icpu)+1:sd(icpu)+ns(icpu))= &
+          active_mg(icpu,ilevel)%u(1:ns(icpu),ivar)
+  end do
+  call exchange_dp_sorted(mg_exchange_send_dp,mg_exchange_recv_dp, &
+       ns,nr,sd,rd,backend,613)
+  do icpu=1,ncpu
+     if(icpu==myid) cycle
+     ngrid=emission_mg(icpu,ilevel)%ngrid
+     do j=1,twotondim
+        step=(j-1)*ngrid
+        iskip=(j-1)*active_mg(myid,ilevel)%ngrid
+        do i=1,ngrid
+           icell=emission_mg(icpu,ilevel)%igrid(i)+iskip
+           active_mg(myid,ilevel)%u(icell,ivar)= &
+                active_mg(myid,ilevel)%u(icell,ivar)+ &
+                mg_exchange_recv_dp(rd(icpu)+step+i)
         end do
-        sendbuf(twotondim+1, idx) = dble(myid)
-        sendbuf(twotondim+2, idx) = dble(i)
      end do
   end do
-
-  ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
-
-  ! Accumulate received data into local active_mg(myid) using emission_mg
-  do i = 1, nrecv
-     sender = nint(recvbuf(twotondim+1, i))
-     ridx   = nint(recvbuf(twotondim+2, i))
-     do j = 1, twotondim
-        step  = (j-1)*active_mg(myid,ilevel)%ngrid
-        icell = emission_mg(sender,ilevel)%igrid(ridx) + step
-        active_mg(myid,ilevel)%u(icell, ivar) = &
-             & active_mg(myid,ilevel)%u(icell, ivar) + recvbuf(j, i)
-     end do
-  end do
-
-  deallocate(sendbuf, dest_cpu, recvbuf)
-#endif
-
-end subroutine make_reverse_mg_dp_ksec
+end subroutine make_reverse_mg_dp_dynamic
 
 ! ########################################################################
 ! ########################################################################
 
-subroutine make_reverse_mg_int_ksec(ilevel)
+subroutine make_reverse_mg_int_dynamic(ilevel,backend)
   use amr_commons
   use poisson_commons
-  use ksection
+  use dynamic_exchange,only:exchange_int_sorted
   implicit none
-#ifndef WITHOUTMPI
-  include 'mpif.h'
-#endif
-  integer,intent(in)::ilevel
-  ! -------------------------------------------------------------------
-  ! Ksection-based reverse MG ghost zone exchange for integer arrays.
-  ! Packs active_mg(icpu)%f, exchanges via ksection tree,
-  ! then accumulates (+=) into local active_mg(myid)%f using emission_mg.
-  ! -------------------------------------------------------------------
-  integer::icpu,i,j,idx,ntotal,nrecv,nprops_ksec,sender,ridx,step,icell
-  real(dp),allocatable::sendbuf(:,:),recvbuf(:,:)
-  integer,allocatable::dest_cpu(:)
+  integer,intent(in)::ilevel,backend
+  integer::icpu,i,j,step,iskip,icell,ngrid
+  integer,dimension(ncpu)::ns,nr,sd,rd
 
-#ifndef WITHOUTMPI
-  nprops_ksec = twotondim + 2
-
-  ! Count total items from remote active_mg
-  ntotal = 0
-  do icpu = 1, ncpu
-     if(icpu == myid) cycle
-     ntotal = ntotal + active_mg(icpu,ilevel)%ngrid
+  ns=0; nr=0
+  do icpu=1,ncpu
+     if(icpu==myid) cycle
+     ns(icpu)=active_mg(icpu,ilevel)%ngrid*twotondim
+     nr(icpu)=emission_mg(icpu,ilevel)%ngrid*twotondim
   end do
+  sd(1)=0; rd(1)=0
+  do icpu=2,ncpu
+     sd(icpu)=sd(icpu-1)+ns(icpu-1)
+     rd(icpu)=rd(icpu-1)+nr(icpu-1)
+  end do
+  call ensure_mg_exchange_int(sum(ns),sum(nr))
 
-  ! Pack sendbuf from active_mg(icpu)%f (int->dp) + dest_cpu
-  allocate(sendbuf(1:nprops_ksec, 1:max(ntotal,1)))
-  allocate(dest_cpu(1:max(ntotal,1)))
-  idx = 0
-  do icpu = 1, ncpu
-     if(icpu == myid) cycle
-     do i = 1, active_mg(icpu,ilevel)%ngrid
-        idx = idx + 1
-        dest_cpu(idx) = icpu
-        do j = 1, twotondim
-           step = (j-1)*active_mg(icpu,ilevel)%ngrid
-           sendbuf(j, idx) = dble(active_mg(icpu,ilevel)%f(i + step, 1))
+  do icpu=1,ncpu
+     if(icpu==myid .or. ns(icpu)==0) cycle
+     mg_exchange_send_int(sd(icpu)+1:sd(icpu)+ns(icpu))= &
+          active_mg(icpu,ilevel)%f(1:ns(icpu),1)
+  end do
+  call exchange_int_sorted(mg_exchange_send_int,mg_exchange_recv_int, &
+       ns,nr,sd,rd,backend,614)
+  do icpu=1,ncpu
+     if(icpu==myid) cycle
+     ngrid=emission_mg(icpu,ilevel)%ngrid
+     do j=1,twotondim
+        step=(j-1)*ngrid
+        iskip=(j-1)*active_mg(myid,ilevel)%ngrid
+        do i=1,ngrid
+           icell=emission_mg(icpu,ilevel)%igrid(i)+iskip
+           active_mg(myid,ilevel)%f(icell,1)= &
+                active_mg(myid,ilevel)%f(icell,1)+ &
+                mg_exchange_recv_int(rd(icpu)+step+i)
         end do
-        sendbuf(twotondim+1, idx) = dble(myid)
-        sendbuf(twotondim+2, idx) = dble(i)
      end do
   end do
-
-  ! Exchange via ksection tree
-  call ksection_exchange_dp(sendbuf, ntotal, dest_cpu, nprops_ksec, &
-       & recvbuf, nrecv)
-
-  ! Accumulate received data (dp->int) into active_mg(myid)%f
-  do i = 1, nrecv
-     sender = nint(recvbuf(twotondim+1, i))
-     ridx   = nint(recvbuf(twotondim+2, i))
-     do j = 1, twotondim
-        step  = (j-1)*active_mg(myid,ilevel)%ngrid
-        icell = emission_mg(sender,ilevel)%igrid(ridx) + step
-        active_mg(myid,ilevel)%f(icell, 1) = &
-             & active_mg(myid,ilevel)%f(icell, 1) + nint(recvbuf(j, i))
-     end do
-  end do
-
-  deallocate(sendbuf, dest_cpu, recvbuf)
-#endif
-
-end subroutine make_reverse_mg_int_ksec
+end subroutine make_reverse_mg_int_dynamic
 
 ! ########################################################################
 ! ########################################################################
@@ -3670,6 +3706,9 @@ subroutine fft_poisson_solve_uniform(ilevel, icount)
 end subroutine fft_poisson_solve_uniform
 #endif
 
+#ifdef MG_PROFILE_ONLY
+#undef FDMDEBUG
+#endif
 
 #ifdef USE_FFTW
 ! ########################################################################
