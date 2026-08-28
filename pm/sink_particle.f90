@@ -1163,7 +1163,7 @@ subroutine accrete_sink(ind_grid,ind_part,ind_grid_part,ng,np,ilevel,on_creation
                     end if
                  end if
 #ifdef RT
-                 if(rt_AGN)then
+                 if(rt_AGN.and.ok_blast_agn(isink).and.delta_mass(isink)>0.0)then
                     dert=0.1d0*delta_mass(isink)*(c_cgs/scale_v)**2
                     do igroup=1,nGroups
                        Np_inj=dert * group_egy_AGNfrac(igroup) / (scale_evtocode*group_egy(igroup)) / (vol_loc*scale_vol) / scale_Np*weight/volume
@@ -1221,6 +1221,8 @@ subroutine compute_accretion_rate(write_sinks)
   ! Compute sink particle accretion rate by averaging contributions from all levels
   do isink=1,nsink
 
+     ! Reset the feedback decision before evaluating the current accretion state.
+     ok_blast_agn(isink)=.false.
      dMsink_overdt(isink)=0
      dMsmbh_overdt(isink)=0
      dMBHoverdt(isink)=0
