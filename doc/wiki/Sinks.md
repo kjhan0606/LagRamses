@@ -97,3 +97,24 @@ Notes:
 * to not boost accretion, set `acc_sink_boost=0.0`
 * it is *highly advised* to use `T2_min=0.0` in order to have all feedback modes on the finest timestep
 * if `chi_switch=0.0`, then the initial values of `AGN_fbk_frac_*` will be used throughout the simulation
+
+## lagRamses AGN and capture ledgers ##
+
+The lagRamses patch adds two `&physics_params` diagnostics.  They are enabled
+by default for SMBH/AGN runs:
+
+| Variable | Type | Default | Description |
+|:---------|:-----|:--------|:------------|
+| `smbh_capture_ledger` | boolean | `.true.` | Write complete sink groups immediately before FoF compaction |
+| `smbh_capture_ledger_file` | string | `smbh_capture_ledger_v1.jsonl` | Capture-ledger path |
+| `agn_coarse_dump` | boolean | `.true.` | Write one AGN physical-state row per sink and coarse step |
+| `agn_coarse_dump_file` | string | `agn_coarse_state_v1.jsonl` | AGN state-ledger path |
+
+Capture members include both `sink_id` and the surviving
+`primary_sink_id`.  The AGN state ledger includes disk-episode properties,
+gas angular momentum, dimensionless BH spin and physical BH angular momentum,
+their angle, accretion rates, radiative
+efficiency, instantaneous bolometric luminosity, and the accumulated
+coarse-step masses and feedback regime.  See
+`patch/lagRamses/SMBH_CAPTURE_LEDGER.md` and
+`patch/lagRamses/AGN_COARSE_STATE.md` for schemas and interpretation.

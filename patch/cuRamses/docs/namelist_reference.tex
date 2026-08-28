@@ -602,11 +602,13 @@ gpu_fft     = .true.
 
 
 % ------------------------------------------------------------------
-\paramheader{use\_fftw}{logical}{.false.}
+\paramheader{use\_fftw}{logical}{.true.}
 \label{param:use_fftw}
 
 \begin{quote}
 Enable FFTW3 CPU direct Poisson solve for fully uniform AMR levels.
+This is the project baseline; multigrid must be requested explicitly with
+\texttt{use\_fftw=.false.}\ for solver diagnostics.
 This is the \textbf{CPU-only alternative} to \paramref{gpu_fft}:
 it uses \textsc{fftw3} (MPI + OpenMP) instead of cuFFT, achieving
 the same ${\sim}8\times$ speedup over multigrid V-cycles without
@@ -640,7 +642,8 @@ FFTW3 reduces base-level Poisson from 241\,s (MG) to 28.9\,s
 (\textbf{8.3$\times$ speedup}), with $e_{\text{cons}} = 6.12 \times
 10^{-4}$ (identical to cuFFT).
 
-\textbf{Build requirement:} \texttt{make HDF5=1 USE\_FFTW=1}
+\textbf{Build requirement:} \texttt{make HDF5=1}; FFTW is enabled by default
+(use \texttt{USE\_FFTW=0} only for an explicit diagnostic opt-out).
 (links \texttt{-lfftw3\_mpi -lfftw3\_omp -lfftw3}).
 
 \apinote{This flag is mutually exclusive with \paramref{gpu_fft}.
@@ -655,7 +658,7 @@ large grids via the sparse P2P slab exchange.}
 use_fftw = .true.
 
 ! Equivalent to gpu_fft but without GPU
-! Requires: make HDF5=1 USE_FFTW=1
+! Default build: make HDF5=1
 \end{lstlisting}
 
 % ------------------------------------------------------------------

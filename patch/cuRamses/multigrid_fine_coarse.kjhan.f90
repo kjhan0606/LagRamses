@@ -147,7 +147,6 @@ subroutine cmp_residual_mg_coarse(ilevel)
    ! Computes the residual for pure MG levels, and stores it into active_mg(myid,ilevel)%u(:,3)
    use amr_commons
    use poisson_commons
-   use morton_hash
 #include "amr_index.h"
    implicit none
    integer, intent(in) :: ilevel
@@ -158,8 +157,8 @@ subroutine cmp_residual_mg_coarse(ilevel)
    integer  :: ngrid
    integer  :: ind, igrid_mg, idim, inbor
    integer  :: icell_mg, iskip_mg, igrid_nbor_mg, icell_nbor_mg
-   integer  :: igrid_amr, cpu_nbor_amr
-   integer  :: igshift, igrid_nbor_amr
+   integer  :: cpu_nbor_amr
+   integer  :: igshift
 
    real(dp) :: dtwondim = (twondim)
 
@@ -177,14 +176,14 @@ subroutine cmp_residual_mg_coarse(ilevel)
    ngrid=active_mg(myid,ilevel)%ngrid
 
    ! Loop over cells myid
-!$omp parallel default(firstprivate) shared(active_mg,son,cpu_map,lookup_mg)
+!$omp parallel default(firstprivate) &
+!$omp shared(active_mg,nbor_mg_cache)
    do ind=1,twotondim
       iskip_mg  = (ind-1)*ngrid
 
       ! Loop over active grids myid
 !$omp do
       do igrid_mg=1,ngrid
-         igrid_amr = active_mg(myid,ilevel)%igrid(igrid_mg)
          icell_mg = igrid_mg + iskip_mg
 
          phi_c = active_mg(myid,ilevel)%u(icell_mg,1)
@@ -196,14 +195,8 @@ subroutine cmp_residual_mg_coarse(ilevel)
                do idim=1,ndim
                   ! Get neighbor grid
                   igshift = iii(idim,inbor,ind)
-                  if(igshift==0) then
-                     igrid_nbor_amr = igrid_amr
-                     cpu_nbor_amr   = myid
-                  else
-                     igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-                     cpu_nbor_amr   = cpu_map(morton_nbor_cell(igrid_amr,ilevel,igshift))
-                  end if
-                  igrid_nbor_mg = lookup_mg(igrid_nbor_amr)
+                  igrid_nbor_mg = nbor_mg_cache(ilevel)%grid(igshift,igrid_mg)
+                  cpu_nbor_amr   = nbor_mg_cache(ilevel)%cpu(igshift,igrid_mg)
                   ! Add up
                   icell_nbor_mg = igrid_nbor_mg + &
                       (jjj(idim,inbor,ind)-1)*active_mg(cpu_nbor_amr,ilevel)%ngrid
@@ -220,27 +213,16 @@ subroutine cmp_residual_mg_coarse(ilevel)
                 do idim=1,ndim
                   ! Get neighbor grid
                   igshift = iii(idim,inbor,ind)
-                  if(igshift==0) then
-                     igrid_nbor_amr = igrid_amr
-                     cpu_nbor_amr   = myid
-                  else
-                     igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-                     cpu_nbor_amr   = cpu_map(morton_nbor_cell(igrid_amr,ilevel,igshift))
-                  end if
+                  igrid_nbor_mg = nbor_mg_cache(ilevel)%grid(igshift,igrid_mg)
+                  cpu_nbor_amr   = nbor_mg_cache(ilevel)%cpu(igshift,igrid_mg)
 
-                  if(igrid_nbor_amr==0) then
+                  if(igrid_nbor_mg<=0) then
                      ! No neighbor cell !
                      ! Virtual phi value on unrefnd neighbor cell : -phi_c/mask_c
                      ! (simulates mask=-1.0 for the nonexistent refined cell)
                      nb_sum = nb_sum - phi_c/active_mg(myid,ilevel)%u(icell_mg,4)
                   else
                      ! Fetch neighbor cell
-                     igrid_nbor_mg  = lookup_mg(igrid_nbor_amr)
-                     if(igrid_nbor_mg<=0) then
-                        nb_sum=nb_sum-phi_c/active_mg(myid,ilevel)%u(icell_mg,4)
-                        cycle
-                     end if
-
                      icell_nbor_mg  = igrid_nbor_mg + &
                        (jjj(idim,inbor,ind)-1)*active_mg(cpu_nbor_amr,ilevel)%ngrid
                      if(active_mg(cpu_nbor_amr,ilevel)%u(icell_nbor_mg,4)<=0.0) then
@@ -340,7 +322,6 @@ subroutine gauss_seidel_mg_coarse(ilevel,safe,redstep)
    use amr_commons
    use pm_commons
    use poisson_commons
-   use morton_hash
    implicit none
    integer, intent(in) :: ilevel
    logical, intent(in) :: safe
@@ -352,9 +333,9 @@ subroutine gauss_seidel_mg_coarse(ilevel,safe,redstep)
    real(dp) :: dx2, nb_sum, weight
    integer  :: ngrid
    integer  :: ind, ind0, igrid_mg, idim, inbor
-   integer  :: igrid_amr, cpu_nbor_amr
+   integer  :: cpu_nbor_amr
    integer  :: iskip_mg, igrid_nbor_mg, icell_mg, icell_nbor_mg
-   integer  :: igshift, igrid_nbor_amr
+   integer  :: igshift
    real(dp) :: dtwondim = (twondim)
 
    ! Set constants
@@ -377,7 +358,8 @@ subroutine gauss_seidel_mg_coarse(ilevel,safe,redstep)
    ngrid=active_mg(myid,ilevel)%ngrid
 
    ! Loop over cells, with red/black ordering
-!$omp parallel default(firstprivate) shared(active_mg,son,cpu_map,lookup_mg)
+!$omp parallel default(firstprivate) &
+!$omp shared(active_mg,nbor_mg_cache)
    do ind0=1,twotondim/2      ! Only half of the cells for a red or black sweep
       if(redstep) then
          ind = ired  (ndim,ind0)
@@ -390,7 +372,6 @@ subroutine gauss_seidel_mg_coarse(ilevel,safe,redstep)
       ! Loop over active grids
 !$omp do
       do igrid_mg=1,ngrid
-         igrid_amr = active_mg(myid,ilevel)%igrid(igrid_mg)
          icell_mg  = iskip_mg  + igrid_mg
 
          nb_sum=0.0d0                       ! Sum of phi on neighbors
@@ -403,16 +384,8 @@ subroutine gauss_seidel_mg_coarse(ilevel,safe,redstep)
                do idim=1,ndim
                   ! Get neighbor grid shift
                   igshift = iii(idim,inbor,ind)
-                  ! Get neighbor grid
-                  if(igshift==0) then
-                     igrid_nbor_amr = igrid_amr
-                     cpu_nbor_amr   = myid
-                  else
-                     igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-                     cpu_nbor_amr   = cpu_map(morton_nbor_cell(igrid_amr,ilevel,igshift))
-                  end if
-                  ! Get neighbor cpu
-                  igrid_nbor_mg  = lookup_mg(igrid_nbor_amr)
+                  igrid_nbor_mg = nbor_mg_cache(ilevel)%grid(igshift,igrid_mg)
+                  cpu_nbor_amr   = nbor_mg_cache(ilevel)%cpu(igshift,igrid_mg)
                   icell_nbor_mg  = igrid_nbor_mg + &
                       (jjj(idim,inbor,ind)-1)*active_mg(cpu_nbor_amr,ilevel)%ngrid
                   nb_sum = nb_sum + &
@@ -434,36 +407,23 @@ subroutine gauss_seidel_mg_coarse(ilevel,safe,redstep)
                do idim=1,ndim
                   ! Get neighbor grid shift
                   igshift = iii(idim,inbor,ind)
+                  igrid_nbor_mg = nbor_mg_cache(ilevel)%grid(igshift,igrid_mg)
+                  cpu_nbor_amr   = nbor_mg_cache(ilevel)%cpu(igshift,igrid_mg)
 
-                  ! Get neighbor grid
-                  if(igshift==0) then
-                     igrid_nbor_amr = igrid_amr
-                     cpu_nbor_amr   = myid
-                  else
-                     igrid_nbor_amr = morton_nbor_grid(igrid_amr,ilevel,igshift)
-                     cpu_nbor_amr   = cpu_map(morton_nbor_cell(igrid_amr,ilevel,igshift))
-                  end if
-
-                  if(igrid_nbor_amr==0) then
+                  if(igrid_nbor_mg<=0) then
                      ! No neighbor cell, set mask=-1 on nonexistent neighbor cell
                      weight = weight - 1.0d0/active_mg(myid,ilevel)%u(icell_mg,4)
                   else
                      ! Fetch neighbor cell
-                     igrid_nbor_mg  = lookup_mg(igrid_nbor_amr)
-                     if(igrid_nbor_mg<=0) then
-                        ! No MG neighbor
-                        weight = weight - 1.0d0/active_mg(myid,ilevel)%u(icell_mg,4)
-                     else
-                        icell_nbor_mg  = igrid_nbor_mg  + (jjj(idim,inbor,ind)-1)*active_mg(cpu_nbor_amr,ilevel)%ngrid
+                     icell_nbor_mg  = igrid_nbor_mg  + (jjj(idim,inbor,ind)-1)*active_mg(cpu_nbor_amr,ilevel)%ngrid
 
-                        if(active_mg(cpu_nbor_amr,ilevel)%u(icell_nbor_mg,4)<=0.0) then
-                           ! Neighbor cell is masked
-                           weight = weight + &
-                                 active_mg(cpu_nbor_amr,ilevel)%u(icell_nbor_mg,4)/active_mg(myid,ilevel)%u(icell_mg,4)
-                        else
-                           ! Neighbor cell is active, increment neighbor sum
-                           nb_sum = nb_sum + active_mg(cpu_nbor_amr,ilevel)%u(icell_nbor_mg,1)
-                        end if
+                     if(active_mg(cpu_nbor_amr,ilevel)%u(icell_nbor_mg,4)<=0.0) then
+                        ! Neighbor cell is masked
+                        weight = weight + &
+                              active_mg(cpu_nbor_amr,ilevel)%u(icell_nbor_mg,4)/active_mg(myid,ilevel)%u(icell_mg,4)
+                     else
+                        ! Neighbor cell is active, increment neighbor sum
+                        nb_sum = nb_sum + active_mg(cpu_nbor_amr,ilevel)%u(icell_nbor_mg,1)
                      end if
                   end if
                end do
@@ -636,6 +596,7 @@ subroutine interpolate_and_correct_coarse(ifinelevel)
    integer,  dimension(1:nvector_mg)                 :: igrid_f_amr, icell_amr, cpu_amr
    integer,  dimension(1:nvector_mg,1:threetondim)  :: nbors_father_cells
    integer,  dimension(1:nvector_mg,1:twotondim)    :: nbors_father_grids
+   integer,  dimension(1:nvector_mg,1:threetondim)  :: coarse_cell_mg, coarse_cpu_mg
    real(dp), dimension(1:nvector_mg)                :: corr
 
    ! Local constants
@@ -676,6 +637,22 @@ subroutine interpolate_and_correct_coarse(ifinelevel)
       ! Gather 3x3x3 neighboring parent cells
       call get3cubefather_mg(icell_amr,nbors_father_cells,nbors_father_grids,nbatch,ifinelevel)
 
+      ! Cache the MG address of each of the 27 parent cells once per batch.
+      do ind_father=1,threetondim
+         do i=1,nbatch
+            coarse_cell_mg(i,ind_father)=0
+            icell_c_amr = nbors_father_cells(i,ind_father)
+            if(icell_c_amr<=0) cycle
+            ind_c       = ICHILD_OF(icell_c_amr)
+            igrid_c_amr = IGRID_OF(icell_c_amr)
+            igrid_c_mg  = lookup_mg(igrid_c_amr)
+            cpu_c_amr   = cpu_map(father(igrid_c_amr))
+            if(igrid_c_mg<=0) cycle
+            coarse_cpu_mg(i,ind_father)=cpu_c_amr
+            coarse_cell_mg(i,ind_father)=(ind_c-1)*active_mg(cpu_c_amr,icoarselevel)%ngrid+igrid_c_mg
+         end do
+      end do
+
       ! Update solution for fine grid cells
       do ind_f=1,twotondim
          iskip_f_mg  = (ind_f-1)*ngrid_f
@@ -696,14 +673,9 @@ subroutine interpolate_and_correct_coarse(ifinelevel)
                   corr(i)=0.0d0        ! Fine cell is masked : no correction
                   cycle
                end if
-               icell_c_amr = nbors_father_cells(i,ind_father)
-               ind_c       = ICHILD_OF(icell_c_amr)
-               igrid_c_amr = IGRID_OF(icell_c_amr)
-               igrid_c_mg  = lookup_mg(igrid_c_amr)
-               cpu_c_amr   = cpu_map(father(igrid_c_amr))
-               if(igrid_c_mg<=0) cycle
-
-               icell_c_mg  = (ind_c-1)*active_mg(cpu_c_amr,icoarselevel)%ngrid + igrid_c_mg
+               icell_c_mg = coarse_cell_mg(i,ind_father)
+               if(icell_c_mg<=0) cycle
+               cpu_c_amr = coarse_cpu_mg(i,ind_father)
                corr(i)=corr(i)+coeff*active_mg(cpu_c_amr,icoarselevel)%u(icell_c_mg,1)
             end do
          end do
@@ -1099,20 +1071,46 @@ subroutine get3cubepos_mg(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng,
 end subroutine get3cubepos_mg
 
 ! ------------------------------------------------------------------------
-! Precompute neighbor grids for coarse MG levels (stub)
+! Precompute neighbor MG indices and owner ranks for coarse MG levels
 ! ------------------------------------------------------------------------
 
 subroutine precompute_nbor_grid_coarse(lmin, lmax)
+   use amr_commons
    use poisson_commons
+   use morton_hash
    implicit none
    integer, intent(in) :: lmin, lmax
-   integer :: ilevel
+   integer :: ilevel, ngrid, igrid_mg, igrid_amr, igshift
+   integer :: igrid_nbor_amr, icell_nbor_amr
 
-   ! Stub: no precomputed cache needed; morton_nbor_grid is called inline
-   if(.not.allocated(nbor_mg_cache)) return
+   if(.not.allocated(nbor_mg_cache)) allocate(nbor_mg_cache(1:nlevelmax-1))
    do ilevel = lmin, lmax
       if(allocated(nbor_mg_cache(ilevel)%grid)) deallocate(nbor_mg_cache(ilevel)%grid)
       if(allocated(nbor_mg_cache(ilevel)%cpu))  deallocate(nbor_mg_cache(ilevel)%cpu)
+      ngrid=active_mg(myid,ilevel)%ngrid
+      allocate(nbor_mg_cache(ilevel)%grid(0:2*ndim,1:ngrid))
+      allocate(nbor_mg_cache(ilevel)%cpu (0:2*ndim,1:ngrid))
+
+!$omp parallel do default(shared) &
+!$omp private(igshift,igrid_mg,igrid_amr,igrid_nbor_amr,icell_nbor_amr) &
+!$omp schedule(static)
+      do igrid_mg=1,ngrid
+         igrid_amr=active_mg(myid,ilevel)%igrid(igrid_mg)
+         nbor_mg_cache(ilevel)%grid(0,igrid_mg)=igrid_mg
+         nbor_mg_cache(ilevel)%cpu (0,igrid_mg)=myid
+         do igshift=1,2*ndim
+            igrid_nbor_amr=morton_nbor_grid(igrid_amr,ilevel,igshift)
+            if(igrid_nbor_amr>0)then
+               icell_nbor_amr=morton_nbor_cell(igrid_amr,ilevel,igshift)
+               nbor_mg_cache(ilevel)%grid(igshift,igrid_mg)=lookup_mg(igrid_nbor_amr)
+               nbor_mg_cache(ilevel)%cpu (igshift,igrid_mg)=cpu_map(icell_nbor_amr)
+            else
+               nbor_mg_cache(ilevel)%grid(igshift,igrid_mg)=0
+               nbor_mg_cache(ilevel)%cpu (igshift,igrid_mg)=myid
+            end if
+         end do
+      end do
+!$omp end parallel do
    end do
 end subroutine precompute_nbor_grid_coarse
 

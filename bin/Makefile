@@ -10,6 +10,8 @@
 #SOLVER = hydro
 #PATCH = ../patch/Horizon5-master
 #EXEC = ramses_ch
+USE_FFTW ?= 1
+CIC_ATOMIC_SCATTER ?= 0
 ##################################
 # Yohan's patch
 #NVECTOR = 32
@@ -42,11 +44,18 @@ endif
 ifdef FDMTRACE
   FFLAGS += -DFDMDEBUG
 endif
+ifeq ($(MG_PROFILE),1)
+  # Refined-level multigrid phase timers only; retain the production -O3 flags.
+  FFLAGS += -DMG_PROFILE
+endif
 ifdef AMR_INDEX_CHECK
   FFLAGS += -DAMR_INDEX_CHECK
 endif
 ifdef MORTON128
   FFLAGS += -DMORTON128
+endif
+ifeq ($(CIC_ATOMIC_SCATTER),1)
+  FFLAGS += -DCIC_ATOMIC_SCATTER
 endif
 
 #############################################################################
@@ -96,9 +105,9 @@ endif
 EUNHA_MODOBJ = eunha_cooling_mod.o
 
 #############################################################################
-# FFTW3 CPU direct Poisson solver (build with: make USE_FFTW=1)
+# FFTW3 CPU direct Poisson solver (project default; disable with USE_FFTW=0)
 #############################################################################
-ifdef USE_FFTW
+ifeq ($(USE_FFTW),1)
   FFTW3_DIR = $(HOME)/local
   FFLAGS += -DUSE_FFTW -I$(FFTW3_DIR)/include
   LIBS_FFTW = -L$(FFTW3_DIR)/lib -lfftw3_mpi -lfftw3_omp -lfftw3 -lm \

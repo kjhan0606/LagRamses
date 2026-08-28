@@ -23,7 +23,7 @@ This sets of parameters, contained in the namelist block `&INIT_PARAMS`. This is
 | `A_region=0.0`  | `real arrays` | X magnetic field. |
 | `B_region=0.0`  | `real arrays` | Y magnetic field. |
 | `C_region=0.0`  | `real arrays` | Z magnetic field. |
-| `filetype=ascii`  | `20*char` | Type of initial conditions file for particles. Possible choices are `ascii` or `grafic`. |
+| `filetype=ascii`  | `20*char` | Type of particle initial conditions. Supported choices include `ascii`, `grafic`, and `gadget`. |
 | `aexp_ini=10.0`  | `real` | This parameter sets the starting expansion factor for cosmology runs only. Default value is read in the IC file. |
 | `multiple=.false.` | `logical` | If `.true.`, each processors reads its own IC file. For parallel runs only. |
 | `initfile= ` | `80*char` | Directory where IC files are stored (when relevant).
@@ -68,3 +68,12 @@ Just write you initial condition as a new routine and add it to the select/case 
 ## Input files
 
 Another way to define initial conditions in RAMSES is by using input files (`initfile` parameter) in the grafic format.
+
+### Gadget particle input
+
+For `filetype='gadget'`, `initfile(1)` is the basename of a Gadget binary
+snapshot. A single-file snapshot may be stored directly at that basename. A
+multi-file snapshot uses the conventional suffixes `.0`, `.1`, and so on.
+The reader accepts 32-bit and 64-bit particle-ID records; a `LONGINT` build
+widens 32-bit IDs internally without changing their values. Missing particle
+data files are fatal rather than being treated as empty input.

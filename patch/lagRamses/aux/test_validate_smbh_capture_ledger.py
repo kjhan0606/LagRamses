@@ -19,6 +19,7 @@ def binary_rows(uid: str = "10-1-7-9-2") -> list[dict]:
         "record_type": "event_begin",
         "event_uid": uid,
         "classification": "BINARY",
+        "primary_sink_id": 9,
         "nmember": 2,
         "expected_pairs": 1,
         "boxlen": 10.0,
@@ -37,6 +38,8 @@ def binary_rows(uid: str = "10-1-7-9-2") -> list[dict]:
             "event_uid": uid,
             "member_index": 1,
             "sink_id": 7,
+            "primary_sink_id": 9,
+            "is_primary": False,
             "mass_code": 2.0,
             "position_code": [0.0, 0.0, 0.0],
             "velocity_code": [0.0, 0.0, 0.0],
@@ -47,6 +50,8 @@ def binary_rows(uid: str = "10-1-7-9-2") -> list[dict]:
             "event_uid": uid,
             "member_index": 2,
             "sink_id": 9,
+            "primary_sink_id": 9,
+            "is_primary": True,
             "mass_code": 3.0,
             "position_code": [1.0, 0.0, 0.0],
             "velocity_code": [0.0, 2.0, 0.0],
@@ -91,6 +96,7 @@ def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
         "record_type": "event_begin",
         "event_uid": uid,
         "classification": "MULTIPLE",
+        "primary_sink_id": 11,
         "nmember": 3,
         "expected_pairs": 3,
         "boxlen": 10.0,
@@ -109,6 +115,8 @@ def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
             "event_uid": uid,
             "member_index": 1,
             "sink_id": 7,
+            "primary_sink_id": 11,
+            "is_primary": False,
             "mass_code": 2.0,
             "position_code": [9.5, 0.0, 0.0],
             "velocity_code": [0.0, 0.0, 0.0],
@@ -119,6 +127,8 @@ def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
             "event_uid": uid,
             "member_index": 2,
             "sink_id": 9,
+            "primary_sink_id": 11,
+            "is_primary": False,
             "mass_code": 3.0,
             "position_code": [0.5, 0.0, 0.0],
             "velocity_code": [0.0, 2.0, 0.0],
@@ -129,6 +139,8 @@ def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
             "event_uid": uid,
             "member_index": 3,
             "sink_id": 11,
+            "primary_sink_id": 11,
+            "is_primary": True,
             "mass_code": 5.0,
             "position_code": [1.5, 0.0, 0.0],
             "velocity_code": [0.0, 10.0, 0.0],
@@ -228,6 +240,15 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertEqual(report.unique_events, 1)
         self.assertEqual(report.binary_events, 1)
 
+    def test_pre_primary_extension_schema_v1_remains_valid(self):
+        rows = binary_rows()
+        rows[0].pop("primary_sink_id")
+        for member in rows[1:3]:
+            member.pop("primary_sink_id")
+            member.pop("is_primary")
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid)
+
     def test_exact_restart_duplicate_is_deduplicated(self):
         rows = binary_rows()
         report = self.validate_rows(rows + rows)
@@ -257,6 +278,13 @@ class LedgerValidationTests(unittest.TestCase):
         report = self.validate_rows(rows)
         self.assertFalse(report.valid)
         self.assertTrue(any("relative-speed invariant" in item for item in report.errors))
+
+    def test_primary_survivor_invariant_failure_is_rejected(self):
+        rows = binary_rows()
+        rows[0]["primary_sink_id"] = 7
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("survivor rule" in item for item in report.errors))
 
     def test_periodic_multiple_preserves_all_members_and_pairs(self):
         report = self.validate_rows(multiple_rows())

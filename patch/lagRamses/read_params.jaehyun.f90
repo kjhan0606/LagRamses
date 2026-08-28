@@ -115,7 +115,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & ,tend,delta_tout,aend,delta_aout,gadget_output,walltime_hrs,minutes_dump &
        & ,informat,outformat,match_aout
   namelist/amr_params/levelmin,levelmax,ngridmax,ngridtot &
-       & ,npartmax,nparttot,nexpand,boxlen,nsinkmax,nlevel_collapse
+       & ,npartmax,nparttot,ngridmax_auto,npartmax_auto &
+       & ,nexpand,boxlen,nsinkmax,nlevel_collapse
   namelist/poisson_params/epsilon,maxiter_fine,restart_phi_warm_start &
        & ,abort_on_mg_nonconvergence,gravity_type,gravity_params &
        & ,cg_levelmin,cic_levelmax
@@ -1335,9 +1336,9 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1)write(*,*)'levelmax should not be lower than levelmin'
      nml_ok=.false.
   end if
-  ! [RESIZABLE] A derived grid capacity may grow; an explicit one stays fixed.
+  ! [RESIZABLE] ngridmax/ngridtot set the initial capacity.  Runtime growth is
+  ! enabled by default and can be disabled with ngridmax_auto=.false.
   if(ngridmax==0)then
-     ngridmax_auto=.true.
      if(ngridtot==0)then
         if(myid==1)write(*,*)'Error in the namelist:'
         if(myid==1)write(*,*)'Allocate some space for refinements !!!'
@@ -1345,23 +1346,18 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      else
         ngridmax=ngridtot/int(ncpu,kind=8)
      endif
-  else
-     ngridmax_auto=.false.
   end if
   ! Phase 2 chunk 2: fixed block size for now; make this a namelist key later.
   amr_block_size=64
   if(mod(ngridmax,amr_block_size)/=0) &
        ngridmax=((ngridmax/amr_block_size)+1)*amr_block_size
   if(npartmax==0)then
-     npartmax_auto=.true.
      if(nparttot==0)then
         ! Keep zero as the initial capacity; the bundle grows on first demand.
         npartmax=0
      else
         npartmax=nparttot/int(ncpu,kind=8)
      endif
-  else
-     npartmax_auto=.false.
   endif
   if(myid>1)verbose=.false.
   if(sink.and.(.not.pic))then

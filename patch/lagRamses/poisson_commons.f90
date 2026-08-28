@@ -16,6 +16,16 @@ module poisson_commons
   type(communicator), allocatable, dimension(:,:) :: active_mg
   type(communicator), allocatable, dimension(:,:) :: emission_mg
 
+  ! Refined-MG exchange policy.  The communication graph is fixed during one
+  ! solve, so auto selection is performed once per level and reused by every
+  ! V-cycle.  Values are the EXCHANGE_* identifiers from dynamic_exchange.
+  integer, allocatable, dimension(:) :: mg_forward_backend
+  integer, allocatable, dimension(:) :: mg_reverse_backend
+  real(dp), allocatable, dimension(:) :: mg_exchange_send_dp
+  real(dp), allocatable, dimension(:) :: mg_exchange_recv_dp
+  integer, allocatable, dimension(:) :: mg_exchange_send_int
+  integer, allocatable, dimension(:) :: mg_exchange_recv_int
+
   ! Minimum MG level
   integer :: levelmin_mg
 
@@ -36,8 +46,8 @@ module poisson_commons
 
   ! Pre-computed neighbor grids/cpus for coarse-level MG solver
   type mg_nbor_cache_t
-     integer, allocatable, dimension(:,:) :: grid  ! (0:twondim, 1:ngrid)
-     integer, allocatable, dimension(:,:) :: cpu   ! (1:twondim, 1:ngrid)
+     integer, allocatable, dimension(:,:) :: grid  ! (0:2*ndim, 1:ngrid)
+     integer, allocatable, dimension(:,:) :: cpu   ! (0:2*ndim, 1:ngrid)
   end type mg_nbor_cache_t
   type(mg_nbor_cache_t), allocatable, dimension(:) :: nbor_mg_cache
 

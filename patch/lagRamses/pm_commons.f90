@@ -61,10 +61,9 @@ module pm_commons
   integer ,allocatable,dimension(:)  ::numbp    ! Number of particles in grid
   ! Global particle linked lists
   integer::headp_free,tailp_free,numbp_free=0,numbp_free_tot=0
-  ! Set by read_params when npartmax was supplied as the automatic-capacity
-  ! sentinel.  Explicit positive npartmax values retain the fixed-capacity
-  ! behaviour.
-  logical::npartmax_auto=.false.
+  ! Grow particle storage at runtime when the current capacity is exhausted.
+  ! This is the default; AMR_PARAMS can disable it explicitly.
+  logical::npartmax_auto=.true.
   ! The free list is built by init_tree after IC/restart loading.  Growth can
   ! therefore happen before it exists, but must append new slots once it does.
   logical::particle_free_list_ready=.false.
@@ -93,6 +92,7 @@ module pm_commons
   contains
 
   subroutine grow_particle_bundle(new_npartmax)
+    use amr_commons, only: myid
     ! Grow every particle-sized array as one logical bundle.  The arrays are
     ! resized one at a time: move_alloc briefly retains the old and new copy
     ! of only the current array, bounding transient extra memory by one array
@@ -249,6 +249,9 @@ module pm_commons
 
     ! This is deliberately the last capacity update: all allocated bundle
     ! members have the same extent before npartmax changes.
+    write(*,'(A,I0,A,I0,A,I0)') &
+         '[RESIZABLE] PARTICLE_GROW rank=',myid,' old=',old_npartmax, &
+         ' new=',target_npartmax
     npartmax=target_npartmax
     if(particle_free_list_ready)npart=npartmax-numbp_free
   end subroutine grow_particle_bundle

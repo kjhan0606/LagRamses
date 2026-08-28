@@ -62,6 +62,66 @@ configuration uses the Intel `ifx` compiler with HDF5 parallel I/O and
 optional CUDA acceleration (`make HDF5=1 USE_CUDA=1`). 128-bit Morton
 keys for deep-AMR runs are enabled with `MORTON128=1`.
 
+Refined-level multigrid phase profiling can be enabled independently with
+`make MG_PROFILE=1 HDF5=1 USE_FFTW=1`. This retains the production `-O3`
+flags and adds cumulative `MGPROF` reports; it does not enable the broader
+debug instrumentation.
+
+The CPU refined-level multigrid solver caches the centre and six face-neighbour
+grid indices for the duration of each solve. Coarse MG levels also cache the
+owner rank. The caches are rebuilt after the MG topology is constructed and
+released during MG cleanup; their storage cost is 28 bytes per active fine grid
+and 56 bytes per coarse MG grid when default four-byte integers are used. This
+removes repeated Morton/hash lookups without changing the stencil or MPI
+exchange backend. The fine-grid cache is shared with the optional CUDA upload
+path.
+
+Refined-MG halo exchanges honor the global `exchange_method` policy. With
+`exchange_method='auto'`, the solver measures each level's fixed communication
+graph once after constructing the MG hierarchy, caches separate forward and
+reverse choices, and reuses them throughout the V-cycle. Sparse graphs use
+nonblocking P2P. MG also keeps P2P for aggregate rank payloads up to 1 MiB,
+because its existing rank buffers avoid the extra collective packing cost.
+Larger intermediate graphs use the sectioned k-section schedule, while dense
+bounded messages may use `MPI_Alltoallv`. The explicit values `p2p`, `ksection`,
+and `alltoallv` force the corresponding backend. Backend selection is not
+repeated inside the MG iteration.
+
+### Sink and AGN JSONL diagnostics
+
+The active [`patch/lagRamses/`](./patch/lagRamses/) sink implementation writes
+two single-writer JSONL products. Both are enabled by default and can be
+configured in `&physics_params`:
+
+```fortran
+smbh_capture_ledger = .true.
+smbh_capture_ledger_file = 'smbh_capture_ledger_v1.jsonl'
+agn_coarse_dump = .true.
+agn_coarse_dump_file = 'agn_coarse_state_v1.jsonl'
+```
+
+The [SMBH capture ledger](./patch/lagRamses/SMBH_CAPTURE_LEDGER.md) records
+each sink group immediately before irreversible merge compaction. Its JSONL
+transaction contains the original global `sink_id`, surviving
+`primary_sink_id`, primary flag, member state, and all unordered pair
+diagnostics. A capture row is a numerical merge event, not by itself a claim
+of physical binary formation or coalescence. Validate complete transactions
+and restart duplicates with:
+
+```bash
+python3 patch/lagRamses/aux/validate_smbh_capture_ledger.py \
+  smbh_capture_ledger_v1.jsonl
+```
+
+The [AGN coarse-step ledger](./patch/lagRamses/AGN_COARSE_STATE.md) writes one
+row per `(nstep_coarse, sink_id)` before feedback deposition and accumulator
+reset. It includes sink mass, gas and BH angular momenta, their alignment
+angle, Bondi/Eddington/accreted rates and masses, radiative efficiency,
+bolometric luminosity, feedback state, saved energy, and derived coherent-disk
+episode quantities. Undefined disk or angle fields are JSON `null`. Give each
+independent run a distinct output path, and deduplicate identical restart keys
+while treating conflicting duplicates as provenance errors.
+
 ---
 
 ![GitHub logo dark-mode-only](./doc/img/full_project_logo_dark.svg#gh-dark-mode-only)

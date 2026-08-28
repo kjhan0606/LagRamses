@@ -387,103 +387,6 @@ end subroutine dump_ndgp_source_diag
 !##############################################################################
 !##############################################################################
 !##############################################################################
-#if defined(_OPENMP) && !defined(HYDRO_CUDA)
-subroutine rho_from_current_level(ilevel)
-  use amr_commons
-  use pm_commons
-  use hydro_commons
-  use poisson_commons
-  implicit none
-  integer::ilevel
-  !------------------------------------------------------------------
-  ! This routine computes the density field at level ilevel using
-  ! the CIC scheme from particles that are not entirely in
-  ! level ilevel (boundary particles).
-  ! Arrays flag1 and flag2 are used as temporary work space.
-  !------------------------------------------------------------------
-  integer::igrid,jgrid,ipart,jpart,idim,icpu
-  integer::i,ig,ip,npart1
-  real(dp)::dx
-
-  integer,dimension(1:nvector),save::ind_grid,ind_cell
-  integer,dimension(1:nvector),save::ind_part,ind_grid_part
-  real(dp),dimension(1:nvector,1:ndim),save::x0
-    
-  ! Mesh spacing in that level
-  dx=0.5D0**ilevel 
-  
-  ! Loop over cpus
-  do icpu=1,ncpu
-     ! Loop over grids
-     igrid=headl(icpu,ilevel)
-     ig=0
-     ip=0   
-     do jgrid=1,numbl(icpu,ilevel)
-        npart1=numbp(igrid)  ! Number of particles in the grid
-        if(npart1>0)then        
-           ig=ig+1
-           ind_grid(ig)=igrid
-           ipart=headp(igrid)
-           
-           ! Loop over particles
-           do jpart=1,npart1
-              if(ig==0)then
-                 ig=1
-                 ind_grid(ig)=igrid
-              end if
-              ip=ip+1
-              ind_part(ip)=ipart
-              ind_grid_part(ip)=ig
-              if(ip==nvector)then
-                 ! Lower left corner of 3x3x3 grid-cube
-                 do idim=1,ndim
-                    do i=1,ig
-                       x0(i,idim)=xg(ind_grid(i),idim)-3.0D0*dx
-                    end do
-                 end do
-                 do i=1,ig
-                    ind_cell(i)=father(ind_grid(i))
-                 end do
-#ifdef TSC
-                 call tsc_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
-#else
-                 call cic_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
-#endif
-                 ip=0
-                 ig=0
-              end if
-              ipart=nextp(ipart)  ! Go to next particle
-           end do
-           ! End loop over particles
-           
-        end if
-
-        igrid=next(igrid)   ! Go to next grid
-     end do
-     ! End loop over grids
-
-     if(ip>0)then
-        ! Lower left corner of 3x3x3 grid-cube
-        do idim=1,ndim
-           do i=1,ig
-              x0(i,idim)=xg(ind_grid(i),idim)-3.0D0*dx
-           end do
-        end do
-        do i=1,ig
-           ind_cell(i)=father(ind_grid(i))
-        end do
-#ifdef TSC
-        call tsc_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
-#else
-        call cic_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
-#endif
-     end if
-
-  end do
-  ! End loop over cpus
-
-end subroutine rho_from_current_level
-#else
 !##############################################
 !##############################################
 !##############################################
@@ -510,6 +413,22 @@ subroutine rho_from_current_level(ilevel)
   !------------------------------------------------------------------
   integer::igrid,jgrid,ipart,jpart,icpu
   integer::i,ig,ip,subnump
+#if defined(_OPENMP) && !defined(TSC)
+  integer::mythread,nthreads
+#ifdef CIC_ATOMIC_SCATTER
+  integer,allocatable::nparticles(:),ptrhead(:)
+#else
+  integer::color_ngtot,gcolor,color,idx,thread_first,thread_last
+  integer::first_grid,last_grid,nlocal,ix,iy,iz
+  integer,parameter::cic_ncolor_axis=4,cic_ncolor=64
+  integer,parameter::cic_color_min_grids=16384
+  integer,allocatable::grid_ids(:),grid_color(:),colored_grids(:),cpu_start(:)
+  integer,allocatable::color_count(:),color_start(:)
+  integer,allocatable::thread_color_count(:,:),thread_color_next(:,:)
+  real(dp),allocatable::multipole_thread(:,:)
+  real(dp)::color_dx
+#endif
+#endif
 #ifdef HYDRO_CUDA
   integer::npart1,idim,gi,slot,nvec,ngtot,pm_hw,nptot
   logical::rho_gpu
@@ -661,24 +580,226 @@ subroutine rho_from_current_level(ilevel)
 !  allocate(ptrhead(0:nthreads-1), nparticles(0:nthreads-1))
 
 
-  ! Loop over cpus
+  ! A source grid can deposit only into its 3^NDIM neighboring-grid stencil.
+  ! Four-color each coordinate (64 bins in 3-D): grids in one bin are at
+  ! least four grid widths apart, including across the periodic power-of-two
+  ! mesh.  Their target-cell stencils therefore cannot overlap.  Processing
+  ! one bin at a time gives every rho/phi cell a single writer and removes the
+  ! atomic scatter bottleneck without rescanning neighboring particles.
+#if defined(_OPENMP) && !defined(TSC)
+  nthreads=1
+!$omp parallel shared(nthreads) private(mythread)
+  mythread=omp_get_thread_num()
+!$omp single
+  nthreads=omp_get_num_threads()
+!$omp end single
+!$omp end parallel
+
+#ifdef CIC_ATOMIC_SCATTER
+  ! Compile-time reference/fallback path used for regression benchmarks.
+  allocate(nparticles(0:nthreads-1),ptrhead(0:nthreads-1))
+  do icpu=1,ncpu
+     if(numbl(icpu,ilevel)>0)then
+        call pthreadLinkedList(headl(icpu,ilevel),numbl(icpu,ilevel), &
+             & nthreads,nparticles,ptrhead,next)
+!$omp parallel private(mythread,subnump,igrid)
+        mythread=omp_get_thread_num()
+        subnump=nparticles(mythread)
+        igrid=ptrhead(mythread)
+        if(subnump>0)call sub_rho_from_current_level(ilevel,igrid,subnump)
+!$omp end parallel
+     endif
+  enddo
+  deallocate(ptrhead,nparticles)
+#else
+  ! Avoid bin construction and 64 phase barriers in a one-thread run.  The
+  ! linked-list order is already race-free; only the multipole accumulation
+  ! moved out of cic_amr and must be supplied explicitly.
+  if(nthreads==1)then
+     if(ilevel==levelmin)then
+        do icpu=1,ncpu
+           igrid=headl(icpu,ilevel)
+           do jgrid=1,numbl(icpu,ilevel)
+              ipart=headp(igrid)
+              do jpart=1,numbp(igrid)
+                 multipole(1)=multipole(1)+mp(ipart)
+                 do i=1,ndim
+                    multipole(i+1)=multipole(i+1)+mp(ipart)*xp(ipart,i)
+                 enddo
+                 ipart=nextp(ipart)
+              enddo
+              igrid=next(igrid)
+           enddo
+        enddo
+     endif
+     do icpu=1,ncpu
+        if(numbl(icpu,ilevel)>0)then
+           igrid=headl(icpu,ilevel)
+           call sub_rho_from_current_level(ilevel,igrid,numbl(icpu,ilevel))
+        endif
+     enddo
+     return
+  endif
+
+  color_ngtot=0
+  do icpu=1,ncpu
+     color_ngtot=color_ngtot+numbl(icpu,ilevel)
+  enddo
+  ! On sparse coarse levels the fixed 64 barriers cost more than a serial
+  ! linked-list pass.  Keep those levels race-free by using one writer.
+  if(color_ngtot<cic_color_min_grids)then
+     if(ilevel==levelmin)then
+        do icpu=1,ncpu
+           igrid=headl(icpu,ilevel)
+           do jgrid=1,numbl(icpu,ilevel)
+              ipart=headp(igrid)
+              do jpart=1,numbp(igrid)
+                 multipole(1)=multipole(1)+mp(ipart)
+                 do i=1,ndim
+                    multipole(i+1)=multipole(i+1)+mp(ipart)*xp(ipart,i)
+                 enddo
+                 ipart=nextp(ipart)
+              enddo
+              igrid=next(igrid)
+           enddo
+        enddo
+     endif
+     do icpu=1,ncpu
+        if(numbl(icpu,ilevel)>0)then
+           igrid=headl(icpu,ilevel)
+           call sub_rho_from_current_level(ilevel,igrid,numbl(icpu,ilevel))
+        endif
+     enddo
+     return
+  endif
+  if(color_ngtot>0)then
+     allocate(grid_ids(1:color_ngtot),grid_color(1:color_ngtot))
+     allocate(colored_grids(1:color_ngtot),cpu_start(1:ncpu+1))
+     allocate(color_count(0:cic_ncolor-1),color_start(0:cic_ncolor))
+     allocate(thread_color_count(0:cic_ncolor-1,0:nthreads-1))
+     allocate(thread_color_next(0:cic_ncolor-1,0:nthreads-1))
+     color_count=0
+     thread_color_count=0
+     color_dx=0.5D0**ilevel
+
+     cpu_start(1)=1
+     do icpu=1,ncpu
+        cpu_start(icpu+1)=cpu_start(icpu)+numbl(icpu,ilevel)
+     enddo
+!$omp parallel do private(igrid,jgrid) schedule(static)
+     do icpu=1,ncpu
+        igrid=headl(icpu,ilevel)
+        do jgrid=1,numbl(icpu,ilevel)
+           grid_ids(cpu_start(icpu)+jgrid-1)=igrid
+           igrid=next(igrid)
+        enddo
+     enddo
+!$omp end parallel do
+
+     ! Count colors privately and retain each grid's color for the fill pass.
+!$omp parallel private(mythread,thread_first,thread_last,idx,igrid,ix,iy,iz,gcolor)
+     mythread=omp_get_thread_num()
+     thread_first=1+(color_ngtot*mythread)/nthreads
+     thread_last=(color_ngtot*(mythread+1))/nthreads
+     do idx=thread_first,thread_last
+        igrid=grid_ids(idx)
+        ix=int(floor(xg(igrid,1)/(2d0*color_dx)))
+        iy=0
+        iz=0
+#if NDIM >= 2
+        iy=int(floor(xg(igrid,2)/(2d0*color_dx)))
+#endif
+#if NDIM >= 3
+        iz=int(floor(xg(igrid,3)/(2d0*color_dx)))
+#endif
+        gcolor=modulo(ix,cic_ncolor_axis) &
+             & +cic_ncolor_axis*modulo(iy,cic_ncolor_axis) &
+             & +cic_ncolor_axis*cic_ncolor_axis*modulo(iz,cic_ncolor_axis)
+        grid_color(idx)=gcolor
+        thread_color_count(gcolor,mythread)= &
+             & thread_color_count(gcolor,mythread)+1
+     enddo
+!$omp end parallel
+
+     color_start(0)=1
+     do color=0,cic_ncolor-1
+        color_count(color)=sum(thread_color_count(color,0:nthreads-1))
+        color_start(color+1)=color_start(color)+color_count(color)
+     enddo
+     do color=0,cic_ncolor-1
+        thread_color_next(color,0)=color_start(color)
+        do mythread=1,nthreads-1
+           thread_color_next(color,mythread)=thread_color_next(color,mythread-1) &
+                & +thread_color_count(color,mythread-1)
+        enddo
+     enddo
+!$omp parallel private(mythread,thread_first,thread_last,idx,gcolor)
+     mythread=omp_get_thread_num()
+     thread_first=1+(color_ngtot*mythread)/nthreads
+     thread_last=(color_ngtot*(mythread+1))/nthreads
+     do idx=thread_first,thread_last
+        gcolor=grid_color(idx)
+        colored_grids(thread_color_next(gcolor,mythread))=grid_ids(idx)
+        thread_color_next(gcolor,mythread)=thread_color_next(gcolor,mythread)+1
+     enddo
+!$omp end parallel
+
+     ! Multipoles are global scalars rather than mesh cells.  Accumulate them
+     ! in thread-private slots once, outside the colored deposition phases.
+     if(ilevel==levelmin)then
+        ! Pad each thread slot to one 64-byte cache line.
+        allocate(multipole_thread(1:8,0:nthreads-1))
+        multipole_thread=0d0
+!$omp parallel private(mythread,idx,igrid,ipart,jpart,i)
+        mythread=omp_get_thread_num()
+        do idx=mythread+1,color_ngtot,nthreads
+           igrid=grid_ids(idx)
+           ipart=headp(igrid)
+           do jpart=1,numbp(igrid)
+              multipole_thread(1,mythread)=multipole_thread(1,mythread)+mp(ipart)
+              do i=1,ndim
+                 multipole_thread(i+1,mythread)=multipole_thread(i+1,mythread) &
+                      & +mp(ipart)*xp(ipart,i)
+              enddo
+              ipart=nextp(ipart)
+           enddo
+        enddo
+!$omp end parallel
+        do mythread=0,nthreads-1
+           multipole(1:ndim+1)=multipole(1:ndim+1) &
+                & +multipole_thread(1:ndim+1,mythread)
+        enddo
+        deallocate(multipole_thread)
+     endif
+
+!$omp parallel private(mythread,color,nlocal,first_grid,last_grid)
+     mythread=omp_get_thread_num()
+     do color=0,cic_ncolor-1
+        nlocal=color_count(color)
+        first_grid=color_start(color)+(nlocal*mythread)/nthreads
+        last_grid=color_start(color)+(nlocal*(mythread+1))/nthreads-1
+        if(last_grid>=first_grid)then
+           call sub_rho_from_grid_vector(ilevel,colored_grids,first_grid, &
+                & last_grid-first_grid+1)
+        endif
+!$omp barrier
+     enddo
+!$omp end parallel
+
+     deallocate(grid_ids,grid_color,colored_grids,cpu_start)
+     deallocate(color_count,color_start,thread_color_count,thread_color_next)
+  endif
+#endif
+#else
+  ! Loop over cpus in the serial or TSC implementation.
   do icpu=1,ncpu
      if(numbl(icpu,ilevel) .gt.0) then
-!       if(numbl(icpu,ilevel) .lt. 4) then
          igrid = headl(icpu,ilevel)
          subnump = numbl(icpu,ilevel)
          call  sub_rho_from_current_level(ilevel,igrid,subnump)
-!       else
-!         call pthreadLinkedList(headl(icpu,ilevel),numbl(icpu,ilevel),nthreads, nparticles, ptrhead,next)
-!!$omp parallel private(subnump, igrid) 
-!         subnump = nparticles(mythread)
-!         igrid = ptrhead(mythread)
-!         call  sub_rho_from_current_level(ilevel,igrid,subnump)
-!!$omp end parallel
-!       endif
      endif
   enddo
-!  deallocate(ptrhead, nparticles)
+#endif
 end subroutine rho_from_current_level
 !##############################################
 !##############################################
@@ -783,7 +904,73 @@ subroutine sub_rho_from_current_level(ilevel, igrid, nump)
   ! End loop over cpus
 
 end subroutine sub_rho_from_current_level
-#endif
+!##############################################################################
+!##############################################################################
+!##############################################################################
+!##############################################################################
+subroutine sub_rho_from_grid_vector(ilevel,grid_vector,first_grid,nump)
+  use amr_commons
+  use pm_commons
+  use hydro_commons
+  use poisson_commons
+  implicit none
+  integer::ilevel,first_grid,nump
+  integer,dimension(*)::grid_vector
+  integer::igrid,jgrid,ipart,jpart,idim
+  integer::i,ig,ip,npart1
+  real(dp)::dx
+  integer,dimension(1:nvector)::ind_grid,ind_cell
+  integer,dimension(1:nvector)::ind_part,ind_grid_part
+  real(dp),dimension(1:nvector,1:ndim)::x0
+
+  dx=0.5D0**ilevel
+  ig=0
+  ip=0
+  do jgrid=1,nump
+     igrid=grid_vector(first_grid+jgrid-1)
+     npart1=numbp(igrid)
+     if(npart1>0)then
+        ig=ig+1
+        ind_grid(ig)=igrid
+        ipart=headp(igrid)
+        do jpart=1,npart1
+           if(ig==0)then
+              ig=1
+              ind_grid(ig)=igrid
+           endif
+           ip=ip+1
+           ind_part(ip)=ipart
+           ind_grid_part(ip)=ig
+           if(ip==nvector)then
+              do idim=1,ndim
+                 do i=1,ig
+                    x0(i,idim)=xg(ind_grid(i),idim)-3.0D0*dx
+                 enddo
+              enddo
+              do i=1,ig
+                 ind_cell(i)=father(ind_grid(i))
+              enddo
+              call cic_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
+              ip=0
+              ig=0
+           endif
+           ipart=nextp(ipart)
+        enddo
+     endif
+  enddo
+
+  if(ip>0)then
+     do idim=1,ndim
+        do i=1,ig
+           x0(i,idim)=xg(ind_grid(i),idim)-3.0D0*dx
+        enddo
+     enddo
+     do i=1,ig
+        ind_cell(i)=father(ind_grid(i))
+     enddo
+     call cic_amr(ind_cell,ind_part,ind_grid_part,x0,ig,ip,ilevel)
+  endif
+end subroutine sub_rho_from_grid_vector
 !##############################################################################
 !##############################################################################
 !##############################################################################
@@ -877,24 +1064,30 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
      mmm(j)=mp(ind_part(j))
   end do
 
+#if !defined(_OPENMP) || defined(CIC_ATOMIC_SCATTER)
   if(ilevel==levelmin)then
      do j=1,np
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
         multipole(1)=multipole(1)+mp(ind_part(j))
      end do
      do idim=1,ndim
         do j=1,np
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
            multipole(idim+1)=multipole(idim+1)+mp(ind_part(j))*xp(ind_part(j),idim)
         end do
      end do
   end if
+#endif
 
 
-  ! Initialize ttt, iii, pt_arr (avoid implicit SAVE with OpenMP)
-  do j=1,nvector
-     ttt(j)=0d0
-     iii(j)=0
-     pt_arr(j)=PTYPE_DM
-  end do
+  ! Only entries 1:np are consumed below.  Filling all nvector entries on
+  ! every colored batch wastes memory bandwidth, particularly when a color
+  ! leaves a thread with a short tail batch.  Each optional field is fully
+  ! defined over 1:np before its corresponding physics branch can use it.
   ! Gather particle birth epoch
   if(star)then
      do j=1,np
@@ -1064,6 +1257,9 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
      if(cic_levelmax==0.or.ilevel<=cic_levelmax)then
     do j=1,np
        if(ok(j))then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
           rho(indp(j,ind))=rho(indp(j,ind))+vol2(j)
        end if
     end do
@@ -1071,12 +1267,18 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
     if(sink)then
        do j=1,np
           if(ok(j).and. ( pt_arr(j)==PTYPE_STAR .or. pt_arr(j)==PTYPE_SINK ))then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
          rho(indp(j,ind))=rho(indp(j,ind))+vol2(j)
           endif
        enddo
     else
        do j=1,np
           if(ok(j).and.pt_arr(j)==PTYPE_STAR)then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
          rho(indp(j,ind))=rho(indp(j,ind))+vol2(j)
           end if
        enddo
@@ -1087,12 +1289,18 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
     if(sink)then
        do j=1,np
           if(ok(j).and.pt_arr(j)/=PTYPE_STAR.and.pt_arr(j)/=PTYPE_SINK)then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
          rho_top(indp(j,ind))=rho_top(indp(j,ind))+vol2(j)
           end if
        enddo
     else
        do j=1,np
           if(ok(j).and.pt_arr(j)/=PTYPE_STAR)then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
          rho_top(indp(j,ind))=rho_top(indp(j,ind))+vol2(j)
           end if
        end do
@@ -1148,6 +1356,9 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
      if(cic_levelmax==0.or.ilevel<cic_levelmax)then
     do j=1,np
        if(ok(j))then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
           phi(indp(j,ind))=phi(indp(j,ind))+vol2(j)
        end if
     end do
@@ -1155,12 +1366,18 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
     if(sink)then
        do j=1,np
           if(ok(j).and. ( pt_arr(j)==PTYPE_STAR .or. pt_arr(j)==PTYPE_SINK ))then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
          phi(indp(j,ind))=phi(indp(j,ind))+vol2(j)
           endif
        enddo
     else
        do j=1,np
           if(ok(j).and.pt_arr(j)==PTYPE_STAR)then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
          phi(indp(j,ind))=phi(indp(j,ind))+vol2(j)
           end if
        enddo
@@ -1172,6 +1389,9 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
      if(sink_refine)then
         do j=1,np
            if(pt_arr(j)==PTYPE_SINK)then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
               phi(indp(j,ind))=phi(indp(j,ind))+m_refine_eff(ilevel)
            end if
         end do

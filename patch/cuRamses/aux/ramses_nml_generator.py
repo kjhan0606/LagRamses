@@ -106,7 +106,7 @@ PARAMS = [
     ParamDef('gpu_fft',    'bool', False,  'RUN_PARAMS', S_GPU, 'GPU FFT for direct Poisson'),
     ParamDef('gpu_sink',   'bool', False,  'RUN_PARAMS', S_GPU, 'GPU sink particle'),
     ParamDef('gpu_auto_tune','bool',True,  'RUN_PARAMS', S_GPU, 'Auto-tune CPU vs GPU (disable for benchmarks)'),
-    ParamDef('use_fftw',   'bool', False,  'RUN_PARAMS', S_GPU, 'FFTW3 CPU direct Poisson solver'),
+    ParamDef('use_fftw',   'bool', True,   'RUN_PARAMS', S_GPU, 'FFTW3 CPU direct Poisson solver'),
 
     # Misc run_params
     ParamDef('jobcontrolfile','str','',    'RUN_PARAMS', S_TIME, 'Job control file path'),

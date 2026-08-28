@@ -89,7 +89,7 @@ module amr_parameters
   integer::n_cuda_streams=1   ! Number of CUDA streams (runtime, max 16)
 
   ! FFTW3 CPU direct Poisson solver (requires USE_FFTW compilation)
-  logical::use_fftw=.false.    ! FFTW3 CPU direct solve for uniform base level
+  logical::use_fftw=.true.     ! Project baseline: direct solve on uniform base level
 
   ! Multigrid merged red/black smoother
   ! .true.  -> GPU MG performs red then black with a single phi communication
@@ -310,6 +310,8 @@ module amr_parameters
   real(dp)::d_jeans_thre=0.d0 ! Gas density threshold to trigger Jeans-based refinement criterion
   logical ::smbh_capture_ledger=.true. ! Log complete pre-compaction sink groups
   character(len=256)::smbh_capture_ledger_file='smbh_capture_ledger_v1.jsonl'
+  logical ::agn_coarse_dump=.true. ! Log one physical-state row per AGN/coarse step
+  character(len=256)::agn_coarse_dump_file='agn_coarse_state_v1.jsonl'
 
   logical ::self_shielding=.false.
   logical ::pressure_fix=.false.

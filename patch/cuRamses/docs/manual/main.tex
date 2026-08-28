@@ -1456,6 +1456,23 @@ Verification: econs = 7.65E-04 (ksection, 12~CPU) and 7.47E-04 (Hilbert, 4~CPU),
 %======================================================
 \chapter{AGN Feedback Spatial Binning}
 \label{ch:agn-binning}
+
+\section{Coarse-step AGN and capture ledgers}
+
+The active lagRamses sink patch writes two rank-1 JSONL diagnostics.  The
+pre-compaction capture ledger records every original sink and its surviving
+\texttt{primary\_sink\_id}.  The coarse-step AGN ledger is written before
+feedback deposition and accumulator reset; it records disk-episode mass and
+radii, gas angular momentum, dimensionless BH spin, physical BH angular
+momentum, their alignment angle, accretion rates,
+radiative efficiency, instantaneous bolometric luminosity, and the
+coarse-step supply, Eddington-limit, and accreted masses.  The feedback regime
+is classified from the same coarse-step ratio consumed by
+\texttt{AGN\_feedback}.  The controls are
+\texttt{smbh\_capture\_ledger}, \texttt{smbh\_capture\_ledger\_file},
+\texttt{agn\_coarse\_dump}, and \texttt{agn\_coarse\_dump\_file} in
+\texttt{physics\_params}.  Undefined disk or angle diagnostics are emitted as
+JSON \texttt{null}, rather than a numerical sentinel.
 %======================================================
 
 The AGN feedback routines \texttt{average\_AGN} and \texttt{AGN\_blast} in \texttt{sink\_particle.kjhan.f90} iterate over all AGN sinks for every leaf cell, resulting in $O(n_\mathrm{cells} \times n_\mathrm{AGN})$ complexity. With 32K sinks, profiling showed \texttt{average\_AGN} consuming 177\,s (68.5\%) and \texttt{AGN\_blast} consuming 73\,s (27.3\%) of the AGN feedback time.
@@ -1989,14 +2006,63 @@ For fully uniform AMR levels (where all $N = N_x \times N_y \times N_z$ cells ex
 \section{Build and Configuration}
 
 \begin{verbatim}
-# Build with FFTW3 support
-cd bin && make HDF5=1 USE_FFTW=1
+# FFTW3 support is enabled by default
+cd bin && make HDF5=1
 
 # Namelist: &RUN_PARAMS
 use_fftw = .true.
 \end{verbatim}
 
 Requires FFTW3 with MPI and OpenMP support (\texttt{-lfftw3\_mpi -lfftw3\_omp -lfftw3}).
+Use \texttt{USE\_FFTW=0} only for an explicit multigrid diagnostic build.
+
+\section{OpenMP particle-to-mesh deposition}
+
+The default CIC density deposition uses atomic-free spatially colored
+scatter.  A source grid can update only its $3^3$ neighboring-grid stencil.
+Coloring each grid coordinate modulo four therefore creates 64 phases in
+which target stencils do not overlap, including at the periodic boundary of
+the power-of-two mesh.  Threads divide the grids within each phase, so
+\texttt{rho}, \texttt{rho\_top}, and \texttt{phi} have a single writer.
+The mass multipole uses padded per-thread accumulators.  One-thread runs and
+sparse AMR levels bypass color construction and its barriers.  The previous
+atomic path can be built for regression tests with
+\texttt{make CIC\_ATOMIC\_SCATTER=1}; it is not the default.
+
+Table~\ref{tab:cic-colored-scaling} compares both paths on an exclusive
+\texttt{grammar-debug} node using the Paper-Ib $256^3$ DMO restart.  The two
+executables differed only by the build switch, and variants were run in
+alternating order.  The final timer \texttt{TOTAL} excludes the ambiguity of
+restart preparation time; the \texttt{rho} timer isolates deposition.
+
+\begin{table}[htbp]
+\caption{Atomic versus colored CIC at fixed 64 physical cores.  Efficiency is
+relative to the corresponding one-thread run at the same MPI rank count.}
+\label{tab:cic-colored-scaling}
+\begin{center}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{2}{c}{Atomic scatter} & \multicolumn{2}{c}{Colored scatter} & \multicolumn{2}{c}{Colored efficiency} \\
+\textbf{MPI$\times$OMP} & \textbf{Total (s)} & \textbf{$\rho$ (s)} & \textbf{Total (s)} & \textbf{$\rho$ (s)} & \textbf{Total} & \textbf{$\rho$} \\
+\midrule
+8$\times$8  & 5.903 & 0.827 & 4.470 & 0.310 & 81.9\% & 52.9\% \\
+16$\times$4 & 4.094 & 0.325 & 4.046 & 0.277 & 86.8\% & 59.7\% \\
+32$\times$2 & 4.437 & 0.267 & 4.444 & 0.252 & 89.3\% & 69.2\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
+
+The largest contention removal occurs at 8$\times$8: colored deposition is
+2.67$\times$ faster and the full timer is 1.32$\times$ faster.  At lower
+thread counts the full application is already limited by other phases;
+16$\times$4 is the fastest tested 64-core layout.  In a separate fixed-four-
+rank test, total-timer efficiencies were 87.5\% and 76.9\% at four and eight
+threads, and eight threads reduced wall time by 43.1\% relative to four.
+These measurements show a real multi-thread speedup but do not support a
+95\% efficiency claim.  All configurations printed the same final
+conservation state.
 
 \section{Two-Path Architecture}
 
@@ -2540,7 +2606,7 @@ Runtime control parameters.
 \midrule
 \multicolumn{4}{l}{\textit{FFTW3 direct Poisson solver (new)}} \\
 \midrule
-\texttt{use\_fftw} & logical & \texttt{.false.} & FFTW3 CPU direct FFT solve for uniform levels (Ch.~\ref{ch:fftw3}) \\
+\texttt{use\_fftw} & logical & \texttt{.true.} & FFTW3 CPU direct FFT solve for uniform levels (Ch.~\ref{ch:fftw3}) \\
 \midrule
 \multicolumn{4}{l}{\textit{Neutrino linear response (new)}} \\
 \midrule
