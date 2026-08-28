@@ -481,7 +481,14 @@ subroutine init_part
                        if(ndim>0)xp(ipart,1)=xg(ind_grid(i),1)+xc(ind,1)
                        if(ndim>1)xp(ipart,2)=xg(ind_grid(i),2)+xc(ind,2)
                        if(ndim>2)xp(ipart,3)=xg(ind_grid(i),3)+xc(ind,3)
-                       mp(ipart)=0.5d0**(3*ilevel)*(1.0d0-omega_b/omega_m)
+                       ! A one-fluid DMO GRAFIC load represents total matter,
+                       ! even though the extended IC header preserves the
+                       ! physical omega_b for provenance and transfer checks.
+                       if(hydro)then
+                          mp(ipart)=0.5d0**(3*ilevel)*(1.0d0-omega_b/omega_m)
+                       else
+                          mp(ipart)=0.5d0**(3*ilevel)
+                       endif
                     end if
                  end do
               end do
@@ -695,7 +702,6 @@ subroutine init_part
               block
                 integer::nslab3,k0,k1,kk,nk
                 integer::ii1lo,ii1hi,ii2lo,ii2hi
-                integer(kind=8)::byte_pos_s,hdr_s,pb4,pb8
                 real(kind=4),allocatable,dimension(:,:,:)::vx_s,vy_s,vz_s
                 real(kind=4),allocatable,dimension(:,:,:)::px_s,py_s,pz_s
                 integer(i8b),allocatable,dimension(:,:,:)::id_s
@@ -715,10 +721,6 @@ subroutine init_part
                 ! Clamp the i1/i2 window once (i3 clamped per slab).
                 ii1lo=max(1,i1_min); ii1hi=min(n1(ilevel),i1_max)
                 ii2lo=max(1,i2_min); ii2hi=min(n2(ilevel),i2_max)
-
-                hdr_s=52_8
-                pb4=int(n1(ilevel),8)*int(n2(ilevel),8)*4_8+8_8
-                pb8=int(n1(ilevel),8)*int(n2(ilevel),8)*8_8+8_8
 
                 ! Slab thickness: target ~64 MB working set for the velocity slab
                 ! (3 r4 + opt 3 r4 + opt i8 over the i1*i2 window). Always >=1.
@@ -749,28 +751,28 @@ subroutine init_part
                    ! --- read this slab's planes for all needed fields ---
                    call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_velcx', &
                         & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
-                        & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,vx_s)
+                        & ii1lo,ii1hi,ii2lo,ii2hi,init_plane,vx_s)
                    call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_velcy', &
                         & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
-                        & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,vy_s)
+                        & ii1lo,ii1hi,ii2lo,ii2hi,init_plane,vy_s)
                    call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_velcz', &
                         & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
-                        & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,vz_s)
+                        & ii1lo,ii1hi,ii2lo,ii2hi,init_plane,vz_s)
                    if(read_pos)then
                       call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_poscx', &
                            & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
-                           & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,px_s)
+                           & ii1lo,ii1hi,ii2lo,ii2hi,init_plane,px_s)
                       call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_poscy', &
                            & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
-                           & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,py_s)
+                           & ii1lo,ii1hi,ii2lo,ii2hi,init_plane,py_s)
                       call read_grafic_slab_r4(TRIM(initfile(ilevel))//'/ic_poscz', &
                            & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
-                           & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb4,init_plane,pz_s)
+                           & ii1lo,ii1hi,ii2lo,ii2hi,init_plane,pz_s)
                    endif
                    if(read_ids)then
                       call read_grafic_slab_i8(TRIM(filename_id), &
                            & n1(ilevel),n2(ilevel),n3(ilevel),i1_min,i1_max,i2_min,i2_max,k0,k1, &
-                           & ii1lo,ii1hi,ii2lo,ii2hi,hdr_s,pb8,id_s)
+                           & ii1lo,ii1hi,ii2lo,ii2hi,id_s)
                    endif
 
                    ! Rescale velocity slab to code units; position slab to box units.
@@ -1066,7 +1068,7 @@ subroutine init_part
            if(recvbuf(icpu)>0)deallocate(reception(icpu,1)%up)
         end do
 
-        write(*,*)'npart=',ipart,'/',npartmax,' for PE=',myid
+        write(*,*)'npart=',npart,'/',npartmax,' for PE=',myid
 #endif
         
 
@@ -1264,23 +1266,41 @@ end subroutine init_part
 ! in init_part to bound peak memory for multi-zoom union ICs.
 !################################################################
 subroutine read_grafic_slab_r4(fname,nn1,nn2,nn3,i1_min,i1_max,i2_min,i2_max,k0,k1, &
-     & ii1lo,ii1hi,ii2lo,ii2hi,hdr_bytes,plane_bytes,plane_buf,slab)
+     & ii1lo,ii1hi,ii2lo,ii2hi,plane_buf,slab)
   implicit none
   character(LEN=*),intent(in)::fname
   integer,intent(in)::nn1,nn2,nn3,i1_min,i1_max,i2_min,i2_max,k0,k1
   integer,intent(in)::ii1lo,ii1hi,ii2lo,ii2hi
-  integer(kind=8),intent(in)::hdr_bytes,plane_bytes
   real(kind=4),intent(inout)::plane_buf(1:nn1,1:nn2)
   ! explicit-shape slab (no interface needed); matches caller's bounds exactly
   real(kind=4),intent(inout)::slab(i1_min:i1_max,i2_min:i2_max,k0:k1)
-  integer::i3,i1,i2
-  integer(kind=8)::byte_pos
+  integer::i3,i1,i2,ios
+  integer(kind=4)::header_payload,plane_payload
+  integer(kind=8)::byte_pos,hdr_bytes,plane_bytes,expected_plane_payload
   ! Only planes that EXIST in the IC sub-grid (i3 in [1,nn3]) are read; out-of-IC
   ! i3 slices are left at the slab's pre-zeroed value, exactly as the original
   ! full-bbox reader does (do i3=max(1,i3_min),min(n3,i3_max)). This avoids the
   ! out-of-file byte_pos (severe 24 EOF) that a multi-zoom union offset level hits
   ! when the rank bounding box runs below 1 or above n3.
   open(10,file=fname,access='stream',form='unformatted',status='old')
+  header_payload=0
+  read(10,pos=1,iostat=ios)header_payload
+  if(ios/=0 .or. (header_payload/=44 .and. header_payload/=48))then
+     write(*,*)'Invalid GRAFIC header record in ',TRIM(fname),header_payload,ios
+     close(10)
+     call clean_stop
+  endif
+  hdr_bytes=int(header_payload,8)+8_8
+  plane_payload=0
+  read(10,pos=hdr_bytes+1_8,iostat=ios)plane_payload
+  expected_plane_payload=int(nn1,8)*int(nn2,8)*4_8
+  if(ios/=0 .or. int(plane_payload,8)/=expected_plane_payload)then
+     write(*,*)'Invalid GRAFIC r4 plane record in ',TRIM(fname), &
+          & plane_payload,expected_plane_payload,ios
+     close(10)
+     call clean_stop
+  endif
+  plane_bytes=int(plane_payload,8)+8_8
   do i3=max(1,k0),min(nn3,k1)
      byte_pos=hdr_bytes+int(i3-1,8)*plane_bytes+5_8
      read(10,pos=byte_pos)((plane_buf(i1,i2),i1=1,nn1),i2=1,nn2)
@@ -1294,21 +1314,39 @@ subroutine read_grafic_slab_r4(fname,nn1,nn2,nn3,i1_min,i1_max,i2_min,i2_max,k0,
 end subroutine read_grafic_slab_r4
 !################################################################
 subroutine read_grafic_slab_i8(fname,nn1,nn2,nn3,i1_min,i1_max,i2_min,i2_max,k0,k1, &
-     & ii1lo,ii1hi,ii2lo,ii2hi,hdr_bytes,plane_bytes,slab)
+     & ii1lo,ii1hi,ii2lo,ii2hi,slab)
   use amr_parameters, ONLY: i8b
   implicit none
   character(LEN=*),intent(in)::fname
   integer,intent(in)::nn1,nn2,nn3,i1_min,i1_max,i2_min,i2_max,k0,k1
   integer,intent(in)::ii1lo,ii1hi,ii2lo,ii2hi
-  integer(kind=8),intent(in)::hdr_bytes,plane_bytes
   integer(i8b),intent(inout)::slab(i1_min:i1_max,i2_min:i2_max,k0:k1)
   integer(i8b),allocatable::plane_buf(:,:)
-  integer::i3,i1,i2
-  integer(kind=8)::byte_pos
+  integer::i3,i1,i2,ios
+  integer(kind=4)::header_payload,plane_payload
+  integer(kind=8)::byte_pos,hdr_bytes,plane_bytes,expected_plane_payload
   allocate(plane_buf(1:nn1,1:nn2))
   ! See read_grafic_slab_r4: clamp i3 to the IC sub-grid [1,nn3]; out-of-IC i3
   ! planes are left pre-zeroed, matching the original full-bbox reader.
   open(10,file=fname,access='stream',form='unformatted',status='old')
+  header_payload=0
+  read(10,pos=1,iostat=ios)header_payload
+  if(ios/=0 .or. (header_payload/=44 .and. header_payload/=48))then
+     write(*,*)'Invalid GRAFIC header record in ',TRIM(fname),header_payload,ios
+     close(10)
+     call clean_stop
+  endif
+  hdr_bytes=int(header_payload,8)+8_8
+  plane_payload=0
+  read(10,pos=hdr_bytes+1_8,iostat=ios)plane_payload
+  expected_plane_payload=int(nn1,8)*int(nn2,8)*8_8
+  if(ios/=0 .or. int(plane_payload,8)/=expected_plane_payload)then
+     write(*,*)'Invalid GRAFIC i8 plane record in ',TRIM(fname), &
+          & plane_payload,expected_plane_payload,ios
+     close(10)
+     call clean_stop
+  endif
+  plane_bytes=int(plane_payload,8)+8_8
   do i3=max(1,k0),min(nn3,k1)
      byte_pos=hdr_bytes+int(i3-1,8)*plane_bytes+5_8
      read(10,pos=byte_pos)((plane_buf(i1,i2),i1=1,nn1),i2=1,nn2)
