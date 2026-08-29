@@ -2256,6 +2256,10 @@ subroutine dump_agn_coarse_state
           & ',"t_code":'//trim(agn_json_real(t))// &
           & ',"mass_code":'//trim(agn_json_real(msink(isink)))// &
           & ',"mass_msun":'//trim(agn_json_real(mass_msun))// &
+          & ',"position_code":['//trim(agn_json_real(xsink(isink,1)))//','// &
+          & trim(agn_json_real(xsink(isink,2)))//','//trim(agn_json_real(xsink(isink,3)))//']'// &
+          & ',"velocity_code":['//trim(agn_json_real(vsink(isink,1)))//','// &
+          & trim(agn_json_real(vsink(isink,2)))//','//trim(agn_json_real(vsink(isink,3)))//']'// &
           & ',"gas_angular_momentum_code":['//trim(agn_json_real(jsink(isink,1)))//','// &
           & trim(agn_json_real(jsink(isink,2)))//','//trim(agn_json_real(jsink(isink,3)))//']'// &
           & ',"gas_angular_momentum_norm_code":'//trim(agn_json_real(jgas_norm))// &
