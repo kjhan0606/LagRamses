@@ -60,6 +60,7 @@ subroutine create_sink
 
   ! Create new particle clouds
   call kjhan_create_cloud(1)
+  call kjhan_sync_sink_particle_coordinates
 
   ! Scatter particle to the grid
   do ilevel=1,nlevelmax
@@ -98,6 +99,47 @@ subroutine create_sink
   call diag_check_nan('sink_post_bondi')
 
 end subroutine create_sink
+!################################################################
+!################################################################
+!################################################################
+!################################################################
+subroutine kjhan_sync_sink_particle_coordinates
+  use amr_commons
+  use pm_commons
+  implicit none
+  integer::ilevel,icpu,igrid,jgrid,npart1,jpart,ipart,next_part,idim
+  integer(i8b)::ksink
+
+  ! kjhan_update_sink_position_velocity updates the cloud-averaged sink
+  ! center.  Synchronize only the canonical PTYPE_SINK particle before the
+  ! particle tree is rebuilt, so Bondi sampling uses the same physical center.
+  if(nsink==0)return
+  do ilevel=1,nlevelmax
+     do icpu=1,ncpu
+        if(numbl(icpu,ilevel)<=0)cycle
+        igrid=headl(icpu,ilevel)
+        do jgrid=1,numbl(icpu,ilevel)
+           npart1=numbp(igrid)
+           if(npart1>0)then
+              ipart=headp(igrid)
+              do jpart=1,npart1
+                 next_part=nextp(ipart)
+                 if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart)>=-nsinkmax)then
+                    ksink=-idp(ipart)
+                    do idim=1,ndim
+                       xp(ipart,idim)=xsink(ksink,idim)
+                       vp(ipart,idim)=vsink(ksink,idim)
+                    end do
+                 endif
+                 ipart=next_part
+              end do
+           endif
+           igrid=next(igrid)
+        end do
+     end do
+  end do
+
+end subroutine kjhan_sync_sink_particle_coordinates
 !################################################################
 !################################################################
 !################################################################
@@ -2946,11 +2988,10 @@ subroutine bondi_hoyle(ilevel)
              next_part=nextp(ipart)
              if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart).ge.-nsinkmax)then
                ksink=-idp(ipart)
-               r2=0.0
-               do idim=1,ndim
-                  r2=r2+(xp(ipart,idim)-xsink(ksink,idim))**2
-               end do
-               if(r2==0.0)then
+                 ! PTYPE_SINK is the unique canonical particle for ksink.
+                 ! Its membership must not rely on xp matching the
+                 ! cloud-averaged xsink by exact floating-point equality.
+                 if(ksink>=1 .and. ksink<=nsink)then
                   npart2=npart2+1
                end if
              endif
