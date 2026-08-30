@@ -91,6 +91,21 @@ class DMRunProvenanceTests(unittest.TestCase):
         self.assertFalse(report.valid)
         self.assertIn("no-DM provenance flags are inconsistent", report.errors)
 
+    def test_noncompacting_zoom_mode_requires_an_exact_zero_merge_radius(self):
+        values = records("cdm")
+        values["smbh_merge_radius_cells"] = "0.0d0"
+        values["smbh_compaction_mode"] = "no_finite_radius_rmerge_zero"
+        report = self.validate(values)
+        self.assertTrue(report.valid, report.errors)
+
+        values["smbh_merge_radius_cells"] = "1.0d0"
+        report = self.validate(values)
+        self.assertFalse(report.valid)
+        self.assertIn(
+            "smbh_compaction_mode disagrees with smbh_merge_radius_cells",
+            report.errors,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -414,6 +414,18 @@ subroutine output_dm_run_provenance(filename)
   write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'smbh_capture_ledger_file = ', &
        & trim(smbh_capture_ledger_file)
   if(ios /= 0) call dm_run_provenance_fatal('write capture-ledger path',filename,ios,iomsg)
+  if(rmerge<0d0) then
+     write(*,'(A,1X,ES24.16)') 'ERROR: rmerge must be non-negative for DM provenance',rmerge
+     call clean_stop
+  endif
+  write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'smbh_merge_radius_cells = ',rmerge
+  if(ios /= 0) call dm_run_provenance_fatal('write sink merge radius',filename,ios,iomsg)
+  if(rmerge==0d0) then
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'smbh_compaction_mode = no_finite_radius_rmerge_zero'
+  else
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'smbh_compaction_mode = enabled'
+  endif
+  if(ios /= 0) call dm_run_provenance_fatal('write sink compaction mode',filename,ios,iomsg)
 
   select case(trim(dm_model))
   case('cdm')

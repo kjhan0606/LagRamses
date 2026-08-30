@@ -124,6 +124,21 @@ def validate_dm_run_provenance(path: str | Path) -> DMRunProvenanceReport:
         if not records.get(key, "").strip():
             errors.append(f"{key} is required")
     _nonnegative_number(records.get("time_code"), "time_code", errors)
+    merge_radius = None
+    merge_mode = records.get("smbh_compaction_mode")
+    if "smbh_merge_radius_cells" in records:
+        merge_radius = _nonnegative_number(
+            records.get("smbh_merge_radius_cells"),
+            "smbh_merge_radius_cells",
+            errors,
+        )
+    if merge_mode is not None:
+        if merge_mode not in {"enabled", "no_finite_radius_rmerge_zero"}:
+            errors.append("smbh_compaction_mode is unsupported")
+        elif merge_radius is None:
+            errors.append("smbh_compaction_mode requires smbh_merge_radius_cells")
+        elif (merge_mode == "no_finite_radius_rmerge_zero") != (merge_radius == 0.0):
+            errors.append("smbh_compaction_mode disagrees with smbh_merge_radius_cells")
     if model == "cdm":
         if flags["pic_enabled"] is not True or flags["sidm_enabled"] is not False or flags["fdm_enabled"] is not False:
             errors.append("CDM provenance flags are inconsistent")

@@ -6,6 +6,12 @@ component has been flushed and before the root `COMPLETE` marker is created.
 The inventory changes no force, sink state, or CDM/SIDM/FDM evolution.  It is
 only a fail-closed index for the later model-specific postprocessor.
 
+The companion `dm_run_provenance_<output>.txt` sidecar records the configured
+SMBH merge radius.  A non-compacting zoom is represented only by
+`smbh_merge_radius_cells = 0` together with
+`smbh_compaction_mode = no_finite_radius_rmerge_zero`.  This configuration provenance
+does not by itself establish resolved binary evolution or a physical delay.
+
 The record identifies the selected output, active DM model, raw snapshot
 directory, particle/hydro/potential/sink prefixes, and the availability of the
 stars, gas, and active dark-matter channels.  A particle dump does not by
