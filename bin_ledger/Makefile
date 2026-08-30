@@ -10,8 +10,6 @@
 #SOLVER = hydro
 #PATCH = ../patch/Horizon5-master
 #EXEC = ramses_ch
-USE_FFTW ?= 1
-CIC_ATOMIC_SCATTER ?= 0
 ##################################
 # Yohan's patch
 #NVECTOR = 32
@@ -22,7 +20,7 @@ NVAR = 11
 NENER = 0
 SOLVER = hydro
 PATCH = ../patch/lagRamses
-EXEC = ramses_final
+EXEC = ramses_ledger
 #############################################################################
 GITBRANCH = $(shell git rev-parse --abbrev-ref HEAD)
 GITHASH = $(shell git rev-parse HEAD)$(shell git diff-index --quiet HEAD -- || printf '%s' '-dirty')
@@ -44,18 +42,11 @@ endif
 ifdef FDMTRACE
   FFLAGS += -DFDMDEBUG
 endif
-ifeq ($(MG_PROFILE),1)
-  # Refined-level multigrid phase timers only; retain the production -O3 flags.
-  FFLAGS += -DMG_PROFILE
-endif
 ifdef AMR_INDEX_CHECK
   FFLAGS += -DAMR_INDEX_CHECK
 endif
 ifdef MORTON128
   FFLAGS += -DMORTON128
-endif
-ifeq ($(CIC_ATOMIC_SCATTER),1)
-  FFLAGS += -DCIC_ATOMIC_SCATTER
 endif
 
 #############################################################################
@@ -83,9 +74,9 @@ ifdef USE_CUDA
   N_CUDA_STREAMS ?= 16
   NVCCFLAGS = -O3 $(CUDA_ARCH) -DNDIM=$(NDIM) -DNVAR=$(NVAR) -DNVECTOR=$(NVECTOR) -DN_STREAMS=$(N_CUDA_STREAMS)
   FFLAGS += -DHYDRO_CUDA
-  LIBS_CUDA = -L$(CUDA_DIR)/lib64 -lcudart -lcufft -lcublas -lcublasLt -lstdc++ -Wl,-rpath,$(CUDA_DIR)/lib64
-  CUDA_MODOBJ = cuda_commons.o hydro_cuda_interface.o poisson_cuda_interface.o sink_cuda_interface.o scalar_cuda_interface.o particle_cuda_interface.o snrt_cuda_interface.o
-  CUDA_OBJS = cuda_stream_pool.o hydro_cuda_kernels.o poisson_cuda_kernels.o sink_cuda_kernels.o scalar_cuda_kernels.o particle_cuda_kernels.o snrt_cuda_kernels.o
+  LIBS_CUDA = -L$(CUDA_DIR)/lib64 -lcudart -lcufft -lstdc++ -Wl,-rpath,$(CUDA_DIR)/lib64
+  CUDA_MODOBJ = cuda_commons.o hydro_cuda_interface.o poisson_cuda_interface.o sink_cuda_interface.o scalar_cuda_interface.o particle_cuda_interface.o
+  CUDA_OBJS = cuda_stream_pool.o hydro_cuda_kernels.o poisson_cuda_kernels.o sink_cuda_kernels.o scalar_cuda_kernels.o particle_cuda_kernels.o
 ifdef USE_CUFFTMP
   CUFFTMP_DIR = $(HOME)/miniconda3/lib/python3.13/site-packages/nvidia/cufftmp/cu12
   FFLAGS += -DUSE_CUFFTMP
@@ -93,7 +84,6 @@ ifdef USE_CUFFTMP
   LIBS_CUDA += -L$(CUFFTMP_DIR)/lib -lcufftMp \
                -Wl,-rpath,$(CUFFTMP_DIR)/lib
 endif
-
 else
   LIBS_CUDA =
   CUDA_MODOBJ =
@@ -105,20 +95,10 @@ endif
 #############################################################################
 EUNHA_MODOBJ = eunha_cooling_mod.o
 
-ifeq ($(SNRT),1)
-  ifneq ($(USE_CUDA),1)
-    $(error SNRT=1 requires USE_CUDA=1)
-  endif
-  FFLAGS += -DSNRT
-  SNRT_MODOBJ = snrt_ramses_driver.o
-else
-  SNRT_MODOBJ =
-endif
-
 #############################################################################
-# FFTW3 CPU direct Poisson solver (project default; disable with USE_FFTW=0)
+# FFTW3 CPU direct Poisson solver (build with: make USE_FFTW=1)
 #############################################################################
-ifeq ($(USE_FFTW),1)
+ifdef USE_FFTW
   FFTW3_DIR = $(HOME)/local
   FFLAGS += -DUSE_FFTW -I$(FFTW3_DIR)/include
   LIBS_FFTW = -L$(FFTW3_DIR)/lib -lfftw3_mpi -lfftw3_omp -lfftw3 -lm \
@@ -141,14 +121,14 @@ LIBGRACKLE = -lgrackle -lhdf5 -lz
 LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_FFTW)
 #############################################################################
 # Sources directories are searched in this exact order
-VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):../aton:../hydro:../pm:../poisson:../amr
+VPATH = ../patch/ledgertest:$(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):../aton:../hydro:../pm:../poisson:../amr
 #############################################################################
 # All objects
 MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
-	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) dark_cooling_mod.o fdm_commons.o pbh_commons.o
+	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) dark_cooling_mod.o fdm_commons.o pbh_commons.o
 
 # SIDM object (depends on amr_commons, pm_commons, random)
 SIDM_OBJ = sidm_scatter.o sidm_angular.o sidm_estimator.o
