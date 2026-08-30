@@ -117,6 +117,7 @@ contains
     use snrt_cuda_interface, only: snrt_cuda_available
     use amr_parameters, only: dp, ndim
     use iso_c_binding, only: c_float
+    use omp_lib, only: omp_get_wtime
     implicit none
 
     integer, intent(in) :: ilevel
@@ -125,6 +126,7 @@ contains
     integer :: i, isink, igroup, ierr, nleaf, n_interface_face
     integer :: icell, islot, ilevel_found
     integer :: energy_index
+    integer :: n_locator_calls, n_active_sources
     integer, allocatable :: leaf_cell(:), leaf_slot(:), neighbor(:,:)
     real(dp) :: direction_dp(snrt_ndirection,3), angular_weight(snrt_ndirection)
     real(dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
@@ -133,6 +135,10 @@ contains
     real(dp) :: tau_dp(snrt_ngroups), delta_accreted, epsilon_r
     real(dp) :: luminosity, emitted_photons, deposited_density
     real(dp) :: ionization_increment, heating_rate, heating_total
+    real(dp) :: wall_start
+    real(dp) :: wall_sub
+    real(dp) :: t_setup, t_topology, t_nlte, t_source, t_transport, t_coupling
+    real(dp) :: t_source_overhead, t_locator, t_budget, t_deposit
     real(c_float), allocatable :: optical_depth(:,:), neutral_hydrogen(:)
     real(c_float), allocatable :: absorbed_group(:,:)
     real(dp), allocatable :: accounted_mass_new(:)
@@ -184,6 +190,7 @@ contains
     if (.not. snrt_cuda_available()) return
     if (.not. allocated(uold)) return
 
+    wall_start = omp_get_wtime()
     call units(scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2)
     dt_s = dtnew(ilevel) * scale_t
     dx_code = boxlen / dble(icoarse_max - icoarse_min + 1) * 0.5d0**ilevel
@@ -192,9 +199,12 @@ contains
     cell_volume_code = dx_code**ndim
     cdt_over_dx = snrt_c_cgs * reduced_c * dt_s / (dx_code * scale_l)
     energy_index = ndim + 2
+    t_setup = omp_get_wtime() - wall_start
 
+    wall_start = omp_get_wtime()
     call snrt_amr_build_same_level_neighbors(ilevel, leaf_cell, leaf_slot, &
          neighbor, nleaf, n_interface_face)
+    t_topology = omp_get_wtime() - wall_start
     if (nleaf == 0) then
        deallocate(leaf_cell, leaf_slot, neighbor)
        return
@@ -203,6 +213,7 @@ contains
          absorbed_group(nleaf,snrt_ngroups))
     call snrt_angular_init(direction_dp, angular_weight)
 
+    wall_start = omp_get_wtime()
     do i = 1, nleaf
        icell = leaf_cell(i)
        islot = leaf_slot(i)
@@ -219,7 +230,14 @@ contains
           optical_depth(i,:) = real(max(tau_dp,0.0d0),c_float)
        end if
     end do
+    t_nlte = omp_get_wtime() - wall_start
 
+    wall_start = omp_get_wtime()
+    t_locator = 0.0d0
+    t_budget = 0.0d0
+    t_deposit = 0.0d0
+    n_locator_calls = 0
+    n_active_sources = 0
     ! dMsmbh is cumulative within a coarse step.  Account for only the
     ! increment not already injected into the photon state on this rank.
     if (accounted_step /= nstep_coarse) then
@@ -241,31 +259,43 @@ contains
     if (nsink > 0 .and. allocated(dMsmbh) .and. allocated(xsink)) then
        scale_m = scale_d * scale_l**3
        do isink = 1, nsink
+          delta_accreted = max(0.0d0, dMsmbh(isink) - accounted_mass(isink))
+          if (delta_accreted <= 0.0d0) cycle
+          wall_sub = omp_get_wtime()
           call snrt_agn_find_local_leaf(xsink(isink,1:ndim), icell, ilevel_found)
+          t_locator = t_locator + omp_get_wtime() - wall_sub
+          n_locator_calls = n_locator_calls + 1
           if (icell == 0 .or. ilevel_found /= ilevel) cycle
           islot = snrt_state_get_slot(icell)
           if (islot <= 0) cycle
-          delta_accreted = max(0.0d0, dMsmbh(isink) - accounted_mass(isink))
-          if (delta_accreted <= 0.0d0) cycle
+          n_active_sources = n_active_sources + 1
           epsilon_r = 0.1d0
           if (allocated(eps_sink) .and. size(eps_sink) >= isink) &
                epsilon_r = max(1.0d-6, min(0.99d0, eps_sink(isink)))
           source_ok = .true.
           do igroup = 1, snrt_ngroups
+             wall_sub = omp_get_wtime()
              call snrt_agn_photon_budget(delta_accreted, scale_m, dt_s, &
                   epsilon_r, 0.5d0*snrt_group_energy_fraction(igroup), &
                   snrt_group_mean_energy_ev(igroup), luminosity, emitted_photons)
+             t_budget = t_budget + omp_get_wtime() - wall_sub
+             wall_sub = omp_get_wtime()
              call snrt_agn_deposit_isotropic(snrt_intensity, islot, igroup, &
                   emitted_photons, cell_volume_code, scale_l, scale_nH, &
                   angular_weight, deposited_density, ierr)
+             t_deposit = t_deposit + omp_get_wtime() - wall_sub
              if (ierr /= 0) source_ok = .false.
           end do
           if (source_ok) accounted_mass(isink) = accounted_mass(isink) + delta_accreted
        end do
     end if
+    t_source = omp_get_wtime() - wall_start
+    t_source_overhead = t_source - t_locator - t_budget - t_deposit
 
+    wall_start = omp_get_wtime()
     call snrt_transport_absorb_multigroup_prepared(leaf_slot, neighbor, &
          cdt_over_dx, optical_depth, neutral_hydrogen, absorbed_group, ierr)
+    t_transport = omp_get_wtime() - wall_start
     if (ierr /= 0) then
        if (myid == 1) write(*,'(A,I0,A,I0)') &
             ' SNRT RT transport failed, code=', ierr, ' level=', ilevel
@@ -274,6 +304,7 @@ contains
        return
     end if
 
+    wall_start = omp_get_wtime()
     do i = 1, nleaf
        icell = leaf_cell(i)
        islot = leaf_slot(i)
@@ -300,6 +331,22 @@ contains
                (scale_d*scale_v**2)
        end if
     end do
+    t_coupling = omp_get_wtime() - wall_start
+
+    if (myid == 1) then
+       write(*,'(A,I0)') ' SNRT source internals level=', ilevel
+       write(*,'(A,F10.3)') '   locator  : ', t_locator
+       write(*,'(A,F10.3)') '   photon   : ', t_budget
+       write(*,'(A,F10.3)') '   deposit  : ', t_deposit
+       write(*,'(A,F10.3)') '   overhead : ', t_source_overhead
+       write(*,'(A,I0)') '   locator calls: ', n_locator_calls
+       write(*,'(A,I0)') '   active sources: ', n_active_sources
+       write(*,'(A,I0,A,I0,6(A,F10.3,1X))') &
+         ' SNRT stage timings level=', ilevel, ' leaves=', nleaf, &
+         ' setup=', t_setup, ' topology=', t_topology, ' nlte=', t_nlte, &
+         ' source=', t_source, ' transport=', t_transport, &
+         ' coupling=', t_coupling
+    endif
 
     deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, &
          neutral_hydrogen, absorbed_group)

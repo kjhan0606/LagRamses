@@ -7,6 +7,7 @@ subroutine create_sink
   use pm_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH
+  use omp_lib, only: omp_get_wtime
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -22,57 +23,88 @@ subroutine create_sink
   integer::ilevel,ivar,info,icpu,igrid,npartbound,isink,nelvelmax_loc
   real(dp)::dx_min,vol_min,dx,dx_temp
   integer::nx_loc
+  real(dp)::t_stage,t_kill_tree,t_rho_star,t_make_sink,t_kill_cloud
+  real(dp)::t_update_pos,t_merge_sink,t_create_cloud,t_tree_rebuild
+  real(dp)::t_hydro_sync,t_final_bondi
+
+  t_kill_tree=0d0
+  t_rho_star=0d0
+  t_make_sink=0d0
+  t_kill_cloud=0d0
+  t_update_pos=0d0
+  t_merge_sink=0d0
+  t_create_cloud=0d0
+  t_tree_rebuild=0d0
+  t_hydro_sync=0d0
+  t_final_bondi=0d0
 
   if(verbose)write(*,*)' Entering create_sink'
   ! Remove particles to finer levels
+  t_stage=omp_get_wtime()
   do ilevel=levelmin,nlevelmax
      call kill_tree_fine(ilevel)
      call virtual_tree_fine(ilevel)
   end do
+  t_kill_tree=t_kill_tree+omp_get_wtime()-t_stage
 
   call diag_check_nan('sink_post_killtree')
 
   ! Get the star density value in each cell
+  t_stage=omp_get_wtime()
   do ilevel=levelmin,nlevelmax
      call kjhan_get_rho_star(ilevel)
   enddo
+  t_rho_star=t_rho_star+omp_get_wtime()-t_stage
 
   call diag_check_nan('sink_post_rhostar')
 
   ! Create new sink particles
   ! and gather particle from the grid
+  t_stage=omp_get_wtime()
   call kjhan_make_sink(nlevelmax)
   do ilevel=nlevelmax-1,1,-1
      if(ilevel>=levelmin)call kjhan_make_sink(ilevel)
      call merge_tree_fine(ilevel)
   end do
+  t_make_sink=t_make_sink+omp_get_wtime()-t_stage
 
   call diag_check_nan('sink_post_makesink')
 
   ! Remove particle clouds around old sinks
+  t_stage=omp_get_wtime()
   call kjhan_kill_cloud(1)
+  t_kill_cloud=t_kill_cloud+omp_get_wtime()-t_stage
 
   ! update sink position before merging sinks and creating clouds
+  t_stage=omp_get_wtime()
   call kjhan_update_sink_position_velocity
+  t_update_pos=t_update_pos+omp_get_wtime()-t_stage
 
   ! Merge sink using FOF
+  t_stage=omp_get_wtime()
   call merge_sink(1)
+  t_merge_sink=t_merge_sink+omp_get_wtime()-t_stage
 
   ! Create new particle clouds
+  t_stage=omp_get_wtime()
   call kjhan_create_cloud(1)
   call kjhan_sync_sink_particle_coordinates
+  t_create_cloud=t_create_cloud+omp_get_wtime()-t_stage
 
   ! Scatter particle to the grid
+  t_stage=omp_get_wtime()
   do ilevel=1,nlevelmax
      call make_tree_fine(ilevel)
      call kill_tree_fine(ilevel)
      call virtual_tree_fine(ilevel)
   end do
+  t_tree_rebuild=t_tree_rebuild+omp_get_wtime()-t_stage
 
   call diag_check_nan('sink_pre_virt')
 
   ! Update hydro quantities for split cells
   if(hydro)then
+     t_stage=omp_get_wtime()
      do ilevel=nlevelmax,levelmin,-1
         call upload_fine(ilevel)
 #ifdef SOLVERmhd
@@ -85,18 +117,35 @@ subroutine create_sink
         ! Update boundaries
         if(simple_boundary)call make_boundary_hydro(ilevel)
      end do
+     t_hydro_sync=t_hydro_sync+omp_get_wtime()-t_stage
   end if
 
   call diag_check_nan('sink_post_virt')
 
   jsink=0d0
   ! Compute Bondi parameters and gather particle
+  t_stage=omp_get_wtime()
   do ilevel=nlevelmax,levelmin,-1
      if(bondi)call bondi_hoyle(ilevel)
      call merge_tree_fine(ilevel)
   end do
+  t_final_bondi=t_final_bondi+omp_get_wtime()-t_stage
 
   call diag_check_nan('sink_post_bondi')
+
+  if(myid==1)then
+     write(*,'(A)') ' === create_sink internal timings ==='
+     write(*,'(A,F10.3,A)') '   kill_tree    : ',t_kill_tree,' s'
+     write(*,'(A,F10.3,A)') '   rho_star     : ',t_rho_star,' s'
+     write(*,'(A,F10.3,A)') '   make_sink    : ',t_make_sink,' s'
+     write(*,'(A,F10.3,A)') '   kill_cloud   : ',t_kill_cloud,' s'
+     write(*,'(A,F10.3,A)') '   update_pos   : ',t_update_pos,' s'
+     write(*,'(A,F10.3,A)') '   merge_sink   : ',t_merge_sink,' s'
+     write(*,'(A,F10.3,A)') '   create_cloud : ',t_create_cloud,' s'
+     write(*,'(A,F10.3,A)') '   tree_rebuild : ',t_tree_rebuild,' s'
+     write(*,'(A,F10.3,A)') '   hydro_sync   : ',t_hydro_sync,' s'
+     write(*,'(A,F10.3,A)') '   final_bondi  : ',t_final_bondi,' s'
+  endif
 
 end subroutine create_sink
 !################################################################

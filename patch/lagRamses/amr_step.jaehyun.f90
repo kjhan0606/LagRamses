@@ -57,6 +57,14 @@ recursive subroutine amr_step(ilevel,icount)
   integer(kind=8) :: sk_t1, sk_t2
   real(dp), save :: sk_agn_fb=0, sk_create_sink=0, sk_grow=0, sk_bondi_hoyle=0
 
+  ! Re-entrant-safe direct cooling timings.  The legacy phase timer is a
+  ! single global state and is not reliable across recursive amr_step calls.
+  real(dp), save :: cool_fine_wall=0d0, cool_table_wall=0d0
+  real(dp) :: cool_t1
+
+  ! SNRT is called immediately after cooling without a legacy phase switch.
+  real(dp), save :: snrt_advance_wall=0d0, snrt_diagnose_wall=0d0
+
 #ifdef HYDRO_CUDA
   ! GPU auto-tuning framework
   ! Phase 0: first call → force CPU, record time
@@ -953,7 +961,11 @@ recursive subroutine amr_step(ilevel,icount)
      ! Still need a chemistry call if RT is defined but not
      ! actually doing radiative transfer (i.e. rt==false):
                                call timer('cooling','start')
-     if(neq_chem.or.cooling.or.T2_star>0.0)call cooling_fine(ilevel)
+     if(neq_chem.or.cooling.or.T2_star>0.0)then
+        cool_t1=omp_get_wtime()
+        call cooling_fine(ilevel)
+        cool_fine_wall=cool_fine_wall+omp_get_wtime()-cool_t1
+     endif
   endif
   ! Regular updates and book-keeping:
   if(ilevel==levelmin) then
@@ -962,19 +974,31 @@ recursive subroutine amr_step(ilevel,icount)
      if(cosmo .and. haardt_madau) call update_UVrates(aexp)
      if(cosmo .and. rt_isDiffuseUVsrc) call update_UVsrc
                                call timer('cooling','start')
-     if(cosmo) call update_coolrates_tables(dble(aexp))
+     if(cosmo)then
+        cool_t1=omp_get_wtime()
+        call update_coolrates_tables(dble(aexp))
+        cool_table_wall=cool_table_wall+omp_get_wtime()-cool_t1
+     endif
                                call timer('radiative transfer','start')
      if(ilevel==levelmin) call output_rt_stats
   endif
 #else
                                call timer('cooling','start')
-  if(neq_chem.or.cooling.or.T2_star>0.0)call cooling_fine(ilevel)
+  if(neq_chem.or.cooling.or.T2_star>0.0)then
+     cool_t1=omp_get_wtime()
+     call cooling_fine(ilevel)
+     cool_fine_wall=cool_fine_wall+omp_get_wtime()-cool_t1
+  endif
   call diag_check_eint('cooling',ilevel)
 #endif
 #ifdef SNRT
+  cool_t1=omp_get_wtime()
   call snrt_ramses_advance_level(ilevel)
+  snrt_advance_wall=snrt_advance_wall+omp_get_wtime()-cool_t1
 #ifndef SNRT_LEDGER_ONLY
+  cool_t1=omp_get_wtime()
   call snrt_ramses_diagnose_level(ilevel)
+  snrt_diagnose_wall=snrt_diagnose_wall+omp_get_wtime()-cool_t1
 #endif
 #endif
 #ifdef SNRT_LEDGER_DIAGNOSTIC
@@ -1165,6 +1189,12 @@ recursive subroutine amr_step(ilevel,icount)
 
   ! Print particle & sink sub-timers every coarse step, then reset
   if(ilevel==levelmin .and. myid==1) then
+     write(*,'(A)') ' === Direct cooling timings ==='
+     write(*,'(A,F10.3,A)') '   cooling_fine : ', cool_fine_wall, ' s'
+     write(*,'(A,F10.3,A)') '   cooling_table: ', cool_table_wall, ' s'
+     write(*,'(A)') ' === Direct SNRT timings ==='
+     write(*,'(A,F10.3,A)') '   snrt_advance : ', snrt_advance_wall, ' s'
+     write(*,'(A,F10.3,A)') '   snrt_diagnose: ', snrt_diagnose_wall, ' s'
      write(*,'(A)') ' === Particle sub-timers ==='
      write(*,'(A,F10.3,A)') '   make_tree  : ', pt_mktree, ' s'
      write(*,'(A,F10.3,A)') '   kill+virt  : ', pt_killtree, ' s'
@@ -1183,7 +1213,9 @@ recursive subroutine amr_step(ilevel,icount)
      ! Reset for next coarse step
      pt_mktree=0; pt_killtree=0; pt_synchro=0; pt_move=0; pt_merge=0
      sk_agn_fb=0; sk_create_sink=0; sk_grow=0; sk_bondi_hoyle=0
-  end if
+     cool_fine_wall=0d0; cool_table_wall=0d0
+     snrt_advance_wall=0d0; snrt_diagnose_wall=0d0
+   end if
 
   ! Periodically emit and reset the existing mutually-exclusive phase timers.
   ! nstep_coarse is incremented by adaptive_loop after this routine returns,
