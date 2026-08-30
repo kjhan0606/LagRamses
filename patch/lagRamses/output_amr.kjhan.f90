@@ -427,6 +427,36 @@ subroutine output_dm_run_provenance(filename)
   endif
   if(ios /= 0) call dm_run_provenance_fatal('write sink compaction mode',filename,ios,iomsg)
 
+  if(len_trim(model_zoom_manifest_sha256)==64 .and. len_trim(model_zoom_case_id)>0 .and. &
+       & len_trim(model_zoom_capture_event_sha256)==64 .and. &
+       & len_trim(model_zoom_initial_conditions_sha256)==64 .and. &
+       & len_trim(model_zoom_baryon_configuration_sha256)==64 .and. &
+       & len_trim(model_zoom_sink_initial_conditions_sha256)==64) then
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'model_zoom_execution_identity_status = available'
+     if(ios /= 0) call dm_run_provenance_fatal('write model zoom identity status',filename,ios,iomsg)
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'model_zoom_manifest_sha256 = ', &
+          & trim(model_zoom_manifest_sha256)
+     if(ios /= 0) call dm_run_provenance_fatal('write model zoom manifest identity',filename,ios,iomsg)
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'model_zoom_case_id = ', &
+          & trim(model_zoom_case_id)
+     if(ios /= 0) call dm_run_provenance_fatal('write model zoom case identity',filename,ios,iomsg)
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'model_zoom_capture_event_sha256 = ', &
+          & trim(model_zoom_capture_event_sha256)
+     if(ios /= 0) call dm_run_provenance_fatal('write model zoom capture identity',filename,ios,iomsg)
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'model_zoom_initial_conditions_sha256 = ', &
+          & trim(model_zoom_initial_conditions_sha256)
+     if(ios /= 0) call dm_run_provenance_fatal('write model zoom IC identity',filename,ios,iomsg)
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'model_zoom_baryon_configuration_sha256 = ', &
+          & trim(model_zoom_baryon_configuration_sha256)
+     if(ios /= 0) call dm_run_provenance_fatal('write model zoom baryon identity',filename,ios,iomsg)
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'model_zoom_sink_initial_conditions_sha256 = ', &
+          & trim(model_zoom_sink_initial_conditions_sha256)
+     if(ios /= 0) call dm_run_provenance_fatal('write model zoom sink identity',filename,ios,iomsg)
+  else
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'model_zoom_execution_identity_status = unavailable'
+     if(ios /= 0) call dm_run_provenance_fatal('write unavailable model zoom identity',filename,ios,iomsg)
+  endif
+
   select case(trim(dm_model))
   case('cdm')
      write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'dm_transport = collisionless_nbody'

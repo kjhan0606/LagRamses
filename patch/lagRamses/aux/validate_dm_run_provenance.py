@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -100,12 +101,53 @@ def _records(path: Path, errors: list[str]) -> dict[str, str]:
     return records
 
 
+def _model_zoom_execution_identity(records: dict[str, str], errors: list[str]) -> None:
+    """Validate a common CDM/SIDM/FDM execution-identity declaration."""
+
+    status = records.get("model_zoom_execution_identity_status")
+    fields = (
+        "model_zoom_manifest_sha256",
+        "model_zoom_case_id",
+        "model_zoom_capture_event_sha256",
+        "model_zoom_initial_conditions_sha256",
+        "model_zoom_baryon_configuration_sha256",
+        "model_zoom_sink_initial_conditions_sha256",
+    )
+    present = [name for name in fields if name in records]
+    if status is None:
+        if present:
+            errors.append("model zoom execution-identity fields require a status")
+        return
+    if status == "unavailable":
+        if present:
+            errors.append("unavailable model zoom execution identity cannot carry fields")
+        return
+    if status != "available":
+        errors.append("model zoom execution identity status is unsupported")
+        return
+    if len(present) != len(fields):
+        errors.append("available model zoom execution identity requires all fields")
+        return
+    if not records["model_zoom_case_id"].strip():
+        errors.append("model_zoom_case_id is required")
+    for name in (
+        "model_zoom_manifest_sha256",
+        "model_zoom_capture_event_sha256",
+        "model_zoom_initial_conditions_sha256",
+        "model_zoom_baryon_configuration_sha256",
+        "model_zoom_sink_initial_conditions_sha256",
+    ):
+        if re.fullmatch(r"[0-9a-f]{64}", records[name]) is None:
+            errors.append(f"{name} must be a lowercase SHA-256 digest")
+
+
 def validate_dm_run_provenance(path: str | Path) -> DMRunProvenanceReport:
     """Fail closed on model ambiguity or missing model-specific controls."""
 
     source = Path(path).expanduser().resolve()
     errors: list[str] = []
     records = _records(source, errors)
+    _model_zoom_execution_identity(records, errors)
     model = records.get("dark_matter_model")
     if model not in MODELS:
         errors.append("dark_matter_model must be cdm, sidm, fdm, or none")

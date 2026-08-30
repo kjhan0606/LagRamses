@@ -317,6 +317,15 @@ module amr_parameters
   character(len=64)::cdm_zoom_host_orbit_initial_conditions_sha256=''
   character(len=64)::cdm_zoom_initial_conditions_sha256=''
   character(len=64)::cdm_zoom_sink_initial_conditions_sha256=''
+  ! Common CDM/SIDM/FDM zoom identity.  A materialized model-specific run
+  ! supplies these values so every normal-output sidecar can attest its exact
+  ! manifest case and capture/input package without changing the dynamics.
+  character(len=64)::model_zoom_manifest_sha256=''
+  character(len=256)::model_zoom_case_id=''
+  character(len=64)::model_zoom_capture_event_sha256=''
+  character(len=64)::model_zoom_initial_conditions_sha256=''
+  character(len=64)::model_zoom_baryon_configuration_sha256=''
+  character(len=64)::model_zoom_sink_initial_conditions_sha256=''
   logical ::agn_coarse_dump=.true. ! Log one physical-state row per AGN/coarse step
   character(len=256)::agn_coarse_dump_file='agn_coarse_state_v1.jsonl'
 

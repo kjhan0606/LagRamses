@@ -78,6 +78,10 @@ subroutine read_hydro_params(nml_ok)
        & ,cdm_zoom_plan_manifest_sha256,cdm_zoom_capture_event_sha256             &
        & ,cdm_zoom_host_orbit_initial_conditions_sha256                           &
        & ,cdm_zoom_initial_conditions_sha256,cdm_zoom_sink_initial_conditions_sha256 &
+       & ,model_zoom_manifest_sha256,model_zoom_case_id                           &
+       & ,model_zoom_capture_event_sha256,model_zoom_initial_conditions_sha256    &
+       & ,model_zoom_baryon_configuration_sha256                                  &
+       & ,model_zoom_sink_initial_conditions_sha256                               &
        & ,agn_coarse_dump,agn_coarse_dump_file                                    &
        & ,bondi,mad_jet,eps_sn1,eps_sn2,tol                             &
        & ,sf_virial,sf_trelax,sf_model,sf_birth_properties &

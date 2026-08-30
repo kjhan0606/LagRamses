@@ -106,6 +106,29 @@ class DMRunProvenanceTests(unittest.TestCase):
             report.errors,
         )
 
+    def test_common_model_zoom_identity_is_available_to_all_three_models(self):
+        for model in ("cdm", "sidm", "fdm"):
+            with self.subTest(model=model):
+                values = records(model)
+                values.update(
+                    model_zoom_execution_identity_status="available",
+                    model_zoom_manifest_sha256="a" * 64,
+                    model_zoom_case_id=f"{model}-fine-replicate-0",
+                    model_zoom_capture_event_sha256="b" * 64,
+                    model_zoom_initial_conditions_sha256="c" * 64,
+                    model_zoom_baryon_configuration_sha256="d" * 64,
+                    model_zoom_sink_initial_conditions_sha256="d" * 64,
+                )
+                report = self.validate(values)
+                self.assertTrue(report.valid, report.errors)
+                values.pop("model_zoom_case_id")
+                report = self.validate(values)
+                self.assertFalse(report.valid)
+                self.assertIn(
+                    "available model zoom execution identity requires all fields",
+                    report.errors,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
