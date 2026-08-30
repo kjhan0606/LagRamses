@@ -4,7 +4,7 @@ Set `fdm_outer_ledger=.true.` in `&fdm_params` to write one
 `fdm_outer_wave_provenance_<output>.txt` file in each normal FDM output
 directory.  The option is off by default.
 
-The current V2 file is a compact raw diagnostic.  It records the output epoch,
+The current V3 file is a compact raw diagnostic.  It records the output epoch,
 axion mass, effective code `hbar`, HJM/wave seam settings, dual-soliton seed
 switch and parameter values, total leaf-cell wave mass, and the global FDM
 mass-current integral.  On wave levels the current uses
@@ -12,9 +12,18 @@ mass-current integral.  On wave levels the current uses
 a complete same-level central stencil enter the current integral.  The file
 therefore reports the stencil coverage fraction explicitly.
 
+V3 additionally records `mpi_ncpu`, the exact number of rank-suffixed
+`fdm_<output>.outNNNNN` and matching AMR shards expected for the output.  A
+consumer of a time-resolved wave diagnostic must require every suffix from
+`00001` through `mpi_ncpu`; discovering one matching pair is not sufficient.
+It also records `restart_parent_output` as a restart hint.  This field does
+not provide a run UUID or prove an uninterrupted restart branch, so outputs
+from separate executions must remain conditional unless a stronger solver-side
+lineage attestation is added.
+
 The dual-soliton fields are runtime configuration provenance, not a claim that
 the supplied coherent state has relaxed.  They allow the outer analysis to
-bind a V2 output to its materialized two-core seed after the separate input
+bind a V2/V3 output to its materialized two-core seed after the separate input
 preflight has checked the complete namelist and `ic_sink` rows.  The Python
 reader continues to accept legacy V1 records, but those lack this runtime
 attestation and cannot alone verify a controlled dual-soliton initialization.

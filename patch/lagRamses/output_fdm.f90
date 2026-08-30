@@ -204,12 +204,19 @@ subroutine output_fdm_outer_wave_provenance(output_char)
      call flush(6)
      call clean_stop
   end if
-  write(ilun,'(A)') '# fdm_outer_wave_provenance_v2'
+  write(ilun,'(A)') '# fdm_outer_wave_provenance_v3'
   write(ilun,'(A)') '# Raw code-unit diagnostics; no calibrated drag or delay.'
   write(ilun,'(A)') '# Full psi snapshots are the required field source.'
   write(ilun,'(A,ES24.16)') 'time_code = ',t
   write(ilun,'(A,ES24.16)') 'aexp = ',aexp
   write(ilun,'(A,I0)') 'nstep_coarse = ',nstep_coarse
+  ! `backup_psi` writes exactly one FDM and one AMR shard per MPI rank.
+  ! Record the expected rank count so downstream readers can reject a
+  ! discovered subset instead of treating it as a complete wave snapshot.
+  write(ilun,'(A,I0)') 'mpi_ncpu = ',ncpu
+  ! This is a restart-parent hint only.  It is not a globally unique run ID
+  ! and must not be interpreted as proof of one uninterrupted execution.
+  write(ilun,'(A,I0)') 'restart_parent_output = ',nrestart
   write(ilun,'(A,ES24.16)') 'm_axion_ev = ',m_axion
   write(ilun,'(A,ES24.16)') 'hbar_code = ',hbar_code
   write(ilun,'(A,L1)') 'fdm_use_hjm = ',fdm_use_hjm
