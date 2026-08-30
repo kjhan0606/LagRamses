@@ -321,11 +321,11 @@ subroutine init_part
      read(ilun)isp
      levelp(1:npart2)=isp
      deallocate(isp)
-     ! Read particle type (mandatory; no backward compat)
-     allocate(isp1(1:npart2))
-     read(ilun)isp1
-     ptypep(1:npart2)=isp1
-     deallocate(isp1)
+     ! The standard RAMSES binary part backup has no compact ptypep record.
+     ! Its next record is the particle potential (when enabled), followed by
+     ! the stellar birth/metallicity fields.  Reading ptypep here shifts the
+     ! stream by one record and eventually produces an EOF on valid legacy
+     ! outputs.  Reconstruct the compact type below from idp and tp instead.
 #ifdef OUTPUT_PARTICLE_POTENTIAL
      allocate(xdp(1:npart2))
      read(ilun)xdp
@@ -358,6 +358,18 @@ subroutine init_part
         indtab(1:npart2)=xdp
         deallocate(xdp)
      end if
+
+     ! Legacy binary backups encode the particle class implicitly:
+     ! negative ids are sink/cloud particles, positive ids with non-zero tp
+     ! are stars, and the remaining positive ids are dark matter.
+     ptypep(1:npart2)=PTYPE_DM
+     do i=1,npart2
+        if(idp(i)<0_i8b)then
+           ptypep(i)=PTYPE_SINK
+        else if((star.or.sink).and.idp(i)>0_i8b.and.tp(i)/=0.0d0)then
+           ptypep(i)=PTYPE_STAR
+        endif
+     enddo
      close(ilun)
 
      !determine NDM

@@ -10,6 +10,13 @@ recursive subroutine amr_step(ilevel,icount)
   use poisson_cuda_interface, only: cuda_mg_release_arrays_c
   use hydro_cuda_interface, only: cuda_mesh_free_c
 #endif
+#ifdef SNRT
+  use snrt_ramses_driver, only: snrt_ramses_diagnose_level, &
+       snrt_ramses_advance_level
+#endif
+#ifdef SNRT_LEDGER_DIAGNOSTIC
+  use snrt_agn_ledger, only: snrt_agn_ledger_diagnose
+#endif
 #ifdef RT
   use rt_hydro_commons
   use SED_module
@@ -963,6 +970,15 @@ recursive subroutine amr_step(ilevel,icount)
                                call timer('cooling','start')
   if(neq_chem.or.cooling.or.T2_star>0.0)call cooling_fine(ilevel)
   call diag_check_eint('cooling',ilevel)
+#endif
+#ifdef SNRT
+  call snrt_ramses_advance_level(ilevel)
+#ifndef SNRT_LEDGER_ONLY
+  call snrt_ramses_diagnose_level(ilevel)
+#endif
+#endif
+#ifdef SNRT_LEDGER_DIAGNOSTIC
+  call snrt_agn_ledger_diagnose(ilevel)
 #endif
   ! SGS turbulence source terms (production, dissipation, PdV coupling)
   if(use_sgs)call sgs_fine(ilevel)
