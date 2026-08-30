@@ -330,6 +330,14 @@ subroutine dump_all
      call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
      if(myid==1)then
+        filename=TRIM(filedir)//'resolved_physics_inventory_'//TRIM(nchar)//'.txt'
+        call output_resolved_physics_inventory(filename,nchar,filedir,phi_marker_valid_all)
+     endif
+
+     ! The resolved-physics inventory is deliberately written before COMPLETE.
+     ! It indexes raw files only; consumers must still require COMPLETE before
+     ! reading any listed snapshot or treating its diagnostic as durable.
+     if(myid==1)then
         filename='output_'//TRIM(nchar)//'/COMPLETE'
         open(unit=11,file=TRIM(filename),form='formatted')
         write(11,'(A)')TRIM(nchar)
@@ -462,6 +470,185 @@ subroutine dm_run_provenance_fatal(operation,filename,status,message)
   call flush(error_unit)
   call clean_stop
 end subroutine dm_run_provenance_fatal
+!#########################################################################
+subroutine output_resolved_physics_inventory(filename,output_char,output_directory, &
+     & phi_checkpoint_valid)
+  ! Record what raw output evidence exists for a model-specific postprocessor.
+  ! This routine does not measure a profile, decompose a force, or modify any
+  ! CDM/SIDM/FDM dynamics.  In particular, a missing force/conservation/SIDM
+  ! scatter ledger is emitted as unavailable rather than represented by zero.
+  use amr_commons
+  implicit none
+
+  character(LEN=*),intent(in)::filename,output_char,output_directory
+  logical,intent(in)::phi_checkpoint_valid
+  character(LEN=16)::dm_model
+  character(LEN=40)::stars_status,gas_status,dm_status
+  character(LEN=512)::iomsg
+  integer::ilun,ios
+
+  if(use_fdm .and. sidm) then
+     write(*,'(A)') 'ERROR: cannot write resolved inventory for simultaneous FDM and SIDM'
+     call clean_stop
+  endif
+  if(use_fdm) then
+     dm_model='fdm'
+     dm_status='available'
+  else if(sidm) then
+     dm_model='sidm'
+     dm_status='available'
+  else if(pic) then
+     dm_model='cdm'
+     dm_status='available'
+  else
+     dm_model='none'
+     dm_status='absent'
+  endif
+  if(pic) then
+     ! A particle dump alone cannot distinguish stars from collisionless DM.
+     ! Do not infer an available stellar force channel without classification.
+     stars_status='requires_particle_classification'
+  else
+     stars_status='absent'
+  endif
+  if(hydro) then
+     gas_status='available'
+  else
+     gas_status='absent'
+  endif
+
+  iomsg=''
+  open(newunit=ilun,file=TRIM(filename),status='replace',action='write', &
+       & form='formatted',iostat=ios,iomsg=iomsg)
+  if(ios/=0) call resolved_physics_inventory_fatal('open',filename,ios,iomsg)
+
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) '# lagramses_resolved_physics_inventory_v1'
+  if(ios/=0) call resolved_physics_inventory_fatal('write schema',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) &
+       & '# Raw file availability only; this record is not a force or delay measurement.'
+  if(ios/=0) call resolved_physics_inventory_fatal('write scope',filename,ios,iomsg)
+  write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'output_number = ',trim(output_char)
+  if(ios/=0) call resolved_physics_inventory_fatal('write output number',filename,ios,iomsg)
+  write(ilun,'(A,I0)',iostat=ios,iomsg=iomsg) 'nstep_coarse = ',nstep_coarse
+  if(ios/=0) call resolved_physics_inventory_fatal('write coarse step',filename,ios,iomsg)
+  write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'time_code = ',t
+  if(ios/=0) call resolved_physics_inventory_fatal('write time',filename,ios,iomsg)
+  write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'aexp = ',aexp
+  if(ios/=0) call resolved_physics_inventory_fatal('write scale factor',filename,ios,iomsg)
+  write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'dark_matter_model = ',trim(dm_model)
+  if(ios/=0) call resolved_physics_inventory_fatal('write model',filename,ios,iomsg)
+  write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'raw_snapshot_directory = ', &
+       & trim(output_directory)
+  if(ios/=0) call resolved_physics_inventory_fatal('write directory',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'completion_marker = COMPLETE'
+  if(ios/=0) call resolved_physics_inventory_fatal('write completion marker',filename,ios,iomsg)
+  write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'star_formation_enabled = ',star
+  if(ios/=0) call resolved_physics_inventory_fatal('write star flag',filename,ios,iomsg)
+  write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'stars_channel_status = ',trim(stars_status)
+  if(ios/=0) call resolved_physics_inventory_fatal('write stars status',filename,ios,iomsg)
+  if(pic)then
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'stars_particle_snapshot_prefix = part_', &
+          & trim(output_char)//'.out'
+  else
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'stars_particle_snapshot_prefix = none'
+  endif
+  if(ios/=0) call resolved_physics_inventory_fatal('write stars snapshot',filename,ios,iomsg)
+  write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'gas_channel_status = ',trim(gas_status)
+  if(ios/=0) call resolved_physics_inventory_fatal('write gas status',filename,ios,iomsg)
+  if(hydro)then
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'gas_snapshot_prefix = hydro_', &
+          & trim(output_char)//'.out'
+  else
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'gas_snapshot_prefix = none'
+  endif
+  if(ios/=0) call resolved_physics_inventory_fatal('write gas snapshot',filename,ios,iomsg)
+  write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'dark_matter_channel_status = ',trim(dm_status)
+  if(ios/=0) call resolved_physics_inventory_fatal('write DM status',filename,ios,iomsg)
+  if(pic)then
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'particle_snapshot_prefix = part_', &
+          & trim(output_char)//'.out'
+  else
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'particle_snapshot_prefix = none'
+  endif
+  if(ios/=0) call resolved_physics_inventory_fatal('write particle snapshot',filename,ios,iomsg)
+  if(poisson)then
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'potential_snapshot_prefix = grav_', &
+          & trim(output_char)//'.out'
+  else
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'potential_snapshot_prefix = none'
+  endif
+  if(ios/=0) call resolved_physics_inventory_fatal('write potential snapshot',filename,ios,iomsg)
+  if(.not.poisson)then
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'potential_checkpoint_status = absent'
+  else if(phi_checkpoint_valid)then
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'potential_checkpoint_status = validated'
+  else
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'potential_checkpoint_status = unvalidated'
+  endif
+  if(ios/=0) call resolved_physics_inventory_fatal('write potential status',filename,ios,iomsg)
+  if(sink)then
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'sink_info_file = sink_', &
+          & trim(output_char)//'.info'
+  else
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'sink_info_file = none'
+  endif
+  if(ios/=0) call resolved_physics_inventory_fatal('write sink info',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'force_source_ledger_status = unavailable'
+  if(ios/=0) call resolved_physics_inventory_fatal('write force ledger status',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'force_source_ledger_reason = no_source_decomposition_in_normal_output'
+  if(ios/=0) call resolved_physics_inventory_fatal('write force ledger reason',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'conservation_ledger_status = unavailable'
+  if(ios/=0) call resolved_physics_inventory_fatal('write conservation ledger status',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'conservation_ledger_reason = no_time_series_in_normal_output'
+  if(ios/=0) call resolved_physics_inventory_fatal('write conservation ledger reason',filename,ios,iomsg)
+
+  select case(trim(dm_model))
+  case('sidm')
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'sidm_scattering_ledger_status = unavailable'
+     if(ios/=0) call resolved_physics_inventory_fatal('write SIDM ledger status',filename,ios,iomsg)
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) &
+          & 'sidm_scattering_ledger_reason = no_cumulative_scatter_counter_in_normal_output'
+     if(ios/=0) call resolved_physics_inventory_fatal('write SIDM ledger reason',filename,ios,iomsg)
+  case('fdm')
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'fdm_field_snapshot_status = available'
+     if(ios/=0) call resolved_physics_inventory_fatal('write FDM field status',filename,ios,iomsg)
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'fdm_field_snapshot_prefix = fdm_', &
+          & trim(output_char)//'.out'
+     if(ios/=0) call resolved_physics_inventory_fatal('write FDM field prefix',filename,ios,iomsg)
+     if(fdm_outer_ledger)then
+        write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'fdm_wave_provenance_status = available'
+        if(ios/=0) call resolved_physics_inventory_fatal('write FDM provenance status',filename,ios,iomsg)
+        write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'fdm_wave_provenance_path = output_', &
+             & trim(output_char)//'/fdm_outer_wave_provenance_'//trim(output_char)//'.txt'
+     else
+        write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'fdm_wave_provenance_status = unavailable'
+        if(ios/=0) call resolved_physics_inventory_fatal('write FDM provenance status',filename,ios,iomsg)
+        write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'fdm_wave_provenance_path = none'
+     endif
+     if(ios/=0) call resolved_physics_inventory_fatal('write FDM provenance path',filename,ios,iomsg)
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'fdm_force_accounting = resolved_wave_only'
+     if(ios/=0) call resolved_physics_inventory_fatal('write FDM force accounting',filename,ios,iomsg)
+  end select
+
+  flush(unit=ilun,iostat=ios,iomsg=iomsg)
+  if(ios/=0) call resolved_physics_inventory_fatal('flush',filename,ios,iomsg)
+  close(ilun,iostat=ios,iomsg=iomsg)
+  if(ios/=0) call resolved_physics_inventory_fatal('close',filename,ios,iomsg)
+end subroutine output_resolved_physics_inventory
+!#########################################################################
+subroutine resolved_physics_inventory_fatal(operation,filename,status,message)
+  use amr_commons
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+
+  character(LEN=*),intent(in)::operation,filename,message
+  integer,intent(in)::status
+
+  write(error_unit,'(A,1X,A,1X,A,1X,I0,1X,A)') 'Resolved inventory I/O failure:', &
+       & trim(operation),trim(filename),status,trim(message)
+  call flush(error_unit)
+  call clean_stop
+end subroutine resolved_physics_inventory_fatal
 !#########################################################################
 !#########################################################################
 !#########################################################################
