@@ -294,7 +294,8 @@ contains
 
     wall_start = omp_get_wtime()
     call snrt_transport_absorb_multigroup_prepared(leaf_slot, neighbor, &
-         cdt_over_dx, optical_depth, neutral_hydrogen, absorbed_group, ierr)
+         cdt_over_dx, optical_depth, neutral_hydrogen, absorbed_group, ierr, &
+         leaf_cell, ilevel)
     t_transport = omp_get_wtime() - wall_start
     if (ierr /= 0) then
        if (myid == 1) write(*,'(A,I0,A,I0)') &

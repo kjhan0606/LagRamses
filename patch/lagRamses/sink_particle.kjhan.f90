@@ -158,6 +158,7 @@ subroutine kjhan_sync_sink_particle_coordinates
   implicit none
   integer::ilevel,icpu,igrid,jgrid,npart1,jpart,ipart,next_part,idim
   integer(i8b)::ksink
+  real(dp)::r2
 
   ! kjhan_update_sink_position_velocity updates the cloud-averaged sink
   ! center.  Synchronize only the canonical PTYPE_SINK particle before the
@@ -175,10 +176,15 @@ subroutine kjhan_sync_sink_particle_coordinates
                  next_part=nextp(ipart)
                  if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart)>=-nsinkmax)then
                     ksink=-idp(ipart)
-                    do idim=1,ndim
-                       xp(ipart,idim)=xsink(ksink,idim)
-                       vp(ipart,idim)=vsink(ksink,idim)
-                    end do
+                    if(ksink>=1 .and. ksink<=nsink .and. &
+                         allocated(canonical_sink_part))then
+                       if(canonical_sink_part(ksink)==ipart)then
+                          do idim=1,ndim
+                             xp(ipart,idim)=xsink(ksink,idim)
+                             vp(ipart,idim)=vsink(ksink,idim)
+                          end do
+                       endif
+                    endif
                  endif
                  ipart=next_part
               end do
@@ -2495,6 +2501,11 @@ subroutine kjhan_create_cloud(ilevel)
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
 
+  if(nsinkmax>0)then
+     if(.not.allocated(canonical_sink_part))allocate(canonical_sink_part(nsinkmax))
+     canonical_sink_part=0
+  endif
+
   if(cosmo.and.pic.and.npartmax_auto)then
      ! Cloud creation below may run in an OpenMP region.  Count its complete
      ! demand first and grow here, before entering that region, so remove_free
@@ -2522,24 +2533,11 @@ subroutine kjhan_create_cloud(ilevel)
 #if NDIM==3
   end do
 #endif
-     ncloud_needed=0
-     do icpu=1,ncpu
-        if(numbl(icpu,ilevel)==0)cycle
-        igrid=headl(icpu,ilevel)
-        do jgrid=1,numbl(icpu,ilevel)
-           npart1=numbp(igrid)
-           if(npart1>0)then
-              ipart=headp(igrid)
-              do jpart=1,npart1
-                 next_part=nextp(ipart)
-                 if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart).ge.-nsinkmax) &
-                      ncloud_needed=ncloud_needed+ncloud-1
-                 ipart=next_part
-              end do
-           endif
-           igrid=next(igrid)
-        end do
-     end do
+     ! kjhan_kill_cloud leaves one canonical particle per sink. Do not scan
+     ! headl here: its local/virtual representation can duplicate particles.
+     ! The cloud demand is therefore the global sink count times the number
+     ! of non-central cloud particles.
+     ncloud_needed=nsink*(ncloud-1)
      if(ncloud_needed>numbp_free)then
         call grow_particle_bundle(npartmax-numbp_free+ncloud_needed)
      endif
@@ -2702,6 +2700,14 @@ subroutine kjhan_mk_cloud(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
 #if NDIM==3
   end do
 #endif
+
+  if(nsinkmax>0)then
+     if(.not.allocated(canonical_sink_part))allocate(canonical_sink_part(nsinkmax))
+     do j=1,np
+        ksink=-idp(ind_part(j))
+        if(ksink>=1 .and. ksink<=nsink)canonical_sink_part(ksink)=ind_part(j)
+     enddo
+  endif
 
 
 
@@ -2922,11 +2928,16 @@ subroutine kjhan_rm_cloud(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
 
   do j=1,np
      ksink=-idp(ind_part(j))
-     r2=0d0
-     do idim=1,ndim
-        r2=r2+(xp(ind_part(j),idim)-xsink(ksink,idim))**2
-     end do
-     ok(j)=r2>r2_eps
+     if(ksink>=1 .and. ksink<=nsink)then
+        r2=0d0
+        do idim=1,ndim
+           r2=r2+(xp(ind_part(j),idim)-xsink(ksink,idim))**2
+        end do
+        ok(j)=r2>r2_eps
+     else
+        ! A stale/free slot is not a valid canonical sink or cloud member.
+        ok(j)=.true.
+     endif
   end do
 
   ! Remove particles from parent linked list
@@ -2956,6 +2967,7 @@ subroutine bondi_hoyle(ilevel)
   !------------------------------------------------------------------------
   integer::igrid,jgrid,ipart,jpart,next_part,idim,info
   integer::i,ig,ip,npart1,npart2,icpu,nx_loc,isink
+  logical::is_canonical
   integer::npack,ip_buf
   real(dp),allocatable,dimension(:)::sink_sbuf,sink_rbuf
   integer(i8b):: ksink
@@ -3022,7 +3034,7 @@ subroutine bondi_hoyle(ilevel)
 
      call pthreadLinkedList(headl(icpu,ilevel), numbl(icpu,ilevel), nthreads, nparticles, ptrhead, next)
 !$omp parallel private(idim,npart3,igrid,jgrid, npart1, npart2, ipart,jpart,next_part, &
-!$omp              isink, r2,ip,ig,ksink)
+!$omp              isink, r2,ip,ig,ksink,is_canonical)
      npart3 = nparticles(mythread)
      igrid = ptrhead(mythread)
 
@@ -3032,22 +3044,30 @@ subroutine bondi_hoyle(ilevel)
        npart1=numbp(igrid)  ! Number of particles in the grid
        npart2=0
 
-       ! Count only sink particles
+       ! Count only canonical sink particles. Cloud-only grids must not
+       ! consume entries in ind_grid while the canonical list is gathered.
        if(npart1>0)then
           ipart=headp(igrid)
           ! Loop over particles
           do jpart=1,npart1
              ! Save next particle   <--- Very important !!!
              next_part=nextp(ipart)
+             is_canonical=.false.
              if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart).ge.-nsinkmax)then
                ksink=-idp(ipart)
-                 ! PTYPE_SINK is the unique canonical particle for ksink.
-                 ! Its membership must not rely on xp matching the
-                 ! cloud-averaged xsink by exact floating-point equality.
-                 if(ksink>=1 .and. ksink<=nsink)then
-                  npart2=npart2+1
+               if(ksink>=1 .and. ksink<=nsink)then
+                  if(allocated(canonical_sink_part))then
+                     is_canonical=(canonical_sink_part(ksink)==ipart)
+                  else
+                     r2=0.0
+                     do idim=1,ndim
+                        r2=r2+(xp(ipart,idim)-xsink(ksink,idim))**2
+                     end do
+                     is_canonical=(r2==0.0)
+                  endif
                end if
              endif
+             if(is_canonical)npart2=npart2+1
              ipart=next_part  ! Go to next particle
           end do
        endif
@@ -3062,13 +3082,21 @@ subroutine bondi_hoyle(ilevel)
              ! Save next particle   <--- Very important !!!
              next_part=nextp(ipart)
              ! Select only sink particles
+             is_canonical=.false.
              if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart).ge.-nsinkmax)then
                ksink=-idp(ipart)
-               r2=0.0
-               do idim=1,ndim
-                  r2=r2+(xp(ipart,idim)-xsink(ksink,idim))**2
-               end do
-               if(r2==0.0)then
+               if(ksink>=1 .and. ksink<=nsink)then
+                  if(allocated(canonical_sink_part))then
+                     is_canonical=(canonical_sink_part(ksink)==ipart)
+                  else
+                     r2=0.0
+                     do idim=1,ndim
+                        r2=r2+(xp(ipart,idim)-xsink(ksink,idim))**2
+                     end do
+                     is_canonical=(r2==0.0)
+                  endif
+               endif
+               if(is_canonical)then
                   if(ig==0)then
                      ig=1
                      ind_grid(ig)=igrid
@@ -3311,7 +3339,7 @@ subroutine kjhan_bondi_velocity(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! It computes the gas velocity and soud speed in the cell
   ! each sink particle sits in.
   !-----------------------------------------------------------------------
-  integer::i,j,idim,nx_loc,isink
+  integer::i,j,jbad,idim,nx_loc,isink
   integer(i8b):: ksink
   real(dp)::xxx,mmm,r2,v2,c2,d,u,v,w,e,bx1,bx2,by1,by2,bz1,bz2
   real(dp)::dx,dx_loc,scale,vol_loc
@@ -3392,17 +3420,21 @@ subroutine kjhan_bondi_velocity(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
 
   ! Check for illegal moves
   error=.false.
+  jbad=0
   do idim=1,ndim
      do j=1,np
-       if(x(j,idim)<=0.0D0.or.x(j,idim)>=6.0D0)error=.true.
+       if(x(j,idim)<=0.0D0.or.x(j,idim)>=6.0D0)then
+          error=.true.
+          if(jbad==0)jbad=j
+       endif
      end do
   end do
   if(error)then
      write(*,*)'problem in kjhan_bondi_velocity'
      write(*,*)ilevel,ng,np
-     write(*,*)-idp(ind_part(j))
-     write(*,*)x(j,1:3)
-     write(*,*)vp(ind_part(j),1:3)
+     write(*,*)-idp(ind_part(jbad))
+     write(*,*)x(jbad,1:3)
+     write(*,*)vp(ind_part(jbad),1:3)
      stop
   end if
 

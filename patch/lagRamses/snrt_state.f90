@@ -2,6 +2,7 @@
 module snrt_state
   use amr_parameters, only: MAXLEVEL, dp
   use iso_c_binding, only: c_float
+#include "amr_index.h"
   implicit none
 
   integer, parameter, public :: snrt_ndirection = 80
@@ -149,7 +150,7 @@ contains
   end subroutine snrt_state_checkpoint_read
 
   subroutine snrt_state_sync_level(ilevel, nleaf, nnew)
-    use amr_commons, only: active, ncoarse, ngridmax, twotondim, son
+    use amr_commons, only: active, ncoarse, twotondim, son
     implicit none
 
     integer, intent(in) :: ilevel
@@ -162,7 +163,7 @@ contains
     do i = 1, active(ilevel)%ngrid
        igrid = active(ilevel)%igrid(i)
        do ind = 1, twotondim
-          icell = ncoarse + (ind - 1) * ngridmax + igrid
+          icell = ICELL_OF(igrid, ind)
           if (son(icell) /= 0) cycle
           nleaf = nleaf + 1
           islot = snrt_slot_of_cell(icell)
@@ -186,7 +187,7 @@ contains
     integer :: cell_capacity
 
     if (allocated(snrt_slot_of_cell)) return
-    cell_capacity = ncoarse + twotondim * ngridmax
+    cell_capacity = ICELL_OF(ngridmax, twotondim)
     allocate(snrt_slot_of_cell(cell_capacity))
     snrt_slot_of_cell = 0
   end subroutine snrt_state_initialize

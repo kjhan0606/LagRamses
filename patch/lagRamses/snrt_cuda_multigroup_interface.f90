@@ -17,6 +17,20 @@ module snrt_cuda_multigroup_interface
        real(c_float), value :: cdt_over_dx
        integer(c_int) :: ierr
      end function snrt_cuda_multigroup_rt_step
+
+     function snrt_cuda_multigroup_rt_step_owned(state, direction, neighbor, &
+          optical_depth, neutral_hydrogen, absorbed, absorbed_group, &
+          nowned, nwork, ndirection, ngroup, cdt_over_dx) &
+          bind(C, name='snrt_cuda_multigroup_rt_step_owned_c') result(ierr)
+       import :: c_int, c_float
+       real(c_float), intent(inout) :: state(*)
+       real(c_float), intent(in) :: direction(*), optical_depth(*), neutral_hydrogen(*)
+       integer(c_int), intent(in) :: neighbor(*)
+       real(c_float), intent(out) :: absorbed(*), absorbed_group(*)
+       integer(c_int), value :: nowned, nwork, ndirection, ngroup
+       real(c_float), value :: cdt_over_dx
+       integer(c_int) :: ierr
+     end function snrt_cuda_multigroup_rt_step_owned
   end interface
 
 end module snrt_cuda_multigroup_interface

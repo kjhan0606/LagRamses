@@ -3,6 +3,8 @@
 // matrices and evaluates B^T * A^T, whose memory layout is the desired A * B.
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
 
 namespace {
 
@@ -620,15 +622,16 @@ namespace {
 __global__ void snrt_multigroup_upwind_kernel(const float *state, float *next,
                                                const float *direction,
                                                const int *neighbor,
-                                               int ncell, int ndirection,
+                                               int nowned, int nwork, int ndirection,
                                                int ngroup, float cdt_over_dx) {
-  const long long per_group = static_cast<long long>(ncell) * ndirection;
+  const long long per_group = static_cast<long long>(nwork) * ndirection;
   const long long total = per_group * ngroup;
   for (long long linear = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
        linear < total;
        linear += static_cast<long long>(gridDim.x) * blockDim.x) {
-    const int idir = static_cast<int>((linear / ncell) % ndirection);
-    const int cell = static_cast<int>(linear % ncell);
+    const int idir = static_cast<int>((linear / nwork) % ndirection);
+    const int cell = static_cast<int>(linear % nwork);
+    if (cell >= nowned) continue;
     const float mux = direction[3 * idir + 0];
     const float muy = direction[3 * idir + 1];
     const float muz = direction[3 * idir + 2];
@@ -650,32 +653,34 @@ __global__ void snrt_multigroup_upwind_kernel(const float *state, float *next,
 
 __global__ void snrt_multigroup_absorb_kernel(float *state, float *absorbed_direction,
                                                const float *optical_depth,
-                                               int ncell, int ndirection,
+                                               int nowned, int nwork, int ndirection,
                                                int ngroup) {
-  const long long per_group = static_cast<long long>(ncell) * ndirection;
+  const long long per_group = static_cast<long long>(nwork) * ndirection;
   const long long total = per_group * ngroup;
   for (long long linear = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
        linear < total;
        linear += static_cast<long long>(gridDim.x) * blockDim.x) {
-    const int cell = static_cast<int>(linear % ncell);
+    const int cell = static_cast<int>(linear % nwork);
+    if (cell >= nowned) continue;
     const int group = static_cast<int>(linear / per_group);
     const float q_before = state[linear];
-    const float q_after = q_before * expf(-fmaxf(0.0f, optical_depth[group * ncell + cell]));
+    const float q_after = q_before * expf(-fmaxf(0.0f, optical_depth[group * nowned + cell]));
     state[linear] = q_after;
     absorbed_direction[linear] = q_before - q_after;
   }
 }
 
 __global__ void snrt_reduce_multigroup_kernel(const float *directional, float *scalar,
-                                              int ncell, int ndirection, int ngroup) {
+                                              int nowned, int nwork,
+                                              int ndirection, int ngroup) {
   const int cell = blockIdx.x;
-  if (cell >= ncell) return;
-  const long long per_group = static_cast<long long>(ncell) * ndirection;
+  if (cell >= nowned) return;
+  const long long per_group = static_cast<long long>(nwork) * ndirection;
   float partial = 0.0f;
   for (int group = 0; group < ngroup; ++group) {
     const long long group_base = static_cast<long long>(group) * per_group;
     for (int idir = threadIdx.x; idir < ndirection; idir += blockDim.x) {
-      partial += directional[group_base + static_cast<long long>(idir) * ncell + cell];
+      partial += directional[group_base + static_cast<long long>(idir) * nwork + cell];
     }
   }
   __shared__ float cache[128];
@@ -690,18 +695,19 @@ __global__ void snrt_reduce_multigroup_kernel(const float *directional, float *s
 
 __global__ void snrt_reduce_multigroup_group_kernel(const float *directional,
                                                      float *scalar_group,
-                                                     int ncell, int ndirection,
+                                                     int nowned, int nwork,
+                                                     int ndirection,
                                                      int ngroup) {
-  const long long total = static_cast<long long>(ncell) * ngroup;
+  const long long total = static_cast<long long>(nowned) * ngroup;
   for (long long linear = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
        linear < total;
        linear += static_cast<long long>(gridDim.x) * blockDim.x) {
-    const int cell = static_cast<int>(linear % ncell);
-    const int group = static_cast<int>(linear / ncell);
-    const long long group_base = static_cast<long long>(group) * ncell * ndirection;
+    const int cell = static_cast<int>(linear % nowned);
+    const int group = static_cast<int>(linear / nowned);
+    const long long group_base = static_cast<long long>(group) * nwork * ndirection;
     float sum = 0.0f;
     for (int idir = 0; idir < ndirection; ++idir) {
-      sum += directional[group_base + static_cast<long long>(idir) * ncell + cell];
+      sum += directional[group_base + static_cast<long long>(idir) * nwork + cell];
     }
     scalar_group[linear] = sum;
   }
@@ -711,14 +717,16 @@ __global__ void snrt_cap_multigroup_absorption_kernel(float *state,
                                                       float *absorbed_direction,
                                                       const float *absorbed_total,
                                                       const float *neutral_hydrogen,
-                                                      int ncell, int ndirection,
+                                                      int nowned, int nwork,
+                                                      int ndirection,
                                                       int ngroup) {
-  const long long per_group = static_cast<long long>(ncell) * ndirection;
+  const long long per_group = static_cast<long long>(nwork) * ndirection;
   const long long total = per_group * ngroup;
   for (long long linear = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
        linear < total;
        linear += static_cast<long long>(gridDim.x) * blockDim.x) {
-    const int cell = static_cast<int>(linear % ncell);
+    const int cell = static_cast<int>(linear % nwork);
+    if (cell >= nowned) continue;
     const float total_absorbed = absorbed_total[cell];
     const float neutral = fmaxf(0.0f, neutral_hydrogen[cell]);
     float cap = 1.0f;
@@ -734,30 +742,31 @@ __global__ void snrt_cap_multigroup_absorption_kernel(float *state,
 
 }  // namespace
 
-extern "C" int snrt_cuda_multigroup_rt_step_c(float *state_host,
-                                                const float *direction_host,
-                                                const int *neighbor_host,
-                                                const float *optical_depth_host,
-                                                const float *neutral_hydrogen_host,
-                                                float *absorbed_host,
-                                                float *absorbed_group_host,
-                                                int ncell, int ndirection, int ngroup,
-                                                float cdt_over_dx) {
+static int snrt_cuda_multigroup_rt_step_impl(float *state_host,
+                                               const float *direction_host,
+                                               const int *neighbor_host,
+                                               const float *optical_depth_host,
+                                               const float *neutral_hydrogen_host,
+                                               float *absorbed_host,
+                                               float *absorbed_group_host,
+                                               int nowned, int nwork,
+                                               int ndirection, int ngroup,
+                                               float cdt_over_dx) {
   if (state_host == nullptr || direction_host == nullptr || neighbor_host == nullptr ||
       optical_depth_host == nullptr || neutral_hydrogen_host == nullptr ||
       absorbed_host == nullptr || absorbed_group_host == nullptr ||
-      ncell <= 0 || ndirection <= 0 || ngroup <= 0 ||
+      nowned <= 0 || nwork < nowned || ndirection <= 0 || ngroup <= 0 ||
       cdt_over_dx < 0.0f) {
     return 1;
   }
 
-  const long long per_group = static_cast<long long>(ncell) * ndirection;
+  const long long per_group = static_cast<long long>(nwork) * ndirection;
   const long long total = per_group * ngroup;
   const size_t state_bytes = static_cast<size_t>(total) * sizeof(float);
   const size_t direction_bytes = static_cast<size_t>(3 * ndirection) * sizeof(float);
-  const size_t neighbor_bytes = static_cast<size_t>(6 * ncell) * sizeof(int);
-  const size_t group_bytes = static_cast<size_t>(ncell) * ngroup * sizeof(float);
-  const size_t cell_bytes = static_cast<size_t>(ncell) * sizeof(float);
+  const size_t neighbor_bytes = static_cast<size_t>(6 * nowned) * sizeof(int);
+  const size_t group_bytes = static_cast<size_t>(nowned) * ngroup * sizeof(float);
+  const size_t cell_bytes = static_cast<size_t>(nowned) * sizeof(float);
   float *state_device = nullptr;
   float *transport_device = nullptr;
   float *direction_device = nullptr;
@@ -766,7 +775,21 @@ extern "C" int snrt_cuda_multigroup_rt_step_c(float *state_host,
   float *neutral_device = nullptr;
   float *absorbed_device = nullptr;
   float *absorbed_group_device = nullptr;
+  cudaEvent_t event_start = nullptr;
+  cudaEvent_t event_stop = nullptr;
+  const char *trace_env = std::getenv("SNRT_CUDA_TRACE");
+  const bool trace = trace_env != nullptr && trace_env[0] == '1' && trace_env[1] == '\0';
   int status = 1;
+
+  if (trace) {
+    if (cudaEventCreate(&event_start) != cudaSuccess ||
+        cudaEventCreate(&event_stop) != cudaSuccess) {
+      if (event_stop != nullptr) cudaEventDestroy(event_stop);
+      if (event_start != nullptr) cudaEventDestroy(event_start);
+      event_start = nullptr;
+      event_stop = nullptr;
+    }
+  }
 
   if (cudaMalloc(&state_device, state_bytes) != cudaSuccess) goto done;
   if (cudaMalloc(&transport_device, state_bytes) != cudaSuccess) goto done;
@@ -782,46 +805,57 @@ extern "C" int snrt_cuda_multigroup_rt_step_c(float *state_host,
   if (cudaMemcpy(tau_device, optical_depth_host, group_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
   if (cudaMemcpy(neutral_device, neutral_hydrogen_host, cell_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
 
+  if (event_start != nullptr) cudaEventRecord(event_start);
   {
     const int threads = 256;
     const int blocks = static_cast<int>((total + threads - 1) / threads);
     snrt_multigroup_upwind_kernel<<<blocks, threads>>>(state_device, transport_device,
-        direction_device, neighbor_device, ncell, ndirection, ngroup, cdt_over_dx);
+        direction_device, neighbor_device, nowned, nwork, ndirection, ngroup, cdt_over_dx);
     if (cudaGetLastError() != cudaSuccess) goto done;
     snrt_multigroup_absorb_kernel<<<blocks, threads>>>(transport_device, state_device,
-        tau_device, ncell, ndirection, ngroup);
+        tau_device, nowned, nwork, ndirection, ngroup);
   }
   if (cudaGetLastError() != cudaSuccess) goto done;
-  snrt_reduce_multigroup_kernel<<<ncell, 128>>>(state_device, absorbed_device,
-      ncell, ndirection, ngroup);
+  snrt_reduce_multigroup_kernel<<<nowned, 128>>>(state_device, absorbed_device,
+      nowned, nwork, ndirection, ngroup);
   if (cudaGetLastError() != cudaSuccess) goto done;
   {
-    const long long group_total = static_cast<long long>(ncell) * ngroup;
+    const long long group_total = static_cast<long long>(nowned) * ngroup;
     const int threads = 256;
     const int blocks = static_cast<int>((group_total + threads - 1) / threads);
     snrt_reduce_multigroup_group_kernel<<<blocks, threads>>>(state_device,
-        absorbed_group_device, ncell, ndirection, ngroup);
+        absorbed_group_device, nowned, nwork, ndirection, ngroup);
   }
   if (cudaGetLastError() != cudaSuccess) goto done;
   {
     const int threads = 256;
     const int blocks = static_cast<int>((total + threads - 1) / threads);
     snrt_cap_multigroup_absorption_kernel<<<blocks, threads>>>(transport_device, state_device,
-        absorbed_device, neutral_device, ncell, ndirection, ngroup);
+        absorbed_device, neutral_device, nowned, nwork, ndirection, ngroup);
   }
   if (cudaGetLastError() != cudaSuccess) goto done;
-  snrt_reduce_multigroup_kernel<<<ncell, 128>>>(state_device, absorbed_device,
-      ncell, ndirection, ngroup);
+  snrt_reduce_multigroup_kernel<<<nowned, 128>>>(state_device, absorbed_device,
+      nowned, nwork, ndirection, ngroup);
   if (cudaGetLastError() != cudaSuccess) goto done;
   {
-    const long long group_total = static_cast<long long>(ncell) * ngroup;
+    const long long group_total = static_cast<long long>(nowned) * ngroup;
     const int threads = 256;
     const int blocks = static_cast<int>((group_total + threads - 1) / threads);
     snrt_reduce_multigroup_group_kernel<<<blocks, threads>>>(state_device,
-        absorbed_group_device, ncell, ndirection, ngroup);
+        absorbed_group_device, nowned, nwork, ndirection, ngroup);
   }
   if (cudaGetLastError() != cudaSuccess) goto done;
   if (cudaDeviceSynchronize() != cudaSuccess) goto done;
+  if (event_stop != nullptr) {
+    float elapsed_ms = 0.0f;
+    cudaEventRecord(event_stop);
+    if (cudaEventSynchronize(event_stop) == cudaSuccess &&
+      cudaEventElapsedTime(&elapsed_ms, event_start, event_stop) == cudaSuccess) {
+      std::fprintf(stderr,
+                   "SNRT CUDA multigroup kernels nowned=%d nwork=%d ndirection=%d ngroup=%d launches=7 ms=%.3f\n",
+                   nowned, nwork, ndirection, ngroup, elapsed_ms);
+    }
+  }
   if (cudaMemcpy(state_host, transport_device, state_bytes, cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
   if (cudaMemcpy(absorbed_host, absorbed_device, cell_bytes, cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
   if (cudaMemcpy(absorbed_group_host, absorbed_group_device, group_bytes,
@@ -829,6 +863,8 @@ extern "C" int snrt_cuda_multigroup_rt_step_c(float *state_host,
   status = 0;
 
 done:
+  if (event_stop != nullptr) cudaEventDestroy(event_stop);
+  if (event_start != nullptr) cudaEventDestroy(event_start);
   cudaFree(absorbed_group_device);
   cudaFree(absorbed_device);
   cudaFree(neutral_device);
@@ -838,4 +874,33 @@ done:
   cudaFree(transport_device);
   cudaFree(state_device);
   return status;
+}
+
+extern "C" int snrt_cuda_multigroup_rt_step_c(float *state_host,
+                                                const float *direction_host,
+                                                const int *neighbor_host,
+                                                const float *optical_depth_host,
+                                                const float *neutral_hydrogen_host,
+                                                float *absorbed_host,
+                                                float *absorbed_group_host,
+                                                int ncell, int ndirection, int ngroup,
+                                                float cdt_over_dx) {
+  return snrt_cuda_multigroup_rt_step_impl(state_host, direction_host, neighbor_host,
+      optical_depth_host, neutral_hydrogen_host, absorbed_host, absorbed_group_host,
+      ncell, ncell, ndirection, ngroup, cdt_over_dx);
+}
+
+extern "C" int snrt_cuda_multigroup_rt_step_owned_c(float *state_host,
+                                                      const float *direction_host,
+                                                      const int *neighbor_host,
+                                                      const float *optical_depth_host,
+                                                      const float *neutral_hydrogen_host,
+                                                      float *absorbed_host,
+                                                      float *absorbed_group_host,
+                                                      int nowned, int nwork,
+                                                      int ndirection, int ngroup,
+                                                      float cdt_over_dx) {
+  return snrt_cuda_multigroup_rt_step_impl(state_host, direction_host, neighbor_host,
+      optical_depth_host, neutral_hydrogen_host, absorbed_host, absorbed_group_host,
+      nowned, nwork, ndirection, ngroup, cdt_over_dx);
 }

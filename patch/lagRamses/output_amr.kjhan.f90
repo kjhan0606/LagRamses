@@ -565,7 +565,7 @@ subroutine output_resolved_physics_inventory(filename,output_char,output_directo
        & form='formatted',iostat=ios,iomsg=iomsg)
   if(ios/=0) call resolved_physics_inventory_fatal('open',filename,ios,iomsg)
 
-  write(ilun,'(A)',iostat=ios,iomsg=iomsg) '# lagramses_resolved_physics_inventory_v1'
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) '# lagramses_resolved_physics_inventory_v2'
   if(ios/=0) call resolved_physics_inventory_fatal('write schema',filename,ios,iomsg)
   write(ilun,'(A)',iostat=ios,iomsg=iomsg) &
        & '# Raw file availability only; this record is not a force or delay measurement.'
@@ -640,10 +640,18 @@ subroutine output_resolved_physics_inventory(filename,output_char,output_directo
   if(ios/=0) call resolved_physics_inventory_fatal('write force ledger status',filename,ios,iomsg)
   write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'force_source_ledger_reason = no_source_decomposition_in_normal_output'
   if(ios/=0) call resolved_physics_inventory_fatal('write force ledger reason',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'force_source_ledger_path = none'
+  if(ios/=0) call resolved_physics_inventory_fatal('write force ledger path',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'force_source_ledger_sha256 = none'
+  if(ios/=0) call resolved_physics_inventory_fatal('write force ledger SHA-256',filename,ios,iomsg)
   write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'conservation_ledger_status = unavailable'
   if(ios/=0) call resolved_physics_inventory_fatal('write conservation ledger status',filename,ios,iomsg)
   write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'conservation_ledger_reason = no_time_series_in_normal_output'
   if(ios/=0) call resolved_physics_inventory_fatal('write conservation ledger reason',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'conservation_ledger_path = none'
+  if(ios/=0) call resolved_physics_inventory_fatal('write conservation ledger path',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'conservation_ledger_sha256 = none'
+  if(ios/=0) call resolved_physics_inventory_fatal('write conservation ledger SHA-256',filename,ios,iomsg)
 
   select case(trim(dm_model))
   case('sidm')
@@ -652,6 +660,10 @@ subroutine output_resolved_physics_inventory(filename,output_char,output_directo
      write(ilun,'(A)',iostat=ios,iomsg=iomsg) &
           & 'sidm_scattering_ledger_reason = no_cumulative_scatter_counter_in_normal_output'
      if(ios/=0) call resolved_physics_inventory_fatal('write SIDM ledger reason',filename,ios,iomsg)
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'sidm_scattering_ledger_path = none'
+     if(ios/=0) call resolved_physics_inventory_fatal('write SIDM ledger path',filename,ios,iomsg)
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'sidm_scattering_ledger_sha256 = none'
+     if(ios/=0) call resolved_physics_inventory_fatal('write SIDM ledger SHA-256',filename,ios,iomsg)
   case('fdm')
      write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'fdm_field_snapshot_status = available'
      if(ios/=0) call resolved_physics_inventory_fatal('write FDM field status',filename,ios,iomsg)

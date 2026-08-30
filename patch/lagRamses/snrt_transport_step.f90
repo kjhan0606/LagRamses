@@ -1,15 +1,20 @@
 module snrt_transport_step
-  ! AMR leaf-slot <-> GPU sparse-stencil adapter.  Only same-level local
-  ! faces are populated at this stage; coarse-fine and MPI faces remain a
+  ! AMR leaf-slot <-> GPU sparse-stencil adapter.  Same-level MPI faces use
+  ! RAMSES virtual cells as read-only GPU ghosts; coarse-fine faces remain a
   ! separate conservative flux-register responsibility.
   use, intrinsic :: iso_c_binding, only: c_int, c_float
   use amr_parameters, only: dp
   use snrt_state, only: snrt_ndirection, snrt_ngroups, snrt_nslot, snrt_intensity
   use snrt_angular_quadrature, only: snrt_angular_init
-  use snrt_amr_topology, only: snrt_amr_build_same_level_neighbors
+  use snrt_amr_topology, only: snrt_amr_build_same_level_neighbors, &
+       snrt_amr_exchange_interface_state, snrt_amr_apply_coarse_flux_correction, &
+       snrt_face_kind, snrt_face_cell, &
+       SNRT_FACE_MPI, SNRT_FACE_PHYSICAL, SNRT_FACE_COARSE_TO_FINE, &
+       SNRT_FACE_FINE_TO_COARSE, SNRT_FACE_UNMAPPED
   use snrt_cuda_sparse_transport_interface, only: snrt_cuda_upwind_sparse
   use snrt_cuda_limited_rt_step_interface, only: snrt_cuda_transport_absorb_limited
-  use snrt_cuda_multigroup_interface, only: snrt_cuda_multigroup_rt_step
+  use snrt_cuda_multigroup_interface, only: snrt_cuda_multigroup_rt_step, &
+       snrt_cuda_multigroup_rt_step_owned
   implicit none
 
 contains
@@ -237,7 +242,7 @@ contains
 
   subroutine snrt_transport_absorb_multigroup_prepared(leaf_slot, neighbor, &
        cdt_over_dx, optical_depth_by_leaf_group, neutral_hydrogen_by_leaf, &
-       absorbed_by_leaf_group, ierr)
+       absorbed_by_leaf_group, ierr, leaf_cell, ilevel)
     ! Prepared-cell ABI used by the RAMSES driver.  Keeping topology outside
     ! this routine lets the driver construct hydro/NLTE fields without a
     ! second AMR traversal.
@@ -248,12 +253,19 @@ contains
     real(c_float), intent(in) :: neutral_hydrogen_by_leaf(:)
     real(c_float), intent(out) :: absorbed_by_leaf_group(:,:)
     integer, intent(out) :: ierr
+    integer, intent(in), optional :: leaf_cell(:)
+    integer, intent(in), optional :: ilevel
     integer :: nleaf, ilocal, igroup, nsub, isub
+    integer :: nmpi, nwork, iwork, iface, ighost
+    integer :: face_kind
+    integer, allocatable :: neighbor_work(:,:), ghost_kind(:), ghost_cell(:), &
+         ghost_face(:), ghost_local(:)
     integer(c_int), allocatable :: neighbor_c(:,:)
     real(dp) :: direction_dp(snrt_ndirection,3), weight(snrt_ndirection)
     real(dp) :: angular_cfl
     real(c_float) :: direction_c(3,snrt_ndirection)
-    real(c_float), allocatable :: packed(:,:,:), tau(:,:), neutral(:)
+    real(c_float), allocatable :: packed(:,:,:), packed_work(:,:,:)
+    real(c_float), allocatable :: ghost_state(:,:,:), tau(:,:), neutral(:)
     real(c_float), allocatable :: absorbed_total(:), absorbed_group(:,:)
     integer(c_int) :: cuda_ierr
 
@@ -275,6 +287,69 @@ contains
     end if
     if (nleaf == 0) return
 
+    if (.not. allocated(snrt_face_kind) .or. .not. allocated(snrt_face_cell) .or. &
+         size(snrt_face_kind,1) < size(neighbor,1) .or. &
+         size(snrt_face_kind,2) < nleaf) then
+       ierr = 3
+       return
+    end if
+    if (size(neighbor,1) < 6) then
+       ierr = 2
+       return
+    end if
+
+    nmpi = count(snrt_face_kind(1:size(neighbor,1),1:nleaf) == SNRT_FACE_MPI) + &
+         count(snrt_face_kind(1:size(neighbor,1),1:nleaf) == SNRT_FACE_FINE_TO_COARSE)
+    do ilocal = 1, nleaf
+       do iface = 1, 6
+          face_kind = snrt_face_kind(iface,ilocal)
+          if (face_kind == SNRT_FACE_UNMAPPED) then
+             ierr = 3
+             return
+          end if
+       end do
+    end do
+    if (nmpi > 0 .and. (.not. present(leaf_cell) .or. .not. present(ilevel))) then
+       ierr = 4
+       return
+    end if
+    nwork = nleaf + nmpi
+    allocate(neighbor_work(6,nleaf), packed_work(nwork,snrt_ndirection,snrt_ngroups))
+    neighbor_work = neighbor(:,1:nleaf)
+    allocate(ghost_kind(nmpi), ghost_cell(nmpi), ghost_face(nmpi), ghost_local(nmpi), &
+         ghost_state(nmpi,snrt_ndirection,snrt_ngroups))
+    if (nmpi > 0) then
+       iwork = nleaf
+       ighost = 0
+       do ilocal = 1, nleaf
+          do iface = 1, 6
+             face_kind = snrt_face_kind(iface,ilocal)
+             if (face_kind == SNRT_FACE_MPI .or. &
+                  face_kind == SNRT_FACE_FINE_TO_COARSE) then
+                ighost = ighost + 1
+                iwork = iwork + 1
+                ghost_kind(ighost) = face_kind
+                ghost_cell(ighost) = snrt_face_cell(iface,ilocal)
+                ghost_face(ighost) = iface
+                ghost_local(ighost) = ilocal
+                neighbor_work(iface,ilocal) = iwork
+             else if (face_kind == SNRT_FACE_COARSE_TO_FINE .or. &
+                  face_kind == SNRT_FACE_PHYSICAL) then
+                neighbor_work(iface,ilocal) = ilocal
+             end if
+          end do
+       end do
+    else
+       do ilocal = 1, nleaf
+          do iface = 1, 6
+             if (snrt_face_kind(iface,ilocal) == SNRT_FACE_PHYSICAL) &
+                  neighbor_work(iface,ilocal) = ilocal
+             if (snrt_face_kind(iface,ilocal) == SNRT_FACE_COARSE_TO_FINE) &
+                  neighbor_work(iface,ilocal) = ilocal
+          end do
+       end do
+    end if
+
     call snrt_angular_init(direction_dp, weight)
     angular_cfl = maxval(sum(abs(direction_dp), dim=2))
     nsub = max(1, ceiling(cdt_over_dx * angular_cfl))
@@ -282,7 +357,7 @@ contains
     allocate(neighbor_c(6,nleaf), packed(nleaf,snrt_ndirection,snrt_ngroups), &
          tau(nleaf,snrt_ngroups), neutral(nleaf), absorbed_total(nleaf), &
          absorbed_group(nleaf,snrt_ngroups))
-    neighbor_c = int(neighbor(:,1:nleaf), c_int)
+    neighbor_c = int(neighbor_work, c_int)
     direction_c = real(transpose(direction_dp), c_float)
     do ilocal = 1, nleaf
        neutral(ilocal) = neutral_hydrogen_by_leaf(ilocal)
@@ -295,10 +370,32 @@ contains
 
     absorbed_by_leaf_group(1:nleaf,1:snrt_ngroups) = 0.0_c_float
     do isub = 1, nsub
+       ! The AMR exchange is collective even when this rank has no local
+       ! ghost faces; the topology routine reduces interface requirements
+       ! across all ranks before entering make_virtual_fine_dp.
+       call snrt_amr_exchange_interface_state(ilevel, leaf_cell, packed, &
+            ghost_kind, ghost_cell, ghost_face, ghost_state, ierr)
+       if (ierr /= 0) then
+          ierr = 10 + ierr
+          return
+       end if
+       packed_work = 0.0_c_float
+       packed_work(1:nleaf,1:snrt_ndirection,1:snrt_ngroups) = packed
+       do ighost = 1, nmpi
+          packed_work(nleaf+ighost,1:snrt_ndirection,1:snrt_ngroups) = &
+               ghost_state(ighost,1:snrt_ndirection,1:snrt_ngroups)
+       end do
+       call snrt_amr_apply_coarse_flux_correction(ilevel, leaf_cell, packed_work, &
+            ghost_kind, ghost_cell, ghost_face, ghost_local, &
+            cdt_over_dx/real(nsub,dp), direction_dp, ierr)
+       if (ierr /= 0) then
+          ierr = 20 + ierr
+          return
+       end if
        absorbed_group = 0.0_c_float
-       cuda_ierr = snrt_cuda_multigroup_rt_step(packed, direction_c, neighbor_c, &
+       cuda_ierr = snrt_cuda_multigroup_rt_step_owned(packed_work, direction_c, neighbor_c, &
             tau, neutral, absorbed_total, absorbed_group, int(nleaf,c_int), &
-            int(snrt_ndirection,c_int), int(snrt_ngroups,c_int), &
+            int(nwork,c_int), int(snrt_ndirection,c_int), int(snrt_ngroups,c_int), &
             real(cdt_over_dx/real(nsub,dp),c_float))
        if (cuda_ierr /= 0_c_int) then
           ierr = 100 + int(cuda_ierr)
@@ -306,6 +403,7 @@ contains
        end if
        absorbed_by_leaf_group(1:nleaf,1:snrt_ngroups) = &
             absorbed_by_leaf_group(1:nleaf,1:snrt_ngroups) + absorbed_group
+       packed = packed_work(1:nleaf,1:snrt_ndirection,1:snrt_ngroups)
        ! The CUDA cap is a per-call neutral-H budget.  Carry the remaining
        ! budget across transport substeps so an optically thick cell cannot
        ! consume the same atoms repeatedly within one hydro step.

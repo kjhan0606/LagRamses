@@ -46,6 +46,10 @@ module pm_commons
   ! This patch uses compact ptypep in place of the baseline typep/FAM_UNDEF
   ! structure; its empty-slot/default value is PTYPE_DM.
   integer(kind=1),allocatable,dimension(:)::ptypep  ! Particle type code (see PTYPE_* below)
+  ! Particle slot of the canonical sink for each sink identity.  Cloud
+  ! particles intentionally share PTYPE_SINK, so position-based selection is
+  ! not stable while a sink moves or after a restart.
+  integer,allocatable,dimension(:)::canonical_sink_part
 
   ! Particle type codes — authoritative species tag for each particle
   integer(kind=1),parameter::PTYPE_DM        =  0_1  ! cold DM (ground state)
