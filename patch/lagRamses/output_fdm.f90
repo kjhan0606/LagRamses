@@ -118,9 +118,10 @@ subroutine output_fdm_outer_wave_provenance(output_char)
   real(dp)::dx,dx_loc,volume,inv2dx,rho,dre,dim,grad_s
   real(dp)::mass_loc,mass_glob,leaf_loc,leaf_glob,stencil_loc,stencil_glob
   real(dp),dimension(3)::current_loc,current_glob,current_cell
-  logical::have_stencil
+  logical::have_stencil,have_restart_parent_execution_id
   character(len=160)::fileloc
   character(len=80),save::execution_instance_id=''
+  character(len=80)::restart_parent_execution_instance_id
 
   if(.not.use_fdm) return
   mass_loc=0.0d0
@@ -196,6 +197,17 @@ subroutine output_fdm_outer_wave_provenance(output_char)
   if(len_trim(execution_instance_id)==0)then
      call fdm_execution_instance_identifier(execution_instance_id)
   endif
+  if(nrestart==0)then
+     restart_parent_execution_instance_id='none'
+  else
+     call fdm_restart_parent_execution_instance_identifier(nrestart, &
+          & restart_parent_execution_instance_id,have_restart_parent_execution_id)
+     if(.not.have_restart_parent_execution_id)then
+        write(*,'(A,I0)') 'ERROR: FDM provenance restart parent lacks an execution-instance token: ',nrestart
+        call flush(6)
+        call clean_stop
+     endif
+  endif
 
   fileloc='output_'//trim(output_char)//'/fdm_outer_wave_provenance_'// &
        & trim(output_char)//'.txt'
@@ -208,7 +220,7 @@ subroutine output_fdm_outer_wave_provenance(output_char)
      call flush(6)
      call clean_stop
   end if
-  write(ilun,'(A)') '# fdm_outer_wave_provenance_v4'
+  write(ilun,'(A)') '# fdm_outer_wave_provenance_v5'
   write(ilun,'(A)') '# Raw code-unit diagnostics; no calibrated drag or delay.'
   write(ilun,'(A)') '# Full psi snapshots are the required field source.'
   write(ilun,'(A,ES24.16)') 'time_code = ',t
@@ -225,6 +237,10 @@ subroutine output_fdm_outer_wave_provenance(output_char)
   ! in this solver invocation.  It distinguishes separately launched restart
   ! branches, but is not a cryptographic UUID or a replacement for lineage.
   write(ilun,'(A,A)') 'execution_instance_id = ',trim(execution_instance_id)
+  ! This value is read from the actual restart-parent raw provenance before
+  ! writing any child V5 record.  A missing legacy parent is fail-closed.
+  write(ilun,'(A,A)') 'restart_parent_execution_instance_id = ', &
+       & trim(restart_parent_execution_instance_id)
   write(ilun,'(A,ES24.16)') 'm_axion_ev = ',m_axion
   write(ilun,'(A,ES24.16)') 'hbar_code = ',hbar_code
   write(ilun,'(A,L1)') 'fdm_use_hjm = ',fdm_use_hjm
@@ -284,6 +300,55 @@ subroutine fdm_execution_instance_identifier(identifier)
        & date_values(6),date_values(7),'.',date_values(8),'-r',nrestart, &
        & '-c',clock_count
 end subroutine fdm_execution_instance_identifier
+!#########################################################################
+!#########################################################################
+!#########################################################################
+subroutine fdm_restart_parent_execution_instance_identifier(parent_output,identifier,found)
+  !-----------------------------------------------------------------------
+  ! Read the concrete parent raw-provenance token used by a restarted run.
+  ! A child V5 record is not written if this direct parent artifact is absent
+  ! or predates execution-instance provenance.
+  !-----------------------------------------------------------------------
+  use amr_commons
+  implicit none
+  integer,intent(in)::parent_output
+  character(len=*),intent(out)::identifier
+  logical,intent(out)::found
+  integer::ilun,ios
+  character(len=5)::nchar
+  character(len=160)::fileloc
+  character(len=256)::line
+  character(len=*),parameter::key='execution_instance_id = '
+
+  identifier=''
+  found=.false.
+  call title(parent_output,nchar)
+  fileloc='output_'//trim(nchar)//'/fdm_outer_wave_provenance_'// &
+       & trim(nchar)//'.txt'
+  inquire(file=trim(fileloc),exist=found)
+  if(.not.found) return
+  ilun=93
+  open(unit=ilun,file=trim(fileloc),status='old',form='formatted', &
+       & action='read',iostat=ios)
+  if(ios/=0)then
+     found=.false.
+     return
+  endif
+  ! A readable legacy parent is not sufficient: only a matching V4/V5
+  ! execution-instance record authorizes a V5 child provenance record.
+  found=.false.
+  do
+     read(ilun,'(A)',iostat=ios) line
+     if(ios/=0) exit
+     line=adjustl(line)
+     if(index(line,key)==1)then
+        identifier=adjustl(line(len(key)+1:))
+        found=len_trim(identifier)>0
+        exit
+     endif
+  end do
+  close(ilun)
+end subroutine fdm_restart_parent_execution_instance_identifier
 !#########################################################################
 !#########################################################################
 !#########################################################################

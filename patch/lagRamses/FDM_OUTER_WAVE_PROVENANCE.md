@@ -4,7 +4,7 @@ Set `fdm_outer_ledger=.true.` in `&fdm_params` to write one
 `fdm_outer_wave_provenance_<output>.txt` file in each normal FDM output
 directory.  The option is off by default.
 
-The current V3 file is a compact raw diagnostic.  It records the output epoch,
+The current V5 file is a compact raw diagnostic.  It records the output epoch,
 axion mass, effective code `hbar`, HJM/wave seam settings, dual-soliton seed
 switch and parameter values, total leaf-cell wave mass, and the global FDM
 mass-current integral.  On wave levels the current uses
@@ -23,14 +23,22 @@ lineage attestation is added.
 
 V4 adds `execution_instance_id`, a rank-1 timestamp/system-clock token that
 is held fixed for every normal output produced by one solver invocation.  It
-lets a consumer reject output fragments from separately launched restart
-branches.  The token is an operational discriminator, not a cryptographic
-UUID: it does not replace an explicit restart lineage or establish that an
-arbitrary collection of outputs is one continuous physical trajectory.
+gives a consumer an operational discriminator for separately launched restart
+branches.  The token is not a cryptographic UUID: a collision does not replace
+an explicit restart lineage or establish that an arbitrary collection of
+outputs is one continuous physical trajectory.
+
+V5 records `restart_parent_execution_instance_id` in every restarted output.
+Rank 1 reads that token from the actual parent raw-provenance file before it
+writes the child record; if the parent file is missing or predates V4, the
+writer stops rather than emit an unbound child.  A downstream reader can then
+require both the parent output number and its exact execution token at each
+listed restart transition.  This remains an operational lineage check, not a
+substitute for a persistent, globally unique run UUID.
 
 The dual-soliton fields are runtime configuration provenance, not a claim that
 the supplied coherent state has relaxed.  They allow the outer analysis to
-bind a V2/V3/V4 output to its materialized two-core seed after the separate input
+bind a V2/V3/V4/V5 output to its materialized two-core seed after the separate input
 preflight has checked the complete namelist and `ic_sink` rows.  The Python
 reader continues to accept legacy V1 records, but those lack this runtime
 attestation and cannot alone verify a controlled dual-soliton initialization.
