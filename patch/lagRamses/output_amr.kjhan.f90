@@ -431,6 +431,37 @@ subroutine output_dm_run_provenance(filename)
   case('cdm')
      write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'dm_transport = collisionless_nbody'
      if(ios /= 0) call dm_run_provenance_fatal('write CDM transport',filename,ios,iomsg)
+     if(len_trim(cdm_zoom_plan_manifest_sha256)==64 .and. &
+          & len_trim(cdm_zoom_capture_event_sha256)==64 .and. &
+          & len_trim(cdm_zoom_host_orbit_initial_conditions_sha256)==64 .and. &
+          & len_trim(cdm_zoom_initial_conditions_sha256)==64 .and. &
+          & len_trim(cdm_zoom_sink_initial_conditions_sha256)==64) then
+        write(ilun,'(A)',iostat=ios,iomsg=iomsg) &
+             & 'cdm_zoom_execution_identity_status = available'
+        if(ios /= 0) call dm_run_provenance_fatal('write CDM zoom identity status',filename,ios,iomsg)
+        write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'cdm_zoom_plan_manifest_sha256 = ', &
+             & trim(cdm_zoom_plan_manifest_sha256)
+        if(ios /= 0) call dm_run_provenance_fatal('write CDM zoom plan identity',filename,ios,iomsg)
+        write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'cdm_zoom_capture_event_sha256 = ', &
+             & trim(cdm_zoom_capture_event_sha256)
+        if(ios /= 0) call dm_run_provenance_fatal('write CDM zoom capture identity',filename,ios,iomsg)
+        write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) &
+             & 'cdm_zoom_host_orbit_initial_conditions_sha256 = ', &
+             & trim(cdm_zoom_host_orbit_initial_conditions_sha256)
+        if(ios /= 0) call dm_run_provenance_fatal('write CDM zoom host-orbit identity',filename,ios,iomsg)
+        write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) &
+             & 'cdm_zoom_initial_conditions_sha256 = ', &
+             & trim(cdm_zoom_initial_conditions_sha256)
+        if(ios /= 0) call dm_run_provenance_fatal('write CDM zoom IC identity',filename,ios,iomsg)
+        write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) &
+             & 'cdm_zoom_sink_initial_conditions_sha256 = ', &
+             & trim(cdm_zoom_sink_initial_conditions_sha256)
+        if(ios /= 0) call dm_run_provenance_fatal('write CDM zoom sink identity',filename,ios,iomsg)
+     else
+        write(ilun,'(A)',iostat=ios,iomsg=iomsg) &
+             & 'cdm_zoom_execution_identity_status = unavailable'
+        if(ios /= 0) call dm_run_provenance_fatal('write unavailable CDM zoom identity',filename,ios,iomsg)
+     endif
   case('sidm')
      sidm_pmax_output=maxval(sidm_Pmax(1:nlevelmax))
      write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'sidm_cross_section_cm2_g = ', &

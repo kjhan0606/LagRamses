@@ -310,6 +310,13 @@ module amr_parameters
   real(dp)::d_jeans_thre=0.d0 ! Gas density threshold to trigger Jeans-based refinement criterion
   logical ::smbh_capture_ledger=.true. ! Log complete pre-compaction sink groups
   character(len=256)::smbh_capture_ledger_file='smbh_capture_ledger_v1.jsonl'
+  ! Immutable CDM zoom input attestations.  These remain blank for ordinary
+  ! runs; a non-compacting zoom supplies all five SHA-256 values in its input.
+  character(len=64)::cdm_zoom_plan_manifest_sha256=''
+  character(len=64)::cdm_zoom_capture_event_sha256=''
+  character(len=64)::cdm_zoom_host_orbit_initial_conditions_sha256=''
+  character(len=64)::cdm_zoom_initial_conditions_sha256=''
+  character(len=64)::cdm_zoom_sink_initial_conditions_sha256=''
   logical ::agn_coarse_dump=.true. ! Log one physical-state row per AGN/coarse step
   character(len=256)::agn_coarse_dump_file='agn_coarse_state_v1.jsonl'
 

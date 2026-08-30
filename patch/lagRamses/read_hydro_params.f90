@@ -75,6 +75,9 @@ subroutine read_hydro_params(nml_ok)
        & ,sigmav_max,star_ratio_floor,mloadAGN,T2maxAGN,f_bondi,random_jet         &
        & ,drag,boost_drag,selfgrav,spin_bh,bhspinmerge,vrel_merge,rmerge,omega_b   &
        & ,smbh_capture_ledger,smbh_capture_ledger_file                            &
+       & ,cdm_zoom_plan_manifest_sha256,cdm_zoom_capture_event_sha256             &
+       & ,cdm_zoom_host_orbit_initial_conditions_sha256                           &
+       & ,cdm_zoom_initial_conditions_sha256,cdm_zoom_sink_initial_conditions_sha256 &
        & ,agn_coarse_dump,agn_coarse_dump_file                                    &
        & ,bondi,mad_jet,eps_sn1,eps_sn2,tol                             &
        & ,sf_virial,sf_trelax,sf_model,sf_birth_properties &
