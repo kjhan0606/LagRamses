@@ -54,11 +54,11 @@ def records(model: str) -> dict[str, str]:
 
 
 class ResolvedPhysicsInventoryTests(unittest.TestCase):
-    def validate(self, values: dict[str, str]):
+    def validate(self, values: dict[str, str], *, schema_version: int = 1):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "resolved_physics_inventory_00042.txt"
             path.write_text(
-                "# lagramses_resolved_physics_inventory_v1\n"
+                f"# lagramses_resolved_physics_inventory_v{schema_version}\n"
                 + "".join(f"{key} = {value}\n" for key, value in values.items()),
                 encoding="utf-8",
             )
@@ -90,7 +90,32 @@ class ResolvedPhysicsInventoryTests(unittest.TestCase):
         values["sidm_scattering_ledger_status"] = "available"
         report = self.validate(values)
         self.assertFalse(report.valid)
-        self.assertIn("SIDM scattering ledger must remain unavailable in inventory v1", report.errors)
+        self.assertIn(
+            "sidm_scattering_ledger_status must be unavailable in inventory v1",
+            report.errors,
+        )
+
+    def test_v2_accepts_only_explicit_hash_bound_ledger_statuses(self):
+        values = records("sidm")
+        values.update(
+            force_source_ledger_path="force_00042.json",
+            force_source_ledger_sha256="a" * 64,
+            conservation_ledger_path="none",
+            conservation_ledger_sha256="none",
+            sidm_scattering_ledger_path="scatter_00042.json",
+            sidm_scattering_ledger_sha256="b" * 64,
+        )
+        values["force_source_ledger_status"] = "available"
+        values["sidm_scattering_ledger_status"] = "available"
+        report = self.validate(values, schema_version=2)
+        self.assertTrue(report.valid, report.errors)
+        values["conservation_ledger_sha256"] = "c" * 64
+        report = self.validate(values, schema_version=2)
+        self.assertFalse(report.valid)
+        self.assertIn(
+            "unavailable conservation_ledger must use path and SHA-256 none",
+            report.errors,
+        )
 
     def test_fdm_cannot_relabel_an_analytic_drag_as_raw_wave_evidence(self):
         values = records("fdm")

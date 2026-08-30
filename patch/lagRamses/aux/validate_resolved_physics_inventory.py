@@ -16,7 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-MAGIC = "# lagramses_resolved_physics_inventory_v1"
+MAGIC_V1 = "# lagramses_resolved_physics_inventory_v1"
+MAGIC_V2 = "# lagramses_resolved_physics_inventory_v2"
 MODELS = {"cdm", "sidm", "fdm", "none"}
 CHANNEL_STATUS = {"available", "absent", "requires_particle_classification"}
 
@@ -45,15 +46,22 @@ class ResolvedPhysicsInventoryReport:
         }
 
 
-def _records(path: Path, errors: list[str]) -> dict[str, str]:
+def _records(path: Path, errors: list[str]) -> tuple[int | None, dict[str, str]]:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as error:
         errors.append(f"cannot read inventory: {error}")
-        return {}
-    if not lines or lines[0].strip() != MAGIC:
+        return None, {}
+    if not lines:
         errors.append("unsupported resolved-physics inventory schema")
-        return {}
+        return None, {}
+    if lines[0].strip() == MAGIC_V1:
+        schema_version = 1
+    elif lines[0].strip() == MAGIC_V2:
+        schema_version = 2
+    else:
+        errors.append("unsupported resolved-physics inventory schema")
+        return None, {}
     records: dict[str, str] = {}
     for number, line in enumerate(lines[1:], start=2):
         if not line.strip() or line.lstrip().startswith("#"):
@@ -68,7 +76,7 @@ def _records(path: Path, errors: list[str]) -> dict[str, str]:
             errors.append(f"duplicate inventory key {key}")
         else:
             records[key] = value
-    return records
+    return schema_version, records
 
 
 def _logical(value: str | None, key: str, errors: list[str]) -> bool | None:
@@ -104,12 +112,46 @@ def _required(records: dict[str, str], key: str, errors: list[str]) -> str | Non
     return value
 
 
+def _ledger_artifact(
+    records: dict[str, str],
+    key: str,
+    *,
+    schema_version: int | None,
+    errors: list[str],
+) -> None:
+    """Validate v2 ledger declarations without promoting their contents."""
+
+    status = records.get(f"{key}_status")
+    if schema_version == 1:
+        if status != "unavailable":
+            errors.append(f"{key}_status must be unavailable in inventory v1")
+        return
+    if status not in {"available", "unavailable"}:
+        errors.append(f"{key}_status is unsupported")
+        return
+    path = records.get(f"{key}_path")
+    digest = records.get(f"{key}_sha256")
+    if status == "unavailable":
+        if path != "none" or digest != "none":
+            errors.append(f"unavailable {key} must use path and SHA-256 none")
+        return
+    if (
+        not isinstance(path, str)
+        or Path(path).is_absolute()
+        or len(Path(path).parts) != 1
+        or Path(path).name in {"", ".", ".."}
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+    ):
+        errors.append(f"available {key} requires a basename and lowercase SHA-256")
+
+
 def validate_resolved_physics_inventory(path: str | Path) -> ResolvedPhysicsInventoryReport:
     """Validate only what a normal output actually advertises as present."""
 
     source = Path(path).expanduser().resolve()
     errors: list[str] = []
-    records = _records(source, errors)
+    schema_version, records = _records(source, errors)
     model = records.get("dark_matter_model")
     if model not in MODELS:
         errors.append("dark_matter_model must be cdm, sidm, fdm, or none")
@@ -137,8 +179,7 @@ def validate_resolved_physics_inventory(path: str | Path) -> ResolvedPhysicsInve
         if records.get(key) not in CHANNEL_STATUS:
             errors.append(f"{key} is unsupported")
     for key in ("force_source_ledger", "conservation_ledger"):
-        if records.get(f"{key}_status") != "unavailable":
-            errors.append(f"{key}_status must be unavailable in inventory v1")
+        _ledger_artifact(records, key, schema_version=schema_version, errors=errors)
         _required(records, f"{key}_reason", errors)
     if model in {"cdm", "sidm"} and records.get("particle_snapshot_prefix") == "none":
         errors.append(f"{model} inventory lacks its collisionless particle snapshot")
@@ -156,8 +197,12 @@ def validate_resolved_physics_inventory(path: str | Path) -> ResolvedPhysicsInve
         if records.get("fdm_force_accounting") != "resolved_wave_only":
             errors.append("FDM inventory must preserve resolved_wave_only accounting")
     elif model == "sidm":
-        if records.get("sidm_scattering_ledger_status") != "unavailable":
-            errors.append("SIDM scattering ledger must remain unavailable in inventory v1")
+        _ledger_artifact(
+            records,
+            "sidm_scattering_ledger",
+            schema_version=schema_version,
+            errors=errors,
+        )
         _required(records, "sidm_scattering_ledger_reason", errors)
     elif model == "none" and records.get("dark_matter_channel_status") != "absent":
         errors.append("no-DM inventory must mark the dark-matter channel absent")
