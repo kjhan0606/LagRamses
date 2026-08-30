@@ -120,6 +120,7 @@ subroutine output_fdm_outer_wave_provenance(output_char)
   real(dp),dimension(3)::current_loc,current_glob,current_cell
   logical::have_stencil
   character(len=160)::fileloc
+  character(len=80),save::execution_instance_id=''
 
   if(.not.use_fdm) return
   mass_loc=0.0d0
@@ -192,6 +193,9 @@ subroutine output_fdm_outer_wave_provenance(output_char)
        & MPI_COMM_WORLD,info)
 #endif
   if(myid/=1) return
+  if(len_trim(execution_instance_id)==0)then
+     call fdm_execution_instance_identifier(execution_instance_id)
+  endif
 
   fileloc='output_'//trim(output_char)//'/fdm_outer_wave_provenance_'// &
        & trim(output_char)//'.txt'
@@ -204,7 +208,7 @@ subroutine output_fdm_outer_wave_provenance(output_char)
      call flush(6)
      call clean_stop
   end if
-  write(ilun,'(A)') '# fdm_outer_wave_provenance_v3'
+  write(ilun,'(A)') '# fdm_outer_wave_provenance_v4'
   write(ilun,'(A)') '# Raw code-unit diagnostics; no calibrated drag or delay.'
   write(ilun,'(A)') '# Full psi snapshots are the required field source.'
   write(ilun,'(A,ES24.16)') 'time_code = ',t
@@ -217,6 +221,10 @@ subroutine output_fdm_outer_wave_provenance(output_char)
   ! This is a restart-parent hint only.  It is not a globally unique run ID
   ! and must not be interpreted as proof of one uninterrupted execution.
   write(ilun,'(A,I0)') 'restart_parent_output = ',nrestart
+  ! Rank 1 creates one process-instance token and retains it for every output
+  ! in this solver invocation.  It distinguishes separately launched restart
+  ! branches, but is not a cryptographic UUID or a replacement for lineage.
+  write(ilun,'(A,A)') 'execution_instance_id = ',trim(execution_instance_id)
   write(ilun,'(A,ES24.16)') 'm_axion_ev = ',m_axion
   write(ilun,'(A,ES24.16)') 'hbar_code = ',hbar_code
   write(ilun,'(A,L1)') 'fdm_use_hjm = ',fdm_use_hjm
@@ -254,6 +262,28 @@ subroutine output_fdm_outer_wave_provenance(output_char)
   close(ilun)
   call flush(6)
 end subroutine output_fdm_outer_wave_provenance
+!#########################################################################
+!#########################################################################
+!#########################################################################
+subroutine fdm_execution_instance_identifier(identifier)
+  !-----------------------------------------------------------------------
+  ! Construct a process-instance discriminator for raw FDM provenance.
+  ! This intentionally uses only portable Fortran intrinsics.  It provides
+  ! an auditable token for one launched solver instance, not a global UUID.
+  !-----------------------------------------------------------------------
+  use amr_commons, only: nrestart
+  implicit none
+  character(len=*),intent(out)::identifier
+  integer,dimension(8)::date_values
+  integer::clock_count
+
+  call date_and_time(values=date_values)
+  call system_clock(count=clock_count)
+  write(identifier,'(I4.4,I2.2,I2.2,A,I2.2,I2.2,I2.2,A,I3.3,A,I0,A,I0)') &
+       & date_values(1),date_values(2),date_values(3),'T',date_values(5), &
+       & date_values(6),date_values(7),'.',date_values(8),'-r',nrestart, &
+       & '-c',clock_count
+end subroutine fdm_execution_instance_identifier
 !#########################################################################
 !#########################################################################
 !#########################################################################

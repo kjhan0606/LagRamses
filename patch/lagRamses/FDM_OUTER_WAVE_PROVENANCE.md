@@ -21,9 +21,16 @@ not provide a run UUID or prove an uninterrupted restart branch, so outputs
 from separate executions must remain conditional unless a stronger solver-side
 lineage attestation is added.
 
+V4 adds `execution_instance_id`, a rank-1 timestamp/system-clock token that
+is held fixed for every normal output produced by one solver invocation.  It
+lets a consumer reject output fragments from separately launched restart
+branches.  The token is an operational discriminator, not a cryptographic
+UUID: it does not replace an explicit restart lineage or establish that an
+arbitrary collection of outputs is one continuous physical trajectory.
+
 The dual-soliton fields are runtime configuration provenance, not a claim that
 the supplied coherent state has relaxed.  They allow the outer analysis to
-bind a V2/V3 output to its materialized two-core seed after the separate input
+bind a V2/V3/V4 output to its materialized two-core seed after the separate input
 preflight has checked the complete namelist and `ic_sink` rows.  The Python
 reader continues to accept legacy V1 records, but those lack this runtime
 attestation and cannot alone verify a controlled dual-soliton initialization.
