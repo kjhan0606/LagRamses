@@ -159,6 +159,8 @@ subroutine dump_all
         write(11,'(" local branch = ",A)')TRIM(gitbranch)
         write(11,'(" last commit  = ",A)')TRIM(githash)
         CLOSE(11)
+        filename=TRIM(filedir)//'dm_run_provenance_'//TRIM(nchar)//'.txt'
+        call output_dm_run_provenance(filename)
      endif
 #ifndef WITHOUTMPI
      if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
@@ -337,6 +339,129 @@ subroutine dump_all
   end if
 
 end subroutine dump_all
+!#########################################################################
+!#########################################################################
+!#########################################################################
+!#########################################################################
+subroutine output_dm_run_provenance(filename)
+  ! Record the active DM realization at each normal output.  This is a
+  ! run-level sidecar; it deliberately does not alter sink capture/merging.
+  use amr_commons
+  implicit none
+
+  character(LEN=*)::filename
+  character(LEN=16)::dm_model
+  character(LEN=512)::iomsg
+  integer::ilun,ios
+  real(dp)::sidm_pmax_output
+
+  if(use_fdm .and. sidm) then
+     write(*,'(A)') 'ERROR: cannot write DM provenance for simultaneous FDM and SIDM'
+     call clean_stop
+  endif
+  if(use_fdm) then
+     dm_model='fdm'
+  else if(sidm) then
+     dm_model='sidm'
+  else if(pic) then
+     dm_model='cdm'
+  else
+     dm_model='none'
+  endif
+
+  iomsg=''
+  open(newunit=ilun,file=TRIM(filename),status='replace',action='write', &
+       & form='formatted',iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call dm_run_provenance_fatal('open',filename,ios,iomsg)
+
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) '# dm_run_provenance_v1'
+  if(ios /= 0) call dm_run_provenance_fatal('write schema',filename,ios,iomsg)
+  write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'dark_matter_model = ',trim(dm_model)
+  if(ios /= 0) call dm_run_provenance_fatal('write model',filename,ios,iomsg)
+  write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'pic_enabled = ',pic
+  if(ios /= 0) call dm_run_provenance_fatal('write PIC flag',filename,ios,iomsg)
+  write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'sidm_enabled = ',sidm
+  if(ios /= 0) call dm_run_provenance_fatal('write SIDM flag',filename,ios,iomsg)
+  write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'fdm_enabled = ',use_fdm
+  if(ios /= 0) call dm_run_provenance_fatal('write FDM flag',filename,ios,iomsg)
+  write(ilun,'(A,I0)',iostat=ios,iomsg=iomsg) 'nstep_coarse = ',nstep_coarse
+  if(ios /= 0) call dm_run_provenance_fatal('write coarse step',filename,ios,iomsg)
+  write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'time_code = ',t
+  if(ios /= 0) call dm_run_provenance_fatal('write time',filename,ios,iomsg)
+  write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'aexp = ',aexp
+  if(ios /= 0) call dm_run_provenance_fatal('write scale factor',filename,ios,iomsg)
+  if(len_trim(githash)>0) then
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'build_git_hash = ',trim(githash)
+  else
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'build_git_hash = unknown'
+  endif
+  if(ios /= 0) call dm_run_provenance_fatal('write git hash',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'namelist_copy = namelist.txt'
+  if(ios /= 0) call dm_run_provenance_fatal('write namelist link',filename,ios,iomsg)
+  write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'compilation_copy = compilation.txt'
+  if(ios /= 0) call dm_run_provenance_fatal('write compilation link',filename,ios,iomsg)
+  write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'smbh_capture_ledger_enabled = ', &
+       & smbh_capture_ledger
+  if(ios /= 0) call dm_run_provenance_fatal('write capture-ledger flag',filename,ios,iomsg)
+  write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'smbh_capture_ledger_file = ', &
+       & trim(smbh_capture_ledger_file)
+  if(ios /= 0) call dm_run_provenance_fatal('write capture-ledger path',filename,ios,iomsg)
+
+  select case(trim(dm_model))
+  case('cdm')
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'dm_transport = collisionless_nbody'
+     if(ios /= 0) call dm_run_provenance_fatal('write CDM transport',filename,ios,iomsg)
+  case('sidm')
+     sidm_pmax_output=maxval(sidm_Pmax(1:nlevelmax))
+     write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'sidm_cross_section_cm2_g = ', &
+          & sidm_cross_section
+     if(ios /= 0) call dm_run_provenance_fatal('write SIDM cross section',filename,ios,iomsg)
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'sidm_type = ',trim(sidm_type)
+     if(ios /= 0) call dm_run_provenance_fatal('write SIDM type',filename,ios,iomsg)
+     write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'sidm_v0_km_s = ',sidm_v0
+     if(ios /= 0) call dm_run_provenance_fatal('write SIDM velocity scale',filename,ios,iomsg)
+     write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'sidm_power = ',sidm_power
+     if(ios /= 0) call dm_run_provenance_fatal('write SIDM power',filename,ios,iomsg)
+     write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'sidm_angular = ',trim(sidm_angular)
+     if(ios /= 0) call dm_run_provenance_fatal('write SIDM angular model',filename,ios,iomsg)
+     write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'sidm_inelastic = ',sidm_inelastic
+     if(ios /= 0) call dm_run_provenance_fatal('write SIDM inelastic flag',filename,ios,iomsg)
+     write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'sidm_max_scatter_probability = ', &
+          & sidm_pmax_output
+     if(ios /= 0) call dm_run_provenance_fatal('write SIDM probability',filename,ios,iomsg)
+  case('fdm')
+     write(ilun,'(A,ES24.16)',iostat=ios,iomsg=iomsg) 'm_axion_ev = ',m_axion
+     if(ios /= 0) call dm_run_provenance_fatal('write FDM axion mass',filename,ios,iomsg)
+     write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'fdm_use_hjm = ',fdm_use_hjm
+     if(ios /= 0) call dm_run_provenance_fatal('write FDM HJM flag',filename,ios,iomsg)
+     write(ilun,'(A,I0)',iostat=ios,iomsg=iomsg) 'fdm_first_wave_level = ',fdm_first_wave_level
+     if(ios /= 0) call dm_run_provenance_fatal('write FDM wave level',filename,ios,iomsg)
+     write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'fdm_outer_ledger_enabled = ', &
+          & fdm_outer_ledger
+     if(ios /= 0) call dm_run_provenance_fatal('write FDM ledger flag',filename,ios,iomsg)
+     write(ilun,'(A)',iostat=ios,iomsg=iomsg) 'fdm_force_accounting = resolved_wave_only'
+     if(ios /= 0) call dm_run_provenance_fatal('write FDM force accounting',filename,ios,iomsg)
+  end select
+
+  flush(unit=ilun,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call dm_run_provenance_fatal('flush',filename,ios,iomsg)
+  close(ilun,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call dm_run_provenance_fatal('close',filename,ios,iomsg)
+end subroutine output_dm_run_provenance
+!#########################################################################
+subroutine dm_run_provenance_fatal(operation,filename,status,message)
+  use amr_commons
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+
+  character(LEN=*),intent(in)::operation,filename,message
+  integer,intent(in)::status
+
+  write(error_unit,'(A,1X,A,1X,A,1X,I0,1X,A)') 'DM provenance I/O failure:', &
+       & trim(operation),trim(filename),status,trim(message)
+  call flush(error_unit)
+  call clean_stop
+end subroutine dm_run_provenance_fatal
 !#########################################################################
 !#########################################################################
 !#########################################################################
