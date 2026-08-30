@@ -108,6 +108,7 @@ def _model_zoom_execution_identity(records: dict[str, str], errors: list[str]) -
     fields = (
         "model_zoom_manifest_sha256",
         "model_zoom_case_id",
+        "model_zoom_levelmax",
         "model_zoom_capture_event_sha256",
         "model_zoom_initial_conditions_sha256",
         "model_zoom_baryon_configuration_sha256",
@@ -130,6 +131,11 @@ def _model_zoom_execution_identity(records: dict[str, str], errors: list[str]) -
         return
     if not records["model_zoom_case_id"].strip():
         errors.append("model_zoom_case_id is required")
+    try:
+        if int(records["model_zoom_levelmax"]) < 1:
+            errors.append("model_zoom_levelmax must be positive")
+    except ValueError:
+        errors.append("model_zoom_levelmax must be an integer")
     for name in (
         "model_zoom_manifest_sha256",
         "model_zoom_capture_event_sha256",

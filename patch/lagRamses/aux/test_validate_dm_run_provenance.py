@@ -114,6 +114,7 @@ class DMRunProvenanceTests(unittest.TestCase):
                     model_zoom_execution_identity_status="available",
                     model_zoom_manifest_sha256="a" * 64,
                     model_zoom_case_id=f"{model}-fine-replicate-0",
+                    model_zoom_levelmax="20",
                     model_zoom_capture_event_sha256="b" * 64,
                     model_zoom_initial_conditions_sha256="c" * 64,
                     model_zoom_baryon_configuration_sha256="d" * 64,

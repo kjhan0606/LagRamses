@@ -440,6 +440,8 @@ subroutine output_dm_run_provenance(filename)
      write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'model_zoom_case_id = ', &
           & trim(model_zoom_case_id)
      if(ios /= 0) call dm_run_provenance_fatal('write model zoom case identity',filename,ios,iomsg)
+     write(ilun,'(A,I0)',iostat=ios,iomsg=iomsg) 'model_zoom_levelmax = ',nlevelmax
+     if(ios /= 0) call dm_run_provenance_fatal('write model zoom level',filename,ios,iomsg)
      write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'model_zoom_capture_event_sha256 = ', &
           & trim(model_zoom_capture_event_sha256)
      if(ios /= 0) call dm_run_provenance_fatal('write model zoom capture identity',filename,ios,iomsg)
