@@ -17,6 +17,12 @@ This namelist block, called `&OUTPUT_PARAMS`, is used to set up the frequency an
 | `walltime_hrs=-1` | `real` | Wallclock time given in ramses job submission, used for dumping an output at the end. Default value of -1 means this is not used.|
 | `minutes_dump=1` | `real` | Dump an output this many minutes before walltime_hrs |
 
+`foutput` is evaluated only after coarse step zero.  It therefore cannot create
+an accidental initialization snapshot through `MOD(0,foutput)`.  Request an
+initial snapshot explicitly with `aout`/`tout` or a runtime output signal.  A
+reader-only gate can keep both scheduled clocks beyond the stopping condition
+and assert that no `output_NNNNN` directory was created.
+
 
 
 ## Restart from previous output

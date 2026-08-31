@@ -318,7 +318,12 @@ recursive subroutine amr_step(ilevel,icount)
 
 
 
-     if(mod(nstep_coarse,foutput)==0.or.aexp>=aout(iout).or.t>=tout(iout).or.output_now_all.EQV..true.)then
+     ! [DE] Guard periodic output against the step-zero MOD(0,foutput) case.
+     ! Periodic output is a step-frequency control, so step zero must not
+     ! trigger it merely because MOD(0,foutput)=0.  An initial snapshot remains
+     ! available explicitly through aout/tout or the runtime output request.
+     if((nstep_coarse>0.and.mod(nstep_coarse,foutput)==0).or. &
+          & aexp>=aout(iout).or.t>=tout(iout).or.output_now_all.EQV..true.)then
                                call timer('io','start')
         if(.not.ok_defrag)then
            call defrag
