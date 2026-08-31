@@ -271,6 +271,7 @@ stellar_ramses_runtime.o: amr_commons.kjhan.o pm_commons.o hydro_commons.o stell
 feedback.kjhan3.o: stellar_ramses_runtime.o
 read_hydro_params.o: stellar_enrichment_config.o
 output_amr.kjhan.o: stellar_enrichment_config.o
+amr_step.jaehyun.o: stellar_enrichment_config.o
 stellar_yield_audit.o: stellar_enrichment_config.o stellar_yield_tables.o
 
 $(STELLAR_EMBEDDED_SOURCE):

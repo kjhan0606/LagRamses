@@ -4,6 +4,9 @@ recursive subroutine amr_step(ilevel,icount)
   use hydro_commons
   use poisson_commons
   use pbh_commons, only: use_pbh, pbh_mark_level
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_enrichment_config, only: use_channel_resolved_feedback
+#endif
   use omp_lib, only: omp_get_wtime,omp_get_max_threads
 #ifdef HYDRO_CUDA
   use cuda_commons, only: cuda_pool_is_initialized_c
@@ -383,8 +386,16 @@ recursive subroutine amr_step(ilevel,icount)
         !----------------------------------------------------
         ! Kinetic feedback
         !----------------------------------------------------
+#ifdef PHASE0_STELLAR_ENRICHMENT
+     if(hydro.and.star.and.f_w>0. .and. &
+          .not.use_channel_resolved_feedback())then
+        call kinetic_feedback
+        call diag_check_eint('kinetic_fb',0)
+     endif
+#else
      if(hydro.and.star.and.f_w>0.)call kinetic_feedback
      if(hydro.and.star.and.f_w>0.)call diag_check_eint('kinetic_fb',0)
+#endif
      call diag_check_nan('post_kinfb')
 
      call timer('sinks','start')

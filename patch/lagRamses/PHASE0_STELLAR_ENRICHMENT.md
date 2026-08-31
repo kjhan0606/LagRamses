@@ -24,7 +24,9 @@ feedback_mode='legacy'            ! historical reproduction only
 Only the SNII returned mass loads the delayed-cooling reservoir; winds, AGB,
 SNIa, and PISN do not.  Energy is read in erg from the normalized yield-table
 contract and converted once using the RAMSES energy unit.  This path therefore
-does not use the legacy `ESN2/NSN2` normalization.
+does not use the legacy `ESN2/NSN2` normalization.  The separate legacy Sedov
+call is also disabled in this mode, preventing a second SNII injection; any
+mechanical source is taken from the channel-resolved momentum ledger.
 
 `legacy` preserves the historical `feedback.kjhan3.f90` path, including its
 total-`mloss` delayed-cooling update and legacy SN energy expressions.  It is
