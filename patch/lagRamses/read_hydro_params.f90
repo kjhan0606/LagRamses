@@ -395,8 +395,13 @@ subroutine read_hydro_params(nml_ok)
   if(delayed_cooling)ivirial=idelay+1
   ixion=ivirial
   if(sf_virial)ixion=ivirial+1
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  ! Keep total metal density separate from the eleven tracked element fields.
+  ichem=imetal+1
+#else
   ichem=ixion
   if(aton)ichem=ixion+1
+#endif
   isgs=ichem
   if(use_sgs)isgs=ichem+1
   if(myid==1) then
@@ -420,5 +425,15 @@ subroutine read_hydro_params(nml_ok)
      end if
      call clean_stop
   end if
+
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  if(metal .and. ichem+10 > nvar) then
+     if(myid==1) then
+        write(*,*) 'ERROR: Phase 0 requires eleven element fields'
+        write(*,*) '  Last element index=',ichem+10,' Current NVAR=',nvar
+     end if
+     call clean_stop
+  end if
+#endif
 
 end subroutine read_hydro_params

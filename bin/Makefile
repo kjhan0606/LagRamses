@@ -18,7 +18,8 @@ CIC_ATOMIC_SCATTER ?= 0
 NVECTOR = 32
 NDIM = 3
 NPRE = 8
-NVAR = 11
+# rho + 3 momentum + total energy + total metal + 11 tracked elements.
+NVAR = 17
 NENER = 0
 SOLVER = hydro
 PATCH = ../patch/lagRamses
@@ -148,7 +149,8 @@ MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
-	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) dark_cooling_mod.o fdm_commons.o pbh_commons.o
+	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) dark_cooling_mod.o fdm_commons.o pbh_commons.o \
+	 $(STELLAR_ENRICHMENT_MODOBJ)
 
 # SIDM object (depends on amr_commons, pm_commons, random)
 SIDM_OBJ = sidm_scatter.o sidm_angular.o sidm_estimator.o
@@ -166,7 +168,7 @@ AMROBJ = read_params.jaehyun.o init_amr.o init_time.kjhan.o init_refine.o adapti
          morton_init.o $(HDF5_OBJS)
 # Particle-Mesh objects
 PMOBJ = init_part.o output_part.o rho_fine.kjhan.o synchro_fine.kjhan.o move_fine.kjhan.o newdt_fine.kjhan.o particle_tree.kjhan.o \
-        add_list.o remove_list.o star_formation.kjhan.o sink_particle.kjhan.o feedback.kjhan3.o \
+        add_list.o remove_list.o star_formation.kjhan.o sink_particle.kjhan.o stellar_ramses_runtime.o feedback.kjhan3.o \
 		clump_finder.o clump_merger.o \
         flag_formation_sites.o init_sink.o output_sink.o
 # Poisson solver objects
@@ -183,6 +185,24 @@ AMRLIB = $(AMROBJ) $(HYDROOBJ) $(PMOBJ) $(POISSONOBJ) $(SIDM_OBJ) $(ADM_OBJ) $(P
 # ATON objects
 ATON_MODOBJ = rad_step.o
 ATON_OBJ = observe.o init_radiation.o rad_init.o rad_boundary.o rad_stars.o rad_backup.o ../aton/atonlib/libaton.a
+
+# Phase 0 Fortran-native stellar enrichment modules.
+PHASE0_STELLAR_ENRICHMENT ?= 1
+ifeq ($(PHASE0_STELLAR_ENRICHMENT),1)
+  FFLAGS += -DPHASE0_STELLAR_ENRICHMENT
+endif
+STELLAR_YIELD_TABLE ?=
+STELLAR_EMBEDDED_SOURCE = $(PATCH)/stellar_yield_embedded_data.f90
+ifdef STELLAR_EMBEDDED_YIELDS
+  FFLAGS += -DSTELLAR_EMBEDDED_YIELDS
+  STELLAR_EMBEDDED_MODOBJ = stellar_yield_embedded_data.o
+else
+  STELLAR_EMBEDDED_MODOBJ =
+endif
+STELLAR_ENRICHMENT_MODOBJ = stellar_enrichment_config.o stellar_enrichment_contract.o \
+        stellar_yield_tables.o stellar_yield_interpolation.o stellar_yield_provider.o \
+        stellar_yield_backend.o $(STELLAR_EMBEDDED_MODOBJ) stellar_ssp_sources.o stellar_source_increment.o stellar_enrichment_driver.o \
+              stellar_cell_deposition.o stellar_ramses_field_map.o stellar_ramses_bridge.o stellar_ramses_mapped_bridge.o stellar_yield_audit.o
 #############################################################################
 ramses:	$(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o
 	$(F90) $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o -o $(EXEC)$(NDIM)d $(LIBS)
@@ -233,6 +253,26 @@ radiation_commons.o: amr_commons.kjhan.o timing.o
 morton_hash.o: morton_keys.o amr_index.o
 hydro_commons.o: hydro_parameters.o
 poisson_commons.o: poisson_parameters.o
+stellar_enrichment_contract.o: stellar_enrichment_config.o
+stellar_yield_tables.o: stellar_enrichment_config.o
+stellar_yield_backend.o: stellar_yield_tables.o $(STELLAR_EMBEDDED_MODOBJ)
+stellar_yield_embedded_data.o: $(STELLAR_EMBEDDED_SOURCE) stellar_yield_tables.o stellar_enrichment_config.o
+stellar_yield_interpolation.o: stellar_enrichment_config.o stellar_yield_tables.o
+stellar_yield_provider.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_interpolation.o
+stellar_ssp_sources.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_provider.o
+stellar_source_increment.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_ssp_sources.o
+stellar_enrichment_driver.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_source_increment.o
+stellar_cell_deposition.o: stellar_enrichment_config.o stellar_enrichment_contract.o
+stellar_ramses_field_map.o: stellar_enrichment_config.o
+stellar_ramses_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o
+stellar_ramses_mapped_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_ramses_field_map.o
+stellar_ramses_runtime.o: amr_commons.kjhan.o pm_commons.o hydro_commons.o stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_backend.o stellar_yield_audit.o stellar_enrichment_driver.o
+feedback.kjhan3.o: stellar_ramses_runtime.o
+stellar_yield_audit.o: stellar_enrichment_config.o stellar_yield_tables.o
+
+$(STELLAR_EMBEDDED_SOURCE):
+	@test -n "$(STELLAR_YIELD_TABLE)" || (echo "Set STELLAR_YIELD_TABLE to generate the embedded yield module"; exit 2)
+	python3 $(PATCH)/generate_stellar_yield_module.py --input "$(STELLAR_YIELD_TABLE)" --output "$@"
 power_spectrum.o: amr_parameters.jaehyun.o amr_commons.kjhan.o poisson_commons.o
 scalar_de_commons.o: amr_parameters.jaehyun.o amr_commons.kjhan.o
 dark_energy_commons.o: scalar_de_commons.o
