@@ -1,0 +1,68 @@
+{
+  "source_sed": "Sazonov-Ostriker-Sunyaev-style piecewise energy continuum",
+  "reference": "Sazonov, Ostriker & Sunyaev (2004), MNRAS 347, 144; 10 eV-1 keV energy slope -1.7 and 1-100 keV slope -1",
+  "normalization": {
+    "nu_lnu_at_13p6_ev_over_lbol": 0.1,
+    "escape_fraction": 1.0,
+    "interpretation": "unobscured injection baseline; unresolved nuclear absorption is not modeled"
+  },
+  "groups": [
+    {
+      "index": 0,
+      "energy_interval_ev": [
+        11.2,
+        13.6
+      ],
+      "photon_weighted_mean_energy_ev": 12.2954112566775,
+      "photon_rate_per_lbol_s_per_erg_s": 1055708221.1327912,
+      "total_photon_rate_s": 3.0233429901562566e+54
+    },
+    {
+      "index": 1,
+      "energy_interval_ev": [
+        13.6,
+        24.59
+      ],
+      "photon_weighted_mean_energy_ev": 17.662918001204492,
+      "photon_rate_per_lbol_s_per_erg_s": 1713270647.764061,
+      "total_photon_rate_s": 4.90647387172938e+54
+    },
+    {
+      "index": 2,
+      "energy_interval_ev": [
+        24.59,
+        54.42
+      ],
+      "photon_weighted_mean_energy_ev": 34.381528542610674,
+      "photon_rate_per_lbol_s_per_erg_s": 730763149.4819461,
+      "total_photon_rate_s": 2.0927635128957187e+54
+    },
+    {
+      "index": 3,
+      "energy_interval_ev": [
+        54.42,
+        500.0
+      ],
+      "photon_weighted_mean_energy_ev": 106.63925876378897,
+      "photon_rate_per_lbol_s_per_erg_s": 249691596.98905554,
+      "total_photon_rate_s": 7.150681640498728e+53
+    },
+    {
+      "index": 4,
+      "energy_interval_ev": [
+        500.0,
+        2000.0
+      ],
+      "photon_weighted_mean_energy_ev": 869.6341490248457,
+      "photon_rate_per_lbol_s_per_erg_s": 5617471.492786695,
+      "total_photon_rate_s": 1.6087345651145592e+52
+    }
+  ],
+  "candidates": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_pilot_zoom_agn_candidates.csv",
+  "source_count": 10,
+  "limits": [
+    "The source SED is a parameterized pilot baseline, not an LRD-obscuration model.",
+    "Photons above 2 keV are excluded because the current P0 group layout ends at 2 keV.",
+    "A production interpretation must vary the Lyman normalization and escape fraction."
+  ]
+}

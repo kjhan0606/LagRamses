@@ -1,0 +1,138 @@
+{
+  "snapshot": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/pilot_rt_ledger/output_00017/data_00017.h5",
+  "info": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/pilot_rt_ledger/output_00017/info_00017.txt",
+  "aexp": 0.208497764676753,
+  "analysis_level": 15,
+  "analysis_rule": "volume-conservative resampling of all intersecting RAMSES AMR leaf cells",
+  "populated_amr_levels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "level_summary": [
+    {
+      "level": 1,
+      "candidate_grids": 1,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 1
+    },
+    {
+      "level": 2,
+      "candidate_grids": 1,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 1
+    },
+    {
+      "level": 3,
+      "candidate_grids": 1,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 1
+    },
+    {
+      "level": 4,
+      "candidate_grids": 1,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 1
+    },
+    {
+      "level": 5,
+      "candidate_grids": 1,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 1
+    },
+    {
+      "level": 6,
+      "candidate_grids": 1,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 1
+    },
+    {
+      "level": 7,
+      "candidate_grids": 1,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 1
+    },
+    {
+      "level": 8,
+      "candidate_grids": 1,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 1
+    },
+    {
+      "level": 9,
+      "candidate_grids": 1,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 4
+    },
+    {
+      "level": 10,
+      "candidate_grids": 4,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 8
+    },
+    {
+      "level": 11,
+      "candidate_grids": 8,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 27
+    },
+    {
+      "level": 12,
+      "candidate_grids": 27,
+      "deposited_leaf_cells": 0,
+      "refined_cells_in_cube": 125
+    },
+    {
+      "level": 13,
+      "candidate_grids": 125,
+      "deposited_leaf_cells": 28,
+      "refined_cells_in_cube": 701
+    },
+    {
+      "level": 14,
+      "candidate_grids": 701,
+      "deposited_leaf_cells": 4013,
+      "refined_cells_in_cube": 817
+    },
+    {
+      "level": 15,
+      "candidate_grids": 817,
+      "deposited_leaf_cells": 6536,
+      "refined_cells_in_cube": 0
+    }
+  ],
+  "left_edge_code": [
+    0.52495205390625,
+    0.09642650359375,
+    0.888546766015625
+  ],
+  "shape": [
+    32,
+    32,
+    32
+  ],
+  "cell_width_code": 3.0517578125e-05,
+  "cell_width_cm": 3.707491434780762e+21,
+  "density_unit_g_cm3": 2.95404898831684e-28,
+  "mean_n_h_cm3": 0.14563785708710159,
+  "max_n_h_cm3": 44.432180127848554,
+  "coverage_min": 0.9999999999999998,
+  "coverage_max": 1.0000000000000002,
+  "thermal_initialization": "offline Grackle thermal-atlas equilibrium fallback",
+  "thermal_atlas": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_validation_thermal_atlas.h5",
+  "metallicity_solar": 1e-06,
+  "source_ledger": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_pilot_agn_photon_ledger.csv",
+  "photon_source_count": 10
+}

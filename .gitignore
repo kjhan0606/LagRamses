@@ -1,0 +1,30 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+
+# Build products
+build/
+bin/
+*.o
+*.mod
+*.smod
+
+# Scheduler and runtime products
+*.log
+*.err
+*.out
+slurm-*.out
+output_*/
+job_*/
+runs/**/output_*/
+runs/**/job_*/
+
+# Large external assets; commit their manifests only
+ic/
+outputs/
+raw_data/
+*.h5
+*.hdf5
+*.dat

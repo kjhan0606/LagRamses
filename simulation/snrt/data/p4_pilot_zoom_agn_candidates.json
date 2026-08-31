@@ -1,0 +1,22 @@
+{
+  "purpose": "AGN candidate selection before photon-group SED assignment",
+  "agn_rate_ledger": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/pilot_agn_rate_ledger.csv",
+  "zoom_manifest": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_high_density_manifest.json",
+  "selection": {
+    "left_edge_code": [
+      0.52495205390625,
+      0.09642650359375,
+      0.888546766015625
+    ],
+    "width_code": 0.0009765625,
+    "shape": [
+      32,
+      32,
+      32
+    ],
+    "non_wrapping": true
+  },
+  "source_count": 10,
+  "photon_group_luminosity": "not assigned; requires an explicit AGN SED and escape prescription",
+  "accretion_rate_convention": "instantaneous_inflow_rate_min_bondi_eddington"
+}

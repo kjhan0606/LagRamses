@@ -1,0 +1,41 @@
+{
+  "snapshot_info": "/gpfs/kjhan/Hydro/Sidm/Agn/Run0/run_cdm/output_00016/info_00016.txt",
+  "selection": "maximum mean gas density in a fixed 32^3 subcube of a 64^3 host probe",
+  "host_proxy": {
+    "sink_id": 10,
+    "mass_msun": 22711230.0,
+    "position_code": [
+      0.5253793,
+      0.09697582,
+      0.8891266
+    ]
+  },
+  "final": {
+    "left_edge_code": [
+      0.52495205390625,
+      0.09642650359375,
+      0.888546766015625
+    ],
+    "width_code": 0.0009765625,
+    "shape": [
+      32,
+      32,
+      32
+    ],
+    "mean_n_h_cm3": 0.14581505316799337,
+    "max_n_h_cm3": 38.78026708650809,
+    "sink_count": 10
+  },
+  "thermal_initialization": {
+    "model": "offline Grackle thermal-atlas net-rate-zero fallback",
+    "atlas": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_validation_thermal_atlas.h5",
+    "scale_factor": 0.20836524,
+    "metallicity_solar": 1e-06,
+    "initial_rt_ionization": "neutral primordial; Grackle table does not export species fractions",
+    "hydro_pressure": "unusable (zero throughout the selected AMR sample)"
+  },
+  "source_catalog": {
+    "stellar": "not available in this output",
+    "agn": "not activated: sink CSV final columns have no audited accretion-rate definition"
+  }
+}
