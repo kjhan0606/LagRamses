@@ -32,6 +32,11 @@ module stellar_enrichment_config
   integer, parameter :: channel_snia  = 4
   integer, parameter :: channel_pisn  = 5
 
+  ! Runtime feedback implementation.  The channel-resolved path is the
+  ! production default; legacy preserves the historical lagRamses behaviour
+  ! for controlled reproduction of existing runs.
+  character(len=32) :: stellar_feedback_mode = 'channel_resolved'
+
   ! Namelist-controlled runtime switches.  The arrays remain allocated for
   ! every compile-time element regardless of these switches.
   logical :: active_element(n_stellar_elements) = .true.
@@ -52,6 +57,7 @@ contains
     enable_snii = .true.
     enable_snia = .false.
     enable_pisn = .false.
+    stellar_feedback_mode = 'channel_resolved'
   end subroutine set_enrichment_defaults
 
   subroutine read_enrichment_namelist(iunit, iostat_out)
@@ -61,10 +67,11 @@ contains
     logical :: use_h, use_he, use_c, use_n, use_o, use_ne
     logical :: use_mg, use_si, use_s, use_ca, use_fe
     logical :: use_wind, use_agb, use_snii, use_snia, use_pisn
+    character(len=32) :: feedback_mode
 
     namelist /stellar_enrichment_params/ use_h, use_he, use_c, use_n, use_o, &
          use_ne, use_mg, use_si, use_s, use_ca, use_fe, use_wind, use_agb, &
-         use_snii, use_snia, use_pisn
+         use_snii, use_snia, use_pisn, feedback_mode
 
     use_h  = active_element(elem_h)
     use_he = active_element(elem_he)
@@ -82,9 +89,21 @@ contains
     use_snii = enable_snii
     use_snia = enable_snia
     use_pisn = enable_pisn
+    feedback_mode = stellar_feedback_mode
 
     read(iunit, nml=stellar_enrichment_params, iostat=iostat_out)
     if (iostat_out /= 0) return
+
+    call lowercase_ascii(feedback_mode)
+    select case (trim(adjustl(feedback_mode)))
+    case ('channel_resolved')
+       stellar_feedback_mode = 'channel_resolved'
+    case ('legacy')
+       stellar_feedback_mode = 'legacy'
+    case default
+       iostat_out = 1001
+       return
+    end select
 
     active_element(elem_h)  = use_h
     active_element(elem_he) = use_he
@@ -103,5 +122,22 @@ contains
     enable_snia = use_snia
     enable_pisn = use_pisn
   end subroutine read_enrichment_namelist
+
+  logical function use_channel_resolved_feedback()
+    use_channel_resolved_feedback = &
+         trim(stellar_feedback_mode) == 'channel_resolved'
+  end function use_channel_resolved_feedback
+
+  subroutine lowercase_ascii(value)
+    character(len=*), intent(inout) :: value
+    integer :: i, code
+
+    do i = 1, len_trim(value)
+       code = iachar(value(i:i))
+       if (code >= iachar('A') .and. code <= iachar('Z')) then
+          value(i:i) = achar(code + iachar('a') - iachar('A'))
+       end if
+    end do
+  end subroutine lowercase_ascii
 
 end module stellar_enrichment_config

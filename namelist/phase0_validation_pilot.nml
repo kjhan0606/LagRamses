@@ -60,6 +60,10 @@ T2thres_SF=1.d4
 yieldtablefilename='/gpfs/kjhan/Run_JWST/opt_run/yield_table.asc'
 /
 
+&STELLAR_ENRICHMENT_PARAMS
+feedback_mode='channel_resolved'
+/
+
 &OUTPUT_PARAMS
 noutput=1
 aout=0.02

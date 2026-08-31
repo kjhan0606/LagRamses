@@ -10,6 +10,27 @@ The C libraries under `Eunha.A1/LagEunha/src/AstroModules` are reference
 implementations and table sources only. Production runtime code will be
 Fortran and will live in `patch/lagRamses/`.
 
+## Runtime feedback selection
+
+The compiled executable retains both feedback implementations.  The runtime
+selection is made in `&STELLAR_ENRICHMENT_PARAMS`:
+
+```text
+feedback_mode='channel_resolved'  ! default
+feedback_mode='legacy'            ! historical reproduction only
+```
+
+`channel_resolved` consumes the explicit per-channel mass and energy ledger.
+Only the SNII returned mass loads the delayed-cooling reservoir; winds, AGB,
+SNIa, and PISN do not.  Energy is read in erg from the normalized yield-table
+contract and converted once using the RAMSES energy unit.  This path therefore
+does not use the legacy `ESN2/NSN2` normalization.
+
+`legacy` preserves the historical `feedback.kjhan3.f90` path, including its
+total-`mloss` delayed-cooling update and legacy SN energy expressions.  It is
+provided for controlled reproduction and must not be interpreted as the
+corrected default physics.
+
 ## Scientific scope
 
 The source model will support four stellar channels:
@@ -177,4 +198,3 @@ The Phase 1 implementation may start only after these contracts are fixed:
 - Production simulation submission.
 - Replacing the existing scalar-metallicity path before the new path has a
   conservation test.
-

@@ -11,7 +11,8 @@ module stellar_ramses_runtime
   use hydro_commons
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels, elem_c, active_element, enable_pisn
-  use stellar_enrichment_contract, only: stellar_population_t, stellar_source_t
+  use stellar_enrichment_contract, only: stellar_population_t, &
+       stellar_source_t, delayed_cooling_source_mass
   use stellar_yield_tables, only: stellar_yield_table_t
   use stellar_yield_backend, only: load_yield_backend, backend_ok
   use stellar_yield_audit, only: audit_yield_table
@@ -137,7 +138,7 @@ contains
     real(stellar_dp) :: age_code, previous_age_code, age_gyr, dt_gyr
     real(stellar_dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
     real(stellar_dp) :: scale_mass, scale_momentum, scale_energy
-    real(stellar_dp) :: returned_code, volume, energy_density
+    real(stellar_dp) :: returned_code, snii_returned_code, volume, energy_density
     real(stellar_dp) :: ejecta_code(n_stellar_elements), metal_ejecta_code
     real(stellar_dp) :: bulk_energy, bulk_momentum(3)
     real(stellar_dp) :: channel_mass_min(n_stellar_channels)
@@ -201,6 +202,15 @@ contains
        return
     end if
     returned_code = max(0.0d0, min(returned_code, mp(ipart)))
+    snii_returned_code = delayed_cooling_source_mass(source) / scale_mass
+    if (snii_returned_code < -source_tolerance .or. &
+         snii_returned_code > returned_code * (1.0d0 + source_tolerance) + &
+         source_tolerance) then
+       ierr = 62
+       if (myid == 1) write(*,*) 'Phase 0 SNII return violates channel ledger'
+       return
+    end if
+    snii_returned_code = max(0.0d0, min(snii_returned_code, returned_code))
     ejecta_code = source%ejected_mass / scale_mass
     if (any(ejecta_code < -source_tolerance)) then
        ierr = 61
@@ -225,6 +235,14 @@ contains
             bulk_momentum(idim) / volume
     end do
     unew(target_cell,5) = unew(target_cell,5) + energy_density
+
+    ! Delayed cooling represents unresolved core-collapse SN blast energy.
+    ! Do not load this reservoir with winds, AGB, SNIa, or their combined
+    ! mass return.  The legacy feedback_mode retains that historical rule.
+    if (delayed_cooling) then
+       unew(target_cell,idelay) = unew(target_cell,idelay) + &
+            snii_returned_code / volume
+    end if
 
     metal_ejecta_code = 0.0d0
     do element = elem_c, n_stellar_elements

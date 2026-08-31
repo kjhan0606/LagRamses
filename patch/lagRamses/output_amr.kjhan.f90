@@ -956,6 +956,9 @@ subroutine output_info(filename)
   use amr_commons
   use hydro_commons
   use pm_commons
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_enrichment_config, only: stellar_feedback_mode
+#endif
   implicit none
   character(LEN=80)::filename
 
@@ -1004,6 +1007,9 @@ subroutine output_info(filename)
   write(ilun,'("unit_l      =",E23.15)')scale_l
   write(ilun,'("unit_d      =",E23.15)')scale_d
   write(ilun,'("unit_t      =",E23.15)')scale_t
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  write(ilun,'("feedback_mode=",A32)')trim(stellar_feedback_mode)
+#endif
   write(ilun,*)
   
   ! Write ordering information

@@ -18,8 +18,9 @@ CIC_ATOMIC_SCATTER ?= 0
 NVECTOR = 32
 NDIM = 3
 NPRE = 8
-# rho + 3 momentum + total energy + total metal + 11 tracked elements.
-NVAR = 17
+# rho + 3 momentum + total energy + total metal + delayed-cooling reservoir
+# + 11 tracked elements.  Unused passive fields remain inert in legacy mode.
+NVAR = 18
 NENER = 0
 SOLVER = hydro
 PATCH = ../patch/lagRamses
@@ -268,6 +269,8 @@ stellar_ramses_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract
 stellar_ramses_mapped_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_ramses_field_map.o
 stellar_ramses_runtime.o: amr_commons.kjhan.o pm_commons.o hydro_commons.o stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_backend.o stellar_yield_audit.o stellar_enrichment_driver.o
 feedback.kjhan3.o: stellar_ramses_runtime.o
+read_hydro_params.o: stellar_enrichment_config.o
+output_amr.kjhan.o: stellar_enrichment_config.o
 stellar_yield_audit.o: stellar_enrichment_config.o stellar_yield_tables.o
 
 $(STELLAR_EMBEDDED_SOURCE):

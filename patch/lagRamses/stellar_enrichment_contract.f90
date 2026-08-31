@@ -116,4 +116,13 @@ contains
                                earlier%channel_net_yield
   end subroutine cumulative_difference
 
+  pure real(stellar_dp) function delayed_cooling_source_mass(source)
+    type(stellar_source_t), intent(in) :: source
+
+    ! The unresolved blast reservoir is a core-collapse SN model.  Keep the
+    ! channel selection here so deposition code cannot accidentally substitute
+    ! total mass return (winds + AGB + SNII + SNIa + PISN).
+    delayed_cooling_source_mass = source%channel_returned_mass(channel_snii)
+  end function delayed_cooling_source_mass
+
 end module stellar_enrichment_contract

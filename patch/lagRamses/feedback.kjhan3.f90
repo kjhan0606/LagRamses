@@ -7,6 +7,7 @@ subroutine thermal_feedback(ilevel)
   use amr_commons
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_ramses_runtime, only: phase0_initialize
+  use stellar_enrichment_config, only: use_channel_resolved_feedback
 #endif
   implicit none
   integer::ilevel
@@ -47,11 +48,13 @@ subroutine thermal_feedback(ilevel)
   if(verbose)write(*,111)ilevel
 
 #ifdef PHASE0_STELLAR_ENRICHMENT
-  call phase0_initialize(phase0_ierr)
-  if(phase0_ierr /= 0) then
-     if(myid==1) write(*,*) 'Phase 0 initialization failed: ', phase0_ierr
-     call clean_stop
-     return
+  if(use_channel_resolved_feedback()) then
+     call phase0_initialize(phase0_ierr)
+     if(phase0_ierr /= 0) then
+        if(myid==1) write(*,*) 'Phase 0 initialization failed: ', phase0_ierr
+        call clean_stop
+        return
+     endif
   endif
 #endif
 
@@ -93,6 +96,7 @@ subroutine sub_thermal_feedback(ilevel,icpu, kgrid,subnump,n11,n22)
   use amr_commons
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_ramses_runtime, only: phase0_feedback
+  use stellar_enrichment_config, only: use_channel_resolved_feedback
 #endif
   implicit none
   integer,intent(in)::ilevel,icpu,kgrid,subnump,n11,n22
@@ -124,12 +128,14 @@ subroutine sub_thermal_feedback(ilevel,icpu, kgrid,subnump,n11,n22)
 ! common /thermal_feedback_units/ scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2
 
 #ifdef PHASE0_STELLAR_ENRICHMENT
-  call phase0_feedback(ilevel, kgrid, subnump, phase0_ierr)
-  if(phase0_ierr /= 0) then
-     if(myid==1) write(*,*) 'Phase 0 feedback failed: ', phase0_ierr
-     call clean_stop
+  if(use_channel_resolved_feedback()) then
+     call phase0_feedback(ilevel, kgrid, subnump, phase0_ierr)
+     if(phase0_ierr /= 0) then
+        if(myid==1) write(*,*) 'Phase 0 feedback failed: ', phase0_ierr
+        call clean_stop
+     endif
+     return
   endif
-  return
 #endif
 
   igrid = kgrid

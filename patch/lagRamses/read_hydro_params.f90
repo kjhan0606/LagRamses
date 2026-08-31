@@ -4,6 +4,10 @@ subroutine read_hydro_params(nml_ok)
   use amr_commons
   use hydro_commons
   use eunha_cooling_mod, only: eunha_load_multi_z
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_enrichment_config, only: read_enrichment_namelist, &
+       stellar_feedback_mode, use_channel_resolved_feedback
+#endif
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -13,6 +17,9 @@ subroutine read_hydro_params(nml_ok)
   ! Local variables  
   !--------------------------------------------------
   integer::i,idim,nboundary_true=0,dum
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  integer::stellar_nml_iostat
+#endif
   integer ,dimension(1:MAXBOUND)::bound_type
   real(dp)::scale,ek_bound
   character(LEN=1)::a1
@@ -114,6 +121,20 @@ subroutine read_hydro_params(nml_ok)
   rewind(1)
   read(1,NML=physics_params,END=105)
 105 continue
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  rewind(1)
+  call read_enrichment_namelist(1,stellar_nml_iostat)
+  if(stellar_nml_iostat>0)then
+     if(myid==1)then
+        write(*,*) 'ERROR: invalid &STELLAR_ENRICHMENT_PARAMS namelist'
+        if(stellar_nml_iostat==1001) &
+             write(*,*) '  feedback_mode must be channel_resolved or legacy'
+     end if
+     nml_ok=.false.
+  end if
+  if(myid==1) write(*,'(A,A)') ' Stellar feedback mode: ', &
+       trim(stellar_feedback_mode)
+#endif
 #ifdef grackle
   rewind(1)
   read(1,NML=grackle_params)
@@ -395,13 +416,10 @@ subroutine read_hydro_params(nml_ok)
   if(delayed_cooling)ivirial=idelay+1
   ixion=ivirial
   if(sf_virial)ixion=ivirial+1
-#ifdef PHASE0_STELLAR_ENRICHMENT
-  ! Keep total metal density separate from the eleven tracked element fields.
-  ichem=imetal+1
-#else
+  ! Chemical fields follow every enabled passive variable.  In particular,
+  ! they must not overlap the delayed-cooling reservoir at idelay.
   ichem=ixion
   if(aton)ichem=ixion+1
-#endif
   isgs=ichem
   if(use_sgs)isgs=ichem+1
   if(myid==1) then
@@ -427,9 +445,9 @@ subroutine read_hydro_params(nml_ok)
   end if
 
 #ifdef PHASE0_STELLAR_ENRICHMENT
-  if(metal .and. ichem+10 > nvar) then
+  if(use_channel_resolved_feedback() .and. metal .and. ichem+10 > nvar) then
      if(myid==1) then
-        write(*,*) 'ERROR: Phase 0 requires eleven element fields'
+        write(*,*) 'ERROR: channel_resolved feedback requires eleven element fields'
         write(*,*) '  Last element index=',ichem+10,' Current NVAR=',nvar
      end if
      call clean_stop
