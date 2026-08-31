@@ -14,8 +14,9 @@ USE_FFTW ?= 1
 CIC_ATOMIC_SCATTER ?= 0
 ##################################
 # Yohan's patch
-#NVECTOR = 32
-NVECTOR = 32
+# [DE] Use coarse vector tiles; NVECTOR=32 made init_tree launch
+# [DE] millions of tiny OpenMP regions for the large zoom IC load.
+NVECTOR = 500
 NDIM = 3
 NPRE = 8
 # rho + 3 momentum + total energy + total metal + delayed-cooling reservoir

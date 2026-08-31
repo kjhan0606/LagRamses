@@ -1,4 +1,5 @@
 subroutine init_part
+  use amr_parameters, ONLY: grafic_nreaders
   use amr_commons
   use pm_commons
   use hydro_parameters, ONLY: ichem
@@ -23,7 +24,7 @@ subroutine init_part
   integer::ind,ix,iy,iz,ilun,info,icpu,nx_loc
   integer::i1,i2,i3,i1_min,i1_max,i2_min,i2_max,i3_min,i3_max
   integer(kind=8)::byte_pos,hdr_bytes,plane_bytes
-  integer::buf_count,indglob,npart_new,nDMloc
+  integer::buf_count,indglob,npart_new,nDMloc,grafic_io_group_size
   integer(i8b)::tmp_long
   real(dp)::dx,xx1,xx2,xx3,vv1,vv2,vv3,mm1,ll1,ll2,ll3
   real(dp)::scale,dx_loc,rr,rmax,dx_min
@@ -718,6 +719,35 @@ subroutine init_part
                 real(kind=4),allocatable,dimension(:,:,:)::px_s,py_s,pz_s
                 integer(i8b),allocatable,dimension(:,:,:)::id_s
 
+                ! Limit concurrent access to the shared GRAFIC files.  For a
+                ! requested R readers, ceil(ncpu/R) consecutive ranks share a
+                ! token.  The simultaneously active ranks are therefore
+                ! separated by grafic_io_group_size in rank-id space.
+                if(grafic_nreaders>0)then
+                   grafic_io_group_size=(ncpu+min(grafic_nreaders,ncpu)-1) &
+                        & /min(grafic_nreaders,ncpu)
+                else
+                   grafic_io_group_size=IOGROUPSIZE
+                endif
+                if(myid==1)then
+                   if(grafic_io_group_size>0)then
+                      write(*,'(A,I0,A,I0)')'GRAFIC slab I/O: concurrent readers=', &
+                           & (ncpu+grafic_io_group_size-1)/grafic_io_group_size, &
+                           & ', rank stride=',grafic_io_group_size
+                   else
+                      write(*,'(A,I0)')'GRAFIC slab I/O: concurrent readers=',ncpu
+                   endif
+                endif
+
+#ifndef WITHOUTMPI
+                if(grafic_io_group_size>0)then
+                   if(mod(myid-1,grafic_io_group_size)/=0)then
+                      call MPI_RECV(dummy_io,1,MPI_INTEGER,myid-1-1,tagg3, &
+                           & MPI_COMM_WORLD,MPI_STATUS_IGNORE,info2)
+                   endif
+                endif
+#endif
+
                 if(read_ids.and.myid==1)write(*,*)'Reading file '//TRIM(filename_id)
                 if(read_pos.and.myid==1)then
                    write(*,*)'Reading file '//TRIM(initfile(ilevel))//'/ic_poscx'
@@ -730,6 +760,9 @@ subroutine init_part
                    write(*,*)'Reading file '//TRIM(initfile(ilevel))//'/ic_velcz'
                 endif
 
+                ! Empty ranks still participate in the token chain, but have
+                ! no local IC window to allocate or read.
+                if(active(ilevel)%ngrid>0)then
                 ! Clamp the i1/i2 window once (i3 clamped per slab).
                 ii1lo=max(1,i1_min); ii1hi=min(n1(ilevel),i1_max)
                 ii2lo=max(1,i2_min); ii2hi=min(n2(ilevel),i2_max)
@@ -867,6 +900,17 @@ subroutine init_part
                    if(read_ids)deallocate(id_s)
                 end do
                 deallocate(init_plane)
+                endif
+
+#ifndef WITHOUTMPI
+                if(grafic_io_group_size>0)then
+                   if(mod(myid,grafic_io_group_size)/=0 .and. myid<ncpu)then
+                      dummy_io=1
+                      call MPI_SEND(dummy_io,1,MPI_INTEGER,myid-1+1,tagg3, &
+                           & MPI_COMM_WORLD,info2)
+                   endif
+                endif
+#endif
               end block
            endif
            
@@ -916,11 +960,15 @@ subroutine init_part
 
         ! Compute particle Hilbert ordering
         sendbuf=0
-        do ipart=1,npart
-           xx(1,1:3)=xp(ipart,1:3)
-           xx_dp(1,1:3)=xx(1,1:3)
-           call cmp_cpumap(xx_dp,cc,1)
-           if(cc(1).ne.myid)sendbuf(cc(1))=sendbuf(cc(1))+1
+        do ipart=1,npart,nvector
+           npart2=min(nvector,npart-ipart+1)
+           do i=1,npart2
+              xx_dp(i,1:3)=xp(ipart+i-1,1:3)
+           end do
+           call cmp_cpumap(xx_dp,cc,npart2)
+           do i=1,npart2
+              if(cc(i).ne.myid)sendbuf(cc(i))=sendbuf(cc(i))+1
+           end do
         end do
            
         ! Allocate communication buffer in emission
@@ -935,29 +983,34 @@ subroutine init_part
         ! Fill communicators
         jpart=0
         sendbuf=0
-        do ipart=1,npart
-           xx(1,1:3)=xp(ipart,1:3)
-           xx_dp(1,1:3)=xx(1,1:3)
-           call cmp_cpumap(xx_dp,cc,1)
-           if(cc(1).ne.myid)then
-              icpu=cc(1)
-              sendbuf(icpu)=sendbuf(icpu)+1
-              ibuf=sendbuf(icpu)
-              emission(icpu,1)%up(ibuf,1)=xp(ipart,1)
-              emission(icpu,1)%up(ibuf,2)=xp(ipart,2)
-              emission(icpu,1)%up(ibuf,3)=xp(ipart,3)
-              emission(icpu,1)%up(ibuf,4)=vp(ipart,1)
-              emission(icpu,1)%up(ibuf,5)=vp(ipart,2)
-              emission(icpu,1)%up(ibuf,6)=vp(ipart,3)
-              emission(icpu,1)%up(ibuf,7)=mp(ipart)
-              if(read_ids)emission(icpu,1)%up(ibuf,twondim+2)=dble(idp(ipart))
-           else
-              jpart=jpart+1
-              xp(jpart,1:3)=xp(ipart,1:3)
-              vp(jpart,1:3)=vp(ipart,1:3)
-              mp(jpart)    =mp(ipart)
-              if(read_ids)idp(jpart)=idp(ipart)
-           endif
+        do ipart=1,npart,nvector
+           npart2=min(nvector,npart-ipart+1)
+           do i=1,npart2
+              xx_dp(i,1:3)=xp(ipart+i-1,1:3)
+           end do
+           call cmp_cpumap(xx_dp,cc,npart2)
+           do i=1,npart2
+              ind=ipart+i-1
+              if(cc(i).ne.myid)then
+                 icpu=cc(i)
+                 sendbuf(icpu)=sendbuf(icpu)+1
+                 ibuf=sendbuf(icpu)
+                 emission(icpu,1)%up(ibuf,1)=xp(ind,1)
+                 emission(icpu,1)%up(ibuf,2)=xp(ind,2)
+                 emission(icpu,1)%up(ibuf,3)=xp(ind,3)
+                 emission(icpu,1)%up(ibuf,4)=vp(ind,1)
+                 emission(icpu,1)%up(ibuf,5)=vp(ind,2)
+                 emission(icpu,1)%up(ibuf,6)=vp(ind,3)
+                 emission(icpu,1)%up(ibuf,7)=mp(ind)
+                 if(read_ids)emission(icpu,1)%up(ibuf,twondim+2)=dble(idp(ind))
+              else
+                 jpart=jpart+1
+                 xp(jpart,1:3)=xp(ind,1:3)
+                 vp(jpart,1:3)=vp(ind,1:3)
+                 mp(jpart)    =mp(ind)
+                 if(read_ids)idp(jpart)=idp(ind)
+              endif
+           end do
         end do
 
         ! Communicate virtual particle number to parent cpu

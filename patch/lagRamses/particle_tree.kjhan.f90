@@ -104,28 +104,27 @@ subroutine init_tree
   !------------------------------------------------
   ! Build linked list at level 1 by vector sweeps
   !------------------------------------------------
+  ! [DE] These staging loops operate on one NVECTOR tile. Launching four
+  ! [DE] OpenMP regions for every tile creates excessive fork/join overhead
+  ! [DE] for large particle loads; keep the tile work serial and coarse.
   do ipart=1,npart,nvector
      npart1=min(nvector,npart-ipart+1)
      ! Gather particles
-!$omp parallel do private(i) 
      do i=1,npart1
         ind_part(i)=ipart+i-1
      end do
      ! Compute coarse cell
 #if NDIM>0
-!$omp parallel do private(i) 
      do i=1,npart1
         ix(i)=int(xp(ind_part(i),1)/scale+skip_loc(1))
      end do
 #endif
 #if NDIM>1
-!$omp parallel do private(i) 
      do i=1,npart1
         iy(i)=int(xp(ind_part(i),2)/scale+skip_loc(2))
      end do
 #endif
 #if NDIM>2
-!$omp parallel do private(i) 
      do i=1,npart1
         iz(i)=int(xp(ind_part(i),3)/scale+skip_loc(3))
      end do

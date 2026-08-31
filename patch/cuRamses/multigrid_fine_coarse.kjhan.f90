@@ -592,7 +592,9 @@ subroutine interpolate_and_correct_coarse(ifinelevel)
    real(dp), dimension(1:8)     :: bbb
    integer,  dimension(1:8,1:8) :: ccc
 
-   integer, parameter::nvector_mg=32
+   ! Use the same compile-time vector sweep as the rest of RAMSES.  Keeping
+   ! this at 32 made the companion helper interfaces diverge from NVECTOR.
+   integer, parameter::nvector_mg=nvector
    integer,  dimension(1:nvector_mg)                 :: igrid_f_amr, icell_amr, cpu_amr
    integer,  dimension(1:nvector_mg,1:threetondim)  :: nbors_father_cells
    integer,  dimension(1:nvector_mg,1:twotondim)    :: nbors_father_grids
@@ -776,7 +778,7 @@ subroutine get3cubefather_mg(ind_cell_father,nbors_father_cells,&
   use amr_commons
   implicit none
   integer::ncell,ilevel
-  integer, parameter::nvector_cg=32
+  integer, parameter::nvector_cg=nvector
   integer,dimension(1:nvector_cg)::ind_cell_father
   integer,dimension(1:nvector_cg,1:threetondim)::nbors_father_cells
   integer,dimension(1:nvector_cg,1:twotondim)::nbors_father_grids
@@ -792,6 +794,11 @@ subroutine get3cubefather_mg(ind_cell_father,nbors_father_cells,&
   integer,dimension(1:nvector_cg,1:threetondim)::nbors_father_ok
   integer,dimension(1:nvector_cg,1:twotondim)::nbors_grids_ok
   logical::oups
+
+  if(ncell<0 .or. ncell>nvector_cg)then
+     write(*,*)'get3cubefather_mg: invalid batch size',ncell,nvector_cg
+     call clean_stop
+  endif
 
   nxny=nx*ny
 
@@ -924,7 +931,7 @@ subroutine get3cubepos_mg(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng,
 #include "amr_index.h"
   implicit none
   integer::ng,ind,ilevel
-  integer, parameter::nvector_cg=32
+  integer, parameter::nvector_cg=nvector
   integer,dimension(1:nvector_cg)::ind_grid
   integer,dimension(1:nvector_cg,1:threetondim)::nbors_father_cells
   integer,dimension(1:nvector_cg,1:twotondim)::nbors_father_grids
@@ -945,6 +952,11 @@ subroutine get3cubepos_mg(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng,
   integer,dimension(1:27,1:8,1:3)::lll,mmm
   integer,dimension(1:nvector_cg)::ind_grid1,ind_grid2,ind_grid3
   integer,dimension(1:nvector_cg,1:twotondim)::nbors_grids
+
+  if(ng<0 .or. ng>nvector_cg)then
+     write(*,*)'get3cubepos_mg: invalid batch size',ng,nvector_cg
+     call clean_stop
+  endif
 
   lll=0; mmm=0
   ! -> ndim=1

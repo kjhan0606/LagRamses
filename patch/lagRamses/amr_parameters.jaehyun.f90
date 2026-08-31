@@ -676,6 +676,11 @@ module amr_parameters
   logical::multiple=.false.
   character(LEN=80),dimension(1:MAXLEVEL)::initfile=' '
   character(LEN=20)::filetype='ascii'
+  ! Maximum number of MPI ranks that may read the shared single-file GRAFIC
+  ! fields concurrently.  Ranks are split into strided token chains at run
+  ! time, so readers active at the same time are spread across the rank space.
+  ! A non-positive value falls back to the legacy IOGROUPSIZE setting.
+  integer::grafic_nreaders=4
 
   ! Initial condition regions parameters
   integer,parameter::MAXREGION=100
