@@ -6,14 +6,47 @@ import argparse
 import csv
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from snrt_core.primordial import PhotoCrossSections, GroupSpectralClosure, sed_weighted_group_closure
+
 
 EV_TO_ERG = 1.602176634e-12
-GROUP_EDGES_EV = np.asarray((11.2, 13.6, 24.59, 54.42, 500.0, 2000.0), dtype=np.float64)
+LEGACY_GROUP_EDGES_EV = np.asarray((11.2, 13.6, 24.59, 54.42, 500.0, 2000.0), dtype=np.float64)
+# Public compatibility alias for callers of the original five-group pilot
+# helper.  The command-line default is the pinned P0 nine-group table below.
+GROUP_EDGES_EV = LEGACY_GROUP_EDGES_EV
+DEFAULT_P0_GROUP_EDGES = PROJECT_ROOT / "config" / "p0_photon_group_edges_ev.txt"
+SED_MIN_EV = 10.0
 LYMAN_EDGE_EV = 13.6
 SED_BREAK_EV = 1000.0
+
+
+def _read_group_edges(path: Path) -> np.ndarray:
+    values: list[float] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, raw_line in enumerate(handle, start=1):
+            line = raw_line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            fields = line.replace(",", " ").split()
+            if len(fields) != 1:
+                raise ValueError(
+                    f"{path}:{line_number}: expected one edge value, got {raw_line.rstrip()!r}"
+                )
+            values.append(float(fields[0]))
+    edges = np.asarray(values, dtype=np.float64)
+    if edges.size < 2 or not np.isfinite(edges).all() or np.any(edges <= 0.0):
+        raise ValueError(f"{path}: group edges must be finite and strictly positive")
+    if np.any(np.diff(edges) <= 0.0):
+        raise ValueError(f"{path}: group edges must be strictly increasing")
+    return edges
 
 
 def _sazonov_shape(energy_ev: np.ndarray) -> np.ndarray:
@@ -25,21 +58,76 @@ def _sazonov_shape(energy_ev: np.ndarray) -> np.ndarray:
     return np.where(energy <= SED_BREAK_EV, low, high)
 
 
-def _group_conversion(lyman_nu_lnu_fraction: float) -> tuple[np.ndarray, np.ndarray]:
-    """Return photon-rate per bolometric luminosity and mean group energies."""
+def _group_conversion(
+    lyman_nu_lnu_fraction: float,
+    group_edges_ev: np.ndarray = LEGACY_GROUP_EDGES_EV,
+) -> tuple[np.ndarray, np.ndarray, GroupSpectralClosure]:
+    """Return source conversion factors and the shared SED microphysics closure.
+
+    The parameterized AGN pilot SED is supported from 10 eV upward. Requested
+    groups below that energy are retained with zero photons and zero gas
+    opacity, rather than extrapolating the SED into an unrecorded regime.
+    """
 
     if lyman_nu_lnu_fraction <= 0.0:
         raise ValueError("lyman-nu-lnu-fraction must be positive")
-    photon_per_lbol = []
-    photon_weighted_energy = []
-    for low, high in zip(GROUP_EDGES_EV[:-1], GROUP_EDGES_EV[1:]):
-        energy = np.geomspace(low, high, 4097)
-        spectral_energy_per_ev = lyman_nu_lnu_fraction / LYMAN_EDGE_EV * _sazonov_shape(energy)
-        energy_fraction = np.trapezoid(spectral_energy_per_ev, energy)
-        photons_per_lbol = np.trapezoid(spectral_energy_per_ev / energy, energy) / EV_TO_ERG
-        photon_per_lbol.append(photons_per_lbol)
-        photon_weighted_energy.append(energy_fraction / (photons_per_lbol * EV_TO_ERG))
-    return np.asarray(photon_per_lbol), np.asarray(photon_weighted_energy)
+    edges = np.asarray(group_edges_ev, dtype=np.float64)
+    if edges.ndim != 1 or edges.size < 2 or not np.isfinite(edges).all() or np.any(edges <= 0.0):
+        raise ValueError("group edges must be finite and strictly positive")
+    if np.any(np.diff(edges) <= 0.0):
+        raise ValueError("group edges must be strictly increasing")
+
+    support: list[np.ndarray] = [np.asarray((SED_MIN_EV,), dtype=np.float64)]
+    for low, high in zip(edges[:-1], edges[1:], strict=True):
+        effective_low = max(float(low), SED_MIN_EV)
+        if effective_low < high:
+            support.append(np.geomspace(effective_low, high, 4097))
+    if len(support) == 1:
+        raise ValueError("requested groups do not overlap the AGN SED support above 10 eV")
+    energy = np.unique(np.concatenate(support))
+    integration_grid = np.unique(np.concatenate((energy, edges)))
+    spectral_energy_per_ev = np.where(
+        integration_grid >= SED_MIN_EV,
+        lyman_nu_lnu_fraction / LYMAN_EDGE_EV * _sazonov_shape(integration_grid),
+        0.0,
+    )
+    photon_spectrum_per_ev = spectral_energy_per_ev / integration_grid
+    photon_per_lbol = np.zeros(edges.size - 1, dtype=np.float64)
+    mean_energy_ev = np.sqrt(edges[:-1] * edges[1:])
+    averaged_sigma = np.zeros((3, edges.size - 1), dtype=np.float64)
+    excess_energy_ev = np.zeros_like(averaged_sigma)
+    for group, (low, high) in enumerate(zip(edges[:-1], edges[1:], strict=True)):
+        effective_low = max(float(low), SED_MIN_EV)
+        if effective_low >= high:
+            continue
+        selected = (integration_grid >= effective_low) & (integration_grid <= high)
+        group_energy = integration_grid[selected]
+        group_spectrum = photon_spectrum_per_ev[selected]
+        photon_count = float(np.trapezoid(group_spectrum, group_energy))
+        if not np.isfinite(photon_count) or photon_count <= 0.0:
+            continue
+        photon_per_lbol[group] = photon_count / EV_TO_ERG
+        mean_energy_ev[group] = np.trapezoid(group_spectrum * group_energy, group_energy) / photon_count
+        group_closure = sed_weighted_group_closure(
+            np.asarray((effective_low, high), dtype=np.float64),
+            integration_grid,
+            photon_spectrum_per_ev,
+        )
+        averaged_sigma[0, group] = float(group_closure.cross_sections.hydrogen_i[0])
+        averaged_sigma[1, group] = float(group_closure.cross_sections.helium_i[0])
+        averaged_sigma[2, group] = float(group_closure.cross_sections.helium_ii[0])
+        excess_energy_ev[:, group] = np.asarray(group_closure.photoelectron_excess_energy_ev[:, 0])
+
+    closure = GroupSpectralClosure(
+        cross_sections=PhotoCrossSections(
+            hydrogen_i=averaged_sigma[0],
+            helium_i=averaged_sigma[1],
+            helium_ii=averaged_sigma[2],
+        ),
+        photon_weighted_energy_ev=mean_energy_ev,
+        photoelectron_excess_energy_ev=excess_energy_ev,
+    )
+    return photon_per_lbol, mean_energy_ev, closure
 
 
 def main() -> None:
@@ -49,9 +137,29 @@ def main() -> None:
     parser.add_argument("--metadata-output", required=True)
     parser.add_argument("--lyman-nu-lnu-fraction", type=float, default=0.1)
     parser.add_argument("--escape-fraction", type=float, default=1.0)
+    group_options = parser.add_mutually_exclusive_group()
+    group_options.add_argument(
+        "--group-edges",
+        type=Path,
+        help="group-edge file; defaults to the pinned P0 nine-group table",
+    )
+    group_options.add_argument(
+        "--legacy-five-groups",
+        action="store_true",
+        help="reproduce the retained 11.2 eV-2 keV five-group pilot contract",
+    )
     args = parser.parse_args()
     if not 0.0 <= args.escape_fraction <= 1.0:
         raise ValueError("escape-fraction must lie in [0, 1]")
+
+    if args.legacy_five_groups:
+        group_edges = LEGACY_GROUP_EDGES_EV.copy()
+        group_edges_path = None
+        group_table_mode = "legacy_five_group_control"
+    else:
+        group_edges_path = DEFAULT_P0_GROUP_EDGES if args.group_edges is None else args.group_edges
+        group_edges = _read_group_edges(group_edges_path)
+        group_table_mode = "p0_default" if args.group_edges is None else "custom"
 
     with Path(args.candidates).open(newline="") as handle:
         reader = csv.DictReader(handle)
@@ -72,7 +180,7 @@ def main() -> None:
     if not rows:
         raise ValueError("candidate ledger has no sources")
 
-    photon_per_lbol, mean_energy_ev = _group_conversion(args.lyman_nu_lnu_fraction)
+    photon_per_lbol, mean_energy_ev, closure = _group_conversion(args.lyman_nu_lnu_fraction, group_edges)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     group_fields = [f"q_group_{group}_s" for group in range(len(photon_per_lbol))]
@@ -118,6 +226,9 @@ def main() -> None:
             "escape_fraction": args.escape_fraction,
             "interpretation": "unobscured injection baseline; unresolved nuclear absorption is not modeled",
         },
+        "group_table_mode": group_table_mode,
+        "group_edges_file": None if group_edges_path is None else str(group_edges_path.resolve()),
+        "group_edges_ev": group_edges.tolist(),
         "groups": [
             {
                 "index": int(index),
@@ -125,19 +236,53 @@ def main() -> None:
                 "photon_weighted_mean_energy_ev": float(mean),
                 "photon_rate_per_lbol_s_per_erg_s": float(rate),
                 "total_photon_rate_s": float(total),
+                "closure_status": (
+                    "agn_sed_weighted"
+                    if total > 0.0
+                    else "agn_sed_below_support_zero_photons"
+                ),
             }
             for index, (low, high, mean, rate, total) in enumerate(
-                zip(GROUP_EDGES_EV[:-1], GROUP_EDGES_EV[1:], mean_energy_ev, photon_per_lbol, total_photon_rate)
+                zip(group_edges[:-1], group_edges[1:], mean_energy_ev, photon_per_lbol, total_photon_rate)
             )
         ],
+        "group_spectral_closure": {
+            "method": "photon-number-weighted Verner cross sections; absorber-weighted photoelectron excess energy",
+            "species_order": ["hydrogen_i", "helium_i", "helium_ii"],
+            "cross_sections_cm2": {
+                "hydrogen_i": np.asarray(closure.cross_sections.hydrogen_i).tolist(),
+                "helium_i": np.asarray(closure.cross_sections.helium_i).tolist(),
+                "helium_ii": np.asarray(closure.cross_sections.helium_ii).tolist(),
+            },
+            "photoelectron_excess_energy_ev": {
+                "hydrogen_i": np.asarray(closure.photoelectron_excess_energy_ev[0]).tolist(),
+                "helium_i": np.asarray(closure.photoelectron_excess_energy_ev[1]).tolist(),
+                "helium_ii": np.asarray(closure.photoelectron_excess_energy_ev[2]).tolist(),
+            },
+            "group_status": [
+                "agn_sed_weighted" if total > 0.0 else "agn_sed_below_support_zero_photons"
+                for total in total_photon_rate
+            ],
+        },
         "candidates": str(Path(args.candidates).resolve()),
         "source_count": len(rows),
         "limits": [
             "The source SED is a parameterized pilot baseline, not an LRD-obscuration model.",
-            "Photons above 2 keV are excluded because the current P0 group layout ends at 2 keV.",
+            f"Photons above {group_edges[-1]:g} eV are excluded because the selected group table ends there.",
+            "The parameterized SED has no support below 10 eV; affected groups are explicit zero-photon controls.",
             "A production interpretation must vary the Lyman normalization and escape fraction.",
         ],
     }
+    aexp_values = [row.get("aexp", "") for row in rows]
+    if all(value not in (None, "") for value in aexp_values):
+        aexp_array = np.asarray([float(value) for value in aexp_values], dtype=np.float64)
+        if not np.isfinite(aexp_array).all() or np.any(aexp_array <= 0.0):
+            raise ValueError("candidate aexp values must be finite and positive")
+        metadata["source_scale_factor"] = float(aexp_array[0])
+        metadata["source_scale_factor_range"] = [float(aexp_array.min()), float(aexp_array.max())]
+        metadata["source_scale_factor_uniform"] = bool(
+            np.allclose(aexp_array, aexp_array[0], rtol=0.0, atol=1.0e-12)
+        )
     metadata_path = Path(args.metadata_output)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")

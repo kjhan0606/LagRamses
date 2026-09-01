@@ -6,11 +6,14 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --gpus=2
 #SBATCH --time=00:30:00
-#SBATCH --output=/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/runs/p8_xshard_smoke/slurm_%j.out
-#SBATCH --error=/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/runs/p8_xshard_smoke/slurm_%j.err
+#SBATCH --output=/gpfs/kjhan/LRD_JWST/simulation/snrt/runs/p8_xshard_smoke/slurm_%j.out
+#SBATCH --error=/gpfs/kjhan/LRD_JWST/simulation/snrt/runs/p8_xshard_smoke/slurm_%j.err
 set -euo pipefail
 
-project=/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt
+readonly input_manifest="/gpfs/kjhan/LRD_JWST/manifests/lrd_jwst_external_assets.json"
+[[ -s "$input_manifest" ]] || { echo "missing input manifest: $input_manifest" >&2; exit 1; }
+
+project=/gpfs/kjhan/LRD_JWST/simulation/snrt
 run_root=${project}/runs/p8_xshard_smoke
 output=${run_root}/p8_tensorcore_h100_xshard_secondary_s8_0p05myr.h5
 
@@ -29,7 +32,7 @@ srun --kill-on-bad-exit=1 --mpi=pmi2 -n 1 -c 2 --cpu-bind=cores \
   .venv-gpu/bin/python tools/p6_run_conservative_thermochemical_pilot.py \
     --input data/p4_coeval_static_rt_input_fesc0p1.h5 \
     --photon-metadata data/p4_coeval_agn_photon_ledger_fesc0p1.json \
-    --thermal-atlas data/p6_thermal_atlas_a0p20849776.h5 \
+    --thermal-atlas data/production_metal_thermal_atlas_v2.h5 \
     --scale-factor 0.208497764676753 \
     --metallicity-solar 1.0e-6 \
     --output "${output}" \

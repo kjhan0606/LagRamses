@@ -1,19 +1,39 @@
-# Offline thermal atlas for runtime interpolation
+# Offline metal thermal atlas
 
-## Division of work
+The runtime atlas is a provenance-enforced, UVB-free metal-only product. It
+does not contain equilibrium primordial cooling or photoheating. SNRT evaluates
+atomic H/He cooling from the live non-equilibrium ion fractions and adds local
+S_N photoheating exactly once. The complete B1 rationale and validation are in
+[`B1_THERMAL_COUPLING.md`](B1_THERMAL_COUPLING.md).
 
-The Grackle generator is an offline preprocessing program. It runs once per scale factor and produces immutable subtables. The simulation/runtime reads one HDF5 thermal atlas and interpolates it in this order:
+At runtime, `snrt_core.jax_thermal_atlas` brackets scale factor and performs
+linear interpolation in `log n_H` and `log T` on a solar-metallicity table;
+the result is multiplied analytically by cell `Z/Zsun`, including exactly zero
+metallicity. The accepted v3 provenance contract fixes the component,
+input and generator checksums, Grackle/data revisions, UVB exclusion, sign
+convention, analytic metallicity application, and CMB-floor choice. Legacy v1
+full-equilibrium atlases and the defective four-dimensional v2 atlas are
+rejected by `read_thermal_atlas`.
 
-1. bracket the current simulation scale factor `a`
-2. trilinearly interpolate each bracketing subtable in `log n_H`, `log Z/Zsun`, and `log T`
-3. linearly interpolate the two results in `a`
+The pinned source is
+[`CloudyData_noUVB.h5`](../../external/grackle/CloudyData_noUVB.h5), revision
+`928696482fbe15d9bac4382de6134d95568f099c` of the Grackle data repository.
+Build the atlas with:
 
-The atlas fields are `mu(a,n_H,Z,T)` and signed `net_rate(a,n_H,Z,T)`. `mu` enters the pressure-to-temperature inversion. `net_rate` is a background UVB/metal thermal term. It is not a replacement for local S_N photo-heating.
+```bash
+./.venv/bin/python tools/build_metal_thermal_atlas.py \
+  --source-data ../../external/grackle/CloudyData_noUVB.h5 \
+  --expected-source-sha256 0abe25cceeb5c0825381c5f17059982a9a2cdd27ce369a475c559fba6a8fa106 \
+  --scale-factors config/p6_thermal_atlas_scale_factors.txt \
+  --output data/production_metal_thermal_atlas_v2.h5
+```
 
-## Table schedule
+The atlas mean molecular weight is only a neutral-primordial staging aid.
+Runtime heat capacity is computed from the evolved H/He state. Production
+snapshots must provide usable pressure/temperature and cell-wise metallicity;
+the atlas equilibrium-temperature fallback is not a physical substitute.
 
-The initial scale-factor schedule is [p4_thermal_atlas_scale_factors.txt](config/p4_thermal_atlas_scale_factors.txt). It has tighter coverage around `z>=14`, the scientific target, and includes the current `z=3.799` P4 snapshot only as an ingestion validation point. Every actual hydro output used by the production simulation should be inserted into this schedule before the offline atlas is frozen.
-
-## Required future extension
-
-The current hydro output has no metallicity field. Runtime staging therefore uses `Z=10^-6 Zsun` explicitly, not an inferred metallicity. Production output must write metallicity, and the atlas must receive that cell-wise field. Shielded and unshielded UVB tables should remain distinct atlas families rather than being mixed by an undocumented interpolation parameter.
+The metal CMB term continuously subtracts the source coefficient evaluated at
+`T_CMB`. This deliberately removes Grackle revision `f93091f`'s optimization
+that stops the subtraction above `100 T_CMB`, avoiding a finite cutoff step;
+the deviation is recorded in the atlas provenance.

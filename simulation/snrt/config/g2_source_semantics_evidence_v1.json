@@ -1,0 +1,447 @@
+{
+  "schema": "snrt-g2-source-semantics-evidence",
+  "schema_version": 1,
+  "status": "literature_reviewed_not_approved",
+  "gate": "G2",
+  "review_date": "2026-09-01",
+  "purpose": "Record source-author definitions separately from project channel and production approval decisions.",
+  "candidates": {
+    "boccioli_roberti2026_neutrino_ccsn": {
+      "primary_sources": [
+        {
+          "citation": "Boccioli & Roberti 2026, A&A 709, A201",
+          "doi": "10.1051/0004-6361/202557714",
+          "url": "https://doi.org/10.1051/0004-6361/202557714",
+          "relevant_sections": ["Section 2 Explosion simulations", "Section 5 Yields", "Data availability"]
+        },
+        {
+          "citation": "Boccioli & Roberti 2026 data release",
+          "data_doi": "10.5281/zenodo.19503168",
+          "url": "https://zenodo.org/records/19503168",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/boccioli_roberti2026_ccsn",
+          "license": "cc-by-4.0"
+        }
+      ],
+      "source_author_definitions": {
+        "Post": "Post-explosion ejecta at 30 seconds after bounce; the default Post tables are decayed to stable species and Post_NoDecay retains the 30-second radioactive inventory.",
+        "Wind": "Integrated pre-collapse wind ejecta inherited from the original progenitor calculations.",
+        "Presn": "Pre-supernova inventory above the emergent mass cut.",
+        "successful_mass_cut": "Baryonic neutron-star mass from the GR1D+ explosion; the release assumes no fallback.",
+        "failed_explosion": "Post and Presn are set to zero. The README does not state that Wind is zeroed.",
+        "yield_unit": "Msun per initial progenitor model.",
+        "progenitor_families": "LC18 multimetallicity/rotation, WH07 solar, and F23 solar single/binary-stripped grids.",
+        "nuclear_network": "SkyNet post-processing with 1530 no-decay isotopes represented in each branch; stable output species coverage depends on the progenitor family."
+      },
+      "project_disposition": {
+        "source_component_semantics_resolved": true,
+        "runtime_channel_assignment_approved": false,
+        "f23_component_mass_closure_pass": true,
+        "lc18_failed_model_wind_consistency_pass": false,
+        "lc18_failed_models_with_reported_wind_but_zero_wind_table_count": 56,
+        "cumulative_release_history_available": false,
+        "canonical_injected_energy_available": false,
+        "canonical_injected_momentum_available": false,
+        "figure_value_reconstruction_allowed": false,
+        "license_status": "verified_cc_by_4.0",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    },
+    "huscher2025_agb": {
+      "primary_sources": [
+        {
+          "citation": "Huscher, Finlator & Jackiewicz 2025, ApJ 993:16",
+          "doi": "10.3847/1538-4357/ae0199",
+          "url": "https://iopscience.iop.org/article/10.3847/1538-4357/ae0199",
+          "relevant_sections": ["Section 3.1 Mass-loss Rates", "Section 4.2 Implications for C IV in the CGM", "Section 5 Summary"]
+        },
+        {
+          "citation": "Huscher et al. 2025 data release",
+          "data_doi": "10.5281/zenodo.17635255",
+          "url": "https://zenodo.org/records/17635255",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/huscher2025_agb/AGB_files_Huscher_et_al_2025.zip",
+          "sha256": "dc559ee272d602bcfe95ab0050cb388eed670986e3e62234b4bd9126d0128199"
+        }
+      ],
+      "source_author_definitions": {
+        "single_star_yield_i": "Gross isotope mass ejected over the stellar lifetime in Msun per initial star.",
+        "single_star_mass_i": "Total isotope mass still inside the terminal stellar model, not ejecta.",
+        "single_star_grid": "120 Cartesian models at twelve masses from 0.8 to 7 Msun and ten total-metallicity mass fractions from 0.0001 to 0.03.",
+        "single_star_species": "Sixteen isotopes from H1 through Si28; this is not complete elemental or isotopic coverage.",
+        "population_mdot": "IMF-weighted instantaneous AGB mass-loss rate tabulated against log10 stellar age and initial metallicity; README claims Msun/yr normalized by total stellar mass formed.",
+        "population_composition": "Instantaneous C12, N14, and O16 mass fractions of the outflowing AGB gas.",
+        "population_imf": "Chabrier IMF over 0.1--300 Msun according to the release README; the table is already population weighted."
+      },
+      "project_disposition": {
+        "source_component_semantics_resolved": true,
+        "runtime_channel_assignment_approved": false,
+        "single_star_cumulative_release_history_available": false,
+        "population_age_table_available": true,
+        "population_age_table_normalization_verified": false,
+        "population_age_table_audit_result": "Direct trapezoidal integration in physical years returns 1326--2895 Msun under the claimed per-Msun-formed normalization; no correction factor is inferred.",
+        "canonical_injected_energy_available": false,
+        "canonical_injected_momentum_available": false,
+        "license_status": "verified_cc_by_4.0",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    },
+    "limongi_chieffi_2018_cds": {
+      "primary_sources": [
+        {
+          "citation": "Limongi & Chieffi 2018, ApJS 237:13",
+          "doi": "10.3847/1538-4365/aacb24",
+          "url": "https://openaccess.inaf.it/bitstream/20.500.12386/28562/2/Limongi_2018_ApJS_237_13.pdf",
+          "relevant_section": "Section 5, especially the definition of recommended set R"
+        },
+        {
+          "citation": "CDS J/ApJS/237/13 ReadMe and tables",
+          "url": "https://cdsarc.cds.unistra.fr/ftp/cats/J/ApJS/237/13/ReadMe"
+        }
+      ],
+      "source_author_definitions": {
+        "table8": "Recommended set R final isotopic ejecta. Models from 13 through 25 Msun use mixing/fallback set M with the mass cut calibrated to eject 0.07 Msun of Ni-56. Models above 25 Msun are assumed to collapse fully and table8 contains wind ejecta only.",
+        "table9": "Integrated isotopic wind ejecta for models from 13 through 25 Msun.",
+        "supported_difference_on_overlapping_models": "table8 - table9 is the non-wind terminal ejecta for the source's 13--25 Msun set-R models.",
+        "table7_binding_energy": "Binding energy above the iron core in 1e51 erg; it is not injected explosion energy.",
+        "table5_phase_mass_history": "Table5 gives each evolutionary phase lifetime and endpoint total stellar mass. After exact duplicate collapse, cumulative age is the ordered sum of phase lifetimes and cumulative wind mass is initial mass minus endpoint total mass. It does not provide time-resolved isotopic wind composition.",
+        "yield_dimension": "ejected isotope mass",
+        "yield_unit_evidence": "The article defines ejecta and calibrates Ni-56 in Msun, while the CDS machine-readable yield columns list unit '---'; treat Msun as literature-supported but pending explicit project approval.",
+        "metallicity_mapping": {
+          "definition": "Source-author total heavy-element mass fractions, including the stated low-metallicity C/O/Mg/Si/S/Ar/Ca/Ti enhancements; do not approximate these as Z_sun*10^[Fe/H].",
+          "solar_abundance_set": "Asplund et al. 2009",
+          "source_solar_metallicity_mass_fraction": 0.01345,
+          "feh_to_total_metallicity_mass_fraction": {
+            "-3": 0.00003236,
+            "-2": 0.0003236,
+            "-1": 0.003236,
+            "0": 0.01345
+          },
+          "source_article_location": "Section 2, page 3, lines following the initial-composition definition"
+        }
+      },
+      "project_disposition": {
+        "source_component_semantics_resolved": true,
+        "source_metallicity_mapping_resolved": true,
+        "runtime_channel_assignment_approved": false,
+        "cumulative_release_history_available": false,
+        "phase_resolved_wind_mass_history_available": true,
+        "phase_resolved_wind_composition_available": false,
+        "canonical_injected_energy_available": false,
+        "canonical_injected_momentum_available": false,
+        "license_status": "public_research_access_verified_redistribution_not_approved",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    },
+    "nugrid_set1ext_mesaonly_fryer12_delay": {
+      "primary_sources": [
+        {
+          "citation": "Ritter et al. 2018, MNRAS 480, 538",
+          "doi": "10.1093/mnras/sty1729",
+          "data_doi": "10.11570/18.0002",
+          "url": "https://academic.oup.com/mnras/article/480/1/538/5046719",
+          "relevant_sections": ["Section 2.3 Stellar yields", "Appendix A Data access"]
+        },
+        {
+          "citation": "NuGrid data releases",
+          "url": "https://nugrid.github.io/content/data.html"
+        },
+        {
+          "citation": "Source-provided Set1ext reader",
+          "url": "https://download.nugridstars.org/set1ext/Yield_tables/read_yields.py",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/nugrid_set1ext/read_yields.py",
+          "sha256": "3ef9cae4fd8b7935f7021ea736bf1a99dea101ad6259372cd66b18ae09c3ed92"
+        }
+      ],
+      "source_author_definitions": {
+        "winds": "Time-integrated stellar-wind ejecta, defined by the integral of mass-loss rate times surface composition over stellar lifetime.",
+        "pre_explosion": "Wind ejecta plus ejecta above the remnant mass cut using the composition at collapse without shock nucleosynthesis.",
+        "total": "Wind ejecta plus SN ejecta after the delayed semi-analytic explosion and fallback prescription.",
+        "supported_terminal_explosive_difference": "total - winds is source-defined terminal SN ejecta.",
+        "supported_terminal_preSN_difference": "pre_explosion - winds is source-defined terminal pre-SN ejecta above the same mass-cut concept.",
+        "yield_unit": "Msun",
+        "lifetime_unit": "yr",
+        "final_mass_unit": "Msun",
+        "reader_behavior": "The supplied Python 2 reader exposes Lifetime, Mfinal, Yields, and X0. It indexes blocks by (M,Z), so the duplicate (5,0.01) key would be overwritten; the SNRT review adapter instead preserves both occurrences. Kinetic-energy support is commented out and no per-model energy field exists in the staged tables."
+      },
+      "project_disposition": {
+        "source_component_semantics_resolved": true,
+        "runtime_channel_assignment_approved": false,
+        "cumulative_release_history_available": false,
+        "canonical_injected_energy_available": false,
+        "canonical_injected_momentum_available": false,
+        "license_status": "public_research_access_verified_redistribution_not_approved",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    },
+    "doherty2014_sagb": {
+      "primary_sources": [
+        {
+          "citation": "Doherty et al. 2014, MNRAS 437, 195",
+          "doi": "10.1093/mnras/stt1877",
+          "url": "https://doi.org/10.1093/mnras/stt1877",
+          "relevant_sections": ["Section 3 Nucleosynthesis and yields", "Online material"]
+        },
+        {
+          "citation": "Doherty et al. 2014, MNRAS 441, 582",
+          "doi": "10.1093/mnras/stu571",
+          "url": "https://doi.org/10.1093/mnras/stu571",
+          "relevant_sections": ["Section 3 Nucleosynthesis results", "Online material"]
+        },
+        {
+          "citation": "Author-hosted electronic yield tables",
+          "url": "https://users.monash.edu/~cdoherty/research/yields.html",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/doherty2014_sagb"
+        }
+      ],
+      "source_author_definitions": {
+        "Yield": "Net isotope yield integrated over the stellar wind, defined by the time integral of (surface mass fraction minus initial mass fraction) times mass-loss rate.",
+        "MassExp": "Total gross isotope mass expelled in the stellar wind.",
+        "ProdFact": "log10 of wind-averaged mass fraction divided by initial mass fraction.",
+        "E_columns": "Alternative results after synthetic extrapolation of thermal pulses beyond the point where stellar evolution ceased to converge.",
+        "baseline": "VW93 MassExp without synthetic thermal-pulse extrapolation.",
+        "channel_scope": "AGB/SAGB wind ejecta only; terminal ECSN or Fe-core-collapse material is not part of these tables."
+      },
+      "project_disposition": {
+        "source_component_semantics_resolved": true,
+        "runtime_channel_assignment_approved": false,
+        "cumulative_release_history_available": false,
+        "primary_grid_model_count": 20,
+        "low_metallicity_upper_mass_msun": 7.5,
+        "calcium_available": false,
+        "synthetic_extrapolated_columns_selected": false,
+        "literal_source_label_repair_applied": false,
+        "canonical_injected_energy_available": false,
+        "canonical_injected_momentum_available": false,
+        "license_status": "public_research_access_verified_redistribution_not_approved",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    },
+    "stockinger2020_low_mass_ccsn": {
+      "primary_sources": [
+        {
+          "citation": "Stockinger et al. 2020, MNRAS 496, 2039",
+          "doi": "10.1093/mnras/staa1691",
+          "url": "https://doi.org/10.1093/mnras/staa1691",
+          "relevant_sections": ["Section 2 Progenitors", "Section 4 Explosion evolution", "Table 5"]
+        },
+        {
+          "citation": "Garching Core-Collapse Supernova Archive, Stockinger2020",
+          "url": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/Stockinger2020/",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/stockinger2020_low_mass_ccsn"
+        }
+      ],
+      "source_author_definitions": {
+        "models": "Solar-metallicity 8.8 Msun ONeMg-core ECSN, zero-metallicity 9.6 Msun low-mass Fe-core CCSN, and solar-metallicity 9.0 Msun low-mass Fe-core CCSN.",
+        "yield_column_1": "Total species mass on the computational grid in Msun.",
+        "yield_column_2": "Species mass in cells with positive radial velocity in Msun.",
+        "diagnostic_explosion_energy": "Integral of positive total specific energy in the post-shock region, tabulated in units of 1e50 erg.",
+        "event_scope": "Terminal event ejecta after progenitor mass loss; these files do not contain the pre-collapse wind return.",
+        "snapshot_scope": "Three post-bounce event snapshots per model, not a cumulative stellar-age release history."
+      },
+      "project_disposition": {
+        "source_component_semantics_resolved": true,
+        "runtime_channel_assignment_approved": false,
+        "cross_model_interpolation_allowed": false,
+        "cumulative_release_history_available": false,
+        "machine_readable_diagnostic_explosion_energy_available": true,
+        "canonical_injected_momentum_available": false,
+        "nitrogen_available": false,
+        "radioactive_decay_and_tracer_projection_approved": false,
+        "vsh_metadata_semantics_pass": false,
+        "vsh_dataset_used": false,
+        "license_status": "mpa_noncommercial_use_with_citation_verified_third_party_redistribution_requires_permission",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    },
+    "sukhbold2016_ccsn": {
+      "primary_sources": [
+        {
+          "citation": "Sukhbold et al. 2016, ApJ 821, 38",
+          "doi": "10.3847/0004-637X/821/1/38",
+          "url": "https://doi.org/10.3847/0004-637X/821/1/38",
+          "relevant_sections": ["Sections 3--4 explosion modelling", "Section 6 nucleosynthesis", "electronic yield tables"]
+        },
+        {
+          "citation": "Garching Core-Collapse Supernova Archive, SEWBJ_2015",
+          "data_doi": "10.17617/1.b",
+          "url": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/SEWBJ_2015/",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/sukhbold2016_ccsn"
+        }
+      ],
+      "source_author_definitions": {
+        "reviewed_grid": "Thirteen source-labelled solar-metallicity 9--12 Msun progenitors, spaced by 0.25 Msun and processed with the Crab-calibrated Z9.6 engine; every reviewed model explodes.",
+        "ejecta_column": "Gross isotope mass ejected during the terminal supernova explosion in Msun.",
+        "wind_column": "Gross isotope mass ejected in presupernova winds in Msun.",
+        "stable_segment": "The top table segment lists explosion-ejecta and wind contributions for stable isotopes.",
+        "radioactive_segment": "The bottom table segment lists only 20 selected radioactive isotopes and is not a complete radioactive inventory.",
+        "final_kinetic_energy": "P-HOTB final kinetic energy at infinity in foe, with 1 foe equal to 1e51 erg.",
+        "mass_cut_and_fallback": "P-HOTB baryonic mass cut after fallback and fallback mass, both in Msun.",
+        "nucleosynthesis": "KEPLER detailed isotopic nucleosynthesis from H through Bi, with iron-group synthesis renormalized to the P-HOTB result; detailed neutrino-powered-wind nucleosynthesis is not included.",
+        "release_history": "Integrated terminal explosion and presupernova-wind yields, not a cumulative stellar-age release history."
+      },
+      "project_disposition": {
+        "source_component_semantics_resolved": true,
+        "runtime_channel_assignment_approved": false,
+        "reviewed_grid_model_count": 13,
+        "reviewed_mass_range_msun": [9.0, 12.0],
+        "reviewed_metallicity": "source_labelled_solar",
+        "machine_readable_final_kinetic_energy_available": true,
+        "machine_readable_fallback_and_baryonic_mass_cut_available": true,
+        "canonical_injected_momentum_available": false,
+        "cumulative_release_history_available": false,
+        "stable_radioactive_decay_projection_approved": false,
+        "neutrino_powered_wind_detailed_nucleosynthesis_available": false,
+        "cross_engine_interpolation_allowed": false,
+        "cross_source_interpolation_allowed": false,
+        "license_status": "mpa_noncommercial_use_with_citation_verified_third_party_redistribution_requires_permission",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    },
+    "limongi2024_transition_fates": {
+      "primary_sources": [
+        {
+          "citation": "Limongi et al. 2024, ApJS 270, 29",
+          "doi": "10.3847/1538-4365/ad12c1",
+          "url": "https://iopscience.iop.org/article/10.3847/1538-4365/ad12c1",
+          "relevant_sections": ["Abstract", "Section 3.6 TP-SAGB evolution", "Section 3.8 final-fate estimate", "Section 3.9 evolution toward core collapse", "Summary"]
+        },
+        {
+          "citation": "Limongi et al. 2024 machine-readable Table 4",
+          "url": "https://content.cld.iop.org/journals/0067-0049/270/2/29/revision1/apjsad12c1t4_mrt.txt",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/limongi2024_transition_fates/TABLE4_TP_MRT.txt",
+          "sha256": "8ca914e8373b28ec58b7c2928d85801b68e917d18a792b408f3de141989bc664"
+        }
+      ],
+      "source_author_definitions": {
+        "model_scope": "Solar-metallicity, nonrotating stars from 7 to 15 Msun.",
+        "white_dwarf_models": "The 7.5--8.0 Msun source models end as hybrid CO/ONeMg or ONeMg white dwarfs.",
+        "potential_ecsn_models": "The 8.5--9.2 Msun source models may potentially explode as ECSNe; this is not a deterministic event assignment.",
+        "ordinary_ccsn_models": "Models at and above 9.22 Msun evolve to iron-core collapse in the source calculation.",
+        "fate_extrapolation": "The competition between core growth and H-envelope removal would require several thousand thermal pulses, so the potential ECSN outcome relies on extrapolated evolution.",
+        "threshold_sensitivity": "M_CO-ec=1.415 Msun gives a minimum potential ECSN mass around 8.5--8.8 Msun; the cited M_CO-ec=1.36 Msun alternative shifts it to about 8.3 Msun.",
+        "table4_scope": "Thermal-pulse structural properties for ten 7.0--9.2 Msun models; it is not a yield, energy, momentum, or terminal-event table."
+      },
+      "project_disposition": {
+        "source_fate_semantics_resolved": true,
+        "runtime_eight_msun_snii_boundary_physically_validated": false,
+        "continuous_fate_interpolation_allowed": false,
+        "stockinger_e8p8_anchor_defines_population_fate_law": false,
+        "runtime_channel_assignment_approved": false,
+        "canonical_yields_available": false,
+        "canonical_injected_energy_available": false,
+        "canonical_injected_momentum_available": false,
+        "license_status": "verified_cc_by_4.0",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    },
+    "roberti2024_ultralowz_ccsn": {
+      "primary_sources": [
+        {
+          "citation": "Roberti, Limongi & Chieffi 2024, ApJS 270, 28",
+          "doi": "10.3847/1538-4365/ad1686",
+          "url": "https://arxiv.org/abs/2312.02942",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/roberti2024_ultralowz_ccsn/ARXIV_SOURCE.tar.gz",
+          "sha256": "35cb05180a5db9fc17e87ce2bde93096f59352a5686eaf48faadf31f906d3e5c",
+          "relevant_sections": ["Evolutionary grid", "Explosion method", "Table 7", "Appendix yield tables"]
+        },
+        {
+          "citation": "IOP machine-readable Tables 5 and 8--13",
+          "url": "https://content.cld.iop.org/journals/0067-0049/270/2/28/revision1/",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/roberti2024_ultralowz_ccsn"
+        }
+      ],
+      "source_author_definitions": {
+        "model_scope": "Rotating 15 and 25 Msun stars at Z=0, 3.236e-7, and 3.236e-6, with 34 source models and a source-specific rotation sampling.",
+        "explosive_yield": "Integrated explosive isotope mass in Msun; the staged tables do not provide a separate wind/terminal component partition.",
+        "explosion_method": "A thermal bomb is deposited at 0.8 Msun and the minimum energy that ejects the mantle is selected.",
+        "mass_cut": "The remnant mass cut is chosen to eject 0.07 Msun of Ni56.",
+        "mixing_and_fallback": "Neither mixing nor fallback is included in the source explosion calculation.",
+        "official_mrt_scope": "Thirty yield-model columns are present. Four zero-Z columns shown in the article source (015z300, 015z600, 025z450, 025z700) are absent from the official MRTs.",
+        "release_history": "Integrated explosion products and scalar evolutionary phases, not an age-resolved isotopic release history."
+      },
+      "project_disposition": {
+        "source_semantics_resolved": true,
+        "official_mrt_source_overlap_exact": true,
+        "source_only_columns_may_be_merged": false,
+        "model_025z600_quarantined": true,
+        "mass_interpolation_allowed": false,
+        "metallicity_interpolation_allowed": false,
+        "rotation_population_selected": false,
+        "wind_terminal_component_ownership_resolved": false,
+        "runtime_channel_assignment_approved": false,
+        "canonical_injected_energy_available": false,
+        "canonical_injected_momentum_available": false,
+        "license_status": "verified_cc_by_4.0",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    },
+    "heger_woosley2010_popiii": {
+      "primary_sources": [
+        {
+          "citation": "Heger & Woosley 2010, ApJ 724, 341--373",
+          "doi": "10.1088/0004-637X/724/1/341",
+          "url": "https://arxiv.org/abs/0803.3161",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/heger_woosley2010_popiii/ARXIV_SOURCE.tar.gz",
+          "sha256": "33fe08f7a58d47620f51371ebdaa74fbc60c55b0cb7c86c3bb5239dfe7f6e47a",
+          "relevant_sections": ["Explosion and Mixing", "Fallback and Remnant Masses", "Nucleosynthesis"]
+        },
+        {
+          "citation": "VizieR J/ApJ/724/341 Table 8",
+          "url": "https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=J/ApJ/724/341",
+          "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/heger_woosley2010_popiii/table8.dat.gz",
+          "sha256": "0fa810d85564623450774f6eda8f00bf9e7646b6ef8a6c94e693e7075cb478ee"
+        }
+      ],
+      "source_author_definitions": {
+        "model_scope": "Nonrotating metal-free stars at 120 masses from 10 to 100 Msun; stellar mass loss is neglected.",
+        "yield_quantity": "Post-supernova isotope ejecta including wind in Msun. The zero-metallicity evolutionary calculation neglects stellar mass loss, and no age-resolved wind component is tabulated.",
+        "energy_quantity": "Kinetic energy at infinity in Bethe, after accounting for the binding energy of escaped material; it is not the central-engine input energy.",
+        "piston_locations": "S4 is the S/NA/kB=4 location, normally the base of the oxygen shell; Ye is the edge of the iron core.",
+        "mixing_and_fallback": "Artificial running-boxcar mixing is applied before fallback. Four source mixing settings are tabulated and fallback is included.",
+        "neutrino_wind": "Neutrino-wind nucleosynthesis from neutron-star remnants is omitted.",
+        "machine_readable_scope": "660546 rows over 5760 mass-energy-piston-mixing coordinates, with 283 isotope names in the union. Every coordinate contains all eleven project tracked elements, but an absent isotope row is not promoted to an exact-zero assertion.",
+        "remnant_semantics": "The electronic table has no explicit remnant-mass column. Initial mass minus the sum of listed isotope yields is retained only as an inferred review residual."
+      },
+      "project_disposition": {
+        "source_semantics_resolved": true,
+        "runtime_channel_assignment_approved": false,
+        "mass_interpolation_allowed": false,
+        "metallicity_extrapolation_allowed": false,
+        "explosion_energy_distribution_selected": false,
+        "piston_distribution_selected": false,
+        "mixing_distribution_selected": false,
+        "inferred_remnant_mass_may_be_promoted": false,
+        "canonical_injected_energy_available": false,
+        "canonical_injected_momentum_available": false,
+        "scientific_use_status": "verified_with_required_citations",
+        "public_redistribution_status": "not_verified",
+        "license_evidence": "g2_source_use_terms_evidence_v1.json",
+        "approval_id": null
+      }
+    }
+  },
+  "global_remaining_blockers": [
+    "Project approval of source-to-runtime channel ownership",
+    "Age-resolved wind and AGB release histories or an explicitly approved terminal-release approximation",
+    "Per-event/per-star injected energy and momentum models",
+    "Complete runtime mass coverage and out-of-domain policy",
+    "Reduced-element/isotope decay policy and omitted-species error budget",
+    "Resolution of the Huscher population-table normalization before any use of that age table",
+    "Resolution of the Boccioli-Roberti LC18 failed-model wind omission and selection of an independent machine-readable explosion-energy/momentum prescription",
+    "Resolution of Doherty calcium/age-history gaps and its metallicity-dependent upper mass boundary",
+    "A non-interpolating policy for Stockinger event anchors plus nitrogen, decay/tracer, momentum, and redistribution resolution",
+    "Resolution of Sukhbold's 8--9 Msun, metallicity, decay-inventory, neutrino-wind, age-history, momentum, engine-uncertainty, and redistribution gaps",
+    "Selection of a metallicity/rotation-dependent terminal-fate law for 8--9.22 Msun; Limongi 2024 constrains but does not deterministically close the seam",
+    "Resolution of Roberti 2024's two-mass sparse grid, rotation population, four zero-Z MRT omissions, 025z600 mass-budget outlier, wind/terminal ownership, and thermal-bomb feedback-model limitations",
+    "Selection of Heger & Woosley 2010's explosion-energy, piston, and artificial-mixing population policy plus resolution of its 8--10 Msun, positive-Z, rotation, neutrino-wind, age-history, remnant, momentum, and redistribution gaps",
+    "Explicit redistribution permission for every selected non-Huscher yield package and a project approval identifier"
+  ]
+}

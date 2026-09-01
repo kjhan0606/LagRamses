@@ -28,7 +28,7 @@
   },
   "thermal_initialization": {
     "model": "offline Grackle thermal-atlas net-rate-zero fallback",
-    "atlas": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_validation_thermal_atlas.h5",
+    "atlas": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_validation_thermal_atlas.h5",
     "scale_factor": 0.20836524,
     "metallicity_solar": 1e-06,
     "initial_rt_ionization": "neutral primordial; Grackle table does not export species fractions",

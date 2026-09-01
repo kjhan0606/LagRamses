@@ -1,0 +1,103 @@
+{
+  "catalogue_csv": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_stellar_catalogue.csv",
+  "catalogue_csv_sha256": "205336d5d2d8a6db66213cdb517a4994a0ccf8ee35627e793a78cbdf30b709a5",
+  "field_provenance": {
+    "birth_epoch": "output_part.f90 tp",
+    "birth_metallicity": "output_part.f90 zp",
+    "birth_proper_time": "output_part.f90 tpp",
+    "current_mass": "output_part.f90 mp",
+    "identity": "output_part.f90 idp",
+    "initial_mass": "output_part.f90 mp0",
+    "positions": "output_part.f90 xp",
+    "velocities": "output_part.f90 vp",
+    "yield_table_index": "output_part.f90 indtab"
+  },
+  "field_stats": {
+    "age_myr": {
+      "count": 42342,
+      "max": 750.0991583655856,
+      "mean": 178.8506959142066,
+      "min": 0.002185223689377258
+    },
+    "birth_metallicity_mass_fraction": {
+      "count": 42342,
+      "max": 1.1813492899814927e-09,
+      "mean": 9.329877281785934e-11,
+      "min": 0.0
+    },
+    "initial_mass_msun": {
+      "count": 42342,
+      "max": 11401695.755949983,
+      "mean": 2310282.672234389,
+      "min": 2280339.151189996
+    },
+    "mass_msun": {
+      "count": 42342,
+      "max": 11401695.726288006,
+      "mean": 2310282.6556032365,
+      "min": 2280339.082229907
+    },
+    "yield_table_index_code": {
+      "count": 42342,
+      "max": 0.05256864404252182,
+      "mean": 0.012534144294229022,
+      "min": 0.0
+    }
+  },
+  "header": {
+    "nsink": 0,
+    "nstar_tot": 42342,
+    "nstar_tot_record_bytes": 8
+  },
+  "info_path": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/output_00011/info_00011.txt",
+  "native_format": "cuRamses_particle_binary_v1",
+  "output_dir": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/output_00011",
+  "particle_type_selection": {
+    "field": "ptypep",
+    "sink_code": 2,
+    "star_code": 1
+  },
+  "rank_files": 32,
+  "record_type": "native_ramses_stellar_catalogue",
+  "sanitization": {
+    "negative_birth_metallicity_clamp_tolerance": 1e-12,
+    "negative_birth_metallicity_clamped_count": 338
+  },
+  "schema_version": 1,
+  "scientific_readiness": {
+    "photon_luminosity_ledger": false,
+    "reason": "native star metadata is decoded; SED, escape fraction, and grouped photon luminosity remain explicit downstream inputs",
+    "stellar_particle_metadata": true,
+    "stellar_source_catalogue": false
+  },
+  "source_catalogue": {
+    "photon_luminosity_assigned": false,
+    "sed_model_assigned": false,
+    "source_kind": "star_metadata_only"
+  },
+  "star_count": 42342,
+  "status": "complete_native_stellar_metadata_extracted",
+  "time_semantics": {
+    "age_formula": "(current_proper_time_code - birth_proper_time_code) * proper_time_unit_s",
+    "birth_epoch_column": "birth_epoch_code",
+    "birth_epoch_kind": "RAMSES conformal/supercomoving time value; not a scale factor",
+    "birth_proper_time_column": "birth_proper_time_code",
+    "cosmological": true,
+    "cosmological_model": {
+      "w0": -1.0,
+      "wa": 0.0
+    },
+    "current_proper_time_code": -0.8942670140201897,
+    "proper_time_unit_s": 4.502923876156184e+17
+  },
+  "unit_conversion": {
+    "birth_metallicity": "native zp value; mass-fraction normalization not converted to solar units",
+    "mass_code": "RAMSES particle mass unit",
+    "mass_unit_msun": 121282728873421.67,
+    "position_code": "normalized RAMSES user coordinate in [0, 1]",
+    "position_proper_cm": 6.68867499578396e+24,
+    "velocity_code": "RAMSES particle velocity unit",
+    "velocity_unit_cm_s": 673216115.0288963,
+    "yield_table_index": "native indtab checkpoint/progress value"
+  }
+}

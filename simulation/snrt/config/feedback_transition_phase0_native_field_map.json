@@ -1,0 +1,181 @@
+{
+  "schema": "snrt-native-ramses-field-map",
+  "schema_version": 1,
+  "baseline_id": "feedback_transition_phase0_10cMpc_h_z0_epsstar002",
+  "source_output": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/output_00011",
+  "format": "ramses_native_hydro_primitive_v1",
+  "description": "Field map for the stopped transitional Phase 0 checkpoint. Native hydro output serializes primitive fields and density-normalized passive scalars; it is not the raw-uold HDF5 layout.",
+  "serialized_fields": [
+    {
+      "field_number": 1,
+      "name": "density",
+      "ramSES_internal": "uold_1",
+      "quantity": "density",
+      "unit": "code_density",
+      "source_semantics": "native output value"
+    },
+    {
+      "field_number": 2,
+      "name": "velocity_x",
+      "ramSES_internal": "uold_2",
+      "quantity": "velocity",
+      "unit": "code_velocity",
+      "source_semantics": "uold_2 / uold_1 at serialization"
+    },
+    {
+      "field_number": 3,
+      "name": "velocity_y",
+      "ramSES_internal": "uold_3",
+      "quantity": "velocity",
+      "unit": "code_velocity",
+      "source_semantics": "uold_3 / uold_1 at serialization"
+    },
+    {
+      "field_number": 4,
+      "name": "velocity_z",
+      "ramSES_internal": "uold_4",
+      "quantity": "velocity",
+      "unit": "code_velocity",
+      "source_semantics": "uold_4 / uold_1 at serialization"
+    },
+    {
+      "field_number": 5,
+      "name": "pressure",
+      "ramSES_internal": "uold_5",
+      "quantity": "thermal_pressure",
+      "unit": "code_pressure",
+      "source_semantics": "(gamma - 1) times internal energy after kinetic-energy subtraction"
+    },
+    {
+      "field_number": 6,
+      "name": "metallicity",
+      "ramSES_internal": "uold_6",
+      "quantity": "metal_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_6 / uold_1 at serialization; imetal=6"
+    },
+    {
+      "field_number": 7,
+      "name": "scalar_01",
+      "ramSES_internal": "uold_7",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_7 / uold_1 at serialization; first Phase 0 element field"
+    },
+    {
+      "field_number": 8,
+      "name": "scalar_02",
+      "ramSES_internal": "uold_8",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_8 / uold_1 at serialization"
+    },
+    {
+      "field_number": 9,
+      "name": "scalar_03",
+      "ramSES_internal": "uold_9",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_9 / uold_1 at serialization"
+    },
+    {
+      "field_number": 10,
+      "name": "scalar_04",
+      "ramSES_internal": "uold_10",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_10 / uold_1 at serialization"
+    },
+    {
+      "field_number": 11,
+      "name": "scalar_05",
+      "ramSES_internal": "uold_11",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_11 / uold_1 at serialization"
+    },
+    {
+      "field_number": 12,
+      "name": "scalar_06",
+      "ramSES_internal": "uold_12",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_12 / uold_1 at serialization"
+    },
+    {
+      "field_number": 13,
+      "name": "scalar_07",
+      "ramSES_internal": "uold_13",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_13 / uold_1 at serialization"
+    },
+    {
+      "field_number": 14,
+      "name": "scalar_08",
+      "ramSES_internal": "uold_14",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_14 / uold_1 at serialization"
+    },
+    {
+      "field_number": 15,
+      "name": "scalar_09",
+      "ramSES_internal": "uold_15",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_15 / uold_1 at serialization"
+    },
+    {
+      "field_number": 16,
+      "name": "scalar_10",
+      "ramSES_internal": "uold_16",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_16 / uold_1 at serialization"
+    },
+    {
+      "field_number": 17,
+      "name": "scalar_11",
+      "ramSES_internal": "uold_17",
+      "quantity": "passive_scalar_mass_fraction",
+      "unit": "dimensionless",
+      "source_semantics": "uold_17 / uold_1 at serialization"
+    }
+  ],
+  "internal_uold_layout": {
+    "density": 1,
+    "momentum": [2, 3, 4],
+    "total_energy": 5,
+    "total_metal": 6,
+    "first_element": 7,
+    "element_candidates": ["H", "He", "C", "N", "O", "Ne", "Mg", "Si", "S", "Ca", "Fe"],
+    "element_candidate_fields": [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+  },
+  "conversion_rules": {
+    "density": "convert code_density using info unit_d",
+    "velocity": "convert code_velocity using info unit_l / info unit_t and cosmological proper-velocity convention",
+    "pressure": "convert code pressure using the RAMSES hydro unit and gamma=1.6666667",
+    "metallicity": "use field 6 directly as a metal mass fraction; do not divide by density again",
+    "elements": "use fields 7..17 as density-normalized passive scalar fractions only after the element ordering is certified"
+  },
+  "confidence": {
+    "primitive_serialization": "confirmed from output_hydro.f90 and hydro_file_descriptor.txt",
+    "core_indices": "confirmed by run.log imetal=6 and ichem=7",
+    "element_order": "inferred from the Phase 0 contract; native output descriptor is not self-describing",
+    "production_ready": false
+  },
+  "not_available_in_checkpoint": [
+    "rt photon groups",
+    "sink/BH catalogue",
+    "force-source ledger",
+    "dust-to-metal field",
+    "non-equilibrium H/He/H2 chemistry fields"
+  ],
+  "evidence": {
+    "native_audit": "data/feedback_transition_phase0_output_00011_native_audit.json",
+    "native_audit_sha256": "ddf49ddfa930a7ca8dcad51d05fd52b211fc3b086a9ade38a912bc4ca830762f",
+    "hydro_descriptor": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/output_00011/hydro_file_descriptor.txt",
+    "runtime_log": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/run.log"
+  }
+}

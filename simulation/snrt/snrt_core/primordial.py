@@ -8,9 +8,11 @@ its implicit solver and thermal network are introduced.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import NamedTuple
 
 import jax.numpy as jnp
+import numpy as np
 
 
 EV_ERG = 1.602176634e-12
@@ -35,11 +37,25 @@ HE_II_FIT = VernerFit(54.42, 5.0e4, 1.720, 1.369e4, 3.288e1, 2.963, 0.0, 0.0, 0.
 
 
 class PhotoCrossSections(NamedTuple):
-    """Group-centre cross sections in cm^2, indexed as (group,)."""
+    """Group-averaged cross sections in cm^2, indexed as ``(group,)``."""
 
     hydrogen_i: jnp.ndarray
     helium_i: jnp.ndarray
     helium_ii: jnp.ndarray
+
+
+class GroupSpectralClosure(NamedTuple):
+    """SED closure shared by source conversion and the RT microphysics.
+
+    ``photoelectron_excess_energy_ev`` has shape ``(3, n_group)`` and uses
+    the species order H I, He I, He II.  Its value is weighted by the same
+    absorber cross section used to construct ``cross_sections``; this keeps
+    photoheating consistent with a group-integrated photon budget.
+    """
+
+    cross_sections: PhotoCrossSections
+    photon_weighted_energy_ev: jnp.ndarray
+    photoelectron_excess_energy_ev: jnp.ndarray
 
 
 class PrimordialState(NamedTuple):
@@ -60,6 +76,18 @@ class PhotoRates(NamedTuple):
     helium_ii: jnp.ndarray
 
 
+def _verner_cross_section_numpy(energy_ev: np.ndarray, fit: VernerFit) -> np.ndarray:
+    """Evaluate a Verner fit in NumPy for offline SED quadrature."""
+
+    energy = np.asarray(energy_ev, dtype=np.float64)
+    x = energy / fit.energy_scale_ev - fit.y_0
+    y = np.sqrt(x**2 + fit.y_1**2)
+    profile = ((x - 1.0) ** 2 + fit.y_w**2) * y ** (0.5 * fit.power - 5.5)
+    profile *= (1.0 + np.sqrt(y / fit.y_a)) ** (-fit.power)
+    sigma = fit.sigma_scale_mb * profile * 1.0e-18
+    return np.where((energy >= fit.threshold_ev) & (energy <= fit.maximum_ev), sigma, 0.0)
+
+
 def verner_cross_section(energy_ev: jnp.ndarray, fit: VernerFit) -> jnp.ndarray:
     """Evaluate a Verner et al. ground-state photoionization fit in cm^2."""
     energy = jnp.asarray(energy_ev)
@@ -72,12 +100,148 @@ def verner_cross_section(energy_ev: jnp.ndarray, fit: VernerFit) -> jnp.ndarray:
 
 
 def primordial_cross_sections(group_energy_ev: jnp.ndarray) -> PhotoCrossSections:
-    """Return H I, He I, and He II cross sections at each photon-group centre."""
+    """Return compatibility cross sections evaluated at group representative energies.
+
+    Production source metadata should use :func:`sed_weighted_group_closure`.
+    This centre-energy helper remains for analytic benchmarks whose groups are
+    deliberately monochromatic.
+    """
     energies = jnp.asarray(group_energy_ev)
     return PhotoCrossSections(
         hydrogen_i=verner_cross_section(energies, H_I_FIT),
         helium_i=verner_cross_section(energies, HE_I_FIT),
         helium_ii=verner_cross_section(energies, HE_II_FIT),
+    )
+
+
+def default_photoelectron_excess_energy(group_energy_ev: jnp.ndarray) -> jnp.ndarray:
+    """Return the legacy representative-energy excess closure ``(3, group)``."""
+
+    energies = jnp.asarray(group_energy_ev)
+    thresholds = jnp.asarray((H_I_FIT.threshold_ev, HE_I_FIT.threshold_ev, HE_II_FIT.threshold_ev), dtype=energies.dtype)
+    return jnp.maximum(energies[None, :] - thresholds[:, None], 0.0)
+
+
+def sed_weighted_group_closure(
+    group_edges_ev: np.ndarray | jnp.ndarray,
+    energy_ev: np.ndarray | jnp.ndarray,
+    photon_number_spectrum_per_ev: np.ndarray | jnp.ndarray,
+) -> GroupSpectralClosure:
+    """Integrate Verner cross sections over a photon-number SED.
+
+    For each group ``g`` and absorber ``s`` this computes
+
+    ``sigma_bar[g,s] = ∫ N_E sigma_s(E) dE / ∫ N_E dE``
+
+    and the corresponding absorption-weighted photoelectron excess energy.
+    The SED is an arbitrary non-negative shape; its normalization cancels from
+    the closure.  This is an offline operation so that the resulting arrays
+    are static inputs to JAX/XLA.
+    """
+
+    edges = np.asarray(group_edges_ev, dtype=np.float64)
+    energies = np.asarray(energy_ev, dtype=np.float64)
+    spectrum = np.asarray(photon_number_spectrum_per_ev, dtype=np.float64)
+    if edges.ndim != 1 or len(edges) < 2 or not np.isfinite(edges).all() or np.any(edges <= 0.0):
+        raise ValueError("group_edges_ev must be a finite, positive one-dimensional edge array")
+    if np.any(np.diff(edges) <= 0.0):
+        raise ValueError("group_edges_ev must be strictly increasing")
+    if energies.ndim != 1 or spectrum.shape != energies.shape or len(energies) < 2:
+        raise ValueError("energy and photon SED arrays must be one-dimensional with at least two samples")
+    if not np.isfinite(energies).all() or np.any(energies <= 0.0):
+        raise ValueError("SED energies must be finite and positive")
+    if not np.isfinite(spectrum).all() or np.any(spectrum < 0.0):
+        raise ValueError("photon-number SED must be finite and non-negative")
+
+    order = np.argsort(energies)
+    energies = energies[order]
+    spectrum = spectrum[order]
+    if np.any(np.diff(energies) <= 0.0):
+        unique = np.r_[True, np.diff(energies) > 0.0]
+        energies = energies[unique]
+        spectrum = spectrum[unique]
+    if edges[0] < energies[0] or edges[-1] > energies[-1]:
+        raise ValueError("SED energy support must cover every requested group edge")
+
+    integration_grid = np.unique(np.concatenate((energies, edges)))
+    integration_spectrum = np.interp(integration_grid, energies, spectrum)
+    species_fits = (H_I_FIT, HE_I_FIT, HE_II_FIT)
+    thresholds = np.asarray([fit.threshold_ev for fit in species_fits], dtype=np.float64)
+    averaged_sigma = np.zeros((3, len(edges) - 1), dtype=np.float64)
+    excess_energy = np.zeros_like(averaged_sigma)
+    photon_mean_energy = np.zeros(len(edges) - 1, dtype=np.float64)
+
+    for group, (lower, upper) in enumerate(zip(edges[:-1], edges[1:], strict=True)):
+        selected = (integration_grid >= lower) & (integration_grid <= upper)
+        group_energy = integration_grid[selected]
+        group_spectrum = integration_spectrum[selected]
+        photon_count = float(np.trapezoid(group_spectrum, group_energy))
+        if not np.isfinite(photon_count) or photon_count <= 0.0:
+            raise ValueError(f"SED has no photons in group {group}")
+        photon_mean_energy[group] = np.trapezoid(group_spectrum * group_energy, group_energy) / photon_count
+        for species, fit in enumerate(species_fits):
+            sigma = _verner_cross_section_numpy(group_energy, fit)
+            weighted_sigma = np.trapezoid(group_spectrum * sigma, group_energy)
+            averaged_sigma[species, group] = weighted_sigma / photon_count
+            if weighted_sigma > 0.0:
+                excess_energy[species, group] = (
+                    np.trapezoid(
+                        group_spectrum * sigma * np.maximum(group_energy - thresholds[species], 0.0),
+                        group_energy,
+                    )
+                    / weighted_sigma
+                )
+
+    return GroupSpectralClosure(
+        cross_sections=PhotoCrossSections(
+            hydrogen_i=averaged_sigma[0],
+            helium_i=averaged_sigma[1],
+            helium_ii=averaged_sigma[2],
+        ),
+        photon_weighted_energy_ev=photon_mean_energy,
+        photoelectron_excess_energy_ev=excess_energy,
+    )
+
+
+def group_spectral_closure_from_metadata(metadata: Mapping[str, object]) -> GroupSpectralClosure:
+    """Load and validate the serialized SED closure in photon metadata."""
+
+    try:
+        groups = metadata["groups"]
+        closure = metadata["group_spectral_closure"]
+        group_energy = np.asarray(
+            [group["photon_weighted_mean_energy_ev"] for group in groups], dtype=np.float64  # type: ignore[index]
+        )
+        cross_sections = closure["cross_sections_cm2"]  # type: ignore[index]
+        excess = closure["photoelectron_excess_energy_ev"]  # type: ignore[index]
+        sigma = np.asarray(
+            [cross_sections[name] for name in ("hydrogen_i", "helium_i", "helium_ii")], dtype=np.float64
+        )
+        excess_array = np.asarray(
+            [excess[name] for name in ("hydrogen_i", "helium_i", "helium_ii")], dtype=np.float64
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("photon metadata lacks a validated group_spectral_closure") from error
+    if (
+        group_energy.ndim != 1
+        or len(group_energy) == 0
+        or not np.isfinite(group_energy).all()
+        or np.any(group_energy <= 0.0)
+        or np.any(np.diff(group_energy) <= 0.0)
+    ):
+        raise ValueError("serialized group mean energies must be finite and strictly increasing")
+    if sigma.shape != (3, len(group_energy)) or excess_array.shape != sigma.shape:
+        raise ValueError("serialized group spectral closure has inconsistent group dimensions")
+    if not np.isfinite(sigma).all() or np.any(sigma < 0.0) or not np.isfinite(excess_array).all() or np.any(excess_array < 0.0):
+        raise ValueError("serialized group spectral closure contains invalid values")
+    return GroupSpectralClosure(
+        PhotoCrossSections(
+            hydrogen_i=sigma[0],
+            helium_i=sigma[1],
+            helium_ii=sigma[2],
+        ),
+        group_energy,
+        excess_array,
     )
 
 

@@ -1,0 +1,89 @@
+{
+  "audit_version": 1,
+  "data_bytes_per_particle": [
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    4,
+    1,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8
+  ],
+  "data_fields": [
+    "position_x",
+    "position_y",
+    "position_z",
+    "velocity_x",
+    "velocity_y",
+    "velocity_z",
+    "mass",
+    "identity",
+    "level",
+    "ptypep",
+    "potential",
+    "birth_epoch",
+    "metallicity",
+    "birth_proper_time",
+    "initial_mass",
+    "yield_table_index"
+  ],
+  "endianness": "little",
+  "expected_ranks": 32,
+  "hash_policy": "native particle payload not hashed; headers and ptype record structure audited",
+  "header_record_lengths": [
+    4,
+    4,
+    4,
+    16,
+    8,
+    8,
+    8,
+    4
+  ],
+  "header_totals": {
+    "dark_matter": 134217728,
+    "sinks": 0,
+    "stars": 42342
+  },
+  "local_particle_total": 134260070,
+  "native_format": "cuRamses_particle_binary_v1",
+  "nsink_headers": [
+    0
+  ],
+  "nstar_tot_headers": [
+    42342
+  ],
+  "output_dir": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/output_00011",
+  "payload_bytes_stat_sum": 15708436126,
+  "ptype_codes": {
+    "0": "DM",
+    "1": "STAR",
+    "2": "SINK"
+  },
+  "ptype_counts": {
+    "0": 134217728,
+    "1": 42342
+  },
+  "rank_files": 32,
+  "record_type": "native_ramses_particle_audit",
+  "scientific_readiness": {
+    "particle_type_roster": true,
+    "photon_luminosity_ledger": false,
+    "reason": "type counts are certified; positions, ages, masses, SED, and source normalization remain a separate explicit reader/ledger step",
+    "stellar_source_catalogue": false
+  },
+  "status": "complete_native_particle_metadata_audited",
+  "yt_frontend_compatibility": {
+    "reason": "yt 4.4.2 expects a 4-byte nstar_tot header field, while this native LONGINT output stores 8 bytes",
+    "status": "blocked_for_default_handler"
+  }
+}

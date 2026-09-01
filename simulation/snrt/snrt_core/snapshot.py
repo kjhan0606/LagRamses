@@ -27,7 +27,8 @@ HELIUM_MASS_FRACTION = 1.0 - HYDROGEN_MASS_FRACTION
 PROTON_MASS_G = 1.67262192369e-24
 BOLTZMANN_ERG_K = 1.380649e-16
 FORMAT_NAME = "snrt_static_rt_input"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+SUPPORTED_FORMAT_VERSIONS = (1, FORMAT_VERSION)
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,11 @@ class StaticRTInput:
     x_heii: np.ndarray
     x_heiii: np.ndarray
     sources: SourceCatalog | None = None
+    velocity_cm_s: np.ndarray | None = None
+    metallicity_solar: np.ndarray | None = None
+    dust_to_metal: np.ndarray | None = None
+    x_h2: np.ndarray | None = None
+    cell_level: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         arrays = {
@@ -119,15 +125,59 @@ class StaticRTInput:
                 raise ValueError(f"{name} must be a fraction in [0, 1]")
         if np.any(normalized["x_heii"] + normalized["x_heiii"] > 1.0):
             raise ValueError("x_heii + x_heiii must not exceed one")
+        optional = {
+            "velocity_cm_s": None if self.velocity_cm_s is None else np.asarray(self.velocity_cm_s, dtype=np.float64),
+            "metallicity_solar": None
+            if self.metallicity_solar is None
+            else np.asarray(self.metallicity_solar, dtype=np.float64),
+            "dust_to_metal": None if self.dust_to_metal is None else np.asarray(self.dust_to_metal, dtype=np.float64),
+            "x_h2": None if self.x_h2 is None else np.asarray(self.x_h2, dtype=np.float64),
+            "cell_level": None if self.cell_level is None else np.asarray(self.cell_level, dtype=np.int16),
+        }
+        if optional["velocity_cm_s"] is not None:
+            velocity = optional["velocity_cm_s"]
+            if velocity.shape != (3, *shape):
+                raise ValueError("velocity_cm_s must have shape (3, nx, ny, nz)")
+        for name in ("metallicity_solar", "dust_to_metal", "x_h2", "cell_level"):
+            value = optional[name]
+            if value is not None and value.shape != shape:
+                raise ValueError(f"{name} must share the gas-grid shape")
+        for name in ("velocity_cm_s", "metallicity_solar", "dust_to_metal", "x_h2", "cell_level"):
+            value = optional[name]
+            if value is not None and not np.isfinite(value).all():
+                raise ValueError(f"{name} must contain finite values")
+        if optional["metallicity_solar"] is not None and np.any(optional["metallicity_solar"] < 0.0):
+            raise ValueError("metallicity_solar must be non-negative")
+        if optional["dust_to_metal"] is not None and np.any(optional["dust_to_metal"] < 0.0):
+            raise ValueError("dust_to_metal must be non-negative")
+        if optional["x_h2"] is not None and np.any((optional["x_h2"] < 0.0) | (optional["x_h2"] > 1.0)):
+            raise ValueError("x_h2 must be a fraction in [0, 1]")
+        if optional["cell_level"] is not None and np.any(optional["cell_level"] < 0):
+            raise ValueError("cell_level must be non-negative")
         if self.sources is not None:
             if np.any(self.sources.cell_index < 0) or np.any(self.sources.cell_index >= np.asarray(shape)):
                 raise ValueError("source cell_index lies outside the gas grid")
         for name, value in normalized.items():
             object.__setattr__(self, name, value)
+        for name, value in optional.items():
+            object.__setattr__(self, name, value)
 
     @property
     def shape(self) -> tuple[int, int, int]:
         return self.hydrogen_number_density_cm3.shape
+
+    def validate_production_contract(self, *, require_sources: bool = True) -> None:
+        """Reject a static input that cannot support a production RHD handoff."""
+
+        missing = [
+            name
+            for name in ("velocity_cm_s", "metallicity_solar", "dust_to_metal", "x_h2", "cell_level")
+            if getattr(self, name) is None
+        ]
+        if require_sources and self.sources is None:
+            missing.append("sources")
+        if missing:
+            raise ValueError(f"static RT input is incomplete for production use: missing {missing}")
 
 
 def neutral_primordial_input(
@@ -138,6 +188,14 @@ def neutral_primordial_input(
     sources: SourceCatalog | None = None,
     *,
     hydrogen_mass_fraction: float = HYDROGEN_MASS_FRACTION,
+    velocity_cm_s: np.ndarray | None = None,
+    metallicity_solar: np.ndarray | None = None,
+    dust_to_metal: np.ndarray | None = None,
+    x_h2: np.ndarray | None = None,
+    cell_level: np.ndarray | None = None,
+    x_hii: np.ndarray | None = None,
+    x_heii: np.ndarray | None = None,
+    x_heiii: np.ndarray | None = None,
 ) -> StaticRTInput:
     """Build a neutral H/He input from RAMSES gas density in cgs units."""
 
@@ -152,16 +210,24 @@ def neutral_primordial_input(
         raise ValueError("mass_density_g_cm3 must be a three-dimensional array")
     dust = np.broadcast_to(np.asarray(dust_relative_abundance, dtype=np.float64), shape).copy()
     zeros = np.zeros(shape, dtype=np.float64)
+    initial_x_hii = zeros if x_hii is None else np.broadcast_to(np.asarray(x_hii, dtype=np.float64), shape).copy()
+    initial_x_heii = zeros if x_heii is None else np.broadcast_to(np.asarray(x_heii, dtype=np.float64), shape).copy()
+    initial_x_heiii = zeros if x_heiii is None else np.broadcast_to(np.asarray(x_heiii, dtype=np.float64), shape).copy()
     return StaticRTInput(
         grid=grid,
         hydrogen_number_density_cm3=density * hydrogen_mass_fraction / PROTON_MASS_G,
         helium_number_density_cm3=density * helium_mass_fraction / (4.0 * PROTON_MASS_G),
         temperature_k=temperature_k,
         dust_relative_abundance=dust,
-        x_hii=zeros,
-        x_heii=zeros,
-        x_heiii=zeros,
+        x_hii=initial_x_hii,
+        x_heii=initial_x_heii,
+        x_heiii=initial_x_heiii,
         sources=sources,
+        velocity_cm_s=velocity_cm_s,
+        metallicity_solar=metallicity_solar,
+        dust_to_metal=dust_to_metal,
+        x_h2=x_h2,
+        cell_level=cell_level,
     )
 
 
@@ -186,6 +252,16 @@ def write_static_rt_input(path: str | Path, snapshot: StaticRTInput) -> None:
         ionization.create_dataset("x_hii", data=snapshot.x_hii)
         ionization.create_dataset("x_heii", data=snapshot.x_heii)
         ionization.create_dataset("x_heiii", data=snapshot.x_heiii)
+        if snapshot.x_h2 is not None:
+            ionization.create_dataset("x_h2", data=snapshot.x_h2)
+        if snapshot.velocity_cm_s is not None:
+            gas.create_dataset("velocity_cm_s", data=snapshot.velocity_cm_s)
+        if snapshot.metallicity_solar is not None:
+            gas.create_dataset("metallicity_solar", data=snapshot.metallicity_solar)
+        if snapshot.dust_to_metal is not None:
+            gas.create_dataset("dust_to_metal", data=snapshot.dust_to_metal)
+        if snapshot.cell_level is not None:
+            handle.create_dataset("grid/cell_level", data=snapshot.cell_level)
         if snapshot.sources is not None:
             sources = handle.create_group("sources")
             sources.create_dataset("cell_index", data=snapshot.sources.cell_index)
@@ -200,7 +276,7 @@ def read_static_rt_input(path: str | Path) -> StaticRTInput:
     with h5py.File(Path(path), "r") as handle:
         if handle.attrs.get("format", "") != FORMAT_NAME:
             raise ValueError("not an SNRT static RT input file")
-        if int(handle.attrs.get("format_version", -1)) != FORMAT_VERSION:
+        if int(handle.attrs.get("format_version", -1)) not in SUPPORTED_FORMAT_VERSIONS:
             raise ValueError("unsupported SNRT static RT input format version")
         sources = None
         if "sources" in handle:
@@ -221,6 +297,13 @@ def read_static_rt_input(path: str | Path) -> StaticRTInput:
             x_heii=np.asarray(handle["ionization/x_heii"]),
             x_heiii=np.asarray(handle["ionization/x_heiii"]),
             sources=sources,
+            velocity_cm_s=None if "gas/velocity_cm_s" not in handle else np.asarray(handle["gas/velocity_cm_s"]),
+            metallicity_solar=None
+            if "gas/metallicity_solar" not in handle
+            else np.asarray(handle["gas/metallicity_solar"]),
+            dust_to_metal=None if "gas/dust_to_metal" not in handle else np.asarray(handle["gas/dust_to_metal"]),
+            x_h2=None if "ionization/x_h2" not in handle else np.asarray(handle["ionization/x_h2"]),
+            cell_level=None if "grid/cell_level" not in handle else np.asarray(handle["grid/cell_level"]),
         )
 
 
@@ -239,6 +322,13 @@ class RamsesFieldMap:
     mean_molecular_weight: float | None = None
     dust_relative_abundance: Any | None = None
     equilibrium_temperature: bool = False
+    velocity: tuple[Any, Any, Any] | None = None
+    metallicity_solar: Any | None = None
+    dust_to_metal: Any | None = None
+    x_hii: Any | None = None
+    x_heii: Any | None = None
+    x_heiii: Any | None = None
+    x_h2: Any | None = None
 
     def __post_init__(self) -> None:
         thermal_field_count = int(self.temperature is not None) + int(self.thermal_pressure is not None)
@@ -246,6 +336,8 @@ class RamsesFieldMap:
             raise ValueError("supply one thermal field, or request equilibrium_temperature fallback")
         if self.mean_molecular_weight is not None and self.mean_molecular_weight <= 0.0:
             raise ValueError("mean_molecular_weight must be positive")
+        if self.velocity is not None and len(self.velocity) != 3:
+            raise ValueError("velocity must contain exactly three yt fields")
 
 
 def _stage_yt_dataset(
@@ -329,12 +421,32 @@ def _stage_yt_dataset(
         dust = np.zeros_like(density)
     else:
         dust = np.asarray(sampled_grid[fields.dust_relative_abundance].to_value(""))
-    if mu_table is None:
+    if fields.x_hii is not None or fields.x_heii is not None or fields.x_heiii is not None:
+        if fields.x_hii is None or fields.x_heii is None or fields.x_heiii is None:
+            raise ValueError("x_hii, x_heii, and x_heiii must be supplied together")
+        x_hii = np.asarray(sampled_grid[fields.x_hii].to_value(""))
+        x_heii = np.asarray(sampled_grid[fields.x_heii].to_value(""))
+        x_heiii = np.asarray(sampled_grid[fields.x_heiii].to_value(""))
+    elif mu_table is None:
         x_hii = np.zeros(density.shape, dtype=np.float64)
         x_heii = np.zeros(density.shape, dtype=np.float64)
         x_heiii = np.zeros(density.shape, dtype=np.float64)
     else:
         _, x_hii, x_heii, x_heiii = mu_table.state(temperature, hydrogen_number_density)
+    velocity = None
+    if fields.velocity is not None:
+        velocity = np.stack(
+            [np.asarray(sampled_grid[field].to_value("cm/s")) for field in fields.velocity], axis=0
+        )
+    metallicity_solar = (
+        None
+        if fields.metallicity_solar is None
+        else np.asarray(sampled_grid[fields.metallicity_solar].to_value(""))
+    )
+    dust_to_metal = (
+        None if fields.dust_to_metal is None else np.asarray(sampled_grid[fields.dust_to_metal].to_value(""))
+    )
+    x_h2 = None if fields.x_h2 is None else np.asarray(sampled_grid[fields.x_h2].to_value(""))
     helium_number_density = density * (1.0 - hydrogen_mass_fraction) / (4.0 * PROTON_MASS_G)
     staged = StaticRTInput(
         grid=GridSpec(
@@ -349,6 +461,11 @@ def _stage_yt_dataset(
         x_heii=x_heii,
         x_heiii=x_heiii,
         sources=sources,
+        velocity_cm_s=velocity,
+        metallicity_solar=metallicity_solar,
+        dust_to_metal=dust_to_metal,
+        x_h2=x_h2,
+        cell_level=np.full(density.shape, level, dtype=np.int16),
     )
     write_static_rt_input(output_path, staged)
     return staged
@@ -415,6 +532,7 @@ def stage_ramses_hydro_only(
     dimensions: tuple[int, int, int],
     fields: RamsesFieldMap,
     scratch_directory: str | Path,
+    hydro_fields_in_file: tuple[str, ...] | None = None,
     left_edge_code: tuple[float, float, float] = (0.0, 0.0, 0.0),
     right_edge_code: tuple[float, float, float] | None = None,
     sources: SourceCatalog | None = None,
@@ -429,8 +547,11 @@ def stage_ramses_hydro_only(
 
     A temporary `output_XXXXX` view is created below ``scratch_directory``.
     It copies only text metadata and symlinks `amr`/`hydro` rank files, so the
-    stock yt AMR reader never opens a legacy particle header.  The source
-    snapshot is never modified.
+    stock yt AMR reader never opens a legacy particle header.  When supplied,
+    ``hydro_fields_in_file`` is the ordered yt field list for the on-disk
+    hydro records.  This is required for old/unversioned descriptors whose
+    ``nvar > 11`` would otherwise make yt guess an MHD layout and shift the
+    pressure field.  The source snapshot is never modified.
     """
 
     info = Path(info_path).resolve()
@@ -458,7 +579,16 @@ def stage_ramses_hydro_only(
                     shutil.copy2(metadata, view / metadata_name)
             for source in amr_files + hydro_files:
                 os.symlink(source, view / source.name)
-            dataset = RAMSESDataset(str(view / info.name))
+            dataset_kwargs = {}
+            if hydro_fields_in_file is not None:
+                if len(hydro_fields_in_file) < 5:
+                    raise ValueError(
+                        "hydro_fields_in_file must identify density, three velocities, and pressure"
+                    )
+                if any(not isinstance(name, str) or not name.strip() for name in hydro_fields_in_file):
+                    raise ValueError("hydro_fields_in_file must contain non-empty field names")
+                dataset_kwargs["fields"] = tuple(hydro_fields_in_file)
+            dataset = RAMSESDataset(str(view / info.name), **dataset_kwargs)
             return _stage_yt_dataset(
                 dataset,
                 output_path,

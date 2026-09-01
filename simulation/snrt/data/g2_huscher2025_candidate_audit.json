@@ -1,0 +1,226 @@
+{
+  "archive": {
+    "crc_pass": true,
+    "member_count_including_directories": 157,
+    "unsafe_member_count": 0
+  },
+  "audit_code_sha256": "c4d3e9a6819c56a6731a88a9e566f23a7ab1feefab691cb0114d346082705108",
+  "blockers": [
+    "population_mdot_normalization_fails_unit_mass_return_and_requires_source_clarification",
+    "single_star_grid_stops_at_7_msun_but_runtime_agb_channel_extends_to_8_msun",
+    "single_star_files_are_lifetime_integrated_and_have_no_per_star_age_resolved_release_history",
+    "only_16_isotopes_are_present_and_runtime_tracked_S_Ca_Fe_are_absent",
+    "N13_requires_an_explicit_decay_projection_before_element_aggregation",
+    "canonical_energy_and_momentum_fields_are_absent",
+    "population_tables_are_imf_weighted_and_must_not_receive_a_second_runtime_imf_convolution",
+    "project_physics_selection_and_approval_are_missing"
+  ],
+  "candidate_id": "huscher2025_agb",
+  "canonical_conversion_allowed": false,
+  "canonical_rows_emitted": 0,
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_huscher2025_candidate_contract_v1.json",
+  "contract_sha256": "af9d7c200ba80f8c60e92c14ff6653c96c74e12044f9a64fe7586c57c12026e5",
+  "gate": "G2",
+  "interpretation": "The source is a current, openly licensed and internally parseable AGB candidate. Its single-star gross yields are useful for review, and all apparent over-ejection is contained by printed precision. The IMF-weighted Mdot table fails its stated normalization under direct physical-time integration, so neither it nor a guessed normalization may be wired into production.",
+  "population_tables": {
+    "age_log10_yr": {
+      "maximum": 10.22,
+      "minimum": 7.18,
+      "step": 0.02
+    },
+    "integrated_return_maximum": 2895.22586110785,
+    "integrated_return_minimum": 1326.358215777782,
+    "interpretation": "The archive README calls Mdot Msun/yr normalized by total stellar mass formed. Direct integration in physical years violates unit mass return in every metallicity column. No hidden SSP normalization factor is inferred.",
+    "mass_loss_integral_under_claimed_units": [
+      {
+        "integrated_claimed_msun_per_msun_formed": 1326.358215777782,
+        "metallicity_mass_fraction": 0.0001
+      },
+      {
+        "integrated_claimed_msun_per_msun_formed": 1757.1740359722648,
+        "metallicity_mass_fraction": 0.001
+      },
+      {
+        "integrated_claimed_msun_per_msun_formed": 1830.1911958903859,
+        "metallicity_mass_fraction": 0.002
+      },
+      {
+        "integrated_claimed_msun_per_msun_formed": 1894.5324496026396,
+        "metallicity_mass_fraction": 0.003
+      },
+      {
+        "integrated_claimed_msun_per_msun_formed": 1772.766745734769,
+        "metallicity_mass_fraction": 0.004
+      },
+      {
+        "integrated_claimed_msun_per_msun_formed": 1785.0844794768159,
+        "metallicity_mass_fraction": 0.005
+      },
+      {
+        "integrated_claimed_msun_per_msun_formed": 1846.4093574265528,
+        "metallicity_mass_fraction": 0.01
+      },
+      {
+        "integrated_claimed_msun_per_msun_formed": 1993.2420691453262,
+        "metallicity_mass_fraction": 0.015
+      },
+      {
+        "integrated_claimed_msun_per_msun_formed": 2159.83097652294,
+        "metallicity_mass_fraction": 0.02
+      },
+      {
+        "integrated_claimed_msun_per_msun_formed": 2895.22586110785,
+        "metallicity_mass_fraction": 0.03
+      }
+    ],
+    "metallicity_columns_exceeding_unit_return": 10,
+    "normalization_inference_applied": false,
+    "normalization_semantics_pass": false,
+    "row_count_per_table": 153,
+    "table_members": {
+      "C12": "tables/AGB_Cyield_table_Huscher25.txt",
+      "N14": "tables/AGB_Nyield_table_Huscher25.txt",
+      "O16": "tables/AGB_Oyield_table_Huscher25.txt",
+      "mass_loss": "tables/AGB_Mdot_table_Huscher25.txt"
+    },
+    "value_ranges": {
+      "C12": {
+        "maximum": 0.02227583,
+        "minimum": 3.838059e-06
+      },
+      "N14": {
+        "maximum": 0.009781951,
+        "minimum": 1.861453e-06
+      },
+      "O16": {
+        "maximum": 0.01288379,
+        "minimum": 2.128957e-06
+      },
+      "mass_loss": {
+        "maximum": 3.651711e-05,
+        "minimum": 0.0
+      }
+    }
+  },
+  "production_ready": false,
+  "schema": "snrt-g2-huscher2025-candidate-audit",
+  "schema_version": 1,
+  "semantic_firewalls": {
+    "hidden_normalization_factor_inferred": false,
+    "mass_i_is_terminal_stellar_inventory_not_ejecta": true,
+    "partial_isotope_set_claimed_complete": false,
+    "population_table_is_imf_weighted": true,
+    "second_imf_convolution_forbidden": true,
+    "yield_i_is_gross_lifetime_ejecta": true
+  },
+  "single_star_grid": {
+    "isotopes": [
+      "H1",
+      "He3",
+      "He4",
+      "C12",
+      "C13",
+      "N13",
+      "N14",
+      "N15",
+      "O16",
+      "O17",
+      "O18",
+      "F19",
+      "Ne20",
+      "Ne22",
+      "Mg24",
+      "Si28"
+    ],
+    "mass_coverage_gap_msun": [
+      7.0,
+      8.0
+    ],
+    "mass_msun": [
+      0.8,
+      1.0,
+      1.5,
+      2.0,
+      2.5,
+      3.0,
+      3.5,
+      4.0,
+      4.5,
+      5.0,
+      6.0,
+      7.0
+    ],
+    "maximum_residual": {
+      "final_mass_msun": 1.183,
+      "initial_helium_fraction": 0.24,
+      "initial_mass_msun": 7.0,
+      "initial_metallicity": 0.0001,
+      "member": "yields/7.0M/huscher25_yields_7.0M_0.0001Z.txt",
+      "negative_residual": false,
+      "negative_residual_outside_printed_quantization": false,
+      "printed_quantization_half_width_msun": 0.010501160600505006,
+      "returned_mass_from_initial_minus_final_msun": 5.817,
+      "source_species_gross_ejecta_sum_msun": 5.800782983131062,
+      "unlisted_or_rounding_residual_msun": 0.01621701686893783
+    },
+    "metallicity_mass_fraction": [
+      0.0001,
+      0.001,
+      0.002,
+      0.003,
+      0.004,
+      0.005,
+      0.01,
+      0.015,
+      0.02,
+      0.03
+    ],
+    "minimum_residual": {
+      "final_mass_msun": 0.988,
+      "initial_helium_fraction": 0.25,
+      "initial_mass_msun": 5.0,
+      "initial_metallicity": 0.005,
+      "member": "yields/5.0M/huscher25_yields_5.0M_0.0050Z.txt",
+      "negative_residual": true,
+      "negative_residual_outside_printed_quantization": false,
+      "printed_quantization_half_width_msun": 0.0105711010505,
+      "returned_mass_from_initial_minus_final_msun": 4.012,
+      "source_species_gross_ejecta_sum_msun": 4.016768760309,
+      "unlisted_or_rounding_residual_msun": -0.004768760309
+    },
+    "model_count": 120,
+    "negative_residual_outside_printed_quantization_count": 0,
+    "negative_source_species_residual_count": 38,
+    "release_history": "lifetime_integrated_per_star_only",
+    "tracked_elements_absent": [
+      "S",
+      "Ca",
+      "Fe"
+    ],
+    "tracked_elements_directly_represented": [
+      "H",
+      "He",
+      "C",
+      "N",
+      "O",
+      "Ne",
+      "Mg",
+      "Si"
+    ]
+  },
+  "source_identity": {
+    "archive_bytes": 133655,
+    "archive_md5": "cbd99c59cf0422b921c738ae18fd37eb",
+    "archive_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/huscher2025_agb/AGB_files_Huscher_et_al_2025.zip",
+    "archive_sha256": "dc559ee272d602bcfe95ab0050cb388eed670986e3e62234b4bd9126d0128199",
+    "article_doi": "10.3847/1538-4357/ae0199",
+    "data_doi": "10.5281/zenodo.17635255",
+    "license": "cc-by-4.0",
+    "license_verified": true,
+    "metadata_bytes": 4747,
+    "metadata_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/huscher2025_agb/zenodo_record_17635255.json",
+    "metadata_sha256": "ed91c30cc8c1c84360585911cb87c2ad277ae7b3ea6b374f82918c599ad82758",
+    "zenodo_record_id": 17635255
+  },
+  "status": "candidate_acquired_license_verified_population_normalization_blocked"
+}

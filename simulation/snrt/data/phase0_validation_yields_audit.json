@@ -1,0 +1,213 @@
+{
+  "asset": {
+    "path": "/home/kjhan/BACKUP/lagRamses/patch/lagRamses/phase0_validation_yields.dat",
+    "bytes": 1977,
+    "sha256": "dd2f94818b7d1d9e7008d2da08998d7100d651e7bb25271abf2ebcb8816d5ea6"
+  },
+  "format": "canonical_phase0_ascii",
+  "status": "fail",
+  "production_gate": {
+    "pass": false,
+    "blocking_reasons": [
+      "required_channel_1_mass_range_not_covered",
+      "required_channel_1_not_approved:pending_physics_approval",
+      "required_channel_2_mass_range_not_covered",
+      "required_channel_2_not_approved:pending_physics_approval",
+      "required_channel_3_mass_range_not_covered",
+      "required_channel_3_not_approved:pending_physics_approval",
+      "missing_provenance_sidecar"
+    ]
+  },
+  "summary": {
+    "rows": 9,
+    "valid_rows": 9,
+    "channels_present": [
+      1,
+      2,
+      3
+    ],
+    "required_channels": [
+      1,
+      2,
+      3
+    ],
+    "optional_channels": [
+      4,
+      5
+    ],
+    "net_yields_used_as_gas_source": false
+  },
+  "row_validation": {
+    "rows": 9,
+    "invalid_channel": 0,
+    "non_finite": 0,
+    "non_positive_initial_mass": 0,
+    "negative_birth_metallicity": 0,
+    "negative_age": 0,
+    "negative_returned_mass": 0,
+    "negative_remnant_mass": 0,
+    "negative_energy": 0,
+    "negative_ejecta": 0,
+    "ejecta_returned_closure_failure": 0,
+    "mass_budget_failure": 0
+  },
+  "duplicate_coordinates": [],
+  "channels": {
+    "1": {
+      "name": "wind",
+      "approval": "pending_physics_approval",
+      "row_count": 3,
+      "mass_count": 1,
+      "metallicity_count": 1,
+      "age_count": 3,
+      "mass_range_msun": [
+        30.0,
+        30.0
+      ],
+      "metallicity_range_mass_fraction": [
+        0.0,
+        0.0
+      ],
+      "age_range_yr": [
+        0.0,
+        13800000000.0
+      ],
+      "cartesian_grid_expected_rows": 3,
+      "cartesian_grid_missing_rows": 0,
+      "missing_coordinate_examples": [],
+      "cartesian_grid_complete": true,
+      "age_zero_present": true
+    },
+    "2": {
+      "name": "AGB",
+      "approval": "pending_physics_approval",
+      "row_count": 3,
+      "mass_count": 1,
+      "metallicity_count": 1,
+      "age_count": 3,
+      "mass_range_msun": [
+        3.0,
+        3.0
+      ],
+      "metallicity_range_mass_fraction": [
+        0.0,
+        0.0
+      ],
+      "age_range_yr": [
+        0.0,
+        13800000000.0
+      ],
+      "cartesian_grid_expected_rows": 3,
+      "cartesian_grid_missing_rows": 0,
+      "missing_coordinate_examples": [],
+      "cartesian_grid_complete": true,
+      "age_zero_present": true
+    },
+    "3": {
+      "name": "SNII",
+      "approval": "pending_physics_approval",
+      "row_count": 3,
+      "mass_count": 1,
+      "metallicity_count": 1,
+      "age_count": 3,
+      "mass_range_msun": [
+        20.0,
+        20.0
+      ],
+      "metallicity_range_mass_fraction": [
+        0.0,
+        0.0
+      ],
+      "age_range_yr": [
+        0.0,
+        13800000000.0
+      ],
+      "cartesian_grid_expected_rows": 3,
+      "cartesian_grid_missing_rows": 0,
+      "missing_coordinate_examples": [],
+      "cartesian_grid_complete": true,
+      "age_zero_present": true
+    },
+    "4": {
+      "name": "SNIa",
+      "approval": "not_implemented",
+      "row_count": 0,
+      "mass_count": 0,
+      "metallicity_count": 0,
+      "age_count": 0,
+      "mass_range_msun": null,
+      "metallicity_range_mass_fraction": null,
+      "age_range_yr": null,
+      "cartesian_grid_expected_rows": 0,
+      "cartesian_grid_missing_rows": 0,
+      "missing_coordinate_examples": [],
+      "cartesian_grid_complete": false,
+      "age_zero_present": false
+    },
+    "5": {
+      "name": "PISN",
+      "approval": "not_implemented",
+      "row_count": 0,
+      "mass_count": 0,
+      "metallicity_count": 0,
+      "age_count": 0,
+      "mass_range_msun": null,
+      "metallicity_range_mass_fraction": null,
+      "age_range_yr": null,
+      "cartesian_grid_expected_rows": 0,
+      "cartesian_grid_missing_rows": 0,
+      "missing_coordinate_examples": [],
+      "cartesian_grid_complete": false,
+      "age_zero_present": false
+    }
+  },
+  "runtime_coverage": {
+    "1": {
+      "mass": false,
+      "age": true,
+      "metallicity": null,
+      "mass_required_range_msun": [
+        0.8,
+        120.0
+      ],
+      "age_required_range_yr": [
+        0.0,
+        13800000000.0
+      ]
+    },
+    "2": {
+      "mass": false,
+      "age": true,
+      "metallicity": null,
+      "mass_required_range_msun": [
+        1.0,
+        8.0
+      ],
+      "age_required_range_yr": [
+        0.0,
+        13800000000.0
+      ]
+    },
+    "3": {
+      "mass": false,
+      "age": true,
+      "metallicity": null,
+      "mass_required_range_msun": [
+        8.0,
+        40.0
+      ],
+      "age_required_range_yr": [
+        0.0,
+        13800000000.0
+      ]
+    }
+  },
+  "zero_age_release_violations": [],
+  "monotonic_violations": [],
+  "provenance": {
+    "required": true,
+    "path": "/home/kjhan/BACKUP/lagRamses/patch/lagRamses/phase0_validation_yields.dat.json",
+    "exists": false
+  },
+  "parse_errors": []
+}

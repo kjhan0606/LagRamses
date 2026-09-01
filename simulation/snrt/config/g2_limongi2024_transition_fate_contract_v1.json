@@ -1,0 +1,86 @@
+{
+  "schema": "snrt-g2-limongi2024-transition-fate-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "purpose": "Constrain the solar-metallicity 8--9.22 Msun terminal-fate seam without manufacturing event yields or treating a discrete progenitor as a universal channel boundary.",
+  "source": {
+    "candidate_id": "limongi2024_transition_fates",
+    "article_citation": "Limongi et al. 2024, ApJS 270, 29",
+    "article_doi": "10.3847/1538-4365/ad12c1",
+    "article_url": "https://iopscience.iop.org/article/10.3847/1538-4365/ad12c1",
+    "table4_url": "https://content.cld.iop.org/journals/0067-0049/270/2/29/revision1/apjsad12c1t4_mrt.txt",
+    "release_root_relative_path": "limongi2024_transition_fates",
+    "files": {
+      "ARTICLE.html": {
+        "bytes": 576338,
+        "sha256": "89b85f83185766d791f18e1db22abe5f8f68e2e2e6f88179c3ca661d72837905"
+      },
+      "TABLE4_TP_MRT.txt": {
+        "bytes": 87274,
+        "sha256": "8ca914e8373b28ec58b7c2928d85801b68e917d18a792b408f3de141989bc664"
+      }
+    }
+  },
+  "review_scope": {
+    "metallicity": "source_solar",
+    "rotation": "nonrotating",
+    "article_initial_mass_range_msun": [7.0, 15.0],
+    "table4_tp_model_masses_msun": [7.0, 7.5, 8.0, 8.5, 8.8, 9.0, 9.05, 9.1, 9.15, 9.2],
+    "table4_expected_data_row_count": 963,
+    "table4_expected_pulse_count_by_mass": {
+      "7.00": 27,
+      "7.50": 23,
+      "8.00": 25,
+      "8.50": 67,
+      "8.80": 81,
+      "9.00": 116,
+      "9.05": 170,
+      "9.10": 159,
+      "9.15": 193,
+      "9.20": 102
+    },
+    "article_ccsn_model_masses_msun": [9.22, 9.25, 9.3, 9.5, 9.8, 10.0, 11.0, 12.0, 13.0, 15.0]
+  },
+  "source_reported_fate_statements": {
+    "classical_agb_co_core_model_msun": 7.0,
+    "sagb_onemg_model_interval_msun": [7.5, 9.2],
+    "hybrid_or_onemg_white_dwarf_model_interval_msun": [7.5, 8.0],
+    "potential_ecsn_model_interval_msun": [8.5, 9.2],
+    "ordinary_core_collapse_lower_model_mass_msun": 9.22,
+    "reference_electron_capture_co_core_mass_msun": 1.415,
+    "reference_minimum_potential_ecsn_mass_interval_msun": [8.5, 8.8],
+    "alternate_electron_capture_co_core_mass_msun": 1.36,
+    "alternate_minimum_potential_ecsn_mass_msun": 8.3,
+    "terminal_fate_requires_extrapolated_thermal_pulse_evolution": true,
+    "potential_ecsn_is_not_a_deterministic_event_assignment": true
+  },
+  "project_transition_policy": {
+    "runtime_channel_3_lower_boundary_msun": 8.0,
+    "runtime_boundary_supported_as_universal_explosion_threshold": false,
+    "continuous_fate_interpolation_allowed": false,
+    "cross_metallicity_extrapolation_allowed": false,
+    "cross_rotation_extrapolation_allowed": false,
+    "stockinger_e8p8_anchor_may_define_population_fate_law": false,
+    "unresolved_runtime_edge_interval_msun": [8.0, 8.8],
+    "unresolved_discrete_model_seam_msun": [9.2, 9.22],
+    "canonical_rows_emitted": 0,
+    "canonical_yields_available": false,
+    "canonical_energy_available": false,
+    "canonical_momentum_available": false,
+    "age_resolved_composition_history_available": false,
+    "runtime_promotion_allowed": false
+  },
+  "use_terms": {
+    "article_license": "CC BY 4.0",
+    "redistribution_with_attribution_allowed": true,
+    "license_evidence_required_in_article_html": true
+  },
+  "approval": {
+    "source_semantics_reviewed": true,
+    "physics_fate_policy_selected": false,
+    "runtime_channel_assignment_approved": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

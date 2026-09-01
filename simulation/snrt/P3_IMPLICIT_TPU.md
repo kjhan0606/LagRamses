@@ -2,9 +2,19 @@
 
 ## Local implicit H/He recombination
 
-After photon-driven primary and secondary ionizations, the P3 closure solves case-B recombination with a backward-Euler update. At fixed electron density the H II, He II, and He III fractions are analytic. The remaining one-dimensional electron-density constraint is solved by 24 fixed bisection iterations per cell.
+The standalone P3 closure solves case-B recombination with a backward-Euler
+update. At fixed electron density the H II, He II, and He III fractions are
+analytic. The remaining one-dimensional electron-density constraint is solved
+by 24 fixed bisection iterations per cell.
 
 This avoids a data-dependent Newton loop, preserves non-negative fractions, and maps directly to XLA. In the stiff pure-H validation (`alpha_B n_e dt=2.58`), the result is `x_HII=0.457505`, matching the analytic backward-Euler root.
+
+The production transport-coupled multiphysics solver no longer applies this
+as a separate post-absorption pass. H recombination is integrated in the
+analytic neutral-fraction relaxation, while helium uses a local
+backward-Euler solve inside a 20-iteration opacity fixed point. This is the
+B2 path; the standalone test above remains a unit test of the older reusable
+implicit primitive.
 
 ## Spatial sharding
 

@@ -4,16 +4,19 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --time=01:00:00
-#SBATCH --output=/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/p6_conservative_s8_fp64_%j.log
-#SBATCH --error=/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/p6_conservative_s8_fp64_%j.err
+#SBATCH --output=/gpfs/kjhan/LRD_JWST/simulation/snrt/p6_conservative_s8_fp64_%j.log
+#SBATCH --error=/gpfs/kjhan/LRD_JWST/simulation/snrt/p6_conservative_s8_fp64_%j.err
 
 set -euo pipefail
-cd /home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt
+
+readonly input_manifest="/gpfs/kjhan/LRD_JWST/manifests/lrd_jwst_external_assets.json"
+[[ -s "$input_manifest" ]] || { echo "missing input manifest: $input_manifest" >&2; exit 1; }
+cd /gpfs/kjhan/LRD_JWST/simulation/snrt
 
 .venv/bin/python tools/p6_run_conservative_thermochemical_pilot.py \
   --input data/p4_coeval_static_rt_input.h5 \
   --photon-metadata data/p4_pilot_agn_photon_ledger.json \
-  --thermal-atlas data/p4_validation_thermal_atlas.h5 \
+  --thermal-atlas data/production_metal_thermal_atlas_v2.h5 \
   --scale-factor 0.208365238497105 \
   --output data/p6_coeval_conservative_primary_s8_fp64_6p37myr.h5 \
   --duration-myr 6.3697581 \

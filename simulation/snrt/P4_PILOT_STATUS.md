@@ -12,10 +12,22 @@ metadata records both scale factors and their difference. The artifact is for
 S_N interface and numerical tests only, never for physical conclusions.
 
 A coeval science input now requires an adaptive-leaf resampler for the complete
-output 00017 HDF5 hierarchy through its populated level 15.
+output 00017 HDF5 hierarchy through its populated level 15. The implementation
+is complete and passes a synthetic AMR conservation test in
+`tests/p4_hdf5_staging.py`: it streams all populated levels, uses only
+`son_flag = 0` leaves, and requires unit coverage and a density mass-balance
+check. The field map also records whether each quantity is a snapshot dataset,
+an explicitly derived quantity, or a pilot constant.
 
-The adaptive-leaf resampler is now complete. It streamed all populated levels,
-used only `son_flag = 0` leaves, and covered each 32-cubed analysis cell with
-volume weight one to floating-point precision. The resulting coeval static RT
-input uses output 00017 gas and the output 00017 instantaneous sink photon
-ledger at `aexp = 0.208497764676753`.
+The real output 00017 HDF5 payload remains external because it is
+866,729,878,508 bytes; its `info_00017.txt`, hydro descriptor, and build
+sidecars are now copied under `/gpfs/kjhan/LRD_JWST`, and both thermal atlases
+are present locally with verified source SHA256 values. A real-value preflight
+passes without loading the HDF5 payload: levels 1--15, six mapped datasets,
+HDF5 `gamma=1.6666667`, and ten ledger sources are present.
+
+The field map now decodes the raw conservative variables: momentum is divided
+by density for velocity, total energy is reduced to thermal pressure, and
+`uold_6` is converted to `Z/Z_sun` using the producing 0.02 solar mass
+fraction. Dust, non-equilibrium ionization, and H₂ remain explicit
+non-production placeholders, so the production-contract gate remains closed.

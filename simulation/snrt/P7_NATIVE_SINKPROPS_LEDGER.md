@@ -11,7 +11,7 @@ No production source patch or recompilation is required.
 ## Conversion
 
 ```bash
-cd /home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt
+cd /gpfs/kjhan/LRD_JWST/simulation/snrt
 python tools/p7_convert_sinkprops.py \
   --input /gpfs/kjhan/Run_JWST/opt_run/sink_00017.dat \
   --output data/agn_coarse_state_00017.jsonl

@@ -1,0 +1,535 @@
+{
+  "audit_code_sha256": "1de8e92c8b4d783517fb636f23a3a1a09b526f15859067677b45d542f28e072a",
+  "blockers": [
+    "no_explicit_redistribution_license_identified",
+    "three_models_do_not_define_a_continuous_8_to_11_msun_grid",
+    "solar_and_zero_metallicity_models_cannot_be_interpolated_as_one_sequence",
+    "nitrogen_missing_from_reduced_chemistry_vector",
+    "radioactive_decay_and_tracer_projection_not_approved",
+    "no_canonical_terminal_momentum_field",
+    "source_selection_and_cross_source_seam_not_approved"
+  ],
+  "canonical_rows_emitted": 0,
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_stockinger2020_candidate_contract_v1.json",
+  "contract_sha256": "283b7587c2e054402b1a7510d0c6c0744ad9190e95653c047210bbcebd7ed6b9",
+  "diagnostic_explosion_energy": {
+    "models": {
+      "e8.8": {
+        "finite_sample_count": 298,
+        "hdf5_group": "e8",
+        "last_finite_diagnostic_energy_1e50_erg": 0.9539027937090561,
+        "last_finite_diagnostic_energy_erg": 9.53902793709056e+49,
+        "last_finite_time_postbounce_s": 3.1294983277591975,
+        "maximum_diagnostic_energy_1e50_erg": 0.9577277131082831,
+        "maximum_time_postbounce_s": 2.2263545150501676,
+        "vsh_attribute": "1e50 erg",
+        "vsh_used": false
+      },
+      "s9.0": {
+        "finite_sample_count": 297,
+        "hdf5_group": "s9",
+        "last_finite_diagnostic_energy_1e50_erg": 0.5250178516256706,
+        "last_finite_diagnostic_energy_erg": 5.250178516256707e+49,
+        "last_finite_time_postbounce_s": 3.1294983277591975,
+        "maximum_diagnostic_energy_1e50_erg": 0.5250628266673871,
+        "maximum_time_postbounce_s": 3.118996655518395,
+        "vsh_attribute": "1e50 erg",
+        "vsh_used": false
+      },
+      "z9.6": {
+        "finite_sample_count": 137,
+        "hdf5_group": "z9",
+        "last_finite_diagnostic_energy_1e50_erg": 0.8602597812628994,
+        "last_finite_diagnostic_energy_erg": 8.602597812628994e+49,
+        "last_finite_time_postbounce_s": 1.4492307692307693,
+        "maximum_diagnostic_energy_1e50_erg": 0.8603047563046159,
+        "maximum_time_postbounce_s": 1.4387290969899666,
+        "vsh_attribute": "1e50 erg",
+        "vsh_used": false
+      }
+    },
+    "time_maximum_postbounce_s": 3.14,
+    "time_minimum_postbounce_s": 0.0,
+    "time_sample_count": 300,
+    "vsh_metadata_semantics_pass": false,
+    "vsh_quarantined": true
+  },
+  "gate": "G2",
+  "model_grid": {
+    "cross_model_interpolation_allowed": false,
+    "model_count": 3,
+    "models": {
+      "e8.8": {
+        "collapse_type": "electron_capture_supernova",
+        "energy_model": "parametric_neutrino_transport_calibrated_to_1e50_erg",
+        "final_time_days": 115.742,
+        "final_total_ejecta_msun": 4.488,
+        "final_yield_file": "e8.8_yields_115.742d.txt",
+        "metallicity": "solar",
+        "radioactive_or_unresolved_tracer_species": [
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Ni56",
+          "Co56",
+          "Tr"
+        ],
+        "tracked_elements_absent": [
+          "N"
+        ],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "zams_mass_msun": 8.8
+      },
+      "s9.0": {
+        "collapse_type": "low_mass_iron_core_ccsn",
+        "energy_model": "self_consistent_vertex_prometheus",
+        "final_time_days": 19.738,
+        "final_total_ejecta_msun": 7.379,
+        "final_yield_file": "s9.0_yields_019.738d.txt",
+        "metallicity": "solar",
+        "radioactive_or_unresolved_tracer_species": [
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Ni56",
+          "Co56",
+          "Tr"
+        ],
+        "tracked_elements_absent": [
+          "N"
+        ],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "zams_mass_msun": 9.0
+      },
+      "z9.6": {
+        "collapse_type": "low_mass_iron_core_ccsn",
+        "energy_model": "self_consistent_vertex_prometheus",
+        "final_time_days": 104.2,
+        "final_total_ejecta_msun": 8.232,
+        "final_yield_file": "z9.6_yields_104.200d.txt",
+        "metallicity": "zero",
+        "radioactive_or_unresolved_tracer_species": [
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Ni56",
+          "Co56",
+          "Tr"
+        ],
+        "tracked_elements_absent": [
+          "N"
+        ],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "zams_mass_msun": 9.6
+      }
+    },
+    "zams_mass_msun": [
+      8.8,
+      9.0,
+      9.6
+    ]
+  },
+  "production_ready": false,
+  "quality_findings": {
+    "nitrogen_missing_from_all_event_yield_vectors": true,
+    "precollapse_wind_in_event_yield_tables": false,
+    "radioactive_decay_projection_complete": false,
+    "vsh_dataset_used": false,
+    "vsh_metadata_semantics_pass": false
+  },
+  "schema": "snrt-g2-stockinger2020-candidate-audit",
+  "schema_version": 1,
+  "semantic_firewalls": {
+    "cross_model_interpolation_allowed": false,
+    "event_snapshots_as_stellar_age_history_allowed": false,
+    "precollapse_wind_and_terminal_event_double_count_forbidden": true,
+    "terminal_yields_as_stable_decay_products_allowed": false
+  },
+  "source_identity": {
+    "article_doi": "10.1093/mnras/staa1691",
+    "candidate_id": "stockinger2020_low_mass_ccsn",
+    "file_count": 12,
+    "files": {
+      "INDEX.html": {
+        "bytes": 28021,
+        "sha256": "933d5dfa85868489da66f22305a88a3595671c95fb903a12aaeca97b7431ebe7"
+      },
+      "e8.8_yields_004.792d.txt": {
+        "bytes": 976,
+        "sha256": "a37db4f070baaa22a0eeb96ec1f21c315bc549bd211c7bbfbd668217d2c2d642"
+      },
+      "e8.8_yields_005.208d.txt": {
+        "bytes": 976,
+        "sha256": "2539a3528880041ae25cf29da797dd5ed4e6cfe357e036230502581b11fbb025"
+      },
+      "e8.8_yields_115.742d.txt": {
+        "bytes": 976,
+        "sha256": "02fd70c5a088ce1ff1a2e22af8934007d8e08baccb36992fdbc9df4a79f3bd06"
+      },
+      "s9.0_progenitor_composition.txt": {
+        "bytes": 1050,
+        "sha256": "2a69b22725cc5bc64a3b602525dd10e5516d863d94663b382a3034e836c74542"
+      },
+      "s9.0_yields_001.974d.txt": {
+        "bytes": 1007,
+        "sha256": "7af3d3bd27bbbdf45a2f8c08591a2cebacd4791137aa983cae023fad04866326"
+      },
+      "s9.0_yields_003.278d.txt": {
+        "bytes": 1007,
+        "sha256": "949e2f0032085601b056e3fac9e0f270cc3b26ffbac941a4df9b07f3ff9a0999"
+      },
+      "s9.0_yields_019.738d.txt": {
+        "bytes": 1007,
+        "sha256": "5a0030da18092fb6aa253d1323f9766d8387a72b0cd46292d2fbc690f7fba1b1"
+      },
+      "shock_energy_kick.h5": {
+        "bytes": 54552,
+        "sha256": "3b3742e7de18804147c391d4c0306a13ab38a3ea2235abba447621bcc74e50d2"
+      },
+      "z9.6_yields_001.153d.txt": {
+        "bytes": 976,
+        "sha256": "29acda88a99c9bd278871fb19f7e2a3a5ecf22b63309ddf6e2943c2ce121aa38"
+      },
+      "z9.6_yields_001.389d.txt": {
+        "bytes": 976,
+        "sha256": "602a6c99890547d1d168005eae44d97e4bb7b45fa66a46f87b67a9ee9a19cae8"
+      },
+      "z9.6_yields_104.200d.txt": {
+        "bytes": 976,
+        "sha256": "76ed17b511896dfcd35588929bfc1735687f6714e244d07450e1b842d21ed8f6"
+      }
+    },
+    "redistribution_license_verified": false,
+    "research_access_verified": true,
+    "source_page": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/Stockinger2020/"
+  },
+  "status": "candidate_acquired_energy_yields_audited_license_unresolved",
+  "yield_mass_closure": {
+    "maximum_absolute_species_sum_residual_msun": 0.0010305937000012477,
+    "pass": true,
+    "tolerance_msun": 0.0011
+  },
+  "yield_snapshots": {
+    "e8.8": [
+      {
+        "file": "e8.8_yields_004.792d.txt",
+        "grid_mass_closure_residual_msun": -0.00020791600000080734,
+        "positive_radial_velocity_mass_closure_residual_msun": -0.0002481300000001241,
+        "reported_total_grid_mass_msun": 4.488,
+        "reported_total_positive_radial_velocity_mass_msun": 4.488,
+        "species": [
+          "n",
+          "p",
+          "He4",
+          "C12",
+          "O16",
+          "Ne20",
+          "Mg24",
+          "Si28",
+          "S32",
+          "Ar36",
+          "Ca40",
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Ni56",
+          "Co56",
+          "Fe56",
+          "Tr"
+        ],
+        "species_count": 18,
+        "species_sum_grid_mass_msun": 4.487792084,
+        "species_sum_positive_radial_velocity_mass_msun": 4.48775187,
+        "time_days": 4.792
+      },
+      {
+        "file": "e8.8_yields_005.208d.txt",
+        "grid_mass_closure_residual_msun": -0.00020799200000087836,
+        "positive_radial_velocity_mass_closure_residual_msun": -0.0002480100000008534,
+        "reported_total_grid_mass_msun": 4.488,
+        "reported_total_positive_radial_velocity_mass_msun": 4.488,
+        "species": [
+          "n",
+          "p",
+          "He4",
+          "C12",
+          "O16",
+          "Ne20",
+          "Mg24",
+          "Si28",
+          "S32",
+          "Ar36",
+          "Ca40",
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Ni56",
+          "Co56",
+          "Fe56",
+          "Tr"
+        ],
+        "species_count": 18,
+        "species_sum_grid_mass_msun": 4.4877920079999996,
+        "species_sum_positive_radial_velocity_mass_msun": 4.48775199,
+        "time_days": 5.208
+      },
+      {
+        "file": "e8.8_yields_115.742d.txt",
+        "grid_mass_closure_residual_msun": -0.00020573100000031985,
+        "positive_radial_velocity_mass_closure_residual_msun": -0.00020573100000031985,
+        "reported_total_grid_mass_msun": 4.488,
+        "reported_total_positive_radial_velocity_mass_msun": 4.488,
+        "species": [
+          "n",
+          "p",
+          "He4",
+          "C12",
+          "O16",
+          "Ne20",
+          "Mg24",
+          "Si28",
+          "S32",
+          "Ar36",
+          "Ca40",
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Ni56",
+          "Co56",
+          "Fe56",
+          "Tr"
+        ],
+        "species_count": 18,
+        "species_sum_grid_mass_msun": 4.487794269,
+        "species_sum_positive_radial_velocity_mass_msun": 4.487794269,
+        "time_days": 115.742
+      }
+    ],
+    "s9.0": [
+      {
+        "file": "s9.0_yields_001.974d.txt",
+        "grid_mass_closure_residual_msun": 0.0001801032899999555,
+        "positive_radial_velocity_mass_closure_residual_msun": -0.00017007669000079773,
+        "reported_total_grid_mass_msun": 7.378,
+        "reported_total_positive_radial_velocity_mass_msun": 7.365,
+        "species": [
+          "n",
+          "p",
+          "He4",
+          "C12",
+          "O16",
+          "Ne20",
+          "Mg24",
+          "Si28",
+          "S32",
+          "Ar36",
+          "Ca40",
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Fe54",
+          "Ni56",
+          "Co56",
+          "Fe56",
+          "Tr"
+        ],
+        "species_count": 19,
+        "species_sum_grid_mass_msun": 7.37818010329,
+        "species_sum_positive_radial_velocity_mass_msun": 7.364829923309999,
+        "time_days": 1.974
+      },
+      {
+        "file": "s9.0_yields_003.278d.txt",
+        "grid_mass_closure_residual_msun": -0.0008829974200006419,
+        "positive_radial_velocity_mass_closure_residual_msun": 0.000701680509999747,
+        "reported_total_grid_mass_msun": 7.377,
+        "reported_total_positive_radial_velocity_mass_msun": 7.375,
+        "species": [
+          "n",
+          "p",
+          "He4",
+          "C12",
+          "O16",
+          "Ne20",
+          "Mg24",
+          "Si28",
+          "S32",
+          "Ar36",
+          "Ca40",
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Fe54",
+          "Ni56",
+          "Co56",
+          "Fe56",
+          "Tr"
+        ],
+        "species_count": 19,
+        "species_sum_grid_mass_msun": 7.376117002579999,
+        "species_sum_positive_radial_velocity_mass_msun": 7.37570168051,
+        "time_days": 3.278
+      },
+      {
+        "file": "s9.0_yields_019.738d.txt",
+        "grid_mass_closure_residual_msun": 0.00017581479000128297,
+        "positive_radial_velocity_mass_closure_residual_msun": 0.00017581468000127387,
+        "reported_total_grid_mass_msun": 7.379,
+        "reported_total_positive_radial_velocity_mass_msun": 7.379,
+        "species": [
+          "n",
+          "p",
+          "He4",
+          "C12",
+          "O16",
+          "Ne20",
+          "Mg24",
+          "Si28",
+          "S32",
+          "Ar36",
+          "Ca40",
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Fe54",
+          "Ni56",
+          "Co56",
+          "Fe56",
+          "Tr"
+        ],
+        "species_count": 19,
+        "species_sum_grid_mass_msun": 7.379175814790001,
+        "species_sum_positive_radial_velocity_mass_msun": 7.379175814680001,
+        "time_days": 19.738
+      }
+    ],
+    "z9.6": [
+      {
+        "file": "z9.6_yields_001.153d.txt",
+        "grid_mass_closure_residual_msun": -0.001008889999999596,
+        "positive_radial_velocity_mass_closure_residual_msun": -3.654919999895867e-05,
+        "reported_total_grid_mass_msun": 8.233,
+        "reported_total_positive_radial_velocity_mass_msun": 8.232,
+        "species": [
+          "n",
+          "p",
+          "He4",
+          "C12",
+          "O16",
+          "Ne20",
+          "Mg24",
+          "Si28",
+          "S32",
+          "Ar36",
+          "Ca40",
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Ni56",
+          "Co56",
+          "Fe56",
+          "Tr"
+        ],
+        "species_count": 18,
+        "species_sum_grid_mass_msun": 8.231991110000001,
+        "species_sum_positive_radial_velocity_mass_msun": 8.2319634508,
+        "time_days": 1.153
+      },
+      {
+        "file": "z9.6_yields_001.389d.txt",
+        "grid_mass_closure_residual_msun": -0.001007617800000915,
+        "positive_radial_velocity_mass_closure_residual_msun": -0.0010305937000012477,
+        "reported_total_grid_mass_msun": 8.233,
+        "reported_total_positive_radial_velocity_mass_msun": 8.233,
+        "species": [
+          "n",
+          "p",
+          "He4",
+          "C12",
+          "O16",
+          "Ne20",
+          "Mg24",
+          "Si28",
+          "S32",
+          "Ar36",
+          "Ca40",
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Ni56",
+          "Co56",
+          "Fe56",
+          "Tr"
+        ],
+        "species_count": 18,
+        "species_sum_grid_mass_msun": 8.2319923822,
+        "species_sum_positive_radial_velocity_mass_msun": 8.2319694063,
+        "time_days": 1.389
+      },
+      {
+        "file": "z9.6_yields_104.200d.txt",
+        "grid_mass_closure_residual_msun": 1.1316000012584482e-06,
+        "positive_radial_velocity_mass_closure_residual_msun": 1.1316000012584482e-06,
+        "reported_total_grid_mass_msun": 8.232,
+        "reported_total_positive_radial_velocity_mass_msun": 8.232,
+        "species": [
+          "n",
+          "p",
+          "He4",
+          "C12",
+          "O16",
+          "Ne20",
+          "Mg24",
+          "Si28",
+          "S32",
+          "Ar36",
+          "Ca40",
+          "Ti44",
+          "Cr48",
+          "Fe52",
+          "Ni56",
+          "Co56",
+          "Fe56",
+          "Tr"
+        ],
+        "species_count": 18,
+        "species_sum_grid_mass_msun": 8.2320011316,
+        "species_sum_positive_radial_velocity_mass_msun": 8.2320011316,
+        "time_days": 104.2
+      }
+    ]
+  }
+}

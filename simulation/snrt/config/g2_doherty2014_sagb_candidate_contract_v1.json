@@ -1,0 +1,117 @@
+{
+  "schema": "snrt-g2-doherty2014-sagb-candidate-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source": {
+    "candidate_id": "doherty2014_sagb",
+    "article_citations": [
+      "Doherty et al. 2014, MNRAS 437, 195",
+      "Doherty et al. 2014, MNRAS 441, 582"
+    ],
+    "article_dois": [
+      "10.1093/mnras/stt1877",
+      "10.1093/mnras/stu571"
+    ],
+    "source_page": "https://users.monash.edu/~cdoherty/research/yields.html",
+    "release_root_relative_path": "doherty2014_sagb",
+    "files": {
+      "INDEX.html": {
+        "bytes": 1927,
+        "sha256": "0909db5cf86a9493e2fc5972da31dff6795b56c051219c394b80bf4bb5fde19c"
+      },
+      "TABLE1-VW93ML.txt": {
+        "bytes": 46964,
+        "sha256": "56002a6871e02c45998b2097ea6638cdf21fd831a4e0baef40e01c9253e17b80"
+      },
+      "TABLE2-VW-MML.txt": {
+        "bytes": 43619,
+        "sha256": "b1b57b5d277260775966ccd8adffb997d91c7f6c5721b2b8cace0da3b6b2fcc0"
+      },
+      "TABLE3-8.5M-TESTCASES.txt": {
+        "bytes": 16724,
+        "sha256": "36743c234509cc3a1a013b3bcbc0d00535c6c41ab0eab194b10d7f6a78da10b7"
+      },
+      "TABLE4-InitialComposition.txt": {
+        "bytes": 1842,
+        "sha256": "d8e5cb633b593719e8f750ca502efac4e917efb9de620acab0f7322a4ff7c249"
+      },
+      "P3Doh14b-table1.txt": {
+        "bytes": 20262,
+        "sha256": "b059363032f8fd3478ecb8dc5f8813f76560cd8f68c0839bdafc5fe5fee44b89"
+      },
+      "P3Doh14b-table2.txt": {
+        "bytes": 23542,
+        "sha256": "68d88fe126df3f08db3faa5057789cd9b426c1e6aaf4fcd279cfc4f3fa5b82b6"
+      },
+      "P3Doh14b-table3.txt": {
+        "bytes": 10112,
+        "sha256": "fa11fe4896958415418429ec61747bb00b89947f1a561e8b471ed83e87b2d123"
+      },
+      "P3Doh14b-table4.txt": {
+        "bytes": 1458,
+        "sha256": "b2e4c905d06f2d36e2d2fbf58e487f9d0d1f657586faf84981ed1d98a2039413"
+      }
+    }
+  },
+  "release_semantics": {
+    "Yield": "net isotope yield integrated over the stellar wind in Msun",
+    "MassExp": "gross isotope mass expelled in the stellar wind in Msun",
+    "ProdFact": "log10 of wind-averaged abundance divided by initial abundance",
+    "E_columns": "alternative values after synthetic extrapolation of thermal pulses beyond numerical convergence",
+    "baseline_branch": "VW93 MassExp without synthetic thermal-pulse extrapolation",
+    "channel_ownership": "AGB/SAGB wind return only; no terminal ECSN or Fe-core-collapse ejecta"
+  },
+  "primary_grid": {
+    "TABLE1-VW93ML.txt": {
+      "metallicity_to_mass_msun": {
+        "0.02": [7.0, 7.5, 8.0, 8.5, 9.0],
+        "0.008": [6.5, 7.0, 7.5, 8.0, 8.5],
+        "0.004": [6.5, 7.0, 7.5, 8.0]
+      }
+    },
+    "P3Doh14b-table1.txt": {
+      "metallicity_to_mass_msun": {
+        "0.001": [6.5, 7.0, 7.5],
+        "0.0001": [6.5, 7.0, 7.5]
+      }
+    },
+    "model_count": 20,
+    "baseline_row_count_per_model": 41,
+    "optional_source_species": ["d"],
+    "tracked_elements": ["H", "He", "C", "N", "O", "Ne", "Mg", "Si", "S", "Ca", "Fe"],
+    "tracked_elements_absent": ["Ca"]
+  },
+  "uncertainty_files": [
+    "TABLE2-VW-MML.txt",
+    "TABLE3-8.5M-TESTCASES.txt",
+    "P3Doh14b-table2.txt",
+    "P3Doh14b-table3.txt"
+  ],
+  "known_release_findings": {
+    "literal_species_label_anomalies": {
+      "TABLE2-VW-MML.txt": ["al-6"]
+    },
+    "source_label_repair_allowed": false,
+    "calcium_isotope_rows_present": false,
+    "per_star_age_resolved_history_present": false,
+    "explicit_redistribution_license_identified": false
+  },
+  "audit_policy": {
+    "primary_global_net_gross_identity_tolerance_msun": 0.0011,
+    "canonical_rows_emitted": 0,
+    "synthetic_extrapolated_columns_selected": false,
+    "cross_source_interpolation_allowed": false,
+    "out_of_domain_extrapolation_allowed": false,
+    "source_label_repair_allowed": false,
+    "project_approval_required": true
+  },
+  "approval": {
+    "research_access_verified": true,
+    "redistribution_license_verified": false,
+    "physics_source_selected": false,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

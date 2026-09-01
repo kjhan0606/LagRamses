@@ -28,9 +28,23 @@ Use one spatial catalogue with three named source scenarios, all binned onto the
 
 The initial paper comparison should run all three scenarios on the same selected density peak. This directly separates stellar pre-ionization from AGN-driven hard-photon escape and prevents an AGN claim from being set by an unrecorded stellar prescription.
 
+For the registered transitional checkpoint `output_00011`, the native stellar
+metadata reader is now complete: it supplies star positions, current and
+initial masses, proper-time ages, birth metallicities, and yield-table
+progress values. It does not assign a stellar SED or photon luminosity, so the
+STAR row becomes usable only after an explicit population-synthesis asset and
+group integration contract are selected.
+
+The group integration contract is now implemented and tested in
+[`tools/p4_build_stellar_photon_ledger.py`](tools/p4_build_stellar_photon_ledger.py);
+see [`P4_STELLAR_SED.md`](P4_STELLAR_SED.md). The remaining blocker is the
+versioned production SED/IMF asset, not the CSV-to-`q_group_N_s` wiring.
+
 ## Deferred inputs
 
 - physical width of the selected cube and its final cell count
 - auditable chemistry source for an ionized `(T, n_H)` table
-- star-particle and sink/BH catalogue readers that preserve age, metallicity, and instantaneous accretion rate
-- final photon-energy group boundaries and each source SED integration
+- sink/BH catalogue reader that preserves instantaneous accretion rate
+- stellar population-synthesis SED asset, IMF, and its approved age/metallicity
+  interpolation range
+- production choice of source-side escape/birth-cloud attenuation parameters

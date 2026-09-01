@@ -1,0 +1,102 @@
+{
+  "schema": "snrt-g2-physical-yield-contract",
+  "schema_version": 1,
+  "status": "blocked_pending_source_approval",
+  "gate": "G2",
+  "population": {
+    "imf_configuration_key": "imf_id",
+    "allowed_imf_ids": {
+      "0": "Salpeter",
+      "1": "Kroupa",
+      "2": "Chabrier",
+      "3": "PopIII"
+    },
+    "default_imf_id": 1,
+    "default_imf_status": "provisional_not_approved",
+    "population_model_configuration_key": "population_model",
+    "allowed_population_models": ["single_star_ssp", "binary_ssp"],
+    "binary_assumptions_required": ["binary_fraction", "period/mass-ratio distribution", "mass-transfer prescription", "common-envelope prescription"],
+    "runtime_must_not_hard_code_imf": true
+  },
+  "channel_partition": {
+    "rule": "A progenitor may occupy overlapping raw mass ranges only when channel ownership is disjoint in evolutionary phase; no ejecta packet may be represented by two channels.",
+    "terminal_remnant_owner": {
+      "1": false,
+      "2": true,
+      "3": true,
+      "4": false,
+      "5": true
+    },
+    "channels": {
+      "1": {
+        "name": "wind",
+        "runtime_mass_range_msun": [0.8, 120.0],
+        "ownership": "pre-terminal stellar-wind mass loss only",
+        "must_exclude": ["TP-AGB terminal ejecta", "CCSN ejecta", "SNIa ejecta", "PISN/PPISN ejecta"]
+      },
+      "2": {
+        "name": "AGB",
+        "runtime_mass_range_msun": [1.0, 8.0],
+        "ownership": "AGB/thermal-pulse envelope release",
+        "must_exclude": ["wind packets already assigned to channel 1", "CCSN/SNIa/PISN ejecta"]
+      },
+      "3": {
+        "name": "SNII",
+        "runtime_mass_range_msun": [8.0, 40.0],
+        "ownership": "core-collapse ejecta and remnant/fallback",
+        "must_exclude": ["pre-SN wind packets already assigned to channel 1"]
+      },
+      "4": {
+        "name": "SNIa",
+        "status": "disabled_until_G3_DTD_gate",
+        "ownership": "binary event convolution, not ordinary IMF mass integration"
+      },
+      "5": {
+        "name": "PISN",
+        "status": "disabled_until_explicit_population_gate",
+        "ownership": "Pop-III/very-low-metallicity event only"
+      }
+    }
+  },
+  "cumulative_contract": {
+    "table_age_range_yr": [0.0, 13800000000.0],
+    "age_zero_anchor_required": true,
+    "age_zero_returned_mass": 0.0,
+    "age_zero_energy": 0.0,
+    "age_zero_ejecta": 0.0,
+    "returned_mass_definition": "actual material returned to gas, cumulative per initial stellar mass",
+    "ejecta_definition": "non-negative actual mass in the eleven tracked elements; sum(tracked_ejecta)<=returned_mass",
+    "untracked_ejecta_definition": "returned_mass-sum(tracked_ejecta); non-negative omitted-element mass deposited only into the generic metal scalar",
+    "untracked_ejecta_policy": "returned_mass_minus_sum_tracked_ejecta_deposited_as_generic_metals",
+    "net_yield_definition": "diagnostic newly produced/consumed material; never a gas-mass source",
+    "mass_closure": "initial_mass = living_mass + remnant_mass + returned_mass",
+    "energy_definition": "cumulative physical erg per initial star/population normalization",
+    "momentum_definition": "cumulative net directed momentum vector in physical g cm/s per initial star/population normalization, expressed in the stellar comoving frame",
+    "isotropic_source_momentum_vector": [0.0, 0.0, 0.0],
+    "isotropic_source_momentum_rule": "An unresolved isotropic wind or explosion has zero net source-frame vector momentum; do not encode scalar radial momentum along an arbitrary Cartesian direction.",
+    "advective_momentum_rule": "The runtime adds returned_mass times the source particle velocity separately, preserving the bulk momentum carried by returned material.",
+    "radial_momentum_rule": "Outward shell momentum is a non-negative scalar subgrid/deposition budget, not one of the three canonical source-frame vector components.",
+    "release_history": "must be cumulative or deterministically converted from a declared rate table exactly once"
+  },
+  "grid_contract": {
+    "axes": ["initial_mass_msun", "birth_metallicity_mass_fraction", "age_yr"],
+    "required_channels": [1, 2, 3],
+    "optional_channels": [4, 5],
+    "complete_cartesian_grid": true,
+    "all_runtime_mass_ranges_covered": true,
+    "explicit_upper_age_required": true,
+    "out_of_domain_policy": "fail_closed; no endpoint clamp or extrapolation"
+  },
+  "chemistry_scope": {
+    "mode": "reduced_chemistry_11",
+    "tracked": ["H", "He", "C", "N", "O", "Ne", "Mg", "Si", "S", "Ca", "Fe"],
+    "omitted_species_to_assess": ["Na", "Al", "Ar", "Ni", "Li", "F", "Ti", "Cr", "isotopes", "s/r-process species"],
+    "untracked_mass_handling": "Preserve omitted-element mass as returned_mass-sum(tracked); add it to generic metallicity but never fabricate an individual-element assignment.",
+    "publication_rule": "Do not describe the 11-field model as complete nucleosynthesis; quantify omitted-species effects before element-abundance claims."
+  },
+  "approval": {
+    "required_sidecar_fields": ["approval_id", "citation", "source_version", "source_sha256", "license_status", "provenance_status", "units", "IMF", "population_model", "channel_boundaries", "metallicity_definition", "solar_abundance_set", "remnant_model", "untracked_ejecta_policy", "conversion_code_sha256"],
+    "required_channel_status": {"1": "approved", "2": "approved", "3": "approved"},
+    "current_status": "blocked_no_approved_physical_asset"
+  }
+}

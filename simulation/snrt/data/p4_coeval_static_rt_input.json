@@ -1,9 +1,135 @@
 {
   "snapshot": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/pilot_rt_ledger/output_00017/data_00017.h5",
-  "info": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/pilot_rt_ledger/output_00017/info_00017.txt",
+  "info": "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger/output_00017/info_00017.txt",
+  "field_map": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p4_hdf5_field_map_pilot.json",
+  "field_map_schema_version": 1,
+  "field_contract": {
+    "density": {
+      "status": "dataset",
+      "dataset": "uold_1",
+      "unit": "code_density",
+      "averaging": "volume"
+    },
+    "velocity": [
+      {
+        "status": "dataset",
+        "dataset": "uold_2",
+        "unit": "code_momentum_density",
+        "averaging": "volume",
+        "quantity": "momentum_density",
+        "source_semantics": "raw conservative momentum density; divide by deposited density to obtain velocity"
+      },
+      {
+        "status": "dataset",
+        "dataset": "uold_3",
+        "unit": "code_momentum_density",
+        "averaging": "volume",
+        "quantity": "momentum_density",
+        "source_semantics": "raw conservative momentum density; divide by deposited density to obtain velocity"
+      },
+      {
+        "status": "dataset",
+        "dataset": "uold_4",
+        "unit": "code_momentum_density",
+        "averaging": "volume",
+        "quantity": "momentum_density",
+        "source_semantics": "raw conservative momentum density; divide by deposited density to obtain velocity"
+      }
+    ],
+    "thermal_pressure": {
+      "status": "derived",
+      "derive": "ideal_gas_pressure_from_conservative",
+      "depends_on": [
+        "density",
+        "velocity",
+        "total_energy_density"
+      ],
+      "gamma": 1.6666667
+    },
+    "total_energy_density": {
+      "status": "dataset",
+      "dataset": "uold_5",
+      "unit": "code_energy_density",
+      "averaging": "volume",
+      "source_semantics": "raw conservative total-energy density"
+    },
+    "temperature_k": {
+      "status": "missing"
+    },
+    "metal_density": {
+      "status": "dataset",
+      "dataset": "uold_6",
+      "unit": "code_density",
+      "averaging": "volume",
+      "source_semantics": "raw conservative metal mass density; imetal=6 in the producing build"
+    },
+    "metallicity_solar": {
+      "status": "derived",
+      "derive": "metallicity_from_density_and_metal_density",
+      "depends_on": [
+        "density",
+        "metal_density"
+      ],
+      "solar_mass_fraction": 0.02
+    },
+    "dust_to_metal": {
+      "status": "constant",
+      "constant": 0.0,
+      "reason": "Dust-to-metal normalization is not present in the current HDF5 contract; zero is a pilot placeholder and is not a dust science result.",
+      "unit": "dimensionless",
+      "averaging": "volume"
+    },
+    "dust_relative_abundance": {
+      "status": "missing"
+    },
+    "x_hii": {
+      "status": "constant",
+      "constant": 0.0,
+      "reason": "Initialize the static pilot as neutral until an audited ionization checkpoint field is available.",
+      "unit": "dimensionless",
+      "averaging": "volume"
+    },
+    "x_heii": {
+      "status": "constant",
+      "constant": 0.0,
+      "reason": "Initialize the static pilot as neutral until an audited ionization checkpoint field is available.",
+      "unit": "dimensionless",
+      "averaging": "volume"
+    },
+    "x_heiii": {
+      "status": "constant",
+      "constant": 0.0,
+      "reason": "Initialize the static pilot as neutral until an audited ionization checkpoint field is available.",
+      "unit": "dimensionless",
+      "averaging": "volume"
+    },
+    "x_h2": {
+      "status": "constant",
+      "constant": 0.0,
+      "reason": "Molecular hydrogen is not yet represented by an audited HDF5 field; zero is an explicit pilot placeholder.",
+      "unit": "dimensionless",
+      "averaging": "volume"
+    }
+  },
+  "production_contract_complete": false,
+  "snapshot_header_gamma": 1.6666667,
   "aexp": 0.208497764676753,
   "analysis_level": 15,
   "analysis_rule": "volume-conservative resampling of all intersecting RAMSES AMR leaf cells",
+  "resampled_fields": [
+    "density",
+    "velocity_0",
+    "velocity_1",
+    "velocity_2",
+    "total_energy_density",
+    "metal_density",
+    "dust_to_metal",
+    "x_hii",
+    "x_heii",
+    "x_heiii",
+    "x_h2"
+  ],
+  "density_mass_conservative": true,
   "populated_amr_levels": [
     1,
     2,
@@ -130,9 +256,12 @@
   "max_n_h_cm3": 44.432180127848554,
   "coverage_min": 0.9999999999999998,
   "coverage_max": 1.0000000000000002,
-  "thermal_initialization": "offline Grackle thermal-atlas equilibrium fallback",
-  "thermal_atlas": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_validation_thermal_atlas.h5",
-  "metallicity_solar": 1e-06,
-  "source_ledger": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_pilot_agn_photon_ledger.csv",
+  "mass_deposited_code": 35554183.91417865,
+  "mass_from_resampled_density_code": 35554183.914178655,
+  "mass_relative_error": 2.0955566340400833e-16,
+  "thermal_initialization": "mapped thermal_pressure field plus thermal atlas inversion",
+  "dust_initialization": "derived metallicity_solar times dust_to_metal",
+  "thermal_atlas": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_validation_thermal_atlas.h5",
+  "source_ledger": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_pilot_agn_photon_ledger.csv",
   "photon_source_count": 10
 }

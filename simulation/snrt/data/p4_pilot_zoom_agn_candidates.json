@@ -1,7 +1,7 @@
 {
   "purpose": "AGN candidate selection before photon-group SED assignment",
-  "agn_rate_ledger": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/pilot_agn_rate_ledger.csv",
-  "zoom_manifest": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_high_density_manifest.json",
+  "agn_rate_ledger": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/pilot_agn_rate_ledger.csv",
+  "zoom_manifest": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_high_density_manifest.json",
   "selection": {
     "left_edge_code": [
       0.52495205390625,

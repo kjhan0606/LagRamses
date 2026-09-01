@@ -1,0 +1,370 @@
+{
+  "status": "blocked",
+  "gate": "G2",
+  "source_selection_matrix": "config/g2_source_selection_matrix_v1.json",
+  "physical_contract": "config/g2_physics_contract_v1.json",
+  "configuration_test": "G2_CONFIGURATION_TEST_OK",
+  "population_ledger_test": "G2_POPULATION_LEDGER_RUN_OK",
+  "yield_asset_test": "STELLAR_YIELD_ASSET_TEST_OK",
+  "converter_test": "YIELD_CONVERTER_TEST_OK",
+  "source_adapter_test": "G2_SOURCE_ADAPTER_TEST_OK",
+  "source_adapter_closure_test": "G2_SOURCE_ADAPTER_CLOSURE_TEST_OK",
+  "reduced_chemistry_scope_test": "G2_REDUCED_CHEMISTRY_SCOPE_TEST_OK",
+  "limongi_decay_projection_test": "G2_LIMONGI_DECAY_PROJECTION_TEST_OK",
+  "nugrid_channel_projection_test": "G2_NUGRID_CHANNEL_PROJECTION_TEST_OK",
+  "feedback_energetics_sensitivity_test": "G2_FEEDBACK_ENERGETICS_SENSITIVITY_TEST_OK",
+  "huscher2025_candidate_test": "G2_HUSCHER2025_CANDIDATE_TEST_OK",
+  "boccioli_roberti2026_candidate_test": "G2_BOCCIOLI_ROBERTI2026_CANDIDATE_TEST_OK",
+  "doherty2014_sagb_candidate_test": "G2_DOHERTY2014_SAGB_CANDIDATE_TEST_OK",
+  "stockinger2020_candidate_test": "G2_STOCKINGER2020_CANDIDATE_TEST_OK",
+  "sukhbold2016_candidate_test": "G2_SUKHBOLD2016_CANDIDATE_TEST_OK",
+  "sukhbold2016_channel_projection_test": "G2_SUKHBOLD_CHANNEL_PROJECTION_TEST_OK",
+  "limongi2024_transition_fate_test": "G2_LIMONGI2024_TRANSITION_FATE_TEST_OK",
+  "roberti2024_ultralowz_candidate_test": "G2_ROBERTI2024_ULTRALOWZ_CANDIDATE_TEST_OK",
+  "heger_woosley2010_popiii_candidate_test": "G2_HEGER_WOOSLEY2010_POPIII_CANDIDATE_TEST_OK",
+  "baseline_metallicity_demand_test": "G2_BASELINE_METALLICITY_DEMAND_TEST_OK",
+  "candidate_grid_coverage_test": "G2_CANDIDATE_GRID_COVERAGE_TEST_OK",
+  "limongi_phase_mass_history_test": "G2_LIMONGI_PHASE_MASS_HISTORY_TEST_OK",
+  "fixture_status": "fail",
+  "fixture_blocking_reasons": [
+    "required_channel_1_mass_range_not_covered",
+    "required_channel_1_not_approved:pending_physics_approval",
+    "required_channel_2_mass_range_not_covered",
+    "required_channel_2_not_approved:pending_physics_approval",
+    "required_channel_3_mass_range_not_covered",
+    "required_channel_3_not_approved:pending_physics_approval",
+    "missing_provenance_sidecar"
+  ],
+  "legacy_status": "legacy_only",
+  "legacy_blocking_reasons": [
+    "legacy_species_count_not_11",
+    "legacy_has_no_explicit_channel_axis",
+    "legacy_has_no_remnant_mass_column",
+    "legacy_has_no_energy_per_channel_column",
+    "legacy_has_no_momentum_per_channel_column",
+    "legacy_release_history_is_not_channel_resolved",
+    "legacy_units_and_source_provenance_are_not_canonical"
+  ],
+  "candidate_source_status": "candidate_review_only",
+  "candidate_source_manifest_status": "pass",
+  "candidate_source_manifest_file_count": 65,
+  "candidate_source_candidate_count": 10,
+  "candidate_source_blocking_reasons": [
+    "candidate_sources_are_not_approved",
+    "no_candidate_is_a_complete_canonical_channel_1_to_3_grid",
+    "no_candidate_contains_the_required_per_star_age_resolved_cumulative_composition_history",
+    "huscher_population_mdot_table_has_unresolved_normalization_semantics",
+    "boccioli_roberti_release_has_no_machine_readable_explosion_energy_or_canonical_momentum",
+    "boccioli_roberti_lc18_failed_models_omit_reported_precollapse_winds",
+    "doherty_sagb_calcium_age_history_and_redistribution_terms_are_missing",
+    "stockinger_models_are_discrete_metallicity_mismatched_event_anchors_with_incomplete_chemistry",
+    "sukhbold_solar_grid_has_incomplete_decay_neutrino_wind_age_history_momentum_and_redistribution_coverage",
+    "limongi2024_constrains_but_does_not_deterministically_close_the_eight_to_eight_point_eight_msun_fate_seam",
+    "roberti2024_ultralowz_grid_has_only_two_masses_four_missing_zero_z_mrt_columns_and_a_quarantined_025z600_mass_budget_outlier",
+    "heger_woosley2010_popiii_grid_has_unselected_explosion_piston_and_mixing_parameters_and_no_8_to_10_msun_coverage",
+    "source_specific_conversion_and_closure_reports_are_required"
+  ],
+  "source_adapter_status": {
+    "limongi_chieffi_2018_cds": "review_only",
+    "nugrid_set1ext_mesaonly_fryer12_delay": "review_only"
+  },
+  "source_adapter_canonical_rows_emitted": {
+    "limongi_chieffi_2018_cds": 0,
+    "nugrid_set1ext_mesaonly_fryer12_delay": 0
+  },
+  "source_adapter_blocking_reasons": {
+    "limongi_chieffi_2018_cds": [
+      "candidate_source_not_approved",
+      "source_reported_yield_unit_requires_project_approval_because_cds_unit_is_blank",
+      "phase_mass_history_available_but_no_age_resolved_isotopic_composition",
+      "isotope_decay_and_reduced_element_mapping_not_approved",
+      "source_terminal_and_wind_semantics_resolved_but_runtime_partition_not_approved",
+      "canonical_returned_and_remnant_mass_definitions_not_resolved",
+      "canonical_injected_energy_absent",
+      "canonical_injected_momentum_absent",
+      "runtime_mass_ranges_not_covered",
+      "license_and_provenance_approval_missing"
+    ],
+    "nugrid_set1ext_mesaonly_fryer12_delay": [
+      "candidate_source_not_approved",
+      "no_age_resolved_cumulative_release_history",
+      "duplicate_mass_metallicity_coordinate",
+      "source_component_semantics_resolved_but_runtime_channel_assignment_not_approved",
+      "runtime_channel_partition_not_approved",
+      "canonical_returned_and_remnant_mass_definitions_not_resolved",
+      "canonical_injected_energy_absent",
+      "canonical_injected_momentum_absent",
+      "runtime_mass_ranges_have_gaps_and_are_not_covered",
+      "license_and_provenance_approval_missing"
+    ]
+  },
+  "source_adapter_closure_status": "review_only_blocked",
+  "source_adapter_closure_gate_blockers": [
+    "source_internal_consistency_does_not_supply_missing_age_energy_momentum_or_channel_semantics",
+    "candidate_sources_are_not_approved",
+    "no_complete_runtime_grid_for_channels_1_to_3"
+  ],
+  "reduced_chemistry_scope_status": "blocked_decay_horizon_and_source_approval_required",
+  "maximum_observed_omitted_mass_fraction": 0.037458716378157585,
+  "untracked_ejecta_residual_contract_implemented": true,
+  "limongi_decay_projection_status": "review_complete_projection_choice_blocked",
+  "limongi_decay_projection_unresolved_nuclides": 0,
+  "nugrid_channel_projection_status": "partial_grid_review_only_blocked",
+  "nugrid_partial_grid_rows": 4960,
+  "nugrid_partial_grid_mass_residual_max_msun": 0.0008345166235099732,
+  "feedback_energetics_sensitivity_status": "review_only_blocked_model_selection_required",
+  "feedback_source_nulls_preserved": true,
+  "feedback_momentum_semantics": {
+    "bulk_advective_momentum_separate": true,
+    "candidate_isotropic_model_count": 80,
+    "isotropic_vector_g_cm_s_per_star": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "scalar_radial_momentum_separate": true,
+    "semantics": "cumulative net directed momentum vector in the stellar comoving frame"
+  },
+  "feedback_sukhbold_energy_anchor_count": 13,
+  "feedback_sukhbold_exact_launch_momentum_derived": false,
+  "feedback_roberti_ultralowz_energy_anchor_count": 34,
+  "feedback_roberti_ultralowz_exact_launch_momentum_derived": false,
+  "feedback_heger_woosley_popiii_coordinate_count": 5760,
+  "feedback_heger_woosley_popiii_exact_launch_momentum_derived": false,
+  "huscher2025_candidate_status": "candidate_acquired_license_verified_population_normalization_blocked",
+  "huscher2025_license_verified": true,
+  "huscher2025_single_star_model_count": 120,
+  "huscher2025_population_normalization_pass": false,
+  "huscher2025_population_integrated_return_range_under_claimed_units": [
+    1326.358215777782,
+    2895.22586110785
+  ],
+  "huscher2025_blocking_reasons": [
+    "population_mdot_normalization_fails_unit_mass_return_and_requires_source_clarification",
+    "single_star_grid_stops_at_7_msun_but_runtime_agb_channel_extends_to_8_msun",
+    "single_star_files_are_lifetime_integrated_and_have_no_per_star_age_resolved_release_history",
+    "only_16_isotopes_are_present_and_runtime_tracked_S_Ca_Fe_are_absent",
+    "N13_requires_an_explicit_decay_projection_before_element_aggregation",
+    "canonical_energy_and_momentum_fields_are_absent",
+    "population_tables_are_imf_weighted_and_must_not_receive_a_second_runtime_imf_convolution",
+    "project_physics_selection_and_approval_are_missing"
+  ],
+  "boccioli_roberti2026_candidate_status": "candidate_acquired_license_verified_semantic_anomalies_blocked",
+  "boccioli_roberti2026_license_verified": true,
+  "boccioli_roberti2026_model_count": 206,
+  "boccioli_roberti2026_f23_component_mass_closure_pass": true,
+  "boccioli_roberti2026_lc18_readme_consistency_pass": false,
+  "boccioli_roberti2026_lc18_failed_wind_omission_count": 56,
+  "boccioli_roberti2026_blocking_reasons": [
+    "candidate_source_not_physics_approved",
+    "no_age_resolved_cumulative_release_history",
+    "explosion_energy_not_in_machine_readable_release",
+    "canonical_injected_momentum_not_in_source",
+    "f23_grid_is_solar_metallicity_only",
+    "runtime_8_to_11_msun_transition_not_covered",
+    "single_binary_population_weighting_not_selected",
+    "wind_and_terminal_ejecta_channel_ownership_not_approved",
+    "lc18_failed_models_omit_reported_precollapse_winds"
+  ],
+  "doherty2014_candidate_status": "candidate_acquired_physics_audited_license_unresolved",
+  "doherty2014_model_count": 20,
+  "doherty2014_mass_closure_pass": true,
+  "doherty2014_tracked_elements_absent": [
+    "Ca"
+  ],
+  "doherty2014_source_label_repair_applied": false,
+  "doherty2014_blocking_reasons": [
+    "no_explicit_redistribution_license_identified",
+    "calcium_missing_from_reduced_chemistry_vector",
+    "low_metallicity_primary_grid_stops_at_7.5_msun",
+    "no_per_star_age_resolved_cumulative_release_history",
+    "terminal_ecsn_or_fe_core_outcome_not_included",
+    "source_selection_and_cross_source_seam_not_approved"
+  ],
+  "stockinger2020_candidate_status": "candidate_acquired_energy_yields_audited_license_unresolved",
+  "stockinger2020_model_count": 3,
+  "stockinger2020_yield_mass_closure_pass": true,
+  "stockinger2020_last_finite_diagnostic_energy_erg": {
+    "e8.8": 9.53902793709056e+49,
+    "s9.0": 5.250178516256707e+49,
+    "z9.6": 8.602597812628994e+49
+  },
+  "stockinger2020_vsh_quarantined": true,
+  "stockinger2020_blocking_reasons": [
+    "no_explicit_redistribution_license_identified",
+    "three_models_do_not_define_a_continuous_8_to_11_msun_grid",
+    "solar_and_zero_metallicity_models_cannot_be_interpolated_as_one_sequence",
+    "nitrogen_missing_from_reduced_chemistry_vector",
+    "radioactive_decay_and_tracer_projection_not_approved",
+    "no_canonical_terminal_momentum_field",
+    "source_selection_and_cross_source_seam_not_approved"
+  ],
+  "sukhbold2016_candidate_status": "candidate_acquired_energy_yields_terms_audited_not_approved",
+  "sukhbold2016_model_count": 13,
+  "sukhbold2016_mass_range_msun": [
+    9.0,
+    12.0
+  ],
+  "sukhbold2016_energy_range_erg": [
+    1.1e+50,
+    6.8999999999999995e+50
+  ],
+  "sukhbold2016_mass_budget_within_review_bound": true,
+  "sukhbold2016_exact_mass_closure_claimed": false,
+  "sukhbold2016_third_party_redistribution_permission_verified": false,
+  "sukhbold2016_blocking_reasons": [
+    "source_is_solar_only_and_does_not_define_a_birth_metallicity_axis",
+    "source_grid_starts_at_9_msun_and_does_not_cover_the_8_to_9_msun_runtime_interval",
+    "single_Z9.6_engine_does_not_define_explosion_model_uncertainty",
+    "selected_radioactive_segment_is_not_a_complete_decay_inventory",
+    "stable_and_radioactive_segments_require_an_approved_decay_projection",
+    "neutrino_powered_wind_detailed_nucleosynthesis_is_not_included",
+    "integrated_presupernova_winds_are_not_an_age_resolved_release_history",
+    "no_canonical_terminal_momentum_field",
+    "third_party_redistribution_requires_archive_permission",
+    "source_selection_and_cross_source_seam_not_approved"
+  ],
+  "sukhbold2016_projection_status": "review_only_blocked_decay_age_boundary_and_approval",
+  "sukhbold2016_projection_record_count": 26,
+  "sukhbold2016_projection_source_nulls_preserved": {
+    "canonical_launch_momentum": true,
+    "decay_complete_returned_mass": true,
+    "lifetime_and_release_age": true
+  },
+  "sukhbold2016_projection_blocking_reasons": [
+    "Select and approve source ownership across the Stockinger, Sukhbold, and F23 transition seams.",
+    "Select an explicit decay horizon and demonstrate that stable and selected-radioactive source segments can be combined without double counting.",
+    "Supply an age-resolved presupernova-wind history or approve and quantify a terminal-lumped approximation.",
+    "Define the 8--8.8 Msun terminal-fate policy and the required birth-metallicity domain.",
+    "Select an explosion-engine uncertainty model and a canonical event momentum/deposition prescription.",
+    "Obtain permission before redistributing MPA archive source data to third parties.",
+    "Record a project physics approval identifier."
+  ],
+  "limongi2024_transition_fate_status": "review_only_fate_policy_blocked",
+  "limongi2024_transition_fate_model_count": 10,
+  "limongi2024_transition_fate_runtime_edge_msun": [
+    8.0,
+    8.8
+  ],
+  "limongi2024_transition_fate_interpolation_allowed": false,
+  "limongi2024_transition_fate_blocking_reasons": [
+    "solar_nonrotating_fate_evidence_only",
+    "thermal_pulse_table_is_not_a_yield_or_event_table",
+    "eight_to_eight_point_eight_msun_terminal_fate_is_not_deterministic",
+    "discrete_fate_models_may_not_be_interpolated",
+    "stockinger_e8p8_event_anchor_cannot_define_a_population_fate_law",
+    "no_event_yields_energy_momentum_or_age_resolved_composition",
+    "runtime_channel3_lower_boundary_at_eight_msun_is_not_approved",
+    "project_fate_policy_and_runtime_channel_assignment_are_not_approved"
+  ],
+  "roberti2024_ultralowz_candidate_status": "candidate_review_only_quarantined_incomplete_grid",
+  "roberti2024_ultralowz_model_count": 34,
+  "roberti2024_ultralowz_metallicity_nodes": [
+    0.0,
+    3.236e-07,
+    3.236e-06
+  ],
+  "roberti2024_ultralowz_official_mrt_model_count": 30,
+  "roberti2024_ultralowz_source_only_missing_models": [
+    "015z300",
+    "015z600",
+    "025z450",
+    "025z700"
+  ],
+  "roberti2024_ultralowz_mass_budget_outliers": [
+    "025z600"
+  ],
+  "roberti2024_ultralowz_blocking_reasons": [
+    "only_two_zams_masses_are_available",
+    "rotation_population_or_marginalization_is_not_selected",
+    "four_zero_metallicity_source_columns_are_absent_from_official_mrts",
+    "model_025z600_has_a_large_source_mass_budget_inconsistency",
+    "wind_and_terminal_yields_are_not_separately_partitioned",
+    "thermal_bomb_energy_and_fixed_ni56_mass_cut_are_not_an_approved_neutrino_driven_feedback_model",
+    "mixing_and_fallback_uncertainties_are_not_sampled",
+    "no_age_resolved_isotopic_release_history",
+    "mass_metallicity_grid_is_not_complete_for_runtime_channels",
+    "project_physics_approval_is_missing"
+  ],
+  "heger_woosley2010_popiii_candidate_status": "candidate_review_only_not_approved",
+  "heger_woosley2010_popiii_record_count": 660546,
+  "heger_woosley2010_popiii_coordinate_count": 5760,
+  "heger_woosley2010_popiii_mass_hull_msun": [
+    10.0,
+    100.0
+  ],
+  "heger_woosley2010_popiii_blocking_reasons": [
+    "zero_metallicity_only",
+    "runtime_ccsn_mass_range_begins_below_the_10_msun_source_hull",
+    "explosion_energy_distribution_is_not_selected",
+    "piston_location_distribution_is_not_selected",
+    "artificial_mixing_distribution_is_not_selected",
+    "rotation_is_omitted",
+    "no_age_resolved_wind_or_isotopic_release_history",
+    "neutrino_wind_nucleosynthesis_is_omitted",
+    "no_explicit_machine_readable_remnant_mass_column",
+    "listed_isotope_absence_has_no_approved_exact_zero_semantics",
+    "no_canonical_event_momentum",
+    "public_redistribution_license_is_not_verified",
+    "project_physics_approval_is_missing"
+  ],
+  "baseline_metallicity_demand_status": "comparison_population_ultra_low_z_uncovered",
+  "baseline_metallicity_demand_star_count": 42342,
+  "baseline_metallicity_demand_observed_range": [
+    0.0,
+    1.1813492899814927e-09
+  ],
+  "baseline_metallicity_demand_fraction_below_candidate_domain": 1.0,
+  "baseline_metallicity_demand_blocking_reasons": [
+    "required_production_birth_metallicity_domain_is_not_selected",
+    "comparison_population_is_below_all_staged_positive_z_full_grid_candidate_nodes",
+    "no_staged_primordial_or_ultra_low_z_full_channel_yield_asset",
+    "stockinger_zero_metallicity_event_anchor_is_not_a_full_grid",
+    "metallicity_floor_clamp_and_solar_extrapolation_are_forbidden"
+  ],
+  "candidate_grid_coverage_status": "blocked_incomplete_mass_metallicity_rotation_age_coverage",
+  "candidate_grid_mass_gaps_msun": {
+    "1": [
+      [
+        0.8,
+        11.0
+      ]
+    ],
+    "2": [],
+    "3": [
+      [
+        8.0,
+        8.8
+      ]
+    ]
+  },
+  "candidate_grid_source_hull_gaps_msun": {
+    "1": [
+      [
+        0.8,
+        11.0
+      ]
+    ],
+    "2": [],
+    "3": [
+      [
+        8.0,
+        8.8
+      ]
+    ]
+  },
+  "candidate_grid_exact_common_metallicity_nodes": 0,
+  "candidate_grid_roberti_baseline_inside_sparse_z_interval": true,
+  "candidate_grid_roberti_production_coverage_approved": false,
+  "candidate_grid_popiii_runtime_mass_gap_msun": [
+    [
+      8.0,
+      10.0
+    ]
+  ],
+  "candidate_grid_popiii_production_coverage_approved": false,
+  "limongi_phase_mass_history_status": "mass_history_recoverable_composition_and_closure_blocked",
+  "limongi_phase_mass_history_monotonic_violations": 0,
+  "limongi_wind_mass_closure_max_abs_msun": 0.34122894710262286,
+  "blocking_reason": "No cited, checksummed, approved physical full-grid asset exists for channels 1--3; staged candidates remain review-only."
+}

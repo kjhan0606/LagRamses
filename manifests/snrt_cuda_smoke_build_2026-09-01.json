@@ -1,0 +1,54 @@
+{
+  "schema": "snrt_cuda_smoke_build_v1",
+  "project_root": "/gpfs/kjhan/LRD_JWST",
+  "recorded_at": "2026-09-01",
+  "output": {
+    "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/bin/snrt_cuda_smoke",
+    "size_bytes": 741816,
+    "sha256": "dd68011c26b07f1f2e7ae684700ec4b547f94f8332117687bcf6b0a0f31e3ed3",
+    "status": "available_local_candidate"
+  },
+  "source": {
+    "checkout": "/home/kjhan/BACKUP/lagRamses",
+    "repository": "git@github.com:KISTI-Chimera/lagRamses.git",
+    "commit": "c8e17039a02a7822cc2abf312203bc9ec78b9a43",
+    "working_tree": "dirty",
+    "files": {
+      "snrt_cuda_smoke.f90": {
+        "path": "/home/kjhan/BACKUP/lagRamses/patch/lagRamses/snrt_cuda_smoke.f90",
+        "sha256": "fefbfacf5404bf6ebeb15a3ee8d774c8e296dd642083f9deeb01d2325d1b65d1"
+      },
+      "snrt_cuda_interface.f90": {
+        "path": "/home/kjhan/BACKUP/lagRamses/patch/lagRamses/snrt_cuda_interface.f90",
+        "sha256": "dd3a4c4e6e860591ae5b31d546a46400008d054141ba0fa82df9942f3907d9b5"
+      },
+      "snrt_cuda_ledger_interface.f90": {
+        "path": "/home/kjhan/BACKUP/lagRamses/patch/lagRamses/snrt_cuda_ledger_interface.f90",
+        "sha256": "c8520c112cd4e92fd530d0d45f6081bb5b297f0b9aa316a8e72294d29e58478e"
+      },
+      "snrt_cuda_kernels.cu": {
+        "path": "/home/kjhan/BACKUP/lagRamses/patch/lagRamses/snrt_cuda_kernels.cu",
+        "sha256": "60269913f481aad7fe1373d89bc45b1581356afc4b7fee1fb36433986fdb76d4"
+      }
+    }
+  },
+  "toolchain": {
+    "cuda": "13.0.2",
+    "nvcc": "13.0.88",
+    "ifx": "2025.3.0",
+    "mpiifx": "/opt/ohpc/pub/intel/oneapi/mpi/2021.17/bin/mpiifx",
+    "target_architecture": "sm_86",
+    "runtime_libraries": [
+      "libcublas.so.13",
+      "libcudart.so.13",
+      "libstdc++.so.6"
+    ]
+  },
+  "verification": {
+    "command": "CUDA_VISIBLE_DEVICES=0 /gpfs/kjhan/LRD_JWST/simulation/snrt/bin/snrt_cuda_smoke",
+    "gpu": "NVIDIA A10",
+    "result": "SNRT_CUDA_SMOKE_OK tensor_abs=1.1921E-07 ledger_abs=7.7486E-07",
+    "exit_code": 0
+  },
+  "promotion_note": "Candidate only: source checkout was dirty at build time and production approval metadata is not yet populated."
+}

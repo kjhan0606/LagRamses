@@ -6,11 +6,14 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --time=00:10:00
-#SBATCH --output=/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/runs/lagramses_bondi_sync/slurm_%j.out
-#SBATCH --error=/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/runs/lagramses_bondi_sync/slurm_%j.err
+#SBATCH --output=/gpfs/kjhan/LRD_JWST/simulation/snrt/runs/lagramses_bondi_sync/slurm_%j.out
+#SBATCH --error=/gpfs/kjhan/LRD_JWST/simulation/snrt/runs/lagramses_bondi_sync/slurm_%j.err
 set -euo pipefail
 
-root=/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/runs/lagramses_bondi_sync
+readonly input_manifest="/gpfs/kjhan/LRD_JWST/manifests/lrd_jwst_external_assets.json"
+[[ -s "$input_manifest" ]] || { echo "missing input manifest: $input_manifest" >&2; exit 1; }
+
+root=/gpfs/kjhan/LRD_JWST/simulation/snrt/runs/lagramses_bondi_sync
 run="${root}/job_${SLURM_JOB_ID}"
 exe=/home/kjhan/BACKUP/lagRamses/bin/ramses_final3d
 

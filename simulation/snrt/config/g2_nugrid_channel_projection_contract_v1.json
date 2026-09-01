@@ -1,0 +1,56 @@
+{
+  "schema": "snrt-g2-nugrid-channel-projection-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source_candidate_id": "nugrid_set1ext_mesaonly_fryer12_delay",
+  "tracked_elements": ["H", "He", "C", "N", "O", "Ne", "Mg", "Si", "S", "Ca", "Fe"],
+  "maximum_age_yr": 13800000000.0,
+  "terminal_release_ramp_relative_width": 0.000001,
+  "duplicate_coordinate_policy": "Collapse only when lifetime, final mass, all 80 yields, all 80 initial mass fractions, and atomic numbers are exactly identical; otherwise fail closed.",
+  "channel_projection": {
+    "2": {
+      "name": "AGB",
+      "source_mass_selection": "initial_mass_msun <= 7",
+      "actual_ejecta": "NuGrid total",
+      "returned_mass": "sum of all 80 source element ejecta",
+      "remnant_mass": "NuGrid Mfinal",
+      "release_history": "provisional terminal-release ramp ending at the source lifetime"
+    },
+    "1": {
+      "name": "massive_star_wind",
+      "source_mass_selection": "initial_mass_msun >= 12",
+      "actual_ejecta": "NuGrid winds",
+      "returned_mass": "sum of all 80 source element ejecta",
+      "remnant_mass": 0.0,
+      "release_history": "provisional terminal-release ramp ending at the source lifetime; not a physical time-resolved wind history"
+    },
+    "3": {
+      "name": "SNII_terminal",
+      "source_mass_selection": "initial_mass_msun >= 12",
+      "actual_ejecta": "NuGrid total minus winds",
+      "returned_mass": "sum of all 80 source element differences",
+      "remnant_mass": "NuGrid Mfinal",
+      "release_history": "provisional terminal-release ramp ending at the source lifetime"
+    }
+  },
+  "net_yield_policy": "diagnostic actual element ejecta minus source initial mass fraction times returned mass",
+  "untracked_ejecta_policy": "returned_mass_minus_sum_tracked_ejecta_deposited_as_generic_metals",
+  "unavailable_fields": {
+    "energy_erg_per_star": null,
+    "momentum_g_cm_s_per_star": null,
+    "meaning": "Unavailable source values remain null; they are not replaced by values from the separate sensitivity overlay.",
+    "momentum_note": "The eventual canonical vector may be exactly zero for an approved isotropic source, but that physical zero is distinct from this source-data null."
+  },
+  "promotion_gate": {
+    "canonical_conversion_allowed": false,
+    "runtime_channel_assignment_approved": false,
+    "terminal_release_approximation_approved": false,
+    "remaining_blockers": [
+      "No age-resolved wind/AGB release history.",
+      "No approved source-coupled injected energy or scalar/radial momentum model.",
+      "Source mass coverage is 1--7 and 12--25 Msun, leaving runtime gaps and upper-range assumptions unresolved.",
+      "Source redistribution terms and project approval are unresolved."
+    ]
+  }
+}

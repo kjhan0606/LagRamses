@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 
 from .primordial import PrimordialState, cen1992_helium_recombination, hui_gnedin_case_b_hydrogen
+from .primordial_cooling import collisional_ionization_coefficients
 
 
 def hydrogen_photoionization_relaxation(
@@ -112,12 +113,29 @@ def implicit_case_b_recombination(
     dt: float,
     iterations: int = 24,
 ) -> PrimordialState:
+    """Apply coupled backward-Euler H/He recombination by electron-density bisection."""
+
+    return implicit_case_b_recombination_with_recombinations(
+        state,
+        temperature_k,
+        dt,
+        iterations,
+    )[0]
+
+
+def implicit_case_b_recombination_with_recombinations(
+    state: PrimordialState,
+    temperature_k: jnp.ndarray,
+    dt: float,
+    iterations: int = 24,
+) -> tuple[PrimordialState, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """Apply coupled backward-Euler H/He recombination by electron-density bisection.
 
     The input is the state after photon-driven ionizations. At fixed electron
     density the backward-Euler fractions are analytic, leaving one monotonic
     scalar equation per cell. Fixed-count bisection keeps the kernel static,
-    positive, and robust at large alpha*n_e*dt.
+    positive, and robust at large alpha*n_e*dt. The returned recombination
+    densities are ordered H II -> H I, He II -> He I, and He III -> He II.
     """
     if iterations < 1:
         raise ValueError("iterations must be positive.")
@@ -152,11 +170,131 @@ def implicit_case_b_recombination(
         iterate,
         (jnp.zeros_like(initial_electron_density), initial_electron_density),
     )
-    x_hii, x_heii, x_heiii = fractions_from_electron_density(0.5 * (lower + upper))
-    return PrimordialState(
+    solved_electron_density = 0.5 * (lower + upper)
+    x_hii, x_heii, x_heiii = fractions_from_electron_density(solved_electron_density)
+    next_state = PrimordialState(
         n_hydrogen=state.n_hydrogen,
         n_helium=state.n_helium,
         x_hydrogen_ii=jnp.clip(x_hii, 0.0, 1.0),
         x_helium_ii=jnp.clip(x_heii, 0.0, 1.0),
         x_helium_iii=jnp.clip(x_heiii, 0.0, 1.0),
+    )
+    recombination_hydrogen = (
+        state.n_hydrogen * dt * alpha_hii * solved_electron_density * next_state.x_hydrogen_ii
+    )
+    recombination_helium_ii = (
+        state.n_helium * dt * alpha_heii * solved_electron_density * next_state.x_helium_ii
+    )
+    recombination_helium_iii = (
+        state.n_helium * dt * alpha_heiii * solved_electron_density * next_state.x_helium_iii
+    )
+    return (
+        next_state,
+        recombination_hydrogen,
+        recombination_helium_ii,
+        recombination_helium_iii,
+    )
+
+
+def implicit_atomic_chemistry_with_transitions(
+    state: PrimordialState,
+    temperature_k: jnp.ndarray,
+    dt: float,
+    iterations: int = 24,
+) -> tuple[
+    PrimordialState,
+    jnp.ndarray,
+    jnp.ndarray,
+    jnp.ndarray,
+    jnp.ndarray,
+    jnp.ndarray,
+    jnp.ndarray,
+]:
+    """Apply coupled collisional ionization and case-B recombination.
+
+    At fixed electron density the backward-Euler H and three-state He systems
+    are analytic. A scalar bisection closes the electron density against the
+    resulting ion fractions. Returned transition densities are recombinations
+    H II, He II, He III followed by collisional ionizations H I, He I, He II.
+    """
+
+    if iterations < 1:
+        raise ValueError("iterations must be positive")
+    if dt < 0.0:
+        raise ValueError("dt must be non-negative")
+
+    alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
+    alpha_heii, alpha_heiii = cen1992_helium_recombination(temperature_k)
+    collisional = collisional_ionization_coefficients(temperature_k)
+
+    def fractions_from_electron_density(
+        electron_density: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        hydrogen_ionization = collisional.hydrogen_i * electron_density
+        hydrogen_recombination = alpha_hii * electron_density
+        next_hii = (
+            state.x_hydrogen_ii + dt * hydrogen_ionization
+        ) / (1.0 + dt * (hydrogen_ionization + hydrogen_recombination))
+
+        helium_i_ionization = collisional.helium_i * electron_density
+        helium_ii_ionization = collisional.helium_ii * electron_density
+        helium_ii_recombination = alpha_heii * electron_density
+        helium_iii_recombination = alpha_heiii * electron_density
+        heiii_factor = 1.0 + dt * helium_iii_recombination
+        heiii_constant = state.x_helium_iii / heiii_factor
+        heiii_from_heii = dt * helium_ii_ionization / heiii_factor
+        numerator = state.x_helium_ii + dt * (
+            helium_i_ionization * (1.0 - heiii_constant)
+            + helium_iii_recombination * heiii_constant
+        )
+        denominator = 1.0 + dt * (
+            helium_i_ionization * (1.0 + heiii_from_heii)
+            + helium_ii_ionization
+            + helium_ii_recombination
+            - helium_iii_recombination * heiii_from_heii
+        )
+        next_heii = numerator / jnp.maximum(denominator, jnp.finfo(denominator.dtype).tiny)
+        next_heiii = heiii_constant + heiii_from_heii * next_heii
+        return next_hii, next_heii, next_heiii
+
+    maximum_electron_density = state.n_hydrogen + 2.0 * state.n_helium
+
+    def iterate(_: int, bounds: tuple[jnp.ndarray, jnp.ndarray]) -> tuple[jnp.ndarray, jnp.ndarray]:
+        lower, upper = bounds
+        midpoint = 0.5 * (lower + upper)
+        x_hii, x_heii, x_heiii = fractions_from_electron_density(midpoint)
+        implied = state.n_hydrogen * x_hii + state.n_helium * (x_heii + 2.0 * x_heiii)
+        residual = midpoint - implied
+        return jnp.where(residual > 0.0, lower, midpoint), jnp.where(residual > 0.0, midpoint, upper)
+
+    lower, upper = jax.lax.fori_loop(
+        0,
+        iterations,
+        iterate,
+        (jnp.zeros_like(maximum_electron_density), maximum_electron_density),
+    )
+    electron_density = 0.5 * (lower + upper)
+    x_hii, x_heii, x_heiii = fractions_from_electron_density(electron_density)
+    next_state = PrimordialState(
+        state.n_hydrogen,
+        state.n_helium,
+        jnp.clip(x_hii, 0.0, 1.0),
+        jnp.clip(x_heii, 0.0, 1.0),
+        jnp.clip(x_heiii, 0.0, 1.0 - jnp.clip(x_heii, 0.0, 1.0)),
+    )
+    next_hei = 1.0 - next_state.x_helium_ii - next_state.x_helium_iii
+    recombination_hydrogen = state.n_hydrogen * dt * alpha_hii * electron_density * next_state.x_hydrogen_ii
+    recombination_helium_ii = state.n_helium * dt * alpha_heii * electron_density * next_state.x_helium_ii
+    recombination_helium_iii = state.n_helium * dt * alpha_heiii * electron_density * next_state.x_helium_iii
+    ionization_hydrogen_i = state.n_hydrogen * dt * collisional.hydrogen_i * electron_density * (1.0 - next_state.x_hydrogen_ii)
+    ionization_helium_i = state.n_helium * dt * collisional.helium_i * electron_density * next_hei
+    ionization_helium_ii = state.n_helium * dt * collisional.helium_ii * electron_density * next_state.x_helium_ii
+    return (
+        next_state,
+        recombination_hydrogen,
+        recombination_helium_ii,
+        recombination_helium_iii,
+        ionization_hydrogen_i,
+        ionization_helium_i,
+        ionization_helium_ii,
     )

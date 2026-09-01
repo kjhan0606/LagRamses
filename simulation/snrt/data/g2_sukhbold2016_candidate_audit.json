@@ -1,0 +1,2029 @@
+{
+  "archive_inventory": {
+    "explosion_results_regular_file_count": 6,
+    "yield_regular_file_count": 309,
+    "yield_table_count_by_branch": {
+      "N20": 105,
+      "W18": 82,
+      "Z9.6": 13,
+      "implosions_W18": 105,
+      "sample_full_zonal_yields": 4
+    }
+  },
+  "audit_code_sha256": "4a73895ecc271a741414be2c9a77f28e1b4acb89a6d772b961ccce032164dc44",
+  "blockers": [
+    "source_is_solar_only_and_does_not_define_a_birth_metallicity_axis",
+    "source_grid_starts_at_9_msun_and_does_not_cover_the_8_to_9_msun_runtime_interval",
+    "single_Z9.6_engine_does_not_define_explosion_model_uncertainty",
+    "selected_radioactive_segment_is_not_a_complete_decay_inventory",
+    "stable_and_radioactive_segments_require_an_approved_decay_projection",
+    "neutrino_powered_wind_detailed_nucleosynthesis_is_not_included",
+    "integrated_presupernova_winds_are_not_an_age_resolved_release_history",
+    "no_canonical_terminal_momentum_field",
+    "third_party_redistribution_requires_archive_permission",
+    "source_selection_and_cross_source_seam_not_approved"
+  ],
+  "canonical_rows_emitted": 0,
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_sukhbold2016_candidate_contract_v1.json",
+  "contract_sha256": "d91c4090eacd506b4313d31b4d895a76b5a1ccedb5baeb3736587e2fee21d3f6",
+  "energy_and_fallback": {
+    "canonical_terminal_momentum_available": false,
+    "fallback_mass_msun_maximum": 0.0029484,
+    "fallback_mass_msun_minimum": 0.00020471,
+    "final_kinetic_energy_erg_maximum": 6.8999999999999995e+50,
+    "final_kinetic_energy_erg_minimum": 1.1e+50
+  },
+  "gate": "G2",
+  "mass_budget_review": {
+    "comparison": "stable ejecta plus stable wind versus labelled ZAMS mass minus P-HOTB baryonic mass cut",
+    "exact_mass_closure_claimed": false,
+    "limitation": "Tables are rounded to three significant figures and expose only 20 selected radioactive isotopes; this is not an exact complete-isotope closure identity.",
+    "maximum_absolute_relative_residual": 0.005948774560409282,
+    "maximum_absolute_residual_msun": 0.05950559192777405,
+    "within_review_bound": true
+  },
+  "production_ready": false,
+  "schema": "snrt-g2-sukhbold2016-candidate-audit",
+  "schema_version": 1,
+  "semantic_firewalls": {
+    "integrated_wind_as_age_resolved_history_allowed": false,
+    "out_of_domain_extrapolation_allowed": false,
+    "precollapse_wind_and_terminal_event_double_count_forbidden": true,
+    "publication_redistribution_without_permission_allowed": false,
+    "single_engine_grid_as_explosion_uncertainty_model_allowed": false
+  },
+  "source_identity": {
+    "article_doi": "10.3847/0004-637X/821/1/38",
+    "candidate_id": "sukhbold2016_ccsn",
+    "data_doi": "10.17617/1.b",
+    "file_count": 4,
+    "files": {
+      "ARCHIVE_TERMS.html": {
+        "bytes": 64972,
+        "sha256": "447fb9dff5bd31a542f93bb8c489902faad068e5007b930435ccb01f62a457fe"
+      },
+      "INDEX.html": {
+        "bytes": 9721,
+        "sha256": "8abc776c7b9c859d5f31091bf5393d8136c5b749b776a9902d6ce99f61227c8b"
+      },
+      "explosion_results_PHOTB.tar.gz": {
+        "bytes": 18850,
+        "sha256": "72e6d68c1a8fdc622054dc08c6263e6ac3faa5e5352b299206cfe076952e93a9"
+      },
+      "nucleosynthesis_yields.tar.gz": {
+        "bytes": 42688013,
+        "sha256": "e74bd3a7bf647f2e06f055b50f2613d7b145613ae56cc1d05f870f8edddf6eed"
+      }
+    },
+    "noncommercial_use_with_citation_verified": true,
+    "research_access_verified": true,
+    "source_page": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/SEWBJ_2015/",
+    "third_party_redistribution_permission_verified": false
+  },
+  "status": "candidate_acquired_energy_yields_terms_audited_not_approved",
+  "yield_semantics": {
+    "age_resolved_wind_history_available": false,
+    "ejecta_and_wind_are_separate_gross_components": true,
+    "neutrino_powered_wind_detailed_nucleosynthesis_included": false,
+    "radioactive_decay_projection_complete": false,
+    "selected_radioactive_isotope_count": 20,
+    "stable_and_radioactive_segments_naively_summed": false,
+    "tracked_elements_complete_in_stable_segment": true
+  },
+  "z96_grid": {
+    "all_models_exploded": true,
+    "cross_engine_interpolation_allowed": false,
+    "cross_source_interpolation_allowed": false,
+    "engine": "Z9.6",
+    "metallicity": "source_labelled_solar",
+    "model_count": 13,
+    "models": {
+      "10.0": {
+        "baryonic_mass_cut_after_fallback_msun": 1.448,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.00024554,
+        "final_kinetic_energy_erg": 6e+50,
+        "final_kinetic_energy_foe": 0.6,
+        "labelled_zams_minus_mass_cut_msun": 8.552,
+        "outside_alpha_msun": 0.043031,
+        "outside_ni_msun": 0.020597,
+        "outside_tracer_msun": 0.010256,
+        "selected_radioactive_ejecta_sum_msun": 0.0261936721,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 6.62e-06,
+            "wind_msun": 9.86e-10
+          },
+          "ar39": {
+            "ejecta_msun": 9.6e-07,
+            "wind_msun": 8.56e-17
+          },
+          "c14": {
+            "ejecta_msun": 7.61e-06,
+            "wind_msun": 1.78e-12
+          },
+          "ca41": {
+            "ejecta_msun": 9.04e-07,
+            "wind_msun": 2.4e-12
+          },
+          "ca45": {
+            "ejecta_msun": 1.2e-07,
+            "wind_msun": 7.19e-33
+          },
+          "cl36": {
+            "ejecta_msun": 2.98e-07,
+            "wind_msun": 3.87e-13
+          },
+          "co60": {
+            "ejecta_msun": 1.19e-06,
+            "wind_msun": 2.15e-22
+          },
+          "fe55": {
+            "ejecta_msun": 8.17e-06,
+            "wind_msun": 6.19e-30
+          },
+          "fe60": {
+            "ejecta_msun": 2.63e-05,
+            "wind_msun": 6.11e-17
+          },
+          "k40": {
+            "ejecta_msun": 1.82e-07,
+            "wind_msun": 2.08e-09
+          },
+          "mn53": {
+            "ejecta_msun": 5.87e-06,
+            "wind_msun": 3.07e-26
+          },
+          "mn54": {
+            "ejecta_msun": 2.05e-07,
+            "wind_msun": 8.68e-51
+          },
+          "na22": {
+            "ejecta_msun": 5.41e-08,
+            "wind_msun": 9.16e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.0248,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.00122,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 8.61e-05,
+            "wind_msun": 8.69e-12
+          },
+          "ni63": {
+            "ejecta_msun": 9.51e-06,
+            "wind_msun": 8.86e-19
+          },
+          "si32": {
+            "ejecta_msun": 4.49e-06,
+            "wind_msun": 3.58e-22
+          },
+          "ti44": {
+            "ejecta_msun": 1.49e-05,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 1.89e-07,
+            "wind_msun": 3.75e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 3.0792571475865818e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.060352,
+          "Ca": 0.0014111129999999999,
+          "Fe": 0.0375892,
+          "H": 4.9400278,
+          "He": 2.970256,
+          "Mg": 0.0075309999999999995,
+          "N": 0.0225176,
+          "Ne": 0.016509,
+          "O": 0.0982298,
+          "S": 0.00971403,
+          "Si": 0.014119999999999999
+        },
+        "stable_ejecta_sum_msun": 8.185621891284423,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.004696964490890658,
+        "stable_segment_mass_budget_residual_msun": -0.0401684403260969,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0005695,
+          "Ca": 2.4004100000000003e-05,
+          "Fe": 0.00044716,
+          "H": 0.22700306,
+          "He": 0.0943117,
+          "Mg": 0.0002361,
+          "N": 0.000687552,
+          "Ne": 0.00040912,
+          "O": 0.00199612,
+          "S": 0.00013613609999999998,
+          "Si": 0.00026773000000000004
+        },
+        "stable_wind_sum_msun": 0.3262096683894793,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.007364348284422562,
+        "untracked_stable_wind_msun": 0.00012148618947926959,
+        "zams_mass_msun": 10.0
+      },
+      "10.25": {
+        "baryonic_mass_cut_after_fallback_msun": 1.474,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.00028174,
+        "final_kinetic_energy_erg": 6.3e+50,
+        "final_kinetic_energy_foe": 0.63,
+        "labelled_zams_minus_mass_cut_msun": 8.776,
+        "outside_alpha_msun": 0.043989,
+        "outside_ni_msun": 0.023703,
+        "outside_tracer_msun": 0.0098309,
+        "selected_radioactive_ejecta_sum_msun": 0.028528776999999998,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 7.39e-06,
+            "wind_msun": 1.03e-09
+          },
+          "ar39": {
+            "ejecta_msun": 1.15e-06,
+            "wind_msun": 1.58e-29
+          },
+          "c14": {
+            "ejecta_msun": 7.55e-06,
+            "wind_msun": 1.15e-17
+          },
+          "ca41": {
+            "ejecta_msun": 9.72e-07,
+            "wind_msun": 9.21e-13
+          },
+          "ca45": {
+            "ejecta_msun": 1.14e-07,
+            "wind_msun": 6.64e-33
+          },
+          "cl36": {
+            "ejecta_msun": 3.58e-07,
+            "wind_msun": 2.47e-13
+          },
+          "co60": {
+            "ejecta_msun": 2.08e-06,
+            "wind_msun": 1.83e-22
+          },
+          "fe55": {
+            "ejecta_msun": 9.18e-06,
+            "wind_msun": 5.28e-30
+          },
+          "fe60": {
+            "ejecta_msun": 2.28e-05,
+            "wind_msun": 5.22e-17
+          },
+          "k40": {
+            "ejecta_msun": 2.09e-07,
+            "wind_msun": 2.07e-09
+          },
+          "mn53": {
+            "ejecta_msun": 6.69e-06,
+            "wind_msun": 4.87e-26
+          },
+          "mn54": {
+            "ejecta_msun": 2.43e-07,
+            "wind_msun": 1.16e-50
+          },
+          "na22": {
+            "ejecta_msun": 5.9e-08,
+            "wind_msun": 8.53e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.027,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.00134,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 9.13e-05,
+            "wind_msun": 2.61e-12
+          },
+          "ni63": {
+            "ejecta_msun": 1.42e-05,
+            "wind_msun": 9.56e-30
+          },
+          "si32": {
+            "ejecta_msun": 6.58e-06,
+            "wind_msun": 2.64e-57
+          },
+          "ti44": {
+            "ejecta_msun": 1.77e-05,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 2.02e-07,
+            "wind_msun": 3.42e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 3.1037780637001917e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.064567,
+          "Ca": 0.001545197,
+          "Fe": 0.0403606,
+          "H": 5.040028,
+          "He": 3.070257,
+          "Mg": 0.0085,
+          "N": 0.0230202,
+          "Ne": 0.017399,
+          "O": 0.1159294,
+          "S": 0.01108167,
+          "Si": 0.016535
+        },
+        "stable_ejecta_sum_msun": 8.417266582228745,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.0039026992968091262,
+        "stable_segment_mass_budget_residual_msun": -0.03425008902879689,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.000568,
+          "Ca": 2.389959e-05,
+          "Fe": 0.00044501,
+          "H": 0.22500315,
+          "He": 0.0946114,
+          "Mg": 0.0002349,
+          "N": 0.000691555,
+          "Ne": 0.00040684,
+          "O": 0.00197597,
+          "S": 0.00013510589999999998,
+          "Si": 0.00026669
+        },
+        "stable_wind_sum_msun": 0.3244833287424583,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.008043515228743914,
+        "untracked_stable_wind_msun": 0.00012080825245824878,
+        "zams_mass_msun": 10.25
+      },
+      "10.5": {
+        "baryonic_mass_cut_after_fallback_msun": 1.484,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.00049307,
+        "final_kinetic_energy_erg": 4.6e+50,
+        "final_kinetic_energy_foe": 0.46,
+        "labelled_zams_minus_mass_cut_msun": 9.016,
+        "outside_alpha_msun": 0.035824,
+        "outside_ni_msun": 0.021143,
+        "outside_tracer_msun": 0.0055136,
+        "selected_radioactive_ejecta_sum_msun": 0.0176644597,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 8.92e-06,
+            "wind_msun": 1.34e-09
+          },
+          "ar39": {
+            "ejecta_msun": 1.34e-06,
+            "wind_msun": 1.38e-29
+          },
+          "c14": {
+            "ejecta_msun": 5.38e-06,
+            "wind_msun": 1.49e-16
+          },
+          "ca41": {
+            "ejecta_msun": 9.37e-07,
+            "wind_msun": 9.91e-13
+          },
+          "ca45": {
+            "ejecta_msun": 1.16e-07,
+            "wind_msun": 5.79e-33
+          },
+          "cl36": {
+            "ejecta_msun": 2.91e-07,
+            "wind_msun": 2.39e-13
+          },
+          "co60": {
+            "ejecta_msun": 3.69e-06,
+            "wind_msun": 1.72e-22
+          },
+          "fe55": {
+            "ejecta_msun": 9.07e-06,
+            "wind_msun": 4.61e-30
+          },
+          "fe60": {
+            "ejecta_msun": 1.83e-05,
+            "wind_msun": 4.9e-17
+          },
+          "k40": {
+            "ejecta_msun": 2.22e-07,
+            "wind_msun": 1.96e-09
+          },
+          "mn53": {
+            "ejecta_msun": 6.35e-06,
+            "wind_msun": 8.4e-26
+          },
+          "mn54": {
+            "ejecta_msun": 3e-07,
+            "wind_msun": 1.71e-50
+          },
+          "na22": {
+            "ejecta_msun": 7.87e-08,
+            "wind_msun": 7.64e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.0167,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.000809,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 6.97e-05,
+            "wind_msun": 2.99e-12
+          },
+          "ni63": {
+            "ejecta_msun": 1.33e-05,
+            "wind_msun": 8.35e-30
+          },
+          "si32": {
+            "ejecta_msun": 2.88e-06,
+            "wind_msun": 2.2e-57
+          },
+          "ti44": {
+            "ejecta_msun": 1.44e-05,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 1.85e-07,
+            "wind_msun": 2.99e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 3.3042201980001797e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.072179,
+          "Ca": 0.001439323,
+          "Fe": 0.02982,
+          "H": 5.1300273,
+          "He": 3.1802580000000003,
+          "Mg": 0.01119,
+          "N": 0.023436000000000002,
+          "Ne": 0.024773,
+          "O": 0.1580398,
+          "S": 0.01001928,
+          "Si": 0.017875000000000002
+        },
+        "stable_ejecta_sum_msun": 8.666321960790023,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.004698227298451049,
+        "stable_segment_mass_budget_residual_msun": -0.04235921732283465,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0005412,
+          "Ca": 2.2656930000000002e-05,
+          "Fe": 0.00042102999999999997,
+          "H": 0.21200314,
+          "He": 0.0907106,
+          "Mg": 0.0002221,
+          "N": 0.000661537,
+          "Ne": 0.00038531,
+          "O": 0.00185556,
+          "S": 0.0001287246,
+          "Si": 0.00025252
+        },
+        "stable_wind_sum_msun": 0.30731882188714205,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.007265257790022517,
+        "untracked_stable_wind_msun": 0.00011444335714205778,
+        "zams_mass_msun": 10.5
+      },
+      "10.75": {
+        "baryonic_mass_cut_after_fallback_msun": 1.467,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.00042141,
+        "final_kinetic_energy_erg": 6.8999999999999995e+50,
+        "final_kinetic_energy_foe": 0.69,
+        "labelled_zams_minus_mass_cut_msun": 9.283,
+        "outside_alpha_msun": 0.046329,
+        "outside_ni_msun": 0.034261,
+        "outside_tracer_msun": 0.011257,
+        "selected_radioactive_ejecta_sum_msun": 0.0309935672,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 9.94e-06,
+            "wind_msun": 1.61e-09
+          },
+          "ar39": {
+            "ejecta_msun": 1.62e-06,
+            "wind_msun": 1.32e-29
+          },
+          "c14": {
+            "ejecta_msun": 7.29e-06,
+            "wind_msun": 1.63e-16
+          },
+          "ca41": {
+            "ejecta_msun": 1.18e-06,
+            "wind_msun": 9.89e-13
+          },
+          "ca45": {
+            "ejecta_msun": 1.56e-07,
+            "wind_msun": 5.49e-33
+          },
+          "cl36": {
+            "ejecta_msun": 3.83e-07,
+            "wind_msun": 2.41e-13
+          },
+          "co60": {
+            "ejecta_msun": 4.35e-06,
+            "wind_msun": 1.76e-22
+          },
+          "fe55": {
+            "ejecta_msun": 1.28e-05,
+            "wind_msun": 4.37e-30
+          },
+          "fe60": {
+            "ejecta_msun": 2.47e-05,
+            "wind_msun": 5e-17
+          },
+          "k40": {
+            "ejecta_msun": 2.39e-07,
+            "wind_msun": 1.99e-09
+          },
+          "mn53": {
+            "ejecta_msun": 9.39e-06,
+            "wind_msun": 1.19e-25
+          },
+          "mn54": {
+            "ejecta_msun": 4.14e-07,
+            "wind_msun": 2.21e-50
+          },
+          "na22": {
+            "ejecta_msun": 8.22e-08,
+            "wind_msun": 7.28e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.0294,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.00138,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 9.83e-05,
+            "wind_msun": 2.97e-12
+          },
+          "ni63": {
+            "ejecta_msun": 1.62e-05,
+            "wind_msun": 7.94e-30
+          },
+          "si32": {
+            "ejecta_msun": 4.68e-06,
+            "wind_msun": 2e-57
+          },
+          "ti44": {
+            "ejecta_msun": 2.16e-05,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 2.43e-07,
+            "wind_msun": 2.8e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 3.604200213000183e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.078497,
+          "Ca": 0.001908851,
+          "Fe": 0.043692,
+          "H": 5.220027,
+          "He": 3.2802599999999997,
+          "Mg": 0.01244,
+          "N": 0.024536000000000002,
+          "Ne": 0.024415,
+          "O": 0.1839807,
+          "S": 0.01420959,
+          "Si": 0.024766
+        },
+        "stable_ejecta_sum_msun": 8.91818163243734,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.005799777108962815,
+        "stable_segment_mass_budget_residual_msun": -0.053839330902501814,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0005503000000000001,
+          "Ca": 2.296795e-05,
+          "Fe": 0.00042645,
+          "H": 0.21400325,
+          "He": 0.0923107,
+          "Mg": 0.00022579999999999999,
+          "N": 0.000671549,
+          "Ne": 0.00039065000000000004,
+          "O": 0.00187557,
+          "S": 0.0001298049,
+          "Si": 0.00025582999999999997
+        },
+        "stable_wind_sum_msun": 0.3109790366601581,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.00944949143734064,
+        "untracked_stable_wind_msun": 0.00011616481015808144,
+        "zams_mass_msun": 10.75
+      },
+      "11.0": {
+        "baryonic_mass_cut_after_fallback_msun": 1.537,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.0016368,
+        "final_kinetic_energy_erg": 3.1e+50,
+        "final_kinetic_energy_foe": 0.31,
+        "labelled_zams_minus_mass_cut_msun": 9.463000000000001,
+        "outside_alpha_msun": 0.024882,
+        "outside_ni_msun": 0.018107,
+        "outside_tracer_msun": 0.00098452,
+        "selected_radioactive_ejecta_sum_msun": 0.017234364999999998,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 1.12e-05,
+            "wind_msun": 2.17e-09
+          },
+          "ar39": {
+            "ejecta_msun": 2.24e-06,
+            "wind_msun": 1.24e-29
+          },
+          "c14": {
+            "ejecta_msun": 4.53e-06,
+            "wind_msun": 6.19e-15
+          },
+          "ca41": {
+            "ejecta_msun": 2.94e-06,
+            "wind_msun": 1.23e-12
+          },
+          "ca45": {
+            "ejecta_msun": 1.46e-07,
+            "wind_msun": 5.17e-33
+          },
+          "cl36": {
+            "ejecta_msun": 1.22e-06,
+            "wind_msun": 2.62e-13
+          },
+          "co60": {
+            "ejecta_msun": 3.5e-06,
+            "wind_msun": 1.81e-22
+          },
+          "fe55": {
+            "ejecta_msun": 1.14e-05,
+            "wind_msun": 4.12e-30
+          },
+          "fe60": {
+            "ejecta_msun": 1.75e-05,
+            "wind_msun": 5.16e-17
+          },
+          "k40": {
+            "ejecta_msun": 1.02e-06,
+            "wind_msun": 2e-09
+          },
+          "mn53": {
+            "ejecta_msun": 6.03e-06,
+            "wind_msun": 1.79e-25
+          },
+          "mn54": {
+            "ejecta_msun": 3.82e-07,
+            "wind_msun": 3.14e-50
+          },
+          "na22": {
+            "ejecta_msun": 2.36e-07,
+            "wind_msun": 6.98e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.0163,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.000779,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 6.4e-05,
+            "wind_msun": 4e-12
+          },
+          "ni63": {
+            "ejecta_msun": 1.48e-05,
+            "wind_msun": 7.48e-30
+          },
+          "si32": {
+            "ejecta_msun": 7.44e-07,
+            "wind_msun": 1.42e-48
+          },
+          "ti44": {
+            "ejecta_msun": 1.32e-05,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 2.77e-07,
+            "wind_msun": 2.6e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 4.175498241600189e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.082618,
+          "Ca": 0.001454876,
+          "Fe": 0.029979,
+          "H": 5.3200265,
+          "He": 3.370263,
+          "Mg": 0.01354,
+          "N": 0.0257427,
+          "Ne": 0.035482,
+          "O": 0.1988606,
+          "S": 0.01282814,
+          "Si": 0.02183
+        },
+        "stable_ejecta_sum_msun": 9.120844328091035,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.003165517303589677,
+        "stable_segment_mass_budget_residual_msun": -0.029955290243869115,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0005572,
+          "Ca": 2.307145e-05,
+          "Fe": 0.00042872,
+          "H": 0.21400335,
+          "He": 0.0935106,
+          "Mg": 0.0002271,
+          "N": 0.00067756,
+          "Ne": 0.00039278,
+          "O": 0.00187551,
+          "S": 0.000130855,
+          "Si": 0.00025686999999999997
+        },
+        "stable_wind_sum_msun": 0.3122003816650971,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.008219512091034886,
+        "untracked_stable_wind_msun": 0.00011676521509712545,
+        "zams_mass_msun": 11.0
+      },
+      "11.25": {
+        "baryonic_mass_cut_after_fallback_msun": 1.528,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.0013575,
+        "final_kinetic_energy_erg": 3.6e+50,
+        "final_kinetic_energy_foe": 0.36,
+        "labelled_zams_minus_mass_cut_msun": 9.722,
+        "outside_alpha_msun": 0.027955,
+        "outside_ni_msun": 0.018789,
+        "outside_tracer_msun": 0.0029668,
+        "selected_radioactive_ejecta_sum_msun": 0.018668036,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 1.1e-05,
+            "wind_msun": 2.79e-09
+          },
+          "ar39": {
+            "ejecta_msun": 1.75e-06,
+            "wind_msun": 4.15e-26
+          },
+          "c14": {
+            "ejecta_msun": 3.78e-06,
+            "wind_msun": 2.83e-13
+          },
+          "ca41": {
+            "ejecta_msun": 1.08e-06,
+            "wind_msun": 1.92e-12
+          },
+          "ca45": {
+            "ejecta_msun": 1.83e-07,
+            "wind_msun": 5.96e-33
+          },
+          "cl36": {
+            "ejecta_msun": 3.31e-07,
+            "wind_msun": 3.53e-13
+          },
+          "co60": {
+            "ejecta_msun": 4.64e-06,
+            "wind_msun": 2.3e-22
+          },
+          "fe55": {
+            "ejecta_msun": 1.08e-05,
+            "wind_msun": 4.74e-30
+          },
+          "fe60": {
+            "ejecta_msun": 1.93e-05,
+            "wind_msun": 6.53e-17
+          },
+          "k40": {
+            "ejecta_msun": 2.93e-07,
+            "wind_msun": 2.31e-09
+          },
+          "mn53": {
+            "ejecta_msun": 6.36e-06,
+            "wind_msun": 2.64e-25
+          },
+          "mn54": {
+            "ejecta_msun": 3.49e-07,
+            "wind_msun": 4.4e-50
+          },
+          "na22": {
+            "ejecta_msun": 2.34e-07,
+            "wind_msun": 8.01e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.0177,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.000807,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 6.93e-05,
+            "wind_msun": 6.71e-12
+          },
+          "ni63": {
+            "ejecta_msun": 1.7e-05,
+            "wind_msun": 8.62e-30
+          },
+          "si32": {
+            "ejecta_msun": 7.62e-07,
+            "wind_msun": 2.03e-34
+          },
+          "ti44": {
+            "ejecta_msun": 1.37e-05,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 1.74e-07,
+            "wind_msun": 2.98e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 5.109266065300238e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.08333600000000001,
+          "Ca": 0.0014705990000000002,
+          "Fe": 0.031742,
+          "H": 5.440026700000001,
+          "He": 3.430269,
+          "Mg": 0.015710000000000002,
+          "N": 0.025550399999999997,
+          "Ne": 0.039693,
+          "O": 0.2179698,
+          "S": 0.01028137,
+          "Si": 0.018819
+        },
+        "stable_ejecta_sum_msun": 9.32294492362888,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.003868427008988575,
+        "stable_segment_mass_budget_residual_msun": -0.03760884738138692,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0006412,
+          "Ca": 2.669302e-05,
+          "Fe": 0.00049615,
+          "H": 0.24800371,
+          "He": 0.1080123,
+          "Mg": 0.000263,
+          "N": 0.000789636,
+          "Ne": 0.00045397,
+          "O": 0.00217633,
+          "S": 0.000150929,
+          "Si": 0.00029721
+        },
+        "stable_wind_sum_msun": 0.3614462289897328,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.00807705462887931,
+        "untracked_stable_wind_msun": 0.00013510096973279317,
+        "zams_mass_msun": 11.25
+      },
+      "11.5": {
+        "baryonic_mass_cut_after_fallback_msun": 1.497,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.00050896,
+        "final_kinetic_energy_erg": 6.4000000000000005e+50,
+        "final_kinetic_energy_foe": 0.64,
+        "labelled_zams_minus_mass_cut_msun": 10.003,
+        "outside_alpha_msun": 0.044546,
+        "outside_ni_msun": 0.02729,
+        "outside_tracer_msun": 0.010309,
+        "selected_radioactive_ejecta_sum_msun": 0.025329506,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 7.93e-06,
+            "wind_msun": 2.22e-09
+          },
+          "ar39": {
+            "ejecta_msun": 1.71e-06,
+            "wind_msun": 1.82e-22
+          },
+          "c14": {
+            "ejecta_msun": 4.07e-06,
+            "wind_msun": 1.59e-12
+          },
+          "ca41": {
+            "ejecta_msun": 1.19e-06,
+            "wind_msun": 5.52e-12
+          },
+          "ca45": {
+            "ejecta_msun": 1.81e-07,
+            "wind_msun": 1.42e-32
+          },
+          "cl36": {
+            "ejecta_msun": 3.85e-07,
+            "wind_msun": 9.87e-13
+          },
+          "co60": {
+            "ejecta_msun": 4.14e-06,
+            "wind_msun": 6.21e-22
+          },
+          "fe55": {
+            "ejecta_msun": 1.22e-05,
+            "wind_msun": 1.13e-29
+          },
+          "fe60": {
+            "ejecta_msun": 2.49e-05,
+            "wind_msun": 1.77e-16
+          },
+          "k40": {
+            "ejecta_msun": 2.7e-07,
+            "wind_msun": 4.79e-09
+          },
+          "mn53": {
+            "ejecta_msun": 8.6e-06,
+            "wind_msun": 4e-25
+          },
+          "mn54": {
+            "ejecta_msun": 3.96e-07,
+            "wind_msun": 7.72e-50
+          },
+          "na22": {
+            "ejecta_msun": 1.44e-07,
+            "wind_msun": 1.83e-23
+          },
+          "ni56": {
+            "ejecta_msun": 0.024,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.00114,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 8.54e-05,
+            "wind_msun": 1.95e-11
+          },
+          "ni63": {
+            "ejecta_msun": 1.56e-05,
+            "wind_msun": 3.32e-29
+          },
+          "si32": {
+            "ejecta_msun": 2.65e-06,
+            "wind_msun": 6.46e-30
+          },
+          "ti44": {
+            "ejecta_msun": 1.95e-05,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 2.4e-07,
+            "wind_msun": 7.05e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 7.037597177000822e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.081612,
+          "Ca": 0.0018272079999999999,
+          "Fe": 0.038419999999999996,
+          "H": 5.4000388,
+          "He": 3.350272,
+          "Mg": 0.015009999999999999,
+          "N": 0.0234507,
+          "Ne": 0.03388,
+          "O": 0.20480060000000003,
+          "S": 0.01357945,
+          "Si": 0.024165
+        },
+        "stable_ejecta_sum_msun": 9.19624127872314,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.005948774560409282,
+        "stable_segment_mass_budget_residual_msun": -0.05950559192777405,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0013014,
+          "Ca": 5.514051e-05,
+          "Fe": 0.00102489,
+          "H": 0.5170059100000001,
+          "He": 0.2190265,
+          "Mg": 0.0005417,
+          "N": 0.0015912,
+          "Ne": 0.000939,
+          "O": 0.0045631000000000005,
+          "S": 0.0003123698,
+          "Si": 0.0006140000000000001
+        },
+        "stable_wind_sum_msun": 0.7472531293490868,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.009185520723139717,
+        "untracked_stable_wind_msun": 0.0002779190390866937,
+        "zams_mass_msun": 11.5
+      },
+      "11.75": {
+        "baryonic_mass_cut_after_fallback_msun": 1.587,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.0029484,
+        "final_kinetic_energy_erg": 2.6e+50,
+        "final_kinetic_energy_foe": 0.26,
+        "labelled_zams_minus_mass_cut_msun": 10.163,
+        "outside_alpha_msun": 0.019069,
+        "outside_ni_msun": 0.018486,
+        "outside_tracer_msun": 0.0,
+        "selected_radioactive_ejecta_sum_msun": 0.017092619,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 9.74e-06,
+            "wind_msun": 3.62e-10
+          },
+          "ar39": {
+            "ejecta_msun": 2.14e-06,
+            "wind_msun": 3.42e-19
+          },
+          "c14": {
+            "ejecta_msun": 4.09e-06,
+            "wind_msun": 4.97e-12
+          },
+          "ca41": {
+            "ejecta_msun": 1.11e-06,
+            "wind_msun": 9.78e-12
+          },
+          "ca45": {
+            "ejecta_msun": 2.56e-07,
+            "wind_msun": 1.9e-32
+          },
+          "cl36": {
+            "ejecta_msun": 3.44e-07,
+            "wind_msun": 1.68e-12
+          },
+          "co60": {
+            "ejecta_msun": 5.93e-06,
+            "wind_msun": 1e-21
+          },
+          "fe55": {
+            "ejecta_msun": 1.08e-05,
+            "wind_msun": 1.51e-29
+          },
+          "fe60": {
+            "ejecta_msun": 2.2e-05,
+            "wind_msun": 2.84e-16
+          },
+          "k40": {
+            "ejecta_msun": 3.34e-07,
+            "wind_msun": 6.26e-09
+          },
+          "mn53": {
+            "ejecta_msun": 5.78e-06,
+            "wind_msun": 1.05e-25
+          },
+          "mn54": {
+            "ejecta_msun": 3.58e-07,
+            "wind_msun": 2.89e-50
+          },
+          "na22": {
+            "ejecta_msun": 4.6e-07,
+            "wind_msun": 2.23e-23
+          },
+          "ni56": {
+            "ejecta_msun": 0.0162,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.000734,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 6.04e-05,
+            "wind_msun": 3.48e-11
+          },
+          "ni63": {
+            "ejecta_msun": 2.2e-05,
+            "wind_msun": 2.5e-24
+          },
+          "si32": {
+            "ejecta_msun": 2.21e-07,
+            "wind_msun": 8.42e-26
+          },
+          "ti44": {
+            "ejecta_msun": 1.25e-05,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 1.56e-07,
+            "wind_msun": 9.41e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 6.6732302843430255e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.09010299999999999,
+          "Ca": 0.001369054,
+          "Fe": 0.029843,
+          "H": 5.2700371,
+          "He": 3.3602629999999998,
+          "Mg": 0.01915,
+          "N": 0.0253599,
+          "Ne": 0.054033,
+          "O": 0.2693208,
+          "S": 0.00989717,
+          "Si": 0.018494
+        },
+        "stable_ejecta_sum_msun": 9.15619824515797,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.0029616215331227293,
+        "stable_segment_mass_budget_residual_msun": -0.0300989596411263,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0018915,
+          "Ca": 7.200828e-05,
+          "Fe": 0.0013383099999999999,
+          "H": 0.69000785,
+          "He": 0.27203890000000003,
+          "Mg": 0.0007082,
+          "N": 0.0015316799999999999,
+          "Ne": 0.00123153,
+          "O": 0.00631655,
+          "S": 0.0004084281,
+          "Si": 0.0008023
+        },
+        "stable_wind_sum_msun": 0.9767027952009039,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.008328221157970717,
+        "untracked_stable_wind_msun": 0.000355538820903889,
+        "zams_mass_msun": 11.75
+      },
+      "12.0": {
+        "baryonic_mass_cut_after_fallback_msun": 1.529,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.0012928,
+        "final_kinetic_energy_erg": 6.6e+50,
+        "final_kinetic_energy_foe": 0.66,
+        "labelled_zams_minus_mass_cut_msun": 10.471,
+        "outside_alpha_msun": 0.039251,
+        "outside_ni_msun": 0.033358,
+        "outside_tracer_msun": 0.010072,
+        "selected_radioactive_ejecta_sum_msun": 0.033438014,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 1.22e-05,
+            "wind_msun": 2.49e-10
+          },
+          "ar39": {
+            "ejecta_msun": 2.43e-06,
+            "wind_msun": 4.85e-29
+          },
+          "c14": {
+            "ejecta_msun": 3.28e-06,
+            "wind_msun": 6.08e-16
+          },
+          "ca41": {
+            "ejecta_msun": 1.61e-06,
+            "wind_msun": 5.95e-12
+          },
+          "ca45": {
+            "ejecta_msun": 3.25e-07,
+            "wind_msun": 2.06e-32
+          },
+          "cl36": {
+            "ejecta_msun": 5.59e-07,
+            "wind_msun": 1.5e-12
+          },
+          "co60": {
+            "ejecta_msun": 6.93e-06,
+            "wind_msun": 1.13e-21
+          },
+          "fe55": {
+            "ejecta_msun": 1.63e-05,
+            "wind_msun": 1.63e-29
+          },
+          "fe60": {
+            "ejecta_msun": 3.07e-05,
+            "wind_msun": 3.22e-16
+          },
+          "k40": {
+            "ejecta_msun": 3.65e-07,
+            "wind_msun": 7.05e-09
+          },
+          "mn53": {
+            "ejecta_msun": 1.16e-05,
+            "wind_msun": 6.11e-26
+          },
+          "mn54": {
+            "ejecta_msun": 6.18e-07,
+            "wind_msun": 1.82e-50
+          },
+          "na22": {
+            "ejecta_msun": 4.03e-07,
+            "wind_msun": 2.35e-23
+          },
+          "ni56": {
+            "ejecta_msun": 0.0317,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.0015,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 9.98e-05,
+            "wind_msun": 1.74e-11
+          },
+          "ni63": {
+            "ejecta_msun": 2.44e-05,
+            "wind_msun": 2.95e-29
+          },
+          "si32": {
+            "ejecta_msun": 6.05e-07,
+            "wind_msun": 6.8e-57
+          },
+          "ti44": {
+            "ejecta_msun": 2.56e-05,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 2.89e-07,
+            "wind_msun": 1e-38
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 7.323850930001154e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.09500099999999999,
+          "Ca": 0.002165915,
+          "Fe": 0.046902,
+          "H": 5.2700368,
+          "He": 3.4002589999999997,
+          "Mg": 0.02369,
+          "N": 0.027726999999999998,
+          "Ne": 0.061136,
+          "O": 0.3296178,
+          "S": 0.017200089999999998,
+          "Si": 0.031239999999999997
+        },
+        "stable_ejecta_sum_msun": 9.31701944310978,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.005292711494087923,
+        "stable_segment_mass_budget_residual_msun": -0.05541998205459464,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.00226,
+          "Ca": 8.111368999999999e-05,
+          "Fe": 0.0015019999999999999,
+          "H": 0.77900915,
+          "He": 0.3030459,
+          "Mg": 0.0007969,
+          "N": 0.00149198,
+          "Ne": 0.0013953,
+          "O": 0.00721838,
+          "S": 0.0004590279,
+          "Si": 0.0009034000000000001
+        },
+        "stable_wind_sum_msun": 1.0985605748356244,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.012043838109780935,
+        "untracked_stable_wind_msun": 0.00039742324562430653,
+        "zams_mass_msun": 12.0
+      },
+      "9.0": {
+        "baryonic_mass_cut_after_fallback_msun": 1.352,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.00020471,
+        "final_kinetic_energy_erg": 1.1e+50,
+        "final_kinetic_energy_foe": 0.11,
+        "labelled_zams_minus_mass_cut_msun": 7.648,
+        "outside_alpha_msun": 0.013312,
+        "outside_ni_msun": 0.0058315,
+        "outside_tracer_msun": 0.0001705,
+        "selected_radioactive_ejecta_sum_msun": 0.0041498415,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 5.51e-06,
+            "wind_msun": 1.72e-09
+          },
+          "ar39": {
+            "ejecta_msun": 2.36e-07,
+            "wind_msun": 1.6e-29
+          },
+          "c14": {
+            "ejecta_msun": 4.95e-07,
+            "wind_msun": 2.97e-14
+          },
+          "ca41": {
+            "ejecta_msun": 3.1e-07,
+            "wind_msun": 1.3e-12
+          },
+          "ca45": {
+            "ejecta_msun": 1.85e-08,
+            "wind_msun": 6.81e-33
+          },
+          "cl36": {
+            "ejecta_msun": 9.32e-08,
+            "wind_msun": 2.3e-13
+          },
+          "co60": {
+            "ejecta_msun": 7.45e-07,
+            "wind_msun": 1.41e-22
+          },
+          "fe55": {
+            "ejecta_msun": 2.69e-06,
+            "wind_msun": 5.42e-30
+          },
+          "fe60": {
+            "ejecta_msun": 1.29e-06,
+            "wind_msun": 4.02e-17
+          },
+          "k40": {
+            "ejecta_msun": 1.27e-07,
+            "wind_msun": 1.63e-09
+          },
+          "mn53": {
+            "ejecta_msun": 1.41e-06,
+            "wind_msun": 1.02e-25
+          },
+          "mn54": {
+            "ejecta_msun": 1.05e-07,
+            "wind_msun": 4.32e-51
+          },
+          "na22": {
+            "ejecta_msun": 8.85e-08,
+            "wind_msun": 8.63e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.00388,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.000233,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 1.78e-05,
+            "wind_msun": 4.55e-12
+          },
+          "ni63": {
+            "ejecta_msun": 2.74e-06,
+            "wind_msun": 9.76e-30
+          },
+          "si32": {
+            "ejecta_msun": 2.08e-08,
+            "wind_msun": 6.26e-41
+          },
+          "ti44": {
+            "ejecta_msun": 3.13e-06,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 3.25e-08,
+            "wind_msun": 3.68e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 3.3561097402001496e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.032191000000000004,
+          "Ca": 0.0006889827999999999,
+          "Fe": 0.0142848,
+          "H": 4.5400286,
+          "He": 2.670248,
+          "Mg": 0.007642,
+          "N": 0.0218113,
+          "Ne": 0.0170552,
+          "O": 0.0607016,
+          "S": 0.0042012279999999996,
+          "Si": 0.008477
+        },
+        "stable_ejecta_sum_msun": 7.381286648069751,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.0015395286449613318,
+        "stable_segment_mass_budget_residual_msun": -0.011774315076664266,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0004463,
+          "Ca": 1.8828457e-05,
+          "Fe": 0.00034928,
+          "H": 0.17800242,
+          "He": 0.0731096,
+          "Mg": 0.0001848,
+          "N": 0.000522432,
+          "Ne": 0.00032014799999999997,
+          "O": 0.00157494,
+          "S": 0.0001065824,
+          "Si": 0.00020901
+        },
+        "stable_wind_sum_msun": 0.2549390368535844,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.003956937269750327,
+        "untracked_stable_wind_msun": 9.469599658440409e-05,
+        "zams_mass_msun": 9.0
+      },
+      "9.25": {
+        "baryonic_mass_cut_after_fallback_msun": 1.393,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.00029949,
+        "final_kinetic_energy_erg": 1.4000000000000001e+50,
+        "final_kinetic_energy_foe": 0.14,
+        "labelled_zams_minus_mass_cut_msun": 7.857,
+        "outside_alpha_msun": 0.014513,
+        "outside_ni_msun": 0.0065875,
+        "outside_tracer_msun": 0.0,
+        "selected_radioactive_ejecta_sum_msun": 0.00322723665,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 5.62e-06,
+            "wind_msun": 1.26e-09
+          },
+          "ar39": {
+            "ejecta_msun": 3.16e-07,
+            "wind_msun": 9.7e-22
+          },
+          "c14": {
+            "ejecta_msun": 2.41e-07,
+            "wind_msun": 5.18e-14
+          },
+          "ca41": {
+            "ejecta_msun": 3.38e-07,
+            "wind_msun": 1.4e-12
+          },
+          "ca45": {
+            "ejecta_msun": 7.11e-09,
+            "wind_msun": 6.92e-33
+          },
+          "cl36": {
+            "ejecta_msun": 9.15e-08,
+            "wind_msun": 2.51e-13
+          },
+          "co60": {
+            "ejecta_msun": 6.04e-07,
+            "wind_msun": 1.56e-22
+          },
+          "fe55": {
+            "ejecta_msun": 2.03e-06,
+            "wind_msun": 5.51e-30
+          },
+          "fe60": {
+            "ejecta_msun": 2.94e-07,
+            "wind_msun": 4.44e-17
+          },
+          "k40": {
+            "ejecta_msun": 1.29e-07,
+            "wind_msun": 1.74e-09
+          },
+          "mn53": {
+            "ejecta_msun": 1.34e-06,
+            "wind_msun": 2.68e-26
+          },
+          "mn54": {
+            "ejecta_msun": 8.38e-08,
+            "wind_msun": 4.89e-51
+          },
+          "na22": {
+            "ejecta_msun": 7.8e-08,
+            "wind_msun": 8.74e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.00301,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.00018,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 1.92e-05,
+            "wind_msun": 4.89e-12
+          },
+          "ni63": {
+            "ejecta_msun": 3.68e-06,
+            "wind_msun": 1.36e-25
+          },
+          "si32": {
+            "ejecta_msun": 1.64e-09,
+            "wind_msun": 1.46e-29
+          },
+          "ti44": {
+            "ejecta_msun": 3.14e-06,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 4.26e-08,
+            "wind_msun": 3.68e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 3.0065928444011347e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.039506,
+          "Ca": 0.0007125892,
+          "Fe": 0.0136535,
+          "H": 4.640028399999999,
+          "He": 2.74025,
+          "Mg": 0.007254,
+          "N": 0.0222118,
+          "Ne": 0.0170167,
+          "O": 0.0695978,
+          "S": 0.004351792,
+          "Si": 0.008515
+        },
+        "stable_ejecta_sum_msun": 7.5670503873722845,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.0022325956806326474,
+        "stable_segment_mass_budget_residual_msun": -0.01754150426273071,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.00047660000000000004,
+          "Ca": 2.0072316e-05,
+          "Fe": 0.00037327,
+          "H": 0.19000258,
+          "He": 0.0783101,
+          "Mg": 0.0001977,
+          "N": 0.0005604609999999999,
+          "Ne": 0.000342713,
+          "O": 0.0016852400000000002,
+          "S": 0.0001139708,
+          "Si": 0.00022418999999999998
+        },
+        "stable_wind_sum_msun": 0.2724081083649846,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.003952806172285328,
+        "untracked_stable_wind_msun": 0.00010121124898460065,
+        "zams_mass_msun": 9.25
+      },
+      "9.5": {
+        "baryonic_mass_cut_after_fallback_msun": 1.407,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.0003644,
+        "final_kinetic_energy_erg": 1.8e+50,
+        "final_kinetic_energy_foe": 0.18,
+        "labelled_zams_minus_mass_cut_msun": 8.093,
+        "outside_alpha_msun": 0.017269,
+        "outside_ni_msun": 0.0088826,
+        "outside_tracer_msun": 0.0,
+        "selected_radioactive_ejecta_sum_msun": 0.0065259761,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 6.32e-06,
+            "wind_msun": 1.13e-09
+          },
+          "ar39": {
+            "ejecta_msun": 6.42e-07,
+            "wind_msun": 8.68e-24
+          },
+          "c14": {
+            "ejecta_msun": 4.13e-06,
+            "wind_msun": 3e-13
+          },
+          "ca41": {
+            "ejecta_msun": 4.72e-07,
+            "wind_msun": 1.79e-12
+          },
+          "ca45": {
+            "ejecta_msun": 5.71e-08,
+            "wind_msun": 7.15e-33
+          },
+          "cl36": {
+            "ejecta_msun": 1.39e-07,
+            "wind_msun": 3.08e-13
+          },
+          "co60": {
+            "ejecta_msun": 9.36e-07,
+            "wind_msun": 1.8e-22
+          },
+          "fe55": {
+            "ejecta_msun": 4.06e-06,
+            "wind_msun": 5.7e-30
+          },
+          "fe60": {
+            "ejecta_msun": 1.06e-05,
+            "wind_msun": 5.11e-17
+          },
+          "k40": {
+            "ejecta_msun": 1.44e-07,
+            "wind_msun": 1.87e-09
+          },
+          "mn53": {
+            "ejecta_msun": 2.47e-06,
+            "wind_msun": 1.96e-26
+          },
+          "mn54": {
+            "ejecta_msun": 1.48e-07,
+            "wind_msun": 5.65e-51
+          },
+          "na22": {
+            "ejecta_msun": 1e-07,
+            "wind_msun": 9.08e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.00613,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.000321,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 3.23e-05,
+            "wind_msun": 6.38e-12
+          },
+          "ni63": {
+            "ejecta_msun": 6.19e-06,
+            "wind_msun": 1.44e-29
+          },
+          "si32": {
+            "ejecta_msun": 6.8e-07,
+            "wind_msun": 5.59e-31
+          },
+          "ti44": {
+            "ejecta_msun": 5.51e-06,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 7.8e-08,
+            "wind_msun": 3.83e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 3.0087780511001976e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.044421999999999996,
+          "Ca": 0.0008361321999999999,
+          "Fe": 0.0172029,
+          "H": 4.7500283,
+          "He": 2.820252,
+          "Mg": 0.008255,
+          "N": 0.022717900000000003,
+          "Ne": 0.0194999,
+          "O": 0.0825455,
+          "S": 0.00547471,
+          "Si": 0.010507
+        },
+        "stable_ejecta_sum_msun": 7.786422737221534,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.0017129558569113196,
+        "stable_segment_mass_budget_residual_msun": -0.01386295174998331,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0005121,
+          "Ca": 2.1623085e-05,
+          "Fe": 0.00040156,
+          "H": 0.20400274999999998,
+          "He": 0.0843108,
+          "Mg": 0.0002129,
+          "N": 0.000606495,
+          "Ne": 0.00036848699999999997,
+          "O": 0.0018055999999999999,
+          "S": 0.00012241850000000001,
+          "Si": 0.00024054
+        },
+        "stable_wind_sum_msun": 0.29271431102848283,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.004681395021534307,
+        "untracked_stable_wind_msun": 0.00010903744348284006,
+        "zams_mass_msun": 9.5
+      },
+      "9.75": {
+        "baryonic_mass_cut_after_fallback_msun": 1.45,
+        "cross_segment_duplicate_isotopes": [
+          "k40"
+        ],
+        "exact_mass_closure_claimed": false,
+        "fallback_mass_msun": 0.00026876,
+        "final_kinetic_energy_erg": 3.4999999999999996e+50,
+        "final_kinetic_energy_foe": 0.35,
+        "labelled_zams_minus_mass_cut_msun": 8.3,
+        "outside_alpha_msun": 0.027838,
+        "outside_ni_msun": 0.015323,
+        "outside_tracer_msun": 0.0023341,
+        "selected_radioactive_ejecta_sum_msun": 0.014230395600000001,
+        "selected_radioactive_inventory": {
+          "al26": {
+            "ejecta_msun": 6.89e-06,
+            "wind_msun": 1.07e-09
+          },
+          "ar39": {
+            "ejecta_msun": 8.21e-07,
+            "wind_msun": 4.55e-20
+          },
+          "c14": {
+            "ejecta_msun": 6.38e-06,
+            "wind_msun": 7.71e-13
+          },
+          "ca41": {
+            "ejecta_msun": 6.55e-07,
+            "wind_msun": 2.09e-12
+          },
+          "ca45": {
+            "ejecta_msun": 1.01e-07,
+            "wind_msun": 7.05e-33
+          },
+          "cl36": {
+            "ejecta_msun": 1.89e-07,
+            "wind_msun": 3.46e-13
+          },
+          "co60": {
+            "ejecta_msun": 1.08e-06,
+            "wind_msun": 1.93e-22
+          },
+          "fe55": {
+            "ejecta_msun": 4.78e-06,
+            "wind_msun": 5.61e-30
+          },
+          "fe60": {
+            "ejecta_msun": 2.33e-05,
+            "wind_msun": 5.5e-17
+          },
+          "k40": {
+            "ejecta_msun": 1.54e-07,
+            "wind_msun": 1.95e-09
+          },
+          "mn53": {
+            "ejecta_msun": 3.23e-06,
+            "wind_msun": 2.39e-26
+          },
+          "mn54": {
+            "ejecta_msun": 1.25e-07,
+            "wind_msun": 7.05e-51
+          },
+          "na22": {
+            "ejecta_msun": 3.96e-08,
+            "wind_msun": 8.96e-24
+          },
+          "ni56": {
+            "ejecta_msun": 0.0134,
+            "wind_msun": 0.0
+          },
+          "ni57": {
+            "ejecta_msun": 0.000708,
+            "wind_msun": 0.0
+          },
+          "ni59": {
+            "ejecta_msun": 5.09e-05,
+            "wind_msun": 7.48e-12
+          },
+          "ni63": {
+            "ejecta_msun": 8.73e-06,
+            "wind_msun": 4.73e-24
+          },
+          "si32": {
+            "ejecta_msun": 5.18e-06,
+            "wind_msun": 2.77e-26
+          },
+          "ti44": {
+            "ejecta_msun": 9.73e-06,
+            "wind_msun": 0.0
+          },
+          "v49": {
+            "ejecta_msun": 1.11e-07,
+            "wind_msun": 3.7e-39
+          }
+        },
+        "selected_radioactive_isotope_row_count": 20,
+        "selected_radioactive_wind_sum_msun": 3.030687055045707e-09,
+        "stable_ejecta_by_tracked_element_msun": {
+          "C": 0.051137,
+          "Ca": 0.0010931419999999999,
+          "Fe": 0.025172200000000002,
+          "H": 4.850028099999999,
+          "He": 2.900254,
+          "Mg": 0.008429,
+          "N": 0.0223185,
+          "Ne": 0.015867,
+          "O": 0.07669770000000001,
+          "S": 0.00741057,
+          "Si": 0.012711
+        },
+        "stable_ejecta_sum_msun": 7.976849944026657,
+        "stable_isotope_row_count": 283,
+        "stable_segment_mass_budget_absolute_relative_residual": 0.0020902865161577335,
+        "stable_segment_mass_budget_residual_msun": -0.01734937808410919,
+        "stable_wind_by_tracked_element_msun": {
+          "C": 0.0005338999999999999,
+          "Ca": 2.2553430000000002e-05,
+          "Fe": 0.00041887,
+          "H": 0.21300288,
+          "He": 0.0882111,
+          "Mg": 0.0002219,
+          "N": 0.000637518,
+          "Ne": 0.00038344000000000003,
+          "O": 0.00187576,
+          "S": 0.0001276894,
+          "Si": 0.00025138
+        },
+        "stable_wind_sum_msun": 0.30580067788923504,
+        "tracked_elements_absent": [],
+        "tracked_elements_present": [
+          "C",
+          "Ca",
+          "Fe",
+          "H",
+          "He",
+          "Mg",
+          "N",
+          "Ne",
+          "O",
+          "S",
+          "Si"
+        ],
+        "untracked_stable_ejecta_msun": 0.0057317320266578875,
+        "untracked_stable_wind_msun": 0.00011368705923503475,
+        "zams_mass_msun": 9.75
+      }
+    },
+    "zams_mass_msun": [
+      9.0,
+      9.25,
+      9.5,
+      9.75,
+      10.0,
+      10.25,
+      10.5,
+      10.75,
+      11.0,
+      11.25,
+      11.5,
+      11.75,
+      12.0
+    ]
+  }
+}

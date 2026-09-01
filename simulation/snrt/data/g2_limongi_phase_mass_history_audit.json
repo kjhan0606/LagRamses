@@ -1,0 +1,81 @@
+{
+  "audit_code_sha256": "f786d0590b4ed753bb65278eb85df2f0c84cf675fcddcb8d6682d453ac0d7255",
+  "blockers": [
+    "Reconcile phase-endpoint mass loss with the integrated isotopic wind table at source precision.",
+    "Provide or approve a time-resolved wind composition model rather than scaling one terminal composition over all phases.",
+    "Select the rotation distribution and interpolation policy.",
+    "Cross-calibrate the source with the low/intermediate-mass wind and AGB source."
+  ],
+  "canonical_conversion_allowed": false,
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_limongi_phase_mass_history_contract_v1.json",
+  "contract_sha256": "c37c1513525b897253546ae825455682191ca7ed838841d6479e085a1f412a14",
+  "duplicate_resolution": {
+    "all_collapsed_rows_physically_identical": true,
+    "collapsed_extra_row_count": 19,
+    "duplicate_coordinate_count": 10
+  },
+  "gate": "G2",
+  "interpretation": "Table5 supplies a monotonic phase-endpoint wind-mass history after exact duplicate collapse, but not a time-resolved isotopic composition. The endpoint mass and integrated isotope sums also disagree beyond the nominal printed-mass half-bin for some models, so the history cannot normalize canonical ejecta without a documented reconciliation.",
+  "mass_history": {
+    "age_zero_anchor_count": 108,
+    "maximum_phase_node_count_per_model": 8,
+    "maximum_terminal_age_yr": 23040321.00167,
+    "minimum_phase_node_count_per_model": 3,
+    "minimum_terminal_age_yr": 3103519.43314,
+    "model_count": 108,
+    "monotonic_mass_violation_count": 0,
+    "negative_cumulative_mass_count": 0,
+    "phase_row_count_after_exact_collapse": 845,
+    "time_resolved_isotopic_composition_available": false,
+    "time_resolved_mass_available": true
+  },
+  "production_ready": false,
+  "runtime_deposition_allowed": false,
+  "schema": "snrt-g2-limongi-phase-mass-history-audit",
+  "schema_version": 1,
+  "source_adapter_code_sha256": "2c5c5ff366fea6487fd9ee616a8099a27b133c51be9872b0df65765ebaa23531",
+  "status": "mass_history_recoverable_composition_and_closure_blocked",
+  "terminal_integrated_wind_closure": {
+    "all_models_close_within_printed_quantization": false,
+    "maximum_absolute_residual": {
+      "absolute_residual_msun": 0.34122894710262286,
+      "coordinate": {
+        "initial_mass_msun": 120.0,
+        "metallicity_feh": -3,
+        "rotation_velocity_km_s": 0
+      },
+      "integrated_isotopic_wind_mass_msun": 0.34122894710262286,
+      "integrated_yield_component": "table8_setR_wind_only",
+      "phase_endpoint_wind_mass_msun": 0.0,
+      "residual_msun": -0.34122894710262286
+    },
+    "maximum_residual_msun": {
+      "absolute_residual_msun": 0.08899943941717936,
+      "coordinate": {
+        "initial_mass_msun": 120.0,
+        "metallicity_feh": 0,
+        "rotation_velocity_km_s": 300
+      },
+      "integrated_isotopic_wind_mass_msun": 101.31100056058283,
+      "integrated_yield_component": "table8_setR_wind_only",
+      "phase_endpoint_wind_mass_msun": 101.4,
+      "residual_msun": 0.08899943941717936
+    },
+    "minimum_residual_msun": {
+      "absolute_residual_msun": 0.34122894710262286,
+      "coordinate": {
+        "initial_mass_msun": 120.0,
+        "metallicity_feh": -3,
+        "rotation_velocity_km_s": 0
+      },
+      "integrated_isotopic_wind_mass_msun": 0.34122894710262286,
+      "integrated_yield_component": "table8_setR_wind_only",
+      "phase_endpoint_wind_mass_msun": 0.0,
+      "residual_msun": -0.34122894710262286
+    },
+    "model_count": 108,
+    "model_count_exceeding_quantization_half_width": 89,
+    "residual_definition": "initial_minus_table5_terminal_mass minus integrated isotopic wind mass",
+    "table5_total_mass_quantization_half_width_msun": 0.005
+  }
+}

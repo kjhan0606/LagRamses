@@ -12,11 +12,13 @@ from .primordial import (
     EV_ERG,
     PhotoCrossSections,
     cen1992_helium_recombination,
+    default_photoelectron_excess_energy,
     hui_gnedin_case_b_hydrogen,
 )
 from .secondary import shull_van_steenberg_high_energy
 from .sharding import XShardings
 from .transport import TransportConfig, advance_with_absorption, angular_integral
+from .primordial_cooling import collisional_ionization_coefficients
 
 
 class _OpacityState(NamedTuple):
@@ -45,6 +47,9 @@ class ConservativePrimordialStepResult(NamedTuple):
     helium_ii_photoionizations: jnp.ndarray
     secondary_hydrogen_ionizations: jnp.ndarray
     secondary_helium_i_ionizations: jnp.ndarray
+    hydrogen_collisional_ionizations: jnp.ndarray
+    helium_i_collisional_ionizations: jnp.ndarray
+    helium_ii_collisional_ionizations: jnp.ndarray
     hydrogen_recombinations: jnp.ndarray
     helium_ii_recombinations: jnp.ndarray
     helium_iii_recombinations: jnp.ndarray
@@ -61,6 +66,7 @@ def build_conservative_primordial_step(
     cross_sections: PhotoCrossSections,
     group_energy_ev: jnp.ndarray,
     *,
+    photoelectron_excess_energy_ev: jnp.ndarray | None = None,
     fixed_point_iterations: int = 16,
     fixed_point_relaxation: float = 0.5,
     use_secondary_ionization: bool = False,
@@ -83,6 +89,13 @@ def build_conservative_primordial_step(
         raise ValueError("fixed_point_iterations must be positive")
     if not 0.0 < fixed_point_relaxation <= 1.0:
         raise ValueError("fixed_point_relaxation must lie in (0, 1]")
+    group_energy_ev = jnp.asarray(group_energy_ev)
+    if photoelectron_excess_energy_ev is None:
+        photoelectron_excess_energy_ev = default_photoelectron_excess_energy(group_energy_ev)
+    else:
+        photoelectron_excess_energy_ev = jnp.asarray(photoelectron_excess_energy_ev)
+        if photoelectron_excess_energy_ev.shape != (3, group_energy_ev.shape[0]):
+            raise ValueError("photoelectron_excess_energy_ev must have shape (3, n_group)")
 
     def step(
         intensity: jnp.ndarray,
@@ -103,8 +116,10 @@ def build_conservative_primordial_step(
         sigma_heii = cross_sections.helium_ii.reshape((-1,) + extra_axes)
         alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
         alpha_heii, alpha_heiii = cen1992_helium_recombination(temperature_k)
-        minimum_n_hi = 1.0e-12 * n_hydrogen
-        minimum_n_he = 1.0e-12 * n_helium
+        collisional = collisional_ionization_coefficients(temperature_k)
+        tiny = jnp.finfo(n_hydrogen.dtype).tiny
+        minimum_n_hi = jnp.maximum(1.0e-12 * n_hydrogen, tiny)
+        minimum_n_he = jnp.maximum(1.0e-12 * n_helium, tiny)
 
         def solve_at_opacity(opacity_state: _OpacityState) -> ConservativePrimordialStepResult:
             mean_n_hi = n_hydrogen * opacity_state.mean_x_hydrogen_i
@@ -130,7 +145,6 @@ def build_conservative_primordial_step(
             hydrogen_photoionizations = jnp.sum(absorbed_photons * kappa_hi / safe_kappa, axis=0)
             helium_i_photoionizations = jnp.sum(absorbed_photons * kappa_hei / safe_kappa, axis=0)
             helium_ii_photoionizations = jnp.sum(absorbed_photons * kappa_heii / safe_kappa, axis=0)
-            photon_energy = jnp.asarray(group_energy_ev).reshape((-1,) + extra_axes)
             secondary_hydrogen_ionizations = jnp.zeros_like(n_hydrogen)
             secondary_helium_i_ionizations = jnp.zeros_like(n_hydrogen)
             gas_photoheating_energy = jnp.zeros_like(n_hydrogen)
@@ -140,13 +154,16 @@ def build_conservative_primordial_step(
                 n_hydrogen * (1.0 - opacity_state.mean_x_hydrogen_i)
                 + n_helium * (opacity_state.x_helium_ii + 2.0 * opacity_state.x_helium_iii)
             ) / jnp.maximum(n_hydrogen + n_helium, jnp.finfo(n_hydrogen.dtype).tiny)
-            for absorbed, threshold_ev in (
-                (absorbed_photons * kappa_hi / safe_kappa, 13.60),
-                (absorbed_photons * kappa_hei / safe_kappa, 24.59),
-                (absorbed_photons * kappa_heii / safe_kappa, 54.42),
+            for absorbed, electron_energy in zip(
+                (
+                    absorbed_photons * kappa_hi / safe_kappa,
+                    absorbed_photons * kappa_hei / safe_kappa,
+                    absorbed_photons * kappa_heii / safe_kappa,
+                ),
+                photoelectron_excess_energy_ev,
+                strict=True,
             ):
-                electron_energy = jnp.maximum(photon_energy - threshold_ev, 0.0)
-                deposited_energy = absorbed * electron_energy
+                deposited_energy = absorbed * electron_energy.reshape((-1,) + extra_axes)
                 photoelectron_energy = photoelectron_energy + jnp.sum(deposited_energy, axis=0)
                 if use_secondary_ionization:
                     fractions = shull_van_steenberg_high_energy(electron_energy, electron_fraction)
@@ -176,30 +193,61 @@ def build_conservative_primordial_step(
                 n_hydrogen * (1.0 - opacity_state.mean_x_hydrogen_i)
                 + n_helium * (opacity_state.x_helium_ii + 2.0 * opacity_state.x_helium_iii)
             )
-            hydrogen_photoionization_rate = (hydrogen_photoionizations + secondary_hydrogen_ionizations) / (
-                transport.dt * jnp.maximum(mean_n_hi, minimum_n_hi)
+            hydrogen_photoionization_rate = (
+                (hydrogen_photoionizations + secondary_hydrogen_ionizations) / transport.dt
+            ) / jnp.maximum(mean_n_hi, minimum_n_hi)
+            hydrogen_total_ionization_rate = (
+                hydrogen_photoionization_rate + collisional.hydrogen_i * electron_density
             )
             next_x_hii, solved_mean_x_hii, next_x_hi, solved_mean_x_hi = hydrogen_neutral_relaxation(
                 x_hydrogen_i,
-                hydrogen_photoionization_rate,
+                hydrogen_total_ionization_rate,
                 electron_density,
                 temperature_k,
                 transport.dt,
             )
-            helium_i_photoionization_rate = (helium_i_photoionizations + secondary_helium_i_ionizations) / (
-                transport.dt * jnp.maximum(n_hei, minimum_n_he)
+            helium_i_photoionization_rate = (
+                (helium_i_photoionizations + secondary_helium_i_ionizations) / transport.dt
+            ) / jnp.maximum(n_hei, minimum_n_he)
+            helium_ii_photoionization_rate = (helium_ii_photoionizations / transport.dt) / jnp.maximum(
+                n_heii,
+                minimum_n_he,
             )
-            helium_ii_photoionization_rate = helium_ii_photoionizations / (
-                transport.dt * jnp.maximum(n_heii, minimum_n_he)
+            helium_i_total_ionization_rate = (
+                helium_i_photoionization_rate + collisional.helium_i * electron_density
+            )
+            helium_ii_total_ionization_rate = (
+                helium_ii_photoionization_rate + collisional.helium_ii * electron_density
             )
             next_x_heii, next_x_heiii = helium_photoionization_backward_euler(
                 x_helium_ii,
                 x_helium_iii,
-                helium_i_photoionization_rate,
-                helium_ii_photoionization_rate,
+                helium_i_total_ionization_rate,
+                helium_ii_total_ionization_rate,
                 electron_density,
                 temperature_k,
                 transport.dt,
+            )
+            hydrogen_collisional_ionizations = (
+                transport.dt
+                * collisional.hydrogen_i
+                * electron_density
+                * n_hydrogen
+                * solved_mean_x_hi
+            )
+            helium_i_collisional_ionizations = (
+                transport.dt
+                * collisional.helium_i
+                * electron_density
+                * n_helium
+                * (1.0 - next_x_heii - next_x_heiii)
+            )
+            helium_ii_collisional_ionizations = (
+                transport.dt
+                * collisional.helium_ii
+                * electron_density
+                * n_helium
+                * next_x_heii
             )
             hydrogen_recombinations = (
                 transport.dt
@@ -242,19 +290,25 @@ def build_conservative_primordial_step(
                 helium_ii_photoionizations=helium_ii_photoionizations,
                 secondary_hydrogen_ionizations=secondary_hydrogen_ionizations,
                 secondary_helium_i_ionizations=secondary_helium_i_ionizations,
+                hydrogen_collisional_ionizations=hydrogen_collisional_ionizations,
+                helium_i_collisional_ionizations=helium_i_collisional_ionizations,
+                helium_ii_collisional_ionizations=helium_ii_collisional_ionizations,
                 hydrogen_recombinations=hydrogen_recombinations,
                 helium_ii_recombinations=helium_ii_recombinations,
                 helium_iii_recombinations=helium_iii_recombinations,
                 hydrogen_ledger_residual=hydrogen_photoionizations
                 + secondary_hydrogen_ionizations
+                + hydrogen_collisional_ionizations
                 - hydrogen_change
                 - hydrogen_recombinations,
                 helium_i_ledger_residual=helium_i_photoionizations
                 + secondary_helium_i_ionizations
+                + helium_i_collisional_ionizations
                 - helium_ii_change
                 - helium_iii_change
                 - helium_ii_recombinations,
                 helium_ii_ledger_residual=helium_ii_photoionizations
+                + helium_ii_collisional_ionizations
                 - helium_iii_change
                 - helium_iii_recombinations,
                 fixed_point_residual=fixed_point_residual,
@@ -286,6 +340,7 @@ def build_x_sharded_conservative_primordial_step(
     group_energy_ev: jnp.ndarray,
     shardings: XShardings,
     *,
+    photoelectron_excess_energy_ev: jnp.ndarray | None = None,
     fixed_point_iterations: int = 16,
     fixed_point_relaxation: float = 0.5,
     use_secondary_ionization: bool = False,
@@ -319,6 +374,9 @@ def build_x_sharded_conservative_primordial_step(
         helium_ii_photoionizations=scalar,
         secondary_hydrogen_ionizations=scalar,
         secondary_helium_i_ionizations=scalar,
+        hydrogen_collisional_ionizations=scalar,
+        helium_i_collisional_ionizations=scalar,
+        helium_ii_collisional_ionizations=scalar,
         hydrogen_recombinations=scalar,
         helium_ii_recombinations=scalar,
         helium_iii_recombinations=scalar,
@@ -333,6 +391,7 @@ def build_x_sharded_conservative_primordial_step(
         transport,
         cross_sections,
         group_energy_ev,
+        photoelectron_excess_energy_ev=photoelectron_excess_energy_ev,
         fixed_point_iterations=fixed_point_iterations,
         fixed_point_relaxation=fixed_point_relaxation,
         use_secondary_ionization=use_secondary_ionization,

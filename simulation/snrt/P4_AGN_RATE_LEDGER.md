@@ -22,6 +22,14 @@ This is an AGN rate ledger, not a photon ledger. Conversion to
 bounds, then feeds `P4_SOURCE_LEDGER.md`. It must not be replaced by a
 conversion from sink mass or `dMsmbh` alone.
 
+The current parameterized pilot converter
+`tools/p4_build_agn_photon_ledger.py` defaults to the pinned P0 nine-group
+table in `config/p0_photon_group_edges_ev.txt`. Its Sazonov-style pilot SED is
+defined from 10 eV upward; the two lower P0 groups therefore carry explicit
+zero-photon/zero-gas-opacity closure entries rather than an invented low-energy
+extrapolation. The retained five-group outputs can be reproduced only with
+`--legacy-five-groups`; they must not be merged with a nine-group ledger.
+
 ## Preferred coarse-step JSON source
 
 The active `patch/lagRamses` writer appends `agn_coarse_state_v1.jsonl` before

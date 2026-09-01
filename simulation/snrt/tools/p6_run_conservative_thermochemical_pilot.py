@@ -21,7 +21,7 @@ from snrt_core.conservative_primordial import (
     build_x_sharded_conservative_primordial_step,
 )
 from snrt_core.jax_thermal_atlas import from_numpy_atlas
-from snrt_core.primordial import PrimordialState, primordial_cross_sections
+from snrt_core.primordial import GroupSpectralClosure, PrimordialState, group_spectral_closure_from_metadata
 from snrt_core.quadrature import level_symmetric_quadrature
 from snrt_core.snapshot import read_static_rt_input
 from snrt_core.sources import PointSources, deposit_point_sources
@@ -88,16 +88,24 @@ def main() -> None:
     static = read_static_rt_input(args.input)
     if static.sources is None:
         raise ValueError("static RT input has no photon sources")
+    if static.metallicity_solar is None:
+        metallicity_solar = jnp.asarray(args.metallicity_solar, dtype=real_dtype)
+        metallicity_source = "command-line fallback"
+    else:
+        metallicity_solar = jnp.asarray(static.metallicity_solar, dtype=real_dtype)
+        if np.any(np.asarray(static.metallicity_solar) <= 0.0):
+            raise ValueError("static input metallicity_solar must be positive")
+        metallicity_source = "static input field"
     shardings = make_x_shardings() if args.x_shard else None
     if shardings is not None:
         validate_x_partition(static.shape, shardings)
     photon_metadata = json.loads(Path(args.photon_metadata).read_text())
-    group_energy_ev = np.asarray(
-        [group["photon_weighted_mean_energy_ev"] for group in photon_metadata["groups"]], dtype=np.float64
-    )
+    spectral_closure: GroupSpectralClosure = group_spectral_closure_from_metadata(photon_metadata)
+    group_energy_ev = np.asarray(spectral_closure.photon_weighted_energy_ev, dtype=np.float64)
     if len(group_energy_ev) != static.sources.photon_luminosity_s.shape[1]:
         raise ValueError("photon metadata group count does not match static RT sources")
-    atlas = from_numpy_atlas(read_thermal_atlas(args.thermal_atlas), dtype=real_dtype)
+    thermal_atlas_host = read_thermal_atlas(args.thermal_atlas)
+    atlas = from_numpy_atlas(thermal_atlas_host, dtype=real_dtype)
 
     directions, weights = level_symmetric_quadrature(args.sn_order)
     directions = jnp.asarray(directions, dtype=real_dtype)
@@ -130,7 +138,10 @@ def main() -> None:
     temperature = jnp.asarray(static.temperature_k, dtype=real_dtype)
     thermal = internal_energy_from_temperature(chemistry, temperature)
     intensity = initial_intensity(len(group_energy_ev), len(directions), static.shape, dtype=real_dtype)
-    cross_sections = primordial_cross_sections(jnp.asarray(group_energy_ev, dtype=real_dtype))
+    cross_sections = type(spectral_closure.cross_sections)(
+        *(jnp.asarray(value, dtype=real_dtype) for value in spectral_closure.cross_sections)
+    )
+    photoelectron_excess_energy_ev = jnp.asarray(spectral_closure.photoelectron_excess_energy_ev, dtype=real_dtype)
 
     cumulative_absorbed = jnp.zeros((len(group_energy_ev), *static.shape), dtype=real_dtype)
     cumulative_hydrogen_residual = jnp.zeros(static.shape, dtype=real_dtype)
@@ -138,6 +149,9 @@ def main() -> None:
     cumulative_helium_ii_residual = jnp.zeros(static.shape, dtype=real_dtype)
     cumulative_photoelectron_energy = jnp.zeros(static.shape, dtype=real_dtype)
     cumulative_photoelectron_energy_residual = jnp.zeros(static.shape, dtype=real_dtype)
+    cumulative_hydrogen_collisional_ionizations = jnp.zeros(static.shape, dtype=real_dtype)
+    cumulative_helium_i_collisional_ionizations = jnp.zeros(static.shape, dtype=real_dtype)
+    cumulative_helium_ii_collisional_ionizations = jnp.zeros(static.shape, dtype=real_dtype)
     maximum_fixed_point_residual = jnp.zeros(static.shape, dtype=real_dtype)
     last_photoheating = jnp.zeros(static.shape, dtype=real_dtype)
     last_excitation_rate = jnp.zeros(static.shape, dtype=real_dtype)
@@ -152,6 +166,7 @@ def main() -> None:
                 cross_sections,
                 jnp.asarray(group_energy_ev, dtype=real_dtype),
                 shardings,
+                photoelectron_excess_energy_ev=photoelectron_excess_energy_ev,
                 fixed_point_iterations=args.fixed_point_iterations,
                 fixed_point_relaxation=args.fixed_point_relaxation,
                 use_secondary_ionization=args.use_secondary_ionization,
@@ -163,6 +178,7 @@ def main() -> None:
             TransportConfig(cell_width=cell_width, dt=dt, reduced_light_speed=reduced_light_speed),
             cross_sections,
             jnp.asarray(group_energy_ev, dtype=real_dtype),
+            photoelectron_excess_energy_ev=photoelectron_excess_energy_ev,
             fixed_point_iterations=args.fixed_point_iterations,
             fixed_point_relaxation=args.fixed_point_relaxation,
             use_secondary_ionization=args.use_secondary_ionization,
@@ -174,6 +190,8 @@ def main() -> None:
         nonlocal cumulative_absorbed, cumulative_hydrogen_residual
         nonlocal cumulative_helium_i_residual, cumulative_helium_ii_residual
         nonlocal cumulative_photoelectron_energy, cumulative_photoelectron_energy_residual
+        nonlocal cumulative_hydrogen_collisional_ionizations
+        nonlocal cumulative_helium_i_collisional_ionizations, cumulative_helium_ii_collisional_ionizations
         nonlocal maximum_fixed_point_residual, last_photoheating, last_excitation_rate, last_background_rate
         radiation = radiation_step(
             intensity,
@@ -194,13 +212,13 @@ def main() -> None:
             x_helium_ii=radiation.x_helium_ii,
             x_helium_iii=radiation.x_helium_iii,
         )
-        thermal, temperature, last_background_rate = _implicit_thermal_update(
+        thermal, temperature, last_background_rate, _, _ = _implicit_thermal_update(
             chemistry,
             thermal,
             radiation.gas_photoheating_rate,
             atlas,
             args.scale_factor,
-            args.metallicity_solar,
+            metallicity_solar,
             dt,
             args.thermal_implicit_iterations,
         )
@@ -212,6 +230,15 @@ def main() -> None:
         cumulative_photoelectron_energy = cumulative_photoelectron_energy + radiation.photoelectron_energy
         cumulative_photoelectron_energy_residual = (
             cumulative_photoelectron_energy_residual + radiation.photoelectron_energy_ledger_residual
+        )
+        cumulative_hydrogen_collisional_ionizations = (
+            cumulative_hydrogen_collisional_ionizations + radiation.hydrogen_collisional_ionizations
+        )
+        cumulative_helium_i_collisional_ionizations = (
+            cumulative_helium_i_collisional_ionizations + radiation.helium_i_collisional_ionizations
+        )
+        cumulative_helium_ii_collisional_ionizations = (
+            cumulative_helium_ii_collisional_ionizations + radiation.helium_ii_collisional_ionizations
         )
         maximum_fixed_point_residual = jnp.maximum(maximum_fixed_point_residual, radiation.fixed_point_residual)
         last_photoheating = radiation.gas_photoheating_rate
@@ -235,6 +262,15 @@ def main() -> None:
     helium_ii_residual = np.asarray(jax.device_get(cumulative_helium_ii_residual))
     photoelectron_energy = np.asarray(jax.device_get(cumulative_photoelectron_energy))
     photoelectron_energy_residual = np.asarray(jax.device_get(cumulative_photoelectron_energy_residual))
+    hydrogen_collisional_ionizations = np.asarray(
+        jax.device_get(cumulative_hydrogen_collisional_ionizations)
+    )
+    helium_i_collisional_ionizations = np.asarray(
+        jax.device_get(cumulative_helium_i_collisional_ionizations)
+    )
+    helium_ii_collisional_ionizations = np.asarray(
+        jax.device_get(cumulative_helium_ii_collisional_ionizations)
+    )
     maximum_fixed_point_residual = np.asarray(jax.device_get(maximum_fixed_point_residual))
     photoheating = np.asarray(jax.device_get(last_photoheating))
     excitation_rate = np.asarray(jax.device_get(last_excitation_rate))
@@ -260,10 +296,16 @@ def main() -> None:
     with h5py.File(output, "w") as handle:
         handle.attrs["format"] = "snrt_p6_conservative_primary_pilot"
         handle.attrs["physics_scope"] = (
-            "primary_H_He_photoionization_secondary_xray_photoelectron_energy_partition_grackle_cooling"
+            "non_equilibrium_atomic_H_He_plus_UVB_free_metal_cooling_primary_photoionization_secondary_xray"
             if args.use_secondary_ionization
-            else "primary_H_He_photoionization_photoheating_grackle_cooling_no_secondary_ionization"
+            else "non_equilibrium_atomic_H_He_plus_UVB_free_metal_cooling_primary_photoionization_no_secondary"
         )
+        handle.attrs["thermal_atlas_component"] = thermal_atlas_host.provenance["thermal_component"]
+        handle.attrs["thermal_atlas_source_data_sha256"] = thermal_atlas_host.provenance["source_data_sha256"]
+        handle.attrs["thermal_atlas_generator_sha256"] = thermal_atlas_host.provenance["generator_sha256"]
+        handle.attrs["thermal_atlas_uv_background_included"] = thermal_atlas_host.provenance[
+            "uv_background_included"
+        ]
         handle.attrs["sn_order"] = args.sn_order
         handle.attrs["precision"] = args.precision
         handle.attrs["number_of_directions"] = len(directions)
@@ -277,7 +319,11 @@ def main() -> None:
         handle.attrs["final_cfl_fraction"] = final_dt / outer_dt
         handle.attrs["elapsed_time_s"] = full_steps * outer_dt + final_dt
         handle.attrs["scale_factor"] = args.scale_factor
-        handle.attrs["metallicity_solar"] = args.metallicity_solar
+        handle.attrs["metallicity_source"] = metallicity_source
+        if static.metallicity_solar is None:
+            handle.attrs["metallicity_solar"] = args.metallicity_solar
+        else:
+            handle.create_dataset("gas/metallicity_solar", data=np.asarray(static.metallicity_solar))
         handle.attrs["max_fixed_point_fraction_residual"] = maximum_fixed_point_error
         handle.attrs["hydrogen_ledger_relative_error"] = ledger_errors["hydrogen"]
         handle.attrs["helium_i_ledger_relative_error"] = ledger_errors["helium_i"]
@@ -292,13 +338,25 @@ def main() -> None:
         handle.create_dataset("thermal/internal_energy_density_erg_cm3", data=internal_energy)
         handle.create_dataset("rates/gas_photoheating_erg_cm3_s", data=photoheating)
         handle.create_dataset("rates/photoelectron_excitation_erg_cm3_s", data=excitation_rate)
-        handle.create_dataset("rates/grackle_background_net_erg_cm3_s", data=background_rate)
+        handle.create_dataset("rates/nonphoto_primordial_plus_metal_net_erg_cm3_s", data=background_rate)
         handle.create_dataset("diagnostics/cumulative_absorbed_photons_cm3", data=absorbed)
         handle.create_dataset("diagnostics/cumulative_hydrogen_ledger_residual_cm3", data=hydrogen_residual)
         handle.create_dataset("diagnostics/cumulative_helium_i_ledger_residual_cm3", data=helium_i_residual)
         handle.create_dataset("diagnostics/cumulative_helium_ii_ledger_residual_cm3", data=helium_ii_residual)
         handle.create_dataset("diagnostics/cumulative_photoelectron_energy_ev_cm3", data=photoelectron_energy)
         handle.create_dataset("diagnostics/cumulative_photoelectron_energy_ledger_residual_ev_cm3", data=photoelectron_energy_residual)
+        handle.create_dataset(
+            "diagnostics/cumulative_hydrogen_collisional_ionizations_cm3",
+            data=hydrogen_collisional_ionizations,
+        )
+        handle.create_dataset(
+            "diagnostics/cumulative_helium_i_collisional_ionizations_cm3",
+            data=helium_i_collisional_ionizations,
+        )
+        handle.create_dataset(
+            "diagnostics/cumulative_helium_ii_collisional_ionizations_cm3",
+            data=helium_ii_collisional_ionizations,
+        )
         handle.create_dataset("diagnostics/max_fixed_point_fraction_residual", data=maximum_fixed_point_residual)
 
     status = "OK" if convergence_passed else "GATE_FAILED"

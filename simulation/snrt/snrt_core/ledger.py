@@ -6,7 +6,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 
-from .transport import TransportConfig, radiation_moments
+from .transport import TransportConfig, advance_with_absorption, angular_integral, radiation_moments
 
 
 class PhotonLedger(NamedTuple):
@@ -70,9 +70,49 @@ def photon_ledger(
 ) -> PhotonLedger:
     """Account for sources, absorption, boundary escape, and finite-volume residual.
 
-    The ledger uses the beginning-of-step intensity, matching the explicit
-    source and absorption update. It is intended for a closed accounting test,
-    not as a substitute for a time-integrated diagnostic in a high-order solver.
+    The absorption term is reconstructed by the exact same
+    ``advance_with_absorption`` operation used by the transport step.  In
+    particular, it includes photons emitted during this step before the local
+    exponential attenuation is applied.  Boundary flux is evaluated from the
+    beginning-of-step upwind state, which is the finite-volume flux used by the
+    explicit spatial operator.  If ``intensity_after`` does not match the
+    supplied operator inputs, that mismatch is exposed by ``residual``.
+    """
+
+    _, absorbed_directional = advance_with_absorption(
+        config,
+        directions,
+        intensity_before,
+        emissivity,
+        absorption,
+    )
+    absorbed_photons = angular_integral(absorbed_directional, weights)
+    return photon_ledger_from_absorbed(
+        config,
+        directions,
+        weights,
+        intensity_before,
+        intensity_after,
+        emissivity,
+        absorbed_photons,
+    )
+
+
+def photon_ledger_from_absorbed(
+    config: TransportConfig,
+    directions: jnp.ndarray,
+    weights: jnp.ndarray,
+    intensity_before: jnp.ndarray,
+    intensity_after: jnp.ndarray,
+    emissivity: jnp.ndarray,
+    absorbed_photons: jnp.ndarray,
+) -> PhotonLedger:
+    """Account for a supplied local absorption result and boundary escape.
+
+    ``absorbed_photons`` must be the angularly integrated photon loss actually
+    used to produce ``intensity_after``.  This variant is required when the
+    opacity is time-averaged or iterated inside a coupled chemistry kernel and
+    therefore cannot be reconstructed from the caller's old state alone.
     """
 
     cell_volume = config.cell_width[0] * config.cell_width[1] * config.cell_width[2]
@@ -80,12 +120,11 @@ def photon_ledger(
     number_after, _ = radiation_moments(intensity_after, directions, weights, config.reduced_light_speed)
     initial = _inventory(number_before, cell_volume)
     final = _inventory(number_after, cell_volume)
-    emitted = config.dt * jnp.sum(emissivity, axis=(1, 2, 3)) * cell_volume
-    absorbed = (
-        config.dt
-        * config.reduced_light_speed
-        * jnp.sum(absorption * number_before, axis=(1, 2, 3))
-        * cell_volume
+    absorbed = _inventory(absorbed_photons, cell_volume)
+    source_directional = jnp.broadcast_to(emissivity[:, None, :, :, :], intensity_before.shape)
+    emitted = _inventory(
+        config.dt * angular_integral(source_directional, weights),
+        cell_volume,
     )
     escaped = config.dt * boundary_escape_rate(intensity_before, directions, weights, config)
     residual = final - initial - emitted + absorbed + escaped

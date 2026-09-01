@@ -4,6 +4,14 @@
 
 `DustModel` accepts group absorption cross sections in `cm^2/H` and a cell-wise relative dust abundance. No Milky-Way opacity is hard-coded: production runs must provide a redshift- and metallicity-appropriate table, for example sampled from Draine model data. Dust receives the full absorbed photon energy and does not change H/He ion fractions.
 
+The audited sidecar loader is documented in
+[`P4_DUST_OPACITY.md`](P4_DUST_OPACITY.md). It additionally accepts a
+dust-absorption-weighted photon energy per group, which is used for dust
+heating and the absorption-only momentum diagnostic. The P4 and P5 runners
+require `--dust-opacity-metadata` whenever the static input has non-zero dust
+abundance; otherwise they use an explicit zero-dust control. The momentum
+diagnostic is not yet coupled to hydro or a full radiation-pressure closure.
+
 Scattering and IR re-emission are intentionally not in this live transport step. They require a separate angle- and frequency-coupled closure rather than treating scattering as absorption.
 
 ## X-ray secondaries
@@ -19,5 +27,11 @@ The more accurate Furlanetto--Stoever treatment depends on both energy and ioniz
 ## Validation
 
 - A unit-optical-depth dust cell transmits `exp(-1)` and receives the exact missing photon energy.
-- A neutral H cell absorbing 1 keV photons produces `x_HII=0.185493` from primary plus secondary ionizations.
+- A neutral H cell exposed to 1 keV photons produces `x_HII=0.099938` from the
+  converged primary-plus-secondary rate update.
 - The P2/P3 validation script also checks finite gas-heating output.
+
+The production multiphysics path now uses the B2 C2-Ray-style
+time-averaged-opacity closure documented in
+[`B2_PRODUCTION_SOLVER_VALIDATION.md`](B2_PRODUCTION_SOLVER_VALIDATION.md).
+The former per-cell atom-inventory attenuation cap is retired.

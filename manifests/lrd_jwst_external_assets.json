@@ -1,0 +1,728 @@
+{
+  "schema": "lrd-jwst-external-assets",
+  "schema_version": 1,
+  "project": "LRD_JWST",
+  "project_root": "/gpfs/kjhan/LRD_JWST",
+  "owner": "Juhan Kim",
+  "created_at": "2026-08-31",
+  "repository": {
+    "base_commit": "45cee683788fdfb0e9aa66a978d1e56c1af2c10c",
+    "working_tree_note": "The path-relocation edits are intentionally uncommitted until reviewed.",
+    "migration_source": "HR5_dualAGN",
+    "migration_source_revision": "agent/migrate-hr5-analysis-workflow @ 24067ae1845a2e8481f776dea1d1b200c3d57fa3"
+  },
+  "configuration_checksums": [
+    {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger/cosmo.nml",
+      "sha256": "d569b994d7240dceffc4fffce185a91e684af8de92167cdc1339c9c2c9e58fae"
+    },
+    {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p4_thermal_atlas_scale_factors.txt",
+      "sha256": "2bfdaf1dff81ab72a96f5b71504f4e43d3029b390c8eee041ab0f32a1858672a"
+    },
+    {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p6_thermal_atlas_scale_factors.txt",
+      "sha256": "47afcb6b9f48483b1641c8be7068097dc99077171e4efabd366bd1b83778f2c3"
+    },
+    {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1"
+    },
+    {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_high_density_manifest.json",
+      "sha256": "42aba2af2db02d224feb7dce900e96c6002925f318a32d57f6eafc0406fca690"
+    }
+  ],
+  "assets": [
+    {
+      "id": "pilot_restart_output_00016",
+      "path": "/gpfs/kjhan/Hydro/Sidm/Agn/Run0/run_cdm/output_00016",
+      "kind": "directory",
+      "status": "available_external",
+      "sha256": null,
+      "sha256_status": "directory_hash_not_computed",
+      "producing_repository": "lagRamses",
+      "producing_commit": "d2271e87d837dd94b88a3609618521cbad2cfaab",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger/cosmo.nml",
+      "simulation": {
+        "target": "SNRT I/O-contract pilot restart",
+        "redshift": 3.799,
+        "resolution": "existing RAMSES CDM run; output_00016 restart"
+      }
+    },
+    {
+      "id": "pilot_ramses_executable",
+      "path": "/gpfs/kjhan/Hydro/Sidm/Agn/Run0/run_cdm/ramses_final3d",
+      "kind": "executable",
+      "status": "available_external",
+      "sha256": "15629e61ebc53e98dd9bdd01ab5577ab3bc79a5a25989b2f7fa9a9c07f78a050",
+      "producing_repository": "lagRamses",
+      "producing_commit": "not recorded in the pilot worktree",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger/cosmo.nml",
+      "simulation": {
+        "target": "SNRT I/O-contract pilot",
+        "redshift": 3.799,
+        "resolution": "existing RAMSES CDM run"
+      }
+    },
+    {
+      "id": "yield_table",
+      "path": "/gpfs/kjhan/Run_JWST/opt_run/yield_table.asc",
+      "kind": "yield_table",
+      "status": "available_external",
+      "sha256": "ba1099c5a4c3afe5e9ba28b3eb59d2e85fd3d40b7e7cb4ec30799eec00a5ac2e",
+      "producing_repository": "external stellar-yield installation",
+      "producing_commit": "not recorded",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger/cosmo.nml",
+      "simulation": {
+        "target": "stellar feedback input",
+        "redshift": null,
+        "resolution": "shared external table"
+      }
+    },
+    {
+      "id": "lagramses_pinned_source",
+      "path": "/home/kjhan/BACKUP/lagRamses",
+      "kind": "git_checkout",
+      "status": "available_external_dirty",
+      "sha256": null,
+      "sha256_status": "git_checkout_hash_not_applicable",
+      "producing_repository": "git@github.com:KISTI-Chimera/lagRamses.git",
+      "producing_commit": "d2271e87d837dd94b88a3609618521cbad2cfaab",
+      "working_tree_note": "The checkout had local modifications at audit time; record the final build revision before production.",
+      "simulation": {
+        "target": "lagRamses dependency",
+        "redshift": null,
+        "resolution": "build-dependent"
+      }
+    },
+    {
+      "id": "lagramses_active_executable",
+      "path": "/home/kjhan/BACKUP/lagRamses/bin/ramses_final3d",
+      "kind": "executable",
+      "status": "available_external",
+      "sha256": "9e28e6445a8876290249230b616f5b91f11b345eac0d1bd94c96b721956d695c",
+      "producing_repository": "git@github.com:KISTI-Chimera/lagRamses.git",
+      "producing_commit": "d2271e87d837dd94b88a3609618521cbad2cfaab",
+      "build_configuration": "make HDF5=1 ramses",
+      "simulation": {
+        "target": "lagRamses grammar validation",
+        "redshift": null,
+        "resolution": "build-dependent"
+      }
+    },
+    {
+      "id": "snrt_cuda_smoke_executable",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/bin/snrt_cuda_smoke",
+      "kind": "executable",
+      "status": "available_local_candidate",
+      "sha256": "dd68011c26b07f1f2e7ae684700ec4b547f94f8332117687bcf6b0a0f31e3ed3",
+      "sha256_status": "verified_local_build",
+      "producing_repository": "git@github.com:KISTI-Chimera/lagRamses.git",
+      "producing_commit": "c8e17039a02a7822cc2abf312203bc9ec78b9a43",
+      "producing_tree_status": "dirty",
+      "build_configuration": "nvcc -O3 -std=c++17 -gencode arch=compute_86,code=sm_86; mpiifx -O3; CUDA 13.0.2; Intel ifx 2025.3.0",
+      "build_manifest": "/gpfs/kjhan/LRD_JWST/manifests/snrt_cuda_smoke_build_2026-09-01.json",
+      "simulation": {
+        "target": "SNRT CUDA smoke test",
+        "redshift": null,
+        "resolution": "GPU build-dependent"
+      }
+    },
+    {
+      "id": "grackle_generator",
+      "path": "/home/kjhan/BACKUP/Eunha.A1/Prerequisites/Cooling_Grackle/grackle_cooling_grid",
+      "kind": "executable",
+      "status": "available_external",
+      "sha256": "4558c93e29c015c8a0b08b29c0b71e228c9558ca429f78536b956dc8d5d9e6df",
+      "producing_repository": "Eunha.A1 external prerequisite tree",
+      "producing_commit": "not recorded",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p6_thermal_atlas_scale_factors.txt",
+      "simulation": {
+        "target": "offline Grackle thermal atlas",
+        "redshift": 3.796,
+        "resolution": "atlas grid; see scale-factor configuration"
+      }
+    },
+    {
+      "id": "grackle_cloudy_data",
+      "path": "/home/kjhan/BACKUP/Eunha.A1/Prerequisites/Cooling_Grackle/input/CloudyData_UVB=HM2012.h5",
+      "kind": "cooling_table",
+      "status": "available_external",
+      "sha256": "8715f1b39e90a7296ec2adcd442fa13a3d45d2ad021c6fa2fae9e4ab7a4700b2",
+      "producing_repository": "Eunha.A1 external prerequisite tree",
+      "producing_commit": "not recorded",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p6_thermal_atlas_scale_factors.txt",
+      "simulation": {
+        "target": "offline Grackle thermal atlas",
+        "redshift": 3.796,
+        "resolution": "CloudyData UV background table"
+      }
+    },
+    {
+      "id": "grackle_cloudy_data_no_uvb",
+      "path": "/gpfs/kjhan/LRD_JWST/external/grackle/CloudyData_noUVB.h5",
+      "kind": "cooling_table",
+      "status": "available_local_pinned",
+      "size_bytes": 126832,
+      "sha256": "0abe25cceeb5c0825381c5f17059982a9a2cdd27ce369a475c559fba6a8fa106",
+      "sha256_status": "verified_against_upstream_revision",
+      "producing_repository": "https://github.com/grackle-project/grackle_data_files",
+      "producing_commit": "928696482fbe15d9bac4382de6134d95568f099c",
+      "upstream_path": "input/CloudyData_noUVB.h5",
+      "runtime_use": "offline metal-only thermal-atlas input; primordial and UVB groups are rejected or ignored",
+      "license_status": "pending_explicit_data_license_confirmation",
+      "provenance_status": "recorded",
+      "owner": "Juhan Kim",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p6_thermal_atlas_scale_factors.txt",
+      "simulation": {
+        "target": "UVB-free metal-only SNRT thermal atlas",
+        "redshift": 3.796,
+        "resolution": "Cloudy metal cooling grid"
+      }
+    },
+    {
+      "id": "production_thermal_atlas_v1",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/production_metal_thermal_atlas_v1.h5",
+      "kind": "derived_hdf5",
+      "status": "quarantined_validation_only",
+      "size_bytes": 2940973,
+      "sha256": "a94a5d812757158ef791a3c08e705b0a5c3292a3591a010b3527895e34e8a0ae",
+      "sha256_status": "verified_generated_output",
+      "source_asset": "grackle_cloudy_data_no_uvb",
+      "source_sha256": "0abe25cceeb5c0825381c5f17059982a9a2cdd27ce369a475c559fba6a8fa106",
+      "generator": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/build_metal_thermal_atlas.py",
+      "generator_sha256": "801287715d04df37fccd19e199463a4931ab1e35d1c98ef5b62a93c994ca1706",
+      "grackle_reference_commit": "f93091ff8456962d7017a5bff7472945a30e3dad",
+      "physics_contract": "rejected format v2: UVB-free metal-only data but runtime interpolation was linear in log Z and violated exact linear Z/Zsun scaling off-grid",
+      "audit_disposition": "AGY B1 audit 2026-09-01 BLOCKED; retained only as a regression-rejection fixture",
+      "validation": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/b1_validate_conservative_primordial_thermal_atomic.json",
+      "validation_sha256": "0f1bd1f115a88484bc9233dffa52939b30739bba2377050dfa1f0e5a938ef0cf",
+      "license_status": "pending_explicit_data_license_confirmation",
+      "provenance_status": "recorded",
+      "owner": "Juhan Kim",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p6_thermal_atlas_scale_factors.txt",
+      "simulation": {
+        "target": "rejected B1 metal-cooling candidate",
+        "redshift": 3.796,
+        "resolution": "2 x 29 x 40 x 161 (a, n_H, log Z, T); defective off-grid Z interpolation",
+        "comparison_role": "rejected_algorithmic_regression_only"
+      }
+    },
+    {
+      "id": "production_thermal_atlas_v2",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/production_metal_thermal_atlas_v2.h5",
+      "kind": "derived_hdf5",
+      "status": "available_local_candidate",
+      "size_bytes": 95870,
+      "sha256": "b1290d930b22ed049d6d3c5ed47ce56ecf3e0d2e693b39792740768e80fdf6ac",
+      "sha256_status": "verified_generated_output",
+      "source_asset": "grackle_cloudy_data_no_uvb",
+      "source_sha256": "0abe25cceeb5c0825381c5f17059982a9a2cdd27ce369a475c559fba6a8fa106",
+      "generator": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/build_metal_thermal_atlas.py",
+      "generator_sha256": "6fe00f80795ac948ed2386512011014932f559c48e7a1455116031852c0f5280",
+      "grackle_reference_commit": "f93091ff8456962d7017a5bff7472945a30e3dad",
+      "physics_contract": "format v3 UVB-free solar-metallicity metal-only table; no primordial rates or photoheating; analytic runtime Z/Zsun multiplier; continuous CMB coefficient subtraction",
+      "grackle_reference_deviation": "the reference two-dex CMB subtraction cutoff is removed for continuity and recorded in HDF5 provenance",
+      "independent_gate_audit": "AGY B1 PASS 2026-09-01; provenance/agy_b1_thermal_coupling_reaudit_2026-09-01.md",
+      "validation": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/b1_validate_conservative_primordial_thermal_v2.json",
+      "validation_sha256": "0f1bd1f115a88484bc9233dffa52939b30739bba2377050dfa1f0e5a938ef0cf",
+      "license_status": "pending_explicit_data_license_confirmation",
+      "provenance_status": "approved",
+      "owner": "Juhan Kim",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p6_thermal_atlas_scale_factors.txt",
+      "simulation": {
+        "target": "production-candidate SNRT metal cooling",
+        "redshift": 3.796,
+        "resolution": "2 x 29 x 161 (a, n_H, T); metallicity applied analytically"
+      }
+    },
+    {
+      "id": "p4_snapshot_hdf5",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger/output_00017/data_00017.h5",
+      "kind": "simulation_output",
+      "status": "not_migrated",
+      "size_bytes_at_source": 866729878508,
+      "sha256": null,
+      "sha256_status": "hash_pending_until_staged",
+      "source_path": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/pilot_rt_ledger/output_00017/data_00017.h5",
+      "source_note": "Large HDF5 output remains an external reference payload; it is not a direct lagRamses runtime input. Stage it on demand only for exact output_00017 coeval P4 extraction/validation, then hash the complete staged file.",
+      "runtime_use": "reference_only; converter input for optional exact-coeval P4 validation",
+      "direct_lagramses_runtime_input": false,
+      "staging_policy": "on_demand; do not treat a partial transfer as a valid snapshot",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger/cosmo.nml",
+      "simulation": {
+        "target": "P4 adaptive-leaf coeval RT input",
+        "redshift": 3.796,
+        "resolution": "RAMSES output_00017; populated AMR levels 1-15"
+      }
+    },
+    {
+      "id": "p4_snapshot_info",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger/output_00017/info_00017.txt",
+      "kind": "simulation_metadata",
+      "status": "available_local",
+      "size_bytes_at_source": 15292,
+      "sha256": "047d36ceae7ead9a5290838401c0cd64869606afc730aa71d615c82aa0fed11a",
+      "sha256_status": "verified_local_copy",
+      "source_path": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/pilot_rt_ledger/output_00017/info_00017.txt",
+      "source_note": "Small metadata sidecar copied with preserved bytes; the 866 GB HDF5 payload remains external.",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger/cosmo.nml",
+      "simulation": {
+        "target": "P4 adaptive-leaf coeval RT input",
+        "redshift": 3.796,
+        "resolution": "RAMSES output_00017 metadata"
+      }
+    },
+    {
+      "id": "p4_validation_thermal_atlas",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_validation_thermal_atlas.h5",
+      "kind": "derived_hdf5",
+      "status": "quarantined_validation_only",
+      "size_bytes_at_source": 14835326,
+      "source_sha256": "8852242dd35f187ec662bfc96758b9dc4a91609e16f8e3ea153ef098f087b0c5",
+      "sha256": "8852242dd35f187ec662bfc96758b9dc4a91609e16f8e3ea153ef098f087b0c5",
+      "sha256_status": "verified_local_copy",
+      "source_path": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p4_validation_thermal_atlas.h5",
+      "source_note": "Legacy format v1 full-equilibrium atlas: primordial chemistry, HM2012 UVB, metal cooling, and photoheating provenance are not separable. Runtime reader rejects it.",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p4_thermal_atlas_scale_factors.txt",
+      "simulation": {
+        "target": "P4/P5 primordial thermal initialization",
+        "redshift": 3.796,
+        "resolution": "offline thermal atlas"
+      }
+    },
+    {
+      "id": "p6_thermal_atlas",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p6_thermal_atlas_a0p20849776.h5",
+      "kind": "derived_hdf5",
+      "status": "quarantined_validation_only",
+      "size_bytes_at_source": 14810804,
+      "source_sha256": "1b9b533b976d56341d67de348565f1cc8303349e3f16e1ae5f3731ac85d8f3c0",
+      "sha256": "1b9b533b976d56341d67de348565f1cc8303349e3f16e1ae5f3731ac85d8f3c0",
+      "sha256_status": "verified_local_copy",
+      "source_path": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/snrt/data/p6_thermal_atlas_a0p20849776.h5",
+      "source_note": "Legacy format v1 full-equilibrium atlas: primordial chemistry, HM2012 UVB, metal cooling, and photoheating provenance are not separable. Runtime reader rejects it.",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p6_thermal_atlas_scale_factors.txt",
+      "simulation": {
+        "target": "P6 conservative thermochemistry pilot",
+        "redshift": 3.796,
+        "resolution": "offline Grackle thermal atlas"
+      }
+    },
+    {
+      "id": "p4_coeval_static_rt_input",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_coeval_static_rt_input.h5",
+      "kind": "derived_hdf5",
+      "status": "available_local",
+      "size_bytes": 3488408,
+      "sha256": "bd860c6361b31e945a728a694b98d5ae7f1d45051cb7aaff090c9d36ce47a378",
+      "sha256_status": "verified_generated_output",
+      "metadata_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_coeval_static_rt_input.json",
+      "metadata_sha256": "19764f863f4440c3c626210b8c1df053e878e0079dffeb060c6d12c4e3cf54fa",
+      "source_path": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/pilot_rt_ledger/output_00017/data_00017.h5",
+      "source_note": "Regenerated on /gpfs from the external output_00017 leaf payload with the audited raw-conservative field map; production-contract gate remains closed.",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_high_density_manifest.json",
+      "simulation": {
+        "target": "P4 static RT transport pilot",
+        "redshift": 3.796,
+        "resolution": "32^3 analysis grid from AMR levels 1-15"
+      }
+    },
+    {
+      "id": "p4_coeval_static_rt_input_fesc0p1",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_coeval_static_rt_input_fesc0p1.h5",
+      "kind": "derived_hdf5",
+      "status": "available_local",
+      "size_bytes": 3488408,
+      "sha256": "69b66172848c3ab71b82d812909201cc09aba95b52e236ad4b57b74764df1e31",
+      "sha256_status": "verified_generated_output",
+      "metadata_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_coeval_static_rt_input_fesc0p1.json",
+      "metadata_sha256": "138bccecb2dca063cd96c21c6bc4751e74c0bf9f8aecba98ae2fa4b8f293d90f",
+      "source_path": "/home/kjhan/BACKUP/HR5_dualAGN/PAPER3_LRD_ZOOM/pilot_rt_ledger/output_00017/data_00017.h5",
+      "source_note": "Regenerated on /gpfs from the external output_00017 leaf payload with the audited raw-conservative field map and fesc=0.1 ledger; production-contract gate remains closed.",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_high_density_manifest.json",
+      "simulation": {
+        "target": "P8 conservative transport smoke input",
+        "redshift": 3.796,
+        "resolution": "32^3 analysis grid; fesc=0.1 source ledger"
+      }
+    },
+    {
+      "id": "feedback_transition_phase0_10cMpc_h_z0_epsstar002",
+      "path": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002",
+      "kind": "simulation_run",
+      "status": "available_external_complete",
+      "host": "lageunha",
+      "sha256": null,
+      "sha256_status": "directory_hash_not_computed; output_00011_COMPLETE",
+      "configuration": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/input.nml",
+      "configuration_sha256": "0fee1de7715628af480e78269193aa510731dd8b48148db2f5a6bae389b34be9",
+      "executable": "/home/kjhan/BACKUP/lagRamses/bin/ramses_final3d",
+      "executable_sha256": "9e28e6445a8876290249230b616f5b91f11b345eac0d1bd94c96b721956d695c",
+      "producing_repository": "git@github.com:KISTI-Chimera/lagRamses.git",
+      "producing_commit": "65d080243d29f918490148352543269796462e30",
+      "producing_tree_state": "dirty (embedded build identity retains -dirty suffix)",
+      "embedded_remote_repository": "git@github.com:kjhan0606/LagRamses.git",
+      "working_tree_note": "Build was embedded as 65d080243d29f918490148352543269796462e30-dirty before the formal Phase 0 commits; source checkout was dirty. See provenance/legacy_feedback_baseline.md.",
+      "build_configuration": "make HDF5=1 ramses; mpiifx -qopenmp; -DPHASE0_STELLAR_ENRICHMENT -DHDF5 -DUSE_FFTW; NDIM=3; NVAR=17",
+      "build_identity": "65d080243d29f918490148352543269796462e30-dirty",
+      "checkout_observed_after_run": "a1d2387d7ec46b21be464262a4dce95c286cd47b",
+      "provenance": "provenance/legacy_feedback_baseline.md",
+      "native_checkpoint_audit": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_native_audit.json",
+      "native_checkpoint_audit_sha256": "ddf49ddfa930a7ca8dcad51d05fd52b211fc3b086a9ade38a912bc4ca830762f",
+      "native_field_map": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/feedback_transition_phase0_native_field_map.json",
+      "native_field_map_sha256": "4bb73d401100c5557f87a7c9c81558b4b5789f71ff93b6e6cde47f71bc291555",
+      "canonical_hydro_probe": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_hydro_probe.h5",
+      "canonical_hydro_probe_sha256": "784e1acc88fabab5d44156796120ab793d8c6158d62322bf301e6fa2ebe87e06",
+      "canonical_hydro_probe_manifest": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_hydro_probe.json",
+      "canonical_hydro_probe_manifest_sha256": "c3c52b178c9d2eb03a99ee72c3aa97c57949fd113e64d3bbcce1a8f0b0b430e9",
+      "native_particle_audit": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_particle_audit.json",
+      "native_particle_audit_sha256": "e2f851853a3156ef30386a584746b30b30f548c9e9eb84a6f2cb670e993ada9b",
+      "native_stellar_catalogue": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_stellar_catalogue.csv",
+      "native_stellar_catalogue_sha256": "205336d5d2d8a6db66213cdb517a4994a0ccf8ee35627e793a78cbdf30b709a5",
+      "native_stellar_catalogue_manifest": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_stellar_catalogue.json",
+      "native_stellar_catalogue_manifest_sha256": "281d60b995a3aa38c5003ba9b9ee1947643159a0fa42e94b178277969c240ad2",
+      "simulation": {
+        "target": "Phase 0 LCDM hydro+gravity validation",
+        "comparison_role": "transitional development-feedback baseline for current stellar/AGN feedback, RT, and dust algorithms",
+        "feedback_policy": "phase0_preselector_transitional; Phase 0 enrichment path active before the later runtime feedback_mode selector",
+        "scale_factor": 0.148540709098256,
+        "redshift": 5.73,
+        "resolution": "10 h^-1 cMpc; AMR levels 9--14",
+        "mpi_ranks": 32,
+        "nstep_coarse": 976,
+        "latest_complete_output": "output_00011",
+        "output_size_bytes_apparent": 65099388045
+      }
+    },
+    {
+      "id": "bpass_v2p2p1_binary_imf135_300",
+      "path": "/gpfs/kjhan/LRD_JWST/external/bpass_v2.2.1/SSP_Spectra_BPASSv2.2.1_bin-imf135_300.hdf5",
+      "kind": "stellar_sed_hdf5",
+      "status": "available_local_candidate",
+      "sha256": "b53d7bf4e8c50ae0a02458eae9d5b6dff5d5782f9f2b23dd40514ad85716c9b3",
+      "size_bytes": 531204704,
+      "md5_expected": "eac7f8ef432ff86b3d7ab8dc32c1b8b1",
+      "source_url": "https://zenodo.org/api/records/6338460/files/SSP_Spectra_BPASSv2.2.1_bin-imf135_300.hdf5/content",
+      "producing_repository": "BPASS",
+      "producing_commit": "v2.2.1",
+      "selection": "binary population; broken IMF slopes -1.30 (0.1--0.5 Msun), -2.35 (0.5--300 Msun)",
+      "simulation": {
+        "target": "stellar photon SED adapter candidate",
+        "redshift": 5.73,
+        "resolution": "BPASS SSP age/metallicity/wavelength grid"
+      }
+    },
+    {
+      "id": "feedback_transition_phase0_bpass_stellar_photon_ledger",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_bpass_stellar_photon_ledger.csv",
+      "kind": "candidate_photon_source_ledger",
+      "status": "available_local_candidate",
+      "size_bytes": 15813427,
+      "sha256": "aeb9b72fbc0716ec25836f431bf9a897bd52011c8fe5553ad185c293dc97e1c4",
+      "metadata_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_bpass_stellar_photon_ledger.json",
+      "metadata_sha256": "939c7ab2305b1de6e44c7e021801a2a0bbf580acc4372374d544aff90c74954b",
+      "source_asset": "bpass_v2p2p1_binary_imf135_300",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "configuration_sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1",
+      "simulation": {
+        "target": "output_00011 stellar source candidate for STAR+AGN merge",
+        "redshift": 5.73,
+        "resolution": "42,342 native stellar sources; P0 nine photon groups"
+      },
+      "limits": [
+        "178 age values are clamped below the BPASS 1 Myr grid edge.",
+        "42,004 metallicity values are clamped below the BPASS minimum relative-solar grid value.",
+        "The BPASS mass normalization and 0.124 eV low-energy zero padding are explicit candidate assumptions.",
+        "Escape fraction is the baseline value 1.0 and is not an LRD obscuration model."
+      ]
+    },
+    {
+      "id": "feedback_transition_phase0_bpass_stellar_photon_ledger_metadata",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_bpass_stellar_photon_ledger.json",
+      "kind": "candidate_photon_source_ledger_metadata",
+      "status": "available_local_candidate",
+      "size_bytes": 10267,
+      "sha256": "939c7ab2305b1de6e44c7e021801a2a0bbf580acc4372374d544aff90c74954b",
+      "source_asset": "feedback_transition_phase0_bpass_stellar_photon_ledger",
+      "simulation": {
+        "target": "candidate STAR+AGN aggregate closure input",
+        "redshift": 5.73,
+        "resolution": "P0 nine photon groups"
+      }
+    },
+    {
+      "id": "p4_pilot_zoom_agn_candidates",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_pilot_zoom_agn_candidates.csv",
+      "kind": "candidate_source_table",
+      "status": "available_local",
+      "size_bytes": 2821,
+      "sha256": "c2980fbad5bcef2821137eb37d67980c8df1b8f639948499cd5f7eae45d038dd",
+      "metadata_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_pilot_zoom_agn_candidates.json",
+      "metadata_sha256": "139efc1809d1c475067d9bdd4e665189faf310afdd8369354208a51ce2551011",
+      "simulation": {
+        "target": "P4 AGN source selection before photon SED assignment",
+        "redshift": 3.796,
+        "resolution": "10 selected sources in 32^3 high-density pilot cube"
+      }
+    },
+    {
+      "id": "feedback_transition_phase0_output_00017_agn_p0_photon_ledger",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00017_agn_p0_photon_ledger.csv",
+      "kind": "candidate_photon_source_ledger",
+      "status": "available_local_candidate",
+      "size_bytes": 3272,
+      "sha256": "151857bd0c9947a1a6717be630161cb44605d8bdf0101d3b8fe7b6fb7b5a367e",
+      "metadata_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00017_agn_p0_photon_ledger.json",
+      "metadata_sha256": "c4285f38ca510f5c40fc23f7688c9e9a4f5c40e95a39227a7099fde7ca257eff",
+      "source_asset": "p4_pilot_zoom_agn_candidates",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "configuration_sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1",
+      "simulation": {
+        "target": "output_00017 AGN source candidate for STAR+AGN merge",
+        "redshift": 3.796,
+        "resolution": "10 selected AGN sources; P0 nine photon groups"
+      },
+      "limits": [
+        "The AGN SED is the parameterized Sazonov-style pilot spectrum.",
+        "The source epoch is output_00017 and is not coeval with the output_00011 stellar candidate."
+      ]
+    },
+    {
+      "id": "feedback_transition_phase0_star_plus_agn_mixed_epoch_control",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_star_plus_agn_mixed_epoch_control.csv",
+      "kind": "noncoeval_combined_photon_ledger_control",
+      "status": "available_local_control",
+      "size_bytes": 11594154,
+      "sha256": "d9a682c0f4e22f1f450fcc261f67bc86e590eedb392f2082d9c582327cb09839",
+      "metadata_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_star_plus_agn_mixed_epoch_control.json",
+      "metadata_sha256": "42b835119429f4e00c227e0b261fe76077e1af10b31c2f2c68a5911cbd7e458b",
+      "source_assets": [
+        "feedback_transition_phase0_bpass_stellar_photon_ledger",
+        "feedback_transition_phase0_output_00017_agn_p0_photon_ledger"
+      ],
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "configuration_sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1",
+      "simulation": {
+        "target": "STAR+AGN source-ledger wiring integration control",
+        "redshift": null,
+        "resolution": "42,352 sources; P0 nine photon groups"
+      },
+      "limits": [
+        "This is explicitly non-coeval: stellar a=0.148540709098256 and AGN a=0.20849776467675274.",
+        "AGN IDs were shifted by +1000000; the offset is recorded in the metadata.",
+        "Do not use this control as a physical snapshot or feedback comparison."
+      ]
+    },
+    {
+      "id": "p5_source_cell_convergence_limit0p25_courant0p1",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p5_validation/p5_coeval_s8_courant0p1_sub1_6p37myr_source_limit0p25_f64.h5",
+      "kind": "validation_hdf5",
+      "status": "available_local_validation",
+      "size_bytes": 12087640,
+      "sha256": "23d0892d4734c9b851ba793dd62f08c18490ba71a068f6f6d507f08c82f92e32",
+      "source_assets": [
+        "p4_coeval_static_rt_input",
+        "p4_pilot_zoom_agn_candidates",
+        "p4_validation_thermal_atlas"
+      ],
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "simulation": {
+        "target": "P5 source-cell convergence control",
+        "redshift": 3.796,
+        "resolution": "32^3 S8; C0.1; 6.3697581 Myr; source target 0.25; float64",
+        "validation": "photon/H-He/thermal gates pass; paired local xHII difference 0.0215405"
+      },
+      "limits": [
+        "Static point-source deposition remains unresolved within one grid cell.",
+        "This is a numerical validation control, not a promoted science result."
+      ]
+    },
+    {
+      "id": "p5_source_cell_convergence_limit0p25_courant0p05",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p5_validation/p5_coeval_s8_courant0p05_sub1_6p37myr_source_limit0p25_f64.h5",
+      "kind": "validation_hdf5",
+      "status": "available_local_validation",
+      "size_bytes": 12087640,
+      "sha256": "a014a3349c9f2cc40af35d56a665dd596afc0e7aa090cf0ced384d8fa980f7c4",
+      "source_assets": [
+        "p4_coeval_static_rt_input",
+        "p4_pilot_zoom_agn_candidates",
+        "p4_validation_thermal_atlas"
+      ],
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "simulation": {
+        "target": "P5 source-cell convergence control",
+        "redshift": 3.796,
+        "resolution": "32^3 S8; C0.05; 6.3697581 Myr; source target 0.25; float64",
+        "validation": "photon/H-He/thermal gates pass; paired local xHII difference 0.0215405"
+      },
+      "limits": [
+        "Static point-source deposition remains unresolved within one grid cell.",
+        "This is a numerical validation control, not a promoted science result."
+      ]
+    },
+    {
+      "id": "p5_controlled_deposition_compact3_courant0p1",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p5_validation/p5_compact3_courant0p1_sub1_6p37myr_source_limit0p25_f64.h5",
+      "kind": "validation_hdf5",
+      "status": "available_local_control",
+      "size_bytes": 12087712,
+      "sha256": "e99e1c4bbf5f2591b60e13c1f5cc76b0b0cb2d30763e73e93ff5ac8f2abc8138",
+      "source_assets": [
+        "p4_coeval_static_rt_input",
+        "p4_pilot_zoom_agn_candidates",
+        "p4_validation_thermal_atlas"
+      ],
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "simulation": {
+        "target": "P5 controlled source-deposition convergence control",
+        "redshift": 3.796,
+        "resolution": "32^3 S8; C0.1; 6.3697581 Myr; compact3; source target 0.25; float64",
+        "validation": "internal photon/H-He/thermal gates pass; paired local xHII difference 0.13438"
+      },
+      "limits": [
+        "compact3 is a normalized numerical regularization, not a physical source-size model.",
+        "The source-cell science convergence gate remains open; do not promote this control."
+      ]
+    },
+    {
+      "id": "p5_controlled_deposition_compact3_courant0p05",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p5_validation/p5_compact3_courant0p05_sub1_6p37myr_source_limit0p25_f64.h5",
+      "kind": "validation_hdf5",
+      "status": "available_local_control",
+      "size_bytes": 12087712,
+      "sha256": "2ecc0354cd12925e77446b4f7973968817e49907e9caadd345b748aca43a6b75",
+      "source_assets": [
+        "p4_coeval_static_rt_input",
+        "p4_pilot_zoom_agn_candidates",
+        "p4_validation_thermal_atlas"
+      ],
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "simulation": {
+        "target": "P5 controlled source-deposition convergence control",
+        "redshift": 3.796,
+        "resolution": "32^3 S8; C0.05; 6.3697581 Myr; compact3; source target 0.25; float64",
+        "validation": "internal photon/H-He/thermal gates pass; paired local xHII difference 0.13438"
+      },
+      "limits": [
+        "compact3 is a normalized numerical regularization, not a physical source-size model.",
+        "The source-cell science convergence gate remains open; do not promote this control."
+      ]
+    },
+    {
+      "id": "p5_refined2_static_rt_input_control",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p5_validation/p4_coeval_static_rt_input_refined2.h5",
+      "kind": "synthetic_refined_static_rt_input",
+      "status": "available_local_control",
+      "size_bytes": 27812888,
+      "sha256": "b817d5e2b3352d6da175f8c604221ec6409312eeb4a4fd3e640272abaf71b4de",
+      "source_asset": "p4_coeval_static_rt_input",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/refine_static_rt_input.py",
+      "simulation": {
+        "target": "factor-2 P5 refined-mesh source-cell control input",
+        "redshift": 3.796,
+        "resolution": "64^3; piecewise-constant coarse-to-fine prolongation; 80 split source rows",
+        "source_mapping": "equal luminosity Q/8 to each coarse-cell child"
+      },
+      "limits": [
+        "This is a synthetic prolongation, not an audited high-resolution hydro snapshot.",
+        "It is valid only as a resolution control and must not be promoted as a physical input."
+      ]
+    },
+    {
+      "id": "p5_refined2_point_courant0p1_short_control",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p5_validation/p5_refined2_point_courant0p1_sub1_0p5myr_source_limit0p25_f64.h5",
+      "kind": "validation_hdf5",
+      "status": "available_local_control",
+      "size_bytes": 96498080,
+      "sha256": "6ababe261f134454e7ef884bf6e342b482f1ce10ee4669e2899b056c50aae287",
+      "source_asset": "p5_refined2_static_rt_input_control",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "simulation": {
+        "target": "P5 synthetic refined-mesh convergence control",
+        "redshift": 3.796,
+        "resolution": "64^3 S8; C0.1; 0.5 Myr; point; source target 0.25; float64",
+        "validation": "internal photon/H-He/thermal gates pass; fine source-block pair max difference 0.008382"
+      },
+      "limits": [
+        "The parent gas state is piecewise-constant synthetic prolongation.",
+        "This short control is not a promoted science result."
+      ]
+    },
+    {
+      "id": "p5_refined2_point_courant0p05_short_control",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p5_validation/p5_refined2_point_courant0p05_sub1_0p5myr_source_limit0p25_f64.h5",
+      "kind": "validation_hdf5",
+      "status": "available_local_control",
+      "size_bytes": 96498080,
+      "sha256": "89e3b70485c3fa7a2896db755449d8e699b0b2abd3d5f3c505a37605c6a1b5a7",
+      "source_asset": "p5_refined2_static_rt_input_control",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "simulation": {
+        "target": "P5 synthetic refined-mesh convergence control",
+        "redshift": 3.796,
+        "resolution": "64^3 S8; C0.05; 0.5 Myr; point; source target 0.25; float64",
+        "validation": "internal photon/H-He/thermal gates pass; fine source-block pair max difference 0.008382"
+      },
+      "limits": [
+        "The parent gas state is piecewise-constant synthetic prolongation.",
+        "This short control is not a promoted science result."
+      ]
+    },
+    {
+      "id": "draine_wd01_mw_rv31_d03_table",
+      "path": "/gpfs/kjhan/LRD_JWST/external/draine_wd01_rv31/kext_albedo_WD_MW_3.1_60_D03.all",
+      "kind": "dust_opacity_table",
+      "status": "available_local",
+      "size_bytes": 65689,
+      "sha256": "b56680cc38b85f051f20c4405303e8c480cc9bec714fd5ba722a257a40ae840c",
+      "source_url": "https://www.astro.princeton.edu/~draine/dust/extcurvs/kext_albedo_WD_MW_3.1_60_D03.all",
+      "producing_repository": "Draine dust model tables",
+      "producing_commit": "table date 2009-10-04",
+      "selection": "carbonaceous-silicate Milky Way model; R_V=3.1; D03 renormalization; b_C=55.8 ppm",
+      "simulation": {
+        "target": "P4 dust absorption closure candidate",
+        "redshift": 5.73,
+        "resolution": "812 wavelength samples, 0.000124--12398 eV"
+      }
+    },
+    {
+      "id": "draine_wd01_mw_rv31_p0_opacity_closure",
+      "path": "/gpfs/kjhan/LRD_JWST/external/draine_wd01_rv31/p0_dust_opacity_rv31_photon_index1.json",
+      "kind": "derived_dust_opacity_closure",
+      "status": "available_local_candidate",
+      "size_bytes": 2324,
+      "sha256": "bde87ee9a4785bd47903c64cfff4a8609a48d8f8efe1fc42272944d67988bb07",
+      "source_asset": "draine_wd01_mw_rv31_d03_table",
+      "configuration": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+      "configuration_sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1",
+      "spectral_weighting": "photon-number dN/dE proportional to E^-1 within each group",
+      "simulation": {
+        "target": "P4 absorption-only dust closure candidate",
+        "redshift": 5.73,
+        "resolution": "P0 nine photon groups"
+      }
+    }
+  ],
+  "local_inputs": [
+    {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/pilot_agn_rate_ledger.csv",
+      "sha256": "0d0249e40f8b9638209cf0a87962d1af1592ed39093cf4b5c1f2ab448aa44ea5"
+    },
+    {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_pilot_agn_photon_ledger.csv",
+      "sha256": "221d65da1bcb76003e48c0c863ce1323829d513a97e9cc33416eeed9e7d55b6a"
+    }
+  ],
+  "run_contract": {
+    "manifest_path": "/gpfs/kjhan/LRD_JWST/manifests/lrd_jwst_external_assets.json",
+    "submit_directories": [
+      "/gpfs/kjhan/LRD_JWST/simulation/pilot_rt_ledger",
+      "/gpfs/kjhan/LRD_JWST/simulation/snrt",
+      "/gpfs/kjhan/LRD_JWST/simulation/snrt/runs"
+    ],
+    "pre_submit_rule": "Resolve every required asset from missing/not_migrated/hash_pending and record its final SHA256 before submission."
+  }
+}

@@ -1,4 +1,4 @@
-"""Offline generator for a time-indexed Grackle thermal atlas."""
+"""Retired full-equilibrium Grackle atlas generator retained for provenance."""
 
 from __future__ import annotations
 
@@ -38,6 +38,10 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--threads", type=int, default=16)
     args = parser.parse_args()
+    raise RuntimeError(
+        "build_grackle_atlas.py is retired: its equilibrium primordial+UVB rate is incompatible with "
+        "SNRT non-equilibrium H/He. Use build_metal_thermal_atlas.py with CloudyData_noUVB.h5."
+    )
     scale_factor = read_scale_factors(args.scale_factors)
     work_directory = Path(args.work_directory)
     work_directory.mkdir(parents=True, exist_ok=True)

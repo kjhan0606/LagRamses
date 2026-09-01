@@ -59,7 +59,10 @@ def build_conservative_hydrogen_step(
     ) -> ConservativeHydrogenStepResult:
         sigma_hi = cross_sections.hydrogen_i.reshape((-1,) + (1,) * n_hydrogen.ndim)
         alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
-        minimum_neutral_density = 1.0e-12 * n_hydrogen
+        minimum_neutral_density = jnp.maximum(
+            1.0e-12 * n_hydrogen,
+            jnp.finfo(n_hydrogen.dtype).tiny,
+        )
 
         def solve_at_mean_fraction(
             mean_x_hii: jnp.ndarray,
@@ -75,8 +78,9 @@ def build_conservative_hydrogen_step(
             )
             absorbed_photons = jnp.einsum("d,gdxyz->gxyz", weights, absorbed_directional)
             photoionizations = jnp.sum(absorbed_photons, axis=0)
-            photoionization_rate = photoionizations / (
-                transport.dt * jnp.maximum(mean_n_hi, minimum_neutral_density)
+            photoionization_rate = (photoionizations / transport.dt) / jnp.maximum(
+                mean_n_hi,
+                minimum_neutral_density,
             )
             electron_density = n_hydrogen * mean_x_hii
             next_x_hii, solved_mean_x_hii = hydrogen_photoionization_relaxation(

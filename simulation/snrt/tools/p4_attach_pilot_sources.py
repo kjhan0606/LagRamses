@@ -52,6 +52,11 @@ def main() -> None:
         x_heii=gas.x_heii,
         x_heiii=gas.x_heiii,
         sources=sources,
+        velocity_cm_s=gas.velocity_cm_s,
+        metallicity_solar=gas.metallicity_solar,
+        dust_to_metal=gas.dust_to_metal,
+        x_h2=gas.x_h2,
+        cell_level=gas.cell_level,
     )
     write_static_rt_input(args.output, output)
 

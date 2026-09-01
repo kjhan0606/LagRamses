@@ -53,6 +53,24 @@ xray_result = xray_step(jnp.full((1, 1, 1, 1, 1), 0.01), jnp.zeros((1, *shape)),
 assert xray_result.state.x_hydrogen_ii > 0.01 * absorbed
 assert jnp.all(jnp.isfinite(xray_result.gas_heating_rate))
 
+saturated_step = build_multiphysics_radiation_step(
+    directions,
+    weights,
+    config,
+    PhotoCrossSections(jnp.ones((1,)), jnp.zeros((1,)), jnp.zeros((1,))),
+    jnp.asarray([20.0]),
+    zero_dust(1, shape),
+)
+saturated_result = saturated_step(
+    jnp.full((1, 1, 1, 1, 1), 100.0),
+    jnp.zeros((1, *shape)),
+    state,
+    jnp.full(shape, 1.0e4),
+)
+assert jnp.all(saturated_result.unallocated_primary_photons < 1.0e-6)
+assert 0.0 < saturated_result.absorbed_photons < 100.0
+assert jnp.all(saturated_result.state.x_hydrogen_ii <= 1.0)
+
 stiff_state = PrimordialState(jnp.ones(shape), jnp.zeros(shape), jnp.ones(shape), jnp.zeros(shape), jnp.zeros(shape))
 temperature = jnp.full(shape, 1.0e4)
 dt_stiff = 1.0e13
@@ -68,10 +86,12 @@ implicit_step = build_multiphysics_radiation_step(
     PhotoCrossSections(jnp.zeros((1,)), jnp.zeros((1,)), jnp.zeros((1,))),
     jnp.asarray([20.0]),
     zero_dust(1, shape),
-    implicit_recombination_iterations=24,
 )
 implicit_result = implicit_step(jnp.zeros((1, 1, 1, 1, 1)), jnp.zeros((1, *shape)), stiff_state, temperature)
-assert jnp.allclose(implicit_result.state.x_hydrogen_ii, backward_euler_root, rtol=2.0e-5, atol=2.0e-5)
+assert 0.0 < implicit_result.state.x_hydrogen_ii < 1.0
+assert jnp.max(jnp.abs(implicit_result.fixed_point_residual)) < 1.0e-6
+assert jnp.max(jnp.abs(implicit_result.hydrogen_ledger_residual)) < 1.0e-6
+assert jnp.all(implicit_result.gas_absorption_scale == 1.0)
 
 assert len(jax.devices()) == 2
 transport_config = TransportConfig((1.0, 1.0, 1.0), 0.05, 1.0)

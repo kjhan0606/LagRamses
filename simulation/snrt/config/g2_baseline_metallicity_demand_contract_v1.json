@@ -1,0 +1,48 @@
+{
+  "schema": "snrt-g2-baseline-metallicity-demand-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "comparison_population_review_only",
+  "purpose": "Measure the inherited transitional Phase-0 stellar population's birth-metallicity demand without promoting the comparison run into a production-domain definition.",
+  "baseline": {
+    "baseline_id": "feedback_transition_phase0_10cMpc_h_z0_epsstar002",
+    "role": "transitional_feedback_baseline_comparison_only",
+    "output": "output_00011",
+    "metadata_path": "data/feedback_transition_phase0_output_00011_stellar_catalogue.json",
+    "metadata_bytes": 3589,
+    "metadata_sha256": "281d60b995a3aa38c5003ba9b9ee1947643159a0fa42e94b178277969c240ad2",
+    "catalogue_path": "data/feedback_transition_phase0_output_00011_stellar_catalogue.csv",
+    "catalogue_bytes": 14464372,
+    "catalogue_sha256": "205336d5d2d8a6db66213cdb517a4994a0ccf8ee35627e793a78cbdf30b709a5",
+    "expected_star_count": 42342,
+    "birth_metallicity_field": "birth_metallicity_mass_fraction",
+    "age_field": "age_myr"
+  },
+  "expected_metadata": {
+    "status": "complete_native_stellar_metadata_extracted",
+    "metallicity_source_field": "output_part.f90 zp",
+    "negative_birth_metallicity_clamp_tolerance": 1e-12,
+    "negative_birth_metallicity_clamped_count": 338,
+    "birth_metallicity_minimum": 0.0,
+    "birth_metallicity_maximum": 1.1813492899814927e-9,
+    "birth_metallicity_mean": 9.329877281785934e-11,
+    "age_myr_minimum": 0.002185223689377258,
+    "age_myr_maximum": 750.0991583655856
+  },
+  "staged_source_domain_reference": {
+    "lowest_positive_full_grid_candidate_metallicity_mass_fraction": 3.236e-5,
+    "sources_at_that_node": ["limongi_chieffi_2018_cds", "boccioli_roberti2026_lc18"],
+    "stockinger_zero_metallicity_model_is_discrete_event_anchor": true,
+    "jost_primordial_article_candidate_has_staged_yield_asset": false
+  },
+  "policy": {
+    "comparison_population_defines_production_domain": false,
+    "metallicity_floor_or_clamp_allowed": false,
+    "solar_source_extrapolation_to_ultra_low_z_allowed": false,
+    "discrete_zero_metallicity_event_anchor_counts_as_full_grid": false,
+    "unstaged_article_values_may_fill_domain": false,
+    "required_production_birth_metallicity_domain_selected": false,
+    "canonical_rows_emitted": 0,
+    "production_ready": false
+  }
+}

@@ -22,6 +22,8 @@ runs/**/output_*/
 runs/**/job_*/
 
 # Large external assets; commit their manifests only
+external/
+.quarantine_hdf5/
 ic/
 outputs/
 raw_data/

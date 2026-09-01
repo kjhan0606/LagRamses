@@ -19,6 +19,51 @@ group ordering of the RT run.  Groups must start at zero and be contiguous.
 Positions use RAMSES box code coordinates.  Only sources inside the selected
 non-wrapping cube are deposited.
 
+STAR, AGN, and STAR+AGN scenarios must use the same group-edge table and
+source-side normalization. A five-group retained AGN control cannot be
+concatenated with the P0 nine-group stellar ledger; the combination must be
+rebuilt on one shared group table with a new aggregate spectral closure.
+
+The strict merger is implemented by
+[`tools/merge_photon_source_ledgers.py`](tools/merge_photon_source_ledgers.py).
+It verifies the input metadata totals against the CSV rows, rejects group-edge
+mismatches, source-ID collisions, and (when declared) non-coeval scale
+factors, and recomputes the combined photon- and absorber-weighted H/He
+closure. If a controlled non-coeval merge is needed, both
+`--allow-mixed-epochs` and one explicit `--source-id-offset` per input are
+required; the output is labeled as an integration control. It applies no dust
+attenuation or feedback.
+
+## Native transitional checkpoint hand-off
+
+The stopped comparison output `output_00011` now has a decoded stellar
+metadata catalogue:
+[`data/feedback_transition_phase0_output_00011_stellar_catalogue.csv`](data/feedback_transition_phase0_output_00011_stellar_catalogue.csv)
+with manifest
+[`data/feedback_transition_phase0_output_00011_stellar_catalogue.json`](data/feedback_transition_phase0_output_00011_stellar_catalogue.json).
+It contains 42,342 stars and preserves the native type, position, mass, age,
+birth-metallicity, and yield-table fields. It is not itself a photon ledger:
+the `q_group_N_s` columns are intentionally absent until a stellar-population
+SED, IMF, metallicity interpolation, escape prescription, and photon-group
+integration are explicitly selected.
+
+The SED-to-ledger wiring is now implemented in
+[`tools/p4_build_stellar_photon_ledger.py`](tools/p4_build_stellar_photon_ledger.py).
+Its input contract, interpolation choices, and closure serialization are
+recorded in [`P4_STELLAR_SED.md`](P4_STELLAR_SED.md). The default P0 nine-group
+boundaries are pinned in
+[`config/p0_photon_group_edges_ev.txt`](config/p0_photon_group_edges_ev.txt).
+The converter has a synthetic test covering rectangular-table validation,
+source integration, the v2 ledger reader, and the serialized H/He spectral
+closure. The staged BPASS path is handled by
+[`tools/p4_build_bpass_stellar_photon_ledger.py`](tools/p4_build_bpass_stellar_photon_ledger.py),
+which writes the candidate `output_00011` stellar ledger without expanding the
+100,000-point HDF5 spectra into CSV. Its metadata retains the BPASS HDF5 hash,
+the moment conversion, and every range-clamp/padding decision. The resulting
+candidate still cannot be merged into a science run until the metallicity and
+young-age treatment, stellar escape fraction, and dust prescription are
+approved.
+
 ## Required provenance sidecar
 
 The CSV must be accompanied by a versioned metadata file that records:

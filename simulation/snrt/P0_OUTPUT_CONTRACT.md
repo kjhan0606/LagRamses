@@ -1,12 +1,20 @@
 # P0 Output Contract: lagRamses to S_N Input
 
-Status: Draft v0.1  
-Date: 2026-08-28
+Status: Draft v0.3 — output_00017 staging validated, production composition pending
+Date: 2026-08-31
+
+The canonical static input writer is now format version 2. The implementation
+and synthetic contract test live in
+[`snrt_core/snapshot.py`](snrt_core/snapshot.py) and
+[`tests/p4_hdf5_staging.py`](tests/p4_hdf5_staging.py). This closes the file
+layout and conservative-leaf bookkeeping portion of the contract; it does not
+identify missing physical fields in an existing checkpoint.
 
 ## 1. Confirmed checkpoint structure
 
-The inspected `patch/lagRamses` HDF5 checkpoint writer provides a practical
-starting point for the S_N converter. The following datasets are confirmed.
+The inspected `cuRAMSES-kjhan` HDF5 checkpoint writer for the
+`Horizon5-master-2` build provides the active output contract. It writes raw
+conservative variables. The following groups are confirmed.
 
 | Checkpoint group | Confirmed content | S_N use |
 | --- | --- | --- |
@@ -31,12 +39,19 @@ volume, not a RAMSES grid index.
 | S_N field | Source | Status |
 | --- | --- | --- |
 | `rho` | decoded `uold_1` | confirmed raw availability |
-| `velocity[3]` | decoded momentum conservatives divided by density | confirmed raw availability |
-| `temperature` | total energy, velocity, EOS, and cooling convention | requires exact `uold` variable map |
-| `metallicity` | passive scalar or dedicated hydro variable | requires exact `uold` variable map |
+| `velocity[3]` | `uold_2..uold_4` momentum densities divided by deposited density | implemented and checked against the raw-conservative writer |
+| `temperature` | `uold_5` total-energy density reduced to pressure, then inverted with the thermal atlas | implemented with HDF5 header `gamma=1.6666667` |
+| `metallicity` | `uold_6` metal mass density divided by `uold_1` and `0.02` | implemented; `uold_6` is confirmed by `imetal=6` in the producing build |
 | `x_HI`, `x_HII`, `x_HeI`, `x_HeII`, `x_HeIII`, `x_H2` | RT/chemistry checkpoint | required but unconfirmed in HDF5 |
-| `dust_to_metal` | explicit snapshot field, or named subgrid prescription | required; no silent default |
-| `cell_mask` and `level` | AMR grid center and refinement flags | confirmed raw availability |
+| `dust_to_metal` | explicit snapshot field, or named subgrid prescription | required; pilot map uses a recorded non-production placeholder |
+| `cell_mask` and `level` | AMR grid center and refinement flags | leaf coverage is checked; `cell_level` is written in v2 |
+
+The HDF5 adapter takes the explicit field map in
+[`config/p4_hdf5_field_map_pilot.json`](config/p4_hdf5_field_map_pilot.json).
+Density, momentum density, total energy density, and metal density are
+volume-conservative. Primitive fields derived from those conserved quantities
+are calculated only after restriction. Thus the current output is a validated
+coeval interface snapshot, not a physical dust/chemistry production snapshot.
 
 ### Required source fields
 
@@ -72,27 +87,27 @@ alone.
 
 1. Select a physical cube centered on the primary BH or on the dual-AGN
    barycenter.
-2. Retain only AMR leaf cells and deposit their volume-weighted conservative
-   quantities onto the static nested S_N blocks.
-3. Preserve mass, each passive scalar mass, and total gas energy during every
-   restriction operation.
+2. Retain only AMR leaf cells and deposit mapped quantities onto the static
+   Cartesian mesh using the map's declared averaging rule.
+3. Preserve density, momentum, total energy, and mapped metal mass during
+   restriction; derive velocity, thermal pressure, and `Z/Z_sun` afterwards.
 4. Refined AMR cells overwrite their parent contribution; no parent and child
    values may be counted twice.
 5. Record the input snapshot ID, expansion factor, physical time, converter
    version, and every source-table hash in the S_N input metadata.
 
-## 5. P0 blockers to close before implementation
+## 5. Remaining production blockers
 
-1. Decode the exact hydro `uold` variable ordering for the active HR5 build.
-2. Establish whether HDF5 outputs all RT photon groups and non-equilibrium
-   chemistry fractions; add an explicit exporter if not.
-3. Establish the active dust model and whether dust is a stored field or a
+1. Certify the remaining `uold_8..uold_11` element/passive-scalar mapping for
+   the exact checkpoint and determine whether any RT chemistry fractions are
+   stored; add an explicit exporter if not.
+2. Establish the active dust model and whether dust is a stored field or a
    metallicity-derived subgrid quantity.
-4. Define the sink accumulator interval and the retained-mass versus inflow-
+3. Define the sink accumulator interval and the retained-mass versus inflow-
    mass convention used to construct AGN luminosity.
-5. Identify the star-particle type and age convention used by the active
+4. Identify the star-particle type and age convention used by the active
    output.
 
-No lagRamses source modification is authorized by this document. The next P0
-inspection resolves these five items and produces a minimal, versioned input
-schema for the converter.
+No lagRamses source modification is authorized by this document. The current
+SNRT converter remains limited to the explicit pilot map until these items are
+resolved and the production-contract gate passes.

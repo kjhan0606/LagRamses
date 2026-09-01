@@ -54,7 +54,11 @@ def main() -> None:
     host_index = catalog.most_massive_interior(probe_width_code / 2.0)
     probe_left_edge = catalog.position_code[host_index] - probe_width_code / 2.0
     thermal_atlas = read_thermal_atlas(args.thermal_atlas)
-    fields = RamsesFieldMap(density=("gas", "density"), equilibrium_temperature=True)
+    fields = RamsesFieldMap(
+        density=("gas", "density"),
+        equilibrium_temperature=True,
+        velocity=(("gas", "velocity_x"), ("gas", "velocity_y"), ("gas", "velocity_z")),
+    )
     probe_path = Path(args.output).with_name("p4_density_probe.h5")
     probe = stage_ramses_hydro_only(
         args.info,

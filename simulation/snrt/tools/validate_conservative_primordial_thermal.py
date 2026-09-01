@@ -117,7 +117,7 @@ def main() -> None:
                 x_helium_ii=radiation.x_helium_ii,
                 x_helium_iii=radiation.x_helium_iii,
             )
-            thermal, temperature, _ = _implicit_thermal_update(
+            thermal, temperature, _, _, _ = _implicit_thermal_update(
                 chemistry,
                 thermal,
                 radiation.gas_photoheating_rate,

@@ -109,9 +109,12 @@ def advance_with_absorption(
     """Advance one S_N step and return the exact local absorption loss.
 
     ``intensity`` is ordered [group, direction, x, y, z]. ``emissivity`` and
-    ``absorption`` are ordered [group, x, y, z]. Transport and emission use an
-    explicit step; the local absorption operator is applied exactly. Positivity
-    therefore requires only the directional transport CFL condition.
+    ``absorption`` are ordered [group, x, y, z]. Transport is explicit. After
+    that transport stage, the local constant-source/absorption problem is
+    integrated analytically over the step. This keeps source-cell emission
+    time-centred with respect to local absorption and returns the corresponding
+    local photon loss. Positivity therefore requires only the directional
+    transport CFL condition.
     """
 
     transport = _transport_rhs(
@@ -121,10 +124,31 @@ def advance_with_absorption(
         config.reduced_light_speed,
     )
     source = emissivity[:, None, :, :, :]
-    pre_absorption = intensity + config.dt * (transport + source)
+    transported = intensity + config.dt * transport
     optical_depth = config.reduced_light_speed * config.dt * absorption[:, None, :, :, :]
-    next_intensity = pre_absorption * jnp.exp(-optical_depth)
-    return next_intensity, pre_absorption - next_intensity
+    transmission = jnp.exp(-optical_depth)
+    one_minus_transmission = -jnp.expm1(-optical_depth)
+
+    # phi(tau) = (1 - exp(-tau)) / tau is the exact source response. The
+    # A second-order polynomial branch avoids losing the source contribution
+    # to cancellation when a cell is optically thin during one step. Keep the
+    # polynomial quadratic: XLA may reassociate powers of a very large dt, and
+    # a cubic term can overflow in float32 even when the resulting tau is zero.
+    safe_optical_depth = jnp.maximum(optical_depth, jnp.finfo(optical_depth.dtype).tiny)
+    source_response = one_minus_transmission / safe_optical_depth
+    source_response_series = (
+        1.0
+        - 0.5 * optical_depth
+        + optical_depth * optical_depth / 6.0
+    )
+    source_response = jnp.where(optical_depth < 1.0e-4, source_response_series, source_response)
+
+    next_intensity = transported * transmission + config.dt * source * source_response
+    absorbed_intensity = (
+        transported * one_minus_transmission
+        + config.dt * source * (1.0 - source_response)
+    )
+    return next_intensity, absorbed_intensity
 
 
 def advance_explicit(
