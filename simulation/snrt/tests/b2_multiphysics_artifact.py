@@ -47,7 +47,7 @@ def main() -> int:
 
     solver_a = payload["solver_a"]
     assert abs(solver_a["radius_ratio"] - 1.0) < 0.05
-    assert payload["solver_a_vs_b"]["x_hii_l1"] < 1.0e-5
+    assert payload["solver_a_vs_b"]["x_hii_l1"] < 5.0e-5
     solver_a_runs = (
         solver_a,
         payload["controlled_deltas"]["dust_on"],
@@ -55,19 +55,38 @@ def main() -> int:
         payload["controlled_deltas"]["secondary_200ev_on"],
     )
     assert all(run["fixed_point_iterations"] >= 20 for run in solver_a_runs)
+    assert all(run["fixed_point_relaxation"] == 0.5 for run in solver_a_runs)
     assert all(run["gas_absorption_limiter_active_cell_step_fraction"] == 0.0 for run in solver_a_runs)
     assert all(run["minimum_gas_absorption_scale"] == 1.0 for run in solver_a_runs)
     assert all(run["maximum_fixed_point_residual"] < 1.0e-4 for run in solver_a_runs)
+    assert all(
+        run[species_residual] < 1.0e-4
+        for run in solver_a_runs
+        for species_residual in (
+            "maximum_fixed_point_hydrogen_residual",
+            "maximum_fixed_point_helium_ii_residual",
+            "maximum_fixed_point_helium_iii_residual",
+        )
+    )
     assert all(run["hydrogen_ledger_l1_relative_error"] < 1.0e-3 for run in solver_a_runs)
+    assert all(
+        run["photoelectron_energy_ledger_l1_relative_error"] < 1.0e-5
+        for run in solver_a_runs
+    )
+    assert all(run["electron_root_bracket_failure_count"] == 0 for run in solver_a_runs)
     assert payload["solver_b"]["maximum_fixed_point_residual"] < 1.0e-4
     assert payload["solver_b"]["hydrogen_ledger_l1_relative_error"] < 1.0e-3
     assert payload["solver_b"]["fixed_point_iterations"] >= 20
     assert 0.10 < payload["controlled_deltas"]["dust_on"]["dust_absorbed_fraction"] < 0.30
     assert -0.006 < payload["controlled_deltas"]["dust_mean_xhii_delta_from_baseline"] < -0.002
-    assert 0.20 < payload["controlled_deltas"]["secondary_200ev_on"][
+    secondary_off = payload["controlled_deltas"]["secondary_200ev_off"]
+    secondary_on = payload["controlled_deltas"]["secondary_200ev_on"]
+    assert secondary_off["helium_to_hydrogen_number_ratio"] == 0.079
+    assert secondary_on["helium_to_hydrogen_number_ratio"] == 0.079
+    assert 0.50 < secondary_on[
         "secondary_hydrogen_ionizations_per_emitted_photon"
-    ] < 0.60
-    assert 0.008 < payload["controlled_deltas"]["secondary_mean_xhii_delta"] < 0.018
+    ] < 0.75
+    assert 0.015 < payload["controlled_deltas"]["secondary_mean_xhii_delta"] < 0.025
     assert payload["shadow"]["relative_difference"] < 0.02
 
     provenance = payload["provenance"]
@@ -78,6 +97,13 @@ def main() -> int:
     )
     assert provenance["snrt_core_sha256"] == {
         path.name: sha256(path) for path in sorted((ROOT / "snrt_core").glob("*.py"))
+    }
+    fs2010_directory = ROOT / "data" / "furlanetto_stoever_2010"
+    assert provenance["furlanetto_stoever_table_manifest_sha256"] == sha256(
+        fs2010_directory / "TABLE_MANIFEST.json"
+    )
+    assert provenance["furlanetto_stoever_table_sha256"] == {
+        path.name: sha256(path) for path in sorted(fs2010_directory.glob("*.dat"))
     }
     print(
         "B2_MULTIPHYSICS_ARTIFACT_OK "

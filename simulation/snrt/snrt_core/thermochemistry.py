@@ -30,6 +30,8 @@ class ThermochemicalState(NamedTuple):
     cumulative_dust_momentum: jnp.ndarray
     cumulative_unallocated_primary_photons: jnp.ndarray
     cumulative_photoheating_energy: jnp.ndarray
+    cumulative_photoelectron_energy: jnp.ndarray
+    cumulative_photoelectron_energy_ledger_residual: jnp.ndarray
     cumulative_background_energy: jnp.ndarray
     cumulative_thermal_residual: jnp.ndarray
     cumulative_thermal_bound_hits: jnp.ndarray
@@ -37,6 +39,7 @@ class ThermochemicalState(NamedTuple):
     cumulative_gas_absorption_limiter_activations: jnp.ndarray
     minimum_gas_absorption_scale: jnp.ndarray
     maximum_fixed_point_residual: jnp.ndarray
+    cumulative_electron_root_bracket_failures: jnp.ndarray
 
 
 class ThermochemicalStepResult(NamedTuple):
@@ -54,6 +57,8 @@ class ThermochemicalStepResult(NamedTuple):
     cumulative_dust_momentum: jnp.ndarray
     cumulative_unallocated_primary_photons: jnp.ndarray
     cumulative_photoheating_energy: jnp.ndarray
+    cumulative_photoelectron_energy: jnp.ndarray
+    cumulative_photoelectron_energy_ledger_residual: jnp.ndarray
     cumulative_background_energy: jnp.ndarray
     cumulative_thermal_residual: jnp.ndarray
     cumulative_thermal_bound_hits: jnp.ndarray
@@ -61,6 +66,7 @@ class ThermochemicalStepResult(NamedTuple):
     cumulative_gas_absorption_limiter_activations: jnp.ndarray
     minimum_gas_absorption_scale: jnp.ndarray
     maximum_fixed_point_residual: jnp.ndarray
+    cumulative_electron_root_bracket_failures: jnp.ndarray
 
 
 CHEMISTRY_DIAGNOSTIC_NAMES = (
@@ -69,6 +75,7 @@ CHEMISTRY_DIAGNOSTIC_NAMES = (
     "helium_ii_photoionizations",
     "secondary_hydrogen_ionizations",
     "secondary_helium_i_ionizations",
+    "secondary_helium_ii_ionizations",
     "hydrogen_collisional_ionizations",
     "helium_i_collisional_ionizations",
     "helium_ii_collisional_ionizations",
@@ -204,7 +211,7 @@ def build_thermochemical_step(
     thermal_subcycles: int = 16,
     source_cell_subcycles: int = 1,
     thermal_implicit_iterations: int = 24,
-    use_secondary_ionization: bool = True,
+    use_secondary_ionization: bool = False,
     time_averaged_absorption_iterations: int = 20,
 ):
     """Build a static-control-flow radiation, chemistry, and energy step.
@@ -269,6 +276,8 @@ def build_thermochemical_step(
             cumulative_dust_momentum=zero_dust_momentum,
             cumulative_unallocated_primary_photons=zero_unallocated,
             cumulative_photoheating_energy=zero_energy,
+            cumulative_photoelectron_energy=zero_energy,
+            cumulative_photoelectron_energy_ledger_residual=zero_energy,
             cumulative_background_energy=zero_energy,
             cumulative_thermal_residual=zero_energy,
             cumulative_thermal_bound_hits=zero_bound_hits,
@@ -276,6 +285,7 @@ def build_thermochemical_step(
             cumulative_gas_absorption_limiter_activations=zero_bound_hits,
             minimum_gas_absorption_scale=jnp.ones_like(temperature_k),
             maximum_fixed_point_residual=zero_bound_hits,
+            cumulative_electron_root_bracket_failures=zero_bound_hits,
         )
 
         def subcycle(_: int, current: ThermochemicalState) -> ThermochemicalState:
@@ -305,6 +315,9 @@ def build_thermochemical_step(
                 current.cumulative_dust_momentum + subtransport.dt * radiation.dust_momentum_rate,
                 current.cumulative_unallocated_primary_photons + radiation.unallocated_primary_photons,
                 current.cumulative_photoheating_energy + subtransport.dt * radiation.gas_heating_rate,
+                current.cumulative_photoelectron_energy + radiation.photoelectron_energy,
+                current.cumulative_photoelectron_energy_ledger_residual
+                + radiation.photoelectron_energy_ledger_residual,
                 current.cumulative_background_energy + subtransport.dt * background,
                 current.cumulative_thermal_residual + thermal_residual,
                 current.cumulative_thermal_bound_hits + thermal_bound_hit,
@@ -320,6 +333,11 @@ def build_thermochemical_step(
                 + jnp.asarray(radiation.gas_absorption_scale < 1.0, dtype=temperature_k.dtype),
                 jnp.minimum(current.minimum_gas_absorption_scale, radiation.gas_absorption_scale),
                 jnp.maximum(current.maximum_fixed_point_residual, radiation.fixed_point_residual),
+                current.cumulative_electron_root_bracket_failures
+                + jnp.asarray(
+                    ~radiation.electron_root_bracket_found,
+                    dtype=temperature_k.dtype,
+                ),
             )
 
         final = jax.lax.fori_loop(0, total_subcycles, subcycle, initial)
@@ -338,6 +356,8 @@ def build_thermochemical_step(
             final.cumulative_dust_momentum,
             final.cumulative_unallocated_primary_photons,
             final.cumulative_photoheating_energy,
+            final.cumulative_photoelectron_energy,
+            final.cumulative_photoelectron_energy_ledger_residual,
             final.cumulative_background_energy,
             final.cumulative_thermal_residual,
             final.cumulative_thermal_bound_hits,
@@ -345,6 +365,7 @@ def build_thermochemical_step(
             final.cumulative_gas_absorption_limiter_activations,
             final.minimum_gas_absorption_scale,
             final.maximum_fixed_point_residual,
+            final.cumulative_electron_root_bracket_failures,
         )
 
     return step

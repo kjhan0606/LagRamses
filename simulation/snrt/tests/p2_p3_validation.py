@@ -22,7 +22,13 @@ from snrt_core.transport import TransportConfig, advance_explicit
 
 
 shape = (1, 1, 1)
-state = PrimordialState(jnp.ones(shape), jnp.zeros(shape), jnp.zeros(shape), jnp.zeros(shape), jnp.zeros(shape))
+state = PrimordialState(
+    jnp.ones(shape),
+    jnp.full(shape, 0.079),
+    jnp.zeros(shape),
+    jnp.zeros(shape),
+    jnp.zeros(shape),
+)
 directions = jnp.zeros((1, 3))
 weights = jnp.ones((1,))
 config = TransportConfig((1.0, 1.0, 1.0), 1.0, 1.0)
@@ -48,10 +54,22 @@ xray_step = build_multiphysics_radiation_step(
     PhotoCrossSections(jnp.ones((1,)), jnp.zeros((1,)), jnp.zeros((1,))),
     jnp.asarray([1000.0]),
     zero_dust(1, shape),
+    use_secondary_ionization=True,
 )
 xray_result = xray_step(jnp.full((1, 1, 1, 1, 1), 0.01), jnp.zeros((1, *shape)), state, jnp.full(shape, 1.0e4))
 assert xray_result.state.x_hydrogen_ii > 0.01 * absorbed
 assert jnp.all(jnp.isfinite(xray_result.gas_heating_rate))
+assert jnp.max(jnp.abs(xray_result.helium_i_ledger_residual)) < 1.0e-6
+assert jnp.max(jnp.abs(xray_result.helium_ii_ledger_residual)) < 1.0e-6
+photoelectron_ledger_relative_error = jnp.max(
+    jnp.abs(xray_result.photoelectron_energy_ledger_residual)
+    / jnp.maximum(
+        jnp.abs(xray_result.photoelectron_energy),
+        jnp.finfo(xray_result.photoelectron_energy.dtype).tiny,
+    )
+)
+assert photoelectron_ledger_relative_error < 1.0e-6
+assert jnp.all(xray_result.electron_root_bracket_found)
 
 saturated_step = build_multiphysics_radiation_step(
     directions,
@@ -60,6 +78,7 @@ saturated_step = build_multiphysics_radiation_step(
     PhotoCrossSections(jnp.ones((1,)), jnp.zeros((1,)), jnp.zeros((1,))),
     jnp.asarray([20.0]),
     zero_dust(1, shape),
+    use_secondary_ionization=False,
 )
 saturated_result = saturated_step(
     jnp.full((1, 1, 1, 1, 1), 100.0),
@@ -110,5 +129,6 @@ print(
     "P2_P3_VALIDATION_OK",
     f"xray_xHII={float(xray_result.state.x_hydrogen_ii[0, 0, 0]):.6f}",
     f"implicit_xHII={float(implicit_state.x_hydrogen_ii[0, 0, 0]):.6f}",
+    f"photoelectron_ledger={float(photoelectron_ledger_relative_error):.6g}",
     f"devices={len(sharded.addressable_shards)}",
 )

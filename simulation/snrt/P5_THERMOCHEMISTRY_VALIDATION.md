@@ -11,6 +11,35 @@
 Status: conservation gate passed; the tighter source-cell timestep treatment
 substantially improves global and local convergence, but the local source-cell
 convergence gate remains open.
+
+## Current-solver FS2010 effect control (2026-09-02)
+
+A matched 0.1 Myr, 32 cubed P5 pair remeasures the effect of secondary
+ionization with the current uncapped solver. Both runs use S4, reduced light
+speed `0.01c`, Courant 0.1, point deposition, a source-cell target of 0.25,
+58 source subcycles, float64, and 32 opacity iterations. The OFF and FS2010 ON
+runs both pass their internal P5 gates: maximum fixed-point residual is
+`2.33e-10`, the worst H/He L1 ledger error is `1.55e-10`, and thermal closure
+is `3.54e-7`.
+
+FS2010 changes volume-mean xHII by `+2.24653e-8` and volume-mean temperature
+by `-7.52274e-3 K`; the maximum local changes are `2.43194e-4` and `25.1009 K`.
+All H I, He I, and He II secondary channels are non-zero. The small mean effect
+is expected because the control ends at `<xHII>=0.978` and `<T>=5.58e6 K`:
+FS2010's ionization-energy fraction near 200 eV falls from about 0.376 at
+`xHII=1e-4` to 0.0022 at `xHII=0.9` and 0.0008 at `xHII=0.99`. It is a measured
+property of this ionized, hot, UV-dominated AGN control, not evidence that
+secondary ionization is generally negligible. The canonical regression bands
+are tightened to `1e-8 < delta<xHII> < 5e-8` and
+`-0.02 K < delta<T> < -0.002 K`. The source-bound report is
+`data/p5_secondary_ionization_validation.json`, checked by
+`tests/p5_secondary_ionization_artifact.py`. This pair is an effect and wiring
+control, not a spatial-resolution or full-duration science promotion.
+
+Both runs also require an internal multi-group photoelectron-energy ledger
+below `1e-12`, zero electron-root bracket failures, and the explicit excitation
+policy `radiative_line_escape_not_returned_to_gas`. The measured ON ledger is
+`1.31e-17`; OFF is exactly zero.
 The full-duration runs below were executed on `/gpfs/kjhan/LRD_JWST` with the
 staged 32^3 P4 input, the audited AGN photon ledger, the P4 thermal atlas, S8
 angular transport, zero dust, float64 arithmetic, and 6.3697581 Myr of
@@ -176,6 +205,9 @@ step remainders give a different local final-step partition.
 
 ## Artifacts
 
+- [`FS2010 OFF 0.1 Myr`](data/p5_validation/p5_fs2010_off_s4_c0p1_0p1myr_source_limit0p25_remediated_n32_f64.h5), SHA256 `02ebe242f7fafea46edbb3bcc52a25d61cc26bb3e3f3d17794c28fcb6a822eea`
+- [`FS2010 ON 0.1 Myr`](data/p5_validation/p5_fs2010_on_s4_c0p1_0p1myr_source_limit0p25_remediated_n32_f64.h5), SHA256 `a03e5ec5906fe2659b82e1fa6e9d162d805fd403aa3e09e9263e48fcc0b45d83`
+- [`FS2010 matched-pair report`](data/p5_secondary_ionization_validation.json), SHA256 `8e297de9c23d47c32691e5b507ae29230e4c44fa88e4ce06046af1df9433e428`
 - [`C0.4_N4`](data/p5_validation/p5_coeval_s8_sub4_6p37myr_conservative_timeavg4_f64.h5)
 - [`C0.1_N1`](data/p5_validation/p5_coeval_s8_courant0p1_sub1_6p37myr_conservative_timeavg4_f64.h5)
 - [`C0.05_N1`](data/p5_validation/p5_coeval_s8_courant0p05_sub1_6p37myr_conservative_timeavg4_f64.h5)

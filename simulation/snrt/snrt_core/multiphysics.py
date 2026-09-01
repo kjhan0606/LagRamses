@@ -13,18 +13,22 @@ from .dust import (
     absorbed_dust_momentum_rate,
     absorption_coefficient as dust_absorption_coefficient,
 )
-from .implicit import helium_photoionization_backward_euler, hydrogen_neutral_relaxation
+from .implicit import coupled_photo_collisional_hhe_update
 from .primordial import (
     EV_ERG,
     PhotoCrossSections,
     PrimordialState,
     case_b_helium_recombination,
     default_photoelectron_excess_energy,
-    electron_number_density,
     hui_gnedin_case_b_hydrogen,
     neutral_number_densities,
 )
-from .secondary import shull_van_steenberg_high_energy
+from .secondary import (
+    HELIUM_I_IONIZATION_ENERGY_EV,
+    HELIUM_II_IONIZATION_ENERGY_EV,
+    HYDROGEN_I_IONIZATION_ENERGY_EV,
+    furlanetto_stoever_2010,
+)
 from .primordial_cooling import collisional_ionization_coefficients
 from .transport import TransportConfig, advance_with_absorption
 
@@ -36,17 +40,24 @@ class ThermochemicalStepResult(NamedTuple):
     dust_heating_rate: jnp.ndarray
     dust_momentum_rate: jnp.ndarray
     excitation_rate: jnp.ndarray
+    photoelectron_energy: jnp.ndarray
+    photoelectron_energy_ledger_residual: jnp.ndarray
     absorbed_photons: jnp.ndarray
     dust_absorbed_photons: jnp.ndarray
     unallocated_primary_photons: jnp.ndarray
     gas_absorption_scale: jnp.ndarray
     time_averaged_x_hydrogen_ii: jnp.ndarray
     fixed_point_residual: jnp.ndarray
+    fixed_point_hydrogen_residual: jnp.ndarray
+    fixed_point_helium_ii_residual: jnp.ndarray
+    fixed_point_helium_iii_residual: jnp.ndarray
+    electron_root_bracket_found: jnp.ndarray
     hydrogen_photoionizations: jnp.ndarray
     helium_i_photoionizations: jnp.ndarray
     helium_ii_photoionizations: jnp.ndarray
     secondary_hydrogen_ionizations: jnp.ndarray
     secondary_helium_i_ionizations: jnp.ndarray
+    secondary_helium_ii_ionizations: jnp.ndarray
     hydrogen_collisional_ionizations: jnp.ndarray
     helium_i_collisional_ionizations: jnp.ndarray
     helium_ii_collisional_ionizations: jnp.ndarray
@@ -104,18 +115,42 @@ def _partition_absorbed(absorbed_photons: jnp.ndarray, channels: _AbsorptionChan
 
 
 def _secondary_energy_terms(
-    state: PrimordialState,
+    deposition_state: PrimordialState,
+    target_state: PrimordialState,
     partition: _AbsorptionChannels,
     photoelectron_excess_energy_ev: jnp.ndarray,
     use_secondary_ionization: bool,
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    """Return extra H/He ionizations and gas heat/excitation energy densities."""
-    electron_fraction = electron_number_density(state) / jnp.maximum(state.n_hydrogen + state.n_helium, jnp.finfo(state.n_hydrogen.dtype).tiny)
-    extra_hydrogen = jnp.zeros_like(state.n_hydrogen)
-    extra_helium = jnp.zeros_like(state.n_hydrogen)
-    gas_heat = jnp.zeros_like(state.n_hydrogen)
-    excitation = jnp.zeros_like(state.n_hydrogen)
-    extra_axes = (1,) * state.n_hydrogen.ndim
+) -> tuple[
+    jnp.ndarray,
+    jnp.ndarray,
+    jnp.ndarray,
+    jnp.ndarray,
+    jnp.ndarray,
+    jnp.ndarray,
+    jnp.ndarray,
+]:
+    """Return secondary species counts and a closed photoelectron-energy ledger.
+
+    FS2010 is a primordial-composition closure. If a tabulated target species
+    is numerically absent in the actual cell, that channel is conservatively
+    returned to heat instead of creating ionizations of a nonexistent species.
+    """
+    extra_hydrogen = jnp.zeros_like(deposition_state.n_hydrogen)
+    extra_helium_i = jnp.zeros_like(deposition_state.n_hydrogen)
+    extra_helium_ii = jnp.zeros_like(deposition_state.n_hydrogen)
+    gas_heat = jnp.zeros_like(deposition_state.n_hydrogen)
+    excitation = jnp.zeros_like(deposition_state.n_hydrogen)
+    photoelectron_energy = jnp.zeros_like(deposition_state.n_hydrogen)
+    extra_axes = (1,) * deposition_state.n_hydrogen.ndim
+    tiny = jnp.finfo(deposition_state.n_hydrogen.dtype).tiny
+    # Hold target availability at the start-of-step state. Letting a species
+    # cross the numerical floor inside the opacity fixed point creates a
+    # discontinuous secondary-ionization map, especially for newly made He II.
+    n_hi, n_hei, n_heii = neutral_number_densities(target_state)
+    hydrogen_target = n_hi > jnp.maximum(1.0e-12 * target_state.n_hydrogen, tiny)
+    helium_floor = jnp.maximum(1.0e-12 * target_state.n_helium, tiny)
+    helium_i_target = n_hei > helium_floor
+    helium_ii_target = n_heii > helium_floor
 
     for absorbed, electron_energy in zip(
         (partition.hydrogen_i, partition.helium_i, partition.helium_ii),
@@ -123,15 +158,70 @@ def _secondary_energy_terms(
         strict=True,
     ):
         energy = electron_energy.reshape((-1,) + extra_axes) * absorbed
+        photoelectron_energy = photoelectron_energy + jnp.sum(energy, axis=0)
         if use_secondary_ionization:
-            fractions = shull_van_steenberg_high_energy(electron_energy, electron_fraction)
-            extra_hydrogen = extra_hydrogen + jnp.sum(energy * fractions.hydrogen_ionization / 13.60, axis=0)
-            extra_helium = extra_helium + jnp.sum(energy * fractions.helium_ionization / 24.59, axis=0)
-            gas_heat = gas_heat + jnp.sum(energy * fractions.heating, axis=0)
+            fractions = furlanetto_stoever_2010(
+                electron_energy,
+                deposition_state.x_hydrogen_ii,
+            )
+            hydrogen_fraction = jnp.where(
+                hydrogen_target[None, ...],
+                fractions.hydrogen_i_ionization,
+                0.0,
+            )
+            helium_i_fraction = jnp.where(
+                helium_i_target[None, ...],
+                fractions.helium_i_ionization,
+                0.0,
+            )
+            helium_ii_fraction = jnp.where(
+                helium_ii_target[None, ...],
+                fractions.helium_ii_ionization,
+                0.0,
+            )
+            unavailable_ionization_fraction = (
+                fractions.hydrogen_i_ionization
+                + fractions.helium_i_ionization
+                + fractions.helium_ii_ionization
+                - hydrogen_fraction
+                - helium_i_fraction
+                - helium_ii_fraction
+            )
+            extra_hydrogen = extra_hydrogen + jnp.sum(
+                energy * hydrogen_fraction / HYDROGEN_I_IONIZATION_ENERGY_EV,
+                axis=0,
+            )
+            extra_helium_i = extra_helium_i + jnp.sum(
+                energy * helium_i_fraction / HELIUM_I_IONIZATION_ENERGY_EV,
+                axis=0,
+            )
+            extra_helium_ii = extra_helium_ii + jnp.sum(
+                energy * helium_ii_fraction / HELIUM_II_IONIZATION_ENERGY_EV,
+                axis=0,
+            )
+            gas_heat = gas_heat + jnp.sum(
+                energy * (fractions.heating + unavailable_ionization_fraction),
+                axis=0,
+            )
             excitation = excitation + jnp.sum(energy * fractions.excitation, axis=0)
         else:
             gas_heat = gas_heat + jnp.sum(energy, axis=0)
-    return extra_hydrogen, extra_helium, gas_heat, excitation
+    photoelectron_energy_ledger_residual = photoelectron_energy - (
+        HYDROGEN_I_IONIZATION_ENERGY_EV * extra_hydrogen
+        + HELIUM_I_IONIZATION_ENERGY_EV * extra_helium_i
+        + HELIUM_II_IONIZATION_ENERGY_EV * extra_helium_ii
+        + gas_heat
+        + excitation
+    )
+    return (
+        extra_hydrogen,
+        extra_helium_i,
+        extra_helium_ii,
+        gas_heat,
+        excitation,
+        photoelectron_energy,
+        photoelectron_energy_ledger_residual,
+    )
 
 
 def _time_average_state(
@@ -183,17 +273,23 @@ def _advance_species(
     opacity_state: PrimordialState,
     partition: _AbsorptionChannels,
     extra_hydrogen: jnp.ndarray,
-    extra_helium: jnp.ndarray,
+    extra_helium_i: jnp.ndarray,
+    extra_helium_ii: jnp.ndarray,
     temperature_k: jnp.ndarray,
     dt: float,
-) -> tuple[PrimordialState, jnp.ndarray, tuple[jnp.ndarray, ...], jnp.ndarray]:
+) -> tuple[
+    PrimordialState,
+    jnp.ndarray,
+    tuple[jnp.ndarray, ...],
+    jnp.ndarray,
+    jnp.ndarray,
+]:
     """Advance H/He from absorbed rates at the time-averaged opacity state."""
 
     mean_n_hi, opacity_n_hei, opacity_n_heii = neutral_number_densities(opacity_state)
     primary_hi = jnp.sum(partition.hydrogen_i, axis=0)
     primary_hei = jnp.sum(partition.helium_i, axis=0)
     primary_heii = jnp.sum(partition.helium_ii, axis=0)
-    electron_density = electron_number_density(opacity_state)
     collisional = collisional_ionization_coefficients(temperature_k)
     alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
     alpha_heii, alpha_heiii = case_b_helium_recombination(temperature_k)
@@ -205,40 +301,32 @@ def _advance_species(
         mean_n_hi,
         minimum_n_hi,
     )
-    hydrogen_total_ionization_rate = (
-        hydrogen_photoionization_rate + collisional.hydrogen_i * electron_density
-    )
-    next_x_hii, solved_mean_x_hii, _, solved_mean_x_hi = hydrogen_neutral_relaxation(
-        1.0 - state.x_hydrogen_ii,
-        hydrogen_total_ionization_rate,
-        electron_density,
-        temperature_k,
-        dt,
-    )
-    helium_i_photoionization_rate = ((primary_hei + extra_helium) / dt) / jnp.maximum(
+    helium_i_photoionization_rate = ((primary_hei + extra_helium_i) / dt) / jnp.maximum(
         opacity_n_hei,
         minimum_n_he,
     )
-    helium_ii_photoionization_rate = (primary_heii / dt) / jnp.maximum(
+    helium_ii_photoionization_rate = ((primary_heii + extra_helium_ii) / dt) / jnp.maximum(
         opacity_n_heii,
         minimum_n_he,
     )
-    next_x_heii, next_x_heiii = helium_photoionization_backward_euler(
-        state.x_helium_ii,
-        state.x_helium_iii,
-        helium_i_photoionization_rate + collisional.helium_i * electron_density,
-        helium_ii_photoionization_rate + collisional.helium_ii * electron_density,
+    (
+        next_state,
+        solved_mean_x_hii,
+        solved_mean_x_hi,
         electron_density,
-        temperature_k,
-        dt,
+        electron_root_bracket_found,
+    ) = (
+        coupled_photo_collisional_hhe_update(
+            state,
+            hydrogen_photoionization_rate,
+            helium_i_photoionization_rate,
+            helium_ii_photoionization_rate,
+            temperature_k,
+            dt,
+        )
     )
-    next_state = PrimordialState(
-        state.n_hydrogen,
-        state.n_helium,
-        next_x_hii,
-        next_x_heii,
-        next_x_heiii,
-    )
+    next_x_heii = next_state.x_helium_ii
+    next_x_heiii = next_state.x_helium_iii
     next_n_hei = state.n_helium * (1.0 - next_x_heii - next_x_heiii)
     hydrogen_collisional_ionizations = (
         dt * collisional.hydrogen_i * electron_density * state.n_hydrogen * solved_mean_x_hi
@@ -268,7 +356,8 @@ def _advance_species(
         primary_hei,
         primary_heii,
         extra_hydrogen,
-        extra_helium,
+        extra_helium_i,
+        extra_helium_ii,
         hydrogen_collisional_ionizations,
         helium_i_collisional_ionizations,
         helium_ii_collisional_ionizations,
@@ -281,17 +370,24 @@ def _advance_species(
         - hydrogen_change
         - hydrogen_recombinations,
         primary_hei
-        + extra_helium
+        + extra_helium_i
         + helium_i_collisional_ionizations
         - helium_ii_change
         - helium_iii_change
         - helium_ii_recombinations,
         primary_heii
+        + extra_helium_ii
         + helium_ii_collisional_ionizations
         - helium_iii_change
         - helium_iii_recombinations,
     )
-    return next_state, unallocated_primary, diagnostics, solved_mean_x_hii
+    return (
+        next_state,
+        unallocated_primary,
+        diagnostics,
+        solved_mean_x_hii,
+        electron_root_bracket_found,
+    )
 
 
 def build_multiphysics_radiation_step(
@@ -301,8 +397,9 @@ def build_multiphysics_radiation_step(
     cross_sections: PhotoCrossSections,
     group_energy_ev: jnp.ndarray,
     dust: DustModel,
-    use_secondary_ionization: bool = True,
+    use_secondary_ionization: bool = False,
     time_averaged_absorption_iterations: int = 20,
+    time_averaged_absorption_relaxation: float = 0.5,
     *,
     photoelectron_excess_energy_ev: jnp.ndarray | None = None,
 ):
@@ -321,6 +418,10 @@ def build_multiphysics_radiation_step(
     """
     if time_averaged_absorption_iterations < 1:
         raise ValueError("time_averaged_absorption_iterations must be positive")
+    if not 0.0 < time_averaged_absorption_relaxation <= 1.0:
+        raise ValueError(
+            "time_averaged_absorption_relaxation must lie in (0, 1]"
+        )
     group_energy_ev = jnp.asarray(group_energy_ev)
     if group_energy_ev.ndim != 1 or group_energy_ev.shape[0] == 0:
         raise ValueError("group_energy_ev must be a non-empty one-dimensional array")
@@ -367,27 +468,52 @@ def build_multiphysics_radiation_step(
             scale = jnp.ones_like(state.n_hydrogen)
             absorbed_photons = jnp.einsum("d,gdxyz->gxyz", weights, absorbed_intensity)
             partition = _partition_absorbed(absorbed_photons, channels)
-            extra_hydrogen, extra_helium, gas_heat_energy, excitation_energy = _secondary_energy_terms(
+            (
+                extra_hydrogen,
+                extra_helium_i,
+                extra_helium_ii,
+                gas_heat_energy,
+                excitation_energy,
+                photoelectron_energy,
+                photoelectron_energy_ledger_residual,
+            ) = _secondary_energy_terms(
                 opacity_state,
+                state,
                 partition,
                 photoelectron_excess_energy_ev,
                 use_secondary_ionization,
             )
-            next_state, unallocated_primary, diagnostics, mean_hii = _advance_species(
+            (
+                next_state,
+                unallocated_primary,
+                diagnostics,
+                mean_hii,
+                electron_root_bracket_found,
+            ) = _advance_species(
                 state,
                 opacity_state,
                 partition,
                 extra_hydrogen,
-                extra_helium,
+                extra_helium_i,
+                extra_helium_ii,
                 temperature_k,
                 transport.dt,
             )
             target_opacity = _time_average_state(state, next_state, mean_hii)
+            fixed_point_hydrogen_residual = jnp.abs(
+                target_opacity.x_hydrogen_ii - opacity_state.x_hydrogen_ii
+            )
+            fixed_point_helium_ii_residual = jnp.abs(
+                target_opacity.x_helium_ii - opacity_state.x_helium_ii
+            )
+            fixed_point_helium_iii_residual = jnp.abs(
+                target_opacity.x_helium_iii - opacity_state.x_helium_iii
+            )
             fixed_point_residual = jnp.maximum(
-                jnp.abs(target_opacity.x_hydrogen_ii - opacity_state.x_hydrogen_ii),
+                fixed_point_hydrogen_residual,
                 jnp.maximum(
-                    jnp.abs(target_opacity.x_helium_ii - opacity_state.x_helium_ii),
-                    jnp.abs(target_opacity.x_helium_iii - opacity_state.x_helium_iii),
+                    fixed_point_helium_ii_residual,
+                    fixed_point_helium_iii_residual,
                 ),
             )
             extra_axes = (1,) * state.n_hydrogen.ndim
@@ -411,33 +537,46 @@ def build_multiphysics_radiation_step(
                     dust_heating_rate=dust_heating_energy * EV_ERG / transport.dt,
                     dust_momentum_rate=dust_momentum,
                     excitation_rate=excitation_energy * EV_ERG / transport.dt,
+                    photoelectron_energy=photoelectron_energy,
+                    photoelectron_energy_ledger_residual=(
+                        photoelectron_energy_ledger_residual
+                    ),
                     absorbed_photons=absorbed_photons,
                     dust_absorbed_photons=partition.dust,
                     unallocated_primary_photons=unallocated_primary,
                     gas_absorption_scale=scale,
                     time_averaged_x_hydrogen_ii=mean_hii,
                     fixed_point_residual=fixed_point_residual,
+                    fixed_point_hydrogen_residual=fixed_point_hydrogen_residual,
+                    fixed_point_helium_ii_residual=fixed_point_helium_ii_residual,
+                    fixed_point_helium_iii_residual=fixed_point_helium_iii_residual,
+                    electron_root_bracket_found=electron_root_bracket_found,
                     hydrogen_photoionizations=diagnostics[0],
                     helium_i_photoionizations=diagnostics[1],
                     helium_ii_photoionizations=diagnostics[2],
                     secondary_hydrogen_ionizations=diagnostics[3],
                     secondary_helium_i_ionizations=diagnostics[4],
-                    hydrogen_collisional_ionizations=diagnostics[5],
-                    helium_i_collisional_ionizations=diagnostics[6],
-                    helium_ii_collisional_ionizations=diagnostics[7],
-                    hydrogen_recombinations=diagnostics[8],
-                    helium_ii_recombinations=diagnostics[9],
-                    helium_iii_recombinations=diagnostics[10],
-                    hydrogen_ledger_residual=diagnostics[11],
-                    helium_i_ledger_residual=diagnostics[12],
-                    helium_ii_ledger_residual=diagnostics[13],
+                    secondary_helium_ii_ionizations=diagnostics[5],
+                    hydrogen_collisional_ionizations=diagnostics[6],
+                    helium_i_collisional_ionizations=diagnostics[7],
+                    helium_ii_collisional_ionizations=diagnostics[8],
+                    hydrogen_recombinations=diagnostics[9],
+                    helium_ii_recombinations=diagnostics[10],
+                    helium_iii_recombinations=diagnostics[11],
+                    hydrogen_ledger_residual=diagnostics[12],
+                    helium_i_ledger_residual=diagnostics[13],
+                    helium_ii_ledger_residual=diagnostics[14],
                 ),
                 target_opacity,
             )
 
         def refine(_: int, opacity_state: PrimordialState) -> PrimordialState:
             _, target_opacity = advance_from_opacity_state(opacity_state)
-            return _relax_opacity_state(opacity_state, target_opacity, 0.5)
+            return _relax_opacity_state(
+                opacity_state,
+                target_opacity,
+                time_averaged_absorption_relaxation,
+            )
 
         time_average = jax.lax.fori_loop(0, time_averaged_absorption_iterations, refine, state)
         return advance_from_opacity_state(time_average)[0]

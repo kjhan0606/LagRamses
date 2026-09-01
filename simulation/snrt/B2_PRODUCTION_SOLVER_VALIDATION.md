@@ -1,8 +1,8 @@
 # B2 production-solver transport validation
 
-Date: 2026-09-01  
-Project root: `/gpfs/kjhan/LRD_JWST`  
-Gate verdict: **PASS — independently re-audited by Claude Opus 5**
+Date: 2026-09-02
+Project root: `/gpfs/kjhan/LRD_JWST`
+Gate verdict: **PASS — source-bound FS2010/coupled-electron rerun**
 
 ## Scope
 
@@ -15,9 +15,11 @@ The gate implements the audit's fixed benchmark: 32 cubed cells, S4, one
 18 eV group, `n_H=0.01 cm^-3`, `T=10^4 K`, `Q=10^49 s^-1`, reduced light speed
 `3e-3 c`, and duration `0.5 t_rec`. The baseline has zero dust and disables
 secondary ionization. Solver B is the independent H-only conservative solver
-in `snrt_core/conservative_hydrogen.py`. Every ionization-front run in this
-gate sets `n_He=0`; B2 therefore makes no validation claim for coupled helium
-transport/chemistry. That path remains for a later H+He gate.
+in `snrt_core/conservative_hydrogen.py`. The baseline, dust, and Solver-B
+ionization-front runs set `n_He=0`. The matched 200 eV secondary ON/OFF control
+uses `n_He/n_H=0.079`, because the FS2010 table is a primordial H/He closure.
+B2 still makes no front/convergence validation claim for coupled helium; that
+path remains for a later H+He gate.
 
 ## Algorithm repair
 
@@ -26,31 +28,46 @@ atom inventory and returned the excess photons to the radiation field. B2
 removes that cap. Absorbed primary and secondary counts are converted to rates
 at the current opacity iterate. H uses an analytic neutral-fraction relaxation
 and its solved time-averaged H I fraction; helium uses its backward-Euler end
-state. Twenty under-relaxed fixed-point iterations synchronize chemistry and
-opacity. Unabsorbed photons remain in the field through the converged opacity,
-not through an atom-count clipping operation.
+state. In Solver A, local photoionization, collisional ionization,
+recombination, and the electron density are closed by a nearest-root scalar
+bisection; this preserves the exact neutral solution for a hot cell with no
+photons while avoiding the unstable electron-density Picard loop once a cell
+is ionized. The bracket-success diagnostic is a hard gate. The backward-Euler
+root remains timestep dependent, so large-step branch accuracy belongs to the
+declared stage-5 timestep-convergence gate. Twenty under-relaxed outer
+iterations synchronize chemistry and opacity. The secondary target-
+availability mask is fixed from the start-of-step species inventory, so newly
+created He II cannot switch its own secondary channel on halfway through that
+fixed point. Unabsorbed photons remain in
+the field through the converged opacity, not through an atom-count clipping
+operation.
 
 The compatibility diagnostic `gas_absorption_scale` is now identically one.
 P4 and P5 outputs additionally record the cap-activation fraction, minimum
 scale, and maximum fixed-point residual; their production CLIs reject fewer
-than 20 opacity iterations. The zero-helium path also evaluates count per time
-before division by its density floor, preventing an underflow-generated `0/0`
-in code-unit shadow tests. The same strict-positive floor and divide ordering
-are regression-tested for the sibling conservative solvers.
+than 20 opacity iterations. They now also fail on an unbracketed electron root
+or a photoelectron-energy ledger violation. If an FS2010 target species is
+absent, its energy is returned to heat. The zero-helium path therefore neither
+creates He ionizations nor relies on overflow through a density floor.
 
-Solver A and Solver B intentionally share the transport operator, H
-relaxation, cross sections, and case-B recombination coefficient. Their
-differential is therefore a wrapper/wiring cross-check; the analytic
-Strömgren radius is the independent physical reference.
+Solver B intentionally retains its simpler H-only closure: electron density is
+evaluated from the mean H II opacity state, collisional ionization is omitted,
+and no coupled nearest-root routine is shared with Solver A. The two solvers
+share transport, cross sections, the analytic H relaxation, and case-B
+recombination, but the chemistry iteration remains independent. Their field
+difference is accepted below `5e-5` absolute mean xHII (about 0.25% of this
+fixture's mean); the analytic Strömgren radius is the fully independent
+physical reference.
 
 ## Recorded result
 
 | Check | Result | Threshold | Status |
 | --- | ---: | ---: | --- |
-| Solver-A analytic radius ratio | `0.9559179` | relative error `< 0.05` | PASS |
-| Solver-A vs Solver-B mean absolute xHII | `1.15422e-6` | `< 1e-5` | PASS |
-| Worst H ledger L1 relative error | `5.60382e-5` (`secondary_200ev_on`) | `< 1e-3` | PASS |
+| Solver-A analytic radius ratio | `0.9556850` | relative error `< 0.05` | PASS |
+| Solver-A vs Solver-B mean absolute xHII | `1.52855e-5` | `< 5e-5` | PASS |
+| Worst H ledger L1 relative error | `2.85782e-5` (`secondary_200ev_off`) | `< 1e-3` | PASS |
 | Maximum opacity fixed-point residual | `2.39611e-5` | `< 1e-4` | PASS |
+| 200 eV secondary-ON H/He II/He III residuals | `5.36e-7 / 1.28e-5 / 7.51e-6` | each `< 1e-4` | PASS |
 | Retired-limiter structural guard | all runs: active fraction `0`, scale `1` | exact invariant | PASS |
 | Solver-A S8 vs A192 shadow difference | `0.00439426` | `< 0.02` | PASS |
 
@@ -65,17 +82,16 @@ this is a transport-wrapper check, not a reactive-chemistry shadow test.
 These are wiring controls, not approved LRD physical prescriptions.
 
 - Adding a deliberately strong `1e-20 cm^2/H` dust cross section at 18 eV
-  absorbs `20.19%` of all absorbed photons and changes mean xHII from
-  `0.0224948` to `0.0184912` (`delta=-0.00400357`).
-- At 200 eV, enabling the current high-energy secondary prescription changes
-  mean xHII from `0.00420259` to `0.0164571`
-  (`delta=+0.0122545`) and produces `0.387678` secondary H ionizations per
-  emitted photon.
+  absorbs `20.18%` of all absorbed photons and changes mean xHII from
+  `0.0224783` to `0.0184787` (`delta=-0.00399958`).
+- In the primordial-composition 200 eV control, enabling FS2010 changes mean
+  xHII from `0.00364859` to `0.0227100` (`delta=+0.0190614`) and produces
+  `0.603538` secondary H ionizations per emitted photon.
 
 The gate uses fixture regression bands, not only signs: dust absorbed fraction
 must lie in `[0.10,0.30]`, its mean-xHII delta in `[-0.006,-0.002]`, secondary
-yield in `[0.20,0.60]` per emitted photon, and its mean-xHII delta in
-`[0.008,0.018]`. Baseline, dust, secondary-off, secondary-on, and Solver B
+yield in `[0.50,0.75]` per emitted photon, and its mean-xHII delta in
+`[0.015,0.025]`. Baseline, dust, secondary-off, secondary-on, and Solver B
 must all independently satisfy their fixed-point and H-ledger thresholds.
 
 ## Reproduction and artifacts
@@ -88,11 +104,11 @@ JAX_PLATFORMS=cpu .venv/bin/python tools/validate_multiphysics_b2.py \
 ```
 
 - Passing JSON: `data/b2_multiphysics_transport_validation.json`, SHA256
-  `c2963d83f98023f0ad4506263f834fd36233e3f9d480905204dc9932c9c8360a`.
+  `0bfcfb33aeee043b43c1b75876c578a4ff8d074de0233a1a53c1a17008c46988`.
 - Validator SHA256:
-  `e38cac82753c42ca2e9cad1a669187b765fe0836deea810db924b337574f8dbc`.
+  `16f53d809f79f77092e07d06a80073e9e5b2a9ab2fd83f3e42906f7b3cb42fef`.
 - JAX `0.11.1`, CPU backend, repository HEAD recorded in the artifact as
-  `3d5d1d61acaf72254a3d1a6d78f72e39f86281be` with source-file hashes because
+  `438aff4fe1a73e7c8818403cf0042d4564f6f3a4` with source-file hashes because
   the worktree is intentionally dirty.
 - The `failed_fp12` and `failed_fp16` JSON files preserve the convergence and
   zero-He underflow failures encountered during implementation. They are not

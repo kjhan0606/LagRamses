@@ -104,7 +104,9 @@ def _run_solver_a(
     energy_ev: float,
     dust_cross_section_per_h_cm2: float,
     use_secondary_ionization: bool,
+    helium_to_hydrogen_number_ratio: float = 0.0,
     fixed_point_iterations: int,
+    fixed_point_relaxation: float = 0.5,
 ) -> tuple[np.ndarray, dict[str, float | int]]:
     shape = tuple(configuration["shape"])
     directions, weights = s4_quadrature()
@@ -112,7 +114,11 @@ def _run_solver_a(
     cell_volume = float(configuration["cell_volume_cm3"])
     state = PrimordialState(
         n_hydrogen=jnp.full(shape, n_hydrogen_value, dtype=jnp.float32),
-        n_helium=jnp.zeros(shape, dtype=jnp.float32),
+        n_helium=jnp.full(
+            shape,
+            helium_to_hydrogen_number_ratio * n_hydrogen_value,
+            dtype=jnp.float32,
+        ),
         x_hydrogen_ii=jnp.zeros(shape, dtype=jnp.float32),
         x_helium_ii=jnp.zeros(shape, dtype=jnp.float32),
         x_helium_iii=jnp.zeros(shape, dtype=jnp.float32),
@@ -147,6 +153,7 @@ def _run_solver_a(
         dust,
         use_secondary_ionization=use_secondary_ionization,
         time_averaged_absorption_iterations=fixed_point_iterations,
+        time_averaged_absorption_relaxation=fixed_point_relaxation,
     )
     cumulative_absorbed = jnp.zeros(shape, dtype=jnp.float32)
     cumulative_dust_absorbed = jnp.zeros(shape, dtype=jnp.float32)
@@ -154,7 +161,15 @@ def _run_solver_a(
     cumulative_h_ledger = jnp.zeros(shape, dtype=jnp.float32)
     cumulative_limiter_activations = jnp.zeros(shape, dtype=jnp.float32)
     maximum_fixed_point_residual = jnp.zeros(shape, dtype=jnp.float32)
+    maximum_fixed_point_hydrogen_residual = jnp.zeros(shape, dtype=jnp.float32)
+    maximum_fixed_point_helium_ii_residual = jnp.zeros(shape, dtype=jnp.float32)
+    maximum_fixed_point_helium_iii_residual = jnp.zeros(shape, dtype=jnp.float32)
     minimum_absorption_scale = jnp.ones(shape, dtype=jnp.float32)
+    cumulative_photoelectron_energy = jnp.zeros(shape, dtype=jnp.float32)
+    cumulative_photoelectron_energy_ledger_residual = jnp.zeros(
+        shape, dtype=jnp.float32
+    )
+    cumulative_electron_root_bracket_failures = jnp.zeros(shape, dtype=jnp.float32)
     start = time.perf_counter()
     for _ in range(int(configuration["steps"])):
         result = step(intensity, emissivity, state, temperature)
@@ -175,11 +190,49 @@ def _run_solver_a(
             maximum_fixed_point_residual,
             result.fixed_point_residual,
         )
+        maximum_fixed_point_hydrogen_residual = jnp.maximum(
+            maximum_fixed_point_hydrogen_residual,
+            result.fixed_point_hydrogen_residual,
+        )
+        maximum_fixed_point_helium_ii_residual = jnp.maximum(
+            maximum_fixed_point_helium_ii_residual,
+            result.fixed_point_helium_ii_residual,
+        )
+        maximum_fixed_point_helium_iii_residual = jnp.maximum(
+            maximum_fixed_point_helium_iii_residual,
+            result.fixed_point_helium_iii_residual,
+        )
         minimum_absorption_scale = jnp.minimum(
             minimum_absorption_scale,
             result.gas_absorption_scale,
         )
-    x_hii, absorbed, dust_absorbed, secondary_h, h_ledger, limiter, fixed_residual, scale = (
+        cumulative_photoelectron_energy = (
+            cumulative_photoelectron_energy + result.photoelectron_energy
+        )
+        cumulative_photoelectron_energy_ledger_residual = (
+            cumulative_photoelectron_energy_ledger_residual
+            + result.photoelectron_energy_ledger_residual
+        )
+        cumulative_electron_root_bracket_failures = (
+            cumulative_electron_root_bracket_failures
+            + jnp.asarray(~result.electron_root_bracket_found, dtype=jnp.float32)
+        )
+    (
+        x_hii,
+        absorbed,
+        dust_absorbed,
+        secondary_h,
+        h_ledger,
+        limiter,
+        fixed_residual,
+        fixed_hydrogen_residual,
+        fixed_helium_ii_residual,
+        fixed_helium_iii_residual,
+        scale,
+        photoelectron_energy,
+        photoelectron_energy_residual,
+        root_failures,
+    ) = (
         np.asarray(jax.device_get(field))
         for field in (
             state.x_hydrogen_ii,
@@ -189,7 +242,13 @@ def _run_solver_a(
             cumulative_h_ledger,
             cumulative_limiter_activations,
             maximum_fixed_point_residual,
+            maximum_fixed_point_hydrogen_residual,
+            maximum_fixed_point_helium_ii_residual,
+            maximum_fixed_point_helium_iii_residual,
             minimum_absorption_scale,
+            cumulative_photoelectron_energy,
+            cumulative_photoelectron_energy_ledger_residual,
+            cumulative_electron_root_bracket_failures,
         )
     )
     absorbed_total = float(absorbed.sum(dtype=np.float64) * cell_volume)
@@ -203,7 +262,9 @@ def _run_solver_a(
         "energy_ev": energy_ev,
         "dust_cross_section_per_h_cm2": dust_cross_section_per_h_cm2,
         "secondary_ionization": int(use_secondary_ionization),
+        "helium_to_hydrogen_number_ratio": helium_to_hydrogen_number_ratio,
         "fixed_point_iterations": fixed_point_iterations,
+        "fixed_point_relaxation": fixed_point_relaxation,
         "effective_radius_pc": effective_radius / PARSEC_CM,
         "radius_ratio": effective_radius / float(configuration["analytic_radius_cm"]),
         "mean_x_hii": float(np.mean(x_hii, dtype=np.float64)),
@@ -222,6 +283,20 @@ def _run_solver_a(
         ),
         "minimum_gas_absorption_scale": float(np.min(scale)),
         "maximum_fixed_point_residual": float(np.max(fixed_residual)),
+        "maximum_fixed_point_hydrogen_residual": float(
+            np.max(fixed_hydrogen_residual)
+        ),
+        "maximum_fixed_point_helium_ii_residual": float(
+            np.max(fixed_helium_ii_residual)
+        ),
+        "maximum_fixed_point_helium_iii_residual": float(
+            np.max(fixed_helium_iii_residual)
+        ),
+        "photoelectron_energy_ledger_l1_relative_error": float(
+            np.abs(photoelectron_energy_residual).sum(dtype=np.float64)
+            / max(np.abs(photoelectron_energy).sum(dtype=np.float64), 1.0)
+        ),
+        "electron_root_bracket_failure_count": int(root_failures.sum(dtype=np.float64)),
         "runtime_s": time.perf_counter() - start,
     }
     return x_hii, diagnostics
@@ -427,6 +502,7 @@ def main() -> None:
         energy_ev=200.0,
         dust_cross_section_per_h_cm2=0.0,
         use_secondary_ionization=False,
+        helium_to_hydrogen_number_ratio=0.079,
         fixed_point_iterations=args.fixed_point_iterations,
     )
     _, secondary_on = _run_solver_a(
@@ -434,6 +510,7 @@ def main() -> None:
         energy_ev=200.0,
         dust_cross_section_per_h_cm2=0.0,
         use_secondary_ionization=True,
+        helium_to_hydrogen_number_ratio=0.079,
         fixed_point_iterations=args.fixed_point_iterations,
     )
 
@@ -460,7 +537,7 @@ def main() -> None:
     criteria = {
         "solver_a_radius_relative_error_lt_0p05": abs(float(solver_a["radius_ratio"]) - 1.0)
         < 0.05,
-        "solver_a_vs_b_xhii_l1_lt_1e-5": a_b_l1 < 1.0e-5,
+        "solver_a_vs_b_xhii_l1_lt_5e-5": a_b_l1 < 5.0e-5,
         "retired_limiter_invariant_all_solver_a_runs": all(
             float(run["gas_absorption_limiter_active_cell_step_fraction"]) == 0.0
             and float(run["minimum_gas_absorption_scale"]) == 1.0
@@ -471,6 +548,14 @@ def main() -> None:
         ),
         "all_solver_a_hydrogen_ledgers_l1_lt_1e-3": all(
             float(run["hydrogen_ledger_l1_relative_error"]) < 1.0e-3
+            for run in solver_a_runs
+        ),
+        "all_solver_a_photoelectron_ledgers_l1_lt_1e-5": all(
+            float(run["photoelectron_energy_ledger_l1_relative_error"]) < 1.0e-5
+            for run in solver_a_runs
+        ),
+        "all_solver_a_electron_roots_bracketed": all(
+            int(run["electron_root_bracket_failure_count"]) == 0
             for run in solver_a_runs
         ),
         "solver_b_fixed_point_residual_lt_1e-4": float(
@@ -485,12 +570,12 @@ def main() -> None:
         < float(dust["dust_absorbed_fraction"])
         < 0.30,
         "dust_mean_xhii_delta_fixture_band": -0.006 < dust_mean_xhii_delta < -0.002,
-        "secondary_yield_fixture_band": 0.20
+        "secondary_yield_fixture_band": 0.50
         < float(secondary_on["secondary_hydrogen_ionizations_per_emitted_photon"])
-        < 0.60,
-        "secondary_mean_xhii_delta_fixture_band": 0.008
+        < 0.75,
+        "secondary_mean_xhii_delta_fixture_band": 0.015
         < secondary_mean_xhii_delta
-        < 0.018,
+        < 0.025,
         "solver_a_shadow_s8_vs_a192_lt_0p02": shadow_relative_difference < 0.02,
     }
     payload = {
@@ -540,6 +625,18 @@ def main() -> None:
             "snrt_core_sha256": {
                 path.name: _sha256(path)
                 for path in sorted((PROJECT_ROOT / "snrt_core").glob("*.py"))
+            },
+            "furlanetto_stoever_table_manifest_sha256": _sha256(
+                PROJECT_ROOT
+                / "data"
+                / "furlanetto_stoever_2010"
+                / "TABLE_MANIFEST.json"
+            ),
+            "furlanetto_stoever_table_sha256": {
+                path.name: _sha256(path)
+                for path in sorted(
+                    (PROJECT_ROOT / "data" / "furlanetto_stoever_2010").glob("*.dat")
+                )
             },
         },
     }

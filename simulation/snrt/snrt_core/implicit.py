@@ -107,6 +107,179 @@ def helium_photoionization_backward_euler(
     return next_heii, next_heiii
 
 
+def coupled_photo_collisional_hhe_update(
+    state: PrimordialState,
+    hydrogen_photoionization_rate: jnp.ndarray,
+    helium_i_photoionization_rate: jnp.ndarray,
+    helium_ii_photoionization_rate: jnp.ndarray,
+    temperature_k: jnp.ndarray,
+    dt: float,
+    iterations: int = 32,
+) -> tuple[PrimordialState, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Close photo/collisional H-He chemistry against the electron density.
+
+    At fixed electron density, H uses its exact constant-rate relaxation and
+    helium uses the three-state backward-Euler solve.  The remaining scalar
+    consistency equation equates that trial electron density to the density
+    implied by the updated H II, He II, and He III fractions.  Fixed-count
+    bisection avoids the unstable outer Picard feedback that otherwise occurs
+    in hot, initially weakly ionized cells.
+
+    Returns the end state, mean H II and H I fractions over the step, the
+    self-consistent end-state electron density, and a boolean indicating that
+    the nearest-root search found a sign-changing bracket (or an exact
+    stationary root).
+    """
+
+    if iterations < 1:
+        raise ValueError("iterations must be positive")
+    if dt < 0.0:
+        raise ValueError("dt must be non-negative")
+    collisional = collisional_ionization_coefficients(temperature_k)
+
+    def fractions_from_electron_density(
+        electron_density: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        next_hii, mean_hii, _, mean_hi = hydrogen_neutral_relaxation(
+            1.0 - state.x_hydrogen_ii,
+            hydrogen_photoionization_rate + collisional.hydrogen_i * electron_density,
+            electron_density,
+            temperature_k,
+            dt,
+        )
+        next_heii, next_heiii = helium_photoionization_backward_euler(
+            state.x_helium_ii,
+            state.x_helium_iii,
+            helium_i_photoionization_rate + collisional.helium_i * electron_density,
+            helium_ii_photoionization_rate + collisional.helium_ii * electron_density,
+            electron_density,
+            temperature_k,
+            dt,
+        )
+        return next_hii, mean_hii, mean_hi, next_heii, next_heiii
+
+    maximum_electron_density = state.n_hydrogen + 2.0 * state.n_helium
+
+    def electron_residual(electron_density: jnp.ndarray) -> jnp.ndarray:
+        next_hii, _, _, next_heii, next_heiii = fractions_from_electron_density(
+            electron_density
+        )
+        implied = (
+            state.n_hydrogen * next_hii
+            + state.n_helium * (next_heii + 2.0 * next_heiii)
+        )
+        return electron_density - implied
+
+    initial_electron_density = (
+        state.n_hydrogen * state.x_hydrogen_ii
+        + state.n_helium * (state.x_helium_ii + 2.0 * state.x_helium_iii)
+    )
+    initial_residual = electron_residual(initial_electron_density)
+    stationary = initial_residual == 0.0
+
+    # The backward-Euler collisional equations can have both the exact
+    # electron-free solution and a highly ionized solution.  A global bracket
+    # would select the latter even for an untouched, exactly neutral hot cell.
+    # Search outward from the previous electron density and choose the first
+    # sign change, preserving continuity with the incoming state.
+    search_down = initial_residual > 0.0
+    search_bound = jnp.where(
+        search_down,
+        jnp.zeros_like(maximum_electron_density),
+        maximum_electron_density,
+    )
+    bracket_samples = 64
+    sample_fraction = (
+        jnp.linspace(
+            0.0,
+            1.0,
+            bracket_samples + 1,
+            dtype=maximum_electron_density.dtype,
+        )
+        ** 4
+    ).reshape((bracket_samples + 1,) + (1,) * maximum_electron_density.ndim)
+    sample_electron_density = (
+        initial_electron_density[None, ...]
+        + sample_fraction
+        * (search_bound - initial_electron_density)[None, ...]
+    )
+    sample_residual = electron_residual(sample_electron_density)
+    sample_index = jnp.arange(bracket_samples + 1).reshape(
+        (bracket_samples + 1,) + (1,) * maximum_electron_density.ndim
+    )
+    crossed = jnp.where(
+        search_down[None, ...],
+        sample_residual <= 0.0,
+        sample_residual >= 0.0,
+    ) & (sample_index > 0)
+    has_crossing = jnp.any(crossed, axis=0)
+    first_crossing = jnp.argmax(crossed, axis=0)
+    previous_crossing = jnp.maximum(first_crossing - 1, 0)
+    crossing_density = jnp.take_along_axis(
+        sample_electron_density,
+        first_crossing[None, ...],
+        axis=0,
+    )[0]
+    previous_density = jnp.take_along_axis(
+        sample_electron_density,
+        previous_crossing[None, ...],
+        axis=0,
+    )[0]
+    bracket_lower = jnp.where(search_down, crossing_density, previous_density)
+    bracket_upper = jnp.where(search_down, previous_density, crossing_density)
+    bracket_lower = jnp.where(
+        has_crossing,
+        bracket_lower,
+        jnp.zeros_like(maximum_electron_density),
+    )
+    bracket_upper = jnp.where(
+        has_crossing,
+        bracket_upper,
+        maximum_electron_density,
+    )
+
+    def iterate(
+        _: int,
+        bounds: tuple[jnp.ndarray, jnp.ndarray],
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        lower, upper = bounds
+        midpoint = 0.5 * (lower + upper)
+        residual = electron_residual(midpoint)
+        return (
+            jnp.where(residual > 0.0, lower, midpoint),
+            jnp.where(residual > 0.0, midpoint, upper),
+        )
+
+    lower, upper = jax.lax.fori_loop(
+        0,
+        iterations,
+        iterate,
+        (bracket_lower, bracket_upper),
+    )
+    electron_density = jnp.where(
+        stationary,
+        initial_electron_density,
+        0.5 * (lower + upper),
+    )
+    next_hii, mean_hii, mean_hi, next_heii, next_heiii = (
+        fractions_from_electron_density(electron_density)
+    )
+    next_state = PrimordialState(
+        state.n_hydrogen,
+        state.n_helium,
+        jnp.clip(next_hii, 0.0, 1.0),
+        jnp.clip(next_heii, 0.0, 1.0),
+        jnp.clip(next_heiii, 0.0, 1.0 - jnp.clip(next_heii, 0.0, 1.0)),
+    )
+    return (
+        next_state,
+        mean_hii,
+        mean_hi,
+        electron_density,
+        stationary | has_crossing,
+    )
+
+
 def implicit_case_b_recombination(
     state: PrimordialState,
     temperature_k: jnp.ndarray,

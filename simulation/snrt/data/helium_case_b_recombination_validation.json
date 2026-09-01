@@ -98,7 +98,7 @@
     "jax_version": "0.11.1",
     "test_sha256": "ca8585722aa4e78f56ff34d9fc330bc9998d475485fb0b5c857d90cc9a335255",
     "primordial_sha256": "1ca0b4f7ff4dddb89c9fd1e8fcbec9320d7b39972375426d36da51740a0b191f",
-    "implicit_sha256": "a540cb6d4fca5c51c07f7688887f31ed01a5468d6aab73797ad0b8eedd65c080",
+    "implicit_sha256": "45a90b34f799cbd9e8cad8e0b23953ec99a0f27fc1db7170799aaa341b8c290f",
     "primordial_cooling_sha256": "2cb0187b0ea3e1f42c405f265a3ddae4015d34b902d886921736e0d202e9b262",
     "b1_thermal_coupling_test_sha256": "d3b2b91970b582dbfaed6d0c8990e7a0b78a4220ad21152464137d4c21688450"
   }

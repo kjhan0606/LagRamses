@@ -93,6 +93,9 @@ def main() -> None:
         # The global ledger therefore needs double precision end to end.
         jax.config.update("jax_enable_x64", True)
     real_dtype = jnp.float64 if args.precision == "float64" else jnp.float32
+    photoelectron_energy_ledger_tolerance = (
+        1.0e-12 if args.precision == "float64" else 1.0e-5
+    )
 
     static = read_static_rt_input(args.input)
     if static.sources is None:
@@ -160,6 +163,7 @@ def main() -> None:
         "helium_ii_photoionizations",
         "secondary_hydrogen_ionizations",
         "secondary_helium_i_ionizations",
+        "secondary_helium_ii_ionizations",
         "hydrogen_collisional_ionizations",
         "helium_i_collisional_ionizations",
         "helium_ii_collisional_ionizations",
@@ -180,6 +184,13 @@ def main() -> None:
     cumulative_limiter_activations = jnp.zeros(static.shape, dtype=real_dtype)
     minimum_gas_absorption_scale = jnp.ones(static.shape, dtype=real_dtype)
     maximum_fixed_point_residual = jnp.zeros(static.shape, dtype=real_dtype)
+    cumulative_photoelectron_energy = jnp.zeros(static.shape, dtype=real_dtype)
+    cumulative_photoelectron_energy_ledger_residual = jnp.zeros(
+        static.shape, dtype=real_dtype
+    )
+    cumulative_electron_root_bracket_failures = jnp.zeros(
+        static.shape, dtype=real_dtype
+    )
     ledger_records: list[dict[str, np.ndarray]] = []
 
     def build_step(step_dt: float):
@@ -196,7 +207,7 @@ def main() -> None:
         )
 
     def advance_one(step_function, step_config: TransportConfig):
-        nonlocal intensity, state, cumulative_absorbed, cumulative_dust_absorbed, cumulative_unallocated, cumulative_dust_momentum, cumulative_diagnostics, cumulative_limiter_activations, minimum_gas_absorption_scale, maximum_fixed_point_residual
+        nonlocal intensity, state, cumulative_absorbed, cumulative_dust_absorbed, cumulative_unallocated, cumulative_dust_momentum, cumulative_diagnostics, cumulative_limiter_activations, minimum_gas_absorption_scale, maximum_fixed_point_residual, cumulative_photoelectron_energy, cumulative_photoelectron_energy_ledger_residual, cumulative_electron_root_bracket_failures
         intensity_before = intensity
         result = step_function(
             intensity,
@@ -232,6 +243,17 @@ def main() -> None:
         maximum_fixed_point_residual = jnp.maximum(
             maximum_fixed_point_residual,
             result.fixed_point_residual,
+        )
+        cumulative_photoelectron_energy = (
+            cumulative_photoelectron_energy + result.photoelectron_energy
+        )
+        cumulative_photoelectron_energy_ledger_residual = (
+            cumulative_photoelectron_energy_ledger_residual
+            + result.photoelectron_energy_ledger_residual
+        )
+        cumulative_electron_root_bracket_failures = (
+            cumulative_electron_root_bracket_failures
+            + jnp.asarray(~result.electron_root_bracket_found, dtype=real_dtype)
         )
         ledger_records.append(
             {
@@ -285,6 +307,13 @@ def main() -> None:
     cumulative_limiter_activations = np.asarray(jax.device_get(cumulative_limiter_activations))
     minimum_gas_absorption_scale = np.asarray(jax.device_get(minimum_gas_absorption_scale))
     maximum_fixed_point_residual = np.asarray(jax.device_get(maximum_fixed_point_residual))
+    photoelectron_energy = np.asarray(jax.device_get(cumulative_photoelectron_energy))
+    photoelectron_energy_ledger_residual = np.asarray(
+        jax.device_get(cumulative_photoelectron_energy_ledger_residual)
+    )
+    electron_root_bracket_failures = np.asarray(
+        jax.device_get(cumulative_electron_root_bracket_failures)
+    )
 
     ledger_arrays = {
         name: np.stack([record[name] for record in ledger_records], axis=0)
@@ -335,6 +364,13 @@ def main() -> None:
     )
     minimum_gas_absorption_scale_value = float(np.min(minimum_gas_absorption_scale))
     maximum_fixed_point_residual_value = float(np.max(maximum_fixed_point_residual))
+    photoelectron_energy_ledger_l1_relative_error = float(
+        np.abs(photoelectron_energy_ledger_residual).sum(dtype=np.float64)
+        / max(np.abs(photoelectron_energy).sum(dtype=np.float64), 1.0)
+    )
+    electron_root_bracket_failure_count = int(
+        electron_root_bracket_failures.sum(dtype=np.float64)
+    )
     nonnegative_arrays = (
         x_hii,
         x_heii,
@@ -354,6 +390,7 @@ def main() -> None:
                 "helium_ii_photoionizations",
                 "secondary_hydrogen_ionizations",
                 "secondary_helium_i_ionizations",
+                "secondary_helium_ii_ionizations",
                 "hydrogen_collisional_ionizations",
                 "helium_i_collisional_ionizations",
                 "helium_ii_collisional_ionizations",
@@ -377,7 +414,13 @@ def main() -> None:
         and np.all(x_heiii <= 1.0)
         and np.all(x_heii + x_heiii <= 1.0 + 1.0e-6)
     )
-    finite_ledger = all(np.isfinite(array).all() for array in ledger_arrays.values()) and np.isfinite(dust_momentum).all() and np.isfinite(cumulative_dust_momentum).all()
+    finite_ledger = (
+        all(np.isfinite(array).all() for array in ledger_arrays.values())
+        and np.isfinite(dust_momentum).all()
+        and np.isfinite(cumulative_dust_momentum).all()
+        and np.isfinite(photoelectron_energy).all()
+        and np.isfinite(photoelectron_energy_ledger_residual).all()
+    )
     ledger_passed = bool(
         photon_ledger_relative_error <= 1.0e-5
         and max(hhe_ledger_relative_errors.values()) <= 1.0e-5
@@ -386,6 +429,9 @@ def main() -> None:
         and unallocated_primary_fraction <= args.unallocated_primary_tolerance
         and gas_absorption_limiter_active_cell_step_fraction < 1.0e-3
         and maximum_fixed_point_residual_value <= 1.0e-4
+        and photoelectron_energy_ledger_l1_relative_error
+        <= photoelectron_energy_ledger_tolerance
+        and electron_root_bracket_failure_count == 0
     )
     numerical_stability_passed = bool(all_nonnegative and fraction_bounds and finite_ledger)
     validation_passed = bool(ledger_passed and numerical_stability_passed)
@@ -406,6 +452,16 @@ def main() -> None:
         handle.attrs["gas_absorption_limiter_active_cell_step_fraction"] = gas_absorption_limiter_active_cell_step_fraction
         handle.attrs["minimum_gas_absorption_scale"] = minimum_gas_absorption_scale_value
         handle.attrs["maximum_fixed_point_residual"] = maximum_fixed_point_residual_value
+        handle.attrs["photoelectron_energy_ledger_l1_relative_error"] = (
+            photoelectron_energy_ledger_l1_relative_error
+        )
+        handle.attrs["photoelectron_energy_ledger_tolerance"] = (
+            photoelectron_energy_ledger_tolerance
+        )
+        handle.attrs["electron_root_bracket_failure_count"] = (
+            electron_root_bracket_failure_count
+        )
+        handle.attrs["excitation_energy_treatment"] = "radiative_line_escape_not_returned_to_gas"
         handle.attrs["unallocated_primary_tolerance"] = args.unallocated_primary_tolerance
         handle.attrs["number_of_directions"] = len(directions)
         handle.attrs["steps"] = full_steps + int(final_dt > 0.0)
@@ -456,6 +512,18 @@ def main() -> None:
         handle.create_dataset("diagnostics/gas_absorption_limiter_activation_count", data=cumulative_limiter_activations)
         handle.create_dataset("diagnostics/minimum_gas_absorption_scale", data=minimum_gas_absorption_scale)
         handle.create_dataset("diagnostics/maximum_fixed_point_residual", data=maximum_fixed_point_residual)
+        handle.create_dataset(
+            "diagnostics/cumulative_photoelectron_energy_ev_cm3",
+            data=photoelectron_energy,
+        )
+        handle.create_dataset(
+            "diagnostics/cumulative_photoelectron_energy_ledger_residual_ev_cm3",
+            data=photoelectron_energy_ledger_residual,
+        )
+        handle.create_dataset(
+            "diagnostics/electron_root_bracket_failure_count",
+            data=electron_root_bracket_failures,
+        )
         for name, value in cumulative_diagnostics.items():
             handle.create_dataset(f"diagnostics/cumulative_{name}_cm3", data=value)
         for name, value in ledger_arrays.items():
@@ -469,7 +537,7 @@ def main() -> None:
         f"quadrature={quadrature_name} steps={full_steps + int(final_dt > 0.0)} elapsed_myr={(full_steps * dt + final_dt) / SECONDS_PER_MYR:.6g} "
         f"max_x_hii={float(x_hii.max()):.6g} ionized_volume_fraction={ionized_volume_fraction:.6g} "
         f"photon_ledger={photon_ledger_relative_error:.6g} hhe_ledger={max(hhe_ledger_relative_errors.values()):.6g} "
-        f"unallocated_primary={unallocated_primary_fraction:.6g} limiter_active={gas_absorption_limiter_active_cell_step_fraction:.6g} fixed_point={maximum_fixed_point_residual_value:.6g} "
+        f"unallocated_primary={unallocated_primary_fraction:.6g} limiter_active={gas_absorption_limiter_active_cell_step_fraction:.6g} fixed_point={maximum_fixed_point_residual_value:.6g} photoelectron_ledger={photoelectron_energy_ledger_l1_relative_error:.6g} root_bracket_failures={electron_root_bracket_failure_count} "
         f"escaped_fraction={escaped_total / max(emitted_total, 1.0):.6g} "
         f"devices={','.join(device.platform for device in jax.devices())} output={output}"
     )

@@ -84,6 +84,12 @@ def main() -> None:
     )
     parser.add_argument("--thermal-implicit-iterations", type=int, default=24)
     parser.add_argument("--time-averaged-absorption-iterations", type=int, default=20)
+    parser.add_argument(
+        "--secondary-ionization",
+        choices=("fs2010", "off"),
+        default="fs2010",
+        help="fast-electron deposition model; off sends all photoelectron energy to heat",
+    )
     parser.add_argument("--precision", choices=("float32", "float64"), default="float64")
     args = parser.parse_args()
     if (
@@ -103,6 +109,9 @@ def main() -> None:
         jax.config.update("jax_enable_x64", True)
     real_dtype = jnp.float64 if args.precision == "float64" else jnp.float32
     host_dtype = np.float64 if args.precision == "float64" else np.float32
+    photoelectron_energy_ledger_tolerance = (
+        1.0e-12 if args.precision == "float64" else 1.0e-5
+    )
 
     static = read_static_rt_input(args.input)
     if static.sources is None:
@@ -206,6 +215,8 @@ def main() -> None:
     cumulative_dust_momentum = jnp.zeros((3, *static.shape), dtype=temperature.dtype)
     cumulative_unallocated = jnp.zeros((3, *static.shape), dtype=temperature.dtype)
     cumulative_photoheating_energy = jnp.zeros_like(temperature)
+    cumulative_photoelectron_energy = jnp.zeros_like(temperature)
+    cumulative_photoelectron_energy_ledger_residual = jnp.zeros_like(temperature)
     cumulative_background_energy = jnp.zeros_like(temperature)
     cumulative_thermal_residual = jnp.zeros_like(temperature)
     cumulative_thermal_bound_hits = jnp.zeros_like(temperature)
@@ -215,6 +226,7 @@ def main() -> None:
     cumulative_limiter_activations = jnp.zeros_like(temperature)
     minimum_gas_absorption_scale = jnp.ones_like(temperature)
     maximum_fixed_point_residual = jnp.zeros_like(temperature)
+    cumulative_electron_root_bracket_failures = jnp.zeros_like(temperature)
 
     def build_step(dt: float):
         return build_thermochemical_step(
@@ -231,6 +243,7 @@ def main() -> None:
             thermal_subcycles=args.thermal_subcycles,
             source_cell_subcycles=source_cell_subcycles,
             thermal_implicit_iterations=args.thermal_implicit_iterations,
+            use_secondary_ionization=args.secondary_ionization == "fs2010",
             time_averaged_absorption_iterations=args.time_averaged_absorption_iterations,
         )
 
@@ -244,6 +257,13 @@ def main() -> None:
         cumulative_dust_momentum = cumulative_dust_momentum + result.cumulative_dust_momentum
         cumulative_unallocated = cumulative_unallocated + result.cumulative_unallocated_primary_photons
         cumulative_photoheating_energy = cumulative_photoheating_energy + result.cumulative_photoheating_energy
+        cumulative_photoelectron_energy = (
+            cumulative_photoelectron_energy + result.cumulative_photoelectron_energy
+        )
+        cumulative_photoelectron_energy_ledger_residual = (
+            cumulative_photoelectron_energy_ledger_residual
+            + result.cumulative_photoelectron_energy_ledger_residual
+        )
         cumulative_background_energy = cumulative_background_energy + result.cumulative_background_energy
         cumulative_thermal_residual = cumulative_thermal_residual + result.cumulative_thermal_residual
         cumulative_thermal_bound_hits = cumulative_thermal_bound_hits + result.cumulative_thermal_bound_hits
@@ -265,6 +285,10 @@ def main() -> None:
         maximum_fixed_point_residual = jnp.maximum(
             maximum_fixed_point_residual,
             result.maximum_fixed_point_residual,
+        )
+        cumulative_electron_root_bracket_failures = (
+            cumulative_electron_root_bracket_failures
+            + result.cumulative_electron_root_bracket_failures
         )
         intensity, chemistry, thermal, temperature = result.intensity, result.chemistry, result.thermal, result.temperature_k
     if final_dt > 0.0:
@@ -275,6 +299,13 @@ def main() -> None:
         cumulative_dust_momentum = cumulative_dust_momentum + result.cumulative_dust_momentum
         cumulative_unallocated = cumulative_unallocated + result.cumulative_unallocated_primary_photons
         cumulative_photoheating_energy = cumulative_photoheating_energy + result.cumulative_photoheating_energy
+        cumulative_photoelectron_energy = (
+            cumulative_photoelectron_energy + result.cumulative_photoelectron_energy
+        )
+        cumulative_photoelectron_energy_ledger_residual = (
+            cumulative_photoelectron_energy_ledger_residual
+            + result.cumulative_photoelectron_energy_ledger_residual
+        )
         cumulative_background_energy = cumulative_background_energy + result.cumulative_background_energy
         cumulative_thermal_residual = cumulative_thermal_residual + result.cumulative_thermal_residual
         cumulative_thermal_bound_hits = cumulative_thermal_bound_hits + result.cumulative_thermal_bound_hits
@@ -296,6 +327,10 @@ def main() -> None:
         maximum_fixed_point_residual = jnp.maximum(
             maximum_fixed_point_residual,
             result.maximum_fixed_point_residual,
+        )
+        cumulative_electron_root_bracket_failures = (
+            cumulative_electron_root_bracket_failures
+            + result.cumulative_electron_root_bracket_failures
         )
         intensity, chemistry, thermal, temperature = result.intensity, result.chemistry, result.thermal, result.temperature_k
     assert result is not None
@@ -315,6 +350,10 @@ def main() -> None:
     dust_momentum_integral = np.asarray(jax.device_get(cumulative_dust_momentum))
     unallocated_primary = np.asarray(jax.device_get(cumulative_unallocated))
     photoheating_energy = np.asarray(jax.device_get(cumulative_photoheating_energy))
+    photoelectron_energy = np.asarray(jax.device_get(cumulative_photoelectron_energy))
+    photoelectron_energy_ledger_residual = np.asarray(
+        jax.device_get(cumulative_photoelectron_energy_ledger_residual)
+    )
     background_energy = np.asarray(jax.device_get(cumulative_background_energy))
     thermal_residual = np.asarray(jax.device_get(cumulative_thermal_residual))
     thermal_bound_hits = np.asarray(jax.device_get(cumulative_thermal_bound_hits))
@@ -326,6 +365,9 @@ def main() -> None:
     cumulative_limiter_activations = np.asarray(jax.device_get(cumulative_limiter_activations))
     minimum_gas_absorption_scale = np.asarray(jax.device_get(minimum_gas_absorption_scale))
     maximum_fixed_point_residual = np.asarray(jax.device_get(maximum_fixed_point_residual))
+    electron_root_bracket_failures = np.asarray(
+        jax.device_get(cumulative_electron_root_bracket_failures)
+    )
 
     cell_volume = float(static.grid.cell_width_cm) ** 3
 
@@ -357,6 +399,17 @@ def main() -> None:
         for name in CHEMISTRY_DIAGNOSTIC_NAMES[-3:]
     }
     photoheating_total = cell_total(photoheating_energy)
+    photoelectron_energy_total = cell_total(photoelectron_energy)
+    photoelectron_energy_ledger_l1_relative_error = (
+        float(
+            np.abs(photoelectron_energy_ledger_residual).sum(dtype=np.float64)
+            * cell_volume
+        )
+        / max(
+            float(np.abs(photoelectron_energy).sum(dtype=np.float64) * cell_volume),
+            1.0,
+        )
+    )
     background_total = cell_total(background_energy)
     initial_energy_total = cell_total(initial_internal_energy)
     thermal_energy_closure = internal_energy - initial_internal_energy - photoheating_energy - background_energy
@@ -381,6 +434,7 @@ def main() -> None:
     )
     minimum_gas_absorption_scale_value = float(np.min(minimum_gas_absorption_scale))
     maximum_fixed_point_residual_value = float(np.max(maximum_fixed_point_residual))
+    electron_root_bracket_failure_count = int(np.sum(electron_root_bracket_failures))
 
     def finite_and_nonnegative(array: np.ndarray) -> bool:
         if not np.isfinite(array).all():
@@ -402,6 +456,8 @@ def main() -> None:
         dust_momentum_integral,
         unallocated_primary,
         photoheating_energy,
+        photoelectron_energy,
+        photoelectron_energy_ledger_residual,
         background_energy,
         thermal_residual,
         thermal_bound_hits,
@@ -411,7 +467,7 @@ def main() -> None:
     all_finite = all(np.isfinite(array).all() for array in finite_arrays)
     nonnegative_chemistry = all(
         finite_and_nonnegative(cumulative_chemistry_diagnostics[name])
-        for name in CHEMISTRY_DIAGNOSTIC_NAMES[:11]
+        for name in CHEMISTRY_DIAGNOSTIC_NAMES[:-3]
     )
     fraction_bounds = bool(
         np.all(x_hii >= 0.0)
@@ -427,6 +483,9 @@ def main() -> None:
         and unallocated_fraction <= 1.0e-3
         and gas_absorption_limiter_active_cell_step_fraction < 1.0e-3
         and maximum_fixed_point_residual_value <= 1.0e-4
+        and photoelectron_energy_ledger_l1_relative_error
+        <= photoelectron_energy_ledger_tolerance
+        and electron_root_bracket_failure_count == 0
     )
     thermal_passed = bool(
         thermal_bound_hit_max == 0
@@ -459,12 +518,14 @@ def main() -> None:
         handle.attrs["source_deposition_mode"] = args.source_deposition_mode
         handle.attrs["thermal_implicit_iterations"] = args.thermal_implicit_iterations
         handle.attrs["time_averaged_absorption_iterations"] = args.time_averaged_absorption_iterations
+        handle.attrs["secondary_ionization_model"] = args.secondary_ionization
         handle.attrs["photon_conservative_absorption"] = True
         handle.attrs["gas_absorption_limiter"] = "retired"
         handle.attrs["chemistry_solver"] = "c2ray_time_averaged_hydrogen_backward_euler_helium"
         handle.attrs["gas_absorption_limiter_active_cell_step_fraction"] = gas_absorption_limiter_active_cell_step_fraction
         handle.attrs["minimum_gas_absorption_scale"] = minimum_gas_absorption_scale_value
         handle.attrs["maximum_fixed_point_residual"] = maximum_fixed_point_residual_value
+        handle.attrs["electron_root_bracket_failure_count"] = electron_root_bracket_failure_count
         handle.attrs["source_absorption_treatment"] = "exact_constant_source_local"
         handle.attrs["hydrogen_photoionization_solver"] = "analytic_hydrogen_and_backward_euler_helium_time_averaged"
         handle.attrs["cumulative_unallocated_primary_fraction"] = unallocated_fraction
@@ -478,6 +539,14 @@ def main() -> None:
         handle.attrs["helium_i_ledger_l1_relative_error"] = hhe_ledger_l1_relative_errors["helium_i_ledger_residual"]
         handle.attrs["helium_ii_ledger_l1_relative_error"] = hhe_ledger_l1_relative_errors["helium_ii_ledger_residual"]
         handle.attrs["photoheating_energy_erg"] = photoheating_total
+        handle.attrs["photoelectron_energy_ev"] = photoelectron_energy_total
+        handle.attrs["photoelectron_energy_ledger_l1_relative_error"] = (
+            photoelectron_energy_ledger_l1_relative_error
+        )
+        handle.attrs["photoelectron_energy_ledger_tolerance"] = (
+            photoelectron_energy_ledger_tolerance
+        )
+        handle.attrs["excitation_energy_treatment"] = "radiative_line_escape_not_returned_to_gas"
         handle.attrs["background_energy_erg"] = background_total
         handle.attrs["initial_internal_energy_erg"] = initial_energy_total
         handle.attrs["thermal_energy_closure_relative_error"] = thermal_energy_closure_relative_error
@@ -511,6 +580,14 @@ def main() -> None:
         handle.create_dataset("thermal/temperature_k", data=temperature)
         handle.create_dataset("thermal/internal_energy_density_erg_cm3", data=internal_energy)
         handle.create_dataset("thermal/cumulative_photoheating_energy_erg_cm3", data=photoheating_energy)
+        handle.create_dataset(
+            "diagnostics/cumulative_photoelectron_energy_ev_cm3",
+            data=photoelectron_energy,
+        )
+        handle.create_dataset(
+            "diagnostics/cumulative_photoelectron_energy_ledger_residual_ev_cm3",
+            data=photoelectron_energy_ledger_residual,
+        )
         handle.create_dataset("thermal/cumulative_background_energy_erg_cm3", data=background_energy)
         handle.create_dataset("thermal/cumulative_dust_heating_energy_erg_cm3", data=dust_heating_energy)
         handle.create_dataset("thermal/energy_closure_erg_cm3", data=thermal_energy_closure)
@@ -528,13 +605,17 @@ def main() -> None:
         handle.create_dataset("diagnostics/gas_absorption_limiter_activation_count", data=cumulative_limiter_activations)
         handle.create_dataset("diagnostics/minimum_gas_absorption_scale", data=minimum_gas_absorption_scale)
         handle.create_dataset("diagnostics/maximum_fixed_point_residual", data=maximum_fixed_point_residual)
+        handle.create_dataset(
+            "diagnostics/electron_root_bracket_failure_count",
+            data=electron_root_bracket_failures,
+        )
         for name, value in cumulative_chemistry_diagnostics.items():
             handle.create_dataset(f"diagnostics/cumulative_{name}_cm3", data=value)
 
     print(
         f"P5_THERMOCHEMICAL_PILOT_{'OK' if validation_passed else 'GATE_FAILED'} "
         f"steps={full_steps + int(final_dt > 0.0)} subcycles={args.thermal_subcycles} source_cell_subcycles={source_cell_subcycles} effective_subcycles={effective_subcycles} implicit_iterations={args.thermal_implicit_iterations} "
-        f"timeavg_iterations={args.time_averaged_absorption_iterations} unallocated_primary_fraction={unallocated_fraction:.6g} limiter_active={gas_absorption_limiter_active_cell_step_fraction:.6g} fixed_point={maximum_fixed_point_residual_value:.6g} "
+        f"timeavg_iterations={args.time_averaged_absorption_iterations} secondary={args.secondary_ionization} unallocated_primary_fraction={unallocated_fraction:.6g} limiter_active={gas_absorption_limiter_active_cell_step_fraction:.6g} fixed_point={maximum_fixed_point_residual_value:.6g} photoelectron_ledger={photoelectron_energy_ledger_l1_relative_error:.6g} root_bracket_failures={electron_root_bracket_failure_count} "
         f"elapsed_myr={(full_steps * outer_dt + final_dt) / SECONDS_PER_MYR:.6g} "
         f"temperature_min={temperature.min():.6g} temperature_max={temperature.max():.6g} "
         f"max_x_hii={x_hii.max():.6g} hhe_ledger={max(hhe_ledger_relative_errors.values()):.6g} "
