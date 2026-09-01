@@ -50,10 +50,12 @@ def make_primordial_stromgren_problem(
 ) -> PrimordialStromgrenProblem:
     """Build B01 in cgs units with one hydrogen-ionizing photon group.
 
-    The reduced speed of light is chosen to remain above the characteristic
-    Strömgren-front speed while allowing a practical explicit time step. The
-    analytic radius deliberately uses hydrogen only; helium is retained in the
-    numerical chemistry and therefore measures the expected correction.
+    The reduced speed of light is a numerical parameter whose validity must be
+    established against a fixed-duration analytic or higher-c reference; no
+    universal front-speed margin is implied by the default. The analytic
+    reference is hydrogen-only. At the default 20 eV, the He I cross section is
+    zero, so the structurally present helium remains neutral and does not
+    contribute to the measured radius discrepancy.
     """
     if not 0.0 < reduced_light_speed_fraction <= 1.0:
         raise ValueError("reduced_light_speed_fraction must lie in (0, 1].")

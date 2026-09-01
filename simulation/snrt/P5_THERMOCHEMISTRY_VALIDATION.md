@@ -207,7 +207,7 @@ step remainders give a different local final-step partition.
 
 - [`FS2010 OFF 0.1 Myr`](data/p5_validation/p5_fs2010_off_s4_c0p1_0p1myr_source_limit0p25_remediated_n32_f64.h5), SHA256 `02ebe242f7fafea46edbb3bcc52a25d61cc26bb3e3f3d17794c28fcb6a822eea`
 - [`FS2010 ON 0.1 Myr`](data/p5_validation/p5_fs2010_on_s4_c0p1_0p1myr_source_limit0p25_remediated_n32_f64.h5), SHA256 `a03e5ec5906fe2659b82e1fa6e9d162d805fd403aa3e09e9263e48fcc0b45d83`
-- [`FS2010 matched-pair report`](data/p5_secondary_ionization_validation.json), SHA256 `8e297de9c23d47c32691e5b507ae29230e4c44fa88e4ce06046af1df9433e428`
+- [`FS2010 matched-pair report`](data/p5_secondary_ionization_validation.json), SHA256 `0e2edc468e13bc1bd89dffcef0ce8d09fb9d919595a353e058fd270d081d5fb1`
 - [`C0.4_N4`](data/p5_validation/p5_coeval_s8_sub4_6p37myr_conservative_timeavg4_f64.h5)
 - [`C0.1_N1`](data/p5_validation/p5_coeval_s8_courant0p1_sub1_6p37myr_conservative_timeavg4_f64.h5)
 - [`C0.05_N1`](data/p5_validation/p5_coeval_s8_courant0p05_sub1_6p37myr_conservative_timeavg4_f64.h5)

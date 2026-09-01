@@ -10,21 +10,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from snrt_core.ionization_front import build_primordial_stromgren_runner, ionized_volume_radius, make_primordial_stromgren_problem
 from snrt_core.photon_coupling import build_primordial_radiation_step
-from snrt_core.primordial import PhotoCrossSections, PhotoRates, PrimordialState, evolve_primordial_fractions
+from snrt_core.primordial import PhotoCrossSections, PhotoRates, PrimordialState, evolve_primordial_fractions, hui_gnedin_case_b_hydrogen
 from snrt_core.quadrature import product_quadrature, s8_quadrature
 from snrt_core.shadow import ShadowProblem, build_shadow_runner, make_opaque_clump_problem
 from snrt_core.transport import TransportConfig
 
 
 stromgren_ratios = []
+stromgren_time_analytic_ratios = []
 for size in (32, 48, 64):
-    problem = make_primordial_stromgren_problem(shape=(size, size, size), cell_size_parsec=128.0 / size)
-    state = build_primordial_stromgren_runner(problem, 4 * size)()
+    problem = make_primordial_stromgren_problem(
+        shape=(size, size, size),
+        cell_size_parsec=128.0 / size,
+        reduced_light_speed_fraction=3.0e-2,
+    )
+    number_of_steps = 12 * size
+    state = build_primordial_stromgren_runner(problem, number_of_steps)()
     radius = ionized_volume_radius(state.chemistry, problem.config.cell_width)
     ratio = float(radius / problem.stromgren_radius_cm)
+    alpha_hii = float(hui_gnedin_case_b_hydrogen(jnp.asarray(1.0e4)))
+    recombination_time = 1.0 / alpha_hii
+    duration = number_of_steps * problem.config.dt
+    analytic_time_radius = problem.stromgren_radius_cm * (
+        1.0 - math.exp(-duration / recombination_time)
+    ) ** (1.0 / 3.0)
+    time_analytic_ratio = float(radius / analytic_time_radius)
     assert jnp.all(jnp.isfinite(state.intensity))
     assert jnp.all(jnp.isfinite(state.chemistry.x_hydrogen_ii))
+    assert abs(time_analytic_ratio - 1.0) < 0.10
     stromgren_ratios.append(ratio)
+    stromgren_time_analytic_ratios.append(time_analytic_ratio)
 spatial_spread = (max(stromgren_ratios) - min(stromgren_ratios)) / stromgren_ratios[-1]
 assert spatial_spread < 0.02
 
@@ -72,6 +87,8 @@ assert recombined.x_helium_iii < recombining.x_helium_iii
 print(
     "P1_VALIDATION_OK",
     f"spatial_spread={spatial_spread:.4f}",
+    f"rs_ratios={','.join(f'{value:.7f}' for value in stromgren_ratios)}",
+    f"analytic_ratios={','.join(f'{value:.4f}' for value in stromgren_time_analytic_ratios)}",
     f"S8_vs_A192={abs(transmission['S8'] - transmission['A192']) / transmission['A192']:.4f}",
     f"A128_vs_A192={abs(transmission['A128'] - transmission['A192']) / transmission['A192']:.4f}",
 )

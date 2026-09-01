@@ -104,11 +104,11 @@ JAX_PLATFORMS=cpu .venv/bin/python tools/validate_multiphysics_b2.py \
 ```
 
 - Passing JSON: `data/b2_multiphysics_transport_validation.json`, SHA256
-  `0bfcfb33aeee043b43c1b75876c578a4ff8d074de0233a1a53c1a17008c46988`.
+  `cbb754ceda86ba4655d309c12dae55ceadb9275c35364fe1d45043da6ccd92ca`.
 - Validator SHA256:
   `16f53d809f79f77092e07d06a80073e9e5b2a9ab2fd83f3e42906f7b3cb42fef`.
 - JAX `0.11.1`, CPU backend, repository HEAD recorded in the artifact as
-  `438aff4fe1a73e7c8818403cf0042d4564f6f3a4` with source-file hashes because
+  `ca90a391296e4fbd99d183df3850de10c537cef4` with source-file hashes because
   the worktree is intentionally dirty.
 - The `failed_fp12` and `failed_fp16` JSON files preserve the convergence and
   zero-He underflow failures encountered during implementation. They are not
