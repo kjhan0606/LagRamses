@@ -38,6 +38,9 @@ recursive subroutine load_balance
   real(dp)::remap_elapsed,remap_elapsed_max
   real(dp)::t0,t1,t2,t3,t4,t5,t6
   real(dp)::t_tree_collapse,t_numbp_done,t_stats_done,t_map_done,t_particle_done
+  real(dp)::t_tree_stage0
+  real(dp),dimension(1:nlevelmax)::t_tree_kill_loc,t_tree_virtual_loc,t_tree_merge_loc
+  real(dp),dimension(1:nlevelmax)::t_tree_kill_max,t_tree_virtual_max,t_tree_merge_max
   real(dp)::te_flag,te_refine,te_bcomm,te_virt,te_phys
   real(dp)::ts_flag,ts_refine,ts_bcomm
   real(dp)::tt0,tt1
@@ -423,16 +426,36 @@ recursive subroutine load_balance
   end do
   t_map_done=MPI_WTIME()
 
+  t_tree_kill_loc=0d0
+  t_tree_virtual_loc=0d0
+  t_tree_merge_loc=0d0
+  t_tree_kill_max=0d0
+  t_tree_virtual_max=0d0
+  t_tree_merge_max=0d0
   if(pic.and.(.not.init))then
      ! Sort particles down to nlevelmax
      do ilevel=1,nlevelmax-1
+        t_tree_stage0=MPI_WTIME()
         call kill_tree_fine(ilevel)
+        t_tree_kill_loc(ilevel)=MPI_WTIME()-t_tree_stage0
+        t_tree_stage0=MPI_WTIME()
         call virtual_tree_fine(ilevel)
+        t_tree_virtual_loc(ilevel)=MPI_WTIME()-t_tree_stage0
      end do
+     t_tree_stage0=MPI_WTIME()
      call virtual_tree_fine(nlevelmax)
+     t_tree_virtual_loc(nlevelmax)=MPI_WTIME()-t_tree_stage0
      do ilevel=nlevelmax-1,levelmin,-1
+        t_tree_stage0=MPI_WTIME()
         call merge_tree_fine(ilevel)
+        t_tree_merge_loc(ilevel)=MPI_WTIME()-t_tree_stage0
      end do
+     call MPI_ALLREDUCE(t_tree_kill_loc,t_tree_kill_max,nlevelmax, &
+          MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+     call MPI_ALLREDUCE(t_tree_virtual_loc,t_tree_virtual_max,nlevelmax, &
+          MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+     call MPI_ALLREDUCE(t_tree_merge_loc,t_tree_merge_max,nlevelmax, &
+          MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
   end if
 
   t_particle_done=MPI_WTIME()
@@ -495,6 +518,17 @@ recursive subroutine load_balance
      write(*,'(A,F8.3,A)') '   grid_stats_allreduce:     ', t_stats_done - t4, ' s'
      write(*,'(A,F8.3,A)') '   cpumap_owner_update:      ', t_map_done - t_stats_done, ' s'
      write(*,'(A,F8.3,A)') '   particle_tree_rebuild:    ', t_particle_done - t_map_done, ' s'
+     if(pic.and.(.not.init))then
+        do ilevel=1,nlevelmax
+           if(t_tree_kill_max(ilevel)+t_tree_virtual_max(ilevel)+ &
+                t_tree_merge_max(ilevel)>0d0)then
+              write(*,'(A,I2,A,3(F8.3,A))') '     level ',ilevel, &
+                   ': kill=',t_tree_kill_max(ilevel),' s virtual=', &
+                   t_tree_virtual_max(ilevel),' s merge=', &
+                   t_tree_merge_max(ilevel),' s'
+           end if
+        end do
+     end if
      write(*,'(A,F8.3,A)') '   shrink_pass:              ', t6 - t5, ' s'
      write(*,'(A,F8.3,A)') '     flag_fine:              ', ts_flag, ' s'
      write(*,'(A,F8.3,A)') '     refine:                 ', ts_refine, ' s'

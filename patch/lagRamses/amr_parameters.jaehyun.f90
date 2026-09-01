@@ -151,6 +151,10 @@ module amr_parameters
   ! Avoid linked-list walks in memory balance by preserving each grid's exact
   ! direct-leaf total and approximating only its within-grid distribution.
   logical::memory_balance_fast_particles=.false.
+  ! Optional parent-at-a-time particle relink during tree rebuild.
+  ! Keep the exact remove/add path as the conservative default.
+  logical::particle_tree_fast_relink=.false.
+  integer::particle_tree_fast_relink_maxlevel=4
   integer::mem_weight_grid=0          ! 0 = auto from nvar; >0 = user override
   integer::mem_weight_part=12        ! Memory per particle in dp-equivalents
   integer::mem_weight_sink=500      ! Computational weight per sink particle

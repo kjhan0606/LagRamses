@@ -484,7 +484,9 @@ subroutine kill_tree_fine(ilevel)
   integer::mythread,nthreads
   common /omp_ktf_thr/ mythread, nthreads
   !$omp threadprivate(/omp_ktf_thr/)
-  integer::ncache
+  integer::ncache,nx_loc
+  real(dp)::dx,scale
+  real(dp),dimension(1:3)::skip_loc
 #endif
 
   if(numbtot(1,ilevel)==0)return
@@ -509,7 +511,6 @@ subroutine kill_tree_fine(ilevel)
   end do
 
 #ifdef _OPENMP
-  ! Setup per-thread work arrays
   !$omp parallel
   mythread=omp_get_thread_num()
   nthreads=omp_get_num_threads()
@@ -522,6 +523,14 @@ subroutine kill_tree_fine(ilevel)
   ind_part => P_ip_kt(:,mythread)
   ind_grid_part => P_igp_kt(:,mythread)
   !$omp end parallel
+
+  dx=0.5D0**ilevel
+  nx_loc=icoarse_max-icoarse_min+1
+  scale=boxlen/dble(nx_loc)
+  skip_loc=(/0.0d0,0.0d0,0.0d0/)
+  if(ndim>0)skip_loc(1)=dble(icoarse_min)
+  if(ndim>1)skip_loc(2)=dble(jcoarse_min)
+  if(ndim>2)skip_loc(3)=dble(kcoarse_min)
 #endif
 
   ! Sort particles between ilevel and ilevel+1
@@ -545,22 +554,27 @@ subroutine kill_tree_fine(ilevel)
         end if
         npart1=numbp(igrid)
         if(npart1>0)then
-           ig=1
-           ind_grid(1)=igrid
-           ip=0
-           ipart=headp(igrid)
-           do jpart=1,npart1
-              next_part=nextp(ipart)
-              ip=ip+1
-              ind_part(ip)=ipart
-              ind_grid_part(ip)=1
-              if(ip==nvector)then
-                 call kill_tree(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
-                 ip=0
-              end if
-              ipart=next_part
-           end do
-           if(ip>0)call kill_tree(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+           if(particle_tree_fast_relink.and. &
+                ilevel<=particle_tree_fast_relink_maxlevel)then
+              call kill_tree_grid_relink(igrid,dx,scale,skip_loc)
+           else
+              ig=1
+              ind_grid(1)=igrid
+              ip=0
+              ipart=headp(igrid)
+              do jpart=1,npart1
+                 next_part=nextp(ipart)
+                 ip=ip+1
+                 ind_part(ip)=ipart
+                 ind_grid_part(ip)=1
+                 if(ip==nvector)then
+                    call kill_tree(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+                    ip=0
+                 end if
+                 ipart=next_part
+              end do
+              if(ip>0)call kill_tree(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+           end if
         end if
      end do
 #else
@@ -603,12 +617,76 @@ subroutine kill_tree_fine(ilevel)
   ! End loop over cpus
 
 #ifdef _OPENMP
-  deallocate(P_ig_kt, P_ip_kt, P_igp_kt)
+  deallocate(P_ig_kt,P_ip_kt,P_igp_kt)
 #endif
 
 111 format('   Entering kill_tree_fine for level ',I2)
 
 end subroutine kill_tree_fine
+!################################################################
+!################################################################
+!################################################################
+!################################################################
+subroutine kill_tree_grid_relink(igrid,dx,scale,skip_loc)
+  use amr_commons
+  use pm_commons
+#include "amr_index.h"
+  implicit none
+  integer,intent(in)::igrid
+  real(dp),intent(in)::dx,scale
+  real(dp),dimension(1:3),intent(in)::skip_loc
+  !------------------------------------------------------------------------
+  ! Rebuild one parent in a single linked-list pass while retaining add_list
+  ! semantics for reception/active aliases.  The generic kill_tree path first
+  ! removes every moving particle from its parent and then appends it to a
+  ! child.  Here the parent list is cleared once and every particle is added
+  ! exactly once to either its refined child or back to the parent.
+  !------------------------------------------------------------------------
+  integer::ipart,npart1,jpart,np,i,idim,ind,igrid_son
+  integer,dimension(1:nvector)::ind_part,dest_grid
+  logical,dimension(1:nvector)::move_particle
+  logical::inside
+  real(dp)::xcoord
+
+  npart1=numbp(igrid)
+  if(npart1<=0)return
+
+  ipart=headp(igrid)
+  headp(igrid)=0
+  tailp(igrid)=0
+  numbp(igrid)=0
+  jpart=0
+
+  do while(jpart<npart1)
+     np=min(nvector,npart1-jpart)
+     do i=1,np
+        ind_part(i)=ipart
+        ipart=nextp(ipart)
+     end do
+
+     !$omp simd private(ind,idim,xcoord,inside,igrid_son)
+     do i=1,np
+        ind=1
+        inside=.true.
+        do idim=1,ndim
+           xcoord=xp(ind_part(i),idim)/scale+skip_loc(idim)
+           inside=inside.and.xcoord>=xg(igrid,idim)-dx.and. &
+                xcoord<xg(igrid,idim)+dx
+           if(xcoord>=xg(igrid,idim))ind=ind+2**(idim-1)
+        end do
+        dest_grid(i)=igrid
+        if(inside)then
+           igrid_son=son(ICELL_OF(igrid,ind))
+           if(igrid_son>0)dest_grid(i)=igrid_son
+        end if
+     end do
+
+     move_particle(1:np)=.true.
+     call add_list(ind_part,dest_grid,move_particle,np)
+     jpart=jpart+np
+  end do
+
+end subroutine kill_tree_grid_relink
 !################################################################
 !################################################################
 !################################################################
@@ -788,19 +866,15 @@ subroutine merge_tree_fine(ilevel)
            if(numbp(ind_grid_son(i))>0)then
               if(numbp(ind_grid(i))>0)then
                  ! Connect son linked list at the tail of father linked list
-!$omp critical
                  nextp(tailp(ind_grid(i)))=headp(ind_grid_son(i))
                  prevp(headp(ind_grid_son(i)))=tailp(ind_grid(i))
                  numbp(ind_grid(i))=numbp(ind_grid(i))+numbp(ind_grid_son(i))
                  tailp(ind_grid(i))=tailp(ind_grid_son(i))
-!$omp end critical
               else
-!$omp critical
                  ! Initialize father linked list
                  headp(ind_grid(i))=headp(ind_grid_son(i))
                  tailp(ind_grid(i))=tailp(ind_grid_son(i))
                  numbp(ind_grid(i))=numbp(ind_grid_son(i))
-!$omp end critical
               end if
 
            end if
@@ -824,6 +898,7 @@ subroutine virtual_tree_fine(ilevel)
   use pm_commons
   use amr_commons
   use ksection
+  use mpi_large, only: mpi_large_isend_dp,mpi_large_irecv_dp
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -978,11 +1053,10 @@ subroutine virtual_tree_fine(ilevel)
              & MPI_INTEGER8,icpu-1,&
              & tagf,MPI_COMM_WORLD,reqrecv(countrecv),info)
 #endif
-        buf_count=ncache*particle_data_width
         countrecv=countrecv+1
-        call MPI_IRECV(emission(icpu,ilevel)%up,buf_count, &
-             & MPI_DOUBLE_PRECISION,icpu-1,&
-             & tagu,MPI_COMM_WORLD,reqrecv(countrecv),info)
+        call mpi_large_irecv_dp(emission(icpu,ilevel)%up,ncache, &
+             particle_data_width,icpu-1,tagu,MPI_COMM_WORLD, &
+             reqrecv(countrecv),info)
      end if
   end do
 
@@ -1002,11 +1076,10 @@ subroutine virtual_tree_fine(ilevel)
              & MPI_INTEGER8,icpu-1,&
              & tagf,MPI_COMM_WORLD,reqsend(countsend),info)
 #endif
-        buf_count=ncache*particle_data_width
         countsend=countsend+1
-        call MPI_ISEND(reception(icpu,ilevel)%up,buf_count, &
-             & MPI_DOUBLE_PRECISION,icpu-1,&
-             & tagu,MPI_COMM_WORLD,reqsend(countsend),info)
+        call mpi_large_isend_dp(reception(icpu,ilevel)%up,ncache, &
+             particle_data_width,icpu-1,tagu,MPI_COMM_WORLD, &
+             reqsend(countsend),info)
      end if
   end do
 

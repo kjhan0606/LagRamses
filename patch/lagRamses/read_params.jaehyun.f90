@@ -30,7 +30,8 @@ subroutine read_params
   namelist/run_params/clumpfind,cosmo,pic,sink,sinkprops,lightcone,poisson,hydro,rt,verbose,debug &
        & ,nrestart,ncontrol,nstepmax,nsubcycle,nremap,remap_thresh,ordering &
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
-  & ,memory_balance,memory_balance_fast_particles &
+  & ,memory_balance,memory_balance_fast_particles,particle_tree_fast_relink &
+  & ,particle_tree_fast_relink_maxlevel &
   & ,mem_weight_grid,mem_weight_part,mem_weight_sink &
        & ,lb_grid_headroom &
   & ,work_weight_grid,work_weight_part,work_weight_sidm_pair &
@@ -478,6 +479,16 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A)') ' Memory balance particle placement: fast grid-total mode'
      else
         write(*,'(A)') ' Memory balance particle placement: exact linked-list mode'
+     end if
+  end if
+  particle_tree_fast_relink_maxlevel=max(0,min(MAXLEVEL-1, &
+       particle_tree_fast_relink_maxlevel))
+  if(myid==1 .and. pic)then
+     if(particle_tree_fast_relink)then
+        write(*,'(A,I0)') ' Particle-tree rebuild: one-pass relink through level ', &
+             particle_tree_fast_relink_maxlevel
+     else
+        write(*,'(A)') ' Particle-tree rebuild: exact remove/add path'
      end if
   end if
 
