@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -26,6 +27,24 @@ DEFAULT_P0_GROUP_EDGES = PROJECT_ROOT / "config" / "p0_photon_group_edges_ev.txt
 SED_MIN_EV = 10.0
 LYMAN_EDGE_EV = 13.6
 SED_BREAK_EV = 1000.0
+
+
+def _group_support_status(low_ev: float, high_ev: float) -> str:
+    """Describe how much of a configured group is covered by the AGN SED."""
+
+    if high_ev <= SED_MIN_EV:
+        return "agn_sed_below_support_zero_photons"
+    if low_ev < SED_MIN_EV:
+        return "agn_sed_partially_supported_10ev_to_upper"
+    return "agn_sed_fully_supported"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _read_group_edges(path: Path) -> np.ndarray:
@@ -100,9 +119,13 @@ def _group_conversion(
         effective_low = max(float(low), SED_MIN_EV)
         if effective_low >= high:
             continue
-        selected = (integration_grid >= effective_low) & (integration_grid <= high)
-        group_energy = integration_grid[selected]
-        group_spectrum = photon_spectrum_per_ev[selected]
+        interior = integration_grid[
+            (integration_grid > effective_low) & (integration_grid < high)
+        ]
+        group_energy = np.concatenate(([effective_low], interior, [high]))
+        group_spectrum = np.interp(
+            group_energy, integration_grid, photon_spectrum_per_ev
+        )
         photon_count = float(np.trapezoid(group_spectrum, group_energy))
         if not np.isfinite(photon_count) or photon_count <= 0.0:
             continue
@@ -179,6 +202,14 @@ def main() -> None:
         rows = list(reader)
     if not rows:
         raise ValueError("candidate ledger has no sources")
+    bolometric_luminosity = np.asarray(
+        [float(row["bolometric_luminosity_erg_s"]) for row in rows],
+        dtype=np.float64,
+    )
+    if not np.isfinite(bolometric_luminosity).all() or np.any(
+        bolometric_luminosity < 0.0
+    ):
+        raise ValueError("candidate bolometric luminosities must be finite and non-negative")
 
     photon_per_lbol, mean_energy_ev, closure = _group_conversion(args.lyman_nu_lnu_fraction, group_edges)
     output = Path(args.output)
@@ -200,7 +231,7 @@ def main() -> None:
     ]
     total_photon_rate = np.zeros(len(photon_per_lbol), dtype=np.float64)
     with output.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=output_fields)
+        writer = csv.DictWriter(handle, fieldnames=output_fields, lineterminator="\n")
         writer.writeheader()
         for row in rows:
             luminosity = float(row["bolometric_luminosity_erg_s"])
@@ -219,6 +250,7 @@ def main() -> None:
             )
 
     metadata = {
+        "schema": "snrt_agn_photon_ledger_v2",
         "source_sed": "Sazonov-Ostriker-Sunyaev-style piecewise energy continuum",
         "reference": "Sazonov, Ostriker & Sunyaev (2004), MNRAS 347, 144; 10 eV-1 keV energy slope -1.7 and 1-100 keV slope -1",
         "normalization": {
@@ -229,6 +261,8 @@ def main() -> None:
         "group_table_mode": group_table_mode,
         "group_edges_file": None if group_edges_path is None else str(group_edges_path.resolve()),
         "group_edges_ev": group_edges.tolist(),
+        "group_interval_convention": "left_closed_right_open_except_final_closed",
+        "group_photon_rate_total_s": total_photon_rate.tolist(),
         "groups": [
             {
                 "index": int(index),
@@ -236,11 +270,12 @@ def main() -> None:
                 "photon_weighted_mean_energy_ev": float(mean),
                 "photon_rate_per_lbol_s_per_erg_s": float(rate),
                 "total_photon_rate_s": float(total),
-                "closure_status": (
-                    "agn_sed_weighted"
-                    if total > 0.0
-                    else "agn_sed_below_support_zero_photons"
+                "sed_supported_interval_ev": (
+                    None
+                    if high <= SED_MIN_EV
+                    else [float(max(low, SED_MIN_EV)), float(high)]
                 ),
+                "closure_status": _group_support_status(float(low), float(high)),
             }
             for index, (low, high, mean, rate, total) in enumerate(
                 zip(group_edges[:-1], group_edges[1:], mean_energy_ev, photon_per_lbol, total_photon_rate)
@@ -260,16 +295,28 @@ def main() -> None:
                 "helium_ii": np.asarray(closure.photoelectron_excess_energy_ev[2]).tolist(),
             },
             "group_status": [
-                "agn_sed_weighted" if total > 0.0 else "agn_sed_below_support_zero_photons"
-                for total in total_photon_rate
+                _group_support_status(float(low), float(high))
+                for low, high in zip(group_edges[:-1], group_edges[1:], strict=True)
             ],
         },
         "candidates": str(Path(args.candidates).resolve()),
         "source_count": len(rows),
+        "luminous_source_count": int(np.count_nonzero(bolometric_luminosity > 0.0)),
+        "total_bolometric_luminosity_erg_s": float(
+            bolometric_luminosity.sum(dtype=np.float64)
+        ),
+        "provenance": {
+            "generator_sha256": _sha256(Path(__file__).resolve()),
+            "candidates_sha256": _sha256(Path(args.candidates).resolve()),
+            "group_edges_file_sha256": (
+                None if group_edges_path is None else _sha256(group_edges_path.resolve())
+            ),
+        },
         "limits": [
             "The source SED is a parameterized pilot baseline, not an LRD-obscuration model.",
             f"Photons above {group_edges[-1]:g} eV are excluded because the selected group table ends there.",
-            "The parameterized SED has no support below 10 eV; affected groups are explicit zero-photon controls.",
+            "The parameterized SED is not extrapolated below 10 eV: groups wholly below 10 eV are explicit zero-photon controls.",
+            "A group straddling 10 eV is integrated only over its supported [10 eV, upper-edge] sub-interval and is explicitly marked partially supported.",
             "A production interpretation must vary the Lyman normalization and escape fraction.",
         ],
     }

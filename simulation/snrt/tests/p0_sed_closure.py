@@ -44,12 +44,35 @@ def main() -> None:
         atol=0.0,
     )
 
-    metadata = json.loads((PROJECT_ROOT / "data/p4_pilot_agn_photon_ledger.json").read_text())
+    threshold_edges = np.asarray((11.2, 13.6, 24.59, 54.42, 100.0))
+    threshold_energy = np.unique(
+        np.concatenate(
+            [
+                np.geomspace(low, high, 257)
+                for low, high in zip(
+                    threshold_edges[:-1], threshold_edges[1:], strict=True
+                )
+            ]
+        )
+    )
+    threshold_closure = sed_weighted_group_closure(
+        threshold_edges, threshold_energy, threshold_energy**-2.0
+    )
+    assert threshold_closure.cross_sections.hydrogen_i[0] == 0.0
+    assert np.all(threshold_closure.cross_sections.helium_i[:2] == 0.0)
+    assert np.all(threshold_closure.cross_sections.helium_ii[:3] == 0.0)
+
+    metadata = json.loads(
+        (PROJECT_ROOT / "data/p4_pilot_agn_photon_ledger.json").read_text()
+    )
     restored = group_spectral_closure_from_metadata(metadata)
-    assert restored.cross_sections.hydrogen_i.shape == (5,)
-    assert restored.photoelectron_excess_energy_ev.shape == (3, 5)
+    assert restored.cross_sections.hydrogen_i.shape == (9,)
+    assert restored.photoelectron_excess_energy_ev.shape == (3, 9)
     assert np.all(np.isfinite(restored.cross_sections.hydrogen_i))
-    print("P0_SED_CLOSURE_OK synthetic_groups=4 metadata_groups=5 species=3")
+    print(
+        "P0_SED_CLOSURE_OK synthetic_groups=4 metadata_groups=9 species=3 "
+        "subthreshold_opacity=zero"
+    )
 
 
 if __name__ == "__main__":

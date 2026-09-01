@@ -5,11 +5,13 @@ job log explicitly reports `HDF5 output done.` The `levelmax = 17` entry in
 `info_00017.txt` is an allowed refinement ceiling; the actual mesh hierarchy
 ends at level 15 because it contains no level-16 or level-17 grids.
 
-`p4_attach_pilot_sources.py` creates a narrowly scoped transport/chemistry
-pilot by preserving the completed `output_00016` 32-cubed gas input and adding
-the audited instantaneous `output_00017` AGN photon ledger. Its output
-metadata records both scale factors and their difference. The artifact is for
-S_N interface and numerical tests only, never for physical conclusions.
+`p4_attach_pilot_sources.py` now rebinds an audited source ledger to a static
+gas input without changing gas fields. It requires the photon metadata, checks
+exact agreement with the configured P0 edges and CSV totals, and records hashes
+of every input. The stage-4 `p4_coeval_static_rt_input_agn9.h5` rebinds the
+coeval output-00017 gas cube to the nine-group AGN ledger; its gas/source scale
+factors agree to `2.5e-16`. Scientific eligibility still follows the gas-field
+contract rather than source coevality alone.
 
 A coeval science input now requires an adaptive-leaf resampler for the complete
 output 00017 HDF5 hierarchy through its populated level 15. The implementation

@@ -118,6 +118,6 @@ JAX_PLATFORMS=cpu .venv/bin/python tests/secondary_furlanetto_stoever.py \
   --json-out build/secondary_furlanetto_stoever_validation.json
 .venv/bin/python tests/secondary_furlanetto_stoever_artifact.py
 .venv/bin/python tests/coupled_photo_collisional_hhe.py
-.venv/bin/python tests/p5_secondary_ionization_artifact.py
+.venv/bin/python tests/p5_secondary_ionization_artifact.py  # historical 5-group control after stage 4
 .venv/bin/python tests/b2_multiphysics_artifact.py
 ```

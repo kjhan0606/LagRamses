@@ -1,0 +1,54 @@
+{
+  "schema": "snrt_agn_nine_group_external_assets_v1",
+  "stage": "AGN nine-group source-ledger closure",
+  "project_root": "/gpfs/kjhan/LRD_JWST",
+  "created_at": "2026-09-02",
+  "publication_deposit": {
+    "status": "pending_final_publication_archive",
+    "policy": "The tracked validation and sidecars fail closed when any local HDF5 is absent or has a different checksum. Deposit identifiers must be added before final publication release."
+  },
+  "assets": [
+    {
+      "id": "agn9_static_rt_input",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_coeval_static_rt_input_agn9.h5",
+      "kind": "derived_hdf5",
+      "status": "available_local_reproducible",
+      "size_bytes": 3488728,
+      "sha256": "c25720164947df6a7f64b01d898401cf00e1420e74281f233323d92d2316a8b2",
+      "role": "canonical nine-group source-rebound static RT input",
+      "tracked_sidecar": "data/p4_coeval_static_rt_input_agn9.json"
+    },
+    {
+      "id": "agn9_short_transport_control",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_validation/p4_agn9_stage4_0p001myr.h5",
+      "kind": "derived_hdf5",
+      "status": "available_local_validation_pass",
+      "size_bytes": 23888160,
+      "sha256": "8db00cbab5699523e9652e3c3c05bf033f69b4445d5af7bffc1c3ea7f11feeef",
+      "role": "0.001 Myr nine-group production-runner control"
+    },
+    {
+      "id": "agn9_full_cfl_failed_probe",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_validation/p4_agn9_stage4_one_step.h5",
+      "kind": "derived_hdf5",
+      "status": "available_local_expected_gate_failure",
+      "size_bytes": 23888160,
+      "sha256": "d314579005aaf830d808fe36c69ebe41efa3800800a7bf8fa28dabdad0e12804",
+      "role": "preserved evidence of the disclosed full-CFL source-cell timestep failure; never a passing artifact"
+    },
+    {
+      "id": "coeval_gas_input",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_coeval_static_rt_input.h5",
+      "kind": "derived_hdf5",
+      "status": "available_local_input",
+      "size_bytes": 3488408,
+      "sha256": "bd860c6361b31e945a728a694b98d5ae7f1d45051cb7aaff090c9d36ce47a378",
+      "role": "gas and ionization state copied into the nine-group static input",
+      "tracked_sidecar": "data/p4_coeval_static_rt_input.json"
+    }
+  ],
+  "reproduction": {
+    "source_rebind": ".venv/bin/python tools/p4_attach_pilot_sources.py --gas-input data/p4_coeval_static_rt_input.h5 --gas-metadata data/p4_coeval_static_rt_input.json --zoom-manifest data/p4_high_density_manifest.json --photon-ledger data/p4_pilot_agn_photon_ledger.csv --photon-metadata data/p4_pilot_agn_photon_ledger.json --output data/p4_coeval_static_rt_input_agn9.h5 --metadata-output data/p4_coeval_static_rt_input_agn9.json --gas-scale-factor 0.208497764676753",
+    "validation": ".venv/bin/python tools/validate_agn_nine_group_ledger.py --output data/agn_nine_group_validation.json"
+  }
+}

@@ -86,12 +86,41 @@ def main() -> int:
         p0_metadata = json.loads(p0_metadata_path.read_text(encoding="utf-8"))
         p0_closure = group_spectral_closure_from_metadata(p0_metadata)
         assert p0_ledger.photon_luminosity_s.shape == (2, 9)
+        expected_edges = np.loadtxt(
+            ROOT / "config" / "p0_photon_group_edges_ev.txt", comments="#"
+        )
+        assert np.array_equal(p0_metadata["group_edges_ev"], expected_edges)
+        assert p0_metadata["schema"] == "snrt_agn_photon_ledger_v2"
+        assert (
+            p0_metadata["group_interval_convention"]
+            == "left_closed_right_open_except_final_closed"
+        )
         assert np.all(p0_ledger.photon_luminosity_s[:, :2] == 0.0)
         assert np.all(p0_ledger.photon_luminosity_s[:, 2:] > 0.0)
         assert p0_metadata["group_table_mode"] == "p0_default"
         assert p0_metadata["groups"][0]["closure_status"] == "agn_sed_below_support_zero_photons"
+        assert p0_metadata["groups"][1]["closure_status"] == "agn_sed_below_support_zero_photons"
+        assert p0_metadata["groups"][2]["closure_status"] == "agn_sed_partially_supported_10ev_to_upper"
+        assert p0_metadata["groups"][2]["sed_supported_interval_ev"] == [10.0, 11.2]
+        assert all(
+            group["closure_status"] == "agn_sed_fully_supported"
+            for group in p0_metadata["groups"][3:]
+        )
         assert p0_closure.cross_sections.hydrogen_i.shape == (9,)
         assert np.all(np.isfinite(p0_closure.photoelectron_excess_energy_ev))
+        assert np.all(p0_closure.cross_sections.hydrogen_i[:4] == 0.0)
+        assert np.all(p0_closure.cross_sections.helium_i[:5] == 0.0)
+        assert np.all(p0_closure.cross_sections.helium_ii[:6] == 0.0)
+        assert p0_metadata["groups"][-1]["energy_interval_ev"] == [2000.0, 10000.0]
+        assert p0_metadata["groups"][-1]["total_photon_rate_s"] > 0.0
+        mismatched = json.loads(json.dumps(p0_metadata))
+        mismatched["group_edges_ev"][4] = 13.61
+        try:
+            group_spectral_closure_from_metadata(mismatched)
+        except ValueError as error:
+            assert "exactly match" in str(error)
+        else:
+            raise AssertionError("mismatched ledger edges were accepted")
 
         legacy_output = work / "legacy.csv"
         legacy_metadata_path = work / "legacy.json"
@@ -102,7 +131,10 @@ def main() -> int:
         assert np.all(legacy_ledger.photon_luminosity_s > 0.0)
         assert legacy_metadata["group_table_mode"] == "legacy_five_group_control"
 
-    print("AGN_PHOTON_LEDGER_TEST_OK p0_groups=9 legacy_groups=5")
+    print(
+        "AGN_PHOTON_LEDGER_TEST_OK p0_groups=9 legacy_groups=5 "
+        "hard_xray_group=positive subthreshold_opacity=zero edges=exact"
+    )
     return 0
 
 

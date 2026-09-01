@@ -52,7 +52,7 @@
       "minimum_gas_absorption_scale": 1.0,
       "photoelectron_energy_ledger_l1_relative_error": 0.0,
       "radius_ratio": 0.89526356906085,
-      "runtime_s": 59.29462870769203,
+      "runtime_s": 62.763959001749754,
       "secondary_hydrogen_ionizations": 0.0,
       "secondary_hydrogen_ionizations_per_emitted_photon": 0.0,
       "secondary_ionization": 0
@@ -80,7 +80,7 @@
       "minimum_gas_absorption_scale": 1.0,
       "photoelectron_energy_ledger_l1_relative_error": 0.0,
       "radius_ratio": 0.5213169343724243,
-      "runtime_s": 61.76759349741042,
+      "runtime_s": 64.3065986726433,
       "secondary_hydrogen_ionizations": 0.0,
       "secondary_hydrogen_ionizations_per_emitted_photon": 0.0,
       "secondary_ionization": 0
@@ -108,7 +108,7 @@
       "minimum_gas_absorption_scale": 1.0,
       "photoelectron_energy_ledger_l1_relative_error": 6.9768051687310965e-09,
       "radius_ratio": 0.9589567242057405,
-      "runtime_s": 69.99557447433472,
+      "runtime_s": 73.63475770689547,
       "secondary_hydrogen_ionizations": 1.164314562179334e+63,
       "secondary_hydrogen_ionizations_per_emitted_photon": 0.6035376147505567,
       "secondary_ionization": 1
@@ -154,7 +154,7 @@
       "xi_0.990.dat": "f4469f4441814efb1392874c7ace827102e8ba3fee5633fd2fcfc0add5d3bed4",
       "xi_0.999.dat": "315a6bb16c7f579f3e5dd56dc5771813e484e8772cf2c4b5e782534e6fa897e5"
     },
-    "git_head": "ca90a391296e4fbd99d183df3850de10c537cef4",
+    "git_head": "f792791069810c92c3e23c2339cc16370cef15b3",
     "jax_backend": "cpu",
     "jax_version": "0.11.1",
     "multiphysics_sha256": "711f8918b376b43a9ae758179c69684203fc0dd96ea956aad53fa400e402f7f0",
@@ -175,7 +175,7 @@
       "mu_table.py": "6ce21d7e4dd99a99bd0607c8a1eea65d6a2d9329dabc0d3f3bef5051a5344bb6",
       "multiphysics.py": "711f8918b376b43a9ae758179c69684203fc0dd96ea956aad53fa400e402f7f0",
       "photon_coupling.py": "a80ab1815ae7bcc6a7751badd59c30b273dcea2b855b5950fc77122d993a6056",
-      "primordial.py": "1ca0b4f7ff4dddb89c9fd1e8fcbec9320d7b39972375426d36da51740a0b191f",
+      "primordial.py": "60c0ffe79dedd0dce8d30e52d5232c7e01d434743c2ba8bf44198cf760df90f9",
       "primordial_cooling.py": "2cb0187b0ea3e1f42c405f265a3ddae4015d34b902d886921736e0d202e9b262",
       "quadrature.py": "3e51ee69f40d19418b36a5ff9420a171e91d9a965143ac72d79d35f5fdc8d449",
       "secondary.py": "d91fdd1547c0ffcf8bc5f4319361c22fc94387c2458e4a9ada51a700bd025f05",
@@ -200,7 +200,7 @@
     "a192": {
       "directions": 192,
       "label": "A192",
-      "runtime_s": 52.837316662073135,
+      "runtime_s": 50.7734868042171,
       "steps": 150,
       "transmission": 0.13396017253398895
     },
@@ -210,7 +210,7 @@
     "s8": {
       "directions": 80,
       "label": "S8",
-      "runtime_s": 36.33079553581774,
+      "runtime_s": 33.53954533115029,
       "steps": 150,
       "transmission": 0.1333715170621872
     },
@@ -244,7 +244,7 @@
     "minimum_gas_absorption_scale": 1.0,
     "photoelectron_energy_ledger_l1_relative_error": 0.0,
     "radius_ratio": 0.9556850046311487,
-    "runtime_s": 65.04291456565261,
+    "runtime_s": 64.27726783789694,
     "secondary_hydrogen_ionizations": 0.0,
     "secondary_hydrogen_ionizations_per_emitted_photon": 0.0,
     "secondary_ionization": 0
@@ -261,6 +261,6 @@
     "maximum_fixed_point_residual": 2.396106719970703e-05,
     "mean_x_hii": 0.022493601905807736,
     "radius_ratio": 0.9559015314841105,
-    "runtime_s": 2.0487426798790693
+    "runtime_s": 2.1729385927319527
   }
 }

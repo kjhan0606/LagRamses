@@ -1,5 +1,11 @@
 # P4 coeval static transport result
 
+> Historical five-group result. Stage 4 replaced the canonical AGN ledger with
+> the configured nine-group table through 10 keV. The fields below have not
+> been regenerated and must not be combined with the current metadata. See
+> [`AGN_NINE_GROUP_VALIDATION.md`](AGN_NINE_GROUP_VALIDATION.md); field-level
+> remeasurement belongs to the B3 timestep/spatial-resolution gate.
+
 ## Input contract
 
 The coeval input is `data/p4_coeval_static_rt_input.h5`. It uses output 00017

@@ -161,7 +161,7 @@ variability, radiation hydrodynamics, and science-observable convergence remain
 later gates.
 
 - Canonical JSON: `data/rsla_refinement_validation.json`, SHA256
-  `317f8403f942cd11fba6d15eecc3d85a36db05d8e7b14ed43d55cdfa069def45`.
+  `899ee41325e2c2ec935db4ccf58d38c777aa7e23aecab8121e2cf34ab5fe1431`.
 - Validator SHA256:
   `e3972142762216fbf8968ec6a6e84091873ab67ddbef941502c0e112d46ab92c`.
 

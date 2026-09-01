@@ -63,7 +63,7 @@
     "photons_in_domain": 9.675070131189848e+61,
     "radius_ratio": 0.9918919447737073,
     "reduced_light_fraction": 0.01,
-    "runtime_s": 319.7346497159451,
+    "runtime_s": 309.61039949953556,
     "shape": [
       32,
       32,
@@ -114,11 +114,11 @@
     "x_hii_l1": 4.352812538854778e-06
   },
   "provenance": {
-    "b2_artifact_sha256": "cbb754ceda86ba4655d309c12dae55ceadb9275c35364fe1d45043da6ccd92ca",
+    "b2_artifact_sha256": "dabb8ca58d27dfb0f0ed06ddb485f511f3e3bd67737b5ac2971a1f1d7c700360",
     "devices": [
       "cpu:0"
     ],
-    "git_head": "ca90a391296e4fbd99d183df3850de10c537cef4",
+    "git_head": "f792791069810c92c3e23c2339cc16370cef15b3",
     "jax_backend": "cpu",
     "jax_version": "0.11.1",
     "snrt_core_sha256": {
@@ -138,7 +138,7 @@
       "mu_table.py": "6ce21d7e4dd99a99bd0607c8a1eea65d6a2d9329dabc0d3f3bef5051a5344bb6",
       "multiphysics.py": "711f8918b376b43a9ae758179c69684203fc0dd96ea956aad53fa400e402f7f0",
       "photon_coupling.py": "a80ab1815ae7bcc6a7751badd59c30b273dcea2b855b5950fc77122d993a6056",
-      "primordial.py": "1ca0b4f7ff4dddb89c9fd1e8fcbec9320d7b39972375426d36da51740a0b191f",
+      "primordial.py": "60c0ffe79dedd0dce8d30e52d5232c7e01d434743c2ba8bf44198cf760df90f9",
       "primordial_cooling.py": "2cb0187b0ea3e1f42c405f265a3ddae4015d34b902d886921736e0d202e9b262",
       "quadrature.py": "3e51ee69f40d19418b36a5ff9420a171e91d9a965143ac72d79d35f5fdc8d449",
       "secondary.py": "d91fdd1547c0ffcf8bc5f4319361c22fc94387c2458e4a9ada51a700bd025f05",
@@ -179,7 +179,7 @@
         "photons_in_domain": 3.2089789107680237e+62,
         "radius_ratio": 0.9545832422326123,
         "reduced_light_fraction": 0.003,
-        "runtime_s": 7.107620740309358,
+        "runtime_s": 7.683308584615588,
         "shape": [
           32,
           32,
@@ -209,7 +209,7 @@
         "photons_in_domain": 3.1224673637202696e+62,
         "radius_ratio": 0.9559017572025664,
         "reduced_light_fraction": 0.003,
-        "runtime_s": 3.5043516773730516,
+        "runtime_s": 3.134788205847144,
         "shape": [
           32,
           32,
@@ -238,7 +238,7 @@
         "photons_in_domain": 3.273217236209742e+62,
         "radius_ratio": 0.9516511753534023,
         "reduced_light_fraction": 0.003,
-        "runtime_s": 30.71226540952921,
+        "runtime_s": 30.31800669617951,
         "shape": [
           64,
           64,
@@ -270,7 +270,7 @@
         "photons_in_domain": 9.860507378574275e+61,
         "radius_ratio": 0.9922146782782912,
         "reduced_light_fraction": 0.01,
-        "runtime_s": 19.32024071738124,
+        "runtime_s": 24.698156278580427,
         "shape": [
           32,
           32,
@@ -300,7 +300,7 @@
         "photons_in_domain": 9.675533999302848e+61,
         "radius_ratio": 0.9919491334779713,
         "reduced_light_fraction": 0.01,
-        "runtime_s": 10.657838471233845,
+        "runtime_s": 9.56828561425209,
         "shape": [
           32,
           32,
@@ -329,7 +329,7 @@
         "photons_in_domain": 1.0156156627008386e+62,
         "radius_ratio": 0.9897771046703158,
         "reduced_light_fraction": 0.01,
-        "runtime_s": 107.67047154158354,
+        "runtime_s": 114.09422807022929,
         "shape": [
           64,
           64,
@@ -362,7 +362,7 @@
       "photons_in_domain": 9.675533999302848e+61,
       "radius_ratio": 0.9919491334779713,
       "reduced_light_fraction": 0.01,
-      "runtime_s": 10.657838471233845,
+      "runtime_s": 9.56828561425209,
       "shape": [
         32,
         32,
@@ -391,7 +391,7 @@
       "photons_in_domain": 8.41630684174496e+62,
       "radius_ratio": 0.8455422608495055,
       "reduced_light_fraction": 0.001,
-      "runtime_s": 1.2783572431653738,
+      "runtime_s": 1.2259264178574085,
       "shape": [
         32,
         32,
@@ -420,7 +420,7 @@
       "photons_in_domain": 3.248184020479591e+61,
       "radius_ratio": 1.0019934610975216,
       "reduced_light_fraction": 0.03,
-      "runtime_s": 28.326318610459566,
+      "runtime_s": 28.402538258582354,
       "shape": [
         32,
         32,
@@ -449,7 +449,7 @@
       "photons_in_domain": 3.1224673637202696e+62,
       "radius_ratio": 0.9559017572025664,
       "reduced_light_fraction": 0.003,
-      "runtime_s": 3.5043516773730516,
+      "runtime_s": 3.134788205847144,
       "shape": [
         32,
         32,

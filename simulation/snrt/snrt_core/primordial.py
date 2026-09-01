@@ -164,7 +164,6 @@ def sed_weighted_group_closure(
         raise ValueError("SED energy support must cover every requested group edge")
 
     integration_grid = np.unique(np.concatenate((energies, edges)))
-    integration_spectrum = np.interp(integration_grid, energies, spectrum)
     species_fits = (H_I_FIT, HE_I_FIT, HE_II_FIT)
     thresholds = np.asarray([fit.threshold_ev for fit in species_fits], dtype=np.float64)
     averaged_sigma = np.zeros((3, len(edges) - 1), dtype=np.float64)
@@ -172,22 +171,38 @@ def sed_weighted_group_closure(
     photon_mean_energy = np.zeros(len(edges) - 1, dtype=np.float64)
 
     for group, (lower, upper) in enumerate(zip(edges[:-1], edges[1:], strict=True)):
-        selected = (integration_grid >= lower) & (integration_grid <= upper)
-        group_energy = integration_grid[selected]
-        group_spectrum = integration_spectrum[selected]
+        interior = integration_grid[(integration_grid > lower) & (integration_grid < upper)]
+        group_energy = np.concatenate(([lower], interior, [upper]))
+        group_spectrum = np.interp(group_energy, energies, spectrum)
         photon_count = float(np.trapezoid(group_spectrum, group_energy))
         if not np.isfinite(photon_count) or photon_count <= 0.0:
             raise ValueError(f"SED has no photons in group {group}")
         photon_mean_energy[group] = np.trapezoid(group_spectrum * group_energy, group_energy) / photon_count
         for species, fit in enumerate(species_fits):
-            sigma = _verner_cross_section_numpy(group_energy, fit)
-            weighted_sigma = np.trapezoid(group_spectrum * sigma, group_energy)
+            absorbing_lower = max(float(lower), fit.threshold_ev)
+            absorbing_upper = min(float(upper), fit.maximum_ev)
+            if absorbing_lower >= absorbing_upper:
+                continue
+            absorbing_interior = integration_grid[
+                (integration_grid > absorbing_lower)
+                & (integration_grid < absorbing_upper)
+            ]
+            absorbing_energy = np.concatenate(
+                ([absorbing_lower], absorbing_interior, [absorbing_upper])
+            )
+            absorbing_spectrum = np.interp(absorbing_energy, energies, spectrum)
+            sigma = _verner_cross_section_numpy(absorbing_energy, fit)
+            weighted_sigma = np.trapezoid(
+                absorbing_spectrum * sigma, absorbing_energy
+            )
             averaged_sigma[species, group] = weighted_sigma / photon_count
             if weighted_sigma > 0.0:
                 excess_energy[species, group] = (
                     np.trapezoid(
-                        group_spectrum * sigma * np.maximum(group_energy - thresholds[species], 0.0),
-                        group_energy,
+                        absorbing_spectrum
+                        * sigma
+                        * (absorbing_energy - thresholds[species]),
+                        absorbing_energy,
                     )
                     / weighted_sigma
                 )
@@ -208,6 +223,10 @@ def group_spectral_closure_from_metadata(metadata: Mapping[str, object]) -> Grou
 
     try:
         groups = metadata["groups"]
+        group_edges = np.asarray(metadata["group_edges_ev"], dtype=np.float64)
+        intervals = np.asarray(
+            [group["energy_interval_ev"] for group in groups], dtype=np.float64  # type: ignore[index]
+        )
         closure = metadata["group_spectral_closure"]
         group_energy = np.asarray(
             [group["photon_weighted_mean_energy_ev"] for group in groups], dtype=np.float64  # type: ignore[index]
@@ -223,8 +242,22 @@ def group_spectral_closure_from_metadata(metadata: Mapping[str, object]) -> Grou
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("photon metadata lacks a validated group_spectral_closure") from error
     if (
+        group_edges.ndim != 1
+        or len(group_edges) < 2
+        or not np.isfinite(group_edges).all()
+        or np.any(group_edges <= 0.0)
+        or np.any(np.diff(group_edges) <= 0.0)
+    ):
+        raise ValueError("serialized photon group edges must be finite, positive, and increasing")
+    if intervals.shape != (len(group_edges) - 1, 2) or not np.array_equal(
+        intervals, np.column_stack((group_edges[:-1], group_edges[1:]))
+    ):
+        raise ValueError(
+            "serialized photon group intervals must exactly match group_edges_ev"
+        )
+    if (
         group_energy.ndim != 1
-        or len(group_energy) == 0
+        or len(group_energy) != len(group_edges) - 1
         or not np.isfinite(group_energy).all()
         or np.any(group_energy <= 0.0)
         or np.any(np.diff(group_energy) <= 0.0)

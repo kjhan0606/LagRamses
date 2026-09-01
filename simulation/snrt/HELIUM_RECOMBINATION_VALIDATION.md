@@ -59,7 +59,7 @@ found in the first Opus 5 audit.
 
 The machine-readable result is
 [`data/helium_case_b_recombination_validation.json`](data/helium_case_b_recombination_validation.json),
-SHA256 `9623d39b1a40ede354c7c6c93ddbc8982f76fa028704a70d5767373d93386429`.
+SHA256 `c51cb89dce2311b1f68f8301efa9ddbcfa9fbece91cbb453d809f0e56c0ba305`.
 The artifact records the JAX version and hashes of the one-zone test, B1 test,
 coefficient source, cooling source, and implicit solver. The fail-closed
 [`tests/helium_recombination_artifact.py`](tests/helium_recombination_artifact.py)

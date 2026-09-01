@@ -1,5 +1,12 @@
 # P5 thermochemistry validation
 
+> Stage-4 dependency notice (2026-09-02): the canonical AGN source ledger is
+> now the configured nine-group table through 10 keV. The P5 HDF5 results below
+> used the superseded five-group source input and are retained as historical
+> solver/FS2010 controls only. They must not be combined with the current
+> photon metadata or promoted as nine-group fields. B3 will regenerate the
+> timestep/spatial matrix from `p4_coeval_static_rt_input_agn9.h5`.
+
 > Historical status (2026-09-01): the full-duration tables in this document
 > predate B2 and used the retired atom-inventory attenuation cap with four
 > opacity iterations. They remain convergence diagnostics, not current-solver
@@ -32,9 +39,10 @@ property of this ionized, hot, UV-dominated AGN control, not evidence that
 secondary ionization is generally negligible. The canonical regression bands
 are tightened to `1e-8 < delta<xHII> < 5e-8` and
 `-0.02 K < delta<T> < -0.002 K`. The source-bound report is
-`data/p5_secondary_ionization_validation.json`, checked by
-`tests/p5_secondary_ionization_artifact.py`. This pair is an effect and wiring
-control, not a spatial-resolution or full-duration science promotion.
+`data/p5_secondary_ionization_validation_legacy5_historical.json`, checked by
+`tests/p5_secondary_ionization_artifact.py` as an explicitly superseded
+historical control. This pair is not the current canonical source closure and
+is not a spatial-resolution or full-duration science promotion.
 
 Both runs also require an internal multi-group photoelectron-energy ledger
 below `1e-12`, zero electron-root bracket failures, and the explicit excitation
@@ -207,7 +215,7 @@ step remainders give a different local final-step partition.
 
 - [`FS2010 OFF 0.1 Myr`](data/p5_validation/p5_fs2010_off_s4_c0p1_0p1myr_source_limit0p25_remediated_n32_f64.h5), SHA256 `02ebe242f7fafea46edbb3bcc52a25d61cc26bb3e3f3d17794c28fcb6a822eea`
 - [`FS2010 ON 0.1 Myr`](data/p5_validation/p5_fs2010_on_s4_c0p1_0p1myr_source_limit0p25_remediated_n32_f64.h5), SHA256 `a03e5ec5906fe2659b82e1fa6e9d162d805fd403aa3e09e9263e48fcc0b45d83`
-- [`FS2010 matched-pair report`](data/p5_secondary_ionization_validation.json), SHA256 `0e2edc468e13bc1bd89dffcef0ce8d09fb9d919595a353e058fd270d081d5fb1`
+- [`FS2010 legacy-five-group matched-pair report`](data/p5_secondary_ionization_validation_legacy5_historical.json), SHA256 `7671d8fb88b28a3f99b840b5b66e97c12c05d7bfae3ea8a7dec74139ff7c45ed`
 - [`C0.4_N4`](data/p5_validation/p5_coeval_s8_sub4_6p37myr_conservative_timeavg4_f64.h5)
 - [`C0.1_N1`](data/p5_validation/p5_coeval_s8_courant0p1_sub1_6p37myr_conservative_timeavg4_f64.h5)
 - [`C0.05_N1`](data/p5_validation/p5_coeval_s8_courant0p05_sub1_6p37myr_conservative_timeavg4_f64.h5)

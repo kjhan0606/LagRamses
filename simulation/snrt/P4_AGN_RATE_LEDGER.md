@@ -27,8 +27,13 @@ The current parameterized pilot converter
 table in `config/p0_photon_group_edges_ev.txt`. Its Sazonov-style pilot SED is
 defined from 10 eV upward; the two lower P0 groups therefore carry explicit
 zero-photon/zero-gas-opacity closure entries rather than an invented low-energy
-extrapolation. The retained five-group outputs can be reproduced only with
+extrapolation. The configured `[5.6,11.2] eV` group is explicitly marked
+partially supported and integrates only `[10,11.2] eV`; all higher groups are
+fully supported. The retained five-group outputs can be reproduced only with
 `--legacy-five-groups`; they must not be merged with a nine-group ledger.
+The canonical nine-group regeneration, exact edge gate, threshold-boundary
+repair, and short production-runner integration are recorded in
+[`AGN_NINE_GROUP_VALIDATION.md`](AGN_NINE_GROUP_VALIDATION.md).
 
 ## Preferred coarse-step JSON source
 
