@@ -13,14 +13,24 @@ subroutine read_params
   !--------------------------------------------------
   ! Local variables
   !--------------------------------------------------
-  integer::i,narg,iargc,ierr,levelmax
+  integer::i,narg,iargc,ierr,levelmax,sink_nml_iostat
+  integer::nlevelmax_sink=0
   character(LEN=80)::infile
   character(LEN=80)::cmdarg
+  character(LEN=15)::accretion_scheme_saved
+  character(LEN=15)::agn_acc_method='mass',agn_inj_method='volume'
   integer(kind=8)::ngridtot=0
   integer(kind=8)::nparttot=0
   real(kind=8)::delta_tout=0,tend=0
   real(kind=8)::delta_aout=0,aend=0
-  logical::nml_ok
+  logical::nml_ok,check_energies=.true.,bondi_use_vrel=.true.
+  logical::sink_descent=.false.
+  real(dp)::mass_smbh_seed=0d0,mass_merger_vel_check=1d100
+  real(dp)::eddington_cap=1d0,AGN_fbk_frac_ener=1d0,AGN_fbk_frac_mom=0d0
+  real(dp)::boost_threshold_density=0.1d0,epsilon_kin=1d0
+  real(dp)::AGN_fbk_mode_switch_threshold=0.01d0,kin_mass_loading=100d0
+  real(dp)::mass_star_AGN=0d0,max_mass_nsc=1d15
+  real(dp)::gamma_grad_descent=0d0,fudge_graddescent=1d0
   integer,parameter::tag=1134
   integer::dummy_io,info2
   !--------------------------------------------------
@@ -122,6 +132,21 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   namelist/poisson_params/epsilon,maxiter_fine,restart_phi_warm_start &
        & ,abort_on_mg_nonconvergence,gravity_type,gravity_params &
        & ,cg_levelmin,cic_levelmax
+  ! The active lagRamses VPATH selects sink_particle.kjhan.f90 and the
+  ! cuRamses pm_parameters module, so the upstream read_sink_params routine
+  ! is not linked.  Keep the standard SINK_PARAMS spelling here and connect
+  ! the fields used by the active sink implementation below.
+  namelist/sink_params/n_sink,rho_sink,d_sink,accretion_scheme,merging_timescale &
+       & ,ir_cloud_massive,sink_soft,mass_sink_direct_force,ir_cloud,nsinkmax &
+       & ,create_sinks,check_energies,mass_sink_seed,mass_smbh_seed,c_acc &
+       & ,nlevelmax_sink,eddington_limit,eddington_cap,acc_sink_boost &
+       & ,mass_merger_vel_check,clump_core,verbose_AGN,T2_AGN,T2_min &
+       & ,cone_opening,mass_halo_AGN,mass_clump_AGN,mass_star_AGN &
+       & ,AGN_fbk_frac_ener,AGN_fbk_frac_mom,T2_max,v_max &
+       & ,boost_threshold_density,epsilon_kin,AGN_fbk_mode_switch_threshold &
+       & ,kin_mass_loading,bondi_use_vrel,smbh,agn,max_mass_nsc &
+       & ,agn_acc_method,agn_inj_method,sink_descent,gamma_grad_descent &
+       & ,fudge_graddescent
   namelist/lightcone_params/zmax_cone  &
        & ,elongated_axis_cone1,observer_cone1,minboxr_cone1,maxboxr_cone1 &
        & ,elongated_axis_cone2,observer_cone2,minboxr_cone2,maxboxr_cone2
@@ -1393,6 +1418,54 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
 #ifdef RT
   call rt_read_hydro_params(nml_ok)
 #endif
+  if(sink)then
+     ! Preserve the active default when a SINK_PARAMS group omits the
+     ! optional accretion_scheme key; a sentinel distinguishes that case.
+     accretion_scheme_saved=accretion_scheme
+     accretion_scheme='__unspecified__'
+     rewind(1)
+     read(1,NML=sink_params,IOSTAT=sink_nml_iostat)
+     if(sink_nml_iostat>0)then
+        if(myid==1)write(*,*)'ERROR: invalid &SINK_PARAMS namelist, iostat=', &
+             & sink_nml_iostat
+        nml_ok=.false.
+        accretion_scheme=accretion_scheme_saved
+     else if(sink_nml_iostat<0)then
+        ! SINK_PARAMS is optional for legacy lagRamses inputs.
+        accretion_scheme=accretion_scheme_saved
+     else
+        if(trim(accretion_scheme)=='__unspecified__')then
+           accretion_scheme=accretion_scheme_saved
+        else
+           flux_accretion=.false.
+           threshold_accretion=.false.
+           bondi_accretion=.false.
+           select case(trim(accretion_scheme))
+           case('none')
+              bondi=.false.
+           case('flux')
+              flux_accretion=.true.
+              bondi=.false.
+           case('threshold')
+              threshold_accretion=.true.
+              bondi=.false.
+           case('bondi')
+              bondi_accretion=.true.
+              bondi=.true.
+           case default
+              if(myid==1)write(*,*)'ERROR: unsupported sink accretion_scheme=', &
+                   & trim(accretion_scheme)
+              nml_ok=.false.
+           end select
+        endif
+        ! kjhan_make_sink uses Mseed rather than the upstream mass_sink_seed.
+        if(mass_sink_seed>0d0)Mseed=mass_sink_seed
+        if(myid==1)write(*,'(A,L1,A,A,A,L1)') &
+             & ' Sink parameters: create_sinks=',create_sinks, &
+             & ' accretion_scheme=',trim(accretion_scheme),' bondi=',bondi
+     endif
+     rewind(1)
+  endif
   if (clumpfind)call read_clumpfind_params
   if (movie)call set_movie_vars
 
