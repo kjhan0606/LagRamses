@@ -18,8 +18,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from snrt_core.implicit import implicit_atomic_chemistry_with_transitions
 from snrt_core.jax_thermal_atlas import from_numpy_atlas, net_rate as jax_metal_net_rate
-from snrt_core.primordial import PrimordialState
+from snrt_core.primordial import (
+    PrimordialState,
+    helium_ii_dielectronic_recombination,
+    hui_gnedin_case_b_helium_ii_radiative,
+    hui_gnedin_case_b_helium_iii,
+    hui_gnedin_case_b_hydrogen,
+)
 from snrt_core.primordial_cooling import (
+    BOLTZMANN_ERG_K,
+    _case_b_recombination_cooling_coefficients,
     collisional_ionization_coefficients,
     primordial_cooling_components,
     primordial_net_rate,
@@ -48,6 +56,38 @@ def state(x_hii: float, x_heii: float = 0.01, x_heiii: float = 0.0) -> Primordia
 
 def main() -> None:
     jax.config.update("jax_enable_x64", True)
+    recombination_temperature = jnp.asarray([1.0e4, 2.0e4, 4.0e4, 1.0e5], dtype=jnp.float64)
+    beta_hii, beta_heii_radiative, beta_heii_dielectronic, beta_heiii = map(
+        np.asarray,
+        _case_b_recombination_cooling_coefficients(recombination_temperature),
+    )
+    alpha_hii = np.asarray(hui_gnedin_case_b_hydrogen(recombination_temperature))
+    alpha_heii_radiative = np.asarray(
+        hui_gnedin_case_b_helium_ii_radiative(recombination_temperature)
+    )
+    alpha_heii_dielectronic = np.asarray(
+        helium_ii_dielectronic_recombination(recombination_temperature)
+    )
+    alpha_heiii = np.asarray(hui_gnedin_case_b_helium_iii(recombination_temperature))
+    thermal_energy_bound = 1.5 * BOLTZMANN_ERG_K * np.asarray(recombination_temperature)
+    # Radiative recombination preferentially removes sub-mean-energy electrons.
+    # Dielectronic cooling instead carries the separate autoionizing-level energy
+    # and is checked against its matched Hui--Gnedin coefficient pair below.
+    for beta, alpha in (
+        (beta_hii, alpha_hii),
+        (beta_heii_radiative, alpha_heii_radiative),
+        (beta_heiii, alpha_heiii),
+    ):
+        recombination_energy = beta / alpha
+        assert np.all(recombination_energy > 0.0)
+        assert np.all(recombination_energy < thermal_energy_bound)
+    assert np.allclose(
+        beta_heii_dielectronic / alpha_heii_dielectronic,
+        1.24e-13 / 1.9e-3,
+        rtol=2.0e-13,
+        atol=0.0,
+    )
+
     coefficient = collisional_ionization_coefficients(jnp.asarray(1.0e5, dtype=jnp.float64))
     assert np.isclose(float(coefficient.hydrogen_i), 3.824258925061223e-9, rtol=2.0e-13)
     assert np.isclose(float(coefficient.helium_i), 4.788994257071327e-10, rtol=2.0e-13)

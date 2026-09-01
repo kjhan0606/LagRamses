@@ -16,6 +16,12 @@ backward-Euler solve inside a 20-iteration opacity fixed point. This is the
 B2 path; the standalone test above remains a unit test of the older reusable
 implicit primitive.
 
+The H II, He II, and He III rates now consistently use the Hui--Gnedin case-B
+contract. He III uses the hydrogenic scaling `2 alpha_HII,B(T/4)`; He II uses
+the case-B radiative rate plus a separately identified dielectronic term. The
+temperature-resolved one-zone gate and coefficient values are recorded in
+[`HELIUM_RECOMBINATION_VALIDATION.md`](HELIUM_RECOMBINATION_VALIDATION.md).
+
 ## Spatial sharding
 
 `XShardings` uses a `NamedSharding` mesh over the Cartesian x dimension:

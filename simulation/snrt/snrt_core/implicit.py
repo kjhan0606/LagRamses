@@ -5,7 +5,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .primordial import PrimordialState, cen1992_helium_recombination, hui_gnedin_case_b_hydrogen
+from .primordial import PrimordialState, case_b_helium_recombination, hui_gnedin_case_b_hydrogen
 from .primordial_cooling import collisional_ionization_coefficients
 
 
@@ -85,7 +85,7 @@ def helium_photoionization_backward_euler(
     while preserving positivity and He-number conservation.
     """
 
-    alpha_heii, alpha_heiii = cen1992_helium_recombination(temperature_k)
+    alpha_heii, alpha_heiii = case_b_helium_recombination(temperature_k)
     recombination_heii = alpha_heii * electron_density
     recombination_heiii = alpha_heiii * electron_density
     heiii_factor = 1.0 + dt * recombination_heiii
@@ -141,7 +141,7 @@ def implicit_case_b_recombination_with_recombinations(
         raise ValueError("iterations must be positive.")
 
     alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
-    alpha_heii, alpha_heiii = cen1992_helium_recombination(temperature_k)
+    alpha_heii, alpha_heiii = case_b_helium_recombination(temperature_k)
     x_hii_initial = state.x_hydrogen_ii
     x_heii_initial = state.x_helium_ii
     x_heiii_initial = state.x_helium_iii
@@ -224,7 +224,7 @@ def implicit_atomic_chemistry_with_transitions(
         raise ValueError("dt must be non-negative")
 
     alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
-    alpha_heii, alpha_heiii = cen1992_helium_recombination(temperature_k)
+    alpha_heii, alpha_heiii = case_b_helium_recombination(temperature_k)
     collisional = collisional_ionization_coefficients(temperature_k)
 
     def fractions_from_electron_density(

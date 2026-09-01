@@ -18,7 +18,7 @@ from .primordial import (
     EV_ERG,
     PhotoCrossSections,
     PrimordialState,
-    cen1992_helium_recombination,
+    case_b_helium_recombination,
     default_photoelectron_excess_energy,
     electron_number_density,
     hui_gnedin_case_b_hydrogen,
@@ -196,7 +196,7 @@ def _advance_species(
     electron_density = electron_number_density(opacity_state)
     collisional = collisional_ionization_coefficients(temperature_k)
     alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
-    alpha_heii, alpha_heiii = cen1992_helium_recombination(temperature_k)
+    alpha_heii, alpha_heiii = case_b_helium_recombination(temperature_k)
     tiny = jnp.finfo(state.n_hydrogen.dtype).tiny
     minimum_n_hi = jnp.maximum(1.0e-12 * state.n_hydrogen, tiny)
     minimum_n_he = jnp.maximum(1.0e-12 * state.n_helium, tiny)

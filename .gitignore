@@ -7,6 +7,8 @@ __pycache__/
 
 # Build products
 build/
+/simulation/snrt/bin/
+/g1_synthetic_yields.dat
 *.o
 *.mod
 *.smod

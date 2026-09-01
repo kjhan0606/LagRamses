@@ -17,7 +17,12 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 
-from .primordial import PrimordialState, electron_number_density, neutral_number_densities
+from .primordial import (
+    PrimordialState,
+    electron_number_density,
+    hui_gnedin_case_b_helium_ii_radiative,
+    neutral_number_densities,
+)
 
 
 BOLTZMANN_ERG_K = 1.380649e-16
@@ -109,34 +114,41 @@ def collisional_ionization_coefficients(
     )
 
 
+def _hui_gnedin_case_b_hydrogen_recombination_cooling(
+    temperature_k: jnp.ndarray,
+) -> jnp.ndarray:
+    """Return the Hui--Gnedin H II case-B cooling coefficient."""
+
+    temperature = jnp.maximum(jnp.asarray(temperature_k), 1.0)
+    lambda_hi = 2.0 * 157807.0 / temperature
+    return (
+        3.435e-30
+        * temperature
+        * lambda_hi**1.970
+        / (1.0 + (lambda_hi / 2.25) ** 0.376) ** 3.720
+    )
+
+
 def _case_b_recombination_cooling_coefficients(
     temperature_k: jnp.ndarray,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """Return H II, He II radiative/dielectronic, and He III cooling fits."""
 
     temperature = jnp.maximum(jnp.asarray(temperature_k), 1.0)
-    lambda_hi = 2.0 * 157807.0 / temperature
-    lambda_heii = 2.0 * 285335.0 / temperature
-    lambda_heiii = 2.0 * 631515.0 / temperature
-    hydrogen_ii = (
-        3.435e-30
+    hydrogen_ii = _hui_gnedin_case_b_hydrogen_recombination_cooling(temperature)
+    helium_ii_radiative = (
+        hui_gnedin_case_b_helium_ii_radiative(temperature)
+        * BOLTZMANN_ERG_K
         * temperature
-        * lambda_hi**1.970
-        / (1.0 + (lambda_hi / 2.25) ** 0.376) ** 3.720
     )
-    helium_ii_radiative = 1.26e-14 * BOLTZMANN_ERG_K * temperature * lambda_heii**0.75
     helium_ii_dielectronic = (
         1.24e-13
         * temperature**-1.5
         * jnp.exp(-470000.0 / temperature)
         * (1.0 + 0.3 * jnp.exp(-94000.0 / temperature))
     )
-    helium_iii = (
-        8.0
-        * 3.435e-30
-        * temperature
-        * lambda_heiii**1.970
-        / (1.0 + (lambda_heiii / 2.25) ** 0.376) ** 3.720
+    helium_iii = 8.0 * _hui_gnedin_case_b_hydrogen_recombination_cooling(
+        temperature / 4.0
     )
     return hydrogen_ii, helium_ii_radiative, helium_ii_dielectronic, helium_iii
 

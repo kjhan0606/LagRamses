@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from .primordial import (
     PhotoCrossSections,
     PrimordialState,
-    cen1992_helium_recombination,
+    case_b_helium_recombination,
     electron_number_density,
     hui_gnedin_case_b_hydrogen,
     neutral_number_densities,
@@ -68,7 +68,7 @@ def _advance_species_from_absorption(
 
     n_electron = electron_number_density(state)
     alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
-    alpha_heii, alpha_heiii = cen1992_helium_recombination(temperature_k)
+    alpha_heii, alpha_heiii = case_b_helium_recombination(temperature_k)
     recombine_hii = n_hii_after_photo * (-jnp.expm1(-alpha_hii * n_electron * dt))
     recombine_heii = n_heii_after_photo * (-jnp.expm1(-alpha_heii * n_electron * dt))
     recombine_heiii = n_heiii_after_photo * (-jnp.expm1(-alpha_heiii * n_electron * dt))

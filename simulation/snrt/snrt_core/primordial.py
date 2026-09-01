@@ -1,9 +1,9 @@
 """Primordial H/He photo-chemistry primitives for the static S_N core.
 
-Cross sections use the analytic form of Verner et al. (1996). The H II
-case-B coefficient follows Hui & Gnedin (1997); the initial helium closure
-uses the standard Cen (1992) radiative plus dielectronic approximation until
-its implicit solver and thermal network are introduced.
+Cross sections use the analytic form of Verner et al. (1996). The H II,
+He II, and He III radiative case-B coefficients follow Hui & Gnedin (1997).
+He II dielectronic recombination is added separately to its radiative case-B
+coefficient.
 """
 
 from __future__ import annotations
@@ -320,13 +320,45 @@ def hui_gnedin_case_b_hydrogen(temperature_k: jnp.ndarray) -> jnp.ndarray:
     return 2.753e-14 * lam**1.5 / (1.0 + (lam / 2.740) ** 0.407) ** 2.242
 
 
-def cen1992_helium_recombination(temperature_k: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Return He II->He I and He III->He II coefficients [cm^3 s^-1]."""
+def hui_gnedin_case_a_helium_ii_radiative(temperature_k: jnp.ndarray) -> jnp.ndarray:
+    """He II -> He I radiative case-A coefficient [cm^3 s^-1]."""
     temperature = jnp.maximum(jnp.asarray(temperature_k), 1.0)
-    radiative_heii = 1.5e-10 / temperature**0.6353
-    dielectronic_heii = 1.9e-3 / temperature**1.5 * jnp.exp(-4.7e5 / temperature)
-    dielectronic_heii *= 1.0 + 0.3 * jnp.exp(-9.4e4 / temperature)
-    return radiative_heii + dielectronic_heii, 4.0 * hui_gnedin_case_b_hydrogen(temperature)
+    lambda_helium_i = 2.0 * 285335.0 / temperature
+    return 3.0e-14 * lambda_helium_i**0.654
+
+
+def hui_gnedin_case_b_helium_ii_radiative(temperature_k: jnp.ndarray) -> jnp.ndarray:
+    """He II -> He I radiative case-B coefficient [cm^3 s^-1]."""
+    temperature = jnp.maximum(jnp.asarray(temperature_k), 1.0)
+    lambda_helium_i = 2.0 * 285335.0 / temperature
+    return 1.26e-14 * lambda_helium_i**0.75
+
+
+def helium_ii_dielectronic_recombination(temperature_k: jnp.ndarray) -> jnp.ndarray:
+    """He II -> He I dielectronic coefficient [cm^3 s^-1]."""
+    temperature = jnp.maximum(jnp.asarray(temperature_k), 1.0)
+    coefficient = 1.9e-3 / temperature**1.5 * jnp.exp(-4.7e5 / temperature)
+    return coefficient * (1.0 + 0.3 * jnp.exp(-9.4e4 / temperature))
+
+
+def hui_gnedin_case_b_helium_iii(temperature_k: jnp.ndarray) -> jnp.ndarray:
+    """He III -> He II hydrogenic case-B coefficient [cm^3 s^-1]."""
+    temperature = jnp.maximum(jnp.asarray(temperature_k), 1.0)
+    return 2.0 * hui_gnedin_case_b_hydrogen(temperature / 4.0)
+
+
+def case_b_helium_recombination(temperature_k: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Return total He II and radiative He III case-B coefficients.
+
+    The He II coefficient is the Hui--Gnedin radiative case-B rate plus the
+    separate dielectronic contribution. He III uses the hydrogenic scaling
+    ``alpha_HeIII,B(T) = 2 alpha_HII,B(T/4)``.
+    """
+    return (
+        hui_gnedin_case_b_helium_ii_radiative(temperature_k)
+        + helium_ii_dielectronic_recombination(temperature_k),
+        hui_gnedin_case_b_helium_iii(temperature_k),
+    )
 
 
 def evolve_primordial_fractions(
@@ -342,7 +374,7 @@ def evolve_primordial_fractions(
     """
     n_electron = electron_number_density(state)
     alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
-    alpha_heii, alpha_heiii = cen1992_helium_recombination(temperature_k)
+    alpha_heii, alpha_heiii = case_b_helium_recombination(temperature_k)
 
     probability_hi = -jnp.expm1(-photo_rates.hydrogen_i * dt)
     probability_hii = -jnp.expm1(-alpha_hii * n_electron * dt)

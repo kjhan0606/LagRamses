@@ -1,0 +1,105 @@
+{
+  "schema": "snrt_helium_case_b_recombination_validation_v2",
+  "passed": true,
+  "temperature_k": [
+    10000.0,
+    20000.0,
+    40000.0,
+    100000.0
+  ],
+  "coefficient_cm3_s": {
+    "helium_ii_case_b_radiative_plus_dielectronic": [
+      2.61613003538964e-13,
+      1.555560645177495e-13,
+      9.442148744977009e-14,
+      6.570365334280354e-13
+    ],
+    "helium_ii_case_b_radiative": [
+      2.61613003538964e-13,
+      1.5555602259288404e-13,
+      9.249416442449086e-14,
+      4.652210175917796e-14
+    ],
+    "helium_ii_case_a_radiative_control": [
+      4.224711651152621e-13,
+      2.684871193396924e-13,
+      1.7062781842557062e-13,
+      9.371240259275016e-14
+    ],
+    "helium_iii_case_b": [
+      1.5447607217271068e-12,
+      9.085606647494964e-13,
+      5.183631354719746e-13,
+      2.337400264654508e-13
+    ]
+  },
+  "one_zone": {
+    "purpose": "cross-module consistency at a fixed dimensionless alpha*dt",
+    "electron_density_cm3": 1.0,
+    "elapsed_recombination_times": 3.0,
+    "backward_euler_substeps": 512,
+    "analytic_decay": 0.049787068367863944,
+    "helium_ii_final_fraction": [
+      0.05022486181495307,
+      0.05022486181495307,
+      0.05022486181495307,
+      0.05022486181495307
+    ],
+    "helium_iii_final_fraction": [
+      0.05022486181495307,
+      0.05022486181495307,
+      0.05022486181495307,
+      0.05022486181495307
+    ],
+    "helium_ii_maximum_relative_error": 0.008793316446238375,
+    "helium_iii_maximum_relative_error": 0.008793316446238375,
+    "acceptance_threshold": 0.02
+  },
+  "fixed_elapsed_time_one_zone": {
+    "purpose": "temperature-resolved stiffness at one common physical elapsed time",
+    "electron_density_cm3": 1.0,
+    "elapsed_s": 2000000000000.0,
+    "backward_euler_substeps": 512,
+    "helium_ii_analytic_fraction": [
+      0.592605710774304,
+      0.732631721975139,
+      0.827916500159958,
+      0.26872329636063347
+    ],
+    "helium_ii_final_fraction": [
+      0.5927640566604435,
+      0.7327009471848377,
+      0.8279453264688794,
+      0.269176055990455
+    ],
+    "helium_iii_analytic_fraction": [
+      0.045523734873925366,
+      0.16249284166109149,
+      0.3546136929299297,
+      0.6265792270086079
+    ],
+    "helium_iii_final_fraction": [
+      0.04594834976782808,
+      0.1630164117422039,
+      0.35498559245452355,
+      0.6267128817182084
+    ],
+    "helium_ii_maximum_relative_error": 0.0016848544058269965,
+    "helium_iii_maximum_relative_error": 0.009327329909961213,
+    "acceptance_threshold": 0.02
+  },
+  "physics_contract": {
+    "helium_ii": "Hui--Gnedin case-B radiative plus separate dielectronic recombination",
+    "helium_iii": "alpha_HeIII,B(T) = 2 alpha_HII,B(T/4)",
+    "case_a_helium_ii_not_used_by_network": true,
+    "reference_source": "Hui & Gnedin (1997), Appendix A, DOI 10.1093/mnras/292.1.27"
+  },
+  "provenance": {
+    "jax_version": "0.11.1",
+    "test_sha256": "ca8585722aa4e78f56ff34d9fc330bc9998d475485fb0b5c857d90cc9a335255",
+    "primordial_sha256": "1ca0b4f7ff4dddb89c9fd1e8fcbec9320d7b39972375426d36da51740a0b191f",
+    "implicit_sha256": "a540cb6d4fca5c51c07f7688887f31ed01a5468d6aab73797ad0b8eedd65c080",
+    "primordial_cooling_sha256": "2cb0187b0ea3e1f42c405f265a3ddae4015d34b902d886921736e0d202e9b262",
+    "b1_thermal_coupling_test_sha256": "d3b2b91970b582dbfaed6d0c8990e7a0b78a4220ad21152464137d4c21688450"
+  }
+}

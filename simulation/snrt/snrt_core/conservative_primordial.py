@@ -11,7 +11,7 @@ from .implicit import helium_photoionization_backward_euler, hydrogen_neutral_re
 from .primordial import (
     EV_ERG,
     PhotoCrossSections,
-    cen1992_helium_recombination,
+    case_b_helium_recombination,
     default_photoelectron_excess_energy,
     hui_gnedin_case_b_hydrogen,
 )
@@ -115,7 +115,7 @@ def build_conservative_primordial_step(
         sigma_hei = cross_sections.helium_i.reshape((-1,) + extra_axes)
         sigma_heii = cross_sections.helium_ii.reshape((-1,) + extra_axes)
         alpha_hii = hui_gnedin_case_b_hydrogen(temperature_k)
-        alpha_heii, alpha_heiii = cen1992_helium_recombination(temperature_k)
+        alpha_heii, alpha_heiii = case_b_helium_recombination(temperature_k)
         collisional = collisional_ionization_coefficients(temperature_k)
         tiny = jnp.finfo(n_hydrogen.dtype).tiny
         minimum_n_hi = jnp.maximum(1.0e-12 * n_hydrogen, tiny)
