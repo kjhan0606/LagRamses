@@ -153,3 +153,20 @@ To generate cosmological initial conditions, check out [MUSIC][6].
 To visualize RAMSES data, we encourage you to use [YT][9], [OSYRIS][7] or [PYNBODY][8].
 
 You'll find a lot of useful ressources, links and news about the Ramses community on https://ramses.cnrs.fr/, a website edited by the French "SNO" Ramses.
+
+## LRD/JWST simulation programme
+
+This repository also hosts the HR5 high-redshift SMBH, dual-AGN, and JWST
+little-red-dot simulation programme. Its active scientific scope is recorded
+in [`docs/lrd_zoom_simulation_design.md`](./docs/lrd_zoom_simulation_design.md).
+
+- `simulation/` contains reproducible configurations, source ledgers,
+  analysis tools, test fixtures, and Slurm submission scripts.
+- `manifests/` records immutable locations and SHA256 hashes for large assets;
+  the assets themselves are not committed.
+- `provenance/` records code, build, migration, and external-data provenance.
+- `docs/archive/legacy_dualagn_paper3/` preserves the superseded Paper-III
+  planning record.
+- `docs/lrd_manuscript/` is the placeholder for the future LRD/JWST
+  manuscript. The existing `paper/` submodule remains the cuRAMSES companion
+  paper workspace.

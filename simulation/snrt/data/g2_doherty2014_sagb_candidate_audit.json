@@ -1,0 +1,423 @@
+{
+  "audit_code_sha256": "ecce941edb31bbb7c2461f9e976d0627260425d05dd00a07829e371b625477b3",
+  "blockers": [
+    "no_explicit_redistribution_license_identified",
+    "calcium_missing_from_reduced_chemistry_vector",
+    "low_metallicity_primary_grid_stops_at_7.5_msun",
+    "no_per_star_age_resolved_cumulative_release_history",
+    "terminal_ecsn_or_fe_core_outcome_not_included",
+    "source_selection_and_cross_source_seam_not_approved"
+  ],
+  "canonical_rows_emitted": 0,
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_doherty2014_sagb_candidate_contract_v1.json",
+  "contract_sha256": "6059d95493c6a9e8602860152bb2d4d5cde7f59552166513feb2c4b03696e140",
+  "gate": "G2",
+  "mass_closure": {
+    "maximum_absolute_global_net_gross_identity_residual_msun": 0.0010500398043117554,
+    "pass": true,
+    "records": [
+      {
+        "global_net_gross_identity_residual_msun": -0.00027855044239844006,
+        "implied_unreturned_mass_msun": 0.9671306342300001,
+        "mass_msun": 7.0,
+        "metallicity_mass_fraction": 0.02,
+        "source_initial_mass_fraction_sum": 0.99995335823,
+        "source_species_gross_wind_sum_msun": 6.03286936577,
+        "source_species_net_yield_sum_msun": 2.833262999983596e-06
+      },
+      {
+        "global_net_gross_identity_residual_msun": -0.00033261002688833976,
+        "implied_unreturned_mass_msun": 1.0107317563599993,
+        "mass_msun": 7.5,
+        "metallicity_mass_fraction": 0.02,
+        "source_initial_mass_fraction_sum": 0.99995335823,
+        "source_species_gross_wind_sum_msun": 6.489268243640001,
+        "source_species_net_yield_sum_msun": -2.9939070000035315e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": -0.00034105436022668304,
+        "implied_unreturned_mass_msun": 1.0725997271,
+        "mass_msun": 8.0,
+        "metallicity_mass_fraction": 0.02,
+        "source_initial_mass_fraction_sum": 0.99995335823,
+        "source_species_gross_wind_sum_msun": 6.9274002729,
+        "source_species_net_yield_sum_msun": -1.794814999999077e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": -0.0003481222864763901,
+        "implied_unreturned_mass_msun": 1.1539255162000002,
+        "mass_msun": 8.5,
+        "metallicity_mass_fraction": 0.02,
+        "source_initial_mass_fraction_sum": 0.99995335823,
+        "source_species_gross_wind_sum_msun": 7.3460744838,
+        "source_species_net_yield_sum_msun": -5.488369999959298e-06
+      },
+      {
+        "global_net_gross_identity_residual_msun": -0.00038675437562325624,
+        "implied_unreturned_mass_msun": 1.2261917670999996,
+        "mass_msun": 9.0,
+        "metallicity_mass_fraction": 0.02,
+        "source_initial_mass_fraction_sum": 0.99995335823,
+        "source_species_gross_wind_sum_msun": 7.7738082329000004,
+        "source_species_net_yield_sum_msun": -2.417020000005603e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": -0.0005398398154357043,
+        "implied_unreturned_mass_msun": 0.9519933468901005,
+        "mass_msun": 6.5,
+        "metallicity_mass_fraction": 0.008,
+        "source_initial_mass_fraction_sum": 0.999904271572,
+        "source_species_gross_wind_sum_msun": 5.5480066531098995,
+        "source_species_net_yield_sum_msun": -8.737860000030395e-06
+      },
+      {
+        "global_net_gross_identity_residual_msun": -0.0005575214675225612,
+        "implied_unreturned_mass_msun": 0.9985483985734005,
+        "mass_msun": 7.0,
+        "metallicity_mass_fraction": 0.008,
+        "source_initial_mass_fraction_sum": 0.999904271572,
+        "source_species_gross_wind_sum_msun": 6.0014516014265995,
+        "source_species_net_yield_sum_msun": 1.6988060000005345e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": -0.0007044393957907295,
+        "implied_unreturned_mass_msun": 1.0577206408229998,
+        "mass_msun": 7.5,
+        "metallicity_mass_fraction": 0.008,
+        "source_initial_mass_fraction_sum": 0.999904271572,
+        "source_species_gross_wind_sum_msun": 6.442279359177,
+        "source_species_net_yield_sum_msun": -8.773011999995844e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": -0.0004681274272299288,
+        "implied_unreturned_mass_msun": 1.1405481010300003,
+        "mass_msun": 8.0,
+        "metallicity_mass_fraction": 0.008,
+        "source_initial_mass_fraction_sum": 0.999904271572,
+        "source_species_gross_wind_sum_msun": 6.85945189897,
+        "source_species_net_yield_sum_msun": 0.0001885171199999876
+      },
+      {
+        "global_net_gross_identity_residual_msun": -0.0007461157103056984,
+        "implied_unreturned_mass_msun": 1.2243519521099993,
+        "mass_msun": 8.5,
+        "metallicity_mass_fraction": 0.008,
+        "source_initial_mass_fraction_sum": 0.999904271572,
+        "source_species_gross_wind_sum_msun": 7.275648047890001,
+        "source_species_net_yield_sum_msun": -4.962936000002222e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": 0.000258419600749619,
+        "implied_unreturned_mass_msun": 1.0059062538359997,
+        "mass_msun": 6.5,
+        "metallicity_mass_fraction": 0.004,
+        "source_initial_mass_fraction_sum": 1.000039237181,
+        "source_species_gross_wind_sum_msun": 5.494093746164,
+        "source_species_net_yield_sum_msun": 4.2846850000009895e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": 0.00021529406899201952,
+        "implied_unreturned_mass_msun": 1.0636339549566998,
+        "mass_msun": 7.0,
+        "metallicity_mass_fraction": 0.004,
+        "source_initial_mass_fraction_sum": 1.000039237181,
+        "source_species_gross_wind_sum_msun": 5.9363660450433,
+        "source_species_net_yield_sum_msun": -1.7632200000035284e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": 0.0003476820509227805,
+        "implied_unreturned_mass_msun": 1.1578361497900005,
+        "mass_msun": 7.5,
+        "metallicity_mass_fraction": 0.004,
+        "source_initial_mass_fraction_sum": 1.000039237181,
+        "source_species_gross_wind_sum_msun": 6.3421638502099995,
+        "source_species_net_yield_sum_msun": 9.883341999996731e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": 0.00028796185333430447,
+        "implied_unreturned_mass_msun": 1.2274478807799998,
+        "mass_msun": 8.0,
+        "metallicity_mass_fraction": 0.004,
+        "source_initial_mass_fraction_sum": 1.000039237181,
+        "source_species_gross_wind_sum_msun": 6.77255211922,
+        "source_species_net_yield_sum_msun": 2.2226000000037558e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": 0.0002450314863367553,
+        "implied_unreturned_mass_msun": 1.06501295253456,
+        "mass_msun": 6.5,
+        "metallicity_mass_fraction": 0.001,
+        "source_initial_mass_fraction_sum": 1.000042041871,
+        "source_species_gross_wind_sum_msun": 5.43498704746544,
+        "source_species_net_yield_sum_msun": 1.6534462000009543e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": 0.0002796472186958898,
+        "implied_unreturned_mass_msun": 1.1435612440891,
+        "mass_msun": 7.0,
+        "metallicity_mass_fraction": 0.001,
+        "source_initial_mass_fraction_sum": 1.000042041871,
+        "source_species_gross_wind_sum_msun": 5.8564387559109,
+        "source_species_net_yield_sum_msun": 3.343157599990909e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": 0.00027236838970650886,
+        "implied_unreturned_mass_msun": 1.2180464754800004,
+        "mass_msun": 7.5,
+        "metallicity_mass_fraction": 0.001,
+        "source_initial_mass_fraction_sum": 1.000042041871,
+        "source_species_gross_wind_sum_msun": 6.2819535245199996,
+        "source_species_net_yield_sum_msun": 8.263310000027796e-06
+      },
+      {
+        "global_net_gross_identity_residual_msun": 1.1190460213792813e-05,
+        "implied_unreturned_mass_msun": 1.0993491082052005,
+        "mass_msun": 6.5,
+        "metallicity_mass_fraction": 0.0001,
+        "source_initial_mass_fraction_sum": 1.0000044214321,
+        "source_species_gross_wind_sum_msun": 5.4006508917947995,
+        "source_species_net_yield_sum_msun": -1.2688151000077604e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": -6.52129961492686e-05,
+        "implied_unreturned_mass_msun": 1.1732854269694801,
+        "mass_msun": 7.0,
+        "metallicity_mass_fraction": 0.0001,
+        "source_initial_mass_fraction_sum": 1.0000044214321,
+        "source_species_gross_wind_sum_msun": 5.82671457303052,
+        "source_species_net_yield_sum_msun": -9.097541899999842e-05
+      },
+      {
+        "global_net_gross_identity_residual_msun": 0.0010500398043117554,
+        "implied_unreturned_mass_msun": 1.2311285834814,
+        "mass_msun": 7.5,
+        "metallicity_mass_fraction": 0.0001,
+        "source_initial_mass_fraction_sum": 1.0000044214321,
+        "source_species_gross_wind_sum_msun": 6.2688714165186,
+        "source_species_net_yield_sum_msun": 0.0010223224149999931
+      }
+    ],
+    "tolerance_msun": 0.0011
+  },
+  "primary_grid": {
+    "age_resolved_release_history": false,
+    "baseline_branch": "VW93 MassExp without synthetic thermal-pulse extrapolation",
+    "mass_msun": [
+      6.5,
+      7.0,
+      7.5,
+      8.0,
+      8.5,
+      9.0
+    ],
+    "metallicity_mass_fraction": [
+      0.0001,
+      0.001,
+      0.004,
+      0.008,
+      0.02
+    ],
+    "metallicity_to_mass_msun": {
+      "0.0001": [
+        6.5,
+        7.0,
+        7.5
+      ],
+      "0.001": [
+        6.5,
+        7.0,
+        7.5
+      ],
+      "0.004": [
+        6.5,
+        7.0,
+        7.5,
+        8.0
+      ],
+      "0.008": [
+        6.5,
+        7.0,
+        7.5,
+        8.0,
+        8.5
+      ],
+      "0.02": [
+        7.0,
+        7.5,
+        8.0,
+        8.5,
+        9.0
+      ]
+    },
+    "model_count": 20,
+    "tracked_elements_absent": [
+      "Ca"
+    ],
+    "tracked_elements_present": [
+      "C",
+      "Fe",
+      "H",
+      "He",
+      "Mg",
+      "N",
+      "Ne",
+      "O",
+      "S",
+      "Si"
+    ]
+  },
+  "production_ready": false,
+  "quality_findings": {
+    "calcium_missing_from_all_primary_models": true,
+    "literal_species_label_anomalies": [
+      {
+        "branch_label": "VW-M",
+        "file": "TABLE2-VW-MML.txt",
+        "line": 539,
+        "mass_msun": 8.0,
+        "metallicity_mass_fraction": 0.004,
+        "species": "al-6"
+      }
+    ],
+    "source_label_repair_applied": false,
+    "synthetic_extrapolated_columns_selected": false
+  },
+  "schema": "snrt-g2-doherty2014-sagb-candidate-audit",
+  "schema_version": 1,
+  "semantic_firewalls": {
+    "agb_wind_and_terminal_supernova_double_count_forbidden": true,
+    "cross_source_interpolation_allowed": false,
+    "out_of_domain_extrapolation_allowed": false
+  },
+  "source_identity": {
+    "article_dois": [
+      "10.1093/mnras/stt1877",
+      "10.1093/mnras/stu571"
+    ],
+    "candidate_id": "doherty2014_sagb",
+    "file_count": 9,
+    "files": {
+      "INDEX.html": {
+        "bytes": 1927,
+        "sha256": "0909db5cf86a9493e2fc5972da31dff6795b56c051219c394b80bf4bb5fde19c"
+      },
+      "P3Doh14b-table1.txt": {
+        "bytes": 20262,
+        "sha256": "b059363032f8fd3478ecb8dc5f8813f76560cd8f68c0839bdafc5fe5fee44b89"
+      },
+      "P3Doh14b-table2.txt": {
+        "bytes": 23542,
+        "sha256": "68d88fe126df3f08db3faa5057789cd9b426c1e6aaf4fcd279cfc4f3fa5b82b6"
+      },
+      "P3Doh14b-table3.txt": {
+        "bytes": 10112,
+        "sha256": "fa11fe4896958415418429ec61747bb00b89947f1a561e8b471ed83e87b2d123"
+      },
+      "P3Doh14b-table4.txt": {
+        "bytes": 1458,
+        "sha256": "b2e4c905d06f2d36e2d2fbf58e487f9d0d1f657586faf84981ed1d98a2039413"
+      },
+      "TABLE1-VW93ML.txt": {
+        "bytes": 46964,
+        "sha256": "56002a6871e02c45998b2097ea6638cdf21fd831a4e0baef40e01c9253e17b80"
+      },
+      "TABLE2-VW-MML.txt": {
+        "bytes": 43619,
+        "sha256": "b1b57b5d277260775966ccd8adffb997d91c7f6c5721b2b8cace0da3b6b2fcc0"
+      },
+      "TABLE3-8.5M-TESTCASES.txt": {
+        "bytes": 16724,
+        "sha256": "36743c234509cc3a1a013b3bcbc0d00535c6c41ab0eab194b10d7f6a78da10b7"
+      },
+      "TABLE4-InitialComposition.txt": {
+        "bytes": 1842,
+        "sha256": "d8e5cb633b593719e8f750ca502efac4e917efb9de620acab0f7322a4ff7c249"
+      }
+    },
+    "redistribution_license_verified": false,
+    "research_access_verified": true,
+    "source_page": "https://users.monash.edu/~cdoherty/research/yields.html"
+  },
+  "status": "candidate_acquired_physics_audited_license_unresolved",
+  "uncertainty_branches": {
+    "P3Doh14b-table2.txt": {
+      "branch_labels": [
+        "B95",
+        "B95 alpha=2.1"
+      ],
+      "coordinate_map": {
+        "0.0001": [
+          6.5,
+          7.0,
+          7.5
+        ],
+        "0.001": [
+          6.5,
+          7.0,
+          7.0,
+          7.5
+        ]
+      },
+      "model_count": 7
+    },
+    "P3Doh14b-table3.txt": {
+      "branch_labels": [
+        "OPAC VW93"
+      ],
+      "coordinate_map": {
+        "0.0001": [
+          6.5,
+          7.0,
+          7.5
+        ]
+      },
+      "model_count": 3
+    },
+    "TABLE2-VW-MML.txt": {
+      "branch_labels": [
+        "VW-M"
+      ],
+      "coordinate_map": {
+        "0.004": [
+          6.5,
+          7.0,
+          7.5,
+          8.0
+        ],
+        "0.008": [
+          6.5,
+          7.0,
+          7.5,
+          8.0,
+          8.5
+        ],
+        "0.02": [
+          7.0,
+          7.5,
+          8.0,
+          8.5
+        ]
+      },
+      "model_count": 13
+    },
+    "TABLE3-8.5M-TESTCASES.txt": {
+      "branch_labels": [
+        "B95",
+        "R75",
+        "VL",
+        "VW93 a1.5",
+        "VW93 a2"
+      ],
+      "coordinate_map": {
+        "0.02": [
+          8.5,
+          8.5,
+          8.5,
+          8.5,
+          8.5
+        ]
+      },
+      "model_count": 5
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "schema": "snrt-g2-source-adapter-contract",
+  "schema_version": 1,
+  "status": "review_only",
+  "gate": "G2",
+  "purpose": "Define a lossless review representation for staged source tables before any scientific interpretation or canonical conversion.",
+  "output_schema": "snrt-g2-source-review-adapter-v1",
+  "invariants": {
+    "verify_every_manifest_fingerprint_before_parsing": true,
+    "preserve_source_axes_and_source_reported_species": true,
+    "preserve_duplicate_source_coordinates": true,
+    "derive_age_resolved_release_history": false,
+    "assign_runtime_feedback_channels": false,
+    "aggregate_isotopes_or_apply_radioactive_decay": false,
+    "fill_missing_energy_or_momentum_with_zero": false,
+    "emit_canonical_rows": false
+  },
+  "source_profiles": {
+    "limongi_chieffi_2018_cds": {
+      "metallicity_axis": "[Fe/H] relative to an unstated-for-runtime solar abundance mapping",
+      "reported_yield_unit_in_cds_readme": "---",
+      "expected_recommended_yield_models": 108,
+      "expected_wind_yield_models": 48,
+      "expected_isotopes_per_model": 333,
+      "source_snapshot_semantics": [
+        "recommended set-R final isotopic ejecta: wind plus terminal ejecta at 13--25 Msun; wind only above 25 Msun",
+        "integrated wind isotopic ejecta at 13--25 Msun",
+        "evolutionary phase duration rows",
+        "pre-supernova structure rows"
+      ]
+    },
+    "nugrid_set1ext_mesaonly_fryer12_delay": {
+      "metallicity_axis": "birth metallicity mass fraction Z",
+      "reported_yield_unit": "Msun",
+      "expected_blocks_per_component": 61,
+      "expected_unique_mass_metallicity_coordinates": 60,
+      "expected_elements_per_block": 80,
+      "source_snapshot_semantics": [
+        "integrated wind plus delayed-explosion SN element ejecta",
+        "integrated wind-only element ejecta",
+        "integrated wind plus pre-SN element ejecta above the remnant mass cut"
+      ]
+    }
+  },
+  "promotion_gate": {
+    "canonical_conversion_allowed": false,
+    "required_before_promotion": [
+      "approved source citation, version, license, and provenance sidecar",
+      "explicit cumulative age-release construction including an age-zero anchor",
+      "non-overlapping runtime channel ownership and a no-double-counting proof",
+      "canonical returned-mass, remnant-mass, energy, and momentum definitions",
+      "approved isotope decay and reduced-element mapping where applicable",
+      "complete runtime mass and metallicity policy without implicit clamping",
+      "mass, element, energy, and population-normalization closure reports"
+    ]
+  }
+}

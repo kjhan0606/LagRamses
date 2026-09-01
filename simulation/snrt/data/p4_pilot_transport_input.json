@@ -1,0 +1,14 @@
+{
+  "purpose": "transport and chemistry pilot only; not a coeval science input",
+  "gas_input": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_high_density_rt_input.h5",
+  "gas_scale_factor": 0.20836524,
+  "photon_ledger": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_pilot_agn_photon_ledger.csv",
+  "source_scale_factor": 0.20849776467675274,
+  "delta_a_source_minus_gas": 0.00013252467675273216,
+  "source_count": 10,
+  "group_count": 5,
+  "limits": [
+    "The output_00017 HDF5 snapshot is incomplete above AMR level 15 after wall-time cancellation.",
+    "A complete coeval hydro snapshot is required before physical interpretation."
+  ]
+}

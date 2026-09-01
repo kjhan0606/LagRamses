@@ -1,0 +1,31 @@
+{
+  "schema": "snrt-g2-limongi-phase-mass-history-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source_candidate_id": "limongi_chieffi_2018_cds",
+  "source_table": "table5.dat",
+  "phase_order": ["MS", "H", "He", "C", "Ne", "O", "Si", "PSN"],
+  "time_semantics": "Each table5 Time value is the lifetime/duration of that evolutionary phase; cumulative stellar age is the ordered sum of phase lifetimes.",
+  "mass_semantics": "At each phase endpoint, cumulative wind mass lost is initial_mass minus table5 total_mass.",
+  "duplicate_policy": "Collapse an exactly identical repeated phase row once; fail closed if any repeated coordinate has different physical values.",
+  "integrated_wind_comparison": {
+    "initial_mass_msun_le_25": "sum all table9 isotopic wind ejecta",
+    "initial_mass_msun_gt_25": "sum all table8 recommended-set-R isotopic ejecta, which the source defines as wind only"
+  },
+  "limitations": {
+    "time_resolved_isotopic_composition_available": false,
+    "phase_endpoint_total_mass_precision_msun": 0.01,
+    "canonical_conversion_allowed": false,
+    "runtime_deposition_allowed": false
+  },
+  "approval": {
+    "production_ready": false,
+    "required_before_approval": [
+      "Reconcile phase-endpoint mass loss with the integrated isotopic wind table at source precision.",
+      "Provide or approve a time-resolved wind composition model rather than scaling one terminal composition over all phases.",
+      "Select the rotation distribution and interpolation policy.",
+      "Cross-calibrate the source with the low/intermediate-mass wind and AGB source."
+    ]
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "schema": "snrt-g2-baseline-metallicity-demand-audit",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "comparison_population_ultra_low_z_uncovered",
+  "production_ready": false,
+  "canonical_rows_emitted": 0,
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_baseline_metallicity_demand_contract_v1.json",
+  "baseline_identity": {
+    "baseline_id": "feedback_transition_phase0_10cMpc_h_z0_epsstar002",
+    "role": "transitional_feedback_baseline_comparison_only",
+    "output": "output_00011",
+    "defines_production_domain": false
+  },
+  "fingerprints": {
+    "metadata": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_stellar_catalogue.json",
+      "bytes": 3589,
+      "sha256": "281d60b995a3aa38c5003ba9b9ee1947643159a0fa42e94b178277969c240ad2"
+    },
+    "catalogue": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_stellar_catalogue.csv",
+      "bytes": 14464372,
+      "sha256": "205336d5d2d8a6db66213cdb517a4994a0ccf8ee35627e793a78cbdf30b709a5"
+    }
+  },
+  "stellar_population": {
+    "star_count": 42342,
+    "unique_source_id_count": 42342,
+    "birth_metallicity_mass_fraction": {
+      "minimum": 0.0,
+      "maximum": 1.1813492899814927e-09,
+      "mean": 9.329877281785934e-11,
+      "quantiles_nearest_rank": {
+        "p01": 9.999999999982631e-51,
+        "p50": 6.407363809502348e-11,
+        "p90": 2.2808483952496954e-10,
+        "p99": 3.9517641315372763e-10
+      },
+      "zero_count_after_recorded_sanitization": 338,
+      "positive_at_or_below_1p01e_minus_50_count": 3935
+    },
+    "age_myr": {
+      "minimum": 0.002185223689377258,
+      "maximum": 750.0991583655856
+    },
+    "metadata_csv_statistics_close": true
+  },
+  "candidate_domain_comparison": {
+    "lowest_positive_full_grid_candidate_metallicity_mass_fraction": 3.236e-05,
+    "stars_below_lowest_positive_full_grid_candidate": 42342,
+    "fraction_below_lowest_positive_full_grid_candidate": 1.0,
+    "maximum_baseline_z_to_candidate_lower_edge_offset_dex": 4.437630188329667,
+    "stockinger_zero_metallicity_model_is_discrete_event_anchor": true,
+    "jost_primordial_yield_asset_staged": false,
+    "positive_z_full_grid_covers_comparison_population": false
+  },
+  "policy": {
+    "comparison_population_defines_production_domain": false,
+    "metallicity_floor_or_clamp_allowed": false,
+    "solar_source_extrapolation_to_ultra_low_z_allowed": false,
+    "discrete_zero_metallicity_event_anchor_counts_as_full_grid": false,
+    "unstaged_article_values_may_fill_domain": false,
+    "required_production_birth_metallicity_domain_selected": false,
+    "canonical_rows_emitted": 0,
+    "production_ready": false
+  },
+  "interpretation": "The inherited comparison population probes ultra-low birth metallicity, but it does not by itself select the future production domain. Every comparison star lies below the lowest staged positive-Z full-grid candidate node, and neither solar extrapolation nor a discrete zero-metallicity event anchor is accepted as coverage.",
+  "blockers": [
+    "required_production_birth_metallicity_domain_is_not_selected",
+    "comparison_population_is_below_all_staged_positive_z_full_grid_candidate_nodes",
+    "no_staged_primordial_or_ultra_low_z_full_channel_yield_asset",
+    "stockinger_zero_metallicity_event_anchor_is_not_a_full_grid",
+    "metallicity_floor_clamp_and_solar_extrapolation_are_forbidden"
+  ],
+  "audit_code_sha256": "f172a6e262dae07405cd0a5b55fbe3cdf4105e92b33407c107503b9ec0a6d2fd"
+}

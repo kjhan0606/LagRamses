@@ -1,7 +1,16 @@
-# Fortran build artifacts
+# Python and local environments
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+.ipynb_checkpoints/
+
+# Build products
+build/
 *.o
 *.mod
 *.smod
+*.preomp_bak
 
 # RAMSES executables
 bin/ramses_final
@@ -12,7 +21,6 @@ bin/ramses_final1d
 bin/*.exe
 bin/ramses_ref3d
 bin/ramses_slab3d
-bin/ramses_final2d
 bin/test_darkcool
 bin/darkcool_*.dat
 
@@ -22,15 +30,27 @@ bin/darkcool_*.dat
 *.cubin
 *.ptx
 
-# Run / output artifacts (not source)
+# Scheduler and runtime products
+*.log
+*.err
+*.out
+slurm-*.out
 output_*/
 movie*/
-*.h5
-*.hdf5
-*.out
-*.log
+job_*/
+runs/**/output_*/
+runs/**/job_*/
 core
 core.*
+
+# Large external assets; commit their manifests only
+external/
+.quarantine_hdf5/
+ic/
+outputs/
+raw_data/
+*.h5
+*.hdf5
 
 # Editor backups
 *.swp
@@ -38,9 +58,3 @@ core.*
 *~
 .*.swp
 .DS_Store
-
-# Python / tooling
-__pycache__/
-*.pyc
-.ipynb_checkpoints/
-*.preomp_bak

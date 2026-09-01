@@ -1,0 +1,167 @@
+{
+  "audit_version": 1,
+  "compilation": {
+    "compile_date": "08/30/26-22:39:20",
+    "last_commit": "65d080243d29f918490148352543269796462e30-dirty",
+    "local_branch": "main",
+    "patch_dir": "../patch/lagRamses",
+    "remote_repo": "git@github.com:kjhan0606/LagRamses.git"
+  },
+  "completion_marker": true,
+  "components": {
+    "amr": {
+      "bytes": 5255049976,
+      "file_count": 32,
+      "present": true,
+      "rank_count_matches_ncpu": true
+    },
+    "grav": {
+      "bytes": 8406623232,
+      "file_count": 32,
+      "present": true,
+      "rank_count_matches_ncpu": true
+    },
+    "hydro": {
+      "bytes": 35727026432,
+      "file_count": 32,
+      "present": true,
+      "rank_count_matches_ncpu": true
+    },
+    "part": {
+      "bytes": 15708436126,
+      "file_count": 32,
+      "present": true,
+      "rank_count_matches_ncpu": true
+    },
+    "rt": {
+      "bytes": 0,
+      "file_count": 0,
+      "present": false,
+      "rank_count_matches_ncpu": false
+    },
+    "sink": {
+      "bytes": 0,
+      "file_count": 0,
+      "present": false,
+      "rank_count_matches_ncpu": false
+    }
+  },
+  "expected_ranks": 32,
+  "hash_policy": "text_metadata_only; native binary payloads not hashed",
+  "hydro_descriptor": {
+    "declared_nvar": 17,
+    "field_count": 17,
+    "fields": {
+      "1": "density",
+      "10": "passive_scalar_5",
+      "11": "passive_scalar_6",
+      "12": "passive_scalar_7",
+      "13": "passive_scalar_8",
+      "14": "passive_scalar_9",
+      "15": "passive_scalar_*",
+      "16": "passive_scalar_*",
+      "17": "passive_scalar_*",
+      "2": "velocity_x",
+      "3": "velocity_y",
+      "4": "velocity_z",
+      "5": "thermal_pressure",
+      "6": "passive_scalar_1",
+      "7": "passive_scalar_2",
+      "8": "passive_scalar_3",
+      "9": "passive_scalar_4"
+    }
+  },
+  "hydro_descriptor_failures": [],
+  "info": {
+    "H0": "0.684000015258789E+02",
+    "aexp": "0.148540709098256E+00",
+    "boxlen": "0.100000000000000E+01",
+    "levelmax": "14",
+    "levelmin": "9",
+    "ncpu": "32",
+    "ndim": "3",
+    "ngridmax": "3125056",
+    "nstep_coarse": "976",
+    "omega_b": "0.480917205293937E-01",
+    "omega_k": "0.000000000000000E+00",
+    "omega_l": "0.699693918228149E+00",
+    "omega_m": "0.300306081771851E+00",
+    "time": "-0.529819183421982E+01",
+    "unit_d": "0.805930740370582E-27",
+    "unit_l": "0.668867499578396E+25",
+    "unit_t": "0.993540535715914E+16"
+  },
+  "makefile_flags": {
+    "F90": "mpiifx",
+    "NVAR": "17",
+    "PHASE0_STELLAR_ENRICHMENT": "1",
+    "SOLVER": "hydro"
+  },
+  "metadata_sha256": {
+    "compilation": "0b241bd5ce3c4dd447a0041867e5bf3afa8bfd259a021fb3d6803fd1c66bb23e",
+    "header": "377747e70f044dde816b4f802c66c60a76743fb0a698a9a4da60b35fdfe6327e",
+    "hydro_descriptor": "0e391f67764daf0e5c4339fb10521ec0f52c7462941b83f23d5c510ad9ddc3d8",
+    "info": "968ec854e0285c002bf7dfc1a753e2df076b3593c501097780c38e6b2129e080",
+    "makefile": "79637a8e171ab7a3b7cb01bd3528b8157d55a555ab5281af10c736b16cf81f99",
+    "namelist": "0fee1de7715628af480e78269193aa510731dd8b48148db2f5a6bae389b34be9",
+    "physics_inventory": "464df6b07b056658762df630ec4318d94e0efea144ab19837e8a048cb5e26530"
+  },
+  "missing_native_components": [],
+  "missing_required_metadata": [],
+  "native_payload_bytes_stat_sum": 65097135766,
+  "output_dir": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/output_00011",
+  "output_number": "00011",
+  "physics_inventory": {
+    "aexp": "1.4854070909825592E-01",
+    "completion_marker": "COMPLETE",
+    "conservation_ledger_path": "none",
+    "conservation_ledger_reason": "no_time_series_in_normal_output",
+    "conservation_ledger_sha256": "none",
+    "conservation_ledger_status": "unavailable",
+    "dark_matter_channel_status": "available",
+    "dark_matter_model": "cdm",
+    "force_source_ledger_path": "none",
+    "force_source_ledger_reason": "no_source_decomposition_in_normal_output",
+    "force_source_ledger_sha256": "none",
+    "force_source_ledger_status": "unavailable",
+    "gas_channel_status": "available",
+    "gas_snapshot_prefix": "hydro_00011.out",
+    "nstep_coarse": "976",
+    "output_number": "00011",
+    "particle_snapshot_prefix": "part_00011.out",
+    "potential_checkpoint_status": "unvalidated",
+    "potential_snapshot_prefix": "grav_00011.out",
+    "raw_snapshot_directory": "output_00011/",
+    "sink_info_file": "none",
+    "star_formation_enabled": "T",
+    "stars_channel_status": "requires_particle_classification",
+    "stars_particle_snapshot_prefix": "part_00011.out",
+    "time_code": "-5.2981918342198195E+00"
+  },
+  "rank_count_mismatches": [],
+  "record_type": "native_ramses_output_audit",
+  "rt_runtime_evidence": "unverified_from_native_output_metadata",
+  "runtime_log_evidence": {
+    "first_element_field": 7,
+    "path": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/run.log",
+    "phase0_enabled_marker": true,
+    "phase0_table_rows": 9,
+    "sha256": "0f5f9d4cd9cc7e3a7b03f30863266080b0c755fa243836133465f6625af50834",
+    "snrt_advance_seconds": 0.0,
+    "snrt_diagnose_seconds": 0.0,
+    "stellar_feedback_mode_line": null,
+    "total_metal_field": 6
+  },
+  "scientific_readiness": {
+    "direct_snrt_input": false,
+    "hydro_native_checkpoint": true,
+    "reason": [
+      "native binary checkpoint requires explicit RAMSES-to-canonical field mapping",
+      "source ledger and sink metadata are unavailable in this output",
+      "dust and non-equilibrium chemistry fields are not certified by this audit"
+    ]
+  },
+  "sink_info_available": false,
+  "source_ledger_available": false,
+  "status": "complete_native_metadata_audited"
+}

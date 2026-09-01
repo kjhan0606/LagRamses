@@ -1,0 +1,17 @@
+{
+  "status": "not_registered",
+  "target": "Fable",
+  "kind": "one_time",
+  "scheduled_for": "2026-09-02T09:00:00+09:00",
+  "timezone": "Asia/Seoul",
+  "repository": "/gpfs/kjhan/LRD_JWST",
+  "read_only": true,
+  "registration_blocker": "This Codex session exposes no scheduler or Fable connector. This file is the exact hand-off payload; it is not evidence that an external task was created.",
+  "prompt": "At 2026-09-02 09:00 Asia/Seoul, perform a read-only audit of SN/AGN feedback physics and code implementation for the LRD_JWST project. Inspect /gpfs/kjhan/LRD_JWST and, read-only, /home/kjhan/BACKUP/lagRamses/patch/lagRamses. Focus on the Phase-0 yield-table contract and channel flow (wind, AGB, SNII, SNIa, PISN), cumulative release semantics, IMF and mass ranges, SNIa delay-time normalization, mass/element/energy/momentum conservation, runtime interpolation and source deposition; then audit the AGN coarse-state ledger, Bondi/Eddington/efficiency/Lbol accounting, thermal/jet feedback, accumulator timing and deduplication, SED/escape/obscuration, and the connection from source ledgers to SNRT/dust. Separate implemented, partial, missing, and unapproved items. Cite file:line evidence, identify physics or algorithmic risks rather than ordinary coding style bugs, and give severity, acceptance gates, and a prioritized validation plan. Do not edit files, commit changes, submit simulations, or alter external state. Return a concise report suitable for provenance/feedback_implementation_plan.md.",
+  "requested_output": {
+    "evidence": "file:line references",
+    "classification": ["implemented", "partial", "missing", "unapproved"],
+    "priority": ["P0", "P1", "P2", "P3"],
+    "deliverables": ["physics/code audit", "acceptance gates", "prioritized tests", "comparison against the stopped transitional baseline"]
+  }
+}

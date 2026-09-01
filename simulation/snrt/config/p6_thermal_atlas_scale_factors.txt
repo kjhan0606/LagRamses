@@ -1,0 +1,3 @@
+# Bracket the source snapshot a=0.208497764676753 for runtime interpolation.
+0.20849000
+0.20851000

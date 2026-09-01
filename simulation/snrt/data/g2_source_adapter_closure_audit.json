@@ -1,0 +1,214 @@
+{
+  "adapter_code_sha256": "2c5c5ff366fea6487fd9ee616a8099a27b133c51be9872b0df65765ebaa23531",
+  "adapter_contract_sha256": "146edbbaf21b9ee414e5268b547ef26d61850887b0ec3513ecfbd9ff69c33b0e",
+  "candidates": {
+    "limongi_chieffi_2018_cds": {
+      "canonical_closure_available": false,
+      "canonical_closure_blockers": [
+        "source_mass_unit_is_literature_supported_but_project_approval_is_missing",
+        "isotope_decay_and_element_mapping_unresolved",
+        "returned_mass_and_remnant_mass_semantics_unresolved",
+        "age_resolved_cumulative_history_absent",
+        "energy_and_momentum_absent"
+      ],
+      "coordinate_alignment": {
+        "evolutionary_property_model_count": 108,
+        "presupernova_property_model_count": 96,
+        "recommended_missing_evolutionary_property_count": 0,
+        "recommended_missing_presupernova_coordinates": [
+          {
+            "initial_mass_msun": 120.0,
+            "metallicity_feh": -3,
+            "rotation_velocity_km_s": 0
+          },
+          {
+            "initial_mass_msun": 120.0,
+            "metallicity_feh": -2,
+            "rotation_velocity_km_s": 0
+          },
+          {
+            "initial_mass_msun": 120.0,
+            "metallicity_feh": -1,
+            "rotation_velocity_km_s": 0
+          },
+          {
+            "initial_mass_msun": 80.0,
+            "metallicity_feh": -3,
+            "rotation_velocity_km_s": 150
+          },
+          {
+            "initial_mass_msun": 120.0,
+            "metallicity_feh": -3,
+            "rotation_velocity_km_s": 150
+          },
+          {
+            "initial_mass_msun": 80.0,
+            "metallicity_feh": -2,
+            "rotation_velocity_km_s": 150
+          },
+          {
+            "initial_mass_msun": 120.0,
+            "metallicity_feh": -2,
+            "rotation_velocity_km_s": 150
+          },
+          {
+            "initial_mass_msun": 120.0,
+            "metallicity_feh": -1,
+            "rotation_velocity_km_s": 150
+          },
+          {
+            "initial_mass_msun": 80.0,
+            "metallicity_feh": -3,
+            "rotation_velocity_km_s": 300
+          },
+          {
+            "initial_mass_msun": 120.0,
+            "metallicity_feh": -3,
+            "rotation_velocity_km_s": 300
+          },
+          {
+            "initial_mass_msun": 80.0,
+            "metallicity_feh": -2,
+            "rotation_velocity_km_s": 300
+          },
+          {
+            "initial_mass_msun": 120.0,
+            "metallicity_feh": -2,
+            "rotation_velocity_km_s": 300
+          }
+        ],
+        "recommended_missing_presupernova_property_count": 12,
+        "recommended_yield_model_count": 108
+      },
+      "duplicate_evolutionary_model_phase_coordinate_count": 10,
+      "recommended_minus_wind_diagnostic": {
+        "definition": "recommended set-R yield minus wind yield at exactly matching 13--25 Msun source coordinates; the paper identifies this as non-wind terminal ejecta",
+        "isotope_difference_count": 15984,
+        "maximum_absolute_difference_in_source_units": 10.17996,
+        "models_with_negative_difference": 0,
+        "most_negative_difference_in_source_units": 0.0,
+        "negative_difference_count": 0,
+        "overlapping_model_count": 48,
+        "runtime_channel_assignment_approved": false,
+        "source_semantics_supported": true
+      },
+      "recommended_yield_budget": {
+        "canonical_mass_closure_claim": "not_allowed; source units and physical returned/remnant definitions are unresolved",
+        "maximum_source_yield_sum_to_initial_mass_ratio": 0.921158992828179,
+        "model_count": 108,
+        "source_yield_sum_exceeds_initial_mass_count": 0
+      },
+      "status": "source_internal_diagnostics_pass_canonical_closure_blocked",
+      "wind_yield_budget": {
+        "canonical_mass_closure_claim": "not_allowed; source units and physical returned/remnant definitions are unresolved",
+        "maximum_source_yield_sum_to_initial_mass_ratio": 0.6582898730845984,
+        "model_count": 48,
+        "source_yield_sum_exceeds_initial_mass_count": 0
+      }
+    },
+    "nugrid_set1ext_mesaonly_fryer12_delay": {
+      "canonical_closure_available": false,
+      "canonical_closure_blockers": [
+        "duplicate_mass_metallicity_coordinate_requires_source_selection_policy",
+        "integrated_snapshots_are_not_cumulative_age_histories",
+        "source_component_semantics_resolved_but_project_channel_ownership_unapproved",
+        "runtime_mass_grid_incomplete",
+        "energy_and_momentum_absent"
+      ],
+      "component_closure": {
+        "pre_explosion": {
+          "block_count": 61,
+          "blocks_within_diagnostic_rounding_tolerance": 61,
+          "diagnostic_rounding_tolerance_msun": 0.001,
+          "duplicate_coordinate_diagnostics": [
+            {
+              "final_masses_identical": true,
+              "initial_mass_msun": 5.0,
+              "lifetimes_identical": true,
+              "maximum_element_yield_difference_msun": 0.0,
+              "metallicity_mass_fraction": 0.01,
+              "multiplicity": 2,
+              "numerically_identical_source_records": true
+            }
+          ],
+          "maximum_absolute_initial_abundance_sum_residual": 4.95733849970037e-07,
+          "maximum_absolute_initial_minus_final_minus_yields_msun": 0.0008345166235104173,
+          "negative_source_yield_value_count": 0,
+          "nonnegative_source_yield_value_count": 4880,
+          "rounding_tolerance_is_not_a_canonical_approval_threshold": true
+        },
+        "total": {
+          "block_count": 61,
+          "blocks_within_diagnostic_rounding_tolerance": 61,
+          "diagnostic_rounding_tolerance_msun": 0.001,
+          "duplicate_coordinate_diagnostics": [
+            {
+              "final_masses_identical": true,
+              "initial_mass_msun": 5.0,
+              "lifetimes_identical": true,
+              "maximum_element_yield_difference_msun": 0.0,
+              "metallicity_mass_fraction": 0.01,
+              "multiplicity": 2,
+              "numerically_identical_source_records": true
+            }
+          ],
+          "maximum_absolute_initial_abundance_sum_residual": 4.95733849970037e-07,
+          "maximum_absolute_initial_minus_final_minus_yields_msun": 0.0008345166235104173,
+          "negative_source_yield_value_count": 0,
+          "nonnegative_source_yield_value_count": 4880,
+          "rounding_tolerance_is_not_a_canonical_approval_threshold": true
+        },
+        "winds": {
+          "block_count": 61,
+          "blocks_within_diagnostic_rounding_tolerance": 41,
+          "diagnostic_rounding_tolerance_msun": 0.001,
+          "duplicate_coordinate_diagnostics": [
+            {
+              "final_masses_identical": true,
+              "initial_mass_msun": 5.0,
+              "lifetimes_identical": true,
+              "maximum_element_yield_difference_msun": 0.0,
+              "metallicity_mass_fraction": 0.01,
+              "multiplicity": 2,
+              "numerically_identical_source_records": true
+            }
+          ],
+          "maximum_absolute_initial_abundance_sum_residual": 4.95733849970037e-07,
+          "maximum_absolute_initial_minus_final_minus_yields_msun": 16.752300030486,
+          "negative_source_yield_value_count": 0,
+          "nonnegative_source_yield_value_count": 4880,
+          "rounding_tolerance_is_not_a_canonical_approval_threshold": true
+        }
+      },
+      "component_relation_diagnostics": {
+        "aligned_block_count": 61,
+        "definition": "source-supported decompositions at identical ordinal and coordinate: total-winds is delayed-explosion SN ejecta; pre_explosion-winds is pre-SN ejecta",
+        "pre_explosion_minus_winds_maximum_value_msun": 9.250169999999999,
+        "pre_explosion_minus_winds_negative_value_count": 0,
+        "runtime_channel_assignment_approved": false,
+        "source_semantics_supported": true,
+        "total_equals_pre_explosion_block_count": 41,
+        "total_equals_winds_block_count": 41,
+        "total_minus_pre_explosion_maximum_absolute_value_msun": 0.45549999999999996,
+        "total_minus_pre_explosion_negative_value_count": 715,
+        "total_minus_winds_maximum_value_msun": 9.24617,
+        "total_minus_winds_negative_value_count": 0,
+        "winds_equals_pre_explosion_block_count": 41
+      },
+      "status": "source_internal_diagnostics_pass_canonical_closure_blocked"
+    }
+  },
+  "canonical_rows_emitted": 0,
+  "closure_audit_code_sha256": "484006a7e8ee561ec536da315236804ed8b47c66a2118d23348a42adc9cd8912",
+  "gate": "G2",
+  "gate_blockers": [
+    "source_internal_consistency_does_not_supply_missing_age_energy_momentum_or_channel_semantics",
+    "candidate_sources_are_not_approved",
+    "no_complete_runtime_grid_for_channels_1_to_3"
+  ],
+  "production_ready": false,
+  "schema": "snrt-g2-source-adapter-closure-audit",
+  "schema_version": 1,
+  "source_semantics_evidence_sha256": "b1ffb82287cab92ebada5091617c536ea584a92622cb111d100db0d9ea24ae11",
+  "status": "review_only_blocked"
+}

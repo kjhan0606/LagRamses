@@ -1,0 +1,135 @@
+{
+  "schema": "snrt-g2-limongi2024-transition-fate-audit",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_fate_policy_blocked",
+  "production_ready": false,
+  "canonical_rows_emitted": 0,
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_limongi2024_transition_fate_contract_v1.json",
+  "source_identity": {
+    "candidate_id": "limongi2024_transition_fates",
+    "article_doi": "10.3847/1538-4365/ad12c1",
+    "metallicity": "source_solar",
+    "rotation": "nonrotating",
+    "license": "CC BY 4.0",
+    "license_verified": true
+  },
+  "fingerprints": {
+    "ARTICLE.html": {
+      "bytes": 576338,
+      "sha256": "89b85f83185766d791f18e1db22abe5f8f68e2e2e6f88179c3ca661d72837905"
+    },
+    "TABLE4_TP_MRT.txt": {
+      "bytes": 87274,
+      "sha256": "8ca914e8373b28ec58b7c2928d85801b68e917d18a792b408f3de141989bc664"
+    }
+  },
+  "article_evidence": {
+    "scope_evidence_pass": true,
+    "fate_statement_evidence_pass": true,
+    "thermal_pulse_extrapolation_evidence_pass": true,
+    "threshold_sensitivity_evidence_pass": true,
+    "license_evidence_pass": true,
+    "required_evidence_labels": [
+      "alternate_ec_threshold_and_mass",
+      "extrapolated_tp_fate",
+      "high_sagb_fate_uncertainty",
+      "ordinary_ccsn_boundary",
+      "potential_ecsn_interval",
+      "reference_ec_threshold",
+      "reference_ecsn_lower_mass",
+      "solar_nonrotating_scope",
+      "white_dwarf_interval"
+    ]
+  },
+  "machine_readable_tp_table": {
+    "title": "Main properties of the TP phase for all models",
+    "data_row_count": 963,
+    "model_count": 10,
+    "model_masses_msun": [
+      7.0,
+      7.5,
+      8.0,
+      8.5,
+      8.8,
+      9.0,
+      9.05,
+      9.1,
+      9.15,
+      9.2
+    ],
+    "pulse_count_by_mass": {
+      "7.00": 27,
+      "7.50": 23,
+      "8.00": 25,
+      "8.50": 67,
+      "8.80": 81,
+      "9.00": 116,
+      "9.05": 170,
+      "9.10": 159,
+      "9.15": 193,
+      "9.20": 102
+    },
+    "pulse_sequences_contiguous": true,
+    "table_contains_terminal_event_yields": false
+  },
+  "source_reported_fate_statements": {
+    "classical_agb_co_core_model_msun": 7.0,
+    "sagb_onemg_model_interval_msun": [
+      7.5,
+      9.2
+    ],
+    "hybrid_or_onemg_white_dwarf_model_interval_msun": [
+      7.5,
+      8.0
+    ],
+    "potential_ecsn_model_interval_msun": [
+      8.5,
+      9.2
+    ],
+    "ordinary_core_collapse_lower_model_mass_msun": 9.22,
+    "reference_electron_capture_co_core_mass_msun": 1.415,
+    "reference_minimum_potential_ecsn_mass_interval_msun": [
+      8.5,
+      8.8
+    ],
+    "alternate_electron_capture_co_core_mass_msun": 1.36,
+    "alternate_minimum_potential_ecsn_mass_msun": 8.3,
+    "terminal_fate_requires_extrapolated_thermal_pulse_evolution": true,
+    "potential_ecsn_is_not_a_deterministic_event_assignment": true
+  },
+  "project_transition_policy": {
+    "runtime_channel_3_lower_boundary_msun": 8.0,
+    "runtime_boundary_supported_as_universal_explosion_threshold": false,
+    "continuous_fate_interpolation_allowed": false,
+    "cross_metallicity_extrapolation_allowed": false,
+    "cross_rotation_extrapolation_allowed": false,
+    "stockinger_e8p8_anchor_may_define_population_fate_law": false,
+    "unresolved_runtime_edge_interval_msun": [
+      8.0,
+      8.8
+    ],
+    "unresolved_discrete_model_seam_msun": [
+      9.2,
+      9.22
+    ],
+    "canonical_rows_emitted": 0,
+    "canonical_yields_available": false,
+    "canonical_energy_available": false,
+    "canonical_momentum_available": false,
+    "age_resolved_composition_history_available": false,
+    "runtime_promotion_allowed": false
+  },
+  "interpretation": "At source-solar metallicity and zero rotation, Limongi et al. constrain the transition but do not define a deterministic continuous explosion law. The 8--8.8 Msun runtime edge remains a fate-policy gap, not a yield interval that may be filled by interpolation.",
+  "blockers": [
+    "solar_nonrotating_fate_evidence_only",
+    "thermal_pulse_table_is_not_a_yield_or_event_table",
+    "eight_to_eight_point_eight_msun_terminal_fate_is_not_deterministic",
+    "discrete_fate_models_may_not_be_interpolated",
+    "stockinger_e8p8_event_anchor_cannot_define_a_population_fate_law",
+    "no_event_yields_energy_momentum_or_age_resolved_composition",
+    "runtime_channel3_lower_boundary_at_eight_msun_is_not_approved",
+    "project_fate_policy_and_runtime_channel_assignment_are_not_approved"
+  ],
+  "audit_code_sha256": "00e1f7df65d06895e41e43f15f4c1207395ebfb9acfd4557ae34dde65af1bfab"
+}

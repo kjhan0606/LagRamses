@@ -1,0 +1,114 @@
+{
+  "schema": "snrt-g2-boccioli-roberti2026-candidate-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source": {
+    "candidate_id": "boccioli_roberti2026_neutrino_ccsn",
+    "article_citation": "Boccioli & Roberti 2026, Astronomy & Astrophysics 709, A201",
+    "article_doi": "10.1051/0004-6361/202557714",
+    "data_doi": "10.5281/zenodo.19503168",
+    "zenodo_record_id": 19503168,
+    "license": "cc-by-4.0",
+    "release_root_relative_path": "boccioli_roberti2026_ccsn",
+    "files": {
+      "README": {
+        "bytes": 3987,
+        "md5": "4a42dda7587574978b7730cc45d02c8e",
+        "sha256": "66dae04f90bf7b96460199a7ebbedf0126c1e70ab840e1693a8a326cd7ae2316"
+      },
+      "LC18.zip": {
+        "bytes": 816270,
+        "md5": "c1d21fcbdf7ed200344881f8a47a211b",
+        "sha256": "249aea46713ab41cad7e8d7406835c205e4f02d36958e113a8f2231f81ebef5e"
+      },
+      "WH07.zip": {
+        "bytes": 377318,
+        "md5": "9f6f436fbb1ffdd5ccc535f2a0976a79",
+        "sha256": "1576e96d9366dd7b36a75abbbc6e9ced55c1157891417062a5cbbf439dbed84c"
+      },
+      "F23.zip": {
+        "bytes": 444104,
+        "md5": "43f568e8ba7a94248a7627b24f04a7c4",
+        "sha256": "41b72c45e7743d9855637ae56cf1ef264c000b4639ed4805b177ab7fe5079a10"
+      },
+      "zenodo_record_19503168.json": {
+        "bytes": 4618,
+        "sha256": "bc04d8a528e5a852524be3e0cd2d973a12b39090ad0bf2aaf71305016d17eb67"
+      }
+    }
+  },
+  "release_semantics": {
+    "Post": "post-explosion ejecta at 30 s after bounce, decayed to stable species",
+    "Post_NoDecay": "post-explosion ejecta at 30 s after bounce before radioactive decay",
+    "Presn": "pre-supernova inventory above the emergent mass cut",
+    "Wind": "integrated pre-collapse wind ejecta reported by the progenitor calculation",
+    "successful_explosion_mass_cut": "baryonic neutron-star mass; source reports no fallback",
+    "failed_explosion_policy": "Post and Presn are zero; pre-collapse Wind must remain independently auditable",
+    "canonical_channel_partition": "Post and Wind are separate ownership domains and must never be summed twice through independent source channels"
+  },
+  "grids": {
+    "LC18": {
+      "archive": "LC18.zip",
+      "archive_member_count": 100,
+      "model_count": 108,
+      "mass_msun": [13, 15, 20, 25, 30, 40, 60, 80, 120],
+      "metallicity_labels": ["A", "B", "C", "D"],
+      "metallicity_feh": {"A": 0, "B": -1, "C": -2, "D": -3},
+      "metallicity_mass_fraction": {"A": 0.01345, "B": 0.003236, "C": 0.0003236, "D": 0.00003236},
+      "rotation_km_s": [0, 150, 300],
+      "element_count": 54,
+      "stable_isotope_count": 147,
+      "no_decay_isotope_count": 1530
+    },
+    "WH07": {
+      "archive": "WH07.zip",
+      "archive_member_count": 12,
+      "model_count": 32,
+      "mass_msun": [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 35, 40, 45, 50, 55, 60, 70, 80, 100, 120],
+      "metallicity": "solar_only",
+      "element_count": 81,
+      "stable_isotope_count": 283,
+      "no_decay_isotope_count": 1530
+    },
+    "F23_single": {
+      "archive": "F23.zip",
+      "archive_member_count": 20,
+      "model_count": 35,
+      "mass_msun": [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
+      "metallicity": "solar_only",
+      "population": "single_star",
+      "element_count": 43,
+      "stable_isotope_count": 123,
+      "no_decay_isotope_count": 1530
+    },
+    "F23_binary": {
+      "archive": "F23.zip",
+      "model_count": 31,
+      "mass_msun": [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
+      "metallicity": "solar_only",
+      "population": "binary_stripped",
+      "element_count": 43,
+      "stable_isotope_count": 123,
+      "no_decay_isotope_count": 1530
+    }
+  },
+  "audit_policy": {
+    "required_tracked_elements": ["h", "he", "c", "n", "o", "ne", "mg", "si", "s", "ca", "fe"],
+    "f23_success_post_mass_closure_tolerance_msun": 0.015,
+    "f23_wind_mass_closure_tolerance_msun": 0.0051,
+    "archive_path_traversal_allowed": false,
+    "canonical_rows_emitted": 0,
+    "out_of_domain_extrapolation_allowed": false,
+    "explosion_energy_inference_from_figures_allowed": false,
+    "momentum_inference_without_an_approved_energy_and_coupling_model_allowed": false,
+    "project_approval_required": true
+  },
+  "approval": {
+    "license_verified": true,
+    "physics_source_selected": false,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

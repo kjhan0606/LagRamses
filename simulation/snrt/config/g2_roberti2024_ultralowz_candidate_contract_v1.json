@@ -1,0 +1,87 @@
+{
+  "schema": "snrt-g2-roberti2024-ultralowz-candidate-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source": {
+    "candidate_id": "roberti2024_ultralowz_ccsn",
+    "article_citation": "Roberti, Limongi & Chieffi 2024, ApJS 270, 28",
+    "article_doi": "10.3847/1538-4365/ad1686",
+    "arxiv_id": "2312.02942",
+    "release_root_relative_path": "roberti2024_ultralowz_ccsn",
+    "files": {
+      "ARXIV_ABSTRACT.html": {"bytes": 45081, "sha256": "a1b210972dcfd833780cc00e65fb32a4215b5021e4a2ab587581e235fb768e5b"},
+      "ARXIV_SOURCE.tar.gz": {"bytes": 18065808, "sha256": "35cb05180a5db9fc17e87ce2bde93096f59352a5686eaf48faadf31f906d3e5c"},
+      "apjsad1686t5_mrt.txt": {"bytes": 30902, "sha256": "a82009e0b59479502a480efc9c6f7a726f6d20262ba4308332d058fdca21a69f"},
+      "apjsad1686t8_mrt.txt": {"bytes": 6587, "sha256": "c6eb350710782b0e033ce82ed1973a5d046f5ed478863ec5bd5fa92e8954be70"},
+      "apjsad1686t9_mrt.txt": {"bytes": 6587, "sha256": "a804aa121f140ffd2613ab069697feb176b2e9ba9c3b7091dd7c4ded70f91fa4"},
+      "apjsad1686t10_mrt.txt": {"bytes": 18609, "sha256": "6bb9889791a00df3b85d05cc762c89ac8f8fc06b3fbd51d875eb7d91afe8bf1a"},
+      "apjsad1686t11_mrt.txt": {"bytes": 16195, "sha256": "2800de23aae975f6885d6c66f10f24a0deb34b5ef6c05cd8e71a76b682aad065"},
+      "apjsad1686t12_mrt.txt": {"bytes": 13781, "sha256": "ca4918d233df0a4851b6c8cfbea4f92c2519411a7fa7106de9c0bcb66699b6d5"},
+      "apjsad1686t13_mrt.txt": {"bytes": 16195, "sha256": "b7aad3bcc9a151dc5b665b3550cf86952681a8f241322eb5eb060d4f194ccc55"}
+    },
+    "urls": {
+      "abstract": "https://arxiv.org/abs/2312.02942",
+      "source": "https://export.arxiv.org/e-print/2312.02942",
+      "mrt_root": "https://content.cld.iop.org/journals/0067-0049/270/2/28/revision1/"
+    }
+  },
+  "source_grid": {
+    "metallicity_mass_fraction_by_code": {"z": 0.0, "f": 3.236e-7, "e": 3.236e-6},
+    "model_rotation_km_s": {
+      "015z": [0, 150, 300, 450, 600, 700, 800],
+      "025z": [0, 150, 300, 450, 600, 700, 800],
+      "015f": [0, 150, 300, 450, 600, 800],
+      "025f": [0, 150, 300, 600, 800],
+      "015e": [0, 300, 600, 700],
+      "025e": [0, 300, 450, 600, 700]
+    },
+    "model_count": 34,
+    "evolution_phase_sequence": ["MS", "H", "He", "C", "Ne", "O", "Si"],
+    "evolution_row_count": 238
+  },
+  "yield_tables": {
+    "8": {"mass_msun": 15.0, "metallicity_code": "z", "isotope_rows": 77, "official_models": ["015z000", "015z150", "015z450", "015z700", "015z800"], "source_only_models": ["015z300", "015z600"]},
+    "9": {"mass_msun": 25.0, "metallicity_code": "z", "isotope_rows": 77, "official_models": ["025z000", "025z150", "025z300", "025z600", "025z800"], "source_only_models": ["025z450", "025z700"]},
+    "10": {"mass_msun": 15.0, "metallicity_code": "f", "isotope_rows": 214, "official_models": ["015f000", "015f150", "015f300", "015f450", "015f600", "015f800"], "source_only_models": []},
+    "11": {"mass_msun": 25.0, "metallicity_code": "f", "isotope_rows": 214, "official_models": ["025f000", "025f150", "025f300", "025f600", "025f800"], "source_only_models": []},
+    "12": {"mass_msun": 15.0, "metallicity_code": "e", "isotope_rows": 214, "official_models": ["015e000", "015e300", "015e600", "015e700"], "source_only_models": []},
+    "13": {"mass_msun": 25.0, "metallicity_code": "e", "isotope_rows": 214, "official_models": ["025e000", "025e300", "025e450", "025e600", "025e700"], "source_only_models": []}
+  },
+  "source_semantics": {
+    "yield_caption": "explosive yields in Msun",
+    "explosion_trigger": "thermal bomb deposited at 0.8 Msun",
+    "energy_selection": "minimum thermal energy leading to full ejection above the Fe core",
+    "remnant_selection": "mass cut chosen to eject 0.07 Msun of Ni56",
+    "mixing_and_fallback_included": false,
+    "machine_readable_explosion_energy_table_available": false,
+    "source_tex_explosion_properties_table_available": true,
+    "separate_wind_and_terminal_yield_components_available": false,
+    "age_resolved_isotopic_release_available": false
+  },
+  "audit_policy": {
+    "canonical_rows_emitted": 0,
+    "official_mrt_and_source_only_columns_may_be_merged_for_production": false,
+    "mass_interpolation_allowed": false,
+    "metallicity_extrapolation_allowed": false,
+    "rotation_marginalization_selected": false,
+    "wind_terminal_partition_may_be_inferred": false,
+    "model_025z600_may_be_promoted": false,
+    "nonoutlier_mass_budget_maximum_absolute_residual_msun": 0.1,
+    "nonoutlier_mass_budget_maximum_relative_residual": 0.004,
+    "expected_mass_budget_outlier_models": ["025z600"],
+    "project_approval_required": true
+  },
+  "use_terms": {
+    "article_and_arxiv_source_license": "CC BY 4.0",
+    "redistribution_with_attribution_allowed": true
+  },
+  "approval": {
+    "research_access_verified": true,
+    "license_verified": true,
+    "physics_source_selected": false,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "coarse": {
+    "absorbed_photons": 1.982398447909878e+62,
+    "dt_myr": 0.050942560976833424,
+    "fixed_point_max_fraction_residual": 1.3113021850585938e-06,
+    "h_ledger_relative_error": 1.499340530674718e-05,
+    "hei_ledger_relative_error": 1.320275284022227e-06,
+    "heii_ledger_relative_error": 1.2627392261355883e-08,
+    "steps": 24,
+    "temperature_at_ceiling_fraction": 0.0,
+    "temperature_max": 40498.453125,
+    "temperature_mean": 10109.08203125,
+    "temperature_min": 10000.0
+  },
+  "fine": {
+    "absorbed_photons": 1.9862036943793342e+62,
+    "dt_myr": 0.025471280488416712,
+    "fixed_point_max_fraction_residual": 4.470348358154297e-07,
+    "h_ledger_relative_error": 5.779718507823454e-06,
+    "hei_ledger_relative_error": 3.7632207259510483e-07,
+    "heii_ledger_relative_error": 1.1298753525171548e-08,
+    "steps": 48,
+    "temperature_at_ceiling_fraction": 0.0,
+    "temperature_max": 32553.015625,
+    "temperature_mean": 10111.2392578125,
+    "temperature_min": 10000.0
+  },
+  "fixed_point_iterations": 16,
+  "mean_abs_dlog10_temperature_coarse_to_fine": 0.00023706296633463353,
+  "passed": true,
+  "scale_factor": 0.20851,
+  "shape": [
+    32,
+    32,
+    32
+  ],
+  "sn_order": 4,
+  "temperature_table_bounds_k": [
+    10.0,
+    1000000000.0
+  ],
+  "thermal_implicit_iterations": 24,
+  "x_heii_l1_coarse_to_fine": 0.0001987164287129417,
+  "x_heiii_l1_coarse_to_fine": 2.8318478143773973e-05,
+  "x_hii_l1_coarse_to_fine": 6.453788228100166e-05
+}

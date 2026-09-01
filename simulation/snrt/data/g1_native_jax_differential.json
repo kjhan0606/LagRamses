@@ -1,0 +1,166 @@
+{
+  "status": "pass",
+  "backend": "cpu",
+  "jax_version": "0.11.1",
+  "table": "/gpfs/kjhan/LRD_JWST/build/g1_native/g1_synthetic_yields.dat",
+  "native_result": "/gpfs/kjhan/LRD_JWST/build/g1_native/g1_native_interpolation.txt",
+  "query_count": 6,
+  "matrix": [
+    {
+      "query": [
+        1.0,
+        0.001,
+        0.0
+      ],
+      "native": {
+        "returned_mass": 0.3502,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3e+48,
+        "momentum_x": 3.0000000000000003e+30,
+        "ejected_H": 0.3502,
+        "net_yield_H": 0.0
+      },
+      "jax": {
+        "returned_mass": 0.3502,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3e+48,
+        "momentum_x": 3.0000000000000003e+30,
+        "ejected_H": 0.3502,
+        "net_yield_H": 0.0
+      },
+      "max_abs_difference": 0.0,
+      "max_relative_difference": 0.0
+    },
+    {
+      "query": [
+        2.0,
+        0.01,
+        1.0
+      ],
+      "native": {
+        "returned_mass": 0.802,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3.1e+48,
+        "momentum_x": 3.1000000000000003e+30,
+        "ejected_H": 0.802,
+        "net_yield_H": 0.01
+      },
+      "jax": {
+        "returned_mass": 0.802,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3.1e+48,
+        "momentum_x": 3.1000000000000003e+30,
+        "ejected_H": 0.802,
+        "net_yield_H": 0.01
+      },
+      "max_abs_difference": 0.0,
+      "max_relative_difference": 0.0
+    },
+    {
+      "query": [
+        1.0,
+        0.0055,
+        0.5
+      ],
+      "native": {
+        "returned_mass": 0.5511,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3.05e+48,
+        "momentum_x": 3.0500000000000006e+30,
+        "ejected_H": 0.5511,
+        "net_yield_H": 0.005
+      },
+      "jax": {
+        "returned_mass": 0.5511,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3.05e+48,
+        "momentum_x": 3.05e+30,
+        "ejected_H": 0.5511,
+        "net_yield_H": 0.005
+      },
+      "max_abs_difference": 562949953421312.0,
+      "max_relative_difference": 1.845737552201023e-16
+    },
+    {
+      "query": [
+        1.5,
+        0.001,
+        0.5
+      ],
+      "native": {
+        "returned_mass": 0.5751999999999999,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3.0500000000000003e+48,
+        "momentum_x": 3.05e+30,
+        "ejected_H": 0.5751999999999999,
+        "net_yield_H": 0.005
+      },
+      "jax": {
+        "returned_mass": 0.5751999999999999,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3.0500000000000003e+48,
+        "momentum_x": 3.05e+30,
+        "ejected_H": 0.5751999999999999,
+        "net_yield_H": 0.005
+      },
+      "max_abs_difference": 0.0,
+      "max_relative_difference": 0.0
+    },
+    {
+      "query": [
+        1.5,
+        0.0055,
+        0.0
+      ],
+      "native": {
+        "returned_mass": 0.37610000000000005,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3e+48,
+        "momentum_x": 3.0000000000000003e+30,
+        "ejected_H": 0.37610000000000005,
+        "net_yield_H": 0.0
+      },
+      "jax": {
+        "returned_mass": 0.3761,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3e+48,
+        "momentum_x": 3.0000000000000003e+30,
+        "ejected_H": 0.3761,
+        "net_yield_H": 0.0
+      },
+      "max_abs_difference": 5.551115123125783e-17,
+      "max_relative_difference": 5.551115123125783e-17
+    },
+    {
+      "query": [
+        1.5,
+        0.0055,
+        0.5
+      ],
+      "native": {
+        "returned_mass": 0.5761000000000001,
+        "remnant_mass": 0.15,
+        "energy": 3.0500000000000003e+48,
+        "momentum_x": 3.0500000000000006e+30,
+        "ejected_H": 0.5761000000000001,
+        "net_yield_H": 0.005
+      },
+      "jax": {
+        "returned_mass": 0.5761000000000001,
+        "remnant_mass": 0.15,
+        "energy": 3.05e+48,
+        "momentum_x": 3.05e+30,
+        "ejected_H": 0.5761000000000001,
+        "net_yield_H": 0.005
+      },
+      "max_abs_difference": 6.490371073168535e+32,
+      "max_relative_difference": 2.1279905157929623e-16
+    }
+  ],
+  "max_abs_difference": 6.490371073168535e+32,
+  "max_relative_difference": 2.1279905157929623e-16,
+  "tolerance": {
+    "rtol": 2e-12,
+    "atol": 2e-12
+  }
+}

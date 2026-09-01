@@ -1,0 +1,173 @@
+{
+  "schema": "snrt-g2-source-use-terms-evidence",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "research_access_verified_redistribution_approval_unresolved",
+  "review_date": "2026-09-01",
+  "purpose": "Separate public research accessibility and citation requirements from permission to redistribute derived production assets.",
+  "sources": {
+    "huscher2025_agb": {
+      "access": "Versioned Zenodo release with archive checksum and explicit CC BY 4.0 metadata.",
+      "citation": "Huscher, Finlator & Jackiewicz 2025, ApJ 993:16; data DOI 10.5281/zenodo.17635255",
+      "evidence_urls": [
+        "https://zenodo.org/records/17635255",
+        "https://doi.org/10.3847/1538-4357/ae0199"
+      ],
+      "research_use_status": "verified_cc_by_4.0",
+      "redistribution_status": "allowed_with_attribution_under_cc_by_4.0",
+      "production_license_status": "verified",
+      "physics_approval_status": "not_approved"
+    },
+    "jost2025_neutrino_ccsn": {
+      "access": "The article is open under CC BY 4.0, and the OUP issue/article record confirms a Supplementary data entry. The dynamically hosted package could not be retrieved and fingerprinted; neither Crossref nor the arXiv source package contains the yield asset.",
+      "citation": "Jost et al. 2025, MNRAS 536, 2135; DOI 10.1093/mnras/stae2718",
+      "evidence_urls": [
+        "https://academic.oup.com/mnras/article/536/3/2135/7920781",
+        "https://repository.gsi.de/record/358850"
+      ],
+      "research_use_status": "article_public_cc_by_4.0",
+      "redistribution_status": "supplement_package_terms_and_fingerprint_not_verified",
+      "production_license_status": "not_approved"
+    },
+    "boccioli_roberti2026_neutrino_ccsn": {
+      "access": "Versioned Zenodo dataset with README, three yield archives, release fingerprints, and explicit CC BY 4.0 metadata.",
+      "citation": "Boccioli & Roberti 2026, A&A 709, A201; article DOI 10.1051/0004-6361/202557714; data DOI 10.5281/zenodo.19503168",
+      "evidence_urls": [
+        "https://doi.org/10.1051/0004-6361/202557714",
+        "https://zenodo.org/records/19503168"
+      ],
+      "research_use_status": "verified_cc_by_4.0",
+      "redistribution_status": "allowed_with_attribution_under_cc_by_4.0",
+      "production_license_status": "verified",
+      "physics_approval_status": "not_approved"
+    },
+    "limongi_chieffi_2018_cds": {
+      "access": "Public machine-readable tables distributed by CDS/VizieR with an associated refereed publication.",
+      "citation": "Limongi & Chieffi 2018, ApJS 237:13; VizieR catalogue J/ApJS/237/13",
+      "service_acknowledgement": "Acknowledge the VizieR catalogue access tool, CDS, Strasbourg, France.",
+      "evidence_urls": [
+        "https://vizier.cds.unistra.fr/",
+        "https://vizier.cds.unistra.fr/vizier/submit.htx",
+        "https://cdsarc.cds.unistra.fr/ftp/cats/J/ApJS/237/13/ReadMe"
+      ],
+      "research_use_status": "public_with_citation",
+      "redistribution_status": "no_explicit_catalogue_license_identified",
+      "production_license_status": "not_approved"
+    },
+    "nugrid_set1ext_mesaonly_fryer12_delay": {
+      "access": "Public Set1ext release recommended by the NuGrid data page for stellar-yield/GCE use.",
+      "citation": "Ritter et al. 2018, MNRAS 480, 538; data DOI 10.11570/18.0002",
+      "evidence_urls": [
+        "https://nugrid.github.io/content/data.html",
+        "https://download.nugridstars.org/set1ext/"
+      ],
+      "research_use_status": "public_with_citation",
+      "redistribution_status": "no_license_file_or_explicit_redistribution_terms_found_in_staged_release",
+      "production_license_status": "not_approved"
+    },
+    "doherty2014_sagb": {
+      "access": "Public supplementary tables hosted on the corresponding author's Monash University research page and linked from Lionel Siess's official SAGB model page.",
+      "citation": "Doherty et al. 2014, MNRAS 437, 195 and MNRAS 441, 582",
+      "evidence_urls": [
+        "https://users.monash.edu/~cdoherty/research/yields.html",
+        "https://www.astro.ulb.ac.be/~siess/pmwiki/pmwiki.php/StellarModels/SAGB",
+        "https://doi.org/10.1093/mnras/stt1877",
+        "https://doi.org/10.1093/mnras/stu571"
+      ],
+      "research_use_status": "public_with_required_paper_citation",
+      "redistribution_status": "no_explicit_license_or_redistribution_terms_found_on_the_author_release_page",
+      "production_license_status": "not_approved"
+    },
+    "stockinger2020_low_mass_ccsn": {
+      "access": "The MPA Garching CCSN archive explicitly permits non-commercial use when the archive page and corresponding publication are cited.",
+      "citation": "Stockinger et al. 2020, MNRAS 496, 2039; DOI 10.1093/mnras/staa1691",
+      "evidence_urls": [
+        "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/archive.html",
+        "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/Stockinger2020/",
+        "https://doi.org/10.1093/mnras/staa1691"
+      ],
+      "research_use_status": "noncommercial_use_permitted_with_archive_and_paper_citation",
+      "redistribution_status": "archive_asks_users_not_to_give_data_to_third_persons_without_permission",
+      "production_license_status": "internal_noncommercial_research_and_publication_use_verified_redistribution_not_approved"
+    },
+    "sukhbold2016_ccsn": {
+      "access": "The MPA Garching CCSN archive explicitly permits non-commercial use when the archive page and corresponding publication are cited; publication notification is requested.",
+      "citation": "Sukhbold et al. 2016, ApJ 821, 38; DOI 10.3847/0004-637X/821/1/38; data DOI 10.17617/1.b",
+      "evidence_urls": [
+        "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/archive.html",
+        "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/SEWBJ_2015/",
+        "https://doi.org/10.3847/0004-637X/821/1/38"
+      ],
+      "local_terms_evidence": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/sukhbold2016_ccsn/ARCHIVE_TERMS.html",
+      "research_use_status": "noncommercial_use_permitted_with_archive_and_paper_citation",
+      "redistribution_status": "archive_asks_users_not_to_give_data_to_third_persons_without_permission",
+      "production_license_status": "internal_noncommercial_research_and_publication_use_verified_redistribution_not_approved",
+      "physics_approval_status": "not_approved"
+    },
+    "limongi2024_transition_fates": {
+      "access": "The IOP article is open under CC BY 4.0 and links its official machine-readable thermal-pulse table.",
+      "citation": "Limongi et al. 2024, ApJS 270, 29; DOI 10.3847/1538-4365/ad12c1",
+      "evidence_urls": [
+        "https://iopscience.iop.org/article/10.3847/1538-4365/ad12c1",
+        "https://content.cld.iop.org/journals/0067-0049/270/2/29/revision1/apjsad12c1t4_mrt.txt"
+      ],
+      "local_license_evidence": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/limongi2024_transition_fates/ARTICLE.html",
+      "research_use_status": "verified_cc_by_4.0",
+      "redistribution_status": "allowed_with_attribution_under_cc_by_4.0",
+      "production_license_status": "verified",
+      "physics_approval_status": "not_approved"
+    },
+    "roberti2024_ultralowz_ccsn": {
+      "access": "The arXiv article/source is explicitly CC BY 4.0 and the publisher supplies official machine-readable evolutionary and explosive-yield tables.",
+      "citation": "Roberti, Limongi & Chieffi 2024, ApJS 270, 28; DOI 10.3847/1538-4365/ad1686; arXiv:2312.02942",
+      "evidence_urls": [
+        "https://arxiv.org/abs/2312.02942",
+        "https://content.cld.iop.org/journals/0067-0049/270/2/28/revision1/apjsad1686t5_mrt.txt"
+      ],
+      "local_license_evidence": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/roberti2024_ultralowz_ccsn/ARXIV_ABSTRACT.html",
+      "research_use_status": "verified_cc_by_4.0",
+      "redistribution_status": "allowed_with_attribution_under_cc_by_4.0",
+      "production_license_status": "verified",
+      "physics_approval_status": "not_approved"
+    },
+    "heger_woosley2010_popiii": {
+      "access": "The official VizieR J/ApJ/724/341 electronic table and metadata are public. VizieR explicitly permits scientific use with citation of the original authors, publication, and publisher and requests VizieR acknowledgment; commercial and public-redistribution rights depend on the data origin and are not inferred here.",
+      "citation": "Heger & Woosley 2010, ApJ 724, 341--373; DOI 10.1088/0004-637X/724/1/341; VizieR J/ApJ/724/341",
+      "evidence_urls": [
+        "https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=J/ApJ/724/341",
+        "https://cds.unistra.fr/vizier-org/licences_vizier.html",
+        "https://arxiv.org/abs/0803.3161"
+      ],
+      "local_terms_evidence": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/heger_woosley2010_popiii/VIZIER_USAGE_RULES.html",
+      "research_use_status": "scientific_use_verified_with_original_authors_publication_publisher_citation",
+      "redistribution_status": "public_redistribution_license_not_verified",
+      "production_license_status": "internal_scientific_review_allowed_public_release_not_approved",
+      "physics_approval_status": "not_approved"
+    },
+    "nubase2020_decay_projection_data": {
+      "access": "Public AMDC/IAEA electronic distribution intended as stable reference data for calculations.",
+      "citation": "Kondev et al. 2021, Chinese Physics C 45, 030001",
+      "evidence_urls": [
+        "https://www-nds.iaea.org/amdc/ame2020/NUBASE2020.pdf",
+        "https://www-nds.iaea.org/amdc/ame2020/nubase_4.mas20.txt"
+      ],
+      "research_use_status": "public_with_required_paper_citation",
+      "redistribution_status": "verify_release_package_terms",
+      "production_license_status": "not_approved"
+    },
+    "radioactivedecay_0.6.1": {
+      "code_license": "MIT",
+      "default_decay_data_terms": "ICRP-107 permits educational, research, and not-for-profit use/copy/distribution when its license text is retained.",
+      "atomic_mass_data_terms": "Package LICENSE.AMDC requires citation of AME2020 and NUBASE2020 sources.",
+      "research_use_status": "verified_for_not_for_profit_research_with_notices",
+      "redistribution_status": "conditional_on_retaining_MIT_ICRP_and_AMDC_notices",
+      "production_license_status": "verified_for_internal_nonprofit_research"
+    }
+  },
+  "gate_disposition": {
+    "internal_candidate_analysis_allowed": true,
+    "canonical_production_asset_approval_allowed": false,
+    "publication_release_redistribution_allowed": false,
+    "remaining_action": "Select the final source set. Huscher 2025 is license-cleared but not physics-approved; obtain or document redistribution terms for every other selected package before G2 approval."
+  }
+}

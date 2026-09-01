@@ -1,0 +1,37 @@
+# P2 multiphysics closure
+
+## Dust
+
+`DustModel` accepts group absorption cross sections in `cm^2/H` and a cell-wise relative dust abundance. No Milky-Way opacity is hard-coded: production runs must provide a redshift- and metallicity-appropriate table, for example sampled from Draine model data. Dust receives the full absorbed photon energy and does not change H/He ion fractions.
+
+The audited sidecar loader is documented in
+[`P4_DUST_OPACITY.md`](P4_DUST_OPACITY.md). It additionally accepts a
+dust-absorption-weighted photon energy per group, which is used for dust
+heating and the absorption-only momentum diagnostic. The P4 and P5 runners
+require `--dust-opacity-metadata` whenever the static input has non-zero dust
+abundance; otherwise they use an explicit zero-dust control. The momentum
+diagnostic is not yet coupled to hydro or a full radiation-pressure closure.
+
+Scattering and IR re-emission are intentionally not in this live transport step. They require a separate angle- and frequency-coupled closure rather than treating scattering as absorption.
+
+## X-ray secondaries
+
+For photoelectron energy at or above 100 eV, the baseline uses the high-energy Shull--van Steenberg fractions for heating, H I ionization, He I ionization, and excitation. The code keeps excitation as a separate energy channel. Below 100 eV all excess energy becomes heat and no secondary ionization is added.
+
+The more accurate Furlanetto--Stoever treatment depends on both energy and ionized fraction in a non-separable way. It remains the planned table-interpolation replacement for this baseline; the present analytic closure must not be used to claim precision X-ray spectra below its stated range.
+
+## Thermal/hydro source term
+
+`ThermalState` stores gas internal-energy density. `advance_radiative_energy()` applies net radiative heating/cooling as a conservative local source term and returns an ideal-gas temperature. Hydrodynamic fluxes, shocks, and metal cooling remain the host hydro solver's responsibility.
+
+## Validation
+
+- A unit-optical-depth dust cell transmits `exp(-1)` and receives the exact missing photon energy.
+- A neutral H cell exposed to 1 keV photons produces `x_HII=0.099938` from the
+  converged primary-plus-secondary rate update.
+- The P2/P3 validation script also checks finite gas-heating output.
+
+The production multiphysics path now uses the B2 C2-Ray-style
+time-averaged-opacity closure documented in
+[`B2_PRODUCTION_SOLVER_VALIDATION.md`](B2_PRODUCTION_SOLVER_VALIDATION.md).
+The former per-cell atom-inventory attenuation cap is retired.

@@ -1,0 +1,257 @@
+{
+  "epoch_policy": {
+    "allow_mixed_epochs": true,
+    "declared_source_scale_factors": [
+      0.148540709098256,
+      0.20849776467675274
+    ],
+    "interpretation": "non-coeval integration control; not a science snapshot"
+  },
+  "group_count": 9,
+  "group_edges_ev": [
+    0.01,
+    1.0,
+    5.6,
+    11.2,
+    13.6,
+    24.59,
+    54.42,
+    500.0,
+    2000.0,
+    10000.0
+  ],
+  "group_photon_rate_total_s": [
+    3.7437672628105807e+56,
+    8.5952673512877e+56,
+    5.55536014538457e+56,
+    1.6774340179918047e+56,
+    1.1505776993062686e+56,
+    6.931509721581133e+55,
+    1.1579851257268542e+54,
+    1.6087616961603328e+52,
+    3.529964866772728e+51
+  ],
+  "group_spectral_closure": {
+    "cross_sections_cm2": {
+      "helium_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        7.220638966398352e-21,
+        4.6303873463549924e-18,
+        8.88410673192675e-19,
+        1.1562061473644916e-21,
+        9.580306965667874e-24
+      ],
+      "helium_ii": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.1334400210638218e-22,
+        7.707237202983798e-19,
+        8.964502731168679e-22,
+        8.247018113977343e-24
+      ],
+      "hydrogen_i": [
+        0.0,
+        0.0,
+        0.0,
+        3.920408106108871e-21,
+        3.3503283972728494e-18,
+        5.981635730306723e-19,
+        5.690832390165712e-20,
+        4.0574260087444905e-23,
+        3.1479424687259854e-25
+      ]
+    },
+    "group_status": [
+      "combined_spectral_closure",
+      "combined_spectral_closure",
+      "combined_spectral_closure",
+      "combined_spectral_closure",
+      "combined_spectral_closure",
+      "combined_spectral_closure",
+      "combined_spectral_closure",
+      "combined_spectral_closure",
+      "combined_spectral_closure"
+    ],
+    "method": "photon-number-weighted composition of input group closures; absorber-weighted excess recomputed",
+    "photoelectron_excess_energy_ev": {
+      "helium_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        7.208303131627013,
+        42.70351183767912,
+        603.1321147629565,
+        2558.2019113233523
+      ],
+      "helium_ii": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        11.890892339890517,
+        575.946517097724,
+        2537.3604318471203
+      ],
+      "hydrogen_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        3.192731010377491,
+        17.018867278948502,
+        51.94330881430319,
+        612.2069560444693,
+        2564.899364722586
+      ]
+    },
+    "species_order": [
+      "hydrogen_i",
+      "helium_i",
+      "helium_ii"
+    ]
+  },
+  "groups": [
+    {
+      "closure_status": "combined_spectral_closure",
+      "energy_interval_ev": [
+        0.01,
+        1.0
+      ],
+      "index": 0,
+      "photon_weighted_mean_energy_ev": 0.5955541573144439,
+      "total_photon_rate_s": 3.7437672628105807e+56
+    },
+    {
+      "closure_status": "combined_spectral_closure",
+      "energy_interval_ev": [
+        1.0,
+        5.6
+      ],
+      "index": 1,
+      "photon_weighted_mean_energy_ev": 2.777692844882773,
+      "total_photon_rate_s": 8.5952673512877e+56
+    },
+    {
+      "closure_status": "combined_spectral_closure",
+      "energy_interval_ev": [
+        5.6,
+        11.2
+      ],
+      "index": 2,
+      "photon_weighted_mean_energy_ev": 8.25904685398067,
+      "total_photon_rate_s": 5.55536014538457e+56
+    },
+    {
+      "closure_status": "combined_spectral_closure",
+      "energy_interval_ev": [
+        11.2,
+        13.6
+      ],
+      "index": 3,
+      "photon_weighted_mean_energy_ev": 12.277335288497415,
+      "total_photon_rate_s": 1.6774340179918047e+56
+    },
+    {
+      "closure_status": "combined_spectral_closure",
+      "energy_interval_ev": [
+        13.6,
+        24.59
+      ],
+      "index": 4,
+      "photon_weighted_mean_energy_ev": 18.11059085142986,
+      "total_photon_rate_s": 1.1505776993062686e+56
+    },
+    {
+      "closure_status": "combined_spectral_closure",
+      "energy_interval_ev": [
+        24.59,
+        54.42
+      ],
+      "index": 5,
+      "photon_weighted_mean_energy_ev": 34.35765482223187,
+      "total_photon_rate_s": 6.931509721581133e+55
+    },
+    {
+      "closure_status": "combined_spectral_closure",
+      "energy_interval_ev": [
+        54.42,
+        500.0
+      ],
+      "index": 6,
+      "photon_weighted_mean_energy_ev": 91.97815036543749,
+      "total_photon_rate_s": 1.1579851257268542e+54
+    },
+    {
+      "closure_status": "combined_spectral_closure",
+      "energy_interval_ev": [
+        500.0,
+        2000.0
+      ],
+      "index": 7,
+      "photon_weighted_mean_energy_ev": 869.6282538449857,
+      "total_photon_rate_s": 1.6087616961603328e+52
+    },
+    {
+      "closure_status": "combined_spectral_closure",
+      "energy_interval_ev": [
+        2000.0,
+        10000.0
+      ],
+      "index": 8,
+      "photon_weighted_mean_energy_ev": 4023.594574013186,
+      "total_photon_rate_s": 3.529964866772728e+51
+    }
+  ],
+  "input_ledgers": [
+    {
+      "ledger": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_bpass_stellar_photon_ledger.csv",
+      "ledger_sha256": "aeb9b72fbc0716ec25836f431bf9a897bd52011c8fe5553ad185c293dc97e1c4",
+      "metadata": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_bpass_stellar_photon_ledger.json",
+      "metadata_sha256": "939c7ab2305b1de6e44c7e021801a2a0bbf580acc4372374d544aff90c74954b",
+      "source_count": 42342,
+      "source_id_offset": 0,
+      "source_kind": "star"
+    },
+    {
+      "ledger": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00017_agn_p0_photon_ledger.csv",
+      "ledger_sha256": "151857bd0c9947a1a6717be630161cb44605d8bdf0101d3b8fe7b6fb7b5a367e",
+      "metadata": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00017_agn_p0_photon_ledger.json",
+      "metadata_sha256": "c4285f38ca510f5c40fc23f7688c9e9a4f5c40e95a39227a7099fde7ca257eff",
+      "source_count": 10,
+      "source_id_offset": 1000000,
+      "source_kind": "unspecified"
+    }
+  ],
+  "limits": [
+    "All input ledgers must use the same group boundaries and unique integer source IDs.",
+    "The aggregate closure is composed from each input's stored group moments; raw spectra are not reconstructed.",
+    "No dust, scattering, IR re-emission, or hydrodynamic feedback is applied by this merger."
+  ],
+  "normalization": {
+    "dust_attenuation": "not applied; delegated to the RT grid",
+    "operation": "source-ledger concatenation only",
+    "source_side_attenuation": "preserved from each input ledger; no new factor applied"
+  },
+  "output_csv_sha256": "d9a682c0f4e22f1f450fcc261f67bc86e590eedb392f2082d9c582327cb09839",
+  "schema": "snrt_combined_photon_source_ledger_v1",
+  "source_count": 42352,
+  "source_id_policy": {
+    "input_offsets": [
+      0,
+      1000000
+    ],
+    "interpretation": "source IDs are input IDs plus the recorded per-ledger offset"
+  },
+  "source_kind": "agn+star",
+  "status": "noncoeval_integration_control"
+}

@@ -1,0 +1,92 @@
+{
+  "schema": "snrt-g2-sukhbold2016-candidate-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source": {
+    "candidate_id": "sukhbold2016_ccsn",
+    "article_citation": "Sukhbold et al. 2016, ApJ 821, 38",
+    "article_doi": "10.3847/0004-637X/821/1/38",
+    "data_doi": "10.17617/1.b",
+    "source_page": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/SEWBJ_2015/",
+    "archive_terms_page": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/archive.html",
+    "release_root_relative_path": "sukhbold2016_ccsn",
+    "files": {
+      "ARCHIVE_TERMS.html": {
+        "bytes": 64972,
+        "sha256": "447fb9dff5bd31a542f93bb8c489902faad068e5007b930435ccb01f62a457fe"
+      },
+      "INDEX.html": {
+        "bytes": 9721,
+        "sha256": "8abc776c7b9c859d5f31091bf5393d8136c5b749b776a9902d6ce99f61227c8b"
+      },
+      "explosion_results_PHOTB.tar.gz": {
+        "bytes": 18850,
+        "sha256": "72e6d68c1a8fdc622054dc08c6263e6ac3faa5e5352b299206cfe076952e93a9"
+      },
+      "nucleosynthesis_yields.tar.gz": {
+        "bytes": 42688013,
+        "sha256": "e74bd3a7bf647f2e06f055b50f2613d7b145613ae56cc1d05f870f8edddf6eed"
+      }
+    }
+  },
+  "archive_inventory": {
+    "explosion_results_regular_file_count": 6,
+    "yield_regular_file_count": 309,
+    "yield_table_count_by_branch": {
+      "N20": 105,
+      "W18": 82,
+      "Z9.6": 13,
+      "implosions_W18": 105,
+      "sample_full_zonal_yields": 4
+    }
+  },
+  "review_grid": {
+    "engine": "Z9.6",
+    "metallicity": "source_labelled_solar",
+    "zams_mass_msun": [9.0, 9.25, 9.5, 9.75, 10.0, 10.25, 10.5, 10.75, 11.0, 11.25, 11.5, 11.75, 12.0],
+    "expected_stable_isotope_rows_per_model": 283,
+    "selected_radioactive_isotopes": [
+      "c14", "na22", "al26", "si32", "cl36", "ar39", "k40", "ca41", "ca45", "ti44",
+      "v49", "mn53", "mn54", "fe55", "fe60", "co60", "ni56", "ni57", "ni59", "ni63"
+    ]
+  },
+  "release_semantics": {
+    "ejecta_column": "gross isotope mass ejected during the terminal supernova explosion in Msun",
+    "wind_column": "gross isotope mass ejected in presupernova winds in Msun",
+    "stable_segment": "top segment containing stable-isotope ejecta and wind contributions",
+    "radioactive_segment": "bottom segment containing a selected, non-exhaustive set of 20 radioactive isotopes",
+    "explosion_energy": "final kinetic energy at infinity from P-HOTB in foe, where 1 foe is 1e51 erg",
+    "remnant_mass": "baryonic mass cut after fallback in Msun",
+    "fallback_mass": "fallback mass in Msun",
+    "release_history": "integrated terminal explosion and presupernova-wind yields, not an age-resolved cumulative history",
+    "neutrino_wind_nucleosynthesis_included": false
+  },
+  "audit_policy": {
+    "canonical_rows_emitted": 0,
+    "cross_engine_interpolation_allowed": false,
+    "cross_source_interpolation_allowed": false,
+    "out_of_domain_extrapolation_allowed": false,
+    "wind_plus_terminal_double_count_allowed": false,
+    "stable_and_radioactive_segments_may_be_naively_summed": false,
+    "exact_zams_mass_budget_closure_claim_allowed": false,
+    "maximum_review_mass_budget_absolute_residual_msun": 0.061,
+    "maximum_review_mass_budget_relative_residual": 0.007,
+    "canonical_decay_projection_complete": false,
+    "canonical_momentum_available": false,
+    "project_approval_required": true
+  },
+  "use_terms": {
+    "noncommercial_use_with_archive_and_publication_citation_permitted": true,
+    "third_party_redistribution_without_permission_permitted": false,
+    "publication_notification_requested": true
+  },
+  "approval": {
+    "research_access_verified": true,
+    "redistribution_permission_verified": false,
+    "physics_source_selected": false,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

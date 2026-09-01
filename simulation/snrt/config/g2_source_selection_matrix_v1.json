@@ -1,0 +1,414 @@
+{
+  "schema": "snrt-g2-source-selection-matrix",
+  "schema_version": 1,
+  "status": "candidate_review_only",
+  "gate": "G2",
+  "purpose": "Record independently reviewable source candidates before any physical values are promoted into the canonical table.",
+  "approval_rule": "No candidate is an approved production source until the source file, license, citation, conversion procedure, checksum, and channel-specific closure report are present.",
+  "candidate_acquisition_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+  "source_semantics_evidence": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_semantics_evidence_v1.json",
+  "canonical_contract": {
+    "table": "canonical_phase0_ascii",
+    "age_on_disk": "yr",
+    "age_in_memory": "Gyr",
+    "mass": "Msun per initial star",
+    "energy": "erg per initial star",
+    "momentum": "g cm/s per initial star",
+    "tracked_elements": ["H", "He", "C", "N", "O", "Ne", "Mg", "Si", "S", "Ca", "Fe"],
+    "omitted_elements_for_reduced_chemistry": ["Na", "Al", "Ar", "Ni", "Li", "F", "Ti", "Cr", "isotopes", "s/r-process species"],
+    "full_nucleosynthesis_claim_allowed": false
+  },
+  "candidates": [
+    {
+      "candidate_id": "jost2025_neutrino_ccsn",
+      "channel": "SNII",
+      "status": "candidate_not_approved",
+      "citation": "Jost et al. 2025, Neutrino-driven core-collapse supernova yields in Galactic chemical evolution",
+      "doi": "10.1093/mnras/stae2718",
+      "url": "https://academic.oup.com/mnras/article/536/3/2135/7920781",
+      "reported_coverage": {
+        "zams_mass_msun": "11--30 in 1 Msun steps at primordial, 1e-4 solar, and solar metallicity; 35, 40, and 75 Msun at solar metallicity only",
+        "metallicity": "primordial, 1e-4 solar, solar",
+        "distinct_progenitor_coordinates": 63,
+        "heating_factors": [2.4, 2.7, 5.6],
+        "yield_and_explosion_model_combinations": 189,
+        "release_time_grid": "terminal explosion/ejecta outcomes, not an age-resolved wind history"
+      },
+      "physics_to_record": ["neutrino-driven explosion calibration", "evolving mass cut/remnant", "fallback", "explosion energy", "pre-SN mass loss", "element/isotope mapping"],
+      "known_gap_for_this_project": "The source leaves the runtime 8--11 Msun transition uncovered, is not a cumulative wind+AGB+SNII Cartesian grid, and must be converted without double counting pre-SN winds. The OUP issue/article record confirms that Supplementary data exist, but the dynamically hosted publisher package could not be retrieved and fingerprinted; Crossref and the arXiv source package do not contain the yield asset. No values may be reconstructed from article tables or figures.",
+      "source_asset_path": null,
+      "source_sha256": null,
+      "license_status": "article_cc_by_4.0_supplement_package_terms_and_asset_fingerprint_pending",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "boccioli_roberti2026_neutrino_ccsn",
+      "channel": ["wind", "SNII"],
+      "status": "candidate_acquired_license_verified_unapproved",
+      "citation": "Boccioli & Roberti 2026, Explodability matters: How realistic neutrino-driven explosions change explosive nucleosynthesis yields",
+      "doi": "10.1051/0004-6361/202557714",
+      "data_doi": "10.5281/zenodo.19503168",
+      "url": "https://zenodo.org/records/19503168",
+      "reported_coverage": {
+        "progenitor_families": ["LC18", "WH07", "F23 single", "F23 binary-stripped"],
+        "model_combinations": 206,
+        "f23_single_mass_msun": "11--45 in 1 Msun steps at source-labelled solar metallicity",
+        "f23_binary_mass_msun": "11--45 with missing 24,25,28,29 Msun nodes at source-labelled solar metallicity",
+        "lc18_mass_msun": [13, 15, 20, 25, 30, 40, 60, 80, 120],
+        "lc18_metallicity_feh": [-3, -2, -1, 0],
+        "lc18_rotation_km_s": [0, 150, 300],
+        "wh07_mass_msun": "12--120 at solar metallicity with a nonuniform high-mass grid",
+        "release_products": "stable and 30-s no-decay isotope yields, element yields, integrated winds, pre-SN inventories, mass cuts, and explosion outcomes"
+      },
+      "physics_to_record": [
+        "GR1D+ neutrino-driven explodability",
+        "SkyNet post-processing",
+        "emergent baryonic mass cut with no fallback for successful explosions",
+        "failed-explosion outcomes",
+        "single versus binary-stripped progenitor selection",
+        "integrated pre-collapse wind ownership",
+        "source-specific metallicity and rotation axes"
+      ],
+      "known_gap_for_this_project": "The F23 single branch closes its released component masses and improves candidate SNII coverage to 11--40 Msun, but it is solar-only. The release has no machine-readable per-model explosion energy, canonical momentum, or age-resolved cumulative history. The LC18 branch has a release inconsistency: all 56 failed models retain positive summary wind masses but their Wind tables are zero, contrary to the README's failed-model policy. The runtime 8--11 Msun transition and the single/binary population weighting remain unresolved.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/boccioli_roberti2026_ccsn",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": null,
+      "license_status": "verified_cc_by_4.0_from_zenodo_record",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "limongi_chieffi_2018_cds",
+      "channel": ["wind", "SNII"],
+      "status": "candidate_acquired_unapproved",
+      "citation": "Limongi & Chieffi 2018, Presupernova evolution and explosive nucleosynthesis of rotating massive stars",
+      "doi": "10.3847/1538-4365/aacb24",
+      "url": "https://vizier.astro.unistra.fr/local//viz-bin/VizieR-3?-source=J%2FApJS%2F237%2F13",
+      "reported_coverage": {
+        "zams_mass_msun": "13--120",
+        "metallicity": "[Fe/H]=-3,-2,-1,0",
+        "rotation_velocity_km_s": [0, 150, 300],
+        "isotopes": 333,
+        "wind_mass_columns_msun": [13, 15, 20, 25],
+        "release_history": "terminal yields plus lifetime/properties scalars; no age-resolved cumulative grid"
+      },
+      "physics_to_record": ["rotation", "pre-SN mass loss", "explosive nucleosynthesis", "remnant/binding properties", "isotope-to-element decay mapping"],
+      "known_gap_for_this_project": "The article resolves set-R semantics: 13--25 Msun table8 includes wind plus terminal ejecta, table9 is wind, and table8 above 25 Msun is wind-only. The source still does not cover the complete runtime wind 0.8--120 or SNII 8--40 ranges; project channel approval, energy, momentum, and release history remain missing.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/limongi_chieffi_2018_cds",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": null,
+      "license_status": "to_be_verified",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "nugrid_set1ext_mesaonly_fryer12_delay",
+      "channel": ["wind", "AGB", "SNII"],
+      "status": "candidate_acquired_unapproved",
+      "citation": "NuGrid Set1ext public yield-table release",
+      "url": "https://nugrid.github.io/content/data.html",
+      "reported_coverage": {
+        "masses_msun": [1, 1.65, 2, 3, 4, 5, 6, 7, 12, 15, 20, 25],
+        "metallicity_mass_fraction": [0.0001, 0.001, 0.006, 0.01, 0.02],
+        "elements_per_block": 80,
+        "release_history": "integrated total/wind/pre-explosion yields plus lifetime scalar; no age-resolved cumulative grid"
+      },
+      "physics_to_record": ["AGB thermal pulses", "mass loss", "remnant mass", "massive-star pre-explosion/explosion partition", "Fryer12 remnant prescription"],
+      "known_gap_for_this_project": "The article resolves the files as wind-only, wind plus pre-SN ejecta, and wind plus delayed-explosion SN ejecta. The table still has a duplicate (5 Msun, Z=0.01) coordinate, mass gaps, no canonical per-channel energy/momentum fields, no age-resolved wind history, and incomplete runtime coverage.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/nugrid_set1ext",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": null,
+      "license_status": "to_be_verified",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "huscher2025_agb",
+      "channel": "AGB",
+      "status": "candidate_acquired_license_verified_unapproved",
+      "citation": "Huscher, Finlator & Jackiewicz 2025, Asymptotic Giant Branch Mass-loss Rates and Metal Yields from Scaled Mixing-length and Mass-loss Parameters",
+      "doi": "10.3847/1538-4357/ae0199",
+      "data_doi": "10.5281/zenodo.17635255",
+      "url": "https://zenodo.org/records/17635255",
+      "reported_coverage": {
+        "zams_mass_msun": [0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0],
+        "metallicity_mass_fraction": [0.0001, 0.001, 0.002, 0.003, 0.004, 0.005, 0.01, 0.015, 0.02, 0.03],
+        "single_star_models": 120,
+        "single_star_isotopes": ["H1", "He3", "He4", "C12", "C13", "N13", "N14", "N15", "O16", "O17", "O18", "F19", "Ne20", "Ne22", "Mg24", "Si28"],
+        "population_tables": "IMF-weighted Mdot and outflow C12/N14/O16 mass fractions at 153 log-age nodes"
+      },
+      "physics_to_record": ["MESA r24.08.1", "metallicity-dependent mixing length", "Blocker mass-loss scaling", "convective-boundary overshoot", "OPLIB opacity", "initial-final mass relation", "IMF weighting"],
+      "known_gap_for_this_project": "The per-star grid ends at 7 Msun, has only 16 isotopes and no S/Ca/Fe, and is lifetime-integrated. Direct physical-time integration of the population Mdot table under its README units returns 1326--2895 Msun per claimed Msun formed; its hidden normalization must be clarified rather than guessed. Energy and momentum are absent.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/huscher2025_agb/AGB_files_Huscher_et_al_2025.zip",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": "dc559ee272d602bcfe95ab0050cb388eed670986e3e62234b4bd9126d0128199",
+      "license_status": "verified_cc_by_4.0_from_zenodo_record",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "doherty2014_sagb",
+      "channel": "AGB",
+      "status": "candidate_acquired_physics_audited_license_unresolved",
+      "citation": "Doherty et al. 2014, Super and massive AGB stars II and III",
+      "doi": ["10.1093/mnras/stt1877", "10.1093/mnras/stu571"],
+      "url": "https://users.monash.edu/~cdoherty/research/yields.html",
+      "reported_coverage": {
+        "zams_mass_msun": [6.5, 7.0, 7.5, 8.0, 8.5, 9.0],
+        "metallicity_mass_fraction": [0.0001, 0.001, 0.004, 0.008, 0.02],
+        "primary_models": 20,
+        "metallicity_dependent_upper_mass_msun": {"0.0001": 7.5, "0.001": 7.5, "0.004": 8.0, "0.008": 8.5, "0.02": 9.0},
+        "release_products": "gross and net integrated SAGB wind yields plus synthetic-pulse and mass-loss sensitivity branches"
+      },
+      "physics_to_record": ["hot-bottom burning", "third dredge-up", "mass-loss prescription", "synthetic terminal pulses", "metallicity-dependent AGB/ECSN boundary"],
+      "known_gap_for_this_project": "The baseline VW93 wind branch narrows the 7--8 Msun AGB gap, but Z<=0.001 stops at 7.5 Msun, calcium and per-star age histories are absent, and terminal ECSN/Fe-core outcomes are outside this release. The alternate table's literal al-6 label is preserved rather than guessed. Redistribution terms are not explicit.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/doherty2014_sagb",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": null,
+      "license_status": "public_author_tables_no_explicit_redistribution_license_identified",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "stockinger2020_low_mass_ccsn",
+      "channel": "SNII",
+      "status": "candidate_acquired_energy_yields_audited_license_unresolved",
+      "citation": "Stockinger et al. 2020, Three-dimensional Models of Core-collapse Supernovae From Low-mass Progenitors With Implications for Crab",
+      "doi": "10.1093/mnras/staa1691",
+      "url": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/Stockinger2020/",
+      "reported_coverage": {
+        "zams_mass_msun": [8.8, 9.0, 9.6],
+        "models": ["solar e8.8 ECSN", "solar s9.0 Fe-core CCSN", "zero-metallicity z9.6 Fe-core CCSN"],
+        "release_products": "three post-bounce yield snapshots per model and machine-readable diagnostic explosion-energy time series",
+        "last_finite_diagnostic_energy_erg": {"e8.8": 9.53902793709056e49, "s9.0": 5.250178516256707e49, "z9.6": 8.602597812628994e49}
+      },
+      "physics_to_record": ["ECSN versus Fe-core outcome", "progenitor metallicity", "diagnostic explosion energy", "mass cut", "fallback", "radioactive decay and tracer mapping"],
+      "known_gap_for_this_project": "These three physically heterogeneous models are discrete anchors and cannot be interpolated into a continuous 8--11 Msun grid. Nitrogen is absent, radioactive/tracer projection is unresolved, the vsh unit attribute is invalid and quarantined, canonical momentum is absent, and third-party redistribution requires MPA archive permission.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/stockinger2020_low_mass_ccsn",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": null,
+      "license_status": "mpa_archive_noncommercial_use_with_citation_permitted_third_party_redistribution_requires_permission",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "sukhbold2016_ccsn",
+      "channel": ["wind", "SNII"],
+      "status": "candidate_acquired_energy_yields_terms_audited_not_approved",
+      "citation": "Sukhbold et al. 2016, Core-collapse Supernovae from 9 to 120 Solar Masses Based on Neutrino-powered Explosions",
+      "doi": "10.3847/0004-637X/821/1/38",
+      "data_doi": "10.17617/1.b",
+      "url": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/SEWBJ_2015/",
+      "reported_coverage": {
+        "full_release_zams_mass_msun": "9--120 at source-labelled solar metallicity",
+        "reviewed_transition_grid_msun": [9.0, 9.25, 9.5, 9.75, 10.0, 10.25, 10.5, 10.75, 11.0, 11.25, 11.5, 11.75, 12.0],
+        "reviewed_engine": "Z9.6 Crab-calibrated P-HOTB; all 13 reviewed models explode",
+        "release_products": "P-HOTB final kinetic energy, fallback, and baryonic mass cut plus KEPLER gross stable-isotope explosion/wind yields and 20 selected radioactive isotopes"
+      },
+      "physics_to_record": [
+        "solar-metallicity progenitor scope",
+        "Z9.6 neutrino-engine calibration",
+        "final kinetic energy at infinity",
+        "fallback and baryonic remnant mass",
+        "separate integrated presupernova wind ownership",
+        "stable plus radioactive decay projection",
+        "neutrino-powered wind nucleosynthesis omission"
+      ],
+      "known_gap_for_this_project": "The 9--12 Msun Z9.6 grid closes the previous candidate source-hull gap between Stockinger and F23, but it does not cover 8--9 Msun or define a metallicity axis. The stable and selected-radioactive segments are not a complete decay inventory, neutrino-powered wind nucleosynthesis and canonical momentum are absent, presupernova winds are not age resolved, and third-party redistribution requires archive permission.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/sukhbold2016_ccsn",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": null,
+      "license_status": "mpa_archive_noncommercial_use_with_citation_permitted_third_party_redistribution_requires_permission",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "limongi2024_transition_fates",
+      "channel": ["AGB", "SNII"],
+      "status": "reference_acquired_fate_semantics_audited_not_approved",
+      "citation": "Limongi et al. 2024, Evolution and Final Fate of Solar Metallicity Stars in the Mass Range 7--15 Msun. I",
+      "doi": "10.3847/1538-4365/ad12c1",
+      "url": "https://iopscience.iop.org/article/10.3847/1538-4365/ad12c1",
+      "reported_coverage": {
+        "scope": "solar-metallicity nonrotating 7--15 Msun stellar-evolution models",
+        "tp_table_model_masses_msun": [7.0, 7.5, 8.0, 8.5, 8.8, 9.0, 9.05, 9.1, 9.15, 9.2],
+        "white_dwarf_model_interval_msun": [7.5, 8.0],
+        "potential_ecsn_model_interval_msun": [8.5, 9.2],
+        "ordinary_ccsn_lower_model_mass_msun": 9.22,
+        "release_products": "article fate statements and a 963-row thermal-pulse property table; no terminal event yields"
+      },
+      "physics_to_record": [
+        "AGB/SAGB/ONeMg white-dwarf boundary",
+        "electron-capture core-mass threshold",
+        "mass-loss versus core-growth competition",
+        "ECSN versus Fe-core CCSN transition",
+        "metallicity and rotation dependence"
+      ],
+      "known_gap_for_this_project": "This source proves that the runtime 8 Msun SNII lower boundary is not a universal physical explosion threshold. Its 8.5--9.2 Msun models may potentially undergo ECSN after extrapolated thermal-pulse evolution, and the inferred lower edge shifts from about 8.5--8.8 to about 8.3 Msun with the adopted electron-capture core-mass criterion. It supplies no yields, energy, momentum, or continuous fate law; the 8--8.8 Msun production edge remains blocked.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/limongi2024_transition_fates",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": null,
+      "license_status": "verified_cc_by_4.0_from_article",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "roberti2024_ultralowz_ccsn",
+      "channel": "SNII",
+      "status": "candidate_acquired_license_verified_semantics_audited_not_approved",
+      "citation": "Roberti, Limongi & Chieffi 2024, Zero and Extremely Low-metallicity Rotating Massive Stars: Evolution, Explosion, and Nucleosynthesis",
+      "doi": "10.3847/1538-4365/ad1686",
+      "url": "https://arxiv.org/abs/2312.02942",
+      "reported_coverage": {
+        "zams_mass_msun": [15.0, 25.0],
+        "metallicity_mass_fraction": [0.0, 3.236e-7, 3.236e-6],
+        "source_models": 34,
+        "official_mrt_yield_models": 30,
+        "rotation_km_s": "0--800 with a source-specific, non-Cartesian sampling",
+        "explosion_energy_erg": "1.5e51--1.2e52 from source Table 7 thermal-bomb models",
+        "release_products": "evolutionary properties, integrated explosive isotopic yields, source-table remnant masses and kinetic energies"
+      },
+      "physics_to_record": [
+        "zero and ultra-low metallicity progenitors",
+        "rotation selection or marginalization",
+        "thermal-bomb energy calibration",
+        "fixed 0.07 Msun Ni56 mass-cut selection",
+        "mixing and fallback omission",
+        "wind versus terminal ejecta ownership"
+      ],
+      "known_gap_for_this_project": "This is the first staged source with coordinates near the inherited ultra-low-Z comparison population, but it has only 15 and 25 Msun models. Four zero-Z article columns are absent from the official MRTs, 025z600 has a 12.48 Msun mass-budget discrepancy, wind and terminal components are not separated, and neither mass/metallicity interpolation nor a rotation population is approved. Its coordinate hull is not production coverage.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/roberti2024_ultralowz_ccsn",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": null,
+      "license_status": "verified_cc_by_4.0_from_arxiv_record",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "heger_woosley2010_popiii",
+      "channel": "SNII",
+      "status": "candidate_acquired_scientific_use_verified_semantics_audited_not_approved",
+      "citation": "Heger & Woosley 2010, Nucleosynthesis and Evolution of Massive Metal-Free Stars",
+      "doi": "10.1088/0004-637X/724/1/341",
+      "url": "https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=J/ApJ/724/341",
+      "reported_coverage": {
+        "zams_mass_msun": "120 source nodes over 10--100 Msun",
+        "metallicity_mass_fraction": 0.0,
+        "explosion_coordinates": 5760,
+        "piston_locations": ["S4", "Ye"],
+        "kinetic_energy_at_infinity_bethe": [0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.4, 3.0, 5.0, 10.0],
+        "mixing_normalized_to_he_core": [0.0, 0.001, 0.00158, 0.00251],
+        "release_products": "660546 official VizieR isotopic-ejecta rows including fallback; terminal integrated release only"
+      },
+      "physics_to_record": [
+        "kinetic energy at infinity rather than central-engine deposition energy",
+        "piston location",
+        "artificial boxcar mixing before fallback",
+        "fallback",
+        "omitted rotation and neutrino-wind nucleosynthesis",
+        "listed-isotope versus inferred-remnant mass semantics"
+      ],
+      "known_gap_for_this_project": "The source materially improves exact-Z=0 mass coverage but starts at 10 Msun while the runtime SNII channel starts at 8 Msun, and it has no positive-metallicity axis. Explosion energy, piston, and artificial-mixing population distributions are unselected; rotation and neutrino-wind nucleosynthesis are omitted; remnant mass is not an explicit machine-readable column; no age-resolved release or canonical momentum is supplied. Scientific use is verified through VizieR, but public redistribution terms are not.",
+      "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/heger_woosley2010_popiii",
+      "source_asset_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+      "source_sha256": "0fa810d85564623450774f6eda8f00bf9e7646b6ef8a6c94e693e7075cb478ee",
+      "license_status": "scientific_use_verified_public_redistribution_license_unresolved",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "karakas_lugaro2016_agb",
+      "channel": "AGB",
+      "status": "candidate_not_approved",
+      "citation": "Karakas & Lugaro 2016, Stellar yields from metal-rich asymptotic giant branch models",
+      "doi": "10.3847/0004-637X/825/1/26",
+      "url": "https://doi.org/10.3847/0004-637X/825/1/26",
+      "reported_coverage": {
+        "zams_mass_msun": "1--7.5 Msun at Z=0.007; 1--8 Msun at Z=0.014 and 0.03",
+        "metallicity_mass_fraction": [0.007, 0.014, 0.03],
+        "release_time_grid": "integrated lifetime ejecta; thermal-pulse surface histories are separate products"
+      },
+      "physics_to_record": ["mass loss", "thermal-pulse timing", "third dredge-up", "remnant mass", "C--Bi abundance coverage"],
+      "known_gap_for_this_project": "The paper is broader than the eleven tracked fields and does not automatically provide a binary-population or RAMSES-ready cumulative grid.",
+      "source_asset_path": null,
+      "source_sha256": null,
+      "license_status": "to_be_verified",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "osborn2025_binaryc_lowz_agb",
+      "channel": "AGB",
+      "status": "candidate_not_approved",
+      "citation": "Osborn et al. 2025, Using Binary Population Synthesis to Calculate the Yields of Low- and Intermediate-Mass Binary Populations at Low Metallicity",
+      "url": "https://arxiv.org/abs/2510.17032",
+      "reported_coverage": {
+        "zams_mass_msun": "approximately 0.7--7",
+        "metallicity": "Z=0.0001",
+        "population": "binary_c population synthesis"
+      },
+      "physics_to_record": ["binary fraction", "common-envelope assumptions", "mass transfer", "TP-AGB occurrence", "C/N/s-process changes"],
+      "known_gap_for_this_project": "Single low-metallicity point is not sufficient for the required metallicity grid; binary population assumptions must match the selected stellar SED/IMF.",
+      "source_asset_path": null,
+      "source_sha256": null,
+      "license_status": "to_be_verified",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "keegans2023_snia_nugrid",
+      "channel": "SNIa",
+      "status": "event_yield_candidate_not_rate_model",
+      "citation": "Keegans et al. 2023, Type Ia Supernova Nucleosynthesis: Metallicity-Dependent Yields",
+      "doi": "10.3847/1538-4365/ace618",
+      "url": "https://arxiv.org/abs/2306.12885",
+      "reported_coverage": {
+        "models": 39,
+        "progenitor_families": "1.4 Msun deflagration-detonation, 1.0 and 0.8 Msun double detonation",
+        "metallicity_compositions": 13,
+        "event_release": "single-event ejecta; DTD convolution remains separate"
+      },
+      "physics_to_record": ["progenitor selection", "22Ne/metallicity dependence", "event ejecta", "event energy", "event remnant", "DTD normalization"],
+      "known_gap_for_this_project": "This cannot be loaded as an ordinary 3--8 Msun IMF channel; a separately approved SNIa DTD and binary normalization are required.",
+      "source_asset_path": null,
+      "source_sha256": null,
+      "license_status": "to_be_verified",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "pisn_ppisn_future_source",
+      "channel": "PISN",
+      "status": "disabled_not_selected",
+      "citation": null,
+      "url": null,
+      "reported_coverage": null,
+      "physics_to_record": ["Pop-III eligibility", "core mass", "PPISN outcome", "metallicity", "rotation/mass-loss assumptions"],
+      "known_gap_for_this_project": "The current switch must not infer PISN from a universal ZAMS 140--260 Msun interval.",
+      "source_asset_path": null,
+      "source_sha256": null,
+      "license_status": "not_applicable_until_selected",
+      "approval_id": null
+    },
+    {
+      "candidate_id": "massive_star_wind_source_pending",
+      "channel": "wind",
+      "status": "source_not_selected",
+      "citation": null,
+      "url": null,
+      "reported_coverage": null,
+      "physics_to_record": ["metallicity-dependent mass loss", "rotation", "binary stripping", "release-time history", "terminal-envelope ownership"],
+      "known_gap_for_this_project": "A CCSN table's pre-SN mass loss cannot be silently reused as an independent wind channel; a dedicated source or explicit partition is required.",
+      "source_asset_path": null,
+      "source_sha256": null,
+      "license_status": "not_selected",
+      "approval_id": null
+    }
+  ],
+  "current_project_assets": {
+    "legacy_yield_table": {
+      "path": "/gpfs/kjhan/Run_JWST/opt_run/yield_table.asc",
+      "status": "legacy_comparison_only",
+      "sha256": "ba1099c5a4c3afe5e9ba28b3eb59d2e85fd3d40b7e7cb4ec30799eec00a5ac2e"
+    },
+    "phase0_validation_fixture": {
+      "path": "/home/kjhan/BACKUP/lagRamses/patch/lagRamses/phase0_validation_yields.dat",
+      "status": "test_fixture_only",
+      "reason": "one mass point per present channel; no approved sidecar; SNIa/PISN absent"
+    }
+  },
+  "gate_status": {
+    "approved_required_channels": false,
+    "complete_physical_grid": false,
+    "provenance_sidecars": false,
+    "production_ready": false,
+    "blocking_reason": "No physical source file has been selected, checksummed, converted, and approved for the canonical 32-field contract."
+  }
+}

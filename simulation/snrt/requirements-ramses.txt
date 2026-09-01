@@ -1,0 +1,4 @@
+# Optional P4 RAMSES staging dependencies.  Install only in snrt/.venv.
+h5py>=3.16,<4
+yt>=4.4,<5
+f90nml>=1.5,<2

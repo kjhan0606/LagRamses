@@ -1,0 +1,25 @@
+{
+  "absorbed_photons": 1.6169083131219876e+63,
+  "analytic_radius_pc": 1072.4792005388738,
+  "chemical_ledger_residual": 1.288038037666747e+59,
+  "chemical_relative_error": 7.966054891385613e-05,
+  "dt_myr": 0.05269920101051734,
+  "effective_radius_pc": 1025.162861168502,
+  "emitted_photons": 1.9291499547390222e+63,
+  "escaped_photons": 1.4546178148151565e+56,
+  "fixed_point_iterations": 12,
+  "fixed_point_max_fraction_residual": 3.814697265625e-06,
+  "ionized_atoms": 1.3259246803611244e+63,
+  "passed": true,
+  "photons_in_domain": 3.122414961552531e+62,
+  "radius_ratio": 0.955881345440921,
+  "recombined_atoms": 2.908547320833441e+62,
+  "shape": [
+    32,
+    32,
+    32
+  ],
+  "sn_order": 4,
+  "steps": 116,
+  "stromgren_radius_pc": 1463.5871211882497
+}
