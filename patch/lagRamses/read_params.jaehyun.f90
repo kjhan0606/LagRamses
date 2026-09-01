@@ -30,7 +30,8 @@ subroutine read_params
   namelist/run_params/clumpfind,cosmo,pic,sink,sinkprops,lightcone,poisson,hydro,rt,verbose,debug &
        & ,nrestart,ncontrol,nstepmax,nsubcycle,nremap,remap_thresh,ordering &
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
-  & ,memory_balance,mem_weight_grid,mem_weight_part,mem_weight_sink &
+  & ,memory_balance,memory_balance_fast_particles &
+  & ,mem_weight_grid,mem_weight_part,mem_weight_sink &
        & ,lb_grid_headroom &
   & ,work_weight_grid,work_weight_part,work_weight_sidm_pair &
        & ,time_balance_alpha,lb_timing_interval,timer_report_interval,lb_timing_ema_alpha &
@@ -472,6 +473,13 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   end if
   if(myid==1) write(*,'(A,F6.3,A)') &
        ' Load-balance grid headroom=',lb_grid_headroom,' x ngridmax'
+  if(myid==1 .and. memory_balance)then
+     if(memory_balance_fast_particles)then
+        write(*,'(A)') ' Memory balance particle placement: fast grid-total mode'
+     else
+        write(*,'(A)') ' Memory balance particle placement: exact linked-list mode'
+     end if
+  end if
 
   !-------------------------------------------------
   ! Work-balance model validation

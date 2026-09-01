@@ -4,6 +4,7 @@ program test_particle_leaf_counts
   use pm_commons
   implicit none
   integer,dimension(1:twotondim)::npart_leaf,ndm_leaf
+  logical,dimension(1:twotondim)::is_leaf
 
   ngridmax=1
   allocate(xg(1,ndim))
@@ -33,6 +34,18 @@ program test_particle_leaf_counts
   call assert_equal('leaf 3 excludes star',ndm_leaf(3),0)
   call assert_equal('leaf 8 DM',ndm_leaf(8),1)
   call assert_equal('particle conservation',sum(npart_leaf),4)
+
+  call count_particles_by_leaf(1,npart_leaf,ndm_leaf,count_dm=.false.)
+  call assert_equal('optional DM count disabled',sum(ndm_leaf),0)
+  call assert_equal('particle count with DM disabled',sum(npart_leaf),4)
+
+  is_leaf=.false.
+  is_leaf((/1,3,8/))=.true.
+  call distribute_particle_total_by_leaf(11_8,is_leaf,npart_leaf)
+  call assert_equal('fast leaf 1 quotient+remainder',npart_leaf(1),4)
+  call assert_equal('fast leaf 3 quotient+remainder',npart_leaf(3),4)
+  call assert_equal('fast leaf 8 quotient',npart_leaf(8),3)
+  call assert_equal('fast particle conservation',sum(npart_leaf),11)
 
   write(*,*)'PASS: particle leaf counts'
 

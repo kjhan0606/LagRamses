@@ -654,40 +654,96 @@ module pm_commons
   ! a grid total and must not be charged to every leaf cell during domain
   ! decomposition.  The SIDM count follows sidm_scatter's definition of a
   ! DM-like particle so the pair proxy represents the work really attempted.
-  subroutine count_particles_by_leaf(igrid,npart_leaf,ndm_leaf)
+  subroutine count_particles_by_leaf(igrid,npart_leaf,ndm_leaf,count_dm)
     use amr_commons, only: xg
     implicit none
     integer,intent(in)::igrid
     integer,dimension(1:twotondim),intent(out)::npart_leaf,ndm_leaf
-    integer::ipart,jpart,ind,ix,iy,iz
+    logical,intent(in),optional::count_dm
+    integer::ipart,jpart,ind,ix,iy,iz,np,ivec
+    integer,dimension(1:nvector)::ind_part,ind_leaf
+    logical,dimension(1:nvector)::dm_like
+    logical::need_dm
 
     npart_leaf=0
     ndm_leaf=0
     if(igrid<=0 .or. .not.allocated(headp) .or. .not.allocated(numbp) .or. &
          .not.allocated(nextp) .or. .not.allocated(xp))return
 
+    need_dm=.true.
+    if(present(count_dm))need_dm=count_dm
+    need_dm=need_dm.and.allocated(idp).and.allocated(ptypep)
+
+    ! Linked-list chasing is inherently serial, but gather particle indices in
+    ! NVECTOR chunks so the coordinate/type classification below can be
+    ! vectorized and does not interleave random nextp and xp/idp loads.
     ipart=headp(igrid)
-    do jpart=1,numbp(igrid)
-       if(ipart<=0)exit
-       ix=0
-       iy=0
-       iz=0
-       if(xp(ipart,1)>xg(igrid,1))ix=1
+    jpart=0
+    do while(jpart<numbp(igrid).and.ipart>0)
+       np=0
+       do while(np<nvector.and.jpart<numbp(igrid).and.ipart>0)
+          np=np+1
+          jpart=jpart+1
+          ind_part(np)=ipart
+          ipart=nextp(ipart)
+       end do
+       !$OMP SIMD PRIVATE(ix,iy,iz)
+       do ivec=1,np
+          ix=0
+          iy=0
+          iz=0
+          if(xp(ind_part(ivec),1)>xg(igrid,1))ix=1
 #if NDIM>1
-       if(xp(ipart,2)>xg(igrid,2))iy=1
+          if(xp(ind_part(ivec),2)>xg(igrid,2))iy=1
 #endif
 #if NDIM>2
-       if(xp(ipart,3)>xg(igrid,3))iz=1
+          if(xp(ind_part(ivec),3)>xg(igrid,3))iz=1
 #endif
-       ind=1+ix+2*iy+4*iz
-       npart_leaf(ind)=npart_leaf(ind)+1
-       if(allocated(idp).and.allocated(ptypep))then
-          if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. &
-               ptypep(ipart)/=PTYPE_SINK) ndm_leaf(ind)=ndm_leaf(ind)+1
-       end if
-       ipart=nextp(ipart)
+          ind_leaf(ivec)=1+ix+2*iy+4*iz
+          dm_like(ivec)=.false.
+          if(need_dm)then
+             dm_like(ivec)=idp(ind_part(ivec))>0 .and. &
+                  ptypep(ind_part(ivec))/=PTYPE_STAR .and. &
+                  ptypep(ind_part(ivec))/=PTYPE_SINK
+          end if
+       end do
+       do ivec=1,np
+          ind=ind_leaf(ivec)
+          npart_leaf(ind)=npart_leaf(ind)+1
+          if(dm_like(ivec))ndm_leaf(ind)=ndm_leaf(ind)+1
+       end do
     end do
   end subroutine count_particles_by_leaf
+
+  ! Spread an exact aggregate count over the selected direct leaf children.
+  ! The quotient/remainder rule is deterministic and conserves npart_direct;
+  ! it deliberately approximates only the within-grid particle positions.
+  subroutine distribute_particle_total_by_leaf(npart_direct,is_leaf,npart_leaf)
+    implicit none
+    integer(kind=8),intent(in)::npart_direct
+    logical,dimension(1:twotondim),intent(in)::is_leaf
+    integer,dimension(1:twotondim),intent(out)::npart_leaf
+    integer::ind,nleaf,ileaf,nbase,nextra
+
+    npart_leaf=0
+    nleaf=count(is_leaf)
+    if(npart_direct<=0_8.or.nleaf<=0)return
+    if(npart_direct>int(huge(nbase),kind=8))then
+       write(*,*)'distribute_particle_total_by_leaf: integer overflow ', &
+            npart_direct
+       error stop 1
+    end if
+    nbase=int(npart_direct/int(nleaf,kind=8))
+    nextra=int(mod(npart_direct,int(nleaf,kind=8)))
+    ileaf=0
+    do ind=1,twotondim
+       if(is_leaf(ind))then
+          ileaf=ileaf+1
+          npart_leaf(ind)=nbase
+          if(ileaf<=nextra)npart_leaf(ind)=npart_leaf(ind)+1
+       end if
+    end do
+  end subroutine distribute_particle_total_by_leaf
 
   function cross(a,b)
     use amr_parameters, only:dp

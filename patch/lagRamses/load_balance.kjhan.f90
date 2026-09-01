@@ -37,6 +37,7 @@ recursive subroutine load_balance
   real(dp)::t_lb_start,t_lb_end
   real(dp)::remap_elapsed,remap_elapsed_max
   real(dp)::t0,t1,t2,t3,t4,t5,t6
+  real(dp)::t_tree_collapse,t_numbp_done,t_stats_done,t_map_done,t_particle_done
   real(dp)::te_flag,te_refine,te_bcomm,te_virt,te_phys
   real(dp)::ts_flag,ts_refine,ts_bcomm
   real(dp)::tt0,tt1
@@ -62,6 +63,8 @@ recursive subroutine load_balance
 #ifndef WITHOUTMPI
   t_lb_start = MPI_WTIME()
   t0 = t_lb_start
+  t_tree_collapse=t0
+  t_numbp_done=t0
   if(myid==1)write(*,*)'Load balancing AMR grid...'
 
   ! Put all particle in main tree trunk
@@ -71,27 +74,33 @@ recursive subroutine load_balance
         call merge_tree_fine(ilevel)
      end do
   endif
+  t_tree_collapse=MPI_WTIME()
 
-  ! Synchronize numbp for virtual/reception grids.
-  ! After make_tree_fine/merge_tree_fine, numbp is correct for active grids
-  ! but stale for reception grids. We temporarily overwrite reception grids'
-  ! numbp with the remote active grid's value for the cost function.
+  ! The fast memory-balance path starts with the exact particle totals stored
+  ! on levelmin grids and propagates them deterministically down the AMR tree.
+  ! A levelmin grid can be a reception grid on the rank owning one of its
+  ! refined descendants, so only that level needs numbp synchronized.  Exact
+  ! linked-list counting visits active grids only and skips this communication.
+  !
+  ! After make_tree_fine/merge_tree_fine, numbp is correct for active grids but
+  ! stale for reception grids. We temporarily overwrite reception grids'
+  ! numbp with the remote active grid's value for the fast cost function.
   ! We save the original numbp before overwriting, and restore afterwards.
   ! Setting numbp=0 would break the particle tree because merge_tree_fine
   ! can attach particles to reception grids at coarser levels.
-  if(memory_balance .and. pic .and. (.not.init))then
+  if(memory_balance .and. memory_balance_fast_particles .and. &
+       (.not.use_cpubox_decomp) .and. pic .and. &
+       (.not.init))then
      ! Count total reception grids for save buffer
      nsave=0
-     do ilevel=1,nlevelmax
-        if(numbtot(1,ilevel)==0) cycle
+     do ilevel=levelmin,levelmin
         do icpu=1,ncpu
            nsave=nsave+reception(icpu,ilevel)%ngrid
         end do
      end do
      if(nsave>0) allocate(numbp_save(1:nsave))
      isave=0
-     do ilevel=1,nlevelmax
-        if(numbtot(1,ilevel)==0) cycle
+     do ilevel=levelmin,levelmin
         ! Post receives into reception%f(:,1) — contiguous buffer
         countrecv=0
         do icpu=1,ncpu
@@ -133,7 +142,8 @@ recursive subroutine load_balance
      end do
   end if
 
-  t1 = MPI_WTIME()
+  t_numbp_done=MPI_WTIME()
+  t1 = t_numbp_done
 
   balance=.true.
 
@@ -149,13 +159,14 @@ recursive subroutine load_balance
   !-------------------------------------------
   call cmp_new_cpu_map
 
-  ! Restore original numbp for reception grids (undo the sync above).
+  ! Restore original numbp for reception grids (undo the fast-path sync).
   ! merge_tree_fine can attach particles to reception grids, so we must
   ! restore the original values rather than setting to 0.
-  if(memory_balance .and. pic .and. (.not.init))then
+  if(memory_balance .and. memory_balance_fast_particles .and. &
+       (.not.use_cpubox_decomp) .and. pic .and. &
+       (.not.init))then
      isave=0
-     do ilevel=1,nlevelmax
-        if(numbtot(1,ilevel)==0) cycle
+     do ilevel=levelmin,levelmin
         do icpu=1,ncpu
            ncache=reception(icpu,ilevel)%ngrid
            do i=1,ncache
@@ -373,6 +384,7 @@ recursive subroutine load_balance
      numbtot(3,ilevel)=comm_buffout(ilevel,3)
      numbtot(4,ilevel)=numbtot(1,ilevel)/ncpu
   end do
+  t_stats_done=MPI_WTIME()
 
   !--------------------------------------
   ! Set old cpu map to new cpu map
@@ -385,6 +397,8 @@ recursive subroutine load_balance
   end if
 
   nxny=nx*ny
+  !$OMP PARALLEL DO COLLAPSE(3) DEFAULT(SHARED) PRIVATE(ix,iy,iz,ind) &
+  !$OMP SCHEDULE(STATIC)
   do iz=kcoarse_min,kcoarse_max
   do iy=jcoarse_min,jcoarse_max
   do ix=icoarse_min,icoarse_max
@@ -393,17 +407,21 @@ recursive subroutine load_balance
   end do
   end do
   end do
+  !$OMP END PARALLEL DO
   do ilevel=1,nlevelmax
      ! Build new communicators
      call build_comm(ilevel)
-     do ind=1,twotondim
-        do i=1,active(ilevel)%ngrid
+     !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(i,ind) SCHEDULE(STATIC)
+     do i=1,active(ilevel)%ngrid
+        do ind=1,twotondim
            cpu_map(ICELL_OF(active(ilevel)%igrid(i),ind))= &
                 cpu_map2(ICELL_OF(active(ilevel)%igrid(i),ind))
         end do
      end do
+     !$OMP END PARALLEL DO
      call make_virtual_fine_int(cpu_map(1),ilevel)
   end do
+  t_map_done=MPI_WTIME()
 
   if(pic.and.(.not.init))then
      ! Sort particles down to nlevelmax
@@ -417,7 +435,8 @@ recursive subroutine load_balance
      end do
   end if
 
-  t5 = MPI_WTIME()
+  t_particle_done=MPI_WTIME()
+  t5 = t_particle_done
 
   !--------------------------------------------
   ! Shrink boundaries around new mesh partition
@@ -463,7 +482,8 @@ recursive subroutine load_balance
   lb_imbalance_ema_valid=.false.
   if(myid==1) then
      write(*,'(A,F8.3,A)') ' load_balance total:         ', t_lb_end - t_lb_start, ' s'
-     write(*,'(A,F8.3,A)') '   numbp_sync:               ', t1 - t0, ' s'
+     write(*,'(A,F8.3,A)') '   particle_tree_collapse:   ', t_tree_collapse - t0, ' s'
+     write(*,'(A,F8.3,A)') '   fast_child_numbp_sync:    ', t_numbp_done - t_tree_collapse, ' s'
      write(*,'(A,F8.3,A)') '   cmp_new_cpu_map:          ', t2 - t1, ' s'
      write(*,'(A,F8.3,A)') '   expand_pass:              ', t3 - t2, ' s'
      write(*,'(A,F8.3,A)') '     flag_fine:              ', te_flag, ' s'
@@ -472,7 +492,9 @@ recursive subroutine load_balance
      write(*,'(A,F8.3,A)') '     virtual_int_pair:       ', te_virt, ' s'
      write(*,'(A,F8.3,A)') '     phys_boundary:          ', te_phys, ' s'
      write(*,'(A,F8.3,A)') '   grid_migration:           ', t4 - t3, ' s'
-     write(*,'(A,F8.3,A)') '   allreduce+cpumap_update:  ', t5 - t4, ' s'
+     write(*,'(A,F8.3,A)') '   grid_stats_allreduce:     ', t_stats_done - t4, ' s'
+     write(*,'(A,F8.3,A)') '   cpumap_owner_update:      ', t_map_done - t_stats_done, ' s'
+     write(*,'(A,F8.3,A)') '   particle_tree_rebuild:    ', t_particle_done - t_map_done, ' s'
      write(*,'(A,F8.3,A)') '   shrink_pass:              ', t6 - t5, ' s'
      write(*,'(A,F8.3,A)') '     flag_fine:              ', ts_flag, ' s'
      write(*,'(A,F8.3,A)') '     refine:                 ', ts_refine, ' s'
@@ -529,6 +551,7 @@ subroutine cmp_new_cpu_map
   use pm_commons
   use bisection
   use ksection
+  use omp_lib, only: omp_get_wtime
 #include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
@@ -545,10 +568,12 @@ subroutine cmp_new_cpu_map
   integer::nxny,ix,iy,iz,ilo,ihi,imid
   integer::ind_long
   integer::isink,igrid_sink,ind_sink,icell_sink,isubcell_sink
-  integer::npair_cell
+  integer::npair_cell,jgrid,parent_cell,parent_grid,parent_ind
   integer,dimension(1:nvector)::ind_grid,ind_cell
   integer,dimension(1:nvector,1:twotondim)::npart_leaf,ndm_leaf
   integer,allocatable::sink_per_grid(:)
+  integer,allocatable::grid_particle_budget(:)
+  logical,dimension(1:twotondim)::all_children
 
   real(dp)::dx,scale,weight
   real(dp),dimension(1:twotondim,1:3)::xc
@@ -596,6 +621,15 @@ subroutine cmp_new_cpu_map
   integer::lb_incoming,lb_free_slots,lb_allowed,lb_target_cpu,lb_limit_iter
   real(kind=8)::lb_fraction_local,lb_fraction_global
   logical::lb_boundary_limited
+  logical::use_fast_particle_balance,need_dm_count
+  integer(kind=8)::fast_grid_loc,fast_fallback_loc,exact_particle_visits_loc
+  integer(kind=8)::particle_assigned_loc,particle_expected_loc
+  integer(kind=8)::particle_physical_loc,particle_physical_tot
+  integer(kind=8)::particle_conservation_error,particle_conservation_tol
+  integer(kind=8)::fast_grid_tot,fast_fallback_tot,exact_particle_visits_tot
+  integer(kind=8)::particle_assigned_tot,particle_expected_tot
+  real(dp)::tpart_work_loc,tkey_work_loc,tcost_work_loc,tt_work
+  real(dp)::tpart_work_max,tkey_work_max,tcost_work_max
 #ifndef WITHOUTMPI
   real(dp)::tcmp_start,tcmp_key,tcmp_sort,tcmp_bound,tcmp_map,tcmp_virtual
 #endif
@@ -608,6 +642,19 @@ subroutine cmp_new_cpu_map
   lb_boundary_limited=.false.
   lb_limit_iter=0
   lb_bound_key_target=0.0_qdp
+  use_fast_particle_balance=memory_balance.and. &
+       memory_balance_fast_particles.and.(.not.use_cpubox_decomp)
+  need_dm_count=(.not.memory_balance).and.sidm.and.work_weight_sidm_pair>0
+  fast_grid_loc=0_8
+  fast_fallback_loc=0_8
+  exact_particle_visits_loc=0_8
+  particle_assigned_loc=0_8
+  particle_expected_loc=0_8
+  particle_physical_loc=int(max(0,npart),kind=8)
+  tpart_work_loc=0d0
+  tkey_work_loc=0d0
+  tcost_work_loc=0d0
+  all_children=.true.
   
   ! Compute AMR subcycle work factors.  Memory balance deliberately ignores
   ! these factors because allocated memory does not grow with update count.
@@ -668,6 +715,76 @@ subroutine cmp_new_cpu_map
      end do
   end if
 
+  ! During load_balance all particles are in the levelmin trunk.  Propagate
+  ! each exact levelmin total down its AMR branches by the same deterministic
+  ! quotient/remainder split used for leaf costs.  Refined-cell shares are
+  ! carried by the child grid; unrefined-cell shares become leaf costs.  This
+  ! conserves the global particle total without touching a linked list and
+  ! handles the initial zoom state where finer-grid numbp values are zero.
+  if(use_fast_particle_balance.and.pic)then
+     allocate(grid_particle_budget(1:ngridmax))
+     !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(i) SCHEDULE(STATIC)
+     do i=1,ngridmax
+        grid_particle_budget(i)=0
+     end do
+     !$OMP END PARALLEL DO
+     !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(i,igrid) SCHEDULE(STATIC) &
+     !$OMP REDUCTION(+:particle_expected_loc)
+     do i=1,active(levelmin)%ngrid
+        igrid=active(levelmin)%igrid(i)
+        grid_particle_budget(igrid)=max(0,numbp(igrid))
+        particle_expected_loc=particle_expected_loc+ &
+             int(grid_particle_budget(igrid),kind=8)
+     end do
+     !$OMP END PARALLEL DO
+     do icpu=1,ncpu
+        !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(i,igrid) SCHEDULE(STATIC)
+        do i=1,reception(icpu,levelmin)%ngrid
+           igrid=reception(icpu,levelmin)%igrid(i)
+           grid_particle_budget(igrid)=max(0,numbp(igrid))
+        end do
+        !$OMP END PARALLEL DO
+     end do
+     do ilevel=levelmin+1,nlevelmax
+        !$OMP PARALLEL DO DEFAULT(SHARED) &
+        !$OMP PRIVATE(jgrid,igrid,parent_cell,parent_grid,parent_ind) &
+        !$OMP SCHEDULE(STATIC)
+        do jgrid=1,active(ilevel)%ngrid
+           igrid=active(ilevel)%igrid(jgrid)
+           parent_cell=father(igrid)
+           if(parent_cell>ncoarse)then
+              parent_grid=IGRID_OF(parent_cell)
+              parent_ind=ICHILD_OF(parent_cell)
+              grid_particle_budget(igrid)= &
+                   grid_particle_budget(parent_grid)/twotondim
+              if(parent_ind<=mod(grid_particle_budget(parent_grid), &
+                   twotondim))grid_particle_budget(igrid)= &
+                   grid_particle_budget(igrid)+1
+           end if
+        end do
+        !$OMP END PARALLEL DO
+        do icpu=1,ncpu
+           !$OMP PARALLEL DO DEFAULT(SHARED) &
+           !$OMP PRIVATE(jgrid,igrid,parent_cell,parent_grid,parent_ind) &
+           !$OMP SCHEDULE(STATIC)
+           do jgrid=1,reception(icpu,ilevel)%ngrid
+              igrid=reception(icpu,ilevel)%igrid(jgrid)
+              parent_cell=father(igrid)
+              if(parent_cell>ncoarse)then
+                 parent_grid=IGRID_OF(parent_cell)
+                 parent_ind=ICHILD_OF(parent_cell)
+                 grid_particle_budget(igrid)= &
+                      grid_particle_budget(parent_grid)/twotondim
+                 if(parent_ind<=mod(grid_particle_budget(parent_grid), &
+                      twotondim))grid_particle_budget(igrid)= &
+                      grid_particle_budget(igrid)+1
+              end if
+           end do
+           !$OMP END PARALLEL DO
+        end do
+     end do
+  end if
+
   !----------------------------------------
   ! Compute cell ordering and cost
   ! for leaf cells with cpu map = myid.
@@ -713,9 +830,12 @@ subroutine cmp_new_cpu_map
   end do
   ! Loop over levels (OMP parallelized on igrid loop)
   !$OMP PARALLEL DEFAULT(SHARED) &
-  !$OMP PRIVATE(igrid,ngrid,ind,idim,ncell_loc,batch_size,my_base,my_idx, &
+  !$OMP PRIVATE(igrid,ngrid,ind,idim,ilevel,ncell_loc,batch_size,my_base,my_idx, &
   !$OMP         ind_grid,ind_cell,xx,order_min,order_max,dom,isub,wflag, &
-  !$OMP         ncell_sub_t,npart_sub_t,npart_leaf,ndm_leaf,npair_cell,i)
+  !$OMP         ncell_sub_t,npart_sub_t,npart_leaf,ndm_leaf,npair_cell,i, &
+  !$OMP         tt_work) &
+  !$OMP REDUCTION(+:fast_grid_loc,fast_fallback_loc,exact_particle_visits_loc, &
+  !$OMP             particle_assigned_loc,tpart_work_loc,tkey_work_loc,tcost_work_loc)
   ncell_sub_t=0
   npart_sub_t=0
   do ilevel=1,nlevelmax
@@ -747,16 +867,33 @@ subroutine cmp_new_cpu_map
         do i=1,ngrid
            ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
         end do
-        npart_leaf=0
-        ndm_leaf=0
+        npart_leaf(1:ngrid,:)=0
+        ndm_leaf(1:ngrid,:)=0
+        tt_work=omp_get_wtime()
         if(pic)then
-           do i=1,ngrid
-              call count_particles_by_leaf(ind_grid(i), &
-                   npart_leaf(i,:),ndm_leaf(i,:))
-           end do
+           if(use_fast_particle_balance)then
+              do i=1,ngrid
+                 call distribute_particle_total_by_leaf( &
+                      int(grid_particle_budget(ind_grid(i)),kind=8), &
+                      all_children,npart_leaf(i,:))
+                 fast_grid_loc=fast_grid_loc+1_8
+              end do
+           else
+              do i=1,ngrid
+                 if(numbp(ind_grid(i))>0)then
+                    call count_particles_by_leaf(ind_grid(i), &
+                         npart_leaf(i,:),ndm_leaf(i,:), &
+                         count_dm=need_dm_count)
+                    exact_particle_visits_loc=exact_particle_visits_loc+ &
+                         int(numbp(ind_grid(i)),kind=8)
+                 end if
+              end do
+           end if
         end if
+        tpart_work_loc=tpart_work_loc+omp_get_wtime()-tt_work
         ! Loop over cells
         do ind=1,twotondim
+           tt_work=omp_get_wtime()
            do i=1,ngrid
               ind_cell(i)=ICELL_OF(ind_grid(i),ind)
            end do
@@ -785,6 +922,8 @@ subroutine cmp_new_cpu_map
               ncell=ncell+batch_size
               !$OMP END ATOMIC
            end if
+           tkey_work_loc=tkey_work_loc+omp_get_wtime()-tt_work
+           tt_work=omp_get_wtime()
            ncell_loc=0
            do i=1,ngrid
               if(cpu_map(ind_cell(i))==myid.and.son(ind_cell(i))==0)then
@@ -792,6 +931,8 @@ subroutine cmp_new_cpu_map
                  my_idx=my_base+ncell_loc
                  isub=(dom(ncell_loc)-1)/ncpu+1
                  ncell_sub_t(isub)=ncell_sub_t(isub)+1
+                 particle_assigned_loc=particle_assigned_loc+ &
+                      int(npart_leaf(i,ind),kind=8)
                  npair_cell=domain_sidm_pair_count(ndm_leaf(i,ind))
                  wflag=domain_leaf_cost(npart_leaf(i,ind),npair_cell, &
                       niter_cost(ilevel),level_mesh_scale_ema(ilevel))
@@ -808,6 +949,7 @@ subroutine cmp_new_cpu_map
                  hilbert_key(my_idx)=order_max(ncell_loc)
               end if
            end do
+           tcost_work_loc=tcost_work_loc+omp_get_wtime()-tt_work
         end do
         ! End loop over cells
      end do
@@ -825,11 +967,79 @@ subroutine cmp_new_cpu_map
   !$OMP END PARALLEL
 
 #ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(fast_grid_loc,fast_grid_tot,1,MPI_INTEGER8,MPI_SUM, &
+       MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(fast_fallback_loc,fast_fallback_tot,1,MPI_INTEGER8, &
+       MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(exact_particle_visits_loc,exact_particle_visits_tot,1, &
+       MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(particle_assigned_loc,particle_assigned_tot,1, &
+       MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(particle_expected_loc,particle_expected_tot,1, &
+       MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(particle_physical_loc,particle_physical_tot,1, &
+       MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(tpart_work_loc,tpart_work_max,1, &
+       MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(tkey_work_loc,tkey_work_max,1, &
+       MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(tcost_work_loc,tcost_work_max,1, &
+       MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+#else
+  fast_grid_tot=fast_grid_loc
+  fast_fallback_tot=fast_fallback_loc
+  exact_particle_visits_tot=exact_particle_visits_loc
+  particle_assigned_tot=particle_assigned_loc
+  particle_expected_tot=particle_expected_loc
+  particle_physical_tot=particle_physical_loc
+  tpart_work_max=tpart_work_loc
+  tkey_work_max=tkey_work_loc
+  tcost_work_max=tcost_work_loc
+#endif
+  if(use_fast_particle_balance.and.pic)then
+     particle_conservation_error=abs(particle_assigned_tot- &
+          particle_expected_tot)
+     ! A rank-boundary branch can exist only as a reception oct on the rank
+     ! carrying its parent remainder.  Permit at most one 2^ndim remainder per
+     ! rank; anything larger indicates a broken propagation and remains fatal.
+     particle_conservation_tol=max(1_8,int(ncpu,kind=8)* &
+          int(twotondim,kind=8))
+     if(particle_conservation_error>particle_conservation_tol)then
+        if(myid==1)write(*,'(A,I0,A,I0,A,I0,A,I0)') &
+             ' ERROR fast particle balance conservation: assigned=', &
+             particle_assigned_tot,' tree=',particle_expected_tot, &
+             ' delta=',particle_conservation_error,' tolerance=', &
+             particle_conservation_tol
+        call clean_stop
+     else if(myid==1.and.particle_conservation_error>0_8)then
+        write(*,'(A,I0,A,I0)') &
+             ' Fast particle balance boundary remainder delta=', &
+             particle_conservation_error,' tolerance=',particle_conservation_tol
+     end if
+  end if
+  if(myid==1.and.pic)then
+     write(*,'(A,3(F10.3,A))') &
+          ' cmp key/cost max-rank thread-work: particles=',tpart_work_max, &
+          ' s keys=',tkey_work_max,' s costs=',tcost_work_max,' s'
+     if(use_fast_particle_balance)then
+        write(*,'(A,I0,A,I0,A,I0,A,I0,A,I0)') &
+             ' cmp fast particle grids=',fast_grid_tot, &
+             ' fallback=',fast_fallback_tot,' assigned=', &
+             particle_assigned_tot,' tree=',particle_expected_tot, &
+             ' physical=',particle_physical_tot
+     else
+        write(*,'(A,I0)') &
+             ' cmp exact particle linked-list visits=',exact_particle_visits_tot
+     end if
+  end if
+
+#ifndef WITHOUTMPI
   tcmp_key=MPI_WTIME()
 #endif
 
   ! Clean up sink cost array
   if(allocated(sink_per_grid)) deallocate(sink_per_grid)
+  if(allocated(grid_particle_budget)) deallocate(grid_particle_budget)
 
   ! Reset time-based load balancing accumulators
   level_time_loc = 0d0
@@ -1109,7 +1319,11 @@ subroutine cmp_new_cpu_map
   ! Compute new cpu map
   !----------------------------------------
 210 continue
-  cpu_map2=0
+  !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(i) SCHEDULE(STATIC)
+  do i=1,size(cpu_map2)
+     cpu_map2(i)=0
+  end do
+  !$OMP END PARALLEL DO
   ncell_loc=1
   do iz=0,nz-1
   do iy=0,ny-1
@@ -1171,7 +1385,7 @@ subroutine cmp_new_cpu_map
      !$OMP PARALLEL DO DEFAULT(SHARED) &
      !$OMP PRIVATE(igrid,ngrid,ind_grid,ind_cell,xx,order_max,i,ind,idim,idom, &
      !$OMP         ilo,ihi,imid,xx_tmp,c_tmp,c_tmp_v) &
-     !$OMP SCHEDULE(DYNAMIC,4)
+     !$OMP SCHEDULE(STATIC)
      do igrid=1,ncache,nvector
         ! Gather nvector grids
         ngrid=MIN(nvector,ncache-igrid+1)
