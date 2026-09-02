@@ -191,7 +191,7 @@ The first P0 work is compiled-tree closure, not physical-table import:
    smoke logs carry the binary SHA-256, evidence survives descendant commits
    through hash pinning plus an ancestor check, and the native shared profile
    is a bounded differential diagnostic rather than a fixed hash set. The
-   implemented gate and its current BLOCK result are recorded in
+   implemented gate and its current PASS result are recorded in
    [`p0_source_parity_gate_2026-09-02.md`](p0_source_parity_gate_2026-09-02.md).
 2. **P0.2 time and interval semantics (F3/F4):** fix the compiled age unit at
    the table boundary and make cumulative release telescope over variable

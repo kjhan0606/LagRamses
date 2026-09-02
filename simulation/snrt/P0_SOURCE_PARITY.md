@@ -17,13 +17,13 @@ Run the read-only gate with:
 python3 simulation/snrt/tools/validate_stellar_source_parity.py
 ```
 
-Use `--require-pass` in a production qualification path. It currently returns
-`STELLAR_SOURCE_PARITY_BLOCKED blocked=production_linked_build_evidence` because
-the production-linked harness has not yet produced fresh build evidence. The
-14 differing native/production hashes are differential diagnostics, not a
-P0.1 failure: the native mirror is explicitly not the production source of
-truth. Existing `build/g1_native` objects are not evidence and are never used
-by this validator.
+Use `--require-pass` in a production qualification path. The production-linked
+harness has now produced fresh evidence and the gate returns
+`STELLAR_SOURCE_PARITY_PASS blocked=none`. The 14 differing
+native/production hashes are differential diagnostics, not a P0.1 failure: the
+native mirror is explicitly not the production source of truth. Existing
+`build/g1_native` objects are not evidence and are never used by this
+validator.
 
 For transparency, the 14 differing entries are 11 byte-different modules and
 3 modules absent from the native mirror (`stellar_cell_deposition.f90`,
@@ -68,7 +68,10 @@ explicitly declared as native differential-test scaffolding. They are not
 production-linked sources and are not silently treated as part of the shared
 production contract.
 
-The current implementation record is
-`provenance/p0_source_parity_gate_2026-09-02.md`; its expected status is
-`STELLAR_SOURCE_PARITY_BLOCKED` until the opt-in production-linked build has
-completed successfully.
+The production evidence is recorded in
+`simulation/snrt/data/p0_production_linked_build_evidence.json`; the build and
+smoke logs remain under the ignored `build/p0_production_linked/` directory,
+and the binary remains the ignored `bin/ramses_final3d`. The current
+implementation record is
+`provenance/p0_source_parity_gate_2026-09-02.md`; P0.1 is closed for source
+identity/build parity, while later runtime physics gates remain open.

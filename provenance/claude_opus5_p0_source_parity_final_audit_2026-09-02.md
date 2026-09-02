@@ -76,3 +76,19 @@ declared in the versioned config with their non-production disposition.
 
 The final static result remains intentionally blocked only by the absent
 production-linked build evidence; the real build has not been run.
+
+## Post-audit execution update
+
+After this audit, the corrected harness was executed on the committed
+production tree. It produced fresh build, linkage, smoke, and SHA-256 evidence
+and the validator returned:
+
+```text
+STELLAR_SOURCE_PARITY_PASS blocked=none
+P0_PRODUCTION_LINKED_CONTRACT_OK
+```
+
+Therefore the audit-time BLOCK is superseded operationally: P0.1 is now closed
+for source identity/build parity. The historical audit findings and scope
+limitations remain unchanged; P0.2--P0.6 and the runtime physics gates are
+still open.

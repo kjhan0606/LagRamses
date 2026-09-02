@@ -2,7 +2,7 @@
 
 Date: 2026-09-01  
 Project root: `/gpfs/kjhan/LRD_JWST`  
-Status: planning baseline; production gate closed
+Status: P0.1 source-parity gate closed; production/publication gates remain open
 
 This plan closes every item raised by the AGY-role, Fable, and
 GPT-5.6-sol reviews. Starting with B2, Claude Opus 5 assumes the independent
@@ -13,11 +13,11 @@ for a production or publication claim.
 
 As of 2026-09-02, the Fable SN/AGN audit and its independent reproduction
 [`fable_sn_agn_independent_reproduction_2026-09-02.md`](fable_sn_agn_independent_reproduction_2026-09-02.md)
-are **BLOCK**. G1 is closed only for the native/phase0 mirror; the compiled
-`patch/lagRamses` runtime still has the P0 source-identity, time, restart,
-fallback, and field-map blockers. G2 remains blocked on approved physical
-yield assets. This status supersedes any earlier statement that G1/G2 were
-production-ready.
+identified **BLOCK**-level physical and implementation gaps. P0.1 source
+identity/build parity is now closed on the compiled `patch/lagRamses` path;
+the remaining compiled G1 blockers are time, restart, fallback, and executed
+field-map semantics. G2 remains blocked on approved physical yield assets.
+This status supersedes any earlier statement that G1/G2 were production-ready.
 
 ## 1. Definition of done
 
@@ -371,9 +371,10 @@ nucleosynthesis” unless the chemistry-expansion gate has passed.
 
 ## 5. Execution order and decision points
 
-1. **Complete:** G0 and the native/JAX contract mirror. **Pending:** compiled
-   G1 closure — source parity, units, interval accounting, HDF5 restart, and
-   executed field map, as listed in the independent Fable reproduction.
+1. **Complete:** G0, the native/JAX contract mirror, and P0.1 compiled source
+   identity/build parity. **Pending:** remaining compiled G1 closure — units,
+   interval accounting, HDF5 restart, fallback policy, and executed field map,
+   as listed in the independent Fable reproduction.
 2. **After compiled G1:** G2 — select sources and generate the first fully
    cited table; this is the only point at which a scientific yield asset may
    be promoted.

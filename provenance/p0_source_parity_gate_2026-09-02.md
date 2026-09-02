@@ -40,22 +40,22 @@ default-disabled embedded-yield macro.
 
 ```text
 python3 simulation/snrt/tests/test_stellar_source_parity.py
-STELLAR_SOURCE_PARITY_GATE_OK status=blocked differing_shared=14
+STELLAR_SOURCE_PARITY_GATE_OK status=pass differing_shared=14
 
 python3 simulation/snrt/tools/validate_stellar_source_parity.py
-STELLAR_SOURCE_PARITY_BLOCKED blocked=production_linked_build_evidence
+STELLAR_SOURCE_PARITY_PASS blocked=none
 ```
 
-The BLOCK is intentional and is the correct P0.1 result: the G1 runner uses
-the native mirror as a differential oracle, while the production-linked
-harness and evidence recorder exist but have not yet been authorized to run a
-forced full RAMSES build. Fourteen of 15 shared contract modules differ from
-the Makefile-selected tree: 11 are byte-different and 3 are absent from the
-native mirror, while `stellar_yield_backend.f90` is identical. This is
-recorded as a diagnostic and does not silently promote the mirror to
-production. The shared-file partition is bounded rather than pinned to these
-exact counts, so a legitimate convergence of the native oracle does not fail
-the gate.
+The production-linked gate is now closed for P0.1. The harness performed the
+forced full RAMSES build, verified all 16 required object compile records,
+linked `bin/ramses_final3d`, matched the binary SHA-256 in both logs, passed
+the configured `nm` linkage contract, and passed the no-argument startup
+smoke. Fourteen of 15 shared contract modules differ from the Makefile-
+selected tree: 11 are byte-different and 3 are absent from the native mirror,
+while `stellar_yield_backend.f90` is identical. This remains a diagnostic and
+does not silently promote the mirror to production. The shared-file partition
+is bounded rather than pinned to these exact counts, so a legitimate
+convergence of the native oracle does not fail the gate.
 
 After the build, evidence must additionally pass the configured `nm` symbol
 linkage check and the no-argument executable startup smoke. The smoke expects
@@ -72,11 +72,10 @@ writes its generated Makefile source to the ignored
 `bin/write_makefile.generated.f90` and does not delete the tracked
 `bin/write_makefile.f90`.
 
-## Remaining P0.1 closure
+## P0.1 disposition and next gate
 
-The selected auditable strategy is to compile and test the exact
-`patch/lagRamses` objects through the production-linked harness. To close the
-gate, run the harness with `P0_BUILD=1`, retain its build log and evidence
-JSON, and require the final validator to return PASS. Until that happens,
-P0.2--P0.6 work may proceed only as isolated diagnostics; no physical yield
-asset or production run may be promoted.
+P0.1 source identity/build parity is closed with the evidence JSON at
+`simulation/snrt/data/p0_production_linked_build_evidence.json`. The binary
+and build/smoke logs are intentionally ignored runtime artifacts, while the
+evidence JSON is versioned. P0.2--P0.6 remain open; no physical yield asset or
+production run may be promoted until their respective gates pass.
