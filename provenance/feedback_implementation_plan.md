@@ -6,8 +6,8 @@ deliberately fail-closed: the legacy three-species table is a comparison input,
 not a canonical Phase-0 yield table, and no missing physical values will be
 invented by an adapter.
 
-G1 native contract is now closed with an AGY PASS. The G1 implementation mirror,
-six-query Fortran/JAX differential matrix, and final audit are recorded in
+The native/phase0 mirror contract is closed with an AGY PASS. The G1
+implementation mirror, six-query Fortran/JAX differential matrix, and final audit are recorded in
 [`agy_g1_reaudit_2026-09-01.md`](agy_g1_reaudit_2026-09-01.md). G2 code
 scaffolding is implemented, but its G2-only AGY audit remains BLOCKED because
 no approved physical full-grid asset has been supplied. Its source-selection
@@ -53,6 +53,13 @@ with 120 masses from 10--100 Msun and 5,760 coupled energy--piston--mixing
 coordinates. It improves primordial mass coverage but does not close the
 8--10 Msun runtime edge or define positive-Z behavior, and none of its free
 explosion/mixing dimensions is population-selected.
+
+The 2026-09-02 Fable audit is independently reproduced in
+[`fable_sn_agn_independent_reproduction_2026-09-02.md`](fable_sn_agn_independent_reproduction_2026-09-02.md).
+It confirms the production **BLOCK**: the AGY/G1 PASS applies to the native
+mirror, while `bin/Makefile` builds the unclosed `patch/lagRamses` runtime.
+The independent reproduction is the authoritative disposition for F1--F17
+and takes precedence over the earlier broad “G1 closed” wording below.
 
 ## Current evidence
 
@@ -170,7 +177,40 @@ explosion/mixing dimensions is population-selected.
 
 ## Priority order and acceptance gates
 
-### P0 — make the yield and source contracts physically executable
+### P0 — make the executed yield and source contracts physically executable
+
+The first P0 work is compiled-tree closure, not physical-table import:
+
+1. **P0.1 source identity/build parity (F2/F15):** use `patch/lagRamses` as
+   the canonical production source and retain `simulation/snrt/native/phase0`
+   only as a differential oracle. The production-linked harness must force a
+   `bin/Makefile` build, verify binary linkage and startup smoke, and record
+   source/config/tool/binary evidence; the native G1 runner cannot close this
+   gate by itself. The gate also checks the source sidecar and records
+   `NVAR/NENER/inener/imetal/idelay/ichem` in its JSON report. The build and
+   smoke logs carry the binary SHA-256, evidence survives descendant commits
+   through hash pinning plus an ancestor check, and the native shared profile
+   is a bounded differential diagnostic rather than a fixed hash set. The
+   implemented gate and its current BLOCK result are recorded in
+   [`p0_source_parity_gate_2026-09-02.md`](p0_source_parity_gate_2026-09-02.md).
+2. **P0.2 time and interval semantics (F3/F4):** fix the compiled age unit at
+   the table boundary and make cumulative release telescope over variable
+   timesteps, first interval, retry, and restart.
+3. **P0.3 HDF5 state (F5):** round-trip `tpp`, `mp0`, `indtab`, and all stellar
+   release state bitwise.
+4. **P0.4 fail-closed runtime (F7/F8):** remove embedded fallback, reject
+   out-of-domain queries, and make IMF/channel windows and approvals explicit.
+5. **P0.6 executed field/species semantics (F14/F15):** validate the actual
+   binary map, prove the `NENER=0` index relations, and close
+   H/He/tracked/untracked/energy/delayed-cooling ledgers.
+6. **P0.5 physical asset approval (F1):** only then promote a complete,
+   checksummed wind/AGB/SNII grid with age-zero, remnant, energy, momentum,
+   release, and provenance closure.
+
+The native mirror tests remain prerequisites, but their PASS no longer closes
+P0. They must be joined by a compiled-tree parity and runtime test.
+
+#### P0 acceptance gates
 
 1. Select and approve a physical yield source for wind, AGB, and SNII, with
    explicit IMF, progenitor-mass range, birth-metallicity grid, age grid, and

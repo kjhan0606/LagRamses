@@ -201,26 +201,33 @@ ifdef STELLAR_EMBEDDED_YIELDS
 else
   STELLAR_EMBEDDED_MODOBJ =
 endif
-STELLAR_ENRICHMENT_MODOBJ = stellar_enrichment_config.o stellar_enrichment_contract.o \
-        stellar_yield_tables.o stellar_yield_interpolation.o stellar_yield_provider.o \
-        stellar_yield_backend.o $(STELLAR_EMBEDDED_MODOBJ) stellar_ssp_sources.o stellar_source_increment.o stellar_enrichment_driver.o \
-              stellar_cell_deposition.o stellar_ramses_field_map.o stellar_ramses_bridge.o stellar_ramses_mapped_bridge.o stellar_yield_audit.o
+# The production source-order sidecar is load-bearing.  The RAMSES runtime
+# module is listed last in the sidecar but remains in PMOBJ below so the
+# integration call site and its module dependencies stay in the production
+# link order.
+include $(PATCH)/stellar_enrichment_sources.mk
+PHASE0_STELLAR_ENRICHMENT_OBJECTS := $(notdir $(PHASE0_STELLAR_ENRICHMENT_SOURCES:.f90=.o))
+STELLAR_ENRICHMENT_MODOBJ = $(filter-out stellar_ramses_runtime.o,$(PHASE0_STELLAR_ENRICHMENT_OBJECTS))
+ifdef STELLAR_EMBEDDED_YIELDS
+  STELLAR_ENRICHMENT_MODOBJ += $(STELLAR_EMBEDDED_MODOBJ)
+endif
 #############################################################################
 ramses:	$(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o
 	$(F90) $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o -o $(EXEC)$(NDIM)d $(LIBS)
-	rm -f write_makefile.f90
+	rm -f $(WRITE_MAKEFILE_SOURCE)
 #	rm write_patch.f90
 ramses_aton: $(MODOBJ) $(ATON_MODOBJ) $(AMRLIB) $(ATON_OBJ) ramses.o
 	$(F90) $(MODOBJ) $(ATON_MODOBJ) $(AMRLIB) $(ATON_OBJ) ramses.o -o $(EXEC)$(NDIM)d $(LIBS) $(LIBCUDA)
-	rm -f write_makefile.f90
+	rm -f $(WRITE_MAKEFILE_SOURCE)
 #	rm write_patch.f90
 #############################################################################
 write_gitinfo.o: FORCE
 	$(F90) $(FFLAGS) -DPATCH=\'$(PATCH)\' -DGITBRANCH=\'$(GITBRANCH)\' -DGITHASH=\'"$(GITHASH)"\' \
  -DGITREPO=\'$(GITREPO)\' -DBUILDDATE=\'"$(BUILDDATE)"\' -c ../amr/write_gitinfo.f90 -o $@
+WRITE_MAKEFILE_SOURCE = write_makefile.generated.f90
 write_makefile.o: FORCE
-	../utils/scripts/cr_write_makefile.sh $(MAKEFILE_LIST)
-	$(F90) $(FFLAGS) -c write_makefile.f90 -o $@
+	../utils/scripts/cr_write_makefile.sh $(firstword $(MAKEFILE_LIST)) $(WRITE_MAKEFILE_SOURCE)
+	$(F90) $(FFLAGS) -c $(WRITE_MAKEFILE_SOURCE) -o $@
 write_patch.o: FORCE
 	../utils/scripts/cr_write_patch.sh $(PATCH)
 	$(F90) $(FFLAGS) -c write_patch.f90 -o $@

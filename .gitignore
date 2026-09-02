@@ -25,6 +25,7 @@ bin/ramses_ref3d
 bin/ramses_slab3d
 bin/test_darkcool
 bin/darkcool_*.dat
+bin/write_makefile.generated.f90
 
 # CUDA build artifacts
 *.cu.o

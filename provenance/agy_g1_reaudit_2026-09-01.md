@@ -41,6 +41,15 @@ six-query differential matrix.
   module files. It is still an integration candidate, not a clean production
   executable.
 
+## Supersession note (2026-09-02)
+
+The `G1_NATIVE_CONTRACT_RUN_OK` line above refers to the pre-P0.1 runner
+execution and is not current production evidence. The new fail-closed
+P0.1 source-parity gate now blocks that runner unless a production-linked
+build/linkage/startup evidence record exists. The native suite remains
+available as `P0_DIAGNOSTIC=1` differential-only work and must emit
+`G1_NATIVE_DIAGNOSTIC_ONLY`; the production-linked build has not yet been run.
+
 ## Limitations and out of scope
 
 HDF5 integrity, physical yield-paper approval, RT/dust/AGN physics, live

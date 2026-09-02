@@ -11,6 +11,14 @@ deliberately fail-closed: a passing Python pilot,
 a synthetic yield fixture, or a successful RAMSES exit code is not sufficient
 for a production or publication claim.
 
+As of 2026-09-02, the Fable SN/AGN audit and its independent reproduction
+[`fable_sn_agn_independent_reproduction_2026-09-02.md`](fable_sn_agn_independent_reproduction_2026-09-02.md)
+are **BLOCK**. G1 is closed only for the native/phase0 mirror; the compiled
+`patch/lagRamses` runtime still has the P0 source-identity, time, restart,
+fallback, and field-map blockers. G2 remains blocked on approved physical
+yield assets. This status supersedes any earlier statement that G1/G2 were
+production-ready.
+
 ## 1. Definition of done
 
 ### Production-ready
@@ -112,9 +120,10 @@ path:
    Verify the `aexp**2` factor against the RAMSES time convention. Reject a
    mixed-unit call at the interface.
 2. **Interval semantics:** define the source as
-   `C(age + dt) - C(age)` for cumulative quantities, apply it once, and update
-   the particle progress marker only after successful deposition. Test a
-   restart at the interval boundary and a repeated call for idempotence.
+   `C(current_age) - C(previous_age)` for cumulative quantities, apply it
+   once, and update the particle progress marker only after successful
+   deposition. Test a restart at the interval boundary and a repeated call
+   for idempotence.
 3. **SN energy:** trace legacy and Phase-0 energy from source-table units to
    `unew`; explicitly encode whether `energy_erg_per_star` is cgs and whether
    any `1e51 erg` normalization is already included. Remove magic conversion
@@ -362,10 +371,12 @@ nucleosynthesis” unless the chemistry-expansion gate has passed.
 
 ## 5. Execution order and decision points
 
-1. **Complete:** G0/G1 — identities and native/JAX contracts are frozen and
-   audited.
-2. **Now:** G2 — select sources and generate the first fully cited table; this
-   is the only point at which a scientific yield asset may be promoted.
+1. **Complete:** G0 and the native/JAX contract mirror. **Pending:** compiled
+   G1 closure — source parity, units, interval accounting, HDF5 restart, and
+   executed field map, as listed in the independent Fable reproduction.
+2. **After compiled G1:** G2 — select sources and generate the first fully
+   cited table; this is the only point at which a scientific yield asset may
+   be promoted.
 3. **Then:** G3 — implement approved SED, SNIa, AGN ledgers, and optional PISN
    gating; merge only coeval, same-grid ledgers.
 4. **Then:** G4 — promote dust and thermal/RT physics after spatial and temporal

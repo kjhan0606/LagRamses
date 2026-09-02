@@ -13,6 +13,16 @@ FC=mpiifx
 
 mkdir -p "$BUILD_DIR" "$DATA_DIR"
 
+# Do not let a native-mirror PASS masquerade as a production-linked PASS. The
+# normal path requires fresh production build/linkage/smoke evidence. A
+# diagnostic-only path keeps the native differential oracle runnable without
+# claiming production closure; it emits a distinct terminal marker.
+if [[ "${P0_DIAGNOSTIC:-0}" == 1 ]]; then
+  python3 "$ROOT/simulation/snrt/tools/validate_stellar_source_parity.py"
+else
+  python3 "$ROOT/simulation/snrt/tools/validate_stellar_source_parity.py" --require-pass
+fi
+
 sources=(
   stellar_enrichment_config.f90
   stellar_enrichment_contract.f90
@@ -66,4 +76,8 @@ G1_NATIVE_RESULT="$BUILD_DIR/g1_native_interpolation.txt" \
   --native-result "$BUILD_DIR/g1_native_interpolation.txt" \
   --evidence "$DATA_DIR/g1_native_jax_differential.json"
 
-echo "G1_NATIVE_CONTRACT_RUN_OK"
+if [[ "${P0_DIAGNOSTIC:-0}" == 1 ]]; then
+  echo "G1_NATIVE_DIAGNOSTIC_ONLY"
+else
+  echo "G1_NATIVE_CONTRACT_RUN_OK"
+fi

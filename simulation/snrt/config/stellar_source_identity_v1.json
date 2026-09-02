@@ -1,0 +1,165 @@
+{
+  "schema": "snrt-stellar-source-identity",
+  "schema_version": 1,
+  "status": "gate_only_until_source_parity_closes",
+  "source_of_truth": {
+    "kind": "repository_tree",
+    "path": "patch/lagRamses",
+    "role": "canonical_production_source",
+    "strategy": "production_linked_harness",
+    "mirror_path": "simulation/snrt/native/phase0",
+    "mirror_role": "differential_oracle",
+    "mirror_can_remain_as_differential_oracle": true
+  },
+  "production": {
+    "makefile": "bin/Makefile",
+    "patch_root": "patch/lagRamses",
+    "object_assignments": [
+      "MODOBJ",
+      "AMRLIB"
+    ],
+    "stellar_order_assignments": [
+      "STELLAR_ENRICHMENT_MODOBJ",
+      "PMOBJ"
+    ],
+    "required_objects": [
+      "stellar_enrichment_config.o",
+      "stellar_enrichment_contract.o",
+      "stellar_yield_tables.o",
+      "stellar_yield_interpolation.o",
+      "stellar_yield_provider.o",
+      "stellar_yield_backend.o",
+      "stellar_ssp_sources.o",
+      "stellar_source_increment.o",
+      "stellar_enrichment_driver.o",
+      "stellar_cell_deposition.o",
+      "stellar_ramses_field_map.o",
+      "stellar_ramses_bridge.o",
+      "stellar_ramses_mapped_bridge.o",
+      "stellar_yield_audit.o",
+      "stellar_ramses_runtime.o",
+      "feedback.kjhan3.o"
+    ],
+    "generated_objects": ["write_makefile.o"],
+    "source_manifest": {
+      "path": "patch/lagRamses/stellar_enrichment_sources.mk",
+      "role": "production_source_order_sidecar"
+    },
+    "compile_parameters": {
+      "NDIM": 3,
+      "NPRE": 8,
+      "NVECTOR": 500,
+      "NVAR": 18,
+      "NENER": 0,
+      "SOLVER": "hydro",
+      "PHASE0_STELLAR_ENRICHMENT": 1
+    },
+    "required_compile_flags": [
+      "-DLONGINT",
+      "-DQUADHILBERT",
+      "-DOUTPUT_PARTICLE_POTENTIAL",
+      "-DUSE_FFTW"
+    ],
+    "compile_policy": {
+      "required_optimization_flag": "-O3",
+      "forbidden_compile_flags": [
+        "-DFDMDEBUG",
+        "-DMORTON128",
+        "-DHDF5",
+        "-DHYDRO_CUDA",
+        "-DSNRT",
+        "-DMG_PROFILE",
+        "-DAMR_INDEX_CHECK",
+        "-DCIC_ATOMIC_SCATTER",
+        "-DSTELLAR_EMBEDDED_YIELDS"
+      ]
+    },
+    "embedded_yield_policy": {
+      "macro": "STELLAR_EMBEDDED_YIELDS",
+      "default": "disabled",
+      "production_fallback": "forbidden"
+    }
+  },
+  "production_linked_harness": {
+    "script": "simulation/snrt/tests/run_p0_production_linked_contract.sh",
+    "build_directory": "build/p0_production_linked",
+    "build_log": "build/p0_production_linked/make.log",
+    "smoke_log": "build/p0_production_linked/smoke.log",
+    "evidence_file": "simulation/snrt/data/p0_production_linked_build_evidence.json",
+    "binary": "bin/ramses_final3d",
+    "link_output": "ramses_final3d",
+    "build_command": "make -C \"$ROOT/bin\" -B ramses",
+    "smoke_command": "\"$ROOT/bin/ramses_final3d\"",
+    "smoke_expected_output": "You should type: ramses3d input.nml",
+    "smoke_expected_exit_code": 0,
+    "linkage_symbol_patterns": [
+      "stellar_ramses_runtime.*phase0_initialize",
+      "stellar_ramses_runtime.*phase0_feedback",
+      "stellar_cell_deposition.*deposit_stellar_source",
+      "stellar_ramses_bridge.*deposit_source_to_uold",
+      "stellar_ramses_mapped_bridge.*deposit_source_to_uold_mapped",
+      "(^|[^A-Za-z0-9_])thermal_feedback_?($|[^A-Za-z0-9_])"
+    ],
+    "shared_contract_baseline": {
+      "differing_sources": [
+        "stellar_enrichment_config.f90",
+        "stellar_enrichment_contract.f90",
+        "stellar_yield_tables.f90",
+        "stellar_yield_interpolation.f90",
+        "stellar_yield_provider.f90",
+        "stellar_ssp_sources.f90",
+        "stellar_source_increment.f90",
+        "stellar_enrichment_driver.f90",
+        "stellar_yield_audit.f90",
+        "stellar_ramses_field_map.f90",
+        "stellar_ramses_runtime.f90"
+      ],
+      "absent_in_native": [
+        "stellar_cell_deposition.f90",
+        "stellar_ramses_bridge.f90",
+        "stellar_ramses_mapped_bridge.f90"
+      ],
+      "identical_sources": ["stellar_yield_backend.f90"]
+    },
+    "recorder": "simulation/snrt/tools/record_p0_production_linked_build.py",
+    "required_evidence_status": "pass"
+  },
+  "g1_runner": {
+    "script": "simulation/snrt/tests/run_g1_native_contract.sh",
+    "native_root": "simulation/snrt/native/phase0",
+    "shared_contract_sources": [
+      "stellar_enrichment_config.f90",
+      "stellar_enrichment_contract.f90",
+      "stellar_yield_tables.f90",
+      "stellar_yield_interpolation.f90",
+      "stellar_yield_provider.f90",
+      "stellar_yield_backend.f90",
+      "stellar_ssp_sources.f90",
+      "stellar_source_increment.f90",
+      "stellar_enrichment_driver.f90",
+      "stellar_yield_audit.f90",
+      "stellar_ramses_field_map.f90",
+      "stellar_ramses_runtime.f90",
+      "stellar_cell_deposition.f90",
+      "stellar_ramses_bridge.f90",
+      "stellar_ramses_mapped_bridge.f90"
+    ],
+    "native_only_mirror_sources": [
+      "stellar_native_units.f90",
+      "stellar_progress_contract.f90",
+      "stellar_population_ledger.f90"
+    ],
+    "native_only_mirror_disposition": "native differential-test scaffolding; not production-linked and not a shared production contract"
+  },
+  "policy": {
+    "production_makefile_is_source_of_truth": true,
+    "native_g1_is_differential_oracle": true,
+    "production_linked_harness_must_exercise_production_sources": true,
+    "shared_contract_hashes_are_differential_diagnostics": true,
+    "runner_sources_must_match_objects": true,
+    "production_linked_harness_must_target_bin_makefile": true,
+    "production_linked_build_evidence_required": true,
+    "stale_build_objects_are_not_evidence": true,
+    "blocked_until_all_criteria_pass": true
+  }
+}
