@@ -1,0 +1,18 @@
+{
+  "canonical_conversion_allowed": false,
+  "canonical_row_field_count": 32,
+  "explicit_null_zero_semantics": true,
+  "gate": "F-P1H-B",
+  "physical_node_count": 0,
+  "production_ready": false,
+  "required_field_count": 84,
+  "required_field_group_count": 8,
+  "resolver_axes_preserved": true,
+  "resolver_axis_count": 12,
+  "runtime_deposition_allowed": false,
+  "schema": "snrt-fp1-source-node-contract-audit",
+  "schema_version": 1,
+  "silent_axis_drop_allowed": false,
+  "status": "review_only_schema_complete_no_physical_nodes",
+  "validated_nodes": []
+}

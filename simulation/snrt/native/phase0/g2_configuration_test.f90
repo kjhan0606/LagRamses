@@ -24,7 +24,7 @@ program g2_configuration_test
      write(unit, '(a)') ' imf_mass_min_msun=0.08, imf_mass_max_msun=120.0,'
      write(unit, '(a)') ' binary_fraction=0.5,'
      write(unit, '(a)') ' channel_mass_min_msun=1.2, 1.0, 8.0, 3.0, 140.0,'
-     write(unit, '(a)') ' channel_mass_max_msun=120.0, 8.0, 40.0, 8.0, 260.0,'
+     write(unit, '(a)') ' channel_mass_max_msun=120.0, 8.0, 120.0, 8.0, 260.0,'
      write(unit, '(a)') '/'
      close(unit)
   end if
@@ -59,7 +59,7 @@ program g2_configuration_test
      write(unit, '(a)') ' imf_mass_min_msun=0.08, imf_mass_max_msun=120.0,'
      write(unit, '(a)') ' binary_fraction=0.0,'
      write(unit, '(a)') ' channel_mass_min_msun=0.8,1.0,8.0,3.0,140.0,'
-     write(unit, '(a)') ' channel_mass_max_msun=120.0,8.0,40.0,8.0,260.0,'
+     write(unit, '(a)') ' channel_mass_max_msun=120.0,8.0,120.0,8.0,260.0,'
      write(unit, '(a)') '/'
      close(unit)
   end if

@@ -16,7 +16,13 @@ TOOLS = ROOT / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
+import audit_stellar_yield_asset as asset_auditor  # noqa: E402
 from audit_stellar_yield_asset import audit_asset  # noqa: E402
+from fp1_source_node_fixture import (  # noqa: E402
+    APPROVAL_ID,
+    NODE_ID,
+    approved_source_node_contract,
+)
 
 
 def _contract() -> dict:
@@ -31,17 +37,25 @@ def _contract() -> dict:
 
 
 def _canonical_row(
-    channel: int, mass: float, age: float, *, tracked_fraction: float = 1.0
+    channel: int,
+    mass: float,
+    age: float,
+    *,
+    tracked_fraction: float = 1.0,
+    metallicity: float = 0.0,
+    release_energy_erg: float | None = None,
 ) -> str:
     returned = 0.1 * mass if age > 0.0 else 0.0
     remnant = 0.2 * mass if age > 0.0 and channel != 1 else 0.0
-    energy = 1.0e50 * mass if age > 0.0 else 0.0
+    energy = (
+        1.0e50 * mass if age > 0.0 else 0.0
+    ) if release_energy_erg is None else (release_energy_erg if age > 0.0 else 0.0)
     ejecta = [tracked_fraction * returned] + [0.0] * 10
     net = [0.0] * 11
     values = [
         channel,
         mass,
-        0.0,
+        metallicity,
         age,
         returned,
         remnant,
@@ -173,23 +187,57 @@ def _test_nonterminal_remnant_is_blocked() -> None:
 
 def _test_provenance_hash_is_verified() -> None:
     rows = [
-        _canonical_row(1, mass, age)
-        for mass in (1.0, 2.0)
+        _canonical_row(
+            1, mass, age, metallicity=0.001, release_energy_erg=0.0
+        )
+        for mass in (60.0,)
         for age in (0.0, 1.0)
     ]
     contract = _contract()
+    contract["runtime"]["channel_mass_ranges_msun"] = {"1": [60.0, 60.0]}
     contract["production_gate"]["require_provenance_sidecar"] = True
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "complete.dat"
         sidecar = Path(directory) / "complete.dat.json"
+        node_mapping_path = Path(directory) / "complete.nodes.json"
         path.write_text("\n".join(rows) + "\n")
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        node_contract_path = Path(directory) / "approved-source-nodes.json"
+        node_contract_path.write_text(
+            json.dumps(approved_source_node_contract()), encoding="utf-8"
+        )
+        node_contract_hash = hashlib.sha256(node_contract_path.read_bytes()).hexdigest()
+        physical_package_path = (
+            ROOT / "config" / "fp1_physical_package_admission_contract_v1.json"
+        )
+        physical_package_hash = hashlib.sha256(
+            physical_package_path.read_bytes()
+        ).hexdigest()
+        node_mapping = {
+            "schema": "snrt-fp1-source-node-row-mapping",
+            "schema_version": 1,
+            "source_node_contract_sha256": node_contract_hash,
+            "source_node_contract_approval_id": APPROVAL_ID,
+            "physical_package_approval_id": APPROVAL_ID,
+            "canonical_asset_sha256": digest,
+            "canonical_row_count": len(rows),
+            "rows": [
+                {
+                    "canonical_coordinate": [1, mass, 0.001, age],
+                    "source_node_id": NODE_ID,
+                }
+                for mass in (60.0,)
+                for age in (0.0, 1.0)
+            ],
+        }
+        node_mapping_path.write_text(json.dumps(node_mapping))
+        node_mapping_hash = hashlib.sha256(node_mapping_path.read_bytes()).hexdigest()
         sidecar.write_text(
             json.dumps(
                 {
                     "sha256": digest,
                     "source": "test",
-                    "approval_id": "TEST-G2-001",
+                    "approval_id": APPROVAL_ID,
                     "citation": "test citation",
                     "source_version": "test-v1",
                     "source_sha256": "a" * 64,
@@ -205,14 +253,86 @@ def _test_provenance_hash_is_verified() -> None:
                     "untracked_ejecta_policy": (
                         "returned_mass_minus_sum_tracked_ejecta_deposited_as_generic_metals"
                     ),
+                    "source_node_contract_path": str(node_contract_path),
+                    "source_node_contract_sha256": node_contract_hash,
+                    "source_node_mapping_path": str(node_mapping_path),
+                    "source_node_mapping_sha256": node_mapping_hash,
+                    "physical_package_contract_path": str(physical_package_path),
+                    "physical_package_contract_sha256": physical_package_hash,
+                    "axis_reduction_policy": {"mode": "none"},
+                    "energy_semantics": "cumulative_physical_erg_per_initial_star",
+                    "momentum_deposition_contract": (
+                        "source_frame_vector_only_no_scalar_radial_deposition"
+                    ),
                     "conversion_code_sha256": "b" * 64,
+                    "row_count": len(rows),
                 }
             )
         )
+        repository_contract = asset_auditor.DEFAULT_SOURCE_NODE_CONTRACT
+        asset_auditor.DEFAULT_SOURCE_NODE_CONTRACT = node_contract_path
         report = audit_asset(path, contract)
-        assert report["status"] == "pass", report
+        assert report["status"] == "fail", report
+        assert (
+            "provenance_physical_package_not_admitted"
+            in report["production_gate"]["blocking_reasons"]
+        )
+        assert report["provenance"]["source_node_binding"][
+            "source_node_contract"
+        ]["actual_sha256"] == node_contract_hash
+        assert report["provenance"]["source_node_binding"][
+            "source_node_mapping"
+        ]["actual_sha256"] == node_mapping_hash
+
+        tampered_mapping = dict(node_mapping)
+        tampered_mapping["canonical_asset_sha256"] = "0" * 64
+        node_mapping_path.write_text(json.dumps(tampered_mapping))
+        report = audit_asset(path, contract)
+        assert report["status"] == "fail"
+        reasons = report["production_gate"]["blocking_reasons"]
+        assert "provenance_source_node_mapping_sha256_mismatch" in reasons
+        assert "provenance_source_node_mapping_asset_mismatch" in reasons
+
+        unknown_mapping = dict(node_mapping)
+        unknown_mapping["rows"] = [dict(row) for row in node_mapping["rows"]]
+        unknown_mapping["rows"][0]["source_node_id"] = "does-not-exist"
+        node_mapping_path.write_text(json.dumps(unknown_mapping))
+        sidecar_data = json.loads(sidecar.read_text())
+        sidecar_data["source_node_mapping_sha256"] = hashlib.sha256(
+            node_mapping_path.read_bytes()
+        ).hexdigest()
+        sidecar.write_text(json.dumps(sidecar_data))
+        report = audit_asset(path, contract)
+        assert report["status"] == "fail"
+        assert (
+            "provenance_source_node_mapping_unknown_node_id"
+            in report["production_gate"]["blocking_reasons"]
+        )
+
+        inconsistent_rows = list(rows)
+        inconsistent_fields = inconsistent_rows[-1].split()
+        inconsistent_fields[6] = "1e51"
+        inconsistent_rows[-1] = " ".join(inconsistent_fields)
+        path.write_text("\n".join(inconsistent_rows) + "\n")
+        inconsistent_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        inconsistent_mapping = dict(node_mapping)
+        inconsistent_mapping["canonical_asset_sha256"] = inconsistent_digest
+        node_mapping_path.write_text(json.dumps(inconsistent_mapping))
+        sidecar_data["sha256"] = inconsistent_digest
+        sidecar_data["source_node_mapping_sha256"] = hashlib.sha256(
+            node_mapping_path.read_bytes()
+        ).hexdigest()
+        sidecar.write_text(json.dumps(sidecar_data))
+        report = audit_asset(path, contract)
+        assert report["status"] == "fail"
+        assert (
+            "provenance_source_node_projection_mismatch"
+            in report["production_gate"]["blocking_reasons"]
+        )
+
         sidecar.write_text(json.dumps({"sha256": "0" * 64, "source": "test"}))
         report = audit_asset(path, contract)
+        asset_auditor.DEFAULT_SOURCE_NODE_CONTRACT = repository_contract
     assert report["status"] == "fail"
     assert "provenance_sha256_mismatch" in report["production_gate"]["blocking_reasons"]
 

@@ -15,11 +15,23 @@
     },
     "source_contract": {
       "path": "config/stellar_feedback_contract_v1.json",
-      "sha256": "94660191a8c1f293859a5af81f37e5767f98cf712187b482e18a885a1b7888b1"
+      "sha256": "25228048af5c63006f4f2a8f2065fd982cf342209a17fda29786f124bd98b70a"
+    },
+    "source_node_contract": {
+      "path": "config/fp1_source_node_contract_v1.json",
+      "sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c"
+    },
+    "terminal_deposition_contract": {
+      "path": "config/fp1_terminal_deposition_contract_v1.json",
+      "sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47"
+    },
+    "physical_package_contract": {
+      "path": "config/fp1_physical_package_admission_contract_v1.json",
+      "sha256": "df89bdff55e9cb9e7e21982a21826c354cd17d53a1ea07b95d60733d796f4106"
     },
     "physics_contract": {
       "path": "config/g2_physics_contract_v1.json",
-      "sha256": "e53e37ee3011e0564e2e92f54daa72c64954174e2178daaa6f7a9b0e1611f886"
+      "sha256": "08267134b80f2a1e1070c2ceba94cd45f3aeeb532502230468ebc30f4b687fdb"
     }
   },
   "runtime_unresolved_intervals": [
@@ -50,6 +62,9 @@
     "approved source-node fate records for every unresolved interval",
     "exact source provenance and source-package checksum",
     "explicit lifetime, wind, terminal ejecta, remnant, and decay semantics",
+    "lossless source-node identity and canonical-row mapping sidecar",
+    "approved terminal energy, scalar momentum, and deposition contract",
+    "physical package passing all node, coverage, closure, rights, and reproduction gates",
     "independent physics audit and production-linked smoke evidence"
   ]
 }

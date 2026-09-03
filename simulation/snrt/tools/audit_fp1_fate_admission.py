@@ -19,6 +19,15 @@ import sys
 from typing import Any
 
 from audit_fp1_population_fate import FateMapError, audit_fate_map
+from audit_fp1_source_node_contract import SourceNodeContractError, audit_source_node_contract
+from audit_fp1_terminal_deposition_contract import (
+    TerminalDepositionContractError,
+    audit_terminal_deposition_contract,
+)
+from audit_fp1_physical_package_admission import (
+    PhysicalPackageAdmissionError,
+    audit_physical_package_admission,
+)
 
 
 TOOL_PATH = Path(__file__).resolve()
@@ -120,6 +129,62 @@ def _check_fortran_interval_mirrors(expected: list[dict[str, Any]]) -> dict[str,
     return result
 
 
+def _fortran_compiled_admission_identity(path: Path) -> dict[str, Any]:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise FateMapError(f"cannot read Fortran admission identity {path}: {exc}") from exc
+
+    result: dict[str, Any] = {}
+    for name in ("compiled_fate_map_sha256", "compiled_fate_approval_id"):
+        match = re.search(
+            rf"\b{name}\s*=\s*(['\"])(.*?)\1",
+            source,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            raise FateMapError(f"Fortran admission identity is missing {name} in {path}")
+        result[name] = match.group(2)
+    consumer = re.search(
+        r"\bsnii_source_node_fate_consumer_available\s*=\s*\.(true|false)\.",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if consumer is None:
+        raise FateMapError(f"Fortran admission identity is missing SNII fate consumer state in {path}")
+    result["snii_source_node_fate_consumer_available"] = (
+        consumer.group(1).lower() == "true"
+    )
+    return result
+
+
+def _check_fortran_admission_identities(
+    *, fate_map_sha256: str, approval_id: Any, production_ready: bool
+) -> dict[str, Any]:
+    expected_digest = fate_map_sha256 if production_ready else ""
+    expected_approval = approval_id if production_ready else ""
+    if not isinstance(expected_approval, str):
+        expected_approval = ""
+
+    result: dict[str, Any] = {}
+    for path in FORTRAN_CONFIGS:
+        actual = _fortran_compiled_admission_identity(path)
+        if actual["compiled_fate_map_sha256"] != expected_digest:
+            raise FateMapError(
+                f"Fortran compiled fate-map digest disagrees with admission sidecar: {path}"
+            )
+        if actual["compiled_fate_approval_id"] != expected_approval:
+            raise FateMapError(
+                f"Fortran compiled fate approval id disagrees with admission sidecar: {path}"
+            )
+        if actual["snii_source_node_fate_consumer_available"] is not production_ready:
+            raise FateMapError(
+                f"Fortran SNII source-node fate consumer state disagrees with admission sidecar: {path}"
+            )
+        result[str(path)] = actual
+    return result
+
+
 def audit_fate_admission(*, sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, Any]:
     sidecar_path = Path(sidecar_path).resolve()
     sidecar = _read_json(sidecar_path)
@@ -133,13 +198,45 @@ def audit_fate_admission(*, sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, A
     artifacts = sidecar.get("artifacts")
     if not isinstance(artifacts, dict):
         raise FateMapError("F-P1 sidecar artifacts are missing")
-    required_artifacts = ("fate_map", "resolver_contract", "source_contract", "physics_contract")
+    required_artifacts = (
+        "fate_map",
+        "resolver_contract",
+        "source_contract",
+        "source_node_contract",
+        "terminal_deposition_contract",
+        "physical_package_contract",
+        "physics_contract",
+    )
     checked: dict[str, dict[str, str]] = {}
     paths: dict[str, Path] = {}
     for name in required_artifacts:
         path, digest = _artifact_hash(artifacts.get(name), sidecar_path, name)
         paths[name] = path
         checked[name] = {"path": str(path), "sha256": digest}
+
+    try:
+        source_node_report = audit_source_node_contract(
+            node_contract_path=paths["source_node_contract"],
+            resolver_contract_path=paths["resolver_contract"],
+            source_contract_path=paths["source_contract"],
+        )
+    except SourceNodeContractError as exc:
+        raise FateMapError(f"source-node admission contract failed: {exc}") from exc
+    try:
+        terminal_deposition_report = audit_terminal_deposition_contract(
+            contract_path=paths["terminal_deposition_contract"],
+            node_contract_path=paths["source_node_contract"],
+            source_contract_path=paths["source_contract"],
+            physics_contract_path=paths["physics_contract"],
+        )
+    except TerminalDepositionContractError as exc:
+        raise FateMapError(f"terminal deposition admission contract failed: {exc}") from exc
+    try:
+        physical_package_report = audit_physical_package_admission(
+            contract_path=paths["physical_package_contract"]
+        )
+    except PhysicalPackageAdmissionError as exc:
+        raise FateMapError(f"physical-package admission contract failed: {exc}") from exc
 
     fate_report = audit_fate_map(
         map_path=paths["fate_map"],
@@ -196,6 +293,12 @@ def audit_fate_admission(*, sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, A
     if not expected_unresolved and sidecar.get("status") == "blocked_review_only":
         raise FateMapError("complete fate map cannot retain blocked_review_only status")
 
+    fortran_admission_identities = _check_fortran_admission_identities(
+        fate_map_sha256=checked["fate_map"]["sha256"],
+        approval_id=sidecar_approval.get("approval_id"),
+        production_ready=sidecar_ready,
+    )
+
     production_ready = sidecar_ready and fate_report["production_ready"]
     status = "admitted" if production_ready else "blocked_review_only"
     if sidecar.get("status") != status:
@@ -209,6 +312,10 @@ def audit_fate_admission(*, sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, A
         "production_ready": production_ready,
         "artifacts": checked,
         "fortran_interval_mirrors": fortran_mirrors,
+        "fortran_admission_identities": fortran_admission_identities,
+        "source_node_contract": source_node_report,
+        "terminal_deposition_contract": terminal_deposition_report,
+        "physical_package_contract": physical_package_report,
         "runtime_unresolved_intervals": expected_unresolved,
         "runtime_unresolved_mass_bucket": bucket_contract,
         "unresolved_mass_bucket": fate_report["unresolved_mass_diagnostic"],

@@ -19,10 +19,27 @@ from pathlib import Path
 import sys
 from typing import Any, Iterable
 
+from audit_fp1_source_node_contract import (
+    SourceNodeContractError,
+    audit_source_node_contract,
+)
+from audit_fp1_physical_package_admission import (
+    PhysicalPackageAdmissionError,
+    audit_physical_package_admission,
+)
+from fp1_source_node_projection import (
+    SourceNodeProjectionError,
+    validate_canonical_row_against_source_node,
+)
+
 
 TOOL_PATH = Path(__file__).resolve()
 SNRT_ROOT = TOOL_PATH.parents[1]
 DEFAULT_CONTRACT = SNRT_ROOT / "config" / "stellar_feedback_contract_v1.json"
+DEFAULT_SOURCE_NODE_CONTRACT = SNRT_ROOT / "config" / "fp1_source_node_contract_v1.json"
+DEFAULT_PHYSICAL_PACKAGE_CONTRACT = (
+    SNRT_ROOT / "config" / "fp1_physical_package_admission_contract_v1.json"
+)
 CANONICAL_FIELD_COUNT = 32
 ELEMENT_COUNT = 11
 EJECTA_START = 10
@@ -31,6 +48,14 @@ NET_START = EJECTA_STOP
 UNTRACKED_EJECTA_POLICY = (
     "returned_mass_minus_sum_tracked_ejecta_deposited_as_generic_metals"
 )
+ALLOWED_ENERGY_SEMANTICS = {
+    "cumulative_physical_erg_per_initial_star",
+    "cumulative_injected_erg_per_initial_star",
+}
+ALLOWED_MOMENTUM_DEPOSITION_CONTRACTS = {
+    "source_frame_vector_only_no_scalar_radial_deposition",
+    "approved_fp1_terminal_deposition_contract",
+}
 
 
 class AuditError(ValueError):
@@ -329,7 +354,12 @@ def _provenance_audit(
     result["untracked_ejecta_policy"] = metadata.get("untracked_ejecta_policy")
     if required and metadata.get("untracked_ejecta_policy") != expected_untracked_policy:
         blockers.append("provenance_untracked_ejecta_policy_mismatch")
-    for field in ("source_sha256", "conversion_code_sha256"):
+    for field in (
+        "source_sha256",
+        "source_node_contract_sha256",
+        "source_node_mapping_sha256",
+        "conversion_code_sha256",
+    ):
         value = metadata.get(field)
         if required and (
             not isinstance(value, str)
@@ -337,6 +367,250 @@ def _provenance_audit(
             or any(character not in "0123456789abcdefABCDEF" for character in value)
         ):
             blockers.append(f"provenance_{field}_invalid")
+    if required and metadata.get("energy_semantics") not in ALLOWED_ENERGY_SEMANTICS:
+        blockers.append("provenance_energy_semantics_not_allowed")
+    if required and metadata.get("momentum_deposition_contract") not in ALLOWED_MOMENTUM_DEPOSITION_CONTRACTS:
+        blockers.append("provenance_momentum_deposition_contract_not_allowed")
+
+    binding_report: dict[str, Any] = {}
+
+    def bound_path(path_field: str, hash_field: str, label: str) -> Path | None:
+        relative = metadata.get(path_field)
+        declared = metadata.get(hash_field)
+        if not isinstance(relative, str) or not relative:
+            if required:
+                blockers.append(f"provenance_{path_field}_missing")
+            return None
+        candidate = Path(relative)
+        if not candidate.is_absolute():
+            candidate = sidecar.parent / candidate
+        candidate = candidate.resolve()
+        if not candidate.is_file():
+            if required:
+                blockers.append(f"provenance_{label}_missing")
+            return None
+        _, actual = _fingerprint(candidate)
+        binding_report[label] = {
+            "path": str(candidate),
+            "declared_sha256": declared,
+            "actual_sha256": actual,
+        }
+        if not isinstance(declared, str) or declared.lower() != actual:
+            blockers.append(f"provenance_{label}_sha256_mismatch")
+        return candidate
+
+    node_contract_path = bound_path(
+        "source_node_contract_path", "source_node_contract_sha256", "source_node_contract"
+    )
+    node_mapping_path = bound_path(
+        "source_node_mapping_path", "source_node_mapping_sha256", "source_node_mapping"
+    )
+    physical_package_path = bound_path(
+        "physical_package_contract_path",
+        "physical_package_contract_sha256",
+        "physical_package_contract",
+    )
+    node_contract_hash: str | None = None
+    node_contract_ids: set[str] = set()
+    node_contract_by_id: dict[str, dict[str, Any]] = {}
+    if node_contract_path is not None:
+        try:
+            node_contract = _read_json(node_contract_path)
+        except AuditError:
+            blockers.append("provenance_source_node_contract_invalid_json")
+        else:
+            if (
+                node_contract.get("schema") != "snrt-fp1-source-node-contract"
+                or node_contract.get("schema_version") != 1
+            ):
+                blockers.append("provenance_source_node_contract_schema_mismatch")
+            node_contract_hash = binding_report["source_node_contract"]["actual_sha256"]
+            if required and node_contract_path != DEFAULT_SOURCE_NODE_CONTRACT.resolve():
+                blockers.append("provenance_source_node_contract_path_not_repository_contract")
+            try:
+                node_audit = audit_source_node_contract(
+                    node_contract_path=node_contract_path
+                )
+            except SourceNodeContractError:
+                blockers.append("provenance_source_node_contract_audit_failed")
+            else:
+                if required and (
+                    node_audit.get("status") != "approved_physical_nodes"
+                    or node_audit.get("production_ready") is not True
+                    or node_audit.get("canonical_conversion_allowed") is not True
+                ):
+                    blockers.append("provenance_source_node_contract_not_approved")
+                nodes = node_contract.get("physical_nodes")
+                if isinstance(nodes, list):
+                    node_contract_by_id = {
+                        node["source_node_id"]: node
+                        for node in nodes
+                        if isinstance(node, dict)
+                        and isinstance(node.get("source_node_id"), str)
+                    }
+                    node_contract_ids = set(node_contract_by_id)
+                if required and node_contract.get("approval", {}).get(
+                    "approval_id"
+                ) != metadata.get("approval_id"):
+                    blockers.append("provenance_source_node_contract_approval_mismatch")
+    physical_package_hash: str | None = None
+    physical_package_selection: dict[str, Any] = {}
+    if physical_package_path is not None:
+        physical_package_hash = binding_report["physical_package_contract"][
+            "actual_sha256"
+        ]
+        if required and physical_package_path != DEFAULT_PHYSICAL_PACKAGE_CONTRACT.resolve():
+            blockers.append("provenance_physical_package_path_not_repository_contract")
+        try:
+            physical_package = _read_json(physical_package_path)
+            physical_package_audit = audit_physical_package_admission(
+                contract_path=physical_package_path
+            )
+        except (AuditError, PhysicalPackageAdmissionError):
+            blockers.append("provenance_physical_package_audit_failed")
+        else:
+            selection_value = physical_package.get("selection")
+            if isinstance(selection_value, dict):
+                physical_package_selection = selection_value
+            if required and (
+                physical_package_audit.get("status") != "admitted_physical_package"
+                or physical_package_audit.get("production_ready") is not True
+                or physical_package_audit.get("canonical_conversion_allowed") is not True
+            ):
+                blockers.append("provenance_physical_package_not_admitted")
+            if required and physical_package_selection.get("approval_id") != metadata.get(
+                "approval_id"
+            ):
+                blockers.append("provenance_physical_package_approval_mismatch")
+            if required and physical_package_selection.get(
+                "selected_package_sha256"
+            ) != metadata.get("source_sha256"):
+                blockers.append("provenance_physical_package_source_hash_mismatch")
+            package_node_evidence = physical_package.get("evidence_artifacts", {}).get(
+                "source_node_contract", {}
+            )
+            if required and (
+                package_node_evidence.get("path")
+                != "config/fp1_source_node_contract_v1.json"
+                or package_node_evidence.get("sha256") != node_contract_hash
+            ):
+                blockers.append("provenance_physical_package_node_contract_mismatch")
+    if node_mapping_path is not None:
+        try:
+            node_mapping = _read_json(node_mapping_path)
+        except AuditError:
+            blockers.append("provenance_source_node_mapping_invalid_json")
+        else:
+            if (
+                node_mapping.get("schema") != "snrt-fp1-source-node-row-mapping"
+                or node_mapping.get("schema_version") != 1
+            ):
+                blockers.append("provenance_source_node_mapping_schema_mismatch")
+            if node_mapping.get("source_node_contract_sha256") != node_contract_hash:
+                blockers.append("provenance_source_node_mapping_contract_mismatch")
+            if node_mapping.get("source_node_contract_approval_id") != metadata.get(
+                "approval_id"
+            ):
+                blockers.append("provenance_source_node_mapping_node_approval_mismatch")
+            if node_mapping.get("physical_package_approval_id") != metadata.get("approval_id"):
+                blockers.append("provenance_source_node_mapping_approval_mismatch")
+            if node_mapping.get("canonical_asset_sha256") != digest:
+                blockers.append("provenance_source_node_mapping_asset_mismatch")
+            mapping_rows = node_mapping.get("rows")
+            parsed_rows, parse_errors = _parse_canonical(path)
+            expected_coordinates = [
+                [
+                    row["channel"],
+                    row["values"][1],
+                    row["values"][2],
+                    row["values"][3],
+                ]
+                for row in parsed_rows
+            ]
+            if parse_errors or not isinstance(mapping_rows, list):
+                blockers.append("provenance_source_node_mapping_rows_invalid")
+            else:
+                mapping_coordinates = [
+                    record.get("canonical_coordinate")
+                    for record in mapping_rows
+                    if isinstance(record, dict)
+                ]
+                mapping_ids_valid = len(mapping_coordinates) == len(mapping_rows) and all(
+                    isinstance(record.get("source_node_id"), str)
+                    and bool(record["source_node_id"])
+                    for record in mapping_rows
+                    if isinstance(record, dict)
+                )
+                if (
+                    node_mapping.get("canonical_row_count") != len(parsed_rows)
+                    or mapping_coordinates != expected_coordinates
+                    or not mapping_ids_valid
+                ):
+                    blockers.append("provenance_source_node_mapping_rows_mismatch")
+                else:
+                    mapping_ids = [record["source_node_id"] for record in mapping_rows]
+                    if required and any(
+                        source_node_id not in node_contract_ids
+                        for source_node_id in mapping_ids
+                    ):
+                        blockers.append("provenance_source_node_mapping_unknown_node_id")
+                    for record in mapping_rows:
+                        node = node_contract_by_id.get(record["source_node_id"])
+                        if node is None:
+                            continue
+                        coordinate = record["canonical_coordinate"]
+                        if (
+                            not math.isclose(
+                                float(coordinate[1]),
+                                float(node["zams_mass_msun"]),
+                                rel_tol=0.0,
+                                abs_tol=1.0e-12,
+                            )
+                            or not math.isclose(
+                                float(coordinate[2]),
+                                float(node["birth_metallicity_value"]),
+                                rel_tol=0.0,
+                                abs_tol=1.0e-15,
+                            )
+                        ):
+                            blockers.append(
+                                "provenance_source_node_mapping_coordinate_node_mismatch"
+                            )
+                            break
+                    if required and physical_package_selection.get(
+                        "source_node_mapping_sha256"
+                    ) != metadata.get("source_node_mapping_sha256"):
+                        blockers.append(
+                            "provenance_source_node_mapping_not_admitted_by_package"
+                        )
+                    for parsed, record in zip(parsed_rows, mapping_rows):
+                        node = node_contract_by_id.get(record["source_node_id"])
+                        if node is None:
+                            continue
+                        values = parsed["values"]
+                        projection_row = {
+                            "channel": parsed["channel"],
+                            "initial_mass_msun_per_star": values[1],
+                            "birth_metallicity_mass_fraction": values[2],
+                            "age_yr": values[3],
+                            "returned_mass_msun_per_star": values[4],
+                            "remnant_mass_msun_per_star": values[5],
+                            "energy_erg_per_star": values[6],
+                            "momentum_g_cm_s_per_star": values[7:10],
+                            "ejecta_msun_per_star": values[10:21],
+                        }
+                        try:
+                            validate_canonical_row_against_source_node(
+                                projection_row,
+                                node,
+                                str(metadata.get("energy_semantics")),
+                            )
+                        except SourceNodeProjectionError:
+                            blockers.append(
+                                "provenance_source_node_projection_mismatch"
+                            )
+                            break
+    result["source_node_binding"] = binding_report
     recorded_hash = metadata.get("sha256") or metadata.get("asset_sha256")
     if recorded_hash is None:
         result["sha256"] = None

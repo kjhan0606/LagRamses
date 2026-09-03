@@ -4,6 +4,7 @@
   "source_selection_matrix": "config/g2_source_selection_matrix_v1.json",
   "physical_contract": "config/g2_physics_contract_v1.json",
   "configuration_test": "G2_CONFIGURATION_TEST_OK",
+  "stellar_feedback_policy_test": "stellar feedback policy: PASS",
   "population_ledger_test": "G2_POPULATION_LEDGER_RUN_OK",
   "yield_asset_test": "STELLAR_YIELD_ASSET_TEST_OK",
   "converter_test": "YIELD_CONVERTER_TEST_OK",
@@ -25,6 +26,7 @@
   "baseline_metallicity_demand_test": "G2_BASELINE_METALLICITY_DEMAND_TEST_OK",
   "candidate_grid_coverage_test": "G2_CANDIDATE_GRID_COVERAGE_TEST_OK",
   "limongi_phase_mass_history_test": "G2_LIMONGI_PHASE_MASS_HISTORY_TEST_OK",
+  "fp1_population_fate_contract_test": "FP1_POPULATION_FATE_CONTRACT_OK",
   "fixture_status": "fail",
   "fixture_blocking_reasons": [
     "required_channel_1_mass_range_not_covered",
@@ -388,6 +390,10 @@
     [
       8.0,
       10.0
+    ],
+    [
+      100.0,
+      120.0
     ]
   ],
   "candidate_grid_popiii_production_coverage_approved": false,

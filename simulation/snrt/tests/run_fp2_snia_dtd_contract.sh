@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # F-P2 contract and source-admission runner.  This proves interval-integrated
-# DTD behavior and the approved physical baseline while SNIa runtime activation
-# remains blocked until its AMR/MPI caller is connected.
+# DTD behavior, the approved physical baseline, and its connected AMR/MPI
+# caller while SNIa runtime activation remains blocked by independent gates.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
@@ -18,10 +18,12 @@ for source in stellar_enrichment_config.f90 stellar_enrichment_contract.f90 \
     stellar_snia_dtd.f90 stellar_snia_population_contract.f90 \
     stellar_snia_physical_contract.f90 \
     stellar_snia_event_ledger.f90 stellar_native_units.f90 \
+    stellar_snia_runtime_accounting.f90 \
     stellar_snia_cell_deposition.f90 fp2_snia_dtd_test.f90 \
     fp2_snia_population_contract_test.f90 fp2_snia_physical_contract_test.f90 \
     fp2_snia_cell_deposition_test.f90 \
-    fp2_snia_event_ledger_test.f90; do
+    fp2_snia_event_ledger_test.f90 fp2_snia_runtime_contract_test.f90 \
+    fp2_snia_runtime_accounting_test.f90; do
   "$FC" -O2 -g -traceback -warn all -check all -fpp \
     -module "$BUILD_DIR" -c "$SOURCE_DIR/$source" \
     -o "$BUILD_DIR/${source%.f90}.o"
@@ -62,11 +64,34 @@ done
   "$BUILD_DIR/stellar_enrichment_config.o" \
   -o "$BUILD_DIR/fp2_snia_event_ledger_test"
 
+"$FC" -O2 -g -traceback -check all \
+  "$BUILD_DIR/fp2_snia_runtime_contract_test.o" \
+  "$BUILD_DIR/stellar_snia_population_contract.o" \
+  "$BUILD_DIR/stellar_snia_physical_contract.o" \
+  "$BUILD_DIR/stellar_snia_cell_deposition.o" \
+  "$BUILD_DIR/stellar_snia_dtd.o" \
+  "$BUILD_DIR/stellar_enrichment_contract.o" \
+  "$BUILD_DIR/stellar_native_units.o" \
+  "$BUILD_DIR/stellar_enrichment_config.o" \
+  -o "$BUILD_DIR/fp2_snia_runtime_contract_test"
+
+"$FC" -O2 -g -traceback -check all \
+  "$BUILD_DIR/fp2_snia_runtime_accounting_test.o" \
+  "$BUILD_DIR/stellar_snia_runtime_accounting.o" \
+  "$BUILD_DIR/stellar_enrichment_config.o" \
+  -o "$BUILD_DIR/fp2_snia_runtime_accounting_test"
+
 (cd "$BUILD_DIR" && ./fp2_snia_dtd_test)
 (cd "$BUILD_DIR" && ./fp2_snia_population_contract_test)
 (cd "$BUILD_DIR" && ./fp2_snia_physical_contract_test)
 (cd "$BUILD_DIR" && ./fp2_snia_cell_deposition_test)
 (cd "$BUILD_DIR" && ./fp2_snia_event_ledger_test)
+(
+  cd "$BUILD_DIR"
+  PHASE0_SNIA_RUNTIME_CONTRACT="$ROOT/simulation/snrt/config/fp2_snia_runtime_contract_v1.nml" \
+    ./fp2_snia_runtime_contract_test
+)
+(cd "$BUILD_DIR" && ./fp2_snia_runtime_accounting_test)
 
 "$ROOT/simulation/snrt/.venv/bin/python" \
   "$ROOT/simulation/snrt/tests/fp2_snia_event_yield_converter.py"
@@ -133,13 +158,16 @@ done
 "$ROOT/simulation/snrt/.venv/bin/python" \
   "$ROOT/simulation/snrt/tests/fp2_snia_event_source_admission.py"
 
+python3 "$ROOT/simulation/snrt/tests/fp2_snia_production_runtime_negative.py"
+
 # Compile the exact production mirror sources as a source-order smoke test.
-# This intentionally does not link or activate SNIa in the runtime binary.
+# Runtime activation remains intentionally disabled by the production gate.
 mkdir -p "$PRODUCTION_BUILD_DIR"
 for source in stellar_enrichment_config.f90 stellar_enrichment_contract.f90 \
     stellar_snia_dtd.f90 stellar_snia_population_contract.f90 \
     stellar_snia_physical_contract.f90 \
     stellar_snia_event_ledger.f90 stellar_native_units.f90 \
+    stellar_snia_runtime_accounting.f90 \
     stellar_snia_cell_deposition.f90; do
   "$FC" -O2 -g -traceback -warn all -check all -fpp \
     -module "$PRODUCTION_BUILD_DIR" -I "$PRODUCTION_BUILD_DIR" \

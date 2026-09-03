@@ -4,9 +4,13 @@
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_population_fate_map_v1.json",
       "sha256": "0145b49b334781a969c2014c314c075e5bfb2c2fa73e46afe84158e98d41d6b4"
     },
+    "physical_package_contract": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
+      "sha256": "df89bdff55e9cb9e7e21982a21826c354cd17d53a1ea07b95d60733d796f4106"
+    },
     "physics_contract": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_physics_contract_v1.json",
-      "sha256": "e53e37ee3011e0564e2e92f54daa72c64954174e2178daaa6f7a9b0e1611f886"
+      "sha256": "08267134b80f2a1e1070c2ceba94cd45f3aeeb532502230468ebc30f4b687fdb"
     },
     "resolver_contract": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_fate_resolver_contract_v1.json",
@@ -14,7 +18,27 @@
     },
     "source_contract": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/stellar_feedback_contract_v1.json",
-      "sha256": "94660191a8c1f293859a5af81f37e5767f98cf712187b482e18a885a1b7888b1"
+      "sha256": "25228048af5c63006f4f2a8f2065fd982cf342209a17fda29786f124bd98b70a"
+    },
+    "source_node_contract": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_source_node_contract_v1.json",
+      "sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c"
+    },
+    "terminal_deposition_contract": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_terminal_deposition_contract_v1.json",
+      "sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47"
+    }
+  },
+  "fortran_admission_identities": {
+    "/gpfs/kjhan/LRD_JWST/patch/lagRamses/stellar_enrichment_config.f90": {
+      "compiled_fate_approval_id": "",
+      "compiled_fate_map_sha256": "",
+      "snii_source_node_fate_consumer_available": false
+    },
+    "/gpfs/kjhan/LRD_JWST/simulation/snrt/native/phase0/stellar_enrichment_config.f90": {
+      "compiled_fate_approval_id": "",
+      "compiled_fate_map_sha256": "",
+      "snii_source_node_fate_consumer_available": false
     }
   },
   "fortran_interval_mirrors": {
@@ -46,6 +70,177 @@
   "gate": "F-P1",
   "interpretation": "Checksum and wiring gates pass, but unresolved fate intervals keep canonical conversion and production deposition disabled.",
   "map_audit_status": "review_only_blocked",
+  "physical_package_contract": {
+    "audit_code_sha256": "3d8d2d7b037776362103ad427c75ee18dfbd35464e7e1d69735c834b90185e94",
+    "candidate_qualification": {
+      "boccioli_roberti2026_lc18": {
+        "hard_blockers": [
+          "failed_model_wind_summary_table_anomaly_requires_author_or_corrected_release",
+          "age_resolved_wind_missing",
+          "per_node_injected_energy_mapping_missing",
+          "canonical_momentum_and_deposition_missing"
+        ],
+        "missing_gate_ids": [
+          "coordinate_hull_and_population",
+          "decay_epoch_and_projection",
+          "energy_momentum_and_deposition",
+          "fate_structure_and_remnant",
+          "lifetime_and_wind_history",
+          "pair_instability",
+          "runtime_invariance_and_reproduction",
+          "source_identity_and_rights",
+          "terminal_mass_and_species_closure"
+        ],
+        "passed_gate_ids": [],
+        "production_qualified": false,
+        "role": "multi_metallicity_rotation_candidate_review",
+        "verified_gate_evidence": {}
+      },
+      "heger_woosley2010_popiii": {
+        "hard_blockers": [
+          "positive_metallicity_axis_missing",
+          "runtime_8_to_10_and_100_to_120_edges_missing",
+          "explosion_piston_mixing_population_unselected",
+          "age_resolved_history_and_neutrino_wind_missing"
+        ],
+        "missing_gate_ids": [
+          "coordinate_hull_and_population",
+          "decay_epoch_and_projection",
+          "energy_momentum_and_deposition",
+          "fate_structure_and_remnant",
+          "lifetime_and_wind_history",
+          "pair_instability",
+          "runtime_invariance_and_reproduction",
+          "source_identity_and_rights",
+          "terminal_mass_and_species_closure"
+        ],
+        "passed_gate_ids": [],
+        "production_qualified": false,
+        "role": "zero_metallicity_parameter_grid_review",
+        "verified_gate_evidence": {}
+      },
+      "limongi_chieffi2018_set_r": {
+        "hard_blockers": [
+          "complete_runtime_domain_missing",
+          "age_resolved_wind_missing",
+          "terminal_energy_momentum_deposition_missing",
+          "production_population_marginalization_unselected"
+        ],
+        "missing_gate_ids": [
+          "coordinate_hull_and_population",
+          "decay_epoch_and_projection",
+          "energy_momentum_and_deposition",
+          "fate_structure_and_remnant",
+          "lifetime_and_wind_history",
+          "pair_instability",
+          "runtime_invariance_and_reproduction",
+          "source_identity_and_rights",
+          "terminal_mass_and_species_closure"
+        ],
+        "passed_gate_ids": [],
+        "production_qualified": false,
+        "role": "metallicity_rotation_structure_wind_comparison",
+        "verified_gate_evidence": {}
+      },
+      "sukhbold2016_w18_n20": {
+        "hard_blockers": [
+          "redistribution_permission_unverified",
+          "failed_node_remnant_and_wind_records_incomplete",
+          "radioactive_epoch_and_k40_duplicate_unresolved",
+          "age_resolved_wind_missing",
+          "canonical_momentum_and_deposition_missing"
+        ],
+        "missing_gate_ids": [
+          "coordinate_hull_and_population",
+          "decay_epoch_and_projection",
+          "energy_momentum_and_deposition",
+          "fate_structure_and_remnant",
+          "lifetime_and_wind_history",
+          "pair_instability",
+          "runtime_invariance_and_reproduction",
+          "source_identity_and_rights",
+          "terminal_mass_and_species_closure"
+        ],
+        "passed_gate_ids": [],
+        "production_qualified": false,
+        "role": "solar_engine_validation_only",
+        "verified_gate_evidence": {}
+      }
+    },
+    "canonical_conversion_allowed": false,
+    "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
+    "contract_sha256": "df89bdff55e9cb9e7e21982a21826c354cd17d53a1ea07b95d60733d796f4106",
+    "evidence_artifacts": {
+      "candidate_grid_audit": {
+        "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_candidate_grid_coverage_audit.json",
+        "sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578"
+      },
+      "candidate_grid_contract": {
+        "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_candidate_grid_coverage_contract_v1.json",
+        "sha256": "73845b9c18a5a2763d93fd627c2b1b7be4cf64f6acbff5c1f5282188fad5b81e"
+      },
+      "high_mass_review": {
+        "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/fp1_high_mass_seam_review.json",
+        "sha256": "1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775"
+      },
+      "source_node_contract": {
+        "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_source_node_contract_v1.json",
+        "sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c"
+      },
+      "terminal_deposition_contract": {
+        "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_terminal_deposition_contract_v1.json",
+        "sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47"
+      }
+    },
+    "gate": "F-P1H-E",
+    "gate_validation": {
+      "approved_validator_ids": [],
+      "hash_only_validator_artifact_may_pass": false,
+      "mode": "disabled_until_gate_specific_executable_validators_are_code_registered"
+    },
+    "high_mass_evidence": {
+      "failed_nodes_with_source_remnant_count": 0,
+      "failed_outcome_count": 12,
+      "outcome_record_count": 18,
+      "radioactive_reference_epoch_warning_count": 12,
+      "source_erratum_or_explanation_required": true
+    },
+    "interpretation": "The admission schema and review evidence are internally consistent, but no candidate passes all physical gates and there are no admitted source nodes.",
+    "physical_node_count": 0,
+    "production_ready": false,
+    "publication_ready": false,
+    "required_gate_ids": [
+      "coordinate_hull_and_population",
+      "decay_epoch_and_projection",
+      "energy_momentum_and_deposition",
+      "fate_structure_and_remnant",
+      "lifetime_and_wind_history",
+      "pair_instability",
+      "runtime_invariance_and_reproduction",
+      "source_identity_and_rights",
+      "terminal_mass_and_species_closure"
+    ],
+    "runtime_deposition_allowed": false,
+    "schema": "snrt-fp1-physical-package-admission-audit",
+    "schema_version": 1,
+    "status": "blocked_no_qualified_physical_package",
+    "unique_hard_blockers": [
+      "age_resolved_history_and_neutrino_wind_missing",
+      "age_resolved_wind_missing",
+      "canonical_momentum_and_deposition_missing",
+      "complete_runtime_domain_missing",
+      "explosion_piston_mixing_population_unselected",
+      "failed_model_wind_summary_table_anomaly_requires_author_or_corrected_release",
+      "failed_node_remnant_and_wind_records_incomplete",
+      "per_node_injected_energy_mapping_missing",
+      "positive_metallicity_axis_missing",
+      "production_population_marginalization_unselected",
+      "radioactive_epoch_and_k40_duplicate_unresolved",
+      "redistribution_permission_unverified",
+      "runtime_8_to_10_and_100_to_120_edges_missing",
+      "terminal_energy_momentum_deposition_missing"
+    ]
+  },
   "production_ready": false,
   "runtime_unresolved_intervals": [
     {
@@ -79,7 +274,43 @@
     "production_ready": false,
     "publication_ready": false
   },
+  "source_node_contract": {
+    "canonical_conversion_allowed": false,
+    "canonical_row_field_count": 32,
+    "explicit_null_zero_semantics": true,
+    "gate": "F-P1H-B",
+    "physical_node_count": 0,
+    "production_ready": false,
+    "required_field_count": 84,
+    "required_field_group_count": 8,
+    "resolver_axes_preserved": true,
+    "resolver_axis_count": 12,
+    "runtime_deposition_allowed": false,
+    "schema": "snrt-fp1-source-node-contract-audit",
+    "schema_version": 1,
+    "silent_axis_drop_allowed": false,
+    "status": "review_only_schema_complete_no_physical_nodes",
+    "validated_nodes": []
+  },
   "status": "blocked_review_only",
+  "terminal_deposition_contract": {
+    "candidate_mass_range_msun": [
+      8.0,
+      120.0
+    ],
+    "channel": 3,
+    "fate_filtered": true,
+    "gate": "F-P1H-C",
+    "ownership_closed": true,
+    "production_ready": false,
+    "runtime_deposition_allowed": false,
+    "scalar_radial_momentum": null,
+    "schema": "snrt-fp1-terminal-deposition-contract-audit",
+    "schema_version": 1,
+    "selected_deposition_mode": null,
+    "selected_runtime_energy_kind": null,
+    "status": "review_only_contract_complete_physical_policy_unselected"
+  },
   "unresolved_mass_bucket": {
     "diagnostic_only": true,
     "imf_id": 1,

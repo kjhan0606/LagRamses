@@ -51,6 +51,12 @@ module stellar_enrichment_config
        'review_only_unresolved'
   character(len=128), save, public :: stellar_fate_map_sha256 = ''
   character(len=128), save, public :: stellar_fate_approval_id = ''
+  ! Build-bound production identity.  These values remain blank in a review
+  ! build and may only be populated by the approved source-package promotion
+  ! process.  Namelist strings alone must never create a production token.
+  character(len=64), parameter, public :: compiled_fate_map_sha256 = ''
+  character(len=128), parameter, public :: compiled_fate_approval_id = ''
+  logical, parameter, public :: snii_source_node_fate_consumer_available = .false.
 
   ! This is a diagnostic mirror of the JSON F-P1 partition.  It records the
   ! initial stellar mass whose terminal fate is not yet physically resolved;
@@ -67,7 +73,7 @@ module stellar_enrichment_config
        (/0.8d0, 1.0d0, 8.0d0, 3.0d0, 140.0d0/)
   real(stellar_dp), dimension(n_stellar_channels), save, public :: &
        configured_channel_mass_max = &
-       (/120.0d0, 8.0d0, 40.0d0, 8.0d0, 260.0d0/)
+       (/120.0d0, 8.0d0, 120.0d0, 8.0d0, 260.0d0/)
   logical, dimension(n_stellar_channels), save, public :: &
        channel_owns_terminal_remnant = (/ .false., .true., .true., .false., .false. /)
   logical, dimension(n_stellar_channels), save, public :: &
@@ -121,7 +127,7 @@ contains
     configured_channel_mass_min = &
          (/0.8d0, 1.0d0, 8.0d0, 3.0d0, 140.0d0/)
     configured_channel_mass_max = &
-         (/120.0d0, 8.0d0, 40.0d0, 8.0d0, 260.0d0/)
+         (/120.0d0, 8.0d0, 120.0d0, 8.0d0, 260.0d0/)
     channel_owns_terminal_remnant = &
        (/ .false., .true., .true., .false., .false. /)
     channel_owns_white_dwarf_reservoir = &
@@ -140,6 +146,8 @@ contains
     character(len=32) :: population_model
     character(len=32) :: yield_source_basis
     character(len=32) :: parsed_feedback_mode
+    character(len=64) :: fate_policy
+    character(len=128) :: fate_map_sha256, fate_approval_id
     integer :: imf_id, parsed_population_model_id, parsed_yield_source_basis_id
     real(stellar_dp) :: imf_mass_min_msun, imf_mass_max_msun, binary_fraction
     real(stellar_dp) :: channel_mass_min_msun(n_stellar_channels)
@@ -151,7 +159,7 @@ contains
          use_snii, use_snia, use_pisn, allow_legacy_prompt_snia, feedback_mode, imf_id, &
          population_model, yield_source_basis, imf_mass_min_msun, &
          imf_mass_max_msun, binary_fraction, channel_mass_min_msun, &
-         channel_mass_max_msun
+         channel_mass_max_msun, fate_policy, fate_map_sha256, fate_approval_id
 
     use_h  = active_element(elem_h)
     use_he = active_element(elem_he)
@@ -182,6 +190,9 @@ contains
     channel_mass_min_msun = -1.0_stellar_dp
     channel_mass_max_msun = -1.0_stellar_dp
     parsed_feedback_mode = stellar_feedback_mode
+    fate_policy = stellar_fate_policy
+    fate_map_sha256 = stellar_fate_map_sha256
+    fate_approval_id = stellar_fate_approval_id
     parsed_population_model_id = population_model_id
     parsed_yield_source_basis_id = yield_source_basis_id
 
@@ -280,6 +291,23 @@ contains
        iostat_out = 1010
        return
     end if
+    call lowercase_ascii(fate_policy)
+    select case (trim(adjustl(fate_policy)))
+    case ('review_only_unresolved')
+       if (len_trim(fate_map_sha256) > 0 .or. len_trim(fate_approval_id) > 0) then
+          iostat_out = 1011
+          return
+       end if
+    case ('approved_terminal_map_v1')
+       if (.not. valid_sha256(fate_map_sha256) .or. &
+            len_trim(fate_approval_id) == 0) then
+          iostat_out = 1011
+          return
+       end if
+    case default
+       iostat_out = 1011
+       return
+    end select
     call commit_runtime_switches(use_h, use_he, use_c, use_n, use_o, use_ne, &
          use_mg, use_si, use_s, use_ca, use_fe, use_wind, use_agb, use_snii, &
          use_snia, use_pisn)
@@ -293,6 +321,9 @@ contains
     configured_binary_fraction = binary_fraction
     configured_channel_mass_min = channel_mass_min_msun
     configured_channel_mass_max = channel_mass_max_msun
+    stellar_fate_policy = trim(adjustl(fate_policy))
+    stellar_fate_map_sha256 = trim(adjustl(fate_map_sha256))
+    stellar_fate_approval_id = trim(adjustl(fate_approval_id))
   end subroutine read_enrichment_namelist
 
   subroutine commit_runtime_switches(use_h, use_he, use_c, use_n, use_o, &
@@ -331,12 +362,21 @@ contains
   end function legacy_prompt_snia_allowed
 
   logical function production_source_model_supported()
+    ! The generic SSP channels and the DTD caller have different population
+    ! identities.  A binary SSP is valid only when the explicit SNIa path is
+    ! enabled; a single-star SSP is valid only when it is not.  Both variants
+    ! still require the same reviewed terminal-fate map and per-star yield
+    ! basis.  This keeps the production gate closed for incomplete physics
+    ! without making an approved binary SNIa contract structurally
+    ! impossible to activate.
     production_source_model_supported = &
          use_channel_resolved_feedback() .and. &
-         population_model_id == population_single_star_ssp .and. &
          yield_source_basis_id == yield_basis_per_star_cumulative .and. &
-         .not. enable_snia .and. .not. enable_pisn .and. &
-         production_fate_policy_supported()
+         .not. enable_pisn .and. production_fate_policy_supported() .and. &
+         ((population_model_id == population_single_star_ssp .and. &
+           .not. enable_snia .and. configured_binary_fraction == 0.0_stellar_dp) .or. &
+          (population_model_id == population_binary_ssp .and. &
+           enable_snia .and. configured_binary_fraction > 0.0_stellar_dp))
   end function production_source_model_supported
 
   logical function production_fate_policy_supported()
@@ -347,7 +387,11 @@ contains
     production_fate_policy_supported = &
          trim(stellar_fate_policy) == 'approved_terminal_map_v1' .and. &
          valid_sha256(stellar_fate_map_sha256) .and. &
-         len_trim(stellar_fate_approval_id) > 0
+         valid_sha256(compiled_fate_map_sha256) .and. &
+         trim(stellar_fate_map_sha256) == trim(compiled_fate_map_sha256) .and. &
+         len_trim(stellar_fate_approval_id) > 0 .and. &
+         len_trim(compiled_fate_approval_id) > 0 .and. &
+         trim(stellar_fate_approval_id) == trim(compiled_fate_approval_id)
   end function production_fate_policy_supported
 
   logical function valid_sha256(value)

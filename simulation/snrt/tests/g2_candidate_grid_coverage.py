@@ -42,20 +42,37 @@ def main() -> int:
     assert mass["2"]["candidate_nodes_by_source_msun"]["doherty2014_sagb"] == [
         6.5, 7.0, 7.5, 8.0, 8.5, 9.0
     ]
-    assert mass["3"]["union_node_hull_msun"] == [8.8, 40.0]
-    assert mass["3"]["candidate_nodes_by_source_msun"]["boccioli_roberti2026_neutrino_ccsn"] == list(range(11, 41))
+    assert mass["3"]["union_node_hull_msun"] == [8.8, 120.0]
+    assert mass["3"]["candidate_nodes_by_source_msun"]["limongi_chieffi_2018_cds"] == [
+        13.0, 15.0, 20.0, 25.0, 30.0, 40.0, 60.0, 80.0, 120.0
+    ]
+    assert mass["3"]["candidate_nodes_by_source_msun"]["boccioli_roberti2026_neutrino_ccsn"] == [
+        *map(float, range(11, 46)), 50.0, 55.0, 60.0, 70.0, 80.0, 100.0, 120.0
+    ]
     assert mass["3"]["candidate_nodes_by_source_msun"]["stockinger2020_low_mass_ccsn"] == [
         8.8, 9.0, 9.6
     ]
     assert mass["3"]["candidate_nodes_by_source_msun"]["sukhbold2016_ccsn"] == [
         9.0, 9.25, 9.5, 9.75, 10.0, 10.25, 10.5,
-        10.75, 11.0, 11.25, 11.5, 11.75, 12.0,
+        10.75, 11.0, 11.25, 11.5, 11.75, 12.0, 40.0, 45.0,
+        50.0, 55.0, 60.0, 70.0, 80.0, 100.0, 120.0,
     ]
     assert mass["3"]["candidate_nodes_by_source_msun"]["roberti2024_ultralowz_ccsn"] == [15.0, 25.0]
     heger_woosley_nodes = mass["3"]["candidate_nodes_by_source_msun"]["heger_woosley2010_popiii"]
-    assert len(heger_woosley_nodes) == 104
+    assert len(heger_woosley_nodes) == 120
     assert heger_woosley_nodes[0] == 10.0
-    assert heger_woosley_nodes[-1] == 40.0
+    assert heger_woosley_nodes[-1] == 100.0
+    assert mass["3"]["flattened_branch_union_is_interpolable"] is False
+    assert mass["3"]["source_node_fate_and_remnant_records_required"] is True
+    branch_inventory = report["channel_3_branch_inventory"]
+    assert branch_inventory["flattened_union_is_interpolable"] is False
+    assert branch_inventory["source_node_fate_and_remnant_records_required"] is True
+    assert branch_inventory["nodes_by_source_and_branch_msun"]["boccioli_roberti2026_neutrino_ccsn"]["LC18"] == [
+        13.0, 15.0, 20.0, 25.0, 30.0, 40.0, 60.0, 80.0, 120.0
+    ]
+    assert branch_inventory["nodes_by_source_and_branch_msun"]["sukhbold2016_ccsn"]["N20_high_mass"] == [
+        40.0, 45.0, 50.0, 55.0, 60.0, 70.0, 80.0, 100.0, 120.0
+    ]
     transition = report["transition_fate_coverage"]
     assert transition["runtime_edge_interval_msun"] == [8.0, 8.8]
     assert transition["runtime_edge_classification"] == "terminal_fate_policy_unresolved_not_interpolable_yield_gap"
@@ -110,8 +127,10 @@ def main() -> int:
     popiii = report["popiii_mass_grid_candidate"]
     assert popiii["metallicity_mass_fraction"] == 0.0
     assert popiii["full_source_mass_hull_msun"] == [10.0, 100.0]
-    assert popiii["runtime_channel_3_mass_hull_msun"] == [10.0, 40.0]
-    assert popiii["runtime_channel_3_uncovered_edge_intervals_msun"] == [[8.0, 10.0]]
+    assert popiii["runtime_channel_3_mass_hull_msun"] == [10.0, 100.0]
+    assert popiii["runtime_channel_3_uncovered_edge_intervals_msun"] == [
+        [8.0, 10.0], [100.0, 120.0]
+    ]
     assert popiii["source_mass_node_count"] == 120
     assert popiii["source_coordinate_count"] == 5760
     assert popiii["explosion_energy_distribution_selected"] is False

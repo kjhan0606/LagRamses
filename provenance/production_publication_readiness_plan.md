@@ -11,9 +11,13 @@ Project root: `/gpfs/kjhan/LRD_JWST`
 Status: P0.1 source-parity gate closed; P0.2 conditional pass recorded;
 P0.3 feedback-state conditional pass recorded with physical continuation pending;
 P0.4 fail-closed runtime gate passed; F-P1 consolidated re-audit returned an
-engineering conditional pass and both conditions are now repaired for the
-next bundled audit; F-P1 science and later production/publication gates remain
-open
+engineering conditional pass and both conditions are now repaired; F-P1
+science and later production/publication gates remain open; F-P2 caller
+qualification is complete but runtime activation remains gated.  The
+2026-09-03 AGY/Opus high-mass review adds F-P1H-A--F-P1H-F as the active
+40--120 M☉ promotion sequence. F-P1H-A--D and the fail-closed F-P1H-E machine
+admission gate are implemented; no physical source package or node is approved,
+so physical promotion and F-P1H-F remain blocked.
 
 This plan closes every item raised by the AGY-role, Fable, and
 GPT-5.6-sol reviews. Starting with B2, Claude Opus 5 assumes the independent
@@ -416,12 +420,14 @@ nucleosynthesis” unless the chemistry-expansion gate has passed.
 ## 5. Execution order and decision points
 
 1. **Complete:** G0, the native/JAX contract mirror, and P0.1 compiled source
-   identity/build parity. **Pending:** remaining compiled G1 closure — units,
-   interval accounting, HDF5 restart, fallback policy, and executed field map,
-   as listed in the independent Fable reproduction.
-2. **After compiled G1:** G2 — select sources and generate the first fully
-   cited table; this is the only point at which a scientific yield asset may
-   be promoted.
+   identity/build parity. P0.2/P0.3 retain their stated conditional physical
+   continuation work; P0.4 remains passed. Generic restart/AMR hardening not
+   tied to feedback stays in the long-term backlog.
+2. **Active F-P1 high-mass sequence:** F-P1H-A--D internal admission, schema,
+   ownership, deposition, branch-preserving hull, and review-closure controls
+   are complete. The F-P1H-E machine gate is also active and fail closed. Obtain
+   a corrected, licensed multi-Z/multi-rotation package and fill complete
+   physical nodes; only F-P1H-F may then promote rows.
 3. **Then:** G3 — implement approved SED, SNIa, AGN ledgers, and optional PISN
    gating; merge only coeval, same-grid ledgers.
 4. **Then:** G4 — promote dust and thermal/RT physics after spatial and temporal
@@ -442,7 +448,13 @@ authorized by this plan before G2--G5 are green.
 - a production-side table manifest with full-grid coverage and checksums;
 - a native/JAX differential and conservation matrix;
 - a paper-scope decision for 11-element reduced chemistry versus an expanded
-  nucleosynthesis set.
+  nucleosynthesis set;
+- an F-P1 source-node sidecar that preserves every resolver axis, explicit
+  failed-node zero/null semantics, and source-hull cells;
+- build-bound fate-map digest/approval identity, channel ownership and scalar
+  momentum/deposition contracts, and source-precision closure evidence;
+- author clarification or corrected release for the LC18 failed-model Wind
+  tables before that branch is considered for production.
 
 The existing detailed implementation notes remain active in
 [`feedback_implementation_plan.md`](feedback_implementation_plan.md), while

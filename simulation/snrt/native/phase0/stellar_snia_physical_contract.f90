@@ -60,6 +60,7 @@ module stellar_snia_physical_contract
   end type snia_event_budget_t
 
   public :: validate_snia_physical_contract
+  public :: read_snia_physical_contract_namelist
   public :: resolve_snia_event_momentum
   public :: build_snia_event_budget
 
@@ -129,6 +130,76 @@ contains
        ierr = snia_contract_err_momentum
     end if
   end subroutine validate_snia_physical_contract
+
+  subroutine read_snia_physical_contract_namelist(iunit, contract, ierr)
+    ! Read the physical contract from the runtime handoff file.  The caller
+    ! owns the file ordering; this reader consumes the next
+    ! &snia_physical_contract group and validates every field before return.
+    integer, intent(in) :: iunit
+    type(snia_physical_contract_t), intent(out) :: contract
+    integer, intent(out) :: ierr
+
+    logical :: approved
+    integer :: wd_debit_policy, shortfall_policy, momentum_policy, read_ierr
+    real(stellar_dp) :: returned_mass_per_event, terminal_remnant_per_event
+    real(stellar_dp) :: wd_debit_per_event, energy_per_event
+    real(stellar_dp) :: momentum_per_event(3), radial_momentum_per_event
+    real(stellar_dp) :: ejected_mass_per_event(n_stellar_elements)
+    real(stellar_dp) :: net_yield_per_event(n_stellar_elements)
+    character(len=128) :: yield_source_id, yield_source_sha256
+    character(len=128) :: source_commit_binding, conversion_code_sha256
+    character(len=128) :: approval_id
+
+    namelist /snia_physical_contract/ yield_source_id, yield_source_sha256, &
+         source_commit_binding, conversion_code_sha256, approval_id, approved, &
+         wd_debit_policy, &
+         shortfall_policy, momentum_policy, returned_mass_per_event, &
+         terminal_remnant_per_event, wd_debit_per_event, energy_per_event, &
+         momentum_per_event, radial_momentum_per_event, ejected_mass_per_event, &
+         net_yield_per_event
+
+    approved = .false.
+    wd_debit_policy = 0
+    shortfall_policy = 0
+    momentum_policy = 0
+    returned_mass_per_event = -1.0_stellar_dp
+    terminal_remnant_per_event = -1.0_stellar_dp
+    wd_debit_per_event = -1.0_stellar_dp
+    energy_per_event = -1.0_stellar_dp
+    momentum_per_event = 0.0_stellar_dp
+    radial_momentum_per_event = -1.0_stellar_dp
+    ejected_mass_per_event = 0.0_stellar_dp
+    net_yield_per_event = 0.0_stellar_dp
+    yield_source_id = ''
+    yield_source_sha256 = ''
+    source_commit_binding = ''
+    conversion_code_sha256 = ''
+    approval_id = ''
+
+    read(iunit, nml=snia_physical_contract, iostat=read_ierr)
+    contract%approved = approved
+    contract%wd_debit_policy = wd_debit_policy
+    contract%shortfall_policy = shortfall_policy
+    contract%momentum_policy = momentum_policy
+    contract%returned_mass_per_event = returned_mass_per_event
+    contract%terminal_remnant_per_event = terminal_remnant_per_event
+    contract%wd_debit_per_event = wd_debit_per_event
+    contract%energy_per_event = energy_per_event
+    contract%momentum_per_event = momentum_per_event
+    contract%radial_momentum_per_event = radial_momentum_per_event
+    contract%ejected_mass_per_event = ejected_mass_per_event
+    contract%net_yield_per_event = net_yield_per_event
+    contract%yield_source_id = yield_source_id
+    contract%yield_source_sha256 = yield_source_sha256
+    contract%source_commit_binding = source_commit_binding
+    contract%conversion_code_sha256 = conversion_code_sha256
+    contract%approval_id = approval_id
+    if (read_ierr /= 0) then
+       ierr = snia_contract_err_argument
+       return
+    end if
+    call validate_snia_physical_contract(contract, ierr)
+  end subroutine read_snia_physical_contract_namelist
 
   subroutine resolve_snia_event_momentum(contract, direction, momentum, ierr)
     type(snia_physical_contract_t), intent(in) :: contract

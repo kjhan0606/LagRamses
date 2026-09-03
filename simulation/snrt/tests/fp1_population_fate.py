@@ -45,6 +45,10 @@ def main() -> int:
     assert report["production_ready"] is False
     assert report["coverage"]["partition_complete"] is True
     assert report["coverage"]["terminal_owner_contract_pass"] is True
+    assert report["coverage"]["fate_filtered_terminal_channels"] == [3]
+    assert report["coverage"]["configured_terminal_windows_msun"] == {
+        "3": [[8.0, 40.0]]
+    }
     assert report["unresolved_intervals"] == [
         {"id": "low_mass_lifetime_seam", "mass_msun": [0.8, 1.0]},
         {"id": "massive_terminal_fate_seam", "mass_msun": [40.0, 120.0]},

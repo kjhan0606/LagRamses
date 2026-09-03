@@ -1,0 +1,209 @@
+{
+  "schema": "snrt-fp1-physical-package-admission-contract",
+  "schema_version": 1,
+  "gate": "F-P1H-E",
+  "status": "blocked_no_qualified_physical_package",
+  "purpose": "Fail-closed admission contract for a production stellar-feedback source package; candidate coordinates and review evidence are not physical approval.",
+  "runtime_domain": {
+    "population_mass_msun": [0.08, 120.0],
+    "terminal_candidate_mass_msun": [8.0, 120.0],
+    "high_mass_review_seam_msun": [40.0, 120.0],
+    "required_birth_metallicity_domain": null,
+    "required_birth_metallicity_domain_selected": false,
+    "age_horizon_yr": 13800000000.0
+  },
+  "evidence_artifacts": {
+    "source_node_contract": {
+      "path": "config/fp1_source_node_contract_v1.json",
+      "sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c"
+    },
+    "terminal_deposition_contract": {
+      "path": "config/fp1_terminal_deposition_contract_v1.json",
+      "sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47"
+    },
+    "candidate_grid_contract": {
+      "path": "config/g2_candidate_grid_coverage_contract_v1.json",
+      "sha256": "73845b9c18a5a2763d93fd627c2b1b7be4cf64f6acbff5c1f5282188fad5b81e"
+    },
+    "candidate_grid_audit": {
+      "path": "data/g2_candidate_grid_coverage_audit.json",
+      "sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578"
+    },
+    "high_mass_review": {
+      "path": "data/fp1_high_mass_seam_review.json",
+      "sha256": "1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775"
+    }
+  },
+  "required_gates": {
+    "source_identity_and_rights": {
+      "scope": "package",
+      "requires": [
+        "citation_and_data_version",
+        "per_file_and_composite_sha256",
+        "machine_readable_license",
+        "redistribution_permission",
+        "immutable_local_source_mirror"
+      ]
+    },
+    "coordinate_hull_and_population": {
+      "scope": "package_and_node",
+      "requires": [
+        "all_resolver_axes_preserved",
+        "required_mass_and_metallicity_domain_selected",
+        "rotation_and_binary_population_selected_or_approved_marginalization",
+        "source_hull_and_boundary_epsilon_tests"
+      ]
+    },
+    "fate_structure_and_remnant": {
+      "scope": "node",
+      "requires": [
+        "explicit_outcome_class",
+        "pre_sn_structure_or_source_fate_basis",
+        "fallback_and_envelope_ejection",
+        "compact_remnant_mass_and_kind",
+        "explicit_failed_or_direct_collapse_record"
+      ]
+    },
+    "lifetime_and_wind_history": {
+      "scope": "node",
+      "requires": [
+        "stellar_lifetime",
+        "age_resolved_cumulative_wind",
+        "wind_terminal_partition",
+        "age_telescope_and_terminal_exactly_once_tests"
+      ]
+    },
+    "terminal_mass_and_species_closure": {
+      "scope": "node",
+      "requires": [
+        "terminal_ejecta_or_explicit_physical_zero",
+        "remnant_plus_wind_plus_terminal_mass_closure",
+        "source_precision_derived_tolerance",
+        "tracked_element_and_other_metals_closure"
+      ]
+    },
+    "decay_epoch_and_projection": {
+      "scope": "node",
+      "requires": [
+        "complete_isotope_inventory",
+        "source_reference_epoch",
+        "decay_horizon_and_network",
+        "duplicate_isotope_resolution",
+        "stable_reduced_chemistry_closure"
+      ]
+    },
+    "energy_momentum_and_deposition": {
+      "scope": "node_and_runtime",
+      "requires": [
+        "energy_quantity_kind",
+        "source_to_injected_energy_mapping",
+        "scalar_radial_momentum_or_explicit_source_absence",
+        "deposition_geometry_and_coupling",
+        "mass_momentum_energy_exactly_once_ledger"
+      ]
+    },
+    "pair_instability": {
+      "scope": "node",
+      "requires": [
+        "ppisn_eligibility_and_pulse_history",
+        "pisn_eligibility_and_complete_disruption",
+        "helium_or_core_mass_basis",
+        "non_overlapping_channel_ownership"
+      ]
+    },
+    "runtime_invariance_and_reproduction": {
+      "scope": "package_and_runtime",
+      "requires": [
+        "independent_source_parser_reproduction",
+        "source_node_reconstruction",
+        "timestep_restart_retry_refinement_mpi_closure",
+        "production_binary_build_bound_identity",
+        "independent_physics_and_code_audit"
+      ]
+    }
+  },
+  "gate_validation": {
+    "mode": "disabled_until_gate_specific_executable_validators_are_code_registered",
+    "approved_validator_ids": [],
+    "hash_only_validator_artifact_may_pass": false
+  },
+  "selection_policy": {
+    "all_required_gates_must_pass": true,
+    "all_required_nodes_must_be_present": true,
+    "failed_or_direct_collapse_nodes_may_be_omitted": false,
+    "missing_values_may_be_rewritten_as_zero": false,
+    "flattened_branch_union_may_be_interpolated": false,
+    "cross_source_interpolation_allowed": false,
+    "cross_engine_interpolation_allowed": false,
+    "out_of_source_hull_clamping_allowed": false,
+    "mass_only_fate_interpolation_allowed": false,
+    "diagnostic_energy_may_be_assumed_injected_energy": false,
+    "momentum_may_be_inferred_from_energy": false,
+    "integrated_wind_may_be_assumed_age_resolved": false,
+    "review_evidence_may_activate_runtime": false,
+    "unexecuted_validator_artifact_may_pass": false
+  },
+  "candidate_qualification": {
+    "sukhbold2016_w18_n20": {
+      "role": "solar_engine_validation_only",
+      "gate_evidence": {},
+      "hard_blockers": [
+        "redistribution_permission_unverified",
+        "failed_node_remnant_and_wind_records_incomplete",
+        "radioactive_epoch_and_k40_duplicate_unresolved",
+        "age_resolved_wind_missing",
+        "canonical_momentum_and_deposition_missing"
+      ],
+      "production_qualified": false
+    },
+    "boccioli_roberti2026_lc18": {
+      "role": "multi_metallicity_rotation_candidate_review",
+      "gate_evidence": {},
+      "hard_blockers": [
+        "failed_model_wind_summary_table_anomaly_requires_author_or_corrected_release",
+        "age_resolved_wind_missing",
+        "per_node_injected_energy_mapping_missing",
+        "canonical_momentum_and_deposition_missing"
+      ],
+      "production_qualified": false
+    },
+    "limongi_chieffi2018_set_r": {
+      "role": "metallicity_rotation_structure_wind_comparison",
+      "gate_evidence": {},
+      "hard_blockers": [
+        "complete_runtime_domain_missing",
+        "age_resolved_wind_missing",
+        "terminal_energy_momentum_deposition_missing",
+        "production_population_marginalization_unselected"
+      ],
+      "production_qualified": false
+    },
+    "heger_woosley2010_popiii": {
+      "role": "zero_metallicity_parameter_grid_review",
+      "gate_evidence": {},
+      "hard_blockers": [
+        "positive_metallicity_axis_missing",
+        "runtime_8_to_10_and_100_to_120_edges_missing",
+        "explosion_piston_mixing_population_unselected",
+        "age_resolved_history_and_neutrino_wind_missing"
+      ],
+      "production_qualified": false
+    }
+  },
+  "physical_node_inventory": [],
+  "selection": {
+    "selected_package_id": null,
+    "selected_package_sha256": null,
+    "source_node_mapping_sha256": null,
+    "approval_id": null,
+    "approved_by": null,
+    "approval_date": null
+  },
+  "approval": {
+    "physical_package_selected": false,
+    "canonical_conversion_allowed": false,
+    "runtime_deposition_allowed": false,
+    "production_ready": false,
+    "publication_ready": false
+  }
+}

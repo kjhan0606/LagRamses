@@ -29,7 +29,8 @@ program test_stellar_residual_deposition
   real(stellar_dp) :: snia_velocity(3,2), expected_snia_mass
   real(stellar_dp) :: expected_snia_momentum(3,2), expected_snia_energy(2)
   real(stellar_dp) :: scale_length_cgs, scale_density_cgs, scale_velocity_cgs
-  integer :: element_var(n_stellar_elements), momentum_var(3)
+  integer :: element_var(n_stellar_elements), masked_element_var(n_stellar_elements)
+  integer :: momentum_var(3)
   integer :: target_cell(2), owner_rank(2)
   integer :: ierr, element
 
@@ -88,6 +89,7 @@ program test_stellar_residual_deposition
   snia_budget%momentum = (/1.0e40_stellar_dp, -2.0e39_stellar_dp, &
        3.0e39_stellar_dp/)
   snia_budget%ejected_mass(elem_c) = 1.0_stellar_dp
+  snia_budget%ejected_mass(elem_fe) = 0.2_stellar_dp
   snia_coupling%approved = .true.
   snia_coupling%mode = snia_thermal_all_to_total_energy
   snia_coupling%thermal_fraction = 1.0_stellar_dp
@@ -135,6 +137,36 @@ program test_stellar_residual_deposition
   call expect_close(snia_uold(7+elem_c-1,1), 0.25_stellar_dp * solar_mass_cgs / &
        (2.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs), 25)
 
+  ! A disabled chemical field is represented by the explicit zero sentinel;
+  ! it must not cause an index error or receive a hidden SNIa increment.
+  masked_element_var = element_var
+  masked_element_var(elem_fe) = 0
+  snia_uold = 0.0_stellar_dp
+  snia_coupling%include_event_momentum_kinetic = .true.
+  call deposit_snia_budget_to_uold(snia_budget, snia_coupling, snia_velocity, &
+       scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, &
+       snia_volume, snia_weights, 1, 5, momentum_var, snia_uold, &
+       1.0e-10_stellar_dp, ierr, 6, masked_element_var)
+  if (ierr /= ramses_bridge_ok) error stop 34
+  call expect_close(snia_uold(7+elem_fe-1,1), 0.0_stellar_dp, 35)
+  call expect_close(snia_uold(7+elem_c-1,1), 0.25_stellar_dp * solar_mass_cgs / &
+       (2.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs), 36)
+  masked_element_var(elem_fe) = -1
+  snia_uold = 0.0_stellar_dp
+  call deposit_snia_budget_to_uold(snia_budget, snia_coupling, snia_velocity, &
+       scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, &
+       snia_volume, snia_weights, 1, 5, momentum_var, snia_uold, &
+       1.0e-10_stellar_dp, ierr, 6, masked_element_var)
+  if (ierr /= ramses_bridge_err_index) error stop 37
+  call expect_close(maxval(abs(snia_uold)), 0.0_stellar_dp, 38)
+  masked_element_var(elem_fe) = 0
+  snia_uold = 0.0_stellar_dp
+  call deposit_snia_budget_to_uold(snia_budget, snia_coupling, snia_velocity, &
+       scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, &
+       snia_volume, snia_weights, 1, 5, momentum_var, snia_uold, &
+       1.0e-10_stellar_dp, ierr, 6, masked_element_var)
+  if (ierr /= ramses_bridge_ok) error stop 39
+
   ! Exercise the RAMSES-facing row-major adapter with a permuted, explicitly
   ! owned target list.  The selected cells are scattered only after the
   ! variable-major scratch deposition succeeds.
@@ -144,7 +176,7 @@ program test_stellar_residual_deposition
   call deposit_snia_budget_to_unew(snia_budget, snia_coupling, snia_velocity, &
        scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, 2, &
        target_cell, owner_rank, 7, snia_volume, snia_weights, 1, 5, &
-       momentum_var, snia_unew, 1.0e-10_stellar_dp, ierr, 6, element_var)
+       momentum_var, snia_unew, 1.0e-10_stellar_dp, ierr, 6, masked_element_var)
   if (ierr /= ramses_bridge_ok) error stop 28
   call expect_close(snia_unew(2,1), snia_uold(1,1), 29)
   call expect_close(snia_unew(1,5), snia_uold(5,2), 30)
@@ -155,7 +187,7 @@ program test_stellar_residual_deposition
   call deposit_snia_budget_to_unew(snia_budget, snia_coupling, snia_velocity, &
        scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, 2, &
        target_cell, owner_rank, 7, snia_volume, snia_weights, 1, 5, &
-       momentum_var, snia_unew, 1.0e-10_stellar_dp, ierr, 6, element_var)
+       momentum_var, snia_unew, 1.0e-10_stellar_dp, ierr, 6, masked_element_var)
   if (ierr /= ramses_bridge_err_target) error stop 32
   call expect_close(maxval(abs(snia_unew)), 0.0_stellar_dp, 33)
   owner_rank(2) = 7
@@ -165,7 +197,7 @@ program test_stellar_residual_deposition
   call deposit_snia_budget_to_uold(snia_budget, snia_coupling, snia_velocity, &
        scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, &
        snia_volume, snia_weights, 1, 5, momentum_var, snia_uold, &
-       1.0e-10_stellar_dp, ierr, 6, element_var)
+       1.0e-10_stellar_dp, ierr, 6, masked_element_var)
   if (ierr /= ramses_bridge_err_snia) error stop 26
   call expect_close(maxval(abs(snia_uold)), 0.0_stellar_dp, 27)
 

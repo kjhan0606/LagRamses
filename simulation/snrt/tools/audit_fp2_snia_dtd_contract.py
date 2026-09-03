@@ -7,7 +7,9 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
+import subprocess
 from typing import Any, Iterable
 
 from fp2_provenance import PROMOTION_REQUIRED_FIELDS, project_relative
@@ -26,6 +28,10 @@ DEFAULT_NATIVE_DEPOSITION = SNRT_ROOT / "native" / "phase0" / "stellar_snia_cell
 DEFAULT_PRODUCTION_DEPOSITION = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_snia_cell_deposition.f90"
 DEFAULT_NATIVE_POPULATION = SNRT_ROOT / "native" / "phase0" / "stellar_snia_population_contract.f90"
 DEFAULT_PRODUCTION_POPULATION = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_snia_population_contract.f90"
+DEFAULT_RUNTIME_CONTRACT = SNRT_ROOT / "config" / "fp2_snia_runtime_contract_v1.nml"
+DEFAULT_RUNTIME_CALLER = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_ramses_runtime.f90"
+DEFAULT_RUNTIME_BRIDGE = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_ramses_bridge.f90"
+DEFAULT_RUNTIME_NEGATIVE_AUDIT = SNRT_ROOT / "data" / "fp2_snia_production_runtime_negative.json"
 DEFAULT_EVENT_YIELD_CONVERTER = SNRT_ROOT / "tools" / "convert_snia_event_yields.py"
 DEFAULT_EVENT_YIELD_ASSET_MANIFEST = SNRT_ROOT.parents[1] / "manifests" / "fp2_snia_keegans2023_review_v1.json"
 PROJECT_ROOT = SNRT_ROOT.parents[1]
@@ -91,6 +97,111 @@ def _resolve_reference(value: Any, *roots: Path) -> Path | None:
         if candidate.exists():
             return candidate
     return (roots[0] / path).resolve() if roots else path.resolve()
+
+
+def _audit_source_binding(
+    event_source: dict[str, Any], runtime_contract_path: Path
+) -> tuple[list[str], dict[str, Any]]:
+    """Check the immutable revision claim without treating a dirty tree as bound.
+
+    The approved physical source is allowed to refer to an earlier staging
+    commit, but the current production code is reproducible only after the
+    worktree changes have been committed.  Report that distinction explicitly
+    so a review baseline cannot be mistaken for a source-bound executable.
+    """
+
+    failures: list[str] = []
+    declared = event_source.get("source_commit_binding")
+    valid_format = isinstance(declared, str) and re.fullmatch(r"[0-9a-f]{40}", declared) is not None
+    runtime_bindings: list[str] = []
+    if runtime_contract_path.is_file():
+        runtime_bindings = re.findall(
+            r'source_commit_binding="([0-9A-Fa-f]+)"',
+            runtime_contract_path.read_text(encoding="utf-8"),
+        )
+    runtime_matches = bool(valid_format) and len(runtime_bindings) == 3 and all(
+        value.lower() == declared.lower() for value in runtime_bindings
+    )
+    if not valid_format:
+        failures.append("source_commit_binding_invalid")
+    if len(runtime_bindings) != 3:
+        failures.append("runtime_source_commit_binding_count_invalid")
+    elif not runtime_matches:
+        failures.append("runtime_source_commit_binding_disagrees_with_contract")
+
+    head = None
+    revision_exists = False
+    is_ancestor = False
+    status_lines: list[str] = []
+    try:
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if head_result.returncode == 0:
+            head = head_result.stdout.strip()
+        if valid_format:
+            revision_result = subprocess.run(
+                ["git", "cat-file", "-e", f"{declared}^{{commit}}"],
+                cwd=PROJECT_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            revision_exists = revision_result.returncode == 0
+            ancestry_result = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", declared, "HEAD"],
+                cwd=PROJECT_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            is_ancestor = ancestry_result.returncode == 0
+        status_result = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=PROJECT_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if status_result.returncode == 0:
+            status_lines = [line for line in status_result.stdout.splitlines() if line]
+    except OSError:
+        pass
+    if valid_format and not revision_exists:
+        failures.append("source_commit_binding_revision_missing")
+    if valid_format and revision_exists and not is_ancestor:
+        failures.append("source_commit_binding_not_ancestor_of_current_head")
+
+    clean = not status_lines
+    if failures:
+        status = "blocked_source_binding"
+    elif not valid_format or not revision_exists:
+        status = "unavailable_source_binding"
+    elif not clean:
+        status = "historical_commit_ancestor_but_current_worktree_unbound"
+    else:
+        status = "source_bound_clean_worktree"
+    return failures, {
+        "status": status,
+        "declared_commit": declared,
+        "runtime_contract_bindings": runtime_bindings,
+        "runtime_contract_matches": runtime_matches,
+        "repository_head": head,
+        "revision_exists": revision_exists,
+        "declared_commit_is_ancestor": is_ancestor,
+        "worktree_clean": clean,
+        "worktree_change_count": len(status_lines),
+        "production_code_bound": clean and revision_exists and is_ancestor and runtime_matches,
+        "interpretation": (
+            "The declared staging revision exists and is ancestral, but current uncommitted changes are not included in that immutable binding."
+            if not clean and not failures else
+            "The declared source revision and runtime handoff are mutually consistent."
+        ),
+    }
 
 
 def _audit_candidate_matrix(
@@ -314,6 +425,10 @@ def audit_contract(
     production_deposition_path: Path = DEFAULT_PRODUCTION_DEPOSITION,
     native_population_path: Path = DEFAULT_NATIVE_POPULATION,
     production_population_path: Path = DEFAULT_PRODUCTION_POPULATION,
+    runtime_contract_path: Path = DEFAULT_RUNTIME_CONTRACT,
+    runtime_caller_path: Path = DEFAULT_RUNTIME_CALLER,
+    runtime_bridge_path: Path = DEFAULT_RUNTIME_BRIDGE,
+    runtime_negative_audit_path: Path = DEFAULT_RUNTIME_NEGATIVE_AUDIT,
 ) -> dict[str, Any]:
     config_path = Path(config_path).resolve()
     native_path = Path(native_path).resolve()
@@ -326,6 +441,10 @@ def audit_contract(
     production_deposition_path = Path(production_deposition_path).resolve()
     native_population_path = Path(native_population_path).resolve()
     production_population_path = Path(production_population_path).resolve()
+    runtime_contract_path = Path(runtime_contract_path).resolve()
+    runtime_caller_path = Path(runtime_caller_path).resolve()
+    runtime_bridge_path = Path(runtime_bridge_path).resolve()
+    runtime_negative_audit_path = Path(runtime_negative_audit_path).resolve()
     event_yield_converter_path = Path(event_yield_converter_path).resolve()
     event_yield_asset_manifest_path = Path(event_yield_asset_manifest_path).resolve()
     event_yield_asset_audit_path = Path(event_yield_asset_audit_path).resolve()
@@ -345,6 +464,7 @@ def audit_contract(
             "schema_version": 1,
             "gate": "F-P2",
             "status": "blocked_contract_integrity",
+            "physical_baseline_ready": False,
             "production_ready": False,
             "runtime_activation_allowed": False,
             "failures": ["dtd_contract_missing"],
@@ -357,6 +477,7 @@ def audit_contract(
             "schema_version": 1,
             "gate": "F-P2",
             "status": "blocked_contract_integrity",
+            "physical_baseline_ready": False,
             "production_ready": False,
             "runtime_activation_allowed": False,
             "failures": [str(exc)],
@@ -856,13 +977,107 @@ def audit_contract(
     if native_deposition_hash is not None and production_deposition_hash is not None and native_deposition_hash != production_deposition_hash:
         failures.append("native_and_production_snia_cell_deposition_mismatch")
 
+    runtime_contract_hash = _sha256(runtime_contract_path)
+    runtime_caller_hash = _sha256(runtime_caller_path)
+    runtime_bridge_hash = _sha256(runtime_bridge_path)
+    for label, value in (
+        ("snia_runtime_contract", runtime_contract_hash),
+        ("snia_runtime_caller", runtime_caller_hash),
+        ("snia_runtime_bridge", runtime_bridge_hash),
+    ):
+        if value is None:
+            failures.append(f"{label}_missing")
+
+    runtime_markers = {
+        "contract_population_group": "&snia_population_realization",
+        "contract_physical_group": "&snia_physical_contract",
+        "contract_thermal_group": "&snia_thermal_coupling",
+    }
+    if runtime_contract_hash is not None:
+        contract_text = runtime_contract_path.read_text(encoding="utf-8")
+        for label, marker in runtime_markers.items():
+            if marker not in contract_text:
+                failures.append(f"{label}_missing")
+    caller_markers = {
+        "contract_environment_handoff": "PHASE0_SNIA_RUNTIME_CONTRACT",
+        "contract_loader": "load_snia_runtime_contract",
+        "amr_leaf_locator": "locate_star_cell",
+        "unew_caller": "deposit_snia_budget_to_unew",
+        "independent_production_gate": "production_source_model_supported",
+        "closed_gate_predicate": "if (.not. production_source_model_supported()) then",
+        "snia_activation_branch": "if (enable_snia) then",
+    }
+    if runtime_caller_hash is not None:
+        caller_text = runtime_caller_path.read_text(encoding="utf-8")
+        for label, marker in caller_markers.items():
+            if marker not in caller_text:
+                failures.append(f"runtime_caller_{label}_missing")
+    bridge_markers = {
+        "unew_adapter": "subroutine deposit_snia_budget_to_unew",
+        "row_major_state": "unew(n_local_cells,nvar)",
+        "transactional_scratch": "selected_uold",
+    }
+    if runtime_bridge_hash is not None:
+        bridge_text = runtime_bridge_path.read_text(encoding="utf-8")
+        for label, marker in bridge_markers.items():
+            if marker not in bridge_text:
+                failures.append(f"runtime_bridge_{label}_missing")
+
+    runtime_negative_audit = None
+    if not runtime_negative_audit_path.is_file():
+        failures.append("snia_production_runtime_negative_audit_missing")
+    else:
+        try:
+            runtime_negative_audit = _read(runtime_negative_audit_path)
+        except ValueError:
+            failures.append("snia_production_runtime_negative_audit_invalid_json")
+        if isinstance(runtime_negative_audit, dict):
+            if runtime_negative_audit.get("status") != "pass":
+                failures.append("snia_production_runtime_negative_audit_not_clean")
+            negative_results = runtime_negative_audit.get("results")
+            if not isinstance(negative_results, dict) or not negative_results:
+                failures.append("snia_production_runtime_negative_results_missing")
+            else:
+                for name, result in negative_results.items():
+                    if not isinstance(result, dict) or result.get("status") != "pass":
+                        failures.append(f"snia_production_runtime_negative_failed:{name}")
+
+    if approved:
+        source_binding_failures, source_binding = _audit_source_binding(
+            event_source, runtime_contract_path
+        )
+        failures.extend(source_binding_failures)
+    else:
+        source_binding = {
+            "status": "not_applicable_review_only",
+            "declared_commit": event_source.get("source_commit_binding"),
+            "runtime_contract_bindings": [],
+            "runtime_contract_matches": False,
+            "repository_head": None,
+            "revision_exists": False,
+            "declared_commit_is_ancestor": False,
+            "worktree_clean": None,
+            "worktree_change_count": None,
+            "production_code_bound": False,
+            "interpretation": "No source revision is selected until the physical baseline is approved.",
+        }
+
     return {
         "schema": "snrt-fp2-snia-dtd-contract-audit",
         "schema_version": 1,
         "gate": "F-P2",
         "status": APPROVED_STATUS if approved and not failures else ("review_only_not_approved" if not failures else "blocked_contract_integrity"),
-        "production_ready": approved and not failures,
+        "physical_baseline_ready": approved and not failures,
+        # The F-P2 contract deliberately keeps runtime activation disabled.
+        # Keep this field tied to actual executable readiness rather than
+        # using it to mean that the review-only physical baseline is complete.
+        "production_ready": False,
         "runtime_activation_allowed": False,
+        "production_blockers": [
+            "runtime_activation_disabled",
+            "independent_f_p1_terminal_fate_gate_closed",
+        ],
+        "source_binding": source_binding,
         "contract": project_relative(config_path),
         "contract_sha256": _sha256(config_path),
         "native_kernel": {"path": project_relative(native_path), "sha256": native_hash},
@@ -886,6 +1101,49 @@ def audit_contract(
         },
         "native_snia_cell_deposition": {"path": project_relative(native_deposition_path), "sha256": native_deposition_hash},
         "production_snia_cell_deposition": {"path": project_relative(production_deposition_path), "sha256": production_deposition_hash},
+        "runtime_handoff": {
+            "status": "connected_runtime_gated" if not any(
+                failure.startswith((
+                    "snia_runtime_contract_",
+                    "snia_runtime_caller_",
+                    "snia_runtime_bridge_",
+                    "runtime_caller_",
+                    "runtime_bridge_",
+                    "contract_",
+                )) for failure in failures
+            ) else "blocked_runtime_handoff",
+            "activation_allowed": False,
+            "contract": {
+                "path": project_relative(runtime_contract_path),
+                "sha256": runtime_contract_hash,
+                "groups": list(runtime_markers),
+            },
+            "caller": {
+                "path": project_relative(runtime_caller_path),
+                "sha256": runtime_caller_hash,
+                "target_policy": "actual AMR leaf-cell NGP target; owner rank is local RAMSES rank",
+                "activation_gate": "production_source_model_supported() remains fail-closed",
+            },
+            "bridge": {
+                "path": project_relative(runtime_bridge_path),
+                "sha256": runtime_bridge_hash,
+                "layout": "unew(local_cell,variable)",
+                "transaction": "variable-major scratch then row-major scatter",
+            },
+        },
+        "production_runtime_negative": {
+            "path": project_relative(runtime_negative_audit_path),
+            "sha256": _sha256(runtime_negative_audit_path),
+            "status": runtime_negative_audit.get("status") if isinstance(runtime_negative_audit, dict) else None,
+            "result_statuses": {
+                name: result.get("status")
+                for name, result in runtime_negative_audit.get("results", {}).items()
+                if isinstance(result, dict)
+            } if isinstance(runtime_negative_audit, dict) else {},
+            "interpretation": (
+                "linked production binary startup negative evidence; no evolution or active SNIa run"
+            ),
+        },
         "kernel_family": contract.get("kernel", {}).get("family"),
         "kernel_alpha": contract.get("kernel", {}).get("alpha"),
         "selected_delay_parameters": {
@@ -1004,7 +1262,7 @@ def audit_contract(
         },
         "failures": failures,
         "interpretation": (
-            "The Maoz field DTD and HESMA yysd4-xap92 n100 event source are approved as a physical baseline; runtime remains disabled until the AMR/MPI caller is connected."
+            "The Maoz field DTD and HESMA yysd4-xap92 n100 event source are ready as a physical baseline; the runtime caller is connected to the local AMR leaf-cell bridge, but production_ready remains false because activation is disabled by the independent F-P1/runtime approval gates."
             if approved else
             "The interval kernel, population realization contract, physical event contract, cell-increment adapter, and guarded RAMSES bridge are implemented and tested, but no SNIa event model is physically approved or runtime-enabled."
         ),
@@ -1025,6 +1283,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--production-deposition", type=Path, default=DEFAULT_PRODUCTION_DEPOSITION)
     parser.add_argument("--native-population", type=Path, default=DEFAULT_NATIVE_POPULATION)
     parser.add_argument("--production-population", type=Path, default=DEFAULT_PRODUCTION_POPULATION)
+    parser.add_argument("--runtime-contract", type=Path, default=DEFAULT_RUNTIME_CONTRACT)
+    parser.add_argument("--runtime-caller", type=Path, default=DEFAULT_RUNTIME_CALLER)
+    parser.add_argument("--runtime-bridge", type=Path, default=DEFAULT_RUNTIME_BRIDGE)
+    parser.add_argument("--runtime-negative-audit", type=Path, default=DEFAULT_RUNTIME_NEGATIVE_AUDIT)
     parser.add_argument("--event-yield-converter", type=Path, default=DEFAULT_EVENT_YIELD_CONVERTER)
     parser.add_argument("--event-yield-asset-manifest", type=Path, default=DEFAULT_EVENT_YIELD_ASSET_MANIFEST)
     parser.add_argument("--event-yield-asset-audit", type=Path, default=DEFAULT_EVENT_YIELD_ASSET_AUDIT)
@@ -1067,6 +1329,10 @@ def main(argv: Iterable[str] | None = None) -> int:
         args.production_deposition,
         args.native_population,
         args.production_population,
+        args.runtime_contract,
+        args.runtime_caller,
+        args.runtime_bridge,
+        args.runtime_negative_audit,
     )
     text = json.dumps(report, indent=2) + "\n"
     if args.json_out is not None:

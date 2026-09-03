@@ -95,6 +95,10 @@ def _load_contract(path: Path) -> dict[str, Any]:
         raise CoverageAuditError("review contract must forbid extrapolation")
     if contract.get("approval", {}).get("canonical_conversion_allowed") is not False:
         raise CoverageAuditError("coverage review unexpectedly permits conversion")
+    if rules.get("flattened_branch_union_is_not_interpolable_coverage") is not True:
+        raise CoverageAuditError("coverage contract must reject flattened branch interpolation")
+    if rules.get("terminal_candidate_nodes_require_source_node_fate_and_remnant_records") is not True:
+        raise CoverageAuditError("coverage contract must require terminal source-node records")
     return contract
 
 
@@ -174,6 +178,9 @@ def audit_candidate_grid_coverage(
     heger_woosley_popiii = audit_heger_woosley2010_popiii_candidate(root=Path(root))
     baseline_demand = audit_g2_baseline_metallicity_demand()
     configured = contract["candidate_channel_nodes"]
+    channel_3_branches = contract.get("channel_3_branch_nodes")
+    if not isinstance(channel_3_branches, dict):
+        raise CoverageAuditError("channel-3 branch-node inventory is missing")
     observed_nugrid = nugrid["source_axes"]["mass_msun"]
     if configured[NUGRID_ID]["2"] != [value for value in observed_nugrid if value <= 7.0]:
         raise CoverageAuditError("NuGrid AGB nodes drifted from coverage contract")
@@ -182,18 +189,27 @@ def audit_candidate_grid_coverage(
     limongi_axes = limongi["source_axes"]
     if configured[LIMONGI_ID]["1"] != limongi_axes["recommended_mass_msun"]:
         raise CoverageAuditError("Limongi wind/outcome nodes drifted from coverage contract")
-    if configured[LIMONGI_ID]["3"] != [
-        value for value in limongi_axes["recommended_mass_msun"] if value <= 40.0
-    ]:
+    if configured[LIMONGI_ID]["3"] != limongi_axes["recommended_mass_msun"]:
         raise CoverageAuditError("Limongi SNII outcome nodes drifted from coverage contract")
+    if channel_3_branches.get(LIMONGI_ID) != {
+        "recommended_set_R": limongi_axes["recommended_mass_msun"]
+    }:
+        raise CoverageAuditError("Limongi channel-3 branch inventory drifted")
     if configured["huscher2025_agb"]["2"] != huscher["single_star_grid"]["mass_msun"]:
         raise CoverageAuditError("Huscher AGB nodes drifted from coverage contract")
     f23_single_masses = [float(value) for value in boccioli["grids"]["F23_single"]["mass_msun"]]
     if configured["boccioli_roberti2026_neutrino_ccsn"]["1"] != f23_single_masses:
         raise CoverageAuditError("Boccioli-Roberti F23 wind nodes drifted from coverage contract")
-    if configured["boccioli_roberti2026_neutrino_ccsn"]["3"] != [
-        value for value in f23_single_masses if value <= 40.0
-    ]:
+    boccioli_branch_masses = {
+        branch: [float(value) for value in boccioli["grids"][branch]["mass_msun"]]
+        for branch in ("F23_single", "F23_binary", "LC18", "WH07")
+    }
+    if channel_3_branches.get("boccioli_roberti2026_neutrino_ccsn") != boccioli_branch_masses:
+        raise CoverageAuditError("Boccioli-Roberti channel-3 branch inventory drifted")
+    boccioli_union = sorted(
+        {value for values in boccioli_branch_masses.values() for value in values}
+    )
+    if configured["boccioli_roberti2026_neutrino_ccsn"]["3"] != boccioli_union:
         raise CoverageAuditError("Boccioli-Roberti F23 SNII nodes drifted from coverage contract")
     doherty_masses = [float(value) for value in doherty["primary_grid"]["mass_msun"]]
     if configured["doherty2014_sagb"]["2"] != doherty_masses:
@@ -202,8 +218,23 @@ def audit_candidate_grid_coverage(
     if configured["stockinger2020_low_mass_ccsn"]["3"] != stockinger_masses:
         raise CoverageAuditError("Stockinger low-mass CCSN nodes drifted from coverage contract")
     sukhbold_masses = [float(value) for value in sukhbold["z96_grid"]["zams_mass_msun"]]
-    if configured["sukhbold2016_ccsn"]["3"] != sukhbold_masses:
-        raise CoverageAuditError("Sukhbold Z9.6 CCSN nodes drifted from coverage contract")
+    high_mass_engines = sukhbold["high_mass_engine_evidence"]["engines"]
+    sukhbold_branch_masses = {
+        "Z9.6": sukhbold_masses,
+        "N20_high_mass": sorted(
+            float(value) for value in high_mass_engines["N20"]["high_mass_results"]
+        ),
+        "W18_high_mass": sorted(
+            float(value) for value in high_mass_engines["W18"]["high_mass_results"]
+        ),
+    }
+    if channel_3_branches.get("sukhbold2016_ccsn") != sukhbold_branch_masses:
+        raise CoverageAuditError("Sukhbold channel-3 branch inventory drifted")
+    sukhbold_union = sorted(
+        {value for values in sukhbold_branch_masses.values() for value in values}
+    )
+    if configured["sukhbold2016_ccsn"]["3"] != sukhbold_union:
+        raise CoverageAuditError("Sukhbold candidate-node union drifted from coverage contract")
     roberti_masses = [float(value) for value in roberti_ultralowz["source_grid"]["masses_msun"]]
     if configured["roberti2024_ultralowz_ccsn"]["3"] != roberti_masses:
         raise CoverageAuditError("Roberti ultra-low-Z CCSN nodes drifted from coverage contract")
@@ -211,9 +242,13 @@ def audit_candidate_grid_coverage(
         float(value)
         for value in heger_woosley_popiii["source_grid"]["zams_masses_msun"]
     ]
-    heger_woosley_runtime_masses = [value for value in heger_woosley_masses if value <= 40.0]
+    heger_woosley_runtime_masses = list(heger_woosley_masses)
     if configured["heger_woosley2010_popiii"]["3"] != heger_woosley_runtime_masses:
         raise CoverageAuditError("Heger--Woosley Pop III CCSN nodes drifted from coverage contract")
+    if channel_3_branches.get("heger_woosley2010_popiii") != {
+        "Z0_source_grid": heger_woosley_masses
+    }:
+        raise CoverageAuditError("Heger--Woosley channel-3 branch inventory drifted")
     transition_reference = contract["transition_fate_reference"]
     transition_policy = transition_fate["project_transition_policy"]
     if transition_reference["candidate_channel_nodes_contributed"] != 0:
@@ -314,6 +349,10 @@ def audit_candidate_grid_coverage(
             ),
             "production_coverage_approved": False,
         }
+        if channel == "3":
+            mass_report[channel]["candidate_branch_nodes_by_source_msun"] = channel_3_branches
+            mass_report[channel]["flattened_branch_union_is_interpolable"] = False
+            mass_report[channel]["source_node_fate_and_remnant_records_required"] = True
 
     limongi_z_map = limongi_axes["metallicity_mass_fraction_from_source_article"]
     limongi_z = [float(limongi_z_map[str(value)]) for value in (-3, -2, -1, 0)]
@@ -387,12 +426,12 @@ def audit_candidate_grid_coverage(
         "The rotation distribution/marginalization for Limongi is not selected and NuGrid has no matching rotation axis.",
         "No source provides the required per-star age-resolved cumulative wind/AGB composition history.",
         "The Huscher IMF-weighted population Mdot table fails its stated unit-mass normalization check and cannot substitute for a per-star history.",
-        "The Boccioli-Roberti F23 branch is solar-only and provides no machine-readable explosion-energy or canonical-momentum column.",
+        "Boccioli-Roberti branch nodes reach 120 Msun, but F23 single/binary, LC18, and WH07 have incompatible population, metallicity, rotation, and engine coordinates; the flattened union is not interpolable and provides no canonical momentum.",
         "Doherty lacks calcium, an age-resolved history, and verified redistribution terms.",
         "Stockinger lacks nitrogen and a stable-decay/tracer projection, has no canonical event momentum, and has unresolved redistribution terms.",
-        "Sukhbold is solar-only, has an incomplete selected-radioactive inventory, omits detailed neutrino-wind nucleosynthesis and canonical momentum, and requires permission for third-party redistribution.",
+        "Sukhbold is solar-only; its separated Z9.6 and W18/N20 high-mass branches do not form a continuous fate law, failed high-mass outcomes lack complete remnant/wind records, the radioactive inventory and neutrino-wind nucleosynthesis are incomplete, canonical momentum is absent, and redistribution permission is unresolved.",
         "Roberti 2024 reaches Z=0 and ultra-low positive Z but has only 15 and 25 Msun nodes, an unselected rotation distribution, four zero-Z MRT omissions, unresolved wind/terminal ownership, and a quarantined 025z600 mass-budget outlier; being inside its sparse metallicity coordinate interval is not production coverage.",
-        "Heger & Woosley 2010 densely covers Z=0 from 10--100 Msun, but leaves the runtime 8--10 Msun Pop III edge uncovered and has no positive-Z axis; explosion energy, piston, artificial mixing, rotation, and neutrino-wind policies are not production-selected.",
+        "Heger & Woosley 2010 densely covers Z=0 from 10--100 Msun, but leaves both the runtime 8--10 and 100--120 Msun Pop III edges uncovered and has no positive-Z axis; explosion energy, piston, artificial mixing, rotation, and neutrino-wind policies are not production-selected.",
     ]
     return {
         "schema": "snrt-g2-candidate-grid-coverage-audit",
@@ -418,6 +457,12 @@ def audit_candidate_grid_coverage(
             "baseline_metallicity_demand": baseline_demand["audit_code_sha256"],
         },
         "mass_coverage": mass_report,
+        "channel_3_branch_inventory": {
+            "nodes_by_source_and_branch_msun": channel_3_branches,
+            "flattened_union_is_interpolable": False,
+            "source_node_fate_and_remnant_records_required": True,
+            "production_coverage_approved": False,
+        },
         "metallicity_coverage": metallicity_report,
         "rotation_coverage": {
             LIMONGI_ID: limongi_axes["rotation_velocity_km_s"],
@@ -502,7 +547,10 @@ def audit_candidate_grid_coverage(
             "runtime_channel_3_mass_hull_msun": [
                 min(heger_woosley_runtime_masses), max(heger_woosley_runtime_masses)
             ],
-            "runtime_channel_3_uncovered_edge_intervals_msun": [[8.0, 10.0]],
+            "runtime_channel_3_uncovered_edge_intervals_msun": _uncovered_edges(
+                [float(value) for value in contract["runtime_mass_ranges_msun"]["3"]],
+                heger_woosley_runtime_masses,
+            ),
             "source_mass_node_count": len(heger_woosley_masses),
             "source_coordinate_count": heger_woosley_popiii["source_grid"]["coordinate_count"],
             "explosion_energy_distribution_selected": popiii_reference[
@@ -524,7 +572,9 @@ def audit_candidate_grid_coverage(
             "seams, rotation assumptions, the runtime Z domain, age histories, and the "
             "Huscher population-table normalization remain open. Sukhbold closes the "
             "candidate source-hull gap from 9.6--11 Msun through overlaps with Stockinger "
-            "and F23. Limongi 2024 shows that the 8--8.8 Msun edge is a terminal-fate "
+            "and F23. Channel-3 candidate coordinates now retain source branch identity "
+            "through 120 Msun; their flattened union is explicitly non-interpolable. "
+            "Limongi 2024 shows that the 8--8.8 Msun edge is a terminal-fate "
             "policy seam rather than an interval that may be populated by yield interpolation. "
             "The inherited comparison population additionally lies more than 4.43 dex below the "
             "lowest staged positive-Z full-grid lower edge at its maximum Z. The fate seam, "
@@ -532,7 +582,7 @@ def audit_candidate_grid_coverage(
             "15 and 25 Msun and without an approved rotation/interpolation/component policy. "
             "Heger & Woosley 2010 adds dense exact-Z=0 mass coverage from 10--100 Msun, "
             "but no positive-Z axis or approved explosion, piston, mixing, rotation, or "
-            "8--10 Msun policy. "
+            "8--10 or 100--120 Msun edge policy. "
             "The fate seam, ultra-low-Z production domain, and all approval constraints remain open."
         ),
     }

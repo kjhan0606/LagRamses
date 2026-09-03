@@ -10,7 +10,7 @@ module stellar_enrichment_driver
   use stellar_enrichment_config, only: stellar_dp, n_stellar_channels, &
        channel_wind, channel_agb, channel_snii, channel_snia, channel_pisn, &
        enable_wind, enable_agb, enable_snii, enable_snia, enable_pisn, &
-       channel_owns_terminal_remnant
+       channel_owns_terminal_remnant, snii_source_node_fate_consumer_available
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, stellar_source_t, clear_cumulative, clear_source
   use stellar_yield_tables, only: stellar_yield_table_t
@@ -73,9 +73,20 @@ contains
 
     do channel = 1, n_stellar_channels
        if (.not. channel_is_enabled(channel)) cycle
-       if (channel == channel_snia .or. channel == channel_pisn) then
-          ! SNIa needs a DTD convolution and PISN needs an explicit
-          ! population/core-mass gate; neither is an IMF-only SSP channel.
+       if (channel == channel_snia) then
+          ! SNIa is evaluated by the runtime DTD caller after this generic
+          ! SSP ledger is built.  Keeping it out here prevents the generic
+          ! IMF-only integrator from treating a prompt table as a DTD.
+          cycle
+       else if (channel == channel_pisn) then
+          ! PISN still needs an explicit population/core-mass gate.
+          ierr = enrichment_driver_err_unsupported
+          return
+       else if (channel == channel_snii .and. &
+            channel_mass_max(channel) > 40.0_stellar_dp .and. &
+            .not. snii_source_node_fate_consumer_available) then
+          ! The canonical table has no source-node outcome axis.  Never let a
+          ! widened candidate window turn unresolved high-mass rows into SNII.
           ierr = enrichment_driver_err_unsupported
           return
        end if
@@ -144,7 +155,16 @@ contains
 
     do channel = 1, n_stellar_channels
        if (.not. channel_is_enabled(channel)) cycle
-       if (channel == channel_snia .or. channel == channel_pisn) then
+       if (channel == channel_snia) then
+          ! See compute_stellar_source_increment: the runtime owns the DTD
+          ! convolution and applies the SNIa ledger transaction separately.
+          cycle
+       else if (channel == channel_pisn) then
+          ierr = enrichment_driver_err_unsupported
+          return
+       else if (channel == channel_snii .and. &
+            channel_mass_max(channel) > 40.0_stellar_dp .and. &
+            .not. snii_source_node_fate_consumer_available) then
           ierr = enrichment_driver_err_unsupported
           return
        end if

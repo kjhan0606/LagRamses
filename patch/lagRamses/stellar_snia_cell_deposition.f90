@@ -38,6 +38,8 @@ module stellar_snia_cell_deposition
      ! must be included explicitly.  A source model whose energy already
      ! includes that kinetic term must use zero-net momentum instead.
      logical :: include_event_momentum_kinetic = .false.
+     character(len=128) :: source_commit_binding = ''
+     character(len=128) :: approval_id = ''
   end type snia_thermal_coupling_t
 
   type, public :: snia_cell_increment_t
@@ -51,6 +53,7 @@ module stellar_snia_cell_deposition
   end type snia_cell_increment_t
 
   public :: validate_snia_thermal_coupling
+  public :: read_snia_thermal_coupling_namelist
   public :: build_snia_cell_increment
 
 contains
@@ -80,6 +83,40 @@ contains
        ierr = snia_deposition_err_policy
     end if
   end subroutine validate_snia_thermal_coupling
+
+  subroutine read_snia_thermal_coupling_namelist(iunit, coupling, ierr)
+    integer, intent(in) :: iunit
+    type(snia_thermal_coupling_t), intent(out) :: coupling
+    integer, intent(out) :: ierr
+
+    logical :: approved, include_event_momentum_kinetic
+    integer :: mode, read_ierr
+    real(stellar_dp) :: thermal_fraction
+    character(len=128) :: source_commit_binding, approval_id
+
+    namelist /snia_thermal_coupling/ approved, mode, thermal_fraction, &
+         include_event_momentum_kinetic, source_commit_binding, approval_id
+
+    approved = .false.
+    mode = 0
+    thermal_fraction = -1.0_stellar_dp
+    include_event_momentum_kinetic = .false.
+    source_commit_binding = ''
+    approval_id = ''
+
+    read(iunit, nml=snia_thermal_coupling, iostat=read_ierr)
+    coupling%approved = approved
+    coupling%mode = mode
+    coupling%thermal_fraction = thermal_fraction
+    coupling%include_event_momentum_kinetic = include_event_momentum_kinetic
+    coupling%source_commit_binding = source_commit_binding
+    coupling%approval_id = approval_id
+    if (read_ierr /= 0) then
+       ierr = snia_deposition_err_argument
+       return
+    end if
+    call validate_snia_thermal_coupling(coupling, ierr)
+  end subroutine read_snia_thermal_coupling_namelist
 
   subroutine build_snia_cell_increment(budget, volume_cm3, bulk_velocity_cm_s, &
        coupling, increment, ierr)

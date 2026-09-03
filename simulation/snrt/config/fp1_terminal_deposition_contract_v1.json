@@ -1,0 +1,70 @@
+{
+  "schema": "snrt-fp1-terminal-deposition-contract",
+  "schema_version": 1,
+  "gate": "F-P1H-C",
+  "status": "contract_only_no_approved_deposition_policy",
+  "channel": {
+    "id": 3,
+    "name": "SNII_terminal_outcome",
+    "candidate_mass_range_msun": [8.0, 120.0],
+    "fate_filtered": true,
+    "source_node_outcome_required": true,
+    "unresolved_outcome_deposition_allowed": false
+  },
+  "energy": {
+    "required_source_field": "energy_kind",
+    "allowed_source_kinds": [
+      "asymptotic_kinetic",
+      "diagnostic",
+      "injected",
+      "central_engine_deposited"
+    ],
+    "selected_runtime_energy_kind": null,
+    "injected_energy_mapping_id": null,
+    "infer_injected_from_asymptotic_or_diagnostic_allowed": false,
+    "terminal_event_must_be_added_exactly_once": true,
+    "zero_energy_requires_outcome_flag": true
+  },
+  "momentum": {
+    "canonical_vector_field": "source_frame_vector_momentum_g_cm_s",
+    "canonical_vector_semantics": "net directed source-frame momentum",
+    "isotropic_source_vector": [0.0, 0.0, 0.0],
+    "scalar_radial_field": "canonical_scalar_launch_momentum_g_cm_s_or_null",
+    "scalar_radial_storage": "fp1_source_node_sidecar",
+    "scalar_must_be_null_without_approved_deposition_contract": true,
+    "infer_scalar_from_energy_allowed": false,
+    "advective_returned_mass_momentum_added_once_at_runtime": true
+  },
+  "deposition": {
+    "allowed_modes": [
+      "thermal_pure",
+      "kinetic_blastwave_subgrid",
+      "dual_coupled"
+    ],
+    "selected_mode": null,
+    "deposition_contract_id": null,
+    "coupling_efficiency_model": null,
+    "receiver_geometry": null,
+    "normalised_cell_weights_required": true,
+    "energy_momentum_double_counting_forbidden": true,
+    "pre_write_validation_required": true,
+    "transactional_cell_update_required": true
+  },
+  "ownership": {
+    "pre_terminal_wind_owner_channel": 1,
+    "terminal_ejecta_owner_channel": 3,
+    "terminal_remnant_owner_channel": 3,
+    "ppisn_pulse_owner": "separate_F-P3_pulse_record",
+    "pisn_complete_disruption_owner_channel": 5,
+    "pisn_has_terminal_remnant_owner": false,
+    "cross_channel_packet_reuse_allowed": false
+  },
+  "approval": {
+    "physical_energy_mapping_selected": false,
+    "scalar_momentum_model_selected": false,
+    "deposition_mode_selected": false,
+    "runtime_deposition_allowed": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

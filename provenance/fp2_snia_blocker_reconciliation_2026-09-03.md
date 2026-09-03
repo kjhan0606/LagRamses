@@ -55,12 +55,12 @@ Status: **physical baseline approved; runtime activation remains gated**.
   incomplete.
 - The approved Maoz field DTD supplies the binary-population normalization and
   the approved HESMA event source supplies the WD debit and zero terminal
-  remnant policy.  The ledger interface is ready but still not called by the
-  runtime.
+  remnant policy.  The runtime now loads the three-group handoff and applies
+  the ledger transaction behind the production gate.
 - The event-frame momentum convention is explicit and radial conversion is
-  tested.  The cell-local conversion adapter and tested production-side
-  RAMSES array bridge are implemented, but no runtime caller yet supplies the
-  AMR/MPI neighbour selection or calls the bridge.
+  tested.  The cell-local conversion adapter and production-side RAMSES array
+  bridge are called by the runtime's located AMR leaf-cell path; this is a
+  one-cell NGP handoff, not a distributed neighbour stencil or MPI exchange.
 - SNIa thermal coupling is approved as all-to-total-energy for this baseline but
   is not called by the runtime; existing generic stellar energy deposition and
   SNII delayed-cooling are separate paths.
@@ -85,9 +85,14 @@ The profile discrepancy values are recorded from the local audit rather than
 the AGY prose: `n300c` is 6.4104173893 relative discrepancy (641.04%) and
 `n1600c` is 0.05112189345 (5.112%).
 
-## Next bundle
+## Qualification bundle result
 
-Connect the approved source/population realization to the actual runtime
-AMR/MPI target-cell selection.  Add multi-cell weighted conservation,
-restart/idempotence, and runtime-disabled negative tests before any activation
-change.
+The connected caller qualification is complete: normal retry/restart
+reconstruction, weighted bridge conservation, and the linked production
+runtime-disabled negative paths all pass.  The actual production binary was
+rebuilt from the current `/gpfs` tree and source parity remains closed.
+
+The F-P1 terminal-fate gate and runtime activation remain closed.  A
+hard-crash pending-event journal, distributed neighbour/MPI deposition, and
+full net-yield/metallicity population extensions are separate follow-up
+gates; none is silently claimed by this result.

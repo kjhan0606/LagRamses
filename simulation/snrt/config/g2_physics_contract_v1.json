@@ -60,9 +60,13 @@
       },
       "3": {
         "name": "SNII",
-        "runtime_mass_range_msun": [8.0, 40.0],
-        "ownership": "core-collapse ejecta and remnant/fallback",
-        "must_exclude": ["pre-SN wind packets already assigned to channel 1"]
+        "runtime_mass_range_msun": [8.0, 120.0],
+        "ownership": "source-node-resolved core-collapse terminal outcome and remnant/fallback; failed/direct-collapse nodes carry explicit zero terminal ejecta",
+        "must_exclude": ["pre-SN wind packets already assigned to channel 1"],
+        "fate_filtered": true,
+        "source_node_outcome_required": true,
+        "unresolved_outcome_deposition_allowed": false,
+        "terminal_deposition_contract": "fp1_terminal_deposition_contract_v1"
       },
       "4": {
         "name": "SNIa",

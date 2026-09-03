@@ -25,6 +25,7 @@ mpiifx -O2 -g -traceback -check all \
   -o "$BUILD_DIR/g2_configuration_test"
 (cd "$BUILD_DIR" && ./g2_configuration_test)
 
+"$ROOT/tests/run_stellar_feedback_policy_unit.sh"
 "$SNRT_ROOT/tests/run_g2_population_ledger.sh"
 
 "$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tests/stellar_yield_asset.py"
@@ -74,6 +75,10 @@ mpiifx -O2 -g -traceback -check all \
   --json-out "$DATA_DIR/g2_candidate_grid_coverage_audit.json"
 "$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tests/g2_limongi_phase_mass_history.py" \
   --json-out "$DATA_DIR/g2_limongi_phase_mass_history_audit.json"
+
+# F-P1 is part of the aggregate G2 feedback preflight.  Its checksum-bound
+# package gate intentionally fails if regenerated candidate evidence drifts.
+"$SNRT_ROOT/tests/run_fp1_population_fate_contract.sh"
 
 "$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tools/adapt_g2_candidate_sources.py" \
   limongi_chieffi_2018_cds \
@@ -144,6 +149,7 @@ report = {
     "source_selection_matrix": "config/g2_source_selection_matrix_v1.json",
     "physical_contract": "config/g2_physics_contract_v1.json",
     "configuration_test": "G2_CONFIGURATION_TEST_OK",
+    "stellar_feedback_policy_test": "stellar feedback policy: PASS",
     "population_ledger_test": "G2_POPULATION_LEDGER_RUN_OK",
     "yield_asset_test": "STELLAR_YIELD_ASSET_TEST_OK",
     "converter_test": "YIELD_CONVERTER_TEST_OK",
@@ -165,6 +171,7 @@ report = {
     "baseline_metallicity_demand_test": "G2_BASELINE_METALLICITY_DEMAND_TEST_OK",
     "candidate_grid_coverage_test": "G2_CANDIDATE_GRID_COVERAGE_TEST_OK",
     "limongi_phase_mass_history_test": "G2_LIMONGI_PHASE_MASS_HISTORY_TEST_OK",
+    "fp1_population_fate_contract_test": "FP1_POPULATION_FATE_CONTRACT_OK",
     "fixture_status": fixture["status"],
     "fixture_blocking_reasons": fixture["production_gate"]["blocking_reasons"],
     "legacy_status": legacy["status"],

@@ -1,0 +1,54 @@
+! Ordered runtime handoff for the approved FP2 physical SNIa baseline.
+! The production caller reads these groups in this order.  This file does not
+! override the production activation gate; PHASE0_SNIA_RUNTIME_CONTRACT must
+! name it explicitly, and the F-P1 fate gate remains independently enforced.
+
+&snia_population_realization
+ approved=.true.
+ population_source_id="maoz2012:field_observed_powerlaw"
+ population_model_id=1
+ imf_id=1
+ binary_fraction=0.5d0
+ binary_fraction_policy=1
+ imf_conversion_factor=1.0d0
+ minimum_delay_gyr=0.04d0
+ maximum_delay_gyr=13.7d0
+ power_law_index=-1.07d0
+ events_per_initial_msun=0.0013d0
+ event_realization_policy=1
+ metallicity_policy=1
+ metallicity_factor_source_id="snia_metallicity_factor_constant_unity_v1"
+ source_commit_binding="c6c8042b03406b9d69bc50434fe5d6af7f542be6"
+ approval_id="FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
+/
+
+&snia_physical_contract
+ approved=.true.
+ wd_debit_policy=1
+ shortfall_policy=1
+ momentum_policy=2
+ returned_mass_per_event=1.4004633930489443d0
+ terminal_remnant_per_event=0.0d0
+ wd_debit_per_event=1.4004633930489443d0
+ energy_per_event=1.5063100005966762d51
+ momentum_per_event=0.0d0,0.0d0,0.0d0
+ radial_momentum_per_event=0.0d0
+ yield_source_id="hesma:yysd4-xap92:n100"
+ yield_source_sha256="bb9325de2e07bf86acd1ef4abf7c950fb44e74e6513b8c9c88336d910f8814c0"
+ source_commit_binding="c6c8042b03406b9d69bc50434fe5d6af7f542be6"
+ conversion_code_sha256="3a831b6f99df0abb549eb62798340dab7aed99e01382930e9231dcf9f9d1923b"
+ approval_id="FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
+ ejected_mass_per_event=7.33d-15,0.000831d0,0.00304d0,3.22d-6,0.101d0, &
+ 0.00357d0,0.0154d0,0.287d0,0.115d0,0.0148d0,0.74d0
+ net_yield_per_event=0.0d0,0.0d0,0.0d0,0.0d0,0.0d0,0.0d0, &
+ 0.0d0,0.0d0,0.0d0,0.0d0,0.0d0,
+/
+
+&snia_thermal_coupling
+ approved=.true.
+ mode=1
+ thermal_fraction=1.0d0
+ include_event_momentum_kinetic=.false.
+ source_commit_binding="c6c8042b03406b9d69bc50434fe5d6af7f542be6"
+ approval_id="FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
+/

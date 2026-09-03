@@ -9,6 +9,9 @@ program test_stellar_feedback_policy
        configured_binary_fraction, &
        configured_channel_mass_min, configured_channel_mass_max, &
        production_source_model_supported, enable_wind, legacy_prompt_snia_allowed
+  use stellar_enrichment_config, only: stellar_fate_policy, stellar_fate_map_sha256, &
+       stellar_fate_approval_id, compiled_fate_map_sha256, compiled_fate_approval_id, &
+       snii_source_node_fate_consumer_available
   use stellar_enrichment_contract, only: stellar_source_t, clear_source, &
        delayed_cooling_source_mass
   implicit none
@@ -82,7 +85,7 @@ program test_stellar_feedback_policy
   write(unit,'(A)') ' imf_mass_min_msun=0.08, imf_mass_max_msun=120.0,'
   write(unit,'(A)') ' binary_fraction=0.5,'
   write(unit,'(A)') ' channel_mass_min_msun=1.2,1.0,8.0,3.0,140.0,'
-  write(unit,'(A)') ' channel_mass_max_msun=120.0,8.0,40.0,8.0,260.0,'
+  write(unit,'(A)') ' channel_mass_max_msun=120.0,8.0,120.0,8.0,260.0,'
   write(unit,'(A)') '/'
   rewind(unit)
   call read_enrichment_namelist(unit,status)
@@ -126,7 +129,7 @@ program test_stellar_feedback_policy
   call write_required_population_contract(unit,'channel_resolved',1, &
        'single_star_ssp','per_star_cumulative',0.0_stellar_dp,.false.)
   write(unit,'(A)') ' channel_mass_min_msun=0.8,1.0,8.0,3.0,140.0,'
-  write(unit,'(A)') ' channel_mass_max_msun=0.7,8.0,40.0,8.0,260.0,'
+  write(unit,'(A)') ' channel_mass_max_msun=0.7,8.0,120.0,8.0,260.0,'
   write(unit,'(A)') '/'
   rewind(unit)
   call read_enrichment_namelist(unit,status)
@@ -145,6 +148,39 @@ program test_stellar_feedback_policy
   call read_enrichment_namelist(unit,status)
   close(unit)
   if (status /= 0 .or. production_source_model_supported()) error stop 16
+
+  call set_enrichment_defaults()
+  open(newunit=unit,status='scratch',action='readwrite')
+  write(unit,'(A)') '&stellar_enrichment_params'
+  call write_required_population_contract(unit,'channel_resolved',1, &
+       'binary_ssp','per_star_cumulative',0.5_stellar_dp)
+  write(unit,'(A)') ' use_snia=.true.,'
+  write(unit,'(A)') ' fate_policy="approved_terminal_map_v1",'
+  write(unit,'(A)') ' fate_map_sha256="'//repeat('a',64)//'",'
+  write(unit,'(A)') ' fate_approval_id="TEST-FP1-APPROVED-MAP" /'
+  rewind(unit)
+  call read_enrichment_namelist(unit,status)
+  close(unit)
+  if (status /= 0 .or. production_source_model_supported()) error stop 28
+  if (trim(stellar_fate_policy) /= 'approved_terminal_map_v1' .or. &
+       trim(stellar_fate_map_sha256) /= repeat('a',64) .or. &
+       trim(stellar_fate_approval_id) /= 'TEST-FP1-APPROVED-MAP') error stop 29
+  if (production_source_model_supported()) error stop 29
+  if (len_trim(compiled_fate_map_sha256) /= 0 .or. &
+       len_trim(compiled_fate_approval_id) /= 0) error stop 30
+  if (snii_source_node_fate_consumer_available) error stop 31
+
+  call set_enrichment_defaults()
+  open(newunit=unit,status='scratch',action='readwrite')
+  write(unit,'(A)') '&stellar_enrichment_params'
+  call write_required_population_contract(unit,'channel_resolved',1, &
+       'single_star_ssp','per_star_cumulative',0.0_stellar_dp)
+  write(unit,'(A)') ' fate_policy="review_only_unresolved",'
+  write(unit,'(A)') ' fate_map_sha256="'//repeat('a',64)//'" /'
+  rewind(unit)
+  call read_enrichment_namelist(unit,status)
+  close(unit)
+  if (status /= 1011) error stop 32
 
   call set_enrichment_defaults()
   open(newunit=unit,status='scratch',action='readwrite')
@@ -206,7 +242,7 @@ program test_stellar_feedback_policy
   call write_required_population_contract(unit,'channel_resolved',1, &
        'single_star_ssp','per_star_cumulative',0.0_stellar_dp,.false.)
   write(unit,'(A)') ' channel_mass_min_msun=0.8,1.0,8.0,3.0,140.0,'
-  write(unit,'(A)') ' channel_mass_max_msun=121.0,8.0,40.0,8.0,260.0,'
+  write(unit,'(A)') ' channel_mass_max_msun=121.0,8.0,120.0,8.0,260.0,'
   write(unit,'(A)') '/'
   rewind(unit)
   call read_enrichment_namelist(unit,status)
@@ -258,7 +294,7 @@ contains
     write(unit,'(A,ES16.8,A)') ' binary_fraction=',binary,','
     if(include_windows)then
        write(unit,'(A)') ' channel_mass_min_msun=0.8,1.0,8.0,3.0,140.0,'
-       write(unit,'(A)') ' channel_mass_max_msun=120.0,8.0,40.0,8.0,260.0,'
+       write(unit,'(A)') ' channel_mass_max_msun=120.0,8.0,120.0,8.0,260.0,'
     endif
   end subroutine write_required_population_contract
 end program test_stellar_feedback_policy

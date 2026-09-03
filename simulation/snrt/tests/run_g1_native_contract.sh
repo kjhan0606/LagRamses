@@ -29,6 +29,7 @@ sources=(
   stellar_snia_physical_contract.f90
   stellar_native_units.f90
   stellar_progress_contract.f90
+  stellar_snia_runtime_accounting.f90
   stellar_yield_tables.f90
   stellar_yield_interpolation.f90
   stellar_yield_provider.f90
@@ -54,6 +55,7 @@ objects=(
   stellar_snia_physical_contract.o
   stellar_native_units.o
   stellar_progress_contract.o
+  stellar_snia_runtime_accounting.o
   stellar_yield_tables.o
   stellar_yield_interpolation.o
   stellar_yield_provider.o

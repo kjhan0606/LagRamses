@@ -3,7 +3,8 @@ program g2_population_ledger_test
   use stellar_enrichment_config, only: stellar_dp, n_stellar_channels, &
        n_stellar_elements, &
        set_enrichment_defaults, enable_wind, enable_agb, enable_snii, &
-       enable_snia, yield_basis_per_star_cumulative, yield_basis_ssp_cumulative
+       enable_snia, enable_pisn, yield_basis_per_star_cumulative, &
+       yield_basis_ssp_cumulative
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, stellar_source_t, untracked_ejecta_mass, &
        generic_metal_ejecta_mass
@@ -16,7 +17,8 @@ program g2_population_ledger_test
        population_ledger_err_argument, population_ledger_err_snia
   use stellar_yield_tables, only: stellar_yield_table_t, clear_yield_table
   use stellar_enrichment_driver, only: compute_stellar_source_increment, &
-       compute_stellar_cumulative, enrichment_driver_err_unsupported, &
+       compute_stellar_cumulative, enrichment_driver_ok, &
+       enrichment_driver_err_unsupported, &
        enrichment_driver_err_ledger
   use stellar_ssp_sources, only: integrate_ssp_channel, calculate_imf_normalization, &
        evaluate_imf, ssp_source_err_basis
@@ -282,18 +284,49 @@ program g2_population_ledger_test
        'nonfinite channel ledger input is rejected', failures)
   states(2)%returned_mass = 15.0_stellar_dp
 
-  ! An enabled SNIa/PISN switch cannot fall through to ordinary IMF integration.
+  ! A widened channel-3 candidate window must not be integrated until the
+  ! source-node fate consumer exists, even if a caller reaches the driver.
+  enable_wind = .false.
+  enable_agb = .false.
+  enable_snii = .true.
+  enable_snia = .false.
+  enable_pisn = .false.
+  channel_mass_min = (/0.8d0, 1.0d0, 8.0d0, 3.0d0, 140.0d0/)
+  channel_mass_max = (/120.0d0, 8.0d0, 120.0d0, 8.0d0, 260.0d0/)
+  call compute_stellar_source_increment(unloaded_table, population, &
+       0.0_stellar_dp, 1.0_stellar_dp, channel_mass_min, channel_mass_max, &
+       8, source, ierr)
+  call expect(ierr == enrichment_driver_err_unsupported, &
+       'high-mass SNII window is refused without source-node fate consumer', failures)
+  call compute_stellar_cumulative(unloaded_table, population, 1.0_stellar_dp, &
+       channel_mass_min, channel_mass_max, 8, driver_states, driver_ledger, ierr)
+  call expect(ierr == enrichment_driver_err_unsupported, &
+       'cumulative high-mass SNII is refused without source-node fate consumer', failures)
+
+  ! SNIa is intentionally absent from the generic IMF-only driver: the
+  ! runtime DTD caller owns its interval convolution and event ledger.
   enable_wind = .false.
   enable_agb = .false.
   enable_snii = .false.
   enable_snia = .true.
   channel_mass_min = (/0.8d0, 1.0d0, 8.0d0, 3.0d0, 140.0d0/)
-  channel_mass_max = (/120.0d0, 8.0d0, 40.0d0, 8.0d0, 260.0d0/)
+  channel_mass_max = (/120.0d0, 8.0d0, 120.0d0, 8.0d0, 260.0d0/)
+  call compute_stellar_source_increment(unloaded_table, population, &
+       0.0_stellar_dp, 1.0_stellar_dp, channel_mass_min, channel_mass_max, &
+       8, source, ierr)
+  call expect(ierr == enrichment_driver_ok, &
+       'generic driver leaves SNIa interval evaluation to the runtime DTD caller', failures)
+  call expect_close(source%returned_mass, 0.0_stellar_dp, &
+       'generic SNIa path emits no prompt-table return', failures)
+
+  ! PISN still cannot enter this driver without its explicit fate resolver.
+  enable_snia = .false.
+  enable_pisn = .true.
   call compute_stellar_source_increment(unloaded_table, population, &
        0.0_stellar_dp, 1.0_stellar_dp, channel_mass_min, channel_mass_max, &
        8, source, ierr)
   call expect(ierr == enrichment_driver_err_unsupported, &
-       'SNIa activation is refused before DTD implementation', failures)
+       'PISN activation is refused without the fate resolver', failures)
   call set_enrichment_defaults()
   call clear_yield_table(mini_table)
 

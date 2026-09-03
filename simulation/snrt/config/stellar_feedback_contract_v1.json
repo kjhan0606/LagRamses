@@ -48,6 +48,22 @@
     "cumulative_fields": ["returned_mass_msun_per_star", "remnant_mass_msun_per_star", "energy_erg_per_star", "ejecta_*_msun_per_star"],
     "net_yields_are_diagnostic_only": true
   },
+  "source_node_identity": {
+    "contract_schema": "snrt-fp1-source-node-contract",
+    "contract_path": "config/fp1_source_node_contract_v1.json",
+    "storage": "immutable_sidecar_with_canonical_row_mapping",
+    "canonical_row_field_count": 32,
+    "source_node_id_required_for_every_canonical_row": true,
+    "all_resolver_key_axes_must_be_preserved": true,
+    "silent_axis_drop_allowed": false,
+    "explicit_axis_reduction_policy_required": true,
+    "failed_or_direct_collapse_node_must_be_present": true,
+    "missing_value_must_not_be_rewritten_as_zero": true,
+    "terminal_deposition_contract_path": "config/fp1_terminal_deposition_contract_v1.json",
+    "physical_package_admission_contract_path": "config/fp1_physical_package_admission_contract_v1.json",
+    "scalar_radial_momentum_storage": "fp1_source_node_sidecar",
+    "scalar_radial_momentum_requires_approved_deposition_contract": true
+  },
   "runtime": {
     "required_channels": [1, 2, 3],
     "optional_channels": [4, 5],
@@ -68,9 +84,19 @@
     "channel_mass_ranges_msun": {
       "1": [0.8, 120.0],
       "2": [1.0, 8.0],
-      "3": [8.0, 40.0],
+      "3": [8.0, 120.0],
       "4": [3.0, 8.0],
       "5": [140.0, 260.0]
+    },
+    "terminal_fate_filtered_channels": {
+      "3": {
+        "candidate_mass_range_msun": [8.0, 120.0],
+        "configured_terminal_window_only_intervals_msun": [[8.0, 40.0]],
+        "source_node_outcome_required": true,
+        "unresolved_outcome_deposition_allowed": false,
+        "explicit_direct_collapse_row_required": true,
+        "terminal_deposition_contract": "fp1_terminal_deposition_contract_v1"
+      }
     },
     "terminal_fate_policy": "review_only_unresolved",
     "terminal_fate_resolver": "per_source_node_fate_lookup_v1",
@@ -100,6 +126,15 @@
       "solar_abundance_set",
       "remnant_model",
       "untracked_ejecta_policy",
+      "source_node_contract_path",
+      "source_node_contract_sha256",
+      "source_node_mapping_path",
+      "source_node_mapping_sha256",
+      "physical_package_contract_path",
+      "physical_package_contract_sha256",
+      "axis_reduction_policy",
+      "energy_semantics",
+      "momentum_deposition_contract",
       "conversion_code_sha256"
     ],
     "accepted_license_statuses": ["verified", "approved"],

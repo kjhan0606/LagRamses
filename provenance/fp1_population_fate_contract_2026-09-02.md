@@ -89,15 +89,16 @@ claim.
 - `simulation/snrt/tests/run_fp1_population_fate_contract.sh`:
   population/fate audit, resolver test, checksum-sidecar mutation test, and
   admission audit pass with `blocked_review_only` status.
-- The previously recorded production build evidence predates this bundle and
-  is not reused as a current production-linked PASS. The source-parity
-  checker remains blocked until a fresh forced build/link/smoke record covers
-  the present source tree.
+- The prior `/gpfs` production-linked build/link/smoke record predates the
+  current F-P1H source changes. Source parity therefore reports
+  `blocked=production_linked_build_evidence`, as required. A clean rebuild and
+  regenerated evidence are mandatory before promotion; the scientific F-P1
+  fate gate also remains blocked by the unresolved intervals below.
 - `P0_DIAGNOSTIC=1 simulation/snrt/tests/run_g1_native_contract.sh`:
   `G1_NATIVE_CONTRACT_TEST_OK`, exact six-query JAX differential, diagnostic
   marker retained because it is not itself production evidence.
-- `simulation/snrt/tests/run_p04_production_negative.sh` still reports
-  `P04_PRODUCTION_NEGATIVE_OK missing=1 coverage=121`.
+- `simulation/snrt/tests/run_p04_production_negative.sh` reports
+  `P04_PRODUCTION_NEGATIVE_OK baseline=3 snia_fail_closed=pass`.
 
 ## Open scientific conditions
 

@@ -194,8 +194,12 @@ contains
     end if
     if (present(element_var)) then
        do element = 1, n_stellar_elements
-          if (element_var(element) < 1 .or. element_var(element) > nvar .or. &
-               element_var(element) == density_var .or. &
+          if (element_var(element) < 0 .or. element_var(element) > nvar) then
+             ierr = ramses_bridge_err_index
+             return
+          end if
+          if (element_var(element) == 0) cycle
+          if (element_var(element) == density_var .or. &
                element_var(element) == energy_var .or. &
                any(element_var(element) == momentum_var) .or. &
                (present(total_metal_var) .and. &
@@ -291,6 +295,7 @@ contains
        end if
        if (present(element_var)) then
           do element = 1, n_stellar_elements
+             if (element_var(element) == 0) cycle
              uold(element_var(element),cell) = uold(element_var(element),cell) + &
                   normalized_weight * increments(cell)%element_mass_density(element) / &
                   density_scale
@@ -371,23 +376,31 @@ contains
 
     do target = 1, n_targets
        if (weights(target) == 0.0_stellar_dp) cycle
+       !$omp atomic update
        unew(target_cell(target),density_var) = &
             unew(target_cell(target),density_var) + selected_uold(density_var,target)
+       !$omp atomic update
        unew(target_cell(target),energy_var) = &
             unew(target_cell(target),energy_var) + selected_uold(energy_var,target)
+       !$omp atomic update
        unew(target_cell(target),momentum_var(1)) = &
             unew(target_cell(target),momentum_var(1)) + selected_uold(momentum_var(1),target)
+       !$omp atomic update
        unew(target_cell(target),momentum_var(2)) = &
             unew(target_cell(target),momentum_var(2)) + selected_uold(momentum_var(2),target)
+       !$omp atomic update
        unew(target_cell(target),momentum_var(3)) = &
             unew(target_cell(target),momentum_var(3)) + selected_uold(momentum_var(3),target)
        if (present(total_metal_var)) then
+          !$omp atomic update
           unew(target_cell(target),total_metal_var) = &
                unew(target_cell(target),total_metal_var) + &
                selected_uold(total_metal_var,target)
        end if
        if (present(element_var)) then
           do previous = 1, n_stellar_elements
+             if (element_var(previous) == 0) cycle
+             !$omp atomic update
              unew(target_cell(target),element_var(previous)) = &
                   unew(target_cell(target),element_var(previous)) + &
                   selected_uold(element_var(previous),target)

@@ -1,0 +1,18 @@
+{
+  "candidate_mass_range_msun": [
+    8.0,
+    120.0
+  ],
+  "channel": 3,
+  "fate_filtered": true,
+  "gate": "F-P1H-C",
+  "ownership_closed": true,
+  "production_ready": false,
+  "runtime_deposition_allowed": false,
+  "scalar_radial_momentum": null,
+  "schema": "snrt-fp1-terminal-deposition-contract-audit",
+  "schema_version": 1,
+  "selected_deposition_mode": null,
+  "selected_runtime_energy_kind": null,
+  "status": "review_only_contract_complete_physical_policy_unselected"
+}

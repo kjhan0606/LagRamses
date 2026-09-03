@@ -50,8 +50,8 @@ runtime deposition.
 - Approval id `FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ` binds the source,
   population, conversion code, and source staging commit.  The approval is
   production-ready as a physical baseline but not publication-ready for net
-  nucleosynthesis or metallicity trends; runtime remains disabled until the
-  tested bridge is connected to the real AMR/MPI caller.
+  nucleosynthesis or metallicity trends.  The tested bridge is now connected
+  to the real runtime caller behind the independent production gate.
 
 ## Verification
 
@@ -72,7 +72,11 @@ runtime deposition.
 
 ## Still blocked
 
-The approved source is not yet called by an AMR/MPI neighbour-selection
-routine, so the runtime still refuses SNIa activation.  Full net-yield and
-metallicity-sensitive population extensions remain open; no large RAMSES run
-is authorized by this change.
+The approved source is called by the runtime's AMR leaf-cell locator and
+row-major `unew` bridge, but the runtime still refuses SNIa activation because
+the independent F-P1/production approval gate remains closed.  Normal
+retry/restart reconstruction is covered by persisted particle mass plus the
+generic cumulative ledger under the approved zero-remnant/WD-debit invariant;
+hard crash exactly-once across a hydro write and checkpoint commit is not yet
+claimed.  Full net-yield and metallicity-sensitive population extensions
+remain open; no large RAMSES run is authorized by this change.

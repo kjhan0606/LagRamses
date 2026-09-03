@@ -204,7 +204,7 @@
       "metallicity": null,
       "mass_required_range_msun": [
         8.0,
-        40.0
+        120.0
       ],
       "age_required_range_yr": [
         0.0,

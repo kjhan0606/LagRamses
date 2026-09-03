@@ -3,8 +3,30 @@
   "schema_version": 1,
   "gate": "F-P2",
   "status": "approved_physical_baseline_runtime_gated",
-  "production_ready": true,
+  "physical_baseline_ready": true,
+  "production_ready": false,
   "runtime_activation_allowed": false,
+  "production_blockers": [
+    "runtime_activation_disabled",
+    "independent_f_p1_terminal_fate_gate_closed"
+  ],
+  "source_binding": {
+    "status": "historical_commit_ancestor_but_current_worktree_unbound",
+    "declared_commit": "c6c8042b03406b9d69bc50434fe5d6af7f542be6",
+    "runtime_contract_bindings": [
+      "c6c8042b03406b9d69bc50434fe5d6af7f542be6",
+      "c6c8042b03406b9d69bc50434fe5d6af7f542be6",
+      "c6c8042b03406b9d69bc50434fe5d6af7f542be6"
+    ],
+    "runtime_contract_matches": true,
+    "repository_head": "235332cf58735f3c7586e4c3eeaca2b861d3c5fe",
+    "revision_exists": true,
+    "declared_commit_is_ancestor": true,
+    "worktree_clean": false,
+    "worktree_change_count": 113,
+    "production_code_bound": false,
+    "interpretation": "The declared staging revision exists and is ancestral, but current uncommitted changes are not included in that immutable binding."
+  },
   "contract": "simulation/snrt/config/fp2_snia_dtd_contract_v1.json",
   "contract_sha256": "155cb6883b72c96b02dc7b6ed11e3174b8cf4abd330f73f30ed5acde56071edf",
   "native_kernel": {
@@ -25,11 +47,11 @@
   },
   "native_physical_contract": {
     "path": "simulation/snrt/native/phase0/stellar_snia_physical_contract.f90",
-    "sha256": "8f1478082982ad747ffb322d8fbbe6d6125b8ef247924f67912643f4404ef2a0"
+    "sha256": "35c31a155250d5bc2de0855abc1462e3c3eab7d72bf93f9b21560711811721e0"
   },
   "production_physical_contract": {
     "path": "patch/lagRamses/stellar_snia_physical_contract.f90",
-    "sha256": "8f1478082982ad747ffb322d8fbbe6d6125b8ef247924f67912643f4404ef2a0"
+    "sha256": "35c31a155250d5bc2de0855abc1462e3c3eab7d72bf93f9b21560711811721e0"
   },
   "population_realization_contract": {
     "path": "simulation/snrt/config/fp2_snia_population_realization_contract_v1.json",
@@ -46,11 +68,49 @@
   },
   "native_snia_cell_deposition": {
     "path": "simulation/snrt/native/phase0/stellar_snia_cell_deposition.f90",
-    "sha256": "6eda5f9354d62d65d0208a9e1a9d016e25f004694b30b94dd078685ec10210be"
+    "sha256": "bc0a5cc291a8f760de463b3ccb6789ff4551987c22f597a093af3879a78b6fab"
   },
   "production_snia_cell_deposition": {
     "path": "patch/lagRamses/stellar_snia_cell_deposition.f90",
-    "sha256": "6eda5f9354d62d65d0208a9e1a9d016e25f004694b30b94dd078685ec10210be"
+    "sha256": "bc0a5cc291a8f760de463b3ccb6789ff4551987c22f597a093af3879a78b6fab"
+  },
+  "runtime_handoff": {
+    "status": "connected_runtime_gated",
+    "activation_allowed": false,
+    "contract": {
+      "path": "simulation/snrt/config/fp2_snia_runtime_contract_v1.nml",
+      "sha256": "8c18f48d211a0983db99e11c4058644a708cb507182649c686415e5ef5239eaa",
+      "groups": [
+        "contract_population_group",
+        "contract_physical_group",
+        "contract_thermal_group"
+      ]
+    },
+    "caller": {
+      "path": "patch/lagRamses/stellar_ramses_runtime.f90",
+      "sha256": "d4348390ad332610f240ae7d7e980dc4a82cf3f30a5602dd9eda0afcef5ca5fc",
+      "target_policy": "actual AMR leaf-cell NGP target; owner rank is local RAMSES rank",
+      "activation_gate": "production_source_model_supported() remains fail-closed"
+    },
+    "bridge": {
+      "path": "patch/lagRamses/stellar_ramses_bridge.f90",
+      "sha256": "a7a15738464f011a949bc306628e27b647a4d9aba1b53109445e1ae6c06a6091",
+      "layout": "unew(local_cell,variable)",
+      "transaction": "variable-major scratch then row-major scatter"
+    }
+  },
+  "production_runtime_negative": {
+    "path": "simulation/snrt/data/fp2_snia_production_runtime_negative.json",
+    "sha256": "1a262fdc66f310ca6c25f29e0407745fc6b9ffd507ed5e4634d3aeb8a000d5d9",
+    "status": "pass",
+    "result_statuses": {
+      "mismatched_approval": "pass",
+      "mismatched_commit": "pass",
+      "missing_contract": "pass",
+      "missing_thermal_group": "pass",
+      "valid_contract_activation": "pass"
+    },
+    "interpretation": "linked production binary startup negative evidence; no evolution or active SNIa run"
   },
   "kernel_family": "power_law",
   "kernel_alpha": -1.07,
@@ -181,6 +241,6 @@
     "inferred_zero_policy": "never infer absent project elements as zero during conversion"
   },
   "failures": [],
-  "interpretation": "The Maoz field DTD and HESMA yysd4-xap92 n100 event source are approved as a physical baseline; runtime remains disabled until the AMR/MPI caller is connected.",
-  "audit_code_sha256": "037dcf9d233ae6c9615a5ed664b732e18f1fae51365ecbba0228e90e97c7796b"
+  "interpretation": "The Maoz field DTD and HESMA yysd4-xap92 n100 event source are ready as a physical baseline; the runtime caller is connected to the local AMR leaf-cell bridge, but production_ready remains false because activation is disabled by the independent F-P1/runtime approval gates.",
+  "audit_code_sha256": "def15a0bf87c0c55f88f649fb094db61467ffd9ddebf5ad273fd1d1cb5bd8885"
 }

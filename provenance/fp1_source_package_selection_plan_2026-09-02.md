@@ -83,12 +83,57 @@ Evidence:
 - `provenance/claude_opus5_g2_source_package_staging_final_audit_2026-09-02.md`
 - `provenance/agy_g2_source_package_staging_audit_2026-09-02.md`
 
+## Low-mass lifetime seam staging (new review bundle)
+
+The Huscher et al. 2025 candidate is now registered as a low-mass seam
+review input, not as a resolution of the seam.  Its single-star grid contains
+0.8 and 1.0 M☉ endpoint files and lifetime-integrated gross ejecta, but it does
+not provide an approved age-resolved per-star release history or an immutable
+lifetime/fate convention for the `[0.8, 1.0)` interval.  Its IMF-weighted
+population tables are explicitly validation-only and cannot be deconvolved or
+convolved again at runtime.
+
+The new review artifact is
+`simulation/snrt/data/fp1_low_mass_seam_review.json`.  It deliberately emits
+no canonical row, keeps runtime activation disabled, and lists the required
+lifetime source, release-history, ownership, and approval inputs.  Endpoint
+coverage must not be mistaken for seam resolution.
+
+The corresponding high-mass review artifact is
+`simulation/snrt/data/fp1_high_mass_seam_review.json`.  It cross-checks the
+staged Sukhbold W18/N20 nodes at 40, 45, 50, 55, 60, 70, 80, 100, and 120 M☉
+and records the coexistence of positive- and non-positive-energy outcomes.
+This makes a mass-only direct-collapse rule explicitly inadmissible while
+leaving the source-node fate map unresolved.  The artifact emits no canonical
+row and cannot authorize runtime deposition.
+
 ## Next executable work
 
-Resolve the remaining source-selection decisions and then, only with an
-explicit project physics approval, design the source-specific conversion
-contract. The immediate scientific prerequisites are an age-resolved wind
-history (or quantified terminal lumping), decay horizon/projection, transition
-seam ownership, explosion-engine uncertainty, canonical momentum/deposition
-semantics, and MPA redistribution permission. The 40--120 M☉ review projection
-is evidence for model dependence, not a production fate law.
+F-P1H-A--D internal controls are now implemented. The runtime is bound to a
+compiled admission identity; all resolver axes survive in the source-node
+sidecar; direct-collapse zero and missing data are distinct; channel 3 is an
+8--120 M☉ candidate domain whose future runtime use requires source-node fate
+filtering; and candidate branches, source hulls,
+rounded-source mass closure, wind discrepancies, radioactive epochs, and
+duplicate isotopes are machine-audited. Physical age/energy/restart closure is
+not claimed because the admitted physical-node inventory is deliberately empty.
+
+F-P1H-E now has a checksum-bound machine admission contract with nine required
+gates and candidate-specific blockers. Declarative gate evidence cannot pass
+until gate-specific executable validators are implemented and code-registered,
+and canonical conversion now also requires a fully admitted F-P1H-E package.
+The next executable physics work is to
+obtain or correct a redistributable package, populate complete source-node
+records, and satisfy those gates. Only then may F-P1H-F regenerate hashes,
+compile an approved identity, exercise physical closure in the production
+binary, and begin the bundled independent audit.
+
+The immediate external prerequisites are a corrected, redistributable
+multi-Z/multi-rotation source package, author resolution of the LC18 failed-
+model Wind anomaly, age-resolved wind history (or quantified terminal
+lumping), decay horizon/projection, transition-seam ownership, injected-energy
+mapping, canonical momentum/deposition semantics, and all required licensing.
+The 40--120 M☉ review projection remains evidence for model dependence, not a
+production fate law.  The integrated ordering and exit criteria are recorded
+in `feedback_population_dtd_active_roadmap.md` and
+`fp1_high_mass_required_data_comparison_2026-09-03.md`.

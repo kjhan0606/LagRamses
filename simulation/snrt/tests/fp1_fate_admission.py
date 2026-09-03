@@ -50,8 +50,19 @@ def main() -> int:
     report = audit_fate_admission()
     assert report["status"] == "blocked_review_only", report
     assert report["production_ready"] is False
-    assert len(report["artifacts"]) == 4
+    assert len(report["artifacts"]) == 7
     assert len(report["fortran_interval_mirrors"]) == 2
+    assert len(report["fortran_admission_identities"]) == 2
+    for identity in report["fortran_admission_identities"].values():
+        assert identity["compiled_fate_map_sha256"] == ""
+        assert identity["compiled_fate_approval_id"] == ""
+        assert identity["snii_source_node_fate_consumer_available"] is False
+    assert report["source_node_contract"]["resolver_axes_preserved"] is True
+    assert report["source_node_contract"]["physical_node_count"] == 0
+    assert report["terminal_deposition_contract"]["runtime_deposition_allowed"] is False
+    assert report["terminal_deposition_contract"]["ownership_closed"] is True
+    assert report["physical_package_contract"]["production_ready"] is False
+    assert report["physical_package_contract"]["physical_node_count"] == 0
     assert len(report["runtime_unresolved_intervals"]) == 2
     assert report["unresolved_mass_bucket"]["runtime_unresolved_bucket_deposition_implemented"] is False
 

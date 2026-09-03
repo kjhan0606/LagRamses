@@ -88,8 +88,11 @@ def _channel_contract(contract: dict[str, Any]) -> dict[int, dict[str, Any]]:
     names = runtime.get("channel_names")
     owners = runtime.get("terminal_remnant_owner")
     ranges = runtime.get("channel_mass_ranges_msun")
+    fate_filters = runtime.get("terminal_fate_filtered_channels", {})
     if not all(isinstance(value, dict) for value in (names, owners, ranges)):
         raise FateMapError("source contract channel metadata is incomplete")
+    if not isinstance(fate_filters, dict):
+        raise FateMapError("source contract terminal fate filters are malformed")
     channels: dict[int, dict[str, Any]] = {}
     for raw_channel, name in names.items():
         try:
@@ -98,10 +101,40 @@ def _channel_contract(contract: dict[str, Any]) -> dict[int, dict[str, Any]]:
             raise FateMapError(f"invalid source channel identifier {raw_channel!r}") from exc
         if raw_channel not in owners or raw_channel not in ranges:
             raise FateMapError(f"source contract channel {raw_channel} is incomplete")
+        fate_filter = fate_filters.get(raw_channel)
+        if fate_filter is not None:
+            if not isinstance(fate_filter, dict):
+                raise FateMapError(f"source contract channel {raw_channel} fate filter is malformed")
+            if _interval(
+                fate_filter.get("candidate_mass_range_msun"),
+                f"channel {raw_channel} fate-filter range",
+            ) != _interval(ranges[raw_channel], f"channel {raw_channel} mass range"):
+                raise FateMapError(f"source contract channel {raw_channel} fate-filter range disagrees")
+            if fate_filter.get("source_node_outcome_required") is not True:
+                raise FateMapError(f"source contract channel {raw_channel} lacks source-node fate gating")
+            if fate_filter.get("unresolved_outcome_deposition_allowed") is not False:
+                raise FateMapError(f"source contract channel {raw_channel} permits unresolved deposition")
+            if fate_filter.get("explicit_direct_collapse_row_required") is not True:
+                raise FateMapError(f"source contract channel {raw_channel} permits missing collapse rows")
+            configured_windows = fate_filter.get(
+                "configured_terminal_window_only_intervals_msun"
+            )
+            if not isinstance(configured_windows, list) or not configured_windows:
+                raise FateMapError(
+                    f"source contract channel {raw_channel} lacks configured terminal windows"
+                )
+            configured_windows = [
+                list(_interval(value, f"channel {raw_channel} configured terminal window"))
+                for value in configured_windows
+            ]
+        else:
+            configured_windows = []
         channels[channel] = {
             "name": name,
             "terminal_owner": owners[raw_channel] is True,
             "mass_range": _interval(ranges[raw_channel], f"channel {raw_channel} mass range"),
+            "fate_filtered": fate_filter is not None,
+            "configured_terminal_windows": configured_windows,
         }
     return channels
 
@@ -132,6 +165,7 @@ def _physics_channel_contract(contract: dict[str, Any]) -> dict[int, dict[str, A
                 if "runtime_mass_range_msun" in channels[raw_channel]
                 else None
             ),
+            "fate_filtered": channels[raw_channel].get("fate_filtered") is True,
         }
     return result
 
@@ -218,6 +252,8 @@ def audit_fate_map(
         physics = physics_channels[channel]
         if source["terminal_owner"] != physics["terminal_owner"]:
             raise FateMapError(f"channel {channel} terminal-owner mapping disagrees with physics contract")
+        if source["fate_filtered"] != physics["fate_filtered"]:
+            raise FateMapError(f"channel {channel} fate-filter policy disagrees with physics contract")
         if physics["mass_range"] is not None and source["mass_range"] != physics["mass_range"]:
             raise FateMapError(f"channel {channel} mass range disagrees with physics contract")
     intervals = fate_map.get("intervals")
@@ -254,10 +290,15 @@ def audit_fate_map(
             if not channel["terminal_owner"]:
                 raise FateMapError(f"terminal interval {identifier} uses a non-owner channel {owner}")
             channel_min, channel_max = channel["mass_range"]
-            if not (
+            exact_range = (
                 math.isclose(mass[0], channel_min, rel_tol=0.0, abs_tol=TOLERANCE)
                 and math.isclose(mass[1], channel_max, rel_tol=0.0, abs_tol=TOLERANCE)
-            ):
+            )
+            contained_range = (
+                mass[0] >= channel_min - TOLERANCE
+                and mass[1] <= channel_max + TOLERANCE
+            )
+            if not (exact_range or (channel["fate_filtered"] and contained_range)):
                 raise FateMapError(
                     f"terminal interval {identifier} does not match owner channel {owner} range"
                 )
@@ -275,6 +316,43 @@ def audit_fate_map(
             }
         )
         previous_upper = mass[1]
+
+    for channel_id, channel in channels.items():
+        if not channel["fate_filtered"]:
+            continue
+        channel_min, channel_max = channel["mass_range"]
+        relevant = [
+            item
+            for item in normalized
+            if item["mass_msun"][1] > channel_min + TOLERANCE
+            and item["mass_msun"][0] < channel_max - TOLERANCE
+        ]
+        declared_terminal_windows = [
+            item["mass_msun"]
+            for item in relevant
+            if item["fate_class"] == "terminal_channel"
+            and item["terminal_remnant_owner_channel"] == channel_id
+        ]
+        if channel["configured_terminal_windows"] != declared_terminal_windows:
+            raise FateMapError(
+                f"channel {channel_id} configured terminal windows disagree with fate map"
+            )
+        if not relevant or not math.isclose(
+            relevant[0]["mass_msun"][0], channel_min, rel_tol=0.0, abs_tol=TOLERANCE
+        ) or not math.isclose(
+            relevant[-1]["mass_msun"][1], channel_max, rel_tol=0.0, abs_tol=TOLERANCE
+        ):
+            raise FateMapError(f"fate-filtered channel {channel_id} is not covered by the fate map")
+        for item in relevant:
+            if item["fate_class"] == "terminal_channel":
+                if item["terminal_remnant_owner_channel"] != channel_id:
+                    raise FateMapError(
+                        f"fate-filtered channel {channel_id} contains a different terminal owner"
+                    )
+            elif item["fate_class"] != "unresolved":
+                raise FateMapError(
+                    f"fate-filtered channel {channel_id} contains an inadmissible fate class"
+                )
 
     if not math.isclose(previous_upper, domain[1], rel_tol=0.0, abs_tol=TOLERANCE):
         if previous_upper < domain[1]:
@@ -354,6 +432,14 @@ def audit_fate_map(
             "partition_complete": True,
             "overlap_free": True,
             "terminal_owner_contract_pass": True,
+            "fate_filtered_terminal_channels": [
+                channel for channel, metadata in channels.items() if metadata["fate_filtered"]
+            ],
+            "configured_terminal_windows_msun": {
+                str(channel): metadata["configured_terminal_windows"]
+                for channel, metadata in channels.items()
+                if metadata["fate_filtered"]
+            },
             "unresolved_interval_count": len(unresolved),
         },
         "interpretation": (

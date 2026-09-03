@@ -72,6 +72,68 @@ wind/ejecta/remnant/energy/momentum/age/decay가 독립 재현되고, F-P1 및
 F-P3 감사가 승인되며, 현재 `review_only_unresolved` 정책이 승인된 map
 식별자로 교체될 때까지 이 과제는 열린 상태다.
 
+### 2026-09-03 AGY/Opus 통합 실행 게이트
+
+고질량 seam은 더 이상 하나의 포괄적인 중기 항목으로만 추적하지 않고,
+다음 순서의 독립 승격 게이트로 수행한다. 이 순서는 두 감사의 공통
+필수자료를 기존 F-P1 계획에 합치고, Opus가 발견한 runtime/schema 배선
+위험을 source 승인보다 먼저 제거한다.
+
+1. **F-P1H-A — build-bound admission identity:** production binary가
+   namelist에 적힌 임의의 64자 문자열을 승인 digest로 받아들이지 않도록,
+   fate-map SHA256과 approval id를 컴파일된 승인 identity와 일치시킨다.
+   Review build의 컴파일 identity는 비어 있어야 하며 항상 fail closed다.
+   **상태: 구현 및 단위/F-P1 계약 테스트 통과.**
+2. **F-P1H-B — lossless source-node schema:** canonical 32-field payload와
+   별도로 resolver의 source/Z/rotation/binary/engine/lifetime/criterion 축을
+   보존하는 immutable node sidecar를 정의한다. 축을 줄일 경우 freeze 또는
+   population marginalization의 분포·가중치·승인 id를 기록하고, 누락과
+   물리적 zero를 구분한다. Failed/direct-collapse 모델은 누락 row가 아니라
+   명시적인 wind-only/zero-terminal/remnant record여야 한다.
+   **상태: 84개 필수 필드, 12개 resolver 축, zero/null 및 축 축약 규칙을
+   계약·변환기·asset audit에 구현하고 회귀검사 통과. 실제 physical node는
+   의도적으로 0개다.**
+3. **F-P1H-C — channel and deposition ownership:** SNII terminal candidate
+   domain이 40 M☉에서 잘려 60--120 M☉ 폭발 node를 버리지 않도록 fate
+   resolver와 channel window의 역할을 분리한다. Wind, terminal ejecta,
+   remnant, PPISN pulse, PISN disruption의 owner를 배타적으로 정하고,
+   scalar radial momentum은 별도 deposition contract 없이 canonical vector에
+   넣지 않는다.
+   **상태: channel 3을 `[8,120]` candidate domain으로 확장하고 에너지·운동량·
+   deposition 소유권 및 exactly-once 요구사항을 계약화했다. 실제 source-node
+   fate/deposition consumer는 아직 없으므로 driver가 40 M☉ 초과 경로를
+   거부하며 runtime deposition은 false다. 물리 node 기반 exactly-once 실행
+   검증은 F-P1H-E 이후 승격 조건이다.**
+4. **F-P1H-D — coverage and closure:** `[40,120]` mass cells의 gap/overlap,
+   모든 resolver 축의 source hull과 ±epsilon 경계, branch별 wind consistency,
+   decay epoch/duplicate isotope, source 정밀도별 mass closure, age telescoping,
+   exactly-once terminal energy, restart 및 population closure를 자동화한다.
+   **상태: 내부 review gate 완료. Branch별 실제 candidate node를 120 M☉까지
+   보존하고 flattened-union 보간을 금지했다. W18/N20 18개 outcome, source
+   정밀도 질량수지, wind branch 차이, radioactive epoch, K-40 duplicate,
+   failed-node completeness를 자동 검사한다. Physical node가 없으므로 age/
+   energy/restart closure의 실제 자료 실행은 F-P1H-E 이후 승격 조건이다.**
+5. **F-P1H-E — physical package admission:** 교정되고 재배포 가능한
+   multi-Z/multi-rotation package를 승인한다. Fate/pre-SN structure,
+   lifetime/age-resolved wind, terminal/remnant/fallback, decay, energy kind와
+   injected-energy mapping, momentum/deposition, PPISN/PISN 자료가 없는 node는
+   승인하지 않는다. Boccioli--Roberti failed-model Wind anomaly는 저자 확인
+   또는 수정 release 전까지 차단한다; Sukhbold W18/N20은 validation branch다.
+   **상태: 9개 필수 gate와 4개 후보 qualification matrix를 가진 기계식
+   admission contract를 구현하고 최상위 sidecar에 checksum-bound artifact로
+   연결했다. 현재 후보 4개 모두 미승인, physical node 0개, production/
+   publication/runtime deposition은 차단 상태다. 해시된 임의 validator 파일의
+   자기승인을 막기 위해 gate 통과 기능도 gate별 executable validator가 코드로
+   등록될 때까지 닫혀 있다. 실제 교정 자료와 validator 구현이 남았다.**
+6. **F-P1H-F — promotion and bundled audit:** 물리 node를 채운 뒤에만
+   converter, map, source package, sidecar, compiled identity를 다시 hash하고
+   unresolved bucket이 정확히 0인지 검증한다. 전체 F-P1/F-P3 묶음 테스트와
+   독립 감사를 통과하기 전에는 canonical conversion과 runtime deposition을
+   열지 않는다.
+
+상세 공통 요구와 모델별 추가사항은
+`fp1_high_mass_required_data_comparison_2026-09-03.md`를 기준으로 한다.
+
 ## Gate F-P2: SNIa DTD and binary event model
 
 Implementation status (2026-09-03): the interval-integrated mathematical
@@ -138,9 +200,11 @@ non-thermal receiver exists.  The adapter is native/production hash-matched
 and unit-tested.  The production `stellar_ramses_bridge` now wraps it with
 explicit RAMSES code-unit conversion and normalized multi-cell weighting;
 pre-write validation keeps failed SNIa policies transactional.  The bridge
-does not select AMR neighbours or perform MPI exchange, and it is not called
-by the runtime.  No SNIa event is sent to AMR cells and no SNIa thermal
-coupling is active at runtime.
+is now callable from the runtime-facing AMR leaf-cell path.  The runtime uses
+the particle's located AMR leaf cell as a one-cell NGP target and passes the
+local RAMSES owner rank to the row-major `unew` bridge.  SNIa activation is
+still disabled by the independent production gate, so no SNIa event is sent
+to AMR cells in a production run yet.
 
 The follow-up implementation bundle (2026-09-03) adds the actual
 RAMSES-facing `unew(local_cell,variable)` adapter: it validates local target
@@ -148,18 +212,33 @@ indices, MPI owner rank, target uniqueness, and weighted multi-cell geometry,
 deposits through variable-major scratch storage, and scatters only after the
 scratch transaction succeeds.  The production bridge and the actual
 `stellar_ramses_runtime`/`feedback.kjhan3` objects now compile together under
-the `/gpfs` Makefile; the adapter remains an explicit seam because the
-runtime does not yet select AMR neighbours or activate SNIa.  The
+the `/gpfs` Makefile; the runtime now selects the particle's AMR leaf cell
+and calls the adapter behind the still-closed production gate.  The
 source-identity manifest now includes all SNIa objects actually linked into
 the production binary, and the historical Fable reproduction test records
 F3/F4/F7/F8 as resolved in the current tree rather than replaying them as
 active defects.
 
-The next implementation bundle is therefore the runtime-facing physical SNIa
-caller: connect the approved source/population realization to the actual
-AMR/MPI target list, then add restart/idempotence and multi-cell conservation
-evidence.  Full net-yield and metallicity sensitivity remain separate
-publication extensions.
+The runtime-caller bundle is now implemented and source/build-linked.  Its
+normal retry/restart invariant, weighted multi-cell bridge conservation, and
+runtime-disabled negative path are now explicit in automated evidence and pass
+against the linked `/gpfs` binary.  The production audit distinguishes
+`physical_baseline_ready` from actual `production_ready`; the latter remains
+false while activation is disabled.  The declared staging commit is an
+ancestor of the current HEAD, but the current dirty worktree is explicitly
+reported as not source-bound until committed.  A hard crash exactly-once
+guarantee is not claimed because RAMSES `unew` writes and the existing
+`indtab` checkpoint commit are not one atomic transaction; a persistent
+pending-event journal is a separate production-hardening item.  Full
+net-yield and metallicity sensitivity remain separate publication extensions.
+
+The next F-P1 staging bundle records the Huscher et al. 2025 AGB release as a
+review-only candidate for the `[0.8, 1.0)` M☉ lifetime seam.  The endpoint
+models and source fingerprints are present, but the release is
+lifetime-integrated rather than an age-resolved per-star history.  The new
+`fp1_low_mass_seam_review.json` therefore keeps the seam unresolved and emits
+no canonical source row.  This is evidence hardening, not a physical source
+selection or a runtime activation.
 
 - Select and cite the DTD family, minimum/maximum delay, normalization per unit
   initial SSP mass, progenitor/binary assumptions, metallicity dependence,
@@ -169,7 +248,8 @@ publication extensions.
   timestep subdivision and across restart.
 - Test the analytic DTD integral, a single event, variable timesteps, zero-event
   intervals, restart/retry idempotence, and mass/species/energy closure.
-- Keep SNIa disabled until the implementation and Claude Opus 5 audit pass.
+- Keep SNIa disabled until the caller qualification evidence and Claude Opus 5
+  audit pass.
 
 ## Gate F-P3: PISN/PPISN population eligibility
 

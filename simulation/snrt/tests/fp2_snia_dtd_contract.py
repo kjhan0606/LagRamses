@@ -72,6 +72,42 @@ def main() -> int:
     audit_report = audit_contract()
     assert audit_report["status"] == "approved_physical_baseline_runtime_gated", audit_report
     assert audit_report["failures"] == [], audit_report
+    assert audit_report["physical_baseline_ready"] is True
+    assert audit_report["production_ready"] is False
+    assert audit_report["runtime_activation_allowed"] is False
+    assert audit_report["production_blockers"] == [
+        "runtime_activation_disabled",
+        "independent_f_p1_terminal_fate_gate_closed",
+    ]
+    source_binding = audit_report["source_binding"]
+    assert source_binding["declared_commit"] == "c6c8042b03406b9d69bc50434fe5d6af7f542be6"
+    assert source_binding["runtime_contract_matches"] is True
+    assert source_binding["revision_exists"] is True
+    assert source_binding["declared_commit_is_ancestor"] is True
+    assert source_binding["production_code_bound"] is False
+    assert source_binding["status"] == "historical_commit_ancestor_but_current_worktree_unbound"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    with tempfile.TemporaryDirectory(prefix="snrt-fp2-binding-") as directory:
+        temporary_contract = Path(directory) / "runtime.nml"
+        runtime_text = (ROOT / "config" / "fp2_snia_runtime_contract_v1.nml").read_text(
+            encoding="utf-8"
+        )
+        temporary_contract.write_text(
+            runtime_text.replace(
+                'source_commit_binding="c6c8042b03406b9d69bc50434fe5d6af7f542be6"\n',
+                "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        from audit_fp2_snia_dtd_contract import _audit_source_binding
+
+        binding_failures, binding_report = _audit_source_binding(
+            payload["event_source"], temporary_contract
+        )
+        assert "runtime_source_commit_binding_count_invalid" in binding_failures
+        assert binding_report["runtime_contract_matches"] is False
     assert audit_report["candidate_matrix"]["candidate_count"] == 4
     assert audit_report["candidate_matrix"]["selected_candidate_id"] == "field_observed_powerlaw_maoz2012"
     assert audit_report["candidate_matrix"]["selected_approval_id"] == "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
@@ -126,6 +162,27 @@ def main() -> int:
     assert audit_report["production_snia_cell_deposition"]["sha256"] == audit_report["native_snia_cell_deposition"]["sha256"]
     assert audit_report["native_snia_population_contract"]["sha256"]
     assert audit_report["production_snia_population_contract"]["sha256"] == audit_report["native_snia_population_contract"]["sha256"]
+    runtime_handoff = audit_report["runtime_handoff"]
+    assert runtime_handoff["status"] == "connected_runtime_gated"
+    assert runtime_handoff["activation_allowed"] is False
+    assert runtime_handoff["contract"]["sha256"]
+    assert runtime_handoff["caller"]["sha256"]
+    assert runtime_handoff["bridge"]["sha256"]
+    assert runtime_handoff["bridge"]["layout"] == "unew(local_cell,variable)"
+    production_negative = audit_report["production_runtime_negative"]
+    assert production_negative["status"] == "pass"
+    assert set(production_negative["result_statuses"]) == {
+        "missing_contract",
+        "mismatched_commit",
+        "mismatched_approval",
+        "missing_thermal_group",
+        "valid_contract_activation",
+    }
+    assert all(status == "pass" for status in production_negative["result_statuses"].values())
+    runtime_caller = (ROOT.parents[1] / "patch" / "lagRamses" / "stellar_ramses_runtime.f90").read_text(encoding="utf-8")
+    assert "if (.not. production_source_model_supported()) then" in runtime_caller
+    assert "if (enable_snia) then" in runtime_caller
+    assert "ierr = 3" in runtime_caller
     asset_report = audit_asset()
     assert asset_report["status"] == "review_only_asset_integrity_passed", asset_report
     assert asset_report["file_count"] == 3
