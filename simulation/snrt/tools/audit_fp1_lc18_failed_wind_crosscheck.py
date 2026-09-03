@@ -51,6 +51,10 @@ EXPECTED_ADMISSION_BLOCKERS = [
 class Lc18FailedWindCrosscheckError(ValueError):
     """The staged LC18/BR26 cross-check evidence is inconsistent."""
 
+    def __init__(self, message: str, *, diagnostics: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
+
 
 def _read_json(path: Path, label: str) -> dict[str, Any]:
     try:
@@ -213,6 +217,11 @@ def _build_phase_histories(
         "missing_psn_terminal_phase_count": len(missing_terminal_phase),
         "missing_psn_terminal_phase": missing_terminal_phase,
     }
+    if age_violations or mass_violations or missing_terminal_phase:
+        raise Lc18FailedWindCrosscheckError(
+            "phase-history invariants violated",
+            diagnostics=diagnostics,
+        )
     return histories, diagnostics
 
 
@@ -237,6 +246,42 @@ def _structure_map(
         }
     missing = sorted(expected_coordinates - set(structures))
     return structures, [list(coordinate) for coordinate in missing]
+
+
+def _residual_statistics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    signed = [
+        float(row["differences_msun"]["summary_minus_cds_terminal_wind"])
+        for row in rows
+    ]
+    relative: list[float] = []
+    relative_null_count = 0
+    for row, difference in zip(rows, signed):
+        denominator = float(row["summary_wind_mass_msun"])
+        if denominator == 0.0:
+            relative_null_count += 1
+        else:
+            relative.append(difference / denominator)
+    return {
+        "model_count": len(rows),
+        "comparison": "summary_wind_mass_msun minus cds_terminal_cumulative_wind_msun",
+        "signed_difference_unit": "Msun",
+        "positive_signed_difference_count": sum(value > 0.0 for value in signed),
+        "negative_signed_difference_count": sum(value < 0.0 for value in signed),
+        "zero_signed_difference_count": sum(value == 0.0 for value in signed),
+        "minimum_signed_difference_msun": min(signed) if signed else None,
+        "maximum_signed_difference_msun": max(signed) if signed else None,
+        "maximum_absolute_difference_msun": max(
+            (abs(value) for value in signed), default=None
+        ),
+        "relative_difference_definition": (
+            "(summary_wind_mass_msun - cds_terminal_cumulative_wind_msun) / "
+            "summary_wind_mass_msun"
+        ),
+        "relative_difference_denominator": "summary_wind_mass_msun",
+        "relative_null_count_zero_denominator": relative_null_count,
+        "minimum_relative_difference": min(relative) if relative else None,
+        "maximum_relative_difference": max(relative) if relative else None,
+    }
 
 
 def _release_rows(
@@ -353,9 +398,12 @@ def audit_lc18_failed_wind_crosscheck(
         BOCCIOLI_ADMISSION_ID
     )
     approval = physical_contract.get("approval")
+    hard_blockers_unchanged = isinstance(admission, dict) and admission.get(
+        "hard_blockers"
+    ) == EXPECTED_ADMISSION_BLOCKERS
     if (
         not isinstance(admission, dict)
-        or admission.get("hard_blockers") != EXPECTED_ADMISSION_BLOCKERS
+        or not hard_blockers_unchanged
         or admission.get("production_qualified") is not False
         or physical_contract.get("physical_node_inventory") != []
         or not isinstance(approval, dict)
@@ -392,7 +440,13 @@ def audit_lc18_failed_wind_crosscheck(
     history_coordinates = set(histories)
     unmatched_release = sorted(release_coordinates - history_coordinates)
     unmatched_cds = sorted(history_coordinates - release_coordinates)
-    if unmatched_release or unmatched_cds or len(release_coordinates) != 108:
+    one_to_one = (
+        not unmatched_release
+        and not unmatched_cds
+        and len(release_coordinates) == 108
+        and len(history_coordinates) == 108
+    )
+    if not one_to_one:
         raise Lc18FailedWindCrosscheckError(
             "LC18 release/CDS model-coordinate join is not one-to-one"
         )
@@ -509,6 +563,11 @@ def audit_lc18_failed_wind_crosscheck(
         ),
         "maximum_absolute_difference_msun": max(all_cds_residuals),
         "agreement_required_for_this_review": False,
+        "residual_statistics": {
+            "all_models": _residual_statistics(rows),
+            "successful_release_control": _residual_statistics(successful),
+            "failed_wind_anomaly": _residual_statistics(failed),
+        },
         "interpretation": (
             "The two staged sources do not agree at nominal table5 precision. "
             "The discrepancy is retained as an author/source question and is "
@@ -557,6 +616,11 @@ def audit_lc18_failed_wind_crosscheck(
             "limongi_chieffi_cds_production_license_status": source_terms[
                 "production_license_status"
             ],
+            "limongi_chieffi_cds_rights": {
+                "redistribution_status": source_terms["redistribution_status"],
+                "production_license_status": source_terms["production_license_status"],
+                "authoritative_for_verdict": False,
+            },
             "review_use_only": True,
         },
         "join": {
@@ -565,7 +629,7 @@ def audit_lc18_failed_wind_crosscheck(
             "joined_model_count": len(rows),
             "unmatched_release_coordinates": [list(value) for value in unmatched_release],
             "unmatched_cds_coordinates": [list(value) for value in unmatched_cds],
-            "one_to_one": True,
+            "one_to_one": one_to_one,
         },
         "successful_release_control": successful_control,
         "failed_wind_anomaly": failed_anomaly,
@@ -577,7 +641,18 @@ def audit_lc18_failed_wind_crosscheck(
             "cross_source_difference_silently_reconciled": False,
         },
         "cross_source_wind_comparison": cross_source,
-        "phase_history": phase_diagnostics,
+        "phase_history": {
+            **phase_diagnostics,
+            "phase_order": list(phase_contract["phase_order"]),
+            "phase_order_provenance": {
+                "source": "g2_limongi_phase_mass_history_contract_v1",
+                "source_attested_for_intermediate_burning_order": False,
+                "interpretation": (
+                    "MS/H/He/PSN labels are source-attested; the C/Ne/O/Si "
+                    "ordering is a project contract assumption."
+                ),
+            },
+        },
         "presupernova_structure": {
             "available_model_count": len(structures),
             "explicit_null_model_count": len(missing_structures),
@@ -587,7 +662,7 @@ def audit_lc18_failed_wind_crosscheck(
         "rows": rows,
         "admission": {
             "candidate_id": BOCCIOLI_ADMISSION_ID,
-            "hard_blockers_unchanged": True,
+            "hard_blockers_unchanged": hard_blockers_unchanged,
             "hard_blockers": list(admission["hard_blockers"]),
             "production_qualified": False,
             "physical_package_contract_path": str(physical_package_contract_path),
@@ -639,10 +714,10 @@ def main(argv: Iterable[str] | None = None) -> int:
         BoccioliRobertiAuditError,
         SourceAdapterError,
     ) as exc:
-        print(
-            json.dumps({"status": "error", "error": str(exc)}, indent=2),
-            file=sys.stderr,
-        )
+        error_payload: dict[str, Any] = {"status": "error", "error": str(exc)}
+        if isinstance(exc, Lc18FailedWindCrosscheckError) and exc.diagnostics:
+            error_payload["diagnostics"] = exc.diagnostics
+        print(json.dumps(error_payload, indent=2), file=sys.stderr)
         return 2
     payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.json_out is not None:

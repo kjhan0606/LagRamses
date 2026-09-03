@@ -203,6 +203,7 @@ def audit_terminal_deposition_contract(
         "scalar_radial_momentum": None,
         "selected_deposition_mode": None,
         "ownership_closed": True,
+        "approval_id": approval.get("approval_id"),
     }
 
 

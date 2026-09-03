@@ -785,6 +785,7 @@ def audit_source_node_contract(
         "explicit_null_zero_semantics": True,
         "silent_axis_drop_allowed": False,
         "physical_node_count": len(nodes),
+        "approval_id": approval.get("approval_id"),
         "validated_nodes": node_reports,
     }
 

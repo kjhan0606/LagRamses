@@ -22,7 +22,57 @@
     "interpretation": "The two staged sources do not agree at nominal table5 precision. The discrepancy is retained as an author/source question and is not silently reconciled.",
     "maximum_absolute_difference_msun": 1.5476,
     "model_count": 108,
-    "nominal_cds_total_mass_half_bin_msun": 0.005
+    "nominal_cds_total_mass_half_bin_msun": 0.005,
+    "residual_statistics": {
+      "all_models": {
+        "comparison": "summary_wind_mass_msun minus cds_terminal_cumulative_wind_msun",
+        "maximum_absolute_difference_msun": 1.5476,
+        "maximum_relative_difference": 1.0,
+        "maximum_signed_difference_msun": 1.5476,
+        "minimum_relative_difference": 0.0009655362667244573,
+        "minimum_signed_difference_msun": 0.05069999999999997,
+        "model_count": 108,
+        "negative_signed_difference_count": 0,
+        "positive_signed_difference_count": 108,
+        "relative_difference_definition": "(summary_wind_mass_msun - cds_terminal_cumulative_wind_msun) / summary_wind_mass_msun",
+        "relative_difference_denominator": "summary_wind_mass_msun",
+        "relative_null_count_zero_denominator": 0,
+        "signed_difference_unit": "Msun",
+        "zero_signed_difference_count": 0
+      },
+      "failed_wind_anomaly": {
+        "comparison": "summary_wind_mass_msun minus cds_terminal_cumulative_wind_msun",
+        "maximum_absolute_difference_msun": 1.5476,
+        "maximum_relative_difference": 1.0,
+        "maximum_signed_difference_msun": 1.5476,
+        "minimum_relative_difference": 0.003829385896799711,
+        "minimum_signed_difference_msun": 0.06450000000000067,
+        "model_count": 56,
+        "negative_signed_difference_count": 0,
+        "positive_signed_difference_count": 56,
+        "relative_difference_definition": "(summary_wind_mass_msun - cds_terminal_cumulative_wind_msun) / summary_wind_mass_msun",
+        "relative_difference_denominator": "summary_wind_mass_msun",
+        "relative_null_count_zero_denominator": 0,
+        "signed_difference_unit": "Msun",
+        "zero_signed_difference_count": 0
+      },
+      "successful_release_control": {
+        "comparison": "summary_wind_mass_msun minus cds_terminal_cumulative_wind_msun",
+        "maximum_absolute_difference_msun": 0.5842000000000014,
+        "maximum_relative_difference": 1.0,
+        "maximum_signed_difference_msun": 0.5842000000000014,
+        "minimum_relative_difference": 0.0009655362667244573,
+        "minimum_signed_difference_msun": 0.05069999999999997,
+        "model_count": 52,
+        "negative_signed_difference_count": 0,
+        "positive_signed_difference_count": 52,
+        "relative_difference_definition": "(summary_wind_mass_msun - cds_terminal_cumulative_wind_msun) / summary_wind_mass_msun",
+        "relative_difference_denominator": "summary_wind_mass_msun",
+        "relative_null_count_zero_denominator": 0,
+        "signed_difference_unit": "Msun",
+        "zero_signed_difference_count": 0
+      }
+    }
   },
   "failed_wind_anomaly": {
     "cds_terminal_wind_positive_count": 53,
@@ -245,6 +295,21 @@
     "model_count": 108,
     "nonincreasing_total_mass_violation_count": 0,
     "nonincreasing_total_mass_violations": [],
+    "phase_order": [
+      "MS",
+      "H",
+      "He",
+      "C",
+      "Ne",
+      "O",
+      "Si",
+      "PSN"
+    ],
+    "phase_order_provenance": {
+      "interpretation": "MS/H/He/PSN labels are source-attested; the C/Ne/O/Si ordering is a project contract assumption.",
+      "source": "g2_limongi_phase_mass_history_contract_v1",
+      "source_attested_for_intermediate_burning_order": false
+    },
     "strictly_increasing_cumulative_age_violation_count": 0,
     "strictly_increasing_cumulative_age_violations": [],
     "unique_phase_row_count": 845
@@ -11684,6 +11749,11 @@
     },
     "limongi_chieffi_cds_production_license_status": "not_approved",
     "limongi_chieffi_cds_redistribution_status": "no_explicit_catalogue_license_identified",
+    "limongi_chieffi_cds_rights": {
+      "authoritative_for_verdict": false,
+      "production_license_status": "not_approved",
+      "redistribution_status": "no_explicit_catalogue_license_identified"
+    },
     "review_use_only": true
   },
   "status": "failed_wind_anomaly_independently_crosschecked_unresolved",
@@ -11696,5 +11766,5 @@
     "summary_minus_cds_above_nominal_half_bin_count": 52,
     "summary_wind_positive_count": 52
   },
-  "tool_sha256": "cbeaf63314bcf65369e0b5e3137df6af8337e32ad10ae6133595497d340bdd74"
+  "tool_sha256": "0eaedc19a695f9e09a9cccd5646c782c07e5e823a602be9e9800c056857081eb"
 }

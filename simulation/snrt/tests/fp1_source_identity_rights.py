@@ -22,6 +22,7 @@ if str(TOOLS) not in sys.path:
 from fp1_gate_validator_registry import (  # noqa: E402
     GateValidatorRegistryError,
     REGISTERED_VALIDATORS,
+    registry_report,
     run_registered_validator,
 )
 from validate_fp1_source_identity_rights import (  # noqa: E402
@@ -151,6 +152,12 @@ def _duplicate_inventory(paths: dict[str, Path]) -> None:
     _write(paths["manifest_path"], manifest)
 
 
+def _duplicate_candidate_records(paths: dict[str, Path]) -> None:
+    manifest, candidate = _manifest_candidate(paths)
+    manifest["candidates"].append(copy.deepcopy(candidate))
+    _write(paths["manifest_path"], manifest)
+
+
 def _coherent_rewrite(paths: dict[str, Path]) -> None:
     target = paths["candidate_root"] / RELEASE / "README"
     target.write_bytes(target.read_bytes() + b"\ncoherent rewrite\n")
@@ -239,10 +246,35 @@ def _substitute_record_and_license(paths: dict[str, Path]) -> None:
     _write(record_path, record)
 
 
+def _license_status(paths: dict[str, Path]) -> None:
+    manifest, candidate = _manifest_candidate(paths)
+    candidate["license_status"] = "not_verified"
+    _write(paths["manifest_path"], manifest)
+
+
+def _published_file_checksum(paths: dict[str, Path]) -> None:
+    record_path = paths["candidate_root"] / RELEASE / "zenodo_record_19503168.json"
+    record = _load(record_path)
+    record["files"][0]["checksum"] = "md5:" + "0" * 32
+    _write(record_path, record)
+
+
 def _manifest_symlink(paths: dict[str, Path]) -> None:
     target = paths["manifest_path"].with_suffix(".real.json")
     paths["manifest_path"].rename(target)
     paths["manifest_path"].symlink_to(target.name)
+
+
+def _candidate_root_symlink(paths: dict[str, Path]) -> None:
+    target = paths["candidate_root"].with_name("g2_candidates.real")
+    paths["candidate_root"].rename(target)
+    paths["candidate_root"].symlink_to(target, target_is_directory=True)
+
+
+def _source_contract_symlink(paths: dict[str, Path]) -> None:
+    target = paths["source_contract_path"].with_suffix(".real.json")
+    paths["source_contract_path"].rename(target)
+    paths["source_contract_path"].symlink_to(target.name)
 
 
 def _registry_exception_tests(baseline: dict[str, Any]) -> None:
@@ -294,6 +326,20 @@ def _registry_exception_tests(baseline: dict[str, Any]) -> None:
     else:
         raise AssertionError("unhashable validator id was not controlled")
 
+    with tempfile.TemporaryDirectory(prefix="snrt-fp1-registry-hash-") as directory:
+        missing_tool = Path(directory) / "missing-validator.py"
+        original_tool_path = record["tool_path"]
+        try:
+            record["tool_path"] = missing_tool
+            try:
+                registry_report()
+            except GateValidatorRegistryError as exc:
+                assert "cannot hash validator artifact" in str(exc), str(exc)
+            else:
+                raise AssertionError("registry hash failure was not controlled")
+        finally:
+            record["tool_path"] = original_tool_path
+
 
 def _terms_are_non_authoritative() -> None:
     with tempfile.TemporaryDirectory(prefix="snrt-fp1-terms-") as directory:
@@ -333,6 +379,7 @@ def main() -> int:
         (_empty_inventory, "manifest_file_inventory_empty_or_malformed"),
         (_extra_inventory, "manifest_file_inventory_not_lock_pinned"),
         (_duplicate_inventory, "manifest_file_path_duplicate"),
+        (_duplicate_candidate_records, "acquisition_manifest_candidate_identity_not_unique"),
         (_coherent_rewrite, "source_file_not_lock_pinned:README"),
         (_internal_symlink, "source_file:README_symlink_forbidden"),
         (_external_symlink, "source_file:README_symlink_forbidden"),
@@ -345,7 +392,11 @@ def main() -> int:
         (_invalid_date, "manifest_retrieval_date_invalid_or_unpinned"),
         (_null_doi, "article_doi_identity_mismatch"),
         (_substitute_record_and_license, "source_file_not_lock_pinned"),
+        (_license_status, "machine_readable_license_not_verified"),
+        (_published_file_checksum, "source_file_not_lock_pinned:zenodo_record_19503168.json"),
         (_manifest_symlink, "acquisition_manifest_symlink_forbidden"),
+        (_candidate_root_symlink, "candidate_root_symlink_forbidden"),
+        (_source_contract_symlink, "candidate_source_contract_symlink_forbidden"),
     )
     for mutate, fragment in cases:
         _expect_blocked(mutate, fragment)

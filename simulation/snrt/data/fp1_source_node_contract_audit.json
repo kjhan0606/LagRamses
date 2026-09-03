@@ -1,4 +1,5 @@
 {
+  "approval_id": null,
   "canonical_conversion_allowed": false,
   "canonical_row_field_count": 32,
   "explicit_null_zero_semantics": true,

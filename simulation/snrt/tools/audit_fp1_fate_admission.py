@@ -202,6 +202,147 @@ def _check_fortran_admission_identities(
     return result
 
 
+def _report_bool(report: dict[str, Any], field: str, label: str) -> bool:
+    value = report.get(field)
+    if type(value) is not bool:
+        raise FateMapError(f"{label}.{field} must be boolean")
+    return value
+
+
+def evaluate_admission_coupling(
+    *,
+    fate_report: dict[str, Any],
+    sidecar_approval: dict[str, Any],
+    physical_package_report: dict[str, Any],
+    source_node_report: dict[str, Any],
+    terminal_deposition_report: dict[str, Any],
+) -> dict[str, Any]:
+    """Evaluate the single production/publication admission predicate.
+
+    All reports have already been independently audited by the caller.  This
+    pure predicate prevents a ready-looking fate sidecar from outvoting a
+    blocked physical package (or the reverse) and makes the coupling testable
+    without changing project artifacts.
+    """
+
+    if not isinstance(sidecar_approval, dict):
+        raise FateMapError("F-P1 sidecar approval is malformed")
+    sidecar_flags = {
+        field: _report_bool(sidecar_approval, field, "sidecar approval")
+        for field in (
+            "canonical_conversion_allowed",
+            "production_ready",
+            "publication_ready",
+        )
+    }
+    physical_flags = {
+        field: _report_bool(physical_package_report, field, "physical-package report")
+        for field in (
+            "canonical_conversion_allowed",
+            "runtime_deposition_allowed",
+            "production_ready",
+            "publication_ready",
+        )
+    }
+    source_flags = {
+        field: _report_bool(source_node_report, field, "source-node report")
+        for field in ("canonical_conversion_allowed", "runtime_deposition_allowed", "production_ready")
+    }
+    deposition_flags = {
+        field: _report_bool(
+            terminal_deposition_report, field, "terminal-deposition report"
+        )
+        for field in ("runtime_deposition_allowed", "production_ready")
+    }
+    fate_ready = _report_bool(fate_report, "production_ready", "fate report")
+
+    node_count = physical_package_report.get("physical_node_count")
+    if type(node_count) is not int or node_count < 0:
+        raise FateMapError("physical-package report physical_node_count is malformed")
+    selected_id = physical_package_report.get("selected_package_id")
+    if selected_id is not None and (not isinstance(selected_id, str) or not selected_id):
+        raise FateMapError("physical-package report selected package id is malformed")
+    selected_blockers = physical_package_report.get("selected_candidate_hard_blockers")
+    if not isinstance(selected_blockers, list) or any(
+        not isinstance(value, str) or not value for value in selected_blockers
+    ):
+        raise FateMapError("physical-package report selected blockers are malformed")
+
+    physical_ready = (
+        physical_package_report.get("status") == "admitted_physical_package"
+        and physical_flags["production_ready"]
+        and physical_flags["publication_ready"]
+        and physical_flags["canonical_conversion_allowed"]
+        and physical_flags["runtime_deposition_allowed"]
+        and node_count > 0
+        and selected_id is not None
+        and not selected_blockers
+    )
+    source_ready = (
+        source_node_report.get("status") == "approved_physical_nodes"
+        and source_flags["production_ready"]
+        and source_flags["canonical_conversion_allowed"]
+        and source_flags["runtime_deposition_allowed"]
+        and source_node_report.get("physical_node_count") == node_count
+        and node_count > 0
+    )
+    deposition_ready = (
+        terminal_deposition_report.get("production_ready") is True
+        and deposition_flags["production_ready"]
+        and deposition_flags["runtime_deposition_allowed"]
+    )
+    sidecar_ready = all(sidecar_flags.values())
+    if any(sidecar_flags.values()) and not sidecar_ready:
+        raise FateMapError("sidecar approval flags are partially enabled")
+    if any(physical_flags.values()) and not all(physical_flags.values()):
+        raise FateMapError("physical-package approval flags are partially enabled")
+    readiness = {
+        "fate_map": fate_ready,
+        "sidecar": sidecar_ready,
+        "physical_package": physical_ready,
+        "source_nodes": source_ready,
+        "terminal_deposition": deposition_ready,
+    }
+    if any(readiness.values()) and not all(readiness.values()):
+        if sidecar_ready and not physical_ready:
+            raise FateMapError(
+                "fate sidecar overclaims physical-package admission"
+            )
+        if physical_ready and not sidecar_ready:
+            raise FateMapError(
+                "fate sidecar is stale relative to admitted physical package"
+            )
+        raise FateMapError("F-P1 admission readiness components disagree")
+
+    approval_ids = {
+        "sidecar": sidecar_approval.get("approval_id"),
+        "physical_package": physical_package_report.get("selected_package_approval_id"),
+        "source_nodes": source_node_report.get("approval_id"),
+        "terminal_deposition": terminal_deposition_report.get("approval_id"),
+    }
+    present_ids = [value for value in approval_ids.values() if value is not None]
+    if present_ids:
+        if any(not isinstance(value, str) or not value for value in approval_ids.values()):
+            raise FateMapError("F-P1 approval identities are incomplete")
+        if len(set(approval_ids.values())) != 1:
+            raise FateMapError("F-P1 approval identities disagree")
+    if all(readiness.values()) and not present_ids:
+        raise FateMapError("admitted F-P1 package lacks a shared approval identity")
+
+    production_ready = all(readiness.values())
+    return {
+        "production_ready": production_ready,
+        "publication_ready": production_ready,
+        "canonical_conversion_allowed": production_ready,
+        "runtime_deposition_allowed": production_ready,
+        "readiness_components": readiness,
+        "approval_ids": approval_ids,
+        "physical_node_count": node_count,
+        "selected_package_id": selected_id,
+        "selected_candidate_hard_blockers": list(selected_blockers),
+    }
+
+
 def audit_fate_admission(*, sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, Any]:
     sidecar_path = Path(sidecar_path).resolve()
     sidecar = _read_json(sidecar_path)
@@ -309,13 +450,19 @@ def audit_fate_admission(*, sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, A
     if not expected_unresolved and sidecar.get("status") == "blocked_review_only":
         raise FateMapError("complete fate map cannot retain blocked_review_only status")
 
+    admission_coupling = evaluate_admission_coupling(
+        fate_report=fate_report,
+        sidecar_approval=sidecar_approval,
+        physical_package_report=physical_package_report,
+        source_node_report=source_node_report,
+        terminal_deposition_report=terminal_deposition_report,
+    )
+    production_ready = admission_coupling["production_ready"]
     fortran_admission_identities = _check_fortran_admission_identities(
         fate_map_sha256=checked["fate_map"]["sha256"],
         approval_id=sidecar_approval.get("approval_id"),
-        production_ready=sidecar_ready,
+        production_ready=production_ready,
     )
-
-    production_ready = sidecar_ready and fate_report["production_ready"]
     status = "admitted" if production_ready else "blocked_review_only"
     if sidecar.get("status") != status:
         raise FateMapError(f"sidecar status must be {status}")
@@ -332,6 +479,7 @@ def audit_fate_admission(*, sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, A
         "source_node_contract": source_node_report,
         "terminal_deposition_contract": terminal_deposition_report,
         "physical_package_contract": physical_package_report,
+        "admission_coupling": admission_coupling,
         "runtime_unresolved_intervals": expected_unresolved,
         "runtime_unresolved_mass_bucket": bucket_contract,
         "unresolved_mass_bucket": fate_report["unresolved_mass_diagnostic"],

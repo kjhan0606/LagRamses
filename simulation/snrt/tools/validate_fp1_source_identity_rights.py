@@ -126,7 +126,10 @@ def _absolute(path: Path) -> Path:
 
 
 def _digest(path: Path, algorithm: str) -> tuple[int, str]:
-    digest = hashlib.new(algorithm)
+    if algorithm == "md5":
+        digest = hashlib.new(algorithm, usedforsecurity=False)
+    else:
+        digest = hashlib.new(algorithm)
     size = 0
     try:
         with path.open("rb") as stream:
@@ -152,14 +155,39 @@ def _valid_digest(value: Any, length: int) -> bool:
 
 def _regular_file_without_symlink(path: Path, label: str) -> Path:
     path = _absolute(path)
+    current = path
+    while True:
+        try:
+            mode = current.lstat().st_mode
+        except OSError as exc:
+            raise SourceIdentityRightsError(
+                f"{label}_missing_or_unreadable:{exc}"
+            ) from exc
+        if stat.S_ISLNK(mode):
+            raise SourceIdentityRightsError(f"{label}_symlink_forbidden")
+        if current == path:
+            if not stat.S_ISREG(mode):
+                raise SourceIdentityRightsError(f"{label}_not_regular_file")
+        elif not stat.S_ISDIR(mode):
+            raise SourceIdentityRightsError(f"{label}_parent_not_directory")
+        if current.parent == current:
+            break
+        current = current.parent
+    return path
+
+
+def _directory_without_symlink(path: Path, label: str) -> Path:
+    path = _absolute(path)
     try:
         mode = path.lstat().st_mode
     except OSError as exc:
-        raise SourceIdentityRightsError(f"{label}_missing_or_unreadable:{exc}") from exc
+        raise SourceIdentityRightsError(
+            f"{label}_missing_or_unreadable:{exc}"
+        ) from exc
     if stat.S_ISLNK(mode):
         raise SourceIdentityRightsError(f"{label}_symlink_forbidden")
-    if not stat.S_ISREG(mode):
-        raise SourceIdentityRightsError(f"{label}_not_regular_file")
+    if not stat.S_ISDIR(mode):
+        raise SourceIdentityRightsError(f"{label}_not_directory")
     return path
 
 
@@ -238,6 +266,10 @@ def _candidate_fingerprint(candidate_id: str, records: list[dict[str, Any]]) -> 
 
 def _blocked_report(candidate_id: Any, reason: str) -> dict[str, Any]:
     reported_id = candidate_id if isinstance(candidate_id, str) else repr(candidate_id)
+    try:
+        validator_code_sha256: str | None = _sha256(TOOL_PATH)[1]
+    except Exception:
+        validator_code_sha256 = None
     return {
         "schema": "snrt-fp1-executable-gate-validation",
         "schema_version": 1,
@@ -250,7 +282,7 @@ def _blocked_report(candidate_id: Any, reason: str) -> dict[str, Any]:
         "blockers": [reason],
         "package_fingerprint_sha256": None,
         "artifacts": {},
-        "validator_code_sha256": _sha256(TOOL_PATH)[1],
+        "validator_code_sha256": validator_code_sha256,
     }
 
 
@@ -337,7 +369,7 @@ def _validate_source_identity_and_rights(
             candidate_id, "candidate_has_no_code_registered_rights_profile"
         )
 
-    candidate_root = _absolute(candidate_root)
+    candidate_root = _directory_without_symlink(candidate_root, "candidate_root")
     manifest_path = _absolute(manifest_path)
     source_contract_path = _absolute(source_contract_path)
     manifest = _read_json(manifest_path, "acquisition_manifest")

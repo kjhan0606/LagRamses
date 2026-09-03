@@ -1,4 +1,26 @@
 {
+  "admission_coupling": {
+    "approval_ids": {
+      "physical_package": null,
+      "sidecar": null,
+      "source_nodes": null,
+      "terminal_deposition": null
+    },
+    "canonical_conversion_allowed": false,
+    "physical_node_count": 0,
+    "production_ready": false,
+    "publication_ready": false,
+    "readiness_components": {
+      "fate_map": false,
+      "physical_package": false,
+      "sidecar": false,
+      "source_nodes": false,
+      "terminal_deposition": false
+    },
+    "runtime_deposition_allowed": false,
+    "selected_candidate_hard_blockers": [],
+    "selected_package_id": null
+  },
   "artifacts": {
     "fate_map": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_population_fate_map_v1.json",
@@ -71,7 +93,23 @@
   "interpretation": "Checksum and wiring gates pass, but unresolved fate intervals keep canonical conversion and production deposition disabled.",
   "map_audit_status": "review_only_blocked",
   "physical_package_contract": {
-    "audit_code_sha256": "e73cef5a57184b8b7d6aeb6531e45a425f4f01c20fd01e92788b47fd02401beb",
+    "all_candidate_hard_blockers": [
+      "age_resolved_history_and_neutrino_wind_missing",
+      "age_resolved_wind_missing",
+      "canonical_momentum_and_deposition_missing",
+      "complete_runtime_domain_missing",
+      "explosion_piston_mixing_population_unselected",
+      "failed_model_wind_summary_table_anomaly_requires_author_or_corrected_release",
+      "failed_node_remnant_and_wind_records_incomplete",
+      "per_node_injected_energy_mapping_missing",
+      "positive_metallicity_axis_missing",
+      "production_population_marginalization_unselected",
+      "radioactive_epoch_and_k40_duplicate_unresolved",
+      "redistribution_permission_unverified",
+      "runtime_8_to_10_and_100_to_120_edges_missing",
+      "terminal_energy_momentum_deposition_missing"
+    ],
+    "audit_code_sha256": "85108cde647d06b57dd48bf6d0f275b472e70e29b2632a0bbeeff684b5a36af7",
     "candidate_qualification": {
       "boccioli_roberti2026_lc18": {
         "hard_blockers": [
@@ -174,7 +212,7 @@
             "schema": "snrt-fp1-executable-gate-validation",
             "schema_version": 1,
             "status": "pass",
-            "validator_code_sha256": "54edbe813f085a532c2749ca514e8fcba6e886a753681b1ae361621727036e53",
+            "validator_code_sha256": "9a3f2626a092bda908985b73271f4dab92df46ce8be9903e4dc080c6fb16b6fc",
             "validator_id": "fp1.source_identity_and_rights.v1"
           }
         }
@@ -255,22 +293,32 @@
     "contract_sha256": "3cdd8a1f64631b008e278206865003377ac908b229688462feb9ca88a0558e34",
     "evidence_artifacts": {
       "candidate_grid_audit": {
+        "code_locked_sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578",
+        "contract_declared_sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578",
         "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_candidate_grid_coverage_audit.json",
         "sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578"
       },
       "candidate_grid_contract": {
+        "code_locked_sha256": "73845b9c18a5a2763d93fd627c2b1b7be4cf64f6acbff5c1f5282188fad5b81e",
+        "contract_declared_sha256": "73845b9c18a5a2763d93fd627c2b1b7be4cf64f6acbff5c1f5282188fad5b81e",
         "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_candidate_grid_coverage_contract_v1.json",
         "sha256": "73845b9c18a5a2763d93fd627c2b1b7be4cf64f6acbff5c1f5282188fad5b81e"
       },
       "high_mass_review": {
+        "code_locked_sha256": "1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775",
+        "contract_declared_sha256": "1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775",
         "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/fp1_high_mass_seam_review.json",
         "sha256": "1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775"
       },
       "source_node_contract": {
+        "code_locked_sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c",
+        "contract_declared_sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c",
         "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_source_node_contract_v1.json",
         "sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c"
       },
       "terminal_deposition_contract": {
+        "code_locked_sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47",
+        "contract_declared_sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47",
         "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_terminal_deposition_contract_v1.json",
         "sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47"
       }
@@ -284,7 +332,7 @@
       "mode": "registered_executable_validators_fail_closed",
       "registry": {
         "registry_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_registry.py",
-        "registry_sha256": "3adc764b551dcaf5cdb9374f9dbd4fccb098c7898a1ee8e34bd2ecdbe1b6aa77",
+        "registry_sha256": "bc881c61eddf50790653e2d53d68776e8c270b7cedd3ba0d9da45d0ed618c204",
         "validators": {
           "fp1.source_identity_and_rights.v1": {
             "gate_id": "source_identity_and_rights",
@@ -296,7 +344,7 @@
               "redistribution_permission"
             ],
             "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/validate_fp1_source_identity_rights.py",
-            "tool_sha256": "54edbe813f085a532c2749ca514e8fcba6e886a753681b1ae361621727036e53"
+            "tool_sha256": "9a3f2626a092bda908985b73271f4dab92df46ce8be9903e4dc080c6fb16b6fc"
           }
         }
       }
@@ -326,23 +374,27 @@
     "runtime_deposition_allowed": false,
     "schema": "snrt-fp1-physical-package-admission-audit",
     "schema_version": 1,
-    "status": "blocked_no_qualified_physical_package",
-    "unique_hard_blockers": [
-      "age_resolved_history_and_neutrino_wind_missing",
-      "age_resolved_wind_missing",
-      "canonical_momentum_and_deposition_missing",
-      "complete_runtime_domain_missing",
-      "explosion_piston_mixing_population_unselected",
-      "failed_model_wind_summary_table_anomaly_requires_author_or_corrected_release",
-      "failed_node_remnant_and_wind_records_incomplete",
-      "per_node_injected_energy_mapping_missing",
-      "positive_metallicity_axis_missing",
-      "production_population_marginalization_unselected",
-      "radioactive_epoch_and_k40_duplicate_unresolved",
-      "redistribution_permission_unverified",
-      "runtime_8_to_10_and_100_to_120_edges_missing",
-      "terminal_energy_momentum_deposition_missing"
-    ]
+    "selected_candidate_hard_blockers": [],
+    "selected_package_approval_id": null,
+    "selected_package_id": null,
+    "selection_evaluation": {
+      "canonical_conversion_allowed": false,
+      "code_owned_birth_metallicity_domain_selected": false,
+      "contract_birth_metallicity_domain_selected": false,
+      "production_ready": false,
+      "publication_ready": false,
+      "runtime_deposition_allowed": false,
+      "selected_candidate_hard_blockers": [],
+      "selected_package_id": null,
+      "status": "blocked_no_qualified_physical_package",
+      "upstream_gates": {
+        "candidate_grid_ready": false,
+        "deposition_ready": false,
+        "high_mass_ready": false,
+        "source_node_ready": false
+      }
+    },
+    "status": "blocked_no_qualified_physical_package"
   },
   "production_ready": false,
   "runtime_unresolved_intervals": [
@@ -378,6 +430,7 @@
     "publication_ready": false
   },
   "source_node_contract": {
+    "approval_id": null,
     "canonical_conversion_allowed": false,
     "canonical_row_field_count": 32,
     "explicit_null_zero_semantics": true,
@@ -397,6 +450,7 @@
   },
   "status": "blocked_review_only",
   "terminal_deposition_contract": {
+    "approval_id": null,
     "candidate_mass_range_msun": [
       8.0,
       120.0

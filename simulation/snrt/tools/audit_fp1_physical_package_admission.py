@@ -26,6 +26,10 @@ TOOL_PATH = Path(__file__).resolve()
 SNRT_ROOT = TOOL_PATH.parents[1]
 DEFAULT_CONTRACT = SNRT_ROOT / "config" / "fp1_physical_package_admission_contract_v1.json"
 DEFAULT_JSON_OUT = SNRT_ROOT / "data" / "fp1_physical_package_admission_audit.json"
+# This is a code-owned admission state, not an editable contract switch.  The
+# real review remains unselected until a reviewed code change changes this
+# constant and supplies a matching, approved domain in the contract.
+CODE_OWNED_BIRTH_METALLICITY_DOMAIN_SELECTED = False
 REQUIRED_EVIDENCE = {
     "source_node_contract",
     "terminal_deposition_contract",
@@ -39,6 +43,31 @@ EXPECTED_EVIDENCE_PATHS = {
     "candidate_grid_contract": "config/g2_candidate_grid_coverage_contract_v1.json",
     "candidate_grid_audit": "data/g2_candidate_grid_coverage_audit.json",
     "high_mass_review": "data/fp1_high_mass_seam_review.json",
+}
+# The contract may describe these values, but it is not their trust root.  A
+# production selection can only use the exact bytes below plus the descriptive
+# contract values checked by _audit_evidence.
+LOCKED_EVIDENCE_ARTIFACTS = {
+    "source_node_contract": {
+        "path": "config/fp1_source_node_contract_v1.json",
+        "sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c",
+    },
+    "terminal_deposition_contract": {
+        "path": "config/fp1_terminal_deposition_contract_v1.json",
+        "sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47",
+    },
+    "candidate_grid_contract": {
+        "path": "config/g2_candidate_grid_coverage_contract_v1.json",
+        "sha256": "73845b9c18a5a2763d93fd627c2b1b7be4cf64f6acbff5c1f5282188fad5b81e",
+    },
+    "candidate_grid_audit": {
+        "path": "data/g2_candidate_grid_coverage_audit.json",
+        "sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578",
+    },
+    "high_mass_review": {
+        "path": "data/fp1_high_mass_seam_review.json",
+        "sha256": "1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775",
+    },
 }
 REQUIRED_GATES = {
     "source_identity_and_rights",
@@ -129,21 +158,53 @@ def _audit_evidence(artifacts: Any) -> tuple[dict[str, dict[str, str]], dict[str
             raise PhysicalPackageAdmissionError(f"evidence artifact is malformed: {name}")
         relative = record.get("path")
         declared = record.get("sha256")
-        if relative != EXPECTED_EVIDENCE_PATHS[name]:
+        locked = LOCKED_EVIDENCE_ARTIFACTS[name]
+        if relative != EXPECTED_EVIDENCE_PATHS[name] or relative != locked["path"]:
             raise PhysicalPackageAdmissionError(
                 f"physical-package evidence path is not pinned: {name}"
             )
-        if not isinstance(declared, str) or len(declared) != 64:
+        if not _valid_sha256(declared):
             raise PhysicalPackageAdmissionError(f"evidence SHA256 is malformed: {name}")
+        if declared.lower() != locked["sha256"]:
+            raise PhysicalPackageAdmissionError(
+                f"evidence SHA256 mismatch with code-owned lock: {name}"
+            )
         path = _repository_evidence_path(relative, name)
         actual = _sha256(path)
-        if actual != declared.lower():
+        if actual != locked["sha256"] or actual != declared.lower():
             raise PhysicalPackageAdmissionError(
                 f"evidence SHA256 mismatch for {name}: declared {declared}, actual {actual}"
             )
-        checked[name] = {"path": str(path), "sha256": actual}
+        checked[name] = {
+            "path": str(path),
+            "sha256": actual,
+            "code_locked_sha256": locked["sha256"],
+            "contract_declared_sha256": declared.lower(),
+        }
         loaded[name] = _read_json(path, name)
     return checked, loaded
+
+
+def _validate_code_owned_selection_state(runtime: dict[str, Any]) -> bool:
+    declared = runtime.get("required_birth_metallicity_domain_selected")
+    if type(declared) is not bool:
+        raise PhysicalPackageAdmissionError(
+            "birth-metallicity selection state must be a boolean"
+        )
+    if declared is not CODE_OWNED_BIRTH_METALLICITY_DOMAIN_SELECTED:
+        raise PhysicalPackageAdmissionError(
+            "birth-metallicity selection state disagrees with code-owned admission state"
+        )
+    domain = runtime.get("required_birth_metallicity_domain")
+    if CODE_OWNED_BIRTH_METALLICITY_DOMAIN_SELECTED and domain is None:
+        raise PhysicalPackageAdmissionError(
+            "code-owned selected state requires an explicit birth-metallicity domain"
+        )
+    if not CODE_OWNED_BIRTH_METALLICITY_DOMAIN_SELECTED and domain is not None:
+        raise PhysicalPackageAdmissionError(
+            "review-unselected state cannot carry a birth-metallicity domain"
+        )
+    return declared
 
 
 def _evaluate_candidate_gate_evidence(
@@ -165,6 +226,10 @@ def _evaluate_candidate_gate_evidence(
                 f"candidate executable gate evidence is malformed: {candidate_id}:{gate_id}"
             )
         validator_id = evidence.get("validator_id")
+        if not isinstance(validator_id, str) or not validator_id:
+            raise PhysicalPackageAdmissionError(
+                f"candidate gate validator id is malformed: {candidate_id}:{gate_id}"
+            )
         if validator_id not in approved_validator_ids:
             raise PhysicalPackageAdmissionError(
                 f"candidate gate validator is not contract-approved: {candidate_id}:{gate_id}"
@@ -190,6 +255,182 @@ def _evaluate_candidate_gate_evidence(
     return passed, reports
 
 
+def evaluate_physical_package_selection(
+    *,
+    candidate_report: dict[str, Any],
+    physical_nodes: list[Any],
+    source_nodes: list[Any],
+    selection: dict[str, Any],
+    approval: dict[str, Any],
+    source_node_ready: bool,
+    deposition_ready: bool,
+    candidate_grid_ready: bool,
+    high_mass_ready: bool,
+    code_owned_birth_metallicity_domain_selected: bool,
+    contract_birth_metallicity_domain_selected: bool,
+    declared_status: Any,
+) -> dict[str, Any]:
+    """Evaluate selection guards without reading files or mutating state.
+
+    The production caller supplies evidence already audited from the real
+    package. Tests may inject synthetic reports and a temporary registry in
+    process, but no synthetic approval artifact can pass this function by
+    itself or be written as project evidence.
+    """
+
+    if type(code_owned_birth_metallicity_domain_selected) is not bool:
+        raise PhysicalPackageAdmissionError("code-owned selection state is malformed")
+    if type(contract_birth_metallicity_domain_selected) is not bool:
+        raise PhysicalPackageAdmissionError("contract selection state is malformed")
+    if (
+        contract_birth_metallicity_domain_selected
+        is not code_owned_birth_metallicity_domain_selected
+    ):
+        raise PhysicalPackageAdmissionError(
+            "birth-metallicity selection state disagrees with code-owned admission state"
+        )
+    for name, value in {
+        "source_node_ready": source_node_ready,
+        "deposition_ready": deposition_ready,
+        "candidate_grid_ready": candidate_grid_ready,
+        "high_mass_ready": high_mass_ready,
+    }.items():
+        if type(value) is not bool:
+            raise PhysicalPackageAdmissionError(f"selection guard is not boolean: {name}")
+
+    if (
+        not isinstance(physical_nodes, list)
+        or any(not isinstance(node_id, str) or not node_id for node_id in physical_nodes)
+        or len(set(physical_nodes)) != len(physical_nodes)
+    ):
+        raise PhysicalPackageAdmissionError("physical-node inventory must be a unique string list")
+    if not isinstance(source_nodes, list) or any(not isinstance(node, dict) for node in source_nodes):
+        raise PhysicalPackageAdmissionError("source-node contract physical_nodes is malformed")
+    source_node_ids = [node.get("source_node_id") for node in source_nodes]
+    if any(not isinstance(node_id, str) or not node_id for node_id in source_node_ids):
+        raise PhysicalPackageAdmissionError("source-node contract has an invalid node id")
+    if sorted(physical_nodes) != sorted(source_node_ids):
+        raise PhysicalPackageAdmissionError(
+            "physical-node inventory disagrees with source-node contract"
+        )
+    if not isinstance(candidate_report, dict) or not candidate_report:
+        raise PhysicalPackageAdmissionError("candidate qualification report is missing")
+    if not isinstance(selection, dict) or not isinstance(approval, dict):
+        raise PhysicalPackageAdmissionError("selection or approval section is missing")
+
+    selected_id = selection.get("selected_package_id")
+    selection_values = list(selection.values())
+    selection_present = selected_id is not None
+    if selection_present:
+        if not isinstance(selected_id, str) or not selected_id:
+            raise PhysicalPackageAdmissionError(
+                "selected physical package id is malformed"
+            )
+        if not code_owned_birth_metallicity_domain_selected:
+            raise PhysicalPackageAdmissionError(
+                "selected physical package requires code-owned selected state"
+            )
+        if any(value is None for value in selection_values):
+            raise PhysicalPackageAdmissionError(
+                "physical-package selection record is incomplete"
+            )
+        selected_candidate = candidate_report.get(selected_id)
+        if not isinstance(selected_candidate, dict) or not selected_candidate.get(
+            "production_qualified"
+        ):
+            raise PhysicalPackageAdmissionError("selected physical package is not evidence-qualified")
+        passed_gate_ids = selected_candidate.get("passed_gate_ids")
+        missing_gate_ids = selected_candidate.get("missing_gate_ids")
+        if (
+            not isinstance(passed_gate_ids, list)
+            or not isinstance(missing_gate_ids, list)
+            or set(passed_gate_ids) != REQUIRED_GATES
+            or missing_gate_ids
+        ):
+            raise PhysicalPackageAdmissionError(
+                "selected physical package does not pass every required gate"
+            )
+        selected_blockers = selected_candidate.get("hard_blockers")
+        if not isinstance(selected_blockers, list):
+            raise PhysicalPackageAdmissionError("selected candidate blockers are malformed")
+        if selected_blockers:
+            raise PhysicalPackageAdmissionError(
+                "selected physical package retains hard blockers"
+            )
+        if not physical_nodes:
+            raise PhysicalPackageAdmissionError("selected physical package has no source nodes")
+        selected_package_sha = selection.get("selected_package_sha256")
+        mapping_sha = selection.get("source_node_mapping_sha256")
+        if not _valid_sha256(selected_package_sha) or not _valid_sha256(mapping_sha):
+            raise PhysicalPackageAdmissionError(
+                "selected package and source-node mapping must have valid SHA256 identities"
+            )
+        if any(node.get("package_fingerprint") != selected_package_sha for node in source_nodes):
+            raise PhysicalPackageAdmissionError(
+                "selected package SHA256 disagrees with source-node package fingerprints"
+            )
+        if not all(
+            (
+                source_node_ready,
+                deposition_ready,
+                candidate_grid_ready,
+                high_mass_ready,
+                contract_birth_metallicity_domain_selected,
+            )
+        ):
+            raise PhysicalPackageAdmissionError(
+                "selected physical package has incomplete upstream gates"
+            )
+        expected_approval = {
+            "physical_package_selected": True,
+            "canonical_conversion_allowed": True,
+            "runtime_deposition_allowed": True,
+            "production_ready": True,
+            "publication_ready": True,
+        }
+        status = "admitted_physical_package"
+        selected_blockers = list(selected_blockers)
+    else:
+        if any(value is not None for value in selection_values):
+            raise PhysicalPackageAdmissionError(
+                "blocked physical-package review cannot name a partial selection"
+            )
+        expected_approval = {
+            "physical_package_selected": False,
+            "canonical_conversion_allowed": False,
+            "runtime_deposition_allowed": False,
+            "production_ready": False,
+            "publication_ready": False,
+        }
+        status = "blocked_no_qualified_physical_package"
+        selected_blockers = []
+
+    for name, expected in expected_approval.items():
+        if type(approval.get(name)) is not bool or approval.get(name) is not expected:
+            raise PhysicalPackageAdmissionError(
+                "physical-package approval disagrees with evaluated state"
+            )
+    if declared_status != status:
+        raise PhysicalPackageAdmissionError(f"physical-package status must be {status}")
+    return {
+        "status": status,
+        "selected_package_id": selected_id,
+        "selected_candidate_hard_blockers": selected_blockers,
+        "production_ready": expected_approval["production_ready"],
+        "publication_ready": expected_approval["publication_ready"],
+        "canonical_conversion_allowed": expected_approval["canonical_conversion_allowed"],
+        "runtime_deposition_allowed": expected_approval["runtime_deposition_allowed"],
+        "code_owned_birth_metallicity_domain_selected": code_owned_birth_metallicity_domain_selected,
+        "contract_birth_metallicity_domain_selected": contract_birth_metallicity_domain_selected,
+        "upstream_gates": {
+            "source_node_ready": source_node_ready,
+            "deposition_ready": deposition_ready,
+            "candidate_grid_ready": candidate_grid_ready,
+            "high_mass_ready": high_mass_ready,
+        },
+    }
+
+
 def audit_physical_package_admission(
     *, contract_path: Path = DEFAULT_CONTRACT
 ) -> dict[str, Any]:
@@ -209,8 +450,7 @@ def audit_physical_package_admission(
         raise PhysicalPackageAdmissionError("terminal candidate domain must be 8--120 Msun")
     if runtime.get("high_mass_review_seam_msun") != [40.0, 120.0]:
         raise PhysicalPackageAdmissionError("high-mass review seam must be 40--120 Msun")
-    if runtime.get("required_birth_metallicity_domain_selected") is not False:
-        raise PhysicalPackageAdmissionError("current review must retain the unselected metallicity domain")
+    _validate_code_owned_selection_state(runtime)
 
     gates = contract.get("required_gates")
     if not isinstance(gates, dict) or set(gates) != REQUIRED_GATES:
@@ -279,6 +519,26 @@ def audit_physical_package_admission(
     source_erratum_required = high_mass.get("cross_engine_wind_review", {}).get(
         "source_erratum_or_explanation_required"
     ) is True
+    try:
+        high_mass_evidence = {
+            "outcome_record_count": high_mass["source_node_completeness"][
+                "outcome_record_count"
+            ],
+            "failed_outcome_count": high_mass["source_node_completeness"][
+                "failed_outcome_count"
+            ],
+            "failed_nodes_with_source_remnant_count": high_mass[
+                "source_node_completeness"
+            ]["failed_nodes_with_source_remnant_count"],
+            "radioactive_reference_epoch_warning_count": high_mass[
+                "cross_engine_wind_review"
+            ]["radioactive_reference_epoch_warning_count"],
+            "source_erratum_or_explanation_required": source_erratum_required,
+        }
+    except (KeyError, TypeError) as exc:
+        raise PhysicalPackageAdmissionError(
+            "physical-package high-mass evidence is malformed"
+        ) from exc
 
     candidates = contract.get("candidate_qualification")
     if not isinstance(candidates, dict) or not candidates:
@@ -318,81 +578,25 @@ def audit_physical_package_admission(
     physical_nodes = contract.get("physical_node_inventory")
     selection = contract.get("selection")
     approval = contract.get("approval")
-    if (
-        not isinstance(physical_nodes, list)
-        or any(not isinstance(node_id, str) or not node_id for node_id in physical_nodes)
-        or len(set(physical_nodes)) != len(physical_nodes)
-    ):
-        raise PhysicalPackageAdmissionError("physical-node inventory must be a unique string list")
-    source_nodes = source_node.get("physical_nodes")
-    if not isinstance(source_nodes, list):
-        raise PhysicalPackageAdmissionError("source-node contract physical_nodes is malformed")
-    source_node_ids = [
-        node.get("source_node_id") for node in source_nodes if isinstance(node, dict)
-    ]
-    if sorted(physical_nodes) != sorted(source_node_ids):
-        raise PhysicalPackageAdmissionError("physical-node inventory disagrees with source-node contract")
-    if not isinstance(selection, dict) or not isinstance(approval, dict):
-        raise PhysicalPackageAdmissionError("selection or approval section is missing")
-    selected_id = selection.get("selected_package_id")
-    selection_values = list(selection.values())
-    selection_present = selected_id is not None
-    if selection_present:
-        if any(value is None for value in selection_values):
-            raise PhysicalPackageAdmissionError("physical-package selection record is incomplete")
-        if selected_id not in candidate_report or not candidate_report[selected_id]["production_qualified"]:
-            raise PhysicalPackageAdmissionError("selected physical package is not evidence-qualified")
-        if not physical_nodes:
-            raise PhysicalPackageAdmissionError("selected physical package has no source nodes")
-        selected_package_sha = selection.get("selected_package_sha256")
-        if not _valid_sha256(selected_package_sha) or not _valid_sha256(
-            selection.get("source_node_mapping_sha256")
-        ):
-            raise PhysicalPackageAdmissionError(
-                "selected package and source-node mapping must have valid SHA256 identities"
-            )
-        if any(
-            node.get("package_fingerprint") != selected_package_sha
-            for node in source_nodes
-            if isinstance(node, dict)
-        ):
-            raise PhysicalPackageAdmissionError(
-                "selected package SHA256 disagrees with source-node package fingerprints"
-            )
-        if not all(
-            (
-                source_node_ready,
-                deposition_ready,
-                candidate_grid_ready,
-                high_mass_ready,
-                runtime.get("required_birth_metallicity_domain_selected") is True,
-            )
-        ):
-            raise PhysicalPackageAdmissionError("selected physical package has incomplete upstream gates")
-        expected_approval = {
-            "physical_package_selected": True,
-            "canonical_conversion_allowed": True,
-            "runtime_deposition_allowed": True,
-            "production_ready": True,
-            "publication_ready": True,
-        }
-        status = "admitted_physical_package"
-    else:
-        if any(value is not None for value in selection_values):
-            raise PhysicalPackageAdmissionError("blocked physical-package review cannot name a partial selection")
-        expected_approval = {
-            "physical_package_selected": False,
-            "canonical_conversion_allowed": False,
-            "runtime_deposition_allowed": False,
-            "production_ready": False,
-            "publication_ready": False,
-        }
-        status = "blocked_no_qualified_physical_package"
-    if any(approval.get(name) is not expected for name, expected in expected_approval.items()):
-        raise PhysicalPackageAdmissionError("physical-package approval disagrees with evaluated state")
-    if contract.get("status") != status:
-        raise PhysicalPackageAdmissionError(f"physical-package status must be {status}")
-
+    source_nodes = source_node.get("physical_nodes") if isinstance(source_node, dict) else None
+    selection_evaluation = evaluate_physical_package_selection(
+        candidate_report=candidate_report,
+        physical_nodes=physical_nodes,
+        source_nodes=source_nodes,
+        selection=selection,
+        approval=approval,
+        source_node_ready=source_node_ready,
+        deposition_ready=deposition_ready,
+        candidate_grid_ready=candidate_grid_ready,
+        high_mass_ready=high_mass_ready,
+        code_owned_birth_metallicity_domain_selected=(
+            CODE_OWNED_BIRTH_METALLICITY_DOMAIN_SELECTED
+        ),
+        contract_birth_metallicity_domain_selected=runtime.get(
+            "required_birth_metallicity_domain_selected"
+        ),
+        declared_status=contract.get("status"),
+    )
     blockers = sorted(
         {
             blocker
@@ -400,15 +604,22 @@ def audit_physical_package_admission(
             for blocker in record["hard_blockers"]
         }
     )
+    try:
+        registry = registry_report()
+    except GateValidatorRegistryError as exc:
+        raise PhysicalPackageAdmissionError(
+            f"validator registry report failed: {exc}"
+        ) from exc
+
     return {
         "schema": "snrt-fp1-physical-package-admission-audit",
         "schema_version": 1,
         "gate": "F-P1H-E",
-        "status": status,
-        "production_ready": approval["production_ready"],
-        "publication_ready": approval["publication_ready"],
-        "canonical_conversion_allowed": approval["canonical_conversion_allowed"],
-        "runtime_deposition_allowed": approval["runtime_deposition_allowed"],
+        "status": selection_evaluation["status"],
+        "production_ready": selection_evaluation["production_ready"],
+        "publication_ready": selection_evaluation["publication_ready"],
+        "canonical_conversion_allowed": selection_evaluation["canonical_conversion_allowed"],
+        "runtime_deposition_allowed": selection_evaluation["runtime_deposition_allowed"],
         "contract_path": str(contract_path),
         "contract_sha256": _sha256(contract_path),
         "audit_code_sha256": _sha256(TOOL_PATH),
@@ -416,18 +627,20 @@ def audit_physical_package_admission(
         "required_gate_ids": sorted(REQUIRED_GATES),
         "gate_validation": {
             **gate_validation,
-            "registry": registry_report(),
+            "registry": registry,
         },
         "candidate_qualification": candidate_report,
         "physical_node_count": len(physical_nodes),
-        "unique_hard_blockers": blockers,
-        "high_mass_evidence": {
-            "outcome_record_count": high_mass["source_node_completeness"]["outcome_record_count"],
-            "failed_outcome_count": high_mass["source_node_completeness"]["failed_outcome_count"],
-            "failed_nodes_with_source_remnant_count": high_mass["source_node_completeness"]["failed_nodes_with_source_remnant_count"],
-            "radioactive_reference_epoch_warning_count": high_mass["cross_engine_wind_review"]["radioactive_reference_epoch_warning_count"],
-            "source_erratum_or_explanation_required": source_erratum_required,
-        },
+        "selected_package_id": selection_evaluation["selected_package_id"],
+        "selected_package_approval_id": selection.get("approval_id")
+        if isinstance(selection, dict)
+        else None,
+        "selected_candidate_hard_blockers": selection_evaluation[
+            "selected_candidate_hard_blockers"
+        ],
+        "all_candidate_hard_blockers": blockers,
+        "selection_evaluation": selection_evaluation,
+        "high_mass_evidence": high_mass_evidence,
         "interpretation": (
             "The admission schema and review evidence are internally consistent, but no "
             "candidate passes all physical gates and there are no admitted source nodes."

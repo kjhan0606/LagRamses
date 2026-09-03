@@ -2,8 +2,8 @@
 
 Date drafted: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: Fable approved with changes; M1--M8 incorporated; implementation
-pending start
+Status: Fable approved with changes; M1--M8 implemented; bundle-end
+AGY/Claude Opus 5 audit pending
 
 ## Purpose fit
 
@@ -27,6 +27,9 @@ LC18 bundle as one coherent Git commit. The commit is a provenance boundary for
 the code-owned trust root; the external source mirror remains gitignored and
 must continue to be verified by the committed lock profile. No production flag
 is changed by this commit.
+
+This precondition was satisfied by commit `e000295` ("Harden FP1 source trust
+and failed-wind evidence").
 
 ## Part A — couple the production admission gates
 
@@ -161,9 +164,10 @@ gitignored and untracked.
   (`gemini-3.8-flash-high`) and Claude Opus 5 audits. Reproduce and triage their
   findings before drafting the subsequent bundle plan.
 
-The current plan has been reviewed by Fable. Its M1--M8 changes are mandatory
-before implementation begins; this approval is not physical-source or runtime
-feedback approval.
+The current plan was reviewed by Fable as **APPROVE WITH CHANGES**. Its M1--M8
+changes are now implemented and verified locally; this approval is not
+physical-source or runtime feedback approval. The bundle-end AGY and Claude
+Opus 5 audits remain the next boundary.
 
 ## Out of scope
 

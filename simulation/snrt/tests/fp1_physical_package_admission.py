@@ -16,9 +16,16 @@ TOOLS = ROOT / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
+import audit_fp1_physical_package_admission as admission_module  # noqa: E402
 from audit_fp1_physical_package_admission import (  # noqa: E402
+    REQUIRED_GATES,
     PhysicalPackageAdmissionError,
     audit_physical_package_admission,
+    evaluate_physical_package_selection,
+)
+from fp1_gate_validator_registry import (  # noqa: E402
+    GateValidatorRegistryError,
+    REGISTERED_VALIDATORS,
 )
 
 
@@ -44,6 +51,170 @@ def _expect_error(contract: dict, fragment: str) -> None:
         assert fragment in str(exc), str(exc)
     else:
         raise AssertionError(f"expected PhysicalPackageAdmissionError containing {fragment!r}")
+
+
+def _selection_fixture() -> dict:
+    package_sha = "a" * 64
+    candidate_id = "synthetic-approved-package"
+    return {
+        "candidate_report": {
+            candidate_id: {
+                "passed_gate_ids": sorted(REQUIRED_GATES),
+                "missing_gate_ids": [],
+                "hard_blockers": [],
+                "production_qualified": True,
+            }
+        },
+        "physical_nodes": ["node-1"],
+        "source_nodes": [
+            {"source_node_id": "node-1", "package_fingerprint": package_sha}
+        ],
+        "selection": {
+            "selected_package_id": candidate_id,
+            "selected_package_sha256": package_sha,
+            "source_node_mapping_sha256": "b" * 64,
+            "approval_id": "SYNTHETIC-APPROVAL",
+            "approved_by": "test",
+            "approval_date": "2026-09-04",
+        },
+        "approval": {
+            "physical_package_selected": True,
+            "canonical_conversion_allowed": True,
+            "runtime_deposition_allowed": True,
+            "production_ready": True,
+            "publication_ready": True,
+        },
+    }
+
+
+def _evaluate_selection_fixture(fixture: dict, **overrides: object) -> dict:
+    values = {
+        "candidate_report": fixture["candidate_report"],
+        "physical_nodes": fixture["physical_nodes"],
+        "source_nodes": fixture["source_nodes"],
+        "selection": fixture["selection"],
+        "approval": fixture["approval"],
+        "source_node_ready": True,
+        "deposition_ready": True,
+        "candidate_grid_ready": True,
+        "high_mass_ready": True,
+        "code_owned_birth_metallicity_domain_selected": True,
+        "contract_birth_metallicity_domain_selected": True,
+        "declared_status": "admitted_physical_package",
+    }
+    values.update(overrides)
+    return evaluate_physical_package_selection(**values)
+
+
+def _expect_selection_error(fixture: dict, fragment: str, **overrides: object) -> None:
+    try:
+        _evaluate_selection_fixture(fixture, **overrides)
+    except PhysicalPackageAdmissionError as exc:
+        assert fragment in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected selection error containing {fragment!r}")
+
+
+def _synthetic_registry_selection() -> None:
+    fixture = _selection_fixture()
+    original_registry = dict(REGISTERED_VALIDATORS)
+    try:
+        with tempfile.TemporaryDirectory(prefix="snrt-fp1-synthetic-registry-") as directory:
+            temporary = Path(directory)
+            required_gates = {
+                gate_id: {"requires": [f"requirement:{gate_id}"]}
+                for gate_id in REQUIRED_GATES
+            }
+            gate_evidence: dict[str, dict[str, str]] = {}
+            for gate_id in sorted(REQUIRED_GATES):
+                validator_id = f"synthetic.{gate_id}.v1"
+                tool_path = temporary / f"{gate_id}.py"
+                tool_path.write_text(f"# {gate_id}\n", encoding="utf-8")
+                tool_sha = hashlib.sha256(tool_path.read_bytes()).hexdigest()
+                requirement_name = f"requirement:{gate_id}"
+
+                def runner(
+                    candidate_id: str,
+                    *,
+                    validator_id: str = validator_id,
+                    gate_id: str = gate_id,
+                    requirement_name: str = requirement_name,
+                    tool_sha: str = tool_sha,
+                ) -> dict:
+                    return {
+                        "schema": "snrt-fp1-executable-gate-validation",
+                        "schema_version": 1,
+                        "validator_id": validator_id,
+                        "gate_id": gate_id,
+                        "candidate_id": candidate_id,
+                        "status": "pass",
+                        "passed": True,
+                        "requirements": {requirement_name: True},
+                        "blockers": [],
+                        "package_fingerprint_sha256": None,
+                        "artifacts": {},
+                        "validator_code_sha256": tool_sha,
+                    }
+
+                REGISTERED_VALIDATORS[validator_id] = {
+                    "gate_id": gate_id,
+                    "requirements": {requirement_name},
+                    "runner": runner,
+                    "tool_path": tool_path,
+                }
+                gate_evidence[gate_id] = {"validator_id": validator_id}
+
+            passed, reports = admission_module._evaluate_candidate_gate_evidence(
+                "synthetic-approved-package",
+                gate_evidence,
+                approved_validator_ids=set(
+                    record["validator_id"] for record in gate_evidence.values()
+                ),
+                required_gates=required_gates,
+            )
+            assert set(passed) == REQUIRED_GATES
+            assert len(reports) == len(REQUIRED_GATES)
+            result = _evaluate_selection_fixture(fixture)
+            assert result["status"] == "admitted_physical_package"
+
+            missing = copy.deepcopy(fixture)
+            removed_gate = sorted(REQUIRED_GATES)[0]
+            missing["candidate_report"]["synthetic-approved-package"][
+                "passed_gate_ids"
+            ].remove(removed_gate)
+            missing["candidate_report"]["synthetic-approved-package"][
+                "missing_gate_ids"
+            ] = [removed_gate]
+            _expect_selection_error(
+                missing, "does not pass every required gate"
+            )
+    finally:
+        REGISTERED_VALIDATORS.clear()
+        REGISTERED_VALIDATORS.update(original_registry)
+
+
+def _selection_guard_tests() -> None:
+    fixture = _selection_fixture()
+    _expect_selection_error(
+        fixture,
+        "birth-metallicity selection state disagrees",
+        contract_birth_metallicity_domain_selected=False,
+    )
+    no_nodes = copy.deepcopy(fixture)
+    no_nodes["physical_nodes"] = []
+    no_nodes["source_nodes"] = []
+    _expect_selection_error(no_nodes, "has no source nodes")
+    bad_hash = copy.deepcopy(fixture)
+    bad_hash["selection"]["selected_package_sha256"] = "bad"
+    _expect_selection_error(bad_hash, "valid SHA256 identities")
+    bad_fingerprint = copy.deepcopy(fixture)
+    bad_fingerprint["source_nodes"][0]["package_fingerprint"] = "c" * 64
+    _expect_selection_error(bad_fingerprint, "disagrees with source-node package fingerprints")
+    _expect_selection_error(fixture, "incomplete upstream gates", high_mass_ready=False)
+    bad_approval = copy.deepcopy(fixture)
+    bad_approval["approval"]["publication_ready"] = False
+    _expect_selection_error(bad_approval, "approval disagrees with evaluated state")
+    _expect_selection_error(fixture, "status must be admitted_physical_package", declared_status="blocked_no_qualified_physical_package")
 
 
 def main() -> int:
@@ -171,7 +342,62 @@ def main() -> int:
 
     self_selected = copy.deepcopy(contract)
     self_selected["selection"]["selected_package_id"] = "sukhbold2016_w18_n20"
-    _expect_error(self_selected, "selection record is incomplete")
+    _expect_error(self_selected, "requires code-owned selected state")
+
+    for name, checked in report["evidence_artifacts"].items():
+        locked = admission_module.LOCKED_EVIDENCE_ARTIFACTS[name]
+        assert checked["sha256"] == checked["code_locked_sha256"]
+        assert checked["contract_declared_sha256"] == checked["code_locked_sha256"]
+        assert checked["sha256"] == locked["sha256"]
+        assert checked["path"].endswith(locked["path"])
+
+    original_locks = copy.deepcopy(admission_module.LOCKED_EVIDENCE_ARTIFACTS)
+    try:
+        admission_module.LOCKED_EVIDENCE_ARTIFACTS["high_mass_review"][
+            "sha256"
+        ] = "0" * 64
+        try:
+            admission_module._audit_evidence(contract["evidence_artifacts"])
+        except PhysicalPackageAdmissionError as exc:
+            assert "code-owned lock" in str(exc), str(exc)
+        else:
+            raise AssertionError("mutable code lock was not detected")
+    finally:
+        admission_module.LOCKED_EVIDENCE_ARTIFACTS.clear()
+        admission_module.LOCKED_EVIDENCE_ARTIFACTS.update(original_locks)
+
+    _selection_guard_tests()
+    _synthetic_registry_selection()
+
+    original_registry_report = admission_module.registry_report
+    try:
+        def registry_failure() -> dict:
+            raise GateValidatorRegistryError("synthetic hash failure")
+
+        admission_module.registry_report = registry_failure
+        try:
+            audit_physical_package_admission()
+        except PhysicalPackageAdmissionError as exc:
+            assert "validator registry report failed" in str(exc), str(exc)
+        else:
+            raise AssertionError("registry failure escaped physical admission")
+    finally:
+        admission_module.registry_report = original_registry_report
+
+    original_audit_evidence = admission_module._audit_evidence
+    evidence, loaded = original_audit_evidence(contract["evidence_artifacts"])
+    malformed_loaded = copy.deepcopy(loaded)
+    del malformed_loaded["high_mass_review"]["source_node_completeness"]
+    try:
+        admission_module._audit_evidence = lambda _: (evidence, malformed_loaded)
+        try:
+            audit_physical_package_admission()
+        except PhysicalPackageAdmissionError as exc:
+            assert "high-mass evidence is malformed" in str(exc), str(exc)
+        else:
+            raise AssertionError("malformed high-mass evidence was not controlled")
+    finally:
+        admission_module._audit_evidence = original_audit_evidence
 
     print("FP1_PHYSICAL_PACKAGE_ADMISSION_TEST_OK")
     return 0
