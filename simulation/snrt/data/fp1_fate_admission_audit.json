@@ -1,0 +1,110 @@
+{
+  "artifacts": {
+    "fate_map": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_population_fate_map_v1.json",
+      "sha256": "0145b49b334781a969c2014c314c075e5bfb2c2fa73e46afe84158e98d41d6b4"
+    },
+    "physics_contract": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_physics_contract_v1.json",
+      "sha256": "e53e37ee3011e0564e2e92f54daa72c64954174e2178daaa6f7a9b0e1611f886"
+    },
+    "resolver_contract": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_fate_resolver_contract_v1.json",
+      "sha256": "3681835efde788123f5b32d13cf3d0d85b4cc58f8e06d97fc7f1fbffc79f4f18"
+    },
+    "source_contract": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/stellar_feedback_contract_v1.json",
+      "sha256": "94660191a8c1f293859a5af81f37e5767f98cf712187b482e18a885a1b7888b1"
+    }
+  },
+  "fortran_interval_mirrors": {
+    "/gpfs/kjhan/LRD_JWST/patch/lagRamses/stellar_enrichment_config.f90": {
+      "intervals": [
+        [
+          0.8,
+          1.0
+        ],
+        [
+          40.0,
+          120.0
+        ]
+      ]
+    },
+    "/gpfs/kjhan/LRD_JWST/simulation/snrt/native/phase0/stellar_enrichment_config.f90": {
+      "intervals": [
+        [
+          0.8,
+          1.0
+        ],
+        [
+          40.0,
+          120.0
+        ]
+      ]
+    }
+  },
+  "gate": "F-P1",
+  "interpretation": "Checksum and wiring gates pass, but unresolved fate intervals keep canonical conversion and production deposition disabled.",
+  "map_audit_status": "review_only_blocked",
+  "production_ready": false,
+  "runtime_unresolved_intervals": [
+    {
+      "id": "low_mass_lifetime_seam",
+      "mass_msun": [
+        0.8,
+        1.0
+      ]
+    },
+    {
+      "id": "massive_terminal_fate_seam",
+      "mass_msun": [
+        40.0,
+        120.0
+      ]
+    }
+  ],
+  "runtime_unresolved_mass_bucket": {
+    "closure_included": false,
+    "deposition_allowed": false,
+    "implementation": "stellar_population_ledger.compute_unresolved_mass_bucket",
+    "implemented": true,
+    "interval_source": "fp1_population_fate_map_v1",
+    "meaning": "IMF-weighted initial stellar mass in unresolved intervals; diagnostic only"
+  },
+  "schema": "snrt-fp1-fate-admission-audit",
+  "schema_version": 1,
+  "sidecar_approval": {
+    "approval_id": null,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "publication_ready": false
+  },
+  "status": "blocked_review_only",
+  "unresolved_mass_bucket": {
+    "diagnostic_only": true,
+    "imf_id": 1,
+    "imf_name": "Kroupa",
+    "intervals": [
+      {
+        "id": "low_mass_lifetime_seam",
+        "kroupa_mass_weight_fraction": 0.050364571012367555,
+        "mass_msun": [
+          0.8,
+          1.0
+        ]
+      },
+      {
+        "id": "massive_terminal_fate_seam",
+        "kroupa_mass_weight_fraction": 0.06753755581476227,
+        "mass_msun": [
+          40.0,
+          120.0
+        ]
+      }
+    ],
+    "normalization_over_population_domain": 4.582229041799163,
+    "runtime_unresolved_bucket_deposition_implemented": false,
+    "runtime_unresolved_mass_bucket_implemented": true,
+    "total_unresolved_mass_weight_fraction": 0.11790212682712983
+  }
+}

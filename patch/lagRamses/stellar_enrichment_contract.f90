@@ -13,14 +13,18 @@ module stellar_enrichment_contract
 
   ! Metadata required to evaluate a single-age stellar population.
   type :: stellar_population_t
-     real(stellar_dp) :: formation_time
-     real(stellar_dp) :: initial_mass
-     real(stellar_dp) :: current_mass
-     real(stellar_dp) :: birth_metallicity
-     real(stellar_dp) :: birth_mass_fraction(n_stellar_elements)
-     integer :: imf_id
-     integer :: population_id
-     logical :: pisn_enabled
+     real(stellar_dp) :: formation_time = 0.0_stellar_dp
+     real(stellar_dp) :: initial_mass = 0.0_stellar_dp
+     real(stellar_dp) :: current_mass = 0.0_stellar_dp
+     real(stellar_dp) :: birth_metallicity = 0.0_stellar_dp
+     real(stellar_dp) :: birth_mass_fraction(n_stellar_elements) = 0.0_stellar_dp
+     integer :: imf_id = -1
+     real(stellar_dp) :: imf_mass_min = 0.0_stellar_dp
+     real(stellar_dp) :: imf_mass_max = 0.0_stellar_dp
+     integer :: population_id = -1
+     real(stellar_dp) :: binary_fraction = 0.0_stellar_dp
+     integer :: yield_basis_id = -1
+     logical :: pisn_enabled = .false.
   end type stellar_population_t
 
   ! Cumulative state at one stellar population age.
@@ -62,6 +66,28 @@ module stellar_enrichment_contract
   end type stellar_source_t
 
 contains
+
+  pure real(stellar_dp) function untracked_ejecta_mass(returned_mass, &
+       ejected_mass)
+    real(stellar_dp), intent(in) :: returned_mass
+    real(stellar_dp), intent(in) :: ejected_mass(n_stellar_elements)
+
+    ! The canonical table deliberately tracks only eleven elements.  Material
+    ! from all other elements remains part of returned_mass and is recovered
+    ! deterministically as this residual.  It is a total-metal source, not a
+    ! fabricated contribution to any individually tracked element.
+    untracked_ejecta_mass = returned_mass - sum(ejected_mass)
+  end function untracked_ejecta_mass
+
+  pure real(stellar_dp) function generic_metal_ejecta_mass(returned_mass, &
+       ejected_mass)
+    real(stellar_dp), intent(in) :: returned_mass
+    real(stellar_dp), intent(in) :: ejected_mass(n_stellar_elements)
+
+    generic_metal_ejecta_mass = &
+         untracked_ejecta_mass(returned_mass, ejected_mass) + &
+         sum(ejected_mass(elem_c:n_stellar_elements))
+  end function generic_metal_ejecta_mass
 
   subroutine clear_cumulative(state)
     type(stellar_cumulative_t), intent(out) :: state

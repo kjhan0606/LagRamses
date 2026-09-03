@@ -46,6 +46,8 @@
     "legacy_units_and_source_provenance_are_not_canonical"
   ],
   "candidate_source_status": "candidate_review_only",
+  "candidate_source_input_integrity_passed": true,
+  "candidate_source_audit_failures": [],
   "candidate_source_manifest_status": "pass",
   "candidate_source_manifest_file_count": 65,
   "candidate_source_candidate_count": 10,
@@ -63,6 +65,27 @@
     "roberti2024_ultralowz_grid_has_only_two_masses_four_missing_zero_z_mrt_columns_and_a_quarantined_025z600_mass_budget_outlier",
     "heger_woosley2010_popiii_grid_has_unselected_explosion_piston_and_mixing_parameters_and_no_8_to_10_msun_coverage",
     "source_specific_conversion_and_closure_reports_are_required"
+  ],
+  "candidate_source_fingerprint_status": "candidate_fingerprint_review_only",
+  "candidate_source_fingerprint_input_integrity_passed": true,
+  "candidate_source_fingerprint_candidate_count": 11,
+  "candidate_source_fingerprint_file_count": 65,
+  "candidate_source_fingerprint_scheme": "sha256(candidate_id + NUL + sorted UTF-8 records path + NUL + bytes + NUL + file_sha256 + LF)",
+  "candidate_source_fingerprint_blocking_reasons": [],
+  "source_selection_gate_status": "review_only_validation_branch_recorded",
+  "source_selection_gate_runtime_activation_allowed": false,
+  "source_selection_review_validation_branch": "sukhbold2016_ccsn",
+  "source_selection_review_validation_branch_sha256": "11e2988969f69da9fb3f6939af9bbd3f0f26afd4420cd676d27a05b30486aa60",
+  "source_selection_production_source_id": null,
+  "source_selection_production_approval_id": null,
+  "source_selection_gate_blocking_reasons": [
+    "review_validation_branch_is_not_a_production_source",
+    "no_explicit_physical_source_and_population_approval",
+    "canonical_age_decay_energy_momentum_and_channel_closure_incomplete",
+    "license_and_redistribution_terms_are_not_closed_for_all_required_channels",
+    "validation_branch_is_solar_metallicity_only",
+    "validation_branch_has_no_age_resolved_presupernova_wind_history",
+    "validation_branch_has_no_canonical_momentum_or_complete_decay_inventory"
   ],
   "source_adapter_status": {
     "limongi_chieffi_2018_cds": "review_only",
@@ -226,6 +249,11 @@
   ],
   "sukhbold2016_projection_status": "review_only_blocked_decay_age_boundary_and_approval",
   "sukhbold2016_projection_record_count": 26,
+  "sukhbold2016_projection_high_mass_record_count": 19,
+  "sukhbold2016_projection_high_mass_component_counts": {
+    "ejecta": 6,
+    "wind": 13
+  },
   "sukhbold2016_projection_source_nulls_preserved": {
     "canonical_launch_momentum": true,
     "decay_complete_returned_mass": true,

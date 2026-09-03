@@ -63,7 +63,7 @@
       "2": true,
       "3": true,
       "4": false,
-      "5": true
+      "5": false
     },
     "channel_mass_ranges_msun": {
       "1": [0.8, 120.0],
@@ -72,6 +72,9 @@
       "4": [3.0, 8.0],
       "5": [140.0, 260.0]
     },
+    "terminal_fate_policy": "review_only_unresolved",
+    "terminal_fate_resolver": "per_source_node_fate_lookup_v1",
+    "terminal_fate_resolution_notes": "The 40--120 Msun interval is model-dependent and is not a universal direct-collapse bin. PISN is complete disruption and therefore does not own a terminal remnant.",
     "required_age_range_yr": [0.0, 13800000000.0],
     "required_birth_metallicity_range_mass_fraction": null
   },

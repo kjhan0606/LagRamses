@@ -1,0 +1,71 @@
+{
+  "schema": "snrt-fp2-snia-dtd-contract",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "review_only_not_approved",
+  "purpose": "Define a separately testable SNIa delay-time kernel without enabling SNIa events or selecting their physical normalization.",
+  "candidate_matrix": "config/fp2_snia_dtd_candidate_matrix_v1.json",
+  "literature_dossier": "provenance/fp2_snia_dtd_literature_dossier_2026-09-02.md",
+  "event_yield_matrix": "config/fp2_snia_event_yield_candidate_matrix_v1.json",
+  "event_yield_dossier": "provenance/fp2_snia_event_yield_dossier_2026-09-03.md",
+  "event_yield_asset_manifest": "manifests/fp2_snia_keegans2023_review_v1.json",
+  "event_yield_asset_audit": "simulation/snrt/data/fp2_snia_event_yield_asset_audit.json",
+  "event_yield_format_audit": "simulation/snrt/data/fp2_snia_keegans_format_audit.json",
+  "event_yield_hesma_asset_manifest": "manifests/fp2_snia_hesma_yysd4_review_v1.json",
+  "event_yield_hesma_source_audit": "simulation/snrt/data/fp2_snia_hesma_source_audit.json",
+  "event_yield_hesma_review_normalized": "simulation/snrt/data/fp2_snia_hesma_n100_review_normalized.json",
+  "event_yield_hesma_model_comparison": "simulation/snrt/data/fp2_snia_hesma_model_comparison.json",
+  "event_yield_hesma_profile_estimator_comparison": "simulation/snrt/data/fp2_snia_hesma_profile_estimator_comparison.json",
+  "event_yield_hesma_selection_packet": "simulation/snrt/data/fp2_snia_hesma_source_selection_packet.json",
+  "event_source_approval_sidecar": "config/fp2_snia_event_source_approval_sidecar_v1.json",
+  "event_yield_converter": "tools/convert_snia_event_yields.py",
+  "time_unit": "Gyr",
+  "kernel": {
+    "family": "power_law",
+    "rate_form": "D(t) proportional to t^alpha between t_min and t_max",
+    "alpha": -1.0,
+    "alpha_status": "shape_candidate_only_not_physics_approval",
+    "normalization": "analytically normalized to unit integral before multiplying by events_per_initial_msun"
+  },
+  "parameters": {
+    "minimum_delay_gyr": null,
+    "maximum_delay_gyr": null,
+    "events_per_initial_msun": null,
+    "parameter_status": "pending_population_and_binary_physics_approval"
+  },
+  "event_source": {
+    "yield_source_id": null,
+    "yield_source_sha256": null,
+    "energy_per_event_erg": null,
+    "momentum_per_event_g_cm_s": null,
+    "composition_basis": null
+  },
+  "integration_contract": {
+    "interval": "closed physical age interval [age_old, age_new] with zero-width intervals returning zero",
+    "event_count": "events_per_initial_msun times the normalized kernel integral over the interval",
+    "cumulative_equivalence": "sum of adjacent interval integrals must equal the cumulative integral",
+    "endpoint_policy": "delay support is [t_min, t_max]; outside-support contribution is zero",
+    "restart_policy": "event expectation is a pure interval function; no endpoint-rate sampling or hidden state"
+  },
+  "activation": {
+    "enabled": false,
+    "production_allowed": false,
+    "requires": [
+      "approved_population_and_binary_model",
+      "approved_minimum_and_maximum_delay",
+      "approved_events_per_initial_msun",
+      "approved_snia_yield_source_and_checksum",
+      "approved_event_energy_and_momentum",
+      "approved_wd_remnant_debit_policy",
+      "approved_momentum_deposition_policy",
+      "approved_imf_conversion",
+      "approved_event_realization_policy",
+      "approved_snia_thermal_coupling",
+      "approved_metallicity_dependence",
+      "source_warning_quarantine_policy",
+      "portable_provenance_and_commit_binding",
+      "conversion_code_sha256",
+      "named_approval_id"
+    ]
+  }
+}

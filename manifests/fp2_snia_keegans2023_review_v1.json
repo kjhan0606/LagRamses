@@ -1,0 +1,48 @@
+{
+  "schema": "snrt-fp2-snia-event-yield-asset-manifest",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "review_only_asset",
+  "candidate_id": "keegans2023_nugrid_metallicity_grid",
+  "asset_root": "assets/review_only/fp2_snia/keegans2023",
+  "source": {
+    "citation": "Keegans et al. 2023, Type Ia Supernova Nucleosynthesis: Metallicity-Dependent Yields",
+    "paper_url": "https://arxiv.org/abs/2306.12885",
+    "data_doi": "10.5281/zenodo.8060323",
+    "data_url": "https://zenodo.org/records/8060323",
+    "version": "Zenodo v1",
+    "license": "CC-BY-4.0",
+    "retrieved_utc": "2026-09-03",
+    "approval_id": null
+  },
+  "files": [
+    {
+      "path": "decayed_brox_yields_new_latex_table.tex",
+      "bytes": 12428,
+      "md5": "0a243a26ec418be1ffca50e9ed6f87a0",
+      "sha256": "5b13bf7ec1c2cde2785fc19683d99a4d3c59baa369ca114f8dbc6e1571ff9a6c",
+      "url": "https://zenodo.org/records/8060323/files/decayed_brox_yields_new_latex_table.tex?download=1"
+    },
+    {
+      "path": "decayed_dean_yields_new_latex_table.tex",
+      "bytes": 11516,
+      "md5": "b46d756d413bbcd7eefdfaa48b937fc0",
+      "sha256": "73f3aecc9c4a739ea069011b893af2041139527abfa3f7b874d89000abc540f4",
+      "url": "https://zenodo.org/records/8060323/files/decayed_dean_yields_new_latex_table.tex?download=1"
+    },
+    {
+      "path": "decayed_shen_yields_new_latex_table.tex",
+      "bytes": 11447,
+      "md5": "443a34dc58d57a15aeb9a754ea5ed6f6",
+      "sha256": "6ec00801f3e74319b619d61e1a9ba8e6119c0c4c02c7849cda46a6d8408d104b",
+      "url": "https://zenodo.org/records/8060323/files/decayed_shen_yields_new_latex_table.tex?download=1"
+    }
+  ],
+  "hash_policy": "sha256(path + NUL + bytes + NUL + file_sha256 + LF) over sorted relative paths",
+  "package_sha256": "32d0a8fa97a6aa0810c82127973ebd73446ab76edea0aba7d6c543f3e82d53b7",
+  "approval": {
+    "approval_id": null,
+    "canonical_conversion_allowed": false,
+    "runtime_activation_allowed": false
+  }
+}

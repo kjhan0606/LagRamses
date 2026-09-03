@@ -1,8 +1,19 @@
 # SNRT stellar/AGN feedback production and publication-readiness plan
 
+Project scope is high-level hydro physics: radiative transfer, stellar and AGN
+feedback, dust, and their coupled source terms. Generic checkpoint, AMR,
+distributed-layout, or low-level hydro hardening is not an active gate unless
+it directly blocks or corrupts one of those high-level models; otherwise it is
+kept in the supporting-infrastructure long-term backlog.
+
 Date: 2026-09-01  
 Project root: `/gpfs/kjhan/LRD_JWST`  
-Status: P0.1 source-parity gate closed; production/publication gates remain open
+Status: P0.1 source-parity gate closed; P0.2 conditional pass recorded;
+P0.3 feedback-state conditional pass recorded with physical continuation pending;
+P0.4 fail-closed runtime gate passed; F-P1 consolidated re-audit returned an
+engineering conditional pass and both conditions are now repaired for the
+next bundled audit; F-P1 science and later production/publication gates remain
+open
 
 This plan closes every item raised by the AGY-role, Fable, and
 GPT-5.6-sol reviews. Starting with B2, Claude Opus 5 assumes the independent
@@ -15,8 +26,25 @@ As of 2026-09-02, the Fable SN/AGN audit and its independent reproduction
 [`fable_sn_agn_independent_reproduction_2026-09-02.md`](fable_sn_agn_independent_reproduction_2026-09-02.md)
 identified **BLOCK**-level physical and implementation gaps. P0.1 source
 identity/build parity is now closed on the compiled `patch/lagRamses` path;
-the remaining compiled G1 blockers are time, restart, fallback, and executed
-field-map semantics. G2 remains blocked on approved physical yield assets.
+the P0.2 time/interval implementation is now present and has a recorded
+`CONDITIONAL PASS` from the Claude Opus 5 gate audit. P0.3 is deliberately
+narrowed to feedback state: `ptypep`, `tpp`, `mp0`, `indtab`, and stellar
+mass ledgers survive the linked HDF5 reader→memory→writer path. Its remaining
+condition is an uninterrupted-versus-restarted physical stellar continuation
+test. The later P0.3 audits also identified generic HDF5 restart hardening,
+but ksection/CPU boxes, general AMR redistribution, hydro/gravity payloads,
+and broad checkpoint-corruption handling are not feedback blockers. They are
+preserved in
+[`long_term_hdf5_restart_validation_backlog.md`](long_term_hdf5_restart_validation_backlog.md).
+The active feedback gate is F-P1 population/fate.  Its first consolidated
+Claude Opus 5 re-audit gave an engineering conditional pass; the two residual
+conditions have been independently repaired and are queued with subsequent
+work for the next bundled audit.  Physical source selection, the 40--120 Msun
+terminal-fate gap, and immutable provenance remain blocking.  Rejection of
+unsupported `binary_ssp`, SNIa, and PISN
+configurations is temporary: SNIa DTD and PISN/PPISN remain required later
+gates, not deferred scope.
+G2 remains blocked on approved physical yield assets.
 This status supersedes any earlier statement that G1/G2 were production-ready.
 
 ## 1. Definition of done
@@ -110,6 +138,16 @@ can resolve to the legacy or embedded fallback implicitly.
 ### G1 — make the native contract unambiguous
 
 #### G1.1 Verify and fix the four Fable findings
+
+P0.2 implementation status (2026-09-02): the age-unit and cumulative-interval
+portion is implemented in both the production tree and native differential
+mirror. `stellar_yield_tables` and the embedded generator convert `age_yr` to
+`age_gyr` once at the table boundary; `stellar_native_units` centralizes the
+RAMSES convention including explicit `aexp**2`; the source APIs consume
+`[previous_age_gyr,current_age_gyr]`; and `stellar_progress_contract` commits
+`indtab` only after successful deposition. Native G1 and production-linked
+P0 tests pass. The remaining G1.1 items (SN-energy dimensional audit and
+executed field-map/restart qualification) remain open.
 
 Before changing source, add minimal reproductions and inspect the exact binary
 path:
@@ -248,6 +286,9 @@ run reproduces the independent ledger within tolerance.
 - Test single-event and SSP-integrated rates, restart continuity, and mass/
   energy closure. Keep the channel disabled until all inputs are approved.
 
+This gate is mandatory for production readiness; fail-closed disabling in P0.4
+does not satisfy it.
+
 #### G3.3 PISN/PPISN
 
 - Keep PISN disabled for ordinary metal-enriched populations.
@@ -257,6 +298,9 @@ run reproduces the independent ledger within tolerance.
   Msun rule.
 - Validate event rates and yields against the selected source family and test
   that PISN cannot be activated by an accidental mass interpolation.
+
+The population decision is mandatory even when its reviewed outcome is to keep
+PISN disabled for the target science configuration.
 
 #### G3.4 AGN ledger
 

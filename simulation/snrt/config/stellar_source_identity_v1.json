@@ -25,12 +25,15 @@
     "required_objects": [
       "stellar_enrichment_config.o",
       "stellar_enrichment_contract.o",
+      "stellar_native_units.o",
+      "stellar_progress_contract.o",
       "stellar_yield_tables.o",
       "stellar_yield_interpolation.o",
       "stellar_yield_provider.o",
       "stellar_yield_backend.o",
       "stellar_ssp_sources.o",
       "stellar_source_increment.o",
+      "stellar_population_ledger.o",
       "stellar_enrichment_driver.o",
       "stellar_cell_deposition.o",
       "stellar_ramses_field_map.o",
@@ -103,14 +106,12 @@
     "shared_contract_baseline": {
       "differing_sources": [
         "stellar_enrichment_config.f90",
-        "stellar_enrichment_contract.f90",
+        "stellar_native_units.f90",
+        "stellar_progress_contract.f90",
         "stellar_yield_tables.f90",
         "stellar_yield_interpolation.f90",
         "stellar_yield_provider.f90",
         "stellar_ssp_sources.f90",
-        "stellar_source_increment.f90",
-        "stellar_enrichment_driver.f90",
-        "stellar_yield_audit.f90",
         "stellar_ramses_field_map.f90",
         "stellar_ramses_runtime.f90"
       ],
@@ -119,7 +120,14 @@
         "stellar_ramses_bridge.f90",
         "stellar_ramses_mapped_bridge.f90"
       ],
-      "identical_sources": ["stellar_yield_backend.f90"]
+      "identical_sources": [
+        "stellar_enrichment_contract.f90",
+        "stellar_source_increment.f90",
+        "stellar_enrichment_driver.f90",
+        "stellar_population_ledger.f90",
+        "stellar_yield_audit.f90",
+        "stellar_yield_backend.f90"
+      ]
     },
     "recorder": "simulation/snrt/tools/record_p0_production_linked_build.py",
     "required_evidence_status": "pass"
@@ -130,12 +138,15 @@
     "shared_contract_sources": [
       "stellar_enrichment_config.f90",
       "stellar_enrichment_contract.f90",
+      "stellar_native_units.f90",
+      "stellar_progress_contract.f90",
       "stellar_yield_tables.f90",
       "stellar_yield_interpolation.f90",
       "stellar_yield_provider.f90",
       "stellar_yield_backend.f90",
       "stellar_ssp_sources.f90",
       "stellar_source_increment.f90",
+      "stellar_population_ledger.f90",
       "stellar_enrichment_driver.f90",
       "stellar_yield_audit.f90",
       "stellar_ramses_field_map.f90",
@@ -144,12 +155,8 @@
       "stellar_ramses_bridge.f90",
       "stellar_ramses_mapped_bridge.f90"
     ],
-    "native_only_mirror_sources": [
-      "stellar_native_units.f90",
-      "stellar_progress_contract.f90",
-      "stellar_population_ledger.f90"
-    ],
-    "native_only_mirror_disposition": "native differential-test scaffolding; not production-linked and not a shared production contract"
+    "native_only_mirror_sources": [],
+    "native_only_mirror_disposition": "none; the population ledger is now production-linked"
   },
   "policy": {
     "production_makefile_is_source_of_truth": true,

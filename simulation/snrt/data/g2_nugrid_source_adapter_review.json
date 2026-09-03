@@ -548,7 +548,7 @@
     "candidate_manifest_status": "candidate_not_approved",
     "license_status": "to_be_verified",
     "manifest_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
-    "manifest_sha256": "bf477aa863852f00adc844eb8cd31e1b4804607328b64f1c6e912f01a2261128",
+    "manifest_sha256": "ebbbfa42357e6a729d19d839f0e1c826ef33cb4705d895b82c5e96e88493f764",
     "promotable": false,
     "verified_file_count": 11,
     "verified_files": [

@@ -1,0 +1,165 @@
+{
+  "schema": "snrt-fp2-snia-dtd-contract-audit",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "review_only_not_approved",
+  "production_ready": false,
+  "runtime_activation_allowed": false,
+  "contract": "simulation/snrt/config/fp2_snia_dtd_contract_v1.json",
+  "contract_sha256": "388ed4939fe7ed31d377086dc1e097cb4f8ad6f0263500b2bdcf9afa7fa67e77",
+  "native_kernel": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_dtd.f90",
+    "sha256": "ba6b7f810f3ae686e9f0d23c769ae9812da265557dfb0cbfb9366517bac7b89b"
+  },
+  "production_kernel": {
+    "path": "patch/lagRamses/stellar_snia_dtd.f90",
+    "sha256": "ba6b7f810f3ae686e9f0d23c769ae9812da265557dfb0cbfb9366517bac7b89b"
+  },
+  "native_event_ledger": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_event_ledger.f90",
+    "sha256": "a8e33f672c141531fd16d8f9d0e298c67a2effe95974703f494323ae3b851973"
+  },
+  "production_event_ledger": {
+    "path": "patch/lagRamses/stellar_snia_event_ledger.f90",
+    "sha256": "a8e33f672c141531fd16d8f9d0e298c67a2effe95974703f494323ae3b851973"
+  },
+  "native_physical_contract": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_physical_contract.f90",
+    "sha256": "ccc6c5e41ccec9e6bfe4dbbc5c2bde00525749c0e7359563ad13eb5d5bca9ea8"
+  },
+  "production_physical_contract": {
+    "path": "patch/lagRamses/stellar_snia_physical_contract.f90",
+    "sha256": "ccc6c5e41ccec9e6bfe4dbbc5c2bde00525749c0e7359563ad13eb5d5bca9ea8"
+  },
+  "kernel_family": "power_law",
+  "kernel_alpha": -1.0,
+  "selected_delay_parameters": {
+    "minimum_delay_gyr": null,
+    "maximum_delay_gyr": null,
+    "events_per_initial_msun": null
+  },
+  "selected_event_source": null,
+  "candidate_matrix": {
+    "path": "simulation/snrt/config/fp2_snia_dtd_candidate_matrix_v1.json",
+    "sha256": "bd5df871776bad367f15bf9feb98b16b1a0d8a87a4bcdf08c4ca7ec28d18c9d6",
+    "schema": "snrt-fp2-snia-dtd-candidate-matrix",
+    "candidate_count": 4,
+    "selected_candidate_id": null,
+    "selected_approval_id": null,
+    "literature_dossier": {
+      "path": "provenance/fp2_snia_dtd_literature_dossier_2026-09-02.md",
+      "sha256": "0f815e80629674879d27ecfcee50c01c5b67099ca6fc33fba41ccaad63a8a214"
+    }
+  },
+  "event_yield_matrix": {
+    "path": "simulation/snrt/config/fp2_snia_event_yield_candidate_matrix_v1.json",
+    "sha256": "79f3b680298d5d8709bea95f10a9913db6b5c658cd1c59b8a35a0824e5f46ef1",
+    "schema": "snrt-fp2-snia-event-yield-candidate-matrix",
+    "candidate_count": 3,
+    "selected_candidate_id": null,
+    "selected_approval_id": null,
+    "event_yield_dossier": {
+      "path": "provenance/fp2_snia_event_yield_dossier_2026-09-03.md",
+      "sha256": "b9589379ce5c7664471afe332529a9a33173a7968132f23d9dac9e29c4a74cf3"
+    }
+  },
+  "event_yield_converter": {
+    "path": "simulation/snrt/tools/convert_snia_event_yields.py",
+    "sha256": "cccc75597a8bc2b9a130488118b73e16512bb196c979ac8d9afd24ae254a4df2"
+  },
+  "event_yield_asset_manifest": {
+    "path": "manifests/fp2_snia_keegans2023_review_v1.json",
+    "sha256": "1e08bedc4381827244fd280d38eb62cdbc5a3c540ddb903aaeba2157fcedac84"
+  },
+  "event_yield_hesma_asset_manifest": {
+    "path": "manifests/fp2_snia_hesma_yysd4_review_v1.json",
+    "sha256": "0a9c6f6695f002f93d30b4c5cce0a6b0abaa3efe93105c836d4aed633561d6df"
+  },
+  "event_yield_asset_audit": {
+    "path": "simulation/snrt/data/fp2_snia_event_yield_asset_audit.json",
+    "sha256": "399eac2c2b6bd3011182c15d4337bcede8adf865660771f7ba666345def6da6f",
+    "status": "review_only_asset_integrity_passed"
+  },
+  "event_yield_hesma_source_audit": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_source_audit.json",
+    "sha256": "5463d58733df8b715fd1ec262b9164cf7b596ad0c9338af98098b8170ea1d510",
+    "status": "review_only_source_format_passed",
+    "physical_review_status": "review_only_with_physical_warnings",
+    "record_id": "yysd4-xap92",
+    "model_count": 15,
+    "physical_warning_count": 2,
+    "physical_warnings": [
+      {
+        "model": "n300c",
+        "type": "profile_mass_mismatch",
+        "relative_difference": 6.410417389339434,
+        "severity": "source_data_anomaly",
+        "requires_quarantine": true,
+        "interpretation": "source-data anomaly requires quarantine before any population mixture"
+      },
+      {
+        "model": "n1600c",
+        "type": "profile_mass_mismatch",
+        "relative_difference": 0.0511218934472347,
+        "severity": "profile_mass_warning",
+        "requires_quarantine": false,
+        "interpretation": "spherical-average density integration is not ready to define returned mass without a source-specific correction or authoritative scalar"
+      }
+    ]
+  },
+  "event_yield_hesma_review_normalized": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_n100_review_normalized.json",
+    "sha256": "f4586d1c953de3e777277414c73b9ffe22c96ee235e61b72b57c340ba169a8cf",
+    "status": "review_only_source_normalized_physics_blocked",
+    "selected_model_id": "n100",
+    "canonical_conversion_allowed": false,
+    "runtime_activation_allowed": false
+  },
+  "event_yield_hesma_model_comparison": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_model_comparison.json",
+    "sha256": "73b3d49c6dbb686965ec71a716f5fdf525dfa078a58bc9fb6384e547138d8004",
+    "status": "review_only_no_model_selected",
+    "model_count": 15,
+    "selected_model_id": null
+  },
+  "event_yield_hesma_profile_estimator_comparison": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_profile_estimator_comparison.json",
+    "sha256": "65e1699bedc529eca777862e15c228a98f5569cbeee1de63bdc4b6935f07b129",
+    "status": "review_only_diagnostic",
+    "model_count": 15,
+    "selected_estimator": null
+  },
+  "event_yield_hesma_selection_packet": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_source_selection_packet.json",
+    "sha256": "e9f342f003fc5cd75216390c81ee46fa185201fe9353fa5a09302acbf1a70a17",
+    "status": "review_only_selection_pending",
+    "model_count": 15,
+    "selected_model_id": null,
+    "selected_population_mixture": null
+  },
+  "event_source_approval_sidecar": {
+    "path": "simulation/snrt/config/fp2_snia_event_source_approval_sidecar_v1.json",
+    "sha256": "c0bb6b83b64751f1bcd5409e66efc563b01a93e43439798d9ba11a03260c0bb4",
+    "status": "blocked_review_only",
+    "production_ready": false,
+    "runtime_activation_allowed": false,
+    "promotion_requirements_status": "requirements_only_not_approval"
+  },
+  "event_yield_format_audit": {
+    "path": "simulation/snrt/data/fp2_snia_keegans_format_audit.json",
+    "sha256": "fa752787f8a3d01e9bdc3e0c0324e2075c952be3ba21006691b0c64a4a4cd98e",
+    "status": "review_only_source_format_passed",
+    "missing_project_elements": [
+      "H",
+      "He",
+      "C",
+      "N"
+    ],
+    "missing_project_elements_are_absent_isotope_rows": true,
+    "explicit_zero_project_elements": [],
+    "inferred_zero_policy": "never infer absent project elements as zero during conversion"
+  },
+  "failures": [],
+  "interpretation": "The interval kernel is implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
+  "audit_code_sha256": "b257d4658ce0d799eb18b9a72845c35ed1e7a2ec93f21c9df7986ed6763b3441"
+}

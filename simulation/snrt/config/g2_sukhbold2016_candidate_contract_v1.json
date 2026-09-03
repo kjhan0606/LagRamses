@@ -49,7 +49,11 @@
     "selected_radioactive_isotopes": [
       "c14", "na22", "al26", "si32", "cl36", "ar39", "k40", "ca41", "ca45", "ti44",
       "v49", "mn53", "mn54", "fe55", "fe60", "co60", "ni56", "ni57", "ni59", "ni63"
-    ]
+    ],
+    "engine_branches_to_audit": ["W18", "N20"],
+    "high_mass_outcome_msun": [40.0, 45.0, 50.0, 55.0, 60.0, 70.0, 80.0, 100.0, 120.0],
+    "implosion_wind_rows_per_model": 303,
+    "implosion_known_duplicate_isotopes": ["k40"]
   },
   "release_semantics": {
     "ejecta_column": "gross isotope mass ejected during the terminal supernova explosion in Msun",

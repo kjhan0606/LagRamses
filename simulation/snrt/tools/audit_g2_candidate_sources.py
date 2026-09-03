@@ -60,6 +60,22 @@ DEFAULT_ROOT = SNRT_ROOT.parents[1] / "external" / "g2_candidates"
 DEFAULT_MANIFEST_NAME = "acquisition_manifest_v1.json"
 
 _NUGRID_TABLE = re.compile(r"^H Table: \(M=([^,]+),Z=([^\)]+)\)")
+_REQUIRED_MANIFEST_CANDIDATE_IDS = frozenset(
+    {
+        "limongi_chieffi_2018_cds",
+        "nugrid_set1ext_mesaonly_fryer12_delay",
+        "huscher2025_agb",
+        "boccioli_roberti2026_neutrino_ccsn",
+        "doherty2014_sagb",
+        "stockinger2020_low_mass_ccsn",
+        "sukhbold2016_ccsn",
+        "limongi2024_transition_fates",
+        "roberti2024_ultralowz_ccsn",
+        "heger_woosley2010_popiii",
+        "nubase2020_decay_projection_data",
+    }
+)
+_MIN_MANIFEST_FILE_COUNT = 65
 
 
 class CandidateAuditError(ValueError):
@@ -119,11 +135,34 @@ def _audit_acquisition_manifest(root: Path, manifest_path: Path) -> dict[str, An
     manifest = _read_json(manifest_path)
     mismatches: list[dict[str, Any]] = []
     file_count = 0
-    for candidate in manifest.get("candidates", []):
+    candidates = manifest.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return {
+            "path": str(manifest_path),
+            "exists": True,
+            "status": "fail",
+            "file_count": 0,
+            "mismatches": [{"reason": "candidate_manifest_empty_or_invalid"}],
+            "blocking_reasons": ["acquisition_manifest_candidate_coverage_incomplete"],
+        }
+    candidate_ids: list[str] = []
+    for candidate in candidates:
         if not isinstance(candidate, dict):
             mismatches.append({"reason": "candidate_record_not_object"})
             continue
-        for entry in candidate.get("files", []):
+        candidate_id = candidate.get("candidate_id")
+        if not isinstance(candidate_id, str) or not candidate_id:
+            mismatches.append({"reason": "candidate_id_missing"})
+        else:
+            candidate_ids.append(candidate_id)
+        files = candidate.get("files")
+        if not isinstance(files, list) or not files:
+            mismatches.append({
+                "candidate_id": candidate_id,
+                "reason": "candidate_file_coverage_empty",
+            })
+            continue
+        for entry in files:
             if not isinstance(entry, dict) or not entry.get("path"):
                 mismatches.append({"reason": "file_record_invalid"})
                 continue
@@ -145,13 +184,27 @@ def _audit_acquisition_manifest(root: Path, manifest_path: Path) -> dict[str, An
                         "observed_sha256": digest,
                     }
                 )
+    missing_candidates = sorted(_REQUIRED_MANIFEST_CANDIDATE_IDS - set(candidate_ids))
+    duplicate_candidates = sorted(
+        candidate_id for candidate_id in set(candidate_ids) if candidate_ids.count(candidate_id) > 1
+    )
+    if missing_candidates:
+        mismatches.append({"reason": "required_candidate_missing", "candidate_ids": missing_candidates})
+    if duplicate_candidates:
+        mismatches.append({"reason": "duplicate_candidate_id", "candidate_ids": duplicate_candidates})
+    if file_count < _MIN_MANIFEST_FILE_COUNT:
+        mismatches.append({
+            "reason": "manifest_file_coverage_below_floor",
+            "observed": file_count,
+            "required_minimum": _MIN_MANIFEST_FILE_COUNT,
+        })
     return {
         "path": str(manifest_path),
         "exists": True,
         "status": "pass" if not mismatches else "fail",
         "file_count": file_count,
         "mismatches": mismatches[:20],
-        "blocking_reasons": [] if not mismatches else ["acquisition_manifest_fingerprint_mismatch"],
+        "blocking_reasons": [] if not mismatches else ["acquisition_manifest_coverage_or_fingerprint_mismatch"],
     }
 
 
@@ -524,6 +577,22 @@ def _nugrid_audit(root: Path) -> dict[str, Any]:
     }
 
 
+def _collect_nested_integrity_failures(value: Any, path: str = "") -> list[dict[str, Any]]:
+    """Collect parser failures that must make the aggregate audit non-clean."""
+    failures: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        parse_errors = value.get("parse_errors")
+        if isinstance(parse_errors, list) and parse_errors:
+            failures.append({"path": path or "<root>", "reason": "source_parse_error", "count": len(parse_errors)})
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            failures.extend(_collect_nested_integrity_failures(child, child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            failures.extend(_collect_nested_integrity_failures(child, f"{path}[{index}]"))
+    return failures
+
+
 def audit_candidates(root: Path, manifest_path: Path | None = None) -> dict[str, Any]:
     root = Path(root).resolve()
     manifest = _audit_acquisition_manifest(
@@ -540,6 +609,27 @@ def audit_candidates(root: Path, manifest_path: Path | None = None) -> dict[str,
     limongi_transition = audit_limongi2024_transition_fates(root=root)
     roberti_ultralowz = audit_roberti2024_ultralowz_candidate(root=root)
     heger_woosley_popiii = audit_heger_woosley2010_popiii_candidate(root=root)
+    candidates = {
+        "limongi_chieffi_2018_cds": limongi,
+        "nugrid_set1ext_mesaonly_fryer12_delay": nugrid,
+        "huscher2025_agb": huscher,
+        "boccioli_roberti2026_neutrino_ccsn": boccioli_roberti,
+        "doherty2014_sagb": doherty,
+        "stockinger2020_low_mass_ccsn": stockinger,
+        "sukhbold2016_ccsn": sukhbold,
+        "limongi2024_transition_fates": limongi_transition,
+        "roberti2024_ultralowz_ccsn": roberti_ultralowz,
+        "heger_woosley2010_popiii": heger_woosley_popiii,
+    }
+    audit_failures: list[dict[str, Any]] = []
+    if manifest.get("status") != "pass":
+        audit_failures.append({
+            "path": "acquisition_manifest",
+            "reason": "acquisition_manifest_integrity_failed",
+            "details": manifest.get("blocking_reasons", []),
+        })
+    audit_failures.extend(_collect_nested_integrity_failures(limongi, "candidates.limongi_chieffi_2018_cds"))
+    audit_failures.extend(_collect_nested_integrity_failures(nugrid, "candidates.nugrid_set1ext_mesaonly_fryer12_delay"))
     blockers = [
         "candidate_sources_are_not_approved",
         "no_candidate_is_a_complete_canonical_channel_1_to_3_grid",
@@ -555,26 +645,19 @@ def audit_candidates(root: Path, manifest_path: Path | None = None) -> dict[str,
         "heger_woosley2010_popiii_grid_has_unselected_explosion_piston_and_mixing_parameters_and_no_8_to_10_msun_coverage",
         "source_specific_conversion_and_closure_reports_are_required",
     ]
+    if audit_failures:
+        blockers.append("candidate_input_integrity_audit_failed")
     return {
         "schema": "snrt-g2-candidate-source-audit",
         "schema_version": 1,
         "gate": "G2",
         "root": str(root),
-        "status": "candidate_review_only",
+        "status": "candidate_review_only" if not audit_failures else "candidate_review_blocked_input_integrity",
         "production_ready": False,
         "acquisition_manifest": manifest,
-        "candidates": {
-            "limongi_chieffi_2018_cds": limongi,
-            "nugrid_set1ext_mesaonly_fryer12_delay": nugrid,
-            "huscher2025_agb": huscher,
-            "boccioli_roberti2026_neutrino_ccsn": boccioli_roberti,
-            "doherty2014_sagb": doherty,
-            "stockinger2020_low_mass_ccsn": stockinger,
-            "sukhbold2016_ccsn": sukhbold,
-            "limongi2024_transition_fates": limongi_transition,
-            "roberti2024_ultralowz_ccsn": roberti_ultralowz,
-            "heger_woosley2010_popiii": heger_woosley_popiii,
-        },
+        "input_integrity_passed": not audit_failures,
+        "audit_failures": audit_failures,
+        "candidates": candidates,
         "blockers": blockers,
         "interpretation": (
             "Staged source files are immutable review inputs. No canonical table was generated; "
@@ -619,7 +702,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(text, encoding="utf-8")
     print(text, end="")
-    return 0
+    return 2 if report["audit_failures"] else 0
 
 
 if __name__ == "__main__":

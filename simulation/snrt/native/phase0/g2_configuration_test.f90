@@ -1,7 +1,9 @@
 program g2_configuration_test
   use stellar_enrichment_config, only: stellar_dp, set_enrichment_defaults, &
        read_enrichment_namelist, default_imf_id, population_model_id, &
-       population_binary_ssp, configured_channel_mass_min
+       population_binary_ssp, configured_channel_mass_min, &
+       yield_source_basis_id, yield_basis_per_star_cumulative, &
+       configured_binary_fraction
   implicit none
 
   integer :: unit, ios, failures
@@ -15,8 +17,12 @@ program g2_configuration_test
   call expect(ios == 0, 'configuration fixture opens for writing', failures)
   if (ios == 0) then
      write(unit, '(a)') '&stellar_enrichment_params'
+     write(unit, '(a)') " feedback_mode='channel_resolved',"
      write(unit, '(a)') ' imf_id=2,'
      write(unit, '(a)') " population_model='binary_ssp',"
+     write(unit, '(a)') " yield_source_basis='per_star_cumulative',"
+     write(unit, '(a)') ' imf_mass_min_msun=0.08, imf_mass_max_msun=120.0,'
+     write(unit, '(a)') ' binary_fraction=0.5,'
      write(unit, '(a)') ' channel_mass_min_msun=1.2, 1.0, 8.0, 3.0, 140.0,'
      write(unit, '(a)') ' channel_mass_max_msun=120.0, 8.0, 40.0, 8.0, 260.0,'
      write(unit, '(a)') '/'
@@ -34,6 +40,10 @@ program g2_configuration_test
   call expect(default_imf_id == 2, 'runtime IMF is configuration-driven', failures)
   call expect(population_model_id == population_binary_ssp, &
        'binary population model is configuration-driven', failures)
+  call expect(yield_source_basis_id == yield_basis_per_star_cumulative, &
+       'yield basis is configuration-driven', failures)
+  call expect(abs(configured_binary_fraction-0.5_stellar_dp) < 1.0e-12, &
+       'binary fraction is configuration-driven', failures)
   call expect(abs(configured_channel_mass_min(1) - 1.2_stellar_dp) < 1.0e-12, &
        'channel mass lower bound is configuration-driven', failures)
 
@@ -43,6 +53,13 @@ program g2_configuration_test
   if (ios == 0) then
      write(unit, '(a)') '&stellar_enrichment_params'
      write(unit, '(a)') ' imf_id=99,'
+     write(unit, '(a)') " feedback_mode='channel_resolved',"
+     write(unit, '(a)') " population_model='single_star_ssp',"
+     write(unit, '(a)') " yield_source_basis='per_star_cumulative',"
+     write(unit, '(a)') ' imf_mass_min_msun=0.08, imf_mass_max_msun=120.0,'
+     write(unit, '(a)') ' binary_fraction=0.0,'
+     write(unit, '(a)') ' channel_mass_min_msun=0.8,1.0,8.0,3.0,140.0,'
+     write(unit, '(a)') ' channel_mass_max_msun=120.0,8.0,40.0,8.0,260.0,'
      write(unit, '(a)') '/'
      close(unit)
   end if

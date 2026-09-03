@@ -9,8 +9,9 @@ invented by an adapter.
 The native/phase0 mirror contract is closed with an AGY PASS. The G1
 implementation mirror, six-query Fortran/JAX differential matrix, and final audit are recorded in
 [`agy_g1_reaudit_2026-09-01.md`](agy_g1_reaudit_2026-09-01.md). G2 code
-scaffolding is implemented, but its G2-only AGY audit remains BLOCKED because
-no approved physical full-grid asset has been supplied. Its source-selection
+scaffolding and review-only source staging are implemented. The current G2
+AGY audit gives the engineering path PASS and the scientific path BLOCK
+because no approved physical full-grid asset has been supplied. Its source-selection
 and physical-contract records are
 [`g2_source_selection_matrix_v1.json`](../simulation/snrt/config/g2_source_selection_matrix_v1.json)
 and
@@ -35,6 +36,26 @@ The CC BY 4.0 Boccioli & Roberti 2026 CCSN release is also staged and audited.
 Its F23 branches close internally and improve candidate SNII coverage to
 11--40 Msun, while its LC18 failed-model Wind inconsistency, missing
 machine-readable energetics, and absent age history remain fail-closed.
+The current G2 candidate-source and high-mass projection audits are recorded in
+[`fp1_source_package_selection_plan_2026-09-02.md`](fp1_source_package_selection_plan_2026-09-02.md),
+[`claude_opus5_g2_source_package_staging_final_audit_2026-09-02.md`](claude_opus5_g2_source_package_staging_final_audit_2026-09-02.md),
+and
+[`agy_g2_source_package_staging_audit_2026-09-02.md`](agy_g2_source_package_staging_audit_2026-09-02.md).
+They preserve zero canonical rows and zero runtime deposition; the next step
+requires an explicit project source/physics approval, not a synthetic default.
+The manifest-scoped fingerprint and selection gates now record Sukhbold
+W18/N20 as a review-only validation branch for the 40--120 Msun seam; they
+keep `production_source_id=null` and runtime activation disabled. This is a
+comparison choice, not a physical source approval, and the next conversion
+step remains blocked until the population, age/decay, energy/momentum,
+channel-ownership, and licensing decisions are explicitly closed.
+The F-P2 DTD interval kernel and separate expected-event ledger are now also
+compiled in both the native mirror and production source order, with
+subdivision/restart and mass/energy/momentum closure tests plus a fail-closed
+contract. Its `alpha=-1` shape is a mathematical fixture only; no physical
+DTD normalization or SNIa event yield has been selected. DTD and event-yield
+literature candidate matrices are staged and machine-audited, but neither
+candidate set can authorize runtime activation.
 The CC BY 4.0 Limongi et al. 2024 transition-fate evidence is now pinned and
 audited as a reference rather than a yield source. It shows that the runtime
 8 Msun SNII boundary is not a universal explosion threshold and leaves the
@@ -109,10 +130,13 @@ and takes precedence over the earlier broad “G1 closed” wording below.
   are not reconstructed from the paper. The official Heger--Woosley VizieR
   package is staged for internal scientific review with public redistribution
   still unresolved.
-- The native population ledger checks channel-level ejecta/returned closure,
-  terminal-remnant ownership, and `initial = living + remnant + returned`; the
-  SSP driver carries channel remnant contributions into that ledger. SNIa/PISN
-  activation is fail-closed until their distinct event models exist.
+- The production timestep driver executes the population ledger on the same
+  cumulative SSP states used for each source increment.  It checks
+  channel-level ejecta/returned closure, terminal-remnant ownership,
+  nonnegative living mass, and consistency with the independently advanced
+  RAMSES particle mass.  Production startup uses the same strict yield audit
+  as the native oracle. SNIa/PISN activation remains fail-closed until their
+  distinct event models exist.
 - The Limongi and NuGrid source-specific adapters verify all manifest hashes
   and preserve actual source values and duplicates. Source-internal closure
   diagnostics pass: no Limongi source-yield sum exceeds initial mass; NuGrid
@@ -195,11 +219,29 @@ The first P0 work is compiled-tree closure, not physical-table import:
    [`p0_source_parity_gate_2026-09-02.md`](p0_source_parity_gate_2026-09-02.md).
 2. **P0.2 time and interval semantics (F3/F4):** fix the compiled age unit at
    the table boundary and make cumulative release telescope over variable
-   timesteps, first interval, retry, and restart.
-3. **P0.3 HDF5 state (F5):** round-trip `tpp`, `mp0`, `indtab`, and all stellar
-   release state bitwise.
+   timesteps, first interval, retry, and restart. **Status (2026-09-02):
+   CONDITIONAL PASS.** The implementation and bounded native/production-linked
+   tests pass; closure still requires the committed module set and an explicit
+   cross-step physical-age/restart evidence record.
+3. **P0.3 HDF5 stellar state (F5):** round-trip `ptypep`, `tpp`, `mp0`,
+   `indtab`, and the stellar mass ledgers. **Status: CONDITIONAL PASS.** The
+   linked writer/reader test preserves nonzero release state; final closure is
+   limited to an uninterrupted-versus-restarted physical stellar continuation
+   test. Generic hydro, gravity, AMR, ksection/CPU-box, and checkpoint-reader
+   hardening are not P0.3 blockers and are tracked separately in
+   [`long_term_hdf5_restart_validation_backlog.md`](long_term_hdf5_restart_validation_backlog.md).
 4. **P0.4 fail-closed runtime (F7/F8):** remove embedded fallback, reject
    out-of-domain queries, and make IMF/channel windows and approvals explicit.
+   **Status (2026-09-02): PASS.**  Implementation, production-linked build,
+   production-binary negative execution, and Claude Opus 5 re-audit pass. See
+   [`p04_fail_closed_runtime_gate_2026-09-02.md`](p04_fail_closed_runtime_gate_2026-09-02.md),
+   [`claude_opus5_p04_fail_closed_runtime_audit_2026-09-02.md`](claude_opus5_p04_fail_closed_runtime_audit_2026-09-02.md),
+   [`claude_opus5_p04_fail_closed_runtime_reaudit_2026-09-02.md`](claude_opus5_p04_fail_closed_runtime_reaudit_2026-09-02.md),
+   and the mandatory
+   [`population/DTD roadmap`](feedback_population_dtd_active_roadmap.md).
+   The temporary
+   rejection of `binary_ssp`, SNIa, and PISN is an admission control, not a
+   decision to omit their physics.
 5. **P0.6 executed field/species semantics (F14/F15):** validate the actual
    binary map, prove the `NENER=0` index relations, and close
    H/He/tracked/untracked/energy/delayed-cooling ledgers.
@@ -237,22 +279,50 @@ for every enabled channel.
 
 ### P1 — approve channel physics and AGN bookkeeping
 
-1. Replace the one-point synthetic channel fixture with age-dependent wind and
-   AGB release histories; document whether each table is cumulative or an
-   instantaneous rate and test the conversion.
-2. Specify SNII energy, ejecta, momentum, remnant, and delayed-cooling semantics
+1. **P1.1 population and fate model (mandatory):** select the single/binary
+   population basis, IMF normalization, binary fraction and parameter
+   distribution, metallicity dependence, stellar lifetimes, and mutually
+   exclusive channel/remnant ownership.  Prove that a population-integrated
+   table is not convolved with the IMF a second time.  Replace the one-point
+   synthetic channel fixture with age-dependent wind and AGB release histories;
+   document whether each table is cumulative or an instantaneous rate and test
+   the conversion.
+   **Medium-term 40--120 M☉ seam:** do not close this interval with a universal
+   ZAMS direct-collapse bin. Select a source-node or pre-supernova-structure
+   fate resolver with explicit metallicity, rotation/binary state, engine,
+   lifetime, mass-cell, and PPISN/PISN axes. Reject out-of-hull and all unsafe
+   interpolation. Keep wind, terminal ejecta, failed-collapse envelope
+   ejection, remnant, and pulse history as separate ledger components. This
+   remains blocked until the source package, age/decay/energy/momentum closure,
+   license, sidecar checksum, and approval id are complete. See
+   [`fp1_mass40_120_literature_dossier_2026-09-02.md`](fp1_mass40_120_literature_dossier_2026-09-02.md)
+   and the zero-node resolver contract.
+2. **P1.2 core-collapse channel (mandatory):** specify SNII energy, ejecta,
+   momentum, remnant, failed-explosion/fallback, and delayed-cooling semantics
    together.  Verify that delayed cooling receives only the intended channel
    contribution and that thermal/kinetic energy is not double counted.
-3. Implement/validate SNIa DTD normalization and PISN eligibility separately;
-   do not silently enable either channel.
-4. Audit the AGN coarse-state ledger against the exact accumulator-reset event:
+3. **P1.3 SNIa DTD (mandatory):** implement SNIa as a distinct SSP event-rate
+   convolution.  Select and pin the DTD shape, minimum delay, normalization per
+   initial stellar mass, binary progenitor assumption, metallicity dependence,
+   event yield/energy, and stochastic versus expectation-value realization.
+   Test analytic DTD integrals, timestep telescoping, restart continuity,
+   single-event closure, and population-integrated mass/energy closure.
+4. **P1.4 PISN/PPISN population decision (mandatory gate):** select a
+   stellar-evolution/fate source and implement eligibility in terms of the
+   declared population, metallicity and core mass.  The reviewed scientific
+   configuration may explicitly disable PISN, but only after this gate records
+   why; no universal ZAMS interval or accidental interpolation may activate it.
+5. **P1.5 AGN ledger (mandatory):** audit the AGN coarse-state ledger against
+   the exact accumulator-reset event:
    deduplicate `(nstep_coarse, sink_id)`, resolve conflicts, and close
    accretion, radiative efficiency, `Lbol`, thermal/jet energy, mass, and
    momentum ledgers.  Record how the SED, escape fraction, obscuration, and
    source deposition consume that ledger.
 
-P1 is complete when channel and AGN ledgers close over a restart and the
-transitional baseline can be replayed without ambiguity.
+Each P1 sub-gate receives a separate read-only Claude Opus 5 physics/code
+audit before the next sub-gate starts.  P1 is complete only when the selected
+population model, DTD, channel/fate rules, and AGN ledgers close over a restart
+and the transitional baseline can be replayed without ambiguity.
 
 ### P2 — connect approved stellar/AGN spectra and dust
 

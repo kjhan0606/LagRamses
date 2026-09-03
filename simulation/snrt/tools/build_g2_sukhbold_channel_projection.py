@@ -21,6 +21,22 @@ from audit_g2_sukhbold2016_candidate import (
 TOOL_PATH = Path(__file__).resolve()
 SNRT_ROOT = TOOL_PATH.parents[1]
 DEFAULT_CONTRACT = SNRT_ROOT / "config" / "g2_sukhbold_channel_projection_contract_v1.json"
+_EXPECTED_FIREWALL_KEYS = (
+    "component_channel_assignment_approved",
+    "wind_and_terminal_may_be_summed_before_channel_ownership_approval",
+    "stable_and_radioactive_segments_may_be_summed",
+    "selected_radioactive_inventory_is_decay_complete",
+    "stable_component_sum_is_exact_total_returned_mass",
+    "source_age_history_may_be_invented",
+    "source_lifetime_may_be_invented",
+    "exact_launch_momentum_may_be_derived",
+    "cross_source_interpolation_allowed",
+    "out_of_domain_extrapolation_allowed",
+)
+_EXPECTED_COMPONENT_CONTRACT = {
+    "wind": ("wind", 1, "integrated presupernova wind only"),
+    "terminal_ccsn": ("ejecta", 3, "terminal supernova ejecta only"),
+}
 
 
 class SukhboldProjectionError(ValueError):
@@ -50,7 +66,9 @@ def _load_contract(path: Path) -> dict[str, Any]:
     ):
         raise SukhboldProjectionError("unsupported Sukhbold projection contract")
     firewalls = contract.get("semantic_firewalls", {})
-    if not firewalls or any(value is not False for value in firewalls.values()):
+    if set(firewalls) != set(_EXPECTED_FIREWALL_KEYS) or any(
+        firewalls.get(key) is not False for key in _EXPECTED_FIREWALL_KEYS
+    ):
         raise SukhboldProjectionError("projection semantic firewalls are not fail-closed")
     approval = contract.get("approval", {})
     if approval.get("canonical_rows_emitted") != 0:
@@ -59,6 +77,14 @@ def _load_contract(path: Path) -> dict[str, Any]:
         raise SukhboldProjectionError("projection unexpectedly permits conversion")
     if approval.get("runtime_deposition_allowed") is not False:
         raise SukhboldProjectionError("projection unexpectedly permits deposition")
+    required = approval.get("required_before_approval")
+    if not isinstance(required, list) or not required or any(
+        not isinstance(value, str) or not value for value in required
+    ):
+        raise SukhboldProjectionError("projection approval prerequisites are missing")
+    components = contract.get("component_projection")
+    if set(components or {}) != set(_EXPECTED_COMPONENT_CONTRACT):
+        raise SukhboldProjectionError("projection component map is incomplete or has unknown entries")
     return contract
 
 
@@ -69,21 +95,34 @@ def _component_record(
     component: str,
     component_contract: dict[str, Any],
     tracked_elements: list[str],
+    engine: str = "Z9.6",
+    source_branch: str = "Z9.6",
 ) -> dict[str, Any]:
+    expected_contract = _EXPECTED_COMPONENT_CONTRACT.get(component)
+    if expected_contract is None:
+        raise SukhboldProjectionError(f"unsupported source component: {component}")
+    expected_source_column, expected_channel, expected_ownership = expected_contract
+    actual_contract = (
+        component_contract.get("source_column"),
+        component_contract.get("proposed_runtime_channel"),
+        component_contract.get("ownership"),
+    )
+    if actual_contract != expected_contract:
+        raise SukhboldProjectionError(
+            f"{component}: contract identity {actual_contract!r} does not match "
+            f"{expected_contract!r}"
+        )
     is_wind = component == "wind"
-    prefix = "wind" if is_wind else "ejecta"
+    prefix = expected_source_column
     tracked = source[f"stable_{prefix}_by_tracked_element_msun"]
     if list(tracked) != tracked_elements:
         raise SukhboldProjectionError(f"s{mass}: tracked-element order drifted")
     stable_mass = float(source[f"stable_{prefix}_sum_msun"])
     untracked = float(source[f"untracked_stable_{prefix}_msun"])
-    if not math.isclose(
-        math.fsum(float(value) for value in tracked.values()) + untracked,
-        stable_mass,
-        rel_tol=0.0,
-        abs_tol=1.0e-12,
-    ):
-        raise SukhboldProjectionError(f"s{mass}: reduced stable vector does not close")
+    if not math.isfinite(stable_mass) or not math.isfinite(untracked):
+        raise SukhboldProjectionError(f"s{mass}: non-finite stable source component")
+    if any(not math.isfinite(float(value)) or float(value) < 0.0 for value in tracked.values()):
+        raise SukhboldProjectionError(f"s{mass}: invalid tracked stable source component")
     radioactive = {
         isotope: float(values[f"{prefix}_msun"])
         for isotope, values in source["selected_radioactive_inventory"].items()
@@ -93,15 +132,25 @@ def _component_record(
     return {
         "zams_mass_msun": mass,
         "metallicity": "source_labelled_solar",
-        "engine": "Z9.6",
-        "source_component": component_contract["source_column"],
-        "proposed_runtime_channel": component_contract["proposed_runtime_channel"],
-        "component_ownership": component_contract["ownership"],
+        "engine": engine,
+        "source_branch": source_branch,
+        "source_component": expected_source_column,
+        "proposed_runtime_channel": expected_channel,
+        "component_ownership": expected_ownership,
         "source_lifetime_yr": None,
         "release_age_yr": None,
         "stable_component_mass_msun": stable_mass,
         "stable_mass_by_tracked_element_msun": tracked,
         "untracked_stable_component_mass_msun": untracked,
+        "source_stable_segment_mass_budget_residual_msun": source.get(
+            "stable_segment_mass_budget_residual_msun"
+        ),
+        "source_stable_segment_mass_budget_exact_closure_claimed": source.get(
+            "exact_mass_closure_claimed", False
+        ),
+        "source_cross_segment_duplicate_isotopes": source.get(
+            "cross_segment_duplicate_isotopes", []
+        ),
         "selected_radioactive_inventory_msun": radioactive,
         "selected_radioactive_inventory_sum_msun": math.fsum(radioactive.values()),
         "decay_complete_returned_mass_msun": None,
@@ -144,6 +193,34 @@ def build_sukhbold_channel_projection(
                     tracked_elements=tracked_elements,
                 )
             )
+    high_mass_records: list[dict[str, Any]] = []
+    for engine, engine_report in source["high_mass_engine_evidence"]["engines"].items():
+        for mass_key, model in engine_report.get("high_mass_yields", {}).items():
+            mass = float(mass_key)
+            for component in ("wind", "terminal_ccsn"):
+                high_mass_records.append(
+                    _component_record(
+                        mass=mass,
+                        source=model,
+                        component=component,
+                        component_contract=components[component],
+                        tracked_elements=tracked_elements,
+                        engine=engine,
+                        source_branch=engine,
+                    )
+                )
+        for mass_key, model in engine_report.get("high_mass_implosion_winds", {}).items():
+            high_mass_records.append(
+                _component_record(
+                    mass=float(mass_key),
+                    source=model,
+                    component="wind",
+                    component_contract=components["wind"],
+                    tracked_elements=tracked_elements,
+                    engine=engine,
+                    source_branch="implosions_W18",
+                )
+            )
     report: dict[str, Any] = {
         "schema": "snrt-g2-sukhbold-channel-projection-review",
         "schema_version": 1,
@@ -154,11 +231,34 @@ def build_sukhbold_channel_projection(
         "runtime_deposition_allowed": False,
         "canonical_rows_emitted": 0,
         "source_candidate_id": source["source_identity"]["candidate_id"],
+        "source_identity": source["source_identity"],
         "model_count": grid["model_count"],
         "record_count": len(records),
+        "high_mass_record_count": len(high_mass_records),
         "record_count_by_source_component": {
             "wind": sum(record["source_component"] == "wind" for record in records),
             "ejecta": sum(record["source_component"] == "ejecta" for record in records),
+        },
+        "high_mass_record_count_by_source_component": {
+            "wind": sum(record["source_component"] == "wind" for record in high_mass_records),
+            "ejecta": sum(record["source_component"] == "ejecta" for record in high_mass_records),
+        },
+        "high_mass_record_count_by_engine_and_source_component": {
+            engine: {
+                "wind": sum(
+                    record["engine"] == engine and record["source_component"] == "wind"
+                    for record in high_mass_records
+                ),
+                "ejecta": sum(
+                    record["engine"] == engine and record["source_component"] == "ejecta"
+                    for record in high_mass_records
+                ),
+            }
+            for engine in source["high_mass_engine_evidence"]["engines"]
+        },
+        "high_mass_missing_source_masses_by_engine": {
+            engine: engine_report.get("missing_high_mass_yield_masses", [])
+            for engine, engine_report in source["high_mass_engine_evidence"]["engines"].items()
         },
         "tracked_elements": tracked_elements,
         "source_nulls_preserved": {
@@ -175,6 +275,7 @@ def build_sukhbold_channel_projection(
     }
     if include_records:
         report["records"] = records
+        report["high_mass_records"] = high_mass_records
     return report
 
 

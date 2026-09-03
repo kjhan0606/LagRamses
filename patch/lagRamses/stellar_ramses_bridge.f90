@@ -6,7 +6,8 @@
 
 module stellar_ramses_bridge
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements
-  use stellar_enrichment_contract, only: stellar_source_t
+  use stellar_enrichment_contract, only: stellar_source_t, &
+       generic_metal_ejecta_mass
   implicit none
 
   private
@@ -22,7 +23,7 @@ contains
 
   subroutine deposit_source_to_uold(source, nvar, n_cells, cell_volume, &
        weights, density_var, energy_var, momentum_var, element_var, uold, &
-       tolerance, ierr)
+       tolerance, ierr, total_metal_var)
     type(stellar_source_t), intent(in) :: source
     integer, intent(in) :: nvar, n_cells
     real(stellar_dp), intent(in) :: cell_volume(n_cells)
@@ -33,9 +34,11 @@ contains
     real(stellar_dp), intent(inout) :: uold(nvar,n_cells)
     real(stellar_dp), intent(in) :: tolerance
     integer, intent(out) :: ierr
+    integer, intent(in), optional :: total_metal_var
 
     real(stellar_dp) :: tol, weight_sum, ejected_sum, scale
     real(stellar_dp) :: normalized_weight, cell_mass, element_mass
+    real(stellar_dp) :: generic_metal_mass
     integer :: cell, element
 
     ierr = ramses_bridge_ok
@@ -56,31 +59,44 @@ contains
        ierr = ramses_bridge_err_index
        return
     end if
+    if (present(total_metal_var)) then
+       if (total_metal_var < 0 .or. total_metal_var > nvar) then
+          ierr = ramses_bridge_err_index
+          return
+       end if
+    end if
 
     weight_sum = sum(weights)
     if (weight_sum <= 0.0_stellar_dp) then
        ierr = ramses_bridge_err_argument
        return
     end if
-    if (source%returned_mass < -tol .or. &
-         minval(source%ejected_mass) < -tol) then
+    ejected_sum = sum(source%ejected_mass)
+    scale = max(tiny(1.0_stellar_dp), abs(source%returned_mass), &
+         abs(ejected_sum))
+    if (source%returned_mass < -tol * scale .or. &
+         minval(source%ejected_mass) < -tol * scale) then
        ierr = ramses_bridge_err_source
        return
     end if
-
-    ejected_sum = sum(source%ejected_mass)
-    scale = max(1.0_stellar_dp, abs(source%returned_mass), &
-         abs(ejected_sum))
-    if (abs(ejected_sum - source%returned_mass) > tol * scale) then
+    if (ejected_sum > source%returned_mass + tol * scale) then
        ierr = ramses_bridge_err_closure
        return
     end if
+    generic_metal_mass = generic_metal_ejecta_mass(source%returned_mass, &
+         source%ejected_mass)
 
     ! All validation is completed before uold is modified.
     do cell = 1, n_cells
        normalized_weight = weights(cell) / weight_sum
        cell_mass = normalized_weight * source%returned_mass / cell_volume(cell)
        uold(density_var,cell) = uold(density_var,cell) + cell_mass
+       if (present(total_metal_var)) then
+          if (total_metal_var > 0) then
+             uold(total_metal_var,cell) = uold(total_metal_var,cell) + &
+                  normalized_weight * generic_metal_mass / cell_volume(cell)
+          end if
+       end if
 
        do element = 1, n_stellar_elements
           if (element_var(element) == 0) cycle

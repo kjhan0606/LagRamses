@@ -1,0 +1,55 @@
+{
+  "schema": "snrt-fp1-fate-admission-sidecar",
+  "schema_version": 1,
+  "gate": "F-P1",
+  "status": "blocked_review_only",
+  "purpose": "Checksum and admission record for the explicit F-P1 fate map; this file does not supply physical fate values.",
+  "artifacts": {
+    "fate_map": {
+      "path": "config/fp1_population_fate_map_v1.json",
+      "sha256": "0145b49b334781a969c2014c314c075e5bfb2c2fa73e46afe84158e98d41d6b4"
+    },
+    "resolver_contract": {
+      "path": "config/fp1_fate_resolver_contract_v1.json",
+      "sha256": "3681835efde788123f5b32d13cf3d0d85b4cc58f8e06d97fc7f1fbffc79f4f18"
+    },
+    "source_contract": {
+      "path": "config/stellar_feedback_contract_v1.json",
+      "sha256": "94660191a8c1f293859a5af81f37e5767f98cf712187b482e18a885a1b7888b1"
+    },
+    "physics_contract": {
+      "path": "config/g2_physics_contract_v1.json",
+      "sha256": "e53e37ee3011e0564e2e92f54daa72c64954174e2178daaa6f7a9b0e1611f886"
+    }
+  },
+  "runtime_unresolved_intervals": [
+    {
+      "id": "low_mass_lifetime_seam",
+      "mass_msun": [0.8, 1.0]
+    },
+    {
+      "id": "massive_terminal_fate_seam",
+      "mass_msun": [40.0, 120.0]
+    }
+  ],
+  "runtime_unresolved_mass_bucket": {
+    "implemented": true,
+    "implementation": "stellar_population_ledger.compute_unresolved_mass_bucket",
+    "interval_source": "fp1_population_fate_map_v1",
+    "deposition_allowed": false,
+    "closure_included": false,
+    "meaning": "IMF-weighted initial stellar mass in unresolved intervals; diagnostic only"
+  },
+  "approval": {
+    "approval_id": null,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "publication_ready": false
+  },
+  "required_for_promotion": [
+    "approved source-node fate records for every unresolved interval",
+    "exact source provenance and source-package checksum",
+    "explicit lifetime, wind, terminal ejecta, remnant, and decay semantics",
+    "independent physics audit and production-linked smoke evidence"
+  ]
+}

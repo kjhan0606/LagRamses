@@ -957,12 +957,24 @@ subroutine output_info(filename)
   use hydro_commons
   use pm_commons
 #ifdef PHASE0_STELLAR_ENRICHMENT
-  use stellar_enrichment_config, only: stellar_feedback_mode
+  use stellar_enrichment_config, only: stellar_feedback_mode, default_imf_id, &
+       population_model_id, configured_channel_mass_min, &
+       configured_channel_mass_max, n_stellar_channels, active_element, &
+       n_stellar_elements, enable_wind, enable_agb, enable_snii, enable_snia, &
+       enable_pisn, yield_source_basis_name, configured_imf_mass_min, &
+       configured_imf_mass_max, configured_binary_fraction, stellar_fate_policy, &
+       stellar_fate_map_sha256, stellar_fate_approval_id
+  use stellar_ramses_runtime, only: phase0_get_runtime_identity
 #endif
   implicit none
   character(LEN=80)::filename
 
   integer::nx_loc,ny_loc,nz_loc,ilun,icpu,idom
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  integer::stellar_channel,stellar_table_rows,stellar_element
+  character(LEN=1024)::stellar_table_path
+  logical::stellar_table_loaded
+#endif
   real(dp)::scale
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   character(LEN=80)::fileloc
@@ -1008,7 +1020,34 @@ subroutine output_info(filename)
   write(ilun,'("unit_d      =",E23.15)')scale_d
   write(ilun,'("unit_t      =",E23.15)')scale_t
 #ifdef PHASE0_STELLAR_ENRICHMENT
-  write(ilun,'("feedback_mode=",A32)')trim(stellar_feedback_mode)
+  write(ilun,'("feedback_mode=",A)')trim(stellar_feedback_mode)
+  write(ilun,'("stellar_imf_id=",I11)')default_imf_id
+  write(ilun,'("stellar_population_model_id=",I11)')population_model_id
+  write(ilun,'("stellar_yield_source_basis=",A)')trim(yield_source_basis_name())
+  write(ilun,'("stellar_imf_mass_support=",2(1X,E23.15))') &
+       configured_imf_mass_min,configured_imf_mass_max
+  write(ilun,'("stellar_binary_fraction=",E23.15)')configured_binary_fraction
+  write(ilun,'("stellar_terminal_fate_policy=",A)')trim(stellar_fate_policy)
+  write(ilun,'("stellar_fate_map_sha256=",A)')trim(stellar_fate_map_sha256)
+  write(ilun,'("stellar_fate_approval_id=",A)')trim(stellar_fate_approval_id)
+  write(ilun,'("stellar_channel_enabled=",5(1X,L1))')enable_wind,enable_agb, &
+       enable_snii,enable_snia,enable_pisn
+  write(ilun,'("stellar_active_elements=",11(1X,L1))') &
+       (active_element(stellar_element),stellar_element=1,n_stellar_elements)
+  do stellar_channel=1,n_stellar_channels
+     write(ilun,'("stellar_channel_mass_window=",I2,2(1X,E23.15))') &
+          stellar_channel,configured_channel_mass_min(stellar_channel), &
+          configured_channel_mass_max(stellar_channel)
+  end do
+  call phase0_get_runtime_identity(stellar_table_path,stellar_table_rows, &
+       stellar_table_loaded)
+  write(ilun,'("phase0_yield_table_loaded=",L1)')stellar_table_loaded
+  write(ilun,'("phase0_yield_table_rows=",I11)')stellar_table_rows
+  if(stellar_table_loaded .and. len_trim(stellar_table_path)>0)then
+     write(ilun,'("phase0_yield_table=",A)')trim(stellar_table_path)
+  else
+     write(ilun,'("phase0_yield_table=<not_loaded>")')
+  endif
 #endif
   write(ilun,*)
   

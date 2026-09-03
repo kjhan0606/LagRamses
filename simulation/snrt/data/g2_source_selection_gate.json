@@ -1,0 +1,35 @@
+{
+  "schema": "snrt-g2-source-selection-gate",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_validation_branch_recorded",
+  "production_ready": false,
+  "runtime_activation_allowed": false,
+  "matrix": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_selection_matrix_v1.json",
+  "fingerprint_audit": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_source_package_fingerprint_audit.json",
+  "matrix_candidate_count": 16,
+  "fingerprint_candidate_count": 11,
+  "fingerprint_file_count": 65,
+  "fingerprint_input_integrity_passed": true,
+  "review_validation_branch": {
+    "candidate_id": "sukhbold2016_ccsn",
+    "status": "review_only_not_production",
+    "matrix_status": "candidate_acquired_energy_yields_terms_audited_not_approved",
+    "composite_sha256": "11e2988969f69da9fb3f6939af9bbd3f0f26afd4420cd676d27a05b30486aa60",
+    "approval_id": null,
+    "basis": "First engine-specific solar-metallicity validation branch for the 40--120 Msun terminal-fate seam; W18/N20 outcomes remain source-comparison evidence and do not define a production fate law."
+  },
+  "production_source_id": null,
+  "production_approval_id": null,
+  "audit_failures": [],
+  "blockers": [
+    "review_validation_branch_is_not_a_production_source",
+    "no_explicit_physical_source_and_population_approval",
+    "canonical_age_decay_energy_momentum_and_channel_closure_incomplete",
+    "license_and_redistribution_terms_are_not_closed_for_all_required_channels",
+    "validation_branch_is_solar_metallicity_only",
+    "validation_branch_has_no_age_resolved_presupernova_wind_history",
+    "validation_branch_has_no_canonical_momentum_or_complete_decay_inventory"
+  ],
+  "interpretation": "Sukhbold W18/N20 is registered only as a comparison/validation branch. This gate deliberately records no production source and cannot authorize canonical conversion or runtime deposition."
+}

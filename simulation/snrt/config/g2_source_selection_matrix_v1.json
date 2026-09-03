@@ -6,7 +6,16 @@
   "purpose": "Record independently reviewable source candidates before any physical values are promoted into the canonical table.",
   "approval_rule": "No candidate is an approved production source until the source file, license, citation, conversion procedure, checksum, and channel-specific closure report are present.",
   "candidate_acquisition_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+  "candidate_package_fingerprint_audit": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_source_package_fingerprint_audit.json",
+  "candidate_package_fingerprint_scheme": "sha256(candidate_id + NUL + sorted UTF-8 records path + NUL + bytes + NUL + file_sha256 + LF); manifest-scoped review fingerprint only; not a redistribution/package identity claim",
   "source_semantics_evidence": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_semantics_evidence_v1.json",
+  "review_selection": {
+    "validation_branch": "sukhbold2016_ccsn",
+    "validation_branch_status": "review_only_not_production",
+    "production_source_id": null,
+    "production_approval_id": null,
+    "basis": "First engine-specific solar-metallicity validation branch for the 40--120 Msun terminal-fate seam; W18/N20 outcomes remain source-comparison evidence and do not define a production fate law."
+  },
   "canonical_contract": {
     "table": "canonical_phase0_ascii",
     "age_on_disk": "yr",

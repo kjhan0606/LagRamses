@@ -12,15 +12,21 @@ module stellar_ramses_runtime
   use hydro_commons
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        active_element, enable_pisn, &
-       default_imf_id, population_model_id, configured_channel_mass_min, &
-       configured_channel_mass_max, channel_owns_terminal_remnant
+       default_imf_id, population_model_id, yield_source_basis_id, &
+       configured_imf_mass_min, configured_imf_mass_max, &
+       configured_binary_fraction, configured_channel_mass_min, &
+       configured_channel_mass_max, channel_owns_terminal_remnant, &
+       production_source_model_supported
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_source_t, delayed_cooling_source_mass, untracked_ejecta_mass, &
        generic_metal_ejecta_mass
-  use stellar_yield_tables, only: stellar_yield_table_t
+  use stellar_yield_tables, only: stellar_yield_table_t, &
+       set_yield_mass_assignment_mode, yield_mass_assignment_piecewise_constant, &
+       yield_table_ok
   use stellar_yield_backend, only: load_yield_backend, backend_ok
   use stellar_yield_audit, only: audit_yield_table
   use stellar_enrichment_driver, only: compute_stellar_source_increment
+  use stellar_population_ledger, only: stellar_population_ledger_t
   use stellar_native_units, only: code_time_to_age_gyr, &
        code_interval_to_age_gyr, mass_code_to_msun, mass_msun_to_code, &
        momentum_cgs_to_code, energy_erg_to_code, units_ok
@@ -50,7 +56,7 @@ contains
   subroutine phase0_initialize(ierr)
     integer, intent(out) :: ierr
     character(len=1024) :: filename
-    integer :: status, table_ierr, audit_ierr, element
+    integer :: status, table_ierr, audit_ierr, assignment_ierr, element
     logical :: exists
 
     if (initialized .or. initialization_ierr /= 0) then
@@ -59,6 +65,13 @@ contains
     end if
 
     ierr = 0
+    if (.not. production_source_model_supported()) then
+       ierr = 3
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) &
+            'Phase 0 source model is not implemented for production'
+       return
+    end if
     call get_environment_variable('PHASE0_YIELD_TABLE', filename, status=status)
     if (status /= 0 .or. len_trim(filename) == 0) then
        ! Production startup must name the approved external table explicitly.
@@ -82,6 +95,19 @@ contains
        ierr = 10 + table_ierr
        initialization_ierr = ierr
        if (myid == 1) write(*,*) 'Phase 0 yield table load failed: ', table_ierr
+       return
+    end if
+    ! Production source evaluation must not invent terminal outcomes between
+    ! discrete source mass nodes.  The mode affects only mass assignment;
+    ! metallicity, age, and any source-node fate axes remain independently
+    ! governed by their resolver contracts.
+    call set_yield_mass_assignment_mode(yield_table, &
+         yield_mass_assignment_piecewise_constant, assignment_ierr)
+    if (assignment_ierr /= yield_table_ok) then
+       ierr = 11
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) &
+            'Phase 0 source-cell mass assignment mode is invalid: ', assignment_ierr
        return
     end if
     call audit_yield_table(yield_table, 1.0d-8, audit_ierr, .true., &
@@ -126,6 +152,7 @@ contains
        write(*,*) '  table rows = ', yield_table%n_rows
        write(*,*) '  total-metal field = ', imetal
        write(*,*) '  first element field = ', ichem
+       write(*,*) '  mass assignment = piecewise source-cell'
     end if
   end subroutine phase0_initialize
 
@@ -165,14 +192,17 @@ contains
     integer, intent(out) :: ierr
     type(stellar_population_t) :: population
     type(stellar_source_t) :: source
+    type(stellar_population_ledger_t) :: population_ledger
     type(stellar_progress_t) :: progress
-    real(stellar_dp) :: age_code, code_dt, age_gyr, dt_gyr
+    real(stellar_dp) :: age_code, code_dt, previous_age_gyr, age_gyr, dt_gyr
     real(stellar_dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
     real(stellar_dp) :: scale_mass, scale_momentum, scale_energy
     real(stellar_dp) :: returned_code, snii_returned_code, volume, energy_density
     real(stellar_dp) :: energy_code, source_momentum_code(3)
     real(stellar_dp) :: ejecta_code(n_stellar_elements), metal_ejecta_code
     real(stellar_dp) :: untracked_ejecta_msun, metal_ejecta_msun
+    real(stellar_dp) :: ledger_remaining_code, ledger_scale
+    real(stellar_dp) :: particle_mass_scale
     real(stellar_dp) :: bulk_energy, bulk_momentum(3)
     integer :: source_ierr, target_cell, idim, element
     integer :: units_ierr, progress_ierr
@@ -218,10 +248,17 @@ contains
        ierr = 44
        return
     end if
+    call code_time_to_age_gyr(progress%committed_age_code, scale_t, aexp, &
+         previous_age_gyr, units_ierr)
+    if (units_ierr /= units_ok) then
+       call progress_abort(progress, progress_ierr)
+       ierr = 45
+       return
+    end if
     call code_interval_to_age_gyr(code_dt, scale_t, aexp, dt_gyr, units_ierr)
     if (units_ierr /= units_ok .or. dt_gyr <= 0.0d0) then
        call progress_abort(progress, progress_ierr)
-       ierr = 45
+       ierr = 46
        return
     end if
 
@@ -230,7 +267,7 @@ contains
          units_ierr)
     if (units_ierr /= units_ok) then
        call progress_abort(progress, progress_ierr)
-       ierr = 46
+       ierr = 47
        return
     end if
     call mass_code_to_msun(mp(ipart), scale_mass, population%current_mass, &
@@ -238,33 +275,38 @@ contains
     if (units_ierr /= units_ok .or. population%initial_mass < 0.0d0 .or. &
          population%current_mass < 0.0d0) then
        call progress_abort(progress, progress_ierr)
-       ierr = 47
+       ierr = 48
        return
     end if
     if (.not. ieee_is_finite(zp(ipart)) .or. zp(ipart) < 0.0d0) then
        call progress_abort(progress, progress_ierr)
-       ierr = 48
+       ierr = 49
        return
     end if
     population%birth_metallicity = zp(ipart)
     population%birth_mass_fraction = 0.0d0
     population%imf_id = default_imf_id
+    population%imf_mass_min = configured_imf_mass_min
+    population%imf_mass_max = configured_imf_mass_max
     population%population_id = population_model_id
+    population%binary_fraction = configured_binary_fraction
+    population%yield_basis_id = yield_source_basis_id
     population%pisn_enabled = enable_pisn
     if (population%initial_mass <= 0.0d0) then
        call progress_commit(progress, progress_ierr)
        if (progress_ierr /= progress_ok) then
-          ierr = 49
+          ierr = 50
           return
        end if
        call progress_export(progress, indtab(ipart), progress_ierr)
-       if (progress_ierr /= progress_ok) ierr = 49
+       if (progress_ierr /= progress_ok) ierr = 50
        return
     end if
 
-    call compute_stellar_source_increment(yield_table, population, age_gyr, &
-         dt_gyr, configured_channel_mass_min, configured_channel_mass_max, &
-         phase0_mass_bins, source, source_ierr)
+    call compute_stellar_source_increment(yield_table, population, &
+         previous_age_gyr, age_gyr, configured_channel_mass_min, &
+         configured_channel_mass_max, &
+         phase0_mass_bins, source, source_ierr, population_ledger)
     if (source_ierr /= 0) then
        call progress_abort(progress, progress_ierr)
        ierr = 50 + source_ierr
@@ -279,14 +321,30 @@ contains
        ierr = 59
        return
     end if
-    if (returned_code < -source_tolerance .or. returned_code > &
-         mp(ipart) * (1.0d0 + source_tolerance)) then
+    particle_mass_scale = max(abs(mp0(ipart)), tiny(1.0d0))
+    if (returned_code < -source_tolerance * particle_mass_scale .or. &
+         returned_code > mp(ipart) + source_tolerance * particle_mass_scale) then
        call progress_abort(progress, progress_ierr)
        ierr = 60
        if (myid == 1) write(*,*) 'Phase 0 returned mass violates star ledger'
        return
     end if
     returned_code = max(0.0d0, min(returned_code, mp(ipart)))
+    call mass_msun_to_code(population_ledger%living_mass + &
+         population_ledger%remnant_mass, scale_mass, ledger_remaining_code, &
+         units_ierr)
+    ledger_scale = max(particle_mass_scale, abs(mp(ipart)), &
+         abs(ledger_remaining_code))
+    if (units_ierr /= units_ok .or. &
+         ledger_remaining_code < -source_tolerance * particle_mass_scale .or. &
+         abs(mp(ipart)-returned_code-ledger_remaining_code) > &
+         source_tolerance * ledger_scale) then
+       call progress_abort(progress, progress_ierr)
+       ierr = 72
+       if (myid == 1) write(*,*) &
+            'Phase 0 cumulative population ledger does not match particle mass'
+       return
+    end if
     call mass_msun_to_code(delayed_cooling_source_mass(source), scale_mass, &
          snii_returned_code, units_ierr)
     if (units_ierr /= units_ok) then
@@ -294,9 +352,9 @@ contains
        ierr = 62
        return
     end if
-    if (snii_returned_code < -source_tolerance .or. &
-         snii_returned_code > returned_code * (1.0d0 + source_tolerance) + &
-         source_tolerance) then
+    if (snii_returned_code < -source_tolerance * particle_mass_scale .or. &
+         snii_returned_code > returned_code + &
+         source_tolerance * particle_mass_scale) then
        call progress_abort(progress, progress_ierr)
        ierr = 63
        if (myid == 1) write(*,*) 'Phase 0 SNII return violates channel ledger'
@@ -312,7 +370,7 @@ contains
           return
        end if
     end do
-    if (any(ejecta_code < -source_tolerance)) then
+    if (any(ejecta_code < -source_tolerance * particle_mass_scale)) then
        call progress_abort(progress, progress_ierr)
        ierr = 65
        return
@@ -321,7 +379,8 @@ contains
     untracked_ejecta_msun = untracked_ejecta_mass(source%returned_mass, &
          source%ejected_mass)
     if (untracked_ejecta_msun < -source_tolerance * &
-         max(1.0d0, abs(source%returned_mass))) then
+         max(population%initial_mass, abs(source%returned_mass), &
+         tiny(1.0d0))) then
        call progress_abort(progress, progress_ierr)
        ierr = 65
        if (myid == 1) write(*,*) &

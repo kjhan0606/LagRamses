@@ -1,8 +1,34 @@
 program ramses
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_enrichment_config, only: use_channel_resolved_feedback
+  use stellar_ramses_runtime, only: phase0_initialize
+#endif
   implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  integer :: phase0_ierr, phase0_mpi_ierr
+#endif
 
   ! Read run parameters
   call read_params
+
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  ! Validate the selected feedback source before allocating ICs or advancing
+  ! the hydro state.  The cached initialization is reused by feedback calls.
+  if(use_channel_resolved_feedback())then
+     call phase0_initialize(phase0_ierr)
+     if(phase0_ierr/=0)then
+        write(*,*)'Phase 0 startup preflight failed: ',phase0_ierr
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,phase0_ierr,phase0_mpi_ierr)
+#else
+        error stop 1
+#endif
+     endif
+  endif
+#endif
 
   ! Set signal handler
   call set_signal_handler
@@ -40,4 +66,3 @@ subroutine output_signal
   output_now = .true.
 
 end subroutine output_signal
-

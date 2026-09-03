@@ -3,17 +3,22 @@ program g2_population_ledger_test
   use stellar_enrichment_config, only: stellar_dp, n_stellar_channels, &
        n_stellar_elements, &
        set_enrichment_defaults, enable_wind, enable_agb, enable_snii, &
-       enable_snia
+       enable_snia, yield_basis_per_star_cumulative, yield_basis_ssp_cumulative
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, stellar_source_t, untracked_ejecta_mass, &
        generic_metal_ejecta_mass
   use stellar_population_ledger, only: stellar_population_ledger_t, &
        finalize_population_ledger, &
+       compute_unresolved_mass_bucket, &
        population_ledger_ok, population_ledger_err_mass, &
-       population_ledger_err_owner, population_ledger_err_nonfinite
+       population_ledger_err_owner, population_ledger_err_nonfinite, &
+       population_ledger_err_argument
   use stellar_yield_tables, only: stellar_yield_table_t, clear_yield_table
   use stellar_enrichment_driver, only: compute_stellar_source_increment, &
-       compute_stellar_cumulative, enrichment_driver_err_unsupported
+       compute_stellar_cumulative, enrichment_driver_err_unsupported, &
+       enrichment_driver_err_ledger
+  use stellar_ssp_sources, only: integrate_ssp_channel, calculate_imf_normalization, &
+       evaluate_imf, ssp_source_err_basis
   implicit none
 
   type(stellar_population_t) :: population
@@ -27,7 +32,10 @@ program g2_population_ledger_test
   real(stellar_dp) :: channel_mass_min(n_stellar_channels)
   real(stellar_dp) :: channel_mass_max(n_stellar_channels)
   real(stellar_dp) :: chemistry_probe(n_stellar_elements)
-  integer :: ierr, failures, channel
+  real(stellar_dp) :: normalization, normalization_truncated, mass_integral
+  real(stellar_dp) :: unresolved_fraction, unresolved_bucket
+  real(stellar_dp) :: overlapping_min(2), overlapping_max(2)
+  integer :: ierr, failures, channel, imf, row
   type(stellar_source_t) :: source
 
   failures = 0
@@ -38,7 +46,11 @@ program g2_population_ledger_test
   population%birth_metallicity = 1.0e-3_stellar_dp
   population%birth_mass_fraction = 0.0_stellar_dp
   population%imf_id = 1
+  population%imf_mass_min = 0.08_stellar_dp
+  population%imf_mass_max = 120.0_stellar_dp
   population%population_id = 0
+  population%binary_fraction = 0.0_stellar_dp
+  population%yield_basis_id = yield_basis_per_star_cumulative
   population%pisn_enabled = .false.
 
   do channel = 1, n_stellar_channels
@@ -76,6 +88,22 @@ program g2_population_ledger_test
        'population mass closure residual is zero', failures)
   call expect_close(ledger%untracked_ejecta_mass, 0.0_stellar_dp, &
        'fully tracked synthetic states have zero untracked residual', failures)
+  call expect(ledger%unresolved_initial_mass_fraction > 0.1178_stellar_dp .and. &
+       ledger%unresolved_initial_mass_fraction < 0.1180_stellar_dp, &
+       'unresolved fate bucket is computed from the configured IMF', failures)
+  call expect_close(ledger%unresolved_initial_mass, &
+       population%initial_mass * ledger%unresolved_initial_mass_fraction, &
+       'unresolved fate bucket remains an initial-mass diagnostic', failures)
+  overlapping_min = (/0.8_stellar_dp, 0.9_stellar_dp/)
+  overlapping_max = (/1.0_stellar_dp, 1.1_stellar_dp/)
+  call compute_unresolved_mass_bucket(population, overlapping_min, &
+       overlapping_max, 2, unresolved_fraction, unresolved_bucket, ierr)
+  call expect(ierr == population_ledger_err_argument, &
+       'overlapping unresolved intervals are rejected', failures)
+  call compute_unresolved_mass_bucket(population, (/0.8d0, 40.0d0/), &
+       (/1.0d0, 120.0d0/), 2, unresolved_fraction, unresolved_bucket, ierr)
+  call expect(ierr == population_ledger_ok, &
+       'explicit unresolved interval bucket succeeds', failures)
 
   chemistry_probe = 0.0_stellar_dp
   chemistry_probe(1) = 4.0_stellar_dp
@@ -104,6 +132,61 @@ program g2_population_ledger_test
   call expect(driver_ledger%remnant_mass > 0.0_stellar_dp .and. &
        driver_ledger%living_mass >= 0.0_stellar_dp, &
        'SSP driver ledger derives nonnegative living mass', failures)
+
+  call compute_stellar_source_increment(mini_table, population, &
+       0.0_stellar_dp, 0.5_stellar_dp, channel_mass_min, channel_mass_max, &
+       16, source, ierr, driver_ledger)
+  call expect(ierr == 0, &
+       'timestep source path executes the cumulative population ledger', failures)
+  call expect_close(source%returned_mass, driver_ledger%returned_mass, &
+       'age-zero anchored timestep return matches cumulative ledger', failures)
+
+  do row = 1, mini_table%n_rows
+     if (mini_table%channel(row) == 1 .and. &
+          mini_table%age_gyr(row) > 0.0_stellar_dp) then
+        mini_table%remnant_mass(row) = 0.01_stellar_dp
+     end if
+  end do
+  call compute_stellar_source_increment(mini_table, population, &
+       0.0_stellar_dp, 0.5_stellar_dp, channel_mass_min, channel_mass_max, &
+       16, source, ierr)
+  call expect(ierr == enrichment_driver_err_ledger, &
+       'timestep source cannot bypass non-owner remnant rejection', failures)
+  call expect_close(source%returned_mass, 0.0_stellar_dp, &
+       'ledger rejection clears the timestep source transaction', failures)
+  do row = 1, mini_table%n_rows
+     if (mini_table%channel(row) == 1) then
+        mini_table%remnant_mass(row) = 0.0_stellar_dp
+     end if
+  end do
+
+  do imf = 0, 3
+     call calculate_imf_normalization(imf, population%imf_mass_min, &
+          population%imf_mass_max, normalization, ierr)
+     call expect(ierr == 0 .and. normalization > 0.0_stellar_dp, &
+          'configured IMF support has a positive normalization', failures)
+     call integrate_imf_mass(imf, population%imf_mass_min, &
+          population%imf_mass_max, normalization, mass_integral)
+     call expect(abs(mass_integral - 1.0_stellar_dp) < 1.0e-5_stellar_dp, &
+          'IMF normalization closes one unit of initial stellar mass', failures)
+  end do
+  call calculate_imf_normalization(population%imf_id, 1.0_stellar_dp, &
+       population%imf_mass_max, normalization_truncated, ierr)
+  call calculate_imf_normalization(population%imf_id, population%imf_mass_min, &
+       population%imf_mass_max, normalization, ierr)
+  call expect(abs(normalization_truncated-normalization) > 1.0e-6_stellar_dp, &
+       'changing configured IMF support changes its normalization', failures)
+  call expect(abs(evaluate_imf(1.0_stellar_dp,2) - &
+       exp(-(log10(1.0_stellar_dp)-log10(0.079_stellar_dp))**2 / &
+       (2.0_stellar_dp*0.69_stellar_dp**2))) < 1.0e-14_stellar_dp, &
+       'Chabrier IMF is continuous at the one-solar-mass branch', failures)
+
+  population%yield_basis_id = yield_basis_ssp_cumulative
+  call integrate_ssp_channel(mini_table, population, 1, 0.5_stellar_dp, &
+       1.0_stellar_dp, 2.0_stellar_dp, 16, driver_states(1), ierr)
+  call expect(ierr == ssp_source_err_basis, &
+       'SSP-normalized source is rejected before a second IMF convolution', failures)
+  population%yield_basis_id = yield_basis_per_star_cumulative
 
   states(1)%remnant_mass = 1.0_stellar_dp
   call finalize_population_ledger(population, states, enabled, owners, &
@@ -160,6 +243,25 @@ program g2_population_ledger_test
   end if
 
 contains
+
+  subroutine integrate_imf_mass(imf_id, mass_min, mass_max, normalization, integral)
+    integer, intent(in) :: imf_id
+    real(stellar_dp), intent(in) :: mass_min, mass_max, normalization
+    real(stellar_dp), intent(out) :: integral
+    integer, parameter :: n_bins = 131072
+    integer :: bin
+    real(stellar_dp) :: dlog_mass, log_mass, mass, dm
+
+    dlog_mass = (log10(mass_max)-log10(mass_min))/real(n_bins,stellar_dp)
+    integral = 0.0_stellar_dp
+    do bin = 1, n_bins
+       log_mass = log10(mass_min) + &
+            (real(bin,stellar_dp)-0.5_stellar_dp)*dlog_mass
+       mass = 10.0_stellar_dp**log_mass
+       dm = mass*log(10.0_stellar_dp)*dlog_mass
+       integral = integral + mass*normalization*evaluate_imf(mass,imf_id)*dm
+    end do
+  end subroutine integrate_imf_mass
 
   subroutine make_mini_table(table)
     type(stellar_yield_table_t), intent(out) :: table

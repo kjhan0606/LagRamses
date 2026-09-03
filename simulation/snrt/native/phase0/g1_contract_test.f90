@@ -5,9 +5,11 @@ program g1_contract_test
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_source_t
   use stellar_yield_tables, only: stellar_yield_table_t, load_yield_table, &
-       clear_yield_table, yield_table_ok
+       clear_yield_table, yield_table_ok, set_yield_mass_assignment_mode, &
+       yield_mass_assignment_linear, yield_mass_assignment_piecewise_constant, &
+       yield_table_err_assignment_mode
   use stellar_yield_interpolation, only: interpolate_yield_row, &
-       interpolation_ok, interpolation_err_grid
+       interpolation_ok, interpolation_err_grid, interpolation_err_assignment_mode
   use stellar_yield_audit, only: audit_yield_table, yield_audit_ok, &
        yield_audit_err_grid, yield_audit_err_duplicate, &
        yield_audit_err_nonfinite, yield_audit_err_mass, &
@@ -86,8 +88,8 @@ program g1_contract_test
        'nonnegative untracked ejecta residual passes strict audit', failures)
 
   overfull_table = table
-  overfull_table%ejected_mass(1,1) = &
-       1.1_stellar_dp * overfull_table%returned_mass(1)
+  overfull_table%ejected_mass(2,1) = &
+       1.1_stellar_dp * overfull_table%returned_mass(2)
   call audit_yield_table(overfull_table, 1.0e-10_stellar_dp, audit_ierr)
   call expect(iand(audit_ierr, yield_audit_err_mass) /= 0, &
        'tracked ejecta above returned mass are rejected', failures)
@@ -115,6 +117,30 @@ program g1_contract_test
        'interpolated returned mass agrees with analytic table', failures)
   call expect_close(ejected_mass(1), returned_mass, 1.0e-12_stellar_dp, &
        'ejected mass closes at the interpolated row', failures)
+
+  call set_yield_mass_assignment_mode(table, yield_mass_assignment_piecewise_constant, ierr)
+  call expect(ierr == yield_table_ok, 'piecewise source-cell mode can be selected', failures)
+  call interpolate_yield_row(table, channel_snii, query_mass, query_z, query_age, &
+       returned_mass, remnant_mass, energy, momentum, ejected_mass, net_yield, ierr)
+  expected = expected_returned(channel_snii, 1.0_stellar_dp, query_z, query_age)
+  call expect(ierr == interpolation_ok, 'piecewise source-cell query succeeds', failures)
+  call expect_close(returned_mass, expected, 1.0e-12_stellar_dp, &
+       'piecewise source-cell query selects the left mass node', failures)
+  call interpolate_yield_row(table, channel_snii, 2.0_stellar_dp, query_z, query_age, &
+       returned_mass, remnant_mass, energy, momentum, ejected_mass, net_yield, ierr)
+  expected = expected_returned(channel_snii, 2.0_stellar_dp, query_z, query_age)
+  call expect_close(returned_mass, expected, 1.0e-12_stellar_dp, &
+       'piecewise source-cell upper edge selects the exact node', failures)
+  call set_yield_mass_assignment_mode(table, 99, ierr)
+  call expect(ierr == yield_table_err_assignment_mode, &
+       'unsupported source-cell mode is rejected', failures)
+  table%mass_assignment_mode = 99
+  call interpolate_yield_row(table, channel_snii, query_mass, query_z, query_age, &
+       returned_mass, remnant_mass, energy, momentum, ejected_mass, net_yield, ierr)
+  call expect(ierr == interpolation_err_assignment_mode, &
+       'invalid source-cell mode cannot enter interpolation', failures)
+  call set_yield_mass_assignment_mode(table, yield_mass_assignment_linear, ierr)
+  call expect(ierr == yield_table_ok, 'linear mode can be restored after review test', failures)
 
   call interpolate_yield_row(table, channel_snii, 0.5_stellar_dp, query_z, &
        query_age, returned_mass, remnant_mass, energy, momentum, ejected_mass, &
@@ -156,17 +182,21 @@ program g1_contract_test
   population%birth_metallicity = query_z
   population%birth_mass_fraction = 0.0_stellar_dp
   population%imf_id = imf_kroupa
+  population%imf_mass_min = 0.08_stellar_dp
+  population%imf_mass_max = 120.0_stellar_dp
   population%population_id = 17
+  population%binary_fraction = 0.0_stellar_dp
+  population%yield_basis_id = 0
   population%pisn_enabled = .false.
   source_tolerance = 1.0e-10_stellar_dp
 
   call integrate_ssp_channel_increment(table, population, channel_snii, &
-       0.0_stellar_dp, 0.5_stellar_dp, 1.0_stellar_dp, 2.0_stellar_dp, 32, &
+       0.0_stellar_dp, 0.25_stellar_dp, 1.0_stellar_dp, 2.0_stellar_dp, 32, &
        source_a, source_ierr)
   call expect(source_ierr == source_increment_ok, &
        'first cumulative source interval succeeds', failures)
   call integrate_ssp_channel_increment(table, population, channel_snii, &
-       0.5_stellar_dp, 0.5_stellar_dp, 1.0_stellar_dp, 2.0_stellar_dp, 32, &
+       0.25_stellar_dp, 1.0_stellar_dp, 1.0_stellar_dp, 2.0_stellar_dp, 32, &
        source_b, source_ierr)
   call expect(source_ierr == source_increment_ok, &
        'second cumulative source interval succeeds', failures)
@@ -177,12 +207,12 @@ program g1_contract_test
        'full cumulative source interval succeeds', failures)
   call expect_close(source_a%returned_mass + source_b%returned_mass, &
        source_full%returned_mass, source_tolerance, &
-       'subdivided returned mass equals one full interval', failures)
+       'variable-width intervals telescope in returned mass', failures)
   call expect_close(source_a%energy + source_b%energy, source_full%energy, &
-       source_tolerance, 'subdivided energy equals one full interval', failures)
+       source_tolerance, 'variable-width intervals telescope in energy', failures)
   call expect_close(source_a%ejected_mass(1) + source_b%ejected_mass(1), &
        source_full%ejected_mass(1), source_tolerance, &
-       'subdivided ejecta equals one full interval', failures)
+       'variable-width intervals telescope in ejecta', failures)
 
   call integrate_ssp_channel_increment(table, population, channel_snii, &
        0.0_stellar_dp, 0.0_stellar_dp, 1.0_stellar_dp, 2.0_stellar_dp, 32, &
@@ -195,7 +225,7 @@ program g1_contract_test
   do i = 1, negative_table%n_rows
      if (negative_table%channel(i) /= channel_snii) cycle
      if (abs(negative_table%age_gyr(i) - 1.0_stellar_dp) > 1.0e-12_stellar_dp) cycle
-     negative_table%returned_mass(i) = 0.01_stellar_dp
+     negative_table%returned_mass(i) = -0.01_stellar_dp
      negative_table%ejected_mass(i,:) = 0.0_stellar_dp
      negative_table%ejected_mass(i,1) = negative_table%returned_mass(i)
   end do
@@ -338,12 +368,14 @@ contains
              do ia = 1, 2
                 returned = expected_returned(channel, masses(im), &
                      metallicities(iz), ages(ia))
-                remnant = 0.05_stellar_dp * real(channel, stellar_dp)
+                remnant = ages(ia) * 0.05_stellar_dp * &
+                     real(channel, stellar_dp)
                 energy = expected_energy(channel, ages(ia))
                 age_yr = ages(ia) * 1.0e9_stellar_dp
                 momentum = 0.0_stellar_dp
-                momentum(1) = real(channel, stellar_dp) * 1.0e30_stellar_dp + &
-                     ages(ia) * 1.0e29_stellar_dp
+                momentum(1) = ages(ia) * &
+                     (real(channel, stellar_dp) * 1.0e30_stellar_dp + &
+                     ages(ia) * 1.0e29_stellar_dp)
                 ejecta = 0.0_stellar_dp
                 ejecta(1) = returned
                 net = 0.0_stellar_dp
@@ -362,17 +394,17 @@ contains
     integer, intent(in) :: channel
     real(stellar_dp), intent(in) :: mass, metallicity, age
 
-    expected_returned = 0.1_stellar_dp * real(channel, stellar_dp) + &
+    expected_returned = age * (0.1_stellar_dp * real(channel, stellar_dp) + &
          0.05_stellar_dp * mass + 0.2_stellar_dp * metallicity + &
-         0.4_stellar_dp * age
+         0.4_stellar_dp)
   end function expected_returned
 
   real(stellar_dp) function expected_energy(channel, age)
     integer, intent(in) :: channel
     real(stellar_dp), intent(in) :: age
 
-    expected_energy = real(channel, stellar_dp) * 1.0e48_stellar_dp + &
-         age * 1.0e47_stellar_dp
+    expected_energy = age * (real(channel, stellar_dp) * 1.0e48_stellar_dp + &
+         1.0e47_stellar_dp)
   end function expected_energy
 
   subroutine expect(condition, label, failures)

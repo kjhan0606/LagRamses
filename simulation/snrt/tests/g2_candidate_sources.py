@@ -4,8 +4,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
+import shutil
+import subprocess
 import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +18,102 @@ if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
 from audit_g2_candidate_sources import audit_candidates  # noqa: E402
+
+
+def _assert_manifest_mutation_is_fatal() -> None:
+    project = ROOT.parents[1]
+    source_root = project / "external" / "g2_candidates"
+    manifest = source_root / "acquisition_manifest_v1.json"
+    with tempfile.TemporaryDirectory(prefix="snrt-g2-manifest-") as directory:
+        mutated = Path(directory) / manifest.name
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["candidates"][0]["files"][0]["sha256"] = "0" * 64
+        mutated.write_text(json.dumps(payload), encoding="utf-8")
+        report = audit_candidates(source_root, mutated)
+        assert report["status"] == "candidate_review_blocked_input_integrity"
+        assert report["input_integrity_passed"] is False
+        assert report["audit_failures"]
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(TOOLS / "audit_g2_candidate_sources.py"),
+                "--root",
+                str(source_root),
+                "--manifest",
+                str(mutated),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 2
+        cli_report = json.loads(result.stdout)
+        assert cli_report["status"] == "candidate_review_blocked_input_integrity"
+        for index, incomplete in enumerate(
+            (
+                {},
+                {"candidates": []},
+                {"candidates": [{"candidate_id": "limongi_chieffi_2018_cds", "files": []}]},
+            )
+        ):
+            coverage_manifest = Path(directory) / f"coverage-{index}.json"
+            coverage_manifest.write_text(json.dumps(incomplete), encoding="utf-8")
+            coverage_report = audit_candidates(source_root, coverage_manifest)
+            assert coverage_report["status"] == "candidate_review_blocked_input_integrity"
+            assert coverage_report["input_integrity_passed"] is False
+
+
+def _assert_inline_parser_mutations_are_fatal() -> None:
+    project = ROOT.parents[1]
+    source_root = project / "external" / "g2_candidates"
+    original_manifest = source_root / "acquisition_manifest_v1.json"
+    mutations = (
+        ("limongi_chieffi_2018_cds", "table8.dat", "limongi"),
+        ("nugrid_set1ext", "element_yield_table_MESAonly_fryer12_delay_total.txt", "nugrid"),
+    )
+    for candidate_dir_name, filename, kind in mutations:
+        with tempfile.TemporaryDirectory(prefix=f"snrt-g2-{kind}-parser-") as directory:
+            farm = Path(directory)
+            for candidate_dir in source_root.iterdir():
+                if not candidate_dir.is_dir():
+                    continue
+                target_dir = farm / candidate_dir.name
+                target_dir.mkdir()
+                for source_file in candidate_dir.iterdir():
+                    (target_dir / source_file.name).symlink_to(source_file)
+            manifest_payload = json.loads(original_manifest.read_text(encoding="utf-8"))
+            relative = f"{candidate_dir_name}/{filename}"
+            target = farm / relative
+            target.unlink()
+            content = (source_root / relative).read_text(encoding="utf-8")
+            if kind == "limongi":
+                rows = content.splitlines()
+                for row_index, row in enumerate(rows):
+                    if row and not row.lstrip().startswith("#"):
+                        fields = row.split()
+                        fields[-1] = "not-a-number"
+                        rows[row_index] = " ".join(fields)
+                        break
+                content = "\n".join(rows) + "\n"
+            else:
+                marker = "H Lifetime:"
+                line_index = next(index for index, row in enumerate(content.splitlines()) if marker in row)
+                rows = content.splitlines()
+                rows[line_index] = "H Lifetime: not-a-number"
+                content = "\n".join(rows) + "\n"
+            target.write_text(content, encoding="utf-8")
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            for candidate in manifest_payload["candidates"]:
+                for entry in candidate.get("files", []):
+                    if entry.get("path") == relative:
+                        entry["bytes"] = target.stat().st_size
+                        entry["sha256"] = digest
+            manifest = farm / original_manifest.name
+            manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+            report = audit_candidates(farm, manifest)
+            assert report["status"] == "candidate_review_blocked_input_integrity"
+            assert report["input_integrity_passed"] is False
+            assert any(failure["reason"] == "source_parse_error" for failure in report["audit_failures"])
 
 
 def main() -> int:
@@ -100,6 +200,9 @@ def main() -> int:
     assert heger_woosley["source_grid"]["zams_mass_msun_maximum"] == 100.0
     assert heger_woosley["physical_semantics"]["canonical_event_energy_selected"] is False
     assert heger_woosley["canonical_rows_emitted"] == 0
+
+    _assert_manifest_mutation_is_fatal()
+    _assert_inline_parser_mutations_are_fatal()
 
     print("G2_CANDIDATE_SOURCE_AUDIT_TEST_OK")
     return 0

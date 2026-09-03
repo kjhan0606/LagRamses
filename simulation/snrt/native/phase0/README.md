@@ -16,15 +16,17 @@ but it has not yet been linked into a clean production executable.
 The G1 contract uses the following canonical units:
 
 - table age: `age_yr` in years;
-- runtime age and timestep: `age_gyr` and `dt_gyr` in Gyr;
+- runtime age interval: `previous_age_gyr` and `current_age_gyr` in Gyr;
 - RAMSES code time conversion: one explicit `code_time_to_age_gyr` factor;
 - returned mass/ejecta: solar masses per initial star;
 - energy: erg per initial star;
 - momentum: g cm/s per initial star.
 
-The source increment is defined as the cumulative difference
-`C(age_gyr + dt_gyr) - C(age_gyr)`, and progress is committed only after a
-successful deposition. No net yield is a gas-mass source.
+The source increment is defined on the half-open runtime interval by the
+cumulative difference `C(current_age_gyr) - C(previous_age_gyr)`.  The table
+boundary converts `age_yr` to `age_gyr` exactly once. Progress is committed
+only after a successful deposition, so a restart or repeated call cannot
+double-deposit a committed interval. No net yield is a gas-mass source.
 
 The exact RAMSES layout used by this candidate is recorded in
 `simulation/snrt/config/stellar_ramses_field_map_v1.json`. A different

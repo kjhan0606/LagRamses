@@ -429,7 +429,7 @@
         "zams_mass_msun": 12.0
       }
     ],
-    "source_audit_code_sha256": "4a73895ecc271a741414be2c9a77f28e1b4acb89a6d772b961ccce032164dc44",
+    "source_audit_code_sha256": "66b78331341317046aa189eb609ef9fa2a9748c2bbf2cb1a6612bb292fe0540c",
     "source_candidate_id": "sukhbold2016_ccsn"
   },
   "production_ready": false,

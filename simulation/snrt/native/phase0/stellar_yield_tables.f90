@@ -32,10 +32,14 @@ module stellar_yield_tables
   integer, parameter, public :: yield_table_err_alloc = 4
   integer, parameter, public :: yield_table_err_format = 5
   integer, parameter, public :: yield_table_err_nonfinite = 6
+  integer, parameter, public :: yield_table_err_assignment_mode = 7
+  integer, parameter, public :: yield_mass_assignment_linear = 0
+  integer, parameter, public :: yield_mass_assignment_piecewise_constant = 1
 
   type, public :: stellar_yield_table_t
      logical :: loaded = .false.
      integer :: n_rows = 0
+     integer :: mass_assignment_mode = yield_mass_assignment_linear
      integer, allocatable :: channel(:)
      real(stellar_dp), allocatable :: initial_mass(:)
      real(stellar_dp), allocatable :: birth_metallicity(:)
@@ -51,6 +55,7 @@ module stellar_yield_tables
 
   public :: clear_yield_table
   public :: load_yield_table
+  public :: set_yield_mass_assignment_mode
 
 contains
 
@@ -70,7 +75,22 @@ contains
 
     table%loaded = .false.
     table%n_rows = 0
+    table%mass_assignment_mode = yield_mass_assignment_linear
   end subroutine clear_yield_table
+
+  subroutine set_yield_mass_assignment_mode(table, mode, ierr)
+    type(stellar_yield_table_t), intent(inout) :: table
+    integer, intent(in) :: mode
+    integer, intent(out) :: ierr
+
+    ierr = yield_table_ok
+    if (mode /= yield_mass_assignment_linear .and. &
+         mode /= yield_mass_assignment_piecewise_constant) then
+       ierr = yield_table_err_assignment_mode
+       return
+    end if
+    table%mass_assignment_mode = mode
+  end subroutine set_yield_mass_assignment_mode
 
   subroutine load_yield_table(filename, table, ierr)
     character(len=*), intent(in) :: filename
@@ -179,14 +199,6 @@ contains
           return
        end if
 
-       age_gyr = age_yr * 1.0e-9_stellar_dp
-       if (.not. ieee_is_finite(age_gyr)) then
-          close(unit)
-          call clear_yield_table(table)
-          ierr = yield_table_err_nonfinite
-          return
-       end if
-
        if (channel_id < 1 .or. channel_id > n_stellar_channels .or. &
             initial_mass <= 0.0_stellar_dp .or. birth_metallicity < 0.0_stellar_dp .or. &
             age_yr < 0.0_stellar_dp .or. returned_mass < 0.0_stellar_dp .or. &
@@ -195,6 +207,14 @@ contains
           close(unit)
           call clear_yield_table(table)
           ierr = yield_table_err_format
+          return
+       end if
+
+       age_gyr = age_yr * 1.0e-9_stellar_dp
+       if (.not. ieee_is_finite(age_gyr)) then
+          close(unit)
+          call clear_yield_table(table)
+          ierr = yield_table_err_nonfinite
           return
        end if
 

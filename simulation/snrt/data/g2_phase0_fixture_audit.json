@@ -156,7 +156,7 @@
     "5": {
       "name": "PISN",
       "approval": "not_implemented",
-      "terminal_remnant_owner": true,
+      "terminal_remnant_owner": false,
       "row_count": 0,
       "mass_count": 0,
       "metallicity_count": 0,

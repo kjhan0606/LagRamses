@@ -1,0 +1,42 @@
+{
+  "schema": "snrt-fp2-snia-event-yield-asset-audit",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "review_only_asset_integrity_passed",
+  "production_ready": false,
+  "canonical_conversion_allowed": false,
+  "runtime_activation_allowed": false,
+  "root": "assets/review_only/fp2_snia/keegans2023",
+  "manifest": "manifests/fp2_snia_keegans2023_review_v1.json",
+  "hash_policy": "sha256(path + NUL + bytes + NUL + file_sha256 + LF) over sorted relative paths",
+  "candidate_id": "keegans2023_nugrid_metallicity_grid",
+  "file_count": 3,
+  "files": [
+    {
+      "path": "decayed_brox_yields_new_latex_table.tex",
+      "exists": true,
+      "bytes": 12428,
+      "sha256": "5b13bf7ec1c2cde2785fc19683d99a4d3c59baa369ca114f8dbc6e1571ff9a6c",
+      "input_integrity_passed": true
+    },
+    {
+      "path": "decayed_dean_yields_new_latex_table.tex",
+      "exists": true,
+      "bytes": 11516,
+      "sha256": "73f3aecc9c4a739ea069011b893af2041139527abfa3f7b874d89000abc540f4",
+      "input_integrity_passed": true
+    },
+    {
+      "path": "decayed_shen_yields_new_latex_table.tex",
+      "exists": true,
+      "bytes": 11447,
+      "sha256": "6ec00801f3e74319b619d61e1a9ba8e6119c0c4c02c7849cda46a6d8408d104b",
+      "input_integrity_passed": true
+    }
+  ],
+  "package_sha256": "32d0a8fa97a6aa0810c82127973ebd73446ab76edea0aba7d6c543f3e82d53b7",
+  "manifest_sha256": "1e08bedc4381827244fd280d38eb62cdbc5a3c540ddb903aaeba2157fcedac84",
+  "audit_code_sha256": "890a520ea9bbee99792452b98fcef627d32e1b2bdaafd9c4695a91881f4a26f5",
+  "audit_failures": [],
+  "interpretation": "Review-only source bytes are intact; this report does not approve isotope conversion, event physics, or runtime activation."
+}

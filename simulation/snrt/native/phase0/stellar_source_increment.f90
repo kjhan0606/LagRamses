@@ -1,7 +1,7 @@
-! Phase 0 timestep source increment.
+! Phase 0 cumulative source increment.
 !
 ! This module converts cumulative SSP quantities into the incremental source
-! for one hydrodynamic timestep.  It is intentionally independent of the AMR
+! for one hydrodynamic interval.  It is intentionally independent of the AMR
 ! deposition code; the returned stellar_source_t is the only object that the
 ! deposition layer needs to consume.
 
@@ -9,7 +9,7 @@ module stellar_source_increment
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp
   use stellar_enrichment_contract, only: stellar_population_t, &
-       stellar_cumulative_t, stellar_source_t, clear_source, &
+       stellar_cumulative_t, stellar_source_t, clear_cumulative, clear_source, &
        cumulative_difference
   use stellar_yield_tables, only: stellar_yield_table_t
   use stellar_ssp_sources, only: integrate_ssp_channel, ssp_source_ok
@@ -27,33 +27,37 @@ module stellar_source_increment
 contains
 
   subroutine integrate_ssp_channel_increment(table, population, channel_id, &
-       age_gyr, timestep_gyr, mass_min, mass_max, n_mass_bins, source, ierr)
+       previous_age_gyr, current_age_gyr, mass_min, mass_max, n_mass_bins, &
+       source, ierr, current_cumulative)
     type(stellar_yield_table_t), intent(in) :: table
     type(stellar_population_t), intent(in) :: population
     integer, intent(in) :: channel_id, n_mass_bins
-    real(stellar_dp), intent(in) :: age_gyr, timestep_gyr, mass_min, mass_max
+    real(stellar_dp), intent(in) :: previous_age_gyr, current_age_gyr
+    real(stellar_dp), intent(in) :: mass_min, mass_max
     type(stellar_source_t), intent(out) :: source
     integer, intent(out) :: ierr
+    type(stellar_cumulative_t), intent(out), optional :: current_cumulative
 
-    type(stellar_cumulative_t) :: previous, later
+    type(stellar_cumulative_t) :: previous, current
     integer :: ssp_ierr
 
     call clear_source(source)
+    if (present(current_cumulative)) call clear_cumulative(current_cumulative)
     ierr = source_increment_ok
 
-    if (.not. ieee_is_finite(age_gyr) .or. &
-         .not. ieee_is_finite(timestep_gyr) .or. &
+    if (.not. ieee_is_finite(previous_age_gyr) .or. &
+         .not. ieee_is_finite(current_age_gyr) .or. &
          .not. ieee_is_finite(mass_min) .or. .not. ieee_is_finite(mass_max) .or. &
-         age_gyr < 0.0_stellar_dp .or. timestep_gyr < 0.0_stellar_dp .or. &
+         previous_age_gyr < 0.0_stellar_dp .or. &
+         current_age_gyr < previous_age_gyr .or. &
          mass_min <= 0.0_stellar_dp .or. mass_max <= mass_min .or. &
          n_mass_bins <= 0) then
        ierr = source_increment_err_argument
        return
     end if
 
-    if (timestep_gyr == 0.0_stellar_dp) return
-
-    call integrate_ssp_channel(table, population, channel_id, age_gyr, mass_min, &
+    call integrate_ssp_channel(table, population, channel_id, previous_age_gyr, &
+         mass_min, &
          mass_max, n_mass_bins, previous, ssp_ierr)
     if (ssp_ierr /= ssp_source_ok) then
        ierr = source_increment_err_ssp
@@ -61,13 +65,13 @@ contains
     end if
 
     call integrate_ssp_channel(table, population, channel_id, &
-         age_gyr + timestep_gyr, mass_min, mass_max, n_mass_bins, later, ssp_ierr)
+         current_age_gyr, mass_min, mass_max, n_mass_bins, current, ssp_ierr)
     if (ssp_ierr /= ssp_source_ok) then
        ierr = source_increment_err_ssp
        return
     end if
 
-    call cumulative_difference(later, previous, source)
+    call cumulative_difference(current, previous, source)
     if (.not. source_values_finite(source)) then
        call clear_source(source)
        ierr = source_increment_err_nonfinite
@@ -78,6 +82,7 @@ contains
        ierr = source_increment_err_negative
        return
     end if
+    if (present(current_cumulative)) current_cumulative = current
   end subroutine integrate_ssp_channel_increment
 
   logical function source_values_finite(source)

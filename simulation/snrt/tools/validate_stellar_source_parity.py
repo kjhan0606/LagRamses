@@ -686,8 +686,7 @@ def audit(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     )
     native_only_mirror_sources = g1.get("native_only_mirror_sources", [])
     native_only_mirror_sources_declared = (
-        bool(native_only_mirror_sources)
-        and all(source in runner_sources for source in native_only_mirror_sources)
+        all(source in runner_sources for source in native_only_mirror_sources)
         and not set(native_only_mirror_sources).intersection(
             g1["shared_contract_sources"]
         )

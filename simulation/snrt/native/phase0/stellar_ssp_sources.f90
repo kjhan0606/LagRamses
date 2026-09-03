@@ -10,7 +10,8 @@ module stellar_ssp_sources
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels, stellar_imf_salpeter, stellar_imf_kroupa, &
-       stellar_imf_chabrier, stellar_imf_popiii
+       stellar_imf_chabrier, stellar_imf_popiii, &
+       yield_basis_per_star_cumulative
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, clear_cumulative
   use stellar_yield_tables, only: stellar_yield_table_t
@@ -30,8 +31,16 @@ module stellar_ssp_sources
   integer, parameter, public :: ssp_source_err_imf = 2
   integer, parameter, public :: ssp_source_err_provider = 3
   integer, parameter, public :: ssp_source_err_nonfinite = 4
+  integer, parameter, public :: ssp_source_err_basis = 5
+
+  real(stellar_dp), parameter :: chabrier_high_amplitude = &
+       exp(-(log10(1.0_stellar_dp)-log10(0.079_stellar_dp))**2 / &
+       (2.0_stellar_dp*0.69_stellar_dp**2))
 
   public :: integrate_ssp_channel
+  public :: calculate_imf_normalization
+  public :: calculate_imf_mass_fraction
+  public :: evaluate_imf
 
 contains
 
@@ -55,16 +64,28 @@ contains
 
     if (.not. ieee_is_finite(population%initial_mass) .or. &
          .not. ieee_is_finite(population%birth_metallicity) .or. &
+         .not. ieee_is_finite(population%imf_mass_min) .or. &
+         .not. ieee_is_finite(population%imf_mass_max) .or. &
          .not. ieee_is_finite(age_gyr) .or. &
          population%initial_mass <= 0.0_stellar_dp .or. age_gyr < 0.0_stellar_dp .or. &
          mass_min <= 0.0_stellar_dp .or. mass_max <= mass_min .or. &
+         population%imf_mass_min <= 0.0_stellar_dp .or. &
+         population%imf_mass_max <= population%imf_mass_min .or. &
+         mass_min < population%imf_mass_min .or. &
+         mass_max > population%imf_mass_max .or. &
          n_mass_bins <= 0 .or. channel_id < 1 .or. &
          channel_id > n_stellar_channels) then
        ierr = ssp_source_err_argument
        return
     end if
+    if (population%yield_basis_id /= yield_basis_per_star_cumulative) then
+       ierr = ssp_source_err_basis
+       return
+    end if
 
-    call calculate_imf_normalization(population%imf_id, imf_norm, provider_ierr)
+    call calculate_imf_normalization(population%imf_id, &
+         population%imf_mass_min, population%imf_mass_max, imf_norm, &
+         provider_ierr)
     if (provider_ierr /= 0) then
        ierr = ssp_source_err_imf
        return
@@ -122,47 +143,157 @@ contains
     ! level quantity and is computed only after all channel states are known.
   end subroutine integrate_ssp_channel
 
-  subroutine calculate_imf_normalization(imf_id, normalization, ierr)
+  subroutine calculate_imf_normalization(imf_id, mass_min, mass_max, &
+       normalization, ierr)
     integer, intent(in) :: imf_id
+    real(stellar_dp), intent(in) :: mass_min, mass_max
     real(stellar_dp), intent(out) :: normalization
     integer, intent(out) :: ierr
 
-    integer, parameter :: n_bins = 1024
-    real(stellar_dp) :: mass_min, mass_max, dlog_mass
-    real(stellar_dp) :: mass, dm, integral, log_mass
-    integer :: bin
+    real(stellar_dp) :: integral
 
     ierr = 0
     normalization = 0.0_stellar_dp
+    if (.not. ieee_is_finite(mass_min) .or. .not. ieee_is_finite(mass_max) .or. &
+         mass_min < 0.08_stellar_dp .or. mass_max <= mass_min) then
+       ierr = 1
+       return
+    end if
     select case (imf_id)
-    case (imf_salpeter, imf_kroupa, imf_chabrier)
-       mass_min = 0.08_stellar_dp
-       mass_max = 120.0_stellar_dp
+    case (imf_salpeter)
+       integral = integrate_power_law(mass_min, mass_max, -1.35_stellar_dp, &
+            1.0_stellar_dp)
+    case (imf_kroupa)
+       integral = 0.0_stellar_dp
+       if (mass_min < 0.5_stellar_dp) integral = integral + &
+            integrate_power_law(mass_min, min(mass_max,0.5_stellar_dp), &
+            -0.3_stellar_dp, 2.0_stellar_dp)
+       if (mass_max > 0.5_stellar_dp) integral = integral + &
+            integrate_power_law(max(mass_min,0.5_stellar_dp), mass_max, &
+            -1.3_stellar_dp, 1.0_stellar_dp)
+    case (imf_chabrier)
+       integral = 0.0_stellar_dp
+       if (mass_min < 1.0_stellar_dp) integral = integral + &
+            integrate_chabrier_low(mass_min, min(mass_max,1.0_stellar_dp))
+       if (mass_max > 1.0_stellar_dp) integral = integral + &
+            integrate_power_law(max(mass_min,1.0_stellar_dp), mass_max, &
+            -1.3_stellar_dp, chabrier_high_amplitude)
     case (imf_popiii)
-       mass_min = 10.0_stellar_dp
-       mass_max = 300.0_stellar_dp
+       integral = 0.0_stellar_dp
+       if (mass_max > 10.0_stellar_dp .and. mass_min < 100.0_stellar_dp) &
+            integral = integral + integrate_power_law(max(mass_min,10.0_stellar_dp), &
+            min(mass_max,100.0_stellar_dp), 1.5_stellar_dp, 0.1_stellar_dp)
+       if (mass_max > 100.0_stellar_dp) integral = integral + &
+            100.0_stellar_dp * (mass_max-max(mass_min,100.0_stellar_dp))
     case default
        ierr = 1
        return
     end select
 
-    dlog_mass = (log10(mass_max) - log10(mass_min)) / &
-         real(n_bins, stellar_dp)
-    integral = 0.0_stellar_dp
-    do bin = 1, n_bins
-       log_mass = log10(mass_min) + &
-            (real(bin, stellar_dp) - 0.5_stellar_dp) * dlog_mass
-       mass = 10.0_stellar_dp ** log_mass
-       dm = mass * log(10.0_stellar_dp) * dlog_mass
-       integral = integral + mass * evaluate_imf(mass, imf_id) * dm
-    end do
-
-    if (integral <= 0.0_stellar_dp) then
+    if (.not. ieee_is_finite(integral) .or. integral <= 0.0_stellar_dp) then
        ierr = 1
        return
     end if
     normalization = 1.0_stellar_dp / integral
   end subroutine calculate_imf_normalization
+
+  subroutine calculate_imf_mass_fraction(imf_id, mass_min, mass_max, &
+       interval_min, interval_max, fraction, ierr)
+    ! Return the initial-mass fraction in one explicitly supplied interval.
+    ! The interval must already be clipped to the configured IMF support;
+    ! silently clipping it here would hide a fate-map/domain mismatch.
+    integer, intent(in) :: imf_id
+    real(stellar_dp), intent(in) :: mass_min, mass_max
+    real(stellar_dp), intent(in) :: interval_min, interval_max
+    real(stellar_dp), intent(out) :: fraction
+    integer, intent(out) :: ierr
+
+    real(stellar_dp) :: normalization, integral
+
+    fraction = 0.0_stellar_dp
+    ierr = 0
+    if (.not. ieee_is_finite(mass_min) .or. .not. ieee_is_finite(mass_max) .or. &
+         .not. ieee_is_finite(interval_min) .or. &
+         .not. ieee_is_finite(interval_max) .or. mass_min < 0.08_stellar_dp .or. &
+         mass_max <= mass_min .or. interval_max <= interval_min .or. &
+         interval_min < mass_min .or. interval_max > mass_max) then
+       ierr = 1
+       return
+    end if
+
+    call calculate_imf_normalization(imf_id, mass_min, mass_max, normalization, ierr)
+    if (ierr /= 0) return
+
+    select case (imf_id)
+    case (imf_salpeter)
+       integral = integrate_power_law(interval_min, interval_max, &
+            -1.35_stellar_dp, 1.0_stellar_dp)
+    case (imf_kroupa)
+       integral = 0.0_stellar_dp
+       if (interval_min < 0.5_stellar_dp) integral = integral + &
+            integrate_power_law(interval_min, min(interval_max,0.5_stellar_dp), &
+            -0.3_stellar_dp, 2.0_stellar_dp)
+       if (interval_max > 0.5_stellar_dp) integral = integral + &
+            integrate_power_law(max(interval_min,0.5_stellar_dp), interval_max, &
+            -1.3_stellar_dp, 1.0_stellar_dp)
+    case (imf_chabrier)
+       integral = 0.0_stellar_dp
+       if (interval_min < 1.0_stellar_dp) integral = integral + &
+            integrate_chabrier_low(interval_min, min(interval_max,1.0_stellar_dp))
+       if (interval_max > 1.0_stellar_dp) integral = integral + &
+            integrate_power_law(max(interval_min,1.0_stellar_dp), interval_max, &
+            -1.3_stellar_dp, chabrier_high_amplitude)
+    case (imf_popiii)
+       integral = 0.0_stellar_dp
+       if (interval_max > 10.0_stellar_dp .and. interval_min < 100.0_stellar_dp) &
+            integral = integral + integrate_power_law(max(interval_min,10.0_stellar_dp), &
+            min(interval_max,100.0_stellar_dp), 1.5_stellar_dp, 0.1_stellar_dp)
+       if (interval_max > 100.0_stellar_dp) integral = integral + &
+            100.0_stellar_dp * (interval_max-max(interval_min,100.0_stellar_dp))
+    case default
+       ierr = 1
+       return
+    end select
+
+    fraction = normalization * integral
+    if (.not. ieee_is_finite(fraction) .or. fraction < 0.0_stellar_dp .or. &
+         fraction > 1.0_stellar_dp + 1.0e-12_stellar_dp) then
+       fraction = 0.0_stellar_dp
+       ierr = 1
+    end if
+  end subroutine calculate_imf_mass_fraction
+
+  pure real(stellar_dp) function integrate_power_law(mass_min, mass_max, &
+       exponent, amplitude)
+    real(stellar_dp), intent(in) :: mass_min, mass_max, exponent, amplitude
+
+    integrate_power_law = 0.0_stellar_dp
+    if (mass_max <= mass_min) return
+    integrate_power_law = amplitude * &
+         (mass_max**(exponent+1.0_stellar_dp) - &
+          mass_min**(exponent+1.0_stellar_dp)) / &
+         (exponent+1.0_stellar_dp)
+  end function integrate_power_law
+
+  pure real(stellar_dp) function integrate_chabrier_low(mass_min, mass_max)
+    real(stellar_dp), intent(in) :: mass_min, mass_max
+    real(stellar_dp), parameter :: log_mean = log10(0.079_stellar_dp)
+    real(stellar_dp), parameter :: sigma = 0.69_stellar_dp
+    real(stellar_dp), parameter :: ln10 = log(10.0_stellar_dp)
+    real(stellar_dp), parameter :: sqrt_two = sqrt(2.0_stellar_dp)
+    real(stellar_dp), parameter :: sqrt_pi_over_two = &
+         sqrt(acos(-1.0_stellar_dp)/2.0_stellar_dp)
+    real(stellar_dp) :: shifted_mean, prefactor
+
+    integrate_chabrier_low = 0.0_stellar_dp
+    if (mass_max <= mass_min) return
+    shifted_mean = log_mean + ln10*sigma**2
+    prefactor = ln10 * exp(ln10*log_mean + &
+         0.5_stellar_dp*(ln10*sigma)**2) * sigma * sqrt_pi_over_two
+    integrate_chabrier_low = prefactor * &
+         (erf((log10(mass_max)-shifted_mean)/(sqrt_two*sigma)) - &
+          erf((log10(mass_min)-shifted_mean)/(sqrt_two*sigma)))
+  end function integrate_chabrier_low
 
   real(stellar_dp) function evaluate_imf(mass, imf_id)
     real(stellar_dp), intent(in) :: mass
@@ -187,7 +318,7 @@ contains
                exp(-((log10(mass) - log10(0.079_stellar_dp)) ** 2) / &
                (2.0_stellar_dp * 0.69_stellar_dp ** 2))
        else
-          evaluate_imf = mass ** (-2.3_stellar_dp)
+          evaluate_imf = chabrier_high_amplitude * mass ** (-2.3_stellar_dp)
        end if
     case (imf_popiii)
        if (mass < 10.0_stellar_dp) then

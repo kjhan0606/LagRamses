@@ -10,7 +10,8 @@ module stellar_yield_interpolation
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels
-  use stellar_yield_tables, only: stellar_yield_table_t
+  use stellar_yield_tables, only: stellar_yield_table_t, &
+       yield_mass_assignment_linear, yield_mass_assignment_piecewise_constant
   implicit none
 
   private
@@ -21,6 +22,7 @@ module stellar_yield_interpolation
   integer, parameter, public :: interpolation_err_grid = 3
   integer, parameter, public :: interpolation_err_argument = 4
   integer, parameter, public :: interpolation_err_nonfinite = 5
+  integer, parameter, public :: interpolation_err_assignment_mode = 6
 
   public :: interpolate_yield_row
 
@@ -75,6 +77,11 @@ contains
        ierr = interpolation_err_argument
        return
     end if
+    if (table%mass_assignment_mode /= yield_mass_assignment_linear .and. &
+         table%mass_assignment_mode /= yield_mass_assignment_piecewise_constant) then
+       ierr = interpolation_err_assignment_mode
+       return
+    end if
 
     call find_bounds(table, channel_id, 1, query_mass, mass_lo, mass_hi, found)
     if (.not. found) then
@@ -92,8 +99,13 @@ contains
        return
     end if
 
-    call make_nodes(mass_lo, mass_hi, query_mass, mass_nodes, mass_weights, &
-         n_mass_nodes)
+    if (table%mass_assignment_mode == yield_mass_assignment_piecewise_constant) then
+       call make_piecewise_mass_node(mass_lo, mass_hi, query_mass, mass_nodes, &
+            mass_weights, n_mass_nodes)
+    else
+       call make_nodes(mass_lo, mass_hi, query_mass, mass_nodes, mass_weights, &
+            n_mass_nodes)
+    end if
     call make_nodes(z_lo, z_hi, query_z, z_nodes, z_weights, n_z_nodes)
     call make_nodes(age_lo, age_hi, query_age_gyr, age_nodes, age_weights, &
          n_age_nodes)
@@ -203,6 +215,31 @@ contains
     weights(1) = 1.0_stellar_dp - fraction
     weights(2) = fraction
   end subroutine make_nodes
+
+  subroutine make_piecewise_mass_node(lower, upper, query, nodes, weights, n_nodes)
+    ! A source-node fate is not a quantity that can be linearly blended with
+    ! the neighboring node.  Select the left node for an interior half-open
+    ! cell and the exact node at a grid edge.  Z and age remain handled by
+    ! their ordinary table policy; source-node callers must use exact values
+    ! on those axes when their fate semantics are discrete.
+    real(stellar_dp), intent(in) :: lower, upper, query
+    real(stellar_dp), intent(out) :: nodes(2), weights(2)
+    integer, intent(out) :: n_nodes
+    real(stellar_dp), parameter :: tolerance = 1.0e-12_stellar_dp
+
+    nodes = 0.0_stellar_dp
+    weights = 0.0_stellar_dp
+    n_nodes = 1
+    if (abs(upper - lower) <= tolerance * max(1.0_stellar_dp, &
+         abs(lower), abs(upper))) then
+       nodes(1) = lower
+    else if (query >= upper) then
+       nodes(1) = upper
+    else
+       nodes(1) = lower
+    endif
+    weights(1) = 1.0_stellar_dp
+  end subroutine make_piecewise_mass_node
 
   integer function find_grid_row(table, channel_id, mass, metallicity, age_gyr)
     type(stellar_yield_table_t), intent(in) :: table

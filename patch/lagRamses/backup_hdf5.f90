@@ -515,6 +515,7 @@ end subroutine backup_poisson_hdf5
 subroutine backup_part_hdf5()
   use amr_commons
   use pm_commons
+  use stellar_enrichment_config, only: stellar_hdf5_state_schema_version
   use ramses_hdf5_io
   implicit none
 #ifndef WITHOUTMPI
@@ -646,6 +647,13 @@ subroutine backup_part_hdf5()
 
   ! Birth epoch (tp) and metallicity (zp)
   if(star .or. sink) then
+     ! HDF5 stellar state schema 1 is the first payload that preserves the
+     ! binary-restart-equivalent stellar release state.  The three arrays
+     ! below are packed in exactly the same active-particle order as every
+     ! other particle dataset in this group.
+     call hdf5_write_attr_int(grp_id, 'stellar_state_schema_version', &
+          stellar_hdf5_state_schema_version)
+
      ipart = 0
      do i = 1, npartmax
         if(levelp(i) > 0) then
@@ -667,6 +675,39 @@ subroutine backup_part_hdf5()
         call hdf5_write_dataset_1d_dp(grp_id, 'metallicity', &
              dbuf, npart_loc, offset_part, npart_total)
      end if
+
+     ! Stellar population formation time, initial mass, and cumulative
+     ! release cursor.  These are not derivable from birth_epoch/mass after
+     ! a restart and therefore must be persisted bitwise.
+     ipart = 0
+     do i = 1, npartmax
+        if(levelp(i) > 0) then
+           ipart = ipart + 1
+           dbuf(ipart) = tpp(i)
+        end if
+     end do
+     call hdf5_write_dataset_1d_dp(grp_id, 'tpp', &
+          dbuf, npart_loc, offset_part, npart_total)
+
+     ipart = 0
+     do i = 1, npartmax
+        if(levelp(i) > 0) then
+           ipart = ipart + 1
+           dbuf(ipart) = mp0(i)
+        end if
+     end do
+     call hdf5_write_dataset_1d_dp(grp_id, 'mp0', &
+          dbuf, npart_loc, offset_part, npart_total)
+
+     ipart = 0
+     do i = 1, npartmax
+        if(levelp(i) > 0) then
+           ipart = ipart + 1
+           dbuf(ipart) = indtab(i)
+        end if
+     end do
+     call hdf5_write_dataset_1d_dp(grp_id, 'indtab', &
+          dbuf, npart_loc, offset_part, npart_total)
   end if
 
   ! Atomic Dark Matter: dark internal energy

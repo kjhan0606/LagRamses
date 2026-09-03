@@ -13,10 +13,28 @@
     },
     "default_imf_id": 1,
     "default_imf_status": "provisional_not_approved",
+    "imf_mass_support_configuration_keys": ["imf_mass_min_msun", "imf_mass_max_msun"],
+    "implemented_imf_lower_mass_limit_msun": 0.08,
+    "imf_normalization": "integral(m*phi(m) dm) over the configured support equals one unit of initial SSP mass",
     "population_model_configuration_key": "population_model",
     "allowed_population_models": ["single_star_ssp", "binary_ssp"],
+    "production_implemented_population_models": ["single_star_ssp"],
+    "binary_fraction_configuration_key": "binary_fraction",
     "binary_assumptions_required": ["binary_fraction", "period/mass-ratio distribution", "mass-transfer prescription", "common-envelope prescription"],
     "runtime_must_not_hard_code_imf": true
+  },
+  "source_basis": {
+    "configuration_key": "yield_source_basis",
+    "recognized_values": [
+      "per_star_cumulative",
+      "per_event_cumulative",
+      "ssp_cumulative_per_initial_mass",
+      "ssp_rate_per_initial_mass"
+    ],
+    "production_implemented_value": "per_star_cumulative",
+    "runtime_operation": "explicit IMF convolution exactly once",
+    "fail_closed_rule": "all other recognized bases are rejected until a basis-specific integration path is implemented",
+    "double_imf_convolution_forbidden": true
   },
   "channel_partition": {
     "rule": "A progenitor may occupy overlapping raw mass ranges only when channel ownership is disjoint in evolutionary phase; no ejecta packet may be represented by two channels.",
@@ -25,7 +43,7 @@
       "2": true,
       "3": true,
       "4": false,
-      "5": true
+      "5": false
     },
     "channels": {
       "1": {
@@ -54,7 +72,8 @@
       "5": {
         "name": "PISN",
         "status": "disabled_until_explicit_population_gate",
-        "ownership": "Pop-III/very-low-metallicity event only"
+        "ownership": "complete-disruption event only; no terminal remnant owner",
+        "must_not_share_owner_semantics_with": "PPISN"
       }
     }
   },
@@ -62,16 +81,19 @@
     "table_age_range_yr": [0.0, 13800000000.0],
     "age_zero_anchor_required": true,
     "age_zero_returned_mass": 0.0,
+    "age_zero_remnant_mass": 0.0,
     "age_zero_energy": 0.0,
+    "age_zero_momentum": 0.0,
     "age_zero_ejecta": 0.0,
-    "returned_mass_definition": "actual material returned to gas, cumulative per initial stellar mass",
+    "age_zero_net_yield": 0.0,
+    "returned_mass_definition": "actual material returned to gas, cumulative per initial star before the production runtime's single IMF convolution",
     "ejecta_definition": "non-negative actual mass in the eleven tracked elements; sum(tracked_ejecta)<=returned_mass",
     "untracked_ejecta_definition": "returned_mass-sum(tracked_ejecta); non-negative omitted-element mass deposited only into the generic metal scalar",
     "untracked_ejecta_policy": "returned_mass_minus_sum_tracked_ejecta_deposited_as_generic_metals",
     "net_yield_definition": "diagnostic newly produced/consumed material; never a gas-mass source",
     "mass_closure": "initial_mass = living_mass + remnant_mass + returned_mass",
-    "energy_definition": "cumulative physical erg per initial star/population normalization",
-    "momentum_definition": "cumulative net directed momentum vector in physical g cm/s per initial star/population normalization, expressed in the stellar comoving frame",
+    "energy_definition": "cumulative physical erg per initial star before the production runtime's single IMF convolution",
+    "momentum_definition": "cumulative net directed momentum vector in physical g cm/s per initial star before the production runtime's single IMF convolution, expressed in the stellar comoving frame",
     "isotropic_source_momentum_vector": [0.0, 0.0, 0.0],
     "isotropic_source_momentum_rule": "An unresolved isotropic wind or explosion has zero net source-frame vector momentum; do not encode scalar radial momentum along an arbitrary Cartesian direction.",
     "advective_momentum_rule": "The runtime adds returned_mass times the source particle velocity separately, preserving the bulk momentum carried by returned material.",
@@ -95,7 +117,7 @@
     "publication_rule": "Do not describe the 11-field model as complete nucleosynthesis; quantify omitted-species effects before element-abundance claims."
   },
   "approval": {
-    "required_sidecar_fields": ["approval_id", "citation", "source_version", "source_sha256", "license_status", "provenance_status", "units", "IMF", "population_model", "channel_boundaries", "metallicity_definition", "solar_abundance_set", "remnant_model", "untracked_ejecta_policy", "conversion_code_sha256"],
+    "required_sidecar_fields": ["approval_id", "citation", "source_version", "source_sha256", "license_status", "provenance_status", "units", "yield_source_basis", "IMF", "imf_mass_support", "population_model", "binary_fraction", "binary_parameter_distributions", "channel_boundaries", "stellar_lifetime_model", "fate_map", "metallicity_definition", "solar_abundance_set", "remnant_model", "untracked_ejecta_policy", "conversion_code_sha256"],
     "required_channel_status": {"1": "approved", "2": "approved", "3": "approved"},
     "current_status": "blocked_no_approved_physical_asset"
   }

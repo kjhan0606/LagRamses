@@ -33,6 +33,13 @@ mpiifx -O2 -g -traceback -check all \
 "$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tools/audit_g2_candidate_sources.py" \
   --json-out "$DATA_DIR/g2_candidate_source_audit.json" \
   > "$BUILD_DIR/g2_candidate_source_audit.stdout"
+"$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tools/audit_g2_source_package_fingerprints.py" \
+  --json-out "$DATA_DIR/g2_source_package_fingerprint_audit.json" \
+  > "$BUILD_DIR/g2_source_package_fingerprint_audit.stdout"
+"$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tests/g2_source_selection_gate.py"
+"$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tools/audit_g2_source_selection_gate.py" \
+  --json-out "$DATA_DIR/g2_source_selection_gate.json" \
+  > "$BUILD_DIR/g2_source_selection_gate.stdout"
 
 "$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tests/g2_source_adapters.py"
 "$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tests/g2_source_adapter_closure.py"
@@ -110,6 +117,8 @@ output = Path(sys.argv[1])
 fixture = json.loads((output.parent / "g2_phase0_fixture_audit.json").read_text())
 legacy = json.loads((output.parent / "g2_legacy_asset_audit.json").read_text())
 candidate_sources = json.loads((output.parent / "g2_candidate_source_audit.json").read_text())
+fingerprints = json.loads((output.parent / "g2_source_package_fingerprint_audit.json").read_text())
+selection = json.loads((output.parent / "g2_source_selection_gate.json").read_text())
 limongi_adapter = json.loads((output.parent / "g2_limongi_source_adapter_review.json").read_text())
 nugrid_adapter = json.loads((output.parent / "g2_nugrid_source_adapter_review.json").read_text())
 adapter_closure = json.loads((output.parent / "g2_source_adapter_closure_audit.json").read_text())
@@ -161,10 +170,25 @@ report = {
     "legacy_status": legacy["status"],
     "legacy_blocking_reasons": legacy["production_gate"]["blocking_reasons"],
     "candidate_source_status": candidate_sources["status"],
+    "candidate_source_input_integrity_passed": candidate_sources["input_integrity_passed"],
+    "candidate_source_audit_failures": candidate_sources["audit_failures"],
     "candidate_source_manifest_status": candidate_sources["acquisition_manifest"]["status"],
     "candidate_source_manifest_file_count": candidate_sources["acquisition_manifest"]["file_count"],
     "candidate_source_candidate_count": len(candidate_sources["candidates"]),
     "candidate_source_blocking_reasons": candidate_sources["blockers"],
+    "candidate_source_fingerprint_status": fingerprints["status"],
+    "candidate_source_fingerprint_input_integrity_passed": fingerprints["input_integrity_passed"],
+    "candidate_source_fingerprint_candidate_count": fingerprints["candidate_count"],
+    "candidate_source_fingerprint_file_count": fingerprints["file_count"],
+    "candidate_source_fingerprint_scheme": fingerprints["scheme"],
+    "candidate_source_fingerprint_blocking_reasons": fingerprints["audit_failures"],
+    "source_selection_gate_status": selection["status"],
+    "source_selection_gate_runtime_activation_allowed": selection["runtime_activation_allowed"],
+    "source_selection_review_validation_branch": selection["review_validation_branch"]["candidate_id"],
+    "source_selection_review_validation_branch_sha256": selection["review_validation_branch"]["composite_sha256"],
+    "source_selection_production_source_id": selection["production_source_id"],
+    "source_selection_production_approval_id": selection["production_approval_id"],
+    "source_selection_gate_blocking_reasons": selection["blockers"],
     "source_adapter_status": {
         "limongi_chieffi_2018_cds": limongi_adapter["status"],
         "nugrid_set1ext_mesaonly_fryer12_delay": nugrid_adapter["status"],
@@ -245,6 +269,8 @@ report = {
     "sukhbold2016_blocking_reasons": sukhbold["blockers"],
     "sukhbold2016_projection_status": sukhbold_projection["status"],
     "sukhbold2016_projection_record_count": sukhbold_projection["record_count"],
+    "sukhbold2016_projection_high_mass_record_count": sukhbold_projection["high_mass_record_count"],
+    "sukhbold2016_projection_high_mass_component_counts": sukhbold_projection["high_mass_record_count_by_source_component"],
     "sukhbold2016_projection_source_nulls_preserved": sukhbold_projection["source_nulls_preserved"],
     "sukhbold2016_projection_blocking_reasons": sukhbold_projection["blockers"],
     "limongi2024_transition_fate_status": limongi_transition["status"],

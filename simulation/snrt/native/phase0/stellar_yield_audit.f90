@@ -99,6 +99,21 @@ contains
             minval(table%ejected_mass(i,:)) < -tol) then
           ierr = ior(ierr, yield_audit_err_value)
        end if
+       if (abs(table%age_gyr(i)) <= tol) then
+          scale = max(1.0_stellar_dp, abs(table%returned_mass(i)), &
+               abs(table%remnant_mass(i)), abs(table%energy(i)), &
+               maxval(abs(table%momentum(i,:))), &
+               maxval(abs(table%ejected_mass(i,:))), &
+               maxval(abs(table%net_yield(i,:))))
+          if (abs(table%returned_mass(i)) > tol*scale .or. &
+               abs(table%remnant_mass(i)) > tol*scale .or. &
+               abs(table%energy(i)) > tol*scale .or. &
+               maxval(abs(table%momentum(i,:))) > tol*scale .or. &
+               maxval(abs(table%ejected_mass(i,:))) > tol*scale .or. &
+               maxval(abs(table%net_yield(i,:))) > tol*scale) then
+             ierr = ior(ierr, yield_audit_err_value)
+          end if
+       end if
 
        ejected_sum = sum(table%ejected_mass(i,:))
        scale = max(1.0_stellar_dp, abs(table%returned_mass(i)), &
@@ -218,6 +233,7 @@ contains
 
     expected_rows = int(n_mass, kind=8) * int(n_z, kind=8) * int(n_age, kind=8)
     if (int(n_rows, kind=8) /= expected_rows) bad = .true.
+    if (.not. any(abs(ages(1:n_age)) <= tolerance)) bad = .true.
 
     do i = 1, n_mass
        do j = 1, n_z

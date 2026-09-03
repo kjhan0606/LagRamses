@@ -263,6 +263,10 @@ morton_hash.o: morton_keys.o amr_index.o
 hydro_commons.o: hydro_parameters.o
 poisson_commons.o: poisson_parameters.o
 stellar_enrichment_contract.o: stellar_enrichment_config.o
+stellar_snia_dtd.o: stellar_enrichment_config.o
+stellar_snia_event_ledger.o: stellar_enrichment_config.o stellar_enrichment_contract.o
+stellar_native_units.o: stellar_enrichment_config.o
+stellar_progress_contract.o: stellar_enrichment_config.o
 stellar_yield_tables.o: stellar_enrichment_config.o
 stellar_yield_backend.o: stellar_yield_tables.o $(STELLAR_EMBEDDED_MODOBJ)
 stellar_yield_embedded_data.o: $(STELLAR_EMBEDDED_SOURCE) stellar_yield_tables.o stellar_enrichment_config.o
@@ -270,15 +274,17 @@ stellar_yield_interpolation.o: stellar_enrichment_config.o stellar_yield_tables.
 stellar_yield_provider.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_interpolation.o
 stellar_ssp_sources.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_provider.o
 stellar_source_increment.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_ssp_sources.o
-stellar_enrichment_driver.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_source_increment.o
+stellar_population_ledger.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_ssp_sources.o
+stellar_enrichment_driver.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_ssp_sources.o stellar_source_increment.o stellar_population_ledger.o
 stellar_cell_deposition.o: stellar_enrichment_config.o stellar_enrichment_contract.o
 stellar_ramses_field_map.o: stellar_enrichment_config.o
 stellar_ramses_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o
 stellar_ramses_mapped_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_ramses_field_map.o
-stellar_ramses_runtime.o: amr_commons.kjhan.o pm_commons.o hydro_commons.o stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_backend.o stellar_yield_audit.o stellar_enrichment_driver.o
+stellar_ramses_runtime.o: amr_commons.kjhan.o pm_commons.o hydro_commons.o stellar_enrichment_config.o stellar_enrichment_contract.o stellar_native_units.o stellar_progress_contract.o stellar_yield_tables.o stellar_yield_backend.o stellar_yield_audit.o stellar_enrichment_driver.o
 feedback.kjhan3.o: stellar_ramses_runtime.o
 read_hydro_params.o: stellar_enrichment_config.o
-output_amr.kjhan.o: stellar_enrichment_config.o
+output_amr.kjhan.o: stellar_enrichment_config.o stellar_ramses_runtime.o
+ramses.o: stellar_enrichment_config.o stellar_ramses_runtime.o
 amr_step.jaehyun.o: stellar_enrichment_config.o
 stellar_yield_audit.o: stellar_enrichment_config.o stellar_yield_tables.o
 

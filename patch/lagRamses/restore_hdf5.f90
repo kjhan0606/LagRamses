@@ -35,7 +35,9 @@ subroutine restore_amr_hdf5()
   include 'mpif.h'
 #endif
   integer :: ilevel, i, igrid, ind, iskip, idim, info
+  integer :: hdf5_attr_status, hdf5_attr_status_all
   integer :: nlevelmax_file, nlevelmax_header
+  integer :: ksec_kmax_file, ksec_nbinodes_file
   integer(i8b) :: ngrid_total
   integer, allocatable :: ngrid_per_cpu(:)
   integer, allocatable :: son_flag_buf(:), cpu_map_buf(:)
@@ -105,8 +107,23 @@ subroutine restore_amr_hdf5()
   ! Step 1: Read header (time, cosmology, nstep, etc.)
   !=====================================================
   call hdf5_open_group('/header', grp_id)
-  call hdf5_read_attr_int(grp_id, 'ncpu', ncpu_file)
-  call hdf5_read_attr_int(grp_id, 'nlevelmax', nlevelmax_header)
+  call hdf5_read_attr_int_checked(grp_id, 'ncpu', ncpu_file, hdf5_attr_status)
+  call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, info)
+  if(hdf5_attr_status_all /= 0 .or. ncpu_file <= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for header/ncpu status=', &
+          hdf5_attr_status_all
+     call hdf5_restart_abort
+  end if
+  nlevelmax_header = 0
+  call hdf5_read_attr_int_checked(grp_id, 'nlevelmax', nlevelmax_header, hdf5_attr_status)
+  call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, info)
+  if(hdf5_attr_status_all /= 0 .or. nlevelmax_header < 1) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for header/nlevelmax status=', &
+          hdf5_attr_status_all
+     call hdf5_restart_abort
+  end if
   if(nlevelmax_header>nlevelmax) then
      if(myid==1) write(*,'(A,I4,A,I4)') &
           ' HDF5 restart level guard: checkpoint levelmax=', nlevelmax_header, &
@@ -115,42 +132,48 @@ subroutine restore_amr_hdf5()
      call hdf5_close_file()
      call clean_stop
   end if
-  call hdf5_read_attr_dp(grp_id, 'time', t)
-  call hdf5_read_attr_int(grp_id, 'nstep', nstep)
-  call hdf5_read_attr_int(grp_id, 'nstep_coarse', nstep_coarse)
+  call hdf5_restore_header_dp_checked(grp_id, 'time', t)
+  call hdf5_restore_header_int_checked(grp_id, 'nstep', nstep)
+  call hdf5_restore_header_int_checked(grp_id, 'nstep_coarse', nstep_coarse)
   ! Output scheduling (noutput/tout/aout) is set by the namelist.
-  ! Only restore the output counters (iout/ifout) from the file.
-  ! Read noutput_file to skip the stored arrays.
+  ! Only restore the output counters (iout/ifout) from the file.  The stored
+  ! tout/aout arrays are deliberately not read: the namelist is authoritative
+  ! and a corrupt noutput attribute must not control an allocation or HDF5
+  ! attribute read length for values that are immediately discarded.
   block
-    integer :: noutput_file
-    real(dp), allocatable :: dummy_dp(:)
-    call hdf5_read_attr_int(grp_id, 'noutput', noutput_file)
-    call hdf5_read_attr_int(grp_id, 'iout', iout)
-    call hdf5_read_attr_int(grp_id, 'ifout', ifout)
-    allocate(dummy_dp(noutput_file))
-    call hdf5_read_attr_1d_dp(grp_id, 'tout', dummy_dp, noutput_file)
-    call hdf5_read_attr_1d_dp(grp_id, 'aout', dummy_dp, noutput_file)
-    deallocate(dummy_dp)
+    call hdf5_restore_header_int_checked(grp_id, 'iout', iout)
+    call hdf5_restore_header_int_checked(grp_id, 'ifout', ifout)
   end block
-  call hdf5_read_attr_1d_dp(grp_id, 'dtold', dtold, nlevelmax)
-  call hdf5_read_attr_1d_dp(grp_id, 'dtnew', dtnew, nlevelmax)
-  call hdf5_read_attr_dp(grp_id, 'const', const)
-  call hdf5_read_attr_dp(grp_id, 'mass_tot_0', mass_tot_0)
-  call hdf5_read_attr_dp(grp_id, 'rho_tot', rho_tot)
-  call hdf5_read_attr_dp(grp_id, 'omega_m', omega_m)
-  call hdf5_read_attr_dp(grp_id, 'omega_l', omega_l)
-  call hdf5_read_attr_dp(grp_id, 'omega_k', omega_k)
-  call hdf5_read_attr_dp(grp_id, 'omega_b', omega_b)
-  call hdf5_read_attr_dp(grp_id, 'h0', h0)
-  call hdf5_read_attr_dp(grp_id, 'aexp_ini', aexp_ini)
-  call hdf5_read_attr_dp(grp_id, 'boxlen_ini', boxlen_ini)
-  call hdf5_read_attr_dp(grp_id, 'aexp', aexp)
-  call hdf5_read_attr_dp(grp_id, 'hexp', hexp)
-  call hdf5_read_attr_dp(grp_id, 'aexp_old', aexp_old)
-  call hdf5_read_attr_dp(grp_id, 'epot_tot_int', epot_tot_int)
-  call hdf5_read_attr_dp(grp_id, 'epot_tot_old', epot_tot_old)
-  call hdf5_read_attr_dp(grp_id, 'mass_sph', mass_sph)
-  call hdf5_read_attr_string(grp_id, 'ordering', ordering_file)
+  block
+     real(dp), allocatable :: dtold_file(:), dtnew_file(:)
+     allocate(dtold_file(nlevelmax_header), dtnew_file(nlevelmax_header))
+     call hdf5_restore_header_dp_array_checked(grp_id, 'dtold', dtold_file, &
+          nlevelmax_header)
+     call hdf5_restore_header_dp_array_checked(grp_id, 'dtnew', dtnew_file, &
+          nlevelmax_header)
+     dtold = 0.0d0
+     dtnew = 0.0d0
+     dtold(1:nlevelmax_header) = dtold_file
+     dtnew(1:nlevelmax_header) = dtnew_file
+     deallocate(dtold_file, dtnew_file)
+  end block
+  call hdf5_restore_header_dp_checked(grp_id, 'const', const)
+  call hdf5_restore_header_dp_checked(grp_id, 'mass_tot_0', mass_tot_0)
+  call hdf5_restore_header_dp_checked(grp_id, 'rho_tot', rho_tot)
+  call hdf5_restore_header_dp_checked(grp_id, 'omega_m', omega_m)
+  call hdf5_restore_header_dp_checked(grp_id, 'omega_l', omega_l)
+  call hdf5_restore_header_dp_checked(grp_id, 'omega_k', omega_k)
+  call hdf5_restore_header_dp_checked(grp_id, 'omega_b', omega_b)
+  call hdf5_restore_header_dp_checked(grp_id, 'h0', h0)
+  call hdf5_restore_header_dp_checked(grp_id, 'aexp_ini', aexp_ini)
+  call hdf5_restore_header_dp_checked(grp_id, 'boxlen_ini', boxlen_ini)
+  call hdf5_restore_header_dp_checked(grp_id, 'aexp', aexp)
+  call hdf5_restore_header_dp_checked(grp_id, 'hexp', hexp)
+  call hdf5_restore_header_dp_checked(grp_id, 'aexp_old', aexp_old)
+  call hdf5_restore_header_dp_checked(grp_id, 'epot_tot_int', epot_tot_int)
+  call hdf5_restore_header_dp_checked(grp_id, 'epot_tot_old', epot_tot_old)
+  call hdf5_restore_header_dp_checked(grp_id, 'mass_sph', mass_sph)
+  call hdf5_restore_header_string_checked(grp_id, 'ordering', ordering_file)
   call hdf5_close_group(grp_id)
 
   iout=restart_output_index(cosmo,noutput,aout,tout,aexp,t)
@@ -161,8 +184,7 @@ subroutine restore_amr_hdf5()
   !=====================================================
   ! Step 2: Check ncpu_file vs ncpu
   !=====================================================
-  if(ncpu_file /= ncpu .or. ordering == 'ksection' &
-       .or. trim(ordering_file) /= trim(ordering)) then
+  if(ncpu_file /= ncpu .or. trim(ordering_file) /= trim(ordering)) then
      ! Variable-ncpu, ksection, or cross-ordering: use distributed varcpu path
      ! (the same-ncpu path replicates ALL grids on every rank, requiring
      !  ngridmax >= total_grids, which is prohibitively expensive)
@@ -192,15 +214,33 @@ subroutine restore_amr_hdf5()
   ! Step 2b: Read coarse grid (all ranks read full coarse)
   !=====================================================
   call hdf5_open_group('/coarse', grp_id)
-  call hdf5_read_dataset_all_int(grp_id, 'son', son(1:ncoarse), ncoarse)
-  call hdf5_read_dataset_all_int(grp_id, 'cpu_map', cpu_map(1:ncoarse), ncoarse)
+  call hdf5_read_dataset_all_int_checked(grp_id, 'son', son(1:ncoarse), ncoarse, &
+       hdf5_attr_status)
+  if(hdf5_attr_status /= 0) then
+     if(myid==1) write(*,*) 'ERROR: checked HDF5 read failed for coarse/son status=', &
+          hdf5_attr_status
+     call hdf5_restart_abort
+  end if
+  call hdf5_read_dataset_all_int_checked(grp_id, 'cpu_map', cpu_map(1:ncoarse), ncoarse, &
+       hdf5_attr_status)
+  if(hdf5_attr_status /= 0) then
+     if(myid==1) write(*,*) 'ERROR: checked HDF5 read failed for coarse/cpu_map status=', &
+          hdf5_attr_status
+     call hdf5_restart_abort
+  end if
   ! Try to read flag1 (new format); fall back to computing from son
   block
      integer :: h5err
      logical :: dset_exists
      call h5lexists_f(grp_id, 'flag1', dset_exists, h5err)
      if(dset_exists .and. h5err == 0) then
-        call hdf5_read_dataset_all_int(grp_id, 'flag1', flag1(1:ncoarse), ncoarse)
+        call hdf5_read_dataset_all_int_checked(grp_id, 'flag1', flag1(1:ncoarse), ncoarse, &
+             hdf5_attr_status)
+        if(hdf5_attr_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: checked HDF5 read failed for coarse/flag1 status=', &
+                hdf5_attr_status
+           call hdf5_restart_abort
+        end if
      else
         do i = 1, ncoarse
            if(son(i) > 0) then
@@ -225,23 +265,15 @@ subroutine restore_amr_hdf5()
      scale = boxlen / dble(nx_loc)
 
      if(ordering == 'ksection') then
-        ! The checkpoint ksection tree is tied to ncpu_file.  Rebuilding it
-        ! from streamed HDF5 coordinates would require retaining all xg or
-        ! rereading xg once per tree depth; neither is acceptable at scale.
-        if(ncpu_file /= ncpu .or. trim(ordering_file) /= trim(ordering)) then
-           if(myid==1) then
-              write(*,*) 'ERROR: HDF5 variable-ncpu/cross-ordering restart to ksection is unsupported.'
-              write(*,*) '       Restart with Hilbert ordering or the checkpoint ncpu/ordering.'
-           end if
-           call clean_stop
+        ! A variable-ncpu or cross-ordering restart cannot safely reuse a
+        ! ksection tree: its dimensions and ownership are tied to the file
+        ! decomposition.  The same-ncpu/same-ordering case is handled by the
+        ! checked checkpoint-tree branch below.
+        if(myid==1) then
+           write(*,*) 'ERROR: HDF5 variable-ncpu/cross-ordering restart to ksection is unsupported.'
+           write(*,*) '       Restart with Hilbert ordering or the checkpoint ncpu/ordering.'
         end if
-        ! Preserve the existing same-ncpu ksection distributed restore path.
-        call build_ksection(update=.false.)
-        call rebuild_ksec_cpuranges()
-        call compute_ksec_cpu_path()
-        bisec_cpubox_min2 = bisec_cpubox_min
-        bisec_cpubox_max2 = bisec_cpubox_max
-        if(myid==1) write(*,*) 'HDF5: ksection tree rebuilt for ncpu=', ncpu
+        call hdf5_restart_abort
      else
         ! Hilbert ordering: compute the global key extent now.  The actual
         ! grid-balanced bounds are placed by the xg-only pre-pass below.
@@ -273,11 +305,65 @@ subroutine restore_amr_hdf5()
      !--- Same ncpu: read ksection tree from file ---
      call hdf5_open_group('/domain', grp_id)
      if(ordering=='ksection') then
-        call hdf5_read_attr_int(grp_id, 'ksec_kmax', ksec_kmax)
-        call hdf5_read_attr_int(grp_id, 'ksec_nbinodes', ksec_nbinodes)
-        call hdf5_read_dataset_all_int(grp_id, 'ksec_factor', ksec_factor, nksec_levels)
-        call hdf5_read_dataset_all_int(grp_id, 'ksec_dir', ksec_dir, nksec_levels)
-        call hdf5_read_dataset_all_int(grp_id, 'ksec_indx', ksec_indx, ksec_nbinodes)
+        call hdf5_read_attr_int_checked(grp_id, 'ksec_kmax', ksec_kmax_file, hdf5_attr_status)
+        call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+             MPI_MAX, MPI_COMM_WORLD, info)
+        if(hdf5_attr_status_all /= 0) then
+           if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for domain/ksec_kmax status=', &
+                hdf5_attr_status_all
+           call hdf5_restart_abort
+        end if
+        call hdf5_read_attr_int_checked(grp_id, 'ksec_nbinodes', ksec_nbinodes_file, hdf5_attr_status)
+        call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+             MPI_MAX, MPI_COMM_WORLD, info)
+        if(hdf5_attr_status_all /= 0) then
+           if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for domain/ksec_nbinodes status=', &
+                hdf5_attr_status_all
+           call hdf5_restart_abort
+        end if
+        if(ksec_kmax_file < 2 .or. ksec_kmax_file > ncpu .or. &
+             ksec_nbinodes_file < 1 .or. ksec_nbinodes_file > 2*ncpu-1) then
+           if(myid==1) write(*,*) 'ERROR: invalid HDF5 ksection dimensions kmax=', &
+                ksec_kmax_file, ' nbinodes=', ksec_nbinodes_file, ' ncpu=', ncpu
+           call hdf5_restart_abort
+        end if
+        if(.not. allocated(ksec_wall) .or. .not. allocated(ksec_next) .or. &
+             .not. allocated(ksec_indx)) then
+           if(myid==1) write(*,*) 'ERROR: ksection arrays are not allocated before HDF5 restore'
+           call hdf5_restart_abort
+        end if
+        if(ksec_kmax_file /= ksec_kmax .or. ksec_nbinodes_file /= ksec_nbinodes .or. &
+             size(ksec_wall,1) /= ksec_nbinodes_file .or. &
+             size(ksec_next,1) /= ksec_nbinodes_file .or. &
+             size(ksec_indx) /= ksec_nbinodes_file .or. &
+             size(ksec_wall,2) /= max(ksec_kmax_file-1,1) .or. &
+             size(ksec_next,2) /= ksec_kmax_file) then
+           if(myid==1) write(*,*) 'ERROR: HDF5 ksection dimensions do not match runtime allocation', &
+                ' file=', ksec_kmax_file, ksec_nbinodes_file, &
+                ' runtime=', ksec_kmax, ksec_nbinodes
+           call hdf5_restart_abort
+        end if
+        call hdf5_read_dataset_all_int_checked(grp_id, 'ksec_factor', ksec_factor, &
+             nksec_levels, hdf5_attr_status)
+        if(hdf5_attr_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for ksec_factor status=', &
+                hdf5_attr_status
+           call hdf5_restart_abort
+        end if
+        call hdf5_read_dataset_all_int_checked(grp_id, 'ksec_dir', ksec_dir, &
+             nksec_levels, hdf5_attr_status)
+        if(hdf5_attr_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for ksec_dir status=', &
+                hdf5_attr_status
+           call hdf5_restart_abort
+        end if
+        call hdf5_read_dataset_all_int_checked(grp_id, 'ksec_indx', ksec_indx, &
+             ksec_nbinodes, hdf5_attr_status)
+        if(hdf5_attr_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for ksec_indx status=', &
+                hdf5_attr_status
+           call hdf5_restart_abort
+        end if
         ! Read flattened 2D arrays
         block
            integer :: nw_cols, nn_cols, nw_total, nn_total
@@ -289,8 +375,20 @@ subroutine restore_amr_hdf5()
            nn_total = ksec_nbinodes * nn_cols
            allocate(wall_flat(nw_total))
            allocate(next_flat(nn_total))
-           call hdf5_read_dataset_all_dp(grp_id, 'ksec_wall', wall_flat, nw_total)
-           call hdf5_read_dataset_all_int(grp_id, 'ksec_next', next_flat, nn_total)
+           call hdf5_read_dataset_all_dp_checked(grp_id, 'ksec_wall', wall_flat, &
+                nw_total, hdf5_attr_status)
+           if(hdf5_attr_status /= 0) then
+              if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for ksec_wall status=', &
+                   hdf5_attr_status
+              call hdf5_restart_abort
+           end if
+           call hdf5_read_dataset_all_int_checked(grp_id, 'ksec_next', next_flat, &
+                nn_total, hdf5_attr_status)
+           if(hdf5_attr_status /= 0) then
+              if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for ksec_next status=', &
+                   hdf5_attr_status
+              call hdf5_restart_abort
+           end if
            ksec_wall(1:ksec_nbinodes, 1:nw_cols) = &
                 reshape(wall_flat, (/ksec_nbinodes, nw_cols/))
            ksec_next(1:ksec_nbinodes, 1:nn_cols) = &
@@ -303,9 +401,21 @@ subroutine restore_amr_hdf5()
            integer :: ncb
            ncb = ncpu * ndim
            allocate(cpubox_flat(ncb))
-           call hdf5_read_dataset_all_dp(grp_id, 'bisec_cpubox_min', cpubox_flat, ncb)
+           call hdf5_read_dataset_all_dp_checked(grp_id, 'bisec_cpubox_min', cpubox_flat, ncb, &
+                hdf5_attr_status)
+           if(hdf5_attr_status /= 0) then
+              if(myid==1) write(*,*) 'ERROR: checked HDF5 read failed for bisec_cpubox_min status=', &
+                   hdf5_attr_status
+              call hdf5_restart_abort
+           end if
            bisec_cpubox_min(1:ncpu, 1:ndim) = reshape(cpubox_flat, (/ncpu, ndim/))
-           call hdf5_read_dataset_all_dp(grp_id, 'bisec_cpubox_max', cpubox_flat, ncb)
+           call hdf5_read_dataset_all_dp_checked(grp_id, 'bisec_cpubox_max', cpubox_flat, ncb, &
+                hdf5_attr_status)
+           if(hdf5_attr_status /= 0) then
+              if(myid==1) write(*,*) 'ERROR: checked HDF5 read failed for bisec_cpubox_max status=', &
+                   hdf5_attr_status
+              call hdf5_restart_abort
+           end if
            bisec_cpubox_max(1:ncpu, 1:ndim) = reshape(cpubox_flat, (/ncpu, ndim/))
            deallocate(cpubox_flat)
         end block
@@ -326,8 +436,17 @@ subroutine restore_amr_hdf5()
   ! Step 4: Read nlevelmax_file from /amr group
   !=====================================================
   call hdf5_open_group('/amr', grp_id)
-  call hdf5_read_attr_int(grp_id, 'nlevelmax_file', nlevelmax_file)
+  nlevelmax_file = 0
+  call hdf5_read_attr_int_checked(grp_id, 'nlevelmax_file', nlevelmax_file, hdf5_attr_status)
+  call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, info)
   call hdf5_close_group(grp_id)
+  if(hdf5_attr_status_all /= 0 .or. nlevelmax_file < 1 .or. &
+       nlevelmax_file > nlevelmax) then
+     if(myid==1) write(*,*) 'ERROR: invalid HDF5 nlevelmax_file=', nlevelmax_file, &
+          ' requested=', nlevelmax, ' status=', hdf5_attr_status_all
+     call hdf5_restart_abort
+  end if
   if(myid==1) write(*,*) 'HDF5: nlevelmax_file =', nlevelmax_file
 
   !=====================================================
@@ -381,10 +500,19 @@ subroutine restore_amr_hdf5()
            end block
 
            allocate(ngrid_per_cpu(ncpu_file))
-           call hdf5_read_dataset_all_int(lvl_grp_id, 'ngrid_per_cpu', &
-                ngrid_per_cpu, ncpu_file)
+           call hdf5_read_dataset_all_int_checked(lvl_grp_id, 'ngrid_per_cpu', &
+                ngrid_per_cpu, ncpu_file, hdf5_attr_status)
+           if(hdf5_attr_status /= 0) then
+              if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for ngrid_per_cpu status=', &
+                   hdf5_attr_status
+              call hdf5_restart_abort
+           end if
            ngrid_total = 0_i8b
            do i = 1, ncpu_file
+              if(ngrid_per_cpu(i) < 0) then
+                 if(myid==1) write(*,*) 'ERROR: invalid ngrid_per_cpu: negative entry at rank=', i
+                 call hdf5_restart_abort
+              end if
               ngrid_total = ngrid_total + int(ngrid_per_cpu(i), i8b)
            end do
            deallocate(ngrid_per_cpu)
@@ -424,9 +552,14 @@ subroutine restore_amr_hdf5()
 
               do idim = 1, ndim
                  write(lvl_str, '(I0)') idim
-                 call hdf5_read_dataset_collective_dp(lvl_grp_id, &
+                 call hdf5_read_dataset_collective_dp_checked(lvl_grp_id, &
                       'xg_'//trim(lvl_str), xg_chunk(:,idim), this_chunk, &
-                      global_off_i8)
+                      global_off_i8, int(ngrid_all_int, i8b), hdf5_attr_status)
+                 if(hdf5_attr_status /= 0) then
+                    if(myid==1) write(*,*) 'ERROR: checked AMR xg read failed status=', &
+                         hdf5_attr_status
+                    call hdf5_restart_abort
+                 end if
               end do
 
               do varcpu_j0 = 1, this_chunk, nvector
@@ -511,11 +644,21 @@ subroutine restore_amr_hdf5()
 
         ! Read ngrid_per_cpu from file (ncpu_file entries)
         allocate(ngrid_per_cpu(ncpu_file))
-        call hdf5_read_dataset_all_int(lvl_grp_id, 'ngrid_per_cpu', ngrid_per_cpu, ncpu_file)
+        call hdf5_read_dataset_all_int_checked(lvl_grp_id, 'ngrid_per_cpu', &
+             ngrid_per_cpu, ncpu_file, hdf5_attr_status)
+        if(hdf5_attr_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for ngrid_per_cpu status=', &
+                hdf5_attr_status
+           call hdf5_restart_abort
+        end if
 
         ! Compute total grids at this level
         ngrid_total = 0
         do i = 1, ncpu_file
+           if(ngrid_per_cpu(i) < 0) then
+              if(myid==1) write(*,*) 'ERROR: invalid ngrid_per_cpu: negative entry at rank=', i
+              call hdf5_restart_abort
+           end if
            ngrid_total = ngrid_total + ngrid_per_cpu(i)
         end do
         ngrid_all_int = int(ngrid_total)
@@ -593,13 +736,24 @@ subroutine restore_amr_hdf5()
            !--- Stage A: parallel hyperslab read (collective) ---
            do idim = 1, ndim
               write(lvl_str, '(I0)') idim
-              call hdf5_read_dataset_collective_dp(lvl_grp_id, &
+              call hdf5_read_dataset_collective_dp_checked(lvl_grp_id, &
                    'xg_'//trim(lvl_str), xg_chunk(:, idim), this_chunk, &
-                   global_off_i8)
+                   global_off_i8, int(ngrid_all_int, i8b), hdf5_attr_status)
+              if(hdf5_attr_status /= 0) then
+                 if(myid==1) write(*,*) 'ERROR: checked AMR xg read failed status=', &
+                      hdf5_attr_status
+                 call hdf5_restart_abort
+              end if
            end do
-           call hdf5_read_dataset_collective_int(lvl_grp_id, 'son_flag', &
+           call hdf5_read_dataset_collective_int_checked(lvl_grp_id, 'son_flag', &
                 son_flag_chunk, this_chunk * twotondim, &
-                global_off_i8 * int(twotondim, i8b))
+                global_off_i8 * int(twotondim, i8b), &
+                int(ngrid_all_int, i8b) * int(twotondim, i8b), hdf5_attr_status)
+           if(hdf5_attr_status /= 0) then
+              if(myid==1) write(*,*) 'ERROR: checked AMR son_flag read failed status=', &
+                   hdf5_attr_status
+              call hdf5_restart_abort
+           end if
 
            !--- Stage B prep: dest_cpu via cmp_cpumap + pack ---
            do j = 1, this_chunk
@@ -865,11 +1019,21 @@ subroutine restore_amr_hdf5()
         end block
 
         ! Read ngrid_per_cpu (all ranks read full array)
-        call hdf5_read_dataset_all_int(lvl_grp_id, 'ngrid_per_cpu', ngrid_per_cpu, ncpu)
+        call hdf5_read_dataset_all_int_checked(lvl_grp_id, 'ngrid_per_cpu', &
+             ngrid_per_cpu, ncpu, hdf5_attr_status)
+        if(hdf5_attr_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for ngrid_per_cpu status=', &
+                hdf5_attr_status
+           call hdf5_restart_abort
+        end if
 
         ! Compute total grids at this level
         ngrid_total = 0
         do i = 1, ncpu
+           if(ngrid_per_cpu(i) < 0) then
+              if(myid==1) write(*,*) 'ERROR: invalid ngrid_per_cpu: negative entry at rank=', i
+              call hdf5_restart_abort
+           end if
            ngrid_total = ngrid_total + ngrid_per_cpu(i)
         end do
         ngrid_all_int = int(ngrid_total)
@@ -890,15 +1054,30 @@ subroutine restore_amr_hdf5()
         ! Read ALL grid positions (every rank reads full datasets)
         do idim = 1, ndim
            write(lvl_str, '(I0)') idim
-           call hdf5_read_dataset_all_dp(lvl_grp_id, 'xg_'//trim(lvl_str), &
-                xg_all(:, idim), ngrid_all_int)
+           call hdf5_read_dataset_all_dp_checked(lvl_grp_id, 'xg_'//trim(lvl_str), &
+                xg_all(:, idim), ngrid_all_int, hdf5_attr_status)
+           if(hdf5_attr_status /= 0) then
+              if(myid==1) write(*,*) 'ERROR: checked HDF5 read failed for AMR xg status=', &
+                   hdf5_attr_status
+              call hdf5_restart_abort
+           end if
         end do
 
         ! Read ALL cell data
-        call hdf5_read_dataset_all_int(lvl_grp_id, 'son_flag', &
-             son_flag_buf, ngrid_all_int * twotondim)
-        call hdf5_read_dataset_all_int(lvl_grp_id, 'cpu_map', &
-             cpu_map_buf, ngrid_all_int * twotondim)
+        call hdf5_read_dataset_all_int_checked(lvl_grp_id, 'son_flag', &
+             son_flag_buf, ngrid_all_int * twotondim, hdf5_attr_status)
+        if(hdf5_attr_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: checked HDF5 read failed for AMR son_flag status=', &
+                hdf5_attr_status
+           call hdf5_restart_abort
+        end if
+        call hdf5_read_dataset_all_int_checked(lvl_grp_id, 'cpu_map', &
+             cpu_map_buf, ngrid_all_int * twotondim, hdf5_attr_status)
+        if(hdf5_attr_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: checked HDF5 read failed for AMR cpu_map status=', &
+                hdf5_attr_status
+           call hdf5_restart_abort
+        end if
 
         ! Initialize hash table for this level
         call morton_hash_init(mort_table(ilevel), max(2 * ngrid_all_int, 16))
@@ -1135,6 +1314,7 @@ subroutine restore_hydro_hdf5()
   include 'mpif.h'
 #endif
   integer :: ilevel, i, igrid, ind, ivar, info
+  integer :: hdf5_attr_status, hdf5_attr_status_all
   integer :: ngrid_loc, nvar_file, fidx
   integer, allocatable :: ngrid_all(:)
   integer(i8b) :: ncells_total, offset_cells, ngrid_total
@@ -1159,8 +1339,22 @@ subroutine restore_hydro_hdf5()
 
   ! Read header to get ncpu_file and nvar_file
   call hdf5_open_group('/header', hdr_grp_id)
-  call hdf5_read_attr_int(hdr_grp_id, 'ncpu', ncpu_file)
-  call hdf5_read_attr_int(hdr_grp_id, 'nvar', nvar_file)
+  call hdf5_read_attr_int_checked(hdr_grp_id, 'ncpu', ncpu_file, hdf5_attr_status)
+  call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, info)
+  if(hdf5_attr_status_all /= 0 .or. ncpu_file <= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for header/ncpu status=', &
+          hdf5_attr_status_all
+     call hdf5_restart_abort
+  end if
+  call hdf5_read_attr_int_checked(hdr_grp_id, 'nvar', nvar_file, hdf5_attr_status)
+  call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, info)
+  if(hdf5_attr_status_all /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for header/nvar status=', &
+          hdf5_attr_status_all
+     call hdf5_restart_abort
+  end if
   call hdf5_close_group(hdr_grp_id)
 
   if(nvar_file /= nvar) then
@@ -1627,6 +1821,7 @@ end subroutine restore_poisson_hdf5
 subroutine restore_part_hdf5()
   use amr_commons
   use pm_commons
+  use stellar_enrichment_config, only: stellar_hdf5_state_schema_version
   use ramses_hdf5_io
   implicit none
 #ifndef WITHOUTMPI
@@ -1644,7 +1839,12 @@ subroutine restore_part_hdf5()
   character(len=10) :: dstr
   character(len=5) :: nchar
   logical :: dset_exists
+  logical :: attr_exists
+  integer :: stellar_state_schema_version
   integer :: h5err
+  integer :: stellar_state_read_status
+  integer :: hdf5_attr_status_all
+  integer :: nindsink_file
 
   call title(nrestart, nchar)
   h5filename = 'output_'//trim(nchar)//'/data_'//trim(nchar)//'.h5'
@@ -1655,23 +1855,80 @@ subroutine restore_part_hdf5()
 
   ! Read header
   call hdf5_open_group('/header', hdr_grp_id)
-  call hdf5_read_attr_int(hdr_grp_id, 'ncpu', ncpu_file)
+  call hdf5_read_attr_int_checked(hdr_grp_id, 'ncpu', ncpu_file, &
+       stellar_state_read_status)
+  call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, h5err)
+  if(hdf5_attr_status_all /= 0 .or. ncpu_file <= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for header/ncpu status=', &
+          hdf5_attr_status_all
+     call hdf5_restart_abort
+  end if
   call hdf5_close_group(hdr_grp_id)
 
   ! Read particle group
   call hdf5_open_group('/particles', grp_id)
-  call hdf5_read_attr_int8(grp_id, 'npart_total', npart_total_file)
+  call hdf5_read_attr_int8_checked(grp_id, 'npart_total', npart_total_file, &
+       stellar_state_read_status)
+  call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, h5err)
+  if(hdf5_attr_status_all /= 0 .or. npart_total_file < 0_i8b) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for particles/npart_total status=', &
+          hdf5_attr_status_all
+     call hdf5_restart_abort
+  end if
   block
      integer(i8b) :: nstar_tot_tmp
-     call hdf5_read_attr_int8(grp_id, 'nstar_tot', nstar_tot_tmp)
+     call hdf5_read_attr_int8_checked(grp_id, 'nstar_tot', nstar_tot_tmp, &
+          stellar_state_read_status)
+     call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+          MPI_MAX, MPI_COMM_WORLD, h5err)
+     if(hdf5_attr_status_all /= 0 .or. nstar_tot_tmp < 0_i8b) then
+        if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for particles/nstar_tot status=', &
+             hdf5_attr_status_all
+        call hdf5_restart_abort
+     end if
      nstar_tot = nstar_tot_tmp
   end block
-  call hdf5_read_attr_dp(grp_id, 'mstar_tot', mstar_tot)
-  call hdf5_read_attr_dp(grp_id, 'mstar_lost', mstar_lost)
+  call hdf5_read_attr_dp_checked(grp_id, 'mstar_tot', mstar_tot, stellar_state_read_status)
+  call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, h5err)
+  if(hdf5_attr_status_all /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for particles/mstar_tot status=', &
+          hdf5_attr_status_all
+     call hdf5_restart_abort
+  end if
+  call hdf5_read_attr_dp_checked(grp_id, 'mstar_lost', mstar_lost, stellar_state_read_status)
+  call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, h5err)
+  if(hdf5_attr_status_all /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for particles/mstar_lost status=', &
+          hdf5_attr_status_all
+     call hdf5_restart_abort
+  end if
 
   ! Read npart_per_cpu
   allocate(npart_per_cpu(ncpu_file))
-  call hdf5_read_dataset_all_int(grp_id, 'npart_per_cpu', npart_per_cpu, ncpu_file)
+  call hdf5_read_dataset_all_int_checked(grp_id, 'npart_per_cpu', npart_per_cpu, &
+       ncpu_file, stellar_state_read_status)
+  if(stellar_state_read_status /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for npart_per_cpu status=', &
+          stellar_state_read_status
+     call hdf5_restart_abort
+  end if
+  tmp_long = 0_i8b
+  do i = 1, ncpu_file
+     if(npart_per_cpu(i) < 0) then
+        if(myid==1) write(*,*) 'ERROR: invalid npart_per_cpu: negative entry at rank=', i
+        call hdf5_restart_abort
+     end if
+     tmp_long = tmp_long + int(npart_per_cpu(i), i8b)
+  end do
+  if(tmp_long /= npart_total_file) then
+     if(myid==1) write(*,*) 'ERROR: invalid npart_per_cpu: sum=', tmp_long, &
+          ' expected=', npart_total_file
+     call hdf5_restart_abort
+  end if
 
   ! Determine local particle count and offset
   if(ncpu_file == ncpu) then
@@ -1706,6 +1963,9 @@ subroutine restore_part_hdf5()
      endif
   end if
 
+  write(*,'(A,I0,A,I0)') 'HDF5 stellar release local count rank=', myid, &
+       ' : ', npart_loc
+
   ! HDF5 particles are restored contiguously into slots 1:npart_loc.
   ! Mark every remaining slot as free before any full-array occupancy scan.
   if(npart_loc < npartmax) levelp(npart_loc+1:npartmax) = 0
@@ -1718,53 +1978,193 @@ subroutine restore_part_hdf5()
   ! Read positions
   do idim = 1, ndim
      write(dstr, '(I0)') idim
-     call hdf5_read_dataset_1d_dp(grp_id, 'x_'//trim(dstr), dbuf, npart_loc, offset_part)
+     call hdf5_read_dataset_1d_dp_checked(grp_id, 'x_'//trim(dstr), dbuf, npart_loc, &
+          offset_part, npart_total_file, stellar_state_read_status)
+     if(stellar_state_read_status /= 0) then
+        if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for x_'//trim(dstr)// &
+             ' status=', stellar_state_read_status
+        call hdf5_restart_abort
+     end if
      xp(1:npart_loc, idim) = dbuf(1:npart_loc)
   end do
 
   ! Read velocities
   do idim = 1, ndim
      write(dstr, '(I0)') idim
-     call hdf5_read_dataset_1d_dp(grp_id, 'v_'//trim(dstr), dbuf, npart_loc, offset_part)
+     call hdf5_read_dataset_1d_dp_checked(grp_id, 'v_'//trim(dstr), dbuf, npart_loc, &
+          offset_part, npart_total_file, stellar_state_read_status)
+     if(stellar_state_read_status /= 0) then
+        if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for v_'//trim(dstr)// &
+             ' status=', stellar_state_read_status
+        call hdf5_restart_abort
+     end if
      vp(1:npart_loc, idim) = dbuf(1:npart_loc)
   end do
 
   ! Read mass
-  call hdf5_read_dataset_1d_dp(grp_id, 'mass', dbuf, npart_loc, offset_part)
+  call hdf5_read_dataset_1d_dp_checked(grp_id, 'mass', dbuf, npart_loc, &
+       offset_part, npart_total_file, stellar_state_read_status)
+  if(stellar_state_read_status /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for mass status=', &
+          stellar_state_read_status
+     call hdf5_restart_abort
+  end if
   mp(1:npart_loc) = dbuf(1:npart_loc)
 
   ! Read identity
-  call hdf5_read_dataset_1d_int8(grp_id, 'identity', ibuf8, npart_loc, offset_part)
+  call hdf5_read_dataset_1d_int8_checked(grp_id, 'identity', ibuf8, npart_loc, &
+       offset_part, npart_total_file, stellar_state_read_status)
+  if(stellar_state_read_status /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for identity status=', &
+          stellar_state_read_status
+     call hdf5_restart_abort
+  end if
   idp(1:npart_loc) = ibuf8(1:npart_loc)
 
   ! Read level
-  call hdf5_read_dataset_1d_int(grp_id, 'levelp', ibuf, npart_loc, offset_part)
+  call hdf5_read_dataset_1d_int_checked(grp_id, 'levelp', ibuf, npart_loc, &
+       offset_part, npart_total_file, stellar_state_read_status)
+  if(stellar_state_read_status /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for levelp status=', &
+          stellar_state_read_status
+     call hdf5_restart_abort
+  end if
   levelp(1:npart_loc) = ibuf(1:npart_loc)
 
   ! Read particle type (stored as int4 in HDF5 for convenience, cast to int1)
-  call hdf5_read_dataset_1d_int(grp_id, 'ptypep', ibuf, npart_loc, offset_part)
+  call hdf5_read_dataset_1d_int_checked(grp_id, 'ptypep', ibuf, npart_loc, &
+       offset_part, npart_total_file, stellar_state_read_status)
+  if(stellar_state_read_status /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for ptypep status=', &
+          stellar_state_read_status
+     call hdf5_restart_abort
+  end if
   ptypep(1:npart_loc) = int(ibuf(1:npart_loc), kind=1)
 
   ! Read birth epoch and metallicity if star/sink
   if(star .or. sink) then
-     call hdf5_read_dataset_1d_dp(grp_id, 'birth_epoch', dbuf, npart_loc, offset_part)
+     ! A stellar restart without the release state is scientifically unsafe:
+     ! silently retaining init_part's zero values would skip already released
+     ! material or replay it.  Require the version marker and every field,
+     ! while keeping a clear failure mode for legacy HDF5 checkpoints.
+     call h5aexists_f(grp_id, 'stellar_state_schema_version', attr_exists, h5err)
+     if(h5err /= 0 .or. .not. attr_exists) then
+        if(myid==1) write(*,*) 'ERROR: HDF5 stellar restart lacks ', &
+             'stellar_state_schema_version; refusing unsafe restore'
+        call hdf5_restart_abort
+     end if
+     stellar_state_schema_version = 0
+     call hdf5_read_attr_int_checked(grp_id, 'stellar_state_schema_version', &
+          stellar_state_schema_version, stellar_state_read_status)
+     call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+          MPI_MAX, MPI_COMM_WORLD, h5err)
+     if(hdf5_attr_status_all /= 0) then
+        if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for particles/stellar_state_schema_version status=', &
+             hdf5_attr_status_all
+        call hdf5_restart_abort
+     end if
+     if(stellar_state_schema_version /= stellar_hdf5_state_schema_version) then
+        if(myid==1) write(*,*) 'ERROR: unsupported HDF5 stellar state schema=', &
+             stellar_state_schema_version, ' expected=', &
+             stellar_hdf5_state_schema_version
+        call hdf5_restart_abort
+     end if
+
+     call hdf5_read_dataset_1d_dp_checked(grp_id, 'birth_epoch', dbuf, npart_loc, &
+          offset_part, npart_total_file, stellar_state_read_status)
+     if(stellar_state_read_status /= 0) then
+        if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for birth_epoch status=', &
+             stellar_state_read_status
+        call hdf5_restart_abort
+     end if
      tp(1:npart_loc) = dbuf(1:npart_loc)
      if(metal) then
-        call hdf5_read_dataset_1d_dp(grp_id, 'metallicity', dbuf, npart_loc, offset_part)
+        call hdf5_read_dataset_1d_dp_checked(grp_id, 'metallicity', dbuf, npart_loc, &
+             offset_part, npart_total_file, stellar_state_read_status)
+        if(stellar_state_read_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for metallicity status=', &
+                stellar_state_read_status
+           call hdf5_restart_abort
+        end if
         zp(1:npart_loc) = dbuf(1:npart_loc)
+     end if
+
+     call h5lexists_f(grp_id, 'tpp', dset_exists, h5err)
+     if(h5err /= 0 .or. .not. dset_exists) then
+        if(myid==1) write(*,*) 'ERROR: HDF5 stellar restart lacks tpp'
+        call hdf5_restart_abort
+     end if
+     call h5lexists_f(grp_id, 'mp0', dset_exists, h5err)
+     if(h5err /= 0 .or. .not. dset_exists) then
+        if(myid==1) write(*,*) 'ERROR: HDF5 stellar restart lacks mp0'
+        call hdf5_restart_abort
+     end if
+     call h5lexists_f(grp_id, 'indtab', dset_exists, h5err)
+     if(h5err /= 0 .or. .not. dset_exists) then
+        if(myid==1) write(*,*) 'ERROR: HDF5 stellar restart lacks indtab'
+        call hdf5_restart_abort
+     end if
+     call hdf5_read_dataset_1d_dp_checked(grp_id, 'tpp', dbuf, npart_loc, &
+          offset_part, npart_total_file, stellar_state_read_status)
+     if(stellar_state_read_status /= 0) then
+        if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for tpp status=', &
+             stellar_state_read_status
+        call hdf5_restart_abort
+     end if
+     tpp(1:npart_loc) = dbuf(1:npart_loc)
+     call hdf5_read_dataset_1d_dp_checked(grp_id, 'mp0', dbuf, npart_loc, &
+          offset_part, npart_total_file, stellar_state_read_status)
+     if(stellar_state_read_status /= 0) then
+        if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for mp0 status=', &
+             stellar_state_read_status
+        call hdf5_restart_abort
+     end if
+     mp0(1:npart_loc) = dbuf(1:npart_loc)
+     call hdf5_read_dataset_1d_dp_checked(grp_id, 'indtab', dbuf, npart_loc, &
+          offset_part, npart_total_file, stellar_state_read_status)
+     if(stellar_state_read_status /= 0) then
+        if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for indtab status=', &
+             stellar_state_read_status
+        call hdf5_restart_abort
+     end if
+     indtab(1:npart_loc) = dbuf(1:npart_loc)
+     if(myid==1 .and. npart_loc>0) then
+        write(*,'(A,3(1X,ES24.16))') 'HDF5 stellar release state sample:', &
+             tpp(1), mp0(1), indtab(1)
+     end if
+     if(npart_loc>0) then
+        write(*,'(A,I0,A,I0,3(1X,ES24.16))') &
+             'HDF5 stellar release local state rank=', myid, ' : ', npart_loc, &
+             tpp(1), mp0(1), indtab(1)
+     else
+        write(*,'(A,I0,A,I0,A)') &
+             'HDF5 stellar release local state rank=', myid, ' : ', npart_loc, &
+             ' EMPTY'
      end if
   end if
 
   ! Atomic Dark Matter: dark internal energy (optional dataset)
   if(use_adm) then
-     call hdf5_read_dataset_1d_dp(grp_id, 'dark_energy_int', dbuf, npart_loc, offset_part)
+     call hdf5_read_dataset_1d_dp_checked(grp_id, 'dark_energy_int', dbuf, npart_loc, &
+          offset_part, npart_total_file, stellar_state_read_status)
+     if(stellar_state_read_status /= 0) then
+        if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for dark_energy_int status=', &
+             stellar_state_read_status
+        call hdf5_restart_abort
+     end if
      edp(1:npart_loc) = dbuf(1:npart_loc)
 
      ! Non-equilibrium dark-H2 fraction (Phase 2; absent in older checkpoints,
      ! in which case xh2p keeps its primordial adm_fH2 seed from init_part).
      call h5lexists_f(grp_id, 'dark_h2_frac', dset_exists, h5err)
      if(dset_exists) then
-        call hdf5_read_dataset_1d_dp(grp_id, 'dark_h2_frac', dbuf, npart_loc, offset_part)
+        call hdf5_read_dataset_1d_dp_checked(grp_id, 'dark_h2_frac', dbuf, npart_loc, &
+             offset_part, npart_total_file, stellar_state_read_status)
+        if(stellar_state_read_status /= 0) then
+           if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for dark_h2_frac status=', &
+                stellar_state_read_status
+           call hdf5_restart_abort
+        end if
         xh2p(1:npart_loc) = dbuf(1:npart_loc)
      end if
   end if
@@ -1777,8 +2177,23 @@ subroutine restore_part_hdf5()
   ! Read sinks
   if(sink) then
      call hdf5_open_group('/sinks', grp_id)
-     call hdf5_read_attr_int(grp_id, 'nsink', nsink)
-     call hdf5_read_attr_int(grp_id, 'nindsink', nindsink)
+     nsink = 0
+     nindsink_file = 0
+     call hdf5_read_attr_int_checked(grp_id, 'nsink', nsink, stellar_state_read_status)
+     call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+          MPI_MAX, MPI_COMM_WORLD, h5err)
+     if(hdf5_attr_status_all /= 0 .or. nsink < 0 .or. nsink > nsinkmax) then
+        if(myid==1) write(*,*) 'ERROR: invalid HDF5 nsink=', nsink, &
+             ' nsinkmax=', nsinkmax, ' status=', hdf5_attr_status_all
+        call hdf5_restart_abort
+     end if
+     call hdf5_read_attr_int_checked(grp_id, 'nindsink', nindsink_file, stellar_state_read_status)
+     call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+          MPI_MAX, MPI_COMM_WORLD, h5err)
+     if(hdf5_attr_status_all /= 0 .or. nindsink_file < 0) then
+        if(myid==1) write(*,*) 'ERROR: invalid HDF5 nindsink status=', hdf5_attr_status_all
+        call hdf5_restart_abort
+     end if
 
      if(nsink > 0) then
         block
@@ -1788,63 +2203,68 @@ subroutine restore_part_hdf5()
            character(len=20) :: stat_name
 
            allocate(sibuf(nsink))
-           call hdf5_read_dataset_all_int(grp_id, 'idsink', sibuf, nsink)
+           call hdf5_restore_sink_int_checked(grp_id, 'idsink', sibuf, nsink)
            idsink(1:nsink) = sibuf(1:nsink)
-           nindsink = maxval(idsink(1:nsink))
+           if(nindsink_file < maxval(idsink(1:nsink))) then
+              if(myid==1) write(*,*) 'ERROR: HDF5 nindsink is below idsink maximum: ', &
+                   nindsink_file, maxval(idsink(1:nsink))
+              call hdf5_restart_abort
+           end if
+           nindsink = nindsink_file
            deallocate(sibuf)
 
            allocate(sbuf(nsink))
-           call hdf5_read_dataset_all_dp(grp_id, 'msink', sbuf, nsink)
+           call hdf5_restore_sink_dp_checked(grp_id, 'msink', sbuf, nsink)
            msink(1:nsink) = sbuf(1:nsink)
 
            ! Position
            do idim = 1, ndim
               write(dstr, '(I0)') idim
-              call hdf5_read_dataset_all_dp(grp_id, 'xsink_'//trim(dstr), sbuf, nsink)
+              call hdf5_restore_sink_dp_checked(grp_id, 'xsink_'//trim(dstr), sbuf, nsink)
               xsink(1:nsink, idim) = sbuf(1:nsink)
            end do
            ! Velocity
            do idim = 1, ndim
               write(dstr, '(I0)') idim
-              call hdf5_read_dataset_all_dp(grp_id, 'vsink_'//trim(dstr), sbuf, nsink)
+              call hdf5_restore_sink_dp_checked(grp_id, 'vsink_'//trim(dstr), sbuf, nsink)
               vsink(1:nsink, idim) = sbuf(1:nsink)
            end do
            ! Time
-           call hdf5_read_dataset_all_dp(grp_id, 'tsink', sbuf, nsink)
+           call hdf5_restore_sink_dp_checked(grp_id, 'tsink', sbuf, nsink)
            tsink(1:nsink) = sbuf(1:nsink)
            ! Accretion
-           call hdf5_read_dataset_all_dp(grp_id, 'dMsmbh', sbuf, nsink)
+           call hdf5_restore_sink_dp_checked(grp_id, 'dMsmbh', sbuf, nsink)
            dMsmbh(1:nsink) = sbuf(1:nsink)
-           call hdf5_read_dataset_all_dp(grp_id, 'dMBH_coarse', sbuf, nsink)
+           call hdf5_restore_sink_dp_checked(grp_id, 'dMBH_coarse', sbuf, nsink)
            dMBH_coarse(1:nsink) = sbuf(1:nsink)
-           call hdf5_read_dataset_all_dp(grp_id, 'dMEd_coarse', sbuf, nsink)
+           call hdf5_restore_sink_dp_checked(grp_id, 'dMEd_coarse', sbuf, nsink)
            dMEd_coarse(1:nsink) = sbuf(1:nsink)
            ! Esave
-           call hdf5_read_dataset_all_dp(grp_id, 'Esave', sbuf, nsink)
+           call hdf5_restore_sink_dp_checked(grp_id, 'Esave', sbuf, nsink)
            Esave(1:nsink) = sbuf(1:nsink)
            ! Gas angular momentum (jsink)
            do idim = 1, ndim
               write(dstr, '(I0)') idim
-              call hdf5_read_dataset_all_dp(grp_id, 'jsink_'//trim(dstr), sbuf, nsink)
+              call hdf5_restore_sink_dp_checked(grp_id, 'jsink_'//trim(dstr), sbuf, nsink)
               jsink(1:nsink, idim) = sbuf(1:nsink)
            end do
            ! BH spin axis
            do idim = 1, ndim
               write(dstr, '(I0)') idim
-              call hdf5_read_dataset_all_dp(grp_id, 'bhspin_'//trim(dstr), sbuf, nsink)
+              call hdf5_restore_sink_dp_checked(grp_id, 'bhspin_'//trim(dstr), sbuf, nsink)
               bhspin(1:nsink, idim) = sbuf(1:nsink)
            end do
            ! BH spin magnitude
-           call hdf5_read_dataset_all_dp(grp_id, 'spinmag', sbuf, nsink)
+           call hdf5_restore_sink_dp_checked(grp_id, 'spinmag', sbuf, nsink)
            spinmag(1:nsink) = sbuf(1:nsink)
            ! BH efficiency
-           call hdf5_read_dataset_all_dp(grp_id, 'eps_sink', sbuf, nsink)
+           call hdf5_restore_sink_dp_checked(grp_id, 'eps_sink', sbuf, nsink)
            eps_sink(1:nsink) = sbuf(1:nsink)
            ! Sink statistics
            do idim = 1, ndim*2+1
               do ilevel = levelmin, nlevelmax
                  write(stat_name, '(I0,"_",I0)') idim, ilevel
-                 call hdf5_read_dataset_all_dp(grp_id, 'sink_stat_'//trim(stat_name), sbuf, nsink)
+                 call hdf5_restore_sink_dp_checked(grp_id, 'sink_stat_'//trim(stat_name), sbuf, nsink)
                  sink_stat(1:nsink, ilevel, idim) = sbuf(1:nsink)
               end do
            end do
@@ -1860,5 +2280,136 @@ subroutine restore_part_hdf5()
   if(myid==1) write(*,*) 'HDF5 particle restore done.'
 
 end subroutine restore_part_hdf5
+
+subroutine hdf5_restore_header_int_checked(grp_id, name, val)
+  use amr_commons, only: myid
+  use ramses_hdf5_io
+  use hdf5, only: HID_T
+  implicit none
+  include 'mpif.h'
+  integer(HID_T), intent(in) :: grp_id
+  character(len=*), intent(in) :: name
+  integer, intent(out) :: val
+  integer :: status, status_all, ierr
+
+  call hdf5_read_attr_int_checked(grp_id, name, val, status)
+  call MPI_Allreduce(status, status_all, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, ierr)
+  if(status_all /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for header/', trim(name), &
+          ' status=', status_all
+     call hdf5_restart_abort
+  end if
+end subroutine hdf5_restore_header_int_checked
+
+subroutine hdf5_restore_header_dp_checked(grp_id, name, val)
+  use amr_commons, only: myid
+  use amr_parameters, only: dp
+  use ramses_hdf5_io
+  use hdf5, only: HID_T
+  implicit none
+  include 'mpif.h'
+  integer(HID_T), intent(in) :: grp_id
+  character(len=*), intent(in) :: name
+  real(dp), intent(out) :: val
+  integer :: status, status_all, ierr
+
+  call hdf5_read_attr_dp_checked(grp_id, name, val, status)
+  call MPI_Allreduce(status, status_all, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, ierr)
+  if(status_all /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for header/', trim(name), &
+          ' status=', status_all
+     call hdf5_restart_abort
+  end if
+end subroutine hdf5_restore_header_dp_checked
+
+subroutine hdf5_restore_header_dp_array_checked(grp_id, name, val, n)
+  use amr_commons, only: myid
+  use amr_parameters, only: dp
+  use ramses_hdf5_io
+  use hdf5, only: HID_T
+  implicit none
+  include 'mpif.h'
+  integer(HID_T), intent(in) :: grp_id
+  character(len=*), intent(in) :: name
+  integer, intent(in) :: n
+  real(dp), intent(out) :: val(n)
+  integer :: status, status_all, ierr
+
+  call hdf5_read_attr_1d_dp_checked(grp_id, name, val, n, status)
+  call MPI_Allreduce(status, status_all, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, ierr)
+  if(status_all /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for header/', trim(name), &
+          ' status=', status_all
+     call hdf5_restart_abort
+  end if
+end subroutine hdf5_restore_header_dp_array_checked
+
+subroutine hdf5_restore_header_string_checked(grp_id, name, val)
+  use amr_commons, only: myid
+  use ramses_hdf5_io
+  use hdf5, only: HID_T
+  implicit none
+  include 'mpif.h'
+  integer(HID_T), intent(in) :: grp_id
+  character(len=*), intent(in) :: name
+  character(len=*), intent(out) :: val
+  integer :: status, status_all, ierr
+
+  call hdf5_read_attr_string_checked(grp_id, name, val, status)
+  call MPI_Allreduce(status, status_all, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, ierr)
+  if(status_all /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for header/', trim(name), &
+          ' status=', status_all
+     call hdf5_restart_abort
+  end if
+end subroutine hdf5_restore_header_string_checked
+
+subroutine hdf5_restore_sink_dp_checked(grp_id, name, data, n)
+  use amr_commons, only: myid
+  use amr_parameters, only: dp
+  use ramses_hdf5_io
+  implicit none
+  integer(HID_T), intent(in) :: grp_id
+  character(len=*), intent(in) :: name
+  integer, intent(in) :: n
+  real(dp), intent(out) :: data(n)
+  integer :: status
+
+  call hdf5_read_dataset_all_dp_checked(grp_id, name, data, n, status)
+  if(status /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for sink dataset ', &
+          trim(name), ' status=', status
+     call hdf5_restart_abort
+  end if
+end subroutine hdf5_restore_sink_dp_checked
+
+subroutine hdf5_restore_sink_int_checked(grp_id, name, data, n)
+  use amr_commons, only: myid
+  use ramses_hdf5_io
+  implicit none
+  integer(HID_T), intent(in) :: grp_id
+  character(len=*), intent(in) :: name
+  integer, intent(in) :: n
+  integer, intent(out) :: data(n)
+  integer :: status
+
+  call hdf5_read_dataset_all_int_checked(grp_id, name, data, n, status)
+  if(status /= 0) then
+     if(myid==1) write(*,*) 'ERROR: failed checked HDF5 read for sink dataset ', &
+          trim(name), ' status=', status
+     call hdf5_restart_abort
+  end if
+end subroutine hdf5_restore_sink_int_checked
+
+subroutine hdf5_restart_abort
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+  integer :: ierr
+  call MPI_ABORT(MPI_COMM_WORLD, 1, ierr)
+#else
+  error stop 1
+#endif
+end subroutine hdf5_restart_abort
 
 #endif

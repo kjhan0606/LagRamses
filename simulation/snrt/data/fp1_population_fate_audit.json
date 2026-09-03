@@ -1,0 +1,128 @@
+{
+  "age_horizon_yr": 13800000000.0,
+  "coverage": {
+    "overlap_free": true,
+    "partition_complete": true,
+    "terminal_owner_contract_pass": true,
+    "unresolved_interval_count": 2
+  },
+  "gate": "F-P1",
+  "interpretation": "The interval wiring is valid, but unresolved stellar lifetimes/fates remain an explicit production blocker.",
+  "interval_count": 5,
+  "intervals": [
+    {
+      "fate_class": "not_terminal_within_age_horizon",
+      "id": "sub_horizon_low_mass",
+      "mass_msun": [
+        0.08,
+        0.8
+      ],
+      "terminal_remnant_owner_channel": null
+    },
+    {
+      "fate_class": "unresolved",
+      "id": "low_mass_lifetime_seam",
+      "mass_msun": [
+        0.8,
+        1.0
+      ],
+      "terminal_remnant_owner_channel": null
+    },
+    {
+      "fate_class": "terminal_channel",
+      "id": "agb_white_dwarf",
+      "mass_msun": [
+        1.0,
+        8.0
+      ],
+      "terminal_remnant_owner_channel": 2
+    },
+    {
+      "fate_class": "terminal_channel",
+      "id": "core_collapse",
+      "mass_msun": [
+        8.0,
+        40.0
+      ],
+      "terminal_remnant_owner_channel": 3
+    },
+    {
+      "fate_class": "unresolved",
+      "id": "massive_terminal_fate_seam",
+      "mass_msun": [
+        40.0,
+        120.0
+      ],
+      "terminal_remnant_owner_channel": null
+    }
+  ],
+  "population_domain_msun": [
+    0.08,
+    120.0
+  ],
+  "production_ready": false,
+  "schema": "snrt-fp1-population-fate-audit",
+  "schema_version": 1,
+  "status": "review_only_blocked",
+  "terminal_intervals": [
+    {
+      "id": "agb_white_dwarf",
+      "mass_msun": [
+        1.0,
+        8.0
+      ],
+      "owner_channel": 2
+    },
+    {
+      "id": "core_collapse",
+      "mass_msun": [
+        8.0,
+        40.0
+      ],
+      "owner_channel": 3
+    }
+  ],
+  "unresolved_intervals": [
+    {
+      "id": "low_mass_lifetime_seam",
+      "mass_msun": [
+        0.8,
+        1.0
+      ]
+    },
+    {
+      "id": "massive_terminal_fate_seam",
+      "mass_msun": [
+        40.0,
+        120.0
+      ]
+    }
+  ],
+  "unresolved_mass_diagnostic": {
+    "diagnostic_only": true,
+    "imf_id": 1,
+    "imf_name": "Kroupa",
+    "intervals": [
+      {
+        "id": "low_mass_lifetime_seam",
+        "kroupa_mass_weight_fraction": 0.050364571012367555,
+        "mass_msun": [
+          0.8,
+          1.0
+        ]
+      },
+      {
+        "id": "massive_terminal_fate_seam",
+        "kroupa_mass_weight_fraction": 0.06753755581476227,
+        "mass_msun": [
+          40.0,
+          120.0
+        ]
+      }
+    ],
+    "normalization_over_population_domain": 4.582229041799163,
+    "runtime_unresolved_bucket_deposition_implemented": false,
+    "runtime_unresolved_mass_bucket_implemented": true,
+    "total_unresolved_mass_weight_fraction": 0.11790212682712983
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "schema": "snrt-fp1-fate-resolver-contract",
+  "schema_version": 1,
+  "gate": "F-P1",
+  "status": "contract_only_no_physical_nodes",
+  "purpose": "Define source-node fate lookup semantics without inventing 40--120 Msun physical values.",
+  "resolver": {
+    "id": "per_source_node_fate_lookup_v1",
+    "assignment_mode": "piecewise_constant_source_node_mass_cell",
+    "edge_convention": "half_open_left_closed_right_last",
+    "out_of_source_hull_policy": "unresolved_and_block",
+    "nearest_node_substitution_allowed": false,
+    "cross_source_interpolation_allowed": false,
+    "cross_metallicity_interpolation_allowed": false,
+    "cross_rotation_interpolation_allowed": false,
+    "mass_only_fallback_allowed": false,
+    "node_count": 0
+  },
+  "nodes": [],
+  "mandatory_key_axes": [
+    "source_id",
+    "source_version",
+    "source_sha256",
+    "zams_mass_msun",
+    "birth_metallicity_value",
+    "birth_metallicity_definition",
+    "solar_abundance_set",
+    "initial_rotation_value_or_declared_marginalization",
+    "engine_or_branch_id",
+    "mass_cell_assignment_rule",
+    "lifetime_source_id",
+    "pair_instability_criterion_id"
+  ],
+  "conditional_key_axes": {
+    "binary_ssp": [
+      "binary_state_or_declared_population_marginalization",
+      "period_mass_ratio_distribution",
+      "mass_transfer_prescription",
+      "common_envelope_prescription"
+    ],
+    "structure_based_classifier": [
+      "pre_sn_structure_diagnostics",
+      "classifier_version",
+      "engine_calibration_id"
+    ]
+  },
+  "outcome_enum": [
+    "unresolved",
+    "wind_only_no_terminal_within_age_horizon",
+    "successful_ccsn_with_fallback",
+    "direct_collapse_no_terminal_ejecta",
+    "direct_collapse_with_envelope_ejection",
+    "ppisn_with_pulses_and_remnant",
+    "pisn_complete_disruption_no_remnant"
+  ],
+  "returned_record_requirements": {
+    "all_outcomes": [
+      "outcome",
+      "lifetime_yr_or_declared_no_terminal_horizon",
+      "wind_component_reference",
+      "source_provenance"
+    ],
+    "terminal_outcomes": [
+      "terminal_remnant_mass_msun_or_no_remnant",
+      "terminal_ejecta_component_reference",
+      "decay_projection_id",
+      "deposition_contract_id"
+    ],
+    "ppisn": [
+      "pulse_history_reference",
+      "final_remnant_mass_msun"
+    ],
+    "pisn": [
+      "complete_disruption_confirmation",
+      "terminal_remnant_mass_msun_is_zero_or_null"
+    ]
+  },
+  "ownership": {
+    "wind": "pre-terminal cumulative wind only",
+    "terminal_ejecta": "one terminal outcome component only",
+    "remnant": "owned by the terminal outcome record; PISN has no owner",
+    "double_counting_forbidden": true
+  },
+  "approval": {
+    "physical_nodes_present": false,
+    "canonical_conversion_allowed": false,
+    "runtime_deposition_allowed": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

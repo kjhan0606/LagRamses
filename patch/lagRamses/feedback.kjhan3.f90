@@ -10,6 +10,9 @@ subroutine thermal_feedback(ilevel)
   use stellar_enrichment_config, only: use_channel_resolved_feedback
 #endif
   implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
   integer::ilevel
 #ifdef PHASE0_STELLAR_ENRICHMENT
   integer :: phase0_ierr
@@ -29,7 +32,7 @@ subroutine thermal_feedback(ilevel)
 
   integer::igrid,jgrid,ipart,jpart,next_part,iastar
   integer::i,ig,ip,npart1,npart2,icpu,nx_loc
-  integer::info,iSN,ivar,ielt,n11,n22,ihx, &
+  integer::info,iSN,ivar,ielt,n11,n22,ihx,feedback_ierr, &
        ihy,ii,ihx0,indt1,indt2,som
   logical ::ok_free
 ! real(dp),dimension(1:3)::skip_loc
@@ -41,6 +44,7 @@ subroutine thermal_feedback(ilevel)
   common /thermal_fb/ mythread
 !$omp threadprivate(/thermal_fb/)
   integer, dimension(:), allocatable:: nparticles, ptrhead
+  integer, dimension(:), allocatable:: feedback_thread_ierr
 
 ! common /thermal_feedback_units/ scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2
 
@@ -71,27 +75,41 @@ subroutine thermal_feedback(ilevel)
   mythread = omp_get_thread_num()
   if(mythread.eq.0) nthreads = omp_get_num_threads()
 !$omp end parallel
-  allocate(ptrhead(0:nthreads-1), nparticles(0:nthreads-1))
+  allocate(ptrhead(0:nthreads-1), nparticles(0:nthreads-1), &
+       feedback_thread_ierr(0:nthreads-1))
 
 
 #if NDIM==3
   do icpu=1,ncpu
   if(numbl(icpu,ilevel) .le.0) goto 12
   call pthreadLinkedList(headl(icpu,ilevel),numbl(icpu,ilevel),nthreads,nparticles,ptrhead,next)
+  feedback_thread_ierr=0
 !$omp parallel private(subnump,igrid) 
   subnump = nparticles(mythread) 
   igrid = ptrhead(mythread) 
-  call sub_thermal_feedback(ilevel,icpu, igrid,subnump,n11,n22)
+  call sub_thermal_feedback(ilevel,icpu,igrid,subnump,n11,n22, &
+       feedback_thread_ierr(mythread))
 !$omp end parallel
+  if(any(feedback_thread_ierr/=0))then
+     feedback_ierr=maxval(feedback_thread_ierr)
+     if(myid==1)write(*,*)'Phase 0 feedback failed: ',feedback_ierr
+     deallocate(feedback_thread_ierr,ptrhead,nparticles)
+#ifndef WITHOUTMPI
+     call MPI_ABORT(MPI_COMM_WORLD,feedback_ierr,info)
+#else
+     call clean_stop
+#endif
+     return
+  endif
 12 end do
 #endif
-  deallocate(ptrhead, nparticles)
+  deallocate(feedback_thread_ierr,ptrhead,nparticles)
 
 111 format('   Entering thermal_feedback for level ',I2)
 end subroutine thermal_feedback
 
 
-subroutine sub_thermal_feedback(ilevel,icpu, kgrid,subnump,n11,n22)
+subroutine sub_thermal_feedback(ilevel,icpu,kgrid,subnump,n11,n22,feedback_ierr)
   use pm_commons
   use amr_commons
 #ifdef PHASE0_STELLAR_ENRICHMENT
@@ -100,6 +118,7 @@ subroutine sub_thermal_feedback(ilevel,icpu, kgrid,subnump,n11,n22)
 #endif
   implicit none
   integer,intent(in)::ilevel,icpu,kgrid,subnump,n11,n22
+  integer,intent(out)::feedback_ierr
 #ifdef PHASE0_STELLAR_ENRICHMENT
   integer :: phase0_ierr
 #endif
@@ -128,14 +147,16 @@ subroutine sub_thermal_feedback(ilevel,icpu, kgrid,subnump,n11,n22)
 ! common /thermal_feedback_units/ scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2
 
 #ifdef PHASE0_STELLAR_ENRICHMENT
+  feedback_ierr=0
   if(use_channel_resolved_feedback()) then
      call phase0_feedback(ilevel, kgrid, subnump, phase0_ierr)
      if(phase0_ierr /= 0) then
-        if(myid==1) write(*,*) 'Phase 0 feedback failed: ', phase0_ierr
-        call clean_stop
+        feedback_ierr=phase0_ierr
      endif
      return
   endif
+#else
+  feedback_ierr=0
 #endif
 
   igrid = kgrid

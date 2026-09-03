@@ -6,14 +6,19 @@
 ! already-differenced timestep sources and does not perform cell deposition.
 
 module stellar_enrichment_driver
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_channels, &
        channel_wind, channel_agb, channel_snii, channel_snia, channel_pisn, &
-       enable_wind, enable_agb, enable_snii, enable_snia, enable_pisn
+       enable_wind, enable_agb, enable_snii, enable_snia, enable_pisn, &
+       channel_owns_terminal_remnant
   use stellar_enrichment_contract, only: stellar_population_t, &
-       stellar_source_t, clear_source
+       stellar_cumulative_t, stellar_source_t, clear_cumulative, clear_source
   use stellar_yield_tables, only: stellar_yield_table_t
   use stellar_source_increment, only: integrate_ssp_channel_increment, &
        source_increment_ok
+  use stellar_ssp_sources, only: integrate_ssp_channel, ssp_source_ok
+  use stellar_population_ledger, only: stellar_population_ledger_t, &
+       clear_population_ledger, finalize_population_ledger, population_ledger_ok
   implicit none
 
   private
@@ -21,29 +26,46 @@ module stellar_enrichment_driver
   integer, parameter, public :: enrichment_driver_err_argument = 1
   integer, parameter, public :: enrichment_driver_err_channel = 2
   integer, parameter, public :: enrichment_driver_err_source = 3
+  integer, parameter, public :: enrichment_driver_err_unsupported = 4
+  integer, parameter, public :: enrichment_driver_err_ledger = 8
 
   public :: compute_stellar_source_increment
+  public :: compute_stellar_cumulative
 
 contains
 
-  subroutine compute_stellar_source_increment(table, population, age, dt, &
-       channel_mass_min, channel_mass_max, n_mass_bins, source, ierr)
+  subroutine compute_stellar_source_increment(table, population, &
+       previous_age_gyr, current_age_gyr, &
+       channel_mass_min, channel_mass_max, n_mass_bins, source, ierr, ledger)
     type(stellar_yield_table_t), intent(in) :: table
     type(stellar_population_t), intent(in) :: population
-    real(stellar_dp), intent(in) :: age, dt
+    real(stellar_dp), intent(in) :: previous_age_gyr, current_age_gyr
     real(stellar_dp), intent(in) :: channel_mass_min(n_stellar_channels)
     real(stellar_dp), intent(in) :: channel_mass_max(n_stellar_channels)
     integer, intent(in) :: n_mass_bins
     type(stellar_source_t), intent(out) :: source
     integer, intent(out) :: ierr
+    type(stellar_population_ledger_t), intent(out), optional :: ledger
 
     type(stellar_source_t) :: channel_source
-    integer :: channel, source_ierr
+    type(stellar_cumulative_t) :: current_states(n_stellar_channels)
+    type(stellar_population_ledger_t) :: evaluated_ledger
+    logical :: channel_enabled(n_stellar_channels)
+    integer :: channel, source_ierr, ledger_ierr
 
     call clear_source(source)
+    call clear_population_ledger(evaluated_ledger)
+    if (present(ledger)) call clear_population_ledger(ledger)
+    channel_enabled = .false.
+    do channel = 1, n_stellar_channels
+       call clear_cumulative(current_states(channel))
+    end do
     ierr = enrichment_driver_ok
 
-    if (age < 0.0_stellar_dp .or. dt < 0.0_stellar_dp .or. &
+    if (.not. ieee_is_finite(previous_age_gyr) .or. &
+         .not. ieee_is_finite(current_age_gyr) .or. &
+         previous_age_gyr < 0.0_stellar_dp .or. &
+         current_age_gyr < previous_age_gyr .or. &
          n_mass_bins <= 0) then
        ierr = enrichment_driver_err_argument
        return
@@ -51,22 +73,105 @@ contains
 
     do channel = 1, n_stellar_channels
        if (.not. channel_is_enabled(channel)) cycle
-       if (channel_mass_min(channel) <= 0.0_stellar_dp .or. &
+       if (channel == channel_snia .or. channel == channel_pisn) then
+          ! SNIa needs a DTD convolution and PISN needs an explicit
+          ! population/core-mass gate; neither is an IMF-only SSP channel.
+          ierr = enrichment_driver_err_unsupported
+          return
+       end if
+       if (.not. ieee_is_finite(channel_mass_min(channel)) .or. &
+            .not. ieee_is_finite(channel_mass_max(channel)) .or. &
+            channel_mass_min(channel) <= 0.0_stellar_dp .or. &
             channel_mass_max(channel) <= channel_mass_min(channel)) then
           ierr = enrichment_driver_err_channel
           return
        end if
 
-       call integrate_ssp_channel_increment(table, population, channel, age, &
-            dt, channel_mass_min(channel), channel_mass_max(channel), &
-            n_mass_bins, channel_source, source_ierr)
+       call integrate_ssp_channel_increment(table, population, channel, &
+            previous_age_gyr, current_age_gyr, channel_mass_min(channel), &
+            channel_mass_max(channel), &
+            n_mass_bins, channel_source, source_ierr, current_states(channel))
        if (source_ierr /= source_increment_ok) then
           ierr = enrichment_driver_err_source
           return
        end if
+       channel_enabled(channel) = .true.
        call add_source(source, channel_source)
     end do
+
+    call finalize_population_ledger(population, current_states, channel_enabled, &
+         channel_owns_terminal_remnant, 1.0e-10_stellar_dp, evaluated_ledger, &
+         ledger_ierr)
+    if (ledger_ierr /= population_ledger_ok) then
+       call clear_source(source)
+       ierr = enrichment_driver_err_ledger
+       return
+    end if
+    if (present(ledger)) ledger = evaluated_ledger
   end subroutine compute_stellar_source_increment
+
+  subroutine compute_stellar_cumulative(table, population, age_gyr, &
+       channel_mass_min, channel_mass_max, n_mass_bins, channel_states, &
+       ledger, ierr)
+    type(stellar_yield_table_t), intent(in) :: table
+    type(stellar_population_t), intent(in) :: population
+    real(stellar_dp), intent(in) :: age_gyr
+    real(stellar_dp), intent(in) :: channel_mass_min(n_stellar_channels)
+    real(stellar_dp), intent(in) :: channel_mass_max(n_stellar_channels)
+    integer, intent(in) :: n_mass_bins
+    type(stellar_cumulative_t), intent(out) :: channel_states(n_stellar_channels)
+    type(stellar_population_ledger_t), intent(out) :: ledger
+    integer, intent(out) :: ierr
+
+    logical :: channel_enabled(n_stellar_channels)
+    integer :: channel, ssp_ierr, ledger_ierr
+
+    ierr = enrichment_driver_ok
+    channel_enabled = .false.
+    call clear_population_ledger(ledger)
+    do channel = 1, n_stellar_channels
+       call clear_cumulative(channel_states(channel))
+    end do
+
+    if (.not. ieee_is_finite(age_gyr) .or. age_gyr < 0.0_stellar_dp .or. &
+         n_mass_bins <= 0) then
+       ierr = enrichment_driver_err_argument
+       call finalize_population_ledger(population, channel_states, &
+            channel_enabled, channel_owns_terminal_remnant, 1.0e-10_stellar_dp, &
+            ledger, ledger_ierr)
+       return
+    end if
+
+    do channel = 1, n_stellar_channels
+       if (.not. channel_is_enabled(channel)) cycle
+       if (channel == channel_snia .or. channel == channel_pisn) then
+          ierr = enrichment_driver_err_unsupported
+          return
+       end if
+       if (.not. ieee_is_finite(channel_mass_min(channel)) .or. &
+            .not. ieee_is_finite(channel_mass_max(channel)) .or. &
+            channel_mass_min(channel) <= 0.0_stellar_dp .or. &
+            channel_mass_max(channel) <= channel_mass_min(channel)) then
+          ierr = enrichment_driver_err_channel
+          return
+       end if
+
+       call integrate_ssp_channel(table, population, channel, age_gyr, &
+            channel_mass_min(channel), channel_mass_max(channel), n_mass_bins, &
+            channel_states(channel), ssp_ierr)
+       if (ssp_ierr /= ssp_source_ok) then
+          ierr = enrichment_driver_err_source
+          return
+       end if
+       channel_enabled(channel) = .true.
+    end do
+
+    call finalize_population_ledger(population, channel_states, channel_enabled, &
+         channel_owns_terminal_remnant, 1.0e-10_stellar_dp, ledger, ledger_ierr)
+    if (ledger_ierr /= population_ledger_ok) then
+       ierr = enrichment_driver_err_ledger
+    end if
+  end subroutine compute_stellar_cumulative
 
   logical function channel_is_enabled(channel)
     integer, intent(in) :: channel

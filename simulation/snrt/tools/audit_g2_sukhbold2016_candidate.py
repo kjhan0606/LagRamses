@@ -21,8 +21,12 @@ DEFAULT_CONTRACT = SNRT_ROOT / "config" / "g2_sukhbold2016_candidate_contract_v1
 _TRACKED_ELEMENT_ORDER = ("H", "He", "C", "N", "O", "Ne", "Mg", "Si", "S", "Ca", "Fe")
 _TRACKED_ELEMENTS = set(_TRACKED_ELEMENT_ORDER)
 _MODEL_HEADER = re.compile(r"^w([0-9.]+) \(w2015\)$", re.MULTILINE)
+_ENGINE_MODEL_HEADER = re.compile(r"^s([0-9]+(?:\.[0-9]+)?) \([^)]+\)$", re.MULTILINE)
 _YIELD_MEMBER = re.compile(
     r"^nucleosynthesis_yields/Z9\.6/s([0-9]+(?:\.[0-9]+)?)\.yield_table$"
+)
+_IMPLOSION_YIELD_MEMBER = re.compile(
+    r"^nucleosynthesis_yields/implosions_W18/s([0-9]+(?:\.[0-9]+)?)\.yield_table$"
 )
 
 
@@ -144,6 +148,114 @@ def _parse_z96_results(text: str, expected_masses: list[float]) -> dict[float, d
     return records
 
 
+def _parse_engine_results(
+    text: str, *, engine: str, expected_masses: list[float]
+) -> dict[str, Any]:
+    """Parse the complete result file and return the requested high-mass tail."""
+    starts = list(_ENGINE_MODEL_HEADER.finditer(text))
+    all_masses: list[float] = []
+    records: dict[float, dict[str, Any]] = {}
+    for index, match in enumerate(starts):
+        stop = starts[index + 1].start() if index + 1 < len(starts) else len(text)
+        block = text[match.start():stop]
+        mass = _finite(match.group(1), f"{engine} ZAMS mass")
+        all_masses.append(mass)
+        if mass not in expected_masses:
+            continue
+        if mass in records:
+            raise SukhboldAuditError(f"duplicate {engine} result at {mass} Msun")
+        energy = _result_value(block, r"E_exp = ([0-9.E+\-]+) foe", f"{engine} explosion energy")
+        record: dict[str, Any] = {
+            "zams_mass_msun": mass,
+            "engine": engine,
+            "final_kinetic_energy_foe": energy,
+            "final_kinetic_energy_erg": 1.0e51 * energy,
+            "outcome": "explosion_energy_positive" if energy > 0.0 else "no_positive_explosion_energy",
+        }
+        if energy > 0.0:
+            record["baryonic_mass_cut_after_fallback_msun"] = _result_value(
+                block,
+                r"M_mass_cut_after_fb\s*=\s*([0-9.E+\-]+)",
+                f"{engine} fallback mass cut",
+            )
+            record["fallback_mass_msun"] = _result_value(
+                block, r"M_fallback\s*=\s*([0-9.E+\-]+)", f"{engine} fallback mass"
+            )
+        records[mass] = record
+    if sorted(records) != sorted(expected_masses):
+        raise SukhboldAuditError(f"{engine} high-mass result grid drifted")
+    return {
+        "engine": engine,
+        "complete_result_model_count": len(all_masses),
+        "high_mass_model_count": len(records),
+        "high_mass_results": records,
+    }
+
+
+def _parse_implosion_wind_table(
+    text: str,
+    *,
+    name: str,
+    expected_rows: int,
+    expected_duplicates: list[str],
+    selected_radioactive_isotopes: list[str],
+) -> dict[str, Any]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    header = lines[0].split() if lines else []
+    if header != ["[isotope]", "[wind]"]:
+        raise SukhboldAuditError(f"{name}: implosion-wind header drifted")
+    rows: list[tuple[str, float]] = []
+    wind_sum = 0.0
+    negative_wind_value_count = 0
+    for line_number, raw in enumerate(lines[1:], start=2):
+        fields = raw.split()
+        if len(fields) != 2:
+            raise SukhboldAuditError(f"{name}:{line_number}: malformed implosion-wind row")
+        value = _finite(fields[1], "implosion wind yield")
+        if value < 0.0:
+            negative_wind_value_count += 1
+        isotopes = fields[0]
+        rows.append((isotopes, value))
+        wind_sum += value
+    isotopes = [isotope for isotope, _ in rows]
+    duplicates = sorted(isotope for isotope in set(isotopes) if isotopes.count(isotope) > 1)
+    if len(isotopes) != expected_rows or duplicates != sorted(expected_duplicates):
+        raise SukhboldAuditError(f"{name}: implosion-wind isotope row inventory drifted")
+    radio = rows[-len(selected_radioactive_isotopes):]
+    stable = rows[:-len(selected_radioactive_isotopes)]
+    if [isotope for isotope, _ in radio] != selected_radioactive_isotopes:
+        raise SukhboldAuditError(f"{name}: selected-radioactive segment drifted")
+    if len(stable) != expected_rows - len(selected_radioactive_isotopes):
+        raise SukhboldAuditError(f"{name}: stable-isotope segment length drifted")
+    cross_segment_duplicates = sorted(
+        set(isotope for isotope, _ in stable) & set(isotope for isotope, _ in radio)
+    )
+    stable_by_element = {
+        element: math.fsum(value for isotope, value in stable if _element(isotope) == element)
+        for element in _TRACKED_ELEMENT_ORDER
+    }
+    stable_sum = math.fsum(value for _, value in stable)
+    return {
+        "isotope_row_count": len(isotopes),
+        "duplicate_isotopes": duplicates,
+        "wind_sum_msun": wind_sum,
+        "source_header": header,
+        "terminal_component_present": len(header) > 2,
+        "stable_wind_sum_msun": stable_sum,
+        "stable_wind_by_tracked_element_msun": stable_by_element,
+        "untracked_stable_wind_msun": stable_sum - math.fsum(stable_by_element.values()),
+        "selected_radioactive_inventory": {
+            isotope: {"ejecta_msun": None, "wind_msun": value}
+            for isotope, value in radio
+        },
+        "selected_radioactive_wind_sum_msun": math.fsum(value for _, value in radio),
+        "negative_wind_value_count": negative_wind_value_count,
+        "all_wind_values_nonnegative": negative_wind_value_count == 0,
+        "cross_segment_duplicate_isotopes": cross_segment_duplicates,
+        "wind_only_no_terminal_component": len(header) == 2,
+    }
+
+
 def _element(isotope: str) -> str:
     match = re.match(r"([a-z]+)[0-9]+$", isotope)
     if match is None:
@@ -156,7 +268,7 @@ def _parse_yield_table(
     text: str,
     *,
     mass: float,
-    result: dict[str, float],
+    result: dict[str, Any] | None,
     contract: dict[str, Any],
 ) -> dict[str, Any]:
     lines = text.splitlines()
@@ -202,9 +314,13 @@ def _parse_yield_table(
     stable_wind = math.fsum(row[2] for row in stable)
     radioactive_ejecta = math.fsum(row[1] for row in radio)
     radioactive_wind = math.fsum(row[2] for row in radio)
-    labelled_budget = mass - result["baryonic_mass_cut_after_fallback_msun"]
-    residual = stable_ejecta + stable_wind - labelled_budget
-    relative = abs(residual) / labelled_budget
+    labelled_budget = None
+    residual = None
+    relative = None
+    if result is not None and "baryonic_mass_cut_after_fallback_msun" in result:
+        labelled_budget = mass - result["baryonic_mass_cut_after_fallback_msun"]
+        residual = stable_ejecta + stable_wind - labelled_budget
+        relative = abs(residual) / labelled_budget
     return {
         "zams_mass_msun": mass,
         "stable_isotope_row_count": len(stable),
@@ -228,12 +344,20 @@ def _parse_yield_table(
         "stable_segment_mass_budget_residual_msun": residual,
         "stable_segment_mass_budget_absolute_relative_residual": relative,
         "exact_mass_closure_claimed": False,
+        "final_kinetic_energy_erg": None if result is None else result.get("final_kinetic_energy_erg"),
+        "baryonic_mass_cut_after_fallback_msun": None if result is None else result.get("baryonic_mass_cut_after_fallback_msun"),
+        "fallback_mass_msun": None if result is None else result.get("fallback_mass_msun"),
     }
 
 
 def _audit_archives(base: Path, contract: dict[str, Any]) -> dict[str, Any]:
     inventory = contract["archive_inventory"]
     expected_masses = [float(value) for value in contract["review_grid"]["zams_mass_msun"]]
+    expected_high_masses = [
+        float(value) for value in contract["review_grid"]["high_mass_outcome_msun"]
+    ]
+    engine_branches = list(contract["review_grid"]["engine_branches_to_audit"])
+    high_mass_yield_texts: dict[str, dict[float, str]] = {}
     explosion_path = base / "explosion_results_PHOTB.tar.gz"
     yield_path = base / "nucleosynthesis_yields.tar.gz"
     try:
@@ -274,14 +398,93 @@ def _audit_archives(base: Path, contract: dict[str, Any]) -> dict[str, Any]:
                 )
                 for mass in expected_masses
             }
+            implosion_members: dict[float, str] = {}
+            for member in regular:
+                match = _IMPLOSION_YIELD_MEMBER.fullmatch(member.name)
+                if match is not None:
+                    mass = _finite(match.group(1), "implosion yield-table mass")
+                    if mass in implosion_members:
+                        raise SukhboldAuditError(f"duplicate implosion yield table at {mass} Msun")
+                    implosion_members[mass] = member.name
+            expected_implosion_count = inventory["yield_table_count_by_branch"]["implosions_W18"]
+            if len(implosion_members) != expected_implosion_count:
+                raise SukhboldAuditError("implosion yield-table inventory drifted")
+            implosion_records = {
+                mass: _parse_implosion_wind_table(
+                    _extract_text(archive, member),
+                    name=member,
+                    expected_rows=contract["review_grid"]["implosion_wind_rows_per_model"],
+                    expected_duplicates=contract["review_grid"]["implosion_known_duplicate_isotopes"],
+                    selected_radioactive_isotopes=list(
+                        contract["review_grid"]["selected_radioactive_isotopes"]
+                    ),
+                )
+                for mass, member in sorted(implosion_members.items())
+            }
+            if any(
+                record["negative_wind_value_count"] > 0
+                for record in implosion_records.values()
+            ):
+                raise SukhboldAuditError("negative implosion-wind yield encountered")
+            for engine in engine_branches:
+                pattern = re.compile(
+                    rf"^nucleosynthesis_yields/{re.escape(engine)}/s([0-9]+(?:\.[0-9]+)?)\.yield_table$"
+                )
+                members_by_mass: dict[float, str] = {}
+                for member in regular:
+                    match = pattern.fullmatch(member.name)
+                    if match is None:
+                        continue
+                    mass = _finite(match.group(1), f"{engine} yield-table mass")
+                    if mass in members_by_mass:
+                        raise SukhboldAuditError(f"duplicate {engine} yield table at {mass} Msun")
+                    members_by_mass[mass] = member.name
+                high_mass_yield_texts[engine] = {
+                    mass: _extract_text(archive, member)
+                    for mass, member in sorted(members_by_mass.items())
+                    if mass in expected_high_masses
+                }
     except (OSError, tarfile.TarError) as exc:
         raise SukhboldAuditError(f"cannot audit Sukhbold archives: {exc}") from exc
+    engine_results: dict[str, dict[str, Any]] = {}
+    with tarfile.open(explosion_path, "r:gz") as archive:
+        for engine in engine_branches:
+            result_text = _extract_text(archive, f"explosion_results_PHOTB/results_{engine}")
+            engine_results[engine] = _parse_engine_results(
+                result_text, engine=engine, expected_masses=expected_high_masses
+            )
+    for engine in engine_branches:
+        result_by_mass = engine_results[engine]["high_mass_results"]
+        high_mass_yields = {
+            mass: _parse_yield_table(
+                text,
+                mass=mass,
+                result=result_by_mass.get(mass),
+                contract=contract,
+            )
+            for mass, text in high_mass_yield_texts[engine].items()
+        }
+        engine_results[engine]["high_mass_yield_masses"] = sorted(high_mass_yields)
+        engine_results[engine]["missing_high_mass_yield_masses"] = sorted(
+            set(expected_high_masses) - set(high_mass_yields)
+        )
+        engine_results[engine]["high_mass_yields"] = high_mass_yields
+        engine_results[engine]["high_mass_implosion_winds"] = {
+            mass: {
+                "zams_mass_msun": mass,
+                **record,
+            }
+            for mass, record in implosion_records.items()
+            if engine == "W18" and mass in expected_high_masses
+        }
     return {
         "explosion_results_regular_file_count": inventory["explosion_results_regular_file_count"],
         "yield_regular_file_count": inventory["yield_regular_file_count"],
         "yield_table_count_by_branch": branch_counts,
         "z96_results": results,
         "z96_yields": yields,
+        "engine_results": engine_results,
+        "implosion_wind_records": implosion_records,
     }
 
 
@@ -324,6 +527,12 @@ def audit_sukhbold2016_candidate(
 
     archive = _audit_archives(base, contract)
     yield_records = list(archive["z96_yields"].values())
+    high_mass_yield_records = [
+        model
+        for engine in archive["engine_results"].values()
+        for model in engine["high_mass_yields"].values()
+        if model["stable_segment_mass_budget_residual_msun"] is not None
+    ]
     max_absolute = max(abs(record["stable_segment_mass_budget_residual_msun"]) for record in yield_records)
     max_relative = max(record["stable_segment_mass_budget_absolute_relative_residual"] for record in yield_records)
     policy = contract["audit_policy"]
@@ -366,6 +575,45 @@ def audit_sukhbold2016_candidate(
             "cross_engine_interpolation_allowed": False,
             "cross_source_interpolation_allowed": False,
         },
+        "high_mass_engine_evidence": {
+            "status": "reproduced_review_evidence_not_production_rows",
+            "engines": archive["engine_results"],
+            "mass_only_partition_rejected": True,
+            "mass_budget_review": {
+                "scope": "available W18/N20 high-mass yield tables only",
+                "records_evaluated": len(high_mass_yield_records),
+                "maximum_absolute_residual_msun": max(
+                    (abs(record["stable_segment_mass_budget_residual_msun"])
+                     for record in high_mass_yield_records),
+                    default=None,
+                ),
+                "maximum_absolute_relative_residual": max(
+                    (record["stable_segment_mass_budget_absolute_relative_residual"]
+                     for record in high_mass_yield_records),
+                    default=None,
+                ),
+                "review_bound_applied": False,
+                "exact_mass_closure_claimed": False,
+                "limitation": (
+                    "The Z9.6 review bound is not applied to high-mass W18/N20 records; "
+                    "implosion-wind-only records have no terminal mass cut for this comparison."
+                ),
+            },
+            "interpretation": "Positive and zero explosion-energy outcomes alternate across the 40--120 Msun tail and between engine branches; no universal ZAMS mass cut is inferred.",
+        },
+        "implosion_wind_evidence": {
+            "status": "reproduced_wind_only_review_evidence",
+            "model_count": len(archive["implosion_wind_records"]),
+            "all_models_wind_only": all(
+                record["wind_only_no_terminal_component"]
+                for record in archive["implosion_wind_records"].values()
+            ),
+            "all_isotope_row_counts_match": all(
+                record["isotope_row_count"] == contract["review_grid"]["implosion_wind_rows_per_model"]
+                for record in archive["implosion_wind_records"].values()
+            ),
+            "terminal_ejecta_must_not_be_invented": True,
+        },
         "energy_and_fallback": {
             "final_kinetic_energy_erg_minimum": min(record["final_kinetic_energy_erg"] for record in results.values()),
             "final_kinetic_energy_erg_maximum": max(record["final_kinetic_energy_erg"] for record in results.values()),
@@ -374,6 +622,7 @@ def audit_sukhbold2016_candidate(
             "canonical_terminal_momentum_available": False,
         },
         "mass_budget_review": {
+            "scope": "Z9.6 engine, source-labelled solar, 9--12 Msun review grid",
             "comparison": "stable ejecta plus stable wind versus labelled ZAMS mass minus P-HOTB baryonic mass cut",
             "maximum_absolute_residual_msun": max_absolute,
             "maximum_absolute_relative_residual": max_relative,

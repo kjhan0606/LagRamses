@@ -1,0 +1,563 @@
+{
+  "schema": "snrt-g2-source-package-fingerprint-audit",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "candidate_fingerprint_review_only",
+  "production_ready": false,
+  "root": "/gpfs/kjhan/LRD_JWST/external/g2_candidates",
+  "manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+  "scheme": "sha256(candidate_id + NUL + sorted UTF-8 records path + NUL + bytes + NUL + file_sha256 + LF)",
+  "manifest_hash_policy": "individual_file_sha256 plus manifest_scoped_composite_sha256; composite is provenance-only and not a physical source approval",
+  "input_integrity_passed": true,
+  "audit_failures": [],
+  "candidate_count": 11,
+  "file_count": 65,
+  "candidates": [
+    {
+      "candidate_id": "limongi_chieffi_2018_cds",
+      "file_count": 5,
+      "files": [
+        {
+          "path": "limongi_chieffi_2018_cds/ReadMe",
+          "exists": true,
+          "bytes": 15442,
+          "sha256": "674df04c58b87111c8276a3e1ad827bf0310194640143a4371740e8f97fe8682",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "limongi_chieffi_2018_cds/table5.dat",
+          "exists": true,
+          "bytes": 113184,
+          "sha256": "c02278a38671e66c42efeb88fc6b2119ffefc72712cf7443128c09ffd5f5122d",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "limongi_chieffi_2018_cds/table7.dat",
+          "exists": true,
+          "bytes": 7346,
+          "sha256": "165201557b9093cab56b978e75b4d5989bc6e12491da54cc2bb26d20d99e6b15",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "limongi_chieffi_2018_cds/table8.dat",
+          "exists": true,
+          "bytes": 447552,
+          "sha256": "bdfc317ca12a377f545964424dba4a666eab964292d0ebfa8b8c9641f073f218",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "limongi_chieffi_2018_cds/table9.dat",
+          "exists": true,
+          "bytes": 227772,
+          "sha256": "64b4bbe536514dfd164bb0e971d2d9163043a767a2ec2de552c76bf131b5088d",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "01873ea4ca2746b5f4a44941237a711777e6e35b3f8e1ced65b524e27bfdb228",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "nugrid_set1ext_mesaonly_fryer12_delay",
+      "file_count": 11,
+      "files": [
+        {
+          "path": "nugrid_set1ext/INDEX.html",
+          "exists": true,
+          "bytes": 2601,
+          "sha256": "338f39055d53a1c4cf676aae5d2ed831a0d93e0620f3db2ad99f34724a7fb925",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/agb_properties_table_1.tex",
+          "exists": true,
+          "bytes": 6994,
+          "sha256": "490f066deb6694068a6fdffa509ccfa19ddf808502f8cb2c22ec1e1b6b3c86e0",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/agb_properties_table_2_set1_3a.txt",
+          "exists": true,
+          "bytes": 18846,
+          "sha256": "89ef062296feaa193b17fe1af4e14063b2fe46b475fef3b609c31ce12d4ea332",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/agb_properties_table_2_set1_4a.txt",
+          "exists": true,
+          "bytes": 17562,
+          "sha256": "1e5f3376d0a68886e60de089d67cc541fb6188fe081590137253bdd1638eacc3",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/agb_properties_table_2_set1_5a.txt",
+          "exists": true,
+          "bytes": 15208,
+          "sha256": "e226d5b88972a977e0b15b4e25fec0612b2527adea3bdd7add0c94589236c19b",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/element_yield_table_MESAonly_fryer12_delay_pre_exp.txt",
+          "exists": true,
+          "bytes": 182473,
+          "sha256": "6b2f82aba8b8ed2f5e13e231f9e519d3d7c94d54c0602c61644a5961a2fb820f",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/element_yield_table_MESAonly_fryer12_delay_total.txt",
+          "exists": true,
+          "bytes": 182473,
+          "sha256": "b3f87c63251790036b5b6ea0c73dba63ce98bf25f2fe328797e7c44ca7d7b7b8",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/element_yield_table_MESAonly_fryer12_delay_winds.txt",
+          "exists": true,
+          "bytes": 182473,
+          "sha256": "bfa15578a4c0e0f7152164bd6909d93fe497ecad226ed2d4f0a747b46a87debd",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/massive_star_properties_table.tex",
+          "exists": true,
+          "bytes": 3947,
+          "sha256": "dc34d46e7a0632516758acd5fd5d30933db37666df16788c78610a41f8450dd7",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/read_yields.py",
+          "exists": true,
+          "bytes": 35265,
+          "sha256": "3ef9cae4fd8b7935f7021ea736bf1a99dea101ad6259372cd66b18ae09c3ed92",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "nugrid_set1ext/yield_tables_INDEX.html",
+          "exists": true,
+          "bytes": 4007,
+          "sha256": "35f9f289d744cbc9abbe0b0f94df7344d2556ea2e1f4d44d593a16585a62b9d9",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "fd0cc5d2dced86807756fc4c39b94ed1af221aaf8434c4778fe6a6ecab0f936d",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "huscher2025_agb",
+      "file_count": 2,
+      "files": [
+        {
+          "path": "huscher2025_agb/AGB_files_Huscher_et_al_2025.zip",
+          "exists": true,
+          "bytes": 133655,
+          "sha256": "dc559ee272d602bcfe95ab0050cb388eed670986e3e62234b4bd9126d0128199",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "huscher2025_agb/zenodo_record_17635255.json",
+          "exists": true,
+          "bytes": 4747,
+          "sha256": "ed91c30cc8c1c84360585911cb87c2ad277ae7b3ea6b374f82918c599ad82758",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "39cfcf0477039954c6a2d20ba40c49f9d97163a1a747c1e236316c6678224b46",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "boccioli_roberti2026_neutrino_ccsn",
+      "file_count": 5,
+      "files": [
+        {
+          "path": "boccioli_roberti2026_ccsn/F23.zip",
+          "exists": true,
+          "bytes": 444104,
+          "sha256": "41b72c45e7743d9855637ae56cf1ef264c000b4639ed4805b177ab7fe5079a10",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "boccioli_roberti2026_ccsn/LC18.zip",
+          "exists": true,
+          "bytes": 816270,
+          "sha256": "249aea46713ab41cad7e8d7406835c205e4f02d36958e113a8f2231f81ebef5e",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "boccioli_roberti2026_ccsn/README",
+          "exists": true,
+          "bytes": 3987,
+          "sha256": "66dae04f90bf7b96460199a7ebbedf0126c1e70ab840e1693a8a326cd7ae2316",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "boccioli_roberti2026_ccsn/WH07.zip",
+          "exists": true,
+          "bytes": 377318,
+          "sha256": "1576e96d9366dd7b36a75abbbc6e9ced55c1157891417062a5cbbf439dbed84c",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "boccioli_roberti2026_ccsn/zenodo_record_19503168.json",
+          "exists": true,
+          "bytes": 4618,
+          "sha256": "bc04d8a528e5a852524be3e0cd2d973a12b39090ad0bf2aaf71305016d17eb67",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "3370571245be954b1330d0b91bae585ffed47b3a1c2d10ffa11fc4ef7b57065b",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "doherty2014_sagb",
+      "file_count": 9,
+      "files": [
+        {
+          "path": "doherty2014_sagb/INDEX.html",
+          "exists": true,
+          "bytes": 1927,
+          "sha256": "0909db5cf86a9493e2fc5972da31dff6795b56c051219c394b80bf4bb5fde19c",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "doherty2014_sagb/P3Doh14b-table1.txt",
+          "exists": true,
+          "bytes": 20262,
+          "sha256": "b059363032f8fd3478ecb8dc5f8813f76560cd8f68c0839bdafc5fe5fee44b89",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "doherty2014_sagb/P3Doh14b-table2.txt",
+          "exists": true,
+          "bytes": 23542,
+          "sha256": "68d88fe126df3f08db3faa5057789cd9b426c1e6aaf4fcd279cfc4f3fa5b82b6",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "doherty2014_sagb/P3Doh14b-table3.txt",
+          "exists": true,
+          "bytes": 10112,
+          "sha256": "fa11fe4896958415418429ec61747bb00b89947f1a561e8b471ed83e87b2d123",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "doherty2014_sagb/P3Doh14b-table4.txt",
+          "exists": true,
+          "bytes": 1458,
+          "sha256": "b2e4c905d06f2d36e2d2fbf58e487f9d0d1f657586faf84981ed1d98a2039413",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "doherty2014_sagb/TABLE1-VW93ML.txt",
+          "exists": true,
+          "bytes": 46964,
+          "sha256": "56002a6871e02c45998b2097ea6638cdf21fd831a4e0baef40e01c9253e17b80",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "doherty2014_sagb/TABLE2-VW-MML.txt",
+          "exists": true,
+          "bytes": 43619,
+          "sha256": "b1b57b5d277260775966ccd8adffb997d91c7f6c5721b2b8cace0da3b6b2fcc0",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "doherty2014_sagb/TABLE3-8.5M-TESTCASES.txt",
+          "exists": true,
+          "bytes": 16724,
+          "sha256": "36743c234509cc3a1a013b3bcbc0d00535c6c41ab0eab194b10d7f6a78da10b7",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "doherty2014_sagb/TABLE4-InitialComposition.txt",
+          "exists": true,
+          "bytes": 1842,
+          "sha256": "d8e5cb633b593719e8f750ca502efac4e917efb9de620acab0f7322a4ff7c249",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "ff4dda0d45f61e0c8342379a65afef857c6d66a4c5671fdaa860eb007912aae6",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "stockinger2020_low_mass_ccsn",
+      "file_count": 12,
+      "files": [
+        {
+          "path": "stockinger2020_low_mass_ccsn/INDEX.html",
+          "exists": true,
+          "bytes": 28021,
+          "sha256": "933d5dfa85868489da66f22305a88a3595671c95fb903a12aaeca97b7431ebe7",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/e8.8_yields_004.792d.txt",
+          "exists": true,
+          "bytes": 976,
+          "sha256": "a37db4f070baaa22a0eeb96ec1f21c315bc549bd211c7bbfbd668217d2c2d642",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/e8.8_yields_005.208d.txt",
+          "exists": true,
+          "bytes": 976,
+          "sha256": "2539a3528880041ae25cf29da797dd5ed4e6cfe357e036230502581b11fbb025",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/e8.8_yields_115.742d.txt",
+          "exists": true,
+          "bytes": 976,
+          "sha256": "02fd70c5a088ce1ff1a2e22af8934007d8e08baccb36992fdbc9df4a79f3bd06",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/s9.0_progenitor_composition.txt",
+          "exists": true,
+          "bytes": 1050,
+          "sha256": "2a69b22725cc5bc64a3b602525dd10e5516d863d94663b382a3034e836c74542",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/s9.0_yields_001.974d.txt",
+          "exists": true,
+          "bytes": 1007,
+          "sha256": "7af3d3bd27bbbdf45a2f8c08591a2cebacd4791137aa983cae023fad04866326",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/s9.0_yields_003.278d.txt",
+          "exists": true,
+          "bytes": 1007,
+          "sha256": "949e2f0032085601b056e3fac9e0f270cc3b26ffbac941a4df9b07f3ff9a0999",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/s9.0_yields_019.738d.txt",
+          "exists": true,
+          "bytes": 1007,
+          "sha256": "5a0030da18092fb6aa253d1323f9766d8387a72b0cd46292d2fbc690f7fba1b1",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/shock_energy_kick.h5",
+          "exists": true,
+          "bytes": 54552,
+          "sha256": "3b3742e7de18804147c391d4c0306a13ab38a3ea2235abba447621bcc74e50d2",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/z9.6_yields_001.153d.txt",
+          "exists": true,
+          "bytes": 976,
+          "sha256": "29acda88a99c9bd278871fb19f7e2a3a5ecf22b63309ddf6e2943c2ce121aa38",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/z9.6_yields_001.389d.txt",
+          "exists": true,
+          "bytes": 976,
+          "sha256": "602a6c99890547d1d168005eae44d97e4bb7b45fa66a46f87b67a9ee9a19cae8",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "stockinger2020_low_mass_ccsn/z9.6_yields_104.200d.txt",
+          "exists": true,
+          "bytes": 976,
+          "sha256": "76ed17b511896dfcd35588929bfc1735687f6714e244d07450e1b842d21ed8f6",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "84960add39cf27ae97ce27655a5f162c6441deedf2bfdb8598881c9539f27731",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "sukhbold2016_ccsn",
+      "file_count": 4,
+      "files": [
+        {
+          "path": "sukhbold2016_ccsn/ARCHIVE_TERMS.html",
+          "exists": true,
+          "bytes": 64972,
+          "sha256": "447fb9dff5bd31a542f93bb8c489902faad068e5007b930435ccb01f62a457fe",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "sukhbold2016_ccsn/INDEX.html",
+          "exists": true,
+          "bytes": 9721,
+          "sha256": "8abc776c7b9c859d5f31091bf5393d8136c5b749b776a9902d6ce99f61227c8b",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "sukhbold2016_ccsn/explosion_results_PHOTB.tar.gz",
+          "exists": true,
+          "bytes": 18850,
+          "sha256": "72e6d68c1a8fdc622054dc08c6263e6ac3faa5e5352b299206cfe076952e93a9",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "sukhbold2016_ccsn/nucleosynthesis_yields.tar.gz",
+          "exists": true,
+          "bytes": 42688013,
+          "sha256": "e74bd3a7bf647f2e06f055b50f2613d7b145613ae56cc1d05f870f8edddf6eed",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "11e2988969f69da9fb3f6939af9bbd3f0f26afd4420cd676d27a05b30486aa60",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "limongi2024_transition_fates",
+      "file_count": 2,
+      "files": [
+        {
+          "path": "limongi2024_transition_fates/ARTICLE.html",
+          "exists": true,
+          "bytes": 576338,
+          "sha256": "89b85f83185766d791f18e1db22abe5f8f68e2e2e6f88179c3ca661d72837905",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "limongi2024_transition_fates/TABLE4_TP_MRT.txt",
+          "exists": true,
+          "bytes": 87274,
+          "sha256": "8ca914e8373b28ec58b7c2928d85801b68e917d18a792b408f3de141989bc664",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "86442e0fa7e65482fa0476b9f0da5c895b98672c95ca35c9944340f2a9e46d85",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "roberti2024_ultralowz_ccsn",
+      "file_count": 9,
+      "files": [
+        {
+          "path": "roberti2024_ultralowz_ccsn/ARXIV_ABSTRACT.html",
+          "exists": true,
+          "bytes": 45081,
+          "sha256": "a1b210972dcfd833780cc00e65fb32a4215b5021e4a2ab587581e235fb768e5b",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "roberti2024_ultralowz_ccsn/ARXIV_SOURCE.tar.gz",
+          "exists": true,
+          "bytes": 18065808,
+          "sha256": "35cb05180a5db9fc17e87ce2bde93096f59352a5686eaf48faadf31f906d3e5c",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "roberti2024_ultralowz_ccsn/apjsad1686t10_mrt.txt",
+          "exists": true,
+          "bytes": 18609,
+          "sha256": "6bb9889791a00df3b85d05cc762c89ac8f8fc06b3fbd51d875eb7d91afe8bf1a",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "roberti2024_ultralowz_ccsn/apjsad1686t11_mrt.txt",
+          "exists": true,
+          "bytes": 16195,
+          "sha256": "2800de23aae975f6885d6c66f10f24a0deb34b5ef6c05cd8e71a76b682aad065",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "roberti2024_ultralowz_ccsn/apjsad1686t12_mrt.txt",
+          "exists": true,
+          "bytes": 13781,
+          "sha256": "ca4918d233df0a4851b6c8cfbea4f92c2519411a7fa7106de9c0bcb66699b6d5",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "roberti2024_ultralowz_ccsn/apjsad1686t13_mrt.txt",
+          "exists": true,
+          "bytes": 16195,
+          "sha256": "b7aad3bcc9a151dc5b665b3550cf86952681a8f241322eb5eb060d4f194ccc55",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "roberti2024_ultralowz_ccsn/apjsad1686t5_mrt.txt",
+          "exists": true,
+          "bytes": 30902,
+          "sha256": "a82009e0b59479502a480efc9c6f7a726f6d20262ba4308332d058fdca21a69f",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "roberti2024_ultralowz_ccsn/apjsad1686t8_mrt.txt",
+          "exists": true,
+          "bytes": 6587,
+          "sha256": "c6eb350710782b0e033ce82ed1973a5d046f5ed478863ec5bd5fa92e8954be70",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "roberti2024_ultralowz_ccsn/apjsad1686t9_mrt.txt",
+          "exists": true,
+          "bytes": 6587,
+          "sha256": "a804aa121f140ffd2613ab069697feb176b2e9ba9c3b7091dd7c4ded70f91fa4",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "3085e6ad9044e6f35a37cb2eb95a06da0cfb9f79361eb175d3d7ffbd3f3699e2",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "heger_woosley2010_popiii",
+      "file_count": 5,
+      "files": [
+        {
+          "path": "heger_woosley2010_popiii/ARXIV_API.xml",
+          "exists": true,
+          "bytes": 3414,
+          "sha256": "0ccf3bdf979cf1fb94decf37721a70f07a6ae42c131ef6ca0d56082933f05c31",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "heger_woosley2010_popiii/ARXIV_SOURCE.tar.gz",
+          "exists": true,
+          "bytes": 1749802,
+          "sha256": "33fe08f7a58d47620f51371ebdaa74fbc60c55b0cb7c86c3bb5239dfe7f6e47a",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "heger_woosley2010_popiii/VIZIER_README",
+          "exists": true,
+          "bytes": 4804,
+          "sha256": "3a9c54f1f335e79228dd872e6d785f0028e3dbd4b5358d3627c41ba3e8ef9f2f",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "heger_woosley2010_popiii/VIZIER_USAGE_RULES.html",
+          "exists": true,
+          "bytes": 9428,
+          "sha256": "f6bab16f7060f41c98958f0044fa3a526eeeeacdd23cb2fa7a529016d2b29e9f",
+          "input_integrity_passed": true
+        },
+        {
+          "path": "heger_woosley2010_popiii/table8.dat.gz",
+          "exists": true,
+          "bytes": 5204646,
+          "sha256": "0fa810d85564623450774f6eda8f00bf9e7646b6ef8a6c94e693e7075cb478ee",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "c7a352d9f162a5378b5d171f1d57423b6c0f1c388e04526c996767ef87ba3d5e",
+      "input_integrity_passed": true
+    },
+    {
+      "candidate_id": "nubase2020_decay_projection_data",
+      "file_count": 1,
+      "files": [
+        {
+          "path": "nuclear_decay/nubase_4.mas20",
+          "exists": true,
+          "bytes": 761906,
+          "sha256": "1585a5eea86c5e17e90307c7e6e786d060049c4039e392a261ff6db977df9859",
+          "input_integrity_passed": true
+        }
+      ],
+      "composite_sha256": "71184c8651296b4703bc49f2bc62c0b849490d3a5541c150ede7c2660dbee27c",
+      "input_integrity_passed": true
+    }
+  ],
+  "approval_id": null,
+  "interpretation": "Composite hashes identify the exact manifest-scoped staged file set. They do not assert scientific validity, licensing approval, or canonical conversion.",
+  "audit_code_sha256": "11f06f246dca18b521374294c506f2564c0916404469b5cfc0457b35d386eade"
+}

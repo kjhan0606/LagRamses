@@ -75,11 +75,62 @@ def main() -> int:
             abs_tol=1.0e-12,
         )
         assert len(model["selected_radioactive_inventory"]) == 20
+    high_mass = report["high_mass_engine_evidence"]
+    assert high_mass["mass_only_partition_rejected"] is True
+    assert set(high_mass["engines"]) == {"W18", "N20"}
+    assert high_mass["engines"]["W18"]["high_mass_model_count"] == 9
+    assert high_mass["engines"]["N20"]["high_mass_model_count"] == 9
+    assert [
+        mass for mass, record in high_mass["engines"]["W18"]["high_mass_results"].items()
+        if record["outcome"] == "explosion_energy_positive"
+    ] == [60.0, 120.0]
+    assert [
+        mass for mass, record in high_mass["engines"]["N20"]["high_mass_results"].items()
+        if record["outcome"] == "explosion_energy_positive"
+    ] == [60.0, 80.0, 100.0, 120.0]
+    assert high_mass["engines"]["W18"]["high_mass_yield_masses"] == [60.0, 120.0]
+    assert high_mass["engines"]["N20"]["high_mass_yield_masses"] == [60.0, 80.0, 100.0, 120.0]
+    assert high_mass["engines"]["W18"]["missing_high_mass_yield_masses"] == [
+        40.0, 45.0, 50.0, 55.0, 70.0, 80.0, 100.0
+    ]
+    assert high_mass["engines"]["N20"]["missing_high_mass_yield_masses"] == [
+        40.0, 45.0, 50.0, 55.0, 70.0
+    ]
+    high_mass_budget = high_mass["mass_budget_review"]
+    assert high_mass_budget["scope"] == "available W18/N20 high-mass yield tables only"
+    assert high_mass_budget["records_evaluated"] == 6
+    assert high_mass_budget["review_bound_applied"] is False
+    assert high_mass_budget["exact_mass_closure_claimed"] is False
+    for engine in ("W18", "N20"):
+        for model in high_mass["engines"][engine]["high_mass_yields"].values():
+            assert model["stable_isotope_row_count"] == 283
+            assert model["selected_radioactive_isotope_row_count"] == 20
+            assert model["tracked_elements_absent"] == []
+            assert len(model["selected_radioactive_inventory"]) == 20
+    assert sorted(high_mass["engines"]["W18"]["high_mass_implosion_winds"]) == [
+        40.0, 45.0, 50.0, 55.0, 70.0, 80.0, 100.0
+    ]
+    for model in high_mass["engines"]["W18"]["high_mass_implosion_winds"].values():
+        assert model["stable_wind_by_tracked_element_msun"]
+        assert len(model["selected_radioactive_inventory"]) == 20
+        assert model["source_header"] == ["[isotope]", "[wind]"]
+        assert model["terminal_component_present"] is False
+        assert model["wind_only_no_terminal_component"] is True
+        assert model["negative_wind_value_count"] == 0
+        assert model["all_wind_values_nonnegative"] is True
+        assert all(value["ejecta_msun"] is None for value in model["selected_radioactive_inventory"].values())
+        assert model["cross_segment_duplicate_isotopes"] == ["k40"]
+    implosion = report["implosion_wind_evidence"]
+    assert implosion["model_count"] == 105
+    assert implosion["all_models_wind_only"] is True
+    assert implosion["all_isotope_row_counts_match"] is True
+    assert implosion["terminal_ejecta_must_not_be_invented"] is True
     energetics = report["energy_and_fallback"]
     assert math.isclose(energetics["final_kinetic_energy_erg_minimum"], 1.1e50)
     assert math.isclose(energetics["final_kinetic_energy_erg_maximum"], 6.9e50)
     assert energetics["canonical_terminal_momentum_available"] is False
     closure = report["mass_budget_review"]
+    assert closure["scope"] == "Z9.6 engine, source-labelled solar, 9--12 Msun review grid"
     assert closure["within_review_bound"] is True
     assert closure["exact_mass_closure_claimed"] is False
     assert closure["maximum_absolute_residual_msun"] < 0.061
