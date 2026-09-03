@@ -280,7 +280,7 @@ stellar_population_ledger.o: stellar_enrichment_config.o stellar_enrichment_cont
 stellar_enrichment_driver.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_ssp_sources.o stellar_source_increment.o stellar_population_ledger.o
 stellar_cell_deposition.o: stellar_enrichment_config.o stellar_enrichment_contract.o
 stellar_ramses_field_map.o: stellar_enrichment_config.o
-stellar_ramses_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o
+stellar_ramses_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_snia_cell_deposition.o
 stellar_ramses_mapped_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_ramses_field_map.o
 stellar_ramses_runtime.o: amr_commons.kjhan.o pm_commons.o hydro_commons.o stellar_enrichment_config.o stellar_enrichment_contract.o stellar_native_units.o stellar_progress_contract.o stellar_yield_tables.o stellar_yield_backend.o stellar_yield_audit.o stellar_enrichment_driver.o
 feedback.kjhan3.o: stellar_ramses_runtime.o

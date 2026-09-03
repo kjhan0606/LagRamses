@@ -31,6 +31,10 @@ Status: **implemented review-boundary hardening; physical promotion remains bloc
   the existing generic runtime path.  It admits only an explicit
   all-to-total-energy thermal policy; unsupported fractional policies fail
   closed.  Native/production hashes and `-check all` unit tests pass.
+- The production RAMSES bridge now consumes those increments with explicit
+  length/density/velocity code-unit scales and normalized multi-cell weights.
+  Its validation is pre-write and the bridge unit test covers conservation,
+  scale conversion, and unchanged `uold` on an unapproved policy.
 - The full F-P2 contract runner passes, including native Fortran tests,
   source-format/profile/selection tests, admission negatives, and production
   mirror compilation.
@@ -42,7 +46,8 @@ Status: **implemented review-boundary hardening; physical promotion remains bloc
   supplies the WD reservoir or terminal-remnant policy for runtime.
 - The event-frame momentum convention is explicit and radial conversion is
   tested.  The cell-local conversion adapter is implemented, but its output is
-  not yet wired into the AMR/MPI neighbour-selection and RAMSES array update.
+  now wired to a tested production-side RAMSES array bridge, but the bridge is
+  not yet called from AMR/MPI neighbour selection.
 - SNIa thermal coupling is represented by a guarded all-to-total-energy cell
   increment policy, but it is not approved or called by the runtime; existing
   generic stellar energy deposition and SNII delayed-cooling are separate

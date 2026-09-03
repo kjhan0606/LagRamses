@@ -10,6 +10,9 @@ compiler=${F90:-ifx}
 sources=(
   stellar_enrichment_config.f90
   stellar_enrichment_contract.f90
+  stellar_snia_physical_contract.f90
+  stellar_native_units.f90
+  stellar_snia_cell_deposition.f90
   stellar_cell_deposition.f90
   stellar_ramses_bridge.f90
   stellar_ramses_field_map.f90

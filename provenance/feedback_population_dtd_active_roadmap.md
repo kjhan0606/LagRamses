@@ -133,8 +133,11 @@ one-cell mass, momentum, event-energy, bulk-kinetic-energy, and total-energy
 density increments.  Its only admitted thermal policy is explicitly approved
 all-to-total-energy; fractional thermalization is rejected until a declared
 non-thermal receiver exists.  The adapter is native/production hash-matched
-and unit-tested, but it does not select neighbours, perform MPI exchange, or
-write RAMSES arrays.  No SNIa event is sent to AMR cells and no SNIa thermal
+and unit-tested.  The production `stellar_ramses_bridge` now wraps it with
+explicit RAMSES code-unit conversion and normalized multi-cell weighting;
+pre-write validation keeps failed SNIa policies transactional.  The bridge
+does not select AMR neighbours or perform MPI exchange, and it is not called
+by the runtime.  No SNIa event is sent to AMR cells and no SNIa thermal
 coupling is active at runtime.
 
 The next implementation bundle is the runtime-facing physical SNIa source
