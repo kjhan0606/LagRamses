@@ -264,6 +264,7 @@ hydro_commons.o: hydro_parameters.o
 poisson_commons.o: poisson_parameters.o
 stellar_enrichment_contract.o: stellar_enrichment_config.o
 stellar_snia_dtd.o: stellar_enrichment_config.o
+stellar_snia_population_contract.o: stellar_enrichment_config.o stellar_snia_dtd.o
 stellar_snia_physical_contract.o: stellar_enrichment_config.o
 stellar_snia_event_ledger.o: stellar_enrichment_config.o stellar_enrichment_contract.o
 stellar_native_units.o: stellar_enrichment_config.o

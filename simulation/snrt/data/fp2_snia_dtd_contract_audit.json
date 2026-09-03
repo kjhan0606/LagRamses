@@ -6,7 +6,7 @@
   "production_ready": false,
   "runtime_activation_allowed": false,
   "contract": "simulation/snrt/config/fp2_snia_dtd_contract_v1.json",
-  "contract_sha256": "388ed4939fe7ed31d377086dc1e097cb4f8ad6f0263500b2bdcf9afa7fa67e77",
+  "contract_sha256": "ae39130006c81b04d0445b505790c72ccfdde84223e971e9f14b868aa27a9e1c",
   "native_kernel": {
     "path": "simulation/snrt/native/phase0/stellar_snia_dtd.f90",
     "sha256": "ba6b7f810f3ae686e9f0d23c769ae9812da265557dfb0cbfb9366517bac7b89b"
@@ -30,6 +30,19 @@
   "production_physical_contract": {
     "path": "patch/lagRamses/stellar_snia_physical_contract.f90",
     "sha256": "c53e756bcb621d9a27a335e74ae7481d756a454a0bd2f9194e613727bfd56572"
+  },
+  "population_realization_contract": {
+    "path": "simulation/snrt/config/fp2_snia_population_realization_contract_v1.json",
+    "sha256": "4b34807cf385c367d6aeaa82cb4ca7b1cdf51336e657043a8be1bb48efd206aa",
+    "status": "review_only_not_approved"
+  },
+  "native_snia_population_contract": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_population_contract.f90",
+    "sha256": "7e52273d232f5c15fe932845eb4d439dd1dc3d21d1b647e5745628e84d414340"
+  },
+  "production_snia_population_contract": {
+    "path": "patch/lagRamses/stellar_snia_population_contract.f90",
+    "sha256": "7e52273d232f5c15fe932845eb4d439dd1dc3d21d1b647e5745628e84d414340"
   },
   "native_snia_cell_deposition": {
     "path": "simulation/snrt/native/phase0/stellar_snia_cell_deposition.f90",
@@ -168,6 +181,6 @@
     "inferred_zero_policy": "never infer absent project elements as zero during conversion"
   },
   "failures": [],
-  "interpretation": "The interval kernel, physical event contract, and cell-increment adapter are implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
-  "audit_code_sha256": "1a689b2527cc09e8becd47ab185b2da5046adbfec9b8175afb2c88b47c5cda5b"
+  "interpretation": "The interval kernel, population realization contract, physical event contract, cell-increment adapter, and guarded RAMSES bridge are implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
+  "audit_code_sha256": "c75b87d9f77294a2458b7947a12e53f31c8da23b155532ac7bca79c9c45babfc"
 }

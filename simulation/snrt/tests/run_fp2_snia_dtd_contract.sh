@@ -15,10 +15,12 @@ FC=mpiifx
 
 mkdir -p "$BUILD_DIR"
 for source in stellar_enrichment_config.f90 stellar_enrichment_contract.f90 \
-    stellar_snia_dtd.f90 stellar_snia_physical_contract.f90 \
+    stellar_snia_dtd.f90 stellar_snia_population_contract.f90 \
+    stellar_snia_physical_contract.f90 \
     stellar_snia_event_ledger.f90 stellar_native_units.f90 \
     stellar_snia_cell_deposition.f90 fp2_snia_dtd_test.f90 \
-    fp2_snia_physical_contract_test.f90 fp2_snia_cell_deposition_test.f90 \
+    fp2_snia_population_contract_test.f90 fp2_snia_physical_contract_test.f90 \
+    fp2_snia_cell_deposition_test.f90 \
     fp2_snia_event_ledger_test.f90; do
   "$FC" -O2 -g -traceback -warn all -check all -fpp \
     -module "$BUILD_DIR" -c "$SOURCE_DIR/$source" \
@@ -38,6 +40,13 @@ done
   -o "$BUILD_DIR/fp2_snia_physical_contract_test"
 
 "$FC" -O2 -g -traceback -check all \
+  "$BUILD_DIR/fp2_snia_population_contract_test.o" \
+  "$BUILD_DIR/stellar_snia_population_contract.o" \
+  "$BUILD_DIR/stellar_snia_dtd.o" \
+  "$BUILD_DIR/stellar_enrichment_config.o" \
+  -o "$BUILD_DIR/fp2_snia_population_contract_test"
+
+"$FC" -O2 -g -traceback -check all \
   "$BUILD_DIR/fp2_snia_cell_deposition_test.o" \
   "$BUILD_DIR/stellar_snia_cell_deposition.o" \
   "$BUILD_DIR/stellar_snia_physical_contract.o" \
@@ -53,6 +62,7 @@ done
   -o "$BUILD_DIR/fp2_snia_event_ledger_test"
 
 (cd "$BUILD_DIR" && ./fp2_snia_dtd_test)
+(cd "$BUILD_DIR" && ./fp2_snia_population_contract_test)
 (cd "$BUILD_DIR" && ./fp2_snia_physical_contract_test)
 (cd "$BUILD_DIR" && ./fp2_snia_cell_deposition_test)
 (cd "$BUILD_DIR" && ./fp2_snia_event_ledger_test)
@@ -123,7 +133,8 @@ done
 # This intentionally does not link or activate SNIa in the runtime binary.
 mkdir -p "$PRODUCTION_BUILD_DIR"
 for source in stellar_enrichment_config.f90 stellar_enrichment_contract.f90 \
-    stellar_snia_dtd.f90 stellar_snia_physical_contract.f90 \
+    stellar_snia_dtd.f90 stellar_snia_population_contract.f90 \
+    stellar_snia_physical_contract.f90 \
     stellar_snia_event_ledger.f90 stellar_native_units.f90 \
     stellar_snia_cell_deposition.f90; do
   "$FC" -O2 -g -traceback -warn all -check all -fpp \

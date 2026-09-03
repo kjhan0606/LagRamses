@@ -141,9 +141,11 @@ by the runtime.  No SNIa event is sent to AMR cells and no SNIa thermal
 coupling is active at runtime.
 
 The next implementation bundle is the runtime-facing physical SNIa source
-contract: an approved source/population realization, an AMR/MPI deposition
-bridge around the tested cell adapter, and versioned source/approval commit
-binding.  Until those fields are populated
+contract: an approved source/population realization, connection of the tested
+RAMSES bridge to the actual AMR/MPI target-cell selection, and versioned
+source/approval commit binding.  The review-only population realization
+contract now defines all required fields without populating them.  Until those
+fields are populated
 and independently reviewed, F-P2 remains blocked.
 
 - Select and cite the DTD family, minimum/maximum delay, normalization per unit

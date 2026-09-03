@@ -18,6 +18,7 @@
   "event_yield_hesma_profile_estimator_comparison": "simulation/snrt/data/fp2_snia_hesma_profile_estimator_comparison.json",
   "event_yield_hesma_selection_packet": "simulation/snrt/data/fp2_snia_hesma_source_selection_packet.json",
   "event_source_approval_sidecar": "config/fp2_snia_event_source_approval_sidecar_v1.json",
+  "population_realization_contract": "config/fp2_snia_population_realization_contract_v1.json",
   "event_yield_converter": "tools/convert_snia_event_yields.py",
   "time_unit": "Gyr",
   "kernel": {

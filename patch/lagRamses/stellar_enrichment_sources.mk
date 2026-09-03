@@ -7,6 +7,7 @@
 PHASE0_STELLAR_ENRICHMENT_SOURCES = \
   patch/lagRamses/stellar_enrichment_config.f90 \
   patch/lagRamses/stellar_snia_dtd.f90 \
+  patch/lagRamses/stellar_snia_population_contract.f90 \
   patch/lagRamses/stellar_snia_physical_contract.f90 \
   patch/lagRamses/stellar_enrichment_contract.f90 \
   patch/lagRamses/stellar_snia_event_ledger.f90 \

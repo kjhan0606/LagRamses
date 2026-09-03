@@ -1,0 +1,32 @@
+{
+  "schema": "snrt-fp2-snia-population-realization-contract",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "review_only_not_approved",
+  "purpose": "Declare the binary-population, IMF, DTD, metallicity, and event-realization inputs without selecting production physics.",
+  "population": {
+    "population_source_id": null,
+    "population_model": null,
+    "imf_id": null,
+    "binary_fraction": null,
+    "imf_conversion_factor": null,
+    "source_commit_binding": null
+  },
+  "dtd": {
+    "minimum_delay_gyr": null,
+    "maximum_delay_gyr": null,
+    "power_law_index": -1.0,
+    "events_per_initial_msun": null
+  },
+  "realization": {
+    "event_realization_policy": null,
+    "metallicity_policy": null,
+    "metallicity_factor_source": null
+  },
+  "approval": {
+    "approval_id": null,
+    "runtime_activation_allowed": false,
+    "production_ready": false,
+    "publication_ready": false
+  }
+}

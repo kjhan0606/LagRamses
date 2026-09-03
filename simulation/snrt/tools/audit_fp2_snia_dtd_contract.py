@@ -24,6 +24,8 @@ DEFAULT_NATIVE_PHYSICAL = SNRT_ROOT / "native" / "phase0" / "stellar_snia_physic
 DEFAULT_PRODUCTION_PHYSICAL = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_snia_physical_contract.f90"
 DEFAULT_NATIVE_DEPOSITION = SNRT_ROOT / "native" / "phase0" / "stellar_snia_cell_deposition.f90"
 DEFAULT_PRODUCTION_DEPOSITION = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_snia_cell_deposition.f90"
+DEFAULT_NATIVE_POPULATION = SNRT_ROOT / "native" / "phase0" / "stellar_snia_population_contract.f90"
+DEFAULT_PRODUCTION_POPULATION = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_snia_population_contract.f90"
 DEFAULT_EVENT_YIELD_CONVERTER = SNRT_ROOT / "tools" / "convert_snia_event_yields.py"
 DEFAULT_EVENT_YIELD_ASSET_MANIFEST = SNRT_ROOT.parents[1] / "manifests" / "fp2_snia_keegans2023_review_v1.json"
 PROJECT_ROOT = SNRT_ROOT.parents[1]
@@ -36,6 +38,7 @@ DEFAULT_HESMA_MODEL_COMPARISON = SNRT_ROOT / "data" / "fp2_snia_hesma_model_comp
 DEFAULT_HESMA_PROFILE_ESTIMATOR_COMPARISON = SNRT_ROOT / "data" / "fp2_snia_hesma_profile_estimator_comparison.json"
 DEFAULT_HESMA_SELECTION_PACKET = SNRT_ROOT / "data" / "fp2_snia_hesma_source_selection_packet.json"
 DEFAULT_EVENT_SOURCE_SIDECAR = SNRT_ROOT / "config" / "fp2_snia_event_source_approval_sidecar_v1.json"
+DEFAULT_POPULATION_REALIZATION = SNRT_ROOT / "config" / "fp2_snia_population_realization_contract_v1.json"
 REQUIRED_ACTIVATION_PREREQUISITES = (
     "approved_population_and_binary_model",
     "approved_minimum_and_maximum_delay",
@@ -290,10 +293,13 @@ def audit_contract(
     hesma_profile_estimator_comparison_path: Path = DEFAULT_HESMA_PROFILE_ESTIMATOR_COMPARISON,
     hesma_selection_packet_path: Path = DEFAULT_HESMA_SELECTION_PACKET,
     event_source_sidecar_path: Path = DEFAULT_EVENT_SOURCE_SIDECAR,
+    population_realization_path: Path = DEFAULT_POPULATION_REALIZATION,
     native_physical_path: Path = DEFAULT_NATIVE_PHYSICAL,
     production_physical_path: Path = DEFAULT_PRODUCTION_PHYSICAL,
     native_deposition_path: Path = DEFAULT_NATIVE_DEPOSITION,
     production_deposition_path: Path = DEFAULT_PRODUCTION_DEPOSITION,
+    native_population_path: Path = DEFAULT_NATIVE_POPULATION,
+    production_population_path: Path = DEFAULT_PRODUCTION_POPULATION,
 ) -> dict[str, Any]:
     config_path = Path(config_path).resolve()
     native_path = Path(native_path).resolve()
@@ -304,6 +310,8 @@ def audit_contract(
     production_physical_path = Path(production_physical_path).resolve()
     native_deposition_path = Path(native_deposition_path).resolve()
     production_deposition_path = Path(production_deposition_path).resolve()
+    native_population_path = Path(native_population_path).resolve()
+    production_population_path = Path(production_population_path).resolve()
     event_yield_converter_path = Path(event_yield_converter_path).resolve()
     event_yield_asset_manifest_path = Path(event_yield_asset_manifest_path).resolve()
     event_yield_asset_audit_path = Path(event_yield_asset_audit_path).resolve()
@@ -315,6 +323,7 @@ def audit_contract(
     hesma_profile_estimator_comparison_path = Path(hesma_profile_estimator_comparison_path).resolve()
     hesma_selection_packet_path = Path(hesma_selection_packet_path).resolve()
     event_source_sidecar_path = Path(event_source_sidecar_path).resolve()
+    population_realization_path = Path(population_realization_path).resolve()
     failures: list[str] = []
     if not config_path.is_file():
         return {
@@ -659,6 +668,64 @@ def audit_contract(
             if promotion_requirements.get("required_fields") != list(PROMOTION_REQUIRED_FIELDS):
                 failures.append("event_source_promotion_requirements_field_set_mismatch")
 
+    population_realization = None
+    population_reference = _resolve_reference(
+        contract.get("population_realization_contract"), SNRT_ROOT, PROJECT_ROOT
+    )
+    if population_reference is not None:
+        population_realization_path = population_reference
+    if not population_realization_path.is_file():
+        failures.append("population_realization_contract_missing")
+    else:
+        try:
+            population_realization = _read(population_realization_path)
+        except ValueError:
+            failures.append("population_realization_contract_invalid_json")
+        if isinstance(population_realization, dict):
+            if population_realization.get("schema") != "snrt-fp2-snia-population-realization-contract":
+                failures.append("population_realization_contract_schema_mismatch")
+            if population_realization.get("schema_version") != 1:
+                failures.append("population_realization_contract_version_mismatch")
+            if population_realization.get("gate") != "F-P2":
+                failures.append("population_realization_contract_gate_mismatch")
+            if population_realization.get("status") != "review_only_not_approved":
+                failures.append("population_realization_contract_must_remain_review_only")
+            population = population_realization.get("population", {})
+            for key in (
+                "population_source_id",
+                "population_model",
+                "imf_id",
+                "binary_fraction",
+                "imf_conversion_factor",
+                "source_commit_binding",
+            ):
+                if population.get(key) is not None:
+                    failures.append(f"population_realization_{key}_must_remain_null")
+            dtd = population_realization.get("dtd", {})
+            for key in (
+                "minimum_delay_gyr",
+                "maximum_delay_gyr",
+                "events_per_initial_msun",
+            ):
+                if dtd.get(key) is not None:
+                    failures.append(f"population_realization_dtd_{key}_must_remain_null")
+            if dtd.get("power_law_index") != -1.0:
+                failures.append("population_realization_dtd_shape_changed")
+            realization = population_realization.get("realization", {})
+            for key in (
+                "event_realization_policy",
+                "metallicity_policy",
+                "metallicity_factor_source",
+            ):
+                if realization.get(key) is not None:
+                    failures.append(f"population_realization_{key}_must_remain_null")
+            approval = population_realization.get("approval", {})
+            if approval.get("approval_id") is not None:
+                failures.append("population_realization_approval_id_must_remain_null")
+            for key in ("runtime_activation_allowed", "production_ready", "publication_ready"):
+                if approval.get(key) is not False:
+                    failures.append(f"population_realization_{key}_must_remain_false")
+
     native_hash = _sha256(native_path)
     production_hash = _sha256(production_path)
     native_event_hash = _sha256(native_event_path)
@@ -685,6 +752,16 @@ def audit_contract(
             failures.append(f"{label}_missing")
     if native_physical_hash is not None and production_physical_hash is not None and native_physical_hash != production_physical_hash:
         failures.append("native_and_production_physical_contract_mismatch")
+    native_population_hash = _sha256(native_population_path)
+    production_population_hash = _sha256(production_population_path)
+    for label, value in (
+        ("native_snia_population_contract", native_population_hash),
+        ("production_snia_population_contract", production_population_hash),
+    ):
+        if value is None:
+            failures.append(f"{label}_missing")
+    if native_population_hash is not None and production_population_hash is not None and native_population_hash != production_population_hash:
+        failures.append("native_and_production_snia_population_contract_mismatch")
     native_deposition_hash = _sha256(native_deposition_path)
     production_deposition_hash = _sha256(production_deposition_path)
     for label, value in (
@@ -711,6 +788,19 @@ def audit_contract(
         "production_event_ledger": {"path": project_relative(production_event_path), "sha256": production_event_hash},
         "native_physical_contract": {"path": project_relative(native_physical_path), "sha256": native_physical_hash},
         "production_physical_contract": {"path": project_relative(production_physical_path), "sha256": production_physical_hash},
+        "population_realization_contract": {
+            "path": project_relative(population_realization_path),
+            "sha256": _sha256(population_realization_path),
+            "status": population_realization.get("status") if isinstance(population_realization, dict) else None,
+        },
+        "native_snia_population_contract": {
+            "path": project_relative(native_population_path),
+            "sha256": native_population_hash,
+        },
+        "production_snia_population_contract": {
+            "path": project_relative(production_population_path),
+            "sha256": production_population_hash,
+        },
         "native_snia_cell_deposition": {"path": project_relative(native_deposition_path), "sha256": native_deposition_hash},
         "production_snia_cell_deposition": {"path": project_relative(production_deposition_path), "sha256": production_deposition_hash},
         "kernel_family": contract.get("kernel", {}).get("family"),
@@ -830,7 +920,7 @@ def audit_contract(
             ),
         },
         "failures": failures,
-        "interpretation": "The interval kernel, physical event contract, and cell-increment adapter are implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
+        "interpretation": "The interval kernel, population realization contract, physical event contract, cell-increment adapter, and guarded RAMSES bridge are implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
         "audit_code_sha256": _sha256(TOOL_PATH),
     }
 
@@ -846,6 +936,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--production-physical-contract", type=Path, default=DEFAULT_PRODUCTION_PHYSICAL)
     parser.add_argument("--native-deposition", type=Path, default=DEFAULT_NATIVE_DEPOSITION)
     parser.add_argument("--production-deposition", type=Path, default=DEFAULT_PRODUCTION_DEPOSITION)
+    parser.add_argument("--native-population", type=Path, default=DEFAULT_NATIVE_POPULATION)
+    parser.add_argument("--production-population", type=Path, default=DEFAULT_PRODUCTION_POPULATION)
     parser.add_argument("--event-yield-converter", type=Path, default=DEFAULT_EVENT_YIELD_CONVERTER)
     parser.add_argument("--event-yield-asset-manifest", type=Path, default=DEFAULT_EVENT_YIELD_ASSET_MANIFEST)
     parser.add_argument("--event-yield-asset-audit", type=Path, default=DEFAULT_EVENT_YIELD_ASSET_AUDIT)
@@ -857,6 +949,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--hesma-profile-estimator-comparison", type=Path, default=DEFAULT_HESMA_PROFILE_ESTIMATOR_COMPARISON)
     parser.add_argument("--hesma-selection-packet", type=Path, default=DEFAULT_HESMA_SELECTION_PACKET)
     parser.add_argument("--event-source-sidecar", type=Path, default=DEFAULT_EVENT_SOURCE_SIDECAR)
+    parser.add_argument("--population-realization", type=Path, default=DEFAULT_POPULATION_REALIZATION)
     parser.add_argument("--json-out", type=Path)
     return parser
 
@@ -880,10 +973,13 @@ def main(argv: Iterable[str] | None = None) -> int:
         args.hesma_profile_estimator_comparison,
         args.hesma_selection_packet,
         args.event_source_sidecar,
+        args.population_realization,
         args.native_physical_contract,
         args.production_physical_contract,
         args.native_deposition,
         args.production_deposition,
+        args.native_population,
+        args.production_population,
     )
     text = json.dumps(report, indent=2) + "\n"
     if args.json_out is not None:

@@ -35,6 +35,10 @@ Status: **implemented review-boundary hardening; physical promotion remains bloc
   length/density/velocity code-unit scales and normalized multi-cell weights.
   Its validation is pre-write and the bridge unit test covers conservation,
   scale conversion, and unchanged `uold` on an unapproved policy.
+- The population realization contract now makes binary source identity, IMF
+  conversion, DTD support, metallicity factor, expectation/Poisson choice,
+  immutable source revision, and approval id explicit.  Its review JSON keeps
+  every physical selection null and is checked by the F-P2 audit.
 - The full F-P2 contract runner passes, including native Fortran tests,
   source-format/profile/selection tests, admission negatives, and production
   mirror compilation.
@@ -54,7 +58,8 @@ Status: **implemented review-boundary hardening; physical promotion remains bloc
   paths.
 - DTD normalization, IMF conversion, event realization, thermal coupling, and
   metallicity dependence remain requirements, not populated physics fields;
-  only the numerical evaluation kernel is now complete.
+  only the numerical evaluation kernel and review-only realization interface
+  are complete.
 - A source commit binding and named approval id do not exist because no
   production commit has been created for this contract.
 
