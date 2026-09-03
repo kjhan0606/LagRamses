@@ -10,9 +10,10 @@ module stellar_population_ledger
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels, n_unresolved_fate_intervals, &
-       unresolved_fate_mass_min, unresolved_fate_mass_max
+       unresolved_fate_mass_min, unresolved_fate_mass_max, channel_snia
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t
+  use stellar_snia_physical_contract, only: snia_event_budget_t
   use stellar_ssp_sources, only: calculate_imf_mass_fraction
   implicit none
 
@@ -24,6 +25,7 @@ module stellar_population_ledger
   integer, parameter, public :: population_ledger_err_mass = 4
   integer, parameter, public :: population_ledger_err_owner = 8
   integer, parameter, public :: population_ledger_err_unresolved_bucket = 16
+  integer, parameter, public :: population_ledger_err_snia = 32
 
   type, public :: stellar_population_ledger_t
      real(stellar_dp) :: initial_mass = 0.0_stellar_dp
@@ -32,6 +34,10 @@ module stellar_population_ledger
      real(stellar_dp) :: untracked_ejecta_mass = 0.0_stellar_dp
      real(stellar_dp) :: remnant_mass = 0.0_stellar_dp
      real(stellar_dp) :: living_mass = 0.0_stellar_dp
+     ! This reservoir is set explicitly by an approved binary-population
+     ! model; it is never inferred from the aggregate remnant mass.
+     real(stellar_dp) :: wd_reservoir_mass = 0.0_stellar_dp
+     real(stellar_dp) :: snia_wd_debit_mass = 0.0_stellar_dp
      ! Initial stellar mass inside the explicitly unresolved fate intervals.
      ! This is an admission diagnostic only: it is excluded from all source
      ! and closure terms and is never deposited as feedback.
@@ -48,6 +54,8 @@ module stellar_population_ledger
   public :: clear_population_ledger
   public :: finalize_population_ledger
   public :: compute_unresolved_mass_bucket
+  public :: set_white_dwarf_reservoir
+  public :: apply_snia_event_budget
 
 contains
 
@@ -60,6 +68,8 @@ contains
     ledger%untracked_ejecta_mass = 0.0_stellar_dp
     ledger%remnant_mass = 0.0_stellar_dp
     ledger%living_mass = 0.0_stellar_dp
+    ledger%wd_reservoir_mass = 0.0_stellar_dp
+    ledger%snia_wd_debit_mass = 0.0_stellar_dp
     ledger%unresolved_initial_mass = 0.0_stellar_dp
     ledger%unresolved_initial_mass_fraction = 0.0_stellar_dp
     ledger%channel_returned_mass = 0.0_stellar_dp
@@ -181,6 +191,103 @@ contains
     end if
   end subroutine finalize_population_ledger
 
+  subroutine set_white_dwarf_reservoir(ledger, reservoir_mass, tolerance, ierr)
+    type(stellar_population_ledger_t), intent(inout) :: ledger
+    real(stellar_dp), intent(in) :: reservoir_mass, tolerance
+    integer, intent(out) :: ierr
+
+    real(stellar_dp) :: scale
+
+    ierr = population_ledger_ok
+    if (.not. ieee_is_finite(reservoir_mass) .or. &
+         .not. ieee_is_finite(tolerance) .or. tolerance < 0.0_stellar_dp .or. &
+         .not. ieee_is_finite(ledger%remnant_mass) .or. &
+         ledger%remnant_mass < 0.0_stellar_dp .or. &
+         reservoir_mass < 0.0_stellar_dp) then
+       ierr = population_ledger_err_argument
+       return
+    end if
+    scale = max(1.0_stellar_dp, abs(ledger%remnant_mass), &
+         abs(reservoir_mass))
+    if (reservoir_mass > ledger%remnant_mass + max(tolerance, &
+         1.0e-12_stellar_dp) * scale) then
+       ierr = population_ledger_err_snia
+       return
+    end if
+    ledger%wd_reservoir_mass = reservoir_mass
+  end subroutine set_white_dwarf_reservoir
+
+  subroutine apply_snia_event_budget(ledger, budget, tolerance, ierr)
+    ! Apply an already validated event budget to an explicit WD reservoir.
+    ! The update is transactional: no ledger field changes on rejection.
+    type(stellar_population_ledger_t), intent(inout) :: ledger
+    type(snia_event_budget_t), intent(in) :: budget
+    real(stellar_dp), intent(in) :: tolerance
+    integer, intent(out) :: ierr
+
+    type(stellar_population_ledger_t) :: candidate
+    real(stellar_dp) :: scale, tol
+
+    ierr = population_ledger_ok
+    tol = max(tolerance, 1.0e-12_stellar_dp)
+    if (.not. ieee_is_finite(tolerance) .or. tolerance < 0.0_stellar_dp .or. &
+         .not. ledger_values_finite(ledger) .or. &
+         .not. budget_values_finite(budget) .or. &
+         budget%wd_reservoir_debit < 0.0_stellar_dp .or. &
+         budget%returned_mass < 0.0_stellar_dp .or. &
+         budget%terminal_remnant_mass < 0.0_stellar_dp .or. &
+         budget%energy < 0.0_stellar_dp) then
+       ierr = population_ledger_err_argument
+       return
+    end if
+    scale = max(1.0_stellar_dp, ledger%initial_mass, &
+         ledger%wd_reservoir_mass, budget%wd_reservoir_debit)
+    if (budget%wd_reservoir_debit > ledger%wd_reservoir_mass + tol * scale) then
+       ierr = population_ledger_err_snia
+       return
+    end if
+    if (budget%returned_mass + budget%terminal_remnant_mass > &
+         budget%wd_reservoir_debit + tol * scale) then
+       ierr = population_ledger_err_mass
+       return
+    end if
+    if (abs(ledger%initial_mass - ledger%living_mass - ledger%remnant_mass - &
+         ledger%returned_mass) > tol * max(1.0_stellar_dp, ledger%initial_mass)) then
+       ierr = population_ledger_err_mass
+       return
+    end if
+
+    candidate = ledger
+    candidate%wd_reservoir_mass = candidate%wd_reservoir_mass - &
+         budget%wd_reservoir_debit
+    candidate%snia_wd_debit_mass = candidate%snia_wd_debit_mass + &
+         budget%wd_reservoir_debit
+    candidate%returned_mass = candidate%returned_mass + budget%returned_mass
+    candidate%channel_returned_mass(channel_snia) = &
+         candidate%channel_returned_mass(channel_snia) + budget%returned_mass
+    candidate%remnant_mass = candidate%remnant_mass - &
+         budget%wd_reservoir_debit + budget%terminal_remnant_mass
+    candidate%channel_remnant_mass(channel_snia) = &
+         candidate%channel_remnant_mass(channel_snia) + &
+         budget%terminal_remnant_mass
+    candidate%living_mass = candidate%initial_mass - candidate%returned_mass - &
+         candidate%remnant_mass
+    if (.not. ledger_values_finite(candidate) .or. &
+         candidate%wd_reservoir_mass < -tol * scale .or. &
+         candidate%remnant_mass < -tol * scale .or. &
+         candidate%living_mass < -tol * scale .or. &
+         abs(candidate%initial_mass - candidate%living_mass - &
+         candidate%remnant_mass - candidate%returned_mass) > tol * scale) then
+       ierr = population_ledger_err_mass
+       return
+    end if
+    candidate%wd_reservoir_mass = max(0.0_stellar_dp, &
+         candidate%wd_reservoir_mass)
+    candidate%remnant_mass = max(0.0_stellar_dp, candidate%remnant_mass)
+    candidate%living_mass = max(0.0_stellar_dp, candidate%living_mass)
+    ledger = candidate
+  end subroutine apply_snia_event_budget
+
   subroutine compute_unresolved_mass_bucket(population, interval_min, &
        interval_max, n_intervals, mass_fraction, mass_bucket, ierr)
     ! Compute an IMF-weighted initial-mass bucket from explicit, non-overlapping
@@ -272,5 +379,28 @@ contains
        end do
     end do
   end function cumulative_is_finite
+
+  logical function ledger_values_finite(ledger)
+    type(stellar_population_ledger_t), intent(in) :: ledger
+
+    ledger_values_finite = ieee_is_finite(ledger%initial_mass) .and. &
+         ieee_is_finite(ledger%returned_mass) .and. &
+         ieee_is_finite(ledger%remnant_mass) .and. &
+         ieee_is_finite(ledger%living_mass) .and. &
+         ieee_is_finite(ledger%wd_reservoir_mass) .and. &
+         ieee_is_finite(ledger%snia_wd_debit_mass) .and. &
+         all(ieee_is_finite(ledger%channel_returned_mass)) .and. &
+         all(ieee_is_finite(ledger%channel_remnant_mass))
+  end function ledger_values_finite
+
+  logical function budget_values_finite(budget)
+    type(snia_event_budget_t), intent(in) :: budget
+
+    budget_values_finite = ieee_is_finite(budget%wd_reservoir_debit) .and. &
+         ieee_is_finite(budget%returned_mass) .and. &
+         ieee_is_finite(budget%terminal_remnant_mass) .and. &
+         ieee_is_finite(budget%energy) .and. &
+         all(ieee_is_finite(budget%momentum))
+  end function budget_values_finite
 
 end module stellar_population_ledger

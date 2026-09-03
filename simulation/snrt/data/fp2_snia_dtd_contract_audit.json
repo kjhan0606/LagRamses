@@ -25,11 +25,11 @@
   },
   "native_physical_contract": {
     "path": "simulation/snrt/native/phase0/stellar_snia_physical_contract.f90",
-    "sha256": "ccc6c5e41ccec9e6bfe4dbbc5c2bde00525749c0e7359563ad13eb5d5bca9ea8"
+    "sha256": "c53e756bcb621d9a27a335e74ae7481d756a454a0bd2f9194e613727bfd56572"
   },
   "production_physical_contract": {
     "path": "patch/lagRamses/stellar_snia_physical_contract.f90",
-    "sha256": "ccc6c5e41ccec9e6bfe4dbbc5c2bde00525749c0e7359563ad13eb5d5bca9ea8"
+    "sha256": "c53e756bcb621d9a27a335e74ae7481d756a454a0bd2f9194e613727bfd56572"
   },
   "kernel_family": "power_law",
   "kernel_alpha": -1.0,

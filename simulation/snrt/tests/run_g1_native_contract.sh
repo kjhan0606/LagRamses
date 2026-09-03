@@ -26,6 +26,7 @@ fi
 sources=(
   stellar_enrichment_config.f90
   stellar_enrichment_contract.f90
+  stellar_snia_physical_contract.f90
   stellar_native_units.f90
   stellar_progress_contract.f90
   stellar_yield_tables.f90
@@ -50,6 +51,7 @@ objects=(
   g1_contract_test.o
   stellar_enrichment_config.o
   stellar_enrichment_contract.o
+  stellar_snia_physical_contract.o
   stellar_native_units.o
   stellar_progress_contract.o
   stellar_yield_tables.o

@@ -21,6 +21,10 @@ Status: **implemented review-boundary hardening; physical promotion remains bloc
   reservoir debit, returned/remnant mass closure, event energy, and either
   signed source-frame or isotropic-zero-vector momentum.  Its native and
   production mirrors are hash-checked by the F-P2 contract audit.
+- The population ledger now accepts an explicit WD-reservoir assignment and
+  applies a validated SNIa event budget transactionally, preserving aggregate
+  initial = living + remnant + returned closure.  Radial momentum requires a
+  unit deposition direction and is converted before ledger consumption.
 - The full F-P2 contract runner passes, including native Fortran tests,
   source-format/profile/selection tests, admission negatives, and production
   mirror compilation.
@@ -28,12 +32,12 @@ Status: **implemented review-boundary hardening; physical promotion remains bloc
 ## Still blocking production
 
 - No HESMA or Keegans event model is selected for production.
-- The new contract interface is not yet wired into the population ledger;
-  WD-reservoir debit and terminal-remnant ownership therefore remain
-  unapproved for runtime.
-- The signed event-frame momentum convention is represented as an explicit
-  interface, but the scalar/radial versus vector cell-deposition policy is
-  not approved or wired into AMR deposition.
+- The ledger interface is tested but no approved binary-population source yet
+  supplies the WD reservoir or terminal-remnant policy for runtime.
+- The event-frame momentum convention is explicit and radial conversion is
+  tested, but the deposition policy is not approved or wired into AMR cells.
+- SNIa thermal coupling is not implemented; existing generic stellar energy
+  deposition and SNII delayed-cooling are separate paths.
 - DTD normalization, IMF conversion, event realization, thermal coupling, and
   metallicity dependence remain requirements, not populated physics fields;
   only the numerical evaluation kernel is now complete.
@@ -55,7 +59,7 @@ the AGY prose: `n300c` is 6.4104173893 relative discrepancy (641.04%) and
 
 ## Next bundle
 
-Wire the review-only interface into the population ledger and a separately
-tested deposition adapter, then bind the populated source/approval record to
-an immutable commit.  Add conservation and restart tests before any runtime
-activation change.
+Wire the review-only momentum result into a separately tested AMR deposition
+adapter, define SNIa thermal coupling, and bind the populated source/approval
+record to an immutable commit.  Add conservation and restart tests before
+any runtime activation change.

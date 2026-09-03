@@ -5,11 +5,13 @@ program fp2_snia_physical_contract_test
        snia_contract_err_reservoir, snia_contract_err_mass, &
        snia_contract_err_momentum, snia_wd_debit_per_event, &
        snia_momentum_source_frame_vector, snia_momentum_isotropic_zero_vector, &
-       validate_snia_physical_contract, build_snia_event_budget
+       snia_momentum_radial_magnitude, validate_snia_physical_contract, &
+       resolve_snia_event_momentum, build_snia_event_budget
   implicit none
 
   type(snia_physical_contract_t) :: contract
   type(snia_event_budget_t) :: budget
+  real(stellar_dp) :: momentum(3), bad_direction(3), unit_direction(3)
   integer :: failures, ierr
 
   failures = 0
@@ -59,6 +61,24 @@ program fp2_snia_physical_contract_test
   contract%momentum_per_event = 0.0_stellar_dp
   call validate_snia_physical_contract(contract, ierr)
   call expect(ierr == snia_contract_ok, 'isotropic zero-vector policy is explicit', failures)
+
+  contract%momentum_policy = snia_momentum_radial_magnitude
+  contract%radial_momentum_per_event = 5.0e40_stellar_dp
+  bad_direction = (/0.0_stellar_dp, 0.0_stellar_dp, 2.0_stellar_dp/)
+  unit_direction = (/0.0_stellar_dp, 0.0_stellar_dp, 1.0_stellar_dp/)
+  call resolve_snia_event_momentum(contract, bad_direction, momentum, ierr)
+  call expect(ierr == snia_contract_err_momentum .and. all(momentum == 0.0_stellar_dp), &
+       'radial policy rejects a non-unit deposition direction', failures)
+  call build_snia_event_budget(contract, 1.0_stellar_dp, 2.0_stellar_dp, &
+       budget, ierr)
+  call expect(ierr == snia_contract_err_momentum .and. all(budget%momentum == 0.0_stellar_dp), &
+       'radial budget rejects a missing deposition direction', failures)
+  call build_snia_event_budget(contract, 2.0_stellar_dp, 3.0_stellar_dp, &
+       budget, ierr, unit_direction)
+  call expect(ierr == snia_contract_ok, 'radial budget accepts an explicit unit direction', failures)
+  call expect(all(abs(budget%momentum - (/0.0_stellar_dp, 0.0_stellar_dp, &
+       1.0e41_stellar_dp/)) < 1.0e29_stellar_dp), &
+       'radial momentum maps into the declared cell direction', failures)
 
   if (failures > 0) then
      write(*, '(a,i0)') 'FP2_SNIa_PHYSICAL_CONTRACT_TEST_FAILED failures=', failures

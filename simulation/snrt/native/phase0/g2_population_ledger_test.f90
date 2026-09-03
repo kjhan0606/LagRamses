@@ -9,6 +9,7 @@ program g2_population_ledger_test
        generic_metal_ejecta_mass
   use stellar_population_ledger, only: stellar_population_ledger_t, &
        finalize_population_ledger, &
+       set_white_dwarf_reservoir, apply_snia_event_budget, &
        compute_unresolved_mass_bucket, &
        population_ledger_ok, population_ledger_err_mass, &
        population_ledger_err_owner, population_ledger_err_nonfinite, &
@@ -19,6 +20,9 @@ program g2_population_ledger_test
        enrichment_driver_err_ledger
   use stellar_ssp_sources, only: integrate_ssp_channel, calculate_imf_normalization, &
        evaluate_imf, ssp_source_err_basis
+  use stellar_snia_physical_contract, only: snia_physical_contract_t, &
+       snia_event_budget_t, snia_contract_ok, snia_wd_debit_per_event, &
+       snia_momentum_source_frame_vector, build_snia_event_budget
   implicit none
 
   type(stellar_population_t) :: population
@@ -37,6 +41,8 @@ program g2_population_ledger_test
   real(stellar_dp) :: overlapping_min(2), overlapping_max(2)
   integer :: ierr, failures, channel, imf, row
   type(stellar_source_t) :: source
+  type(snia_physical_contract_t) :: snia_contract
+  type(snia_event_budget_t) :: snia_budget
 
   failures = 0
   call set_enrichment_defaults()
@@ -88,6 +94,35 @@ program g2_population_ledger_test
        'population mass closure residual is zero', failures)
   call expect_close(ledger%untracked_ejecta_mass, 0.0_stellar_dp, &
        'fully tracked synthetic states have zero untracked residual', failures)
+  call set_white_dwarf_reservoir(ledger, 2.0_stellar_dp, 1.0e-12_stellar_dp, ierr)
+  call expect(ierr == population_ledger_ok, &
+       'explicit WD reservoir is admitted as a remnant subset', failures)
+  snia_contract%approved = .true.
+  snia_contract%wd_debit_policy = snia_wd_debit_per_event
+  snia_contract%momentum_policy = snia_momentum_source_frame_vector
+  snia_contract%returned_mass_per_event = 1.3_stellar_dp
+  snia_contract%terminal_remnant_per_event = 0.0_stellar_dp
+  snia_contract%wd_debit_per_event = 1.4_stellar_dp
+  snia_contract%energy_per_event = 1.0e51_stellar_dp
+  snia_contract%momentum_per_event = 0.0_stellar_dp
+  call build_snia_event_budget(snia_contract, 1.0_stellar_dp, &
+       ledger%wd_reservoir_mass, snia_budget, ierr)
+  call expect(ierr == snia_contract_ok, 'SNIa budget is built from explicit WD reservoir', failures)
+  call apply_snia_event_budget(ledger, snia_budget, 1.0e-12_stellar_dp, ierr)
+  call expect(ierr == population_ledger_ok, 'SNIa budget updates population ledger transactionally', failures)
+  call expect_close(ledger%wd_reservoir_mass, 0.6_stellar_dp, &
+       'WD reservoir is debited exactly once', failures)
+  call expect_close(ledger%snia_wd_debit_mass, 1.4_stellar_dp, &
+       'SNIa WD debit is retained in the ledger', failures)
+  call expect_close(ledger%returned_mass, 41.3_stellar_dp, &
+       'SNIa returned mass enters aggregate return', failures)
+  call expect_close(ledger%remnant_mass, 4.6_stellar_dp, &
+       'consumed WD remnant leaves aggregate remnant mass', failures)
+  call expect_close(ledger%living_mass, 54.1_stellar_dp, &
+       'living mass is recomputed after SNIa debit', failures)
+  call expect_close(ledger%initial_mass - ledger%living_mass - ledger%remnant_mass - &
+       ledger%returned_mass, 0.0_stellar_dp, &
+       'SNIa ledger update preserves population mass closure', failures)
   call expect(ledger%unresolved_initial_mass_fraction > 0.1178_stellar_dp .and. &
        ledger%unresolved_initial_mass_fraction < 0.1180_stellar_dp, &
        'unresolved fate bucket is computed from the configured IMF', failures)

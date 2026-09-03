@@ -123,10 +123,17 @@ The DTD kernel now evaluates the power-law primitive in a cancellation-safe
 form near `alpha = -1`, with a logarithmic-series reference test at
 `alpha = -0.99999999`; the native and production-mirror tests pass.
 
+The review-only SNIa physical contract now has a guarded population-ledger
+path: an explicitly supplied WD reservoir is debited transactionally, mass
+closure is recomputed, and source-frame, isotropic-zero, or radial momentum
+conventions are validated.  A radial budget requires an explicit unit cell
+direction.  This remains a contract test path; no SNIa event is sent to AMR
+cells and no SNIa thermal coupling is active.
+
 The next implementation bundle is the physical SNIa source contract: an
-explicit WD-reservoir debit/closure policy, signed event-frame momentum and
-its cell-deposition convention, and a versioned source/approval commit
-binding.  Until those fields are populated
+approved source/population realization, AMR deposition adapter, thermal
+coupling policy, and versioned source/approval commit binding.  Until those
+fields are populated
 and independently reviewed, F-P2 remains blocked.
 
 - Select and cite the DTD family, minimum/maximum delay, normalization per unit

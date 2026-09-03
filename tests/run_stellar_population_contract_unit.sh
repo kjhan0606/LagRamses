@@ -10,6 +10,7 @@ compiler=${F90:-ifx}
 sources=(
   stellar_enrichment_config.f90
   stellar_enrichment_contract.f90
+  stellar_snia_physical_contract.f90
   stellar_yield_tables.f90
   stellar_yield_interpolation.f90
   stellar_yield_provider.f90
