@@ -127,13 +127,20 @@ The review-only SNIa physical contract now has a guarded population-ledger
 path: an explicitly supplied WD reservoir is debited transactionally, mass
 closure is recomputed, and source-frame, isotropic-zero, or radial momentum
 conventions are validated.  A radial budget requires an explicit unit cell
-direction.  This remains a contract test path; no SNIa event is sent to AMR
-cells and no SNIa thermal coupling is active.
+direction.  The new
+`stellar_snia_cell_deposition` adapter converts a validated event budget into
+one-cell mass, momentum, event-energy, bulk-kinetic-energy, and total-energy
+density increments.  Its only admitted thermal policy is explicitly approved
+all-to-total-energy; fractional thermalization is rejected until a declared
+non-thermal receiver exists.  The adapter is native/production hash-matched
+and unit-tested, but it does not select neighbours, perform MPI exchange, or
+write RAMSES arrays.  No SNIa event is sent to AMR cells and no SNIa thermal
+coupling is active at runtime.
 
-The next implementation bundle is the physical SNIa source contract: an
-approved source/population realization, AMR deposition adapter, thermal
-coupling policy, and versioned source/approval commit binding.  Until those
-fields are populated
+The next implementation bundle is the runtime-facing physical SNIa source
+contract: an approved source/population realization, an AMR/MPI deposition
+bridge around the tested cell adapter, and versioned source/approval commit
+binding.  Until those fields are populated
 and independently reviewed, F-P2 remains blocked.
 
 - Select and cite the DTD family, minimum/maximum delay, normalization per unit

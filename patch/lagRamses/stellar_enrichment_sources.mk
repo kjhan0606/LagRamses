@@ -11,6 +11,7 @@ PHASE0_STELLAR_ENRICHMENT_SOURCES = \
   patch/lagRamses/stellar_enrichment_contract.f90 \
   patch/lagRamses/stellar_snia_event_ledger.f90 \
   patch/lagRamses/stellar_native_units.f90 \
+  patch/lagRamses/stellar_snia_cell_deposition.f90 \
   patch/lagRamses/stellar_progress_contract.f90 \
   patch/lagRamses/stellar_yield_tables.f90 \
   patch/lagRamses/stellar_yield_interpolation.f90 \

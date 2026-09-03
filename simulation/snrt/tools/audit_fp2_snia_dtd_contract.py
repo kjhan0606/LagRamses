@@ -22,6 +22,8 @@ DEFAULT_NATIVE_EVENT = SNRT_ROOT / "native" / "phase0" / "stellar_snia_event_led
 DEFAULT_PRODUCTION_EVENT = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_snia_event_ledger.f90"
 DEFAULT_NATIVE_PHYSICAL = SNRT_ROOT / "native" / "phase0" / "stellar_snia_physical_contract.f90"
 DEFAULT_PRODUCTION_PHYSICAL = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_snia_physical_contract.f90"
+DEFAULT_NATIVE_DEPOSITION = SNRT_ROOT / "native" / "phase0" / "stellar_snia_cell_deposition.f90"
+DEFAULT_PRODUCTION_DEPOSITION = SNRT_ROOT.parents[1] / "patch" / "lagRamses" / "stellar_snia_cell_deposition.f90"
 DEFAULT_EVENT_YIELD_CONVERTER = SNRT_ROOT / "tools" / "convert_snia_event_yields.py"
 DEFAULT_EVENT_YIELD_ASSET_MANIFEST = SNRT_ROOT.parents[1] / "manifests" / "fp2_snia_keegans2023_review_v1.json"
 PROJECT_ROOT = SNRT_ROOT.parents[1]
@@ -290,6 +292,8 @@ def audit_contract(
     event_source_sidecar_path: Path = DEFAULT_EVENT_SOURCE_SIDECAR,
     native_physical_path: Path = DEFAULT_NATIVE_PHYSICAL,
     production_physical_path: Path = DEFAULT_PRODUCTION_PHYSICAL,
+    native_deposition_path: Path = DEFAULT_NATIVE_DEPOSITION,
+    production_deposition_path: Path = DEFAULT_PRODUCTION_DEPOSITION,
 ) -> dict[str, Any]:
     config_path = Path(config_path).resolve()
     native_path = Path(native_path).resolve()
@@ -298,6 +302,8 @@ def audit_contract(
     production_event_path = Path(production_event_path).resolve()
     native_physical_path = Path(native_physical_path).resolve()
     production_physical_path = Path(production_physical_path).resolve()
+    native_deposition_path = Path(native_deposition_path).resolve()
+    production_deposition_path = Path(production_deposition_path).resolve()
     event_yield_converter_path = Path(event_yield_converter_path).resolve()
     event_yield_asset_manifest_path = Path(event_yield_asset_manifest_path).resolve()
     event_yield_asset_audit_path = Path(event_yield_asset_audit_path).resolve()
@@ -679,6 +685,16 @@ def audit_contract(
             failures.append(f"{label}_missing")
     if native_physical_hash is not None and production_physical_hash is not None and native_physical_hash != production_physical_hash:
         failures.append("native_and_production_physical_contract_mismatch")
+    native_deposition_hash = _sha256(native_deposition_path)
+    production_deposition_hash = _sha256(production_deposition_path)
+    for label, value in (
+        ("native_snia_cell_deposition", native_deposition_hash),
+        ("production_snia_cell_deposition", production_deposition_hash),
+    ):
+        if value is None:
+            failures.append(f"{label}_missing")
+    if native_deposition_hash is not None and production_deposition_hash is not None and native_deposition_hash != production_deposition_hash:
+        failures.append("native_and_production_snia_cell_deposition_mismatch")
 
     return {
         "schema": "snrt-fp2-snia-dtd-contract-audit",
@@ -695,6 +711,8 @@ def audit_contract(
         "production_event_ledger": {"path": project_relative(production_event_path), "sha256": production_event_hash},
         "native_physical_contract": {"path": project_relative(native_physical_path), "sha256": native_physical_hash},
         "production_physical_contract": {"path": project_relative(production_physical_path), "sha256": production_physical_hash},
+        "native_snia_cell_deposition": {"path": project_relative(native_deposition_path), "sha256": native_deposition_hash},
+        "production_snia_cell_deposition": {"path": project_relative(production_deposition_path), "sha256": production_deposition_hash},
         "kernel_family": contract.get("kernel", {}).get("family"),
         "kernel_alpha": contract.get("kernel", {}).get("alpha"),
         "selected_delay_parameters": {
@@ -812,7 +830,7 @@ def audit_contract(
             ),
         },
         "failures": failures,
-        "interpretation": "The interval kernel is implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
+        "interpretation": "The interval kernel, physical event contract, and cell-increment adapter are implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
         "audit_code_sha256": _sha256(TOOL_PATH),
     }
 
@@ -826,6 +844,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--production-event-ledger", type=Path, default=DEFAULT_PRODUCTION_EVENT)
     parser.add_argument("--native-physical-contract", type=Path, default=DEFAULT_NATIVE_PHYSICAL)
     parser.add_argument("--production-physical-contract", type=Path, default=DEFAULT_PRODUCTION_PHYSICAL)
+    parser.add_argument("--native-deposition", type=Path, default=DEFAULT_NATIVE_DEPOSITION)
+    parser.add_argument("--production-deposition", type=Path, default=DEFAULT_PRODUCTION_DEPOSITION)
     parser.add_argument("--event-yield-converter", type=Path, default=DEFAULT_EVENT_YIELD_CONVERTER)
     parser.add_argument("--event-yield-asset-manifest", type=Path, default=DEFAULT_EVENT_YIELD_ASSET_MANIFEST)
     parser.add_argument("--event-yield-asset-audit", type=Path, default=DEFAULT_EVENT_YIELD_ASSET_AUDIT)
@@ -862,6 +882,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         args.event_source_sidecar,
         args.native_physical_contract,
         args.production_physical_contract,
+        args.native_deposition,
+        args.production_deposition,
     )
     text = json.dumps(report, indent=2) + "\n"
     if args.json_out is not None:

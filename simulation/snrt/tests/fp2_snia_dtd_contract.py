@@ -107,6 +107,8 @@ def main() -> int:
     assert audit_report["event_source_approval_sidecar"]["promotion_requirements_status"] == "requirements_only_not_approval"
     assert audit_report["native_physical_contract"]["sha256"]
     assert audit_report["production_physical_contract"]["sha256"] == audit_report["native_physical_contract"]["sha256"]
+    assert audit_report["native_snia_cell_deposition"]["sha256"]
+    assert audit_report["production_snia_cell_deposition"]["sha256"] == audit_report["native_snia_cell_deposition"]["sha256"]
     asset_report = audit_asset()
     assert asset_report["status"] == "review_only_asset_integrity_passed", asset_report
     assert asset_report["file_count"] == 3

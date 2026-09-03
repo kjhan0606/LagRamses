@@ -25,6 +25,12 @@ Status: **implemented review-boundary hardening; physical promotion remains bloc
   applies a validated SNIa event budget transactionally, preserving aggregate
   initial = living + remnant + returned closure.  Radial momentum requires a
   unit deposition direction and is converted before ledger consumption.
+- The cell-local SNIa deposition adapter now converts the validated physical
+  budget into mass, bulk-plus-event momentum, event energy, bulk kinetic
+  energy, and total-energy density increments using the same cgs convention as
+  the existing generic runtime path.  It admits only an explicit
+  all-to-total-energy thermal policy; unsupported fractional policies fail
+  closed.  Native/production hashes and `-check all` unit tests pass.
 - The full F-P2 contract runner passes, including native Fortran tests,
   source-format/profile/selection tests, admission negatives, and production
   mirror compilation.
@@ -35,9 +41,12 @@ Status: **implemented review-boundary hardening; physical promotion remains bloc
 - The ledger interface is tested but no approved binary-population source yet
   supplies the WD reservoir or terminal-remnant policy for runtime.
 - The event-frame momentum convention is explicit and radial conversion is
-  tested, but the deposition policy is not approved or wired into AMR cells.
-- SNIa thermal coupling is not implemented; existing generic stellar energy
-  deposition and SNII delayed-cooling are separate paths.
+  tested.  The cell-local conversion adapter is implemented, but its output is
+  not yet wired into the AMR/MPI neighbour-selection and RAMSES array update.
+- SNIa thermal coupling is represented by a guarded all-to-total-energy cell
+  increment policy, but it is not approved or called by the runtime; existing
+  generic stellar energy deposition and SNII delayed-cooling are separate
+  paths.
 - DTD normalization, IMF conversion, event realization, thermal coupling, and
   metallicity dependence remain requirements, not populated physics fields;
   only the numerical evaluation kernel is now complete.
@@ -59,7 +68,8 @@ the AGY prose: `n300c` is 6.4104173893 relative discrepancy (641.04%) and
 
 ## Next bundle
 
-Wire the review-only momentum result into a separately tested AMR deposition
-adapter, define SNIa thermal coupling, and bind the populated source/approval
-record to an immutable commit.  Add conservation and restart tests before
-any runtime activation change.
+Select and bind the physical source/population realization, then wrap the
+tested cell adapter with the actual AMR/MPI target-cell and RAMSES conserved
+array bridge.  Add multi-cell weighted conservation, restart/idempotence, and
+runtime-disabled negative tests before any activation change.  A source
+commit binding and named approval id remain mandatory.

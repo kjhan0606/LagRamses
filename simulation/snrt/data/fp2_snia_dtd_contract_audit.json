@@ -31,6 +31,14 @@
     "path": "patch/lagRamses/stellar_snia_physical_contract.f90",
     "sha256": "c53e756bcb621d9a27a335e74ae7481d756a454a0bd2f9194e613727bfd56572"
   },
+  "native_snia_cell_deposition": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_cell_deposition.f90",
+    "sha256": "ebb2f025a9b170bcfbaf74171ed3058878739a4d4342503c54e6d2561b4b85d6"
+  },
+  "production_snia_cell_deposition": {
+    "path": "patch/lagRamses/stellar_snia_cell_deposition.f90",
+    "sha256": "ebb2f025a9b170bcfbaf74171ed3058878739a4d4342503c54e6d2561b4b85d6"
+  },
   "kernel_family": "power_law",
   "kernel_alpha": -1.0,
   "selected_delay_parameters": {
@@ -160,6 +168,6 @@
     "inferred_zero_policy": "never infer absent project elements as zero during conversion"
   },
   "failures": [],
-  "interpretation": "The interval kernel is implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
-  "audit_code_sha256": "b257d4658ce0d799eb18b9a72845c35ed1e7a2ec93f21c9df7986ed6763b3441"
+  "interpretation": "The interval kernel, physical event contract, and cell-increment adapter are implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
+  "audit_code_sha256": "1a689b2527cc09e8becd47ab185b2da5046adbfec9b8175afb2c88b47c5cda5b"
 }

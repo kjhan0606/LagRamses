@@ -16,8 +16,10 @@ FC=mpiifx
 mkdir -p "$BUILD_DIR"
 for source in stellar_enrichment_config.f90 stellar_enrichment_contract.f90 \
     stellar_snia_dtd.f90 stellar_snia_physical_contract.f90 \
-    stellar_snia_event_ledger.f90 fp2_snia_dtd_test.f90 \
-    fp2_snia_physical_contract_test.f90 fp2_snia_event_ledger_test.f90; do
+    stellar_snia_event_ledger.f90 stellar_native_units.f90 \
+    stellar_snia_cell_deposition.f90 fp2_snia_dtd_test.f90 \
+    fp2_snia_physical_contract_test.f90 fp2_snia_cell_deposition_test.f90 \
+    fp2_snia_event_ledger_test.f90; do
   "$FC" -O2 -g -traceback -warn all -check all -fpp \
     -module "$BUILD_DIR" -c "$SOURCE_DIR/$source" \
     -o "$BUILD_DIR/${source%.f90}.o"
@@ -36,6 +38,14 @@ done
   -o "$BUILD_DIR/fp2_snia_physical_contract_test"
 
 "$FC" -O2 -g -traceback -check all \
+  "$BUILD_DIR/fp2_snia_cell_deposition_test.o" \
+  "$BUILD_DIR/stellar_snia_cell_deposition.o" \
+  "$BUILD_DIR/stellar_snia_physical_contract.o" \
+  "$BUILD_DIR/stellar_native_units.o" \
+  "$BUILD_DIR/stellar_enrichment_config.o" \
+  -o "$BUILD_DIR/fp2_snia_cell_deposition_test"
+
+"$FC" -O2 -g -traceback -check all \
   "$BUILD_DIR/fp2_snia_event_ledger_test.o" \
   "$BUILD_DIR/stellar_snia_event_ledger.o" \
   "$BUILD_DIR/stellar_enrichment_contract.o" \
@@ -44,6 +54,7 @@ done
 
 (cd "$BUILD_DIR" && ./fp2_snia_dtd_test)
 (cd "$BUILD_DIR" && ./fp2_snia_physical_contract_test)
+(cd "$BUILD_DIR" && ./fp2_snia_cell_deposition_test)
 (cd "$BUILD_DIR" && ./fp2_snia_event_ledger_test)
 
 "$ROOT/simulation/snrt/.venv/bin/python" \
@@ -113,7 +124,8 @@ done
 mkdir -p "$PRODUCTION_BUILD_DIR"
 for source in stellar_enrichment_config.f90 stellar_enrichment_contract.f90 \
     stellar_snia_dtd.f90 stellar_snia_physical_contract.f90 \
-    stellar_snia_event_ledger.f90; do
+    stellar_snia_event_ledger.f90 stellar_native_units.f90 \
+    stellar_snia_cell_deposition.f90; do
   "$FC" -O2 -g -traceback -warn all -check all -fpp \
     -module "$PRODUCTION_BUILD_DIR" -I "$PRODUCTION_BUILD_DIR" \
     -c "$PRODUCTION_SOURCE_DIR/$source" \
