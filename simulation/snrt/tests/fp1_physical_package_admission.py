@@ -62,11 +62,31 @@ def main() -> int:
     assert report["high_mass_evidence"]["failed_nodes_with_source_remnant_count"] == 0
     assert report["high_mass_evidence"]["radioactive_reference_epoch_warning_count"] == 12
     assert report["high_mass_evidence"]["source_erratum_or_explanation_required"] is True
-    assert all(
-        not candidate["production_qualified"]
-        and len(candidate["missing_gate_ids"]) == 9
-        for candidate in report["candidate_qualification"].values()
+    boccioli = report["candidate_qualification"]["boccioli_roberti2026_lc18"]
+    assert boccioli["passed_gate_ids"] == ["source_identity_and_rights"]
+    assert len(boccioli["missing_gate_ids"]) == 8
+    assert boccioli["production_qualified"] is False
+    assert (
+        boccioli["verified_gate_evidence"]["source_identity_and_rights"]["status"]
+        == "pass"
     )
+    assert (
+        boccioli["verified_gate_evidence"]["source_identity_and_rights"]
+        ["package_fingerprint_sha256"]
+        == "3370571245be954b1330d0b91bae585ffed47b3a1c2d10ffa11fc4ef7b57065b"
+    )
+    assert all(
+        not candidate["production_qualified"] and len(candidate["missing_gate_ids"]) == 9
+        for candidate_id, candidate in report["candidate_qualification"].items()
+        if candidate_id != "boccioli_roberti2026_lc18"
+    )
+    assert report["gate_validation"]["mode"] == "registered_executable_validators_fail_closed"
+    assert report["gate_validation"]["approved_validator_ids"] == [
+        "fp1.source_identity_and_rights.v1"
+    ]
+    assert set(report["gate_validation"]["registry"]["validators"]) == {
+        "fp1.source_identity_and_rights.v1"
+    }
 
     bad_hash = copy.deepcopy(contract)
     bad_hash["evidence_artifacts"]["high_mass_review"]["sha256"] = "0" * 64
@@ -131,7 +151,17 @@ def main() -> int:
             "validator_sha256": hashlib.sha256(validator.read_bytes()).hexdigest(),
             "approval_id": "TEST-GATE-APPROVAL",
         }
-        _expect_error(one_verified_gate, "gate-specific executable validators")
+        _expect_error(one_verified_gate, "executable gate evidence is malformed")
+
+    unregistered_validator = copy.deepcopy(contract)
+    unregistered_validator["candidate_qualification"]["boccioli_roberti2026_lc18"][
+        "gate_evidence"
+    ]["source_identity_and_rights"]["validator_id"] = "fp1.unregistered.v1"
+    _expect_error(unregistered_validator, "not contract-approved")
+
+    disabled_registry = copy.deepcopy(contract)
+    disabled_registry["gate_validation"]["approved_validator_ids"] = []
+    _expect_error(disabled_registry, "validator registry is inconsistent")
 
     unsafe_validator_artifact = copy.deepcopy(contract)
     unsafe_validator_artifact["selection_policy"][

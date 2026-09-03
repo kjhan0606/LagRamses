@@ -1,5 +1,5 @@
 {
-  "audit_code_sha256": "3d8d2d7b037776362103ad427c75ee18dfbd35464e7e1d69735c834b90185e94",
+  "audit_code_sha256": "e73cef5a57184b8b7d6aeb6531e45a425f4f01c20fd01e92788b47fd02401beb",
   "candidate_qualification": {
     "boccioli_roberti2026_lc18": {
       "hard_blockers": [
@@ -16,13 +16,96 @@
         "lifetime_and_wind_history",
         "pair_instability",
         "runtime_invariance_and_reproduction",
-        "source_identity_and_rights",
         "terminal_mass_and_species_closure"
       ],
-      "passed_gate_ids": [],
+      "passed_gate_ids": [
+        "source_identity_and_rights"
+      ],
       "production_qualified": false,
       "role": "multi_metallicity_rotation_candidate_review",
-      "verified_gate_evidence": {}
+      "verified_gate_evidence": {
+        "source_identity_and_rights": {
+          "artifacts": {
+            "acquisition_manifest": {
+              "path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+              "sha256": "ebbbfa42357e6a729d19d839f0e1c826ef33cb4705d895b82c5e96e88493f764"
+            },
+            "attribution_citation": "Boccioli & Roberti 2026, A&A 709, A201; article DOI 10.1051/0004-6361/202557714; data DOI 10.5281/zenodo.19503168",
+            "data_doi": "10.5281/zenodo.19503168",
+            "license_id": "cc-by-4.0",
+            "license_reference_url": "https://creativecommons.org/licenses/by/4.0/",
+            "lock_profile_sha256": "63059cebd15468eb819d4f4669c2241a58ba77b995176a6034f3f966e7a994d1",
+            "retrieved_date": "2026-09-01",
+            "source_contract": {
+              "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_boccioli_roberti2026_candidate_contract_v1.json",
+              "sha256": "5e5e079af58f250be465427f3e070b9014e9e6af99ebbc5e623d6236fea55443"
+            },
+            "source_files": [
+              {
+                "bytes": 3987,
+                "identity_passed": true,
+                "md5": "4a42dda7587574978b7730cc45d02c8e",
+                "path": "boccioli_roberti2026_ccsn/README",
+                "sha256": "66dae04f90bf7b96460199a7ebbedf0126c1e70ab840e1693a8a326cd7ae2316"
+              },
+              {
+                "bytes": 816270,
+                "identity_passed": true,
+                "md5": "c1d21fcbdf7ed200344881f8a47a211b",
+                "path": "boccioli_roberti2026_ccsn/LC18.zip",
+                "sha256": "249aea46713ab41cad7e8d7406835c205e4f02d36958e113a8f2231f81ebef5e"
+              },
+              {
+                "bytes": 377318,
+                "identity_passed": true,
+                "md5": "9f6f436fbb1ffdd5ccc535f2a0976a79",
+                "path": "boccioli_roberti2026_ccsn/WH07.zip",
+                "sha256": "1576e96d9366dd7b36a75abbbc6e9ced55c1157891417062a5cbbf439dbed84c"
+              },
+              {
+                "bytes": 444104,
+                "identity_passed": true,
+                "md5": "43f568e8ba7a94248a7627b24f04a7c4",
+                "path": "boccioli_roberti2026_ccsn/F23.zip",
+                "sha256": "41b72c45e7743d9855637ae56cf1ef264c000b4639ed4805b177ab7fe5079a10"
+              },
+              {
+                "bytes": 4618,
+                "identity_passed": true,
+                "md5": null,
+                "path": "boccioli_roberti2026_ccsn/zenodo_record_19503168.json",
+                "sha256": "bc04d8a528e5a852524be3e0cd2d973a12b39090ad0bf2aaf71305016d17eb67"
+              }
+            ],
+            "source_use_terms_report": {
+              "authoritative_for_verdict": false,
+              "citation_matches_lock": true,
+              "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_use_terms_evidence_v1.json",
+              "reported_license_status": "verified",
+              "reported_redistribution_status": "allowed_with_attribution_under_cc_by_4.0",
+              "sha256": "9b8e8b4cf383cf93feecbf96cfa42ed4eb5212c8b424a7217ed7507bbc16db4a"
+            },
+            "version_record_id": 19503168
+          },
+          "blockers": [],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "source_identity_and_rights",
+          "package_fingerprint_sha256": "3370571245be954b1330d0b91bae585ffed47b3a1c2d10ffa11fc4ef7b57065b",
+          "passed": true,
+          "requirements": {
+            "citation_and_data_version": true,
+            "hash_locked_local_source_mirror": true,
+            "machine_readable_license": true,
+            "per_file_and_composite_sha256": true,
+            "redistribution_permission": true
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "pass",
+          "validator_code_sha256": "54edbe813f085a532c2749ca514e8fcba6e886a753681b1ae361621727036e53",
+          "validator_id": "fp1.source_identity_and_rights.v1"
+        }
+      }
     },
     "heger_woosley2010_popiii": {
       "hard_blockers": [
@@ -97,7 +180,7 @@
   },
   "canonical_conversion_allowed": false,
   "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
-  "contract_sha256": "df89bdff55e9cb9e7e21982a21826c354cd17d53a1ea07b95d60733d796f4106",
+  "contract_sha256": "3cdd8a1f64631b008e278206865003377ac908b229688462feb9ca88a0558e34",
   "evidence_artifacts": {
     "candidate_grid_audit": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_candidate_grid_coverage_audit.json",
@@ -122,9 +205,29 @@
   },
   "gate": "F-P1H-E",
   "gate_validation": {
-    "approved_validator_ids": [],
+    "approved_validator_ids": [
+      "fp1.source_identity_and_rights.v1"
+    ],
     "hash_only_validator_artifact_may_pass": false,
-    "mode": "disabled_until_gate_specific_executable_validators_are_code_registered"
+    "mode": "registered_executable_validators_fail_closed",
+    "registry": {
+      "registry_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_registry.py",
+      "registry_sha256": "3adc764b551dcaf5cdb9374f9dbd4fccb098c7898a1ee8e34bd2ecdbe1b6aa77",
+      "validators": {
+        "fp1.source_identity_and_rights.v1": {
+          "gate_id": "source_identity_and_rights",
+          "requirements": [
+            "citation_and_data_version",
+            "hash_locked_local_source_mirror",
+            "machine_readable_license",
+            "per_file_and_composite_sha256",
+            "redistribution_permission"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/validate_fp1_source_identity_rights.py",
+          "tool_sha256": "54edbe813f085a532c2749ca514e8fcba6e886a753681b1ae361621727036e53"
+        }
+      }
+    }
   },
   "high_mass_evidence": {
     "failed_nodes_with_source_remnant_count": 0,

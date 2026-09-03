@@ -123,8 +123,16 @@ F-P3 감사가 승인되며, 현재 `review_only_unresolved` 정책이 승인된
    admission contract를 구현하고 최상위 sidecar에 checksum-bound artifact로
    연결했다. 현재 후보 4개 모두 미승인, physical node 0개, production/
    publication/runtime deposition은 차단 상태다. 해시된 임의 validator 파일의
-   자기승인을 막기 위해 gate 통과 기능도 gate별 executable validator가 코드로
-   등록될 때까지 닫혀 있다. 실제 교정 자료와 validator 구현이 남았다.**
+   자기승인을 막는 code registry와 Boccioli--Roberti 2026 source identity/rights
+   validator의 초안을 구현했다. 그러나 AGY와 독립 Codex `gpt-5.6-sol` 감사에서
+   candidate substitution, self-consistent package rewrite, mutable rights evidence,
+   sidecar path/publication invariant 결함이 확인되었으므로 첫 gate PASS는 승인하지
+   않았다. 2026-09-04 remediation 묶음에서 trust root를 code-owned lock profile로
+   고정하고 식별된 우회와 adversarial cases를 차단했으며 LC18 failed-wind cross-check도
+   기록했다. 집중/F-P1/G2 증거는 통과했지만 묶음 종료 AGY/Claude Opus 5 감사가 남아
+   있다.
+   나머지 8개 executable validator, 실제 교정 자료, physical node, runtime
+   consumer가 남았으며 production 승인은 계속 닫혀 있다.**
 6. **F-P1H-F — promotion and bundled audit:** 물리 node를 채운 뒤에만
    converter, map, source package, sidecar, compiled identity를 다시 hash하고
    unresolved bucket이 정확히 0인지 검증한다. 전체 F-P1/F-P3 묶음 테스트와
@@ -272,5 +280,9 @@ selection or a runtime activation.
   model's own ledgers close.
 
 No gate above can be closed by a synthetic fixture, a parser-only test, or a
-silent default.  Each gate ends with a distinct Claude Opus 5 physics and code
-audit before work advances.
+silent default.  Audits are no longer run after every individual step.  Each
+implementation bundle ends with independent AGY (`gemini-3.8-flash-high`) and
+Claude Opus 5 audits.  Their findings are reproduced and triaged before the
+driver writes the next bundle plan; Fable then evaluates that plan for final-
+purpose alignment, scientific/technical justification, and feasibility before
+the next bundle starts.

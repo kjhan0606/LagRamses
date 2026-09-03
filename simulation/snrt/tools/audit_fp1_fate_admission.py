@@ -38,6 +38,15 @@ FORTRAN_CONFIGS = (
     PROJECT_ROOT / "patch" / "lagRamses" / "stellar_enrichment_config.f90",
     SNRT_ROOT / "native" / "phase0" / "stellar_enrichment_config.f90",
 )
+EXPECTED_ARTIFACT_PATHS = {
+    "fate_map": "config/fp1_population_fate_map_v1.json",
+    "resolver_contract": "config/fp1_fate_resolver_contract_v1.json",
+    "source_contract": "config/stellar_feedback_contract_v1.json",
+    "source_node_contract": "config/fp1_source_node_contract_v1.json",
+    "terminal_deposition_contract": "config/fp1_terminal_deposition_contract_v1.json",
+    "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+    "physics_contract": "config/g2_physics_contract_v1.json",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -64,16 +73,24 @@ def _sha256(path: Path) -> str:
 def _artifact_path(value: Any, sidecar_path: Path, field: str) -> Path:
     if not isinstance(value, str) or not value:
         raise FateMapError(f"{field}.path must be a non-empty string")
-    path = Path(value)
-    if not path.is_absolute():
-        path = SNRT_ROOT / path
-    return path.resolve()
+    relative = Path(value)
+    if relative.is_absolute():
+        raise FateMapError(f"{field}.path must be SNRT-relative")
+    path = (SNRT_ROOT / relative).resolve()
+    try:
+        path.relative_to(SNRT_ROOT.resolve())
+    except ValueError as exc:
+        raise FateMapError(f"{field}.path escapes the SNRT root") from exc
+    return path
 
 
 def _artifact_hash(artifact: Any, sidecar_path: Path, name: str) -> tuple[Path, str]:
     if not isinstance(artifact, dict):
         raise FateMapError(f"artifact {name} is malformed")
-    path = _artifact_path(artifact.get("path"), sidecar_path, f"artifact {name}")
+    relative = artifact.get("path")
+    if relative != EXPECTED_ARTIFACT_PATHS[name]:
+        raise FateMapError(f"artifact {name}.path is not pinned")
+    path = _artifact_path(relative, sidecar_path, f"artifact {name}")
     declared = artifact.get("sha256")
     if not isinstance(declared, str) or len(declared) != 64:
         raise FateMapError(f"artifact {name}.sha256 must be a 64-character digest")
@@ -198,15 +215,9 @@ def audit_fate_admission(*, sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, A
     artifacts = sidecar.get("artifacts")
     if not isinstance(artifacts, dict):
         raise FateMapError("F-P1 sidecar artifacts are missing")
-    required_artifacts = (
-        "fate_map",
-        "resolver_contract",
-        "source_contract",
-        "source_node_contract",
-        "terminal_deposition_contract",
-        "physical_package_contract",
-        "physics_contract",
-    )
+    required_artifacts = tuple(EXPECTED_ARTIFACT_PATHS)
+    if set(artifacts) != set(required_artifacts):
+        raise FateMapError("F-P1 sidecar artifact set is not exact")
     checked: dict[str, dict[str, str]] = {}
     paths: dict[str, Path] = {}
     for name in required_artifacts:
@@ -286,6 +297,11 @@ def audit_fate_admission(*, sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, A
         raise FateMapError("resolver runtime deposition must remain disabled in the current sidecar")
 
     sidecar_ready = sidecar_approval.get("production_ready") is True
+    publication_ready = sidecar_approval.get("publication_ready")
+    if type(publication_ready) is not bool:
+        raise FateMapError("sidecar publication_ready must be boolean")
+    if not sidecar_ready and publication_ready is not False:
+        raise FateMapError("blocked sidecar must keep publication disabled")
     if expected_unresolved and sidecar_ready:
         raise FateMapError("unresolved fate intervals cannot be admitted to production")
     if expected_unresolved and sidecar.get("status") != "blocked_review_only":

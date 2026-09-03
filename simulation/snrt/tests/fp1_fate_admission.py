@@ -30,8 +30,6 @@ def _write_and_audit(sidecar: dict) -> dict:
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "sidecar.json"
         payload = copy.deepcopy(sidecar)
-        for artifact in payload["artifacts"].values():
-            artifact["path"] = str((ROOT / artifact["path"]).resolve())
         path.write_text(json.dumps(payload), encoding="utf-8")
         return audit_fate_admission(sidecar_path=path)
 
@@ -78,6 +76,26 @@ def main() -> int:
     overclaim["status"] = "admitted"
     overclaim["approval"]["production_ready"] = True
     _expect_error(overclaim, "cannot be admitted")
+
+    publication_overclaim = copy.deepcopy(sidecar)
+    publication_overclaim["approval"]["publication_ready"] = True
+    _expect_error(publication_overclaim, "publication disabled")
+
+    absolute_artifact = copy.deepcopy(sidecar)
+    absolute_artifact["artifacts"]["fate_map"]["path"] = str(
+        (ROOT / "config" / "fp1_population_fate_map_v1.json").resolve()
+    )
+    _expect_error(absolute_artifact, "path is not pinned")
+
+    escaping_artifact = copy.deepcopy(sidecar)
+    escaping_artifact["artifacts"]["fate_map"]["path"] = "../outside.json"
+    _expect_error(escaping_artifact, "path is not pinned")
+
+    extra_artifact = copy.deepcopy(sidecar)
+    extra_artifact["artifacts"]["extra"] = copy.deepcopy(
+        extra_artifact["artifacts"]["fate_map"]
+    )
+    _expect_error(extra_artifact, "artifact set is not exact")
 
     print("FP1_FATE_ADMISSION_TEST_OK")
     return 0

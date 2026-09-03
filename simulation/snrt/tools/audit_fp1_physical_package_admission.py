@@ -14,6 +14,12 @@ from audit_fp1_source_node_contract import (
     SourceNodeContractError,
     audit_source_node_contract,
 )
+from fp1_gate_validator_registry import (
+    GateValidatorRegistryError,
+    registered_validator_ids,
+    registry_report,
+    run_registered_validator,
+)
 
 
 TOOL_PATH = Path(__file__).resolve()
@@ -141,18 +147,47 @@ def _audit_evidence(artifacts: Any) -> tuple[dict[str, dict[str, str]], dict[str
 
 
 def _evaluate_candidate_gate_evidence(
-    candidate_id: str, gate_evidence: Any
+    candidate_id: str,
+    gate_evidence: Any,
+    *,
+    approved_validator_ids: set[str],
+    required_gates: dict[str, dict[str, Any]],
 ) -> tuple[list[str], dict[str, Any]]:
     if not isinstance(gate_evidence, dict) or not set(gate_evidence).issubset(REQUIRED_GATES):
         raise PhysicalPackageAdmissionError(
             f"candidate gate-evidence set is malformed: {candidate_id}"
         )
-    if gate_evidence:
-        raise PhysicalPackageAdmissionError(
-            "candidate gate evidence cannot pass until gate-specific executable "
-            f"validators are implemented and code-registered: {candidate_id}"
-        )
-    return [], {}
+    passed: list[str] = []
+    reports: dict[str, Any] = {}
+    for gate_id, evidence in sorted(gate_evidence.items()):
+        if not isinstance(evidence, dict) or set(evidence) != {"validator_id"}:
+            raise PhysicalPackageAdmissionError(
+                f"candidate executable gate evidence is malformed: {candidate_id}:{gate_id}"
+            )
+        validator_id = evidence.get("validator_id")
+        if validator_id not in approved_validator_ids:
+            raise PhysicalPackageAdmissionError(
+                f"candidate gate validator is not contract-approved: {candidate_id}:{gate_id}"
+            )
+        try:
+            report = run_registered_validator(
+                validator_id=validator_id,
+                gate_id=gate_id,
+                candidate_id=candidate_id,
+            )
+        except GateValidatorRegistryError as exc:
+            raise PhysicalPackageAdmissionError(
+                f"candidate executable gate validation failed: {candidate_id}:{gate_id}: {exc}"
+            ) from exc
+        expected_requirements = set(required_gates[gate_id]["requires"])
+        if set(report["requirements"]) != expected_requirements:
+            raise PhysicalPackageAdmissionError(
+                f"candidate validator requirement coverage mismatch: {candidate_id}:{gate_id}"
+            )
+        reports[gate_id] = report
+        if report["passed"] is True:
+            passed.append(gate_id)
+    return passed, reports
 
 
 def audit_physical_package_admission(
@@ -195,16 +230,19 @@ def audit_physical_package_admission(
         if policy.get(name) is not False:
             raise PhysicalPackageAdmissionError(f"unsafe physical-package policy enabled: {name}")
     gate_validation = contract.get("gate_validation")
+    code_registered_validator_ids = registered_validator_ids()
     if (
         not isinstance(gate_validation, dict)
         or gate_validation.get("mode")
-        != "disabled_until_gate_specific_executable_validators_are_code_registered"
-        or gate_validation.get("approved_validator_ids") != []
+        != "registered_executable_validators_fail_closed"
+        or gate_validation.get("approved_validator_ids")
+        != code_registered_validator_ids
         or gate_validation.get("hash_only_validator_artifact_may_pass") is not False
     ):
         raise PhysicalPackageAdmissionError(
-            "physical-package gate-validator execution must remain disabled and fail closed"
+            "physical-package executable gate-validator registry is inconsistent"
         )
+    approved_validator_ids = set(code_registered_validator_ids)
 
     evidence, loaded = _audit_evidence(contract.get("evidence_artifacts"))
     source_node = loaded["source_node_contract"]
@@ -254,7 +292,10 @@ def audit_physical_package_admission(
                 f"candidate qualification has undeclared fields: {candidate_id}"
             )
         passed, gate_report = _evaluate_candidate_gate_evidence(
-            candidate_id, record.get("gate_evidence")
+            candidate_id,
+            record.get("gate_evidence"),
+            approved_validator_ids=approved_validator_ids,
+            required_gates=gates,
         )
         blockers = record.get("hard_blockers")
         if not isinstance(blockers, list):
@@ -373,7 +414,10 @@ def audit_physical_package_admission(
         "audit_code_sha256": _sha256(TOOL_PATH),
         "evidence_artifacts": evidence,
         "required_gate_ids": sorted(REQUIRED_GATES),
-        "gate_validation": gate_validation,
+        "gate_validation": {
+            **gate_validation,
+            "registry": registry_report(),
+        },
         "candidate_qualification": candidate_report,
         "physical_node_count": len(physical_nodes),
         "unique_hard_blockers": blockers,
