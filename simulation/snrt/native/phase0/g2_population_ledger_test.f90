@@ -13,7 +13,7 @@ program g2_population_ledger_test
        compute_unresolved_mass_bucket, &
        population_ledger_ok, population_ledger_err_mass, &
        population_ledger_err_owner, population_ledger_err_nonfinite, &
-       population_ledger_err_argument
+       population_ledger_err_argument, population_ledger_err_snia
   use stellar_yield_tables, only: stellar_yield_table_t, clear_yield_table
   use stellar_enrichment_driver, only: compute_stellar_source_increment, &
        compute_stellar_cumulative, enrichment_driver_err_unsupported, &
@@ -22,6 +22,7 @@ program g2_population_ledger_test
        evaluate_imf, ssp_source_err_basis
   use stellar_snia_physical_contract, only: snia_physical_contract_t, &
        snia_event_budget_t, snia_contract_ok, snia_wd_debit_per_event, &
+       snia_shortfall_reject_event_interval, &
        snia_momentum_source_frame_vector, build_snia_event_budget
   implicit none
 
@@ -77,7 +78,7 @@ program g2_population_ledger_test
   owners = (/ .false., .true., .true., .false., .true. /)
 
   call set_state(states(1), 1, 5.0_stellar_dp, 0.0_stellar_dp)
-  call set_state(states(2), 2, 15.0_stellar_dp, 1.0_stellar_dp)
+  call set_state(states(2), 2, 15.0_stellar_dp, 2.0_stellar_dp)
   call set_state(states(3), 3, 20.0_stellar_dp, 5.0_stellar_dp)
   call finalize_population_ledger(population, states, enabled, owners, &
        1.0e-12_stellar_dp, ledger, ierr)
@@ -85,9 +86,9 @@ program g2_population_ledger_test
        'channel states close a population mass ledger', failures)
   call expect_close(ledger%returned_mass, 40.0_stellar_dp, &
        'returned mass is summed once by channel', failures)
-  call expect_close(ledger%remnant_mass, 6.0_stellar_dp, &
+  call expect_close(ledger%remnant_mass, 7.0_stellar_dp, &
        'terminal remnant mass is retained by owner channels', failures)
-  call expect_close(ledger%living_mass, 54.0_stellar_dp, &
+  call expect_close(ledger%living_mass, 53.0_stellar_dp, &
        'living mass is derived after channel aggregation', failures)
   call expect_close(ledger%initial_mass - ledger%living_mass - &
        ledger%remnant_mass - ledger%returned_mass, 0.0_stellar_dp, &
@@ -97,13 +98,27 @@ program g2_population_ledger_test
   call set_white_dwarf_reservoir(ledger, 2.0_stellar_dp, 1.0e-12_stellar_dp, ierr)
   call expect(ierr == population_ledger_ok, &
        'explicit WD reservoir is admitted as a remnant subset', failures)
+  call set_white_dwarf_reservoir(ledger, 6.0_stellar_dp, 1.0e-12_stellar_dp, ierr)
+  call expect(ierr == population_ledger_err_argument .or. &
+       ierr == population_ledger_err_snia, &
+       'SNII remnant mass cannot fund a WD reservoir', failures)
+  call set_white_dwarf_reservoir(ledger, 2.0_stellar_dp, 1.0e-12_stellar_dp, ierr)
   snia_contract%approved = .true.
   snia_contract%wd_debit_policy = snia_wd_debit_per_event
+  snia_contract%shortfall_policy = snia_shortfall_reject_event_interval
   snia_contract%momentum_policy = snia_momentum_source_frame_vector
+  snia_contract%yield_source_id = 'unit-yield-source'
+  snia_contract%yield_source_sha256 = &
+       '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  snia_contract%source_commit_binding = '0123456789abcdef0123456789abcdef01234567'
+  snia_contract%conversion_code_sha256 = &
+       'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789'
+  snia_contract%approval_id = 'unit-test-only'
   snia_contract%returned_mass_per_event = 1.3_stellar_dp
-  snia_contract%terminal_remnant_per_event = 0.0_stellar_dp
+  snia_contract%terminal_remnant_per_event = 0.1_stellar_dp
   snia_contract%wd_debit_per_event = 1.4_stellar_dp
   snia_contract%energy_per_event = 1.0e51_stellar_dp
+  snia_contract%ejected_mass_per_event(1) = 1.0_stellar_dp
   snia_contract%momentum_per_event = 0.0_stellar_dp
   call build_snia_event_budget(snia_contract, 1.0_stellar_dp, &
        ledger%wd_reservoir_mass, snia_budget, ierr)
@@ -116,10 +131,22 @@ program g2_population_ledger_test
        'SNIa WD debit is retained in the ledger', failures)
   call expect_close(ledger%returned_mass, 41.3_stellar_dp, &
        'SNIa returned mass enters aggregate return', failures)
-  call expect_close(ledger%remnant_mass, 4.6_stellar_dp, &
+  call expect_close(ledger%remnant_mass, 5.7_stellar_dp, &
        'consumed WD remnant leaves aggregate remnant mass', failures)
-  call expect_close(ledger%living_mass, 54.1_stellar_dp, &
+  call expect_close(ledger%living_mass, 53.0_stellar_dp, &
        'living mass is recomputed after SNIa debit', failures)
+  call expect_close(ledger%channel_remnant_mass(2), 0.6_stellar_dp, &
+       'WD debit leaves the owning AGB remnant channel', failures)
+  call expect_close(ledger%channel_remnant_mass(4), 0.1_stellar_dp, &
+       'terminal SNIa remnant is recorded in its event channel', failures)
+  call expect_close(ledger%tracked_ejecta_mass, 41.0_stellar_dp, &
+       'SNIa tracked ejecta updates the aggregate ledger', failures)
+  call expect_close(ledger%untracked_ejecta_mass, 0.3_stellar_dp, &
+       'SNIa untracked returned residual updates the aggregate ledger', failures)
+  call expect_close(ledger%channel_tracked_ejecta_mass(4), 1.0_stellar_dp, &
+       'SNIa tracked ejecta updates its channel ledger', failures)
+  call expect_close(ledger%channel_untracked_ejecta_mass(4), 0.3_stellar_dp, &
+       'SNIa untracked residual updates its channel ledger', failures)
   call expect_close(ledger%initial_mass - ledger%living_mass - ledger%remnant_mass - &
        ledger%returned_mass, 0.0_stellar_dp, &
        'SNIa ledger update preserves population mass closure', failures)

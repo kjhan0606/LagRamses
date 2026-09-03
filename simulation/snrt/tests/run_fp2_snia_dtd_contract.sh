@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# F-P2 mathematical contract only.  This proves interval-integrated DTD
-# behavior while SNIa event activation remains blocked by the physical source
-# and binary-population approval gate.
+# F-P2 contract and source-admission runner.  This proves interval-integrated
+# DTD behavior and the approved physical baseline while SNIa runtime activation
+# remains blocked until its AMR/MPI caller is connected.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
@@ -51,6 +51,7 @@ done
   "$BUILD_DIR/stellar_snia_cell_deposition.o" \
   "$BUILD_DIR/stellar_snia_physical_contract.o" \
   "$BUILD_DIR/stellar_native_units.o" \
+  "$BUILD_DIR/stellar_enrichment_contract.o" \
   "$BUILD_DIR/stellar_enrichment_config.o" \
   -o "$BUILD_DIR/fp2_snia_cell_deposition_test"
 
@@ -92,6 +93,9 @@ done
   "$ROOT/simulation/snrt/tests/fp2_snia_hesma_adapter.py"
 
 "$ROOT/simulation/snrt/.venv/bin/python" \
+  "$ROOT/simulation/snrt/tests/promote_hesma_snia_source.py"
+
+"$ROOT/simulation/snrt/.venv/bin/python" \
   "$ROOT/simulation/snrt/tools/adapt_hesma_snia_source.py" \
   --model n100 \
   --json-out "$ROOT/simulation/snrt/data/fp2_snia_hesma_n100_review_normalized.json" \
@@ -118,7 +122,7 @@ done
 
 "$ROOT/simulation/snrt/.venv/bin/python" \
   "$ROOT/simulation/snrt/tools/build_hesma_snia_selection_packet.py" \
-  --json-out "$ROOT/simulation/snrt/data/fp2_snia_hesma_source_selection_packet.json" \
+  --json-out "$BUILD_DIR/fp2_snia_hesma_source_selection_packet_review.json" \
   > "$BUILD_DIR/fp2_snia_hesma_selection_packet.stdout"
 
 "$ROOT/simulation/snrt/.venv/bin/python" \

@@ -39,6 +39,8 @@ DEFAULT_HESMA_PROFILE_ESTIMATOR_COMPARISON = SNRT_ROOT / "data" / "fp2_snia_hesm
 DEFAULT_HESMA_SELECTION_PACKET = SNRT_ROOT / "data" / "fp2_snia_hesma_source_selection_packet.json"
 DEFAULT_EVENT_SOURCE_SIDECAR = SNRT_ROOT / "config" / "fp2_snia_event_source_approval_sidecar_v1.json"
 DEFAULT_POPULATION_REALIZATION = SNRT_ROOT / "config" / "fp2_snia_population_realization_contract_v1.json"
+DEFAULT_APPROVED_EVENT_SOURCE = SNRT_ROOT / "data" / "fp2_snia_hesma_n100_approved_event_source_v1.json"
+APPROVED_STATUS = "approved_physical_baseline_runtime_gated"
 REQUIRED_ACTIVATION_PREREQUISITES = (
     "approved_population_and_binary_model",
     "approved_minimum_and_maximum_delay",
@@ -95,6 +97,8 @@ def _audit_candidate_matrix(
     contract: dict[str, Any],
 ) -> tuple[list[str], dict[str, Any]]:
     failures: list[str] = []
+    approved = contract.get("status") == APPROVED_STATUS
+    approval_id = contract.get("event_source", {}).get("approval_id")
     reference = _resolve_reference(contract.get("candidate_matrix"), SNRT_ROOT, PROJECT_ROOT)
     dossier_reference = _resolve_reference(contract.get("literature_dossier"), PROJECT_ROOT, SNRT_ROOT)
     matrix: dict[str, Any] = {}
@@ -114,12 +118,15 @@ def _audit_candidate_matrix(
             failures.append("candidate_matrix_schema_mismatch")
         if matrix.get("gate") != "F-P2":
             failures.append("candidate_matrix_gate_mismatch")
-        if matrix.get("status") != "review_only_no_candidate_selected":
-            failures.append("candidate_matrix_must_remain_review_only")
-        if matrix.get("selected_candidate_id") is not None:
-            failures.append("candidate_matrix_candidate_must_remain_unselected")
-        if matrix.get("selected_approval_id") is not None:
-            failures.append("candidate_matrix_approval_must_remain_unselected")
+        expected_matrix_status = "approved_baseline_selection_runtime_gated" if approved else "review_only_no_candidate_selected"
+        if matrix.get("status") != expected_matrix_status:
+            failures.append("candidate_matrix_status_disagrees_with_contract")
+        expected_candidate = "field_observed_powerlaw_maoz2012" if approved else None
+        expected_approval = approval_id if approved else None
+        if matrix.get("selected_candidate_id") != expected_candidate:
+            failures.append("candidate_matrix_selected_candidate_disagrees_with_contract")
+        if matrix.get("selected_approval_id") != expected_approval:
+            failures.append("candidate_matrix_selected_approval_disagrees_with_contract")
         candidates = matrix.get("candidates")
         if not isinstance(candidates, list) or not candidates:
             failures.append("candidate_matrix_candidates_missing")
@@ -139,8 +146,9 @@ def _audit_candidate_matrix(
             for key in ("citation", "url", "evidence_type", "project_role"):
                 if not isinstance(candidate.get(key), str) or not candidate[key]:
                     failures.append(f"candidate_matrix_{key}_missing:{candidate_id}")
-            if candidate.get("status") != "candidate_not_approved":
-                failures.append(f"candidate_matrix_candidate_not_review_only:{candidate_id}")
+            expected_candidate_status = "approved_baseline" if approved and candidate_id == expected_candidate else "candidate_not_approved"
+            if candidate.get("status") != expected_candidate_status:
+                failures.append(f"candidate_matrix_candidate_status_mismatch:{candidate_id}")
             blockers = candidate.get("blockers")
             if not isinstance(blockers, list) or not blockers:
                 failures.append(f"candidate_matrix_blockers_missing:{candidate_id}")
@@ -148,10 +156,10 @@ def _audit_candidate_matrix(
         if not isinstance(decision, dict):
             failures.append("candidate_matrix_decision_missing")
         else:
-            if decision.get("production_source_id") is not None:
-                failures.append("candidate_matrix_production_source_must_remain_null")
-            if decision.get("production_approval_id") is not None:
-                failures.append("candidate_matrix_production_approval_must_remain_null")
+            if decision.get("production_source_id") != (expected_candidate if approved else None):
+                failures.append("candidate_matrix_production_source_disagrees_with_contract")
+            if decision.get("production_approval_id") != (expected_approval if approved else None):
+                failures.append("candidate_matrix_production_approval_disagrees_with_contract")
             if decision.get("runtime_activation_allowed") is not False:
                 failures.append("candidate_matrix_runtime_activation_must_remain_disabled")
         matrix_summary = {
@@ -182,6 +190,8 @@ def _audit_event_yield_matrix(
     contract: dict[str, Any],
 ) -> tuple[list[str], dict[str, Any]]:
     failures: list[str] = []
+    approved = contract.get("status") == APPROVED_STATUS
+    approval_id = contract.get("event_source", {}).get("approval_id")
     reference = _resolve_reference(contract.get("event_yield_matrix"), SNRT_ROOT, PROJECT_ROOT)
     dossier_reference = _resolve_reference(contract.get("event_yield_dossier"), PROJECT_ROOT, SNRT_ROOT)
     matrix: dict[str, Any] = {}
@@ -199,12 +209,15 @@ def _audit_event_yield_matrix(
             failures.append("event_yield_matrix_schema_mismatch")
         if matrix.get("gate") != "F-P2":
             failures.append("event_yield_matrix_gate_mismatch")
-        if matrix.get("status") != "review_only_no_candidate_selected":
-            failures.append("event_yield_matrix_must_remain_review_only")
-        if matrix.get("selected_candidate_id") is not None:
-            failures.append("event_yield_matrix_candidate_must_remain_unselected")
-        if matrix.get("selected_approval_id") is not None:
-            failures.append("event_yield_matrix_approval_must_remain_unselected")
+        expected_matrix_status = "approved_baseline_selection_runtime_gated" if approved else "review_only_no_candidate_selected"
+        if matrix.get("status") != expected_matrix_status:
+            failures.append("event_yield_matrix_status_disagrees_with_contract")
+        expected_candidate = "hesma_model_archive_snia_profiles" if approved else None
+        expected_approval = approval_id if approved else None
+        if matrix.get("selected_candidate_id") != expected_candidate:
+            failures.append("event_yield_matrix_selected_candidate_disagrees_with_contract")
+        if matrix.get("selected_approval_id") != expected_approval:
+            failures.append("event_yield_matrix_selected_approval_disagrees_with_contract")
         candidates = matrix.get("candidates")
         if not isinstance(candidates, list) or not candidates:
             failures.append("event_yield_matrix_candidates_missing")
@@ -224,8 +237,9 @@ def _audit_event_yield_matrix(
             for key in ("citation", "paper_url", "evidence_type", "project_role", "license"):
                 if not isinstance(candidate.get(key), str) or not candidate[key]:
                     failures.append(f"event_yield_matrix_{key}_missing:{candidate_id}")
-            if candidate.get("status") != "candidate_not_approved":
-                failures.append(f"event_yield_matrix_candidate_not_review_only:{candidate_id}")
+            expected_candidate_status = "approved_baseline" if approved and candidate_id == expected_candidate else "candidate_not_approved"
+            if candidate.get("status") != expected_candidate_status:
+                failures.append(f"event_yield_matrix_candidate_status_mismatch:{candidate_id}")
             blockers = candidate.get("blockers")
             if not isinstance(blockers, list) or not blockers:
                 failures.append(f"event_yield_matrix_blockers_missing:{candidate_id}")
@@ -246,10 +260,10 @@ def _audit_event_yield_matrix(
         if not isinstance(decision, dict):
             failures.append("event_yield_matrix_decision_missing")
         else:
-            if decision.get("production_source_id") is not None:
-                failures.append("event_yield_matrix_production_source_must_remain_null")
-            if decision.get("production_approval_id") is not None:
-                failures.append("event_yield_matrix_production_approval_must_remain_null")
+            if decision.get("production_source_id") != ("hesma:yysd4-xap92:n100" if approved else None):
+                failures.append("event_yield_matrix_production_source_disagrees_with_contract")
+            if decision.get("production_approval_id") != (expected_approval if approved else None):
+                failures.append("event_yield_matrix_production_approval_disagrees_with_contract")
             if decision.get("runtime_activation_allowed") is not False:
                 failures.append("event_yield_matrix_runtime_activation_must_remain_disabled")
         matrix_summary = {
@@ -352,21 +366,45 @@ def audit_contract(
         failures.append("schema_mismatch")
     if contract.get("gate") != "F-P2":
         failures.append("gate_mismatch")
-    if contract.get("status") != "review_only_not_approved":
-        failures.append("contract_must_remain_review_only")
+    approved = contract.get("status") == APPROVED_STATUS
+    if contract.get("status") not in ("review_only_not_approved", APPROVED_STATUS):
+        failures.append("unsupported_contract_status")
     activation = contract.get("activation", {})
     if activation.get("enabled") is not False:
         failures.append("activation_must_be_disabled")
     if activation.get("production_allowed") is not False:
         failures.append("production_activation_must_be_disabled")
     parameters = contract.get("parameters", {})
-    for key in ("minimum_delay_gyr", "maximum_delay_gyr", "events_per_initial_msun"):
-        if parameters.get(key) is not None:
-            failures.append(f"{key}_must_remain_unselected")
+    if approved:
+        for key in ("minimum_delay_gyr", "maximum_delay_gyr", "events_per_initial_msun"):
+            value = parameters.get(key)
+            if not isinstance(value, (int, float)) or value <= 0.0:
+                failures.append(f"{key}_approved_value_missing")
+    else:
+        for key in ("minimum_delay_gyr", "maximum_delay_gyr", "events_per_initial_msun"):
+            if parameters.get(key) is not None:
+                failures.append(f"{key}_must_remain_unselected")
     event_source = contract.get("event_source", {})
-    for key in ("yield_source_id", "yield_source_sha256", "energy_per_event_erg", "momentum_per_event_g_cm_s", "composition_basis"):
-        if event_source.get(key) is not None:
-            failures.append(f"{key}_must_remain_unselected")
+    event_source_keys = (
+        "yield_source_id", "yield_source_sha256", "energy_per_event_erg",
+        "momentum_per_event_g_cm_s", "composition_basis",
+        "wd_reservoir_shortfall_policy", "source_commit_binding",
+        "conversion_code_sha256", "approval_id",
+    )
+    if not approved:
+        for key in event_source_keys:
+            if event_source.get(key) is not None:
+                failures.append(f"{key}_must_remain_unselected")
+    else:
+        for key in event_source_keys:
+            if event_source.get(key) is None:
+                failures.append(f"{key}_approved_value_missing")
+        if event_source.get("yield_source_id") != "hesma:yysd4-xap92:n100":
+            failures.append("approved_event_source_id_mismatch")
+        if event_source.get("approval_id") != "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ":
+            failures.append("approved_event_source_approval_id_mismatch")
+        if event_source.get("momentum_policy") != "isotropic_zero_vector":
+            failures.append("approved_event_source_momentum_policy_mismatch")
     prerequisites = activation.get("requires")
     if not isinstance(prerequisites, list) or not prerequisites:
         failures.append("approval_prerequisites_missing")
@@ -599,7 +637,8 @@ def audit_contract(
         if isinstance(hesma_selection_packet, dict):
             if hesma_selection_packet.get("schema") != "snrt-fp2-snia-hesma-source-selection-packet":
                 failures.append("hesma_selection_packet_schema_mismatch")
-            if hesma_selection_packet.get("status") != "review_only_selection_pending":
+            expected_selection_status = APPROVED_STATUS if approved else "review_only_selection_pending"
+            if hesma_selection_packet.get("status") != expected_selection_status:
                 failures.append("hesma_selection_packet_status_mismatch")
             if hesma_selection_packet.get("source", {}).get("package_sha256") != (
                 hesma_source_audit.get("package_sha256")
@@ -609,16 +648,17 @@ def audit_contract(
             if len(hesma_selection_packet.get("models", [])) != 15:
                 failures.append("hesma_selection_packet_model_count_mismatch")
             selection = hesma_selection_packet.get("selection", {})
-            for key in (
-                "selected_model_id",
-                "selected_population_mixture",
-                "selected_profile_estimator",
-                "approval_id",
-            ):
-                if selection.get(key) is not None:
-                    failures.append(f"hesma_selection_packet_{key}_must_remain_null")
+            expected_selection = {
+                "selected_model_id": "n100" if approved else None,
+                "selected_population_mixture": "single_model_n100" if approved else None,
+                "selected_profile_estimator": "inner_zero_outer_half_bin" if approved else None,
+                "approval_id": contract.get("event_source", {}).get("approval_id") if approved else None,
+            }
+            for key, value in expected_selection.items():
+                if selection.get(key) != value:
+                    failures.append(f"hesma_selection_packet_{key}_disagrees_with_contract")
             physical = hesma_selection_packet.get("physical_event_contract", {})
-            for key in (
+            physical_keys = (
                 "decay_convention",
                 "decay_horizon_yr",
                 "isotope_to_project_element_policy",
@@ -627,16 +667,22 @@ def audit_contract(
                 "energy_erg_per_event",
                 "momentum_g_cm_s_per_event",
                 "population_weight",
-            ):
-                if physical.get(key) is not None:
-                    failures.append(f"hesma_selection_packet_{key}_must_remain_null")
+            )
+            if not approved:
+                for key in physical_keys:
+                    if physical.get(key) is not None:
+                        failures.append(f"hesma_selection_packet_{key}_must_remain_null")
+            else:
+                for key in physical_keys:
+                    if physical.get(key) is None:
+                        failures.append(f"hesma_selection_packet_{key}_missing_for_approved_baseline")
             admission = hesma_selection_packet.get("admission", {})
-            if admission.get("canonical_conversion_allowed") is not False:
-                failures.append("hesma_selection_packet_conversion_not_disabled")
+            if admission.get("canonical_conversion_allowed") is not approved:
+                failures.append("hesma_selection_packet_conversion_state_mismatch")
             if admission.get("runtime_activation_allowed") is not False:
                 failures.append("hesma_selection_packet_runtime_not_disabled")
-            if admission.get("canonical_rows_emitted") != 0:
-                failures.append("hesma_selection_packet_emitted_canonical_rows")
+            if admission.get("canonical_rows_emitted") != (1 if approved else 0):
+                failures.append("hesma_selection_packet_canonical_row_count_mismatch")
 
     event_source_sidecar = None
     sidecar_reference = _resolve_reference(
@@ -654,15 +700,17 @@ def audit_contract(
         except (ImportError, OSError, ValueError) as exc:
             failures.append(f"event_source_approval_sidecar_invalid:{type(exc).__name__}")
         if isinstance(event_source_sidecar, dict):
-            if event_source_sidecar.get("status") != "blocked_review_only":
-                failures.append("event_source_approval_sidecar_not_blocked")
-            if event_source_sidecar.get("production_ready") is not False:
-                failures.append("event_source_approval_sidecar_production_enabled")
+            expected_sidecar_status = APPROVED_STATUS if approved else "blocked_review_only"
+            if event_source_sidecar.get("status") != expected_sidecar_status:
+                failures.append("event_source_approval_sidecar_status_mismatch")
+            if event_source_sidecar.get("production_ready") is not approved:
+                failures.append("event_source_approval_sidecar_production_state_mismatch")
             if event_source_sidecar.get("runtime_activation_allowed") is not False:
                 failures.append("event_source_approval_sidecar_runtime_enabled")
             promotion_requirements = event_source_sidecar.get("promotion_requirements", {})
-            if promotion_requirements.get("status") != "requirements_only_not_approval":
-                failures.append("event_source_promotion_requirements_not_review_only")
+            expected_promotion_status = "satisfied_for_approved_physical_baseline" if approved else "requirements_only_not_approval"
+            if promotion_requirements.get("status") != expected_promotion_status:
+                failures.append("event_source_promotion_requirements_status_mismatch")
             if promotion_requirements.get("runtime_activation_allowed") is not False:
                 failures.append("event_source_promotion_requirements_runtime_enabled")
             if promotion_requirements.get("required_fields") != list(PROMOTION_REQUIRED_FIELDS):
@@ -688,43 +736,78 @@ def audit_contract(
                 failures.append("population_realization_contract_version_mismatch")
             if population_realization.get("gate") != "F-P2":
                 failures.append("population_realization_contract_gate_mismatch")
-            if population_realization.get("status") != "review_only_not_approved":
-                failures.append("population_realization_contract_must_remain_review_only")
+            expected_population_status = APPROVED_STATUS if approved else "review_only_not_approved"
+            if population_realization.get("status") != expected_population_status:
+                failures.append("population_realization_contract_status_mismatch")
             population = population_realization.get("population", {})
-            for key in (
+            population_keys = (
                 "population_source_id",
                 "population_model",
                 "imf_id",
                 "binary_fraction",
+                "binary_fraction_policy",
                 "imf_conversion_factor",
                 "source_commit_binding",
-            ):
-                if population.get(key) is not None:
-                    failures.append(f"population_realization_{key}_must_remain_null")
+            )
+            for key in population_keys:
+                if key not in population:
+                    failures.append(f"population_realization_{key}_missing")
+            if not approved:
+                for key in population_keys:
+                    if population.get(key) is not None:
+                        failures.append(f"population_realization_{key}_must_remain_null")
+            else:
+                for key in population_keys:
+                    if population.get(key) is None:
+                        failures.append(f"population_realization_{key}_missing_for_approved_baseline")
             dtd = population_realization.get("dtd", {})
-            for key in (
+            dtd_keys = (
                 "minimum_delay_gyr",
                 "maximum_delay_gyr",
                 "events_per_initial_msun",
-            ):
-                if dtd.get(key) is not None:
-                    failures.append(f"population_realization_dtd_{key}_must_remain_null")
-            if dtd.get("power_law_index") != -1.0:
-                failures.append("population_realization_dtd_shape_changed")
+            )
+            if not approved:
+                for key in dtd_keys:
+                    if dtd.get(key) is not None:
+                        failures.append(f"population_realization_dtd_{key}_must_remain_null")
+                if dtd.get("power_law_index") != -1.0:
+                    failures.append("population_realization_dtd_shape_changed")
+            else:
+                for key in dtd_keys:
+                    if dtd.get(key) is None:
+                        failures.append(f"population_realization_dtd_{key}_missing_for_approved_baseline")
+                if dtd.get("power_law_index") != -1.07:
+                    failures.append("population_realization_dtd_shape_mismatch")
             realization = population_realization.get("realization", {})
-            for key in (
+            realization_keys = (
                 "event_realization_policy",
                 "metallicity_policy",
                 "metallicity_factor_source",
-            ):
-                if realization.get(key) is not None:
-                    failures.append(f"population_realization_{key}_must_remain_null")
+                "metallicity_factor_source_id",
+            )
+            for key in realization_keys:
+                if key not in realization:
+                    failures.append(f"population_realization_{key}_missing")
+            if not approved:
+                for key in realization_keys:
+                    if realization.get(key) is not None:
+                        failures.append(f"population_realization_{key}_must_remain_null")
+            else:
+                for key in realization_keys:
+                    if realization.get(key) is None:
+                        failures.append(f"population_realization_{key}_missing_for_approved_baseline")
             approval = population_realization.get("approval", {})
-            if approval.get("approval_id") is not None:
-                failures.append("population_realization_approval_id_must_remain_null")
-            for key in ("runtime_activation_allowed", "production_ready", "publication_ready"):
-                if approval.get(key) is not False:
-                    failures.append(f"population_realization_{key}_must_remain_false")
+            if approved:
+                if approval.get("approval_id") != contract.get("event_source", {}).get("approval_id"):
+                    failures.append("population_realization_approval_id_mismatch")
+                if approval.get("runtime_activation_allowed") is not False or approval.get("production_ready") is not True:
+                    failures.append("population_realization_approval_runtime_state_mismatch")
+            else:
+                if approval.get("approval_id") is not None:
+                    failures.append("population_realization_approval_id_must_remain_null")
+                for key in ("runtime_activation_allowed", "production_ready", "publication_ready"):
+                    if approval.get(key) is not False:
+                        failures.append(f"population_realization_{key}_must_remain_false")
 
     native_hash = _sha256(native_path)
     production_hash = _sha256(production_path)
@@ -777,8 +860,8 @@ def audit_contract(
         "schema": "snrt-fp2-snia-dtd-contract-audit",
         "schema_version": 1,
         "gate": "F-P2",
-        "status": "review_only_not_approved" if not failures else "blocked_contract_integrity",
-        "production_ready": False,
+        "status": APPROVED_STATUS if approved and not failures else ("review_only_not_approved" if not failures else "blocked_contract_integrity"),
+        "production_ready": approved and not failures,
         "runtime_activation_allowed": False,
         "contract": project_relative(config_path),
         "contract_sha256": _sha256(config_path),
@@ -920,7 +1003,11 @@ def audit_contract(
             ),
         },
         "failures": failures,
-        "interpretation": "The interval kernel, population realization contract, physical event contract, cell-increment adapter, and guarded RAMSES bridge are implemented and tested, but no SNIa event model is physically approved or runtime-enabled.",
+        "interpretation": (
+            "The Maoz field DTD and HESMA yysd4-xap92 n100 event source are approved as a physical baseline; runtime remains disabled until the AMR/MPI caller is connected."
+            if approved else
+            "The interval kernel, population realization contract, physical event contract, cell-increment adapter, and guarded RAMSES bridge are implemented and tested, but no SNIa event model is physically approved or runtime-enabled."
+        ),
         "audit_code_sha256": _sha256(TOOL_PATH),
     }
 

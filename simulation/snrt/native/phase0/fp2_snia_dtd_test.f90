@@ -6,6 +6,8 @@ program fp2_snia_dtd_test
 
   integer :: failures, ierr, index
   real(stellar_dp) :: value, cumulative, sum_intervals, expected
+  real(stellar_dp) :: handoff_exponent, handoff_low, handoff_high
+  real(stellar_dp) :: handoff_expected_low, handoff_expected_high
   real(stellar_dp), parameter :: tmin = 0.04_stellar_dp
   real(stellar_dp), parameter :: tmax = 13.8_stellar_dp
   real(stellar_dp), parameter :: alpha = -1.0_stellar_dp
@@ -89,6 +91,34 @@ program fp2_snia_dtd_test
   call expect(ierr == snia_dtd_ok .and. abs(value - expected) < &
        1.0e-15_stellar_dp, &
        'near-log DTD integral remains stable under cancellation test', failures)
+
+  ! Exercise both sides of the expm1-series handoff.  The handoff is a
+  ! numerical branch only; it must not alter the normalized physical kernel.
+  handoff_exponent = 1.0e-1_stellar_dp / log(1.0_stellar_dp / tmin)
+  call integrate_snia_dtd_interval(tmin, 1.0_stellar_dp, tmin, tmax, &
+       -1.0_stellar_dp + handoff_exponent * (1.0_stellar_dp - 1.0e-10_stellar_dp), &
+       normalization, handoff_low, ierr)
+  handoff_expected_low = normalization * &
+       (1.0_stellar_dp - exp(handoff_exponent * &
+       (1.0_stellar_dp - 1.0e-10_stellar_dp) * log(tmin))) / &
+       (exp(handoff_exponent * (1.0_stellar_dp - 1.0e-10_stellar_dp) * &
+       log(tmax)) - exp(handoff_exponent * (1.0_stellar_dp - 1.0e-10_stellar_dp) * &
+       log(tmin)))
+  call expect(ierr == snia_dtd_ok .and. abs(handoff_low - handoff_expected_low) < &
+       1.0e-14_stellar_dp * normalization, &
+       'series branch matches the analytic DTD near handoff', failures)
+  call integrate_snia_dtd_interval(tmin, 1.0_stellar_dp, tmin, tmax, &
+       -1.0_stellar_dp + handoff_exponent * (1.0_stellar_dp + 1.0e-10_stellar_dp), &
+       normalization, handoff_high, ierr)
+  handoff_expected_high = normalization * &
+       (1.0_stellar_dp - exp(handoff_exponent * &
+       (1.0_stellar_dp + 1.0e-10_stellar_dp) * log(tmin))) / &
+       (exp(handoff_exponent * (1.0_stellar_dp + 1.0e-10_stellar_dp) * &
+       log(tmax)) - exp(handoff_exponent * (1.0_stellar_dp + 1.0e-10_stellar_dp) * &
+       log(tmin)))
+  call expect(ierr == snia_dtd_ok .and. abs(handoff_high - handoff_expected_high) < &
+       1.0e-14_stellar_dp * normalization, &
+       'direct branch matches the analytic DTD near handoff', failures)
 
   if (failures > 0) then
      write(*, '(a,i0)') 'FP2_SNIa_DTD_TEST_FAILED failures=', failures

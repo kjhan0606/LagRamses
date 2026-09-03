@@ -6,7 +6,8 @@ program test_stellar_residual_deposition
        deposition_err_closure
   use stellar_ramses_bridge, only: deposit_source_to_uold, ramses_bridge_ok, &
        ramses_bridge_err_closure, deposit_snia_budget_to_uold, &
-       ramses_bridge_err_snia
+       deposit_snia_budget_to_unew, ramses_bridge_err_snia, &
+       ramses_bridge_err_index, ramses_bridge_err_target
   use stellar_snia_physical_contract, only: snia_event_budget_t
   use stellar_snia_cell_deposition, only: snia_thermal_coupling_t, &
        snia_thermal_all_to_total_energy
@@ -24,10 +25,12 @@ program test_stellar_residual_deposition
   real(stellar_dp) :: gas_metal_density(1), gas_energy(1), gas_momentum(3,1)
   real(stellar_dp) :: gas_elements(n_stellar_elements,1), uold(nvar,1)
   real(stellar_dp) :: snia_volume(2), snia_weights(2), snia_uold(nvar,2)
-  real(stellar_dp) :: snia_velocity(3), expected_snia_mass
-  real(stellar_dp) :: expected_snia_momentum(3), expected_snia_energy
+  real(stellar_dp) :: snia_unew(2,nvar)
+  real(stellar_dp) :: snia_velocity(3,2), expected_snia_mass
+  real(stellar_dp) :: expected_snia_momentum(3,2), expected_snia_energy(2)
   real(stellar_dp) :: scale_length_cgs, scale_density_cgs, scale_velocity_cgs
   integer :: element_var(n_stellar_elements), momentum_var(3)
+  integer :: target_cell(2), owner_rank(2)
   integer :: ierr, element
 
   call clear_source(source)
@@ -80,16 +83,19 @@ program test_stellar_residual_deposition
 
   snia_budget%wd_reservoir_debit = 1.4_stellar_dp
   snia_budget%returned_mass = 1.3_stellar_dp
-  snia_budget%terminal_remnant_mass = 0.0_stellar_dp
+  snia_budget%terminal_remnant_mass = 0.1_stellar_dp
   snia_budget%energy = 1.0e51_stellar_dp
   snia_budget%momentum = (/1.0e40_stellar_dp, -2.0e39_stellar_dp, &
        3.0e39_stellar_dp/)
+  snia_budget%ejected_mass(elem_c) = 1.0_stellar_dp
   snia_coupling%approved = .true.
   snia_coupling%mode = snia_thermal_all_to_total_energy
   snia_coupling%thermal_fraction = 1.0_stellar_dp
+  snia_coupling%include_event_momentum_kinetic = .true.
   snia_volume = (/2.0_stellar_dp, 4.0_stellar_dp/)
   snia_weights = (/1.0_stellar_dp, 3.0_stellar_dp/)
-  snia_velocity = (/1.0e7_stellar_dp, -2.0e7_stellar_dp, 3.0e7_stellar_dp/)
+  snia_velocity(:,1) = (/1.0e7_stellar_dp, -2.0e7_stellar_dp, 3.0e7_stellar_dp/)
+  snia_velocity(:,2) = (/-4.0e7_stellar_dp, 5.0e7_stellar_dp, -6.0e7_stellar_dp/)
   scale_length_cgs = 10.0_stellar_dp
   scale_density_cgs = 2.0_stellar_dp
   scale_velocity_cgs = 3.0_stellar_dp
@@ -97,34 +103,71 @@ program test_stellar_residual_deposition
   call deposit_snia_budget_to_uold(snia_budget, snia_coupling, snia_velocity, &
        scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, &
        snia_volume, snia_weights, 1, 5, momentum_var, snia_uold, &
-       1.0e-10_stellar_dp, ierr)
+       1.0e-10_stellar_dp, ierr, 6, element_var)
   if (ierr /= ramses_bridge_ok) error stop 16
   expected_snia_mass = snia_budget%returned_mass * solar_mass_cgs
-  expected_snia_momentum = expected_snia_mass * snia_velocity + &
+  expected_snia_momentum(:,1) = expected_snia_mass * snia_velocity(:,1) + &
        snia_budget%momentum
-  expected_snia_energy = snia_budget%energy + 0.5_stellar_dp * expected_snia_mass * &
-       sum(snia_velocity**2)
+  expected_snia_momentum(:,2) = expected_snia_mass * snia_velocity(:,2) + &
+       snia_budget%momentum
+  expected_snia_energy(1) = snia_budget%energy + 0.5_stellar_dp * expected_snia_mass * &
+       sum(snia_velocity(:,1)**2) + sum(snia_velocity(:,1) * snia_budget%momentum) + &
+       0.5_stellar_dp * sum(snia_budget%momentum**2) / expected_snia_mass
+  expected_snia_energy(2) = snia_budget%energy + 0.5_stellar_dp * expected_snia_mass * &
+       sum(snia_velocity(:,2)**2) + sum(snia_velocity(:,2) * snia_budget%momentum) + &
+       0.5_stellar_dp * sum(snia_budget%momentum**2) / expected_snia_mass
   call expect_close(snia_uold(1,1), 0.25_stellar_dp * expected_snia_mass / &
        (2.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs), 17)
   call expect_close(snia_uold(1,2), 0.75_stellar_dp * expected_snia_mass / &
        (4.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs), 18)
-  call expect_close(snia_uold(2,1), 0.25_stellar_dp * expected_snia_momentum(1) / &
+  call expect_close(snia_uold(2,1), 0.25_stellar_dp * expected_snia_momentum(1,1) / &
        (2.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs * scale_velocity_cgs), 19)
-  call expect_close(snia_uold(3,2), 0.75_stellar_dp * expected_snia_momentum(2) / &
+  call expect_close(snia_uold(3,2), 0.75_stellar_dp * expected_snia_momentum(2,2) / &
        (4.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs * scale_velocity_cgs), 20)
-  call expect_close(snia_uold(5,1), 0.25_stellar_dp * expected_snia_energy / &
+  call expect_close(snia_uold(5,1), 0.25_stellar_dp * expected_snia_energy(1) / &
        (2.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs * scale_velocity_cgs**2), 21)
-  call expect_close(snia_uold(5,2), 0.75_stellar_dp * expected_snia_energy / &
+  call expect_close(snia_uold(5,2), 0.75_stellar_dp * expected_snia_energy(2) / &
        (4.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs * scale_velocity_cgs**2), 22)
+  call expect_close(snia_uold(6,1), 0.25_stellar_dp * 1.3_stellar_dp * solar_mass_cgs / &
+       (2.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs), 23)
+  call expect_close(snia_uold(6,2), 0.75_stellar_dp * 1.3_stellar_dp * solar_mass_cgs / &
+       (4.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs), 24)
+  call expect_close(snia_uold(7+elem_c-1,1), 0.25_stellar_dp * solar_mass_cgs / &
+       (2.0_stellar_dp * scale_length_cgs**3 * scale_density_cgs), 25)
+
+  ! Exercise the RAMSES-facing row-major adapter with a permuted, explicitly
+  ! owned target list.  The selected cells are scattered only after the
+  ! variable-major scratch deposition succeeds.
+  target_cell = (/2, 1/)
+  owner_rank = (/7, 7/)
+  snia_unew = 0.0_stellar_dp
+  call deposit_snia_budget_to_unew(snia_budget, snia_coupling, snia_velocity, &
+       scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, 2, &
+       target_cell, owner_rank, 7, snia_volume, snia_weights, 1, 5, &
+       momentum_var, snia_unew, 1.0e-10_stellar_dp, ierr, 6, element_var)
+  if (ierr /= ramses_bridge_ok) error stop 28
+  call expect_close(snia_unew(2,1), snia_uold(1,1), 29)
+  call expect_close(snia_unew(1,5), snia_uold(5,2), 30)
+  call expect_close(snia_unew(2,6), snia_uold(6,1), 31)
+
+  owner_rank(2) = 8
+  snia_unew = 0.0_stellar_dp
+  call deposit_snia_budget_to_unew(snia_budget, snia_coupling, snia_velocity, &
+       scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, 2, &
+       target_cell, owner_rank, 7, snia_volume, snia_weights, 1, 5, &
+       momentum_var, snia_unew, 1.0e-10_stellar_dp, ierr, 6, element_var)
+  if (ierr /= ramses_bridge_err_target) error stop 32
+  call expect_close(maxval(abs(snia_unew)), 0.0_stellar_dp, 33)
+  owner_rank(2) = 7
 
   snia_uold = 0.0_stellar_dp
   snia_coupling%approved = .false.
   call deposit_snia_budget_to_uold(snia_budget, snia_coupling, snia_velocity, &
        scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 2, &
        snia_volume, snia_weights, 1, 5, momentum_var, snia_uold, &
-       1.0e-10_stellar_dp, ierr)
-  if (ierr /= ramses_bridge_err_snia) error stop 23
-  call expect_close(maxval(abs(snia_uold)), 0.0_stellar_dp, 24)
+       1.0e-10_stellar_dp, ierr, 6, element_var)
+  if (ierr /= ramses_bridge_err_snia) error stop 26
+  call expect_close(maxval(abs(snia_uold)), 0.0_stellar_dp, 27)
 
   source%ejected_mass = 0.0_stellar_dp
   source%ejected_mass(elem_h) = 10.1_stellar_dp

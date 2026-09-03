@@ -1,6 +1,6 @@
 # F-P2 blocker reconciliation — 2026-09-03
 
-Status: **implemented review-boundary hardening; physical promotion remains blocked**.
+Status: **physical baseline approved; runtime activation remains gated**.
 
 ## Completed in this bundle
 
@@ -35,33 +35,42 @@ Status: **implemented review-boundary hardening; physical promotion remains bloc
   length/density/velocity code-unit scales and normalized multi-cell weights.
   Its validation is pre-write and the bridge unit test covers conservation,
   scale conversion, and unchanged `uold` on an unapproved policy.
+- The bridge now has a RAMSES-facing `unew(local_cell,variable)` entry point
+  that validates target-cell uniqueness, local MPI ownership, and target
+  bounds before depositing to variable-major scratch storage and scattering
+  to the selected row-major cells.  The production bridge, runtime, and
+  feedback caller objects compile under the actual `/gpfs` Makefile.
 - The population realization contract now makes binary source identity, IMF
   conversion, DTD support, metallicity factor, expectation/Poisson choice,
-  immutable source revision, and approval id explicit.  Its review JSON keeps
-  every physical selection null and is checked by the F-P2 audit.
+  immutable source revision, and approval id explicit.  Its approved baseline
+  is checked by the F-P2 audit.
 - The full F-P2 contract runner passes, including native Fortran tests,
   source-format/profile/selection tests, admission negatives, and production
   mirror compilation.
 
 ## Still blocking production
 
-- No HESMA or Keegans event model is selected for production.
-- The ledger interface is tested but no approved binary-population source yet
-  supplies the WD reservoir or terminal-remnant policy for runtime.
+- HESMA `yysd4-xap92/n100` is selected and approved as the physical baseline;
+  Keegans remains a review-only comparison because its project-element rows are
+  incomplete.
+- The approved Maoz field DTD supplies the binary-population normalization and
+  the approved HESMA event source supplies the WD debit and zero terminal
+  remnant policy.  The ledger interface is ready but still not called by the
+  runtime.
 - The event-frame momentum convention is explicit and radial conversion is
-  tested.  The cell-local conversion adapter is implemented, but its output is
-  now wired to a tested production-side RAMSES array bridge, but the bridge is
-  not yet called from AMR/MPI neighbour selection.
-- SNIa thermal coupling is represented by a guarded all-to-total-energy cell
-  increment policy, but it is not approved or called by the runtime; existing
-  generic stellar energy deposition and SNII delayed-cooling are separate
-  paths.
-- DTD normalization, IMF conversion, event realization, thermal coupling, and
-  metallicity dependence remain requirements, not populated physics fields;
-  only the numerical evaluation kernel and review-only realization interface
-  are complete.
-- A source commit binding and named approval id do not exist because no
-  production commit has been created for this contract.
+  tested.  The cell-local conversion adapter and tested production-side
+  RAMSES array bridge are implemented, but no runtime caller yet supplies the
+  AMR/MPI neighbour selection or calls the bridge.
+- SNIa thermal coupling is approved as all-to-total-energy for this baseline but
+  is not called by the runtime; existing generic stellar energy deposition and
+  SNII delayed-cooling are separate paths.
+- DTD normalization, IMF conversion, event realization, source energy, WD
+  debit, momentum convention, and approval id are populated in the approved
+  baseline.  Metallicity sensitivity and full net-yield semantics remain
+  explicit follow-up work.
+- Approval id `FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ` is bound to source
+  staging commit `c6c8042b03406b9d69bc50434fe5d6af7f542be6` and the promotion
+  tool checksum in the sidecar.
 
 ## Independent audit disposition
 
@@ -78,8 +87,7 @@ the AGY prose: `n300c` is 6.4104173893 relative discrepancy (641.04%) and
 
 ## Next bundle
 
-Select and bind the physical source/population realization, then wrap the
-tested cell adapter with the actual AMR/MPI target-cell and RAMSES conserved
-array bridge.  Add multi-cell weighted conservation, restart/idempotence, and
-runtime-disabled negative tests before any activation change.  A source
-commit binding and named approval id remain mandatory.
+Connect the approved source/population realization to the actual runtime
+AMR/MPI target-cell selection.  Add multi-cell weighted conservation,
+restart/idempotence, and runtime-disabled negative tests before any activation
+change.

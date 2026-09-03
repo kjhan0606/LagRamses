@@ -121,11 +121,18 @@ contains
        ! The local series for expm1(z)/z also avoids loss of significance for
        ! small z.  This is a numerical contract, not a choice of DTD model.
        z = exponent * log_ratio
-       if (abs(z) <= 1.0e-4_stellar_dp) then
+       if (abs(z) <= 1.0e-1_stellar_dp) then
+          ! Keep the series through z**10 and use a wide handoff interval;
+          ! exp(z)-1 is otherwise least accurate exactly where e -> 0.
           exp_minus_one_over_z = 1.0_stellar_dp + z * (0.5_stellar_dp + &
                z * (1.0_stellar_dp / 6.0_stellar_dp + z * &
-               (1.0_stellar_dp / 24.0_stellar_dp + z / &
-               120.0_stellar_dp)))
+               (1.0_stellar_dp / 24.0_stellar_dp + z * &
+               (1.0_stellar_dp / 120.0_stellar_dp + z * &
+               (1.0_stellar_dp / 720.0_stellar_dp + z * &
+               (1.0_stellar_dp / 5040.0_stellar_dp + z * &
+               (1.0_stellar_dp / 40320.0_stellar_dp + z * &
+               (1.0_stellar_dp / 362880.0_stellar_dp + z * &
+               (1.0_stellar_dp / 3628800.0_stellar_dp)))))))))
        else
           exp_minus_one_over_z = (exp(z) - 1.0_stellar_dp) / z
        end if

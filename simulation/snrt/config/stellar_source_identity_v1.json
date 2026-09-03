@@ -24,8 +24,13 @@
     ],
     "required_objects": [
       "stellar_enrichment_config.o",
+      "stellar_snia_dtd.o",
+      "stellar_snia_population_contract.o",
+      "stellar_snia_physical_contract.o",
       "stellar_enrichment_contract.o",
+      "stellar_snia_event_ledger.o",
       "stellar_native_units.o",
+      "stellar_snia_cell_deposition.o",
       "stellar_progress_contract.o",
       "stellar_yield_tables.o",
       "stellar_yield_interpolation.o",
@@ -116,15 +121,20 @@
         "stellar_ramses_runtime.f90"
       ],
       "absent_in_native": [
-        "stellar_cell_deposition.f90",
         "stellar_ramses_bridge.f90",
         "stellar_ramses_mapped_bridge.f90"
       ],
       "identical_sources": [
         "stellar_enrichment_contract.f90",
+        "stellar_snia_dtd.f90",
+        "stellar_snia_population_contract.f90",
+        "stellar_snia_physical_contract.f90",
+        "stellar_snia_event_ledger.f90",
+        "stellar_snia_cell_deposition.f90",
         "stellar_source_increment.f90",
         "stellar_enrichment_driver.f90",
         "stellar_population_ledger.f90",
+        "stellar_cell_deposition.f90",
         "stellar_yield_audit.f90",
         "stellar_yield_backend.f90"
       ]
@@ -137,8 +147,13 @@
     "native_root": "simulation/snrt/native/phase0",
     "shared_contract_sources": [
       "stellar_enrichment_config.f90",
+      "stellar_snia_dtd.f90",
+      "stellar_snia_population_contract.f90",
+      "stellar_snia_physical_contract.f90",
       "stellar_enrichment_contract.f90",
+      "stellar_snia_event_ledger.f90",
       "stellar_native_units.f90",
+      "stellar_snia_cell_deposition.f90",
       "stellar_progress_contract.f90",
       "stellar_yield_tables.f90",
       "stellar_yield_interpolation.f90",

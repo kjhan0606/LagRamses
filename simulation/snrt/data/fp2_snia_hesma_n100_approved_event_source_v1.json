@@ -1,0 +1,92 @@
+{
+  "approval": {
+    "approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+    "canonical_conversion_allowed": true,
+    "production_ready": true,
+    "publication_ready": false,
+    "runtime_activation_allowed": false,
+    "scope": "physical SNIa baseline source; runtime AMR caller and full net-yield/metallicity sensitivity remain separately gated"
+  },
+  "conversion": {
+    "conversion_code_path": "simulation/snrt/tools/promote_hesma_snia_source.py",
+    "conversion_code_sha256": "3a831b6f99df0abb549eb62798340dab7aed99e01382930e9231dcf9f9d1923b",
+    "policy": "deterministic promotion from one explicit reviewed HESMA model; no profile correction or missing-element inference"
+  },
+  "element_order": [
+    "H",
+    "He",
+    "C",
+    "N",
+    "O",
+    "Ne",
+    "Mg",
+    "Si",
+    "S",
+    "Ca",
+    "Fe"
+  ],
+  "event": {
+    "decay_convention": "HESMA stable-element section after approximately 2 Gyr; adopted horizon is 2 Gyr",
+    "decay_horizon_yr": 2000000000.0,
+    "ejected_mass_msun_per_event": [
+      7.33e-15,
+      0.000831,
+      0.00304,
+      3.22e-06,
+      0.101,
+      0.00357,
+      0.0154,
+      0.287,
+      0.115,
+      0.0148,
+      0.74
+    ],
+    "energy_basis": "inner_zero_outer_half_bin spherical-average profile estimator",
+    "energy_erg_per_event": 1.5063100005966762e+51,
+    "isotope_to_project_element_policy": "use HESMA integrated stable-element section; free-proton column is H",
+    "momentum_g_cm_s_per_event": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "momentum_policy": "isotropic_zero_vector",
+    "net_yield_msun_per_event": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "net_yield_status": "not supplied by the integrated stable-element source; zero is diagnostic-only and never a gas-mass source",
+    "population_weight": 1.0,
+    "quantity_basis": "per_event",
+    "returned_mass_msun_per_event": 1.4004633930489443,
+    "terminal_remnant_msun_per_event": 0.0,
+    "untracked_ejecta_msun_per_event": 0.11981917304893708,
+    "wd_debit_msun_per_event": 1.4004633930489443
+  },
+  "gate": "F-P2",
+  "schema": "snrt-fp2-snia-hesma-event-source",
+  "schema_version": 1,
+  "source": {
+    "candidate_id": "hesma_model_archive_snia_profiles",
+    "citation": "Seitenzahl et al. 2013, Three-dimensional delayed-detonation models with nucleosynthesis for Type Ia supernovae; HESMA record yysd4-xap92",
+    "license": "CC-BY-4.0",
+    "manifest_sha256": "0a9c6f6695f002f93d30b4c5cce0a6b0abaa3efe93105c836d4aed633561d6df",
+    "model_id": "n100",
+    "normalized_source_path": "simulation/snrt/data/fp2_snia_hesma_n100_review_normalized.json",
+    "normalized_source_sha256": "f4586d1c953de3e777277414c73b9ffe22c96ee235e61b72b57c340ba169a8cf",
+    "package_sha256": "bb9325de2e07bf86acd1ef4abf7c950fb44e74e6513b8c9c88336d910f8814c0",
+    "record_id": "yysd4-xap92",
+    "source_commit_binding": "c6c8042b03406b9d69bc50434fe5d6af7f542be6",
+    "source_id": "hesma:yysd4-xap92:n100",
+    "source_version": "HESMA record publication date 2026-08-14"
+  },
+  "status": "approved_physical_baseline_runtime_gated"
+}

@@ -17,6 +17,7 @@ TOOL_PATH = Path(__file__).resolve()
 SNRT_ROOT = TOOL_PATH.parents[1]
 PROJECT_ROOT = SNRT_ROOT.parents[1]
 DEFAULT_SIDECAR = SNRT_ROOT / "config" / "fp2_snia_event_source_approval_sidecar_v1.json"
+APPROVED_STATUS = "approved_physical_baseline_runtime_gated"
 
 
 class SniaAdmissionError(ValueError):
@@ -61,14 +62,19 @@ def audit_sidecar(sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, Any]:
         or sidecar.get("gate") != "F-P2"
     ):
         raise SniaAdmissionError("unsupported F-P2 event-source approval sidecar")
-    if sidecar.get("status") != "blocked_review_only":
-        raise SniaAdmissionError("current F-P2 event-source sidecar must remain blocked_review_only")
+    status = sidecar.get("status")
+    if status not in ("blocked_review_only", APPROVED_STATUS):
+        raise SniaAdmissionError("unsupported F-P2 event-source sidecar status")
+    approved = status == APPROVED_STATUS
 
     artifacts = sidecar.get("artifacts")
     if not isinstance(artifacts, dict):
         raise SniaAdmissionError("F-P2 event-source sidecar artifacts are missing")
     checked: dict[str, dict[str, str]] = {}
-    for name in ("hesma_review_normalized", "hesma_asset_manifest", "hesma_source_audit"):
+    artifact_names = ["hesma_review_normalized", "hesma_asset_manifest", "hesma_source_audit"]
+    if approved:
+        artifact_names.append("approved_event_source")
+    for name in artifact_names:
         artifact = artifacts.get(name)
         if not isinstance(artifact, dict):
             raise SniaAdmissionError(f"artifact {name} is malformed")
@@ -103,8 +109,12 @@ def audit_sidecar(sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, Any]:
         raise SniaAdmissionError("review source_id disagrees with normalized artifact")
     if review_selection.get("model_id") != normalized_source.get("selected_model_id"):
         raise SniaAdmissionError("review model_id disagrees with normalized artifact")
-    if review_selection.get("selection_basis") != "explicit review fixture only; not a production source selection":
-        raise SniaAdmissionError("review selection basis overclaims production selection")
+    expected_selection_basis = (
+        "approved physical baseline; explicit n100 model and documented profile estimator"
+        if approved else "explicit review fixture only; not a production source selection"
+    )
+    if review_selection.get("selection_basis") != expected_selection_basis:
+        raise SniaAdmissionError("review selection basis disagrees with sidecar status")
 
     selected_model = normalized_source.get("selected_model_id")
     model_report = source_audit.get("model_reports", {}).get(selected_model)
@@ -131,7 +141,7 @@ def audit_sidecar(sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, Any]:
     physical = sidecar.get("physical_event_contract")
     if not isinstance(physical, dict):
         raise SniaAdmissionError("physical_event_contract is missing")
-    for key in (
+    physical_keys = (
         "decay_convention",
         "decay_horizon_yr",
         "isotope_to_project_element_policy",
@@ -140,18 +150,60 @@ def audit_sidecar(sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, Any]:
         "energy_erg_per_event",
         "momentum_g_cm_s_per_event",
         "population_weight",
-    ):
-        if physical.get(key) is not None:
-            raise SniaAdmissionError(f"physical event field must remain unset: {key}")
+    )
+    if not approved:
+        for key in physical_keys:
+            if physical.get(key) is not None:
+                raise SniaAdmissionError(f"physical event field must remain unset: {key}")
+    else:
+        required_approved = {
+            "decay_convention", "decay_horizon_yr", "isotope_to_project_element_policy",
+            "returned_mass_msun_per_event", "terminal_remnant_msun_per_event",
+            "wd_debit_msun_per_event", "energy_erg_per_event",
+            "momentum_g_cm_s_per_event", "momentum_policy", "thermal_coupling",
+            "metallicity_policy", "ejected_mass_msun_per_event",
+            "net_yield_msun_per_event", "source_commit_binding", "conversion_code_sha256",
+            "approval_id",
+        }
+        missing = [key for key in required_approved if physical.get(key) is None]
+        if missing:
+            raise SniaAdmissionError("approved physical fields are missing: " + ", ".join(sorted(missing)))
+        if physical.get("approval_id") != sidecar.get("approval", {}).get("approval_id"):
+            raise SniaAdmissionError("physical approval_id disagrees with sidecar approval")
+        if physical.get("momentum_policy") != "isotropic_zero_vector" or physical.get("momentum_g_cm_s_per_event") != [0.0, 0.0, 0.0]:
+            raise SniaAdmissionError("approved baseline must use an isotropic zero-vector momentum convention")
+        if physical.get("terminal_remnant_msun_per_event") != 0.0 or physical.get("wd_debit_msun_per_event") != physical.get("returned_mass_msun_per_event"):
+            raise SniaAdmissionError("approved normal SNIa source must close WD debit with zero terminal remnant")
+        ejecta = physical.get("ejected_mass_msun_per_event")
+        if not isinstance(ejecta, list) or len(ejecta) != 11 or any(float(value) < 0.0 for value in ejecta):
+            raise SniaAdmissionError("approved physical ejecta must be a non-negative 11-element vector")
+        if sum(float(value) for value in ejecta) > float(physical["returned_mass_msun_per_event"]) + 1.0e-10:
+            raise SniaAdmissionError("approved tracked ejecta exceed returned mass")
+        approved_asset = _read_json(_artifact_path(artifacts["approved_event_source"]["path"]))
+        if approved_asset.get("status") != APPROVED_STATUS:
+            raise SniaAdmissionError("approved event source has not been promoted")
+        event = approved_asset.get("event", {})
+        if event.get("returned_mass_msun_per_event") != physical.get("returned_mass_msun_per_event") or event.get("energy_erg_per_event") != physical.get("energy_erg_per_event"):
+            raise SniaAdmissionError("approved event asset disagrees with physical sidecar")
+        if approved_asset.get("approval", {}).get("approval_id") != sidecar.get("approval", {}).get("approval_id"):
+            raise SniaAdmissionError("approved event asset approval_id disagrees with sidecar")
 
     approval = sidecar.get("approval")
     if not isinstance(approval, dict):
         raise SniaAdmissionError("approval section is missing")
-    if approval.get("approval_id") is not None:
-        raise SniaAdmissionError("approval_id must remain null")
-    for key in ("canonical_conversion_allowed", "runtime_activation_allowed", "production_ready", "publication_ready"):
-        if approval.get(key) is not False:
-            raise SniaAdmissionError(f"approval.{key} must remain false")
+    if approved:
+        if not isinstance(approval.get("approval_id"), str) or not approval["approval_id"]:
+            raise SniaAdmissionError("approved sidecar requires a named approval_id")
+        if approval.get("canonical_conversion_allowed") is not True:
+            raise SniaAdmissionError("approved sidecar must permit the selected canonical event asset")
+        if approval.get("runtime_activation_allowed") is not False or approval.get("production_ready") is not True:
+            raise SniaAdmissionError("approved sidecar must remain runtime-gated but production-ready as a source")
+    else:
+        if approval.get("approval_id") is not None:
+            raise SniaAdmissionError("approval_id must remain null")
+        for key in ("canonical_conversion_allowed", "runtime_activation_allowed", "production_ready", "publication_ready"):
+            if approval.get(key) is not False:
+                raise SniaAdmissionError(f"approval.{key} must remain false")
 
     promotion = sidecar.get("promotion_requirements")
     if not isinstance(promotion, dict):
@@ -160,10 +212,12 @@ def audit_sidecar(sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, Any]:
         raise SniaAdmissionError("promotion requirements schema mismatch")
     if promotion.get("schema_version") != 1:
         raise SniaAdmissionError("promotion requirements schema version mismatch")
-    if promotion.get("status") != "requirements_only_not_approval":
-        raise SniaAdmissionError("promotion requirements must remain non-approval")
-    if promotion.get("production_approval_status") != "not_approved":
-        raise SniaAdmissionError("promotion requirements must remain unapproved")
+    expected_promotion_status = "satisfied_for_approved_physical_baseline" if approved else "requirements_only_not_approval"
+    expected_approval_status = APPROVED_STATUS if approved else "not_approved"
+    if promotion.get("status") != expected_promotion_status:
+        raise SniaAdmissionError("promotion requirements status disagrees with approval state")
+    if promotion.get("production_approval_status") != expected_approval_status:
+        raise SniaAdmissionError("promotion requirements approval status disagrees with approval state")
     required_fields = promotion.get("required_fields")
     if not isinstance(required_fields, list) or list(required_fields) != list(PROMOTION_REQUIRED_FIELDS):
         raise SniaAdmissionError("promotion required_fields are malformed")
@@ -181,16 +235,20 @@ def audit_sidecar(sidecar_path: Path = DEFAULT_SIDECAR) -> dict[str, Any]:
         "schema": "snrt-fp2-snia-event-source-admission-audit",
         "schema_version": 1,
         "gate": "F-P2",
-        "status": "blocked_review_only",
-        "production_ready": False,
+        "status": status,
+        "production_ready": approval.get("production_ready") is True if approved else False,
         "runtime_activation_allowed": False,
         "artifacts": checked,
         "review_selection": review_selection,
-        "physical_fields_unset": True,
+        "physical_fields_unset": not approved,
         "sidecar_approval": approval,
         "promotion_requirements": promotion,
         "audit_code_sha256": _sha256(TOOL_PATH),
-        "interpretation": "HESMA source wiring is checksum-consistent, but no SNIa physical event contract is approved.",
+        "interpretation": (
+            "HESMA yysd4-xap92 n100 is approved as the physical baseline; runtime remains disabled until the AMR/MPI caller is connected."
+            if approved else
+            "HESMA source wiring is checksum-consistent, but no SNIa physical event contract is approved."
+        ),
     }
 
 

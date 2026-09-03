@@ -6,19 +6,31 @@ program fp2_snia_population_contract_test
        snia_population_contract_err_unapproved, &
        snia_population_contract_err_parameter, &
        snia_population_contract_err_realization, snia_realization_expectation, &
-       snia_realization_poisson, snia_metallicity_factor_supplied, &
-       validate_snia_population_realization, evaluate_snia_interval_events
+       snia_realization_poisson, snia_binary_fraction_baked_into_rate, &
+       snia_binary_fraction_scales_rate, snia_metallicity_factor_supplied, &
+       validate_snia_population_realization, &
+       read_snia_population_realization_namelist, evaluate_snia_interval_events
   implicit none
 
   type(snia_population_realization_t) :: realization
+  type(snia_population_realization_t) :: loaded_realization
   real(stellar_dp) :: expected_events, repeat_events
   real(stellar_dp) :: first_interval, second_interval
-  integer :: failures, ierr
+  integer :: failures, ierr, unit, loader_ierr
 
   failures = 0
   call validate_snia_population_realization(realization, ierr)
   call expect(ierr == snia_population_contract_err_unapproved, &
        'unapproved population realization is rejected', failures)
+
+  open(newunit=unit,status='scratch',action='readwrite')
+  write(unit,'(A)') '&snia_population_realization approved=.false. /'
+  rewind(unit)
+  call read_snia_population_realization_namelist(unit, loaded_realization, &
+       loader_ierr)
+  close(unit)
+  call expect(loader_ierr == snia_population_contract_err_unapproved, &
+       'review-only namelist is rejected by the runtime loader', failures)
 
   realization%approved = .true.
   realization%population_source_id = 'unit-binary-population'
@@ -31,7 +43,9 @@ program fp2_snia_population_contract_test
   realization%power_law_index = -1.0_stellar_dp
   realization%events_per_initial_msun = 1.0e-3_stellar_dp
   realization%event_realization_policy = snia_realization_expectation
+  realization%binary_fraction_policy = snia_binary_fraction_baked_into_rate
   realization%metallicity_policy = snia_metallicity_factor_supplied
+  realization%metallicity_factor_source_id = 'unit-metallicity-policy'
   realization%source_commit_binding = &
        '0123456789abcdef0123456789abcdef01234567'
   realization%approval_id = 'unit-test-only'
@@ -39,12 +53,41 @@ program fp2_snia_population_contract_test
   call expect(ierr == snia_population_contract_ok, &
        'complete approved realization contract is valid', failures)
 
+  open(newunit=unit,status='scratch',action='readwrite')
+  write(unit,'(A)') '&snia_population_realization'
+  write(unit,'(A)') ' approved=.true., population_source_id="unit-binary-population",'
+  write(unit,'(A)') ' population_model_id=1, imf_id=1, binary_fraction=0.5,'
+  write(unit,'(A)') ' binary_fraction_policy=1, imf_conversion_factor=2.0,'
+  write(unit,'(A)') ' minimum_delay_gyr=0.01, maximum_delay_gyr=10.0,'
+  write(unit,'(A)') ' power_law_index=-1.0, events_per_initial_msun=1.0e-3,'
+  write(unit,'(A)') ' event_realization_policy=1, metallicity_policy=1,'
+  write(unit,'(A)') ' metallicity_factor_source_id="unit-metallicity-policy",'
+  write(unit,'(A)') ' source_commit_binding="0123456789abcdef0123456789abcdef01234567",'
+  write(unit,'(A)') ' approval_id="unit-test-only" /'
+  rewind(unit)
+  call read_snia_population_realization_namelist(unit, loaded_realization, &
+       loader_ierr)
+  close(unit)
+  call expect(loader_ierr == snia_population_contract_ok .and. &
+       loaded_realization%population_source_id == realization%population_source_id .and. &
+       loaded_realization%binary_fraction_policy == &
+       realization%binary_fraction_policy .and. &
+       loaded_realization%metallicity_factor_source_id == &
+       realization%metallicity_factor_source_id, &
+       'runtime loader populates the complete approved realization type', failures)
+
   call evaluate_snia_interval_events(realization, 100.0_stellar_dp, &
        0.01_stellar_dp, 0.1_stellar_dp, 0.5_stellar_dp, expected_events, ierr)
   call expect(ierr == snia_population_contract_ok, &
        'interval expectation is evaluated from the realization contract', failures)
   call expect_close(expected_events, 1.0_stellar_dp / 30.0_stellar_dp, &
        'IMF conversion and metallicity factor are applied once', failures)
+  realization%binary_fraction_policy = snia_binary_fraction_scales_rate
+  call evaluate_snia_interval_events(realization, 100.0_stellar_dp, &
+       0.01_stellar_dp, 0.1_stellar_dp, 0.5_stellar_dp, repeat_events, ierr)
+  call expect_close(repeat_events, 1.0_stellar_dp / 60.0_stellar_dp, &
+       'explicit binary-fraction scaling policy changes the event rate', failures)
+  realization%binary_fraction_policy = snia_binary_fraction_baked_into_rate
   call evaluate_snia_interval_events(realization, 100.0_stellar_dp, &
        0.01_stellar_dp, 0.1_stellar_dp, 0.5_stellar_dp, repeat_events, ierr)
   call expect(ierr == snia_population_contract_ok, &

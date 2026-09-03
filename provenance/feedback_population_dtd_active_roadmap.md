@@ -74,10 +74,12 @@ F-P3 감사가 승인되며, 현재 `review_only_unresolved` 정책이 승인된
 
 ## Gate F-P2: SNIa DTD and binary event model
 
-Implementation status (2026-09-02): the interval-integrated mathematical
+Implementation status (2026-09-03): the interval-integrated mathematical
 kernel, expected-event ledger, DTD/event-yield literature candidate matrices,
 fail-closed contract, and source-normalized event-yield converter are
-implemented and tested; the physical event model remains blocked.
+implemented and tested.  The Maoz field DTD plus HESMA yysd4-xap92/n100
+physical baseline is now approved, while runtime activation remains gated on
+the AMR/MPI caller.
 The contract audit now checks the candidate matrix and dossier references in
 addition to the source mirrors. See
 `fp2_snia_dtd_contract_2026-09-02.md` and
@@ -140,13 +142,24 @@ does not select AMR neighbours or perform MPI exchange, and it is not called
 by the runtime.  No SNIa event is sent to AMR cells and no SNIa thermal
 coupling is active at runtime.
 
-The next implementation bundle is the runtime-facing physical SNIa source
-contract: an approved source/population realization, connection of the tested
-RAMSES bridge to the actual AMR/MPI target-cell selection, and versioned
-source/approval commit binding.  The review-only population realization
-contract now defines all required fields without populating them.  Until those
-fields are populated
-and independently reviewed, F-P2 remains blocked.
+The follow-up implementation bundle (2026-09-03) adds the actual
+RAMSES-facing `unew(local_cell,variable)` adapter: it validates local target
+indices, MPI owner rank, target uniqueness, and weighted multi-cell geometry,
+deposits through variable-major scratch storage, and scatters only after the
+scratch transaction succeeds.  The production bridge and the actual
+`stellar_ramses_runtime`/`feedback.kjhan3` objects now compile together under
+the `/gpfs` Makefile; the adapter remains an explicit seam because the
+runtime does not yet select AMR neighbours or activate SNIa.  The
+source-identity manifest now includes all SNIa objects actually linked into
+the production binary, and the historical Fable reproduction test records
+F3/F4/F7/F8 as resolved in the current tree rather than replaying them as
+active defects.
+
+The next implementation bundle is therefore the runtime-facing physical SNIa
+caller: connect the approved source/population realization to the actual
+AMR/MPI target list, then add restart/idempotence and multi-cell conservation
+evidence.  Full net-yield and metallicity sensitivity remain separate
+publication extensions.
 
 - Select and cite the DTD family, minimum/maximum delay, normalization per unit
   initial SSP mass, progenitor/binary assumptions, metallicity dependence,

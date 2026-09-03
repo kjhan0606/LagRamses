@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Admission checks for the review-only F-P2 SNIa DTD contract."""
+"""Admission checks for the approved-but-runtime-gated F-P2 SNIa contract."""
 
 from __future__ import annotations
 
@@ -31,20 +31,35 @@ def _audit(path: Path) -> dict:
     assert payload["schema"] == "snrt-fp2-snia-dtd-contract"
     assert payload["gate"] == "F-P2"
     errors = []
-    if payload.get("status") != "review_only_not_approved":
-        errors.append("contract is not review-only")
+    if payload.get("status") != "approved_physical_baseline_runtime_gated":
+        errors.append("contract is not the approved physical baseline")
     if payload.get("activation", {}).get("enabled") is not False:
         errors.append("activation must remain disabled")
     if payload.get("activation", {}).get("production_allowed") is not False:
         errors.append("production activation must remain disabled")
     parameters = payload.get("parameters", {})
     for key in ("minimum_delay_gyr", "maximum_delay_gyr", "events_per_initial_msun"):
-        if parameters.get(key) is not None:
-            errors.append(f"{key} must remain unselected")
+        if not isinstance(parameters.get(key), (int, float)) or parameters[key] <= 0.0:
+            errors.append(f"{key} is not approved")
+    expected_parameters = {
+        "minimum_delay_gyr": 0.04,
+        "maximum_delay_gyr": 13.7,
+        "events_per_initial_msun": 0.0013,
+    }
+    for key, expected in expected_parameters.items():
+        if parameters.get(key) != expected:
+            errors.append(f"{key} disagrees with the approved Maoz baseline")
     event_source = payload.get("event_source", {})
-    for key in ("yield_source_id", "yield_source_sha256", "energy_per_event_erg", "momentum_per_event_g_cm_s", "composition_basis"):
-        if event_source.get(key) is not None:
-            errors.append(f"{key} must remain unselected")
+    for key in (
+        "yield_source_id", "yield_source_sha256", "energy_per_event_erg",
+        "momentum_per_event_g_cm_s", "composition_basis",
+        "wd_reservoir_shortfall_policy", "source_commit_binding",
+        "conversion_code_sha256", "approval_id",
+    ):
+        if event_source.get(key) is None:
+            errors.append(f"{key} is not approved")
+    if event_source.get("yield_source_id") != "hesma:yysd4-xap92:n100":
+        errors.append("yield source disagrees with the approved HESMA baseline")
     if not isinstance(payload.get("activation", {}).get("requires"), list) or not payload["activation"]["requires"]:
         errors.append("approval prerequisites are missing")
     return {"status": "pass" if not errors else "blocked", "errors": errors}
@@ -55,14 +70,14 @@ def main() -> int:
     report = _audit(path)
     assert report["status"] == "pass", report
     audit_report = audit_contract()
-    assert audit_report["status"] == "review_only_not_approved", audit_report
+    assert audit_report["status"] == "approved_physical_baseline_runtime_gated", audit_report
     assert audit_report["failures"] == [], audit_report
     assert audit_report["candidate_matrix"]["candidate_count"] == 4
-    assert audit_report["candidate_matrix"]["selected_candidate_id"] is None
-    assert audit_report["candidate_matrix"]["selected_approval_id"] is None
+    assert audit_report["candidate_matrix"]["selected_candidate_id"] == "field_observed_powerlaw_maoz2012"
+    assert audit_report["candidate_matrix"]["selected_approval_id"] == "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
     assert audit_report["event_yield_matrix"]["candidate_count"] == 3
-    assert audit_report["event_yield_matrix"]["selected_candidate_id"] is None
-    assert audit_report["event_yield_matrix"]["selected_approval_id"] is None
+    assert audit_report["event_yield_matrix"]["selected_candidate_id"] == "hesma_model_archive_snia_profiles"
+    assert audit_report["event_yield_matrix"]["selected_approval_id"] == "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
     event_matrix_payload = json.loads(
         (ROOT / "config" / "fp2_snia_event_yield_candidate_matrix_v1.json").read_text(
             encoding="utf-8"
@@ -97,14 +112,14 @@ def main() -> int:
     assert audit_report["event_yield_hesma_profile_estimator_comparison"]["status"] == "review_only_diagnostic"
     assert audit_report["event_yield_hesma_profile_estimator_comparison"]["model_count"] == 15
     assert audit_report["event_yield_hesma_profile_estimator_comparison"]["selected_estimator"] is None
-    assert audit_report["event_yield_hesma_selection_packet"]["status"] == "review_only_selection_pending"
+    assert audit_report["event_yield_hesma_selection_packet"]["status"] == "approved_physical_baseline_runtime_gated"
     assert audit_report["event_yield_hesma_selection_packet"]["model_count"] == 15
-    assert audit_report["event_yield_hesma_selection_packet"]["selected_model_id"] is None
-    assert audit_report["event_yield_hesma_selection_packet"]["selected_population_mixture"] is None
-    assert audit_report["event_source_approval_sidecar"]["status"] == "blocked_review_only"
-    assert audit_report["event_source_approval_sidecar"]["production_ready"] is False
+    assert audit_report["event_yield_hesma_selection_packet"]["selected_model_id"] == "n100"
+    assert audit_report["event_yield_hesma_selection_packet"]["selected_population_mixture"] == "single_model_n100"
+    assert audit_report["event_source_approval_sidecar"]["status"] == "approved_physical_baseline_runtime_gated"
+    assert audit_report["event_source_approval_sidecar"]["production_ready"] is True
     assert audit_report["event_source_approval_sidecar"]["runtime_activation_allowed"] is False
-    assert audit_report["event_source_approval_sidecar"]["promotion_requirements_status"] == "requirements_only_not_approval"
+    assert audit_report["event_source_approval_sidecar"]["promotion_requirements_status"] == "satisfied_for_approved_physical_baseline"
     assert audit_report["native_physical_contract"]["sha256"]
     assert audit_report["production_physical_contract"]["sha256"] == audit_report["native_physical_contract"]["sha256"]
     assert audit_report["native_snia_cell_deposition"]["sha256"]
@@ -145,7 +160,7 @@ def main() -> int:
         assert audit_contract(selected_path)["status"] == "blocked_contract_integrity"
 
         bad_matrix = copy.deepcopy(matrix)
-        bad_matrix["selected_candidate_id"] = "field_observed_powerlaw_maoz2012"
+        bad_matrix["selected_candidate_id"] = "cluster_observed_powerlaw_freundlich2021"
         bad_matrix_path = ROOT / "data" / "fp2_snia_dtd_bad_matrix_test.json"
         try:
             bad_matrix_path.write_text(json.dumps(bad_matrix), encoding="utf-8")
@@ -154,7 +169,7 @@ def main() -> int:
             bad_contract_path = _write(bad_contract, temporary)
             bad_report = audit_contract(bad_contract_path)
             assert bad_report["status"] == "blocked_contract_integrity"
-            assert "candidate_matrix_candidate_must_remain_unselected" in bad_report["failures"]
+            assert "candidate_matrix_selected_candidate_disagrees_with_contract" in bad_report["failures"]
         finally:
             bad_matrix_path.unlink(missing_ok=True)
 
@@ -172,7 +187,7 @@ def main() -> int:
             bad_event_contract_path = _write(bad_event_contract, temporary)
             bad_event_report = audit_contract(bad_event_contract_path)
             assert bad_event_report["status"] == "blocked_contract_integrity"
-            assert "event_yield_matrix_candidate_must_remain_unselected" in bad_event_report["failures"]
+            assert "event_yield_matrix_selected_candidate_disagrees_with_contract" in bad_event_report["failures"]
         finally:
             event_matrix_path.unlink(missing_ok=True)
 

@@ -1,5 +1,9 @@
 {
   "artifacts": {
+    "approved_event_source": {
+      "path": "simulation/snrt/data/fp2_snia_hesma_n100_approved_event_source_v1.json",
+      "sha256": "a93e22a32d7566c711601cc92d6554c27caaa5ed7e3ad68dabefb02be06e7e5f"
+    },
     "hesma_asset_manifest": {
       "path": "manifests/fp2_snia_hesma_yysd4_review_v1.json",
       "sha256": "0a9c6f6695f002f93d30b4c5cce0a6b0abaa3efe93105c836d4aed633561d6df"
@@ -13,14 +17,15 @@
       "sha256": "5463d58733df8b715fd1ec262b9164cf7b596ad0c9338af98098b8170ea1d510"
     }
   },
-  "audit_code_sha256": "6e992d1c431437897817ad0bb0a7151cae5a394ddbcda3e2d0381c555cb78de5",
+  "audit_code_sha256": "df617705316516d9c425fd614e3450f407e61e1b0b854667ef9dadebed8e57d1",
   "gate": "F-P2",
-  "interpretation": "HESMA source wiring is checksum-consistent, but no SNIa physical event contract is approved.",
-  "physical_fields_unset": true,
-  "production_ready": false,
+  "interpretation": "HESMA yysd4-xap92 n100 is approved as the physical baseline; runtime remains disabled until the AMR/MPI caller is connected.",
+  "physical_fields_unset": false,
+  "production_ready": true,
   "promotion_requirements": {
     "artifact_policy": "all promotion artifacts use repository-relative or path-free canonical payloads and bind to a source commit",
-    "production_approval_status": "not_approved",
+    "production_approval_status": "approved_physical_baseline_runtime_gated",
+    "remaining_runtime_gate": "connect the tested bridge to the actual AMR/MPI target-selection caller",
     "required_fields": [
       "selected_model_or_population_mixture",
       "minimum_delay_gyr",
@@ -45,23 +50,23 @@
     "runtime_activation_allowed": false,
     "schema": "snrt-fp2-snia-event-source-promotion-requirements",
     "schema_version": 1,
-    "status": "requirements_only_not_approval",
+    "status": "satisfied_for_approved_physical_baseline",
     "warning_policy": "a selected model must have no unresolved physical warnings or quarantine flags"
   },
   "review_selection": {
     "model_id": "n100",
-    "selection_basis": "explicit review fixture only; not a production source selection",
+    "selection_basis": "approved physical baseline; explicit n100 model and documented profile estimator",
     "source_id": "hesma:yysd4-xap92"
   },
   "runtime_activation_allowed": false,
   "schema": "snrt-fp2-snia-event-source-admission-audit",
   "schema_version": 1,
   "sidecar_approval": {
-    "approval_id": null,
-    "canonical_conversion_allowed": false,
-    "production_ready": false,
+    "approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+    "canonical_conversion_allowed": true,
+    "production_ready": true,
     "publication_ready": false,
     "runtime_activation_allowed": false
   },
-  "status": "blocked_review_only"
+  "status": "approved_physical_baseline_runtime_gated"
 }

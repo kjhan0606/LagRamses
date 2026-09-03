@@ -11,6 +11,7 @@ module stellar_snia_event_ledger
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        channel_snia
   use stellar_enrichment_contract, only: stellar_source_t, clear_source
+  use stellar_snia_physical_contract, only: snia_event_budget_t
   implicit none
 
   private
@@ -21,6 +22,7 @@ module stellar_snia_event_ledger
   integer, parameter, public :: snia_event_ledger_err_mass = 4
 
   public :: build_snia_event_source
+  public :: build_snia_event_source_from_budget
 
 contains
 
@@ -84,5 +86,56 @@ contains
        ierr = snia_event_ledger_err_nonfinite
     end if
   end subroutine build_snia_event_source
+
+  subroutine build_snia_event_source_from_budget(budget, source, ierr)
+    ! The physical budget is the single event record.  This adapter is the
+    ! only conversion into the common stellar source contract, preventing an
+    ! independently populated element record from drifting from mass/energy.
+    type(snia_event_budget_t), intent(in) :: budget
+    type(stellar_source_t), intent(out) :: source
+    integer, intent(out) :: ierr
+    real(stellar_dp) :: tracked_ejecta, scale
+
+    call clear_source(source)
+    ierr = snia_event_ledger_ok
+    if (.not. ieee_is_finite(budget%wd_reservoir_debit) .or. &
+         .not. ieee_is_finite(budget%returned_mass) .or. &
+         .not. ieee_is_finite(budget%terminal_remnant_mass) .or. &
+         .not. ieee_is_finite(budget%energy) .or. &
+         .not. all(ieee_is_finite(budget%momentum)) .or. &
+         .not. all(ieee_is_finite(budget%ejected_mass)) .or. &
+         .not. all(ieee_is_finite(budget%net_yield)) .or. &
+         budget%wd_reservoir_debit < 0.0_stellar_dp .or. &
+         budget%returned_mass < 0.0_stellar_dp .or. &
+         budget%terminal_remnant_mass < 0.0_stellar_dp .or. &
+         budget%energy < 0.0_stellar_dp .or. &
+         minval(budget%ejected_mass) < 0.0_stellar_dp) then
+       ierr = snia_event_ledger_err_argument
+       return
+    end if
+    scale = max(1.0_stellar_dp, budget%wd_reservoir_debit, &
+         budget%returned_mass, budget%terminal_remnant_mass)
+    if (abs(budget%returned_mass + budget%terminal_remnant_mass - &
+         budget%wd_reservoir_debit) > 1.0e-12_stellar_dp * scale) then
+       ierr = snia_event_ledger_err_mass
+       return
+    end if
+    tracked_ejecta = sum(budget%ejected_mass)
+    if (tracked_ejecta > budget%returned_mass + &
+         1.0e-12_stellar_dp * max(1.0_stellar_dp, budget%returned_mass)) then
+       ierr = snia_event_ledger_err_mass
+       return
+    end if
+    source%ejected_mass = budget%ejected_mass
+    source%net_yield = budget%net_yield
+    source%returned_mass = budget%returned_mass
+    source%energy = budget%energy
+    source%momentum = budget%momentum
+    source%channel_returned_mass(channel_snia) = budget%returned_mass
+    source%channel_energy(channel_snia) = budget%energy
+    source%channel_momentum(channel_snia,:) = budget%momentum
+    source%channel_ejected_mass(channel_snia,:) = budget%ejected_mass
+    source%channel_net_yield(channel_snia,:) = budget%net_yield
+  end subroutine build_snia_event_source_from_budget
 
 end module stellar_snia_event_ledger

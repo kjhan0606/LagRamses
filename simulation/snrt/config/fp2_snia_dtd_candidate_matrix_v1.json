@@ -2,10 +2,10 @@
   "schema": "snrt-fp2-snia-dtd-candidate-matrix",
   "schema_version": 1,
   "gate": "F-P2",
-  "status": "review_only_no_candidate_selected",
+  "status": "approved_baseline_selection_runtime_gated",
   "selection_rule": "A candidate must specify its population basis, delay support, normalization convention, source-frame event yields, energy/momentum, metallicity dependence, license, and conversion checksum before approval.",
-  "selected_candidate_id": null,
-  "selected_approval_id": null,
+  "selected_candidate_id": "field_observed_powerlaw_maoz2012",
+  "selected_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
   "candidates": [
     {
       "candidate_id": "field_observed_powerlaw_maoz2012",
@@ -22,12 +22,10 @@
       "imf_convention": "Kroupa-like convention in the source analysis; project IMF conversion must be explicit",
       "population_and_binary_semantics": "empirical impulse response; progenitor channel is not uniquely identified",
       "project_role": "primary_field_baseline_candidate",
-      "status": "candidate_not_approved",
+      "status": "approved_baseline",
       "blockers": [
-        "project IMF and binary normalization not yet approved",
-        "event-yield source must be separately selected",
-        "metallicity/environment dependence is not closed",
-        "source package license and conversion checksum are not staged"
+        "binary fraction is recorded as bookkeeping only because the empirical DTD normalization already includes the binary population",
+        "the selected HESMA event-yield source supplies the event composition; metallicity-sensitive DTD alternatives remain systematic comparisons"
       ]
     },
     {
@@ -92,8 +90,8 @@
   ],
   "decision": {
     "current_recommendation": "Use the field-observed power-law as the baseline candidate for sensitivity design, while retaining the extended-DTD GCE result as a systematic comparison. Do not write either into the production contract yet.",
-    "production_source_id": null,
-    "production_approval_id": null,
-    "runtime_activation_allowed": false
+      "production_source_id": "field_observed_powerlaw_maoz2012",
+      "production_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+      "runtime_activation_allowed": false
   }
 }

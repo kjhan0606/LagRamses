@@ -4,10 +4,13 @@ program fp2_snia_event_ledger_test
   use stellar_enrichment_contract, only: stellar_source_t
   use stellar_snia_event_ledger, only: snia_event_ledger_ok, &
        snia_event_ledger_err_argument, snia_event_ledger_err_mass, &
-       build_snia_event_source
+       build_snia_event_source, build_snia_event_source_from_budget
+  use stellar_snia_physical_contract, only: snia_event_budget_t
   implicit none
 
   type(stellar_source_t) :: source
+  type(stellar_source_t) :: budget_source
+  type(snia_event_budget_t) :: budget
   real(stellar_dp) :: ejecta(n_stellar_elements), net_yield(n_stellar_elements)
   real(stellar_dp) :: momentum(3), expected_events, returned_mass, energy
   real(stellar_dp) :: tracked, scale
@@ -50,6 +53,19 @@ program fp2_snia_event_ledger_test
   call expect(abs(source%returned_mass - sum(source%ejected_mass) - &
        expected_events * (returned_mass - tracked)) < 1.0e-12_stellar_dp * expected_events * scale, &
        'untracked event residual is preserved', failures)
+
+  budget%wd_reservoir_debit = expected_events * returned_mass
+  budget%returned_mass = expected_events * returned_mass
+  budget%terminal_remnant_mass = 0.0_stellar_dp
+  budget%energy = expected_events * energy
+  budget%momentum = expected_events * momentum
+  budget%ejected_mass = expected_events * ejecta
+  budget%net_yield = expected_events * net_yield
+  call build_snia_event_source_from_budget(budget, budget_source, ierr)
+  call expect(ierr == snia_event_ledger_ok .and. &
+       abs(budget_source%returned_mass - source%returned_mass) < 1.0e-12_stellar_dp .and. &
+       all(abs(budget_source%ejected_mass-source%ejected_mass) < 1.0e-12_stellar_dp), &
+       'physical event budget is the single source of deposited composition', failures)
 
   call build_snia_event_source(expected_events, returned_mass, ejecta, &
        net_yield, energy, momentum, source, ierr)

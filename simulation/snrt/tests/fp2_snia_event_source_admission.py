@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the fail-closed F-P2 SNIa event-source sidecar."""
+"""Tests for the approved-but-runtime-gated F-P2 SNIa event-source sidecar."""
 
 from __future__ import annotations
 
@@ -22,14 +22,14 @@ from audit_fp2_snia_event_source_admission import SniaAdmissionError, audit_side
 def main() -> int:
     sidecar_path = ROOT / "config" / "fp2_snia_event_source_approval_sidecar_v1.json"
     report = audit_sidecar(sidecar_path)
-    assert report["status"] == "blocked_review_only"
-    assert report["production_ready"] is False
+    assert report["status"] == "approved_physical_baseline_runtime_gated"
+    assert report["production_ready"] is True
     assert report["runtime_activation_allowed"] is False
-    assert report["physical_fields_unset"] is True
+    assert report["physical_fields_unset"] is False
     assert report["review_selection"]["model_id"] == "n100"
-    assert len(report["artifacts"]) == 3
-    assert report["promotion_requirements"]["status"] == "requirements_only_not_approval"
-    assert report["promotion_requirements"]["production_approval_status"] == "not_approved"
+    assert len(report["artifacts"]) == 4
+    assert report["promotion_requirements"]["status"] == "satisfied_for_approved_physical_baseline"
+    assert report["promotion_requirements"]["production_approval_status"] == "approved_physical_baseline_runtime_gated"
     assert report["promotion_requirements"]["runtime_activation_allowed"] is False
 
     payload = json.loads(sidecar_path.read_text(encoding="utf-8"))

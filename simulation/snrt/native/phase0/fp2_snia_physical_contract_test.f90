@@ -2,8 +2,10 @@ program fp2_snia_physical_contract_test
   use stellar_enrichment_config, only: stellar_dp
   use stellar_snia_physical_contract, only: snia_physical_contract_t, &
        snia_event_budget_t, snia_contract_ok, snia_contract_err_unapproved, &
+       snia_contract_err_argument, &
        snia_contract_err_reservoir, snia_contract_err_mass, &
-       snia_contract_err_momentum, snia_wd_debit_per_event, &
+       snia_contract_err_momentum, snia_contract_err_yield, snia_wd_debit_per_event, &
+       snia_shortfall_reject_event_interval, &
        snia_momentum_source_frame_vector, snia_momentum_isotropic_zero_vector, &
        snia_momentum_radial_magnitude, validate_snia_physical_contract, &
        resolve_snia_event_momentum, build_snia_event_budget
@@ -21,15 +23,30 @@ program fp2_snia_physical_contract_test
 
   contract%approved = .true.
   contract%wd_debit_policy = snia_wd_debit_per_event
+  contract%shortfall_policy = snia_shortfall_reject_event_interval
   contract%momentum_policy = snia_momentum_source_frame_vector
   contract%returned_mass_per_event = 1.30_stellar_dp
-  contract%terminal_remnant_per_event = 0.0_stellar_dp
+  contract%terminal_remnant_per_event = 0.10_stellar_dp
   contract%wd_debit_per_event = 1.40_stellar_dp
   contract%energy_per_event = 1.0e51_stellar_dp
   contract%momentum_per_event = (/1.0e40_stellar_dp, -2.0e39_stellar_dp, &
        3.0e39_stellar_dp/)
+  contract%yield_source_id = 'unit-yield-source'
+  contract%yield_source_sha256 = &
+       '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  contract%source_commit_binding = '0123456789abcdef0123456789abcdef01234567'
+  contract%conversion_code_sha256 = &
+       'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789'
+  contract%approval_id = 'unit-test-only'
+  contract%ejected_mass_per_event(1) = 1.0_stellar_dp
   call validate_snia_physical_contract(contract, ierr)
   call expect(ierr == snia_contract_ok, 'explicit approved contract is valid', failures)
+
+  contract%shortfall_policy = 0
+  call validate_snia_physical_contract(contract, ierr)
+  call expect(ierr == snia_contract_err_argument, &
+       'SNIa reservoir shortfall policy must be explicit', failures)
+  contract%shortfall_policy = snia_shortfall_reject_event_interval
 
   call build_snia_event_budget(contract, 2.0_stellar_dp, 3.0_stellar_dp, &
        budget, ierr)
@@ -38,6 +55,10 @@ program fp2_snia_physical_contract_test
        'WD reservoir debit scales by event count', failures)
   call expect(abs(budget%returned_mass - 2.6_stellar_dp) < 1.0e-12_stellar_dp, &
        'returned mass scales by event count', failures)
+  call expect(abs(budget%terminal_remnant_mass - 0.2_stellar_dp) < 1.0e-12_stellar_dp, &
+       'terminal remnant scales by event count', failures)
+  call expect(abs(budget%ejected_mass(1) - 2.0_stellar_dp) < 1.0e-12_stellar_dp, &
+       'tracked SNIa ejecta scales by event count', failures)
   call expect(all(abs(budget%momentum - 2.0_stellar_dp * &
        contract%momentum_per_event) < 1.0e28_stellar_dp), &
        'signed source-frame momentum is preserved', failures)
@@ -53,6 +74,12 @@ program fp2_snia_physical_contract_test
   call expect(ierr == snia_contract_err_mass, &
        'event mass exceeding WD debit is rejected', failures)
   contract%returned_mass_per_event = 1.30_stellar_dp
+
+  contract%terminal_remnant_per_event = 0.0_stellar_dp
+  call validate_snia_physical_contract(contract, ierr)
+  call expect(ierr == snia_contract_err_mass, &
+       'WD mass deficit is rejected rather than assigned to living stars', failures)
+  contract%terminal_remnant_per_event = 0.10_stellar_dp
 
   contract%momentum_policy = snia_momentum_isotropic_zero_vector
   call validate_snia_physical_contract(contract, ierr)

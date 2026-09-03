@@ -2,31 +2,36 @@
   "schema": "snrt-fp2-snia-population-realization-contract",
   "schema_version": 1,
   "gate": "F-P2",
-  "status": "review_only_not_approved",
-  "purpose": "Declare the binary-population, IMF, DTD, metallicity, and event-realization inputs without selecting production physics.",
+  "status": "approved_physical_baseline_runtime_gated",
+  "purpose": "Approved SNIa population baseline: the field-observed Maoz et al. DTD on the project Kroupa IMF. Runtime activation remains gated until the AMR/MPI event caller is connected.",
   "population": {
-    "population_source_id": null,
-    "population_model": null,
-    "imf_id": null,
-    "binary_fraction": null,
-    "imf_conversion_factor": null,
-    "source_commit_binding": null
+    "population_source_id": "maoz2012:field_observed_powerlaw",
+    "population_model": "binary_ssp",
+    "imf_id": 1,
+    "binary_fraction": 0.5,
+    "binary_fraction_policy": "baked_into_rate",
+    "imf_conversion_factor": 1.0,
+    "source_commit_binding": "c6c8042b03406b9d69bc50434fe5d6af7f542be6",
+    "binary_semantics": "binary fraction is retained as explicit SSP metadata but is not multiplied into the empirical DTD normalization"
   },
   "dtd": {
-    "minimum_delay_gyr": null,
-    "maximum_delay_gyr": null,
-    "power_law_index": -1.0,
-    "events_per_initial_msun": null
+    "minimum_delay_gyr": 0.04,
+    "maximum_delay_gyr": 13.7,
+    "power_law_index": -1.07,
+    "events_per_initial_msun": 0.0013,
+    "normalization_source": "Maoz, Mannucci & Brandt 2012 field-observed DTD; Kroupa-like source convention"
   },
   "realization": {
-    "event_realization_policy": null,
-    "metallicity_policy": null,
-    "metallicity_factor_source": null
+    "event_realization_policy": "expectation",
+    "metallicity_policy": "supplied_factor",
+    "metallicity_factor_source": "constant unity baseline; no metallicity dependence is claimed",
+    "metallicity_factor_source_id": "snia_metallicity_factor_constant_unity_v1"
   },
   "approval": {
-    "approval_id": null,
+    "approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
     "runtime_activation_allowed": false,
-    "production_ready": false,
-    "publication_ready": false
+    "production_ready": true,
+    "publication_ready": false,
+    "scope": "physical population baseline; runtime caller and metallicity/net-yield sensitivity remain separately gated"
   }
 }

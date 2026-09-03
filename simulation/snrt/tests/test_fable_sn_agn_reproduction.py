@@ -16,10 +16,11 @@ from reproduce_fable_sn_agn_findings import reproduce  # noqa: E402
 
 
 EXPECTED_REPRODUCED = {
-    "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10",
-    "F11", "F12", "F15", "F16", "F17",
+    "F1", "F2", "F5", "F6", "F9", "F10", "F11", "F12", "F15", "F16",
+    "F17",
 }
 EXPECTED_PARTIAL = {"F13", "F14"}
+EXPECTED_NOT_REPRODUCED = {"F3", "F4", "F7", "F8"}
 
 
 def main() -> int:
@@ -29,7 +30,10 @@ def main() -> int:
     assert payload["independent_checks"]["g1_runner_excludes_ramses_runtime"]
     assert payload["independent_checks"]["compiled_runtime_uses_gyr"]
     assert payload["independent_checks"]["table_axis_declares_years"]
-    assert payload["independent_checks"]["compiled_interpolator_clamps"]
+    assert not payload["independent_checks"]["compiled_interpolator_clamps"]
+    assert payload["independent_checks"]["production_converts_age_once"]
+    assert payload["independent_checks"]["current_interval_contract"]
+    assert payload["independent_checks"]["production_requires_external_table"]
     assert payload["independent_checks"]["mirror_converts_year_axis"]
     assert payload["independent_checks"]["mirror_rejects_domain"]
     assert payload["independent_checks"]["production_nvar18"]
@@ -40,7 +44,7 @@ def main() -> int:
 
     assert set(payload["summary"]["reproduced"]) == EXPECTED_REPRODUCED
     assert set(payload["summary"]["partially_reproduced"]) == EXPECTED_PARTIAL
-    assert payload["summary"]["not_reproduced"] == []
+    assert set(payload["summary"]["not_reproduced"]) == EXPECTED_NOT_REPRODUCED
 
     interval = payload["numerical_reproductions"]["forward_cumulative_interval"]
     assert interval["implementation_total"] == 64.0

@@ -236,6 +236,7 @@ contains
     real(stellar_dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
     real(stellar_dp) :: scale_mass, scale_momentum, scale_energy
     real(stellar_dp) :: returned_code, snii_returned_code, volume, energy_density
+    real(stellar_dp) :: source_momentum_code(3)
     real(stellar_dp) :: ejecta_code(n_stellar_elements), metal_ejecta_code
     real(stellar_dp) :: untracked_ejecta_msun, metal_ejecta_msun
     real(stellar_dp) :: ledger_remaining_code, ledger_scale
@@ -400,8 +401,23 @@ contains
        return
     end if
 
+    source_momentum_code = source%momentum / scale_momentum
     bulk_momentum = returned_code * vp(ipart,1:3)
-    bulk_energy = 0.5d0 * returned_code * sum(vp(ipart,1:3)**2)
+    ! source%energy is the non-bulk event energy.  Once a source carries
+    ! event momentum, conserved total energy also contains its kinetic term
+    ! and the bulk/event cross-term.  The current SSP path has zero source
+    ! momentum; the expression keeps the future SNIa convention explicit.
+    if (returned_code > 0.0d0) then
+       bulk_energy = 0.5d0 * returned_code * sum(vp(ipart,1:3)**2) + &
+            sum(vp(ipart,1:3) * source_momentum_code) + &
+            0.5d0 * sum(source_momentum_code**2) / returned_code
+    else if (maxval(abs(source_momentum_code)) > 0.0d0) then
+       call progress_abort(progress, progress_ierr)
+       ierr = 68
+       return
+    else
+       bulk_energy = 0.0d0
+    end if
     do idim = 1, 3
        bulk_momentum(idim) = bulk_momentum(idim) + &
             source%momentum(idim) / scale_momentum

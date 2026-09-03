@@ -2,10 +2,10 @@
   "schema": "snrt-fp2-snia-event-yield-candidate-matrix",
   "schema_version": 1,
   "gate": "F-P2",
-  "status": "review_only_no_candidate_selected",
+  "status": "approved_baseline_selection_runtime_gated",
   "selection_rule": "A candidate must close the isotope-to-element conversion, decay horizon, ejecta mass, remnant ownership, event energy, momentum convention, licensing, source checksum, and deterministic conversion checksum before approval.",
-  "selected_candidate_id": null,
-  "selected_approval_id": null,
+  "selected_candidate_id": "hesma_model_archive_snia_profiles",
+  "selected_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
   "candidates": [
     {
       "candidate_id": "keegans2023_nugrid_metallicity_grid",
@@ -67,22 +67,19 @@
       "yield_basis": "integrated isotopic abundances plus model-dependent ejecta profiles where available",
       "license": "model-dependent archive terms; redistribution status not established for this project",
       "project_role": "energetics_and_profile_closure_candidate",
-      "status": "candidate_not_approved",
+      "status": "approved_baseline",
       "source_data_role": "model_archive_isotopic_yields_and_hydro_profiles",
       "blockers": [
-        "an archive is not a unique physical source; a concrete model ID and version must be selected",
-        "machine-readable abundance/profile files, exact checksums, and redistribution terms are not staged",
-        "decay convention and isotope-to-project-element aggregation must be pinned",
-        "ejecta mass, event energy, and signed momentum must be derived or supplied with a documented profile convention",
-        "the selected model must be checked for the project 11-element ledger without inferred zeros",
-        "population weighting over Chandrasekhar/sub-Chandrasekhar model families remains unapproved"
+        "the baseline explicitly selects model n100 and the inner-zero/outer-half-bin profile estimator",
+        "the approved baseline uses isotropic zero-vector momentum; signed/asymmetric profile momentum is not claimed",
+        "the approved baseline has no metallicity interpolation or net-yield claim; those remain sensitivity extensions"
       ]
     }
   ],
   "decision": {
     "current_recommendation": "Use Keegans et al. 2023 as the leading composition candidate, HESMA as the leading profile/energetics-closure candidate, and Seitenzahl et al. 2013 as an independent comparison. Do not select any source or write physical event values into the production contract yet.",
-    "production_source_id": null,
-    "production_approval_id": null,
-    "runtime_activation_allowed": false
+      "production_source_id": "hesma:yysd4-xap92:n100",
+      "production_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+      "runtime_activation_allowed": false
   }
 }

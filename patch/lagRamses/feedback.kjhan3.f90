@@ -7,7 +7,8 @@ subroutine thermal_feedback(ilevel)
   use amr_commons
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_ramses_runtime, only: phase0_initialize
-  use stellar_enrichment_config, only: use_channel_resolved_feedback
+  use stellar_enrichment_config, only: use_channel_resolved_feedback, &
+       legacy_prompt_snia_allowed
 #endif
   implicit none
 #ifndef WITHOUTMPI
@@ -114,7 +115,8 @@ subroutine sub_thermal_feedback(ilevel,icpu,kgrid,subnump,n11,n22,feedback_ierr)
   use amr_commons
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_ramses_runtime, only: phase0_feedback
-  use stellar_enrichment_config, only: use_channel_resolved_feedback
+  use stellar_enrichment_config, only: use_channel_resolved_feedback, &
+       legacy_prompt_snia_allowed
 #endif
   implicit none
   integer,intent(in)::ilevel,icpu,kgrid,subnump,n11,n22
@@ -336,6 +338,7 @@ subroutine sub_thermal_feedback(ilevel,icpu,kgrid,subnump,n11,n22,feedback_ierr)
 
                     !Nb of SNIa                                                                      
                     valsn1=0.
+                    if (legacy_prompt_snia_allowed()) then
                     Xeject(:n11,:n22)=yieldtab%NSN1(:n11,:n22)
                     if (Xeject(ihx,ihy)>0.d0) then
                        yieldval=Xeject(ihx,ihy)*wxb*wyb   + Xeject(ihx,ihy+1)*wxb*wya   + &
@@ -343,6 +346,7 @@ subroutine sub_thermal_feedback(ilevel,icpu,kgrid,subnump,n11,n22,feedback_ierr)
                        yieldval1=Xeject(ihx0,ihy)*wxb0*wyb   + Xeject(ihx0,ihy+1)*wxb0*wya   + &
                             Xeject(ihx0+1,ihy)*wxa0*wyb + Xeject(ihx0+1,ihy+1)*wxa0*wya
                        if((yieldval-yieldval1)/(yieldval1+1.d-99)>=tol)valsn1=yieldval-yieldval1
+                    endif
                     endif
 
 

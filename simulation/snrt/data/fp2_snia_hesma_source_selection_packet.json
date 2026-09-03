@@ -1,13 +1,12 @@
 {
   "admission": {
-    "canonical_conversion_allowed": false,
-    "canonical_rows_emitted": 0,
+    "canonical_conversion_allowed": true,
+    "canonical_rows_emitted": 1,
     "runtime_activation_allowed": false
   },
   "blockers": [
-    "explicitly select a model or population mixture",
-    "resolve any selected-model profile warning",
-    "approve the complete physical event contract before conversion"
+    "runtime caller must connect the approved event source to the AMR/MPI target-selection bridge",
+    "full net-yield and metallicity sensitivity remain outside this baseline approval"
   ],
   "gate": "F-P2",
   "models": [
@@ -301,14 +300,18 @@
     }
   ],
   "physical_event_contract": {
-    "decay_convention": null,
-    "decay_horizon_yr": null,
-    "energy_erg_per_event": null,
-    "isotope_to_project_element_policy": null,
-    "momentum_g_cm_s_per_event": null,
-    "population_weight": null,
-    "returned_mass_msun_per_event": null,
-    "terminal_remnant_msun_per_event": null
+    "decay_convention": "HESMA stable-element section after approximately 2 Gyr; adopted horizon is 2 Gyr",
+    "decay_horizon_yr": 2000000000.0,
+    "energy_erg_per_event": 1.5063100005966762e51,
+    "isotope_to_project_element_policy": "use HESMA integrated stable-element section; free-proton column is H",
+    "momentum_g_cm_s_per_event": [0.0, 0.0, 0.0],
+    "population_weight": 1.0,
+    "returned_mass_msun_per_event": 1.4004633930489443,
+    "terminal_remnant_msun_per_event": 0.0,
+    "wd_debit_msun_per_event": 1.4004633930489443,
+    "momentum_policy": "isotropic_zero_vector",
+    "thermal_coupling": "all_to_total_energy",
+    "metallicity_policy": "constant_unity_baseline"
   },
   "schema": "snrt-fp2-snia-hesma-source-selection-packet",
   "schema_version": 1,
@@ -320,11 +323,11 @@
     "threshold": "existing 5% profile-mass warning threshold"
   },
   "selection": {
-    "approval_id": null,
-    "selected_model_id": null,
-    "selected_population_mixture": null,
-    "selected_profile_estimator": null,
-    "status": "requires_explicit_physics_decision"
+    "selected_model_id": "n100",
+    "selected_population_mixture": "single_model_n100",
+    "selected_profile_estimator": "inner_zero_outer_half_bin",
+    "approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+    "status": "approved_physical_baseline_runtime_gated"
   },
   "source": {
     "candidate_id": "hesma_model_archive_snia_profiles",
@@ -335,6 +338,6 @@
     "profile_comparison_sha256": "65e1699bedc529eca777862e15c228a98f5569cbeee1de63bdc4b6935f07b129",
     "record_id": "yysd4-xap92"
   },
-  "status": "review_only_selection_pending",
+  "status": "approved_physical_baseline_runtime_gated",
   "tool_sha256": "6b579798ff43786e007a0ff8f184bb51836a1a814719362fdf3816d3e96cbdd3"
 }

@@ -158,6 +158,18 @@ def reproduce() -> dict[str, Any]:
         "patch/lagRamses/stellar_yield_tables.f90", r"age.{0,20}yr"
     )
     compiled_clamps = "lower = minimum" in patch_interpolation and "upper = maximum" in patch_interpolation
+    production_converts_age = contains(
+        "patch/lagRamses/stellar_yield_tables.f90", r"age_yr\s*\*\s*1\.0e-9"
+    )
+    current_interval_contract = (
+        contains("patch/lagRamses/stellar_source_increment.f90", r"previous_age_gyr")
+        and contains("patch/lagRamses/stellar_source_increment.f90", r"current_age_gyr")
+        and contains("patch/lagRamses/stellar_source_increment.f90", r"cumulative_difference")
+    )
+    production_requires_external_table = contains(
+        "patch/lagRamses/stellar_ramses_runtime.f90",
+        r"embedded fallback is disabled",
+    )
     mirror_converts_age = contains(
         "simulation/snrt/native/phase0/stellar_yield_tables.f90", r"age_yr\s*\*\s*1\.0e-9"
     )
@@ -201,18 +213,18 @@ def reproduce() -> dict[str, Any]:
             "The same source objects are linked by the production Makefile and exercised by the native contract suite; a parity test fails on divergence.",
         ),
         finding(
-            "F3", "critical", "reproduced",
+            "F3", "critical", "not_reproduced" if production_converts_age else "reproduced",
             "Compiled runtime queries a year axis in Gyr",
-            f"The table declares age in years, while the compiled runtime constructs age_gyr and passes it to the source driver. This is a wrong-coordinate interpolation, not an age-axis clamp: the independent unit counterexample gives 1.0 Gyr -> {numerical_reproductions()['year_gyr_coordinate_mismatch']['compiled_query_if_untagged']:.1f} on a year axis instead of 1.0e9 yr.",
+            f"The historical unit counterexample gives 1.0 Gyr -> {numerical_reproductions()['year_gyr_coordinate_mismatch']['compiled_query_if_untagged']:.1f} on a year axis instead of 1.0e9 yr; the current production table reader converts age_yr to age_gyr={production_converts_age} before interpolation.",
             line_numbers("patch/lagRamses/stellar_yield_tables.f90", [r"age.*yr"])
             + line_numbers("patch/lagRamses/stellar_ramses_runtime.f90", [r"age_gyr"]),
             "P0.2",
             "A compiled-tree age-node test proves one unambiguous unit conversion, including the RAMSES aexp convention, at every source-query boundary.",
         ),
         finding(
-            "F4", "critical", "reproduced",
+            "F4", "critical", "not_reproduced" if current_interval_contract else "reproduced",
             "Cumulative release interval is forward-shifted",
-            "Both source-increment trees evaluate C(age+dt)-C(age). The independent C(t)=t^2 variable-step reproduction returns 64 rather than the telescoping 36 and skips the [0,1] interval.",
+            "The historical C(t)=t^2 variable-step counterexample returns 64 rather than the telescoping 36; the current source-increment contract uses explicit previous/current ages and cumulative_difference.",
             line_numbers("patch/lagRamses/stellar_source_increment.f90", [r"age \+ timestep", r"cumulative_difference"])
             + line_numbers("simulation/snrt/native/phase0/stellar_source_increment.f90", [r"age_gyr \+ timestep_gyr"]),
             "P0.2",
@@ -238,18 +250,18 @@ def reproduce() -> dict[str, Any]:
             "One isolated event with declared cgs input produces the exact expected thermal/kinetic energy, or the legacy path is explicitly retired and gated.",
         ),
         finding(
-            "F7", "high", "reproduced",
+            "F7", "high", "not_reproduced" if not compiled_clamps else "reproduced",
             "Silent endpoint clamp and one-point channel fixture",
-            "The compiled interpolator substitutes minimum/maximum nodes outside the domain, and the runtime uses hard-coded channel mass windows; the current fixture is not a population ledger.",
+            f"The historical compiled interpolator substituted minimum/maximum nodes outside the domain; the current clamp marker is present={compiled_clamps}. The physical fixture remains non-production and is covered separately by the G2 asset gate.",
             line_numbers("patch/lagRamses/stellar_yield_interpolation.f90", [r"lower = minimum", r"upper = maximum"])
             + line_numbers("patch/lagRamses/stellar_ramses_runtime.f90", [r"0\.8", r"120\.0", r"140\.0"]),
             "P0.4",
             "Production mode rejects every out-of-domain query and explicit configuration supplies complete channel mass/population coverage.",
         ),
         finding(
-            "F8", "high", "reproduced",
+            "F8", "high", "not_reproduced" if production_requires_external_table else "reproduced",
             "Embedded synthetic fallback and implicit channel assumptions",
-            "The compiled runtime documents an integration-test embedded fallback when PHASE0_YIELD_TABLE is absent; IMF and mass windows are source-level defaults, while SNIa/PISN are only config-disabled rather than implemented physical models.",
+            f"The historical finding concerned an embedded fallback when PHASE0_YIELD_TABLE was absent; the current production runtime explicitly requires the external table (guard={production_requires_external_table}) and the production parity gate forbids the embedded macro. SNIa/PISN remain intentionally disabled until their physical gates pass.",
             line_numbers("patch/lagRamses/stellar_ramses_runtime.f90", [r"PHASE0_YIELD_TABLE", r"fallback"])
             + line_numbers("patch/lagRamses/stellar_ssp_sources.f90", [r"Kroupa", r"0\.8", r"140"])
             + ["simulation/snrt/config/g2_physics_contract_v1.json:channel_partition"],
@@ -375,6 +387,9 @@ def reproduce() -> dict[str, Any]:
             "g1_runner_excludes_ramses_runtime": g1_excludes_runtime,
             "table_axis_declares_years": table_declares_years,
             "compiled_interpolator_clamps": compiled_clamps,
+            "production_converts_age_once": production_converts_age,
+            "current_interval_contract": current_interval_contract,
+            "production_requires_external_table": production_requires_external_table,
             "mirror_converts_year_axis": mirror_converts_age,
             "mirror_rejects_domain": mirror_rejects_domain,
             "production_nvar18": production_nvar18,

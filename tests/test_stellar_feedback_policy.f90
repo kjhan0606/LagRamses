@@ -8,7 +8,7 @@ program test_stellar_feedback_policy
        configured_imf_mass_min, configured_imf_mass_max, &
        configured_binary_fraction, &
        configured_channel_mass_min, configured_channel_mass_max, &
-       production_source_model_supported, enable_wind
+       production_source_model_supported, enable_wind, legacy_prompt_snia_allowed
   use stellar_enrichment_contract, only: stellar_source_t, clear_source, &
        delayed_cooling_source_mass
   implicit none
@@ -34,6 +34,15 @@ program test_stellar_feedback_policy
   close(unit)
   if (status /= 0 .or. trim(stellar_feedback_mode) /= 'legacy' .or. &
        enable_wind) error stop 3
+  if (legacy_prompt_snia_allowed()) error stop 25
+
+  call set_enrichment_defaults()
+  open(newunit=unit,status='scratch',action='readwrite')
+  write(unit,'(A)') '&stellar_enrichment_params feedback_mode="legacy", allow_legacy_prompt_snia=.true. /'
+  rewind(unit)
+  call read_enrichment_namelist(unit,status)
+  close(unit)
+  if (status /= 0 .or. .not. legacy_prompt_snia_allowed()) error stop 26
 
   open(newunit=unit,status='scratch',action='readwrite')
   write(unit,'(A)') '&stellar_enrichment_params'
@@ -44,6 +53,17 @@ program test_stellar_feedback_policy
   call read_enrichment_namelist(unit,status)
   close(unit)
   if (status /= 0 .or. .not. use_channel_resolved_feedback()) error stop 4
+
+  call set_enrichment_defaults()
+  open(newunit=unit,status='scratch',action='readwrite')
+  write(unit,'(A)') '&stellar_enrichment_params'
+  call write_required_population_contract(unit,'channel_resolved',1, &
+       'single_star_ssp','per_star_cumulative',0.0_stellar_dp)
+  write(unit,'(A)') ' allow_legacy_prompt_snia=.true. /'
+  rewind(unit)
+  call read_enrichment_namelist(unit,status)
+  close(unit)
+  if (status /= 1010 .or. legacy_prompt_snia_allowed()) error stop 27
 
   open(newunit=unit,status='scratch',action='readwrite')
   write(unit,'(A)') '&stellar_enrichment_params feedback_mode="invalid" /'

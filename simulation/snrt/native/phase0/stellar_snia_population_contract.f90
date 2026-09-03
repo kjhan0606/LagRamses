@@ -1,10 +1,10 @@
-! Review-only SNIa binary-population realization contract.
+! Approved-baseline SNIa binary-population realization contract.
 !
 ! This module defines the inputs needed to turn the interval DTD kernel into
-! an expected event count.  It deliberately contains no project-selected
-! population, normalization, or metallicity table.  An approved record must
-! bind those choices to a source identifier, an immutable source commit, and a
-! named approval before this interface can be used by a runtime caller.
+! an expected event count.  The selected Maoz field DTD baseline is loaded by
+! the versioned sidecar/namelist contract and binds its choices to a source
+! identifier, immutable source commit, and named approval before a runtime
+! caller may use the interface.
 
 module stellar_snia_population_contract
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -24,6 +24,8 @@ module stellar_snia_population_contract
 
   integer, parameter, public :: snia_realization_expectation = 1
   integer, parameter, public :: snia_realization_poisson = 2
+  integer, parameter, public :: snia_binary_fraction_baked_into_rate = 1
+  integer, parameter, public :: snia_binary_fraction_scales_rate = 2
   integer, parameter, public :: snia_metallicity_factor_supplied = 1
 
   type, public :: snia_population_realization_t
@@ -38,12 +40,15 @@ module stellar_snia_population_contract
      real(stellar_dp) :: power_law_index = -1.0_stellar_dp
      real(stellar_dp) :: events_per_initial_msun = -1.0_stellar_dp
      integer :: event_realization_policy = 0
+     integer :: binary_fraction_policy = 0
      integer :: metallicity_policy = 0
+     character(len=128) :: metallicity_factor_source_id = ''
      character(len=128) :: source_commit_binding = ''
      character(len=128) :: approval_id = ''
   end type snia_population_realization_t
 
   public :: validate_snia_population_realization
+  public :: read_snia_population_realization_namelist
   public :: evaluate_snia_interval_events
 
 contains
@@ -84,12 +89,84 @@ contains
        ierr = snia_population_contract_err_realization
        return
     end if
+    if (realization%binary_fraction_policy /= snia_binary_fraction_baked_into_rate .and. &
+         realization%binary_fraction_policy /= snia_binary_fraction_scales_rate) then
+       ierr = snia_population_contract_err_parameter
+       return
+    end if
     if (realization%metallicity_policy /= snia_metallicity_factor_supplied .or. &
          .not. is_hex_commit(realization%source_commit_binding) .or. &
-         len_trim(realization%approval_id) == 0) then
+         len_trim(realization%approval_id) == 0 .or. &
+         len_trim(realization%metallicity_factor_source_id) == 0) then
        ierr = snia_population_contract_err_parameter
     end if
   end subroutine validate_snia_population_realization
+
+  subroutine read_snia_population_realization_namelist(iunit, realization, ierr)
+    ! JSON remains the review/provenance sidecar.  A production caller must
+    ! pass its separately generated, human-auditable namelist through this
+    ! loader so the complete record is populated into the Fortran type before
+    ! validation; no field is silently defaulted during the handoff.
+    integer, intent(in) :: iunit
+    type(snia_population_realization_t), intent(out) :: realization
+    integer, intent(out) :: ierr
+
+    logical :: approved
+    character(len=128) :: population_source_id, metallicity_factor_source_id
+    character(len=128) :: source_commit_binding, approval_id
+    integer :: population_model_id, imf_id, event_realization_policy
+    integer :: binary_fraction_policy, metallicity_policy, read_ierr
+    real(stellar_dp) :: binary_fraction, imf_conversion_factor
+    real(stellar_dp) :: minimum_delay_gyr, maximum_delay_gyr
+    real(stellar_dp) :: power_law_index, events_per_initial_msun
+
+    namelist /snia_population_realization/ approved, population_source_id, &
+         population_model_id, imf_id, binary_fraction, binary_fraction_policy, &
+         imf_conversion_factor, minimum_delay_gyr, maximum_delay_gyr, &
+         power_law_index, events_per_initial_msun, event_realization_policy, &
+         metallicity_policy, metallicity_factor_source_id, &
+         source_commit_binding, approval_id
+
+    approved = .false.
+    population_source_id = ''
+    population_model_id = -1
+    imf_id = -1
+    binary_fraction = -1.0_stellar_dp
+    binary_fraction_policy = 0
+    imf_conversion_factor = -1.0_stellar_dp
+    minimum_delay_gyr = -1.0_stellar_dp
+    maximum_delay_gyr = -1.0_stellar_dp
+    power_law_index = -1.0_stellar_dp
+    events_per_initial_msun = -1.0_stellar_dp
+    event_realization_policy = 0
+    metallicity_policy = 0
+    metallicity_factor_source_id = ''
+    source_commit_binding = ''
+    approval_id = ''
+
+    read(iunit, nml=snia_population_realization, iostat=read_ierr)
+    realization%approved = approved
+    realization%population_source_id = population_source_id
+    realization%population_model_id = population_model_id
+    realization%imf_id = imf_id
+    realization%binary_fraction = binary_fraction
+    realization%binary_fraction_policy = binary_fraction_policy
+    realization%imf_conversion_factor = imf_conversion_factor
+    realization%minimum_delay_gyr = minimum_delay_gyr
+    realization%maximum_delay_gyr = maximum_delay_gyr
+    realization%power_law_index = power_law_index
+    realization%events_per_initial_msun = events_per_initial_msun
+    realization%event_realization_policy = event_realization_policy
+    realization%metallicity_policy = metallicity_policy
+    realization%metallicity_factor_source_id = metallicity_factor_source_id
+    realization%source_commit_binding = source_commit_binding
+    realization%approval_id = approval_id
+    if (read_ierr /= 0) then
+       ierr = snia_population_contract_err_argument
+       return
+    end if
+    call validate_snia_population_realization(realization, ierr)
+  end subroutine read_snia_population_realization_namelist
 
   subroutine evaluate_snia_interval_events(realization, initial_mass_msun, &
        age_old_gyr, age_new_gyr, metallicity_factor, expected_events, ierr)
@@ -125,6 +202,9 @@ contains
     end if
     events_per_mass = realization%events_per_initial_msun * &
          realization%imf_conversion_factor * metallicity_factor
+    if (realization%binary_fraction_policy == snia_binary_fraction_scales_rate) then
+       events_per_mass = events_per_mass * realization%binary_fraction
+    end if
     call integrate_snia_dtd_interval(age_old_gyr, age_new_gyr, &
          realization%minimum_delay_gyr, realization%maximum_delay_gyr, &
          realization%power_law_index, events_per_mass, expected_events, dtd_ierr)

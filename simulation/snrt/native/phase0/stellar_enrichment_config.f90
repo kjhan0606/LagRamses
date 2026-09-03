@@ -70,6 +70,8 @@ module stellar_enrichment_config
        (/120.0d0, 8.0d0, 40.0d0, 8.0d0, 260.0d0/)
   logical, dimension(n_stellar_channels), save, public :: &
        channel_owns_terminal_remnant = (/ .false., .true., .true., .false., .false. /)
+  logical, dimension(n_stellar_channels), save, public :: &
+       channel_owns_white_dwarf_reservoir = (/ .false., .true., .false., .false., .false. /)
 
   ! Runtime feedback implementation.  The channel-resolved path is the
   ! production default; legacy preserves the historical lagRamses behaviour
@@ -92,6 +94,7 @@ module stellar_enrichment_config
   ! must not be interpreted as a Type-Ia history.
   logical :: enable_snia = .false.
   logical :: enable_pisn = .false.
+  logical :: legacy_prompt_snia_opt_in = .false.
 
 contains
 
@@ -102,6 +105,7 @@ contains
     enable_snii = .true.
     enable_snia = .false.
     enable_pisn = .false.
+    legacy_prompt_snia_opt_in = .false.
     stellar_feedback_mode = 'channel_resolved'
     default_imf_id = stellar_imf_kroupa
     population_model_id = population_single_star_ssp
@@ -119,7 +123,9 @@ contains
     configured_channel_mass_max = &
          (/120.0d0, 8.0d0, 40.0d0, 8.0d0, 260.0d0/)
     channel_owns_terminal_remnant = &
-         (/ .false., .true., .true., .false., .false. /)
+       (/ .false., .true., .true., .false., .false. /)
+    channel_owns_white_dwarf_reservoir = &
+         (/ .false., .true., .false., .false., .false. /)
   end subroutine set_enrichment_defaults
 
   subroutine read_enrichment_namelist(iunit, iostat_out)
@@ -129,6 +135,7 @@ contains
     logical :: use_h, use_he, use_c, use_n, use_o, use_ne
     logical :: use_mg, use_si, use_s, use_ca, use_fe
     logical :: use_wind, use_agb, use_snii, use_snia, use_pisn
+    logical :: allow_legacy_prompt_snia
     character(len=32) :: feedback_mode
     character(len=32) :: population_model
     character(len=32) :: yield_source_basis
@@ -141,7 +148,7 @@ contains
 
     namelist /stellar_enrichment_params/ use_h, use_he, use_c, use_n, use_o, &
          use_ne, use_mg, use_si, use_s, use_ca, use_fe, use_wind, use_agb, &
-         use_snii, use_snia, use_pisn, feedback_mode, imf_id, &
+         use_snii, use_snia, use_pisn, allow_legacy_prompt_snia, feedback_mode, imf_id, &
          population_model, yield_source_basis, imf_mass_min_msun, &
          imf_mass_max_msun, binary_fraction, channel_mass_min_msun, &
          channel_mass_max_msun
@@ -162,6 +169,9 @@ contains
     use_snii = enable_snii
     use_snia = enable_snia
     use_pisn = enable_pisn
+    ! Opt-in is a property of this namelist read, never an implicit carryover
+    ! from a previous legacy comparison read.
+    allow_legacy_prompt_snia = .false.
     feedback_mode = ''
     imf_id = -1
     population_model = ''
@@ -193,6 +203,7 @@ contains
        call commit_runtime_switches(use_h, use_he, use_c, use_n, use_o, &
             use_ne, use_mg, use_si, use_s, use_ca, use_fe, use_wind, use_agb, &
             use_snii, use_snia, use_pisn)
+       legacy_prompt_snia_opt_in = allow_legacy_prompt_snia
        stellar_feedback_mode = 'legacy'
        return
     case default
@@ -265,9 +276,14 @@ contains
        end if
     end do
 
+    if (allow_legacy_prompt_snia) then
+       iostat_out = 1010
+       return
+    end if
     call commit_runtime_switches(use_h, use_he, use_c, use_n, use_o, use_ne, &
          use_mg, use_si, use_s, use_ca, use_fe, use_wind, use_agb, use_snii, &
          use_snia, use_pisn)
+    legacy_prompt_snia_opt_in = .false.
     stellar_feedback_mode = parsed_feedback_mode
     default_imf_id = imf_id
     population_model_id = parsed_population_model_id
@@ -308,6 +324,11 @@ contains
     use_channel_resolved_feedback = &
          trim(stellar_feedback_mode) == 'channel_resolved'
   end function use_channel_resolved_feedback
+
+  logical function legacy_prompt_snia_allowed()
+    legacy_prompt_snia_allowed = trim(stellar_feedback_mode) == 'legacy' .and. &
+         legacy_prompt_snia_opt_in
+  end function legacy_prompt_snia_allowed
 
   logical function production_source_model_supported()
     production_source_model_supported = &

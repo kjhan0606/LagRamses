@@ -424,7 +424,19 @@ contains
     end if
     ! Rebuild the returned-particle momentum after the physical source unit
     ! conversion has succeeded.  All writes below are part of one transaction.
-    bulk_energy = 0.5d0 * returned_code * sum(vp(ipart,1:3)**2)
+    ! source%energy is the non-bulk event energy, so include event momentum
+    ! kinetic energy and its cross-term with the gas-frame bulk velocity.
+    if (returned_code > 0.0d0) then
+       bulk_energy = 0.5d0 * returned_code * sum(vp(ipart,1:3)**2) + &
+            sum(vp(ipart,1:3) * source_momentum_code) + &
+            0.5d0 * sum(source_momentum_code**2) / returned_code
+    else if (maxval(abs(source_momentum_code)) > 0.0d0) then
+       call progress_abort(progress, progress_ierr)
+       ierr = 68
+       return
+    else
+       bulk_energy = 0.0d0
+    end if
     bulk_momentum = returned_code * vp(ipart,1:3) + source_momentum_code
     energy_density = (energy_code + bulk_energy) / volume
 

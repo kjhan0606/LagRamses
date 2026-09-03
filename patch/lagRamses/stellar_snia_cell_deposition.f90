@@ -14,9 +14,10 @@
 
 module stellar_snia_cell_deposition
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use stellar_enrichment_config, only: stellar_dp
+  use stellar_enrichment_config, only: stellar_dp, n_stellar_elements
   use stellar_native_units, only: solar_mass_cgs
   use stellar_snia_physical_contract, only: snia_event_budget_t
+  use stellar_enrichment_contract, only: generic_metal_ejecta_mass
   implicit none
 
   private
@@ -33,6 +34,10 @@ module stellar_snia_cell_deposition
      logical :: approved = .false.
      integer :: mode = 0
      real(stellar_dp) :: thermal_fraction = -1.0_stellar_dp
+     ! If event momentum is nonzero, its kinetic energy and bulk cross-term
+     ! must be included explicitly.  A source model whose energy already
+     ! includes that kinetic term must use zero-net momentum instead.
+     logical :: include_event_momentum_kinetic = .false.
   end type snia_thermal_coupling_t
 
   type, public :: snia_cell_increment_t
@@ -41,6 +46,8 @@ module stellar_snia_cell_deposition
      real(stellar_dp) :: event_energy_density = 0.0_stellar_dp
      real(stellar_dp) :: bulk_kinetic_energy_density = 0.0_stellar_dp
      real(stellar_dp) :: total_energy_density = 0.0_stellar_dp
+     real(stellar_dp) :: element_mass_density(n_stellar_elements) = 0.0_stellar_dp
+     real(stellar_dp) :: total_metal_density = 0.0_stellar_dp
   end type snia_cell_increment_t
 
   public :: validate_snia_thermal_coupling
@@ -93,6 +100,8 @@ contains
     increment%event_energy_density = 0.0_stellar_dp
     increment%bulk_kinetic_energy_density = 0.0_stellar_dp
     increment%total_energy_density = 0.0_stellar_dp
+    increment%element_mass_density = 0.0_stellar_dp
+    increment%total_metal_density = 0.0_stellar_dp
     ierr = snia_deposition_ok
 
     call validate_snia_thermal_coupling(coupling, policy_ierr)
@@ -109,6 +118,8 @@ contains
          budget%wd_reservoir_debit, budget%returned_mass, &
          budget%terminal_remnant_mass, budget%energy/))) .or. &
          .not. all(ieee_is_finite(budget%momentum)) .or. &
+         .not. all(ieee_is_finite(budget%ejected_mass)) .or. &
+         .not. all(ieee_is_finite(budget%net_yield)) .or. &
          budget%wd_reservoir_debit < 0.0_stellar_dp .or. &
          budget%returned_mass < 0.0_stellar_dp .or. &
          budget%terminal_remnant_mass < 0.0_stellar_dp .or. &
@@ -116,22 +127,40 @@ contains
        ierr = snia_deposition_err_budget
        return
     end if
-    if (budget%returned_mass + budget%terminal_remnant_mass > &
-         budget%wd_reservoir_debit + 1.0e-12_stellar_dp * &
-         max(1.0_stellar_dp, budget%wd_reservoir_debit)) then
+    if (abs(budget%returned_mass + budget%terminal_remnant_mass - &
+         budget%wd_reservoir_debit) > 1.0e-12_stellar_dp * &
+         max(1.0_stellar_dp, budget%wd_reservoir_debit, &
+         budget%returned_mass, budget%terminal_remnant_mass) .or. &
+         sum(budget%ejected_mass) > budget%returned_mass + &
+         1.0e-12_stellar_dp * max(1.0_stellar_dp, budget%returned_mass)) then
        ierr = snia_deposition_err_budget
+       return
+    end if
+    if (maxval(abs(budget%momentum)) > 0.0_stellar_dp .and. &
+         .not. coupling%include_event_momentum_kinetic) then
+       ierr = snia_deposition_err_policy
        return
     end if
 
     returned_mass_cgs = budget%returned_mass * solar_mass_cgs
     bulk_momentum = returned_mass_cgs * bulk_velocity_cm_s + budget%momentum
     bulk_kinetic_energy = 0.5_stellar_dp * returned_mass_cgs * &
-         sum(bulk_velocity_cm_s**2)
+         sum(bulk_velocity_cm_s**2) + sum(bulk_velocity_cm_s * budget%momentum)
+    if (returned_mass_cgs > 0.0_stellar_dp) then
+       bulk_kinetic_energy = bulk_kinetic_energy + &
+            0.5_stellar_dp * sum(budget%momentum**2) / returned_mass_cgs
+    else if (maxval(abs(budget%momentum)) > 0.0_stellar_dp) then
+       ierr = snia_deposition_err_budget
+       return
+    end if
     increment%mass_density = returned_mass_cgs / volume_cm3
     increment%momentum_density = bulk_momentum / volume_cm3
     increment%event_energy_density = coupling%thermal_fraction * &
          budget%energy / volume_cm3
     increment%bulk_kinetic_energy_density = bulk_kinetic_energy / volume_cm3
+    increment%element_mass_density = budget%ejected_mass * solar_mass_cgs / volume_cm3
+    increment%total_metal_density = generic_metal_ejecta_mass( &
+         budget%returned_mass, budget%ejected_mass) * solar_mass_cgs / volume_cm3
     increment%total_energy_density = increment%event_energy_density + &
          increment%bulk_kinetic_energy_density
 
@@ -139,12 +168,16 @@ contains
          .not. all(ieee_is_finite(increment%momentum_density)) .or. &
          .not. ieee_is_finite(increment%event_energy_density) .or. &
          .not. ieee_is_finite(increment%bulk_kinetic_energy_density) .or. &
-         .not. ieee_is_finite(increment%total_energy_density)) then
+         .not. ieee_is_finite(increment%total_energy_density) .or. &
+         .not. all(ieee_is_finite(increment%element_mass_density)) .or. &
+         .not. ieee_is_finite(increment%total_metal_density)) then
        increment%mass_density = 0.0_stellar_dp
        increment%momentum_density = 0.0_stellar_dp
        increment%event_energy_density = 0.0_stellar_dp
        increment%bulk_kinetic_energy_density = 0.0_stellar_dp
        increment%total_energy_density = 0.0_stellar_dp
+       increment%element_mass_density = 0.0_stellar_dp
+       increment%total_metal_density = 0.0_stellar_dp
        ierr = snia_deposition_err_result
     end if
   end subroutine build_snia_cell_increment
