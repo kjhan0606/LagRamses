@@ -130,9 +130,15 @@ F-P3 감사가 승인되며, 현재 `review_only_unresolved` 정책이 승인된
    code-owned evidence lock, 순수 coupling/selection predicate, controlled-error
    및 adversarial fixture로 보강했다. LC18 failed-wind cross-check에는 phase
    invariant diagnostics, differential G2 check, signed/relative residual과
-   non-authoritative CDS rights 표시를 추가했다. 집중/F-P1/G2 증거와 248개
-   config/data fixture 불변성 검사는 통과했으며, 현재 묶음 종료 AGY/Claude Opus 5
-   감사가 남아 있다.
+   non-authoritative CDS rights 표시를 추가했다. 구현 commit은
+   `033799a2d2ea8618877596122f02a2007d8d64bb`이다. 집중/F-P1/G2 증거와 248개
+   config/data fixture 불변성 검사는 통과했고, AGY는 PASS, Opus 5는
+   CONDITIONAL PASS를 반환했지만, Opus 5가 selection hash의
+   검증 fingerprint 결속과 CDS-derived publication 경계를 추가 gating item으로
+   지적했다. 이 두 항목과 성공 control의 zero-CDS 통계는 다음 묶음 후보로
+   기록하며, 현재 묶음은 physical source 승인이나 runtime 승인이 아니다.
+   독립감사와 재현/triage는 완료되었고, 다음 구현 묶음은 사용자 명시
+   승인이 있을 때까지 시작하지 않는다.
    나머지 8개 executable validator, 실제 교정 자료, physical node, runtime
    consumer가 남았으며 production 승인은 계속 닫혀 있다.**
 6. **F-P1H-F — promotion and bundled audit:** 물리 node를 채운 뒤에만

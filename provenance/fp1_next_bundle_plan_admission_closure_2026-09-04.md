@@ -2,8 +2,12 @@
 
 Date drafted: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: Fable approved with changes; M1--M8 implemented; bundle-end
-AGY/Claude Opus 5 audit pending
+Status: Fable-approved implementation complete; AGY PASS; Claude Opus 5
+CONDITIONAL PASS; next-bundle implementation paused pending explicit approval
+Implementation commit: `033799a2d2ea8618877596122f02a2007d8d64bb`
+Audit records: `agy_fp1_admission_closure_bundle_audit_2026-09-04.md`,
+`opus5_fp1_admission_closure_bundle_audit_2026-09-04.md`, and
+`fp1_admission_closure_bundle_audit_comparison_2026-09-04.md`
 
 ## Purpose fit
 
@@ -38,8 +42,11 @@ and failed-wind evidence").
 Replace the contradictory metallicity-domain guard with a code constant
 declaring the current state as review-unselected. The default contract must
 declare the same state. The positive path is reachable only when the code
-constant declares a selected state and the contract agrees and nine registered
-validators pass. A JSON edit alone must not open the path.
+constant declares a selected state and the contract agrees and all nine
+required gates pass through approved executable validators. A JSON edit alone
+must not open the path. The current tree has one registered validator and eight
+outstanding validator implementations; it does not claim nine implemented
+validators.
 
 ### M2 (P0) — pure coupling predicate
 
@@ -165,9 +172,16 @@ gitignored and untracked.
   findings before drafting the subsequent bundle plan.
 
 The current plan was reviewed by Fable as **APPROVE WITH CHANGES**. Its M1--M8
-changes are now implemented and verified locally; this approval is not
-physical-source or runtime feedback approval. The bundle-end AGY and Claude
-Opus 5 audits remain the next boundary.
+changes are implemented and verified locally. AGY returned **PASS** and Claude
+Opus 5 returned **CONDITIONAL PASS**; the findings and driver reproductions are
+recorded in the three audit records listed above. This approval is not
+physical-source or runtime feedback approval. F1 package-hash binding and F2
+CDS-derived publication gating are carried forward as blocking items, with F3
+control statistics and lower-priority hygiene items explicitly triaged.
+
+No subsequent implementation bundle has started. Per the current operating
+instruction, the driver is waiting for explicit user approval before starting
+the next bundle.
 
 ## Out of scope
 

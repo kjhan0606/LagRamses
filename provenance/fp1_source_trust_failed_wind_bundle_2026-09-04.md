@@ -2,7 +2,7 @@
 
 Date: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: implementation complete; bundle-end AGY/Claude Opus 5 audit pending
+Status: implementation complete; bundle-end AGY/Claude Opus 5 audits recorded
 
 ## Scope and purpose
 
@@ -88,10 +88,8 @@ false.
 
 ## Next audit and planning boundary
 
-This bundle is now complete at the implementation/evidence level. At bundle
-end it is submitted independently to AGY (`gemini-3.8-flash-high`) and Claude
-Opus 5. Their findings will be independently reproduced and triaged. The
-driver will then write the next implementation-bundle plan, including any
-accepted findings. Fable will evaluate that next plan for final-purpose fit,
-scientific/technical justification, and feasibility before implementation
-starts. No per-step audit is scheduled.
+This bundle is complete at the implementation/evidence level and its
+bundle-end AGY/Claude Opus 5 audit records are retained in this provenance
+directory. No per-step audit is scheduled. Subsequent work is governed by the
+new bundle boundary: the driver must wait for explicit user approval before
+starting another implementation bundle.
