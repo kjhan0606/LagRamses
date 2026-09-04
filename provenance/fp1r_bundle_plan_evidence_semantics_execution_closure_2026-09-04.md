@@ -2,8 +2,9 @@
 
 Date: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: R1/R2 complete; Claude Opus 5 `PASS` for both; R4 implementation in
-progress (R3 remains last)
+Status: R1/R2 complete; Claude Opus 5 `PASS` for both; R4 implementation
+conditionally complete and rework required by Opus/GPT-5.6-Sol (R3 remains
+last)
 Parent evidence HEAD: `db1bb66`
 Parent implementation: `25bd05f`
 Parent verification boundary: `5aeb6d3`
@@ -16,6 +17,8 @@ bundle. This document is only the next driver plan. No F-P1R code or checked-in
 evidence may be changed until Grok audits this plan and returns an acceptable
 plan decision. After each F-P1R implementation step, Claude Opus 5 performs
 the active implementation audit. AGY is retired and will not be called.
+The current R4 rework is a narrow completion of this already-approved bundle,
+not a new physical-source or runtime bundle.
 
 ## Purpose and scope
 
@@ -152,6 +155,32 @@ positive physical-package admission:
    must re-evaluate or refuse a forged gate dictionary; a hand-built
    `publication_ready` label is not permission.
 
+### R4 adjudication rework (M-R4-1)
+
+GPT-5.6-Sol independently confirmed Opus 5's `CONDITIONAL PASS` as
+`REWORK R4`. The implementation has no publication bypass, but its
+machine-readable evidence is inaccurate on the wrong-path branch: no terms
+file is opened while the payload reports that the candidate record was parsed
+from locked bytes. Before R3, apply only this narrow evidence fix:
+
+1. Initialize `terms_error` to an explicit not-read/path-mismatch sentinel
+   before the path check. Clear it only after the locked-path reader has
+   successfully supplied a parsed record. The wrong-path result must therefore
+   set `publication_terms_record_parsed=false`, use an unavailable
+   `record_source`, include a named blocker, and remain denied.
+2. Extend the synthetic wrong-path regression to assert the false parsed-record
+   requirement and unavailable record source. Keep rights fields in the
+   hashed fixture bytes, preserve the private test-only profile seam, and do
+   not edit the repository terms catalog.
+3. Re-run the focused publication, LC18, physical-package, converter, and
+   population/fate tests plus deterministic G2 preflight. Confirm all
+   production/publication/runtime flags and zero-node state remain unchanged.
+   Claude Opus 5 must then issue a clean R4 implementation audit before R3.
+
+This is completion work inside the already approved F-P1R bundle, not a new
+physical-source or runtime bundle. AGY is retired and is not part of the
+review chain; historical AGY reports remain provenance only.
+
 ## Acceptance gates
 
 - **R1:** an isolated fully admitted converter success, content mutation, and
@@ -168,7 +197,8 @@ positive physical-package admission:
   hash.
 - **R4:** the code-owned terms reader/hash and bytes-derived candidate record
   are the sole production authority; altered terms/path/record/approval inputs
-  cannot open publication.
+  cannot open publication; an unlocked path is explicitly marked unread and
+  cannot claim a parsed record.
 - Full focused tests, population/fate contract, G2 preflight with expected
   `G2_PREFLIGHT_BLOCKED`, deterministic JSON regeneration, a second
   byte-identical high-mass regeneration, config/data and staged-source hash

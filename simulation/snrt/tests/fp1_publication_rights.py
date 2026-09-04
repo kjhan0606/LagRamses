@@ -153,6 +153,13 @@ def main() -> int:
         assert "publication_terms_bytes_not_code_locked" in wrong_path_gate[
             "blocking_reasons"
         ]
+        assert wrong_path_gate["requirements"]["publication_terms_record_parsed"] is False
+        assert wrong_path_gate["source_terms_lock"]["record_source"] == (
+            "not_available_due_to_terms_error"
+        )
+        assert "publication_terms_record_unavailable" in wrong_path_gate[
+            "blocking_reasons"
+        ]
         assert "source_redistribution_permission_not_approved" in wrong_path_gate[
             "blocking_reasons"
         ]

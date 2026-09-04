@@ -126,7 +126,9 @@ def evaluate_derived_artifact_publication(
     terms_path_locked = actual_terms_path == expected_terms_path
     source_record: dict[str, Any] = {}
     observed_terms_sha256: str | None = None
-    terms_error: str | None = None
+    terms_error: str | None = (
+        "publication_terms_not_read_path_not_code_locked"
+    )
     if terms_path_locked:
         source_record, observed_terms_sha256, terms_error = _read_locked_terms_record(
             actual_terms_path, candidate_id
