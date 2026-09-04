@@ -20,11 +20,19 @@ if str(TOOLS) not in sys.path:
 
 import convert_yield_rows_to_canonical as converter  # noqa: E402
 from convert_yield_rows_to_canonical import ConversionError  # noqa: E402
+from audit_g2_source_package_fingerprints import audit_fingerprints  # noqa: E402
 from fp1_source_node_fixture import (  # noqa: E402
     APPROVAL_ID,
     NODE_ID,
     approved_source_node_contract,
 )
+from validate_fp1_source_identity_rights import (  # noqa: E402
+    LOCKED_CANDIDATE_PROFILES,
+)
+
+
+STAGED_SOURCE_ROOT = ROOT.parents[1] / "external" / "g2_candidates"
+STAGED_SOURCE_MANIFEST = STAGED_SOURCE_ROOT / "acquisition_manifest_v1.json"
 
 
 def _row(
@@ -90,6 +98,53 @@ def _repository_artifact_hashes() -> dict[str, dict[str, str]]:
     return snapshots
 
 
+def _staged_source_hashes() -> dict[str, object]:
+    """Snapshot only manifest-listed staged files and their existing composites."""
+
+    report = audit_fingerprints(STAGED_SOURCE_ROOT, STAGED_SOURCE_MANIFEST)
+    assert report["status"] == "candidate_fingerprint_review_only"
+    assert report["input_integrity_passed"] is True
+    assert report["candidate_count"] == 11
+    assert report["file_count"] == 65
+    files: dict[str, dict[str, object]] = {}
+    composites: dict[str, str] = {}
+    for candidate in report["candidates"]:
+        candidate_id = candidate["candidate_id"]
+        composites[candidate_id] = candidate["composite_sha256"]
+        for record in candidate["files"]:
+            assert record["input_integrity_passed"] is True
+            files[f"{candidate_id}/{record['path']}"] = {
+                "bytes": record["bytes"],
+                "sha256": record["sha256"],
+            }
+
+    profile = LOCKED_CANDIDATE_PROFILES["boccioli_roberti2026_lc18"]
+    source_id = profile["source_candidate_id"]
+    assert composites[source_id] == profile["expected_composite_sha256"]
+    for locked in profile["files"].values():
+        observed = files[f"{source_id}/{locked['relative_path']}"]
+        assert observed["bytes"] == locked["bytes"]
+        assert observed["sha256"] == locked["sha256"]
+
+    return {
+        "manifest_sha256": hashlib.sha256(STAGED_SOURCE_MANIFEST.read_bytes()).hexdigest(),
+        "files": files,
+        "composites": composites,
+        "code_owned_lc18": {
+            "source_candidate_id": source_id,
+            "files": {
+                name: {
+                    "relative_path": locked["relative_path"],
+                    "bytes": locked["bytes"],
+                    "sha256": locked["sha256"],
+                }
+                for name, locked in profile["files"].items()
+            },
+            "expected_composite_sha256": profile["expected_composite_sha256"],
+        },
+    }
+
+
 def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -142,7 +197,13 @@ def _synthetic_admitted_converter_path(
     }
     _write_json(package_contract_path, package_contract)
 
-    before = _repository_artifact_hashes()
+    # Capture every tracked input before any module seam is patched. The
+    # staged-source snapshot is deliberately manifest-scoped and reuses the
+    # existing package-fingerprint implementation and LC18 code-owned lock.
+    before = {
+        "repository": _repository_artifact_hashes(),
+        "staged": _staged_source_hashes(),
+    }
     original_node_contract = converter.DEFAULT_SOURCE_NODE_CONTRACT
     original_package_contract = converter.DEFAULT_PHYSICAL_PACKAGE_CONTRACT
     original_node_audit = converter.audit_source_node_contract
@@ -247,16 +308,28 @@ def _synthetic_admitted_converter_path(
     assert converter.DEFAULT_PHYSICAL_PACKAGE_CONTRACT == original_package_contract
     assert converter.audit_source_node_contract is original_node_audit
     assert converter.audit_physical_package_admission is original_package_audit
-    assert _repository_artifact_hashes() == before
 
     # The genuine repository path remains fail-closed after all synthetic seams
-    # have been restored.
+    # have been restored. Call the Python audit function, not its writing CLI,
+    # so this check cannot rewrite the tracked audit artifact.
+    real_package_report = converter.audit_physical_package_admission()
+    assert real_package_report["status"] == "blocked_no_qualified_physical_package"
+    assert real_package_report["canonical_conversion_allowed"] is False
+    assert real_package_report["runtime_deposition_allowed"] is False
+    assert real_package_report["production_ready"] is False
+    assert real_package_report["publication_ready"] is False
+    assert real_package_report["physical_node_count"] == 0
+    assert real_package_report["selected_package_id"] is None
+
     try:
+        blocked_output = root / "repository-blocked" / "yield.dat"
+        blocked_sidecar = root / "repository-blocked" / "yield.dat.json"
+        blocked_mapping = root / "repository-blocked" / "yield.nodes.json"
         converter.convert(
             source_json,
-            root / "repository-blocked" / "yield.dat",
-            root / "repository-blocked" / "yield.dat.json",
-            root / "repository-blocked" / "yield.nodes.json",
+            blocked_output,
+            blocked_sidecar,
+            blocked_mapping,
         )
     except ConversionError as exc:
         assert (
@@ -265,6 +338,14 @@ def _synthetic_admitted_converter_path(
         )
     else:
         raise AssertionError("real repository conversion was not fail-closed")
+    assert not blocked_output.exists()
+    assert not blocked_sidecar.exists()
+    assert not blocked_mapping.exists()
+
+    # These comparisons intentionally occur after every post-restore check,
+    # covering the entire synthetic fixture window.
+    assert _repository_artifact_hashes() == before["repository"]
+    assert _staged_source_hashes() == before["staged"]
 
 
 def main() -> int:
