@@ -2,8 +2,7 @@
 
 Date: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: Grok re-audit `APPROVE WITH CHANGES`; M8–M11 applied; R1 evidence
-rework authorized, R2 remains blocked until rework and unconditional Opus pass
+Status: R1 rework complete; Claude Opus 5 `PASS`; R2 implementation in progress
 Parent evidence HEAD: `db1bb66`
 Parent implementation: `25bd05f`
 Parent verification boundary: `5aeb6d3`
@@ -258,9 +257,9 @@ sidecar-field checks remain later maintenance items; they are not required to
 open R2. This amendment does not select a source, alter real contracts/data,
 or enable conversion/runtime feedback. This amendment and the next bundle
 transition were re-reviewed by Grok. The re-audit returned `APPROVE WITH
-CHANGES`; M8–M11 above are the resulting mandatory plan edits. R1 rework may
-now begin, but R2 remains blocked until the rework is tested and Claude Opus 5
-returns an unconditional `PASS`.
+CHANGES`; M8–M11 above are the resulting mandatory plan edits. R1 rework was
+then independently tested and Claude Opus 5 returned an unconditional `PASS`;
+R2 is now authorized within this already approved F-P1R bundle.
 
 ## Stop and audit rule
 
