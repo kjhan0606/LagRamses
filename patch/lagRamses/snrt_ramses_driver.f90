@@ -101,7 +101,8 @@ contains
     use amr_commons, only: levelmin, nstep_coarse, myid, dtnew, boxlen, &
          icoarse_min, icoarse_max
     use hydro_commons, only: uold
-    use pm_commons, only: nsink, dMsmbh, xsink, eps_sink
+    use pm_commons, only: nsink, dMsmbh, xsink, eps_sink, idsink, &
+         dMBHoverdt, dMEdoverdt, dMBH_coarse, dMEd_coarse
     use snrt_state, only: snrt_ndirection, snrt_ngroups, snrt_intensity, &
          snrt_neutral_fraction, snrt_group_mean_energy_ev, &
          snrt_group_energy_fraction, snrt_group_cross_section_cm2, &
@@ -111,11 +112,13 @@ contains
     use snrt_angular_quadrature, only: snrt_angular_init
     use snrt_agn_locator, only: snrt_agn_find_local_leaf
     use snrt_agn_source, only: snrt_c_cgs, snrt_agn_photon_budget, &
-         snrt_agn_deposit_isotropic
+         snrt_agn_deposit_transaction
+    use snrt_agn_efficiency, only: snrt_agn_resolve_efficiency
     use snrt_nlte_coupling, only: snrt_nlte_optical_depth_groups, &
          snrt_nlte_photo_source
     use snrt_cuda_interface, only: snrt_cuda_available
-    use amr_parameters, only: dp, ndim
+    use amr_parameters, only: dp, ndim, spin_bh, mad_jet, X_floor
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use iso_c_binding, only: c_float
     use omp_lib, only: omp_get_wtime
     implicit none
@@ -125,15 +128,17 @@ contains
     integer :: env_length, env_status, read_status
     integer :: i, isink, igroup, ierr, nleaf, n_interface_face
     integer :: icell, islot, ilevel_found
-    integer :: energy_index
+    integer :: energy_index, efficiency_status, efficiency_mode
     integer :: n_locator_calls, n_active_sources
     integer, allocatable :: leaf_cell(:), leaf_slot(:), neighbor(:,:)
     real(dp) :: direction_dp(snrt_ndirection,3), angular_weight(snrt_ndirection)
     real(dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
     real(dp) :: dt_s, dx_code, cell_volume_code, cdt_over_dx, scale_m
     real(dp) :: rho_code, neutral_fraction, ionized_fraction
-    real(dp) :: tau_dp(snrt_ngroups), delta_accreted, epsilon_r
-    real(dp) :: luminosity, emitted_photons, deposited_density
+    real(dp) :: tau_dp(snrt_ngroups), delta_inflow, epsilon_r, epsilon_eff
+    real(dp) :: supplied_mass, edd_ratio, raw_epsilon
+    real(dp) :: delta_retained, retained_bound, retained_tolerance
+    real(dp) :: deposited_density
     real(dp) :: ionization_increment, heating_rate, heating_total
     real(dp) :: wall_start
     real(dp) :: wall_sub
@@ -141,20 +146,28 @@ contains
     real(dp) :: t_source_overhead, t_locator, t_budget, t_deposit
     real(c_float), allocatable :: optical_depth(:,:), neutral_hydrogen(:)
     real(c_float), allocatable :: absorbed_group(:,:)
-    real(dp), allocatable :: accounted_mass_new(:)
-    logical :: enabled, source_ok
+    real(dp), allocatable :: accounted_inflow_new(:), retained_seen_new(:), &
+         emitted_groups(:), luminosity_groups(:)
+    logical, allocatable :: retained_initialized_new(:)
+    integer, allocatable :: accounted_ids_new(:)
+    logical :: enabled, source_ok, accounting_identity_ok, accounting_order_same
+    logical :: efficiency_contract_ok
     logical, save :: enabled_resolved = .false.
+    logical, save :: enabled_latched = .false.
     real(dp), save :: reduced_c = 0.01d0
     integer, save :: level_filter = -1
     integer, save :: accounted_step = -huge(1)
-    real(dp), allocatable, save :: accounted_mass(:)
+    integer, allocatable, save :: accounted_ids(:)
+    real(dp), allocatable, save :: accounted_inflow(:), retained_seen(:)
+    logical, allocatable, save :: retained_initialized(:)
+    real(dp), parameter :: mass_consistency_tol = 1.0d-8
 
     enabled = .false.
     if (.not. enabled_resolved) then
        env_value = ''
        call get_environment_variable('SNRT_RT_ENABLE', env_value, &
             length=env_length, status=env_status)
-       enabled = env_status == 0 .and. env_length == 1 .and. &
+       enabled_latched = env_status == 0 .and. env_length == 1 .and. &
             env_value(1:1) == '1'
        env_value = ''
        call get_environment_variable('SNRT_REDUCED_C', env_value, &
@@ -173,17 +186,15 @@ contains
                level_filter > MAXLEVEL) level_filter = -1
        end if
        enabled_resolved = .true.
-       if (enabled .and. myid == 1) write(*,'(A,F8.4)') &
+       if (enabled_latched .and. myid == 1) write(*,'(A,F8.4)') &
             ' SNRT S_N RT enabled; reduced speed factor=', reduced_c
-       if (enabled .and. myid == 1 .and. level_filter > 0) &
+       if (enabled_latched .and. myid == 1 .and. level_filter > 0) &
             write(*,'(A,I0)') ' SNRT RT level filter=', level_filter
-    else
-       env_value = ''
-       call get_environment_variable('SNRT_RT_ENABLE', env_value, &
-            length=env_length, status=env_status)
-       enabled = env_status == 0 .and. env_length == 1 .and. &
-            env_value(1:1) == '1'
     end if
+    ! Runtime control is latched once per process.  Re-reading the
+    ! environment mid-step could strand an already committed accounting
+    ! marker while leaving the transport state in a different mode.
+    enabled = enabled_latched
     if (.not. enabled) return
     if (ilevel < levelmin .or. dtnew(ilevel) <= 0.0d0) return
     if (level_filter > 0 .and. ilevel /= level_filter) return
@@ -238,56 +249,225 @@ contains
     t_deposit = 0.0d0
     n_locator_calls = 0
     n_active_sources = 0
-    ! dMsmbh is cumulative within a coarse step.  Account for only the
-    ! increment not already injected into the photon state on this rank.
-    if (accounted_step /= nstep_coarse) then
-       if (allocated(accounted_mass)) deallocate(accounted_mass)
+    ! dMBH_coarse and dMEd_coarse are cumulative supplied-mass ledgers within
+    ! a coarse step.  Account for only the increment not already injected into
+    ! the photon state on this rank.  The saved marker is keyed by idsink,
+    ! never by the mutable sink-array position; RAMSES may reorder the local
+    ! particle arrays between calls.  retained_seen is a separate observation
+    ! cursor for dMsmbh and survives coarse-step boundaries so deferred Esave
+    ! carry-over is not re-emitted as a new source event.
+    accounting_identity_ok = .true.
+    if (nsink > 0) then
+       do i = 1, nsink
+          if (idsink(i) <= 0) accounting_identity_ok = .false.
+          do isink = i + 1, nsink
+             if (idsink(i) == idsink(isink)) accounting_identity_ok = .false.
+          end do
+       end do
+    end if
+    if (.not. accounting_identity_ok) then
+       if (myid == 1) write(*,'(A)') &
+            ' SNRT AGN source skipped: idsink identity map is invalid'
+    else if (accounted_step /= nstep_coarse) then
        if (nsink > 0) then
-          allocate(accounted_mass(nsink))
-          accounted_mass = 0.0d0
+          allocate(accounted_ids_new(nsink), accounted_inflow_new(nsink), &
+               retained_seen_new(nsink), retained_initialized_new(nsink))
+          accounted_ids_new = idsink
+          accounted_inflow_new = 0.0d0
+          retained_seen_new = 0.0d0
+          retained_initialized_new = .false.
+          if (allocated(accounted_ids) .and. allocated(retained_seen) .and. &
+               allocated(retained_initialized)) then
+             do i = 1, nsink
+                do isink = 1, size(accounted_ids)
+                   if (accounted_ids(isink) == accounted_ids_new(i)) then
+                      retained_seen_new(i) = retained_seen(isink)
+                      retained_initialized_new(i) = retained_initialized(isink)
+                      exit
+                   end if
+                end do
+             end do
+          end if
+          if (allocated(accounted_ids)) deallocate(accounted_ids)
+          if (allocated(accounted_inflow)) deallocate(accounted_inflow)
+          if (allocated(retained_seen)) deallocate(retained_seen)
+          if (allocated(retained_initialized)) deallocate(retained_initialized)
+          call move_alloc(accounted_ids_new, accounted_ids)
+          call move_alloc(accounted_inflow_new, accounted_inflow)
+          call move_alloc(retained_seen_new, retained_seen)
+          call move_alloc(retained_initialized_new, retained_initialized)
+       else
+          if (allocated(accounted_ids)) deallocate(accounted_ids)
+          if (allocated(accounted_inflow)) deallocate(accounted_inflow)
+          if (allocated(retained_seen)) deallocate(retained_seen)
+          if (allocated(retained_initialized)) deallocate(retained_initialized)
        end if
        accounted_step = nstep_coarse
-    else if (nsink > 0 .and. (.not. allocated(accounted_mass) .or. &
-         size(accounted_mass) < nsink)) then
-       allocate(accounted_mass_new(nsink))
-       accounted_mass_new = 0.0d0
-       if (allocated(accounted_mass)) accounted_mass_new(1:size(accounted_mass)) = &
-            accounted_mass
-       if (allocated(accounted_mass)) deallocate(accounted_mass)
-       call move_alloc(accounted_mass_new, accounted_mass)
+    else if (nsink > 0) then
+       ! Avoid an O(nsink^2) remap at every AMR level when the common case is
+       ! an unchanged particle-array order.  Rebuild by stable ID only after
+       ! RAMSES actually reorders or changes the sink population.
+       accounting_order_same = .false.
+       if (allocated(accounted_ids) .and. allocated(accounted_inflow) .and. &
+            allocated(retained_seen) .and. allocated(retained_initialized)) then
+          if (size(accounted_ids) == nsink .and. size(accounted_inflow) == nsink .and. &
+               size(retained_seen) == nsink .and. size(retained_initialized) == nsink) &
+               accounting_order_same = all(accounted_ids == idsink)
+       end if
+       if (.not. accounting_order_same) then
+          allocate(accounted_ids_new(nsink), accounted_inflow_new(nsink), &
+               retained_seen_new(nsink), retained_initialized_new(nsink))
+          accounted_ids_new = idsink
+          accounted_inflow_new = 0.0d0
+          retained_seen_new = 0.0d0
+          retained_initialized_new = .false.
+          if (allocated(accounted_ids) .and. allocated(accounted_inflow) .and. &
+               allocated(retained_seen) .and. allocated(retained_initialized)) then
+             do i = 1, nsink
+                do isink = 1, size(accounted_ids)
+                   if (accounted_ids(isink) == accounted_ids_new(i)) then
+                      accounted_inflow_new(i) = accounted_inflow(isink)
+                      retained_seen_new(i) = retained_seen(isink)
+                      retained_initialized_new(i) = retained_initialized(isink)
+                      exit
+                   end if
+                end do
+             end do
+          end if
+          if (allocated(accounted_ids)) deallocate(accounted_ids)
+          if (allocated(accounted_inflow)) deallocate(accounted_inflow)
+          if (allocated(retained_seen)) deallocate(retained_seen)
+          if (allocated(retained_initialized)) deallocate(retained_initialized)
+          call move_alloc(accounted_ids_new, accounted_ids)
+          call move_alloc(accounted_inflow_new, accounted_inflow)
+          call move_alloc(retained_seen_new, retained_seen)
+          call move_alloc(retained_initialized_new, retained_initialized)
+       end if
     end if
-    if (nsink > 0 .and. allocated(dMsmbh) .and. allocated(xsink)) then
-       scale_m = scale_d * scale_l**3
-       do isink = 1, nsink
-          delta_accreted = max(0.0d0, dMsmbh(isink) - accounted_mass(isink))
-          if (delta_accreted <= 0.0d0) cycle
-          wall_sub = omp_get_wtime()
-          call snrt_agn_find_local_leaf(xsink(isink,1:ndim), icell, ilevel_found)
-          t_locator = t_locator + omp_get_wtime() - wall_sub
-          n_locator_calls = n_locator_calls + 1
-          if (icell == 0 .or. ilevel_found /= ilevel) cycle
-          islot = snrt_state_get_slot(icell)
-          if (islot <= 0) cycle
-          n_active_sources = n_active_sources + 1
-          epsilon_r = 0.1d0
-          if (allocated(eps_sink) .and. size(eps_sink) >= isink) &
-               epsilon_r = max(1.0d-6, min(0.99d0, eps_sink(isink)))
-          source_ok = .true.
-          do igroup = 1, snrt_ngroups
-             wall_sub = omp_get_wtime()
-             call snrt_agn_photon_budget(delta_accreted, scale_m, dt_s, &
-                  epsilon_r, 0.5d0*snrt_group_energy_fraction(igroup), &
-                  snrt_group_mean_energy_ev(igroup), luminosity, emitted_photons)
-             t_budget = t_budget + omp_get_wtime() - wall_sub
-             wall_sub = omp_get_wtime()
-             call snrt_agn_deposit_isotropic(snrt_intensity, islot, igroup, &
-                  emitted_photons, cell_volume_code, scale_l, scale_nH, &
-                  angular_weight, deposited_density, ierr)
-             t_deposit = t_deposit + omp_get_wtime() - wall_sub
-             if (ierr /= 0) source_ok = .false.
-          end do
-          if (source_ok) accounted_mass(isink) = accounted_mass(isink) + delta_accreted
-       end do
+
+    if (accounting_identity_ok .and. nsink > 0) then
+       if (allocated(dMsmbh) .and. allocated(xsink) .and. &
+            allocated(dMBHoverdt) .and. allocated(dMEdoverdt) .and. &
+            allocated(dMBH_coarse) .and. allocated(dMEd_coarse)) then
+          if (size(dMsmbh) >= nsink .and. size(xsink,1) >= nsink .and. &
+               size(dMBHoverdt) >= nsink .and. size(dMEdoverdt) >= nsink .and. &
+               size(dMBH_coarse) >= nsink .and. size(dMEd_coarse) >= nsink .and. &
+               allocated(accounted_inflow) .and. allocated(retained_seen) .and. &
+               allocated(retained_initialized)) then
+             scale_m = scale_d * scale_l**3
+             allocate(emitted_groups(snrt_ngroups), luminosity_groups(snrt_ngroups))
+             do isink = 1, nsink
+                if (.not. ieee_is_finite(dMsmbh(isink)) .or. &
+                     dMsmbh(isink) < 0.0d0 .or. &
+                     .not. ieee_is_finite(dMBH_coarse(isink)) .or. &
+                     .not. ieee_is_finite(dMEd_coarse(isink))) cycle
+
+                raw_epsilon = 0.0d0
+                if (allocated(eps_sink)) then
+                   if (size(eps_sink) >= isink) raw_epsilon = eps_sink(isink)
+                end if
+                call snrt_agn_resolve_efficiency(raw_epsilon,spin_bh, &
+                     dMBHoverdt(isink),dMEdoverdt(isink),mad_jet,X_floor, &
+                     epsilon_r,epsilon_eff,supplied_mass,edd_ratio, &
+                     efficiency_status,efficiency_contract_ok,efficiency_mode)
+                ! The helper's inflow output is based on instantaneous rates;
+                ! source accounting uses the cumulative coarse ledgers below.
+                supplied_mass=min(max(dMBH_coarse(isink),0.0d0), &
+                     max(dMEd_coarse(isink),0.0d0))
+                if (.not. ieee_is_finite(supplied_mass)) cycle
+                if (supplied_mass + mass_consistency_tol*max(1.0d0,abs(supplied_mass)) &
+                     < accounted_inflow(isink)) then
+                   if (myid == 1) write(*,'(A,I0)') &
+                        ' SNRT AGN source skipped: supplied-mass ledger regressed for sink ', idsink(isink)
+                   cycle
+                end if
+                delta_inflow=max(0.0d0,supplied_mass-accounted_inflow(isink))
+
+                ! Observe retained mass independently of photon commit.  A
+                ! decrease is the documented AGN_blast reset/rebase, not a
+                ! negative accretion event.  This cursor is deliberately kept
+                ! across coarse steps to absorb nonzero deferred-Esave carry.
+                if (.not. retained_initialized(isink)) then
+                   retained_seen(isink)=dMsmbh(isink)
+                   retained_initialized(isink)=.true.
+                   delta_retained=0.0d0
+                else if (dMsmbh(isink) < retained_seen(isink)) then
+                   ! AGN_blast can reset dMsmbh before the next source call.
+                   ! Rebase the comparison at zero, but do not consume the
+                   ! post-reset increment until its source transaction has
+                   ! committed; a skipped transaction must be re-armed.
+                   delta_retained=dMsmbh(isink)
+                else
+                   delta_retained=dMsmbh(isink)-retained_seen(isink)
+                end if
+
+                if (.not. efficiency_contract_ok) then
+                   if (myid == 1) write(*,'(A,I0,A,I0)') &
+                        ' SNRT AGN source skipped: efficiency contract status=', efficiency_status, &
+                        ' sink=', idsink(isink)
+                   cycle
+                end if
+                if (epsilon_eff >= 1.0d0 .or. epsilon_eff < 0.0d0) cycle
+                retained_bound=(1.0d0-epsilon_eff)*delta_inflow
+                retained_tolerance=max(1.0d-14, &
+                     mass_consistency_tol*max(abs(retained_bound),1.0d-300))
+                if (delta_retained > retained_bound*(1.0d0+mass_consistency_tol) &
+                     + retained_tolerance) then
+                   if (myid == 1) write(*,'(A,I0)') &
+                        ' SNRT AGN source skipped: retained mass exceeds supplied bound for sink ', idsink(isink)
+                   cycle
+                end if
+                if (delta_inflow <= 0.0d0) cycle
+
+                wall_sub = omp_get_wtime()
+                ! The locator returns a leaf owned by this MPI rank or zero.
+                ! The source loop is intentionally serial: local intensity and
+                ! the idsink-keyed accounting map are shared mutable state, not
+                ! OpenMP-threadprivate data.  A valid leaf therefore has one
+                ! MPI owner for this source transaction.
+                call snrt_agn_find_local_leaf(xsink(isink,1:ndim), icell, ilevel_found)
+                t_locator = t_locator + omp_get_wtime() - wall_sub
+                n_locator_calls = n_locator_calls + 1
+                if (icell == 0 .or. ilevel_found /= ilevel) cycle
+                islot = snrt_state_get_slot(icell)
+                if (islot <= 0) cycle
+                n_active_sources = n_active_sources + 1
+                source_ok = .true.
+                do igroup = 1, snrt_ngroups
+                   wall_sub = omp_get_wtime()
+                   call snrt_agn_photon_budget(delta_inflow, scale_m, dt_s, &
+                        epsilon_eff, 0.5d0*snrt_group_energy_fraction(igroup), &
+                        snrt_group_mean_energy_ev(igroup), luminosity_groups(igroup), &
+                        emitted_groups(igroup))
+                   t_budget = t_budget + omp_get_wtime() - wall_sub
+                   if (.not. ieee_is_finite(luminosity_groups(igroup)) .or. &
+                        .not. ieee_is_finite(emitted_groups(igroup)) .or. &
+                        emitted_groups(igroup) < 0.0d0) source_ok = .false.
+                end do
+                if (source_ok) then
+                   wall_sub = omp_get_wtime()
+                   call snrt_agn_deposit_transaction(snrt_intensity, islot, &
+                        emitted_groups, cell_volume_code, scale_l, scale_nH, &
+                        angular_weight, deposited_density, ierr)
+                   t_deposit = t_deposit + omp_get_wtime() - wall_sub
+                   if (ierr /= 0) source_ok = .false.
+                end if
+                ! The accounting marker moves only after all spectral groups
+                ! commit, and it advances by supplied inflow rather than the
+                ! retained BH mass.
+                if (source_ok) then
+                   accounted_inflow(isink) = accounted_inflow(isink) + delta_inflow
+                   ! Consume the retained cursor only with the same
+                   ! successful transaction.  A locator/validation/commit
+                   ! failure therefore rechecks the same retained increment
+                   ! on the next AMR-level call instead of silently arming a
+                   ! later emission without its consistency gate.
+                   retained_seen(isink)=dMsmbh(isink)
+                end if
+             end do
+             deallocate(emitted_groups, luminosity_groups)
+          end if
+       end if
     end if
     t_source = omp_get_wtime() - wall_start
     t_source_overhead = t_source - t_locator - t_budget - t_deposit

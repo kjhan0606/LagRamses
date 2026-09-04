@@ -2174,6 +2174,9 @@ end subroutine write_smbh_capture_ledger
 subroutine dump_agn_coarse_state
   use pm_commons
   use amr_commons
+  use amr_parameters, only: spin_bh,mad_jet,X_floor
+  use snrt_agn_efficiency, only: snrt_agn_resolve_efficiency, &
+       snrt_agn_efficiency_status_name, snrt_agn_efficiency_mode_name
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use, intrinsic :: iso_fortran_env, only: error_unit
   implicit none
@@ -2182,19 +2185,24 @@ subroutine dump_agn_coarse_state
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
   real(dp)::mass_g,mass_msun,bondi_rate,edd_rate,inflow_rate,mdot_msun_yr
   real(dp)::edd_ratio,coarse_edd_ratio,epsilon_r,epsilon_eff,luminosity
+  real(dp)::raw_epsilon
   real(dp)::jgas_norm,jbh_norm,cos_angle,angle_rad,angle_deg
   real(dp)::jbh_physical_norm,jbh_physical(1:3)
   real(dp)::alpha_visc,nu_ratio,amod,chieps,mass_8,t_nu1
   real(dp)::rwarp,rsg,msg,dmacc,disk_mass_g,disk_mass_msun
   real(dp)::prefact,redshift
-  logical::angle_valid,disk_valid
+  logical::angle_valid,disk_valid,efficiency_contract_ok
+  integer::efficiency_status,efficiency_mode
   integer,save::last_dump_step=-huge(0)
   character(len=8)::feedback_mode
+  character(len=256)::efficiency_status_text
+  character(len=32)::efficiency_mode_text
   character(len=512)::iomsg
-  ! Keep the legacy constants used by kjhan_growspin so the diagnostic disk
-  ! episode follows the same analytic prescription as the state-update model.
-  real(dp),parameter::solar_mass_g=2d33
-  real(dp),parameter::year_s=3600d0*24d0*365d0
+  ! Use the declared Julian year at the ledger boundary.  The disk episode
+  ! diagnostic and the source-rate conversion must not disagree by silently
+  ! using different year lengths.
+  real(dp),parameter::solar_mass_g=1.98847d33
+  real(dp),parameter::year_s=3600d0*24d0*365.25d0
   real(dp),parameter::clight_cgs=2.99792458d10
   real(dp),parameter::proton_mass_cgs=1.66d-24
   real(dp),parameter::sigma_thomson_cgs=6.652d-25
@@ -2224,24 +2232,25 @@ subroutine dump_agn_coarse_state
   do isink=1,nsink
      mass_g=msink(isink)*scale_m
      mass_msun=mass_g/solar_mass_g
-     bondi_rate=max(dMBHoverdt(isink),0d0)
-     edd_rate=max(dMEdoverdt(isink),0d0)
-     inflow_rate=min(bondi_rate,edd_rate)
-     mdot_msun_yr=inflow_rate*scale_m/scale_t*year_s/solar_mass_g
-     edd_ratio=0d0
-     if(edd_rate > tiny(edd_rate)) edd_ratio=bondi_rate/edd_rate
-     coarse_edd_ratio=0d0
-     if(dMEd_coarse(isink) > tiny(dMEd_coarse(isink))) &
-          & coarse_edd_ratio=dMBH_coarse(isink)/dMEd_coarse(isink)
-
-     epsilon_r=0.1d0
+     bondi_rate=0d0
+     if(ieee_is_finite(dMBHoverdt(isink))) bondi_rate=max(dMBHoverdt(isink),0d0)
+     edd_rate=0d0
+     if(ieee_is_finite(dMEdoverdt(isink))) edd_rate=max(dMEdoverdt(isink),0d0)
+     raw_epsilon=0d0
      if(allocated(eps_sink)) then
-        if(ieee_is_finite(eps_sink(isink)) .and. eps_sink(isink)>0d0) &
-             & epsilon_r=eps_sink(isink)
+        if(size(eps_sink)>=isink) raw_epsilon=eps_sink(isink)
      endif
-     epsilon_eff=epsilon_r
-     if(mad_jet .and. X_floor>0d0 .and. edd_ratio<X_floor) &
-          & epsilon_eff=epsilon_r*max(edd_ratio,0d0)/X_floor
+     call snrt_agn_resolve_efficiency(raw_epsilon,spin_bh,dMBHoverdt(isink), &
+          dMEdoverdt(isink),mad_jet,X_floor,epsilon_r,epsilon_eff,inflow_rate, &
+          edd_ratio,efficiency_status,efficiency_contract_ok,efficiency_mode)
+     efficiency_status_text=snrt_agn_efficiency_status_name(efficiency_status)
+     efficiency_mode_text=snrt_agn_efficiency_mode_name(efficiency_mode)
+     mdot_msun_yr=inflow_rate*scale_m/scale_t*year_s/solar_mass_g
+     coarse_edd_ratio=0d0
+     if(ieee_is_finite(dMBH_coarse(isink)) .and. &
+          ieee_is_finite(dMEd_coarse(isink)) .and. &
+          dMEd_coarse(isink) > tiny(dMEd_coarse(isink))) &
+          & coarse_edd_ratio=dMBH_coarse(isink)/dMEd_coarse(isink)
      luminosity=epsilon_eff*inflow_rate*scale_m/scale_t*clight_cgs**2
 
      jgas_norm=sqrt(sum(jsink(isink,1:ndim)**2))
@@ -2307,6 +2316,9 @@ subroutine dump_agn_coarse_state
      iomsg=''
      write(ilun,'(A)',iostat=ios,iomsg=iomsg) &
           & '{"schema_version":1,"record_type":"agn_coarse_state"'// &
+          & ',"ledger_phase":"pre_feedback_pre_reset"'// &
+          & ',"source_interval_kind":"instantaneous_pre_reset_state"'// &
+          & ',"julian_year_days":365.25'// &
           & ',"nstep_coarse":'//trim(agn_json_int(nstep_coarse))// &
           & ',"sink_id":'//trim(agn_json_int(idsink(isink)))// &
           & ',"aexp":'//trim(agn_json_real(aexp))// &
@@ -2341,8 +2353,13 @@ subroutine dump_agn_coarse_state
           & trim(agn_json_real(dMEd_coarse(isink)))// &
           & ',"coarse_accreted_bh_mass_code":'//trim(agn_json_real(dMsmbh(isink)))// &
           & ',"coarse_eddington_ratio":'//trim(agn_json_real(coarse_edd_ratio))// &
+          & ',"raw_radiative_efficiency":'//trim(agn_json_real(raw_epsilon))// &
           & ',"radiative_efficiency":'//trim(agn_json_real(epsilon_r))// &
           & ',"effective_radiative_efficiency":'//trim(agn_json_real(epsilon_eff))// &
+          & ',"efficiency_status":'//trim(agn_json_int(efficiency_status))// &
+          & ',"efficiency_status_name":"'//trim(efficiency_status_text)//'"'// &
+          & ',"efficiency_mode":"'//trim(efficiency_mode_text)//'"'// &
+          & ',"efficiency_contract_ok":'//trim(agn_json_logical(efficiency_contract_ok))// &
           & ',"bolometric_luminosity_erg_s":'//trim(agn_json_real(luminosity))// &
           & ',"feedback_mode":"'//trim(feedback_mode)//'"'// &
           & ',"feedback_energy_deferred":'//trim(agn_json_logical(Esave(isink)>0d0))// &

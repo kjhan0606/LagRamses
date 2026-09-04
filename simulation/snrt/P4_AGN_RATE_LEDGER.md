@@ -12,10 +12,28 @@ python tools/p4_build_agn_rate_ledger.py \
 ```
 
 The converter writes the instantaneous Bondi and Eddington rates, their
-non-negative minimum, the active radiative efficiency, and
-`L_bol = epsilon_r * mdot_inflow * c^2`. The calculation treats the selected
+non-negative minimum, both the raw and effective radiative efficiencies, and
+`L_bol = epsilon_eff * mdot_inflow * c^2`. The calculation treats the selected
 rate as inflowing mass rate, which is the convention used by the active
 Bondi/Eddington limiter.
+
+The CSV columns are deliberately named `raw_radiative_efficiency` and
+`effective_radiative_efficiency`; the latter is the luminosity convention.
+For the coarse JSON source, the intermediate `radiative_efficiency` column is
+the resolved base coefficient and the raw sink value is retained separately.
+The coarse JSON path also emits `efficiency_status` and
+`efficiency_contract_ok`.  Any row with `efficiency_contract_ok=false` is
+rejected before the CSV is created, so configuration or initialization
+divergence cannot silently enter a physical or publication artifact.  The
+canonical reader keeps such rows readable for ledger diagnostics but does not
+promote them into `AgnCoarseState`; the converter rejects a requested coarse
+step containing one.  The
+legacy `sinkprops` path has no mode-resolved contract; its corresponding CSV
+fields are blank and `efficiency_contract_source` says
+`legacy_sinkprops_mode_unresolved`.
+Native `sinkprops` input has no mode-resolved effective field, so its
+review-only rate ledger records raw == effective and does not approve an AGN
+SED or obscuration model.  All rate conversions use a 365.25-day Julian year.
 
 This is an AGN rate ledger, not a photon ledger. Conversion to
 `q_group_N_s` requires a declared intrinsic AGN SED and photon-group energy
@@ -39,8 +57,9 @@ repair, and short production-runner integration are recorded in
 
 The active `patch/lagRamses` writer appends `agn_coarse_state_v1.jsonl` before
 feedback resets its coarse mass accumulators. It records the instantaneous
-Bondi and Eddington rates, effective radiative efficiency, code-computed
-bolometric luminosity, and sink position. Select exactly one matching coarse
+Bondi and Eddington rates, raw/effective radiative efficiencies,
+code-computed bolometric luminosity, and sink position. Its pre-reset and
+instantaneous markers are required by the canonical reader. Select exactly one matching coarse
 step by the hydro snapshot expansion factor:
 
 ```bash
@@ -52,4 +71,15 @@ python tools/p4_build_agn_rate_ledger.py \
 
 This path preserves the active jet-mode effective efficiency. It rejects a
 selection that matches zero or multiple coarse steps rather than guessing a
-rate interval.
+rate interval. Identical restart duplicates are collapsed by key
+`(nstep_coarse, sink_id)`; conflicting same-key payloads fail closed.
+
+The bounded source/ordering audit can be run with a ledger from the same
+production run:
+
+```bash
+python tools/audit_agn_coarse_ledger.py \
+  --input agn_coarse_state_v1.jsonl \
+  --helper ../patch/lagRamses/snrt_agn_efficiency.f90 \
+  --output data/agn_coarse_ledger_audit.json
+```

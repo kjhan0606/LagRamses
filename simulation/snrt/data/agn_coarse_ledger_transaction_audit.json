@@ -1,0 +1,88 @@
+{
+  "blockers": [],
+  "bundle": "F-P1.5 AGN ledger transaction",
+  "criteria": {
+    "accounting_commit_after_transaction": true,
+    "atomic_transaction_call_present": true,
+    "coarse_writer_precedes_agn_blast": true,
+    "coarse_writer_precedes_coarse_rate_reset": true,
+    "coarse_writer_precedes_dMsmbh_reset": true,
+    "driver_has_direct_amr_pm_dependencies": true,
+    "driver_has_no_hidden_efficiency_clamp": true,
+    "driver_has_no_independent_mad_formula": true,
+    "driver_photon_budget_uses_effective_efficiency": true,
+    "driver_photon_budget_uses_supplied_inflow": true,
+    "driver_rearms_retained_cursor_after_successful_commit": true,
+    "driver_retained_mass_is_one_sided_check_only": true,
+    "driver_supplied_mass_is_bondi_eddington_minimum": true,
+    "efficiency_status_and_mode_emitted": true,
+    "helper_has_amr_parameter_dependency": true,
+    "helper_has_single_mode_transform": true,
+    "helper_path_is_explicit_audit_input": true,
+    "instantaneous_marker_emitted": true,
+    "julian_year_marker_emitted": true,
+    "local_leaf_single_owner_contract_present": true,
+    "one_coarse_writer_call_in_agn_feedback": true,
+    "pre_reset_marker_emitted": true,
+    "production_makefile_keeps_runtime_cuda_gate": true,
+    "production_makefile_links_shared_efficiency_helper": true,
+    "production_makefile_links_transaction_module": true,
+    "production_makefile_links_transport_graph": true,
+    "rank1_writer_guard": true,
+    "raw_and_effective_efficiency_emitted": true,
+    "rt_enable_latched_once": true,
+    "same_step_duplicate_guard_in_memory": true,
+    "same_step_duplicate_guard_in_writer": true,
+    "shared_efficiency_helper_called_by_driver": true,
+    "shared_efficiency_helper_called_by_writer": true,
+    "source_api_declares_supplied_inflow": true,
+    "source_loop_is_not_openmp_directive": true,
+    "source_smoke_records_supplied_mass_api": true,
+    "stable_idsink_key_map_present": true,
+    "transaction_module_present": true,
+    "transaction_validates_finite_inputs": true,
+    "writer_has_no_independent_mad_formula": true
+  },
+  "input": {
+    "all_records_pre_reset_instantaneous": true,
+    "coarse_steps": [
+      42
+    ],
+    "duplicate_count_collapsed": 1,
+    "passed": true,
+    "record_count": 2,
+    "sink_ids": [
+      101,
+      202
+    ],
+    "source_algebra_validated": true
+  },
+  "limitations": [
+    "No physical AGN SED, obscuration, escape-fraction, or hydro-closure claim is made.",
+    "A run UUID/dump counter is not present; conflicting rewind payloads fail closed.",
+    "Cross-coarse-step deferred re-emission and a durable crash journal remain open follow-ups.",
+    "The shared helper convention is now checked here; this remains an arithmetic/engineering audit, not a physical AGN SED validation.",
+    "Input evidence is arithmetic/transactional and must be refreshed from the same production run."
+  ],
+  "passed": true,
+  "physical_closure_claim": false,
+  "provenance": {
+    "driver": "/gpfs/kjhan/LRD_JWST/patch/lagRamses/snrt_ramses_driver.f90",
+    "helper": "patch/lagRamses/snrt_agn_efficiency.f90",
+    "input": "simulation/snrt/data/agn_coarse_state_transaction_fixture.jsonl",
+    "makefile": "/gpfs/kjhan/LRD_JWST/bin/Makefile",
+    "sha256": {
+      "driver": "e554f2233f63cc6f09b588e965dc940eeae2708677f89a6c6ee329548e7eff57",
+      "helper": "34915c8cafc688763e38aa11641e613662ec2bbf420f96f64448cabeaa2bcc01",
+      "input": "acfb57341550322338d91536e3a51c855a16aafe4a7a4dec8602e42447d92567",
+      "makefile": "7b7dd7b68dcc3e7806cbe0fff9f204a17fb16dd866d09cc2f4f18cca52fe26ca",
+      "source": "79f23fa5ddaac1e6dfa7d4b5e90a5aa5c68ed901150534b30a55a6cb6122706c",
+      "source_module": "8a398433f3fe3599ad64a9200de9a15c591033cb8cdec67eb79efc23ec410c93",
+      "source_smoke": "b7ce7d8b02ceb7f5d814f5109fd3793914f0e0680c5b976757ddf3e0b5123224"
+    },
+    "source": "/gpfs/kjhan/LRD_JWST/patch/lagRamses/sink_particle.kjhan.f90",
+    "source_module": "/gpfs/kjhan/LRD_JWST/patch/lagRamses/snrt_agn_source.f90",
+    "source_smoke": "/gpfs/kjhan/LRD_JWST/patch/lagRamses/snrt_agn_source_smoke.f90"
+  },
+  "schema": "snrt_agn_coarse_ledger_audit_v2"
+}

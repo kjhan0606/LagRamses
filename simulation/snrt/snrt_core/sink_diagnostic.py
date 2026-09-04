@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 import struct
 
@@ -13,6 +14,8 @@ import numpy as np
 M_SUN_G = 1.98847e33
 SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
 SPEED_OF_LIGHT_CM_S = 2.99792458e10
+JULIAN_YEAR_DAYS = 365.25
+AGN_EFF_STATUS_SPIN_DISABLED_DEFAULT = 1
 
 
 @dataclass(frozen=True)
@@ -112,11 +115,272 @@ class AgnCoarseState:
     bondi_rate_msun_per_year: np.ndarray
     eddington_rate_msun_per_year: np.ndarray
     inflow_rate_msun_per_year: np.ndarray
+    # ``raw_radiative_efficiency`` is the sink-array value.  The resolved
+    # ``radiative_efficiency`` is the helper-selected base coefficient, and
+    # ``effective_radiative_efficiency`` includes the active feedback-mode
+    # reduction used for bolometric luminosity.  Keeping all three prevents a
+    # silent convention change at the ledger boundary.
+    raw_radiative_efficiency: np.ndarray
     radiative_efficiency: np.ndarray
+    effective_radiative_efficiency: np.ndarray
+    efficiency_status: np.ndarray
+    efficiency_contract_ok: np.ndarray
     bolometric_luminosity_erg_s: np.ndarray
     expansion_factor: float
     time_code: float
     nstep_coarse: int
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant is forbidden: {value}")
+
+
+def _finite_number(record: dict[str, object], name: str) -> float:
+    value = record.get(name)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"AGN coarse-state field {name!r} is missing or not numeric")
+    value_float = float(value)
+    if not math.isfinite(value_float):
+        raise ValueError(f"AGN coarse-state field {name!r} must be finite")
+    return value_float
+
+
+def _nullable_finite_number(record: dict[str, object], name: str) -> float | None:
+    """Read a numeric diagnostic field, allowing writer-emitted JSON null."""
+
+    if name not in record:
+        raise ValueError(f"AGN coarse-state field {name!r} is missing")
+    value = record[name]
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"AGN coarse-state field {name!r} is not numeric or null")
+    value_float = float(value)
+    if not math.isfinite(value_float):
+        raise ValueError(f"AGN coarse-state field {name!r} must be finite or null")
+    return value_float
+
+
+def _integer_field(record: dict[str, object], name: str, *, minimum: int | None = None) -> int:
+    value = record.get(name)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"AGN coarse-state field {name!r} is missing or not integral")
+    value_float = float(value)
+    if not math.isfinite(value_float) or not value_float.is_integer():
+        raise ValueError(f"AGN coarse-state field {name!r} must be a finite integer")
+    integer = int(value_float)
+    if minimum is not None and integer < minimum:
+        raise ValueError(f"AGN coarse-state field {name!r} is below {minimum}")
+    return integer
+
+
+def _boolean_field(record: dict[str, object], name: str, *, default: bool) -> bool:
+    value = record.get(name, default)
+    if not isinstance(value, bool):
+        raise ValueError(f"AGN coarse-state field {name!r} must be boolean")
+    return value
+
+
+def _time_field(record: dict[str, object]) -> float:
+    has_t_code = "t_code" in record and record["t_code"] is not None
+    has_time_code = "time_code" in record and record["time_code"] is not None
+    if not has_t_code and not has_time_code:
+        raise ValueError("AGN coarse-state requires t_code (or legacy time_code)")
+    t_code = _finite_number(record, "t_code") if has_t_code else None
+    time_code = _finite_number(record, "time_code") if has_time_code else None
+    if t_code is not None and time_code is not None and not math.isclose(
+        t_code, time_code, rel_tol=0.0, abs_tol=1.0e-13
+    ):
+        raise ValueError("AGN coarse-state t_code and time_code disagree")
+    return t_code if t_code is not None else time_code  # type: ignore[return-value]
+
+
+def _vector_field(record: dict[str, object], name: str) -> list[float]:
+    value = record.get(name)
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(f"AGN coarse-state field {name!r} must be a length-3 array")
+    vector = []
+    for index, component in enumerate(value):
+        if isinstance(component, bool) or not isinstance(component, (int, float)):
+            raise ValueError(f"AGN coarse-state field {name!r}[{index}] is not numeric")
+        component_float = float(component)
+        if not math.isfinite(component_float):
+            raise ValueError(f"AGN coarse-state field {name!r}[{index}] must be finite")
+        vector.append(component_float)
+    return vector
+
+
+def _require_string(record: dict[str, object], name: str, expected: str) -> None:
+    if record.get(name) != expected:
+        raise ValueError(f"AGN coarse-state field {name!r} must equal {expected!r}")
+
+
+def _validate_agn_coarse_record(record: dict[str, object], line_number: int) -> None:
+    """Validate the source-owned algebra and the pre-reset boundary contract."""
+
+    if record.get("record_type") != "agn_coarse_state":
+        raise ValueError(f"line {line_number}: not an AGN coarse-state record")
+    _integer_field(record, "nstep_coarse", minimum=0)
+    _integer_field(record, "sink_id", minimum=1)
+    aexp = _finite_number(record, "aexp")
+    if not 0.0 < aexp <= 1.0:
+        raise ValueError(f"line {line_number}: aexp must lie in (0, 1]")
+    _time_field(record)
+    year_days = _finite_number(record, "julian_year_days")
+    if not math.isclose(year_days, JULIAN_YEAR_DAYS, rel_tol=0.0, abs_tol=1.0e-12):
+        raise ValueError(f"line {line_number}: unsupported year convention {year_days}")
+    _require_string(record, "ledger_phase", "pre_feedback_pre_reset")
+    _require_string(record, "source_interval_kind", "instantaneous_pre_reset_state")
+
+    mass_msun = _finite_number(record, "mass_msun")
+    if mass_msun <= 0.0:
+        raise ValueError(f"line {line_number}: mass_msun must be positive")
+    _vector_field(record, "position_code")
+    _vector_field(record, "velocity_code")
+    unit_mass = _finite_number(record, "unit_mass_cgs")
+    unit_time = _finite_number(record, "unit_time_cgs")
+    if unit_mass <= 0.0 or unit_time <= 0.0:
+        raise ValueError(f"line {line_number}: source units must be positive")
+
+    bondi = _finite_number(record, "bondi_rate_code")
+    eddington = _finite_number(record, "eddington_rate_code")
+    inflow = _finite_number(record, "inflow_rate_code")
+    inflow_msun_per_year = _finite_number(record, "inflow_rate_msun_per_yr")
+    if bondi < 0.0 or eddington < 0.0 or inflow < 0.0 or inflow_msun_per_year < 0.0:
+        raise ValueError(f"line {line_number}: accretion rates must be non-negative")
+    expected_inflow = min(bondi, eddington)
+    if not math.isclose(inflow, expected_inflow, rel_tol=2.0e-12, abs_tol=1.0e-300):
+        raise ValueError(f"line {line_number}: inflow_rate_code is not min(Bondi,Eddington)")
+    expected_rate = expected_inflow * unit_mass / M_SUN_G * SECONDS_PER_YEAR / unit_time
+    if not math.isclose(
+        inflow_msun_per_year,
+        expected_rate,
+        rel_tol=2.0e-12,
+        abs_tol=max(1.0e-300, abs(expected_rate) * 2.0e-12),
+    ):
+        raise ValueError(f"line {line_number}: inflow rate unit conversion failed")
+
+    raw_efficiency = _nullable_finite_number(record, "raw_radiative_efficiency")
+    resolved_efficiency = _nullable_finite_number(record, "radiative_efficiency")
+    effective_efficiency = _nullable_finite_number(record, "effective_radiative_efficiency")
+    if "efficiency_status" not in record or "efficiency_contract_ok" not in record:
+        raise ValueError(
+            f"line {line_number}: AGN coarse-state requires efficiency_status "
+            "and efficiency_contract_ok"
+        )
+    efficiency_status = _integer_field(record, "efficiency_status", minimum=0)
+    efficiency_contract_ok = _boolean_field(record, "efficiency_contract_ok", default=True)
+    if not efficiency_contract_ok and efficiency_status == 0:
+        raise ValueError(
+            f"line {line_number}: false efficiency contract requires a nonzero status"
+        )
+    if efficiency_contract_ok:
+        # The helper's raw input and resolved base are strict (0,1).  A
+        # spin-disabled RAMSES branch can legitimately leave the diagnostic
+        # raw sink-array value at zero while selecting the explicit .1 default;
+        # accept that only with the corresponding status bit and a promotable
+        # contract.  A spin-enabled zero is instead a readable,
+        # non-promotable initialization divergence (handled below).
+        raw_spin_disabled_default = (
+            raw_efficiency == 0.0
+            and (efficiency_status & AGN_EFF_STATUS_SPIN_DISABLED_DEFAULT) != 0
+        )
+        if (
+            raw_efficiency is None
+            or resolved_efficiency is None
+            or effective_efficiency is None
+            or not (0.0 < raw_efficiency < 1.0 or raw_spin_disabled_default)
+            or not 0.0 < resolved_efficiency < 1.0
+            or not 0.0 <= effective_efficiency < 1.0
+        ):
+            raise ValueError(f"line {line_number}: invalid raw/effective efficiency")
+    luminosity = _finite_number(record, "bolometric_luminosity_erg_s")
+    if luminosity < 0.0:
+        raise ValueError(f"line {line_number}: bolometric luminosity must be non-negative")
+    if effective_efficiency is not None:
+        expected_luminosity = effective_efficiency * expected_inflow * unit_mass / unit_time * SPEED_OF_LIGHT_CM_S**2
+        if not math.isclose(
+            luminosity,
+            expected_luminosity,
+            rel_tol=5.0e-12,
+            abs_tol=max(1.0e-20, abs(expected_luminosity) * 5.0e-12),
+        ):
+            raise ValueError(f"line {line_number}: bolometric luminosity algebra failed")
+
+    if "mass_code" in record and record["mass_code"] is not None:
+        mass_code = _finite_number(record, "mass_code")
+        if mass_code <= 0.0 or not math.isclose(
+            mass_code * unit_mass / M_SUN_G,
+            mass_msun,
+            rel_tol=5.0e-12,
+            abs_tol=max(1.0e-20, abs(mass_msun) * 5.0e-12),
+        ):
+            raise ValueError(f"line {line_number}: mass_code/mass_msun conversion failed")
+
+
+def _canonicalize_agn_records(path: str | Path) -> tuple[list[dict[str, object]], int]:
+    """Parse, validate, and canonicalize AGN records by stable source key.
+
+    An identical semantic duplicate is a harmless restart re-read and is
+    counted once.  A same-key payload conflict is fail-closed: without a run
+    identity or dump counter this is also how a rewind/replay ambiguity is
+    surfaced rather than hidden.
+    """
+
+    records_by_key: dict[tuple[int, int], dict[str, object]] = {}
+    duplicate_count = 0
+    for line_number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line, parse_constant=_reject_json_constant)
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ValueError(f"line {line_number}: invalid JSONL record: {error}") from error
+        if not isinstance(record, dict):
+            raise ValueError(f"line {line_number}: JSONL record must be an object")
+        record_type = record.get("record_type")
+        if record_type == "agn_coarse_state_header":
+            continue
+        if record_type != "agn_coarse_state":
+            raise ValueError(f"line {line_number}: unknown record_type {record_type!r}")
+        _validate_agn_coarse_record(record, line_number)
+        key = (
+            _integer_field(record, "nstep_coarse", minimum=0),
+            _integer_field(record, "sink_id", minimum=1),
+        )
+        previous = records_by_key.get(key)
+        if previous is None:
+            records_by_key[key] = record
+        elif previous == record:
+            duplicate_count += 1
+        else:
+            raise ValueError(
+                "conflicting AGN coarse-state duplicate for "
+                f"(nstep_coarse={key[0]}, sink_id={key[1]})"
+            )
+
+    records = [records_by_key[key] for key in sorted(records_by_key)]
+    if not records:
+        raise ValueError("AGN coarse-state ledger contains no active records")
+    step_context: dict[int, tuple[float, float, str, str]] = {}
+    for record in records:
+        step = _integer_field(record, "nstep_coarse", minimum=0)
+        context = (
+            _finite_number(record, "aexp"),
+            _time_field(record),
+            str(record["ledger_phase"]),
+            str(record["source_interval_kind"]),
+        )
+        previous = step_context.setdefault(step, context)
+        if previous != context:
+            raise ValueError(f"AGN coarse-state step {step} has inconsistent epoch metadata")
+    return records, duplicate_count
+
+
+def read_agn_coarse_records(path: str | Path) -> list[dict[str, object]]:
+    """Return validated, stable-key canonical AGN records."""
+
+    return _canonicalize_agn_records(path)[0]
 
 
 def read_agn_coarse_state(
@@ -129,47 +393,95 @@ def read_agn_coarse_state(
 
     The diagnostic is emitted before AGN feedback resets its mass accumulators.
     Selection is by the snapshot expansion factor, never by a reset-prone
-    accreted-mass field.
+    accreted-mass field.  Identical restart duplicates are collapsed before
+    selection; conflicting same-key payloads fail closed.
     """
 
     if not 0.0 < expansion_factor <= 1.0 or expansion_factor_tolerance <= 0.0:
         raise ValueError("invalid AGN coarse-state expansion-factor selection")
-    matches = []
-    for line_number, line in enumerate(Path(path).read_text().splitlines(), start=1):
-        if not line.strip():
-            continue
-        record = json.loads(line)
-        if record.get("record_type") != "agn_coarse_state":
-            continue
-        if abs(float(record["aexp"]) - expansion_factor) <= expansion_factor_tolerance:
-            matches.append(record)
+    records = read_agn_coarse_records(path)
+    matches = [
+        record
+        for record in records
+        if abs(_finite_number(record, "aexp") - expansion_factor) <= expansion_factor_tolerance
+    ]
     if not matches:
         raise ValueError("no AGN coarse-state records match the requested expansion factor")
-    steps = {int(record["nstep_coarse"]) for record in matches}
+    steps = {_integer_field(record, "nstep_coarse", minimum=0) for record in matches}
     if len(steps) != 1:
         raise ValueError("requested expansion factor matches multiple AGN coarse steps")
-    matches.sort(key=lambda record: int(record["sink_id"]))
-    sink_id = np.asarray([record["sink_id"] for record in matches], dtype=np.int64)
-    if len(np.unique(sink_id)) != len(sink_id):
-        raise ValueError("AGN coarse-state selection contains duplicate sink IDs")
-    position = np.asarray([record["position_code"] for record in matches], dtype=np.float64)
-    velocity = np.asarray([record["velocity_code"] for record in matches], dtype=np.float64)
-    mass = np.asarray([record["mass_msun"] for record in matches], dtype=np.float64)
+    non_promotable = [
+        _integer_field(record, "sink_id", minimum=1)
+        for record in matches
+        if not bool(record["efficiency_contract_ok"])
+    ]
+    if non_promotable:
+        raise ValueError(
+            "requested AGN coarse step contains non-promotable efficiency "
+            f"contract for sink IDs {non_promotable}; refusing state promotion"
+        )
+    matches.sort(key=lambda record: _integer_field(record, "sink_id", minimum=1))
+    sink_id = np.asarray([_integer_field(record, "sink_id", minimum=1) for record in matches], dtype=np.int64)
+    position = np.asarray([_vector_field(record, "position_code") for record in matches], dtype=np.float64)
+    velocity = np.asarray([_vector_field(record, "velocity_code") for record in matches], dtype=np.float64)
+    mass = np.asarray([_finite_number(record, "mass_msun") for record in matches], dtype=np.float64)
     rate_scale = np.asarray(
-        [record["unit_mass_cgs"] / M_SUN_G * SECONDS_PER_YEAR / record["unit_time_cgs"] for record in matches],
+        [
+            _finite_number(record, "unit_mass_cgs")
+            / M_SUN_G
+            * SECONDS_PER_YEAR
+            / _finite_number(record, "unit_time_cgs")
+            for record in matches
+        ],
         dtype=np.float64,
     )
-    bondi = np.asarray([record["bondi_rate_code"] for record in matches], dtype=np.float64) * rate_scale
-    eddington = np.asarray([record["eddington_rate_code"] for record in matches], dtype=np.float64) * rate_scale
-    inflow = np.asarray([record["inflow_rate_msun_per_yr"] for record in matches], dtype=np.float64)
-    efficiency = np.asarray([record["effective_radiative_efficiency"] for record in matches], dtype=np.float64)
-    luminosity = np.asarray([record["bolometric_luminosity_erg_s"] for record in matches], dtype=np.float64)
-    arrays = (position, velocity, mass, bondi, eddington, inflow, efficiency, luminosity)
-    if position.shape != (len(sink_id), 3) or velocity.shape != position.shape or any(not np.isfinite(value).all() for value in arrays):
+    bondi = np.asarray([_finite_number(record, "bondi_rate_code") for record in matches], dtype=np.float64) * rate_scale
+    eddington = np.asarray([_finite_number(record, "eddington_rate_code") for record in matches], dtype=np.float64) * rate_scale
+    inflow = np.asarray([_finite_number(record, "inflow_rate_msun_per_yr") for record in matches], dtype=np.float64)
+    raw_efficiency = np.asarray(
+        [_finite_number(record, "raw_radiative_efficiency") for record in matches], dtype=np.float64
+    )
+    resolved_efficiency = np.asarray(
+        [_finite_number(record, "radiative_efficiency") for record in matches], dtype=np.float64
+    )
+    effective_efficiency = np.asarray(
+        [_finite_number(record, "effective_radiative_efficiency") for record in matches], dtype=np.float64
+    )
+    efficiency_status = np.asarray(
+        [_integer_field(record, "efficiency_status", minimum=0) for record in matches], dtype=np.int64
+    )
+    efficiency_contract_ok = np.asarray(
+        [_boolean_field(record, "efficiency_contract_ok", default=True) for record in matches], dtype=bool
+    )
+    luminosity = np.asarray(
+        [_finite_number(record, "bolometric_luminosity_erg_s") for record in matches], dtype=np.float64
+    )
+    arrays = (
+        position,
+        velocity,
+        mass,
+        bondi,
+        eddington,
+        inflow,
+        raw_efficiency,
+        resolved_efficiency,
+        effective_efficiency,
+        luminosity,
+    )
+    if position.shape != (len(sink_id), 3) or velocity.shape != position.shape or any(
+        not np.isfinite(value).all() for value in arrays
+    ):
         raise ValueError("AGN coarse-state contains invalid source arrays")
     if np.any(mass <= 0.0) or np.any(bondi < 0.0) or np.any(eddington < 0.0) or np.any(inflow < 0.0):
         raise ValueError("AGN coarse-state contains invalid masses or accretion rates")
-    if np.any((efficiency <= 0.0) | (efficiency >= 1.0)) or np.any(luminosity < 0.0):
+    # The row-level validator above already admits the explicit
+    # spin-disabled raw=0 fallback and rejects spin-enabled initialization
+    # divergence.  Keep this vector check consistent with that policy.
+    if np.any((raw_efficiency < 0.0) | (raw_efficiency >= 1.0)) or np.any(
+        (resolved_efficiency <= 0.0) | (resolved_efficiency >= 1.0)
+    ) or np.any(
+        (effective_efficiency < 0.0) | (effective_efficiency >= 1.0)
+    ) or np.any(luminosity < 0.0):
         raise ValueError("AGN coarse-state contains invalid radiative efficiencies or luminosities")
     return AgnCoarseState(
         sink_id=sink_id,
@@ -179,10 +491,14 @@ def read_agn_coarse_state(
         bondi_rate_msun_per_year=bondi,
         eddington_rate_msun_per_year=eddington,
         inflow_rate_msun_per_year=inflow,
-        radiative_efficiency=efficiency,
+        raw_radiative_efficiency=raw_efficiency,
+        radiative_efficiency=resolved_efficiency,
+        effective_radiative_efficiency=effective_efficiency,
+        efficiency_status=efficiency_status,
+        efficiency_contract_ok=efficiency_contract_ok,
         bolometric_luminosity_erg_s=luminosity,
-        expansion_factor=expansion_factor,
-        time_code=float(matches[0]["t_code"]),
+        expansion_factor=float(matches[0]["aexp"]),
+        time_code=_time_field(matches[0]),
         nstep_coarse=steps.pop(),
     )
 
