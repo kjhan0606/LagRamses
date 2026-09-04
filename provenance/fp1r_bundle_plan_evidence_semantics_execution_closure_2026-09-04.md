@@ -2,8 +2,8 @@
 
 Date: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: R1/R2/R4 complete; Claude Opus 5 `PASS` for all three; R3
-implementation in progress and remains last
+Status: R1/R2/R4/R3 complete; Claude Opus 5 `PASS` for all four; F-P1R bundle
+closed on 2026-09-04; next bundle waits for explicit user approval
 Parent evidence HEAD: `db1bb66`
 Parent implementation: `25bd05f`
 Parent verification boundary: `5aeb6d3`
@@ -187,7 +187,34 @@ the rework plan, GPT-5.6-Sol returned `REWORK R4` and confirmed the required
 change, and Claude Opus 5's final re-audit returned `PASS` with no mandatory
 fixes. The wrong-path branch now explicitly records unread terms and cannot
 claim a parsed candidate record. R4 is closed; R3 is the only remaining step
-in this bundle.
+in this bundle at the time of that audit.
+
+### R3 closure record
+
+R3 was implemented in `2921584`. The runner now regenerates and audits the
+high-mass seam report before any population/fate admission consumer, captures
+the post-regeneration SHA-256, and runs the read-only freshness check after
+both physical-package and fate-admission JSONs are regenerated. The check
+binds both report nesting locations to the actual artifact bytes and verifies
+the code/contract locks. The full runner passed with
+`FP1_HIGH_MASS_FRESHNESS_TEST_OK` and `FP1_POPULATION_FATE_CONTRACT_OK`; the
+broader G2 preflight again ended at `G2_PREFLIGHT_BLOCKED`; and a second
+standalone regeneration was byte-identical with SHA-256
+`1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775`.
+Claude Opus 5's final R3 audit is
+`opus5_fp1r_r3_same_run_freshness_audit_2026-09-04.md` and returned `PASS`
+with no mandatory fixes.
+
+### F-P1R bundle closure
+
+R1 (converter fixture), R2 (LC18 parsed-zero semantics), R4 (code-owned
+publication terms and wrong-path attestation), and R3 (same-run freshness)
+are complete. The fail-closed state is unchanged: zero physical nodes and
+canonical rows, unresolved `[0.8,1.0]` and `[40,120] M_sun` seams, blocked
+physical/publication/runtime admission, and unsent inquiry. No new
+implementation bundle may begin until the user explicitly approves it and
+Grok reviews the driver's next-bundle plan. AGY is retired and will not be
+called.
 
 ## Acceptance gates
 
