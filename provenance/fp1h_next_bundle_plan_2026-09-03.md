@@ -2,8 +2,9 @@
 
 Date proposed: 2026-09-03
 Fable approval date: 2026-09-04
-Status: approved with changes; Part A and Part B' implementation complete;
-bundle-end AGY/Claude Opus 5 audit pending
+Status: historical approved plan; Part A and Part B' implementation complete;
+the pre-retirement bundle-end AGY/Claude Opus 5 audit records are retained;
+no AGY audit is pending or authorized
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
 
 ## Purpose fit
@@ -97,7 +98,8 @@ clamping, and flattened branch unions.
 - No writes under `external/g2_candidates`, no download, and no author contact.
 - Physical-node inventory remains empty and no canonical conversion, runtime
   deposition, production, or publication approval is enabled.
-- Submit the completed bundle to AGY. If AGY is technically unavailable,
-  resolve the invocation and continue; if negative, obtain an independent
-  Codex `gpt-5.6-sol` re-audit and incorporate matching findings before the
-  next bundle plan is sent to Fable.
+- The historical bundle-end AGY/Claude Opus 5 review was handled before AGY's
+  retirement. Do not commission or retry AGY. Future completed steps use
+  Claude Opus 5; a conditional or negative Opus result may use the existing
+  GPT-5.6 Sol adjudication path, and the resulting next-bundle plan is reviewed
+  by Grok under the current governance.

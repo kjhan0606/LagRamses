@@ -424,6 +424,7 @@
       "explicit_publication_approval_identity": false,
       "publication_approval_artifact_identity": false,
       "publication_approval_candidate_identity": false,
+      "publication_terms_record_parsed": true,
       "source_redistribution_permission_consistent": false,
       "source_terms_bytes_locked": true,
       "source_terms_path_locked": true,
@@ -437,6 +438,7 @@
       "code_locked_sha256": "9b8e8b4cf383cf93feecbf96cfa42ed4eb5212c8b424a7217ed7507bbc16db4a",
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_use_terms_evidence_v1.json",
       "path_matches": true,
+      "record_source": "candidate_record_parsed_from_locked_terms_bytes",
       "sha256": "9b8e8b4cf383cf93feecbf96cfa42ed4eb5212c8b424a7217ed7507bbc16db4a",
       "sha256_matches": true
     }
@@ -11832,5 +11834,5 @@
     "summary_minus_cds_above_phase_endpoint_half_bin_count": 52,
     "summary_wind_positive_count": 52
   },
-  "tool_sha256": "a7319f3b28e7b9eab7b91846a549fd2f4ea9fb71c86b5167899661215f9176cb"
+  "tool_sha256": "3a47dc51d15d0da6685a9d021fd3aec01c57eb10545c03fe8ed702740480cdcd"
 }

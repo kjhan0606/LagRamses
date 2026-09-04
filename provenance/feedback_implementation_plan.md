@@ -1,5 +1,12 @@
 # Stellar/AGN feedback and yield-table implementation plan
 
+Governance notice (2026-09-04): this is a historical base plan whose AGY
+references describe audits that already occurred. AGY is retired and must not
+be commissioned for any future gate. Current active governance is recorded in
+`audit_governance_amendment_2026-09-04.md`; future implementation steps use
+Claude Opus 5, bundle-start plans use Grok, and GPT-5.6 Sol is the conditional
+or negative Opus adjudicator.
+
 Status: active plan, 2026-09-01.  The stopped comparison run is recorded in
 [`legacy_feedback_baseline.md`](legacy_feedback_baseline.md).  The plan is
 deliberately fail-closed: the legacy three-species table is a comparison input,
@@ -368,8 +375,9 @@ plan until P0--P2 gates are green.
 3. Rebuild the `/gpfs` native runtime against the approved canonical table and
    run channel-by-channel closure, source-increment, and differential tests
    before any large job.
-4. Commission the G2-only AGY re-audit after the physical asset and sidecar
-   are present; do not advance to G3 while G2 is blocked.
+4. The historical G2-only AGY re-audit was completed before AGY retirement;
+   do not commission a new AGY audit. Do not advance to G3 while G2 is
+   blocked; use the current Opus/Grok governance for any new review.
 5. Re-run the P0 comparison against
    `feedback_transition_phase0_10cMpc_h_z0_epsstar002`, labeling it
    `transitional_feedback_baseline`, not pure legacy.

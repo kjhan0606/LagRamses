@@ -683,8 +683,6 @@ def audit_lc18_failed_wind_crosscheck(
         publication_gate = evaluate_derived_artifact_publication(
             candidate_id="limongi_chieffi_2018_cds",
             terms_path=Path(terms_path_value),
-            terms_sha256=_sha256(Path(terms_path_value)),
-            source_record=source_terms,
             approval_record={},
             review_use_only=True,
             derived_artifact_kind="fp1_lc18_failed_wind_crosscheck",

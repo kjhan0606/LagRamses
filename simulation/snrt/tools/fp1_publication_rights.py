@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -35,30 +38,69 @@ def _valid_sha256(value: Any) -> bool:
     )
 
 
+class _PublicationGateAttestation:
+    """In-process evidence needed to re-evaluate one publication gate."""
+
+    def __init__(self, payload: dict[str, Any], request: dict[str, Any]):
+        self.payload = copy.deepcopy(payload)
+        self.request = copy.deepcopy(request)
+
+
+class _PublicationGate(dict[str, Any]):
+    """A JSON-compatible gate carrying a private re-evaluation request."""
+
+    def __init__(self, payload: dict[str, Any], request: dict[str, Any]):
+        super().__init__(payload)
+        self._attestation = _PublicationGateAttestation(payload, request)
+
+
+def _read_locked_terms_record(
+    terms_path: Path, candidate_id: str
+) -> tuple[dict[str, Any], str | None, str | None]:
+    """Read the candidate rights record and hash from the same file bytes."""
+
+    try:
+        terms_bytes = terms_path.read_bytes()
+    except OSError as exc:
+        return {}, None, f"publication_terms_read_error:{exc}"
+    terms_sha256 = hashlib.sha256(terms_bytes).hexdigest()
+    try:
+        catalog = json.loads(terms_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return {}, terms_sha256, f"publication_terms_json_malformed:{exc}"
+    if not isinstance(catalog, dict):
+        return {}, terms_sha256, "publication_terms_catalog_not_object"
+    sources = catalog.get("sources")
+    if not isinstance(sources, dict):
+        return {}, terms_sha256, "publication_terms_catalog_sources_missing"
+    source_record = sources.get(candidate_id)
+    if not isinstance(source_record, dict):
+        return {}, terms_sha256, "publication_terms_candidate_missing"
+    return source_record, terms_sha256, None
+
+
 def evaluate_derived_artifact_publication(
     *,
     candidate_id: str,
     terms_path: Path,
-    terms_sha256: Any,
-    source_record: dict[str, Any],
     approval_record: dict[str, Any] | None,
     review_use_only: Any,
     derived_artifact_kind: str,
-    locked_terms_profile: dict[str, str] | None = None,
+    _test_locked_terms_profile: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate publication permission from locked, explicit rights evidence.
+    """Evaluate publication permission from code-owned locked terms bytes.
 
-    ``locked_terms_profile`` is code-owned in production and may be supplied
-    as an isolated in-memory fixture by tests.  No report label is trusted as a
-    substitute for the explicit rights fields.
+    Production calls use ``PUBLICATION_TERMS_LOCKS``.  The private
+    ``_test_locked_terms_profile`` seam exists only for isolated in-memory test
+    fixtures.  The terms file is read and hashed here, and the candidate rights
+    record is parsed from those same bytes; no caller-supplied digest or
+    detached source record is accepted.
     """
 
     if not isinstance(candidate_id, str) or not candidate_id:
         raise PublicationRightsError("publication candidate id is malformed")
     if not isinstance(derived_artifact_kind, str) or not derived_artifact_kind:
         raise PublicationRightsError("derived artifact kind is malformed")
-    if not isinstance(source_record, dict):
-        raise PublicationRightsError("source terms record is malformed")
     if not isinstance(approval_record, dict):
         raise PublicationRightsError("publication approval record is malformed")
     if type(review_use_only) is not bool:
@@ -66,8 +108,8 @@ def evaluate_derived_artifact_publication(
 
     profile = (
         PUBLICATION_TERMS_LOCKS.get(candidate_id)
-        if locked_terms_profile is None
-        else locked_terms_profile
+        if _test_locked_terms_profile is None
+        else _test_locked_terms_profile
     )
     if not isinstance(profile, dict):
         raise PublicationRightsError(
@@ -82,12 +124,23 @@ def evaluate_derived_artifact_publication(
     actual_terms_path = Path(terms_path).resolve()
     expected_terms_path = (SNRT_ROOT / expected_relative_path).resolve()
     terms_path_locked = actual_terms_path == expected_terms_path
-    terms_hash_locked = _valid_sha256(terms_sha256) and str(terms_sha256).lower() == expected_sha256.lower()
+    source_record: dict[str, Any] = {}
+    observed_terms_sha256: str | None = None
+    terms_error: str | None = None
+    if terms_path_locked:
+        source_record, observed_terms_sha256, terms_error = _read_locked_terms_record(
+            actual_terms_path, candidate_id
+        )
+    terms_hash_locked = (
+        _valid_sha256(observed_terms_sha256)
+        and str(observed_terms_sha256).lower() == expected_sha256.lower()
+    )
 
     blockers: list[str] = []
     requirements = {
         "source_terms_path_locked": terms_path_locked,
         "source_terms_bytes_locked": terms_hash_locked,
+        "publication_terms_record_parsed": terms_error is None,
         "explicit_derived_artifact_publication_approval": (
             approval_record.get("approved") is True
         ),
@@ -123,6 +176,7 @@ def evaluate_derived_artifact_publication(
     blocker_by_requirement = {
         "source_terms_path_locked": "publication_terms_path_not_code_locked",
         "source_terms_bytes_locked": "publication_terms_bytes_not_code_locked",
+        "publication_terms_record_parsed": "publication_terms_record_unavailable",
         "explicit_derived_artifact_publication_approval": (
             "derived_artifact_publication_approval_missing"
         ),
@@ -150,8 +204,10 @@ def evaluate_derived_artifact_publication(
         for name, passed in requirements.items()
         if not passed
     )
+    if terms_error is not None:
+        blockers.append(terms_error)
     allowed = all(requirements.values())
-    return {
+    payload = {
         "schema": "snrt-fp1-derived-artifact-publication-gate",
         "schema_version": 1,
         "candidate_id": candidate_id,
@@ -163,21 +219,35 @@ def evaluate_derived_artifact_publication(
         "source_terms_lock": {
             "path": str(actual_terms_path),
             "code_locked_path": str(expected_terms_path),
-            "sha256": str(terms_sha256).lower() if _valid_sha256(terms_sha256) else None,
+            "sha256": observed_terms_sha256,
             "code_locked_sha256": expected_sha256.lower(),
             "path_matches": terms_path_locked,
             "sha256_matches": terms_hash_locked,
+            "record_source": (
+                "candidate_record_parsed_from_locked_terms_bytes"
+                if terms_error is None
+                else "not_available_due_to_terms_error"
+            ),
         },
         "requirements": requirements,
         "blocking_reasons": blockers,
     }
+    request = {
+        "candidate_id": candidate_id,
+        "terms_path": Path(terms_path),
+        "approval_record": copy.deepcopy(approval_record),
+        "review_use_only": review_use_only,
+        "derived_artifact_kind": derived_artifact_kind,
+        "_test_locked_terms_profile": copy.deepcopy(_test_locked_terms_profile),
+    }
+    return _PublicationGate(payload, request)
 
 
 def require_publication_allowed(gate: dict[str, Any]) -> None:
-    """Guard future export/publish callers against review-only artifacts."""
+    """Re-evaluate an in-process gate before allowing export/publish."""
 
     if (
-        not isinstance(gate, dict)
+        not isinstance(gate, _PublicationGate)
         or gate.get("schema") != "snrt-fp1-derived-artifact-publication-gate"
         or gate.get("schema_version") != 1
         or gate.get("authoritative_for_publication_verdict") is not True
@@ -187,3 +257,18 @@ def require_publication_allowed(gate: dict[str, Any]) -> None:
         or gate.get("blocking_reasons") != []
     ):
         raise PublicationRightsError("publication/export refused by derived-artifact rights gate")
+    attestation = getattr(gate, "_attestation", None)
+    if not isinstance(attestation, _PublicationGateAttestation):
+        raise PublicationRightsError("publication/export gate lacks a private attestation")
+    if dict(gate) != attestation.payload:
+        raise PublicationRightsError("publication/export gate was mutated after evaluation")
+    try:
+        refreshed = evaluate_derived_artifact_publication(**attestation.request)
+    except PublicationRightsError as exc:
+        raise PublicationRightsError(
+            f"publication/export re-evaluation failed: {exc}"
+        ) from exc
+    if not isinstance(refreshed, _PublicationGate) or dict(refreshed) != dict(gate):
+        raise PublicationRightsError(
+            "publication/export gate is not the current authoritative result"
+        )

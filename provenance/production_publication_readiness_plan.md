@@ -14,12 +14,12 @@ P0.4 fail-closed runtime gate passed; F-P1 consolidated re-audit returned an
 engineering conditional pass and both conditions are now repaired; F-P1
 science and later production/publication gates remain open; F-P2 caller
 qualification is complete but runtime activation remains gated.  The
-2026-09-03 AGY/Opus high-mass review adds F-P1H-A--F-P1H-F as the active
+historical 2026-09-03 AGY/Opus high-mass review adds F-P1H-A--F-P1H-F as the active
 40--120 M☉ promotion sequence. F-P1H-A--D and the fail-closed F-P1H-E machine
 admission gate are implemented; no physical source package or node is approved,
 so physical promotion and F-P1H-F remain blocked.
 
-This plan closes every item raised by the AGY-role, Fable, and
+This plan closes every item raised by the historical AGY role, Fable, and
 GPT-5.6-sol reviews. Starting with B2, Claude Opus 5 assumes the independent
 gate-auditor role; earlier AGY reports remain historical records. It is
 deliberately fail-closed: a passing Python pilot,
