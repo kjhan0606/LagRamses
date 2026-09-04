@@ -134,12 +134,12 @@ subroutine output_fdm_outer_wave_provenance(output_char)
      dx_loc=dx*boxlen/dble(icoarse_max-icoarse_min+1)
      volume=dx_loc**ndim
      inv2dx=0.5d0/dx_loc
-     if(fdm_ghost2)then
-        call make_virtual_fine_dp2(psi_re(1),psi_im(1),ilevel)
-     else
-        call make_virtual_fine_dp(psi_re(1),ilevel)
-        call make_virtual_fine_dp(psi_im(1),ilevel)
-     end if
+     ! Do not start a new ghost-cell exchange from an output hook.  The
+     ! timestepper owns the MPI request lifecycle, and issuing a refresh here
+     ! can leave its request pool in a state that collides with backup_psi's
+     ! output-token protocol.  We use the ghost values already current at the
+     ! end of the step; fdm_neighbor_cell marks any incomplete stencil so its
+     ! coverage is reported rather than silently filled.
      do ind=1,twotondim
         do i=1,active(ilevel)%ngrid
            igrid=active(ilevel)%igrid(i)
