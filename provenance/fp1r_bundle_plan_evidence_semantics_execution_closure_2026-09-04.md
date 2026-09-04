@@ -2,9 +2,8 @@
 
 Date: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: R1/R2 complete; Claude Opus 5 `PASS` for both; R4 implementation
-conditionally complete and rework required by Opus/GPT-5.6-Sol (R3 remains
-last)
+Status: R1/R2/R4 complete; Claude Opus 5 `PASS` for all three; R3
+implementation in progress and remains last
 Parent evidence HEAD: `db1bb66`
 Parent implementation: `25bd05f`
 Parent verification boundary: `5aeb6d3`
@@ -180,6 +179,15 @@ from locked bytes. Before R3, apply only this narrow evidence fix:
 This is completion work inside the already approved F-P1R bundle, not a new
 physical-source or runtime bundle. AGY is retired and is not part of the
 review chain; historical AGY reports remain provenance only.
+
+### R4 closure record
+
+The M-R4-1 sentinel/test rework was implemented in `ac73d52`. Grok approved
+the rework plan, GPT-5.6-Sol returned `REWORK R4` and confirmed the required
+change, and Claude Opus 5's final re-audit returned `PASS` with no mandatory
+fixes. The wrong-path branch now explicitly records unread terms and cannot
+claim a parsed candidate record. R4 is closed; R3 is the only remaining step
+in this bundle.
 
 ## Acceptance gates
 
