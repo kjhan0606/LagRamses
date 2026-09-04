@@ -74,3 +74,18 @@ slope_type=1
 
 &POISSON_PARAMS
 /
+
+! The Phase-0 enrichment module is compiled into the current lagRamses
+! executable and requires an explicit runtime configuration even for this
+! hydro/sink-free FDM writer smoke input.
+&STELLAR_ENRICHMENT_PARAMS
+feedback_mode='channel_resolved'
+imf_id=1
+population_model='single_star_ssp'
+yield_source_basis='per_star_cumulative'
+imf_mass_min_msun=0.08
+imf_mass_max_msun=120.0
+binary_fraction=0.0
+channel_mass_min_msun=0.8,1.0,8.0,3.0,140.0
+channel_mass_max_msun=120.0,8.0,120.0,8.0,260.0
+/
