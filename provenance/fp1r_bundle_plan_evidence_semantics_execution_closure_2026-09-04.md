@@ -2,8 +2,8 @@
 
 Date: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: Grok `APPROVE WITH CHANGES`; M1–M7 amendments applied; implementation
-authorized by bundle-start plan governance
+Status: Grok re-audit `APPROVE WITH CHANGES`; M8–M11 applied; R1 evidence
+rework authorized, R2 remains blocked until rework and unconditional Opus pass
 Parent evidence HEAD: `db1bb66`
 Parent implementation: `25bd05f`
 Parent verification boundary: `5aeb6d3`
@@ -71,11 +71,22 @@ positive physical-package admission:
    hash, and hash-only mutation. Each disagreement must fail before any output
    path exists, demonstrating execution of the pre-write guard rather than
    merely inspecting it. Keep the existing blocked-path tests.
-4. Assert the real repository's `simulation/snrt/config`,
-   `simulation/snrt/data`, staged-source hashes, and blocked selection state
-   are unchanged by the fixture. After the temporary fixture is restored, the
-   real repository conversion must still fail closed. Do not weaken the
-   production converter's requirement for the repository F-P1 contracts.
+4. Before patching, snapshot the real repository's
+   `simulation/snrt/config`/`simulation/snrt/data` hashes and only the
+   manifest-listed staged files under
+   `external/g2_candidates/acquisition_manifest_v1.json`, including the
+   existing code-owned LC18 per-file hashes and composite
+   `3370571245be954b1330d0b91bae585ffed47b3a1c2d10ffa11fc4ef7b57065b`. Do not
+   recurse over unlisted external files or write any manifest/source/fingerprint
+   file. After all temporary seams are restored, call the Python
+   `audit_physical_package_admission()` function with its default real
+   contract (not its writing CLI) and assert blocked status, false
+   conversion/runtime/production/publication flags, zero physical nodes, and
+   null selection. The real repository conversion must still fail closed and
+   all three output paths must remain absent. Compare all snapshots only after
+   those post-restore checks, covering the complete fixture window. Do not
+   weaken the production converter's requirement for the repository F-P1
+   contracts.
 
 ### R2 (P0) — qualify LC18 parsed-zero semantics
 
@@ -145,7 +156,9 @@ positive physical-package admission:
 
 - **R1:** an isolated fully admitted converter success, content mutation, and
   hash mutation are all tested; mismatches fail before writes; all seams are
-  restored in `finally`; real repository evidence remains byte-invariant.
+  restored in `finally`; the restored real physical-package audit asserts the
+  blocked zero-node/null-selection state; manifest-scoped staged-source,
+  config, and data hashes are compared only after all post-restore checks.
 - **R2:** report field names and interpretations distinguish parsed/quantized
   zeros from physical zeros; Table 5 precision/half-bin and
   `physical_zero_inferred: false` are explicit; 52/56, 48/4, 53/3, and 101/7
@@ -200,6 +213,54 @@ of this plan:
 - **M7 — lineage/order:** record `db1bb66` as parent evidence and `25bd05f` as
   implementation parent; execute R1 first, sequence R2 and R4 because both
   touch the LC18 tool, and integrate R3 last in the runner.
+
+- **M8 — staged-source inventory:** snapshot only the files listed in
+  `external/g2_candidates/acquisition_manifest_v1.json`, confined to that
+  tree, with per-file hashes and the existing code-owned LC18 composite
+  `3370571245be954b1330d0b91bae585ffed47b3a1c2d10ffa11fc4ef7b57065b`. Do not
+  recurse over unlisted external files, invent a composite, or write any
+  manifest/source/fingerprint file.
+- **M9 — real audit entrypoint:** after restoration, call the Python function
+  `audit_physical_package_admission()` with the default real contract, not its
+  writing CLI and not a synthetic path. Assert the restored binding identity,
+  blocked status, false conversion/runtime/production/publication flags, zero
+  physical nodes, and null selection; retain the real converter rejection and
+  three absent output paths.
+- **M10 — snapshot order:** take all snapshots before patching. Compare
+  config/data/staged-source hashes only after the post-restore admission and
+  converter checks, covering the complete synthetic fixture window.
+- **M11 — R1 acceptance and lineage:** update the R1 acceptance gate to name
+  the staged-source snapshot, direct real audit assertion, and post-restore
+  comparison. Record the rework against evidence `9e422e5` and implementation
+  `a514fd5`; retain `db1bb66`/`25bd05f` as historical lineage.
+
+## R1 adjudication amendment before R2
+
+Claude Opus 5 returned `CONDITIONAL PASS` for R1. GPT-5.6-Sol adjudicated
+that result as `REWORK R1`: the converter boundary is sound, but evidence
+completeness required by this plan is not yet closed. Before R2 may begin,
+the driver must implement and verify the following evidence-only rework:
+
+1. Extend the fixture snapshot with staged-source per-file/composite hashes in
+   addition to all `simulation/snrt/config` and `simulation/snrt/data` hashes.
+2. After every synthetic seam is restored, directly call the real
+   `audit_physical_package_admission()` and assert
+   `status == "blocked_no_qualified_physical_package"`,
+   `canonical_conversion_allowed is False`, zero physical nodes, and no
+   selection. Retain the real converter rejection and assert all three output
+   paths remain absent.
+3. Move the final config/data/staged-source hash comparison after the complete
+   post-restore blocked-check sequence, covering the whole fixture window.
+
+The older `main()` source-contract patch without `try/finally`, exact
+per-mutation exception wording, assert-under-`-O` hardening, and optional
+sidecar-field checks remain later maintenance items; they are not required to
+open R2. This amendment does not select a source, alter real contracts/data,
+or enable conversion/runtime feedback. This amendment and the next bundle
+transition were re-reviewed by Grok. The re-audit returned `APPROVE WITH
+CHANGES`; M8–M11 above are the resulting mandatory plan edits. R1 rework may
+now begin, but R2 remains blocked until the rework is tested and Claude Opus 5
+returns an unconditional `PASS`.
 
 ## Stop and audit rule
 
