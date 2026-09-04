@@ -7,7 +7,7 @@
   "approval_rule": "No candidate is an approved production source until the source file, license, citation, conversion procedure, checksum, and channel-specific closure report are present.",
   "candidate_acquisition_manifest": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
   "candidate_package_fingerprint_audit": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_source_package_fingerprint_audit.json",
-  "candidate_package_fingerprint_scheme": "sha256(candidate_id + NUL + sorted UTF-8 records path + NUL + bytes + NUL + file_sha256 + LF); manifest-scoped review fingerprint only; not a redistribution/package identity claim",
+  "candidate_package_fingerprint_scheme": "sha256(candidate_id + NUL + sorted UTF-8 records path + NUL + bytes + NUL + file_sha256 + LF); manifest-scoped review fingerprint only; not a redistribution/package identity claim; F-P1 admission instead requires the executable source-identity validator composite fingerprint",
   "source_semantics_evidence": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_semantics_evidence_v1.json",
   "review_selection": {
     "validation_branch": "sukhbold2016_ccsn",

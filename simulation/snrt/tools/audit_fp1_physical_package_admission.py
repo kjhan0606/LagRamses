@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import sys
 from typing import Any, Iterable
@@ -19,6 +20,11 @@ from fp1_gate_validator_registry import (
     registered_validator_ids,
     registry_report,
     run_registered_validator,
+)
+from fp1_source_node_mapping import (
+    SourceNodeMappingError,
+    mapping_sha256,
+    normalize_mapping_document,
 )
 
 
@@ -94,6 +100,15 @@ REQUIRED_FALSE_POLICIES = {
     "review_evidence_may_activate_runtime",
     "unexecuted_validator_artifact_may_pass",
 }
+EXPECTED_SELECTION_FIELDS = {
+    "selected_package_id",
+    "selected_package_sha256",
+    "source_node_mapping_sha256",
+    "source_node_mapping",
+    "approval_id",
+    "approved_by",
+    "approval_date",
+}
 
 
 class PhysicalPackageAdmissionError(ValueError):
@@ -127,6 +142,88 @@ def _valid_sha256(value: Any) -> bool:
         and len(value) == 64
         and all(character in "0123456789abcdefABCDEF" for character in value)
     )
+
+
+def _validated_selection_mapping(
+    mapping: Any,
+    *,
+    source_nodes_by_id: dict[str, dict[str, Any]],
+    source_node_contract_sha256: Any,
+    source_node_contract_approval_id: Any,
+    selected_package_sha256: str,
+    package_approval_id: Any,
+    declared_mapping_sha256: Any,
+) -> dict[str, Any]:
+    if not _valid_sha256(source_node_contract_sha256):
+        raise PhysicalPackageAdmissionError(
+            "source-node contract hash is malformed for selected package"
+        )
+    if not isinstance(source_node_contract_approval_id, str) or not source_node_contract_approval_id:
+        raise PhysicalPackageAdmissionError(
+            "source-node contract approval id is missing for selected package"
+        )
+    if not isinstance(package_approval_id, str) or not package_approval_id:
+        raise PhysicalPackageAdmissionError(
+            "physical-package approval id is missing for selected package"
+        )
+    try:
+        normalized = normalize_mapping_document(mapping)
+    except SourceNodeMappingError as exc:
+        raise PhysicalPackageAdmissionError(
+            f"selected source-node mapping is invalid: {exc}"
+        ) from exc
+    if normalized["source_node_contract_sha256"] != str(source_node_contract_sha256).lower():
+        raise PhysicalPackageAdmissionError(
+            "source-node mapping contract hash disagrees with audited contract"
+        )
+    if normalized["source_node_contract_approval_id"] != source_node_contract_approval_id:
+        raise PhysicalPackageAdmissionError(
+            "source-node mapping contract approval id disagrees with audited contract"
+        )
+    if normalized["physical_package_approval_id"] != package_approval_id:
+        raise PhysicalPackageAdmissionError(
+            "source-node mapping approval id disagrees with package selection"
+        )
+    if normalized["physical_package_sha256"] != selected_package_sha256.lower():
+        raise PhysicalPackageAdmissionError(
+            "source-node mapping package hash disagrees with package selection"
+        )
+    mapped_ids = {row["source_node_id"] for row in normalized["rows"]}
+    source_node_ids = set(source_nodes_by_id)
+    if mapped_ids != source_node_ids:
+        raise PhysicalPackageAdmissionError(
+            "source-node mapping does not cover exactly the physical-node inventory"
+        )
+    for row in normalized["rows"]:
+        node = source_nodes_by_id[row["source_node_id"]]
+        coordinate = row["canonical_coordinate"]
+        try:
+            mass_matches = math.isclose(
+                float(coordinate[1]),
+                float(node["zams_mass_msun"]),
+                rel_tol=0.0,
+                abs_tol=1.0e-12,
+            )
+            metallicity_matches = math.isclose(
+                float(coordinate[2]),
+                float(node["birth_metallicity_value"]),
+                rel_tol=0.0,
+                abs_tol=1.0e-15,
+            )
+        except (KeyError, TypeError, ValueError):
+            raise PhysicalPackageAdmissionError(
+                f"source-node mapping coordinate cannot be checked for {row['source_node_id']}"
+            ) from None
+        if not mass_matches or not metallicity_matches:
+            raise PhysicalPackageAdmissionError(
+                "source-node mapping coordinate disagrees with its physical node"
+            )
+    computed = mapping_sha256(normalized)
+    if not _valid_sha256(declared_mapping_sha256) or str(declared_mapping_sha256).lower() != computed:
+        raise PhysicalPackageAdmissionError(
+            "source-node mapping SHA256 disagrees with canonical mapping bytes"
+        )
+    return normalized
 
 
 def _repository_evidence_path(value: Any, label: str) -> Path:
@@ -268,6 +365,8 @@ def evaluate_physical_package_selection(
     high_mass_ready: bool,
     code_owned_birth_metallicity_domain_selected: bool,
     contract_birth_metallicity_domain_selected: bool,
+    source_node_contract_sha256: Any,
+    source_node_contract_approval_id: Any,
     declared_status: Any,
 ) -> dict[str, Any]:
     """Evaluate selection guards without reading files or mutating state.
@@ -317,6 +416,10 @@ def evaluate_physical_package_selection(
         raise PhysicalPackageAdmissionError("candidate qualification report is missing")
     if not isinstance(selection, dict) or not isinstance(approval, dict):
         raise PhysicalPackageAdmissionError("selection or approval section is missing")
+    if set(selection) != EXPECTED_SELECTION_FIELDS:
+        raise PhysicalPackageAdmissionError(
+            "physical-package selection field set is not exact"
+        )
 
     selected_id = selection.get("selected_package_id")
     selection_values = list(selection.values())
@@ -350,6 +453,25 @@ def evaluate_physical_package_selection(
             raise PhysicalPackageAdmissionError(
                 "selected physical package does not pass every required gate"
             )
+        verified_gate_evidence = selected_candidate.get("verified_gate_evidence")
+        if (
+            not isinstance(verified_gate_evidence, dict)
+            or set(verified_gate_evidence) != REQUIRED_GATES
+        ):
+            raise PhysicalPackageAdmissionError(
+                "selected physical package lacks all verified executable gate reports"
+            )
+        for gate_id, gate_report in verified_gate_evidence.items():
+            if (
+                not isinstance(gate_report, dict)
+                or gate_report.get("gate_id") != gate_id
+                or gate_report.get("candidate_id") != selected_id
+                or gate_report.get("status") != "pass"
+                or gate_report.get("passed") is not True
+            ):
+                raise PhysicalPackageAdmissionError(
+                    f"selected executable gate report is not passed and identity-matched: {gate_id}"
+                )
         selected_blockers = selected_candidate.get("hard_blockers")
         if not isinstance(selected_blockers, list):
             raise PhysicalPackageAdmissionError("selected candidate blockers are malformed")
@@ -365,10 +487,35 @@ def evaluate_physical_package_selection(
             raise PhysicalPackageAdmissionError(
                 "selected package and source-node mapping must have valid SHA256 identities"
             )
-        if any(node.get("package_fingerprint") != selected_package_sha for node in source_nodes):
+        identity_report = verified_gate_evidence["source_identity_and_rights"]
+        identity_fingerprint = identity_report.get("package_fingerprint_sha256")
+        if not _valid_sha256(identity_fingerprint):
+            raise PhysicalPackageAdmissionError(
+                "selected source-identity validator lacks a valid package fingerprint"
+            )
+        if selected_package_sha.lower() != identity_fingerprint.lower():
+            raise PhysicalPackageAdmissionError(
+                "selected package SHA256 disagrees with executable source-identity fingerprint"
+            )
+        if any(
+            not _valid_sha256(node.get("package_fingerprint"))
+            or node["package_fingerprint"].lower() != selected_package_sha.lower()
+            for node in source_nodes
+        ):
             raise PhysicalPackageAdmissionError(
                 "selected package SHA256 disagrees with source-node package fingerprints"
             )
+        _validated_selection_mapping(
+            selection.get("source_node_mapping"),
+            source_nodes_by_id={
+                node["source_node_id"]: node for node in source_nodes
+            },
+            source_node_contract_sha256=source_node_contract_sha256,
+            source_node_contract_approval_id=source_node_contract_approval_id,
+            selected_package_sha256=selected_package_sha,
+            package_approval_id=selection.get("approval_id"),
+            declared_mapping_sha256=mapping_sha,
+        )
         if not all(
             (
                 source_node_ready,
@@ -428,6 +575,7 @@ def evaluate_physical_package_selection(
             "candidate_grid_ready": candidate_grid_ready,
             "high_mass_ready": high_mass_ready,
         },
+        "source_node_mapping_sha256": selection.get("source_node_mapping_sha256"),
     }
 
 
@@ -594,6 +742,10 @@ def audit_physical_package_admission(
         ),
         contract_birth_metallicity_domain_selected=runtime.get(
             "required_birth_metallicity_domain_selected"
+        ),
+        source_node_contract_sha256=evidence["source_node_contract"]["sha256"],
+        source_node_contract_approval_id=source_node.get("approval", {}).get(
+            "approval_id"
         ),
         declared_status=contract.get("status"),
     )

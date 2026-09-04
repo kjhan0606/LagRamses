@@ -9,7 +9,7 @@
     ],
     "hard_blockers_unchanged": true,
     "physical_package_contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
-    "physical_package_contract_sha256": "3cdd8a1f64631b008e278206865003377ac908b229688462feb9ca88a0558e34",
+    "physical_package_contract_sha256": "ce6d26667bcb15b0cc688b632ad637de74c77908f52edc8c0e872c8847798579",
     "production_qualified": false
   },
   "boccioli_contract_sha256": "5e5e079af58f250be465427f3e070b9014e9e6af99ebbc5e623d6236fea55443",
@@ -18,6 +18,12 @@
   "cross_source_wind_comparison": {
     "above_nominal_half_bin_count": 108,
     "agreement_required_for_this_review": false,
+    "cds_terminal_wind_positive_count": 101,
+    "cds_terminal_wind_zero_count": 7,
+    "cds_terminal_wind_zero_count_by_outcome": {
+      "failed": 3,
+      "successful": 4
+    },
     "comparison": "BR26 summary wind minus LC18 CDS initial-minus-PSN mass",
     "interpretation": "The two staged sources do not agree at nominal table5 precision. The discrepancy is retained as an author/source question and is not silently reconciled.",
     "maximum_absolute_difference_msun": 1.5476,
@@ -383,9 +389,52 @@
     ]
   },
   "production_ready": false,
+  "publication_gate": {
+    "allowed": false,
+    "authoritative_for_publication_verdict": true,
+    "blocking_reasons": [
+      "derived_artifact_publication_approval_missing",
+      "derived_artifact_redistribution_permission_not_approved",
+      "source_redistribution_permission_not_approved",
+      "production_license_not_verified",
+      "publication_attribution_evidence_missing",
+      "derived_artifact_approval_identity_missing",
+      "derived_artifact_approval_candidate_mismatch",
+      "derived_artifact_approval_artifact_mismatch",
+      "artifact_declared_review_only"
+    ],
+    "candidate_id": "limongi_chieffi_2018_cds",
+    "derived_artifact_kind": "fp1_lc18_failed_wind_crosscheck",
+    "publication_ready": false,
+    "requirements": {
+      "attribution_evidence_present": false,
+      "declared_review_only_is_false": false,
+      "explicit_derived_artifact_publication_approval": false,
+      "explicit_derived_artifact_redistribution_permission": false,
+      "explicit_publication_approval_identity": false,
+      "publication_approval_artifact_identity": false,
+      "publication_approval_candidate_identity": false,
+      "source_redistribution_permission_consistent": false,
+      "source_terms_bytes_locked": true,
+      "source_terms_path_locked": true,
+      "verified_production_license": false
+    },
+    "review_use_only": true,
+    "schema": "snrt-fp1-derived-artifact-publication-gate",
+    "schema_version": 1,
+    "source_terms_lock": {
+      "code_locked_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_use_terms_evidence_v1.json",
+      "code_locked_sha256": "9b8e8b4cf383cf93feecbf96cfa42ed4eb5212c8b424a7217ed7507bbc16db4a",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_use_terms_evidence_v1.json",
+      "path_matches": true,
+      "sha256": "9b8e8b4cf383cf93feecbf96cfa42ed4eb5212c8b424a7217ed7507bbc16db4a",
+      "sha256_matches": true
+    }
+  },
   "publication_ready": false,
   "quality_findings": {
     "cross_source_difference_silently_reconciled": false,
+    "derived_artifact_publication_gate_pass": false,
     "failed_wind_anomaly_resolved": false,
     "lc18_readme_consistency_pass": false
   },
@@ -11758,6 +11807,8 @@
   },
   "status": "failed_wind_anomaly_independently_crosschecked_unresolved",
   "successful_release_control": {
+    "cds_terminal_wind_positive_count": 48,
+    "cds_terminal_wind_zero_count": 4,
     "interpretation": "Successful models verify that the BR26 release normally carries nonzero Wind tables. Their CDS endpoint differences are measured cross-source discrepancies, not a promotion tolerance.",
     "maximum_absolute_summary_minus_cds_terminal_wind_msun": 0.5842000000000014,
     "maximum_absolute_summary_minus_release_wind_table_msun": 0.007183005956193367,
@@ -11766,5 +11817,5 @@
     "summary_minus_cds_above_nominal_half_bin_count": 52,
     "summary_wind_positive_count": 52
   },
-  "tool_sha256": "0eaedc19a695f9e09a9cccd5646c782c07e5e823a602be9e9800c056857081eb"
+  "tool_sha256": "4f06e7617f0574759ee83e67817ed0a28075dc8fb4e73e8fcfbbfd4e0f3e9073"
 }

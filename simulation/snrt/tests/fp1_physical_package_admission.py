@@ -26,7 +26,9 @@ from audit_fp1_physical_package_admission import (  # noqa: E402
 from fp1_gate_validator_registry import (  # noqa: E402
     GateValidatorRegistryError,
     REGISTERED_VALIDATORS,
+    run_registered_validator,
 )
+from fp1_source_node_mapping import mapping_sha256  # noqa: E402
 
 
 def _contract() -> dict:
@@ -56,24 +58,64 @@ def _expect_error(contract: dict, fragment: str) -> None:
 def _selection_fixture() -> dict:
     package_sha = "a" * 64
     candidate_id = "synthetic-approved-package"
+    approval_id = "SYNTHETIC-APPROVAL"
+    source_contract_sha = "d" * 64
+    mapping = {
+        "schema": "snrt-fp1-source-node-row-mapping",
+        "schema_version": 1,
+        "source_node_contract_sha256": source_contract_sha,
+        "source_node_contract_approval_id": "SYNTHETIC-SOURCE-APPROVAL",
+        "physical_package_approval_id": approval_id,
+        "physical_package_sha256": package_sha,
+        "canonical_asset_sha256": "e" * 64,
+        "canonical_row_count": 2,
+        "rows": [
+            {
+                "canonical_coordinate": [1, 60.0, 0.001, 0.0],
+                "source_node_id": "node-1",
+            },
+            {
+                "canonical_coordinate": [1, 60.0, 0.001, 1.0],
+                "source_node_id": "node-1",
+            },
+        ],
+    }
+    verified_gate_evidence = {
+        gate_id: {
+            "validator_id": f"synthetic.{gate_id}.v1",
+            "gate_id": gate_id,
+            "candidate_id": candidate_id,
+            "status": "pass",
+            "passed": True,
+            "package_fingerprint_sha256": package_sha,
+        }
+        for gate_id in REQUIRED_GATES
+    }
     return {
         "candidate_report": {
             candidate_id: {
                 "passed_gate_ids": sorted(REQUIRED_GATES),
                 "missing_gate_ids": [],
+                "verified_gate_evidence": verified_gate_evidence,
                 "hard_blockers": [],
                 "production_qualified": True,
             }
         },
         "physical_nodes": ["node-1"],
         "source_nodes": [
-            {"source_node_id": "node-1", "package_fingerprint": package_sha}
+            {
+                "source_node_id": "node-1",
+                "package_fingerprint": package_sha,
+                "zams_mass_msun": 60.0,
+                "birth_metallicity_value": 0.001,
+            }
         ],
         "selection": {
             "selected_package_id": candidate_id,
             "selected_package_sha256": package_sha,
-            "source_node_mapping_sha256": "b" * 64,
-            "approval_id": "SYNTHETIC-APPROVAL",
+            "source_node_mapping_sha256": mapping_sha256(mapping),
+            "source_node_mapping": mapping,
+            "approval_id": approval_id,
             "approved_by": "test",
             "approval_date": "2026-09-04",
         },
@@ -100,6 +142,8 @@ def _evaluate_selection_fixture(fixture: dict, **overrides: object) -> dict:
         "high_mass_ready": True,
         "code_owned_birth_metallicity_domain_selected": True,
         "contract_birth_metallicity_domain_selected": True,
+        "source_node_contract_sha256": "d" * 64,
+        "source_node_contract_approval_id": "SYNTHETIC-SOURCE-APPROVAL",
         "declared_status": "admitted_physical_package",
     }
     values.update(overrides)
@@ -151,7 +195,7 @@ def _synthetic_registry_selection() -> None:
                         "passed": True,
                         "requirements": {requirement_name: True},
                         "blockers": [],
-                        "package_fingerprint_sha256": None,
+                        "package_fingerprint_sha256": "a" * 64,
                         "artifacts": {},
                         "validator_code_sha256": tool_sha,
                     }
@@ -174,8 +218,34 @@ def _synthetic_registry_selection() -> None:
             )
             assert set(passed) == REQUIRED_GATES
             assert len(reports) == len(REQUIRED_GATES)
+            fixture["candidate_report"]["synthetic-approved-package"][
+                "verified_gate_evidence"
+            ] = reports
             result = _evaluate_selection_fixture(fixture)
             assert result["status"] == "admitted_physical_package"
+
+            identity_validator = "synthetic.source_identity_and_rights.v1"
+            original_runner = REGISTERED_VALIDATORS[identity_validator]["runner"]
+
+            def missing_fingerprint(candidate_id: str) -> dict:
+                report = original_runner(candidate_id)
+                report["package_fingerprint_sha256"] = None
+                return report
+
+            REGISTERED_VALIDATORS[identity_validator]["runner"] = missing_fingerprint
+            try:
+                try:
+                    run_registered_validator(
+                        validator_id=identity_validator,
+                        gate_id="source_identity_and_rights",
+                        candidate_id="synthetic-approved-package",
+                    )
+                except GateValidatorRegistryError as exc:
+                    assert "valid package fingerprint" in str(exc), str(exc)
+                else:
+                    raise AssertionError("passed validator without fingerprint was accepted")
+            finally:
+                REGISTERED_VALIDATORS[identity_validator]["runner"] = original_runner
 
             missing = copy.deepcopy(fixture)
             removed_gate = sorted(REQUIRED_GATES)[0]
@@ -215,6 +285,75 @@ def _selection_guard_tests() -> None:
     bad_approval["approval"]["publication_ready"] = False
     _expect_selection_error(bad_approval, "approval disagrees with evaluated state")
     _expect_selection_error(fixture, "status must be admitted_physical_package", declared_status="blocked_no_qualified_physical_package")
+
+    bad_identity_fingerprint = copy.deepcopy(fixture)
+    bad_identity_fingerprint["candidate_report"][
+        "synthetic-approved-package"
+    ]["verified_gate_evidence"]["source_identity_and_rights"][
+        "package_fingerprint_sha256"
+    ] = "c" * 64
+    _expect_selection_error(
+        bad_identity_fingerprint,
+        "disagrees with executable source-identity fingerprint",
+    )
+
+    missing_reports = copy.deepcopy(fixture)
+    missing_reports["candidate_report"]["synthetic-approved-package"][
+        "verified_gate_evidence"
+    ] = {}
+    _expect_selection_error(
+        missing_reports, "lacks all verified executable gate reports"
+    )
+
+    bad_mapping_hash = copy.deepcopy(fixture)
+    bad_mapping_hash["selection"]["source_node_mapping_sha256"] = "f" * 64
+    _expect_selection_error(
+        bad_mapping_hash, "mapping SHA256 disagrees with canonical mapping bytes"
+    )
+
+    bad_mapping_package = copy.deepcopy(fixture)
+    bad_mapping_package["selection"]["source_node_mapping"] = copy.deepcopy(
+        fixture["selection"]["source_node_mapping"]
+    )
+    bad_mapping_package["selection"]["source_node_mapping"][
+        "physical_package_sha256"
+    ] = "f" * 64
+    bad_mapping_package["selection"]["source_node_mapping_sha256"] = mapping_sha256(
+        bad_mapping_package["selection"]["source_node_mapping"]
+    )
+    _expect_selection_error(
+        bad_mapping_package, "mapping package hash disagrees with package selection"
+    )
+
+    unknown_mapping_node = copy.deepcopy(fixture)
+    unknown_mapping_node["selection"]["source_node_mapping"] = copy.deepcopy(
+        fixture["selection"]["source_node_mapping"]
+    )
+    unknown_mapping_node["selection"]["source_node_mapping"]["rows"][0][
+        "source_node_id"
+    ] = "unknown-node"
+    unknown_mapping_node["selection"]["source_node_mapping_sha256"] = mapping_sha256(
+        unknown_mapping_node["selection"]["source_node_mapping"]
+    )
+    _expect_selection_error(
+        unknown_mapping_node,
+        "does not cover exactly the physical-node inventory",
+    )
+
+    reordered_mapping = copy.deepcopy(fixture)
+    reordered_mapping["selection"]["source_node_mapping"]["rows"] = list(
+        reversed(reordered_mapping["selection"]["source_node_mapping"]["rows"])
+    )
+    assert mapping_sha256(
+        reordered_mapping["selection"]["source_node_mapping"]
+    ) == fixture["selection"]["source_node_mapping_sha256"]
+
+    duplicate_mapping = copy.deepcopy(fixture)
+    duplicate_mapping["selection"]["source_node_mapping"]["rows"].append(
+        copy.deepcopy(duplicate_mapping["selection"]["source_node_mapping"]["rows"][0])
+    )
+    duplicate_mapping["selection"]["source_node_mapping"]["canonical_row_count"] = 3
+    _expect_selection_error(duplicate_mapping, "duplicate canonical coordinate")
 
 
 def main() -> int:

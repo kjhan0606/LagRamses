@@ -24,6 +24,10 @@ from audit_g2_boccioli_roberti2026_candidate import (
     _yield_table,
     audit_boccioli_roberti2026_candidate,
 )
+from fp1_publication_rights import (
+    PublicationRightsError,
+    evaluate_derived_artifact_publication,
+)
 
 
 TOOL_PATH = Path(__file__).resolve()
@@ -520,6 +524,14 @@ def audit_lc18_failed_wind_crosscheck(
             row["release_wind_table_element_sum_msun"] > 0.0
             for row in successful
         ),
+        "cds_terminal_wind_positive_count": sum(
+            row["cds_terminal_cumulative_wind_mass_msun"] > 0.0
+            for row in successful
+        ),
+        "cds_terminal_wind_zero_count": sum(
+            row["cds_terminal_cumulative_wind_mass_msun"] == 0.0
+            for row in successful
+        ),
         "maximum_absolute_summary_minus_release_wind_table_msun": max(
             successful_internal_residuals
         ),
@@ -558,6 +570,26 @@ def audit_lc18_failed_wind_crosscheck(
         "comparison": "BR26 summary wind minus LC18 CDS initial-minus-PSN mass",
         "nominal_cds_total_mass_half_bin_msun": cds_half_bin,
         "model_count": len(rows),
+        "cds_terminal_wind_positive_count": sum(
+            row["cds_terminal_cumulative_wind_mass_msun"] > 0.0
+            for row in rows
+        ),
+        "cds_terminal_wind_zero_count": sum(
+            row["cds_terminal_cumulative_wind_mass_msun"] == 0.0
+            for row in rows
+        ),
+        "cds_terminal_wind_zero_count_by_outcome": {
+            "successful": sum(
+                row["exploded"]
+                and row["cds_terminal_cumulative_wind_mass_msun"] == 0.0
+                for row in rows
+            ),
+            "failed": sum(
+                not row["exploded"]
+                and row["cds_terminal_cumulative_wind_mass_msun"] == 0.0
+                for row in rows
+            ),
+        },
         "above_nominal_half_bin_count": sum(
             value > cds_half_bin for value in all_cds_residuals
         ),
@@ -583,6 +615,12 @@ def audit_lc18_failed_wind_crosscheck(
         or len(failed) != expected_failed
         or failed_anomaly["summary_wind_positive_count"] != expected_failed
         or failed_anomaly["release_wind_table_exact_zero_count"] != expected_failed
+        or successful_control["cds_terminal_wind_zero_count"] != 4
+        or successful_control["cds_terminal_wind_positive_count"] != 48
+        or failed_anomaly["cds_terminal_wind_zero_count"] != 3
+        or failed_anomaly["cds_terminal_wind_positive_count"] != 53
+        or cross_source["cds_terminal_wind_zero_count"] != 7
+        or cross_source["cds_terminal_wind_positive_count"] != 101
     ):
         raise Lc18FailedWindCrosscheckError(
             "LC18 successful-control or failed-wind anomaly counts drifted"
@@ -595,13 +633,35 @@ def audit_lc18_failed_wind_crosscheck(
     source_terms = limongi["source_semantics_evidence"][
         "source_use_terms_evidence"
     ]["candidate_record"]
+    source_terms_evidence = limongi["source_semantics_evidence"][
+        "source_use_terms_evidence"
+    ]
+    terms_path_value = source_terms_evidence.get("path")
+    if not isinstance(terms_path_value, str) or not terms_path_value:
+        raise Lc18FailedWindCrosscheckError(
+            "Limongi source-use-terms evidence path is missing"
+        )
+    try:
+        publication_gate = evaluate_derived_artifact_publication(
+            candidate_id="limongi_chieffi_2018_cds",
+            terms_path=Path(terms_path_value),
+            terms_sha256=_sha256(Path(terms_path_value)),
+            source_record=source_terms,
+            approval_record={},
+            review_use_only=True,
+            derived_artifact_kind="fp1_lc18_failed_wind_crosscheck",
+        )
+    except PublicationRightsError as exc:
+        raise Lc18FailedWindCrosscheckError(
+            f"Limongi derived-artifact publication gate failed: {exc}"
+        ) from exc
     return {
         "schema": "snrt-fp1-lc18-failed-wind-crosscheck",
         "schema_version": 1,
         "gate": "F-P1H-E-review",
         "status": "failed_wind_anomaly_independently_crosschecked_unresolved",
         "production_ready": False,
-        "publication_ready": False,
+        "publication_ready": publication_gate["publication_ready"],
         "canonical_conversion_allowed": False,
         "runtime_deposition_allowed": False,
         "canonical_rows_emitted": 0,
@@ -621,7 +681,7 @@ def audit_lc18_failed_wind_crosscheck(
                 "production_license_status": source_terms["production_license_status"],
                 "authoritative_for_verdict": False,
             },
-            "review_use_only": True,
+            "review_use_only": publication_gate["review_use_only"],
         },
         "join": {
             **release_diagnostics,
@@ -639,7 +699,9 @@ def audit_lc18_failed_wind_crosscheck(
             ],
             "failed_wind_anomaly_resolved": False,
             "cross_source_difference_silently_reconciled": False,
+            "derived_artifact_publication_gate_pass": publication_gate["allowed"],
         },
+        "publication_gate": publication_gate,
         "cross_source_wind_comparison": cross_source,
         "phase_history": {
             **phase_diagnostics,

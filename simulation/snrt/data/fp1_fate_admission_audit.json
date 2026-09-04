@@ -28,7 +28,7 @@
     },
     "physical_package_contract": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
-      "sha256": "3cdd8a1f64631b008e278206865003377ac908b229688462feb9ca88a0558e34"
+      "sha256": "ce6d26667bcb15b0cc688b632ad637de74c77908f52edc8c0e872c8847798579"
     },
     "physics_contract": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_physics_contract_v1.json",
@@ -109,7 +109,7 @@
       "runtime_8_to_10_and_100_to_120_edges_missing",
       "terminal_energy_momentum_deposition_missing"
     ],
-    "audit_code_sha256": "85108cde647d06b57dd48bf6d0f275b472e70e29b2632a0bbeeff684b5a36af7",
+    "audit_code_sha256": "a6ac711bc3d2adb3d45adc55bc356dc3370cde0ecb8a18ebea558fbdd54405a5",
     "candidate_qualification": {
       "boccioli_roberti2026_lc18": {
         "hard_blockers": [
@@ -290,7 +290,7 @@
     },
     "canonical_conversion_allowed": false,
     "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
-    "contract_sha256": "3cdd8a1f64631b008e278206865003377ac908b229688462feb9ca88a0558e34",
+    "contract_sha256": "ce6d26667bcb15b0cc688b632ad637de74c77908f52edc8c0e872c8847798579",
     "evidence_artifacts": {
       "candidate_grid_audit": {
         "code_locked_sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578",
@@ -332,7 +332,7 @@
       "mode": "registered_executable_validators_fail_closed",
       "registry": {
         "registry_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_registry.py",
-        "registry_sha256": "bc881c61eddf50790653e2d53d68776e8c270b7cedd3ba0d9da45d0ed618c204",
+        "registry_sha256": "abb377eec7234e8a6de5e65cbac8e73e8df6d5e45665986e7ee7ebeb6bbad96c",
         "validators": {
           "fp1.source_identity_and_rights.v1": {
             "gate_id": "source_identity_and_rights",
@@ -386,6 +386,7 @@
       "runtime_deposition_allowed": false,
       "selected_candidate_hard_blockers": [],
       "selected_package_id": null,
+      "source_node_mapping_sha256": null,
       "status": "blocked_no_qualified_physical_package",
       "upstream_gates": {
         "candidate_grid_ready": false,

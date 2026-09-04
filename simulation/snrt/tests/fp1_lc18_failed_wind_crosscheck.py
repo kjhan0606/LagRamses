@@ -251,6 +251,8 @@ def main() -> int:
     assert successful["model_count"] == 52
     assert successful["summary_wind_positive_count"] == 52
     assert successful["release_wind_table_nonzero_count"] == 52
+    assert successful["cds_terminal_wind_positive_count"] == 48
+    assert successful["cds_terminal_wind_zero_count"] == 4
     assert successful["summary_minus_cds_above_nominal_half_bin_count"] == 52
     assert math.isclose(
         successful["maximum_absolute_summary_minus_release_wind_table_msun"],
@@ -271,6 +273,7 @@ def main() -> int:
     assert failed["release_wind_table_exact_zero_count"] == 56
     assert failed["cds_terminal_wind_positive_count"] == 53
     assert failed["cds_terminal_wind_zero_count"] == 3
+    assert failed["cds_terminal_wind_positive_count"] == 53
     assert failed["unresolved_count"] == 56
     assert report["quality_findings"]["lc18_readme_consistency_pass"] is False
     assert report["quality_findings"]["failed_wind_anomaly_resolved"] is False
@@ -280,6 +283,12 @@ def main() -> int:
 
     comparison = report["cross_source_wind_comparison"]
     assert comparison["model_count"] == 108
+    assert comparison["cds_terminal_wind_positive_count"] == 101
+    assert comparison["cds_terminal_wind_zero_count"] == 7
+    assert comparison["cds_terminal_wind_zero_count_by_outcome"] == {
+        "successful": 4,
+        "failed": 3,
+    }
     assert comparison["above_nominal_half_bin_count"] == 108
     assert comparison["agreement_required_for_this_review"] is False
     assert math.isclose(
@@ -327,6 +336,19 @@ def main() -> int:
         "authoritative_for_verdict"
     ] is False
     assert report["source_identity"]["review_use_only"] is True
+    publication_gate = report["publication_gate"]
+    assert publication_gate["allowed"] is False
+    assert publication_gate["publication_ready"] is False
+    assert publication_gate["review_use_only"] is True
+    assert publication_gate["authoritative_for_publication_verdict"] is True
+    assert "derived_artifact_publication_approval_missing" in publication_gate[
+        "blocking_reasons"
+    ]
+    assert "derived_artifact_redistribution_permission_not_approved" in publication_gate[
+        "blocking_reasons"
+    ]
+    assert "artifact_declared_review_only" in publication_gate["blocking_reasons"]
+    assert report["quality_findings"]["derived_artifact_publication_gate_pass"] is False
     assert report["phase_history"]["phase_order_provenance"][
         "source_attested_for_intermediate_burning_order"
     ] is False

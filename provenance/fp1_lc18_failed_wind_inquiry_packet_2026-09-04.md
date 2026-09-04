@@ -4,6 +4,13 @@ Date: 2026-09-04
 Status: internal review packet; **not sent**
 Scope: Boccioli & Roberti (2026) LC18 branch versus Limongi & Chieffi (2018)
 
+Publication classification: **internal review only**. The executable
+`fp1_lc18_failed_wind_crosscheck` publication gate reports
+`allowed=false`, `publication_ready=false`, and `review_use_only=true` because
+the CDS redistribution terms and a derived-artifact approval record are not
+present. Editing this packet's label or the generated JSON cannot authorize
+publication or redistribution.
+
 ## Reproducible finding
 
 The joined review artifact is

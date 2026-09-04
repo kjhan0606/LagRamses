@@ -201,6 +201,7 @@
     "selected_package_id": null,
     "selected_package_sha256": null,
     "source_node_mapping_sha256": null,
+    "source_node_mapping": null,
     "approval_id": null,
     "approved_by": null,
     "approval_date": null

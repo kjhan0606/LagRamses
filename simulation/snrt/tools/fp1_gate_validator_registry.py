@@ -23,6 +23,14 @@ class GateValidatorRegistryError(ValueError):
     """A requested validator is absent or returned an invalid result."""
 
 
+def _valid_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdefABCDEF" for character in value)
+    )
+
+
 REGISTERED_VALIDATORS: dict[str, dict[str, Any]] = {
     SOURCE_IDENTITY_VALIDATOR_ID: {
         "gate_id": SOURCE_IDENTITY_GATE_ID,
@@ -127,6 +135,15 @@ def run_registered_validator(
             f"validator blockers are malformed: {validator_id}"
         )
     passed = all(requirements.values()) and not blockers
+    package_fingerprint = result["package_fingerprint_sha256"]
+    if package_fingerprint is not None and not _valid_sha256(package_fingerprint):
+        raise GateValidatorRegistryError(
+            f"validator package fingerprint is malformed: {validator_id}"
+        )
+    if passed and not _valid_sha256(package_fingerprint):
+        raise GateValidatorRegistryError(
+            f"passed validator lacks a valid package fingerprint: {validator_id}"
+        )
     if (
         type(result["passed"]) is not bool
         or result["passed"] is not passed

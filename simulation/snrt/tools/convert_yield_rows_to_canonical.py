@@ -69,6 +69,12 @@ from fp1_source_node_projection import (
     SourceNodeProjectionError,
     validate_canonical_row_against_source_node,
 )
+from fp1_source_node_mapping import (
+    SourceNodeMappingError,
+    canonical_mapping_text,
+    mapping_sha256,
+    normalize_mapping_document,
+)
 
 
 TOOL_PATH = Path(__file__).resolve()
@@ -304,6 +310,57 @@ def _format_table(rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def build_conversion_proposal(input_path: Path) -> dict[str, Any]:
+    """Prepare non-writing conversion evidence without admission or promotion.
+
+    This mode deliberately stops before reading or changing any production
+    contract.  It reports the deterministic canonical asset hash and mapping
+    rows needed to prepare a future reviewed admission record; it never writes
+    the table, sidecar, mapping, or any repository file.
+    """
+
+    document = _read_input(Path(input_path))
+    source = _source_metadata(document["source"])
+    rows = _normalize_rows(document["rows"])
+    table_text = _format_table(rows)
+    asset_hash = hashlib.sha256(table_text.encode("utf-8")).hexdigest()
+    mapping_rows = [
+        {
+            "canonical_coordinate": [
+                row["channel"],
+                row["initial_mass_msun_per_star"],
+                row["birth_metallicity_mass_fraction"],
+                row["age_yr"],
+            ],
+            "source_node_id": row["source_node_id"],
+        }
+        for row in rows
+    ]
+    return {
+        "schema": "snrt-fp1-canonical-conversion-proposal",
+        "schema_version": 1,
+        "status": "proposal_only_not_admitted",
+        "writes_performed": False,
+        "source_sha256": source["source_sha256"],
+        "source_version": source["source_version"],
+        "canonical_asset_sha256": asset_hash,
+        "canonical_row_count": len(rows),
+        "canonical_mapping_rows": mapping_rows,
+        "required_admission_fields": [
+            "source_node_contract_sha256",
+            "source_node_contract_approval_id",
+            "physical_package_approval_id",
+            "physical_package_sha256",
+            "source_node_mapping_sha256",
+        ],
+        "interpretation": (
+            "Deterministic review evidence only. A reviewed physical-package "
+            "selection must bind these rows and the asset hash before the normal "
+            "converter is allowed to write any output."
+        ),
+    }
+
+
 def convert(
     input_path: Path,
     output_path: Path,
@@ -426,6 +483,7 @@ def convert(
         "source_node_contract_sha256": node_contract_hash,
         "source_node_contract_approval_id": approval["approval_id"],
         "physical_package_approval_id": selection["approval_id"],
+        "physical_package_sha256": selection["selected_package_sha256"],
         "canonical_asset_sha256": asset_hash,
         "canonical_row_count": len(rows),
         "rows": [
@@ -441,8 +499,18 @@ def convert(
             for row in rows
         ],
     }
-    mapping_text = json.dumps(mapping, indent=2, sort_keys=True) + "\n"
-    node_mapping_hash = hashlib.sha256(mapping_text.encode("utf-8")).hexdigest()
+    try:
+        mapping_text = canonical_mapping_text(mapping)
+        node_mapping_hash = mapping_sha256(mapping)
+        admitted_mapping = normalize_mapping_document(
+            selection.get("source_node_mapping")
+        )
+    except SourceNodeMappingError as exc:
+        raise ConversionError(f"admitted source-node mapping is invalid: {exc}") from exc
+    if admitted_mapping != normalize_mapping_document(mapping):
+        raise ConversionError(
+            "admitted source-node mapping does not equal the converter-generated mapping"
+        )
     if selection.get("source_node_mapping_sha256") != node_mapping_hash:
         raise ConversionError(
             "canonical source-node mapping disagrees with the admitted package selection"
@@ -512,24 +580,31 @@ def convert(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="normalized source-row JSON")
-    parser.add_argument("--output", type=Path, required=True, help="canonical ASCII table")
-    parser.add_argument("--sidecar", type=Path, required=True, help="canonical provenance sidecar")
+    parser.add_argument("--output", type=Path, help="canonical ASCII table")
+    parser.add_argument("--sidecar", type=Path, help="canonical provenance sidecar")
     parser.add_argument(
-        "--node-mapping", type=Path, required=True,
+        "--node-mapping", type=Path,
         help="write canonical-row to source-node mapping JSON",
     )
     parser.add_argument(
         "--node-contract", type=Path, default=DEFAULT_SOURCE_NODE_CONTRACT,
         help=f"source-node contract JSON (default: {DEFAULT_SOURCE_NODE_CONTRACT})",
     )
+    parser.add_argument(
+        "--proposal",
+        action="store_true",
+        help="print non-writing conversion evidence; do not audit admission or write files",
+    )
     args = parser.parse_args()
     try:
+        if args.proposal:
+            proposal = build_conversion_proposal(args.input)
+            print(json.dumps(proposal, indent=2, sort_keys=True))
+            return 0
+        if args.output is None or args.sidecar is None or args.node_mapping is None:
+            parser.error("--output, --sidecar, and --node-mapping are required without --proposal")
         metadata = convert(
-            args.input,
-            args.output,
-            args.sidecar,
-            args.node_mapping,
-            args.node_contract,
+            args.input, args.output, args.sidecar, args.node_mapping, args.node_contract
         )
     except (ConversionError, OSError) as exc:
         parser.error(str(exc))

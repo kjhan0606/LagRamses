@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -88,6 +90,33 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
+        proposal = converter.build_conversion_proposal(source_json)
+        assert proposal["status"] == "proposal_only_not_admitted"
+        assert proposal["writes_performed"] is False
+        assert proposal["canonical_row_count"] == 2
+        assert len(proposal["canonical_mapping_rows"]) == 2
+        assert not output.exists() and not sidecar.exists() and not mapping.exists()
+        original_argv = list(sys.argv)
+        proposal_stdout = io.StringIO()
+        sys.argv = [
+            "convert_yield_rows_to_canonical.py",
+            str(source_json),
+            "--proposal",
+            "--output",
+            str(output),
+            "--sidecar",
+            str(sidecar),
+            "--node-mapping",
+            str(mapping),
+        ]
+        try:
+            with contextlib.redirect_stdout(proposal_stdout):
+                assert converter.main() == 0
+        finally:
+            sys.argv = original_argv
+        cli_proposal = json.loads(proposal_stdout.getvalue())
+        assert cli_proposal["status"] == "proposal_only_not_admitted"
+        assert not output.exists() and not sidecar.exists() and not mapping.exists()
         node_contract = root / "approved-source-nodes.json"
         node_contract.write_text(
             json.dumps(approved_source_node_contract()), encoding="utf-8"
