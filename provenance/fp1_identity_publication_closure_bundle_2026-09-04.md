@@ -3,6 +3,7 @@
 Date: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
 Implementation commit: `25bd05f` (`Close FP1 identity and publication boundaries`)
+Bundle verification boundary: `5aeb6d3` (`Record FP1 bundle verification boundary`)
 Plan review: Fable `APPROVE WITH CHANGES`, recorded in
 `fable_fp1_identity_publication_closure_plan_audit_2026-09-04.md`
 
@@ -63,5 +64,7 @@ The following completed successfully on GPFS:
   across the preflight rerun.
 
 No simulation, source selection, CDS redistribution, author contact, or
-runtime feedback activation was performed. Bundle-end AGY and Claude Opus 5
-audits remain pending under the project audit policy.
+runtime feedback activation was performed. Bundle-end audit and independent
+triage are recorded in `fp1_identity_publication_closure_audit_comparison_2026-09-04.md`.
+AGY is historical only; future completed steps use Claude Opus 5, and Grok
+reviews the next driver plan before any new bundle begins.

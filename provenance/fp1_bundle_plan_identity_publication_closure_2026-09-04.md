@@ -2,7 +2,7 @@
 
 Date drafted: 2026-09-04
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: Fable APPROVE WITH CHANGES; mandatory changes incorporated; implementation complete; bundle-end audit pending
+Status: Fable APPROVE WITH CHANGES; mandatory changes incorporated; implementation complete; bundle-end audit and triage complete; next plan pending
 Fable record: `fable_fp1_identity_publication_closure_plan_audit_2026-09-04.md`
 
 ## Authorization and parent evidence
@@ -121,11 +121,13 @@ feedback.
   compilation, and `git diff --check` pass.
 - No source selection, author contact, CDS redistribution, runtime feedback,
   or unrelated RAMSES infrastructure work occurs.
-- After the whole bundle is implemented, obtain one AGY
-  (`gemini-3.8-flash-high`) audit and one Claude Opus 5 audit, independently
-  reproduce/triage both, and record the comparison before drafting the next
-  plan. A FAIL result activates the previously agreed `gpt-5.6-sol`
-  re-audit path; Grok remains excluded while unavailable.
+- For this historical bundle, the already completed AGY
+  (`gemini-3.8-flash-high`) and Claude Opus 5 results are independently
+  reproduced/triaged and recorded. AGY is now retired from the active roster.
+  Future implementation steps receive Claude Opus 5 audits; a conditional or
+  negative result may activate the `gpt-5.6-sol` re-audit path. Before any
+  future bundle starts, Grok audits the driver's plan for final-purpose fit,
+  scientific/technical justification, feasibility, and scope.
 
 ## Explicitly deferred
 

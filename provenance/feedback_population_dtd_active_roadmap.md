@@ -288,9 +288,11 @@ selection or a runtime activation.
   model's own ledgers close.
 
 No gate above can be closed by a synthetic fixture, a parser-only test, or a
-silent default.  Audits are no longer run after every individual step.  Each
-implementation bundle ends with independent AGY (`gemini-3.8-flash-high`) and
-Claude Opus 5 audits.  Their findings are reproduced and triaged before the
-driver writes the next bundle plan; Fable then evaluates that plan for final-
-purpose alignment, scientific/technical justification, and feasibility before
-the next bundle starts.
+silent default.  Effective 2026-09-04, Claude Opus 5 is the active
+implementation-stage auditor and reviews each completed implementation step.
+Grok is the active bundle-start plan auditor and must review the driver's
+next-bundle plan for final-purpose alignment, scientific/technical
+justification, feasibility, and scope before implementation starts.  AGY is
+retired from the active roster; earlier AGY results remain historical
+provenance only.  Conditional or negative Opus findings may trigger the
+existing GPT-5.6 Sol re-audit path before the driver writes the next plan.
