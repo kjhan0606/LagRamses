@@ -245,15 +245,12 @@ subroutine dump_all
      end if
 
      if(use_fdm)then
-        if(myid==1) write(*,*)'Start backup fdm (psi)'
-        if(myid==1) call flush(6)
-        filename=TRIM(filedir)//'fdm_'//TRIM(nchar)//'.out'
-        call backup_psi(filename)
-#ifndef WITHOUTMPI
-        if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
-#endif
-        if(myid==1) write(*,*)'End backup fdm (psi)'
-        if(myid==1) call flush(6)
+        ! Compute the compact diagnostic before backup_psi.  The diagnostic
+        ! refreshes same-level ghost cells; backup_psi uses the output-token
+        ! point-to-point protocol.  Keeping those communication phases in
+        ! this order avoids carrying requests from the ghost refresh into the
+        ! token protocol (which otherwise can fail in MPI_Waitall after a
+        ! successful shard write).
         if(fdm_outer_ledger)then
            if(myid==1) write(*,*)'Start FDM outer-wave provenance'
            call output_fdm_outer_wave_provenance(nchar)
@@ -263,6 +260,15 @@ subroutine dump_all
            if(myid==1) write(*,*)'End FDM outer-wave provenance'
            if(myid==1) call flush(6)
         end if
+        if(myid==1) write(*,*)'Start backup fdm (psi)'
+        if(myid==1) call flush(6)
+        filename=TRIM(filedir)//'fdm_'//TRIM(nchar)//'.out'
+        call backup_psi(filename)
+#ifndef WITHOUTMPI
+        if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+        if(myid==1) write(*,*)'End backup fdm (psi)'
+        if(myid==1) call flush(6)
      end if
 #ifdef ATON
      if(aton)then
