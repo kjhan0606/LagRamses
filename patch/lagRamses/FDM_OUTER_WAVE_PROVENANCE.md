@@ -4,6 +4,13 @@ Set `fdm_outer_ledger=.true.` in `&fdm_params` to write one
 `fdm_outer_wave_provenance_<output>.txt` file in each normal FDM output
 directory.  The option is off by default.
 
+The outer ledger currently requires `outformat='original'`.  The HDF5 normal
+output path does not yet write the complete per-rank `fdm_<output>.out*`
+field shards used by the radial/current postprocessor; a run that combines
+`fdm_outer_ledger=.true.` with `outformat='hdf5'` therefore stops before
+creating a misleading partial output.  Use the original binary output until
+an equivalent HDF5 FDM-field writer and validator are available.
+
 The current V5 file is a compact raw diagnostic.  It records the output epoch,
 axion mass, effective code `hbar`, HJM/wave seam settings, dual-soliton seed
 switch and parameter values, total leaf-cell wave mass, and the global FDM

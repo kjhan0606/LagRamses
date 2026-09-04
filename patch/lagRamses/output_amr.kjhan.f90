@@ -29,6 +29,20 @@ subroutine dump_all
   ifout=ifout+1
   if(t>=tout(iout).or.aexp>=aout(iout))iout=iout+1
   output_done=.true.
+
+  ! The HDF5 normal-output path stores the AMR/particle/Poisson payload in
+  ! data_<output>.h5 and jumps over backup_psi.  A pure-FDM outer ledger is
+  ! only consumable when the complete per-rank wave shards are present, so
+  ! fail closed instead of advertising an available field that was not
+  ! written.  Operators must select the original binary output format until
+  ! an equivalent HDF5 FDM-field writer is implemented.
+  if(use_fdm .and. fdm_outer_ledger .and. trim(outformat)=='hdf5')then
+     if(myid==1)then
+        write(*,'(A)') 'ERROR: fdm_outer_ledger requires outformat=original; HDF5 FDM field shards are unavailable'
+        call flush(6)
+     endif
+     call clean_stop
+  endif
   
   if(IOGROUPSIZEREP>0)call title(((myid-1)/IOGROUPSIZEREP)+1,ncharcpu)
 
