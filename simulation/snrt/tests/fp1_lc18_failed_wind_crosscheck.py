@@ -251,9 +251,15 @@ def main() -> int:
     assert successful["model_count"] == 52
     assert successful["summary_wind_positive_count"] == 52
     assert successful["release_wind_table_nonzero_count"] == 52
-    assert successful["cds_terminal_wind_positive_count"] == 48
-    assert successful["cds_terminal_wind_zero_count"] == 4
-    assert successful["summary_minus_cds_above_nominal_half_bin_count"] == 52
+    assert successful["cds_terminal_wind_parsed_positive_count"] == 48
+    assert successful["cds_terminal_wind_parsed_exact_zero_count"] == 4
+    assert successful["summary_minus_cds_above_phase_endpoint_half_bin_count"] == 52
+    assert successful["cds_phase_endpoint_total_mass_precision_msun"] == 0.01
+    assert successful["cds_phase_endpoint_total_mass_half_bin_msun"] == 0.005
+    assert successful["physical_zero_inferred"] is False
+    assert "not evidence that physical wind is zero" in successful[
+        "parsed_exact_zero_interpretation"
+    ]
     assert math.isclose(
         successful["maximum_absolute_summary_minus_release_wind_table_msun"],
         0.007183005956193367,
@@ -271,9 +277,13 @@ def main() -> int:
     assert failed["model_count"] == 56
     assert failed["summary_wind_positive_count"] == 56
     assert failed["release_wind_table_exact_zero_count"] == 56
-    assert failed["cds_terminal_wind_positive_count"] == 53
-    assert failed["cds_terminal_wind_zero_count"] == 3
-    assert failed["cds_terminal_wind_positive_count"] == 53
+    assert failed["cds_terminal_wind_parsed_positive_count"] == 53
+    assert failed["cds_terminal_wind_parsed_exact_zero_count"] == 3
+    assert failed["cds_terminal_wind_parsed_positive_count"] == 53
+    assert failed["cds_phase_endpoint_total_mass_precision_msun"] == 0.01
+    assert failed["cds_phase_endpoint_total_mass_half_bin_msun"] == 0.005
+    assert failed["physical_zero_inferred"] is False
+    assert "do not define or resolve" in failed["interpretation"]
     assert failed["unresolved_count"] == 56
     assert report["quality_findings"]["lc18_readme_consistency_pass"] is False
     assert report["quality_findings"]["failed_wind_anomaly_resolved"] is False
@@ -283,13 +293,17 @@ def main() -> int:
 
     comparison = report["cross_source_wind_comparison"]
     assert comparison["model_count"] == 108
-    assert comparison["cds_terminal_wind_positive_count"] == 101
-    assert comparison["cds_terminal_wind_zero_count"] == 7
-    assert comparison["cds_terminal_wind_zero_count_by_outcome"] == {
+    assert comparison["cds_terminal_wind_parsed_positive_count"] == 101
+    assert comparison["cds_terminal_wind_parsed_exact_zero_count"] == 7
+    assert comparison["cds_terminal_wind_parsed_exact_zero_count_by_outcome"] == {
         "successful": 4,
         "failed": 3,
     }
-    assert comparison["above_nominal_half_bin_count"] == 108
+    assert comparison["cds_phase_endpoint_total_mass_precision_msun"] == 0.01
+    assert comparison["cds_phase_endpoint_total_mass_half_bin_msun"] == 0.005
+    assert comparison["physical_zero_inferred"] is False
+    assert "not physical-zero inferences" in comparison["interpretation"]
+    assert comparison["above_cds_phase_endpoint_half_bin_count"] == 108
     assert comparison["agreement_required_for_this_review"] is False
     assert math.isclose(
         comparison["maximum_absolute_difference_msun"],

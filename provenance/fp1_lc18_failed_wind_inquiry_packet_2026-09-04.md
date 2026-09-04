@@ -23,13 +23,19 @@ Boccioli--Roberti summary identifies 52 successful and 56 failed models.
   0.007183005956 M_sun.
 - All 56 failed models have a positive summary wind but an exactly zero release
   Wind table. They therefore remain unresolved; no missing wind was rebuilt.
-- The independent LC18 CDS table5 endpoint gives a positive cumulative wind
-  for 53 failed models and a value rounded to zero for three. Its summary-wind
-  differences exceed the nominal 0.005 M_sun table5 half-bin for all 108
-  models, including all 52 successful controls. The largest absolute
-  difference is 1.5476 M_sun. Thus CDS is corroborating evidence that the
-  failed stars underwent mass loss, but it is not a numerically identical
-  replacement for the release summary.
+- The independent LC18 CDS table5 endpoint gives a parsed positive cumulative
+  wind for 53 failed models and a parsed exact-zero endpoint for three; the
+  successful controls contain 48 parsed-positive and 4 parsed exact-zero
+  endpoints. The exact-zero values are determined from table5's 0.01 M_sun
+  printed endpoint precision (half-bin 0.005 M_sun); they are not an inference
+  that the physical wind is zero, and the pipeline does not round the wind
+  values. The three failed parsed exact-zero endpoints remain inside the
+  unresolved BR26 zero-Wind release anomaly and do not define or resolve it.
+  The summary-wind differences exceed the table5 half-bin for all 108 models,
+  including all 52 successful controls. The largest absolute difference is
+  1.5476 M_sun. Thus CDS is corroborating evidence that the failed stars
+  underwent mass loss, but it is not a numerically identical replacement for
+  the release summary.
 - CDS table5 yields 845 unique phase rows after 19 exactly duplicated rows are
   collapsed. Each model has 3--8 unique phases, a PSN endpoint, strictly
   increasing cumulative age, and non-increasing total mass.

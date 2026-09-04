@@ -288,6 +288,30 @@ def _residual_statistics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _parsed_cds_zero_metadata(precision_msun: float) -> dict[str, Any]:
+    """Describe parsed Table 5 zeros without inferring a physical zero wind."""
+
+    if not math.isfinite(precision_msun) or precision_msun <= 0.0:
+        raise Lc18FailedWindCrosscheckError(
+            "CDS phase-endpoint mass precision must be a positive finite value"
+        )
+    return {
+        "cds_phase_endpoint_total_mass_precision_msun": precision_msun,
+        "cds_phase_endpoint_total_mass_half_bin_msun": 0.5 * precision_msun,
+        "physical_zero_inferred": False,
+        "parsed_exact_zero_definition": (
+            "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing "
+            "M_initial - M_total(PSN) from CDS table5 at the declared source "
+            "endpoint precision"
+        ),
+        "parsed_exact_zero_interpretation": (
+            "An exact parsed zero is compatible with physical mass loss below "
+            "the source table half-bin; it is not evidence that physical wind "
+            "is zero. The pipeline does not round the wind values."
+        ),
+    }
+
+
 def _release_rows(
     archive_path: Path, grid: dict[str, Any]
 ) -> tuple[dict[tuple[int, int, float], dict[str, Any]], dict[str, Any]]:
@@ -512,9 +536,10 @@ def audit_lc18_failed_wind_crosscheck(
         abs(row["differences_msun"]["summary_minus_cds_terminal_wind"])
         for row in rows
     ]
-    cds_half_bin = 0.5 * float(
-        phase_contract["limitations"]["phase_endpoint_total_mass_precision_msun"]
+    cds_zero_metadata = _parsed_cds_zero_metadata(
+        float(phase_contract["limitations"]["phase_endpoint_total_mass_precision_msun"])
     )
+    cds_half_bin = cds_zero_metadata["cds_phase_endpoint_total_mass_half_bin_msun"]
     successful_control = {
         "model_count": len(successful),
         "summary_wind_positive_count": sum(
@@ -524,11 +549,11 @@ def audit_lc18_failed_wind_crosscheck(
             row["release_wind_table_element_sum_msun"] > 0.0
             for row in successful
         ),
-        "cds_terminal_wind_positive_count": sum(
+        "cds_terminal_wind_parsed_positive_count": sum(
             row["cds_terminal_cumulative_wind_mass_msun"] > 0.0
             for row in successful
         ),
-        "cds_terminal_wind_zero_count": sum(
+        "cds_terminal_wind_parsed_exact_zero_count": sum(
             row["cds_terminal_cumulative_wind_mass_msun"] == 0.0
             for row in successful
         ),
@@ -538,13 +563,16 @@ def audit_lc18_failed_wind_crosscheck(
         "maximum_absolute_summary_minus_cds_terminal_wind_msun": max(
             successful_cds_residuals
         ),
-        "summary_minus_cds_above_nominal_half_bin_count": sum(
+        "summary_minus_cds_above_phase_endpoint_half_bin_count": sum(
             value > cds_half_bin for value in successful_cds_residuals
         ),
+        **cds_zero_metadata,
         "interpretation": (
             "Successful models verify that the BR26 release normally carries "
             "nonzero Wind tables. Their CDS endpoint differences are measured "
-            "cross-source discrepancies, not a promotion tolerance."
+            "cross-source discrepancies, not a promotion tolerance. The four "
+            "parsed exact-zero CDS endpoints are successful controls and do not "
+            "establish physical zero wind."
         ),
     }
     failed_anomaly = {
@@ -555,30 +583,36 @@ def audit_lc18_failed_wind_crosscheck(
         "release_wind_table_exact_zero_count": sum(
             row["release_wind_table_element_sum_msun"] == 0.0 for row in failed
         ),
-        "cds_terminal_wind_positive_count": sum(
+        "cds_terminal_wind_parsed_positive_count": sum(
             row["cds_terminal_cumulative_wind_mass_msun"] > 0.0 for row in failed
         ),
-        "cds_terminal_wind_zero_count": sum(
+        "cds_terminal_wind_parsed_exact_zero_count": sum(
             row["cds_terminal_cumulative_wind_mass_msun"] == 0.0 for row in failed
         ),
         "unresolved_count": sum(
             row["resolution"] == "unresolved_failed_wind_anomaly"
             for row in failed
         ),
+        **cds_zero_metadata,
+        "interpretation": (
+            "The three parsed exact-zero CDS endpoints are inside the failed "
+            "BR26 zero-Wind release anomaly; they do not define or resolve "
+            "that anomaly, and parsed zero is not inferred physical zero wind."
+        ),
     }
     cross_source = {
         "comparison": "BR26 summary wind minus LC18 CDS initial-minus-PSN mass",
-        "nominal_cds_total_mass_half_bin_msun": cds_half_bin,
+        **cds_zero_metadata,
         "model_count": len(rows),
-        "cds_terminal_wind_positive_count": sum(
+        "cds_terminal_wind_parsed_positive_count": sum(
             row["cds_terminal_cumulative_wind_mass_msun"] > 0.0
             for row in rows
         ),
-        "cds_terminal_wind_zero_count": sum(
+        "cds_terminal_wind_parsed_exact_zero_count": sum(
             row["cds_terminal_cumulative_wind_mass_msun"] == 0.0
             for row in rows
         ),
-        "cds_terminal_wind_zero_count_by_outcome": {
+        "cds_terminal_wind_parsed_exact_zero_count_by_outcome": {
             "successful": sum(
                 row["exploded"]
                 and row["cds_terminal_cumulative_wind_mass_msun"] == 0.0
@@ -590,7 +624,7 @@ def audit_lc18_failed_wind_crosscheck(
                 for row in rows
             ),
         },
-        "above_nominal_half_bin_count": sum(
+        "above_cds_phase_endpoint_half_bin_count": sum(
             value > cds_half_bin for value in all_cds_residuals
         ),
         "maximum_absolute_difference_msun": max(all_cds_residuals),
@@ -601,9 +635,11 @@ def audit_lc18_failed_wind_crosscheck(
             "failed_wind_anomaly": _residual_statistics(failed),
         },
         "interpretation": (
-            "The two staged sources do not agree at nominal table5 precision. "
-            "The discrepancy is retained as an author/source question and is "
-            "not silently reconciled."
+            "The two staged sources do not agree at the declared CDS table5 "
+            "endpoint precision. The discrepancy is retained as an author/"
+            "source question and is not silently reconciled. Parsed exact-zero "
+            "endpoints are source-precision observations, not physical-zero "
+            "inferences."
         ),
     }
 
@@ -615,12 +651,14 @@ def audit_lc18_failed_wind_crosscheck(
         or len(failed) != expected_failed
         or failed_anomaly["summary_wind_positive_count"] != expected_failed
         or failed_anomaly["release_wind_table_exact_zero_count"] != expected_failed
-        or successful_control["cds_terminal_wind_zero_count"] != 4
-        or successful_control["cds_terminal_wind_positive_count"] != 48
-        or failed_anomaly["cds_terminal_wind_zero_count"] != 3
-        or failed_anomaly["cds_terminal_wind_positive_count"] != 53
-        or cross_source["cds_terminal_wind_zero_count"] != 7
-        or cross_source["cds_terminal_wind_positive_count"] != 101
+        or successful_control["cds_terminal_wind_parsed_exact_zero_count"] != 4
+        or successful_control["cds_terminal_wind_parsed_positive_count"] != 48
+        or failed_anomaly["cds_terminal_wind_parsed_exact_zero_count"] != 3
+        or failed_anomaly["cds_terminal_wind_parsed_positive_count"] != 53
+        or cross_source["cds_terminal_wind_parsed_exact_zero_count"] != 7
+        or cross_source["cds_terminal_wind_parsed_positive_count"] != 101
+        or cross_source["cds_terminal_wind_parsed_exact_zero_count_by_outcome"]
+        != {"successful": 4, "failed": 3}
     ):
         raise Lc18FailedWindCrosscheckError(
             "LC18 successful-control or failed-wind anomaly counts drifted"

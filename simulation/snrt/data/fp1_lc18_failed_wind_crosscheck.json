@@ -16,19 +16,23 @@
   "canonical_conversion_allowed": false,
   "canonical_rows_emitted": 0,
   "cross_source_wind_comparison": {
-    "above_nominal_half_bin_count": 108,
+    "above_cds_phase_endpoint_half_bin_count": 108,
     "agreement_required_for_this_review": false,
-    "cds_terminal_wind_positive_count": 101,
-    "cds_terminal_wind_zero_count": 7,
-    "cds_terminal_wind_zero_count_by_outcome": {
+    "cds_phase_endpoint_total_mass_half_bin_msun": 0.005,
+    "cds_phase_endpoint_total_mass_precision_msun": 0.01,
+    "cds_terminal_wind_parsed_exact_zero_count": 7,
+    "cds_terminal_wind_parsed_exact_zero_count_by_outcome": {
       "failed": 3,
       "successful": 4
     },
+    "cds_terminal_wind_parsed_positive_count": 101,
     "comparison": "BR26 summary wind minus LC18 CDS initial-minus-PSN mass",
-    "interpretation": "The two staged sources do not agree at nominal table5 precision. The discrepancy is retained as an author/source question and is not silently reconciled.",
+    "interpretation": "The two staged sources do not agree at the declared CDS table5 endpoint precision. The discrepancy is retained as an author/source question and is not silently reconciled. Parsed exact-zero endpoints are source-precision observations, not physical-zero inferences.",
     "maximum_absolute_difference_msun": 1.5476,
     "model_count": 108,
-    "nominal_cds_total_mass_half_bin_msun": 0.005,
+    "parsed_exact_zero_definition": "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing M_initial - M_total(PSN) from CDS table5 at the declared source endpoint precision",
+    "parsed_exact_zero_interpretation": "An exact parsed zero is compatible with physical mass loss below the source table half-bin; it is not evidence that physical wind is zero. The pipeline does not round the wind values.",
+    "physical_zero_inferred": false,
     "residual_statistics": {
       "all_models": {
         "comparison": "summary_wind_mass_msun minus cds_terminal_cumulative_wind_msun",
@@ -81,9 +85,15 @@
     }
   },
   "failed_wind_anomaly": {
-    "cds_terminal_wind_positive_count": 53,
-    "cds_terminal_wind_zero_count": 3,
+    "cds_phase_endpoint_total_mass_half_bin_msun": 0.005,
+    "cds_phase_endpoint_total_mass_precision_msun": 0.01,
+    "cds_terminal_wind_parsed_exact_zero_count": 3,
+    "cds_terminal_wind_parsed_positive_count": 53,
+    "interpretation": "The three parsed exact-zero CDS endpoints are inside the failed BR26 zero-Wind release anomaly; they do not define or resolve that anomaly, and parsed zero is not inferred physical zero wind.",
     "model_count": 56,
+    "parsed_exact_zero_definition": "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing M_initial - M_total(PSN) from CDS table5 at the declared source endpoint precision",
+    "parsed_exact_zero_interpretation": "An exact parsed zero is compatible with physical mass loss below the source table half-bin; it is not evidence that physical wind is zero. The pipeline does not round the wind values.",
+    "physical_zero_inferred": false,
     "release_wind_table_exact_zero_count": 56,
     "summary_wind_positive_count": 56,
     "unresolved_count": 56
@@ -11807,15 +11817,20 @@
   },
   "status": "failed_wind_anomaly_independently_crosschecked_unresolved",
   "successful_release_control": {
-    "cds_terminal_wind_positive_count": 48,
-    "cds_terminal_wind_zero_count": 4,
-    "interpretation": "Successful models verify that the BR26 release normally carries nonzero Wind tables. Their CDS endpoint differences are measured cross-source discrepancies, not a promotion tolerance.",
+    "cds_phase_endpoint_total_mass_half_bin_msun": 0.005,
+    "cds_phase_endpoint_total_mass_precision_msun": 0.01,
+    "cds_terminal_wind_parsed_exact_zero_count": 4,
+    "cds_terminal_wind_parsed_positive_count": 48,
+    "interpretation": "Successful models verify that the BR26 release normally carries nonzero Wind tables. Their CDS endpoint differences are measured cross-source discrepancies, not a promotion tolerance. The four parsed exact-zero CDS endpoints are successful controls and do not establish physical zero wind.",
     "maximum_absolute_summary_minus_cds_terminal_wind_msun": 0.5842000000000014,
     "maximum_absolute_summary_minus_release_wind_table_msun": 0.007183005956193367,
     "model_count": 52,
+    "parsed_exact_zero_definition": "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing M_initial - M_total(PSN) from CDS table5 at the declared source endpoint precision",
+    "parsed_exact_zero_interpretation": "An exact parsed zero is compatible with physical mass loss below the source table half-bin; it is not evidence that physical wind is zero. The pipeline does not round the wind values.",
+    "physical_zero_inferred": false,
     "release_wind_table_nonzero_count": 52,
-    "summary_minus_cds_above_nominal_half_bin_count": 52,
+    "summary_minus_cds_above_phase_endpoint_half_bin_count": 52,
     "summary_wind_positive_count": 52
   },
-  "tool_sha256": "4f06e7617f0574759ee83e67817ed0a28075dc8fb4e73e8fcfbbfd4e0f3e9073"
+  "tool_sha256": "a7319f3b28e7b9eab7b91846a549fd2f4ea9fb71c86b5167899661215f9176cb"
 }
