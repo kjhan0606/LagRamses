@@ -989,8 +989,13 @@ subroutine compute_fifth_force(ilevel, factor)
   use amr_commons
   use poisson_commons
   use morton_hash
+  use iso_fortran_env, only: int32, int64
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
   implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
   integer,intent(in)::ilevel
   real(dp),intent(in)::factor
   !-------------------------------------------------------
@@ -1009,6 +1014,21 @@ subroutine compute_fifth_force(ilevel, factor)
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
 
+  ! [DE] Paper-I diagnostic: disabled unless the same environment is supplied to
+  ! every MPI rank. Capture the first eligible solve ONCE per level/process.
+  ! No new namelist or force arithmetic; only owned active cells are sampled.
+  logical,save::p1_initialized=.false.,p1_enabled=.false.
+  logical,save::p1_done(1:MAXLEVEL)=.false.
+  character(len=4000),save::p1_dir=''
+  real(dp),save::p1_min_a=0d0
+  logical::p1_capture
+  integer::p1_row,p1_axis,p1_bit
+  integer(int64)::p1_nlocal,p1_nglobal
+  integer(int64),parameter::p1_max_cells=134217728_int64 ! 512^3, per level
+  real(dp),allocatable::p1_samples(:,:)
+  real(dp)::p1_skip(3)
+  character(len=4096)::p1_path
+
   ! NOTE: no early return on ncache==0 — the final make_virtual_fine_dp
   ! must be entered by every rank (matched communication)
   ncache=active(ilevel)%ngrid
@@ -1017,6 +1037,8 @@ subroutine compute_fifth_force(ilevel, factor)
   nx_loc=(icoarse_max-icoarse_min+1)
   scale=boxlen/dble(nx_loc)
   dx_loc=dx*scale
+
+  call paper1_capture_begin
 
   ! Neighbor lookup tables (left=1, right=2)
   ggg(1,1,1:8)=(/1,0,1,0,1,0,1,0/); hhh(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
@@ -1029,7 +1051,8 @@ subroutine compute_fifth_force(ilevel, factor)
 !$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
 !$omp&  ig_left,ig_right,ih_left,ih_right, &
-!$omp&  ind_nb_left,ind_nb_right,grad_u,u_cen,u_left,u_right) schedule(static)
+!$omp&  ind_nb_left,ind_nb_right,grad_u,u_cen,u_left,u_right, &
+!$omp&  p1_row,p1_axis,p1_bit) schedule(static)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
      do i=1,ngrid
@@ -1054,30 +1077,43 @@ subroutine compute_fifth_force(ilevel, factor)
 
         do i=1,ngrid
            u_cen = scalar_gr(ind_cell_w(i))
+           if(p1_capture)then
+              p1_row=(igrid+i-2)*twotondim+ind
+              do p1_axis=1,3
+                 p1_bit=ibits(ind-1,p1_axis-1,1)
+                 p1_samples(p1_axis,p1_row)= &
+                      & (xg(ind_grid_w(i),p1_axis)+(dble(p1_bit)-0.5d0)*dx-p1_skip(p1_axis))*scale
+              end do
+              p1_samples(4,p1_row)=rho(ind_cell_w(i))
+              p1_samples(5,p1_row)=u_cen
+              p1_samples(6,p1_row)=merge(1d0,0d0,son(ind_cell_w(i))==0)
+           end if
            do idim=1,ndim
               ig_left =ggg(idim,1,ind)
               ig_right=ggg(idim,2,ind)
-              ih_left = ICELL_OF(1,hhh(idim,1,ind))-1
-              ih_right = ICELL_OF(1,hhh(idim,2,ind))-1
-
               ! Same-level neighbours are already cached above.  The old
               ! path decoded the cell Morton coordinate and performed a
               ! hash lookup six times per active cell even on a complete
               ! uniform level.  Retain parent-CIC only for a genuinely
               ! missing AMR neighbour.
               if(igridn_w(i,ig_left)>0) then
-                 u_left=scalar_gr(igridn_w(i,ig_left)+ih_left)
+                 ! [DE] Blocked cell layout is not grid+child_offset.
+                 u_left=scalar_gr(ICELL_OF(igridn_w(i,ig_left),hhh(idim,1,ind)))
               else
                  call scalar_sample_axis( &
                       & ind_grid_w(i),ind,ilevel,idim,-1,u_cen,u_left)
               end if
               if(igridn_w(i,ig_right)>0) then
-                 u_right=scalar_gr(igridn_w(i,ig_right)+ih_right)
+                 u_right=scalar_gr(ICELL_OF(igridn_w(i,ig_right),hhh(idim,2,ind)))
               else
                  call scalar_sample_axis( &
                       & ind_grid_w(i),ind,ilevel,idim,1,u_cen,u_right)
               end if
               grad_u=(u_right-u_left)/(2d0*dx_loc)
+              if(p1_capture)then
+                 p1_samples(6+idim,p1_row)=f(ind_cell_w(i),idim)
+                 p1_samples(9+idim,p1_row)=factor*grad_u
+              end if
               f(ind_cell_w(i),idim) = f(ind_cell_w(i),idim) + factor * grad_u
            end do
         end do
@@ -1090,6 +1126,116 @@ subroutine compute_fifth_force(ilevel, factor)
   do idim=1,ndim
      call make_virtual_fine_dp(f(1,idim),ilevel)
   end do
+
+  if(p1_capture)call paper1_capture_write
+
+contains
+
+  subroutine paper1_capture_fail(message)
+    character(len=*),intent(in)::message
+    write(*,'(A,I0,2A)')' PAPER1_FORCE_DIAG rank ',myid,': ',trim(message)
+    call scalar_solver_abort
+    stop 92
+  end subroutine paper1_capture_fail
+
+  subroutine paper1_capture_begin
+    character(len=128)::env_value
+    integer::env_status,env_length,ios,info,present_local,present_global
+    logical::exists
+
+    p1_capture=.false.
+    if(.not.p1_initialized)then
+       p1_initialized=.true.
+       call get_environment_variable('PAPER1_FORCE_DIAG_DIR',p1_dir,length=env_length,status=env_status)
+       if(env_status==1.or.env_length==0)return
+       if(env_status/=0)call paper1_capture_fail('invalid or overlong PAPER1_FORCE_DIAG_DIR')
+       if(len_trim(p1_dir)==0.or.p1_dir(1:1)/='/') &
+            & call paper1_capture_fail('PAPER1_FORCE_DIAG_DIR must be an existing absolute directory')
+       p1_enabled=.true.
+       call get_environment_variable('PAPER1_FORCE_DIAG_MIN_A',env_value,length=env_length,status=env_status)
+       if(env_status/=1.and.env_length>0)then
+          if(env_status/=0)call paper1_capture_fail('invalid PAPER1_FORCE_DIAG_MIN_A')
+          read(env_value,*,iostat=ios)p1_min_a
+          if(ios/=0)call paper1_capture_fail('cannot parse PAPER1_FORCE_DIAG_MIN_A')
+          if(.not.ieee_is_finite(p1_min_a).or.p1_min_a<0d0) &
+               & call paper1_capture_fail('PAPER1_FORCE_DIAG_MIN_A must be finite and nonnegative')
+       end if
+    end if
+    if(.not.p1_enabled)return
+    if(ndim/=3.or.storage_size(0.0_dp)/=64)call paper1_capture_fail('requires 3D and float64')
+    if(ilevel<1.or.ilevel>MAXLEVEL)call paper1_capture_fail('invalid capture level')
+    if(p1_done(ilevel))return
+    if(.not.ieee_is_finite(aexp))call paper1_capture_fail('nonfinite solve scale factor')
+    if(aexp<p1_min_a)return
+    ! The saved pre-addition vector is Newtonian only for unmixed f(R).
+    if(.not.use_fR.or.use_nDGP.or.use_mond.or.use_coupled_de.or. &
+         & use_symmetron.or.use_dilaton.or.use_galileon) &
+         & call paper1_capture_fail('capture requires unmixed f(R) physics')
+    if(ncpu>999999)call paper1_capture_fail('rank count exceeds filename contract')
+
+    p1_nlocal=int(ncache,int64)*int(twotondim,int64)
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(p1_nlocal,p1_nglobal,1,MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+    p1_nglobal=p1_nlocal
+#endif
+    if(p1_nglobal>p1_max_cells)call paper1_capture_fail('capture exceeds the 512^3 global-cell pilot cap')
+    write(p1_path,'(A,"/force_rank",I6.6,"_level",I3.3,".bin")')trim(p1_dir),myid,ilevel
+    inquire(file=trim(p1_path),exist=exists,iostat=ios)
+    if(ios/=0)call paper1_capture_fail('cannot inspect capture destination')
+    present_local=merge(1,0,exists)
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(present_local,present_global,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+#else
+    present_global=present_local
+#endif
+    if(present_global/=0)call paper1_capture_fail('capture file already exists; refusing overwrite')
+    allocate(p1_samples(12,int(p1_nlocal)),stat=ios)
+    if(ios/=0)call paper1_capture_fail('cannot allocate bounded capture buffer')
+    p1_skip=(/dble(icoarse_min),dble(jcoarse_min),dble(kcoarse_min)/)
+    p1_capture=.true.
+  end subroutine paper1_capture_begin
+
+  subroutine paper1_capture_write
+    integer::writer,unit_diag,ios,info,first,last
+    integer(int32)::header_i4(8)
+    integer(int64)::header_i8(4)
+    real(dp)::header_r8(6)
+    ! Native-endian stream (no Fortran record markers), fixed 128-byte header:
+    ! magic[16]; i4[8]: version,endian-marker,rank,ncpu,ndim,level,ncol,reserved;
+    ! i8[4]: local cells,global cells,nstep,nstep_coarse;
+    ! r8[6]: a,factor,Lbox[Mpc/h],boxlen,dx_loc,min_a.
+    ! Then local_cells rows of 12 float64: x,y,z,rho,scalar,leaf,FN[3],F5[3].
+    ! Coordinates are cell centres in code-box units, including nonleaf cells.
+    ! Empty ranks still write a header. No cell-formatted I/O or ghost rows.
+    header_i4=[1_int32,16909060_int32,int(myid,int32),int(ncpu,int32), &
+         & int(ndim,int32),int(ilevel,int32),12_int32,0_int32]
+    header_i8=[p1_nlocal,p1_nglobal,int(nstep,int64),int(nstep_coarse,int64)]
+    header_r8=[aexp,factor,boxlen_ini,boxlen,dx_loc,p1_min_a]
+    do writer=1,ncpu
+       if(myid==writer)then
+          open(newunit=unit_diag,file=trim(p1_path),access='stream',form='unformatted', &
+               & status='new',action='write',iostat=ios)
+          if(ios/=0)call paper1_capture_fail('cannot exclusively create '//trim(p1_path))
+          write(unit_diag,iostat=ios)'P1_FORCE_DIAG_V1',header_i4,header_i8,header_r8
+          if(ios/=0)call paper1_capture_fail('capture header write failed')
+          do first=1,int(p1_nlocal),65536
+             last=min(first+65535,int(p1_nlocal))
+             write(unit_diag,iostat=ios)p1_samples(:,first:last)
+             if(ios/=0)call paper1_capture_fail('capture payload write failed')
+          end do
+          close(unit_diag,iostat=ios)
+          if(ios/=0)call paper1_capture_fail('capture close failed')
+       end if
+#ifndef WITHOUTMPI
+       call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+    end do
+    p1_done(ilevel)=.true.
+    deallocate(p1_samples)
+    if(myid==1)write(*,'(A,I0,A,ES24.16,A,I0)') &
+         & ' PAPER1_FORCE_DIAG captured level ',ilevel,' a=',aexp,' cells=',p1_nglobal
+  end subroutine paper1_capture_write
 
 end subroutine compute_fifth_force
 
@@ -1735,11 +1881,12 @@ subroutine fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)
            lapl = 0d0
            do idim=1,ndim
               ig_left =ggg(idim,1,ind); ig_right=ggg(idim,2,ind)
-              ih_left = ICELL_OF(1,hhh(idim,1,ind))-1
-              ih_right = ICELL_OF(1,hhh(idim,2,ind))-1
               u_nb_l = u_c; u_nb_r = u_c
-              if(igridn_w(i,ig_left ) > 0) u_nb_l = scalar_gr(igridn_w(i,ig_left )+ih_left)
-              if(igridn_w(i,ig_right) > 0) u_nb_r = scalar_gr(igridn_w(i,ig_right)+ih_right)
+              ! [DE] Respect the blocked cell map on both sides of the stencil.
+              if(igridn_w(i,ig_left ) > 0) &
+                   & u_nb_l = scalar_gr(ICELL_OF(igridn_w(i,ig_left),hhh(idim,1,ind)))
+              if(igridn_w(i,ig_right) > 0) &
+                   & u_nb_r = scalar_gr(ICELL_OF(igridn_w(i,ig_right),hhh(idim,2,ind)))
               lapl = lapl + (u_nb_l + u_nb_r - 2d0*u_c) * dx2_inv
            end do
            if(u_abs > small_fR) then
@@ -2810,15 +2957,14 @@ subroutine fR_gauss_seidel(ilevel, R_bar, fR_bar, res_max, src_max)
               do idim=1,ndim
                  ig_left =ggg(idim,1,ind)
                  ig_right=ggg(idim,2,ind)
-                 ih_left = ICELL_OF(1,hhh(idim,1,ind))-1
-                 ih_right = ICELL_OF(1,hhh(idim,2,ind))-1
                  if(igridn_w(i,ig_left) > 0) then
-                    u_nb_l=scalar_gr(igridn_w(i,ig_left)+ih_left)
+                    ! [DE] Use the full grid/child mapping, including block offset.
+                    u_nb_l=scalar_gr(ICELL_OF(igridn_w(i,ig_left),hhh(idim,1,ind)))
                  else
                     call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,-1,u_c,u_nb_l)
                  end if
                  if(igridn_w(i,ig_right) > 0) then
-                    u_nb_r=scalar_gr(igridn_w(i,ig_right)+ih_right)
+                    u_nb_r=scalar_gr(ICELL_OF(igridn_w(i,ig_right),hhh(idim,2,ind)))
                  else
                     call scalar_sample_axis(ind_grid_w(i),ind,ilevel,idim,1,u_c,u_nb_r)
                  end if
