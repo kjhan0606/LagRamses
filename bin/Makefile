@@ -166,7 +166,7 @@ MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
-	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
+	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o agn_feedback_deposition.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
 	 $(STELLAR_ENRICHMENT_MODOBJ)
 
 # SIDM object (depends on amr_commons, pm_commons, random)
@@ -289,7 +289,9 @@ snrt_transport_step.o: snrt_state.o snrt_angular_quadrature.o \
                         snrt_cuda_multigroup_interface.o
 snrt_rt_transaction.o: amr_parameters.jaehyun.o mpi_mod.o
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
-sink_particle.kjhan.o: snrt_agn_efficiency.o amr_parameters.jaehyun.o pm_commons.o
+agn_feedback_deposition.o: amr_parameters.jaehyun.o
+sink_particle.kjhan.o: snrt_agn_efficiency.o agn_feedback_deposition.o amr_parameters.jaehyun.o pm_commons.o
+read_params.jaehyun.o: snrt_agn_efficiency.o
 snrt_ramses_driver.o: amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
                        pm_commons.o snrt_agn_efficiency.o \
                        snrt_state.o snrt_amr_topology.o snrt_transport_step.o \

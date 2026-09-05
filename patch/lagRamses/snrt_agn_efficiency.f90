@@ -10,6 +10,7 @@ module snrt_agn_efficiency
 
   private
   public :: snrt_agn_resolve_efficiency
+  public :: snrt_agn_rt_requested
   public :: snrt_agn_efficiency_status_name
   public :: snrt_agn_efficiency_mode_name
   public :: snrt_agn_eff_status_ok
@@ -52,6 +53,21 @@ module snrt_agn_efficiency
   integer, parameter :: snrt_agn_eff_mode_invalid = 9
 
 contains
+
+  logical function snrt_agn_rt_requested() result(requested)
+    ! One process-lifetime latch, shared by namelist preflight, legacy
+    ! dispatch and the live driver. Preflight checks MPI agreement explicitly.
+    logical, save :: resolved=.false., latched=.false.
+    character(len=8) :: value
+    integer :: length, status
+    if (.not.resolved) then
+       value=''
+       call get_environment_variable('SNRT_RT_ENABLE',value,length=length,status=status)
+       latched=status==0 .and. length==1 .and. value(1:1)=='1'
+       resolved=.true.
+    end if
+    requested=latched
+  end function snrt_agn_rt_requested
 
   pure subroutine snrt_agn_resolve_efficiency(raw_efficiency, spin_bh, bondi_rate, &
        eddington_rate, mad_jet, x_floor, resolved_base_efficiency, &

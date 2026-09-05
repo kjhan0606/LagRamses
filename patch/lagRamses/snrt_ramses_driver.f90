@@ -98,8 +98,9 @@ contains
   end subroutine snrt_ramses_diagnose_level
 
   subroutine snrt_ramses_advance_level(ilevel)
+    use amr_parameters, only: sink, sink_AGN
     use amr_commons, only: levelmin, nstep_coarse, myid, dtnew, boxlen, &
-         icoarse_min, icoarse_max
+         icoarse_min, icoarse_max, ncpu, nrestart
     use hydro_commons, only: uold
     use pm_commons, only: nsink, dMsmbh, xsink, eps_sink, idsink, &
          dMBHoverdt, dMEdoverdt, dMBH_coarse, dMEd_coarse
@@ -138,7 +139,7 @@ contains
     use snrt_agn_locator, only: snrt_agn_find_local_leaf
     use snrt_agn_source, only: snrt_c_cgs, snrt_agn_photon_budget, &
          snrt_agn_deposit_transaction
-    use snrt_agn_efficiency, only: snrt_agn_resolve_efficiency
+    use snrt_agn_efficiency, only: snrt_agn_resolve_efficiency, snrt_agn_rt_requested
     use snrt_nlte_coupling, only: snrt_nlte_primordial_optical_depth_groups
     use snrt_thermochemistry, only: snrt_thermochemistry_result, &
          snrt_secondary_tables_load_from_environment, snrt_secondary_tables_loaded, &
@@ -234,7 +235,6 @@ contains
     logical, save :: transaction_config_reported = .false.
     real(dp), save :: reduced_c = 0.01d0
     integer, save :: level_filter = -1
-    integer, save :: accounted_step = -huge(1)
     integer, allocatable, save :: accounted_ids(:)
     real(dp), allocatable, save :: accounted_inflow(:), retained_seen(:)
     logical, allocatable, save :: retained_initialized(:)
@@ -242,11 +242,11 @@ contains
 
     enabled = .false.
     if (.not. enabled_resolved) then
-       env_value = ''
-       call get_environment_variable('SNRT_RT_ENABLE', env_value, &
-            length=env_length, status=env_status)
-       enabled_latched = env_status == 0 .and. env_length == 1 .and. &
-            env_value(1:1) == '1'
+       enabled_latched = snrt_agn_rt_requested()
+       if (enabled_latched .and. sink .and. sink_AGN) then
+          if(myid==1)write(*,*)'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
+          call clean_stop
+       end if
        env_value = ''
        call get_environment_variable('SNRT_REDUCED_C', env_value, &
             length=env_length, status=env_status)
@@ -280,6 +280,13 @@ contains
     enabled = enabled_latched
     transaction_diagnostic_mode = transaction_diagnostic_mode_latched
     if (.not. enabled) return
+    ! Do not guess unknown historical photon ownership by either replaying
+    ! the ledger or silently rebasing away real accretion. Startup rejects
+    ! these modes with sink enabled; defend restored sink arrays here too.
+    if (nsink>0 .and. (ncpu>1 .or. nrestart>0)) then
+       if(myid==1)write(*,*)'Live SNRT AGN requires serial fresh start until inflow cursors are persistent/migratable'
+       call clean_stop
+    end if
     if (.not. spectral_contract_resolved) then
        call snrt_spectral_contract_load_from_environment(spectral_status)
        spectral_contract_resolved = .true.
@@ -581,42 +588,10 @@ contains
     if (.not. accounting_identity_ok) then
        if (myid == 1) write(*,'(A)') &
             ' SNRT AGN source skipped: idsink identity map is invalid'
-    else if (accounted_step /= nstep_coarse) then
-       if (nsink > 0) then
-          allocate(accounted_ids_new(nsink), accounted_inflow_new(nsink), &
-               retained_seen_new(nsink), retained_initialized_new(nsink))
-          accounted_ids_new = idsink
-          accounted_inflow_new = 0.0d0
-          retained_seen_new = 0.0d0
-          retained_initialized_new = .false.
-          if (allocated(accounted_ids) .and. allocated(retained_seen) .and. &
-               allocated(retained_initialized)) then
-             do i = 1, nsink
-                do isink = 1, size(accounted_ids)
-                   if (accounted_ids(isink) == accounted_ids_new(i)) then
-                      retained_seen_new(i) = retained_seen(isink)
-                      retained_initialized_new(i) = retained_initialized(isink)
-                      exit
-                   end if
-                end do
-             end do
-          end if
-          if (allocated(accounted_ids)) deallocate(accounted_ids)
-          if (allocated(accounted_inflow)) deallocate(accounted_inflow)
-          if (allocated(retained_seen)) deallocate(retained_seen)
-          if (allocated(retained_initialized)) deallocate(retained_initialized)
-          call move_alloc(accounted_ids_new, accounted_ids)
-          call move_alloc(accounted_inflow_new, accounted_inflow)
-          call move_alloc(retained_seen_new, retained_seen)
-          call move_alloc(retained_initialized_new, retained_initialized)
-       else
-          if (allocated(accounted_ids)) deallocate(accounted_ids)
-          if (allocated(accounted_inflow)) deallocate(accounted_inflow)
-          if (allocated(retained_seen)) deallocate(retained_seen)
-          if (allocated(retained_initialized)) deallocate(retained_initialized)
-       end if
-       accounted_step = nstep_coarse
     else if (nsink > 0) then
+       ! Legacy feedback is excluded above and therefore does not reset the
+       ! cumulative supply ledger. Keep accounted_inflow across coarse steps;
+       ! only a genuinely new idsink starts from zero, not a new step number.
        ! Avoid an O(nsink^2) remap at every AMR level when the common case is
        ! an unchanged particle-array order.  Rebuild by stable ID only after
        ! RAMSES actually reorders or changes the sink population.
