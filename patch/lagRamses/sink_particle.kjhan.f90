@@ -6145,7 +6145,10 @@ end subroutine kjhan_growspin
 !###########################################################
 !###########################################################
 subroutine AGN_feedback
-  use agn_feedback_deposition, only: agn_eddington_ratio
+  use agn_feedback_deposition, only: agn_eddington_ratio, agn_scalar_map
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_enrichment_config, only: use_channel_resolved_feedback, n_stellar_elements
+#endif
   use snrt_agn_efficiency, only: snrt_agn_rt_requested
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_commons
@@ -6159,14 +6162,16 @@ subroutine AGN_feedback
   !----------------------------------------------------------------------
   ! local constants
   integer::nAGN,iAGN,ilevel,ivar,info,feedback_error,feedback_error_all
+  integer::nelements,nscalar,metal_slot,reserved_fields(4)
+  integer,allocatable::scalar_fields(:)
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   logical ,dimension(:),allocatable::ok_blast_agn
   integer ,dimension(:),allocatable::ind_blast,iAGN_myid
-  real(dp),dimension(:),allocatable::mAGN,ZAGN,vol_gas,mass_gas,vol_blast,mass_blast,psy_norm
+  real(dp),dimension(:),allocatable::mAGN,vol_gas,mass_gas,vol_blast,mass_blast
   real(dp),dimension(:),allocatable::dMBH_AGN,dMEd_AGN,dMsmbh_AGN,EsaveAGN,Msmbh,spinmagAGN,eps_AGN
-  real(dp),dimension(:,:),allocatable::xAGN,vAGN,jAGN,vloadAGN
+  real(dp),dimension(:,:),allocatable::xAGN,vAGN,jAGN,vloadAGN,cloadAGN,psy_norm
   real(dp)::temp_blast
   integer,dimension(1:nsink)::itemp
   integer::isort,isink,idim,ilun
@@ -6185,6 +6190,30 @@ subroutine AGN_feedback
   if(.not. hydro)return
   if(ndim.ne.3)return
   if(nsink.eq.0)return
+
+  ! Layout-only preflight: no yield-source initialization or private runtime map.
+  nelements=nelt
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  if(use_channel_resolved_feedback()) nelements=n_stellar_elements
+#endif
+  metal_slot=merge(1,0,metal)
+  nscalar=metal_slot+max(0,nelements)
+  allocate(scalar_fields(nscalar))
+  reserved_fields=0
+  if(delayed_cooling)reserved_fields(1)=idelay
+  if(sf_virial)reserved_fields(2)=ivirial
+  if(aton)reserved_fields(3)=ixion
+  if(use_sgs)reserved_fields(4)=isgs
+  call agn_scalar_map(nvar,merge(imetal,0,metal),ichem,nelements,reserved_fields,scalar_fields,feedback_error)
+  if(nener/=0)feedback_error=1
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(feedback_error,feedback_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+  feedback_error=feedback_error_all
+#endif
+  if(feedback_error/=0)then
+     if(myid==1)write(*,*)'AGN requires a disjoint chemistry map and NENER=0'
+     call clean_stop
+  endif
 
   if(verbose)write(*,*)'  +Entering make_AGN'
 
@@ -6247,10 +6276,10 @@ subroutine AGN_feedback
   call kjhan_getAGNonmyid(itemp,nAGN)
 
   ! Allocate the arrays for the position and the mass of the AGN in myid
-  allocate(xAGN(1:nAGN,1:3),vAGN(1:nAGN,1:3),mAGN(1:nAGN),ZAGN(1:nAGN),iAGN_myid(1:nAGN) &
+  allocate(xAGN(1:nAGN,1:3),vAGN(1:nAGN,1:3),mAGN(1:nAGN),iAGN_myid(1:nAGN) &
        & ,dMBH_AGN(1:nAGN),dMEd_AGN(1:nAGN),dMsmbh_AGN(1:nAGN),Msmbh(1:nAGN),EsaveAGN(1:nAGN),jAGN(1:nAGN,1:3) &
-       & ,spinmagAGN(1:nAGN),eps_AGN(1:nAGN),vloadAGN(1:nAGN,1:3))
-  xAGN=0d0; vAGN=0d0; mAGN=0d0; ZAGN=0d0; iAGN_myid=0; dMBH_AGN=0d0; dMEd_AGN=0d0; EsaveAGN=0d0; jAGN=0d0; spinmagAGN=0d0; eps_AGN=0d0
+       & ,spinmagAGN(1:nAGN),eps_AGN(1:nAGN),vloadAGN(1:nAGN,1:3),cloadAGN(1:nAGN,1:nscalar))
+  xAGN=0d0; vAGN=0d0; mAGN=0d0; iAGN_myid=0; dMBH_AGN=0d0; dMEd_AGN=0d0; EsaveAGN=0d0; jAGN=0d0; spinmagAGN=0d0; eps_AGN=0d0
 
 !$omp parallel do private(iAGN, isort)
   do iAGN=1,nAGN
@@ -6281,7 +6310,7 @@ subroutine AGN_feedback
   enddo
 
   ! Allocate arrays that are outputs of average_AGN (initialised in average_AGN)
-  allocate(vol_gas(1:nAGN),mass_gas(1:nAGN),psy_norm(1:nAGN),vol_blast(1:nAGN),mass_blast(1:nAGN))
+  allocate(vol_gas(1:nAGN),mass_gas(1:nAGN),psy_norm(1:nAGN,1:2),vol_blast(1:nAGN),mass_blast(1:nAGN))
   allocate(ind_blast(1:nAGN),ok_blast_agn(1:nAGN))
 
   ! Reject invalid budgets before average_AGN removes any loaded gas.
@@ -6289,10 +6318,10 @@ subroutine AGN_feedback
   if (.not. all(ieee_is_finite(dMBH_AGN)) .or. .not. all(ieee_is_finite(dMEd_AGN)) .or. &
        .not. all(ieee_is_finite(dMsmbh_AGN)) .or. .not. all(ieee_is_finite(EsaveAGN)) .or. &
        .not. all(ieee_is_finite(jAGN)) .or. .not. all(ieee_is_finite(vAGN)) .or. &
-       .not. all(ieee_is_finite([f_ekAGN,eAGN_K,eAGN_T,T2maxAGN,X_floor])) .or. &
+       .not. all(ieee_is_finite([f_ekAGN,eAGN_K,eAGN_T,T2maxAGN,X_floor,mloadAGN])) .or. &
        any(dMBH_AGN < 0d0) .or. any(dMEd_AGN < 0d0) .or. any(dMsmbh_AGN < 0d0) .or. &
        any(EsaveAGN < 0d0) .or. f_ekAGN < 0d0 .or. f_ekAGN > 1d0 .or. &
-       eAGN_K < 0d0 .or. eAGN_T < 0d0 .or. T2maxAGN <= 0d0 .or. X_floor <= 0d0) then
+       mloadAGN < 0d0 .or. eAGN_K < 0d0 .or. eAGN_T < 0d0 .or. T2maxAGN <= 0d0 .or. X_floor <= 0d0) then
      feedback_error=1
   end if
 #ifndef WITHOUTMPI
@@ -6317,8 +6346,8 @@ subroutine AGN_feedback
   enddo
 
   ! Compute some averaged quantities before doing the AGN energy input
-  call average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast &
-       & ,mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN)
+  call average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast &
+       & ,mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
 
   ! Check if AGN goes into thermal blast wave mode
 !!$omp parallel do private(iAGN, temp_blast)
@@ -6340,8 +6369,8 @@ subroutine AGN_feedback
   end do
 
   ! Modify hydro quantities to account for a Sedov blast wave
-  call AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_blast,vol_gas &
-       & ,psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN)
+  call AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,vol_gas &
+       & ,psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
 
   ! Reset total accreted mass if AGN input has been done
 !!$omp parallel do private(iAGN, isort)
@@ -6375,7 +6404,7 @@ subroutine AGN_feedback
   ! Deallocate everything
   deallocate(vol_gas,mass_gas,psy_norm,vol_blast,mass_blast)
   deallocate(ind_blast)
-  deallocate(xAGN,vAGN,vloadAGN,mAGN,ZAGN,jAGN)
+  deallocate(xAGN,vAGN,vloadAGN,cloadAGN,scalar_fields,mAGN,jAGN)
   deallocate(iAGN_myid,ok_blast_agn,dMBH_AGN,dMEd_AGN,dMsmbh_AGN,Msmbh,EsaveAGN)
   deallocate(spinmagAGN,eps_AGN)
 
@@ -6396,9 +6425,11 @@ end subroutine AGN_feedback
 !################################################################
 !################################################################
 !################################################################
-subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast &
-     & ,mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN)
-  use agn_feedback_deposition, only: agn_eddington_ratio
+subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast &
+     & ,mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
+  use agn_feedback_deposition, only: agn_eddington_ratio, agn_jet_geometry, agn_contains_donor, &
+       agn_withdraw_cell, agn_pack_load, agn_unpack_load
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use pm_commons
   use amr_commons
   use hydro_commons
@@ -6414,7 +6445,11 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
   ! Yohan Dubois, December 15th, 2010
   !------------------------------------------------------------------------
   integer::ilevel,ncache,nAGN,j,iAGN,ind,ix,iy,iz,ngrid
-  integer::i,isink,nx_loc,igrid,info
+  integer::i,isink,nx_loc,igrid,info,nscalar,metal_slot,donor_error,donor_error_all,cell_ierr
+  integer::scalar_fields(nscalar),owner_hits(nAGN),owner_send(nsink),owner_all(nsink)
+  real(dp)::cloadAGN(nAGN,nscalar),donor_row(nvar),weights(2),axis(3)
+  real(dp)::geometry_send(4,nsink),geometry_all(4,nsink)
+  real(dp)::load_send(4+nscalar,nsink),load_all(4+nscalar,nsink)
 ! integer,dimension(1:nvector)::ind_grid,ind_cell
 ! logical ,dimension(1:nvector)::ok
   integer,target, allocatable, dimension(:,:)::Pind_grid,Pind_cell
@@ -6426,12 +6461,15 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
   integer:: mythread, nthreads
   common /omp_threads_agn/ mythread
 !$omp threadprivate(/omp_threads_agn/)
-  real(dp),target, allocatable, dimension(:,:)::Pvol_gas,Pmass_gas,Ppsy_norm
-  real(dp),pointer,  dimension(:)::Tvol_gas,Tmass_gas,Tpsy_norm
+  real(dp),target, allocatable, dimension(:,:)::Pvol_gas,Pmass_gas
+  real(dp),target, allocatable::Ppsy_norm(:,:,:)
+  real(dp),pointer,  dimension(:)::Tvol_gas,Tmass_gas
+  real(dp),pointer::Tpsy_norm(:,:)
   common /com_av_agn/ Tvol_gas,Tmass_gas,Tpsy_norm
 !$omp threadprivate(/com_av_agn/)
 
-  real(dp), dimension(1:nAGN)::vol_gas,mass_gas,psy_norm
+  real(dp), dimension(1:nAGN)::vol_gas,mass_gas
+  real(dp)::psy_norm(nAGN,2)
   real(dp)::x,y,z,dr_AGN,d,u,v,w,ek,u2,v2,w2,dr_cell
   real(dp)::scale,dx,dxx,dyy,dzz,dx_min,dx_loc,vol_loc,rmax2,rmax
   real(dp)::x_half,y_half,z_half,x_box,y_box,z_box
@@ -6441,12 +6479,9 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
   integer ,dimension(1:nAGN)::ind_blast,iAGN_myid
   real(dp),dimension(1:nAGN)::vol_blast,mass_blast,mAGN
   real(dp):: mAGNi
-  real(dp),dimension(1:nAGN)::dMBH_AGN,dMEd_AGN,ZAGN,EsaveAGN,X_radio
+  real(dp),dimension(1:nAGN)::dMBH_AGN,dMEd_AGN,EsaveAGN,X_radio
   real(dp),dimension(1:nAGN,1:3)::xAGN,vloadAGN,jAGN
-#ifndef WITHOUTMPI
-  real(dp),dimension(1:nsink)::vol_gas_mpi,mass_gas_mpi,mAGN_mpi,psy_norm_mpi,ZAGN_mpi
-  real(dp),dimension(:),allocatable::allreduce_sbuf,allreduce_rbuf
-#endif
+
   logical ,dimension(1:nAGN)::ok_blast_agn
   real(dp)::jtot,j_x,j_y,j_z,drjet,dzjet,psy
   real(dp)::eint,ekk
@@ -6466,14 +6501,14 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
   allocate(Pok(1:nvector, 0: nthreads-1))
   allocate(Pvol_gas(1:nAGN, 0: nthreads-1))
   allocate(Pmass_gas(1:nAGN, 0: nthreads-1))
-  allocate(Ppsy_norm(1:nAGN, 0: nthreads-1))
+  allocate(Ppsy_norm(1:nAGN,1:2, 0: nthreads-1))
 !$omp parallel
   ind_grid => Pind_grid(:, mythread)
   ind_cell => Pind_cell(:, mythread)
   ok => Pok(:, mythread)
   Tvol_gas => Pvol_gas(:, mythread)
   Tmass_gas => Pmass_gas(:,  mythread)
-  Tpsy_norm => Ppsy_norm(:, mythread)
+  Tpsy_norm => Ppsy_norm(:,:, mythread)
 !$omp end parallel
 
 
@@ -6549,8 +6584,8 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
   end if
 
   ! Initialize the averaged variables
-  vol_gas=0d0;mass_gas=0d0;vol_blast=0d0;mass_blast=0d0;ind_blast=-1;psy_norm=0d0;ZAGN=0d0
-  vloadAGN=0d0
+  vol_gas=0d0;mass_gas=0d0;vol_blast=0d0;mass_blast=0d0;ind_blast=-1;psy_norm=0d0
+  vloadAGN=0d0;cloadAGN=0d0;mAGN=0d0;owner_hits=0
 !#########################################################################################################
 ! STATUS:
 ! mass_blast, ind_blast, vol_blast: global return variables of iAGN but only once saved when iAGN is completely contained by
@@ -6582,7 +6617,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
      ncache=active(ilevel)%ngrid
 !$omp parallel do private(iAGN,igrid,ngrid,i,ind,x,y,z,dxx,dyy,dzz,&
 !$omp                  dr_AGN,dr_cell,jtot,j_x,j_y,j_z,dzjet,drjet,psy,d,u,v,w,&
-!$omp                  ekk,eint,ibx,iby,ibz,jbx,jby,jbz) schedule(dynamic)
+!$omp                  ekk,eint,ibx,iby,ibz,jbx,jby,jbz,weights,axis) schedule(dynamic)
      do igrid=1,ncache,nvector
        ngrid=MIN(nvector,ncache-igrid+1)
        do i=1,ngrid
@@ -6617,6 +6652,16 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
                   dyy=y-xAGN(iAGN,2)
                   dzz=z-xAGN(iAGN,3)
                   dr_AGN=dxx*dxx+dyy*dyy+dzz*dzz
+                  if(agn_contains_donor([dxx,dyy,dzz],dx_loc))then
+                     ! One half-open leaf should own the donor. Record ties
+                     ! without an OMP race and reject before any mass removal.
+!$omp critical(agn_donor_location)
+                     owner_hits(iAGN)=owner_hits(iAGN)+1
+                     ind_blast(iAGN)=ind_cell(i)
+                     vol_blast(iAGN)=vol_loc
+                     mass_blast(iAGN)=vol_loc*uold(ind_cell(i),1)
+!$omp end critical(agn_donor_location)
+                  endif
 
                   ! ------------------------------------------
                   ! case 0: Some energy has not been released
@@ -6625,11 +6670,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
                      if(dr_AGN.le.rmax2)then
                        Tvol_gas (iAGN)=Tvol_gas (iAGN)+vol_loc*uold(ind_cell(i),1)
                      endif
-                     dr_cell=MAX(ABS(dxx),ABS(dyy),ABS(dzz))
-                     if(dr_cell.le.dx_loc/2.0)then
-                       ind_blast(iAGN)=ind_cell(i)
-                       vol_blast (iAGN)=vol_loc
-                     endif
+
 
                   ! ------------------------------------------
                   ! case 1: All energy has been released in
@@ -6646,33 +6687,18 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
                        if(ok_blast_agn(iAGN))then
                           jtot=sqrt(jAGN(iAGN,1)**2+jAGN(iAGN,2)**2+jAGN(iAGN,3)**2)
                           if(jtot.gt.0d0)then
-                            j_x=jAGN(iAGN,1)/jtot
-                            j_y=jAGN(iAGN,2)/jtot
-                            j_z=jAGN(iAGN,3)/jtot
-                            dr_cell=MAX(ABS(dxx),ABS(dyy),ABS(dzz))
-                            dzjet= dxx*j_x + dyy*j_y + dzz*j_z
-                            drjet=sqrt(max(0d0,dr_AGN-dzjet*dzjet))
-                            ! Check if the cell lies within the AGN jet cylindre
-                            if (drjet .le. rmax .and. abs(dzjet) .le. rmax)then
+                            call agn_jet_geometry([dxx,dyy,dzz],jAGN(iAGN,:),rmax,weights,axis)
+                            if(any(weights>0d0))then
                                Tvol_gas(iAGN)=Tvol_gas(iAGN)+vol_loc
-                               psy=exp(-drjet**2/2d0/rmax**2d0)
-                               Tpsy_norm(iAGN)=Tpsy_norm(iAGN)+psy*vol_loc
+                               Tpsy_norm(iAGN,:)=Tpsy_norm(iAGN,:)+weights*vol_loc
                             endif
-                            if(dr_cell.le.dx_loc/2.0)then
-                               ind_blast(iAGN)=ind_cell(i)
-                               vol_blast(iAGN)=vol_loc
-                               ! Deferred: uold jet mass removal after parallel loop
-                            endif
+
                             ! If no spin for the jet then put all thermal
                           else
                             if(dr_AGN.le.rmax2) then
                                Tvol_gas(iAGN)=Tvol_gas(iAGN)+vol_loc
                             endif
-                            dr_cell=MAX(ABS(dxx),ABS(dyy),ABS(dzz))
-                            if(dr_cell.le.dx_loc/2d0)then
-                               ind_blast(iAGN)=ind_cell(i)
-                               vol_blast(iAGN)=vol_loc
-                            endif
+
                           endif
                         endif
 
@@ -6684,12 +6710,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
                             Tvol_gas (iAGN)=Tvol_gas (iAGN)+vol_loc*uold(ind_cell(i),1)
                             Tmass_gas(iAGN)=Tmass_gas(iAGN)+vol_loc*uold(ind_cell(i),1)
                          endif
-                         dr_cell=MAX(ABS(dxx),ABS(dyy),ABS(dzz))
-                         if(dr_cell.le.dx_loc/2.0)then
-                            ind_blast(iAGN)=ind_cell(i)
-                            vol_blast (iAGN)=vol_loc
-                            mass_blast(iAGN)=vol_loc*uold(ind_cell(i),1)
-                         endif
+
                       endif
                    endif
                   iAGN=agn_next(iAGN)
@@ -6707,92 +6728,75 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,vol_gas,mass_gas,ps
   end do
   ! End loop over levels
 
-  ! Deferred uold update: apply jet mass removal sequentially
-  ! to avoid OMP race when two AGN share a cell.
+  ! Geometry/owner consensus FIRST, before sequential donor extraction.
+  geometry_send=0d0; owner_send=0
   do iAGN=1,nAGN
-     if(EsaveAGN(iAGN).le.0d0 .and. X_radio(iAGN).lt.X_floor &
-        & .and. ok_blast_agn(iAGN) .and. ind_blast(iAGN).gt.0)then
-        jtot=sqrt(jAGN(iAGN,1)**2+jAGN(iAGN,2)**2+jAGN(iAGN,3)**2)
-        if(jtot.gt.0d0)then
-           d=uold(ind_blast(iAGN),1)
-           u=uold(ind_blast(iAGN),2)/d
-           v=uold(ind_blast(iAGN),3)/d
-           w=uold(ind_blast(iAGN),4)/d
-           vloadAGN(iAGN,:)=[u,v,w] ! donor velocity, before any later injection
-           ekk=0.5d0*d*(u*u+v*v+w*w)
-           eint=uold(ind_blast(iAGN),5)-ekk
-           mAGN(iAGN)=min(mloadAGN*dMsmbh(iAGN_myid(iAGN)),0.25d0*d*vol_blast(iAGN))
-           if(metal)then
-              ZAGN(iAGN)=uold(ind_blast(iAGN),imetal)/d
-              uold(ind_blast(iAGN),imetal)=uold(ind_blast(iAGN),imetal) &
-              & - ZAGN(iAGN)*mAGN(iAGN)/vol_blast(iAGN)
-           endif
-           d=d-mAGN(iAGN)/vol_blast(iAGN)
-           uold(ind_blast(iAGN),1)=d
-           uold(ind_blast(iAGN),2)=d*u
-           uold(ind_blast(iAGN),3)=d*v
-           uold(ind_blast(iAGN),4)=d*w
-           uold(ind_blast(iAGN),5)=eint+0.5d0*d*(u*u+v*v+w*w)
-        endif
+     isink=iAGN_myid(iAGN)
+     geometry_send(1,isink)=sum(Pvol_gas(iAGN,:))
+     geometry_send(2,isink)=sum(Pmass_gas(iAGN,:))
+     geometry_send(3,isink)=sum(Ppsy_norm(iAGN,1,:))
+     geometry_send(4,isink)=sum(Ppsy_norm(iAGN,2,:))
+     owner_send(isink)=owner_hits(iAGN)
+  enddo
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(geometry_send,geometry_all,4*nsink,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(owner_send,owner_all,nsink,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+  geometry_all=geometry_send; owner_all=owner_send
+#endif
+  donor_error=0
+  do iAGN=1,nAGN
+     isink=iAGN_myid(iAGN)
+     vol_gas(iAGN)=geometry_all(1,isink)
+     mass_gas(iAGN)=geometry_all(2,isink)
+     psy_norm(iAGN,:)=geometry_all(3:4,isink)
+     if(EsaveAGN(iAGN)<=0d0 .and. X_radio(iAGN)<X_floor .and. ok_blast_agn(iAGN))then
+        if(sum(jAGN(iAGN,:)**2)>0d0 .and. owner_all(isink)/=1)donor_error=1
      endif
   enddo
-
-  deallocate(bin_head, agn_next)
-
-!$omp parallel do private(iAGN)
-  do iAGN = 1, nAGN
-  vol_gas(iAGN) = sum(Pvol_gas(iAGN,0:nthreads-1))
-  mass_gas(iAGN) = sum(Pmass_gas(iAGN,0:nthreads-1))
-  psy_norm(iAGN) = sum(Ppsy_norm(iAGN,0:nthreads-1))
-  enddo
-
-
-  deallocate(Pind_cell)
-  deallocate(Pind_grid)
-  deallocate(Pok)
-  deallocate(Pvol_gas)
-  deallocate(Pmass_gas)
-  deallocate(Ppsy_norm)
-
-  !################################################################
+  if(.not.all(ieee_is_finite(geometry_all)) .or. any(geometry_all<0d0))donor_error=1
 #ifndef WITHOUTMPI
-  vol_gas_mpi=0d0; mass_gas_mpi=0d0; mAGN_mpi=0d0; ZAGN_mpi=0d0; psy_norm_mpi=0d0
-  ! Put the nAGN size arrays into nsink size arrays to synchronize processors
-!$omp parallel do private(iAGN,isink)
-  do iAGN=1,nAGN
-     isink=iAGN_myid(iAGN)
-     vol_gas_mpi (isink)=vol_gas (iAGN)
-     mass_gas_mpi(isink)=mass_gas(iAGN)
-     mAGN_mpi    (isink)=mAGN    (iAGN)
-     ZAGN_mpi    (isink)=ZAGN    (iAGN)
-     psy_norm_mpi(isink)=psy_norm(iAGN)
-  enddo
-  ! Pack 5 ALLREDUCE calls into 1
-  allocate(allreduce_sbuf(5*nsink), allreduce_rbuf(5*nsink))
-  allreduce_sbuf(1:nsink)=vol_gas_mpi
-  allreduce_sbuf(nsink+1:2*nsink)=mass_gas_mpi
-  allreduce_sbuf(2*nsink+1:3*nsink)=mAGN_mpi
-  allreduce_sbuf(3*nsink+1:4*nsink)=ZAGN_mpi
-  allreduce_sbuf(4*nsink+1:5*nsink)=psy_norm_mpi
-  call MPI_ALLREDUCE(allreduce_sbuf,allreduce_rbuf,5*nsink,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
-  vol_gas_mpi =allreduce_rbuf(1:nsink)
-  mass_gas_mpi=allreduce_rbuf(nsink+1:2*nsink)
-  mAGN_mpi    =allreduce_rbuf(2*nsink+1:3*nsink)
-  ZAGN_mpi    =allreduce_rbuf(3*nsink+1:4*nsink)
-  psy_norm_mpi=allreduce_rbuf(4*nsink+1:5*nsink)
-  deallocate(allreduce_sbuf, allreduce_rbuf)
-  ! Put the nsink size arrays into nAGN size arrays
-!$omp parallel do private(iAGN,isink)
-  do iAGN=1,nAGN
-     isink=iAGN_myid(iAGN)
-     vol_gas (iAGN)=vol_gas_mpi (isink)
-     mass_gas(iAGN)=mass_gas_mpi(isink)
-     mAGN    (iAGN)=mAGN_mpi   (isink)
-     ZAGN    (iAGN)=ZAGN_mpi   (isink)
-     psy_norm(iAGN)=psy_norm_mpi(isink)
-  enddo
+  call MPI_ALLREDUCE(donor_error,donor_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+  donor_error=donor_error_all
 #endif
-  !################################################################
+  if(donor_error/=0)then
+     if(myid==1)write(*,*)'AGN donor ownership/geometry rejected before loading'
+     call clean_stop
+  endif
+
+  ! Shared donors are updated sequentially; every payload is captured from
+  ! the actual pre-withdrawal cell, not a stale snapshot from the AMR pass.
+  load_send=0d0
+  do iAGN=1,nAGN
+     if(EsaveAGN(iAGN)>0d0 .or. X_radio(iAGN)>=X_floor .or. &
+          .not.ok_blast_agn(iAGN) .or. ind_blast(iAGN)<=0)cycle
+     if(sum(jAGN(iAGN,:)**2)<=0d0)cycle
+     donor_row=uold(ind_blast(iAGN),1:nvar)
+     call agn_withdraw_cell(donor_row,scalar_fields,metal_slot, &
+          mloadAGN*dMsmbh(iAGN_myid(iAGN)),vol_blast(iAGN), &
+          mAGN(iAGN),vloadAGN(iAGN,:),cloadAGN(iAGN,:),cell_ierr)
+     donor_error=max(donor_error,cell_ierr)
+     if(cell_ierr/=0)cycle
+     uold(ind_blast(iAGN),1:nvar)=donor_row
+     call agn_pack_load(mAGN(iAGN),vloadAGN(iAGN,:),cloadAGN(iAGN,:),load_send(:,iAGN_myid(iAGN)))
+  enddo
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(donor_error,donor_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+  donor_error=donor_error_all
+#endif
+  if(donor_error/=0)then
+     if(myid==1)write(*,*)'AGN donor withdrawal rejected: ',donor_error
+     call clean_stop
+  endif
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(load_send,load_all,(4+nscalar)*nsink,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+  load_all=load_send
+#endif
+  do iAGN=1,nAGN
+     call agn_unpack_load(load_all(:,iAGN_myid(iAGN)),mAGN(iAGN),vloadAGN(iAGN,:),cloadAGN(iAGN,:))
+  enddo
+  deallocate(bin_head,agn_next,Pind_cell,Pind_grid,Pok,Pvol_gas,Pmass_gas,Ppsy_norm)
 
   if(verbose)write(*,*)'  +Exiting average_AGN', nAGN
 
@@ -6801,13 +6805,13 @@ end subroutine average_AGN
 !################################################################
 !################################################################
 !################################################################
-subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_blast,vol_gas &
-     & ,psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN)
+subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,vol_gas &
+     & ,psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
   use pm_commons
   use amr_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH
-  use agn_feedback_deposition, only: agn_deposit_cell, agn_jet_delta, agn_eddington_ratio
+  use agn_feedback_deposition, only: agn_deposit_material, agn_jet_delta, agn_eddington_ratio, agn_jet_geometry
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
   implicit none
@@ -6823,14 +6827,17 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
   ! Yohan Dubois, December 15th, 2010
   !------------------------------------------------------------------------
   integer::ilevel,j,iAGN,nAGN,ind,ix,iy,iz,ngrid
-  integer::i,nx_loc,igrid,info,ncache
+  integer::i,nx_loc,igrid,info,ncache,nscalar,metal_slot
+  integer::scalar_fields(nscalar)
+  real(dp)::cloadAGN(nAGN,nscalar),weights(2),axis(3),psy_norm(nAGN,2)
+  logical::jet_fallback(nAGN)
   real(dp)::x,y,z,dx,dxx,dyy,dzz,dr_AGN,d,u,v,w,ek,u_r,d_gas,dT
   real(dp)::scale,dx_min,dx_loc,vol_loc,rmax2,rmax,x_half,y_half,z_half,x_box,y_box,z_box
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
   real(dp),dimension(1:3)::xbound,skip_loc
   real(dp),dimension(1:twotondim,1:3)::xc
-  real(dp),dimension(1:nAGN)::mAGN,ZAGN,p_gas,vol_gas,uBlast,vol_blast
-  real(dp),dimension(1:nAGN)::EAGN,X_radio,psy_norm,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,spinmagAGN,eps_AGN
+  real(dp),dimension(1:nAGN)::mAGN,p_gas,vol_gas,uBlast,vol_blast
+  real(dp),dimension(1:nAGN)::EAGN,X_radio,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,spinmagAGN,eps_AGN
 
   real(dp),dimension(1:nAGN)::EsaveAGN
   real(dp), target, allocatable, dimension(:,:):: PEsaveAGN
@@ -6957,6 +6964,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
   EAGN=0d0
   p_gas=0d0
   ok_save=.false.
+  jet_fallback=.false.
   deposition_error=0
   do iAGN=1,nAGN
      if(EsaveAGN(iAGN).gt.0d0)then
@@ -6982,12 +6990,14 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
         deposition_error=1
         cycle
      end if
+     jet_fallback(iAGN)=.not.ok_save(iAGN) .and. ok_blast_agn(iAGN) .and. &
+          X_radio(iAGN)<X_floor .and. sum(jAGN(iAGN,:)**2)>0d0 .and. any(psy_norm(iAGN,:)<=0d0)
      ! No division by zero in the single-cell fallback. Thermal/saved
      ! vol_gas is a mass; resolved jet vol_gas is a geometrical volume.
      if (vol_gas(iAGN)>0d0) then
         p_gas(iAGN)=EAGN(iAGN)/vol_gas(iAGN)
         if (.not.ok_save(iAGN) .and. X_radio(iAGN)<X_floor .and. &
-             mAGN(iAGN)>0d0 .and. psy_norm(iAGN)>0d0) then
+             mAGN(iAGN)>0d0 .and. all(psy_norm(iAGN,:)>0d0)) then
            ! One total loaded mass, hence E_kin = m_load*v_jet^2/2.
            uBlast(iAGN)=sqrt(2d0*f_ekAGN*EAGN(iAGN)/mAGN(iAGN))
            p_gas(iAGN)=(1d0-f_ekAGN)*EAGN(iAGN)/vol_gas(iAGN)
@@ -7027,7 +7037,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
      ! Loop over grids
      ncache=active(ilevel)%ngrid
 !$omp parallel do private(igrid,ngrid,i,ind,x,y,z,iAGN,dxx,dyy,dzz,&
-!$omp               dr_AGN,jtot,j_x,j_y,j_z,dzjet,drjet,psy,&
+!$omp               dr_AGN,jtot,weights,axis,&
 !$omp               ibx,iby,ibz,jbx,jby,jbz,dm_cell,dp_cell,de_cell,deferred_cell,cell_ierr) &
 !$omp               reduction(max:deposition_error) schedule(dynamic)
      do igrid=1,ncache,nvector
@@ -7072,22 +7082,19 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
 
                     dm_cell=0d0; dp_cell=0d0; de_cell=0d0
                     deferred_cell=0d0; cell_ierr=0
-                    if(ok_save(iAGN))then
+                    if(jet_fallback(iAGN))then
+                       ! Whole event goes to the donor fallback, never half a jet.
+                    else if(ok_save(iAGN))then
                        if(dr_AGN<=rmax2 .and. vol_gas(iAGN)>0d0) &
                             de_cell=p_gas(iAGN)*uold(ind_cell(i),1)
                     else if(ok_blast_agn(iAGN))then
                        if(X_radio(iAGN)<X_floor)then
                           jtot=sqrt(sum(jAGN(iAGN,:)**2))
                           if(jtot>0d0)then
-                             j_x=jAGN(iAGN,1)/jtot
-                             j_y=jAGN(iAGN,2)/jtot
-                             j_z=jAGN(iAGN,3)/jtot
-                             dzjet=dxx*j_x+dyy*j_y+dzz*j_z
-                             drjet=sqrt(max(0d0,dr_AGN-dzjet*dzjet))
-                             if(drjet<=rmax .and. abs(dzjet)<=rmax .and. psy_norm(iAGN)>0d0)then
-                                psy=exp(-drjet**2/2d0/rmax**2d0)
-                                call agn_jet_delta(mAGN(iAGN),psy,psy_norm(iAGN),vAGN(iAGN,:), &
-                                     [j_x,j_y,j_z],uBlast(iAGN),dzjet,dm_cell,dp_cell,de_cell)
+                             call agn_jet_geometry([dxx,dyy,dzz],jAGN(iAGN,:),rmax,weights,axis)
+                             if(any(weights>0d0) .and. all(psy_norm(iAGN,:)>0d0))then
+                                call agn_jet_delta(mAGN(iAGN),weights,psy_norm(iAGN,:),vloadAGN(iAGN,:), &
+                                     axis,uBlast(iAGN),dm_cell,dp_cell,de_cell)
                                 de_cell=de_cell+p_gas(iAGN)
                              endif
                           else
@@ -7101,7 +7108,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
                     endif
                     if(dm_cell>0d0 .or. de_cell/=0d0)then
                        call deposit_agn_cell(ind_cell(i),dm_cell,dp_cell,de_cell,vol_loc, &
-                            ZAGN(iAGN),deferred_cell,cell_ierr)
+                            cloadAGN(iAGN,:),deferred_cell,cell_ierr)
                        TEsaveAGN(iAGN)=TEsaveAGN(iAGN)+deferred_cell
                        deposition_error=max(deposition_error,cell_ierr)
                     endif
@@ -7129,7 +7136,8 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
 
   ! Fallbacks can share a donor cell: keep this short loop serial.
   do iAGN=1,nAGN
-     if(ind_blast(iAGN)<=0 .or. vol_gas(iAGN)>0d0) cycle
+     if(ind_blast(iAGN)<=0)cycle
+     if(vol_gas(iAGN)>0d0 .and. .not.jet_fallback(iAGN))cycle
      if(.not.ok_save(iAGN) .and. .not.ok_blast_agn(iAGN)) cycle
      if(vol_blast(iAGN)<=0d0)then
         deposition_error=1
@@ -7143,7 +7151,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
         de_cell=de_cell+0.5d0*dm_cell*sum(vloadAGN(iAGN,:)**2)
      endif
      call deposit_agn_cell(ind_blast(iAGN),dm_cell,dp_cell,de_cell,vol_blast(iAGN), &
-          ZAGN(iAGN),deferred_cell,cell_ierr)
+          cloadAGN(iAGN,:),deferred_cell,cell_ierr)
      EsaveAGN(iAGN)=EsaveAGN(iAGN)+deferred_cell
      deposition_error=max(deposition_error,cell_ierr)
   end do
@@ -7165,26 +7173,17 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,ZAGN,jAGN,ind_b
 
 contains
 
-  subroutine deposit_agn_cell(cell,drho,dmomentum,denergy,volume,metal_fraction,deferred,ierr)
+  subroutine deposit_agn_cell(cell,drho,dmomentum,denergy,volume,fractions,deferred,ierr)
     integer, intent(in) :: cell
-    real(dp), intent(in) :: drho,dmomentum(3),denergy,volume,metal_fraction
+    real(dp), intent(in) :: drho,dmomentum(3),denergy,volume,fractions(nscalar)
     real(dp), intent(out) :: deferred
     integer, intent(out) :: ierr
-    real(dp) :: row(5),new_metal
+    real(dp) :: row(nvar)
 
-    deferred=0d0
-    ierr=1
-    row=uold(cell,1:5)
-    new_metal=0d0
-    if(metal)then
-       new_metal=uold(cell,imetal)+metal_fraction*drho
-       if (.not.ieee_is_finite(new_metal) .or. new_metal<0d0) return
-    endif
-    call agn_deposit_cell(row,drho,dmomentum,denergy,volume,gamma,scale_T2, &
-         T2maxAGNz,deferred,ierr)
-    if(ierr/=0)return
-    uold(cell,1:5)=row
-    if(metal)uold(cell,imetal)=new_metal
+    row=uold(cell,1:nvar)
+    call agn_deposit_material(row,scalar_fields,metal_slot,fractions,drho,dmomentum,denergy, &
+         volume,gamma,scale_T2,T2maxAGNz,deferred,ierr)
+    if(ierr==0)uold(cell,1:nvar)=row
   end subroutine deposit_agn_cell
 end subroutine AGN_blast
 !################################################################

@@ -291,6 +291,9 @@ snrt_rt_transaction.o: amr_parameters.jaehyun.o mpi_mod.o
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
 agn_feedback_deposition.o: amr_parameters.jaehyun.o
 sink_particle.kjhan.o: snrt_agn_efficiency.o agn_feedback_deposition.o amr_parameters.jaehyun.o pm_commons.o
+ifeq ($(PHASE0_STELLAR_ENRICHMENT),1)
+sink_particle.kjhan.o: stellar_enrichment_config.o
+endif
 read_params.jaehyun.o: snrt_agn_efficiency.o
 snrt_ramses_driver.o: amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
                        pm_commons.o snrt_agn_efficiency.o \
