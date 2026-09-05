@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 
 import h5py
@@ -16,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from snrt_core.dust import dust_model_from_metadata, zero_dust
+from snrt_core.dust import dust_model_from_metadata, read_dust_opacity_metadata, zero_dust
 from snrt_core.jax_thermal_atlas import from_numpy_atlas
 from snrt_core.primordial import GroupSpectralClosure, PrimordialState, group_spectral_closure_from_metadata
 from snrt_core.quadrature import level_symmetric_quadrature
@@ -30,6 +32,7 @@ from snrt_core.transport import TransportConfig, initial_intensity
 
 LIGHT_SPEED_CM_S = 2.99792458e10
 SECONDS_PER_MYR = 365.25 * 86400.0 * 1.0e6
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _group_edges_from_photon_metadata(metadata: dict[str, object]) -> np.ndarray:
@@ -53,6 +56,14 @@ def _group_edges_from_photon_metadata(metadata: dict[str, object]) -> np.ndarray
     return np.concatenate((intervals[:1, 0], intervals[:, 1]))
 
 
+def _sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True)
@@ -60,7 +71,7 @@ def main() -> None:
     parser.add_argument("--thermal-atlas", required=True)
     parser.add_argument(
         "--dust-opacity-metadata",
-        help="validated snrt_dust_opacity_v1 JSON; required to activate non-zero static dust",
+        help="validated snrt_dust_opacity_v1/v2 JSON; required to activate non-zero static dust",
     )
     parser.add_argument("--scale-factor", required=True, type=float)
     parser.add_argument("--metallicity-solar", type=float, default=1.0e-6)
@@ -125,7 +136,41 @@ def main() -> None:
             raise ValueError("static input metallicity_solar must be positive")
         metallicity_source = "static input field"
     photon_metadata = json.loads(Path(args.photon_metadata).read_text())
-    spectral_closure: GroupSpectralClosure = group_spectral_closure_from_metadata(photon_metadata)
+    spectral_closure: GroupSpectralClosure = group_spectral_closure_from_metadata(
+        photon_metadata, require_code_manifest=True
+    )
+    photon_sed_identity = photon_metadata.get("source_sed_identity")
+    photon_sed_sha256 = photon_metadata.get("source_sed_sha256")
+    if photon_sed_identity is not None and (
+        not isinstance(photon_sed_identity, str) or not _SHA256.fullmatch(photon_sed_identity)
+    ):
+        raise ValueError("photon metadata source_sed_identity must be a SHA-256 identity or null")
+    if photon_sed_sha256 is not None and (
+        not isinstance(photon_sed_sha256, str) or not _SHA256.fullmatch(photon_sed_sha256)
+    ):
+        raise ValueError("photon metadata source_sed_sha256 must be a SHA-256 or null")
+    photon_group_edges_sha256 = photon_metadata.get("group_edges_sha256")
+    if photon_group_edges_sha256 is None:
+        provenance = photon_metadata.get("provenance")
+        if isinstance(provenance, dict):
+            photon_group_edges_sha256 = provenance.get("group_edges_file_sha256")
+    if photon_group_edges_sha256 is not None and (
+        not isinstance(photon_group_edges_sha256, str)
+        or not _SHA256.fullmatch(photon_group_edges_sha256)
+    ):
+        raise ValueError("photon metadata group_edges_sha256 must be a SHA-256 or null")
+    photon_group_edges_path = photon_metadata.get("group_edges_file")
+    if photon_group_edges_sha256 is not None:
+        if not isinstance(photon_group_edges_path, str) or not photon_group_edges_path.strip():
+            raise ValueError("photon metadata group_edges_sha256 requires group_edges_file")
+        try:
+            actual_group_edges_sha256 = _sha256_file(photon_group_edges_path)
+        except (FileNotFoundError, OSError) as error:
+            raise ValueError("photon metadata group-edge input file is unavailable") from error
+        if actual_group_edges_sha256 != photon_group_edges_sha256:
+            raise ValueError("photon metadata group-edge hash does not match its file")
+    if photon_sed_identity is not None and photon_group_edges_sha256 is None:
+        raise ValueError("source-bound photon metadata must include group_edges_sha256")
     group_energy_ev = np.asarray(spectral_closure.photon_weighted_energy_ev, dtype=host_dtype)
     if len(group_energy_ev) != static.sources.photon_luminosity_s.shape[1]:
         raise ValueError("photon metadata group count does not match static RT sources")
@@ -194,6 +239,10 @@ def main() -> None:
         *(jnp.asarray(value, dtype=real_dtype) for value in spectral_closure.cross_sections)
     )
     photoelectron_excess_energy_ev = jnp.asarray(spectral_closure.photoelectron_excess_energy_ev, dtype=real_dtype)
+    dust_opacity_metadata_sha256 = ""
+    dust_payload_sha256 = ""
+    dust_source_table_sha256 = ""
+    dust_builder_sha256 = ""
     if args.dust_opacity_metadata is None:
         if np.any(np.asarray(static.dust_relative_abundance) > 0.0):
             raise ValueError(
@@ -201,13 +250,33 @@ def main() -> None:
                 "supply --dust-opacity-metadata to activate it"
             )
         dust = zero_dust(len(group_energy_ev), static.shape, dtype=real_dtype)
+        dust_binding_status = "zero_dust"
+        dust_schema = "none"
     else:
+        dust_closure = read_dust_opacity_metadata(
+            args.dust_opacity_metadata,
+            expected_group_edges_ev=group_edges_ev,
+            expected_group_edges_sha256=photon_group_edges_sha256,
+            expected_source_sed_identity=photon_sed_identity,
+            expected_source_sed_sha256=photon_sed_sha256,
+            require_source_match=True,
+        )
         dust = dust_model_from_metadata(
             args.dust_opacity_metadata,
             jnp.asarray(static.dust_relative_abundance, dtype=real_dtype),
             dtype=real_dtype,
             expected_group_edges_ev=group_edges_ev,
+            expected_group_edges_sha256=photon_group_edges_sha256,
+            expected_source_sed_identity=photon_sed_identity,
+            expected_source_sed_sha256=photon_sed_sha256,
+            require_source_match=True,
         )
+        dust_binding_status = dust_closure.binding_status
+        dust_schema = dust_closure.schema
+        dust_opacity_metadata_sha256 = _sha256_file(args.dust_opacity_metadata)
+        dust_payload_sha256 = dust_closure.payload_sha256 or ""
+        dust_source_table_sha256 = dust_closure.source_table_sha256 or ""
+        dust_builder_sha256 = dust_closure.builder_sha256 or ""
     zero_cell = jnp.zeros_like(temperature)
     cumulative_absorbed = jnp.zeros((len(group_energy_ev), *static.shape), dtype=temperature.dtype)
     cumulative_dust_absorbed = jnp.zeros((len(group_energy_ev), *static.shape), dtype=temperature.dtype)
@@ -562,10 +631,19 @@ def main() -> None:
         handle.attrs["elapsed_time_s"] = full_steps * outer_dt + final_dt
         handle.attrs["scale_factor"] = args.scale_factor
         handle.attrs["metallicity_source"] = metallicity_source
+        handle.attrs["source_sed_identity"] = photon_sed_identity or ""
+        handle.attrs["source_sed_sha256"] = photon_sed_sha256 or ""
+        handle.attrs["group_edges_sha256"] = photon_group_edges_sha256 or ""
         handle.attrs["dust_model"] = "metadata" if args.dust_opacity_metadata is not None else "zero_dust"
+        handle.attrs["dust_opacity_schema"] = dust_schema
+        handle.attrs["dust_binding_status"] = dust_binding_status
         handle.attrs["dust_opacity_metadata_path"] = (
             "" if args.dust_opacity_metadata is None else str(Path(args.dust_opacity_metadata).resolve())
         )
+        handle.attrs["dust_opacity_metadata_sha256"] = dust_opacity_metadata_sha256
+        handle.attrs["dust_payload_sha256"] = dust_payload_sha256
+        handle.attrs["dust_source_table_sha256"] = dust_source_table_sha256
+        handle.attrs["dust_builder_sha256"] = dust_builder_sha256
         handle.attrs["dust_absorbed_photons"] = dust_absorbed_total
         handle.attrs["dust_heating_energy_erg"] = dust_heating_total
         handle.attrs["dust_momentum_g_cm_s"] = dust_momentum_total

@@ -13,6 +13,7 @@ build/
 *.mod
 *.smod
 *.preomp_bak
+*__genmod.f90
 
 # RAMSES executables
 bin/ramses_final

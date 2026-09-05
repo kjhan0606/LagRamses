@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -29,6 +30,10 @@ def main() -> int:
     assert report["status"] == "mass_history_recoverable_composition_and_closure_blocked"
     assert report["production_ready"] is False
     assert report["canonical_conversion_allowed"] is False
+    shared_path = ROOT / "tools" / "fp1_limongi_phase_history.py"
+    assert report["phase_history_shared_code_sha256"] == hashlib.sha256(
+        shared_path.read_bytes()
+    ).hexdigest()
     duplicate = report["duplicate_resolution"]
     assert duplicate["duplicate_coordinate_count"] == 10
     assert duplicate["collapsed_extra_row_count"] == 19
@@ -41,8 +46,16 @@ def main() -> int:
     assert history["age_zero_anchor_count"] == 108
     assert history["monotonic_mass_violation_count"] == 0
     assert history["negative_cumulative_mass_count"] == 0
+    assert history["observed_source_order_matches_contract_rank"] is True
+    assert history["phase_order_violation_count"] == 0
     assert history["time_resolved_mass_available"] is True
     assert history["time_resolved_isotopic_composition_available"] is False
+    stored_path = ROOT / "data" / "g2_limongi_phase_mass_history_audit.json"
+    stored = json.loads(stored_path.read_text(encoding="utf-8"))
+    assert stored == report, "checked-in G2 phase-history evidence is stale"
+    assert report["phase_order_provenance"][
+        "source_attested_for_intermediate_burning_order"
+    ] is False
     closure = report["terminal_integrated_wind_closure"]
     assert closure["model_count"] == 108
     assert closure["all_models_close_within_printed_quantization"] is False

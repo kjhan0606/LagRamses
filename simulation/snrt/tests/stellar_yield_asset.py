@@ -203,9 +203,21 @@ def _test_provenance_hash_is_verified() -> None:
         path.write_text("\n".join(rows) + "\n")
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         node_contract_path = Path(directory) / "approved-source-nodes.json"
-        node_contract_path.write_text(
-            json.dumps(approved_source_node_contract()), encoding="utf-8"
-        )
+        # This test exercises canonical-row projection independently of the
+        # physical source-rights gate.  An approved node must now resolve to a
+        # code-registered, hash-verified external source; the synthetic test
+        # source is intentionally review-only so that the projection checks
+        # remain reachable without weakening that production fail-closed rule.
+        review_node_contract = approved_source_node_contract()
+        review_node_contract["status"] = "review_nodes_present"
+        review_node_contract["approval"] = {
+            "physical_nodes_present": True,
+            "canonical_conversion_allowed": False,
+            "runtime_deposition_allowed": False,
+            "production_ready": False,
+            "approval_id": None,
+        }
+        node_contract_path.write_text(json.dumps(review_node_contract), encoding="utf-8")
         node_contract_hash = hashlib.sha256(node_contract_path.read_bytes()).hexdigest()
         physical_package_path = (
             ROOT / "config" / "fp1_physical_package_admission_contract_v1.json"

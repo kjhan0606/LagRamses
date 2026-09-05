@@ -18,6 +18,26 @@ Dust activation is now wired through the explicit
 [`P4_DUST_OPACITY.md`](P4_DUST_OPACITY.md) sidecar contract, but this retained
 validation artifact intentionally remains a zero-dust control.
 
+The native RAMSES implementation now uses the same canonical nine-group
+contract, including the `[2000,10000] eV` hard-X-ray group. This is a native
+Fortran wiring correction documented in
+[`SNRT_NATIVE_GROUP_CONTRACT.md`](SNRT_NATIVE_GROUP_CONTRACT.md); it does not
+retroactively promote the historical HDF5 result below to a nine-group live
+RAMSES result. The checked-in native numbers are a reference-control closure,
+and `SNRT_RT_ENABLE` still requires an explicit contract path, CUDA, and the
+separate physical-source approvals.
+The native contract records whether group fractions are intrinsic or escaped;
+the resolved-domain injection gate accepts only `escaped`, and the checked-in
+reference control requires `SNRT_ALLOW_REFERENCE_CONTROL=1`.
+
+The native nine-group wiring does not yet close the emission-side
+photon-number-weighted mean against the H absorber-weighted heating excess,
+and it still lacks secondary ionization and recombination. For the new
+`[2000,10000] eV` group these are explicit science-gate limitations, not
+properties of the historical HDF5 result; see
+[`SNRT_NATIVE_GROUP_CONTRACT.md`](SNRT_NATIVE_GROUP_CONTRACT.md) for the
+quantified gap and follow-up gate.
+
 The gas staging audit is internally consistent: the 32^3 mesh has cell width
 `3.707491434780762e21 cm` (1.2015 kpc), side length 38.4485 kpc, AMR coverage
 within `2.3e-16` of unity, and density mass-balance error

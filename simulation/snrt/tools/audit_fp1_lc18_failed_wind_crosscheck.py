@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 import hashlib
 import json
 import math
@@ -28,6 +27,10 @@ from fp1_publication_rights import (
     PublicationRightsError,
     evaluate_derived_artifact_publication,
 )
+from fp1_limongi_phase_history import (
+    PhaseHistoryInvariantError,
+    build_phase_histories,
+)
 
 
 TOOL_PATH = Path(__file__).resolve()
@@ -43,6 +46,7 @@ DEFAULT_PHASE_CONTRACT = (
 DEFAULT_PHYSICAL_PACKAGE_CONTRACT = (
     SNRT_ROOT / "config" / "fp1_physical_package_admission_contract_v1.json"
 )
+PHASE_HISTORY_TOOL_PATH = Path(__file__).with_name("fp1_limongi_phase_history.py")
 BOCCIOLI_ADMISSION_ID = "boccioli_roberti2026_lc18"
 EXPECTED_ADMISSION_BLOCKERS = [
     "failed_model_wind_summary_table_anomaly_requires_author_or_corrected_release",
@@ -95,137 +99,27 @@ def _coordinate(record: dict[str, Any]) -> tuple[int, int, float]:
 def _build_phase_histories(
     records: list[dict[str, Any]], phase_order: list[str]
 ) -> tuple[dict[tuple[int, int, float], dict[str, Any]], dict[str, Any]]:
-    phase_rank = {phase: index for index, phase in enumerate(phase_order)}
-    grouped: dict[tuple[int, int, float], list[dict[str, Any]]] = defaultdict(list)
-    collapsed_duplicates: list[dict[str, Any]] = []
-    for record in records:
-        source = record["source_coordinate"]
-        occurrence = int(source["phase_occurrence"])
-        if occurrence > 1:
-            collapsed_duplicates.append(
-                {
-                    "coordinate": {
-                        "rotation_velocity_km_s": int(
-                            source["rotation_velocity_km_s"]
-                        ),
-                        "metallicity_feh": int(source["metallicity_feh"]),
-                        "initial_mass_msun": float(source["initial_mass_msun"]),
-                    },
-                    "phase": source["phase"],
-                    "occurrence": occurrence,
-                    "source_line": record["source_line"],
-                }
-            )
-            continue
-        grouped[_coordinate(record)].append(record)
-    if len(grouped) != 108:
-        raise Lc18FailedWindCrosscheckError(
-            f"expected 108 CDS phase-history models, found {len(grouped)}"
+    try:
+        canonical_histories, diagnostics = build_phase_histories(
+            records, phase_order
         )
-
-    age_violations: list[dict[str, Any]] = []
-    mass_violations: list[dict[str, Any]] = []
-    missing_terminal_phase: list[dict[str, Any]] = []
-    histories: dict[tuple[int, int, float], dict[str, Any]] = {}
-    unique_phase_counts: list[int] = []
-    for coordinate, model_records in grouped.items():
-        try:
-            ordered = sorted(
-                model_records,
-                key=lambda value: phase_rank[value["source_coordinate"]["phase"]],
-            )
-        except KeyError as exc:
-            raise Lc18FailedWindCrosscheckError(
-                f"unknown CDS phase {exc.args[0]!r}"
-            ) from exc
-        phases = [record["source_coordinate"]["phase"] for record in ordered]
-        if len(phases) != len(set(phases)):
-            raise Lc18FailedWindCrosscheckError(
-                f"non-collapsed duplicate phase at {coordinate}"
-            )
-        if not phases or phases[-1] != "PSN":
-            missing_terminal_phase.append(
-                {
-                    "rotation_velocity_km_s": coordinate[0],
-                    "metallicity_feh": coordinate[1],
-                    "initial_mass_msun": coordinate[2],
-                }
-            )
-
-        cumulative_age = 0.0
-        previous_age = 0.0
-        previous_mass = coordinate[2]
-        nodes: list[dict[str, Any]] = []
-        for record in ordered:
-            source = record["source_coordinate"]
-            duration = float(record["phase_duration_yr"])
-            total_mass = float(record["total_mass_msun"])
-            cumulative_age += duration
-            node = {
-                "phase": source["phase"],
-                "source_line": record["source_line"],
-                "phase_duration_yr": duration,
-                "cumulative_age_yr": cumulative_age,
-                "total_mass_msun": total_mass,
-                "cumulative_wind_mass_msun": coordinate[2] - total_mass,
-            }
-            nodes.append(node)
-            if (
-                not math.isfinite(duration)
-                or duration <= 0.0
-                or not math.isfinite(cumulative_age)
-                or cumulative_age <= previous_age
-            ):
-                age_violations.append(
-                    {"coordinate": list(coordinate), "node": dict(node)}
-                )
-            if (
-                not math.isfinite(total_mass)
-                or total_mass < 0.0
-                or total_mass > previous_mass + 1.0e-12
-            ):
-                mass_violations.append(
-                    {
-                        "coordinate": list(coordinate),
-                        "previous_mass_msun": previous_mass,
-                        "node": dict(node),
-                    }
-                )
-            previous_age = cumulative_age
-            previous_mass = total_mass
-
-        terminal = nodes[-1]
-        histories[coordinate] = {
-            "unique_phase_count": len(nodes),
-            "terminal_phase": terminal["phase"],
-            "terminal_age_yr": terminal["cumulative_age_yr"],
-            "terminal_total_mass_msun": terminal["total_mass_msun"],
-            "terminal_cumulative_wind_mass_msun": terminal[
-                "cumulative_wind_mass_msun"
+    except PhaseHistoryInvariantError as exc:
+        raise Lc18FailedWindCrosscheckError(
+            str(exc), diagnostics=exc.diagnostics
+        ) from exc
+    histories = {
+        coordinate: {
+            "unique_phase_count": canonical["unique_phase_count"],
+            "terminal_phase": canonical["terminal_phase"],
+            "terminal_age_yr": canonical["terminal_age_yr"],
+            "terminal_total_mass_msun": canonical["terminal_total_mass_msun"],
+            "terminal_cumulative_wind_mass_msun": canonical[
+                "terminal_cumulative_wind_mass_msun"
             ],
-            "nodes": nodes,
+            "nodes": canonical["nodes"],
         }
-        unique_phase_counts.append(len(nodes))
-
-    diagnostics = {
-        "model_count": len(histories),
-        "unique_phase_row_count": sum(unique_phase_counts),
-        "minimum_unique_phase_count_per_model": min(unique_phase_counts),
-        "maximum_unique_phase_count_per_model": max(unique_phase_counts),
-        "collapsed_duplicate_row_count": len(collapsed_duplicates),
-        "collapsed_duplicate_rows": collapsed_duplicates,
-        "strictly_increasing_cumulative_age_violation_count": len(age_violations),
-        "strictly_increasing_cumulative_age_violations": age_violations,
-        "nonincreasing_total_mass_violation_count": len(mass_violations),
-        "nonincreasing_total_mass_violations": mass_violations,
-        "missing_psn_terminal_phase_count": len(missing_terminal_phase),
-        "missing_psn_terminal_phase": missing_terminal_phase,
+        for coordinate, canonical in canonical_histories.items()
     }
-    if age_violations or mass_violations or missing_terminal_phase:
-        raise Lc18FailedWindCrosscheckError(
-            "phase-history invariants violated",
-            diagnostics=diagnostics,
-        )
     return histories, diagnostics
 
 
@@ -777,6 +671,7 @@ def audit_lc18_failed_wind_crosscheck(
             "CDS catalogue redistribution has no explicit identified license and this artifact is review-only",
         ],
         "tool_sha256": _sha256(TOOL_PATH),
+        "phase_history_shared_code_sha256": _sha256(PHASE_HISTORY_TOOL_PATH),
         "boccioli_contract_sha256": _sha256(boccioli_contract_path),
         "phase_contract_sha256": _sha256(phase_contract_path),
     }

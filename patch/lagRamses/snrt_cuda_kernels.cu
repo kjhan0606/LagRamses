@@ -3,6 +3,7 @@
 // matrices and evaluates B^T * A^T, whose memory layout is the desired A * B.
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
+#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 
@@ -740,6 +741,148 @@ __global__ void snrt_cap_multigroup_absorption_kernel(float *state,
   }
 }
 
+// Apply the production H/He inventory cap.  The transport solve is still
+// multigroup, but the inventory is consumed in group order so that a group
+// can only use species with non-zero optical depth in that group.  The
+// per-cell thread owns all groups and therefore updates the three species
+// inventories without atomics or a cross-group race.
+__global__ void snrt_cap_multigroup_species_absorption_kernel(
+    float *state, float *absorbed_direction,
+    const float *optical_depth_species, float *available_species,
+    int nowned, int nwork, int ndirection, int ngroup) {
+  const int cell = blockIdx.x * blockDim.x + threadIdx.x;
+  if (cell >= nowned) return;
+
+  float available[3];
+  for (int species = 0; species < 3; ++species) {
+    available[species] = fmaxf(0.0f, available_species[species * nowned + cell]);
+  }
+
+  for (int group = 0; group < ngroup; ++group) {
+    const long long group_base = static_cast<long long>(group) * nwork * ndirection;
+    float raw_absorbed = 0.0f;
+    for (int idir = 0; idir < ndirection; ++idir) {
+      raw_absorbed += fmaxf(0.0f,
+          absorbed_direction[group_base + static_cast<long long>(idir) * nwork + cell]);
+    }
+    if (raw_absorbed <= 0.0f) continue;
+
+    float opacity[3];
+    float opacity_sum = 0.0f;
+    float eligible_inventory = 0.0f;
+    for (int species = 0; species < 3; ++species) {
+      const long long opacity_index =
+          (static_cast<long long>(species) * ngroup + group) * nowned + cell;
+      opacity[species] = fmaxf(0.0f, optical_depth_species[opacity_index]);
+      if (opacity[species] > 0.0f) {
+        opacity_sum += opacity[species];
+        eligible_inventory += available[species];
+      }
+    }
+    // Use the cell-scale inventory magnitude for the residual guard.  A
+    // fixed code-density threshold is not scale invariant and can either
+    // discard a resolvable remainder or leave an FP32-sized overrun for the
+    // double-precision Fortran partition.
+    float inventory_scale = fmaxf(fabsf(raw_absorbed), eligible_inventory);
+    for (int species = 0; species < 3; ++species) {
+      inventory_scale = fmaxf(inventory_scale, fabsf(available[species]));
+    }
+    const float remainder_tolerance =
+        256.0f * FLT_EPSILON * fmaxf(inventory_scale, FLT_MIN);
+
+    float target_absorbed = 0.0f;
+    if (opacity_sum > 0.0f && eligible_inventory > 0.0f) {
+      // Keep a deterministic FP32 guard band whenever the raw absorption
+      // reaches an inventory boundary.  This prevents a later Fortran
+      // double-precision partition from seeing a one-ulp overrun.
+      const float safe_inventory = eligible_inventory * 0.99995f;
+      target_absorbed = fminf(raw_absorbed, safe_inventory);
+    }
+
+    // Mirror snrt_partition_absorption: first allocate by opacity, then
+    // redistribute only over species that are eligible in this group.  The
+    // active-set loop is bounded by the three species: a saturated species
+    // is removed from the opacity-weighted pool, and the remaining target is
+    // recomputed over the unsaturated species.  This guarantees that the
+    // directional cap and the inventory decrement use the same assigned
+    // amount; a partially assigned target is returned to the photon field.
+    float assigned[3] = {0.0f, 0.0f, 0.0f};
+    float remaining = target_absorbed;
+    bool active[3] = {opacity[0] > 0.0f && available[0] > 0.0f,
+                      opacity[1] > 0.0f && available[1] > 0.0f,
+                      opacity[2] > 0.0f && available[2] > 0.0f};
+    float active_weight = 0.0f;
+    for (int species = 0; species < 3; ++species) {
+      if (active[species]) active_weight += opacity[species];
+    }
+    for (int pass = 0; pass < 3 && remaining > remainder_tolerance &&
+         active_weight > 0.0f; ++pass) {
+      const float pass_remaining = remaining;
+      const float pass_weight = active_weight;
+      bool saturated_any = false;
+      bool saturated[3] = {false, false, false};
+      for (int species = 0; species < 3; ++species) {
+        if (!active[species]) continue;
+        const float headroom = fmaxf(0.0f, available[species] - assigned[species]);
+        if (headroom <= remainder_tolerance) {
+          saturated[species] = true;
+          saturated_any = true;
+          continue;
+        }
+        const float requested = pass_remaining * opacity[species] / pass_weight;
+        const float addition = fminf(requested, headroom);
+        assigned[species] += addition;
+        if (addition + remainder_tolerance >= headroom) {
+          saturated[species] = true;
+          saturated_any = true;
+        }
+      }
+      remaining = target_absorbed - (assigned[0] + assigned[1] + assigned[2]);
+      if (remaining < 0.0f) remaining = 0.0f;
+      if (!saturated_any) {
+        remaining = 0.0f;
+        break;
+      }
+      for (int species = 0; species < 3; ++species) {
+        if (saturated[species]) {
+          active[species] = false;
+          active_weight -= opacity[species];
+        }
+      }
+    }
+    // The target is below the total eligible inventory, so any residual here
+    // is roundoff or a zero-headroom edge case.  Fill it deterministically
+    // without ever exceeding a species inventory; the assigned sum remains
+    // authoritative for the photon-field cap.
+    if (remaining > remainder_tolerance) {
+      for (int species = 0; species < 3 && remaining > 0.0f; ++species) {
+        if (!active[species]) continue;
+        const float headroom = fmaxf(0.0f, available[species] - assigned[species]);
+        const float addition = fminf(headroom, remaining);
+        assigned[species] += addition;
+        remaining -= addition;
+      }
+    }
+    const float limited_absorbed = assigned[0] + assigned[1] + assigned[2];
+    const float cap = limited_absorbed > 0.0f ? limited_absorbed / raw_absorbed : 0.0f;
+    for (int idir = 0; idir < ndirection; ++idir) {
+      const long long index = group_base + static_cast<long long>(idir) * nwork + cell;
+      const float removed = absorbed_direction[index];
+      const float limited_removed = removed * cap;
+      state[index] += removed - limited_removed;
+      absorbed_direction[index] = limited_removed;
+    }
+
+    for (int species = 0; species < 3; ++species) {
+      available[species] = fmaxf(0.0f, available[species] - assigned[species]);
+    }
+  }
+
+  for (int species = 0; species < 3; ++species) {
+    available_species[species * nowned + cell] = available[species];
+  }
+}
+
 }  // namespace
 
 static int snrt_cuda_multigroup_rt_step_impl(float *state_host,
@@ -751,9 +894,17 @@ static int snrt_cuda_multigroup_rt_step_impl(float *state_host,
                                                float *absorbed_group_host,
                                                int nowned, int nwork,
                                                int ndirection, int ngroup,
-                                               float cdt_over_dx) {
+                                               float cdt_over_dx,
+                                               const float *optical_depth_species_host,
+                                               float *available_species_host) {
+  const bool species_aware = optical_depth_species_host != nullptr &&
+                             available_species_host != nullptr;
+  if ((optical_depth_species_host == nullptr) !=
+      (available_species_host == nullptr)) {
+    return 1;
+  }
   if (state_host == nullptr || direction_host == nullptr || neighbor_host == nullptr ||
-      optical_depth_host == nullptr || neutral_hydrogen_host == nullptr ||
+      optical_depth_host == nullptr || (!species_aware && neutral_hydrogen_host == nullptr) ||
       absorbed_host == nullptr || absorbed_group_host == nullptr ||
       nowned <= 0 || nwork < nowned || ndirection <= 0 || ngroup <= 0 ||
       cdt_over_dx < 0.0f) {
@@ -767,6 +918,8 @@ static int snrt_cuda_multigroup_rt_step_impl(float *state_host,
   const size_t neighbor_bytes = static_cast<size_t>(6 * nowned) * sizeof(int);
   const size_t group_bytes = static_cast<size_t>(nowned) * ngroup * sizeof(float);
   const size_t cell_bytes = static_cast<size_t>(nowned) * sizeof(float);
+  const size_t species_bytes = static_cast<size_t>(3) * ngroup * nowned * sizeof(float);
+  const size_t inventory_bytes = static_cast<size_t>(3) * nowned * sizeof(float);
   float *state_device = nullptr;
   float *transport_device = nullptr;
   float *direction_device = nullptr;
@@ -775,6 +928,8 @@ static int snrt_cuda_multigroup_rt_step_impl(float *state_host,
   float *neutral_device = nullptr;
   float *absorbed_device = nullptr;
   float *absorbed_group_device = nullptr;
+  float *optical_depth_species_device = nullptr;
+  float *available_species_device = nullptr;
   cudaEvent_t event_start = nullptr;
   cudaEvent_t event_stop = nullptr;
   const char *trace_env = std::getenv("SNRT_CUDA_TRACE");
@@ -796,14 +951,21 @@ static int snrt_cuda_multigroup_rt_step_impl(float *state_host,
   if (cudaMalloc(&direction_device, direction_bytes) != cudaSuccess) goto done;
   if (cudaMalloc(&neighbor_device, neighbor_bytes) != cudaSuccess) goto done;
   if (cudaMalloc(&tau_device, group_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&neutral_device, cell_bytes) != cudaSuccess) goto done;
+  if (!species_aware && cudaMalloc(&neutral_device, cell_bytes) != cudaSuccess) goto done;
   if (cudaMalloc(&absorbed_device, cell_bytes) != cudaSuccess) goto done;
   if (cudaMalloc(&absorbed_group_device, group_bytes) != cudaSuccess) goto done;
+  if (species_aware && cudaMalloc(&optical_depth_species_device, species_bytes) != cudaSuccess) goto done;
+  if (species_aware && cudaMalloc(&available_species_device, inventory_bytes) != cudaSuccess) goto done;
   if (cudaMemcpy(state_device, state_host, state_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
   if (cudaMemcpy(direction_device, direction_host, direction_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
   if (cudaMemcpy(neighbor_device, neighbor_host, neighbor_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
   if (cudaMemcpy(tau_device, optical_depth_host, group_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
-  if (cudaMemcpy(neutral_device, neutral_hydrogen_host, cell_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (!species_aware && cudaMemcpy(neutral_device, neutral_hydrogen_host, cell_bytes,
+                                    cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (species_aware && cudaMemcpy(optical_depth_species_device, optical_depth_species_host,
+                                  species_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (species_aware && cudaMemcpy(available_species_device, available_species_host,
+                                  inventory_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
 
   if (event_start != nullptr) cudaEventRecord(event_start);
   {
@@ -829,11 +991,22 @@ static int snrt_cuda_multigroup_rt_step_impl(float *state_host,
   if (cudaGetLastError() != cudaSuccess) goto done;
   {
     const int threads = 256;
-    const int blocks = static_cast<int>((total + threads - 1) / threads);
-    snrt_cap_multigroup_absorption_kernel<<<blocks, threads>>>(transport_device, state_device,
-        absorbed_device, neutral_device, nowned, nwork, ndirection, ngroup);
+    if (species_aware) {
+      const int blocks = (nowned + threads - 1) / threads;
+      snrt_cap_multigroup_species_absorption_kernel<<<blocks, threads>>>(transport_device,
+          state_device, optical_depth_species_device, available_species_device,
+          nowned, nwork, ndirection, ngroup);
+    } else {
+      const int blocks = static_cast<int>((total + threads - 1) / threads);
+      snrt_cap_multigroup_absorption_kernel<<<blocks, threads>>>(transport_device, state_device,
+          absorbed_device, neutral_device, nowned, nwork, ndirection, ngroup);
+    }
   }
   if (cudaGetLastError() != cudaSuccess) goto done;
+  // Recompute the returned absorption from the capped removal field.  In this
+  // wrapper state_device is the absorbed_direction argument of the absorb and
+  // cap kernels; transport_device is the surviving photon field returned to
+  // the caller.  Summing transport_device here would invert the ledger.
   snrt_reduce_multigroup_kernel<<<nowned, 128>>>(state_device, absorbed_device,
       nowned, nwork, ndirection, ngroup);
   if (cudaGetLastError() != cudaSuccess) goto done;
@@ -860,6 +1033,8 @@ static int snrt_cuda_multigroup_rt_step_impl(float *state_host,
   if (cudaMemcpy(absorbed_host, absorbed_device, cell_bytes, cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
   if (cudaMemcpy(absorbed_group_host, absorbed_group_device, group_bytes,
                  cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  if (species_aware && cudaMemcpy(available_species_host, available_species_device,
+                                  inventory_bytes, cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
   status = 0;
 
 done:
@@ -867,6 +1042,8 @@ done:
   if (event_start != nullptr) cudaEventDestroy(event_start);
   cudaFree(absorbed_group_device);
   cudaFree(absorbed_device);
+  cudaFree(available_species_device);
+  cudaFree(optical_depth_species_device);
   cudaFree(neutral_device);
   cudaFree(tau_device);
   cudaFree(neighbor_device);
@@ -887,7 +1064,7 @@ extern "C" int snrt_cuda_multigroup_rt_step_c(float *state_host,
                                                 float cdt_over_dx) {
   return snrt_cuda_multigroup_rt_step_impl(state_host, direction_host, neighbor_host,
       optical_depth_host, neutral_hydrogen_host, absorbed_host, absorbed_group_host,
-      ncell, ncell, ndirection, ngroup, cdt_over_dx);
+      ncell, ncell, ndirection, ngroup, cdt_over_dx, nullptr, nullptr);
 }
 
 extern "C" int snrt_cuda_multigroup_rt_step_owned_c(float *state_host,
@@ -902,5 +1079,17 @@ extern "C" int snrt_cuda_multigroup_rt_step_owned_c(float *state_host,
                                                       float cdt_over_dx) {
   return snrt_cuda_multigroup_rt_step_impl(state_host, direction_host, neighbor_host,
       optical_depth_host, neutral_hydrogen_host, absorbed_host, absorbed_group_host,
-      nowned, nwork, ndirection, ngroup, cdt_over_dx);
+      nowned, nwork, ndirection, ngroup, cdt_over_dx, nullptr, nullptr);
+}
+
+extern "C" int snrt_cuda_multigroup_rt_step_species_c(
+    float *state_host, const float *direction_host, const int *neighbor_host,
+    const float *optical_depth_host, const float *optical_depth_species_host,
+    float *available_species_host, float *absorbed_host,
+    float *absorbed_group_host, int nowned, int nwork, int ndirection,
+    int ngroup, float cdt_over_dx) {
+  return snrt_cuda_multigroup_rt_step_impl(state_host, direction_host, neighbor_host,
+      optical_depth_host, nullptr, absorbed_host, absorbed_group_host,
+      nowned, nwork, ndirection, ngroup, cdt_over_dx,
+      optical_depth_species_host, available_species_host);
 }

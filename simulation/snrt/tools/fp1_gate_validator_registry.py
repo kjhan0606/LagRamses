@@ -14,6 +14,12 @@ from validate_fp1_source_identity_rights import (
     VALIDATOR_ID as SOURCE_IDENTITY_VALIDATOR_ID,
     validate_source_identity_and_rights,
 )
+from fp1_gate_validator_blocks import (
+    GATE_REQUIREMENTS,
+    GATE_VALIDATOR_IDS,
+    TOOL_PATH as BLOCKED_GATE_TOOL_PATH,
+    blocked_gate_validator,
+)
 
 
 REGISTRY_PATH = Path(__file__).resolve()
@@ -27,7 +33,7 @@ def _valid_sha256(value: Any) -> bool:
     return (
         isinstance(value, str)
         and len(value) == 64
-        and all(character in "0123456789abcdefABCDEF" for character in value)
+        and all(character in "0123456789abcdef" for character in value)
     )
 
 
@@ -39,6 +45,30 @@ REGISTERED_VALIDATORS: dict[str, dict[str, Any]] = {
         "tool_path": SOURCE_IDENTITY_TOOL_PATH,
     }
 }
+
+
+def _blocked_runner(gate_id: str) -> Callable[[str], dict[str, Any]]:
+    def runner(candidate_id: str) -> dict[str, Any]:
+        return blocked_gate_validator(candidate_id, gate_id)
+
+    return runner
+
+
+if SOURCE_IDENTITY_VALIDATOR_ID != GATE_VALIDATOR_IDS.get(SOURCE_IDENTITY_GATE_ID):
+    raise RuntimeError("source-identity validator registry disagrees")
+
+
+for _gate_id, _validator_id in GATE_VALIDATOR_IDS.items():
+    if _gate_id == SOURCE_IDENTITY_GATE_ID:
+        if GATE_REQUIREMENTS[_gate_id] != set(SOURCE_IDENTITY_REQUIREMENTS):
+            raise RuntimeError("source-identity requirement registry disagrees")
+        continue
+    REGISTERED_VALIDATORS[_validator_id] = {
+        "gate_id": _gate_id,
+        "requirements": set(GATE_REQUIREMENTS[_gate_id]),
+        "runner": _blocked_runner(_gate_id),
+        "tool_path": BLOCKED_GATE_TOOL_PATH,
+    }
 
 
 def _sha256(path: Path) -> str:

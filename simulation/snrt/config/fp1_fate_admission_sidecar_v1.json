@@ -27,7 +27,7 @@
     },
     "physical_package_contract": {
       "path": "config/fp1_physical_package_admission_contract_v1.json",
-      "sha256": "ce6d26667bcb15b0cc688b632ad637de74c77908f52edc8c0e872c8847798579"
+      "sha256": "06cd0858dfb3a79675bbb9c1f83c7fde33b0069637a2bf4e384ff1e7922359e0"
     },
     "physics_contract": {
       "path": "config/g2_physics_contract_v1.json",

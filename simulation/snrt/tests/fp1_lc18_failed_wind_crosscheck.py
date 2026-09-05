@@ -151,6 +151,45 @@ def _phase_invariant_tests() -> None:
         "missing_psn_terminal_phase_count",
     )
 
+    negative_cumulative_wind = copy.deepcopy(records)
+    first_model = _first_model_records(negative_cumulative_wind)[0]
+    first_model["total_mass_msun"] = float(
+        first_model["source_coordinate"]["initial_mass_msun"]
+    ) + 1.0
+    _expect_phase_error(
+        negative_cumulative_wind,
+        phase_order,
+        "negative_cumulative_mass_count",
+    )
+
+    out_of_order = copy.deepcopy(records)
+    target_coordinate = (
+        records[0]["source_coordinate"]["rotation_velocity_km_s"],
+        records[0]["source_coordinate"]["metallicity_feh"],
+        records[0]["source_coordinate"]["initial_mass_msun"],
+    )
+    target_indices = [
+        index
+        for index, record in enumerate(out_of_order)
+        if (
+            record["source_coordinate"]["rotation_velocity_km_s"],
+            record["source_coordinate"]["metallicity_feh"],
+            record["source_coordinate"]["initial_mass_msun"],
+        )
+        == target_coordinate
+        and int(record["source_coordinate"]["phase_occurrence"]) == 1
+    ]
+    assert len(target_indices) >= 2
+    out_of_order[target_indices[0]], out_of_order[target_indices[1]] = (
+        out_of_order[target_indices[1]],
+        out_of_order[target_indices[0]],
+    )
+    _expect_phase_error(
+        out_of_order,
+        phase_order,
+        "phase_order_violation_count",
+    )
+
 
 def _differential_phase_audit_test() -> None:
     root = ROOT.parents[1] / "external" / "g2_candidates"
@@ -238,6 +277,12 @@ def main() -> int:
     assert report["canonical_rows_emitted"] == 0
     assert report["physical_nodes_emitted"] == 0
     assert report["inquiry_sent"] is False
+    assert report["phase_history_shared_code_sha256"] == _sha256(
+        crosscheck_module.PHASE_HISTORY_TOOL_PATH
+    )
+    stored_path = ROOT / "data" / "fp1_lc18_failed_wind_crosscheck.json"
+    stored = json.loads(stored_path.read_text(encoding="utf-8"))
+    assert stored == report, "checked-in LC18 cross-check evidence is stale"
 
     joined = report["join"]
     assert joined["summary_row_count"] == 108
@@ -321,6 +366,8 @@ def main() -> int:
     assert history["strictly_increasing_cumulative_age_violation_count"] == 0
     assert history["nonincreasing_total_mass_violation_count"] == 0
     assert history["missing_psn_terminal_phase_count"] == 0
+    assert history["observed_source_order_matches_contract_rank"] is True
+    assert history["phase_order_violation_count"] == 0
 
     structure = report["presupernova_structure"]
     assert structure["available_model_count"] == 96

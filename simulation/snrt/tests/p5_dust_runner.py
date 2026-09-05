@@ -119,6 +119,13 @@ def main() -> int:
         assert "P5_THERMOCHEMICAL_PILOT_OK" in result.stdout
         with h5py.File(output_path, "r") as handle:
             assert handle.attrs["dust_model"] == "metadata"
+            assert handle.attrs["dust_opacity_schema"] == "snrt_dust_opacity_v1"
+            assert handle.attrs["dust_binding_status"] == "reference_control"
+            assert handle.attrs["dust_opacity_metadata_sha256"]
+            assert handle.attrs["dust_payload_sha256"] == ""
+            assert handle.attrs["dust_source_table_sha256"] == ""
+            assert handle.attrs["dust_builder_sha256"] == ""
+            assert handle.attrs["source_sed_identity"] == ""
             assert np.asarray(handle["diagnostics/cumulative_dust_absorbed_photons_cm3"]).shape == (9, *shape)
             assert np.max(np.asarray(handle["diagnostics/cumulative_dust_absorbed_photons_cm3"])) > 0.0
             assert np.max(np.asarray(handle["thermal/cumulative_dust_heating_energy_erg_cm3"])) > 0.0

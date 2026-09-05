@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 import hashlib
 import json
 import math
@@ -18,11 +17,13 @@ from adapt_g2_candidate_sources import (
     SourceAdapterError,
     adapt_candidate,
 )
+from fp1_limongi_phase_history import build_phase_histories
 
 
 TOOL_PATH = Path(__file__).resolve()
 SNRT_ROOT = TOOL_PATH.parents[1]
 DEFAULT_CONTRACT = SNRT_ROOT / "config" / "g2_limongi_phase_mass_history_contract_v1.json"
+PHASE_HISTORY_TOOL_PATH = TOOL_PATH.with_name("fp1_limongi_phase_history.py")
 
 
 class PhaseHistoryAuditError(ValueError):
@@ -59,15 +60,6 @@ def _load_contract(path: Path) -> dict[str, Any]:
     return contract
 
 
-def _coordinate(record: dict[str, Any]) -> tuple[int, int, float]:
-    source = record["source_coordinate"]
-    return (
-        int(source["rotation_velocity_km_s"]),
-        int(source["metallicity_feh"]),
-        float(source["initial_mass_msun"]),
-    )
-
-
 def _yield_coordinate(record: dict[str, Any]) -> tuple[int, int, float]:
     source = record["source_model_coordinate"]
     return (
@@ -90,68 +82,52 @@ def audit_limongi_phase_mass_history(
     properties = source["source_components"]["evolutionary_properties"]
     if properties["all_duplicate_rows_physically_identical"] is not True:
         raise PhaseHistoryAuditError("non-identical Limongi phase duplicates cannot collapse")
-    grouped: dict[tuple[int, int, float], list[dict[str, Any]]] = defaultdict(list)
-    collapsed_extra_rows = 0
-    for record in properties["records"]:
-        occurrence = int(record["source_coordinate"]["phase_occurrence"])
-        if occurrence > 1:
-            collapsed_extra_rows += 1
-            continue
-        grouped[_coordinate(record)].append(record)
-    if len(grouped) != 108:
-        raise PhaseHistoryAuditError("unexpected Limongi evolutionary model count")
-
-    phase_rank = {name: index for index, name in enumerate(contract["phase_order"])}
+    try:
+        canonical_histories, phase_diagnostics = build_phase_histories(
+            properties["records"],
+            contract["phase_order"],
+        )
+    except ValueError as exc:
+        raise PhaseHistoryAuditError(str(exc)) from exc
     histories: dict[tuple[int, int, float], dict[str, Any]] = {}
-    monotonic_mass_violation_count = 0
-    negative_cumulative_mass_count = 0
-    maximum_age_yr = 0.0
-    minimum_age_yr = math.inf
-    phase_node_counts: list[int] = []
-    for coordinate, records in grouped.items():
-        phases = [record["source_coordinate"]["phase"] for record in records]
-        try:
-            ranks = [phase_rank[phase] for phase in phases]
-        except KeyError as exc:
-            raise PhaseHistoryAuditError(f"unknown source phase {exc.args[0]}") from exc
-        if ranks != sorted(ranks) or len(ranks) != len(set(ranks)):
-            raise PhaseHistoryAuditError(f"invalid phase ordering at {coordinate}")
-        cumulative_age = 0.0
-        previous_mass = 0.0
-        nodes: list[dict[str, Any]] = [
-            {"phase": "age_zero", "age_yr": 0.0, "cumulative_wind_mass_msun": 0.0}
-        ]
-        for record in records:
-            duration = float(record["phase_duration_yr"])
-            if not math.isfinite(duration) or duration <= 0.0:
-                raise PhaseHistoryAuditError(f"invalid phase lifetime at {coordinate}")
-            cumulative_age += duration
-            cumulative_mass = coordinate[2] - float(record["total_mass_msun"])
-            if cumulative_mass < -1.0e-12:
-                negative_cumulative_mass_count += 1
-            if cumulative_mass + 1.0e-12 < previous_mass:
-                monotonic_mass_violation_count += 1
-            previous_mass = max(previous_mass, cumulative_mass)
-            nodes.append(
-                {
-                    "phase": record["source_coordinate"]["phase"],
-                    "age_yr": cumulative_age,
-                    "cumulative_wind_mass_msun": cumulative_mass,
-                }
-            )
-        maximum_age_yr = max(maximum_age_yr, cumulative_age)
-        minimum_age_yr = min(minimum_age_yr, cumulative_age)
-        phase_node_counts.append(len(records))
+    for coordinate, canonical in canonical_histories.items():
         histories[coordinate] = {
-            "terminal_age_yr": cumulative_age,
-            "phase_node_count_excluding_age_zero": len(records),
-            "terminal_cumulative_wind_mass_msun": nodes[-1][
-                "cumulative_wind_mass_msun"
+            "terminal_age_yr": canonical["terminal_age_yr"],
+            "phase_node_count_excluding_age_zero": canonical["unique_phase_count"],
+            "terminal_cumulative_wind_mass_msun": canonical[
+                "terminal_cumulative_wind_mass_msun"
             ],
-            "nodes": nodes,
+            "nodes": [
+                {
+                    "phase": "age_zero",
+                    "age_yr": 0.0,
+                    "cumulative_wind_mass_msun": 0.0,
+                }
+            ]
+            + [
+                {
+                    "phase": node["phase"],
+                    "age_yr": node["cumulative_age_yr"],
+                    "cumulative_wind_mass_msun": node[
+                        "cumulative_wind_mass_msun"
+                    ],
+                }
+                for node in canonical["nodes"]
+            ],
         }
-    if monotonic_mass_violation_count or negative_cumulative_mass_count:
-        raise PhaseHistoryAuditError("phase-derived cumulative wind mass is invalid")
+    collapsed_extra_rows = phase_diagnostics["collapsed_duplicate_row_count"]
+    monotonic_mass_violation_count = phase_diagnostics[
+        "nonincreasing_total_mass_violation_count"
+    ]
+    negative_cumulative_mass_count = phase_diagnostics[
+        "negative_cumulative_mass_count"
+    ]
+    maximum_age_yr = phase_diagnostics["maximum_terminal_age_yr"]
+    minimum_age_yr = phase_diagnostics["minimum_terminal_age_yr"]
+    phase_node_counts = [
+        history["phase_node_count_excluding_age_zero"]
+        for history in histories.values()
+    ]
 
     components = source["source_components"]
     wind_sums = {
@@ -205,6 +181,7 @@ def audit_limongi_phase_mass_history(
         "contract_path": str(contract_path),
         "contract_sha256": _sha256(contract_path),
         "audit_code_sha256": _sha256(TOOL_PATH),
+        "phase_history_shared_code_sha256": _sha256(PHASE_HISTORY_TOOL_PATH),
         "source_adapter_code_sha256": source["adapter_code_sha256"],
         "duplicate_resolution": {
             "duplicate_coordinate_count": properties[
@@ -223,8 +200,22 @@ def audit_limongi_phase_mass_history(
             "maximum_terminal_age_yr": maximum_age_yr,
             "monotonic_mass_violation_count": monotonic_mass_violation_count,
             "negative_cumulative_mass_count": negative_cumulative_mass_count,
+            "observed_source_order_matches_contract_rank": phase_diagnostics[
+                "observed_source_order_matches_contract_rank"
+            ],
+            "phase_order_violation_count": phase_diagnostics[
+                "phase_order_violation_count"
+            ],
             "time_resolved_mass_available": True,
             "time_resolved_isotopic_composition_available": False,
+        },
+        "phase_order_provenance": {
+            "source": "g2_limongi_phase_mass_history_contract_v1",
+            "source_attested_for_intermediate_burning_order": False,
+            "interpretation": (
+                "MS/H/He/PSN labels are source-attested; the C/Ne/O/Si "
+                "ordering is a project contract assumption."
+            ),
         },
         "terminal_integrated_wind_closure": {
             "model_count": len(residuals),

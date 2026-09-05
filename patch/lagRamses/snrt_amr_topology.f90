@@ -294,15 +294,25 @@ contains
     integer :: nchild
     integer :: local_need_same, local_need_coarse, local_need_fine
     integer :: global_need_same, global_need_coarse, global_need_fine, info
+    integer :: local_error, global_error
     real(dp) :: face_average
     logical :: need_same, need_coarse, need_fine
 
     ierr = 0
     ghost_state = 0.0_c_float
+    local_error = 0
     if (size(state,1) < size(leaf_cell) .or. size(ghost_kind) < size(ghost_cell) .or. &
          size(ghost_face) < size(ghost_cell) .or. size(ghost_state,1) < size(ghost_cell) .or. &
-         size(ghost_state,2) < size(state,2) .or. size(ghost_state,3) < size(state,3)) then
-       ierr = 1
+         size(ghost_state,2) < size(state,2) .or. size(ghost_state,3) < size(state,3)) &
+       local_error = 1
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(local_error, global_error, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, info)
+#else
+    global_error = local_error
+#endif
+    if (global_error /= 0) then
+       ierr = global_error
        return
     end if
 
@@ -311,6 +321,7 @@ contains
     need_same = .false.
     need_coarse = .false.
     need_fine = .false.
+    local_error = 0
     do ighost = 1, size(ghost_cell)
        select case (ghost_kind(ighost))
        case (SNRT_FACE_MPI)
@@ -320,11 +331,21 @@ contains
        case (SNRT_FACE_COARSE_TO_FINE)
           need_fine = ilevel < nlevelmax
        case default
-          ierr = 2
-          deallocate(field)
-          return
+          local_error = max(local_error,2)
        end select
     end do
+
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(local_error, global_error, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, info)
+#else
+    global_error = local_error
+#endif
+    if (global_error /= 0) then
+       ierr = global_error
+       deallocate(field)
+       return
+    end if
 
     ! make_virtual_fine_dp is collective.  A rank can have no local
     ! interface of a given kind even though another rank does, so exchange
@@ -350,7 +371,10 @@ contains
     need_same = global_need_same > 0
     need_coarse = global_need_coarse > 0
     need_fine = global_need_fine > 0
-    if (.not. need_same .and. .not. need_coarse .and. .not. need_fine) return
+    if (.not. need_same .and. .not. need_coarse .and. .not. need_fine) then
+       deallocate(field)
+       return
+    end if
 
     do igroup = 1, size(state,3)
        do idir = 1, size(state,2)
@@ -415,7 +439,8 @@ contains
   end subroutine snrt_amr_exchange_interface_state
 
   subroutine snrt_amr_apply_coarse_flux_correction(ilevel, leaf_cell, state_work, &
-       ghost_kind, ghost_cell, ghost_face, ghost_local, cdt_over_dx, direction_dp, ierr)
+       ghost_kind, ghost_cell, ghost_face, ghost_local, cdt_over_dx, direction_dp, &
+       coarse_flux_trial, ierr)
     use iso_c_binding, only: c_float
 #ifndef WITHOUTMPI
     use mpi_mod
@@ -426,11 +451,16 @@ contains
     integer, intent(in) :: ghost_face(:), ghost_local(:)
     real(c_float), intent(in) :: state_work(:,:,:)
     real(dp), intent(in) :: cdt_over_dx, direction_dp(:,:)
+    ! Corrections are accumulated in a trial buffer.  The persistent
+    ! snrt_intensity array is committed by the transaction layer only after
+    ! transport, partition, and chemistry have all succeeded.
+    real(c_float), intent(inout) :: coarse_flux_trial(:,:,:)
     integer, intent(out) :: ierr
     real(dp), allocatable :: correction(:)
     integer :: nfield, nface_child, ilocal, idir, igroup, ighost
     integer :: parent_cell, idim, fine_sign, coarse_sign, islot, icell
     integer :: local_has, global_has, info
+    integer :: local_error, global_error
     real(dp) :: mu, q_upstream, face_flux
 
     ierr = 0
@@ -445,9 +475,20 @@ contains
     global_has = local_has
 #endif
     if (global_has == 0) return
+    local_error = 0
     if (ilevel <= 1 .or. size(state_work,1) < size(leaf_cell) .or. &
-         size(direction_dp,1) < 1 .or. size(direction_dp,2) < 3) then
-       ierr = 1
+         size(direction_dp,1) < 1 .or. size(direction_dp,2) < 3 .or. &
+         size(coarse_flux_trial,1) < size(direction_dp,1) .or. &
+         size(coarse_flux_trial,2) < size(state_work,3) .or. &
+         size(coarse_flux_trial,3) < snrt_nslot) local_error = 1
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(local_error, global_error, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, info)
+#else
+    global_error = local_error
+#endif
+    if (global_error /= 0) then
+       ierr = global_error
        return
     end if
 
@@ -487,8 +528,9 @@ contains
           call make_virtual_reverse_dp(correction, ilevel-1)
           do islot = 1, snrt_nslot
              icell = snrt_state_get_cell(islot)
-             if (icell >= 1 .and. icell <= nfield .and. correction(icell) /= 0.0d0) then
-                snrt_intensity(idir,igroup,islot) = snrt_intensity(idir,igroup,islot) + &
+             if (icell >= 1 .and. icell <= nfield .and. correction(icell) /= 0.0d0 .and. &
+                  islot >= 1 .and. islot <= size(coarse_flux_trial,3)) then
+                coarse_flux_trial(idir,igroup,islot) = coarse_flux_trial(idir,igroup,islot) + &
                      real(correction(icell),c_float)
              end if
           end do

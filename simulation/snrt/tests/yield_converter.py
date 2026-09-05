@@ -399,7 +399,20 @@ def main() -> int:
             json.dumps(approved_source_node_contract()), encoding="utf-8"
         )
         repository_contract = converter.DEFAULT_SOURCE_NODE_CONTRACT
+        original_node_audit = converter.audit_source_node_contract
         converter.DEFAULT_SOURCE_NODE_CONTRACT = node_contract
+        # Isolate the physical-package admission assertion from the source
+        # rights gate.  The synthetic node is intentionally not a
+        # code-registered physical source, so the real node auditor would
+        # correctly reject it before the package-binding branch is reached.
+        def synthetic_node_audit(*, node_contract_path: Path) -> dict[str, object]:
+            del node_contract_path
+            return {
+                "status": "approved_physical_nodes",
+                "production_ready": True,
+            }
+
+        converter.audit_source_node_contract = synthetic_node_audit
         normalized = converter._normalize_rows(  # noqa: SLF001 - bounded unit seam
             json.loads(source_json.read_text())["rows"]
         )
@@ -516,6 +529,7 @@ def main() -> int:
         else:
             raise AssertionError("unknown source_node_id was accepted")
 
+        converter.audit_source_node_contract = original_node_audit
         converter.DEFAULT_SOURCE_NODE_CONTRACT = repository_contract
         blocked_by_review_contract = root / "blocked-review-contract.json"
         blocked_by_review_contract.write_text(

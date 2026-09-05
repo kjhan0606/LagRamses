@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 
 import h5py
@@ -16,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from snrt_core.dust import dust_model_from_metadata, zero_dust
+from snrt_core.dust import dust_model_from_metadata, read_dust_opacity_metadata, zero_dust
 from snrt_core.ledger import photon_ledger_from_absorbed
 from snrt_core.multiphysics import build_multiphysics_radiation_step
 from snrt_core.primordial import (
@@ -32,6 +34,7 @@ from snrt_core.transport import TransportConfig, initial_intensity, radiation_mo
 
 LIGHT_SPEED_CM_S = 2.99792458e10
 SECONDS_PER_MYR = 365.25 * 86400.0 * 1.0e6
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _group_edges_from_photon_metadata(metadata: dict[str, object]) -> np.ndarray:
@@ -53,13 +56,21 @@ def _group_edges_from_photon_metadata(metadata: dict[str, object]) -> np.ndarray
     return np.concatenate((intervals[:1, 0], intervals[:, 1]))
 
 
+def _sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True)
     parser.add_argument("--photon-metadata", required=True)
     parser.add_argument(
         "--dust-opacity-metadata",
-        help="validated snrt_dust_opacity_v1 JSON; required to activate non-zero static dust",
+        help="validated snrt_dust_opacity_v1/v2 JSON; required to activate non-zero static dust",
     )
     parser.add_argument("--output", required=True)
     parser.add_argument("--steps", type=int)
@@ -101,7 +112,41 @@ def main() -> None:
     if static.sources is None:
         raise ValueError("static RT input has no photon sources")
     metadata = json.loads(Path(args.photon_metadata).read_text())
-    spectral_closure: GroupSpectralClosure = group_spectral_closure_from_metadata(metadata)
+    spectral_closure: GroupSpectralClosure = group_spectral_closure_from_metadata(
+        metadata, require_code_manifest=True
+    )
+    photon_sed_identity = metadata.get("source_sed_identity")
+    photon_sed_sha256 = metadata.get("source_sed_sha256")
+    if photon_sed_identity is not None and (
+        not isinstance(photon_sed_identity, str) or not _SHA256.fullmatch(photon_sed_identity)
+    ):
+        raise ValueError("photon metadata source_sed_identity must be a SHA-256 identity or null")
+    if photon_sed_sha256 is not None and (
+        not isinstance(photon_sed_sha256, str) or not _SHA256.fullmatch(photon_sed_sha256)
+    ):
+        raise ValueError("photon metadata source_sed_sha256 must be a SHA-256 or null")
+    photon_group_edges_sha256 = metadata.get("group_edges_sha256")
+    if photon_group_edges_sha256 is None:
+        provenance = metadata.get("provenance")
+        if isinstance(provenance, dict):
+            photon_group_edges_sha256 = provenance.get("group_edges_file_sha256")
+    if photon_group_edges_sha256 is not None and (
+        not isinstance(photon_group_edges_sha256, str)
+        or not _SHA256.fullmatch(photon_group_edges_sha256)
+    ):
+        raise ValueError("photon metadata group_edges_sha256 must be a SHA-256 or null")
+    photon_group_edges_path = metadata.get("group_edges_file")
+    if photon_group_edges_sha256 is not None:
+        if not isinstance(photon_group_edges_path, str) or not photon_group_edges_path.strip():
+            raise ValueError("photon metadata group_edges_sha256 requires group_edges_file")
+        try:
+            actual_group_edges_sha256 = _sha256_file(photon_group_edges_path)
+        except (FileNotFoundError, OSError) as error:
+            raise ValueError("photon metadata group-edge input file is unavailable") from error
+        if actual_group_edges_sha256 != photon_group_edges_sha256:
+            raise ValueError("photon metadata group-edge hash does not match its file")
+    if photon_sed_identity is not None and photon_group_edges_sha256 is None:
+        raise ValueError("source-bound photon metadata must include group_edges_sha256")
     host_dtype = np.float64 if args.precision == "float64" else np.float32
     group_energy_ev = np.asarray(spectral_closure.photon_weighted_energy_ev, dtype=host_dtype)
     if len(group_energy_ev) != static.sources.photon_luminosity_s.shape[1]:
@@ -123,6 +168,10 @@ def main() -> None:
     directional_extent = float(np.max(np.sum(np.abs(np.asarray(directions)), axis=1)))
     dt = args.courant * min(cell_width) / (reduced_light_speed * directional_extent)
     transport = TransportConfig(cell_width=cell_width, dt=dt, reduced_light_speed=reduced_light_speed)
+    dust_opacity_metadata_sha256 = ""
+    dust_payload_sha256 = ""
+    dust_source_table_sha256 = ""
+    dust_builder_sha256 = ""
     if args.dust_opacity_metadata is None:
         if np.any(np.asarray(static.dust_relative_abundance) > 0.0):
             raise ValueError(
@@ -130,13 +179,33 @@ def main() -> None:
                 "supply --dust-opacity-metadata to activate it"
             )
         dust = zero_dust(len(group_energy_ev), static.shape, dtype=real_dtype)
+        dust_binding_status = "zero_dust"
+        dust_schema = "none"
     else:
+        dust_closure = read_dust_opacity_metadata(
+            args.dust_opacity_metadata,
+            expected_group_edges_ev=group_edges_ev,
+            expected_group_edges_sha256=photon_group_edges_sha256,
+            expected_source_sed_identity=photon_sed_identity,
+            expected_source_sed_sha256=photon_sed_sha256,
+            require_source_match=True,
+        )
         dust = dust_model_from_metadata(
             args.dust_opacity_metadata,
             jnp.asarray(static.dust_relative_abundance, dtype=real_dtype),
             dtype=real_dtype,
             expected_group_edges_ev=group_edges_ev,
+            expected_group_edges_sha256=photon_group_edges_sha256,
+            expected_source_sed_identity=photon_sed_identity,
+            expected_source_sed_sha256=photon_sed_sha256,
+            require_source_match=True,
         )
+        dust_binding_status = dust_closure.binding_status
+        dust_schema = dust_closure.schema
+        dust_opacity_metadata_sha256 = _sha256_file(args.dust_opacity_metadata)
+        dust_payload_sha256 = dust_closure.payload_sha256 or ""
+        dust_source_table_sha256 = dust_closure.source_table_sha256 or ""
+        dust_builder_sha256 = dust_closure.builder_sha256 or ""
     emissivity = deposit_point_sources(
         static.shape,
         cell_width,
@@ -473,10 +542,19 @@ def main() -> None:
         handle.attrs["courant"] = args.courant
         handle.attrs["input_path"] = str(Path(args.input).resolve())
         handle.attrs["photon_metadata_path"] = str(Path(args.photon_metadata).resolve())
+        handle.attrs["source_sed_identity"] = photon_sed_identity or ""
+        handle.attrs["source_sed_sha256"] = photon_sed_sha256 or ""
+        handle.attrs["group_edges_sha256"] = photon_group_edges_sha256 or ""
         handle.attrs["dust_model"] = "metadata" if args.dust_opacity_metadata is not None else "zero_dust"
+        handle.attrs["dust_opacity_schema"] = dust_schema
+        handle.attrs["dust_binding_status"] = dust_binding_status
         handle.attrs["dust_opacity_metadata_path"] = (
             "" if args.dust_opacity_metadata is None else str(Path(args.dust_opacity_metadata).resolve())
         )
+        handle.attrs["dust_opacity_metadata_sha256"] = dust_opacity_metadata_sha256
+        handle.attrs["dust_payload_sha256"] = dust_payload_sha256
+        handle.attrs["dust_source_table_sha256"] = dust_source_table_sha256
+        handle.attrs["dust_builder_sha256"] = dust_builder_sha256
         handle.attrs["photon_ledger_relative_error"] = photon_ledger_relative_error
         handle.attrs["photon_step_residual_relative_error"] = photon_step_residual_relative_error
         handle.attrs["hydrogen_ledger_relative_error"] = hhe_ledger_relative_errors["hydrogen_ledger_residual"]

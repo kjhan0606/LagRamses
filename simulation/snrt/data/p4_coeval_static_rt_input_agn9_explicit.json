@@ -1,0 +1,41 @@
+{
+  "schema": "snrt_static_source_rebind_v2",
+  "purpose": "coeval static RT source rebind; science status remains inherited from the gas input",
+  "gas_input": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_coeval_static_rt_input.h5",
+  "gas_metadata": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_coeval_static_rt_input.json",
+  "zoom_manifest": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_high_density_manifest.json",
+  "gas_scale_factor": 0.208497764676753,
+  "photon_ledger": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_explicit_agn_photon_ledger.csv",
+  "photon_metadata": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_explicit_agn_photon_ledger.json",
+  "source_scale_factor": 0.20849776467675274,
+  "delta_a_source_minus_gas": -2.498001805406602e-16,
+  "coeval_within_1e-12": true,
+  "source_count": 10,
+  "group_count": 9,
+  "group_edges_ev": [
+    0.01,
+    1.0,
+    5.6,
+    11.2,
+    13.6,
+    24.59,
+    54.42,
+    500.0,
+    2000.0,
+    10000.0
+  ],
+  "group_interval_convention": "left_closed_right_open_except_final_closed",
+  "provenance": {
+    "source_rebind_tool_sha256": "47c44777dae9a7dccbf979ee2ffd0b36a7c4befc72de58824696ca9f5dc0d6b8",
+    "gas_input_sha256": "bd860c6361b31e945a728a694b98d5ae7f1d45051cb7aaff090c9d36ce47a378",
+    "gas_metadata_sha256": "19764f863f4440c3c626210b8c1df053e878e0079dffeb060c6d12c4e3cf54fa",
+    "zoom_manifest_sha256": "3a11e71bc88f622d7f409bf152b2f6ab97c801ddea6267162efd2354af5f4cb3",
+    "photon_ledger_sha256": "1a406398414f258e4f0d00544fd3fee998d659009fc177999e023eb69eb69743",
+    "photon_metadata_sha256": "179c3bd1b20fc6575b029b6410e651760f38e52945721f3504c4eecb642ba34b",
+    "group_edges_sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1"
+  },
+  "limits": [
+    "Only the source catalogue is replaced; all gas, ionization, grid, and composition fields are copied unchanged.",
+    "Scientific eligibility remains limited by the provenance and unresolved fields of the supplied gas input."
+  ]
+}

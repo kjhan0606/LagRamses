@@ -1,0 +1,38 @@
+! Reference-control contract for the native SNRT nine-group wiring test.
+! This file is not a production physical SED approval.  The source identity
+! points to the reviewed p4 pilot ledger and the values below are copied from
+! its serialized Verner group closure.  Set SNRT_GROUP_CONTRACT explicitly to
+! this path only for a controlled wiring/preflight run.
+&snrt_group_contract
+ contract_version=1,
+ contract_status='reference_control',
+ source_id='p4_pilot_agn_photon_ledger.json',
+ source_sha256='d2326e4ec0320e9e0b34a58460b08bddafa4b4433322691a9dd346a49762909d',
+ source_commit_binding='bd0411bf9c2aaff6165724a146be00180bd8d127',
+ approval_id='reference_control_not_science_approved',
+ edges_sha256='d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1',
+ interval_convention='left_closed_right_open_except_final_closed',
+ fraction_semantics='escaped',
+ edges_input=0.01, 1.0, 5.6, 11.2, 13.6, 24.59, 54.42, 500.0, 2000.0, 10000.0,
+ mean_input=0.1, 2.3664319132398464, 10.56942670578782, 12.2954112566775,
+   17.662918001204492, 34.381528542610674, 106.63925876378897,
+   869.6341490248457, 4023.594574013186,
+ fraction_input=0.0, 0.0, 0.013511533835180084, 0.020796840301004517,
+   0.04848404224733352, 0.04025429392485865, 0.04266103999017264,
+   0.007826865238873246, 0.007946053312172761,
+ hi_input=0.0, 0.0, 0.0, 0.0, 3.56337318189246e-18,
+   6.0658255816842125e-19, 4.536757555281624e-20,
+   4.0573225032765143e-23, 3.1479424687259854e-25,
+ hei_input=0.0, 0.0, 0.0, 0.0, 0.0, 4.659818809105699e-18,
+   7.291758993386981e-19, 1.1561772423872495e-21,
+   9.580306965667874e-24,
+ heii_input=0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.220469290175417e-19,
+   8.964284134154936e-22, 8.247018113977343e-24,
+ excess_hi_input=0.0, 0.0, 0.0, 0.0, 2.8485343274404133,
+   16.817799758225394, 55.27227962007381, 612.2116532407207,
+   2564.899364722586,
+ excess_hei_input=0.0, 0.0, 0.0, 0.0, 0.0, 7.043961358733624,
+   46.593074848840416, 603.1368314447863, 2558.2019113233523,
+ excess_heii_input=0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 15.519987376343611,
+   575.951269028906, 2537.3604318471203
+/

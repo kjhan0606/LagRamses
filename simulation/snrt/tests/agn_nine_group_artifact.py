@@ -7,12 +7,15 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import subprocess
 import sys
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = ROOT.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -31,6 +34,7 @@ STATIC_INPUT = ROOT / "data" / "p4_coeval_static_rt_input_agn9.h5"
 STATIC_METADATA = ROOT / "data" / "p4_coeval_static_rt_input_agn9.json"
 TRANSPORT_CONTROL = ROOT / "data" / "p4_validation" / "p4_agn9_stage4_0p001myr.h5"
 EXTERNAL_ASSET_MANIFEST = ROOT / "data" / "agn_nine_group_external_assets.json"
+ATTESTATION_SCOPE = "simulation/snrt"
 
 
 def sha256(path: Path) -> str:
@@ -126,6 +130,20 @@ def main() -> int:
     assert payload["ledger"]["luminous_source_count"] == 5
 
     provenance = payload["provenance"]
+    working_tree_status = subprocess.check_output(
+        ("git", "status", "--short", "--untracked-files=all", "--", ATTESTATION_SCOPE),
+        cwd=REPOSITORY_ROOT,
+        text=True,
+    )
+    current_head = subprocess.check_output(
+        ("git", "rev-parse", "HEAD"), cwd=REPOSITORY_ROOT, text=True
+    ).strip()
+    assert provenance["git_head"] == current_head
+    assert provenance["working_tree_attestation_scope"] == ATTESTATION_SCOPE
+    assert provenance["working_tree_clean"] is (working_tree_status == "")
+    assert provenance["working_tree_status_sha256"] == hashlib.sha256(
+        working_tree_status.encode("utf-8")
+    ).hexdigest()
     for key, path in (
         ("validator_sha256", VALIDATOR),
         ("generator_sha256", GENERATOR),
@@ -144,6 +162,27 @@ def main() -> int:
         assert provenance[key] == sha256(path)
     candidates = Path(metadata["candidates"])
     assert provenance["candidates_sha256"] == sha256(candidates)
+
+    with TemporaryDirectory(prefix="agn-pilot-artifact-test-") as directory:
+        output = Path(directory) / "validation.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(VALIDATOR),
+                "--output",
+                str(output),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stdout + result.stderr)
+        fresh = json.loads(output.read_text(encoding="utf-8"))
+        assert fresh["passed"] is True
+        assert all(fresh["criteria"].values())
+        assert fresh["configuration"]["source_mode"] == "pilot"
+        assert fresh["criteria"] == payload["criteria"]
 
     print(
         "AGN_NINE_GROUP_ARTIFACT_OK "

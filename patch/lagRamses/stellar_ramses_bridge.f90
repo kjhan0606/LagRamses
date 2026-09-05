@@ -11,11 +11,12 @@ module stellar_ramses_bridge
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements
   use stellar_enrichment_contract, only: stellar_source_t, &
-       generic_metal_ejecta_mass
+       delayed_cooling_source_mass, generic_metal_ejecta_mass
   use stellar_snia_physical_contract, only: snia_event_budget_t
   use stellar_snia_cell_deposition, only: snia_thermal_coupling_t, &
        snia_cell_increment_t, &
        snia_deposition_ok, build_snia_cell_increment
+  use stellar_ramses_field_map, only: stellar_field_map_t, validate_field_map
   implicit none
 
   private
@@ -29,7 +30,9 @@ module stellar_ramses_bridge
   integer, parameter, public :: ramses_bridge_err_target = 64
 
   public :: deposit_source_to_uold
+  public :: build_stellar_source_unew_delta
   public :: deposit_snia_budget_to_uold
+  public :: build_snia_budget_unew_delta
   public :: deposit_snia_budget_to_unew
 
 contains
@@ -129,6 +132,125 @@ contains
             normalized_weight * source%momentum(3) / cell_volume(cell)
     end do
   end subroutine deposit_source_to_uold
+
+  subroutine build_stellar_source_unew_delta(source, bulk_velocity_code, &
+       scale_mass, scale_momentum, scale_energy, volume_code, nvar, ndim, &
+       field_map, delta, tolerance, ierr)
+    ! Convert one generic stellar source into a complete row-major RAMSES
+    ! delta.  This routine is deliberately non-mutating so generic and SNIa
+    ! deltas can be combined before the runtime lock/commit boundary.
+    type(stellar_source_t), intent(in) :: source
+    real(stellar_dp), intent(in) :: bulk_velocity_code(3)
+    real(stellar_dp), intent(in) :: scale_mass, scale_momentum, scale_energy
+    real(stellar_dp), intent(in) :: volume_code
+    integer, intent(in) :: nvar, ndim
+    type(stellar_field_map_t), intent(in) :: field_map
+    real(stellar_dp), intent(out) :: delta(:)
+    real(stellar_dp), intent(in) :: tolerance
+    integer, intent(out) :: ierr
+
+    real(stellar_dp) :: tol, returned_code, snii_code, source_momentum_code(3)
+    real(stellar_dp) :: generic_metal_code, bulk_energy, ejected_sum, scale
+    integer :: map_ierr, element, idim
+
+    ierr = ramses_bridge_ok
+    delta = 0.0_stellar_dp
+    tol = max(tolerance, 1.0e-12_stellar_dp)
+    if (nvar <= 0 .or. size(delta) < nvar .or. ndim /= 3 .or. &
+         .not. ieee_is_finite(tolerance) .or. tolerance < 0.0_stellar_dp .or. &
+         .not. ieee_is_finite(volume_code) .or. volume_code <= 0.0_stellar_dp .or. &
+         .not. all(ieee_is_finite(bulk_velocity_code)) .or. &
+         .not. ieee_is_finite(scale_mass) .or. scale_mass <= 0.0_stellar_dp .or. &
+         .not. ieee_is_finite(scale_momentum) .or. scale_momentum <= 0.0_stellar_dp .or. &
+         .not. ieee_is_finite(scale_energy) .or. scale_energy <= 0.0_stellar_dp) then
+       ierr = ramses_bridge_err_argument
+       return
+    end if
+    call validate_field_map(field_map, nvar, ndim, map_ierr)
+    if (map_ierr /= 0) then
+       ierr = ramses_bridge_err_index
+       return
+    end if
+    if (.not. ieee_is_finite(source%returned_mass) .or. &
+         .not. ieee_is_finite(source%energy) .or. &
+         .not. all(ieee_is_finite(source%momentum)) .or. &
+         .not. all(ieee_is_finite(source%ejected_mass)) .or. &
+         .not. all(ieee_is_finite(source%net_yield)) .or. &
+         .not. all(ieee_is_finite(source%channel_returned_mass)) .or. &
+         .not. all(ieee_is_finite(source%channel_energy)) .or. &
+         .not. all(ieee_is_finite(source%channel_momentum)) .or. &
+         .not. all(ieee_is_finite(source%channel_ejected_mass)) .or. &
+         .not. all(ieee_is_finite(source%channel_net_yield)) .or. &
+         source%returned_mass < 0.0_stellar_dp .or. &
+         source%energy < 0.0_stellar_dp .or. &
+         minval(source%ejected_mass) < 0.0_stellar_dp) then
+       ierr = ramses_bridge_err_source
+       return
+    end if
+    ejected_sum = sum(source%ejected_mass)
+    scale = max(1.0_stellar_dp, source%returned_mass, abs(ejected_sum))
+    if (.not. ieee_is_finite(ejected_sum) .or. &
+         ejected_sum > source%returned_mass + tol * scale) then
+       ierr = ramses_bridge_err_closure
+       return
+    end if
+
+    returned_code = source%returned_mass / scale_mass
+    source_momentum_code = source%momentum / scale_momentum
+    if (returned_code > 0.0_stellar_dp) then
+       bulk_energy = 0.5_stellar_dp * returned_code * &
+            sum(bulk_velocity_code**2) + &
+            sum(bulk_velocity_code * source_momentum_code) + &
+            0.5_stellar_dp * sum(source_momentum_code**2) / returned_code
+    else if (maxval(abs(source_momentum_code)) > 0.0_stellar_dp) then
+       ierr = ramses_bridge_err_source
+       return
+    else
+       bulk_energy = 0.0_stellar_dp
+    end if
+    generic_metal_code = generic_metal_ejecta_mass(source%returned_mass, &
+         source%ejected_mass) / scale_mass
+    snii_code = delayed_cooling_source_mass(source) / scale_mass
+    if (.not. ieee_is_finite(returned_code) .or. &
+         .not. ieee_is_finite(bulk_energy) .or. &
+         .not. ieee_is_finite(generic_metal_code) .or. &
+         .not. ieee_is_finite(snii_code) .or. &
+         snii_code < -tol * max(1.0_stellar_dp, abs(returned_code))) then
+       ierr = ramses_bridge_err_result
+       return
+    end if
+    if (snii_code < 0.0_stellar_dp .or. &
+         snii_code > returned_code + tol * max(1.0_stellar_dp, abs(returned_code))) then
+       ierr = ramses_bridge_err_closure
+       return
+    end if
+    snii_code = max(0.0_stellar_dp, snii_code)
+    generic_metal_code = max(0.0_stellar_dp, generic_metal_code)
+
+    delta(field_map%density_index) = returned_code / volume_code
+    do idim = 1, ndim
+       delta(field_map%momentum_index(idim)) = &
+            (returned_code * bulk_velocity_code(idim) + &
+            source_momentum_code(idim)) / volume_code
+    end do
+    delta(field_map%energy_index) = &
+         (source%energy / scale_energy + bulk_energy) / volume_code
+    if (field_map%delayed_cooling_index /= 0) then
+       delta(field_map%delayed_cooling_index) = snii_code / volume_code
+    end if
+    if (field_map%total_metal_index /= 0) then
+       delta(field_map%total_metal_index) = generic_metal_code / volume_code
+    end if
+    do element = 1, n_stellar_elements
+       if (field_map%element_index(element) == 0) cycle
+       delta(field_map%element_index(element)) = &
+            source%ejected_mass(element) / scale_mass / volume_code
+    end do
+    if (.not. all(ieee_is_finite(delta(1:nvar)))) then
+       delta = 0.0_stellar_dp
+       ierr = ramses_bridge_err_result
+    end if
+  end subroutine build_stellar_source_unew_delta
 
   subroutine deposit_snia_budget_to_uold(budget, coupling, bulk_velocity_cm_s, &
        scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, &
@@ -305,6 +427,84 @@ contains
     deallocate(increments)
   end subroutine deposit_snia_budget_to_uold
 
+  subroutine build_snia_budget_unew_delta(budget, coupling, bulk_velocity_cm_s, &
+       scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, &
+       cell_volume_code, density_var, energy_var, momentum_var, delta, &
+       tolerance, ierr, total_metal_var, element_var)
+    ! Build one SNIa contribution in the RAMSES row-major layout without
+    ! touching a production array.  The caller owns the eventual synchronized
+    ! commit.  The variable-major scratch is retained only as a unit-conversion
+    ! boundary shared with deposit_snia_budget_to_uold.
+    type(snia_event_budget_t), intent(in) :: budget
+    type(snia_thermal_coupling_t), intent(in) :: coupling
+    real(stellar_dp), intent(in) :: bulk_velocity_cm_s(3)
+    real(stellar_dp), intent(in) :: scale_length_cgs, scale_density_cgs
+    real(stellar_dp), intent(in) :: scale_velocity_cgs
+    integer, intent(in) :: nvar
+    real(stellar_dp), intent(in) :: cell_volume_code
+    integer, intent(in) :: density_var, energy_var, momentum_var(3)
+    real(stellar_dp), intent(out) :: delta(:)
+    real(stellar_dp), intent(in) :: tolerance
+    integer, intent(out) :: ierr
+    integer, intent(in), optional :: total_metal_var
+    integer, intent(in), optional :: element_var(n_stellar_elements)
+
+    real(stellar_dp), allocatable :: scratch_uold(:,:)
+    real(stellar_dp) :: velocity_cells(3,1), volume_cells(1), weights(1)
+    integer :: allocation_status, scratch_ierr
+
+    ierr = ramses_bridge_ok
+    delta = 0.0_stellar_dp
+    if (nvar <= 0 .or. size(delta) < nvar) then
+       ierr = ramses_bridge_err_argument
+       return
+    end if
+    allocate(scratch_uold(nvar,1), stat=allocation_status)
+    if (allocation_status /= 0) then
+       ierr = ramses_bridge_err_result
+       return
+    end if
+    scratch_uold = 0.0_stellar_dp
+    velocity_cells(:,1) = bulk_velocity_cm_s
+    volume_cells(1) = cell_volume_code
+    weights(1) = 1.0_stellar_dp
+
+    if (present(total_metal_var)) then
+       if (present(element_var)) then
+          call deposit_snia_budget_to_uold(budget, coupling, velocity_cells, &
+               scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 1, &
+               volume_cells, weights, density_var, energy_var, momentum_var, &
+               scratch_uold, tolerance, scratch_ierr, total_metal_var, element_var)
+       else
+          call deposit_snia_budget_to_uold(budget, coupling, velocity_cells, &
+               scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 1, &
+               volume_cells, weights, density_var, energy_var, momentum_var, &
+               scratch_uold, tolerance, scratch_ierr, total_metal_var)
+       end if
+    else if (present(element_var)) then
+       call deposit_snia_budget_to_uold(budget, coupling, velocity_cells, &
+            scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 1, &
+            volume_cells, weights, density_var, energy_var, momentum_var, &
+            scratch_uold, tolerance, scratch_ierr, element_var=element_var)
+    else
+       call deposit_snia_budget_to_uold(budget, coupling, velocity_cells, &
+            scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, 1, &
+            volume_cells, weights, density_var, energy_var, momentum_var, &
+            scratch_uold, tolerance, scratch_ierr)
+    end if
+    if (scratch_ierr /= ramses_bridge_ok) then
+       deallocate(scratch_uold)
+       ierr = scratch_ierr
+       return
+    end if
+    delta(1:nvar) = scratch_uold(:,1)
+    deallocate(scratch_uold)
+    if (.not. all(ieee_is_finite(delta(1:nvar)))) then
+       delta = 0.0_stellar_dp
+       ierr = ramses_bridge_err_result
+    end if
+  end subroutine build_snia_budget_unew_delta
+
   subroutine deposit_snia_budget_to_unew(budget, coupling, bulk_velocity_cm_s, &
        scale_length_cgs, scale_density_cgs, scale_velocity_cgs, nvar, &
        n_local_cells, n_targets, target_cell, owner_rank, local_rank, &
@@ -313,9 +513,10 @@ contains
     ! RAMSES stores conserved state as unew(local_cell,variable), whereas the
     ! unit bridge above uses variable-major scratch storage.  This adapter
     ! validates the AMR/MPI-selected target list, deposits transactionally in
-    ! scratch storage, and scatters only to the owned local cells.  A caller
-    ! must pass one target list per MPI rank; nonlocal owners are rejected
-    ! rather than silently dropped.
+    ! scratch storage, and scatters to addressable local rows.  RAMSES
+    ! virtual/reception rows are legal targets and are reconciled later by
+    ! make_virtual_reverse_dp.  owner_rank is retained as provenance metadata;
+    ! this helper does not claim cross-rank atomicity.
     type(snia_event_budget_t), intent(in) :: budget
     type(snia_thermal_coupling_t), intent(in) :: coupling
     real(stellar_dp), intent(in) :: bulk_velocity_cm_s(3,n_targets)
@@ -343,7 +544,7 @@ contains
     end if
     do target = 1, n_targets
        if (target_cell(target) < 1 .or. target_cell(target) > n_local_cells .or. &
-            owner_rank(target) /= local_rank) then
+            owner_rank(target) < 0) then
           ierr = ramses_bridge_err_target
           return
        end if

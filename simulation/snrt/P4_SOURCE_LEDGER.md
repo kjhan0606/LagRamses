@@ -24,6 +24,19 @@ source-side normalization. A five-group retained AGN control cannot be
 concatenated with the P0 nine-group stellar ledger; the combination must be
 rebuilt on one shared group table with a new aggregate spectral closure.
 
+The native RAMSES SNRT state now consumes the same nine-group ordering through
+the explicit [`SNRT_NATIVE_GROUP_CONTRACT.md`](SNRT_NATIVE_GROUP_CONTRACT.md)
+namelist contract. The native path refuses to run without
+`SNRT_GROUP_CONTRACT`; it no longer carries the historical four-group
+`18/35/70/200 eV` fallback. The `[2000,10000] eV` group is therefore present in
+the source transaction and CUDA multigroup ABI. The checked-in contract is a
+reference-control copy of the P4 pilot closure, not a production AGN SED
+approval. Its `fraction_semantics='escaped'` field records that the resolved
+domain receives the escape-scaled fraction; the reference control also
+requires the explicit `SNRT_ALLOW_REFERENCE_CONTROL=1` opt-in. Intrinsic
+fractions remain inspectable but are blocked at this injection boundary until
+an approved upstream escape conversion exists.
+
 The strict merger is implemented by
 [`tools/merge_photon_source_ledgers.py`](tools/merge_photon_source_ledgers.py).
 It verifies the input metadata totals against the CSV rows, rejects group-edge
@@ -33,6 +46,15 @@ closure. If a controlled non-coeval merge is needed, both
 `--allow-mixed-epochs` and one explicit `--source-id-offset` per input are
 required; the output is labeled as an integration control. It applies no dust
 attenuation or feedback.
+
+For an explicit component, the merger preserves its source SED identity and
+raw input hash in `component_ledgers`. The STAR+AGN result receives a new
+aggregate identity and an aggregate photon-weighted gas closure. A component
+v2 dust sidecar is never accepted as the mixture closure: the merged metadata
+sets `component_only_sidecars_allowed=false` and requires a sidecar built from
+the aggregate continuous SED (or a separately approved equivalent). The
+merger therefore cannot silently attach stellar-only or AGN-only dust weights
+to a mixed source run.
 
 ## Native transitional checkpoint hand-off
 

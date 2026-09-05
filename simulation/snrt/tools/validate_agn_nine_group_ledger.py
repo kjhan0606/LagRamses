@@ -16,6 +16,7 @@ import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = ROOT.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -24,6 +25,15 @@ from snrt_core.primordial import (
     HE_I_FIT,
     HE_II_FIT,
     group_spectral_closure_from_metadata,
+    sed_weighted_group_closure_with_diagnostics,
+)
+from snrt_core.sed import (
+    SOURCE_SED_CANDIDATE_STATUS,
+    SED_INTERPOLATION_CONVENTION,
+    SED_QUADRATURE_RELATIVE_TOLERANCE,
+    SED_QUADRATURE_SCHEME,
+    integrate_photon_sed_groups,
+    read_lbol_photon_sed,
 )
 from snrt_core.source_ledger import read_photon_source_ledger_csv
 
@@ -38,6 +48,13 @@ DEFAULT_STATIC_INPUT = ROOT / "data" / "p4_coeval_static_rt_input_agn9.h5"
 DEFAULT_STATIC_METADATA = ROOT / "data" / "p4_coeval_static_rt_input_agn9.json"
 DEFAULT_TRANSPORT_CONTROL = (
     ROOT / "data" / "p4_validation" / "p4_agn9_stage4_0p001myr.h5"
+)
+DEFAULT_EXPLICIT_LEDGER = ROOT / "data" / "p4_explicit_agn_photon_ledger.csv"
+DEFAULT_EXPLICIT_METADATA = ROOT / "data" / "p4_explicit_agn_photon_ledger.json"
+DEFAULT_EXPLICIT_STATIC_INPUT = ROOT / "data" / "p4_coeval_static_rt_input_agn9_explicit.h5"
+DEFAULT_EXPLICIT_STATIC_METADATA = ROOT / "data" / "p4_coeval_static_rt_input_agn9_explicit.json"
+DEFAULT_EXPLICIT_TRANSPORT_CONTROL = (
+    ROOT / "data" / "p4_validation" / "p4_agn9_explicit_stage4_0p001myr.h5"
 )
 DEFAULT_FAILED_FULL_CFL_PROBE = (
     ROOT / "data" / "p4_validation" / "p4_agn9_stage4_one_step.h5"
@@ -58,8 +75,20 @@ def sha256(path: Path) -> str:
 
 def git_head() -> str:
     return subprocess.check_output(
-        ("git", "rev-parse", "HEAD"), cwd=ROOT, text=True
+        ("git", "rev-parse", "HEAD"), cwd=REPOSITORY_ROOT, text=True
     ).strip()
+
+
+ATTESTATION_SCOPE = "simulation/snrt"
+
+
+def working_tree_attestation() -> tuple[bool, str]:
+    status = subprocess.check_output(
+        ("git", "status", "--short", "--untracked-files=all", "--", ATTESTATION_SCOPE),
+        cwd=REPOSITORY_ROOT,
+        text=True,
+    )
+    return status == "", hashlib.sha256(status.encode("utf-8")).hexdigest()
 
 
 def unique_interval_index(intervals: np.ndarray, target: tuple[float, float]) -> int:
@@ -121,12 +150,32 @@ def main() -> int:
         type=Path,
         default=DEFAULT_EXTERNAL_ASSET_MANIFEST,
     )
+    parser.add_argument(
+        "--source-mode",
+        choices=("pilot", "explicit"),
+        default="pilot",
+        help="validate the historical parameterized pilot or the canonical explicit SED control",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
+    if args.source_mode == "explicit":
+        if args.ledger == DEFAULT_LEDGER:
+            args.ledger = DEFAULT_EXPLICIT_LEDGER
+        if args.metadata == DEFAULT_METADATA:
+            args.metadata = DEFAULT_EXPLICIT_METADATA
+        if args.static_input == DEFAULT_STATIC_INPUT:
+            args.static_input = DEFAULT_EXPLICIT_STATIC_INPUT
+        if args.static_metadata == DEFAULT_STATIC_METADATA:
+            args.static_metadata = DEFAULT_EXPLICIT_STATIC_METADATA
+        if args.transport_control == DEFAULT_TRANSPORT_CONTROL:
+            args.transport_control = DEFAULT_EXPLICIT_TRANSPORT_CONTROL
+
     metadata = json.loads(args.metadata.read_text(encoding="utf-8"))
     ledger = read_photon_source_ledger_csv(args.ledger)
-    closure = group_spectral_closure_from_metadata(metadata)
+    closure = group_spectral_closure_from_metadata(
+        metadata, require_code_manifest=True
+    )
     expected_edges = np.loadtxt(args.group_edges, comments="#", dtype=np.float64)
     metadata_edges = np.asarray(metadata["group_edges_ev"], dtype=np.float64)
     intervals = np.asarray(
@@ -187,6 +236,68 @@ def main() -> int:
             "diagnostics/photon_ledger/aggregate_residual_photons"
         ].shape
 
+    explicit_sed = None
+    explicit_expected_group_photon_rate = None
+    explicit_expected_quadrature = None
+    explicit_expected_closure = None
+    explicit_expected_verner_quadrature = None
+    explicit_expected_group_mean_energy = None
+    explicit_expected_group_energy_fraction = None
+    if args.source_mode == "explicit":
+        source_contract = metadata.get("source_sed_contract")
+        if not isinstance(source_contract, dict):
+            raise ValueError("explicit canonical metadata lacks source_sed_contract")
+        source_path = source_contract.get("input_path")
+        represented_fraction = source_contract.get("represented_bolometric_fraction")
+        if not isinstance(source_path, str) or not isinstance(represented_fraction, (int, float)):
+            raise ValueError("explicit canonical metadata lacks source SED path/fraction")
+        explicit_sed = read_lbol_photon_sed(
+            source_path,
+            expected_bolometric_fraction=float(represented_fraction),
+        )
+        explicit_moments = integrate_photon_sed_groups(
+            explicit_sed, expected_edges, allow_empty_groups=True
+        )
+        explicit_expected_closure, explicit_expected_verner_quadrature = (
+            sed_weighted_group_closure_with_diagnostics(
+                expected_edges,
+                explicit_sed.energy_ev,
+                explicit_sed.photon_rate_per_norm_per_ev,
+                energy_fraction_per_ev=explicit_sed.energy_fraction_per_ev,
+                interpolation_convention=explicit_sed.interpolation_convention,
+                allow_empty_groups=True,
+            )
+        )
+        escape_fraction = float(metadata["normalization"]["escape_fraction"])
+        explicit_expected_group_photon_rate = (
+            float(np.sum(candidate_lbol, dtype=np.float64))
+            * escape_fraction
+            * explicit_moments.group_photon_rate_per_norm
+        )
+        explicit_expected_group_mean_energy = (
+            explicit_moments.photon_weighted_mean_energy_ev
+        )
+        explicit_expected_group_energy_fraction = (
+            explicit_moments.group_energy_fraction_per_norm
+        )
+        explicit_expected_quadrature = explicit_moments.quadrature_diagnostics
+        explicit_source_contract_current = bool(
+            metadata.get("source_sed_identity") == explicit_sed.identity
+            and metadata.get("source_sed_sha256") == explicit_sed.input_sha256
+            and source_contract.get("identity") == explicit_sed.identity
+            and source_contract.get("input_sha256") == explicit_sed.input_sha256
+            and source_contract.get("status") == SOURCE_SED_CANDIDATE_STATUS
+            and source_contract.get("interpolation_convention")
+            == SED_INTERPOLATION_CONVENTION
+            and isinstance(source_contract.get("quadrature"), dict)
+            and source_contract["quadrature"].get("scheme") == SED_QUADRATURE_SCHEME
+            and metadata.get("source_model_status")
+            == "synthetic_non_physical_wiring_fixture"
+            and "Sazonov" not in str(metadata.get("reference", ""))
+        )
+    else:
+        explicit_source_contract_current = True
+
     hard_group = unique_interval_index(expected_intervals, (2000.0, 10000.0))
     soft_xray_group = unique_interval_index(expected_intervals, (500.0, 2000.0))
     species_thresholds = np.asarray(
@@ -196,20 +307,68 @@ def main() -> int:
     wholly_below_species_threshold = (
         expected_edges[1:][None, :] <= species_thresholds[:, None]
     )
-    wholly_below_sed_support = expected_edges[1:] <= SED_MINIMUM_EV
-    partially_supported_by_sed = (expected_edges[:-1] < SED_MINIMUM_EV) & (
-        expected_edges[1:] > SED_MINIMUM_EV
-    )
-    fully_supported_by_sed = expected_edges[:-1] >= SED_MINIMUM_EV
-    expected_group_status = np.full(
-        expected_intervals.shape[0], "agn_sed_fully_supported", dtype=object
-    )
-    expected_group_status[wholly_below_sed_support] = (
-        "agn_sed_below_support_zero_photons"
-    )
-    expected_group_status[partially_supported_by_sed] = (
-        "agn_sed_partially_supported_10ev_to_upper"
-    )
+    if explicit_sed is None:
+        sed_support_minimum_ev = SED_MINIMUM_EV
+        sed_support_maximum_ev = float(expected_edges[-1])
+        wholly_below_sed_support = expected_edges[1:] <= SED_MINIMUM_EV
+        partially_supported_by_sed = (expected_edges[:-1] < SED_MINIMUM_EV) & (
+            expected_edges[1:] > SED_MINIMUM_EV
+        )
+        fully_supported_by_sed = expected_edges[:-1] >= SED_MINIMUM_EV
+        expected_group_status = np.full(
+            expected_intervals.shape[0], "agn_sed_fully_supported", dtype=object
+        )
+        expected_group_status[wholly_below_sed_support] = (
+            "agn_sed_below_support_zero_photons"
+        )
+        expected_group_status[partially_supported_by_sed] = (
+            "agn_sed_partially_supported_10ev_to_upper"
+        )
+        expected_supported_intervals = [
+            None
+            if below
+            else [max(float(low), SED_MINIMUM_EV), float(high)]
+            for low, high, below in zip(
+                expected_edges[:-1], expected_edges[1:], wholly_below_sed_support, strict=True
+            )
+        ]
+    else:
+        sed_support_minimum_ev = float(explicit_sed.energy_ev[0])
+        sed_support_maximum_ev = float(explicit_sed.energy_ev[-1])
+        wholly_below_sed_support = expected_edges[1:] <= sed_support_minimum_ev
+        partially_supported_by_sed = (
+            (expected_edges[:-1] < sed_support_minimum_ev)
+            & (expected_edges[1:] > sed_support_minimum_ev)
+        ) | (
+            (expected_edges[:-1] < sed_support_maximum_ev)
+            & (expected_edges[1:] > sed_support_maximum_ev)
+        )
+        fully_supported_by_sed = (
+            (expected_edges[:-1] >= sed_support_minimum_ev)
+            & (expected_edges[1:] <= sed_support_maximum_ev)
+        )
+        expected_group_status = np.asarray(
+            [
+                "empty_source_group_zero_photons"
+                if total == 0.0
+                else "source_sed_fully_supported"
+                for total in explicit_expected_group_photon_rate
+            ],
+            dtype=object,
+        )
+        expected_supported_intervals = [
+            None
+            if high <= sed_support_minimum_ev or low >= sed_support_maximum_ev
+            else [
+                float(max(low, sed_support_minimum_ev)),
+                float(min(high, sed_support_maximum_ev)),
+            ]
+            for low, high in zip(
+                expected_edges[:-1],
+                expected_edges[1:],
+                strict=True,
+            )
+        ]
     metadata_group_status = np.asarray(
         [group["closure_status"] for group in metadata["groups"]], dtype=object
     )
@@ -229,39 +388,198 @@ def main() -> int:
     )
     hard_power_erg_s = hard_power_ev_s * EV_TO_ERG
     luminous_source_count = int(np.count_nonzero(candidate_lbol > 0.0))
+    working_tree_clean, working_tree_status_sha256 = working_tree_attestation()
 
     gas_input = Path(static_metadata["gas_input"])
     gas_metadata_value = static_metadata.get("gas_metadata")
     gas_metadata = None if gas_metadata_value is None else Path(gas_metadata_value)
     zoom_manifest = Path(static_metadata["zoom_manifest"])
     static_provenance = static_metadata["provenance"]
-    external_asset_by_id = {
-        asset["id"]: asset for asset in external_assets.get("assets", [])
-    }
     expected_external_assets = {
-        "agn9_static_rt_input": args.static_input,
-        "agn9_short_transport_control": args.transport_control,
+        "agn9_static_rt_input": ROOT / "data" / "p4_coeval_static_rt_input_agn9.h5",
+        "agn9_short_transport_control": ROOT / "data" / "p4_validation" / "p4_agn9_stage4_0p001myr.h5",
         "agn9_full_cfl_failed_probe": DEFAULT_FAILED_FULL_CFL_PROBE,
         "coeval_gas_input": gas_input,
+        "agn9_explicit_source_sed_control": ROOT / "data" / "p4_explicit_agn_sed_control.csv",
+        "agn9_explicit_photon_ledger": ROOT / "data" / "p4_explicit_agn_photon_ledger.csv",
+        "agn9_explicit_photon_metadata": ROOT / "data" / "p4_explicit_agn_photon_ledger.json",
+        "agn9_explicit_static_rt_input": ROOT / "data" / "p4_coeval_static_rt_input_agn9_explicit.h5",
+        "agn9_explicit_static_rt_metadata": ROOT / "data" / "p4_coeval_static_rt_input_agn9_explicit.json",
+        "agn9_explicit_short_transport_control": ROOT / "data" / "p4_validation" / "p4_agn9_explicit_stage4_0p001myr.h5",
     }
-    external_asset_contract_closes = (
+    declared_assets = external_assets.get("assets")
+    external_asset_by_id = {}
+    if isinstance(declared_assets, list):
+        for asset in declared_assets:
+            if isinstance(asset, dict) and isinstance(asset.get("id"), str):
+                external_asset_by_id[asset["id"]] = asset
+
+    def _manifest_asset_current(asset: object) -> bool:
+        if not isinstance(asset, dict):
+            return False
+        asset_id = asset.get("id")
+        path_value = asset.get("path")
+        if (
+            not isinstance(asset_id, str)
+            or asset_id not in expected_external_assets
+            or not isinstance(path_value, str)
+            or not path_value.strip()
+            or not isinstance(asset.get("sha256"), str)
+        ):
+            return False
+        expected_path = expected_external_assets[asset_id]
+        try:
+            return (
+                Path(path_value).resolve() == expected_path.resolve()
+                and asset["sha256"] == sha256(expected_path)
+                and asset.get("size_bytes") == expected_path.stat().st_size
+            )
+        except (OSError, ValueError):
+            return False
+
+    declared_ids = (
+        []
+        if not isinstance(declared_assets, list)
+        else [asset.get("id") if isinstance(asset, dict) else None for asset in declared_assets]
+    )
+    declared_ids_are_unique_strings = bool(
+        all(isinstance(asset_id, str) for asset_id in declared_ids)
+        and len(declared_ids) == len(set(declared_ids))
+    )
+    all_declared_assets_current = bool(
+        isinstance(declared_assets, list)
+        and declared_ids_are_unique_strings
+        and set(external_asset_by_id) == set(expected_external_assets)
+        and all(_manifest_asset_current(asset) for asset in declared_assets)
+    )
+    if args.source_mode == "explicit":
+        active_asset_paths = {
+            "agn9_explicit_source_sed_control": ROOT / "data" / "p4_explicit_agn_sed_control.csv",
+            "agn9_explicit_photon_ledger": args.ledger,
+            "agn9_explicit_photon_metadata": args.metadata,
+            "agn9_explicit_static_rt_input": args.static_input,
+            "agn9_explicit_static_rt_metadata": args.static_metadata,
+            "agn9_explicit_short_transport_control": args.transport_control,
+            "coeval_gas_input": gas_input,
+        }
+    else:
+        active_asset_paths = {
+            "agn9_static_rt_input": args.static_input,
+            "agn9_short_transport_control": args.transport_control,
+            "agn9_full_cfl_failed_probe": DEFAULT_FAILED_FULL_CFL_PROBE,
+            "coeval_gas_input": gas_input,
+        }
+    active_asset_contract_closes = all(
+        asset_id in external_asset_by_id
+        and Path(external_asset_by_id[asset_id]["path"]).resolve() == path.resolve()
+        for asset_id, path in active_asset_paths.items()
+    )
+    external_asset_contract_closes = bool(
         external_assets.get("schema") == "snrt_agn_nine_group_external_assets_v1"
         and external_assets.get("publication_deposit", {}).get("status")
         == "pending_final_publication_archive"
-        and all(
-            asset_id in external_asset_by_id
-            and Path(external_asset_by_id[asset_id]["path"]).resolve()
-            == path.resolve()
-            and external_asset_by_id[asset_id]["sha256"] == sha256(path)
-            and external_asset_by_id[asset_id]["size_bytes"] == path.stat().st_size
-            for asset_id, path in expected_external_assets.items()
-        )
+        and all_declared_assets_current
+        and active_asset_contract_closes
     )
+
+    if explicit_sed is None:
+        support_criteria = {
+            "wholly_below_sed_support_groups_zero": bool(
+                np.all(csv_totals[wholly_below_sed_support] == 0.0)
+                and np.all(
+                    ledger.photon_luminosity_s[:, wholly_below_sed_support] == 0.0
+                )
+            )
+        }
+    else:
+        serialized_closure = metadata["group_spectral_closure"]
+        expected_sigma = np.asarray(
+            (
+                explicit_expected_closure.cross_sections.hydrogen_i,
+                explicit_expected_closure.cross_sections.helium_i,
+                explicit_expected_closure.cross_sections.helium_ii,
+            ),
+            dtype=np.float64,
+        )
+        serialized_sigma = np.asarray(
+            (
+                serialized_closure["cross_sections_cm2"]["hydrogen_i"],
+                serialized_closure["cross_sections_cm2"]["helium_i"],
+                serialized_closure["cross_sections_cm2"]["helium_ii"],
+            ),
+            dtype=np.float64,
+        )
+        expected_excess = np.asarray(
+            explicit_expected_closure.photoelectron_excess_energy_ev,
+            dtype=np.float64,
+        )
+        serialized_excess = np.asarray(
+            (
+                serialized_closure["photoelectron_excess_energy_ev"]["hydrogen_i"],
+                serialized_closure["photoelectron_excess_energy_ev"]["helium_i"],
+                serialized_closure["photoelectron_excess_energy_ev"]["helium_ii"],
+            ),
+            dtype=np.float64,
+        )
+        support_criteria = {
+            "explicit_sed_group_integrals_reproduce_ledger": bool(
+                np.allclose(
+                    csv_totals,
+                    explicit_expected_group_photon_rate,
+                    rtol=2.0e-12,
+                    atol=0.0,
+                )
+            ),
+            "explicit_sed_quadrature_converged": bool(
+                explicit_expected_quadrature is not None
+                and explicit_expected_quadrature.converged
+                and explicit_expected_quadrature.maximum_relative_error
+                <= SED_QUADRATURE_RELATIVE_TOLERANCE
+                and metadata.get("source_sed_quadrature", {}).get("converged") is True
+            ),
+            "explicit_verner_quadrature_converged": bool(
+                explicit_expected_verner_quadrature is not None
+                and explicit_expected_verner_quadrature.converged
+                and explicit_expected_verner_quadrature.maximum_relative_error
+                <= SED_QUADRATURE_RELATIVE_TOLERANCE
+                and metadata.get("verner_quadrature", {}).get("converged") is True
+            ),
+            "explicit_verner_closure_reproduces_metadata": bool(
+                np.allclose(serialized_sigma, expected_sigma, rtol=2.0e-12, atol=1.0e-30)
+                and np.allclose(serialized_excess, expected_excess, rtol=2.0e-12, atol=1.0e-12)
+            ),
+            "explicit_group_means_reproduce_metadata": bool(
+                explicit_expected_group_mean_energy is not None
+                and np.allclose(
+                    group_means,
+                    explicit_expected_group_mean_energy,
+                    rtol=2.0e-12,
+                    atol=1.0e-12,
+                )
+            ),
+            "explicit_group_energy_fractions_reproduce_metadata": bool(
+                explicit_expected_group_energy_fraction is not None
+                and np.allclose(
+                    np.asarray(
+                        [group["energy_fraction_of_lbol"] for group in metadata["groups"]],
+                        dtype=np.float64,
+                    ),
+                    explicit_expected_group_energy_fraction,
+                    rtol=2.0e-12,
+                    atol=1.0e-30,
+                )
+            ),
+        }
 
     criteria = {
         "metadata_schema_v2": metadata.get("schema")
         == "snrt_agn_photon_ledger_v2",
-        "p0_default_group_table": metadata.get("group_table_mode") == "p0_default",
+        "source_mode_contract": explicit_source_contract_current,
+        "p0_default_group_table": (
+            metadata.get("group_table_mode") == "p0_default"
+            if args.source_mode == "pilot"
+            else metadata.get("group_table_mode") == "custom"
+        ),
         "exactly_nine_groups": metadata_edges.shape == (10,)
         and ledger.photon_luminosity_s.shape[1] == 9,
         "metadata_edges_exactly_match_config": np.array_equal(
@@ -296,30 +614,19 @@ def main() -> int:
             and metadata.get("total_bolometric_luminosity_erg_s")
             == total_bolometric_luminosity_erg_s
         ),
-        "wholly_below_sed_support_groups_zero": bool(
-            np.all(csv_totals[wholly_below_sed_support] == 0.0)
-            and np.all(
-                ledger.photon_luminosity_s[:, wholly_below_sed_support] == 0.0
-            )
-        ),
         "partial_and_full_sed_support_groups_positive": bool(
             np.all(csv_totals[partially_supported_by_sed | fully_supported_by_sed] > 0.0)
         ),
         "sed_support_status_and_intervals_explicit": bool(
             np.array_equal(metadata_group_status, expected_group_status)
             and all(
-                supported is None
-                if below
-                else np.array_equal(
-                    supported,
-                    (max(float(low), SED_MINIMUM_EV), float(high)),
+                (
+                    supported is None
+                    if expected_interval is None
+                    else np.array_equal(supported, expected_interval)
                 )
-                for low, high, below, supported in zip(
-                    expected_edges[:-1],
-                    expected_edges[1:],
-                    wholly_below_sed_support,
-                    metadata_supported_intervals,
-                    strict=True,
+                for expected_interval, supported in zip(
+                    expected_supported_intervals, metadata_supported_intervals, strict=True
                 )
             )
         ),
@@ -354,6 +661,10 @@ def main() -> int:
             "group_edges_file_sha256"
         )
         == sha256(args.group_edges),
+        "metadata_top_level_group_config_hash_current": metadata.get(
+            "group_edges_sha256"
+        )
+        == sha256(args.group_edges),
         "static_input_has_exact_nine_group_source_matrix": static_source_luminosity.shape
         == ledger.photon_luminosity_s.shape
         and static_source_luminosity.shape[1] == 9
@@ -379,6 +690,7 @@ def main() -> int:
         and static_provenance["zoom_manifest_sha256"] == sha256(zoom_manifest)
         and static_provenance["group_edges_sha256"] == sha256(args.group_edges),
         "external_hdf5_asset_manifest_closes": external_asset_contract_closes,
+        "external_asset_manifest_all_declared_current": all_declared_assets_current,
         "transport_control_uses_nine_groups": transported_group_energy.shape
         == (9,)
         and np.array_equal(transported_group_energy, group_means)
@@ -400,6 +712,7 @@ def main() -> int:
             < 1.0e-12
             and transport_attributes["electron_root_bracket_failure_count"] == 0
         ),
+        **support_criteria,
     }
 
     payload = {
@@ -407,11 +720,14 @@ def main() -> int:
         "passed": all(criteria.values()),
         "criteria": criteria,
         "configuration": {
+            "source_mode": args.source_mode,
             "group_edges_ev": expected_edges.tolist(),
             "number_of_groups": 9,
             "interval_convention": EXPECTED_INTERVAL_CONVENTION,
-            "sed_support_minimum_ev": SED_MINIMUM_EV,
+            "sed_support_minimum_ev": sed_support_minimum_ev,
+            "sed_support_maximum_ev": sed_support_maximum_ev,
             "species_threshold_ev": species_thresholds.tolist(),
+            "working_tree_attestation_scope": ATTESTATION_SCOPE,
         },
         "hard_xray_diagnostics": {
             "energy_interval_ev": intervals[hard_group].tolist(),
@@ -464,6 +780,9 @@ def main() -> int:
         },
         "provenance": {
             "git_head": git_head(),
+            "working_tree_attestation_scope": ATTESTATION_SCOPE,
+            "working_tree_clean": working_tree_clean,
+            "working_tree_status_sha256": working_tree_status_sha256,
             "validator_sha256": sha256(Path(__file__).resolve()),
             "generator_sha256": sha256(GENERATOR),
             "group_edges_sha256": sha256(args.group_edges),
@@ -480,6 +799,7 @@ def main() -> int:
             "external_asset_manifest_sha256": sha256(
                 args.external_asset_manifest
             ),
+            "source_sed_sha256": metadata.get("source_sed_sha256"),
         },
         "scope": (
             "AGN source-ledger group topology, SED integration, and hard-X-ray "
@@ -492,6 +812,7 @@ def main() -> int:
     )
     print(
         f"AGN_NINE_GROUP_{'PASS' if payload['passed'] else 'FAIL'} "
+        f"mode={args.source_mode} "
         f"hard_q={hard_photon_rate:.6g} "
         f"hard_to_soft_q={payload['hard_xray_diagnostics']['photon_number_ratio_to_0p5_2kev']:.6g} "
         f"hard_supported_sed_fraction={payload['hard_xray_diagnostics']['fraction_of_supported_sed_energy_power']:.6g} "

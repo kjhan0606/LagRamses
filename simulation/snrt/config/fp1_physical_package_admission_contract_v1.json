@@ -125,7 +125,15 @@
   "gate_validation": {
     "mode": "registered_executable_validators_fail_closed",
     "approved_validator_ids": [
-      "fp1.source_identity_and_rights.v1"
+      "fp1.coordinate_hull_and_population.v1",
+      "fp1.decay_epoch_and_projection.v1",
+      "fp1.energy_momentum_and_deposition.v1",
+      "fp1.fate_structure_and_remnant.v1",
+      "fp1.lifetime_and_wind_history.v1",
+      "fp1.pair_instability.v1",
+      "fp1.runtime_invariance_and_reproduction.v1",
+      "fp1.source_identity_and_rights.v1",
+      "fp1.terminal_mass_and_species_closure.v1"
     ],
     "hash_only_validator_artifact_may_pass": false
   },
@@ -148,7 +156,35 @@
   "candidate_qualification": {
     "sukhbold2016_w18_n20": {
       "role": "solar_engine_validation_only",
-      "gate_evidence": {},
+      "gate_evidence": {
+        "coordinate_hull_and_population": {
+          "validator_id": "fp1.coordinate_hull_and_population.v1"
+        },
+        "decay_epoch_and_projection": {
+          "validator_id": "fp1.decay_epoch_and_projection.v1"
+        },
+        "energy_momentum_and_deposition": {
+          "validator_id": "fp1.energy_momentum_and_deposition.v1"
+        },
+        "fate_structure_and_remnant": {
+          "validator_id": "fp1.fate_structure_and_remnant.v1"
+        },
+        "lifetime_and_wind_history": {
+          "validator_id": "fp1.lifetime_and_wind_history.v1"
+        },
+        "pair_instability": {
+          "validator_id": "fp1.pair_instability.v1"
+        },
+        "runtime_invariance_and_reproduction": {
+          "validator_id": "fp1.runtime_invariance_and_reproduction.v1"
+        },
+        "source_identity_and_rights": {
+          "validator_id": "fp1.source_identity_and_rights.v1"
+        },
+        "terminal_mass_and_species_closure": {
+          "validator_id": "fp1.terminal_mass_and_species_closure.v1"
+        }
+      },
       "hard_blockers": [
         "redistribution_permission_unverified",
         "failed_node_remnant_and_wind_records_incomplete",
@@ -161,8 +197,32 @@
     "boccioli_roberti2026_lc18": {
       "role": "multi_metallicity_rotation_candidate_review",
       "gate_evidence": {
+        "coordinate_hull_and_population": {
+          "validator_id": "fp1.coordinate_hull_and_population.v1"
+        },
+        "decay_epoch_and_projection": {
+          "validator_id": "fp1.decay_epoch_and_projection.v1"
+        },
+        "energy_momentum_and_deposition": {
+          "validator_id": "fp1.energy_momentum_and_deposition.v1"
+        },
+        "fate_structure_and_remnant": {
+          "validator_id": "fp1.fate_structure_and_remnant.v1"
+        },
+        "lifetime_and_wind_history": {
+          "validator_id": "fp1.lifetime_and_wind_history.v1"
+        },
+        "pair_instability": {
+          "validator_id": "fp1.pair_instability.v1"
+        },
+        "runtime_invariance_and_reproduction": {
+          "validator_id": "fp1.runtime_invariance_and_reproduction.v1"
+        },
         "source_identity_and_rights": {
           "validator_id": "fp1.source_identity_and_rights.v1"
+        },
+        "terminal_mass_and_species_closure": {
+          "validator_id": "fp1.terminal_mass_and_species_closure.v1"
         }
       },
       "hard_blockers": [
@@ -175,7 +235,35 @@
     },
     "limongi_chieffi2018_set_r": {
       "role": "metallicity_rotation_structure_wind_comparison",
-      "gate_evidence": {},
+      "gate_evidence": {
+        "coordinate_hull_and_population": {
+          "validator_id": "fp1.coordinate_hull_and_population.v1"
+        },
+        "decay_epoch_and_projection": {
+          "validator_id": "fp1.decay_epoch_and_projection.v1"
+        },
+        "energy_momentum_and_deposition": {
+          "validator_id": "fp1.energy_momentum_and_deposition.v1"
+        },
+        "fate_structure_and_remnant": {
+          "validator_id": "fp1.fate_structure_and_remnant.v1"
+        },
+        "lifetime_and_wind_history": {
+          "validator_id": "fp1.lifetime_and_wind_history.v1"
+        },
+        "pair_instability": {
+          "validator_id": "fp1.pair_instability.v1"
+        },
+        "runtime_invariance_and_reproduction": {
+          "validator_id": "fp1.runtime_invariance_and_reproduction.v1"
+        },
+        "source_identity_and_rights": {
+          "validator_id": "fp1.source_identity_and_rights.v1"
+        },
+        "terminal_mass_and_species_closure": {
+          "validator_id": "fp1.terminal_mass_and_species_closure.v1"
+        }
+      },
       "hard_blockers": [
         "complete_runtime_domain_missing",
         "age_resolved_wind_missing",
@@ -186,7 +274,35 @@
     },
     "heger_woosley2010_popiii": {
       "role": "zero_metallicity_parameter_grid_review",
-      "gate_evidence": {},
+      "gate_evidence": {
+        "coordinate_hull_and_population": {
+          "validator_id": "fp1.coordinate_hull_and_population.v1"
+        },
+        "decay_epoch_and_projection": {
+          "validator_id": "fp1.decay_epoch_and_projection.v1"
+        },
+        "energy_momentum_and_deposition": {
+          "validator_id": "fp1.energy_momentum_and_deposition.v1"
+        },
+        "fate_structure_and_remnant": {
+          "validator_id": "fp1.fate_structure_and_remnant.v1"
+        },
+        "lifetime_and_wind_history": {
+          "validator_id": "fp1.lifetime_and_wind_history.v1"
+        },
+        "pair_instability": {
+          "validator_id": "fp1.pair_instability.v1"
+        },
+        "runtime_invariance_and_reproduction": {
+          "validator_id": "fp1.runtime_invariance_and_reproduction.v1"
+        },
+        "source_identity_and_rights": {
+          "validator_id": "fp1.source_identity_and_rights.v1"
+        },
+        "terminal_mass_and_species_closure": {
+          "validator_id": "fp1.terminal_mass_and_species_closure.v1"
+        }
+      },
       "hard_blockers": [
         "positive_metallicity_axis_missing",
         "runtime_8_to_10_and_100_to_120_edges_missing",

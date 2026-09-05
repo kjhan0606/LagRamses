@@ -116,6 +116,13 @@ def main() -> int:
             dust_momentum = np.asarray(handle["rates/dust_momentum_rate_dyn_cm3"])
             dust_absorbed = np.asarray(handle["diagnostics/cumulative_dust_absorbed_photons_cm3"])
             assert handle.attrs["dust_model"] == "metadata"
+            assert handle.attrs["dust_opacity_schema"] == "snrt_dust_opacity_v1"
+            assert handle.attrs["dust_binding_status"] == "reference_control"
+            assert handle.attrs["dust_opacity_metadata_sha256"]
+            assert handle.attrs["dust_payload_sha256"] == ""
+            assert handle.attrs["dust_source_table_sha256"] == ""
+            assert handle.attrs["dust_builder_sha256"] == ""
+            assert handle.attrs["source_sed_identity"] == ""
             assert np.asarray(handle["group_energy_ev"]).shape == (9,)
             assert dust_momentum.shape == (3, *shape)
             assert dust_absorbed.shape == (9, *shape)

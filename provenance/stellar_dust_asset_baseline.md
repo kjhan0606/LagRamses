@@ -36,8 +36,12 @@ the rounded `C_ext/H * (1-albedo)` consistency, and produces the P0 sidecar
 photon-number weighting proportional to `E^-1`. Its staged SHA256 is
 `bde87ee9a4785bd47903c64cfff4a8609a48d8f8efe1fc42272944d67988bb07`.
 
-The sidecar is absorption-only. Dust scattering, IR re-emission, grain
-temperature evolution, and a source-specific stellar/AGN spectral weighting
+The sidecar is absorption-only and remains the `snrt_dust_opacity_v1`
+reference-control artifact. The source-bound `snrt_dust_opacity_v2` builder is
+now implemented and tested; it requires an explicit validated source SED and
+binds its identity, raw SED hash, Draine input hash, and group-edge hash. No
+source-specific stellar/AGN SED has yet been approved or promoted into a
+science run. Dust scattering, IR re-emission, and grain-temperature evolution
 remain separate promotion gates.
 
 ## Coevality gate

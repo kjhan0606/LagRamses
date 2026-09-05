@@ -1,5 +1,5 @@
 {
-  "audit_code_sha256": "f786d0590b4ed753bb65278eb85df2f0c84cf675fcddcb8d6682d453ac0d7255",
+  "audit_code_sha256": "9c2258936dd6cd7bf7ae56e223b1a0818a9f7ad0b226310d20fe9b69d3231aa0",
   "blockers": [
     "Reconcile phase-endpoint mass loss with the integrated isotopic wind table at source precision.",
     "Provide or approve a time-resolved wind composition model rather than scaling one terminal composition over all phases.",
@@ -25,9 +25,17 @@
     "model_count": 108,
     "monotonic_mass_violation_count": 0,
     "negative_cumulative_mass_count": 0,
+    "observed_source_order_matches_contract_rank": true,
+    "phase_order_violation_count": 0,
     "phase_row_count_after_exact_collapse": 845,
     "time_resolved_isotopic_composition_available": false,
     "time_resolved_mass_available": true
+  },
+  "phase_history_shared_code_sha256": "71ea5453659b15882e5d594c4e47c303d38e7a78e05596857450720a9f4c374c",
+  "phase_order_provenance": {
+    "interpretation": "MS/H/He/PSN labels are source-attested; the C/Ne/O/Si ordering is a project contract assumption.",
+    "source": "g2_limongi_phase_mass_history_contract_v1",
+    "source_attested_for_intermediate_burning_order": false
   },
   "production_ready": false,
   "runtime_deposition_allowed": false,

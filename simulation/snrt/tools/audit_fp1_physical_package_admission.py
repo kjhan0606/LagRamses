@@ -86,6 +86,12 @@ REQUIRED_GATES = {
     "pair_instability",
     "runtime_invariance_and_reproduction",
 }
+GATE_EVIDENCE_STATUSES = {
+    "missing_evidence",
+    "validator_blocked",
+    "validator_error",
+    "pass",
+}
 REQUIRED_FALSE_POLICIES = {
     "failed_or_direct_collapse_nodes_may_be_omitted",
     "missing_values_may_be_rewritten_as_zero",
@@ -310,27 +316,29 @@ def _evaluate_candidate_gate_evidence(
     *,
     approved_validator_ids: set[str],
     required_gates: dict[str, dict[str, Any]],
-) -> tuple[list[str], dict[str, Any]]:
+) -> tuple[list[str], dict[str, Any], dict[str, str], dict[str, str]]:
     if not isinstance(gate_evidence, dict) or not set(gate_evidence).issubset(REQUIRED_GATES):
         raise PhysicalPackageAdmissionError(
             f"candidate gate-evidence set is malformed: {candidate_id}"
         )
     passed: list[str] = []
     reports: dict[str, Any] = {}
+    statuses = {gate_id: "missing_evidence" for gate_id in REQUIRED_GATES}
+    errors: dict[str, str] = {}
     for gate_id, evidence in sorted(gate_evidence.items()):
         if not isinstance(evidence, dict) or set(evidence) != {"validator_id"}:
-            raise PhysicalPackageAdmissionError(
-                f"candidate executable gate evidence is malformed: {candidate_id}:{gate_id}"
-            )
+            statuses[gate_id] = "validator_error"
+            errors[gate_id] = "candidate executable gate evidence is malformed"
+            continue
         validator_id = evidence.get("validator_id")
         if not isinstance(validator_id, str) or not validator_id:
-            raise PhysicalPackageAdmissionError(
-                f"candidate gate validator id is malformed: {candidate_id}:{gate_id}"
-            )
+            statuses[gate_id] = "validator_error"
+            errors[gate_id] = "candidate gate validator id is malformed"
+            continue
         if validator_id not in approved_validator_ids:
-            raise PhysicalPackageAdmissionError(
-                f"candidate gate validator is not contract-approved: {candidate_id}:{gate_id}"
-            )
+            statuses[gate_id] = "validator_error"
+            errors[gate_id] = "candidate gate validator is not contract-approved"
+            continue
         try:
             report = run_registered_validator(
                 validator_id=validator_id,
@@ -338,18 +346,30 @@ def _evaluate_candidate_gate_evidence(
                 candidate_id=candidate_id,
             )
         except GateValidatorRegistryError as exc:
-            raise PhysicalPackageAdmissionError(
-                f"candidate executable gate validation failed: {candidate_id}:{gate_id}: {exc}"
-            ) from exc
+            statuses[gate_id] = "validator_error"
+            errors[gate_id] = str(exc)
+            continue
         expected_requirements = set(required_gates[gate_id]["requires"])
         if set(report["requirements"]) != expected_requirements:
-            raise PhysicalPackageAdmissionError(
-                f"candidate validator requirement coverage mismatch: {candidate_id}:{gate_id}"
-            )
+            statuses[gate_id] = "validator_error"
+            errors[gate_id] = "candidate validator requirement coverage mismatch"
+            continue
         reports[gate_id] = report
-        if report["passed"] is True:
+        if report["status"] == "pass" and report["passed"] is True:
+            statuses[gate_id] = "pass"
             passed.append(gate_id)
-    return passed, reports
+        elif report["status"] == "blocked" and report["passed"] is False:
+            statuses[gate_id] = "validator_blocked"
+        else:
+            statuses[gate_id] = "validator_error"
+            errors[gate_id] = "validator report has an unsupported outcome"
+    if set(statuses) != REQUIRED_GATES or any(
+        status not in GATE_EVIDENCE_STATUSES for status in statuses.values()
+    ):
+        raise PhysicalPackageAdmissionError(
+            f"candidate gate-evidence status map is malformed: {candidate_id}"
+        )
+    return passed, reports, statuses, errors
 
 
 def evaluate_physical_package_selection(
@@ -460,6 +480,16 @@ def evaluate_physical_package_selection(
         ):
             raise PhysicalPackageAdmissionError(
                 "selected physical package lacks all verified executable gate reports"
+            )
+        gate_evidence_status = selected_candidate.get("gate_evidence_status")
+        if (
+            not isinstance(gate_evidence_status, dict)
+            or set(gate_evidence_status) != REQUIRED_GATES
+            or any(status != "pass" for status in gate_evidence_status.values())
+            or selected_candidate.get("gate_validation_errors")
+        ):
+            raise PhysicalPackageAdmissionError(
+                "selected physical package has non-passing executable gate evidence"
             )
         for gate_id, gate_report in verified_gate_evidence.items():
             if (
@@ -699,9 +729,15 @@ def audit_physical_package_admission(
             raise PhysicalPackageAdmissionError(
                 f"candidate qualification has undeclared fields: {candidate_id}"
             )
-        passed, gate_report = _evaluate_candidate_gate_evidence(
+        gate_evidence = record.get("gate_evidence")
+        if not isinstance(gate_evidence, dict) or set(gate_evidence) != REQUIRED_GATES:
+            raise PhysicalPackageAdmissionError(
+                "candidate admission record must name every required validator: "
+                + candidate_id
+            )
+        passed, gate_report, gate_statuses, gate_errors = _evaluate_candidate_gate_evidence(
             candidate_id,
-            record.get("gate_evidence"),
+            gate_evidence,
             approved_validator_ids=approved_validator_ids,
             required_gates=gates,
         )
@@ -709,7 +745,7 @@ def audit_physical_package_admission(
         if not isinstance(blockers, list):
             raise PhysicalPackageAdmissionError(f"candidate blockers are malformed: {candidate_id}")
         missing = sorted(REQUIRED_GATES - set(passed))
-        qualified = not missing and not blockers
+        qualified = all(status == "pass" for status in gate_statuses.values()) and not blockers
         if record.get("production_qualified") is not qualified:
             raise PhysicalPackageAdmissionError(
                 f"candidate production qualification disagrees with verified evidence: {candidate_id}"
@@ -719,6 +755,8 @@ def audit_physical_package_admission(
             "passed_gate_ids": passed,
             "missing_gate_ids": missing,
             "verified_gate_evidence": gate_report,
+            "gate_evidence_status": gate_statuses,
+            "gate_validation_errors": gate_errors,
             "hard_blockers": blockers,
             "production_qualified": qualified,
         }

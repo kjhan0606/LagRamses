@@ -2,6 +2,14 @@
 
 Status: mandatory feedback work, 2026-09-02.
 
+The 2026-09-04 F-P1.2 stellar/SNIa source-to-cell transaction bundle is now
+closed with a Claude Opus 5 `PASS`.  Its generic and SNIa row-major scratch
+deltas, full field-map validation, independent momentum/kinetic-energy
+accounting, OpenMP same-cell commit boundary, and focused native/source/build
+evidence are accepted as engineering closure.  This does not promote a
+physical yield/fate source, close the 40--120 M_sun seam, enable live runtime
+feedback, or close SED/dust physics; those gates remain as stated below.
+
 This file prevents the P0.4 fail-closed guards from being mistaken for a scope
 reduction.  The guards only prohibit incomplete physics from entering a
 production run.  They do not close or defer the following work to the generic
@@ -288,11 +296,11 @@ selection or a runtime activation.
   model's own ledgers close.
 
 No gate above can be closed by a synthetic fixture, a parser-only test, or a
-silent default.  Effective 2026-09-04, Claude Opus 5 is the active
-implementation-stage auditor and reviews each completed implementation step.
-Grok is the active bundle-start plan auditor and must review the driver's
-next-bundle plan for final-purpose alignment, scientific/technical
-justification, feasibility, and scope before implementation starts.  AGY is
-retired from the active roster; earlier AGY results remain historical
-provenance only.  Conditional or negative Opus findings may trigger the
-existing GPT-5.6 Sol re-audit path before the driver writes the next plan.
+silent default.  Effective 2026-09-04, Claude Opus 5 is the sole active
+auditor: it reviews the driver's next-bundle plan before implementation and
+performs one bundled audit after each completed implementation bundle.  Grok
+is no longer active; its quota-failure attempt is historical provenance only.
+AGY is retired from the active roster; earlier AGY results remain historical
+provenance only.
+Conditional or negative Opus findings may trigger the existing GPT-5.6 Sol
+re-audit path when specifically invoked by the project workflow or user.

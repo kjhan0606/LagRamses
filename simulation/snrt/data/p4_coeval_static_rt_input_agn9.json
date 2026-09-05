@@ -26,12 +26,12 @@
   ],
   "group_interval_convention": "left_closed_right_open_except_final_closed",
   "provenance": {
-    "source_rebind_tool_sha256": "a9f815e3bb64c08c2df7a8a36687d74e8ec7a0c1a0e51a454c6867ca1c2b091f",
+    "source_rebind_tool_sha256": "47c44777dae9a7dccbf979ee2ffd0b36a7c4befc72de58824696ca9f5dc0d6b8",
     "gas_input_sha256": "bd860c6361b31e945a728a694b98d5ae7f1d45051cb7aaff090c9d36ce47a378",
     "gas_metadata_sha256": "19764f863f4440c3c626210b8c1df053e878e0079dffeb060c6d12c4e3cf54fa",
     "zoom_manifest_sha256": "3a11e71bc88f622d7f409bf152b2f6ab97c801ddea6267162efd2354af5f4cb3",
     "photon_ledger_sha256": "bfdab21cffc3fb9a7d02e7d6a3f2e892fd6e7d87076022ecb6b2fda902e19a4e",
-    "photon_metadata_sha256": "506bb47abd2481d7caab1f5ac3fa0451af10e0ec5907ec61ce03738639e9a53a",
+    "photon_metadata_sha256": "d2326e4ec0320e9e0b34a58460b08bddafa4b4433322691a9dd346a49762909d",
     "group_edges_sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1"
   },
   "limits": [

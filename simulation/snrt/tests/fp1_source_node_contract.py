@@ -19,6 +19,9 @@ from audit_fp1_source_node_contract import (  # noqa: E402
     SourceNodeContractError,
     audit_source_node_contract,
 )
+from fp1_gate_validator_registry import REGISTERED_VALIDATORS  # noqa: E402
+from fp1_source_node_fixture import approved_source_node_contract  # noqa: E402
+from validate_fp1_source_identity_rights import VALIDATOR_ID  # noqa: E402
 
 
 def _load(path: Path) -> dict:
@@ -49,6 +52,7 @@ def main() -> int:
     assert report["explicit_null_zero_semantics"] is True
     assert report["silent_axis_drop_allowed"] is False
     assert report["physical_node_count"] == 0
+    assert report["rights_bindings"] == []
 
     missing_axis = copy.deepcopy(current)
     missing_axis["required_fields"]["coordinates"].remove("engine_or_branch_id")
@@ -122,6 +126,55 @@ def main() -> int:
     assert node_report["status"] == "review_nodes_present"
     assert node_report["physical_node_count"] == 1
     assert node_report["validated_nodes"][0]["outcome"] == "direct_collapse"
+
+    synthetic_approved = approved_source_node_contract()
+    _expect_node_error(
+        synthetic_approved,
+        "no unique code-registered candidate",
+    )
+
+    known_source_wrong_package = copy.deepcopy(synthetic_approved)
+    known_source_wrong_package["physical_nodes"][0].update(
+        {
+            "source_id": "boccioli_roberti2026_neutrino_ccsn",
+            "package_fingerprint": "c" * 64,
+        }
+    )
+    _expect_node_error(
+        known_source_wrong_package,
+        "disagrees with executed rights validator",
+    )
+
+    known_source_validator_blocked = copy.deepcopy(synthetic_approved)
+    known_source_validator_blocked["physical_nodes"][0].update(
+        {
+            "source_id": "boccioli_roberti2026_neutrino_ccsn",
+            "package_fingerprint": (
+                "3370571245be954b1330d0b91bae585ffed47b3a1c2d10ffa11fc4ef7b57065b"
+            ),
+        }
+    )
+    original_rights_runner = REGISTERED_VALIDATORS[VALIDATOR_ID]["runner"]
+
+    def blocked_rights_runner(candidate_id: str) -> dict:
+        report = original_rights_runner(candidate_id)
+        report["requirements"] = {
+            requirement: False for requirement in report["requirements"]
+        }
+        report["blockers"] = ["synthetic_rights_validator_blocked"]
+        report["package_fingerprint_sha256"] = None
+        report["status"] = "blocked"
+        report["passed"] = False
+        return report
+
+    REGISTERED_VALIDATORS[VALIDATOR_ID]["runner"] = blocked_rights_runner
+    try:
+        _expect_node_error(
+            known_source_validator_blocked,
+            "rights validator did not pass",
+        )
+    finally:
+        REGISTERED_VALIDATORS[VALIDATOR_ID]["runner"] = original_rights_runner
 
     invalid_direct_collapse = copy.deepcopy(review_nodes)
     invalid_direct_collapse["physical_nodes"][0]["terminal_ejecta_mass_msun"] = 1.0

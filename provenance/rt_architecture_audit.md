@@ -1,8 +1,8 @@
 # SNRT algorithm and wiring audit
 
-Status: recorded 2026-08-31  
+Status: recorded 2026-08-31
 Audit mode: scientific architecture review (algorithm, data flow, and physical
-justification); this was not a defect-hunting or production-run audit.  
+justification); this was not a defect-hunting or production-run audit.
 Reviewer role: Fable-requested independent review (the agent runtime displayed
 the reviewer as `Nash`).
 
@@ -43,10 +43,18 @@ Relevant implementation anchors:
 
 1. Group opacity must be SED-weighted.  A production group needs
    `∫N_E σ(E)dE / ∫N_E dE`, and the photoelectron excess energy must use the
-   same absorber-weighted integral.  The new offline closure is implemented in
-   [`primordial.py`](../simulation/snrt/snrt_core/primordial.py), serialized by
+   same absorber-weighted integral. The source SED utility, explicit AGN
+   conversion, source-weighted Draine v2 sidecar, and static-runner identity
+   matching are now implemented in
+   [`sed.py`](../simulation/snrt/snrt_core/sed.py),
+   [`primordial.py`](../simulation/snrt/snrt_core/primordial.py),
    [`p4_build_agn_photon_ledger.py`](../simulation/snrt/tools/p4_build_agn_photon_ledger.py),
-   and consumed by P4-P6 runners.
+   and the P4/P5 runners. They establish a candidate engineering closure;
+   they do not approve an astrophysical SED or dust mixture.
+   F-P2.2 additionally binds the explicit-source closure dependency manifests
+   and canonical metadata payload hashes, constrains dust status vocabulary,
+   and records the validated dust provenance in P4/P5 artifacts. The explicit
+   nine-group canonical control remains synthetic and non-physical.
 2. The photon ledger must use the transport operator's exact absorbed loss,
    including source photons emitted within the step.  The ledger now rebuilds
    the same `pre_absorption → exp(-tau)` operation in
@@ -89,7 +97,8 @@ production calculation was launched.
   claims, or quantitative RHD interpretation.
 
 The remaining scientific gates are: stage and validate the adopted stellar SED
-table (including its IMF and metallicity convention); replace the remaining
-dust/chemistry pilot constants with audited HDF5 fields or an explicitly
-approved subgrid prescription so the production contract passes; and then
-choose and implement the dust/stellar/feedback scope explicitly.
+table (including its IMF and metallicity convention); select and approve the
+AGN SED/escape/obscuration and dust-to-metal prescription; replace the
+remaining dust/chemistry pilot constants with audited HDF5 fields or an
+explicitly approved subgrid prescription so the production contract passes;
+and then choose and implement the dust/stellar/feedback scope explicitly.

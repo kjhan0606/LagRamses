@@ -1,7 +1,8 @@
 # AGN nine-group source-ledger validation
 
-Date: 2026-09-02
-Stage status: internal gates **PASS**; final Claude Opus 5 re-audit **PASS**
+Date: 2026-09-05
+Stage status: F-P2.3 engineering gates **PASS**; bundled Claude Opus 5
+follow-up audit **PASS** for the declared engineering scope
 
 ## Scope and acceptance contract
 
@@ -28,6 +29,8 @@ The hard gates require:
   source-rebind, and short transport-control hashes;
 - current gas-input, gas-sidecar, zoom-manifest, and external-HDF5 manifest
   hashes;
+- explicit source-closure interpolation/quadrature identity and convergence
+  diagnostics;
 - a nine-group production-runner control passing photon, H/He, fixed-point,
   photoelectron-energy, root, and finite-value gates.
 
@@ -60,6 +63,25 @@ explicit zero-photon controls. Group 2 is serialized on the configured
 `[5.6,11.2] eV` interval but is explicitly marked partially supported and is
 integrated only over `[10,11.2] eV`; no spectrum is extrapolated below
 `10 eV`. Groups 3--8 are fully supported.
+
+## Explicit SED engineering control
+
+The canonical explicit path is
+`data/p4_explicit_agn_sed_control.csv`, a fully tabulated constant
+`energy_fraction_per_ev` wiring fixture on `[0.01,10000] eV`. It is marked in
+the hash-bound metadata as `synthetic_non_physical_wiring_fixture`; it is not
+an adopted AGN spectrum and is not an obscuration or escape prescription.
+
+The source boundary interpolates the tabulated energy fraction piecewise
+linearly, derives `q_E=f_E/(E_eV*EV_ERG)`, and integrates each group on a
+logarithmically refined union grid. The 2048-versus-4096 subdivision
+convergence difference is required to be no larger than `5e-6`. The explicit
+canonical ledger reports maximum source-moment difference `6.32e-7` and
+maximum Verner-closure difference `1.57e-6`; both pass. The validator
+reconstructs the explicit photon rates, group means, group energy fractions,
+and H I/He I/He II closure from the SED and compares them with the serialized
+metadata. Source-weighted dust uses the same convention, but no physical
+source-bound dust sidecar is promoted by this document.
 
 ## Restored hard-X-ray group
 
@@ -116,12 +138,21 @@ passes:
 
 The control HDF5 is
 `data/p4_validation/p4_agn9_stage4_0p001myr.h5`, SHA256
-`8db00cbab5699523e9652e3c3c05bf033f69b4445d5af7bffc1c3ea7f11feeef`.
+`77eae4b74b67d2a4a49c965443007a278e4be0d33c2d3c53bdff7a6c981c4467`.
 A separate full-CFL one-step probe (`0.1045 Myr`) failed the H ledger at
 `7.5731e-3`; this is preserved locally as evidence of the already declared
-source-cell timestep problem and is not used as a passing artifact. The next
-B3 gate must quantify timestep and spatial convergence with the nine-group
+source-cell timestep problem and is not used as a passing artifact. Its
+expected-failure reproduction is recorded in the external-asset manifest. The
+next B3 gate must quantify timestep and spatial convergence with the nine-group
 input.
+
+The explicit control uses the same static gas cube and S4/float64 runner for
+`0.001 Myr`. Its transport control is
+`data/p4_validation/p4_agn9_explicit_stage4_0p001myr.h5`, SHA256
+`cc2227f32f07f7b320c16d2434541516cf3e978ac036f4b7be77c38610925bda`; it
+passes with photon ledger `1.13e-16`, H ledger L1 `2.04e-9`, fixed-point
+residual `2.33e-10`, photoelectron ledger `3.47e-18`, and zero electron-root
+bracket failures. This is an engineering routing control only.
 
 ## Reproduction and provenance
 
@@ -129,21 +160,43 @@ input.
 cd /gpfs/kjhan/LRD_JWST/simulation/snrt
 .venv/bin/python tests/agn_photon_ledger.py
 .venv/bin/python tests/p0_sed_closure.py
+.venv/bin/python tests/source_sed_dust_closure.py
+.venv/bin/python tools/p4_build_agn_photon_ledger.py \
+  --candidates data/p4_pilot_zoom_agn_candidates.csv \
+  --output data/p4_pilot_agn_photon_ledger.csv \
+  --metadata-output data/p4_pilot_agn_photon_ledger.json
+.venv/bin/python tools/p4_build_agn_photon_ledger.py \
+  --candidates data/p4_pilot_zoom_agn_candidates.csv \
+  --group-edges config/p0_photon_group_edges_ev.txt \
+  --sed-table data/p4_explicit_agn_sed_control.csv \
+  --sed-bolometric-fraction 1.0 \
+  --output data/p4_explicit_agn_photon_ledger.csv \
+  --metadata-output data/p4_explicit_agn_photon_ledger.json
 .venv/bin/python tools/validate_agn_nine_group_ledger.py \
   --output data/agn_nine_group_validation.json
+.venv/bin/python tools/validate_agn_nine_group_ledger.py \
+  --source-mode explicit \
+  --output data/agn_nine_group_explicit_validation.json
 .venv/bin/python tests/agn_nine_group_artifact.py
+.venv/bin/python tests/agn_nine_group_explicit_artifact.py
 ```
 
 - Canonical validation JSON SHA256:
-  `2a66b4f3893c2ccf52b67cc2f4cbe10ac9102cf717cbbefec2e0fe6e16ecde75`.
+  `098bdf77c46c740b7b4c101179ce4501374479bd898976a6440d3732c3edd1cf`.
+- Explicit validation JSON SHA256:
+  `8532696e1a6ed34a1600a5a5f083bc9ccee7089b4245032a103e02b088332349`.
 - Validator SHA256:
-  `749d26595a02470b4cf4c9b1733b45a59235c9777eb73cb4120b3f72ce922fd1`.
+  `c3f2102b5aba8cba4fe91e31d46633fa2d48d811cc35c2dc7ac1e6ca83e7785c`.
 - Canonical photon CSV SHA256:
   `bfdab21cffc3fb9a7d02e7d6a3f2e892fd6e7d87076022ecb6b2fda902e19a4e`.
 - Canonical photon metadata SHA256:
-  `506bb47abd2481d7caab1f5ac3fa0451af10e0ec5907ec61ce03738639e9a53a`.
+  `d2326e4ec0320e9e0b34a58460b08bddafa4b4433322691a9dd346a49762909d`.
+- Explicit photon CSV SHA256:
+  `1a406398414f258e4f0d00544fd3fee998d659009fc177999e023eb69eb69743`.
+- Explicit photon metadata SHA256:
+  `179c3bd1b20fc6575b029b6410e651760f38e52945721f3504c4eecb642ba34b`.
 - External-asset manifest SHA256:
-  `0dea881608b7fdbfc6045db08446e74f674ecac23e60efe9528b514fa61095a4`.
+  `cba3f8525d616c4bdd52dffcc07019e237a6858dac0b1afddf5eb91e4d66ed7b`.
 
 The initial independent audit is recorded in
 [`provenance/claude_opus5_agn_nine_group_audit_2026-09-02.md`](../../provenance/claude_opus5_agn_nine_group_audit_2026-09-02.md).
@@ -153,6 +206,15 @@ documented above. The focused
 independently closed all five findings and M9/Mo2 with final `PASS`. Its two
 new low-severity observations—full bolometric coverage and SED-normalization
 sensitivity—remain explicit obligations for the final publication gate.
+
+The F-P2.3 bundled audit is recorded in
+[`provenance/claude_opus5_fp2_3_canonical_asset_quadrature_bundle_end_audit_2026-09-05.md`](../../provenance/claude_opus5_fp2_3_canonical_asset_quadrature_bundle_end_audit_2026-09-05.md).
+It accepted the numerical core, all declared asset hashes, and the scoped
+attestation, but requested this document refresh and explicit checks of
+serialized group means/fractions. Those repairs are now present in the
+worktree; the follow-up Opus disposition returned PASS for this declared
+engineering scope. Physical source selection and runtime promotion remain
+separate gates.
 
 The SED and unit conversion are source-ledger closures, not an LRD obscuration
 model. The intrinsic normalization and escape fraction remain explicit

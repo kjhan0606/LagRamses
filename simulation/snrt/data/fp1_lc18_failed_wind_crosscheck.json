@@ -9,7 +9,7 @@
     ],
     "hard_blockers_unchanged": true,
     "physical_package_contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
-    "physical_package_contract_sha256": "ce6d26667bcb15b0cc688b632ad637de74c77908f52edc8c0e872c8847798579",
+    "physical_package_contract_sha256": "06cd0858dfb3a79675bbb9c1f83c7fde33b0069637a2bf4e384ff1e7922359e0",
     "production_qualified": false
   },
   "boccioli_contract_sha256": "5e5e079af58f250be465427f3e070b9014e9e6af99ebbc5e623d6236fea55443",
@@ -304,13 +304,18 @@
         "source_line": 864
       }
     ],
+    "maximum_terminal_age_yr": 23040321.00167,
     "maximum_unique_phase_count_per_model": 8,
+    "minimum_terminal_age_yr": 3103519.43314,
     "minimum_unique_phase_count_per_model": 3,
     "missing_psn_terminal_phase": [],
     "missing_psn_terminal_phase_count": 0,
     "model_count": 108,
+    "negative_cumulative_mass": [],
+    "negative_cumulative_mass_count": 0,
     "nonincreasing_total_mass_violation_count": 0,
     "nonincreasing_total_mass_violations": [],
+    "observed_source_order_matches_contract_rank": true,
     "phase_order": [
       "MS",
       "H",
@@ -326,10 +331,13 @@
       "source": "g2_limongi_phase_mass_history_contract_v1",
       "source_attested_for_intermediate_burning_order": false
     },
+    "phase_order_violation_count": 0,
+    "phase_order_violations": [],
     "strictly_increasing_cumulative_age_violation_count": 0,
     "strictly_increasing_cumulative_age_violations": [],
     "unique_phase_row_count": 845
   },
+  "phase_history_shared_code_sha256": "71ea5453659b15882e5d594c4e47c303d38e7a78e05596857450720a9f4c374c",
   "physical_nodes_emitted": 0,
   "presupernova_structure": {
     "available_model_count": 96,
@@ -11834,5 +11842,5 @@
     "summary_minus_cds_above_phase_endpoint_half_bin_count": 52,
     "summary_wind_positive_count": 52
   },
-  "tool_sha256": "3a47dc51d15d0da6685a9d021fd3aec01c57eb10545c03fe8ed702740480cdcd"
+  "tool_sha256": "7382132a6e6d9b974dff64fc11a8c316c631f311dc244c9b4516624d271ea0f8"
 }

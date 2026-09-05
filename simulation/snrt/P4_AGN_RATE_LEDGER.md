@@ -40,6 +40,41 @@ This is an AGN rate ledger, not a photon ledger. Conversion to
 bounds, then feeds `P4_SOURCE_LEDGER.md`. It must not be replaced by a
 conversion from sink mass or `dMsmbh` alone.
 
+The photon-ledger converter accepts an explicit tabulated source SED:
+
+```bash
+python tools/p4_build_agn_photon_ledger.py \
+  --candidates data/agn_rate_candidates.csv \
+  --sed-table PATH/to/agn_source_sed.csv \
+  --sed-bolometric-fraction 0.95 \
+  --output data/agn_photon_ledger.csv \
+  --metadata-output data/agn_photon_ledger.json
+```
+
+The CSV must contain strictly increasing `energy_ev` and non-negative
+`energy_fraction_per_ev` columns. The latter is dimensionless per eV per
+`L_bol`; its declared integral is checked before conversion. The converter
+uses `q_E = f_E / (E_eV * 1.602176634e-12 erg/eV)` and integrates on a
+logarithmically refined union of SED samples and every group edge. Explicit
+source closure compares 2048 and 4096 subdivisions and fails closed above the
+declared `5e-6` relative tolerance. It records the source SED identity, raw
+input hash, support interval, represented `L_bol` fraction, per-group energy
+fraction, and the same H I/He I/He II spectral closure consumed by SNRT. The
+intrinsic `energy_fraction_of_lbol` and
+`photon_rate_per_lbol_s_per_erg_s` fields are kept separate from their
+escape-scaled counterparts and from `total_photon_rate_s`.
+
+For an explicit tabulated SED, the metadata also carries a canonical
+`closure_code_manifest` for the ledger builder, SED conversion, primordial
+closure, and integrity helper, plus a `payload_sha256` self-hash. The P4/P5
+source boundary re-hashes these dependencies and the source input before
+creating a run output. The built-in Sazonov-style path remains a null-identity
+reference control and does not acquire the explicit-source manifest.
+
+If `--sed-table` is omitted, the built-in Sazonov-style shape remains only the
+`reference_control_parameterized_pilot` path. It deliberately carries a null
+source identity and cannot be paired with a source-bound v2 dust sidecar.
+
 The current parameterized pilot converter
 `tools/p4_build_agn_photon_ledger.py` defaults to the pinned P0 nine-group
 table in `config/p0_photon_group_edges_ev.txt`. Its Sazonov-style pilot SED is

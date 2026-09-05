@@ -18,6 +18,7 @@ if str(TOOLS) not in sys.path:
 
 import audit_fp1_physical_package_admission as admission_module  # noqa: E402
 from audit_fp1_physical_package_admission import (  # noqa: E402
+    GATE_EVIDENCE_STATUSES,
     REQUIRED_GATES,
     PhysicalPackageAdmissionError,
     audit_physical_package_admission,
@@ -27,6 +28,10 @@ from fp1_gate_validator_registry import (  # noqa: E402
     GateValidatorRegistryError,
     REGISTERED_VALIDATORS,
     run_registered_validator,
+)
+from fp1_gate_validator_blocks import (  # noqa: E402
+    GATE_REQUIREMENTS,
+    GATE_VALIDATOR_IDS,
 )
 from fp1_source_node_mapping import mapping_sha256  # noqa: E402
 
@@ -97,6 +102,10 @@ def _selection_fixture() -> dict:
                 "passed_gate_ids": sorted(REQUIRED_GATES),
                 "missing_gate_ids": [],
                 "verified_gate_evidence": verified_gate_evidence,
+                "gate_evidence_status": {
+                    gate_id: "pass" for gate_id in REQUIRED_GATES
+                },
+                "gate_validation_errors": {},
                 "hard_blockers": [],
                 "production_qualified": True,
             }
@@ -208,7 +217,7 @@ def _synthetic_registry_selection() -> None:
                 }
                 gate_evidence[gate_id] = {"validator_id": validator_id}
 
-            passed, reports = admission_module._evaluate_candidate_gate_evidence(
+            passed, reports, statuses, errors = admission_module._evaluate_candidate_gate_evidence(
                 "synthetic-approved-package",
                 gate_evidence,
                 approved_validator_ids=set(
@@ -218,11 +227,39 @@ def _synthetic_registry_selection() -> None:
             )
             assert set(passed) == REQUIRED_GATES
             assert len(reports) == len(REQUIRED_GATES)
+            assert set(statuses) == REQUIRED_GATES
+            assert set(statuses.values()) == {"pass"}
+            assert set(statuses.values()).issubset(GATE_EVIDENCE_STATUSES)
+            assert errors == {}
             fixture["candidate_report"]["synthetic-approved-package"][
                 "verified_gate_evidence"
             ] = reports
             result = _evaluate_selection_fixture(fixture)
             assert result["status"] == "admitted_physical_package"
+
+            missing_gate = sorted(REQUIRED_GATES)[0]
+            partial_evidence = {
+                gate_id: evidence
+                for gate_id, evidence in gate_evidence.items()
+                if gate_id != missing_gate
+            }
+            _, _, partial_statuses, partial_errors = (
+                admission_module._evaluate_candidate_gate_evidence(
+                    "synthetic-approved-package",
+                    partial_evidence,
+                    approved_validator_ids=set(
+                        record["validator_id"] for record in gate_evidence.values()
+                    ),
+                    required_gates=required_gates,
+                )
+            )
+            assert partial_statuses[missing_gate] == "missing_evidence"
+            assert all(
+                status == "pass"
+                for gate_id, status in partial_statuses.items()
+                if gate_id != missing_gate
+            )
+            assert partial_errors == {}
 
             identity_validator = "synthetic.source_identity_and_rights.v1"
             original_runner = REGISTERED_VALIDATORS[identity_validator]["runner"]
@@ -258,6 +295,135 @@ def _synthetic_registry_selection() -> None:
             _expect_selection_error(
                 missing, "does not pass every required gate"
             )
+    finally:
+        REGISTERED_VALIDATORS.clear()
+        REGISTERED_VALIDATORS.update(original_registry)
+
+
+def _registry_adversarial_tests() -> None:
+    """Exercise direct registry rejection paths before admission evaluation."""
+
+    original_registry = dict(REGISTERED_VALIDATORS)
+    try:
+        try:
+            run_registered_validator(
+                validator_id="fp1.not-code-registered.v1",
+                gate_id="coordinate_hull_and_population",
+                candidate_id="synthetic-candidate",
+            )
+        except GateValidatorRegistryError as exc:
+            assert "not code-registered" in str(exc), str(exc)
+        else:
+            raise AssertionError("unregistered validator was accepted")
+
+        with tempfile.TemporaryDirectory(prefix="snrt-fp1-registry-adversarial-") as directory:
+            temporary = Path(directory)
+            requirements = {"synthetic_requirement"}
+
+            def register(
+                validator_id: str,
+                gate_id: str,
+                tool_name: str,
+                runner,
+            ) -> None:
+                tool_path = temporary / tool_name
+                tool_path.write_text(f"# {validator_id}\n", encoding="utf-8")
+                REGISTERED_VALIDATORS[validator_id] = {
+                    "gate_id": gate_id,
+                    "requirements": requirements,
+                    "runner": runner,
+                    "tool_path": tool_path,
+                }
+
+            misbound_id = "synthetic.registry-misbound.v1"
+            misbound_path = temporary / "misbound.py"
+            misbound_path.write_text("# misbound\n", encoding="utf-8")
+            misbound_sha = hashlib.sha256(misbound_path.read_bytes()).hexdigest()
+
+            def valid_report(candidate_id: str) -> dict:
+                return {
+                    "schema": "snrt-fp1-executable-gate-validation",
+                    "schema_version": 1,
+                    "validator_id": misbound_id,
+                    "gate_id": "coordinate_hull_and_population",
+                    "candidate_id": candidate_id,
+                    "status": "pass",
+                    "passed": True,
+                    "requirements": {"synthetic_requirement": True},
+                    "blockers": [],
+                    "package_fingerprint_sha256": "a" * 64,
+                    "artifacts": {},
+                    "validator_code_sha256": misbound_sha,
+                }
+
+            REGISTERED_VALIDATORS[misbound_id] = {
+                "gate_id": "coordinate_hull_and_population",
+                "requirements": requirements,
+                "runner": valid_report,
+                "tool_path": misbound_path,
+            }
+            try:
+                run_registered_validator(
+                    validator_id=misbound_id,
+                    gate_id="fate_structure_and_remnant",
+                    candidate_id="synthetic-candidate",
+                )
+            except GateValidatorRegistryError as exc:
+                assert "registered for" in str(exc), str(exc)
+            else:
+                raise AssertionError("gate/validator mis-binding was accepted")
+
+            malformed_id = "synthetic.registry-malformed.v1"
+
+            def malformed_report(_: str) -> dict:
+                return {"status": "pass"}
+
+            register(
+                malformed_id,
+                "fate_structure_and_remnant",
+                "malformed.py",
+                malformed_report,
+            )
+            try:
+                run_registered_validator(
+                    validator_id=malformed_id,
+                    gate_id="fate_structure_and_remnant",
+                    candidate_id="synthetic-candidate",
+                )
+            except GateValidatorRegistryError as exc:
+                assert "malformed report" in str(exc), str(exc)
+            else:
+                raise AssertionError("malformed validator report was accepted")
+
+            stale_id = "synthetic.registry-stale-hash.v1"
+            stale_path = temporary / "stale.py"
+            stale_path.write_text("# stale\n", encoding="utf-8")
+            stale_actual_sha = hashlib.sha256(stale_path.read_bytes()).hexdigest()
+
+            def stale_report(candidate_id: str) -> dict:
+                report = valid_report(candidate_id)
+                report["validator_id"] = stale_id
+                report["gate_id"] = "lifetime_and_wind_history"
+                report["validator_code_sha256"] = "0" * 64
+                return report
+
+            REGISTERED_VALIDATORS[stale_id] = {
+                "gate_id": "lifetime_and_wind_history",
+                "requirements": requirements,
+                "runner": stale_report,
+                "tool_path": stale_path,
+            }
+            assert stale_actual_sha != "0" * 64
+            try:
+                run_registered_validator(
+                    validator_id=stale_id,
+                    gate_id="lifetime_and_wind_history",
+                    candidate_id="synthetic-candidate",
+                )
+            except GateValidatorRegistryError as exc:
+                assert "internally inconsistent" in str(exc), str(exc)
+            else:
+                raise AssertionError("stale validator code hash was accepted")
     finally:
         REGISTERED_VALIDATORS.clear()
         REGISTERED_VALIDATORS.update(original_registry)
@@ -376,6 +542,13 @@ def main() -> int:
     assert boccioli["passed_gate_ids"] == ["source_identity_and_rights"]
     assert len(boccioli["missing_gate_ids"]) == 8
     assert boccioli["production_qualified"] is False
+    assert set(boccioli["verified_gate_evidence"]) == REQUIRED_GATES
+    assert set(boccioli["gate_evidence_status"]) == REQUIRED_GATES
+    assert set(boccioli["gate_evidence_status"].values()) == {
+        "pass",
+        "validator_blocked",
+    }
+    assert boccioli["gate_validation_errors"] == {}
     assert (
         boccioli["verified_gate_evidence"]["source_identity_and_rights"]["status"]
         == "pass"
@@ -386,17 +559,33 @@ def main() -> int:
         == "3370571245be954b1330d0b91bae585ffed47b3a1c2d10ffa11fc4ef7b57065b"
     )
     assert all(
-        not candidate["production_qualified"] and len(candidate["missing_gate_ids"]) == 9
+        not candidate["production_qualified"]
+        and len(candidate["missing_gate_ids"]) == 9
+        and set(candidate["gate_evidence_status"]) == REQUIRED_GATES
+        and set(candidate["gate_evidence_status"].values()) == {"validator_blocked"}
         for candidate_id, candidate in report["candidate_qualification"].items()
         if candidate_id != "boccioli_roberti2026_lc18"
     )
     assert report["gate_validation"]["mode"] == "registered_executable_validators_fail_closed"
-    assert report["gate_validation"]["approved_validator_ids"] == [
-        "fp1.source_identity_and_rights.v1"
-    ]
-    assert set(report["gate_validation"]["registry"]["validators"]) == {
-        "fp1.source_identity_and_rights.v1"
-    }
+    assert set(report["gate_validation"]["approved_validator_ids"]) == set(
+        GATE_VALIDATOR_IDS.values()
+    )
+    assert set(report["gate_validation"]["registry"]["validators"]) == set(
+        GATE_VALIDATOR_IDS.values()
+    )
+    for gate_id, validator_id in GATE_VALIDATOR_IDS.items():
+        registry_record = report["gate_validation"]["registry"]["validators"][validator_id]
+        assert registry_record["gate_id"] == gate_id
+        assert set(registry_record["requirements"]) == GATE_REQUIREMENTS[gate_id]
+        gate_report = boccioli["verified_gate_evidence"][gate_id]
+        assert gate_report["validator_id"] == validator_id
+        assert set(gate_report["requirements"]) == GATE_REQUIREMENTS[gate_id]
+        if gate_id != "source_identity_and_rights":
+            assert gate_report["status"] == "blocked"
+            assert gate_report["passed"] is False
+            assert gate_report["package_fingerprint_sha256"] is None
+            assert gate_report["artifacts"]["authoritative_validation_available"] is False
+            assert gate_report["blockers"]
 
     bad_hash = copy.deepcopy(contract)
     bad_hash["evidence_artifacts"]["high_mass_review"]["sha256"] = "0" * 64
@@ -432,6 +621,12 @@ def main() -> int:
     ] = ["source_identity_and_rights"]
     _expect_error(self_declared, "undeclared fields")
 
+    incomplete_candidate = copy.deepcopy(contract)
+    del incomplete_candidate["candidate_qualification"]["sukhbold2016_w18_n20"][
+        "gate_evidence"
+    ]["decay_epoch_and_projection"]
+    _expect_error(incomplete_candidate, "must name every required validator")
+
     with tempfile.TemporaryDirectory(prefix="snrt-fp1-gate-evidence-") as directory:
         temporary = Path(directory)
         validator = temporary / "validator.py"
@@ -461,13 +656,34 @@ def main() -> int:
             "validator_sha256": hashlib.sha256(validator.read_bytes()).hexdigest(),
             "approval_id": "TEST-GATE-APPROVAL",
         }
-        _expect_error(one_verified_gate, "executable gate evidence is malformed")
+        malformed_report = _audit_mutation(one_verified_gate)
+        malformed_candidate = malformed_report["candidate_qualification"][
+            "sukhbold2016_w18_n20"
+        ]
+        assert (
+            malformed_candidate["gate_evidence_status"]["source_identity_and_rights"]
+            == "validator_error"
+        )
+        assert "malformed" in malformed_candidate["gate_validation_errors"][
+            "source_identity_and_rights"
+        ]
 
     unregistered_validator = copy.deepcopy(contract)
     unregistered_validator["candidate_qualification"]["boccioli_roberti2026_lc18"][
         "gate_evidence"
     ]["source_identity_and_rights"]["validator_id"] = "fp1.unregistered.v1"
-    _expect_error(unregistered_validator, "not contract-approved")
+    unregistered_report = _audit_mutation(unregistered_validator)
+    unregistered_candidate = unregistered_report["candidate_qualification"][
+        "boccioli_roberti2026_lc18"
+    ]
+    assert (
+        unregistered_candidate["gate_evidence_status"]["source_identity_and_rights"]
+        == "validator_error"
+    )
+    assert "not contract-approved" in unregistered_candidate["gate_validation_errors"][
+        "source_identity_and_rights"
+    ]
+    assert unregistered_candidate["production_qualified"] is False
 
     disabled_registry = copy.deepcopy(contract)
     disabled_registry["gate_validation"]["approved_validator_ids"] = []
@@ -507,6 +723,7 @@ def main() -> int:
 
     _selection_guard_tests()
     _synthetic_registry_selection()
+    _registry_adversarial_tests()
 
     original_registry_report = admission_module.registry_report
     try:

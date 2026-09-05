@@ -97,7 +97,11 @@ class FortranSequentialReader:
         raise ValueError(f"unexpected idsink record size: {len(payload)}")
 
 
-def read_sinkprops(path: Path) -> tuple[dict[str, object], list[dict[str, object]]]:
+def read_sinkprops(
+    path: Path, *, nstep_coarse: int
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    if nstep_coarse < 0:
+        raise ValueError("nstep_coarse must be non-negative")
     with path.open("rb") as stream:
         reader = FortranSequentialReader(stream)
         nsink = reader.integer(stream)
@@ -153,13 +157,21 @@ def read_sinkprops(path: Path) -> tuple[dict[str, object], list[dict[str, object
         if inflow < 0.0 or not 0.0 <= efficiency < 1.0:
             raise ValueError(f"invalid inflow or radiative efficiency for id={sink_id}")
         inflow_cgs = inflow * rate_unit_cgs
+        mass_msun = masses[index] * units["mass_cgs"] / MSUN_CGS
         records.append(
             {
                 "record_type": "agn_coarse_state",
                 "source_format": "ramses_sinkprops_v1",
+                "schema_version": 1,
+                "ledger_phase": "pre_feedback_pre_reset",
+                "source_interval_kind": "instantaneous_pre_reset_state",
+                "julian_year_days": 365.25,
+                "nstep_coarse": nstep_coarse,
                 "aexp": aexp,
-                "time_code": time_code,
+                "t_code": time_code,
                 "sink_id": sink_id,
+                "mass_code": masses[index],
+                "mass_msun": mass_msun,
                 "sink_mass_code": masses[index],
                 "position_code": [positions[axis][index] for axis in range(ndim)],
                 "velocity_code": [velocities[axis][index] for axis in range(ndim)],
@@ -168,7 +180,12 @@ def read_sinkprops(path: Path) -> tuple[dict[str, object], list[dict[str, object
                 "eddington_rate_code": eddington[index],
                 "inflow_rate_code": inflow,
                 "inflow_rate_msun_per_yr": inflow_cgs / MSUN_CGS * YEAR_S,
+                # sinkprops exposes only eps_sink.  Preserve it in both
+                # fields, explicitly marking that no mode-resolved effective
+                # efficiency was available in this review-only conversion.
+                "radiative_efficiency": efficiency,
                 "effective_radiative_efficiency": efficiency,
+                "effective_efficiency_status": "sinkprops_raw_equals_effective_mode_not_encoded",
                 "bolometric_luminosity_erg_s": efficiency * inflow_cgs * C_LIGHT_CGS**2,
                 "accreted_mass_since_feedback_code": accreted[index],
                 "ambient_density_code": gas_density[index],
@@ -178,7 +195,10 @@ def read_sinkprops(path: Path) -> tuple[dict[str, object], list[dict[str, object
                 "bh_spin_code": [bh_spin[axis][index] for axis in range(ndim)],
                 "bh_spin_magnitude": spin_magnitude[index],
                 "units": units,
+                "unit_mass_cgs": units["mass_cgs"],
+                "unit_time_cgs": units["time_s"],
                 "accretion_rate_convention": "instantaneous_inflow_rate_min_bondi_eddington_effective_agn_efficiency",
+                "feedback_timing": "written_before_AGN_feedback_accumulator_reset",
             }
         )
     return units, records
@@ -188,9 +208,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True, help="RAMSES sink_XXXXX.dat file")
     parser.add_argument("--output", type=Path, required=True, help="AGN source JSONL output")
+    parser.add_argument(
+        "--nstep-coarse",
+        type=int,
+        required=True,
+        help="coarse-step identity from the producing RAMSES run (never inferred from the filename)",
+    )
     args = parser.parse_args()
 
-    units, records = read_sinkprops(args.input)
+    units, records = read_sinkprops(args.input, nstep_coarse=args.nstep_coarse)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     header = {
         "record_type": "agn_coarse_state_header",
@@ -199,6 +225,9 @@ def main() -> None:
         "sink_count": len(records),
         "units": units,
         "luminosity_convention": "L_bol=epsilon*min(Mdot_Bondi,Mdot_Edd)*c^2",
+        "ledger_phase": "pre_feedback_pre_reset",
+        "source_interval_kind": "instantaneous_pre_reset_state",
+        "julian_year_days": 365.25,
         "feedback_timing": "written_before_AGN_feedback_accumulator_reset",
     }
     with args.output.open("w", encoding="ascii") as stream:

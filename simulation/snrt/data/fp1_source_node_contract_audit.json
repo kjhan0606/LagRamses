@@ -10,6 +10,7 @@
   "required_field_group_count": 8,
   "resolver_axes_preserved": true,
   "resolver_axis_count": 12,
+  "rights_bindings": [],
   "runtime_deposition_allowed": false,
   "schema": "snrt-fp1-source-node-contract-audit",
   "schema_version": 1,

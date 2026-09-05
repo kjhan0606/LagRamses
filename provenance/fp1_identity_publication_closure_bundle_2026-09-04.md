@@ -66,5 +66,6 @@ The following completed successfully on GPFS:
 No simulation, source selection, CDS redistribution, author contact, or
 runtime feedback activation was performed. Bundle-end audit and independent
 triage are recorded in `fp1_identity_publication_closure_audit_comparison_2026-09-04.md`.
-AGY is historical only; future completed steps use Claude Opus 5, and Grok
-reviews the next driver plan before any new bundle begins.
+AGY is historical only; Claude Opus 5 is the active auditor for future bundle
+plans and completed implementation steps. Grok's attempted review is
+historical only and carries no approval authority.

@@ -29,13 +29,14 @@ def main() -> None:
     closure = sed_weighted_group_closure(edges, energy, photon_spectrum)
 
     group = 3
-    selected = (energy >= edges[group]) & (energy <= edges[group + 1])
-    photons = np.trapezoid(photon_spectrum[selected], energy[selected])
+    reference_energy = np.geomspace(edges[group], edges[group + 1], 131073)
+    reference_spectrum = np.interp(reference_energy, energy, photon_spectrum)
+    photons = np.trapezoid(reference_spectrum, reference_energy)
     expected_sigma = np.trapezoid(
-        photon_spectrum[selected] * _verner_cross_section_numpy(energy[selected], H_I_FIT),
-        energy[selected],
+        reference_spectrum * _verner_cross_section_numpy(reference_energy, H_I_FIT),
+        reference_energy,
     ) / photons
-    assert np.isclose(closure.cross_sections.hydrogen_i[group], expected_sigma, rtol=1.0e-12, atol=0.0)
+    assert np.isclose(closure.cross_sections.hydrogen_i[group], expected_sigma, rtol=1.0e-6, atol=0.0)
     assert closure.photoelectron_excess_energy_ev[0, group] > 0.0
     assert not np.isclose(
         closure.cross_sections.hydrogen_i[group],

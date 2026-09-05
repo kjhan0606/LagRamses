@@ -2,8 +2,8 @@
   "schema": "snrt-fp2-snia-dtd-contract-audit",
   "schema_version": 1,
   "gate": "F-P2",
-  "status": "approved_physical_baseline_runtime_gated",
-  "physical_baseline_ready": true,
+  "status": "blocked_contract_integrity",
+  "physical_baseline_ready": false,
   "production_ready": false,
   "runtime_activation_allowed": false,
   "production_blockers": [
@@ -19,11 +19,11 @@
       "c6c8042b03406b9d69bc50434fe5d6af7f542be6"
     ],
     "runtime_contract_matches": true,
-    "repository_head": "235332cf58735f3c7586e4c3eeaca2b861d3c5fe",
+    "repository_head": "343619e1943be7f706d33b99561c8087ed2daffc",
     "revision_exists": true,
     "declared_commit_is_ancestor": true,
     "worktree_clean": false,
-    "worktree_change_count": 113,
+    "worktree_change_count": 100,
     "production_code_bound": false,
     "interpretation": "The declared staging revision exists and is ancestral, but current uncommitted changes are not included in that immutable binding."
   },
@@ -75,7 +75,7 @@
     "sha256": "bc0a5cc291a8f760de463b3ccb6789ff4551987c22f597a093af3879a78b6fab"
   },
   "runtime_handoff": {
-    "status": "connected_runtime_gated",
+    "status": "blocked_runtime_handoff",
     "activation_allowed": false,
     "contract": {
       "path": "simulation/snrt/config/fp2_snia_runtime_contract_v1.nml",
@@ -88,20 +88,20 @@
     },
     "caller": {
       "path": "patch/lagRamses/stellar_ramses_runtime.f90",
-      "sha256": "d4348390ad332610f240ae7d7e980dc4a82cf3f30a5602dd9eda0afcef5ca5fc",
+      "sha256": "e1cf7205e87bf3843477195c0a91c88af1dc11bc317a4c98cdc85ce11da9d85f",
       "target_policy": "actual AMR leaf-cell NGP target; owner rank is local RAMSES rank",
       "activation_gate": "production_source_model_supported() remains fail-closed"
     },
     "bridge": {
       "path": "patch/lagRamses/stellar_ramses_bridge.f90",
-      "sha256": "a7a15738464f011a949bc306628e27b647a4d9aba1b53109445e1ae6c06a6091",
+      "sha256": "09ce0a15ed5f2644ac683c3b7afb2096dc6d3e3b84a0764ebd9243c4611293f3",
       "layout": "unew(local_cell,variable)",
       "transaction": "variable-major scratch then row-major scatter"
     }
   },
   "production_runtime_negative": {
     "path": "simulation/snrt/data/fp2_snia_production_runtime_negative.json",
-    "sha256": "1a262fdc66f310ca6c25f29e0407745fc6b9ffd507ed5e4634d3aeb8a000d5d9",
+    "sha256": "333adbd040cb1073a315683884cd078fcf1984d20da116a5f080fd49e74beb0c",
     "status": "pass",
     "result_statuses": {
       "mismatched_approval": "pass",
@@ -240,7 +240,9 @@
     "explicit_zero_project_elements": [],
     "inferred_zero_policy": "never infer absent project elements as zero during conversion"
   },
-  "failures": [],
+  "failures": [
+    "runtime_caller_unew_caller_missing"
+  ],
   "interpretation": "The Maoz field DTD and HESMA yysd4-xap92 n100 event source are ready as a physical baseline; the runtime caller is connected to the local AMR leaf-cell bridge, but production_ready remains false because activation is disabled by the independent F-P1/runtime approval gates.",
   "audit_code_sha256": "def15a0bf87c0c55f88f649fb094db61467ffd9ddebf5ad273fd1d1cb5bd8885"
 }

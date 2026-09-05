@@ -59,7 +59,9 @@ def main() -> None:
     ledger = read_photon_source_ledger_csv(args.photon_ledger)
     photon_metadata_path = Path(args.photon_metadata)
     photon_metadata = json.loads(photon_metadata_path.read_text(encoding="utf-8"))
-    spectral_closure = group_spectral_closure_from_metadata(photon_metadata)
+    spectral_closure = group_spectral_closure_from_metadata(
+        photon_metadata, require_code_manifest=True
+    )
     configured_edges = np.loadtxt(args.group_edges, comments="#", dtype=np.float64)
     metadata_edges = np.asarray(photon_metadata["group_edges_ev"], dtype=np.float64)
     if not np.array_equal(metadata_edges, configured_edges):

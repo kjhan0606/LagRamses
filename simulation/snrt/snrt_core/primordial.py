@@ -9,13 +9,38 @@ coefficient.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
 
+from snrt_core.provenance import (
+    require_sha256,
+    sha256_file,
+    validate_code_manifest,
+    validate_payload_hash,
+)
+from snrt_core.sed import (
+    QuadratureDiagnostics,
+    SOURCE_SED_CANDIDATE_STATUS,
+    SOURCE_SED_CONTRACT_STATUSES,
+    SED_INTERPOLATION_CONVENTION,
+    SED_QUADRATURE_BASE_SUBDIVISIONS,
+    SED_QUADRATURE_RELATIVE_TOLERANCE,
+    SED_QUADRATURE_REFINED_SUBDIVISIONS,
+    SED_QUADRATURE_SCHEME,
+)
+
 
 EV_ERG = 1.602176634e-12
+SNRT_ROOT = Path(__file__).resolve().parents[1]
+AGN_PHOTON_CLOSURE_CODE_MANIFEST = {
+    "agn_ledger_builder": SNRT_ROOT / "tools" / "p4_build_agn_photon_ledger.py",
+    "source_sed": SNRT_ROOT / "snrt_core" / "sed.py",
+    "primordial_closure": SNRT_ROOT / "snrt_core" / "primordial.py",
+    "integrity_helper": SNRT_ROOT / "snrt_core" / "provenance.py",
+}
 
 
 class VernerFit(NamedTuple):
@@ -126,6 +151,8 @@ def sed_weighted_group_closure(
     group_edges_ev: np.ndarray | jnp.ndarray,
     energy_ev: np.ndarray | jnp.ndarray,
     photon_number_spectrum_per_ev: np.ndarray | jnp.ndarray,
+    *,
+    allow_empty_groups: bool = False,
 ) -> GroupSpectralClosure:
     """Integrate Verner cross sections over a photon-number SED.
 
@@ -136,64 +163,123 @@ def sed_weighted_group_closure(
     and the corresponding absorption-weighted photoelectron excess energy.
     The SED is an arbitrary non-negative shape; its normalization cancels from
     the closure.  This is an offline operation so that the resulting arrays
-    are static inputs to JAX/XLA.
+    are static inputs to JAX/XLA.  When ``allow_empty_groups`` is true, a group
+    with zero source photons receives zero absorber closure and a geometric-
+    mean representative energy; this is valid only for an inactive source
+    group and is recorded by the caller.
     """
 
-    edges = np.asarray(group_edges_ev, dtype=np.float64)
-    energies = np.asarray(energy_ev, dtype=np.float64)
-    spectrum = np.asarray(photon_number_spectrum_per_ev, dtype=np.float64)
-    if edges.ndim != 1 or len(edges) < 2 or not np.isfinite(edges).all() or np.any(edges <= 0.0):
-        raise ValueError("group_edges_ev must be a finite, positive one-dimensional edge array")
-    if np.any(np.diff(edges) <= 0.0):
-        raise ValueError("group_edges_ev must be strictly increasing")
-    if energies.ndim != 1 or spectrum.shape != energies.shape or len(energies) < 2:
-        raise ValueError("energy and photon SED arrays must be one-dimensional with at least two samples")
-    if not np.isfinite(energies).all() or np.any(energies <= 0.0):
-        raise ValueError("SED energies must be finite and positive")
-    if not np.isfinite(spectrum).all() or np.any(spectrum < 0.0):
-        raise ValueError("photon-number SED must be finite and non-negative")
+    closure, _ = sed_weighted_group_closure_with_diagnostics(
+        group_edges_ev,
+        energy_ev,
+        photon_number_spectrum_per_ev,
+        allow_empty_groups=allow_empty_groups,
+    )
+    return closure
 
-    order = np.argsort(energies)
-    energies = energies[order]
-    spectrum = spectrum[order]
-    if np.any(np.diff(energies) <= 0.0):
-        unique = np.r_[True, np.diff(energies) > 0.0]
-        energies = energies[unique]
-        spectrum = spectrum[unique]
-    if edges[0] < energies[0] or edges[-1] > energies[-1]:
-        raise ValueError("SED energy support must cover every requested group edge")
 
-    integration_grid = np.unique(np.concatenate((energies, edges)))
+def _sed_group_grids(
+    energies: np.ndarray,
+    edges: np.ndarray,
+    extra_energies: np.ndarray,
+    *,
+    subdivisions: int,
+) -> tuple[np.ndarray, ...]:
+    if not isinstance(subdivisions, int) or subdivisions < 1:
+        raise ValueError("quadrature subdivisions must be a positive integer")
+    grids: list[np.ndarray] = []
+    for lower, upper in zip(edges[:-1], edges[1:], strict=True):
+        refinement = np.geomspace(lower, upper, subdivisions + 1, dtype=np.float64)
+        source_nodes = energies[(energies > lower) & (energies < upper)]
+        extra_nodes = extra_energies[
+            (extra_energies > lower) & (extra_energies < upper)
+        ]
+        grids.append(np.unique(np.concatenate((refinement, source_nodes, extra_nodes))))
+    return tuple(grids)
+
+
+def _closure_once(
+    edges: np.ndarray,
+    energies: np.ndarray,
+    spectrum: np.ndarray,
+    *,
+    energy_fraction_per_ev: np.ndarray | None,
+    allow_empty_groups: bool,
+    subdivisions: int,
+) -> GroupSpectralClosure:
+    """Evaluate one deterministic quadrature level of the Verner closure."""
+
     species_fits = (H_I_FIT, HE_I_FIT, HE_II_FIT)
     thresholds = np.asarray([fit.threshold_ev for fit in species_fits], dtype=np.float64)
+    grids = _sed_group_grids(
+        energies,
+        edges,
+        thresholds,
+        subdivisions=subdivisions,
+    )
     averaged_sigma = np.zeros((3, len(edges) - 1), dtype=np.float64)
     excess_energy = np.zeros_like(averaged_sigma)
-    photon_mean_energy = np.zeros(len(edges) - 1, dtype=np.float64)
+    photon_mean_energy = np.sqrt(edges[:-1] * edges[1:])
 
-    for group, (lower, upper) in enumerate(zip(edges[:-1], edges[1:], strict=True)):
-        interior = integration_grid[(integration_grid > lower) & (integration_grid < upper)]
-        group_energy = np.concatenate(([lower], interior, [upper]))
-        group_spectrum = np.interp(group_energy, energies, spectrum)
+    for group, group_energy in enumerate(grids):
+        if energy_fraction_per_ev is None:
+            group_spectrum = np.interp(group_energy, energies, spectrum)
+        else:
+            group_fraction = np.interp(
+                group_energy, energies, energy_fraction_per_ev
+            )
+            group_spectrum = group_fraction / (group_energy * EV_ERG)
         photon_count = float(np.trapezoid(group_spectrum, group_energy))
-        if not np.isfinite(photon_count) or photon_count <= 0.0:
-            raise ValueError(f"SED has no photons in group {group}")
-        photon_mean_energy[group] = np.trapezoid(group_spectrum * group_energy, group_energy) / photon_count
+        if not np.isfinite(photon_count) or photon_count < 0.0:
+            raise ValueError(f"SED has an invalid photon integral in group {group}")
+        if photon_count == 0.0:
+            if not allow_empty_groups:
+                raise ValueError(f"SED has no photons in group {group}")
+            continue
+        photon_mean_energy[group] = (
+            np.trapezoid(group_spectrum * group_energy, group_energy) / photon_count
+        )
         for species, fit in enumerate(species_fits):
-            absorbing_lower = max(float(lower), fit.threshold_ev)
-            absorbing_upper = min(float(upper), fit.maximum_ev)
+            absorbing_lower = max(float(edges[group]), fit.threshold_ev)
+            absorbing_upper = min(float(edges[group + 1]), fit.maximum_ev)
             if absorbing_lower >= absorbing_upper:
                 continue
-            absorbing_interior = integration_grid[
-                (integration_grid > absorbing_lower)
-                & (integration_grid < absorbing_upper)
-            ]
-            absorbing_energy = np.concatenate(
-                ([absorbing_lower], absorbing_interior, [absorbing_upper])
+            absorbing_mask = (group_energy >= absorbing_lower) & (
+                group_energy <= absorbing_upper
             )
-            absorbing_spectrum = np.interp(absorbing_energy, energies, spectrum)
+            absorbing_energy = group_energy[absorbing_mask]
+            absorbing_spectrum = group_spectrum[absorbing_mask]
+            if absorbing_energy[0] != absorbing_lower:
+                absorbing_energy = np.insert(absorbing_energy, 0, absorbing_lower)
+                if energy_fraction_per_ev is None:
+                    absorbing_spectrum = np.insert(
+                        absorbing_spectrum,
+                        0,
+                        np.interp(absorbing_lower, energies, spectrum),
+                    )
+                else:
+                    absorbing_spectrum = np.insert(
+                        absorbing_spectrum,
+                        0,
+                        np.interp(absorbing_lower, energies, energy_fraction_per_ev)
+                        / (absorbing_lower * EV_ERG),
+                    )
+            if absorbing_energy[-1] != absorbing_upper:
+                absorbing_energy = np.append(absorbing_energy, absorbing_upper)
+                if energy_fraction_per_ev is None:
+                    absorbing_spectrum = np.append(
+                        absorbing_spectrum,
+                        np.interp(absorbing_upper, energies, spectrum),
+                    )
+                else:
+                    absorbing_spectrum = np.append(
+                        absorbing_spectrum,
+                        np.interp(absorbing_upper, energies, energy_fraction_per_ev)
+                        / (absorbing_upper * EV_ERG),
+                    )
             sigma = _verner_cross_section_numpy(absorbing_energy, fit)
-            weighted_sigma = np.trapezoid(
-                absorbing_spectrum * sigma, absorbing_energy
+            weighted_sigma = float(
+                np.trapezoid(absorbing_spectrum * sigma, absorbing_energy)
             )
             averaged_sigma[species, group] = weighted_sigma / photon_count
             if weighted_sigma > 0.0:
@@ -201,7 +287,7 @@ def sed_weighted_group_closure(
                     np.trapezoid(
                         absorbing_spectrum
                         * sigma
-                        * (absorbing_energy - thresholds[species]),
+                        * (absorbing_energy - fit.threshold_ev),
                         absorbing_energy,
                     )
                     / weighted_sigma
@@ -218,8 +304,198 @@ def sed_weighted_group_closure(
     )
 
 
-def group_spectral_closure_from_metadata(metadata: Mapping[str, object]) -> GroupSpectralClosure:
+def _closure_relative_error_by_group(
+    reference: GroupSpectralClosure,
+    refined: GroupSpectralClosure,
+) -> np.ndarray:
+    reference_values = np.concatenate(
+        (
+            np.asarray(reference.cross_sections, dtype=np.float64),
+            np.asarray(reference.photon_weighted_energy_ev, dtype=np.float64)[None, :],
+            np.asarray(reference.photoelectron_excess_energy_ev, dtype=np.float64),
+        ),
+        axis=0,
+    )
+    refined_values = np.concatenate(
+        (
+            np.asarray(refined.cross_sections, dtype=np.float64),
+            np.asarray(refined.photon_weighted_energy_ev, dtype=np.float64)[None, :],
+            np.asarray(refined.photoelectron_excess_energy_ev, dtype=np.float64),
+        ),
+        axis=0,
+    )
+    scale = np.maximum(
+        np.maximum(np.abs(reference_values), np.abs(refined_values)), 1.0e-300
+    )
+    return np.max(np.abs(refined_values - reference_values) / scale, axis=0)
+
+
+def sed_weighted_group_closure_with_diagnostics(
+    group_edges_ev: np.ndarray | jnp.ndarray,
+    energy_ev: np.ndarray | jnp.ndarray,
+    photon_number_spectrum_per_ev: np.ndarray | jnp.ndarray,
+    *,
+    energy_fraction_per_ev: np.ndarray | None = None,
+    interpolation_convention: str = "piecewise_linear_photon_number_per_ev",
+    allow_empty_groups: bool = False,
+) -> tuple[GroupSpectralClosure, QuadratureDiagnostics]:
+    """Return a Verner closure plus a base-versus-refined convergence record.
+
+    If ``energy_fraction_per_ev`` is supplied, it is the authoritative
+    tabulated quantity and the photon spectrum is derived as
+    ``f_E/(E*EV_ERG)``.  This is the explicit-source convention.  Without it,
+    callers retain the historical piecewise-linear photon-number spectrum
+    interface used by stellar and analytic controls.
+    """
+
+    edges = np.asarray(group_edges_ev, dtype=np.float64)
+    energies = np.asarray(energy_ev, dtype=np.float64)
+    spectrum = np.asarray(photon_number_spectrum_per_ev, dtype=np.float64)
+    if edges.ndim != 1 or len(edges) < 2 or not np.isfinite(edges).all() or np.any(edges <= 0.0):
+        raise ValueError("group_edges_ev must be a finite, positive one-dimensional edge array")
+    if np.any(np.diff(edges) <= 0.0):
+        raise ValueError("group_edges_ev must be strictly increasing")
+    if energies.ndim != 1 or spectrum.shape != energies.shape or len(energies) < 2:
+        raise ValueError("energy and photon SED arrays must be one-dimensional with at least two samples")
+    if not np.isfinite(energies).all() or np.any(energies <= 0.0):
+        raise ValueError("SED energies must be finite and positive")
+    if not np.isfinite(spectrum).all() or np.any(spectrum < 0.0):
+        raise ValueError("photon-number SED must be finite and non-negative")
+    if energy_fraction_per_ev is not None:
+        energy_fraction = np.asarray(energy_fraction_per_ev, dtype=np.float64)
+        if energy_fraction.shape != energies.shape:
+            raise ValueError("energy-fraction and photon SED arrays must have identical shapes")
+        if not np.isfinite(energy_fraction).all() or np.any(energy_fraction < 0.0):
+            raise ValueError("energy-fraction SED must be finite and non-negative")
+        if interpolation_convention != SED_INTERPOLATION_CONVENTION:
+            raise ValueError(
+                "energy-fraction SEDs require the declared "
+                f"{SED_INTERPOLATION_CONVENTION} convention"
+            )
+    elif interpolation_convention != "piecewise_linear_photon_number_per_ev":
+        raise ValueError(
+            "photon-number SEDs require piecewise_linear_photon_number_per_ev "
+            "unless an energy-fraction table is supplied"
+        )
+    else:
+        energy_fraction = None
+
+    order = np.argsort(energies)
+    energies = energies[order]
+    spectrum = spectrum[order]
+    if energy_fraction is not None:
+        energy_fraction = energy_fraction[order]
+    if np.any(np.diff(energies) <= 0.0):
+        unique = np.r_[True, np.diff(energies) > 0.0]
+        energies = energies[unique]
+        spectrum = spectrum[unique]
+        if energy_fraction is not None:
+            energy_fraction = energy_fraction[unique]
+    if edges[0] < energies[0] or edges[-1] > energies[-1]:
+        raise ValueError("SED energy support must cover every requested group edge")
+
+    base = _closure_once(
+        edges,
+        energies,
+        spectrum,
+        energy_fraction_per_ev=energy_fraction,
+        allow_empty_groups=allow_empty_groups,
+        subdivisions=SED_QUADRATURE_BASE_SUBDIVISIONS,
+    )
+    refined = _closure_once(
+        edges,
+        energies,
+        spectrum,
+        energy_fraction_per_ev=energy_fraction,
+        allow_empty_groups=allow_empty_groups,
+        subdivisions=SED_QUADRATURE_REFINED_SUBDIVISIONS,
+    )
+    group_error = _closure_relative_error_by_group(base, refined)
+    maximum_error = float(np.max(group_error))
+    diagnostics = QuadratureDiagnostics(
+        scheme=SED_QUADRATURE_SCHEME,
+        interpolation_convention=interpolation_convention,
+        base_subdivisions=SED_QUADRATURE_BASE_SUBDIVISIONS,
+        refined_subdivisions=SED_QUADRATURE_REFINED_SUBDIVISIONS,
+        relative_tolerance=SED_QUADRATURE_RELATIVE_TOLERANCE,
+        group_max_relative_error=tuple(float(value) for value in group_error),
+        maximum_relative_error=maximum_error,
+        converged=maximum_error <= SED_QUADRATURE_RELATIVE_TOLERANCE,
+    )
+    if not diagnostics.converged:
+        raise ValueError(
+            "Verner SED quadrature did not converge: "
+            f"maximum relative error {maximum_error:.6g} exceeds "
+            f"{SED_QUADRATURE_RELATIVE_TOLERANCE:.6g}"
+        )
+    return refined, diagnostics
+
+
+def group_spectral_closure_from_metadata(
+    metadata: Mapping[str, object],
+    *,
+    require_code_manifest: bool = False,
+) -> GroupSpectralClosure:
     """Load and validate the serialized SED closure in photon metadata."""
+
+    schema = metadata.get("schema")
+    source_identity = metadata.get("source_sed_identity")
+    source_hash = metadata.get("source_sed_sha256")
+    if source_identity is not None:
+        source_identity = require_sha256(
+            source_identity, "source_sed_identity", "serialized photon metadata"
+        )
+        contract = metadata.get("source_sed_contract")
+        if not isinstance(contract, Mapping) or contract.get("identity") != source_identity:
+            raise ValueError("serialized source SED contract does not match source_sed_identity")
+    if source_hash is not None:
+        source_hash = require_sha256(
+            source_hash, "source_sed_sha256", "serialized photon metadata"
+        )
+    if isinstance(source_identity, str) and source_hash is not None:
+        contract = metadata.get("source_sed_contract")
+        if isinstance(contract, Mapping) and contract.get("input_sha256") != source_hash:
+            raise ValueError("serialized source SED contract does not match source_sed_sha256")
+    if schema == "snrt_agn_photon_ledger_v2" and source_identity is not None:
+        if not isinstance(source_hash, str):
+            raise ValueError("source-bound AGN photon metadata must include source_sed_sha256")
+        contract = metadata["source_sed_contract"]
+        assert isinstance(contract, Mapping)
+        if contract.get("status") not in SOURCE_SED_CONTRACT_STATUSES:
+            raise ValueError("source-bound AGN photon metadata has an invalid source SED status")
+        if contract.get("status") != SOURCE_SED_CANDIDATE_STATUS:
+            raise ValueError(
+                "source-bound AGN photon metadata must use the candidate source SED status"
+            )
+        if contract.get("status") == SOURCE_SED_CANDIDATE_STATUS:
+            if contract.get("interpolation_convention") != SED_INTERPOLATION_CONVENTION:
+                raise ValueError(
+                    "source-bound AGN photon metadata has an unsupported SED interpolation convention"
+                )
+            quadrature = contract.get("quadrature")
+            if not isinstance(quadrature, Mapping) or quadrature.get("scheme") != SED_QUADRATURE_SCHEME:
+                raise ValueError(
+                    "source-bound AGN photon metadata lacks the declared SED quadrature scheme"
+                )
+        source_input_path = contract.get("input_path")
+        if not isinstance(source_input_path, str) or not source_input_path.strip():
+            raise ValueError("source-bound AGN photon metadata lacks source SED input_path")
+        try:
+            actual_source_hash = sha256_file(source_input_path)
+        except (FileNotFoundError, OSError) as error:
+            raise ValueError("source-bound AGN photon SED input file is unavailable") from error
+        if actual_source_hash != source_hash:
+            raise ValueError("source-bound AGN photon SED input hash does not match its file")
+        validate_code_manifest(
+            metadata,
+            AGN_PHOTON_CLOSURE_CODE_MANIFEST,
+            context="source-bound AGN photon metadata",
+        )
+        validate_payload_hash(metadata, context="source-bound AGN photon metadata")
+    elif require_code_manifest and source_identity is not None:
+        raise ValueError(
+            "source-bound photon metadata does not declare the supported AGN closure manifest"
+        )
 
     try:
         groups = metadata["groups"]

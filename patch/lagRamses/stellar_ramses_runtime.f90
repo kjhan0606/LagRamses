@@ -7,6 +7,7 @@
 
 module stellar_ramses_runtime
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use omp_lib, only: omp_lock_kind, omp_init_lock, omp_set_lock, omp_unset_lock
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -41,7 +42,10 @@ module stellar_ramses_runtime
        read_snia_thermal_coupling_namelist, snia_deposition_ok
   use stellar_snia_runtime_accounting, only: &
        reconstruct_prior_snia_return, snia_accounting_ok
-  use stellar_ramses_bridge, only: deposit_snia_budget_to_unew, &
+  use stellar_ramses_field_map, only: stellar_field_map_t, clear_field_map, &
+       validate_field_map
+  use stellar_ramses_bridge, only: build_stellar_source_unew_delta, &
+       build_snia_budget_unew_delta, &
        ramses_bridge_ok
   use stellar_native_units, only: code_time_to_age_gyr, &
        code_interval_to_age_gyr, units_ok, solar_mass_cgs
@@ -54,6 +58,7 @@ module stellar_ramses_runtime
 
   real(stellar_dp), parameter :: source_tolerance = 1.0d-10
   integer, parameter :: phase0_mass_bins = 64
+  integer, parameter :: n_stellar_feedback_locks = 4096
 
   type(stellar_yield_table_t), save :: yield_table
   logical, save :: initialized = .false.
@@ -64,6 +69,9 @@ module stellar_ramses_runtime
   type(snia_physical_contract_t), save :: snia_physical
   type(snia_thermal_coupling_t), save :: snia_coupling
   logical, save :: snia_runtime_contract_initialized = .false.
+  type(stellar_field_map_t), save :: runtime_field_map
+  integer(omp_lock_kind), save :: stellar_feedback_locks(1:n_stellar_feedback_locks)
+  logical, save :: stellar_feedback_locks_initialized = .false.
 
   public :: phase0_initialize
   public :: phase0_feedback
@@ -75,6 +83,8 @@ contains
     integer, intent(out) :: ierr
     character(len=1024) :: filename
     integer :: status, table_ierr, audit_ierr, coverage_ierr, assignment_ierr
+    integer :: map_ierr, element
+    character(len=256) :: map_message
     logical :: exists
 
     if (initialized .or. initialization_ierr /= 0) then
@@ -169,6 +179,43 @@ contains
        return
     end if
 
+    ! The production caller is compiled for three dimensions and the SNIa
+    ! increment carries three momentum components.  Do not silently mix a
+    ! three-component energy expression with a lower-dimensional write.
+    if (ndim /= 3) then
+       ierr = 32
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) 'Phase 0 requires ndim==3'
+       return
+    end if
+
+    call clear_field_map(runtime_field_map)
+    runtime_field_map%density_index = 1
+    runtime_field_map%energy_index = ndim + 2
+    runtime_field_map%momentum_index = (/2, 3, 4/)
+    runtime_field_map%total_metal_index = imetal
+    if (delayed_cooling) then
+       runtime_field_map%delayed_cooling_index = idelay
+    else
+       runtime_field_map%delayed_cooling_index = 0
+    end if
+    do element = 1, n_stellar_elements
+       if (active_element(element)) then
+          runtime_field_map%element_index(element) = ichem + element - 1
+       else
+          runtime_field_map%element_index(element) = 0
+       end if
+    end do
+    call validate_field_map(runtime_field_map, nvar, ndim, map_ierr, map_message)
+    if (map_ierr /= 0) then
+       ierr = 33
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) 'Phase 0 field map is invalid: ', &
+            map_ierr, ' ', trim(map_message)
+       return
+    end if
+    call initialize_stellar_feedback_locks()
+
     initialized = .true.
     initialization_ierr = 0
     loaded_yield_table_path = trim(filename)
@@ -178,9 +225,24 @@ contains
        write(*,*) '  table rows = ', yield_table%n_rows
        write(*,*) '  total-metal field = ', imetal
        write(*,*) '  first element field = ', ichem
+       write(*,*) '  total-energy field = ', runtime_field_map%energy_index
+       if (delayed_cooling) write(*,*) '  delayed-cooling field = ', idelay
        write(*,*) '  mass assignment = piecewise source-cell'
     end if
   end subroutine phase0_initialize
+
+  subroutine initialize_stellar_feedback_locks()
+    integer :: lock_index
+
+    ! This is called before thermal_feedback enters its OpenMP region.  A
+    ! striped lock array avoids the lost-update window of one atomic operation
+    ! per conserved field while allowing unrelated cells to proceed together.
+    if (stellar_feedback_locks_initialized) return
+    do lock_index = 1, n_stellar_feedback_locks
+       call omp_init_lock(stellar_feedback_locks(lock_index))
+    end do
+    stellar_feedback_locks_initialized = .true.
+  end subroutine initialize_stellar_feedback_locks
 
   subroutine load_snia_runtime_contract(ierr)
     ! The runtime handoff is one ordered, auditable file.  All three groups
@@ -325,22 +387,21 @@ contains
     real(stellar_dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
     real(stellar_dp) :: scale_mass, scale_momentum, scale_energy
     real(stellar_dp) :: returned_code, snii_returned_code, snia_returned_code
-    real(stellar_dp) :: volume, energy_density
+    real(stellar_dp) :: volume
     real(stellar_dp) :: snia_expected_events, snia_available_msun
-    real(stellar_dp) :: source_momentum_code(3)
     real(stellar_dp) :: ejecta_code(n_stellar_elements), metal_ejecta_code
     real(stellar_dp) :: untracked_ejecta_msun, metal_ejecta_msun
     real(stellar_dp) :: ledger_remaining_code, ledger_scale
     real(stellar_dp) :: generic_remaining_code, prior_snia_returned_code
     real(stellar_dp) :: particle_mass_before_code
     real(stellar_dp) :: particle_mass_scale
-    real(stellar_dp) :: bulk_energy, bulk_momentum(3)
-    real(stellar_dp) :: snia_velocity(3,1), snia_cell_volume(1), snia_weights(1)
-    integer :: snia_target_cell(1), snia_owner_rank(1)
+    real(stellar_dp) :: generic_delta(nvar), snia_delta(nvar)
+    real(stellar_dp) :: staged_delta(nvar), current_row(nvar), proposed_row(nvar)
+    real(stellar_dp) :: mp_after, next_indtab
     integer :: snia_element_var(n_stellar_elements)
     integer :: snia_ledger_ierr, snia_bridge_ierr
     integer :: snia_accounting_ierr
-    integer :: source_ierr, target_cell, idim, element
+    integer :: source_ierr, target_cell, element, lock_index
     integer :: progress_ierr, units_ierr
     logical :: located, should_deposit
     type(stellar_progress_t) :: progress
@@ -428,6 +489,23 @@ contains
     if (source_ierr /= 0) then
        ierr = 50 + source_ierr
        if (myid == 1) write(*,*) 'Phase 0 source evaluation failed: ', source_ierr
+       call progress_abort(progress, progress_ierr)
+       return
+    end if
+
+    if (.not. ieee_is_finite(source%returned_mass) .or. &
+         .not. ieee_is_finite(source%energy) .or. source%returned_mass < 0.0d0 .or. &
+         source%energy < 0.0d0 .or. &
+         .not. all(ieee_is_finite(source%momentum)) .or. &
+         .not. all(ieee_is_finite(source%ejected_mass)) .or. &
+         .not. all(ieee_is_finite(source%net_yield)) .or. &
+         .not. all(ieee_is_finite(source%channel_returned_mass)) .or. &
+         .not. all(ieee_is_finite(source%channel_energy)) .or. &
+         .not. all(ieee_is_finite(source%channel_momentum)) .or. &
+         .not. all(ieee_is_finite(source%channel_ejected_mass)) .or. &
+         .not. all(ieee_is_finite(source%channel_net_yield))) then
+       ierr = 84
+       if (myid == 1) write(*,*) 'Phase 0 source increment is non-finite or negative'
        call progress_abort(progress, progress_ierr)
        return
     end if
@@ -603,102 +681,107 @@ contains
     end if
 
     call locate_star_cell(ilevel, parent_grid, ipart, target_cell, volume, located)
-    if (.not. located) then
+    if (.not. located .or. target_cell < 1 .or. target_cell > size(unew,1) .or. &
+         .not. ieee_is_finite(volume) .or. volume <= 0.0d0) then
+       ierr = 85
        call progress_abort(progress, progress_ierr)
        return
     end if
 
+    ! Build the complete generic source row in scratch.  Its kinetic energy is
+    ! evaluated independently of the SNIa component below; never derive the
+    ! energy from a merged generic+SNIa net momentum.
+    call build_stellar_source_unew_delta(source, vp(ipart,1:3), scale_mass, &
+         scale_momentum, scale_energy, volume, nvar, ndim, runtime_field_map, &
+         generic_delta, source_tolerance, snia_bridge_ierr)
+    if (snia_bridge_ierr /= ramses_bridge_ok) then
+       ierr = 86
+       if (myid == 1) write(*,*) 'Phase 0 generic source staging failed: ', &
+            snia_bridge_ierr
+       call progress_abort(progress, progress_ierr)
+       return
+    end if
+
+    snia_delta = 0.0d0
     if (enable_snia) then
-       snia_target_cell(1) = target_cell
-       snia_owner_rank(1) = myid - 1
-       snia_cell_volume(1) = volume
-       snia_weights(1) = 1.0d0
-       snia_velocity(:,1) = vp(ipart,1:3) * scale_v
        do element = 1, n_stellar_elements
-          if (active_element(element)) then
-             snia_element_var(element) = ichem + element - 1
-          else
-             ! Zero is the bridge's explicit "do not deposit this element"
-             ! sentinel.  Keep the SNIa path consistent with the generic path.
-             snia_element_var(element) = 0
-          end if
+          snia_element_var(element) = runtime_field_map%element_index(element)
        end do
-       call deposit_snia_budget_to_unew(snia_budget, snia_coupling, snia_velocity, &
-            scale_l, scale_d, scale_v, nvar, size(unew,1), 1, &
-            snia_target_cell, snia_owner_rank, myid - 1, snia_cell_volume, &
-            snia_weights, 1, ndim + 2, (/2, 3, 4/), unew, source_tolerance, &
-            snia_bridge_ierr, imetal, snia_element_var)
+       call build_snia_budget_unew_delta(snia_budget, snia_coupling, &
+            vp(ipart,1:3) * scale_v, scale_l, scale_d, scale_v, nvar, volume, &
+            runtime_field_map%density_index, runtime_field_map%energy_index, &
+            runtime_field_map%momentum_index, snia_delta, source_tolerance, &
+            snia_bridge_ierr, runtime_field_map%total_metal_index, snia_element_var)
        if (snia_bridge_ierr /= ramses_bridge_ok) then
           ierr = 82
-          if (myid == 1) write(*,*) 'Phase 0 SNIa AMR deposition failed: ', &
+          if (myid == 1) write(*,*) 'Phase 0 SNIa source staging failed: ', &
                snia_bridge_ierr
           call progress_abort(progress, progress_ierr)
           return
        end if
     end if
-
-    source_momentum_code = source%momentum / scale_momentum
-    bulk_momentum = returned_code * vp(ipart,1:3)
-    ! source%energy is the non-bulk event energy.  Once a source carries
-    ! event momentum, conserved total energy also contains its kinetic term
-    ! and the bulk/event cross-term.  The current SSP path has zero source
-    ! momentum; the expression keeps the future SNIa convention explicit.
-    if (returned_code > 0.0d0) then
-       bulk_energy = 0.5d0 * returned_code * sum(vp(ipart,1:3)**2) + &
-            sum(vp(ipart,1:3) * source_momentum_code) + &
-            0.5d0 * sum(source_momentum_code**2) / returned_code
-    else if (maxval(abs(source_momentum_code)) > 0.0d0) then
+    if (.not. all(ieee_is_finite(snia_delta))) then
+       ierr = 87
        call progress_abort(progress, progress_ierr)
-       ierr = 68
        return
-    else
-       bulk_energy = 0.0d0
-    end if
-    do idim = 1, 3
-       bulk_momentum(idim) = bulk_momentum(idim) + &
-            source%momentum(idim) / scale_momentum
-    end do
-    energy_density = (source%energy / scale_energy + bulk_energy) / volume
-
-    !$omp atomic update
-    unew(target_cell,1) = unew(target_cell,1) + returned_code / volume
-    do idim = 1, ndim
-       !$omp atomic update
-       unew(target_cell,1+idim) = unew(target_cell,1+idim) + &
-            bulk_momentum(idim) / volume
-    end do
-    !$omp atomic update
-    unew(target_cell,5) = unew(target_cell,5) + energy_density
-
-    ! Delayed cooling represents unresolved core-collapse SN blast energy.
-    ! Do not load this reservoir with winds, AGB, SNIa, or their combined
-    ! mass return.  The legacy feedback_mode retains that historical rule.
-    if (delayed_cooling) then
-       !$omp atomic update
-       unew(target_cell,idelay) = unew(target_cell,idelay) + &
-            snii_returned_code / volume
     end if
 
-    ! Generic metallicity retains tracked metals even when their individual
-    ! fields are disabled, plus the source-declared untracked residual.
-    !$omp atomic update
-    unew(target_cell,imetal) = unew(target_cell,imetal) + &
-         metal_ejecta_code / volume
-    do element = 1, n_stellar_elements
-       if (.not. active_element(element)) cycle
-       !$omp atomic update
-       unew(target_cell,ichem+element-1) = &
-            unew(target_cell,ichem+element-1) + ejecta_code(element) / volume
-    end do
+    staged_delta = generic_delta + snia_delta
+    if (.not. all(ieee_is_finite(staged_delta))) then
+       ierr = 88
+       call progress_abort(progress, progress_ierr)
+       return
+    end if
+    mp_after = particle_mass_before_code - returned_code - snia_returned_code
+    if (.not. ieee_is_finite(mp_after) .or. &
+         mp_after < -source_tolerance * ledger_scale) then
+       ierr = 89
+       call progress_abort(progress, progress_ierr)
+       return
+    end if
+    mp_after = max(0.0d0, mp_after)
 
-    mp(ipart) = mp(ipart) - returned_code - snia_returned_code
+    ! All fallible validation is complete before this lock.  The row is
+    ! re-read under the striped lock because another OpenMP particle may target
+    ! the same cell.  Virtual/reception rows are valid here; their partial
+    ! values are reconciled later by RAMSES's reverse virtual-cell exchange.
+    lock_index = 1 + mod(target_cell - 1, n_stellar_feedback_locks)
+    call omp_set_lock(stellar_feedback_locks(lock_index))
+    current_row = unew(target_cell,1:nvar)
+    proposed_row = current_row + staged_delta
+    if (.not. all(ieee_is_finite(current_row)) .or. &
+         .not. all(ieee_is_finite(proposed_row))) then
+       call omp_unset_lock(stellar_feedback_locks(lock_index))
+       ierr = 90
+       call progress_abort(progress, progress_ierr)
+       return
+    end if
+
+    ! Commit the local progress candidate before the first shared write.  The
+    ! scalar exported here is only a prepared value; indtab is written below
+    ! as part of the same in-process commit and no fallible call follows it.
     call progress_commit(progress, progress_ierr)
     if (progress_ierr /= progress_ok) then
+       call omp_unset_lock(stellar_feedback_locks(lock_index))
        ierr = 70
+       call progress_abort(progress, progress_ierr)
        return
     end if
-    call progress_export(progress, indtab(ipart), progress_ierr)
-    if (progress_ierr /= progress_ok) ierr = 71
+    call progress_export(progress, next_indtab, progress_ierr)
+    if (progress_ierr /= progress_ok .or. .not. ieee_is_finite(next_indtab)) then
+       call omp_unset_lock(stellar_feedback_locks(lock_index))
+       ierr = 71
+       call progress_abort(progress, progress_ierr)
+       return
+    end if
+
+    ! One complete in-process commit.  Do not insert calls or error branches
+    ! after the first assignment: process-crash and cross-rank atomicity are
+    ! explicit deferred limitations of this bundle.
+    unew(target_cell,1:nvar) = proposed_row
+    mp(ipart) = mp_after
+    indtab(ipart) = next_indtab
+    call omp_unset_lock(stellar_feedback_locks(lock_index))
   end subroutine deposit_one_star
 
   subroutine locate_star_cell(ilevel, parent_grid, ipart, target_cell, volume, located)

@@ -12,6 +12,7 @@ module stellar_ramses_field_map
      integer :: energy_index = 0
      integer :: momentum_index(3) = 0
      integer :: total_metal_index = 0
+     integer :: delayed_cooling_index = 0
      integer :: element_index(n_stellar_elements) = 0
      logical :: volume_is_physical = .true.
   end type stellar_field_map_t
@@ -25,6 +26,7 @@ contains
     field_map%energy_index = 0
     field_map%momentum_index = 0
     field_map%total_metal_index = 0
+    field_map%delayed_cooling_index = 0
     field_map%element_index = 0
     field_map%volume_is_physical = .true.
   end subroutine clear_field_map
@@ -81,6 +83,23 @@ contains
        end if
     end if
 
+    if (field_map%delayed_cooling_index /= 0) then
+       if (.not. valid_index(field_map%delayed_cooling_index, nvar)) then
+          ierr = 17
+          if (present(message)) message = 'invalid delayed-cooling field index'
+          return
+       end if
+       if (field_map%delayed_cooling_index == field_map%density_index .or. &
+           field_map%delayed_cooling_index == field_map%energy_index .or. &
+           (field_map%total_metal_index /= 0 .and. &
+            field_map%delayed_cooling_index == field_map%total_metal_index)) then
+          ierr = 18
+          if (present(message)) message = &
+               'delayed-cooling field overlaps a core field'
+          return
+       end if
+    end if
+
     do i = 1, ndim
        index = field_map%momentum_index(i)
        if (.not. valid_index(index, nvar)) then
@@ -101,6 +120,13 @@ contains
           ierr = 15
           if (present(message)) write(message, '(a,i0)') &
                'momentum field overlaps total-metal field for component ', i
+          return
+       end if
+       if (field_map%delayed_cooling_index /= 0 .and. &
+           index == field_map%delayed_cooling_index) then
+          ierr = 19
+          if (present(message)) write(message, '(a,i0)') &
+               'momentum field overlaps delayed-cooling field for component ', i
           return
        end if
        do j = 1, i - 1
@@ -134,6 +160,13 @@ contains
           ierr = 16
           if (present(message)) write(message, '(a,i0)') &
                'element field overlaps total-metal field for element ', i
+          return
+       end if
+       if (field_map%delayed_cooling_index /= 0 .and. &
+           index == field_map%delayed_cooling_index) then
+          ierr = 20
+          if (present(message)) write(message, '(a,i0)') &
+               'element field overlaps delayed-cooling field for element ', i
           return
        end if
        do j = 1, ndim

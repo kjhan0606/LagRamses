@@ -116,9 +116,11 @@ ifeq ($(SNRT),1)
   # The driver is not self-contained: keep the complete Fortran module graph
   # in the production link. CUDA entry points are supplied by
   # snrt_cuda_kernels.o; these interface modules only publish the C ABI.
-  SNRT_MODOBJ = mpi_mod.o snrt_state.o snrt_agn_locator.o snrt_agn_source.o \
+  SNRT_MODOBJ = mpi_mod.o snrt_spectral_contract.o snrt_agn_source.o \
+                snrt_thermochemistry.o snrt_state.o snrt_agn_locator.o \
                 snrt_nlte_coupling.o snrt_angular_quadrature.o \
                 snrt_amr_topology.o snrt_transport_step.o \
+                snrt_rt_transaction.o \
                 snrt_cuda_ledger_interface.o \
                 snrt_cuda_sparse_transport_interface.o \
                 snrt_cuda_limited_rt_step_interface.o \
@@ -271,23 +273,30 @@ amr_index.o: amr_commons.kjhan.o
 # SNRT module graph.  Explicit prerequisites are required because the
 # implicit %.o rule otherwise tries to compile a module before its .mod file
 # exists when a clean production build is requested.
-snrt_state.o: amr_commons.kjhan.o
+snrt_spectral_contract.o: amr_parameters.jaehyun.o
+snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o
 snrt_agn_locator.o: amr_commons.kjhan.o
 snrt_agn_source.o: amr_parameters.jaehyun.o
 snrt_nlte_coupling.o: snrt_agn_source.o
+snrt_thermochemistry.o: amr_parameters.jaehyun.o snrt_agn_source.o
 snrt_angular_quadrature.o: snrt_state.o
 snrt_amr_topology.o: amr_commons.kjhan.o mpi_mod.o snrt_state.o
 snrt_transport_step.o: snrt_state.o snrt_angular_quadrature.o \
                         snrt_amr_topology.o \
+                        mpi_mod.o \
                         snrt_cuda_sparse_transport_interface.o \
                         snrt_cuda_limited_rt_step_interface.o \
                         snrt_cuda_multigroup_interface.o
+snrt_rt_transaction.o: amr_parameters.jaehyun.o mpi_mod.o
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
 sink_particle.kjhan.o: snrt_agn_efficiency.o amr_parameters.jaehyun.o pm_commons.o
-snrt_ramses_driver.o: amr_commons.kjhan.o pm_commons.o snrt_agn_efficiency.o \
+snrt_ramses_driver.o: amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
+                       pm_commons.o snrt_agn_efficiency.o \
                        snrt_state.o snrt_amr_topology.o snrt_transport_step.o \
+                       snrt_rt_transaction.o \
                        snrt_angular_quadrature.o snrt_agn_locator.o \
-                       snrt_agn_source.o snrt_nlte_coupling.o \
+                       snrt_agn_source.o snrt_nlte_coupling.o snrt_thermochemistry.o \
+                       snrt_spectral_contract.o \
                        snrt_cuda_interface.o snrt_cuda_ledger_interface.o \
                        snrt_cuda_sparse_transport_interface.o \
                        snrt_cuda_limited_rt_step_interface.o \

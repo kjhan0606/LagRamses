@@ -1,11 +1,12 @@
 # Stellar/AGN feedback and yield-table implementation plan
 
-Governance notice (2026-09-04): this is a historical base plan whose AGY
+Governance notice (2026-09-05): this is a historical base plan whose AGY
 references describe audits that already occurred. AGY is retired and must not
 be commissioned for any future gate. Current active governance is recorded in
-`audit_governance_amendment_2026-09-04.md`; future implementation steps use
-Claude Opus 5, bundle-start plans use Grok, and GPT-5.6 Sol is the conditional
-or negative Opus adjudicator.
+`audit_governance_amendment_2026-09-04.md` and
+`audit_cadence_amendment_2026-09-05.md`; Fable reviews bundle-start plans,
+Claude Opus 5 audits bundle-end implementation, and each is the other's
+fallback in the opposite role. GPT-5.6 Sol is a conditional reserve only.
 
 Status: active plan, 2026-09-01.  The stopped comparison run is recorded in
 [`legacy_feedback_baseline.md`](legacy_feedback_baseline.md).  The plan is
@@ -333,13 +334,34 @@ and the transitional baseline can be replayed without ambiguity.
 
 ### P2 — connect approved stellar/AGN spectra and dust
 
+The F-P2 source-SED/dust spectral-closure bundle is implemented as a candidate
+engineering gate in
+[`fp2_source_sed_dust_closure_bundle_plan_2026-09-05.md`](fp2_source_sed_dust_closure_bundle_plan_2026-09-05.md)
+and its evidence record. It binds an explicit source SED to the grouped photon
+ledger, gas closure, and Draine absorption closure, and rejects component-only
+dust metadata for a STAR+AGN mixture. It does not change the scientific source
+approval or runtime-activation decision.
+
+The follow-on F-P2.6 native RT/chemistry transaction bundle is implemented and
+awaits its single bundle-end audit. It places the prepared transport,
+species-partition, H/He thermochemistry, and RAMSES thermal receiver behind a
+level transaction with trial-only coarse flux, MPI-collective decisions, and a
+bounded opacity fixed point. Its plan and evidence are recorded in
+[`fp2_6_native_rt_chemistry_transaction_bundle_plan_2026-09-05.md`](fp2_6_native_rt_chemistry_transaction_bundle_plan_2026-09-05.md)
+and
+[`fp2_6_native_rt_chemistry_transaction_bundle_implementation_evidence_2026-09-05.md`](fp2_6_native_rt_chemistry_transaction_bundle_implementation_evidence_2026-09-05.md).
+The result is not yet a production-run authorization; the end audit and later
+live RHD/feedback qualification remain required.
+
 1. Approve the stellar SED/IMF/metallicity/age mapping (the BPASS ledger is
    currently a candidate with explicit clamps and `fesc=1`, not a science
-   input) and define the AGN SED/escape/obscuration model.
-2. Define dust-to-metal normalization and source-specific opacity units.  Add
-   scattering, absorption, IR re-emission, and radiation-pressure tests before
-   claiming a dusty LRD solution.  The staged Draine/WD01 table alone is not a
-   complete dust mixture closure.
+   input), define the AGN SED/escape/obscuration model, and use the source-bound
+   identity path when those choices are made.
+2. Define dust-to-metal normalization and source-specific opacity units. The
+   current bundle implements absorption and source-weighted binding; add
+   scattering, IR re-emission, grain-temperature/destruction physics, and
+   radiation-pressure tests before claiming a dusty LRD solution. The staged
+   Draine/WD01 table alone is not a complete dust mixture closure.
 3. Add H2/metal chemistry and Compton/photo-heating coupling only after the
    elemental source ledger is approved.
 

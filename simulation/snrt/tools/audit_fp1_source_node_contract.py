@@ -15,6 +15,16 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from fp1_gate_validator_registry import (  # noqa: E402
+    GateValidatorRegistryError,
+    run_registered_validator,
+)
+from validate_fp1_source_identity_rights import (  # noqa: E402
+    GATE_ID as SOURCE_IDENTITY_GATE_ID,
+    LOCKED_CANDIDATE_PROFILES,
+    VALIDATOR_ID as SOURCE_IDENTITY_VALIDATOR_ID,
+)
+
 
 TOOL_PATH = Path(__file__).resolve()
 SNRT_ROOT = TOOL_PATH.parents[1]
@@ -114,6 +124,74 @@ APPROVED_RIGHTS_STATUSES = {"approved", "verified", "permitted"}
 
 class SourceNodeContractError(ValueError):
     """The F-P1 source-node contract is malformed or permits data loss."""
+
+
+def _execute_source_rights_binding(node: dict[str, Any]) -> dict[str, Any]:
+    """Bind an approved node to the code-owned rights validator and its bytes."""
+    source_id = node["source_id"]
+    candidate_ids = sorted(
+        candidate_id
+        for candidate_id, profile in LOCKED_CANDIDATE_PROFILES.items()
+        if profile.get("source_candidate_id") == source_id
+    )
+    if len(candidate_ids) != 1:
+        raise SourceNodeContractError(
+            "source-node source_id has no unique code-registered candidate: "
+            + str(source_id)
+        )
+    candidate_id = candidate_ids[0]
+    try:
+        report = run_registered_validator(
+            validator_id=SOURCE_IDENTITY_VALIDATOR_ID,
+            gate_id=SOURCE_IDENTITY_GATE_ID,
+            candidate_id=candidate_id,
+        )
+    except GateValidatorRegistryError as exc:
+        raise SourceNodeContractError(
+            "source-node rights validator execution failed: " + str(exc)
+        ) from exc
+    if report.get("status") != "pass" or report.get("passed") is not True:
+        blockers = report.get("blockers")
+        rendered = ", ".join(blockers) if isinstance(blockers, list) else "malformed_report"
+        raise SourceNodeContractError(
+            "source-node rights validator did not pass: " + rendered
+        )
+    artifacts = report.get("artifacts")
+    source_files = artifacts.get("source_files") if isinstance(artifacts, dict) else None
+    if (
+        not isinstance(source_files, list)
+        or not source_files
+        or any(
+            not isinstance(record, dict) or record.get("identity_passed") is not True
+            for record in source_files
+        )
+    ):
+        raise SourceNodeContractError(
+            "source-node rights validator did not provide verified source bytes"
+        )
+    package_fingerprint = report.get("package_fingerprint_sha256")
+    if (
+        not isinstance(package_fingerprint, str)
+        or len(package_fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in package_fingerprint)
+    ):
+        raise SourceNodeContractError(
+            "source-node rights validator returned an invalid package fingerprint"
+        )
+    node_fingerprint = node["package_fingerprint"]
+    if node_fingerprint.lower() != package_fingerprint:
+        raise SourceNodeContractError(
+            "source-node package fingerprint disagrees with executed rights validator"
+        )
+    return {
+        "candidate_id": candidate_id,
+        "validator_id": SOURCE_IDENTITY_VALIDATOR_ID,
+        "gate_id": SOURCE_IDENTITY_GATE_ID,
+        "package_fingerprint_sha256": package_fingerprint,
+        "validator_code_sha256": report["validator_code_sha256"],
+        "source_file_count": len(source_files),
+        "source_bytes_verified": True,
+    }
 
 
 def _read_json(path: Path, label: str) -> dict[str, Any]:
@@ -692,6 +770,7 @@ def audit_source_node_contract(
     if not isinstance(approval, dict):
         raise SourceNodeContractError("source-node approval section is missing")
     status = contract["status"]
+    rights_bindings: list[dict[str, Any]] = []
     if not nodes:
         if status != "contract_only_no_physical_nodes" or any(
             approval.get(field) is not False
@@ -757,6 +836,7 @@ def audit_source_node_contract(
                     raise SourceNodeContractError(
                         f"approved source node has disallowed {field}: {node[field]}"
                     )
+            rights_bindings.append(_execute_source_rights_binding(node))
     else:
         raise SourceNodeContractError("non-empty source-node file has contract-only status")
 
@@ -787,6 +867,7 @@ def audit_source_node_contract(
         "physical_node_count": len(nodes),
         "approval_id": approval.get("approval_id"),
         "validated_nodes": node_reports,
+        "rights_bindings": rights_bindings,
     }
 
 

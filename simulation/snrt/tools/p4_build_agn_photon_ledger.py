@@ -12,10 +12,23 @@ import sys
 import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TOOL_PATH = Path(__file__).resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from snrt_core.primordial import PhotoCrossSections, GroupSpectralClosure, sed_weighted_group_closure
+from snrt_core.primordial import (
+    GroupSpectralClosure,
+    PhotoCrossSections,
+    sed_weighted_group_closure,
+    sed_weighted_group_closure_with_diagnostics,
+)
+from snrt_core.provenance import PAYLOAD_HASH_SCHEME, build_code_manifest, canonical_payload_sha256
+from snrt_core.sed import (
+    PhotonSED,
+    integrate_photon_sed_groups,
+    read_lbol_photon_sed,
+    source_sed_metadata,
+)
 
 
 EV_TO_ERG = 1.602176634e-12
@@ -153,12 +166,61 @@ def _group_conversion(
     return photon_per_lbol, mean_energy_ev, closure
 
 
+def _group_conversion_from_sed(
+    sed: PhotonSED,
+    group_edges_ev: np.ndarray,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    GroupSpectralClosure,
+    tuple[str, ...],
+    np.ndarray,
+    dict[str, object],
+    dict[str, object],
+]:
+    """Convert an explicit Lbol-normalized SED into the shared group closure."""
+
+    moments = integrate_photon_sed_groups(sed, group_edges_ev, allow_empty_groups=True)
+    closure, closure_diagnostics = sed_weighted_group_closure_with_diagnostics(
+        group_edges_ev,
+        sed.energy_ev,
+        sed.photon_rate_per_norm_per_ev,
+        energy_fraction_per_ev=sed.energy_fraction_per_ev,
+        interpolation_convention=sed.interpolation_convention,
+        allow_empty_groups=True,
+    )
+    return (
+        moments.group_photon_rate_per_norm,
+        moments.photon_weighted_mean_energy_ev,
+        closure,
+        moments.support_status,
+        moments.group_energy_fraction_per_norm,
+        moments.quadrature_diagnostics.as_dict()
+        if moments.quadrature_diagnostics is not None
+        else {},
+        closure_diagnostics.as_dict(),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidates", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--metadata-output", required=True)
     parser.add_argument("--lyman-nu-lnu-fraction", type=float, default=0.1)
+    parser.add_argument(
+        "--sed-table",
+        type=Path,
+        help=(
+            "explicit CSV with energy_ev and energy_fraction_per_ev, normalized "
+            "to the declared L_bol scale; replaces the pilot Sazonov shape"
+        ),
+    )
+    parser.add_argument(
+        "--sed-bolometric-fraction",
+        type=float,
+        help="required with --sed-table; expected integral of energy_fraction_per_ev",
+    )
     parser.add_argument("--escape-fraction", type=float, default=1.0)
     group_options = parser.add_mutually_exclusive_group()
     group_options.add_argument(
@@ -211,7 +273,91 @@ def main() -> None:
     ):
         raise ValueError("candidate bolometric luminosities must be finite and non-negative")
 
-    photon_per_lbol, mean_energy_ev, closure = _group_conversion(args.lyman_nu_lnu_fraction, group_edges)
+    if args.sed_table is not None:
+        if args.sed_bolometric_fraction is None:
+            parser.error("--sed-bolometric-fraction is required with --sed-table")
+        sed = read_lbol_photon_sed(
+            args.sed_table,
+            expected_bolometric_fraction=args.sed_bolometric_fraction,
+        )
+        (
+            photon_per_lbol,
+            mean_energy_ev,
+            closure,
+            group_support_status,
+            group_energy_fraction_per_lbol,
+            source_sed_quadrature,
+            verner_quadrature,
+        ) = _group_conversion_from_sed(sed, group_edges)
+        source_sed_label = "explicit_tabulated_lbol_normalized_photon_sed"
+        source_sed_contract = source_sed_metadata(sed)
+        source_sed_contract["status"] = "candidate_explicit_tabulated_sed"
+        source_sed_identity = sed.identity
+        source_sed_sha256 = sed.input_sha256
+        group_sed_supported_intervals = tuple(
+            [float(low), float(high)]
+            for low, high in zip(group_edges[:-1], group_edges[1:], strict=True)
+        )
+        source_sed_reference = (
+            "Explicit tabulated source SED supplied by the caller; see "
+            "source_sed_contract for input provenance"
+        )
+        normalization_metadata = {
+            "escape_fraction": args.escape_fraction,
+            "represented_bolometric_fraction": sed.represented_bolometric_fraction,
+            "interpretation": "intrinsic source spectrum normalized to L_bol; escape fraction scales emitted photons",
+            "energy_fraction_units": "dimensionless per eV per L_bol",
+            "photon_rate_units": "photons s^-1 eV^-1 per (erg s^-1 of L_bol)",
+        }
+        limits_metadata = [
+            "The explicit source SED and escape fraction are source-side inputs, not an LRD-obscuration model.",
+            "The explicit group ledger is closed over the selected group table: no energy outside the group range is silently truncated, and the group-integrated fraction must reproduce the declared represented fraction.",
+            "The explicit SED must cover every configured group edge; no extrapolation is performed.",
+            "The source energy fractions are intrinsic to L_bol; escaped photon totals include the declared escape fraction.",
+            "This canonical explicit source is a synthetic non-physical wiring fixture; no AGN SED is scientifically adopted here.",
+        ]
+    else:
+        photon_per_lbol, mean_energy_ev, closure = _group_conversion(args.lyman_nu_lnu_fraction, group_edges)
+        group_support_status = tuple(
+            _group_support_status(float(low), float(high))
+            for low, high in zip(group_edges[:-1], group_edges[1:], strict=True)
+        )
+        # The pilot shape is retained as a reference control.  This derived
+        # value is diagnostic only because its low-energy support is partial.
+        group_energy_fraction_per_lbol = photon_per_lbol * mean_energy_ev * EV_TO_ERG
+        source_sed_label = "Sazonov-Ostriker-Sunyaev-style piecewise energy continuum"
+        source_sed_contract = {
+            "schema": "snrt_source_sed_v1",
+            "status": "reference_control_parameterized_pilot",
+            "identity": None,
+            "normalization": "L_bol_erg_s",
+            "support_ev": [SED_MIN_EV, float(group_edges[-1])],
+            "model": "Sazonov, Ostriker & Sunyaev (2004) parameterized pilot",
+        }
+        source_sed_identity = None
+        source_sed_sha256 = None
+        group_sed_supported_intervals = tuple(
+            None
+            if high <= SED_MIN_EV
+            else [float(max(low, SED_MIN_EV)), float(high)]
+            for low, high in zip(group_edges[:-1], group_edges[1:], strict=True)
+        )
+        source_sed_reference = (
+            "Sazonov, Ostriker & Sunyaev (2004), MNRAS 347, 144; "
+            "10 eV-1 keV energy slope -1.7 and 1-100 keV slope -1"
+        )
+        normalization_metadata = {
+            "nu_lnu_at_13p6_ev_over_lbol": args.lyman_nu_lnu_fraction,
+            "escape_fraction": args.escape_fraction,
+            "interpretation": "unobscured injection baseline; unresolved nuclear absorption is not modeled",
+        }
+        limits_metadata = [
+            "The source SED and escape fraction are source-side inputs, not an LRD-obscuration model.",
+            f"Photons above {group_edges[-1]:g} eV are excluded because the selected group table ends there.",
+            "The parameterized SED is not extrapolated below 10 eV: groups wholly below 10 eV are explicit zero-photon controls.",
+            "A group straddling 10 eV is integrated only over its supported [10 eV, upper-edge] sub-interval and is explicitly marked partially supported.",
+            "A production interpretation must vary the Lyman normalization and escape fraction.",
+        ]
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     group_fields = [f"q_group_{group}_s" for group in range(len(photon_per_lbol))]
@@ -249,33 +395,45 @@ def main() -> None:
                 }
             )
 
+    escaped_photon_per_lbol = args.escape_fraction * photon_per_lbol
+    escaped_energy_fraction_per_lbol = args.escape_fraction * group_energy_fraction_per_lbol
+    group_edges_sha256 = (
+        None if group_edges_path is None else _sha256(group_edges_path.resolve())
+    )
     metadata = {
         "schema": "snrt_agn_photon_ledger_v2",
-        "source_sed": "Sazonov-Ostriker-Sunyaev-style piecewise energy continuum",
-        "reference": "Sazonov, Ostriker & Sunyaev (2004), MNRAS 347, 144; 10 eV-1 keV energy slope -1.7 and 1-100 keV slope -1",
-        "normalization": {
-            "nu_lnu_at_13p6_ev_over_lbol": args.lyman_nu_lnu_fraction,
-            "escape_fraction": args.escape_fraction,
-            "interpretation": "unobscured injection baseline; unresolved nuclear absorption is not modeled",
-        },
+        "source_sed": source_sed_label,
+        "reference": source_sed_reference,
+        "normalization": normalization_metadata,
         "group_table_mode": group_table_mode,
         "group_edges_file": None if group_edges_path is None else str(group_edges_path.resolve()),
+        "group_edges_sha256": group_edges_sha256,
         "group_edges_ev": group_edges.tolist(),
         "group_interval_convention": "left_closed_right_open_except_final_closed",
+        "source_sed_identity": source_sed_identity,
+        "source_sed_sha256": source_sed_sha256,
+        "source_sed_contract": source_sed_contract,
+        "source_sed_quadrature": source_sed_quadrature if args.sed_table is not None else None,
+        "verner_quadrature": verner_quadrature if args.sed_table is not None else None,
         "group_photon_rate_total_s": total_photon_rate.tolist(),
         "groups": [
             {
                 "index": int(index),
                 "energy_interval_ev": [float(low), float(high)],
                 "photon_weighted_mean_energy_ev": float(mean),
-                "photon_rate_per_lbol_s_per_erg_s": float(rate),
-                "total_photon_rate_s": float(total),
-                "sed_supported_interval_ev": (
-                    None
-                    if high <= SED_MIN_EV
-                    else [float(max(low, SED_MIN_EV)), float(high)]
+                "energy_fraction_of_lbol": float(
+                    group_energy_fraction_per_lbol[index]
                 ),
-                "closure_status": _group_support_status(float(low), float(high)),
+                "escaped_energy_fraction_of_lbol": float(
+                    escaped_energy_fraction_per_lbol[index]
+                ),
+                "photon_rate_per_lbol_s_per_erg_s": float(rate),
+                "escaped_photon_rate_per_lbol_s_per_erg_s": float(
+                    escaped_photon_per_lbol[index]
+                ),
+                "total_photon_rate_s": float(total),
+                "sed_supported_interval_ev": group_sed_supported_intervals[index],
+                "closure_status": group_support_status[index],
             }
             for index, (low, high, mean, rate, total) in enumerate(
                 zip(group_edges[:-1], group_edges[1:], mean_energy_ev, photon_per_lbol, total_photon_rate)
@@ -294,10 +452,7 @@ def main() -> None:
                 "helium_i": np.asarray(closure.photoelectron_excess_energy_ev[1]).tolist(),
                 "helium_ii": np.asarray(closure.photoelectron_excess_energy_ev[2]).tolist(),
             },
-            "group_status": [
-                _group_support_status(float(low), float(high))
-                for low, high in zip(group_edges[:-1], group_edges[1:], strict=True)
-            ],
+            "group_status": list(group_support_status),
         },
         "candidates": str(Path(args.candidates).resolve()),
         "source_count": len(rows),
@@ -312,14 +467,10 @@ def main() -> None:
                 None if group_edges_path is None else _sha256(group_edges_path.resolve())
             ),
         },
-        "limits": [
-            "The source SED is a parameterized pilot baseline, not an LRD-obscuration model.",
-            f"Photons above {group_edges[-1]:g} eV are excluded because the selected group table ends there.",
-            "The parameterized SED is not extrapolated below 10 eV: groups wholly below 10 eV are explicit zero-photon controls.",
-            "A group straddling 10 eV is integrated only over its supported [10 eV, upper-edge] sub-interval and is explicitly marked partially supported.",
-            "A production interpretation must vary the Lyman normalization and escape fraction.",
-        ],
+        "limits": limits_metadata,
     }
+    if args.sed_table is not None:
+        metadata["source_model_status"] = "synthetic_non_physical_wiring_fixture"
     aexp_values = [row.get("aexp", "") for row in rows]
     if all(value not in (None, "") for value in aexp_values):
         aexp_array = np.asarray([float(value) for value in aexp_values], dtype=np.float64)
@@ -330,6 +481,17 @@ def main() -> None:
         metadata["source_scale_factor_uniform"] = bool(
             np.allclose(aexp_array, aexp_array[0], rtol=0.0, atol=1.0e-12)
         )
+    if args.sed_table is not None:
+        metadata["closure_code_manifest"] = build_code_manifest(
+            {
+                "agn_ledger_builder": TOOL_PATH,
+                "source_sed": PROJECT_ROOT / "snrt_core" / "sed.py",
+                "primordial_closure": PROJECT_ROOT / "snrt_core" / "primordial.py",
+                "integrity_helper": PROJECT_ROOT / "snrt_core" / "provenance.py",
+            }
+        )
+        metadata["payload_hash_scheme"] = PAYLOAD_HASH_SCHEME
+        metadata["payload_sha256"] = canonical_payload_sha256(metadata)
     metadata_path = Path(args.metadata_output)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
