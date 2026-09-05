@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # RAMSES-independent native contract for the shared AGN efficiency helper and
-# the positional supplied-inflow photon-budget API.  It intentionally uses a
+# accepted-fuel/energy photon budgets and native deposition. It uses a
 # scratch directory and never enables SNRT runtime execution.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 FC=${FC:-mpiifx}

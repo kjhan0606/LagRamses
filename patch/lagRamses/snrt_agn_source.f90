@@ -44,10 +44,35 @@ contains
 
     radiated_energy_erg = radiative_efficiency * delta_inflow_mass_code * &
          mass_unit_g * snrt_c_cgs**2
-    luminosity_erg_s = radiated_energy_erg / delta_t_s
-    emitted_photons = ionizing_fraction * radiated_energy_erg / &
-         (mean_photon_energy_ev * snrt_ev_to_erg)
+    call snrt_agn_photon_budget_energy(radiated_energy_erg,delta_t_s,ionizing_fraction, &
+         mean_photon_energy_ev,luminosity_erg_s,emitted_photons)
   end subroutine snrt_agn_photon_budget
+
+  subroutine snrt_agn_photon_budget_energy(energy_erg,delta_t_s,fraction,mean_ev,luminosity,photons,ierr)
+    ! Fractions are escaped fractions of the full accepted bolometric energy.
+    real(dp), intent(in) :: energy_erg,delta_t_s,fraction,mean_ev
+    real(dp), intent(out) :: luminosity,photons
+    integer, optional, intent(out) :: ierr
+    luminosity=0d0; photons=0d0
+    if(present(ierr))ierr=1
+    if(.not.all(ieee_is_finite([energy_erg,delta_t_s,fraction,mean_ev])))return
+    if(energy_erg<0d0.or.delta_t_s<=0d0.or.fraction<0d0.or.fraction>1d0.or.mean_ev<=0d0)return
+    luminosity=energy_erg/delta_t_s
+    photons=(fraction*energy_erg)/(mean_ev*snrt_ev_to_erg)
+    if(.not.all(ieee_is_finite([luminosity,photons])))then
+       luminosity=0d0; photons=0d0
+       return
+    endif
+    if(present(ierr))ierr=0
+  end subroutine snrt_agn_photon_budget_energy
+
+  pure subroutine snrt_agn_source_commit(pending_erg,source_ok)
+    real(dp), intent(inout) :: pending_erg
+    logical, intent(in) :: source_ok
+    ! The serial source phase has no concurrent accretion. Transport rollback
+    ! occurs after this commit and must not restore this fuel.
+    if(source_ok)pending_erg=0d0
+  end subroutine snrt_agn_source_commit
 
   subroutine snrt_agn_isotropic_packet(emitted_photons, angular_weights, &
        directional_photons)

@@ -1101,6 +1101,7 @@ subroutine kjhan_make_sink(ilevel)
         msink(isink) =msink_all(isink)
         dMsmbh(isink)=dMsmbh_all(isink)
         Esave (isink)=Esave_all (isink)
+        agn_pending_erg(isink)=0d0 ! Newly created sinks have no accepted radiative fuel.
         xsink(isink,1:ndim)=xsink_all(isink,1:ndim)
         vsink(isink,1:ndim)=vsink_all(isink,1:ndim)
         bhspin(isink,1:ndim)=bhspin_all(isink,1:ndim)
@@ -1123,6 +1124,7 @@ end subroutine kjhan_make_sink
 !################################################################
 !################################################################
 subroutine merge_sink(ilevel)
+  use agn_feedback_deposition, only: agn_merge_pending
   use pm_commons
   use amr_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH, twopi
@@ -1135,6 +1137,8 @@ subroutine merge_sink(ilevel)
   ! This routine merges sink usink the FOF algorithm.
   ! It keeps only the group centre of mass and remove other sinks.
   !------------------------------------------------------------------------
+  real(dp), allocatable :: pending_new(:)
+  integer :: pending_error,pending_error_all
   integer::j,isink,ii,jj,kk,ind,idim,new_sink
   real(dp)::dx_loc,scale,dx_min,xx,yy,zz,rr,rmax2,rmax
   integer::igrid,jgrid,ipart,jpart,next_part,info
@@ -1422,6 +1426,16 @@ subroutine merge_sink(ilevel)
   !----------------------------------------------------
   ! Compute group centre of mass and average velocity
   !----------------------------------------------------
+  allocate(pending_new(new_sink))
+  call agn_merge_pending(agn_pending_erg(1:nsink),gsink,pending_new,pending_error)
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(pending_error,pending_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+  pending_error=pending_error_all
+#endif
+  if(pending_error/=0)then
+     if(myid==1)write(*,*) 'Invalid AGN pending energy/merger map before sink compaction'
+     call clean_stop
+  endif
   xsink_new=0d0; vsink_new=0d0; msink_new=0d0; dMsmbh_new=0d0; Esave_new=0d0; idsink_new=0
   oksink_all=0d0; oksink_new=0d0; tsink_new=0d0
   rank_old=0; idsink_old=0d0; tsink_old=0d0
@@ -1689,6 +1703,9 @@ subroutine merge_sink(ilevel)
   end do
 ! call MPI_BARRIER(MPI_COMM_WORLD, info) if(verbose) print *,'###4'
 
+  agn_pending_erg(1:new_sink)=pending_new(1:new_sink)
+  agn_pending_erg(new_sink+1:nsinkmax)=0d0
+  deallocate(pending_new)
   nsink=new_sink
   msink (1:nsink)=msink_new (1:nsink)
   dMsmbh(1:nsink)=dMsmbh_new(1:nsink)
@@ -3905,6 +3922,8 @@ end subroutine kjhan_average_density
 !################################################################
 !################################################################
 subroutine grow_bondi(ilevel)
+  use snrt_agn_efficiency, only: snrt_agn_rt_requested
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use pm_commons
   use amr_commons
   use hydro_commons
@@ -3939,19 +3958,41 @@ subroutine grow_bondi(ilevel)
   integer,parameter::n_bondi_locks=4096
   integer(omp_lock_kind),save::bondi_cell_locks(1:n_bondi_locks)
   logical,save::bondi_locks_initialized=.false.
-  real(dp),allocatable::sink_thread(:,:,:)
+  real(dp),allocatable::sink_thread(:,:,:),radiated_new(:),radiated_all(:)
+  integer,allocatable::accretion_error(:),accretion_notice(:,:)
+  integer::notice_sum(2),notice_all(2)
+  logical,save::notice_reported(2)=.false.
+  integer :: scalar_fields(nvar),nscalar,metal_slot,receipt_error,receipt_error_all
+  logical :: capture_radiation
 
   call MPI_BARRIER(MPI_COMM_WORLD,info)
 
   if(numbtot(1,ilevel)==0)return
+
+  call agn_select_scalar_fields(scalar_fields,nscalar,metal_slot,receipt_error)
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(receipt_error,receipt_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+  receipt_error=receipt_error_all
+#endif
+  if(receipt_error/=0)then
+     if(myid==1)write(*,*) 'Invalid accretion constituent layout'
+     call clean_stop
+  endif
+  capture_radiation=.false.
+#ifdef SNRT
+  capture_radiation=snrt_agn_rt_requested()
+#endif
 
   !$omp parallel shared(nthreads) private(mythread)
      mythread = omp_get_thread_num()
      if(mythread==0) nthreads = omp_get_num_threads()
   !$omp end parallel
   allocate(nparticles_omp(0:nthreads-1), ptrhead_omp(0:nthreads-1))
-  allocate(sink_thread(1:max(nsink,1),1:4+ndim,0:nthreads-1))
+  allocate(sink_thread(1:max(nsink,1),1:5+ndim,0:nthreads-1))
   sink_thread=0d0
+  allocate(accretion_error(0:nthreads-1),accretion_notice(2,0:nthreads-1),radiated_new(nsink),radiated_all(nsink))
+  accretion_notice=0
+  accretion_error=0; radiated_new=0d0; radiated_all=0d0
   if(.not.bondi_locks_initialized)then
      do i=1,n_bondi_locks
         call omp_init_lock(bondi_cell_locks(i))
@@ -4106,7 +4147,8 @@ subroutine grow_bondi(ilevel)
                  endif
                  if(ip==nvector)then
                     call accrete_bondi(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
-                         & bondi_cell_locks,n_bondi_locks,sink_thread(:,:,mythread))
+                         & bondi_cell_locks,n_bondi_locks,sink_thread(:,:,mythread),nscalar, &
+                         & scalar_fields(1:nscalar),metal_slot,capture_radiation,accretion_error(mythread),accretion_notice(:,mythread))
                     ip=0
                     ig=0
                  end if
@@ -4120,12 +4162,37 @@ subroutine grow_bondi(ilevel)
         ! End loop over grids
         if(ip>0) then
            call accrete_bondi(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
-                & bondi_cell_locks,n_bondi_locks,sink_thread(:,:,mythread))
+                & bondi_cell_locks,n_bondi_locks,sink_thread(:,:,mythread),nscalar, &
+                         & scalar_fields(1:nscalar),metal_slot,capture_radiation,accretion_error(mythread),accretion_notice(:,mythread))
         endif
      !$omp end parallel
 102  end do
   ! End loop over cpus
   deallocate(nparticles_omp, ptrhead_omp)
+
+  receipt_error=maxval(accretion_error)
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(receipt_error,receipt_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+  receipt_error=receipt_error_all
+#endif
+  notice_sum=sum(accretion_notice,dim=2)
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(notice_sum,notice_all,2,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  notice_sum=notice_all
+#endif
+  if(myid==1)then
+     if(notice_sum(1)>0.and..not.notice_reported(1))write(*,*) &
+          'AGN accretion skipped for finite invalid composition: ',notice_sum(1),' events; further notices suppressed'
+     if(notice_sum(2)>0.and..not.notice_reported(2))write(*,*) &
+          'AGN accretion used current donor density for zero initial reference: ',notice_sum(2), &
+          ' events; further notices suppressed'
+  endif
+  notice_reported=notice_reported.or.notice_sum>0
+  deallocate(accretion_error,accretion_notice)
+  if(receipt_error/=0)then
+     if(myid==1)write(*,*) 'Invalid accretion event rejected before donor mutation'
+     call clean_stop
+  endif
 
   ! Deterministic per-sink reduction of thread-private accretion ledgers.
   msink_new=0d0; vsink_new=0d0; dMBH_coarse_new=0d0; dMEd_coarse_new=0d0; dMsmbh_new=0d0
@@ -4141,6 +4208,7 @@ subroutine grow_bondi(ilevel)
              & +sink_thread(isink,3+ndim,mythread)
         dMsmbh_new(isink)=dMsmbh_new(isink) &
              & +sink_thread(isink,4+ndim,mythread)
+        radiated_new(isink)=radiated_new(isink)+sink_thread(isink,5+ndim,mythread)
      end do
   end do
   !$omp end parallel do
@@ -4148,8 +4216,8 @@ subroutine grow_bondi(ilevel)
 
   if(nsink>0)then
 #ifndef WITHOUTMPI
-     ! Pack 7 fields: msink(1)+vsink(3)+dMBH_coarse(1)+dMEd_coarse(1)+dMsmbh(1)
-     npack = (4+ndim)*nsink
+     ! Pack 5+ndim fields: mass, momentum, two supplied rates, retained mass, accepted radiative erg.
+     npack = (5+ndim)*nsink
      allocate(sink_sbuf(1:npack), sink_rbuf(1:npack))
      ip_buf = 0
      sink_sbuf(ip_buf+1:ip_buf+nsink) = msink_new(1:nsink); ip_buf = ip_buf + nsink
@@ -4159,6 +4227,7 @@ subroutine grow_bondi(ilevel)
      sink_sbuf(ip_buf+1:ip_buf+nsink) = dMBH_coarse_new(1:nsink); ip_buf = ip_buf + nsink
      sink_sbuf(ip_buf+1:ip_buf+nsink) = dMEd_coarse_new(1:nsink); ip_buf = ip_buf + nsink
      sink_sbuf(ip_buf+1:ip_buf+nsink) = dMsmbh_new(1:nsink);      ip_buf = ip_buf + nsink
+     sink_sbuf(ip_buf+1:ip_buf+nsink) = radiated_new; ip_buf = ip_buf + nsink
      call MPI_ALLREDUCE(sink_sbuf, sink_rbuf, npack, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, info)
      ip_buf = 0
      msink_all=0d0; vsink_all=0d0; dMBH_coarse_all=0d0; dMEd_coarse_all=0d0; dMsmbh_all=0d0
@@ -4169,6 +4238,7 @@ subroutine grow_bondi(ilevel)
      dMBH_coarse_all(1:nsink) = sink_rbuf(ip_buf+1:ip_buf+nsink); ip_buf = ip_buf + nsink
      dMEd_coarse_all(1:nsink) = sink_rbuf(ip_buf+1:ip_buf+nsink); ip_buf = ip_buf + nsink
      dMsmbh_all(1:nsink)      = sink_rbuf(ip_buf+1:ip_buf+nsink); ip_buf = ip_buf + nsink
+     radiated_all = sink_rbuf(ip_buf+1:ip_buf+nsink)
      deallocate(sink_sbuf, sink_rbuf)
 #else
      msink_all=msink_new
@@ -4176,9 +4246,23 @@ subroutine grow_bondi(ilevel)
      dMBH_coarse_all=dMBH_coarse_new
      dMEd_coarse_all=dMEd_coarse_new
      dMsmbh_all       =dMsmbh_new
+     radiated_all=radiated_new
 #endif
   endif
 
+  receipt_error=0
+  if(.not.all(ieee_is_finite(radiated_all)).or.any(radiated_all<0d0))receipt_error=1
+  if(.not.all(ieee_is_finite(agn_pending_erg(1:nsink)+radiated_all)))receipt_error=1
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(receipt_error,receipt_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+  receipt_error=receipt_error_all
+#endif
+  if(receipt_error/=0)then
+     if(myid==1)write(*,*) 'Invalid reduced AGN accepted energy'
+     call clean_stop
+  endif
+  agn_pending_erg(1:nsink)=agn_pending_erg(1:nsink)+radiated_all
+  deallocate(radiated_new,radiated_all)
   !$omp parallel do schedule(static) private(isink)
   do isink=1,nsink
      vsink(isink,1:ndim)=vsink(isink,1:ndim)*msink(isink)+vsink_all(isink,1:ndim)
@@ -4202,7 +4286,9 @@ end subroutine grow_bondi
 !################################################################
 !################################################################
 subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
-     & bondi_cell_locks,n_bondi_locks,sink_thread)
+     & bondi_cell_locks,n_bondi_locks,sink_thread,nscalar,scalar_fields,metal_slot,capture_radiation,receipt_error,notice)
+  use agn_feedback_deposition, only: agn_accretion_receipt, agn_accrete_scalars, agn_eddington_ratio
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -4211,10 +4297,16 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
 #include "amr_index.h"
   implicit none
   integer::ng,np,ilevel,n_bondi_locks
+  integer,intent(in)::nscalar,scalar_fields(nscalar),metal_slot
+  integer,intent(inout)::receipt_error,notice(2)
+  logical,intent(in)::capture_radiation
+  integer::cell_ierr
+  real(dp)::donor_row(nvar),gross_mass,radiated_erg
+  real(dp)::event_radiated(nvector)
   integer,dimension(1:nvector)::ind_grid
   integer,dimension(1:nvector)::ind_grid_part,ind_part
   integer(omp_lock_kind),dimension(1:n_bondi_locks),intent(inout)::bondi_cell_locks
-  real(dp),dimension(1:max(nsink,1),1:4+ndim),intent(inout)::sink_thread
+  real(dp),dimension(1:max(nsink,1),1:5+ndim),intent(inout)::sink_thread
   !-----------------------------------------------------------------------
   ! This routine is called by subroutine bondi_hoyle.
   !-----------------------------------------------------------------------
@@ -4425,6 +4517,7 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
   ! update remains atomic at cell granularity, while unrelated cells can
   ! proceed concurrently.  Particle and sink updates are deferred until
   ! after the cell lock is released.
+  event_radiated=0d0
   event_ok(1:np)=.false.
   event_mp(1:np)=0d0
   event_vp(1:np,1:ndim)=0d0
@@ -4440,6 +4533,19 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         do idim=1,ndim
            r2=r2+(xp(ind_part(j),idim)-xsink(ksink,idim))**2
         end do
+        if(.not.all(ieee_is_finite([r2k(ksink),total_volume(ksink), &
+             dMBHoverdt(ksink),dMEdoverdt(ksink),dtnew(ilevel)])))then
+           receipt_error=1
+           cycle
+        endif
+        if(min(dMBHoverdt(ksink),dMEdoverdt(ksink))<0d0.or.dtnew(ilevel)<0d0)then
+           receipt_error=1
+           cycle
+        endif
+        if(r2k(ksink)<=0d0.or.total_volume(ksink)<=0d0)then
+           receipt_error=1
+           cycle
+        endif
         weight=exp(-r2/r2k(ksink))
 
         ! A striped lock is sufficient: collisions merely serialize two
@@ -4447,6 +4553,12 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         ilock=1+mod(indp(j)-1,n_bondi_locks)
         call omp_set_lock(bondi_cell_locks(ilock))
 
+        donor_row=uold(indp(j),1:nvar)
+        if(.not.all(ieee_is_finite(donor_row(1:ndim+2))).or.donor_row(1)<=0d0)then
+           receipt_error=1
+           call omp_unset_lock(bondi_cell_locks(ilock))
+           cycle
+        endif
         d=uold(indp(j),1)
         u=uold(indp(j),2)/d
 #if NDIM>1
@@ -4456,9 +4568,6 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         w=uold(indp(j),4)/d
 #endif
         e=uold(indp(j),ndim+2)/d
-        if(metal)then
-           z=uold(indp(j),imetal)/d
-        endif
 
 #ifdef SOLVERmhd
         bx1=uold(indp(j),6)
@@ -4472,20 +4581,33 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         d_ini=unew(indp(j),1)
         acc_mass=min(dMBHoverdt(ksink),dMEdoverdt(ksink)) &
              & *weight/total_volume(ksink)*dtnew(ilevel)
-        dmsink=max( min(acc_mass, (d-floorB*d_ini)*vol_loc), 0d0)
         if(spin_bh)then
            epsilon_r=eps_sink(ksink)
         else
            epsilon_r=0.1d0
         endif
         if(mad_jet)then
-           if(dMBHoverdt(ksink)/dMEdoverdt(ksink).lt.X_floor)then
+           if(agn_eddington_ratio(dMBHoverdt(ksink),dMEdoverdt(ksink)).lt.X_floor)then
               ! from Benson & Babul 2009, for an ADAF
-              epsilon_r=epsilon_r*(dMBHoverdt(ksink)/(X_floor*dMEdoverdt(ksink)))
+              epsilon_r=epsilon_r*agn_eddington_ratio(dMBHoverdt(ksink),dMEdoverdt(ksink))/X_floor
            endif
         endif
-        dmsink=dmsink*(1d0-epsilon_r)
-        dmsink_net=dmsink
+        call agn_accretion_receipt(d,d_ini,vol_loc,acc_mass,floorB,epsilon_r, &
+             scale_d*scale_l**3,gross_mass,dmsink_net,radiated_erg,cell_ierr)
+        if(cell_ierr==0)then
+           if(d_ini==0d0)notice(2)=notice(2)+1
+           call agn_accrete_scalars(donor_row,scalar_fields,metal_slot,gross_mass,vol_loc,cell_ierr,ndim+2)
+        endif
+        if(cell_ierr/=0)then
+           if(cell_ierr==2)then
+              notice(1)=notice(1)+1
+           else
+              receipt_error=1
+           endif
+           call omp_unset_lock(bondi_cell_locks(ilock))
+           cycle
+        endif
+        if(capture_radiation)event_radiated(j)=radiated_erg
 
         ! Save the sink ledger contribution in this event.  It is reduced
         ! into a thread-private sink array after the hydro transaction.
@@ -4510,8 +4632,8 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         event_vp(j,3)=(mp_old*vp(ind_part(j),3)+dmsink_net*w)/event_mp(j)
 #endif
 
-        dmsink=dmsink/(1d0-epsilon_r)
-        d=d-dmsink/vol_loc
+        dmsink=gross_mass
+        d=d-gross_mass/vol_loc
 #ifdef SOLVERmhd
         e=e+0.125d0*((bx1+bx2)**2+(by1+by2)**2+(bz1+bz2)**2)/d
 #endif
@@ -4524,9 +4646,7 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         uold(indp(j),4)=d*w
 #endif
         uold(indp(j),ndim+2)=d*e
-        if(metal)then
-           uold(indp(j),imetal)=d*z
-        endif
+        uold(indp(j),scalar_fields)=donor_row(scalar_fields)
 
 
         if(drag)then
@@ -4594,6 +4714,7 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         sink_thread(ksink,2+ndim)=sink_thread(ksink,2+ndim)+event_dmbh(j)
         sink_thread(ksink,3+ndim)=sink_thread(ksink,3+ndim)+event_dmed(j)
         sink_thread(ksink,4+ndim)=sink_thread(ksink,4+ndim)+event_dmsmbh(j)
+        sink_thread(ksink,5+ndim)=sink_thread(ksink,5+ndim)+event_radiated(j)
      endif
   end do
 
@@ -6145,10 +6266,7 @@ end subroutine kjhan_growspin
 !###########################################################
 !###########################################################
 subroutine AGN_feedback
-  use agn_feedback_deposition, only: agn_eddington_ratio, agn_scalar_map
-#ifdef PHASE0_STELLAR_ENRICHMENT
-  use stellar_enrichment_config, only: use_channel_resolved_feedback, n_stellar_elements
-#endif
+  use agn_feedback_deposition, only: agn_eddington_ratio
   use snrt_agn_efficiency, only: snrt_agn_rt_requested
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_commons
@@ -6162,7 +6280,7 @@ subroutine AGN_feedback
   !----------------------------------------------------------------------
   ! local constants
   integer::nAGN,iAGN,ilevel,ivar,info,feedback_error,feedback_error_all
-  integer::nelements,nscalar,metal_slot,reserved_fields(4)
+  integer::nscalar,metal_slot,fields_work(nvar)
   integer,allocatable::scalar_fields(:)
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -6191,20 +6309,9 @@ subroutine AGN_feedback
   if(ndim.ne.3)return
   if(nsink.eq.0)return
 
-  ! Layout-only preflight: no yield-source initialization or private runtime map.
-  nelements=nelt
-#ifdef PHASE0_STELLAR_ENRICHMENT
-  if(use_channel_resolved_feedback()) nelements=n_stellar_elements
-#endif
-  metal_slot=merge(1,0,metal)
-  nscalar=metal_slot+max(0,nelements)
+  call agn_select_scalar_fields(fields_work,nscalar,metal_slot,feedback_error)
   allocate(scalar_fields(nscalar))
-  reserved_fields=0
-  if(delayed_cooling)reserved_fields(1)=idelay
-  if(sf_virial)reserved_fields(2)=ivirial
-  if(aton)reserved_fields(3)=ixion
-  if(use_sgs)reserved_fields(4)=isgs
-  call agn_scalar_map(nvar,merge(imetal,0,metal),ichem,nelements,reserved_fields,scalar_fields,feedback_error)
+  scalar_fields=fields_work(1:nscalar)
   if(nener/=0)feedback_error=1
 #ifndef WITHOUTMPI
   call MPI_ALLREDUCE(feedback_error,feedback_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
@@ -6863,7 +6970,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
   real(dp)::jtot,j_x,j_y,j_z,drjet,dzjet,psy,nCOM,T2_1,T2_2,ekk,eint,vm_,dr_cell,T2,etot
   real(dp)::eint1,ekkold,T2maxAGNz,epsilon_r,ZZ1,ZZ2,onethird,r_lso,eff_mad
   integer::idim,isink,cell_ierr,deposition_error,deposition_error_all
-  real(dp)::dm_cell,dp_cell(3),de_cell,deferred_cell
+  real(dp)::dm_cell,dp_cell(3),de_cell,deferred_cell,rho_ref
   integer :: nbin, nbx, nby, nbz, ibx, iby, ibz, jbx, jby, jbz
   real(dp) :: inv_bin_size, bin_xmin, bin_ymin, bin_zmin
   integer, allocatable :: bin_head(:,:,:), agn_next(:)
@@ -7038,7 +7145,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
      ncache=active(ilevel)%ngrid
 !$omp parallel do private(igrid,ngrid,i,ind,x,y,z,iAGN,dxx,dyy,dzz,&
 !$omp               dr_AGN,jtot,weights,axis,&
-!$omp               ibx,iby,ibz,jbx,jby,jbz,dm_cell,dp_cell,de_cell,deferred_cell,cell_ierr) &
+!$omp               ibx,iby,ibz,jbx,jby,jbz,dm_cell,dp_cell,de_cell,deferred_cell,cell_ierr,rho_ref) &
 !$omp               reduction(max:deposition_error) schedule(dynamic)
      do igrid=1,ncache,nvector
         ngrid=MIN(nvector,ncache-igrid+1)
@@ -7068,6 +7175,21 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
                  ibx=max(1,min(nbx,int((x-bin_xmin)*inv_bin_size)+1))
                  iby=max(1,min(nby,int((y-bin_ymin)*inv_bin_size)+1))
                  ibz=max(1,min(nbz,int((z-bin_zmin)*inv_bin_size)+1))
+                 ! Restore the density measure used by average_AGN. All
+                 ! donor withdrawals are complete; no receiver in this cell
+                 ! has been deposited yet. Include shared/fallback donors.
+                 rho_ref=uold(ind_cell(i),1)
+                 do jbz=max(1,ibz-1),min(nbz,ibz+1)
+                 do jby=max(1,iby-1),min(nby,iby+1)
+                 do jbx=max(1,ibx-1),min(nbx,ibx+1)
+                    iAGN=bin_head(jbx,jby,jbz)
+                    do while(iAGN>0)
+                       if(ind_blast(iAGN)==ind_cell(i))rho_ref=rho_ref+mAGN(iAGN)/vol_loc
+                       iAGN=agn_next(iAGN)
+                    enddo
+                 enddo
+                 enddo
+                 enddo
                  ! Loop over 27 neighbor bins
                  do jbz=max(1,ibz-1),min(nbz,ibz+1)
                  do jby=max(1,iby-1),min(nby,iby+1)
@@ -7086,7 +7208,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
                        ! Whole event goes to the donor fallback, never half a jet.
                     else if(ok_save(iAGN))then
                        if(dr_AGN<=rmax2 .and. vol_gas(iAGN)>0d0) &
-                            de_cell=p_gas(iAGN)*uold(ind_cell(i),1)
+                            de_cell=p_gas(iAGN)*rho_ref
                     else if(ok_blast_agn(iAGN))then
                        if(X_radio(iAGN)<X_floor)then
                           jtot=sqrt(sum(jAGN(iAGN,:)**2))
@@ -7103,7 +7225,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
                           endif
                        else
                           if(dr_AGN<=rmax2 .and. vol_gas(iAGN)>0d0) &
-                               de_cell=p_gas(iAGN)*uold(ind_cell(i),1)
+                               de_cell=p_gas(iAGN)*rho_ref
                        endif
                     endif
                     if(dm_cell>0d0 .or. de_cell/=0d0)then
@@ -7679,3 +7801,33 @@ subroutine true_max(x,y,z,ilevel)
 
 #endif
 end subroutine true_max
+
+! Shared layout-only selector: called before either accretion or AGN loading.
+subroutine agn_select_scalar_fields(fields,nscalar,metal_slot,ierr)
+  use agn_feedback_deposition, only: agn_scalar_map
+  use amr_commons
+  use hydro_commons
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_enrichment_config, only: use_channel_resolved_feedback, n_stellar_elements
+#endif
+  implicit none
+  integer,intent(out)::fields(nvar),nscalar,metal_slot,ierr
+  integer::nelements,reserved_fields(4)
+  nelements=nelt
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  if(use_channel_resolved_feedback())nelements=n_stellar_elements
+#endif
+  metal_slot=merge(1,0,metal)
+  nscalar=metal_slot+max(0,nelements)
+  fields=0; ierr=1
+  if(nscalar>nvar)then
+     nscalar=0
+     return
+  endif
+  reserved_fields=0
+  if(delayed_cooling)reserved_fields(1)=idelay
+  if(sf_virial)reserved_fields(2)=ivirial
+  if(aton)reserved_fields(3)=ixion
+  if(use_sgs)reserved_fields(4)=isgs
+  call agn_scalar_map(nvar,merge(imetal,0,metal),ichem,nelements,reserved_fields,fields(1:nscalar),ierr,ndim+2)
+end subroutine agn_select_scalar_fields

@@ -9,9 +9,92 @@ module agn_feedback_deposition
   public :: agn_deposit_cell, agn_jet_delta, agn_eddington_ratio
   public :: agn_jet_geometry, agn_contains_donor, agn_scalar_map
   public :: agn_withdraw_cell, agn_deposit_material, agn_pack_load, agn_unpack_load
+  public :: agn_accretion_receipt, agn_accrete_scalars
+  public :: agn_merge_pending
   integer, parameter, public :: agn_deposit_invalid_source=1, agn_deposit_invalid_receiver=2
 
 contains
+
+  pure subroutine agn_merge_pending(pending,groups,merged,ierr)
+    real(dp),intent(in)::pending(:)
+    integer,intent(in)::groups(:)
+    real(dp),intent(out)::merged(:)
+    integer,intent(out)::ierr
+    integer::k
+    merged=0d0; ierr=1
+    if(size(groups)/=size(pending))return
+    if(any(groups<1).or.any(groups>size(merged)))return
+    if(.not.all(ieee_is_finite(pending)).or.any(pending<0d0))return
+    do k=1,size(groups)
+       merged(groups(k))=merged(groups(k))+pending(k)
+    enddo
+    if(.not.all(ieee_is_finite(merged)))then
+       merged=0d0
+       return
+    endif
+    ierr=0
+  end subroutine agn_merge_pending
+
+  pure subroutine agn_accretion_receipt(rho,rho_initial,volume,requested,floor_fraction, &
+       epsilon,mass_unit,gross,retained,radiated_erg,ierr)
+    real(dp), intent(in) :: rho,rho_initial,volume,requested,floor_fraction,epsilon,mass_unit
+    real(dp), intent(out) :: gross,retained,radiated_erg
+    integer, intent(out) :: ierr
+    real(dp), parameter :: c_cgs=2.99792458d10
+    real(dp) :: floor_density
+    gross=0d0; retained=0d0; radiated_erg=0d0; ierr=1
+    if(.not.all(ieee_is_finite([rho,rho_initial,volume,requested,floor_fraction,epsilon,mass_unit])))return
+    if(rho<=0d0.or.rho_initial<0d0.or.volume<=0d0.or.requested<0d0.or.mass_unit<=0d0)return
+    if(floor_fraction<=0d0.or.floor_fraction>1d0.or.epsilon<0d0.or.epsilon>=1d0)return
+    ! A zero unew reference can occur in an unrefreshed reception cell.
+    ! Use the current donor for a conservative per-event floor, never the
+    ! zero reference that would allow emptying it. The caller counts this.
+    floor_density=rho_initial
+    if(floor_density==0d0)floor_density=rho
+    gross=max(min(requested,(rho-floor_fraction*floor_density)*volume),0d0)
+    retained=(1d0-epsilon)*gross
+    radiated_erg=epsilon*gross*mass_unit*c_cgs**2
+    if(.not.all(ieee_is_finite([gross,retained,radiated_erg])))then
+       gross=0d0; retained=0d0; radiated_erg=0d0
+       return
+    endif
+    ierr=0
+  end subroutine agn_accretion_receipt
+
+  pure subroutine agn_accrete_scalars(row,fields,metal_slot,gross,volume,ierr,hydro_last)
+    ! Only the declared constituent densities change here. The caller retains
+    ! the accretion hydro/MHD energy convention, not cold jet loading.
+    real(dp), intent(inout) :: row(:)
+    integer, intent(in) :: fields(:),metal_slot
+    real(dp), intent(in) :: gross,volume
+    integer, intent(out) :: ierr
+    integer, optional, intent(in) :: hydro_last
+    real(dp) :: factor
+    integer :: k,last
+    ierr=1
+    last=5
+    if(present(hydro_last))last=hydro_last
+    if(last<3.or.size(row)<last)return
+    if(.not.all(ieee_is_finite([row(1),gross,volume])))return
+    if(row(1)<=0d0.or.gross<0d0.or.volume<=0d0)return
+    if(any(fields<=last).or.any(fields>size(row)))return
+    if(metal_slot<0.or.metal_slot>size(fields))return
+    do k=1,size(fields)
+       if(any(fields(:k-1)==fields(k)))return
+    enddo
+    if(.not.all(ieee_is_finite(row(fields))))return
+    factor=1d0-gross/(row(1)*volume)
+    if(.not.ieee_is_finite(factor).or.factor<0d0.or.factor>1d0)return
+    ! Finite but unphysical advected composition is not corrected here:
+    ! status 2 requests a whole-event skip, not a whole-run fatal error.
+    ierr=2
+    if(any(row(fields)<0d0))return
+    if(metal_slot>0)then
+       if(row(fields(metal_slot))>row(1))return
+    endif
+    row(fields)=row(fields)*factor
+    ierr=0
+  end subroutine agn_accrete_scalars
 
   pure real(dp) function agn_eddington_ratio(bondi, eddington) result(ratio)
     real(dp), intent(in) :: bondi, eddington
@@ -127,11 +210,15 @@ contains
     kinetic_delta=0.5d0*(drho(1)*sum(plus**2)+drho(2)*sum(minus**2))
   end subroutine agn_jet_delta
 
-  pure subroutine agn_scalar_map(nvars, metal_index, first_element, nelements, reserved, fields, ierr)
+  pure subroutine agn_scalar_map(nvars, metal_index, first_element, nelements, reserved, fields, ierr,hydro_last)
     integer, intent(in) :: nvars, metal_index, first_element, nelements, reserved(:)
     integer, intent(out) :: fields(:), ierr
-    integer :: k, nmetal
+    integer, optional, intent(in) :: hydro_last
+    integer :: k, nmetal,last
     fields=0; ierr=agn_deposit_invalid_source
+    last=5
+    if(present(hydro_last))last=hydro_last
+    if(last<3.or.last>nvars)return
     nmetal=merge(1,0,metal_index/=0)
     if(nelements<0 .or. size(fields)/=nmetal+nelements)return
     if(nmetal==1)fields(1)=metal_index
@@ -139,7 +226,7 @@ contains
        fields(nmetal+k)=first_element+k-1
     enddo
     do k=1,size(fields)
-       if(fields(k)<=5 .or. fields(k)>nvars)return
+       if(fields(k)<=last .or. fields(k)>nvars)return
        if(any(fields(k)==reserved))return
        if(any(fields(k)==fields(:k-1)))return
     enddo

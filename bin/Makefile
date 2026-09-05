@@ -290,6 +290,7 @@ snrt_transport_step.o: snrt_state.o snrt_angular_quadrature.o \
 snrt_rt_transaction.o: amr_parameters.jaehyun.o mpi_mod.o
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
 agn_feedback_deposition.o: amr_parameters.jaehyun.o
+init_sink.o: pm_commons.o
 sink_particle.kjhan.o: snrt_agn_efficiency.o agn_feedback_deposition.o amr_parameters.jaehyun.o pm_commons.o
 ifeq ($(PHASE0_STELLAR_ENRICHMENT),1)
 sink_particle.kjhan.o: stellar_enrichment_config.o

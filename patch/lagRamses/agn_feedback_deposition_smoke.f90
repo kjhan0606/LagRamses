@@ -69,8 +69,118 @@ program agn_feedback_deposition_smoke
   call entrainment_event([17d0,-11d0,5d0],.false.,1d0)
   call entrainment_event([0d0,0d0,0d0],.true.,1d0)
   call layouts_and_payload()
+  call accepted_accretion()
+  call overlapping_events(.false.)
+  call overlapping_events(.true.)
   write(*,'(A)') 'AGN_NATIVE_CELL_COUPLING_SMOKE_OK'
 contains
+  subroutine accepted_accretion()
+    real(dp)::gas(9),initial(9),gross,net,erg,erg2,merged(2),reordered(2),gas1(4),gas2(5)
+    integer::status,field(1)
+    gas=[8d0,16d0,0d0,0d0,24d0,1.6d0,7d0,4.8d0,0.08d0]; initial=gas
+    call agn_accretion_receipt(8d0,8d0,2d0,100d0,0.75d0,0.1d0,5d33,gross,net,erg,status)
+    call check(status==0.and.gross==4d0.and.abs(net-3.6d0)<1d-14,'floor clips gross before retained mass and radiation')
+    call agn_accrete_scalars(gas,[6,8,9],1,gross,2d0,status)
+    call check(status==0.and.maxval(abs(gas([6,8,9])-0.75d0*initial([6,8,9])))<1d-14, &
+         'actual accreted fraction removes total metal and all declared elements')
+    call check(all(gas(1:5)==initial(1:5)).and.gas(7)==initial(7),'scalar helper leaves hydro and reserved convention to caller')
+    ! Next accepted event uses its own efficiency and unit conversion.
+    call agn_accretion_receipt(6d0,6d0,2d0,1d0,0.75d0,0.2d0,5d33,gross,net,erg2,status)
+    call check(status==0.and.gross==1d0.and.net==0.8d0,'second event contemporaneous efficiency')
+    call check(abs((erg+erg2)/(0.6d0*5d33*(2.99792458d10)**2)-1d0)<1d-14, &
+         'accepted energies add without latest-efficiency reconstruction')
+    call agn_merge_pending([erg,0d0,erg2],[2,1,2],merged,status)
+    call check(status==0.and.merged(1)==0d0.and.merged(2)==erg+erg2,'new sink zero and merger sum accepted energy')
+    call agn_merge_pending(merged,[2,1],reordered,status)
+    call check(status==0.and.all(reordered==merged(2:1:-1)),'reorder preserves pending ownership')
+    call agn_merge_pending([erg,erg2],[1,3],merged,status)
+    call check(status/=0,'invalid merger mapping rejected before sink commit')
+    call agn_accretion_receipt(6d0,8d0,2d0,100d0,0.75d0,0.2d0,5d33,gross,net,erg2,status)
+    call check(status==0.and.gross==0d0.and.net==0d0.and.erg2==0d0,'exhausted floor supplies no photons')
+    call agn_accretion_receipt(8d0,8d0,2d0,1d0,0.75d0,0d0,5d33,gross,net,erg2,status)
+    call check(status==0.and.net==gross.and.erg2==0d0,'zero efficiency is valid zero radiative energy')
+    call agn_accretion_receipt(8d0,8d0,2d0,1d0,0.75d0,1d0,5d33,gross,net,erg2,status)
+    call check(status/=0.and.gross==0d0,'invalid efficiency rejected before donor mutation')
+    gas=initial
+    call agn_accrete_scalars(gas,[6,6],1,4d0,2d0,status)
+    call check(status/=0.and.all(gas==initial),'invalid accretion scalar map non-mutating')
+    gas=initial; gas(8)=-1d-14; initial=gas
+    call agn_accrete_scalars(gas,[6,8,9],1,4d0,2d0,status)
+    call check(status==2.and.all(gas==initial),'finite negative constituent requests whole-event skip without clamping')
+    gas(8)=1d0; gas(6)=9d0; initial=gas
+    call agn_accrete_scalars(gas,[6,8,9],1,4d0,2d0,status)
+    call check(status==2.and.all(gas==initial),'metal above gas density requests event skip without mutation')
+    call agn_accretion_receipt(8d0,0d0,2d0,100d0,0.75d0,0.1d0,5d33,gross,net,erg2,status)
+    call check(status==0.and.gross==4d0.and.abs(net-3.6d0)<1d-14, &
+         'zero initial reference uses current donor floor instead of emptying cell or aborting')
+    call agn_scalar_map(4,4,0,0,[0],field,status,3)
+    call check(status==0.and.field(1)==4,'1D metal index follows actual hydro extent')
+    gas1=[8d0,16d0,24d0,1.6d0]
+    call agn_accrete_scalars(gas1,field,1,4d0,2d0,status,3)
+    call check(status==0.and.abs(gas1(4)-1.2d0)<1d-14,'1D scalar withdrawal leaves hydro slots intact')
+    call agn_scalar_map(5,5,0,0,[0],field,status,4)
+    call check(status==0.and.field(1)==5,'2D metal index follows actual hydro extent')
+    gas2=[8d0,16d0,0d0,24d0,1.6d0]
+    call agn_accrete_scalars(gas2,field,1,4d0,2d0,status,4)
+    call check(status==0.and.abs(gas2(5)-1.2d0)<1d-14,'2D scalar withdrawal leaves hydro slots intact')
+  end subroutine accepted_accretion
+
+  subroutine overlapping_events(reverse_order)
+    logical,intent(in)::reverse_order
+    real(dp)::gas(9,3),initial(9,3),vol(3),rho_ref,pre_mass,norm(2),lw(2),ax(3),pos(3)
+    real(dp)::loaded(2),vel(3,2),frac(3,2),drho,dpvec(3),de,dsave,saved,requested(4),budget(4)
+    real(dp)::change(9),thermal_density,speed
+    integer::k,j,event,jet,status
+    vol=[2d0,1d0,3d0]; pos=[-0.5d0,0d0,0.5d0]
+    do k=1,3
+       gas(:,k)=[2d0,0d0,0d0,0d0,2d0,0.2d0,7d0,1d0,0.02d0]
+    enddo
+    gas(:,1)=[8d0,0d0,0d0,0d0,8d0,1.6d0,7d0,4.8d0,0.08d0]
+    initial=gas; pre_mass=sum(gas(1,:)*vol)
+    call agn_withdraw_cell(gas(:,1),[6,8,9],1,2d0,vol(1),loaded(1),vel(:,1),frac(:,1),status)
+    call check(status==0,'overlap first donor loading')
+    call agn_withdraw_cell(gas(:,1),[6,8,9],1,1d0,vol(1),loaded(2),vel(:,2),frac(:,2),status)
+    call check(status==0,'overlap shared donor loading')
+    call check(abs(sum(gas(1,:)*vol)-pre_mass)>1d0,'old thermal normalization actually differs after loading')
+    norm=0d0
+    do k=1,3
+       call agn_jet_geometry([pos(k),0d0,0d0],[1d0,0d0,0d0],1d0,lw,ax)
+       norm=norm+lw*vol(k)
+    enddo
+    ! Thermal, jet, saved thermal replay, second shared-donor jet.
+    budget=[7d0,4d0,5d0,3d0]; saved=0d0; requested=0d0
+    do k=1,3
+       rho_ref=gas(1,k)
+       if(k==1)rho_ref=rho_ref+sum(loaded)/vol(k)
+       call check(abs(rho_ref-initial(1,k))<1d-14,'pre-loading density restored once before cell event loop')
+       do j=1,4
+          event=j
+          if(reverse_order)event=5-j
+          drho=0d0; dpvec=0d0
+          if(event==1.or.event==3)then
+             de=budget(event)*rho_ref/pre_mass
+             requested(event)=requested(event)+de*vol(k)
+             call agn_deposit_cell(gas(1:5,k),drho,dpvec,de,vol(k),2d0,1d0,1d0,dsave,status)
+          else
+             jet=event/2
+             call agn_jet_geometry([pos(k),0d0,0d0],[1d0,0d0,0d0],1d0,lw,ax)
+             speed=sqrt(budget(event)/loaded(jet))
+             call agn_jet_delta(loaded(jet),lw,norm,vel(:,jet),ax,speed,drho,dpvec,de)
+             thermal_density=0.5d0*budget(event)/sum(vol)
+             de=de+thermal_density
+             call agn_deposit_material(gas(:,k),[6,8,9],1,frac(:,jet),drho,dpvec,de, &
+                  vol(k),2d0,1d0,1d0,dsave,status)
+          endif
+          call check(status==0,'overlapping native deposition accepted')
+          saved=saved+dsave
+       enddo
+    enddo
+    change=matmul(gas-initial,vol)
+    call check(maxval(abs(requested([1,3])-budget([1,3])))<1d-12,'thermal and replay requested energies normalize separately')
+    call check(abs(change(5)+saved-sum(budget))<1d-11.and.saved>0d0,'overlap gas plus deferred energy closes with active cap')
+    call check(maxval(abs(change([1,2,3,4,6,8,9])))<1d-11,'overlap preserves loaded mass momentum and species')
+  end subroutine overlapping_events
+
   subroutine entrainment_event(boost,missing_lobe,cap)
     real(dp),intent(in)::boost(3),cap
     logical,intent(in)::missing_lobe
