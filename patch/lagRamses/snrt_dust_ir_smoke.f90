@@ -85,7 +85,40 @@ program snrt_dust_ir_smoke
   if (ierr/=dust_ok .or. maxval(energy)<=0 .or. maxval(photons)<=0) stop 9
   call coupling_checks()
   call transient_checks()
+  call halo_checks()
 contains
+  subroutine halo_checks()
+    type(dust_ir_table) :: halo_table
+    type(dust_ir_diagnostics) :: whole,part(2)
+    real(dust_dp) :: rays(3,2),field(2,2,2),old(2,2,2),split(2,2,2),p(2,2),t(2)
+    integer :: links(6,2),remote(6,1),status,i,j
+    rays(:,1)=[1d0,0d0,0d0]; rays(:,2)=[-1d0,0d0,0d0]
+    links=0; links(1:2,1)=2; links(1:2,2)=1
+    remote=0; remote(1:2,1)=1
+    old(:,:,1)=.2d0; old(:,:,2)=.7d0; field=old; p=0; t=0
+    call snrt_dust_ir_initialize(halo_table,[.001d0,.01d0],[.001d0,.01d0], &
+         [1d-21,1d-21],[10d0,20d0],10d0,status)
+    if(status/=dust_ok)stop 70
+    call snrt_dust_ir_advance(halo_table,rays,[.5d0,.5d0],links,1d0,1d0,.1d0,[0d0,0d0],[0d0,0d0], &
+         field,t,p,whole,status,1d-10,128)
+    if(status/=dust_ok)stop 71
+    split=old; p=0; t=0; links=0
+    do i=1,2
+       j=3-i
+       call snrt_dust_ir_advance(halo_table,rays,[.5d0,.5d0],links(:,i:i),1d0,1d0,.1d0,[0d0],[0d0], &
+            split(:,:,i:i),t(i:i),p(:,i:i),part(i),status,1d-10,128, &
+            ghost_energy=old(:,:,j:j),ghost_index=remote)
+       if(status/=dust_ok)stop 72
+    end do
+    if(maxval(abs(split-field))>1d-14.or.abs(sum(part%interface_erg))>1d-14)stop 73
+    if(any(part%escaped_erg/=0).or.part(1)%interface_erg==0)stop 74
+    old=-1
+    call snrt_dust_ir_advance(halo_table,rays,[.5d0,.5d0],links(:,1:1),1d0,1d0,.1d0,[0d0],[0d0], &
+         split(:,:,1:1),t(1:1),p(:,1:1),whole,status,1d-10,128,ghost_energy=old(:,:,1:1),ghost_index=remote)
+    if(status/=dust_err_state.or.any(split/=field))stop 75
+    write(*,'(a)')'NATIVE_DUST_IR_HALO_OK split_matches_whole=1 interface_cancels=1 rollback=1'
+  end subroutine
+
   subroutine transient_checks()
     type(dust_ir_table) :: transient_table
     type(dust_ir_diagnostics) :: result

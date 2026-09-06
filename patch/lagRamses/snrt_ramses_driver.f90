@@ -124,7 +124,6 @@ contains
          snrt_spectral_contract_source_id
     use snrt_amr_topology, only: snrt_amr_build_same_level_neighbors
 #ifdef DUST_LIVE
-    use snrt_amr_topology, only: snrt_face_kind, SNRT_FACE_LOCAL, SNRT_FACE_PHYSICAL
     use snrt_dust_live, only: snrt_dust_live_stage, snrt_dust_live_commit
     use snrt_dust_ir, only: dust_ir_diagnostics
     use snrt_dust_contract, only: snrt_dust_contract_version
@@ -1183,20 +1182,18 @@ contains
     ! this collective pre-commit check has passed everywhere.
     local_transaction_failure = snrt_failure_none
     if(snrt_dust_contract_version>=3)then
-       ierr=1
-       if(nleaf>0.and.allocated(snrt_face_kind))then
-          if(all(snrt_face_kind==SNRT_FACE_LOCAL.or.snrt_face_kind==SNRT_FACE_PHYSICAL))then
              ! Start from the pre-primary material energy and inject exactly
              ! the accepted primary absorption. Receiver-stage energy already
              ! includes that absorption and must NOT be fed as old energy.
              ! Primary quadrature integrates over 4*pi. IR stores energy per
              ! normalized direction and therefore requires weights summing 1.
-             call snrt_dust_live_stage(leaf_slot,neighbor,transpose(direction_dp),angular_weight/sum(angular_weight), &
+             ! Stage validates faces and reduces errors collectively before
+             ! halo exchange. Never skip this call on a rank-local condition.
+             call snrt_dust_live_stage(ilevel,leaf_cell,leaf_slot,neighbor, &
+                  transpose(direction_dp),angular_weight/sum(angular_weight), &
                   dx_code*scale_l,dt_s,snrt_c_cgs*reduced_c, &
                   dust_n_hydrogen_cm3*dust_relative_abundance,dust_absorbed_energy,dust_old_energy, &
                   dust_heat_capacity,dust_ir_trial,dust_trial_energy,dust_trial_temperature,dust_ir_result,ierr)
-          end if
-       end if
        if(ierr/=0)then
           local_transaction_failure=snrt_failure_receiver
           if(myid==1)write(*,'(A,I0)')' SNRT live IR staging failed: error=',ierr

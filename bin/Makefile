@@ -317,7 +317,7 @@ snrt_dust_coupling.o: snrt_thermochemistry.o ../patch/lagRamses/snrt_dust_coupli
 snrt_dust_transaction.o: amr_parameters.jaehyun.o
 snrt_dust_receiver.o: ../patch/lagRamses/snrt_dust_receiver.f90
 snrt_dust_contract.o: ../patch/lagRamses/snrt_dust_contract.f90
-snrt_dust_live.o: snrt_state.o snrt_dust_contract.o snrt_dust_ir.o
+snrt_dust_live.o: snrt_state.o snrt_dust_contract.o snrt_dust_ir.o snrt_amr_topology.o mpi_mod.o
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
 agn_feedback_deposition.o: amr_parameters.jaehyun.o
 init_sink.o: pm_commons.o

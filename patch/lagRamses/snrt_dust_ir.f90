@@ -19,6 +19,9 @@ module snrt_dust_ir
   end type
   type, public :: dust_ir_diagnostics
      real(real64) :: escaped_erg=0, absorbed_erg=0, primary_erg=0
+     ! Signed outward MPI boundary flux; unlike physical escape, it cancels
+     ! when neighboring ranks' ledgers are summed.
+     real(real64) :: interface_erg=0
      real(real64) :: balance_relative=0, local_relative=0
      integer :: iterations=0
   end type
@@ -171,7 +174,8 @@ contains
   end subroutine
 
   subroutine snrt_dust_ir_advance(table, direction, weight, neighbor, dx, dt, c_hat, density, primary, &
-       energy, temperature, photons, diagnostics, ierr, tolerance, max_iterations, dust_energy, heat_capacity)
+       energy, temperature, photons, diagnostics, ierr, tolerance, max_iterations, dust_energy, heat_capacity, &
+       ghost_energy,ghost_index)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -188,13 +192,16 @@ contains
     ! energy erg/cm3 and capacity erg/cm3/K. Both or neither must be supplied.
     real(real64), optional, intent(inout) :: dust_energy(:)
     real(real64), optional, intent(in) :: heat_capacity(:)
+    real(real64), optional, intent(in) :: ghost_energy(:,:,:)
+    integer, optional, intent(in) :: ghost_index(:,:)
     real(real64), allocatable :: transported(:,:,:), candidate(:,:,:), rate(:,:), next_t(:)
     real(real64), allocatable :: guess(:), absorbed(:), transmit(:,:), loss(:,:), response(:,:)
     real(real64), allocatable :: emitted_photons(:,:)
     real(real64), allocatable :: trial_dust_energy(:)
     logical :: transient
     real(real64) :: cfl, volume, factor, tau, source, old_total, new_total, scale, balance, sum_w
-    integer :: ng, nd, nc, i, j, g, d, axis, face, outgoing, opposite, iteration
+    integer :: ng, nd, nc, i, j, g, d, axis, face, outgoing, opposite, iteration, ghost
+    integer, allocatable :: remote(:,:)
     type(dust_ir_diagnostics) :: trial
     trial=dust_ir_diagnostics()
     ierr=dust_err_table
@@ -202,12 +209,23 @@ contains
     transient=present(dust_energy)
     ierr=dust_err_config
     if(transient.neqv.present(heat_capacity))return
+    if(present(ghost_energy).neqv.present(ghost_index))return
     ng=size(table%energy); nd=size(weight); nc=size(density)
     ierr=dust_err_shape
     if (nd<1 .or. nc<1) return
     if (any(shape(direction)/=[3,nd]) .or. any(shape(neighbor)/=[6,nc])) return
     if (any(shape(energy)/=[ng,nd,nc]) .or. any(shape(photons)/=[ng,nc])) return
     if (size(temperature)/=nc .or. size(primary)/=nc) return
+    allocate(remote(6,nc)); remote=0
+    if(present(ghost_index))then
+       if(any(shape(ghost_index)/=[6,nc]))return
+       if(size(ghost_energy,1)/=ng.or.size(ghost_energy,2)/=nd)return
+       if(any(ghost_index<0).or.any(ghost_index>size(ghost_energy,3)))return
+       if(any(ghost_index>0.and.neighbor/=0))return
+       ierr=dust_err_state
+       if(any(.not.ieee_is_finite(ghost_energy)).or.any(ghost_energy<0))return
+       remote=ghost_index
+    end if
     if(transient)then
        if(size(dust_energy)/=nc.or.size(heat_capacity)/=nc)return
        ierr=dust_err_state
@@ -262,8 +280,18 @@ contains
              factor=c_hat*dt/dx*abs(direction(axis,d))
              transported(:,d,i)=transported(:,d,i)-factor*energy(:,d,i)
              if (j>0) transported(:,d,i)=transported(:,d,i)+factor*energy(:,d,j)
-             if (neighbor(outgoing,i)==0) trial%escaped_erg=trial%escaped_erg &
-                  +sum(energy(:,d,i))*weight(d)*factor*volume
+             ghost=remote(face,i)
+             if(ghost>0)then
+                transported(:,d,i)=transported(:,d,i)+factor*ghost_energy(:,d,ghost)
+                trial%interface_erg=trial%interface_erg-sum(ghost_energy(:,d,ghost))*weight(d)*factor*volume
+             end if
+             if (neighbor(outgoing,i)==0) then
+                if(remote(outgoing,i)>0)then
+                   trial%interface_erg=trial%interface_erg+sum(energy(:,d,i))*weight(d)*factor*volume
+                else
+                   trial%escaped_erg=trial%escaped_erg+sum(energy(:,d,i))*weight(d)*factor*volume
+                end if
+             end if
           end do
        end do
        do g=1,ng
@@ -280,9 +308,9 @@ contains
        end do
     end do
     trial%primary_erg=sum(primary)*dt*volume
-    if (.not.all(ieee_is_finite([volume,old_total,trial%primary_erg,trial%escaped_erg]))) return
+    if (.not.all(ieee_is_finite([volume,old_total,trial%primary_erg,trial%escaped_erg,trial%interface_erg]))) return
     scale=max(trial%primary_erg,tiny(scale))
-    if (trial%primary_erg==0) scale=max(old_total,scale)
+    if(trial%primary_erg==0)scale=max(old_total,abs(trial%interface_erg),scale)
     if(transient)then
        scale=max(scale,sum(dust_energy)*volume)
        if(.not.ieee_is_finite(scale))return
@@ -310,7 +338,7 @@ contains
        ierr=dust_err_state
        if (.not.all(ieee_is_finite(candidate)) .or. any(candidate<0) .or. .not.ieee_is_finite(new_total)) return
        if (.not.all(ieee_is_finite(absorbed)) .or. any(absorbed<0)) return
-       balance=new_total-old_total+trial%escaped_erg-trial%primary_erg
+       balance=new_total-old_total+trial%escaped_erg+trial%interface_erg-trial%primary_erg
        if(transient)balance=balance+sum(trial_dust_energy-dust_energy)*volume
        trial%balance_relative=abs(balance)/scale
        trial%local_relative=maxval(abs(absorbed-guess)/max(primary*dt+absorbed,tiny(scale)))

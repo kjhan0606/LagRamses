@@ -1781,9 +1781,9 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         else if (snrt_dust_contract_runtime_allowed) then
 #ifdef DUST_LIVE
            if(snrt_dust_contract_version>=3)then
-              if(ncpu/=1.or.levelmin/=nlevelmax.or.cosmo.or.nremap/=0.or.trim(outformat)/='hdf5')then
+              if(levelmin/=nlevelmax.or.cosmo.or.nremap/=0.or.trim(outformat)/='hdf5')then
                  if(myid==1)write(*,'(A)') &
-                      'SNRT IR requires single-rank fixed noncosmological mesh, nremap=0 and HDF5 output'
+                      'SNRT IR requires fixed noncosmological mesh, nremap=0 and HDF5 output'
                  nml_ok=.false.
               else
                  if(myid==1)write(*,'(A)')'SNRT live IR enabled: fixed mesh; physical input approval still applies'
