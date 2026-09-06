@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 from snrt_core.snapshot import GridSpec, SourceCatalog, neutral_primordial_input, write_static_rt_input
 from tools import p4_build_agn_photon_ledger as agn_ledger
+from tools.build_draine_dust_thermal import build_thermal_metadata
 
 
 def main() -> int:
@@ -193,6 +194,131 @@ def main() -> int:
             scattering = np.asarray(handle["rates/dust_scattering_momentum_rate_dyn_cm3"])
             assert np.allclose(total, absorption + scattering)
             assert handle.attrs["primary_absorption_closure_relative_error"] <= 1.0e-5
+
+        physical_opacity_path = (
+            ROOT.parents[1]
+            / "external"
+            / "draine_wd01_rv31"
+            / "p0_dust_opacity_rv31_photon_index1_scattering.json"
+        )
+        source_table_path = (
+            ROOT.parents[1]
+            / "external"
+            / "draine_wd01_rv31"
+            / "kext_albedo_WD_MW_3.1_60_D03.all"
+        )
+        thermal_metadata_path = work / "dust-thermal.json"
+        thermal_metadata = build_thermal_metadata(
+            source_table_path,
+            agn_ledger.DEFAULT_P0_GROUP_EDGES,
+            temperature_grid_k=np.geomspace(5.0, 300.0, 64),
+        )
+        thermal_metadata_path.write_text(
+            json.dumps(thermal_metadata, indent=2) + "\n", encoding="utf-8"
+        )
+        thermal_output_path = work / "thermal-output.h5"
+        thermal_command = list(scattering_command)
+        thermal_command[thermal_command.index(str(scattering_metadata_path))] = str(physical_opacity_path)
+        thermal_command[thermal_command.index(str(scattering_output_path))] = str(thermal_output_path)
+        physical_control_output_path = work / "physical-control-output.h5"
+        physical_control_command = list(thermal_command)
+        physical_control_command[physical_control_command.index(str(thermal_output_path))] = str(
+            physical_control_output_path
+        )
+        physical_control_result = subprocess.run(
+            physical_control_command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        if physical_control_result.returncode != 0:
+            raise RuntimeError(physical_control_result.stdout + physical_control_result.stderr)
+        thermal_command.extend(("--dust-thermal-metadata", str(thermal_metadata_path)))
+        thermal_result = subprocess.run(
+            thermal_command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        if thermal_result.returncode != 0:
+            raise RuntimeError(thermal_result.stdout + thermal_result.stderr)
+        assert "dust_ir=snrt_dust_thermal_v1" in thermal_result.stdout
+        with h5py.File(physical_control_output_path, "r") as baseline, h5py.File(thermal_output_path, "r") as handle:
+            assert handle.attrs["dust_thermal_schema"] == "snrt_dust_thermal_v1"
+            assert handle.attrs["dust_thermal_status"] == "candidate_kirchhoff_equilibrium"
+            assert handle.attrs["dust_ir_transport_semantics"] == "recorded_not_transport_reemitted"
+            assert handle.attrs["dust_ir_out_of_range_count"] == 0
+            assert handle.attrs["dust_ir_energy_closure_relative_error"] <= 1.0e-5
+            assert handle.attrs["dust_ir_power_residual_relative_error"] <= 1.0e-5
+            assert np.asarray(handle["thermal/dust_grain_temperature_k"]).shape == shape
+            assert np.asarray(handle["thermal/dust_ir_reemitted_energy_erg_cm3"]).shape == shape
+            assert np.asarray(handle["thermal/dust_ir_untracked_energy_erg_cm3"]).shape == shape
+            assert np.asarray(handle["sources/dust_ir_photon_rate_cm3_s"]).shape == (9, *shape)
+            assert np.max(np.asarray(handle["thermal/dust_ir_reemitted_energy_erg_cm3"])) > 0.0
+            assert np.max(np.asarray(handle["thermal/dust_ir_untracked_energy_erg_cm3"])) > 0.0
+            assert np.allclose(
+                baseline["ionization/x_hii"],
+                handle["ionization/x_hii"],
+                rtol=0.0,
+                atol=0.0,
+            )
+            assert np.allclose(
+                baseline["thermal/internal_energy_density_erg_cm3"],
+                handle["thermal/internal_energy_density_erg_cm3"],
+                rtol=0.0,
+                atol=0.0,
+            )
+            for dataset in (
+                "diagnostics/cumulative_dust_absorbed_photons_cm3",
+                "diagnostics/cumulative_dust_scattered_photons_cm3",
+                "thermal/cumulative_dust_heating_energy_erg_cm3",
+            ):
+                assert np.allclose(baseline[dataset], handle[dataset], rtol=0.0, atol=0.0)
+
+        zero_input_path = work / "zero-dust-input.h5"
+        zero_output_path = work / "zero-dust-thermal-output.h5"
+        zero_snapshot = neutral_primordial_input(
+            GridSpec(cell_width_cm=1.0e18, left_edge_cm=np.zeros(3)),
+            np.full(shape, 1.0e-24),
+            np.full(shape, 1.0e4),
+            dust_relative_abundance=0.0,
+            sources=SourceCatalog(
+                cell_index=np.asarray([[0, 0, 0]]),
+                photon_luminosity_s=source_luminosity[None, :],
+            ),
+        )
+        write_static_rt_input(zero_input_path, zero_snapshot)
+        zero_command = list(thermal_command)
+        zero_command[zero_command.index(str(input_path))] = str(zero_input_path)
+        zero_command[zero_command.index(str(thermal_output_path))] = str(zero_output_path)
+        zero_result = subprocess.run(
+            zero_command, check=False, capture_output=True, text=True, env=environment
+        )
+        if zero_result.returncode != 0:
+            raise RuntimeError(zero_result.stdout + zero_result.stderr)
+        with h5py.File(zero_output_path, "r") as handle:
+            assert handle.attrs["dust_ir_out_of_range_count"] == 0
+            assert np.allclose(handle["thermal/cumulative_dust_heating_energy_erg_cm3"], 0.0)
+            assert np.allclose(handle["thermal/dust_grain_temperature_k"], 0.0)
+            assert np.allclose(handle["thermal/dust_ir_reemitted_energy_erg_cm3"], 0.0)
+            assert np.allclose(handle["thermal/dust_ir_untracked_energy_erg_cm3"], 0.0)
+            assert np.allclose(handle["sources/dust_ir_photon_rate_cm3_s"], 0.0)
+
+        non_v3_output_path = work / "non-v3-thermal-output.h5"
+        non_v3_command = list(thermal_command)
+        non_v3_command[non_v3_command.index(str(physical_opacity_path))] = str(dust_metadata_path)
+        non_v3_command[non_v3_command.index(str(thermal_output_path))] = str(non_v3_output_path)
+        non_v3_result = subprocess.run(
+            non_v3_command, check=False, capture_output=True, text=True, env=environment
+        )
+        assert non_v3_result.returncode != 0
+        non_v3_message = non_v3_result.stdout + non_v3_result.stderr
+        assert (
+            "unbound reference dust closure cannot be used" in non_v3_message
+            or "requires snrt_dust_opacity_v3" in non_v3_message
+        )
 
     print("P5_DUST_RUNNER_TEST_OK groups=9 dust_model=metadata")
     return 0

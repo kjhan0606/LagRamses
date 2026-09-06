@@ -74,6 +74,16 @@ thermal energy equation; the output stores it separately under
 `rates/dust_heating_erg_cm3_s`. The H/He absorption closure subtracts the
 separate dust ledger before testing gas chemistry conservation.
 
+The opt-in DUST-2 `--dust-thermal-metadata` path is documented in
+[`P6_DUST_THERMAL.md`](P6_DUST_THERMAL.md). It derives a single-temperature
+equilibrium candidate from a provenance-bound absorption table, includes the
+CMB floor, and evaluates the closure inside every thermochemical subcycle.
+Tracked IR energy, explicit out-of-band energy, and photon rates use the
+thermal table's own emission-weighted energies. The source is recorded but not
+recursively transported; gas thermal energy, H/He state, and DUST-1 ledgers
+are unchanged. Missing or incompatible thermal data and out-of-range cells
+fail closed.
+
 The production candidate atlas brackets output 00017 with `a=0.20849` and
 `a=0.20851`. Its metal coefficients are UVB-free; scale-factor dependence in
 this narrow bracket is only the declared CMB metal-floor correction.

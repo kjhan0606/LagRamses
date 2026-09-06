@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 
 from .jax_thermal_atlas import JaxThermalAtlas, net_rate
+from .dust import DustThermalModel, evaluate_dust_thermal
 from .multiphysics import build_multiphysics_radiation_step
 from .primordial import PhotoCrossSections, PrimordialState
 from .primordial_cooling import primordial_net_rate
@@ -27,11 +28,22 @@ class ThermochemicalState(NamedTuple):
     dust_momentum_rate: jnp.ndarray
     dust_scattered_photons: jnp.ndarray
     dust_scattering_momentum_rate: jnp.ndarray
+    dust_grain_temperature_k: jnp.ndarray
+    dust_ir_reemission_rate: jnp.ndarray
+    dust_ir_untracked_rate: jnp.ndarray
+    dust_ir_photon_rate: jnp.ndarray
+    dust_ir_equilibrium_power_residual_rate: jnp.ndarray
+    dust_ir_out_of_range: jnp.ndarray
     background_net_rate: jnp.ndarray
     cumulative_absorbed_photons: jnp.ndarray
     cumulative_dust_absorbed_photons: jnp.ndarray
     cumulative_dust_scattered_photons: jnp.ndarray
     cumulative_dust_heating_energy: jnp.ndarray
+    cumulative_dust_ir_reemitted_energy: jnp.ndarray
+    cumulative_dust_ir_untracked_energy: jnp.ndarray
+    cumulative_dust_ir_photons: jnp.ndarray
+    cumulative_dust_ir_power_residual: jnp.ndarray
+    cumulative_dust_ir_out_of_range: jnp.ndarray
     cumulative_dust_momentum: jnp.ndarray
     cumulative_dust_scattering_momentum: jnp.ndarray
     cumulative_unallocated_primary_photons: jnp.ndarray
@@ -60,11 +72,22 @@ class ThermochemicalStepResult(NamedTuple):
     dust_momentum_rate: jnp.ndarray
     dust_scattered_photons: jnp.ndarray
     dust_scattering_momentum_rate: jnp.ndarray
+    dust_grain_temperature_k: jnp.ndarray
+    dust_ir_reemission_rate: jnp.ndarray
+    dust_ir_untracked_rate: jnp.ndarray
+    dust_ir_photon_rate: jnp.ndarray
+    dust_ir_equilibrium_power_residual_rate: jnp.ndarray
+    dust_ir_out_of_range: jnp.ndarray
     background_net_rate: jnp.ndarray
     cumulative_absorbed_photons: jnp.ndarray
     cumulative_dust_absorbed_photons: jnp.ndarray
     cumulative_dust_scattered_photons: jnp.ndarray
     cumulative_dust_heating_energy: jnp.ndarray
+    cumulative_dust_ir_reemitted_energy: jnp.ndarray
+    cumulative_dust_ir_untracked_energy: jnp.ndarray
+    cumulative_dust_ir_photons: jnp.ndarray
+    cumulative_dust_ir_power_residual: jnp.ndarray
+    cumulative_dust_ir_out_of_range: jnp.ndarray
     cumulative_dust_momentum: jnp.ndarray
     cumulative_dust_scattering_momentum: jnp.ndarray
     cumulative_unallocated_primary_photons: jnp.ndarray
@@ -219,6 +242,8 @@ def build_thermochemical_step(
     scale_factor: float,
     metallicity_solar: float | jnp.ndarray,
     *,
+    dust_thermal_model: DustThermalModel | None = None,
+    dust_background_temperature_k: float = 2.7255,
     photoelectron_excess_energy_ev: jnp.ndarray | None = None,
     thermal_subcycles: int = 16,
     source_cell_subcycles: int = 1,
@@ -240,6 +265,11 @@ def build_thermochemical_step(
         or time_averaged_absorption_iterations < 1
     ):
         raise ValueError("thermal subcycles and implicit iterations must be positive")
+    if dust_thermal_model is not None and (
+        not bool(jnp.isfinite(jnp.asarray(dust_background_temperature_k)))
+        or dust_background_temperature_k <= 0.0
+    ):
+        raise ValueError("dust background temperature must be positive and finite")
     total_subcycles = thermal_subcycles * source_cell_subcycles
     subtransport = TransportConfig(
         cell_width=transport.cell_width,
@@ -269,6 +299,7 @@ def build_thermochemical_step(
         zero_rate = jnp.zeros_like(temperature_k)
         zero_absorbed = jnp.zeros((len(group_energy_ev), *temperature_k.shape), dtype=temperature_k.dtype)
         zero_dust_momentum = jnp.zeros((3, *temperature_k.shape), dtype=temperature_k.dtype)
+        zero_dust_ir = jnp.zeros((len(group_energy_ev), *temperature_k.shape), dtype=temperature_k.dtype)
         zero_unallocated = jnp.zeros((3, *temperature_k.shape), dtype=temperature_k.dtype)
         zero_energy = jnp.zeros_like(temperature_k)
         zero_bound_hits = jnp.zeros_like(temperature_k)
@@ -283,11 +314,22 @@ def build_thermochemical_step(
             dust_momentum_rate=zero_dust_momentum,
             dust_scattered_photons=zero_absorbed,
             dust_scattering_momentum_rate=zero_dust_momentum,
+            dust_grain_temperature_k=zero_rate,
+            dust_ir_reemission_rate=zero_rate,
+            dust_ir_untracked_rate=zero_rate,
+            dust_ir_photon_rate=zero_dust_ir,
+            dust_ir_equilibrium_power_residual_rate=zero_rate,
+            dust_ir_out_of_range=zero_rate,
             background_net_rate=zero_rate,
             cumulative_absorbed_photons=zero_absorbed,
             cumulative_dust_absorbed_photons=zero_absorbed,
             cumulative_dust_scattered_photons=zero_absorbed,
             cumulative_dust_heating_energy=zero_energy,
+            cumulative_dust_ir_reemitted_energy=zero_energy,
+            cumulative_dust_ir_untracked_energy=zero_energy,
+            cumulative_dust_ir_photons=zero_dust_ir,
+            cumulative_dust_ir_power_residual=zero_energy,
+            cumulative_dust_ir_out_of_range=zero_rate,
             cumulative_dust_momentum=zero_dust_momentum,
             cumulative_dust_scattering_momentum=zero_dust_momentum,
             cumulative_unallocated_primary_photons=zero_unallocated,
@@ -306,6 +348,27 @@ def build_thermochemical_step(
 
         def subcycle(_: int, current: ThermochemicalState) -> ThermochemicalState:
             radiation = radiation_step(current.intensity, emissivity, current.chemistry, current.temperature_k)
+            if dust_thermal_model is None:
+                dust_grain_temperature = zero_rate
+                dust_ir_reemission_rate = zero_rate
+                dust_ir_untracked_rate = zero_rate
+                dust_ir_photon_rate = zero_dust_ir
+                dust_ir_power_residual = zero_rate
+                dust_ir_out_of_range = zero_rate
+            else:
+                dust_ir = evaluate_dust_thermal(
+                    dust_thermal_model,
+                    radiation.dust_heating_rate,
+                    radiation.state.n_hydrogen,
+                    dust.relative_abundance,
+                    dust_background_temperature_k,
+                )
+                dust_grain_temperature = dust_ir.grain_temperature_k
+                dust_ir_reemission_rate = dust_ir.reemitted_energy_rate
+                dust_ir_untracked_rate = dust_ir.untracked_energy_rate
+                dust_ir_photon_rate = dust_ir.ir_photon_rate
+                dust_ir_power_residual = dust_ir.equilibrium_power_residual_rate
+                dust_ir_out_of_range = jnp.asarray(dust_ir.out_of_range, dtype=temperature_k.dtype)
             next_thermal, next_temperature, background, thermal_residual, thermal_bound_hit = _implicit_thermal_update(
                 radiation.state,
                 current.thermal,
@@ -326,11 +389,26 @@ def build_thermochemical_step(
                 radiation.dust_momentum_rate,
                 radiation.dust_scattered_photons,
                 radiation.dust_scattering_momentum_rate,
+                dust_grain_temperature,
+                dust_ir_reemission_rate,
+                dust_ir_untracked_rate,
+                dust_ir_photon_rate,
+                dust_ir_power_residual,
+                dust_ir_out_of_range,
                 background,
                 current.cumulative_absorbed_photons + radiation.absorbed_photons,
                 current.cumulative_dust_absorbed_photons + radiation.dust_absorbed_photons,
                 current.cumulative_dust_scattered_photons + radiation.dust_scattered_photons,
                 current.cumulative_dust_heating_energy + subtransport.dt * radiation.dust_heating_rate,
+                current.cumulative_dust_ir_reemitted_energy
+                + subtransport.dt * dust_ir_reemission_rate,
+                current.cumulative_dust_ir_untracked_energy
+                + subtransport.dt * dust_ir_untracked_rate,
+                current.cumulative_dust_ir_photons
+                + subtransport.dt * dust_ir_photon_rate,
+                current.cumulative_dust_ir_power_residual
+                + subtransport.dt * dust_ir_power_residual,
+                current.cumulative_dust_ir_out_of_range + dust_ir_out_of_range,
                 current.cumulative_dust_momentum + subtransport.dt * radiation.dust_momentum_rate,
                 current.cumulative_dust_scattering_momentum
                 + subtransport.dt * radiation.dust_scattering_momentum_rate,
@@ -372,11 +450,22 @@ def build_thermochemical_step(
             final.dust_momentum_rate,
             final.dust_scattered_photons,
             final.dust_scattering_momentum_rate,
+            final.dust_grain_temperature_k,
+            final.dust_ir_reemission_rate,
+            final.dust_ir_untracked_rate,
+            final.dust_ir_photon_rate,
+            final.dust_ir_equilibrium_power_residual_rate,
+            final.dust_ir_out_of_range,
             final.background_net_rate,
             final.cumulative_absorbed_photons,
             final.cumulative_dust_absorbed_photons,
             final.cumulative_dust_scattered_photons,
             final.cumulative_dust_heating_energy,
+            final.cumulative_dust_ir_reemitted_energy,
+            final.cumulative_dust_ir_untracked_energy,
+            final.cumulative_dust_ir_photons,
+            final.cumulative_dust_ir_power_residual,
+            final.cumulative_dust_ir_out_of_range,
             final.cumulative_dust_momentum,
             final.cumulative_dust_scattering_momentum,
             final.cumulative_unallocated_primary_photons,

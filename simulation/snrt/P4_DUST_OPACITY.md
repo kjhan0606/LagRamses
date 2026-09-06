@@ -171,5 +171,7 @@ consumes the explicit absorption and scattering arrays.
 
 The v2/v3 paths are engineering/source-provenance closures, not astrophysical
 approvals: the SED, dust-to-metal normalization, escape/obscuration model,
-anisotropic phase function, IR re-emission, and live hydro coupling remain
-later promotion gates.
+anisotropic phase function, and live hydro coupling remain later promotion
+gates. The separate DUST-2 thermal/IR candidate is documented in
+[`P6_DUST_THERMAL.md`](P6_DUST_THERMAL.md); it does not change this opacity
+contract or recursively transport its recorded IR source.

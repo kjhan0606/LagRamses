@@ -88,7 +88,7 @@ def main() -> int:
     assert scattering_closure.scattering_phase_function == "phase_isotropic_candidate"
     assert np.allclose(scattering_closure.scattering_cross_section_per_h_cm2, scattering)
 
-    expected_staged_sha256 = "61350545eea164c8db94ff830abd7f9e57cd7efc6f1e36f389d61627d364b9da"
+    expected_staged_sha256 = "7521ef988a47b590f375f49cdedf375109f5ee306968e54749b38f5e43a1faa8"
     digest = hashlib.sha256(STAGED_SIDECAR.read_bytes()).hexdigest()
     assert digest == expected_staged_sha256
     staged = json.loads(STAGED_SIDECAR.read_text(encoding="utf-8"))

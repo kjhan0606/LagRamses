@@ -6,10 +6,14 @@ import json
 from pathlib import Path
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
 from snrt_core.provenance import (
+    PAYLOAD_HASH_SCHEME,
+    canonical_payload_sha256,
+    build_code_manifest,
     require_sha256,
     sha256_file,
     validate_code_manifest,
@@ -39,6 +43,11 @@ SNRT_ROOT = Path(__file__).resolve().parents[1]
 DUST_CLOSURE_CODE_MANIFEST = {
     "dust_builder": SNRT_ROOT / "tools" / "build_draine_dust_opacity.py",
     "source_sed": SNRT_ROOT / "snrt_core" / "sed.py",
+    "dust_loader": SNRT_ROOT / "snrt_core" / "dust.py",
+    "integrity_helper": SNRT_ROOT / "snrt_core" / "provenance.py",
+}
+DUST_THERMAL_CODE_MANIFEST = {
+    "thermal_builder": SNRT_ROOT / "tools" / "build_draine_dust_thermal.py",
     "dust_loader": SNRT_ROOT / "snrt_core" / "dust.py",
     "integrity_helper": SNRT_ROOT / "snrt_core" / "provenance.py",
 }
@@ -91,8 +100,59 @@ class DustOpacityClosure(NamedTuple):
     binding_status: str = "reference_control"
     group_edges_sha256: str | None = None
     source_table_sha256: str | None = None
+    dust_mass_per_h_g: float | None = None
     builder_sha256: str | None = None
     payload_sha256: str | None = None
+
+
+class DustThermalClosure(NamedTuple):
+    """Validated equilibrium dust-emission table.
+
+    The power curve is per reference-mixture H nucleus.  Fractions and photon
+    energies are tabulated only for the configured IR groups; the complement
+    is an explicit out-of-band energy ledger.
+    """
+
+    group_edges_ev: np.ndarray
+    ir_group_indices: np.ndarray
+    temperature_k: np.ndarray
+    emitted_power_per_h_erg_s: np.ndarray
+    ir_energy_fraction: np.ndarray
+    ir_mean_photon_energy_ev: np.ndarray
+    untracked_energy_fraction: np.ndarray
+    reference_mixture: str
+    thermal_source: str
+    schema: str = "snrt_dust_thermal_v1"
+    binding_status: str = "reference_thermal_control"
+    group_edges_sha256: str | None = None
+    source_table_sha256: str | None = None
+    dust_mass_per_h_g: float | None = None
+    builder_sha256: str | None = None
+    payload_sha256: str | None = None
+
+
+class DustThermalModel(NamedTuple):
+    """JAX-ready equilibrium dust-emission table."""
+
+    temperature_k: jnp.ndarray
+    log_temperature_k: jnp.ndarray
+    emitted_power_per_h_erg_s: jnp.ndarray
+    log_emitted_power_per_h_erg_s: jnp.ndarray
+    ir_energy_fraction: jnp.ndarray
+    ir_mean_photon_energy_ev: jnp.ndarray
+    untracked_energy_fraction: jnp.ndarray
+    ir_group_indices: tuple[int, ...]
+
+
+class DustThermalStep(NamedTuple):
+    """One local thermal/emission closure evaluation."""
+
+    grain_temperature_k: jnp.ndarray
+    reemitted_energy_rate: jnp.ndarray
+    untracked_energy_rate: jnp.ndarray
+    ir_photon_rate: jnp.ndarray
+    equilibrium_power_residual_rate: jnp.ndarray
+    out_of_range: jnp.ndarray
 
 
 def read_dust_opacity_metadata(
@@ -148,6 +208,7 @@ def read_dust_opacity_metadata(
         )
     group_edges_sha256 = None
     source_table_sha256 = None
+    dust_mass_per_h_g = None
     builder_sha256 = None
     payload_sha256 = None
     source_bound = schema == "snrt_dust_opacity_v2" or (
@@ -216,6 +277,12 @@ def read_dust_opacity_metadata(
         source_table_sha256 = require_sha256(
             source_table.get("sha256"), "source_table.sha256", opacity_path
         )
+        try:
+            dust_mass_per_h_g = float(source_table.get("dust_mass_per_h_g"))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{opacity_path}: source_table lacks dust_mass_per_h_g") from error
+        if not np.isfinite(dust_mass_per_h_g) or dust_mass_per_h_g <= 0.0:
+            raise ValueError(f"{opacity_path}: source_table dust_mass_per_h_g is invalid")
         if not isinstance(source_table_path, str) or not source_table_path.strip():
             raise ValueError(f"{opacity_path}: source_table lacks path")
         try:
@@ -298,6 +365,12 @@ def read_dust_opacity_metadata(
             raise ValueError(f"{opacity_path}: v3 reference control lacks source_table provenance")
         source_table_path = source_table.get("path")
         source_table_sha256 = require_sha256(source_table.get("sha256"), "source_table.sha256", opacity_path)
+        try:
+            dust_mass_per_h_g = float(source_table.get("dust_mass_per_h_g"))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{opacity_path}: source_table lacks dust_mass_per_h_g") from error
+        if not np.isfinite(dust_mass_per_h_g) or dust_mass_per_h_g <= 0.0:
+            raise ValueError(f"{opacity_path}: source_table dust_mass_per_h_g is invalid")
         if not isinstance(source_table_path, str) or not source_table_path.strip():
             raise ValueError(f"{opacity_path}: source_table lacks path")
         try:
@@ -556,8 +629,355 @@ def read_dust_opacity_metadata(
         binding_status=binding_status,
         group_edges_sha256=group_edges_sha256,
         source_table_sha256=source_table_sha256,
+        dust_mass_per_h_g=dust_mass_per_h_g,
         builder_sha256=builder_sha256,
         payload_sha256=payload_sha256,
+    )
+
+
+def read_dust_thermal_metadata(
+    path: str | Path,
+    *,
+    expected_group_edges_ev: np.ndarray | None = None,
+    expected_group_edges_sha256: str | None = None,
+    expected_source_table_sha256: str | None = None,
+    expected_dust_mass_per_h_g: float | None = None,
+) -> DustThermalClosure:
+    """Read and validate the Kirchhoff-derived equilibrium dust table."""
+
+    thermal_path = Path(path)
+    with thermal_path.open("r", encoding="utf-8") as handle:
+        metadata = json.load(handle)
+    if not isinstance(metadata, dict) or metadata.get("schema") != "snrt_dust_thermal_v1":
+        raise ValueError(f"{thermal_path}: unsupported dust thermal schema")
+    status = metadata.get("status")
+    if status not in ("reference_thermal_control", "candidate_kirchhoff_equilibrium"):
+        raise ValueError(f"{thermal_path}: invalid dust thermal status")
+    required_strings = ("reference_mixture", "thermal_source", "single_temperature_assumption")
+    for name in required_strings:
+        if not isinstance(metadata.get(name), str) or not metadata[name].strip():
+            raise ValueError(f"{thermal_path}: {name} must be a non-empty string")
+
+    edges = np.asarray(metadata.get("group_edges_ev"), dtype=np.float64)
+    if (
+        edges.ndim != 1
+        or edges.size < 2
+        or not np.isfinite(edges).all()
+        or np.any(edges <= 0.0)
+        or np.any(np.diff(edges) <= 0.0)
+    ):
+        raise ValueError(f"{thermal_path}: group edges are invalid")
+    if expected_group_edges_ev is not None:
+        expected_edges = np.asarray(expected_group_edges_ev, dtype=np.float64)
+        if expected_edges.shape != edges.shape or not np.array_equal(expected_edges, edges):
+            raise ValueError(f"{thermal_path}: thermal groups do not match the photon-ledger groups")
+    group_edges_sha256 = require_sha256(
+        metadata.get("group_edges_sha256"), "group_edges_sha256", thermal_path
+    )
+    group_edges_path = metadata.get("group_edges_path")
+    if not isinstance(group_edges_path, str) or not group_edges_path.strip():
+        raise ValueError(f"{thermal_path}: thermal sidecar lacks group_edges_path")
+    try:
+        if sha256_file(group_edges_path) != group_edges_sha256:
+            raise ValueError(f"{thermal_path}: group-edge hash does not match its file")
+    except (FileNotFoundError, OSError) as error:
+        raise ValueError(f"{thermal_path}: group-edge input file is unavailable") from error
+    if expected_group_edges_sha256 is not None and expected_group_edges_sha256 != group_edges_sha256:
+        raise ValueError(f"{thermal_path}: thermal group-edge hash does not match the photon metadata")
+
+    indices_raw = metadata.get("ir_group_indices")
+    if not isinstance(indices_raw, list) or not indices_raw:
+        raise ValueError(f"{thermal_path}: ir_group_indices must be a non-empty list")
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in indices_raw):
+        raise ValueError(f"{thermal_path}: IR group indices must be integers")
+    ir_indices = np.asarray(indices_raw, dtype=np.int64)
+    if np.any(ir_indices < 0) or np.any(ir_indices >= edges.size - 1) or np.unique(ir_indices).size != ir_indices.size:
+        raise ValueError(f"{thermal_path}: IR group indices are invalid or duplicated")
+
+    temperature = np.asarray(metadata.get("temperature_k"), dtype=np.float64)
+    power = np.asarray(metadata.get("emitted_power_per_h_erg_s"), dtype=np.float64)
+    fractions = np.asarray(metadata.get("ir_energy_fraction"), dtype=np.float64)
+    photon_energy = np.asarray(metadata.get("ir_mean_photon_energy_ev"), dtype=np.float64)
+    untracked = np.asarray(metadata.get("untracked_energy_fraction"), dtype=np.float64)
+    number_of_temperatures = temperature.size
+    number_of_ir_groups = ir_indices.size
+    if (
+        temperature.ndim != 1
+        or number_of_temperatures < 2
+        or power.shape != temperature.shape
+        or fractions.shape != (number_of_temperatures, number_of_ir_groups)
+        or photon_energy.shape != fractions.shape
+        or untracked.shape != temperature.shape
+    ):
+        raise ValueError(f"{thermal_path}: thermal arrays have inconsistent shapes")
+    if (
+        not np.isfinite(temperature).all()
+        or np.any(temperature <= 0.0)
+        or np.any(np.diff(temperature) <= 0.0)
+        or not np.isfinite(power).all()
+        or np.any(power <= 0.0)
+        or np.any(np.diff(power) <= 0.0)
+        or not np.isfinite(fractions).all()
+        or np.any(fractions < 0.0)
+        or not np.isfinite(photon_energy).all()
+        or np.any(photon_energy <= 0.0)
+        or not np.isfinite(untracked).all()
+        or np.any(untracked < 0.0)
+    ):
+        raise ValueError(f"{thermal_path}: thermal arrays are non-finite or out of bounds")
+    fraction_tolerance = float(metadata.get("fraction_tolerance", 1.0e-10))
+    if not np.isfinite(fraction_tolerance) or fraction_tolerance <= 0.0:
+        raise ValueError(f"{thermal_path}: fraction_tolerance is invalid")
+    fraction_sum = fractions.sum(axis=1) + untracked
+    if not np.allclose(fraction_sum, 1.0, rtol=0.0, atol=fraction_tolerance):
+        raise ValueError(f"{thermal_path}: tracked plus untracked energy fractions do not close")
+    lower = edges[ir_indices]
+    upper = edges[ir_indices + 1]
+    energy_tolerance = 1.0e-12 * np.maximum(1.0, upper)
+    if np.any(photon_energy < lower[None, :] - energy_tolerance[None, :]) or np.any(
+        photon_energy > upper[None, :] + energy_tolerance[None, :]
+    ):
+        raise ValueError(f"{thermal_path}: thermal photon energies lie outside their IR groups")
+
+    source_table = metadata.get("source_table")
+    if not isinstance(source_table, dict):
+        raise ValueError(f"{thermal_path}: thermal sidecar lacks source_table provenance")
+    source_table_path = source_table.get("path")
+    source_table_sha256 = require_sha256(
+        source_table.get("sha256"), "source_table.sha256", thermal_path
+    )
+    if not isinstance(source_table_path, str) or not source_table_path.strip():
+        raise ValueError(f"{thermal_path}: source_table lacks path")
+    try:
+        if sha256_file(source_table_path) != source_table_sha256:
+            raise ValueError(f"{thermal_path}: source-table hash does not match its file")
+    except (FileNotFoundError, OSError) as error:
+        raise ValueError(f"{thermal_path}: source-table input is unavailable") from error
+    try:
+        dust_mass_per_h_g = float(source_table.get("dust_mass_per_h_g"))
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{thermal_path}: source_table lacks dust_mass_per_h_g") from error
+    if not np.isfinite(dust_mass_per_h_g) or dust_mass_per_h_g <= 0.0:
+        raise ValueError(f"{thermal_path}: source_table dust_mass_per_h_g is invalid")
+    if expected_source_table_sha256 is not None and source_table_sha256 != expected_source_table_sha256:
+        raise ValueError(f"{thermal_path}: thermal and opacity source tables do not match")
+    if expected_dust_mass_per_h_g is not None and not np.isclose(
+        dust_mass_per_h_g, expected_dust_mass_per_h_g, rtol=1.0e-12, atol=0.0
+    ):
+        raise ValueError(f"{thermal_path}: thermal and opacity dust masses per H do not match")
+
+    builder = metadata.get("builder")
+    if not isinstance(builder, dict):
+        raise ValueError(f"{thermal_path}: thermal sidecar lacks builder provenance")
+    builder_path = builder.get("path")
+    if not isinstance(builder_path, str) or not builder_path.strip():
+        raise ValueError(f"{thermal_path}: builder provenance lacks path")
+    builder_sha256 = require_sha256(builder.get("sha256"), "builder.sha256", thermal_path)
+    if Path(builder_path).resolve() != DUST_THERMAL_CODE_MANIFEST["thermal_builder"].resolve():
+        raise ValueError(f"{thermal_path}: thermal builder path is not the canonical builder")
+    if sha256_file(builder_path) != builder_sha256:
+        raise ValueError(f"{thermal_path}: thermal builder hash does not match its file")
+    validate_code_manifest(metadata, DUST_THERMAL_CODE_MANIFEST, context=thermal_path)
+    payload_sha256 = validate_payload_hash(metadata, context=thermal_path)
+    return DustThermalClosure(
+        group_edges_ev=edges,
+        ir_group_indices=ir_indices,
+        temperature_k=temperature,
+        emitted_power_per_h_erg_s=power,
+        ir_energy_fraction=fractions,
+        ir_mean_photon_energy_ev=photon_energy,
+        untracked_energy_fraction=untracked,
+        reference_mixture=str(metadata["reference_mixture"]),
+        thermal_source=str(metadata["thermal_source"]),
+        binding_status=str(status),
+        group_edges_sha256=group_edges_sha256,
+        source_table_sha256=source_table_sha256,
+        dust_mass_per_h_g=dust_mass_per_h_g,
+        builder_sha256=str(metadata["builder"]["sha256"]),
+        payload_sha256=payload_sha256,
+    )
+
+
+def dust_thermal_model_from_metadata(
+    path: str | Path,
+    *,
+    dtype: jnp.dtype = jnp.float32,
+    expected_group_edges_ev: np.ndarray | None = None,
+    expected_group_edges_sha256: str | None = None,
+    expected_source_table_sha256: str | None = None,
+    expected_dust_mass_per_h_g: float | None = None,
+) -> DustThermalModel:
+    """Build a fixed-shape JAX thermal model from a validated sidecar."""
+
+    closure = read_dust_thermal_metadata(
+        path,
+        expected_group_edges_ev=expected_group_edges_ev,
+        expected_group_edges_sha256=expected_group_edges_sha256,
+        expected_source_table_sha256=expected_source_table_sha256,
+        expected_dust_mass_per_h_g=expected_dust_mass_per_h_g,
+    )
+    number_of_groups = closure.group_edges_ev.size - 1
+    full_fraction = np.zeros((closure.temperature_k.size, number_of_groups), dtype=np.float64)
+    full_photon_energy = np.ones_like(full_fraction)
+    full_fraction[:, closure.ir_group_indices] = closure.ir_energy_fraction
+    full_photon_energy[:, closure.ir_group_indices] = closure.ir_mean_photon_energy_ev
+    return DustThermalModel(
+        temperature_k=jnp.asarray(closure.temperature_k, dtype=dtype),
+        log_temperature_k=jnp.log(jnp.asarray(closure.temperature_k, dtype=dtype)),
+        emitted_power_per_h_erg_s=jnp.asarray(closure.emitted_power_per_h_erg_s, dtype=dtype),
+        log_emitted_power_per_h_erg_s=jnp.log(
+            jnp.asarray(closure.emitted_power_per_h_erg_s, dtype=dtype)
+        ),
+        ir_energy_fraction=jnp.asarray(full_fraction, dtype=dtype),
+        ir_mean_photon_energy_ev=jnp.asarray(full_photon_energy, dtype=dtype),
+        untracked_energy_fraction=jnp.asarray(closure.untracked_energy_fraction, dtype=dtype),
+        ir_group_indices=tuple(int(value) for value in closure.ir_group_indices),
+    )
+
+
+def _log_linear_interpolate(
+    query_log: jnp.ndarray,
+    grid_log: jnp.ndarray,
+    values: jnp.ndarray,
+) -> jnp.ndarray:
+    """Interpolate a one- or multi-column table in log-temperature space."""
+
+    index = jnp.searchsorted(grid_log, query_log, side="right") - 1
+    index = jnp.clip(index, 0, grid_log.size - 2)
+    lower = grid_log[index]
+    upper = grid_log[index + 1]
+    weight = (query_log - lower) / jnp.maximum(upper - lower, jnp.finfo(query_log.dtype).tiny)
+    if values.ndim == 1:
+        lower_value = values[index]
+        upper_value = values[index + 1]
+    else:
+        lower_value = values[index, ...]
+        upper_value = values[index + 1, ...]
+    return lower_value + weight[..., None] * (upper_value - lower_value) if values.ndim > 1 else lower_value + weight * (upper_value - lower_value)
+
+
+def evaluate_dust_thermal(
+    model: DustThermalModel,
+    absorbed_dust_power_rate: jnp.ndarray,
+    n_hydrogen: jnp.ndarray,
+    relative_abundance: jnp.ndarray,
+    background_temperature_k: float,
+) -> DustThermalStep:
+    """Evaluate local equilibrium and return a one-pass IR source ledger."""
+
+    absorbed = jnp.asarray(absorbed_dust_power_rate)
+    hydrogen = jnp.asarray(n_hydrogen)
+    abundance = jnp.asarray(relative_abundance)
+    if absorbed.shape != hydrogen.shape or abundance.shape != hydrogen.shape:
+        raise ValueError("dust thermal fields must share the cell shape")
+    if not np.isfinite(background_temperature_k) or background_temperature_k <= 0.0:
+        raise ValueError("background_temperature_k must be positive and finite")
+    dtype = absorbed.dtype
+    background_temperature = jnp.asarray(background_temperature_k, dtype=dtype)
+    background_log_temperature = jnp.log(background_temperature)
+    table_min = model.temperature_k[0]
+    table_max = model.temperature_k[-1]
+    background_in_range = (background_temperature >= table_min) & (background_temperature <= table_max)
+    background_power = _log_linear_interpolate(
+        jnp.clip(background_log_temperature, model.log_temperature_k[0], model.log_temperature_k[-1]),
+        model.log_temperature_k,
+        model.emitted_power_per_h_erg_s,
+    )
+    dust_density = jnp.maximum(hydrogen * jnp.maximum(abundance, 0.0), 0.0)
+    invalid_input = (
+        (~jnp.isfinite(absorbed))
+        | (~jnp.isfinite(hydrogen))
+        | (~jnp.isfinite(abundance))
+        | (absorbed < 0.0)
+        | (hydrogen <= 0.0)
+        | (abundance < 0.0)
+    )
+    local_power = jnp.maximum(jnp.where(jnp.isfinite(absorbed), absorbed, 0.0), 0.0)
+    active = (dust_density > 0.0) & (local_power > 0.0)
+    local_per_h = jnp.where(active, local_power / jnp.maximum(dust_density, jnp.finfo(dtype).tiny), 0.0)
+    target_power = background_power + local_per_h
+    target_in_range = (target_power >= model.emitted_power_per_h_erg_s[0]) & (
+        target_power <= model.emitted_power_per_h_erg_s[-1]
+    )
+    safe_target = jnp.clip(
+        target_power,
+        model.emitted_power_per_h_erg_s[0],
+        model.emitted_power_per_h_erg_s[-1],
+    )
+    lower_log_temperature = jnp.full_like(target_power, model.log_temperature_k[0])
+    upper_log_temperature = jnp.full_like(target_power, model.log_temperature_k[-1])
+
+    def bisect_temperature(
+        _: int,
+        bounds: tuple[jnp.ndarray, jnp.ndarray],
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        lower_bound, upper_bound = bounds
+        midpoint = 0.5 * (lower_bound + upper_bound)
+        midpoint_power = _log_linear_interpolate(
+            midpoint,
+            model.log_temperature_k,
+            model.emitted_power_per_h_erg_s,
+        )
+        return (
+            jnp.where(midpoint_power < safe_target, midpoint, lower_bound),
+            jnp.where(midpoint_power < safe_target, upper_bound, midpoint),
+        )
+
+    lower_log_temperature, upper_log_temperature = jax.lax.fori_loop(
+        0,
+        32,
+        bisect_temperature,
+        (lower_log_temperature, upper_log_temperature),
+    )
+    solved_log_temperature = 0.5 * (lower_log_temperature + upper_log_temperature)
+    solved_temperature = jnp.exp(solved_log_temperature)
+    solved_temperature = jnp.where(active, solved_temperature, 0.0)
+    evaluation_temperature = jnp.where(active, solved_temperature, model.temperature_k[0])
+    evaluated_power = _log_linear_interpolate(
+        jnp.log(jnp.maximum(evaluation_temperature, model.temperature_k[0])),
+        model.log_temperature_k,
+        model.emitted_power_per_h_erg_s,
+    )
+    fractions = _log_linear_interpolate(
+        jnp.log(jnp.maximum(evaluation_temperature, model.temperature_k[0])),
+        model.log_temperature_k,
+        model.ir_energy_fraction,
+    )
+    photon_energy = _log_linear_interpolate(
+        jnp.log(jnp.maximum(evaluation_temperature, model.temperature_k[0])),
+        model.log_temperature_k,
+        model.ir_mean_photon_energy_ev,
+    )
+    untracked = _log_linear_interpolate(
+        jnp.log(jnp.maximum(evaluation_temperature, model.temperature_k[0])),
+        model.log_temperature_k,
+        model.untracked_energy_fraction,
+    )
+    emitted_excess_per_h = jnp.where(
+        active,
+        jnp.maximum(evaluated_power - background_power, 0.0),
+        0.0,
+    )
+    emitted_excess_rate = emitted_excess_per_h * dust_density
+    ir_energy_rate = jnp.moveaxis(emitted_excess_rate[..., None] * fractions, -1, 0)
+    ir_photon_rate = ir_energy_rate / jnp.maximum(
+        jnp.moveaxis(photon_energy, -1, 0) * EV_ERG,
+        jnp.finfo(dtype).tiny,
+    )
+    untracked_rate = emitted_excess_rate * untracked
+    residual_rate = jnp.where(
+        active,
+        (evaluated_power - target_power) * dust_density,
+        0.0,
+    )
+    out_of_range = invalid_input | (active & ((~background_in_range) | (~target_in_range)))
+    return DustThermalStep(
+        grain_temperature_k=solved_temperature,
+        reemitted_energy_rate=jnp.sum(ir_energy_rate, axis=0),
+        untracked_energy_rate=untracked_rate,
+        ir_photon_rate=ir_photon_rate,
+        equilibrium_power_residual_rate=residual_rate,
+        out_of_range=out_of_range,
     )
 
 

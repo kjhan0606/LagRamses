@@ -16,8 +16,13 @@ diagnostic is not yet coupled to hydro or a full radiation-pressure closure.
 
 The current scattering candidate is deliberately isotropic and records the
 measured Draine angular moments without claiming to use an anisotropic phase
-function. IR re-emission remains deferred: it requires a grain-temperature and
-frequency-coupled closure rather than treating absorbed energy as an IR source.
+function. The DUST-2 candidate in
+[`P6_DUST_THERMAL.md`](P6_DUST_THERMAL.md) admits a Kirchhoff-derived
+single-temperature table, records tracked and out-of-band IR energy and
+thermal photon rates inside the P5 subcycle, and includes the CMB floor. It is
+explicitly one-pass (`recorded_not_transport_reemitted`) and cannot alter
+gas/H/He state; recursive IR transport, stochastic heating, and physical
+mixture approval remain deferred.
 
 ## X-ray secondaries
 

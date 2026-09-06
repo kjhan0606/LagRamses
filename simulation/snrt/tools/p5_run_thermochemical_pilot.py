@@ -18,7 +18,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from snrt_core.dust import dust_model_from_metadata, read_dust_opacity_metadata, zero_dust
+from snrt_core.dust import (
+    dust_model_from_metadata,
+    dust_thermal_model_from_metadata,
+    read_dust_opacity_metadata,
+    read_dust_thermal_metadata,
+    zero_dust,
+)
 from snrt_core.jax_thermal_atlas import from_numpy_atlas
 from snrt_core.primordial import GroupSpectralClosure, PrimordialState, group_spectral_closure_from_metadata
 from snrt_core.quadrature import level_symmetric_quadrature
@@ -79,6 +85,10 @@ def main() -> None:
         default="off",
         help="dust scattering closure; v3 requires isotropic and v1/v2 require off",
     )
+    parser.add_argument(
+        "--dust-thermal-metadata",
+        help="validated snrt_dust_thermal_v1 sidecar for one-pass grain thermal/IR recording",
+    )
     parser.add_argument("--scale-factor", required=True, type=float)
     parser.add_argument("--metallicity-solar", type=float, default=1.0e-6)
     parser.add_argument("--output", required=True)
@@ -117,7 +127,11 @@ def main() -> None:
         or args.source_cell_photons_per_neutral < 0.0
     ):
         raise ValueError("invalid duration or thermochemistry iteration count")
-    if not 0.0 < args.reduced_light_fraction <= 1.0 or not 0.0 < args.courant < 1.0:
+    if (
+        args.scale_factor <= 0.0
+        or not 0.0 < args.reduced_light_fraction <= 1.0
+        or not 0.0 < args.courant < 1.0
+    ):
         raise ValueError("invalid reduced-light-fraction or courant")
     output = Path(args.output)
     if output.exists():
@@ -249,9 +263,18 @@ def main() -> None:
     dust_payload_sha256 = ""
     dust_source_table_sha256 = ""
     dust_builder_sha256 = ""
+    dust_thermal_metadata_sha256 = ""
+    dust_thermal_payload_sha256 = ""
+    dust_thermal_builder_sha256 = ""
+    dust_thermal_schema = "none"
+    dust_thermal_status = "disabled"
+    dust_thermal_model = None
+    dust_thermal_closure = None
     if args.dust_opacity_metadata is None:
         if args.dust_scattering != "off":
             raise ValueError("dust scattering requires a scattering-enabled opacity sidecar")
+        if args.dust_thermal_metadata is not None:
+            raise ValueError("dust thermal metadata requires dust opacity metadata")
         if np.any(np.asarray(static.dust_relative_abundance) > 0.0):
             raise ValueError(
                 "static input contains non-zero dust_relative_abundance; "
@@ -289,11 +312,56 @@ def main() -> None:
         dust_payload_sha256 = dust_closure.payload_sha256 or ""
         dust_source_table_sha256 = dust_closure.source_table_sha256 or ""
         dust_builder_sha256 = dust_closure.builder_sha256 or ""
+        if args.dust_thermal_metadata is not None:
+            if dust_schema != "snrt_dust_opacity_v3":
+                raise ValueError(
+                    "dust thermal metadata requires a provenance-pinned snrt_dust_opacity_v3 sidecar"
+                )
+            if dust_closure.source_table_sha256 is None or dust_closure.dust_mass_per_h_g is None:
+                raise ValueError("active dust opacity lacks source-table mixture binding for thermal metadata")
+            dust_thermal_closure = read_dust_thermal_metadata(
+                args.dust_thermal_metadata,
+                expected_group_edges_ev=group_edges_ev,
+                expected_group_edges_sha256=dust_closure.group_edges_sha256,
+                expected_source_table_sha256=dust_closure.source_table_sha256,
+                expected_dust_mass_per_h_g=dust_closure.dust_mass_per_h_g,
+            )
+            dust_thermal_model = dust_thermal_model_from_metadata(
+                args.dust_thermal_metadata,
+                dtype=real_dtype,
+                expected_group_edges_ev=group_edges_ev,
+                expected_group_edges_sha256=dust_closure.group_edges_sha256,
+                expected_source_table_sha256=dust_closure.source_table_sha256,
+                expected_dust_mass_per_h_g=dust_closure.dust_mass_per_h_g,
+            )
+            dust_thermal_metadata_sha256 = _sha256_file(args.dust_thermal_metadata)
+            dust_thermal_payload_sha256 = dust_thermal_closure.payload_sha256 or ""
+            dust_thermal_builder_sha256 = dust_thermal_closure.builder_sha256 or ""
+            dust_thermal_schema = dust_thermal_closure.schema
+            dust_thermal_status = dust_thermal_closure.binding_status
+            dust_background_temperature_k = 2.7255 / args.scale_factor
+            if not (
+                dust_thermal_closure.temperature_k[0]
+                <= dust_background_temperature_k
+                <= dust_thermal_closure.temperature_k[-1]
+            ):
+                raise ValueError(
+                    "dust thermal table does not cover the run's CMB background temperature"
+                )
+        else:
+            dust_background_temperature_k = 2.7255 / args.scale_factor
+    if args.dust_opacity_metadata is None:
+        dust_background_temperature_k = 2.7255 / args.scale_factor
     zero_cell = jnp.zeros_like(temperature)
     cumulative_absorbed = jnp.zeros((len(group_energy_ev), *static.shape), dtype=temperature.dtype)
     cumulative_dust_absorbed = jnp.zeros((len(group_energy_ev), *static.shape), dtype=temperature.dtype)
     cumulative_dust_scattered = jnp.zeros((len(group_energy_ev), *static.shape), dtype=temperature.dtype)
     cumulative_dust_heating_energy = jnp.zeros_like(temperature)
+    cumulative_dust_ir_reemitted_energy = jnp.zeros_like(temperature)
+    cumulative_dust_ir_untracked_energy = jnp.zeros_like(temperature)
+    cumulative_dust_ir_photons = jnp.zeros((len(group_energy_ev), *static.shape), dtype=temperature.dtype)
+    cumulative_dust_ir_power_residual = jnp.zeros_like(temperature)
+    cumulative_dust_ir_out_of_range = jnp.zeros_like(temperature)
     cumulative_dust_momentum = jnp.zeros((3, *static.shape), dtype=temperature.dtype)
     cumulative_dust_scattering_momentum = jnp.zeros((3, *static.shape), dtype=temperature.dtype)
     cumulative_unallocated = jnp.zeros((3, *static.shape), dtype=temperature.dtype)
@@ -326,6 +394,8 @@ def main() -> None:
             thermal_subcycles=args.thermal_subcycles,
             source_cell_subcycles=source_cell_subcycles,
             thermal_implicit_iterations=args.thermal_implicit_iterations,
+            dust_thermal_model=dust_thermal_model,
+            dust_background_temperature_k=dust_background_temperature_k,
             use_secondary_ionization=args.secondary_ionization == "fs2010",
             time_averaged_absorption_iterations=args.time_averaged_absorption_iterations,
         )
@@ -338,6 +408,19 @@ def main() -> None:
         cumulative_dust_absorbed = cumulative_dust_absorbed + result.cumulative_dust_absorbed_photons
         cumulative_dust_scattered = cumulative_dust_scattered + result.cumulative_dust_scattered_photons
         cumulative_dust_heating_energy = cumulative_dust_heating_energy + result.cumulative_dust_heating_energy
+        cumulative_dust_ir_reemitted_energy = (
+            cumulative_dust_ir_reemitted_energy + result.cumulative_dust_ir_reemitted_energy
+        )
+        cumulative_dust_ir_untracked_energy = (
+            cumulative_dust_ir_untracked_energy + result.cumulative_dust_ir_untracked_energy
+        )
+        cumulative_dust_ir_photons = cumulative_dust_ir_photons + result.cumulative_dust_ir_photons
+        cumulative_dust_ir_power_residual = (
+            cumulative_dust_ir_power_residual + result.cumulative_dust_ir_power_residual
+        )
+        cumulative_dust_ir_out_of_range = (
+            cumulative_dust_ir_out_of_range + result.cumulative_dust_ir_out_of_range
+        )
         cumulative_dust_momentum = cumulative_dust_momentum + result.cumulative_dust_momentum
         cumulative_dust_scattering_momentum = (
             cumulative_dust_scattering_momentum + result.cumulative_dust_scattering_momentum
@@ -384,6 +467,19 @@ def main() -> None:
         cumulative_dust_absorbed = cumulative_dust_absorbed + result.cumulative_dust_absorbed_photons
         cumulative_dust_scattered = cumulative_dust_scattered + result.cumulative_dust_scattered_photons
         cumulative_dust_heating_energy = cumulative_dust_heating_energy + result.cumulative_dust_heating_energy
+        cumulative_dust_ir_reemitted_energy = (
+            cumulative_dust_ir_reemitted_energy + result.cumulative_dust_ir_reemitted_energy
+        )
+        cumulative_dust_ir_untracked_energy = (
+            cumulative_dust_ir_untracked_energy + result.cumulative_dust_ir_untracked_energy
+        )
+        cumulative_dust_ir_photons = cumulative_dust_ir_photons + result.cumulative_dust_ir_photons
+        cumulative_dust_ir_power_residual = (
+            cumulative_dust_ir_power_residual + result.cumulative_dust_ir_power_residual
+        )
+        cumulative_dust_ir_out_of_range = (
+            cumulative_dust_ir_out_of_range + result.cumulative_dust_ir_out_of_range
+        )
         cumulative_dust_momentum = cumulative_dust_momentum + result.cumulative_dust_momentum
         cumulative_dust_scattering_momentum = (
             cumulative_dust_scattering_momentum + result.cumulative_dust_scattering_momentum
@@ -435,11 +531,20 @@ def main() -> None:
     dust_heating = np.asarray(jax.device_get(result.dust_heating_rate))
     dust_momentum = np.asarray(jax.device_get(result.dust_momentum_rate))
     dust_scattering_momentum = np.asarray(jax.device_get(result.dust_scattering_momentum_rate))
+    dust_grain_temperature = np.asarray(jax.device_get(result.dust_grain_temperature_k))
+    dust_ir_reemission_rate = np.asarray(jax.device_get(result.dust_ir_reemission_rate))
+    dust_ir_untracked_rate = np.asarray(jax.device_get(result.dust_ir_untracked_rate))
+    dust_ir_photon_rate = np.asarray(jax.device_get(result.dust_ir_photon_rate))
     background_rate = np.asarray(jax.device_get(result.background_net_rate))
     absorbed_photons = np.asarray(jax.device_get(cumulative_absorbed))
     dust_absorbed_photons = np.asarray(jax.device_get(cumulative_dust_absorbed))
     dust_scattered_photons = np.asarray(jax.device_get(cumulative_dust_scattered))
     dust_heating_energy = np.asarray(jax.device_get(cumulative_dust_heating_energy))
+    dust_ir_reemitted_energy = np.asarray(jax.device_get(cumulative_dust_ir_reemitted_energy))
+    dust_ir_untracked_energy = np.asarray(jax.device_get(cumulative_dust_ir_untracked_energy))
+    dust_ir_photons = np.asarray(jax.device_get(cumulative_dust_ir_photons))
+    dust_ir_power_residual = np.asarray(jax.device_get(cumulative_dust_ir_power_residual))
+    dust_ir_out_of_range = np.asarray(jax.device_get(cumulative_dust_ir_out_of_range))
     dust_momentum_integral = np.asarray(jax.device_get(cumulative_dust_momentum))
     dust_scattering_momentum_integral = np.asarray(
         jax.device_get(cumulative_dust_scattering_momentum)
@@ -475,6 +580,44 @@ def main() -> None:
     absorbed_total = cell_total(absorbed_photons.sum(axis=0))
     dust_absorbed_total = cell_total(dust_absorbed_photons.sum(axis=0))
     dust_heating_total = cell_total(dust_heating_energy)
+    dust_ir_reemitted_total = cell_total(dust_ir_reemitted_energy)
+    dust_ir_untracked_total = cell_total(dust_ir_untracked_energy)
+    dust_ir_total = dust_ir_reemitted_energy + dust_ir_untracked_energy
+    dust_ir_energy_closure = dust_ir_total - dust_heating_energy
+    dust_ir_energy_closure_relative_error = (
+        float(np.abs(dust_ir_energy_closure).sum(dtype=np.float64) * cell_volume)
+        / max(float(np.abs(dust_heating_energy).sum(dtype=np.float64) * cell_volume), 1.0)
+    )
+    dust_ir_power_residual_total = cell_total(dust_ir_power_residual)
+    dust_ir_power_residual_relative_error = (
+        float(np.abs(dust_ir_power_residual).sum(dtype=np.float64) * cell_volume)
+        / max(float(np.abs(dust_heating_energy).sum(dtype=np.float64) * cell_volume), 1.0)
+    )
+    dust_ir_out_of_range_count = int(np.sum(dust_ir_out_of_range))
+    if dust_thermal_closure is None:
+        dust_ir_max_optical_depth = 0.0
+        dust_ir_thick_cell_fraction = 0.0
+    else:
+        ir_indices = dust_thermal_closure.ir_group_indices
+        absorption_ir = dust_closure.absorption_cross_section_per_h_cm2[ir_indices]
+        scattering_ir = (
+            np.zeros_like(absorption_ir)
+            if dust_closure.scattering_cross_section_per_h_cm2 is None
+            else dust_closure.scattering_cross_section_per_h_cm2[ir_indices]
+        )
+        dust_ir_tau = np.max(
+            (absorption_ir + scattering_ir)[:, None, None, None]
+            * np.asarray(static.hydrogen_number_density_cm3)[None, ...]
+            * np.asarray(static.dust_relative_abundance)[None, ...]
+            * cell_width[0],
+            axis=0,
+        )
+        dust_cells = np.asarray(static.dust_relative_abundance) > 0.0
+        dust_ir_max_optical_depth = float(np.max(dust_ir_tau))
+        dust_ir_thick_cell_fraction = float(
+            np.count_nonzero((dust_ir_tau > 1.0) & dust_cells)
+            / max(np.count_nonzero(dust_cells), 1)
+        )
     dust_momentum_total = cell_total(dust_momentum_integral)
     unallocated_total = cell_total(unallocated_primary.sum(axis=0))
     photon_scale = max(absorbed_total, 1.0)
@@ -550,8 +693,17 @@ def main() -> None:
         dust_absorbed_photons,
         dust_scattered_photons,
         dust_heating,
+        dust_grain_temperature,
+        dust_ir_reemission_rate,
+        dust_ir_untracked_rate,
+        dust_ir_photon_rate,
         dust_momentum,
         dust_heating_energy,
+        dust_ir_reemitted_energy,
+        dust_ir_untracked_energy,
+        dust_ir_photons,
+        dust_ir_power_residual,
+        dust_ir_out_of_range,
         dust_momentum_integral,
         dust_scattering_momentum_integral,
         unallocated_primary,
@@ -592,6 +744,14 @@ def main() -> None:
         and
         thermal_energy_closure_relative_error <= 1.0e-5
         and thermal_residual_l1_relative_error <= 1.0e-5
+        and (
+            dust_thermal_closure is None
+            or (
+                dust_ir_out_of_range_count == 0
+                and dust_ir_energy_closure_relative_error <= 1.0e-5
+                and dust_ir_power_residual_relative_error <= 1.0e-5
+            )
+        )
     )
     numerical_stability_passed = bool(all_finite and nonnegative_chemistry and fraction_bounds)
     validation_passed = bool(ledger_passed and thermal_passed and numerical_stability_passed)
@@ -683,6 +843,32 @@ def main() -> None:
         handle.attrs["dust_builder_sha256"] = dust_builder_sha256
         handle.attrs["dust_absorbed_photons"] = dust_absorbed_total
         handle.attrs["dust_heating_energy_erg"] = dust_heating_total
+        handle.attrs["dust_thermal_schema"] = dust_thermal_schema
+        handle.attrs["dust_thermal_status"] = dust_thermal_status
+        handle.attrs["dust_thermal_metadata_path"] = (
+            "" if args.dust_thermal_metadata is None else str(Path(args.dust_thermal_metadata).resolve())
+        )
+        handle.attrs["dust_thermal_metadata_sha256"] = dust_thermal_metadata_sha256
+        handle.attrs["dust_thermal_payload_sha256"] = dust_thermal_payload_sha256
+        handle.attrs["dust_thermal_builder_sha256"] = dust_thermal_builder_sha256
+        handle.attrs["dust_ir_group_indices"] = (
+            np.asarray(dust_thermal_closure.ir_group_indices, dtype=np.int64)
+            if dust_thermal_closure is not None
+            else np.asarray([], dtype=np.int64)
+        )
+        handle.attrs["dust_ir_background_temperature_k"] = dust_background_temperature_k
+        handle.attrs["dust_ir_one_pass"] = dust_thermal_closure is not None
+        handle.attrs["dust_ir_transport_semantics"] = (
+            "recorded_not_transport_reemitted" if dust_thermal_closure is not None else "disabled"
+        )
+        handle.attrs["dust_ir_energy_closure_relative_error"] = dust_ir_energy_closure_relative_error
+        handle.attrs["dust_ir_energy_closure_tolerance"] = 1.0e-5
+        handle.attrs["dust_ir_power_residual_relative_error"] = dust_ir_power_residual_relative_error
+        handle.attrs["dust_ir_untracked_energy_erg"] = dust_ir_untracked_total
+        handle.attrs["dust_ir_reemitted_energy_erg"] = dust_ir_reemitted_total
+        handle.attrs["dust_ir_max_optical_depth"] = dust_ir_max_optical_depth
+        handle.attrs["dust_ir_thick_cell_fraction"] = dust_ir_thick_cell_fraction
+        handle.attrs["dust_ir_out_of_range_count"] = dust_ir_out_of_range_count
         handle.attrs["dust_momentum_g_cm_s"] = dust_momentum_total
         handle.attrs["dust_scattering_momentum_g_cm_s"] = cell_total(dust_scattering_momentum_integral)
         if static.metallicity_solar is None:
@@ -706,9 +892,20 @@ def main() -> None:
         )
         handle.create_dataset("thermal/cumulative_background_energy_erg_cm3", data=background_energy)
         handle.create_dataset("thermal/cumulative_dust_heating_energy_erg_cm3", data=dust_heating_energy)
+        handle.create_dataset("thermal/dust_grain_temperature_k", data=dust_grain_temperature)
+        handle.create_dataset(
+            "thermal/dust_ir_reemitted_energy_erg_cm3", data=dust_ir_reemitted_energy
+        )
+        handle.create_dataset(
+            "thermal/dust_ir_untracked_energy_erg_cm3", data=dust_ir_untracked_energy
+        )
+        handle.create_dataset("thermal/dust_ir_energy_closure_erg_cm3", data=dust_ir_energy_closure)
         handle.create_dataset("thermal/energy_closure_erg_cm3", data=thermal_energy_closure)
         handle.create_dataset("rates/gas_photoheating_erg_cm3_s", data=gas_heating)
         handle.create_dataset("rates/dust_heating_erg_cm3_s", data=dust_heating)
+        handle.create_dataset("rates/dust_ir_reemission_erg_cm3_s", data=dust_ir_reemission_rate)
+        handle.create_dataset("rates/dust_ir_untracked_erg_cm3_s", data=dust_ir_untracked_rate)
+        handle.create_dataset("sources/dust_ir_photon_rate_cm3_s", data=dust_ir_photon_rate)
         handle.create_dataset("rates/dust_momentum_rate_dyn_cm3", data=dust_momentum)
         handle.create_dataset("rates/dust_total_momentum_rate_dyn_cm3", data=dust_momentum)
         handle.create_dataset(
@@ -723,6 +920,14 @@ def main() -> None:
         handle.create_dataset("diagnostics/cumulative_absorbed_photons_cm3", data=absorbed_photons)
         handle.create_dataset("diagnostics/cumulative_dust_absorbed_photons_cm3", data=dust_absorbed_photons)
         handle.create_dataset("diagnostics/cumulative_dust_scattered_photons_cm3", data=dust_scattered_photons)
+        handle.create_dataset("diagnostics/cumulative_dust_ir_photons_cm3", data=dust_ir_photons)
+        handle.create_dataset(
+            "diagnostics/cumulative_dust_ir_power_residual_erg_cm3",
+            data=dust_ir_power_residual,
+        )
+        handle.create_dataset(
+            "diagnostics/dust_ir_out_of_range_count", data=dust_ir_out_of_range
+        )
         handle.create_dataset("diagnostics/cumulative_dust_momentum_g_cm2_s", data=dust_momentum_integral)
         handle.create_dataset(
             "diagnostics/cumulative_dust_total_momentum_g_cm2_s",
@@ -758,6 +963,7 @@ def main() -> None:
         f"temperature_min={temperature.min():.6g} temperature_max={temperature.max():.6g} "
         f"max_x_hii={x_hii.max():.6g} hhe_ledger={max(hhe_ledger_relative_errors.values()):.6g} "
         f"thermal_closure={thermal_energy_closure_relative_error:.6g} thermal_bound_fraction={thermal_bound_hit_fraction:.6g} "
+        f"dust_ir={dust_thermal_schema} dust_ir_closure={dust_ir_energy_closure_relative_error:.6g} dust_ir_out_of_range={dust_ir_out_of_range_count} "
         f"devices={','.join(device.platform for device in jax.devices())} output={output}"
     )
     if not validation_passed:
@@ -768,6 +974,7 @@ def main() -> None:
             f"thermal_closure={thermal_energy_closure_relative_error:.6g}, "
             f"thermal_residual={thermal_residual_l1_relative_error:.6g}, "
             f"thermal_bound_fraction={thermal_bound_hit_fraction:.6g}, "
+            f"dust_ir_closure={dust_ir_energy_closure_relative_error:.6g}, "
             f"stability={numerical_stability_passed}"
         )
 
