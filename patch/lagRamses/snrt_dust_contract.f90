@@ -13,6 +13,7 @@ module snrt_dust_contract
   integer, parameter, public :: snrt_dust_contract_dp = real64
   integer, parameter, public :: snrt_dust_contract_max_groups = 32
   integer, parameter, public :: snrt_dust_contract_max_temperature = 256
+  integer, parameter, public :: snrt_dust_contract_max_ir = 256
   integer, parameter, public :: snrt_dust_contract_ok = 0
   integer, parameter, public :: snrt_dust_contract_err_missing = 1
   integer, parameter, public :: snrt_dust_contract_err_open = 2
@@ -26,6 +27,12 @@ module snrt_dust_contract
   integer, save, public :: snrt_dust_contract_number_groups = 0
   integer, save, public :: snrt_dust_contract_number_temperature = 0
   integer, save, public :: snrt_dust_contract_version = 0
+  integer, save, public :: snrt_dust_contract_number_ir = 0
+  real(real64), save, public :: snrt_dust_contract_ir_energy_ev(snrt_dust_contract_max_ir) = 0
+  real(real64), save, public :: snrt_dust_contract_ir_weight_ev(snrt_dust_contract_max_ir) = 0
+  real(real64), save, public :: snrt_dust_contract_ir_absorption_per_h_cm2(snrt_dust_contract_max_ir) = 0
+  real(real64), save, public :: snrt_dust_contract_ir_background_k = 0
+  character(len=64), save, public :: snrt_dust_contract_ir_status = ''
   real(real64), save, public :: snrt_dust_contract_group_edges_ev( &
        snrt_dust_contract_max_groups + 1) = 0.0d0
   real(real64), save, public :: snrt_dust_contract_absorption_per_h_cm2( &
@@ -65,6 +72,10 @@ contains
     integer :: opt_status, opt_length
     character(len=16) :: opt_in
     integer :: contract_version, ngroups_input, ntemperature_input
+    integer :: nir_input
+    character(len=64) :: ir_status
+    real(real64) :: ir_energy_input(snrt_dust_contract_max_ir), ir_weight_input(snrt_dust_contract_max_ir)
+    real(real64) :: ir_absorption_input(snrt_dust_contract_max_ir), ir_background_input
     character(len=64) :: opacity_status, thermal_status
     character(len=128) :: source_id, source_sha256, source_table_sha256
     character(len=128) :: group_edges_sha256, approval_id
@@ -82,7 +93,8 @@ contains
          source_sha256, source_table_sha256, group_edges_sha256, approval_id, &
          thermal_source, edges_input, absorption_input, mean_energy_input, &
          temperature_input, power_input, mass_per_h_input, &
-         heat_capacity_per_h_erg_k_input
+         heat_capacity_per_h_erg_k_input, nir_input, ir_status, ir_energy_input, &
+         ir_weight_input, ir_absorption_input, ir_background_input
 
     call snrt_dust_contract_reset()
     ierr = snrt_dust_contract_ok
@@ -93,6 +105,12 @@ contains
     end if
 
     contract_version = 0
+    nir_input = 0
+    ir_status = ''
+    ir_energy_input = 0
+    ir_weight_input = 0
+    ir_absorption_input = 0
+    ir_background_input = 0
     ngroups_input = 0
     ntemperature_input = 0
     opacity_status = ''
@@ -126,10 +144,10 @@ contains
        snrt_dust_contract_error_message = trim(read_message)
        return
     end if
-    if (contract_version /= 1 .and. contract_version /= 2) then
+    if (contract_version < 1 .or. contract_version > 3) then
        ierr = snrt_dust_contract_err_version
        snrt_dust_contract_error_message = &
-            'only snrt_dust_contract versions 1 and 2 are supported'
+            'only snrt_dust_contract versions 1 through 3 are supported'
        return
     end if
     if (.not. known_opacity_status(opacity_status) .or. &
@@ -171,6 +189,41 @@ contains
          temperature_input, power_input)) then
        ierr = snrt_dust_contract_err_values
        snrt_dust_contract_error_message = 'dust opacity or thermal table values are invalid'
+       return
+    end if
+
+    if (contract_version == 3) then
+       ierr = snrt_dust_contract_err_values
+       snrt_dust_contract_error_message = 'invalid IR quadrature or background temperature'
+       if (nir_input < 1 .or. nir_input > snrt_dust_contract_max_ir) return
+       if (.not. all(ieee_is_finite(ir_energy_input(1:nir_input))) .or. &
+            .not. all(ieee_is_finite(ir_weight_input(1:nir_input))) .or. &
+            .not. all(ieee_is_finite(ir_absorption_input(1:nir_input))) .or. &
+            .not. ieee_is_finite(ir_background_input)) return
+       if (any(ir_energy_input(1:nir_input) <= 0) .or. &
+            any(ir_weight_input(1:nir_input) <= 0) .or. &
+            any(ir_absorption_input(1:nir_input) <= 0)) return
+       if (any(ir_energy_input(2:nir_input) <= ir_energy_input(1:nir_input-1))) return
+       if (.not. any(temperature_input(1:ntemperature_input) == ir_background_input)) return
+       if (trim(ir_status) /= 'candidate_ir' .and. trim(ir_status) /= 'reference_ir_control' .and. &
+            trim(ir_status) /= 'approved_ir_production') then
+          ierr = snrt_dust_contract_err_status
+          snrt_dust_contract_error_message = 'IR status is not recognized'
+          return
+       end if
+       snrt_dust_contract_number_ir = nir_input
+       snrt_dust_contract_ir_energy_ev(1:nir_input) = ir_energy_input(1:nir_input)
+       snrt_dust_contract_ir_weight_ev(1:nir_input) = ir_weight_input(1:nir_input)
+       snrt_dust_contract_ir_absorption_per_h_cm2(1:nir_input) = ir_absorption_input(1:nir_input)
+       snrt_dust_contract_ir_background_k = ir_background_input
+       snrt_dust_contract_ir_status = ir_status
+       ierr = snrt_dust_contract_ok
+       snrt_dust_contract_error_message = ''
+    else if (nir_input /= 0 .or. len_trim(ir_status) /= 0 .or. &
+         any(ir_energy_input /= 0) .or. any(ir_weight_input /= 0) .or. &
+         any(ir_absorption_input /= 0) .or. ir_background_input /= 0) then
+       ierr = snrt_dust_contract_err_version
+       snrt_dust_contract_error_message = 'IR data require contract version 3'
        return
     end if
 
@@ -216,6 +269,15 @@ contains
           snrt_dust_contract_runtime_allowed = trim(opt_in) == '1'
        end if
     end if
+    if (contract_version == 3) then
+       if (snrt_dust_contract_reference_control) then
+          snrt_dust_contract_runtime_allowed = snrt_dust_contract_runtime_allowed .and. &
+               trim(ir_status) == 'reference_ir_control'
+       else
+          snrt_dust_contract_runtime_allowed = snrt_dust_contract_runtime_allowed .and. &
+               trim(ir_status) == 'approved_ir_production'
+       end if
+    end if
   end subroutine snrt_dust_contract_load
 
 
@@ -241,6 +303,12 @@ contains
     snrt_dust_contract_number_groups = 0
     snrt_dust_contract_number_temperature = 0
     snrt_dust_contract_version = 0
+    snrt_dust_contract_number_ir = 0
+    snrt_dust_contract_ir_energy_ev = 0
+    snrt_dust_contract_ir_weight_ev = 0
+    snrt_dust_contract_ir_absorption_per_h_cm2 = 0
+    snrt_dust_contract_ir_background_k = 0
+    snrt_dust_contract_ir_status = ''
     snrt_dust_contract_group_edges_ev = 0.0d0
     snrt_dust_contract_absorption_per_h_cm2 = 0.0d0
     snrt_dust_contract_absorption_mean_energy_ev = 0.0d0

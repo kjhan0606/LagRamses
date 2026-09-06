@@ -13,7 +13,7 @@ subroutine read_params
        snrt_thermochemistry_error_name, snrt_thermochemistry_error_message
   use snrt_dust_contract, only: snrt_dust_contract_load_from_environment, &
        snrt_dust_contract_loaded, snrt_dust_contract_runtime_allowed, &
-       snrt_dust_contract_reference_control, &
+       snrt_dust_contract_reference_control, snrt_dust_contract_version, &
        snrt_dust_contract_error_name, snrt_dust_contract_error_message
 #endif
   use pm_parameters
@@ -1780,7 +1780,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
            nml_ok=.false.
         else if (snrt_dust_contract_runtime_allowed) then
 #ifdef DUST_LIVE
-           if(myid==1)then
+           if(snrt_dust_contract_version>=3)then
+              if(myid==1)write(*,'(A)') &
+                   'SNRT startup rejected IR contract: live IR transport/state persistence not yet connected'
+              nml_ok=.false.
+           else if(myid==1)then
               if(snrt_dust_contract_reference_control)then
                  write(*,'(A)') 'SNRT startup admitted DUST_LIVE reference control: NONPRODUCTION'
               else

@@ -73,6 +73,12 @@ contains
          snrt_dust_contract_group_edges_ev,snrt_dust_contract_absorption_per_h_cm2, &
          snrt_dust_contract_absorption_mean_energy_ev,snrt_dust_contract_temperature_k, &
          snrt_dust_contract_emitted_power_per_h_erg_s]
+    ! Keep the v2 attribute unchanged. Version 3 additionally binds the IR
+    ! quadrature, so a restart cannot reinterpret radiation with new opacity.
+    if (snrt_dust_contract_version >= 3) dust_values=[dust_values, &
+         real(snrt_dust_contract_number_ir,dp),snrt_dust_contract_ir_background_k, &
+         snrt_dust_contract_ir_energy_ev,snrt_dust_contract_ir_weight_ev, &
+         snrt_dust_contract_ir_absorption_per_h_cm2]
     if(writing)then
        call hdf5_write_attr_1d_dp(grp,'dust_contract_values',dust_values,size(dust_values))
     else
