@@ -303,6 +303,9 @@ sink_particle.kjhan.o: stellar_enrichment_config.o
 endif
 read_params.jaehyun.o: snrt_agn_efficiency.o
 read_params.jaehyun.o: snrt_thermochemistry.o snrt_dust_contract.o
+ifeq ($(SNRT),1)
+read_params.jaehyun.o: snrt_spectral_contract.o
+endif
 snrt_ramses_driver.o: amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
                        pm_commons.o snrt_agn_efficiency.o \
                        snrt_state.o snrt_amr_topology.o snrt_transport_step.o \
@@ -376,6 +379,11 @@ eunha_cooling_mod.o: amr_parameters.jaehyun.o amr_commons.kjhan.o
 dark_cooling_mod.o: amr_parameters.jaehyun.o
 dark_cooling_fine.o: amr_commons.kjhan.o pm_commons.o dark_cooling_mod.o
 FORCE:
+
+.PHONY: snrt_bundle_gate
+snrt_bundle_gate:
+	../simulation/snrt/tests/run_snrt_bundle_gate.sh
+
 #############################################################################
 clean :
 	rm -f *.o *.$(MOD)

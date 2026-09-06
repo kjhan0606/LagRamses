@@ -7,17 +7,22 @@ set -euo pipefail
 
 ROOT=/gpfs/kjhan/LRD_JWST
 SNRT_ROOT="$ROOT/simulation/snrt"
+PRODUCTION_SOURCE_DIR="$ROOT/patch/lagRamses"
+FIXTURE_SOURCE_DIR="$SNRT_ROOT/tests/fixtures/phase0"
 BUILD_DIR="$ROOT/build/g2_config"
 DATA_DIR="$SNRT_ROOT/data"
 mkdir -p "$BUILD_DIR" "$DATA_DIR"
 
+python3 "$ROOT/simulation/snrt/tools/validate_stellar_source_parity.py" \
+  --check-runner "$BASH_SOURCE" --require-production-source
+
 mpiifx -O2 -g -traceback -warn all -check all -fpp \
   -module "$BUILD_DIR" \
-  -c "$SNRT_ROOT/native/phase0/stellar_enrichment_config.f90" \
+  -I "$BUILD_DIR" -c "$PRODUCTION_SOURCE_DIR/stellar_enrichment_config.f90" \
   -o "$BUILD_DIR/stellar_enrichment_config.o"
 mpiifx -O2 -g -traceback -warn all -check all -fpp \
   -module "$BUILD_DIR" \
-  -c "$SNRT_ROOT/native/phase0/g2_configuration_test.f90" \
+  -I "$BUILD_DIR" -c "$FIXTURE_SOURCE_DIR/g2_configuration_test.f90" \
   -o "$BUILD_DIR/g2_configuration_test.o"
 mpiifx -O2 -g -traceback -check all \
   "$BUILD_DIR/g2_configuration_test.o" \
@@ -97,7 +102,7 @@ mpiifx -O2 -g -traceback -check all \
 
 set +e
 "$SNRT_ROOT/.venv/bin/python" "$SNRT_ROOT/tools/audit_stellar_yield_asset.py" \
-  /home/kjhan/BACKUP/lagRamses/patch/lagRamses/phase0_validation_yields.dat \
+  "$PRODUCTION_SOURCE_DIR/phase0_validation_yields.dat" \
   --json-out "$DATA_DIR/g2_phase0_fixture_audit.json" \
   > "$BUILD_DIR/g2_fixture_audit.stdout"
 fixture_status=$?

@@ -150,7 +150,9 @@
   },
   "g1_runner": {
     "script": "simulation/snrt/tests/run_g1_native_contract.sh",
+    "production_root": "patch/lagRamses",
     "native_root": "simulation/snrt/native/phase0",
+    "fixture_root": "simulation/snrt/tests/fixtures/phase0",
     "shared_contract_sources": [
       "stellar_enrichment_config.f90",
       "stellar_snia_dtd.f90",
@@ -182,7 +184,8 @@
   },
   "policy": {
     "production_makefile_is_source_of_truth": true,
-    "native_g1_is_differential_oracle": true,
+    "g1_runner_compiles_production_sources": true,
+    "native_mirror_is_differential_oracle": true,
     "production_linked_harness_must_exercise_production_sources": true,
     "shared_contract_hashes_are_differential_diagnostics": true,
     "runner_sources_must_match_objects": true,

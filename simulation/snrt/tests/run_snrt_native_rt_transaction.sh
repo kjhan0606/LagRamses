@@ -2,7 +2,8 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-build_dir="$(mktemp -d)"
+build_dir="$(mktemp -d /gpfs/kjhan/LRD_JWST/.snrt-rt-transaction.XXXXXX)"
+trap 'rm -rf "$build_dir"' EXIT
 module_dir="$build_dir/modules"
 mkdir -p "$module_dir"
 
@@ -89,7 +90,7 @@ grep -q "SNRT_RT_TX_DIAGNOSTIC_MODE" "$driver_source"
 grep -q "\.not\. transaction_diagnostic_mode" "$driver_source"
 rg -q "hydro_state_invalid" "$driver_source"
 rg -q "non-finite hydro state" "$driver_source"
-echo SNRT_NATIVE_RT_TRANSACTION_DRIVER_FAILURE_ROUTES_PASS
-echo SNRT_NATIVE_RT_TRANSACTION_DRIVER_HYDRO_PREFLIGHT_PASS
+echo STATIC_SUPPORTING_CHECK driver_failure_routes
+echo STATIC_SUPPORTING_CHECK driver_hydro_preflight
 
 echo SNRT_NATIVE_RT_TRANSACTION_SMOKE_RUN_PASS

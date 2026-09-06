@@ -87,3 +87,70 @@ publication-ready: physical source admission, live multi-source feedback, and
 the retained build-identity separation still require their explicitly scoped
 follow-up gates. The next implementation bundle is G3/G4 physical source/SED
 and dust runtime qualification, subject to the available canonical data.
+
+## 2026-09-06 continuation record
+
+The remaining consolidation work was re-run from the `/gpfs` checkout.
+
+### D2 — consolidated native bundle gate
+
+`simulation/snrt/tests/run_snrt_bundle_gate.sh` completed with
+`SNRT_BUNDLE_GATE_PASS` at commit `0fb88721e7facdfd8b494300820896c6319c6c36`.
+The machine-readable summary is retained at
+`simulation/snrt/build/fp27_bundle_gate_summary_current.txt` (ignored build
+output). The production SNRT+CUDA link ran once and took 177.216 s. The
+following evidence passed:
+
+* AGN reference partition and five required native symbols;
+* dust ledger receiver and zero-dust boundary;
+* H/He thermochemistry loader, including four negative cases;
+* nine-group spectral contract, including ten loader cases;
+* two-rank MPI transaction/zero-leaf coverage and eleven rollback/config
+  rejection cases;
+* CUDA photon/species budget and zero-dust equivalence;
+* production-negative/fail-closed checks and `git diff --check`.
+
+The linked qualification binary digest was
+`d02ac2d8d328728ecb0082c0ea745d21a14f1b392a7282a2f865a3e8b8383117`.
+The gate deliberately labels driver-route checks as
+`STATIC_SUPPORTING_CHECK` and retains `ZERO_SCAFFOLD`; neither is promoted to
+live dust physics.
+
+### D3 — production source ownership
+
+The four replacement runners now resolve production modules from
+`patch/lagRamses` and executable fixtures from
+`simulation/snrt/tests/fixtures/phase0`. The explicit source-identity checker
+returned `STELLAR_SOURCE_IDENTITY_PASS` with zero stale assignments for:
+
+* `run_g1_native_contract.sh`;
+* `run_fp12_stellar_feedback_transaction.sh`;
+* `run_fp2_snia_dtd_contract.sh`;
+* `run_g2_population_ledger.sh`.
+
+Native execution passed for G1 (including CPU/JAX differential agreement),
+FP1.2 transaction, G2 population ledger, and the full SNIa contract runner.
+The FP1.2 runner's missing executable bit was corrected. The normal G1 result
+remains diagnostic-only because the retained production-linked evidence is
+not the same binary identity as the current SNRT+CUDA build; this is an
+identity boundary, not a physics failure.
+
+### D4 — current startup-binary smoke
+
+The fresh D4 job `333272` was submitted with the startup-contract binary
+`simulation/snrt/build/g5_startup_contract_admission/ramses3d` and remains
+pending Slurm backfill at the time of this update. It is not claimed as a
+pass in advance. The earlier job `333211` remains the completed D4 PASS for
+the preceding wiring-qualification binary; a later result may append its
+own binary-specific record.
+
+### Disposition
+
+D2 and D3 are complete for this engineering bundle, and D4 is already passed
+for the previously retained qualification binary while the startup-admission
+binary-specific rerun is pending. The repository is therefore ready for the
+bounded reference/control SNRT+feedback qualification path. It is still not
+production/publication-ready for physical dusty feedback: physical stellar
+yield/source admission, stellar/AGN SED activation, persistent dust state,
+nonzero dust optical depth, dust thermal/momentum receiver, and live IR
+transport remain explicit G2--G5 blockers.

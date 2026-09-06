@@ -224,7 +224,7 @@ program g2_population_ledger_test
      end if
   end do
 
-  do imf = 0, 3
+  do imf = 0, 4
      call calculate_imf_normalization(imf, population%imf_mass_min, &
           population%imf_mass_max, normalization, ierr)
      call expect(ierr == 0 .and. normalization > 0.0_stellar_dp, &

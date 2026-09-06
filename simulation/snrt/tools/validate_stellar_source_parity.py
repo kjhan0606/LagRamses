@@ -214,6 +214,84 @@ def runner_source_dir(text: str) -> str:
     return match.group(1) if match else ""
 
 
+def runner_assignment(text: str, name: str) -> str:
+    """Read one simple quoted/unquoted shell assignment from a runner."""
+
+    match = re.search(
+        rf"(?m)^\s*{re.escape(name)}=(?:\"([^\"]+)\"|([^\s#]+))\s*$",
+        text,
+    )
+    if not match:
+        return ""
+    return match.group(1) or match.group(2) or ""
+
+
+def resolve_runner_path(value: str) -> Path:
+    if value.startswith("$ROOT/"):
+        return (ROOT / value[len("$ROOT/") :]).resolve()
+    if value.startswith("$SNRT_ROOT/"):
+        return (ROOT / "simulation/snrt" / value[len("$SNRT_ROOT/") :]).resolve()
+    if value.startswith("$FIXTURE_SOURCE_DIR/"):
+        return (ROOT / "simulation/snrt/tests/fixtures/phase0" / value[len("$FIXTURE_SOURCE_DIR/") :]).resolve()
+    path = Path(value)
+    return (path if path.is_absolute() else ROOT / path).resolve()
+
+
+def runner_source_identity(runner_path: Path) -> dict[str, Any]:
+    """Fail closed when a production runner points at the old phase0 mirror."""
+
+    runner_path = runner_path.resolve()
+    text = runner_path.read_text(encoding="utf-8", errors="replace")
+    production_value = runner_assignment(text, "PRODUCTION_SOURCE_DIR")
+    if not production_value:
+        production_value = runner_assignment(text, "SOURCE_DIR")
+    fixture_value = runner_assignment(text, "FIXTURE_SOURCE_DIR")
+    production_root = resolve_runner_path(production_value) if production_value else None
+    fixture_root = resolve_runner_path(fixture_value) if fixture_value else None
+    expected_production = (ROOT / "patch/lagRamses").resolve()
+    expected_fixture = (ROOT / "simulation/snrt/tests/fixtures/phase0").resolve()
+    assignment_values = {
+        name: runner_assignment(text, name)
+        for name in ("SOURCE_DIR", "PRODUCTION_SOURCE_DIR", "FIXTURE_SOURCE_DIR", "TEST_SOURCE")
+    }
+    stale_assignments = {
+        name: value
+        for name, value in assignment_values.items()
+        if "native/phase0" in value
+    }
+    production_ok = production_root == expected_production and production_root.is_dir()
+    fixture_ok = fixture_root == expected_fixture and fixture_root.is_dir()
+    fixture_test_values = [
+        value for name, value in assignment_values.items()
+        if name == "TEST_SOURCE" and value
+    ]
+    fixture_tests_ok = all(
+        resolve_runner_path(value).is_file()
+        and resolve_runner_path(value).resolve().is_relative_to(expected_fixture)
+        for value in fixture_test_values
+    )
+    status = "pass" if production_ok and fixture_ok and fixture_tests_ok and not stale_assignments else "blocked"
+    return {
+        "schema": "snrt-stellar-source-identity-check-v1",
+        "runner": str(runner_path.relative_to(ROOT)),
+        "status": status,
+        "production_assignment": production_value,
+        "production_root": str(production_root) if production_root else None,
+        "expected_production_root": str(expected_production),
+        "fixture_assignment": fixture_value,
+        "fixture_root": str(fixture_root) if fixture_root else None,
+        "expected_fixture_root": str(expected_fixture),
+        "fixture_test_sources": fixture_test_values,
+        "stale_assignments": stale_assignments,
+        "criteria": {
+            "production_root_is_canonical": production_ok,
+            "fixture_root_is_explicit": fixture_ok,
+            "fixture_test_sources_resolve": fixture_tests_ok,
+            "no_production_assignment_targets_phase0": not stale_assignments,
+        },
+    }
+
+
 def _define_tokens(command: str) -> dict[str, str]:
     defines: dict[str, str] = {}
     for name, value in re.findall(
@@ -598,14 +676,26 @@ def audit(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     runner_sources = source_names_from_runner(runner, "sources", "f90")
     runner_objects = source_names_from_runner(runner, "objects", "o")
     runner_dir = relative_root_from_runner(runner_source_dir(runner))
+    fixture_dir = relative_root_from_runner(
+        runner_assignment(runner, "FIXTURE_SOURCE_DIR")
+    )
+    fixture_root = g1.get(
+        "fixture_root", "simulation/snrt/tests/fixtures/phase0"
+    )
     native_root = g1["native_root"]
     missing_native_sources = [
-        source for source in runner_sources if not (ROOT / native_root / source).is_file()
+        source for source in runner_sources if not (ROOT / patch_root / source).is_file()
     ]
     missing_native_objects = [
         object_name
         for object_name in runner_objects
-        if not (ROOT / native_root / fortran_source_for_object(object_name)).is_file()
+        if not (ROOT / patch_root / fortran_source_for_object(object_name)).is_file()
+    ]
+    fixture_sources = source_names_from_runner(runner, "fixture_sources", "f90")
+    missing_fixture_sources = [
+        source
+        for source in fixture_sources
+        if not (ROOT / fixture_root / source).is_file()
     ]
     shared_hashes: dict[str, dict[str, str | None]] = {}
     for source in g1["shared_contract_sources"]:
@@ -883,10 +973,12 @@ def audit(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         "production_link_recipe_is_complete": production_link_recipe_complete,
         "production_shared_contract_profile_bounded": shared_contract_profile_bounded,
         "production_make_database_resolves": make_db_ok,
-        "native_runner_source_root_is_declared": runner_dir == native_root,
-        "native_runner_sources_resolve": not missing_native_sources,
-        "native_runner_objects_resolve": not missing_native_objects,
-        "native_runner_sources_match_objects": runner_source_object_match,
+        "runner_source_root_is_canonical_production": runner_dir == patch_root,
+        "runner_production_sources_resolve": not missing_native_sources,
+        "runner_production_objects_resolve": not missing_native_objects,
+        "runner_production_sources_match_objects": runner_source_object_match,
+        "runner_fixture_root_is_declared": fixture_dir == fixture_root,
+        "runner_fixture_sources_resolve": not missing_fixture_sources,
         "native_only_mirror_sources_declared": native_only_mirror_sources_declared,
         "production_linked_harness_exists": harness_exists,
         "production_linked_harness_targets_bin_makefile": harness_targets_makefile,
@@ -954,11 +1046,18 @@ def audit(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
             "script": g1["script"],
             "declared_source_dir": runner_source_dir(runner),
             "resolved_source_root": runner_dir,
-            "expected_native_root": native_root,
+            "expected_production_root": patch_root,
+            "declared_fixture_source_dir": runner_assignment(
+                runner, "FIXTURE_SOURCE_DIR"
+            ),
+            "resolved_fixture_root": fixture_dir,
+            "expected_fixture_root": fixture_root,
             "sources": runner_sources,
             "objects": runner_objects,
             "missing_sources": missing_native_sources,
             "missing_objects": missing_native_objects,
+            "fixture_sources": fixture_sources,
+            "missing_fixture_sources": missing_fixture_sources,
             "sources_match_objects": runner_source_object_match,
             "native_only_sources": native_only_mirror_sources,
             "native_only_disposition": g1.get("native_only_mirror_disposition", ""),
@@ -1034,7 +1133,32 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--require-pass", action="store_true")
+    parser.add_argument(
+        "--check-runner",
+        type=Path,
+        help="check one runner's production/fixture source assignments only",
+    )
+    parser.add_argument(
+        "--require-production-source",
+        action="store_true",
+        help="fail --check-runner unless production uses patch/lagRamses",
+    )
     args = parser.parse_args()
+    if args.check_runner is not None:
+        runner_path = args.check_runner
+        if not runner_path.is_absolute():
+            runner_path = ROOT / runner_path
+        payload = runner_source_identity(runner_path)
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(
+                "STELLAR_SOURCE_IDENTITY_"
+                f"{payload['status'].upper()} "
+                f"runner={payload['runner']} "
+                f"stale_assignments={len(payload['stale_assignments'])}"
+            )
+        return 0 if payload["status"] == "pass" or not args.require_production_source else 1
     payload = audit(args.config)
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))

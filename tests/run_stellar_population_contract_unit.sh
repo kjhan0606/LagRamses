@@ -30,7 +30,7 @@ done
 
 "$compiler" -O0 -g -traceback -warn all -check all \
   -module "$build_dir" -I"$build_dir" -c \
-  "$repo_dir/simulation/snrt/native/phase0/g2_population_ledger_test.f90" \
+  "$repo_dir/simulation/snrt/tests/fixtures/phase0/g2_population_ledger_test.f90" \
   -o "$build_dir/g2_population_ledger_test.o"
 
 "$compiler" -O0 -g -traceback -check all \
