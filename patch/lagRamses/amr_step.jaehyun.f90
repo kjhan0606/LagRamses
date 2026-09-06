@@ -16,6 +16,7 @@ recursive subroutine amr_step(ilevel,icount)
 #ifdef SNRT
   use snrt_ramses_driver, only: snrt_ramses_diagnose_level, &
        snrt_ramses_advance_level
+  use snrt_agn_efficiency, only: snrt_agn_rt_requested
 #endif
 #ifdef SNRT_LEDGER_DIAGNOSTIC
   use snrt_agn_ledger, only: snrt_agn_ledger_diagnose
@@ -944,6 +945,12 @@ recursive subroutine amr_step(ilevel,icount)
   cool_t1=omp_get_wtime()
   call snrt_ramses_advance_level(ilevel)
   snrt_advance_wall=snrt_advance_wall+omp_get_wtime()-cool_t1
+  ! The normal hydro restriction above predates the SNRT receiver.  A
+  ! successful SNRT level transaction writes the post-transport thermal
+  ! state back to uold, so the parent AMR level must see that state before
+  ! this level returns.  Restrict only for an explicitly requested SNRT run;
+  ! the environment latch is rank-uniformly validated in read_params.
+  if(hydro .and. snrt_agn_rt_requested()) call upload_fine(ilevel)
 #ifndef SNRT_LEDGER_ONLY
   cool_t1=omp_get_wtime()
   call snrt_ramses_diagnose_level(ilevel)

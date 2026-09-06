@@ -19,7 +19,7 @@ set -euo pipefail
 # and immutable for this /gpfs test case.
 ROOT=/gpfs/kjhan/LRD_JWST
 SCRIPT_DIR=/gpfs/kjhan/LRD_JWST/simulation/snrt/runs/fp2_7_initialized_ramses_smoke
-BINARY="$ROOT/bin/ramses_final3d"
+BINARY="${D4_BINARY:-$ROOT/bin/ramses_final3d}"
 TEMPLATE="$SCRIPT_DIR/effective.nml"
 GROUP_CONTRACT="$ROOT/simulation/snrt/config/snrt_group_contract_reference_control_v1.nml"
 SECONDARY_CONTRACT="$ROOT/simulation/snrt/config/snrt_secondary_table_contract_v1.nml"
