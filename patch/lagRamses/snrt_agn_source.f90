@@ -71,7 +71,8 @@ contains
     logical, intent(in) :: source_ok
     ! The caller invokes this only after the enclosing source -> RT/chemistry
     ! -> dust transaction has passed its global commit.  Until then the
-    ! accepted event remains pending and is retryable after rollback.
+    ! accepted event remains pending in memory; this routine clears the whole
+    ! accepted event, rather than debiting a partial amount.
     if(source_ok)pending_erg=0d0
   end subroutine snrt_agn_source_commit
 

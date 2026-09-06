@@ -737,13 +737,9 @@ contains
     ! Begin the enclosing transaction before any AGN source photon is added.
     ! The pending-energy marker is deliberately not consumed in the source
     ! loop: it is cleared only after RT/chemistry/dust has passed its global
-    ! commit.  This makes a failed coupled step retryable without duplicating
-    ! or losing the accepted AGN event.
-    do i = 1, nleaf
-       do igroup = 1, snrt_ngroups
-          incoming_intensity(:,igroup,i) = snrt_intensity(:,igroup,leaf_slot(i))
-       end do
-    end do
+    ! commit.  Before terminal failure, this preserves the accepted event in
+    ! memory without duplicating or losing it; durable restart retry is not
+    ! provided by this routine.
     call snrt_transaction_begin(transaction, snrt_intensity, leaf_slot, &
          snrt_hydrogen_ii, snrt_helium_ii, snrt_helium_iii, &
          snrt_neutral_fraction, level_thermal, transaction_status)
@@ -835,7 +831,7 @@ contains
                 ! Defer fuel consumption until the enclosing RT/chemistry/dust
                 ! transaction has passed its global commit.  A failed source
                 ! deposition, or a later coupled rollback, leaves this event
-                ! pending for an exact retry.
+                ! pending in memory until a successful coupled commit.
                 if (source_ok) source_transaction_ok(isink) = .true.
              end do
              deallocate(emitted_groups, luminosity_groups)

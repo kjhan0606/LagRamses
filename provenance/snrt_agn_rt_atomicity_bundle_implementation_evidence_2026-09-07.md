@@ -12,8 +12,9 @@ The previous source path consumed `agn_pending_erg` immediately after a
 successful multigroup deposition, while the RT transaction snapshot was made
 after that deposition. A later coupled rollback could therefore restore the
 photon state without restoring the accepted-event fuel marker. This repair
-keeps one accepted event retryable until the complete source → RT/chemistry →
-dust commit succeeds.
+keeps the accepted event pending in memory until the complete source →
+RT/chemistry → dust commit succeeds. It does not provide durable restart
+retry after RAMSES reaches its terminal failure path.
 
 ## Implementation
 
@@ -24,13 +25,15 @@ dust commit succeeds.
   complete spectral-group validation and atomic deposition succeeded. The
   source loop no longer clears `agn_pending_erg`.
 - Every coupled rollback path releases the mask and restores the pre-source
-  persistent state. The pending energy is consequently retained for a retry.
+  persistent state. The pending energy consequently remains uncleared until
+  the process reaches a successful coupled commit.
 - After global RT commit and the live-dust commit, the driver clears pending
   energy only for the source entries recorded in that mask. The helper
   `snrt_agn_source_commit` now documents this caller contract.
 - The active source remains the `patch/lagRamses` implementation. With the
   production `bin/Makefile` VPATH, `patch/lagRamses/snrt_ramses_driver.f90`
-  is selected before the older `patch/cuRamses` copy. No mirror was edited.
+  is selected first; no duplicate SNRT driver mirror exists in
+  `patch/cuRamses`, and no mirror was edited.
 
 ## Native evidence
 
@@ -61,14 +64,34 @@ driver. The second explicitly compiled the same active driver with the
 `DUST_LIVE` conditional path. Existing unrelated dirty files and scratch
 directories were not staged.
 
+After the bundle-end review, the active tree was rechecked with fresh full
+links in separate `/gpfs` scratch directories:
+
+```
+make -C bin -B -j4 SNRT=1 DUST_LIVE=0 USE_CUDA=1 HDF5=1 \
+  EXEC=/gpfs/kjhan/LRD_JWST/.snrt-atomicity-link.se08tt/ramses_snrt_atomicity_cpu \
+  ramses
+make -C bin -B -j4 SNRT=1 DUST_LIVE=1 USE_CUDA=1 HDF5=1 \
+  EXEC=/gpfs/kjhan/LRD_JWST/.snrt-atomicity-dust-link.PIQ814/ramses_snrt_atomicity_dust \
+  ramses
+```
+
+Both full links passed, producing separate `*3d` executables without
+overwriting `bin/ramses_final3d`. The embedded source identity was
+`210b611542903147a9197836d0e3f2f755506cca-dirty`; the commit component is
+exact, while the worktree also contained pending audit-closure edits and an
+unrelated tracked change. These are fresh working-tree links, not clean-tree
+revision artifacts.
+
 ## Boundary and remaining limits
 
 This closes source-ledger consumption ordering for the current serial,
-fresh-start SNRT AGN path. It does not approve physical AGN spectra, MAD
-partition choices, restart/migration persistence, simultaneous legacy plus
-SNRT ownership, or an initialized live RAMSES evolution. The existing
-transaction commit API and those broader runtime qualifications remain under
-their governing bundle records.
+fresh-start SNRT AGN path. On a coupled failure the marker remains uncleared
+until terminal stop, but it is not persisted for a later restart. It does not
+approve physical AGN spectra, MAD partition choices, restart/migration
+persistence, simultaneous legacy plus SNRT ownership, or an initialized live
+RAMSES evolution. The existing transaction commit API and those broader
+runtime qualifications remain under their governing bundle records.
 
 The older
 `provenance/agn_accepted_fuel_overlap_bundle_evidence_2026-09-06.md` remains a
