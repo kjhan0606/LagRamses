@@ -98,6 +98,7 @@ def merge_ledgers(
     component_totals: list[np.ndarray] = []
     component_closures = []
     components: list[dict[str, object]] = []
+    component_scale_factors: list[float | None] = []
     all_ids: list[int] = []
     for ledger_path, metadata_path in zip(ledger_paths, metadata_paths, strict=True):
         ledger = read_photon_source_ledger_csv(ledger_path)
@@ -116,6 +117,17 @@ def merge_ledgers(
         if not np.allclose(csv_totals, totals, rtol=2.0e-12, atol=1.0e-30):
             raise ValueError(f"{ledger_path}: CSV and metadata group totals disagree")
         component_closure = group_spectral_closure_from_metadata(metadata)
+        scale_factor_value = metadata.get("source_scale_factor")
+        if scale_factor_value is None:
+            component_scale_factors.append(None)
+        else:
+            try:
+                scale_factor = float(scale_factor_value)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"{metadata_path}: source_scale_factor is not numeric") from error
+            if not np.isfinite(scale_factor) or scale_factor <= 0.0:
+                raise ValueError(f"{metadata_path}: source_scale_factor is invalid")
+            component_scale_factors.append(scale_factor)
         ledgers.append(ledger)
         metadata_list.append(metadata)
         component_totals.append(totals)
@@ -124,7 +136,18 @@ def merge_ledgers(
         all_ids.extend(int(value) for value in ledger.source_id)
 
     if len(set(all_ids)) != len(all_ids):
-        raise ValueError("component source_id values must be globally unique")
+        raise ValueError("component source_id values collide; IDs must be globally unique")
+    if any(value is not None for value in component_scale_factors):
+        if not all(value is not None for value in component_scale_factors):
+            raise ValueError("all component photon ledgers must declare source scale factors together")
+        scale_factors = np.asarray(component_scale_factors, dtype=np.float64)
+        if not np.allclose(scale_factors, scale_factors[0], rtol=1.0e-12, atol=1.0e-14):
+            raise ValueError("component photon ledgers have different source scale factors")
+        merged_scale_factor: float | None = float(scale_factors[0])
+        epoch_status = "verified_coeval_source_scale_factor"
+    else:
+        merged_scale_factor = None
+        epoch_status = "missing_source_scale_factor_not_production_eligible"
     assert edges_reference is not None
     group_count = edges_reference.size - 1
     total_photons = np.sum(np.asarray(component_totals), axis=0, dtype=np.float64)
@@ -179,6 +202,7 @@ def merge_ledgers(
     rows.sort(key=lambda row: row[0])
     group_fields = [f"q_group_{index}_s" for index in range(group_count)]
     output_fields = ["source_id", "source_kind", "x_code", "y_code", "z_code", *group_fields]
+    source_kinds = sorted({str(row[1]) for row in rows})
     output.parent.mkdir(parents=True, exist_ok=True)
     metadata_output.parent.mkdir(parents=True, exist_ok=True)
     mixed_identity = _canonical_sha256(
@@ -192,12 +216,24 @@ def merge_ledgers(
     metadata: dict[str, object] = {
         "schema": "snrt_mixed_photon_source_ledger_v1",
         "status": "candidate_mixed_source_ledger",
-        "source_kind": "star_plus_agn_mixture",
+        "source_kind": "+".join(source_kinds),
+        "source_kinds": source_kinds,
         "source_count": len(rows),
-        "source_kinds": sorted({str(row[1]) for row in rows}),
+        "group_count": group_count,
         "group_edges_ev": edges_reference.tolist(),
         "group_interval_convention": "left_closed_right_open_except_final_closed",
         "group_photon_rate_total_s": total_photons.tolist(),
+        "source_epoch": {
+            "status": epoch_status,
+            "scale_factor": merged_scale_factor,
+            "component_scale_factors": component_scale_factors,
+        },
+        "source_id_policy": {
+            "mode": "preserve_input_source_ids",
+            "input_offsets": [0 for _ in ledgers],
+            "collision_policy": "reject_before_write",
+            "sort_order": "ascending_source_id",
+        },
         "source_sed_identity": mixed_identity,
         "source_sed_sha256": None,
         "source_sed_contract": {
@@ -249,6 +285,8 @@ def merge_ledgers(
             "This merge does not approve stellar/AGN physics or enable live feedback.",
         ],
     }
+    if merged_scale_factor is not None:
+        metadata["source_scale_factor"] = merged_scale_factor
     with output.open("x", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(output_fields)
