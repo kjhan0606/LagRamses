@@ -1102,6 +1102,7 @@ subroutine kjhan_make_sink(ilevel)
         dMsmbh(isink)=dMsmbh_all(isink)
         Esave (isink)=Esave_all (isink)
         agn_pending_erg(isink)=0d0 ! Newly created sinks have no accepted radiative fuel.
+        agn_mechanical_pending(:,isink)=0d0
         xsink(isink,1:ndim)=xsink_all(isink,1:ndim)
         vsink(isink,1:ndim)=vsink_all(isink,1:ndim)
         bhspin(isink,1:ndim)=bhspin_all(isink,1:ndim)
@@ -1138,7 +1139,8 @@ subroutine merge_sink(ilevel)
   ! It keeps only the group centre of mass and remove other sinks.
   !------------------------------------------------------------------------
   real(dp), allocatable :: pending_new(:)
-  integer :: pending_error,pending_error_all
+  integer :: pending_error,pending_error_all,pending_channel,channel_error
+  real(dp),allocatable::mechanical_merged(:,:)
   integer::j,isink,ii,jj,kk,ind,idim,new_sink
   real(dp)::dx_loc,scale,dx_min,xx,yy,zz,rr,rmax2,rmax
   integer::igrid,jgrid,ipart,jpart,next_part,info
@@ -1428,6 +1430,12 @@ subroutine merge_sink(ilevel)
   !----------------------------------------------------
   allocate(pending_new(new_sink))
   call agn_merge_pending(agn_pending_erg(1:nsink),gsink,pending_new,pending_error)
+  allocate(mechanical_merged(4,new_sink))
+  do pending_channel=1,4
+     call agn_merge_pending(agn_mechanical_pending(pending_channel,1:nsink),gsink, &
+          mechanical_merged(pending_channel,:),channel_error)
+     pending_error=max(pending_error,channel_error)
+  enddo
 #ifndef WITHOUTMPI
   call MPI_ALLREDUCE(pending_error,pending_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
   pending_error=pending_error_all
@@ -1705,7 +1713,9 @@ subroutine merge_sink(ilevel)
 
   agn_pending_erg(1:new_sink)=pending_new(1:new_sink)
   agn_pending_erg(new_sink+1:nsinkmax)=0d0
-  deallocate(pending_new)
+  agn_mechanical_pending(:,1:new_sink)=mechanical_merged
+  agn_mechanical_pending(:,new_sink+1:nsinkmax)=0d0
+  deallocate(pending_new,mechanical_merged)
   nsink=new_sink
   msink (1:nsink)=msink_new (1:nsink)
   dMsmbh(1:nsink)=dMsmbh_new(1:nsink)
@@ -3948,7 +3958,7 @@ subroutine grow_bondi(ilevel)
   integer,dimension(1:nvector)::ind_grid,ind_part,ind_grid_part
   real(dp)::r2,density,volume
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
-  integer::ind,ivar
+  integer::ind,ivar,channel
   real(dp)::alpha,d_star,pi,factG,c2mean,nfloor,sigmav2,v2mean
   real(dp)::ZZ1,ZZ2,r_lso,epsilon_r,onethird
   real(dp),dimension(1:3)::xdum,vdum,jdum
@@ -3958,7 +3968,7 @@ subroutine grow_bondi(ilevel)
   integer,parameter::n_bondi_locks=4096
   integer(omp_lock_kind),save::bondi_cell_locks(1:n_bondi_locks)
   logical,save::bondi_locks_initialized=.false.
-  real(dp),allocatable::sink_thread(:,:,:),radiated_new(:),radiated_all(:)
+  real(dp),allocatable::sink_thread(:,:,:),radiated_new(:),radiated_all(:),mechanical_new(:,:),mechanical_all(:,:)
   integer,allocatable::accretion_error(:),accretion_notice(:,:)
   integer::notice_sum(2),notice_all(2)
   logical,save::notice_reported(2)=.false.
@@ -3988,9 +3998,11 @@ subroutine grow_bondi(ilevel)
      if(mythread==0) nthreads = omp_get_num_threads()
   !$omp end parallel
   allocate(nparticles_omp(0:nthreads-1), ptrhead_omp(0:nthreads-1))
-  allocate(sink_thread(1:max(nsink,1),1:5+ndim,0:nthreads-1))
+  allocate(sink_thread(1:max(nsink,1),1:8+ndim,0:nthreads-1))
   sink_thread=0d0
   allocate(accretion_error(0:nthreads-1),accretion_notice(2,0:nthreads-1),radiated_new(nsink),radiated_all(nsink))
+  allocate(mechanical_new(3,nsink),mechanical_all(3,nsink))
+  mechanical_new=0d0; mechanical_all=0d0
   accretion_notice=0
   accretion_error=0; radiated_new=0d0; radiated_all=0d0
   if(.not.bondi_locks_initialized)then
@@ -4066,7 +4078,7 @@ subroutine grow_bondi(ilevel)
      v2mean =min(SUM((velocity(1:3)-vsink(isink,1:3))**2),sigmav2)
      total_volume(isink)=volume
      alpha=max((density/d_star)**boost_acc,1d0)
-     if(Esave(isink).eq.0d0)then
+     if(Esave(isink)==0d0.and.agn_mechanical_pending(4,isink)==0d0)then
         dMBHoverdt(isink)=alpha * fourpi *density* (factG*msink(isink))**2 &
              & / (c2mean+v2mean)**1.5d0
      else
@@ -4209,6 +4221,7 @@ subroutine grow_bondi(ilevel)
         dMsmbh_new(isink)=dMsmbh_new(isink) &
              & +sink_thread(isink,4+ndim,mythread)
         radiated_new(isink)=radiated_new(isink)+sink_thread(isink,5+ndim,mythread)
+        mechanical_new(:,isink)=mechanical_new(:,isink)+sink_thread(isink,6+ndim:8+ndim,mythread)
      end do
   end do
   !$omp end parallel do
@@ -4216,8 +4229,8 @@ subroutine grow_bondi(ilevel)
 
   if(nsink>0)then
 #ifndef WITHOUTMPI
-     ! Pack 5+ndim fields: mass, momentum, two supplied rates, retained mass, accepted radiative erg.
-     npack = (5+ndim)*nsink
+     ! Pack 8+ndim fields: legacy receipts plus EM, heat, jet erg and jet loading mass.
+     npack = (8+ndim)*nsink
      allocate(sink_sbuf(1:npack), sink_rbuf(1:npack))
      ip_buf = 0
      sink_sbuf(ip_buf+1:ip_buf+nsink) = msink_new(1:nsink); ip_buf = ip_buf + nsink
@@ -4228,6 +4241,9 @@ subroutine grow_bondi(ilevel)
      sink_sbuf(ip_buf+1:ip_buf+nsink) = dMEd_coarse_new(1:nsink); ip_buf = ip_buf + nsink
      sink_sbuf(ip_buf+1:ip_buf+nsink) = dMsmbh_new(1:nsink);      ip_buf = ip_buf + nsink
      sink_sbuf(ip_buf+1:ip_buf+nsink) = radiated_new; ip_buf = ip_buf + nsink
+     do channel=1,3
+        sink_sbuf(ip_buf+1:ip_buf+nsink)=mechanical_new(channel,:); ip_buf=ip_buf+nsink
+     enddo
      call MPI_ALLREDUCE(sink_sbuf, sink_rbuf, npack, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, info)
      ip_buf = 0
      msink_all=0d0; vsink_all=0d0; dMBH_coarse_all=0d0; dMEd_coarse_all=0d0; dMsmbh_all=0d0
@@ -4238,7 +4254,10 @@ subroutine grow_bondi(ilevel)
      dMBH_coarse_all(1:nsink) = sink_rbuf(ip_buf+1:ip_buf+nsink); ip_buf = ip_buf + nsink
      dMEd_coarse_all(1:nsink) = sink_rbuf(ip_buf+1:ip_buf+nsink); ip_buf = ip_buf + nsink
      dMsmbh_all(1:nsink)      = sink_rbuf(ip_buf+1:ip_buf+nsink); ip_buf = ip_buf + nsink
-     radiated_all = sink_rbuf(ip_buf+1:ip_buf+nsink)
+     radiated_all = sink_rbuf(ip_buf+1:ip_buf+nsink); ip_buf=ip_buf+nsink
+     do channel=1,3
+        mechanical_all(channel,:)=sink_rbuf(ip_buf+1:ip_buf+nsink); ip_buf=ip_buf+nsink
+     enddo
      deallocate(sink_sbuf, sink_rbuf)
 #else
      msink_all=msink_new
@@ -4247,12 +4266,15 @@ subroutine grow_bondi(ilevel)
      dMEd_coarse_all=dMEd_coarse_new
      dMsmbh_all       =dMsmbh_new
      radiated_all=radiated_new
+     mechanical_all=mechanical_new
 #endif
   endif
 
   receipt_error=0
   if(.not.all(ieee_is_finite(radiated_all)).or.any(radiated_all<0d0))receipt_error=1
   if(.not.all(ieee_is_finite(agn_pending_erg(1:nsink)+radiated_all)))receipt_error=1
+  if(.not.all(ieee_is_finite(mechanical_all)).or.any(mechanical_all<0d0))receipt_error=1
+  if(.not.all(ieee_is_finite(agn_mechanical_pending(1:3,1:nsink)+mechanical_all)))receipt_error=1
 #ifndef WITHOUTMPI
   call MPI_ALLREDUCE(receipt_error,receipt_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
   receipt_error=receipt_error_all
@@ -4262,7 +4284,8 @@ subroutine grow_bondi(ilevel)
      call clean_stop
   endif
   agn_pending_erg(1:nsink)=agn_pending_erg(1:nsink)+radiated_all
-  deallocate(radiated_new,radiated_all)
+  agn_mechanical_pending(1:3,1:nsink)=agn_mechanical_pending(1:3,1:nsink)+mechanical_all
+  deallocate(radiated_new,radiated_all,mechanical_new,mechanical_all)
   !$omp parallel do schedule(static) private(isink)
   do isink=1,nsink
      vsink(isink,1:ndim)=vsink(isink,1:ndim)*msink(isink)+vsink_all(isink,1:ndim)
@@ -4287,7 +4310,8 @@ end subroutine grow_bondi
 !################################################################
 subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
      & bondi_cell_locks,n_bondi_locks,sink_thread,nscalar,scalar_fields,metal_slot,capture_radiation,receipt_error,notice)
-  use agn_feedback_deposition, only: agn_accretion_receipt, agn_accrete_scalars, agn_eddington_ratio
+  use agn_feedback_deposition, only: agn_accretion_receipt, agn_accrete_scalars, agn_eddington_ratio, agn_partition_release
+  use snrt_agn_efficiency, only: snrt_agn_reference_active
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_commons
   use pm_commons
@@ -4302,11 +4326,12 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
   logical,intent(in)::capture_radiation
   integer::cell_ierr
   real(dp)::donor_row(nvar),gross_mass,radiated_erg
-  real(dp)::event_radiated(nvector)
+  real(dp)::event_radiated(nvector),event_mechanical(3,nvector),partitioned(4)
+  logical::reference_model
   integer,dimension(1:nvector)::ind_grid
   integer,dimension(1:nvector)::ind_grid_part,ind_part
   integer(omp_lock_kind),dimension(1:n_bondi_locks),intent(inout)::bondi_cell_locks
-  real(dp),dimension(1:max(nsink,1),1:5+ndim),intent(inout)::sink_thread
+  real(dp),dimension(1:max(nsink,1),1:8+ndim),intent(inout)::sink_thread
   !-----------------------------------------------------------------------
   ! This routine is called by subroutine bondi_hoyle.
   !-----------------------------------------------------------------------
@@ -4517,7 +4542,8 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
   ! update remains atomic at cell granularity, while unrelated cells can
   ! proceed concurrently.  Particle and sink updates are deferred until
   ! after the cell lock is released.
-  event_radiated=0d0
+  event_radiated=0d0; event_mechanical=0d0
+  reference_model=snrt_agn_reference_active()
   event_ok(1:np)=.false.
   event_mp(1:np)=0d0
   event_vp(1:np,1:ndim)=0d0
@@ -4607,7 +4633,19 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
            call omp_unset_lock(bondi_cell_locks(ilock))
            cycle
         endif
-        if(capture_radiation)event_radiated(j)=radiated_erg
+        if(reference_model)then
+           call agn_partition_release(radiated_erg,dmsink_net, &
+                agn_eddington_ratio(dMBHoverdt(ksink),dMEdoverdt(ksink)),X_floor,partitioned,cell_ierr)
+           if(cell_ierr/=0)then
+              receipt_error=1
+              call omp_unset_lock(bondi_cell_locks(ilock))
+              cycle
+           endif
+           event_radiated(j)=partitioned(1)
+           event_mechanical(:,j)=partitioned(2:4)
+        else if(capture_radiation)then
+           event_radiated(j)=radiated_erg
+        endif
 
         ! Save the sink ledger contribution in this event.  It is reduced
         ! into a thread-private sink array after the hydro transaction.
@@ -4715,6 +4753,7 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         sink_thread(ksink,3+ndim)=sink_thread(ksink,3+ndim)+event_dmed(j)
         sink_thread(ksink,4+ndim)=sink_thread(ksink,4+ndim)+event_dmsmbh(j)
         sink_thread(ksink,5+ndim)=sink_thread(ksink,5+ndim)+event_radiated(j)
+        sink_thread(ksink,6+ndim:8+ndim)=sink_thread(ksink,6+ndim:8+ndim)+event_mechanical(:,j)
      endif
   end do
 
@@ -6266,8 +6305,9 @@ end subroutine kjhan_growspin
 !###########################################################
 !###########################################################
 subroutine AGN_feedback
-  use agn_feedback_deposition, only: agn_eddington_ratio
-  use snrt_agn_efficiency, only: snrt_agn_rt_requested
+  use agn_feedback_deposition, only: agn_eddington_ratio, agn_reference_event, agn_reference_commit, agn_heat_ready, &
+       agn_reference_receiver_ready, agn_reference_jet_speed_ok
+  use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_reference_active
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_commons
   use pm_commons
@@ -6290,20 +6330,29 @@ subroutine AGN_feedback
   real(dp),dimension(:),allocatable::mAGN,vol_gas,mass_gas,vol_blast,mass_blast
   real(dp),dimension(:),allocatable::dMBH_AGN,dMEd_AGN,dMsmbh_AGN,EsaveAGN,Msmbh,spinmagAGN,eps_AGN
   real(dp),dimension(:,:),allocatable::xAGN,vAGN,jAGN,vloadAGN,cloadAGN,psy_norm
+  real(dp),dimension(:,:),allocatable::reference_pending
+  real(dp),dimension(:,:),allocatable::reference_pending_send,reference_pending_all
+  real(dp),dimension(:),allocatable::reference_energy,reference_load,reference_deferred,reference_deferred_all
+  logical,dimension(:),allocatable::reference_jet,reference_replay
   real(dp)::temp_blast
   integer,dimension(1:nsink)::itemp
+  integer,dimension(:),allocatable::reference_touched_send,reference_touched_all
   integer::isort,isink,idim,ilun
-  real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,Mfrac
+  real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_e,Mfrac
+  logical::reference_model
   character(LEN=5)::nchar,ncharcpu
   character(LEN=80)::filename,filedir,filecmd
   real(dp),allocatable,dimension(:)::xdp
   integer::nblock,nresidual,istart,iend,nsink_loc
 
 #ifdef SNRT
-  if (snrt_agn_rt_requested()) then
+  reference_model=snrt_agn_reference_active()
+  if (snrt_agn_rt_requested().and..not.reference_model) then
      if (myid == 1) write(*,*) 'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
      call clean_stop
   end if
+#else
+  reference_model=.false.
 #endif
   if(.not. hydro)return
   if(ndim.ne.3)return
@@ -6326,6 +6375,7 @@ subroutine AGN_feedback
 
   ! Conversion factor from user units to cgs units
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
+  scale_e=scale_d*scale_l**3d0*scale_v**2d0
 
   ! Persist the complete pre-feedback AGN state once per coarse step.  This
   ! call precedes the feedback/reset section below, so rates, saved energy,
@@ -6431,6 +6481,10 @@ subroutine AGN_feedback
        mloadAGN < 0d0 .or. eAGN_K < 0d0 .or. eAGN_T < 0d0 .or. T2maxAGN <= 0d0 .or. X_floor <= 0d0) then
      feedback_error=1
   end if
+  if(reference_model)then
+     if(.not.all(ieee_is_finite(agn_mechanical_pending(:,1:nsink))).or. &
+          any(agn_mechanical_pending(:,1:nsink)<0d0))feedback_error=1
+  endif
 #ifndef WITHOUTMPI
   call MPI_ALLREDUCE(feedback_error,feedback_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
   feedback_error=feedback_error_all
@@ -6440,73 +6494,198 @@ subroutine AGN_feedback
      call clean_stop
   end if
 
-  ! Check if AGN goes into jet mode
-  ok_blast_agn(1:nAGN)=.false.
-!$omp parallel do private(iAGN, Mfrac)
-  do iAGN=1,nAGN
-     if(agn_eddington_ratio(dMBH_AGN(iAGN),dMEd_AGN(iAGN)).lt.X_floor .and. EsaveAGN(iAGN).eq.0d0)then
-        Mfrac=0d0
-        if (Msmbh(iAGN)>dMsmbh_AGN(iAGN)) &
-             Mfrac=dMsmbh_AGN(iAGN)/(Msmbh(iAGN)-dMsmbh_AGN(iAGN))
-        if(Mfrac.ge.jetfrac)ok_blast_agn(iAGN)=.true.
-     endif
-  enddo
+  if(reference_model)then
+     ! Reference control keeps the physical partition separate from the
+     ! legacy Esave ledger.  All four channels are physical/code-unit
+     ! entitlements carried by the canonical sink slot.
+     allocate(reference_pending(4,nAGN),reference_pending_send(4,nsink),reference_pending_all(4,nsink), &
+          reference_energy(nAGN),reference_load(nAGN),reference_deferred(nsink),reference_deferred_all(nsink), &
+          reference_jet(nAGN),reference_replay(nAGN),reference_touched_send(nsink),reference_touched_all(nsink))
+     reference_pending=0d0; reference_energy=0d0; reference_load=0d0
+     reference_jet=.false.; reference_replay=.false.; ok_blast_agn=.false.; EsaveAGN=0d0
+     do iAGN=1,nAGN
+        isort=iAGN_myid(iAGN)
+        reference_pending(:,iAGN)=agn_mechanical_pending(:,isort)
+        call agn_reference_event(reference_pending(:,iAGN),Msmbh(iAGN),jetfrac,reference_energy(iAGN), &
+             reference_load(iAGN),reference_jet(iAGN),reference_replay(iAGN))
+        reference_energy(iAGN)=reference_energy(iAGN)/scale_e
+        if(reference_energy(iAGN)>0d0)ok_blast_agn(iAGN)=.true.
+     enddo
 
-  ! Compute some averaged quantities before doing the AGN energy input
-  call average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast &
-       & ,mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
-
-  ! Check if AGN goes into thermal blast wave mode
-!!$omp parallel do private(iAGN, temp_blast)
-  do iAGN=1,nAGN
-     if(agn_eddington_ratio(dMBH_AGN(iAGN),dMEd_AGN(iAGN)) .ge. X_floor .and. EsaveAGN(iAGN).eq.0d0)then
-   ! Compute estimated average temperature in the blast
-   temp_blast=0.0
-   if(vol_gas(iAGN)>0.0)then
-      temp_blast=eAGN_T*1d12*dMsmbh_AGN(iAGN)/mass_gas(iAGN)
-   else
-      if(ind_blast(iAGN)>0)then
-         temp_blast=eAGN_T*1d12*dMsmbh_AGN(iAGN)/mass_blast(iAGN)
-      endif
-   endif
-   if(temp_blast>TAGN)then
-      ok_blast_agn(iAGN)=.true.
-   endif
-     endif
-  end do
-
-  ! Modify hydro quantities to account for a Sedov blast wave
-  call AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,vol_gas &
-       & ,psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
-
-  ! Reset total accreted mass if AGN input has been done
-!!$omp parallel do private(iAGN, isort)
-  do iAGN=1,nAGN
-     if(ok_blast_agn(iAGN))then
-   isort=iAGN_myid(iAGN)
-   dMsmbh(isort)=0d0
-     endif
-  end do
-  ! Important: initialise coarse Bondi and Eddington mass for the next coarse step
+     ! The same averaging/deposition geometry is used, but its mode and
+     ! energy/loading inputs are explicit rather than reconstructed from
+     ! legacy rates or Esave.
+     call average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast, &
+          mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN,nscalar,scalar_fields, &
+          metal_slot,cloadAGN,reference_replay,reference_jet,reference_load)
+     ! Use one receiver predicate for both deposition eligibility and ledger
+     ! commit.  Replay uses the thermal bubble volume; fresh events require
+     ! the unique local donor/receiver cell.
+     do iAGN=1,nAGN
+        ok_blast_agn(iAGN)=agn_reference_receiver_ready(reference_replay(iAGN),ok_blast_agn(iAGN), &
+             vol_gas(iAGN),ind_blast(iAGN))
+     enddo
+     feedback_error=0
+     do iAGN=1,nAGN
+        if(reference_jet(iAGN).and.ok_blast_agn(iAGN).and.sum(jAGN(iAGN,:)**2)<=0d0)feedback_error=1
+     enddo
 #ifndef WITHOUTMPI
-  dMsmbh_new=dMsmbh
-  call MPI_ALLREDUCE(dMsmbh_new,dMsmbh_all,nsink,MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,info)
-  dMsmbh=dMsmbh_all
+     call MPI_ALLREDUCE(feedback_error,feedback_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+     feedback_error=feedback_error_all
 #endif
-  dMBH_coarse=0d0; dMEd_coarse=0d0
-  ! Important: save the energy for the next time step that has not been put in the current time step
+     if(feedback_error/=0)then
+        if(myid==1)write(*,*)'Reference AGN jet has no finite direction; refusing starvation fallback'
+        call clean_stop
+     endif
+
+     ! Heat is released only when the existing temperature trigger is met.
+     ! Replay and jet events are selected by the channel-priority ledger and
+     ! do not pass through this thermal gate.
+     do iAGN=1,nAGN
+        if(ok_blast_agn(iAGN).and..not.reference_replay(iAGN).and..not.reference_jet(iAGN))then
+           ok_blast_agn(iAGN)=agn_heat_ready(reference_energy(iAGN),mass_gas(iAGN), &
+                scale_T2,gamma,TAGN)
+        endif
+     enddo
+
+     call AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,vol_gas, &
+          psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN, &
+          nscalar,scalar_fields,metal_slot,cloadAGN,reference_replay,reference_jet,reference_energy)
+
+     ! AGN_blast returns deferred code energy per local AGN.  Reference
+     ! liability is stored in physical erg and reduced once by sink slot.
+     reference_deferred=0d0
+     do iAGN=1,nAGN
+        if(ok_blast_agn(iAGN))then
+           isort=iAGN_myid(iAGN)
+           reference_deferred(isort)=reference_deferred(isort)+EsaveAGN(iAGN)*scale_e
+        endif
+     enddo
 #ifndef WITHOUTMPI
-  Esave_new=0d0
-!!$omp parallel do private(iAGN, isink)
-  do iAGN=1,nAGN
-     isink=iAGN_myid(iAGN)
-     Esave_new(isink)=EsaveAGN(iAGN)
-  enddo
-  call MPI_ALLREDUCE(Esave_new,Esave_all,nsink,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
-  Esave= Esave_all
+     call MPI_ALLREDUCE(reference_deferred,reference_deferred_all,nsink,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
 #else
-  Esave=EsaveAGN
+     reference_deferred_all=reference_deferred
 #endif
+     feedback_error=0
+     reference_pending_send=0d0
+     reference_touched_send=0
+     do iAGN=1,nAGN
+        if(ok_blast_agn(iAGN))then
+           isort=iAGN_myid(iAGN)
+           call agn_reference_commit(reference_pending(:,iAGN),reference_jet(iAGN),reference_replay(iAGN),.true., &
+                reference_deferred_all(isort),feedback_error_all)
+           feedback_error=max(feedback_error,feedback_error_all)
+           reference_pending_send(:,isort)=reference_pending(:,iAGN)
+           reference_touched_send(isort)=1
+           dMsmbh(isort)=0d0
+        endif
+     enddo
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(feedback_error,feedback_error_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+     feedback_error=feedback_error_all
+#endif
+     if(feedback_error/=0)then
+        if(myid==1)write(*,*)'Invalid AGN reference event commit'
+        call clean_stop
+     endif
+     ! The border-list optimization means a sink is not present in every
+     ! rank's local iAGN list.  Publish the committed state by sink slot;
+     ! MAX is safe because all ranks that touched one sink commit the same
+     ! post-event value, while untouched ranks send zero.
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(reference_touched_send,reference_touched_all,nsink,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+     call MPI_ALLREDUCE(reference_pending_send,reference_pending_all,4*nsink,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+#else
+     reference_touched_all=reference_touched_send
+     reference_pending_all=reference_pending_send
+#endif
+     if(.not.all(ieee_is_finite(reference_pending_all)).or.any(reference_pending_all<0d0))then
+        if(myid==1)write(*,*)'Invalid rank-consensus AGN reference pending ledger'
+        call clean_stop
+     endif
+     do isink=1,nsink
+        if(reference_touched_all(isink)>0)agn_mechanical_pending(:,isink)=reference_pending_all(:,isink)
+     enddo
+     ! dMsmbh remains a diagnostic only; deferred/channel ledgers are the
+     ! authoritative replay state for this comparison model.
+#ifndef WITHOUTMPI
+     dMsmbh_new=dMsmbh
+     call MPI_ALLREDUCE(dMsmbh_new,dMsmbh_all,nsink,MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,info)
+     dMsmbh=dMsmbh_all
+#endif
+     dMBH_coarse=0d0; dMEd_coarse=0d0
+     deallocate(reference_pending,reference_pending_send,reference_pending_all,reference_energy,reference_load, &
+          reference_deferred,reference_deferred_all,reference_jet,reference_replay,reference_touched_send, &
+          reference_touched_all)
+  else
+     ! Legacy/MAD path remains unchanged and retains its Esave semantics.
+     ok_blast_agn(1:nAGN)=.false.
+!$omp parallel do private(iAGN, Mfrac)
+     do iAGN=1,nAGN
+        if(agn_eddington_ratio(dMBH_AGN(iAGN),dMEd_AGN(iAGN)).lt.X_floor .and. EsaveAGN(iAGN).eq.0d0)then
+           Mfrac=0d0
+           if (Msmbh(iAGN)>dMsmbh_AGN(iAGN)) &
+                Mfrac=dMsmbh_AGN(iAGN)/(Msmbh(iAGN)-dMsmbh_AGN(iAGN))
+           if(Mfrac.ge.jetfrac)ok_blast_agn(iAGN)=.true.
+        endif
+     enddo
+
+     ! Compute some averaged quantities before doing the AGN energy input
+     call average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast &
+          & ,mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
+
+     ! Check if AGN goes into thermal blast wave mode
+!!$omp parallel do private(iAGN, temp_blast)
+     do iAGN=1,nAGN
+        if(agn_eddington_ratio(dMBH_AGN(iAGN),dMEd_AGN(iAGN)) .ge. X_floor .and. EsaveAGN(iAGN).eq.0d0)then
+           ! Compute estimated average temperature in the blast
+           temp_blast=0.0
+           if(vol_gas(iAGN)>0.0)then
+              temp_blast=eAGN_T*1d12*dMsmbh_AGN(iAGN)/mass_gas(iAGN)
+           else
+              if(ind_blast(iAGN)>0)then
+                 temp_blast=eAGN_T*1d12*dMsmbh_AGN(iAGN)/mass_blast(iAGN)
+              endif
+           endif
+           if(temp_blast>TAGN)then
+              ok_blast_agn(iAGN)=.true.
+           endif
+        endif
+     end do
+
+     ! Modify hydro quantities to account for a Sedov blast wave
+     call AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,vol_gas &
+          & ,psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
+
+     ! Reset total accreted mass if AGN input has been done
+!!$omp parallel do private(iAGN, isort)
+     do iAGN=1,nAGN
+        if(ok_blast_agn(iAGN))then
+           isort=iAGN_myid(iAGN)
+           dMsmbh(isort)=0d0
+        endif
+     end do
+     ! Important: initialise coarse Bondi and Eddington mass for the next coarse step
+#ifndef WITHOUTMPI
+     dMsmbh_new=dMsmbh
+     call MPI_ALLREDUCE(dMsmbh_new,dMsmbh_all,nsink,MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,info)
+     dMsmbh=dMsmbh_all
+#endif
+     dMBH_coarse=0d0; dMEd_coarse=0d0
+     ! Important: save the energy for the next time step that has not been put in the current time step
+#ifndef WITHOUTMPI
+     Esave_new=0d0
+!!$omp parallel do private(iAGN, isink)
+     do iAGN=1,nAGN
+        isink=iAGN_myid(iAGN)
+        Esave_new(isink)=EsaveAGN(iAGN)
+     enddo
+     call MPI_ALLREDUCE(Esave_new,Esave_all,nsink,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+     Esave= Esave_all
+#else
+     Esave=EsaveAGN
+#endif
+  endif
 
   ! Deallocate everything
   deallocate(vol_gas,mass_gas,psy_norm,vol_blast,mass_blast)
@@ -6533,7 +6712,8 @@ end subroutine AGN_feedback
 !################################################################
 !################################################################
 subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast &
-     & ,mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
+     & ,mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN, &
+     & is_replay_ref,is_jet_ref,mload_ref)
   use agn_feedback_deposition, only: agn_eddington_ratio, agn_jet_geometry, agn_contains_donor, &
        agn_withdraw_cell, agn_pack_load, agn_unpack_load
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -6597,8 +6777,22 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
   integer, allocatable :: bin_head(:,:,:), agn_next(:)
   integer :: nAGN_local
   integer, allocatable :: agn_local(:)
+  logical, optional, intent(in) :: is_replay_ref(:),is_jet_ref(:)
+  real(dp), optional, intent(in) :: mload_ref(:)
+  logical :: reference_call
 
   if(verbose)write(*,*)'  +Entering average_AGN'
+  reference_call=present(is_replay_ref).or.present(is_jet_ref).or.present(mload_ref)
+  if(reference_call.and..not.(present(is_replay_ref).and.present(is_jet_ref).and.present(mload_ref)))then
+     if(myid==1)write(*,*)'Incomplete AGN reference averaging arguments'
+     call clean_stop
+  endif
+  if(reference_call)then
+     if(size(is_replay_ref)/=nAGN.or.size(is_jet_ref)/=nAGN.or.size(mload_ref)/=nAGN)then
+        if(myid==1)write(*,*)'AGN reference event arrays have inconsistent size'
+        call clean_stop
+     endif
+  endif
 !$omp parallel shared(nthreads)
   mythread = omp_get_thread_num()
   if(mythread.eq.0) nthreads = omp_get_num_threads()
@@ -6773,7 +6967,8 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
                   ! ------------------------------------------
                   ! case 0: Some energy has not been released
                   ! ------------------------------------------
-                  if(EsaveAGN(iAGN).gt.0d0)then
+                  if((.not.reference_call.and.EsaveAGN(iAGN).gt.0d0).or. &
+                       (reference_call.and.is_replay_ref(iAGN)))then
                      if(dr_AGN.le.rmax2)then
                        Tvol_gas (iAGN)=Tvol_gas (iAGN)+vol_loc*uold(ind_cell(i),1)
                      endif
@@ -6789,7 +6984,8 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
                      ! ------------------------------------------
                      ! Jet feedback
                      ! ------------------------------------------
-                     if(X_radio(iAGN).lt.X_floor)then
+                     if((.not.reference_call.and.X_radio(iAGN).lt.X_floor).or. &
+                          (reference_call.and.is_jet_ref(iAGN)))then
 
                        if(ok_blast_agn(iAGN))then
                           jtot=sqrt(jAGN(iAGN,1)**2+jAGN(iAGN,2)**2+jAGN(iAGN,3)**2)
@@ -6857,8 +7053,9 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
      vol_gas(iAGN)=geometry_all(1,isink)
      mass_gas(iAGN)=geometry_all(2,isink)
      psy_norm(iAGN,:)=geometry_all(3:4,isink)
-     if(EsaveAGN(iAGN)<=0d0 .and. X_radio(iAGN)<X_floor .and. ok_blast_agn(iAGN))then
-        if(sum(jAGN(iAGN,:)**2)>0d0 .and. owner_all(isink)/=1)donor_error=1
+     if((.not.reference_call.and.EsaveAGN(iAGN)<=0d0.and.X_radio(iAGN)<X_floor).or. &
+          (reference_call.and.is_jet_ref(iAGN)))then
+        if(ok_blast_agn(iAGN).and.sum(jAGN(iAGN,:)**2)>0d0.and.owner_all(isink)/=1)donor_error=1
      endif
   enddo
   if(.not.all(ieee_is_finite(geometry_all)) .or. any(geometry_all<0d0))donor_error=1
@@ -6875,12 +7072,18 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
   ! the actual pre-withdrawal cell, not a stale snapshot from the AMR pass.
   load_send=0d0
   do iAGN=1,nAGN
-     if(EsaveAGN(iAGN)>0d0 .or. X_radio(iAGN)>=X_floor .or. &
+     if((.not.reference_call.and.EsaveAGN(iAGN)>0d0).or. &
+          (.not.reference_call.and.X_radio(iAGN)>=X_floor).or. &
+          (reference_call.and..not.is_jet_ref(iAGN)).or. &
           .not.ok_blast_agn(iAGN) .or. ind_blast(iAGN)<=0)cycle
      if(sum(jAGN(iAGN,:)**2)<=0d0)cycle
      donor_row=uold(ind_blast(iAGN),1:nvar)
-     call agn_withdraw_cell(donor_row,scalar_fields,metal_slot, &
-          mloadAGN*dMsmbh(iAGN_myid(iAGN)),vol_blast(iAGN), &
+     if(reference_call)then
+        mAGNi=mload_ref(iAGN)
+     else
+        mAGNi=mloadAGN*dMsmbh(iAGN_myid(iAGN))
+     endif
+     call agn_withdraw_cell(donor_row,scalar_fields,metal_slot,mAGNi,vol_blast(iAGN), &
           mAGN(iAGN),vloadAGN(iAGN,:),cloadAGN(iAGN,:),cell_ierr)
      donor_error=max(donor_error,cell_ierr)
      if(cell_ierr/=0)cycle
@@ -6913,12 +7116,14 @@ end subroutine average_AGN
 !################################################################
 !################################################################
 subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,vol_gas &
-     & ,psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN)
+     & ,psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN,nscalar,scalar_fields,metal_slot,cloadAGN, &
+     & is_replay_ref,is_jet_ref,EAGN_ref)
   use pm_commons
   use amr_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH
-  use agn_feedback_deposition, only: agn_deposit_material, agn_jet_delta, agn_eddington_ratio, agn_jet_geometry
+  use agn_feedback_deposition, only: agn_deposit_material, agn_jet_delta, agn_eddington_ratio, agn_jet_geometry, agn_legacy_energy, &
+       agn_reference_jet_speed_ok
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
   implicit none
@@ -6953,6 +7158,10 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
   real(dp),dimension(1:nAGN,1:3)::xAGN,vAGN,jAGN,vloadAGN
   integer ,dimension(1:nAGN)::ind_blast,iAGN_myid
   logical ,dimension(1:nAGN)::ok_blast_agn,ok_save
+  logical, optional, intent(in) :: is_replay_ref(:),is_jet_ref(:)
+  real(dp), optional, intent(in) :: EAGN_ref(:)
+  logical :: reference_call
+  logical,dimension(1:nAGN)::jet_event
 #ifndef _OPENMP
   logical ,dimension(1:nvector),save::ok
   integer,dimension(1:nvector),save::ind_grid,ind_cell
@@ -6968,7 +7177,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
 !$omp threadprivate(/omp_threads_agn_blast/)
 #endif
   real(dp)::jtot,j_x,j_y,j_z,drjet,dzjet,psy,nCOM,T2_1,T2_2,ekk,eint,vm_,dr_cell,T2,etot
-  real(dp)::eint1,ekkold,T2maxAGNz,epsilon_r,ZZ1,ZZ2,onethird,r_lso,eff_mad
+  real(dp)::eint1,ekkold,T2maxAGNz,epsilon_r,ZZ1,ZZ2,onethird,r_lso
   integer::idim,isink,cell_ierr,deposition_error,deposition_error_all
   real(dp)::dm_cell,dp_cell(3),de_cell,deferred_cell,rho_ref
   integer :: nbin, nbx, nby, nbz, ibx, iby, ibz, jbx, jby, jbz
@@ -6980,6 +7189,17 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
 
 
   if(verbose)write(*,*)' +Entering AGN_blast'
+  reference_call=present(is_replay_ref).or.present(is_jet_ref).or.present(EAGN_ref)
+  if(reference_call.and..not.(present(is_replay_ref).and.present(is_jet_ref).and.present(EAGN_ref)))then
+     if(myid==1)write(*,*)'Incomplete AGN reference blast arguments'
+     call clean_stop
+  endif
+  if(reference_call)then
+     if(size(is_replay_ref)/=nAGN.or.size(is_jet_ref)/=nAGN.or.size(EAGN_ref)/=nAGN)then
+        if(myid==1)write(*,*)'AGN reference event arrays have inconsistent size'
+        call clean_stop
+     endif
+  endif
 
 #ifdef _OPENMP
 !$omp parallel shared(nthreads)
@@ -7074,38 +7294,40 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
   jet_fallback=.false.
   deposition_error=0
   do iAGN=1,nAGN
-     if(EsaveAGN(iAGN).gt.0d0)then
+     if(reference_call)then
+        ok_save(iAGN)=is_replay_ref(iAGN)
+        if(ok_save(iAGN).or.ok_blast_agn(iAGN))EAGN(iAGN)=EAGN_ref(iAGN)
+     else if(EsaveAGN(iAGN).gt.0d0)then
         ok_save(iAGN)=.true.
         EAGN(iAGN)=EsaveAGN(iAGN)
      else if(ok_blast_agn(iAGN))then
         epsilon_r=0.1d0
         if(spin_bh) epsilon_r=eps_AGN(iAGN)
-        if(X_radio(iAGN).lt.X_floor)then
-           if(mad_jet)then
-              ! Existing MAD calibration; this bundle does not recalibrate it.
-              eff_mad=(4.10507+0.328712*spinmagAGN(iAGN)+76.0849*spinmagAGN(iAGN)**2d0 &
-                   +47.9235*spinmagAGN(iAGN)**3d0+3.86634*spinmagAGN(iAGN)**4d0)/100d0
-              EAGN(iAGN)=eff_mad*dMsmbh_AGN(iAGN)*(3d10/scale_v)**2d0
-           else
-              EAGN(iAGN)=eAGN_K*epsilon_r*dMsmbh_AGN(iAGN)*(3d10/scale_v)**2d0
-           endif
-        else
-           EAGN(iAGN)=eAGN_T*epsilon_r*dMsmbh_AGN(iAGN)*(3d10/scale_v)**2d0
-        endif
+        EAGN(iAGN)=agn_legacy_energy(X_radio(iAGN)<X_floor,epsilon_r,spinmagAGN(iAGN),mad_jet, &
+             dMsmbh_AGN(iAGN),eAGN_K,eAGN_T,scale_v)
      endif
      if (.not. ieee_is_finite(EAGN(iAGN)) .or. EAGN(iAGN)<0d0) then
         deposition_error=1
         cycle
      end if
+     if(reference_call)then
+        jet_event(iAGN)=is_jet_ref(iAGN).and..not.ok_save(iAGN)
+     else
+        jet_event(iAGN)=.not.ok_save(iAGN).and.X_radio(iAGN)<X_floor
+     endif
      jet_fallback(iAGN)=.not.ok_save(iAGN) .and. ok_blast_agn(iAGN) .and. &
-          X_radio(iAGN)<X_floor .and. sum(jAGN(iAGN,:)**2)>0d0 .and. any(psy_norm(iAGN,:)<=0d0)
+          jet_event(iAGN) .and. sum(jAGN(iAGN,:)**2)>0d0 .and. any(psy_norm(iAGN,:)<=0d0)
      ! No division by zero in the single-cell fallback. Thermal/saved
      ! vol_gas is a mass; resolved jet vol_gas is a geometrical volume.
      if (vol_gas(iAGN)>0d0) then
         p_gas(iAGN)=EAGN(iAGN)/vol_gas(iAGN)
-        if (.not.ok_save(iAGN) .and. X_radio(iAGN)<X_floor .and. &
+        if (.not.ok_save(iAGN) .and. jet_event(iAGN) .and. &
              mAGN(iAGN)>0d0 .and. all(psy_norm(iAGN,:)>0d0)) then
            ! One total loaded mass, hence E_kin = m_load*v_jet^2/2.
+           if(reference_call.and..not.agn_reference_jet_speed_ok(EAGN(iAGN),mAGN(iAGN),f_ekAGN,scale_v))then
+              deposition_error=1
+              cycle
+           endif
            uBlast(iAGN)=sqrt(2d0*f_ekAGN*EAGN(iAGN)/mAGN(iAGN))
            p_gas(iAGN)=(1d0-f_ekAGN)*EAGN(iAGN)/vol_gas(iAGN)
         endif
@@ -7210,7 +7432,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
                        if(dr_AGN<=rmax2 .and. vol_gas(iAGN)>0d0) &
                             de_cell=p_gas(iAGN)*rho_ref
                     else if(ok_blast_agn(iAGN))then
-                       if(X_radio(iAGN)<X_floor)then
+                       if(jet_event(iAGN))then
                           jtot=sqrt(sum(jAGN(iAGN,:)**2))
                           if(jtot>0d0)then
                              call agn_jet_geometry([dxx,dyy,dzz],jAGN(iAGN,:),rmax,weights,axis)
@@ -7267,7 +7489,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
      endif
      dm_cell=0d0; dp_cell=0d0
      de_cell=EAGN(iAGN)/vol_blast(iAGN)
-     if(.not.ok_save(iAGN) .and. X_radio(iAGN)<X_floor)then
+     if(.not.ok_save(iAGN) .and. jet_event(iAGN))then
         dm_cell=mAGN(iAGN)/vol_blast(iAGN)
         dp_cell=dm_cell*vloadAGN(iAGN,:)
         de_cell=de_cell+0.5d0*dm_cell*sum(vloadAGN(iAGN,:)**2)

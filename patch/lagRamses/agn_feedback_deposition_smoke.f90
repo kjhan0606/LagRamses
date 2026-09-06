@@ -72,6 +72,7 @@ program agn_feedback_deposition_smoke
   call accepted_accretion()
   call overlapping_events(.false.)
   call overlapping_events(.true.)
+  call legacy_energy_contract()
   write(*,'(A)') 'AGN_NATIVE_CELL_COUPLING_SMOKE_OK'
 contains
   subroutine accepted_accretion()
@@ -123,7 +124,67 @@ contains
     gas2=[8d0,16d0,0d0,24d0,1.6d0]
     call agn_accrete_scalars(gas2,field,1,4d0,2d0,status,4)
     call check(status==0.and.abs(gas2(5)-1.2d0)<1d-14,'2D scalar withdrawal leaves hydro slots intact')
+    call partition_reference_contract()
   end subroutine accepted_accretion
+
+  subroutine partition_reference_contract()
+    real(dp)::receipt(4),pending(4),energy,load
+    logical::is_jet,is_replay
+    integer::status
+
+    call agn_partition_release(100d0,4d0,0.1d0,0.01d0,receipt,status)
+    call check(status==0.and.maxval(abs(receipt-[85d0,15d0,0d0,0d0]))<1d-14, &
+         'reference high-state EM/heat partition')
+    call agn_partition_release(100d0,4d0,0.001d0,0.01d0,receipt,status)
+    call check(status==0.and.maxval(abs(receipt-[0d0,0d0,100d0,4d0]))<1d-14, &
+         'reference low-state jet/loading partition')
+
+    pending=[7d0,50d0,2d0,11d0]
+    call agn_reference_event(pending,100d0,0.01d0,energy,load,is_jet,is_replay)
+    call check(is_replay.and..not.is_jet.and.energy==11d0.and.load==0d0, &
+         'reference replay has priority over new channels')
+    call agn_reference_commit(pending,is_jet,is_replay,.true.,3d0,status)
+    call check(status==0.and.all(pending==[7d0,50d0,2d0,3d0]), &
+         'reference replay commit preserves unselected channels')
+
+    pending=[7d0,50d0,2d0,0d0]
+    call agn_reference_event(pending,10d0,0.1d0,energy,load,is_jet,is_replay)
+    call check(is_jet.and..not.is_replay.and.energy==50d0.and.load==2d0, &
+         'reference jet selection uses retained loading entitlement')
+    call agn_reference_commit(pending,is_jet,is_replay,.true.,0d0,status)
+    call check(status==0.and.all(pending==[7d0,0d0,0d0,0d0]), &
+         'reference jet commit consumes loading entitlement')
+    pending=[7d0,50d0,12d0,0d0]
+    call agn_reference_event(pending,10d0,0d0,energy,load,is_jet,is_replay)
+    call check(.not.is_jet.and..not.is_replay.and.energy==7d0.and.load==0d0, &
+         'reference jet trigger rejects loading mass at or above BH mass')
+    call check(agn_heat_ready(3d0,1d0,2d0,5d0,10d0), &
+         'reference heat trigger uses deposited energy and gas mass')
+    call check(.not.agn_heat_ready(1d0,1d0,2d0,5d0,10d0), &
+         'reference heat trigger defers below threshold')
+    call check(agn_reference_receiver_ready(.true.,.true.,2d0,-1), &
+         'reference replay can use a thermal receiver without a donor owner')
+    call check(.not.agn_reference_receiver_ready(.true.,.true.,0d0,-1), &
+         'reference replay without a receiver remains pending')
+    call check(agn_reference_receiver_ready(.false.,.true.,0d0,7), &
+         'fresh reference event requires its donor owner')
+    call check(agn_reference_jet_speed_ok(0.125d0*(2.99792458d10)**2d0,1d0,1d0,1d0), &
+         'reference jet speed guard accepts sub-relativistic event')
+    call check(.not.agn_reference_jet_speed_ok(0.5d0*(2.99792458d10)**2d0,1d0,1d0,1d0), &
+         'reference jet speed guard rejects superluminal Newtonian event')
+    write(*,'(A)') 'AGN_REFERENCE_PARTITION_SMOKE_OK'
+  end subroutine partition_reference_contract
+
+  subroutine legacy_energy_contract()
+    real(dp)::legacy
+    legacy=agn_legacy_energy(.false.,0.2d0,0d0,.false.,2d0,0.8d0,0.15d0,10d0)
+    call check(abs(legacy-5.4d17)<1d3,'legacy thermal energy recipe remains bitwise-scaled')
+    legacy=agn_legacy_energy(.true.,0.2d0,0d0,.false.,2d0,0.8d0,0.15d0,10d0)
+    call check(abs(legacy-2.88d18)<1d4,'legacy non-MAD jet energy recipe remains bitwise-scaled')
+    legacy=agn_legacy_energy(.true.,0.2d0,0d0,.true.,2d0,0.8d0,0.15d0,10d0)
+    call check(abs(legacy-7.3891262054443359d17)<1d-12*7.3891262054443359d17, &
+         'legacy MAD polynomial recipe remains isolated')
+  end subroutine legacy_energy_contract
 
   subroutine overlapping_events(reverse_order)
     logical,intent(in)::reverse_order

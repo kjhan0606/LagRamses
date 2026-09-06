@@ -11,9 +11,134 @@ module agn_feedback_deposition
   public :: agn_withdraw_cell, agn_deposit_material, agn_pack_load, agn_unpack_load
   public :: agn_accretion_receipt, agn_accrete_scalars
   public :: agn_merge_pending
+  public :: agn_partition_release, agn_reference_event, agn_reference_commit
+  public :: agn_heat_ready, agn_legacy_energy, agn_reference_receiver_ready
+  public :: agn_reference_jet_speed_ok, agn_reference_max_jet_speed_fraction
   integer, parameter, public :: agn_deposit_invalid_source=1, agn_deposit_invalid_receiver=2
+  ! The reference profile is coupled to the Newtonian RAMSES velocity update.
+  ! Do not silently enter a superluminal regime when retained mass is used as
+  ! the jet loading entitlement.  A violating event is rejected before any
+  ! hydro mutation; the reference model is not relativistically corrected.
+  real(dp), parameter :: agn_reference_max_jet_speed_fraction=0.9d0
 
 contains
+
+  pure subroutine agn_partition_release(released,retained,chi,xfloor,receipt,ierr)
+    ! receipt = EM erg, mechanical heat erg, jet erg, jet loading entitlement
+    ! in retained code mass. These named shares belong to the reference model.
+    real(dp),intent(in)::released,retained,chi,xfloor
+    real(dp),intent(out)::receipt(4)
+    integer,intent(out)::ierr
+    real(dp),parameter::high_mechanical_share=0.15d0
+    receipt=0d0; ierr=1
+    if(.not.all(ieee_is_finite([released,retained,chi,xfloor])))return
+    if(released<0d0.or.retained<0d0.or.chi<0d0.or.xfloor<=0d0)return
+    if(chi>=xfloor)then
+       receipt(2)=high_mechanical_share*released
+       receipt(1)=released-receipt(2)
+    else
+       receipt(3)=released
+       receipt(4)=retained
+    endif
+    ierr=0
+  end subroutine agn_partition_release
+
+  pure subroutine agn_reference_event(pending,bh_mass,jetfrac,energy,load_mass,is_jet,is_replay)
+    ! pending = heat erg, jet erg, loading code mass, deferred erg.
+    ! One event per sink/coarse step; heat's temperature trigger follows
+    ! the existing averaging pass. Ineligible/unselected channels stay pending.
+    real(dp),intent(in)::pending(4),bh_mass,jetfrac
+    real(dp),intent(out)::energy,load_mass
+    logical,intent(out)::is_jet,is_replay
+    real(dp)::mass_fraction
+    is_jet=.false.; is_replay=.false.; energy=0d0; load_mass=0d0
+    if(.not.all(ieee_is_finite(pending)).or. &
+         .not.all(ieee_is_finite([bh_mass,jetfrac])).or.any(pending<0d0).or. &
+         bh_mass<=0d0.or.jetfrac<0d0)return
+    if(pending(4)>0d0)then
+       is_replay=.true.; energy=pending(4)
+       return
+    endif
+    mass_fraction=0d0
+    if(bh_mass>pending(3))mass_fraction=pending(3)/(bh_mass-pending(3))
+    if(pending(2)>0d0.and.bh_mass>pending(3).and.mass_fraction>=jetfrac)then
+       is_jet=.true.; energy=pending(2); load_mass=pending(3)
+    else
+       energy=pending(1)
+    endif
+  end subroutine agn_reference_event
+
+  pure subroutine agn_reference_commit(pending,is_jet,is_replay,fired,deferred_erg,ierr)
+    real(dp),intent(inout)::pending(4)
+    logical,intent(in)::is_jet,is_replay,fired
+    real(dp),intent(in)::deferred_erg
+    integer,intent(out)::ierr
+    ierr=1
+    if(.not.all(ieee_is_finite(pending)).or.any(pending<0d0))return
+    if(.not.ieee_is_finite(deferred_erg).or.deferred_erg<0d0)return
+    if(is_jet.and.is_replay)return
+    if(fired)then
+       if(.not.is_replay)then
+          if(is_jet)then
+             pending(2:3)=0d0 ! Unloaded entitlement is consumed, not future gas.
+          else
+             pending(1)=0d0
+          endif
+       endif
+       pending(4)=deferred_erg
+    endif
+    ierr=0
+  end subroutine agn_reference_commit
+
+  pure logical function agn_heat_ready(energy,mass,scale_t2,gamma,threshold) result(ready)
+    real(dp),intent(in)::energy,mass,scale_t2,gamma,threshold
+    ready=.false.
+    if(mass>0d0.and.energy>0d0)ready=(gamma-1d0)*(energy/mass)*scale_t2>threshold
+  end function agn_heat_ready
+
+  pure logical function agn_reference_receiver_ready(is_replay,selected,vol_gas,ind_blast) result(ready)
+    logical,intent(in)::is_replay,selected
+    real(dp),intent(in)::vol_gas
+    integer,intent(in)::ind_blast
+    ready=.false.
+    if(.not.selected.or..not.ieee_is_finite(vol_gas))return
+    if(is_replay)then
+       ! Replay is deposited over the thermal bubble and does not require the
+       ! single-cell donor owner used by a fresh jet/heat event.
+       ready=vol_gas>0d0
+    else
+       ready=ind_blast>0
+    endif
+  end function agn_reference_receiver_ready
+
+  pure logical function agn_reference_jet_speed_ok(energy,mass,f_ek,scale_v) result(ok)
+    real(dp),intent(in)::energy,mass,f_ek,scale_v
+    real(dp),parameter::c_cgs=2.99792458d10
+    real(dp)::speed_code
+    ok=.false.
+    if(.not.all(ieee_is_finite([energy,mass,f_ek,scale_v])))return
+    if(energy<0d0.or.mass<=0d0.or.f_ek<0d0.or.f_ek>1d0.or.scale_v<=0d0)return
+    speed_code=sqrt(2d0*f_ek*energy/mass)
+    ok=ieee_is_finite(speed_code).and.speed_code<= &
+         agn_reference_max_jet_speed_fraction*c_cgs/scale_v
+  end function agn_reference_jet_speed_ok
+
+  pure real(dp) function agn_legacy_energy(is_jet,epsilon_r,spin,mad,retained,eK,eT,scale_v) result(energy)
+    logical,intent(in)::is_jet,mad
+    real(dp),intent(in)::epsilon_r,spin,retained,eK,eT,scale_v
+    real(dp)::eff_mad
+    if(is_jet)then
+       if(mad)then
+          eff_mad=(4.10507+0.328712*spin+76.0849*spin**2d0 &
+               +47.9235*spin**3d0+3.86634*spin**4d0)/100d0
+          energy=eff_mad*retained*(3d10/scale_v)**2d0
+       else
+          energy=eK*epsilon_r*retained*(3d10/scale_v)**2d0
+       endif
+    else
+       energy=eT*epsilon_r*retained*(3d10/scale_v)**2d0
+    endif
+  end function agn_legacy_energy
 
   pure subroutine agn_merge_pending(pending,groups,merged,ierr)
     real(dp),intent(in)::pending(:)

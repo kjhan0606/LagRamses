@@ -1,7 +1,10 @@
 subroutine read_params
   use amr_commons
+  use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_model, snrt_agn_model_reference, &
+       snrt_agn_reference_config_ok, snrt_agn_admit_reference
 #ifdef SNRT
-  use snrt_agn_efficiency, only: snrt_agn_rt_requested
+  use snrt_spectral_contract, only: snrt_spectral_contract_load_from_environment, &
+       snrt_spectral_contract_status, snrt_spectral_contract_runtime_allowed
 #endif
   use pm_parameters
   use pm_commons, only: npartmax_auto
@@ -17,6 +20,8 @@ subroutine read_params
   ! Local variables
   !--------------------------------------------------
   integer::i,narg,iargc,ierr,levelmax,sink_nml_iostat
+  integer::agn_model_local,agn_model_min,agn_model_max,agn_contract_error
+  logical::agn_snrt_built
 #ifdef SNRT
   integer :: snrt_requested_local, snrt_requested_min, snrt_requested_max
 #endif
@@ -1702,15 +1707,50 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1)write(*,*)'SNRT_RT_ENABLE must agree across MPI ranks'
      nml_ok=.false.
   end if
-  if (snrt_requested_max==1 .and. sink .and. sink_AGN) then
+  if (snrt_requested_max==1 .and. sink .and. sink_AGN .and. &
+       snrt_agn_model()/=snrt_agn_model_reference) then
      if(myid==1)write(*,*)'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
      nml_ok=.false.
   end if
   if (snrt_requested_max==1 .and. sink .and. (ncpu>1 .or. nrestart>0)) then
-     if(myid==1)write(*,*)'Live SNRT AGN requires serial fresh start until inflow cursors are persistent/migratable'
+     if(myid==1)write(*,*)'Live SNRT AGN requires serial fresh start until pending energy and photon state support restart/migration'
      nml_ok=.false.
   end if
 #endif
+
+  ! The comparison profile is opt-in, rank-uniform, serial and fresh only.
+  agn_model_local=snrt_agn_model()
+  agn_model_min=agn_model_local; agn_model_max=agn_model_local
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(agn_model_local,agn_model_min,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr)
+  call MPI_ALLREDUCE(agn_model_local,agn_model_max,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
+#endif
+  if(agn_model_min<0.or.agn_model_min/=agn_model_max)then
+     if(myid==1)write(*,*) 'Unknown or rank-inconsistent SNRT_AGN_MODEL'
+     nml_ok=.false.
+  endif
+  agn_snrt_built=.false.
+#ifdef SNRT
+  agn_snrt_built=.true.
+#endif
+  if(agn_model_max==snrt_agn_model_reference)then
+     if(.not.snrt_agn_reference_config_ok(agn_snrt_built,snrt_agn_rt_requested(),hydro,sink,bondi, &
+          sink_AGN,mad_jet,ndim,nener,ncpu,nrestart,X_floor))then
+        if(myid==1)write(*,*) 'partition_reference_v1 requires serial fresh 3D NENER=0 non-MAD Bondi + RT + AGN'
+        nml_ok=.false.
+     endif
+#ifdef SNRT
+     call snrt_spectral_contract_load_from_environment(agn_contract_error)
+     if(agn_contract_error/=0.or..not.snrt_spectral_contract_runtime_allowed.or. &
+          trim(snrt_spectral_contract_status)/='reference_control')then
+        if(myid==1)write(*,*) 'partition_reference_v1 requires explicitly enabled reference_control SED'
+        nml_ok=.false.
+     endif
+#endif
+  endif
+  call snrt_agn_admit_reference(nml_ok.and.agn_model_local==snrt_agn_model_reference)
+  if(nml_ok.and.agn_model_local==snrt_agn_model_reference.and.myid==1)write(*,*) &
+       'SNRT_AGN_MODEL=partition_reference_v1 comparison only; mechanical shares high=0.15 low=1; MAD excluded'
 
   if(.not. nml_ok)then
      if(myid==1)write(*,*)'Too many errors in the namelist'

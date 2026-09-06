@@ -21,6 +21,9 @@ module pm_commons
   ! Physical erg accepted during gas accretion, awaiting SNRT source commit.
   ! Process-lifetime only: live SNRT sinks still require serial fresh start.
   real(dp),allocatable,dimension(:)::agn_pending_erg
+  ! Reference model only: (heat erg, jet erg, retained loading mass in code
+  ! units, deferred erg) by sink slot. Legacy/MAD leaves all four zero.
+  real(dp),allocatable,dimension(:,:)::agn_mechanical_pending
   real(dp),allocatable,dimension(:,:,:)::weighted_momentum
   real(dp),allocatable,dimension(:,:,:)::sink_stat,sink_stat_all
   real(dp),allocatable,dimension(:)::c_avgptr,v_avgptr,d_avgptr

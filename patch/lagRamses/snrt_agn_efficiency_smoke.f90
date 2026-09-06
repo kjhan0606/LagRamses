@@ -41,8 +41,37 @@ program snrt_agn_efficiency_smoke
        1.0d0,2.0d0,snrt_agn_eff_mode_mad_floor_disabled,.false., &
        snrt_agn_eff_status_floor_disabled)
 
+  if(.not.snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
+       3,0,1,0,0.01d0)) error stop 4
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.true., &
+       3,0,1,0,0.01d0)) error stop 5
+  if(snrt_agn_reference_config_ok(.false.,.true.,.true.,.true.,.true.,.true.,.false., &
+       3,0,1,0,0.01d0)) error stop 6
+  if(snrt_agn_reference_config_ok(.true.,.false.,.true.,.true.,.true.,.true.,.false., &
+       3,0,1,0,0.01d0)) error stop 7
+  if(snrt_agn_reference_config_ok(.true.,.true.,.false.,.true.,.true.,.true.,.false., &
+       3,0,1,0,0.01d0)) error stop 8
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.false.,.true.,.true.,.false., &
+       3,0,1,0,0.01d0)) error stop 9
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.false.,.true.,.false., &
+       3,0,1,0,0.01d0)) error stop 10
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.false.,.false., &
+       3,0,1,0,0.01d0)) error stop 11
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
+       2,0,1,0,0.01d0)) error stop 12
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
+       3,1,1,0,0.01d0)) error stop 13
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
+       3,0,2,0,0.01d0)) error stop 14
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
+       3,0,1,1,0.01d0)) error stop 15
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
+       3,0,1,0,0d0)) error stop 16
+  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
+       3,0,1,0,ieee_value(0d0,ieee_quiet_nan))) error stop 17
+
   write(*,'(A)') 'SNRT_AGN_EFFICIENCY_OK thermal=1 mad_low=0.01 boundary=high '&
-       //'spin_init=visible invalid=fail_closed'
+       //'spin_init=visible invalid=fail_closed reference_admission=narrow'
 
 contains
 

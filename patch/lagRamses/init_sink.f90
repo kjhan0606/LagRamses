@@ -77,6 +77,8 @@ subroutine init_sink
   allocate(Esave          (1:nsinkmax))
   allocate(agn_pending_erg(1:nsinkmax))
   agn_pending_erg=0d0
+  allocate(agn_mechanical_pending(4,nsinkmax))
+  agn_mechanical_pending=0d0
   allocate(dMBH_coarse_new(1:nsinkmax))
   allocate(dMEd_coarse_new(1:nsinkmax))
   allocate(dMsmbh_new     (1:nsinkmax))
@@ -282,6 +284,8 @@ subroutine init_sink_alloc
   allocate(Esave          (1:nsinkmax))
   allocate(agn_pending_erg(1:nsinkmax))
   agn_pending_erg=0d0
+  allocate(agn_mechanical_pending(4,nsinkmax))
+  agn_mechanical_pending=0d0
   allocate(dMBH_coarse_new(1:nsinkmax))
   allocate(dMEd_coarse_new(1:nsinkmax))
   allocate(dMsmbh_new     (1:nsinkmax))

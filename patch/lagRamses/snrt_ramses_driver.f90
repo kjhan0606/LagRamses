@@ -139,7 +139,7 @@ contains
     use snrt_agn_locator, only: snrt_agn_find_local_leaf
     use snrt_agn_source, only: snrt_c_cgs, snrt_agn_photon_budget_energy, &
          snrt_agn_deposit_transaction, snrt_agn_source_commit
-    use snrt_agn_efficiency, only: snrt_agn_rt_requested
+    use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_reference_active
     use snrt_nlte_coupling, only: snrt_nlte_primordial_optical_depth_groups
     use snrt_thermochemistry, only: snrt_thermochemistry_result, &
          snrt_secondary_tables_load_from_environment, snrt_secondary_tables_loaded, &
@@ -233,7 +233,7 @@ contains
     enabled = .false.
     if (.not. enabled_resolved) then
        enabled_latched = snrt_agn_rt_requested()
-       if (enabled_latched .and. sink .and. sink_AGN) then
+       if (enabled_latched .and. sink .and. sink_AGN .and. .not.snrt_agn_reference_active()) then
           if(myid==1)write(*,*)'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
           call clean_stop
        end if
@@ -288,6 +288,8 @@ contains
        spectral_contract_ok = spectral_status == 0 .and. &
             snrt_spectral_contract_loaded .and. &
             snrt_spectral_contract_runtime_allowed
+       if(snrt_agn_reference_active())spectral_contract_ok=spectral_contract_ok.and. &
+            trim(snrt_spectral_contract_status)=='reference_control'
        if (myid == 1) then
           if (spectral_contract_ok) then
              write(*,'(A,I0,A,A)') ' SNRT spectral contract loaded: groups=', &

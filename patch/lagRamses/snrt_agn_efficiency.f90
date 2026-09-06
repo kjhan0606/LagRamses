@@ -11,6 +11,10 @@ module snrt_agn_efficiency
   private
   public :: snrt_agn_resolve_efficiency
   public :: snrt_agn_rt_requested
+  public :: snrt_agn_model, snrt_agn_reference_active, snrt_agn_admit_reference
+  public :: snrt_agn_reference_config_ok
+  integer, parameter, public :: snrt_agn_model_legacy=0, snrt_agn_model_reference=1
+  logical, save :: reference_admitted=.false.
   public :: snrt_agn_efficiency_status_name
   public :: snrt_agn_efficiency_mode_name
   public :: snrt_agn_eff_status_ok
@@ -53,6 +57,46 @@ module snrt_agn_efficiency
   integer, parameter :: snrt_agn_eff_mode_invalid = 9
 
 contains
+
+  integer function snrt_agn_model() result(model)
+    integer,save::latched=0
+    logical,save::resolved=.false.
+    character(len=64)::value
+    integer::length,status
+    if(.not.resolved)then
+       call get_environment_variable('SNRT_AGN_MODEL',value,length=length,status=status)
+       latched=-1
+       if(status==1.or.length==0)then
+          latched=snrt_agn_model_legacy
+       else if(status==0)then
+          select case(trim(value))
+          case('legacy'); latched=snrt_agn_model_legacy
+          case('partition_reference_v1'); latched=snrt_agn_model_reference
+          end select
+       endif
+       resolved=.true.
+    endif
+    model=latched
+  end function snrt_agn_model
+
+  logical function snrt_agn_reference_active() result(active)
+    active=reference_admitted
+  end function snrt_agn_reference_active
+
+  subroutine snrt_agn_admit_reference(allowed)
+    logical,intent(in)::allowed
+    reference_admitted=allowed.and.snrt_agn_model()==snrt_agn_model_reference
+  end subroutine snrt_agn_admit_reference
+
+  pure logical function snrt_agn_reference_config_ok(built,rt,hydro,sink,bondi,mechanical,mad, &
+       dimensions,nener,ncpu,restart,xfloor) result(ok)
+    logical,intent(in)::built,rt,hydro,sink,bondi,mechanical,mad
+    integer,intent(in)::dimensions,nener,ncpu,restart
+    real(dp),intent(in)::xfloor
+    ok=built.and.rt.and.hydro.and.sink.and.bondi.and.mechanical.and..not.mad &
+         .and.dimensions==3.and.nener==0.and.ncpu==1.and.restart==0 &
+         .and.ieee_is_finite(xfloor).and.xfloor>0d0
+  end function snrt_agn_reference_config_ok
 
   logical function snrt_agn_rt_requested() result(requested)
     ! One process-lifetime latch, shared by namelist preflight, legacy
