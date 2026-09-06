@@ -656,7 +656,7 @@ contains
     end do
 #ifdef DUST_LIVE
     call snrt_dust_prepare_cell_optical_depth(dust_n_hydrogen_cm3, dust_path_cm, &
-         dust_relative_abundance, snrt_dust_contract_absorption_per_h_cm2, &
+         dust_relative_abundance, snrt_dust_contract_absorption_per_h_cm2(1:snrt_ngroups), &
          dust_tau_dp, ierr)
     if (ierr /= 0 .or. any(.not. ieee_is_finite(dust_tau_dp)) .or. &
          any(dust_tau_dp < 0.0d0)) then
@@ -902,7 +902,7 @@ contains
              end do
           end do
           call snrt_dust_receiver_stage(dust_absorbed_photons, &
-               snrt_dust_contract_absorption_mean_energy_ev, dt_s, &
+               snrt_dust_contract_absorption_mean_energy_ev(1:snrt_ngroups), dt_s, &
                dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
                dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
                dust_absorbed_energy, ierr)

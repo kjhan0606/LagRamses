@@ -84,5 +84,27 @@ program snrt_dust_receiver_smoke
   if (ierr /= snrt_dust_receiver_err_state .or. any(state_energy /= state_energy_before) .or. &
        any(state_temperature /= state_temperature_before)) error stop 12
 
+  ! Native contracts reserve 32 entries, while live transport uses nine.
+  ! Reproduce the unsliced-call failure and check the active payload only.
+  block
+    real(snrt_dust_receiver_dp) :: sigma32(32), energy32(32), tau9(nc,9), photons9(9,nc)
+    sigma32 = -1.0d0
+    energy32 = -1.0d0
+    sigma32(1:9) = 1.0d-21
+    energy32(1:9) = 20.0d0
+    photons9 = 1.0d10
+    call snrt_dust_prepare_cell_optical_depth(n_h, path, abundance, sigma32, tau9, ierr)
+    if (ierr /= snrt_dust_receiver_err_shape) error stop 13
+    call snrt_dust_prepare_cell_optical_depth(n_h, path, abundance, sigma32(1:9), tau9, ierr)
+    if (ierr /= 0 .or. any(tau9 <= 0.0d0)) error stop 14
+    call snrt_dust_receiver_stage(photons9, energy32, 10.0d0, abundance, capacity, &
+         old_energy, old_temperature, staged_energy, staged_temperature, absorbed_energy, ierr)
+    if (ierr /= snrt_dust_receiver_err_shape) error stop 15
+    call snrt_dust_receiver_stage(photons9, energy32(1:9), 10.0d0, abundance, capacity, &
+         old_energy, old_temperature, staged_energy, staged_temperature, absorbed_energy, ierr)
+    expected_absorbed = 9.0d0 * 1.0d10 * 20.0d0 * snrt_dust_receiver_ev_to_erg
+    if (ierr /= 0 .or. any(abs(absorbed_energy-expected_absorbed) > 1.0d-12)) error stop 16
+    write(*,'(a)') 'SNRT_DUST_NINE_GROUP_PADDED_CONTRACT_PASS'
+  end block
   write(*,'(a)') 'SNRT_NATIVE_DUST_MAPPING_RECEIVER_OK binding=1 mapping=1 opacity=1 thermal=1 closure=1 rollback=1'
 end program snrt_dust_receiver_smoke

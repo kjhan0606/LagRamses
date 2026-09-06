@@ -49,6 +49,9 @@ end subroutine dump_all_hdf5
 subroutine backup_header_hdf5()
   use amr_commons
   use hydro_commons
+#ifdef DUST_LIVE
+  use hydro_parameters, only: idust, idust_energy
+#endif
   use hydro_parameters, only: gamma
   use pm_commons
   use ramses_hdf5_io
@@ -75,6 +78,10 @@ subroutine backup_header_hdf5()
 
   ! Hydro
   call hdf5_write_attr_int(grp_id, 'nvar', nvar)
+#ifdef DUST_LIVE
+  call hdf5_write_attr_int(grp_id, 'dust_mass_field_index', idust)
+  call hdf5_write_attr_int(grp_id, 'dust_energy_field_index', idust_energy)
+#endif
   call hdf5_write_attr_dp(grp_id, 'gamma', gamma)
 
   ! Time

@@ -1306,6 +1306,9 @@ end subroutine restore_amr_hdf5
 subroutine restore_hydro_hdf5()
   use amr_commons
   use hydro_commons
+#ifdef DUST_LIVE
+  use hydro_parameters, only: idust, idust_energy
+#endif
   use ramses_hdf5_io
   ! varcpu variables now in amr_commons
 #include "amr_index.h"
@@ -1316,6 +1319,9 @@ subroutine restore_hydro_hdf5()
   integer :: ilevel, i, igrid, ind, ivar, info
   integer :: hdf5_attr_status, hdf5_attr_status_all
   integer :: ngrid_loc, nvar_file, fidx
+#ifdef DUST_LIVE
+  integer :: dust_mass_field_file, dust_energy_field_file
+#endif
   integer, allocatable :: ngrid_all(:)
   integer(i8b) :: ncells_total, offset_cells, ngrid_total
   real(dp), allocatable :: ubuf(:), ubuf_all(:), ubuf_chunk(:)
@@ -1355,6 +1361,30 @@ subroutine restore_hydro_hdf5()
           hdf5_attr_status_all
      call hdf5_restart_abort
   end if
+#ifdef DUST_LIVE
+  call hdf5_read_attr_int_checked(hdr_grp_id, 'dust_mass_field_index', &
+       dust_mass_field_file, hdf5_attr_status)
+  if(hdf5_attr_status == 0) then
+     if(dust_mass_field_file /= idust) hdf5_attr_status = 1
+  end if
+  call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, info)
+  if(hdf5_attr_status_all /= 0) then
+     if(myid==1) write(*,*) 'ERROR: DUST_LIVE checkpoint dust mass field missing or mismatched'
+     call hdf5_restart_abort
+  end if
+  call hdf5_read_attr_int_checked(hdr_grp_id, 'dust_energy_field_index', &
+       dust_energy_field_file, hdf5_attr_status)
+  if(hdf5_attr_status == 0) then
+     if(dust_energy_field_file /= idust_energy .or. nvar_file /= nvar) hdf5_attr_status = 1
+  end if
+  call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
+       MPI_MAX, MPI_COMM_WORLD, info)
+  if(hdf5_attr_status_all /= 0) then
+     if(myid==1) write(*,*) 'ERROR: DUST_LIVE checkpoint dust energy field or NVAR missing or mismatched'
+     call hdf5_restart_abort
+  end if
+#endif
   call hdf5_close_group(hdr_grp_id)
 
   if(nvar_file /= nvar) then

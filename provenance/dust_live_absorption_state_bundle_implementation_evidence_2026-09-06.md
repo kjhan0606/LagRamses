@@ -91,3 +91,46 @@ grain-size evolution, gas-dust exchange beyond the staged absorption-energy
 receiver, and live AMR/MPI/restart qualification remain open. The live profile
 must therefore remain disabled until the physical contract and its dedicated
 qualification evidence are available.
+
+## Wiring correction after e00578c
+
+Reinspection found two defects not covered by the previous default-profile
+bundle gate. The live driver passed all 32 reserved contract entries to
+nine-group optical-depth and thermal-receiver calls. Both routines reject
+that shape. The driver now passes the active `1:snrt_ngroups` slices. The
+existing receiver smoke reproduces the unsliced failures and verifies
+positive opacity and the expected absorbed energy with the nine-group slices;
+both Intel and GNU runs report `SNRT_DUST_NINE_GROUP_PADDED_CONTRACT_PASS`.
+
+The previous HDF5 change was in `patch/cuRamses`, but Makefile VPATH selects
+`patch/lagRamses/backup_hdf5.f90` and `restore_hdf5.f90` first. Thus the
+earlier claim of active checkpoint field validation was unsupported. The
+active files now save both dust indices and collectively reject missing or
+mismatched metadata and mismatched NVAR before reading hydro payloads. Failed
+attribute reads do not inspect an undefined output value. This corrects the
+active source path; a live dust checkpoint round-trip is still unverified.
+
+These are source/runtime wiring repairs, with no simulation namelist changes.
+Full physical live qualification, especially dust cooling/IR and restart of
+the coupled radiation state, remains required before production promotion.
+
+Corrected-profile verification:
+
+- `make -C bin -B -j2 DUST_LIVE=1 SNRT=1 USE_CUDA=1 HDF5=1`
+  completed successfully. The dry-run selects both HDF5 files from
+  `patch/lagRamses` with `-DDUST_LIVE` and `-DNVAR=30`.
+- The live executable is retained at
+  `/gpfs/kjhan/LRD_JWST/.dust-live-wiring.OjdUEJ/ramses_live3d`, SHA-256
+  `22faa66ea054782af78ccf48dbe96c6d41afd6faf813f578099eaebcf341ebec`.
+- An actual startup-negative check used that directory's `effective.nml`,
+  copied from the existing initialized-RAMSES template. The reference spectral
+  and secondary contracts were admitted; `dust_native_contract_test.nml`
+  was rejected with `DUST_LIVE requires runtime-approved version-2
+  opacity/thermal data`, followed by `Aborting...`. No output directory was
+  created. The inherited `clean_stop` returns zero even on this refusal, so
+  the rejection log, not process exit status, is the acceptance evidence.
+- Output policy was `noutput=1`, `aout=2`, `tout=1e30`,
+  `foutput=fbackup=1000000`; the early refusal produced zero dumps.
+- `make -s -C bin -B -j4 DUST_LIVE=0 SNRT=1 USE_CUDA=1 HDF5=1`
+  subsequently completed successfully and restored the default executable
+  `bin/ramses_final3d` to the legacy NVAR=18 profile.
