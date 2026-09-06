@@ -6345,6 +6345,41 @@ subroutine AGN_feedback
   real(dp),allocatable,dimension(:)::xdp
   integer::nblock,nresidual,istart,iend,nsink_loc
 
+  ! Reference mode adds optional assumed-shape dummies to these external
+  ! routines.  Keep an explicit interface here so the caller and callee
+  ! agree on descriptors for the optional arrays while retaining the legacy
+  ! explicit-shape contract for all mandatory arguments.
+  interface
+     subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast, &
+          mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN,nscalar,scalar_fields, &
+          metal_slot,cloadAGN,is_replay_ref,is_jet_ref,mload_ref)
+       import :: dp
+       integer :: nAGN,nscalar,metal_slot
+       real(dp) :: xAGN(1:nAGN,1:3),dMBH_AGN(1:nAGN),dMEd_AGN(1:nAGN),mAGN(1:nAGN),jAGN(1:nAGN,1:3)
+       real(dp) :: vol_gas(1:nAGN),mass_gas(1:nAGN),psy_norm(1:nAGN,2),vol_blast(1:nAGN),mass_blast(1:nAGN)
+       integer :: ind_blast(1:nAGN),iAGN_myid(1:nAGN),scalar_fields(nscalar)
+       logical :: ok_blast_agn(1:nAGN)
+       real(dp) :: EsaveAGN(1:nAGN),vloadAGN(1:nAGN,1:3),cloadAGN(nAGN,nscalar)
+       logical, optional, intent(in) :: is_replay_ref(:),is_jet_ref(:)
+       real(dp), optional, intent(in) :: mload_ref(:)
+     end subroutine average_AGN
+
+     subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,vol_gas, &
+          psy_norm,vol_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,spinmagAGN,eps_AGN,vloadAGN, &
+          nscalar,scalar_fields,metal_slot,cloadAGN,is_replay_ref,is_jet_ref,EAGN_ref)
+       import :: dp
+       integer :: nAGN,nscalar,metal_slot
+       real(dp) :: xAGN(1:nAGN,1:3),vAGN(1:nAGN,1:3),dMsmbh_AGN(1:nAGN),dMBH_AGN(1:nAGN)
+       real(dp) :: dMEd_AGN(1:nAGN),mAGN(1:nAGN),jAGN(1:nAGN,1:3),vol_gas(1:nAGN)
+       real(dp) :: psy_norm(1:nAGN,2),vol_blast(1:nAGN),EsaveAGN(1:nAGN)
+       real(dp) :: spinmagAGN(1:nAGN),eps_AGN(1:nAGN),vloadAGN(1:nAGN,1:3),cloadAGN(nAGN,nscalar)
+       integer :: ind_blast(1:nAGN),iAGN_myid(1:nAGN),scalar_fields(nscalar)
+       logical :: ok_blast_agn(1:nAGN)
+       logical, optional, intent(in) :: is_replay_ref(:),is_jet_ref(:)
+       real(dp), optional, intent(in) :: EAGN_ref(:)
+     end subroutine AGN_blast
+  end interface
+
 #ifdef SNRT
   reference_model=snrt_agn_reference_active()
   if (snrt_agn_rt_requested().and..not.reference_model) then

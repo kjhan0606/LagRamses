@@ -185,6 +185,10 @@ class RunWizard:
         self.root, self.generator, self.tk, self.ttk = root, generator, tk, ttk
         self.filedialog, self.messagebox = dialogs
         self.answers, self.files, self.report = [], OrderedDict(), None
+        # Most prompts remain scalar, but AMR base/max levels are one logical
+        # form.  Keep submission sizes so Back removes that form as a unit.
+        self.answer_batches = []
+        self.level_pair_active = False
         self.previous_answer = None
         self.returning = False
         root.title('lagRamses run setup')
@@ -203,7 +207,9 @@ class RunWizard:
 
     def back(self):
         if self.answers:
-            self.previous_answer = self.answers.pop()
+            batch_size = self.answer_batches.pop() if self.answer_batches else 1
+            self.previous_answer = self.answers[-batch_size:]
+            del self.answers[-batch_size:]
             self.returning = True
         self.refresh()
 
@@ -226,8 +232,13 @@ class RunWizard:
         self.show_preview(ui.notes)
 
     def show_question(self, question, notes):
+        self.level_pair_active = False
+        if question.kind == 'value' and question.prompt.startswith('levelmin '):
+            self.show_level_pair(question, notes)
+            return
         if self.returning:
-            question.default = self.previous_answer
+            previous = self.previous_answer
+            question.default = previous[0] if isinstance(previous, list) else previous
             if question.kind == 'floats':
                 question.default = ','.join(str(value) for value in question.default)
             self.returning = False
@@ -287,6 +298,85 @@ class RunWizard:
         self.ttk.Label(self.frame, text='Configuration files only. Saving is a separate step.').pack(
             side='bottom', anchor='w')
 
+    def _level_max_question(self, levelmin):
+        """Replay just far enough to obtain the dependent levelmax prompt."""
+        ui = ReplayUI(self.answers + [levelmin])
+        try:
+            self.generator.generate_run(ui, lambda *_: None)
+        except Question as question:
+            if not question.prompt.startswith('levelmax '):
+                raise ValueError('The shared wizard inserted an unexpected prompt before levelmax.')
+            return question
+        raise ValueError('The shared wizard did not request levelmax after levelmin.')
+
+    def show_level_pair(self, question, notes):
+        """Render the dependent AMR levels as one side-by-side form."""
+        self.level_pair_active = True
+        previous = self.previous_answer if self.returning else None
+        self.returning = False
+        self.previous_answer = None
+        levelmin_default = previous[0] if isinstance(previous, list) else question.default
+        try:
+            levelmax_question = self._level_max_question(levelmin_default)
+        except (ValueError, KeyError, TypeError, OverflowError) as exc:
+            self.ttk.Label(self.frame, text='Setup needs correction', font=('', 16)).pack(anchor='w')
+            self.ttk.Label(self.frame, text=str(exc), wraplength=850).pack(anchor='w', pady=20)
+            self.ttk.Button(self.frame, text='Back', command=self.back).pack(anchor='w')
+            return
+        levelmax_default = previous[1] if isinstance(previous, list) and len(previous) > 1 \
+            else levelmax_question.default
+        self.level_questions = (question, levelmax_question)
+
+        self.ttk.Label(self.frame, text='Run setup — AMR levels', font=('', 16)).pack(anchor='w')
+        headings = [note.strip() for note in notes if note.strip().startswith('===')]
+        if headings:
+            self.ttk.Label(self.frame, text=headings[-1].strip('= ')).pack(anchor='w', pady=8)
+        self.ttk.Label(
+            self.frame,
+            text='Set the base and maximum AMR levels together. Each control is independent; '
+                 'the shared wizard validates the pair before continuing.',
+            wraplength=850).pack(anchor='w', pady=12)
+
+        holder = self.ttk.Frame(self.frame)
+        holder.pack(fill='x', pady=12)
+        self.level_variables = []
+        for column, (level_question, default, title) in enumerate((
+                (question, levelmin_default, 'Base/coarse level'),
+                (levelmax_question, levelmax_default, 'AMR maximum level'))):
+            panel = self.ttk.Frame(holder, padding=(0, 0, 18 if column == 0 else 0, 0))
+            panel.grid(row=0, column=column, sticky='ew')
+            holder.columnconfigure(column, weight=1)
+            self.ttk.Label(panel, text=title).pack(anchor='w')
+            variable = self.tk.StringVar(value=str(default))
+            self.level_variables.append(variable)
+            spinbox = self.ttk.Spinbox(panel, from_=1, to=30, textvariable=variable, width=8)
+            spinbox.pack(anchor='w', pady=8)
+            self.ttk.Label(panel, text=level_question.prompt, wraplength=380).pack(anchor='w')
+        self.level_error = self.ttk.Label(self.frame, text='', foreground='firebrick', wraplength=850)
+        self.level_error.pack(anchor='w', pady=12)
+        buttons = self.ttk.Frame(self.frame)
+        buttons.pack(side='bottom', fill='x', pady=10)
+        self.ttk.Button(buttons, text='Back', command=self.back,
+                        state='normal' if self.answers else 'disabled').pack(side='left')
+        self.ttk.Button(buttons, text='Next', command=self.next_level_pair).pack(side='right')
+        self.ttk.Label(self.frame, text='Both AMR levels are collected before the next wizard step.').pack(
+            side='bottom', anchor='w')
+
+    def next_level_pair(self):
+        try:
+            first, _ = self.level_questions
+            levelmin = parse_answer(first, self.level_variables[0].get(), self.generator)
+            levelmax_question = self._level_max_question(levelmin)
+            levelmax = parse_answer(levelmax_question, self.level_variables[1].get(), self.generator)
+            if not 1 <= levelmin <= levelmax <= 30:
+                raise ValueError('Require 1 <= levelmin <= levelmax <= 30.')
+        except (ValueError, TypeError, OverflowError) as exc:
+            self.level_error.configure(text=str(exc))
+            return
+        self.answers.extend((levelmin, levelmax))
+        self.answer_batches.append(2)
+        self.refresh()
+
     def browse_directory(self):
         path = self.filedialog.askdirectory(parent=self.root, mustexist=True)
         if path:
@@ -313,6 +403,7 @@ class RunWizard:
             self.error.configure(text=str(exc))
             return
         self.answers.append(answer)
+        self.answer_batches.append(1)
         self.refresh()
 
     def show_preview(self, notes):
@@ -372,13 +463,13 @@ def launch(generator):
         from tkinter import filedialog, messagebox, ttk
     except ImportError as exc:
         print('GUI unavailable: Tkinter is not installed ({}). Use a Python with '
-              'Tk support, or run mkrun.py without --gui for the CLI.'.format(exc), file=sys.stderr)
+              'Tk support, or run mkrun.py --mode cli for the CLI.'.format(exc), file=sys.stderr)
         return 2
     try:
         root = tk.Tk()
     except tk.TclError as exc:
         print('GUI unavailable: cannot open a graphical display ({}). Run from '
-              'a desktop/display-enabled session, or omit --gui for the CLI.'.format(exc),
+              'a desktop/display-enabled session, or use mkrun.py --mode cli.'.format(exc),
               file=sys.stderr)
         return 2
     try:

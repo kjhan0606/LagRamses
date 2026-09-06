@@ -15,8 +15,9 @@ hydro) basic physics -- then writes:
 Scope: cosmological (cosmo=.true.) runs only. For idealized test
 problems (Sedov, tubes, ...) copy one of namelist/*.nml directly.
 
-Run: python3 mkrun.py          # terminal wizard
-     python3 mkrun.py --gui    # graphical setup, preview and confirmed save
+Run: python3 mkrun.py                 # terminal wizard
+     python3 mkrun.py --mode gui      # graphical setup, preview and confirmed save
+     python3 mkrun.py --gui            # legacy alias for --mode gui
 """
 import argparse
 import math
@@ -801,11 +802,12 @@ def write_genetic_param(path, name, omega_m, omega_l, h, ns, sigma8, z_start, se
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--mode', choices=('cli', 'gui'), default=None,
+                        help='Select the setup interface (default: cli).')
     parser.add_argument('--gui', action='store_true',
-                        help='Open the Tkinter setup wizard with preview and confirmed save; '
-                             'never launches simulations or submits jobs')
+                        help='Legacy alias for --mode gui; never launches simulations or submits jobs')
     args = parser.parse_args(argv)
-    if args.gui:
+    if args.gui or args.mode == 'gui':
         from ramses_run_gui import launch
         return launch(sys.modules[__name__])
     generate_run()

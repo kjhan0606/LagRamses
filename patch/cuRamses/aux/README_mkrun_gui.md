@@ -1,6 +1,7 @@
 # Run configuration wizard
 
-From the repository root, run `python3 mkrun.py --gui`. With no arguments,
+From the repository root, run `python3 mkrun.py --mode gui`. The older
+`--gui` spelling remains a compatibility alias. With no arguments,
 `mkrun.py` retains its terminal wizard. `--help` works without Tkinter or a display.
 GUI mode requires Python's Tkinter module and a graphical desktop or forwarded
 display; an unavailable dependency/display produces an actionable error and exit
@@ -8,8 +9,10 @@ status 2. No packages are downloaded automatically.
 
 Next/Back walks the same prompts and defaults as the terminal wizard, including
 DMO/hydro, dark matter and gravity sectors, cosmology, AMR, zoom, IC pipeline,
-output epochs and hydro settings. Returning to a question retains its answer;
-changing it rebuilds subsequent questions. Advanced parameters use a JSON object
+output epochs and hydro settings. The base and maximum AMR levels are shown in
+one side-by-side form, so they can be adjusted together and validated as a pair.
+Returning to a question retains its answer; changing it rebuilds subsequent questions.
+Advanced parameters use a JSON object
 with names from the existing namelist database, typed numbers/booleans and quoted
 Fortran array lists. As in the terminal wizard, the subsequent generation stage
 sets output epochs, IC paths and the selected cooling defaults.

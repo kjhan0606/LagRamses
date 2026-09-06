@@ -102,7 +102,8 @@ contains
     use amr_commons, only: levelmin, nstep_coarse, myid, dtnew, boxlen, &
          icoarse_min, icoarse_max, ncpu, nrestart
     use hydro_commons, only: uold
-    use pm_commons, only: nsink, xsink, idsink, agn_pending_erg
+    use pm_commons, only: nsink, xsink, idsink, agn_pending_erg, nindsink, msink, vsink, jsink, &
+         dMBH_coarse, dMEd_coarse, dMsmbh, Esave, spinmag
     use snrt_state, only: snrt_ndirection, snrt_ngroups, snrt_intensity, &
          snrt_nslot, &
          snrt_neutral_fraction, snrt_hydrogen_ii, snrt_helium_ii, &
@@ -185,6 +186,7 @@ contains
     integer :: convergence_status
     integer :: chemistry_failures
     integer :: n_locator_calls, n_active_sources
+    logical, save :: test_seed_checked = .false.
     integer, allocatable :: leaf_cell(:), leaf_slot(:), neighbor(:,:)
     real(dp) :: direction_dp(snrt_ndirection,3), angular_weight(snrt_ndirection)
     real(dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
@@ -450,6 +452,58 @@ contains
             ' SNRT RT preflight failed closed: hydro thermal field is unavailable on one or more ranks'
        call clean_stop
        return
+    end if
+
+    ! Explicitly opt-in harness seed.  The normal runtime never sets this
+    ! variable; it exists only to exercise the production driver with a
+    ! fresh-start source when no restart payload is available.  Keep the
+    ! seed in the driver so the tested source->RT call sequence is unchanged.
+    if (.not. test_seed_checked) then
+       test_seed_checked = .true.
+       env_value = ''
+       call get_environment_variable('SNRT_DRIVER_TEST_SEED_SOURCE', env_value, &
+            length=env_length, status=env_status)
+       if (env_status == 0 .and. trim(env_value) == '1') then
+          if (.not. transaction_diagnostic_mode) then
+             if (myid == 1) write(*,'(A)') &
+                  ' SNRT_DRIVER_TEST_SEED_SOURCE rejected: diagnostic mode required'
+          else if (nsink /= 0) then
+             if (myid == 1) write(*,'(A)') &
+                  ' SNRT_DRIVER_TEST_SEED_SOURCE rejected: sinks already exist'
+          else if (.not. allocated(xsink) .or. .not. allocated(idsink) .or. &
+               .not. allocated(agn_pending_erg) .or. .not. allocated(msink) .or. &
+               .not. allocated(vsink) .or. .not. allocated(jsink) .or. &
+               .not. allocated(dMBH_coarse) .or. .not. allocated(dMEd_coarse) .or. &
+               .not. allocated(dMsmbh) .or. .not. allocated(Esave) .or. &
+               .not. allocated(spinmag)) then
+             if (myid == 1) write(*,'(A)') &
+                  ' SNRT_DRIVER_TEST_SEED_SOURCE rejected: sink arrays unavailable'
+          else if (size(xsink,1) < 1 .or. size(xsink,2) < ndim .or. &
+               size(idsink) < 1 .or. size(agn_pending_erg) < 1 .or. &
+               size(msink) < 1 .or. size(vsink,1) < 1 .or. size(vsink,2) < ndim .or. &
+               size(jsink,1) < 1 .or. size(jsink,2) < ndim .or. &
+               size(dMBH_coarse) < 1 .or. size(dMEd_coarse) < 1 .or. &
+               size(dMsmbh) < 1 .or. size(Esave) < 1 .or. size(spinmag) < 1) then
+             if (myid == 1) write(*,'(A)') &
+                  ' SNRT_DRIVER_TEST_SEED_SOURCE rejected: sink arrays too small'
+          else
+             nsink = 1
+             nindsink = 1
+             idsink(1) = 1
+             xsink(1,1:ndim) = 0.5d0 * boxlen
+             msink(1) = 1.0d0
+             vsink(1,1:ndim) = 0.0d0
+             jsink(1,1:ndim) = 0.0d0
+             dMBH_coarse(1) = 0.0d0
+             dMEd_coarse(1) = 0.0d0
+             dMsmbh(1) = 0.0d0
+             Esave(1) = 0.0d0
+             spinmag(1) = 0.0d0
+             agn_pending_erg(1) = 1.0d-6
+             if (myid == 1) write(*,'(A)') &
+                  ' SNRT_DRIVER_TEST_SEED_SOURCE applied: NONPRODUCTION'
+          end if
+       end if
     end if
 
     wall_start = omp_get_wtime()

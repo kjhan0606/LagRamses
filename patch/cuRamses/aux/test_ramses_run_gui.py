@@ -145,6 +145,17 @@ class WizardTests(unittest.TestCase):
                 mkrun.main(['--help'])
         self.assertEqual(caught.exception.code, 0)
 
+    def test_mode_gui_dispatches_to_shared_frontend(self):
+        with mock.patch('ramses_run_gui.launch', return_value=0) as launch:
+            self.assertEqual(mkrun.main(['--mode', 'gui']), 0)
+            self.assertEqual(mkrun.main(['--gui', '--mode', 'gui']), 0)
+        self.assertEqual(launch.call_count, 2)
+        self.assertTrue(all(call == mock.call(mkrun) for call in launch.call_args_list))
+
+    def test_level_pair_replay_is_two_answers(self):
+        answers, _, _ = collect()
+        self.assertEqual(answers[11:13], [8, 14])
+
     def test_missing_tk_is_graceful(self):
         with mock.patch.dict(sys.modules, {'tkinter': None}), \
                 contextlib.redirect_stderr(io.StringIO()) as stderr:
@@ -245,6 +256,10 @@ class DisplayTests(unittest.TestCase):
                     root.update_idletasks()
                     if wizard.report is not None:
                         break
+                    if wizard.level_pair_active:
+                        self.assertEqual(len(wizard.level_variables), 2)
+                        wizard.next_level_pair()
+                        continue
                     question = wizard.question
                     if question.kind == 'choice' and 'Run mode' in question.prompt:
                         wizard.choice_list.selection_clear(0, 'end')
