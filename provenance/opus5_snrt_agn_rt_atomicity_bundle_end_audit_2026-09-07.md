@@ -63,8 +63,10 @@ The implementation evidence records successful native source/transaction
 smokes and active-driver compile checks. The Opus audit itself was read-only
 and did not rerun writers. Existing linked binaries were not accepted as
 HEAD-qualified evidence for `210b611` because the recorded binary predates the
-commit and embeds an older dirty identity. A fresh full-link record and a
-driver-faithful failure harness remain verification work.
+commit and embeds an older dirty identity. At audit time, a fresh full-link
+record and a driver-faithful failure harness remained verification work; the
+clean full-link condition is closed below, while the driver-faithful harness
+remains open.
 
 After the audit, the following bounded rechecks were run from the active
 `/gpfs/kjhan/LRD_JWST` tree:
@@ -92,9 +94,23 @@ After the audit, the following bounded rechecks were run from the active
   change. They are therefore fresh working-tree links, not clean-tree
   revision artifacts.
 
-These rechecks do not close the two remaining evidence conditions above: they
-are not a production-driver failure harness and do not constitute a clean
-exact-revision artifact.
+The clean-revision condition was subsequently closed in a separate worktree
+at commit `b5b20e12b66b17efd943be9562224be79be1a7b8`:
+
+- `make -C bin -B -j1 SNRT=1 DUST_LIVE=0 USE_CUDA=1 HDF5=1
+  EXEC=/gpfs/kjhan/LRD_JWST/.snrt-clean-b5b20e1/ramses_snrt_clean_cpu ramses`
+  passed and produced `ramses_snrt_clean_cpu3d`.
+- `make -C bin -B -j1 SNRT=1 DUST_LIVE=1 USE_CUDA=1 HDF5=1
+  EXEC=/gpfs/kjhan/LRD_JWST/.snrt-clean-b5b20e1/ramses_snrt_clean_dust ramses`
+  passed and produced `ramses_snrt_clean_dust3d`.
+
+The clean worktree contained no unrelated tracked changes, and both link
+logs embedded the exact `b5b20e1` identity. The `-j1` choice is recorded
+because the Makefile does not fully order the initial module compilation for
+`-j4`; this is a build-hygiene limitation, not a source-link failure.
+
+The remaining evidence condition is the production-driver failure harness;
+the clean full-link condition is now closed.
 
 The conditional result does not approve physical AGN SED/MAD choices,
 restart/migration persistence, simultaneous legacy-plus-SNRT ownership,

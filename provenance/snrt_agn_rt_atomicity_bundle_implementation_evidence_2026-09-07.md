@@ -83,6 +83,14 @@ exact, while the worktree also contained pending audit-closure edits and an
 unrelated tracked change. These are fresh working-tree links, not clean-tree
 revision artifacts.
 
+The exact-revision link condition was then verified in the clean detached
+worktree `/gpfs/kjhan/LRD_JWST/.snrt-clean-b5b20e1` at commit
+`b5b20e12b66b17efd943be9562224be79be1a7b8`. Serial (`-j1`) full links passed
+for both `DUST_LIVE=0` and `DUST_LIVE=1`, producing
+`ramses_snrt_clean_cpu3d` and `ramses_snrt_clean_dust3d`, respectively. The
+link logs embed the exact clean commit identity. Serial build is used because
+the initial module dependency graph is not safe for a cold `-j4` build.
+
 ## Boundary and remaining limits
 
 This closes source-ledger consumption ordering for the current serial,
