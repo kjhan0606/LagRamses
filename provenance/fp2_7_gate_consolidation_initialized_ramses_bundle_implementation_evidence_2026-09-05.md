@@ -154,3 +154,15 @@ production/publication-ready for physical dusty feedback: physical stellar
 yield/source admission, stellar/AGN SED activation, persistent dust state,
 nonzero dust optical depth, dust thermal/momentum receiver, and live IR
 transport remain explicit G2--G5 blockers.
+
+## D4 binary-specific completion update — 2026-09-06
+
+The pending rerun noted above has completed. Slurm job `333272` returned exit
+code `0` on `syn03` with two MPI ranks and two A10 GPUs, using
+`simulation/snrt/build/g5_startup_contract_admission/ramses3d` with SHA-256
+`e30a938397781ee02eb060222937007f659bed4a0e5d268c1cee125901e019f0`. The
+baseline emitted startup contract admission, transaction commit, closure, and
+completion markers. The injected receiver case emitted both the transaction
+rollback and diagnostic fail-closed markers. No `output_*` directory was
+created in either case. D4 is therefore PASS for the current startup binary;
+the production/publication physical blockers listed above are unchanged.

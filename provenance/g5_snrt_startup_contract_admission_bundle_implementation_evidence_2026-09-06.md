@@ -82,3 +82,28 @@ reference/control SNRT+feedback qualification path after D4 completion, but
 not yet production/publication-ready for physical dusty feedback.  The latter
 requires the explicitly recorded G2/G3/G4/G5 physical assets and live dust
 receiver rather than another static validator.
+
+## D4 completion update — 2026-09-06
+
+Slurm job `333272` completed with exit code `0` on `syn03` using the recorded
+startup-contract binary
+`/gpfs/kjhan/LRD_JWST/simulation/snrt/build/g5_startup_contract_admission/ramses3d`
+(SHA-256
+`e30a938397781ee02eb060222937007f659bed4a0e5d268c1cee125901e019f0`). The
+job used two MPI ranks and two A10 GPUs; elapsed wall time was 10 seconds.
+
+The case root is
+`simulation/snrt/runs/fp2_7_initialized_ramses_smoke/job_333272/`:
+
+* baseline passed startup spectral and thermochemistry admission,
+  `SNRT_RT_TRANSACTION_COMMIT_PASS`, `SNRT_RT_CLOSURE_PASS`, finite-state
+  diagnostics, and `Run completed`;
+* injected receiver failure passed the exact rollback markers
+  `SNRT RT transaction rollback: class=receiver` and
+  `SNRT_RT_DIAGNOSTIC_FAIL_CLOSED class=receiver`;
+* both cases used the effective namelist recorded in their case directories,
+  and neither created an `output_*` directory.
+
+This is the binary-specific completion of D4. It closes initialized SNRT
+runtime qualification only; `ZERO_SCAFFOLD`, physical source admission, and
+live dusty feedback remain unchanged.
