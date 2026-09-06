@@ -456,6 +456,24 @@ subroutine read_hydro_params(nml_ok)
   if(aton)ichem=ixion+1
   isgs=ichem
   if(use_sgs)isgs=ichem+1
+#ifdef DUST_LIVE
+  ! Reserve the dust fields after the full channel-resolved element window.
+  ! This prevents collision with ichem:ichem+10 even when that optional
+  ! feedback path is disabled in a particular runtime namelist.
+  idust=ichem+11
+  idust_energy=idust+1
+  if(.not.hydro)then
+     if(myid==1)write(*,*) 'ERROR: DUST_LIVE requires hydro=.true.'
+     nml_ok=.false.
+  endif
+  if(nvar<idust_energy)then
+     if(myid==1)then
+        write(*,*) 'ERROR: DUST_LIVE requires NVAR >= ',idust_energy
+        write(*,*) '  Current NVAR=',nvar,'. Recompile with the live profile or a larger NVAR'
+     endif
+     call clean_stop
+  endif
+#endif
   if(myid==1) then
      write(*,*) 'Hydro var indices:'
 #if NENER>0
@@ -467,6 +485,11 @@ subroutine read_hydro_params(nml_ok)
      if(aton)            write(*,*) '   ixion   = ',ixion
      write(*,*) '   ichem   = ',ichem
      if(use_sgs)         write(*,*) '   isgs    = ',isgs
+#ifdef DUST_LIVE
+     write(*,*) '   idust   = ',idust
+     write(*,*) '   idust_energy = ',idust_energy
+     write(*,*) '   DUST_LIVE fields are primitive dust mass/energy per gas mass in IC input'
+#endif
   endif
   ! Last variable is isgs (or ichem if use_sgs=.false.)
   ! Runtime check: make sure NVAR is large enough

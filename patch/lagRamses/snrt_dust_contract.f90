@@ -24,6 +24,7 @@ module snrt_dust_contract
 
   integer, save, public :: snrt_dust_contract_number_groups = 0
   integer, save, public :: snrt_dust_contract_number_temperature = 0
+  integer, save, public :: snrt_dust_contract_version = 0
   real(real64), save, public :: snrt_dust_contract_group_edges_ev( &
        snrt_dust_contract_max_groups + 1) = 0.0d0
   real(real64), save, public :: snrt_dust_contract_absorption_per_h_cm2( &
@@ -35,6 +36,7 @@ module snrt_dust_contract
   real(real64), save, public :: snrt_dust_contract_emitted_power_per_h_erg_s( &
        snrt_dust_contract_max_temperature) = 0.0d0
   real(real64), save, public :: snrt_dust_contract_mass_per_h_g = 0.0d0
+  real(real64), save, public :: snrt_dust_contract_heat_capacity_per_h_erg_k = 0.0d0
   logical, save, public :: snrt_dust_contract_loaded = .false.
   logical, save, public :: snrt_dust_contract_runtime_allowed = .false.
   character(len=64), save, public :: snrt_dust_contract_opacity_status = ''
@@ -69,12 +71,14 @@ contains
     real(real64) :: temperature_input(snrt_dust_contract_max_temperature)
     real(real64) :: power_input(snrt_dust_contract_max_temperature)
     real(real64) :: mass_per_h_input
+    real(real64) :: heat_capacity_per_h_erg_k_input
 
     namelist /snrt_dust_contract/ contract_version, ngroups_input, &
          ntemperature_input, opacity_status, thermal_status, source_id, &
          source_sha256, source_table_sha256, group_edges_sha256, approval_id, &
          thermal_source, edges_input, absorption_input, mean_energy_input, &
-         temperature_input, power_input, mass_per_h_input
+         temperature_input, power_input, mass_per_h_input, &
+         heat_capacity_per_h_erg_k_input
 
     call snrt_dust_contract_reset()
     ierr = snrt_dust_contract_ok
@@ -101,6 +105,7 @@ contains
     temperature_input = -1.0d0
     power_input = -1.0d0
     mass_per_h_input = -1.0d0
+    heat_capacity_per_h_erg_k_input = -1.0d0
 
     open(newunit=unit, file=trim(filename), status='old', action='read', &
          form='formatted', iostat=open_ierr)
@@ -117,9 +122,10 @@ contains
        snrt_dust_contract_error_message = trim(read_message)
        return
     end if
-    if (contract_version /= 1) then
+    if (contract_version /= 1 .and. contract_version /= 2) then
        ierr = snrt_dust_contract_err_version
-       snrt_dust_contract_error_message = 'only snrt_dust_contract version 1 is supported'
+       snrt_dust_contract_error_message = &
+            'only snrt_dust_contract versions 1 and 2 are supported'
        return
     end if
     if (.not. known_opacity_status(opacity_status) .or. &
@@ -148,6 +154,14 @@ contains
        snrt_dust_contract_error_message = 'reference dust mass per H is invalid'
        return
     end if
+    if (contract_version >= 2 .and. &
+         (heat_capacity_per_h_erg_k_input <= 0.0d0 .or. &
+          .not. ieee_is_finite(heat_capacity_per_h_erg_k_input))) then
+       ierr = snrt_dust_contract_err_values
+       snrt_dust_contract_error_message = &
+            'version 2 requires a positive dust heat capacity per H'
+       return
+    end if
     if (.not. valid_opacity_values(ngroups_input, edges_input, absorption_input, &
          mean_energy_input) .or. .not. valid_thermal_values(ntemperature_input, &
          temperature_input, power_input)) then
@@ -156,6 +170,7 @@ contains
        return
     end if
 
+    snrt_dust_contract_version = contract_version
     snrt_dust_contract_number_groups = ngroups_input
     snrt_dust_contract_number_temperature = ntemperature_input
     snrt_dust_contract_group_edges_ev(1:ngroups_input + 1) = &
@@ -169,6 +184,8 @@ contains
     snrt_dust_contract_emitted_power_per_h_erg_s(1:ntemperature_input) = &
          power_input(1:ntemperature_input)
     snrt_dust_contract_mass_per_h_g = mass_per_h_input
+    if (contract_version >= 2) snrt_dust_contract_heat_capacity_per_h_erg_k = &
+         heat_capacity_per_h_erg_k_input
     snrt_dust_contract_opacity_status = trim(opacity_status)
     snrt_dust_contract_thermal_status = trim(thermal_status)
     snrt_dust_contract_source_id = trim(source_id)
@@ -179,9 +196,11 @@ contains
     snrt_dust_contract_thermal_source = trim(thermal_source)
     snrt_dust_contract_loaded = .true.
     snrt_dust_contract_runtime_allowed = &
+         contract_version >= 2 .and. &
          trim(opacity_status) == 'approved_production' .and. &
          trim(thermal_status) == 'approved_thermal_production' .and. &
-         len_trim(approval_id) > 0
+         len_trim(approval_id) > 0 .and. &
+         heat_capacity_per_h_erg_k_input > 0.0d0
   end subroutine snrt_dust_contract_load
 
 
@@ -206,12 +225,14 @@ contains
   subroutine snrt_dust_contract_reset()
     snrt_dust_contract_number_groups = 0
     snrt_dust_contract_number_temperature = 0
+    snrt_dust_contract_version = 0
     snrt_dust_contract_group_edges_ev = 0.0d0
     snrt_dust_contract_absorption_per_h_cm2 = 0.0d0
     snrt_dust_contract_absorption_mean_energy_ev = 0.0d0
     snrt_dust_contract_temperature_k = 0.0d0
     snrt_dust_contract_emitted_power_per_h_erg_s = 0.0d0
     snrt_dust_contract_mass_per_h_g = 0.0d0
+    snrt_dust_contract_heat_capacity_per_h_erg_k = 0.0d0
     snrt_dust_contract_loaded = .false.
     snrt_dust_contract_runtime_allowed = .false.
     snrt_dust_contract_opacity_status = ''

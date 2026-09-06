@@ -1,6 +1,6 @@
 {
-  "binary": "/gpfs/kjhan/LRD_JWST/.snrt-bundle-gate.kfPWMh/ramses_bundle3d",
-  "binary_sha256": "684dec40632e94058f5fd35028aeda20985418eb37a365bd33303f31f7f6ada0",
+  "binary": "/gpfs/kjhan/LRD_JWST/.snrt-bundle-gate.KGhcNa/ramses_bundle3d",
+  "binary_sha256": "8e59bfc42e7b8a6a97ca02c61746402e13fbd6dea145dd2d75d5c93d5e9c4bc9",
   "contract": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp2_snia_runtime_contract_v1.nml",
   "contract_sha256": "8c18f48d211a0983db99e11c4058644a708cb507182649c686415e5ef5239eaa",
   "interpretation": "The actual production binary loads or rejects the ordered SNIa contract, then fails closed before evolution; this is startup negative evidence, not an active SNIa physics run.",

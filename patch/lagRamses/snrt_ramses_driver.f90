@@ -108,6 +108,7 @@ contains
          snrt_neutral_fraction, snrt_hydrogen_ii, snrt_helium_ii, &
          snrt_helium_iii, snrt_state_get_slot
     use snrt_spectral_contract, only: &
+         snrt_nedges, snrt_group_edges_ev, snrt_group_edges_sha256, &
          snrt_group_mean_energy_ev, snrt_group_energy_fraction, &
          snrt_group_cross_section_cm2, snrt_group_cross_section_hei_cm2, &
          snrt_group_cross_section_heii_cm2, &
@@ -135,6 +136,17 @@ contains
          snrt_failure_receiver, snrt_failure_transport, snrt_failure_convergence
     use snrt_dust_transaction, only: snrt_dust_validate_ledgers, &
          snrt_dust_transaction_ok
+    use snrt_dust_contract, only: snrt_dust_contract_loaded, &
+         snrt_dust_contract_runtime_allowed, snrt_dust_contract_number_groups, &
+         snrt_dust_contract_number_temperature, snrt_dust_contract_group_edges_ev, &
+         snrt_dust_contract_group_edges_sha256, &
+         snrt_dust_contract_absorption_per_h_cm2, &
+         snrt_dust_contract_absorption_mean_energy_ev, &
+         snrt_dust_contract_temperature_k, &
+         snrt_dust_contract_mass_per_h_g, &
+         snrt_dust_contract_heat_capacity_per_h_erg_k
+    use snrt_dust_receiver, only: snrt_dust_prepare_cell_optical_depth, &
+         snrt_dust_receiver_stage
     use snrt_angular_quadrature, only: snrt_angular_init
     use snrt_agn_locator, only: snrt_agn_find_local_leaf
     use snrt_agn_source, only: snrt_c_cgs, snrt_agn_photon_budget_energy, &
@@ -149,7 +161,7 @@ contains
          snrt_mean_molecular_weight, snrt_inventory_tolerance
     use snrt_cuda_interface, only: snrt_cuda_available
     use amr_parameters, only: dp, ndim, spin_bh, mad_jet, X_floor
-    use hydro_parameters, only: gamma
+    use hydro_parameters, only: gamma, idust, idust_energy
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use iso_c_binding, only: c_float
     use omp_lib, only: omp_get_wtime
@@ -177,6 +189,9 @@ contains
     real(dp) :: n_hydrogen_cm3, n_helium_cm3
     real(dp) :: neutral_hydrogen_code, neutral_helium_i_code, neutral_helium_ii_code
     real(dp) :: temperature_k, internal_energy, kinetic_energy, molecular_weight
+#ifdef DUST_LIVE
+    real(dp) :: dust_mass_code, dust_energy_code, dust_energy_scale
+#endif
     real(dp) :: tau_dp(snrt_ngroups), tau_hi_dp(snrt_ngroups)
     real(dp) :: tau_hei_dp(snrt_ngroups), tau_heii_dp(snrt_ngroups)
     real(dp) :: unassigned_absorption_total, ledger_relative_error
@@ -210,6 +225,14 @@ contains
     real(dp), allocatable :: trial_absorbed_species(:,:,:)
     real(dp), allocatable :: current_fraction(:,:), target_fraction(:,:)
     real(dp), allocatable :: emitted_groups(:), luminosity_groups(:)
+#ifdef DUST_LIVE
+    real(dp), allocatable :: dust_relative_abundance(:), dust_heat_capacity(:)
+    real(dp), allocatable :: dust_old_energy(:), dust_old_temperature(:)
+    real(dp), allocatable :: dust_trial_energy(:), dust_trial_temperature(:)
+    real(dp), allocatable :: dust_absorbed_photons(:,:), dust_absorbed_energy(:)
+    real(dp), allocatable :: dust_n_hydrogen_cm3(:), dust_path_cm(:)
+    real(dp), allocatable :: dust_tau_dp(:,:)
+#endif
     logical :: enabled, source_ok, accounting_identity_ok
     logical :: transaction_converged, transaction_active
     logical :: transaction_diagnostic_mode
@@ -226,9 +249,18 @@ contains
     logical, save :: transaction_diagnostic_mode_latched = .false.
     logical, save :: transaction_config_reported = .false.
     logical, save :: dust_scaffold_reported = .false.
+#ifdef DUST_LIVE
+    logical, save :: dust_contract_checked = .false.
+    logical, save :: dust_contract_ok = .false.
+#endif
     real(dp), save :: reduced_c = 0.01d0
     integer, save :: level_filter = -1
-    character(len=13), parameter :: dust_tau_mode = 'ZERO_SCAFFOLD'
+    character(len=20), parameter :: dust_tau_mode = &
+#ifdef DUST_LIVE
+         'LIVE_ABSORPTION'
+#else
+         'ZERO_SCAFFOLD'
+#endif
 
     enabled = .false.
     if (.not. enabled_resolved) then
@@ -270,9 +302,35 @@ contains
     enabled = enabled_latched
     transaction_diagnostic_mode = transaction_diagnostic_mode_latched
     if (.not. enabled) return
+#ifdef DUST_LIVE
+    if (.not. dust_contract_checked) then
+       dust_contract_ok = snrt_dust_contract_loaded .and. &
+            snrt_dust_contract_runtime_allowed .and. &
+            snrt_dust_contract_number_groups == snrt_ngroups .and. &
+            snrt_dust_contract_number_temperature >= 2 .and. &
+            trim(snrt_dust_contract_group_edges_sha256) == trim(snrt_group_edges_sha256)
+       if (dust_contract_ok) then
+          dust_contract_ok = maxval(abs(snrt_dust_contract_group_edges_ev(1:snrt_nedges) - &
+               snrt_group_edges_ev)) <= 1.0d-12 * max(1.0d0, &
+               maxval(abs(snrt_group_edges_ev)))
+       end if
+       dust_contract_checked = .true.
+       if (myid == 1 .and. .not. dust_contract_ok) then
+          write(*,'(A)') ' SNRT DUST_LIVE disabled: dust contract does not match the canonical nine-group runtime'
+       endif
+    endif
+    if (.not. dust_contract_ok) then
+       call clean_stop
+       return
+    endif
+#endif
     if (myid == 1 .and. .not. dust_scaffold_reported) then
        write(*,'(A,A)') ' SNRT dust optical-depth mode=', trim(dust_tau_mode)
+#ifdef DUST_LIVE
+       write(*,'(A)') '   dust mass/thermal-energy fields are staged with the coupled RT transaction'
+#else
        write(*,'(A)') '   dust ledger is trial-only; no dust thermal/momentum/abundance commit'
+#endif
        dust_scaffold_reported = .true.
     end if
     ! Do not guess unknown historical photon ownership by either replaying
@@ -441,6 +499,14 @@ contains
          trial_heating_rate(nleaf), trial_unassigned(nleaf), &
          trial_absorbed_species(nleaf,3,snrt_ngroups), &
          current_fraction(nleaf,3), target_fraction(nleaf,3))
+#ifdef DUST_LIVE
+    allocate(dust_relative_abundance(nleaf), dust_heat_capacity(nleaf), &
+         dust_old_energy(nleaf), dust_old_temperature(nleaf), &
+         dust_trial_energy(nleaf), dust_trial_temperature(nleaf), &
+         dust_absorbed_photons(snrt_ngroups,nleaf), dust_absorbed_energy(nleaf), &
+         dust_n_hydrogen_cm3(nleaf), dust_path_cm(nleaf), &
+         dust_tau_dp(nleaf,snrt_ngroups))
+#endif
     optical_depth_dust = 0.0_c_float
     raw_group = 0.0_c_float
     absorbed_hhe_group_species = 0.0_c_float
@@ -454,6 +520,11 @@ contains
 
     wall_start = omp_get_wtime()
     hydro_state_invalid = .false.
+#ifdef DUST_LIVE
+    dust_energy_scale = scale_d * scale_v**2
+    if (.not. ieee_is_finite(dust_energy_scale) .or. dust_energy_scale <= 0.0d0) &
+         hydro_state_invalid = .true.
+#endif
     do i = 1, nleaf
        icell = leaf_cell(i)
        islot = leaf_slot(i)
@@ -475,6 +546,52 @@ contains
           hydro_state_invalid = .true.
        end if
        rho_level(i) = rho_code
+#ifdef DUST_LIVE
+       dust_n_hydrogen_cm3(i) = rho_code * scale_nH
+       dust_path_cm(i) = dx_code * scale_l
+       dust_relative_abundance(i) = 0.0d0
+       dust_heat_capacity(i) = 1.0d0
+       dust_old_energy(i) = 0.0d0
+       dust_old_temperature(i) = max(1.0d0, snrt_dust_contract_temperature_k(1))
+       dust_mass_code = -1.0d0
+       dust_energy_code = -1.0d0
+       if (icell >= 1 .and. icell <= size(uold,1) .and. &
+            size(uold,2) >= idust_energy) then
+          dust_mass_code = uold(icell,idust)
+          dust_energy_code = uold(icell,idust_energy)
+          if (.not. ieee_is_finite(dust_mass_code) .or. &
+               .not. ieee_is_finite(dust_energy_code) .or. &
+               dust_mass_code < 0.0d0 .or. dust_energy_code < 0.0d0) then
+             hydro_state_invalid = .true.
+          else if (dust_mass_code > 0.0d0) then
+             if (dust_n_hydrogen_cm3(i) <= 0.0d0 .or. &
+                  dust_energy_code <= 0.0d0) then
+                hydro_state_invalid = .true.
+             else
+                dust_relative_abundance(i) = dust_mass_code * scale_d / &
+                     (dust_n_hydrogen_cm3(i) * snrt_dust_contract_mass_per_h_g)
+                dust_heat_capacity(i) = dust_n_hydrogen_cm3(i) * &
+                     dust_relative_abundance(i) * &
+                     snrt_dust_contract_heat_capacity_per_h_erg_k
+                dust_old_energy(i) = dust_energy_code * dust_energy_scale
+                dust_old_temperature(i) = dust_old_energy(i) / dust_heat_capacity(i)
+                if (.not. ieee_is_finite(dust_relative_abundance(i)) .or. &
+                     .not. ieee_is_finite(dust_heat_capacity(i)) .or. &
+                     .not. ieee_is_finite(dust_old_energy(i)) .or. &
+                     .not. ieee_is_finite(dust_old_temperature(i)) .or. &
+                     dust_relative_abundance(i) <= 0.0d0 .or. &
+                     dust_heat_capacity(i) <= 0.0d0 .or. &
+                     dust_old_energy(i) <= 0.0d0 .or. &
+                     dust_old_temperature(i) <= 0.0d0) hydro_state_invalid = .true.
+             end if
+          else if (dust_energy_code > 0.0d0) then
+             ! A thermal dust energy without a dust mass is not a valid state.
+             hydro_state_invalid = .true.
+          end if
+       else
+          hydro_state_invalid = .true.
+       end if
+#endif
        hydrogen_ionized_fraction = 0.0d0
        helium_ionized_fraction = 0.0d0
        helium_double_ionized_fraction = 0.0d0
@@ -537,6 +654,17 @@ contains
        optical_depth_species(i,:,2) = optical_depth_helium_i(i,:)
        optical_depth_species(i,:,3) = optical_depth_helium_ii(i,:)
     end do
+#ifdef DUST_LIVE
+    call snrt_dust_prepare_cell_optical_depth(dust_n_hydrogen_cm3, dust_path_cm, &
+         dust_relative_abundance, snrt_dust_contract_absorption_per_h_cm2, &
+         dust_tau_dp, ierr)
+    if (ierr /= 0 .or. any(.not. ieee_is_finite(dust_tau_dp)) .or. &
+         any(dust_tau_dp < 0.0d0)) then
+       hydro_state_invalid = .true.
+       dust_tau_dp = 0.0d0
+    end if
+    optical_depth_dust = real(dust_tau_dp, c_float)
+#endif
     t_nlte = omp_get_wtime() - wall_start
 
     ! A non-finite hydro receiver value must never be replaced by the local
@@ -565,6 +693,12 @@ contains
             trial_neutral_hydrogen, trial_thermal, rho_level, temperature_level, &
             trial_heating_rate, trial_unassigned, trial_absorbed_species, &
             current_fraction, target_fraction)
+#ifdef DUST_LIVE
+       deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
+            dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
+            dust_absorbed_photons, dust_absorbed_energy, dust_n_hydrogen_cm3, &
+            dust_path_cm, dust_tau_dp)
+#endif
        call clean_stop
        return
     end if
@@ -686,6 +820,12 @@ contains
             trial_neutral_hydrogen, trial_thermal, rho_level, temperature_level, &
             trial_heating_rate, trial_unassigned, trial_absorbed_species, &
             current_fraction, target_fraction)
+#ifdef DUST_LIVE
+       deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
+            dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
+            dust_absorbed_photons, dust_absorbed_energy, dust_n_hydrogen_cm3, &
+            dust_path_cm, dust_tau_dp)
+#endif
        call clean_stop
        return
     end if
@@ -722,6 +862,10 @@ contains
        trial_heating_rate = 0.0d0
        trial_unassigned = 0.0d0
        trial_absorbed_species = 0.0d0
+#ifdef DUST_LIVE
+       dust_trial_energy = dust_old_energy
+       dust_trial_temperature = dust_old_temperature
+#endif
        wall_sub = omp_get_wtime()
        call snrt_transport_absorb_multigroup_prepared_dust_trial(leaf_slot, neighbor, &
             cdt_over_dx, iteration_tau, iteration_species_tau, optical_depth_dust, &
@@ -749,6 +893,22 @@ contains
           if (ledger_status /= snrt_dust_transaction_ok) &
                local_transaction_failure = snrt_failure_receiver
        end if
+#ifdef DUST_LIVE
+       if (local_transaction_failure == snrt_failure_none) then
+          do i = 1, nleaf
+             do igroup = 1, snrt_ngroups
+                dust_absorbed_photons(igroup,i) = &
+                     real(absorbed_dust_group(i,igroup),dp) * scale_nH
+             end do
+          end do
+          call snrt_dust_receiver_stage(dust_absorbed_photons, &
+               snrt_dust_contract_absorption_mean_energy_ev, dt_s, &
+               dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
+               dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
+               dust_absorbed_energy, ierr)
+          if (ierr /= 0) local_transaction_failure = snrt_failure_receiver
+       end if
+#endif
 
        if (local_transaction_failure == snrt_failure_none) then
           unassigned_absorption_total = 0.0d0
@@ -775,10 +935,21 @@ contains
              trial_unassigned(i) = 0.0d0
              if (sum(abs(real(absorbed_hhe_group_species(i,:,:),dp))) <= 0.0d0 .and. &
                   sum(abs(real(absorbed_group(i,:),dp))) > 0.0d0) then
+#ifndef DUST_LIVE
                 ! A future nonzero dust source must supply a dust receiver;
                 ! fail closed instead of pretending dust absorption heats gas.
                 local_transaction_failure = snrt_failure_receiver
                 exit
+#else
+                ! Dust-only absorption has already been staged by the live
+                ! dust receiver.  It must not be reinterpreted as gas heating.
+                if (snrt_transaction_failure_requested(transaction_config, &
+                     snrt_failure_receiver, i)) then
+                   local_transaction_failure = snrt_failure_receiver
+                   exit
+                end if
+                cycle
+#endif
              end if
              do igroup = 1, snrt_ngroups
                 trial_absorbed_species(i,:,igroup) = &
@@ -987,9 +1158,68 @@ contains
             trial_neutral_hydrogen, trial_thermal, rho_level, temperature_level, &
             trial_heating_rate, trial_unassigned, trial_absorbed_species, &
             current_fraction, target_fraction)
+#ifdef DUST_LIVE
+       deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
+            dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
+            dust_absorbed_photons, dust_absorbed_energy, dust_n_hydrogen_cm3, &
+            dust_path_cm, dust_tau_dp)
+#endif
        call clean_stop
        return
     end if
+
+#ifdef DUST_LIVE
+    ! Validate the dust state and its code-unit conversion before committing
+    ! any persistent RT/chemistry state.  The dust fields are intentionally
+    ! outside the existing transaction snapshot; they remain untouched until
+    ! this collective pre-commit check has passed everywhere.
+    local_transaction_failure = snrt_failure_none
+    if (any(.not. ieee_is_finite(dust_trial_energy)) .or. &
+         any(.not. ieee_is_finite(dust_trial_temperature)) .or. &
+         any(dust_trial_energy < 0.0d0) .or. &
+         any(dust_trial_temperature <= 0.0d0)) then
+       local_transaction_failure = snrt_failure_receiver
+    else
+       do i = 1, nleaf
+          dust_energy_code = dust_trial_energy(i) / dust_energy_scale
+          if (.not. ieee_is_finite(dust_energy_code) .or. &
+               dust_energy_code < 0.0d0) then
+             local_transaction_failure = snrt_failure_receiver
+             exit
+          end if
+       end do
+    end if
+    call snrt_transaction_reduce_decision(local_transaction_failure, 1, 0.0d0, &
+         global_transaction_failure, global_transaction_converged, &
+         global_transaction_residual, convergence_status)
+    if (convergence_status /= 0) global_transaction_failure = snrt_failure_receiver
+    if (global_transaction_failure /= snrt_failure_none) then
+       if (transaction_active) call snrt_transaction_restore(transaction, snrt_intensity, &
+            leaf_slot, snrt_hydrogen_ii, snrt_helium_ii, snrt_helium_iii, &
+            snrt_neutral_fraction, level_thermal, transaction_status)
+       if (myid == 1) write(*,'(A,I0)') &
+            ' SNRT DUST_LIVE pre-commit validation failed at level=', ilevel
+       deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, optical_depth_species, &
+            optical_depth_dust, available_species_transport, optical_depth_hydrogen, &
+            optical_depth_helium_i, optical_depth_helium_ii, absorbed_group, raw_group, &
+            absorbed_hhe_group_species, absorbed_dust_group, returned_group, &
+            incoming_intensity, trial_intensity, coarse_flux_trial, iteration_tau, &
+            iteration_species_tau, target_tau, target_species_tau, start_hydrogen_ii, &
+            start_helium_ii, start_helium_iii, start_neutral_hydrogen, level_thermal, &
+            current_hydrogen_ii, current_helium_ii, current_helium_iii, &
+            relaxed_hydrogen_ii, relaxed_helium_ii, relaxed_helium_iii, &
+            trial_hydrogen_ii, trial_helium_ii, trial_helium_iii, &
+            trial_neutral_hydrogen, trial_thermal, rho_level, temperature_level, &
+            trial_heating_rate, trial_unassigned, trial_absorbed_species, &
+            current_fraction, target_fraction)
+       deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
+            dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
+            dust_absorbed_photons, dust_absorbed_energy, dust_n_hydrogen_cm3, &
+            dust_path_cm, dust_tau_dp)
+       call clean_stop
+       return
+    end if
+#endif
 
     call snrt_transaction_commit_level(transaction, snrt_intensity, leaf_slot, &
          snrt_hydrogen_ii, snrt_helium_ii, snrt_helium_iii, snrt_neutral_fraction, &
@@ -1023,6 +1253,12 @@ contains
             trial_neutral_hydrogen, trial_thermal, rho_level, temperature_level, &
             trial_heating_rate, trial_unassigned, trial_absorbed_species, &
             current_fraction, target_fraction)
+#ifdef DUST_LIVE
+       deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
+            dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
+            dust_absorbed_photons, dust_absorbed_energy, dust_n_hydrogen_cm3, &
+            dust_path_cm, dust_tau_dp)
+#endif
        call clean_stop
        return
     end if
@@ -1044,6 +1280,13 @@ contains
        icell = leaf_cell(i)
        if (icell >= 1 .and. icell <= size(uold,1) .and. &
             size(uold,2) >= energy_index) uold(icell,energy_index) = level_thermal(i)
+#ifdef DUST_LIVE
+       if (icell >= 1 .and. icell <= size(uold,1) .and. &
+            size(uold,2) >= idust_energy) then
+          dust_energy_code = dust_trial_energy(i) / dust_energy_scale
+          uold(icell,idust_energy) = dust_energy_code
+       end if
+#endif
     end do
     t_coupling = omp_get_wtime() - wall_start
 
@@ -1072,6 +1315,12 @@ contains
          optical_depth_hydrogen, optical_depth_helium_i, optical_depth_helium_ii, &
          absorbed_group, raw_group, absorbed_hhe_group_species, absorbed_dust_group, &
          returned_group)
+#ifdef DUST_LIVE
+    deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
+         dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
+         dust_absorbed_photons, dust_absorbed_energy, dust_n_hydrogen_cm3, &
+         dust_path_cm, dust_tau_dp)
+#endif
   end subroutine snrt_ramses_advance_level
 
 end module snrt_ramses_driver

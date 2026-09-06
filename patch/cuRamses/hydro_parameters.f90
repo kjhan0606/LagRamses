@@ -93,5 +93,7 @@ module hydro_parameters
   integer::inener=6
   integer::iHydrogen=-1
   integer::iHelium=-1
+  integer::idust=-1
+  integer::idust_energy=-1
 
 end module hydro_parameters

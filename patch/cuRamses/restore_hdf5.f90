@@ -957,6 +957,9 @@ end subroutine restore_amr_hdf5
 subroutine restore_hydro_hdf5()
   use amr_commons
   use hydro_commons
+#ifdef DUST_LIVE
+  use hydro_parameters, only: nvar, idust, idust_energy
+#endif
   use ramses_hdf5_io
   ! varcpu variables now in amr_commons
   implicit none
@@ -965,6 +968,9 @@ subroutine restore_hydro_hdf5()
 #endif
   integer :: ilevel, i, igrid, ind, iskip, ivar, info
   integer :: ngrid_loc, nvar_file, fidx
+#ifdef DUST_LIVE
+  integer :: dust_mass_field_file, dust_energy_field_file, attr_status
+#endif
   integer, allocatable :: ngrid_all(:)
   integer(i8b) :: ncells_total, offset_cells, ngrid_total
   real(dp), allocatable :: ubuf(:), ubuf_all(:), ubuf_chunk(:)
@@ -990,11 +996,43 @@ subroutine restore_hydro_hdf5()
   call hdf5_open_group('/header', hdr_grp_id)
   call hdf5_read_attr_int(hdr_grp_id, 'ncpu', ncpu_file)
   call hdf5_read_attr_int(hdr_grp_id, 'nvar', nvar_file)
+#ifdef DUST_LIVE
+  call hdf5_read_attr_int_checked(hdr_grp_id, 'dust_mass_field_index', &
+       dust_mass_field_file, attr_status)
+  if(attr_status/=0)then
+     if(myid==1)write(*,*) 'ERROR: DUST_LIVE checkpoint lacks dust mass field metadata'
+     call hdf5_close_group(hdr_grp_id)
+     call hdf5_close_file()
+     call clean_stop
+     return
+  endif
+  call hdf5_read_attr_int_checked(hdr_grp_id, 'dust_energy_field_index', &
+       dust_energy_field_file, attr_status)
+  if(attr_status/=0)then
+     if(myid==1)write(*,*) 'ERROR: DUST_LIVE checkpoint lacks dust energy field metadata'
+     call hdf5_close_group(hdr_grp_id)
+     call hdf5_close_file()
+     call clean_stop
+     return
+  endif
+#endif
   call hdf5_close_group(hdr_grp_id)
 
+#ifdef DUST_LIVE
+  if(nvar_file/=nvar .or. dust_mass_field_file/=idust .or. &
+       dust_energy_field_file/=idust_energy)then
+     if(myid==1)write(*,'(A,6(I0,1X))') &
+          'ERROR: DUST_LIVE checkpoint field map mismatch file/expected nvar,mass,energy=', &
+          nvar_file,dust_mass_field_file,dust_energy_field_file,nvar,idust,idust_energy
+     call hdf5_close_file()
+     call clean_stop
+     return
+  endif
+#else
   if(nvar_file /= nvar) then
      if(myid==1) write(*,*) 'WARNING: HDF5 nvar mismatch, file=', nvar_file, ' expected=', nvar
   end if
+#endif
 
   ! Suppress HDF5 error messages for missing level groups
   call hdf5_suppress_errors()

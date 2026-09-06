@@ -1760,10 +1760,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
              trim(snrt_secondary_loaded_source_id),' upstream=', &
              trim(snrt_secondary_loaded_upstream_commit)
      end if
-     ! A supplied dust contract must never be silently ignored while the live
-     ! driver is still ZERO_SCAFFOLD.  Candidate contracts remain available
-     ! for inspection; an approved contract is rejected until a persistent
-     ! RAMSES dust state and thermal receiver are actually wired.
+     ! A supplied dust contract must never be silently ignored.  Candidate
+     ! contracts remain available for inspection in the legacy profile.  The
+     ! DUST_LIVE profile requires a version-2, physically approved contract;
+     ! otherwise the executable must not enter the live driver.
      snrt_dust_contract_env = ''
      call get_environment_variable('SNRT_DUST_CONTRACT', snrt_dust_contract_env, &
           length=snrt_dust_contract_env_length)
@@ -1778,13 +1778,30 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
                 write(*,'(A,A)') '  detail: ',trim(snrt_dust_contract_error_message)
            nml_ok=.false.
         else if (snrt_dust_contract_runtime_allowed) then
+#ifdef DUST_LIVE
+           if(myid==1)write(*,'(A)') &
+                'SNRT startup admitted approved DUST_LIVE contract'
+#else
            if(myid==1)write(*,'(A)') &
                 'SNRT startup rejected approved dust contract: live dust receiver is not wired'
            nml_ok=.false.
-        else if(myid==1)then
-           write(*,'(A)') &
+#endif
+        else
+#ifdef DUST_LIVE
+           if(myid==1)write(*,'(A)') &
+                'SNRT startup rejected dust contract: DUST_LIVE requires runtime-approved version-2 opacity/thermal data'
+           nml_ok=.false.
+#else
+           if(myid==1)write(*,'(A)') &
                 'SNRT dust contract loaded for inspection only; live dust remains ZERO_SCAFFOLD'
+#endif
         end if
+#ifdef DUST_LIVE
+     else
+        if(myid==1)write(*,'(A)') &
+             'SNRT startup rejected: DUST_LIVE requires SNRT_DUST_CONTRACT'
+        nml_ok=.false.
+#endif
      end if
   end if
 #endif

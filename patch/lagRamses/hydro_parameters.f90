@@ -103,5 +103,9 @@ module hydro_parameters
   integer::inener=6
   integer::iHydrogen=-1
   integer::iHelium=-1
+  ! DUST_LIVE reserves two fields after the complete existing passive map.
+  ! They are assigned by read_hydro_params only in the live profile.
+  integer::idust=-1
+  integer::idust_energy=-1
 
 end module hydro_parameters

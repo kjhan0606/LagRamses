@@ -22,6 +22,12 @@ NPRE = 8
 # rho + 3 momentum + total energy + total metal + delayed-cooling reservoir
 # + 11 tracked elements.  Unused passive fields remain inert in legacy mode.
 NVAR = 18
+DUST_LIVE ?= 0
+ifeq ($(DUST_LIVE),1)
+  # Keep the default legacy field count unchanged.  The live profile reserves
+  # the complete channel window plus dust mass and dust thermal energy.
+  NVAR = 30
+endif
 NENER = 0
 SOLVER = hydro
 PATCH = ../patch/lagRamses
@@ -113,6 +119,9 @@ ifeq ($(SNRT),1)
     $(error SNRT=1 requires USE_CUDA=1)
   endif
   FFLAGS += -DSNRT
+  ifeq ($(DUST_LIVE),1)
+    FFLAGS += -DDUST_LIVE
+  endif
   # The driver is not self-contained: keep the complete Fortran module graph
   # in the production link. CUDA entry points are supplied by
   # snrt_cuda_kernels.o; these interface modules only publish the C ABI.
@@ -132,6 +141,11 @@ ifeq ($(SNRT),1)
   endif
 else
   SNRT_MODOBJ =
+endif
+ifeq ($(DUST_LIVE),1)
+  ifneq ($(SNRT),1)
+    $(error DUST_LIVE=1 requires SNRT=1)
+  endif
 endif
 
 #############################################################################
@@ -310,7 +324,7 @@ snrt_ramses_driver.o: amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
                        pm_commons.o snrt_agn_efficiency.o \
                        snrt_state.o snrt_amr_topology.o snrt_transport_step.o \
                        snrt_rt_transaction.o \
-                       snrt_dust_transaction.o \
+                       snrt_dust_transaction.o snrt_dust_receiver.o snrt_dust_contract.o \
                        snrt_angular_quadrature.o snrt_agn_locator.o \
                        snrt_agn_source.o snrt_nlte_coupling.o snrt_thermochemistry.o \
                        snrt_spectral_contract.o \
