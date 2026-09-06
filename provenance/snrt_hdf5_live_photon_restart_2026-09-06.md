@@ -96,3 +96,57 @@ physical dust/SED approval, IR re-emission or full production dusty feedback.
 The existing live AGN serial/fresh-start restriction remains in place. MPI
 file-map tests and populated-radiation AMR lifecycle handling remain necessary
 before broader simulation-ready promotion.
+
+## MPI execution follow-up
+
+The same recorded executable was tested after commit `3fac21a`; no source
+or binary change was made for these tests. Cases remain under the same run
+root, with `run_mpi_case.sh` specifying Intel `mpirun -np 2`, visible A10
+devices `1,2`, `OMP_NUM_THREADS=1`, and `I_MPI_FABRICS=shm`. The scalar runner
+is unchanged. All cases use the existing effective namelist and reference
+contracts; each successful case intentionally writes one final dump below
+4 MiB. Scheduled output remains `noutput=1,aout=2,tout=1e30`, with
+`fbackup=1000000`. Fresh two-step runs have `foutput=2`; resumed runs have
+`nrestart=1,nstepmax=3,foutput=3`. GPFS had 173 TiB available.
+
+Results:
+
+| Case | Configuration | Observed result |
+|---|---|---|
+| `mpi2` | 1-rank populated checkpoint to 2 ranks | Radiation read PASS; subsequent forced load balance and hydro path failed, timeout exit 124 |
+| `mpi2_fresh` | Fresh 2-rank dust control, 2 steps | Run completed; 512 total leaf cells and one HDF5 checkpoint |
+| `mpi2_seeded` | 2-rank checkpoint, uniform test photons, resume on 2 ranks | Restore/RT closure/run completion PASS |
+| `mpi2_to1` | Identical populated 2-rank checkpoint, resume on 1 rank | Restore/RT closure/run completion PASS |
+| `pattern2` | Spatially varying populated 2-rank checkpoint, resume on 2 ranks | Restore/RT closure/run completion PASS |
+| `pattern1` | Identical varying checkpoint, resume on 1 rank | Restore/RT closure/run completion PASS |
+
+For `mpi2_seeded` and `mpi2_to1`, all final radiation records and dust energy
+values match the original serial `bound_seeded` result exactly after sorting
+grids by their stored x/y/z coordinates and retaining child-cell order. Uniform
+data alone cannot establish correct cell correspondence, so the second pair
+uses group-1 directional photon density
+`1e-4*(1+0.25*xg_1+0.01*child_index)`, with zero-based `child_index=0..7`.
+Values range from `1.03125e-4` to `1.28875e-4`. All other radiation groups remain
+zero. This is an explicitly modified numerical test checkpoint, not a physical
+source prescription. The two patterned outputs have identical grid coordinates,
+zero maximum radiation difference, and zero relative dust-energy difference
+over all 512 cells. The predeclared comparison tolerance was `2e-6`.
+
+### Unresolved 1-to-2 direction
+
+The `mpi2/run.log` records `SNRT_HDF5_RADIATION_RESTORE_PASS`, then forced
+load balancing, two bounded remap rounds, and
+`FATAL: get3cubepos called with invalid grid`. The process subsequently
+terminated at the 60-second timeout (exit 124); this is a failed case, not a
+verified evolution. The exact cause of the invalid hydro grid was not
+established here, and the test does not isolate SNRT from the underlying
+variable-rank AMR restart behavior. No core tree/CPU-box fix was attempted.
+
+Consequently the streaming radiation file-map branch is verified for the
+tested 2-to-1 static-box restart, not for arbitrary redistribution. The
+1-to-2 forced-remap failure is retained for joint AMR integration work.
+Populated radiation transfer during live load balancing, refinement/coarsening,
+and AGN pending-fuel migration remain unimplemented/unqualified requirements;
+the successful fixed-layout tests do not close them. Continue the high-level
+dust/feedback physics implementation without treating this record as general
+MPI/AMR production approval.
