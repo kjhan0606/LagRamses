@@ -2,6 +2,7 @@ program snrt_checkpoint_smoke
   use amr_parameters, only: dp, amr_block_size, ngridmax, twotondim
   use amr_commons, only: active, ncoarse, son
   use iso_c_binding, only: c_float
+  use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_positive_inf
   use snrt_spectral_contract, only: &
        snrt_spectral_contract_load, snrt_spectral_contract_load_from_environment, &
        snrt_spectral_contract_ok, snrt_spectral_contract_loaded, &
@@ -21,6 +22,8 @@ program snrt_checkpoint_smoke
   integer :: idir, igroup, islot
   real(dp) :: expected_value
   logical :: payload_match
+  real(c_float) :: bad_photons(3), first_photon
+  integer :: case_id, stream_size, intensity_pos, write_pos
 
   checkpoint_file = ''
   candidate_file = ''
@@ -145,6 +148,35 @@ program snrt_checkpoint_smoke
   call expect(snrt_state_get_cell(1) == 1 .and. snrt_state_get_slot(1) == 1, &
        'round-tripped cell-to-slot identity is preserved', failures)
   close(unit)
+
+  ! Corrupt the serialized intensity, leaving valid identities and chemistry.
+  ! Its offset is derived from the payload sizes, not a fixed header length.
+  bad_photons = [-1.0_c_float, ieee_value(0.0_c_float,ieee_quiet_nan), &
+       ieee_value(0.0_c_float,ieee_positive_inf)]
+  first_photon = snrt_intensity(1,1,1)
+  do case_id = 1, 3
+     open(newunit=unit, file=trim(checkpoint_file), status='old', &
+          access='stream', form='unformatted', action='readwrite')
+     inquire(unit=unit,size=stream_size)
+     intensity_pos = stream_size - 4*snrt_nslot*storage_size(0.0_dp)/8 - &
+          size(snrt_intensity,1)*size(snrt_intensity,2)*snrt_nslot*storage_size(first_photon)/8 + 1
+     write(unit,pos=intensity_pos) bad_photons(case_id)
+     rewind(unit)
+     call snrt_state_checkpoint_read(unit,ierr)
+     call expect(ierr == 10 .and. snrt_intensity(1,1,1) == first_photon .and. &
+          snrt_nslot == twotondim, 'invalid photon read rejected without state replacement', failures)
+     write(unit,pos=intensity_pos) first_photon
+     close(unit)
+
+     snrt_intensity(1,1,1) = bad_photons(case_id)
+     open(newunit=unit,status='scratch',access='stream',form='unformatted')
+     call snrt_state_checkpoint_write(unit,ierr)
+     inquire(unit=unit,pos=write_pos)
+     call expect(ierr == 10 .and. write_pos == 1, &
+          'invalid photon write rejected before header publication', failures)
+     close(unit)
+     snrt_intensity(1,1,1) = first_photon
+  end do
 
   if (failures == 0) then
      write(*,'(a)') 'SNRT_CHECKPOINT_OK'

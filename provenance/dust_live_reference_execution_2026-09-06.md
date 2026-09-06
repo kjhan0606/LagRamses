@@ -58,3 +58,30 @@ driver and survive source-free HDF5 restart. It does not prove nonzero
 photon absorption heating, persistence of a populated radiation field,
 MPI redistribution, physical opacity/heat-capacity admission, IR cooling,
 or production dusty feedback. Those remain requirements of the full goal.
+
+## Radiation restart inspection and repair
+
+Following commit `044befa`, a source search confirmed that
+`snrt_state_checkpoint_write/read` have no production caller: only the native
+checkpoint smoke invokes them. The successful source-free hydro/dust restart
+above therefore does not establish radiation restart, even with the same
+number of MPI ranks. Coupled radiation persistence remains an implementation
+requirement, including a mapping from restored AMR cells to stored radiation
+slots; merely invoking the raw cell-ID serializer is not sufficient if AMR
+storage indices change.
+
+The existing serializer also accepted negative and nonfinite intensity on
+both write and read. `snrt_state.f90` now rejects these with error 10. Write
+validation precedes the header; read validation precedes live state mutation.
+The existing `snrt_checkpoint_smoke.f90` now corrupts the intensity record
+with negative, NaN and positive-infinity values and verifies rejection, then
+checks that invalid in-memory photons cannot publish a header. No new gate
+or production test-source option was introduced.
+
+`bash simulation/snrt/tests/run_snrt_native_spectral_contract.sh` passed,
+including the existing nonzero nine-group intensity/H-He round-trip,
+spectral/secondary identity rejection and all six invalid-photon read/write
+checks (`SNRT_CHECKPOINT_OK`, `SNRT_NATIVE_SPECTRAL_CONTRACT_ALL_OK`). This
+verifies the native serialization boundary only. Live absorption heating,
+production checkpoint wiring, radiation cell remapping and physical dust/IR
+qualification remain open.

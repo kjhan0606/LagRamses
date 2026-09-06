@@ -110,6 +110,22 @@ contains
        ierr = 7
        return
     end if
+    ! Invalid photons must be rejected before even the header is published.
+    if (snrt_nslot > 0) then
+       if (.not. allocated(snrt_intensity)) then
+          ierr = 10
+          return
+       end if
+       if (size(snrt_intensity,3) < snrt_nslot) then
+          ierr = 10
+          return
+       end if
+       if (any(.not. ieee_is_finite(snrt_intensity(:,:,1:snrt_nslot))) .or. &
+            any(snrt_intensity(:,:,1:snrt_nslot) < 0.0_c_float)) then
+          ierr = 10
+          return
+       end if
+    end if
     write(unit_id, iostat=ios) checkpoint_version, snrt_ndirection, &
          snrt_ngroups, snrt_nslot
     if (ios /= 0) then
@@ -255,6 +271,13 @@ contains
     read(unit_id, iostat=ios) saved_hydrogen_ii, saved_helium_ii, saved_helium_iii
     if (ios /= 0) then
        ierr = 8
+       deallocate(saved_cell_id, saved_intensity, saved_neutral, &
+            saved_hydrogen_ii, saved_helium_ii, saved_helium_iii)
+       return
+    end if
+    if (any(.not. ieee_is_finite(saved_intensity)) .or. &
+         any(saved_intensity < 0.0_c_float)) then
+       ierr = 10
        deallocate(saved_cell_id, saved_intensity, saved_neutral, &
             saved_hydrogen_ii, saved_helium_ii, saved_helium_iii)
        return
