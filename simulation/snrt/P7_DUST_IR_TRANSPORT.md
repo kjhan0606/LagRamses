@@ -143,3 +143,60 @@ not evidence of strong trapping. Single equilibrium-temperature mixture,
 frozen primary heating, omitted scattering, fixed dust and no native/live
 coupling remain in force. The next handoff is native transport and coupled
 energy/momentum semantics, not another infrastructure validation framework.
+
+## DUST-5 native operator
+
+`patch/lagRamses/snrt_dust_ir.f90` implements the secondary spectral thermal
+source and conservative transport/reprocessing in FP64 Fortran. It is listed
+in the SNRT module build graph, but is **not called by the live RAMSES driver**.
+It does not reinterpret the existing nine-group FP32 photon state as energy.
+The compiled array API is a native candidate, not live dust activation.
+
+`snrt_dust_ir_initialize` accepts positive frequency nodes (eV), integration
+weights (eV), absorption cross sections (cm2/H), strictly increasing thermal
+nodes (K) including the exact CMB. It computes the Planck powers itself;
+frequency quadrature generation/data admission remain caller responsibilities.
+No sidecar loader or implicit dust-abundance model is hidden in this module.
+
+`snrt_dust_ir_advance` takes directions `(3,ndir)`, weights normalized to ONE
+(the primary native angular convention is different), reciprocal neighbors
+`(6,ncell)` ordered x-/x+/y-/y+/z-/z+, a common cell width (cm), dt (s), c_hat
+(cm/s), reference-mixture density nH*relative_dust (cm^-3), and primary heating
+(erg/cm3/s). Zero neighbor means vacuum. It is an equal-width cell-set API:
+do not pass incomplete MPI ghosts or coarse/fine faces as vacuum boundaries.
+
+State arrays are energy `(nfreq,ndir,ncell)` in erg/cm3 per normalized angular
+direction, diagnostic temperature `(ncell)` K and cumulative emitted photons
+`(nfreq,ncell)` photons/cm3. Frequencies are energy channels, not primary
+ionizing photon groups. Each call returns per-step escaped, absorbed and
+primary energy (erg), local/global residuals and iteration count. Reabsorption
+is recycled energy, not an additional source. **Only success commits all
+state and diagnostics.** Nonzero status leaves all inout arrays and
+diagnostics bit-identical; the caller must inspect it before proceeding.
+Table/config/shape/state/CFL/thermal-range/nonconvergence statuses are distinct.
+The committed step conserves energy to the nonlinear stop tolerance, not
+machine precision: 1e-9 relative to injected energy here (observed 7.407e-10);
+with zero injection the scale is old radiation inventory, with a tiny floor
+for an empty state. Exact closure holds at the converged fixed point.
+Future live gas/force coupling must explicitly budget this finite residual.
+
+The algorithm matches the reference bath-relative slope source, log-T
+interpolation in total power, thin-cell response, old-state outgoing flux,
+zero-primary old-inventory scale, and half-relaxed local iteration. It has no
+gas, momentum or primary-photon side effects. The same finite-domain, thermal
+interpolation and RSLA interpretation limits apply as in DUST-4.
+
+```sh
+JAX_PLATFORMS=cpu .venv/bin/python tests/dust_ir_transport.py --native
+```
+
+This opt-in check compiles the actual module and one native smoke driver with
+available GNU/Intel compilers in private temporary directories. A plain
+numeric fixture supplies the same 136-node manufactured cube as DUST-4;
+Fortran computes its own source table and evolves the field. It checks
+energy/temperature/photon differences to 1e-8, conservation to 1e-9,
+nonconvergence/CFL/neighbor-reciprocity rollback, and zero/weak source.
+Default invocation stays compiler-free. Compilation/build-graph inclusion is
+not a full production link, MPI/AMR/restart or live-runtime qualification.
+Persistent state layout/spectral resolution, dust-density mapping and the
+coupled primary/gas/force transaction remain explicit subsequent design work.

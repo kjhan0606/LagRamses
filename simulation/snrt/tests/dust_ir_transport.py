@@ -2,8 +2,12 @@
 """Compact DUST-3 conservation, differential emission and refinement study."""
 
 import json
+import argparse
 from pathlib import Path
+import shutil
+import subprocess
 import sys
+from tempfile import TemporaryDirectory
 
 import jax
 import jax.numpy as jnp
@@ -131,8 +135,96 @@ def spectral_checks():
     assert dt_changes["stored"] < .02 and dt_changes["mean_temperature"] < .01
 
 
+def native_checks():
+    """Opt-in differential of the real Fortran energy/source operator."""
+    source = ROOT.parents[1] / "external/draine_wd01_rv31/kext_albedo_WD_MW_3.1_60_D03.all"
+    raw = read_draine_table(source)
+    temperatures = np.unique(np.r_[np.geomspace(5., 300., 64), 20.])
+    model = prepare_spectral_table(raw["energy_ev"], raw["absorption_per_h_cm2"], temperatures, 13.1)
+    density = np.full((2, 2, 2), 1e6)
+    primary_per_h = np.trapezoid(
+        _planck_power_density(raw["energy_ev"], raw["absorption_per_h_cm2"], 20.)
+        - _planck_power_density(raw["energy_ev"], raw["absorption_per_h_cm2"], 13.1), raw["energy_ev"])
+    primary = density * primary_per_h
+    dx, c, tolerance = 1e18, 2.99792458e10, 1e-9
+    directions, weights = level_symmetric_quadrature(4, dtype=jnp.float64)
+    reference = evolve(model.table, density, primary,
+        model.absorption_per_h_cm2[:, None, None, None] * density,
+        width=dx, duration=4*dx/c, light_speed=c, tolerance=tolerance)
+    neighbor = np.zeros((6, 8), dtype=int)
+    for cell in np.ndindex(density.shape):
+        index = np.ravel_multi_index(cell, density.shape)
+        for axis in range(3):
+            for side, delta in enumerate((-1, 1)):
+                other = list(cell)
+                other[axis] += delta
+                if 0 <= other[axis] < density.shape[axis]:
+                    neighbor[2*axis+side, index] = 1 + np.ravel_multi_index(other, density.shape)
+    compilers = [name for name in ("gfortran", "ifx") if shutil.which(name)]
+    if not compilers:
+        raise RuntimeError("native dust check requires gfortran or ifx")
+    native_root = ROOT.parents[1] / "patch/lagRamses"
+    with TemporaryDirectory(prefix="dust-native-", dir=ROOT.parents[1]) as directory:
+        work = Path(directory)
+        fixture = work / "input.txt"
+        lines = [f"{len(model.energy_ev)} {len(model.temperature_k)} {len(weights)} 8 {reference['steps']}",
+                 f"{dx:.17e} {reference['dt_s']:.17e} {c:.17e} 13.1 {tolerance:.17e}"]
+        for array in (model.energy_ev, model.weights_ev, model.absorption_per_h_cm2,
+                      model.temperature_k, np.asarray(directions).T, np.asarray(weights),
+                      neighbor, density.ravel(), primary.ravel()):
+            kind = "d" if np.asarray(array).dtype.kind in "iu" else ".17e"
+            lines.extend(format(value, kind) for value in np.asarray(array).ravel(order="F"))
+        fixture.write_text("\n".join(lines) + "\n")
+        for compiler in compilers:
+            build = work / compiler
+            build.mkdir()
+            if compiler == "ifx":
+                # Production preprocessing/optimization, isolated .mod/.o.
+                flags = ["-fpp", "-O3", "-qopenmp", "-DSNRT", "-DNDIM=3", "-DNPRE=8",
+                         "-DNVAR=18", "-DLONGINT", "-DQUADHILBERT", "-DOUTPUT_PARTICLE_POTENTIAL",
+                         "-DNVECTOR=500", "-DNENER=0", "-DSOLVER=hydro", "-DHYDRO_CUDA",
+                         "-DUSE_FFTW", "-DPHASE0_STELLAR_ENRICHMENT",
+                         "-module", str(build), "-I" + str(build)]
+            else:
+                flags = ["-cpp", "-O2", "-ffree-line-length-none", "-fcheck=all", "-DSNRT",
+                         "-DNDIM=3", "-DNPRE=8", "-DNVAR=18", "-J" + str(build), "-I" + str(build)]
+            executable = build / "dust_smoke"
+            compiled = subprocess.run([compiler, *flags, str(native_root / "snrt_dust_ir.f90"),
+                str(native_root / "snrt_dust_ir_smoke.f90"), "-o", str(executable)],
+                cwd=build, capture_output=True, text=True)
+            if compiled.returncode:
+                raise RuntimeError(compiled.stdout + compiled.stderr)
+            run = subprocess.run([str(executable), str(fixture)], cwd=build, capture_output=True, text=True)
+            if run.returncode or not run.stdout.startswith("NATIVE_DUST_IR_OK\n"):
+                raise RuntimeError(run.stdout + run.stderr)
+            values = np.fromstring(run.stdout.split("\n", 1)[1], sep=" ")
+            nfreq = len(model.energy_ev)
+            assert len(values) == 4 + 8 + 2*nfreq*8
+            np.testing.assert_allclose(values[:3], [reference["stored_energy_erg"],
+                reference["escaped_energy_erg"], reference["reprocessed_energy_erg"]], rtol=1e-8, atol=0)
+            assert values[3] < tolerance
+            temperature = values[4:12]
+            field = values[12:12+nfreq*8].reshape((nfreq, 8), order="F")
+            photons = values[12+nfreq*8:].reshape((nfreq, 8), order="F")
+            np.testing.assert_allclose(temperature, reference["grain_temperature_k"].ravel(), rtol=1e-8, atol=0)
+            np.testing.assert_allclose(field.sum(axis=0), reference["energy_density"].sum(axis=0).ravel(), rtol=1e-8, atol=0)
+            np.testing.assert_allclose(photons.sum(axis=0), reference["emitted_photons_cm3"].sum(axis=0).ravel(), rtol=1e-8, atol=0)
+            errors = np.abs(values[:3] / np.asarray([reference["stored_energy_erg"],
+                reference["escaped_energy_erg"], reference["reprocessed_energy_erg"]]) - 1)
+            print(f"DUST_NATIVE_DIFFERENTIAL compiler={compiler} energy_errors={errors.tolist()} "
+                  f"temperature_error={np.max(np.abs(temperature/reference['grain_temperature_k'].ravel()-1)):.3e} "
+                  f"balance={values[3]:.3e} rollback=3 zero=1 weak=1")
+    print("DUST_NATIVE_IR_TEST_OK")
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--native", action="store_true", help="run only the opt-in compiled native differential")
+    args = parser.parse_args()
     jax.config.update("jax_enable_x64", True)
+    if args.native:
+        native_checks()
+        return
     table = synthetic_table()
     heat = jnp.asarray([[[0., 1e-42, 1e-25, 2e-24]]])
     emitted = jax.jit(excess_emission)(table, heat, jnp.ones_like(heat))
