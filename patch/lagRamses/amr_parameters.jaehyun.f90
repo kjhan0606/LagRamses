@@ -69,8 +69,9 @@ module amr_parameters
                                ! paths and keeps whichever is faster.
   logical::gpu_poisson=.false. ! GPU Poisson MG for AMR levels
   logical::gpu_fft=.false.     ! cuFFT direct solve for uniform base level
-  logical::gpu_sink=.true.     ! GPU AGN feedback (average_AGN + AGN_blast).
-                               ! On by default, also guarded by gpu_auto_tune.
+  logical::gpu_sink=.false.    ! Retained for namelist compatibility only.
+                               ! No equivalent CUDA AGN feedback path exists;
+                               ! this is not a backend selector.
   logical::gpu_scalar=.true.   ! GPU nGR scalar-field Newton-GS sweeps.
                                ! On by default: measured 1.8x (f(R), 6-point) to
                                ! 13.7x (Galileon, 18-point) on an A100, and the
