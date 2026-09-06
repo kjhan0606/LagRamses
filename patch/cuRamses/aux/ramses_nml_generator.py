@@ -61,6 +61,9 @@ S_SIDM     = '17. SIDM'
 S_SGS      = '18. SGS Turbulence'
 S_POISSON  = '19. Poisson Solver'
 S_LIGHTCONE = '20. Lightcone'
+S_FDM      = '21. Fuzzy Dark Matter'
+S_ADM      = '22. Atomic Dark Matter'
+S_PBH      = '23. Primordial Black Holes'
 
 # --- Full parameter database ---
 PARAMS = [
@@ -125,7 +128,15 @@ PARAMS = [
     ParamDef('use_galileon','bool',False,  'RUN_PARAMS', S_MODGRAV,'Galileon scalar field'),
     ParamDef('use_coupled_de','bool',False,'RUN_PARAMS', S_DE,  'Coupled dark energy'),
     ParamDef('use_ede',    'bool', False,  'RUN_PARAMS', S_DE,  'Early dark energy'),
+    ParamDef('use_quintessence','bool',False,'RUN_PARAMS',S_DE, 'Quintessence field-level DE'),
+    ParamDef('use_kessence','bool',False,  'RUN_PARAMS', S_DE,  'Purely kinetic k-essence'),
+    ParamDef('use_chaplygin','bool',False, 'RUN_PARAMS', S_DE,  'Generalized Chaplygin gas'),
+    ParamDef('use_rvm',    'bool', False,  'RUN_PARAMS', S_DE,  'Running vacuum model'),
+    ParamDef('use_horndeski','bool',False, 'RUN_PARAMS', S_MODGRAV,'Horndeski mu(a,k) gravity'),
     ParamDef('use_sgs',    'bool', False,  'RUN_PARAMS', S_SGS, 'SGS turbulence model'),
+    ParamDef('use_fdm',    'bool', False,  'RUN_PARAMS', S_FDM, 'Fuzzy (axion) dark matter'),
+    ParamDef('use_adm',    'bool', False,  'RUN_PARAMS', S_ADM, 'Atomic dark matter'),
+    ParamDef('use_pbh',    'bool', False,  'RUN_PARAMS', S_PBH, 'Primordial black hole admixture'),
 
     # ====== COSMO_PARAMS ======
     ParamDef('omega_b',  'real', 0.045,  'COSMO_PARAMS', S_COSMO, 'Baryon density parameter'),
@@ -161,6 +172,10 @@ PARAMS = [
     ParamDef('nexpand',   'int',  1,       'AMR_PARAMS', S_AMR, 'Buffer cells for refinement'),
     ParamDef('ngridtot',  'int',  0,       'AMR_PARAMS', S_AMR, 'Total grid allocation (0=auto)'),
     ParamDef('nparttot',  'int',  0,       'AMR_PARAMS', S_AMR, 'Total particle allocation (0=auto)'),
+    ParamDef('ngridmax_auto', 'bool', False, 'AMR_PARAMS', S_AMR,
+             'Grow grid capacity at runtime instead of a fixed ngridmax'),
+    ParamDef('npartmax_auto', 'bool', False, 'AMR_PARAMS', S_AMR,
+             'Grow particle capacity at runtime instead of a fixed npartmax'),
     ParamDef('ngridmax',  'int',  0,       'AMR_PARAMS', S_AMR, 'Max grids per CPU (0=auto)'),
     ParamDef('npartmax',  'int',  0,       'AMR_PARAMS', S_AMR, 'Max particles per CPU (0=auto)'),
     ParamDef('boxlen',    'real', 1.0,     'AMR_PARAMS', S_AMR, 'Box length (code units)'),
@@ -395,6 +410,12 @@ PARAMS = [
     # ====== COUPLED_DE_PARAMS ======
     ParamDef('beta_cde', 'real', 0.0,     'COUPLED_DE_PARAMS', S_DE, 'Coupled DE coupling constant',
              visible_when='use_coupled_de==True'),
+    ParamDef('cde_friction', 'bool', False, 'COUPLED_DE_PARAMS', S_DE,
+             'Velocity-dependent friction term in the particle kick',
+             visible_when='use_coupled_de==True'),
+    ParamDef('cde_vary_mass', 'bool', False, 'COUPLED_DE_PARAMS', S_DE,
+             'DM mass evolution m(phi) in the Poisson source',
+             visible_when='use_coupled_de==True'),
 
     # ====== EDE_PARAMS ======
     ParamDef('omega_ede','real', 0.0,     'EDE_PARAMS', S_DE, 'Early dark energy density',
@@ -457,6 +478,62 @@ PARAMS = [
              visible_when='sidm==True'),
     ParamDef('sidm_frac_excited','real',0.0,'SIDM_PARAMS',S_SIDM,'Initial excited state fraction',
              visible_when='sidm==True'),
+
+    # ====== QUINT_PARAMS (field-level scalar DE) ======
+    ParamDef('quint_pot',     'int',  1,    'QUINT_PARAMS', S_DE, 'Potential (1=Ratra-Peebles, 2=exponential)',
+             visible_when='use_quintessence==True', choices=[1, 2]),
+    ParamDef('quint_ic_mode', 'int',  0,    'QUINT_PARAMS', S_DE, 'Initial-field mode (0=shooting to omega_l)',
+             visible_when='use_quintessence==True'),
+    ParamDef('quint_alpha',   'real', 1.0,  'QUINT_PARAMS', S_DE, 'Ratra-Peebles index (pot=1)',
+             visible_when='use_quintessence==True'),
+    ParamDef('quint_lambda',  'real', 1.0,  'QUINT_PARAMS', S_DE, 'Exponential slope (pot=2)',
+             visible_when='use_quintessence==True'),
+    ParamDef('quint_phi_ini', 'real', 0.01, 'QUINT_PARAMS', S_DE, 'Initial field value [Mpl] at a=1e-6',
+             visible_when='use_quintessence==True'),
+
+    # ====== KESSENCE_PARAMS (purely kinetic k-essence) ======
+    ParamDef('kes_x0', 'real', 0.5001, 'KESSENCE_PARAMS', S_DE, 'X(a=1) in M^4 units, must be > 0.5',
+             visible_when='use_kessence==True'),
+
+    # ====== CHAPLYGIN_PARAMS (generalized Chaplygin gas) ======
+    ParamDef('chaplygin_As',    'real', 0.7, 'CHAPLYGIN_PARAMS', S_DE, 'Chaplygin A_s (energy-density split at a=1)',
+             visible_when='use_chaplygin==True'),
+    ParamDef('chaplygin_alpha', 'real', 1.0, 'CHAPLYGIN_PARAMS', S_DE, 'Chaplygin alpha exponent (1=standard GCG)',
+             visible_when='use_chaplygin==True'),
+
+    # ====== RVM_PARAMS (running vacuum model) ======
+    ParamDef('rvm_nu', 'real', 0.01, 'RVM_PARAMS', S_DE, 'RVM nu coupling (Lambda(H) ~ nu*H^2)',
+             visible_when='use_rvm==True'),
+
+    # ====== HORNDESKI_PARAMS (quasi-static mu(a,k)) ======
+    ParamDef('hs_mu0',  'real', 0.1, 'HORNDESKI_PARAMS', S_MODGRAV, 'mu(a=1) - 1 (Poisson-source boost)',
+             visible_when='use_horndeski==True'),
+    ParamDef('hs_mass', 'real', 0.0, 'HORNDESKI_PARAMS', S_MODGRAV, 'Compton mass [h/Mpc]; 0 = scale-independent',
+             visible_when='use_horndeski==True'),
+
+    # ====== FDM_PARAMS (fuzzy/axion dark matter, core subset) ======
+    ParamDef('m_axion',    'real', 1.0e-22, 'FDM_PARAMS', S_FDM, 'Axion mass [eV]',
+             visible_when='use_fdm==True'),
+    ParamDef('fdm_courant','real', 0.5,     'FDM_PARAMS', S_FDM, 'FDM (Schrodinger-Poisson) Courant factor',
+             visible_when='use_fdm==True'),
+
+    # ====== ADM_PARAMS (atomic dark matter, core subset) ======
+    ParamDef('adm_alpha',    'real', 0.01,  'ADM_PARAMS', S_ADM, 'Dark fine-structure constant',
+             visible_when='use_adm==True'),
+    ParamDef('adm_mp',       'real', 1.0,   'ADM_PARAMS', S_ADM, 'Dark proton mass [GeV]',
+             visible_when='use_adm==True'),
+    ParamDef('adm_me_ratio', 'real', 1836.0,'ADM_PARAMS', S_ADM, 'Dark proton/electron mass ratio',
+             visible_when='use_adm==True'),
+    ParamDef('adm_xi',       'real', 0.5,   'ADM_PARAMS', S_ADM, 'Dark-to-visible temperature ratio xi=T_dark/T_visible',
+             visible_when='use_adm==True'),
+
+    # ====== PBH_PARAMS (primordial black holes, core subset) ======
+    ParamDef('pbh_table_file', 'str',  '',   'PBH_PARAMS', S_PBH, 'Evaporation table file path',
+             visible_when='use_pbh==True'),
+    ParamDef('pbh_fraction',   'real', 0.01, 'PBH_PARAMS', S_PBH, 'f_PBH: PBH fraction of omega_m',
+             visible_when='use_pbh==True'),
+    ParamDef('pbh_boost',      'real', 1.0,  'PBH_PARAMS', S_PBH, 'Small-scale clustering boost factor',
+             visible_when='use_pbh==True'),
 ]
 
 # Build lookup dict (case-insensitive keys)
@@ -632,7 +709,10 @@ GROUP_ORDER = [
     'FR_PARAMS', 'NDGP_PARAMS', 'SYMMETRON_PARAMS',
     'DILATON_PARAMS', 'GALILEON_PARAMS',
     'COUPLED_DE_PARAMS', 'EDE_PARAMS',
+    'QUINT_PARAMS', 'KESSENCE_PARAMS', 'CHAPLYGIN_PARAMS',
+    'RVM_PARAMS', 'HORNDESKI_PARAMS',
     'MOND_PARAMS', 'SGS_PARAMS', 'SIDM_PARAMS',
+    'FDM_PARAMS', 'ADM_PARAMS', 'PBH_PARAMS',
 ]
 
 # Groups that are always emitted (even if empty)
@@ -657,6 +737,14 @@ GROUP_REQUIRES = {
     'MOND_PARAMS': 'use_mond',
     'SGS_PARAMS': 'use_sgs',
     'SIDM_PARAMS': 'sidm',
+    'QUINT_PARAMS': 'use_quintessence',
+    'KESSENCE_PARAMS': 'use_kessence',
+    'CHAPLYGIN_PARAMS': 'use_chaplygin',
+    'RVM_PARAMS': 'use_rvm',
+    'HORNDESKI_PARAMS': 'use_horndeski',
+    'FDM_PARAMS': 'use_fdm',
+    'ADM_PARAMS': 'use_adm',
+    'PBH_PARAMS': 'use_pbh',
 }
 
 
