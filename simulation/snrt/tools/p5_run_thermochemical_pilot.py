@@ -759,6 +759,7 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(output, "w") as handle:
         handle.attrs["format"] = "snrt_p5_thermochemical_pilot"
+        handle.attrs["static_input_sha256"] = _sha256_file(args.input)
         handle.attrs["thermal_coupling"] = "non_equilibrium_atomic_H_He_plus_UVB_free_metal_atlas"
         handle.attrs["thermal_atlas_component"] = thermal_atlas_host.provenance["thermal_component"]
         handle.attrs["thermal_atlas_source_data_sha256"] = thermal_atlas_host.provenance["source_data_sha256"]

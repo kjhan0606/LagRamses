@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import os
 from pathlib import Path
 import subprocess
@@ -245,6 +246,39 @@ def main() -> int:
         if thermal_result.returncode != 0:
             raise RuntimeError(thermal_result.stdout + thermal_result.stderr)
         assert "dust_ir=snrt_dust_thermal_v1" in thermal_result.stdout
+        # Use the actual validated P5 output as frozen DUST-3 heating input.
+        for reference_temperature in (20, 50):
+            ir_output = work / f"ir-transport-{reference_temperature}.h5"
+            ir_command = [sys.executable, str(ROOT / "tools/p6_run_dust_ir.py"),
+                          "--input", str(input_path), "--p5-heating", str(thermal_output_path),
+                          "--dust-opacity-metadata", str(physical_opacity_path),
+                          "--dust-thermal-metadata", str(thermal_metadata_path),
+                          "--output", str(ir_output), "--duration-s", "1e10",
+                          "--opacity-temperature-k", str(reference_temperature)]
+            ir_run = subprocess.run(ir_command, capture_output=True, text=True, env=environment)
+            if ir_run.returncode:
+                raise RuntimeError(ir_run.stdout + ir_run.stderr)
+            with h5py.File(ir_output, "r") as ir:
+                assert ir.attrs["validation_passed"]
+                assert ir.attrs["balance_relative"] <= 1e-9
+                assert ir.attrs["reprocessed_energy_erg"] > 0
+                print(f"P6_PHYSICAL_IR Tref={reference_temperature} "
+                      f"sigma={ir.attrs['opacity_per_h_cm2']} "
+                      f"reprocessed={ir.attrs['reprocessed_energy_erg']:.6e} "
+                      f"outside_fraction={ir.attrs['outside_fraction_of_emitted']:.6g} "
+                      f"stationarity={ir.attrs['stationarity_relative']:.6g} "
+                      f"tau_cell={ir.attrs['max_cell_tau']:.6g} "
+                      f"balance={ir.attrs['balance_relative']:.3e}")
+        # Mismatched geometry input must fail before a study output exists.
+        mismatched_input = work / "mismatched-static.h5"
+        write_static_rt_input(mismatched_input, replace(snapshot, temperature_k=snapshot.temperature_k * 2))
+        ir_command[ir_command.index("--input") + 1] = str(mismatched_input)
+        rejected_output = work / "rejected-ir.h5"
+        ir_command[ir_command.index("--output") + 1] = str(rejected_output)
+        rejected = subprocess.run(ir_command, capture_output=True, text=True, env=environment)
+        assert rejected.returncode != 0
+        assert "binding mismatch: static_input_sha256" in rejected.stderr
+        assert not rejected_output.exists()
         with h5py.File(physical_control_output_path, "r") as baseline, h5py.File(thermal_output_path, "r") as handle:
             assert handle.attrs["dust_thermal_schema"] == "snrt_dust_thermal_v1"
             assert handle.attrs["dust_thermal_status"] == "candidate_kirchhoff_equilibrium"
