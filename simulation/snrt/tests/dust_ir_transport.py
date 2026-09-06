@@ -12,10 +12,12 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from snrt_core.dust import DustThermalClosure, EV_ERG
-from snrt_core.dust_ir import prepare_excess_table, excess_emission, build_ir_step
+from snrt_core.dust_ir import prepare_excess_table, prepare_spectral_table, excess_emission, build_ir_step
 from snrt_core.quadrature import level_symmetric_quadrature
 from snrt_core.transport import TransportConfig, angular_integral, initial_intensity
 from tools.p6_run_dust_ir import evolve
+from tools.build_draine_dust_opacity import read_draine_table
+from tools.build_draine_dust_thermal import _planck_power_density
 
 
 def synthetic_table(background=13.1, **changes):
@@ -40,6 +42,93 @@ def must_fail(action, exception, text):
         assert text in str(error), str(error)
     else:
         raise AssertionError(f"expected {exception}: {text}")
+
+
+def spectral_checks():
+    # Wider synthetic domain makes the omitted blackbody tail negligible.
+    for resolution in (4, 8):
+        constant = prepare_spectral_table([1e-9, 1e3], [1e-24, 1e-24],
+            [5., 20., 100., 300.], 13.1, bins_per_decade=resolution)
+        analytic = 4 * 5.670374419e-5 * constant.temperature_k**4 * 1e-24
+        np.testing.assert_allclose(constant.table.power, analytic, rtol=1e-6, atol=0)
+        print(f"DUST_SPECTRAL_BLACKBODY bins_per_decade={resolution} "
+              f"relative={np.max(np.abs(np.asarray(constant.table.power)/analytic-1)):.6g}")
+    assert np.count_nonzero(constant.temperature_k == 13.1) == 1
+    duplicate = prepare_spectral_table([1e-9, 1e3], [1e-24, 1e-24], [5., 20., 100.], 20.)
+    assert len(duplicate.temperature_k) == 3
+    # Cross-module Planck consistency, full-c LTE: c*kappa*u = emitted power.
+    # Absolute normalization is pinned by the analytic blackbody check above.
+    # atol only masks the builder's artificial x=700 floor in negligible
+    # Wien channels, where the spectral constructor correctly returns zero.
+    # Test only thermodynamic nodes (including the exactly inserted bath).
+    for row, temperature in enumerate(constant.temperature_k):
+        u = _planck_power_density(constant.energy_ev, np.ones_like(constant.energy_ev),
+                                  temperature) * constant.weights_ev / 2.99792458e10
+        np.testing.assert_allclose(2.99792458e10 * constant.absorption_per_h_cm2 * u,
+                                   constant.table.band_power[row], rtol=1e-12, atol=1e-270)
+    heat = jnp.full((1, 1, 1), 1e-42)
+    weak = excess_emission(constant.table, heat, jnp.ones_like(heat))
+    np.testing.assert_allclose(weak.energy_rate.sum(axis=0), heat, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(weak.photon_rate * constant.energy_ev[:, None, None, None] * EV_ERG,
+                               weak.energy_rate, rtol=1e-12, atol=0)
+    assert not np.any(weak.invalid) and np.any(weak.energy_rate > 0)
+    must_fail(lambda: prepare_spectral_table([1., 1.], [1., 1.], [5., 20.], 10.),
+              ValueError, "opacity grid")
+    must_fail(lambda: prepare_spectral_table([1., 2.], [1., 1.], [5., 20.], 2.7),
+              ValueError, "CMB coverage")
+
+    source = ROOT.parents[1] / "external/draine_wd01_rv31/kext_albedo_WD_MW_3.1_60_D03.all"
+    raw = read_draine_table(source)
+    temperatures = np.unique(np.r_[np.geomspace(5., 300., 64), 20.])
+    models = [prepare_spectral_table(raw["energy_ev"], raw["absorption_per_h_cm2"],
+              temperatures, 13.1, bins_per_decade=n) for n in (4, 8)]
+    # Same heating for both runs, taken from an independent dense raw-grid
+    # Planck integral. This is a manufactured dusty cube, not astrophysics.
+    primary_per_h = np.trapezoid(
+        _planck_power_density(raw["energy_ev"], raw["absorption_per_h_cm2"], 20.)
+        - _planck_power_density(raw["energy_ev"], raw["absorption_per_h_cm2"], 13.1), raw["energy_ev"])
+    density = np.full((2, 2, 2), 1e6)
+    width, c = 1e18, 2.99792458e10
+    results = []
+    for model in models:
+        absorption = model.absorption_per_h_cm2[:, None, None, None] * density
+        value = evolve(model.table, density, density * primary_per_h, absorption,
+                        width=width, duration=4*width/c, light_speed=c)
+        long = model.energy_ev < .01
+        long_stored = value["energy_density"][long].sum() * width**3
+        long_absorption_rate = (value["energy_density"][long] * absorption[long]).sum() * c * width**3
+        assert long_stored > 0 and long_absorption_rate > 0
+        assert value["outside_energy_erg"] == 0 and value["balance_relative"] < 1e-9
+        # Locate peak per log frequency, not peak of arbitrarily weighted nodes.
+        emitted = _planck_power_density(model.energy_ev, model.absorption_per_h_cm2, 20.)
+        peak = np.argmax(emitted * model.energy_ev)
+        peak_tau = model.absorption_per_h_cm2[peak] * density[0, 0, 0] * 2 * width
+        assert .3 < peak_tau < 1.
+        print("DUST_SPECTRAL_CASE", json.dumps({
+            "nodes": len(model.energy_ev), "stored": value["stored_energy_erg"],
+            "reprocessed": value["reprocessed_energy_erg"], "mean_temperature": float(value["grain_temperature_k"].mean()),
+            "peak_box_tau": peak_tau, "longwave_stored": long_stored,
+            "longwave_absorption_rate": long_absorption_rate,
+            "balance": value["balance_relative"], "iterations": value["max_iterations"],
+            "low_tail_conditional_fraction": model.low_tail_conditional_fraction_max}))
+        results.append(value)
+    changes = {key: abs(results[0][key] / results[1][key] - 1)
+               for key in ("stored_energy_erg", "reprocessed_energy_erg")}
+    changes["temperature_max"] = float(np.max(np.abs(
+        results[0]["grain_temperature_k"] / results[1]["grain_temperature_k"] - 1)))
+    print("DUST_SPECTRAL_REFINEMENT", json.dumps(changes))
+    assert max(changes["stored_energy_erg"], changes["reprocessed_energy_erg"]) < .02
+    assert changes["temperature_max"] < .01
+    # One new-regime timestep check, not another space/angular matrix.
+    model = models[0]
+    half = evolve(model.table, density, density * primary_per_h,
+        model.absorption_per_h_cm2[:, None, None, None] * density,
+        width=width, duration=4*width/c, light_speed=c, courant=.2)
+    dt_changes = {"stored": abs(half["stored_energy_erg"] / results[0]["stored_energy_erg"] - 1),
+                  "mean_temperature": abs(float(half["grain_temperature_k"].mean()
+                                                / results[0]["grain_temperature_k"].mean()) - 1)}
+    print("DUST_SPECTRAL_DT_HALF", json.dumps(dt_changes))
+    assert dt_changes["stored"] < .02 and dt_changes["mean_temperature"] < .01
 
 
 def main():
@@ -114,6 +203,8 @@ def main():
             "stationarity_relative", "max_iterations", "max_in_step_self_absorption_fraction")
     print(json.dumps({name: {key: value[key] for key in keys} for name, value in comparisons.items()}, indent=2))
     print("DUST_IR_TRANSPORT_TEST_OK two_IR_groups=1 weak_CMB=1 failures=7")
+    spectral_checks()
+    print("DUST_SPECTRAL_IR_TEST_OK Kirchhoff=1 Stefan_Boltzmann=1 longwave=1")
 
 
 if __name__ == "__main__":

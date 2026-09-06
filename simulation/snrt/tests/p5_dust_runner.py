@@ -269,6 +269,41 @@ def main() -> int:
                       f"stationarity={ir.attrs['stationarity_relative']:.6g} "
                       f"tau_cell={ir.attrs['max_cell_tau']:.6g} "
                       f"balance={ir.attrs['balance_relative']:.3e}")
+        spectral_command = list(ir_command)
+        spectral_command[spectral_command.index("--output") + 1] = str(work / "spectral-ir.h5")
+        flag = spectral_command.index("--opacity-temperature-k")
+        del spectral_command[flag:flag + 2]
+        spectral_command.extend(("--ir-mode", "spectral"))
+        spectral_run = subprocess.run(spectral_command, capture_output=True, text=True, env=environment)
+        if spectral_run.returncode:
+            raise RuntimeError(spectral_run.stdout + spectral_run.stderr)
+        with h5py.File(work / "spectral-ir.h5", "r") as ir:
+            assert ir.attrs["status"] == "static_spectral_candidate"
+            assert ir.attrs["ir_mode"] == "spectral" and ir.attrs["validation_passed"]
+            assert "opacity_temperature_k" not in ir.attrs
+            assert ir.attrs["outside_energy_erg"] == 0
+            assert ir.attrs["balance_relative"] < 1e-9
+            assert ir["energy_density"].shape == shape
+            spectrum = np.asarray(ir["energy_per_frequency_erg"])
+            frequency = np.asarray(ir["spectral/energy_ev"])
+            assert spectrum[frequency < .01].sum() > 0
+            np.testing.assert_allclose(spectrum.sum(), ir.attrs["stored_energy_erg"], rtol=1e-12)
+            assert ir.attrs["low_tail_conditional_fraction_max"] < 2e-5
+            assert "max_cell_tau" not in ir.attrs
+            assert 0 < ir.attrs["emission_weighted_cell_tau"] < ir.attrs["max_cell_tau_all_frequencies"]
+            assert 0 < ir.attrs["emission_weighted_in_step_self_absorption_fraction"] < 1
+            print(f"P6_PHYSICAL_SPECTRAL nodes={len(frequency)} "
+                  f"longwave_stored_fraction={spectrum[frequency < .01].sum()/spectrum.sum():.6g} "
+                  f"balance={ir.attrs['balance_relative']:.3e} "
+                  f"sidecar_difference={ir.attrs['sidecar_power_relative_difference_max']:.6g} "
+                  f"original_nodes_difference={ir.attrs['sidecar_original_nodes_power_relative_difference_max']:.6g} "
+                  f"weighted_tau={ir.attrs['emission_weighted_cell_tau']:.6g}")
+        invalid_spectral = list(spectral_command)
+        invalid_spectral[invalid_spectral.index("--output") + 1] = str(work / "rejected-spectral.h5")
+        invalid_spectral.extend(("--opacity-temperature-k", "20"))
+        rejected_spectral = subprocess.run(invalid_spectral, capture_output=True, text=True, env=environment)
+        assert rejected_spectral.returncode and "spectral mode rejects" in rejected_spectral.stderr
+        assert not (work / "rejected-spectral.h5").exists()
         # Mismatched geometry input must fail before a study output exists.
         mismatched_input = work / "mismatched-static.h5"
         write_static_rt_input(mismatched_input, replace(snapshot, temperature_k=snapshot.temperature_k * 2))

@@ -1,8 +1,9 @@
 """Static excess-IR energy transport with local equilibrium reprocessing.
 
 Energy fields are erg/cm^3 per normalized angular direction. Primary dust
-heating is erg/cm^3/s. Only configured IR bands are transported; the spectral
-complement is an explicit escape sink. No grain heat capacity or gas coupling.
+heating is erg/cm^3/s. Gray mode transports configured IR bands and freely
+escapes the complement. Spectral mode transports the full supplied opacity
+domain. No grain heat capacity or gas coupling.
 """
 
 from typing import NamedTuple
@@ -30,6 +31,80 @@ class ExcessEmission(NamedTuple):
     photon_rate: jnp.ndarray
     outside_rate: jnp.ndarray
     invalid: jnp.ndarray
+
+
+class SpectralClosure(NamedTuple):
+    table: ExcessTable
+    energy_ev: np.ndarray
+    weights_ev: np.ndarray
+    absorption_per_h_cm2: np.ndarray
+    temperature_k: np.ndarray
+    domain_ev: np.ndarray
+    low_tail_conditional_fraction_max: float
+    high_tail_conditional_log_fraction_max: float
+
+
+def prepare_spectral_table(energy_ev, absorption_per_h_cm2, temperature_k,
+                           background_k, *, bins_per_decade=4) -> SpectralClosure:
+    """Discrete Kirchhoff closure on the full supplied opacity domain.
+
+    Four Gauss-Legendre nodes per log-energy bin. Each channel contains
+    quadrature-integrated energy; its absorption coefficient has NO weight.
+    Outside the finite domain no opacity/emissivity is silently supplied.
+    Tail estimates assume opacity there never exceeds the stated endpoint.
+    """
+    if not jax.config.x64_enabled:
+        raise ValueError("IR reference transport requires JAX float64")
+    energy, sigma, temperature = map(lambda x: np.asarray(x, dtype=float),
+                                    (energy_ev, absorption_per_h_cm2, temperature_k))
+    if (energy.ndim != 1 or energy.size < 2 or sigma.shape != energy.shape
+            or not np.isfinite(energy).all() or not np.isfinite(sigma).all()
+            or np.any(energy <= 0) or np.any(np.diff(energy) <= 0) or np.any(sigma <= 0)):
+        raise ValueError("invalid spectral opacity grid")
+    if (temperature.ndim != 1 or temperature.size < 2
+            or not np.isfinite(temperature).all() or np.any(temperature <= 0)
+            or np.any(np.diff(temperature) <= 0) or not np.isfinite(background_k)
+            or not temperature[0] <= background_k <= temperature[-1]):
+        raise ValueError("invalid spectral temperature grid or CMB coverage")
+    if not isinstance(bins_per_decade, (int, np.integer)) or not 1 <= bins_per_decade <= 64:
+        raise ValueError("spectral bins per decade must be an integer in [1,64]")
+    temperature = np.unique(np.append(temperature, background_k))
+    count = int(np.ceil(np.log10(energy[-1] / energy[0]) * bins_per_decade))
+    breaks = np.asarray([.01, 1.])
+    edges = np.unique(np.concatenate((np.geomspace(energy[0], energy[-1], count + 1),
+                                      breaks[(breaks > energy[0]) & (breaks < energy[-1])])))
+    x, w = np.polynomial.legendre.leggauss(4)
+    lo, hi = np.log(edges[:-1]), np.log(edges[1:])
+    nodes = np.exp(((lo + hi)[:, None] + (hi - lo)[:, None] * x) / 2)
+    weights = ((hi - lo)[:, None] / 2 * w * nodes).ravel()
+    nodes = nodes.ravel()
+    opacity = np.exp(np.interp(np.log(nodes), np.log(energy), np.log(sigma)))
+    # 4 pi sigma B_E dE; stable occupation has no artificial Wien floor.
+    h, c, kb_ev = 6.62607015e-27, 2.99792458e10, 8.617333262145e-5
+    arg = nodes[None, :] / (kb_ev * temperature[:, None])
+    occupation = np.exp(-arg) / (-np.expm1(-arg))
+    band = (8 * np.pi * (nodes * EV_ERG)**3 / (h**3 * c**2)
+            * EV_ERG * opacity * weights)[None, :] * occupation
+    power = band.sum(axis=1)
+    if (not np.isfinite(band).all() or not np.isfinite(power).all() or np.any(band < 0)
+            or np.any(np.diff(band, axis=0) < 0) or np.any(power <= 0)
+            or np.any(np.diff(power) <= 0)):
+        raise ValueError("spectral thermal power is not finite positive and increasing")
+    background = power[np.flatnonzero(temperature == background_k)[0]]
+    table = ExcessTable(*(jnp.asarray(v, dtype=jnp.float64) for v in
+        (power, np.log(temperature), band, band / (nodes * EV_ERG), np.zeros_like(power), background)))
+    # B_E <= Rayleigh-Jeans. This is NOT a measured opacity bound.
+    low_tail = (8 * np.pi * sigma[0] * kb_ev * temperature * EV_ERG
+                * (energy[0] * EV_ERG)**3 / (3 * h**3 * c**2))
+    # Analytic integrated Wien upper bound, reported in log space to avoid
+    # falsely reporting exact zero after floating-point underflow.
+    upper_x = energy[-1] / (kb_ev * temperature)
+    log_high = (np.log(8 * np.pi * sigma[-1] / (h**3 * c**2))
+                + 4 * np.log(kb_ev * temperature * EV_ERG) - upper_x
+                + np.log(upper_x**3 + 3 * upper_x**2 + 6 * upper_x + 6)
+                - np.log(-np.expm1(-upper_x)) - np.log(power))
+    return SpectralClosure(table, nodes, weights, opacity, temperature, energy[[0, -1]],
+                           float(np.max(low_tail / power)), float(np.max(log_high)))
 
 
 def prepare_excess_table(closure: DustThermalClosure, background_k: float) -> ExcessTable:

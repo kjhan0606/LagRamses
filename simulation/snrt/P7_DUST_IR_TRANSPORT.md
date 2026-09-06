@@ -74,3 +74,72 @@ convergence errors. The output code hashes identify the implementation.
 Sources: [Draine optical data](https://www.astro.princeton.edu/~draine/dust/dat/mix/)
 and [da Cunha et al. 2013](https://arxiv.org/abs/1302.0844) for the distinction
 between CMB heating and emission relative to the background.
+
+## DUST-4 opt-in spectral extension
+
+Add `--ir-mode spectral` to the invocation and omit `--opacity-temperature-k`
+(it is rejected in this mode). `--spectral-bins-per-decade 4` is the default;
+8 is the comparison resolution. Gray remains the default historical control.
+No primary photon-group edges or AGN photon ledger are changed.
+
+The secondary field has four Gauss-Legendre ordinates per log-energy bin,
+with explicit .01 and 1 eV breakpoints. It spans the full pinned raw Draine
+table, about 1.23984e-4--1.23984e4 eV. At each ordinate the same log-log
+interpolated absorption cross section enters emission and absorption.
+Quadrature weights multiply emission/energy, NEVER the absorption
+coefficient. Photons are diagnostic energy divided by that ordinate's E.
+The [Draine source description](https://www.astro.princeton.edu/~draine/dust/dustmix.html)
+documents the finite 1 cm--1 Angstrom coverage and the dust-mass normalization.
+
+The thermal power curve is the sum of these exact discrete emission
+channels, not a rescaled old sidecar curve. Its admitted temperature grid
+comes from the validated sidecar, with the CMB inserted and deduplicated.
+At temperature nodes, including the bath, the closure obeys node-wise
+Kirchhoff balance. Between nodes it uses the common-power interpolation:
+total energy closes exactly, but the spectrum need not equal a Planck
+spectrum at the diagnostic interpolated temperature. Weak positive excess
+still uses the stable slope integration, not subtraction of near-equal baths.
+
+All in-domain thermal energy, including below .01 eV, is now transported and
+available for reabsorption. The finite-domain model has **zero complement
+escape**, not proof of zero emission outside the raw domain. A low-energy
+Rayleigh-Jeans tail estimate assumes sigma below the data is bounded by its
+lower endpoint; a high-energy integrated Wien estimate assumes the analogous
+upper-endpoint bound, recorded in natural-log relative units to avoid numeric
+underflow. Both are explicitly conditional estimates, not measured bounds
+or extrapolated opacities used by the solver. The low-end estimate is about
+1.3e-5 of finite-domain total power at the worst 5 K node of this mixture.
+It is a bound on total emitted power, not automatically on arbitrarily weak
+CMB-excess power. No full-frequency physical completeness is claimed.
+
+Spectral output keeps the existing format, with `ir_mode=spectral` and
+`status=static_spectral_candidate`. `spectral/` contains energies, weights,
+cross sections, thermal nodes and domain; the energy-density and emitted
+photon cubes are summed over frequency. `energy_per_frequency_erg` retains
+the spectrum of total stored energy. `sidecar_power_relative_difference_max`
+compares against the old curve (including its log-T interpolation at the
+inserted bath). All outputs retain static/P5/sidecar/raw/code hash binding.
+`sidecar_original_nodes_power_relative_difference_max` excludes that inserted
+node, separating quadrature changes from the old temperature interpolation.
+Spectral all-frequency tau/self-absorption maxima are explicitly suffixed
+`_all_frequencies`: high-energy nodes can dominate even when carrying no
+thermal radiation. `emission_weighted_cell_tau` and
+`emission_weighted_in_step_self_absorption_fraction` instead weight by the
+cumulative emitted energy per node/cell (zero sentinel for no emission).
+Neither is a universal trapping factor. The Kirchhoff test is cross-module
+consistency; Stefan-Boltzmann supplies the independent normalization at both
+4 and 8 bins/decade. The LTE comparison's tiny absolute tolerance covers the
+historical Planck builder's x=700 floor in negligible Wien channels.
+
+For BOTH modes, reduced-c inventory is a conservative transport quantity:
+with unchanged physical source power and absorption rate c_hat*kappa*U,
+stationary U scales as c/c_hat. Do not interpret it as physical full-c LTE
+energy density or use it for force/gas coupling without an explicit RSLA
+coupling derivation. The discrete LTE test and moderately opaque spectral
+comparison use full c. Spectral refinement here is a bounded case comparison,
+not a publication/production error guarantee. The physical P5 cube remains
+optically thin; newly covered radiation mainly becomes boundary escape,
+not evidence of strong trapping. Single equilibrium-temperature mixture,
+frozen primary heating, omitted scattering, fixed dust and no native/live
+coupling remain in force. The next handoff is native transport and coupled
+energy/momentum semantics, not another infrastructure validation framework.
