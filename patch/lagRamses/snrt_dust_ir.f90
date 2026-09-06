@@ -130,27 +130,38 @@ contains
        if(.not.ieee_is_finite(target))return
        if(target<capacity(i)*lower) return
        if(target>capacity(i)*upper+dt*density(i)*(table%power(nt)-table%background))return
-       ! C*T_new + dt*n_d*[P(T_new)-P(T_background)] = E_old + dt*heating.
-       ! Positive C and the monotone table give a unique bracketed root.
+       ! Solve for emitted power, not the tiny temperature displacement of a
+       ! stiff grain or the difference of two large material energies.
+       lower=0d0
+       upper=min(density(i)*(table%power(nt)-table%background), &
+            max(heating(i)+(old_energy(i)-capacity(i)*table%background_temperature)/dt,0d0))
        do iteration=1,80
           mid=lower+0.5d0*(upper-lower)
+          power=table%background+mid/density(i)
           k=1
           do while(k<nt-1)
-             if(log(mid)<=table%log_t(k+1))exit
+             if(power<=table%power(k+1))exit
              k=k+1
           end do
-          fraction=(log(mid)-table%log_t(k))/(table%log_t(k+1)-table%log_t(k))
-          power=table%power(k)+fraction*(table%power(k+1)-table%power(k))
-          residual=capacity(i)*mid+dt*density(i)*max(power-table%background,0d0)-target
+          fraction=(power-table%power(k))/(table%power(k+1)-table%power(k))
+          temperature(i)=exp(table%log_t(k)+fraction*(table%log_t(k+1)-table%log_t(k)))
+          residual=(capacity(i)*temperature(i)-old_energy(i))/dt+mid-heating(i)
           if(residual>0)then
              upper=mid
           else
              lower=mid
           end if
        end do
-       temperature(i)=lower+0.5d0*(upper-lower)
+       emitted(i)=lower+0.5d0*(upper-lower)
+       power=table%background+emitted(i)/density(i)
+       k=1
+       do while(k<nt-1)
+          if(power<=table%power(k+1))exit
+          k=k+1
+       end do
+       fraction=(power-table%power(k))/(table%power(k+1)-table%power(k))
+       temperature(i)=exp(table%log_t(k)+fraction*(table%log_t(k+1)-table%log_t(k)))
        next_energy(i)=capacity(i)*temperature(i)
-       emitted(i)=max(heating(i)+(old_energy(i)-next_energy(i))/dt,0d0)
     end do
     call emission(table,emitted,density,rate,unused_temperature,ierr)
   end subroutine

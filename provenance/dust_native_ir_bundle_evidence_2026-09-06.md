@@ -139,3 +139,29 @@ project environment `simulation/snrt/.venv/bin/python` ran the checks
 successfully. No new Python environment, validator or gate framework was added.
 Live IR frequency/state admission, AMR/MPI transport, checkpoint persistence
 and physical-model approval remain explicit integration requirements.
+
+### Weak-emission/stiff-capacity correction
+
+Reinspection after `a831d86` reproduced a cancellation defect: a 20 K grain
+with capacity `1e20 erg/cm3/K` and `dt=1e-6 s` could report no photons because
+the original formula subtracted two large material energies to infer emitted
+power. The added fixed-temperature-limit test failed at STOP 59.
+
+The solve now brackets emitted power directly, bounded by both the admitted
+table and the available material-plus-input energy above the bath. Temperature
+is obtained from the same power/log-temperature inversion, and the residual
+enforces the implicit material energy equation. This avoids inferring weak
+emission from a rounded-away material energy difference. A trial fix based
+only on evaluating power at a temperature root failed the stiff cooling
+closure test; it was replaced by this emitted-power solve before commit.
+
+Both GNU and Intel native runs pass after the change. The large-capacity
+limit emits positive photons/radiation and agrees, per spectral node, with a
+direct Planck difference between 20 K and the 10 K bath within `1e-12`
+relative tolerance. Existing cooling, positive heating, invalid-input rollback,
+and equilibrium differential checks remain successful. The material energy
+change may be smaller than FP64 resolution in this limit; total-energy
+closure retains its stated relative tolerance, while the radiative source is
+no longer spuriously zero. These are numerical-control values, not a physical
+grain heat-capacity recommendation. Live IR input/state integration remains
+pending; this correction closes a defect in its prerequisite operator.
