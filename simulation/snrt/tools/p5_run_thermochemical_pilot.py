@@ -828,6 +828,11 @@ def main() -> None:
         handle.attrs["group_edges_sha256"] = photon_group_edges_sha256 or ""
         handle.attrs["dust_model"] = "metadata" if args.dust_opacity_metadata is not None else "zero_dust"
         handle.attrs["dust_relative_abundance_origin"] = static.dust_relative_abundance_origin
+        handle.attrs["dust_abundance_contract"] = (
+            "direct"
+            if static.dust_relative_abundance_origin == "direct"
+            else "metallicity_solar_times_dust_to_metal"
+        )
         handle.attrs["dust_opacity_schema"] = dust_schema
         handle.attrs["dust_binding_status"] = dust_binding_status
         handle.attrs["dust_scattering"] = args.dust_scattering
@@ -876,6 +881,8 @@ def main() -> None:
             handle.attrs["metallicity_solar"] = args.metallicity_solar
         else:
             handle.create_dataset("gas/metallicity_solar", data=np.asarray(static.metallicity_solar))
+        if static.dust_to_metal is not None:
+            handle.create_dataset("gas/dust_to_metal", data=np.asarray(static.dust_to_metal))
         handle.create_dataset("group_energy_ev", data=group_energy_ev)
         handle.create_dataset("ionization/x_hii", data=x_hii)
         handle.create_dataset("ionization/x_heii", data=x_heii)

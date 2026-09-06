@@ -370,10 +370,62 @@ class RamsesFieldMap:
         thermal_field_count = int(self.temperature is not None) + int(self.thermal_pressure is not None)
         if thermal_field_count != 1 and not (thermal_field_count == 0 and self.equilibrium_temperature):
             raise ValueError("supply one thermal field, or request equilibrium_temperature fallback")
+        composition_field_count = int(self.metallicity_solar is not None) + int(self.dust_to_metal is not None)
+        if composition_field_count == 1:
+            raise ValueError(
+                "metallicity_solar and dust_to_metal must be supplied together; "
+                "a partial dust mapping is ambiguous"
+            )
         if self.mean_molecular_weight is not None and self.mean_molecular_weight <= 0.0:
             raise ValueError("mean_molecular_weight must be positive")
         if self.velocity is not None and len(self.velocity) != 3:
             raise ValueError("velocity must contain exactly three yt fields")
+
+
+def resolve_dust_abundance(
+    shape: tuple[int, ...],
+    *,
+    dust_relative_abundance: Any | None,
+    metallicity_solar: Any | None,
+    dust_to_metal: Any | None,
+) -> tuple[np.ndarray, str]:
+    """Resolve explicit dust state fields without an implicit partial fallback.
+
+    A direct abundance is authoritative when supplied.  The optional
+    metallicity/DTM fields may accompany it as preserved input metadata, but
+    they must be a complete pair.  When no direct field is supplied, the
+    complete pair is multiplied cell-by-cell and its origin is recorded.
+    With no dust fields at all, the result is an explicit zero-dust pilot
+    control.  A partial metallicity/DTM pair is always rejected.
+    """
+
+    composition_field_count = int(metallicity_solar is not None) + int(dust_to_metal is not None)
+    if composition_field_count == 1:
+        raise ValueError(
+            "metallicity_solar and dust_to_metal must be supplied together; "
+            "a partial dust mapping is ambiguous"
+        )
+
+    def _field(value: Any, name: str) -> np.ndarray:
+        array = np.asarray(value, dtype=np.float64)
+        if array.shape != shape:
+            raise ValueError(f"{name} must share the gas-grid shape")
+        if not np.isfinite(array).all():
+            raise ValueError(f"{name} must contain finite values")
+        if np.any(array < 0.0):
+            raise ValueError(f"{name} must be non-negative")
+        return array
+
+    if dust_relative_abundance is not None:
+        return _field(dust_relative_abundance, "dust_relative_abundance"), "direct"
+    if composition_field_count == 2:
+        metallicity = _field(metallicity_solar, "metallicity_solar")
+        dust_to_metal_field = _field(dust_to_metal, "dust_to_metal")
+        derived = metallicity * dust_to_metal_field
+        if not np.isfinite(derived).all():
+            raise ValueError("metallicity_solar*dust_to_metal is non-finite")
+        return derived, "metallicity_solar_times_dust_to_metal"
+    return np.zeros(shape, dtype=np.float64), "direct"
 
 
 def _stage_yt_dataset(
@@ -453,17 +505,27 @@ def _stage_yt_dataset(
             temperature = pressure * fields.mean_molecular_weight * PROTON_MASS_G / (density * BOLTZMANN_ERG_K)
         else:
             temperature = mu_table.temperature_from_pressure(pressure, density, hydrogen_number_density)
-    if fields.dust_relative_abundance is not None:
-        dust = np.asarray(sampled_grid[fields.dust_relative_abundance].to_value(""))
-        dust_relative_abundance_origin = "direct"
-    elif fields.metallicity_solar is not None and fields.dust_to_metal is not None:
-        metallicity_field = np.asarray(sampled_grid[fields.metallicity_solar].to_value(""))
-        dust_to_metal_field = np.asarray(sampled_grid[fields.dust_to_metal].to_value(""))
-        dust = metallicity_field * dust_to_metal_field
-        dust_relative_abundance_origin = "metallicity_solar_times_dust_to_metal"
-    else:
-        dust = np.zeros_like(density)
-        dust_relative_abundance_origin = "direct"
+    direct_dust_field = (
+        None
+        if fields.dust_relative_abundance is None
+        else np.asarray(sampled_grid[fields.dust_relative_abundance].to_value(""))
+    )
+    metallicity_field = (
+        None
+        if fields.metallicity_solar is None
+        else np.asarray(sampled_grid[fields.metallicity_solar].to_value(""))
+    )
+    dust_to_metal_field = (
+        None
+        if fields.dust_to_metal is None
+        else np.asarray(sampled_grid[fields.dust_to_metal].to_value(""))
+    )
+    dust, dust_relative_abundance_origin = resolve_dust_abundance(
+        density.shape,
+        dust_relative_abundance=direct_dust_field,
+        metallicity_solar=metallicity_field,
+        dust_to_metal=dust_to_metal_field,
+    )
     if fields.x_hii is not None or fields.x_heii is not None or fields.x_heiii is not None:
         if fields.x_hii is None or fields.x_heii is None or fields.x_heiii is None:
             raise ValueError("x_hii, x_heii, and x_heiii must be supplied together")

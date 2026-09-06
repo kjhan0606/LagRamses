@@ -67,15 +67,20 @@ def main() -> int:
         photon_path = work / "photon.json"
         output_path = work / "output.h5"
         shape = (2, 2, 2)
+        metallicity_solar = np.full(shape, 1.0e-6)
+        dust_to_metal = np.ones(shape)
         snapshot = neutral_primordial_input(
             GridSpec(cell_width_cm=1.0e18, left_edge_cm=np.zeros(3)),
             np.full(shape, 1.0e-24),
             np.full(shape, 1.0e4),
-            dust_relative_abundance=1.0,
+            dust_relative_abundance=metallicity_solar * dust_to_metal,
             sources=SourceCatalog(
                 cell_index=np.asarray([[0, 0, 0]]),
                 photon_luminosity_s=source_luminosity[None, :],
             ),
+            metallicity_solar=metallicity_solar,
+            dust_to_metal=dust_to_metal,
+            dust_relative_abundance_origin="metallicity_solar_times_dust_to_metal",
         )
         write_static_rt_input(input_path, snapshot)
         photon_path.write_text(json.dumps(photon_metadata, indent=2) + "\n", encoding="utf-8")
@@ -121,6 +126,10 @@ def main() -> int:
         assert "P5_THERMOCHEMICAL_PILOT_OK" in result.stdout
         with h5py.File(output_path, "r") as handle:
             assert handle.attrs["dust_model"] == "metadata"
+            assert handle.attrs["dust_relative_abundance_origin"] == "metallicity_solar_times_dust_to_metal"
+            assert handle.attrs["dust_abundance_contract"] == "metallicity_solar_times_dust_to_metal"
+            assert np.array_equal(handle["gas/metallicity_solar"], metallicity_solar)
+            assert np.array_equal(handle["gas/dust_to_metal"], dust_to_metal)
             assert handle.attrs["dust_opacity_schema"] == "snrt_dust_opacity_v1"
             assert handle.attrs["dust_binding_status"] == "reference_control"
             assert handle.attrs["dust_opacity_metadata_sha256"]

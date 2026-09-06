@@ -11,7 +11,15 @@ from tempfile import TemporaryDirectory
 import h5py
 import numpy as np
 
-from snrt_core.snapshot import GridSpec, SourceCatalog, neutral_primordial_input, read_static_rt_input, write_static_rt_input
+from snrt_core.snapshot import (
+    GridSpec,
+    RamsesFieldMap,
+    SourceCatalog,
+    neutral_primordial_input,
+    read_static_rt_input,
+    resolve_dust_abundance,
+    write_static_rt_input,
+)
 
 
 def main() -> None:
@@ -73,6 +81,34 @@ def main() -> None:
     assert np.allclose(restored.x_heii, 0.2)
     assert np.allclose(restored.x_heiii, 0.3)
     restored.validate_production_contract(require_sources=True)
+
+    resolved, origin = resolve_dust_abundance(
+        shape,
+        dust_relative_abundance=None,
+        metallicity_solar=metallicity,
+        dust_to_metal=dust_to_metal,
+    )
+    assert origin == "metallicity_solar_times_dust_to_metal"
+    assert np.array_equal(resolved, metallicity * dust_to_metal)
+    for keyword in ("metallicity_solar", "dust_to_metal"):
+        partial = {
+            "dust_relative_abundance": None,
+            "metallicity_solar": metallicity if keyword == "metallicity_solar" else None,
+            "dust_to_metal": dust_to_metal if keyword == "dust_to_metal" else None,
+        }
+        try:
+            resolve_dust_abundance(shape, **partial)
+        except ValueError as error:
+            assert "supplied together" in str(error)
+        else:
+            raise AssertionError(f"partial dust mapping accepted for {keyword}")
+    for keyword in ("metallicity_solar", "dust_to_metal"):
+        try:
+            RamsesFieldMap(density="density", temperature="temperature", **{keyword: "field"})
+        except ValueError as error:
+            assert "supplied together" in str(error)
+        else:
+            raise AssertionError(f"partial RAMSES dust field map accepted for {keyword}")
 
     derived_snapshot = neutral_primordial_input(
         GridSpec(cell_width_cm=3.085677581e18, left_edge_cm=np.array([1.0, 2.0, 3.0])),

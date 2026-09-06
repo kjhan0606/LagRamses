@@ -74,6 +74,14 @@ thermal energy equation; the output stores it separately under
 `rates/dust_heating_erg_cm3_s`. The H/He absorption closure subtracts the
 separate dust ledger before testing gas chemistry conservation.
 
+The P5 output preserves `gas/metallicity_solar` and `gas/dust_to_metal` when
+they were present in the static input, together with the
+`dust_relative_abundance_origin` and `dust_abundance_contract` attributes.
+For the derived contract, the abundance used by dust opacity is the explicit
+cell product `metallicity_solar*dust_to_metal`; no redshift, depletion, or
+metallicity floor is inserted by the runner. A direct abundance remains a
+separate, explicitly labelled control.
+
 The opt-in DUST-2 `--dust-thermal-metadata` path is documented in
 [`P6_DUST_THERMAL.md`](P6_DUST_THERMAL.md). It derives a single-temperature
 equilibrium candidate from a provenance-bound absorption table, includes the

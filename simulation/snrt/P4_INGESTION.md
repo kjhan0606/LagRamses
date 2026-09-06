@@ -28,6 +28,13 @@ because its abundance origin cannot be reconstructed; zero-dust legacy files
 retain the `direct` default. New derived staging records the exact product
 `metallicity_solar*dust_to_metal` and validates it on read.
 
+The yt field-map adapter rejects a partial composition pair:
+`metallicity_solar` and `dust_to_metal` must be mapped together when either is
+present. If a direct `dust_relative_abundance` field is supplied, it is the
+authoritative abundance and the complete composition pair is retained as
+input metadata. With no dust fields, the adapter produces only the explicit
+zero-dust pilot control; it never turns a partial pair into an implicit zero.
+
 The source catalogue is deliberately not inferred from gas cells, particle masses, BH accretion rates, or a RAMSES `rt` output. The science workflow must supply an audited stellar/BH SED-to-group luminosity conversion.
 
 ## Current snapshot audit
