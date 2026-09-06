@@ -11,6 +11,8 @@ P4-A makes a RAMSES hydro state usable by the static S_N radiation solver. It do
 - `/gas/hydrogen_number_density_cm3` and `/gas/helium_number_density_cm3`: nuclei number density.
 - `/gas/temperature_k`: gas temperature.
 - `/gas/dust_relative_abundance`: dimensionless multiplier for the supplied dust cross section.
+- `/gas` attribute `dust_relative_abundance_origin`: `direct` or
+  `metallicity_solar_times_dust_to_metal`.
 - `/gas/velocity_cm_s`: optional three-component proper velocity.
 - `/gas/metallicity_solar` and `/gas/dust_to_metal`: optional composition fields.
 - `/ionization/x_hii`, `/ionization/x_heii`, `/ionization/x_heiii`: initial primordial number fractions.
@@ -19,9 +21,12 @@ P4-A makes a RAMSES hydro state usable by the static S_N radiation solver. It do
 - `/sources/cell_index` and `/sources/photon_luminosity_s`: optional source positions and photon-number luminosities per RT group.
 - `cell_width_cm` and `grid/left_edge_cm`: proper grid geometry.
 
-Format version 2 is the current writer format. The reader remains compatible
-with version 1 files, whose absent optional fields are reported as incomplete
-by `StaticRTInput.validate_production_contract()`.
+Format version 3 is the current writer format. The reader remains compatible
+with version 1 and 2 files when their dust state is unambiguous. A legacy file
+with non-zero dust but no `dust_relative_abundance_origin` attribute is rejected
+because its abundance origin cannot be reconstructed; zero-dust legacy files
+retain the `direct` default. New derived staging records the exact product
+`metallicity_solar*dust_to_metal` and validates it on read.
 
 The source catalogue is deliberately not inferred from gas cells, particle masses, BH accretion rates, or a RAMSES `rt` output. The science workflow must supply an audited stellar/BH SED-to-group luminosity conversion.
 
@@ -172,6 +177,6 @@ PYTHONPATH=. .venv/bin/python tests/p4_hdf5_staging.py
 PYTHONPATH=. .venv/bin/python tests/native_stellar_catalogue.py
 ```
 
-The checks validate the v2 cgs H/He conversion, geometry, source-group
+The checks validate the v3 cgs H/He conversion, dust-origin attribute, geometry, source-group
 catalogue, HDF5 round-trip, explicit field map, AMR coverage, and density mass
 balance. They do not touch the production RAMSES snapshot.

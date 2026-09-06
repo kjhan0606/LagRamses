@@ -2,17 +2,22 @@
 
 ## Dust
 
-`DustModel` accepts group absorption cross sections in `cm^2/H` and a cell-wise relative dust abundance. No Milky-Way opacity is hard-coded: production runs must provide a redshift- and metallicity-appropriate table, for example sampled from Draine model data. Dust receives the full absorbed photon energy and does not change H/He ion fractions.
+`DustModel` accepts group absorption cross sections in `cm^2/H` and a cell-wise relative dust abundance. No Milky-Way opacity is hard-coded: production runs must provide a redshift- and metallicity-appropriate table, for example sampled from Draine model data. Dust receives the absorption-weighted energy of the photons absorbed by the dust fraction and does not change H/He ion fractions; conservative scattering adds no dust heating.
 
 The audited sidecar loader is documented in
 [`P4_DUST_OPACITY.md`](P4_DUST_OPACITY.md). It additionally accepts a
 dust-absorption-weighted photon energy per group, which is used for dust
-heating and the absorption-only momentum diagnostic. The P4 and P5 runners
+heating and absorption momentum. A v3 candidate also stores the
+scattering-weighted energy and uses a named isotropic within-group closure for
+the separate scattering ledger and momentum diagnostic. The P4 and P5 runners
 require `--dust-opacity-metadata` whenever the static input has non-zero dust
 abundance; otherwise they use an explicit zero-dust control. The momentum
 diagnostic is not yet coupled to hydro or a full radiation-pressure closure.
 
-Scattering and IR re-emission are intentionally not in this live transport step. They require a separate angle- and frequency-coupled closure rather than treating scattering as absorption.
+The current scattering candidate is deliberately isotropic and records the
+measured Draine angular moments without claiming to use an anisotropic phase
+function. IR re-emission remains deferred: it requires a grain-temperature and
+frequency-coupled closure rather than treating absorbed energy as an IR source.
 
 ## X-ray secondaries
 

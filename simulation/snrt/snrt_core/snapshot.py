@@ -27,8 +27,8 @@ HELIUM_MASS_FRACTION = 1.0 - HYDROGEN_MASS_FRACTION
 PROTON_MASS_G = 1.67262192369e-24
 BOLTZMANN_ERG_K = 1.380649e-16
 FORMAT_NAME = "snrt_static_rt_input"
-FORMAT_VERSION = 2
-SUPPORTED_FORMAT_VERSIONS = (1, FORMAT_VERSION)
+FORMAT_VERSION = 3
+SUPPORTED_FORMAT_VERSIONS = (1, 2, FORMAT_VERSION)
 
 
 @dataclass(frozen=True)
@@ -91,6 +91,7 @@ class StaticRTInput:
     velocity_cm_s: np.ndarray | None = None
     metallicity_solar: np.ndarray | None = None
     dust_to_metal: np.ndarray | None = None
+    dust_relative_abundance_origin: str = "direct"
     x_h2: np.ndarray | None = None
     cell_level: np.ndarray | None = None
 
@@ -150,6 +151,29 @@ class StaticRTInput:
             raise ValueError("metallicity_solar must be non-negative")
         if optional["dust_to_metal"] is not None and np.any(optional["dust_to_metal"] < 0.0):
             raise ValueError("dust_to_metal must be non-negative")
+        if self.dust_relative_abundance_origin not in (
+            "direct",
+            "metallicity_solar_times_dust_to_metal",
+        ):
+            raise ValueError(
+                "dust_relative_abundance_origin must be direct or "
+                "metallicity_solar_times_dust_to_metal"
+            )
+        if self.dust_relative_abundance_origin == "metallicity_solar_times_dust_to_metal":
+            if optional["metallicity_solar"] is None or optional["dust_to_metal"] is None:
+                raise ValueError(
+                    "derived dust abundance requires metallicity_solar and dust_to_metal"
+                )
+            derived_dust = optional["metallicity_solar"] * optional["dust_to_metal"]
+            if not np.allclose(
+                normalized["dust_relative_abundance"],
+                derived_dust,
+                rtol=1.0e-12,
+                atol=1.0e-15,
+            ):
+                raise ValueError(
+                    "dust_relative_abundance disagrees with metallicity_solar*dust_to_metal"
+                )
         if optional["x_h2"] is not None and np.any((optional["x_h2"] < 0.0) | (optional["x_h2"] > 1.0)):
             raise ValueError("x_h2 must be a fraction in [0, 1]")
         if optional["cell_level"] is not None and np.any(optional["cell_level"] < 0):
@@ -191,6 +215,7 @@ def neutral_primordial_input(
     velocity_cm_s: np.ndarray | None = None,
     metallicity_solar: np.ndarray | None = None,
     dust_to_metal: np.ndarray | None = None,
+    dust_relative_abundance_origin: str = "direct",
     x_h2: np.ndarray | None = None,
     cell_level: np.ndarray | None = None,
     x_hii: np.ndarray | None = None,
@@ -226,6 +251,7 @@ def neutral_primordial_input(
         velocity_cm_s=velocity_cm_s,
         metallicity_solar=metallicity_solar,
         dust_to_metal=dust_to_metal,
+        dust_relative_abundance_origin=dust_relative_abundance_origin,
         x_h2=x_h2,
         cell_level=cell_level,
     )
@@ -248,6 +274,7 @@ def write_static_rt_input(path: str | Path, snapshot: StaticRTInput) -> None:
         gas.create_dataset("helium_number_density_cm3", data=snapshot.helium_number_density_cm3)
         gas.create_dataset("temperature_k", data=snapshot.temperature_k)
         gas.create_dataset("dust_relative_abundance", data=snapshot.dust_relative_abundance)
+        gas.attrs["dust_relative_abundance_origin"] = snapshot.dust_relative_abundance_origin
         ionization = handle.create_group("ionization")
         ionization.create_dataset("x_hii", data=snapshot.x_hii)
         ionization.create_dataset("x_heii", data=snapshot.x_heii)
@@ -276,8 +303,16 @@ def read_static_rt_input(path: str | Path) -> StaticRTInput:
     with h5py.File(Path(path), "r") as handle:
         if handle.attrs.get("format", "") != FORMAT_NAME:
             raise ValueError("not an SNRT static RT input file")
-        if int(handle.attrs.get("format_version", -1)) not in SUPPORTED_FORMAT_VERSIONS:
+        format_version = int(handle.attrs.get("format_version", -1))
+        if format_version not in SUPPORTED_FORMAT_VERSIONS:
             raise ValueError("unsupported SNRT static RT input format version")
+        dust_relative_abundance = np.asarray(handle["gas/dust_relative_abundance"])
+        has_dust_origin = "dust_relative_abundance_origin" in handle["gas"].attrs
+        if not has_dust_origin and np.any(dust_relative_abundance > 0.0):
+            raise ValueError(
+                "static RT input with non-zero dust abundance lacks the required "
+                "dust_relative_abundance_origin attribute"
+            )
         sources = None
         if "sources" in handle:
             sources = SourceCatalog(
@@ -292,7 +327,7 @@ def read_static_rt_input(path: str | Path) -> StaticRTInput:
             hydrogen_number_density_cm3=np.asarray(handle["gas/hydrogen_number_density_cm3"]),
             helium_number_density_cm3=np.asarray(handle["gas/helium_number_density_cm3"]),
             temperature_k=np.asarray(handle["gas/temperature_k"]),
-            dust_relative_abundance=np.asarray(handle["gas/dust_relative_abundance"]),
+            dust_relative_abundance=dust_relative_abundance,
             x_hii=np.asarray(handle["ionization/x_hii"]),
             x_heii=np.asarray(handle["ionization/x_heii"]),
             x_heiii=np.asarray(handle["ionization/x_heiii"]),
@@ -302,6 +337,7 @@ def read_static_rt_input(path: str | Path) -> StaticRTInput:
             if "gas/metallicity_solar" not in handle
             else np.asarray(handle["gas/metallicity_solar"]),
             dust_to_metal=None if "gas/dust_to_metal" not in handle else np.asarray(handle["gas/dust_to_metal"]),
+            dust_relative_abundance_origin=str(handle["gas"].attrs.get("dust_relative_abundance_origin", "direct")),
             x_h2=None if "ionization/x_h2" not in handle else np.asarray(handle["ionization/x_h2"]),
             cell_level=None if "grid/cell_level" not in handle else np.asarray(handle["grid/cell_level"]),
         )
@@ -417,10 +453,17 @@ def _stage_yt_dataset(
             temperature = pressure * fields.mean_molecular_weight * PROTON_MASS_G / (density * BOLTZMANN_ERG_K)
         else:
             temperature = mu_table.temperature_from_pressure(pressure, density, hydrogen_number_density)
-    if fields.dust_relative_abundance is None:
-        dust = np.zeros_like(density)
-    else:
+    if fields.dust_relative_abundance is not None:
         dust = np.asarray(sampled_grid[fields.dust_relative_abundance].to_value(""))
+        dust_relative_abundance_origin = "direct"
+    elif fields.metallicity_solar is not None and fields.dust_to_metal is not None:
+        metallicity_field = np.asarray(sampled_grid[fields.metallicity_solar].to_value(""))
+        dust_to_metal_field = np.asarray(sampled_grid[fields.dust_to_metal].to_value(""))
+        dust = metallicity_field * dust_to_metal_field
+        dust_relative_abundance_origin = "metallicity_solar_times_dust_to_metal"
+    else:
+        dust = np.zeros_like(density)
+        dust_relative_abundance_origin = "direct"
     if fields.x_hii is not None or fields.x_heii is not None or fields.x_heiii is not None:
         if fields.x_hii is None or fields.x_heii is None or fields.x_heiii is None:
             raise ValueError("x_hii, x_heii, and x_heiii must be supplied together")
@@ -464,6 +507,7 @@ def _stage_yt_dataset(
         velocity_cm_s=velocity,
         metallicity_solar=metallicity_solar,
         dust_to_metal=dust_to_metal,
+        dust_relative_abundance_origin=dust_relative_abundance_origin,
         x_h2=x_h2,
         cell_level=np.full(density.shape, level, dtype=np.int16),
     )

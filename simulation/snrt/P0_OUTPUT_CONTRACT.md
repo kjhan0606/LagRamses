@@ -3,11 +3,11 @@
 Status: Draft v0.3 — output_00017 staging validated, production composition pending
 Date: 2026-08-31
 
-The canonical static input writer is now format version 2. The implementation
+The canonical static input writer is now format version 3. The implementation
 and synthetic contract test live in
 [`snrt_core/snapshot.py`](snrt_core/snapshot.py) and
 [`tests/p4_hdf5_staging.py`](tests/p4_hdf5_staging.py). This closes the file
-layout and conservative-leaf bookkeeping portion of the contract; it does not
+layout, dust-abundance-origin, and conservative-leaf bookkeeping portion of the contract; it does not
 identify missing physical fields in an existing checkpoint.
 
 ## 1. Confirmed checkpoint structure

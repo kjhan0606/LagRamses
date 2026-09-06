@@ -151,6 +151,94 @@ def advance_with_absorption(
     return next_intensity, absorbed_intensity
 
 
+def _exponential_integral(rate: jnp.ndarray, dt: float) -> jnp.ndarray:
+    """Return ``(1-exp(-rate*dt))/rate`` with a thin-cell branch."""
+
+    safe_rate = jnp.maximum(rate, jnp.finfo(rate.dtype).tiny)
+    optical_depth = rate * dt
+    exact = -jnp.expm1(-optical_depth) / safe_rate
+    series = dt * (1.0 - 0.5 * optical_depth + optical_depth * optical_depth / 6.0)
+    return jnp.where(optical_depth < 1.0e-4, series, exact)
+
+
+def _exponential_double_integral(rate: jnp.ndarray, dt: float) -> jnp.ndarray:
+    """Return ``(dt-F(rate))/rate`` for a constant local source."""
+
+    safe_rate = jnp.maximum(rate, jnp.finfo(rate.dtype).tiny)
+    optical_depth = rate * dt
+    first = _exponential_integral(rate, dt)
+    exact = (dt - first) / safe_rate
+    # The quadratic branch avoids an unnecessary high power in float32 while
+    # retaining the correct limit dt**2/2 as rate -> 0.
+    series = dt * dt * (0.5 - optical_depth / 6.0 + optical_depth * optical_depth / 24.0)
+    return jnp.where(optical_depth < 1.0e-4, series, exact)
+
+
+def advance_with_isotropic_scattering(
+    config: TransportConfig,
+    directions: jnp.ndarray,
+    weights: jnp.ndarray,
+    intensity: jnp.ndarray,
+    emissivity: jnp.ndarray,
+    absorption: jnp.ndarray,
+    scattering: jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Advance transport with exact local isotropic within-group scattering.
+
+    The explicit upwind transport stage is unchanged.  In the subsequent
+    local constant-coefficient solve, ``absorption`` and ``scattering`` are
+    coefficients in cm^-1 and ``emissivity`` is an isotropic source.  The
+    returned arrays are, respectively, the next intensity, absorption loss,
+    incoming scattering events, and isotropic outgoing scattering events.  All
+    three event arrays are directional photon-number integrals over the step;
+    ``absorbed`` is intentionally absorption-only for the H/He ledgers.
+
+    For the isotropic closure, the angular mean obeys
+    ``dJ/dt = -c_hat*kappa_abs*J + source``.  Thus scattering redistributes
+    directions but cannot remove photons or add dust heating.
+    """
+
+    transport = _transport_rhs(
+        intensity,
+        directions,
+        config.cell_width,
+        config.reduced_light_speed,
+    )
+    transported = intensity + config.dt * transport
+    source = emissivity[:, None, :, :, :]
+    absorption_rate = config.reduced_light_speed * absorption[:, None, :, :, :]
+    scattering_rate = config.reduced_light_speed * scattering[:, None, :, :, :]
+    total_rate = absorption_rate + scattering_rate
+    absorption_integral = _exponential_integral(absorption_rate, config.dt)
+    total_integral = _exponential_integral(total_rate, config.dt)
+    absorption_double_integral = _exponential_double_integral(absorption_rate, config.dt)
+    transmission_absorption = jnp.exp(-absorption_rate * config.dt)
+    transmission_total = jnp.exp(-total_rate * config.dt)
+
+    mean_initial = jnp.einsum("d,gdxyz->gxyz", weights, transported)
+    mean_initial_directional = mean_initial[:, None, :, :, :]
+    mean_integral = (
+        mean_initial * absorption_integral[:, 0, :, :, :]
+        + emissivity * absorption_double_integral[:, 0, :, :, :]
+    )
+    directional_integral = (
+        transported * total_integral
+        + mean_initial_directional * (absorption_integral - total_integral)
+        + source * absorption_double_integral
+    )
+    next_intensity = (
+        transported * transmission_total
+        + mean_initial_directional * (transmission_absorption - transmission_total)
+        + source * absorption_integral
+    )
+    absorbed_intensity = absorption_rate * directional_integral
+    scattered_incoming = scattering_rate * directional_integral
+    scattered_outgoing = jnp.broadcast_to(
+        scattering_rate * mean_integral[:, None, :, :, :], directional_integral.shape
+    )
+    return next_intensity, absorbed_intensity, scattered_incoming, scattered_outgoing
+
+
 def advance_explicit(
     config: TransportConfig,
     directions: jnp.ndarray,

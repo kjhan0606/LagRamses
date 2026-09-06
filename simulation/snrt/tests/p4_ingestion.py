@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import h5py
 import numpy as np
 
 from snrt_core.snapshot import GridSpec, SourceCatalog, neutral_primordial_input, read_static_rt_input, write_static_rt_input
@@ -45,6 +46,16 @@ def main() -> None:
         path = Path(temporary_directory) / "static_rt_input.h5"
         write_static_rt_input(path, snapshot)
         restored = read_static_rt_input(path)
+        with h5py.File(path, "r") as handle:
+            assert int(handle.attrs["format_version"]) == 3
+        with h5py.File(path, "a") as handle:
+            del handle["gas"].attrs["dust_relative_abundance_origin"]
+        try:
+            read_static_rt_input(path)
+        except ValueError as error:
+            assert "lacks the required dust_relative_abundance_origin" in str(error)
+        else:
+            raise AssertionError("legacy non-zero-dust input without origin was accepted")
     assert restored.shape == shape
     assert np.array_equal(restored.temperature_k, temperature)
     assert np.allclose(restored.hydrogen_number_density_cm3, density * 0.76 / 1.67262192369e-24)
@@ -55,13 +66,47 @@ def main() -> None:
     assert np.array_equal(restored.velocity_cm_s, velocity)
     assert np.array_equal(restored.metallicity_solar, metallicity)
     assert np.array_equal(restored.dust_to_metal, dust_to_metal)
+    assert restored.dust_relative_abundance_origin == "direct"
     assert np.array_equal(restored.x_h2, x_h2)
     assert np.array_equal(restored.cell_level, cell_level)
     assert np.allclose(restored.x_hii, 0.1)
     assert np.allclose(restored.x_heii, 0.2)
     assert np.allclose(restored.x_heiii, 0.3)
     restored.validate_production_contract(require_sources=True)
-    print("P4_INGESTION_OK format=v2 shape=4x3x2 sources=2 groups=2")
+
+    derived_snapshot = neutral_primordial_input(
+        GridSpec(cell_width_cm=3.085677581e18, left_edge_cm=np.array([1.0, 2.0, 3.0])),
+        density,
+        temperature,
+        dust_relative_abundance=0.01,
+        metallicity_solar=metallicity,
+        dust_to_metal=dust_to_metal,
+        dust_relative_abundance_origin="metallicity_solar_times_dust_to_metal",
+    )
+    with TemporaryDirectory() as temporary_directory:
+        derived_path = Path(temporary_directory) / "derived_static_rt_input.h5"
+        write_static_rt_input(derived_path, derived_snapshot)
+        derived_restored = read_static_rt_input(derived_path)
+    assert derived_restored.dust_relative_abundance_origin == "metallicity_solar_times_dust_to_metal"
+    assert np.allclose(
+        derived_restored.dust_relative_abundance,
+        derived_restored.metallicity_solar * derived_restored.dust_to_metal,
+    )
+    try:
+        neutral_primordial_input(
+            GridSpec(cell_width_cm=3.085677581e18, left_edge_cm=np.array([1.0, 2.0, 3.0])),
+            density,
+            temperature,
+            dust_relative_abundance=0.011,
+            metallicity_solar=metallicity,
+            dust_to_metal=dust_to_metal,
+            dust_relative_abundance_origin="metallicity_solar_times_dust_to_metal",
+        )
+    except ValueError as error:
+        assert "disagrees" in str(error)
+    else:
+        raise AssertionError("inconsistent derived dust abundance was accepted")
+    print("P4_INGESTION_OK format=v3 shape=4x3x2 sources=2 groups=2")
 
 
 if __name__ == "__main__":

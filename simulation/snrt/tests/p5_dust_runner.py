@@ -127,8 +127,71 @@ def main() -> int:
             assert handle.attrs["dust_builder_sha256"] == ""
             assert handle.attrs["source_sed_identity"] == ""
             assert np.asarray(handle["diagnostics/cumulative_dust_absorbed_photons_cm3"]).shape == (9, *shape)
+            assert np.asarray(handle["diagnostics/cumulative_dust_scattered_photons_cm3"]).shape == (9, *shape)
             assert np.max(np.asarray(handle["diagnostics/cumulative_dust_absorbed_photons_cm3"])) > 0.0
+            assert np.allclose(handle["diagnostics/cumulative_dust_scattered_photons_cm3"], 0.0)
             assert np.max(np.asarray(handle["thermal/cumulative_dust_heating_energy_erg_cm3"])) > 0.0
+            assert handle.attrs["primary_absorption_closure_relative_error"] <= 1.0e-5
+
+        scattering_metadata = json.loads(dust_metadata_path.read_text(encoding="utf-8"))
+        for key in (
+            "group_edges_path",
+            "group_edges_sha256",
+            "source_table",
+            "builder",
+            "closure_code_manifest",
+            "payload_hash_scheme",
+            "payload_sha256",
+        ):
+            scattering_metadata.pop(key, None)
+        scattering_metadata.update(
+            {
+                "schema": "snrt_dust_opacity_v3",
+                "schema_version": 3,
+                "status": "reference_scattering_control",
+                "phase_function": "phase_isotropic_candidate",
+                "scattering_cross_section_per_h_cm2": [5.0e-21] * (edges.size - 1),
+                "scattering_weighted_energy_ev": np.sqrt(edges[:-1] * edges[1:]).tolist(),
+                "scattering_angle_cosine": [0.0] * (edges.size - 1),
+                "scattering_angle_cosine_squared": [0.5] * (edges.size - 1),
+                "transport_corrected_scattering_cross_section_per_h_cm2": [
+                    5.0e-21
+                ]
+                * (edges.size - 1),
+                "isotropic_candidate_momentum_overestimate_factor": [1.0] * (edges.size - 1),
+                "isotropic_candidate_momentum_bound_unbounded": [False] * (edges.size - 1),
+            }
+        )
+        scattering_metadata_path = work / "dust-scattering.json"
+        scattering_output_path = work / "scattering-output.h5"
+        scattering_metadata_path.write_text(
+            json.dumps(scattering_metadata, indent=2) + "\n", encoding="utf-8"
+        )
+        scattering_command = list(result.args)
+        scattering_command[scattering_command.index(str(dust_metadata_path))] = str(
+            scattering_metadata_path
+        )
+        scattering_command[scattering_command.index(str(output_path))] = str(scattering_output_path)
+        scattering_command.extend(("--dust-scattering", "isotropic"))
+        scattering_result = subprocess.run(
+            scattering_command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        if scattering_result.returncode != 0:
+            raise RuntimeError(scattering_result.stdout + scattering_result.stderr)
+        with h5py.File(scattering_output_path, "r") as handle:
+            assert handle.attrs["dust_opacity_schema"] == "snrt_dust_opacity_v3"
+            assert handle.attrs["dust_scattering"] == "isotropic"
+            scattered = np.asarray(handle["diagnostics/cumulative_dust_scattered_photons_cm3"])
+            assert np.max(scattered) > 0.0
+            assert handle.attrs["dust_momentum_rate_semantics"] == "total_absorption_plus_scattering"
+            total = np.asarray(handle["rates/dust_total_momentum_rate_dyn_cm3"])
+            absorption = np.asarray(handle["rates/dust_absorption_momentum_rate_dyn_cm3"])
+            scattering = np.asarray(handle["rates/dust_scattering_momentum_rate_dyn_cm3"])
+            assert np.allclose(total, absorption + scattering)
             assert handle.attrs["primary_absorption_closure_relative_error"] <= 1.0e-5
 
     print("P5_DUST_RUNNER_TEST_OK groups=9 dust_model=metadata")

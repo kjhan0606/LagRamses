@@ -94,6 +94,7 @@ def main() -> None:
         velocity_cm_s=gas.velocity_cm_s,
         metallicity_solar=gas.metallicity_solar,
         dust_to_metal=gas.dust_to_metal,
+        dust_relative_abundance_origin=gas.dust_relative_abundance_origin,
         x_h2=gas.x_h2,
         cell_level=gas.cell_level,
     )

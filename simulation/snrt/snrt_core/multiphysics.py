@@ -12,6 +12,8 @@ from .dust import (
     DustModel,
     absorbed_dust_momentum_rate,
     absorption_coefficient as dust_absorption_coefficient,
+    scattered_dust_momentum_rate,
+    scattering_coefficient as dust_scattering_coefficient,
 )
 from .implicit import coupled_photo_collisional_hhe_update
 from .primordial import (
@@ -30,10 +32,22 @@ from .secondary import (
     furlanetto_stoever_2010,
 )
 from .primordial_cooling import collisional_ionization_coefficients
-from .transport import TransportConfig, advance_with_absorption
+from .transport import (
+    TransportConfig,
+    advance_with_absorption,
+    advance_with_isotropic_scattering,
+    angular_integral,
+)
 
 
 class ThermochemicalStepResult(NamedTuple):
+    """One radiation step; ``dust_momentum_rate`` is total force.
+
+    The total equals absorption plus scattering. The scattering component is
+    available separately as ``dust_scattering_momentum_rate``; consumers must
+    not add that component to the total.
+    """
+
     intensity: jnp.ndarray
     state: PrimordialState
     gas_heating_rate: jnp.ndarray
@@ -44,6 +58,8 @@ class ThermochemicalStepResult(NamedTuple):
     photoelectron_energy_ledger_residual: jnp.ndarray
     absorbed_photons: jnp.ndarray
     dust_absorbed_photons: jnp.ndarray
+    dust_scattered_photons: jnp.ndarray
+    dust_scattering_momentum_rate: jnp.ndarray
     unallocated_primary_photons: jnp.ndarray
     gas_absorption_scale: jnp.ndarray
     time_averaged_x_hydrogen_ii: jnp.ndarray
@@ -425,9 +441,37 @@ def build_multiphysics_radiation_step(
     group_energy_ev = jnp.asarray(group_energy_ev)
     if group_energy_ev.ndim != 1 or group_energy_ev.shape[0] == 0:
         raise ValueError("group_energy_ev must be a non-empty one-dimensional array")
+    directions = jnp.asarray(directions)
+    weights = jnp.asarray(weights)
+    if directions.ndim != 2 or directions.shape[1] != 3 or weights.shape != (directions.shape[0],):
+        raise ValueError("directions must have shape (n_direction, 3) and weights must match")
+    if (
+        not np.isfinite(np.asarray(directions)).all()
+        or not np.isfinite(np.asarray(weights)).all()
+        or np.any(np.asarray(weights) < 0.0)
+        or not np.isclose(float(np.sum(np.asarray(weights))), 1.0, rtol=0.0, atol=5.0e-7)
+    ):
+        raise ValueError("angular directions/weights must be finite, non-negative, and normalized")
     dust_cross_section = jnp.asarray(dust.absorption_cross_section_per_h)
     if dust_cross_section.shape != group_energy_ev.shape:
         raise ValueError("dust absorption cross section must have shape (n_group,)")
+    scattering_active = (
+        dust.scattering_phase_function == "phase_isotropic_candidate"
+        and dust.scattering_cross_section_per_h is not None
+        and dust.scattering_weighted_energy_ev is not None
+    )
+    if dust.scattering_phase_function not in ("off", "phase_isotropic_candidate"):
+        raise ValueError("unsupported dust scattering phase function")
+    if scattering_active:
+        scattering_cross_section = jnp.asarray(dust.scattering_cross_section_per_h)
+        scattering_energy = jnp.asarray(dust.scattering_weighted_energy_ev)
+        if scattering_cross_section.shape != group_energy_ev.shape:
+            raise ValueError("dust scattering cross section must have shape (n_group,)")
+        if scattering_energy.shape != group_energy_ev.shape:
+            raise ValueError("dust scattering-weighted energy must have shape (n_group,)")
+    else:
+        scattering_cross_section = jnp.zeros_like(dust_cross_section)
+        scattering_energy = group_energy_ev
     if dust.absorption_weighted_energy_ev is None:
         dust_photon_energy_ev = group_energy_ev
     else:
@@ -456,13 +500,36 @@ def build_multiphysics_radiation_step(
             opacity_state: PrimordialState,
         ) -> tuple[ThermochemicalStepResult, jnp.ndarray]:
             channels = _absorption_channels(opacity_state, cross_sections, dust)
-            next_intensity, absorbed_intensity = advance_with_absorption(
-                transport,
-                directions,
-                intensity,
-                emissivity,
-                channels.total,
+            scattering = (
+                dust_scattering_coefficient(opacity_state.n_hydrogen, dust)
+                if scattering_active
+                else jnp.zeros_like(channels.total)
             )
+            if scattering_active:
+                (
+                    next_intensity,
+                    absorbed_intensity,
+                    scattered_incoming,
+                    scattered_outgoing,
+                ) = advance_with_isotropic_scattering(
+                    transport,
+                    directions,
+                    weights,
+                    intensity,
+                    emissivity,
+                    channels.total,
+                    scattering,
+                )
+            else:
+                next_intensity, absorbed_intensity = advance_with_absorption(
+                    transport,
+                    directions,
+                    intensity,
+                    emissivity,
+                    channels.total,
+                )
+                scattered_incoming = jnp.zeros_like(absorbed_intensity)
+                scattered_outgoing = jnp.zeros_like(absorbed_intensity)
             # Kept as a diagnostic compatibility field. The former local
             # atom-inventory attenuation cap has been retired.
             scale = jnp.ones_like(state.n_hydrogen)
@@ -521,12 +588,21 @@ def build_multiphysics_radiation_step(
             dust_heating_energy = jnp.sum(partition.dust * dust_photon_energy, axis=0)
             safe_total = jnp.maximum(channels.total, jnp.finfo(channels.total.dtype).tiny)
             dust_fraction = channels.dust / safe_total
-            dust_momentum = absorbed_dust_momentum_rate(
+            dust_momentum_absorption = absorbed_dust_momentum_rate(
                 absorbed_intensity,
                 dust_fraction,
                 directions,
                 weights,
                 dust_photon_energy_ev,
+                transport.dt,
+            )
+            dust_scattered_photons = angular_integral(scattered_incoming, weights)
+            dust_momentum_scattering = scattered_dust_momentum_rate(
+                scattered_incoming,
+                scattered_outgoing,
+                directions,
+                weights,
+                scattering_energy,
                 transport.dt,
             )
             return (
@@ -535,7 +611,7 @@ def build_multiphysics_radiation_step(
                     state=next_state,
                     gas_heating_rate=gas_heat_energy * EV_ERG / transport.dt,
                     dust_heating_rate=dust_heating_energy * EV_ERG / transport.dt,
-                    dust_momentum_rate=dust_momentum,
+                    dust_momentum_rate=dust_momentum_absorption + dust_momentum_scattering,
                     excitation_rate=excitation_energy * EV_ERG / transport.dt,
                     photoelectron_energy=photoelectron_energy,
                     photoelectron_energy_ledger_residual=(
@@ -543,6 +619,8 @@ def build_multiphysics_radiation_step(
                     ),
                     absorbed_photons=absorbed_photons,
                     dust_absorbed_photons=partition.dust,
+                    dust_scattered_photons=dust_scattered_photons,
+                    dust_scattering_momentum_rate=dust_momentum_scattering,
                     unallocated_primary_photons=unallocated_primary,
                     gas_absorption_scale=scale,
                     time_averaged_x_hydrogen_ii=mean_hii,

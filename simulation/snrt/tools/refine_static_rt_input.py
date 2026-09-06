@@ -70,6 +70,7 @@ def refine_static_rt_input(snapshot: StaticRTInput, factor: int = 2) -> StaticRT
         dust_to_metal=None
         if snapshot.dust_to_metal is None
         else _refine_field(snapshot.dust_to_metal, factor, scalar_axes),
+        dust_relative_abundance_origin=snapshot.dust_relative_abundance_origin,
         x_h2=None if snapshot.x_h2 is None else _refine_field(snapshot.x_h2, factor, scalar_axes),
         cell_level=None
         if snapshot.cell_level is None

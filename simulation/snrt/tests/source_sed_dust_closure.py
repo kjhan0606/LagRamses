@@ -39,12 +39,38 @@ def _write_sed(path: Path, edges: np.ndarray) -> None:
             writer.writerow((f"{energy:.17g}", f"{fraction:.17g}"))
 
 
-def _write_draine(path: Path, energies: tuple[float, ...] = (1.0, 10.0, 100.0, 1000.0)) -> None:
+def _write_tilted_sed(path: Path, edges: np.ndarray) -> None:
+    """Write a distinct source-bound fixture for the stellar-side contract."""
+
+    energy = np.asarray(edges, dtype=np.float64)
+    fraction = 1.0 + 0.2 * (energy - energy[0]) / (energy[-1] - energy[0])
+    fraction /= np.trapezoid(fraction, energy)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(("energy_ev", "energy_fraction_per_ev"))
+        writer.writerows((f"{e:.17g}", f"{f:.17g}") for e, f in zip(energy, fraction, strict=True))
+
+
+def _write_draine(
+    path: Path,
+    energies: tuple[float, ...] = (1.0, 10.0, 100.0, 1000.0),
+    *,
+    albedo: float = 0.0,
+    cosine: float = 0.0,
+    cosine_squared: float = 0.0,
+) -> None:
     # A compact table with the same header semantics as the official Draine
     # format.  The opacity is deliberately energy-dependent so the test
     # exercises source weighting rather than only schema loading.
     rows = tuple(
-        (1.2398419843320026 / energy, 0.0, 0.0, energy, energy * 1.0e26, 0.0)
+        (
+            1.2398419843320026 / energy,
+            albedo,
+            cosine,
+            energy,
+            energy * (1.0 - albedo) * 1.0e26,
+            cosine_squared,
+        )
         for energy in energies
     )
     lines = [
@@ -205,6 +231,45 @@ def main() -> int:
             "integrity_helper",
         }
         assert np.all(closure.absorption_cross_section_per_h_cm2 > 0.0)
+
+        # The scattering schema is source-bound independently for a second
+        # (stellar-side) synthetic SED; it is not an aggregate STAR+AGN
+        # closure and must carry a distinct source identity.
+        stellar_sed_path = work / "stellar_sed.csv"
+        _write_tilted_sed(stellar_sed_path, edges)
+        stellar_sed = read_lbol_photon_sed(stellar_sed_path, expected_bolometric_fraction=1.0)
+        scattering_draine_path = work / "scattering-draine.all"
+        _write_draine(
+            scattering_draine_path,
+            albedo=0.5,
+            cosine=0.4,
+            cosine_squared=0.2,
+        )
+        stellar_scattering_metadata = build_draine_dust_opacity.build_source_weighted_opacity_metadata(
+            scattering_draine_path,
+            stellar_sed_path,
+            edges_path,
+            expected_bolometric_fraction=1.0,
+            include_scattering=True,
+        )
+        assert stellar_scattering_metadata["schema"] == "snrt_dust_opacity_v3"
+        assert stellar_scattering_metadata["status"] == "candidate_scattering_isotropic"
+        assert stellar_scattering_metadata["source_sed_identity"] == stellar_sed.identity
+        assert stellar_scattering_metadata["source_sed_identity"] != sed.identity
+        assert max(stellar_scattering_metadata["scattering_cross_section_per_h_cm2"]) > 0.0
+        stellar_scattering_path = work / "stellar-scattering-dust.json"
+        stellar_scattering_path.write_text(
+            json.dumps(stellar_scattering_metadata) + "\n", encoding="utf-8"
+        )
+        stellar_scattering_closure = read_dust_opacity_metadata(
+            stellar_scattering_path,
+            expected_group_edges_ev=edges,
+            expected_source_sed_identity=stellar_sed.identity,
+            expected_source_sed_sha256=stellar_sed.input_sha256,
+            require_source_match=True,
+        )
+        assert stellar_scattering_closure.schema == "snrt_dust_opacity_v3"
+        assert stellar_scattering_closure.scattering_phase_function == "phase_isotropic_candidate"
 
         # Independent numerical and closed-form verification on intentionally
         # offset SED/Draine/group samples. Neither calculation uses the
@@ -442,6 +507,94 @@ def main() -> int:
                 agn_metadata["groups"], full_edges[:-1], full_edges[1:], strict=True
             )
         )
+
+        # The AGN source-bound side is bound to the explicit AGN SED used by
+        # the photon ledger, with the same nine-group edges; it is not the
+        # unbound reference control or the stellar fixture above.
+        agn_scattering_draine_path = work / "agn-scattering-draine.all"
+        _write_draine(
+            agn_scattering_draine_path,
+            tuple(float(value) for value in full_edges),
+            albedo=0.5,
+            cosine=0.4,
+            cosine_squared=0.2,
+        )
+        agn_scattering_metadata = build_draine_dust_opacity.build_source_weighted_opacity_metadata(
+            agn_scattering_draine_path,
+            explicit_sed_path,
+            full_edges_path,
+            expected_bolometric_fraction=1.0,
+            include_scattering=True,
+        )
+        agn_scattering_path = work / "agn-scattering-dust.json"
+        agn_scattering_path.write_text(json.dumps(agn_scattering_metadata) + "\n", encoding="utf-8")
+        agn_scattering_closure = read_dust_opacity_metadata(
+            agn_scattering_path,
+            expected_group_edges_ev=full_edges,
+            expected_source_sed_identity=explicit_sed.identity,
+            expected_source_sed_sha256=explicit_sed.input_sha256,
+            require_source_match=True,
+        )
+        assert agn_scattering_closure.schema == "snrt_dust_opacity_v3"
+        assert agn_scattering_closure.source_sed_identity == explicit_sed.identity
+        assert np.any(agn_scattering_closure.scattering_cross_section_per_h_cm2 > 0.0)
+
+        # An unbound v3 fixture exercises the declared missing-array contract
+        # without source-bound payload validation masking the error.
+        malformed_v3 = dict(agn_scattering_metadata)
+        for key in (
+            "group_edges_path",
+            "group_edges_sha256",
+            "source_table",
+            "source_sed_identity",
+            "source_sed_sha256",
+            "source_sed_contract",
+            "source_sed_group_energy_fraction_of_lbol",
+            "source_sed_quadrature",
+            "groups",
+            "builder",
+            "closure_code_manifest",
+            "payload_hash_scheme",
+            "payload_sha256",
+        ):
+            malformed_v3.pop(key, None)
+        malformed_v3["status"] = "reference_scattering_control"
+        malformed_v3.pop("scattering_angle_cosine_squared")
+        malformed_path = work / "malformed-v3-dust.json"
+        malformed_path.write_text(json.dumps(malformed_v3) + "\n", encoding="utf-8")
+        try:
+            read_dust_opacity_metadata(malformed_path, expected_group_edges_ev=full_edges)
+        except ValueError as error:
+            assert "missing dust opacity fields" in str(error)
+        else:
+            raise AssertionError("malformed v3 sidecar was not rejected as ValueError")
+        null_v3 = dict(agn_scattering_metadata)
+        for key in (
+            "group_edges_path",
+            "group_edges_sha256",
+            "source_table",
+            "source_sed_identity",
+            "source_sed_sha256",
+            "source_sed_contract",
+            "source_sed_group_energy_fraction_of_lbol",
+            "source_sed_quadrature",
+            "groups",
+            "builder",
+            "closure_code_manifest",
+            "payload_hash_scheme",
+            "payload_sha256",
+        ):
+            null_v3.pop(key, None)
+        null_v3["status"] = "reference_scattering_control"
+        null_v3["scattering_weighted_energy_ev"] = None
+        null_path = work / "null-v3-dust.json"
+        null_path.write_text(json.dumps(null_v3) + "\n", encoding="utf-8")
+        try:
+            read_dust_opacity_metadata(null_path, expected_group_edges_ev=full_edges)
+        except ValueError as error:
+            assert "v3 scattering fields cannot be null" in str(error)
+        else:
+            raise AssertionError("null v3 scattering field was accepted")
         assert np.isclose(
             sum(group["energy_fraction_of_lbol"] for group in agn_metadata["groups"]),
             1.0,

@@ -71,7 +71,13 @@ def main() -> None:
     parser.add_argument("--thermal-atlas", required=True)
     parser.add_argument(
         "--dust-opacity-metadata",
-        help="validated snrt_dust_opacity_v1/v2 JSON; required to activate non-zero static dust",
+        help="validated snrt_dust_opacity_v1/v2/v3 JSON; required to activate non-zero static dust",
+    )
+    parser.add_argument(
+        "--dust-scattering",
+        choices=("off", "isotropic"),
+        default="off",
+        help="dust scattering closure; v3 requires isotropic and v1/v2 require off",
     )
     parser.add_argument("--scale-factor", required=True, type=float)
     parser.add_argument("--metallicity-solar", type=float, default=1.0e-6)
@@ -244,6 +250,8 @@ def main() -> None:
     dust_source_table_sha256 = ""
     dust_builder_sha256 = ""
     if args.dust_opacity_metadata is None:
+        if args.dust_scattering != "off":
+            raise ValueError("dust scattering requires a scattering-enabled opacity sidecar")
         if np.any(np.asarray(static.dust_relative_abundance) > 0.0):
             raise ValueError(
                 "static input contains non-zero dust_relative_abundance; "
@@ -273,6 +281,10 @@ def main() -> None:
         )
         dust_binding_status = dust_closure.binding_status
         dust_schema = dust_closure.schema
+        if args.dust_scattering == "isotropic" and dust_schema != "snrt_dust_opacity_v3":
+            raise ValueError("--dust-scattering isotropic requires snrt_dust_opacity_v3")
+        if args.dust_scattering == "off" and dust_schema == "snrt_dust_opacity_v3":
+            raise ValueError("scattering-enabled sidecar cannot run with --dust-scattering off")
         dust_opacity_metadata_sha256 = _sha256_file(args.dust_opacity_metadata)
         dust_payload_sha256 = dust_closure.payload_sha256 or ""
         dust_source_table_sha256 = dust_closure.source_table_sha256 or ""
@@ -280,8 +292,10 @@ def main() -> None:
     zero_cell = jnp.zeros_like(temperature)
     cumulative_absorbed = jnp.zeros((len(group_energy_ev), *static.shape), dtype=temperature.dtype)
     cumulative_dust_absorbed = jnp.zeros((len(group_energy_ev), *static.shape), dtype=temperature.dtype)
+    cumulative_dust_scattered = jnp.zeros((len(group_energy_ev), *static.shape), dtype=temperature.dtype)
     cumulative_dust_heating_energy = jnp.zeros_like(temperature)
     cumulative_dust_momentum = jnp.zeros((3, *static.shape), dtype=temperature.dtype)
+    cumulative_dust_scattering_momentum = jnp.zeros((3, *static.shape), dtype=temperature.dtype)
     cumulative_unallocated = jnp.zeros((3, *static.shape), dtype=temperature.dtype)
     cumulative_photoheating_energy = jnp.zeros_like(temperature)
     cumulative_photoelectron_energy = jnp.zeros_like(temperature)
@@ -322,8 +336,12 @@ def main() -> None:
         result = step(intensity, emissivity, chemistry, thermal, temperature)
         cumulative_absorbed = cumulative_absorbed + result.cumulative_absorbed_photons
         cumulative_dust_absorbed = cumulative_dust_absorbed + result.cumulative_dust_absorbed_photons
+        cumulative_dust_scattered = cumulative_dust_scattered + result.cumulative_dust_scattered_photons
         cumulative_dust_heating_energy = cumulative_dust_heating_energy + result.cumulative_dust_heating_energy
         cumulative_dust_momentum = cumulative_dust_momentum + result.cumulative_dust_momentum
+        cumulative_dust_scattering_momentum = (
+            cumulative_dust_scattering_momentum + result.cumulative_dust_scattering_momentum
+        )
         cumulative_unallocated = cumulative_unallocated + result.cumulative_unallocated_primary_photons
         cumulative_photoheating_energy = cumulative_photoheating_energy + result.cumulative_photoheating_energy
         cumulative_photoelectron_energy = (
@@ -364,8 +382,12 @@ def main() -> None:
         result = build_step(final_dt)(intensity, emissivity, chemistry, thermal, temperature)
         cumulative_absorbed = cumulative_absorbed + result.cumulative_absorbed_photons
         cumulative_dust_absorbed = cumulative_dust_absorbed + result.cumulative_dust_absorbed_photons
+        cumulative_dust_scattered = cumulative_dust_scattered + result.cumulative_dust_scattered_photons
         cumulative_dust_heating_energy = cumulative_dust_heating_energy + result.cumulative_dust_heating_energy
         cumulative_dust_momentum = cumulative_dust_momentum + result.cumulative_dust_momentum
+        cumulative_dust_scattering_momentum = (
+            cumulative_dust_scattering_momentum + result.cumulative_dust_scattering_momentum
+        )
         cumulative_unallocated = cumulative_unallocated + result.cumulative_unallocated_primary_photons
         cumulative_photoheating_energy = cumulative_photoheating_energy + result.cumulative_photoheating_energy
         cumulative_photoelectron_energy = (
@@ -412,11 +434,18 @@ def main() -> None:
     gas_heating = np.asarray(jax.device_get(result.gas_heating_rate))
     dust_heating = np.asarray(jax.device_get(result.dust_heating_rate))
     dust_momentum = np.asarray(jax.device_get(result.dust_momentum_rate))
+    dust_scattering_momentum = np.asarray(jax.device_get(result.dust_scattering_momentum_rate))
     background_rate = np.asarray(jax.device_get(result.background_net_rate))
     absorbed_photons = np.asarray(jax.device_get(cumulative_absorbed))
     dust_absorbed_photons = np.asarray(jax.device_get(cumulative_dust_absorbed))
+    dust_scattered_photons = np.asarray(jax.device_get(cumulative_dust_scattered))
     dust_heating_energy = np.asarray(jax.device_get(cumulative_dust_heating_energy))
     dust_momentum_integral = np.asarray(jax.device_get(cumulative_dust_momentum))
+    dust_scattering_momentum_integral = np.asarray(
+        jax.device_get(cumulative_dust_scattering_momentum)
+    )
+    dust_absorption_momentum = dust_momentum - dust_scattering_momentum
+    dust_absorption_momentum_integral = dust_momentum_integral - dust_scattering_momentum_integral
     unallocated_primary = np.asarray(jax.device_get(cumulative_unallocated))
     photoheating_energy = np.asarray(jax.device_get(cumulative_photoheating_energy))
     photoelectron_energy = np.asarray(jax.device_get(cumulative_photoelectron_energy))
@@ -519,10 +548,12 @@ def main() -> None:
         internal_energy,
         absorbed_photons,
         dust_absorbed_photons,
+        dust_scattered_photons,
         dust_heating,
         dust_momentum,
         dust_heating_energy,
         dust_momentum_integral,
+        dust_scattering_momentum_integral,
         unallocated_primary,
         photoheating_energy,
         photoelectron_energy,
@@ -635,8 +666,14 @@ def main() -> None:
         handle.attrs["source_sed_sha256"] = photon_sed_sha256 or ""
         handle.attrs["group_edges_sha256"] = photon_group_edges_sha256 or ""
         handle.attrs["dust_model"] = "metadata" if args.dust_opacity_metadata is not None else "zero_dust"
+        handle.attrs["dust_relative_abundance_origin"] = static.dust_relative_abundance_origin
         handle.attrs["dust_opacity_schema"] = dust_schema
         handle.attrs["dust_binding_status"] = dust_binding_status
+        handle.attrs["dust_scattering"] = args.dust_scattering
+        handle.attrs["dust_momentum_rate_semantics"] = "total_absorption_plus_scattering"
+        handle.attrs["dust_momentum_component_rule"] = (
+            "dust_total = dust_absorption + dust_scattering; use total or components, never both"
+        )
         handle.attrs["dust_opacity_metadata_path"] = (
             "" if args.dust_opacity_metadata is None else str(Path(args.dust_opacity_metadata).resolve())
         )
@@ -647,6 +684,7 @@ def main() -> None:
         handle.attrs["dust_absorbed_photons"] = dust_absorbed_total
         handle.attrs["dust_heating_energy_erg"] = dust_heating_total
         handle.attrs["dust_momentum_g_cm_s"] = dust_momentum_total
+        handle.attrs["dust_scattering_momentum_g_cm_s"] = cell_total(dust_scattering_momentum_integral)
         if static.metallicity_solar is None:
             handle.attrs["metallicity_solar"] = args.metallicity_solar
         else:
@@ -672,10 +710,32 @@ def main() -> None:
         handle.create_dataset("rates/gas_photoheating_erg_cm3_s", data=gas_heating)
         handle.create_dataset("rates/dust_heating_erg_cm3_s", data=dust_heating)
         handle.create_dataset("rates/dust_momentum_rate_dyn_cm3", data=dust_momentum)
+        handle.create_dataset("rates/dust_total_momentum_rate_dyn_cm3", data=dust_momentum)
+        handle.create_dataset(
+            "rates/dust_absorption_momentum_rate_dyn_cm3",
+            data=dust_absorption_momentum,
+        )
+        handle.create_dataset(
+            "rates/dust_scattering_momentum_rate_dyn_cm3",
+            data=np.asarray(jax.device_get(result.dust_scattering_momentum_rate)),
+        )
         handle.create_dataset("rates/nonphoto_primordial_plus_metal_net_erg_cm3_s", data=background_rate)
         handle.create_dataset("diagnostics/cumulative_absorbed_photons_cm3", data=absorbed_photons)
         handle.create_dataset("diagnostics/cumulative_dust_absorbed_photons_cm3", data=dust_absorbed_photons)
+        handle.create_dataset("diagnostics/cumulative_dust_scattered_photons_cm3", data=dust_scattered_photons)
         handle.create_dataset("diagnostics/cumulative_dust_momentum_g_cm2_s", data=dust_momentum_integral)
+        handle.create_dataset(
+            "diagnostics/cumulative_dust_total_momentum_g_cm2_s",
+            data=dust_momentum_integral,
+        )
+        handle.create_dataset(
+            "diagnostics/cumulative_dust_absorption_momentum_g_cm2_s",
+            data=dust_absorption_momentum_integral,
+        )
+        handle.create_dataset(
+            "diagnostics/cumulative_dust_scattering_momentum_g_cm2_s",
+            data=dust_scattering_momentum_integral,
+        )
         handle.create_dataset("diagnostics/cumulative_unallocated_primary_photons_cm3", data=unallocated_primary)
         handle.create_dataset("diagnostics/cumulative_primary_absorption_closure_cm3", data=primary_absorption_closure)
         handle.create_dataset("diagnostics/cumulative_thermal_residual_erg_cm3", data=thermal_residual)

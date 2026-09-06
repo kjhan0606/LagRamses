@@ -16,6 +16,8 @@ from .transport import TransportConfig
 
 
 class ThermochemicalState(NamedTuple):
+    """Subcycle state; ``dust_momentum_rate`` is total force."""
+
     intensity: jnp.ndarray
     chemistry: PrimordialState
     thermal: ThermalState
@@ -23,11 +25,15 @@ class ThermochemicalState(NamedTuple):
     gas_heating_rate: jnp.ndarray
     dust_heating_rate: jnp.ndarray
     dust_momentum_rate: jnp.ndarray
+    dust_scattered_photons: jnp.ndarray
+    dust_scattering_momentum_rate: jnp.ndarray
     background_net_rate: jnp.ndarray
     cumulative_absorbed_photons: jnp.ndarray
     cumulative_dust_absorbed_photons: jnp.ndarray
+    cumulative_dust_scattered_photons: jnp.ndarray
     cumulative_dust_heating_energy: jnp.ndarray
     cumulative_dust_momentum: jnp.ndarray
+    cumulative_dust_scattering_momentum: jnp.ndarray
     cumulative_unallocated_primary_photons: jnp.ndarray
     cumulative_photoheating_energy: jnp.ndarray
     cumulative_photoelectron_energy: jnp.ndarray
@@ -43,6 +49,8 @@ class ThermochemicalState(NamedTuple):
 
 
 class ThermochemicalStepResult(NamedTuple):
+    """Thermochemical result; total dust force is not a component ledger."""
+
     intensity: jnp.ndarray
     chemistry: PrimordialState
     thermal: ThermalState
@@ -50,11 +58,15 @@ class ThermochemicalStepResult(NamedTuple):
     gas_heating_rate: jnp.ndarray
     dust_heating_rate: jnp.ndarray
     dust_momentum_rate: jnp.ndarray
+    dust_scattered_photons: jnp.ndarray
+    dust_scattering_momentum_rate: jnp.ndarray
     background_net_rate: jnp.ndarray
     cumulative_absorbed_photons: jnp.ndarray
     cumulative_dust_absorbed_photons: jnp.ndarray
+    cumulative_dust_scattered_photons: jnp.ndarray
     cumulative_dust_heating_energy: jnp.ndarray
     cumulative_dust_momentum: jnp.ndarray
+    cumulative_dust_scattering_momentum: jnp.ndarray
     cumulative_unallocated_primary_photons: jnp.ndarray
     cumulative_photoheating_energy: jnp.ndarray
     cumulative_photoelectron_energy: jnp.ndarray
@@ -269,11 +281,15 @@ def build_thermochemical_step(
             gas_heating_rate=zero_rate,
             dust_heating_rate=zero_rate,
             dust_momentum_rate=zero_dust_momentum,
+            dust_scattered_photons=zero_absorbed,
+            dust_scattering_momentum_rate=zero_dust_momentum,
             background_net_rate=zero_rate,
             cumulative_absorbed_photons=zero_absorbed,
             cumulative_dust_absorbed_photons=zero_absorbed,
+            cumulative_dust_scattered_photons=zero_absorbed,
             cumulative_dust_heating_energy=zero_energy,
             cumulative_dust_momentum=zero_dust_momentum,
+            cumulative_dust_scattering_momentum=zero_dust_momentum,
             cumulative_unallocated_primary_photons=zero_unallocated,
             cumulative_photoheating_energy=zero_energy,
             cumulative_photoelectron_energy=zero_energy,
@@ -308,11 +324,16 @@ def build_thermochemical_step(
                 radiation.gas_heating_rate,
                 radiation.dust_heating_rate,
                 radiation.dust_momentum_rate,
+                radiation.dust_scattered_photons,
+                radiation.dust_scattering_momentum_rate,
                 background,
                 current.cumulative_absorbed_photons + radiation.absorbed_photons,
                 current.cumulative_dust_absorbed_photons + radiation.dust_absorbed_photons,
+                current.cumulative_dust_scattered_photons + radiation.dust_scattered_photons,
                 current.cumulative_dust_heating_energy + subtransport.dt * radiation.dust_heating_rate,
                 current.cumulative_dust_momentum + subtransport.dt * radiation.dust_momentum_rate,
+                current.cumulative_dust_scattering_momentum
+                + subtransport.dt * radiation.dust_scattering_momentum_rate,
                 current.cumulative_unallocated_primary_photons + radiation.unallocated_primary_photons,
                 current.cumulative_photoheating_energy + subtransport.dt * radiation.gas_heating_rate,
                 current.cumulative_photoelectron_energy + radiation.photoelectron_energy,
@@ -349,11 +370,15 @@ def build_thermochemical_step(
             final.gas_heating_rate,
             final.dust_heating_rate,
             final.dust_momentum_rate,
+            final.dust_scattered_photons,
+            final.dust_scattering_momentum_rate,
             final.background_net_rate,
             final.cumulative_absorbed_photons,
             final.cumulative_dust_absorbed_photons,
+            final.cumulative_dust_scattered_photons,
             final.cumulative_dust_heating_energy,
             final.cumulative_dust_momentum,
+            final.cumulative_dust_scattering_momentum,
             final.cumulative_unallocated_primary_photons,
             final.cumulative_photoheating_energy,
             final.cumulative_photoelectron_energy,

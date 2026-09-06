@@ -57,10 +57,18 @@ the source centre of luminosity and total group rate. The current 64³ result is
 limited to 0.5 Myr for cost control; a real production refinement requires an
 audited higher-resolution hydro state rather than this synthetic prolongation.
 
-P5 accepts the same validated `--dust-opacity-metadata` sidecar as P4. With a
-non-zero static dust abundance, dust absorption is included in the transport
-partition, cumulative dust photon count, absorption-only momentum diagnostic,
-and dust heating ledger. Dust heating is deliberately not added to the gas
+P5 accepts the same validated `--dust-opacity-metadata` and
+`--dust-scattering {off,isotropic}` contract as P4. With a non-zero static dust
+abundance, dust absorption is included in the transport partition, cumulative
+dust photon count, and dust heating ledger. The optional v3 isotropic
+scattering path records a separate cumulative scattering photon ledger and
+scattering momentum diagnostic; it does not add scattering to dust heating.
+`dust_total_momentum_rate_dyn_cm3` is the total absorption-plus-scattering
+force rate, while `dust_absorption_momentum_rate_dyn_cm3` and
+`dust_scattering_momentum_rate_dyn_cm3` are its components. The historical
+`dust_momentum_rate_dyn_cm3` is a total-force alias. Consumers must use either
+the total or the two components, never both.
+Dust heating is deliberately not added to the gas
 thermal energy equation; the output stores it separately under
 `thermal/cumulative_dust_heating_energy_erg_cm3` and
 `rates/dust_heating_erg_cm3_s`. The H/He absorption closure subtracts the

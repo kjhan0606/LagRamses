@@ -62,6 +62,25 @@ def main() -> int:
         "opacity_source": "synthetic runner fixture",
         "spectral_weighting": "group geometric-mean fixture",
     }
+    dust_scattering_metadata = dict(dust_metadata)
+    dust_scattering_metadata.update(
+        {
+            "schema": "snrt_dust_opacity_v3",
+            "schema_version": 3,
+            "status": "reference_scattering_control",
+            "phase_function": "phase_isotropic_candidate",
+            "scattering_cross_section_per_h_cm2": [2.0e-21] * (edges.size - 1),
+            "scattering_weighted_energy_ev": np.sqrt(edges[:-1] * edges[1:]).tolist(),
+            "scattering_angle_cosine": [0.0] * (edges.size - 1),
+            "scattering_angle_cosine_squared": [0.5] * (edges.size - 1),
+            "transport_corrected_scattering_cross_section_per_h_cm2": [
+                2.0e-21
+            ]
+            * (edges.size - 1),
+            "isotropic_candidate_momentum_overestimate_factor": [1.0] * (edges.size - 1),
+            "isotropic_candidate_momentum_bound_unbounded": [False] * (edges.size - 1),
+        }
+    )
 
     with TemporaryDirectory(prefix="p4-dust-runner-test-") as directory:
         work = Path(directory)
@@ -129,7 +148,86 @@ def main() -> int:
             assert np.all(np.isfinite(dust_heating)) and np.max(dust_heating) > 0.0
             assert np.all(np.isfinite(dust_momentum))
 
-    print("P4_DUST_RUNNER_TEST_OK groups=9 dust_model=metadata")
+        scattering_metadata_path = work / "dust-scattering.json"
+        scattering_output_path = work / "scattering-output.h5"
+        scattering_metadata_path.write_text(
+            json.dumps(dust_scattering_metadata, indent=2) + "\n", encoding="utf-8"
+        )
+        scattering_command = [
+            sys.executable,
+            str(ROOT / "tools" / "p4_run_transport_pilot.py"),
+            "--input",
+            str(input_path),
+            "--photon-metadata",
+            str(photon_metadata_path),
+            "--dust-opacity-metadata",
+            str(scattering_metadata_path),
+            "--dust-scattering",
+            "isotropic",
+            "--steps",
+            "1",
+            "--sn-order",
+            "4",
+            "--output",
+            str(scattering_output_path),
+        ]
+        scattering_result = subprocess.run(
+            scattering_command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        if scattering_result.returncode != 0:
+            raise RuntimeError(scattering_result.stdout + scattering_result.stderr)
+        with h5py.File(scattering_output_path, "r") as handle:
+            assert handle.attrs["dust_opacity_schema"] == "snrt_dust_opacity_v3"
+            assert handle.attrs["dust_scattering"] == "isotropic"
+            assert np.asarray(handle["diagnostics/cumulative_dust_scattered_photons_cm3"]).shape == (9, *shape)
+            assert np.asarray(handle["rates/dust_scattering_momentum_rate_dyn_cm3"]).shape == (3, *shape)
+            assert handle.attrs["dust_momentum_rate_semantics"] == "total_absorption_plus_scattering"
+            total = np.asarray(handle["rates/dust_total_momentum_rate_dyn_cm3"])
+            absorption = np.asarray(handle["rates/dust_absorption_momentum_rate_dyn_cm3"])
+            scattering = np.asarray(handle["rates/dust_scattering_momentum_rate_dyn_cm3"])
+            assert np.allclose(total, absorption + scattering)
+            assert handle.attrs["primary_absorption_closure_relative_error"] <= 1.0e-5
+
+        # Both sides of the activation fence are fail-closed.
+        disabled_output = work / "disabled-scattering.h5"
+        disabled_command = [
+            item for item in scattering_command
+            if item not in ("--dust-scattering", "isotropic")
+        ]
+        disabled_command[disabled_command.index(str(scattering_output_path))] = str(disabled_output)
+        disabled_result = subprocess.run(
+            disabled_command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        assert disabled_result.returncode != 0
+        assert "scattering-enabled sidecar cannot run with --dust-scattering off" in (
+            disabled_result.stdout + disabled_result.stderr
+        )
+        enabled_old_output = work / "enabled-old-sidecar.h5"
+        enabled_old_command = list(
+            result.args if isinstance(result.args, list) else []
+        ) + ["--dust-scattering", "isotropic"]
+        enabled_old_command[enabled_old_command.index(str(output_path))] = str(enabled_old_output)
+        enabled_old_result = subprocess.run(
+            enabled_old_command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        assert enabled_old_result.returncode != 0
+        assert "--dust-scattering isotropic requires snrt_dust_opacity_v3" in (
+            enabled_old_result.stdout + enabled_old_result.stderr
+        )
+
+    print("P4_DUST_RUNNER_TEST_OK groups=9 dust_model=metadata scattering=isotropic")
     return 0
 
 

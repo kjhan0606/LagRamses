@@ -757,9 +757,11 @@ def main() -> None:
     if "dust_relative_abundance" in field_values:
         dust = field_values["dust_relative_abundance"]
         dust_initialization = "mapped dust_relative_abundance field"
+        dust_relative_abundance_origin = "direct"
     elif "dust_to_metal" in field_values and "metallicity_solar" in field_values:
         dust = metallicity * field_values["dust_to_metal"]
         dust_initialization = "derived metallicity_solar times dust_to_metal"
+        dust_relative_abundance_origin = "metallicity_solar_times_dust_to_metal"
     else:
         raise ValueError("field map must provide dust_relative_abundance or both metallicity_solar and dust_to_metal")
     if np.any(~np.isfinite(dust)) or np.any(dust < 0.0):
@@ -796,6 +798,7 @@ def main() -> None:
         velocity_cm_s=velocity,
         metallicity_solar=metallicity,
         dust_to_metal=field_values.get("dust_to_metal"),
+        dust_relative_abundance_origin=dust_relative_abundance_origin,
         x_h2=x_h2,
         cell_level=np.full(output_shape, args.analysis_level, dtype=np.int16),
         x_hii=field_values["x_hii"],
@@ -843,6 +846,7 @@ def main() -> None:
         / max(abs(mass_deposited_code), np.finfo(np.float64).tiny),
         "thermal_initialization": thermal_initialization,
         "dust_initialization": dust_initialization,
+        "dust_relative_abundance_origin": dust_relative_abundance_origin,
         "thermal_atlas": str(Path(args.thermal_atlas).resolve()),
         "source_ledger": str(Path(args.source_ledger).resolve()),
         "photon_source_count": int(len(sources.cell_index)),
