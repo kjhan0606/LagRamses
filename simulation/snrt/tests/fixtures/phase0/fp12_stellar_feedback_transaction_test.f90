@@ -3,7 +3,7 @@ program fp12_stellar_feedback_transaction_test
   use omp_lib, only: omp_lock_kind, omp_init_lock, omp_set_lock, omp_unset_lock, &
        omp_destroy_lock, omp_get_max_threads
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, elem_c, &
-       channel_snii
+       channel_snii, channel_wind, channel_agb
   use stellar_enrichment_contract, only: stellar_source_t, &
        delayed_cooling_source_mass, generic_metal_ejecta_mass
   use stellar_native_units, only: solar_mass_cgs
@@ -25,6 +25,7 @@ program fp12_stellar_feedback_transaction_test
   integer :: element_var(n_stellar_elements)
   type(stellar_field_map_t) :: field_map, invalid_map
   type(stellar_source_t) :: source, zero_mass_source, opposed_source
+  type(stellar_source_t) :: invalid_source
   type(snia_event_budget_t) :: budget, opposed_budget
   type(snia_thermal_coupling_t) :: coupling
   real(stellar_dp) :: generic_delta(nvar_test), snia_delta(nvar_test)
@@ -217,6 +218,85 @@ program fp12_stellar_feedback_transaction_test
        field_map, generic_delta, 1.0e-12_stellar_dp, ierr)
   call expect(ierr == ramses_bridge_err_source .and. all(generic_delta == 0.0_stellar_dp), &
        'nonzero momentum with zero returned mass is rejected transactionally', failures)
+
+  ! Wind and AGB are separate ejecta components even when they arrive in the
+  ! same cell in one timestep. Net momentum cancellation must not erase energy.
+  opposed_source = source
+  opposed_source%returned_mass = 0.4_stellar_dp
+  opposed_source%energy = 0.0_stellar_dp
+  opposed_source%momentum = 0.0_stellar_dp
+  opposed_source%channel_returned_mass = 0.0_stellar_dp
+  opposed_source%channel_returned_mass(channel_wind) = 0.2_stellar_dp
+  opposed_source%channel_returned_mass(channel_agb) = 0.2_stellar_dp
+  opposed_source%channel_momentum = 0.0_stellar_dp
+  opposed_source%channel_momentum(channel_wind,1) = 1.0e39_stellar_dp
+  opposed_source%channel_momentum(channel_agb,1) = -1.0e39_stellar_dp
+  opposed_velocity = 0.0_stellar_dp
+  call build_stellar_source_unew_delta(opposed_source, opposed_velocity, &
+       1.0_stellar_dp, 1.0e39_stellar_dp, 1.0e50_stellar_dp, 2.0_stellar_dp, &
+       nvar_test, 3, field_map, generic_delta, 1.0e-12_stellar_dp, ierr, &
+       channel_resolved=.true.)
+  call expect(ierr == ramses_bridge_ok .and. &
+       abs(generic_delta(5) - 2.5_stellar_dp) < 1.0e-12_stellar_dp .and. &
+       all(generic_delta(momentum_var) == 0.0_stellar_dp) .and. &
+       generic_delta(7) == 0.0_stellar_dp, &
+       'opposed wind/AGB momenta retain energy without SNII cooling mass', failures)
+
+  opposed_velocity = (/3.0_stellar_dp, 0.0_stellar_dp, 0.0_stellar_dp/)
+  opposed_source%energy = 4.0e50_stellar_dp
+  call build_stellar_source_unew_delta(opposed_source, opposed_velocity, &
+       1.0_stellar_dp, 1.0e39_stellar_dp, 1.0e50_stellar_dp, 2.0_stellar_dp, &
+       nvar_test, 3, field_map, generic_delta, 1.0e-12_stellar_dp, ierr, &
+       channel_resolved=.true.)
+  call expect(ierr == ramses_bridge_ok .and. &
+       abs(generic_delta(5) - 5.4_stellar_dp) < 1.0e-12_stellar_dp .and. &
+       abs(generic_delta(2) - 0.6_stellar_dp) < 1.0e-12_stellar_dp, &
+       'channel mixing retains supplied energy and stellar bulk motion', failures)
+
+  invalid_source = opposed_source
+  invalid_source%channel_returned_mass(channel_agb) = 0.1_stellar_dp
+  call build_stellar_source_unew_delta(invalid_source, opposed_velocity, &
+       1.0_stellar_dp, 1.0e39_stellar_dp, 1.0e50_stellar_dp, 2.0_stellar_dp, &
+       nvar_test, 3, field_map, generic_delta, 1.0e-12_stellar_dp, ierr, &
+       channel_resolved=.true.)
+  call expect(ierr /= ramses_bridge_ok .and. all(generic_delta == 0.0_stellar_dp), &
+       'incomplete channel mass ledger rejects without a partial delta', failures)
+
+  invalid_source = opposed_source
+  invalid_source%momentum(1) = 1.0e39_stellar_dp
+  call build_stellar_source_unew_delta(invalid_source, opposed_velocity, &
+       1.0_stellar_dp, 1.0e39_stellar_dp, 1.0e50_stellar_dp, 2.0_stellar_dp, &
+       nvar_test, 3, field_map, generic_delta, 1.0e-12_stellar_dp, ierr, &
+       channel_resolved=.true.)
+  call expect(ierr /= ramses_bridge_ok .and. all(generic_delta == 0.0_stellar_dp), &
+       'inconsistent channel momentum ledger rejects without a partial delta', failures)
+
+  invalid_source = opposed_source
+  invalid_source%channel_returned_mass = 0.0_stellar_dp
+  invalid_source%channel_returned_mass(channel_snii) = 0.4_stellar_dp
+  call build_stellar_source_unew_delta(invalid_source, opposed_velocity, &
+       1.0_stellar_dp, 1.0e39_stellar_dp, 1.0e50_stellar_dp, 2.0_stellar_dp, &
+       nvar_test, 3, field_map, generic_delta, 1.0e-12_stellar_dp, ierr, &
+       channel_resolved=.true.)
+  call expect(ierr == ramses_bridge_err_source .and. all(generic_delta == 0.0_stellar_dp), &
+       'massless channel momenta cannot hide behind net cancellation', failures)
+
+  ! Isotropic AGB return has zero net rest-frame momentum. Its unresolved
+  ! wind energy must come from the supplied energy budget, not an invented speed.
+  opposed_source%channel_returned_mass = 0.0_stellar_dp
+  opposed_source%channel_returned_mass(channel_agb) = 0.4_stellar_dp
+  opposed_source%channel_momentum = 0.0_stellar_dp
+  call build_stellar_source_unew_delta(opposed_source, opposed_velocity, &
+       1.0_stellar_dp, 1.0e39_stellar_dp, 1.0e50_stellar_dp, 2.0_stellar_dp, &
+       nvar_test, 3, field_map, generic_delta, 1.0e-12_stellar_dp, ierr, &
+       channel_resolved=.true.)
+  call expect(ierr == ramses_bridge_ok .and. &
+       abs(generic_delta(1) - 0.2_stellar_dp) < 1.0e-12_stellar_dp .and. &
+       abs(generic_delta(2) - 0.6_stellar_dp) < 1.0e-12_stellar_dp .and. &
+       abs(generic_delta(5) - 2.9_stellar_dp) < 1.0e-12_stellar_dp .and. &
+       abs(generic_delta(element_var(elem_c)) - 0.05_stellar_dp) < 1.0e-12_stellar_dp .and. &
+       generic_delta(7) == 0.0_stellar_dp, &
+       'AGB-only return carries mass carbon bulk momentum and supplied energy', failures)
 
   snia_delta = 9.0_stellar_dp
   call build_snia_budget_unew_delta(budget, coupling, snia_velocity, 1.0e20_stellar_dp, &

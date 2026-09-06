@@ -135,7 +135,7 @@ contains
 
   subroutine build_stellar_source_unew_delta(source, bulk_velocity_code, &
        scale_mass, scale_momentum, scale_energy, volume_code, nvar, ndim, &
-       field_map, delta, tolerance, ierr)
+       field_map, delta, tolerance, ierr, channel_resolved)
     ! Convert one generic stellar source into a complete row-major RAMSES
     ! delta.  This routine is deliberately non-mutating so generic and SNIa
     ! deltas can be combined before the runtime lock/commit boundary.
@@ -148,10 +148,13 @@ contains
     real(stellar_dp), intent(out) :: delta(:)
     real(stellar_dp), intent(in) :: tolerance
     integer, intent(out) :: ierr
+    logical, intent(in), optional :: channel_resolved
 
     real(stellar_dp) :: tol, returned_code, snii_code, source_momentum_code(3)
     real(stellar_dp) :: generic_metal_code, bulk_energy, ejected_sum, scale
-    integer :: map_ierr, element, idim
+    real(stellar_dp) :: channel_mass, channel_mass_sum, channel_p(3), momentum_sum(3)
+    logical :: resolve_channels
+    integer :: map_ierr, element, idim, channel
 
     ierr = ramses_bridge_ok
     delta = 0.0_stellar_dp
@@ -197,7 +200,49 @@ contains
 
     returned_code = source%returned_mass / scale_mass
     source_momentum_code = source%momentum / scale_momentum
-    if (returned_code > 0.0_stellar_dp) then
+    resolve_channels = .false.
+    if (present(channel_resolved)) resolve_channels = channel_resolved
+    if (resolve_channels) then
+       ! Production SSP sources carry a complete channel mass/momentum ledger.
+       ! Retain each component's kinetic energy before mixing in the cell:
+       ! sum_c |m_c*v_star + p_c|^2/(2*m_c), not |sum_c p_c|^2/(2*sum_c m_c).
+       ! A nonzero residual becomes gas internal energy on conservative mixing.
+       channel_mass_sum = sum(source%channel_returned_mass)
+       momentum_sum = sum(source%channel_momentum, dim=1)
+       if (any(source%channel_returned_mass < 0.0_stellar_dp)) then
+          ierr = ramses_bridge_err_source
+          return
+       end if
+       scale = max(tiny(1.0_stellar_dp), source%returned_mass, channel_mass_sum)
+       if (.not. ieee_is_finite(channel_mass_sum) .or. &
+            .not. all(ieee_is_finite(momentum_sum)) .or. &
+            abs(channel_mass_sum - source%returned_mass) > tol * scale) then
+          ierr = ramses_bridge_err_closure
+          return
+       end if
+       do idim = 1, 3
+          scale = max(tiny(1.0_stellar_dp), abs(source%momentum(idim)), &
+               sum(abs(source%channel_momentum(:,idim))))
+          if (.not. ieee_is_finite(scale) .or. &
+               abs(momentum_sum(idim) - source%momentum(idim)) > tol * scale) then
+             ierr = ramses_bridge_err_closure
+             return
+          end if
+       end do
+       bulk_energy = 0.0_stellar_dp
+       do channel = 1, size(source%channel_returned_mass)
+          channel_mass = source%channel_returned_mass(channel) / scale_mass
+          channel_p = source%channel_momentum(channel,:) / scale_momentum
+          if (channel_mass > 0.0_stellar_dp) then
+             bulk_energy = bulk_energy + 0.5_stellar_dp * &
+                  sum((channel_mass * bulk_velocity_code + channel_p)**2) / channel_mass
+          else if (any(channel_p /= 0.0_stellar_dp)) then
+             ierr = ramses_bridge_err_source
+             return
+          end if
+       end do
+    else if (returned_code > 0.0_stellar_dp) then
+       ! Aggregate-only callers retain their existing single-component contract.
        bulk_energy = 0.5_stellar_dp * returned_code * &
             sum(bulk_velocity_code**2) + &
             sum(bulk_velocity_code * source_momentum_code) + &

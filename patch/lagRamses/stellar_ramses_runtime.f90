@@ -688,12 +688,12 @@ contains
        return
     end if
 
-    ! Build the complete generic source row in scratch.  Its kinetic energy is
-    ! evaluated independently of the SNIa component below; never derive the
-    ! energy from a merged generic+SNIa net momentum.
+    ! Build the complete generic source row in scratch. Keep wind/AGB/SNII
+    ! channel kinetic energies separate, and independent of SNIa below;
+    ! cancellation of net momentum must not discard component energy.
     call build_stellar_source_unew_delta(source, vp(ipart,1:3), scale_mass, &
          scale_momentum, scale_energy, volume, nvar, ndim, runtime_field_map, &
-         generic_delta, source_tolerance, snia_bridge_ierr)
+         generic_delta, source_tolerance, snia_bridge_ierr, channel_resolved=.true.)
     if (snia_bridge_ierr /= ramses_bridge_ok) then
        ierr = 86
        if (myid == 1) write(*,*) 'Phase 0 generic source staging failed: ', &

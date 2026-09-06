@@ -40,6 +40,8 @@ module stellar_enrichment_config
   integer, parameter, public :: stellar_imf_kroupa = 1
   integer, parameter, public :: stellar_imf_chabrier = 2
   integer, parameter, public :: stellar_imf_popiii = 3
+  ! Append new IDs; ID 3 remains the historical Pop-III model.
+  integer, parameter, public :: stellar_imf_miller_scalo = 4
   integer, parameter, public :: population_single_star_ssp = 0
   integer, parameter, public :: population_binary_ssp = 1
   integer, parameter, public :: enrichment_namelist_err_missing = 1005
@@ -83,7 +85,7 @@ module stellar_enrichment_config
   ! production default; legacy preserves the historical lagRamses behaviour
   ! for controlled reproduction of existing runs.
   character(len=32) :: stellar_feedback_mode = 'channel_resolved'
-  integer :: default_imf_id = stellar_imf_kroupa
+  integer :: default_imf_id = stellar_imf_chabrier
   integer :: population_model_id = population_single_star_ssp
   integer :: yield_source_basis_id = yield_basis_per_star_cumulative
   real(stellar_dp) :: configured_imf_mass_min = 0.08_stellar_dp
@@ -113,7 +115,7 @@ contains
     enable_pisn = .false.
     legacy_prompt_snia_opt_in = .false.
     stellar_feedback_mode = 'channel_resolved'
-    default_imf_id = stellar_imf_kroupa
+    default_imf_id = stellar_imf_chabrier
     population_model_id = population_single_star_ssp
     yield_source_basis_id = yield_basis_per_star_cumulative
     configured_imf_mass_min = 0.08_stellar_dp
@@ -181,7 +183,8 @@ contains
     ! from a previous legacy comparison read.
     allow_legacy_prompt_snia = .false.
     feedback_mode = ''
-    imf_id = -1
+    ! Omission selects the project default, not the previous namelist's IMF.
+    imf_id = stellar_imf_chabrier
     population_model = ''
     yield_source_basis = ''
     imf_mass_min_msun = -1.0_stellar_dp
@@ -237,7 +240,7 @@ contains
        return
     end select
 
-    if (imf_id < stellar_imf_salpeter .or. imf_id > stellar_imf_popiii) then
+    if (imf_id < stellar_imf_salpeter .or. imf_id > stellar_imf_miller_scalo) then
        iostat_out = 1002
        return
     end if

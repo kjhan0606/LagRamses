@@ -27,7 +27,7 @@ selects the compiled synthetic fixture. The IMF, population model, and all
 five channel mass windows are read from the same namelist, for example:
 
 ```text
-imf_id=1
+imf_id=2                         ! Chabrier (default when omitted)
 population_model='single_star_ssp'
 yield_source_basis='per_star_cumulative'
 imf_mass_min_msun=0.08
@@ -37,8 +37,10 @@ channel_mass_min_msun=0.8,1.0,8.0,3.0,140.0
 channel_mass_max_msun=120.0,8.0,40.0,8.0,260.0
 ```
 
-These population-contract fields are mandatory for `channel_resolved`; they
-must not be inherited from compiled defaults.  The current production
+Except for `imf_id`, these population-contract fields are mandatory for
+`channel_resolved`; they must not be inherited from compiled defaults.
+An omitted `imf_id` selects Chabrier on every read, never the previous
+namelist's choice. Explicit invalid IDs are errors. The current production
 integrator accepts only `per_star_cumulative`, because it applies one explicit
 IMF convolution over the declared IMF mass support.  Per-event and already
 SSP-integrated cumulative/rate bases are recognized but rejected until their
@@ -51,6 +53,35 @@ The implemented IMF shapes have a lower supported mass of `0.08 Msun`.
 Channel-resolved startup rejects a configured IMF lower bound below that
 value; the upper bound and every enabled wind/AGB/SNII channel window must be
 explicit and internally nested.
+
+IMF choices in `stellar_enrichment_params` (existing IDs preserved):
+
+| imf_id | Model |
+|---|---|
+| 2 | Chabrier — default |
+| 1 | Kroupa |
+| 0 | Salpeter |
+| 4 | Miller–Scalo, continuous three-power-law approximation |
+| 3 | Historical Pop III — separate, not an ordinary-population default |
+
+The existing Chabrier form is the individual-star lognormal
+(`mc=0.079 Msun`, `sigma_log10=0.69`) joined continuously to
+`dN/dm ∝ m^-2.3` above 1 Msun. Miller–Scalo uses `dN/dm` slopes
+-1.4, -2.5 and -3.3, with breaks at 1 and 10 Msun and continuity coefficients
+1, 1 and `10^0.8`. This is the piecewise approximation also documented by
+[BASTA](https://basta.readthedocs.io/en/devel/_modules/priors.html#millerscalo1979),
+not the original lognormal parametrization. Its end slopes are explicitly
+continued over the configured support, including 0.08–0.1 and 100–120 Msun
+when using this project's usual 0.08–120 interval. This is a modeling
+convention, not additional stellar-yield support.
+
+All choices normalize `integral(m*phi(m) dm)=1` over the configured mass
+support; per-star yields receive exactly one IMF convolution. Changing the
+IMF does not automatically reweight an already IMF-integrated SED or DTD
+table. In particular, the approved N100/Maoz SNIa contract remains on its
+explicit Kroupa basis: a different runtime IMF needs a matching approved
+conversion, and the existing identity mismatch check must continue to reject
+an inconsistent combination.
 
 `binary_ssp`, SNIa, and PISN settings are parsed but are rejected by production
 initialization at this gate.  This is a temporary fail-closed admission control,

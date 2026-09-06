@@ -9,7 +9,7 @@
 module stellar_snia_population_contract
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, population_binary_ssp, &
-       stellar_imf_salpeter, stellar_imf_popiii
+       stellar_imf_salpeter, stellar_imf_miller_scalo
   use stellar_snia_dtd, only: integrate_snia_dtd_interval, snia_dtd_ok
   implicit none
 
@@ -65,7 +65,7 @@ contains
     if (len_trim(realization%population_source_id) == 0 .or. &
          realization%population_model_id /= population_binary_ssp .or. &
          realization%imf_id < stellar_imf_salpeter .or. &
-         realization%imf_id > stellar_imf_popiii) then
+         realization%imf_id > stellar_imf_miller_scalo) then
        ierr = snia_population_contract_err_model
        return
     end if

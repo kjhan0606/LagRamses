@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Focused F-P1.2 native bridge/transaction evidence.  It uses only the
-# RAMSES-independent patch modules and never activates a production run.
+# Focused F-P1.2 bridge/transaction evidence. It uses canonical production
+# modules, an explicitly scoped phase0 fixture driver, and never activates a
+# production run.
 ROOT=/gpfs/kjhan/LRD_JWST
 SOURCE_DIR="$ROOT/patch/lagRamses"
-TEST_SOURCE="$ROOT/simulation/snrt/native/phase0/fp12_stellar_feedback_transaction_test.f90"
+FIXTURE_SOURCE_DIR="$ROOT/simulation/snrt/tests/fixtures/phase0"
+TEST_SOURCE="$FIXTURE_SOURCE_DIR/fp12_stellar_feedback_transaction_test.f90"
 BUILD_DIR="$ROOT/build/fp12_stellar_feedback_transaction"
 FC=ifx
 
@@ -16,6 +18,9 @@ export OMP_NUM_THREADS=4
 export OMP_DYNAMIC=FALSE
 
 mkdir -p "$BUILD_DIR"
+
+python3 "$ROOT/simulation/snrt/tools/validate_stellar_source_parity.py" \
+  --check-runner "$BASH_SOURCE" --require-production-source
 
 sources=(
   stellar_enrichment_config.f90

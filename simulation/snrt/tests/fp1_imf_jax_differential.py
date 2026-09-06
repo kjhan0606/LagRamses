@@ -45,6 +45,11 @@ def evaluate_imf(mass: jax.Array, imf_id: int) -> jax.Array:
                 (mass / 100.0) ** -1.0,
             ),
         )
+    elif imf_id == 4:
+        value = jnp.where(
+            mass < 1.0, mass**-1.4,
+            jnp.where(mass < 10.0, mass**-2.5, 10.0**0.8 * mass**-3.3),
+        )
     else:
         raise ValueError(f"unsupported IMF id {imf_id}")
     return jnp.where(mass < 0.08, zero, value)
@@ -92,8 +97,8 @@ def main() -> int:
                 "relative_difference": relative,
             }
         )
-    if len(rows) != 8:
-        raise AssertionError(f"expected 8 differential rows, found {len(rows)}")
+    if len(rows) != 10:
+        raise AssertionError(f"expected 10 differential rows, found {len(rows)}")
     payload = {
         "schema": "fp1-imf-jax-fortran-differential-v1",
         "status": "pass",
@@ -104,7 +109,7 @@ def main() -> int:
         "rows": rows,
     }
     Path(sys.argv[2]).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    print("FP1_IMF_JAX_DIFFERENTIAL_OK rows=8")
+    print("FP1_IMF_JAX_DIFFERENTIAL_OK rows=10")
     return 0
 
 

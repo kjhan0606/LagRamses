@@ -10,7 +10,7 @@ module stellar_ssp_sources
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels, stellar_imf_salpeter, stellar_imf_kroupa, &
-       stellar_imf_chabrier, stellar_imf_popiii, &
+       stellar_imf_chabrier, stellar_imf_popiii, stellar_imf_miller_scalo, &
        yield_basis_per_star_cumulative
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, clear_cumulative
@@ -27,6 +27,7 @@ module stellar_ssp_sources
   integer, parameter, public :: imf_popiii = stellar_imf_popiii
 
   integer, parameter, public :: ssp_source_ok = 0
+  integer, parameter, public :: imf_miller_scalo = stellar_imf_miller_scalo
   integer, parameter, public :: ssp_source_err_argument = 1
   integer, parameter, public :: ssp_source_err_imf = 2
   integer, parameter, public :: ssp_source_err_provider = 3
@@ -178,6 +179,8 @@ contains
        if (mass_max > 1.0_stellar_dp) integral = integral + &
             integrate_power_law(max(mass_min,1.0_stellar_dp), mass_max, &
             -1.3_stellar_dp, chabrier_high_amplitude)
+    case (imf_miller_scalo)
+       integral = integrate_miller_scalo_mass(mass_min, mass_max)
     case (imf_popiii)
        integral = 0.0_stellar_dp
        if (mass_max > 10.0_stellar_dp .and. mass_min < 100.0_stellar_dp) &
@@ -243,6 +246,8 @@ contains
        if (interval_max > 1.0_stellar_dp) integral = integral + &
             integrate_power_law(max(interval_min,1.0_stellar_dp), interval_max, &
             -1.3_stellar_dp, chabrier_high_amplitude)
+    case (imf_miller_scalo)
+       integral = integrate_miller_scalo_mass(interval_min, interval_max)
     case (imf_popiii)
        integral = 0.0_stellar_dp
        if (interval_max > 10.0_stellar_dp .and. interval_min < 100.0_stellar_dp) &
@@ -274,6 +279,26 @@ contains
           mass_min**(exponent+1.0_stellar_dp)) / &
          (exponent+1.0_stellar_dp)
   end function integrate_power_law
+
+  pure real(stellar_dp) function integrate_miller_scalo_mass(mass_min, mass_max)
+    ! Integral of m*phi(m) for the continuous Miller-Scalo three-power-law
+    ! approximation (dN/dm slopes -1.4, -2.5, -3.3; breaks 1 and 10 Msun).
+    ! End slopes continue over the explicitly configured IMF support.
+    real(stellar_dp), intent(in) :: mass_min, mass_max
+
+    integrate_miller_scalo_mass = 0.0_stellar_dp
+    if (mass_min < 1.0_stellar_dp) integrate_miller_scalo_mass = &
+         integrate_power_law(mass_min, min(mass_max,1.0_stellar_dp), &
+         -0.4_stellar_dp, 1.0_stellar_dp)
+    if (mass_max > 1.0_stellar_dp .and. mass_min < 10.0_stellar_dp) &
+         integrate_miller_scalo_mass = integrate_miller_scalo_mass + &
+         integrate_power_law(max(mass_min,1.0_stellar_dp), min(mass_max,10.0_stellar_dp), &
+         -1.5_stellar_dp, 1.0_stellar_dp)
+    if (mass_max > 10.0_stellar_dp) integrate_miller_scalo_mass = &
+         integrate_miller_scalo_mass + &
+         integrate_power_law(max(mass_min,10.0_stellar_dp), mass_max, &
+         -2.3_stellar_dp, 10.0_stellar_dp**0.8_stellar_dp)
+  end function integrate_miller_scalo_mass
 
   pure real(stellar_dp) function integrate_chabrier_low(mass_min, mass_max)
     real(stellar_dp), intent(in) :: mass_min, mass_max
@@ -319,6 +344,14 @@ contains
                (2.0_stellar_dp * 0.69_stellar_dp ** 2))
        else
           evaluate_imf = chabrier_high_amplitude * mass ** (-2.3_stellar_dp)
+       end if
+    case (imf_miller_scalo)
+       if (mass < 1.0_stellar_dp) then
+          evaluate_imf = mass**(-1.4_stellar_dp)
+       else if (mass < 10.0_stellar_dp) then
+          evaluate_imf = mass**(-2.5_stellar_dp)
+       else
+          evaluate_imf = 10.0_stellar_dp**0.8_stellar_dp * mass**(-3.3_stellar_dp)
        end if
     case (imf_popiii)
        if (mass < 10.0_stellar_dp) then
