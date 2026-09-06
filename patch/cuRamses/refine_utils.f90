@@ -165,12 +165,18 @@ end subroutine refine_coarse
 !###############################################################
 !###############################################################
 subroutine make_grid_coarse(ind_cell,ibound,boundary_region)
+#ifdef SNRT
+  use snrt_regrid, only: snrt_regrid_refine,snrt_regrid_check
+#endif
   use amr_commons
   use morton_keys
   use morton_hash
 #include "amr_index.h"
   implicit none
   integer::ind_cell,ibound
+#ifdef SNRT
+  integer :: snrt_regrid_error
+#endif
   logical::boundary_region
   !----------------------------------------------------------
   ! This routine create one new grid at level 1, contained
@@ -335,6 +341,14 @@ subroutine make_grid_coarse(ind_cell,ibound,boundary_region)
      end if
   end if
 
+#ifdef SNRT
+  if(.not.balance.and..not.boundary_region)then
+     if(cpu_map(ind_cell)==myid)then
+        call snrt_regrid_refine(ind_cell,ind_grid_son,snrt_regrid_error)
+        call snrt_regrid_check(snrt_regrid_error)
+     end if
+  end if
+#endif
 end subroutine make_grid_coarse
 !###############################################################
 !###############################################################
@@ -652,6 +666,9 @@ end subroutine refine_fine
 !###############################################################
 !###############################################################
 subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region)
+#ifdef SNRT
+  use snrt_regrid, only: snrt_regrid_refine,snrt_regrid_check
+#endif
   use amr_commons
   use hydro_commons
   use poisson_commons, ONLY:f,phi,phi_old,scalar_gr,scalar_gr_old
@@ -666,6 +683,9 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
 #include "amr_index.h"
   implicit none
   integer::nn,ind,ilevel,ibound
+#ifdef SNRT
+  integer :: snrt_regrid_error
+#endif
   logical::boundary_region
   integer,dimension(1:nvector)::ind_grid,ind_cell
   !--------------------------------------------------------------
@@ -995,12 +1015,24 @@ subroutine make_grid_fine(ind_grid,ind_cell,ind,ilevel,nn,ibound,boundary_region
      call fdm_prolong_grids(ilevel,ind_grid_son,nn)
   end if
 
+#ifdef SNRT
+  if(.not.balance.and..not.boundary_region)then
+     do i=1,nn
+        if(cpu_map(ind_cell(i))/=myid)cycle
+        call snrt_regrid_refine(ind_cell(i),ind_grid_son(i),snrt_regrid_error)
+        call snrt_regrid_check(snrt_regrid_error)
+     end do
+  end if
+#endif
 end subroutine make_grid_fine
 !###############################################################
 !###############################################################
 !###############################################################
 !###############################################################
 subroutine kill_grid(ind_cell,ilevel,nn,ibound,boundary_region)
+#ifdef SNRT
+  use snrt_regrid, only: snrt_regrid_coarsen,snrt_regrid_check
+#endif
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -1017,6 +1049,9 @@ subroutine kill_grid(ind_cell,ilevel,nn,ibound,boundary_region)
 #include "amr_index.h"
   implicit none
   integer::nn,ilevel,ibound
+#ifdef SNRT
+  integer :: snrt_regrid_error
+#endif
   logical::boundary_region
   integer,dimension(1:nvector)::ind_cell
   !----------------------------------------------------
@@ -1047,6 +1082,16 @@ subroutine kill_grid(ind_cell,ilevel,nn,ibound,boundary_region)
      ind_grid_son(i)=son(ind_cell(i))
   end do
   
+#ifdef SNRT
+  ! Read child radiation and rho*x before deleting topology or zeroing uold.
+  if(.not.balance.and..not.boundary_region)then
+     do i=1,nn
+        if(cpu_map(ind_cell(i))/=myid)cycle
+        call snrt_regrid_coarsen(ind_cell(i),ind_grid_son(i),snrt_regrid_error)
+        call snrt_regrid_check(snrt_regrid_error)
+     end do
+  end if
+#endif
   ! Disconnect son grids from father cells
   do i=1,nn
      son(ind_cell(i))=0

@@ -130,7 +130,7 @@ ifeq ($(SNRT),1)
                 snrt_nlte_coupling.o snrt_angular_quadrature.o \
                 snrt_amr_topology.o snrt_transport_step.o \
                 snrt_rt_transaction.o snrt_dust_ir.o snrt_dust_coupling.o \
-                snrt_dust_transaction.o snrt_dust_receiver.o snrt_dust_contract.o snrt_dust_live.o \
+                snrt_dust_transaction.o snrt_dust_receiver.o snrt_dust_contract.o snrt_dust_live.o snrt_regrid.o \
                 snrt_cuda_ledger_interface.o \
                 snrt_cuda_sparse_transport_interface.o \
                 snrt_cuda_limited_rt_step_interface.o \
@@ -248,6 +248,9 @@ endif
 ramses:	$(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o
 	$(F90) $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o -o $(EXEC)$(NDIM)d $(LIBS)
 	rm -f $(WRITE_MAKEFILE_SOURCE)
+snrt_regrid_native: $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) snrt_regrid_smoke.o
+	$(F90) $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) snrt_regrid_smoke.o -o $(EXEC)_regrid $(LIBS)
+snrt_regrid_smoke.o: snrt_regrid.o snrt_dust_live.o
 #	rm write_patch.f90
 ramses_aton: $(MODOBJ) $(ATON_MODOBJ) $(AMRLIB) $(ATON_OBJ) ramses.o
 	$(F90) $(MODOBJ) $(ATON_MODOBJ) $(AMRLIB) $(ATON_OBJ) ramses.o -o $(EXEC)$(NDIM)d $(LIBS) $(LIBCUDA)
@@ -318,6 +321,10 @@ snrt_dust_transaction.o: amr_parameters.jaehyun.o
 snrt_dust_receiver.o: ../patch/lagRamses/snrt_dust_receiver.f90
 snrt_dust_contract.o: ../patch/lagRamses/snrt_dust_contract.f90
 snrt_dust_live.o: snrt_state.o snrt_dust_contract.o snrt_dust_ir.o snrt_amr_topology.o mpi_mod.o
+snrt_regrid.o: snrt_state.o snrt_dust_live.o hydro_commons.o mpi_mod.o
+ifeq ($(SNRT),1)
+refine_utils.o: snrt_regrid.o
+endif
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
 agn_feedback_deposition.o: amr_parameters.jaehyun.o
 init_sink.o: pm_commons.o

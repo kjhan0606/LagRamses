@@ -44,8 +44,23 @@ module snrt_state
   public :: snrt_state_checkpoint_write, snrt_state_checkpoint_read
   integer, parameter, public :: snrt_checkpoint_cell_width = 4 + snrt_ndirection*snrt_ngroups
   public :: snrt_state_pack_cell, snrt_state_restore_cell
+  public :: snrt_state_clear_cell, validate_cell_payload
 
 contains
+  subroutine snrt_state_clear_cell(icell)
+    integer, intent(in) :: icell
+    integer :: slot
+    slot=snrt_state_get_slot(icell)
+    if(slot==0)return
+    ! Keep the cell-ID/slot association for pool reuse, but never its retired
+    ! photon/chemistry contents. This avoids holes in the raw checkpoint map.
+    snrt_intensity(:,:,slot)=0.0_c_float
+    snrt_hydrogen_ii(slot)=0.0_dp
+    snrt_helium_ii(slot)=0.0_dp
+    snrt_helium_iii(slot)=0.0_dp
+    snrt_neutral_fraction(slot)=1.0_dp
+  end subroutine
+
 
   subroutine snrt_state_pack_cell(icell, payload, ierr)
     integer, intent(in) :: icell
@@ -423,16 +438,21 @@ contains
     implicit none
 
     integer :: cell_capacity
+    integer, allocatable :: expanded_map(:)
 
     ! Keep zero-sized payloads allocated on ranks with no local leaves.  The
     ! native transaction and AMR exchange paths are collective; an unallocated
     ! persistent payload on an empty rank would make the rank leave the path
     ! before its peers.  snrt_state_grow replaces these zero-sized arrays when
     ! the first local slot is created.
+    cell_capacity = ICELL_OF(ngridmax, twotondim)
     if (.not. allocated(snrt_slot_of_cell)) then
-       cell_capacity = ICELL_OF(ngridmax, twotondim)
        allocate(snrt_slot_of_cell(cell_capacity))
        snrt_slot_of_cell = 0
+    else if(cell_capacity>size(snrt_slot_of_cell))then
+       allocate(expanded_map(cell_capacity)); expanded_map=0
+       expanded_map(1:size(snrt_slot_of_cell))=snrt_slot_of_cell
+       call move_alloc(expanded_map,snrt_slot_of_cell)
     end if
     if (.not. allocated(snrt_intensity)) &
          allocate(snrt_intensity(snrt_ndirection, snrt_ngroups, max(0,snrt_capacity)))
