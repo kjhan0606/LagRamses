@@ -17,6 +17,8 @@ recursive subroutine amr_step(ilevel,icount)
   use snrt_ramses_driver, only: snrt_ramses_diagnose_level, &
        snrt_ramses_advance_level
   use snrt_agn_efficiency, only: snrt_agn_rt_requested
+  use snrt_state, only: snrt_state_sync_level
+  use snrt_regrid, only: snrt_regrid_upload,snrt_regrid_check
 #endif
 #ifdef SNRT_LEDGER_DIAGNOSTIC
   use snrt_agn_ledger, only: snrt_agn_ledger_diagnose
@@ -68,6 +70,9 @@ recursive subroutine amr_step(ilevel,icount)
 
   ! SNRT is called immediately after cooling without a legacy phase switch.
   real(dp), save :: snrt_advance_wall=0d0, snrt_diagnose_wall=0d0
+#ifdef SNRT
+  integer :: snrt_sync_leaves,snrt_sync_new,snrt_sync_error
+#endif
 
 #ifdef HYDRO_CUDA
   ! GPU auto-tuning framework
@@ -787,6 +792,11 @@ recursive subroutine amr_step(ilevel,icount)
   !---------------------------
   ! Recursive call to amr_step
   !---------------------------
+#ifdef SNRT
+  ! Fine transport can deposit flux in a coarse leaf before the coarse RT
+  ! solve runs. Establish those receiver slots before entering recursion.
+  if(snrt_agn_rt_requested())call snrt_state_sync_level(ilevel,snrt_sync_leaves,snrt_sync_new)
+#endif
   if(lb_timing_sample)then
      call cpu_time(t_lb_cpu_child_start)
   endif
@@ -945,11 +955,14 @@ recursive subroutine amr_step(ilevel,icount)
   cool_t1=omp_get_wtime()
   call snrt_ramses_advance_level(ilevel)
   snrt_advance_wall=snrt_advance_wall+omp_get_wtime()-cool_t1
-  ! The normal hydro restriction above predates the SNRT receiver.  A
-  ! successful SNRT level transaction writes the post-transport thermal
-  ! state back to uold, so the parent AMR level must see that state before
-  ! this level returns.  Restrict only for an explicitly requested SNRT run;
-  ! the environment latch is rank-uniformly validated in read_params.
+  if(snrt_agn_rt_requested())then
+     call snrt_regrid_upload(ilevel,snrt_sync_error)
+     call snrt_regrid_check(snrt_sync_error)
+  end if
+  ! Hydro upload_fine(ilevel) refreshes covered cells ON this level from
+  ! ilevel+1. Radiation upload above takes the completed fine level and
+  ! refreshes its parents at ilevel-1; the two argument conventions differ.
+  ! Keep hydro's own covered-cell update for an explicitly requested SNRT run.
   if(hydro .and. snrt_agn_rt_requested()) call upload_fine(ilevel)
 #ifndef SNRT_LEDGER_ONLY
   cool_t1=omp_get_wtime()

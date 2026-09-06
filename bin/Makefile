@@ -324,6 +324,7 @@ snrt_dust_live.o: snrt_state.o snrt_dust_contract.o snrt_dust_ir.o snrt_amr_topo
 snrt_regrid.o: snrt_state.o snrt_dust_live.o hydro_commons.o mpi_mod.o
 ifeq ($(SNRT),1)
 refine_utils.o: snrt_regrid.o
+amr_step.jaehyun.o: snrt_regrid.o
 endif
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
 agn_feedback_deposition.o: amr_parameters.jaehyun.o

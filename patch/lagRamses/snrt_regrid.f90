@@ -1,7 +1,7 @@
 ! Conservative state transfer at the actual grid creation/destruction hooks.
 ! This does not implement coarse-fine transport or load-balance migration.
 module snrt_regrid
-  use amr_commons, only: dp,ncoarse,ngridmax,myid
+  use amr_commons, only: dp,ncoarse,ngridmax,myid,ncpu,active,father,headl,next
 #ifndef WITHOUTMPI
   use mpi_mod
 #endif
@@ -17,7 +17,7 @@ module snrt_regrid
 #include "amr_index.h"
   implicit none
   private
-  public :: snrt_regrid_refine,snrt_regrid_coarsen,snrt_regrid_check
+  public :: snrt_regrid_refine,snrt_regrid_coarsen,snrt_regrid_check,snrt_regrid_upload
 contains
   subroutine snrt_regrid_check(ierr)
     integer, intent(in) :: ierr
@@ -112,11 +112,35 @@ contains
   subroutine snrt_regrid_coarsen(parent,grid,ierr)
     integer, intent(in) :: parent,grid
     integer, intent(out) :: ierr
-    real(dp) :: payload(snrt_checkpoint_cell_width+ir_width(),twotondim)
-    real(dp) :: merged(snrt_checkpoint_cell_width+ir_width()),weight(twotondim),norm
+    real(dp) :: merged(snrt_checkpoint_cell_width+ir_width())
     integer :: children(twotondim),j
     ierr=0
     if(snrt_nslot==0)return
+    call cell_ids(parent,grid,children,ierr)
+    if(ierr/=0)return
+    call restricted_payload(parent,grid,merged,ierr)
+    if(ierr/=0)return
+    if(merged(1)==0)then
+       call clear(parent,ierr)
+    else
+       call restore(parent,merged,ierr)
+    end if
+    if(ierr/=0)return
+    do j=1,twotondim
+       call clear(children(j),ierr)
+       if(ierr/=0)return
+    end do
+  end subroutine
+
+  subroutine restricted_payload(parent,grid,merged,ierr)
+    integer, intent(in) :: parent,grid
+    real(dp), intent(out) :: merged(:)
+    integer, intent(out) :: ierr
+    real(dp) :: payload(snrt_checkpoint_cell_width+ir_width(),twotondim)
+    real(dp) :: weight(twotondim),norm
+    integer :: children(twotondim),j
+    ierr=0
+    merged=0
     call cell_ids(parent,grid,children,ierr)
     if(ierr/=0)return
     do j=1,twotondim
@@ -132,7 +156,7 @@ contains
           ierr=2
           return
        end if
-       call clear(parent,ierr)
+       merged=0
        return
     end if
     ierr=2
@@ -162,10 +186,95 @@ contains
        ierr=2
        return
     end if
-    call restore(parent,merged,ierr)
+  end subroutine
+
+  subroutine snrt_regrid_upload(ilevel,ierr)
+    ! Restrict the completed fine level to its parents WITHOUT retiring the
+    ! fine states. Parent cells may be virtual on the fine grid's rank:
+    ! reverse communication sends each complete oct average to its owner.
+    integer, intent(in) :: ilevel
+    integer, intent(out) :: ierr
+    integer :: nfield,ncache,width,i,j,g,parent,owner_grid,ind,nowned,info,global_error
+    integer :: local_counts(2),global_counts(2)
+    integer, allocatable :: parents(:),owned(:)
+    real(dp), allocatable :: reduced(:,:),received(:,:),field(:),count_field(:)
+    ierr=0
+    if(ilevel<=1)return
+    nfield=ICELL_OF(ngridmax,twotondim)
+    ncache=active(ilevel)%ngrid
+    width=snrt_checkpoint_cell_width+ir_width()
+    allocate(parents(ncache),reduced(width,ncache),field(nfield),count_field(nfield))
+    count_field=0
+    do i=1,ncache
+       g=active(ilevel)%igrid(i); parent=father(g); parents(i)=parent
+       call restricted_payload(parent,g,reduced(:,i),j)
+       ierr=max(ierr,j)
+       if(j/=0)cycle
+       count_field(parent)=count_field(parent)+1
+    end do
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(ierr,global_error,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,10,j)
+    ierr=global_error
+#endif
     if(ierr/=0)return
-    do j=1,twotondim
-       call clear(children(j),ierr)
+    if(ncpu>1)call make_virtual_reverse_dp(count_field,ilevel-1)
+    ! Select owned parent cells through the persistent grid list, not a
+    ! possibly absent active list below levelmin.
+    nowned=0; owner_grid=headl(myid,ilevel-1)
+    do while(owner_grid>0)
+       do ind=1,twotondim
+          parent=ICELL_OF(owner_grid,ind)
+          if(count_field(parent)>0)nowned=nowned+1
+       end do
+       owner_grid=next(owner_grid)
+    end do
+    local_counts=[ncache,nowned]; global_counts=local_counts
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(local_counts,global_counts,2,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+    if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,10,j)
+#endif
+    ! Every contributing oct must have exactly one receiving parent owner.
+    if(global_counts(1)/=global_counts(2))then
+       ierr=3
+       return
+    end if
+    allocate(owned(nowned),received(width,nowned))
+    i=0; owner_grid=headl(myid,ilevel-1)
+    do while(owner_grid>0)
+       do ind=1,twotondim
+          parent=ICELL_OF(owner_grid,ind)
+          if(count_field(parent)<=0)cycle
+          i=i+1; owned(i)=parent
+          if(count_field(parent)/=1)ierr=3
+       end do
+       owner_grid=next(owner_grid)
+    end do
+    do j=1,width
+       field=0
+       do i=1,ncache
+          field(parents(i))=field(parents(i))+reduced(j,i)
+       end do
+       if(ncpu>1)call make_virtual_reverse_dp(field,ilevel-1)
+       received(j,:)=field(owned)
+    end do
+    do i=1,nowned
+       call validate_cell_payload(received(1:snrt_checkpoint_cell_width,i),j)
+       ierr=max(ierr,j)
+    end do
+    if(any(.not.ieee_is_finite(received)).or.any(received<0))ierr=max(ierr,3)
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(ierr,global_error,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,10,j)
+    ierr=global_error
+#endif
+    if(ierr/=0)return
+    do i=1,nowned
+       if(received(1,i)==0)then
+          call clear(owned(i),ierr)
+       else
+          call restore(owned(i),received(:,i),ierr)
+       end if
        if(ierr/=0)return
     end do
   end subroutine

@@ -2,7 +2,7 @@
 program snrt_regrid_smoke
   use amr_parameters, only: dp,ngridmax,amr_block_size,twotondim
   use hydro_parameters, only: nvar
-  use amr_commons, only: ncoarse,myid,ncpu
+  use amr_commons, only: ncoarse,myid,ncpu,active,father,headl,next
   use hydro_commons, only: uold
   use snrt_state
   use snrt_regrid
@@ -87,6 +87,35 @@ program snrt_regrid_smoke
   if(ierr/=0.or.snrt_state_get_slot(65)==0)stop 22
   call snrt_state_pack_cell(1,q,ierr)
   if(any(q/=saved))stop 23
+  ! Completed level-2 oct (grid 3) restricts to cell 10 in level-1 grid 2.
+  ! Unlike deletion, this synchronization must retain every child payload.
+  allocate(active(2),father(ngridmax),headl(1,2),next(ngridmax))
+  father=0; headl=0; next=0
+  active(2)%ngrid=1; allocate(active(2)%igrid(1)); active(2)%igrid(1)=3
+  father(3)=10; headl(1,1)=2
+  call snrt_state_restore_cell(10,p,ierr)
+  call snrt_dust_live_restore(10,ir,ierr)
+  call snrt_regrid_refine(10,3,ierr)
+  if(ierr/=0)stop 24
+  do j=1,8
+     q=p; q(2)=real(j,dp)/16; q(5:)=p(5:)*j
+     call snrt_state_restore_cell(17+j,q,ierr)
+     call snrt_dust_live_restore(17+j,ir*j,ierr)
+     uold(17+j,1)=j
+  end do
+  call snrt_regrid_upload(2,ierr)
+  if(ierr/=0)stop 25
+  call snrt_state_pack_cell(10,q,ierr)
+  if(abs(q(2)*36-expected_ions)>1d-13)stop 26
+  call snrt_dust_live_pack(10,out_ir,ierr)
+  if(maxval(abs(out_ir/ir-4.5d0))>1d-14)stop 27
+  do j=1,8
+     call snrt_state_pack_cell(17+j,q,ierr)
+     if(abs(q(2)-real(j,dp)/16)>1d-15)stop 28
+     call snrt_dust_live_pack(17+j,out_ir,ierr)
+     if(maxval(abs(out_ir/ir-j))>1d-14)stop 29
+  end do
+  write(*,'(A)')'SNRT_NATIVE_LEVEL_UPLOAD_PASS parent_updated=1 children_retained=1'
   write(*,'(A)')'SNRT_NATIVE_REGRID_PASS refine=1 restrict=1 rho_weighted_ions=1 retired_clear=1 reject_before_write=1'
   call MPI_FINALIZE(info)
 end program
