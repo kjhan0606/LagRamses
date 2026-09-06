@@ -9,6 +9,7 @@ physical source data or emit canonical/runtime payloads.
 from __future__ import annotations
 
 from collections import defaultdict
+from decimal import Decimal
 import math
 from typing import Any
 
@@ -30,6 +31,63 @@ def _coordinate(record: dict[str, Any]) -> tuple[int, int, float]:
         int(source["metallicity_feh"]),
         float(source["initial_mass_msun"]),
     )
+
+
+def three_digit_half_bin(total_mass: float) -> float:
+    """Nearest-rounding sensitivity only, never an approved error budget."""
+    if not math.isfinite(total_mass) or total_mass <= 0.0:
+        raise PhaseHistoryInvariantError("precision review requires positive finite mass")
+    return float(Decimal("0.5") * Decimal(10) ** (Decimal(str(total_mass)).adjusted() - 2))
+
+
+def mass_precision_evidence(records: list[dict], limitations: dict) -> dict:
+    policy = limitations.get("mass_precision_review", {})
+    if (
+        limitations.get("phase_endpoint_total_mass_precision_msun") is not None
+        or policy.get("printed_decimal_step_msun") != 0.01
+        or policy.get("physical_precision_confirmed") is not False
+        or policy.get("rounding_rule_confirmed") is not False
+        or policy.get("sensitivity_significant_digits") != 3
+        or policy.get("sensitivity_is_approval_tolerance") is not False
+    ):
+        raise PhaseHistoryInvariantError("unapproved Table 5 precision policy")
+    counts: dict[str, int] = defaultdict(int)
+    off_grid = 0
+    for record in records:
+        mass = float(record["total_mass_msun"])
+        step = Decimal(str(2.0 * three_digit_half_bin(mass)))
+        counts[str(step)] += 1
+        off_grid += Decimal(str(mass)) % step != 0
+    return {
+        **policy,
+        "source_row_count_including_duplicates": len(records),
+        "three_digit_step_counts_including_duplicates": dict(counts),
+        "off_three_digit_grid_row_count": off_grid,
+        "interpretation": (
+            "Observed three-digit spacing is evidence for a sensitivity study, "
+            "not proof of a rounding rule. Neither printed-format half-bins nor "
+            "three-digit half-bins authorize mass closure or physical zero wind."
+        ),
+    }
+
+
+def original_integrated_winds(components: dict) -> dict[tuple[int, int, float], float]:
+    """LC18 set R: table9 for <=25 Msun; table8 wind-only for >25 Msun."""
+    winds = {}
+    for name in ("wind_yields", "recommended_yields"):
+        for record in components[name]["records"]:
+            source = record["source_model_coordinate"]
+            key = (int(source["rotation_velocity_km_s"]),
+                   int(source["metallicity_feh"]), float(source["initial_mass_msun"]))
+            if (name == "wind_yields") != (key[2] <= 25.0):
+                continue
+            if key in winds:
+                raise PhaseHistoryInvariantError(f"duplicate integrated wind coordinate {key}")
+            values = list(record["source_reported_isotopic_yields"].values())
+            if not values or any(not math.isfinite(v) or v < 0.0 for v in values):
+                raise PhaseHistoryInvariantError(f"invalid gross wind yields at {key}")
+            winds[key] = math.fsum(values)
+    return winds
 
 
 def build_phase_histories(

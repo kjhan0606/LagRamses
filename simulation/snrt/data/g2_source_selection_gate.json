@@ -7,7 +7,7 @@
   "runtime_activation_allowed": false,
   "matrix": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_selection_matrix_v1.json",
   "fingerprint_audit": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_source_package_fingerprint_audit.json",
-  "matrix_candidate_count": 16,
+  "matrix_candidate_count": 17,
   "fingerprint_candidate_count": 11,
   "fingerprint_file_count": 65,
   "fingerprint_input_integrity_passed": true,

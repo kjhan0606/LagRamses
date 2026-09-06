@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -17,6 +18,9 @@ if str(TOOLS) not in sys.path:
 
 from audit_g2_limongi_phase_mass_history import (  # noqa: E402
     audit_limongi_phase_mass_history,
+)
+from fp1_limongi_phase_history import (  # noqa: E402
+    PhaseHistoryInvariantError, mass_precision_evidence, three_digit_half_bin,
 )
 
 
@@ -58,9 +62,39 @@ def main() -> int:
     ] is False
     closure = report["terminal_integrated_wind_closure"]
     assert closure["model_count"] == 108
-    assert closure["all_models_close_within_printed_quantization"] is False
-    assert closure["model_count_exceeding_quantization_half_width"] > 0
+    assert closure["physical_closure_approved"] is False
+    assert closure["model_count_exceeding_printed_format_half_bin"] == 89
+    assert closure["model_count_exceeding_three_digit_sensitivity_half_bin"] == 2
+    assert len(closure["three_digit_sensitivity_outliers"]) == 2
     assert closure["maximum_absolute_residual"]["absolute_residual_msun"] > 0.3
+    precision = report["mass_precision_review"]
+    assert precision["physical_precision_confirmed"] is False
+    assert precision["rounding_rule_confirmed"] is False
+    assert precision["sensitivity_is_approval_tolerance"] is False
+    assert precision["off_three_digit_grid_row_count"] == 0
+    assert precision["source_row_count_including_duplicates"] == 864
+    assert precision["three_digit_step_counts_including_duplicates"] == {
+        "0.01": 60, "0.1": 776, "1.0": 28,
+    }
+    for mass, half_bin in [(9.99, 0.005), (10.0, 0.05), (99.9, 0.05), (100.0, 0.5)]:
+        assert three_digit_half_bin(mass) == half_bin
+    for mass in [0.0, -1.0, float("nan"), float("inf")]:
+        try:
+            three_digit_half_bin(mass)
+        except PhaseHistoryInvariantError:
+            pass
+        else:
+            raise AssertionError("invalid sensitivity mass accepted")
+    limitations = json.loads((ROOT / "config" / "g2_limongi_phase_mass_history_contract_v1.json").read_text())["limitations"]
+    for key in ["physical_precision_confirmed", "rounding_rule_confirmed", "sensitivity_is_approval_tolerance"]:
+        changed = copy.deepcopy(limitations)
+        changed["mass_precision_review"][key] = True
+        try:
+            mass_precision_evidence([], changed)
+        except PhaseHistoryInvariantError:
+            pass
+        else:
+            raise AssertionError(f"unapproved precision change accepted: {key}")
     assert len(report["blockers"]) == 4
     if args.json_out is not None:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)

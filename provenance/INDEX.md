@@ -43,8 +43,24 @@ evidence.
 | F-P2.6 native RT transaction | active, transport/chemistry transaction | [plan](fp2_6_native_rt_chemistry_transaction_bundle_plan_2026-09-05.md) | [evidence](fp2_6_native_rt_chemistry_transaction_bundle_implementation_evidence_2026-09-05.md) | [Fable plan](fable_fp2_6_native_rt_chemistry_transaction_bundle_plan_audit_2026-09-05.md) | [Fable closure](fable_fp2_6_native_rt_chemistry_transaction_bundle_closure_audit_2026-09-05.md), conditional pass |
 | F-P2.7 gate consolidation / initialized-RAMSES | active, current engineering bundle | [plan](fp2_7_gate_consolidation_initialized_ramses_bundle_plan_2026-09-05.md) | pending | [Fable plan](fable_fp2_7_gate_consolidation_initialized_ramses_bundle_plan_audit_2026-09-05.md) | pending; implementation in progress |
 
+## Next bundle queue
+
+| Bundle | Status / purpose | Plan | Plan audit | Authorization |
+|---|---|---|---|---|
+| F-P1H-F physical-source admission / high-mass seam | approved reduced scope; KL16/CK22 investigation parked by operator; physical admission remains unapproved, not an engineering-wide blocker | [plan and wrap-up](fp1h_f_physical_source_admission_bundle_plan_2026-09-05.md) | [Fable](fable_fp1h_f_physical_source_admission_bundle_plan_audit_2026-09-05.md), historical conditional approve | operator wrap-up 2026-09-05; do not automatically reopen AGB source research |
+
 ## Cross-cutting decisions and non-approvals
 
+- KL16/CK22 AGB source discrepancies are parked, not resolved or approved.
+  Evidence and readers remain in the [existing bundle record](fp1h_f_physical_source_admission_bundle_plan_2026-09-05.md).
+  No author email was sent; contact is cancelled. The source-reader checks
+  require explicit `--include-parked-agb`; standard selection/admission
+  protections remain active. Continue source-independent native feedback work.
+- [LC18 failed-wind inquiry and source review](fp1_lc18_failed_wind_inquiry_packet_2026-09-04.md)
+  updated 2026-09-05: printed format is not physical precision; original-wind
+  comparison and mixed-source mass deficit measured; no wind replacement,
+  author contact, new gate or production activation. Supersedes the old
+  parsed-zero precision interpretation, not the historical audit record.
 - [production/publication readiness plan](production_publication_readiness_plan.md)
   remains the governing high-level RT/stellar/AGN feedback/dust roadmap.
 - [audit cadence amendment](audit_cadence_amendment_2026-09-05.md) governs one
@@ -52,9 +68,12 @@ evidence.
 - [Fable operational audit](fable_operational_instrumentation_gate_efficiency_audit_2026-09-05.md)
   classified the workspace `OVERINSTRUMENTED`; F-P2.7 is the approved
   consolidation response.
-- Physical SED/yield/DTD/PISN approval, live production feedback, dust science
-  approval, HDF5 restart, distributed AMR scaling, and publication convergence
-  are not granted by any F-P2 record above.
+- SNIa HESMA N100 and Maoz DTD retain their prior physical approval
+  `FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ`; see
+  [approval sidecar](../simulation/snrt/config/fp2_snia_event_source_approval_sidecar_v1.json).
+  Runtime activation remains gated. Wind/AGB/SNII source admission, physical
+  SED/PISN/dust choices, live production feedback, HDF5 restart, distributed
+  AMR scaling and publication convergence require their own evidence.
 
 ## Classification rules
 

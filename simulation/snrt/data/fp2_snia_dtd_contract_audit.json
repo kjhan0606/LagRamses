@@ -19,11 +19,11 @@
       "c6c8042b03406b9d69bc50434fe5d6af7f542be6"
     ],
     "runtime_contract_matches": true,
-    "repository_head": "343619e1943be7f706d33b99561c8087ed2daffc",
+    "repository_head": "0fb88721e7facdfd8b494300820896c6319c6c36",
     "revision_exists": true,
     "declared_commit_is_ancestor": true,
     "worktree_clean": false,
-    "worktree_change_count": 100,
+    "worktree_change_count": 62,
     "production_code_bound": false,
     "interpretation": "The declared staging revision exists and is ancestral, but current uncommitted changes are not included in that immutable binding."
   },
@@ -60,11 +60,11 @@
   },
   "native_snia_population_contract": {
     "path": "simulation/snrt/native/phase0/stellar_snia_population_contract.f90",
-    "sha256": "7a279d56b3b93318ceb026e00974ee24e1016134872db339b5318d637c65cb9b"
+    "sha256": "840d08fe11d0b87efbc8d3a315be3f6adb96bd35e0c64cfcab7be137e7c9ae1b"
   },
   "production_snia_population_contract": {
     "path": "patch/lagRamses/stellar_snia_population_contract.f90",
-    "sha256": "7a279d56b3b93318ceb026e00974ee24e1016134872db339b5318d637c65cb9b"
+    "sha256": "840d08fe11d0b87efbc8d3a315be3f6adb96bd35e0c64cfcab7be137e7c9ae1b"
   },
   "native_snia_cell_deposition": {
     "path": "simulation/snrt/native/phase0/stellar_snia_cell_deposition.f90",
@@ -88,20 +88,20 @@
     },
     "caller": {
       "path": "patch/lagRamses/stellar_ramses_runtime.f90",
-      "sha256": "e1cf7205e87bf3843477195c0a91c88af1dc11bc317a4c98cdc85ce11da9d85f",
+      "sha256": "2e227af20cc40f003962048b76cc147503d64a6dadf382e08f5bb3e5a345b511",
       "target_policy": "actual AMR leaf-cell NGP target; owner rank is local RAMSES rank",
       "activation_gate": "production_source_model_supported() remains fail-closed"
     },
     "bridge": {
       "path": "patch/lagRamses/stellar_ramses_bridge.f90",
-      "sha256": "09ce0a15ed5f2644ac683c3b7afb2096dc6d3e3b84a0764ebd9243c4611293f3",
+      "sha256": "90f5c50c30462805989838ea1cf959cb6f20244fbb0e5c96103675999f56af44",
       "layout": "unew(local_cell,variable)",
       "transaction": "variable-major scratch then row-major scatter"
     }
   },
   "production_runtime_negative": {
     "path": "simulation/snrt/data/fp2_snia_production_runtime_negative.json",
-    "sha256": "333adbd040cb1073a315683884cd078fcf1984d20da116a5f080fd49e74beb0c",
+    "sha256": "bbbd3635b98e36d4fabca4438e4b5311e662d9149108c605cbb925f2ce04f981",
     "status": "pass",
     "result_statuses": {
       "mismatched_approval": "pass",

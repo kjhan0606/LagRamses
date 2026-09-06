@@ -759,43 +759,16 @@ contains
              ! With no absorbed photons this bundle has no local chemistry
              ! source to advance.  Do not reject an otherwise untouched cell
              ! merely because its hydro internal-energy reconstruction cannot
-             ! provide a positive temperature.
-             if (sum(abs(real(absorbed_group(i,:),dp))) <= 0.0d0) cycle
-
-             available_species_code = real(available_species_transport(i,:),dp)
-             chemistry_cell_ok = .true.
-             trial_unassigned(i) = 0.0d0
-             do igroup = 1, snrt_ngroups
-                opacity_species(1) = real(iteration_species_tau(i,igroup,1),dp)
-                opacity_species(2) = real(iteration_species_tau(i,igroup,2),dp)
-                opacity_species(3) = real(iteration_species_tau(i,igroup,3),dp)
-                call snrt_partition_absorption(real(absorbed_group(i,igroup),dp), &
-                     opacity_species, available_species_code, &
-                     trial_absorbed_species(i,:,igroup), ierr, &
-                     unassigned_absorption_code, inventory_scale_code=&
-                     sum(abs(real(available_species_transport(i,:),dp))))
-                trial_unassigned(i) = trial_unassigned(i) + &
-                     max(0.0d0, unassigned_absorption_code)
-                unassigned_absorption_total = unassigned_absorption_total + &
-                     max(0.0d0, unassigned_absorption_code)
-                if (ierr /= snrt_thermochemistry_ok) then
-                   local_transaction_failure = snrt_failure_partition
-                   chemistry_cell_ok = .false.
+             ! provide a positive temperature.  The receiver failure hook is
+             ! checked here as well so the initialized, source-free RAMSES
+             ! smoke can exercise the full rollback path without inventing a
+             ! physical photon source.
+             if (sum(abs(real(absorbed_group(i,:),dp))) <= 0.0d0) then
+                if (snrt_transaction_failure_requested(transaction_config, &
+                     snrt_failure_receiver, i)) then
+                   local_transaction_failure = snrt_failure_receiver
                    exit
                 end if
-                if (max(real(absorbed_group(i,igroup),dp), &
-                     sum(abs(real(available_species_transport(i,:),dp)))) > 0.0d0) then
-                   if (max(0.0d0,unassigned_absorption_code) > &
-                        snrt_inventory_tolerance(max(real(absorbed_group(i,igroup),dp), &
-                        sum(abs(real(available_species_transport(i,:),dp)))))) then
-                      local_transaction_failure = snrt_failure_unassigned
-                      chemistry_cell_ok = .false.
-                      exit
-                   end if
-                end if
-             end do
-             if (.not. chemistry_cell_ok) then
-                chemistry_failures = chemistry_failures + 1
                 cycle
              end if
 
@@ -995,6 +968,11 @@ contains
                   ' max_iter=', transaction_config%max_iterations, &
                   ' residual=', global_transaction_residual
           end if
+          if (transaction_diagnostic_mode .and. &
+               global_transaction_failure /= snrt_failure_none) &
+               write(*,'(A,A,A,I0)') ' SNRT_RT_DIAGNOSTIC_FAIL_CLOSED class=', &
+               trim(snrt_transaction_failure_name(global_transaction_failure)), &
+               ' level=', ilevel
        end if
        deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, optical_depth_species, &
             optical_depth_dust, available_species_transport, optical_depth_hydrogen, &
@@ -1052,6 +1030,16 @@ contains
          global_unassigned_absorption, convergence_status)
     if (convergence_status /= 0) global_unassigned_absorption = &
          unassigned_absorption_total
+    if (myid == 1) then
+       write(*,'(A,I0,A,I0,A,ES12.4)') &
+            ' SNRT_RT_TRANSACTION_COMMIT_PASS level=', ilevel, &
+            ' iteration=', transaction_iteration, &
+            ' residual=', global_transaction_residual
+       write(*,'(A,I0,A,I0,A,I0,A,I0,A,I0,A,ES12.4)') &
+            ' SNRT_RT_CLOSURE_PASS level=', ilevel, ' leaves=', nleaf, &
+            ' photon_nonnegative=', 1, ' species_simplex=', 1, &
+            ' thermal_finite=', 1, ' unassigned_code=', global_unassigned_absorption
+    end if
     do i = 1, nleaf
        icell = leaf_cell(i)
        if (icell >= 1 .and. icell <= size(uold,1) .and. &

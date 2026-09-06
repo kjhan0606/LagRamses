@@ -1,12 +1,14 @@
 # P0.1 source-of-truth and build-parity gate
 
-This gate prevents the native/phase0 contract PASS from being presented as a
-PASS for the compiled `lagRamses` executable.
+This gate prevents a RAMSES-independent contract PASS from being presented as
+a PASS for the compiled `lagRamses` executable.
 
 The production source is the `patch/lagRamses` tree selected by
-`bin/Makefile`. The G1 runner intentionally builds a separate RAMSES-
-independent mirror under `simulation/snrt/native/phase0`, which is retained as
-a differential oracle. The production-linked harness targets the actual
+`bin/Makefile`. The G1 runner now compiles its stellar modules directly from
+`patch/lagRamses` and links the test driver from the explicit
+`simulation/snrt/tests/fixtures/phase0` namespace. The historical
+`simulation/snrt/native/phase0/stellar_*.f90` tree is retained only as a
+differential oracle. The production-linked harness targets the actual
 `bin/Makefile`, which consumes the source-order sidecar, and records a forced
 rebuild, binary linkage symbols, startup smoke, and source/config/tool hashes.
 The source-order sidecar is checked against the effective make object order.
@@ -44,13 +46,13 @@ Evidence remains valid across a later descendant commit: source, build-input,
 tool, binary, and log hashes remain exact, while the recorded build `HEAD` is
 required only to be an ancestor of the current `HEAD`.
 
-The gate is invoked before the native G1 test by
+The gate is invoked before the production-source G1 test by
 `tests/run_g1_native_contract.sh`, so a future native contract PASS cannot
 bypass compiled-tree parity. The production-linked path is
 `tests/run_p0_production_linked_contract.sh`; it is opt-in and requires
 `P0_BUILD=1`. It runs `make -C "$ROOT/bin" -B ramses`, records the binary,
 Makefile, source, and compile-contract evidence, and then reruns the gate.
-For differential-only work, set `P0_DIAGNOSTIC=1` on the G1 runner; it emits
+For diagnostic-only work, set `P0_DIAGNOSTIC=1` on the G1 runner; it emits
 `G1_NATIVE_DIAGNOSTIC_ONLY` and never claims P0 closure.
 
 The native/production shared-file profile is a bounded differential diagnostic:

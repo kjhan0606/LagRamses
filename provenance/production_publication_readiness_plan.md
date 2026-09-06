@@ -419,6 +419,13 @@ nucleosynthesis” unless the chemistry-expansion gate has passed.
 
 ## 5. Execution order and decision points
 
+Operator scheduling amendment, 2026-09-05: the KL16/CK22 AGB source-resolution
+investigation is parked; see the [wrap-up](fp1h_f_physical_source_admission_bundle_plan_2026-09-05.md).
+Do not wait for author correspondence or repeat source reviews before doing
+source-independent native feedback work. This changes scheduling, not the
+criteria for activating or publishing a physical source package. Retain
+existing approved SNIa physics and all source-admission protections.
+
 1. **Complete:** G0, the native/JAX contract mirror, and P0.1 compiled source
    identity/build parity. P0.2/P0.3 retain their stated conditional physical
    continuation work; P0.4 remains passed. Generic restart/AMR hardening not

@@ -1,5 +1,5 @@
 {
-  "audit_code_sha256": "9c2258936dd6cd7bf7ae56e223b1a0818a9f7ad0b226310d20fe9b69d3231aa0",
+  "audit_code_sha256": "bd655df69c130ef73e58a2a7e5ffd660d660cd34fcbd2f7803928390dd6a1832",
   "blockers": [
     "Reconcile phase-endpoint mass loss with the integrated isotopic wind table at source precision.",
     "Provide or approve a time-resolved wind composition model rather than scaling one terminal composition over all phases.",
@@ -8,14 +8,14 @@
   ],
   "canonical_conversion_allowed": false,
   "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_limongi_phase_mass_history_contract_v1.json",
-  "contract_sha256": "c37c1513525b897253546ae825455682191ca7ed838841d6479e085a1f412a14",
+  "contract_sha256": "c1c57901006d8b3cd929133b25dc3fdeb2bfd9a54ded42897ff32a7032cecdce",
   "duplicate_resolution": {
     "all_collapsed_rows_physically_identical": true,
     "collapsed_extra_row_count": 19,
     "duplicate_coordinate_count": 10
   },
   "gate": "G2",
-  "interpretation": "Table5 supplies a monotonic phase-endpoint wind-mass history after exact duplicate collapse, but not a time-resolved isotopic composition. The endpoint mass and integrated isotope sums also disagree beyond the nominal printed-mass half-bin for some models, so the history cannot normalize canonical ejecta without a documented reconciliation.",
+  "interpretation": "Table5 supplies a monotonic phase-endpoint wind-mass history after exact duplicate collapse, but not a time-resolved isotopic composition. Printed decimal places are not confirmed physical precision. The three-digit nearest-rounding comparison is sensitivity-only; remaining residuals and source rounding require reconciliation. Neither comparison can normalize canonical ejecta.",
   "mass_history": {
     "age_zero_anchor_count": 108,
     "maximum_phase_node_count_per_model": 8,
@@ -31,7 +31,26 @@
     "time_resolved_isotopic_composition_available": false,
     "time_resolved_mass_available": true
   },
-  "phase_history_shared_code_sha256": "71ea5453659b15882e5d594c4e47c303d38e7a78e05596857450720a9f4c374c",
+  "mass_precision_review": {
+    "interpretation": "Observed three-digit spacing is evidence for a sensitivity study, not proof of a rounding rule. Neither printed-format half-bins nor three-digit half-bins authorize mass closure or physical zero wind.",
+    "off_three_digit_grid_row_count": 0,
+    "physical_precision_confirmed": false,
+    "printed_decimal_step_msun": 0.01,
+    "publisher_mrt_sha256": "2d1787477d6c8160967c8b4289e4ce476cde88e540e9469a80553f67237e19a3",
+    "publisher_mrt_url": "https://content.cld.iop.org/journals/0067-0049/237/1/13/revision1/apjsaacb24t5_mrt.txt",
+    "review_date": "2026-09-05",
+    "rounding_rule_confirmed": false,
+    "sensitivity_is_approval_tolerance": false,
+    "sensitivity_significant_digits": 3,
+    "source_format": "F6.2 in CDS ReadMe and publisher Table 5 MRT; formatting is not an attestation of physical precision or nearest rounding.",
+    "source_row_count_including_duplicates": 864,
+    "three_digit_step_counts_including_duplicates": {
+      "0.01": 60,
+      "0.1": 776,
+      "1.0": 28
+    }
+  },
+  "phase_history_shared_code_sha256": "e2c44eac9672f82e1c6e7c07dd196fe59dcce2f4fb6ca80a94fe11fdde513783",
   "phase_order_provenance": {
     "interpretation": "MS/H/He/PSN labels are source-attested; the C/Ne/O/Si ordering is a project contract assumption.",
     "source": "g2_limongi_phase_mass_history_contract_v1",
@@ -44,7 +63,6 @@
   "source_adapter_code_sha256": "2c5c5ff366fea6487fd9ee616a8099a27b133c51be9872b0df65765ebaa23531",
   "status": "mass_history_recoverable_composition_and_closure_blocked",
   "terminal_integrated_wind_closure": {
-    "all_models_close_within_printed_quantization": false,
     "maximum_absolute_residual": {
       "absolute_residual_msun": 0.34122894710262286,
       "coordinate": {
@@ -55,7 +73,8 @@
       "integrated_isotopic_wind_mass_msun": 0.34122894710262286,
       "integrated_yield_component": "table8_setR_wind_only",
       "phase_endpoint_wind_mass_msun": 0.0,
-      "residual_msun": -0.34122894710262286
+      "residual_msun": -0.34122894710262286,
+      "three_digit_sensitivity_half_bin_msun": 0.5
     },
     "maximum_residual_msun": {
       "absolute_residual_msun": 0.08899943941717936,
@@ -67,7 +86,8 @@
       "integrated_isotopic_wind_mass_msun": 101.31100056058283,
       "integrated_yield_component": "table8_setR_wind_only",
       "phase_endpoint_wind_mass_msun": 101.4,
-      "residual_msun": 0.08899943941717936
+      "residual_msun": 0.08899943941717936,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     "minimum_residual_msun": {
       "absolute_residual_msun": 0.34122894710262286,
@@ -79,11 +99,42 @@
       "integrated_isotopic_wind_mass_msun": 0.34122894710262286,
       "integrated_yield_component": "table8_setR_wind_only",
       "phase_endpoint_wind_mass_msun": 0.0,
-      "residual_msun": -0.34122894710262286
+      "residual_msun": -0.34122894710262286,
+      "three_digit_sensitivity_half_bin_msun": 0.5
     },
     "model_count": 108,
-    "model_count_exceeding_quantization_half_width": 89,
+    "model_count_exceeding_printed_format_half_bin": 89,
+    "model_count_exceeding_three_digit_sensitivity_half_bin": 2,
+    "physical_closure_approved": false,
+    "printed_format_half_bin_msun": 0.005,
     "residual_definition": "initial_minus_table5_terminal_mass minus integrated isotopic wind mass",
-    "table5_total_mass_quantization_half_width_msun": 0.005
+    "three_digit_sensitivity_outliers": [
+      {
+        "absolute_residual_msun": 0.052420896102670866,
+        "coordinate": {
+          "initial_mass_msun": 30.0,
+          "metallicity_feh": -1,
+          "rotation_velocity_km_s": 300
+        },
+        "integrated_isotopic_wind_mass_msun": 14.05242089610267,
+        "integrated_yield_component": "table8_setR_wind_only",
+        "phase_endpoint_wind_mass_msun": 14.0,
+        "residual_msun": -0.052420896102670866,
+        "three_digit_sensitivity_half_bin_msun": 0.05
+      },
+      {
+        "absolute_residual_msun": 0.08899943941717936,
+        "coordinate": {
+          "initial_mass_msun": 120.0,
+          "metallicity_feh": 0,
+          "rotation_velocity_km_s": 300
+        },
+        "integrated_isotopic_wind_mass_msun": 101.31100056058283,
+        "integrated_yield_component": "table8_setR_wind_only",
+        "phase_endpoint_wind_mass_msun": 101.4,
+        "residual_msun": 0.08899943941717936,
+        "three_digit_sensitivity_half_bin_msun": 0.05
+      }
+    ]
   }
 }

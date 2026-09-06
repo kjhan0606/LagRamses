@@ -8,8 +8,14 @@
     "population_mass_msun": [0.08, 120.0],
     "terminal_candidate_mass_msun": [8.0, 120.0],
     "high_mass_review_seam_msun": [40.0, 120.0],
-    "required_birth_metallicity_domain": null,
-    "required_birth_metallicity_domain_selected": false,
+    "required_birth_metallicity_domain": {
+      "quantity": "metal_mass_fraction",
+      "bounds": [0.0, 0.139],
+      "solar_metal_mass_fraction": 0.0139,
+      "solar_reference": "Asplund_Amarsi_Grevesse_2021_photospheric",
+      "bounds_in_solar_units": [0.0, 10.0]
+    },
+    "required_birth_metallicity_domain_selected": true,
     "age_horizon_yr": 13800000000.0
   },
   "evidence_artifacts": {

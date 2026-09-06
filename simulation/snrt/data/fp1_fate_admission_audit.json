@@ -28,11 +28,11 @@
     },
     "physical_package_contract": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
-      "sha256": "06cd0858dfb3a79675bbb9c1f83c7fde33b0069637a2bf4e384ff1e7922359e0"
+      "sha256": "e177a2c0dd46cca7badd6a6278dab9dc0d0edc2a1303132752ec1439ef7fb2a1"
     },
     "physics_contract": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_physics_contract_v1.json",
-      "sha256": "08267134b80f2a1e1070c2ceba94cd45f3aeeb532502230468ebc30f4b687fdb"
+      "sha256": "2d9feb465f5d02f6642b61aab26df65022ae78da619191f5b913a5ed5bc2abd0"
     },
     "resolver_contract": {
       "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_fate_resolver_contract_v1.json",
@@ -109,7 +109,7 @@
       "runtime_8_to_10_and_100_to_120_edges_missing",
       "terminal_energy_momentum_deposition_missing"
     ],
-    "audit_code_sha256": "b1559849c844a1b513c65b8e47fc58febbb68802d8f1b3a6353e13e52e606650",
+    "audit_code_sha256": "05c79d5b4fbbe6d1d9129e1c9e858cc1fc8448973ab6091b8d55b046d022fd51",
     "candidate_qualification": {
       "boccioli_roberti2026_lc18": {
         "gate_evidence_status": {
@@ -1383,7 +1383,7 @@
     },
     "canonical_conversion_allowed": false,
     "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
-    "contract_sha256": "06cd0858dfb3a79675bbb9c1f83c7fde33b0069637a2bf4e384ff1e7922359e0",
+    "contract_sha256": "e177a2c0dd46cca7badd6a6278dab9dc0d0edc2a1303132752ec1439ef7fb2a1",
     "evidence_artifacts": {
       "candidate_grid_audit": {
         "code_locked_sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578",
@@ -1565,6 +1565,35 @@
       "terminal_mass_and_species_closure"
     ],
     "runtime_deposition_allowed": false,
+    "runtime_domain": {
+      "age_horizon_yr": 13800000000.0,
+      "high_mass_review_seam_msun": [
+        40.0,
+        120.0
+      ],
+      "population_mass_msun": [
+        0.08,
+        120.0
+      ],
+      "required_birth_metallicity_domain": {
+        "bounds": [
+          0.0,
+          0.139
+        ],
+        "bounds_in_solar_units": [
+          0.0,
+          10.0
+        ],
+        "quantity": "metal_mass_fraction",
+        "solar_metal_mass_fraction": 0.0139,
+        "solar_reference": "Asplund_Amarsi_Grevesse_2021_photospheric"
+      },
+      "required_birth_metallicity_domain_selected": true,
+      "terminal_candidate_mass_msun": [
+        8.0,
+        120.0
+      ]
+    },
     "schema": "snrt-fp1-physical-package-admission-audit",
     "schema_version": 1,
     "selected_candidate_hard_blockers": [],
@@ -1572,8 +1601,8 @@
     "selected_package_id": null,
     "selection_evaluation": {
       "canonical_conversion_allowed": false,
-      "code_owned_birth_metallicity_domain_selected": false,
-      "contract_birth_metallicity_domain_selected": false,
+      "code_owned_birth_metallicity_domain_selected": true,
+      "contract_birth_metallicity_domain_selected": true,
       "production_ready": false,
       "publication_ready": false,
       "runtime_deposition_allowed": false,

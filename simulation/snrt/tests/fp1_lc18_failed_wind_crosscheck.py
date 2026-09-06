@@ -47,6 +47,8 @@ SOURCE_FILES = (
     / "g2_candidates"
     / "limongi_chieffi_2018_cds"
     / "table7.dat",
+    ROOT.parents[1] / "external" / "g2_candidates" / "limongi_chieffi_2018_cds" / "table8.dat",
+    ROOT.parents[1] / "external" / "g2_candidates" / "limongi_chieffi_2018_cds" / "table9.dat",
 )
 
 
@@ -298,9 +300,10 @@ def main() -> int:
     assert successful["release_wind_table_nonzero_count"] == 52
     assert successful["cds_terminal_wind_parsed_positive_count"] == 48
     assert successful["cds_terminal_wind_parsed_exact_zero_count"] == 4
-    assert successful["summary_minus_cds_above_phase_endpoint_half_bin_count"] == 52
-    assert successful["cds_phase_endpoint_total_mass_precision_msun"] == 0.01
-    assert successful["cds_phase_endpoint_total_mass_half_bin_msun"] == 0.005
+    assert successful["summary_minus_cds_above_printed_format_half_bin_count"] == 52
+    assert successful["cds_phase_endpoint_total_mass_precision_msun"] is None
+    assert successful["cds_phase_endpoint_total_mass_half_bin_msun"] is None
+    assert successful["cds_printed_format_half_bin_msun"] == 0.005
     assert successful["physical_zero_inferred"] is False
     assert "not evidence that physical wind is zero" in successful[
         "parsed_exact_zero_interpretation"
@@ -324,9 +327,9 @@ def main() -> int:
     assert failed["release_wind_table_exact_zero_count"] == 56
     assert failed["cds_terminal_wind_parsed_positive_count"] == 53
     assert failed["cds_terminal_wind_parsed_exact_zero_count"] == 3
-    assert failed["cds_terminal_wind_parsed_positive_count"] == 53
-    assert failed["cds_phase_endpoint_total_mass_precision_msun"] == 0.01
-    assert failed["cds_phase_endpoint_total_mass_half_bin_msun"] == 0.005
+    assert failed["cds_phase_endpoint_total_mass_precision_msun"] is None
+    assert failed["cds_phase_endpoint_total_mass_half_bin_msun"] is None
+    assert failed["cds_printed_format_half_bin_msun"] == 0.005
     assert failed["physical_zero_inferred"] is False
     assert "do not define or resolve" in failed["interpretation"]
     assert failed["unresolved_count"] == 56
@@ -344,11 +347,13 @@ def main() -> int:
         "successful": 4,
         "failed": 3,
     }
-    assert comparison["cds_phase_endpoint_total_mass_precision_msun"] == 0.01
-    assert comparison["cds_phase_endpoint_total_mass_half_bin_msun"] == 0.005
+    assert comparison["cds_phase_endpoint_total_mass_precision_msun"] is None
+    assert comparison["cds_phase_endpoint_total_mass_half_bin_msun"] is None
+    assert comparison["cds_printed_format_half_bin_msun"] == 0.005
     assert comparison["physical_zero_inferred"] is False
     assert "not physical-zero inferences" in comparison["interpretation"]
-    assert comparison["above_cds_phase_endpoint_half_bin_count"] == 108
+    assert comparison["above_cds_printed_format_half_bin_count"] == 108
+    assert comparison["above_three_digit_sensitivity_half_bin_count"] == 108
     assert comparison["agreement_required_for_this_review"] is False
     assert math.isclose(
         comparison["maximum_absolute_difference_msun"],
@@ -376,6 +381,43 @@ def main() -> int:
     assert structure["binding_energy_is_not_injected_explosion_energy"] is True
 
     rows = report["rows"]
+    original = report["original_lc18_wind_comparison"]
+    assert original["positive_wind_count"] == 108
+    assert original["failed_model_positive_wind_count"] == 56
+    assert original["above_printed_format_half_bin_count"] == 89
+    assert original["above_three_digit_sensitivity_half_bin_count"] == 2
+    assert original["physical_closure_approved"] is False
+    assert original["replacement_applied"] is False
+    mixed = original["mixed_source_budget_review"]
+    assert mixed["model_count"] == mixed["positive_deficit_count"] == 52
+    assert math.isclose(mixed["minimum_deficit_msun"], 0.0501418214872682, abs_tol=1e-12)
+    assert math.isclose(mixed["maximum_deficit_msun"], 0.6072574340308559, abs_tol=1e-12)
+    assert mixed["mixed_source_use_approved"] is False
+    assert all(row["mixed_source_mass_deficit_msun"] is None for row in rows if not row["exploded"])
+    atmosphere = original["atmosphere_hypothesis"]
+    assert atmosphere["cause_confirmed"] is False
+    assert atmosphere["correction_applied"] is False
+    assert atmosphere["fraction_between_0p009_and_0p011_count"] == 106
+    assert len(atmosphere["outliers_outside_0p009_to_0p011"]) == 2
+    assert math.isclose(atmosphere["median_fraction"], 0.010060988970999758, abs_tol=1e-12)
+    precision = report["mass_precision_review"]
+    assert precision["physical_precision_confirmed"] is False
+    assert precision["sensitivity_is_approval_tolerance"] is False
+    assert precision["off_three_digit_grid_row_count"] == 0
+    for row in rows:
+        mass = row["coordinate"]["initial_mass_msun"]
+        assert row["original_lc18_wind_source_table"] == ("table9.dat" if mass <= 25 else "table8.dat")
+        assert row["original_lc18_integrated_wind_mass_msun"] > 0.0
+    # Raw-table sums reproduced without the adapter in the 2026-09-05 review.
+    examples = {(0, 0, 20): 12.459052587158395,
+                (300, -1, 120): 79.50545602731917,
+                (0, -3, 120): 0.34122894710262286}
+    for row in rows:
+        c = row["coordinate"]
+        key = (c["rotation_velocity_km_s"], c["metallicity_feh"], c["initial_mass_msun"])
+        if key in examples:
+            assert math.isclose(row["original_lc18_integrated_wind_mass_msun"], examples[key], rel_tol=0, abs_tol=1e-12)
+            assert row["release_wind_table_element_sum_msun"] == 0.0
     assert len(rows) == 108
     assert sum(row["exploded"] for row in rows) == 52
     assert sum(

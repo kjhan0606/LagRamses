@@ -32,10 +32,16 @@ TOOL_PATH = Path(__file__).resolve()
 SNRT_ROOT = TOOL_PATH.parents[1]
 DEFAULT_CONTRACT = SNRT_ROOT / "config" / "fp1_physical_package_admission_contract_v1.json"
 DEFAULT_JSON_OUT = SNRT_ROOT / "data" / "fp1_physical_package_admission_audit.json"
-# This is a code-owned admission state, not an editable contract switch.  The
-# real review remains unselected until a reviewed code change changes this
-# constant and supplies a matching, approved domain in the contract.
-CODE_OWNED_BIRTH_METALLICITY_DOMAIN_SELECTED = False
+# Operator-selected target (2026-09-05), not evidence of source coverage or
+# permission to clamp gas abundances. Existing physical-package guards remain.
+CODE_OWNED_BIRTH_METALLICITY_DOMAIN_SELECTED = True
+CODE_OWNED_BIRTH_METALLICITY_DOMAIN = {
+    "quantity": "metal_mass_fraction",
+    "bounds": [0.0, 0.139],
+    "solar_metal_mass_fraction": 0.0139,
+    "solar_reference": "Asplund_Amarsi_Grevesse_2021_photospheric",
+    "bounds_in_solar_units": [0.0, 10.0],
+}
 REQUIRED_EVIDENCE = {
     "source_node_contract",
     "terminal_deposition_contract",
@@ -306,6 +312,10 @@ def _validate_code_owned_selection_state(runtime: dict[str, Any]) -> bool:
     if not CODE_OWNED_BIRTH_METALLICITY_DOMAIN_SELECTED and domain is not None:
         raise PhysicalPackageAdmissionError(
             "review-unselected state cannot carry a birth-metallicity domain"
+        )
+    if declared and domain != CODE_OWNED_BIRTH_METALLICITY_DOMAIN:
+        raise PhysicalPackageAdmissionError(
+            "birth-metallicity domain disagrees with operator-selected target"
         )
     return declared
 
@@ -812,6 +822,7 @@ def audit_physical_package_admission(
         "runtime_deposition_allowed": selection_evaluation["runtime_deposition_allowed"],
         "contract_path": str(contract_path),
         "contract_sha256": _sha256(contract_path),
+        "runtime_domain": runtime,
         "audit_code_sha256": _sha256(TOOL_PATH),
         "evidence_artifacts": evidence,
         "required_gate_ids": sorted(REQUIRED_GATES),

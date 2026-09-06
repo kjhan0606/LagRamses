@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import math
+from statistics import median
 from pathlib import Path
 import sys
 from typing import Any, Iterable
@@ -30,6 +31,9 @@ from fp1_publication_rights import (
 from fp1_limongi_phase_history import (
     PhaseHistoryInvariantError,
     build_phase_histories,
+    mass_precision_evidence,
+    original_integrated_winds,
+    three_digit_half_bin,
 )
 
 
@@ -190,18 +194,21 @@ def _parsed_cds_zero_metadata(precision_msun: float) -> dict[str, Any]:
             "CDS phase-endpoint mass precision must be a positive finite value"
         )
     return {
-        "cds_phase_endpoint_total_mass_precision_msun": precision_msun,
-        "cds_phase_endpoint_total_mass_half_bin_msun": 0.5 * precision_msun,
+        "cds_phase_endpoint_total_mass_precision_msun": None,
+        "cds_phase_endpoint_total_mass_half_bin_msun": None,
+        "cds_printed_decimal_step_msun": precision_msun,
+        "cds_printed_format_half_bin_msun": 0.5 * precision_msun,
+        "physical_precision_confirmed": False,
         "physical_zero_inferred": False,
         "parsed_exact_zero_definition": (
             "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing "
-            "M_initial - M_total(PSN) from CDS table5 at the declared source "
-            "endpoint precision"
+            "M_initial - M_total(PSN) from CDS table5; no pipeline rounding"
         ),
         "parsed_exact_zero_interpretation": (
-            "An exact parsed zero is compatible with physical mass loss below "
-            "the source table half-bin; it is not evidence that physical wind "
-            "is zero. The pipeline does not round the wind values."
+            "An exact parsed zero is not evidence that physical wind is zero. "
+            "The F6.2 format does not establish physical precision or rounding. "
+            "No physical upper limit is inferred from the printed-format "
+            "half-bin. The pipeline does not round the wind values."
         ),
     }
 
@@ -228,6 +235,9 @@ def _release_rows(
                     f"Yields_Rot_{rotation:03d}_Eles_LC18_Wind.txt"
                 )
                 table = _yield_table(archive, member)
+                post = _yield_table(archive, member.replace("_Wind.txt", "_Post.txt"))
+                if post["mass_msun"] != table["mass_msun"]:
+                    raise Lc18FailedWindCrosscheckError("Post/Wind mass axes differ")
                 by_mass = {
                     int(row["mass_msun"]): row
                     for row in summary
@@ -258,6 +268,9 @@ def _release_rows(
                         "archive_member_path": member,
                         "summary": dict(summary_row),
                         "wind_table_element_sum_msun": wind_sum,
+                        "post_table_element_sum_msun": math.fsum(
+                            post["values"][species][column] for species in post["species"]
+                        ),
                     }
     except BoccioliRobertiAuditError as exc:
         raise Lc18FailedWindCrosscheckError(str(exc)) from exc
@@ -358,6 +371,13 @@ def audit_lc18_failed_wind_crosscheck(
         properties["records"],
         phase_contract["phase_order"],
     )
+    try:
+        precision = mass_precision_evidence(properties["records"], phase_contract["limitations"])
+        original_winds = original_integrated_winds(components)
+    except PhaseHistoryInvariantError as exc:
+        raise Lc18FailedWindCrosscheckError(str(exc)) from exc
+    if set(original_winds) != set(histories):
+        raise Lc18FailedWindCrosscheckError("original wind/phase coordinate mismatch")
     release_coordinates = set(release_rows)
     history_coordinates = set(histories)
     unmatched_release = sorted(release_coordinates - history_coordinates)
@@ -384,6 +404,10 @@ def audit_lc18_failed_wind_crosscheck(
         summary_wind = float(summary["wind_mass_msun"])
         release_wind = float(release["wind_table_element_sum_msun"])
         cds_wind = float(history["terminal_cumulative_wind_mass_msun"])
+        original_wind = original_winds[coordinate]
+        original_final_mass = coordinate[2] - original_wind
+        if original_final_mass <= 0.0:
+            raise Lc18FailedWindCrosscheckError(f"invalid original wind mass budget at {coordinate}")
         failed = not bool(summary["exploded"])
         rows.append(
             {
@@ -398,8 +422,23 @@ def audit_lc18_failed_wind_crosscheck(
                 "summary_wind_mass_msun": summary_wind,
                 "release_wind_table_element_sum_msun": release_wind,
                 "cds_terminal_cumulative_wind_mass_msun": cds_wind,
+                "original_lc18_integrated_wind_mass_msun": original_wind,
+                "original_lc18_wind_source_table": "table9.dat" if coordinate[2] <= 25.0 else "table8.dat",
+                "three_digit_sensitivity_half_bin_msun": three_digit_half_bin(
+                    history["terminal_total_mass_msun"]
+                ),
+                "summary_extra_wind_fraction_of_original_final_mass": (
+                    summary_wind - original_wind
+                ) / original_final_mass,
+                # BR26 mass-cut zero is undefined for failures, not a zero remnant.
+                "mixed_source_mass_deficit_msun": (
+                    coordinate[2] - original_wind - release["post_table_element_sum_msun"]
+                    - summary["mass_cut_msun"]
+                ) if not failed else None,
                 "cds_terminal_age_yr": history["terminal_age_yr"],
                 "differences_msun": {
+                    "summary_minus_original_lc18_wind": summary_wind - original_wind,
+                    "original_lc18_wind_minus_cds_terminal_wind": original_wind - cds_wind,
                     "summary_minus_release_wind_table": summary_wind
                     - release_wind,
                     "summary_minus_cds_terminal_wind": summary_wind - cds_wind,
@@ -431,9 +470,9 @@ def audit_lc18_failed_wind_crosscheck(
         for row in rows
     ]
     cds_zero_metadata = _parsed_cds_zero_metadata(
-        float(phase_contract["limitations"]["phase_endpoint_total_mass_precision_msun"])
+        float(precision["printed_decimal_step_msun"])
     )
-    cds_half_bin = cds_zero_metadata["cds_phase_endpoint_total_mass_half_bin_msun"]
+    cds_half_bin = cds_zero_metadata["cds_printed_format_half_bin_msun"]
     successful_control = {
         "model_count": len(successful),
         "summary_wind_positive_count": sum(
@@ -457,7 +496,7 @@ def audit_lc18_failed_wind_crosscheck(
         "maximum_absolute_summary_minus_cds_terminal_wind_msun": max(
             successful_cds_residuals
         ),
-        "summary_minus_cds_above_phase_endpoint_half_bin_count": sum(
+        "summary_minus_cds_above_printed_format_half_bin_count": sum(
             value > cds_half_bin for value in successful_cds_residuals
         ),
         **cds_zero_metadata,
@@ -518,8 +557,12 @@ def audit_lc18_failed_wind_crosscheck(
                 for row in rows
             ),
         },
-        "above_cds_phase_endpoint_half_bin_count": sum(
+        "above_cds_printed_format_half_bin_count": sum(
             value > cds_half_bin for value in all_cds_residuals
+        ),
+        "above_three_digit_sensitivity_half_bin_count": sum(
+            abs(row["differences_msun"]["summary_minus_cds_terminal_wind"])
+            > row["three_digit_sensitivity_half_bin_msun"] for row in rows
         ),
         "maximum_absolute_difference_msun": max(all_cds_residuals),
         "agreement_required_for_this_review": False,
@@ -529,8 +572,9 @@ def audit_lc18_failed_wind_crosscheck(
             "failed_wind_anomaly": _residual_statistics(failed),
         },
         "interpretation": (
-            "The two staged sources do not agree at the declared CDS table5 "
-            "endpoint precision. The discrepancy is retained as an author/"
+            "The two staged sources differ under both the printed-format and "
+            "three-digit sensitivity comparisons; neither is confirmed physical "
+            "precision. The discrepancy is retained as an author/"
             "source question and is not silently reconciled. Parsed exact-zero "
             "endpoints are source-precision observations, not physical-zero "
             "inferences."
@@ -585,6 +629,15 @@ def audit_lc18_failed_wind_crosscheck(
         raise Lc18FailedWindCrosscheckError(
             f"Limongi derived-artifact publication gate failed: {exc}"
         ) from exc
+    original_residual_key = "original_lc18_wind_minus_cds_terminal_wind"
+    original_outliers = [
+        {"coordinate": row["coordinate"],
+         "original_wind_minus_endpoint_msun": row["differences_msun"][original_residual_key],
+         "three_digit_sensitivity_half_bin_msun": row["three_digit_sensitivity_half_bin_msun"]}
+        for row in rows if abs(row["differences_msun"][original_residual_key])
+        > row["three_digit_sensitivity_half_bin_msun"]
+    ]
+    extra_fractions = [row["summary_extra_wind_fraction_of_original_final_mass"] for row in rows]
     return {
         "schema": "snrt-fp1-lc18-failed-wind-crosscheck",
         "schema_version": 1,
@@ -633,6 +686,42 @@ def audit_lc18_failed_wind_crosscheck(
         },
         "publication_gate": publication_gate,
         "cross_source_wind_comparison": cross_source,
+        "mass_precision_review": precision,
+        "original_lc18_wind_comparison": {
+            "model_count": len(rows),
+            "positive_wind_count": sum(original_winds[key] > 0.0 for key in original_winds),
+            "failed_model_positive_wind_count": sum(
+                row["original_lc18_integrated_wind_mass_msun"] > 0.0 for row in failed
+            ),
+            "above_printed_format_half_bin_count": sum(
+                abs(row["differences_msun"][original_residual_key]) > cds_half_bin for row in rows
+            ),
+            "above_three_digit_sensitivity_half_bin_count": len(original_outliers),
+            "three_digit_sensitivity_outliers": original_outliers,
+            "physical_closure_approved": False,
+            "replacement_applied": False,
+            "mixed_source_budget_review": {
+                "definition": "initial mass - original LC18 wind - BR26 Post element sum - BR26 mass cut; successful models only",
+                "model_count": len(successful),
+                "positive_deficit_count": sum(row["mixed_source_mass_deficit_msun"] > 0.0 for row in successful),
+                "minimum_deficit_msun": min(row["mixed_source_mass_deficit_msun"] for row in successful),
+                "maximum_deficit_msun": max(row["mixed_source_mass_deficit_msun"] for row in successful),
+                "mixed_source_use_approved": False,
+            },
+            "atmosphere_hypothesis": {
+                "fraction_definition": "(BR26 summary wind - LC18 integrated wind) / (initial mass - LC18 integrated wind)",
+                "median_fraction": median(extra_fractions),
+                "fraction_between_0p009_and_0p011_count": sum(0.009 <= x <= 0.011 for x in extra_fractions),
+                "outliers_outside_0p009_to_0p011": [
+                    {"coordinate": row["coordinate"],
+                     "fraction": row["summary_extra_wind_fraction_of_original_final_mass"]}
+                    for row in rows if not 0.009 <= row["summary_extra_wind_fraction_of_original_final_mass"] <= 0.011
+                ],
+                "cause_confirmed": False,
+                "correction_applied": False,
+                "interpretation": "The near-1% excess motivates an LC18 atmosphere/profile-boundary question (paper section 2); it is not an inferred wind correction.",
+            },
+        },
         "phase_history": {
             **phase_diagnostics,
             "phase_order": list(phase_contract["phase_order"]),

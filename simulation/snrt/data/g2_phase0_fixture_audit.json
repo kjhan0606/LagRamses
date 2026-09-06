@@ -1,6 +1,6 @@
 {
   "asset": {
-    "path": "/home/kjhan/BACKUP/lagRamses/patch/lagRamses/phase0_validation_yields.dat",
+    "path": "/gpfs/kjhan/LRD_JWST/patch/lagRamses/phase0_validation_yields.dat",
     "bytes": 1977,
     "sha256": "dd2f94818b7d1d9e7008d2da08998d7100d651e7bb25271abf2ebcb8816d5ea6"
   },
@@ -216,7 +216,7 @@
   "monotonic_violations": [],
   "provenance": {
     "required": true,
-    "path": "/home/kjhan/BACKUP/lagRamses/patch/lagRamses/phase0_validation_yields.dat.json",
+    "path": "/gpfs/kjhan/LRD_JWST/patch/lagRamses/phase0_validation_yields.dat.json",
     "exists": false
   },
   "parse_errors": []

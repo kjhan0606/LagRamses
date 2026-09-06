@@ -433,6 +433,12 @@ def _selection_guard_tests() -> None:
     fixture = _selection_fixture()
     _expect_selection_error(
         fixture,
+        "requires code-owned selected state",
+        code_owned_birth_metallicity_domain_selected=False,
+        contract_birth_metallicity_domain_selected=False,
+    )
+    _expect_selection_error(
+        fixture,
         "birth-metallicity selection state disagrees",
         contract_birth_metallicity_domain_selected=False,
     )
@@ -530,6 +536,21 @@ def main() -> int:
     assert report["publication_ready"] is False
     assert report["canonical_conversion_allowed"] is False
     assert report["runtime_deposition_allowed"] is False
+    runtime = report["runtime_domain"]
+    assert runtime["required_birth_metallicity_domain_selected"] is True
+    domain = runtime["required_birth_metallicity_domain"]
+    assert domain["bounds"] == [0.0, 0.139]
+    assert domain["solar_metal_mass_fraction"] == 0.0139
+    assert domain["bounds_in_solar_units"] == [0.0, 10.0]
+    wrong_domain = copy.deepcopy(contract)
+    wrong_domain["runtime_domain"]["required_birth_metallicity_domain"]["bounds"] = [0.0, 0.2]
+    _expect_error(wrong_domain, "disagrees with operator-selected target")
+    missing_domain = copy.deepcopy(contract)
+    missing_domain["runtime_domain"]["required_birth_metallicity_domain"] = None
+    _expect_error(missing_domain, "requires an explicit birth-metallicity domain")
+    unselected_domain = copy.deepcopy(contract)
+    unselected_domain["runtime_domain"]["required_birth_metallicity_domain_selected"] = False
+    _expect_error(unselected_domain, "selection state disagrees")
     assert len(report["required_gate_ids"]) == 9
     assert len(report["candidate_qualification"]) == 4
     assert report["physical_node_count"] == 0
@@ -697,7 +718,8 @@ def main() -> int:
 
     self_selected = copy.deepcopy(contract)
     self_selected["selection"]["selected_package_id"] = "sukhbold2016_w18_n20"
-    _expect_error(self_selected, "requires code-owned selected state")
+    # Selecting the target domain does not authorize a physical package.
+    _expect_error(self_selected, "selection record is incomplete")
 
     for name, checked in report["evidence_artifacts"].items():
         locked = admission_module.LOCKED_EVIDENCE_ARTIFACTS[name]

@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 from pathlib import Path
 import sys
 from typing import Any, Iterable
@@ -17,7 +16,10 @@ from adapt_g2_candidate_sources import (
     SourceAdapterError,
     adapt_candidate,
 )
-from fp1_limongi_phase_history import build_phase_histories
+from fp1_limongi_phase_history import (
+    PhaseHistoryInvariantError, build_phase_histories, mass_precision_evidence,
+    original_integrated_winds, three_digit_half_bin,
+)
 
 
 TOOL_PATH = Path(__file__).resolve()
@@ -58,15 +60,6 @@ def _load_contract(path: Path) -> dict[str, Any]:
     if limitations.get("runtime_deposition_allowed") is not False:
         raise PhaseHistoryAuditError("phase-history review unexpectedly permits deposition")
     return contract
-
-
-def _yield_coordinate(record: dict[str, Any]) -> tuple[int, int, float]:
-    source = record["source_model_coordinate"]
-    return (
-        int(source["rotation_velocity_km_s"]),
-        int(source["metallicity_feh"]),
-        float(source["initial_mass_msun"]),
-    )
 
 
 def _extreme(residuals: list[dict[str, Any]], fn: Any) -> dict[str, Any]:
@@ -130,22 +123,14 @@ def audit_limongi_phase_mass_history(
     ]
 
     components = source["source_components"]
-    wind_sums = {
-        _yield_coordinate(record): math.fsum(
-            record["source_reported_isotopic_yields"].values()
-        )
-        for record in components["wind_yields"]["records"]
-    }
-    recommended_sums = {
-        _yield_coordinate(record): math.fsum(
-            record["source_reported_isotopic_yields"].values()
-        )
-        for record in components["recommended_yields"]["records"]
-    }
+    wind_sums = original_integrated_winds(components)
+    precision = mass_precision_evidence(properties["records"], contract["limitations"])
+    if set(wind_sums) != set(histories):
+        raise PhaseHistoryAuditError("integrated-wind/phase coordinate mismatch")
     residuals: list[dict[str, Any]] = []
     for coordinate, history in sorted(histories.items()):
         source_component = "table9_wind" if coordinate[2] <= 25.0 else "table8_setR_wind_only"
-        integrated = wind_sums.get(coordinate) if coordinate[2] <= 25.0 else recommended_sums.get(coordinate)
+        integrated = wind_sums.get(coordinate)
         if integrated is None:
             raise PhaseHistoryAuditError(f"missing integrated wind yield at {coordinate}")
         phase_mass = history["terminal_cumulative_wind_mass_msun"]
@@ -161,15 +146,20 @@ def audit_limongi_phase_mass_history(
                 "integrated_isotopic_wind_mass_msun": integrated,
                 "residual_msun": phase_mass - integrated,
                 "absolute_residual_msun": abs(phase_mass - integrated),
+                "three_digit_sensitivity_half_bin_msun": three_digit_half_bin(
+                    canonical_histories[coordinate]["terminal_total_mass_msun"]
+                ),
             }
         )
     maximum_absolute = max(residuals, key=lambda value: value["absolute_residual_msun"])
     quantization_half_width = 0.5 * float(
-        contract["limitations"]["phase_endpoint_total_mass_precision_msun"]
+        precision["printed_decimal_step_msun"]
     )
     over_quantization = [
         value for value in residuals if value["absolute_residual_msun"] > quantization_half_width
     ]
+    over_sensitivity = [value for value in residuals if value["absolute_residual_msun"]
+                        > value["three_digit_sensitivity_half_bin_msun"]]
     return {
         "schema": "snrt-g2-limongi-phase-mass-history-audit",
         "schema_version": 1,
@@ -183,6 +173,7 @@ def audit_limongi_phase_mass_history(
         "audit_code_sha256": _sha256(TOOL_PATH),
         "phase_history_shared_code_sha256": _sha256(PHASE_HISTORY_TOOL_PATH),
         "source_adapter_code_sha256": source["adapter_code_sha256"],
+        "mass_precision_review": precision,
         "duplicate_resolution": {
             "duplicate_coordinate_count": properties[
                 "duplicate_model_phase_coordinate_count"
@@ -223,16 +214,19 @@ def audit_limongi_phase_mass_history(
             "minimum_residual_msun": _extreme(residuals, min),
             "maximum_residual_msun": _extreme(residuals, max),
             "maximum_absolute_residual": maximum_absolute,
-            "table5_total_mass_quantization_half_width_msun": quantization_half_width,
-            "model_count_exceeding_quantization_half_width": len(over_quantization),
-            "all_models_close_within_printed_quantization": not over_quantization,
+            "printed_format_half_bin_msun": quantization_half_width,
+            "model_count_exceeding_printed_format_half_bin": len(over_quantization),
+            "model_count_exceeding_three_digit_sensitivity_half_bin": len(over_sensitivity),
+            "three_digit_sensitivity_outliers": over_sensitivity,
+            "physical_closure_approved": False,
         },
         "interpretation": (
             "Table5 supplies a monotonic phase-endpoint wind-mass history after "
             "exact duplicate collapse, but not a time-resolved isotopic composition. "
-            "The endpoint mass and integrated isotope sums also disagree beyond "
-            "the nominal printed-mass half-bin for some models, so the history "
-            "cannot normalize canonical ejecta without a documented reconciliation."
+            "Printed decimal places are not confirmed physical precision. The "
+            "three-digit nearest-rounding comparison is sensitivity-only; "
+            "remaining residuals and source rounding require reconciliation. "
+            "Neither comparison can normalize canonical ejecta."
         ),
         "blockers": contract["approval"]["required_before_approval"],
     }
@@ -252,7 +246,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         report = audit_limongi_phase_mass_history(
             root=args.root, contract_path=args.contract
         )
-    except (PhaseHistoryAuditError, SourceAdapterError) as exc:
+    except (PhaseHistoryAuditError, PhaseHistoryInvariantError, SourceAdapterError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, indent=2), file=sys.stderr)
         return 2
     payload = json.dumps(report, indent=2, sort_keys=True) + "\n"

@@ -9,17 +9,20 @@
     ],
     "hard_blockers_unchanged": true,
     "physical_package_contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
-    "physical_package_contract_sha256": "06cd0858dfb3a79675bbb9c1f83c7fde33b0069637a2bf4e384ff1e7922359e0",
+    "physical_package_contract_sha256": "e177a2c0dd46cca7badd6a6278dab9dc0d0edc2a1303132752ec1439ef7fb2a1",
     "production_qualified": false
   },
   "boccioli_contract_sha256": "5e5e079af58f250be465427f3e070b9014e9e6af99ebbc5e623d6236fea55443",
   "canonical_conversion_allowed": false,
   "canonical_rows_emitted": 0,
   "cross_source_wind_comparison": {
-    "above_cds_phase_endpoint_half_bin_count": 108,
+    "above_cds_printed_format_half_bin_count": 108,
+    "above_three_digit_sensitivity_half_bin_count": 108,
     "agreement_required_for_this_review": false,
-    "cds_phase_endpoint_total_mass_half_bin_msun": 0.005,
-    "cds_phase_endpoint_total_mass_precision_msun": 0.01,
+    "cds_phase_endpoint_total_mass_half_bin_msun": null,
+    "cds_phase_endpoint_total_mass_precision_msun": null,
+    "cds_printed_decimal_step_msun": 0.01,
+    "cds_printed_format_half_bin_msun": 0.005,
     "cds_terminal_wind_parsed_exact_zero_count": 7,
     "cds_terminal_wind_parsed_exact_zero_count_by_outcome": {
       "failed": 3,
@@ -27,11 +30,12 @@
     },
     "cds_terminal_wind_parsed_positive_count": 101,
     "comparison": "BR26 summary wind minus LC18 CDS initial-minus-PSN mass",
-    "interpretation": "The two staged sources do not agree at the declared CDS table5 endpoint precision. The discrepancy is retained as an author/source question and is not silently reconciled. Parsed exact-zero endpoints are source-precision observations, not physical-zero inferences.",
+    "interpretation": "The two staged sources differ under both the printed-format and three-digit sensitivity comparisons; neither is confirmed physical precision. The discrepancy is retained as an author/source question and is not silently reconciled. Parsed exact-zero endpoints are source-precision observations, not physical-zero inferences.",
     "maximum_absolute_difference_msun": 1.5476,
     "model_count": 108,
-    "parsed_exact_zero_definition": "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing M_initial - M_total(PSN) from CDS table5 at the declared source endpoint precision",
-    "parsed_exact_zero_interpretation": "An exact parsed zero is compatible with physical mass loss below the source table half-bin; it is not evidence that physical wind is zero. The pipeline does not round the wind values.",
+    "parsed_exact_zero_definition": "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing M_initial - M_total(PSN) from CDS table5; no pipeline rounding",
+    "parsed_exact_zero_interpretation": "An exact parsed zero is not evidence that physical wind is zero. The F6.2 format does not establish physical precision or rounding. No physical upper limit is inferred from the printed-format half-bin. The pipeline does not round the wind values.",
+    "physical_precision_confirmed": false,
     "physical_zero_inferred": false,
     "residual_statistics": {
       "all_models": {
@@ -85,14 +89,17 @@
     }
   },
   "failed_wind_anomaly": {
-    "cds_phase_endpoint_total_mass_half_bin_msun": 0.005,
-    "cds_phase_endpoint_total_mass_precision_msun": 0.01,
+    "cds_phase_endpoint_total_mass_half_bin_msun": null,
+    "cds_phase_endpoint_total_mass_precision_msun": null,
+    "cds_printed_decimal_step_msun": 0.01,
+    "cds_printed_format_half_bin_msun": 0.005,
     "cds_terminal_wind_parsed_exact_zero_count": 3,
     "cds_terminal_wind_parsed_positive_count": 53,
     "interpretation": "The three parsed exact-zero CDS endpoints are inside the failed BR26 zero-Wind release anomaly; they do not define or resolve that anomaly, and parsed zero is not inferred physical zero wind.",
     "model_count": 56,
-    "parsed_exact_zero_definition": "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing M_initial - M_total(PSN) from CDS table5 at the declared source endpoint precision",
-    "parsed_exact_zero_interpretation": "An exact parsed zero is compatible with physical mass loss below the source table half-bin; it is not evidence that physical wind is zero. The pipeline does not round the wind values.",
+    "parsed_exact_zero_definition": "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing M_initial - M_total(PSN) from CDS table5; no pipeline rounding",
+    "parsed_exact_zero_interpretation": "An exact parsed zero is not evidence that physical wind is zero. The F6.2 format does not establish physical precision or rounding. No physical upper limit is inferred from the printed-format half-bin. The pipeline does not round the wind values.",
+    "physical_precision_confirmed": false,
     "physical_zero_inferred": false,
     "release_wind_table_exact_zero_count": 56,
     "summary_wind_positive_count": 56,
@@ -109,7 +116,93 @@
     "unmatched_cds_coordinates": [],
     "unmatched_release_coordinates": []
   },
-  "phase_contract_sha256": "c37c1513525b897253546ae825455682191ca7ed838841d6479e085a1f412a14",
+  "mass_precision_review": {
+    "interpretation": "Observed three-digit spacing is evidence for a sensitivity study, not proof of a rounding rule. Neither printed-format half-bins nor three-digit half-bins authorize mass closure or physical zero wind.",
+    "off_three_digit_grid_row_count": 0,
+    "physical_precision_confirmed": false,
+    "printed_decimal_step_msun": 0.01,
+    "publisher_mrt_sha256": "2d1787477d6c8160967c8b4289e4ce476cde88e540e9469a80553f67237e19a3",
+    "publisher_mrt_url": "https://content.cld.iop.org/journals/0067-0049/237/1/13/revision1/apjsaacb24t5_mrt.txt",
+    "review_date": "2026-09-05",
+    "rounding_rule_confirmed": false,
+    "sensitivity_is_approval_tolerance": false,
+    "sensitivity_significant_digits": 3,
+    "source_format": "F6.2 in CDS ReadMe and publisher Table 5 MRT; formatting is not an attestation of physical precision or nearest rounding.",
+    "source_row_count_including_duplicates": 864,
+    "three_digit_step_counts_including_duplicates": {
+      "0.01": 60,
+      "0.1": 776,
+      "1.0": 28
+    }
+  },
+  "original_lc18_wind_comparison": {
+    "above_printed_format_half_bin_count": 89,
+    "above_three_digit_sensitivity_half_bin_count": 2,
+    "atmosphere_hypothesis": {
+      "cause_confirmed": false,
+      "correction_applied": false,
+      "fraction_between_0p009_and_0p011_count": 106,
+      "fraction_definition": "(BR26 summary wind - LC18 integrated wind) / (initial mass - LC18 integrated wind)",
+      "interpretation": "The near-1% excess motivates an LC18 atmosphere/profile-boundary question (paper section 2); it is not an inferred wind correction.",
+      "median_fraction": 0.010060988970999758,
+      "outliers_outside_0p009_to_0p011": [
+        {
+          "coordinate": {
+            "initial_mass_msun": 40.0,
+            "metallicity_feh": -1,
+            "metallicity_label": "B",
+            "rotation_velocity_km_s": 0
+          },
+          "fraction": 0.014255817194057633
+        },
+        {
+          "coordinate": {
+            "initial_mass_msun": 120.0,
+            "metallicity_feh": -3,
+            "metallicity_label": "D",
+            "rotation_velocity_km_s": 150
+          },
+          "fraction": 0.0046494621372653476
+        }
+      ]
+    },
+    "failed_model_positive_wind_count": 56,
+    "mixed_source_budget_review": {
+      "definition": "initial mass - original LC18 wind - BR26 Post element sum - BR26 mass cut; successful models only",
+      "maximum_deficit_msun": 0.6072574340308559,
+      "minimum_deficit_msun": 0.0501418214872682,
+      "mixed_source_use_approved": false,
+      "model_count": 52,
+      "positive_deficit_count": 52
+    },
+    "model_count": 108,
+    "physical_closure_approved": false,
+    "positive_wind_count": 108,
+    "replacement_applied": false,
+    "three_digit_sensitivity_outliers": [
+      {
+        "coordinate": {
+          "initial_mass_msun": 30.0,
+          "metallicity_feh": -1,
+          "metallicity_label": "B",
+          "rotation_velocity_km_s": 300
+        },
+        "original_wind_minus_endpoint_msun": 0.052420896102670866,
+        "three_digit_sensitivity_half_bin_msun": 0.05
+      },
+      {
+        "coordinate": {
+          "initial_mass_msun": 120.0,
+          "metallicity_feh": 0,
+          "metallicity_label": "A",
+          "rotation_velocity_km_s": 300
+        },
+        "original_wind_minus_endpoint_msun": -0.08899943941717936,
+        "three_digit_sensitivity_half_bin_msun": 0.05
+      }
+    ]
+  },
+  "phase_contract_sha256": "c1c57901006d8b3cd929133b25dc3fdeb2bfd9a54ded42897ff32a7032cecdce",
   "phase_history": {
     "collapsed_duplicate_row_count": 19,
     "collapsed_duplicate_rows": [
@@ -337,7 +430,7 @@
     "strictly_increasing_cumulative_age_violations": [],
     "unique_phase_row_count": 845
   },
-  "phase_history_shared_code_sha256": "71ea5453659b15882e5d594c4e47c303d38e7a78e05596857450720a9f4c374c",
+  "phase_history_shared_code_sha256": "e2c44eac9672f82e1c6e7c07dd196fe59dcce2f4fb6ca80a94fe11fdde513783",
   "physical_nodes_emitted": 0,
   "presupernova_structure": {
     "available_model_count": 96,
@@ -557,14 +650,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.02108134822481282,
         "release_wind_table_minus_cds_terminal_wind": 0.15189449771789534,
         "summary_minus_cds_terminal_wind": 0.1516,
+        "summary_minus_original_lc18_wind": 0.13051865177518718,
         "summary_minus_release_wind_table": -0.0002944977178953312
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.12947597949032397,
+      "original_lc18_integrated_wind_mass_msun": 0.02108134822481282,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.15189449771789534,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.1516
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010056203854651292,
+      "summary_wind_mass_msun": 0.1516,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -664,14 +764,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.04715737068932775,
         "release_wind_table_minus_cds_terminal_wind": 0.19836336686189662,
         "summary_minus_cds_terminal_wind": 0.198,
+        "summary_minus_original_lc18_wind": 0.15084262931067227,
         "summary_minus_release_wind_table": -0.0003633668618966135
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.14994380454541578,
+      "original_lc18_integrated_wind_mass_msun": 0.04715737068932775,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.19836336686189662,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.198
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010087889844770348,
+      "summary_wind_mass_msun": 0.198,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -771,14 +878,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.005765282292042401,
         "release_wind_table_minus_cds_terminal_wind": 0.20505641075424663,
         "summary_minus_cds_terminal_wind": 0.2053000000000007,
+        "summary_minus_original_lc18_wind": 0.1995347177079583,
         "summary_minus_release_wind_table": 0.00024358924575407226
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.1995775376813742,
+      "original_lc18_integrated_wind_mass_msun": 0.2057652822920417,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.4050564107542459,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.4053
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01008044617807094,
+      "summary_wind_mass_msun": 0.4053,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -878,14 +992,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.0375646670013039,
         "release_wind_table_minus_cds_terminal_wind": 0.2100604116556627,
         "summary_minus_cds_terminal_wind": 0.20970000000000144,
+        "summary_minus_original_lc18_wind": 0.24726466700130534,
         "summary_minus_release_wind_table": -0.00036041165566125244
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.24665172582353256,
+      "original_lc18_integrated_wind_mass_msun": 0.3624353329986947,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.6100604116556613,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.6097
+      "summary_extra_wind_fraction_of_original_final_mass": 0.0100360839370006,
+      "summary_wind_mass_msun": 0.6097,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -985,14 +1106,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.020075079506865386,
         "release_wind_table_minus_cds_terminal_wind": 0.31771699404380666,
         "summary_minus_cds_terminal_wind": 0.3249,
+        "summary_minus_original_lc18_wind": 0.30482492049313464,
         "summary_minus_release_wind_table": 0.007183005956193367
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.30488472145167034,
+      "original_lc18_integrated_wind_mass_msun": 0.020075079506865386,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.31771699404380666,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.3249
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010167634552172209,
+      "summary_wind_mass_msun": 0.3249,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -1092,14 +1220,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.031960392163638364,
         "release_wind_table_minus_cds_terminal_wind": 0.4352171945619365,
         "summary_minus_cds_terminal_wind": 0.4355,
+        "summary_minus_original_lc18_wind": 0.4035396078363616,
         "summary_minus_release_wind_table": 0.00028280543806347147
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.403581812229294,
+      "original_lc18_integrated_wind_mass_msun": 0.031960392163638364,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.4352171945619365,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.4355
+      "summary_extra_wind_fraction_of_original_final_mass": 0.0100965574442946,
+      "summary_wind_mass_msun": 0.4355,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -1199,14 +1334,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.04274463953588271,
         "release_wind_table_minus_cds_terminal_wind": 0.5659644419961612,
         "summary_minus_cds_terminal_wind": 0.5644999999999986,
+        "summary_minus_original_lc18_wind": 0.6072446395358813,
         "summary_minus_release_wind_table": -0.0014644419961626909
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.6072574340308559,
+      "original_lc18_integrated_wind_mass_msun": 0.057255360464118714,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.6659644419961627,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.6645
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010130410997820185,
+      "summary_wind_mass_msun": 0.6645,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -1306,14 +1448,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.001074738301815023,
         "release_wind_table_minus_cds_terminal_wind": -0.09999999999999432,
         "summary_minus_cds_terminal_wind": 0.7979000000000057,
+        "summary_minus_original_lc18_wind": 0.7989747383018208,
         "summary_minus_release_wind_table": 0.8979
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 0.09892526169817929,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 0.8979
+      "summary_extra_wind_fraction_of_original_final_mass": 0.009999549329200948,
+      "summary_wind_mass_msun": 0.8979,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -1384,14 +1533,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.34122894710262286,
         "release_wind_table_minus_cds_terminal_wind": 0.0,
         "summary_minus_cds_terminal_wind": 1.5476,
+        "summary_minus_original_lc18_wind": 1.2063710528973772,
         "summary_minus_release_wind_table": 1.5476
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 0.34122894710262286,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 1.5476
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010081760344706186,
+      "summary_wind_mass_msun": 1.5476,
+      "three_digit_sensitivity_half_bin_msun": 0.5
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -1491,14 +1647,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.03328841726113549,
         "release_wind_table_minus_cds_terminal_wind": 0.0,
         "summary_minus_cds_terminal_wind": 0.1644,
+        "summary_minus_original_lc18_wind": 0.1311115827388645,
         "summary_minus_release_wind_table": 0.1644
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 0.03328841726113549,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 0.1644
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010111398090584409,
+      "summary_wind_mass_msun": 0.1644,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -1598,14 +1761,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.008874941825955968,
         "release_wind_table_minus_cds_terminal_wind": -0.1999999999999993,
         "summary_minus_cds_terminal_wind": 0.15770000000000073,
+        "summary_minus_original_lc18_wind": 0.14882505817404476,
         "summary_minus_release_wind_table": 0.3577
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 0.20887494182595526,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 0.3577
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010061780803604207,
+      "summary_wind_mass_msun": 0.3577,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -1705,14 +1875,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.026855698732363487,
         "release_wind_table_minus_cds_terminal_wind": 0.17108156443085137,
         "summary_minus_cds_terminal_wind": 0.1717999999999993,
+        "summary_minus_original_lc18_wind": 0.19865569873236277,
         "summary_minus_release_wind_table": 0.0007184355691479127
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.19865603459866388,
+      "original_lc18_integrated_wind_mass_msun": 0.2731443012676372,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.4710815644308521,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.4718
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01007031742748178,
+      "summary_wind_mass_msun": 0.4718,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -1812,14 +1989,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.04101848903931754,
         "release_wind_table_minus_cds_terminal_wind": 0.2893168112177582,
         "summary_minus_cds_terminal_wind": 0.28929999999999934,
+        "summary_minus_original_lc18_wind": 0.2482815109606818,
         "summary_minus_release_wind_table": -1.6811217758871955e-05
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.2482315289573227,
+      "original_lc18_integrated_wind_mass_msun": 0.34101848903931825,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.5893168112177589,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.5893
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010068603638407492,
+      "summary_wind_mass_msun": 0.5893,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -1919,14 +2103,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.03809614925043836,
         "release_wind_table_minus_cds_terminal_wind": 0.33795104262087233,
         "summary_minus_cds_terminal_wind": 0.3377999999999986,
+        "summary_minus_original_lc18_wind": 0.29970385074956024,
         "summary_minus_release_wind_table": -0.00015104262087373144
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.29971598268331245,
+      "original_lc18_integrated_wind_mass_msun": 0.13809614925043978,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.43795104262087375,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.4378
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010036327631603349,
+      "summary_wind_mass_msun": 0.4378,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2026,14 +2217,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.04756684723495341,
         "release_wind_table_minus_cds_terminal_wind": 0.3552598916648225,
         "summary_minus_cds_terminal_wind": 0.3547000000000028,
+        "summary_minus_original_lc18_wind": 0.4022668472349562,
         "summary_minus_release_wind_table": -0.0005598916648197338
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.40226254781783854,
+      "original_lc18_integrated_wind_mass_msun": 0.25243315276504374,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.6552598916648197,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.6547
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010120540177491139,
+      "summary_wind_mass_msun": 0.6547,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2133,14 +2331,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.01755581029562958,
         "release_wind_table_minus_cds_terminal_wind": 0.5836140425256584,
         "summary_minus_cds_terminal_wind": 0.5842000000000014,
+        "summary_minus_original_lc18_wind": 0.601755810295631,
         "summary_minus_release_wind_table": 0.0005859574743429796
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.6018028791111876,
+      "original_lc18_integrated_wind_mass_msun": 0.382444189704369,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.983614042525657,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.9842
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010093600821382734,
+      "summary_wind_mass_msun": 0.9842,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2240,14 +2445,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.002177644530969358,
         "release_wind_table_minus_cds_terminal_wind": -1.4000000000000057,
         "summary_minus_cds_terminal_wind": 0.7922999999999942,
+        "summary_minus_original_lc18_wind": 0.7901223554690249,
         "summary_minus_release_wind_table": 2.1923
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 1.402177644530975,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 2.1923
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010052725785398892,
+      "summary_wind_mass_msun": 2.1923,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2318,14 +2530,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.19067898523099913,
         "release_wind_table_minus_cds_terminal_wind": -17.0,
         "summary_minus_cds_terminal_wind": 1.2289999999999992,
+        "summary_minus_original_lc18_wind": 1.038321014769,
         "summary_minus_release_wind_table": 18.229
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 17.190678985231,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 18.229
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010099483242573315,
+      "summary_wind_mass_msun": 18.229,
+      "three_digit_sensitivity_half_bin_msun": 0.5
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2425,14 +2644,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.006177694181118021,
         "release_wind_table_minus_cds_terminal_wind": 0.13179910303122278,
         "summary_minus_cds_terminal_wind": 0.13229999999999997,
+        "summary_minus_original_lc18_wind": 0.12612230581888195,
         "summary_minus_release_wind_table": 0.000500896968777198
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.12617286267071903,
+      "original_lc18_integrated_wind_mass_msun": 0.506177694181118,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.6317991030312228,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.6323
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01009477345937133,
+      "summary_wind_mass_msun": 0.6323,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2532,14 +2758,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.0059012622266286785,
         "release_wind_table_minus_cds_terminal_wind": 0.1500125850608579,
         "summary_minus_cds_terminal_wind": 0.15009999999999923,
+        "summary_minus_original_lc18_wind": 0.14419873777337056,
         "summary_minus_release_wind_table": 8.741493914132814e-05
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.14325764223456527,
+      "original_lc18_integrated_wind_mass_msun": 0.8059012622266294,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.9500125850608586,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.9501
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010159062610268344,
+      "summary_wind_mass_msun": 0.9501,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2639,14 +2872,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.020608110909586586,
         "release_wind_table_minus_cds_terminal_wind": 0.20560734534110425,
         "summary_minus_cds_terminal_wind": 0.20579999999999865,
+        "summary_minus_original_lc18_wind": 0.18519188909041207,
         "summary_minus_release_wind_table": 0.0001926546588943978
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.18526179469523418,
+      "original_lc18_integrated_wind_mass_msun": 1.620608110909588,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 1.8056073453411057,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 1.8058
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010076061830986787,
+      "summary_wind_mass_msun": 1.8058,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2746,14 +2986,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.044455204560711614,
         "release_wind_table_minus_cds_terminal_wind": 0.1672475980173287,
         "summary_minus_cds_terminal_wind": 0.16750000000000131,
+        "summary_minus_original_lc18_wind": 0.21195520456071293,
         "summary_minus_release_wind_table": 0.00025240198267262315
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.21198972359069979,
+      "original_lc18_integrated_wind_mass_msun": 4.355544795439287,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 4.567247598017327,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 4.5675
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010266931360527663,
+      "summary_wind_mass_msun": 4.5675,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2853,14 +3100,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.023732830331715693,
         "release_wind_table_minus_cds_terminal_wind": 0.3080356547405989,
         "summary_minus_cds_terminal_wind": 0.3082000000000007,
+        "summary_minus_original_lc18_wind": 0.284467169668285,
         "summary_minus_release_wind_table": 0.000164345259401788
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.28442628479226695,
+      "original_lc18_integrated_wind_mass_msun": 1.723732830331715,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 2.008035654740598,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 2.0082
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010060280162207216,
+      "summary_wind_mass_msun": 2.0082,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -2960,14 +3214,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.02753447998262004,
         "release_wind_table_minus_cds_terminal_wind": 0.3817308062916265,
         "summary_minus_cds_terminal_wind": 0.3819999999999997,
+        "summary_minus_original_lc18_wind": 0.4095344799826197,
         "summary_minus_release_wind_table": 0.00026919370837319434
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.40848246791319154,
+      "original_lc18_integrated_wind_mass_msun": 11.27246552001738,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 11.681730806291627,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 11.682
+      "summary_extra_wind_fraction_of_original_final_mass": 0.014255817194057633,
+      "summary_wind_mass_msun": 11.682,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -3067,14 +3328,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.00911868982799291,
         "release_wind_table_minus_cds_terminal_wind": 0.4328704196795492,
         "summary_minus_cds_terminal_wind": 0.43319999999999936,
+        "summary_minus_original_lc18_wind": 0.42408131017200645,
         "summary_minus_release_wind_table": 0.0003295803204501624
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.42401762161207524,
+      "original_lc18_integrated_wind_mass_msun": 18.009118689827993,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 18.43287041967955,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 18.4332
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010099366742018716,
+      "summary_wind_mass_msun": 18.4332,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -3174,14 +3442,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.04640454321616261,
         "release_wind_table_minus_cds_terminal_wind": -40.1,
         "summary_minus_cds_terminal_wind": 0.44780000000000086,
+        "summary_minus_original_lc18_wind": 0.40139545678383826,
         "summary_minus_release_wind_table": 40.5478
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 40.146404543216164,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 40.5478
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010071750169168567,
+      "summary_wind_mass_msun": 40.5478,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -3260,14 +3535,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.02599383550625589,
         "release_wind_table_minus_cds_terminal_wind": -69.3,
         "summary_minus_cds_terminal_wind": 0.5520999999999958,
+        "summary_minus_original_lc18_wind": 0.5261061644937399,
         "summary_minus_release_wind_table": 69.8521
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 69.32599383550625,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 69.8521
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010382170353493226,
+      "summary_wind_mass_msun": 69.8521,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -3367,14 +3649,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.029282591297915772,
         "release_wind_table_minus_cds_terminal_wind": 0.15003320456765867,
         "summary_minus_cds_terminal_wind": 0.14910000000000045,
+        "summary_minus_original_lc18_wind": 0.11981740870208468,
         "summary_minus_release_wind_table": -0.000933204567658219
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.11979284452184569,
+      "original_lc18_integrated_wind_mass_msun": 1.1292825912979154,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 1.2500332045676583,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 1.2491
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010093527170838888,
+      "summary_wind_mass_msun": 1.2491,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -3474,14 +3763,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.041908141708118185,
         "release_wind_table_minus_cds_terminal_wind": -1.6999999999999993,
         "summary_minus_cds_terminal_wind": 0.17540000000000067,
+        "summary_minus_original_lc18_wind": 0.13349185829188248,
         "summary_minus_release_wind_table": 1.8754
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 1.7419081417081175,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 1.8754
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010068708206180811,
+      "summary_wind_mass_msun": 1.8754,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -3581,14 +3877,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.0009474128416062655,
         "release_wind_table_minus_cds_terminal_wind": -12.46,
         "summary_minus_cds_terminal_wind": 0.07489999999999952,
+        "summary_minus_original_lc18_wind": 0.07584741284160579,
         "summary_minus_release_wind_table": 12.5349
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 12.459052587158395,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 12.5349
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010058074760267386,
+      "summary_wind_mass_msun": 12.5349,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -3688,14 +3991,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.002753172885039845,
         "release_wind_table_minus_cds_terminal_wind": 0.08332137569789921,
         "summary_minus_cds_terminal_wind": 0.08309999999999818,
+        "summary_minus_original_lc18_wind": 0.08585317288503802,
         "summary_minus_release_wind_table": -0.0002213756979010384
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.08490324997218979,
+      "original_lc18_integrated_wind_mass_msun": 16.45724682711496,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 16.5433213756979,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 16.5431
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010049824821995165,
+      "summary_wind_mass_msun": 16.5431,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -3795,14 +4105,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.031892066907520444,
         "release_wind_table_minus_cds_terminal_wind": 0.07818967665953735,
         "summary_minus_cds_terminal_wind": 0.07840000000000202,
+        "summary_minus_original_lc18_wind": 0.11029206690752247,
         "summary_minus_release_wind_table": 0.00021032334046466872
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.11033758852746933,
+      "original_lc18_integrated_wind_mass_msun": 19.16810793309248,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 19.278189676659537,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 19.2784
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010182160810526853,
+      "summary_wind_mass_msun": 19.2784,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -3902,14 +4219,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.041259207246209684,
         "release_wind_table_minus_cds_terminal_wind": 0.10065059541448917,
         "summary_minus_cds_terminal_wind": 0.10060000000000002,
+        "summary_minus_original_lc18_wind": 0.1418592072462097,
         "summary_minus_release_wind_table": -5.0595414489151835e-05
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.14188118494017798,
+      "original_lc18_integrated_wind_mass_msun": 25.85874079275379,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 26.000650595414488,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 26.0006
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01003158241901957,
+      "summary_wind_mass_msun": 26.0006,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -4009,14 +4333,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.0444896651500315,
         "release_wind_table_minus_cds_terminal_wind": 0.2151294620304327,
         "summary_minus_cds_terminal_wind": 0.21300000000000097,
+        "summary_minus_original_lc18_wind": 0.16851033484996947,
         "summary_minus_release_wind_table": -0.002129462030431739
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.1684941633025243,
+      "original_lc18_integrated_wind_mass_msun": 43.04448966515003,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 43.21512946203043,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 43.213
+      "summary_extra_wind_fraction_of_original_final_mass": 0.009938381772185128,
+      "summary_wind_mass_msun": 43.213,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -4116,14 +4447,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.016457932877735004,
         "release_wind_table_minus_cds_terminal_wind": 0.21342091830253196,
         "summary_minus_cds_terminal_wind": 0.21270000000000522,
+        "summary_minus_original_lc18_wind": 0.22915793287774022,
         "summary_minus_release_wind_table": -0.0007209183025267407
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.22907423747053102,
+      "original_lc18_integrated_wind_mass_msun": 57.28354206712226,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 57.51342091830253,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 57.5127
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010087749311748018,
+      "summary_wind_mass_msun": 57.5127,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_000_Eles_LC18_Wind.txt",
@@ -4223,14 +4561,21 @@
         "rotation_velocity_km_s": 0
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.024338808967712566,
         "release_wind_table_minus_cds_terminal_wind": 0.30419581011952346,
         "summary_minus_cds_terminal_wind": 0.3048000000000002,
+        "summary_minus_original_lc18_wind": 0.2804611910322876,
         "summary_minus_release_wind_table": 0.0006041898804767243
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.2804966766381556,
+      "original_lc18_integrated_wind_mass_msun": 92.1243388089677,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 92.40419581011952,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 92.4048
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010061149370064559,
+      "summary_wind_mass_msun": 92.4048,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -4330,14 +4675,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.049916886338081445,
         "release_wind_table_minus_cds_terminal_wind": -1.1999999999999993,
         "summary_minus_cds_terminal_wind": 0.16800000000000082,
+        "summary_minus_original_lc18_wind": 0.11808311366191937,
         "summary_minus_release_wind_table": 1.368
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 1.2499168863380807,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 1.368
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01004955560906826,
+      "summary_wind_mass_msun": 1.368,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -4437,14 +4789,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.043797904882339145,
         "release_wind_table_minus_cds_terminal_wind": 0.09066886134337881,
         "summary_minus_cds_terminal_wind": 0.09049999999999936,
+        "summary_minus_original_lc18_wind": 0.1342979048823385,
         "summary_minus_release_wind_table": -0.00016886134337945613
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.13431195086929892,
+      "original_lc18_integrated_wind_mass_msun": 1.7562020951176616,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 1.8906688613433795,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 1.8905
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010140437497375995,
+      "summary_wind_mass_msun": 1.8905,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -4544,14 +4903,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.03696481667453844,
         "release_wind_table_minus_cds_terminal_wind": -1.8000000000000007,
         "summary_minus_cds_terminal_wind": 0.21969999999999912,
+        "summary_minus_original_lc18_wind": 0.18273518332546068,
         "summary_minus_release_wind_table": 2.0197
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 1.8369648166745391,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 2.0197
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010060828571934957,
+      "summary_wind_mass_msun": 2.0197,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -4651,14 +5017,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.0295235440559396,
         "release_wind_table_minus_cds_terminal_wind": -2.1000000000000014,
         "summary_minus_cds_terminal_wind": 0.2606999999999986,
+        "summary_minus_original_lc18_wind": 0.231176455944059,
         "summary_minus_release_wind_table": 2.3607
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 2.129523544055941,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 2.3607
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010108073453973717,
+      "summary_wind_mass_msun": 2.3607,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -4758,14 +5131,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.012423212890393831,
         "release_wind_table_minus_cds_terminal_wind": 0.29143305278686915,
         "summary_minus_cds_terminal_wind": 0.29109999999999925,
+        "summary_minus_original_lc18_wind": 0.2786767871096054,
         "summary_minus_release_wind_table": -0.0003330527868699029
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.27870400499744186,
+      "original_lc18_integrated_wind_mass_msun": 2.3124232128903945,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 2.59143305278687,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 2.5911
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010065047918507186,
+      "summary_wind_mass_msun": 2.5911,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -4865,14 +5245,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.002918932032592636,
         "release_wind_table_minus_cds_terminal_wind": 0.2437544634686386,
         "summary_minus_cds_terminal_wind": 0.24380000000000202,
+        "summary_minus_original_lc18_wind": 0.24671893203259465,
         "summary_minus_release_wind_table": 4.5536531363410404e-05
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.24674689499694358,
+      "original_lc18_integrated_wind_mass_msun": 15.397081067967406,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 15.643754463468637,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 15.6438
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010028034995122902,
+      "summary_wind_mass_msun": 15.6438,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -4972,14 +5359,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.03508832875596113,
         "release_wind_table_minus_cds_terminal_wind": -18.1,
         "summary_minus_cds_terminal_wind": 0.3852999999999973,
+        "summary_minus_original_lc18_wind": 0.42038832875595844,
         "summary_minus_release_wind_table": 18.4853
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 18.06491167124404,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 18.4853
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010024739317591647,
+      "summary_wind_mass_msun": 18.4853,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5058,14 +5452,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.011660053052974462,
         "release_wind_table_minus_cds_terminal_wind": -26.299999999999997,
         "summary_minus_cds_terminal_wind": 0.5263000000000027,
+        "summary_minus_original_lc18_wind": 0.5379600530529771,
         "summary_minus_release_wind_table": 26.8263
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 26.288339946947023,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 26.8263
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010015703341166781,
+      "summary_wind_mass_msun": 26.8263,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5136,14 +5537,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.003536675772643605,
         "release_wind_table_minus_cds_terminal_wind": -45.2,
         "summary_minus_cds_terminal_wind": 0.35129999999999484,
+        "summary_minus_original_lc18_wind": 0.34776332422735123,
         "summary_minus_release_wind_table": 45.5513
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 45.203536675772646,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 45.5513
+      "summary_extra_wind_fraction_of_original_final_mass": 0.0046494621372653476,
+      "summary_wind_mass_msun": 45.5513,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5243,14 +5651,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.0024463087522972327,
         "release_wind_table_minus_cds_terminal_wind": 0.10768187327332024,
         "summary_minus_cds_terminal_wind": 0.10789999999999988,
+        "summary_minus_original_lc18_wind": 0.11034630875229712,
         "summary_minus_release_wind_table": 0.00021812672667964605
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.1093414004755704,
+      "original_lc18_integrated_wind_mass_msun": 1.9975536912477028,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 2.1076818732733202,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 2.1079
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010029252191352946,
+      "summary_wind_mass_msun": 2.1079,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5350,14 +5765,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.02424210792933934,
         "release_wind_table_minus_cds_terminal_wind": -2.0,
         "summary_minus_cds_terminal_wind": 0.15519999999999978,
+        "summary_minus_original_lc18_wind": 0.13095789207066044,
         "summary_minus_release_wind_table": 2.1552
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 2.0242421079293393,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 2.1552
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010092504280669982,
+      "summary_wind_mass_msun": 2.1552,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5457,14 +5879,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.029695379663473798,
         "release_wind_table_minus_cds_terminal_wind": -2.3999999999999986,
         "summary_minus_cds_terminal_wind": 0.20470000000000121,
+        "summary_minus_original_lc18_wind": 0.17500462033652742,
         "summary_minus_release_wind_table": 2.6047
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 2.4296953796634724,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 2.6047
+      "summary_extra_wind_fraction_of_original_final_mass": 0.00996024964382066,
+      "summary_wind_mass_msun": 2.6047,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5564,14 +5993,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.04605733260160513,
         "release_wind_table_minus_cds_terminal_wind": -0.10000000000000142,
         "summary_minus_cds_terminal_wind": 0.2956999999999986,
+        "summary_minus_original_lc18_wind": 0.24964266739839344,
         "summary_minus_release_wind_table": 0.3957
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 0.14605733260160655,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 0.3957
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01004438896231368,
+      "summary_wind_mass_msun": 0.3957,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5671,14 +6107,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.04636492375286494,
         "release_wind_table_minus_cds_terminal_wind": 0.3199894884793153,
         "summary_minus_cds_terminal_wind": 0.3189000000000006,
+        "summary_minus_original_lc18_wind": 0.2725350762471357,
         "summary_minus_release_wind_table": -0.0010894884793146709
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.2720280286765173,
+      "original_lc18_integrated_wind_mass_msun": 3.2463649237528642,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 3.5199894884793146,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 3.5189
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010186842852211227,
+      "summary_wind_mass_msun": 3.5189,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5778,14 +6221,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.026600904335229103,
         "release_wind_table_minus_cds_terminal_wind": 0.19322688427836354,
         "summary_minus_cds_terminal_wind": 0.1927000000000021,
+        "summary_minus_original_lc18_wind": 0.2193009043352312,
         "summary_minus_release_wind_table": -0.0005268842783614502
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.21932525732884667,
+      "original_lc18_integrated_wind_mass_msun": 18.17339909566477,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 18.393226884278363,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 18.3927
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010047414404854644,
+      "summary_wind_mass_msun": 18.3927,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5885,14 +6335,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.00983472390194251,
         "release_wind_table_minus_cds_terminal_wind": -24.0,
         "summary_minus_cds_terminal_wind": 0.35290000000000177,
+        "summary_minus_original_lc18_wind": 0.3627347239019443,
         "summary_minus_release_wind_table": 24.3529
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 23.990165276098057,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 24.3529
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010073212684344116,
+      "summary_wind_mass_msun": 24.3529,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -5971,14 +6428,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.041480971388978105,
         "release_wind_table_minus_cds_terminal_wind": -31.5,
         "summary_minus_cds_terminal_wind": 0.5305000000000035,
+        "summary_minus_original_lc18_wind": 0.4890190286110254,
         "summary_minus_release_wind_table": 32.0305
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 31.541480971388978,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 32.0305
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010091497602770266,
+      "summary_wind_mass_msun": 32.0305,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -6065,14 +6529,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.00525027393339883,
         "release_wind_table_minus_cds_terminal_wind": -47.7,
         "summary_minus_cds_terminal_wind": 0.7395999999999958,
+        "summary_minus_original_lc18_wind": 0.734349726066597,
         "summary_minus_release_wind_table": 48.4396
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 47.7052502739334,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 48.4396
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010157718628934127,
+      "summary_wind_mass_msun": 48.4396,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -6172,14 +6643,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.012682637716820544,
         "release_wind_table_minus_cds_terminal_wind": 0.12851314477488396,
         "summary_minus_cds_terminal_wind": 0.12860000000000027,
+        "summary_minus_original_lc18_wind": 0.11591736228317973,
         "summary_minus_release_wind_table": 8.685522511631127e-05
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.11589032719228909,
+      "original_lc18_integrated_wind_mass_msun": 1.6126826377168202,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 1.7285131447748836,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 1.7286
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010179514506824815,
+      "summary_wind_mass_msun": 1.7286,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -6279,14 +6757,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.011523640188622508,
         "release_wind_table_minus_cds_terminal_wind": 0.14157280832645736,
         "summary_minus_cds_terminal_wind": 0.14040000000000052,
+        "summary_minus_original_lc18_wind": 0.12887635981137802,
         "summary_minus_release_wind_table": -0.0011728083264568312
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.12885944346368028,
+      "original_lc18_integrated_wind_mass_msun": 2.211523640188622,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 2.3415728083264566,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 2.3404
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010077538260646937,
+      "summary_wind_mass_msun": 2.3404,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -6386,14 +6871,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.027864899391983222,
         "release_wind_table_minus_cds_terminal_wind": -6.1,
         "summary_minus_cds_terminal_wind": 0.16720000000000024,
+        "summary_minus_original_lc18_wind": 0.13933510060801702,
         "summary_minus_release_wind_table": 6.2672
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 6.127864899391983,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 6.2672
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010044243340876197,
+      "summary_wind_mass_msun": 6.2672,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -6493,14 +6985,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.036474152100899104,
         "release_wind_table_minus_cds_terminal_wind": -8.8,
         "summary_minus_cds_terminal_wind": 0.12259999999999849,
+        "summary_minus_original_lc18_wind": 0.1590741521008976,
         "summary_minus_release_wind_table": 8.9226
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 8.763525847899102,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 8.9226
+      "summary_extra_wind_fraction_of_original_final_mass": 0.009797333498068262,
+      "summary_wind_mass_msun": 8.9226,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -6600,14 +7099,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.0030505624125876096,
         "release_wind_table_minus_cds_terminal_wind": -4.100000000000001,
         "summary_minus_cds_terminal_wind": 0.26649999999999885,
+        "summary_minus_original_lc18_wind": 0.26344943758741124,
         "summary_minus_release_wind_table": 4.3665
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 4.103050562412589,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 4.3665
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010172991155670053,
+      "summary_wind_mass_msun": 4.3665,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -6707,14 +7213,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.015135264287501116,
         "release_wind_table_minus_cds_terminal_wind": 0.20002275365744282,
         "summary_minus_cds_terminal_wind": 0.1997,
+        "summary_minus_original_lc18_wind": 0.2148352642875011,
         "summary_minus_release_wind_table": -0.00032275365744283135
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.21477023559606234,
+      "original_lc18_integrated_wind_mass_msun": 18.684864735712498,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 18.900022753657442,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 18.8997
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010079000748704955,
+      "summary_wind_mass_msun": 18.8997,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -6814,14 +7327,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.001356763895238089,
         "release_wind_table_minus_cds_terminal_wind": 0.2660977904284181,
         "summary_minus_cds_terminal_wind": 0.26670000000000016,
+        "summary_minus_original_lc18_wind": 0.26534323610476207,
         "summary_minus_release_wind_table": 0.0006022095715820797
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.2654178876288418,
+      "original_lc18_integrated_wind_mass_msun": 33.60135676389524,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 33.86609779042842,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 33.8667
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010051396722611062,
+      "summary_wind_mass_msun": 33.8667,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -6921,14 +7441,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.009455624301274668,
         "release_wind_table_minus_cds_terminal_wind": -42.4,
         "summary_minus_cds_terminal_wind": 0.36820000000000164,
+        "summary_minus_original_lc18_wind": 0.3776556243012763,
         "summary_minus_release_wind_table": 42.7682
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 42.390544375698724,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 42.7682
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010041507329270005,
+      "summary_wind_mass_msun": 42.7682,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7015,14 +7542,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.007567846020705815,
         "release_wind_table_minus_cds_terminal_wind": -77.3,
         "summary_minus_cds_terminal_wind": 0.4270000000000067,
+        "summary_minus_original_lc18_wind": 0.4345678460207125,
         "summary_minus_release_wind_table": 77.727
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 77.29243215397929,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 77.727
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01017542950672157,
+      "summary_wind_mass_msun": 77.727,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7122,14 +7656,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 7.595422400363816e-06,
         "release_wind_table_minus_cds_terminal_wind": 0.05077574992760869,
         "summary_minus_cds_terminal_wind": 0.05069999999999997,
+        "summary_minus_original_lc18_wind": 0.050692404577599603,
         "summary_minus_release_wind_table": -7.57499276087259e-05
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.0501418214872682,
+      "original_lc18_integrated_wind_mass_msun": 7.940007595422401,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 7.990775749927609,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 7.9907
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010018276812380182,
+      "summary_wind_mass_msun": 7.9907,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7229,14 +7770,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.0036940861392675828,
         "release_wind_table_minus_cds_terminal_wind": -8.690000000000001,
         "summary_minus_cds_terminal_wind": 0.06709999999999816,
+        "summary_minus_original_lc18_wind": 0.06340591386073058,
         "summary_minus_release_wind_table": 8.7571
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 8.693694086139269,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 8.7571
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010054366966462839,
+      "summary_wind_mass_msun": 8.7571,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7336,14 +7884,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.002917445438725963,
         "release_wind_table_minus_cds_terminal_wind": -12.29,
         "summary_minus_cds_terminal_wind": 0.0752000000000006,
+        "summary_minus_original_lc18_wind": 0.07811744543872656,
         "summary_minus_release_wind_table": 12.3652
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 12.287082554561273,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 12.3652
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010128131928201013,
+      "summary_wind_mass_msun": 12.3652,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7443,14 +7998,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.0010318045364066109,
         "release_wind_table_minus_cds_terminal_wind": 0.09238820581338558,
         "summary_minus_cds_terminal_wind": 0.0923999999999996,
+        "summary_minus_original_lc18_wind": 0.0934318045364062,
         "summary_minus_release_wind_table": 1.1794186614011437e-05
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.09339043512567669,
+      "original_lc18_integrated_wind_mass_msun": 15.748968195463593,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 15.842388205813386,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 15.8424
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01009960905015917,
+      "summary_wind_mass_msun": 15.8424,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7550,14 +8112,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.036381703275580435,
         "release_wind_table_minus_cds_terminal_wind": -18.8,
         "summary_minus_cds_terminal_wind": 0.07679999999999865,
+        "summary_minus_original_lc18_wind": 0.11318170327557908,
         "summary_minus_release_wind_table": 18.8768
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 18.76361829672442,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 18.8768
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010072789111692855,
+      "summary_wind_mass_msun": 18.8768,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7657,14 +8226,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.03687892190193409,
         "release_wind_table_minus_cds_terminal_wind": -26.3,
         "summary_minus_cds_terminal_wind": 0.10109999999999886,
+        "summary_minus_original_lc18_wind": 0.13797892190193295,
         "summary_minus_release_wind_table": 26.4011
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 26.263121078098067,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 26.4011
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010044415670137474,
+      "summary_wind_mass_msun": 26.4011,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7764,14 +8340,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.0313519393825743,
         "release_wind_table_minus_cds_terminal_wind": 0.22506837658077217,
         "summary_minus_cds_terminal_wind": 0.22519999999999385,
+        "summary_minus_original_lc18_wind": 0.19384806061741955,
         "summary_minus_release_wind_table": 0.00013162341922168252
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.19384726664121965,
+      "original_lc18_integrated_wind_mass_msun": 40.73135193938258,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 40.925068376580775,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 40.9252
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010060283420382742,
+      "summary_wind_mass_msun": 40.9252,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7871,14 +8454,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.04163184543279641,
         "release_wind_table_minus_cds_terminal_wind": 0.28968689281679616,
         "summary_minus_cds_terminal_wind": 0.2902999999999949,
+        "summary_minus_original_lc18_wind": 0.24866815456719848,
         "summary_minus_release_wind_table": 0.0006131071831987356
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.24861917106622755,
+      "original_lc18_integrated_wind_mass_msun": 55.2416318454328,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 55.4896868928168,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 55.4903
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010043802281909538,
+      "summary_wind_mass_msun": 55.4903,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_150_Eles_LC18_Wind.txt",
@@ -7978,14 +8568,21 @@
         "rotation_velocity_km_s": 150
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.0363919472580676,
         "release_wind_table_minus_cds_terminal_wind": 0.2305607385902846,
         "summary_minus_cds_terminal_wind": 0.22990000000000066,
+        "summary_minus_original_lc18_wind": 0.26629194725806826,
         "summary_minus_release_wind_table": -0.0006607385902839269
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.26624538654749674,
+      "original_lc18_integrated_wind_mass_msun": 93.46360805274193,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 93.73056073859028,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 93.7299
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010034971890200148,
+      "summary_wind_mass_msun": 93.7299,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8085,14 +8682,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.022477145249487462,
         "release_wind_table_minus_cds_terminal_wind": 0.15182079509427732,
         "summary_minus_cds_terminal_wind": 0.1519000000000007,
+        "summary_minus_original_lc18_wind": 0.12942285475051324,
         "summary_minus_release_wind_table": 7.920490572338457e-05
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.12843092545375723,
+      "original_lc18_integrated_wind_mass_msun": 0.22247714524948675,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.3518207950942766,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 0.3519
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010128947231927317,
+      "summary_wind_mass_msun": 0.3519,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8192,14 +8796,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.009462172101763588,
         "release_wind_table_minus_cds_terminal_wind": -1.1999999999999993,
         "summary_minus_cds_terminal_wind": 0.1479000000000008,
+        "summary_minus_original_lc18_wind": 0.13843782789823722,
         "summary_minus_release_wind_table": 1.3479
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 1.2094621721017629,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 1.3479
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01003860977910359,
+      "summary_wind_mass_msun": 1.3479,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8299,14 +8910,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.03394461394482724,
         "release_wind_table_minus_cds_terminal_wind": 0.0,
         "summary_minus_cds_terminal_wind": 0.2352,
+        "summary_minus_original_lc18_wind": 0.20125538605517274,
         "summary_minus_release_wind_table": 0.2352
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 0.03394461394482724,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 0.2352
+      "summary_extra_wind_fraction_of_original_final_mass": 0.0100798771797325,
+      "summary_wind_mass_msun": 0.2352,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8406,14 +9024,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.00841069191115551,
         "release_wind_table_minus_cds_terminal_wind": -11.7,
         "summary_minus_cds_terminal_wind": 0.1416000000000004,
+        "summary_minus_original_lc18_wind": 0.13318930808884488,
         "summary_minus_release_wind_table": 11.8416
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 11.708410691911155,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 11.8416
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010020570527844254,
+      "summary_wind_mass_msun": 11.8416,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8513,14 +9138,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.037931876116083174,
         "release_wind_table_minus_cds_terminal_wind": 0.20908541380091705,
         "summary_minus_cds_terminal_wind": 0.20890000000000164,
+        "summary_minus_original_lc18_wind": 0.17096812388391847,
         "summary_minus_release_wind_table": -0.0001854138009154127
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.1709227238191855,
+      "original_lc18_integrated_wind_mass_msun": 12.937931876116082,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 13.109085413800916,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 13.1089
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010020363454333705,
+      "summary_wind_mass_msun": 13.1089,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8620,14 +9252,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.016532747318569463,
         "release_wind_table_minus_cds_terminal_wind": 0.2649049127939982,
         "summary_minus_cds_terminal_wind": 0.26529999999999987,
+        "summary_minus_original_lc18_wind": 0.2487672526814304,
         "summary_minus_release_wind_table": 0.00039508720600167635
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.24867660813128456,
+      "original_lc18_integrated_wind_mass_msun": 15.51653274731857,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 15.764904912793998,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 15.7653
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010160621864298466,
+      "summary_wind_mass_msun": 15.7653,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8727,14 +9366,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.04975917722067891,
         "release_wind_table_minus_cds_terminal_wind": -21.9,
         "summary_minus_cds_terminal_wind": 0.33330000000000126,
+        "summary_minus_original_lc18_wind": 0.38305917722068017,
         "summary_minus_release_wind_table": 22.2333
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 21.85024082277932,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 22.2333
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010040933035546023,
+      "summary_wind_mass_msun": 22.2333,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8805,14 +9451,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.0009249331466030242,
         "release_wind_table_minus_cds_terminal_wind": -27.200000000000003,
         "summary_minus_cds_terminal_wind": 0.5301999999999971,
+        "summary_minus_original_lc18_wind": 0.5292750668533941,
         "summary_minus_release_wind_table": 27.7302
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 27.200924933146606,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 27.7302
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010024324596278136,
+      "summary_wind_mass_msun": 27.7302,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_D/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8859,14 +9512,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.041864009980066896,
         "release_wind_table_minus_cds_terminal_wind": -37.2,
         "summary_minus_cds_terminal_wind": 0.8574999999999946,
+        "summary_minus_original_lc18_wind": 0.8156359900199277,
         "summary_minus_release_wind_table": 38.0575
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 37.24186400998007,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 38.0575
+      "summary_extra_wind_fraction_of_original_final_mass": 0.009855659268573761,
+      "summary_wind_mass_msun": 38.0575,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -8966,14 +9626,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.04461355923560717,
         "release_wind_table_minus_cds_terminal_wind": -1.5,
         "summary_minus_cds_terminal_wind": 0.16110000000000002,
+        "summary_minus_original_lc18_wind": 0.11648644076439285,
         "summary_minus_release_wind_table": 1.6611
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 1.5446135592356072,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 1.6611
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01016870459733002,
+      "summary_wind_mass_msun": 1.6611,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9073,14 +9740,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.017242308921750604,
         "release_wind_table_minus_cds_terminal_wind": -1.3000000000000007,
         "summary_minus_cds_terminal_wind": 0.15389999999999926,
+        "summary_minus_original_lc18_wind": 0.13665769107824866,
         "summary_minus_release_wind_table": 1.4539
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 1.3172423089217513,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 1.4539
+      "summary_extra_wind_fraction_of_original_final_mass": 0.009987583947887594,
+      "summary_wind_mass_msun": 1.4539,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9180,14 +9854,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.013915543327323032,
         "release_wind_table_minus_cds_terminal_wind": -3.1999999999999993,
         "summary_minus_cds_terminal_wind": 0.15880000000000072,
+        "summary_minus_original_lc18_wind": 0.17271554332732375,
         "summary_minus_release_wind_table": 3.3588
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 3.1860844566726763,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 3.3588
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010272178594109014,
+      "summary_wind_mass_msun": 3.3588,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9287,14 +9968,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.03492967530990754,
         "release_wind_table_minus_cds_terminal_wind": -11.8,
         "summary_minus_cds_terminal_wind": 0.16589999999999883,
+        "summary_minus_original_lc18_wind": 0.1309703246900913,
         "summary_minus_release_wind_table": 11.9659
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 11.834929675309908,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 11.9659
+      "summary_extra_wind_fraction_of_original_final_mass": 0.009948319413415238,
+      "summary_wind_mass_msun": 11.9659,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9394,14 +10082,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.040331922144938304,
         "release_wind_table_minus_cds_terminal_wind": -14.9,
         "summary_minus_cds_terminal_wind": 0.18989999999999974,
+        "summary_minus_original_lc18_wind": 0.14956807785506143,
         "summary_minus_release_wind_table": 15.0899
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 14.940331922144939,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 15.0899
+      "summary_extra_wind_fraction_of_original_final_mass": 0.00993169816770386,
+      "summary_wind_mass_msun": 15.0899,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9501,14 +10196,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.041128113375535236,
         "release_wind_table_minus_cds_terminal_wind": 0.19061428807644987,
         "summary_minus_cds_terminal_wind": 0.18859999999999744,
+        "summary_minus_original_lc18_wind": 0.22972811337553267,
         "summary_minus_release_wind_table": -0.0020142880764524307
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.22963642215682656,
+      "original_lc18_integrated_wind_mass_msun": 17.058871886624466,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 17.29061428807645,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 17.2886
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010013810665291242,
+      "summary_wind_mass_msun": 17.2886,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9608,14 +10310,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.01814327096360202,
         "release_wind_table_minus_cds_terminal_wind": -22.6,
         "summary_minus_cds_terminal_wind": 0.37569999999999837,
+        "summary_minus_original_lc18_wind": 0.3938432709636004,
         "summary_minus_release_wind_table": 22.9757
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 22.5818567290364,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 22.9757
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01052546269096206,
+      "summary_wind_mass_msun": 22.9757,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9694,14 +10403,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.0071149853014986775,
         "release_wind_table_minus_cds_terminal_wind": -33.0,
         "summary_minus_cds_terminal_wind": 0.491100000000003,
+        "summary_minus_original_lc18_wind": 0.49821498530150166,
         "summary_minus_release_wind_table": 33.4911
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 32.9928850146985,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 33.4911
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010598714374564082,
+      "summary_wind_mass_msun": 33.4911,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_C/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9772,14 +10488,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.03099514417169047,
         "release_wind_table_minus_cds_terminal_wind": -49.599999999999994,
         "summary_minus_cds_terminal_wind": 0.7346000000000075,
+        "summary_minus_original_lc18_wind": 0.703604855828317,
         "summary_minus_release_wind_table": 50.3346
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 49.630995144171685,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 50.3346
+      "summary_extra_wind_fraction_of_original_final_mass": 0.00999878934297649,
+      "summary_wind_mass_msun": 50.3346,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9879,14 +10602,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.01749347336579854,
         "release_wind_table_minus_cds_terminal_wind": -2.3000000000000007,
         "summary_minus_cds_terminal_wind": 0.08939999999999948,
+        "summary_minus_original_lc18_wind": 0.10689347336579802,
         "summary_minus_release_wind_table": 2.3894
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 2.282506526634202,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 2.3894
+      "summary_extra_wind_fraction_of_original_final_mass": 0.00997373813489512,
+      "summary_wind_mass_msun": 2.3894,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -9986,14 +10716,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.004172179601279247,
         "release_wind_table_minus_cds_terminal_wind": -3.8000000000000007,
         "summary_minus_cds_terminal_wind": 0.11649999999999938,
+        "summary_minus_original_lc18_wind": 0.11232782039872014,
         "summary_minus_release_wind_table": 3.9165
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 3.80417217960128,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 3.9165
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01003300713450234,
+      "summary_wind_mass_msun": 3.9165,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -10093,14 +10830,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.0427348686590463,
         "release_wind_table_minus_cds_terminal_wind": 0.13054587126260042,
         "summary_minus_cds_terminal_wind": 0.1265000000000014,
+        "summary_minus_original_lc18_wind": 0.1692348686590477,
         "summary_minus_release_wind_table": -0.004045871262599032
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.1684025680859249,
+      "original_lc18_integrated_wind_mass_msun": 2.8572651313409523,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 3.030545871262599,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 3.0265
+      "summary_extra_wind_fraction_of_original_final_mass": 0.00987210441949078,
+      "summary_wind_mass_msun": 3.0265,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -10200,14 +10944,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.04306575370119248,
         "release_wind_table_minus_cds_terminal_wind": -6.5,
         "summary_minus_cds_terminal_wind": 0.13919999999999977,
+        "summary_minus_original_lc18_wind": 0.18226575370119225,
         "summary_minus_release_wind_table": 6.6392
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 6.4569342462988075,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 6.6392
+      "summary_extra_wind_fraction_of_original_final_mass": 0.009829321435955758,
+      "summary_wind_mass_msun": 6.6392,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -10307,14 +11058,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.052420896102670866,
         "release_wind_table_minus_cds_terminal_wind": -14.0,
         "summary_minus_cds_terminal_wind": 0.2110000000000003,
+        "summary_minus_original_lc18_wind": 0.15857910389732943,
         "summary_minus_release_wind_table": 14.211
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 14.05242089610267,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 14.211
+      "summary_extra_wind_fraction_of_original_final_mass": 0.00994377283625295,
+      "summary_wind_mass_msun": 14.211,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -10414,14 +11172,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.017204477147679142,
         "release_wind_table_minus_cds_terminal_wind": 0.22562370556135392,
         "summary_minus_cds_terminal_wind": 0.22609999999999886,
+        "summary_minus_original_lc18_wind": 0.20889552285231971,
         "summary_minus_release_wind_table": 0.0004762944386449419
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.20888399290654336,
+      "original_lc18_integrated_wind_mass_msun": 19.31720447714768,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 19.525623705561355,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 19.5261
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010099965578710676,
+      "summary_wind_mass_msun": 19.5261,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -10521,14 +11286,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.039284798864620996,
         "release_wind_table_minus_cds_terminal_wind": -32.5,
         "summary_minus_cds_terminal_wind": 0.2376999999999967,
+        "summary_minus_original_lc18_wind": 0.2769847988646177,
         "summary_minus_release_wind_table": 32.7377
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 32.46071520113538,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 32.7377
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010057806543909852,
+      "summary_wind_mass_msun": 32.7377,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -10628,14 +11400,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.027535334830574243,
         "release_wind_table_minus_cds_terminal_wind": -47.9,
         "summary_minus_cds_terminal_wind": 0.3494000000000028,
+        "summary_minus_original_lc18_wind": 0.3218646651694286,
         "summary_minus_release_wind_table": 48.2494
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 47.92753533483057,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 48.2494
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010035545086092881,
+      "summary_wind_mass_msun": 48.2494,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_B/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -10735,14 +11514,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.005456027319169721,
         "release_wind_table_minus_cds_terminal_wind": -79.5,
         "summary_minus_cds_terminal_wind": 0.42140000000000555,
+        "summary_minus_original_lc18_wind": 0.4159439726808358,
         "summary_minus_release_wind_table": 79.9214
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 79.50545602731917,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 79.9214
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01027160530469111,
+      "summary_wind_mass_msun": 79.9214,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -10842,14 +11628,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.004458909149772872,
         "release_wind_table_minus_cds_terminal_wind": 0.05821295543072669,
         "summary_minus_cds_terminal_wind": 0.058100000000000485,
+        "summary_minus_original_lc18_wind": 0.05364109085022761,
         "summary_minus_release_wind_table": -0.00011295543072620262
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.0536296667884415,
+      "original_lc18_integrated_wind_mass_msun": 7.6444589091497726,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 7.698212955430726,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 7.6981
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010015998372577464,
+      "summary_wind_mass_msun": 7.6981,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -10949,14 +11742,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.0011650740353044142,
         "release_wind_table_minus_cds_terminal_wind": -8.77,
         "summary_minus_cds_terminal_wind": 0.06450000000000067,
+        "summary_minus_original_lc18_wind": 0.06566507403530508,
         "summary_minus_release_wind_table": 8.8345
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 8.768834925964695,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 8.8345
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010538169548568925,
+      "summary_wind_mass_msun": 8.8345,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -11056,14 +11856,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.003914122182100854,
         "release_wind_table_minus_cds_terminal_wind": -11.82,
         "summary_minus_cds_terminal_wind": 0.07819999999999894,
+        "summary_minus_original_lc18_wind": 0.08211412218209979,
         "summary_minus_release_wind_table": 11.8982
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 11.8160858778179,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 11.8982
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010033600176660391,
+      "summary_wind_mass_msun": 11.8982,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -11163,14 +11970,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.003042828129540709,
         "release_wind_table_minus_cds_terminal_wind": 0.09312248811399826,
         "summary_minus_cds_terminal_wind": 0.09330000000000105,
+        "summary_minus_original_lc18_wind": 0.09634282812954176,
         "summary_minus_release_wind_table": 0.00017751188600279022
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.0963535285370809,
+      "original_lc18_integrated_wind_mass_msun": 15.516957171870459,
+      "original_lc18_wind_source_table": "table9.dat",
       "release_wind_table_element_sum_msun": 15.613122488113998,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 15.6133
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010159484658632999,
+      "summary_wind_mass_msun": 15.6133,
+      "three_digit_sensitivity_half_bin_msun": 0.005
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -11270,14 +12084,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.006116028246786698,
         "release_wind_table_minus_cds_terminal_wind": -18.8,
         "summary_minus_cds_terminal_wind": 0.10719999999999885,
+        "summary_minus_original_lc18_wind": 0.11331602824678555,
         "summary_minus_release_wind_table": 18.9072
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 18.793883971753214,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 18.9072
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010111980632821808,
+      "summary_wind_mass_msun": 18.9072,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -11377,14 +12198,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.012085479485129724,
         "release_wind_table_minus_cds_terminal_wind": -26.2,
         "summary_minus_cds_terminal_wind": 0.12679999999999936,
+        "summary_minus_original_lc18_wind": 0.13888547948512908,
         "summary_minus_release_wind_table": 26.3268
       },
       "exploded": false,
+      "mixed_source_mass_deficit_msun": null,
+      "original_lc18_integrated_wind_mass_msun": 26.18791452051487,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 0.0,
       "resolution": "unresolved_failed_wind_anomaly",
-      "summary_wind_mass_msun": 26.3268
+      "summary_extra_wind_fraction_of_original_final_mass": 0.01005535910499638,
+      "summary_wind_mass_msun": 26.3268,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -11484,14 +12312,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.03923289105291872,
         "release_wind_table_minus_cds_terminal_wind": 0.12778448352293736,
         "summary_minus_cds_terminal_wind": 0.12470000000000425,
+        "summary_minus_original_lc18_wind": 0.16393289105292297,
         "summary_minus_release_wind_table": -0.0030844835229331125
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.1639144842821132,
+      "original_lc18_integrated_wind_mass_msun": 43.36076710894708,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 43.527784483522936,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 43.5247
+      "summary_extra_wind_fraction_of_original_final_mass": 0.009852190430069123,
+      "summary_wind_mass_msun": 43.5247,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -11591,14 +12426,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": 0.013257608237971397,
         "release_wind_table_minus_cds_terminal_wind": 0.18958085690145055,
         "summary_minus_cds_terminal_wind": 0.18910000000000338,
+        "summary_minus_original_lc18_wind": 0.17584239176203198,
         "summary_minus_release_wind_table": -0.00048085690144716864
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.1758174646199544,
+      "original_lc18_integrated_wind_mass_msun": 62.51325760823797,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 62.68958085690145,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 62.6891
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010055754686754636,
+      "summary_wind_mass_msun": 62.6891,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     },
     {
       "archive_member_path": "LC18/Elements/Met_A/Yields_Rot_300_Eles_LC18_Wind.txt",
@@ -11698,14 +12540,21 @@
         "rotation_velocity_km_s": 300
       },
       "differences_msun": {
+        "original_lc18_wind_minus_cds_terminal_wind": -0.08899943941717936,
         "release_wind_table_minus_cds_terminal_wind": 0.09767478481768421,
         "summary_minus_cds_terminal_wind": 0.09799999999999898,
+        "summary_minus_original_lc18_wind": 0.18699943941717834,
         "summary_minus_release_wind_table": 0.0003252151823147642
       },
       "exploded": true,
+      "mixed_source_mass_deficit_msun": 0.27695496314076706,
+      "original_lc18_integrated_wind_mass_msun": 101.31100056058283,
+      "original_lc18_wind_source_table": "table8.dat",
       "release_wind_table_element_sum_msun": 101.49767478481769,
       "resolution": "successful_model_release_control_review_only",
-      "summary_wind_mass_msun": 101.498
+      "summary_extra_wind_fraction_of_original_final_mass": 0.010005856119979102,
+      "summary_wind_mass_msun": 101.498,
+      "three_digit_sensitivity_half_bin_msun": 0.05
     }
   ],
   "runtime_deposition_allowed": false,
@@ -11827,20 +12676,23 @@
   },
   "status": "failed_wind_anomaly_independently_crosschecked_unresolved",
   "successful_release_control": {
-    "cds_phase_endpoint_total_mass_half_bin_msun": 0.005,
-    "cds_phase_endpoint_total_mass_precision_msun": 0.01,
+    "cds_phase_endpoint_total_mass_half_bin_msun": null,
+    "cds_phase_endpoint_total_mass_precision_msun": null,
+    "cds_printed_decimal_step_msun": 0.01,
+    "cds_printed_format_half_bin_msun": 0.005,
     "cds_terminal_wind_parsed_exact_zero_count": 4,
     "cds_terminal_wind_parsed_positive_count": 48,
     "interpretation": "Successful models verify that the BR26 release normally carries nonzero Wind tables. Their CDS endpoint differences are measured cross-source discrepancies, not a promotion tolerance. The four parsed exact-zero CDS endpoints are successful controls and do not establish physical zero wind.",
     "maximum_absolute_summary_minus_cds_terminal_wind_msun": 0.5842000000000014,
     "maximum_absolute_summary_minus_release_wind_table_msun": 0.007183005956193367,
     "model_count": 52,
-    "parsed_exact_zero_definition": "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing M_initial - M_total(PSN) from CDS table5 at the declared source endpoint precision",
-    "parsed_exact_zero_interpretation": "An exact parsed zero is compatible with physical mass loss below the source table half-bin; it is not evidence that physical wind is zero. The pipeline does not round the wind values.",
+    "parsed_exact_zero_definition": "cds_terminal_cumulative_wind_mass_msun == 0.0 after parsing M_initial - M_total(PSN) from CDS table5; no pipeline rounding",
+    "parsed_exact_zero_interpretation": "An exact parsed zero is not evidence that physical wind is zero. The F6.2 format does not establish physical precision or rounding. No physical upper limit is inferred from the printed-format half-bin. The pipeline does not round the wind values.",
+    "physical_precision_confirmed": false,
     "physical_zero_inferred": false,
     "release_wind_table_nonzero_count": 52,
-    "summary_minus_cds_above_phase_endpoint_half_bin_count": 52,
+    "summary_minus_cds_above_printed_format_half_bin_count": 52,
     "summary_wind_positive_count": 52
   },
-  "tool_sha256": "7382132a6e6d9b974dff64fc11a8c316c631f311dc244c9b4516624d271ea0f8"
+  "tool_sha256": "9021041d962551f868c25d71c31395b71152bf82397ce4a13cddc7fac7eb5e7a"
 }

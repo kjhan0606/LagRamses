@@ -15,7 +15,18 @@
   },
   "limitations": {
     "time_resolved_isotopic_composition_available": false,
-    "phase_endpoint_total_mass_precision_msun": 0.01,
+    "phase_endpoint_total_mass_precision_msun": null,
+    "mass_precision_review": {
+      "printed_decimal_step_msun": 0.01,
+      "physical_precision_confirmed": false,
+      "rounding_rule_confirmed": false,
+      "sensitivity_significant_digits": 3,
+      "sensitivity_is_approval_tolerance": false,
+      "source_format": "F6.2 in CDS ReadMe and publisher Table 5 MRT; formatting is not an attestation of physical precision or nearest rounding.",
+      "publisher_mrt_url": "https://content.cld.iop.org/journals/0067-0049/237/1/13/revision1/apjsaacb24t5_mrt.txt",
+      "publisher_mrt_sha256": "2d1787477d6c8160967c8b4289e4ce476cde88e540e9469a80553f67237e19a3",
+      "review_date": "2026-09-05"
+    },
     "canonical_conversion_allowed": false,
     "runtime_deposition_allowed": false
   },
