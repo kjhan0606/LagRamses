@@ -21,8 +21,11 @@ FFLAGS=(-qopenmp -fpp -O0 -g -check all -check noarg_temp_created -I"$BUILD" -I"
 "$BUILD/efficiency_smoke"
 
 "$FC" "${FFLAGS[@]}" -c "$ROOT/patch/lagRamses/snrt_agn_source.f90" -o "$BUILD/snrt_agn_source.o"
+"$FC" "${FFLAGS[@]}" -DWITHOUTMPI -c "$ROOT/patch/lagRamses/snrt_rt_transaction.f90" \
+  -o "$BUILD/snrt_rt_transaction.o"
 "$FC" "${FFLAGS[@]}" "$ROOT/patch/lagRamses/snrt_agn_source_smoke.f90" \
-  "$BUILD/snrt_agn_source.o" "$ROOT/bin/amr_parameters.jaehyun.o" -o "$BUILD/source_smoke"
+  "$BUILD/snrt_agn_source.o" "$BUILD/snrt_rt_transaction.o" \
+  "$ROOT/bin/amr_parameters.jaehyun.o" -o "$BUILD/source_smoke"
 "$BUILD/source_smoke"
 
 "$FC" "${FFLAGS[@]}" -c "$ROOT/patch/lagRamses/agn_feedback_deposition.f90" -o "$BUILD/agn_feedback_deposition.o"

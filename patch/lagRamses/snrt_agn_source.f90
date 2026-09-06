@@ -69,8 +69,9 @@ contains
   pure subroutine snrt_agn_source_commit(pending_erg,source_ok)
     real(dp), intent(inout) :: pending_erg
     logical, intent(in) :: source_ok
-    ! The serial source phase has no concurrent accretion. Transport rollback
-    ! occurs after this commit and must not restore this fuel.
+    ! The caller invokes this only after the enclosing source -> RT/chemistry
+    ! -> dust transaction has passed its global commit.  Until then the
+    ! accepted event remains pending and is retryable after rollback.
     if(source_ok)pending_erg=0d0
   end subroutine snrt_agn_source_commit
 

@@ -242,6 +242,7 @@ contains
     type(dust_live_coarse_trial) :: dust_ir_coarse
 #endif
     logical :: enabled, source_ok, accounting_identity_ok
+    logical, allocatable :: source_transaction_ok(:)
     logical :: transaction_converged, transaction_active
     logical :: transaction_diagnostic_mode
     logical :: hydro_state_invalid
@@ -733,65 +734,11 @@ contains
             ' SNRT AGN source skipped: idsink identity map is invalid'
     end if
 
-    if (accounting_identity_ok .and. nsink > 0) then
-       if (allocated(agn_pending_erg) .and. allocated(xsink)) then
-          if (size(agn_pending_erg)>=nsink .and. size(xsink,1)>=nsink) then
-             allocate(emitted_groups(snrt_ngroups), luminosity_groups(snrt_ngroups))
-             do isink = 1, nsink
-                if (.not.ieee_is_finite(agn_pending_erg(isink)) .or. agn_pending_erg(isink)<0d0) then
-                   if(myid==1)write(*,*) 'Invalid accepted AGN radiative energy for sink ',idsink(isink)
-                   call clean_stop
-                endif
-                if(agn_pending_erg(isink)==0d0)cycle
-
-                wall_sub = omp_get_wtime()
-                ! The locator returns a leaf owned by this MPI rank or zero.
-                ! The source loop is intentionally serial: local intensity and
-                ! the sink-carried pending energy are shared mutable state, not
-                ! OpenMP-threadprivate data.  A valid leaf therefore has one
-                ! MPI owner for this source transaction.
-                call snrt_agn_find_local_leaf(xsink(isink,1:ndim), icell, ilevel_found)
-                t_locator = t_locator + omp_get_wtime() - wall_sub
-                n_locator_calls = n_locator_calls + 1
-                if (icell == 0 .or. ilevel_found /= ilevel) cycle
-                islot = snrt_state_get_slot(icell)
-                if (islot <= 0) cycle
-                n_active_sources = n_active_sources + 1
-                source_ok = .true.
-                do igroup = 1, snrt_ngroups
-                   wall_sub = omp_get_wtime()
-                   call snrt_agn_photon_budget_energy(agn_pending_erg(isink), dt_s, &
-                        snrt_group_energy_fraction(igroup), &
-                        snrt_group_mean_energy_ev(igroup), luminosity_groups(igroup), &
-                        emitted_groups(igroup),ierr)
-                   if(ierr/=0)source_ok=.false.
-                   t_budget = t_budget + omp_get_wtime() - wall_sub
-                   if (.not. ieee_is_finite(luminosity_groups(igroup)) .or. &
-                        .not. ieee_is_finite(emitted_groups(igroup)) .or. &
-                        emitted_groups(igroup) < 0.0d0) source_ok = .false.
-                end do
-                if (source_ok) then
-                   wall_sub = omp_get_wtime()
-                   call snrt_agn_deposit_transaction(snrt_intensity, islot, &
-                        emitted_groups, cell_volume_code, scale_l, scale_nH, &
-                        angular_weight, deposited_density, ierr)
-                   t_deposit = t_deposit + omp_get_wtime() - wall_sub
-                   if (ierr /= 0) source_ok = .false.
-                end if
-                ! Failed source deposition retains fuel; successful source
-                ! commit remains consumed even if subsequent transport retries.
-                call snrt_agn_source_commit(agn_pending_erg(isink),source_ok)
-             end do
-             deallocate(emitted_groups, luminosity_groups)
-          end if
-       end if
-    end if
-    t_source = omp_get_wtime() - wall_start
-    t_source_overhead = t_source - t_locator - t_budget - t_deposit
-
-    ! The source phase above has already committed its own photon/accounting
-    ! transaction.  The RT/chemistry transaction starts here, so a failed
-    ! coupled level never erases a valid source deposit.
+    ! Begin the enclosing transaction before any AGN source photon is added.
+    ! The pending-energy marker is deliberately not consumed in the source
+    ! loop: it is cleared only after RT/chemistry/dust has passed its global
+    ! commit.  This makes a failed coupled step retryable without duplicating
+    ! or losing the accepted AGN event.
     do i = 1, nleaf
        do igroup = 1, snrt_ngroups
           incoming_intensity(:,igroup,i) = snrt_intensity(:,igroup,leaf_slot(i))
@@ -837,6 +784,76 @@ contains
        call clean_stop
        return
     end if
+    allocate(source_transaction_ok(max(1,nsink)))
+    source_transaction_ok = .false.
+
+    if (accounting_identity_ok .and. nsink > 0) then
+       if (allocated(agn_pending_erg) .and. allocated(xsink)) then
+          if (size(agn_pending_erg)>=nsink .and. size(xsink,1)>=nsink) then
+             allocate(emitted_groups(snrt_ngroups), luminosity_groups(snrt_ngroups))
+             do isink = 1, nsink
+                if (.not.ieee_is_finite(agn_pending_erg(isink)) .or. agn_pending_erg(isink)<0d0) then
+                   if(myid==1)write(*,*) 'Invalid accepted AGN radiative energy for sink ',idsink(isink)
+                   call clean_stop
+                endif
+                if(agn_pending_erg(isink)==0d0)cycle
+
+                wall_sub = omp_get_wtime()
+                ! The locator returns a leaf owned by this MPI rank or zero.
+                ! The source loop is intentionally serial: local intensity and
+                ! the sink-carried pending energy are shared mutable state, not
+                ! OpenMP-threadprivate data.  A valid leaf therefore has one
+                ! MPI owner for this source transaction.
+                call snrt_agn_find_local_leaf(xsink(isink,1:ndim), icell, ilevel_found)
+                t_locator = t_locator + omp_get_wtime() - wall_sub
+                n_locator_calls = n_locator_calls + 1
+                if (icell == 0 .or. ilevel_found /= ilevel) cycle
+                islot = snrt_state_get_slot(icell)
+                if (islot <= 0) cycle
+                n_active_sources = n_active_sources + 1
+                source_ok = .true.
+                do igroup = 1, snrt_ngroups
+                   wall_sub = omp_get_wtime()
+                   call snrt_agn_photon_budget_energy(agn_pending_erg(isink), dt_s, &
+                        snrt_group_energy_fraction(igroup), &
+                        snrt_group_mean_energy_ev(igroup), luminosity_groups(igroup), &
+                        emitted_groups(igroup),ierr)
+                   if(ierr/=0)source_ok=.false.
+                   t_budget = t_budget + omp_get_wtime() - wall_sub
+                   if (.not. ieee_is_finite(luminosity_groups(igroup)) .or. &
+                        .not. ieee_is_finite(emitted_groups(igroup)) .or. &
+                        emitted_groups(igroup) < 0.0d0) source_ok = .false.
+                end do
+                if (source_ok) then
+                   wall_sub = omp_get_wtime()
+                   call snrt_agn_deposit_transaction(snrt_intensity, islot, &
+                        emitted_groups, cell_volume_code, scale_l, scale_nH, &
+                        angular_weight, deposited_density, ierr)
+                   t_deposit = t_deposit + omp_get_wtime() - wall_sub
+                   if (ierr /= 0) source_ok = .false.
+                end if
+                ! Defer fuel consumption until the enclosing RT/chemistry/dust
+                ! transaction has passed its global commit.  A failed source
+                ! deposition, or a later coupled rollback, leaves this event
+                ! pending for an exact retry.
+                if (source_ok) source_transaction_ok(isink) = .true.
+             end do
+             deallocate(emitted_groups, luminosity_groups)
+          end if
+       end if
+    end if
+    t_source = omp_get_wtime() - wall_start
+    t_source_overhead = t_source - t_locator - t_budget - t_deposit
+
+    ! The enclosing RT/chemistry/dust transaction now consumes the source
+    ! photons staged above.  Its snapshot predates source injection, so every
+    ! coupled rollback restores both the pre-source RT state and the pending
+    ! AGN event marker.
+    do i = 1, nleaf
+       do igroup = 1, snrt_ngroups
+          incoming_intensity(:,igroup,i) = snrt_intensity(:,igroup,leaf_slot(i))
+       end do
+    end do
 
     current_hydrogen_ii = start_hydrogen_ii
     current_helium_ii = start_helium_ii
@@ -1166,6 +1183,7 @@ contains
             trial_neutral_hydrogen, trial_thermal, rho_level, temperature_level, &
             trial_heating_rate, trial_unassigned, trial_absorbed_species, &
             current_fraction, target_fraction)
+       deallocate(source_transaction_ok)
 #ifdef DUST_LIVE
        deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
             dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
@@ -1239,6 +1257,7 @@ contains
             trial_neutral_hydrogen, trial_thermal, rho_level, temperature_level, &
             trial_heating_rate, trial_unassigned, trial_absorbed_species, &
             current_fraction, target_fraction)
+       deallocate(source_transaction_ok)
        deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
             dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
             dust_absorbed_photons, dust_absorbed_energy, dust_n_hydrogen_cm3, &
@@ -1280,6 +1299,7 @@ contains
             trial_neutral_hydrogen, trial_thermal, rho_level, temperature_level, &
             trial_heating_rate, trial_unassigned, trial_absorbed_species, &
             current_fraction, target_fraction)
+       deallocate(source_transaction_ok)
 #ifdef DUST_LIVE
        deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
             dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
@@ -1323,6 +1343,15 @@ contains
             ' escaped_erg=',dust_ir_result%escaped_erg
     end if
 #endif
+    ! Fuel consumption is the final accounting action of the coupled source
+    ! -> RT/chemistry -> dust commit.  No rollback path can observe a cleared
+    ! marker because every failure branch returns before this point.
+    if (allocated(agn_pending_erg)) then
+       do isink = 1, nsink
+          if (source_transaction_ok(isink)) &
+               call snrt_agn_source_commit(agn_pending_erg(isink), .true.)
+       end do
+    end if
     t_coupling = omp_get_wtime() - wall_start
 
     if (myid == 1) then
@@ -1350,6 +1379,7 @@ contains
          optical_depth_hydrogen, optical_depth_helium_i, optical_depth_helium_ii, &
          absorbed_group, raw_group, absorbed_hhe_group_species, absorbed_dust_group, &
          returned_group)
+    deallocate(source_transaction_ok)
 #ifdef DUST_LIVE
     deallocate(dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
          dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
