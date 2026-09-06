@@ -149,8 +149,11 @@ def _implicit_thermal_update(
         ) + primordial_net_rate(chemistry, temperature_k, scale_factor)
         return heat_capacity * temperature_k - thermal.internal_energy_density - dt * (photoheating_rate + background)
 
+    raw_old_temperature = thermal.internal_energy_density / jnp.maximum(
+        heat_capacity, jnp.finfo(heat_capacity.dtype).tiny
+    )
     old_temperature = jnp.clip(
-        thermal.internal_energy_density / jnp.maximum(heat_capacity, jnp.finfo(heat_capacity.dtype).tiny),
+        raw_old_temperature,
         temperature_floor,
         temperature_ceiling,
     )
@@ -225,7 +228,10 @@ def _implicit_thermal_update(
     next_internal_energy = heat_capacity * temperature
     residual = next_internal_energy - thermal.internal_energy_density - dt * (photoheating_rate + background)
     bound_hit = jnp.asarray(
-        (~stationary) & (~has_crossing),
+        (~stationary) & (~has_crossing)
+        | ~jnp.isfinite(raw_old_temperature)
+        | (raw_old_temperature < temperature_floor)
+        | (raw_old_temperature > temperature_ceiling),
         dtype=heat_capacity.dtype,
     )
     return ThermalState(next_internal_energy), temperature, background, residual, bound_hit

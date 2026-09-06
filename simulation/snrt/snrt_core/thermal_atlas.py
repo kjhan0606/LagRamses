@@ -124,6 +124,56 @@ class ThermalAtlas:
         weight = (clipped - axis[index]) / (axis[index + 1] - axis[index])
         return index, weight
 
+    def validate_runtime_domain(
+        self,
+        scale_factor: float,
+        temperature_k: np.ndarray,
+        n_h_cm3: np.ndarray,
+        *,
+        label: str = "thermal runtime",
+    ) -> None:
+        """Reject a runtime state that would otherwise be edge-clamped.
+
+        The interpolation helpers retain clamping for controlled offline
+        studies.  A production-facing caller must prove that its epoch and
+        initial gas state lie inside the admitted table domain instead of
+        silently using an edge value.
+        """
+
+        if not np.isfinite(scale_factor) or not self.scale_factor[0] <= scale_factor <= self.scale_factor[-1]:
+            raise ValueError(
+                f"{label} scale factor {scale_factor:.17g} is outside the admitted "
+                f"range [{self.scale_factor[0]:.17g}, {self.scale_factor[-1]:.17g}]"
+            )
+        temperature, density = np.broadcast_arrays(
+            np.asarray(temperature_k, dtype=np.float64),
+            np.asarray(n_h_cm3, dtype=np.float64),
+        )
+        if not np.isfinite(temperature).all() or np.any(temperature <= 0.0):
+            raise ValueError(f"{label} temperature must be finite and positive")
+        if not np.isfinite(density).all() or np.any(density <= 0.0):
+            raise ValueError(f"{label} n_H must be finite and positive")
+        log_density = np.log10(density)
+        log_temperature = np.log10(temperature)
+        if np.any(
+            (log_density < self.log_hydrogen_number_density_cm3[0])
+            | (log_density > self.log_hydrogen_number_density_cm3[-1])
+        ):
+            raise ValueError(
+                f"{label} n_H lies outside the admitted range "
+                f"[{10.0 ** self.log_hydrogen_number_density_cm3[0]:.17g}, "
+                f"{10.0 ** self.log_hydrogen_number_density_cm3[-1]:.17g}] cm^-3"
+            )
+        if np.any(
+            (log_temperature < self.log_temperature_k[0])
+            | (log_temperature > self.log_temperature_k[-1])
+        ):
+            raise ValueError(
+                f"{label} temperature lies outside the admitted range "
+                f"[{10.0 ** self.log_temperature_k[0]:.17g}, "
+                f"{10.0 ** self.log_temperature_k[-1]:.17g}] K"
+            )
+
     def _spatial_interpolate(
         self, values: np.ndarray, temperature_k: np.ndarray, n_h_cm3: np.ndarray
     ) -> np.ndarray:

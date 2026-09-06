@@ -144,6 +144,47 @@ def main() -> int:
             assert np.max(np.asarray(handle["thermal/cumulative_dust_heating_energy_erg_cm3"])) > 0.0
             assert handle.attrs["primary_absorption_closure_relative_error"] <= 1.0e-5
 
+        out_of_atlas_output = work / "out-of-atlas-output.h5"
+        out_of_atlas_command = list(result.args)
+        out_of_atlas_command[out_of_atlas_command.index(str(output_path))] = str(out_of_atlas_output)
+        out_of_atlas_command[out_of_atlas_command.index("0.208497764676753")] = "0.20848"
+        out_of_atlas_result = subprocess.run(
+            out_of_atlas_command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        assert out_of_atlas_result.returncode != 0
+        assert "outside the admitted range" in (out_of_atlas_result.stdout + out_of_atlas_result.stderr)
+        assert not out_of_atlas_output.exists()
+
+        out_of_atlas_temperature_input = work / "out-of-atlas-temperature-input.h5"
+        write_static_rt_input(
+            out_of_atlas_temperature_input,
+            replace(snapshot, temperature_k=np.full(shape, 1.0e10)),
+        )
+        out_of_atlas_temperature_output = work / "out-of-atlas-temperature-output.h5"
+        out_of_atlas_temperature_command = list(result.args)
+        out_of_atlas_temperature_command[out_of_atlas_temperature_command.index(str(input_path))] = str(
+            out_of_atlas_temperature_input
+        )
+        out_of_atlas_temperature_command[out_of_atlas_temperature_command.index(str(output_path))] = str(
+            out_of_atlas_temperature_output
+        )
+        out_of_atlas_temperature_result = subprocess.run(
+            out_of_atlas_temperature_command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        assert out_of_atlas_temperature_result.returncode != 0
+        assert "temperature lies outside the admitted range" in (
+            out_of_atlas_temperature_result.stdout + out_of_atlas_temperature_result.stderr
+        )
+        assert not out_of_atlas_temperature_output.exists()
+
         scattering_metadata = json.loads(dust_metadata_path.read_text(encoding="utf-8"))
         for key in (
             "group_edges_path",

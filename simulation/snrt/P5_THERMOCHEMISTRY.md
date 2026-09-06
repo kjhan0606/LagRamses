@@ -21,10 +21,13 @@ added exactly once. Details and B1 evidence are in
 [`B1_THERMAL_COUPLING.md`](B1_THERMAL_COUPLING.md).
 
 `snrt_core.jax_thermal_atlas` holds the 3-D solar-metallicity contribution on
-`(a, n_H, T)` as JAX arrays and performs edge-clamped multilinear lookup inside
-XLA. It then applies `Z/Zsun` as an analytic linear multiplier; metallicity is
-not an interpolated table axis. Primordial rates are evaluated directly from
-the live H/He state and are never read from this table.
+`(a, n_H, T)` as JAX arrays and performs multilinear lookup inside XLA. Its
+low-level interpolation helper retains edge clamping for controlled offline
+studies, but the P5 production-facing entry point rejects an out-of-domain
+scale factor or initial `n_H`/temperature before any output is created. It
+then applies `Z/Zsun` as an analytic linear multiplier; metallicity is not an
+interpolated table axis. Primordial rates are evaluated directly from the
+live H/He state and are never read from this table.
 
 The operator uses a fixed-count subcycle within each transport step: update
 photon/ionization state, including collisional ionization, then solve the

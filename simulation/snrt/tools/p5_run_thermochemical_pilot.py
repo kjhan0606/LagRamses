@@ -198,6 +198,12 @@ def main() -> None:
     if len(group_edges_ev) != len(group_energy_ev) + 1:
         raise ValueError("photon metadata group intervals do not match the spectral closure")
     thermal_atlas_host = read_thermal_atlas(args.thermal_atlas)
+    thermal_atlas_host.validate_runtime_domain(
+        args.scale_factor,
+        static.temperature_k,
+        static.hydrogen_number_density_cm3,
+        label="P5 initial state",
+    )
     atlas = from_numpy_atlas(thermal_atlas_host, dtype=real_dtype)
 
     directions, weights = level_symmetric_quadrature(args.sn_order, dtype=real_dtype)
