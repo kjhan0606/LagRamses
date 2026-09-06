@@ -42,8 +42,68 @@ module snrt_state
   private
   public :: snrt_state_sync_level, snrt_state_get_slot, snrt_state_get_cell
   public :: snrt_state_checkpoint_write, snrt_state_checkpoint_read
+  integer, parameter, public :: snrt_checkpoint_cell_width = 4 + snrt_ndirection*snrt_ngroups
+  public :: snrt_state_pack_cell, snrt_state_restore_cell
 
 contains
+
+  subroutine snrt_state_pack_cell(icell, payload, ierr)
+    integer, intent(in) :: icell
+    real(dp), intent(out) :: payload(snrt_checkpoint_cell_width)
+    integer, intent(out) :: ierr
+    integer :: slot
+    payload = 0.0_dp
+    ierr = 0
+    slot = snrt_state_get_slot(icell)
+    if(slot == 0) return
+    payload(1:4) = [1.0_dp, snrt_hydrogen_ii(slot), snrt_helium_ii(slot), snrt_helium_iii(slot)]
+    payload(5:) = reshape(real(snrt_intensity(:,:,slot),dp),[snrt_ndirection*snrt_ngroups])
+    call validate_cell_payload(payload,ierr)
+  end subroutine
+
+  subroutine validate_cell_payload(payload,ierr)
+    real(dp), intent(in) :: payload(snrt_checkpoint_cell_width)
+    integer, intent(out) :: ierr
+    ierr = 10
+    if(any(.not.ieee_is_finite(payload)).or.any(payload<0.0_dp)) return
+    if(payload(1)==0.0_dp)then
+       if(any(payload/=0.0_dp)) return
+    else if(payload(1)==1.0_dp)then
+       if(payload(2)>1.0_dp.or.sum(payload(3:4))>1.0_dp+1.0d-10) return
+       if(any(payload(5:)>real(huge(0.0_c_float),dp))) return
+    else
+       return
+    end if
+    ierr = 0
+  end subroutine
+
+  subroutine snrt_state_restore_cell(icell,payload,ierr)
+    integer, intent(in) :: icell
+    real(dp), intent(in) :: payload(snrt_checkpoint_cell_width)
+    integer, intent(out) :: ierr
+    integer :: slot
+    call validate_cell_payload(payload,ierr)
+    if(ierr/=0) return
+    call snrt_state_initialize()
+    if(icell<1.or.icell>size(snrt_slot_of_cell))then
+       ierr=11
+       return
+    end if
+    if(payload(1)==0.0_dp) return
+    slot=snrt_slot_of_cell(icell)
+    if(slot==0)then
+       call snrt_state_grow(snrt_nslot+1)
+       snrt_nslot=snrt_nslot+1
+       slot=snrt_nslot
+       snrt_slot_of_cell(icell)=slot
+       snrt_cell_id(slot)=icell
+    end if
+    snrt_hydrogen_ii(slot)=payload(2)
+    snrt_neutral_fraction(slot)=1.0_dp-payload(2)
+    snrt_helium_ii(slot)=payload(3)
+    snrt_helium_iii(slot)=payload(4)
+    snrt_intensity(:,:,slot)=reshape(real(payload(5:),c_float),[snrt_ndirection,snrt_ngroups])
+  end subroutine
 
   function snrt_state_get_slot(icell) result(islot)
     integer, intent(in) :: icell

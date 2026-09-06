@@ -1304,6 +1304,9 @@ end subroutine restore_amr_hdf5
 ! Hydro restore from HDF5
 !###########################################################################
 subroutine restore_hydro_hdf5()
+#ifdef SNRT
+  use snrt_hdf5, only: snrt_hdf5_read
+#endif
   use amr_commons
   use hydro_commons
 #ifdef DUST_LIVE
@@ -1530,6 +1533,9 @@ subroutine restore_hydro_hdf5()
   end if
 
   call hdf5_restore_errors()
+#ifdef SNRT
+  call snrt_hdf5_read()
+#endif
   call hdf5_close_file()
 
   ! Virtual exchange to populate ghost cells

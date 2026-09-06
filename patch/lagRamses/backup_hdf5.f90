@@ -6,6 +6,9 @@
 !###########################################################################
 #ifdef HDF5
 subroutine dump_all_hdf5(filedir, nchar)
+#ifdef SNRT
+  use snrt_hdf5, only: snrt_hdf5_write
+#endif
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -30,6 +33,9 @@ subroutine dump_all_hdf5(filedir, nchar)
   call backup_header_hdf5()
   call backup_amr_hdf5()
   if(hydro) call backup_hydro_hdf5()
+#ifdef SNRT
+  if(hydro) call snrt_hdf5_write()
+#endif
   if(poisson) call backup_poisson_hdf5()
   if(pic) call backup_part_hdf5()
   if(sink) call backup_sink_hdf5()

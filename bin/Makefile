@@ -139,6 +139,9 @@ ifeq ($(SNRT),1)
     FFLAGS += -DSNRT_LEDGER_DIAGNOSTIC
     SNRT_MODOBJ += snrt_agn_ledger.o
   endif
+  ifdef HDF5
+    SNRT_MODOBJ += snrt_hdf5.o
+  endif
 else
   SNRT_MODOBJ =
 endif
@@ -290,6 +293,12 @@ amr_index.o: amr_commons.kjhan.o
 # exists when a clean production build is requested.
 snrt_spectral_contract.o: amr_parameters.jaehyun.o
 snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o
+snrt_hdf5.o: snrt_state.o ramses_hdf5_io.o snrt_agn_efficiency.o snrt_dust_contract.o
+ifeq ($(SNRT),1)
+ifdef HDF5
+backup_hdf5.o restore_hdf5.o: snrt_hdf5.o
+endif
+endif
 snrt_agn_locator.o: amr_commons.kjhan.o
 snrt_agn_source.o: amr_parameters.jaehyun.o
 snrt_nlte_coupling.o: snrt_agn_source.o
