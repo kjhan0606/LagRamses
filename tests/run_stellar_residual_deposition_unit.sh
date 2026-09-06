@@ -14,8 +14,8 @@ sources=(
   stellar_native_units.f90
   stellar_snia_cell_deposition.f90
   stellar_cell_deposition.f90
-  stellar_ramses_bridge.f90
   stellar_ramses_field_map.f90
+  stellar_ramses_bridge.f90
   stellar_ramses_mapped_bridge.f90
 )
 objects=()
