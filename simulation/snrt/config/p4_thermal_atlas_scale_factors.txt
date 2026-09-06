@@ -1,0 +1,15 @@
+# Offline Grackle subtable schedule.  Extend with every planned hydro output.
+# The spacing is deliberately finer across the high-z (z >= 14) science window.
+0.040000  # z = 24.0
+0.045000  # z = 21.2
+0.050000  # z = 19.0
+0.055000  # z = 17.2
+0.060000  # z = 15.7
+0.062500  # z = 15.0
+0.066667  # z = 14.0
+0.071429  # z = 13.0
+0.080000  # z = 11.5
+0.100000  # z = 9.0
+0.125000  # z = 7.0
+0.166667  # z = 5.0
+0.208365  # z = 3.799; current P4 snapshot

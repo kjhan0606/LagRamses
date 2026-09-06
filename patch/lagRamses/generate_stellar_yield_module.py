@@ -87,7 +87,9 @@ def generate(input_path: Path, output_path: Path) -> None:
     scalar_rows = [row[1] for row in rows]
     masses = [fortran_real(row[0]) for row in scalar_rows]
     metallicities = [fortran_real(row[1]) for row in scalar_rows]
-    ages = [fortran_real(row[2]) for row in scalar_rows]
+    # The canonical file stores age_yr.  Embedded data follows the same
+    # table-boundary conversion as the runtime ASCII loader.
+    ages = [fortran_real(row[2] * 1.0e-9) for row in scalar_rows]
     returned = [fortran_real(row[3]) for row in scalar_rows]
     remnants = [fortran_real(row[4]) for row in scalar_rows]
     energies = [fortran_real(row[5]) for row in scalar_rows]
@@ -123,7 +125,7 @@ def generate(input_path: Path, output_path: Path) -> None:
         emit_vector("embedded_channel", channels, "integer"),
         emit_vector("embedded_initial_mass", masses),
         emit_vector("embedded_birth_metallicity", metallicities),
-        emit_vector("embedded_age", ages),
+        emit_vector("embedded_age_gyr", ages),
         emit_vector("embedded_returned_mass", returned),
         emit_vector("embedded_remnant_mass", remnants),
         emit_vector("embedded_energy", energies),
@@ -142,7 +144,7 @@ def generate(input_path: Path, output_path: Path) -> None:
         "    allocate(table%channel(embedded_n_rows), &",
         "         table%initial_mass(embedded_n_rows), &",
         "         table%birth_metallicity(embedded_n_rows), &",
-        "         table%age(embedded_n_rows), &",
+        "         table%age_gyr(embedded_n_rows), &",
         "         table%returned_mass(embedded_n_rows), &",
         "         table%remnant_mass(embedded_n_rows), &",
         "         table%energy(embedded_n_rows), &",
@@ -157,7 +159,7 @@ def generate(input_path: Path, output_path: Path) -> None:
         "    table%channel = embedded_channel",
         "    table%initial_mass = embedded_initial_mass",
         "    table%birth_metallicity = embedded_birth_metallicity",
-        "    table%age = embedded_age",
+        "    table%age_gyr = embedded_age_gyr",
         "    table%returned_mass = embedded_returned_mass",
         "    table%remnant_mass = embedded_remnant_mass",
         "    table%energy = embedded_energy",

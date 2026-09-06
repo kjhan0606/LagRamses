@@ -1,0 +1,49 @@
+{
+  "schema": "snrt-stellar-ramses-field-map",
+  "schema_version": 1,
+  "map_id": "stellar_ramses_field_map_v1_nvar18_no_aton",
+  "status": "contract_candidate",
+  "compile_time_assumptions": {
+    "ndim": 3,
+    "nvar": 18,
+    "metal": true,
+    "delayed_cooling": true,
+    "aton": false,
+    "n_stellar_elements": 11
+  },
+  "indices_one_based": {
+    "density": 1,
+    "momentum": [2, 3, 4],
+    "energy": 5,
+    "total_metal": 6,
+    "delayed_cooling": 7,
+    "elements": {
+      "H": 8,
+      "He": 9,
+      "C": 10,
+      "N": 11,
+      "O": 12,
+      "Ne": 13,
+      "Mg": 14,
+      "Si": 15,
+      "S": 16,
+      "Ca": 17,
+      "Fe": 18
+    }
+  },
+  "units_and_semantics": {
+    "density": "RAMSES code density",
+    "momentum": "RAMSES code momentum density",
+    "energy": "RAMSES code total-energy density",
+    "total_metal": "RAMSES code metal mass density; C..Fe ejecta only in the current deposition contract",
+    "delayed_cooling": "RAMSES delayed-cooling reservoir; SNII channel only",
+    "elements": "RAMSES code elemental mass densities",
+    "volume_is_physical": true
+  },
+  "source_of_index_formula": "read_hydro_params.f90: inener=ndim+3; imetal=nener+ndim+3; idelay=imetal+1; ichem=idelay+1 when delayed_cooling=.true. and aton=.false.",
+  "production_requirements": [
+    "The executable and this map must be built from the same source identity.",
+    "Any ATON or alternative NVAR layout requires a new versioned map and a separate binary.",
+    "Runtime startup must validate every active index and reject overlap or NVAR mismatch."
+  ]
+}

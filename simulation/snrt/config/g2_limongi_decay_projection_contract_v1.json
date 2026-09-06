@@ -1,0 +1,45 @@
+{
+  "schema": "snrt-g2-limongi-decay-projection-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_no_projection_horizon_approved",
+  "source_candidate_id": "limongi_chieffi_2018_cds",
+  "projection_horizons_yr": [0.0, 1000000.0, 1000000000.0, 13800000000.0],
+  "tracked_elements": ["H", "He", "C", "N", "O", "Ne", "Mg", "Si", "S", "Ca", "Fe"],
+  "radioactivedecay": {
+    "version": "0.6.1",
+    "dataset_name": "icrp107_ame2020_nubase2020",
+    "runtime_data_sha256": {
+      "decay_data.npz": "810c2f6c5907946450cac2d11b58e3f16169aaba97bfe2478da48f629389580d",
+      "c_scipy.npz": "34795a1a9248acdccab2bdf5c1f000bce2c84a3e0ec352b3e27cf24297c83f4b",
+      "c_inv_scipy.npz": "fa9c5bc98c86df14bdb3555a6f4072a69364ba427a49c6e6deac001d28361921"
+    },
+    "citation": "Malins & Lemoine 2022, Journal of Open Source Software 7, 3318, DOI 10.21105/joss.03318",
+    "code_license": "MIT",
+    "embedded_data_terms": "ICRP-107 and AME2020/NUBASE2020 terms apply; verify redistribution terms before production release"
+  },
+  "nubase2020_supplement": {
+    "path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/nuclear_decay/nubase_4.mas20",
+    "bytes": 761906,
+    "sha256": "1585a5eea86c5e17e90307c7e6e786d060049c4039e392a261ff6db977df9859",
+    "url": "https://www-nds.iaea.org/amdc/ame2020/nubase_4.mas20.txt",
+    "citation": "Kondev et al. 2021, Chinese Physics C 45, 030001, DOI 10.1088/1674-1137/abddae"
+  },
+  "supplement_policy": {
+    "expected_source_isotope_count": 333,
+    "expected_radioactivedecay_missing_count": 26,
+    "short_lived_missing_nuclides": "Require an evaluated 100-percent ground-state beta-minus or beta-plus/electron-capture branch in NUBASE2020, transfer mass to that immediate daughter using the NUBASE atomic-mass ratio, then continue with the pinned decay matrix.",
+    "long_lived_missing_nuclides": "Retain the parent when its evaluated half-life exceeds the largest projection horizon.",
+    "branching_or_unresolved_missing_nuclides": "Fail closed.",
+    "particle_emission_or_fission": "Fail closed."
+  },
+  "approval": {
+    "projection_horizon_approved": false,
+    "canonical_conversion_allowed": false,
+    "remaining_decisions": [
+      "Choose the abundance interpretation horizon or retain time-dependent radionuclides.",
+      "Approve the beta-decay rest-mass treatment and publication uncertainty.",
+      "Verify decay-data redistribution terms for the release package."
+    ]
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "field_ranges": {
+    "hydrogen_number_density_cm3": [
+      8.79218470145457e-06,
+      3.191656945238421e-05
+    ],
+    "temperature_k": [
+      1509.465806013045,
+      2782.925235246687
+    ],
+    "velocity_abs_cm_s": 5193912.7340768315
+  },
+  "geometry": {
+    "cell_width_cm": 1.3063818351140548e+22,
+    "left_edge_code": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "level": 9,
+    "right_edge_code": [
+      0.015625,
+      0.015625,
+      0.015625
+    ],
+    "shape": [
+      8,
+      8,
+      8
+    ],
+    "width_code": 0.015625
+  },
+  "native_hydro_field_order": [
+    "Density",
+    "x-velocity",
+    "y-velocity",
+    "z-velocity",
+    "Pressure",
+    "Metallicity",
+    "scalar_01",
+    "scalar_02",
+    "scalar_03",
+    "scalar_04",
+    "scalar_05",
+    "scalar_06",
+    "scalar_07",
+    "scalar_08",
+    "scalar_09",
+    "scalar_10",
+    "scalar_11"
+  ],
+  "not_available_in_probe": [
+    "stellar/AGN source catalogue and photon luminosity ledger",
+    "dust-to-metal field and dust relative abundance calibration",
+    "certified solar-normalized metallicity field",
+    "non-equilibrium H/He/H2 chemistry fields",
+    "particle and sink records (hydro-only view)"
+  ],
+  "notes": [
+    "The source snapshot is not modified.",
+    "This artifact validates only native AMR/hydro reading, pressure mapping, cgs conversion, and canonical HDF5 serialization.",
+    "The native descriptor is old/unversioned; the explicit ordered field list prevents yt from applying its NVAR>11 MHD fallback."
+  ],
+  "output": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_hydro_probe.h5",
+  "output_sha256": "784e1acc88fabab5d44156796120ab793d8c6158d62322bf301e6fa2ebe87e06",
+  "production_contract": {
+    "error": "static RT input is incomplete for production use: missing ['metallicity_solar', 'dust_to_metal', 'x_h2']",
+    "passed": false
+  },
+  "production_ready": false,
+  "record_type": "snrt_native_ramses_hydro_probe",
+  "schema_version": 1,
+  "source_info": "/gpfs/kjhan/Phase0_validation/10cMpc_h_z0_epsstar002/output_00011/info_00011.txt",
+  "status": "canonical_hydro_interface_preflight",
+  "thermal_initialization": {
+    "hydrogen_mass_fraction": 0.76,
+    "mean_molecular_weight": 0.6,
+    "scale_factor": null,
+    "source": "native thermal_pressure",
+    "thermal_atlas": null
+  }
+}

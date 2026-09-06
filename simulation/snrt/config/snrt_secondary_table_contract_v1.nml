@@ -1,0 +1,10 @@
+&snrt_secondary_table_contract
+ contract_version=1,
+ table_directory='/gpfs/kjhan/LRD_JWST/simulation/snrt/data/furlanetto_stoever_2010',
+ source_id='furlanetto_stoever_2010_21cmfast',
+ upstream_commit='892f98c80cfe985ca6b399ec6b51a3aa95124b11',
+ manifest_sha256='c74610c82414504263868704d8d5e913d7a46815c9803e30053780cd8e61d2a3',
+ license_name='MIT',
+ nenergy_contract=258,
+ nxi_contract=14
+/

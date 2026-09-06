@@ -22,10 +22,10 @@ module stellar_yield_provider
 contains
 
   subroutine evaluate_channel_cumulative(table, channel_id, initial_mass, &
-       birth_metallicity, age, state, ierr)
+       birth_metallicity, age_gyr, state, ierr)
     type(stellar_yield_table_t), intent(in) :: table
     integer, intent(in) :: channel_id
-    real(stellar_dp), intent(in) :: initial_mass, birth_metallicity, age
+    real(stellar_dp), intent(in) :: initial_mass, birth_metallicity, age_gyr
     type(stellar_cumulative_t), intent(out) :: state
     integer, intent(out) :: ierr
 
@@ -40,13 +40,13 @@ contains
 
     if (channel_id < 1 .or. channel_id > n_stellar_channels .or. &
          initial_mass <= 0.0_stellar_dp .or. birth_metallicity < 0.0_stellar_dp .or. &
-         age < 0.0_stellar_dp) then
+         age_gyr < 0.0_stellar_dp) then
        ierr = provider_err_argument
        return
     end if
 
     call interpolate_yield_row(table, channel_id, initial_mass, &
-         birth_metallicity, age, returned_mass, remnant_mass, energy, &
+         birth_metallicity, age_gyr, returned_mass, remnant_mass, energy, &
          momentum, ejected_mass, net_yield, interpolation_ierr)
     if (interpolation_ierr /= interpolation_ok) then
        ierr = provider_err_interpolation

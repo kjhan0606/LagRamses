@@ -18,6 +18,9 @@ module pm_commons
   real(dp),allocatable,dimension(:)::dMBH_coarse,dMEd_coarse,dMsmbh,dMBH_coarse_new
   real(dp),allocatable,dimension(:)::dMEd_coarse_new,dMsmbh_new,dMBH_coarse_all,dMEd_coarse_all,dMsmbh_all
   real(dp),allocatable,dimension(:)::Esave,Esave_new,Esave_all
+  ! Physical erg accepted during gas accretion, awaiting SNRT source commit.
+  ! Process-lifetime only: live SNRT sinks still require serial fresh start.
+  real(dp),allocatable,dimension(:)::agn_pending_erg
   real(dp),allocatable,dimension(:,:,:)::weighted_momentum
   real(dp),allocatable,dimension(:,:,:)::sink_stat,sink_stat_all
   real(dp),allocatable,dimension(:)::c_avgptr,v_avgptr,d_avgptr

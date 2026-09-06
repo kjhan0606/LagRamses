@@ -1,0 +1,37 @@
+{
+  "coarse": {
+    "absorbed_photons": 1.6142269680267097e+63,
+    "dt_myr": 0.05269920101051734,
+    "emitted_photons": 1.9291499547390222e+63,
+    "escaped_photons": 7.168241712916423e+59,
+    "fixed_point_max_fraction_residual": 3.5762786865234375e-07,
+    "h_ledger_relative_error": 4.01108399422632e-06,
+    "hei_ledger_relative_error": 2.7256943979676963e-07,
+    "heii_ledger_relative_error": 1.3107340030919826e-09,
+    "photons_in_domain": 3.142061625410209e+62,
+    "steps": 116
+  },
+  "fine": {
+    "absorbed_photons": 1.6128979805563304e+63,
+    "dt_myr": 0.02634960050525867,
+    "emitted_photons": 1.9291499547390222e+63,
+    "escaped_photons": 8.716860834162546e+59,
+    "fixed_point_max_fraction_residual": 1.0132789611816406e-06,
+    "h_ledger_relative_error": 3.97962531000982e-06,
+    "hei_ledger_relative_error": 1.6301497025838825e-07,
+    "heii_ledger_relative_error": 1.2320493797959414e-08,
+    "photons_in_domain": 3.1538028809927555e+62,
+    "steps": 232
+  },
+  "fixed_point_iterations": 16,
+  "passed": true,
+  "shape": [
+    32,
+    32,
+    32
+  ],
+  "sn_order": 4,
+  "x_heii_l1_coarse_to_fine": 0.0006527123623527586,
+  "x_heiii_l1_coarse_to_fine": 6.179264892125502e-05,
+  "x_hii_l1_coarse_to_fine": 0.00027901591965928674
+}

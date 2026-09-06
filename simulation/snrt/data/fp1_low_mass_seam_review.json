@@ -1,0 +1,64 @@
+{
+  "blockers": [
+    "no_approved_lifetime_source_or_age_resolved_release_history",
+    "lifetime_integrated_ejecta_are_not_an_age_resolved_source",
+    "terminal_fate_and_remnant_ownership_are_not_approved",
+    "Huscher_population_tables_are_IMF_weighted_and_second_convolution_is_forbidden"
+  ],
+  "candidate": {
+    "article_doi": "10.3847/1538-4357/ae0199",
+    "audit": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_huscher2025_candidate_audit.json",
+      "sha256": "f80cae910d887ea2ad82d656c9c7bb7b5b86d1ffcd637713ee75c898edf6d812"
+    },
+    "candidate_id": "huscher2025_agb",
+    "contract": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_huscher2025_candidate_contract_v1.json",
+      "sha256": "af9d7c200ba80f8c60e92c14ff6653c96c74e12044f9a64fe7586c57c12026e5"
+    },
+    "data_doi": "10.5281/zenodo.17635255",
+    "license": "cc-by-4.0",
+    "mass_grid_msun": [
+      0.8,
+      1.0,
+      1.5,
+      2.0,
+      2.5,
+      3.0,
+      3.5,
+      4.0,
+      4.5,
+      5.0,
+      6.0,
+      7.0
+    ],
+    "yield_semantics": "gross isotope mass ejected over the stellar lifetime in Msun per initial star"
+  },
+  "canonical_conversion_allowed": false,
+  "gate": "F-P1",
+  "interpretation": "The candidate reaches both 0.8 and 1.0 Msun endpoints, but its files contain lifetime-integrated ejecta rather than an approved age-resolved lifetime/fate map. The F-P1 seam therefore remains unresolved and contributes no canonical feedback.",
+  "production_ready": false,
+  "required_next_inputs": [
+    "immutable_lifetime_source_and_age_convention",
+    "per_star_or_explicitly_approved_terminal_lumping_release_history",
+    "non_overlapping_AGB_wind_and_terminal_remnant_ownership",
+    "named_physics_approval_id_and_source_package_fingerprint"
+  ],
+  "resolved": false,
+  "runtime_activation_allowed": false,
+  "schema": "snrt-fp1-low-mass-lifetime-seam-review",
+  "schema_version": 1,
+  "seam": {
+    "endpoint_coverage": {
+      "0.8": true,
+      "1.0": true
+    },
+    "fate_map_status": "no_approved_lifetime_or_terminal_fate_source",
+    "id": "low_mass_lifetime_seam",
+    "mass_msun": [
+      0.8,
+      1.0
+    ]
+  },
+  "status": "review_only_candidate_covers_endpoints_lifetime_unresolved"
+}

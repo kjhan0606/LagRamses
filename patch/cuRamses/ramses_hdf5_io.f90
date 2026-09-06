@@ -207,6 +207,117 @@ contains
     call h5tclose_f(type_id, ierr)
   end subroutine hdf5_read_attr_int8
 
+  subroutine hdf5_read_attr_int_checked(loc_id, name, val, status)
+    implicit none
+    integer(HID_T), intent(in) :: loc_id
+    character(len=*), intent(in) :: name
+    integer, intent(out) :: val
+    integer, intent(out) :: status
+    integer(HID_T) :: attr_id, space_id
+    integer(HSIZE_T), dimension(1) :: dims = (/1/), maxdims
+    integer :: ierr, rank
+    logical :: have_attr, have_space
+
+    status = 1
+    have_attr = .false.
+    have_space = .false.
+    call h5aopen_f(loc_id, trim(name), attr_id, ierr)
+    if(ierr /= 0) then
+       status = 10
+       goto 930
+    end if
+    have_attr = .true.
+    call h5aget_space_f(attr_id, space_id, ierr)
+    if(ierr /= 0) then
+       status = 11
+       goto 930
+    end if
+    have_space = .true.
+    call h5sget_simple_extent_ndims_f(space_id, rank, ierr)
+    if(ierr /= 0 .or. (rank /= 0 .and. rank /= 1)) then
+       status = 12
+       goto 930
+    end if
+    if(rank == 1) then
+       call h5sget_simple_extent_dims_f(space_id, dims, maxdims, ierr)
+       if(ierr < 0 .or. ierr /= rank .or. dims(1) /= 1_HSIZE_T) then
+          status = 13
+          goto 930
+       end if
+    end if
+    call h5aread_f(attr_id, H5T_NATIVE_INTEGER, val, dims, ierr)
+    if(ierr /= 0) then
+       status = 14
+       goto 930
+    end if
+    status = 0
+930 continue
+    if(have_space) call h5sclose_f(space_id, ierr)
+    if(have_attr) call h5aclose_f(attr_id, ierr)
+  end subroutine hdf5_read_attr_int_checked
+
+  subroutine hdf5_read_attr_int8_checked(loc_id, name, val, status)
+    implicit none
+    integer(HID_T), intent(in) :: loc_id
+    character(len=*), intent(in) :: name
+    integer(i8b), intent(out) :: val
+    integer, intent(out) :: status
+    integer(HID_T) :: attr_id, space_id, type_id
+    integer(HSIZE_T), dimension(1) :: dims = (/1/), maxdims
+    integer :: ierr, rank
+    logical :: have_attr, have_space, have_type
+
+    status = 1
+    have_attr = .false.
+    have_space = .false.
+    have_type = .false.
+    call h5aopen_f(loc_id, trim(name), attr_id, ierr)
+    if(ierr /= 0) then
+       status = 10
+       goto 940
+    end if
+    have_attr = .true.
+    call h5aget_space_f(attr_id, space_id, ierr)
+    if(ierr /= 0) then
+       status = 11
+       goto 940
+    end if
+    have_space = .true.
+    call h5sget_simple_extent_ndims_f(space_id, rank, ierr)
+    if(ierr /= 0 .or. (rank /= 0 .and. rank /= 1)) then
+       status = 12
+       goto 940
+    end if
+    if(rank == 1) then
+       call h5sget_simple_extent_dims_f(space_id, dims, maxdims, ierr)
+       if(ierr < 0 .or. ierr /= rank .or. dims(1) /= 1_HSIZE_T) then
+          status = 13
+          goto 940
+       end if
+    end if
+    call h5tcopy_f(H5T_NATIVE_INTEGER, type_id, ierr)
+    if(ierr /= 0) then
+       status = 14
+       goto 940
+    end if
+    have_type = .true.
+    call h5tset_size_f(type_id, int(8, SIZE_T), ierr)
+    if(ierr /= 0) then
+       status = 15
+       goto 940
+    end if
+    call h5aread_f(attr_id, type_id, val, dims, ierr)
+    if(ierr /= 0) then
+       status = 16
+       goto 940
+    end if
+    status = 0
+940 continue
+    if(have_type) call h5tclose_f(type_id, ierr)
+    if(have_space) call h5sclose_f(space_id, ierr)
+    if(have_attr) call h5aclose_f(attr_id, ierr)
+  end subroutine hdf5_read_attr_int8_checked
+
   subroutine hdf5_read_attr_dp(loc_id, name, val)
     implicit none
     integer(HID_T), intent(in) :: loc_id
@@ -219,6 +330,55 @@ contains
     call h5aread_f(attr_id, H5T_NATIVE_DOUBLE, val, dims, ierr)
     call h5aclose_f(attr_id, ierr)
   end subroutine hdf5_read_attr_dp
+
+  subroutine hdf5_read_attr_dp_checked(loc_id, name, val, status)
+    implicit none
+    integer(HID_T), intent(in) :: loc_id
+    character(len=*), intent(in) :: name
+    real(dp), intent(out) :: val
+    integer, intent(out) :: status
+    integer(HID_T) :: attr_id, space_id
+    integer(HSIZE_T), dimension(1) :: dims = (/1/), maxdims
+    integer :: ierr, rank
+    logical :: have_attr, have_space
+
+    status = 1
+    have_attr = .false.
+    have_space = .false.
+    call h5aopen_f(loc_id, trim(name), attr_id, ierr)
+    if(ierr /= 0) then
+       status = 10
+       goto 950
+    end if
+    have_attr = .true.
+    call h5aget_space_f(attr_id, space_id, ierr)
+    if(ierr /= 0) then
+       status = 11
+       goto 950
+    end if
+    have_space = .true.
+    call h5sget_simple_extent_ndims_f(space_id, rank, ierr)
+    if(ierr /= 0 .or. (rank /= 0 .and. rank /= 1)) then
+       status = 12
+       goto 950
+    end if
+    if(rank == 1) then
+       call h5sget_simple_extent_dims_f(space_id, dims, maxdims, ierr)
+       if(ierr < 0 .or. ierr /= rank .or. dims(1) /= 1_HSIZE_T) then
+          status = 13
+          goto 950
+       end if
+    end if
+    call h5aread_f(attr_id, H5T_NATIVE_DOUBLE, val, dims, ierr)
+    if(ierr /= 0) then
+       status = 14
+       goto 950
+    end if
+    status = 0
+950 continue
+    if(have_space) call h5sclose_f(space_id, ierr)
+    if(have_attr) call h5aclose_f(attr_id, ierr)
+  end subroutine hdf5_read_attr_dp_checked
 
   subroutine hdf5_read_attr_string(loc_id, name, val)
     implicit none
@@ -238,6 +398,71 @@ contains
     call h5aclose_f(attr_id, ierr)
     call h5tclose_f(type_id, ierr)
   end subroutine hdf5_read_attr_string
+
+  subroutine hdf5_read_attr_string_checked(loc_id, name, val, status)
+    implicit none
+    integer(HID_T), intent(in) :: loc_id
+    character(len=*), intent(in) :: name
+    character(len=*), intent(out) :: val
+    integer, intent(out) :: status
+    integer(HID_T) :: attr_id, space_id, type_id
+    integer(HSIZE_T), dimension(1) :: dims = (/1/), maxdims
+    integer(SIZE_T) :: slen
+    integer :: ierr, rank
+    logical :: have_attr, have_space, have_type
+
+    status = 1
+    have_attr = .false.
+    have_space = .false.
+    have_type = .false.
+    val = ''
+    call h5aopen_f(loc_id, trim(name), attr_id, ierr)
+    if(ierr /= 0) then
+       status = 10
+       goto 960
+    end if
+    have_attr = .true.
+    call h5aget_space_f(attr_id, space_id, ierr)
+    if(ierr /= 0) then
+       status = 11
+       goto 960
+    end if
+    have_space = .true.
+    call h5sget_simple_extent_ndims_f(space_id, rank, ierr)
+    if(ierr /= 0 .or. (rank /= 0 .and. rank /= 1)) then
+       status = 12
+       goto 960
+    end if
+    if(rank == 1) then
+       call h5sget_simple_extent_dims_f(space_id, dims, maxdims, ierr)
+       if(ierr < 0 .or. ierr /= rank .or. dims(1) /= 1_HSIZE_T) then
+          status = 13
+          goto 960
+       end if
+    end if
+    slen = len(val)
+    call h5tcopy_f(H5T_NATIVE_CHARACTER, type_id, ierr)
+    if(ierr /= 0) then
+       status = 14
+       goto 960
+    end if
+    have_type = .true.
+    call h5tset_size_f(type_id, slen, ierr)
+    if(ierr /= 0) then
+       status = 15
+       goto 960
+    end if
+    call h5aread_f(attr_id, type_id, val, dims, ierr)
+    if(ierr /= 0) then
+       status = 16
+       goto 960
+    end if
+    status = 0
+960 continue
+    if(have_type) call h5tclose_f(type_id, ierr)
+    if(have_space) call h5sclose_f(space_id, ierr)
+    if(have_attr) call h5aclose_f(attr_id, ierr)
+  end subroutine hdf5_read_attr_string_checked
 
   !=========================================================================
   ! 1D array attribute write/read
@@ -273,6 +498,60 @@ contains
     call h5aread_f(attr_id, H5T_NATIVE_DOUBLE, arr, dims, ierr)
     call h5aclose_f(attr_id, ierr)
   end subroutine hdf5_read_attr_1d_dp
+
+  subroutine hdf5_read_attr_1d_dp_checked(loc_id, name, arr, n, status)
+    implicit none
+    integer(HID_T), intent(in) :: loc_id
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: n
+    real(dp), intent(out) :: arr(n)
+    integer, intent(out) :: status
+    integer(HID_T) :: attr_id, space_id
+    integer(HSIZE_T), dimension(1) :: dims, maxdims
+    integer :: ierr, rank
+    logical :: have_attr, have_space
+
+    status = 1
+    have_attr = .false.
+    have_space = .false.
+    if(n < 1) then
+       status = 2
+       return
+    end if
+    call h5aopen_f(loc_id, trim(name), attr_id, ierr)
+    if(ierr /= 0) then
+       status = 10
+       goto 970
+    end if
+    have_attr = .true.
+    call h5aget_space_f(attr_id, space_id, ierr)
+    if(ierr /= 0) then
+       status = 11
+       goto 970
+    end if
+    have_space = .true.
+    call h5sget_simple_extent_ndims_f(space_id, rank, ierr)
+    if(ierr /= 0 .or. rank /= 1) then
+       status = 12
+       goto 970
+    end if
+    dims(1) = 0_HSIZE_T
+    maxdims(1) = 0_HSIZE_T
+    call h5sget_simple_extent_dims_f(space_id, dims, maxdims, ierr)
+    if(ierr < 0 .or. ierr /= rank .or. dims(1) /= int(n, HSIZE_T)) then
+       status = 13
+       goto 970
+    end if
+    call h5aread_f(attr_id, H5T_NATIVE_DOUBLE, arr, dims, ierr)
+    if(ierr /= 0) then
+       status = 14
+       goto 970
+    end if
+    status = 0
+970 continue
+    if(have_space) call h5sclose_f(space_id, ierr)
+    if(have_attr) call h5aclose_f(attr_id, ierr)
+  end subroutine hdf5_read_attr_1d_dp_checked
 
   !=========================================================================
   ! Dataset write: all ranks collectively write with hyperslab selection
@@ -422,6 +701,126 @@ contains
     call h5dclose_f(dset_id, ierr)
   end subroutine hdf5_read_dataset_1d_dp
 
+  subroutine hdf5_read_dataset_1d_dp_checked(grp_id, name, data, nlocal, &
+       offset_global, expected_total, status)
+    ! Checked counterpart used by restart-critical state.  The historical
+    ! helper above intentionally has no status return because many old
+    ! callers predate fail-closed restart handling.  Do not use that relaxed
+    ! path for serialized stellar release cursors.
+    implicit none
+    include 'mpif.h'
+    integer(HID_T), intent(in) :: grp_id
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: nlocal
+    integer(i8b), intent(in) :: offset_global, expected_total
+    real(dp), intent(out) :: data(nlocal)
+    integer, intent(out) :: status
+    integer(HID_T) :: dset_id, dspace_id, memspace_id, plist_id
+    integer(HSIZE_T), dimension(1) :: dims, maxdims, ldims, offset, count
+    integer :: ierr, rank
+    logical :: have_dset, have_dspace, have_memspace, have_plist
+
+    status = 1
+    have_dset = .false.
+    have_dspace = .false.
+    have_memspace = .false.
+    have_plist = .false.
+
+    if(nlocal < 0 .or. offset_global < 0_i8b .or. expected_total < 0_i8b) then
+       status = 2
+       return
+    end if
+    if(offset_global > expected_total) then
+       status = 3
+       return
+    end if
+    if(int(nlocal, i8b) > expected_total-offset_global) then
+       status = 4
+       return
+    end if
+
+    call h5dopen_f(grp_id, trim(name), dset_id, ierr)
+    if(ierr /= 0) then
+       status = 10
+       goto 900
+    end if
+    have_dset = .true.
+    call h5dget_space_f(dset_id, dspace_id, ierr)
+    if(ierr /= 0) then
+       status = 11
+       goto 900
+    end if
+    have_dspace = .true.
+    call h5sget_simple_extent_ndims_f(dspace_id, rank, ierr)
+    if(ierr /= 0 .or. rank /= 1) then
+       status = 12
+       goto 900
+    end if
+    call h5sget_simple_extent_dims_f(dspace_id, dims, maxdims, ierr)
+    ! HDF5's Fortran wrapper returns the dataspace rank on success (not zero)
+    ! and -1 on failure; the dimensions themselves are written to dims.
+    if(ierr < 0 .or. ierr /= rank) then
+       status = 13
+       goto 900
+    end if
+    if(dims(1) /= expected_total) then
+       status = 14
+       goto 900
+    end if
+
+    offset(1) = int(offset_global, HSIZE_T)
+    count(1) = int(nlocal, HSIZE_T)
+    if(nlocal > 0) then
+       call h5sselect_hyperslab_f(dspace_id, H5S_SELECT_SET_F, offset, count, ierr)
+    else
+       call h5sselect_none_f(dspace_id, ierr)
+    end if
+    if(ierr /= 0) then
+       status = 20
+       goto 900
+    end if
+
+    ldims(1) = int(nlocal, HSIZE_T)
+    call h5screate_simple_f(1, ldims, memspace_id, ierr)
+    if(ierr /= 0) then
+       status = 21
+       goto 900
+    end if
+    have_memspace = .true.
+    if(nlocal == 0) then
+       call h5sselect_none_f(memspace_id, ierr)
+       if(ierr /= 0) then
+          status = 22
+          goto 900
+       end if
+    end if
+
+    call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, ierr)
+    if(ierr /= 0) then
+       status = 23
+       goto 900
+    end if
+    have_plist = .true.
+    call h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, ierr)
+    if(ierr /= 0) then
+       status = 24
+       goto 900
+    end if
+    call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, ldims, ierr, &
+         mem_space_id=memspace_id, file_space_id=dspace_id, xfer_prp=plist_id)
+    if(ierr /= 0) then
+       status = 25
+       goto 900
+    end if
+
+    status = 0
+900 continue
+    if(have_plist) call h5pclose_f(plist_id, ierr)
+    if(have_memspace) call h5sclose_f(memspace_id, ierr)
+    if(have_dspace) call h5sclose_f(dspace_id, ierr)
+    if(have_dset) call h5dclose_f(dset_id, ierr)
+  end subroutine hdf5_read_dataset_1d_dp_checked
+
   subroutine hdf5_read_dataset_1d_int(grp_id, name, data, nlocal, offset_global)
     implicit none
     include 'mpif.h'
@@ -454,6 +853,120 @@ contains
     call h5sclose_f(dspace_id, ierr)
     call h5dclose_f(dset_id, ierr)
   end subroutine hdf5_read_dataset_1d_int
+
+  subroutine hdf5_read_dataset_1d_int_checked(grp_id, name, data, nlocal, &
+       offset_global, expected_total, status)
+    implicit none
+    include 'mpif.h'
+    integer(HID_T), intent(in) :: grp_id
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: nlocal
+    integer(i8b), intent(in) :: offset_global, expected_total
+    integer, intent(out) :: data(nlocal)
+    integer, intent(out) :: status
+    integer(HID_T) :: dset_id, dspace_id, memspace_id, plist_id
+    integer(HSIZE_T), dimension(1) :: dims, maxdims, ldims, offset, count
+    integer :: ierr, rank
+    logical :: have_dset, have_dspace, have_memspace, have_plist
+
+    status = 1
+    have_dset = .false.
+    have_dspace = .false.
+    have_memspace = .false.
+    have_plist = .false.
+
+    if(nlocal < 0 .or. offset_global < 0_i8b .or. expected_total < 0_i8b) then
+       status = 2
+       return
+    end if
+    if(offset_global > expected_total) then
+       status = 3
+       return
+    end if
+    if(int(nlocal, i8b) > expected_total-offset_global) then
+       status = 4
+       return
+    end if
+
+    call h5dopen_f(grp_id, trim(name), dset_id, ierr)
+    if(ierr /= 0) then
+       status = 10
+       goto 900
+    end if
+    have_dset = .true.
+    call h5dget_space_f(dset_id, dspace_id, ierr)
+    if(ierr /= 0) then
+       status = 11
+       goto 900
+    end if
+    have_dspace = .true.
+    call h5sget_simple_extent_ndims_f(dspace_id, rank, ierr)
+    if(ierr /= 0 .or. rank /= 1) then
+       status = 12
+       goto 900
+    end if
+    call h5sget_simple_extent_dims_f(dspace_id, dims, maxdims, ierr)
+    if(ierr < 0 .or. ierr /= rank) then
+       status = 13
+       goto 900
+    end if
+    if(dims(1) /= expected_total) then
+       status = 14
+       goto 900
+    end if
+
+    offset(1) = int(offset_global, HSIZE_T)
+    count(1) = int(nlocal, HSIZE_T)
+    if(nlocal > 0) then
+       call h5sselect_hyperslab_f(dspace_id, H5S_SELECT_SET_F, offset, count, ierr)
+    else
+       call h5sselect_none_f(dspace_id, ierr)
+    end if
+    if(ierr /= 0) then
+       status = 20
+       goto 900
+    end if
+
+    ldims(1) = int(nlocal, HSIZE_T)
+    call h5screate_simple_f(1, ldims, memspace_id, ierr)
+    if(ierr /= 0) then
+       status = 21
+       goto 900
+    end if
+    have_memspace = .true.
+    if(nlocal == 0) then
+       call h5sselect_none_f(memspace_id, ierr)
+       if(ierr /= 0) then
+          status = 22
+          goto 900
+       end if
+    end if
+
+    call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, ierr)
+    if(ierr /= 0) then
+       status = 23
+       goto 900
+    end if
+    have_plist = .true.
+    call h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, ierr)
+    if(ierr /= 0) then
+       status = 24
+       goto 900
+    end if
+    call h5dread_f(dset_id, H5T_NATIVE_INTEGER, data, ldims, ierr, &
+         mem_space_id=memspace_id, file_space_id=dspace_id, xfer_prp=plist_id)
+    if(ierr /= 0) then
+       status = 25
+       goto 900
+    end if
+
+    status = 0
+900 continue
+    if(have_plist) call h5pclose_f(plist_id, ierr)
+    if(have_memspace) call h5sclose_f(memspace_id, ierr)
+    if(have_dspace) call h5sclose_f(dspace_id, ierr)
+    if(have_dset) call h5dclose_f(dset_id, ierr)
+  end subroutine hdf5_read_dataset_1d_int_checked
 
   subroutine hdf5_read_dataset_1d_int8(grp_id, name, data, nlocal, offset_global)
     implicit none
@@ -491,6 +1004,133 @@ contains
     call h5sclose_f(dspace_id, ierr)
     call h5dclose_f(dset_id, ierr)
   end subroutine hdf5_read_dataset_1d_int8
+
+  subroutine hdf5_read_dataset_1d_int8_checked(grp_id, name, data, nlocal, &
+       offset_global, expected_total, status)
+    implicit none
+    include 'mpif.h'
+    integer(HID_T), intent(in) :: grp_id
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: nlocal
+    integer(i8b), intent(in) :: offset_global, expected_total
+    integer(i8b), intent(out) :: data(nlocal)
+    integer, intent(out) :: status
+    integer(HID_T) :: dset_id, dspace_id, memspace_id, plist_id, type_id
+    integer(HSIZE_T), dimension(1) :: dims, maxdims, ldims, offset, count
+    integer :: ierr, rank
+    logical :: have_dset, have_dspace, have_memspace, have_plist, have_type
+
+    status = 1
+    have_dset = .false.
+    have_dspace = .false.
+    have_memspace = .false.
+    have_plist = .false.
+    have_type = .false.
+
+    if(nlocal < 0 .or. offset_global < 0_i8b .or. expected_total < 0_i8b) then
+       status = 2
+       return
+    end if
+    if(offset_global > expected_total) then
+       status = 3
+       return
+    end if
+    if(int(nlocal, i8b) > expected_total-offset_global) then
+       status = 4
+       return
+    end if
+
+    call h5dopen_f(grp_id, trim(name), dset_id, ierr)
+    if(ierr /= 0) then
+       status = 10
+       goto 910
+    end if
+    have_dset = .true.
+    call h5dget_space_f(dset_id, dspace_id, ierr)
+    if(ierr /= 0) then
+       status = 11
+       goto 910
+    end if
+    have_dspace = .true.
+    call h5sget_simple_extent_ndims_f(dspace_id, rank, ierr)
+    if(ierr /= 0 .or. rank /= 1) then
+       status = 12
+       goto 910
+    end if
+    call h5sget_simple_extent_dims_f(dspace_id, dims, maxdims, ierr)
+    if(ierr < 0 .or. ierr /= rank) then
+       status = 13
+       goto 910
+    end if
+    if(dims(1) /= expected_total) then
+       status = 14
+       goto 910
+    end if
+
+    offset(1) = int(offset_global, HSIZE_T)
+    count(1) = int(nlocal, HSIZE_T)
+    if(nlocal > 0) then
+       call h5sselect_hyperslab_f(dspace_id, H5S_SELECT_SET_F, offset, count, ierr)
+    else
+       call h5sselect_none_f(dspace_id, ierr)
+    end if
+    if(ierr /= 0) then
+       status = 20
+       goto 910
+    end if
+
+    ldims(1) = int(nlocal, HSIZE_T)
+    call h5screate_simple_f(1, ldims, memspace_id, ierr)
+    if(ierr /= 0) then
+       status = 21
+       goto 910
+    end if
+    have_memspace = .true.
+    if(nlocal == 0) then
+       call h5sselect_none_f(memspace_id, ierr)
+       if(ierr /= 0) then
+          status = 22
+          goto 910
+       end if
+    end if
+
+    call h5tcopy_f(H5T_NATIVE_INTEGER, type_id, ierr)
+    if(ierr /= 0) then
+       status = 23
+       goto 910
+    end if
+    have_type = .true.
+    call h5tset_size_f(type_id, int(8, SIZE_T), ierr)
+    if(ierr /= 0) then
+       status = 24
+       goto 910
+    end if
+    call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, ierr)
+    if(ierr /= 0) then
+       status = 25
+       goto 910
+    end if
+    have_plist = .true.
+    call h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, ierr)
+    if(ierr /= 0) then
+       status = 26
+       goto 910
+    end if
+    call h5dread_f(dset_id, type_id, data, ldims, ierr, &
+         mem_space_id=memspace_id, file_space_id=dspace_id, xfer_prp=plist_id)
+    if(ierr /= 0) then
+       status = 27
+       goto 910
+    end if
+
+    status = 0
+910 continue
+    if(have_plist) call h5pclose_f(plist_id, ierr)
+    if(have_type) call h5tclose_f(type_id, ierr)
+    if(have_memspace) call h5sclose_f(memspace_id, ierr)
+    if(have_dspace) call h5sclose_f(dspace_id, ierr)
+    if(have_dset) call h5dclose_f(dset_id, ierr)
+  end subroutine hdf5_read_dataset_1d_int8_checked
 
   !=========================================================================
   ! Rank-0-only dataset write/read (for sinks, small metadata)
@@ -677,6 +1317,269 @@ contains
     call h5dclose_f(dset_id, ierr)
   end subroutine hdf5_read_dataset_all_int
 
+  subroutine hdf5_read_dataset_all_int_checked(grp_id, name, data, n, status)
+    ! Checked rank-0 read + broadcast for restart metadata.  Unlike the
+    ! historical helper above, every HDF5/MPI stage is reduced to all ranks
+    ! before any rank proceeds, so a missing or malformed count array cannot
+    ! leave the other ranks waiting in a broadcast with untrusted offsets.
+    implicit none
+    include 'mpif.h'
+    integer(HID_T), intent(in) :: grp_id
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: n
+    integer, intent(out) :: data(n)
+    integer, intent(out) :: status
+    integer(HID_T) :: dset_id, dspace_id, memspace_id, plist_id
+    integer(HSIZE_T), dimension(1) :: dims, maxdims, ldims
+    integer(HSIZE_T), dimension(1) :: offset, count
+    integer :: ierr, myrank, local_status, global_status, rank
+    logical :: have_dset, have_dspace, have_memspace, have_plist
+
+    call MPI_Comm_rank(MPI_COMM_WORLD, myrank, ierr)
+    status = 0
+    local_status = 0
+    have_dset = .false.
+    have_dspace = .false.
+    have_memspace = .false.
+    have_plist = .false.
+
+    if(n <= 0) local_status = 2
+    if(local_status == 0) then
+       call h5dopen_f(grp_id, trim(name), dset_id, ierr)
+       if(ierr /= 0) then
+          local_status = 10
+       else
+          have_dset = .true.
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 920
+    end if
+
+    if(myrank == 0) then
+       call h5dget_space_f(dset_id, dspace_id, ierr)
+       if(ierr /= 0) then
+          local_status = 11
+       else
+          have_dspace = .true.
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 920
+    end if
+
+    if(myrank == 0) then
+       call h5sget_simple_extent_ndims_f(dspace_id, rank, ierr)
+       if(ierr /= 0 .or. rank /= 1) then
+          local_status = 12
+       else
+          call h5sget_simple_extent_dims_f(dspace_id, dims, maxdims, ierr)
+          if(ierr < 0 .or. ierr /= rank) then
+             local_status = 13
+          else if(dims(1) /= int(n, HSIZE_T)) then
+             local_status = 14
+          end if
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 920
+    end if
+
+    if(myrank == 0) then
+       ldims(1) = int(n, HSIZE_T)
+       offset(1) = 0_HSIZE_T
+       count(1) = int(n, HSIZE_T)
+       call h5sselect_hyperslab_f(dspace_id, H5S_SELECT_SET_F, offset, count, ierr)
+       if(ierr /= 0) then
+          local_status = 20
+       else
+          call h5screate_simple_f(1, ldims, memspace_id, ierr)
+          if(ierr /= 0) then
+             local_status = 21
+          else
+             have_memspace = .true.
+          end if
+       end if
+    end if
+    if(myrank == 0 .and. local_status == 0) then
+       call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, ierr)
+       if(ierr /= 0) then
+          local_status = 22
+       else
+          have_plist = .true.
+          call h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_INDEPENDENT_F, ierr)
+          if(ierr /= 0) local_status = 23
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 920
+    end if
+
+    if(myrank == 0) then
+       call h5dread_f(dset_id, H5T_NATIVE_INTEGER, data, ldims, ierr, &
+            mem_space_id=memspace_id, file_space_id=dspace_id, xfer_prp=plist_id)
+       if(ierr /= 0) local_status = 24
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 920
+    end if
+    call MPI_Bcast(data, n, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+    if(ierr /= 0) status = 25
+
+920 continue
+    if(myrank == 0) then
+       if(have_plist) call h5pclose_f(plist_id, ierr)
+       if(have_memspace) call h5sclose_f(memspace_id, ierr)
+       if(have_dspace) call h5sclose_f(dspace_id, ierr)
+    end if
+    if(have_dset) call h5dclose_f(dset_id, ierr)
+  end subroutine hdf5_read_dataset_all_int_checked
+
+  subroutine hdf5_read_dataset_all_dp_checked(grp_id, name, data, n, status)
+    ! Checked rank-0 read + broadcast for restart metadata stored as doubles.
+    implicit none
+    include 'mpif.h'
+    integer(HID_T), intent(in) :: grp_id
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: n
+    real(dp), intent(out) :: data(n)
+    integer, intent(out) :: status
+    integer(HID_T) :: dset_id, dspace_id, memspace_id, plist_id
+    integer(HSIZE_T), dimension(1) :: dims, maxdims, ldims
+    integer(HSIZE_T), dimension(1) :: offset, count
+    integer :: ierr, myrank, local_status, global_status, rank
+    logical :: have_dset, have_dspace, have_memspace, have_plist
+
+    call MPI_Comm_rank(MPI_COMM_WORLD, myrank, ierr)
+    status = 0
+    local_status = 0
+    have_dset = .false.
+    have_dspace = .false.
+    have_memspace = .false.
+    have_plist = .false.
+
+    if(n <= 0) local_status = 2
+    if(local_status == 0) then
+       call h5dopen_f(grp_id, trim(name), dset_id, ierr)
+       if(ierr /= 0) then
+          local_status = 10
+       else
+          have_dset = .true.
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 950
+    end if
+
+    if(myrank == 0) then
+       call h5dget_space_f(dset_id, dspace_id, ierr)
+       if(ierr /= 0) then
+          local_status = 11
+       else
+          have_dspace = .true.
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 950
+    end if
+
+    if(myrank == 0) then
+       call h5sget_simple_extent_ndims_f(dspace_id, rank, ierr)
+       if(ierr /= 0 .or. rank /= 1) then
+          local_status = 12
+       else
+          call h5sget_simple_extent_dims_f(dspace_id, dims, maxdims, ierr)
+          if(ierr < 0 .or. ierr /= rank) then
+             local_status = 13
+          else if(dims(1) /= int(n, HSIZE_T)) then
+             local_status = 14
+          end if
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 950
+    end if
+
+    if(myrank == 0) then
+       ldims(1) = int(n, HSIZE_T)
+       offset(1) = 0_HSIZE_T
+       count(1) = int(n, HSIZE_T)
+       call h5sselect_hyperslab_f(dspace_id, H5S_SELECT_SET_F, offset, count, ierr)
+       if(ierr /= 0) then
+          local_status = 20
+       else
+          call h5screate_simple_f(1, ldims, memspace_id, ierr)
+          if(ierr /= 0) then
+             local_status = 21
+          else
+             have_memspace = .true.
+          end if
+       end if
+    end if
+    if(myrank == 0 .and. local_status == 0) then
+       call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, ierr)
+       if(ierr /= 0) then
+          local_status = 22
+       else
+          have_plist = .true.
+          call h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_INDEPENDENT_F, ierr)
+          if(ierr /= 0) local_status = 23
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 950
+    end if
+
+    if(myrank == 0) then
+       call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, ldims, ierr, &
+            mem_space_id=memspace_id, file_space_id=dspace_id, xfer_prp=plist_id)
+       if(ierr /= 0) local_status = 24
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 950
+    end if
+    call MPI_Bcast(data, n, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
+    if(ierr /= 0) status = 25
+
+950 continue
+    if(myrank == 0) then
+       if(have_plist) call h5pclose_f(plist_id, ierr)
+       if(have_memspace) call h5sclose_f(memspace_id, ierr)
+       if(have_dspace) call h5sclose_f(dspace_id, ierr)
+    end if
+    if(have_dset) call h5dclose_f(dset_id, ierr)
+  end subroutine hdf5_read_dataset_all_dp_checked
+
   subroutine hdf5_read_dataset_chunk_dp(grp_id, name, data, n, offset_global)
     ! Replicate a chunk [offset_global+1 .. offset_global+n] of dataset to all
     ! ranks via rank-0 read + MPI_Bcast. Used by streaming varcpu restore to
@@ -826,6 +1729,330 @@ contains
     call h5sclose_f(dspace_id, ierr)
     call h5dclose_f(dset_id, ierr)
   end subroutine hdf5_read_dataset_collective_int
+
+  subroutine hdf5_read_dataset_collective_dp_checked(grp_id, name, data, n, &
+       offset_global, expected_total, status)
+    ! Fail-closed counterpart of the legacy collective reader.  Every rank
+    ! validates the one-dimensional dataset and its own hyperslab before the
+    ! collective H5Dread.  This is used for AMR payloads whose offsets are
+    ! derived from checkpoint count arrays; a malformed extent must therefore
+    ! stop all ranks before any untrusted selection is issued.
+    implicit none
+    include 'mpif.h'
+    integer(HID_T), intent(in) :: grp_id
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: n
+    integer(i8b), intent(in) :: offset_global, expected_total
+    real(dp), intent(out) :: data(*)
+    integer, intent(out) :: status
+    integer(HID_T) :: dset_id, dspace_id, memspace_id, plist_id
+    integer(HSIZE_T), dimension(1) :: dims, maxdims, ldims, offset, count
+    integer :: ierr, rank, local_status, global_status
+    logical :: have_dset, have_dspace, have_memspace, have_plist
+
+    status = 0
+    local_status = 0
+    have_dset = .false.
+    have_dspace = .false.
+    have_memspace = .false.
+    have_plist = .false.
+
+    if(n < 0 .or. offset_global < 0_i8b .or. expected_total < 0_i8b) then
+       local_status = 2
+    else if(offset_global > expected_total) then
+       local_status = 3
+    else if(int(n, i8b) > expected_total-offset_global) then
+       local_status = 4
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1010
+    end if
+
+    call h5dopen_f(grp_id, trim(name), dset_id, ierr)
+    if(ierr /= 0) then
+       local_status = 10
+    else
+       have_dset = .true.
+       local_status = 0
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1010
+    end if
+
+    call h5dget_space_f(dset_id, dspace_id, ierr)
+    if(ierr /= 0) then
+       local_status = 11
+    else
+       have_dspace = .true.
+       local_status = 0
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1010
+    end if
+
+    call h5sget_simple_extent_ndims_f(dspace_id, rank, ierr)
+    if(ierr /= 0 .or. rank /= 1) then
+       local_status = 12
+    else
+       call h5sget_simple_extent_dims_f(dspace_id, dims, maxdims, ierr)
+       if(ierr < 0 .or. ierr /= rank) then
+          local_status = 13
+       else if(dims(1) /= int(expected_total, HSIZE_T)) then
+          local_status = 14
+       else
+          local_status = 0
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1010
+    end if
+
+    if(n > 0) then
+       offset(1) = int(offset_global, HSIZE_T)
+       count(1) = int(n, HSIZE_T)
+       call h5sselect_hyperslab_f(dspace_id, H5S_SELECT_SET_F, offset, count, ierr)
+    else
+       call h5sselect_none_f(dspace_id, ierr)
+    end if
+    if(ierr /= 0) then
+       local_status = 20
+    else
+       local_status = 0
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1010
+    end if
+
+    ldims(1) = int(n, HSIZE_T)
+    call h5screate_simple_f(1, ldims, memspace_id, ierr)
+    if(ierr /= 0) then
+       local_status = 21
+    else
+       have_memspace = .true.
+       local_status = 0
+    end if
+    if(n == 0 .and. local_status == 0) then
+       call h5sselect_none_f(memspace_id, ierr)
+       if(ierr /= 0) local_status = 22
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1010
+    end if
+
+    call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, ierr)
+    if(ierr /= 0) then
+       local_status = 23
+    else
+       have_plist = .true.
+       call h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, ierr)
+       if(ierr /= 0) then
+          local_status = 24
+       else
+          local_status = 0
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1010
+    end if
+
+    call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, ldims, ierr, &
+         mem_space_id=memspace_id, file_space_id=dspace_id, xfer_prp=plist_id)
+    if(ierr /= 0) then
+       local_status = 25
+    else
+       local_status = 0
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    status = global_status
+
+1010 continue
+    if(have_plist) call h5pclose_f(plist_id, ierr)
+    if(have_memspace) call h5sclose_f(memspace_id, ierr)
+    if(have_dspace) call h5sclose_f(dspace_id, ierr)
+    if(have_dset) call h5dclose_f(dset_id, ierr)
+  end subroutine hdf5_read_dataset_collective_dp_checked
+
+  subroutine hdf5_read_dataset_collective_int_checked(grp_id, name, data, n, &
+       offset_global, expected_total, status)
+    ! Integer version of hdf5_read_dataset_collective_dp_checked.
+    implicit none
+    include 'mpif.h'
+    integer(HID_T), intent(in) :: grp_id
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: n
+    integer(i8b), intent(in) :: offset_global, expected_total
+    integer, intent(out) :: data(*)
+    integer, intent(out) :: status
+    integer(HID_T) :: dset_id, dspace_id, memspace_id, plist_id
+    integer(HSIZE_T), dimension(1) :: dims, maxdims, ldims, offset, count
+    integer :: ierr, rank, local_status, global_status
+    logical :: have_dset, have_dspace, have_memspace, have_plist
+
+    status = 0
+    local_status = 0
+    have_dset = .false.
+    have_dspace = .false.
+    have_memspace = .false.
+    have_plist = .false.
+
+    if(n < 0 .or. offset_global < 0_i8b .or. expected_total < 0_i8b) then
+       local_status = 2
+    else if(offset_global > expected_total) then
+       local_status = 3
+    else if(int(n, i8b) > expected_total-offset_global) then
+       local_status = 4
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1110
+    end if
+
+    call h5dopen_f(grp_id, trim(name), dset_id, ierr)
+    if(ierr /= 0) then
+       local_status = 10
+    else
+       have_dset = .true.
+       local_status = 0
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1110
+    end if
+
+    call h5dget_space_f(dset_id, dspace_id, ierr)
+    if(ierr /= 0) then
+       local_status = 11
+    else
+       have_dspace = .true.
+       local_status = 0
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1110
+    end if
+
+    call h5sget_simple_extent_ndims_f(dspace_id, rank, ierr)
+    if(ierr /= 0 .or. rank /= 1) then
+       local_status = 12
+    else
+       call h5sget_simple_extent_dims_f(dspace_id, dims, maxdims, ierr)
+       if(ierr < 0 .or. ierr /= rank) then
+          local_status = 13
+       else if(dims(1) /= int(expected_total, HSIZE_T)) then
+          local_status = 14
+       else
+          local_status = 0
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1110
+    end if
+
+    if(n > 0) then
+       offset(1) = int(offset_global, HSIZE_T)
+       count(1) = int(n, HSIZE_T)
+       call h5sselect_hyperslab_f(dspace_id, H5S_SELECT_SET_F, offset, count, ierr)
+    else
+       call h5sselect_none_f(dspace_id, ierr)
+    end if
+    if(ierr /= 0) then
+       local_status = 20
+    else
+       local_status = 0
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1110
+    end if
+
+    ldims(1) = int(n, HSIZE_T)
+    call h5screate_simple_f(1, ldims, memspace_id, ierr)
+    if(ierr /= 0) then
+       local_status = 21
+    else
+       have_memspace = .true.
+       local_status = 0
+    end if
+    if(n == 0 .and. local_status == 0) then
+       call h5sselect_none_f(memspace_id, ierr)
+       if(ierr /= 0) local_status = 22
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1110
+    end if
+
+    call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, ierr)
+    if(ierr /= 0) then
+       local_status = 23
+    else
+       have_plist = .true.
+       call h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, ierr)
+       if(ierr /= 0) then
+          local_status = 24
+       else
+          local_status = 0
+       end if
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    if(global_status /= 0) then
+       status = global_status
+       goto 1110
+    end if
+
+    call h5dread_f(dset_id, H5T_NATIVE_INTEGER, data, ldims, ierr, &
+         mem_space_id=memspace_id, file_space_id=dspace_id, xfer_prp=plist_id)
+    if(ierr /= 0) then
+       local_status = 25
+    else
+       local_status = 0
+    end if
+    call MPI_Allreduce(local_status, global_status, 1, MPI_INTEGER, MPI_MAX, &
+         MPI_COMM_WORLD, ierr)
+    status = global_status
+
+1110 continue
+    if(have_plist) call h5pclose_f(plist_id, ierr)
+    if(have_memspace) call h5sclose_f(memspace_id, ierr)
+    if(have_dspace) call h5sclose_f(dspace_id, ierr)
+    if(have_dset) call h5dclose_f(dset_id, ierr)
+  end subroutine hdf5_read_dataset_collective_int_checked
 
   !=========================================================================
   ! Phase D: file pool (LRU cache of open HDF5 file handles)

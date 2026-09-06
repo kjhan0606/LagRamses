@@ -1,0 +1,139 @@
+{
+  "configuration": {
+    "group_edges_ev": [
+      0.01,
+      1.0,
+      5.6,
+      11.2,
+      13.6,
+      24.59,
+      54.42,
+      500.0,
+      2000.0,
+      10000.0
+    ],
+    "interval_convention": "left_closed_right_open_except_final_closed",
+    "number_of_groups": 9,
+    "sed_support_maximum_ev": 10000.0,
+    "sed_support_minimum_ev": 0.01,
+    "source_mode": "explicit",
+    "species_threshold_ev": [
+      13.6,
+      24.59,
+      54.42
+    ],
+    "working_tree_attestation_scope": "simulation/snrt"
+  },
+  "criteria": {
+    "all_values_finite_nonnegative": true,
+    "candidate_rows_match_ledger_identity_kind_position": true,
+    "csv_metadata_totals_close": true,
+    "exactly_nine_groups": true,
+    "explicit_group_energy_fractions_reproduce_metadata": true,
+    "explicit_group_means_reproduce_metadata": true,
+    "explicit_sed_group_integrals_reproduce_ledger": true,
+    "explicit_sed_quadrature_converged": true,
+    "explicit_verner_closure_reproduces_metadata": true,
+    "explicit_verner_quadrature_converged": true,
+    "external_asset_manifest_all_declared_current": true,
+    "external_hdf5_asset_manifest_closes": true,
+    "group_indices_contiguous": true,
+    "group_means_inside_intervals": true,
+    "half_open_interval_policy_declared": true,
+    "hard_group_microphysics_positive": true,
+    "luminous_source_accounting_closes": true,
+    "metadata_candidates_hash_current": true,
+    "metadata_edges_exactly_match_config": true,
+    "metadata_generator_hash_current": true,
+    "metadata_group_config_hash_current": true,
+    "metadata_intervals_exactly_match_config": true,
+    "metadata_schema_v2": true,
+    "metadata_top_level_group_config_hash_current": true,
+    "p0_default_group_table": true,
+    "partial_and_full_sed_support_groups_positive": true,
+    "sed_support_status_and_intervals_explicit": true,
+    "source_mode_contract": true,
+    "static_input_has_exact_nine_group_source_matrix": true,
+    "static_rebind_metadata_closes": true,
+    "subthreshold_cross_sections_exactly_zero": true,
+    "transport_control_internal_gates_pass": true,
+    "transport_control_uses_nine_groups": true,
+    "two_to_ten_kev_group_present_and_positive": true
+  },
+  "hard_xray_diagnostics": {
+    "cross_sections_cm2": [
+      2.0173423307153017e-25,
+      6.149709888449776e-24,
+      5.312279797508539e-24
+    ],
+    "emitted_power_erg_s": 2.2910466759523178e+45,
+    "energy_interval_ev": [
+      2000.0,
+      10000.0
+    ],
+    "energy_power_ratio_to_0p5_2kev": 5.333333333333333,
+    "fraction_of_candidate_bolometric_luminosity": 0.8000008000007999,
+    "fraction_of_supported_sed_energy_power": 0.8000008000008,
+    "fraction_of_total_photon_rate": 0.11649499353689491,
+    "photoelectron_excess_energy_ev": [
+      2769.291235915201,
+      2765.161647912759,
+      2749.8513268373313
+    ],
+    "photon_number_ratio_to_0p5_2kev": 1.1609640551533367,
+    "photon_rate_s": 2.876787580772557e+53,
+    "photon_weighted_mean_energy_ev": 4970.679348570264
+  },
+  "ledger": {
+    "group_photon_rate_total_s": [
+      8.231506631122241e+53,
+      3.079356794850383e+53,
+      1.2389649476275068e+53,
+      3.4704389190624275e+52,
+      1.0586522860128453e+53,
+      1.4199346394481624e+53,
+      3.964340146967115e+53,
+      2.4779299307355383e+53,
+      2.876787580772557e+53
+    ],
+    "luminous_source_count": 5,
+    "source_count": 10,
+    "total_candidate_bolometric_luminosity_erg_s": 2.863805481132053e+45,
+    "total_photon_rate_s": 2.4694516849442592e+54,
+    "total_supported_sed_energy_power_ev_s": 1.7874467897976176e+57
+  },
+  "passed": true,
+  "provenance": {
+    "candidates_sha256": "c2980fbad5bcef2821137eb37d67980c8df1b8f639948499cd5f7eae45d038dd",
+    "external_asset_manifest_sha256": "cba3f8525d616c4bdd52dffcc07019e237a6858dac0b1afddf5eb91e4d66ed7b",
+    "generator_sha256": "fcd6ae052c71d37d93d34ba933457dcb87a31e4426415615fce4aa08614ed0a3",
+    "git_head": "bd0411bf9c2aaff6165724a146be00180bd8d127",
+    "group_edges_sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1",
+    "ledger_sha256": "1a406398414f258e4f0d00544fd3fee998d659009fc177999e023eb69eb69743",
+    "metadata_sha256": "179c3bd1b20fc6575b029b6410e651760f38e52945721f3504c4eecb642ba34b",
+    "p4_runner_sha256": "ccbc238028c32e9157da0975b4d54015944b95f7d3bddfbdde42ec7bb931496a",
+    "primordial_sha256": "940c1ea765350a8a8b0dbb87b1d60aba24c103abc722dbae325e8ee0f55e5d9a",
+    "source_ledger_sha256": "4f3e64274a5700d206d5e43d17d77a2758fae6106daba61e4a6e83e527f1031d",
+    "source_rebind_tool_sha256": "47c44777dae9a7dccbf979ee2ffd0b36a7c4befc72de58824696ca9f5dc0d6b8",
+    "source_sed_sha256": "db13d6306287634ed9e01726a70c1f23bf75e29af1f283dde216d45c87b1ad91",
+    "static_input_sha256": "aa5255996d76930d048bbe59e5ce81e56fe63e2d2a19ac9ac6b7530b03b7d43f",
+    "static_metadata_sha256": "2702a2319f4dd87c047204676fa6ec6251d2ceb3865b5dabfb724e29f8a584ba",
+    "transport_control_sha256": "cc2227f32f07f7b320c16d2434541516cf3e978ac036f4b7be77c38610925bda",
+    "validator_sha256": "c3f2102b5aba8cba4fe91e31d46633fa2d48d811cc35c2dc7ac1e6ca83e7785c",
+    "working_tree_attestation_scope": "simulation/snrt",
+    "working_tree_clean": false,
+    "working_tree_status_sha256": "c0a308a50506886b95f2da4258c74de93f1ec16fc2a25a3eaff58a4e73b96240"
+  },
+  "schema": "snrt_agn_nine_group_validation_v1",
+  "scope": "AGN source-ledger group topology, SED integration, and hard-X-ray wiring; not an obscuration calibration or a transported-field promotion",
+  "transport_control": {
+    "duration_myr": 0.001,
+    "electron_root_bracket_failure_count": 0,
+    "hydrogen_ledger_l1_relative_error": 2.0368240594967494e-09,
+    "maximum_fixed_point_residual": 2.328162107545495e-10,
+    "number_of_groups": 9,
+    "photoelectron_energy_ledger_l1_relative_error": 3.46976458931199e-18,
+    "photon_ledger_relative_error": 1.125242383162221e-16,
+    "validation_passed": true
+  }
+}

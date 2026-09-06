@@ -1,0 +1,369 @@
+{
+  "adapter_code_sha256": "2c5c5ff366fea6487fd9ee616a8099a27b133c51be9872b0df65765ebaa23531",
+  "adapter_contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_adapter_contract_v1.json",
+  "adapter_contract_sha256": "146edbbaf21b9ee414e5268b547ef26d61850887b0ec3513ecfbd9ff69c33b0e",
+  "blockers": [
+    "candidate_source_not_approved",
+    "source_reported_yield_unit_requires_project_approval_because_cds_unit_is_blank",
+    "phase_mass_history_available_but_no_age_resolved_isotopic_composition",
+    "isotope_decay_and_reduced_element_mapping_not_approved",
+    "source_terminal_and_wind_semantics_resolved_but_runtime_partition_not_approved",
+    "canonical_returned_and_remnant_mass_definitions_not_resolved",
+    "canonical_injected_energy_absent",
+    "canonical_injected_momentum_absent",
+    "runtime_mass_ranges_not_covered",
+    "license_and_provenance_approval_missing"
+  ],
+  "candidate_id": "limongi_chieffi_2018_cds",
+  "canonical_conversion_allowed": false,
+  "canonical_rows_emitted": 0,
+  "contract_profile": {
+    "expected_isotopes_per_model": 333,
+    "expected_recommended_yield_models": 108,
+    "expected_wind_yield_models": 48,
+    "metallicity_axis": "[Fe/H] relative to an unstated-for-runtime solar abundance mapping",
+    "reported_yield_unit_in_cds_readme": "---",
+    "source_snapshot_semantics": [
+      "recommended set-R final isotopic ejecta: wind plus terminal ejecta at 13--25 Msun; wind only above 25 Msun",
+      "integrated wind isotopic ejecta at 13--25 Msun",
+      "evolutionary phase duration rows",
+      "pre-supernova structure rows"
+    ]
+  },
+  "gate": "G2",
+  "interpretation": "Source numbers were parsed for review only. Missing canonical quantities are represented by availability flags, not physical zeroes; no canonical row or approval artifact was emitted.",
+  "records_included": false,
+  "schema": "snrt-g2-source-review-adapter",
+  "schema_version": 1,
+  "source_availability": {
+    "age_resolved_cumulative_release_history": false,
+    "canonical_energy_erg_per_star": false,
+    "canonical_momentum_g_cm_s_per_star": false,
+    "canonical_remnant_mass": false,
+    "canonical_returned_mass": false,
+    "runtime_feedback_channel_assignment": false
+  },
+  "source_axes": {
+    "metallicity_feh": [
+      -3,
+      -2,
+      -1,
+      0
+    ],
+    "metallicity_mapping_status": "source_defined_exact_values_recorded_not_project_approved",
+    "metallicity_mass_fraction_from_source_article": {
+      "-1": 0.003236,
+      "-2": 0.0003236,
+      "-3": 3.236e-05,
+      "0": 0.01345
+    },
+    "recommended_mass_msun": [
+      13.0,
+      15.0,
+      20.0,
+      25.0,
+      30.0,
+      40.0,
+      60.0,
+      80.0,
+      120.0
+    ],
+    "rotation_velocity_km_s": [
+      0,
+      150,
+      300
+    ],
+    "wind_mass_msun": [
+      13.0,
+      15.0,
+      20.0,
+      25.0
+    ]
+  },
+  "source_components": {
+    "evolutionary_properties": {
+      "all_duplicate_rows_physically_identical": true,
+      "duplicate_model_phase_coordinate_count": 10,
+      "duplicate_model_phase_coordinates": [
+        {
+          "initial_mass_msun": 120.0,
+          "metallicity_feh": -3,
+          "multiplicity": 3,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 0
+        },
+        {
+          "initial_mass_msun": 120.0,
+          "metallicity_feh": -2,
+          "multiplicity": 3,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 0
+        },
+        {
+          "initial_mass_msun": 120.0,
+          "metallicity_feh": -1,
+          "multiplicity": 2,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 0
+        },
+        {
+          "initial_mass_msun": 80.0,
+          "metallicity_feh": -3,
+          "multiplicity": 2,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 150
+        },
+        {
+          "initial_mass_msun": 120.0,
+          "metallicity_feh": -3,
+          "multiplicity": 3,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 150
+        },
+        {
+          "initial_mass_msun": 80.0,
+          "metallicity_feh": -2,
+          "multiplicity": 2,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 150
+        },
+        {
+          "initial_mass_msun": 80.0,
+          "metallicity_feh": -3,
+          "multiplicity": 3,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 300
+        },
+        {
+          "initial_mass_msun": 120.0,
+          "metallicity_feh": -3,
+          "multiplicity": 6,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 300
+        },
+        {
+          "initial_mass_msun": 80.0,
+          "metallicity_feh": -2,
+          "multiplicity": 2,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 300
+        },
+        {
+          "initial_mass_msun": 120.0,
+          "metallicity_feh": -2,
+          "multiplicity": 3,
+          "phase": "PSN",
+          "physical_values_exactly_identical": true,
+          "rotation_velocity_km_s": 300
+        }
+      ],
+      "duplicate_policy": "Exact duplicate rows may be collapsed once; any duplicate with different physical values must fail closed.",
+      "model_coordinate_count": 108,
+      "phase_counts": {
+        "C": 107,
+        "H": 108,
+        "He": 107,
+        "MS": 108,
+        "Ne": 107,
+        "O": 102,
+        "PSN": 127,
+        "Si": 98
+      },
+      "records_included": false,
+      "row_count": 864,
+      "row_semantics": "phase durations and end-of-phase properties; not a cumulative ejecta history",
+      "source_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/limongi_chieffi_2018_cds/table5.dat"
+    },
+    "presupernova_properties": {
+      "expected_supernova_type_counts": {
+        "SNIIP": 50,
+        "SNIb": 46
+      },
+      "records_included": false,
+      "row_count": 96,
+      "row_semantics": "pre-supernova structure; binding energy is not injected feedback energy",
+      "source_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/limongi_chieffi_2018_cds/table7.dat"
+    },
+    "recommended_yields": {
+      "component": "recommended_yields",
+      "mass_columns_msun": [
+        13.0,
+        15.0,
+        20.0,
+        25.0,
+        30.0,
+        40.0,
+        60.0,
+        80.0,
+        120.0
+      ],
+      "maximum_source_value": 67.827,
+      "maximum_source_yield_sum": 101.31100056058283,
+      "minimum_source_value": 0.0,
+      "minimum_source_yield_sum": 0.020075079506865386,
+      "model_count": 108,
+      "numeric_value_count": 35964,
+      "records_included": false,
+      "snapshot_semantics": "integrated source-reported isotopic yield snapshot; not age resolved",
+      "source_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/limongi_chieffi_2018_cds/table8.dat",
+      "source_reported_units": "ejected isotope mass; Msun is supported by article context, while the CDS ReadMe column unit is '---'; project approval remains pending",
+      "source_row_count": 3996,
+      "species_count_per_model": [
+        333
+      ]
+    },
+    "wind_yields": {
+      "component": "wind_yields",
+      "mass_columns_msun": [
+        13.0,
+        15.0,
+        20.0,
+        25.0
+      ],
+      "maximum_source_value": 10.135,
+      "maximum_source_yield_sum": 16.45724682711496,
+      "minimum_source_value": 0.0,
+      "minimum_source_yield_sum": 0.02108134822481282,
+      "model_count": 48,
+      "numeric_value_count": 15984,
+      "records_included": false,
+      "snapshot_semantics": "integrated source-reported isotopic yield snapshot; not age resolved",
+      "source_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/limongi_chieffi_2018_cds/table9.dat",
+      "source_reported_units": "ejected isotope mass; Msun is supported by article context, while the CDS ReadMe column unit is '---'; project approval remains pending",
+      "source_row_count": 3996,
+      "species_count_per_model": [
+        333
+      ]
+    }
+  },
+  "source_semantics_evidence": {
+    "primary_sources": [
+      {
+        "citation": "Limongi & Chieffi 2018, ApJS 237:13",
+        "doi": "10.3847/1538-4365/aacb24",
+        "relevant_section": "Section 5, especially the definition of recommended set R",
+        "url": "https://openaccess.inaf.it/bitstream/20.500.12386/28562/2/Limongi_2018_ApJS_237_13.pdf"
+      },
+      {
+        "citation": "CDS J/ApJS/237/13 ReadMe and tables",
+        "url": "https://cdsarc.cds.unistra.fr/ftp/cats/J/ApJS/237/13/ReadMe"
+      }
+    ],
+    "project_disposition": {
+      "approval_id": null,
+      "canonical_injected_energy_available": false,
+      "canonical_injected_momentum_available": false,
+      "cumulative_release_history_available": false,
+      "license_evidence": "g2_source_use_terms_evidence_v1.json",
+      "license_status": "public_research_access_verified_redistribution_not_approved",
+      "phase_resolved_wind_composition_available": false,
+      "phase_resolved_wind_mass_history_available": true,
+      "runtime_channel_assignment_approved": false,
+      "source_component_semantics_resolved": true,
+      "source_metallicity_mapping_resolved": true
+    },
+    "source_author_definitions": {
+      "metallicity_mapping": {
+        "definition": "Source-author total heavy-element mass fractions, including the stated low-metallicity C/O/Mg/Si/S/Ar/Ca/Ti enhancements; do not approximate these as Z_sun*10^[Fe/H].",
+        "feh_to_total_metallicity_mass_fraction": {
+          "-1": 0.003236,
+          "-2": 0.0003236,
+          "-3": 3.236e-05,
+          "0": 0.01345
+        },
+        "solar_abundance_set": "Asplund et al. 2009",
+        "source_article_location": "Section 2, page 3, lines following the initial-composition definition",
+        "source_solar_metallicity_mass_fraction": 0.01345
+      },
+      "supported_difference_on_overlapping_models": "table8 - table9 is the non-wind terminal ejecta for the source's 13--25 Msun set-R models.",
+      "table5_phase_mass_history": "Table5 gives each evolutionary phase lifetime and endpoint total stellar mass. After exact duplicate collapse, cumulative age is the ordered sum of phase lifetimes and cumulative wind mass is initial mass minus endpoint total mass. It does not provide time-resolved isotopic wind composition.",
+      "table7_binding_energy": "Binding energy above the iron core in 1e51 erg; it is not injected explosion energy.",
+      "table8": "Recommended set R final isotopic ejecta. Models from 13 through 25 Msun use mixing/fallback set M with the mass cut calibrated to eject 0.07 Msun of Ni-56. Models above 25 Msun are assumed to collapse fully and table8 contains wind ejecta only.",
+      "table9": "Integrated isotopic wind ejecta for models from 13 through 25 Msun.",
+      "yield_dimension": "ejected isotope mass",
+      "yield_unit_evidence": "The article defines ejecta and calibrates Ni-56 in Msun, while the CDS machine-readable yield columns list unit '---'; treat Msun as literature-supported but pending explicit project approval."
+    },
+    "source_use_terms_evidence": {
+      "candidate_record": {
+        "access": "Public machine-readable tables distributed by CDS/VizieR with an associated refereed publication.",
+        "citation": "Limongi & Chieffi 2018, ApJS 237:13; VizieR catalogue J/ApJS/237/13",
+        "evidence_urls": [
+          "https://vizier.cds.unistra.fr/",
+          "https://vizier.cds.unistra.fr/vizier/submit.htx",
+          "https://cdsarc.cds.unistra.fr/ftp/cats/J/ApJS/237/13/ReadMe"
+        ],
+        "production_license_status": "not_approved",
+        "redistribution_status": "no_explicit_catalogue_license_identified",
+        "research_use_status": "public_with_citation",
+        "service_acknowledgement": "Acknowledge the VizieR catalogue access tool, CDS, Strasbourg, France."
+      },
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_use_terms_evidence_v1.json",
+      "sha256": "9b8e8b4cf383cf93feecbf96cfa42ed4eb5212c8b424a7217ed7507bbc16db4a",
+      "status": "research_access_verified_redistribution_approval_unresolved"
+    }
+  },
+  "source_semantics_evidence_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_semantics_evidence_v1.json",
+  "source_semantics_evidence_sha256": "b1ffb82287cab92ebada5091617c536ea584a92622cb111d100db0d9ea24ae11",
+  "status": "review_only",
+  "uninterpreted_component_relation_diagnostics": {
+    "definition": "recommended set-R yield minus wind yield at exactly matching 13--25 Msun source coordinates; the paper identifies this as non-wind terminal ejecta",
+    "isotope_difference_count": 15984,
+    "maximum_absolute_difference_in_source_units": 10.17996,
+    "models_with_negative_difference": 0,
+    "most_negative_difference_in_source_units": 0.0,
+    "negative_difference_count": 0,
+    "overlapping_model_count": 48,
+    "runtime_channel_assignment_approved": false,
+    "source_semantics_supported": true
+  },
+  "verified_acquisition": {
+    "approval_id": null,
+    "candidate_manifest_status": "candidate_not_approved",
+    "license_status": "to_be_verified",
+    "manifest_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+    "manifest_sha256": "ebbbfa42357e6a729d19d839f0e1c826ef33cb4705d895b82c5e96e88493f764",
+    "promotable": false,
+    "verified_file_count": 5,
+    "verified_files": [
+      {
+        "bytes": 15442,
+        "relative_path": "limongi_chieffi_2018_cds/ReadMe",
+        "role": "CDS format and provenance documentation",
+        "sha256": "674df04c58b87111c8276a3e1ad827bf0310194640143a4371740e8f97fe8682"
+      },
+      {
+        "bytes": 113184,
+        "relative_path": "limongi_chieffi_2018_cds/table5.dat",
+        "role": "main evolutionary properties",
+        "sha256": "c02278a38671e66c42efeb88fc6b2119ffefc72712cf7443128c09ffd5f5122d"
+      },
+      {
+        "bytes": 7346,
+        "relative_path": "limongi_chieffi_2018_cds/table7.dat",
+        "role": "presupernova properties",
+        "sha256": "165201557b9093cab56b978e75b4d5989bc6e12491da54cc2bb26d20d99e6b15"
+      },
+      {
+        "bytes": 447552,
+        "relative_path": "limongi_chieffi_2018_cds/table8.dat",
+        "role": "recommended isotopic yields",
+        "sha256": "bdfc317ca12a377f545964424dba4a666eab964292d0ebfa8b8c9641f073f218"
+      },
+      {
+        "bytes": 227772,
+        "relative_path": "limongi_chieffi_2018_cds/table9.dat",
+        "role": "recommended isotopic wind yields",
+        "sha256": "64b4bbe536514dfd164bb0e971d2d9163043a767a2ec2de552c76bf131b5088d"
+      }
+    ]
+  }
+}

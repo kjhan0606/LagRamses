@@ -1,0 +1,343 @@
+{
+  "admission": {
+    "canonical_conversion_allowed": true,
+    "canonical_rows_emitted": 1,
+    "runtime_activation_allowed": false
+  },
+  "blockers": [
+    "runtime caller must connect the approved event source to the AMR/MPI target-selection bridge",
+    "full net-yield and metallicity sensitivity remain outside this baseline approval"
+  ],
+  "gate": "F-P2",
+  "models": [
+    {
+      "integrated_stable_element_mass_msun": 1.4054489942403372,
+      "model_id": "n1",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.7109471337012868e+51,
+        "inner_zero_outer_half_bin": 1.710947503313874e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.03284854818554559,
+        "inner_zero_outer_half_bin": 0.0329246858117209
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.3968717434410902,
+      "model_id": "n3",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.6571781032114573e+51,
+        "inner_zero_outer_half_bin": 1.6571787779199625e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.04348272801803539,
+        "inner_zero_outer_half_bin": 0.043598506776722196
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.4032780367231477,
+      "model_id": "n5",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.6287577518091437e+51,
+        "inner_zero_outer_half_bin": 1.6287579676046395e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.03256393708774749,
+        "inner_zero_outer_half_bin": 0.03261305295832963
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.3986719970544625,
+      "model_id": "n10",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.636651723258574e+51,
+        "inner_zero_outer_half_bin": 1.6366518966430193e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.033799928140083,
+        "inner_zero_outer_half_bin": 0.03384351480877745
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.4010097201287288,
+      "model_id": "n20",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.561599250133212e+51,
+        "inner_zero_outer_half_bin": 1.561599512834557e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.0348629610595304,
+        "inner_zero_outer_half_bin": 0.03492041449703417
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.4009618610674601,
+      "model_id": "n40",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.5225416930057738e+51,
+        "inner_zero_outer_half_bin": 1.5225420642558958e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.036684258852950055,
+        "inner_zero_outer_half_bin": 0.03676342804199505
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.4166964460806897,
+      "model_id": "n100h",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.584154830300321e+51,
+        "inner_zero_outer_half_bin": 1.5841551367361447e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.03469480803646517,
+        "inner_zero_outer_half_bin": 0.03476186551866177
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.4004633930489443,
+      "model_id": "n100",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.506309572849768e+51,
+        "inner_zero_outer_half_bin": 1.5063100005966762e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.03759158780642069,
+        "inner_zero_outer_half_bin": 0.037683413189629776
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.360736624061774,
+      "model_id": "n100l",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.4052810490334708e+51,
+        "inner_zero_outer_half_bin": 1.4052815050806586e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.038731350571278716,
+        "inner_zero_outer_half_bin": 0.03883498065799175
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.4007505232763764,
+      "model_id": "n150",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.5143324953326393e+51,
+        "inner_zero_outer_half_bin": 1.5143327641618758e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.03540457242553508,
+        "inner_zero_outer_half_bin": 0.035468164843254525
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.399420796223195,
+      "model_id": "n200",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.3883388033531417e+51,
+        "inner_zero_outer_half_bin": 1.388339303582379e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.04389470939887376,
+        "inner_zero_outer_half_bin": 0.04400217059368835
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.399613574144439,
+      "model_id": "n300c",
+      "physical_warnings": [
+        {
+          "interpretation": "source-data anomaly requires quarantine before any population mixture",
+          "model": "n300c",
+          "relative_difference": 6.410417389339434,
+          "requires_quarantine": true,
+          "severity": "source_data_anomaly",
+          "type": "profile_mass_mismatch"
+        }
+      ],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 3.340384905796177e+52,
+        "inner_zero_outer_half_bin": 3.3403849180513113e+52
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 6.410388838341228,
+        "inner_zero_outer_half_bin": 6.410417389339434
+      },
+      "quarantine_required": true,
+      "review_screen": "physical_warning_requires_resolution",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "source_data_anomaly_requires_quarantine"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.4004239031667294,
+      "model_id": "n1600",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.3747178457894451e+51,
+        "inner_zero_outer_half_bin": 1.3747186509110558e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.04661205368628174,
+        "inner_zero_outer_half_bin": 0.04678229612070146
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.4006396823108527,
+      "model_id": "n1600c",
+      "physical_warnings": [
+        {
+          "interpretation": "spherical-average density integration is not ready to define returned mass without a source-specific correction or authoritative scalar",
+          "model": "n1600c",
+          "relative_difference": 0.0511218934472347,
+          "requires_quarantine": false,
+          "severity": "profile_mass_warning",
+          "type": "profile_mass_mismatch"
+        }
+      ],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.2532928592218868e+51,
+        "inner_zero_outer_half_bin": 1.2532928780648022e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.05110538298413129,
+        "inner_zero_outer_half_bin": 0.0511218934472347
+      },
+      "quarantine_required": false,
+      "review_screen": "physical_warning_requires_resolution",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_mass_warning_requires_resolution"
+    },
+    {
+      "integrated_stable_element_mass_msun": 1.4004062317504062,
+      "model_id": "n100_z0.01",
+      "physical_warnings": [],
+      "profile_kinetic_energy_by_estimator_erg": {
+        "half_bin_extrapolated_both_ends": 1.506309572849768e+51,
+        "inner_zero_outer_half_bin": 1.5063100005966762e+51
+      },
+      "profile_mass_relative_difference_by_estimator": {
+        "half_bin_extrapolated_both_ends": 0.03763393986196463,
+        "inner_zero_outer_half_bin": 0.03772576899327054
+      },
+      "quarantine_required": false,
+      "review_screen": "profile_consistent_review_candidate",
+      "screening_is_not_production_approval": true,
+      "screening_threshold_relative_mass_difference": 0.05,
+      "source_review_classification": "profile_consistent_review_candidate"
+    }
+  ],
+  "physical_event_contract": {
+    "decay_convention": "HESMA stable-element section after approximately 2 Gyr; adopted horizon is 2 Gyr",
+    "decay_horizon_yr": 2000000000.0,
+    "energy_erg_per_event": 1.5063100005966762e51,
+    "isotope_to_project_element_policy": "use HESMA integrated stable-element section; free-proton column is H",
+    "momentum_g_cm_s_per_event": [0.0, 0.0, 0.0],
+    "population_weight": 1.0,
+    "returned_mass_msun_per_event": 1.4004633930489443,
+    "terminal_remnant_msun_per_event": 0.0,
+    "wd_debit_msun_per_event": 1.4004633930489443,
+    "momentum_policy": "isotropic_zero_vector",
+    "thermal_coupling": "all_to_total_energy",
+    "metallicity_policy": "constant_unity_baseline"
+  },
+  "schema": "snrt-fp2-snia-hesma-source-selection-packet",
+  "schema_version": 1,
+  "screening_policy": {
+    "automatic_event_energy": false,
+    "automatic_population_weighting": false,
+    "automatic_selection": false,
+    "purpose": "separate source-format/profile consistency review from physical source approval",
+    "threshold": "existing 5% profile-mass warning threshold"
+  },
+  "selection": {
+    "selected_model_id": "n100",
+    "selected_population_mixture": "single_model_n100",
+    "selected_profile_estimator": "inner_zero_outer_half_bin",
+    "approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+    "status": "approved_physical_baseline_runtime_gated"
+  },
+  "source": {
+    "candidate_id": "hesma_model_archive_snia_profiles",
+    "model_comparison_path": "simulation/snrt/data/fp2_snia_hesma_model_comparison.json",
+    "model_comparison_sha256": "73b3d49c6dbb686965ec71a716f5fdf525dfa078a58bc9fb6384e547138d8004",
+    "package_sha256": "bb9325de2e07bf86acd1ef4abf7c950fb44e74e6513b8c9c88336d910f8814c0",
+    "profile_comparison_path": "simulation/snrt/data/fp2_snia_hesma_profile_estimator_comparison.json",
+    "profile_comparison_sha256": "65e1699bedc529eca777862e15c228a98f5569cbeee1de63bdc4b6935f07b129",
+    "record_id": "yysd4-xap92"
+  },
+  "status": "approved_physical_baseline_runtime_gated",
+  "tool_sha256": "6b579798ff43786e007a0ff8f184bb51836a1a814719362fdf3816d3e96cbdd3"
+}

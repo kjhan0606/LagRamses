@@ -1,0 +1,278 @@
+{
+  "schema": "snrt_agn_photon_ledger_v2",
+  "source_sed": "Sazonov-Ostriker-Sunyaev-style piecewise energy continuum",
+  "reference": "Sazonov, Ostriker & Sunyaev (2004), MNRAS 347, 144; 10 eV-1 keV energy slope -1.7 and 1-100 keV slope -1",
+  "normalization": {
+    "nu_lnu_at_13p6_ev_over_lbol": 0.1,
+    "escape_fraction": 1.0,
+    "interpretation": "unobscured injection baseline; unresolved nuclear absorption is not modeled"
+  },
+  "group_table_mode": "p0_default",
+  "group_edges_file": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+  "group_edges_ev": [
+    0.01,
+    1.0,
+    5.6,
+    11.2,
+    13.6,
+    24.59,
+    54.42,
+    500.0,
+    2000.0,
+    10000.0
+  ],
+  "group_interval_convention": "left_closed_right_open_except_final_closed",
+  "group_photon_rate_total_s": [
+    0.0,
+    0.0,
+    2.2850007338344437e+54,
+    3.0233429901562566e+54,
+    4.90647387172938e+54,
+    2.0927635128957187e+54,
+    7.150681640498728e+53,
+    1.6087345651145592e+52,
+    3.529964866772728e+51
+  ],
+  "groups": [
+    {
+      "index": 0,
+      "energy_interval_ev": [
+        0.01,
+        1.0
+      ],
+      "photon_weighted_mean_energy_ev": 0.1,
+      "photon_rate_per_lbol_s_per_erg_s": 0.0,
+      "total_photon_rate_s": 0.0,
+      "sed_supported_interval_ev": null,
+      "closure_status": "agn_sed_below_support_zero_photons"
+    },
+    {
+      "index": 1,
+      "energy_interval_ev": [
+        1.0,
+        5.6
+      ],
+      "photon_weighted_mean_energy_ev": 2.3664319132398464,
+      "photon_rate_per_lbol_s_per_erg_s": 0.0,
+      "total_photon_rate_s": 0.0,
+      "sed_supported_interval_ev": null,
+      "closure_status": "agn_sed_below_support_zero_photons"
+    },
+    {
+      "index": 2,
+      "energy_interval_ev": [
+        5.6,
+        11.2
+      ],
+      "photon_weighted_mean_energy_ev": 10.56942670578782,
+      "photon_rate_per_lbol_s_per_erg_s": 797889643.3046811,
+      "total_photon_rate_s": 2.2850007338344437e+54,
+      "sed_supported_interval_ev": [
+        10.0,
+        11.2
+      ],
+      "closure_status": "agn_sed_partially_supported_10ev_to_upper"
+    },
+    {
+      "index": 3,
+      "energy_interval_ev": [
+        11.2,
+        13.6
+      ],
+      "photon_weighted_mean_energy_ev": 12.2954112566775,
+      "photon_rate_per_lbol_s_per_erg_s": 1055708221.1327912,
+      "total_photon_rate_s": 3.0233429901562566e+54,
+      "sed_supported_interval_ev": [
+        11.2,
+        13.6
+      ],
+      "closure_status": "agn_sed_fully_supported"
+    },
+    {
+      "index": 4,
+      "energy_interval_ev": [
+        13.6,
+        24.59
+      ],
+      "photon_weighted_mean_energy_ev": 17.662918001204492,
+      "photon_rate_per_lbol_s_per_erg_s": 1713270647.764061,
+      "total_photon_rate_s": 4.90647387172938e+54,
+      "sed_supported_interval_ev": [
+        13.6,
+        24.59
+      ],
+      "closure_status": "agn_sed_fully_supported"
+    },
+    {
+      "index": 5,
+      "energy_interval_ev": [
+        24.59,
+        54.42
+      ],
+      "photon_weighted_mean_energy_ev": 34.381528542610674,
+      "photon_rate_per_lbol_s_per_erg_s": 730763149.4819461,
+      "total_photon_rate_s": 2.0927635128957187e+54,
+      "sed_supported_interval_ev": [
+        24.59,
+        54.42
+      ],
+      "closure_status": "agn_sed_fully_supported"
+    },
+    {
+      "index": 6,
+      "energy_interval_ev": [
+        54.42,
+        500.0
+      ],
+      "photon_weighted_mean_energy_ev": 106.63925876378897,
+      "photon_rate_per_lbol_s_per_erg_s": 249691596.98905554,
+      "total_photon_rate_s": 7.150681640498728e+53,
+      "sed_supported_interval_ev": [
+        54.42,
+        500.0
+      ],
+      "closure_status": "agn_sed_fully_supported"
+    },
+    {
+      "index": 7,
+      "energy_interval_ev": [
+        500.0,
+        2000.0
+      ],
+      "photon_weighted_mean_energy_ev": 869.6341490248457,
+      "photon_rate_per_lbol_s_per_erg_s": 5617471.492786695,
+      "total_photon_rate_s": 1.6087345651145592e+52,
+      "sed_supported_interval_ev": [
+        500.0,
+        2000.0
+      ],
+      "closure_status": "agn_sed_fully_supported"
+    },
+    {
+      "index": 8,
+      "energy_interval_ev": [
+        2000.0,
+        10000.0
+      ],
+      "photon_weighted_mean_energy_ev": 4023.594574013186,
+      "photon_rate_per_lbol_s_per_erg_s": 1232613.3496250398,
+      "total_photon_rate_s": 3.529964866772728e+51,
+      "sed_supported_interval_ev": [
+        2000.0,
+        10000.0
+      ],
+      "closure_status": "agn_sed_fully_supported"
+    }
+  ],
+  "group_spectral_closure": {
+    "method": "photon-number-weighted Verner cross sections; absorber-weighted photoelectron excess energy",
+    "species_order": [
+      "hydrogen_i",
+      "helium_i",
+      "helium_ii"
+    ],
+    "cross_sections_cm2": {
+      "hydrogen_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        3.56337318189246e-18,
+        6.0658255816842125e-19,
+        4.536757555281624e-20,
+        4.0573225032765143e-23,
+        3.1479424687259854e-25
+      ],
+      "helium_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        4.659818809105699e-18,
+        7.291758993386981e-19,
+        1.1561772423872495e-21,
+        9.580306965667874e-24
+      ],
+      "helium_ii": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        6.220469290175417e-19,
+        8.964284134154936e-22,
+        8.247018113977343e-24
+      ]
+    },
+    "photoelectron_excess_energy_ev": {
+      "hydrogen_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.8485343274404133,
+        16.817799758225394,
+        55.27227962007381,
+        612.2116532407207,
+        2564.899364722586
+      ],
+      "helium_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        7.043961358733624,
+        46.593074848840416,
+        603.1368314447863,
+        2558.2019113233523
+      ],
+      "helium_ii": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        15.519987376343611,
+        575.951269028906,
+        2537.3604318471203
+      ]
+    },
+    "group_status": [
+      "agn_sed_below_support_zero_photons",
+      "agn_sed_below_support_zero_photons",
+      "agn_sed_partially_supported_10ev_to_upper",
+      "agn_sed_fully_supported",
+      "agn_sed_fully_supported",
+      "agn_sed_fully_supported",
+      "agn_sed_fully_supported",
+      "agn_sed_fully_supported",
+      "agn_sed_fully_supported"
+    ]
+  },
+  "candidates": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/p4_pilot_zoom_agn_candidates.csv",
+  "source_count": 10,
+  "luminous_source_count": 5,
+  "total_bolometric_luminosity_erg_s": 2.863805481132053e+45,
+  "provenance": {
+    "generator_sha256": "489cbf452f369650bd83ae0ef839a57ec60ca511a0758cb9816f460df690155e",
+    "candidates_sha256": "c2980fbad5bcef2821137eb37d67980c8df1b8f639948499cd5f7eae45d038dd",
+    "group_edges_file_sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1"
+  },
+  "limits": [
+    "The source SED is a parameterized pilot baseline, not an LRD-obscuration model.",
+    "Photons above 10000 eV are excluded because the selected group table ends there.",
+    "The parameterized SED is not extrapolated below 10 eV: groups wholly below 10 eV are explicit zero-photon controls.",
+    "A group straddling 10 eV is integrated only over its supported [10 eV, upper-edge] sub-interval and is explicitly marked partially supported.",
+    "A production interpretation must vary the Lyman normalization and escape fraction."
+  ],
+  "source_scale_factor": 0.20849776467675274,
+  "source_scale_factor_range": [
+    0.20849776467675274,
+    0.20849776467675274
+  ],
+  "source_scale_factor_uniform": true
+}

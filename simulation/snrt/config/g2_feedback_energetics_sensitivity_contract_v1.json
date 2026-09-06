@@ -1,0 +1,149 @@
+{
+  "schema": "snrt-g2-feedback-energetics-sensitivity-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "input_projection": {
+    "source_candidate_id": "nugrid_set1ext_mesaonly_fryer12_delay",
+    "contract": "g2_nugrid_channel_projection_contract_v1.json",
+    "rule": "Apply candidate energetics only as an external sensitivity overlay; never rewrite source-data nulls or emit canonical rows."
+  },
+  "machine_readable_event_energy_anchors": {
+    "source_candidate_id": "stockinger2020_low_mass_ccsn",
+    "candidate_contract": "g2_stockinger2020_candidate_contract_v1.json",
+    "models": ["e8.8", "s9.0", "z9.6"],
+    "rule": "Use final finite diagnostic explosion energies only as model-specific sensitivity anchors. Do not interpolate across the ECSN/Fe-core or solar/zero-metallicity model boundaries and do not replace NuGrid source nulls."
+  },
+  "machine_readable_mass_grid_energy_anchors": {
+    "source_candidate_id": "sukhbold2016_ccsn",
+    "candidate_contract": "g2_sukhbold2016_candidate_contract_v1.json",
+    "engine": "Z9.6",
+    "metallicity": "source_labelled_solar",
+    "zams_mass_msun": [9.0, 9.25, 9.5, 9.75, 10.0, 10.25, 10.5, 10.75, 11.0, 11.25, 11.5, 11.75, 12.0],
+    "rule": "Use P-HOTB final kinetic energies, fallback, and baryonic mass cuts only as source-grid sensitivity anchors. Do not infer exact ejecta launch momentum from the rounded stable plus selected-radioactive tables, do not interpolate across engines or metallicity, and do not replace NuGrid source nulls."
+  },
+  "source_table_ultralowz_energy_anchors": {
+    "source_candidate_id": "roberti2024_ultralowz_ccsn",
+    "candidate_contract": "g2_roberti2024_ultralowz_candidate_contract_v1.json",
+    "model_count": 34,
+    "zams_mass_msun": [15.0, 25.0],
+    "metallicity_mass_fraction": [0.0, 3.236e-7, 3.236e-6],
+    "rule": "Use the exact article-source Table 7 thermal-bomb kinetic energies and remnant masses only as sparse sensitivity anchors. Do not infer ejecta launch momentum because wind/terminal ownership is unresolved, do not interpolate in mass/metallicity/rotation, and keep 025z600 quarantined."
+  },
+  "source_table_popiii_energy_grid": {
+    "source_candidate_id": "heger_woosley2010_popiii",
+    "candidate_contract": "g2_heger_woosley2010_popiii_candidate_contract_v1.json",
+    "metallicity_mass_fraction": 0.0,
+    "zams_mass_hull_msun": [10.0, 100.0],
+    "zams_mass_node_count": 120,
+    "coordinate_count": 5760,
+    "s4_kinetic_energy_bethe": [0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.4, 3.0, 5.0, 10.0],
+    "ye_kinetic_energy_bethe": [1.2, 10.0],
+    "mixing_normalized_to_he_core": [0.0, 0.001, 0.00158, 0.00251],
+    "rule": "Retain kinetic energy at infinity, piston location, artificial mixing, and fallback as a coupled review grid. Do not select a population distribution, infer exact remnant mass from listed-isotope residuals, derive launch momentum, or interpolate/extrapolate in mass or metallicity."
+  },
+  "physical_constants": {
+    "solar_mass_g": 1.98847e33,
+    "km_s_to_cm_s": 100000.0
+  },
+  "source_frame_momentum": {
+    "canonical_quantity": "cumulative net directed momentum vector in the stellar comoving frame",
+    "unresolved_isotropic_vector_g_cm_s_per_star": [0.0, 0.0, 0.0],
+    "bulk_advective_momentum": "added separately by the RAMSES runtime as returned_mass times particle velocity",
+    "scalar_radial_momentum": "separate non-negative deposition budget; not representable by choosing an arbitrary Cartesian vector direction"
+  },
+  "channel_sensitivity_models": {
+    "1": {
+      "name": "massive_star_wind",
+      "terminal_velocity_km_s": [1000.0, 1600.0, 2300.0, 3000.0],
+      "kinetic_energy": "0.5 * returned_mass * terminal_velocity^2",
+      "scalar_radial_momentum": "returned_mass * terminal_velocity",
+      "limitation": "A single terminal velocity applied to terminal-lumped wind mass is not an age-, phase-, mass-, or metallicity-resolved wind model."
+    },
+    "2": {
+      "name": "AGB_wind",
+      "terminal_velocity_km_s": [5.0, 10.0, 20.0, 30.0],
+      "kinetic_energy": "0.5 * returned_mass * terminal_velocity^2",
+      "scalar_radial_momentum": "returned_mass * terminal_velocity",
+      "limitation": "The velocity grid is a sensitivity bracket, not a source-specific dust-driven wind prescription."
+    },
+    "3": {
+      "name": "core_collapse_supernova",
+      "explosion_energy_erg_per_event": [1.0e50, 5.0e50, 1.0e51, 2.0e51],
+      "ejecta_launch_scalar_momentum": "sqrt(2 * returned_mass * explosion_energy)",
+      "terminal_shell_momentum_msun_km_s": "2.8e5 * ambient_hydrogen_number_density_cm3^(-0.17)",
+      "terminal_shell_momentum_calibration_energy_erg": 1.0e51,
+      "ambient_hydrogen_number_density_cm3": [0.1, 1.0, 10.0, 100.0],
+      "limitation": "The NuGrid yields do not supply an explosion energy/failure flag; the energy grid is not coupled to progenitor compactness, fallback, or remnant outcome, and the terminal-shell fit is audited only at its published 1e51 erg calibration."
+    }
+  },
+  "literature_evidence": [
+    {
+      "quantity": "massive-star terminal wind velocity",
+      "citation": "Marcolino et al. 2022, MNRAS 511, 5104",
+      "doi": "10.1093/mnras/stac452",
+      "url": "https://academic.oup.com/mnras/article/511/4/5104/6530649",
+      "use": "Empirical O/B-star samples contain terminal velocities around 1000--2300 km/s; 3000 km/s is retained as an upper sensitivity node, not an adopted population prescription."
+    },
+    {
+      "quantity": "AGB terminal wind velocity",
+      "citation": "Marshall et al. 2004, MNRAS 355, 1348",
+      "doi": "10.1111/j.1365-2966.2004.08417.x",
+      "url": "https://academic.oup.com/mnras/article/355/4/1348/993470",
+      "use": "Published AGB outflow velocities motivate a 5--30 km/s sensitivity bracket; no universal fixed value is approved."
+    },
+    {
+      "quantity": "core-collapse explosion energy variability",
+      "citation": "Sukhbold et al. 2016, ApJ 821, 38",
+      "doi": "10.3847/0004-637X/821/1/38",
+      "url": "https://arxiv.org/abs/1510.04643",
+      "use": "Explosion outcome and kinetic energy vary non-monotonically with progenitor structure; a fixed 1e51 erg event cannot be inferred from the yield mass alone."
+    },
+    {
+      "quantity": "machine-readable low-mass CCSN diagnostic energy anchors",
+      "citation": "Stockinger et al. 2020, MNRAS 496, 2039",
+      "doi": "10.1093/mnras/staa1691",
+      "url": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/Stockinger2020/",
+      "use": "The e8.8, s9.0, and z9.6 machine-readable diagnostic-energy series provide discrete sub-1e50 erg model anchors; their heterogeneous progenitors forbid interpolation into a universal mass-energy relation."
+    },
+    {
+      "quantity": "machine-readable solar 9--12 Msun final kinetic-energy grid",
+      "citation": "Sukhbold et al. 2016, ApJ 821, 38",
+      "doi": "10.3847/0004-637X/821/1/38",
+      "url": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/SEWBJ_2015/",
+      "use": "The Z9.6 P-HOTB release supplies progenitor-specific final kinetic energy, fallback, and baryonic mass cut at 13 solar-metallicity nodes from 9--12 Msun. It is retained as a single-engine sensitivity grid, not a universal or canonical prescription."
+    },
+    {
+      "quantity": "source-table zero and ultra-low-Z thermal-bomb energy anchors",
+      "citation": "Roberti, Limongi & Chieffi 2024, ApJS 270, 28",
+      "doi": "10.3847/1538-4365/ad1686",
+      "url": "https://arxiv.org/abs/2312.02942",
+      "use": "Article-source Table 7 supplies 34 kinetic-energy and remnant-mass records at 15 and 25 Msun over Z=0--3.236e-6 and multiple rotations. The thermal-bomb/fixed-Ni56-mass-cut values are sparse sensitivity anchors, not an approved neutrino-driven or interpolable population model."
+    },
+    {
+      "quantity": "official electronic Pop III piston-energy grid",
+      "citation": "Heger & Woosley 2010, ApJ 724, 341--373",
+      "doi": "10.1088/0004-637X/724/1/341",
+      "url": "https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=J/ApJ/724/341",
+      "use": "VizieR Table 8 supplies kinetic energy at infinity over 120 zero-metallicity masses, two piston definitions, and four artificial-mixing settings. It is retained as a coupled sensitivity grid, not an approved event-energy population model."
+    },
+    {
+      "quantity": "resolved single-SN terminal radial momentum",
+      "citation": "Kim & Ostriker 2015, ApJ 802, 99",
+      "doi": "10.1088/0004-637X/802/2/99",
+      "url": "https://arxiv.org/abs/1410.1537",
+      "use": "Audit the published 2.8e5 Msun km/s n^-0.17 terminal radial-momentum fit over n=0.1--100 cm^-3; this scalar is not a canonical net vector."
+    }
+  ],
+  "approval": {
+    "canonical_conversion_allowed": false,
+    "runtime_deposition_allowed": false,
+    "production_ready": false,
+    "required_before_approval": [
+      "Select and cite a progenitor-, metallicity-, remnant-, and fallback-consistent energy model.",
+      "Select age-resolved wind and AGB velocity or mechanical-luminosity histories.",
+      "Define the resolution- and environment-dependent thermal versus terminal-radial-momentum deposition switch.",
+      "Validate conservation and convergence in resolved and unresolved blast/wind tests."
+    ]
+  }
+}

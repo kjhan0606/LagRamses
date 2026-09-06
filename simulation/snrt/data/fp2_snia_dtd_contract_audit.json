@@ -1,0 +1,248 @@
+{
+  "schema": "snrt-fp2-snia-dtd-contract-audit",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "blocked_contract_integrity",
+  "physical_baseline_ready": false,
+  "production_ready": false,
+  "runtime_activation_allowed": false,
+  "production_blockers": [
+    "runtime_activation_disabled",
+    "independent_f_p1_terminal_fate_gate_closed"
+  ],
+  "source_binding": {
+    "status": "historical_commit_ancestor_but_current_worktree_unbound",
+    "declared_commit": "c6c8042b03406b9d69bc50434fe5d6af7f542be6",
+    "runtime_contract_bindings": [
+      "c6c8042b03406b9d69bc50434fe5d6af7f542be6",
+      "c6c8042b03406b9d69bc50434fe5d6af7f542be6",
+      "c6c8042b03406b9d69bc50434fe5d6af7f542be6"
+    ],
+    "runtime_contract_matches": true,
+    "repository_head": "343619e1943be7f706d33b99561c8087ed2daffc",
+    "revision_exists": true,
+    "declared_commit_is_ancestor": true,
+    "worktree_clean": false,
+    "worktree_change_count": 100,
+    "production_code_bound": false,
+    "interpretation": "The declared staging revision exists and is ancestral, but current uncommitted changes are not included in that immutable binding."
+  },
+  "contract": "simulation/snrt/config/fp2_snia_dtd_contract_v1.json",
+  "contract_sha256": "155cb6883b72c96b02dc7b6ed11e3174b8cf4abd330f73f30ed5acde56071edf",
+  "native_kernel": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_dtd.f90",
+    "sha256": "354ba2ac3e34572e8e102ebdd98a328f6203288f0023c1cc7ff10853492fc6ef"
+  },
+  "production_kernel": {
+    "path": "patch/lagRamses/stellar_snia_dtd.f90",
+    "sha256": "354ba2ac3e34572e8e102ebdd98a328f6203288f0023c1cc7ff10853492fc6ef"
+  },
+  "native_event_ledger": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_event_ledger.f90",
+    "sha256": "d5c7cd28e72e642c668f332d466ff8b8e0feca1b360618f2e4c9bb8530cce94a"
+  },
+  "production_event_ledger": {
+    "path": "patch/lagRamses/stellar_snia_event_ledger.f90",
+    "sha256": "d5c7cd28e72e642c668f332d466ff8b8e0feca1b360618f2e4c9bb8530cce94a"
+  },
+  "native_physical_contract": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_physical_contract.f90",
+    "sha256": "35c31a155250d5bc2de0855abc1462e3c3eab7d72bf93f9b21560711811721e0"
+  },
+  "production_physical_contract": {
+    "path": "patch/lagRamses/stellar_snia_physical_contract.f90",
+    "sha256": "35c31a155250d5bc2de0855abc1462e3c3eab7d72bf93f9b21560711811721e0"
+  },
+  "population_realization_contract": {
+    "path": "simulation/snrt/config/fp2_snia_population_realization_contract_v1.json",
+    "sha256": "c7188f54cc581daf5e8c411b1d2819c63067bf4587a39b70e0c5cd16764fe7fe",
+    "status": "approved_physical_baseline_runtime_gated"
+  },
+  "native_snia_population_contract": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_population_contract.f90",
+    "sha256": "7a279d56b3b93318ceb026e00974ee24e1016134872db339b5318d637c65cb9b"
+  },
+  "production_snia_population_contract": {
+    "path": "patch/lagRamses/stellar_snia_population_contract.f90",
+    "sha256": "7a279d56b3b93318ceb026e00974ee24e1016134872db339b5318d637c65cb9b"
+  },
+  "native_snia_cell_deposition": {
+    "path": "simulation/snrt/native/phase0/stellar_snia_cell_deposition.f90",
+    "sha256": "bc0a5cc291a8f760de463b3ccb6789ff4551987c22f597a093af3879a78b6fab"
+  },
+  "production_snia_cell_deposition": {
+    "path": "patch/lagRamses/stellar_snia_cell_deposition.f90",
+    "sha256": "bc0a5cc291a8f760de463b3ccb6789ff4551987c22f597a093af3879a78b6fab"
+  },
+  "runtime_handoff": {
+    "status": "blocked_runtime_handoff",
+    "activation_allowed": false,
+    "contract": {
+      "path": "simulation/snrt/config/fp2_snia_runtime_contract_v1.nml",
+      "sha256": "8c18f48d211a0983db99e11c4058644a708cb507182649c686415e5ef5239eaa",
+      "groups": [
+        "contract_population_group",
+        "contract_physical_group",
+        "contract_thermal_group"
+      ]
+    },
+    "caller": {
+      "path": "patch/lagRamses/stellar_ramses_runtime.f90",
+      "sha256": "e1cf7205e87bf3843477195c0a91c88af1dc11bc317a4c98cdc85ce11da9d85f",
+      "target_policy": "actual AMR leaf-cell NGP target; owner rank is local RAMSES rank",
+      "activation_gate": "production_source_model_supported() remains fail-closed"
+    },
+    "bridge": {
+      "path": "patch/lagRamses/stellar_ramses_bridge.f90",
+      "sha256": "09ce0a15ed5f2644ac683c3b7afb2096dc6d3e3b84a0764ebd9243c4611293f3",
+      "layout": "unew(local_cell,variable)",
+      "transaction": "variable-major scratch then row-major scatter"
+    }
+  },
+  "production_runtime_negative": {
+    "path": "simulation/snrt/data/fp2_snia_production_runtime_negative.json",
+    "sha256": "333adbd040cb1073a315683884cd078fcf1984d20da116a5f080fd49e74beb0c",
+    "status": "pass",
+    "result_statuses": {
+      "mismatched_approval": "pass",
+      "mismatched_commit": "pass",
+      "missing_contract": "pass",
+      "missing_thermal_group": "pass",
+      "valid_contract_activation": "pass"
+    },
+    "interpretation": "linked production binary startup negative evidence; no evolution or active SNIa run"
+  },
+  "kernel_family": "power_law",
+  "kernel_alpha": -1.07,
+  "selected_delay_parameters": {
+    "minimum_delay_gyr": 0.04,
+    "maximum_delay_gyr": 13.7,
+    "events_per_initial_msun": 0.0013
+  },
+  "selected_event_source": "hesma:yysd4-xap92:n100",
+  "candidate_matrix": {
+    "path": "simulation/snrt/config/fp2_snia_dtd_candidate_matrix_v1.json",
+    "sha256": "4b7b9f84a18cd4127967098e02ad1b181f654333e165ad0052f2a48e0fbed753",
+    "schema": "snrt-fp2-snia-dtd-candidate-matrix",
+    "candidate_count": 4,
+    "selected_candidate_id": "field_observed_powerlaw_maoz2012",
+    "selected_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+    "literature_dossier": {
+      "path": "provenance/fp2_snia_dtd_literature_dossier_2026-09-02.md",
+      "sha256": "0f815e80629674879d27ecfcee50c01c5b67099ca6fc33fba41ccaad63a8a214"
+    }
+  },
+  "event_yield_matrix": {
+    "path": "simulation/snrt/config/fp2_snia_event_yield_candidate_matrix_v1.json",
+    "sha256": "87dc96784422b5fe7ccdb34beb49fb572a9dc642055f58fe8abf68861f81b642",
+    "schema": "snrt-fp2-snia-event-yield-candidate-matrix",
+    "candidate_count": 3,
+    "selected_candidate_id": "hesma_model_archive_snia_profiles",
+    "selected_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+    "event_yield_dossier": {
+      "path": "provenance/fp2_snia_event_yield_dossier_2026-09-03.md",
+      "sha256": "b9589379ce5c7664471afe332529a9a33173a7968132f23d9dac9e29c4a74cf3"
+    }
+  },
+  "event_yield_converter": {
+    "path": "simulation/snrt/tools/convert_snia_event_yields.py",
+    "sha256": "cccc75597a8bc2b9a130488118b73e16512bb196c979ac8d9afd24ae254a4df2"
+  },
+  "event_yield_asset_manifest": {
+    "path": "manifests/fp2_snia_keegans2023_review_v1.json",
+    "sha256": "1e08bedc4381827244fd280d38eb62cdbc5a3c540ddb903aaeba2157fcedac84"
+  },
+  "event_yield_hesma_asset_manifest": {
+    "path": "manifests/fp2_snia_hesma_yysd4_review_v1.json",
+    "sha256": "0a9c6f6695f002f93d30b4c5cce0a6b0abaa3efe93105c836d4aed633561d6df"
+  },
+  "event_yield_asset_audit": {
+    "path": "simulation/snrt/data/fp2_snia_event_yield_asset_audit.json",
+    "sha256": "399eac2c2b6bd3011182c15d4337bcede8adf865660771f7ba666345def6da6f",
+    "status": "review_only_asset_integrity_passed"
+  },
+  "event_yield_hesma_source_audit": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_source_audit.json",
+    "sha256": "5463d58733df8b715fd1ec262b9164cf7b596ad0c9338af98098b8170ea1d510",
+    "status": "review_only_source_format_passed",
+    "physical_review_status": "review_only_with_physical_warnings",
+    "record_id": "yysd4-xap92",
+    "model_count": 15,
+    "physical_warning_count": 2,
+    "physical_warnings": [
+      {
+        "model": "n300c",
+        "type": "profile_mass_mismatch",
+        "relative_difference": 6.410417389339434,
+        "severity": "source_data_anomaly",
+        "requires_quarantine": true,
+        "interpretation": "source-data anomaly requires quarantine before any population mixture"
+      },
+      {
+        "model": "n1600c",
+        "type": "profile_mass_mismatch",
+        "relative_difference": 0.0511218934472347,
+        "severity": "profile_mass_warning",
+        "requires_quarantine": false,
+        "interpretation": "spherical-average density integration is not ready to define returned mass without a source-specific correction or authoritative scalar"
+      }
+    ]
+  },
+  "event_yield_hesma_review_normalized": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_n100_review_normalized.json",
+    "sha256": "f4586d1c953de3e777277414c73b9ffe22c96ee235e61b72b57c340ba169a8cf",
+    "status": "review_only_source_normalized_physics_blocked",
+    "selected_model_id": "n100",
+    "canonical_conversion_allowed": false,
+    "runtime_activation_allowed": false
+  },
+  "event_yield_hesma_model_comparison": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_model_comparison.json",
+    "sha256": "73b3d49c6dbb686965ec71a716f5fdf525dfa078a58bc9fb6384e547138d8004",
+    "status": "review_only_no_model_selected",
+    "model_count": 15,
+    "selected_model_id": null
+  },
+  "event_yield_hesma_profile_estimator_comparison": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_profile_estimator_comparison.json",
+    "sha256": "65e1699bedc529eca777862e15c228a98f5569cbeee1de63bdc4b6935f07b129",
+    "status": "review_only_diagnostic",
+    "model_count": 15,
+    "selected_estimator": null
+  },
+  "event_yield_hesma_selection_packet": {
+    "path": "simulation/snrt/data/fp2_snia_hesma_source_selection_packet.json",
+    "sha256": "e05f1574ea31d80be913573b39627d00d2c378623cd2a6f2da0476f89427d9ed",
+    "status": "approved_physical_baseline_runtime_gated",
+    "model_count": 15,
+    "selected_model_id": "n100",
+    "selected_population_mixture": "single_model_n100"
+  },
+  "event_source_approval_sidecar": {
+    "path": "simulation/snrt/config/fp2_snia_event_source_approval_sidecar_v1.json",
+    "sha256": "0cbd41fc1a7e6c9d9e6e5337e089cb7d38ad69c97534125c8ce4b8d2b0169484",
+    "status": "approved_physical_baseline_runtime_gated",
+    "production_ready": true,
+    "runtime_activation_allowed": false,
+    "promotion_requirements_status": "satisfied_for_approved_physical_baseline"
+  },
+  "event_yield_format_audit": {
+    "path": "simulation/snrt/data/fp2_snia_keegans_format_audit.json",
+    "sha256": "fa752787f8a3d01e9bdc3e0c0324e2075c952be3ba21006691b0c64a4a4cd98e",
+    "status": "review_only_source_format_passed",
+    "missing_project_elements": [
+      "H",
+      "He",
+      "C",
+      "N"
+    ],
+    "missing_project_elements_are_absent_isotope_rows": true,
+    "explicit_zero_project_elements": [],
+    "inferred_zero_policy": "never infer absent project elements as zero during conversion"
+  },
+  "failures": [
+    "runtime_caller_unew_caller_missing"
+  ],
+  "interpretation": "The Maoz field DTD and HESMA yysd4-xap92 n100 event source are ready as a physical baseline; the runtime caller is connected to the local AMR leaf-cell bridge, but production_ready remains false because activation is disabled by the independent F-P1/runtime approval gates.",
+  "audit_code_sha256": "def15a0bf87c0c55f88f649fb094db61467ffd9ddebf5ad273fd1d1cb5bd8885"
+}

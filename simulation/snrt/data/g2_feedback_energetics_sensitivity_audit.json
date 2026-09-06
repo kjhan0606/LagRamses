@@ -1,0 +1,968 @@
+{
+  "audit_code_sha256": "968c1575e3133111946e9da7583358ee76fe1f41aa29e45d1f376caf7a927bdf",
+  "blockers": [
+    "Select and cite a progenitor-, metallicity-, remnant-, and fallback-consistent energy model.",
+    "Select age-resolved wind and AGB velocity or mechanical-luminosity histories.",
+    "Define the resolution- and environment-dependent thermal versus terminal-radial-momentum deposition switch.",
+    "Validate conservation and convergence in resolved and unresolved blast/wind tests."
+  ],
+  "canonical_conversion_allowed": false,
+  "channel_sensitivity": {
+    "1_massive_star_wind": {
+      "model_count": 20,
+      "returned_mass_unweighted_grid_sum_msun": 40.40132391903296,
+      "scenarios": [
+        {
+          "kinetic_energy_erg_per_model": {
+            "maximum": 1.2114584697285574e+50,
+            "minimum": 2.3089439592591698e+47,
+            "unweighted_grid_sum": 4.016841028663973e+50
+          },
+          "scalar_radial_momentum_g_cm_s_per_model": {
+            "maximum": 2.422916939457115e+42,
+            "minimum": 4.6178879185183395e+39,
+            "unweighted_grid_sum": 8.033682057327947e+42
+          },
+          "velocity_km_s": 1000.0
+        },
+        {
+          "kinetic_energy_erg_per_model": {
+            "maximum": 3.101333682505107e+50,
+            "minimum": 5.910896535703474e+47,
+            "unweighted_grid_sum": 1.0283113033379772e+51
+          },
+          "scalar_radial_momentum_g_cm_s_per_model": {
+            "maximum": 3.876667103131384e+42,
+            "minimum": 7.388620669629342e+39,
+            "unweighted_grid_sum": 1.2853891291724715e+43
+          },
+          "velocity_km_s": 1600.0
+        },
+        {
+          "kinetic_energy_erg_per_model": {
+            "maximum": 6.408615304864069e+50,
+            "minimum": 1.2214313544481008e+48,
+            "unweighted_grid_sum": 2.124908904163242e+51
+          },
+          "scalar_radial_momentum_g_cm_s_per_model": {
+            "maximum": 5.5727089607513646e+42,
+            "minimum": 1.062114221259218e+40,
+            "unweighted_grid_sum": 1.847746873185428e+43
+          },
+          "velocity_km_s": 2300.0
+        },
+        {
+          "kinetic_energy_erg_per_model": {
+            "maximum": 1.0903126227557018e+51,
+            "minimum": 2.0780495633332528e+48,
+            "unweighted_grid_sum": 3.6151569257975765e+51
+          },
+          "scalar_radial_momentum_g_cm_s_per_model": {
+            "maximum": 7.268750818371345e+42,
+            "minimum": 1.3853663755555018e+40,
+            "unweighted_grid_sum": 2.410104617198384e+43
+          },
+          "velocity_km_s": 3000.0
+        }
+      ]
+    },
+    "2_agb_wind": {
+      "model_count": 40,
+      "returned_mass_unweighted_grid_sum_msun": 115.32101337213842,
+      "scenarios": [
+        {
+          "kinetic_energy_erg_per_model": {
+            "maximum": 1.4750292386103655e+45,
+            "minimum": 1.0329124511381516e+44,
+            "unweighted_grid_sum": 2.866404693251201e+46
+          },
+          "scalar_radial_momentum_g_cm_s_per_model": {
+            "maximum": 5.900116954441462e+39,
+            "minimum": 4.131649804552606e+38,
+            "unweighted_grid_sum": 1.1465618773004805e+41
+          },
+          "velocity_km_s": 5.0
+        },
+        {
+          "kinetic_energy_erg_per_model": {
+            "maximum": 5.900116954441462e+45,
+            "minimum": 4.1316498045526064e+44,
+            "unweighted_grid_sum": 1.1465618773004805e+47
+          },
+          "scalar_radial_momentum_g_cm_s_per_model": {
+            "maximum": 1.1800233908882925e+40,
+            "minimum": 8.263299609105212e+38,
+            "unweighted_grid_sum": 2.293123754600961e+41
+          },
+          "velocity_km_s": 10.0
+        },
+        {
+          "kinetic_energy_erg_per_model": {
+            "maximum": 2.360046781776585e+46,
+            "minimum": 1.6526599218210426e+45,
+            "unweighted_grid_sum": 4.586247509201922e+47
+          },
+          "scalar_radial_momentum_g_cm_s_per_model": {
+            "maximum": 2.360046781776585e+40,
+            "minimum": 1.6526599218210425e+39,
+            "unweighted_grid_sum": 4.586247509201922e+41
+          },
+          "velocity_km_s": 20.0
+        },
+        {
+          "kinetic_energy_erg_per_model": {
+            "maximum": 5.310105258997315e+46,
+            "minimum": 3.718484824097346e+45,
+            "unweighted_grid_sum": 1.0319056895704325e+48
+          },
+          "scalar_radial_momentum_g_cm_s_per_model": {
+            "maximum": 3.540070172664877e+40,
+            "minimum": 2.4789898827315636e+39,
+            "unweighted_grid_sum": 6.8793712638028825e+41
+          },
+          "velocity_km_s": 30.0
+        }
+      ]
+    },
+    "3_core_collapse_supernova": {
+      "launch_energy_sensitivity": [
+        {
+          "explosion_energy_erg_per_event": 1e+50,
+          "scalar_ejecta_launch_momentum_g_cm_s_per_model": {
+            "maximum": 2.7182804841831322e+42,
+            "minimum": 1.6810218509266688e+42,
+            "unweighted_grid_sum": 4.502542892135035e+43
+          },
+          "unweighted_grid_energy_sum_erg": 2e+51
+        },
+        {
+          "explosion_energy_erg_per_event": 5e+50,
+          "scalar_ejecta_launch_momentum_g_cm_s_per_model": {
+            "maximum": 6.078259944544526e+42,
+            "minimum": 3.758879130334549e+42,
+            "unweighted_grid_sum": 1.0067991978422441e+44
+          },
+          "unweighted_grid_energy_sum_erg": 1e+52
+        },
+        {
+          "explosion_energy_erg_per_event": 1e+51,
+          "scalar_ejecta_launch_momentum_g_cm_s_per_model": {
+            "maximum": 8.595957649204005e+42,
+            "minimum": 5.315857845440304e+42,
+            "unweighted_grid_sum": 1.4238290801748546e+44
+          },
+          "unweighted_grid_energy_sum_erg": 2e+52
+        },
+        {
+          "explosion_energy_erg_per_event": 2e+51,
+          "scalar_ejecta_launch_momentum_g_cm_s_per_model": {
+            "maximum": 1.2156519889089052e+43,
+            "minimum": 7.517758260669098e+42,
+            "unweighted_grid_sum": 2.0135983956844882e+44
+          },
+          "unweighted_grid_energy_sum_erg": 4e+52
+        }
+      ],
+      "model_count": 20,
+      "returned_mass_unweighted_grid_sum_msun": 258.84902538900985,
+      "terminal_shell_density_sensitivity_at_published_1e51_erg_calibration": [
+        {
+          "ambient_hydrogen_number_density_cm3": 0.1,
+          "scalar_terminal_shell_momentum_g_cm_s_per_event": 8.235255438538338e+43,
+          "scalar_terminal_shell_momentum_msun_km_s_per_event": 414150.34868709807,
+          "unweighted_grid_scalar_terminal_shell_momentum_g_cm_s": 1.647051087707668e+45
+        },
+        {
+          "ambient_hydrogen_number_density_cm3": 1.0,
+          "scalar_terminal_shell_momentum_g_cm_s_per_event": 5.567716e+43,
+          "scalar_terminal_shell_momentum_msun_km_s_per_event": 280000.0,
+          "unweighted_grid_scalar_terminal_shell_momentum_g_cm_s": 1.1135431999999999e+45
+        },
+        {
+          "ambient_hydrogen_number_density_cm3": 10.0,
+          "scalar_terminal_shell_momentum_g_cm_s_per_event": 3.764237999417543e+43,
+          "scalar_terminal_shell_momentum_msun_km_s_per_event": 189303.2331097549,
+          "unweighted_grid_scalar_terminal_shell_momentum_g_cm_s": 7.528475998835085e+44
+        },
+        {
+          "ambient_hydrogen_number_density_cm3": 100.0,
+          "scalar_terminal_shell_momentum_g_cm_s_per_event": 2.5449372267297734e+43,
+          "scalar_terminal_shell_momentum_msun_km_s_per_event": 127984.693092165,
+          "unweighted_grid_scalar_terminal_shell_momentum_g_cm_s": 5.0898744534595466e+44
+        }
+      ]
+    }
+  },
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_feedback_energetics_sensitivity_contract_v1.json",
+  "contract_sha256": "ad4201ceb16a6a9d53c8d82cfb8ef00f5306fc88eec36180dac017812a9c7033",
+  "gate": "G2",
+  "input_projection": {
+    "model_count_by_channel": {
+      "1": 20,
+      "2": 40,
+      "3": 20
+    },
+    "projection_builder_code_sha256": "1eeb458ba769be0cf04f45004c96251e8edd439a924d0f133fd3890ab83f54df",
+    "projection_contract_sha256": "b8b1fef5726033875df52e0ae2447e0cc0b262e7f4d3fdb68970b8c0bb7d7c67",
+    "source_candidate_id": "nugrid_set1ext_mesaonly_fryer12_delay",
+    "source_energy_and_momentum_nulls_preserved": true,
+    "status": "partial_grid_review_only_blocked"
+  },
+  "interpretation": "The overlay quantifies sensitivity but does not fill source nulls. Wind/AGB radial budgets are velocity-dependent, SN launch momentum is ejecta-mass and energy dependent, and terminal shell momentum is an environment-dependent scalar rather than a canonical net vector.",
+  "machine_readable_event_energy_anchors": {
+    "cross_model_interpolation_allowed": false,
+    "records": [
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "collapse_type": "electron_capture_supernova",
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": 1.304827207860982e+42,
+        "diagnostic_energy_sample_time_postbounce_s": 3.1294983277591975,
+        "diagnostic_explosion_energy_erg": 9.53902793709056e+49,
+        "final_event_ejecta_mass_msun": 4.488,
+        "metallicity": "solar",
+        "model": "e8.8",
+        "zams_mass_msun": 8.8
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "collapse_type": "low_mass_iron_core_ccsn",
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": 1.241252996268501e+42,
+        "diagnostic_energy_sample_time_postbounce_s": 3.1294983277591975,
+        "diagnostic_explosion_energy_erg": 5.250178516256707e+49,
+        "final_event_ejecta_mass_msun": 7.379,
+        "metallicity": "solar",
+        "model": "s9.0",
+        "zams_mass_msun": 9.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "collapse_type": "low_mass_iron_core_ccsn",
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": 1.678193404586265e+42,
+        "diagnostic_energy_sample_time_postbounce_s": 1.4492307692307693,
+        "diagnostic_explosion_energy_erg": 8.602597812628994e+49,
+        "final_event_ejecta_mass_msun": 8.232,
+        "metallicity": "zero",
+        "model": "z9.6",
+        "zams_mass_msun": 9.6
+      }
+    ],
+    "source_audit_code_sha256": "1de8e92c8b4d783517fb636f23a3a1a09b526f15859067677b45d542f28e072a",
+    "source_candidate_id": "stockinger2020_low_mass_ccsn",
+    "vsh_dataset_used": false,
+    "vsh_metadata_quarantined": true
+  },
+  "machine_readable_mass_grid_energy_anchors": {
+    "cross_engine_interpolation_allowed": false,
+    "cross_source_interpolation_allowed": false,
+    "exact_ejecta_launch_momentum_derived": false,
+    "records": [
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.352,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.00020471,
+        "final_kinetic_energy_erg": 1.1e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 7.381286648069751,
+        "zams_mass_msun": 9.0
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.393,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.00029949,
+        "final_kinetic_energy_erg": 1.4000000000000001e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 7.5670503873722845,
+        "zams_mass_msun": 9.25
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.407,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.0003644,
+        "final_kinetic_energy_erg": 1.8e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 7.786422737221534,
+        "zams_mass_msun": 9.5
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.45,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.00026876,
+        "final_kinetic_energy_erg": 3.4999999999999996e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 7.976849944026657,
+        "zams_mass_msun": 9.75
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.448,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.00024554,
+        "final_kinetic_energy_erg": 6e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 8.185621891284423,
+        "zams_mass_msun": 10.0
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.474,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.00028174,
+        "final_kinetic_energy_erg": 6.3e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 8.417266582228745,
+        "zams_mass_msun": 10.25
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.484,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.00049307,
+        "final_kinetic_energy_erg": 4.6e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 8.666321960790023,
+        "zams_mass_msun": 10.5
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.467,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.00042141,
+        "final_kinetic_energy_erg": 6.8999999999999995e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 8.91818163243734,
+        "zams_mass_msun": 10.75
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.537,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.0016368,
+        "final_kinetic_energy_erg": 3.1e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 9.120844328091035,
+        "zams_mass_msun": 11.0
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.528,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.0013575,
+        "final_kinetic_energy_erg": 3.6e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 9.32294492362888,
+        "zams_mass_msun": 11.25
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.497,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.00050896,
+        "final_kinetic_energy_erg": 6.4000000000000005e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 9.19624127872314,
+        "zams_mass_msun": 11.5
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.587,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.0029484,
+        "final_kinetic_energy_erg": 2.6e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 9.15619824515797,
+        "zams_mass_msun": 11.75
+      },
+      {
+        "baryonic_mass_cut_after_fallback_msun": 1.529,
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "engine": "Z9.6",
+        "exact_total_event_ejecta_mass_available": false,
+        "fallback_mass_msun": 0.0012928,
+        "final_kinetic_energy_erg": 6.6e+50,
+        "metallicity": "source_labelled_solar",
+        "stable_event_ejecta_sum_msun": 9.31701944310978,
+        "zams_mass_msun": 12.0
+      }
+    ],
+    "source_audit_code_sha256": "66b78331341317046aa189eb609ef9fa2a9748c2bbf2cb1a6612bb292fe0540c",
+    "source_candidate_id": "sukhbold2016_ccsn"
+  },
+  "production_ready": false,
+  "runtime_deposition_allowed": false,
+  "schema": "snrt-g2-feedback-energetics-sensitivity-audit",
+  "schema_version": 1,
+  "source_frame_vector_momentum": {
+    "bulk_advective_momentum_separate": true,
+    "candidate_isotropic_model_count": 80,
+    "isotropic_vector_g_cm_s_per_star": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "scalar_radial_momentum_separate": true,
+    "semantics": "cumulative net directed momentum vector in the stellar comoving frame"
+  },
+  "source_table_popiii_energy_grid": {
+    "coordinate_count": 5760,
+    "energy_semantics": "kinetic energy at infinity in Bethe (1e51 erg)",
+    "exact_ejecta_launch_momentum_derived": false,
+    "explicit_remnant_mass_available": false,
+    "explosion_energy_distribution_selected": false,
+    "fallback_included": true,
+    "inferred_remnant_mass_promoted": false,
+    "kinetic_energy_at_infinity_erg_range": [
+      3e+50,
+      1e+52
+    ],
+    "mass_interpolation_allowed": false,
+    "metallicity_extrapolation_allowed": false,
+    "metallicity_mass_fraction": 0.0,
+    "mixing_distribution_selected": false,
+    "mixing_normalized_to_he_core": [
+      0.0,
+      0.001,
+      0.00158,
+      0.00251
+    ],
+    "piston_distribution_selected": false,
+    "piston_locations": {
+      "S4": "entropy per baryon S/NA/kB=4, normally the base of the oxygen shell",
+      "Ye": "edge of the iron core at the inward Ye drop"
+    },
+    "s4_kinetic_energy_bethe": [
+      0.3,
+      0.6,
+      0.9,
+      1.2,
+      1.5,
+      1.8,
+      2.4,
+      3.0,
+      5.0,
+      10.0
+    ],
+    "source_audit_code_sha256": "1bc45fda827e067d9941972da6af8742647a81000c40c7f35344a2918e44aec4",
+    "source_candidate_id": "heger_woosley2010_popiii",
+    "ye_kinetic_energy_bethe": [
+      1.2,
+      10.0
+    ],
+    "zams_mass_hull_msun": [
+      10.0,
+      100.0
+    ],
+    "zams_mass_node_count": 120
+  },
+  "source_table_ultralowz_energy_anchors": {
+    "energy_semantics": {
+      "age_resolved_isotopic_release_available": false,
+      "energy_selection": "minimum thermal energy leading to full ejection above the Fe core",
+      "explosion_trigger": "thermal bomb deposited at 0.8 Msun",
+      "machine_readable_explosion_energy_table_available": false,
+      "mixing_and_fallback_included": false,
+      "remnant_selection": "mass cut chosen to eject 0.07 Msun of Ni56",
+      "separate_wind_and_terminal_yield_components_available": false,
+      "source_tex_explosion_properties_table_available": true,
+      "yield_caption": "explosive yields in Msun"
+    },
+    "exact_ejecta_launch_momentum_derived": false,
+    "mass_budget_quarantined_models": [
+      "025z600"
+    ],
+    "mass_interpolation_allowed": false,
+    "metallicity_interpolation_allowed": false,
+    "records": [
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.27,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-06,
+        "model": "015e000",
+        "remnant_mass_msun": 1.54,
+        "rotation_km_s": 0,
+        "thermal_bomb_kinetic_energy_erg": 1.5e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.77,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-06,
+        "model": "015e300",
+        "remnant_mass_msun": 1.98,
+        "rotation_km_s": 300,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.73,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-06,
+        "model": "015e600",
+        "remnant_mass_msun": 2.0,
+        "rotation_km_s": 600,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.65,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-06,
+        "model": "015e700",
+        "remnant_mass_msun": 2.07,
+        "rotation_km_s": 700,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.01,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "015f000",
+        "remnant_mass_msun": 1.71,
+        "rotation_km_s": 0,
+        "thermal_bomb_kinetic_energy_erg": 2e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.53,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "015f150",
+        "remnant_mass_msun": 1.93,
+        "rotation_km_s": 150,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.72,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "015f300",
+        "remnant_mass_msun": 1.91,
+        "rotation_km_s": 300,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.56,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "015f450",
+        "remnant_mass_msun": 1.9,
+        "rotation_km_s": 450,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.54,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "015f600",
+        "remnant_mass_msun": 1.87,
+        "rotation_km_s": 600,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.55,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "015f800",
+        "remnant_mass_msun": 2.07,
+        "rotation_km_s": 800,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.07,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "015z000",
+        "remnant_mass_msun": 1.75,
+        "rotation_km_s": 0,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.35,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "015z150",
+        "remnant_mass_msun": 1.86,
+        "rotation_km_s": 150,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.53,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "015z300",
+        "remnant_mass_msun": 1.99,
+        "rotation_km_s": 300,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.73,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "015z450",
+        "remnant_mass_msun": 2.32,
+        "rotation_km_s": 450,
+        "thermal_bomb_kinetic_energy_erg": 4e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.54,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "015z600",
+        "remnant_mass_msun": 2.09,
+        "rotation_km_s": 600,
+        "thermal_bomb_kinetic_energy_erg": 4e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.61,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "015z700",
+        "remnant_mass_msun": 2.04,
+        "rotation_km_s": 700,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.67,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "015z800",
+        "remnant_mass_msun": 2.15,
+        "rotation_km_s": 800,
+        "thermal_bomb_kinetic_energy_erg": 3e+51,
+        "zams_mass_msun": 15.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.43,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-06,
+        "model": "025e000",
+        "remnant_mass_msun": 2.31,
+        "rotation_km_s": 0,
+        "thermal_bomb_kinetic_energy_erg": 4e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.75,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-06,
+        "model": "025e300",
+        "remnant_mass_msun": 2.7,
+        "rotation_km_s": 300,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.77,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-06,
+        "model": "025e450",
+        "remnant_mass_msun": 3.15,
+        "rotation_km_s": 450,
+        "thermal_bomb_kinetic_energy_erg": 1e+52,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.72,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-06,
+        "model": "025e600",
+        "remnant_mass_msun": 2.94,
+        "rotation_km_s": 600,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.81,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-06,
+        "model": "025e700",
+        "remnant_mass_msun": 3.16,
+        "rotation_km_s": 700,
+        "thermal_bomb_kinetic_energy_erg": 1e+52,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.41,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "025f000",
+        "remnant_mass_msun": 2.13,
+        "rotation_km_s": 0,
+        "thermal_bomb_kinetic_energy_erg": 4e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.62,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "025f150",
+        "remnant_mass_msun": 3.08,
+        "rotation_km_s": 150,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.62,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "025f300",
+        "remnant_mass_msun": 2.66,
+        "rotation_km_s": 300,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.87,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "025f600",
+        "remnant_mass_msun": 3.14,
+        "rotation_km_s": 600,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.75,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 3.236e-07,
+        "model": "025f800",
+        "remnant_mass_msun": 2.87,
+        "rotation_km_s": 800,
+        "thermal_bomb_kinetic_energy_erg": 1.2e+52,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.18,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "025z000",
+        "remnant_mass_msun": 1.68,
+        "rotation_km_s": 0,
+        "thermal_bomb_kinetic_energy_erg": 5e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.37,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "025z150",
+        "remnant_mass_msun": 2.49,
+        "rotation_km_s": 150,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.38,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "025z300",
+        "remnant_mass_msun": 2.28,
+        "rotation_km_s": 300,
+        "thermal_bomb_kinetic_energy_erg": 7e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.39,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "025z450",
+        "remnant_mass_msun": 2.66,
+        "rotation_km_s": 450,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.48,
+        "mass_budget_quarantined": true,
+        "metallicity_mass_fraction": 0.0,
+        "model": "025z600",
+        "remnant_mass_msun": 2.69,
+        "rotation_km_s": 600,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.35,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "025z700",
+        "remnant_mass_msun": 3.23,
+        "rotation_km_s": 700,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      },
+      {
+        "canonical_energy_selected": false,
+        "canonical_momentum_selected": false,
+        "derived_scalar_ejecta_launch_momentum_g_cm_s": null,
+        "iron_core_mass_msun": 1.43,
+        "mass_budget_quarantined": false,
+        "metallicity_mass_fraction": 0.0,
+        "model": "025z800",
+        "remnant_mass_msun": 3.08,
+        "rotation_km_s": 800,
+        "thermal_bomb_kinetic_energy_erg": 9e+51,
+        "zams_mass_msun": 25.0
+      }
+    ],
+    "rotation_interpolation_or_marginalization_allowed": false,
+    "source_audit_code_sha256": "0eba2f171ef7046a21043398d2b8cb8549bfd3f307d08b23a9be5d70bf1a02c8",
+    "source_candidate_id": "roberti2024_ultralowz_ccsn"
+  },
+  "status": "review_only_blocked_model_selection_required"
+}

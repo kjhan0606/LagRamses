@@ -1,0 +1,93 @@
+{
+  "schema": "snrt-g2-stockinger2020-candidate-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source": {
+    "candidate_id": "stockinger2020_low_mass_ccsn",
+    "article_citation": "Stockinger et al. 2020, MNRAS 496, 2039",
+    "article_doi": "10.1093/mnras/staa1691",
+    "source_page": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/Stockinger2020/",
+    "release_root_relative_path": "stockinger2020_low_mass_ccsn",
+    "files": {
+      "INDEX.html": {"bytes": 28021, "sha256": "933d5dfa85868489da66f22305a88a3595671c95fb903a12aaeca97b7431ebe7"},
+      "e8.8_yields_004.792d.txt": {"bytes": 976, "sha256": "a37db4f070baaa22a0eeb96ec1f21c315bc549bd211c7bbfbd668217d2c2d642"},
+      "e8.8_yields_005.208d.txt": {"bytes": 976, "sha256": "2539a3528880041ae25cf29da797dd5ed4e6cfe357e036230502581b11fbb025"},
+      "e8.8_yields_115.742d.txt": {"bytes": 976, "sha256": "02fd70c5a088ce1ff1a2e22af8934007d8e08baccb36992fdbc9df4a79f3bd06"},
+      "z9.6_yields_001.153d.txt": {"bytes": 976, "sha256": "29acda88a99c9bd278871fb19f7e2a3a5ecf22b63309ddf6e2943c2ce121aa38"},
+      "z9.6_yields_001.389d.txt": {"bytes": 976, "sha256": "602a6c99890547d1d168005eae44d97e4bb7b45fa66a46f87b67a9ee9a19cae8"},
+      "z9.6_yields_104.200d.txt": {"bytes": 976, "sha256": "76ed17b511896dfcd35588929bfc1735687f6714e244d07450e1b842d21ed8f6"},
+      "s9.0_yields_001.974d.txt": {"bytes": 1007, "sha256": "7af3d3bd27bbbdf45a2f8c08591a2cebacd4791137aa983cae023fad04866326"},
+      "s9.0_yields_003.278d.txt": {"bytes": 1007, "sha256": "949e2f0032085601b056e3fac9e0f270cc3b26ffbac941a4df9b07f3ff9a0999"},
+      "s9.0_yields_019.738d.txt": {"bytes": 1007, "sha256": "5a0030da18092fb6aa253d1323f9766d8387a72b0cd46292d2fbc690f7fba1b1"},
+      "s9.0_progenitor_composition.txt": {"bytes": 1050, "sha256": "2a69b22725cc5bc64a3b602525dd10e5516d863d94663b382a3034e836c74542"},
+      "shock_energy_kick.h5": {"bytes": 54552, "sha256": "3b3742e7de18804147c391d4c0306a13ab38a3ea2235abba447621bcc74e50d2"}
+    }
+  },
+  "models": {
+    "e8.8": {
+      "hdf5_group": "e8",
+      "zams_mass_msun": 8.8,
+      "metallicity": "solar",
+      "collapse_type": "electron_capture_supernova",
+      "energy_model": "parametric_neutrino_transport_calibrated_to_1e50_erg",
+      "yield_snapshot_days": [4.792, 5.208, 115.742],
+      "final_yield_file": "e8.8_yields_115.742d.txt",
+      "expected_species_count": 18
+    },
+    "z9.6": {
+      "hdf5_group": "z9",
+      "zams_mass_msun": 9.6,
+      "metallicity": "zero",
+      "collapse_type": "low_mass_iron_core_ccsn",
+      "energy_model": "self_consistent_vertex_prometheus",
+      "yield_snapshot_days": [1.153, 1.389, 104.2],
+      "final_yield_file": "z9.6_yields_104.200d.txt",
+      "expected_species_count": 18
+    },
+    "s9.0": {
+      "hdf5_group": "s9",
+      "zams_mass_msun": 9.0,
+      "metallicity": "solar",
+      "collapse_type": "low_mass_iron_core_ccsn",
+      "energy_model": "self_consistent_vertex_prometheus",
+      "yield_snapshot_days": [1.974, 3.278, 19.738],
+      "final_yield_file": "s9.0_yields_019.738d.txt",
+      "expected_species_count": 19
+    }
+  },
+  "release_semantics": {
+    "yield_column_1": "total species mass on the computational grid in Msun",
+    "yield_column_2": "species mass in cells with positive radial velocity in Msun",
+    "energy": "positive-total-energy diagnostic explosion energy in units of 1e50 erg",
+    "yield_scope": "terminal event ejecta after pre-collapse mass loss; wind return is not included",
+    "release_history": "three post-bounce event snapshots, not a stellar-age cumulative release history"
+  },
+  "known_release_findings": {
+    "vsh_attribute_value": "1e50 erg",
+    "vsh_attribute_semantics_valid": false,
+    "nitrogen_species_present": false,
+    "radioactive_decay_projection_complete": false,
+    "explicit_open_redistribution_license_identified": false,
+    "archive_noncommercial_use_with_citation_permitted": true,
+    "third_party_redistribution_requires_permission": true
+  },
+  "audit_policy": {
+    "yield_total_closure_tolerance_msun": 0.0011,
+    "energy_unit_attribute": "1e50 erg",
+    "canonical_rows_emitted": 0,
+    "vsh_dataset_use_allowed": false,
+    "cross_model_interpolation_allowed": false,
+    "out_of_domain_extrapolation_allowed": false,
+    "terminal_yields_as_stable_decay_products_allowed": false,
+    "project_approval_required": true
+  },
+  "approval": {
+    "research_access_verified": true,
+    "open_redistribution_permission_verified": false,
+    "physics_source_selected": false,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

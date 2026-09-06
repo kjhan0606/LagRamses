@@ -1,0 +1,163 @@
+{
+  "blockers": [
+    "No age-resolved wind/AGB release history.",
+    "No approved source-coupled injected energy or scalar/radial momentum model.",
+    "Source mass coverage is 1--7 and 12--25 Msun, leaving runtime gaps and upper-range assumptions unresolved.",
+    "Source redistribution terms and project approval are unresolved."
+  ],
+  "builder_code_sha256": "1eeb458ba769be0cf04f45004c96251e8edd439a924d0f133fd3890ab83f54df",
+  "canonical_conversion_allowed": false,
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_nugrid_channel_projection_contract_v1.json",
+  "contract_sha256": "b8b1fef5726033875df52e0ae2447e0cc0b262e7f4d3fdb68970b8c0bb7d7c67",
+  "duplicate_policy_result": {
+    "all_collapsed_records_physically_identical": true,
+    "collapsed_coordinate_count": 3,
+    "collapsed_records": [
+      {
+        "component": "total",
+        "coordinate": [
+          5.0,
+          0.01
+        ],
+        "multiplicity": 2,
+        "physical_values_exactly_identical": true,
+        "source_ordinals": [
+          18,
+          19
+        ]
+      },
+      {
+        "component": "winds",
+        "coordinate": [
+          5.0,
+          0.01
+        ],
+        "multiplicity": 2,
+        "physical_values_exactly_identical": true,
+        "source_ordinals": [
+          18,
+          19
+        ]
+      },
+      {
+        "component": "pre_explosion",
+        "coordinate": [
+          5.0,
+          0.01
+        ],
+        "multiplicity": 2,
+        "physical_values_exactly_identical": true,
+        "source_ordinals": [
+          18,
+          19
+        ]
+      }
+    ]
+  },
+  "gate": "G2",
+  "interpretation": "Mass, remnant, reduced chemistry, duplicate, and age-grid wiring are executable review artifacts. Null energy/momentum and provisional terminal lumping prevent canonical promotion.",
+  "production_ready": false,
+  "release_history_status": "provisional_terminal_lumping_not_approved",
+  "row_audit": {
+    "channels": {
+      "1": {
+        "age_node_count": 42,
+        "complete_mass_metallicity_age_grid": true,
+        "complete_mass_metallicity_grid": true,
+        "mass_nodes_msun": [
+          12.0,
+          15.0,
+          20.0,
+          25.0
+        ],
+        "maximum_relative_terminal_pre_event_width": 1e-06,
+        "maximum_terminal_pre_event_width_yr": 19.8,
+        "metallicity_nodes_mass_fraction": [
+          0.0001,
+          0.001,
+          0.006,
+          0.01,
+          0.02
+        ],
+        "minimum_relative_terminal_pre_event_width": 1e-06,
+        "minimum_terminal_pre_event_width_yr": 7.58,
+        "model_count": 20,
+        "row_count": 840
+      },
+      "2": {
+        "age_node_count": 82,
+        "complete_mass_metallicity_age_grid": true,
+        "complete_mass_metallicity_grid": true,
+        "mass_nodes_msun": [
+          1.0,
+          1.65,
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0
+        ],
+        "maximum_relative_terminal_pre_event_width": 1e-06,
+        "maximum_terminal_pre_event_width_yr": 12150.0,
+        "metallicity_nodes_mass_fraction": [
+          0.0001,
+          0.001,
+          0.006,
+          0.01,
+          0.02
+        ],
+        "minimum_relative_terminal_pre_event_width": 1e-06,
+        "minimum_terminal_pre_event_width_yr": 45.58,
+        "model_count": 40,
+        "row_count": 3280
+      },
+      "3": {
+        "age_node_count": 42,
+        "complete_mass_metallicity_age_grid": true,
+        "complete_mass_metallicity_grid": true,
+        "mass_nodes_msun": [
+          12.0,
+          15.0,
+          20.0,
+          25.0
+        ],
+        "maximum_relative_terminal_pre_event_width": 1e-06,
+        "maximum_terminal_pre_event_width_yr": 19.8,
+        "metallicity_nodes_mass_fraction": [
+          0.0001,
+          0.001,
+          0.006,
+          0.01,
+          0.02
+        ],
+        "minimum_relative_terminal_pre_event_width": 1e-06,
+        "minimum_terminal_pre_event_width_yr": 7.58,
+        "model_count": 20,
+        "row_count": 840
+      }
+    },
+    "duplicate_coordinate_count": 0,
+    "maximum_absolute_source_population_mass_residual_msun": 0.0008345166235099732,
+    "maximum_absolute_tracked_plus_untracked_closure_residual_msun": 0.0,
+    "maximum_source_population_mass_residual_msun": 0.0007357879860998562,
+    "minimum_source_population_mass_residual_msun": -0.0008345166235099732,
+    "null_energy_row_count": 4960,
+    "null_momentum_row_count": 4960,
+    "row_count": 4960
+  },
+  "rows_included": false,
+  "runtime_coverage_status": "incomplete_1_to_7_and_12_to_25_msun_only",
+  "schema": "snrt-g2-nugrid-channel-projection",
+  "schema_version": 1,
+  "source_adapter_code_sha256": "2c5c5ff366fea6487fd9ee616a8099a27b133c51be9872b0df65765ebaa23531",
+  "source_candidate_id": "nugrid_set1ext_mesaonly_fryer12_delay",
+  "source_semantics_evidence_sha256": "b1ffb82287cab92ebada5091617c536ea584a92622cb111d100db0d9ea24ae11",
+  "status": "partial_grid_review_only_blocked",
+  "unavailable_fields": {
+    "energy_erg_per_star": null,
+    "meaning": "Unavailable source values remain null; they are not replaced by values from the separate sensitivity overlay.",
+    "momentum_g_cm_s_per_star": null,
+    "momentum_note": "The eventual canonical vector may be exactly zero for an approved isotropic source, but that physical zero is distinct from this source-data null."
+  }
+}

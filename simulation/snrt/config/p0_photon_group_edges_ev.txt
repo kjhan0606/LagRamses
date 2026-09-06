@@ -1,0 +1,12 @@
+# P0 baseline photon-group boundaries in eV.
+# Ten boundaries define nine groups; group i is [edge_i, edge_{i+1}].
+0.01
+1.0
+5.6
+11.2
+13.6
+24.59
+54.42
+500.0
+2000.0
+10000.0

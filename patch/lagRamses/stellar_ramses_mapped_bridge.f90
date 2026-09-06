@@ -1,6 +1,7 @@
 module stellar_ramses_mapped_bridge
-  use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, elem_c
-  use stellar_enrichment_contract, only: stellar_source_t
+  use stellar_enrichment_config, only: stellar_dp, n_stellar_elements
+  use stellar_enrichment_contract, only: stellar_source_t, &
+       generic_metal_ejecta_mass
   use stellar_ramses_field_map, only: stellar_field_map_t, validate_field_map
   implicit none
   private
@@ -19,7 +20,8 @@ contains
     type(stellar_field_map_t), intent(in) :: field_map
     integer, intent(out) :: ierr
     character(len=*), intent(out), optional :: message
-    real(stellar_dp) :: weight_sum, volume_factor
+    real(stellar_dp) :: weight_sum, volume_factor, ejected_sum, source_scale
+    real(stellar_dp) :: generic_metal_mass
     integer :: i, j, map_ierr
     character(len=256) :: map_message
 
@@ -56,22 +58,28 @@ contains
        return
     end if
 
-    if (source%returned_mass < 0.0_stellar_dp) then
+    ejected_sum = sum(source%ejected_mass)
+    source_scale = max(tiny(1.0_stellar_dp), abs(source%returned_mass), &
+         abs(ejected_sum))
+    if (source%returned_mass < -1.0e-10_stellar_dp * source_scale) then
        ierr = 5
        if (present(message)) message = 'returned stellar mass must be nonnegative'
        return
     end if
-    if (any(source%ejected_mass < 0.0_stellar_dp)) then
+    if (any(source%ejected_mass < &
+         -1.0e-10_stellar_dp * source_scale)) then
        ierr = 6
        if (present(message)) message = 'actual ejecta masses must be nonnegative'
        return
     end if
-    if (abs(sum(source%ejected_mass) - source%returned_mass) > &
-        1.0e-10_stellar_dp * max(1.0_stellar_dp, source%returned_mass)) then
+    if (ejected_sum > source%returned_mass + &
+         1.0e-10_stellar_dp * source_scale) then
        ierr = 7
-       if (present(message)) message = 'element ejecta do not close to returned mass'
+       if (present(message)) message = 'tracked ejecta exceed returned mass'
        return
     end if
+    generic_metal_mass = generic_metal_ejecta_mass(source%returned_mass, &
+         source%ejected_mass)
 
     do i = 1, ncell
        if (weights(i) == 0.0_stellar_dp) cycle
@@ -88,7 +96,7 @@ contains
        if (field_map%total_metal_index /= 0) then
           uold(field_map%total_metal_index, i) = &
                uold(field_map%total_metal_index, i) + volume_factor * &
-               sum(source%ejected_mass(elem_c:n_stellar_elements))
+               generic_metal_mass
        end if
        do j = 1, n_stellar_elements
           if (field_map%element_index(j) == 0) cycle

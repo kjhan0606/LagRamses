@@ -18,6 +18,8 @@ subroutine backup_part(filename)
   logical,allocatable,dimension(:)::nb
   integer,parameter::tag=1122
   integer::dummy_io,info2
+  integer :: unit_info, ivar, idesc
+  character(len=80) :: descriptor
 
   if(verbose)write(*,*)'Entering backup_part'
   
@@ -195,6 +197,55 @@ subroutine backup_part(filename)
   end if
   close(ilun)
 
+  ! Keep the native particle stream self-describing.  The descriptor records
+  ! the exact payload order used above, including the stellar release cursor;
+  ! restart/evidence tooling must derive binary record positions from this
+  ! file rather than duplicating an implicit Python or source-code order.
+  if(myid==1) then
+     idesc=index(trim(filename),'part_')
+     if(idesc>1) then
+        descriptor=trim(filename(1:idesc-1))//'part_file_descriptor.txt'
+        open(newunit=unit_info,file=trim(descriptor),status='replace',form='formatted')
+        write(unit_info,'("# version: ",i2)') 1
+        write(unit_info,'("# ",a,", ",a,", ",a)') 'ivar','variable_name','variable_type'
+        ivar=1
+        do idim=1,ndim
+           write(unit_info,'(I2,", ",a,", d")') ivar, 'position_'//char(iachar('x')+idim-1)
+           ivar=ivar+1
+        end do
+        do idim=1,ndim
+           write(unit_info,'(I2,", ",a,", d")') ivar, 'velocity_'//char(iachar('x')+idim-1)
+           ivar=ivar+1
+        end do
+        write(unit_info,'(I2,", mass, d")') ivar
+        ivar=ivar+1
+        write(unit_info,'(I2,", identity, q")') ivar
+        ivar=ivar+1
+        write(unit_info,'(I2,", levelp, i")') ivar
+        ivar=ivar+1
+        write(unit_info,'(I2,", ptypep, b")') ivar
+        ivar=ivar+1
+#ifdef OUTPUT_PARTICLE_POTENTIAL
+        write(unit_info,'(I2,", potential, d")') ivar
+        ivar=ivar+1
+#endif
+        if(star.or.sink)then
+           write(unit_info,'(I2,", birth_epoch, d")') ivar
+           ivar=ivar+1
+           if(metal)then
+              write(unit_info,'(I2,", metallicity, d")') ivar
+              ivar=ivar+1
+           end if
+           write(unit_info,'(I2,", tpp, d")') ivar
+           ivar=ivar+1
+           write(unit_info,'(I2,", mp0, d")') ivar
+           ivar=ivar+1
+           write(unit_info,'(I2,", indtab, d")') ivar
+        end if
+        close(unit_info)
+     end if
+  end if
+
 
 
   ! Send the token
@@ -210,4 +261,3 @@ subroutine backup_part(filename)
   
 
 end subroutine backup_part
-

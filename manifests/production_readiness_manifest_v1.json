@@ -1,0 +1,56 @@
+{
+  "schema": "lrd-jwst-production-readiness-manifest",
+  "schema_version": 1,
+  "project": "LRD_JWST",
+  "project_root": "/gpfs/kjhan/LRD_JWST",
+  "created_at": "2026-09-01",
+  "source_registry": "/gpfs/kjhan/LRD_JWST/manifests/lrd_jwst_external_assets.json",
+  "environment": "/gpfs/kjhan/LRD_JWST/manifests/snrt_cpu_environment_2026-09-01.json",
+  "repository": {
+    "path": "/gpfs/kjhan/LRD_JWST",
+    "head_at_recording": "45cee683788fdfb0e9aa66a978d1e56c1af2c10c",
+    "working_tree_at_recording": "dirty; existing migration and pilot changes are preserved",
+    "production_clean_tree_required": true
+  },
+  "asset_metadata_policy": {
+    "require_per_asset_record": true,
+    "required_fields": ["license_status", "provenance_status", "owner"],
+    "accepted_license_statuses": ["verified", "approved"],
+    "accepted_provenance_statuses": ["recorded", "approved"],
+    "forbidden_asset_statuses": ["missing", "not_migrated", "hash_pending", "available_external_dirty"],
+    "forbidden_comparison_roles": ["legacy_comparison_only", "phase0_preselector_transitional"],
+    "require_non_null_sha256_for_production_assets": true
+  },
+  "asset_metadata": {
+    "production_thermal_atlas_v2": {
+      "license_status": "pending_explicit_data_license_confirmation",
+      "provenance_status": "approved",
+      "owner": "Juhan Kim",
+      "physics_status": "B1 PASS: AGY finding repaired, locally revalidated, and independently re-audited 2026-09-01",
+      "sha256": "b1290d930b22ed049d6d3c5ed47ce56ecf3e0d2e693b39792740768e80fdf6ac"
+    }
+  },
+  "required_production_assets": [
+    {"id": "lagramses_active_executable", "purpose": "clean production RAMSES binary"},
+    {"id": "snrt_cuda_smoke_executable", "purpose": "target accelerator qualification binary"},
+    {"id": "p4_snapshot_hdf5", "purpose": "production coeval input payload"},
+    {"id": "physical_stellar_yield_table_v1", "purpose": "approved physical stellar yields"},
+    {"id": "physical_stellar_sed_v1", "purpose": "approved stellar population SED"},
+    {"id": "physical_agn_sed_v1", "purpose": "approved AGN SED"},
+    {"id": "physical_dust_model_v1", "purpose": "approved dust opacity/depletion model"},
+    {"id": "production_thermal_atlas_v2", "purpose": "epoch-bracketing thermal atlas"}
+  ],
+  "production_rules": {
+    "require_explicit_manifest": true,
+    "reject_embedded_yield_fallback": true,
+    "reject_legacy_and_transitional_assets": true,
+    "reject_unresolved_hashes": true,
+    "reject_dirty_source_identity": true,
+    "production_status": "blocked_until_all_required_assets_are_approved"
+  },
+  "gate": {
+    "name": "G0",
+    "status_at_recording": "blocked",
+    "blocking_reason": "The inventory is explicit, but required production assets, clean identity, per-asset license records, and complete checksums are not yet available."
+  }
+}

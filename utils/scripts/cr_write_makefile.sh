@@ -1,6 +1,6 @@
 #! /bin/bash
 #######################################
-# cr_write_makefile.sh [makefile name]
+# cr_write_makefile.sh [makefile name] [output source]
 # creates a .f90 file with code to
 # write the Makefile content to disk
 #######################################
@@ -12,6 +12,7 @@ if [ $# == 0 ]
 fi
 
 MAKEFILE=$1
+OUTPUT=${2:-write_makefile.f90}
 
 sed "s/\"/\"\"/g;s/^/  write(ilun,format)\"/;s/$/\"/" ${MAKEFILE} > .test_middle.f90
   
@@ -35,7 +36,6 @@ subroutine output_makefile(filename)
   open(unit=ilun,file=fileloc,form='formatted')
 EOF
 
-cat .test_before.f90 .test_middle.f90 .test_after.f90 > write_makefile.f90
+cat .test_before.f90 .test_middle.f90 .test_after.f90 > "$OUTPUT"
 
 rm .test_before.f90 .test_middle.f90 .test_after.f90
-

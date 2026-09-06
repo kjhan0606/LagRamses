@@ -1,0 +1,85 @@
+{
+  "schema": "snrt-fp2-snia-event-yield-candidate-matrix",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "approved_baseline_selection_runtime_gated",
+  "selection_rule": "A candidate must close the isotope-to-element conversion, decay horizon, ejecta mass, remnant ownership, event energy, momentum convention, licensing, source checksum, and deterministic conversion checksum before approval.",
+  "selected_candidate_id": "hesma_model_archive_snia_profiles",
+  "selected_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+  "candidates": [
+    {
+      "candidate_id": "keegans2023_nugrid_metallicity_grid",
+      "citation": "Keegans et al. 2023, Type Ia Supernova Nucleosynthesis: Metallicity-Dependent Yields",
+      "doi": "10.3847/1538-4365/ace102",
+      "paper_url": "https://arxiv.org/abs/2306.12885",
+      "data_doi": "10.5281/zenodo.8060323",
+      "data_url": "https://zenodo.org/records/8060323",
+      "evidence_type": "metallicity_dependent_nugrid_isotopic_yields",
+      "coverage": "39 models from three progenitor/explosion families over 13 22Ne composition points",
+      "yield_basis": "complete isotopic abundance yields with a decayed-isotope supplementary package",
+      "license": "CC-BY-4.0 for the Zenodo data record",
+      "project_role": "composition_baseline_candidate",
+      "status": "candidate_not_approved",
+      "source_data_role": "decayed_isotopic_abundance_table",
+      "project_element_completeness": {
+        "status": "incomplete_for_project_11_element_ledger",
+        "absent_from_source_isotope_rows": ["H", "He", "C", "N"],
+        "explicit_zero_only_elements": [],
+        "infer_absent_elements_as_zero": false
+      },
+      "source_asset_path": "assets/review_only/fp2_snia/keegans2023",
+      "source_manifest_path": "manifests/fp2_snia_keegans2023_review_v1.json",
+      "source_package_sha256": "32d0a8fa97a6aa0810c82127973ebd73446ab76edea0aba7d6c543f3e82d53b7",
+      "blockers": [
+        "source files are staged for review, but source-specific normalization and conversion are not approved",
+        "isotope-to-project-element aggregation and decay horizon are not yet pinned",
+        "the staged decayed package omits H, He, C, and N required by the project 11-element ledger",
+        "per-event returned mass and remnant ownership require an explicit contract",
+        "event energy and momentum are not supplied as a closed runtime source record",
+        "progenitor/explosion mixture and metallicity weighting are not selected"
+      ]
+    },
+    {
+      "candidate_id": "seitenzahl2013_three_dimensional_ddt",
+      "citation": "Seitenzahl et al. 2013, Three-dimensional delayed-detonation models with nucleosynthesis for Type Ia supernovae",
+      "paper_url": "https://academic.oup.com/mnras/article/429/2/1156/1035579",
+      "evidence_type": "three_dimensional_delayed_detonation_isotopic_yields",
+      "coverage": "14 three-dimensional delayed-detonation models with detailed tracer-particle nucleosynthesis",
+      "yield_basis": "isotopic ejecta yields; model family spans ignition conditions and central-density variants",
+      "license": "not established for redistribution in this project",
+      "project_role": "independent_comparison_candidate",
+      "status": "candidate_not_approved",
+      "blockers": [
+        "redistribution/license terms and machine-readable source package are not staged",
+        "the model family is not a selected LRD progenitor mixture",
+        "decay convention, element aggregation, event energy, and momentum remain to be closed",
+        "source checksum and deterministic conversion checksum are absent"
+      ]
+    },
+    {
+      "candidate_id": "hesma_model_archive_snia_profiles",
+      "citation": "Kromer et al. 2017, Simulating the observed diversity of Type Ia supernovae — Introducing a model data base",
+      "doi": "10.48550/arXiv.1706.09879",
+      "paper_url": "https://arxiv.org/abs/1706.09879",
+      "data_url": "https://hesma.h-its.org/",
+      "evidence_type": "public_snia_model_archive_with_integrated_isotopic_yields_and_ejecta_profiles",
+      "coverage": "archive-level candidate; individual Type Ia model IDs must be selected and staged",
+      "yield_basis": "integrated isotopic abundances plus model-dependent ejecta profiles where available",
+      "license": "model-dependent archive terms; redistribution status not established for this project",
+      "project_role": "energetics_and_profile_closure_candidate",
+      "status": "approved_baseline",
+      "source_data_role": "model_archive_isotopic_yields_and_hydro_profiles",
+      "blockers": [
+        "the baseline explicitly selects model n100 and the inner-zero/outer-half-bin profile estimator",
+        "the approved baseline uses isotropic zero-vector momentum; signed/asymmetric profile momentum is not claimed",
+        "the approved baseline has no metallicity interpolation or net-yield claim; those remain sensitivity extensions"
+      ]
+    }
+  ],
+  "decision": {
+    "current_recommendation": "Use Keegans et al. 2023 as the leading composition candidate, HESMA as the leading profile/energetics-closure candidate, and Seitenzahl et al. 2013 as an independent comparison. Do not select any source or write physical event values into the production contract yet.",
+      "production_source_id": "hesma:yysd4-xap92:n100",
+      "production_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+      "runtime_activation_allowed": false
+  }
+}

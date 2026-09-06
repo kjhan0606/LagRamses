@@ -1,0 +1,59 @@
+{
+  "schema": "snrt-g2-huscher2025-candidate-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source": {
+    "candidate_id": "huscher2025_agb",
+    "article_doi": "10.3847/1538-4357/ae0199",
+    "data_doi": "10.5281/zenodo.17635255",
+    "zenodo_record_id": 17635255,
+    "license": "cc-by-4.0",
+    "archive_relative_path": "huscher2025_agb/AGB_files_Huscher_et_al_2025.zip",
+    "archive_bytes": 133655,
+    "archive_md5": "cbd99c59cf0422b921c738ae18fd37eb",
+    "archive_sha256": "dc559ee272d602bcfe95ab0050cb388eed670986e3e62234b4bd9126d0128199",
+    "metadata_relative_path": "huscher2025_agb/zenodo_record_17635255.json",
+    "metadata_sha256": "ed91c30cc8c1c84360585911cb87c2ad277ae7b3ea6b374f82918c599ad82758"
+  },
+  "single_star_grid": {
+    "mass_msun": [0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0],
+    "metallicity_mass_fraction": [0.0001, 0.001, 0.002, 0.003, 0.004, 0.005, 0.01, 0.015, 0.02, 0.03],
+    "isotopes": ["H1", "He3", "He4", "C12", "C13", "N13", "N14", "N15", "O16", "O17", "O18", "F19", "Ne20", "Ne22", "Mg24", "Si28"],
+    "yield_column_semantics": "gross isotope mass ejected over the stellar lifetime in Msun per initial star",
+    "mass_i_column_semantics": "isotope mass remaining inside the star at the end of the simulation; never treat as ejecta",
+    "final_mass_precision_msun": 0.001,
+    "required_cartesian_model_count": 120
+  },
+  "population_tables": {
+    "age_coordinate": "log10(age/yr)",
+    "age_min": 7.18,
+    "age_max": 10.22,
+    "age_step": 0.02,
+    "row_count": 153,
+    "mass_loss_table_claimed_unit": "Msun/yr normalized by total stellar mass formed",
+    "composition_tables": ["C12", "N14", "O16"],
+    "composition_value_semantics": "instantaneous isotope mass fraction of outflowing AGB gas",
+    "normalization_acceptance_rule": "Trapezoidal integration in physical years must not return more than one Msun per one Msun initially formed. Failure blocks all physical use until the source normalization is documented.",
+    "runtime_use": "independent population-level validation only; never convolve a second IMF or mix with per-star rows"
+  },
+  "canonical_projection_policy": {
+    "canonical_rows_emitted": 0,
+    "isotope_decay_required": ["N13"],
+    "tracked_elements_directly_represented": ["H", "He", "C", "N", "O", "Ne", "Mg", "Si"],
+    "tracked_elements_absent": ["S", "Ca", "Fe"],
+    "partial_isotope_coverage_is_not_elemental_completeness": true,
+    "unlisted_ejecta_is_residual_mass_not_a_named_species": true,
+    "out_of_domain_extrapolation_allowed": false,
+    "population_table_to_single_star_deconvolution_allowed": false,
+    "canonical_energy_or_momentum_inference_allowed": false,
+    "project_approval_required": true
+  },
+  "approval": {
+    "license_verified": true,
+    "physics_source_selected": false,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

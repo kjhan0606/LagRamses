@@ -1,0 +1,56 @@
+{
+  "schema": "snrt-fp2-snia-hesma-asset-manifest",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "review_only_asset",
+  "candidate_id": "hesma_model_archive_snia_profiles",
+  "source_record_id": "yysd4-xap92",
+  "asset_root": "assets/review_only/fp2_snia/hesma_yysd4_xap92",
+  "source": {
+    "citation": "Seitenzahl et al. 2013, Three-dimensional delayed-detonation models with nucleosynthesis for Type Ia supernovae; HESMA record yysd4-xap92",
+    "paper_url": "https://academic.oup.com/mnras/article/429/2/1156/1035579",
+    "archive_url": "https://hesma.h-its.org/records/yysd4-xap92",
+    "record_api_url": "https://hesma.h-its.org/api/records/yysd4-xap92",
+    "version": "HESMA record publication date 2026-08-14",
+    "license": "CC-BY-4.0",
+    "retrieved_utc": "2026-09-03",
+    "approval_id": null
+  },
+  "files": [
+    {
+      "path": "ddt_2013_abundances.zip",
+      "bytes": 17825,
+      "md5": "b5b80b41a92f63a76f78537376d7ee24",
+      "sha256": "1655bc52f3df0b4376af0bc4b98ce894d44b9c92b0ddde720ed662607c50fd49",
+      "url": "https://hesma.h-its.org/api/records/yysd4-xap92/files/ddt_2013_abundances.zip/content"
+    },
+    {
+      "path": "ddt_2013_density.zip",
+      "bytes": 27854,
+      "md5": "f35d350c1bd5799a9bf6b8d9561da41e",
+      "sha256": "69ab7d4f4f3beaaa5a19b584ef6c58f40f2bc4aa3bf26bd6ae32f04c095ddd9b",
+      "url": "https://hesma.h-its.org/api/records/yysd4-xap92/files/ddt_2013_density.zip/content"
+    },
+    {
+      "path": "ddt_2013_isotopes.zip",
+      "bytes": 3751179,
+      "md5": "4c62f1754f200b3117d2e872ceeddf43",
+      "sha256": "289f1d24ee9717c72de32daa67297cc1c53ac343a1c91cb1d75680c610f5899f",
+      "url": "https://hesma.h-its.org/api/records/yysd4-xap92/files/ddt_2013_isotopes.zip/content"
+    },
+    {
+      "path": "record.json",
+      "bytes": 14331,
+      "md5": null,
+      "sha256": "0d40e111aa41d2b0f57a2a43955727178b71c197414aaab61148a70572f57ea3",
+      "url": "https://hesma.h-its.org/api/records/yysd4-xap92"
+    }
+  ],
+  "hash_policy": "sha256(path + NUL + bytes + NUL + file_sha256 + LF) over sorted relative paths",
+  "package_sha256": "bb9325de2e07bf86acd1ef4abf7c950fb44e74e6513b8c9c88336d910f8814c0",
+  "approval": {
+    "approval_id": null,
+    "canonical_conversion_allowed": false,
+    "runtime_activation_allowed": false
+  }
+}

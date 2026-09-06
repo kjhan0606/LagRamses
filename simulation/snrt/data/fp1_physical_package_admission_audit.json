@@ -1,0 +1,1498 @@
+{
+  "all_candidate_hard_blockers": [
+    "age_resolved_history_and_neutrino_wind_missing",
+    "age_resolved_wind_missing",
+    "canonical_momentum_and_deposition_missing",
+    "complete_runtime_domain_missing",
+    "explosion_piston_mixing_population_unselected",
+    "failed_model_wind_summary_table_anomaly_requires_author_or_corrected_release",
+    "failed_node_remnant_and_wind_records_incomplete",
+    "per_node_injected_energy_mapping_missing",
+    "positive_metallicity_axis_missing",
+    "production_population_marginalization_unselected",
+    "radioactive_epoch_and_k40_duplicate_unresolved",
+    "redistribution_permission_unverified",
+    "runtime_8_to_10_and_100_to_120_edges_missing",
+    "terminal_energy_momentum_deposition_missing"
+  ],
+  "audit_code_sha256": "b1559849c844a1b513c65b8e47fc58febbb68802d8f1b3a6353e13e52e606650",
+  "candidate_qualification": {
+    "boccioli_roberti2026_lc18": {
+      "gate_evidence_status": {
+        "coordinate_hull_and_population": "validator_blocked",
+        "decay_epoch_and_projection": "validator_blocked",
+        "energy_momentum_and_deposition": "validator_blocked",
+        "fate_structure_and_remnant": "validator_blocked",
+        "lifetime_and_wind_history": "validator_blocked",
+        "pair_instability": "validator_blocked",
+        "runtime_invariance_and_reproduction": "validator_blocked",
+        "source_identity_and_rights": "pass",
+        "terminal_mass_and_species_closure": "validator_blocked"
+      },
+      "gate_validation_errors": {},
+      "hard_blockers": [
+        "failed_model_wind_summary_table_anomaly_requires_author_or_corrected_release",
+        "age_resolved_wind_missing",
+        "per_node_injected_energy_mapping_missing",
+        "canonical_momentum_and_deposition_missing"
+      ],
+      "missing_gate_ids": [
+        "coordinate_hull_and_population",
+        "decay_epoch_and_projection",
+        "energy_momentum_and_deposition",
+        "fate_structure_and_remnant",
+        "lifetime_and_wind_history",
+        "pair_instability",
+        "runtime_invariance_and_reproduction",
+        "terminal_mass_and_species_closure"
+      ],
+      "passed_gate_ids": [
+        "source_identity_and_rights"
+      ],
+      "production_qualified": false,
+      "role": "multi_metallicity_rotation_candidate_review",
+      "verified_gate_evidence": {
+        "coordinate_hull_and_population": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_coordinate_hull_and_population_validator_not_implemented",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "coordinate_hull_and_population",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "all_resolver_axes_preserved": false,
+            "required_mass_and_metallicity_domain_selected": false,
+            "rotation_and_binary_population_selected_or_approved_marginalization": false,
+            "source_hull_and_boundary_epsilon_tests": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.coordinate_hull_and_population.v1"
+        },
+        "decay_epoch_and_projection": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_decay_epoch_projection_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "decay_epoch_and_projection",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "complete_isotope_inventory": false,
+            "decay_horizon_and_network": false,
+            "duplicate_isotope_resolution": false,
+            "source_reference_epoch": false,
+            "stable_reduced_chemistry_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.decay_epoch_and_projection.v1"
+        },
+        "energy_momentum_and_deposition": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_energy_momentum_deposition_contract_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "energy_momentum_and_deposition",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "deposition_geometry_and_coupling": false,
+            "energy_quantity_kind": false,
+            "mass_momentum_energy_exactly_once_ledger": false,
+            "scalar_radial_momentum_or_explicit_source_absence": false,
+            "source_to_injected_energy_mapping": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.energy_momentum_and_deposition.v1"
+        },
+        "fate_structure_and_remnant": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_fate_structure_and_remnant_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "fate_structure_and_remnant",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "compact_remnant_mass_and_kind": false,
+            "explicit_failed_or_direct_collapse_record": false,
+            "explicit_outcome_class": false,
+            "fallback_and_envelope_ejection": false,
+            "pre_sn_structure_or_source_fate_basis": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.fate_structure_and_remnant.v1"
+        },
+        "lifetime_and_wind_history": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_age_resolved_lifetime_wind_history_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "lifetime_and_wind_history",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "age_resolved_cumulative_wind": false,
+            "age_telescope_and_terminal_exactly_once_tests": false,
+            "stellar_lifetime": false,
+            "wind_terminal_partition": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.lifetime_and_wind_history.v1"
+        },
+        "pair_instability": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_pair_instability_eligibility_history_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "pair_instability",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "helium_or_core_mass_basis": false,
+            "non_overlapping_channel_ownership": false,
+            "pisn_eligibility_and_complete_disruption": false,
+            "ppisn_eligibility_and_pulse_history": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.pair_instability.v1"
+        },
+        "runtime_invariance_and_reproduction": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "approved_physical_package_required_before_runtime_reproduction",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "runtime_invariance_and_reproduction",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "independent_physics_and_code_audit": false,
+            "independent_source_parser_reproduction": false,
+            "production_binary_build_bound_identity": false,
+            "source_node_reconstruction": false,
+            "timestep_restart_retry_refinement_mpi_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.runtime_invariance_and_reproduction.v1"
+        },
+        "source_identity_and_rights": {
+          "artifacts": {
+            "acquisition_manifest": {
+              "path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+              "sha256": "ebbbfa42357e6a729d19d839f0e1c826ef33cb4705d895b82c5e96e88493f764"
+            },
+            "attribution_citation": "Boccioli & Roberti 2026, A&A 709, A201; article DOI 10.1051/0004-6361/202557714; data DOI 10.5281/zenodo.19503168",
+            "data_doi": "10.5281/zenodo.19503168",
+            "license_id": "cc-by-4.0",
+            "license_reference_url": "https://creativecommons.org/licenses/by/4.0/",
+            "lock_profile_sha256": "63059cebd15468eb819d4f4669c2241a58ba77b995176a6034f3f966e7a994d1",
+            "retrieved_date": "2026-09-01",
+            "source_contract": {
+              "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_boccioli_roberti2026_candidate_contract_v1.json",
+              "sha256": "5e5e079af58f250be465427f3e070b9014e9e6af99ebbc5e623d6236fea55443"
+            },
+            "source_files": [
+              {
+                "bytes": 3987,
+                "identity_passed": true,
+                "md5": "4a42dda7587574978b7730cc45d02c8e",
+                "path": "boccioli_roberti2026_ccsn/README",
+                "sha256": "66dae04f90bf7b96460199a7ebbedf0126c1e70ab840e1693a8a326cd7ae2316"
+              },
+              {
+                "bytes": 816270,
+                "identity_passed": true,
+                "md5": "c1d21fcbdf7ed200344881f8a47a211b",
+                "path": "boccioli_roberti2026_ccsn/LC18.zip",
+                "sha256": "249aea46713ab41cad7e8d7406835c205e4f02d36958e113a8f2231f81ebef5e"
+              },
+              {
+                "bytes": 377318,
+                "identity_passed": true,
+                "md5": "9f6f436fbb1ffdd5ccc535f2a0976a79",
+                "path": "boccioli_roberti2026_ccsn/WH07.zip",
+                "sha256": "1576e96d9366dd7b36a75abbbc6e9ced55c1157891417062a5cbbf439dbed84c"
+              },
+              {
+                "bytes": 444104,
+                "identity_passed": true,
+                "md5": "43f568e8ba7a94248a7627b24f04a7c4",
+                "path": "boccioli_roberti2026_ccsn/F23.zip",
+                "sha256": "41b72c45e7743d9855637ae56cf1ef264c000b4639ed4805b177ab7fe5079a10"
+              },
+              {
+                "bytes": 4618,
+                "identity_passed": true,
+                "md5": null,
+                "path": "boccioli_roberti2026_ccsn/zenodo_record_19503168.json",
+                "sha256": "bc04d8a528e5a852524be3e0cd2d973a12b39090ad0bf2aaf71305016d17eb67"
+              }
+            ],
+            "source_use_terms_report": {
+              "authoritative_for_verdict": false,
+              "citation_matches_lock": true,
+              "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_use_terms_evidence_v1.json",
+              "reported_license_status": "verified",
+              "reported_redistribution_status": "allowed_with_attribution_under_cc_by_4.0",
+              "sha256": "9b8e8b4cf383cf93feecbf96cfa42ed4eb5212c8b424a7217ed7507bbc16db4a"
+            },
+            "version_record_id": 19503168
+          },
+          "blockers": [],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "source_identity_and_rights",
+          "package_fingerprint_sha256": "3370571245be954b1330d0b91bae585ffed47b3a1c2d10ffa11fc4ef7b57065b",
+          "passed": true,
+          "requirements": {
+            "citation_and_data_version": true,
+            "hash_locked_local_source_mirror": true,
+            "machine_readable_license": true,
+            "per_file_and_composite_sha256": true,
+            "redistribution_permission": true
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "pass",
+          "validator_code_sha256": "9a3f2626a092bda908985b73271f4dab92df46ce8be9903e4dc080c6fb16b6fc",
+          "validator_id": "fp1.source_identity_and_rights.v1"
+        },
+        "terminal_mass_and_species_closure": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_terminal_mass_species_closure_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "boccioli_roberti2026_lc18",
+          "gate_id": "terminal_mass_and_species_closure",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "remnant_plus_wind_plus_terminal_mass_closure": false,
+            "source_precision_derived_tolerance": false,
+            "terminal_ejecta_or_explicit_physical_zero": false,
+            "tracked_element_and_other_metals_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.terminal_mass_and_species_closure.v1"
+        }
+      }
+    },
+    "heger_woosley2010_popiii": {
+      "gate_evidence_status": {
+        "coordinate_hull_and_population": "validator_blocked",
+        "decay_epoch_and_projection": "validator_blocked",
+        "energy_momentum_and_deposition": "validator_blocked",
+        "fate_structure_and_remnant": "validator_blocked",
+        "lifetime_and_wind_history": "validator_blocked",
+        "pair_instability": "validator_blocked",
+        "runtime_invariance_and_reproduction": "validator_blocked",
+        "source_identity_and_rights": "validator_blocked",
+        "terminal_mass_and_species_closure": "validator_blocked"
+      },
+      "gate_validation_errors": {},
+      "hard_blockers": [
+        "positive_metallicity_axis_missing",
+        "runtime_8_to_10_and_100_to_120_edges_missing",
+        "explosion_piston_mixing_population_unselected",
+        "age_resolved_history_and_neutrino_wind_missing"
+      ],
+      "missing_gate_ids": [
+        "coordinate_hull_and_population",
+        "decay_epoch_and_projection",
+        "energy_momentum_and_deposition",
+        "fate_structure_and_remnant",
+        "lifetime_and_wind_history",
+        "pair_instability",
+        "runtime_invariance_and_reproduction",
+        "source_identity_and_rights",
+        "terminal_mass_and_species_closure"
+      ],
+      "passed_gate_ids": [],
+      "production_qualified": false,
+      "role": "zero_metallicity_parameter_grid_review",
+      "verified_gate_evidence": {
+        "coordinate_hull_and_population": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_coordinate_hull_and_population_validator_not_implemented",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "heger_woosley2010_popiii",
+          "gate_id": "coordinate_hull_and_population",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "all_resolver_axes_preserved": false,
+            "required_mass_and_metallicity_domain_selected": false,
+            "rotation_and_binary_population_selected_or_approved_marginalization": false,
+            "source_hull_and_boundary_epsilon_tests": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.coordinate_hull_and_population.v1"
+        },
+        "decay_epoch_and_projection": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_decay_epoch_projection_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "heger_woosley2010_popiii",
+          "gate_id": "decay_epoch_and_projection",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "complete_isotope_inventory": false,
+            "decay_horizon_and_network": false,
+            "duplicate_isotope_resolution": false,
+            "source_reference_epoch": false,
+            "stable_reduced_chemistry_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.decay_epoch_and_projection.v1"
+        },
+        "energy_momentum_and_deposition": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_energy_momentum_deposition_contract_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "heger_woosley2010_popiii",
+          "gate_id": "energy_momentum_and_deposition",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "deposition_geometry_and_coupling": false,
+            "energy_quantity_kind": false,
+            "mass_momentum_energy_exactly_once_ledger": false,
+            "scalar_radial_momentum_or_explicit_source_absence": false,
+            "source_to_injected_energy_mapping": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.energy_momentum_and_deposition.v1"
+        },
+        "fate_structure_and_remnant": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_fate_structure_and_remnant_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "heger_woosley2010_popiii",
+          "gate_id": "fate_structure_and_remnant",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "compact_remnant_mass_and_kind": false,
+            "explicit_failed_or_direct_collapse_record": false,
+            "explicit_outcome_class": false,
+            "fallback_and_envelope_ejection": false,
+            "pre_sn_structure_or_source_fate_basis": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.fate_structure_and_remnant.v1"
+        },
+        "lifetime_and_wind_history": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_age_resolved_lifetime_wind_history_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "heger_woosley2010_popiii",
+          "gate_id": "lifetime_and_wind_history",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "age_resolved_cumulative_wind": false,
+            "age_telescope_and_terminal_exactly_once_tests": false,
+            "stellar_lifetime": false,
+            "wind_terminal_partition": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.lifetime_and_wind_history.v1"
+        },
+        "pair_instability": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_pair_instability_eligibility_history_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "heger_woosley2010_popiii",
+          "gate_id": "pair_instability",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "helium_or_core_mass_basis": false,
+            "non_overlapping_channel_ownership": false,
+            "pisn_eligibility_and_complete_disruption": false,
+            "ppisn_eligibility_and_pulse_history": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.pair_instability.v1"
+        },
+        "runtime_invariance_and_reproduction": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "approved_physical_package_required_before_runtime_reproduction",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "heger_woosley2010_popiii",
+          "gate_id": "runtime_invariance_and_reproduction",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "independent_physics_and_code_audit": false,
+            "independent_source_parser_reproduction": false,
+            "production_binary_build_bound_identity": false,
+            "source_node_reconstruction": false,
+            "timestep_restart_retry_refinement_mpi_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.runtime_invariance_and_reproduction.v1"
+        },
+        "source_identity_and_rights": {
+          "artifacts": {},
+          "blockers": [
+            "candidate_has_no_code_registered_rights_profile"
+          ],
+          "candidate_id": "heger_woosley2010_popiii",
+          "gate_id": "source_identity_and_rights",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "citation_and_data_version": false,
+            "hash_locked_local_source_mirror": false,
+            "machine_readable_license": false,
+            "per_file_and_composite_sha256": false,
+            "redistribution_permission": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "9a3f2626a092bda908985b73271f4dab92df46ce8be9903e4dc080c6fb16b6fc",
+          "validator_id": "fp1.source_identity_and_rights.v1"
+        },
+        "terminal_mass_and_species_closure": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_terminal_mass_species_closure_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "heger_woosley2010_popiii",
+          "gate_id": "terminal_mass_and_species_closure",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "remnant_plus_wind_plus_terminal_mass_closure": false,
+            "source_precision_derived_tolerance": false,
+            "terminal_ejecta_or_explicit_physical_zero": false,
+            "tracked_element_and_other_metals_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.terminal_mass_and_species_closure.v1"
+        }
+      }
+    },
+    "limongi_chieffi2018_set_r": {
+      "gate_evidence_status": {
+        "coordinate_hull_and_population": "validator_blocked",
+        "decay_epoch_and_projection": "validator_blocked",
+        "energy_momentum_and_deposition": "validator_blocked",
+        "fate_structure_and_remnant": "validator_blocked",
+        "lifetime_and_wind_history": "validator_blocked",
+        "pair_instability": "validator_blocked",
+        "runtime_invariance_and_reproduction": "validator_blocked",
+        "source_identity_and_rights": "validator_blocked",
+        "terminal_mass_and_species_closure": "validator_blocked"
+      },
+      "gate_validation_errors": {},
+      "hard_blockers": [
+        "complete_runtime_domain_missing",
+        "age_resolved_wind_missing",
+        "terminal_energy_momentum_deposition_missing",
+        "production_population_marginalization_unselected"
+      ],
+      "missing_gate_ids": [
+        "coordinate_hull_and_population",
+        "decay_epoch_and_projection",
+        "energy_momentum_and_deposition",
+        "fate_structure_and_remnant",
+        "lifetime_and_wind_history",
+        "pair_instability",
+        "runtime_invariance_and_reproduction",
+        "source_identity_and_rights",
+        "terminal_mass_and_species_closure"
+      ],
+      "passed_gate_ids": [],
+      "production_qualified": false,
+      "role": "metallicity_rotation_structure_wind_comparison",
+      "verified_gate_evidence": {
+        "coordinate_hull_and_population": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_coordinate_hull_and_population_validator_not_implemented",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "limongi_chieffi2018_set_r",
+          "gate_id": "coordinate_hull_and_population",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "all_resolver_axes_preserved": false,
+            "required_mass_and_metallicity_domain_selected": false,
+            "rotation_and_binary_population_selected_or_approved_marginalization": false,
+            "source_hull_and_boundary_epsilon_tests": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.coordinate_hull_and_population.v1"
+        },
+        "decay_epoch_and_projection": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_decay_epoch_projection_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "limongi_chieffi2018_set_r",
+          "gate_id": "decay_epoch_and_projection",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "complete_isotope_inventory": false,
+            "decay_horizon_and_network": false,
+            "duplicate_isotope_resolution": false,
+            "source_reference_epoch": false,
+            "stable_reduced_chemistry_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.decay_epoch_and_projection.v1"
+        },
+        "energy_momentum_and_deposition": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_energy_momentum_deposition_contract_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "limongi_chieffi2018_set_r",
+          "gate_id": "energy_momentum_and_deposition",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "deposition_geometry_and_coupling": false,
+            "energy_quantity_kind": false,
+            "mass_momentum_energy_exactly_once_ledger": false,
+            "scalar_radial_momentum_or_explicit_source_absence": false,
+            "source_to_injected_energy_mapping": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.energy_momentum_and_deposition.v1"
+        },
+        "fate_structure_and_remnant": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_fate_structure_and_remnant_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "limongi_chieffi2018_set_r",
+          "gate_id": "fate_structure_and_remnant",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "compact_remnant_mass_and_kind": false,
+            "explicit_failed_or_direct_collapse_record": false,
+            "explicit_outcome_class": false,
+            "fallback_and_envelope_ejection": false,
+            "pre_sn_structure_or_source_fate_basis": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.fate_structure_and_remnant.v1"
+        },
+        "lifetime_and_wind_history": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_age_resolved_lifetime_wind_history_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "limongi_chieffi2018_set_r",
+          "gate_id": "lifetime_and_wind_history",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "age_resolved_cumulative_wind": false,
+            "age_telescope_and_terminal_exactly_once_tests": false,
+            "stellar_lifetime": false,
+            "wind_terminal_partition": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.lifetime_and_wind_history.v1"
+        },
+        "pair_instability": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_pair_instability_eligibility_history_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "limongi_chieffi2018_set_r",
+          "gate_id": "pair_instability",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "helium_or_core_mass_basis": false,
+            "non_overlapping_channel_ownership": false,
+            "pisn_eligibility_and_complete_disruption": false,
+            "ppisn_eligibility_and_pulse_history": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.pair_instability.v1"
+        },
+        "runtime_invariance_and_reproduction": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "approved_physical_package_required_before_runtime_reproduction",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "limongi_chieffi2018_set_r",
+          "gate_id": "runtime_invariance_and_reproduction",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "independent_physics_and_code_audit": false,
+            "independent_source_parser_reproduction": false,
+            "production_binary_build_bound_identity": false,
+            "source_node_reconstruction": false,
+            "timestep_restart_retry_refinement_mpi_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.runtime_invariance_and_reproduction.v1"
+        },
+        "source_identity_and_rights": {
+          "artifacts": {},
+          "blockers": [
+            "candidate_has_no_code_registered_rights_profile"
+          ],
+          "candidate_id": "limongi_chieffi2018_set_r",
+          "gate_id": "source_identity_and_rights",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "citation_and_data_version": false,
+            "hash_locked_local_source_mirror": false,
+            "machine_readable_license": false,
+            "per_file_and_composite_sha256": false,
+            "redistribution_permission": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "9a3f2626a092bda908985b73271f4dab92df46ce8be9903e4dc080c6fb16b6fc",
+          "validator_id": "fp1.source_identity_and_rights.v1"
+        },
+        "terminal_mass_and_species_closure": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_terminal_mass_species_closure_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "limongi_chieffi2018_set_r",
+          "gate_id": "terminal_mass_and_species_closure",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "remnant_plus_wind_plus_terminal_mass_closure": false,
+            "source_precision_derived_tolerance": false,
+            "terminal_ejecta_or_explicit_physical_zero": false,
+            "tracked_element_and_other_metals_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.terminal_mass_and_species_closure.v1"
+        }
+      }
+    },
+    "sukhbold2016_w18_n20": {
+      "gate_evidence_status": {
+        "coordinate_hull_and_population": "validator_blocked",
+        "decay_epoch_and_projection": "validator_blocked",
+        "energy_momentum_and_deposition": "validator_blocked",
+        "fate_structure_and_remnant": "validator_blocked",
+        "lifetime_and_wind_history": "validator_blocked",
+        "pair_instability": "validator_blocked",
+        "runtime_invariance_and_reproduction": "validator_blocked",
+        "source_identity_and_rights": "validator_blocked",
+        "terminal_mass_and_species_closure": "validator_blocked"
+      },
+      "gate_validation_errors": {},
+      "hard_blockers": [
+        "redistribution_permission_unverified",
+        "failed_node_remnant_and_wind_records_incomplete",
+        "radioactive_epoch_and_k40_duplicate_unresolved",
+        "age_resolved_wind_missing",
+        "canonical_momentum_and_deposition_missing"
+      ],
+      "missing_gate_ids": [
+        "coordinate_hull_and_population",
+        "decay_epoch_and_projection",
+        "energy_momentum_and_deposition",
+        "fate_structure_and_remnant",
+        "lifetime_and_wind_history",
+        "pair_instability",
+        "runtime_invariance_and_reproduction",
+        "source_identity_and_rights",
+        "terminal_mass_and_species_closure"
+      ],
+      "passed_gate_ids": [],
+      "production_qualified": false,
+      "role": "solar_engine_validation_only",
+      "verified_gate_evidence": {
+        "coordinate_hull_and_population": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_coordinate_hull_and_population_validator_not_implemented",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "sukhbold2016_w18_n20",
+          "gate_id": "coordinate_hull_and_population",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "all_resolver_axes_preserved": false,
+            "required_mass_and_metallicity_domain_selected": false,
+            "rotation_and_binary_population_selected_or_approved_marginalization": false,
+            "source_hull_and_boundary_epsilon_tests": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.coordinate_hull_and_population.v1"
+        },
+        "decay_epoch_and_projection": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_decay_epoch_projection_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "sukhbold2016_w18_n20",
+          "gate_id": "decay_epoch_and_projection",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "complete_isotope_inventory": false,
+            "decay_horizon_and_network": false,
+            "duplicate_isotope_resolution": false,
+            "source_reference_epoch": false,
+            "stable_reduced_chemistry_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.decay_epoch_and_projection.v1"
+        },
+        "energy_momentum_and_deposition": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_energy_momentum_deposition_contract_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "sukhbold2016_w18_n20",
+          "gate_id": "energy_momentum_and_deposition",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "deposition_geometry_and_coupling": false,
+            "energy_quantity_kind": false,
+            "mass_momentum_energy_exactly_once_ledger": false,
+            "scalar_radial_momentum_or_explicit_source_absence": false,
+            "source_to_injected_energy_mapping": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.energy_momentum_and_deposition.v1"
+        },
+        "fate_structure_and_remnant": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_fate_structure_and_remnant_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "sukhbold2016_w18_n20",
+          "gate_id": "fate_structure_and_remnant",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "compact_remnant_mass_and_kind": false,
+            "explicit_failed_or_direct_collapse_record": false,
+            "explicit_outcome_class": false,
+            "fallback_and_envelope_ejection": false,
+            "pre_sn_structure_or_source_fate_basis": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.fate_structure_and_remnant.v1"
+        },
+        "lifetime_and_wind_history": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_age_resolved_lifetime_wind_history_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "sukhbold2016_w18_n20",
+          "gate_id": "lifetime_and_wind_history",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "age_resolved_cumulative_wind": false,
+            "age_telescope_and_terminal_exactly_once_tests": false,
+            "stellar_lifetime": false,
+            "wind_terminal_partition": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.lifetime_and_wind_history.v1"
+        },
+        "pair_instability": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_pair_instability_eligibility_history_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "sukhbold2016_w18_n20",
+          "gate_id": "pair_instability",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "helium_or_core_mass_basis": false,
+            "non_overlapping_channel_ownership": false,
+            "pisn_eligibility_and_complete_disruption": false,
+            "ppisn_eligibility_and_pulse_history": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.pair_instability.v1"
+        },
+        "runtime_invariance_and_reproduction": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "approved_physical_package_required_before_runtime_reproduction",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "sukhbold2016_w18_n20",
+          "gate_id": "runtime_invariance_and_reproduction",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "independent_physics_and_code_audit": false,
+            "independent_source_parser_reproduction": false,
+            "production_binary_build_bound_identity": false,
+            "source_node_reconstruction": false,
+            "timestep_restart_retry_refinement_mpi_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.runtime_invariance_and_reproduction.v1"
+        },
+        "source_identity_and_rights": {
+          "artifacts": {},
+          "blockers": [
+            "candidate_has_no_code_registered_rights_profile"
+          ],
+          "candidate_id": "sukhbold2016_w18_n20",
+          "gate_id": "source_identity_and_rights",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "citation_and_data_version": false,
+            "hash_locked_local_source_mirror": false,
+            "machine_readable_license": false,
+            "per_file_and_composite_sha256": false,
+            "redistribution_permission": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "9a3f2626a092bda908985b73271f4dab92df46ce8be9903e4dc080c6fb16b6fc",
+          "validator_id": "fp1.source_identity_and_rights.v1"
+        },
+        "terminal_mass_and_species_closure": {
+          "artifacts": {
+            "authoritative_validation_available": false,
+            "physical_node_count": 0,
+            "physical_package_contract": "config/fp1_physical_package_admission_contract_v1.json",
+            "physical_package_status": "blocked_no_qualified_physical_package",
+            "source_node_contract": "config/fp1_source_node_contract_v1.json",
+            "validator_role": "fail_closed_unavailable_physical_gate"
+          },
+          "blockers": [
+            "authoritative_terminal_mass_species_closure_asset_missing",
+            "physical_package_not_admitted",
+            "physical_node_inventory_empty"
+          ],
+          "candidate_id": "sukhbold2016_w18_n20",
+          "gate_id": "terminal_mass_and_species_closure",
+          "package_fingerprint_sha256": null,
+          "passed": false,
+          "requirements": {
+            "remnant_plus_wind_plus_terminal_mass_closure": false,
+            "source_precision_derived_tolerance": false,
+            "terminal_ejecta_or_explicit_physical_zero": false,
+            "tracked_element_and_other_metals_closure": false
+          },
+          "schema": "snrt-fp1-executable-gate-validation",
+          "schema_version": 1,
+          "status": "blocked",
+          "validator_code_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195",
+          "validator_id": "fp1.terminal_mass_and_species_closure.v1"
+        }
+      }
+    }
+  },
+  "canonical_conversion_allowed": false,
+  "contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_physical_package_admission_contract_v1.json",
+  "contract_sha256": "06cd0858dfb3a79675bbb9c1f83c7fde33b0069637a2bf4e384ff1e7922359e0",
+  "evidence_artifacts": {
+    "candidate_grid_audit": {
+      "code_locked_sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578",
+      "contract_declared_sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_candidate_grid_coverage_audit.json",
+      "sha256": "d58bc7e04ae02d2af1f3b9caeffb674d4e98e5fd2f6584deff36fd7873079578"
+    },
+    "candidate_grid_contract": {
+      "code_locked_sha256": "73845b9c18a5a2763d93fd627c2b1b7be4cf64f6acbff5c1f5282188fad5b81e",
+      "contract_declared_sha256": "73845b9c18a5a2763d93fd627c2b1b7be4cf64f6acbff5c1f5282188fad5b81e",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_candidate_grid_coverage_contract_v1.json",
+      "sha256": "73845b9c18a5a2763d93fd627c2b1b7be4cf64f6acbff5c1f5282188fad5b81e"
+    },
+    "high_mass_review": {
+      "code_locked_sha256": "1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775",
+      "contract_declared_sha256": "1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/fp1_high_mass_seam_review.json",
+      "sha256": "1c0cbb745093eae4901346f08096c67baf280d23df9149269ed4b37d98fa5775"
+    },
+    "source_node_contract": {
+      "code_locked_sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c",
+      "contract_declared_sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_source_node_contract_v1.json",
+      "sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c"
+    },
+    "terminal_deposition_contract": {
+      "code_locked_sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47",
+      "contract_declared_sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47",
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp1_terminal_deposition_contract_v1.json",
+      "sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47"
+    }
+  },
+  "gate": "F-P1H-E",
+  "gate_validation": {
+    "approved_validator_ids": [
+      "fp1.coordinate_hull_and_population.v1",
+      "fp1.decay_epoch_and_projection.v1",
+      "fp1.energy_momentum_and_deposition.v1",
+      "fp1.fate_structure_and_remnant.v1",
+      "fp1.lifetime_and_wind_history.v1",
+      "fp1.pair_instability.v1",
+      "fp1.runtime_invariance_and_reproduction.v1",
+      "fp1.source_identity_and_rights.v1",
+      "fp1.terminal_mass_and_species_closure.v1"
+    ],
+    "hash_only_validator_artifact_may_pass": false,
+    "mode": "registered_executable_validators_fail_closed",
+    "registry": {
+      "registry_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_registry.py",
+      "registry_sha256": "e9fdaea444a3504739f19173e98d3e70fd8a7a4150630f3dfcbee6d65c71d42f",
+      "validators": {
+        "fp1.coordinate_hull_and_population.v1": {
+          "gate_id": "coordinate_hull_and_population",
+          "requirements": [
+            "all_resolver_axes_preserved",
+            "required_mass_and_metallicity_domain_selected",
+            "rotation_and_binary_population_selected_or_approved_marginalization",
+            "source_hull_and_boundary_epsilon_tests"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_blocks.py",
+          "tool_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195"
+        },
+        "fp1.decay_epoch_and_projection.v1": {
+          "gate_id": "decay_epoch_and_projection",
+          "requirements": [
+            "complete_isotope_inventory",
+            "decay_horizon_and_network",
+            "duplicate_isotope_resolution",
+            "source_reference_epoch",
+            "stable_reduced_chemistry_closure"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_blocks.py",
+          "tool_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195"
+        },
+        "fp1.energy_momentum_and_deposition.v1": {
+          "gate_id": "energy_momentum_and_deposition",
+          "requirements": [
+            "deposition_geometry_and_coupling",
+            "energy_quantity_kind",
+            "mass_momentum_energy_exactly_once_ledger",
+            "scalar_radial_momentum_or_explicit_source_absence",
+            "source_to_injected_energy_mapping"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_blocks.py",
+          "tool_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195"
+        },
+        "fp1.fate_structure_and_remnant.v1": {
+          "gate_id": "fate_structure_and_remnant",
+          "requirements": [
+            "compact_remnant_mass_and_kind",
+            "explicit_failed_or_direct_collapse_record",
+            "explicit_outcome_class",
+            "fallback_and_envelope_ejection",
+            "pre_sn_structure_or_source_fate_basis"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_blocks.py",
+          "tool_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195"
+        },
+        "fp1.lifetime_and_wind_history.v1": {
+          "gate_id": "lifetime_and_wind_history",
+          "requirements": [
+            "age_resolved_cumulative_wind",
+            "age_telescope_and_terminal_exactly_once_tests",
+            "stellar_lifetime",
+            "wind_terminal_partition"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_blocks.py",
+          "tool_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195"
+        },
+        "fp1.pair_instability.v1": {
+          "gate_id": "pair_instability",
+          "requirements": [
+            "helium_or_core_mass_basis",
+            "non_overlapping_channel_ownership",
+            "pisn_eligibility_and_complete_disruption",
+            "ppisn_eligibility_and_pulse_history"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_blocks.py",
+          "tool_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195"
+        },
+        "fp1.runtime_invariance_and_reproduction.v1": {
+          "gate_id": "runtime_invariance_and_reproduction",
+          "requirements": [
+            "independent_physics_and_code_audit",
+            "independent_source_parser_reproduction",
+            "production_binary_build_bound_identity",
+            "source_node_reconstruction",
+            "timestep_restart_retry_refinement_mpi_closure"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_blocks.py",
+          "tool_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195"
+        },
+        "fp1.source_identity_and_rights.v1": {
+          "gate_id": "source_identity_and_rights",
+          "requirements": [
+            "citation_and_data_version",
+            "hash_locked_local_source_mirror",
+            "machine_readable_license",
+            "per_file_and_composite_sha256",
+            "redistribution_permission"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/validate_fp1_source_identity_rights.py",
+          "tool_sha256": "9a3f2626a092bda908985b73271f4dab92df46ce8be9903e4dc080c6fb16b6fc"
+        },
+        "fp1.terminal_mass_and_species_closure.v1": {
+          "gate_id": "terminal_mass_and_species_closure",
+          "requirements": [
+            "remnant_plus_wind_plus_terminal_mass_closure",
+            "source_precision_derived_tolerance",
+            "terminal_ejecta_or_explicit_physical_zero",
+            "tracked_element_and_other_metals_closure"
+          ],
+          "tool_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/fp1_gate_validator_blocks.py",
+          "tool_sha256": "7449ade4772d8f109c60d740d4429d3f8ab27b4eea5066ddd5667d5818a94195"
+        }
+      }
+    }
+  },
+  "high_mass_evidence": {
+    "failed_nodes_with_source_remnant_count": 0,
+    "failed_outcome_count": 12,
+    "outcome_record_count": 18,
+    "radioactive_reference_epoch_warning_count": 12,
+    "source_erratum_or_explanation_required": true
+  },
+  "interpretation": "The admission schema and review evidence are internally consistent, but no candidate passes all physical gates and there are no admitted source nodes.",
+  "physical_node_count": 0,
+  "production_ready": false,
+  "publication_ready": false,
+  "required_gate_ids": [
+    "coordinate_hull_and_population",
+    "decay_epoch_and_projection",
+    "energy_momentum_and_deposition",
+    "fate_structure_and_remnant",
+    "lifetime_and_wind_history",
+    "pair_instability",
+    "runtime_invariance_and_reproduction",
+    "source_identity_and_rights",
+    "terminal_mass_and_species_closure"
+  ],
+  "runtime_deposition_allowed": false,
+  "schema": "snrt-fp1-physical-package-admission-audit",
+  "schema_version": 1,
+  "selected_candidate_hard_blockers": [],
+  "selected_package_approval_id": null,
+  "selected_package_id": null,
+  "selection_evaluation": {
+    "canonical_conversion_allowed": false,
+    "code_owned_birth_metallicity_domain_selected": false,
+    "contract_birth_metallicity_domain_selected": false,
+    "production_ready": false,
+    "publication_ready": false,
+    "runtime_deposition_allowed": false,
+    "selected_candidate_hard_blockers": [],
+    "selected_package_id": null,
+    "source_node_mapping_sha256": null,
+    "status": "blocked_no_qualified_physical_package",
+    "upstream_gates": {
+      "candidate_grid_ready": false,
+      "deposition_ready": false,
+      "high_mass_ready": false,
+      "source_node_ready": false
+    }
+  },
+  "status": "blocked_no_qualified_physical_package"
+}

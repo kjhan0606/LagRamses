@@ -1,0 +1,49 @@
+{
+  "schema": "snrt_b3_timestep_spatial_gate_contract_v1",
+  "declared_at": "2026-09-02",
+  "primary_metric": "relative_change_in_volume_mean_x_hii",
+  "primary_acceptance_threshold": 0.02,
+  "relative_change_denominator": "maximum absolute value of the two compared means",
+  "canonical_comparison": {
+    "baseline": "n32_courant0p1",
+    "refined": "n64_courant0p1",
+    "simultaneous_change": "cell width divided by two and transport timestep divided by two"
+  },
+  "diagnostic_matrix": [
+    "n32_courant0p1",
+    "n32_courant0p05",
+    "n64_courant0p1",
+    "n64_courant0p05"
+  ],
+  "fixed_run_contract": {
+    "duration_myr": 0.1,
+    "sn_order": 4,
+    "reduced_light_fraction": 0.01,
+    "precision": "float64",
+    "thermal_subcycles": 1,
+    "source_cell_photons_per_neutral": 0.25,
+    "source_deposition_mode": "point",
+    "thermal_implicit_iterations": 24,
+    "time_averaged_absorption_iterations": 32,
+    "secondary_ionization": "fs2010",
+    "photon_groups": 9
+  },
+  "mandatory_internal_gates": {
+    "validation_passed": true,
+    "maximum_fixed_point_residual": 0.0001,
+    "maximum_h_he_l1_ledger_error": 0.0001,
+    "thermal_energy_closure_relative_error": 0.00001,
+    "photoelectron_energy_ledger_l1_relative_error": 1e-12,
+    "electron_root_bracket_failure_count": 0,
+    "thermal_bound_hit_max": 0
+  },
+  "secondary_diagnostics_not_used_to_move_the_primary_threshold": [
+    "time-only volume-mean x_hii change on n32",
+    "time-only volume-mean x_hii change on n64",
+    "same-physical-timestep spatial change between n32_courant0p05 and n64_courant0p1",
+    "volume-mean temperature change",
+    "coarsened field L1 and Linfinity differences",
+    "source-block x_hii difference"
+  ],
+  "scope_limit": "The n64 gas state is a conservative piecewise-constant prolongation of the n32 staged snapshot, not an independently reconstructed higher-resolution hydro snapshot."
+}

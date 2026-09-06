@@ -1,0 +1,166 @@
+{
+  "status": "pass",
+  "backend": "cpu",
+  "jax_version": "0.11.1",
+  "table": "/gpfs/kjhan/LRD_JWST/build/g1_native/g1_synthetic_yields.dat",
+  "native_result": "/gpfs/kjhan/LRD_JWST/build/g1_native/g1_native_interpolation.txt",
+  "query_count": 6,
+  "matrix": [
+    {
+      "query": [
+        1.0,
+        0.001,
+        0.0
+      ],
+      "native": {
+        "returned_mass": 0.0,
+        "remnant_mass": 0.0,
+        "energy": 0.0,
+        "momentum_x": 0.0,
+        "ejected_H": 0.0,
+        "net_yield_H": 0.0
+      },
+      "jax": {
+        "returned_mass": 0.0,
+        "remnant_mass": 0.0,
+        "energy": 0.0,
+        "momentum_x": 0.0,
+        "ejected_H": 0.0,
+        "net_yield_H": 0.0
+      },
+      "max_abs_difference": 0.0,
+      "max_relative_difference": 0.0
+    },
+    {
+      "query": [
+        2.0,
+        0.01,
+        1.0
+      ],
+      "native": {
+        "returned_mass": 0.802,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3.1e+48,
+        "momentum_x": 3.1000000000000003e+30,
+        "ejected_H": 0.802,
+        "net_yield_H": 0.01
+      },
+      "jax": {
+        "returned_mass": 0.802,
+        "remnant_mass": 0.15000000000000002,
+        "energy": 3.1e+48,
+        "momentum_x": 3.1000000000000003e+30,
+        "ejected_H": 0.802,
+        "net_yield_H": 0.01
+      },
+      "max_abs_difference": 0.0,
+      "max_relative_difference": 0.0
+    },
+    {
+      "query": [
+        1.0,
+        0.0055,
+        0.5
+      ],
+      "native": {
+        "returned_mass": 0.37555,
+        "remnant_mass": 0.07500000000000001,
+        "energy": 1.55e+48,
+        "momentum_x": 1.5500000000000002e+30,
+        "ejected_H": 0.37555,
+        "net_yield_H": 0.005
+      },
+      "jax": {
+        "returned_mass": 0.37555,
+        "remnant_mass": 0.07500000000000001,
+        "energy": 1.55e+48,
+        "momentum_x": 1.5500000000000002e+30,
+        "ejected_H": 0.37555,
+        "net_yield_H": 0.005
+      },
+      "max_abs_difference": 0.0,
+      "max_relative_difference": 0.0
+    },
+    {
+      "query": [
+        1.5,
+        0.001,
+        0.5
+      ],
+      "native": {
+        "returned_mass": 0.3876,
+        "remnant_mass": 0.07500000000000001,
+        "energy": 1.55e+48,
+        "momentum_x": 1.5500000000000002e+30,
+        "ejected_H": 0.3876,
+        "net_yield_H": 0.005
+      },
+      "jax": {
+        "returned_mass": 0.3876,
+        "remnant_mass": 0.07500000000000001,
+        "energy": 1.55e+48,
+        "momentum_x": 1.5500000000000002e+30,
+        "ejected_H": 0.3876,
+        "net_yield_H": 0.005
+      },
+      "max_abs_difference": 0.0,
+      "max_relative_difference": 0.0
+    },
+    {
+      "query": [
+        1.5,
+        0.0055,
+        0.0
+      ],
+      "native": {
+        "returned_mass": 0.0,
+        "remnant_mass": 0.0,
+        "energy": 0.0,
+        "momentum_x": 0.0,
+        "ejected_H": 0.0,
+        "net_yield_H": 0.0
+      },
+      "jax": {
+        "returned_mass": 0.0,
+        "remnant_mass": 0.0,
+        "energy": 0.0,
+        "momentum_x": 0.0,
+        "ejected_H": 0.0,
+        "net_yield_H": 0.0
+      },
+      "max_abs_difference": 0.0,
+      "max_relative_difference": 0.0
+    },
+    {
+      "query": [
+        1.5,
+        0.0055,
+        0.5
+      ],
+      "native": {
+        "returned_mass": 0.38805,
+        "remnant_mass": 0.07500000000000001,
+        "energy": 1.55e+48,
+        "momentum_x": 1.5500000000000002e+30,
+        "ejected_H": 0.38805,
+        "net_yield_H": 0.005
+      },
+      "jax": {
+        "returned_mass": 0.38805,
+        "remnant_mass": 0.07500000000000001,
+        "energy": 1.55e+48,
+        "momentum_x": 1.5500000000000002e+30,
+        "ejected_H": 0.38805,
+        "net_yield_H": 0.005
+      },
+      "max_abs_difference": 0.0,
+      "max_relative_difference": 0.0
+    }
+  ],
+  "max_abs_difference": 0.0,
+  "max_relative_difference": 0.0,
+  "tolerance": {
+    "rtol": 2e-12,
+    "atol": 2e-12
+  }
+}

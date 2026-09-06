@@ -1,0 +1,200 @@
+{
+  "schema": "snrt-g2-candidate-grid-coverage-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "runtime_mass_ranges_msun": {
+    "1": [0.8, 120.0],
+    "2": [1.0, 8.0],
+    "3": [8.0, 120.0]
+  },
+  "candidate_channel_nodes": {
+    "nugrid_set1ext_mesaonly_fryer12_delay": {
+      "1": [12.0, 15.0, 20.0, 25.0],
+      "2": [1.0, 1.65, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+      "3": [12.0, 15.0, 20.0, 25.0]
+    },
+    "limongi_chieffi_2018_cds": {
+      "1": [13.0, 15.0, 20.0, 25.0, 30.0, 40.0, 60.0, 80.0, 120.0],
+      "2": [],
+      "3": [13.0, 15.0, 20.0, 25.0, 30.0, 40.0, 60.0, 80.0, 120.0]
+    },
+    "huscher2025_agb": {
+      "1": [],
+      "2": [0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0],
+      "3": []
+    },
+    "boccioli_roberti2026_neutrino_ccsn": {
+      "1": [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0, 32.0, 33.0, 34.0, 35.0, 36.0, 37.0, 38.0, 39.0, 40.0, 41.0, 42.0, 43.0, 44.0, 45.0],
+      "2": [],
+      "3": [
+        11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0,
+        21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0,
+        31.0, 32.0, 33.0, 34.0, 35.0, 36.0, 37.0, 38.0, 39.0, 40.0,
+        41.0, 42.0, 43.0, 44.0, 45.0, 50.0, 55.0, 60.0, 70.0, 80.0,
+        100.0, 120.0
+      ]
+    },
+    "doherty2014_sagb": {
+      "1": [],
+      "2": [6.5, 7.0, 7.5, 8.0, 8.5, 9.0],
+      "3": []
+    },
+    "stockinger2020_low_mass_ccsn": {
+      "1": [],
+      "2": [],
+      "3": [8.8, 9.0, 9.6]
+    },
+    "sukhbold2016_ccsn": {
+      "1": [],
+      "2": [],
+      "3": [
+        9.0, 9.25, 9.5, 9.75, 10.0, 10.25, 10.5, 10.75, 11.0,
+        11.25, 11.5, 11.75, 12.0, 40.0, 45.0, 50.0, 55.0, 60.0,
+        70.0, 80.0, 100.0, 120.0
+      ]
+    },
+    "roberti2024_ultralowz_ccsn": {
+      "1": [],
+      "2": [],
+      "3": [15.0, 25.0]
+    },
+    "heger_woosley2010_popiii": {
+      "1": [],
+      "2": [],
+      "3": [
+        10.0, 10.2, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9,
+        11.0, 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.9,
+        12.0, 12.2, 12.4, 12.6, 12.8, 13.0, 13.2, 13.4, 13.6, 13.8,
+        14.0, 14.2, 14.4, 14.6, 14.8, 15.0, 15.2, 15.4, 15.6, 15.8,
+        16.0, 16.2, 16.4, 16.6, 16.8, 17.0, 17.1, 17.2, 17.3, 17.4,
+        17.5, 17.6, 17.7, 17.8, 17.9, 18.0, 18.1, 18.2, 18.3, 18.4,
+        18.5, 18.6, 18.7, 18.8, 18.9, 19.0, 19.2, 19.4, 19.6, 19.8,
+        20.0, 20.5, 21.0, 21.5, 22.0, 22.5, 23.0, 23.5, 24.0, 24.5,
+        25.0, 25.5, 26.0, 26.5, 27.0, 27.5, 28.0, 28.5, 29.0, 29.5,
+        30.0, 30.5, 31.0, 31.5, 32.0, 32.5, 33.0, 33.5, 34.0, 34.5,
+        35.0, 36.0, 37.0, 38.0, 39.0, 40.0, 41.0, 42.0, 43.0, 44.0,
+        45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0,
+        95.0, 100.0
+      ]
+    }
+  },
+  "channel_3_branch_nodes": {
+    "limongi_chieffi_2018_cds": {
+      "recommended_set_R": [13.0, 15.0, 20.0, 25.0, 30.0, 40.0, 60.0, 80.0, 120.0]
+    },
+    "boccioli_roberti2026_neutrino_ccsn": {
+      "F23_single": [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0, 32.0, 33.0, 34.0, 35.0, 36.0, 37.0, 38.0, 39.0, 40.0, 41.0, 42.0, 43.0, 44.0, 45.0],
+      "F23_binary": [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 26.0, 27.0, 30.0, 31.0, 32.0, 33.0, 34.0, 35.0, 36.0, 37.0, 38.0, 39.0, 40.0, 41.0, 42.0, 43.0, 44.0, 45.0],
+      "LC18": [13.0, 15.0, 20.0, 25.0, 30.0, 40.0, 60.0, 80.0, 120.0],
+      "WH07": [12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0, 32.0, 33.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 70.0, 80.0, 100.0, 120.0]
+    },
+    "sukhbold2016_ccsn": {
+      "Z9.6": [9.0, 9.25, 9.5, 9.75, 10.0, 10.25, 10.5, 10.75, 11.0, 11.25, 11.5, 11.75, 12.0],
+      "N20_high_mass": [40.0, 45.0, 50.0, 55.0, 60.0, 70.0, 80.0, 100.0, 120.0],
+      "W18_high_mass": [40.0, 45.0, 50.0, 55.0, 60.0, 70.0, 80.0, 100.0, 120.0]
+    },
+    "heger_woosley2010_popiii": {
+      "Z0_source_grid": [
+        10.0, 10.2, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9,
+        11.0, 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.9,
+        12.0, 12.2, 12.4, 12.6, 12.8, 13.0, 13.2, 13.4, 13.6, 13.8,
+        14.0, 14.2, 14.4, 14.6, 14.8, 15.0, 15.2, 15.4, 15.6, 15.8,
+        16.0, 16.2, 16.4, 16.6, 16.8, 17.0, 17.1, 17.2, 17.3, 17.4,
+        17.5, 17.6, 17.7, 17.8, 17.9, 18.0, 18.1, 18.2, 18.3, 18.4,
+        18.5, 18.6, 18.7, 18.8, 18.9, 19.0, 19.2, 19.4, 19.6, 19.8,
+        20.0, 20.5, 21.0, 21.5, 22.0, 22.5, 23.0, 23.5, 24.0, 24.5,
+        25.0, 25.5, 26.0, 26.5, 27.0, 27.5, 28.0, 28.5, 29.0, 29.5,
+        30.0, 30.5, 31.0, 31.5, 32.0, 32.5, 33.0, 33.5, 34.0, 34.5,
+        35.0, 36.0, 37.0, 38.0, 39.0, 40.0, 41.0, 42.0, 43.0, 44.0,
+        45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0,
+        95.0, 100.0
+      ]
+    }
+  },
+  "limongi_channel_notes": {
+    "1": "table9 provides wind ejecta at 13--25 Msun and recommended set R is wind-only above 25 Msun.",
+    "3": "set R provides terminal ejecta at 13--25 Msun and an explicit full-collapse/zero-terminal-ejecta outcome above 25 Msun; remnant construction is still unapproved."
+  },
+  "huscher_channel_notes": {
+    "2": "The 120 single-star models provide integrated AGB ejecta over 0.8--7 Msun. The separate age table is IMF-weighted population output with a failed stated-normalization check and is not a per-star release history."
+  },
+  "boccioli_roberti_channel_notes": {
+    "1": "Only the F23 single-star Wind branch is counted here. It provides integrated pre-collapse wind ejecta at solar metallicity over 11--45 Msun; channel ownership and interpolation remain unapproved.",
+    "3": "F23 single/binary, LC18, and WH07 branch nodes are inventoried independently through their actual source limits. The flattened 11--120 Msun union is evidence-coordinate coverage only; it is not an approved cross-branch grid, fate law, or interpolation domain."
+  },
+  "doherty_channel_notes": {
+    "2": "Only the non-extrapolated VW93 MassExp branch is counted as integrated AGB/SAGB wind return. The 8--9 Msun endpoint exists only at Z >= 0.004; Z=0.001 and 0.0001 stop at 7.5 Msun."
+  },
+  "stockinger_channel_notes": {
+    "3": "The e8.8 ECSN and z9.6/s9.0 low-mass Fe-core CCSN models are discrete event anchors. They have incompatible metallicities and progenitor physics and may not be interpolated into a continuous source grid."
+  },
+  "sukhbold_channel_notes": {
+    "3": "The source-labelled solar Z9.6 branch at 9--12 Msun and the separate W18/N20 engine outcomes at 40--120 Msun are inventoried as distinct branches. Their union is not a continuous mass grid or an approved fate law; the high-mass failed outcomes lack complete remnant/wind records."
+  },
+  "roberti2024_ultralowz_channel_notes": {
+    "3": "The CC BY 4.0 source directly samples Z=0, 3.236e-7, and 3.236e-6, but only at 15 and 25 Msun with an unselected rotation population. Four zero-Z article columns are missing from the official MRTs, 025z600 is quarantined, and no mass or metallicity interpolation is approved."
+  },
+  "heger_woosley2010_popiii_channel_notes": {
+    "3": "The official electronic table densely samples Z=0 over 10--100 Msun, and all source mass nodes are counted as candidate coordinates. The 100--120 Msun runtime edge remains outside this source hull. Explosion energy, piston location, and artificial mixing remain unselected; rotation and neutrino-wind nucleosynthesis are omitted, and no positive-Z interpolation is allowed."
+  },
+  "transition_fate_reference": {
+    "candidate_id": "limongi2024_transition_fates",
+    "contract": "g2_limongi2024_transition_fate_contract_v1.json",
+    "candidate_channel_nodes_contributed": 0,
+    "reason_not_counted_as_yield_coverage": "The source supplies fate semantics and thermal-pulse structural properties, not terminal event yields.",
+    "source_scope": "solar-metallicity nonrotating models only",
+    "runtime_edge_interval_msun": [8.0, 8.8],
+    "runtime_edge_classification": "terminal_fate_policy_unresolved_not_interpolable_yield_gap",
+    "continuous_fate_interpolation_allowed": false,
+    "stockinger_e8p8_anchor_may_define_population_fate_law": false
+  },
+  "runtime_demand_reference": {
+    "contract": "g2_baseline_metallicity_demand_contract_v1.json",
+    "baseline_id": "feedback_transition_phase0_10cMpc_h_z0_epsstar002",
+    "baseline_role": "transitional_feedback_baseline_comparison_only",
+    "comparison_population_defines_production_domain": false,
+    "metallicity_floor_or_clamp_allowed": false,
+    "solar_source_extrapolation_to_ultra_low_z_allowed": false
+  },
+  "ultralowz_sparse_reference": {
+    "candidate_id": "roberti2024_ultralowz_ccsn",
+    "contract": "g2_roberti2024_ultralowz_candidate_contract_v1.json",
+    "mass_nodes_msun": [15.0, 25.0],
+    "metallicity_nodes_mass_fraction": [0.0, 3.236e-7, 3.236e-6],
+    "mass_interpolation_allowed": false,
+    "metallicity_interpolation_allowed": false,
+    "rotation_population_selected": false,
+    "model_025z600_allowed": false,
+    "source_only_mrt_merge_allowed": false
+  },
+  "popiii_mass_grid_reference": {
+    "candidate_id": "heger_woosley2010_popiii",
+    "contract": "g2_heger_woosley2010_popiii_candidate_contract_v1.json",
+    "full_source_mass_hull_msun": [10.0, 100.0],
+    "runtime_channel_3_mass_hull_msun": [10.0, 100.0],
+    "metallicity_mass_fraction": 0.0,
+    "mass_interpolation_allowed": false,
+    "metallicity_extrapolation_allowed": false,
+    "explosion_energy_distribution_selected": false,
+    "piston_distribution_selected": false,
+    "mixing_distribution_selected": false,
+    "rotation_included": false
+  },
+  "coverage_rules": {
+    "node_hull_is_not_approval": true,
+    "cross_source_interpolation_allowed": false,
+    "out_of_domain_extrapolation_allowed": false,
+    "required_birth_metallicity_domain": null,
+    "required_birth_metallicity_domain_status": "not_selected",
+    "age_resolved_release_required": true,
+    "rotation_population_or_marginalization_required": true,
+    "within_sparse_coordinate_hull_is_not_approval": true,
+    "flattened_branch_union_is_not_interpolable_coverage": true,
+    "terminal_candidate_nodes_require_source_node_fate_and_remnant_records": true
+  },
+  "approval": {
+    "canonical_conversion_allowed": false,
+    "production_ready": false
+  }
+}

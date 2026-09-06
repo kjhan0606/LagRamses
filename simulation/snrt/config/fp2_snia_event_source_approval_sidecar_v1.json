@@ -1,0 +1,110 @@
+{
+  "schema": "snrt-fp2-snia-event-source-approval-sidecar",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "approved_physical_baseline_runtime_gated",
+  "purpose": "Approval record for the explicitly selected HESMA yysd4-xap92 n100 event source. It approves the physical baseline while keeping runtime activation gated until the AMR/MPI caller is connected.",
+  "artifacts": {
+    "hesma_review_normalized": {
+      "path": "simulation/snrt/data/fp2_snia_hesma_n100_review_normalized.json",
+      "sha256": "f4586d1c953de3e777277414c73b9ffe22c96ee235e61b72b57c340ba169a8cf"
+    },
+    "hesma_asset_manifest": {
+      "path": "manifests/fp2_snia_hesma_yysd4_review_v1.json",
+      "sha256": "0a9c6f6695f002f93d30b4c5cce0a6b0abaa3efe93105c836d4aed633561d6df"
+    },
+    "hesma_source_audit": {
+      "path": "simulation/snrt/data/fp2_snia_hesma_source_audit.json",
+      "sha256": "5463d58733df8b715fd1ec262b9164cf7b596ad0c9338af98098b8170ea1d510"
+    },
+    "approved_event_source": {
+      "path": "simulation/snrt/data/fp2_snia_hesma_n100_approved_event_source_v1.json",
+      "sha256": "a93e22a32d7566c711601cc92d6554c27caaa5ed7e3ad68dabefb02be06e7e5f"
+    }
+  },
+  "review_selection": {
+    "source_id": "hesma:yysd4-xap92",
+    "model_id": "n100",
+    "selection_basis": "approved physical baseline; explicit n100 model and documented profile estimator"
+  },
+  "physical_event_contract": {
+    "decay_convention": "HESMA stable-element section after approximately 2 Gyr; adopted horizon is 2 Gyr",
+    "decay_horizon_yr": 2000000000.0,
+    "isotope_to_project_element_policy": "use HESMA integrated stable-element section; free-proton column is H",
+    "returned_mass_msun_per_event": 1.4004633930489443,
+    "terminal_remnant_msun_per_event": 0.0,
+    "wd_debit_msun_per_event": 1.4004633930489443,
+    "energy_erg_per_event": 1.5063100005966762e51,
+    "energy_basis": "inner_zero_outer_half_bin spherical-average profile estimator",
+    "momentum_g_cm_s_per_event": [0.0, 0.0, 0.0],
+    "momentum_policy": "isotropic_zero_vector",
+    "population_weight": 1.0,
+    "thermal_coupling": "all_to_total_energy",
+    "metallicity_policy": "constant_unity_baseline",
+    "ejected_mass_msun_per_event": [7.33e-15, 0.000831, 0.00304, 3.22e-6, 0.101, 0.00357, 0.0154, 0.287, 0.115, 0.0148, 0.74],
+    "net_yield_msun_per_event": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "net_yield_status": "not supplied by the integrated stable-element source; zero is diagnostic-only and never a gas-mass source",
+    "source_commit_binding": "c6c8042b03406b9d69bc50434fe5d6af7f542be6",
+    "conversion_code_sha256": "3a831b6f99df0abb549eb62798340dab7aed99e01382930e9231dcf9f9d1923b",
+    "approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
+  },
+  "approval": {
+    "approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+    "canonical_conversion_allowed": true,
+    "runtime_activation_allowed": false,
+    "production_ready": true,
+    "publication_ready": false
+  },
+  "required_for_promotion": [
+    "selected_model_or_population_mixture",
+    "minimum_delay_gyr",
+    "maximum_delay_gyr",
+    "events_per_initial_msun_and_imf_conversion",
+    "decay_convention_and_horizon_yr",
+    "isotope_to_project_element_policy",
+    "returned_mass_msun_per_event",
+    "terminal_remnant_msun_per_event",
+    "wd_remnant_debit_policy",
+    "energy_erg_per_event",
+    "momentum_vector_convention",
+    "momentum_deposition_policy",
+    "event_realization_policy",
+    "snia_thermal_coupling",
+    "metallicity_dependence",
+    "source_warning_quarantine_policy",
+    "portable_artifact_paths",
+    "source_commit_binding",
+    "named_approval_id"
+  ],
+  "promotion_requirements": {
+    "schema": "snrt-fp2-snia-event-source-promotion-requirements",
+    "schema_version": 1,
+    "status": "satisfied_for_approved_physical_baseline",
+    "production_approval_status": "approved_physical_baseline_runtime_gated",
+    "required_fields": [
+      "selected_model_or_population_mixture",
+      "minimum_delay_gyr",
+      "maximum_delay_gyr",
+      "events_per_initial_msun_and_imf_conversion",
+      "decay_convention_and_horizon_yr",
+      "isotope_to_project_element_policy",
+      "returned_mass_msun_per_event",
+      "terminal_remnant_msun_per_event",
+      "wd_remnant_debit_policy",
+      "energy_erg_per_event",
+      "momentum_vector_convention",
+      "momentum_deposition_policy",
+      "event_realization_policy",
+      "snia_thermal_coupling",
+      "metallicity_dependence",
+      "source_warning_quarantine_policy",
+      "portable_artifact_paths",
+      "source_commit_binding",
+      "named_approval_id"
+    ],
+    "warning_policy": "a selected model must have no unresolved physical warnings or quarantine flags",
+    "artifact_policy": "all promotion artifacts use repository-relative or path-free canonical payloads and bind to a source commit",
+    "runtime_activation_allowed": false,
+    "remaining_runtime_gate": "connect the tested bridge to the actual AMR/MPI target-selection caller"
+  }
+}

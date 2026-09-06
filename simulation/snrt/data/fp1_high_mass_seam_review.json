@@ -1,0 +1,334 @@
+{
+  "blockers": [
+    "no_approved_source_node_fate_map_for_40_to_120_msun",
+    "engine_branch_outcomes_are_comparison_evidence_not_a_project_fate_law",
+    "age_resolved_wind_history_and_terminal_lumping_policy_missing",
+    "complete_decay_projection_and_element_closure_missing",
+    "canonical_event_energy_and_momentum_deposition_contract_missing",
+    "wind_terminal_remnant_ownership_and_cross_source_seams_unapproved",
+    "third_party_redistribution_permission_not_verified",
+    "failed_outcome_remnant_and_n20_wind_coverage_missing",
+    "cross_engine_stable_wind_discrepancy_requires_source_erratum_or_explanation",
+    "radioactive_wind_reference_epoch_inconsistent_between_engine_branches",
+    "cross_segment_k40_requires_explicit_decay_projection_and_duplicate_resolution"
+  ],
+  "candidate": {
+    "article_doi": "10.3847/0004-637X/821/1/38",
+    "candidate_audit": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_sukhbold2016_candidate_audit.json",
+      "sha256": "c14db49da70ba5aae7ff8e11b2dec1282015e823280a17ddca1902673e7e6550"
+    },
+    "candidate_id": "sukhbold2016_ccsn",
+    "data_doi": "10.17617/1.b",
+    "engines": {
+      "N20": {
+        "mass_nodes_msun": [
+          40.0,
+          45.0,
+          50.0,
+          55.0,
+          60.0,
+          70.0,
+          80.0,
+          100.0,
+          120.0
+        ],
+        "nonpositive_energy_mass_nodes_msun": [
+          40.0,
+          45.0,
+          50.0,
+          55.0,
+          70.0
+        ],
+        "outcomes": {
+          "100.0": "explosion_energy_positive",
+          "120.0": "explosion_energy_positive",
+          "40.0": "no_positive_explosion_energy",
+          "45.0": "no_positive_explosion_energy",
+          "50.0": "no_positive_explosion_energy",
+          "55.0": "no_positive_explosion_energy",
+          "60.0": "explosion_energy_positive",
+          "70.0": "no_positive_explosion_energy",
+          "80.0": "explosion_energy_positive"
+        },
+        "positive_energy_mass_nodes_msun": [
+          60.0,
+          80.0,
+          100.0,
+          120.0
+        ]
+      },
+      "W18": {
+        "mass_nodes_msun": [
+          40.0,
+          45.0,
+          50.0,
+          55.0,
+          60.0,
+          70.0,
+          80.0,
+          100.0,
+          120.0
+        ],
+        "nonpositive_energy_mass_nodes_msun": [
+          40.0,
+          45.0,
+          50.0,
+          55.0,
+          70.0,
+          80.0,
+          100.0
+        ],
+        "outcomes": {
+          "100.0": "no_positive_explosion_energy",
+          "120.0": "explosion_energy_positive",
+          "40.0": "no_positive_explosion_energy",
+          "45.0": "no_positive_explosion_energy",
+          "50.0": "no_positive_explosion_energy",
+          "55.0": "no_positive_explosion_energy",
+          "60.0": "explosion_energy_positive",
+          "70.0": "no_positive_explosion_energy",
+          "80.0": "no_positive_explosion_energy"
+        },
+        "positive_energy_mass_nodes_msun": [
+          60.0,
+          120.0
+        ]
+      }
+    },
+    "projection_review": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/g2_sukhbold_channel_projection_review.json",
+      "sha256": "833587e7c60092b61e2b5fbb2387c8a2bc5e1fd886399893fbf709cff8bdbb85"
+    },
+    "source_identity": {
+      "article_doi": "10.3847/0004-637X/821/1/38",
+      "candidate_id": "sukhbold2016_ccsn",
+      "data_doi": "10.17617/1.b",
+      "file_count": 4,
+      "files": {
+        "ARCHIVE_TERMS.html": {
+          "bytes": 64972,
+          "sha256": "447fb9dff5bd31a542f93bb8c489902faad068e5007b930435ccb01f62a457fe"
+        },
+        "INDEX.html": {
+          "bytes": 9721,
+          "sha256": "8abc776c7b9c859d5f31091bf5393d8136c5b749b776a9902d6ce99f61227c8b"
+        },
+        "explosion_results_PHOTB.tar.gz": {
+          "bytes": 18850,
+          "sha256": "72e6d68c1a8fdc622054dc08c6263e6ac3faa5e5352b299206cfe076952e93a9"
+        },
+        "nucleosynthesis_yields.tar.gz": {
+          "bytes": 42688013,
+          "sha256": "e74bd3a7bf647f2e06f055b50f2613d7b145613ae56cc1d05f870f8edddf6eed"
+        }
+      },
+      "noncommercial_use_with_citation_verified": true,
+      "research_access_verified": true,
+      "source_page": "https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/SEWBJ_2015/",
+      "third_party_redistribution_permission_verified": false
+    }
+  },
+  "canonical_conversion_allowed": false,
+  "cross_engine_wind_review": {
+    "all_common_stable_winds_bit_identical": false,
+    "common_mass_nodes_msun": [
+      60.0,
+      80.0,
+      100.0,
+      120.0
+    ],
+    "common_wind_record_count": 8,
+    "k40_cross_segment_duplicate_present_in_all_common_records": true,
+    "k40_cross_segment_duplicate_record_count": 8,
+    "radioactive_reference_epoch_warning_count": 12,
+    "radioactive_reference_epoch_warnings": [
+      {
+        "absolute_log10_spread_dex": 20.92935391643614,
+        "isotope": "mn54",
+        "n20_wind_msun": 3.34e-14,
+        "w18_wind_msun": 3.93e-35,
+        "zams_mass_msun": 80.0,
+        "zero_vs_positive": false
+      },
+      {
+        "absolute_log10_spread_dex": 9.886056647693163,
+        "isotope": "na22",
+        "n20_wind_msun": 2.4e-13,
+        "w18_wind_msun": 3.12e-23,
+        "zams_mass_msun": 80.0,
+        "zero_vs_positive": false
+      },
+      {
+        "absolute_log10_spread_dex": null,
+        "isotope": "ni56",
+        "n20_wind_msun": 7.48e-19,
+        "w18_wind_msun": 0.0,
+        "zams_mass_msun": 80.0,
+        "zero_vs_positive": true
+      },
+      {
+        "absolute_log10_spread_dex": null,
+        "isotope": "ni57",
+        "n20_wind_msun": 1.65e-14,
+        "w18_wind_msun": 0.0,
+        "zams_mass_msun": 80.0,
+        "zero_vs_positive": true
+      },
+      {
+        "absolute_log10_spread_dex": 36.88930170250631,
+        "isotope": "ti44",
+        "n20_wind_msun": 9.92e-18,
+        "w18_wind_msun": 1.28e-54,
+        "zams_mass_msun": 80.0,
+        "zero_vs_positive": false
+      },
+      {
+        "absolute_log10_spread_dex": 15.628836887265791,
+        "isotope": "v49",
+        "n20_wind_msun": 4.85e-16,
+        "w18_wind_msun": 1.14e-31,
+        "zams_mass_msun": 80.0,
+        "zero_vs_positive": false
+      },
+      {
+        "absolute_log10_spread_dex": 20.32025743868561,
+        "isotope": "mn54",
+        "n20_wind_msun": 5.08e-14,
+        "w18_wind_msun": 2.43e-34,
+        "zams_mass_msun": 100.0,
+        "zero_vs_positive": false
+      },
+      {
+        "absolute_log10_spread_dex": 10.25827801524303,
+        "isotope": "na22",
+        "n20_wind_msun": 3.19e-13,
+        "w18_wind_msun": 1.76e-23,
+        "zams_mass_msun": 100.0,
+        "zero_vs_positive": false
+      },
+      {
+        "absolute_log10_spread_dex": null,
+        "isotope": "ni56",
+        "n20_wind_msun": 1.38e-18,
+        "w18_wind_msun": 0.0,
+        "zams_mass_msun": 100.0,
+        "zero_vs_positive": true
+      },
+      {
+        "absolute_log10_spread_dex": null,
+        "isotope": "ni57",
+        "n20_wind_msun": 2.69e-14,
+        "w18_wind_msun": 0.0,
+        "zams_mass_msun": 100.0,
+        "zero_vs_positive": true
+      },
+      {
+        "absolute_log10_spread_dex": 35.26666109403272,
+        "isotope": "ti44",
+        "n20_wind_msun": 1.36e-17,
+        "w18_wind_msun": 7.36e-53,
+        "zams_mass_msun": 100.0,
+        "zero_vs_positive": false
+      },
+      {
+        "absolute_log10_spread_dex": 16.591504781012393,
+        "isotope": "v49",
+        "n20_wind_msun": 6.91e-16,
+        "w18_wind_msun": 1.77e-32,
+        "zams_mass_msun": 100.0,
+        "zero_vs_positive": false
+      }
+    ],
+    "radioactive_wind_values_admissible": false,
+    "source_erratum_or_explanation_required": true,
+    "stable_wind_comparisons": [
+      {
+        "bit_identical": true,
+        "element_differences_msun": {},
+        "n20_stable_wind_msun": 52.697364486731004,
+        "signed_n20_minus_w18_msun": 0.0,
+        "w18_stable_wind_msun": 52.697364486731004,
+        "zams_mass_msun": 60.0
+      },
+      {
+        "bit_identical": true,
+        "element_differences_msun": {},
+        "n20_stable_wind_msun": 73.64634332156548,
+        "signed_n20_minus_w18_msun": 0.0,
+        "w18_stable_wind_msun": 73.64634332156548,
+        "zams_mass_msun": 80.0
+      },
+      {
+        "bit_identical": false,
+        "element_differences_msun": {
+          "Mg": 0.00010000000000000286
+        },
+        "n20_stable_wind_msun": 94.03178996760204,
+        "signed_n20_minus_w18_msun": 0.00010000010999533515,
+        "w18_stable_wind_msun": 94.03168996749204,
+        "zams_mass_msun": 100.0
+      },
+      {
+        "bit_identical": true,
+        "element_differences_msun": {},
+        "n20_stable_wind_msun": 113.826357554937,
+        "signed_n20_minus_w18_msun": 0.0,
+        "w18_stable_wind_msun": 113.826357554937,
+        "zams_mass_msun": 120.0
+      }
+    ]
+  },
+  "gate": "F-P1",
+  "interpretation": "W18/N20 contain both positive- and non-positive-energy outcomes across the same 40--120 Msun mass range. This proves mass-only direct-collapse fallback is unsafe; it does not select a production fate map or authorize any canonical feedback row.",
+  "production_ready": false,
+  "required_next_inputs": [
+    "licensed_source_node_fate_map_with_source_hull_and_approval",
+    "age_resolved_wind_or_approved_terminal_lumping_contract",
+    "decay_projection_and_reduced_chemistry_closure",
+    "energy_momentum_and_deposition_semantics",
+    "non_overlapping_wind_terminal_remnant_ownership"
+  ],
+  "resolved": false,
+  "review_closure": {
+    "exact_mass_closure_claimed": false,
+    "maximum_absolute_relative_residual": 0.003301399145327014,
+    "maximum_absolute_residual_msun": 0.3903541335443208,
+    "production_acceptance_claimed": false,
+    "record_count": 6,
+    "review_relative_tolerance": 0.007,
+    "scope": "available rounded Sukhbold high-mass terminal-yield records only",
+    "within_review_tolerance": true
+  },
+  "runtime_activation_allowed": false,
+  "schema": "snrt-fp1-high-mass-seam-review",
+  "schema_version": 1,
+  "seam": {
+    "fate_map_status": "model_dependent_source_node_required",
+    "id": "massive_terminal_fate_seam",
+    "mass_msun": [
+      40.0,
+      120.0
+    ],
+    "mass_nodes_msun": [
+      40.0,
+      45.0,
+      50.0,
+      55.0,
+      60.0,
+      70.0,
+      80.0,
+      100.0,
+      120.0
+    ]
+  },
+  "source_node_completeness": {
+    "complete": false,
+    "failed_nodes_with_source_remnant_count": 0,
+    "failed_outcome_count": 12,
+    "failed_wind_record_count": 7,
+    "outcome_record_count": 18,
+    "terminal_yield_record_count": 6
+  },
+  "status": "review_only_engine_comparison_fate_unresolved"
+}

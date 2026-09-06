@@ -1,0 +1,97 @@
+{
+  "schema": "snrt-fp2-snia-dtd-candidate-matrix",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "approved_baseline_selection_runtime_gated",
+  "selection_rule": "A candidate must specify its population basis, delay support, normalization convention, source-frame event yields, energy/momentum, metallicity dependence, license, and conversion checksum before approval.",
+  "selected_candidate_id": "field_observed_powerlaw_maoz2012",
+  "selected_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+  "candidates": [
+    {
+      "candidate_id": "field_observed_powerlaw_maoz2012",
+      "citation": "Maoz, Mannucci & Brandt 2012, The delay-time distribution of Type-Ia supernovae from Sloan II",
+      "doi": "10.1111/j.1365-2966.2012.21871.x",
+      "url": "https://academic.oup.com/mnras/article/426/4/3282/1017965",
+      "evidence_type": "field_galaxy_observational_dtd",
+      "reported_shape": "power_law",
+      "reported_power_law_index": -1.07,
+      "reported_power_law_index_uncertainty": 0.07,
+      "reported_delay_support_gyr": [0.04, 13.7],
+      "reported_integrated_events_per_initial_msun": 0.0013,
+      "reported_integrated_events_uncertainty": 0.00015,
+      "imf_convention": "Kroupa-like convention in the source analysis; project IMF conversion must be explicit",
+      "population_and_binary_semantics": "empirical impulse response; progenitor channel is not uniquely identified",
+      "project_role": "primary_field_baseline_candidate",
+      "status": "approved_baseline",
+      "blockers": [
+        "binary fraction is recorded as bookkeeping only because the empirical DTD normalization already includes the binary population",
+        "the selected HESMA event-yield source supplies the event composition; metallicity-sensitive DTD alternatives remain systematic comparisons"
+      ]
+    },
+    {
+      "candidate_id": "cluster_observed_powerlaw_freundlich2021",
+      "citation": "Freundlich & Maoz 2021, The delay time distribution of Type-Ia supernovae in galaxy clusters",
+      "doi": "10.1093/mnras/stab493",
+      "url": "https://academic.oup.com/mnras/article/502/4/5882/6145511",
+      "evidence_type": "cluster_observational_dtd_with_extended_sfh",
+      "reported_shape": "power_law",
+      "reported_power_law_index": -1.09,
+      "reported_power_law_index_uncertainty_minus": 0.12,
+      "reported_power_law_index_uncertainty_plus": 0.15,
+      "reported_amplitude_at_1gyr_yr_minus1_msun_minus1": 4.1e-13,
+      "reported_amplitude_uncertainty_minus": 1.0e-13,
+      "reported_amplitude_uncertainty_plus": 1.2e-13,
+      "environment_semantics": "cluster population; amplitude is reported higher than field by about 2--3",
+      "project_role": "environmental_sensitivity_candidate_not_default",
+      "status": "candidate_not_approved",
+      "blockers": [
+        "cluster normalization must not be transferred to field/LRD populations without an environment model",
+        "project IMF and binary normalization not yet approved",
+        "event-yield source and conversion checksum are not staged"
+      ]
+    },
+    {
+      "candidate_id": "gce_extended_dtd_dubay2024",
+      "citation": "Dubay, Johnson & Johnson 2024, Galactic Chemical Evolution Models Favor an Extended Type Ia Supernova Delay-Time Distribution",
+      "doi": "10.3847/1538-4357/ad61df",
+      "url": "https://arxiv.org/abs/2404.08059",
+      "evidence_type": "galactic_chemical_evolution_model_comparison",
+      "reported_shape": "extended_dtd_with_fewer_prompt_events_than_fiducial_t_minus_one",
+      "reported_power_law_index": null,
+      "reported_delay_support_gyr": null,
+      "reported_integrated_events_per_initial_msun": null,
+      "project_role": "shape_systematic_candidate",
+      "status": "candidate_not_approved",
+      "blockers": [
+        "does not by itself provide a portable project normalization",
+        "Milky Way chemical-evolution fit is not an LRD binary prescription",
+        "event-yield source and conversion checksum are not staged"
+      ]
+    },
+    {
+      "candidate_id": "double_degenerate_theory_powerlaw_ruiter2011",
+      "citation": "Ruiter, Belczynski & Fryer 2011, Delay times and rates for Type Ia supernovae and thermonuclear explosions from double-detonation sub-Chandrasekhar mass models",
+      "doi": "10.1111/j.1365-2966.2011.18674.x",
+      "url": "https://academic.oup.com/mnras/article/417/1/408/979905",
+      "evidence_type": "binary_population_synthesis",
+      "reported_shape": "channel_dependent; double-detonation branch_can_approach_t_minus_one",
+      "reported_power_law_index": -1.0,
+      "reported_delay_support_gyr": null,
+      "reported_integrated_events_per_initial_msun": null,
+      "population_and_binary_semantics": "explicit binary evolutionary channels and common-envelope assumptions",
+      "project_role": "theory_population_candidate",
+      "status": "candidate_not_approved",
+      "blockers": [
+        "binary initial distributions and common-envelope choices must match the project population",
+        "rate normalization is model dependent",
+        "event-yield source and conversion checksum are not staged"
+      ]
+    }
+  ],
+  "decision": {
+    "current_recommendation": "Use the field-observed power-law as the baseline candidate for sensitivity design, while retaining the extended-DTD GCE result as a systematic comparison. Do not write either into the production contract yet.",
+      "production_source_id": "field_observed_powerlaw_maoz2012",
+      "production_approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+      "runtime_activation_allowed": false
+  }
+}

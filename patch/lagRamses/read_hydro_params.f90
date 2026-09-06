@@ -7,7 +7,10 @@ subroutine read_hydro_params(nml_ok)
   use eunha_cooling_mod, only: eunha_load_multi_z
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: read_enrichment_namelist, &
-       stellar_feedback_mode, use_channel_resolved_feedback
+       stellar_feedback_mode, use_channel_resolved_feedback, default_imf_id, &
+       population_model_id, yield_source_basis_name, configured_imf_mass_min, &
+       configured_imf_mass_max, configured_binary_fraction, stellar_fate_policy, &
+       stellar_fate_map_sha256, stellar_fate_approval_id, production_fate_policy_supported
 #endif
   implicit none
 #ifndef WITHOUTMPI
@@ -125,16 +128,46 @@ subroutine read_hydro_params(nml_ok)
 #ifdef PHASE0_STELLAR_ENRICHMENT
   rewind(1)
   call read_enrichment_namelist(1,stellar_nml_iostat)
-  if(stellar_nml_iostat>0)then
+  if(stellar_nml_iostat/=0)then
      if(myid==1)then
         write(*,*) 'ERROR: invalid &STELLAR_ENRICHMENT_PARAMS namelist'
         if(stellar_nml_iostat==1001) &
              write(*,*) '  feedback_mode must be channel_resolved or legacy'
+        if(stellar_nml_iostat==1002) &
+             write(*,*) '  imf_id must be in the supported range 0:3'
+        if(stellar_nml_iostat==1003) &
+             write(*,*) '  population_model must be single_star_ssp or binary_ssp'
+        if(stellar_nml_iostat==1004) &
+             write(*,*) '  every channel mass window must be finite and increasing'
+        if(stellar_nml_iostat==1005) &
+             write(*,*) '  &STELLAR_ENRICHMENT_PARAMS is required in this build'
+        if(stellar_nml_iostat==1006) &
+             write(*,*) '  yield_source_basis is required and must be recognized'
+        if(stellar_nml_iostat==1007) &
+             write(*,*) '  IMF mass bounds must be finite, positive, and increasing'
+        if(stellar_nml_iostat==1008) &
+             write(*,*) '  binary_fraction is invalid for the selected population model'
+        if(stellar_nml_iostat==1009) &
+             write(*,*) '  an enabled channel mass window lies outside the IMF support'
      end if
      nml_ok=.false.
   end if
-  if(myid==1) write(*,'(A,A)') ' Stellar feedback mode: ', &
-       trim(stellar_feedback_mode)
+  if(myid==1 .and. stellar_nml_iostat==0)then
+     write(*,'(A,A)') ' Stellar feedback mode: ',trim(stellar_feedback_mode)
+     write(*,'(A,I0)') ' Stellar IMF id: ',default_imf_id
+     write(*,'(A,I0)') ' Stellar population model id: ',population_model_id
+     write(*,'(A,A)') ' Stellar yield source basis: ',trim(yield_source_basis_name())
+     write(*,'(A,2(1X,ES12.4))') ' Stellar IMF mass support:', &
+          configured_imf_mass_min,configured_imf_mass_max
+     write(*,'(A,1X,ES12.4)') ' Stellar binary fraction:', &
+          configured_binary_fraction
+     write(*,'(A,A)') ' Stellar terminal-fate policy: ',trim(stellar_fate_policy)
+     write(*,'(A,A)') ' Stellar fate-map SHA256: ',trim(stellar_fate_map_sha256)
+     write(*,'(A,A)') ' Stellar fate approval id: ',trim(stellar_fate_approval_id)
+     if(.not.production_fate_policy_supported())then
+        write(*,'(A)') ' Stellar terminal-fate policy is review-only; production admission is blocked'
+     endif
+  end if
 #endif
 #ifdef grackle
   rewind(1)

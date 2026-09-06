@@ -1,0 +1,44 @@
+{
+  "schema": "snrt_environment_v1",
+  "project_root": "/gpfs/kjhan/LRD_JWST",
+  "environment_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/.venv",
+  "recorded_at": "2026-09-01",
+  "host_kernel": "Linux-5.14.0-570.17.1.el9_6.x86_64-x86_64-with-glibc2.34",
+  "python": {
+    "executable": "/gpfs/kjhan/LRD_JWST/simulation/snrt/.venv/bin/python",
+    "version": "3.13.11"
+  },
+  "backend": {
+    "jax": "0.11.1",
+    "jaxlib": "0.11.1",
+    "default": "cpu",
+    "devices_at_recording": ["cpu:0"]
+  },
+  "packages": {
+    "numpy": "2.5.2",
+    "h5py": "3.16.0",
+    "scipy": "1.18.1",
+    "yt": "4.4.2",
+    "unyt": "3.1.0",
+    "f90nml": "1.5.0",
+    "radioactivedecay": "0.6.1",
+    "pandas": "3.0.5",
+    "networkx": "3.6.1"
+  },
+  "dependency_files": {
+    "requirements_cpu": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/requirements-cpu.txt",
+      "sha256": "e4efe48f3ff341e7803990f86084fab7e347a7e9aafc40d49e0650fc85cb1fec"
+    },
+    "requirements_ramses": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/requirements-ramses.txt",
+      "sha256": "dcbef6530c9d6a2745e92f8c8d7e5ae541994e0bdc8ca1ab105b194e44e34e60"
+    },
+    "resolved_lock": {
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/requirements-cpu.lock.txt",
+      "sha256": "eb8696f8589b6da1b030a6723bcb12557ddb5726cb860abdb437de37735c3e9e"
+    }
+  },
+  "gpu_status": "CUDA-enabled jaxlib is not installed; JAX uses CPU for this environment record.",
+  "reproducibility_status": "locked"
+}

@@ -6,7 +6,8 @@
 
 module stellar_cell_deposition
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements
-  use stellar_enrichment_contract, only: stellar_source_t
+  use stellar_enrichment_contract, only: stellar_source_t, &
+       generic_metal_ejecta_mass
   implicit none
 
   private
@@ -21,7 +22,7 @@ contains
 
   subroutine deposit_stellar_source(source, n_cells, cell_volume, weights, &
        gas_density, gas_element_density, gas_energy_density, &
-       gas_momentum_density, tolerance, ierr)
+       gas_momentum_density, tolerance, ierr, gas_metal_density)
     type(stellar_source_t), intent(in) :: source
     integer, intent(in) :: n_cells
     real(stellar_dp), intent(in) :: cell_volume(n_cells)
@@ -34,9 +35,11 @@ contains
          gas_momentum_density(3,n_cells)
     real(stellar_dp), intent(in) :: tolerance
     integer, intent(out) :: ierr
+    real(stellar_dp), intent(inout), optional :: gas_metal_density(n_cells)
 
     real(stellar_dp) :: tol, weight_sum, ejected_sum, scale
     real(stellar_dp) :: normalized_weight, delta_mass, delta_element
+    real(stellar_dp) :: generic_metal_mass
     integer :: cell, element
 
     ierr = deposition_ok
@@ -58,19 +61,20 @@ contains
        return
     end if
 
-    if (source%returned_mass < -tol .or. &
-         minval(source%ejected_mass) < -tol) then
+    ejected_sum = sum(source%ejected_mass)
+    scale = max(tiny(1.0_stellar_dp), abs(source%returned_mass), &
+         abs(ejected_sum))
+    if (source%returned_mass < -tol * scale .or. &
+         minval(source%ejected_mass) < -tol * scale) then
        ierr = deposition_err_source
        return
     end if
-
-    ejected_sum = sum(source%ejected_mass)
-    scale = max(1.0_stellar_dp, abs(source%returned_mass), &
-         abs(ejected_sum))
-    if (abs(ejected_sum - source%returned_mass) > tol * scale) then
+    if (ejected_sum > source%returned_mass + tol * scale) then
        ierr = deposition_err_closure
        return
     end if
+    generic_metal_mass = generic_metal_ejecta_mass(source%returned_mass, &
+         source%ejected_mass)
 
     ! All checks occur before the first update, so a rejected source leaves
     ! every gas array unchanged.
@@ -79,6 +83,10 @@ contains
        delta_mass = normalized_weight * source%returned_mass
        gas_density(cell) = gas_density(cell) + &
             delta_mass / cell_volume(cell)
+       if (present(gas_metal_density)) then
+          gas_metal_density(cell) = gas_metal_density(cell) + &
+               normalized_weight * generic_metal_mass / cell_volume(cell)
+       end if
 
        do element = 1, n_stellar_elements
           delta_element = normalized_weight * source%ejected_mass(element)

@@ -1,0 +1,91 @@
+{
+  "schema": "snrt-hdf5-field-map",
+  "schema_version": 1,
+  "source_descriptor": "hydro_file_descriptor.txt",
+  "notes": "output_00017 is the raw-conservative cuRAMSES HDF5 checkpoint built with Horizon5-master-2. uold_1 is density, uold_2..uold_4 are momentum densities, uold_5 is total-energy density, uold_6 is the metal mass density (imetal=6), and uold_7 is the delayed-cooling reservoir (idelay=7). The H/O/Fe-like element slots uold_8..uold_10 are retained for a later element audit. Dust and non-equilibrium ionization remain explicit pilot placeholders, so this map is ineligible for production-contract mode.",
+  "fields": {
+    "density": {
+      "dataset": "uold_1",
+      "unit": "code_density",
+      "averaging": "volume"
+    },
+    "velocity": [
+      {
+        "dataset": "uold_2",
+        "unit": "code_momentum_density",
+        "averaging": "volume",
+        "quantity": "momentum_density",
+        "source_semantics": "raw conservative momentum density; divide by deposited density to obtain velocity"
+      },
+      {
+        "dataset": "uold_3",
+        "unit": "code_momentum_density",
+        "averaging": "volume",
+        "quantity": "momentum_density",
+        "source_semantics": "raw conservative momentum density; divide by deposited density to obtain velocity"
+      },
+      {
+        "dataset": "uold_4",
+        "unit": "code_momentum_density",
+        "averaging": "volume",
+        "quantity": "momentum_density",
+        "source_semantics": "raw conservative momentum density; divide by deposited density to obtain velocity"
+      }
+    ],
+    "thermal_pressure": {
+      "derive": "ideal_gas_pressure_from_conservative",
+      "depends_on": ["density", "velocity", "total_energy_density"],
+      "gamma": 1.6666667,
+      "reason": "uold_5 is raw total-energy density; recover thermal pressure as (gamma-1)*(E - |rho v|^2/(2 rho)) using the HDF5 header gamma when present."
+    },
+    "total_energy_density": {
+      "dataset": "uold_5",
+      "unit": "code_energy_density",
+      "averaging": "volume",
+      "source_semantics": "raw conservative total-energy density"
+    },
+    "metal_density": {
+      "dataset": "uold_6",
+      "unit": "code_density",
+      "averaging": "volume",
+      "source_semantics": "raw conservative metal mass density; imetal=6 in the producing build"
+    },
+    "metallicity_solar": {
+      "derive": "metallicity_from_density_and_metal_density",
+      "depends_on": ["density", "metal_density"],
+      "metal_density_field": "metal_density",
+      "solar_mass_fraction": 0.02,
+      "reason": "Convert the conservative metal-density fraction uold_6/uold_1 to Z/Z_sun using the producing RAMSES cooling convention Zsolar=metal_density/(density*0.02)."
+    },
+    "dust_to_metal": {
+      "constant": 0.0,
+      "unit": "dimensionless",
+      "averaging": "volume",
+      "reason": "Dust-to-metal normalization is not present in the current HDF5 contract; zero is a pilot placeholder and is not a dust science result."
+    },
+    "x_hii": {
+      "constant": 0.0,
+      "unit": "dimensionless",
+      "averaging": "volume",
+      "reason": "Initialize the static pilot as neutral until an audited ionization checkpoint field is available."
+    },
+    "x_heii": {
+      "constant": 0.0,
+      "unit": "dimensionless",
+      "averaging": "volume",
+      "reason": "Initialize the static pilot as neutral until an audited ionization checkpoint field is available."
+    },
+    "x_heiii": {
+      "constant": 0.0,
+      "unit": "dimensionless",
+      "averaging": "volume",
+      "reason": "Initialize the static pilot as neutral until an audited ionization checkpoint field is available."
+    },
+    "x_h2": {
+      "constant": 0.0,
+      "unit": "dimensionless",
+      "averaging": "volume",
+      "reason": "Molecular hydrogen is not yet represented by an audited HDF5 field; zero is an explicit pilot placeholder."
+    }
+  }
+}

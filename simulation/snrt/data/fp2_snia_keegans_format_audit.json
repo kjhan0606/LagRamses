@@ -1,0 +1,839 @@
+{
+  "schema": "snrt-fp2-snia-keegans-format-audit",
+  "schema_version": 1,
+  "gate": "F-P2",
+  "status": "review_only_source_format_passed",
+  "format_integrity_passed": true,
+  "canonical_conversion_allowed": false,
+  "runtime_activation_allowed": false,
+  "root": "assets/review_only/fp2_snia/keegans2023",
+  "manifest": "manifests/fp2_snia_keegans2023_review_v1.json",
+  "manifest_sha256": "1e08bedc4381827244fd280d38eb62cdbc5a3c540ddb903aaeba2157fcedac84",
+  "file_reports": [
+    {
+      "path": "assets/review_only/fp2_snia/keegans2023/decayed_brox_yields_new_latex_table.tex",
+      "sha256": "5b13bf7ec1c2cde2785fc19683d99a4d3c59baa369ca114f8dbc6e1571ff9a6c",
+      "header": "Element & Z & A & $^{22}$Ne = 0  & 1e-7 & 1e-6 & 1e-5 & 1e-4 & 1e-3 & 2e-3 & 5e-3 & 1e-2 & 1.4e-2 & 2e-2 & 5e-2 & 1e-1 \\\\",
+      "header_column_count": 13,
+      "header_22ne": [
+        0.0,
+        1e-07,
+        1e-06,
+        1e-05,
+        0.0001,
+        0.001,
+        0.002,
+        0.005,
+        0.01,
+        0.014,
+        0.02,
+        0.05,
+        0.1
+      ],
+      "header_22ne_matches_expected": true,
+      "row_count": 70,
+      "isotope_coordinate_count": 70,
+      "elements": [
+        "Al",
+        "Ar",
+        "Ca",
+        "Cl",
+        "Co",
+        "Cr",
+        "Cu",
+        "F",
+        "Fe",
+        "Ga",
+        "Ge",
+        "K",
+        "Mg",
+        "Mn",
+        "Na",
+        "Ne",
+        "Ni",
+        "O",
+        "P",
+        "S",
+        "Sc",
+        "Si",
+        "Ti",
+        "V",
+        "Zn"
+      ],
+      "z_by_element": {
+        "Al": 13,
+        "Ar": 18,
+        "Ca": 20,
+        "Cl": 17,
+        "Co": 27,
+        "Cr": 24,
+        "Cu": 29,
+        "F": 9,
+        "Fe": 26,
+        "Ga": 31,
+        "Ge": 32,
+        "K": 19,
+        "Mg": 12,
+        "Mn": 25,
+        "Na": 11,
+        "Ne": 10,
+        "Ni": 28,
+        "O": 8,
+        "P": 15,
+        "S": 16,
+        "Sc": 21,
+        "Si": 14,
+        "Ti": 22,
+        "V": 23,
+        "Zn": 30
+      },
+      "element_stats": {
+        "Al": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ar": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ca": {
+          "isotope_row_count": 6,
+          "yield_cell_count": 78,
+          "nonzero_yield_cell_count": 78,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Cl": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Co": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Cr": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Cu": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "F": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Fe": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ga": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ge": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "K": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Mg": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Mn": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Na": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ne": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ni": {
+          "isotope_row_count": 5,
+          "yield_cell_count": 65,
+          "nonzero_yield_cell_count": 65,
+          "all_yield_cells_explicit_zero": false
+        },
+        "O": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "P": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "S": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Sc": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Si": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ti": {
+          "isotope_row_count": 5,
+          "yield_cell_count": 65,
+          "nonzero_yield_cell_count": 65,
+          "all_yield_cells_explicit_zero": false
+        },
+        "V": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Zn": {
+          "isotope_row_count": 5,
+          "yield_cell_count": 65,
+          "nonzero_yield_cell_count": 65,
+          "all_yield_cells_explicit_zero": false
+        }
+      },
+      "format_failures": [],
+      "format_integrity_passed": true
+    },
+    {
+      "path": "assets/review_only/fp2_snia/keegans2023/decayed_dean_yields_new_latex_table.tex",
+      "sha256": "73f3aecc9c4a739ea069011b893af2041139527abfa3f7b874d89000abc540f4",
+      "header": "Symbol & Z & A & $^{22}$Ne = 0  & 1e-7 & 1e-6 & 1e-5 & 1e-4 & 1e-3 & 2e-3 & 5e-3 & 1e-2 & 1.4e-2 & 2e-2 & 5e-2 & 1e-1 \\\\",
+      "header_column_count": 13,
+      "header_22ne": [
+        0.0,
+        1e-07,
+        1e-06,
+        1e-05,
+        0.0001,
+        0.001,
+        0.002,
+        0.005,
+        0.01,
+        0.014,
+        0.02,
+        0.05,
+        0.1
+      ],
+      "header_22ne_matches_expected": true,
+      "row_count": 70,
+      "isotope_coordinate_count": 70,
+      "elements": [
+        "Al",
+        "Ar",
+        "Ca",
+        "Cl",
+        "Co",
+        "Cr",
+        "Cu",
+        "F",
+        "Fe",
+        "Ga",
+        "Ge",
+        "K",
+        "Mg",
+        "Mn",
+        "Na",
+        "Ne",
+        "Ni",
+        "O",
+        "P",
+        "S",
+        "Sc",
+        "Si",
+        "Ti",
+        "V",
+        "Zn"
+      ],
+      "z_by_element": {
+        "Al": 13,
+        "Ar": 18,
+        "Ca": 20,
+        "Cl": 17,
+        "Co": 27,
+        "Cr": 24,
+        "Cu": 29,
+        "F": 9,
+        "Fe": 26,
+        "Ga": 31,
+        "Ge": 32,
+        "K": 19,
+        "Mg": 12,
+        "Mn": 25,
+        "Na": 11,
+        "Ne": 10,
+        "Ni": 28,
+        "O": 8,
+        "P": 15,
+        "S": 16,
+        "Sc": 21,
+        "Si": 14,
+        "Ti": 22,
+        "V": 23,
+        "Zn": 30
+      },
+      "element_stats": {
+        "Al": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ar": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ca": {
+          "isotope_row_count": 6,
+          "yield_cell_count": 78,
+          "nonzero_yield_cell_count": 78,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Cl": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Co": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Cr": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Cu": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "F": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Fe": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ga": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ge": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "K": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Mg": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Mn": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Na": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ne": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ni": {
+          "isotope_row_count": 5,
+          "yield_cell_count": 65,
+          "nonzero_yield_cell_count": 65,
+          "all_yield_cells_explicit_zero": false
+        },
+        "O": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "P": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "S": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Sc": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Si": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ti": {
+          "isotope_row_count": 5,
+          "yield_cell_count": 65,
+          "nonzero_yield_cell_count": 65,
+          "all_yield_cells_explicit_zero": false
+        },
+        "V": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Zn": {
+          "isotope_row_count": 5,
+          "yield_cell_count": 65,
+          "nonzero_yield_cell_count": 65,
+          "all_yield_cells_explicit_zero": false
+        }
+      },
+      "format_failures": [],
+      "format_integrity_passed": true
+    },
+    {
+      "path": "assets/review_only/fp2_snia/keegans2023/decayed_shen_yields_new_latex_table.tex",
+      "sha256": "6ec00801f3e74319b619d61e1a9ba8e6119c0c4c02c7849cda46a6d8408d104b",
+      "header": "Symbol & Z & A & $^{22}$Ne = 0  & 1e-7 & 1e-6 & 1e-5 & 1e-4 & 1e-3 & 2e-3 & 5e-3 & 1e-2 & 1.4e-2 & 2e-2 & 5e-2 & 1e-1 \\\\",
+      "header_column_count": 13,
+      "header_22ne": [
+        0.0,
+        1e-07,
+        1e-06,
+        1e-05,
+        0.0001,
+        0.001,
+        0.002,
+        0.005,
+        0.01,
+        0.014,
+        0.02,
+        0.05,
+        0.1
+      ],
+      "header_22ne_matches_expected": true,
+      "row_count": 70,
+      "isotope_coordinate_count": 70,
+      "elements": [
+        "Al",
+        "Ar",
+        "Ca",
+        "Cl",
+        "Co",
+        "Cr",
+        "Cu",
+        "F",
+        "Fe",
+        "Ga",
+        "Ge",
+        "K",
+        "Mg",
+        "Mn",
+        "Na",
+        "Ne",
+        "Ni",
+        "O",
+        "P",
+        "S",
+        "Sc",
+        "Si",
+        "Ti",
+        "V",
+        "Zn"
+      ],
+      "z_by_element": {
+        "Al": 13,
+        "Ar": 18,
+        "Ca": 20,
+        "Cl": 17,
+        "Co": 27,
+        "Cr": 24,
+        "Cu": 29,
+        "F": 9,
+        "Fe": 26,
+        "Ga": 31,
+        "Ge": 32,
+        "K": 19,
+        "Mg": 12,
+        "Mn": 25,
+        "Na": 11,
+        "Ne": 10,
+        "Ni": 28,
+        "O": 8,
+        "P": 15,
+        "S": 16,
+        "Sc": 21,
+        "Si": 14,
+        "Ti": 22,
+        "V": 23,
+        "Zn": 30
+      },
+      "element_stats": {
+        "Al": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ar": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ca": {
+          "isotope_row_count": 6,
+          "yield_cell_count": 78,
+          "nonzero_yield_cell_count": 78,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Cl": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Co": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Cr": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Cu": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "F": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Fe": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ga": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ge": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "K": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Mg": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Mn": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Na": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ne": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ni": {
+          "isotope_row_count": 5,
+          "yield_cell_count": 65,
+          "nonzero_yield_cell_count": 65,
+          "all_yield_cells_explicit_zero": false
+        },
+        "O": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "P": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "S": {
+          "isotope_row_count": 4,
+          "yield_cell_count": 52,
+          "nonzero_yield_cell_count": 52,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Sc": {
+          "isotope_row_count": 1,
+          "yield_cell_count": 13,
+          "nonzero_yield_cell_count": 13,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Si": {
+          "isotope_row_count": 3,
+          "yield_cell_count": 39,
+          "nonzero_yield_cell_count": 39,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Ti": {
+          "isotope_row_count": 5,
+          "yield_cell_count": 65,
+          "nonzero_yield_cell_count": 65,
+          "all_yield_cells_explicit_zero": false
+        },
+        "V": {
+          "isotope_row_count": 2,
+          "yield_cell_count": 26,
+          "nonzero_yield_cell_count": 26,
+          "all_yield_cells_explicit_zero": false
+        },
+        "Zn": {
+          "isotope_row_count": 5,
+          "yield_cell_count": 65,
+          "nonzero_yield_cell_count": 65,
+          "all_yield_cells_explicit_zero": false
+        }
+      },
+      "format_failures": [],
+      "format_integrity_passed": true
+    }
+  ],
+  "file_count": 3,
+  "source_element_count": 25,
+  "source_elements": [
+    "Al",
+    "Ar",
+    "Ca",
+    "Cl",
+    "Co",
+    "Cr",
+    "Cu",
+    "F",
+    "Fe",
+    "Ga",
+    "Ge",
+    "K",
+    "Mg",
+    "Mn",
+    "Na",
+    "Ne",
+    "Ni",
+    "O",
+    "P",
+    "S",
+    "Sc",
+    "Si",
+    "Ti",
+    "V",
+    "Zn"
+  ],
+  "project_elements": [
+    "H",
+    "He",
+    "C",
+    "N",
+    "O",
+    "Ne",
+    "Mg",
+    "Si",
+    "S",
+    "Ca",
+    "Fe"
+  ],
+  "missing_project_elements": [
+    "H",
+    "He",
+    "C",
+    "N"
+  ],
+  "project_element_presence": {
+    "H": {
+      "status": "absent_from_source_isotope_rows",
+      "isotope_row_count": 0,
+      "yield_cell_count": 0,
+      "nonzero_yield_cell_count": 0
+    },
+    "He": {
+      "status": "absent_from_source_isotope_rows",
+      "isotope_row_count": 0,
+      "yield_cell_count": 0,
+      "nonzero_yield_cell_count": 0
+    },
+    "C": {
+      "status": "absent_from_source_isotope_rows",
+      "isotope_row_count": 0,
+      "yield_cell_count": 0,
+      "nonzero_yield_cell_count": 0
+    },
+    "N": {
+      "status": "absent_from_source_isotope_rows",
+      "isotope_row_count": 0,
+      "yield_cell_count": 0,
+      "nonzero_yield_cell_count": 0
+    },
+    "O": {
+      "status": "present_with_nonzero_or_mixed_data",
+      "isotope_row_count": 9,
+      "yield_cell_count": 117,
+      "nonzero_yield_cell_count": 117
+    },
+    "Ne": {
+      "status": "present_with_nonzero_or_mixed_data",
+      "isotope_row_count": 9,
+      "yield_cell_count": 117,
+      "nonzero_yield_cell_count": 117
+    },
+    "Mg": {
+      "status": "present_with_nonzero_or_mixed_data",
+      "isotope_row_count": 9,
+      "yield_cell_count": 117,
+      "nonzero_yield_cell_count": 117
+    },
+    "Si": {
+      "status": "present_with_nonzero_or_mixed_data",
+      "isotope_row_count": 9,
+      "yield_cell_count": 117,
+      "nonzero_yield_cell_count": 117
+    },
+    "S": {
+      "status": "present_with_nonzero_or_mixed_data",
+      "isotope_row_count": 12,
+      "yield_cell_count": 156,
+      "nonzero_yield_cell_count": 156
+    },
+    "Ca": {
+      "status": "present_with_nonzero_or_mixed_data",
+      "isotope_row_count": 18,
+      "yield_cell_count": 234,
+      "nonzero_yield_cell_count": 234
+    },
+    "Fe": {
+      "status": "present_with_nonzero_or_mixed_data",
+      "isotope_row_count": 12,
+      "yield_cell_count": 156,
+      "nonzero_yield_cell_count": 156
+    }
+  },
+  "missing_project_elements_are_absent_isotope_rows": true,
+  "explicit_zero_project_elements": [],
+  "inferred_zero_policy": "never infer absent project elements as zero during conversion",
+  "conversion_blockers": [
+    "source package is an isotope-valued table, not normalized per-event runtime rows",
+    "isotope-to-project-element aggregation and decay horizon are not approved",
+    "event energy and momentum are absent from the staged supplementary files",
+    "returned mass and normal-SNIa zero-remnant ownership are not closed by these files",
+    "project tracked elements absent from the staged package: H, He, C, N"
+  ],
+  "audit_failures": [],
+  "audit_code_sha256": "2fa3c6c529f1a2f3b08343ffe2883fb0adf6336ee31ece5e321c6e6a03df0c1f",
+  "interpretation": "The staged bytes and table grammar are intact, but this report explicitly does not authorize isotope conversion or SNIa runtime activation."
+}

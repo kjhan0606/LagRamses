@@ -1,0 +1,98 @@
+{
+  "schema": "snrt_furlanetto_stoever_2010_validation_v1",
+  "passed": true,
+  "table": {
+    "energy_count": 258,
+    "energy_minimum_ev": 10.0,
+    "energy_maximum_ev": 9937.21,
+    "ionized_fraction_grid": [
+      0.0001,
+      0.0002318,
+      0.0004677,
+      0.001,
+      0.002318,
+      0.004677,
+      0.01,
+      0.02318,
+      0.04677,
+      0.1,
+      0.5,
+      0.9,
+      0.99,
+      0.999
+    ],
+    "interpolation": "bilinear in electron energy and H II fraction",
+    "composition_assumption": "primordial H/He; x_HII=x_HeII; negligible HeIII"
+  },
+  "continuity": {
+    "energy_ev": [
+      99.9,
+      100.0,
+      100.1
+    ],
+    "maximum_absolute_channel_delta_99p9_to_100p1_ev": 0.0003354571456627431,
+    "acceptance_threshold": 0.005
+  },
+  "table_floor_continuity": {
+    "energy_ev": [
+      9.999,
+      10.0,
+      10.001
+    ],
+    "maximum_absolute_channel_delta_9p999_to_10p001_ev": 0.002272164886390593,
+    "acceptance_threshold": 0.005
+  },
+  "pinned_21cmfast_reference": {
+    "electron_energy_ev": 200.0,
+    "hydrogen_ionized_fraction": 0.1,
+    "interpolated_fion_fheat_fexc_nhi_nhei_nheii": [
+      0.09607314283559579,
+      0.8050120030165913,
+      0.09892426515837104,
+      1.2863868778280545,
+      0.06802767164404225,
+      0.0009278715384615386
+    ],
+    "production_maximum_absolute_error": 0.0
+  },
+  "independent_host_interpolation_maximum_absolute_error": 1.1102230246251565e-16,
+  "energy_closure_maximum_absolute_error": 2.220446049250313e-16,
+  "conservative_solver": {
+    "secondary_hydrogen_ionizations": 0.0036578054004828,
+    "secondary_helium_i_ionizations": 0.00017233073042958143,
+    "secondary_helium_ii_ionizations": 2.552543470186421e-07,
+    "photoelectron_energy_ledger_relative_error": 2.7755575615628914e-17
+  },
+  "multiphysics_solver": {
+    "secondary_hydrogen_ionizations": 0.0036578054004828007,
+    "secondary_helium_i_ionizations": 0.00017233073042958137,
+    "secondary_helium_ii_ionizations": 2.552543470186417e-07,
+    "photoelectron_energy_ledger_relative_error": 2.7755575615628914e-17,
+    "zero_helium_secondary_channels_are_zero": true
+  },
+  "provenance": {
+    "jax_version": "0.11.1",
+    "test_sha256": "dc4d9c77b5579ef0218f3fa6b63c8127fccac43f155acb4a82980b26a4dbc005",
+    "secondary_sha256": "d91fdd1547c0ffcf8bc5f4319361c22fc94387c2458e4a9ada51a700bd025f05",
+    "multiphysics_sha256": "711f8918b376b43a9ae758179c69684203fc0dd96ea956aad53fa400e402f7f0",
+    "conservative_primordial_sha256": "a60212e4e383134bdaa897a240a60abdcc84a6a8bcafb17042bcf3a8ea36a892",
+    "implicit_sha256": "45a90b34f799cbd9e8cad8e0b23953ec99a0f27fc1db7170799aaa341b8c290f",
+    "table_manifest_sha256": "c74610c82414504263868704d8d5e913d7a46815c9803e30053780cd8e61d2a3",
+    "table_sha256": {
+      "log_xi_-1.0.dat": "771458627c9f9a99773c3454d9ad370996e1b86030f71e82c011403a6572a974",
+      "log_xi_-1.3.dat": "06ce3e987c2004a4c7bfa20a1e5df9df56dc27161ad0931425e33637bd437053",
+      "log_xi_-1.6.dat": "5cc1d661d4eb9ada6a8650021923af6577a767fb0da65c441ea087cd7a9159db",
+      "log_xi_-2.0.dat": "33d74ea86afe901330bfa21883582ddbb7a8c362627318abeac5d678af4d1593",
+      "log_xi_-2.3.dat": "d4a4265aeefdaf1f42f13a58337ed43ae50729eede825278b8e7a03a557889e4",
+      "log_xi_-2.6.dat": "427cbbc4bc4dcc1f0222009b2224c177194f3bd0d57b3a24b38ef30b9f132fd5",
+      "log_xi_-3.0.dat": "b12d4674b38f1f49418d469e627473810a9e832b636c683693bdd02347b85591",
+      "log_xi_-3.3.dat": "4bc981ead5ffc308d9b16764529c093f6cf90f450b258e548012368541d6ad2a",
+      "log_xi_-3.6.dat": "56388fb1d427d72e5a4c0c43b3ca4c117915f9d1b493499145b865e9da71df4b",
+      "log_xi_-4.0.dat": "1f27ca3a704d467e2b6330001b4b01601accef54f44c1e939d101ace5156e5ad",
+      "xi_0.500.dat": "cc636504fc11fc36eee4613aaa7c6da4f29ff3243a5b85d1d4cd129d88482175",
+      "xi_0.900.dat": "0573894809fb51c4588980d7b0882bdefc6ee654026d62a022a9c94e1f96b543",
+      "xi_0.990.dat": "f4469f4441814efb1392874c7ace827102e8ba3fee5633fd2fcfc0add5d3bed4",
+      "xi_0.999.dat": "315a6bb16c7f579f3e5dd56dc5771813e484e8772cf2c4b5e782534e6fa897e5"
+    }
+  }
+}

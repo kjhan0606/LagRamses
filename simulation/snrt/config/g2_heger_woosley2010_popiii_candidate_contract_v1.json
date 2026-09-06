@@ -1,0 +1,112 @@
+{
+  "schema": "snrt-g2-heger-woosley2010-popiii-candidate-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source": {
+    "candidate_id": "heger_woosley2010_popiii",
+    "article_citation": "Heger & Woosley 2010, ApJ 724, 341--373",
+    "article_doi": "10.1088/0004-637X/724/1/341",
+    "arxiv_id": "0803.3161",
+    "vizier_catalog": "J/ApJ/724/341",
+    "release_root_relative_path": "heger_woosley2010_popiii",
+    "files": {
+      "ARXIV_API.xml": {
+        "bytes": 3414,
+        "sha256": "0ccf3bdf979cf1fb94decf37721a70f07a6ae42c131ef6ca0d56082933f05c31"
+      },
+      "ARXIV_SOURCE.tar.gz": {
+        "bytes": 1749802,
+        "sha256": "33fe08f7a58d47620f51371ebdaa74fbc60c55b0cb7c86c3bb5239dfe7f6e47a"
+      },
+      "VIZIER_README": {
+        "bytes": 4804,
+        "sha256": "3a9c54f1f335e79228dd872e6d785f0028e3dbd4b5358d3627c41ba3e8ef9f2f"
+      },
+      "VIZIER_USAGE_RULES.html": {
+        "bytes": 9428,
+        "sha256": "f6bab16f7060f41c98958f0044fa3a526eeeeacdd23cb2fa7a529016d2b29e9f"
+      },
+      "table8.dat.gz": {
+        "bytes": 5204646,
+        "sha256": "0fa810d85564623450774f6eda8f00bf9e7646b6ef8a6c94e693e7075cb478ee"
+      }
+    },
+    "urls": {
+      "arxiv_api": "https://export.arxiv.org/api/query?id_list=0803.3161",
+      "arxiv_source": "https://export.arxiv.org/e-print/0803.3161",
+      "vizier_readme": "https://cdsarc.cds.unistra.fr/ftp/J/ApJ/724/341/ReadMe",
+      "vizier_table8": "https://cdsarc.cds.unistra.fr/ftp/J/ApJ/724/341/table8.dat.gz",
+      "vizier_usage_rules": "https://cds.unistra.fr/vizier-org/licences_vizier.html"
+    }
+  },
+  "source_grid": {
+    "metallicity_mass_fraction": 0.0,
+    "zams_masses_msun": [
+      10.0, 10.2, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9,
+      11.0, 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.9,
+      12.0, 12.2, 12.4, 12.6, 12.8, 13.0, 13.2, 13.4, 13.6, 13.8,
+      14.0, 14.2, 14.4, 14.6, 14.8, 15.0, 15.2, 15.4, 15.6, 15.8,
+      16.0, 16.2, 16.4, 16.6, 16.8, 17.0, 17.1, 17.2, 17.3, 17.4,
+      17.5, 17.6, 17.7, 17.8, 17.9, 18.0, 18.1, 18.2, 18.3, 18.4,
+      18.5, 18.6, 18.7, 18.8, 18.9, 19.0, 19.2, 19.4, 19.6, 19.8,
+      20.0, 20.5, 21.0, 21.5, 22.0, 22.5, 23.0, 23.5, 24.0, 24.5,
+      25.0, 25.5, 26.0, 26.5, 27.0, 27.5, 28.0, 28.5, 29.0, 29.5,
+      30.0, 30.5, 31.0, 31.5, 32.0, 32.5, 33.0, 33.5, 34.0, 34.5,
+      35.0, 36.0, 37.0, 38.0, 39.0, 40.0, 41.0, 42.0, 43.0, 44.0,
+      45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0,
+      95.0, 100.0
+    ],
+    "s4_kinetic_energy_bethe": [0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.4, 3.0, 5.0, 10.0],
+    "ye_kinetic_energy_bethe": [1.2, 10.0],
+    "mixing_normalized_to_he_core": [0.0, 0.001, 0.00158, 0.00251],
+    "coordinate_count": 5760,
+    "record_count": 660546,
+    "isotope_union_count": 283
+  },
+  "source_semantics": {
+    "yield_quantity": "post-supernova ejecta including wind in Msun",
+    "energy_quantity": "kinetic energy at infinity in Bethe (1e51 erg)",
+    "piston_locations": {
+      "S4": "entropy per baryon S/NA/kB=4, normally the base of the oxygen shell",
+      "Ye": "edge of the iron core at the inward Ye drop"
+    },
+    "mixing_prescription": "artificial running-boxcar mixing applied before fallback",
+    "fallback_included": true,
+    "neutrino_wind_included": false,
+    "rotation_included": false,
+    "stellar_mass_loss_included": false,
+    "explicit_remnant_mass_column_available": false,
+    "separate_wind_and_terminal_yield_components_available": false,
+    "age_resolved_isotopic_release_available": false
+  },
+  "audit_policy": {
+    "canonical_rows_emitted": 0,
+    "mass_interpolation_allowed": false,
+    "metallicity_extrapolation_allowed": false,
+    "explosion_energy_distribution_selected": false,
+    "piston_distribution_selected": false,
+    "mixing_distribution_selected": false,
+    "listed_isotope_absence_may_be_interpreted_as_exact_zero": false,
+    "inferred_remnant_mass_may_be_promoted": false,
+    "wind_terminal_partition_may_be_inferred": false,
+    "canonical_event_momentum_may_be_derived": false,
+    "project_approval_required": true
+  },
+  "use_terms": {
+    "scientific_use_verified": true,
+    "original_authors_publication_and_publisher_citation_required": true,
+    "vizier_acknowledgment_requested": true,
+    "public_redistribution_license_verified": false,
+    "commercial_use_verified": false
+  },
+  "approval": {
+    "research_access_verified": true,
+    "license_verified_for_internal_scientific_use": true,
+    "license_verified_for_public_redistribution": false,
+    "physics_source_selected": false,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "approval_id": null
+  }
+}

@@ -113,7 +113,23 @@ ifeq ($(SNRT),1)
     $(error SNRT=1 requires USE_CUDA=1)
   endif
   FFLAGS += -DSNRT
-  SNRT_MODOBJ = snrt_ramses_driver.o
+  # The driver is not self-contained: keep the complete Fortran module graph
+  # in the production link. CUDA entry points are supplied by
+  # snrt_cuda_kernels.o; these interface modules only publish the C ABI.
+  SNRT_MODOBJ = mpi_mod.o snrt_spectral_contract.o snrt_agn_source.o \
+                snrt_thermochemistry.o snrt_state.o snrt_agn_locator.o \
+                snrt_nlte_coupling.o snrt_angular_quadrature.o \
+                snrt_amr_topology.o snrt_transport_step.o \
+                snrt_rt_transaction.o snrt_dust_ir.o snrt_dust_coupling.o \
+                snrt_dust_transaction.o \
+                snrt_cuda_ledger_interface.o \
+                snrt_cuda_sparse_transport_interface.o \
+                snrt_cuda_limited_rt_step_interface.o \
+                snrt_cuda_multigroup_interface.o snrt_ramses_driver.o
+  ifeq ($(SNRT_LEDGER_DIAGNOSTIC),1)
+    FFLAGS += -DSNRT_LEDGER_DIAGNOSTIC
+    SNRT_MODOBJ += snrt_agn_ledger.o
+  endif
 else
   SNRT_MODOBJ =
 endif
@@ -151,7 +167,7 @@ MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
-	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) dark_cooling_mod.o fdm_commons.o pbh_commons.o \
+	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o agn_feedback_deposition.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
 	 $(STELLAR_ENRICHMENT_MODOBJ)
 
 # SIDM object (depends on amr_commons, pm_commons, random)
@@ -201,26 +217,33 @@ ifdef STELLAR_EMBEDDED_YIELDS
 else
   STELLAR_EMBEDDED_MODOBJ =
 endif
-STELLAR_ENRICHMENT_MODOBJ = stellar_enrichment_config.o stellar_enrichment_contract.o \
-        stellar_yield_tables.o stellar_yield_interpolation.o stellar_yield_provider.o \
-        stellar_yield_backend.o $(STELLAR_EMBEDDED_MODOBJ) stellar_ssp_sources.o stellar_source_increment.o stellar_enrichment_driver.o \
-              stellar_cell_deposition.o stellar_ramses_field_map.o stellar_ramses_bridge.o stellar_ramses_mapped_bridge.o stellar_yield_audit.o
+# The production source-order sidecar is load-bearing.  The RAMSES runtime
+# module is listed last in the sidecar but remains in PMOBJ below so the
+# integration call site and its module dependencies stay in the production
+# link order.
+include $(PATCH)/stellar_enrichment_sources.mk
+PHASE0_STELLAR_ENRICHMENT_OBJECTS := $(notdir $(PHASE0_STELLAR_ENRICHMENT_SOURCES:.f90=.o))
+STELLAR_ENRICHMENT_MODOBJ = $(filter-out stellar_ramses_runtime.o,$(PHASE0_STELLAR_ENRICHMENT_OBJECTS))
+ifdef STELLAR_EMBEDDED_YIELDS
+  STELLAR_ENRICHMENT_MODOBJ += $(STELLAR_EMBEDDED_MODOBJ)
+endif
 #############################################################################
 ramses:	$(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o
 	$(F90) $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o -o $(EXEC)$(NDIM)d $(LIBS)
-	rm -f write_makefile.f90
+	rm -f $(WRITE_MAKEFILE_SOURCE)
 #	rm write_patch.f90
 ramses_aton: $(MODOBJ) $(ATON_MODOBJ) $(AMRLIB) $(ATON_OBJ) ramses.o
 	$(F90) $(MODOBJ) $(ATON_MODOBJ) $(AMRLIB) $(ATON_OBJ) ramses.o -o $(EXEC)$(NDIM)d $(LIBS) $(LIBCUDA)
-	rm -f write_makefile.f90
+	rm -f $(WRITE_MAKEFILE_SOURCE)
 #	rm write_patch.f90
 #############################################################################
 write_gitinfo.o: FORCE
 	$(F90) $(FFLAGS) -DPATCH=\'$(PATCH)\' -DGITBRANCH=\'$(GITBRANCH)\' -DGITHASH=\'"$(GITHASH)"\' \
  -DGITREPO=\'$(GITREPO)\' -DBUILDDATE=\'"$(BUILDDATE)"\' -c ../amr/write_gitinfo.f90 -o $@
+WRITE_MAKEFILE_SOURCE = write_makefile.generated.f90
 write_makefile.o: FORCE
-	../utils/scripts/cr_write_makefile.sh $(MAKEFILE_LIST)
-	$(F90) $(FFLAGS) -c write_makefile.f90 -o $@
+	../utils/scripts/cr_write_makefile.sh $(firstword $(MAKEFILE_LIST)) $(WRITE_MAKEFILE_SOURCE)
+	$(F90) $(FFLAGS) -c $(WRITE_MAKEFILE_SOURCE) -o $@
 write_patch.o: FORCE
 	../utils/scripts/cr_write_patch.sh $(PATCH)
 	$(F90) $(FFLAGS) -c write_patch.f90 -o $@
@@ -248,6 +271,48 @@ force_fine.kjhan.o: scalar_cuda_interface.o
 multigrid_fine_commons.o: poisson_cuda_interface.o
 endif
 amr_index.o: amr_commons.kjhan.o
+# SNRT module graph.  Explicit prerequisites are required because the
+# implicit %.o rule otherwise tries to compile a module before its .mod file
+# exists when a clean production build is requested.
+snrt_spectral_contract.o: amr_parameters.jaehyun.o
+snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o
+snrt_agn_locator.o: amr_commons.kjhan.o
+snrt_agn_source.o: amr_parameters.jaehyun.o
+snrt_nlte_coupling.o: snrt_agn_source.o
+snrt_thermochemistry.o: amr_parameters.jaehyun.o snrt_agn_source.o
+snrt_angular_quadrature.o: snrt_state.o
+snrt_amr_topology.o: amr_commons.kjhan.o mpi_mod.o snrt_state.o
+snrt_transport_step.o: snrt_state.o snrt_angular_quadrature.o \
+                        snrt_amr_topology.o \
+                        mpi_mod.o \
+                        snrt_cuda_sparse_transport_interface.o \
+                        snrt_cuda_limited_rt_step_interface.o \
+                        snrt_cuda_multigroup_interface.o
+snrt_rt_transaction.o: amr_parameters.jaehyun.o mpi_mod.o
+snrt_dust_ir.o: ../patch/lagRamses/snrt_dust_ir.f90
+snrt_dust_coupling.o: snrt_thermochemistry.o ../patch/lagRamses/snrt_dust_coupling.f90
+snrt_dust_transaction.o: amr_parameters.jaehyun.o
+snrt_agn_efficiency.o: amr_parameters.jaehyun.o
+agn_feedback_deposition.o: amr_parameters.jaehyun.o
+init_sink.o: pm_commons.o
+sink_particle.kjhan.o: snrt_agn_efficiency.o agn_feedback_deposition.o amr_parameters.jaehyun.o pm_commons.o
+ifeq ($(PHASE0_STELLAR_ENRICHMENT),1)
+sink_particle.kjhan.o: stellar_enrichment_config.o
+endif
+read_params.jaehyun.o: snrt_agn_efficiency.o
+snrt_ramses_driver.o: amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
+                       pm_commons.o snrt_agn_efficiency.o \
+                       snrt_state.o snrt_amr_topology.o snrt_transport_step.o \
+                       snrt_rt_transaction.o \
+                       snrt_dust_transaction.o \
+                       snrt_angular_quadrature.o snrt_agn_locator.o \
+                       snrt_agn_source.o snrt_nlte_coupling.o snrt_thermochemistry.o \
+                       snrt_spectral_contract.o \
+                       snrt_cuda_interface.o snrt_cuda_ledger_interface.o \
+                       snrt_cuda_sparse_transport_interface.o \
+                       snrt_cuda_limited_rt_step_interface.o \
+                       snrt_cuda_multigroup_interface.o
+snrt_agn_ledger.o: amr_commons.kjhan.o pm_commons.o
 # [RESIZABLE] grow_grid_capacity preserves every capacity bundle, including
 # the optional radiation fields; build those modules before pm_commons.mod.
 pm_commons.o: amr_commons.kjhan.o pm_parameters.o hydro_commons.o poisson_commons.o morton_hash.o radiation_commons.o
@@ -256,6 +321,14 @@ morton_hash.o: morton_keys.o amr_index.o
 hydro_commons.o: hydro_parameters.o
 poisson_commons.o: poisson_parameters.o
 stellar_enrichment_contract.o: stellar_enrichment_config.o
+stellar_snia_dtd.o: stellar_enrichment_config.o
+stellar_snia_population_contract.o: stellar_enrichment_config.o stellar_snia_dtd.o
+stellar_snia_physical_contract.o: stellar_enrichment_config.o
+stellar_snia_event_ledger.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_snia_physical_contract.o
+stellar_native_units.o: stellar_enrichment_config.o
+stellar_snia_cell_deposition.o: stellar_enrichment_config.o stellar_snia_physical_contract.o stellar_native_units.o
+stellar_progress_contract.o: stellar_enrichment_config.o
+stellar_snia_runtime_accounting.o: stellar_enrichment_config.o
 stellar_yield_tables.o: stellar_enrichment_config.o
 stellar_yield_backend.o: stellar_yield_tables.o $(STELLAR_EMBEDDED_MODOBJ)
 stellar_yield_embedded_data.o: $(STELLAR_EMBEDDED_SOURCE) stellar_yield_tables.o stellar_enrichment_config.o
@@ -263,15 +336,17 @@ stellar_yield_interpolation.o: stellar_enrichment_config.o stellar_yield_tables.
 stellar_yield_provider.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_interpolation.o
 stellar_ssp_sources.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_provider.o
 stellar_source_increment.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_ssp_sources.o
-stellar_enrichment_driver.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_source_increment.o
+stellar_population_ledger.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_ssp_sources.o stellar_snia_physical_contract.o
+stellar_enrichment_driver.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_ssp_sources.o stellar_source_increment.o stellar_population_ledger.o
 stellar_cell_deposition.o: stellar_enrichment_config.o stellar_enrichment_contract.o
 stellar_ramses_field_map.o: stellar_enrichment_config.o
-stellar_ramses_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o
+stellar_ramses_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_snia_physical_contract.o stellar_snia_cell_deposition.o stellar_ramses_field_map.o
 stellar_ramses_mapped_bridge.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_ramses_field_map.o
-stellar_ramses_runtime.o: amr_commons.kjhan.o pm_commons.o hydro_commons.o stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_backend.o stellar_yield_audit.o stellar_enrichment_driver.o
+stellar_ramses_runtime.o: amr_commons.kjhan.o pm_commons.o hydro_commons.o stellar_enrichment_config.o stellar_enrichment_contract.o stellar_native_units.o stellar_progress_contract.o stellar_snia_runtime_accounting.o stellar_yield_tables.o stellar_yield_backend.o stellar_yield_audit.o stellar_enrichment_driver.o stellar_population_ledger.o stellar_snia_population_contract.o stellar_snia_physical_contract.o stellar_snia_cell_deposition.o stellar_ramses_field_map.o stellar_ramses_bridge.o
 feedback.kjhan3.o: stellar_ramses_runtime.o
 read_hydro_params.o: stellar_enrichment_config.o
-output_amr.kjhan.o: stellar_enrichment_config.o
+output_amr.kjhan.o: stellar_enrichment_config.o stellar_ramses_runtime.o
+ramses.o: stellar_enrichment_config.o stellar_ramses_runtime.o
 amr_step.jaehyun.o: stellar_enrichment_config.o
 stellar_yield_audit.o: stellar_enrichment_config.o stellar_yield_tables.o
 

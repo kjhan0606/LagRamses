@@ -1,0 +1,345 @@
+{
+  "algorithm": {
+    "dust_attenuation": "not applied; this is an intrinsic/source-side ledger",
+    "gas_transport": "delegated to RT solver",
+    "group_integration": "trapezoid on the BPASS energy grid plus P0 group boundaries",
+    "node_storage": "photon, energy, absorber, and excess-energy moments; no spectral extrapolation"
+  },
+  "bpass_hdf5_contract": {
+    "age_grid_myr": [
+      1.0,
+      1.2589254117941675,
+      1.584893192461114,
+      1.9952623149688788,
+      2.5118864315095792,
+      3.1622776601683795,
+      3.9810717055349736,
+      5.011872336272725,
+      6.309573444801931,
+      7.943282347242814,
+      10.0,
+      12.589254117941675,
+      15.848931924611142,
+      19.952623149688797,
+      25.11886431509581,
+      31.622776601683793,
+      39.810717055349734,
+      50.118723362727245,
+      63.09573444801933,
+      79.43282347242818,
+      100.0,
+      125.89254117941675,
+      158.48931924611142,
+      199.52623149688807,
+      251.18864315095823,
+      316.22776601683796,
+      398.1071705534973,
+      501.18723362727246,
+      630.9573444801936,
+      794.3282347242822,
+      1000.0,
+      1258.9254117941675,
+      1584.893192461114,
+      1995.262314968881,
+      2511.8864315095825,
+      3162.2776601683795,
+      3981.0717055349733,
+      5011.872336272725,
+      6309.573444801936,
+      7943.282347242821,
+      10000.0,
+      12589.254117941688,
+      15848.93192461114,
+      19952.623149688785,
+      25118.86431509582,
+      31622.776601683792,
+      39810.71705534978,
+      50118.72336272725,
+      63095.73444801943,
+      79432.82347242821,
+      100000.0
+    ],
+    "ages_units": "Gigayears (converted to Myr)",
+    "datasets": [
+      "ages",
+      "metallicities",
+      "spectra",
+      "wavelengths"
+    ],
+    "energy_range_ev": [
+      0.12398419843320026,
+      12398.419843320025
+    ],
+    "metallicities_units": "log10 relative to Solar (dex)",
+    "metallicity_log10_solar_grid": [
+      -3.3010299956639813,
+      -2.3010299956639813,
+      -1.3010299956639813,
+      -1.0,
+      -0.8239087409443188,
+      -0.6989700043360187,
+      -0.5228787452803376,
+      -0.3979400086720376,
+      -0.3010299956639812,
+      -0.1549019599857432,
+      0.0,
+      0.17609125905568124,
+      0.3010299956639812
+    ],
+    "root_attributes": {
+      "createdBy": "Andrew Benson <abenson@obs.carnegiescience.edu>",
+      "description": "Simple stellar population spectra from the BPASS v2.2.1 libraryincluding binary stars for a broken power law IMF with slope -1.30 from 0.1M\u2609 to 0.5M\u2609 and a slope of -2.35 from 0.5M\u2609 to 300M\u2609.",
+      "fileFormat": 1,
+      "initialMassFunction": "Broken power law IMF with slope -1.30 from 0.1M\u2609 to 0.5M\u2609 and a slope of -2.35 from 0.5M\u2609 to 300M\u2609.",
+      "referenceURLs": "https://ui.adsabs.harvard.edu/abs/2017PASA...34...58E; https://ui.adsabs.harvard.edu/abs/2018MNRAS.479...75S",
+      "references": "Eldridge, Stanway et al. (2017; PASA, 34, 58); Stanway & Eldridge et al. (2018; MNRAS, 479, 75)",
+      "timeStamp": "2022-02-17T00:11:08.000-08:00",
+      "url": "http://bpass.auckland.ac.nz"
+    },
+    "spectra_mass_normalization": "assumed per initial stellar Msun by explicit CLI acknowledgement",
+    "spectra_units": "L_sun/Hz as declared by HDF5",
+    "wavelength_units": "Angstroms (converted to eV)"
+  },
+  "closure_complete": true,
+  "group_edges_ev": [
+    0.01,
+    1.0,
+    5.6,
+    11.2,
+    13.6,
+    24.59,
+    54.42,
+    500.0,
+    2000.0,
+    10000.0
+  ],
+  "group_edges_file": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/p0_photon_group_edges_ev.txt",
+  "group_edges_sha256": "d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1",
+  "group_photon_rate_total_s": [
+    3.7437672628105807e+56,
+    8.5952673512877e+56,
+    5.532510138046226e+56,
+    1.6472005880902422e+56,
+    1.101512960588975e+56,
+    6.722233370291561e+55,
+    4.429169616769815e+53,
+    2.7131045773468336e+47,
+    5.069648828299322e+20
+  ],
+  "group_spectral_closure": {
+    "cross_sections_cm2": {
+      "helium_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        7.518837074784501e-21,
+        4.629471087011066e-18,
+        1.145487568513068e-18,
+        2.8701259270135332e-21,
+        3.334861179537704e-23
+      ],
+      "helium_ii": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.1713700983540442e-22,
+        1.0107552597894084e-18,
+        2.192620626356474e-21,
+        2.8313678742646947e-23
+      ],
+      "hydrogen_i": [
+        0.0,
+        0.0,
+        0.0,
+        3.980363932507802e-21,
+        3.3408387343578943e-18,
+        5.979014734583819e-19,
+        7.554030787969611e-20,
+        1.019477970320744e-22,
+        1.1033553378747022e-24
+      ]
+    },
+    "empty_group_policy": "geometric-mean representative energy and zero closure for groups without BPASS photons",
+    "group_status": [
+      "bpass_node_moment_interpolation",
+      "bpass_node_moment_interpolation",
+      "bpass_node_moment_interpolation",
+      "bpass_node_moment_interpolation",
+      "bpass_node_moment_interpolation",
+      "bpass_node_moment_interpolation",
+      "bpass_node_moment_interpolation",
+      "bpass_node_moment_interpolation",
+      "bpass_node_moment_interpolation"
+    ],
+    "method": "BPASS L_nu-to-photon conversion, node group moments, and log-age/log-metallicity bilinear interpolation",
+    "photoelectron_excess_energy_ev": {
+      "helium_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        7.213452953305669,
+        38.70620148809009,
+        490.4699984109708,
+        1977.747780583553
+      ],
+      "helium_ii": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        8.285100822989195,
+        460.7497954287114,
+        1947.9225869581883
+      ],
+      "hydrogen_i": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        3.209083819009283,
+        17.025217791619518,
+        48.71554359132516,
+        501.36140958850166,
+        1988.735287787616
+      ]
+    },
+    "photon_conversion": "q_E = L_nu * L_sun / (h * E_eV)",
+    "species_order": [
+      "hydrogen_i",
+      "helium_i",
+      "helium_ii"
+    ]
+  },
+  "groups": [
+    {
+      "closure_status": "bpass_node_moment_interpolation",
+      "energy_interval_ev": [
+        0.01,
+        1.0
+      ],
+      "index": 0,
+      "photon_weighted_mean_energy_ev": 0.5955541573144439,
+      "total_photon_rate_s": 3.7437672628105807e+56
+    },
+    {
+      "closure_status": "bpass_node_moment_interpolation",
+      "energy_interval_ev": [
+        1.0,
+        5.6
+      ],
+      "index": 1,
+      "photon_weighted_mean_energy_ev": 2.777692844882773,
+      "total_photon_rate_s": 8.5952673512877e+56
+    },
+    {
+      "closure_status": "bpass_node_moment_interpolation",
+      "energy_interval_ev": [
+        5.6,
+        11.2
+      ],
+      "index": 2,
+      "photon_weighted_mean_energy_ev": 8.249504675972696,
+      "total_photon_rate_s": 5.532510138046226e+56
+    },
+    {
+      "closure_status": "bpass_node_moment_interpolation",
+      "energy_interval_ev": [
+        11.2,
+        13.6
+      ],
+      "index": 3,
+      "photon_weighted_mean_energy_ev": 12.277003514382699,
+      "total_photon_rate_s": 1.6472005880902422e+56
+    },
+    {
+      "closure_status": "bpass_node_moment_interpolation",
+      "energy_interval_ev": [
+        13.6,
+        24.59
+      ],
+      "index": 4,
+      "photon_weighted_mean_energy_ev": 18.13053156226397,
+      "total_photon_rate_s": 1.101512960588975e+56
+    },
+    {
+      "closure_status": "bpass_node_moment_interpolation",
+      "energy_interval_ev": [
+        24.59,
+        54.42
+      ],
+      "index": 5,
+      "photon_weighted_mean_energy_ev": 34.35691158634324,
+      "total_photon_rate_s": 6.722233370291561e+55
+    },
+    {
+      "closure_status": "bpass_node_moment_interpolation",
+      "energy_interval_ev": [
+        54.42,
+        500.0
+      ],
+      "index": 6,
+      "photon_weighted_mean_energy_ev": 68.3084949391657,
+      "total_photon_rate_s": 4.429169616769815e+53
+    },
+    {
+      "closure_status": "bpass_node_moment_interpolation",
+      "energy_interval_ev": [
+        500.0,
+        2000.0
+      ],
+      "index": 7,
+      "photon_weighted_mean_energy_ev": 520.0737365863938,
+      "total_photon_rate_s": 2.7131045773468336e+47
+    },
+    {
+      "closure_status": "bpass_node_moment_interpolation",
+      "energy_interval_ev": [
+        2000.0,
+        10000.0
+      ],
+      "index": 8,
+      "photon_weighted_mean_energy_ev": 2002.5976624488148,
+      "total_photon_rate_s": 5.069648828299322e+20
+    }
+  ],
+  "input_bpass_hdf5": "/gpfs/kjhan/LRD_JWST/external/bpass_v2.2.1/SSP_Spectra_BPASSv2.2.1_bin-imf135_300.hdf5",
+  "input_bpass_hdf5_sha256": "b53d7bf4e8c50ae0a02458eae9d5b6dff5d5782f9f2b23dd40514ad85716c9b3",
+  "input_catalogue": "/gpfs/kjhan/LRD_JWST/simulation/snrt/data/feedback_transition_phase0_output_00011_stellar_catalogue.csv",
+  "input_catalogue_sha256": "205336d5d2d8a6db66213cdb517a4994a0ccf8ee35627e793a78cbdf30b709a5",
+  "interpolation_clamped_sources": {
+    "age": 178,
+    "metallicity": 42004
+  },
+  "limits": [
+    "The BPASS HDF5 spectra mass normalization is an explicit assumption because its units attribute is L_sun/Hz.",
+    "The missing spectrum below the table minimum is zero-padded only under the explicit candidate policy.",
+    "Nebular emission, source-specific stellar escape, and live stellar evolution are not included."
+  ],
+  "low_energy_coverage": {
+    "policy": "zero_below_table_support",
+    "requested_minimum_energy_ev": 0.01,
+    "table_minimum_energy_ev": 0.12398419843320026
+  },
+  "normalization": {
+    "escape_fraction": 1.0,
+    "escape_fraction_interpretation": "source-side multiplicative factor",
+    "mass_field_used": "initial_mass_msun",
+    "mass_normalization_acknowledged": true,
+    "metallicity_floor_count": 338,
+    "metallicity_floor_solar": 0.0005,
+    "solar_mass_fraction": 0.02
+  },
+  "output_csv_sha256": "aeb9b72fbc0716ec25836f431bf9a897bd52011c8fe5553ad185c293dc97e1c4",
+  "schema": "stellar_photon_source_ledger_v1",
+  "source_count": 42342,
+  "source_kind": "star",
+  "source_scale_factor": 0.148540709098256,
+  "status": "candidate_bpass_stellar_photon_ledger"
+}

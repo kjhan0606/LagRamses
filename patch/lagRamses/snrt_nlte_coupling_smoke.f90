@@ -16,6 +16,14 @@ program snrt_nlte_coupling_smoke
   if (abs(ionization_increment-0.25d0) > 1.0d-13) error stop 2
   if (abs(heating_rate-expected_heat) / expected_heat > 1.0d-13) error stop 3
 
+  ! A source ledger may provide absorber-weighted excess energy instead of
+  ! reconstructing it from the group mean.  The native boundary must honor
+  ! that closure when it is present.
+  call snrt_nlte_photo_source(0.25d0, 1.0d0, 0.5d0, 1.0d-3, 1.0d12, 20.0d0, &
+       ionization_increment, heating_rate, 3.5d0)
+  expected_heat = 0.25d0 * 1.0d-3 * 3.5d0 * 1.602176634d-12 / 1.0d12
+  if (abs(heating_rate-expected_heat) / expected_heat > 1.0d-13) error stop 4
+
   write(*,'(a,es14.6,a,es14.6)') 'SNRT_NLTE_COUPLING_OK tau=', tau, &
        ' heating_rate=', heating_rate
 end program snrt_nlte_coupling_smoke

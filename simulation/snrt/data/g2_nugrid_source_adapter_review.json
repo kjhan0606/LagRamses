@@ -1,0 +1,623 @@
+{
+  "adapter_code_sha256": "2c5c5ff366fea6487fd9ee616a8099a27b133c51be9872b0df65765ebaa23531",
+  "adapter_contract_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_adapter_contract_v1.json",
+  "adapter_contract_sha256": "146edbbaf21b9ee414e5268b547ef26d61850887b0ec3513ecfbd9ff69c33b0e",
+  "blockers": [
+    "candidate_source_not_approved",
+    "no_age_resolved_cumulative_release_history",
+    "duplicate_mass_metallicity_coordinate",
+    "source_component_semantics_resolved_but_runtime_channel_assignment_not_approved",
+    "runtime_channel_partition_not_approved",
+    "canonical_returned_and_remnant_mass_definitions_not_resolved",
+    "canonical_injected_energy_absent",
+    "canonical_injected_momentum_absent",
+    "runtime_mass_ranges_have_gaps_and_are_not_covered",
+    "license_and_provenance_approval_missing"
+  ],
+  "candidate_id": "nugrid_set1ext_mesaonly_fryer12_delay",
+  "canonical_conversion_allowed": false,
+  "canonical_rows_emitted": 0,
+  "component_coordinate_sequences_identical": true,
+  "contract_profile": {
+    "expected_blocks_per_component": 61,
+    "expected_elements_per_block": 80,
+    "expected_unique_mass_metallicity_coordinates": 60,
+    "metallicity_axis": "birth metallicity mass fraction Z",
+    "reported_yield_unit": "Msun",
+    "source_snapshot_semantics": [
+      "integrated wind plus delayed-explosion SN element ejecta",
+      "integrated wind-only element ejecta",
+      "integrated wind plus pre-SN element ejecta above the remnant mass cut"
+    ]
+  },
+  "gate": "G2",
+  "interpretation": "Source numbers were parsed for review only. Missing canonical quantities are represented by availability flags, not physical zeroes; no canonical row or approval artifact was emitted.",
+  "records_included": false,
+  "schema": "snrt-g2-source-review-adapter",
+  "schema_version": 1,
+  "source_availability": {
+    "age_resolved_cumulative_release_history": false,
+    "canonical_energy_erg_per_star": false,
+    "canonical_momentum_g_cm_s_per_star": false,
+    "canonical_remnant_mass": false,
+    "canonical_returned_mass": false,
+    "runtime_feedback_channel_assignment": false
+  },
+  "source_axes": {
+    "mass_msun": [
+      1.0,
+      1.65,
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      6.0,
+      7.0,
+      12.0,
+      15.0,
+      20.0,
+      25.0
+    ],
+    "metallicity_mass_fraction": [
+      0.0001,
+      0.001,
+      0.006,
+      0.01,
+      0.02
+    ]
+  },
+  "source_components": {
+    "pre_explosion": {
+      "block_count": 61,
+      "component": "pre_explosion",
+      "duplicate_coordinates": [
+        {
+          "initial_mass_msun": 5.0,
+          "metallicity_mass_fraction": 0.01,
+          "multiplicity": 2
+        }
+      ],
+      "elements_per_block": [
+        80
+      ],
+      "header_elements": [
+        "H",
+        "He",
+        "Li",
+        "B",
+        "C",
+        "N",
+        "O",
+        "F",
+        "Ne",
+        "Na",
+        "Mg",
+        "Al",
+        "Si",
+        "P",
+        "Pb",
+        "S",
+        "Cl",
+        "Ar",
+        "K",
+        "Ca",
+        "Sc",
+        "Ti",
+        "V",
+        "Cr",
+        "Mn",
+        "Fe",
+        "Co",
+        "Ni",
+        "Cu",
+        "Zn",
+        "Ga",
+        "Ge",
+        "As",
+        "Se",
+        "Br",
+        "Kr",
+        "Rb",
+        "Sr",
+        "Y",
+        "Zr",
+        "Nb",
+        "Mo",
+        "Ru",
+        "Rh",
+        "Pd",
+        "Ag",
+        "Cd",
+        "In",
+        "Sn",
+        "Sb",
+        "Te",
+        "I",
+        "Xe",
+        "Cs",
+        "Ba",
+        "La",
+        "Ce",
+        "Pr",
+        "Nd",
+        "Sm",
+        "Eu",
+        "Gd",
+        "Tb",
+        "Dy",
+        "Ho",
+        "Er",
+        "Tm",
+        "Yb",
+        "Lu",
+        "Hf",
+        "Ta",
+        "W",
+        "Re",
+        "Os",
+        "Ir",
+        "Pt",
+        "Au",
+        "Hg",
+        "Tl",
+        "Bi"
+      ],
+      "mass_closure_diagnostic": {
+        "definition": "initial_mass - final_mass - sum(source-reported element yields); diagnostic only",
+        "maximum_absolute_residual_msun": 0.0008345166235104173,
+        "maximum_residual_msun": 0.0007786363851209899,
+        "minimum_residual_msun": -0.0008345166235104173
+      },
+      "mass_msun": [
+        1.0,
+        1.65,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+        6.0,
+        7.0,
+        12.0,
+        15.0,
+        20.0,
+        25.0
+      ],
+      "metallicity_mass_fraction": [
+        0.0001,
+        0.001,
+        0.006,
+        0.01,
+        0.02
+      ],
+      "records_included": false,
+      "snapshot_semantics": "integrated stellar winds plus pre-SN ejecta above the remnant mass cut; not age resolved",
+      "source_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/nugrid_set1ext/element_yield_table_MESAonly_fryer12_delay_pre_exp.txt",
+      "source_reported_units": {
+        "final_mass": "Msun",
+        "lifetime": "yr",
+        "yield": "Msun"
+      },
+      "unique_coordinate_count": 60
+    },
+    "total": {
+      "block_count": 61,
+      "component": "total",
+      "duplicate_coordinates": [
+        {
+          "initial_mass_msun": 5.0,
+          "metallicity_mass_fraction": 0.01,
+          "multiplicity": 2
+        }
+      ],
+      "elements_per_block": [
+        80
+      ],
+      "header_elements": [
+        "H",
+        "He",
+        "Li",
+        "B",
+        "C",
+        "N",
+        "O",
+        "F",
+        "Ne",
+        "Na",
+        "Mg",
+        "Al",
+        "Si",
+        "P",
+        "Pb",
+        "S",
+        "Cl",
+        "Ar",
+        "K",
+        "Ca",
+        "Sc",
+        "Ti",
+        "V",
+        "Cr",
+        "Mn",
+        "Fe",
+        "Co",
+        "Ni",
+        "Cu",
+        "Zn",
+        "Ga",
+        "Ge",
+        "As",
+        "Se",
+        "Br",
+        "Kr",
+        "Rb",
+        "Sr",
+        "Y",
+        "Zr",
+        "Nb",
+        "Mo",
+        "Ru",
+        "Rh",
+        "Pd",
+        "Ag",
+        "Cd",
+        "In",
+        "Sn",
+        "Sb",
+        "Te",
+        "I",
+        "Xe",
+        "Cs",
+        "Ba",
+        "La",
+        "Ce",
+        "Pr",
+        "Nd",
+        "Sm",
+        "Eu",
+        "Gd",
+        "Tb",
+        "Dy",
+        "Ho",
+        "Er",
+        "Tm",
+        "Yb",
+        "Lu",
+        "Hf",
+        "Ta",
+        "W",
+        "Re",
+        "Os",
+        "Ir",
+        "Pt",
+        "Au",
+        "Hg",
+        "Tl",
+        "Bi"
+      ],
+      "mass_closure_diagnostic": {
+        "definition": "initial_mass - final_mass - sum(source-reported element yields); diagnostic only",
+        "maximum_absolute_residual_msun": 0.0008345166235104173,
+        "maximum_residual_msun": 0.0007357879861000782,
+        "minimum_residual_msun": -0.0008345166235104173
+      },
+      "mass_msun": [
+        1.0,
+        1.65,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+        6.0,
+        7.0,
+        12.0,
+        15.0,
+        20.0,
+        25.0
+      ],
+      "metallicity_mass_fraction": [
+        0.0001,
+        0.001,
+        0.006,
+        0.01,
+        0.02
+      ],
+      "records_included": false,
+      "snapshot_semantics": "integrated stellar winds plus delayed-explosion SN ejecta; not age resolved",
+      "source_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/nugrid_set1ext/element_yield_table_MESAonly_fryer12_delay_total.txt",
+      "source_reported_units": {
+        "final_mass": "Msun",
+        "lifetime": "yr",
+        "yield": "Msun"
+      },
+      "unique_coordinate_count": 60
+    },
+    "winds": {
+      "block_count": 61,
+      "component": "winds",
+      "duplicate_coordinates": [
+        {
+          "initial_mass_msun": 5.0,
+          "metallicity_mass_fraction": 0.01,
+          "multiplicity": 2
+        }
+      ],
+      "elements_per_block": [
+        80
+      ],
+      "header_elements": [
+        "H",
+        "He",
+        "Li",
+        "B",
+        "C",
+        "N",
+        "O",
+        "F",
+        "Ne",
+        "Na",
+        "Mg",
+        "Al",
+        "Si",
+        "P",
+        "Pb",
+        "S",
+        "Cl",
+        "Ar",
+        "K",
+        "Ca",
+        "Sc",
+        "Ti",
+        "V",
+        "Cr",
+        "Mn",
+        "Fe",
+        "Co",
+        "Ni",
+        "Cu",
+        "Zn",
+        "Ga",
+        "Ge",
+        "As",
+        "Se",
+        "Br",
+        "Kr",
+        "Rb",
+        "Sr",
+        "Y",
+        "Zr",
+        "Nb",
+        "Mo",
+        "Ru",
+        "Rh",
+        "Pd",
+        "Ag",
+        "Cd",
+        "In",
+        "Sn",
+        "Sb",
+        "Te",
+        "I",
+        "Xe",
+        "Cs",
+        "Ba",
+        "La",
+        "Ce",
+        "Pr",
+        "Nd",
+        "Sm",
+        "Eu",
+        "Gd",
+        "Tb",
+        "Dy",
+        "Ho",
+        "Er",
+        "Tm",
+        "Yb",
+        "Lu",
+        "Hf",
+        "Ta",
+        "W",
+        "Re",
+        "Os",
+        "Ir",
+        "Pt",
+        "Au",
+        "Hg",
+        "Tl",
+        "Bi"
+      ],
+      "mass_closure_diagnostic": {
+        "definition": "initial_mass - final_mass - sum(source-reported element yields); diagnostic only",
+        "maximum_absolute_residual_msun": 16.752300030486,
+        "maximum_residual_msun": 16.752300030486,
+        "minimum_residual_msun": -0.0008345166235104173
+      },
+      "mass_msun": [
+        1.0,
+        1.65,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+        6.0,
+        7.0,
+        12.0,
+        15.0,
+        20.0,
+        25.0
+      ],
+      "metallicity_mass_fraction": [
+        0.0001,
+        0.001,
+        0.006,
+        0.01,
+        0.02
+      ],
+      "records_included": false,
+      "snapshot_semantics": "integrated stellar-wind ejecta only; not age resolved",
+      "source_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/nugrid_set1ext/element_yield_table_MESAonly_fryer12_delay_winds.txt",
+      "source_reported_units": {
+        "final_mass": "Msun",
+        "lifetime": "yr",
+        "yield": "Msun"
+      },
+      "unique_coordinate_count": 60
+    }
+  },
+  "source_semantics_evidence": {
+    "primary_sources": [
+      {
+        "citation": "Ritter et al. 2018, MNRAS 480, 538",
+        "data_doi": "10.11570/18.0002",
+        "doi": "10.1093/mnras/sty1729",
+        "relevant_sections": [
+          "Section 2.3 Stellar yields",
+          "Appendix A Data access"
+        ],
+        "url": "https://academic.oup.com/mnras/article/480/1/538/5046719"
+      },
+      {
+        "citation": "NuGrid data releases",
+        "url": "https://nugrid.github.io/content/data.html"
+      },
+      {
+        "citation": "Source-provided Set1ext reader",
+        "local_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/nugrid_set1ext/read_yields.py",
+        "sha256": "3ef9cae4fd8b7935f7021ea736bf1a99dea101ad6259372cd66b18ae09c3ed92",
+        "url": "https://download.nugridstars.org/set1ext/Yield_tables/read_yields.py"
+      }
+    ],
+    "project_disposition": {
+      "approval_id": null,
+      "canonical_injected_energy_available": false,
+      "canonical_injected_momentum_available": false,
+      "cumulative_release_history_available": false,
+      "license_evidence": "g2_source_use_terms_evidence_v1.json",
+      "license_status": "public_research_access_verified_redistribution_not_approved",
+      "runtime_channel_assignment_approved": false,
+      "source_component_semantics_resolved": true
+    },
+    "source_author_definitions": {
+      "final_mass_unit": "Msun",
+      "lifetime_unit": "yr",
+      "pre_explosion": "Wind ejecta plus ejecta above the remnant mass cut using the composition at collapse without shock nucleosynthesis.",
+      "reader_behavior": "The supplied Python 2 reader exposes Lifetime, Mfinal, Yields, and X0. It indexes blocks by (M,Z), so the duplicate (5,0.01) key would be overwritten; the SNRT review adapter instead preserves both occurrences. Kinetic-energy support is commented out and no per-model energy field exists in the staged tables.",
+      "supported_terminal_explosive_difference": "total - winds is source-defined terminal SN ejecta.",
+      "supported_terminal_preSN_difference": "pre_explosion - winds is source-defined terminal pre-SN ejecta above the same mass-cut concept.",
+      "total": "Wind ejecta plus SN ejecta after the delayed semi-analytic explosion and fallback prescription.",
+      "winds": "Time-integrated stellar-wind ejecta, defined by the integral of mass-loss rate times surface composition over stellar lifetime.",
+      "yield_unit": "Msun"
+    },
+    "source_use_terms_evidence": {
+      "candidate_record": {
+        "access": "Public Set1ext release recommended by the NuGrid data page for stellar-yield/GCE use.",
+        "citation": "Ritter et al. 2018, MNRAS 480, 538; data DOI 10.11570/18.0002",
+        "evidence_urls": [
+          "https://nugrid.github.io/content/data.html",
+          "https://download.nugridstars.org/set1ext/"
+        ],
+        "production_license_status": "not_approved",
+        "redistribution_status": "no_license_file_or_explicit_redistribution_terms_found_in_staged_release",
+        "research_use_status": "public_with_citation"
+      },
+      "path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_use_terms_evidence_v1.json",
+      "sha256": "9b8e8b4cf383cf93feecbf96cfa42ed4eb5212c8b424a7217ed7507bbc16db4a",
+      "status": "research_access_verified_redistribution_approval_unresolved"
+    }
+  },
+  "source_semantics_evidence_path": "/gpfs/kjhan/LRD_JWST/simulation/snrt/config/g2_source_semantics_evidence_v1.json",
+  "source_semantics_evidence_sha256": "b1ffb82287cab92ebada5091617c536ea584a92622cb111d100db0d9ea24ae11",
+  "status": "review_only",
+  "uninterpreted_component_relation_diagnostics": {
+    "aligned_block_count": 61,
+    "definition": "source-supported decompositions at identical ordinal and coordinate: total-winds is delayed-explosion SN ejecta; pre_explosion-winds is pre-SN ejecta",
+    "pre_explosion_minus_winds_maximum_value_msun": 9.250169999999999,
+    "pre_explosion_minus_winds_negative_value_count": 0,
+    "runtime_channel_assignment_approved": false,
+    "source_semantics_supported": true,
+    "total_equals_pre_explosion_block_count": 41,
+    "total_equals_winds_block_count": 41,
+    "total_minus_pre_explosion_maximum_absolute_value_msun": 0.45549999999999996,
+    "total_minus_pre_explosion_negative_value_count": 715,
+    "total_minus_winds_maximum_value_msun": 9.24617,
+    "total_minus_winds_negative_value_count": 0,
+    "winds_equals_pre_explosion_block_count": 41
+  },
+  "verified_acquisition": {
+    "approval_id": null,
+    "candidate_manifest_status": "candidate_not_approved",
+    "license_status": "to_be_verified",
+    "manifest_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/acquisition_manifest_v1.json",
+    "manifest_sha256": "ebbbfa42357e6a729d19d839f0e1c826ef33cb4705d895b82c5e96e88493f764",
+    "promotable": false,
+    "verified_file_count": 11,
+    "verified_files": [
+      {
+        "bytes": 2601,
+        "relative_path": "nugrid_set1ext/INDEX.html",
+        "role": "release directory index",
+        "sha256": "338f39055d53a1c4cf676aae5d2ed831a0d93e0620f3db2ad99f34724a7fb925"
+      },
+      {
+        "bytes": 4007,
+        "relative_path": "nugrid_set1ext/yield_tables_INDEX.html",
+        "role": "yield directory index",
+        "sha256": "35f9f289d744cbc9abbe0b0f94df7344d2556ea2e1f4d44d593a16585a62b9d9"
+      },
+      {
+        "bytes": 35265,
+        "relative_path": "nugrid_set1ext/read_yields.py",
+        "role": "source-provided Python 2 yield-table reader; provenance/semantics evidence only",
+        "sha256": "3ef9cae4fd8b7935f7021ea736bf1a99dea101ad6259372cd66b18ae09c3ed92"
+      },
+      {
+        "bytes": 182473,
+        "relative_path": "nugrid_set1ext/element_yield_table_MESAonly_fryer12_delay_total.txt",
+        "role": "integrated total yields",
+        "sha256": "b3f87c63251790036b5b6ea0c73dba63ce98bf25f2fe328797e7c44ca7d7b7b8"
+      },
+      {
+        "bytes": 182473,
+        "relative_path": "nugrid_set1ext/element_yield_table_MESAonly_fryer12_delay_winds.txt",
+        "role": "integrated wind yields",
+        "sha256": "bfa15578a4c0e0f7152164bd6909d93fe497ecad226ed2d4f0a747b46a87debd"
+      },
+      {
+        "bytes": 182473,
+        "relative_path": "nugrid_set1ext/element_yield_table_MESAonly_fryer12_delay_pre_exp.txt",
+        "role": "pre-explosion yields",
+        "sha256": "6b2f82aba8b8ed2f5e13e231f9e519d3d7c94d54c0602c61644a5961a2fb820f"
+      },
+      {
+        "bytes": 6994,
+        "relative_path": "nugrid_set1ext/agb_properties_table_1.tex",
+        "role": "AGB model-properties documentation",
+        "sha256": "490f066deb6694068a6fdffa509ccfa19ddf808502f8cb2c22ec1e1b6b3c86e0"
+      },
+      {
+        "bytes": 18846,
+        "relative_path": "nugrid_set1ext/agb_properties_table_2_set1_3a.txt",
+        "role": "AGB thermal-pulse properties set1.3a",
+        "sha256": "89ef062296feaa193b17fe1af4e14063b2fe46b475fef3b609c31ce12d4ea332"
+      },
+      {
+        "bytes": 17562,
+        "relative_path": "nugrid_set1ext/agb_properties_table_2_set1_4a.txt",
+        "role": "AGB thermal-pulse properties set1.4a",
+        "sha256": "1e5f3376d0a68886e60de089d67cc541fb6188fe081590137253bdd1638eacc3"
+      },
+      {
+        "bytes": 15208,
+        "relative_path": "nugrid_set1ext/agb_properties_table_2_set1_5a.txt",
+        "role": "AGB thermal-pulse properties set1.5a",
+        "sha256": "e226d5b88972a977e0b15b4e25fec0612b2527adea3bdd7add0c94589236c19b"
+      },
+      {
+        "bytes": 3947,
+        "relative_path": "nugrid_set1ext/massive_star_properties_table.tex",
+        "role": "massive-star model-properties documentation",
+        "sha256": "dc34d46e7a0632516758acd5fd5d30933db37666df16788c78610a41f8450dd7"
+      }
+    ]
+  }
+}

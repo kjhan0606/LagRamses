@@ -1,5 +1,8 @@
 subroutine read_params
   use amr_commons
+#ifdef SNRT
+  use snrt_agn_efficiency, only: snrt_agn_rt_requested
+#endif
   use pm_parameters
   use pm_commons, only: npartmax_auto
   use poisson_parameters
@@ -14,6 +17,9 @@ subroutine read_params
   ! Local variables
   !--------------------------------------------------
   integer::i,narg,iargc,ierr,levelmax,sink_nml_iostat
+#ifdef SNRT
+  integer :: snrt_requested_local, snrt_requested_min, snrt_requested_max
+#endif
   integer::nlevelmax_sink=0
   character(LEN=80)::infile
   character(LEN=80)::cmdarg
@@ -1680,6 +1686,31 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         end if
      end if
   end if
+
+#ifdef SNRT
+  ! Check before any sink feedback or RT state mutation, including before
+  ! sinks are first created. Do not allow rank-local environment selection
+  ! to split collective RT execution or the source ownership decision.
+  snrt_requested_local=merge(1,0,snrt_agn_rt_requested())
+  snrt_requested_min=snrt_requested_local
+  snrt_requested_max=snrt_requested_local
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(snrt_requested_local,snrt_requested_min,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr)
+  call MPI_ALLREDUCE(snrt_requested_local,snrt_requested_max,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
+#endif
+  if (snrt_requested_min/=snrt_requested_max) then
+     if(myid==1)write(*,*)'SNRT_RT_ENABLE must agree across MPI ranks'
+     nml_ok=.false.
+  end if
+  if (snrt_requested_max==1 .and. sink .and. sink_AGN) then
+     if(myid==1)write(*,*)'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
+     nml_ok=.false.
+  end if
+  if (snrt_requested_max==1 .and. sink .and. (ncpu>1 .or. nrestart>0)) then
+     if(myid==1)write(*,*)'Live SNRT AGN requires serial fresh start until inflow cursors are persistent/migratable'
+     nml_ok=.false.
+  end if
+#endif
 
   if(.not. nml_ok)then
      if(myid==1)write(*,*)'Too many errors in the namelist'

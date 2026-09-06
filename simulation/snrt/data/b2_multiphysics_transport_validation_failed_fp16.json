@@ -1,0 +1,179 @@
+{
+  "configuration": {
+    "analytic_radius_cm": 3.309325025718587e+21,
+    "analytic_radius_pc": 1072.4792005388738,
+    "cell_volume_cm3": 1.799025886302064e+62,
+    "cell_width_cm": 5.6451974605125884e+20,
+    "courant": 0.4,
+    "dt_myr": 0.05269920101051734,
+    "dt_s": 1663060305809.502,
+    "duration_recombination_times": 0.5,
+    "duration_s": 192914995473902.22,
+    "fixed_point_iterations": 16,
+    "n_hydrogen_cm3": 0.01,
+    "recombination_time_s": 385829990947804.44,
+    "reduced_light_fraction": 0.003,
+    "reduced_light_speed_cm_s": 89937737.4,
+    "shape": [
+      32,
+      32,
+      32
+    ],
+    "sn_order": 4,
+    "source_energy_ev": 18.0,
+    "source_rate_s": 1e+49,
+    "steps": 116,
+    "stromgren_radius_cm": 4.516157968410071e+21,
+    "stromgren_radius_pc": 1463.5871211882497,
+    "temperature_k": 10000.0
+  },
+  "controlled_deltas": {
+    "dust_mean_xhii_delta_from_baseline": -0.004003536687378073,
+    "dust_on": {
+      "absorbed_photons": 1.6743939303652365e+63,
+      "dust_absorbed_fraction": 0.20186792734268635,
+      "dust_absorbed_photons": 3.380064322780046e+62,
+      "dust_cross_section_per_h_cm2": 1e-20,
+      "effective_radius_pc": 960.3656476894922,
+      "energy_ev": 18.0,
+      "fixed_point_iterations": 16,
+      "gas_absorption_limiter_active_cell_step_fraction": 0.0,
+      "hydrogen_ledger_l1_relative_error": 7.558512060630169e-06,
+      "hydrogen_ledger_signed_relative_error": 7.538002812854895e-06,
+      "maximum_fixed_point_residual": 0.0001360177993774414,
+      "mean_x_hii": 0.01849110004513932,
+      "minimum_gas_absorption_scale": 1.0,
+      "radius_ratio": 0.8954631914604503,
+      "runtime_s": 3.2279131412506104,
+      "secondary_hydrogen_ionizations": 0.0,
+      "secondary_hydrogen_ionizations_per_emitted_photon": 0.0,
+      "secondary_ionization": 0
+    },
+    "secondary_200ev_off": {
+      "absorbed_photons": 2.513340467861834e+62,
+      "dust_absorbed_fraction": 0.0,
+      "dust_absorbed_photons": 0.0,
+      "dust_cross_section_per_h_cm2": 0.0,
+      "effective_radius_pc": 586.0779402939469,
+      "energy_ev": 200.0,
+      "fixed_point_iterations": 16,
+      "gas_absorption_limiter_active_cell_step_fraction": 0.0,
+      "hydrogen_ledger_l1_relative_error": 4.834250010592805e-05,
+      "hydrogen_ledger_signed_relative_error": 1.4784227789819784e-05,
+      "maximum_fixed_point_residual": 1.0132789611816406e-06,
+      "mean_x_hii": 0.0042026093524327734,
+      "minimum_gas_absorption_scale": 1.0,
+      "radius_ratio": 0.5464702159253704,
+      "runtime_s": 3.2738539930433035,
+      "secondary_hydrogen_ionizations": 0.0,
+      "secondary_hydrogen_ionizations_per_emitted_photon": 0.0,
+      "secondary_ionization": 0
+    },
+    "secondary_200ev_on": {
+      "absorbed_photons": 2.3811687842649542e+62,
+      "dust_absorbed_fraction": 0.0,
+      "dust_absorbed_photons": 0.0,
+      "dust_cross_section_per_h_cm2": 0.0,
+      "effective_radius_pc": 923.7777217126792,
+      "energy_ev": 200.0,
+      "fixed_point_iterations": 16,
+      "gas_absorption_limiter_active_cell_step_fraction": 0.0,
+      "hydrogen_ledger_l1_relative_error": 5.205637894160248e-05,
+      "hydrogen_ledger_signed_relative_error": 1.3537359151858108e-05,
+      "maximum_fixed_point_residual": 1.52587890625e-05,
+      "mean_x_hii": 0.01645717740029795,
+      "minimum_gas_absorption_scale": 1.0,
+      "radius_ratio": 0.8613479135525625,
+      "runtime_s": 4.126545691862702,
+      "secondary_hydrogen_ionizations": 7.478880745110755e+62,
+      "secondary_hydrogen_ionizations_per_emitted_photon": 0.3876775222547439,
+      "secondary_ionization": 1
+    },
+    "secondary_mean_xhii_delta": 0.012254568047865178
+  },
+  "criteria": {
+    "dust_absorbs_photons": true,
+    "dust_reduces_mean_xhii": true,
+    "gas_absorption_limiter_activity_lt_1e-3": true,
+    "secondary_channel_active": true,
+    "secondary_increases_mean_xhii": true,
+    "solver_a_fixed_point_residual_lt_1e-4": false,
+    "solver_a_hydrogen_ledger_l1_lt_1e-3": true,
+    "solver_a_radius_relative_error_lt_0p05": true,
+    "solver_a_shadow_s8_vs_a192_lt_0p02": false,
+    "solver_a_vs_b_xhii_l1_lt_1e-3": true
+  },
+  "passed": false,
+  "provenance": {
+    "conservative_hydrogen_sha256": "814d1f37cb76dcb1cd4db0401be435d0543cad08bb612bbb1855d5947243528b",
+    "devices": [
+      "cpu:0"
+    ],
+    "git_head": "45cee683788fdfb0e9aa66a978d1e56c1af2c10c",
+    "jax_backend": "cpu",
+    "jax_version": "0.11.1",
+    "multiphysics_sha256": "7b3bf812f4f777f4ee22ee9c95aef71ebe98786db3ec4ef841ad1661a9e159e9",
+    "validator": "/gpfs/kjhan/LRD_JWST/simulation/snrt/tools/validate_multiphysics_b2.py",
+    "validator_sha256": "cdccd1f765d13683d26363dc58731baaf33f87a7488d6447b8bc9f35f1dd5bbe"
+  },
+  "schema": "snrt_b2_multiphysics_validation_v1",
+  "shadow": {
+    "a192": {
+      "directions": 192,
+      "label": "A192",
+      "runtime_s": 10.430991504341364,
+      "steps": 150,
+      "transmission": NaN
+    },
+    "clump_absorption": 8.0,
+    "clump_radius_cells": 12.0,
+    "relative_difference": NaN,
+    "s8": {
+      "directions": 80,
+      "label": "S8",
+      "runtime_s": 4.489551385864615,
+      "steps": 150,
+      "transmission": NaN
+    },
+    "shape": [
+      48,
+      48,
+      48
+    ],
+    "solver": "multiphysics_dust_transport_with_inert_gas"
+  },
+  "solver_a": {
+    "absorbed_photons": 1.6168994105682683e+63,
+    "dust_absorbed_fraction": 0.0,
+    "dust_absorbed_photons": 0.0,
+    "dust_cross_section_per_h_cm2": 0.0,
+    "effective_radius_pc": 1025.2002313733005,
+    "energy_ev": 18.0,
+    "fixed_point_iterations": 16,
+    "gas_absorption_limiter_active_cell_step_fraction": 0.0,
+    "hydrogen_ledger_l1_relative_error": 8.355125918124657e-06,
+    "hydrogen_ledger_signed_relative_error": 8.292023958038637e-06,
+    "maximum_fixed_point_residual": 0.0001436471939086914,
+    "mean_x_hii": 0.022494636732517392,
+    "minimum_gas_absorption_scale": 1.0,
+    "radius_ratio": 0.9559161901304776,
+    "runtime_s": 3.440263070166111,
+    "secondary_hydrogen_ionizations": 0.0,
+    "secondary_hydrogen_ionizations_per_emitted_photon": 0.0,
+    "secondary_ionization": 0
+  },
+  "solver_a_vs_b": {
+    "x_hii_l1": 1.154032361228019e-06
+  },
+  "solver_b": {
+    "absorbed_photons": 1.6169035872178866e+63,
+    "effective_radius_pc": 1025.1827237050504,
+    "fixed_point_iterations": 16,
+    "hydrogen_ledger_l1_relative_error": 8.571759554313962e-06,
+    "hydrogen_ledger_signed_relative_error": 8.481820466934934e-06,
+    "maximum_fixed_point_residual": 0.0001437067985534668,
+    "mean_x_hii": 0.022493484308142797,
+    "radius_ratio": 0.9558998656476889,
+    "runtime_s": 2.023709086701274
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "schema": "snrt-fp1-fate-admission-sidecar",
+  "schema_version": 1,
+  "gate": "F-P1",
+  "status": "blocked_review_only",
+  "purpose": "Checksum and admission record for the explicit F-P1 fate map; this file does not supply physical fate values.",
+  "artifacts": {
+    "fate_map": {
+      "path": "config/fp1_population_fate_map_v1.json",
+      "sha256": "0145b49b334781a969c2014c314c075e5bfb2c2fa73e46afe84158e98d41d6b4"
+    },
+    "resolver_contract": {
+      "path": "config/fp1_fate_resolver_contract_v1.json",
+      "sha256": "3681835efde788123f5b32d13cf3d0d85b4cc58f8e06d97fc7f1fbffc79f4f18"
+    },
+    "source_contract": {
+      "path": "config/stellar_feedback_contract_v1.json",
+      "sha256": "25228048af5c63006f4f2a8f2065fd982cf342209a17fda29786f124bd98b70a"
+    },
+    "source_node_contract": {
+      "path": "config/fp1_source_node_contract_v1.json",
+      "sha256": "6fa9d14a0b5827dad1b9b9280d5433b81480fa13ed11ee62826e244b82707b5c"
+    },
+    "terminal_deposition_contract": {
+      "path": "config/fp1_terminal_deposition_contract_v1.json",
+      "sha256": "b2b7de92d62b62e128014be68a28c0ae8a2d164e48244d8f880de00355d8bc47"
+    },
+    "physical_package_contract": {
+      "path": "config/fp1_physical_package_admission_contract_v1.json",
+      "sha256": "06cd0858dfb3a79675bbb9c1f83c7fde33b0069637a2bf4e384ff1e7922359e0"
+    },
+    "physics_contract": {
+      "path": "config/g2_physics_contract_v1.json",
+      "sha256": "08267134b80f2a1e1070c2ceba94cd45f3aeeb532502230468ebc30f4b687fdb"
+    }
+  },
+  "runtime_unresolved_intervals": [
+    {
+      "id": "low_mass_lifetime_seam",
+      "mass_msun": [0.8, 1.0]
+    },
+    {
+      "id": "massive_terminal_fate_seam",
+      "mass_msun": [40.0, 120.0]
+    }
+  ],
+  "runtime_unresolved_mass_bucket": {
+    "implemented": true,
+    "implementation": "stellar_population_ledger.compute_unresolved_mass_bucket",
+    "interval_source": "fp1_population_fate_map_v1",
+    "deposition_allowed": false,
+    "closure_included": false,
+    "meaning": "IMF-weighted initial stellar mass in unresolved intervals; diagnostic only"
+  },
+  "approval": {
+    "approval_id": null,
+    "canonical_conversion_allowed": false,
+    "production_ready": false,
+    "publication_ready": false
+  },
+  "required_for_promotion": [
+    "approved source-node fate records for every unresolved interval",
+    "exact source provenance and source-package checksum",
+    "explicit lifetime, wind, terminal ejecta, remnant, and decay semantics",
+    "lossless source-node identity and canonical-row mapping sidecar",
+    "approved terminal energy, scalar momentum, and deposition contract",
+    "physical package passing all node, coverage, closure, rights, and reproduction gates",
+    "independent physics audit and production-linked smoke evidence"
+  ]
+}

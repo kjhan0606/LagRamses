@@ -1,0 +1,67 @@
+{
+  "schema": "snrt_furlanetto_stoever_2010_table_manifest_v1",
+  "paper_doi": "10.1111/j.1365-2966.2010.16401.x",
+  "upstream_repository": "https://github.com/21cmfast/21cmFAST",
+  "upstream_commit": "892f98c80cfe985ca6b399ec6b51a3aa95124b11",
+  "upstream_path": "src/py21cmfast/_data/x_int_tables",
+  "license": "MIT",
+  "normalization": "numeric and text payload unchanged; one terminal LF appended",
+  "files": {
+    "log_xi_-4.0.dat": {
+      "upstream_sha256": "7dbf798e04c16695aa38e79a4ee02487906132b52c2e296580f9e179af453b9e",
+      "vendored_sha256": "1f27ca3a704d467e2b6330001b4b01601accef54f44c1e939d101ace5156e5ad"
+    },
+    "log_xi_-3.6.dat": {
+      "upstream_sha256": "73cc4ddd53b45d167b1cff2e791fd5aef9427b412b5ecae6558b0bc655ebadb2",
+      "vendored_sha256": "56388fb1d427d72e5a4c0c43b3ca4c117915f9d1b493499145b865e9da71df4b"
+    },
+    "log_xi_-3.3.dat": {
+      "upstream_sha256": "c91c94f4f8341fc8c0b23c70cb450c4857329a150396515b68f1b01193faee69",
+      "vendored_sha256": "4bc981ead5ffc308d9b16764529c093f6cf90f450b258e548012368541d6ad2a"
+    },
+    "log_xi_-3.0.dat": {
+      "upstream_sha256": "05fbb80748e9fabee5c21d76278c96b68bc45bc44ad3f94357d7fb05b6af1e67",
+      "vendored_sha256": "b12d4674b38f1f49418d469e627473810a9e832b636c683693bdd02347b85591"
+    },
+    "log_xi_-2.6.dat": {
+      "upstream_sha256": "37aef88d911265f94696a301007cf66c160950371aa5a7245b97bab1bce04bde",
+      "vendored_sha256": "427cbbc4bc4dcc1f0222009b2224c177194f3bd0d57b3a24b38ef30b9f132fd5"
+    },
+    "log_xi_-2.3.dat": {
+      "upstream_sha256": "0128e087cee5472350e7f64433e587370f709ff306d98bf4e55a1878c3419db0",
+      "vendored_sha256": "d4a4265aeefdaf1f42f13a58337ed43ae50729eede825278b8e7a03a557889e4"
+    },
+    "log_xi_-2.0.dat": {
+      "upstream_sha256": "59a4b1c0467402d65062976d6ca0cae0e810f881b5c2c4b5fe0c82595386571d",
+      "vendored_sha256": "33d74ea86afe901330bfa21883582ddbb7a8c362627318abeac5d678af4d1593"
+    },
+    "log_xi_-1.6.dat": {
+      "upstream_sha256": "defbf2c0665eccf07ae0880a5ec543b4310727a3af58eab86845cb7983e8976b",
+      "vendored_sha256": "5cc1d661d4eb9ada6a8650021923af6577a767fb0da65c441ea087cd7a9159db"
+    },
+    "log_xi_-1.3.dat": {
+      "upstream_sha256": "ac1a84443babc5351e5f077ad00ca05b6ebb25f09c399879b833e34a69633887",
+      "vendored_sha256": "06ce3e987c2004a4c7bfa20a1e5df9df56dc27161ad0931425e33637bd437053"
+    },
+    "log_xi_-1.0.dat": {
+      "upstream_sha256": "3a83d09a3741d11f7d667156d8bd2a6d026fb7f624cbea98e58b789b0a9deea5",
+      "vendored_sha256": "771458627c9f9a99773c3454d9ad370996e1b86030f71e82c011403a6572a974"
+    },
+    "xi_0.500.dat": {
+      "upstream_sha256": "323aef990def3136fa9f0b85b03fd60e7a98ea82c5046dfc13030330a96262ad",
+      "vendored_sha256": "cc636504fc11fc36eee4613aaa7c6da4f29ff3243a5b85d1d4cd129d88482175"
+    },
+    "xi_0.900.dat": {
+      "upstream_sha256": "adce6a9e8d35f407d56fd4e0a9ecc8b58b3779180dd539ee6b7fdf45814bfd7a",
+      "vendored_sha256": "0573894809fb51c4588980d7b0882bdefc6ee654026d62a022a9c94e1f96b543"
+    },
+    "xi_0.990.dat": {
+      "upstream_sha256": "3391aad0581271b5e707e857cc4e7d25c864a6da3b0121f608d21bf2d4885749",
+      "vendored_sha256": "f4469f4441814efb1392874c7ace827102e8ba3fee5633fd2fcfc0add5d3bed4"
+    },
+    "xi_0.999.dat": {
+      "upstream_sha256": "ce0bc152e220bfe85b95afbd1bb7ab21aae1171826013bd68e5953cb18378878",
+      "vendored_sha256": "315a6bb16c7f579f3e5dd56dc5771813e484e8772cf2c4b5e782534e6fa897e5"
+    }
+  }
+}

@@ -1,0 +1,440 @@
+{
+  "admission": {
+    "canonical_conversion_allowed": false,
+    "runtime_activation_allowed": false,
+    "selected_estimator": null
+  },
+  "estimators": [
+    "inner_zero_outer_half_bin",
+    "half_bin_extrapolated_both_ends"
+  ],
+  "gate": "F-P2",
+  "interpretation": {
+    "mass_and_energy": "diagnostic estimates only; not authoritative event fields",
+    "momentum": "signed vector remains unavailable from spherical-average profiles",
+    "purpose": "quantify shell-edge sensitivity of spherical-average profile diagnostics",
+    "selection": "no estimator selected for production",
+    "source_epoch": "use exact source-reported per-model epoch from the HESMA record"
+  },
+  "model_count": 15,
+  "models": [
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n1_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.7109471337012868e+51,
+          "mass_estimate_msun": 1.4516159532499675,
+          "relative_difference_from_integrated_stable_mass": 0.03284854818554559
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.710947503313874e+51,
+          "mass_estimate_msun": 1.4517229608000994,
+          "relative_difference_from_integrated_stable_mass": 0.0329246858117209
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4054489942403372,
+      "model_id": "n1",
+      "profile_epoch_s": 100.2,
+      "row_count": 82,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n3_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.6571781032114573e+51,
+          "mass_estimate_msun": 1.457611537537218,
+          "relative_difference_from_integrated_stable_mass": 0.04348272801803539
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.6571787779199625e+51,
+          "mass_estimate_msun": 1.4577732656137183,
+          "relative_difference_from_integrated_stable_mass": 0.043598506776722196
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.3968717434410902,
+      "model_id": "n3",
+      "profile_epoch_s": 100.19,
+      "row_count": 79,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n5_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.6287577518091437e+51,
+          "mass_estimate_msun": 1.448974294427618,
+          "relative_difference_from_integrated_stable_mass": 0.03256393708774749
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.6287579676046395e+51,
+          "mass_estimate_msun": 1.4490432176500605,
+          "relative_difference_from_integrated_stable_mass": 0.03261305295832963
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4032780367231477,
+      "model_id": "n5",
+      "profile_epoch_s": 100.1,
+      "row_count": 86,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n10_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.636651723258574e+51,
+          "mass_estimate_msun": 1.4459470100464498,
+          "relative_difference_from_integrated_stable_mass": 0.033799928140083
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.6366518966430193e+51,
+          "mass_estimate_msun": 1.4460079734993976,
+          "relative_difference_from_integrated_stable_mass": 0.03384351480877745
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.3986719970544625,
+      "model_id": "n10",
+      "profile_epoch_s": 100.13,
+      "row_count": 89,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n20_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.561599250133212e+51,
+          "mass_estimate_msun": 1.4498530674456003,
+          "relative_difference_from_integrated_stable_mass": 0.0348629610595304
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.561599512834557e+51,
+          "mass_estimate_msun": 1.4499335602699979,
+          "relative_difference_from_integrated_stable_mass": 0.03492041449703417
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4010097201287288,
+      "model_id": "n20",
+      "profile_epoch_s": 100.01,
+      "row_count": 86,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n40_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.5225416930057738e+51,
+          "mass_estimate_msun": 1.4523551086219695,
+          "relative_difference_from_integrated_stable_mass": 0.036684258852950055
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.5225420642558958e+51,
+          "mass_estimate_msun": 1.4524660216363932,
+          "relative_difference_from_integrated_stable_mass": 0.03676342804199505
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4009618610674601,
+      "model_id": "n40",
+      "profile_epoch_s": 100.08,
+      "row_count": 91,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n100h_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.584154830300321e+51,
+          "mass_estimate_msun": 1.4658484573234016,
+          "relative_difference_from_integrated_stable_mass": 0.03469480803646517
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.5841551367361447e+51,
+          "mass_estimate_msun": 1.4659434574201127,
+          "relative_difference_from_integrated_stable_mass": 0.03476186551866177
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4166964460806897,
+      "model_id": "n100h",
+      "profile_epoch_s": 100.0,
+      "row_count": 91,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n100_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.506309572849768e+51,
+          "mass_estimate_msun": 1.4531090356584215,
+          "relative_difference_from_integrated_stable_mass": 0.03759158780642069
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.5063100005966762e+51,
+          "mass_estimate_msun": 1.4532376337461586,
+          "relative_difference_from_integrated_stable_mass": 0.037683413189629776
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4004633930489443,
+      "model_id": "n100",
+      "profile_epoch_s": 100.22,
+      "row_count": 93,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n100l_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.4052810490334708e+51,
+          "mass_estimate_msun": 1.4134397912834888,
+          "relative_difference_from_integrated_stable_mass": 0.038731350571278716
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.4052815050806586e+51,
+          "mass_estimate_msun": 1.413580804537834,
+          "relative_difference_from_integrated_stable_mass": 0.03883498065799175
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.360736624061774,
+      "model_id": "n100l",
+      "profile_epoch_s": 100.19,
+      "row_count": 92,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n150_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.5143324953326393e+51,
+          "mass_estimate_msun": 1.450343496627821,
+          "relative_difference_from_integrated_stable_mass": 0.03540457242553508
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.5143327641618758e+51,
+          "mass_estimate_msun": 1.450432573740218,
+          "relative_difference_from_integrated_stable_mass": 0.035468164843254525
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4007505232763764,
+      "model_id": "n150",
+      "profile_epoch_s": 98.21,
+      "row_count": 92,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n200_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.3883388033531417e+51,
+          "mass_estimate_msun": 1.4608479654001527,
+          "relative_difference_from_integrated_stable_mass": 0.04389470939887376
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.388339303582379e+51,
+          "mass_estimate_msun": 1.4609983488309632,
+          "relative_difference_from_integrated_stable_mass": 0.04400217059368835
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.399420796223195,
+      "model_id": "n200",
+      "profile_epoch_s": 100.21,
+      "row_count": 94,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n300c_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 3.340384905796177e+52,
+          "mass_estimate_msun": 10.371680807830824,
+          "relative_difference_from_integrated_stable_mass": 6.410388838341228
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 3.3403849180513113e+52,
+          "mass_estimate_msun": 10.37172076819547,
+          "relative_difference_from_integrated_stable_mass": 6.410417389339434
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.399613574144439,
+      "model_id": "n300c",
+      "profile_epoch_s": 100.13,
+      "row_count": 49,
+      "source_audit_physical_warnings": [
+        {
+          "interpretation": "source-data anomaly requires quarantine before any population mixture",
+          "model": "n300c",
+          "relative_difference": 6.410417389339434,
+          "requires_quarantine": true,
+          "severity": "source_data_anomaly",
+          "type": "profile_mass_mismatch"
+        }
+      ]
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n1600_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.3747178457894451e+51,
+          "mass_estimate_msun": 1.4657005373246892,
+          "relative_difference_from_integrated_stable_mass": 0.04661205368628174
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.3747186509110558e+51,
+          "mass_estimate_msun": 1.4659389488991839,
+          "relative_difference_from_integrated_stable_mass": 0.04678229612070146
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4004239031667294,
+      "model_id": "n1600",
+      "profile_epoch_s": 100.15,
+      "row_count": 95,
+      "source_audit_physical_warnings": []
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n1600c_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.2532928592218868e+51,
+          "mass_estimate_msun": 1.4722199096981208,
+          "relative_difference_from_integrated_stable_mass": 0.05110538298413129
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.2532928780648022e+51,
+          "mass_estimate_msun": 1.4722430349079167,
+          "relative_difference_from_integrated_stable_mass": 0.0511218934472347
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4006396823108527,
+      "model_id": "n1600c",
+      "profile_epoch_s": 100.13,
+      "row_count": 97,
+      "source_audit_physical_warnings": [
+        {
+          "interpretation": "spherical-average density integration is not ready to define returned mass without a source-specific correction or authoritative scalar",
+          "model": "n1600c",
+          "relative_difference": 0.0511218934472347,
+          "requires_quarantine": false,
+          "severity": "profile_mass_warning",
+          "type": "profile_mass_mismatch"
+        }
+      ]
+    },
+    {
+      "density_member": "ddt_2013_density/ddt_2013_n100_z0.01_density.dat",
+      "estimators": {
+        "half_bin_extrapolated_both_ends": {
+          "edge_policy": "inner and outer edges half-bin extrapolated; interior midpoints; inner edge clamped at zero",
+          "estimator": "half_bin_extrapolated_both_ends",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.506309572849768e+51,
+          "mass_estimate_msun": 1.4531090356584215,
+          "relative_difference_from_integrated_stable_mass": 0.03763393986196463
+        },
+        "inner_zero_outer_half_bin": {
+          "edge_policy": "inner edge fixed at zero; interior midpoints; outer edge half-bin extrapolated",
+          "estimator": "inner_zero_outer_half_bin",
+          "event_scalar_approval_status": "review_only_not_authoritative",
+          "kinetic_energy_estimate_erg": 1.5063100005966762e+51,
+          "mass_estimate_msun": 1.4532376337461586,
+          "relative_difference_from_integrated_stable_mass": 0.03772576899327054
+        }
+      },
+      "integrated_stable_element_mass_msun": 1.4004062317504062,
+      "model_id": "n100_z0.01",
+      "profile_epoch_s": 100.22,
+      "row_count": 93,
+      "source_audit_physical_warnings": []
+    }
+  ],
+  "schema": "snrt-fp2-snia-hesma-profile-estimator-comparison",
+  "schema_version": 1,
+  "source": {
+    "manifest_sha256": "0a9c6f6695f002f93d30b4c5cce0a6b0abaa3efe93105c836d4aed633561d6df",
+    "package_sha256": "bb9325de2e07bf86acd1ef4abf7c950fb44e74e6513b8c9c88336d910f8814c0",
+    "record_id": "yysd4-xap92",
+    "source_audit_sha256": "5463d58733df8b715fd1ec262b9164cf7b596ad0c9338af98098b8170ea1d510"
+  },
+  "status": "review_only_diagnostic",
+  "tool_sha256": "8a7ce83bc5a2d76bc1a8004eb3772299a03f686e91d3efe39c70b7244c563c68"
+}

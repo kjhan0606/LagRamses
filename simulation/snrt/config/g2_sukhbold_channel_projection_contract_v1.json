@@ -1,0 +1,48 @@
+{
+  "schema": "snrt-g2-sukhbold-channel-projection-contract",
+  "schema_version": 1,
+  "gate": "G2",
+  "status": "review_only_not_approved",
+  "source_candidate_id": "sukhbold2016_ccsn",
+  "source_candidate_contract": "g2_sukhbold2016_candidate_contract_v1.json",
+  "tracked_elements": ["H", "He", "C", "N", "O", "Ne", "Mg", "Si", "S", "Ca", "Fe"],
+  "component_projection": {
+    "wind": {
+      "source_column": "wind",
+      "proposed_runtime_channel": 1,
+      "ownership": "integrated presupernova wind only"
+    },
+    "terminal_ccsn": {
+      "source_column": "ejecta",
+      "proposed_runtime_channel": 3,
+      "ownership": "terminal supernova ejecta only"
+    }
+  },
+  "semantic_firewalls": {
+    "component_channel_assignment_approved": false,
+    "wind_and_terminal_may_be_summed_before_channel_ownership_approval": false,
+    "stable_and_radioactive_segments_may_be_summed": false,
+    "selected_radioactive_inventory_is_decay_complete": false,
+    "stable_component_sum_is_exact_total_returned_mass": false,
+    "source_age_history_may_be_invented": false,
+    "source_lifetime_may_be_invented": false,
+    "exact_launch_momentum_may_be_derived": false,
+    "cross_source_interpolation_allowed": false,
+    "out_of_domain_extrapolation_allowed": false
+  },
+  "approval": {
+    "canonical_rows_emitted": 0,
+    "canonical_conversion_allowed": false,
+    "runtime_deposition_allowed": false,
+    "production_ready": false,
+    "required_before_approval": [
+      "Select and approve source ownership across the Stockinger, Sukhbold, and F23 transition seams.",
+      "Select an explicit decay horizon and demonstrate that stable and selected-radioactive source segments can be combined without double counting.",
+      "Supply an age-resolved presupernova-wind history or approve and quantify a terminal-lumped approximation.",
+      "Define the 8--8.8 Msun terminal-fate policy and the required birth-metallicity domain.",
+      "Select an explosion-engine uncertainty model and a canonical event momentum/deposition prescription.",
+      "Obtain permission before redistributing MPA archive source data to third parties.",
+      "Record a project physics approval identifier."
+    ]
+  }
+}

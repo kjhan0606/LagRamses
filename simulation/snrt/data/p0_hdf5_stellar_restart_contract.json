@@ -1,0 +1,222 @@
+{
+  "schema": "lagramses-hdf5-stellar-restart-state",
+  "schema_version": 1,
+  "release_fields": [
+    "tpp",
+    "mp0",
+    "indtab"
+  ],
+  "bitwise_synthetic_roundtrip": true,
+  "legacy_missing_state_rejected": true,
+  "production_fortran_source_guard": true,
+  "production_fortran_runtime_roundtrip": {
+    "writer_output": "linked HDF5 production binary",
+    "reader_output": "linked HDF5 production binary",
+    "schema_version": 1,
+    "active_particle_count": 3,
+    "release_dataset_lengths": {
+      "tpp": 3,
+      "mp0": 3,
+      "indtab": 3
+    },
+    "writer_release_values": {
+      "tpp": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "mp0": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "indtab": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "writer_particle_type_counts": {
+      "PTYPE_DM": 3,
+      "PTYPE_STAR": 0,
+      "PTYPE_SINK": 0
+    },
+    "writer_release_state_zero": true,
+    "writer_release_zero_match": true,
+    "restart_seed_particle_type": "PTYPE_STAR",
+    "restart_seed_release_values": {
+      "tpp": [
+        0.125,
+        0.25,
+        0.5
+      ],
+      "mp0": [
+        8.0,
+        16.0,
+        32.0
+      ],
+      "indtab": [
+        1.0,
+        2.0,
+        3.0
+      ]
+    },
+    "restart_writer_nonzero_payload": {
+      "tpp": [
+        0.125,
+        0.25,
+        0.5
+      ],
+      "mp0": [
+        8.0,
+        16.0,
+        32.0
+      ],
+      "indtab": [
+        1.0,
+        2.0,
+        3.0
+      ]
+    },
+    "restart_writer_nonzero": true,
+    "restart_writer_nonzero_payload_match": true,
+    "binary_release_values": {
+      "tpp": [
+        0.125,
+        0.25,
+        0.5
+      ],
+      "mp0": [
+        8.0,
+        16.0,
+        32.0
+      ],
+      "indtab": [
+        1.0,
+        2.0,
+        3.0
+      ]
+    },
+    "binary_release_record_indices": {
+      "tpp": 20,
+      "mp0": 21,
+      "indtab": 22
+    },
+    "binary_nonzero_payload": true,
+    "binary_hdf5_writer_bitwise_match": true,
+    "release_state_value_match": true,
+    "binary_release_record_order": [
+      "tpp",
+      "mp0",
+      "indtab"
+    ],
+    "restored_release_state_sample": [
+      0.125,
+      8.0,
+      1.0
+    ],
+    "restored_release_state_value_match": true,
+    "restart_particle_restore_marker": true,
+    "cross_ncpu_reader_nproc": 4,
+    "cross_ncpu_particle_restore_marker": true,
+    "cross_ncpu_local_count_markers": 4,
+    "cross_ncpu_rank_value_match": true,
+    "cross_ncpu_zero_particle_rank_covered": true,
+    "same_ncpu_reader_nproc": 2,
+    "same_ncpu_rank_value_match": true,
+    "linked_sink_payload_exercised": true,
+    "linked_sink_writer_nsink": 1,
+    "linked_sink_writer_roundtrip": true,
+    "fortran_missing_schema_rejected": true,
+    "fortran_non_scalar_schema_attribute_rejected": true,
+    "fortran_bad_extent_rejected": true,
+    "fortran_truncated_ptypep_rejected": true,
+    "fortran_missing_npart_per_cpu_rejected": true,
+    "fortran_inconsistent_npart_per_cpu_rejected": true,
+    "fortran_negative_npart_per_cpu_rejected": true,
+    "fortran_wrong_length_npart_per_cpu_rejected": true,
+    "fortran_negative_ngrid_per_cpu_rejected": true,
+    "fortran_wrong_length_ngrid_per_cpu_rejected": true,
+    "fortran_truncated_amr_son_flag_rejected": true,
+    "fortran_oversized_nsink_rejected": true,
+    "fortran_inconsistent_nindsink_rejected": true,
+    "fortran_missing_stellar_ledger_attribute_rejected": true,
+    "fortran_missing_header_aexp_rejected": true,
+    "ksection_runtime_writer_dimensions": [
+      2,
+      3
+    ],
+    "ksection_runtime_restart_marker": true,
+    "ksection_oversized_dimensions_rejected": true,
+    "same_ncpu_metadata_injected": true,
+    "injected_restart_payload": true,
+    "true_ptype_star_continuation_equivalence": false,
+    "binary_build": {
+      "path": "/gpfs/kjhan/LRD_JWST/bin/ramses_final3d",
+      "sha256": "0ba9de317b680f331e8d4cd456ecf5aba9ea661b52b3fa16b6875b5282ea95e4",
+      "size_bytes": 8282096,
+      "mtime_ns": 1788335833449670504,
+      "source_inputs": {
+        "git_head": "eb3b2ee87edad51b16ec626dc9a5e12558753268",
+        "worktree_dirty": true,
+        "git_status_short": [
+          " M bin/Makefile",
+          " M patch/cuRamses/output_part.f90",
+          " M patch/cuRamses/ramses_hdf5_io.f90",
+          " M patch/lagRamses/PHASE0_STELLAR_ENRICHMENT.md",
+          " M patch/lagRamses/PHASE0_YIELD_TABLE_FORMAT.md",
+          " M patch/lagRamses/backup_hdf5.f90",
+          " M patch/lagRamses/generate_stellar_yield_module.py",
+          " M patch/lagRamses/restore_hdf5.f90",
+          " M patch/lagRamses/stellar_enrichment_config.f90",
+          " M patch/lagRamses/stellar_enrichment_driver.f90",
+          " M patch/lagRamses/stellar_enrichment_sources.mk",
+          " M patch/lagRamses/stellar_ramses_runtime.f90",
+          " M patch/lagRamses/stellar_source_increment.f90",
+          " M patch/lagRamses/stellar_ssp_sources.f90",
+          " M patch/lagRamses/stellar_yield_audit.f90",
+          " M patch/lagRamses/stellar_yield_interpolation.f90",
+          " M patch/lagRamses/stellar_yield_provider.f90",
+          " M patch/lagRamses/stellar_yield_tables.f90",
+          " M provenance/feedback_implementation_plan.md",
+          " M provenance/production_publication_readiness_plan.md",
+          " M simulation/snrt/config/stellar_source_identity_v1.json",
+          " M simulation/snrt/data/p0_production_linked_build_evidence.json",
+          " M simulation/snrt/native/phase0/README.md",
+          " M simulation/snrt/native/phase0/g1_contract_test.f90",
+          " M simulation/snrt/native/phase0/stellar_enrichment_driver.f90",
+          " M simulation/snrt/native/phase0/stellar_ramses_runtime.f90",
+          " M simulation/snrt/native/phase0/stellar_source_increment.f90",
+          "?? patch/lagRamses/stellar_native_units.f90",
+          "?? patch/lagRamses/stellar_progress_contract.f90",
+          "?? provenance/claude_opus5_p02_time_interval_audit_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_audit_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit10_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit11_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit12_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit13_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit14_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit2_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit3_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit4_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit5_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit6_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit7_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit8_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit9_2026-09-02.md",
+          "?? provenance/claude_opus5_p03_hdf5_restart_reaudit_2026-09-02.md",
+          "?? simulation/snrt/data/p0_hdf5_stellar_restart_contract.json",
+          "?? simulation/snrt/tests/p0_hdf5_stellar_restart.py"
+        ],
+        "sha256": {
+          "patch/cuRamses/ramses_hdf5_io.f90": "90ad1f5c372641cd5ae1944aae8ccb345070695f8d7d82f360c843248b5ca3b4",
+          "patch/lagRamses/restore_hdf5.f90": "e48593c3fa0462a4f8415c63793f909d360f0ee7525a03520595f41f18f7aaba",
+          "patch/lagRamses/backup_hdf5.f90": "f42cfaee2a658424cb0ebac4132fad14364fbd2cf92d3d2ba963f105a6f3e1ec",
+          "patch/cuRamses/output_part.f90": "82db0e0e3e29ed617a611e408e842fabeb586632e8e405f42bf97ffde59bca3f",
+          "bin/Makefile": "bec7e04c883020969a732cfe1c563e78f55fea2b07ac3616b63d7f5b7fbef01c"
+        }
+      }
+    }
+  },
+  "scope": "bounded one-rank HDF5/binary writer plus one-rank and four-rank HDF5 reader fixtures, two-rank same-ncpu and negative fixtures; post-restart writer uses a temporary PTYPE_STAR seed; no production data used; fixture runtime outputs were opened"
+}

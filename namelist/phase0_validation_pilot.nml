@@ -1,6 +1,6 @@
 ! Phase 0 integration pilot: 10 h^-1 cMpc LCDM hydro+gravity.
-! The legacy table is only for RAMSES startup compatibility.  Phase 0
-! uses its embedded backend unless PHASE0_YIELD_TABLE is set in the shell.
+! The legacy table is only for RAMSES startup compatibility.  Phase 0 requires
+! an approved external canonical table through PHASE0_YIELD_TABLE.
 
 &RUN_PARAMS
 cosmo=.true.
@@ -62,6 +62,14 @@ yieldtablefilename='/gpfs/kjhan/Run_JWST/opt_run/yield_table.asc'
 
 &STELLAR_ENRICHMENT_PARAMS
 feedback_mode='channel_resolved'
+imf_id=1
+population_model='single_star_ssp'
+yield_source_basis='per_star_cumulative'
+imf_mass_min_msun=0.08
+imf_mass_max_msun=120.0
+binary_fraction=0.0
+channel_mass_min_msun=0.8,1.0,8.0,3.0,140.0
+channel_mass_max_msun=120.0,8.0,40.0,8.0,260.0
 /
 
 &OUTPUT_PARAMS

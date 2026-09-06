@@ -1,0 +1,107 @@
+{
+  "schema": "snrt-fp1-population-fate-map",
+  "schema_version": 1,
+  "gate": "F-P1",
+  "status": "review_only_unresolved",
+  "purpose": "Make every configured IMF mass interval explicit before a physical population and terminal-fate source is approved.",
+  "population_domain_msun": [0.08, 120.0],
+  "age_horizon_yr": 13800000000.0,
+  "interval_convention": "half_open_left_closed_right_last",
+  "source_contract": "config/stellar_feedback_contract_v1.json",
+  "resolution_strategy": {
+    "canonical_method": "per_source_node_fate_lookup_v1",
+    "mass_only_partition_allowed": false,
+    "out_of_source_hull_policy": "unresolved_and_block",
+    "cross_source_interpolation_allowed": false,
+    "candidate_models": [
+      {
+        "id": "sukhbold2016_engine_node",
+        "role": "solar_metallicity_engine_specific_validation",
+        "source_candidate": "sukhbold2016_ccsn",
+        "status": "candidate_not_approved",
+        "outcome_coordinate": ["zams_mass_msun", "engine_branch"],
+        "requires": ["wind_ownership", "complete_decay_projection", "event_deposition_contract"]
+      },
+      {
+        "id": "limongi_chieffi_2018_grid_node",
+        "role": "metallicity_rotation_sensitivity_branch",
+        "source_candidate": "limongi_chieffi_2018_cds",
+        "status": "candidate_not_approved",
+        "outcome_coordinate": ["zams_mass_msun", "birth_metallicity", "initial_rotation"],
+        "requires": ["source_hull_fingerprint", "set_semantics", "wind_ownership"]
+      },
+      {
+        "id": "ugolini2025_hyperion_grid_node",
+        "role": "modern_multimetallicity_remnant_branch",
+        "source_candidate": "ugolini2025_remnant_grid",
+        "status": "reference_only_not_staged",
+        "outcome_coordinate": ["zams_mass_msun", "birth_metallicity", "initial_rotation"],
+        "requires": ["source_asset_acquisition", "ppisn_pisn_semantics", "event_deposition_contract"]
+      },
+      {
+        "id": "pre_sn_structure_explodability",
+        "role": "structure_based_fate_classifier",
+        "source_candidate": "patton_sukhbold2020",
+        "status": "algorithm_candidate_not_approved",
+        "outcome_coordinate": ["pre_sn_structure_diagnostics"],
+        "requires": ["source_grid_structural_columns", "engine_calibration", "threshold_provenance"]
+      }
+    ]
+  },
+  "intervals": [
+    {
+      "id": "sub_horizon_low_mass",
+      "mass_msun": [0.08, 0.8],
+      "fate_class": "not_terminal_within_age_horizon",
+      "terminal_remnant_owner_channel": null,
+      "evidence_status": "model_selection_pending"
+    },
+    {
+      "id": "low_mass_lifetime_seam",
+      "mass_msun": [0.8, 1.0],
+      "fate_class": "unresolved",
+      "terminal_remnant_owner_channel": null,
+      "evidence_status": "no_approved_lifetime_or_terminal_fate_source"
+    },
+    {
+      "id": "agb_white_dwarf",
+      "mass_msun": [1.0, 8.0],
+      "fate_class": "terminal_channel",
+      "terminal_remnant_owner_channel": 2,
+      "evidence_status": "channel_window_only_not_physics_approved"
+    },
+    {
+      "id": "core_collapse",
+      "mass_msun": [8.0, 40.0],
+      "fate_class": "terminal_channel",
+      "terminal_remnant_owner_channel": 3,
+      "evidence_status": "channel_window_only_not_physics_approved"
+    },
+    {
+      "id": "massive_terminal_fate_seam",
+      "mass_msun": [40.0, 120.0],
+      "fate_class": "unresolved",
+      "terminal_remnant_owner_channel": null,
+      "evidence_status": "model_dependent_source_node_required",
+      "resolution_note": "Do not interpret this interval as universal direct collapse; candidate outcomes are non-monotonic in ZAMS mass and depend on source model, metallicity, rotation, winds, pre-SN structure, fallback, and pair instability.",
+      "candidate_resolution_strategy": "per_source_node_fate_lookup_v1"
+    }
+  ],
+  "policy": {
+    "unresolved_intervals_block_production": true,
+    "unassigned_intervals_block_production": true,
+    "cross_source_interpolation_allowed": false,
+    "cross_metallicity_extrapolation_allowed": false,
+    "cross_rotation_extrapolation_allowed": false,
+    "direct_collapse_without_explicit_remnant_model_allowed": false,
+    "terminal_channel_owner_must_match_source_contract": true,
+    "physics_approval_required_before_canonical_conversion": true
+  },
+  "approval": {
+    "population_model_selected": false,
+    "fate_policy_selected": false,
+    "production_ready": false,
+    "publication_ready": false,
+    "approval_id": null
+  }
+}

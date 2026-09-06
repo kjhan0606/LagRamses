@@ -74,13 +74,6 @@ recursive subroutine amr_step(ilevel,icount)
   ! Phase 1: second call → force GPU, record time
   ! Phase 2+: use faster path, keep booking times
   !
-  ! AGN feedback (sink particles)
-  integer, save :: sk_auto_phase = 0
-  real(dp), save :: sk_cpu_ref = 0d0, sk_gpu_ref = 0d0
-  logical, save :: sk_use_gpu = .false.
-  logical, save :: sk_auto_init = .false.
-  real(dp) :: sk_dt_agn
-  !
   ! Hydro Godunov
   integer, save :: hy_auto_phase = 0
   real(dp), save :: hy_cpu_ref = 0d0, hy_gpu_ref = 0d0
@@ -404,72 +397,12 @@ recursive subroutine amr_step(ilevel,icount)
      call diag_check_nan('post_kinfb')
 
      call timer('sinks','start')
-#ifdef HYDRO_CUDA
-     ! --- GPU auto-tuning: set gpu_sink for this step ---
-     if(.not. sk_auto_init .and. gpu_sink) then
-        sk_auto_init = .true.
-        sk_auto_phase = 0
-     endif
-     if(sk_auto_init) then
-        if(sk_auto_phase == 0) then
-           gpu_sink = .false.  ! Phase 0: force CPU path
-        else if(sk_auto_phase == 1) then
-           gpu_sink = .true.   ! Phase 1: force GPU path
-        else
-           gpu_sink = sk_use_gpu  ! Phase 2+: use decided path
-        endif
-     endif
-#endif
      call system_clock(sk_t1)
      if(sink .and. sink_AGN)call AGN_feedback
      if(sink .and. sink_AGN)call diag_check_eint('AGN_fb',0)
      call diag_check_nan('post_agnfb')
      call system_clock(sk_t2)
      sk_agn_fb = sk_agn_fb + dble(sk_t2-sk_t1)/dble(pt_rate)
-#ifdef HYDRO_CUDA
-     ! --- GPU auto-tuning: record time and update decision ---
-     if(sk_auto_init .and. sink .and. sink_AGN) then
-        sk_dt_agn = dble(sk_t2-sk_t1)/dble(pt_rate)
-        if(sk_auto_phase == 0) then
-           ! Phase 0 done: recorded CPU time
-           sk_cpu_ref = sk_dt_agn
-           sk_auto_phase = 1
-           if(myid==1) write(*,'(A,F8.3,A)') &
-                ' [GPU auto-tune] AGN_feedback CPU: ', sk_cpu_ref, ' s'
-        else if(sk_auto_phase == 1) then
-           ! Phase 1 done: recorded GPU time, decide
-           sk_gpu_ref = sk_dt_agn
-           sk_use_gpu = (sk_gpu_ref < sk_cpu_ref)
-           sk_auto_phase = 2
-           gpu_sink = sk_use_gpu
-           if(myid==1) then
-              write(*,'(A,F8.3,A,F8.3,A)') &
-                   ' [GPU auto-tune] AGN_feedback GPU: ', sk_gpu_ref, &
-                   ' s  (CPU was ', sk_cpu_ref, ' s)'
-              if(sk_use_gpu) then
-                 write(*,'(A)') ' [GPU auto-tune] Decision: GPU (faster)'
-              else
-                 write(*,'(A)') ' [GPU auto-tune] Decision: CPU (faster)'
-              endif
-           endif
-        else
-           ! Phase 2+: keep booking, check for switch
-           if(sk_use_gpu) then
-              sk_gpu_ref = sk_dt_agn
-           else
-              sk_cpu_ref = sk_dt_agn
-              ! Switch to GPU if CPU became slower
-              if(sk_cpu_ref > sk_gpu_ref .and. sk_gpu_ref > 0d0) then
-                 sk_use_gpu = .true.
-                 gpu_sink = .true.
-                 if(myid==1) write(*,'(A,F8.3,A,F8.3,A)') &
-                      ' [GPU auto-tune] Switching to GPU: CPU=', &
-                      sk_cpu_ref, ' s > GPU=', sk_gpu_ref, ' s'
-              endif
-           endif
-        endif
-     endif
-#endif
      !-----------------------------------------------------
      ! Create sink particles and associated cloud particles
      !-----------------------------------------------------

@@ -1,0 +1,74 @@
+{
+  "schema": "fp1-imf-jax-fortran-differential-v1",
+  "status": "pass",
+  "jax_version": "0.11.1",
+  "jax_backend": "cpu",
+  "normalization_method": "independent 256-point Gauss-Legendre quadrature per IMF branch over the actual JAX shape",
+  "tolerance_relative": 2e-12,
+  "rows": [
+    {
+      "imf_id": 0,
+      "mass_min_msun": 0.08,
+      "mass_max_msun": 120.0,
+      "fortran_normalization": 0.15671292625272332,
+      "jax_normalization": 0.15671292625272312,
+      "relative_difference": 1.239776666514938e-15
+    },
+    {
+      "imf_id": 0,
+      "mass_min_msun": 1.0,
+      "mass_max_msun": 120.0,
+      "fortran_normalization": 0.4306058334421291,
+      "jax_normalization": 0.43060583344212827,
+      "relative_difference": 1.9337110735653206e-15
+    },
+    {
+      "imf_id": 1,
+      "mass_min_msun": 0.08,
+      "mass_max_msun": 120.0,
+      "fortran_normalization": 0.21823439877797132,
+      "jax_normalization": 0.21823439877797107,
+      "relative_difference": 1.1446416419200887e-15
+    },
+    {
+      "imf_id": 1,
+      "mass_min_msun": 1.0,
+      "mass_max_msun": 120.0,
+      "fortran_normalization": 0.3936070318981693,
+      "jax_normalization": 0.39360703189816837,
+      "relative_difference": 2.3975424584780505e-15
+    },
+    {
+      "imf_id": 2,
+      "mass_min_msun": 0.08,
+      "mass_max_msun": 120.0,
+      "fortran_normalization": 0.8295812180922688,
+      "jax_normalization": 0.8295812180922676,
+      "relative_difference": 1.4721226812440238e-15
+    },
+    {
+      "imf_id": 2,
+      "mass_min_msun": 1.0,
+      "mass_max_msun": 120.0,
+      "fortran_normalization": 1.410335425671514,
+      "jax_normalization": 1.4103354256715108,
+      "relative_difference": 2.2041738528054854e-15
+    },
+    {
+      "imf_id": 3,
+      "mass_min_msun": 0.08,
+      "mass_max_msun": 120.0,
+      "fortran_normalization": 0.00016701877315678827,
+      "jax_normalization": 0.00016701877315678827,
+      "relative_difference": 0.0
+    },
+    {
+      "imf_id": 3,
+      "mass_min_msun": 1.0,
+      "mass_max_msun": 120.0,
+      "fortran_normalization": 0.00016701877315678827,
+      "jax_normalization": 0.00016701877315678827,
+      "relative_difference": 0.0
+    }
+  ]
+}

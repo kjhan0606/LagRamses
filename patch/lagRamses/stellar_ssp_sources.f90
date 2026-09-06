@@ -7,8 +7,9 @@
 ! SN table.
 
 module stellar_ssp_sources
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
-       n_stellar_channels
+       n_stellar_channels, yield_basis_per_star_cumulative
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, clear_cumulative
   use stellar_yield_tables, only: stellar_yield_table_t
@@ -27,17 +28,26 @@ module stellar_ssp_sources
   integer, parameter, public :: ssp_source_err_argument = 1
   integer, parameter, public :: ssp_source_err_imf = 2
   integer, parameter, public :: ssp_source_err_provider = 3
+  integer, parameter, public :: ssp_source_err_nonfinite = 4
+  integer, parameter, public :: ssp_source_err_basis = 5
+
+  real(stellar_dp), parameter :: chabrier_high_amplitude = &
+       exp(-(log10(1.0_stellar_dp)-log10(0.079_stellar_dp))**2 / &
+       (2.0_stellar_dp*0.69_stellar_dp**2))
 
   public :: integrate_ssp_channel
+  public :: calculate_imf_normalization
+  public :: calculate_imf_mass_fraction
+  public :: evaluate_imf
 
 contains
 
-  subroutine integrate_ssp_channel(table, population, channel_id, age, &
+  subroutine integrate_ssp_channel(table, population, channel_id, age_gyr, &
        mass_min, mass_max, n_mass_bins, state, ierr)
     type(stellar_yield_table_t), intent(in) :: table
     type(stellar_population_t), intent(in) :: population
     integer, intent(in) :: channel_id, n_mass_bins
-    real(stellar_dp), intent(in) :: age, mass_min, mass_max
+    real(stellar_dp), intent(in) :: age_gyr, mass_min, mass_max
     type(stellar_cumulative_t), intent(out) :: state
     integer, intent(out) :: ierr
 
@@ -50,15 +60,30 @@ contains
     call clear_cumulative(state)
     ierr = ssp_source_ok
 
-    if (population%initial_mass <= 0.0_stellar_dp .or. age < 0.0_stellar_dp .or. &
+    if (.not. ieee_is_finite(population%initial_mass) .or. &
+         .not. ieee_is_finite(population%birth_metallicity) .or. &
+         .not. ieee_is_finite(population%imf_mass_min) .or. &
+         .not. ieee_is_finite(population%imf_mass_max) .or. &
+         .not. ieee_is_finite(age_gyr) .or. &
+         population%initial_mass <= 0.0_stellar_dp .or. age_gyr < 0.0_stellar_dp .or. &
          mass_min <= 0.0_stellar_dp .or. mass_max <= mass_min .or. &
+         population%imf_mass_min <= 0.0_stellar_dp .or. &
+         population%imf_mass_max <= population%imf_mass_min .or. &
+         mass_min < population%imf_mass_min .or. &
+         mass_max > population%imf_mass_max .or. &
          n_mass_bins <= 0 .or. channel_id < 1 .or. &
          channel_id > n_stellar_channels) then
        ierr = ssp_source_err_argument
        return
     end if
+    if (population%yield_basis_id /= yield_basis_per_star_cumulative) then
+       ierr = ssp_source_err_basis
+       return
+    end if
 
-    call calculate_imf_normalization(population%imf_id, imf_norm, provider_ierr)
+    call calculate_imf_normalization(population%imf_id, &
+         population%imf_mass_min, population%imf_mass_max, imf_norm, &
+         provider_ierr)
     if (provider_ierr /= 0) then
        ierr = ssp_source_err_imf
        return
@@ -77,7 +102,7 @@ contains
        if (n_stars <= 0.0_stellar_dp) cycle
 
        call evaluate_channel_cumulative(table, channel_id, mass, &
-            population%birth_metallicity, age, star_state, provider_ierr)
+            population%birth_metallicity, age_gyr, star_state, provider_ierr)
        if (provider_ierr /= provider_ok) then
           ierr = ssp_source_err_provider
           return
@@ -89,6 +114,8 @@ contains
        state%net_yield = state%net_yield + star_weight * star_state%net_yield
        state%returned_mass = state%returned_mass + &
             star_weight * star_state%returned_mass
+       state%remnant_mass = state%remnant_mass + &
+            star_weight * star_state%remnant_mass
        state%energy = state%energy + star_weight * star_state%energy
        state%momentum = state%momentum + star_weight * star_state%momentum
        state%channel_returned_mass = state%channel_returned_mass + &
@@ -103,52 +130,167 @@ contains
             star_weight * star_state%channel_net_yield
     end do
 
-    ! Remnant and living masses are population-level ledger quantities.  They
-    ! are intentionally left unset here because a channel-specific table row
-    ! must not cause the same remnant to be counted once per channel.
+    if (.not. cumulative_values_finite(state)) then
+       call clear_cumulative(state)
+       ierr = ssp_source_err_nonfinite
+       return
+    end if
+
+    ! Remnant contributions remain channel-local here.  The population ledger
+    ! owns the single terminal-remnant decision after all channels are known.
   end subroutine integrate_ssp_channel
 
-  subroutine calculate_imf_normalization(imf_id, normalization, ierr)
+  subroutine calculate_imf_normalization(imf_id, mass_min, mass_max, &
+       normalization, ierr)
     integer, intent(in) :: imf_id
+    real(stellar_dp), intent(in) :: mass_min, mass_max
     real(stellar_dp), intent(out) :: normalization
     integer, intent(out) :: ierr
 
-    integer, parameter :: n_bins = 1024
-    real(stellar_dp) :: mass_min, mass_max, dlog_mass
-    real(stellar_dp) :: mass, dm, integral, log_mass
-    integer :: bin
+    real(stellar_dp) :: integral
 
     ierr = 0
     normalization = 0.0_stellar_dp
+    if (.not. ieee_is_finite(mass_min) .or. .not. ieee_is_finite(mass_max) .or. &
+         mass_min < 0.08_stellar_dp .or. mass_max <= mass_min) then
+       ierr = 1
+       return
+    end if
     select case (imf_id)
-    case (imf_salpeter, imf_kroupa, imf_chabrier)
-       mass_min = 0.08_stellar_dp
-       mass_max = 120.0_stellar_dp
+    case (imf_salpeter)
+       integral = integrate_power_law(mass_min, mass_max, -1.35_stellar_dp, &
+            1.0_stellar_dp)
+    case (imf_kroupa)
+       integral = 0.0_stellar_dp
+       if (mass_min < 0.5_stellar_dp) integral = integral + &
+            integrate_power_law(mass_min, min(mass_max,0.5_stellar_dp), &
+            -0.3_stellar_dp, 2.0_stellar_dp)
+       if (mass_max > 0.5_stellar_dp) integral = integral + &
+            integrate_power_law(max(mass_min,0.5_stellar_dp), mass_max, &
+            -1.3_stellar_dp, 1.0_stellar_dp)
+    case (imf_chabrier)
+       integral = 0.0_stellar_dp
+       if (mass_min < 1.0_stellar_dp) integral = integral + &
+            integrate_chabrier_low(mass_min, min(mass_max,1.0_stellar_dp))
+       if (mass_max > 1.0_stellar_dp) integral = integral + &
+            integrate_power_law(max(mass_min,1.0_stellar_dp), mass_max, &
+            -1.3_stellar_dp, chabrier_high_amplitude)
     case (imf_popiii)
-       mass_min = 10.0_stellar_dp
-       mass_max = 300.0_stellar_dp
+       integral = 0.0_stellar_dp
+       if (mass_max > 10.0_stellar_dp .and. mass_min < 100.0_stellar_dp) &
+            integral = integral + integrate_power_law(max(mass_min,10.0_stellar_dp), &
+            min(mass_max,100.0_stellar_dp), 1.5_stellar_dp, 0.1_stellar_dp)
+       if (mass_max > 100.0_stellar_dp) integral = integral + &
+            100.0_stellar_dp * (mass_max-max(mass_min,100.0_stellar_dp))
     case default
        ierr = 1
        return
     end select
 
-    dlog_mass = (log10(mass_max) - log10(mass_min)) / &
-         real(n_bins, stellar_dp)
-    integral = 0.0_stellar_dp
-    do bin = 1, n_bins
-       log_mass = log10(mass_min) + &
-            (real(bin, stellar_dp) - 0.5_stellar_dp) * dlog_mass
-       mass = 10.0_stellar_dp ** log_mass
-       dm = mass * log(10.0_stellar_dp) * dlog_mass
-       integral = integral + mass * evaluate_imf(mass, imf_id) * dm
-    end do
-
-    if (integral <= 0.0_stellar_dp) then
+    if (.not. ieee_is_finite(integral) .or. integral <= 0.0_stellar_dp) then
        ierr = 1
        return
     end if
     normalization = 1.0_stellar_dp / integral
   end subroutine calculate_imf_normalization
+
+  subroutine calculate_imf_mass_fraction(imf_id, mass_min, mass_max, &
+       interval_min, interval_max, fraction, ierr)
+    ! Return the initial-mass fraction in one explicitly supplied interval.
+    ! The interval must already be clipped to the configured IMF support;
+    ! silently clipping it here would hide a fate-map/domain mismatch.
+    integer, intent(in) :: imf_id
+    real(stellar_dp), intent(in) :: mass_min, mass_max
+    real(stellar_dp), intent(in) :: interval_min, interval_max
+    real(stellar_dp), intent(out) :: fraction
+    integer, intent(out) :: ierr
+
+    real(stellar_dp) :: normalization, integral
+
+    fraction = 0.0_stellar_dp
+    ierr = 0
+    if (.not. ieee_is_finite(mass_min) .or. .not. ieee_is_finite(mass_max) .or. &
+         .not. ieee_is_finite(interval_min) .or. &
+         .not. ieee_is_finite(interval_max) .or. mass_min < 0.08_stellar_dp .or. &
+         mass_max <= mass_min .or. interval_max <= interval_min .or. &
+         interval_min < mass_min .or. interval_max > mass_max) then
+       ierr = 1
+       return
+    end if
+
+    call calculate_imf_normalization(imf_id, mass_min, mass_max, normalization, ierr)
+    if (ierr /= 0) return
+
+    select case (imf_id)
+    case (imf_salpeter)
+       integral = integrate_power_law(interval_min, interval_max, &
+            -1.35_stellar_dp, 1.0_stellar_dp)
+    case (imf_kroupa)
+       integral = 0.0_stellar_dp
+       if (interval_min < 0.5_stellar_dp) integral = integral + &
+            integrate_power_law(interval_min, min(interval_max,0.5_stellar_dp), &
+            -0.3_stellar_dp, 2.0_stellar_dp)
+       if (interval_max > 0.5_stellar_dp) integral = integral + &
+            integrate_power_law(max(interval_min,0.5_stellar_dp), interval_max, &
+            -1.3_stellar_dp, 1.0_stellar_dp)
+    case (imf_chabrier)
+       integral = 0.0_stellar_dp
+       if (interval_min < 1.0_stellar_dp) integral = integral + &
+            integrate_chabrier_low(interval_min, min(interval_max,1.0_stellar_dp))
+       if (interval_max > 1.0_stellar_dp) integral = integral + &
+            integrate_power_law(max(interval_min,1.0_stellar_dp), interval_max, &
+            -1.3_stellar_dp, chabrier_high_amplitude)
+    case (imf_popiii)
+       integral = 0.0_stellar_dp
+       if (interval_max > 10.0_stellar_dp .and. interval_min < 100.0_stellar_dp) &
+            integral = integral + integrate_power_law(max(interval_min,10.0_stellar_dp), &
+            min(interval_max,100.0_stellar_dp), 1.5_stellar_dp, 0.1_stellar_dp)
+       if (interval_max > 100.0_stellar_dp) integral = integral + &
+            100.0_stellar_dp * (interval_max-max(interval_min,100.0_stellar_dp))
+    case default
+       ierr = 1
+       return
+    end select
+
+    fraction = normalization * integral
+    if (.not. ieee_is_finite(fraction) .or. fraction < 0.0_stellar_dp .or. &
+         fraction > 1.0_stellar_dp + 1.0e-12_stellar_dp) then
+       fraction = 0.0_stellar_dp
+       ierr = 1
+    end if
+  end subroutine calculate_imf_mass_fraction
+
+  pure real(stellar_dp) function integrate_power_law(mass_min, mass_max, &
+       exponent, amplitude)
+    real(stellar_dp), intent(in) :: mass_min, mass_max, exponent, amplitude
+
+    integrate_power_law = 0.0_stellar_dp
+    if (mass_max <= mass_min) return
+    integrate_power_law = amplitude * &
+         (mass_max**(exponent+1.0_stellar_dp) - &
+          mass_min**(exponent+1.0_stellar_dp)) / &
+         (exponent+1.0_stellar_dp)
+  end function integrate_power_law
+
+  pure real(stellar_dp) function integrate_chabrier_low(mass_min, mass_max)
+    real(stellar_dp), intent(in) :: mass_min, mass_max
+    real(stellar_dp), parameter :: log_mean = log10(0.079_stellar_dp)
+    real(stellar_dp), parameter :: sigma = 0.69_stellar_dp
+    real(stellar_dp), parameter :: ln10 = log(10.0_stellar_dp)
+    real(stellar_dp), parameter :: sqrt_two = sqrt(2.0_stellar_dp)
+    real(stellar_dp), parameter :: sqrt_pi_over_two = &
+         sqrt(acos(-1.0_stellar_dp)/2.0_stellar_dp)
+    real(stellar_dp) :: shifted_mean, prefactor
+
+    integrate_chabrier_low = 0.0_stellar_dp
+    if (mass_max <= mass_min) return
+    shifted_mean = log_mean + ln10*sigma**2
+    prefactor = ln10 * exp(ln10*log_mean + &
+         0.5_stellar_dp*(ln10*sigma)**2) * sigma * sqrt_pi_over_two
+    integrate_chabrier_low = prefactor * &
+         (erf((log10(mass_max)-shifted_mean)/(sqrt_two*sigma)) - &
+          erf((log10(mass_min)-shifted_mean)/(sqrt_two*sigma)))
+  end function integrate_chabrier_low
 
   real(stellar_dp) function evaluate_imf(mass, imf_id)
     real(stellar_dp), intent(in) :: mass
@@ -173,7 +315,7 @@ contains
                exp(-((log10(mass) - log10(0.079_stellar_dp)) ** 2) / &
                (2.0_stellar_dp * 0.69_stellar_dp ** 2))
        else
-          evaluate_imf = mass ** (-2.3_stellar_dp)
+          evaluate_imf = chabrier_high_amplitude * mass ** (-2.3_stellar_dp)
        end if
     case (imf_popiii)
        if (mass < 10.0_stellar_dp) then
@@ -185,5 +327,21 @@ contains
        end if
     end select
   end function evaluate_imf
+
+  logical function cumulative_values_finite(state)
+    type(stellar_cumulative_t), intent(in) :: state
+
+    cumulative_values_finite = ieee_is_finite(state%returned_mass) .and. &
+         ieee_is_finite(state%remnant_mass) .and. &
+         ieee_is_finite(state%living_mass) .and. ieee_is_finite(state%energy) .and. &
+         all(ieee_is_finite(state%momentum)) .and. &
+         all(ieee_is_finite(state%ejected_mass)) .and. &
+         all(ieee_is_finite(state%net_yield)) .and. &
+         all(ieee_is_finite(state%channel_returned_mass)) .and. &
+         all(ieee_is_finite(state%channel_energy)) .and. &
+         all(ieee_is_finite(state%channel_momentum)) .and. &
+         all(ieee_is_finite(state%channel_ejected_mass)) .and. &
+         all(ieee_is_finite(state%channel_net_yield))
+  end function cumulative_values_finite
 
 end module stellar_ssp_sources

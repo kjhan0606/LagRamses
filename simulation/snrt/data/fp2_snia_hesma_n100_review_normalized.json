@@ -1,0 +1,180 @@
+{
+  "adapter": {
+    "code_sha256": "99c1b41d6b141773fee0c39a0c9a5aee6c1c0516a189e135a5983ce52fddecdf",
+    "normalization_policy": "read one explicit model; preserve source values and provenance; infer no missing physics",
+    "source_audit_code_sha256": "5ebfae209e700ebe838cd29a6a2317727d7f88968cc7b1fb2e4f4c11dceee658",
+    "source_audit_manifest_sha256": "0a9c6f6695f002f93d30b4c5cce0a6b0abaa3efe93105c836d4aed633561d6df"
+  },
+  "admission": {
+    "canonical_conversion_allowed": false,
+    "converter_input_emitted": false,
+    "required_next_approvals": [
+      "explicit decay horizon and isotope-to-11-element policy",
+      "authoritative returned mass and terminal remnant ownership",
+      "event energy convention or authoritative scalar",
+      "signed momentum convention/source",
+      "DTD population weighting and named approval id"
+    ],
+    "runtime_activation_allowed": false
+  },
+  "composition": {
+    "all_source_stable_element_mass_msun": 1.4004633930489443,
+    "all_source_stable_element_masses_msun": {
+      "al": 0.000674,
+      "ar": 0.0196,
+      "b": 4.29e-12,
+      "be": 4.44e-28,
+      "c": 0.00304,
+      "ca": 0.0148,
+      "cl": 0.000213,
+      "co": 0.000534,
+      "cr": 0.0103,
+      "cu": 4.58e-07,
+      "f": 4.39e-11,
+      "fe": 0.74,
+      "ga": 3.97e-13,
+      "ge": 3.5e-13,
+      "h": 7.33e-15,
+      "he": 0.000831,
+      "k": 0.000113,
+      "li": 5.47e-19,
+      "mg": 0.0154,
+      "mn": 0.0133,
+      "n": 3.22e-06,
+      "na": 3.74e-05,
+      "ne": 0.00357,
+      "ni": 0.074,
+      "o": 0.101,
+      "p": 0.000577,
+      "s": 0.115,
+      "sc": 2.05e-07,
+      "si": 0.287,
+      "ti": 0.000362,
+      "v": 0.000105,
+      "zn": 3.11e-06
+    },
+    "element_order": [
+      "H",
+      "He",
+      "C",
+      "N",
+      "O",
+      "Ne",
+      "Mg",
+      "Si",
+      "S",
+      "Ca",
+      "Fe"
+    ],
+    "missing_project_elements": [],
+    "non_project_stable_element_mass_msun": 0.11981917304893708,
+    "project_stable_element_mass_msun": 1.2806442200000072,
+    "project_stable_element_masses_msun": [
+      7.33e-15,
+      0.000831,
+      0.00304,
+      3.22e-06,
+      0.101,
+      0.00357,
+      0.0154,
+      0.287,
+      0.115,
+      0.0148,
+      0.74
+    ],
+    "source_mass_semantics": "integrated stable elements after about 2 Gyr; not an approved returned-mass scalar"
+  },
+  "decay_and_mapping": {
+    "decay_approval_status": "pending_physics_approval",
+    "exact_decay_horizon_yr": null,
+    "hydrogen_mapping": "free-proton column p is explicitly mapped to H; no implicit missing-element zero",
+    "isotope_to_element_conversion": "not performed; source integrated stable-element section copied as review diagnostic",
+    "source_integrated_abundance_convention": "stable elements/isotopes after about 2 Gyr; radioactive isotopes at end of simulation",
+    "source_profile_convention": "about 100 s after explosion"
+  },
+  "event_contract": {
+    "energy_erg_per_event": null,
+    "momentum_g_cm_s_per_event": null,
+    "population_weight": null,
+    "reasons": [
+      "integrated stable-element total is not an authoritative returned-mass field",
+      "profile kinetic energy is a review-only estimator and has model-dependent warnings",
+      "spherical-average profiles do not determine a signed momentum vector",
+      "terminal remnant ownership is not selected by this archive extraction",
+      "DTD normalization and population weighting are separate unapproved inputs"
+    ],
+    "returned_mass_msun_per_event": null,
+    "status": "blocked_missing_approved_event_contract",
+    "terminal_remnant_msun_per_event": null
+  },
+  "gate": "F-P2",
+  "profiles": {
+    "density": {
+      "estimator": "piecewise_constant_density_in_velocity_shells; inner edge v=0 and outer edge extrapolated by half a bin",
+      "kinetic_energy_estimate_erg": 1.5063100005966762e+51,
+      "mass_estimate_msun": 1.4532376337461586,
+      "member": "ddt_2013_density/ddt_2013_n100_density.dat",
+      "row_count": 93,
+      "spherical_average": true,
+      "velocity_max_km_s": 27185.0113371839,
+      "velocity_min_km_s": 578.404496535828
+    },
+    "density_isotope_row_count_match": true,
+    "isotopes": {
+      "isotope_count": 384,
+      "isotope_header_sha256": "7395323a17dd6b44df43044f2acbc693cc0cbc309cfc1057bf036760a4d6164c",
+      "member": "ddt_2013_isotopes/ddt_2013_n100_isotopes.dat",
+      "row_count": 93,
+      "spherical_average": true
+    },
+    "physical_warnings": [],
+    "profile_epoch_s": 100.22,
+    "profile_mass_vs_integrated_stable_mass": {
+      "integrated_stable_element_mass_msun": 1.4004633930489443,
+      "profile_mass_estimate_msun": 1.4532376337461586,
+      "relative_difference": 0.037683413189629776,
+      "review_classification": "profile_consistent_review_candidate",
+      "status": "within_5_percent"
+    }
+  },
+  "schema": "snrt-fp2-snia-hesma-source-normalized",
+  "schema_version": 1,
+  "source": {
+    "asset_root": "assets/review_only/fp2_snia/hesma_yysd4_xap92",
+    "candidate_id": "hesma_model_archive_snia_profiles",
+    "citation": "Seitenzahl et al. 2013, Three-dimensional delayed-detonation models with nucleosynthesis for Type Ia supernovae; HESMA record yysd4-xap92",
+    "license": "CC-BY-4.0",
+    "manifest_sha256": "0a9c6f6695f002f93d30b4c5cce0a6b0abaa3efe93105c836d4aed633561d6df",
+    "package_sha256": "bb9325de2e07bf86acd1ef4abf7c950fb44e74e6513b8c9c88336d910f8814c0",
+    "record_api_url": "https://hesma.h-its.org/api/records/yysd4-xap92",
+    "record_id": "yysd4-xap92",
+    "selected_model_id": "n100",
+    "selection_policy": "explicit_model_argument_required; archive default forbidden",
+    "source_id": "hesma:yysd4-xap92",
+    "source_version": "HESMA record publication date 2026-08-14"
+  },
+  "source_members": {
+    "abundances": {
+      "archive": "ddt_2013_abundances.zip",
+      "archive_sha256": "1655bc52f3df0b4376af0bc4b98ce894d44b9c92b0ddde720ed662607c50fd49",
+      "member": "ddt_2013_abundances/ddt_2013_n100_abundances.dat",
+      "member_bytes": 2299,
+      "member_sha256": "e4823345c824c359a9ab92c7969e82097009fedfac28a8d713e6a0e0b5c29080"
+    },
+    "density": {
+      "archive": "ddt_2013_density.zip",
+      "archive_sha256": "69ab7d4f4f3beaaa5a19b584ef6c58f40f2bc4aa3bf26bd6ae32f04c095ddd9b",
+      "member": "ddt_2013_density/ddt_2013_n100_density.dat",
+      "member_bytes": 4512,
+      "member_sha256": "6c2407fa7dd97f30c9ea906b83ffe4499b7416fee190fa66b7f8b7e9e2960083"
+    },
+    "isotopes": {
+      "archive": "ddt_2013_isotopes.zip",
+      "archive_sha256": "289f1d24ee9717c72de32daa67297cc1c53ac343a1c91cb1d75680c610f5899f",
+      "member": "ddt_2013_isotopes/ddt_2013_n100_isotopes.dat",
+      "member_bytes": 870816,
+      "member_sha256": "3c01c2f7f6e2d60c42c5c42160336103612270c6fdc7fec1cb4f166d98ed74fc"
+    }
+  },
+  "status": "review_only_source_normalized_physics_blocked"
+}
