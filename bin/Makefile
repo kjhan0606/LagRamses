@@ -302,6 +302,7 @@ ifeq ($(PHASE0_STELLAR_ENRICHMENT),1)
 sink_particle.kjhan.o: stellar_enrichment_config.o
 endif
 read_params.jaehyun.o: snrt_agn_efficiency.o
+read_params.jaehyun.o: snrt_thermochemistry.o snrt_dust_contract.o
 snrt_ramses_driver.o: amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
                        pm_commons.o snrt_agn_efficiency.o \
                        snrt_state.o snrt_amr_topology.o snrt_transport_step.o \
