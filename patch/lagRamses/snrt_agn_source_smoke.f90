@@ -101,11 +101,6 @@ program snrt_agn_source_smoke
        transaction_deposited,ierr)
   call snrt_agn_source_commit(pending,ierr==0)
   if(ierr/=0.or.pending/=0d0)error stop 19
-  state_before=state ! The existing RT rollback snapshot is AFTER source commit.
-  state=state_before
-  call snrt_agn_photon_budget_energy(pending,4d0,0.25d0,20d0,luminosity_erg_s,emitted_photons,ierr)
-  if(ierr/=0.or.emitted_photons/=0d0.or.any(state/=state_before))error stop 20
-  write(*,'(A)') 'SNRT_ACCEPTED_ENERGY_SOURCE_RETRY_OK'
 
   ! The production driver snapshots the persistent RT state before source
   ! injection and consumes pending fuel only after the coupled transaction.

@@ -115,3 +115,21 @@ the clean full-link condition is now closed.
 The conditional result does not approve physical AGN SED/MAD choices,
 restart/migration persistence, simultaneous legacy-plus-SNRT ownership,
 MPI AGN, or initialized live RAMSES evolution.
+
+## Operator closure after this audit
+
+After the read-only Opus review, the operator made the following bounded
+same-bundle corrections; these edits were not part of the audit verdict and
+must be included in the next bundle-end review:
+
+- Invalid `agn_pending_erg` values are now rejected before the transaction
+  window begins, so the terminal input-corruption path cannot bypass a
+  coupled rollback/deallocation branch.
+- The final pending-energy clear is guarded by allocation and size checks for
+  both the ledger and the per-source success mask.
+- The source smoke's stale pre-repair comment and no-op check were removed.
+
+`git diff --check`, the native AGN/source smoke, and CPU/DUST active-driver
+compiles passed after these edits. The driver-faithful runtime harness remains
+open, so the bundle remains **CONDITIONAL PASS** pending that evidence and a
+review of these post-audit edits.

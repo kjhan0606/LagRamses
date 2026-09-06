@@ -734,6 +734,24 @@ contains
             ' SNRT AGN source skipped: idsink identity map is invalid'
     end if
 
+    ! Validate the accepted-event ledger before entering the transaction
+    ! window.  Invalid energy is terminal input corruption, not a coupled
+    ! RT failure; checking it here ensures that no source has been deposited
+    ! and no rollback/deallocation branch can be bypassed.
+    if (accounting_identity_ok .and. nsink > 0 .and. allocated(agn_pending_erg)) then
+       if (size(agn_pending_erg) >= nsink) then
+          do isink = 1, nsink
+             if (.not. ieee_is_finite(agn_pending_erg(isink)) .or. &
+                  agn_pending_erg(isink) < 0.0d0) then
+                if (myid == 1) write(*,'(A,I0)') &
+                     'Invalid accepted AGN radiative energy for sink ', idsink(isink)
+                call clean_stop
+                return
+             end if
+          end do
+       end if
+    end if
+
     ! Begin the enclosing transaction before any AGN source photon is added.
     ! The pending-energy marker is deliberately not consumed in the source
     ! loop: it is cleared only after RT/chemistry/dust has passed its global
@@ -788,10 +806,6 @@ contains
           if (size(agn_pending_erg)>=nsink .and. size(xsink,1)>=nsink) then
              allocate(emitted_groups(snrt_ngroups), luminosity_groups(snrt_ngroups))
              do isink = 1, nsink
-                if (.not.ieee_is_finite(agn_pending_erg(isink)) .or. agn_pending_erg(isink)<0d0) then
-                   if(myid==1)write(*,*) 'Invalid accepted AGN radiative energy for sink ',idsink(isink)
-                   call clean_stop
-                endif
                 if(agn_pending_erg(isink)==0d0)cycle
 
                 wall_sub = omp_get_wtime()
@@ -1342,11 +1356,13 @@ contains
     ! Fuel consumption is the final accounting action of the coupled source
     ! -> RT/chemistry -> dust commit.  No rollback path can observe a cleared
     ! marker because every failure branch returns before this point.
-    if (allocated(agn_pending_erg)) then
-       do isink = 1, nsink
-          if (source_transaction_ok(isink)) &
-               call snrt_agn_source_commit(agn_pending_erg(isink), .true.)
-       end do
+    if (allocated(agn_pending_erg) .and. allocated(source_transaction_ok)) then
+       if (size(agn_pending_erg) >= nsink .and. size(source_transaction_ok) >= nsink) then
+          do isink = 1, nsink
+             if (source_transaction_ok(isink)) &
+                  call snrt_agn_source_commit(agn_pending_erg(isink), .true.)
+          end do
+       end if
     end if
     t_coupling = omp_get_wtime() - wall_start
 

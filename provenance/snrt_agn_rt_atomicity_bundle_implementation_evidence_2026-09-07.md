@@ -101,6 +101,27 @@ persistence, simultaneous legacy plus SNRT ownership, or an initialized live
 RAMSES evolution. The existing transaction commit API and those broader
 runtime qualifications remain under their governing bundle records.
 
+## Post-audit bounded closure
+
+Following the Opus read-only audit, the active driver was tightened without
+changing the admitted serial/fresh-start scope. The accepted-energy ledger is
+validated before `snrt_transaction_begin`, and the final clear now requires
+both allocated arrays to cover `nsink`; this closes the audit's invalid-input
+window and malformed-ledger guard conditions. The source smoke no longer
+contains the stale pre-repair snapshot comment or its no-op check.
+
+Post-edit evidence:
+
+- `git diff --check` passed.
+- `simulation/snrt/tests/run_fp15_agn_efficiency.sh` passed, including the
+  coupled rollback/pending and coupled commit/clear markers.
+- Active CPU (`DUST_LIVE=0`) and DUST (`DUST_LIVE=1`, `HDF5=1`) driver object
+  compiles passed through the `../patch/lagRamses` VPATH entry.
+
+These are operator rechecks after the Opus verdict, not a replacement for the
+still-open driver-faithful call through `snrt_ramses_advance_level`; the next
+bundle-end audit must review both the closure edits and that harness.
+
 The older
 `provenance/agn_accepted_fuel_overlap_bundle_evidence_2026-09-06.md` remains a
 historical record of the pre-repair implementation. This record is the current
