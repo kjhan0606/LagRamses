@@ -1,0 +1,19 @@
+&snrt_dust_contract
+ contract_version=1,
+ ngroups_input=3,
+ ntemperature_input=4,
+ opacity_status='candidate_source_sed_matched',
+ thermal_status='candidate_kirchhoff_equilibrium',
+ source_id='draine_test_fixture_only',
+ source_sha256='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+ source_table_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+ group_edges_sha256='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+ approval_id='',
+ thermal_source='test fixture only; not a physical dust approval',
+ edges_input=1.0d0,10.0d0,100.0d0,1000.0d0,
+ absorption_input=1.0d-21,2.0d-21,0.0d0,
+ mean_energy_input=3.0d0,20.0d0,200.0d0,
+ temperature_input=10.0d0,20.0d0,40.0d0,80.0d0,
+ power_input=1.0d-20,2.0d-20,4.0d-20,8.0d-20,
+ mass_per_h_input=1.0d-26
+/
