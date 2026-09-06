@@ -4,7 +4,16 @@ subroutine read_params
        snrt_agn_reference_config_ok, snrt_agn_admit_reference
 #ifdef SNRT
   use snrt_spectral_contract, only: snrt_spectral_contract_load_from_environment, &
-       snrt_spectral_contract_status, snrt_spectral_contract_runtime_allowed
+       snrt_spectral_contract_status, snrt_spectral_contract_runtime_allowed, &
+       snrt_spectral_contract_error_name, snrt_spectral_contract_error_message, &
+       snrt_spectral_contract_source_id
+  use snrt_thermochemistry, only: snrt_secondary_tables_load_from_environment, &
+       snrt_secondary_tables_loaded, snrt_secondary_loaded_source_id, &
+       snrt_secondary_loaded_upstream_commit, snrt_thermochemistry_ok, &
+       snrt_thermochemistry_error_name, snrt_thermochemistry_error_message
+  use snrt_dust_contract, only: snrt_dust_contract_load_from_environment, &
+       snrt_dust_contract_loaded, snrt_dust_contract_runtime_allowed, &
+       snrt_dust_contract_error_name, snrt_dust_contract_error_message
 #endif
   use pm_parameters
   use pm_commons, only: npartmax_auto
@@ -24,6 +33,9 @@ subroutine read_params
   logical::agn_snrt_built
 #ifdef SNRT
   integer :: snrt_requested_local, snrt_requested_min, snrt_requested_max
+  integer :: snrt_thermochemistry_error, snrt_dust_contract_error
+  integer :: snrt_dust_contract_env_length
+  character(len=1024) :: snrt_dust_contract_env
 #endif
   integer::nlevelmax_sink=0
   character(LEN=80)::infile
@@ -1715,6 +1727,65 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   if (snrt_requested_max==1 .and. sink .and. (ncpu>1 .or. nrestart>0)) then
      if(myid==1)write(*,*)'Live SNRT AGN requires serial fresh start until pending energy and photon state support restart/migration'
      nml_ok=.false.
+  end if
+  if (snrt_requested_max==1) then
+     ! Admit the runtime contracts during namelist initialization.  The
+     ! driver also keeps a defensive per-process loader, but waiting until
+     ! the first AMR level would allow a missing or non-admissible contract
+     ! to look like a successful no-op run.
+     call snrt_spectral_contract_load_from_environment(agn_contract_error)
+     if (agn_contract_error/=0 .or. .not.snrt_spectral_contract_runtime_allowed) then
+        if(myid==1)write(*,'(A,I0,A,A)') &
+             'SNRT startup rejected spectral contract: error=',agn_contract_error, &
+             ' (',trim(snrt_spectral_contract_error_name(agn_contract_error))//')'
+        if(myid==1 .and. len_trim(snrt_spectral_contract_error_message)>0) &
+             write(*,'(A,A)') '  detail: ',trim(snrt_spectral_contract_error_message)
+        nml_ok=.false.
+     else if(myid==1)then
+        write(*,'(A,A,A,A)') 'SNRT startup spectral contract admitted: status=', &
+             trim(snrt_spectral_contract_status),' source=',trim(snrt_spectral_contract_source_id)
+     end if
+     call snrt_secondary_tables_load_from_environment(snrt_thermochemistry_error)
+     if (snrt_thermochemistry_error/=snrt_thermochemistry_ok .or. &
+          .not.snrt_secondary_tables_loaded) then
+        if(myid==1)write(*,'(A,I0,A,A)') &
+             'SNRT startup rejected thermochemistry contract: error=', &
+             snrt_thermochemistry_error,' (', &
+             trim(snrt_thermochemistry_error_name(snrt_thermochemistry_error))//')'
+        if(myid==1 .and. len_trim(snrt_thermochemistry_error_message)>0) &
+             write(*,'(A,A)') '  detail: ',trim(snrt_thermochemistry_error_message)
+        nml_ok=.false.
+     else if(myid==1)then
+        write(*,'(A,A,A,A)') 'SNRT startup thermochemistry contract admitted: source=', &
+             trim(snrt_secondary_loaded_source_id),' upstream=', &
+             trim(snrt_secondary_loaded_upstream_commit)
+     end if
+     ! A supplied dust contract must never be silently ignored while the live
+     ! driver is still ZERO_SCAFFOLD.  Candidate contracts remain available
+     ! for inspection; an approved contract is rejected until a persistent
+     ! RAMSES dust state and thermal receiver are actually wired.
+     snrt_dust_contract_env = ''
+     call get_environment_variable('SNRT_DUST_CONTRACT', snrt_dust_contract_env, &
+          length=snrt_dust_contract_env_length)
+     if (snrt_dust_contract_env_length > 0) then
+        call snrt_dust_contract_load_from_environment(snrt_dust_contract_error)
+        if (snrt_dust_contract_error/=0 .or. .not.snrt_dust_contract_loaded) then
+           if(myid==1)write(*,'(A,I0,A,A)') &
+                'SNRT startup rejected dust contract: error=', &
+                snrt_dust_contract_error,' (', &
+                trim(snrt_dust_contract_error_name(snrt_dust_contract_error))//')'
+           if(myid==1 .and. len_trim(snrt_dust_contract_error_message)>0) &
+                write(*,'(A,A)') '  detail: ',trim(snrt_dust_contract_error_message)
+           nml_ok=.false.
+        else if (snrt_dust_contract_runtime_allowed) then
+           if(myid==1)write(*,'(A)') &
+                'SNRT startup rejected approved dust contract: live dust receiver is not wired'
+           nml_ok=.false.
+        else if(myid==1)then
+           write(*,'(A)') &
+                'SNRT dust contract loaded for inspection only; live dust remains ZERO_SCAFFOLD'
+        end if
+     end if
   end if
 #endif
 
