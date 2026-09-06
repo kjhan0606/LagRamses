@@ -128,8 +128,12 @@ contains
        lower=table%background_temperature
        upper=exp(table%log_t(nt))
        if(.not.ieee_is_finite(target))return
-       if(target<capacity(i)*lower) return
-       if(target>capacity(i)*upper+dt*density(i)*(table%power(nt)-table%background))return
+       ! Unit conversion of a stored C*T can move a bath-temperature state a
+       ! few ulps below the bath. Admit rounding only; material/radiation
+       ! closure below still accounts for any resulting energy correction.
+       if(target<capacity(i)*lower*(1-64*epsilon(1d0))) return
+       if(target>(capacity(i)*upper+dt*density(i)*(table%power(nt)-table%background)) &
+            *(1+64*epsilon(1d0)))return
        ! Solve for emitted power, not the tiny temperature displacement of a
        ! stiff grain or the difference of two large material energies.
        lower=0d0
@@ -211,8 +215,8 @@ contains
        if(any(dust_energy<0).or.any(heat_capacity<=0))return
        do i=1,nc
           if(density(i)<=0)cycle
-          if(dust_energy(i)/heat_capacity(i)<table%background_temperature.or. &
-               dust_energy(i)/heat_capacity(i)>exp(table%log_t(size(table%log_t))))return
+          if(dust_energy(i)/heat_capacity(i)<table%background_temperature*(1-64*epsilon(1d0)).or. &
+               dust_energy(i)/heat_capacity(i)>exp(table%log_t(size(table%log_t)))*(1+64*epsilon(1d0)))return
        end do
     end if
     ierr=dust_err_config

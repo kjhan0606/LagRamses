@@ -1781,9 +1781,23 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         else if (snrt_dust_contract_runtime_allowed) then
 #ifdef DUST_LIVE
            if(snrt_dust_contract_version>=3)then
-              if(myid==1)write(*,'(A)') &
-                   'SNRT startup rejected IR contract: live IR transport/state persistence not yet connected'
+              if(ncpu/=1.or.levelmin/=nlevelmax.or.cosmo.or.nremap/=0.or.trim(outformat)/='hdf5')then
+                 if(myid==1)write(*,'(A)') &
+                      'SNRT IR requires single-rank fixed noncosmological mesh, nremap=0 and HDF5 output'
+                 nml_ok=.false.
+              else
+                 if(myid==1)write(*,'(A)')'SNRT live IR enabled: fixed mesh; physical input approval still applies'
+                 if(myid==1.and.snrt_dust_contract_reference_control) &
+                      write(*,'(A)')'SNRT live IR reference control: NONPRODUCTION'
+              end if
+              if(nrestart>0.and.trim(informat)/='hdf5')then
+                 nml_ok=.false.
+                 if(myid==1)write(*,'(A)')'SNRT IR restart requires informat=hdf5'
+              end if
+#ifndef HDF5
               nml_ok=.false.
+              if(myid==1)write(*,'(A)')'SNRT IR requires HDF5 build for persistent radiation'
+#endif
            else if(myid==1)then
               if(snrt_dust_contract_reference_control)then
                  write(*,'(A)') 'SNRT startup admitted DUST_LIVE reference control: NONPRODUCTION'

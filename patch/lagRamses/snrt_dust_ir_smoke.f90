@@ -140,6 +140,15 @@ contains
        expected_photons=1d-6*prefactor*(warm-cold)/(test_energy(j)*1.602176634d-12)
        if(abs(emitted(j,1)/expected_photons-1)>1d-12)stop 60
     end do
+    field=0; emitted=0; capacity=1d-24; grain_t=10
+    grain_e=nearest(capacity*grain_t,-1d0); initial=sum(grain_e)*1d36
+    call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
+         field,grain_t,emitted,result,status,1d-10,128,grain_e,capacity)
+    if(status/=dust_ok.or.abs(sum(grain_e)*1d36-initial)/initial>1d-13)stop 61
+    grain_t=9.99d0; grain_e=capacity*grain_t; previous_e=grain_e
+    call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
+         field,grain_t,emitted,result,status,1d-10,128,grain_e,capacity)
+    if(status/=dust_err_state.or.any(grain_e/=previous_e))stop 62
     write(*,'(a)')'NATIVE_DUST_TRANSIENT_OK cooling=1 heating=1 material_plus_radiation_closure=1 rollback=1'
   end subroutine
 

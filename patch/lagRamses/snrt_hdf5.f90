@@ -3,7 +3,8 @@
 module snrt_hdf5
   use amr_commons
   use ramses_hdf5_io
-  use snrt_state, only: snrt_checkpoint_cell_width, snrt_state_pack_cell, snrt_state_restore_cell
+  use snrt_state, only: primary_width=>snrt_checkpoint_cell_width, snrt_ndirection, &
+       primary_pack=>snrt_state_pack_cell, primary_restore=>snrt_state_restore_cell
   use snrt_agn_efficiency, only: snrt_agn_rt_requested
   use snrt_spectral_contract, only: snrt_spectral_contract_source_sha256, &
        snrt_spectral_contract_source_commit_binding, snrt_spectral_contract_approval_id, &
@@ -12,12 +13,43 @@ module snrt_hdf5
   use snrt_thermochemistry, only: snrt_secondary_loaded_manifest_sha256
 #ifdef DUST_LIVE
   use snrt_dust_contract
+  use snrt_dust_live, only: snrt_dust_live_pack, snrt_dust_live_restore
 #endif
 #include "amr_index.h"
   implicit none
   private
+  integer :: snrt_checkpoint_cell_width=primary_width
   public :: snrt_hdf5_write, snrt_hdf5_read
 contains
+  subroutine snrt_state_pack_cell(icell,payload,ierr)
+    integer, intent(in) :: icell
+    real(dp), intent(out) :: payload(:)
+    integer, intent(out) :: ierr
+    call primary_pack(icell,payload(1:primary_width),ierr)
+    if(ierr/=0)return
+#ifdef DUST_LIVE
+    if(snrt_checkpoint_cell_width>primary_width) &
+         call snrt_dust_live_pack(icell,payload(primary_width+1:),ierr)
+#endif
+  end subroutine
+
+  subroutine snrt_state_restore_cell(icell,payload,ierr)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    integer, intent(in) :: icell
+    real(dp), intent(in) :: payload(:)
+    integer, intent(out) :: ierr
+    ! Check IR before the primary restore can mutate any cell.
+    ierr=10
+    if(any(.not.ieee_is_finite(payload)).or.any(payload<0))return
+    if(payload(1)==0.and.any(payload/=0))return
+    call primary_restore(icell,payload(1:primary_width),ierr)
+    if(ierr/=0)return
+#ifdef DUST_LIVE
+    if(snrt_checkpoint_cell_width>primary_width) &
+         call snrt_dust_live_restore(icell,payload(primary_width+1:),ierr)
+#endif
+  end subroutine
+
   subroutine require_ok(status)
     integer, intent(in) :: status
     integer :: global_status, info
@@ -34,9 +66,17 @@ contains
     logical, intent(in) :: writing
     character(len=128) :: values(7), loaded
     character(len=20) :: names(7)
-    integer :: k,status,width
+    integer :: k,status,width,version
 #ifdef DUST_LIVE
     real(dp), allocatable :: dust_values(:), saved_dust(:)
+#endif
+    snrt_checkpoint_cell_width=primary_width
+    version=1
+#ifdef DUST_LIVE
+    if(snrt_dust_contract_version>=3)then
+       snrt_checkpoint_cell_width=primary_width+snrt_dust_contract_number_ir*snrt_ndirection
+       version=2
+    end if
 #endif
     names=[character(len=20)::'source_sha256','source_commit','approval','edges_sha256', &
          'spectral_status','fraction_semantics','secondary_manifest']
@@ -46,11 +86,12 @@ contains
          snrt_spectral_contract_fraction_semantics,snrt_secondary_loaded_manifest_sha256]
     if(writing)then
        call hdf5_write_attr_int(grp,'cell_width',snrt_checkpoint_cell_width)
-       call hdf5_write_attr_int(grp,'format_version',1)
+       call hdf5_write_attr_int(grp,'format_version',version)
+       if(version==2)call hdf5_write_attr_string(grp,'ir_energy_units','erg/cm3 per normalized direction')
     else
        call hdf5_read_attr_int_checked(grp,'format_version',width,status)
        call require_ok(status)
-       call require_ok(merge(0,1,width==1))
+       call require_ok(merge(0,1,width==version))
        call hdf5_read_attr_int_checked(grp,'cell_width',width,status)
        call require_ok(status)
        call require_ok(merge(0,1,width==snrt_checkpoint_cell_width))

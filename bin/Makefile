@@ -130,7 +130,7 @@ ifeq ($(SNRT),1)
                 snrt_nlte_coupling.o snrt_angular_quadrature.o \
                 snrt_amr_topology.o snrt_transport_step.o \
                 snrt_rt_transaction.o snrt_dust_ir.o snrt_dust_coupling.o \
-                snrt_dust_transaction.o snrt_dust_receiver.o snrt_dust_contract.o \
+                snrt_dust_transaction.o snrt_dust_receiver.o snrt_dust_contract.o snrt_dust_live.o \
                 snrt_cuda_ledger_interface.o \
                 snrt_cuda_sparse_transport_interface.o \
                 snrt_cuda_limited_rt_step_interface.o \
@@ -293,7 +293,7 @@ amr_index.o: amr_commons.kjhan.o
 # exists when a clean production build is requested.
 snrt_spectral_contract.o: amr_parameters.jaehyun.o
 snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o
-snrt_hdf5.o: snrt_state.o ramses_hdf5_io.o snrt_agn_efficiency.o snrt_dust_contract.o
+snrt_hdf5.o: snrt_state.o ramses_hdf5_io.o snrt_agn_efficiency.o snrt_dust_contract.o snrt_dust_live.o
 ifeq ($(SNRT),1)
 ifdef HDF5
 backup_hdf5.o restore_hdf5.o: snrt_hdf5.o
@@ -317,6 +317,7 @@ snrt_dust_coupling.o: snrt_thermochemistry.o ../patch/lagRamses/snrt_dust_coupli
 snrt_dust_transaction.o: amr_parameters.jaehyun.o
 snrt_dust_receiver.o: ../patch/lagRamses/snrt_dust_receiver.f90
 snrt_dust_contract.o: ../patch/lagRamses/snrt_dust_contract.f90
+snrt_dust_live.o: snrt_state.o snrt_dust_contract.o snrt_dust_ir.o
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
 agn_feedback_deposition.o: amr_parameters.jaehyun.o
 init_sink.o: pm_commons.o
@@ -333,7 +334,7 @@ snrt_ramses_driver.o: amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
                        pm_commons.o snrt_agn_efficiency.o \
                        snrt_state.o snrt_amr_topology.o snrt_transport_step.o \
                        snrt_rt_transaction.o \
-                       snrt_dust_transaction.o snrt_dust_receiver.o snrt_dust_contract.o \
+                       snrt_dust_transaction.o snrt_dust_receiver.o snrt_dust_contract.o snrt_dust_live.o \
                        snrt_angular_quadrature.o snrt_agn_locator.o \
                        snrt_agn_source.o snrt_nlte_coupling.o snrt_thermochemistry.o \
                        snrt_spectral_contract.o \
