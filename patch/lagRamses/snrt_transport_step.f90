@@ -14,7 +14,8 @@ module snrt_transport_step
   use snrt_cuda_sparse_transport_interface, only: snrt_cuda_upwind_sparse
   use snrt_cuda_limited_rt_step_interface, only: snrt_cuda_transport_absorb_limited
   use snrt_cuda_multigroup_interface, only: snrt_cuda_multigroup_rt_step, &
-       snrt_cuda_multigroup_rt_step_owned, snrt_cuda_multigroup_rt_step_species
+       snrt_cuda_multigroup_rt_step_owned, snrt_cuda_multigroup_rt_step_species, &
+       snrt_cuda_multigroup_rt_step_species_dust
   implicit none
 
 contains
@@ -263,6 +264,69 @@ contains
        cdt_over_dx, optical_depth_by_leaf_group, optical_depth_by_leaf_species, &
        available_species_by_leaf, incoming_intensity, trial_intensity, &
        coarse_flux_trial, absorbed_by_leaf_group, ierr, leaf_cell, ilevel)
+    ! Backward-compatible H/He-only prepared ABI.  The DUST-8 entry point is
+    ! separate so existing callers and link checks retain their symbol.
+    integer, intent(in) :: leaf_slot(:)
+    integer, intent(in) :: neighbor(:,:)
+    real(dp), intent(in) :: cdt_over_dx
+    real(c_float), intent(in) :: optical_depth_by_leaf_group(:,:)
+    real(c_float), intent(in) :: optical_depth_by_leaf_species(:,:,:)
+    real(c_float), intent(in) :: available_species_by_leaf(:,:)
+    real(c_float), intent(in) :: incoming_intensity(:,:,:)
+    real(c_float), intent(out) :: trial_intensity(:,:,:)
+    real(c_float), intent(out) :: coarse_flux_trial(:,:,:)
+    real(c_float), intent(out) :: absorbed_by_leaf_group(:,:)
+    integer, intent(out) :: ierr
+    integer, intent(in), optional :: leaf_cell(:)
+    integer, intent(in), optional :: ilevel
+
+    call snrt_transport_absorb_multigroup_prepared_trial_core(leaf_slot, neighbor, &
+         cdt_over_dx, optical_depth_by_leaf_group, optical_depth_by_leaf_species, &
+         available_species_by_leaf, incoming_intensity, trial_intensity, &
+         coarse_flux_trial, absorbed_by_leaf_group, ierr, .false., leaf_cell, ilevel)
+  end subroutine snrt_transport_absorb_multigroup_prepared_trial
+
+  subroutine snrt_transport_absorb_multigroup_prepared_dust_trial(leaf_slot, neighbor, &
+       cdt_over_dx, optical_depth_by_leaf_group, optical_depth_by_leaf_species, &
+       optical_depth_by_leaf_dust, available_species_by_leaf, incoming_intensity, &
+       trial_intensity, coarse_flux_trial, raw_by_leaf_group, &
+       absorbed_hhe_by_leaf_group_species, absorbed_dust_by_leaf_group, &
+       returned_by_leaf_group, absorbed_by_leaf_group, ierr, leaf_cell, ilevel)
+    ! DUST-8 prepared ABI.  H/He species output uses (leaf,group,species),
+    ! the same contiguous layout consumed by the CUDA DUST-7 wrapper.
+    integer, intent(in) :: leaf_slot(:)
+    integer, intent(in) :: neighbor(:,:)
+    real(dp), intent(in) :: cdt_over_dx
+    real(c_float), intent(in) :: optical_depth_by_leaf_group(:,:)
+    real(c_float), intent(in) :: optical_depth_by_leaf_species(:,:,:)
+    real(c_float), intent(in) :: optical_depth_by_leaf_dust(:,:)
+    real(c_float), intent(in) :: available_species_by_leaf(:,:)
+    real(c_float), intent(in) :: incoming_intensity(:,:,:)
+    real(c_float), intent(out) :: trial_intensity(:,:,:)
+    real(c_float), intent(out) :: coarse_flux_trial(:,:,:)
+    real(c_float), intent(out) :: raw_by_leaf_group(:,:)
+    real(c_float), intent(out) :: absorbed_hhe_by_leaf_group_species(:,:,:)
+    real(c_float), intent(out) :: absorbed_dust_by_leaf_group(:,:)
+    real(c_float), intent(out) :: returned_by_leaf_group(:,:)
+    real(c_float), intent(out) :: absorbed_by_leaf_group(:,:)
+    integer, intent(out) :: ierr
+    integer, intent(in), optional :: leaf_cell(:)
+    integer, intent(in), optional :: ilevel
+
+    call snrt_transport_absorb_multigroup_prepared_trial_core(leaf_slot, neighbor, &
+         cdt_over_dx, optical_depth_by_leaf_group, optical_depth_by_leaf_species, &
+         available_species_by_leaf, incoming_intensity, trial_intensity, &
+         coarse_flux_trial, absorbed_by_leaf_group, ierr, .true., leaf_cell, ilevel, &
+         optical_depth_by_leaf_dust, absorbed_hhe_by_leaf_group_species, &
+         absorbed_dust_by_leaf_group, returned_by_leaf_group, raw_by_leaf_group)
+  end subroutine snrt_transport_absorb_multigroup_prepared_dust_trial
+
+  subroutine snrt_transport_absorb_multigroup_prepared_trial_core(leaf_slot, neighbor, &
+       cdt_over_dx, optical_depth_by_leaf_group, optical_depth_by_leaf_species, &
+       available_species_by_leaf, incoming_intensity, trial_intensity, &
+       coarse_flux_trial, absorbed_by_leaf_group, ierr, use_dust, leaf_cell, ilevel, &
+       optical_depth_by_leaf_dust, absorbed_hhe_by_leaf_group_species, &
+       absorbed_dust_by_leaf_group, returned_by_leaf_group, raw_by_leaf_group)
     ! Prepared-cell ABI used by the RAMSES driver.  Keeping topology outside
     ! this routine lets the driver construct hydro/NLTE fields without a
     ! second AMR traversal.
@@ -287,8 +351,14 @@ contains
     real(c_float), intent(out) :: coarse_flux_trial(:,:,:)
     real(c_float), intent(out) :: absorbed_by_leaf_group(:,:)
     integer, intent(out) :: ierr
+    logical, intent(in) :: use_dust
     integer, intent(in), optional :: leaf_cell(:)
     integer, intent(in), optional :: ilevel
+    real(c_float), intent(in), optional :: optical_depth_by_leaf_dust(:,:)
+    real(c_float), intent(out), optional :: absorbed_hhe_by_leaf_group_species(:,:,:)
+    real(c_float), intent(out), optional :: absorbed_dust_by_leaf_group(:,:)
+    real(c_float), intent(out), optional :: returned_by_leaf_group(:,:)
+    real(c_float), intent(out), optional :: raw_by_leaf_group(:,:)
     integer :: nleaf, ilocal, igroup, nsub, isub
     integer :: nmpi, nwork, iwork, iface, ighost
     integer :: face_kind
@@ -301,8 +371,11 @@ contains
     real(c_float) :: direction_c(3,snrt_ndirection)
     real(c_float), allocatable :: packed(:,:,:), packed_work(:,:,:)
     real(c_float), allocatable :: ghost_state(:,:,:), tau(:,:), species_tau(:,:,:)
+    real(c_float), allocatable :: dust_tau(:,:)
     real(c_float), allocatable :: species_budget(:,:)
     real(c_float), allocatable :: absorbed_total(:), absorbed_group(:,:)
+    real(c_float), allocatable :: absorbed_hhe_group(:,:,:), absorbed_dust_group(:,:), &
+         returned_group(:,:), raw_group(:,:)
     integer(c_int) :: cuda_ierr
 
     ierr = 0
@@ -310,6 +383,12 @@ contains
     nleaf = size(leaf_slot)
     trial_intensity = 0.0_c_float
     coarse_flux_trial = 0.0_c_float
+    if (present(absorbed_hhe_by_leaf_group_species)) &
+         absorbed_hhe_by_leaf_group_species = 0.0_c_float
+    if (present(absorbed_dust_by_leaf_group)) &
+         absorbed_dust_by_leaf_group = 0.0_c_float
+    if (present(returned_by_leaf_group)) returned_by_leaf_group = 0.0_c_float
+    if (present(raw_by_leaf_group)) raw_by_leaf_group = 0.0_c_float
     local_error = 0
     if (cdt_over_dx < 0.0d0) local_error = 1
     if (size(neighbor,1) < 6 .or. size(neighbor,2) < nleaf .or. &
@@ -332,6 +411,26 @@ contains
          size(absorbed_by_leaf_group,1) < nleaf .or. &
          size(absorbed_by_leaf_group,2) < snrt_ngroups) then
        local_error = max(local_error,2)
+    end if
+    if (use_dust) then
+       if (.not. present(optical_depth_by_leaf_dust) .or. &
+            .not. present(absorbed_hhe_by_leaf_group_species) .or. &
+            .not. present(absorbed_dust_by_leaf_group) .or. &
+            .not. present(returned_by_leaf_group) .or. .not. present(raw_by_leaf_group)) then
+          local_error = max(local_error,2)
+       else if (size(optical_depth_by_leaf_dust,1) < nleaf .or. &
+            size(optical_depth_by_leaf_dust,2) < snrt_ngroups .or. &
+            size(absorbed_hhe_by_leaf_group_species,1) < nleaf .or. &
+            size(absorbed_hhe_by_leaf_group_species,2) < snrt_ngroups .or. &
+            size(absorbed_hhe_by_leaf_group_species,3) < 3 .or. &
+            size(absorbed_dust_by_leaf_group,1) < nleaf .or. &
+            size(absorbed_dust_by_leaf_group,2) < snrt_ngroups .or. &
+            size(returned_by_leaf_group,1) < nleaf .or. &
+            size(returned_by_leaf_group,2) < snrt_ngroups .or. &
+            size(raw_by_leaf_group,1) < nleaf .or. &
+            size(raw_by_leaf_group,2) < snrt_ngroups) then
+          local_error = max(local_error,2)
+       end if
     end if
     if (nleaf > 0) then
        if (.not. allocated(snrt_face_kind) .or. .not. allocated(snrt_face_cell)) then
@@ -408,6 +507,12 @@ contains
          tau(nleaf,snrt_ngroups), species_tau(nleaf,snrt_ngroups,3), &
          species_budget(nleaf,3), absorbed_total(nleaf), &
          absorbed_group(nleaf,snrt_ngroups))
+    if (use_dust) then
+       allocate(dust_tau(nleaf,snrt_ngroups), &
+            absorbed_hhe_group(nleaf,snrt_ngroups,3), &
+            absorbed_dust_group(nleaf,snrt_ngroups), returned_group(nleaf,snrt_ngroups), &
+            raw_group(nleaf,snrt_ngroups))
+    end if
     neighbor_c = int(neighbor_work, c_int)
     direction_c = real(transpose(direction_dp), c_float)
     do ilocal = 1, nleaf
@@ -418,6 +523,8 @@ contains
                real(nsub,c_float)
           species_tau(ilocal,igroup,1:3) = &
                optical_depth_by_leaf_species(ilocal,igroup,1:3) / real(nsub,c_float)
+          if (use_dust) dust_tau(ilocal,igroup) = &
+               optical_depth_by_leaf_dust(ilocal,igroup) / real(nsub,c_float)
        end do
     end do
 
@@ -452,12 +559,28 @@ contains
           return
        end if
        absorbed_group = 0.0_c_float
+       if (use_dust) then
+          absorbed_hhe_group = 0.0_c_float
+          absorbed_dust_group = 0.0_c_float
+          returned_group = 0.0_c_float
+          raw_group = 0.0_c_float
+       end if
        cuda_ierr = 0_c_int
        if (nleaf > 0) then
-          cuda_ierr = snrt_cuda_multigroup_rt_step_species(packed_work, direction_c, neighbor_c, &
-               tau, species_tau, species_budget, absorbed_total, absorbed_group, int(nleaf,c_int), &
-               int(nwork,c_int), int(snrt_ndirection,c_int), int(snrt_ngroups,c_int), &
-               real(cdt_over_dx/real(nsub,dp),c_float))
+          if (use_dust) then
+             cuda_ierr = snrt_cuda_multigroup_rt_step_species_dust(packed_work, direction_c, &
+                  neighbor_c, tau, species_tau, dust_tau, species_budget, &
+                  absorbed_hhe_group, absorbed_dust_group, returned_group, raw_group, &
+                  absorbed_group, absorbed_total, int(nleaf,c_int), int(nwork,c_int), &
+                  int(snrt_ndirection,c_int), int(snrt_ngroups,c_int), &
+                  real(cdt_over_dx/real(nsub,dp),c_float))
+          else
+             cuda_ierr = snrt_cuda_multigroup_rt_step_species(packed_work, direction_c, &
+                  neighbor_c, tau, species_tau, species_budget, absorbed_total, &
+                  absorbed_group, int(nleaf,c_int), int(nwork,c_int), &
+                  int(snrt_ndirection,c_int), int(snrt_ngroups,c_int), &
+                  real(cdt_over_dx/real(nsub,dp),c_float))
+          end if
        end if
        local_error = 0
        if (cuda_ierr /= 0_c_int) local_error = 100 + int(cuda_ierr)
@@ -468,6 +591,17 @@ contains
        end if
        absorbed_by_leaf_group(1:nleaf,1:snrt_ngroups) = &
             absorbed_by_leaf_group(1:nleaf,1:snrt_ngroups) + absorbed_group
+       if (use_dust) then
+          absorbed_hhe_by_leaf_group_species(1:nleaf,1:snrt_ngroups,1:3) = &
+               absorbed_hhe_by_leaf_group_species(1:nleaf,1:snrt_ngroups,1:3) + &
+               absorbed_hhe_group
+          absorbed_dust_by_leaf_group(1:nleaf,1:snrt_ngroups) = &
+               absorbed_dust_by_leaf_group(1:nleaf,1:snrt_ngroups) + absorbed_dust_group
+          returned_by_leaf_group(1:nleaf,1:snrt_ngroups) = &
+               returned_by_leaf_group(1:nleaf,1:snrt_ngroups) + returned_group
+          raw_by_leaf_group(1:nleaf,1:snrt_ngroups) = &
+               raw_by_leaf_group(1:nleaf,1:snrt_ngroups) + raw_group
+       end if
        packed = packed_work(1:nleaf,1:snrt_ndirection,1:snrt_ngroups)
     end do
 
@@ -479,6 +613,8 @@ contains
     deallocate(neighbor_work, packed_work, ghost_kind, ghost_cell, ghost_face, &
          ghost_local, ghost_state, neighbor_c, packed, tau, species_tau, &
          species_budget, absorbed_total, absorbed_group)
-  end subroutine snrt_transport_absorb_multigroup_prepared_trial
+    if (use_dust) deallocate(dust_tau, absorbed_hhe_group, absorbed_dust_group, &
+         returned_group, raw_group)
+  end subroutine snrt_transport_absorb_multigroup_prepared_trial_core
 
 end module snrt_transport_step

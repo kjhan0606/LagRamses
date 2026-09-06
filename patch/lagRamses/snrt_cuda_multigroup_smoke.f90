@@ -36,7 +36,7 @@ program snrt_cuda_multigroup_smoke
   integer(c_int) :: group_zero_bits(size(absorbed_group_zero_reference))
   integer(c_int) :: scalar_bits(size(absorbed)), scalar_zero_bits(size(absorbed_zero_reference))
   real(c_double) :: before, after, removed, budget_error
-  real(c_double) :: ledger_error, inventory_error, zero_error
+  real(c_double) :: ledger_error, inventory_error, zero_error, hhe_zero_error
   real(c_double) :: expected_available(3), expected_hhe_tau, expected_total_tau
   real(c_double) :: expected_eligible, expected_hhe_target, expected_excess
   real(c_double) :: expected_dust, expected_fraction, expected_scale
@@ -287,10 +287,15 @@ program snrt_cuda_multigroup_smoke
   if (any(transfer(assigned_group,group_bits) /= &
        transfer(absorbed_group_zero_reference,group_zero_bits))) error stop 29
   if (maxval(absorbed_dust_group) /= 0.0_c_float) error stop 30
+  hhe_zero_error = maxval(abs(real(sum(absorbed_hhe_species,dim=3) - &
+       absorbed_group_zero_reference,c_double)))
+  if (hhe_zero_error > 3.0d-5) error stop 30
   zero_error = maxval(abs(real(raw_group - sum(absorbed_hhe_species,dim=3) - &
        returned_group,c_double)))
   if (zero_error > 3.0d-5) error stop 31
-  write(*,'(a)') 'SNRT_CUDA_MULTIGROUP_SPECIES_DUST_ZERO_DUST_BITWISE_OK'
+  write(*,'(a,es14.6,a,es14.6)') &
+       'SNRT_CUDA_MULTIGROUP_SPECIES_DUST_ZERO_DUST_BITWISE_OK hhe_max_abs=', &
+       hhe_zero_error, ' closure_max_abs=', zero_error
 
   ! Invalid-input transaction: validation must reject before copying any
   ! state, inventory, or output back to the caller.

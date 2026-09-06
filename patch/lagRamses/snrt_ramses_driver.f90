@@ -122,7 +122,7 @@ contains
          snrt_spectral_contract_runtime_allowed, snrt_spectral_contract_status, &
          snrt_spectral_contract_source_id
     use snrt_amr_topology, only: snrt_amr_build_same_level_neighbors
-    use snrt_transport_step, only: snrt_transport_absorb_multigroup_prepared_trial
+    use snrt_transport_step, only: snrt_transport_absorb_multigroup_prepared_dust_trial
     use snrt_rt_transaction, only: snrt_rt_iteration_config, &
          snrt_transaction_contract_version, &
          snrt_rt_transaction_snapshot, snrt_transaction_load_config, &
@@ -132,8 +132,9 @@ contains
          snrt_transaction_failure_requested, &
          snrt_transaction_failure_name, snrt_transaction_error_message, &
          snrt_failure_none, snrt_failure_partition, snrt_failure_chemistry, &
-         snrt_failure_receiver, snrt_failure_transport, snrt_failure_convergence, &
-         snrt_failure_unassigned
+         snrt_failure_receiver, snrt_failure_transport, snrt_failure_convergence
+    use snrt_dust_transaction, only: snrt_dust_validate_ledgers, &
+         snrt_dust_transaction_ok
     use snrt_angular_quadrature, only: snrt_angular_init
     use snrt_agn_locator, only: snrt_agn_find_local_leaf
     use snrt_agn_source, only: snrt_c_cgs, snrt_agn_photon_budget_energy, &
@@ -144,7 +145,7 @@ contains
          snrt_secondary_tables_load_from_environment, snrt_secondary_tables_loaded, &
          snrt_thermochemistry_ok, snrt_thermochemistry_error_name, &
          snrt_thermochemistry_error_message, snrt_thermochemistry_advance_cell, &
-         snrt_partition_absorption, snrt_nhelium_per_hydrogen, &
+         snrt_nhelium_per_hydrogen, &
          snrt_mean_molecular_weight, snrt_inventory_tolerance
     use snrt_cuda_interface, only: snrt_cuda_available
     use amr_parameters, only: dp, ndim, spin_bh, mad_jet, X_floor
@@ -161,7 +162,7 @@ contains
     integer :: icell, islot, ilevel_found
     integer :: energy_index
     integer :: spectral_status, thermochemistry_status
-    integer :: transaction_status, transaction_iteration
+    integer :: transaction_status, transaction_iteration, ledger_status
     integer :: local_transaction_failure, local_transaction_converged
     integer :: global_transaction_failure, global_transaction_converged
     integer :: convergence_status
@@ -178,22 +179,22 @@ contains
     real(dp) :: temperature_k, internal_energy, kinetic_energy, molecular_weight
     real(dp) :: tau_dp(snrt_ngroups), tau_hi_dp(snrt_ngroups)
     real(dp) :: tau_hei_dp(snrt_ngroups), tau_heii_dp(snrt_ngroups)
-    real(dp) :: opacity_species(3), available_species_code(3)
-    real(dp) :: unassigned_absorption_code, unassigned_absorption_total
+    real(dp) :: unassigned_absorption_total, ledger_relative_error
     real(dp) :: global_unassigned_absorption
     real(dp) :: excess_energy_ev(3,snrt_ngroups)
-    real(dp) :: absorbed_species_code(3,snrt_ngroups)
     real(dp) :: deposited_density
     real(dp) :: wall_start
     real(dp) :: transaction_residual, global_transaction_residual
     real(dp) :: wall_sub
     real(dp) :: t_setup, t_topology, t_nlte, t_source, t_transport, t_coupling
     real(dp) :: t_source_overhead, t_locator, t_budget, t_deposit
-    real(c_float), allocatable :: optical_depth(:,:), optical_depth_species(:,:,:)
+    real(c_float), allocatable :: optical_depth(:,:), optical_depth_species(:,:,:), &
+         optical_depth_dust(:,:)
     real(c_float), allocatable :: available_species_transport(:,:)
     real(c_float), allocatable :: optical_depth_hydrogen(:,:), &
          optical_depth_helium_i(:,:), optical_depth_helium_ii(:,:)
-    real(c_float), allocatable :: absorbed_group(:,:)
+    real(c_float), allocatable :: absorbed_group(:,:), raw_group(:,:), &
+         absorbed_hhe_group_species(:,:,:), absorbed_dust_group(:,:), returned_group(:,:)
     real(c_float), allocatable :: incoming_intensity(:,:,:), trial_intensity(:,:,:)
     real(c_float), allocatable :: coarse_flux_trial(:,:,:)
     real(c_float), allocatable :: iteration_tau(:,:), iteration_species_tau(:,:,:)
@@ -210,7 +211,6 @@ contains
     real(dp), allocatable :: current_fraction(:,:), target_fraction(:,:)
     real(dp), allocatable :: emitted_groups(:), luminosity_groups(:)
     logical :: enabled, source_ok, accounting_identity_ok
-    logical :: chemistry_cell_ok
     logical :: transaction_converged, transaction_active
     logical :: transaction_diagnostic_mode
     logical :: hydro_state_invalid
@@ -225,8 +225,10 @@ contains
     logical, save :: thermochemistry_contract_ok = .false.
     logical, save :: transaction_diagnostic_mode_latched = .false.
     logical, save :: transaction_config_reported = .false.
+    logical, save :: dust_scaffold_reported = .false.
     real(dp), save :: reduced_c = 0.01d0
     integer, save :: level_filter = -1
+    character(len=13), parameter :: dust_tau_mode = 'ZERO_SCAFFOLD'
 
     enabled = .false.
     if (.not. enabled_resolved) then
@@ -268,6 +270,11 @@ contains
     enabled = enabled_latched
     transaction_diagnostic_mode = transaction_diagnostic_mode_latched
     if (.not. enabled) return
+    if (myid == 1 .and. .not. dust_scaffold_reported) then
+       write(*,'(A,A)') ' SNRT dust optical-depth mode=', trim(dust_tau_mode)
+       write(*,'(A)') '   dust ledger is trial-only; no dust thermal/momentum/abundance commit'
+       dust_scaffold_reported = .true.
+    end if
     ! Do not guess unknown historical photon ownership by either replaying
     ! the ledger or silently rebasing away real accretion. Startup rejects
     ! these modes with sink enabled; defend restored sink arrays here too.
@@ -405,11 +412,14 @@ contains
     t_topology = omp_get_wtime() - wall_start
     allocate(optical_depth(nleaf,snrt_ngroups), &
          optical_depth_species(nleaf,snrt_ngroups,3), &
+         optical_depth_dust(nleaf,snrt_ngroups), &
          available_species_transport(nleaf,3), &
          optical_depth_hydrogen(nleaf,snrt_ngroups), &
          optical_depth_helium_i(nleaf,snrt_ngroups), &
          optical_depth_helium_ii(nleaf,snrt_ngroups), &
-         absorbed_group(nleaf,snrt_ngroups), &
+         absorbed_group(nleaf,snrt_ngroups), raw_group(nleaf,snrt_ngroups), &
+         absorbed_hhe_group_species(nleaf,snrt_ngroups,3), &
+         absorbed_dust_group(nleaf,snrt_ngroups), returned_group(nleaf,snrt_ngroups), &
          incoming_intensity(snrt_ndirection,snrt_ngroups,nleaf), &
          trial_intensity(snrt_ndirection,snrt_ngroups,nleaf), &
          coarse_flux_trial(snrt_ndirection,snrt_ngroups,size(snrt_intensity,3)), &
@@ -429,6 +439,11 @@ contains
          trial_heating_rate(nleaf), trial_unassigned(nleaf), &
          trial_absorbed_species(nleaf,3,snrt_ngroups), &
          current_fraction(nleaf,3), target_fraction(nleaf,3))
+    optical_depth_dust = 0.0_c_float
+    raw_group = 0.0_c_float
+    absorbed_hhe_group_species = 0.0_c_float
+    absorbed_dust_group = 0.0_c_float
+    returned_group = 0.0_c_float
     call snrt_angular_init(direction_dp, angular_weight)
     excess_energy_ev = 0.0d0
     excess_energy_ev(1,:) = snrt_group_photoelectron_excess_energy_ev
@@ -536,8 +551,9 @@ contains
        if (myid == 1) write(*,'(A)') &
             ' SNRT RT disabled: non-finite hydro state on one or more ranks'
        deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, optical_depth_species, &
-            available_species_transport, optical_depth_hydrogen, &
-            optical_depth_helium_i, optical_depth_helium_ii, absorbed_group, &
+            optical_depth_dust, available_species_transport, optical_depth_hydrogen, &
+            optical_depth_helium_i, optical_depth_helium_ii, absorbed_group, raw_group, &
+            absorbed_hhe_group_species, absorbed_dust_group, returned_group, &
             incoming_intensity, trial_intensity, coarse_flux_trial, iteration_tau, &
             iteration_species_tau, target_tau, target_species_tau, start_hydrogen_ii, &
             start_helium_ii, start_helium_iii, start_neutral_hydrogen, level_thermal, &
@@ -656,8 +672,9 @@ contains
             trim(snrt_transaction_failure_name(global_transaction_failure)), &
             ' level=', ilevel
        deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, optical_depth_species, &
-            available_species_transport, optical_depth_hydrogen, &
-            optical_depth_helium_i, optical_depth_helium_ii, absorbed_group, &
+            optical_depth_dust, available_species_transport, optical_depth_hydrogen, &
+            optical_depth_helium_i, optical_depth_helium_ii, absorbed_group, raw_group, &
+            absorbed_hhe_group_species, absorbed_dust_group, returned_group, &
             incoming_intensity, trial_intensity, coarse_flux_trial, iteration_tau, &
             iteration_species_tau, target_tau, target_species_tau, start_hydrogen_ii, &
             start_helium_ii, start_helium_iii, start_neutral_hydrogen, level_thermal, &
@@ -677,8 +694,11 @@ contains
     current_fraction(:,1) = current_hydrogen_ii
     current_fraction(:,2) = current_helium_ii
     current_fraction(:,3) = current_helium_iii
-    iteration_tau = real(optical_depth,c_float)
     iteration_species_tau = real(optical_depth_species,c_float)
+    ! DUST-7 validates the total against the FP32 component sum.  Rebuild the
+    ! total in the same precision/order at this boundary instead of relying
+    ! on a separately rounded FP64 total from the NLTE helper.
+    iteration_tau = sum(iteration_species_tau, dim=3) + optical_depth_dust
     chemistry_failures = 0
     unassigned_absorption_total = 0.0d0
     t_transport = 0.0d0
@@ -701,10 +721,11 @@ contains
        trial_unassigned = 0.0d0
        trial_absorbed_species = 0.0d0
        wall_sub = omp_get_wtime()
-       call snrt_transport_absorb_multigroup_prepared_trial(leaf_slot, neighbor, &
-            cdt_over_dx, iteration_tau, iteration_species_tau, &
+       call snrt_transport_absorb_multigroup_prepared_dust_trial(leaf_slot, neighbor, &
+            cdt_over_dx, iteration_tau, iteration_species_tau, optical_depth_dust, &
             available_species_transport, incoming_intensity, trial_intensity, &
-            coarse_flux_trial, absorbed_group, ierr, leaf_cell, ilevel)
+            coarse_flux_trial, raw_group, absorbed_hhe_group_species, &
+            absorbed_dust_group, returned_group, absorbed_group, ierr, leaf_cell, ilevel)
        t_transport = t_transport + omp_get_wtime() - wall_sub
        if (ierr /= 0) then
           local_transaction_failure = snrt_failure_transport
@@ -718,6 +739,13 @@ contains
                any(absorbed_group < 0.0_c_float) .or. &
                any(.not. ieee_is_finite(coarse_flux_trial))) &
                local_transaction_failure = snrt_failure_transport
+       end if
+       if (local_transaction_failure == snrt_failure_none) then
+          call snrt_dust_validate_ledgers(raw_group, absorbed_hhe_group_species, &
+               absorbed_dust_group, returned_group, absorbed_group, &
+               ledger_relative_error, ledger_status)
+          if (ledger_status /= snrt_dust_transaction_ok) &
+               local_transaction_failure = snrt_failure_receiver
        end if
 
        if (local_transaction_failure == snrt_failure_none) then
@@ -768,6 +796,19 @@ contains
                 chemistry_failures = chemistry_failures + 1
                 cycle
              end if
+
+             trial_unassigned(i) = 0.0d0
+             if (sum(abs(real(absorbed_hhe_group_species(i,:,:),dp))) <= 0.0d0 .and. &
+                  sum(abs(real(absorbed_group(i,:),dp))) > 0.0d0) then
+                ! A future nonzero dust source must supply a dust receiver;
+                ! fail closed instead of pretending dust absorption heats gas.
+                local_transaction_failure = snrt_failure_receiver
+                exit
+             end if
+             do igroup = 1, snrt_ngroups
+                trial_absorbed_species(i,:,igroup) = &
+                     real(absorbed_hhe_group_species(i,igroup,:),dp)
+             end do
              if (snrt_transaction_failure_requested(transaction_config, &
                   snrt_failure_partition, i)) then
                 local_transaction_failure = snrt_failure_partition
@@ -895,6 +936,8 @@ contains
              target_species_tau(i,:,1) = real(max(tau_hi_dp,0.0d0),c_float)
              target_species_tau(i,:,2) = real(max(tau_hei_dp,0.0d0),c_float)
              target_species_tau(i,:,3) = real(max(tau_heii_dp,0.0d0),c_float)
+             target_tau(i,:) = sum(target_species_tau(i,:,:),dim=2) + &
+                  optical_depth_dust(i,:)
           end do
        end if
        if (local_transaction_failure == snrt_failure_none) then
@@ -928,8 +971,8 @@ contains
        current_fraction(:,1) = current_hydrogen_ii
        current_fraction(:,2) = current_helium_ii
        current_fraction(:,3) = current_helium_iii
-       iteration_tau = target_tau
        iteration_species_tau = target_species_tau
+       iteration_tau = sum(iteration_species_tau, dim=3) + optical_depth_dust
     end do
 
     if (global_transaction_failure /= snrt_failure_none .or. &
@@ -952,8 +995,9 @@ contains
           end if
        end if
        deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, optical_depth_species, &
-            available_species_transport, optical_depth_hydrogen, &
-            optical_depth_helium_i, optical_depth_helium_ii, absorbed_group, &
+            optical_depth_dust, available_species_transport, optical_depth_hydrogen, &
+            optical_depth_helium_i, optical_depth_helium_ii, absorbed_group, raw_group, &
+            absorbed_hhe_group_species, absorbed_dust_group, returned_group, &
             incoming_intensity, trial_intensity, coarse_flux_trial, iteration_tau, &
             iteration_species_tau, target_tau, target_species_tau, start_hydrogen_ii, &
             start_helium_ii, start_helium_iii, start_neutral_hydrogen, level_thermal, &
@@ -987,8 +1031,9 @@ contains
             trim(snrt_transaction_failure_name(global_transaction_failure)), &
             ' level=', ilevel
        deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, optical_depth_species, &
-            available_species_transport, optical_depth_hydrogen, &
-            optical_depth_helium_i, optical_depth_helium_ii, absorbed_group, &
+            optical_depth_dust, available_species_transport, optical_depth_hydrogen, &
+            optical_depth_helium_i, optical_depth_helium_ii, absorbed_group, raw_group, &
+            absorbed_hhe_group_species, absorbed_dust_group, returned_group, &
             incoming_intensity, trial_intensity, coarse_flux_trial, iteration_tau, &
             iteration_species_tau, target_tau, target_species_tau, start_hydrogen_ii, &
             start_helium_ii, start_helium_iii, start_neutral_hydrogen, level_thermal, &
@@ -1023,6 +1068,8 @@ contains
        write(*,'(A,I0)') '   chemistry failures: ', chemistry_failures
        write(*,'(A,ES12.4)') '   unassigned absorption code (global): ', &
             global_unassigned_absorption
+       write(*,'(A,ES12.4)') '   dust ledger relative error (last trial): ', &
+            ledger_relative_error
        write(*,'(A,I0,A,I0,6(A,F10.3,1X))') &
          ' SNRT stage timings level=', ilevel, ' leaves=', nleaf, &
          ' setup=', t_setup, ' topology=', t_topology, ' nlte=', t_nlte, &
@@ -1031,9 +1078,10 @@ contains
     endif
 
     deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, optical_depth_species, &
-         available_species_transport, &
+         optical_depth_dust, available_species_transport, &
          optical_depth_hydrogen, optical_depth_helium_i, optical_depth_helium_ii, &
-         absorbed_group)
+         absorbed_group, raw_group, absorbed_hhe_group_species, absorbed_dust_group, &
+         returned_group)
   end subroutine snrt_ramses_advance_level
 
 end module snrt_ramses_driver
