@@ -120,7 +120,7 @@ ifeq ($(SNRT),1)
                 snrt_thermochemistry.o snrt_state.o snrt_agn_locator.o \
                 snrt_nlte_coupling.o snrt_angular_quadrature.o \
                 snrt_amr_topology.o snrt_transport_step.o \
-                snrt_rt_transaction.o snrt_dust_ir.o \
+                snrt_rt_transaction.o snrt_dust_ir.o snrt_dust_coupling.o \
                 snrt_cuda_ledger_interface.o \
                 snrt_cuda_sparse_transport_interface.o \
                 snrt_cuda_limited_rt_step_interface.o \
@@ -289,6 +289,7 @@ snrt_transport_step.o: snrt_state.o snrt_angular_quadrature.o \
                         snrt_cuda_multigroup_interface.o
 snrt_rt_transaction.o: amr_parameters.jaehyun.o mpi_mod.o
 snrt_dust_ir.o: ../patch/lagRamses/snrt_dust_ir.f90
+snrt_dust_coupling.o: snrt_thermochemistry.o ../patch/lagRamses/snrt_dust_coupling.f90
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
 agn_feedback_deposition.o: amr_parameters.jaehyun.o
 init_sink.o: pm_commons.o

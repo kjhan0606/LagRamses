@@ -189,15 +189,25 @@ def native_checks():
                 flags = ["-cpp", "-O2", "-ffree-line-length-none", "-fcheck=all", "-DSNRT",
                          "-DNDIM=3", "-DNPRE=8", "-DNVAR=18", "-J" + str(build), "-I" + str(build)]
             executable = build / "dust_smoke"
-            compiled = subprocess.run([compiler, *flags, str(native_root / "snrt_dust_ir.f90"),
-                str(native_root / "snrt_dust_ir_smoke.f90"), "-o", str(executable)],
+            native_sources = [native_root / "amr_parameters.jaehyun.f90",
+                native_root / "snrt_agn_source.f90",
+                native_root / "snrt_thermochemistry.f90",
+                native_root / "snrt_dust_ir.f90",
+                native_root / "snrt_dust_coupling.f90",
+                native_root / "snrt_dust_ir_smoke.f90"]
+            compiled = subprocess.run([compiler, *flags, *(str(source) for source in native_sources),
+                "-o", str(executable)],
                 cwd=build, capture_output=True, text=True)
             if compiled.returncode:
                 raise RuntimeError(compiled.stdout + compiled.stderr)
             run = subprocess.run([str(executable), str(fixture)], cwd=build, capture_output=True, text=True)
-            if run.returncode or not run.stdout.startswith("NATIVE_DUST_IR_OK\n"):
+            if (run.returncode or not run.stdout.startswith("NATIVE_DUST_IR_OK\n") or
+                    "NATIVE_DUST_COUPLING_OK" not in run.stdout):
                 raise RuntimeError(run.stdout + run.stderr)
-            values = np.fromstring(run.stdout.split("\n", 1)[1], sep=" ")
+            # The coupling marker follows the original numeric DUST-5 payload;
+            # keep the existing differential parser independent of that marker.
+            numeric_payload = run.stdout.split("NATIVE_DUST_COUPLING_OK", 1)[0]
+            values = np.fromstring(numeric_payload.split("\n", 1)[1], sep=" ")
             nfreq = len(model.energy_ev)
             assert len(values) == 4 + 8 + 2*nfreq*8
             np.testing.assert_allclose(values[:3], [reference["stored_energy_erg"],
