@@ -180,20 +180,87 @@ def save_preview(files, expected):
     return saved
 
 
+class StageEnd(Exception):
+    """The next configuration stage has been reached."""
+
+
+def answer_text(question, value):
+    if question.kind == 'edit':
+        return json.dumps(value, indent=2)
+    if question.kind == 'floats' and isinstance(value, list):
+        return ','.join(map(str, value))
+    if question.kind == 'bool':
+        return value
+    return '' if value is None else str(value)
+
+
+class StageUI(ReplayUI):
+    """Collect one whole form through the same generator as the terminal UI.
+
+    Drafts are keyed by question identity, not position: changing a branch
+    cannot feed an old answer into a different parameter.
+    """
+    def __init__(self, generator, answers=(), draft=None):
+        super().__init__(answers)
+        self.generator = generator
+        self.draft = draft or {}
+        self.section = 'Run files'
+        self.stage = None
+        self.fields = []
+        self.values = []
+        self.error = None
+
+    def info(self, text=''):
+        super().info(text)
+        heading = str(text).strip()
+        if heading.startswith('==='):
+            self.section = heading.strip('= ')
+            if self.section.startswith('lagRamses run generator'):
+                self.section = 'Run files'
+
+    def _answer(self, question):
+        if question.prompt.startswith('==='):
+            self.section = question.prompt.strip('= ')
+        elif question.prompt == 'Zoom-in run?':
+            self.section = 'Zoom region'
+        elif 'full parameter editor' in question.prompt:
+            self.section = 'Advanced settings'
+        if self.index < len(self.answers):
+            return super()._answer(question)
+        if self.stage is not None and self.section != self.stage:
+            raise StageEnd()
+        self.stage = self.section
+        key = (question.kind, question.prompt)
+        raw = self.draft.get(key, answer_text(question, question.default))
+        self.fields.append((key, question, raw))
+        value = parse_answer(question, raw, self.generator)
+        self.values.append(value)
+        return copy.deepcopy(value)
+
+
+def collect_stage(generator, answers=(), draft=None):
+    ui = StageUI(generator, answers, draft)
+    files = OrderedDict()
+    report = None
+    try:
+        report = generator.generate_run(ui, files.__setitem__)
+    except StageEnd:
+        pass
+    except (ValueError, KeyError, TypeError, OverflowError) as exc:
+        ui.error = str(exc)
+    return ui, files, report
+
+
 class RunWizard:
     def __init__(self, root, generator, tk, ttk, dialogs):
         self.root, self.generator, self.tk, self.ttk = root, generator, tk, ttk
         self.filedialog, self.messagebox = dialogs
         self.answers, self.files, self.report = [], OrderedDict(), None
-        # Most prompts remain scalar, but AMR base/max levels are one logical
-        # form.  Keep submission sizes so Back removes that form as a unit.
-        self.answer_batches = []
-        self.level_pair_active = False
-        self.previous_answer = None
-        self.returning = False
+        self.history = []
+        self.draft = {}
         root.title('lagRamses run setup')
-        root.geometry('980x720')
-        root.minsize(720, 520)
+        root.geometry('1100x800')
+        root.minsize(760, 560)
         self.frame = ttk.Frame(root, padding=16)
         self.frame.pack(fill='both', expand=True)
         root.protocol('WM_DELETE_WINDOW', self.close)
@@ -206,204 +273,120 @@ class RunWizard:
             self.root.destroy()
 
     def back(self):
-        if self.answers:
-            batch_size = self.answer_batches.pop() if self.answer_batches else 1
-            self.previous_answer = self.answers[-batch_size:]
-            del self.answers[-batch_size:]
-            self.returning = True
+        if self.history:
+            count, self.draft = self.history.pop()
+            del self.answers[count:]
         self.refresh()
 
     def refresh(self):
         for child in self.frame.winfo_children():
             child.destroy()
         self.files, self.report = OrderedDict(), None
-        ui = ReplayUI(self.answers)
-        try:
-            report = self.generator.generate_run(ui, self.files.__setitem__)
-        except Question as question:
-            self.show_question(question, ui.notes)
+        ui, files, report = collect_stage(self.generator, self.answers, self.draft)
+        self.stage_ui = ui
+        if not ui.fields and not ui.error:
+            self.files, self.report = files, report
+            self.show_preview(ui.notes)
             return
-        except (ValueError, KeyError, TypeError, OverflowError) as exc:
-            self.ttk.Label(self.frame, text='Setup needs correction', font=('', 16)).pack(anchor='w')
-            self.ttk.Label(self.frame, text=str(exc), wraplength=850).pack(anchor='w', pady=20)
-            self.ttk.Button(self.frame, text='Back', command=self.back).pack(anchor='w')
-            return
-        self.report = report
-        self.show_preview(ui.notes)
+        self.show_stage(ui)
 
-    def show_question(self, question, notes):
-        self.level_pair_active = False
-        if question.kind == 'value' and question.prompt.startswith('levelmin '):
-            self.show_level_pair(question, notes)
-            return
-        if self.returning:
-            previous = self.previous_answer
-            question.default = previous[0] if isinstance(previous, list) else previous
-            if question.kind == 'floats':
-                question.default = ','.join(str(value) for value in question.default)
-            self.returning = False
-        self.question = question
-        self.ttk.Label(self.frame, text='Run setup — step {}'.format(len(self.answers) + 1),
-                       font=('', 16)).pack(anchor='w')
-        headings = [note.strip() for note in notes if note.strip().startswith('===')]
-        if headings:
-            self.ttk.Label(self.frame, text=headings[-1].strip('= ')).pack(anchor='w', pady=8)
-        self.ttk.Label(self.frame, text=question.prompt.strip('= \n'),
-                       wraplength=850).pack(anchor='w', pady=12)
-        if question.kind == 'edit':
-            self.ttk.Label(self.frame, text='Edit named parameters as JSON. Booleans use true/false; '
-                           'arrays use quoted Fortran lists (for example "8*8.").\n'
-                           'The shared wizard subsequently sets its output schedule, IC paths '
-                           'and selected cooling defaults.', wraplength=850).pack(anchor='w')
-            self.entry = self.tk.Text(self.frame, height=16, wrap='none')
-            self.entry.pack(fill='both', expand=True, pady=8)
-            self.entry.insert('1.0', json.dumps(question.default, indent=2))
-        elif question.kind == 'bool':
-            self.variable = self.tk.BooleanVar(value=question.default)
-            self.ttk.Checkbutton(self.frame, text='Yes', variable=self.variable).pack(anchor='w')
-        elif question.kind == 'choice':
-            self.variable = self.tk.StringVar(value=question.default)
-            # A scrollable list keeps the gravity menu usable on small displays.
-            holder = self.ttk.Frame(self.frame)
-            holder.pack(fill='both', expand=True)
-            self.choice_list = self.tk.Listbox(holder, exportselection=False, height=10)
-            scrollbar = self.ttk.Scrollbar(holder, command=self.choice_list.yview)
-            self.choice_list.configure(yscrollcommand=scrollbar.set)
-            scrollbar.pack(side='right', fill='y')
-            self.choice_list.pack(side='left', fill='both', expand=True)
-            for index, (key, labels) in enumerate(question.options.items()):
-                self.choice_list.insert('end', '{} — {}'.format(key, labels[0]))
-                if key == question.default:
-                    self.choice_list.selection_set(index)
-                    self.choice_list.see(index)
-        else:
-            self.variable = self.tk.StringVar(value='' if question.default is None else str(question.default))
-            self.entry = self.ttk.Entry(self.frame, textvariable=self.variable)
-            self.entry.pack(fill='x', pady=8)
-            self.entry.focus_set()
-            self.entry.bind('<Return>', lambda event: self.next())
-            if question.prompt == 'Output directory':
-                self.ttk.Button(self.frame, text='Choose existing directory…',
-                                command=self.browse_directory).pack(anchor='w')
-            elif 'path' in question.prompt.lower():
-                self.ttk.Button(self.frame, text='Choose existing file…',
-                                command=self.browse_file).pack(anchor='w')
-        self.error = self.ttk.Label(self.frame, text='', foreground='firebrick', wraplength=850)
-        self.error.pack(anchor='w', pady=12)
-        buttons = self.ttk.Frame(self.frame)
-        buttons.pack(side='bottom', fill='x', pady=10)
-        self.ttk.Button(buttons, text='Back', command=self.back,
-                        state='normal' if self.answers else 'disabled').pack(side='left')
-        self.ttk.Button(buttons, text='Next', command=self.next).pack(side='right')
-        self.ttk.Label(self.frame, text='Configuration files only. Saving is a separate step.').pack(
-            side='bottom', anchor='w')
+    def read_draft(self):
+        return {key: read() for key, read in self.readers.items()}
 
-    def _level_max_question(self, levelmin):
-        """Replay just far enough to obtain the dependent levelmax prompt."""
-        ui = ReplayUI(self.answers + [levelmin])
-        try:
-            self.generator.generate_run(ui, lambda *_: None)
-        except Question as question:
-            if not question.prompt.startswith('levelmax '):
-                raise ValueError('The shared wizard inserted an unexpected prompt before levelmax.')
-            return question
-        raise ValueError('The shared wizard did not request levelmax after levelmin.')
-
-    def show_level_pair(self, question, notes):
-        """Render the dependent AMR levels as one side-by-side form."""
-        self.level_pair_active = True
-        previous = self.previous_answer if self.returning else None
-        self.returning = False
-        self.previous_answer = None
-        levelmin_default = previous[0] if isinstance(previous, list) else question.default
-        try:
-            levelmax_question = self._level_max_question(levelmin_default)
-        except (ValueError, KeyError, TypeError, OverflowError) as exc:
-            self.ttk.Label(self.frame, text='Setup needs correction', font=('', 16)).pack(anchor='w')
-            self.ttk.Label(self.frame, text=str(exc), wraplength=850).pack(anchor='w', pady=20)
-            self.ttk.Button(self.frame, text='Back', command=self.back).pack(anchor='w')
-            return
-        levelmax_default = previous[1] if isinstance(previous, list) and len(previous) > 1 \
-            else levelmax_question.default
-        self.level_questions = (question, levelmax_question)
-
-        self.ttk.Label(self.frame, text='Run setup — AMR levels', font=('', 16)).pack(anchor='w')
-        headings = [note.strip() for note in notes if note.strip().startswith('===')]
-        if headings:
-            self.ttk.Label(self.frame, text=headings[-1].strip('= ')).pack(anchor='w', pady=8)
-        self.ttk.Label(
-            self.frame,
-            text='Set the base and maximum AMR levels together. Each control is independent; '
-                 'the shared wizard validates the pair before continuing.',
-            wraplength=850).pack(anchor='w', pady=12)
-
-        holder = self.ttk.Frame(self.frame)
-        holder.pack(fill='x', pady=12)
-        self.level_variables = []
-        for column, (level_question, default, title) in enumerate((
-                (question, levelmin_default, 'Base/coarse level'),
-                (levelmax_question, levelmax_default, 'AMR maximum level'))):
-            panel = self.ttk.Frame(holder, padding=(0, 0, 18 if column == 0 else 0, 0))
-            panel.grid(row=0, column=column, sticky='ew')
-            holder.columnconfigure(column, weight=1)
-            self.ttk.Label(panel, text=title).pack(anchor='w')
-            variable = self.tk.StringVar(value=str(default))
-            self.level_variables.append(variable)
-            spinbox = self.ttk.Spinbox(panel, from_=1, to=30, textvariable=variable, width=8)
-            spinbox.pack(anchor='w', pady=8)
-            self.ttk.Label(panel, text=level_question.prompt, wraplength=380).pack(anchor='w')
-        self.level_error = self.ttk.Label(self.frame, text='', foreground='firebrick', wraplength=850)
-        self.level_error.pack(anchor='w', pady=12)
-        buttons = self.ttk.Frame(self.frame)
-        buttons.pack(side='bottom', fill='x', pady=10)
-        self.ttk.Button(buttons, text='Back', command=self.back,
-                        state='normal' if self.answers else 'disabled').pack(side='left')
-        self.ttk.Button(buttons, text='Next', command=self.next_level_pair).pack(side='right')
-        self.ttk.Label(self.frame, text='Both AMR levels are collected before the next wizard step.').pack(
-            side='bottom', anchor='w')
-
-    def next_level_pair(self):
-        try:
-            first, _ = self.level_questions
-            levelmin = parse_answer(first, self.level_variables[0].get(), self.generator)
-            levelmax_question = self._level_max_question(levelmin)
-            levelmax = parse_answer(levelmax_question, self.level_variables[1].get(), self.generator)
-            if not 1 <= levelmin <= levelmax <= 30:
-                raise ValueError('Require 1 <= levelmin <= levelmax <= 30.')
-        except (ValueError, TypeError, OverflowError) as exc:
-            self.level_error.configure(text=str(exc))
-            return
-        self.answers.extend((levelmin, levelmax))
-        self.answer_batches.append(2)
+    def update_fields(self):
+        self.draft = self.read_draft()
         self.refresh()
 
-    def browse_directory(self):
-        path = self.filedialog.askdirectory(parent=self.root, mustexist=True)
+    def browse(self, variable, directory=False):
+        chooser = self.filedialog.askdirectory if directory else self.filedialog.askopenfilename
+        path = chooser(parent=self.root, mustexist=True) if directory else chooser(parent=self.root)
         if path:
-            self.variable.set(path)
+            variable.set(path)
 
-    def browse_file(self):
-        path = self.filedialog.askopenfilename(parent=self.root)
-        if path:
-            self.variable.set(path)
+    def show_stage(self, ui):
+        self.ttk.Label(self.frame, text='{} — {}'.format(len(self.history) + 1, ui.stage or 'Setup'),
+                       font=('', 16)).pack(anchor='w', pady=(0, 12))
+        self.ttk.Label(self.frame, text='Edit the settings together. Model choices update related fields.',
+                       wraplength=950).pack(anchor='w')
+
+        # Keep navigation visible while long model menus/advanced edits scroll.
+        bar = self.ttk.Frame(self.frame)
+        bar.pack(side='bottom', fill='x', pady=10)
+        self.ttk.Button(bar, text='Back', command=self.back,
+                        state='normal' if self.history else 'disabled').pack(side='left')
+        self.ttk.Button(bar, text='Next', command=self.next).pack(side='right')
+        self.ttk.Button(bar, text='Update fields', command=self.update_fields).pack(side='right', padx=8)
+        self.error = self.ttk.Label(self.frame, text=ui.error or '', foreground='firebrick', wraplength=950)
+        self.error.pack(side='bottom', anchor='w', pady=8)
+
+        holder = self.ttk.Frame(self.frame)
+        holder.pack(fill='both', expand=True)
+        canvas = self.tk.Canvas(holder, highlightthickness=0)
+        scrollbar = self.ttk.Scrollbar(holder, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+        content = self.ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=content, anchor='nw')
+        content.bind('<Configure>', lambda event: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>', lambda event: canvas.itemconfigure(window, width=event.width))
+        for column in range(2):
+            content.columnconfigure(column, weight=1, uniform='fields')
+        self.readers, self.controls = {}, {}
+        cell = 0
+        for key, question, raw in ui.fields:
+            wide = question.kind in ('choice', 'edit')
+            if wide and cell % 2:
+                cell += 1
+            panel = self.ttk.LabelFrame(content, text=question.prompt.strip('= \n'), padding=10)
+            panel.grid(row=cell // 2, column=0 if wide else cell % 2,
+                       columnspan=2 if wide else 1, sticky='nsew', padx=5, pady=5)
+            cell += 2 if wide else 1
+            if question.kind == 'edit':
+                entry = self.tk.Text(panel, height=16, wrap='none')
+                entry.pack(fill='both', expand=True)
+                entry.insert('1.0', raw)
+                self.readers[key] = lambda entry=entry: entry.get('1.0', 'end-1c')
+                self.controls[key] = entry
+                continue
+            variable = (self.tk.BooleanVar(value=raw) if question.kind == 'bool'
+                        else self.tk.StringVar(value=raw))
+            self.controls[key] = variable
+            self.readers[key] = variable.get
+            if question.kind == 'choice':
+                for column in range(2):
+                    panel.columnconfigure(column, weight=1, uniform='choices')
+                for index, (value, labels) in enumerate(question.options.items()):
+                    self.ttk.Radiobutton(panel, text=labels[0], value=value, variable=variable,
+                                         command=self.update_fields).grid(
+                                             row=index // 2, column=index % 2, sticky='w', padx=5, pady=5)
+            elif question.kind == 'bool':
+                for index, (label, value) in enumerate((('Yes', True), ('No', False))):
+                    self.ttk.Radiobutton(panel, text=label, value=value, variable=variable,
+                                         command=self.update_fields).grid(row=0, column=index, padx=12)
+            else:
+                entry = self.ttk.Entry(panel, textvariable=variable)
+                entry.pack(fill='x')
+                if question.prompt == 'Output directory' or 'path' in question.prompt.lower():
+                    self.ttk.Button(panel, text='Browse…', command=lambda var=variable,
+                                    directory=question.prompt == 'Output directory':
+                                    self.browse(var, directory)).pack(anchor='w', pady=5)
 
     def next(self):
-        try:
-            if self.question.kind == 'edit':
-                raw = self.entry.get('1.0', 'end-1c')
-            elif self.question.kind == 'choice':
-                selection = self.choice_list.curselection()
-                if not selection:
-                    raise ValueError('Select an option.')
-                raw = list(self.question.options)[selection[0]]
-            else:
-                raw = self.variable.get()
-            answer = parse_answer(self.question, raw, self.generator)
-        except (ValueError, TypeError) as exc:
-            self.error.configure(text=str(exc))
+        draft = self.read_draft()
+        ui, _, _ = collect_stage(self.generator, self.answers, draft)
+        if ui.error:
+            self.error.configure(text=ui.error)
             return
-        self.answers.append(answer)
-        self.answer_batches.append(1)
+        # A value may reveal a dependent field. Show it for review before
+        # accepting newly exposed defaults (e.g. quintessence potential).
+        if [key for key, _, _ in ui.fields] != list(self.readers):
+            self.draft = draft
+            self.refresh()
+            return
+        self.history.append((len(self.answers), draft))
+        self.answers.extend(ui.values)
+        self.draft = {}
         self.refresh()
 
     def show_preview(self, notes):

@@ -76,6 +76,9 @@ run_case() {
 
   if [[ "$name" == baseline ]]; then
     [[ "$status" -eq 0 ]] || { echo "F-P2.8 FAIL baseline return=$status" >&2; tail -n 120 "$log" >&2; return 1; }
+    grep -Fq 'Run completed' "$log" || {
+      echo "F-P2.8 FAIL baseline did not finish time integration" >&2; tail -n 120 "$log" >&2; return 1;
+    }
     grep -Eq 'active sources:[[:space:]]+[1-9][0-9]*' "$log" || {
       echo "F-P2.8 FAIL baseline did not reach an active AGN source" >&2; tail -n 120 "$log" >&2; return 1;
     }

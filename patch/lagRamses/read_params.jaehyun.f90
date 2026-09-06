@@ -1490,6 +1490,17 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      endif
      rewind(1)
   endif
+  ! Fresh sink formation uses hydro state and rho_star, which is allocated
+  ! by init_poisson and populated by kjhan_get_rho_star.  Do not silently
+  ! enable gravity or let this combination reach kjhan_make_sink.
+  if(sink.and.create_sinks)then
+     if(.not.hydro.or..not.poisson)then
+        if(myid==1)write(*,*) &
+             & 'ERROR: sink creation requires hydro=.true. and poisson=.true.; ', &
+             & 'use create_sinks=.false. for existing-sink-only runs.'
+        nml_ok=.false.
+     endif
+  endif
   if (clumpfind)call read_clumpfind_params
   if (movie)call set_movie_vars
 

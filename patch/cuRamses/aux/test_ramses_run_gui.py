@@ -36,6 +36,38 @@ def collect(overrides=None):
 
 
 class WizardTests(unittest.TestCase):
+    def test_sink_formation_prerequisites_and_round_trip(self):
+        rng = mkrun.rng
+        for hydro in (False, True):
+            for poisson in (False, True):
+                for create in (None, False, True):
+                    values = dict(sink=True, hydro=hydro, poisson=poisson)
+                    if create is not None:
+                        values['create_sinks'] = create
+                    with self.subTest(**values):
+                        errors = [msg for msg in rng.validate_params(values)
+                                  if msg.level == 'ERROR']
+                        self.assertEqual(bool(errors),
+                                         create is not False and not (hydro and poisson))
+        values = dict(sink=True, hydro=True, poisson=False, create_sinks=False)
+        text = rng.format_namelist(values)
+        self.assertIn('&SINK_PARAMS', text)
+        parsed, _ = rng.parse_namelist(text)
+        self.assertIs(rng.import_to_values(parsed)['create_sinks'], False)
+        self.assertNotIn('&SINK_PARAMS', rng.format_namelist(dict(sink=False)))
+
+    def test_invalid_sink_edit_does_not_write(self):
+        answers, _, _ = collect({
+            'Open the full parameter editor for fine-tuning before writing?': True})
+        ui = gui.ReplayUI(answers)
+        with mock.patch.object(ui, 'edit', return_value={
+                'sink': True, 'hydro': True, 'poisson': False}), \
+                mock.patch('builtins.open', side_effect=AssertionError('unexpected write')):
+            files = {}
+            with self.assertRaisesRegex(ValueError, 'sink creation requires'):
+                mkrun.generate_run(ui, files.__setitem__)
+            self.assertEqual(files, {})
+
     def test_preview_never_touches_filesystem(self):
         with mock.patch('builtins.open', side_effect=AssertionError('preview wrote a file')), \
                 mock.patch('os.makedirs', side_effect=AssertionError('preview made a directory')):
@@ -152,9 +184,79 @@ class WizardTests(unittest.TestCase):
         self.assertEqual(launch.call_count, 2)
         self.assertTrue(all(call == mock.call(mkrun) for call in launch.call_args_list))
 
-    def test_level_pair_replay_is_two_answers(self):
-        answers, _, _ = collect()
-        self.assertEqual(answers[11:13], [8, 14])
+    def test_grouped_forms_match_shared_generator(self):
+        for overrides in ({}, {'Run mode': 'hydro', 'Zoom-in run?': True},
+                          {'Dark matter sector': 'sidm', 'Gravity / dark-energy sector': 'w0wa'},
+                          {'Zoom-in run?': True, 'IC pipeline': 'genetic_mono'}):
+            with self.subTest(overrides=overrides):
+                expected_answers, expected_files, _ = collect(overrides)
+                answers, stages = [], {}
+                for _ in range(20):
+                    ui, _, _ = gui.collect_stage(mkrun, answers)
+                    draft = {key: overrides[question.prompt.strip('= \n')]
+                             for key, question, _ in ui.fields
+                             if question.prompt.strip('= \n') in overrides}
+                    ui, files, report = gui.collect_stage(mkrun, answers, draft)
+                    self.assertIsNone(ui.error)
+                    if not ui.fields:
+                        break
+                    stages[ui.stage] = len(ui.fields)
+                    answers.extend(ui.values)
+                else:
+                    self.fail('Forms did not reach preview')
+                self.assertEqual(answers, expected_answers)
+                self.assertEqual(files, expected_files)
+                self.assertIsNotNone(report)
+                self.assertEqual(stages['Run files'], 2)
+                self.assertEqual(stages['Base cosmology'], 6)
+                self.assertEqual(stages['AMR levels'], 2)
+                if overrides.get('Zoom-in run?'):
+                    self.assertEqual(stages['Zoom region'], 7)
+                if overrides.get('Run mode') == 'hydro':
+                    self.assertEqual(stages['Hydro solver'], 6)
+
+    def test_stage_navigation_and_invalid_pair_are_atomic(self):
+        wizard = gui.RunWizard.__new__(gui.RunWizard)
+        wizard.generator, wizard.answers, wizard.history = mkrun, [], []
+        wizard.draft, wizard.error = {}, mock.Mock()
+        wizard.refresh = mock.Mock()
+        while True:
+            ui, _, _ = gui.collect_stage(mkrun, wizard.answers)
+            self.assertIsNone(ui.error)
+            wizard.readers = {key: mock.Mock(return_value=raw) for key, _, raw in ui.fields}
+            if ui.stage == 'AMR levels':
+                break
+            wizard.next()
+        before = list(wizard.answers)
+        keys = list(wizard.readers)
+        wizard.readers[keys[0]].return_value = '12'
+        wizard.readers[keys[1]].return_value = '8'
+        wizard.next()
+        self.assertEqual(wizard.answers, before)
+        wizard.error.configure.assert_called()
+        wizard.readers[keys[1]].return_value = '16'
+        wizard.next()
+        self.assertEqual(wizard.answers, before + [12, 16])
+        wizard.back()
+        self.assertEqual(wizard.answers, before)
+        self.assertEqual(list(wizard.draft.values()), ['12', '16'])
+
+    def test_model_switch_drops_obsolete_branch_fields(self):
+        answers = []
+        while True:
+            ui, _, _ = gui.collect_stage(mkrun, answers)
+            if ui.stage == 'Gravity / dark-energy sector':
+                break
+            answers.extend(ui.values)
+        choice = ui.fields[0][0]
+        ui, _, _ = gui.collect_stage(mkrun, answers, {choice: 'w0wa'})
+        draft = {key: raw for key, _, raw in ui.fields}
+        draft[('value', 'wa')] = '0.3'
+        draft[choice] = 'lcdm'
+        ui, _, _ = gui.collect_stage(mkrun, answers, draft)
+        self.assertIsNone(ui.error)
+        self.assertEqual(ui.values, ['lcdm'])
+        self.assertEqual(len(ui.fields), 1)
 
     def test_missing_tk_is_graceful(self):
         with mock.patch.dict(sys.modules, {'tkinter': None}), \
@@ -244,29 +346,29 @@ class DisplayTests(unittest.TestCase):
         try:
             dialogs = (mock.Mock(), mock.Mock())
             wizard = gui.RunWizard(root, mkrun, tk, ttk, dialogs)
-            wizard.variable.set('gui_smoke')
-            wizard.next()
-            wizard.back()
-            self.assertEqual(wizard.variable.get(), 'gui_smoke')
-            wizard.next()
             with tempfile.TemporaryDirectory() as directory:
-                wizard.variable.set(directory)
+                name_key = ('value', 'Run name (used as file/dir prefix)')
+                wizard.controls[name_key].set('gui_smoke')
+                wizard.controls[('value', 'Output directory')].set(directory)
+                wizard.next()
+                wizard.back()
+                self.assertEqual(wizard.controls[name_key].get(), 'gui_smoke')
                 wizard.next()
                 for _ in range(100):
                     root.update_idletasks()
                     if wizard.report is not None:
                         break
-                    if wizard.level_pair_active:
-                        self.assertEqual(len(wizard.level_variables), 2)
-                        wizard.next_level_pair()
-                        continue
-                    question = wizard.question
-                    if question.kind == 'choice' and 'Run mode' in question.prompt:
-                        wizard.choice_list.selection_clear(0, 'end')
-                        wizard.choice_list.selection_set(list(question.options).index('hydro'))
-                    if question.kind == 'bool' and ('full parameter editor' in question.prompt
-                                                    or 'Zoom-in run' in question.prompt):
-                        wizard.variable.set(True)
+                    for key, question, _ in wizard.stage_ui.fields:
+                        if question.kind == 'choice' and 'Run mode' in question.prompt:
+                            wizard.controls[key].set('hydro')
+                        if question.kind == 'bool' and ('full parameter editor' in question.prompt
+                                                        or 'Zoom-in run' in question.prompt):
+                            wizard.controls[key].set(True)
+                    wizard.update_fields()
+                    if wizard.stage_ui.stage == 'Base cosmology':
+                        self.assertEqual(len(wizard.controls), 6)
+                    if wizard.stage_ui.stage == 'Zoom region':
+                        self.assertEqual(len(wizard.controls), 7)
                     wizard.next()
                 self.assertIsNotNone(wizard.report)
                 self.assertFalse(list(Path(directory).iterdir()))

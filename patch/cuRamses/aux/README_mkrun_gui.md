@@ -7,11 +7,18 @@ GUI mode requires Python's Tkinter module and a graphical desktop or forwarded
 display; an unavailable dependency/display produces an actionable error and exit
 status 2. No packages are downloaded automatically.
 
-Next/Back walks the same prompts and defaults as the terminal wizard, including
-DMO/hydro, dark matter and gravity sectors, cosmology, AMR, zoom, IC pipeline,
-output epochs and hydro settings. The base and maximum AMR levels are shown in
-one side-by-side form, so they can be adjusted together and validated as a pair.
-Returning to a question retains its answer; changing it rebuilds subsequent questions.
+Next/Back navigates whole configuration stages: run files, DMO/hydro, dark
+matter, gravity, cosmology, AMR, zoom, IC pipeline, output epochs, hydro and
+advanced settings. Each stage shows its fields together in two columns.
+Model choices appear as side-by-side radio buttons and reveal related fields
+on the same page. Yes/No buttons also appear together. Long pages scroll
+while navigation stays visible.
+
+Use Update fields after changing a value that controls other fields.
+Next validates the complete stage; newly exposed fields are shown for review
+before proceeding. Back restores the whole previous form. Changing a branch
+discards fields that no longer apply. Generation still uses the terminal
+wizard's prompts, defaults and validation.
 Advanced parameters use a JSON object
 with names from the existing namelist database, typed numbers/booleans and quoted
 Fortran array lists. As in the terminal wizard, the subsequent generation stage

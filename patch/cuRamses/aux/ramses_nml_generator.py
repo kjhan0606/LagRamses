@@ -73,6 +73,9 @@ PARAMS = [
     ParamDef('poisson', 'bool', False, 'RUN_PARAMS', S_SIMTYPE, 'Self-gravity (Poisson solver)'),
     ParamDef('hydro',   'bool', False, 'RUN_PARAMS', S_SIMTYPE, 'Hydrodynamics'),
     ParamDef('sink',    'bool', False, 'RUN_PARAMS', S_SIMTYPE, 'Sink particles (BH/stars)'),
+    ParamDef('create_sinks', 'bool', True, 'SINK_PARAMS', S_SIMTYPE,
+             'Form new sinks (requires hydro and self-gravity; false keeps existing sinks)',
+             visible_when='sink==True'),
     ParamDef('rt',      'bool', False, 'RUN_PARAMS', S_SIMTYPE, 'Radiative transfer'),
     ParamDef('lightcone','bool',False, 'RUN_PARAMS', S_SIMTYPE, 'Lightcone output'),
     ParamDef('clumpfind','bool',False, 'RUN_PARAMS', S_SIMTYPE, 'Clump finder'),
@@ -659,6 +662,13 @@ def validate_params(values):
     if values.get('sink') and not values.get('mseed'):
         msgs.append(ValidationMsg('WARNING', 'sink=True but Mseed not set'))
 
+    # Active VPATH selects patch/cuRamses/pm_parameters.f90: default is True.
+    if values.get('sink') and values.get('create_sinks', True):
+        if not values.get('hydro') or not values.get('poisson'):
+            msgs.append(ValidationMsg('ERROR',
+                'sink creation requires hydro=True and poisson=True; '
+                'use create_sinks=False for existing-sink-only runs'))
+
     dr = values.get('dr_proper', 0)
     if isinstance(dr, (int, float)) and dr > 0:
         jn = values.get('jeans_ncells', 0)
@@ -703,7 +713,7 @@ def validate_params(values):
 GROUP_ORDER = [
     'RUN_PARAMS', 'COSMO_PARAMS', 'OUTPUT_PARAMS', 'INIT_PARAMS',
     'AMR_PARAMS', 'LIGHTCONE_PARAMS', 'REFINE_PARAMS',
-    'HYDRO_PARAMS', 'POISSON_PARAMS', 'PHYSICS_PARAMS',
+    'HYDRO_PARAMS', 'POISSON_PARAMS', 'PHYSICS_PARAMS', 'SINK_PARAMS',
     # Optional groups (only emitted when relevant)
     'CPL_PARAMS', 'NEUTRINO_PARAMS',
     'FR_PARAMS', 'NDGP_PARAMS', 'SYMMETRON_PARAMS',
@@ -724,6 +734,7 @@ ALWAYS_EMIT = {
 
 # Groups that require a toggle to be True
 GROUP_REQUIRES = {
+    'SINK_PARAMS': 'sink',
     'COSMO_PARAMS': 'cosmo',
     'CPL_PARAMS': None,  # emitted if w0 or wa differ from defaults
     'NEUTRINO_PARAMS': 'use_neutrino',
@@ -1307,6 +1318,9 @@ def main():
 
     # --- Generate output ---
     output = show_review(values)
+    if any(msg.level == 'ERROR' for msg in validate_params(values)):
+        print('Refusing to write an invalid namelist.', file=sys.stderr)
+        return 1
 
     # --- Write file ---
     if args.output:

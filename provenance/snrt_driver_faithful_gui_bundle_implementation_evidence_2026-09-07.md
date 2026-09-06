@@ -107,5 +107,10 @@ restart/migration persistence, MPI source ownership, physical AGN SED/MAD,
 and live dust are outside this evidence and remain unapproved for production
 science.
 
+Follow-up: `sink_formation_prerequisites_2026-09-07.md` corrects the crash
+location to the caller's post-quenching rho_star access and records the
+unsupported-input rejection plus a successful zero-source formation scan
+with Poisson enabled. Actual physical sink formation remains unvalidated.
+
 The Opus5 bundle-end audit and its post-audit closure are recorded in
 `provenance/opus5_f_p2_8_bundle_end_audit_2026-09-07.md`.
