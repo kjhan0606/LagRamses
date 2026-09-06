@@ -202,7 +202,8 @@ def native_checks():
                 raise RuntimeError(compiled.stdout + compiled.stderr)
             run = subprocess.run([str(executable), str(fixture)], cwd=build, capture_output=True, text=True)
             if (run.returncode or not run.stdout.startswith("NATIVE_DUST_IR_OK\n") or
-                    "NATIVE_DUST_COUPLING_OK" not in run.stdout):
+                    "NATIVE_DUST_COUPLING_OK" not in run.stdout or
+                    "NATIVE_DUST_TRANSIENT_OK" not in run.stdout):
                 raise RuntimeError(run.stdout + run.stderr)
             # The coupling marker follows the original numeric DUST-5 payload;
             # keep the existing differential parser independent of that marker.

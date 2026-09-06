@@ -14,6 +14,7 @@ module snrt_dust_ir
      private
      logical :: ready=.false.
      real(real64) :: background=0
+     real(real64) :: background_temperature=0
      real(real64), allocatable :: energy(:), sigma(:), log_t(:), power(:), band(:,:)
   end type
   type, public :: dust_ir_diagnostics
@@ -63,6 +64,7 @@ contains
     if (any(table%power(2:)<=table%power(:nt-1))) return
     if (any(table%band(:,2:)<table%band(:,:nt-1))) return
     table%background=table%power(bath)
+    table%background_temperature=cmb
     table%ready=.true.
     ierr=dust_ok
   end subroutine
@@ -103,8 +105,58 @@ contains
     ierr=dust_ok
   end subroutine
 
+  subroutine transient_emission(table,heating,density,dt,old_energy,capacity, &
+       rate,temperature,next_energy,ierr)
+    type(dust_ir_table), intent(in) :: table
+    real(real64), intent(in) :: heating(:),density(:),dt,old_energy(:),capacity(:)
+    real(real64), intent(out) :: rate(:,:),temperature(:),next_energy(:)
+    integer, intent(out) :: ierr
+    real(real64) :: lower,upper,mid,target,power,fraction,residual
+    real(real64) :: emitted(size(heating)),unused_temperature(size(heating))
+    integer :: i,k,iteration,nt
+    ierr=dust_err_range
+    nt=size(table%power)
+    do i=1,size(heating)
+       if(density(i)==0)then
+          if(heating(i)/=0) return
+          next_energy(i)=old_energy(i)
+          temperature(i)=old_energy(i)/capacity(i)
+          emitted(i)=0
+          cycle
+       end if
+       target=old_energy(i)+dt*heating(i)
+       lower=table%background_temperature
+       upper=exp(table%log_t(nt))
+       if(.not.ieee_is_finite(target))return
+       if(target<capacity(i)*lower) return
+       if(target>capacity(i)*upper+dt*density(i)*(table%power(nt)-table%background))return
+       ! C*T_new + dt*n_d*[P(T_new)-P(T_background)] = E_old + dt*heating.
+       ! Positive C and the monotone table give a unique bracketed root.
+       do iteration=1,80
+          mid=lower+0.5d0*(upper-lower)
+          k=1
+          do while(k<nt-1)
+             if(log(mid)<=table%log_t(k+1))exit
+             k=k+1
+          end do
+          fraction=(log(mid)-table%log_t(k))/(table%log_t(k+1)-table%log_t(k))
+          power=table%power(k)+fraction*(table%power(k+1)-table%power(k))
+          residual=capacity(i)*mid+dt*density(i)*max(power-table%background,0d0)-target
+          if(residual>0)then
+             upper=mid
+          else
+             lower=mid
+          end if
+       end do
+       temperature(i)=lower+0.5d0*(upper-lower)
+       next_energy(i)=capacity(i)*temperature(i)
+       emitted(i)=max(heating(i)+(old_energy(i)-next_energy(i))/dt,0d0)
+    end do
+    call emission(table,emitted,density,rate,unused_temperature,ierr)
+  end subroutine
+
   subroutine snrt_dust_ir_advance(table, direction, weight, neighbor, dx, dt, c_hat, density, primary, &
-       energy, temperature, photons, diagnostics, ierr, tolerance, max_iterations)
+       energy, temperature, photons, diagnostics, ierr, tolerance, max_iterations, dust_energy, heat_capacity)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -117,21 +169,41 @@ contains
     integer, intent(out) :: ierr
     real(real64), intent(in) :: tolerance
     integer, intent(in) :: max_iterations
+    ! Optional finite-capacity material state, both in physical volume units:
+    ! energy erg/cm3 and capacity erg/cm3/K. Both or neither must be supplied.
+    real(real64), optional, intent(inout) :: dust_energy(:)
+    real(real64), optional, intent(in) :: heat_capacity(:)
     real(real64), allocatable :: transported(:,:,:), candidate(:,:,:), rate(:,:), next_t(:)
     real(real64), allocatable :: guess(:), absorbed(:), transmit(:,:), loss(:,:), response(:,:)
     real(real64), allocatable :: emitted_photons(:,:)
+    real(real64), allocatable :: trial_dust_energy(:)
+    logical :: transient
     real(real64) :: cfl, volume, factor, tau, source, old_total, new_total, scale, balance, sum_w
     integer :: ng, nd, nc, i, j, g, d, axis, face, outgoing, opposite, iteration
     type(dust_ir_diagnostics) :: trial
     trial=dust_ir_diagnostics()
     ierr=dust_err_table
     if (.not.table%ready) return
+    transient=present(dust_energy)
+    ierr=dust_err_config
+    if(transient.neqv.present(heat_capacity))return
     ng=size(table%energy); nd=size(weight); nc=size(density)
     ierr=dust_err_shape
     if (nd<1 .or. nc<1) return
     if (any(shape(direction)/=[3,nd]) .or. any(shape(neighbor)/=[6,nc])) return
     if (any(shape(energy)/=[ng,nd,nc]) .or. any(shape(photons)/=[ng,nc])) return
     if (size(temperature)/=nc .or. size(primary)/=nc) return
+    if(transient)then
+       if(size(dust_energy)/=nc.or.size(heat_capacity)/=nc)return
+       ierr=dust_err_state
+       if(any(.not.ieee_is_finite(dust_energy)).or.any(.not.ieee_is_finite(heat_capacity)))return
+       if(any(dust_energy<0).or.any(heat_capacity<=0))return
+       do i=1,nc
+          if(density(i)<=0)cycle
+          if(dust_energy(i)/heat_capacity(i)<table%background_temperature.or. &
+               dust_energy(i)/heat_capacity(i)>exp(table%log_t(size(table%log_t))))return
+       end do
+    end if
     ierr=dust_err_config
     if (.not.all(ieee_is_finite([dx,dt,c_hat,tolerance]))) return
     if (min(dx,dt,c_hat,tolerance)<=0 .or. tolerance>=1 .or. max_iterations<1) return
@@ -159,6 +231,7 @@ contains
     end do
     allocate(transported(ng,nd,nc),candidate(ng,nd,nc),rate(ng,nc),next_t(nc))
     allocate(guess(nc),absorbed(nc),transmit(ng,nc),loss(ng,nc),response(ng,nc),emitted_photons(ng,nc))
+    if(transient)allocate(trial_dust_energy(nc))
     volume=dx**3
     transported=energy
     old_total=0
@@ -195,9 +268,18 @@ contains
     if (.not.all(ieee_is_finite([volume,old_total,trial%primary_erg,trial%escaped_erg]))) return
     scale=max(trial%primary_erg,tiny(scale))
     if (trial%primary_erg==0) scale=max(old_total,scale)
+    if(transient)then
+       scale=max(scale,sum(dust_energy)*volume)
+       if(.not.ieee_is_finite(scale))return
+    end if
     guess=0
     do iteration=0,max_iterations
-       call emission(table, primary+guess/dt, density, rate, next_t, ierr)
+       if(transient)then
+          call transient_emission(table,primary+guess/dt,density,dt,dust_energy,heat_capacity, &
+               rate,next_t,trial_dust_energy,ierr)
+       else
+          call emission(table, primary+guess/dt, density, rate, next_t, ierr)
+       end if
        if (ierr/=dust_ok) return
        absorbed=0; new_total=0
        do i=1,nc
@@ -214,6 +296,7 @@ contains
        if (.not.all(ieee_is_finite(candidate)) .or. any(candidate<0) .or. .not.ieee_is_finite(new_total)) return
        if (.not.all(ieee_is_finite(absorbed)) .or. any(absorbed<0)) return
        balance=new_total-old_total+trial%escaped_erg-trial%primary_erg
+       if(transient)balance=balance+sum(trial_dust_energy-dust_energy)*volume
        trial%balance_relative=abs(balance)/scale
        trial%local_relative=maxval(abs(absorbed-guess)/max(primary*dt+absorbed,tiny(scale)))
        if (max(trial%balance_relative,trial%local_relative)<=tolerance) then
@@ -224,6 +307,7 @@ contains
           trial%iterations=iteration; trial%absorbed_erg=sum(absorbed)*volume
           if (.not.ieee_is_finite(trial%absorbed_erg)) return
           energy=candidate; temperature=next_t; photons=photons+emitted_photons
+          if(transient)dust_energy=trial_dust_energy
           diagnostics=trial
           ierr=dust_ok
           return

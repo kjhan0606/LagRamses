@@ -84,7 +84,49 @@ program snrt_dust_ir_smoke
        energy,temperature,photons,diag,ierr,tol,128)
   if (ierr/=dust_ok .or. maxval(energy)<=0 .or. maxval(photons)<=0) stop 9
   call coupling_checks()
+  call transient_checks()
 contains
+  subroutine transient_checks()
+    type(dust_ir_table) :: transient_table
+    type(dust_ir_diagnostics) :: result
+    real(dust_dp) :: rays(3,2), weights(2), field(2,2,1), emitted(2,1), grain_t(1)
+    real(dust_dp) :: grain_e(1), capacity(1), previous_e(1), saved_field(2,2,1), saved_emitted(2,1)
+    real(dust_dp) :: total,initial,stored_ir,saved_temperature(1)
+    integer :: links(6,1),status
+    rays(:,1)=[1d0,0d0,0d0]; rays(:,2)=[-1d0,0d0,0d0]
+    weights=.5d0; links=0; field=0; emitted=0
+    capacity=1d-24; grain_t=20d0; grain_e=capacity*grain_t; initial=sum(grain_e)*1d36
+    call snrt_dust_ir_initialize(transient_table,[.001d0,.01d0],[.001d0,.01d0], &
+         [1d-21,1d-21],[10d0,20d0,50d0,100d0],10d0,status)
+    if(status/=dust_ok)stop 51
+    previous_e=grain_e
+    call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
+         field,grain_t,emitted,result,status,1d-10,128,grain_e,capacity)
+    if(status/=dust_ok)then
+       write(*,*)'TRANSIENT_ERROR',status
+       stop 52
+    end if
+    stored_ir=sum(field)*.5d0*1d36
+    total=stored_ir+sum(grain_e)*1d36+result%escaped_erg
+    if(abs(total-initial)/initial>1d-10)stop 53
+    if(any(grain_e>=previous_e).or.any(grain_t<10d0).or.sum(emitted)<=0)stop 54
+    saved_field=field; saved_emitted=emitted; previous_e=grain_e; saved_temperature=grain_t
+    call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
+         field,grain_t,emitted,result,status,1d-10,128,grain_e,[0d0])
+    if(status/=dust_err_state.or.any(field/=saved_field).or.any(grain_e/=previous_e).or. &
+         any(emitted/=saved_emitted).or.any(grain_t/=saved_temperature))stop 55
+    call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
+         field,grain_t,emitted,result,status,1d-10,128,dust_energy=grain_e)
+    if(status/=dust_err_config.or.any(field/=saved_field).or.any(grain_e/=previous_e))stop 56
+    initial=(sum(field)*.5d0+sum(grain_e))*1d36
+    call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[1d-27], &
+         field,grain_t,emitted,result,status,1d-10,128,grain_e,capacity)
+    if(status/=dust_ok)stop 57
+    total=(sum(field)*.5d0+sum(grain_e))*1d36+result%escaped_erg
+    if(abs(total-initial-result%primary_erg)/max(initial,result%primary_erg)>1d-10)stop 58
+    write(*,'(a)')'NATIVE_DUST_TRANSIENT_OK cooling=1 heating=1 material_plus_radiation_closure=1 rollback=1'
+  end subroutine
+
   subroutine coupling_checks()
     real(dust_dp) :: sigma_test(3), tau_hhe(3), tau, tau_total
     real(dust_dp) :: available(3), assigned(3), assigned_dust, returned, unassigned
