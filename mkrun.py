@@ -15,9 +15,13 @@ hydro) basic physics -- then writes:
 Scope: cosmological (cosmo=.true.) runs only. For idealized test
 problems (Sedov, tubes, ...) copy one of namelist/*.nml directly.
 
-Run: python3 mkrun.py
+Run: python3 mkrun.py          # terminal wizard
+     python3 mkrun.py --gui    # graphical setup, preview and confirmed save
 """
+import argparse
+import math
 import os
+import re
 import sys
 from collections import OrderedDict
 
@@ -79,6 +83,9 @@ def ask_floats(prompt, default_csv):
 
 
 def default_of(name):
+    if name.lower() not in rng.PARAM_BY_NAME:
+        raise ValueError('The current parameter database does not support {}. '
+                         'Choose a supported sector.'.format(name))
     return rng.PARAM_BY_NAME[name.lower()].default
 
 
@@ -175,7 +182,9 @@ GRAV_SECTORS = OrderedDict([
 ])
 
 
-def collect_dm_sector(values):
+def collect_dm_sector(values, ui=None):
+    ui = ui or ConsoleUI()
+    ask, ask_bool, ask_choice = ui.ask, ui.ask_bool, ui.ask_choice
     extra = {}
     choice = ask_choice('\n=== Dark matter sector ===', DM_SECTORS, 'cdm')
     if choice == 'sidm':
@@ -203,7 +212,9 @@ def collect_dm_sector(values):
     return choice, extra
 
 
-def collect_grav_sector(values):
+def collect_grav_sector(values, ui=None):
+    ui = ui or ConsoleUI()
+    ask, ask_bool, ask_choice = ui.ask, ui.ask_bool, ui.ask_choice
     extra = {}
     choice = ask_choice('\n=== Gravity / dark-energy sector ===', GRAV_SECTORS, 'lcdm')
     if choice == 'w0wa':
@@ -297,11 +308,38 @@ def collect_grav_sector(values):
 # ---------------------------------------------------------------------------
 # main wizard
 # ---------------------------------------------------------------------------
-def main():
+class ConsoleUI:
+    ask = staticmethod(ask)
+    ask_bool = staticmethod(ask_bool)
+    ask_choice = staticmethod(ask_choice)
+    ask_floats = staticmethod(ask_floats)
+    edit = staticmethod(rng.interactive_edit)
+    info = staticmethod(print)
+
+
+def save_text(path, text):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as stream:
+        stream.write(text)
+
+
+def generate_run(ui=None, write_text=save_text):
+    """Shared wizard; a GUI supplies prompts and an in-memory text sink.
+
+    No directories or files are touched except by the supplied text sink.
+    """
+    ui = ui or ConsoleUI()
+    ask, ask_bool, ask_choice = ui.ask, ui.ask_bool, ui.ask_choice
+    ask_floats, print = ui.ask_floats, ui.info
     print('=== lagRamses run generator (cosmological runs only) ===')
     name = ask('Run name (used as file/dir prefix)', 'myrun')
     outdir = ask('Output directory', os.path.join(HERE, 'runs', name))
-    os.makedirs(outdir, exist_ok=True)
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name):
+        raise ValueError('Run name must start with a letter or digit and contain '
+                         'only letters, digits, underscores, dots or hyphens.')
+    if not outdir.strip():
+        raise ValueError('Output directory is required.')
+    outdir = os.path.abspath(os.path.expanduser(outdir))
 
     values = OrderedDict()
     values['cosmo'] = True
@@ -314,8 +352,8 @@ def main():
     ]), 'dmo')
     values['hydro'] = (mode == 'hydro')
 
-    dm_choice, extra_dm = collect_dm_sector(values)
-    grav_choice, extra_grav = collect_grav_sector(values)
+    dm_choice, extra_dm = collect_dm_sector(values, ui)
+    grav_choice, extra_grav = collect_grav_sector(values, ui)
 
     print('\n=== Base cosmology ===')
     omega_m = ask('omega_m', 0.3111, float)
@@ -325,6 +363,12 @@ def main():
     ns = ask('n_s (scalar spectral index)', 0.9665, float)
     boxlen = ask('box size [Mpc/h]', 100.0, float)
     omega_l = 1.0 - omega_m
+    if not all(math.isfinite(v) for v in (omega_m, omega_b, h, sigma8, ns, boxlen)):
+        raise ValueError('Cosmology and box size must be finite.')
+    if not (0 <= omega_b <= omega_m and omega_m > 0 and h > 0
+            and sigma8 > 0 and boxlen > 0):
+        raise ValueError('Require 0 <= omega_b <= omega_m, with positive '
+                         'omega_m, h, sigma_8 and box size.')
     values['omega_m'] = omega_m
     values['omega_b'] = omega_b
     values['omega_l'] = omega_l
@@ -336,6 +380,8 @@ def main():
     levelmax = ask('levelmax (AMR max level)', levelmin + 6, int)
     values['levelmin'] = levelmin
     values['levelmax'] = levelmax
+    if not 1 <= levelmin <= levelmax <= 30:
+        raise ValueError('Require 1 <= levelmin <= levelmax <= 30.')
 
     zoom = ask_bool('\nZoom-in run?', False)
     zoom_levelmin = levelmin
@@ -356,6 +402,13 @@ def main():
         cz = ask('zoom region center z [0-1, box units]', 0.5, float)
         region_center = (cx, cy, cz)
         region_radius = ask('zoom region radius/half-extent [Mpc/h]', boxlen * 0.1, float)
+        if not (levelmin == zoom_levelmin <= zoom_levelmax <= levelmax <= 30):
+            raise ValueError('Zoom IC minimum must match levelmin; require '
+                             'zoom minimum <= zoom maximum <= levelmax <= 30.')
+        if not all(math.isfinite(c) and 0 <= c <= 1 for c in region_center):
+            raise ValueError('Zoom center coordinates must be finite and in [0,1].')
+        if not math.isfinite(region_radius) or not 0 < region_radius <= boxlen / 2:
+            raise ValueError('Zoom radius must be positive and at most half the box size.')
 
     print('\n=== IC pipeline ===')
     if zoom:
@@ -377,6 +430,11 @@ def main():
 
     print('\n=== Output epochs ===')
     zlist = ask_floats('output redshifts (comma separated, high-z first)', '9,4,2,1,0.5,0')
+    if not math.isfinite(z_start) or z_start < 0:
+        raise ValueError('IC starting redshift must be finite and nonnegative.')
+    if not zlist or not all(math.isfinite(z) and -1 < z <= z_start for z in zlist):
+        raise ValueError('Output redshifts must be finite, greater than -1, '
+                         'and no greater than the IC starting redshift.')
     zlist = sorted(set(zlist), reverse=True)
     aout = sorted(1.0 / (1.0 + z) for z in zlist)
 
@@ -395,7 +453,7 @@ def main():
     advanced = ask_bool(
         '\nOpen the full parameter editor for fine-tuning before writing?', False)
     if advanced:
-        values = rng.interactive_edit(values)
+        values = ui.edit(values)
 
     # ---- AMR / refine / init defaults not asked above ----
     values.setdefault('ngridtot', 100_000_000)
@@ -452,10 +510,8 @@ def main():
     msgs = rng.validate_params(values)
 
     nml_path = os.path.join(outdir, '{}.nml'.format(name))
-    with open(nml_path, 'w') as f:
-        f.write('! Generated by mkrun.py -- dm={} grav={} mode={}\n'.format(
-            dm_choice, grav_choice, mode))
-        f.write(nml_text)
+    write_text(nml_path, '! Generated by mkrun.py -- dm={} grav={} mode={}\n'.format(
+        dm_choice, grav_choice, mode) + nml_text)
     written = [nml_path]
 
     # ---- lagCAMB transfer function(s) ----
@@ -473,7 +529,7 @@ def main():
     for tz in target_zs:
         camb_path = os.path.join(outdir, '{}_camb_z{:g}.ini'.format(name, tz))
         write_camb_ini(camb_path, values, omega_m, omega_b, h, sigma8, ns,
-                        grav_choice, tz)
+                        grav_choice, tz, write_text=write_text)
         written.append(camb_path)
         transfer_file_of[tz] = 'transfer_z{:g}.dat'.format(tz)
 
@@ -482,33 +538,34 @@ def main():
         p = os.path.join(outdir, '{}_music.conf'.format(name))
         write_music_conf(p, values, omega_m, omega_b, h, sigma8, ns, boxlen,
                           z_start, seed, levelmin, zoom_levelmin, zoom_levelmax,
-                          zoom, region_center, region_radius, ic_root)
+                          zoom, region_center, region_radius, ic_root, write_text=write_text)
         written.append(p)
     elif ic_choice == 'monofonic':
         p = os.path.join(outdir, '{}_monofonic.conf'.format(name))
         write_monofonic_conf(p, values, omega_m, h, sigma8, ns, boxlen, z_start,
                               seed, levelmin, ic_root, parent_only=False,
-                              transfer_file=transfer_file_of[0.0])
+                              transfer_file=transfer_file_of[0.0], write_text=write_text)
         written.append(p)
     elif ic_choice == 'genetic':
         p = os.path.join(outdir, '{}_genetic.param'.format(name))
         write_genetic_param(p, name, omega_m, omega_l, h, ns, sigma8, z_start, seed,
                              boxlen, levelmin, zoom_levelmin, zoom_levelmax, zoom,
                              region_center, region_radius, ic_root,
-                             camb_file=transfer_file_of[z_start], wn_import=None)
+                             camb_file=transfer_file_of[z_start], wn_import=None,
+                             write_text=write_text)
         written.append(p)
     elif ic_choice == 'genetic_mono':
         mono_p = os.path.join(outdir, '{}_monofonic_parent.conf'.format(name))
         write_monofonic_conf(mono_p, values, omega_m, h, sigma8, ns, boxlen, z_start,
                               seed, levelmin, ic_root, parent_only=True, name=name,
-                              transfer_file=transfer_file_of[0.0])
+                              transfer_file=transfer_file_of[0.0], write_text=write_text)
         written.append(mono_p)
         gen_p = os.path.join(outdir, '{}_genetic.param'.format(name))
         write_genetic_param(gen_p, name, omega_m, omega_l, h, ns, sigma8, z_start, seed,
                              boxlen, levelmin, zoom_levelmin, zoom_levelmax, zoom,
                              region_center, region_radius, ic_root,
                              camb_file=transfer_file_of[z_start],
-                             wn_import='{}_wn.npy'.format(name))
+                             wn_import='{}_wn.npy'.format(name), write_text=write_text)
         written.append(gen_p)
 
     print('\n=== done ===')
@@ -523,12 +580,14 @@ def main():
     if ic_choice == 'genetic_mono':
         print('genetIC white-noise import needs {}_wn.npy, converted from the '
               'monofonIC HDF5 dump (see manual ch. 26b/26c).'.format(name))
+    return {'paths': written, 'messages': msgs, 'values': values, 'outdir': outdir}
 
 
 # ---------------------------------------------------------------------------
 # lagCAMB
 # ---------------------------------------------------------------------------
-def write_camb_ini(path, values, omega_m, omega_b, h, sigma8, ns, grav_choice, target_z):
+def write_camb_ini(path, values, omega_m, omega_b, h, sigma8, ns, grav_choice, target_z,
+                   write_text=save_text):
     ombh2 = omega_b * h * h
     omch2 = (omega_m - omega_b) * h * h
     w0 = values.get('w0', -1.0)
@@ -568,8 +627,7 @@ def write_camb_ini(path, values, omega_m, omega_b, h, sigma8, ns, grav_choice, t
         'transfer_filename(1) = transfer_z{:g}.dat'.format(target_z),
         'transfer_matterpower(1) = matterpower_z{:g}.dat'.format(target_z),
     ]
-    with open(path, 'w') as f:
-        f.write('\n'.join(lines) + '\n')
+    write_text(path, '\n'.join(lines) + '\n')
 
 
 # ---------------------------------------------------------------------------
@@ -577,7 +635,7 @@ def write_camb_ini(path, values, omega_m, omega_b, h, sigma8, ns, grav_choice, t
 # ---------------------------------------------------------------------------
 def write_music_conf(path, values, omega_m, omega_b, h, sigma8, ns, boxlen,
                       z_start, seed, levelmin, zoom_levelmin, zoom_levelmax,
-                      zoom, region_center, region_radius, ic_root):
+                      zoom, region_center, region_radius, ic_root, write_text=save_text):
     lmin = zoom_levelmin if zoom else levelmin
     lmax = zoom_levelmax if zoom else levelmin
     extent = min(0.9, 2.0 * region_radius / boxlen)
@@ -634,8 +692,7 @@ def write_music_conf(path, values, omega_m, omega_b, h, sigma8, ns, boxlen,
         'laplace_order\t\t= 6',
         'grad_order\t\t= 6',
     ]
-    with open(path, 'w') as f:
-        f.write('\n'.join(lines) + '\n')
+    write_text(path, '\n'.join(lines) + '\n')
 
 
 # ---------------------------------------------------------------------------
@@ -643,7 +700,7 @@ def write_music_conf(path, values, omega_m, omega_b, h, sigma8, ns, boxlen,
 # ---------------------------------------------------------------------------
 def write_monofonic_conf(path, values, omega_m, h, sigma8, ns, boxlen, z_start,
                           seed, levelmin, ic_root, parent_only, transfer_file,
-                          name=None):
+                          name=None, write_text=save_text):
     lines = [
         '[setup]',
         'GridRes\t\t\t= {}'.format(2 ** levelmin),
@@ -690,8 +747,7 @@ def write_monofonic_conf(path, values, omega_m, h, sigma8, ns, boxlen, z_start,
             'format\t\t\t= grafic2',
             'filename\t\t= {}'.format(ic_root),
         ]
-    with open(path, 'w') as f:
-        f.write('\n'.join(lines) + '\n')
+    write_text(path, '\n'.join(lines) + '\n')
 
 
 # ---------------------------------------------------------------------------
@@ -700,7 +756,7 @@ def write_monofonic_conf(path, values, omega_m, h, sigma8, ns, boxlen, z_start,
 def write_genetic_param(path, name, omega_m, omega_l, h, ns, sigma8, z_start, seed,
                          boxlen, levelmin, zoom_levelmin, zoom_levelmax, zoom,
                          region_center, region_radius, ic_root, camb_file,
-                         wn_import):
+                         wn_import, write_text=save_text):
     lines = [
         '# genetIC param file, generated by mkrun.py',
         'Om\t{:.6f}'.format(omega_m),
@@ -739,13 +795,29 @@ def write_genetic_param(path, name, omega_m, omega_l, h, ns, sigma8, z_start, se
             '# ^ convert the monofonIC WhiteNoise HDF5 dump to {} first'.format(wn_import))
     lines.append('')
     lines.append('done')
-    with open(path, 'w') as f:
-        f.write('\n'.join(lines) + '\n')
+    write_text(path, '\n'.join(lines) + '\n')
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--gui', action='store_true',
+                        help='Open the Tkinter setup wizard with preview and confirmed save; '
+                             'never launches simulations or submits jobs')
+    args = parser.parse_args(argv)
+    if args.gui:
+        from ramses_run_gui import launch
+        return launch(sys.modules[__name__])
+    generate_run()
+    return 0
 
 
 if __name__ == '__main__':
     try:
-        main()
+        sys.exit(main())
+    except ValueError as exc:
+        print('Error: {}'.format(exc), file=sys.stderr)
+        sys.exit(2)
     except (KeyboardInterrupt, EOFError):
         print('\naborted')
         sys.exit(1)
