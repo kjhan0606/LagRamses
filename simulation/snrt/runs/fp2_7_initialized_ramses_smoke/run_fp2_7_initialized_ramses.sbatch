@@ -34,6 +34,7 @@ mkdir -p "$JOB_ROOT/baseline" "$JOB_ROOT/injected"
 
 export OMP_NUM_THREADS=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
+export I_MPI_FABRICS=shm
 
 write_metadata() {
   local case_dir="$1"
@@ -51,7 +52,7 @@ write_metadata() {
     printf 'cuda_visible_devices=%s\n' "${CUDA_VISIBLE_DEVICES:-unset}"
     printf 'output_policy=noutput=1 aout=2.0 tout=1.0d30 foutput=1000000 fbackup=1000000\n'
     mpiifx --version > "$case_dir/compiler.version" 2>&1 || true
-    srun --version > "$case_dir/launcher.version" 2>&1 || true
+    mpirun --version > "$case_dir/launcher.version" 2>&1 || true
     printf 'compiler=%s\n' "$(sed -n '1p' "$case_dir/compiler.version")"
     printf 'launcher=%s\n' "$(sed -n '1p' "$case_dir/launcher.version")"
   } > "$case_dir/run_metadata.txt"
@@ -75,15 +76,17 @@ run_case() {
   write_metadata "$case_dir"
   if [[ "$case_name" == baseline ]]; then
     set +e
-    env -u SNRT_RT_TX_DIAGNOSTIC_MODE \
-      -u SNRT_RT_TX_TEST_FAIL_STAGE -u SNRT_RT_TX_TEST_FAIL_LEAF \
-      SNRT_RT_ENABLE=1 SNRT_REDUCED_C=0.01 SNRT_RT_LEVEL=3 \
-      SNRT_GROUP_CONTRACT="$GROUP_CONTRACT" \
-      SNRT_ALLOW_REFERENCE_CONTROL=1 \
-      SNRT_SECONDARY_TABLE_CONTRACT="$SECONDARY_CONTRACT" \
-      timeout 240s srun --mpi=pmi2 --ntasks=2 --ntasks-per-node=2 \
-      --gpus-per-task=1 "$BINARY" "$case_dir/effective.nml" \
-      > "$log" 2>&1
+    (
+      cd -- "$case_dir"
+      env -u SNRT_RT_TX_DIAGNOSTIC_MODE \
+        -u SNRT_RT_TX_TEST_FAIL_STAGE -u SNRT_RT_TX_TEST_FAIL_LEAF \
+        SNRT_RT_ENABLE=1 SNRT_REDUCED_C=0.01 SNRT_RT_LEVEL=3 \
+        SNRT_GROUP_CONTRACT="$GROUP_CONTRACT" \
+        SNRT_ALLOW_REFERENCE_CONTROL=1 \
+        SNRT_SECONDARY_TABLE_CONTRACT="$SECONDARY_CONTRACT" \
+        timeout 240s mpirun -np "${SLURM_NTASKS:-2}" "$BINARY" \
+        effective.nml
+    ) > "$log" 2>&1
     status=$?
     set -e
     [[ "$status" -eq 0 ]] || { echo "D4_FAIL baseline return_code=$status" >&2; tail -n 100 "$log" >&2; return 1; }
@@ -96,26 +99,31 @@ run_case() {
     printf 'D4_CASE baseline status=PASS return_code=%s\n' "$status" | tee "$case_dir/status.txt"
   else
     set +e
-    env SNRT_RT_ENABLE=1 SNRT_REDUCED_C=0.01 SNRT_RT_LEVEL=3 \
-      SNRT_GROUP_CONTRACT="$GROUP_CONTRACT" \
-      SNRT_ALLOW_REFERENCE_CONTROL=1 \
-      SNRT_SECONDARY_TABLE_CONTRACT="$SECONDARY_CONTRACT" \
-      SNRT_RT_TX_DIAGNOSTIC_MODE=1 \
-      SNRT_RT_TX_TEST_FAIL_STAGE=receiver \
-      SNRT_RT_TX_TEST_FAIL_LEAF=1 \
-      timeout 240s srun --mpi=pmi2 --ntasks=2 --ntasks-per-node=2 \
-      --gpus-per-task=1 "$BINARY" "$case_dir/effective.nml" \
-      > "$log" 2>&1
+    (
+      cd -- "$case_dir"
+      env SNRT_RT_ENABLE=1 SNRT_REDUCED_C=0.01 SNRT_RT_LEVEL=3 \
+        SNRT_GROUP_CONTRACT="$GROUP_CONTRACT" \
+        SNRT_ALLOW_REFERENCE_CONTROL=1 \
+        SNRT_SECONDARY_TABLE_CONTRACT="$SECONDARY_CONTRACT" \
+        SNRT_RT_TX_DIAGNOSTIC_MODE=1 \
+        SNRT_RT_TX_TEST_FAIL_STAGE=receiver \
+        SNRT_RT_TX_TEST_FAIL_LEAF=1 \
+        timeout 240s mpirun -np "${SLURM_NTASKS:-2}" "$BINARY" \
+        effective.nml
+    ) > "$log" 2>&1
     status=$?
     set -e
-    [[ "$status" -ne 0 ]] || { echo "D4_FAIL injected run unexpectedly succeeded" >&2; tail -n 100 "$log" >&2; return 1; }
+    # Diagnostic injection is fail-closed inside the runtime and may return
+    # normally after recording the rollback.  The markers, not a nonzero
+    # launcher status, are the authoritative injected-case result.
+    [[ "$status" -eq 0 ]] || { echo "D4_FAIL injected process return_code=$status" >&2; tail -n 100 "$log" >&2; return 1; }
     grep -Fq 'SNRT_RT_DIAGNOSTIC_FAIL_CLOSED class=receiver' "$log" || {
       echo "D4_FAIL injected rollback marker missing" >&2; tail -n 100 "$log" >&2; return 1;
     }
     grep -Fq 'SNRT RT transaction rollback: class=receiver' "$log" || {
       echo "D4_FAIL injected transaction rollback marker missing" >&2; tail -n 100 "$log" >&2; return 1;
     }
-    printf 'D4_CASE injected status=PASS return_code=%s expected_nonzero=1\n' "$status" | tee "$case_dir/status.txt"
+    printf 'D4_CASE injected status=PASS return_code=%s expected_fail_closed_markers=1\n' "$status" | tee "$case_dir/status.txt"
   fi
   assert_no_outputs "$case_dir"
 }

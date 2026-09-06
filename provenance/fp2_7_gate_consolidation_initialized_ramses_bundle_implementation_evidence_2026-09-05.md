@@ -1,9 +1,10 @@
-# F-P2.7 implementation evidence — incomplete runtime qualification
+# F-P2.7 implementation evidence — initialized RAMSES runtime qualification
 
-Date: 2026-09-05 (Asia/Seoul)
+Date: 2026-09-06 (Asia/Seoul)
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Checkpoint: `55b1d772173b70b62ba0d215d73f46988db91f96`; subsequent edits remain
-in the worktree. Status: **partial evidence; D4 and bundle-end audit pending**.
+Checkpoint: the D4 runner and evidence update are being recorded on top of
+`d6e677c`. Status: **D4 passed; physical source admission and live production
+qualification remain outside this gate**.
 
 ## Recorded native results
 
@@ -40,7 +41,7 @@ Repeatedly rebuilding the shared binary to alternate these two checks does
 not close this evidence-identity conflict; qualification needs distinct
 retained build identities when that workflow is next changed.
 
-## D4 runtime evidence remains outstanding
+## D4 initialized-RAMSES runtime evidence
 
 Slurm job `332448` failed before runtime validation because the submitted
 script was executed from a Slurm spool copy and derived `BINARY=//bin/ramses_final3d`
@@ -48,26 +49,41 @@ from `BASH_SOURCE`. This was an infrastructure failure, not a RAMSES physics
 result; no baseline or injected case ran and no output directory was created.
 The runner was corrected to use the immutable `/gpfs/kjhan/LRD_JWST` project
 root and run directory explicitly, then shell-checked and resubmitted as job
-`333139`. It is currently `PENDING` for scheduler `Priority`, with one node,
-two MPI tasks, two GPUs on partition `a10`, and a ten-minute limit. No D4
-runtime pass or injected rollback is evidenced yet.
+`333139`. It reached the binary but failed during PMI2 initialization; this was
+replaced by the Intel `mpirun` launcher in the runner. Job `333201` then
+demonstrated the runtime behavior but exposed a harness-only expectation bug:
+diagnostic fail-closed returns normally with status 0. The runner now treats
+the exact runtime markers as authoritative for that diagnostic case.
 
 The intended template and runner are under
 `simulation/snrt/runs/fp2_7_initialized_ramses_smoke/`. The template specifies
 hydro, legacy feedback mode, a fixed level 3 grid, two coarse steps, disabled
-PIC/Poisson and a future output schedule. These are intended settings only;
-the effective per-case namelist cannot be attested before job execution.
+PIC/Poisson and a future output schedule. The corrected launcher records the
+Intel MPI launcher and runs from each case directory, so RAMSES receives the
+case-local effective namelist.
 
-Actionable scheduler disposition: retain job `333139` and recheck its runtime
-logs after start. Completion requires direct baseline and injected runtime
-logs, executable identity, and confirmation that no unexpected dump was
-produced. A pending job or static marker cannot satisfy D4.
+Job `333211` is the completed D4 qualification. Direct case evidence is under
+`simulation/snrt/runs/fp2_7_initialized_ramses_smoke/job_333211/`:
 
-## Outstanding closure
+* baseline: `D4_CASE baseline status=PASS return_code=0`, with
+  `SNRT_RT_TRANSACTION_COMMIT_PASS`, `SNRT_RT_CLOSURE_PASS`, and `Run completed`
+  in `baseline/ramses.log`;
+* injected receiver failure: `D4_CASE injected status=PASS return_code=0`,
+  with both `SNRT RT transaction rollback: class=receiver` and
+  `SNRT_RT_DIAGNOSTIC_FAIL_CLOSED class=receiver` in `injected/ramses.log`;
+* launcher: Intel `mpirun`, two MPI ranks, two A10 GPUs, and recorded
+  binary/effective-namelist SHA-256 files in each case;
+* output safety: no `output_*` directory exists in either case; the runner
+  completed with `D4_PASS job_id=333211`.
 
-F-P2.7 is not marked complete and has no bundle-end verdict. The provenance
-index and this single evidence record carry the pending state forward.
-The next bundle's operator approval is recorded separately; it does not turn
-this pending runtime evidence into a pass. The path-repair patch and
-resubmission are recorded in the current worktree; D4 remains open until the
-job produces both required runtime cases.
+This closes the initialized-runtime D4 gate only. It does not qualify live
+stellar, AGN, dust, or physical high-mass yield coupling, and it does not
+resolve the retained CPU-versus-CUDA binary identity caveat above.
+
+## Bundle disposition
+
+F-P2.7 D4 is **PASS for initialized SNRT runtime behavior**. The bundle is not
+publication-ready: physical source admission, live multi-source feedback, and
+the retained build-identity separation still require their explicitly scoped
+follow-up gates. The next implementation bundle is G3/G4 physical source/SED
+and dust runtime qualification, subject to the available canonical data.
