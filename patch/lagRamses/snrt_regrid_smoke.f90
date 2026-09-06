@@ -2,12 +2,15 @@
 program snrt_regrid_smoke
   use amr_parameters, only: dp,ngridmax,amr_block_size,twotondim
   use hydro_parameters, only: nvar
-  use amr_commons, only: ncoarse,myid,ncpu,active,father,headl,next
+  use amr_commons, only: ncoarse,myid,ncpu,active,father,headl,next,son
   use hydro_commons, only: uold
   use snrt_state
   use snrt_regrid
   use snrt_dust_contract
   use snrt_dust_live
+  use snrt_dust_ir, only: dust_ir_diagnostics,dust_ok
+  use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
+       SNRT_FACE_COARSE_TO_FINE,SNRT_FACE_FINE_TO_COARSE
   use mpi_mod
   implicit none
   real(dp) :: p(snrt_checkpoint_cell_width),q(snrt_checkpoint_cell_width),saved(snrt_checkpoint_cell_width)
@@ -117,5 +120,111 @@ program snrt_regrid_smoke
   end do
   write(*,'(A)')'SNRT_NATIVE_LEVEL_UPLOAD_PASS parent_updated=1 children_retained=1'
   write(*,'(A)')'SNRT_NATIVE_REGRID_PASS refine=1 restrict=1 rho_weighted_ions=1 retired_clear=1 reject_before_write=1'
+  call coarse_ir_checks()
+  call defrag_checks()
   call MPI_FINALIZE(info)
+contains
+  subroutine defrag_checks()
+    real(dp) :: before_p(snrt_checkpoint_cell_width,2),before_ir(size(ir),2)
+    integer :: old_cells(2),new_cells(2),map(8),status,j
+    integer :: bad(snrt_nslot)
+    old_cells=[2,18]; new_cells=[10,2]
+    do j=1,2
+       call snrt_state_pack_cell(old_cells(j),before_p(:,j),status)
+       call snrt_dust_live_pack(old_cells(j),before_ir(:,j),status)
+    end do
+    ! Cyclic overlapping renumbering must move identities, not overwrite
+    ! payloads in place. Grid 9 (the old capacity-growth slot) is retired.
+    map=0; map(1:3)=[2,3,1]
+    call snrt_regrid_defrag(map,status)
+    if(status/=0)stop 43
+    do j=1,2
+       call snrt_state_pack_cell(new_cells(j),q,status)
+       call snrt_dust_live_pack(new_cells(j),out_ir,status)
+       if(any(q/=before_p(:,j)).or.any(out_ir/=before_ir(:,j)))stop 44
+    end do
+    bad=2
+    call snrt_state_rebind_cells(bad,status)
+    if(status==0)stop 45
+    call snrt_state_pack_cell(10,q,status)
+    if(any(q/=before_p(:,1)))stop 46
+    write(*,'(A)')'SNRT_NATIVE_DEFRAG_PASS cyclic_rebind=1 primary_IR_exact=1 duplicate_rejected=1'
+  end subroutine
+
+  subroutine coarse_ir_checks()
+    type(dust_live_coarse_trial) :: coarse
+    type(dust_ir_diagnostics) :: diag
+    real(dp), allocatable :: trial(:,:,:)
+    real(dp) :: rays(3,snrt_ndirection),weights(snrt_ndirection),material(4),temperature(4)
+    real(dp) :: expected,coarse_expected,total
+    integer :: cells(4),slots(4),links(6,4),d,j,status
+    ! Four fine faces (area 4) meet one coarse face (area 4). All other
+    ! faces are fine-owned/blocked so the native transport has no escape.
+    allocate(son(65),snrt_face_kind(6,4),snrt_face_cell(6,4))
+    son=1; son(2)=0; headl(1,1)=1; next=0
+    cells=[18,19,20,21]; links=0
+    snrt_face_kind=SNRT_FACE_COARSE_TO_FINE; snrt_face_cell=0
+    snrt_face_kind(1,:)=SNRT_FACE_FINE_TO_COARSE; snrt_face_cell(1,:)=2
+    rays=0; rays(1,1:40)=1; rays(1,41:80)=-1; weights=1d0/snrt_ndirection
+    call snrt_dust_live_restore(2,2*ir,status)
+    do j=1,4
+       slots(j)=snrt_state_get_slot(cells(j))
+       call snrt_dust_live_restore(cells(j),ir,status)
+    end do
+    ! dt/dx=2.4 forces three native substeps. The coarse donor must be
+    ! refreshed between them, not repeatedly sampled from the old field.
+    call snrt_dust_live_stage(2,cells,slots,links,rays,weights,1d0,2.4d0,1d0, &
+         [0d0,0d0,0d0,0d0],[0d0,0d0,0d0,0d0],[0d0,0d0,0d0,0d0],[1d0,1d0,1d0,1d0], &
+         trial,material,temperature,diag,status,coarse)
+    if(status/=dust_ok)then
+       write(*,*)'COARSE_IR_STAGE_ERROR',status
+       stop 30
+    end if
+    if(diag%escaped_erg/=0.or.size(coarse%slots)/=1)stop 31
+    do d=1,snrt_ndirection
+       if(d<=40)then
+          coarse_expected=2*.6d0**3; expected=1+1.6d0*(1+.6d0+.6d0**2)
+       else
+          coarse_expected=2+.4d0*(1+.2d0+.2d0**2); expected=.2d0**3
+       end if
+       if(maxval(abs(trial(:,d,:)/ir(1)-expected))>2d-14)stop 32
+       if(maxval(abs(coarse%energy(:,d,1)/ir(1)-coarse_expected))>2d-14)stop 33
+       total=sum(trial(1,d,:))+8*coarse%energy(1,d,1)
+       if(abs(total/ir(1)-20)>2d-14)stop 34
+    end do
+    call snrt_dust_live_pack(2,out_ir,status)
+    if(any(out_ir/=2*ir))stop 35
+    do j=1,4
+       call snrt_dust_live_pack(cells(j),out_ir,status)
+       if(any(out_ir/=ir))stop 36
+    end do
+    call snrt_dust_live_commit(slots,trial,coarse)
+    call snrt_dust_live_pack(2,saved_ir,status)
+    ! Failure after coarse trial construction must not change either side.
+    call snrt_dust_live_stage(2,cells,slots,links,rays,weights,1d0,2.4d0,1d0, &
+         [0d0,0d0,0d0,0d0],[-1d-23,0d0,0d0,0d0],[0d0,0d0,0d0,0d0],[1d0,1d0,1d0,1d0], &
+         trial,material,temperature,diag,status,coarse)
+    if(status==dust_ok)stop 37
+    call snrt_dust_live_pack(2,out_ir,status)
+    if(any(out_ir/=saved_ir))stop 38
+    do j=1,4
+       call snrt_dust_live_pack(cells(j),out_ir,status)
+       if(any(out_ir/=reshape(trial(:,:,j),[size(ir)])))stop 39
+    end do
+    ! A face pointing at a covered/unmapped donor must fail, not inject zero.
+    snrt_face_cell(1,:)=3
+    call snrt_dust_live_stage(2,cells,slots,links,rays,weights,1d0,2.4d0,1d0, &
+         [0d0,0d0,0d0,0d0],[0d0,0d0,0d0,0d0],[0d0,0d0,0d0,0d0],[1d0,1d0,1d0,1d0], &
+         trial,material,temperature,diag,status,coarse)
+    if(status==dust_ok)stop 40
+    ! The later coarse-level advance must not apply the fine-owned flux again.
+    deallocate(snrt_face_kind,snrt_face_cell)
+    allocate(snrt_face_kind(6,1),snrt_face_cell(6,1))
+    snrt_face_kind=SNRT_FACE_COARSE_TO_FINE; snrt_face_cell=0
+    call snrt_dust_live_stage(1,[2],[snrt_state_get_slot(2)],links(:,1:1),rays,weights,2d0,2.4d0,1d0, &
+         [0d0],[0d0],[0d0],[1d0],trial,material(1:1),temperature(1:1),diag,status,coarse)
+    if(status/=dust_ok.or.diag%escaped_erg/=0)stop 41
+    if(any(reshape(trial,[size(ir)])/=saved_ir))stop 42
+    write(*,'(A)')'SNRT_NATIVE_IR_COARSE_FINE_PASS bidirectional=1 substeps=3 conserved=1 atomic=1 no_double_flux=1'
+  end subroutine
 end program

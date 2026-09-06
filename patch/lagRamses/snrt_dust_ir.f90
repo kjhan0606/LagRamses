@@ -175,7 +175,7 @@ contains
 
   subroutine snrt_dust_ir_advance(table, direction, weight, neighbor, dx, dt, c_hat, density, primary, &
        energy, temperature, photons, diagnostics, ierr, tolerance, max_iterations, dust_energy, heat_capacity, &
-       ghost_energy,ghost_index)
+       ghost_energy,ghost_index,blocked_face)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -194,6 +194,10 @@ contains
     real(real64), optional, intent(in) :: heat_capacity(:)
     real(real64), optional, intent(in) :: ghost_energy(:,:,:)
     integer, optional, intent(in) :: ghost_index(:,:)
+    ! A coarse face adjoining finer cells is advanced by the fine owner.
+    ! Suppress BOTH inflow and outflow here; this is not a vacuum boundary.
+    logical, optional, intent(in) :: blocked_face(:,:)
+    logical, allocatable :: blocked(:,:)
     real(real64), allocatable :: transported(:,:,:), candidate(:,:,:), rate(:,:), next_t(:)
     real(real64), allocatable :: guess(:), absorbed(:), transmit(:,:), loss(:,:), response(:,:)
     real(real64), allocatable :: emitted_photons(:,:)
@@ -217,6 +221,7 @@ contains
     if (any(shape(energy)/=[ng,nd,nc]) .or. any(shape(photons)/=[ng,nc])) return
     if (size(temperature)/=nc .or. size(primary)/=nc) return
     allocate(remote(6,nc)); remote=0
+    allocate(blocked(6,nc)); blocked=.false.
     if(present(ghost_index))then
        if(any(shape(ghost_index)/=[6,nc]))return
        if(size(ghost_energy,1)/=ng.or.size(ghost_energy,2)/=nd)return
@@ -225,6 +230,12 @@ contains
        ierr=dust_err_state
        if(any(.not.ieee_is_finite(ghost_energy)).or.any(ghost_energy<0))return
        remote=ghost_index
+    end if
+    ierr=dust_err_shape
+    if(present(blocked_face))then
+       if(any(shape(blocked_face)/=[6,nc]))return
+       blocked=blocked_face
+       if(any(blocked.and.(neighbor/=0.or.remote/=0)))return
     end if
     if(transient)then
        if(size(dust_energy)/=nc.or.size(heat_capacity)/=nc)return
@@ -278,14 +289,15 @@ contains
              end if
              j=neighbor(face,i)
              factor=c_hat*dt/dx*abs(direction(axis,d))
-             transported(:,d,i)=transported(:,d,i)-factor*energy(:,d,i)
+             if(.not.blocked(outgoing,i)) &
+                  transported(:,d,i)=transported(:,d,i)-factor*energy(:,d,i)
              if (j>0) transported(:,d,i)=transported(:,d,i)+factor*energy(:,d,j)
              ghost=remote(face,i)
              if(ghost>0)then
                 transported(:,d,i)=transported(:,d,i)+factor*ghost_energy(:,d,ghost)
                 trial%interface_erg=trial%interface_erg-sum(ghost_energy(:,d,ghost))*weight(d)*factor*volume
              end if
-             if (neighbor(outgoing,i)==0) then
+             if (neighbor(outgoing,i)==0.and..not.blocked(outgoing,i)) then
                 if(remote(outgoing,i)>0)then
                    trial%interface_erg=trial%interface_erg+sum(energy(:,d,i))*weight(d)*factor*volume
                 else

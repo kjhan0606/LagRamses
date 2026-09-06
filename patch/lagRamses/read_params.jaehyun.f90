@@ -1781,12 +1781,23 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         else if (snrt_dust_contract_runtime_allowed) then
 #ifdef DUST_LIVE
            if(snrt_dust_contract_version>=3)then
-              if(levelmin/=nlevelmax.or.cosmo.or.nremap/=0.or.trim(outformat)/='hdf5')then
+              if(levelmin/=nlevelmax)then
+                 call get_environment_variable('SNRT_RT_LEVEL',snrt_dust_contract_env, &
+                      length=snrt_dust_contract_env_length)
+                 if(snrt_dust_contract_env_length>0)then
+                    nml_ok=.false.
+                    if(myid==1)write(*,'(A)')'SNRT IR AMR requires all levels: unset SNRT_RT_LEVEL'
+                 end if
+              end if
+              if(cosmo.or.nremap/=0.or.trim(outformat)/='hdf5')then
                  if(myid==1)write(*,'(A)') &
-                      'SNRT IR requires fixed noncosmological mesh, nremap=0 and HDF5 output'
+                      'SNRT IR requires noncosmological mesh, nremap=0 and HDF5 output'
+                 nml_ok=.false.
+              else if(levelmin/=nlevelmax.and..not.snrt_dust_contract_reference_control)then
+                 if(myid==1)write(*,'(A)')'SNRT IR AMR qualification is reference-control only'
                  nml_ok=.false.
               else
-                 if(myid==1)write(*,'(A)')'SNRT live IR enabled: fixed mesh; physical input approval still applies'
+                 if(myid==1)write(*,'(A)')'SNRT live IR enabled; physical input approval still applies'
                  if(myid==1.and.snrt_dust_contract_reference_control) &
                       write(*,'(A)')'SNRT live IR reference control: NONPRODUCTION'
               end if

@@ -1911,6 +1911,9 @@ end subroutine cmp_minmaxorder
 !#########################################################################
 !#########################################################################
 subroutine defrag
+#ifdef SNRT
+  use snrt_regrid, only: snrt_regrid_defrag,snrt_regrid_check
+#endif
   use amr_commons
   use pm_commons
   use poisson_commons
@@ -1929,6 +1932,9 @@ subroutine defrag
   integer::ind,idim,ivar,istart
   real(dp),allocatable::defrag_dp(:)
   integer,allocatable::defrag_map(:)
+#ifdef SNRT
+  integer :: snrt_regrid_error
+#endif
 #ifndef WITHOUTMPI
   real(dp)::t_defrag_start,t_defrag_end
 #endif
@@ -1985,6 +1991,12 @@ subroutine defrag
      end do
   end do
 
+  ! Radiation lives in slot-indexed arrays outside the hydro allocation.
+  ! Move its cell identities with the exact same old->new grid map.
+#ifdef SNRT
+  call snrt_regrid_defrag(defrag_map,snrt_regrid_error)
+  call snrt_regrid_check(snrt_regrid_error)
+#endif
   ngrid2=0
   do igrid=1,igridmax
      flag2(igrid)=0

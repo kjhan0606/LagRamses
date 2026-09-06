@@ -124,7 +124,7 @@ contains
          snrt_spectral_contract_source_id
     use snrt_amr_topology, only: snrt_amr_build_same_level_neighbors
 #ifdef DUST_LIVE
-    use snrt_dust_live, only: snrt_dust_live_stage, snrt_dust_live_commit
+    use snrt_dust_live, only: snrt_dust_live_stage, snrt_dust_live_commit, dust_live_coarse_trial
     use snrt_dust_ir, only: dust_ir_diagnostics
     use snrt_dust_contract, only: snrt_dust_contract_version
 #endif
@@ -239,6 +239,7 @@ contains
     real(dp), allocatable :: dust_tau_dp(:,:)
     real(dp), allocatable :: dust_ir_trial(:,:,:)
     type(dust_ir_diagnostics) :: dust_ir_result
+    type(dust_live_coarse_trial) :: dust_ir_coarse
 #endif
     logical :: enabled, source_ok, accounting_identity_ok
     logical :: transaction_converged, transaction_active
@@ -1193,7 +1194,8 @@ contains
                   transpose(direction_dp),angular_weight/sum(angular_weight), &
                   dx_code*scale_l,dt_s,snrt_c_cgs*reduced_c, &
                   dust_n_hydrogen_cm3*dust_relative_abundance,dust_absorbed_energy,dust_old_energy, &
-                  dust_heat_capacity,dust_ir_trial,dust_trial_energy,dust_trial_temperature,dust_ir_result,ierr)
+                  dust_heat_capacity,dust_ir_trial,dust_trial_energy,dust_trial_temperature,dust_ir_result,ierr, &
+                  dust_ir_coarse)
        if(ierr/=0)then
           local_transaction_failure=snrt_failure_receiver
           if(myid==1)write(*,'(A,I0)')' SNRT live IR staging failed: error=',ierr
@@ -1315,7 +1317,7 @@ contains
     end do
 #ifdef DUST_LIVE
     if(snrt_dust_contract_version>=3)then
-       call snrt_dust_live_commit(leaf_slot,dust_ir_trial)
+       call snrt_dust_live_commit(leaf_slot,dust_ir_trial,dust_ir_coarse)
        if(myid==1)write(*,'(A,ES12.4,A,ES12.4)') &
             ' SNRT_DUST_IR_COMMIT_PASS balance=',dust_ir_result%balance_relative, &
             ' escaped_erg=',dust_ir_result%escaped_erg

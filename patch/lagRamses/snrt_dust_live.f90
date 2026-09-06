@@ -6,9 +6,10 @@ module snrt_dust_live
   use snrt_dust_contract
   use snrt_dust_ir
   use snrt_state, only: snrt_ndirection, snrt_nslot, snrt_state_get_slot
-  use amr_commons, only: ngridmax,ncoarse,ncpu
+  use amr_commons, only: ngridmax,ncoarse,ncpu,myid,headl,next,son
   use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
-       SNRT_FACE_LOCAL,SNRT_FACE_PHYSICAL,SNRT_FACE_MPI
+       SNRT_FACE_LOCAL,SNRT_FACE_PHYSICAL,SNRT_FACE_MPI, &
+       SNRT_FACE_COARSE_TO_FINE,SNRT_FACE_FINE_TO_COARSE
 #ifndef WITHOUTMPI
   use mpi_mod
 #endif
@@ -18,6 +19,10 @@ module snrt_dust_live
   real(dust_dp), allocatable, save :: radiation(:,:,:)
   type(dust_ir_table), save :: table
   logical, save :: initialized=.false.
+  type, public :: dust_live_coarse_trial
+     integer, allocatable :: slots(:)
+     real(dust_dp), allocatable :: energy(:,:,:)
+  end type
   public :: snrt_dust_live_stage, snrt_dust_live_commit
   public :: snrt_dust_live_pack, snrt_dust_live_restore
 contains
@@ -53,7 +58,7 @@ contains
   end subroutine
 
   subroutine snrt_dust_live_stage(ilevel,cells,slots,neighbors,directions,weights,dx,dt,chat, &
-       density,primary_energy,old_energy,capacity,trial,material,temperature,diagnostics,ierr)
+       density,primary_energy,old_energy,capacity,trial,material,temperature,diagnostics,ierr,coarse)
     integer, intent(in) :: ilevel,cells(:),slots(:),neighbors(:,:)
     real(dust_dp), intent(in) :: directions(:,:),weights(:),dx,dt,chat
     real(dust_dp), intent(in) :: density(:),primary_energy(:),old_energy(:),capacity(:)
@@ -61,11 +66,14 @@ contains
     real(dust_dp), intent(out) :: material(:),temperature(:)
     type(dust_ir_diagnostics), intent(out) :: diagnostics
     integer, intent(out) :: ierr
+    type(dust_live_coarse_trial), intent(out) :: coarse
     real(dust_dp), allocatable :: photons(:,:),ghosts(:,:,:),field(:)
-    integer, allocatable :: remote(:,:),ghost_cells(:)
+    integer, allocatable :: remote(:,:),ghost_cells(:),ghost_kind(:),coarse_cells(:)
+    logical, allocatable :: blocked(:,:)
     type(dust_ir_diagnostics) :: step
-    real(dust_dp) :: cfl,step_dt
-    integer :: nsub,isub,i,ng,face,k,nghost,nfield,g,d,global_nsub,info
+    real(dust_dp) :: cfl,step_dt,mu,q
+    integer :: nsub,isub,i,ng,face,k,nghost,nfield,g,d,global_nsub,info,has_coarse
+    integer :: grid,child,cell,ncoarse_leaf,axis
     call prepare(ierr)
     if(ierr==dust_ok)call validate_stage()
     call collective_error(ierr)
@@ -77,23 +85,83 @@ contains
 #endif
     step_dt=dt/nsub
     ng=snrt_dust_contract_number_ir
+    has_coarse=0
+    if(size(slots)>0)then
+       if(any(snrt_face_kind==SNRT_FACE_FINE_TO_COARSE))has_coarse=1
+    end if
+    ! Use the same global decision on empty ranks and on coarse-only owners.
+    call collective_error(has_coarse)
+    ierr=dust_ok
+    if(has_coarse/=0)then
+       if(ilevel<=1)ierr=dust_err_config
+       if(.not.allocated(headl).or..not.allocated(next).or..not.allocated(son))ierr=dust_err_config
+    end if
+    call collective_error(ierr)
+    if(ierr/=dust_ok)return
+    ncoarse_leaf=0
+    if(has_coarse/=0)then
+       grid=headl(myid,ilevel-1)
+       do while(grid>0)
+          do child=1,twotondim
+             cell=ICELL_OF(grid,child)
+             if(son(cell)==0)ncoarse_leaf=ncoarse_leaf+1
+          end do
+          grid=next(grid)
+       end do
+    end if
+    allocate(coarse_cells(ncoarse_leaf),coarse%slots(ncoarse_leaf))
+    allocate(coarse%energy(ng,snrt_ndirection,ncoarse_leaf))
+    k=0
+    if(has_coarse/=0)then
+       grid=headl(myid,ilevel-1)
+       do while(grid>0)
+          do child=1,twotondim
+             cell=ICELL_OF(grid,child)
+             if(son(cell)/=0)cycle
+             k=k+1; coarse_cells(k)=cell; coarse%slots(k)=snrt_state_get_slot(cell)
+          end do
+          grid=next(grid)
+       end do
+    end if
+    ierr=dust_ok
+    if(any(coarse%slots<1).or.any(coarse%slots>snrt_nslot))ierr=dust_err_state
+    call collective_error(ierr)
+    if(ierr/=dust_ok)return
+    if(ncoarse_leaf>0)coarse%energy=radiation(:,:,coarse%slots)
     allocate(trial(ng,snrt_ndirection,size(slots)),photons(ng,size(slots)))
     if(size(slots)>0)trial=radiation(:,:,slots)
     photons=0
     material=old_energy
     temperature=material/capacity
     nghost=0
-    allocate(remote(6,size(slots))); remote=0
-    if(size(slots)>0)nghost=count(snrt_face_kind==SNRT_FACE_MPI)
-    allocate(ghost_cells(nghost),ghosts(ng,snrt_ndirection,nghost),field(nfield))
+    allocate(remote(6,size(slots)),blocked(6,size(slots))); remote=0; blocked=.false.
+    if(size(slots)>0)then
+       nghost=count(snrt_face_kind==SNRT_FACE_MPI.or.snrt_face_kind==SNRT_FACE_FINE_TO_COARSE)
+       blocked=snrt_face_kind==SNRT_FACE_COARSE_TO_FINE
+    end if
+    allocate(ghost_cells(nghost),ghost_kind(nghost),ghosts(ng,snrt_ndirection,nghost),field(nfield))
     k=0
     do i=1,size(slots)
        do face=1,6
-          if(snrt_face_kind(face,i)/=SNRT_FACE_MPI)cycle
+          if(snrt_face_kind(face,i)/=SNRT_FACE_MPI.and.snrt_face_kind(face,i)/=SNRT_FACE_FINE_TO_COARSE)cycle
           k=k+1; remote(face,i)=k; ghost_cells(k)=snrt_face_cell(face,i)
+          ghost_kind(k)=snrt_face_kind(face,i)
        end do
     end do
     diagnostics=dust_ir_diagnostics()
+    if(has_coarse/=0)then
+       ! A missing coarse donor must not silently appear as vacuum. The
+       ! owner marker is exchanged using the same mapping as the energy.
+       field=0; field(coarse_cells)=1
+       if(ncpu>1)call make_virtual_fine_dp(field,ilevel-1)
+       ierr=dust_ok
+       do k=1,nghost
+          if(ghost_kind(k)/=SNRT_FACE_FINE_TO_COARSE)cycle
+          if(field(ghost_cells(k))/=1)ierr=dust_err_state
+       end do
+       call collective_error(ierr)
+       if(ierr/=dust_ok)return
+    end if
     do isub=1,nsub
        ! Reuse RAMSES' real halo communicator, in FP64. All ranks participate
        ! in every substep, including a rank with no local MPI boundary faces.
@@ -103,14 +171,45 @@ contains
                 field=0
                 field(cells)=trial(g,d,:)
                 call make_virtual_fine_dp(field,ilevel)
-                ghosts(g,d,:)=field(ghost_cells)
+                do k=1,nghost
+                   if(ghost_kind(k)==SNRT_FACE_MPI)ghosts(g,d,k)=field(ghost_cells(k))
+                end do
+             end do
+          end do
+       end if
+       if(has_coarse/=0)then
+          do d=1,snrt_ndirection
+             do g=1,ng
+                field=0; field(coarse_cells)=coarse%energy(g,d,:)
+                if(ncpu>1)call make_virtual_fine_dp(field,ilevel-1)
+                do k=1,nghost
+                   if(ghost_kind(k)==SNRT_FACE_FINE_TO_COARSE)ghosts(g,d,k)=field(ghost_cells(k))
+                end do
+                ! Fine-volume/coarse-volume = 1/8 in 3D. Use the OLD
+                ! upwind field, exactly as the native transport operator.
+                field=0
+                do i=1,size(slots)
+                   do face=1,6
+                      if(snrt_face_kind(face,i)/=SNRT_FACE_FINE_TO_COARSE)cycle
+                      k=remote(face,i); cell=ghost_cells(k); axis=(face+1)/2
+                      mu=directions(axis,d)
+                      if(mod(face,2)==1)mu=-mu
+                      q=ghosts(g,d,k)
+                      if(mu>=0)q=trial(g,d,i)
+                      field(cell)=field(cell)+chat*step_dt/dx*mu*q/real(twotondim,dust_dp)
+                   end do
+                end do
+                if(ncpu>1)call make_virtual_reverse_dp(field,ilevel-1)
+                coarse%energy(g,d,:)=coarse%energy(g,d,:)+field(coarse_cells)
              end do
           end do
        end if
        step=dust_ir_diagnostics()
        ierr=dust_ok
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
-            density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity,ghosts,remote)
+            density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
+            ghosts,remote,blocked)
+       if(any(.not.ieee_is_finite(coarse%energy)).or.any(coarse%energy<0))ierr=dust_err_state
        call collective_error(ierr)
        if(ierr/=dust_ok)return
        diagnostics%escaped_erg=diagnostics%escaped_erg+step%escaped_erg
@@ -143,11 +242,17 @@ contains
          if(any(shape(snrt_face_cell)/=[6,size(slots)]))return
          ierr=dust_err_config
          if(any(snrt_face_kind/=SNRT_FACE_LOCAL.and.snrt_face_kind/=SNRT_FACE_PHYSICAL.and. &
-              snrt_face_kind/=SNRT_FACE_MPI))return
+              snrt_face_kind/=SNRT_FACE_MPI.and.snrt_face_kind/=SNRT_FACE_FINE_TO_COARSE.and. &
+              snrt_face_kind/=SNRT_FACE_COARSE_TO_FINE))return
+         if(any(snrt_face_kind==SNRT_FACE_FINE_TO_COARSE))then
+            if(ilevel<=1)return
+            if(.not.allocated(headl).or..not.allocated(next).or..not.allocated(son))return
+         end if
          do i=1,size(slots)
             do face=1,6
-               if(snrt_face_kind(face,i)/=SNRT_FACE_MPI)cycle
-               if(ncpu<2.or.snrt_face_cell(face,i)<1.or.snrt_face_cell(face,i)>nfield)return
+               if(snrt_face_kind(face,i)==SNRT_FACE_MPI.and.ncpu<2)return
+               if(snrt_face_kind(face,i)/=SNRT_FACE_MPI.and.snrt_face_kind(face,i)/=SNRT_FACE_FINE_TO_COARSE)cycle
+               if(snrt_face_cell(face,i)<1.or.snrt_face_cell(face,i)>nfield)return
             end do
          end do
       end if
@@ -172,12 +277,14 @@ contains
 #endif
   end subroutine
 
-  subroutine snrt_dust_live_commit(slots,trial)
+  subroutine snrt_dust_live_commit(slots,trial,coarse)
     integer, intent(in) :: slots(:)
     real(dust_dp), intent(in) :: trial(:,:,:)
+    type(dust_live_coarse_trial), intent(in) :: coarse
     ! Called only after the primary transaction commits; no allocation or
     ! fallible conversion remains here. Stage has validated the slot window.
     if(size(slots)>0)radiation(:,:,slots)=trial
+    if(size(coarse%slots)>0)radiation(:,:,coarse%slots)=coarse%energy
   end subroutine
 
   subroutine snrt_dust_live_pack(icell,payload,ierr)

@@ -45,8 +45,31 @@ module snrt_state
   integer, parameter, public :: snrt_checkpoint_cell_width = 4 + snrt_ndirection*snrt_ngroups
   public :: snrt_state_pack_cell, snrt_state_restore_cell
   public :: snrt_state_clear_cell, validate_cell_payload
+  public :: snrt_state_rebind_cells
 
 contains
+  subroutine snrt_state_rebind_cells(cells,ierr)
+    integer, intent(in) :: cells(:)
+    integer, intent(out) :: ierr
+    integer, allocatable :: new_map(:)
+    integer :: slot,cell
+    ierr=10
+    if(size(cells)/=snrt_nslot)return
+    call snrt_state_initialize()
+    if(any(cells<1).or.any(cells>size(snrt_slot_of_cell)))return
+    allocate(new_map(size(snrt_slot_of_cell))); new_map=0
+    do slot=1,snrt_nslot
+       cell=cells(slot)
+       if(new_map(cell)/=0)return
+       new_map(cell)=slot
+    end do
+    ! Payloads (including live IR) stay in their original slots. Rebinding
+    ! only integer identities avoids copying the full radiation allocation.
+    call move_alloc(new_map,snrt_slot_of_cell)
+    snrt_cell_id(1:snrt_nslot)=cells
+    ierr=0
+  end subroutine
+
   subroutine snrt_state_clear_cell(icell)
     integer, intent(in) :: icell
     integer :: slot

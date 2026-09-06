@@ -1,0 +1,155 @@
+! Native live IR reference smoke: mixed level-3/4 periodic hydro, 20 K synthetic dust.
+! This is a deliberately small, non-cosmological hydro box.  It has no IC
+! payload and no sinks/stars; init_flow_fine therefore exercises the built-in
+! region_condinit path while SNRT is enabled by the batch environment.
+&RUN_PARAMS
+  cosmo=.false.
+  pic=.false.
+  poisson=.false.
+  hydro=.true.
+  rt=.false.
+  sink=.false.
+  sinkprops=.false.
+  ncontrol=1
+  nstepmax=2
+  nsubcycle=2
+  nremap=0
+  aexp_step_limit=0.1d0
+  verbose=.true.
+  debug=.false.
+  ! CPU hydro reference; SNRT transport still uses CUDA. CUDA hydro on
+  ! this AMR fixture has an independent uniform-state conservation defect.
+  gpu_hydro=.false.
+  gpu_poisson=.false.
+  gpu_fft=.false.
+  gpu_sink=.false.
+  gpu_scalar=.false.
+  gpu_particle=.false.
+  gpu_auto_tune=.false.
+  n_cuda_streams=1
+  use_fftw=.false.
+  mg_merged_rb=.false.
+/
+
+&INIT_PARAMS
+  filetype='ascii'
+  nregion=1
+  region_type(1)='square'
+  x_center=0.5d0
+  y_center=0.5d0
+  z_center=0.5d0
+  length_x=1.0d0
+  length_y=1.0d0
+  length_z=1.0d0
+  exp_region=10.0d0
+  d_region=1.0d0
+  u_region=0.0d0
+  v_region=0.0d0
+  w_region=0.0d0
+  p_region=1.0d0
+  ! idust=17, idust_energy=18 with this metal-free passive map.
+  var_region(1,12)=0.006024096385542169d0
+  var_region(1,13)=1.26009674420798d-15
+/
+
+&AMR_PARAMS
+  levelmin=3
+  levelmax=4
+  ngridmax=2048
+  npartmax=0
+  nsinkmax=1
+  nexpand=1
+  boxlen=1.0d0
+/
+
+&OUTPUT_PARAMS
+  noutput=1
+  aout=2.0d0
+  tout=1.0d30
+  foutput=2
+  fbackup=1000000
+  output_mode=0
+  outformat='hdf5'
+  informat='hdf5'
+/
+
+&HYDRO_PARAMS
+  gamma=1.6666666667d0
+  courant_factor=0.5d0
+  slope_type=1
+  scheme='muscl'
+  riemann='hllc'
+  pressure_fix=.true.
+/
+
+&BOUNDARY_PARAMS
+  nboundary=0
+  no_inflow=.true.
+/
+
+&POISSON_PARAMS
+  epsilon=1.0d-4
+  maxiter_fine=100
+  restart_phi_warm_start=.false.
+  abort_on_mg_nonconvergence=.true.
+  gravity_type=0
+/
+
+&PHYSICS_PARAMS
+  cooling=.false.
+  haardt_madau=.false.
+  metal=.false.
+  isothermal=.false.
+  neq_chem=.false.
+  units_density=1.66d-24
+  units_time=3.1556926d13
+  units_length=3.0857d21
+  m_star=-1.0d0
+  t_star=0.0d0
+  n_star=1.0d30
+  eps_star=0.0d0
+  T2_star=0.0d0
+  g_star=1.6d0
+  ind_rsink=4.0d0
+  smbh=.false.
+  agn=.false.
+  sink_AGN=.false.
+  bondi=.false.
+  drag=.false.
+  selfgrav=.false.
+  spin_bh=.false.
+  mad_jet=.false.
+  cooling_method='original'
+  yieldtablefilename='/gpfs/kjhan/LRD_JWST/simulation/snrt/runs/fp2_7_initialized_ramses_smoke/no_yield_table.asc'
+/
+
+&STELLAR_ENRICHMENT_PARAMS
+  feedback_mode='legacy'
+  use_h=.true.
+  use_he=.true.
+  use_c=.true.
+  use_n=.true.
+  use_o=.true.
+  use_ne=.true.
+  use_mg=.true.
+  use_si=.true.
+  use_s=.true.
+  use_ca=.true.
+  use_fe=.true.
+  use_wind=.true.
+  use_agb=.true.
+  use_snii=.true.
+  use_snia=.false.
+  use_pisn=.false.
+  allow_legacy_prompt_snia=.false.
+/
+
+&REFINE_PARAMS
+  m_refine=0.0d0
+  ivar_refine=-1
+  x_refine=0.5d0
+  y_refine=0.5d0
+  z_refine=0.5d0
+  r_refine=0.5d0
+  exp_refine=10.0d0
+/

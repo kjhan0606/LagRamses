@@ -8,7 +8,7 @@ module snrt_regrid
   use hydro_commons, only: uold
   use snrt_state, only: snrt_nslot,snrt_ndirection,snrt_checkpoint_cell_width, &
        snrt_state_get_slot,snrt_state_pack_cell,snrt_state_restore_cell, &
-       snrt_state_clear_cell,validate_cell_payload
+       snrt_state_clear_cell,validate_cell_payload,snrt_state_get_cell,snrt_state_rebind_cells
 #ifdef DUST_LIVE
   use snrt_dust_contract, only: snrt_dust_contract_version,snrt_dust_contract_number_ir
   use snrt_dust_live, only: snrt_dust_live_pack,snrt_dust_live_restore
@@ -18,7 +18,50 @@ module snrt_regrid
   implicit none
   private
   public :: snrt_regrid_refine,snrt_regrid_coarsen,snrt_regrid_check,snrt_regrid_upload
+  public :: snrt_regrid_defrag
 contains
+  subroutine snrt_regrid_defrag(grid_map,ierr)
+    integer, intent(in) :: grid_map(:)
+    integer, intent(out) :: ierr
+    integer, allocatable :: cells(:)
+    logical, allocatable :: retired(:)
+    integer :: slot,cell,grid,child,packed,unused
+    ierr=0
+    if(snrt_nslot==0)return
+    allocate(cells(snrt_nslot),retired(snrt_nslot)); retired=.false.
+    packed=0
+    if(size(grid_map)>0)packed=maxval(grid_map)
+    ierr=1
+    if(any(grid_map<0).or.packed>ngridmax)return
+    unused=0
+    do slot=1,snrt_nslot
+       cell=snrt_state_get_cell(slot)
+       if(cell<1.or.cell>ICELL_OF(ngridmax,twotondim))return
+       cells(slot)=cell
+       if(cell<=ncoarse)cycle
+       grid=IGRID_OF(cell); child=ICHILD_OF(cell)
+       if(grid<=size(grid_map))then
+          if(grid_map(grid)>0)then
+             cells(slot)=ICELL_OF(grid_map(grid),child)
+             cycle
+          end if
+       end if
+       ! Retain zero-valued retired slots on free cells, as ordinary grid
+       ! deletion already does. This preserves the raw checkpoint's unique,
+       ! nonzero cell IDs and permits later pool reuse without slot growth.
+       grid=packed+unused/twotondim+1; child=mod(unused,twotondim)+1
+       if(grid>ngridmax)return
+       cells(slot)=ICELL_OF(grid,child); retired(slot)=.true.; unused=unused+1
+    end do
+    call snrt_state_rebind_cells(cells,ierr)
+    if(ierr/=0)return
+    do slot=1,snrt_nslot
+       if(.not.retired(slot))cycle
+       call clear(cells(slot),ierr)
+       if(ierr/=0)return
+    end do
+  end subroutine
+
   subroutine snrt_regrid_check(ierr)
     integer, intent(in) :: ierr
     integer :: info
