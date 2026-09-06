@@ -31,3 +31,10 @@ manifest remains `blocked_until_all_required_assets_are_approved`, and the
 live dust driver remains `ZERO_SCAFFOLD`. This preflight therefore establishes
 simulation readiness for bounded reference/control and legacy-comparison
 calculations, not physical dusty production.
+
+The post-build identity repair also makes the P04/SNIa production-negative
+runner accept an explicit `P04_BINARY`/`SNRT_PRODUCTION_BINARY` path. The
+SNRT/CUDA bundle gate now passes its freshly linked binary directly, so the
+negative test cannot accidentally inspect the separately retained CPU
+`bin/ramses_final3d`. The override path was exercised with the retained G5
+SNRT/CUDA binary and returned `P04_PRODUCTION_NEGATIVE_OK`.

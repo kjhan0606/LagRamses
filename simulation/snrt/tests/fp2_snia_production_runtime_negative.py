@@ -20,7 +20,9 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[3]
-BINARY = ROOT / "bin/ramses_final3d"
+BINARY = Path(
+    os.environ.get("SNRT_PRODUCTION_BINARY", str(ROOT / "bin/ramses_final3d"))
+).resolve()
 NAMELIST = ROOT / "namelist/phase0_validation_snia_fail_closed.nml"
 CONTRACT = ROOT / "simulation/snrt/config/fp2_snia_runtime_contract_v1.nml"
 EVIDENCE = ROOT / "simulation/snrt/data/fp2_snia_production_runtime_negative.json"

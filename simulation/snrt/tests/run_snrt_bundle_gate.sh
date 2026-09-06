@@ -143,6 +143,7 @@ grep -q 'ZERO_SCAFFOLD' "$ROOT/patch/lagRamses/snrt_ramses_driver.f90" || \
 printf 'STATIC_SUPPORTING_CHECK dust_direct_hhe_handoff\nSTATIC_SUPPORTING_CHECK dust_zero_scaffold\n' | tee -a "$SUMMARY"
 
 run_stage production_negative \
+  env P04_BINARY="$BINARY" \
   "$ROOT/simulation/snrt/tests/run_p04_production_negative.sh"
 grep -q 'P04_PRODUCTION_NEGATIVE_OK' "$LAST_STAGE_LOG" || fail_gate 'production_negative_marker_missing'
 printf 'NEGATIVE_CASES family=production_fail_closed count=1_plus_snia_runtime\n' | tee -a "$SUMMARY"
