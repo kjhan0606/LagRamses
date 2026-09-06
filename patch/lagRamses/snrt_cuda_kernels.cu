@@ -4,8 +4,10 @@
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 namespace {
 
@@ -883,6 +885,273 @@ __global__ void snrt_cap_multigroup_species_absorption_kernel(
   }
 }
 
+// Validate the new four-component optical-depth contract before the device
+// state is touched.  The total tau is accepted from the caller so the DUST-7
+// zero-dust path can be bitwise compared with the legacy ABI; the component
+// sum is checked with an FP32-relative tolerance.
+__global__ void snrt_validate_species_dust_inputs_kernel(
+    const float *state, const float *direction, const int *neighbor,
+    const float *optical_depth, const float *optical_depth_species,
+    const float *optical_depth_dust, const float *available_species,
+    int nowned, int nwork, int ndirection, int ngroup, int *invalid) {
+  const long long group_count = static_cast<long long>(nowned) * ngroup;
+  const long long species_count = 3 * group_count;
+  const long long inventory_count = 3 * static_cast<long long>(nowned);
+  const long long state_count = static_cast<long long>(nwork) * ndirection * ngroup;
+  const long long direction_count = 3 * static_cast<long long>(ndirection);
+  const long long neighbor_count = 6 * static_cast<long long>(nowned);
+  long long total = state_count;
+  if (direction_count > total) total = direction_count;
+  if (neighbor_count > total) total = neighbor_count;
+  if (group_count > total) total = group_count;
+  if (inventory_count > total) total = inventory_count;
+  if (species_count > total) total = species_count;
+  const long long linear = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (linear >= total) return;
+
+  if (linear < state_count) {
+    const float value = state[linear];
+    if (!isfinite(value) || value < 0.0f) atomicExch(invalid, 1);
+  }
+  if (linear < direction_count) {
+    if (!isfinite(direction[linear])) atomicExch(invalid, 1);
+  }
+  if (linear < neighbor_count) {
+    const int value = neighbor[linear];
+    if (value < 0 || value > nwork) atomicExch(invalid, 1);
+  }
+
+  if (linear < group_count) {
+    const int cell = static_cast<int>(linear % nowned);
+    const int group = static_cast<int>(linear / nowned);
+    const float total_tau = optical_depth[linear];
+    const float dust_tau = optical_depth_dust[linear];
+    const long long hhe_base = static_cast<long long>(group) * nowned + cell;
+    const float component_sum = optical_depth_species[hhe_base] +
+        optical_depth_species[group_count + hhe_base] +
+        optical_depth_species[2 * group_count + hhe_base] + dust_tau;
+    const float scale = fmaxf(fmaxf(fabsf(total_tau), fabsf(component_sum)), FLT_MIN);
+    if (!isfinite(total_tau) || total_tau < 0.0f || !isfinite(dust_tau) ||
+        dust_tau < 0.0f || !isfinite(component_sum) ||
+        fabsf(total_tau - component_sum) > 8.0f * FLT_EPSILON * scale) {
+      atomicExch(invalid, 1);
+    }
+  }
+  if (linear < species_count) {
+    const float value = optical_depth_species[linear];
+    if (!isfinite(value) || value < 0.0f) atomicExch(invalid, 1);
+  }
+  if (linear < inventory_count) {
+    const float value = available_species[linear];
+    if (!isfinite(value) || value < 0.0f) atomicExch(invalid, 1);
+  }
+}
+
+// DUST-7 cap and ledger kernel.  This is deliberately separate from the
+// legacy three-species kernel so its active-set arithmetic cannot perturb the
+// old ABI.  One thread owns all groups of a cell, preserving group-order
+// reservoir consumption without atomics.
+__global__ void snrt_cap_multigroup_species_dust_absorption_kernel(
+    float *state, float *absorbed_direction,
+    const float *optical_depth_species, const float *optical_depth_dust,
+    float *available_species, float *absorbed_hhe_species,
+    float *absorbed_dust_group, float *returned_group, float *raw_group,
+    float *absorbed_group, float *absorbed_total,
+    int nowned, int nwork, int ndirection, int ngroup) {
+  const int cell = blockIdx.x * blockDim.x + threadIdx.x;
+  if (cell >= nowned) return;
+
+  const long long group_count = static_cast<long long>(nowned) * ngroup;
+  float available[3];
+  for (int species = 0; species < 3; ++species) {
+    available[species] = available_species[species * nowned + cell];
+  }
+  for (int group = 0; group < ngroup; ++group) {
+    const long long group_base = static_cast<long long>(group) * nwork * ndirection;
+    const long long output_index = static_cast<long long>(group) * nowned + cell;
+    const long long hhe_base = static_cast<long long>(group) * nowned + cell;
+    float opacity[3];
+    float hhe_tau = 0.0f;
+    for (int species = 0; species < 3; ++species) {
+      opacity[species] = optical_depth_species[species * group_count + hhe_base];
+      hhe_tau += opacity[species];
+      absorbed_hhe_species[species * group_count + hhe_base] = 0.0f;
+    }
+    const float dust_tau = optical_depth_dust[output_index];
+    const float component_tau = hhe_tau + dust_tau;
+    float raw_absorbed = 0.0f;
+    for (int idir = 0; idir < ndirection; ++idir) {
+      raw_absorbed += fmaxf(0.0f,
+          absorbed_direction[group_base + static_cast<long long>(idir) * nwork + cell]);
+    }
+    raw_group[output_index] = raw_absorbed;
+    if (raw_absorbed <= 0.0f) {
+      absorbed_dust_group[output_index] = 0.0f;
+      returned_group[output_index] = 0.0f;
+      absorbed_group[output_index] = 0.0f;
+      continue;
+    }
+
+    float hhe_target_full = 0.0f;
+    if (dust_tau == 0.0f) {
+      // Exact legacy arithmetic in the zero-dust limit.
+      hhe_target_full = raw_absorbed;
+    } else if (hhe_tau > 0.0f && component_tau > 0.0f) {
+      hhe_target_full = fminf(raw_absorbed,
+          raw_absorbed * hhe_tau / component_tau);
+    }
+    hhe_target_full = fmaxf(0.0f, fminf(raw_absorbed, hhe_target_full));
+
+    float eligible_inventory = 0.0f;
+    for (int species = 0; species < 3; ++species) {
+      if (opacity[species] > 0.0f) eligible_inventory += available[species];
+    }
+    float inventory_scale = fmaxf(raw_absorbed, eligible_inventory);
+    for (int species = 0; species < 3; ++species) {
+      inventory_scale = fmaxf(inventory_scale, fabsf(available[species]));
+    }
+    const float remainder_tolerance =
+        256.0f * FLT_EPSILON * fmaxf(inventory_scale, FLT_MIN);
+    // Match the legacy guard band.  Its slice is explicitly returned below,
+    // not treated as physical H/He excess eligible for dust transfer.
+    const float target_absorbed = fminf(hhe_target_full, eligible_inventory * 0.99995f);
+    float assigned[3] = {0.0f, 0.0f, 0.0f};
+    float remaining = target_absorbed;
+    bool active[3] = {opacity[0] > 0.0f && available[0] > 0.0f,
+                      opacity[1] > 0.0f && available[1] > 0.0f,
+                      opacity[2] > 0.0f && available[2] > 0.0f};
+    float active_weight = 0.0f;
+    for (int species = 0; species < 3; ++species) {
+      if (active[species]) active_weight += opacity[species];
+    }
+    for (int pass = 0; pass < 3 && remaining > remainder_tolerance &&
+         active_weight > 0.0f; ++pass) {
+      const float pass_remaining = remaining;
+      const float pass_weight = active_weight;
+      bool saturated_any = false;
+      bool saturated[3] = {false, false, false};
+      for (int species = 0; species < 3; ++species) {
+        if (!active[species]) continue;
+        const float headroom = fmaxf(0.0f, available[species] - assigned[species]);
+        if (headroom <= remainder_tolerance) {
+          saturated[species] = true;
+          saturated_any = true;
+          continue;
+        }
+        const float requested = pass_remaining * opacity[species] / pass_weight;
+        const float addition = fminf(requested, headroom);
+        assigned[species] += addition;
+        if (addition + remainder_tolerance >= headroom) {
+          saturated[species] = true;
+          saturated_any = true;
+        }
+      }
+      remaining = target_absorbed - (assigned[0] + assigned[1] + assigned[2]);
+      if (remaining < 0.0f) remaining = 0.0f;
+      if (!saturated_any) {
+        remaining = 0.0f;
+        break;
+      }
+      for (int species = 0; species < 3; ++species) {
+        if (saturated[species]) {
+          active[species] = false;
+          active_weight -= opacity[species];
+        }
+      }
+    }
+    if (remaining > remainder_tolerance) {
+      for (int species = 0; species < 3 && remaining > 0.0f; ++species) {
+        if (!active[species]) continue;
+        const float headroom = fmaxf(0.0f, available[species] - assigned[species]);
+        const float addition = fminf(headroom, remaining);
+        assigned[species] += addition;
+        remaining -= addition;
+      }
+    }
+
+    const float assigned_hhe = assigned[0] + assigned[1] + assigned[2];
+    const float physical_excess = fmaxf(0.0f, hhe_target_full - eligible_inventory);
+    const float guard_return = fmaxf(0.0f,
+        hhe_target_full - target_absorbed - physical_excess);
+    const float dust_direct = fmaxf(0.0f, raw_absorbed - hhe_target_full);
+    const float dust_fraction = -expm1f(-dust_tau);
+    const float dust_transfer = physical_excess * dust_fraction;
+    const float hhe_residual = fmaxf(0.0f, target_absorbed - assigned_hhe);
+    // Keep the guard-band and the unabsorbed part of the finite H/He excess
+    // explicit in the returned ledger.  Defining the assigned total as
+    // raw-returned makes the group closure exact in FP32; the dust ledger is
+    // then the non-H/He remainder of that assigned total.
+    float returned = 0.0f;
+    float assigned_total = 0.0f;
+    float assigned_dust = 0.0f;
+    if (dust_tau == 0.0f) {
+      // Keep the old cap and directional arithmetic exactly in the zero-dust
+      // limit.  The returned ledger is the old unassigned remainder.
+      assigned_total = assigned_hhe;
+      returned = fmaxf(0.0f, raw_absorbed - assigned_total);
+    } else {
+      const float returned_model = guard_return + hhe_residual +
+          fmaxf(0.0f, physical_excess - dust_transfer);
+      returned = fminf(raw_absorbed, fmaxf(0.0f, returned_model));
+      assigned_total = fmaxf(0.0f, raw_absorbed - returned);
+      assigned_dust = fmaxf(0.0f, assigned_total - assigned_hhe);
+      if (assigned_hhe > assigned_total) {
+        assigned_total = assigned_hhe;
+        assigned_dust = 0.0f;
+      }
+    }
+    for (int species = 0; species < 3; ++species) {
+      absorbed_hhe_species[species * group_count + hhe_base] = assigned[species];
+      available[species] = fmaxf(0.0f, available[species] - assigned[species]);
+    }
+    const float cap = assigned_total > 0.0f ? assigned_total / raw_absorbed : 0.0f;
+    for (int idir = 0; idir < ndirection; ++idir) {
+      const long long index = group_base + static_cast<long long>(idir) * nwork + cell;
+      const float removed = fmaxf(0.0f, absorbed_direction[index]);
+      const float limited_removed = removed * cap;
+      state[index] += removed - limited_removed;
+      absorbed_direction[index] = limited_removed;
+    }
+    // Match the legacy per-group reduction order.  This keeps the zero-dust
+    // ABI comparison meaningful while the raw/returned ledgers remain
+    // independently available to the DUST-8 host partition.
+    float assigned_group = 0.0f;
+    for (int idir = 0; idir < ndirection; ++idir) {
+      assigned_group += absorbed_direction[group_base +
+          static_cast<long long>(idir) * nwork + cell];
+    }
+    absorbed_dust_group[output_index] = assigned_dust;
+    returned_group[output_index] = fmaxf(0.0f, raw_absorbed - assigned_group);
+    absorbed_group[output_index] = assigned_group;
+  }
+
+  // Reproduce snrt_reduce_multigroup_kernel's 128-lane reduction order for
+  // the cell-total output.  This is intentionally separate from the ledger
+  // arithmetic so the zero-dust regression can compare the legacy scalar
+  // absorption bit-for-bit.
+  float partial[128];
+  for (int lane = 0; lane < 128; ++lane) {
+    float sum = 0.0f;
+    for (int group = 0; group < ngroup; ++group) {
+      const long long group_base = static_cast<long long>(group) * nwork * ndirection;
+      for (int idir = lane; idir < ndirection; idir += 128) {
+        sum += absorbed_direction[group_base + static_cast<long long>(idir) * nwork + cell];
+      }
+    }
+    partial[lane] = sum;
+  }
+  for (int stride = 64; stride > 0; stride /= 2) {
+    for (int lane = 0; lane < stride; ++lane) {
+      partial[lane] += partial[lane + stride];
+    }
+  }
+  absorbed_total[cell] = partial[0];
+
+  for (int species = 0; species < 3; ++species) {
+    available_species[species * nowned + cell] = available[species];
+  }
+}
+
 }  // namespace
 
 static int snrt_cuda_multigroup_rt_step_impl(float *state_host,
@@ -1092,4 +1361,178 @@ extern "C" int snrt_cuda_multigroup_rt_step_species_c(
       optical_depth_host, nullptr, absorbed_host, absorbed_group_host,
       nowned, nwork, ndirection, ngroup, cdt_over_dx,
       optical_depth_species_host, available_species_host);
+}
+
+// DUST-7 keeps the existing three-species ABI above untouched.  This wrapper
+// owns the fourth (dust) component and returns separate ledgers so the host
+// partition in DUST-8 does not have to reconstruct raw or returned photons.
+extern "C" int snrt_cuda_multigroup_rt_step_species_dust_c(
+    float *state_host, const float *direction_host, const int *neighbor_host,
+    const float *optical_depth_host, const float *optical_depth_species_host,
+    const float *optical_depth_dust_host, float *available_species_host,
+    float *absorbed_hhe_species_host, float *absorbed_dust_group_host,
+    float *returned_group_host, float *raw_group_host,
+    float *absorbed_group_host, float *absorbed_host,
+    int nowned, int nwork, int ndirection, int ngroup, float cdt_over_dx) {
+  if (state_host == nullptr || direction_host == nullptr || neighbor_host == nullptr ||
+      optical_depth_host == nullptr || optical_depth_species_host == nullptr ||
+      optical_depth_dust_host == nullptr || available_species_host == nullptr ||
+      absorbed_hhe_species_host == nullptr || absorbed_dust_group_host == nullptr ||
+      returned_group_host == nullptr || raw_group_host == nullptr ||
+      absorbed_group_host == nullptr || absorbed_host == nullptr ||
+      nowned <= 0 || nwork < nowned || ndirection <= 0 || ngroup <= 0 ||
+      !std::isfinite(cdt_over_dx) || cdt_over_dx < 0.0f) {
+    return 1;
+  }
+
+  const long long max_long = std::numeric_limits<long long>::max();
+  if (static_cast<long long>(nwork) > max_long / ndirection) return 1;
+  const long long per_group = static_cast<long long>(nwork) * ndirection;
+  if (per_group > max_long / ngroup) return 1;
+  const long long total = per_group * ngroup;
+  const long long group_count = static_cast<long long>(nowned) * ngroup;
+  if (group_count > max_long / 3) return 1;
+  const long long species_count = 3 * group_count;
+  const long long inventory_count = 3 * static_cast<long long>(nowned);
+  const long long direction_count = 3 * static_cast<long long>(ndirection);
+  const long long neighbor_count = 6 * static_cast<long long>(nowned);
+  if (per_group <= 0 || total <= 0 || group_count <= 0 ||
+      total > static_cast<long long>(std::numeric_limits<size_t>::max() / sizeof(float)) ||
+      group_count > static_cast<long long>(std::numeric_limits<size_t>::max() / sizeof(float)) ||
+      species_count > static_cast<long long>(std::numeric_limits<size_t>::max() / sizeof(float)) ||
+      inventory_count > static_cast<long long>(std::numeric_limits<size_t>::max() / sizeof(float))) {
+    return 1;
+  }
+
+  const size_t state_bytes = static_cast<size_t>(total) * sizeof(float);
+  const size_t direction_bytes = static_cast<size_t>(direction_count) * sizeof(float);
+  const size_t neighbor_bytes = static_cast<size_t>(neighbor_count) * sizeof(int);
+  const size_t group_bytes = static_cast<size_t>(group_count) * sizeof(float);
+  const size_t species_bytes = static_cast<size_t>(species_count) * sizeof(float);
+  const size_t inventory_bytes = static_cast<size_t>(inventory_count) * sizeof(float);
+  float *state_device = nullptr;
+  float *transport_device = nullptr;
+  float *direction_device = nullptr;
+  int *neighbor_device = nullptr;
+  float *tau_device = nullptr;
+  float *tau_species_device = nullptr;
+  float *tau_dust_device = nullptr;
+  float *available_species_device = nullptr;
+  float *absorbed_hhe_species_device = nullptr;
+  float *absorbed_dust_group_device = nullptr;
+  float *returned_group_device = nullptr;
+  float *raw_group_device = nullptr;
+  float *absorbed_group_device = nullptr;
+  float *absorbed_device = nullptr;
+  int *invalid_device = nullptr;
+  int status = 1;
+
+  if (cudaMalloc(&state_device, state_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&transport_device, state_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&direction_device, direction_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&neighbor_device, neighbor_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&tau_device, group_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&tau_species_device, species_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&tau_dust_device, group_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&available_species_device, inventory_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&absorbed_hhe_species_device, species_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&absorbed_dust_group_device, group_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&returned_group_device, group_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&raw_group_device, group_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&absorbed_group_device, group_bytes) != cudaSuccess) goto done;
+  if (cudaMalloc(&absorbed_device, static_cast<size_t>(nowned) * sizeof(float)) != cudaSuccess) goto done;
+  if (cudaMalloc(&invalid_device, sizeof(int)) != cudaSuccess) goto done;
+
+  if (cudaMemcpy(state_device, state_host, state_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (cudaMemcpy(direction_device, direction_host, direction_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (cudaMemcpy(neighbor_device, neighbor_host, neighbor_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (cudaMemcpy(tau_device, optical_depth_host, group_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (cudaMemcpy(tau_species_device, optical_depth_species_host, species_bytes,
+                 cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (cudaMemcpy(tau_dust_device, optical_depth_dust_host, group_bytes,
+                 cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (cudaMemcpy(available_species_device, available_species_host, inventory_bytes,
+                 cudaMemcpyHostToDevice) != cudaSuccess) goto done;
+  if (cudaMemset(invalid_device, 0, sizeof(int)) != cudaSuccess) goto done;
+
+  {
+    long long validation_total = total;
+    if (direction_count > validation_total) validation_total = direction_count;
+    if (neighbor_count > validation_total) validation_total = neighbor_count;
+    if (group_count > validation_total) validation_total = group_count;
+    if (species_count > validation_total) validation_total = species_count;
+    if (inventory_count > validation_total) validation_total = inventory_count;
+    const int threads = 256;
+    const long long block_count = (validation_total + threads - 1) / threads;
+    if (block_count <= 0 || block_count > 2147483647LL) goto done;
+    snrt_validate_species_dust_inputs_kernel<<<static_cast<int>(block_count), threads>>>(
+        state_device, direction_device, neighbor_device, tau_device,
+        tau_species_device, tau_dust_device, available_species_device,
+        nowned, nwork, ndirection, ngroup, invalid_device);
+    if (cudaGetLastError() != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) goto done;
+  }
+  {
+    int invalid = 0;
+    if (cudaMemcpy(&invalid, invalid_device, sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+    if (invalid != 0) {
+      status = 2;
+      goto done;
+    }
+  }
+
+  {
+    const int threads = 256;
+    const int blocks = static_cast<int>((total + threads - 1) / threads);
+    snrt_multigroup_upwind_kernel<<<blocks, threads>>>(state_device, transport_device,
+        direction_device, neighbor_device, nowned, nwork, ndirection, ngroup, cdt_over_dx);
+    if (cudaGetLastError() != cudaSuccess) goto done;
+    snrt_multigroup_absorb_kernel<<<blocks, threads>>>(transport_device, state_device,
+        tau_device, nowned, nwork, ndirection, ngroup);
+    if (cudaGetLastError() != cudaSuccess) goto done;
+  }
+  {
+    const int threads = 256;
+    const int blocks = (nowned + threads - 1) / threads;
+    snrt_cap_multigroup_species_dust_absorption_kernel<<<blocks, threads>>>(
+        transport_device, state_device, tau_species_device, tau_dust_device,
+        available_species_device, absorbed_hhe_species_device,
+        absorbed_dust_group_device, returned_group_device, raw_group_device,
+        absorbed_group_device, absorbed_device, nowned, nwork, ndirection, ngroup);
+    if (cudaGetLastError() != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) goto done;
+  }
+
+  if (cudaMemcpy(state_host, transport_device, state_bytes, cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  if (cudaMemcpy(available_species_host, available_species_device, inventory_bytes,
+                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  if (cudaMemcpy(absorbed_hhe_species_host, absorbed_hhe_species_device, species_bytes,
+                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  if (cudaMemcpy(absorbed_dust_group_host, absorbed_dust_group_device, group_bytes,
+                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  if (cudaMemcpy(returned_group_host, returned_group_device, group_bytes,
+                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  if (cudaMemcpy(raw_group_host, raw_group_device, group_bytes,
+                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  if (cudaMemcpy(absorbed_group_host, absorbed_group_device, group_bytes,
+                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  if (cudaMemcpy(absorbed_host, absorbed_device,
+                 static_cast<size_t>(nowned) * sizeof(float), cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  status = 0;
+
+done:
+  cudaFree(invalid_device);
+  cudaFree(absorbed_device);
+  cudaFree(absorbed_group_device);
+  cudaFree(raw_group_device);
+  cudaFree(returned_group_device);
+  cudaFree(absorbed_dust_group_device);
+  cudaFree(absorbed_hhe_species_device);
+  cudaFree(available_species_device);
+  cudaFree(tau_dust_device);
+  cudaFree(tau_species_device);
+  cudaFree(tau_device);
+  cudaFree(neighbor_device);
+  cudaFree(direction_device);
+  cudaFree(transport_device);
+  cudaFree(state_device);
+  return status;
 }
