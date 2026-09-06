@@ -2,7 +2,8 @@
 !
 ! The upstream JSON tooling owns scientific sidecar construction and file
 ! hashing.  This runtime-facing namelist is an explicit, bounded transport
-! representation.  Candidate records are readable but never runtime-enabled.
+! representation. Candidate records are readable but never runtime-enabled.
+! Reference controls require the explicit SNRT_ALLOW_REFERENCE_CONTROL=1 opt-in.
 module snrt_dust_contract
   use, intrinsic :: iso_fortran_env, only: real64
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -39,6 +40,7 @@ module snrt_dust_contract
   real(real64), save, public :: snrt_dust_contract_heat_capacity_per_h_erg_k = 0.0d0
   logical, save, public :: snrt_dust_contract_loaded = .false.
   logical, save, public :: snrt_dust_contract_runtime_allowed = .false.
+  logical, save, public :: snrt_dust_contract_reference_control = .false.
   character(len=64), save, public :: snrt_dust_contract_opacity_status = ''
   character(len=64), save, public :: snrt_dust_contract_thermal_status = ''
   character(len=128), save, public :: snrt_dust_contract_source_id = ''
@@ -60,6 +62,8 @@ contains
     character(len=*), intent(in) :: filename
     integer, intent(out) :: ierr
     integer :: unit, open_ierr, read_ierr
+    integer :: opt_status, opt_length
+    character(len=16) :: opt_in
     integer :: contract_version, ngroups_input, ntemperature_input
     character(len=64) :: opacity_status, thermal_status
     character(len=128) :: source_id, source_sha256, source_table_sha256
@@ -201,6 +205,17 @@ contains
          trim(thermal_status) == 'approved_thermal_production' .and. &
          len_trim(approval_id) > 0 .and. &
          heat_capacity_per_h_erg_k_input > 0.0d0
+    snrt_dust_contract_reference_control = &
+         trim(opacity_status) == 'reference_control' .and. &
+         trim(thermal_status) == 'reference_thermal_control'
+    if (contract_version >= 2 .and. snrt_dust_contract_reference_control) then
+       opt_in = ''
+       call get_environment_variable('SNRT_ALLOW_REFERENCE_CONTROL', opt_in, &
+            length=opt_length, status=opt_status)
+       if (opt_status == 0 .and. opt_length > 0 .and. opt_length <= len(opt_in)) then
+          snrt_dust_contract_runtime_allowed = trim(opt_in) == '1'
+       end if
+    end if
   end subroutine snrt_dust_contract_load
 
 
@@ -235,6 +250,7 @@ contains
     snrt_dust_contract_heat_capacity_per_h_erg_k = 0.0d0
     snrt_dust_contract_loaded = .false.
     snrt_dust_contract_runtime_allowed = .false.
+    snrt_dust_contract_reference_control = .false.
     snrt_dust_contract_opacity_status = ''
     snrt_dust_contract_thermal_status = ''
     snrt_dust_contract_source_id = ''

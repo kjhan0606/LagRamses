@@ -3,7 +3,8 @@ program snrt_dust_contract_smoke
   implicit none
 
   integer :: ierr
-  character(len=2048) :: valid_path, invalid_path
+  character(len=2048) :: valid_path, invalid_path, reference_path
+  character(len=16) :: expected_reference
   character(len=32) :: error_name
 
   call get_command_argument(1, valid_path)
@@ -33,6 +34,22 @@ program snrt_dust_contract_smoke
        snrt_dust_contract_runtime_allowed .or. snrt_dust_contract_number_groups /= 0 .or. &
        trim(error_name) /= 'status') error stop 4
   write(*,'(a,a)') 'SNRT_DUST_CONTRACT_INVALID_RESET_OK error=', trim(error_name)
+
+  call get_command_argument(3, reference_path)
+  call get_command_argument(4, expected_reference)
+  if (len_trim(reference_path) > 0) then
+     call snrt_dust_contract_load(trim(reference_path), ierr)
+     if (ierr /= 0 .or. .not. snrt_dust_contract_reference_control .or. &
+          snrt_dust_contract_number_groups /= 9 .or. snrt_dust_contract_version /= 2) error stop 5
+     if (snrt_dust_contract_runtime_allowed .neqv. (trim(expected_reference) == '1')) error stop 6
+     if (len_trim(snrt_dust_contract_approval_id) /= 0) error stop 7
+     call snrt_dust_contract_load(trim(valid_path), ierr)
+     if (ierr /= 0 .or. snrt_dust_contract_reference_control .or. &
+          snrt_dust_contract_runtime_allowed) error stop 8
+     call snrt_dust_contract_load(trim(invalid_path), ierr)
+     if (snrt_dust_contract_reference_control .or. snrt_dust_contract_runtime_allowed) error stop 9
+     write(*,'(a,a)') 'SNRT_DUST_REFERENCE_OPT_IN_PASS expected=', trim(expected_reference)
+  end if
 
   write(*,'(a)') 'SNRT_NATIVE_DUST_CONTRACT_ADMISSION_OK candidate=1 environment=1 reset=1 runtime_gate=1'
 end program snrt_dust_contract_smoke

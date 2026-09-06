@@ -1,0 +1,24 @@
+! Analytic wiring fixture only. Hash tokens a/b label synthetic inputs.
+! No physical opacity or grain heat-capacity approval is implied.
+&snrt_dust_contract
+ contract_version=2,
+ ngroups_input=9,
+ ntemperature_input=2,
+ opacity_status='reference_control',
+ thermal_status='reference_thermal_control',
+ source_id='analytic_nine_group_dust_wiring_fixture',
+ source_sha256='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+ source_table_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+ group_edges_sha256='d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1',
+ approval_id='',
+ thermal_source='analytic constant capacity; absorption-only engineering control',
+ edges_input=0.01,1.0,5.6,11.2,13.6,24.59,54.42,500.0,2000.0,10000.0,
+ absorption_input=9*1.0d-21,
+ mean_energy_input=0.1,2.3664319132398464,10.56942670578782,12.2954112566775,
+   17.662918001204492,34.381528542610674,106.63925876378897,
+   869.6341490248457,4023.594574013186,
+ temperature_input=1.0d0,1.0d6,
+ power_input=1.0d-30,1.0d-18,
+ mass_per_h_input=1.0d-26,
+ heat_capacity_per_h_erg_k_input=1.0d-19
+/

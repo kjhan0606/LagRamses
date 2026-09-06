@@ -13,6 +13,7 @@ subroutine read_params
        snrt_thermochemistry_error_name, snrt_thermochemistry_error_message
   use snrt_dust_contract, only: snrt_dust_contract_load_from_environment, &
        snrt_dust_contract_loaded, snrt_dust_contract_runtime_allowed, &
+       snrt_dust_contract_reference_control, &
        snrt_dust_contract_error_name, snrt_dust_contract_error_message
 #endif
   use pm_parameters
@@ -1762,8 +1763,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      end if
      ! A supplied dust contract must never be silently ignored.  Candidate
      ! contracts remain available for inspection in the legacy profile.  The
-     ! DUST_LIVE profile requires a version-2, physically approved contract;
-     ! otherwise the executable must not enter the live driver.
+     ! DUST_LIVE requires an admitted version-2 contract: physical approval
+     ! or an explicitly opted-in, labelled nonproduction reference control.
      snrt_dust_contract_env = ''
      call get_environment_variable('SNRT_DUST_CONTRACT', snrt_dust_contract_env, &
           length=snrt_dust_contract_env_length)
@@ -1779,17 +1780,22 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
            nml_ok=.false.
         else if (snrt_dust_contract_runtime_allowed) then
 #ifdef DUST_LIVE
-           if(myid==1)write(*,'(A)') &
-                'SNRT startup admitted approved DUST_LIVE contract'
+           if(myid==1)then
+              if(snrt_dust_contract_reference_control)then
+                 write(*,'(A)') 'SNRT startup admitted DUST_LIVE reference control: NONPRODUCTION'
+              else
+                 write(*,'(A)') 'SNRT startup admitted approved DUST_LIVE contract'
+              end if
+           end if
 #else
            if(myid==1)write(*,'(A)') &
-                'SNRT startup rejected approved dust contract: live dust receiver is not wired'
+                'SNRT startup rejected runtime dust contract: live dust receiver is not wired'
            nml_ok=.false.
 #endif
         else
 #ifdef DUST_LIVE
            if(myid==1)write(*,'(A)') &
-                'SNRT startup rejected dust contract: DUST_LIVE requires runtime-approved version-2 opacity/thermal data'
+                'SNRT startup rejected dust contract: DUST_LIVE requires admitted version-2 opacity/thermal data'
            nml_ok=.false.
 #else
            if(myid==1)write(*,'(A)') &
