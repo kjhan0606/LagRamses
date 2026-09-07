@@ -12,8 +12,10 @@ hydro) basic physics -- then writes:
   <name>_genetic.param      genetIC IC param file               | one
   <name>_monofonic.conf     monofonIC parent config (if used)  /
 
-Scope: cosmological (cosmo=.true.) runs only. For idealized test
-problems (Sedov, tubes, ...) copy one of namelist/*.nml directly.
+Default scope: cosmological (cosmo=.true.) runs. The Run mode menu also
+offers the fixed, non-cosmological RT/feedback/dust comparison profile.
+It writes inputs/environment only; it never launches a simulation.
+For other idealized problems (Sedov, tubes, ...) use namelist/*.nml.
 
 Run: python3 mkrun.py                 # terminal wizard
      python3 mkrun.py --mode gui      # graphical setup, preview and confirmed save
@@ -23,7 +25,9 @@ import argparse
 import math
 import os
 import re
+import shlex
 import sys
+from pathlib import Path
 from collections import OrderedDict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -324,6 +328,100 @@ def save_text(path, text):
         stream.write(text)
 
 
+def generate_comparison(name, outdir, ui, write_text):
+    """Package the already exercised comparison, not a new physical model.
+
+    Preserve the full native template verbatim except for local input paths;
+    formatting through the generic database would lose unlisted IC fields.
+    Both the GUI preview and terminal wizard use this same setup-only path.
+    """
+    ui.info('\n=== RT/feedback/dust comparison ===')
+    ui.info('Reference only: non-cosmological, 1 MPI rank / 2 OpenMP threads, '
+            '4 steps, level 3, BPASS radiation population distinct from feedback. '
+            'Not a production/publication approval. No job will be launched.')
+    if not ui.ask_bool('Use the fixed reference-only RT/feedback/dust comparison?', False):
+        raise ValueError('Comparison not selected; return to Run mode or restart the wizard.')
+    if os.path.lexists(outdir):
+        raise ValueError('Comparison requires a NEW output directory; existing runs are preserved.')
+    root, dest = Path(HERE), Path(outdir)
+    config = root / 'simulation/snrt/config'
+    source = root / '.agb-physical.4LAOTJ/snia-input'
+    binary = root / '.bpass-native.v0ZwR6/ramses_bpass_native3d'
+    env = OrderedDict([
+        ('OMP_NUM_THREADS', '2'), ('I_MPI_FABRICS', 'shm'),
+        ('SNRT_RT_ENABLE', '1'), ('SNRT_BACKEND', 'openmp'),
+        ('SNRT_AGN_MODEL', 'partition_reference_v1'), ('SNRT_REDUCED_C', '.01'),
+        ('SNRT_RT_LEVEL', '3'), ('SNRT_ALLOW_REFERENCE_CONTROL', '1'), ('SNRT_P1_DIAGNOSTIC', '0'),
+        ('SNRT_GROUP_CONTRACT', config / 'snrt_group_contract_reference_control_v1.nml'),
+        ('SNRT_SECONDARY_TABLE_CONTRACT', config / 'snrt_secondary_table_contract_v1.nml'),
+        ('SNRT_DUST_CONTRACT', config / 'dust_dl01_bulk_030_reference_v4.nml'),
+        ('SNRT_STELLAR_SED', config / 'snrt_stellar_sed_bpass_independent_v2.nml'),
+        ('PHASE0_SNIA_RUNTIME_CONTRACT', config / 'fp2_snia_effective_ssp_runtime_v1.nml'),
+    ])
+    template = config / 'kl16_lc18_snia_agn_dl01_dust_smoke.nml'
+    sink = config / 'kl16_lc18_snia_agn_dust_smoke.ic_sink'
+    fallback_yields = config / 'snrt_agn_driver_faithful_smoke_yields.dat'
+    required = [template, sink, fallback_yields, binary, source / 'history.nml', source / 'yields.dat']
+    required += [value for value in env.values() if isinstance(value, Path)]
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise ValueError('Local comparison assets unavailable (a Git clone alone is insufficient): '
+                         + ', '.join(missing))
+    text = template.read_text(encoding='utf-8')
+    history_token = 'CHANGE_ME_KL16_LC18_INPUT/history.nml'
+    fallback_token = '/gpfs/kjhan/LRD_JWST/simulation/snrt/config/snrt_agn_driver_faithful_smoke_yields.dat'
+    if text.count(history_token) != 1 or text.count(fallback_token) != 1:
+        raise ValueError('Comparison template changed: inspect its input paths before generation.')
+    history_name = name + '.history.nml'
+    text = text.replace(history_token, str(dest / history_name).replace("'", "''"))
+    text = text.replace(fallback_token, str(fallback_yields).replace("'", "''"))
+    raw, _ = rng.parse_namelist(text)
+    values = rng.import_to_values(raw)
+    msgs = rng.validate_params(values)
+    errors = [str(msg) for msg in msgs if msg.level == 'ERROR']
+    if errors:
+        raise ValueError('Invalid comparison namelist: ' + '; '.join(errors))
+    env['PHASE0_YIELD_TABLE'] = dest / 'yields.dat'
+    environment = ['# Source this file; it does NOT execute a simulation.',
+                   'unset SNRT_DRIVER_TEST_SEED_SOURCE SNRT_RT_TX_DIAGNOSTIC_MODE']
+    environment += ['export {}={}'.format(key, shlex.quote(str(value))) for key, value in env.items()]
+    instructions = (
+        'Fixed RT/feedback/dust comparison; inputs only, NOT launch approval.\n'
+        '1 MPI rank, OpenMP=2; NVAR=30 SNRT/DUST_LIVE/HDF5/CUDA-linked build.\n'
+        'No CAMB/IC generator is needed; ic_sink accompanies the uniform gas namelist.\n'
+        'noutput=1 aout=2 tout=1e30 (unreached); foutput=2 fbackup=1000000; 4 steps.\n'
+        'Expected dumps: 2 x ~56 MB = ~112 MB. Report actual namelist path and free space before launch.\n'
+        'After that separate launch review, in a fresh run with no output_* present:\n\n'
+        'cd {}\nsource {}\n{} {} > run.log 2>&1\n\n'
+        'Do not rerun in this directory once evolution has produced outputs.\n'
+        'Reject ERROR / MG nonconvergence even if process status is zero.\n'
+        'BPASS is an independent population; 0--1 Myr holds the first spectrum; common grey transport.\n'
+        'DL01 is a 30/70 bulk single-temperature comparison; no stochastic PAH/sublimation.\n'
+        'Feedback uses effective SSP SNIa, not microscopic binary-progenitor proof.\n'
+        'Large BH seed / short age coverage are numerical controls; terminal AGB is not reached.\n'
+        'Local binary/shared libraries and repository contracts are still required.\n'
+        'Full limitations/restart procedure: {}\n'
+    ).format(shlex.quote(outdir), shlex.quote(name + '.env.sh'), shlex.quote(str(binary)),
+             shlex.quote(name + '.nml'), root / 'provenance/rt_feedback_dust_comparison_closeout_2026-09-07.md')
+    files = OrderedDict([
+        (str(dest / (name + '.nml')), text), (str(dest / 'ic_sink'), sink.read_text()),
+        (str(dest / history_name), (source / 'history.nml').read_text()),
+        (str(dest / 'yields.dat'), (source / 'yields.dat').read_text()),
+        (str(dest / (name + '.env.sh')), '\n'.join(environment) + '\n'),
+        (str(dest / 'README.txt'), instructions),
+    ])
+    if write_text is save_text:
+        # Reuse the existing setup-only atomic publisher, never overwrite a
+        # concurrently created destination. No Tkinter/display is imported.
+        from ramses_run_gui import save_preview
+        save_preview(files, {path: None for path in files})
+    else:
+        for path, contents in files.items():
+            write_text(path, contents)
+    ui.info(instructions)
+    return {'paths': list(files), 'messages': msgs, 'values': values, 'outdir': outdir}
+
+
 def generate_run(ui=None, write_text=save_text):
     """Shared wizard; a GUI supplies prompts and an in-memory text sink.
 
@@ -332,7 +430,7 @@ def generate_run(ui=None, write_text=save_text):
     ui = ui or ConsoleUI()
     ask, ask_bool, ask_choice = ui.ask, ui.ask_bool, ui.ask_choice
     ask_floats, print = ui.ask_floats, ui.info
-    print('=== lagRamses run generator (cosmological runs only) ===')
+    print('=== lagRamses run generator (cosmological / fixed RT comparison) ===')
     name = ask('Run name (used as file/dir prefix)', 'myrun')
     outdir = ask('Output directory', os.path.join(HERE, 'runs', name))
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name):
@@ -350,7 +448,10 @@ def generate_run(ui=None, write_text=save_text):
     mode = ask_choice('\n=== Run mode ===', OrderedDict([
         ('dmo', ('DMO (dark matter only, N-body + gravity)',)),
         ('hydro', ('Hydro (gas + gravity + N-body)',)),
+        ('comparison', ('RT/feedback/dust comparison (fixed non-cosmological reference)',)),
     ]), 'dmo')
+    if mode == 'comparison':
+        return generate_comparison(name, outdir, ui, write_text)
     values['hydro'] = (mode == 'hydro')
 
     dm_choice, extra_dm = collect_dm_sector(values, ui)

@@ -4,6 +4,7 @@ import contextlib
 import io
 import os
 import re
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -36,7 +37,115 @@ def collect(overrides=None):
             answers.append(value)
 
 
+@contextlib.contextmanager
+def comparison_workspace():
+    """Portable setup fixtures: the dummy executable is NEVER executed."""
+    with tempfile.TemporaryDirectory(prefix='mkrun comparison ') as directory:
+        root = Path(directory)
+        config = root / 'simulation/snrt/config'
+        config.mkdir(parents=True)
+        for name in ('kl16_lc18_snia_agn_dl01_dust_smoke.nml',
+                     'kl16_lc18_snia_agn_dust_smoke.ic_sink',
+                     'snrt_agn_driver_faithful_smoke_yields.dat',
+                     'snrt_group_contract_reference_control_v1.nml',
+                     'snrt_secondary_table_contract_v1.nml',
+                     'dust_dl01_bulk_030_reference_v4.nml',
+                     'snrt_stellar_sed_bpass_independent_v2.nml',
+                     'fp2_snia_effective_ssp_runtime_v1.nml'):
+            shutil.copyfile(ROOT / 'simulation/snrt/config' / name, config / name)
+        source = root / '.agb-physical.4LAOTJ/snia-input'
+        source.mkdir(parents=True)
+        (source / 'history.nml').write_text('! setup-only history fixture\n')
+        (source / 'yields.dat').write_text('setup-only yields fixture\n')
+        binary = root / '.bpass-native.v0ZwR6/ramses_bpass_native3d'
+        binary.parent.mkdir()
+        binary.write_text('not an executable: setup tests must never launch it\n')
+        with mock.patch.object(mkrun, 'HERE', str(root)):
+            yield root
+
+
 class WizardTests(unittest.TestCase):
+    def test_comparison_cli_gui_same_bundle_and_no_launch(self):
+        with comparison_workspace() as root:
+            settings = {'Run mode': 'comparison', 'Output directory': str(root / 'new run'),
+                        'Use the fixed reference-only RT/feedback/dust comparison?': True}
+            with mock.patch('os.makedirs', side_effect=AssertionError('preview writes')), \
+                    mock.patch('subprocess.run', side_effect=AssertionError('generator launches')):
+                answers, preview, report = collect(settings)
+            self.assertFalse((root / 'new run').exists())
+            self.assertEqual(len(preview), 6)
+            self.assertFalse(report['values']['cosmo'])
+            self.assertTrue(report['values']['hydro'])
+            self.assertTrue(report['values']['use_snia'])
+            self.assertFalse(report['values']['create_sinks'])
+            self.assertEqual(report['values']['imf_id'], 1)
+            self.assertEqual(report['values']['nstepmax'], 4)
+            self.assertEqual(report['values']['foutput'], 2)
+            self.assertEqual(report['values']['outformat'], 'hdf5')
+            self.assertEqual(report['values']['informat'], 'hdf5')
+            text = preview[str(root / 'new run/myrun.nml')]
+            self.assertNotIn('CHANGE_ME', text)
+            self.assertEqual(report['values']['high_mass_history_path'], str(root / 'new run/myrun.history.nml'))
+            self.assertIn('var_region(1,14)=5.43633430456151513d-13', text)
+            self.assertEqual(preview[str(root / 'new run/myrun.history.nml')], '! setup-only history fixture\n')
+            environment = preview[str(root / 'new run/myrun.env.sh')]
+            self.assertIn('SNRT_STELLAR_SED=', environment)
+            self.assertIn('SNRT_DUST_CONTRACT=', environment)
+            self.assertIn('PHASE0_SNIA_RUNTIME_CONTRACT=', environment)
+            subprocess.run(['bash', '-n'], input=environment, text=True, check=True)
+            # Quote handling for paths containing spaces; source exports only.
+            check = subprocess.check_output(['bash', '-c', environment + '\nprintf "%s" "$PHASE0_YIELD_TABLE"'], text=True)
+            self.assertEqual(check, str(root / 'new run/yields.dat'))
+            responses = iter(answers)
+            cli = {}
+            def terminal_input(_):
+                value = next(responses)
+                return ('yes' if value else 'no') if isinstance(value, bool) else str(value)
+            with mock.patch('builtins.input', side_effect=terminal_input), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                mkrun.generate_run(write_text=cli.__setitem__)
+            self.assertEqual(cli, preview)
+
+    def test_comparison_requires_opt_in_new_directory_and_local_assets(self):
+        with comparison_workspace() as root:
+            settings = {'Run mode': 'comparison', 'Output directory': str(root / 'fresh'),
+                        'Use the fixed reference-only RT/feedback/dust comparison?': True}
+            with self.assertRaisesRegex(ValueError, 'Comparison not selected'):
+                collect(dict(settings, **{'Use the fixed reference-only RT/feedback/dust comparison?': False}))
+            with self.assertRaisesRegex(ValueError, 'NEW output directory'):
+                collect(dict(settings, **{'Output directory': str(root)}))
+            (root / '.agb-physical.4LAOTJ/snia-input/yields.dat').unlink()
+            with self.assertRaisesRegex(ValueError, 'Local comparison assets unavailable'):
+                collect(settings)
+            self.assertFalse((root / 'fresh').exists())
+
+    def test_comparison_forms_reach_preview_and_explicit_cli_save(self):
+        with comparison_workspace() as root:
+            settings = {'Run mode': 'comparison', 'Output directory': str(root / 'fresh'),
+                        'Use the fixed reference-only RT/feedback/dust comparison?': True}
+            answers = []
+            for _ in range(6):
+                ui, _, _ = gui.collect_stage(mkrun, answers)
+                draft = {key: settings[q.prompt.strip('= \n')] for key, q, _ in ui.fields
+                         if q.prompt.strip('= \n') in settings}
+                ui, files, report = gui.collect_stage(mkrun, answers, draft)
+                self.assertIsNone(ui.error)
+                if not ui.fields:
+                    break
+                answers.extend(ui.values)
+            self.assertIsNotNone(report)
+            self.assertEqual(len(files), 6)
+            self.assertFalse((root / 'fresh').exists())
+            responses = iter(answers)
+            def terminal_input(_):
+                value = next(responses)
+                return ('yes' if value else 'no') if isinstance(value, bool) else str(value)
+            with mock.patch('builtins.input', side_effect=terminal_input), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                mkrun.generate_run()
+            for path, text in files.items():
+                self.assertEqual(Path(path).read_text(), text)
+
     def test_high_mass_history_runtime_contract(self):
         rng = mkrun.rng
         valid = dict(feedback_mode='channel_resolved', fate_policy='user_selected_model_v1',

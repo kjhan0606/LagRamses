@@ -4,6 +4,9 @@ The selected single-rank/OpenMP comparison implementation is now closed.
 For its fixed executable, exact inputs, reproduction commands and limits, start
 with the [closeout handover](../../provenance/rt_feedback_dust_comparison_closeout_2026-09-07.md).
 The wider capabilities described below are not all qualified by that one profile.
+`mkrun.py` now offers this reference comparison in the CLI/GUI **Run mode** menu;
+it prepares the namelist, input copies and runtime environment without launching
+a job. See the [wizard guide](../../patch/cuRamses/aux/README_mkrun_gui.md).
 
 Work/build in `/gpfs/kjhan/LRD_JWST`; repository identity is
 `kjhan0606/LagRamses`. Keep isolated build directories at the same depth as

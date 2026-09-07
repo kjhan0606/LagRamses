@@ -45,6 +45,14 @@ GitHub clone만으로 바이너리와 로컬 yield 입력까지 배포되는 것
 
 ## 재현 실행 안내 — 이번 종료에서는 다시 실행하지 않음
 
+후속 사용자 요청으로 `mkrun.py`에도 이 비교 모드를 연결했다.
+`python3 mkrun.py` 또는 `python3 mkrun.py --mode gui`의 **Run mode →
+RT/feedback/dust comparison**을 선택하고 reference-only 확인에 동의하면 된다.
+새 출력 디렉토리에 namelist, sink IC, yield/history 복사본, 환경 파일,
+실행 안내를 생성한다. 물리 설정이나 코드의 종료 범위는 바꾸지 않았다.
+자세한 조작은 [mkrun 안내](../patch/cuRamses/aux/README_mkrun_gui.md)를 따른다.
+로컬 원본 입력과 바이너리는 여전히 필요하며, 자동 실행/다운로드는 하지 않는다.
+
 기존 출력 디렉토리에서 재실행하지 않는다. 새 실행이 필요할 때만 아래처럼
 새 디렉토리를 만든다. 복사하는 namelist는 placeholder가 이미 해결된 실제 입력이다.
 

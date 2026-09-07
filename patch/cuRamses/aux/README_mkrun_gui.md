@@ -7,6 +7,38 @@ GUI mode requires Python's Tkinter module and a graphical desktop or forwarded
 display; an unavailable dependency/display produces an actionable error and exit
 status 2. No packages are downloaded automatically.
 
+## Fixed RT / feedback / dust comparison
+
+In either `python3 mkrun.py` or `python3 mkrun.py --mode gui`, select
+**RT/feedback/dust comparison** in the **Run mode** stage and explicitly accept
+the reference-only model. The default remains cosmological DMO; ordinary hydro
+generation is unchanged. The comparison skips cosmology/IC/advanced editing and
+uses the existing non-cosmological four-step profile, not a new physical model.
+
+Choose a **new, nonexistent output directory** (type a new child directory if
+the directory chooser selects an existing parent). The preview contains:
+
+- `<name>.nml`: full existing profile including dust IC, HDF5 I/O,
+  `create_sinks=.false.`, Kroupa/binary feedback and effective SSP SNIa.
+- `ic_sink`, `<name>.history.nml`, `yields.dat`: copied local inputs; the
+  namelist and environment point at the destination copies.
+- `<name>.env.sh`: explicit BPASS, DL01, AGN/secondary/SNIa contracts and
+  single-rank/OpenMP settings. Sourcing it exports settings but launches nothing.
+- `README.txt`: build/dependency requirements, limitations, output budget and
+  a manual launch command requiring a separate run/storage review.
+
+The current local yield exports and verified executable must exist under the
+repository's preserved `.agb-physical.4LAOTJ` and `.bpass-native.v0ZwR6`
+directories. Missing files produce an error before any output is written; a
+GitHub clone alone is insufficient. No source is synthesized/downloaded, and
+no GPU, cosmological or production qualification is inferred. See the
+[closeout handover](../../../provenance/rt_feedback_dust_comparison_closeout_2026-09-07.md).
+
+No main RAMSES namelist field was added: SNRT and SNIa auxiliary contracts are
+connected by the environment file, not invented entries in `RUN_PARAMS`.
+
+## Shared wizard and save behavior
+
 Next/Back navigates whole configuration stages: run files, DMO/hydro, dark
 matter, gravity, cosmology, AMR, zoom, IC pipeline, output epochs, hydro and
 advanced settings. Each stage shows its fields together in two columns.
