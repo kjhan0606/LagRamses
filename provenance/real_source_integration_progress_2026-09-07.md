@@ -1588,3 +1588,27 @@ directories. Reported capacity estimates: 56 MB/dump, 112 MB live plus 168 MB
 restart/copies; free space 168--169 TB. `run-reference.sh` in the scratch build
 records the exact reference environment for reproduction. No production run,
 new gate ladder, external audit, shared-context update, commit or push was done.
+
+### Operator-directed closeout of the selected comparison implementation
+
+After source commit `073daf6` was pushed, the operator objected to repeatedly
+extending the final phase. The agreed closeout was then authorized with
+"진행해": fix the selected runnable comparison, retain its limitations and
+separate further physical improvements/large-run verification from completion.
+
+The [closeout handover](rt_feedback_dust_comparison_closeout_2026-09-07.md)
+now fixes the exact local executable/input hashes, effective namelist and
+environment, supported single-rank/OpenMP settings, output budget and restart
+procedure. Existing BPASS live/restart/rejection logs and native smoke results
+were inspected, all listed executable/input SHA256 values were checked, and
+the linked libraries resolve in the current workspace. No physics/settings
+changed, so the already passed simulation/tests were not repeated. No new
+audit, gate framework, binary, output, source-data move or deletion was added.
+The unrelated generator edit remains untouched.
+
+**Selected comparison execution implementation: closed.** This does not certify
+long-running/distributed production or publication physics. The previously
+suggested spectrum-specific transport/mixture implementation is now optional
+future physics work, not an open item blocking this closeout. The handover
+proposes a separate combined verification task for later authorization; no
+follow-on calculation is running or automatically scheduled by this closeout.

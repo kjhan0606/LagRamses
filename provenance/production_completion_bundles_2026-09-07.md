@@ -1,5 +1,23 @@
 # Remaining production implementation bundles
 
+## Latest operator scope: comparison implementation closed
+
+The operator approved a bounded closeout after explicitly objecting to the
+repeated expansion of "final" work. The **selected single-rank/OpenMP comparison
+execution implementation is closed**; unrestricted production/publication
+qualification is not claimed. This decision supersedes the active NEXT-WORK
+instructions and remaining-bundle counts below, which are retained as history.
+The newly proposed spectrum-specific transport/mixture work is deferred, not
+another mandatory completion bundle. No new simulation or test ladder is needed
+for the unchanged, already exercised profile.
+
+The fixed executable, inputs, local-only dependencies, launch recipe, evidence,
+limitations and separate optional verification proposal are in the
+[closeout handover](rt_feedback_dust_comparison_closeout_2026-09-07.md).
+Do not automatically resume historical deferred work from this file.
+
+## Historical implementation plan and amendments
+
 User-directed sequence, updated 2026-09-07. Scope: RT, stellar/AGN feedback,
 and dust in `/gpfs/kjhan/LRD_JWST` (kjhan0606/LagRamses).
 
