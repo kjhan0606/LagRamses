@@ -1433,6 +1433,40 @@ logical function level_fft_ok(ilevel)
   level_fft_ok = .true.
 end function level_fft_ok
 
+! The other scalar models retain their domain-level eligibility rule.
+! f(R) may also use the existing Helmholtz engine on a refined level when
+! that level covers the ENTIRE periodic box. A partly refined AMR patch
+! needs a boundary-aware solver; zero-filling it is not a periodic solve.
+logical function fR_level_fft_ok(ilevel)
+  use amr_commons
+  implicit none
+  integer,intent(in)::ilevel
+  integer::l
+  integer(i8b)::expected_grids,ntot
+  logical,external::level_fft_ok
+
+  fR_level_fft_ok=level_fft_ok(ilevel)
+  if(ilevel<=levelmin) return
+  fR_level_fft_ok=.false.
+  if(.not.fR_fft_refined .or. .not.use_fftw) return
+  if(ndim/=3 .or. simple_boundary .or. nboundary/=0) return
+
+  ! numbtot is global and identical on all ranks, including empty ranks.
+  ! Check products before multiplying so an extreme level cannot wrap.
+  expected_grids=int(nx,i8b)*int(ny,i8b)*int(nz,i8b)
+  do l=2,ilevel
+     if(expected_grids>huge(expected_grids)/8_i8b) return
+     expected_grids=8_i8b*expected_grids
+  end do
+  if(numbtot(1,ilevel)/=expected_grids) return
+  if(ncpu<=1) then
+     if(expected_grids>16777216_i8b/8_i8b) return
+     ntot=8_i8b*expected_grids
+     if(ntot>16777216_i8b) return
+  end if
+  fR_level_fft_ok=.true.
+end function fR_level_fft_ok
+
 !=========================================================
 ! level_fft_helmholtz: solve (lap - m2) x = b on the fully
 ! refined periodic level; b read from scalar_gr_old, x is
@@ -2590,7 +2624,7 @@ subroutine fR_solve_level(ilevel, icount)
   real(dp),save::fR_bar_previous(1:MAXLEVEL)=0d0
 #ifdef USE_FFTW
   real(dp)::m2bar
-  logical,external::level_fft_ok
+  logical,external::fR_level_fft_ok
 #endif
 
   ! NOTE: do NOT return when ncache==0 — the relaxation loop and the
@@ -2623,9 +2657,10 @@ subroutine fR_solve_level(ilevel, icount)
   call vain_prepare_uniform_cache(ilevel)
 
 #ifdef USE_FFTW
-  ! Spectral Newton on the uniform domain level: converges the
-  ! long-wavelength modes that the GS sweeps below cannot reach
-  if(level_fft_ok(ilevel)) then
+  ! Spectral Newton on eligible full periodic levels, followed by the
+  ! SAME nonlinear GS residual test. This accelerates the solve without
+  ! replacing R(f_R) with a linear physical model or relaxing fR_eps.
+  if(fR_level_fft_ok(ilevel)) then
      call make_virtual_fine_dp(scalar_gr(1), ilevel)
      do iter=1,8
         call fR_build_fft_rhs(ilevel, R_bar, fR_bar, m2bar)

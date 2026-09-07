@@ -385,8 +385,12 @@ subroutine init_part
      do i=1,npart2
         if(idp(i)<0_i8b)then
            ptypep(i)=PTYPE_SINK
-        else if((star.or.sink).and.idp(i)>0_i8b.and.tp(i)/=0.0d0)then
-           ptypep(i)=PTYPE_STAR
+        else if(star.or.sink)then
+           ! Fortran .and. need not short-circuit.  A DMO restart has no
+           ! allocated tp array, so guard its access with a separate IF.
+           if(idp(i)>0_i8b.and.tp(i)/=0.0d0)then
+              ptypep(i)=PTYPE_STAR
+           endif
         endif
      enddo
      close(ilun)
