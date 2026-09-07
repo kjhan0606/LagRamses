@@ -509,6 +509,10 @@ def generate_run(ui=None, write_text=save_text):
         )
 
     msgs = rng.validate_params(values)
+    if values.get('nrestart', 0) > 0:
+        print('Restart input format: {}. Live SNRT AGN needs informat=hdf5, '
+              'an HDF5 build and a saved AGN energy ledger.'.format(
+                  values.get('informat') or 'original'))
     errors = [str(msg) for msg in msgs if msg.level == 'ERROR']
     if errors:
         raise ValueError('Invalid namelist: ' + '; '.join(errors))

@@ -55,6 +55,9 @@ class WizardTests(unittest.TestCase):
         parsed, _ = rng.parse_namelist(text)
         self.assertIs(rng.import_to_values(parsed)['create_sinks'], False)
         self.assertNotIn('&SINK_PARAMS', rng.format_namelist(dict(sink=False)))
+        parsed, _ = rng.parse_namelist(rng.format_namelist(
+            dict(nrestart=2, informat='hdf5', outformat='hdf5')))
+        self.assertEqual(rng.import_to_values(parsed)['informat'], 'hdf5')
 
     def test_invalid_sink_edit_does_not_write(self):
         answers, _, _ = collect({

@@ -759,22 +759,50 @@ end subroutine backup_part_hdf5
 subroutine backup_sink_hdf5()
   use amr_commons
   use pm_commons
+  use snrt_agn_efficiency, only: snrt_agn_model, snrt_agn_rt_requested
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use ramses_hdf5_io
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer :: idim, ilevel
+  integer :: idim, ilevel, pending_status, pending_status_all, info
   integer(HID_T) :: grp_id
   real(dp), allocatable :: dbuf(:)
   integer, allocatable :: ibuf(:)
   character(len=10) :: dstr
+  character(len=24),parameter :: pending_names(4)=[character(len=24):: &
+       'agn_heat_pending_erg','agn_jet_pending_erg','agn_loading_pending_mass','agn_deferred_pending_erg']
+
+  pending_status=0
+  if(nsink<0.or.nsink>nsinkmax)pending_status=1
+  if(nsink>0.and.pending_status==0)then
+     if(.not.allocated(agn_pending_erg).or..not.allocated(agn_mechanical_pending))then
+        pending_status=1
+     else if(size(agn_pending_erg)<nsink.or.size(agn_mechanical_pending,1)/=4.or. &
+          size(agn_mechanical_pending,2)<nsink)then
+        pending_status=1
+     else if(any(.not.ieee_is_finite(agn_pending_erg(1:nsink))).or. &
+          any(agn_pending_erg(1:nsink)<0d0).or. &
+          any(.not.ieee_is_finite(agn_mechanical_pending(:,1:nsink))).or. &
+          any(agn_mechanical_pending(:,1:nsink)<0d0))then
+        pending_status=1
+     endif
+  endif
+  call MPI_Allreduce(pending_status,pending_status_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+  if(pending_status_all/=0)then
+     if(myid==1)write(*,*)'ERROR: invalid AGN pending state at HDF5 output'
+     call clean_stop
+  endif
 
   call hdf5_create_group('/sinks', grp_id)
   call hdf5_write_attr_int(grp_id, 'nsink', nsink)
   call hdf5_write_attr_int(grp_id, 'nindsink', nindsink)
   call hdf5_write_attr_int(grp_id, 'levelmin', levelmin)
   call hdf5_write_attr_int(grp_id, 'nlevelmax', nlevelmax)
+  call hdf5_write_attr_int(grp_id, 'agn_state_schema', 1)
+  call hdf5_write_attr_int(grp_id, 'agn_model', snrt_agn_model())
+  call hdf5_write_attr_int(grp_id, 'agn_rt_enabled', merge(1,0,snrt_agn_rt_requested()))
 
   if(nsink > 0) then
      allocate(ibuf(nsink))
@@ -785,6 +813,12 @@ subroutine backup_sink_hdf5()
      call hdf5_write_dataset_serial_dp(grp_id, 'msink', msink, nsink, myid)
 
      allocate(dbuf(nsink))
+     dbuf=agn_pending_erg(1:nsink)
+     call hdf5_write_dataset_serial_dp(grp_id,'agn_radiation_pending_erg',dbuf,nsink,myid)
+     do idim=1,4
+        dbuf=agn_mechanical_pending(idim,1:nsink)
+        call hdf5_write_dataset_serial_dp(grp_id,trim(pending_names(idim)),dbuf,nsink,myid)
+     enddo
      ! Position
      do idim = 1, ndim
         dbuf(1:nsink) = xsink(1:nsink, idim)

@@ -6,6 +6,7 @@ module snrt_hdf5
   use snrt_state, only: primary_width=>snrt_checkpoint_cell_width, snrt_ndirection, &
        primary_pack=>snrt_state_pack_cell, primary_restore=>snrt_state_restore_cell
   use snrt_agn_efficiency, only: snrt_agn_rt_requested
+  use snrt_stellar_source, only: stellar_sed_enabled, stellar_sed_identity
   use snrt_spectral_contract, only: snrt_spectral_contract_source_sha256, &
        snrt_spectral_contract_source_commit_binding, snrt_spectral_contract_approval_id, &
        snrt_spectral_contract_group_edges_sha256, snrt_spectral_contract_status, &
@@ -66,7 +67,9 @@ contains
     logical, intent(in) :: writing
     character(len=128) :: values(7), loaded
     character(len=20) :: names(7)
-    integer :: k,status,width,version
+    integer :: k,status,width,version,stellar_switch,count
+    logical :: exists
+    real(dp),allocatable :: stellar_values(:),saved_stellar(:)
 #ifdef DUST_LIVE
     real(dp), allocatable :: dust_values(:), saved_dust(:)
 #endif
@@ -78,6 +81,10 @@ contains
        version=2
     end if
 #endif
+    ! An older executable must not accept a checkpoint whose future stellar
+    ! photons it cannot reproduce. Formats 3/4 add the live stellar source
+    ! identity to primary-only / primary+IR formats 1/2 respectively.
+    if(stellar_sed_enabled)version=version+2
     names=[character(len=20)::'source_sha256','source_commit','approval','edges_sha256', &
          'spectral_status','fraction_semantics','secondary_manifest']
     values=[character(len=128)::snrt_spectral_contract_source_sha256, &
@@ -87,7 +94,8 @@ contains
     if(writing)then
        call hdf5_write_attr_int(grp,'cell_width',snrt_checkpoint_cell_width)
        call hdf5_write_attr_int(grp,'format_version',version)
-       if(version==2)call hdf5_write_attr_string(grp,'ir_energy_units','erg/cm3 per normalized direction')
+       if(version==2.or.version==4) &
+            call hdf5_write_attr_string(grp,'ir_energy_units','erg/cm3 per normalized direction')
     else
        call hdf5_read_attr_int_checked(grp,'format_version',width,status)
        call require_ok(status)
@@ -105,6 +113,37 @@ contains
           call require_ok(merge(0,1,trim(loaded)==trim(values(k))))
        end if
     end do
+    ! Persist the actual age/Z photon table, not just its pathname. Disabled
+    ! legacy checkpoints remain readable, but cannot acquire a new source
+    ! on restart without an explicit migration of the scientific model.
+    stellar_switch=merge(1,0,stellar_sed_enabled)
+    if(writing)then
+       call hdf5_write_attr_int(grp,'stellar_sed_enabled',stellar_switch)
+    else
+       call h5aexists_f(grp,'stellar_sed_enabled',exists,status)
+       call require_ok(abs(status))
+       width=0
+       if(exists)then
+          call hdf5_read_attr_int_checked(grp,'stellar_sed_enabled',width,status)
+          call require_ok(status)
+       endif
+       call require_ok(merge(0,1,width==stellar_switch))
+    endif
+    if(stellar_sed_enabled)then
+       call stellar_sed_identity(stellar_values)
+       if(writing)then
+          count=0
+          if(myid==1)count=size(stellar_values)
+          call hdf5_write_dataset_1d_dp(grp,'stellar_sed_values',stellar_values,count, &
+               0_i8b,int(size(stellar_values),i8b))
+       else
+          allocate(saved_stellar(size(stellar_values)))
+          call hdf5_read_dataset_1d_dp_checked(grp,'stellar_sed_values',saved_stellar,size(saved_stellar), &
+               0_i8b,int(size(saved_stellar),i8b),status)
+          call require_ok(status)
+          call require_ok(merge(0,1,all(saved_stellar==stellar_values)))
+       endif
+    endif
 #ifdef DUST_LIVE
     ! Bind the actual opacity/thermal values as well as the field map. A
     ! changed constant heat capacity would reinterpret the saved dust energy.

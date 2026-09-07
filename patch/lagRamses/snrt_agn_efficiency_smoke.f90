@@ -62,8 +62,10 @@ program snrt_agn_efficiency_smoke
   if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
        3,1,1,0,0.01d0)) error stop 13
   if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
-       3,0,2,0,0.01d0)) error stop 14
-  if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
+       3,0,0,0,0.01d0)) error stop 14
+  if(.not.snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
+       3,0,2,0,0.01d0)) error stop 18
+  if(.not.snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
        3,0,1,1,0.01d0)) error stop 15
   if(snrt_agn_reference_config_ok(.true.,.true.,.true.,.true.,.true.,.true.,.false., &
        3,0,1,0,0d0)) error stop 16

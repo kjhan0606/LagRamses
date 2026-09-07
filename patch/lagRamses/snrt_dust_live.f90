@@ -8,6 +8,7 @@ module snrt_dust_live
   use snrt_state, only: snrt_ndirection, snrt_nslot, snrt_state_get_slot
   use amr_commons, only: ngridmax,ncoarse,ncpu,myid,headl,next,son
   use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
+       snrt_halo_tile_exchange, &
        SNRT_FACE_LOCAL,SNRT_FACE_PHYSICAL,SNRT_FACE_MPI, &
        SNRT_FACE_COARSE_TO_FINE,SNRT_FACE_FINE_TO_COARSE
 #ifndef WITHOUTMPI
@@ -68,6 +69,9 @@ contains
     integer, intent(out) :: ierr
     type(dust_live_coarse_trial), intent(out) :: coarse
     real(dust_dp), allocatable :: photons(:,:),ghosts(:,:,:),field(:)
+    real(dust_dp), allocatable :: halo_field(:,:)
+    integer,parameter :: halo_tile=16
+    integer :: first_component,ncomponent,component,column
     integer, allocatable :: remote(:,:),ghost_cells(:),ghost_kind(:),coarse_cells(:)
     logical, allocatable :: blocked(:,:)
     type(dust_ir_diagnostics) :: step
@@ -140,6 +144,7 @@ contains
        blocked=snrt_face_kind==SNRT_FACE_COARSE_TO_FINE
     end if
     allocate(ghost_cells(nghost),ghost_kind(nghost),ghosts(ng,snrt_ndirection,nghost),field(nfield))
+    if(ncpu>1)allocate(halo_field(nfield,halo_tile))
     k=0
     do i=1,size(slots)
        do face=1,6
@@ -166,13 +171,22 @@ contains
        ! Reuse RAMSES' real halo communicator, in FP64. All ranks participate
        ! in every substep, including a rank with no local MPI boundary faces.
        if(ncpu>1)then
-          do d=1,snrt_ndirection
-             do g=1,ng
-                field=0
-                field(cells)=trial(g,d,:)
-                call make_virtual_fine_dp(field,ilevel)
+          do first_component=1,ng*snrt_ndirection,halo_tile
+             ncomponent=min(halo_tile,ng*snrt_ndirection-first_component+1)
+             halo_field=0d0
+             do column=1,ncomponent
+                component=first_component+column-1
+                g=mod(component-1,ng)+1;d=(component-1)/ng+1
+                halo_field(cells,column)=trial(g,d,:)
+             enddo
+             call snrt_halo_tile_exchange(halo_field(:,1:ncomponent),ilevel,ierr)
+             call collective_error(ierr)
+             if(ierr/=dust_ok)return
+             do column=1,ncomponent
+                component=first_component+column-1
+                g=mod(component-1,ng)+1;d=(component-1)/ng+1
                 do k=1,nghost
-                   if(ghost_kind(k)==SNRT_FACE_MPI)ghosts(g,d,k)=field(ghost_cells(k))
+                   if(ghost_kind(k)==SNRT_FACE_MPI)ghosts(g,d,k)=halo_field(ghost_cells(k),column)
                 end do
              end do
           end do
@@ -209,6 +223,12 @@ contains
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
             ghosts,remote,blocked)
+       if(ierr/=dust_ok.and.size(slots)>0)then
+          write(*,'(A,3I6,A,2ES25.16,A,ES14.5)')' SNRT IR rejected state rank/level/error=',myid,ilevel,ierr, &
+               ' material_T_range=',minval(material/capacity),maxval(material/capacity), &
+               ' min_IR=',minval(trial)
+          if(nghost>0)write(*,'(A,ES14.5)')' SNRT IR rejected min_ghost_IR=',minval(ghosts)
+       endif
        if(any(.not.ieee_is_finite(coarse%energy)).or.any(coarse%energy<0))ierr=dust_err_state
        call collective_error(ierr)
        if(ierr/=dust_ok)return

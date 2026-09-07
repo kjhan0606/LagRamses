@@ -109,11 +109,12 @@ contains
   end subroutine
 
   subroutine transient_emission(table,heating,density,dt,old_energy,capacity, &
-       rate,temperature,next_energy,ierr)
+       rate,temperature,next_energy,ierr,material_tolerance)
     type(dust_ir_table), intent(in) :: table
     real(real64), intent(in) :: heating(:),density(:),dt,old_energy(:),capacity(:)
     real(real64), intent(out) :: rate(:,:),temperature(:),next_energy(:)
     integer, intent(out) :: ierr
+    real(real64), intent(in) :: material_tolerance
     real(real64) :: lower,upper,mid,target,power,fraction,residual
     real(real64) :: emitted(size(heating)),unused_temperature(size(heating))
     integer :: i,k,iteration,nt
@@ -131,10 +132,11 @@ contains
        lower=table%background_temperature
        upper=exp(table%log_t(nt))
        if(.not.ieee_is_finite(target))return
-       ! Unit conversion of a stored C*T can move a bath-temperature state a
-       ! few ulps below the bath. Admit rounding only; material/radiation
-       ! closure below still accounts for any resulting energy correction.
-       if(target<capacity(i)*lower*(1-64*epsilon(1d0))) return
+       ! Hydro advects material mass and energy separately. A tiny deficit
+       ! below the bath is admissible only within the declared solve error.
+       ! Do NOT replace old_energy: the full floor correction is charged to
+       ! material+radiation closure in advance(), not hidden as bath heating.
+       if(target<capacity(i)*lower*(1-material_tolerance)) return
        if(target>(capacity(i)*upper+dt*density(i)*(table%power(nt)-table%background)) &
             *(1+64*epsilon(1d0)))return
        ! Solve for emitted power, not the tiny temperature displacement of a
@@ -204,6 +206,7 @@ contains
     real(real64), allocatable :: trial_dust_energy(:)
     logical :: transient
     real(real64) :: cfl, volume, factor, tau, source, old_total, new_total, scale, balance, sum_w
+    real(real64) :: material_tolerance
     integer :: ng, nd, nc, i, j, g, d, axis, face, outgoing, opposite, iteration, ghost
     integer, allocatable :: remote(:,:)
     type(dust_ir_diagnostics) :: trial
@@ -215,6 +218,8 @@ contains
     if(transient.neqv.present(heat_capacity))return
     if(present(ghost_energy).neqv.present(ghost_index))return
     ng=size(table%energy); nd=size(weight); nc=size(density)
+    if(.not.ieee_is_finite(tolerance).or.tolerance<=0.or.tolerance>=1)return
+    material_tolerance=max(tolerance,64*epsilon(1d0))
     ierr=dust_err_shape
     if (nd<1 .or. nc<1) return
     if (any(shape(direction)/=[3,nd]) .or. any(shape(neighbor)/=[6,nc])) return
@@ -244,7 +249,7 @@ contains
        if(any(dust_energy<0).or.any(heat_capacity<=0))return
        do i=1,nc
           if(density(i)<=0)cycle
-          if(dust_energy(i)/heat_capacity(i)<table%background_temperature*(1-64*epsilon(1d0)).or. &
+          if(dust_energy(i)/heat_capacity(i)<table%background_temperature*(1-material_tolerance).or. &
                dust_energy(i)/heat_capacity(i)>exp(table%log_t(size(table%log_t)))*(1+64*epsilon(1d0)))return
        end do
     end if
@@ -331,7 +336,7 @@ contains
     do iteration=0,max_iterations
        if(transient)then
           call transient_emission(table,primary+guess/dt,density,dt,dust_energy,heat_capacity, &
-               rate,next_t,trial_dust_energy,ierr)
+               rate,next_t,trial_dust_energy,ierr,material_tolerance)
        else
           call emission(table, primary+guess/dt, density, rate, next_t, ierr)
        end if

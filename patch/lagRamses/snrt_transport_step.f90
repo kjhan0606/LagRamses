@@ -16,6 +16,7 @@ module snrt_transport_step
   use snrt_cuda_multigroup_interface, only: snrt_cuda_multigroup_rt_step, &
        snrt_cuda_multigroup_rt_step_owned, snrt_cuda_multigroup_rt_step_species, &
        snrt_cuda_multigroup_rt_step_species_dust
+  use snrt_runtime_backend, only: snrt_runtime_species_dust_step
   implicit none
 
 contains
@@ -568,7 +569,7 @@ contains
        cuda_ierr = 0_c_int
        if (nleaf > 0) then
           if (use_dust) then
-             cuda_ierr = snrt_cuda_multigroup_rt_step_species_dust(packed_work, direction_c, &
+             cuda_ierr = snrt_runtime_species_dust_step(packed_work, direction_c, &
                   neighbor_c, tau, species_tau, dust_tau, species_budget, &
                   absorbed_hhe_group, absorbed_dust_group, returned_group, raw_group, &
                   absorbed_group, absorbed_total, int(nleaf,c_int), int(nwork,c_int), &

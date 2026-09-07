@@ -19,8 +19,9 @@ module pm_commons
   real(dp),allocatable,dimension(:)::dMEd_coarse_new,dMsmbh_new,dMBH_coarse_all,dMEd_coarse_all,dMsmbh_all
   real(dp),allocatable,dimension(:)::Esave,Esave_new,Esave_all
   ! Physical erg accepted during gas accretion, awaiting SNRT source commit.
-  ! Process-lifetime only: live SNRT sinks still require serial fresh start.
+  ! Persisted with the HDF5 sink payload; MPI source ownership is separate.
   real(dp),allocatable,dimension(:)::agn_pending_erg
+  logical::agn_checkpoint_restored=.false.
   ! Reference model only: (heat erg, jet erg, retained loading mass in code
   ! units, deferred erg) by sink slot. Legacy/MAD leaves all four zero.
   real(dp),allocatable,dimension(:,:)::agn_mechanical_pending

@@ -94,7 +94,7 @@ contains
     integer,intent(in)::dimensions,nener,ncpu,restart
     real(dp),intent(in)::xfloor
     ok=built.and.rt.and.hydro.and.sink.and.bondi.and.mechanical.and..not.mad &
-         .and.dimensions==3.and.nener==0.and.ncpu==1.and.restart==0 &
+         .and.dimensions==3.and.nener==0.and.ncpu>=1.and.restart>=0 &
          .and.ieee_is_finite(xfloor).and.xfloor>0d0
   end function snrt_agn_reference_config_ok
 

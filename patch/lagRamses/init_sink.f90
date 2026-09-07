@@ -1,9 +1,10 @@
 ! Project-local override of patch/cuRamses/init_sink.f90: initialize the
-! process-lifetime accepted AGN radiation reservoir (no restart format change).
+! accepted AGN reservoirs (persisted in HDF5; legacy binary layout unchanged).
 subroutine init_sink
   use amr_commons
   use pm_commons
   use clfind_commons
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -24,6 +25,10 @@ subroutine init_sink
 
   integer,parameter::tag=1112,tag2=1113
   integer::dummy_io,info2
+  integer::ic_status,ic_extra_status,ic_line,ic_owner(nvector),ic_part
+  real(dp)::ic_row(12),ic_position(nvector,ndim)
+  character(len=2048)::ic_record
+  character(len=64)::ic_extra
 
 
   allocate(total_volume(1:nsinkmax))
@@ -221,6 +226,116 @@ subroutine init_sink
         INQUIRE(FILE=filename, EXIST=ic_sink)
      end if
   end if
+
+  ! Read the established 12-column sink IC layout in code units:
+  ! mass, centered x/y/z, vx/vy/vz, gas angular momentum x/y/z,
+  ! upstream-only SMBH mass and drag fraction. This patch has one BH mass;
+  ! reject nonzero upstream-only fields rather than silently discarding them.
+  ! The old override only INQUIREd this file and never created its sinks.
+#ifndef WITHOUTMPI
+  call MPI_BCAST(ic_sink,1,MPI_LOGICAL,0,MPI_COMM_WORLD,info2)
+#endif
+  if(ic_sink)then
+     if(ndim/=3)then
+        if(myid==1)write(*,*)'ERROR: ic_sink loading requires NDIM=3'
+        call clean_stop
+     endif
+     ic_status=0
+     if(myid==1)open(newunit=ilun,file=trim(filename),status='old',action='read',iostat=ic_status)
+#ifndef WITHOUTMPI
+     call MPI_BCAST(ic_status,1,MPI_INTEGER,0,MPI_COMM_WORLD,info2)
+#endif
+     if(ic_status/=0)then
+        if(myid==1)write(*,*)'ERROR: cannot open sink IC ',trim(filename)
+        call clean_stop
+     endif
+     ic_line=0
+     do
+        ic_status=0
+        if(myid==1)then
+           do
+              read(ilun,'(A)',iostat=ic_status)ic_record
+              ic_line=ic_line+1
+              if(ic_status/=0)exit
+              ic_record=adjustl(ic_record)
+              if(len_trim(ic_record)==0)cycle
+              if(ic_record(1:1)=='!'.or.ic_record(1:1)=='#')cycle
+              exit
+           enddo
+           if(ic_status<0)then
+              ic_status=-1
+           else if(ic_status==0)then
+              ic_row=ieee_value(0d0,ieee_quiet_nan)
+              read(ic_record,*,iostat=ic_status)ic_row
+              if(ic_status/=0)ic_status=1 ! An incomplete row is not file EOF.
+              if(ic_status==0)then
+                 read(ic_record,*,iostat=ic_extra_status)ic_row,ic_extra
+                 if(ic_extra_status==0)ic_status=1
+                 if(.not.all(ieee_is_finite(ic_row)))ic_status=1
+                 if(ic_row(1)<=0d0.or.any(ic_row(11:12)/=0d0))ic_status=1
+                 if(any(ic_row(2:4)<-boxlen/2).or.any(ic_row(2:4)>=boxlen/2))ic_status=1
+              endif
+           endif
+        endif
+#ifndef WITHOUTMPI
+        call MPI_BCAST(ic_status,1,MPI_INTEGER,0,MPI_COMM_WORLD,info2)
+#endif
+        if(ic_status==-1)exit
+        if(ic_status/=0.or.nsink>=nsinkmax.or.nindsink==huge(nindsink))then
+           if(myid==1)write(*,*)'ERROR: invalid or over-capacity sink IC at line ',ic_line
+           call clean_stop
+        endif
+#ifndef WITHOUTMPI
+        call MPI_BCAST(ic_row,12,MPI_DOUBLE_PRECISION,0,MPI_COMM_WORLD,info2)
+#endif
+        nsink=nsink+1
+        nindsink=nindsink+1
+        idsink(nsink)=nindsink
+        msink(nsink)=ic_row(1)
+        xsink(nsink,:)=ic_row(2:4)+boxlen/2
+        vsink(nsink,:)=ic_row(5:7)
+        jsink(nsink,:)=ic_row(8:10)
+        tsink(nsink)=t
+        dMsmbh(nsink)=0d0; dMBH_coarse(nsink)=0d0; dMEd_coarse(nsink)=0d0
+        Esave(nsink)=0d0; agn_pending_erg(nsink)=0d0
+        agn_mechanical_pending(:,nsink)=0d0
+        bhspin(nsink,:)=0d0; spinmag(nsink)=0d0
+        sink_stat(nsink,:,:)=0d0
+
+        ! init_part calls us immediately before init_tree: append one
+        ! canonical particle on its owner, not just the replicated BH table.
+        ! Normal create_sink subsequently builds its accretion cloud.
+        ic_position=0d0
+        ic_position(1,:)=xsink(nsink,:)
+        ic_owner(1)=1
+#ifndef WITHOUTMPI
+        call cmp_cpumap(ic_position,ic_owner,1)
+#endif
+        if(ic_owner(1)==myid)then
+           ic_part=npart+1
+           if(ic_part>npartmax)then
+              if(.not.npartmax_auto)then
+                 write(*,*)'ERROR: insufficient particle capacity for sink IC'
+                 call clean_stop
+              endif
+              call grow_particle_bundle(ic_part)
+           endif
+           npart=ic_part
+           xp(ic_part,:)=xsink(nsink,:); vp(ic_part,:)=vsink(nsink,:)
+           mp(ic_part)=msink(nsink); idp(ic_part)=-int(nsink,i8b)
+           ptypep(ic_part)=PTYPE_SINK; levelp(ic_part)=levelmin
+           tp(ic_part)=0d0
+           if(allocated(zp))zp(ic_part)=0d0
+           if(allocated(tpp))tpp(ic_part)=0d0
+           if(allocated(mp0))mp0(ic_part)=0d0
+           if(allocated(indtab))indtab(ic_part)=0d0
+        endif
+     enddo
+     if(myid==1)then
+        close(ilun)
+        write(*,'(A,I0,A,A)')' Sink IC loaded: added=',nsink-nsinkold,' file=',trim(filename)
+     endif
+  endif
 
 end subroutine init_sink
 

@@ -1857,6 +1857,8 @@ end subroutine restore_poisson_hdf5
 subroutine restore_part_hdf5()
   use amr_commons
   use pm_commons
+  use snrt_agn_efficiency, only: snrt_agn_model, snrt_agn_model_legacy, snrt_agn_rt_requested
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_hdf5_state_schema_version
   use ramses_hdf5_io
   implicit none
@@ -1881,6 +1883,11 @@ subroutine restore_part_hdf5()
   integer :: stellar_state_read_status
   integer :: hdf5_attr_status_all
   integer :: nindsink_file
+  integer :: agn_schema, agn_saved_model, agn_saved_rt, pending_status, pending_status_all
+  logical :: agn_schema_present
+  real(dp),allocatable :: pending_radiation(:), pending_mechanical(:,:)
+  character(len=24),parameter :: pending_names(4)=[character(len=24):: &
+       'agn_heat_pending_erg','agn_jet_pending_erg','agn_loading_pending_mass','agn_deferred_pending_erg']
 
   call title(nrestart, nchar)
   h5filename = 'output_'//trim(nchar)//'/data_'//trim(nchar)//'.h5'
@@ -2231,6 +2238,26 @@ subroutine restore_part_hdf5()
         call hdf5_restart_abort
      end if
 
+     ! Old legacy files have no accepted-event ledger. Only a legacy run
+     ! without live RT can read those; never manufacture a reference ledger.
+     agn_checkpoint_restored=.false.
+     call h5aexists_f(grp_id,'agn_state_schema',agn_schema_present,h5err)
+     if(h5err/=0)call hdf5_restart_abort
+     if(agn_schema_present)then
+        call hdf5_restore_header_int_checked(grp_id,'agn_state_schema',agn_schema)
+        call hdf5_restore_header_int_checked(grp_id,'agn_model',agn_saved_model)
+        call hdf5_restore_header_int_checked(grp_id,'agn_rt_enabled',agn_saved_rt)
+        if(agn_schema/=1.or.agn_saved_model/=snrt_agn_model().or. &
+             agn_saved_rt/=merge(1,0,snrt_agn_rt_requested()))then
+           if(myid==1)write(*,*)'ERROR: AGN checkpoint schema/model/RT ownership mismatch'
+           call hdf5_restart_abort
+        endif
+     else if(snrt_agn_model()/=snrt_agn_model_legacy.or.snrt_agn_rt_requested())then
+        if(myid==1)write(*,*)'ERROR: AGN checkpoint is missing the accepted-event ledger'
+        call hdf5_restart_abort
+     endif
+     nindsink=nindsink_file
+
      if(nsink > 0) then
         block
            real(dp), allocatable :: sbuf(:)
@@ -2250,6 +2277,25 @@ subroutine restore_part_hdf5()
            deallocate(sibuf)
 
            allocate(sbuf(nsink))
+           if(agn_schema_present)then
+              allocate(pending_radiation(nsink),pending_mechanical(4,nsink))
+              call hdf5_restore_sink_dp_checked(grp_id,'agn_radiation_pending_erg',pending_radiation,nsink)
+              do idim=1,4
+                 call hdf5_restore_sink_dp_checked(grp_id,trim(pending_names(idim)),sbuf,nsink)
+                 pending_mechanical(idim,:)=sbuf
+              enddo
+              pending_status=0
+              if(any(.not.ieee_is_finite(pending_radiation)).or.any(pending_radiation<0d0).or. &
+                   any(.not.ieee_is_finite(pending_mechanical)).or.any(pending_mechanical<0d0))pending_status=1
+              call MPI_Allreduce(pending_status,pending_status_all,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,h5err)
+              if(pending_status_all/=0)then
+                 if(myid==1)write(*,*)'ERROR: nonfinite or negative AGN checkpoint ledger'
+                 call hdf5_restart_abort
+              endif
+              agn_pending_erg(1:nsink)=pending_radiation
+              agn_mechanical_pending(:,1:nsink)=pending_mechanical
+              deallocate(pending_radiation,pending_mechanical)
+           endif
            call hdf5_restore_sink_dp_checked(grp_id, 'msink', sbuf, nsink)
            msink(1:nsink) = sbuf(1:nsink)
 
@@ -2308,6 +2354,8 @@ subroutine restore_part_hdf5()
         end block
      end if
 
+     agn_checkpoint_restored=agn_schema_present
+     if(agn_checkpoint_restored.and.myid==1)write(*,'(A,I0)')' AGN checkpoint ledger restored: sinks=',nsink
      call hdf5_close_group(grp_id)
   end if
 

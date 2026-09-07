@@ -276,6 +276,88 @@ contains
     end if
   end subroutine snrt_amr_classify_faces
 
+  subroutine snrt_halo_tile_exchange(field,ilevel,ierr)
+    ! Reuse the established RAMSES grid maps, but keep SNRT packet buffers
+    ! private. No mutation of generic hydro exchange/autotuning state. Each
+    ! peer message carries a bounded tile, with the same per-grid ordering.
+#ifndef WITHOUTMPI
+    use mpi_mod
+#endif
+    real(dp),intent(inout)::field(:,:)
+    integer,intent(in)::ilevel
+    integer,intent(out)::ierr
+#ifndef WITHOUTMPI
+    real(dp),allocatable::sendbuf(:),recvbuf(:)
+    integer::sc(ncpu),rc(ncpu),so(ncpu),ro(ncpu),req(2*ncpu)
+    integer::cpu,i,j,col,grid,k,nreq,info,status,global_status,ns,nr,width
+    integer(kind=8)::total_send,total_recv
+    width=twotondim*size(field,2)
+    status=0;total_send=0;total_recv=0
+    do cpu=1,ncpu
+       total_send=total_send+int(emission(cpu,ilevel)%ngrid,8)*width
+       total_recv=total_recv+int(reception(cpu,ilevel)%ngrid,8)*width
+    enddo
+    if(max(total_send,total_recv)>huge(1))status=1
+    call MPI_ALLREDUCE(status,global_status,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    ierr=max(global_status,abs(info))
+    if(ierr/=0)return
+    ns=int(total_send);nr=int(total_recv)
+    allocate(sendbuf(max(1,ns)),recvbuf(max(1,nr)),stat=status)
+    call MPI_ALLREDUCE(abs(status),global_status,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    ierr=max(global_status,abs(info))
+    if(ierr/=0)return
+    ns=0;nr=0
+    do cpu=1,ncpu
+       so(cpu)=ns;ro(cpu)=nr
+       sc(cpu)=emission(cpu,ilevel)%ngrid*width
+       rc(cpu)=reception(cpu,ilevel)%ngrid*width
+       ns=ns+sc(cpu);nr=nr+rc(cpu)
+       k=so(cpu)
+       do i=1,emission(cpu,ilevel)%ngrid
+          grid=emission(cpu,ilevel)%igrid(i)
+          do col=1,size(field,2)
+             do j=1,twotondim
+                k=k+1
+                sendbuf(k)=field(ICELL_OF(grid,j),col)
+             enddo
+          enddo
+       enddo
+    enddo
+    nreq=0
+    do cpu=1,ncpu
+       if(rc(cpu)==0)cycle
+       nreq=nreq+1
+       call MPI_IRECV(recvbuf(ro(cpu)+1),rc(cpu),MPI_DOUBLE_PRECISION,cpu-1,936, &
+            MPI_COMM_WORLD,req(nreq),info)
+    enddo
+    do cpu=1,ncpu
+       if(sc(cpu)==0)cycle
+       nreq=nreq+1
+       call MPI_ISEND(sendbuf(so(cpu)+1),sc(cpu),MPI_DOUBLE_PRECISION,cpu-1,936, &
+            MPI_COMM_WORLD,req(nreq),info)
+    enddo
+    call MPI_WAITALL(nreq,req,MPI_STATUSES_IGNORE,info)
+    status=abs(info)
+    call MPI_ALLREDUCE(status,global_status,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    ierr=max(global_status,abs(info))
+    if(ierr/=0)return
+    do cpu=1,ncpu
+       k=ro(cpu)
+       do i=1,reception(cpu,ilevel)%ngrid
+          grid=reception(cpu,ilevel)%igrid(i)
+          do col=1,size(field,2)
+             do j=1,twotondim
+                k=k+1
+                field(ICELL_OF(grid,j),col)=recvbuf(k)
+             enddo
+          enddo
+       enddo
+    enddo
+#else
+    ierr=0
+#endif
+  end subroutine
+
   subroutine snrt_amr_exchange_interface_state(ilevel, leaf_cell, state, &
        ghost_kind, ghost_cell, ghost_face, ghost_state, ierr)
     use iso_c_binding, only: c_float
@@ -288,7 +370,9 @@ contains
     real(c_float), intent(in) :: state(:,:,:)
     real(c_float), intent(out) :: ghost_state(:,:,:)
     integer, intent(out) :: ierr
-    real(dp), allocatable :: field(:)
+    real(dp), allocatable :: field(:,:)
+    integer,parameter :: halo_tile=16
+    integer :: first_component,ncomponent,component,column
     integer :: ilocal, idir, igroup, ighost, nfield, islot, icell
     integer :: child_grid, child_cell, child, idim, inbor, bit, target_bit
     integer :: nchild
@@ -317,7 +401,7 @@ contains
     end if
 
     nfield = ICELL_OF(ngridmax, twotondim)
-    allocate(field(nfield))
+    allocate(field(nfield,halo_tile))
     need_same = .false.
     need_coarse = .false.
     need_fine = .false.
@@ -376,23 +460,37 @@ contains
        return
     end if
 
-    do igroup = 1, size(state,3)
-       do idir = 1, size(state,2)
-          field = 0.0d0
+    ! Exchange a bounded tile of angular/group components at once. The old
+    ! path called the generic scalar halo routine 80*9 times per substep.
+    do first_component=1,size(state,2)*size(state,3),halo_tile
+       ncomponent=min(halo_tile,size(state,2)*size(state,3)-first_component+1)
+       field=0d0
+       do column=1,ncomponent
+          component=first_component+column-1
+          idir=mod(component-1,size(state,2))+1
+          igroup=(component-1)/size(state,2)+1
           do islot = 1, snrt_nslot
              icell = snrt_state_get_cell(islot)
              if (icell >= 1 .and. icell <= nfield) then
-                field(icell) = real(snrt_intensity(idir,igroup,islot),dp)
+                field(icell,column) = real(snrt_intensity(idir,igroup,islot),dp)
              end if
           end do
           do ilocal = 1, size(leaf_cell)
              if (leaf_cell(ilocal) >= 1 .and. leaf_cell(ilocal) <= nfield) then
-                field(leaf_cell(ilocal)) = real(state(ilocal,idir,igroup),dp)
+                field(leaf_cell(ilocal),column) = real(state(ilocal,idir,igroup),dp)
              end if
           end do
-          if (need_same) call make_virtual_fine_dp(field, ilevel)
-          if (need_coarse) call make_virtual_fine_dp(field, ilevel-1)
-          if (need_fine) call make_virtual_fine_dp(field, ilevel+1)
+       enddo
+       if(need_same)call snrt_halo_tile_exchange(field(:,1:ncomponent),ilevel,ierr)
+       if(ierr/=0)return
+       if(need_coarse)call snrt_halo_tile_exchange(field(:,1:ncomponent),ilevel-1,ierr)
+       if(ierr/=0)return
+       if(need_fine)call snrt_halo_tile_exchange(field(:,1:ncomponent),ilevel+1,ierr)
+       if(ierr/=0)return
+       do column=1,ncomponent
+          component=first_component+column-1
+          idir=mod(component-1,size(state,2))+1
+          igroup=(component-1)/size(state,2)+1
           do ighost = 1, size(ghost_cell)
              select case (ghost_kind(ighost))
              case (SNRT_FACE_MPI, SNRT_FACE_FINE_TO_COARSE)
@@ -400,7 +498,7 @@ contains
                    ierr = 3
                    cycle
                 end if
-                ghost_state(ighost,idir,igroup) = real(field(ghost_cell(ighost)),c_float)
+                ghost_state(ighost,idir,igroup) = real(field(ghost_cell(ighost),column),c_float)
              case (SNRT_FACE_COARSE_TO_FINE)
                 child_grid = son(ghost_cell(ighost))
                 if (child_grid <= 0) then
@@ -421,7 +519,7 @@ contains
                       ierr = 5
                       cycle
                    end if
-                   face_average = face_average + field(child_cell)
+                   face_average = face_average + field(child_cell,column)
                    nchild = nchild + 1
                 end do
                 if (nchild > 0) then

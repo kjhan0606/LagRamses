@@ -178,6 +178,19 @@ contains
     call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
          field,grain_t,emitted,result,status,1d-10,128,grain_e,capacity)
     if(status/=dust_ok.or.abs(sum(grain_e)*1d36-initial)/initial>1d-13)stop 61
+    ! An advected near-bath deficit consumes the declared energy error;
+    ! it is neither free background heating nor an unreported clip.
+    field=0; emitted=0; grain_t=10d0*(1-2d-12); grain_e=capacity*grain_t
+    previous_e=grain_e; initial=sum(grain_e)*1d36
+    call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
+         field,grain_t,emitted,result,status,1d-10,128,grain_e,capacity)
+    if(status/=dust_ok.or.result%balance_relative<=0.or.result%balance_relative>1d-10)stop 63
+    if(abs(result%balance_relative-(sum(grain_e)-sum(previous_e))*1d36/initial)>1d-15)stop 64
+    if(any(field/=0).or.any(emitted/=0))stop 65
+    grain_t=10d0*(1-2d-9); grain_e=capacity*grain_t; previous_e=grain_e
+    call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
+         field,grain_t,emitted,result,status,1d-10,128,grain_e,capacity)
+    if(status/=dust_err_state.or.any(grain_e/=previous_e))stop 66
     grain_t=9.99d0; grain_e=capacity*grain_t; previous_e=grain_e
     call snrt_dust_ir_advance(transient_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
          field,grain_t,emitted,result,status,1d-10,128,grain_e,capacity)

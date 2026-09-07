@@ -97,13 +97,16 @@ contains
     deallocate(directional, weights, projection, binned, scalar)
   end subroutine snrt_ramses_diagnose_level
 
-  subroutine snrt_ramses_advance_level(ilevel)
+  subroutine snrt_ramses_advance_level(ilevel,step_start_proper)
     use amr_parameters, only: sink, sink_AGN
     use amr_commons, only: levelmin, nstep_coarse, myid, dtnew, boxlen, &
-         icoarse_min, icoarse_max, ncpu, nrestart
+         icoarse_min, icoarse_max, ncpu, nrestart, texp, aexp, active
     use hydro_commons, only: uold
     use pm_commons, only: nsink, xsink, idsink, agn_pending_erg, nindsink, msink, vsink, jsink, &
-         dMBH_coarse, dMEd_coarse, dMsmbh, Esave, spinmag
+         dMBH_coarse, dMEd_coarse, dMsmbh, Esave, spinmag, agn_checkpoint_restored, &
+         headp, numbp, nextp, ptypep, PTYPE_STAR, xp, mp0, tpp, zp
+    use snrt_stellar_source, only: stellar_sed_enabled, stellar_photon_interval
+    use snrt_runtime_backend, only: snrt_backend_initialize
     use snrt_state, only: snrt_ndirection, snrt_ngroups, snrt_intensity, &
          snrt_nslot, &
          snrt_neutral_fraction, snrt_hydrogen_ii, snrt_helium_ii, &
@@ -174,6 +177,9 @@ contains
     implicit none
 
     integer, intent(in) :: ilevel
+    real(dp), intent(in), optional :: step_start_proper
+    real(dp) :: stellar_photons(snrt_ngroups), stellar_time_scale
+    integer :: igrid, ipart, ip, ig
     character(len=1024) :: env_value
     integer :: env_length, env_status, read_status
     integer :: i, isink, igroup, ierr, nleaf, n_interface_face
@@ -347,8 +353,8 @@ contains
     ! Do not guess unknown historical photon ownership by either replaying
     ! the ledger or silently rebasing away real accretion. Startup rejects
     ! these modes with sink enabled; defend restored sink arrays here too.
-    if (nsink>0 .and. (ncpu>1 .or. nrestart>0)) then
-       if(myid==1)write(*,*)'Live SNRT AGN requires serial fresh start until pending energy and photon state support restart/migration'
+    if (nsink>0 .and. nrestart>0.and..not.agn_checkpoint_restored) then
+       if(myid==1)write(*,*)'Live SNRT AGN requires a restored restart energy ledger'
        call clean_stop
     end if
     if (.not. spectral_contract_resolved) then
@@ -426,14 +432,15 @@ contains
     if (ilevel < levelmin .or. dtnew(ilevel) <= 0.0d0) return
     if (level_filter > 0 .and. ilevel /= level_filter) return
     local_transaction_failure = snrt_failure_none
-    if (snrt_cuda_available() <= 0) local_transaction_failure = snrt_failure_transport
+    call snrt_backend_initialize(ierr)
+    if (ierr /= 0) local_transaction_failure = snrt_failure_transport
     call snrt_transaction_reduce_decision(local_transaction_failure, 1, 0.0d0, &
          global_transaction_failure, global_transaction_converged, &
          global_transaction_residual, convergence_status)
     if (convergence_status /= 0 .or. &
          global_transaction_failure /= snrt_failure_none) then
        if (myid == 1 .and. global_transaction_failure == snrt_failure_transport) &
-            write(*,'(A)') ' SNRT RT preflight failed closed: no CUDA device is visible on every rank'
+            write(*,'(A)') ' SNRT RT preflight failed: invalid backend controls or forced CUDA unavailable'
        call clean_stop
        return
     end if
@@ -855,6 +862,55 @@ contains
     allocate(source_transaction_ok(max(1,nsink)))
     source_transaction_ok = .false.
 
+    ! Proper-time endpoints belong to this recursive level step, not to the
+    ! feedback indtab marker (which was already advanced). Birth mass/epoch
+    ! are carried by the native stellar particle and HDF5 particle payload.
+    if(stellar_sed_enabled)then
+       local_transaction_failure=snrt_failure_none
+       if(.not.present(step_start_proper))then
+          local_transaction_failure=snrt_failure_transport
+       else
+          stellar_time_scale=scale_t/aexp**2/31557600d6
+          do ig=1,active(ilevel)%ngrid
+             igrid=active(ilevel)%igrid(ig)
+             ipart=headp(igrid)
+             do ip=1,numbp(igrid)
+                if(ptypep(ipart)==PTYPE_STAR)then
+                   call stellar_photon_interval((step_start_proper-tpp(ipart))*stellar_time_scale, &
+                        (texp-tpp(ipart))*stellar_time_scale,zp(ipart), &
+                        mp0(ipart)*scale_d*scale_l**3/1.98847d33,stellar_photons,ierr)
+                   if(ierr/=0)then
+                      local_transaction_failure=snrt_failure_transport
+                   else if(any(stellar_photons>0d0))then
+                      call snrt_agn_find_local_leaf(xp(ipart,1:ndim),icell,ilevel_found,igrid,ilevel)
+                      islot=0
+                      if(icell>0.and.ilevel_found==ilevel)islot=snrt_state_get_slot(icell)
+                      if(islot<=0)then
+                         local_transaction_failure=snrt_failure_transport
+                      else
+                         call snrt_agn_deposit_transaction(snrt_intensity,islot,stellar_photons, &
+                              cell_volume_code,scale_l,scale_nH,angular_weight,deposited_density,ierr)
+                         if(ierr/=0)local_transaction_failure=snrt_failure_transport
+                         if(ierr==0)n_active_sources=n_active_sources+1
+                      endif
+                   endif
+                endif
+                ipart=nextp(ipart)
+             enddo
+          enddo
+       endif
+       call snrt_transaction_reduce_decision(local_transaction_failure,0,0d0, &
+            global_transaction_failure,global_transaction_converged,global_transaction_residual,convergence_status)
+       if(global_transaction_failure/=snrt_failure_none.or.convergence_status/=0)then
+          call snrt_transaction_restore(transaction,snrt_intensity,leaf_slot,snrt_hydrogen_ii, &
+               snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status)
+          if(myid==1)write(*,*)'SNRT stellar source rejected: age/Z coverage, birth mass or local ownership'
+          call clean_stop
+          return
+       endif
+    endif
+
+    local_transaction_failure=snrt_failure_none
     if (accounting_identity_ok .and. nsink > 0) then
        if (allocated(agn_pending_erg) .and. allocated(xsink)) then
           if (size(agn_pending_erg)>=nsink .and. size(xsink,1)>=nsink) then
@@ -901,11 +957,38 @@ contains
                 ! deposition, or a later coupled rollback, leaves this event
                 ! pending in memory until a successful coupled commit.
                 if (source_ok) source_transaction_ok(isink) = .true.
+                if (.not.source_ok) local_transaction_failure=snrt_failure_transport
              end do
              deallocate(emitted_groups, luminosity_groups)
           end if
        end if
     end if
+    ! All ranks carry the same accepted sink receipts. Exactly one spatial
+    ! owner injects each event; publish its success before the global coupled
+    ! solve, then clear the replicated receipt everywhere only after commit.
+    block
+#ifndef WITHOUTMPI
+      use mpi_mod, only: MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD
+#endif
+      integer :: owned(max(1,nsink)),owners(max(1,nsink)),info
+      owned=merge(1,0,source_transaction_ok)
+      owners=owned
+#ifndef WITHOUTMPI
+      call MPI_ALLREDUCE(owned,owners,max(1,nsink),MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+      if(info/=0)local_transaction_failure=snrt_failure_transport
+#endif
+      if(any(owners>1))local_transaction_failure=snrt_failure_transport
+      source_transaction_ok=owners==1
+    end block
+    call snrt_transaction_reduce_decision(local_transaction_failure,0,0d0, &
+         global_transaction_failure,global_transaction_converged,global_transaction_residual,convergence_status)
+    if(global_transaction_failure/=snrt_failure_none.or.convergence_status/=0)then
+       call snrt_transaction_restore(transaction,snrt_intensity,leaf_slot,snrt_hydrogen_ii, &
+            snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status)
+       if(myid==1)write(*,*)'SNRT AGN source failed: invalid budget/deposition or duplicate MPI owner'
+       call clean_stop
+       return
+    endif
     t_source = omp_get_wtime() - wall_start
     t_source_overhead = t_source - t_locator - t_budget - t_deposit
 

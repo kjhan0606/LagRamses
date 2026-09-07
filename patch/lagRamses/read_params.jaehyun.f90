@@ -3,6 +3,8 @@ subroutine read_params
   use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_model, snrt_agn_model_reference, &
        snrt_agn_reference_config_ok, snrt_agn_admit_reference
 #ifdef SNRT
+  use snrt_stellar_source, only: stellar_sed_load, stellar_sed_enabled, stellar_sed_consensus
+  use snrt_runtime_backend, only: snrt_backend_initialize
   use snrt_spectral_contract, only: snrt_spectral_contract_load_from_environment, &
        snrt_spectral_contract_status, snrt_spectral_contract_runtime_allowed, &
        snrt_spectral_contract_error_name, snrt_spectral_contract_error_message, &
@@ -34,6 +36,7 @@ subroutine read_params
   logical::agn_snrt_built
 #ifdef SNRT
   integer :: snrt_requested_local, snrt_requested_min, snrt_requested_max
+  integer :: stellar_requested_local, stellar_requested_min, stellar_requested_max
   integer :: snrt_thermochemistry_error, snrt_dust_contract_error
   integer :: snrt_dust_contract_env_length
   character(len=1024) :: snrt_dust_contract_env
@@ -1736,11 +1739,24 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1)write(*,*)'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
      nml_ok=.false.
   end if
-  if (snrt_requested_max==1 .and. sink .and. (ncpu>1 .or. nrestart>0)) then
-     if(myid==1)write(*,*)'Live SNRT AGN requires serial fresh start until pending energy and photon state support restart/migration'
-     nml_ok=.false.
+  if (snrt_requested_max==1 .and. sink) then
+     if(nrestart>0)then
+        if(trim(informat)/='hdf5')then
+           if(myid==1)write(*,*)'Live SNRT AGN restart requires informat=hdf5 and its saved energy ledger'
+           nml_ok=.false.
+        endif
+#ifndef HDF5
+        if(myid==1)write(*,*)'Live SNRT AGN restart requires an HDF5 build'
+        nml_ok=.false.
+#endif
+     endif
   end if
   if (snrt_requested_max==1) then
+     call snrt_backend_initialize(agn_contract_error)
+     if(agn_contract_error/=0)then
+        if(myid==1)write(*,*)'SNRT backend startup rejected: invalid controls or forced CUDA unavailable'
+        nml_ok=.false.
+     endif
      ! Admit the runtime contracts during namelist initialization.  The
      ! driver also keeps a defensive per-process loader, but waiting until
      ! the first AMR level would allow a missing or non-admissible contract
@@ -1757,6 +1773,41 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A,A,A,A)') 'SNRT startup spectral contract admitted: status=', &
              trim(snrt_spectral_contract_status),' source=',trim(snrt_spectral_contract_source_id)
      end if
+     call stellar_sed_load(agn_contract_error)
+     if(agn_contract_error/=0)then
+        if(myid==1)write(*,*)'SNRT stellar SED rejected: check table, IMF and common transport identity'
+        nml_ok=.false.
+     endif
+     stellar_requested_local=merge(1,0,stellar_sed_enabled)
+     stellar_requested_min=stellar_requested_local
+     stellar_requested_max=stellar_requested_local
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(stellar_requested_local,stellar_requested_min,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr)
+     call MPI_ALLREDUCE(stellar_requested_local,stellar_requested_max,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
+#endif
+     if(stellar_requested_min/=stellar_requested_max)then
+        if(myid==1)write(*,*)'SNRT stellar SED enable must agree across MPI ranks'
+        nml_ok=.false.
+     endif
+     if(stellar_requested_min==1.and.stellar_requested_max==1)then
+        call stellar_sed_consensus(agn_contract_error)
+        if(agn_contract_error/=0)then
+           if(myid==1)write(*,*)'SNRT stellar SED values must agree across MPI ranks'
+           nml_ok=.false.
+        endif
+     endif
+     if(stellar_sed_enabled)then
+        if(.not.star.or..not.metal.or.trim(outformat)/='hdf5')then
+           if(myid==1)write(*,*)'SNRT stellar source requires star, metal and HDF5 output'
+           nml_ok=.false.
+        endif
+        if(nrestart>0.and.trim(informat)/='hdf5')nml_ok=.false.
+#ifndef HDF5
+        nml_ok=.false.
+#endif
+        if(myid==1)write(*,'(A,A)')'SNRT stellar SED photon rates per INITIAL Msun: ', &
+             trim(snrt_spectral_contract_status)
+     endif
      call snrt_secondary_tables_load_from_environment(snrt_thermochemistry_error)
      if (snrt_thermochemistry_error/=snrt_thermochemistry_ok .or. &
           .not.snrt_secondary_tables_loaded) then
@@ -1852,7 +1903,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   end if
 #endif
 
-  ! The comparison profile is opt-in, rank-uniform, serial and fresh only.
+  ! The comparison profile is opt-in and rank-uniform. Accepted receipts
+  ! are replicated; photon ownership and final consumption are collective.
   agn_model_local=snrt_agn_model()
   agn_model_min=agn_model_local; agn_model_max=agn_model_local
 #ifndef WITHOUTMPI
@@ -1870,7 +1922,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   if(agn_model_max==snrt_agn_model_reference)then
      if(.not.snrt_agn_reference_config_ok(agn_snrt_built,snrt_agn_rt_requested(),hydro,sink,bondi, &
           sink_AGN,mad_jet,ndim,nener,ncpu,nrestart,X_floor))then
-        if(myid==1)write(*,*) 'partition_reference_v1 requires serial fresh 3D NENER=0 non-MAD Bondi + RT + AGN'
+        if(myid==1)write(*,*) 'partition_reference_v1 requires 3D NENER=0 non-MAD Bondi + RT + AGN'
         nml_ok=.false.
      endif
 #ifdef SNRT

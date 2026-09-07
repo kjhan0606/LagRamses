@@ -49,6 +49,9 @@ recursive subroutine amr_step(ilevel,icount)
 !!$  logical::ok_defrag
   logical,save::first_step=.true.
   integer:: info
+#ifdef SNRT
+  real(dp) :: snrt_step_start_proper
+#endif
 
   real(kind=4):: real_mem, real_mem_tot
   real(kind=8):: t_lb_level_start, t_lb_level_end
@@ -793,6 +796,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! Recursive call to amr_step
   !---------------------------
 #ifdef SNRT
+  snrt_step_start_proper=texp
   ! Fine transport can deposit flux in a coarse leaf before the coarse RT
   ! solve runs. Establish those receiver slots before entering recursion.
   if(snrt_agn_rt_requested())call snrt_state_sync_level(ilevel,snrt_sync_leaves,snrt_sync_new)
@@ -953,7 +957,7 @@ recursive subroutine amr_step(ilevel,icount)
 #endif
 #ifdef SNRT
   cool_t1=omp_get_wtime()
-  call snrt_ramses_advance_level(ilevel)
+  call snrt_ramses_advance_level(ilevel,snrt_step_start_proper)
   snrt_advance_wall=snrt_advance_wall+omp_get_wtime()-cool_t1
   if(snrt_agn_rt_requested())then
      call snrt_regrid_upload(ilevel,snrt_sync_error)

@@ -1,0 +1,180 @@
+! Actual BH accretion source, not SNRT_DRIVER_TEST_SEED_SOURCE.
+! Copy snrt_agn_accretion_smoke.ic_sink to ic_sink in a fresh run directory.
+! Reference-only combined native source/feedback/primary RT/live dust wiring.
+&RUN_PARAMS
+  cosmo=.false.
+  pic=.true.
+  poisson=.true.
+  hydro=.true.
+  rt=.false.
+  sink=.true.
+  sinkprops=.false.
+  nrestart=0
+  ncontrol=1
+  nstepmax=3
+  nsubcycle=1
+  nremap=0
+  aexp_step_limit=0.1d0
+  verbose=.true.
+  debug=.false.
+  gpu_hydro=.false.
+  gpu_poisson=.false.
+  gpu_fft=.false.
+  gpu_sink=.false.
+  gpu_scalar=.false.
+  gpu_particle=.false.
+  gpu_auto_tune=.false.
+  n_cuda_streams=1
+  use_fftw=.false.
+  mg_merged_rb=.false.
+/
+
+&INIT_PARAMS
+  filetype='ascii'
+  initfile(1)=' '
+  nregion=1
+  region_type(1)='square'
+  x_center(1)=0.5d0
+  y_center(1)=0.5d0
+  z_center(1)=0.5d0
+  length_x(1)=1.0d0
+  length_y(1)=1.0d0
+  length_z(1)=1.0d0
+  exp_region(1)=10.0d0
+  d_region(1)=1.0d-3
+  u_region(1)=0.0d0
+  v_region(1)=0.0d0
+  w_region(1)=0.0d0
+  p_region(1)=1.0d-8
+  ! metal=6; H..Fe=7..17; dust mass=18; dust energy=19.
+  var_region(1,1)=0.01d0
+  var_region(1,2)=0.74d0
+  var_region(1,3)=0.25d0
+  var_region(1,12)=0.01d0
+  var_region(1,13)=0.006024096385542169d0
+  var_region(1,14)=1.26009674420798d-15
+/
+
+&AMR_PARAMS
+  levelmin=3
+  levelmax=3
+  ngridmax=128
+  npartmax=4096
+  nsinkmax=1
+  nexpand=1
+  boxlen=1.0d0
+/
+
+&OUTPUT_PARAMS
+  noutput=1
+  aout=2.0d0
+  tout=1.0d30
+  foutput=1
+  fbackup=1000000
+  output_mode=0
+  outformat='hdf5'
+  informat='hdf5'
+/
+
+&HYDRO_PARAMS
+  gamma=1.6666666667d0
+  courant_factor=0.005d0
+  slope_type=1
+  scheme='muscl'
+  riemann='hllc'
+  pressure_fix=.true.
+/
+
+&BOUNDARY_PARAMS
+  nboundary=0
+  no_inflow=.true.
+/
+
+&POISSON_PARAMS
+  epsilon=1.0d-4
+  maxiter_fine=100
+  restart_phi_warm_start=.false.
+  abort_on_mg_nonconvergence=.true.
+  gravity_type=0
+/
+
+&PHYSICS_PARAMS
+  cooling=.false.
+  haardt_madau=.false.
+  metal=.true.
+  isothermal=.false.
+  neq_chem=.false.
+  units_density=1.66d-24
+  units_time=3.1556926d13
+  units_length=3.0857d21
+  m_star=-1.0d0
+  t_star=0.01d0
+  n_star=1.0d-10
+  eps_star=0.1d0
+  sf_virial=.false.
+  sf_birth_properties=.false.
+  T2_star=0.0d0
+  g_star=1.6d0
+  smbh=.true.
+  agn=.true.
+  sink_AGN=.true.
+  bondi=.true.
+  boost_acc=0.0d0
+  f_bondi=1.0d0
+  X_floor=1.0d-2
+  rAGN=4.0d0
+  eAGN_K=1.0d0
+  eAGN_T=1.5d-1
+  TAGN=0.0d0
+  T2maxAGN=1.0d8
+  selfgrav=.false.
+  spin_bh=.false.
+  mad_jet=.false.
+  cooling_method='original'
+  yieldtablefilename='/gpfs/kjhan/LRD_JWST/simulation/snrt/config/snrt_agn_driver_faithful_smoke_yields.dat'
+/
+
+&SINK_PARAMS
+  n_sink=-1.0d0
+  rho_sink=-1.0d0
+  d_sink=-1.0d0
+  accretion_scheme='bondi'
+  nsinkmax=1
+  create_sinks=.false.
+  nlevelmax_sink=3
+  check_energies=.true.
+  verbose_AGN=.false.
+  smbh=.true.
+  agn=.true.
+  mass_smbh_seed=1.0d0
+  sink_descent=.false.
+/
+
+&STELLAR_ENRICHMENT_PARAMS
+  feedback_mode='legacy'
+  yield_source_basis='per_star_cumulative'
+  population_model='single_star_ssp'
+  imf_id=2
+  imf_mass_min_msun=0.08d0
+  imf_mass_max_msun=120d0
+  binary_fraction=0d0
+  channel_mass_min_msun=0.8d0,1d0,8d0,3d0,140d0
+  channel_mass_max_msun=120d0,8d0,120d0,8d0,260d0
+  use_h=.true.
+  use_he=.true.
+  use_c=.true.
+  use_n=.true.
+  use_o=.true.
+  use_ne=.true.
+  use_mg=.true.
+  use_si=.true.
+  use_s=.true.
+  use_ca=.true.
+  use_fe=.true.
+  use_wind=.false.
+  use_agb=.false.
+  use_snii=.false.
+  use_snia=.false.
+  use_pisn=.false.
+  allow_legacy_prompt_snia=.false.
+/

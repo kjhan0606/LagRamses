@@ -134,7 +134,8 @@ ifeq ($(SNRT),1)
                 snrt_cuda_ledger_interface.o \
                 snrt_cuda_sparse_transport_interface.o \
                 snrt_cuda_limited_rt_step_interface.o \
-                snrt_cuda_multigroup_interface.o snrt_ramses_driver.o
+                snrt_cuda_multigroup_interface.o snrt_runtime_backend.o snrt_openmp_transport.o \
+                snrt_stellar_source.o snrt_ramses_driver.o
   ifeq ($(SNRT_LEDGER_DIAGNOSTIC),1)
     FFLAGS += -DSNRT_LEDGER_DIAGNOSTIC
     SNRT_MODOBJ += snrt_agn_ledger.o
@@ -297,6 +298,7 @@ amr_index.o: amr_commons.kjhan.o
 snrt_spectral_contract.o: amr_parameters.jaehyun.o
 snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o
 snrt_hdf5.o: snrt_state.o ramses_hdf5_io.o snrt_agn_efficiency.o snrt_dust_contract.o snrt_dust_live.o
+snrt_hdf5.o: snrt_stellar_source.o
 ifeq ($(SNRT),1)
 ifdef HDF5
 backup_hdf5.o restore_hdf5.o: snrt_hdf5.o
@@ -314,6 +316,18 @@ snrt_transport_step.o: snrt_state.o snrt_angular_quadrature.o \
                         snrt_cuda_sparse_transport_interface.o \
                         snrt_cuda_limited_rt_step_interface.o \
                         snrt_cuda_multigroup_interface.o
+snrt_transport_step.o snrt_ramses_driver.o: snrt_runtime_backend.o
+snrt_runtime_backend.o: snrt_cuda_multigroup_interface.o mpi_mod.o
+snrt_openmp_transport.o: ../patch/lagRamses/snrt_openmp_transport.cpp ../patch/lagRamses/snrt_species_dust_cell.h
+	icpx -O3 -qopenmp -fp-model=precise -c $< -o $@
+snrt_cuda_kernels.o: ../patch/lagRamses/snrt_species_dust_cell.h
+snrt_backend_smoke: snrt_openmp_transport.o snrt_cuda_kernels.o ../patch/lagRamses/snrt_backend_smoke.cpp
+	icpx -O2 -qopenmp ../patch/lagRamses/snrt_backend_smoke.cpp snrt_openmp_transport.o snrt_cuda_kernels.o \
+	  $(LIBS_CUDA) -o $@
+snrt_stellar_source_smoke: snrt_stellar_source.o snrt_agn_locator.o ../patch/lagRamses/snrt_stellar_source_smoke.f90
+	$(F90) -fpp -I. -I../patch/lagRamses ../patch/lagRamses/snrt_stellar_source_smoke.f90 \
+	  amr_parameters.jaehyun.o amr_commons.kjhan.o snrt_agn_locator.o \
+	  stellar_enrichment_config.o snrt_spectral_contract.o snrt_stellar_source.o -o $@
 snrt_rt_transaction.o: amr_parameters.jaehyun.o mpi_mod.o
 snrt_dust_ir.o: ../patch/lagRamses/snrt_dust_ir.f90
 snrt_dust_coupling.o: snrt_thermochemistry.o ../patch/lagRamses/snrt_dust_coupling.f90
@@ -328,6 +342,11 @@ refine_utils.o: snrt_regrid.o
 amr_step.jaehyun.o: snrt_regrid.o
 endif
 snrt_agn_efficiency.o: amr_parameters.jaehyun.o
+snrt_stellar_source.o: snrt_spectral_contract.o stellar_enrichment_config.o mpi_mod.o
+ifeq ($(SNRT),1)
+read_params.jaehyun.o snrt_ramses_driver.o: snrt_stellar_source.o snrt_runtime_backend.o
+endif
+backup_hdf5.o restore_hdf5.o: snrt_agn_efficiency.o
 agn_feedback_deposition.o: amr_parameters.jaehyun.o
 init_sink.o: pm_commons.o
 sink_particle.kjhan.o: snrt_agn_efficiency.o agn_feedback_deposition.o amr_parameters.jaehyun.o pm_commons.o

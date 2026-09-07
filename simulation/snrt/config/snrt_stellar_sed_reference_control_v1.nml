@@ -1,0 +1,18 @@
+! Synthetic photon-production control, NOT BPASS or an approved stellar SED.
+! Rates are photons/s per INITIAL Msun, metallicities are mass fractions.
+&snrt_stellar_sed
+ version=1, na=3, nz=2, imf_id=2,
+ population_id=0, imf_min=0.08, imf_max=120, binary_fraction=0,
+ status='reference_control', interpolation='linear_age_linear_Z',
+ fraction_semantics='escaped', approval_id='',
+ transport_sha256='d2326e4ec0320e9e0b34a58460b08bddafa4b4433322691a9dd346a49762909d',
+ edges_sha256='d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1',
+ ages=0,1,100000,
+ metals=0,0.2,
+ rates(:,1,1)=0,0,0,0,1d40,0,0,0,0,
+ rates(:,2,1)=0,0,0,0,2d40,0,0,0,0,
+ rates(:,3,1)=0,0,0,0,0,0,0,0,0,
+ rates(:,1,2)=0,0,0,0,2d40,0,0,0,0,
+ rates(:,2,2)=0,0,0,0,4d40,0,0,0,0,
+ rates(:,3,2)=0,0,0,0,0,0,0,0,0,
+/
