@@ -55,8 +55,10 @@ contains
     real(stellar_dp) :: imf_norm, log_min, log_max, dlog_mass
     real(stellar_dp) :: log_mass, mass, dm, n_stars
     real(stellar_dp) :: star_weight
+    real(stellar_dp), allocatable :: edges(:)
+    real(stellar_dp) :: left, right, fraction, swap
     type(stellar_cumulative_t) :: star_state
-    integer :: bin, provider_ierr
+    integer :: bin, provider_ierr, count_edges, i, j, count_bins, extra, row, other
 
     call clear_cumulative(state)
     ierr = ssp_source_ok
@@ -94,17 +96,75 @@ contains
     log_max = log10(mass_max)
     dlog_mass = (log_max - log_min) / real(n_mass_bins, stellar_dp)
 
-    do bin = 1, n_mass_bins
+    count_bins=n_mass_bins
+    if(table%high_mass_ready)then
+       ! Common IMF cells for every channel prevent wind/remnant quadrature
+       ! mismatch. Split at the seam and at every source-node cell boundary.
+       extra=0
+       if(allocated(table%agb_terminal_row))extra=size(table%agb_terminal_row)
+       allocate(edges(n_mass_bins+size(table%hm_mass)+extra+4))
+       do i=0,n_mass_bins
+          edges(i+1)=population%imf_mass_min*(population%imf_mass_max/population%imf_mass_min)** &
+               (real(i,stellar_dp)/n_mass_bins)
+       enddo
+       edges(1)=population%imf_mass_min;edges(n_mass_bins+1)=population%imf_mass_max
+       count_edges=n_mass_bins+1
+       count_edges=count_edges+1;edges(count_edges)=40
+       do i=2,size(table%hm_mass)
+          if(table%hm_z(i)/=table%hm_z(i-1))cycle
+          count_edges=count_edges+1;edges(count_edges)=.5d0*(table%hm_mass(i)+table%hm_mass(i-1))
+       enddo
+       if(allocated(table%agb_terminal_row))then
+          ! Split every AGB nearest-node cell. This makes the WD inventory
+          ! independent of quadrature-bin count even at a discrete event.
+          do i=1,size(table%agb_terminal_row)
+             row=table%agb_terminal_row(i);right=huge(1d0)
+             do j=1,size(table%agb_terminal_row)
+                other=table%agb_terminal_row(j)
+                if(table%birth_metallicity(row)/=table%birth_metallicity(other))cycle
+                if(table%initial_mass(other)>table%initial_mass(row))right=min(right,table%initial_mass(other))
+             enddo
+             if(right==huge(1d0))cycle
+             count_edges=count_edges+1;edges(count_edges)=.5d0*(table%initial_mass(row)+right)
+          enddo
+       endif
+       do i=2,count_edges
+          swap=edges(i);j=i-1
+          do while(j>=1)
+             if(edges(j)<=swap)exit
+             edges(j+1)=edges(j);j=j-1
+          enddo
+          edges(j+1)=swap
+       enddo
+       count_bins=count_edges-1
+    endif
+
+    do bin = 1, count_bins
        log_mass = log_min + (real(bin, stellar_dp) - 0.5_stellar_dp) * dlog_mass
        mass = 10.0_stellar_dp ** log_mass
        dm = mass * log(10.0_stellar_dp) * dlog_mass
-       n_stars = population%initial_mass * imf_norm * &
+      n_stars = population%initial_mass * imf_norm * &
             evaluate_imf(mass, population%imf_id) * dm
+       if(table%high_mass_ready)then
+          left=max(mass_min,edges(bin));right=min(mass_max,edges(bin+1))
+          if(right<=left)cycle
+          mass=sqrt(left*right)
+          call calculate_imf_mass_fraction(population%imf_id,population%imf_mass_min, &
+               population%imf_mass_max,left,right,fraction,provider_ierr)
+          if(provider_ierr/=0)then
+             ierr=ssp_source_err_imf
+             return
+          endif
+          n_stars=population%initial_mass*fraction/mass
+       endif
        if (n_stars <= 0.0_stellar_dp) cycle
 
        call evaluate_channel_cumulative(table, channel_id, mass, &
             population%birth_metallicity, age_gyr, star_state, provider_ierr)
        if (provider_ierr /= provider_ok) then
+          if(table%high_mass_ready)write(*,'(A,2I5,3ES24.16)') &
+               'High-mass source query rejected (channel,status,M,Z,age): ', &
+               channel_id,provider_ierr,mass,population%birth_metallicity,age_gyr
           ierr = ssp_source_err_provider
           return
        end if

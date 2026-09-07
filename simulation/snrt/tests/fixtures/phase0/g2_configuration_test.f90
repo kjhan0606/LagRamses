@@ -3,7 +3,7 @@ program g2_configuration_test
        read_enrichment_namelist, default_imf_id, population_model_id, &
        population_binary_ssp, configured_channel_mass_min, &
        yield_source_basis_id, yield_basis_per_star_cumulative, &
-       configured_binary_fraction
+       configured_binary_fraction, high_mass_model, high_mass_max_remnant_adjust_fraction
   implicit none
 
   integer :: unit, ios, failures, imf
@@ -75,6 +75,12 @@ program g2_configuration_test
   end do
   ! Read with omitted IMF immediately after Miller-Scalo: no inherited state.
   call check_imf_selection(-1)
+  call check_high_mass('source_consistent', 0.0_stellar_dp, .true.)
+  call check_high_mass('wind_only_collapse', 0.0_stellar_dp, .true.)
+  call check_high_mass('mixed_remnant', 0.02_stellar_dp, .true.)
+  call check_high_mass('mixed_remnant', 0.0_stellar_dp, .false.)
+  call check_high_mass('source_consistent', 0.02_stellar_dp, .false.)
+  call check_high_mass('unknown', 0.0_stellar_dp, .false.)
   call set_enrichment_defaults()
 
   if (failures == 0) then
@@ -85,6 +91,37 @@ program g2_configuration_test
   end if
 
 contains
+
+  subroutine check_high_mass(preset, limit, accepted)
+    character(len=*), intent(in) :: preset
+    real(stellar_dp), intent(in) :: limit
+    logical, intent(in) :: accepted
+    integer :: scratch, status
+    character(len=32) :: previous
+    real(stellar_dp) :: previous_limit
+    previous = high_mass_model
+    previous_limit = high_mass_max_remnant_adjust_fraction
+    open(newunit=scratch, status='scratch', action='readwrite')
+    write(scratch, '(a)') '&stellar_enrichment_params'
+    write(scratch, '(a)') " feedback_mode='channel_resolved', population_model='single_star_ssp',"
+    write(scratch, '(a)') " yield_source_basis='per_star_cumulative',"
+    write(scratch, '(a)') ' imf_mass_min_msun=.08, imf_mass_max_msun=120, binary_fraction=0,'
+    write(scratch, '(a)') ' channel_mass_min_msun=.8,1,8,3,140, channel_mass_max_msun=120,8,120,8,260,'
+    write(scratch, '(a)') " high_mass_preset='"//preset//"',"
+    write(scratch, '(a,es24.16)') ' high_mass_remnant_adjust_max_fraction=',limit
+    write(scratch, '(a)') '/'
+    rewind(scratch)
+    call read_enrichment_namelist(scratch, status)
+    close(scratch)
+    call expect((status == 0) .eqv. accepted, 'preset combination admission: '//preset, failures)
+    if (accepted) then
+       call expect(high_mass_model == preset .and. high_mass_max_remnant_adjust_fraction == limit, &
+            'selected values propagate: '//preset, failures)
+    else
+       call expect(high_mass_model == previous .and. high_mass_max_remnant_adjust_fraction == previous_limit, &
+            'invalid read preserves previous state', failures)
+    end if
+  end subroutine check_high_mass
 
   subroutine check_imf_selection(requested)
     integer, intent(in) :: requested

@@ -1,9 +1,12 @@
-! Ordered runtime handoff for the approved FP2 physical SNIa baseline.
+! Effective SSP accounting approved 2026-09-07; DTD/N100 event source unchanged.
+! Aggregate mass conservation, NOT a self-consistent WD/binary population.
 ! The production caller reads these groups in this order.  This file does not
 ! override the production activation gate; PHASE0_SNIA_RUNTIME_CONTRACT must
 ! name it explicitly, and the F-P1 fate gate remains independently enforced.
 
 &snia_population_realization
+ mass_accounting='effective_ssp'
+ accounting_approval_id='SNIA-EFFECTIVE-SSP-2026-09-07'
  approved=.true.
  population_source_id="maoz2012:field_observed_powerlaw"
  population_model_id=1

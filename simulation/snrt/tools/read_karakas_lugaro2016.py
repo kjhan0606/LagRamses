@@ -1,11 +1,17 @@
-"""Read pinned KL16 mirror rows without selecting a population or converting ejecta.
+"""Read pinned KL16 rows and normalize selected gross ejecta, preserving raw data.
 
 This source-specific reader retains commented nodes, initial-composition model
-coordinates and source mass discrepancies. It does not run COLIBRE processing.
+coordinates and raw source mass discrepancies. The operator-selected detailed
+yield-table mass takes precedence over the conflicting auxiliary array; this
+does not approve a complete yield/population model or run COLIBRE processing.
+The operator-selected gross normalization uses ALL listed elements, never just
+the tracked subset. It does not infer timing, energy or normalized net yields.
 """
 from __future__ import annotations
 
 import hashlib
+import csv
+import io
 import json
 import math
 from pathlib import Path
@@ -16,6 +22,92 @@ from adapt_g2_candidate_sources import SourceAdapterError
 DEFAULT_MATRIX = Path(__file__).resolve().parents[1] / "config/g2_source_selection_matrix_v1.json"
 _NUMBER = r"[-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?"
 _HEADER = re.compile(rf"Initial mass\s*=\s*({_NUMBER}),\s*Z\s*=\s*({_NUMBER}),\s*Y\s*=\s*({_NUMBER}),\s*M_mix\s*=\s*({_NUMBER})")
+GROSS_NORMALIZATION_POLICY = "all_listed_elements_to_selected_expelled_mass_v1"
+TRACKED_ATOMIC_NUMBERS = (1, 2, 6, 7, 8, 10, 12, 14, 16, 20, 26)
+LIFETIME_PATH = DEFAULT_MATRIX.parents[1] / 'data/kl16_stellar_lifetimes.csv'
+LIFETIME_SHA256 = '62e7fd40ce1d63d9024c1755f8226bb501ce92db95831c945ef18eaa2f80ee13'
+
+
+def attach_kl16_lifetimes(records: list[dict]) -> None:
+    """Exact M,Z,Y,overshoot match to K14/KL16 Table 1; no lifetime fit.
+
+    M_mix is a post-processing nucleosynthesis choice, not a second evolution
+    calculation. KL16 section 3.1 explicitly defines absent N_ov as no
+    overshoot. Do not transfer an overshoot lifetime to a no-overshoot model.
+    """
+    data = LIFETIME_PATH.read_bytes()
+    if hashlib.sha256(data).hexdigest() != LIFETIME_SHA256:
+        raise SourceAdapterError('KL16 lifetime data fingerprint mismatch')
+    grid = {}
+    for line in csv.DictReader(io.StringIO(data.decode())):
+        key = tuple(float(line[k]) for k in ('initial_mass_msun', 'metallicity', 'initial_helium', 'overshoot'))
+        age = float(line['stellar_duration_myr'])*1e6
+        if key in grid or not all(math.isfinite(v) for v in (*key, age)) or age <= 0:
+            raise SourceAdapterError('invalid or duplicate KL16 lifetime coordinate')
+        grid[key] = (age, line['source'], line['core_kind'])
+    matches = []
+    for row in records:
+        c = row['coordinate']
+        key = (c['initial_mass_msun'], c['metallicity_mass_fraction'], c['initial_helium_label'],
+               0. if row['overshoot_label'] is None else row['overshoot_label'])
+        if key not in grid:
+            raise SourceAdapterError(f'no exact KL16 evolution match: {key}')
+        age, source, core = grid[key]
+        matches.append(dict(stellar_lifetime_yr=age, lifetime_source=source+':Table1',
+                            lifetime_data_sha256=LIFETIME_SHA256, core_kind=core,
+                            lifetime_convention='source_total_stellar_duration_to_AGB_endpoint'))
+    for row, match in zip(records, matches):
+        row['evolution'] = match
+
+
+def normalize_selected_ejecta(row: dict) -> dict:
+    """Return a derived payload; never overwrite or renormalize raw fields.
+
+    Apply M_i' = M_expelled * M_i / sum_all(M_i). Initial-composition data
+    and old raw net-yield diagnostics must not be mistaken for this payload.
+    """
+    if row.get("commented_out", True):
+        raise SourceAdapterError("cannot normalize an excluded KL16 node")
+    gross = {z: e["gross_mass_msun"] for z, e in row["elements_by_atomic_number"].items()}
+    if len(gross) != 78 or not set(TRACKED_ATOMIC_NUMBERS) <= gross.keys():
+        raise SourceAdapterError("normalization requires the full 78-element KL16 payload")
+    initial = row["coordinate"]["initial_mass_msun"]
+    expelled = row["selected_mass_expelled_msun"]
+    remnant = row["selected_final_mass_msun"]
+    if (not all(math.isfinite(x) and x >= 0 for x in (*gross.values(), initial, expelled, remnant))
+            or initial <= 0 or expelled <= 0):
+        raise SourceAdapterError("invalid KL16 normalization mass")
+    if not math.isclose(expelled + remnant, initial, rel_tol=1e-12, abs_tol=0):
+        raise SourceAdapterError("selected KL16 mass budget does not close")
+    try:
+        total = math.fsum(gross.values())
+    except OverflowError as error:
+        raise SourceAdapterError("KL16 gross sum overflow") from error
+    if not math.isfinite(total) or total <= 0:
+        raise SourceAdapterError("KL16 gross sum must be finite and positive")
+    scale = expelled / total
+    if not math.isfinite(scale) or scale <= 0:
+        raise SourceAdapterError("invalid KL16 normalization factor")
+    selected = {z: mass * scale for z, mass in gross.items()}
+    # No element absorbs a residual: preserve every raw ratio, to roundoff.
+    selected_sum = math.fsum(selected.values())
+    if not math.isclose(selected_sum, expelled, rel_tol=1e-14, abs_tol=0):
+        raise SourceAdapterError("normalized KL16 mass budget does not close")
+    return {
+        "policy": GROSS_NORMALIZATION_POLICY,
+        "raw_gross_sum_msun": total,
+        "normalization_factor": scale,
+        "gross_sum_correction_msun": selected_sum - total,
+        "returned_mass_msun": expelled, "remnant_mass_msun": remnant,
+        "mass_source": row["selected_mass_source"],
+        "gross_mass_msun_by_atomic_number": selected,
+        "mass_fraction_by_atomic_number": {z: mass / expelled for z, mass in selected.items()},
+        "tracked_ejected_mass_msun": [selected[z] for z in TRACKED_ATOMIC_NUMBERS],
+        "untracked_ejecta_msun": math.fsum(v for z, v in selected.items() if z not in TRACKED_ATOMIC_NUMBERS),
+        "total_metal_ejecta_msun": math.fsum(v for z, v in selected.items() if z not in (1, 2)),
+        "net_yield_msun": None,
+        "net_yield_status": "unavailable_initial_composition_normalization_and_model_matching_not_selected",
+    }
 
 
 def _blocks(text: str, *, initial: bool) -> list[dict]:
@@ -75,11 +167,13 @@ def _blocks(text: str, *, initial: bool) -> list[dict]:
     return blocks
 
 
-def read_karakas_lugaro2016(matrix_path: Path = DEFAULT_MATRIX) -> dict:
+def read_karakas_lugaro2016(matrix_path: Path = DEFAULT_MATRIX, *, include_lifetimes: bool = False) -> dict:
     matrix = json.loads(Path(matrix_path).read_text())
     candidate = next(c for c in matrix["candidates"] if c["candidate_id"] == "karakas_lugaro2016_agb")
     if candidate["approval_id"] is not None:
         raise SourceAdapterError("KL16 review reader does not implement physical approval")
+    if candidate.get("selected_gross_normalization_policy") != GROSS_NORMALIZATION_POLICY:
+        raise SourceAdapterError("KL16 normalization lacks the matching operator selection")
     base = Path(candidate["source_asset_path"])
     texts = {}
     for suffix in ("007", "014", "030"):
@@ -116,6 +210,32 @@ def read_karakas_lugaro2016(matrix_path: Path = DEFAULT_MATRIX) -> dict:
                 raise SourceAdapterError("KL16 active mass missing from auxiliary array")
             row["auxiliary_final_mass_msun"] = masses[mass]
             row["auxiliary_minus_header_final_mass_msun"] = masses[mass] - row["final_mass_msun"]
+            # Preserve raw fingerprints and both source values. Do not repair
+            # the archive. Normalized ejecta live in a separate payload. A printed
+            # article value takes precedence if available; Table 7 only prints
+            # the 3.5 Msun example, not the disputed 4 Msun node.
+            row["selected_final_mass_msun"] = row["final_mass_msun"]
+            row["selected_mass_expelled_msun"] = row["mass_expelled_msun"]
+            row["selected_mass_source"] = "yield_table_header"
+            if mass == 3.5 and coord["metallicity_mass_fraction"] == 0.03:
+                row["selected_final_mass_msun"] = 0.727
+                row["selected_mass_expelled_msun"] = 2.773
+                row["selected_mass_source"] = "KL16_article_table_7"
+            row["auxiliary_mass_disagreement_resolved"] = False
+            if row["auxiliary_minus_header_final_mass_msun"] != 0.0:
+                choice = candidate["source_row_review"]["mass_disagreement"]
+                if (choice.get("authoritative_value_selected") is not True or
+                        mass != choice["initial_mass_msun"] or
+                        coord["metallicity_mass_fraction"] != choice["metallicity_mass_fraction"] or
+                        row["final_mass_msun"] != choice["selected_final_mass_msun"] or
+                        row["mass_expelled_msun"] != choice["selected_mass_expelled_msun"] or
+                        masses[mass] != choice["auxiliary_final_mass_msun"] or
+                        choice["selected_source"] != "yield_table_header"):
+                    raise SourceAdapterError("KL16 mass disagreement lacks the matching operator selection")
+                row["auxiliary_mass_disagreement_resolved"] = True
+            if not math.isclose(mass, row["selected_final_mass_msun"] +
+                                row["selected_mass_expelled_msun"], rel_tol=0, abs_tol=5e-4):
+                raise SourceAdapterError("KL16 selected remnant and ejecta do not close initial mass")
             row["listed_gross_sum_msun"] = math.fsum(e["gross_mass_msun"] for e in row["elements_by_atomic_number"].values())
             row["gross_sum_minus_labelled_expelled_msun"] = row["listed_gross_sum_msun"] - row["mass_expelled_msun"]
             # Full header coordinates are retained: no positional X0 matching or
@@ -132,13 +252,18 @@ def read_karakas_lugaro2016(matrix_path: Path = DEFAULT_MATRIX) -> dict:
                     z: e["gross_mass_msun"] - composition[z]["mass_fraction"] * row["mass_expelled_msun"]
                     for z, e in row["elements_by_atomic_number"].items()
                 }
+            row["selected_ejecta"] = normalize_selected_ejecta(row)
             records.append(row)
         if len(active_masses) != len(set(active_masses)) or set(active_masses) != set(masses):
             raise SourceAdapterError("KL16 active yield and auxiliary mass coordinates disagree")
+    if include_lifetimes:
+        attach_kl16_lifetimes(records)
     return {
         "candidate_id": candidate["candidate_id"], "status": "source_rows_review_only",
         "production_ready": False, "canonical_rows_emitted": 0,
-        "runtime_activation_allowed": False, "renormalization_applied": False,
+        "runtime_activation_allowed": False, "renormalization_applied": True,
+        "normalization_policy": GROSS_NORMALIZATION_POLICY,
+        "source_values_modified": False,
         "records": records, "excluded_commented_records": excluded,
         "initial_composition_records": initial_records,
         "net_diagnostic_definition": "gross - source X0 * labelled mass expelled; only unique exact full-header matches, no physical approval",

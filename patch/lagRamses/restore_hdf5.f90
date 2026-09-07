@@ -1911,6 +1911,7 @@ subroutine restore_part_hdf5()
 
   ! Read particle group
   call hdf5_open_group('/particles', grp_id)
+  call stellar_feedback_hdf5_identity(grp_id,.false.)
   call hdf5_read_attr_int8_checked(grp_id, 'npart_total', npart_total_file, &
        stellar_state_read_status)
   call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, 1, MPI_INTEGER, &

@@ -1,8 +1,10 @@
 program fp2_snia_runtime_contract_test
-  use stellar_enrichment_config, only: stellar_dp
+  use stellar_enrichment_config, only: stellar_dp, stellar_imf_kroupa, stellar_imf_chabrier, &
+       population_binary_ssp, population_single_star_ssp
   use stellar_snia_population_contract, only: &
        snia_population_realization_t, read_snia_population_realization_namelist, &
-       snia_population_contract_ok
+       snia_population_contract_ok, validate_snia_population_binding, validate_snia_population_realization, &
+       snia_accounting_strict_wd, snia_accounting_effective_ssp, snia_effective_ssp_approval
   use stellar_snia_physical_contract, only: snia_physical_contract_t, &
        read_snia_physical_contract_namelist, snia_contract_ok
   use stellar_snia_cell_deposition, only: snia_thermal_coupling_t, &
@@ -47,6 +49,35 @@ program fp2_snia_runtime_contract_test
   call expect(coupling%mode == 1 .and. coupling%thermal_fraction == &
        1.0_stellar_dp .and. .not. coupling%include_event_momentum_kinetic, &
        'thermal coupling is the approved total-energy policy', failures)
+
+  call validate_snia_population_binding(population, stellar_imf_kroupa, population_binary_ssp, .5d0, ierr)
+  call expect(ierr == snia_population_contract_ok, 'approved runtime population matches', failures)
+  call validate_snia_population_binding(population, stellar_imf_chabrier, population_binary_ssp, .5d0, ierr)
+  call expect(ierr /= snia_population_contract_ok, 'Kroupa DTD cannot silently feed Chabrier particles', failures)
+  call validate_snia_population_binding(population, stellar_imf_kroupa, population_single_star_ssp, .5d0, ierr)
+  call expect(ierr /= snia_population_contract_ok, 'binary DTD cannot silently feed a single-star population', failures)
+  call validate_snia_population_binding(population, stellar_imf_kroupa, population_binary_ssp, .3d0, ierr)
+  call expect(ierr /= snia_population_contract_ok, 'baked-in binary metadata still has to match', failures)
+  population%imf_conversion_factor=2d0
+  call validate_snia_population_binding(population, stellar_imf_chabrier, population_binary_ssp, .5d0, ierr)
+  call expect(ierr /= snia_population_contract_ok, 'conversion factor does not override target IMF identity', failures)
+
+  population%mass_accounting=snia_accounting_effective_ssp
+  population%accounting_approval_id=''
+  call validate_snia_population_realization(population,ierr)
+  call expect(ierr /= snia_population_contract_ok, 'effective SSP requires separate accounting approval', failures)
+  population%accounting_approval_id=snia_effective_ssp_approval
+  call validate_snia_population_realization(population,ierr)
+  call expect(ierr == snia_population_contract_ok, 'explicit effective SSP accounting admitted', failures)
+  population%mass_accounting='unknown'
+  call validate_snia_population_realization(population,ierr)
+  call expect(ierr /= snia_population_contract_ok, 'unknown mass accounting rejects', failures)
+  population%mass_accounting=snia_accounting_strict_wd
+  call validate_snia_population_realization(population,ierr)
+  call expect(ierr /= snia_population_contract_ok, 'effective approval cannot masquerade as strict WD', failures)
+  population%accounting_approval_id=''
+  call validate_snia_population_realization(population,ierr)
+  call expect(ierr == snia_population_contract_ok, 'historical strict WD accounting preserved', failures)
 
   if (failures > 0) then
      write(*, '(a,i0)') 'FP2_SNIa_RUNTIME_CONTRACT_TEST_FAILED failures=', failures

@@ -52,7 +52,14 @@ evidence.
 
 ## Cross-cutting decisions and non-approvals
 
-- KL16/CK22 AGB source discrepancies are parked, not resolved or approved.
+- SNIa scope decision (2026-09-07): operator approved an explicitly effective
+  SSP/remaining-stellar-mass accounting mode with unchanged empirical DTD and
+  N100 source values; **implemented with bounded native/live/restart checks**. Preserve
+  strict WD-supply mode and its existing rejection. Microscopic binary
+  evolution/IFMR/retention work is medium-term, not the next implementation
+  prerequisite. See the final operator-decision section of the
+  [existing completion plan](production_completion_bundles_2026-09-07.md).
+- KL16 auxiliary mass discrepancy: operator selected detailed yield-header .774 Msun over .744 (2026-09-07); printed article data take precedence where available. Other KL16/CK22 issues remain parked, not a full physical-package approval.
   Evidence and readers remain in the [existing bundle record](fp1h_f_physical_source_admission_bundle_plan_2026-09-05.md).
   No author email was sent; contact is cancelled. The source-reader checks
   require explicit `--include-parked-agb`; standard selection/admission

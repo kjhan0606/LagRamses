@@ -40,6 +40,16 @@ module stellar_yield_tables
      logical :: loaded = .false.
      integer :: n_rows = 0
      integer :: mass_assignment_mode = yield_mass_assignment_linear
+     ! Per-source-node high-mass adapter, admitted only after full validation.
+     logical :: high_mass_ready = .false.
+     logical :: high_mass_wind_only = .false.
+     logical :: high_mass_linear_z = .false.
+     logical :: net_yield_diagnostic_unavailable = .false.
+     character(len=128) :: high_mass_identity(4) = ''
+     real(stellar_dp), allocatable :: hm_mass(:), hm_z(:), hm_age(:), hm_remnant(:), hm_adjustment(:)
+     integer, allocatable :: hm_wind_row(:), hm_terminal_row(:)
+     ! Optional single terminal envelope/WD event, indexed by source M,Z.
+     integer, allocatable :: agb_terminal_row(:)
      integer, allocatable :: channel(:)
      real(stellar_dp), allocatable :: initial_mass(:)
      real(stellar_dp), allocatable :: birth_metallicity(:)
@@ -71,6 +81,14 @@ contains
     if (allocated(table%momentum)) deallocate(table%momentum)
     if (allocated(table%ejected_mass)) deallocate(table%ejected_mass)
     if (allocated(table%net_yield)) deallocate(table%net_yield)
+    if (allocated(table%hm_mass)) deallocate(table%hm_mass, table%hm_z, table%hm_age, &
+         table%hm_remnant, table%hm_adjustment, table%hm_wind_row, table%hm_terminal_row)
+    if (allocated(table%agb_terminal_row)) deallocate(table%agb_terminal_row)
+    table%high_mass_ready = .false.
+    table%high_mass_wind_only = .false.
+    table%high_mass_linear_z = .false.
+    table%net_yield_diagnostic_unavailable = .false.
+    table%high_mass_identity = ''
 
     table%loaded = .false.
     table%n_rows = 0

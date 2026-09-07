@@ -10,7 +10,8 @@ subroutine read_hydro_params(nml_ok)
        stellar_feedback_mode, use_channel_resolved_feedback, default_imf_id, &
        population_model_id, yield_source_basis_name, configured_imf_mass_min, &
        configured_imf_mass_max, configured_binary_fraction, stellar_fate_policy, &
-       stellar_fate_map_sha256, stellar_fate_approval_id, production_fate_policy_supported
+       stellar_fate_map_sha256, stellar_fate_approval_id, production_fate_policy_supported, &
+       high_mass_model, high_mass_max_remnant_adjust_fraction, user_source_model_requested, high_mass_history_file
 #endif
   implicit none
 #ifndef WITHOUTMPI
@@ -128,13 +129,20 @@ subroutine read_hydro_params(nml_ok)
 #ifdef PHASE0_STELLAR_ENRICHMENT
   rewind(1)
   call read_enrichment_namelist(1,stellar_nml_iostat)
+  if(stellar_nml_iostat==0.and.stellar_fate_policy=='user_selected_model_v1')then
+     if(.not.user_source_model_requested().or..not.pic)stellar_nml_iostat=1013
+  endif
   if(stellar_nml_iostat/=0)then
      if(myid==1)then
         write(*,*) 'ERROR: invalid &STELLAR_ENRICHMENT_PARAMS namelist'
         if(stellar_nml_iostat==1001) &
              write(*,*) '  feedback_mode must be channel_resolved or legacy'
         if(stellar_nml_iostat==1002) &
-             write(*,*) '  imf_id must be in the supported range 0:3'
+             write(*,*) '  imf_id must be in the supported range 0:4'
+        if(stellar_nml_iostat==1012) &
+             write(*,*) '  invalid high-mass preset/adjustment limit, or override requested in legacy mode'
+        if(stellar_nml_iostat==1013) &
+             write(*,*) '  user source requires PIC, wind+SNII; SNIa requires matching binary SSP and AGB WD source; PISN off'
         if(stellar_nml_iostat==1003) &
              write(*,*) '  population_model must be single_star_ssp or binary_ssp'
         if(stellar_nml_iostat==1004) &
@@ -164,7 +172,12 @@ subroutine read_hydro_params(nml_ok)
      write(*,'(A,A)') ' Stellar terminal-fate policy: ',trim(stellar_fate_policy)
      write(*,'(A,A)') ' Stellar fate-map SHA256: ',trim(stellar_fate_map_sha256)
      write(*,'(A,A)') ' Stellar fate approval id: ',trim(stellar_fate_approval_id)
-     if(.not.production_fate_policy_supported())then
+     write(*,'(A,A)') ' High-mass endpoint preset: ',trim(high_mass_model)
+     write(*,'(A,ES16.7)') ' Maximum remnant correction / initial mass: ',high_mass_max_remnant_adjust_fraction
+     if(user_source_model_requested())then
+        write(*,*) 'Stellar source: USER_SELECTED_MODEL, not an automatic physical approval'
+        write(*,*) 'High-mass history: ',trim(high_mass_history_file)
+     else if(.not.production_fate_policy_supported())then
         write(*,'(A)') ' Stellar terminal-fate policy is review-only; production admission is blocked'
      endif
   end if

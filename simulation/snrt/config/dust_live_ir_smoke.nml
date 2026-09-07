@@ -94,6 +94,8 @@
 /
 
 &PHYSICS_PARAMS
+  ! No particles: do not request the particle-only element/birth header.
+  sf_birth_properties=.false.
   cooling=.false.
   haardt_madau=.false.
   metal=.false.

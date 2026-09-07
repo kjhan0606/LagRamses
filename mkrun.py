@@ -451,6 +451,20 @@ def generate_run(ui=None, write_text=save_text):
     else:
         physics_on = False
 
+    stellar_defaults = OrderedDict([
+        ('feedback_mode', 'channel_resolved'), ('imf_id', 2),
+        ('population_model', 'single_star_ssp'), ('yield_source_basis', 'per_star_cumulative'),
+        ('imf_mass_min_msun', 0.08), ('imf_mass_max_msun', 120.0), ('binary_fraction', 0.0),
+        ('channel_mass_min_msun', '0.8,1.0,8.0,3.0,140.0'),
+        ('channel_mass_max_msun', '120.0,8.0,120.0,8.0,260.0'),
+        ('fate_policy', 'review_only_unresolved'), ('high_mass_preset', 'source_consistent'),
+        ('high_mass_remnant_adjust_max_fraction', 0.0),
+        ('use_wind', True), ('use_agb', True), ('use_snii', True),
+        ('use_snia', False), ('use_pisn', False),
+    ])
+    if physics_on:
+        values.update(stellar_defaults)
+
     advanced = ask_bool(
         '\nOpen the full parameter editor for fine-tuning before writing?', False)
     if advanced:
@@ -502,11 +516,8 @@ def generate_run(ui=None, write_text=save_text):
         ])
         nml_text = merge_into_group(nml_text, 'PHYSICS_PARAMS',
                                      physics_extra['PHYSICS_PARAMS'], values)
-        nml_text = nml_text.rstrip('\n') + (
-            "\n\n&STELLAR_ENRICHMENT_PARAMS\n"
-            "feedback_mode='channel_resolved'\n"
-            "/\n"
-        )
+        nml_text = merge_into_group(nml_text, 'STELLAR_ENRICHMENT_PARAMS',
+                                   stellar_defaults, values)
 
     msgs = rng.validate_params(values)
     if values.get('nrestart', 0) > 0:

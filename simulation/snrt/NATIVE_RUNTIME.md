@@ -131,3 +131,354 @@ checkpoint 2 to another NEW directory and change only `nrestart=2`, optionally
 hiding GPUs with `CUDA_VISIBLE_DEVICES=''` and retaining `SNRT_BACKEND=auto`.
 This integrated stellar profile was exercised with one rank; the separate
 two-rank reference used AGN without star formation. These are not the same test.
+
+## Draine optics in the native live-dust input
+
+The existing thermal builder can also emit the native v3 namelist. From the
+project root, choose NEW output paths and run:
+
+```sh
+JAX_PLATFORMS=cpu simulation/snrt/.venv/bin/python simulation/snrt/tools/build_draine_dust_thermal.py \
+  --source external/draine_wd01_rv31/kext_albedo_WD_MW_3.1_60_D03.all \
+  --output /path/to/new/dust_thermal.json \
+  --native-output /path/to/new/dust_native.nml \
+  --native-source-ledger simulation/snrt/data/p4_pilot_agn_photon_ledger.json \
+  --native-background-k 10 --reference-heat-capacity-per-h 1e-24
+```
+
+Set `SNRT_DUST_CONTRACT` to that native file and retain
+`SNRT_ALLOW_REFERENCE_CONTROL=1`. The raw opacity table supplies absorption
+and dust mass per H. Primary opacity is sampled at each ledger group's mean
+energy (an explicit grey approximation, not a full SED-weighted average).
+Native IR uses 136 quadrature nodes across the supplied raw energy domain and
+65 temperatures including the 10 K bath with these defaults; the separate JSON
+sidecar retains its older primary-group thermal representation.
+
+The constant heat capacity above is a **test value**, not inferred from the
+opacity data. The exporter therefore never emits production approval. It
+checks ledger group edges, ordering, representative energies and edge checksum;
+raw-source and ledger checksums are retained. Scattering and stochastic grain
+heating are not supplied by this conversion.
+
+For a particle-free cooling control based on `config/dust_live_ir_smoke.nml`,
+leave `sf_birth_properties=.false.`: its particle-only element list is not
+initialized in a no-PIC run. The demonstrated Draine run used CPU hydro,
+Courant factor .005, dust mass per gas mass .006024096385542169 and initial
+dust energy per gas mass 9.01356598145909e-16 in that fixture's code units
+(20 K for the explicit test capacity). Do not reuse these energy units with
+another material capacity or units definition.
+
+## SNIa population identity
+
+The physical SNIa handoff is checked against the actual configured IMF,
+population model and binary fraction before runtime initialization completes.
+`config/fp2_snia_runtime_contract_v1.nml` is the approved Kroupa/binary/.5
+baseline; default Chabrier/single-star particles do not match it. The handoff's
+IMF conversion factor does not authorize an undeclared change of target IMF.
+This check does not replace the existing AGB white-dwarf reservoir requirements.
+
+## High-mass models: native source history and HDF5 restart
+
+`STELLAR_ENRICHMENT_PARAMS` now accepts `high_mass_preset`:
+`source_consistent` (default), `wind_only_collapse`, or `mixed_remnant`.
+The latter requires `high_mass_remnant_adjust_max_fraction > 0` and <=1,
+defined relative to INITIAL stellar mass. Other presets require this value
+to be zero. Missing or invalid choices do not inherit a previous override.
+There is no conservation-disable option. Legacy mode rejects an override.
+
+The native connection is implemented:
+namelist -> source-node history/endpoint resolution -> common IMF source cells
+-> cumulative differences -> existing RAMSES mechanical deposition and stellar
+mass/progress commit -> HDF5 identity and restart checks. It is not a Python
+runtime. `source_consistent` requires identical declared source identities and
+mass closure; `wind_only_collapse` preserves winds and suppresses terminal
+ejecta/energy/momentum; `mixed_remnant` preserves ejecta and adjusts the remnant
+only within the explicit limit. The remnant is a baryonic residual, not a
+gravitational black-hole mass. Raw source rows remain unchanged.
+
+Activation requires `fate_policy='user_selected_model_v1'` together with
+`high_mass_history_path`. This separate user-responsibility route does NOT
+create a scientific approval: leave `fate_map_sha256` and `fate_approval_id`
+empty. The original approved-package path and its restrictions remain intact.
+The route requires channel-resolved, per-star cumulative yields, wind and SNII,
+PIC and HDF5 output/restart. It now supports two explicit populations:
+single-star/binary fraction zero/SNIa off, or an effective binary SSP with
+positive binary fraction, SNIa on and AGB enabled as the WD supplier (AGB upper
+mass <=8 Msun). History and SNIa handoff must match the configured IMF,
+population and binary fraction. No second binary-fraction factor is applied
+to an empirical DTD whose normalization already includes it. This is not a
+binary stellar-evolution calculation; actual yield inputs must justify that
+effective population approximation. PISN remains disabled.
+
+For the approved N100/Maoz input, explicitly select Kroupa (`imf_id=1`),
+`population_model='binary_ssp'`, `binary_fraction=.5`, `use_snia=.true.` and
+`use_agb=.true.` and set `PHASE0_SNIA_RUNTIME_CONTRACT` to
+`config/fp2_snia_runtime_contract_v1.nml`. Default Chabrier/single-star behavior
+is unchanged and does NOT silently inherit that approval. SNIa uses the real
+per-event input and DTD, not canonical per-star channel-4 rows. Existing
+population accounting debits only the AGB WD reservoir, retains NS/BH remnants
+and rejects a WD shortfall. The supported SNIa metallicity factor remains the
+explicit approved constant-unity model, not an invented Z-dependent DTD.
+
+`PHASE0_YIELD_TABLE` supplies the canonical per-star cumulative source table.
+The history file is `/stellar_high_mass_history/` version 1 (Fortran namelist),
+with up to 512 nodes. See `tests/fixtures/phase0/high_mass_history.nml` for the
+complete schema: declared model/wind/terminal identities and coordinates,
+IMF/population/binary/support identity, mass, Z, lifetime in years and raw
+terminal outcome (0 failed / 1 exploded). These labels describe user-supplied
+inputs; they are not independent proof of source authenticity. Every exact-Z
+branch must contain ascending nodes from 40 through 120 Msun, with matching
+wind/SNII rows and an endpoint at each declared lifetime.
+
+The explicit timing approximation is `wind_linear_terminal_step`: linearly
+interpolate cumulative wind rows, emit terminal ejecta at the node lifetime,
+and freeze both afterwards. Pre-terminal SN leakage is rejected. Mass uses
+nearest-source-node cells, lower-node ties, and budget scaling by M/M_node
+(constant mass fractions inside each cell), not interpolation of discrete
+explosion outcomes. IMF integration splits at 40 Msun and source-cell edges
+and uses analytic IMF mass weights shared by the channels. The history namelist
+now accepts `metallicity_policy='exact_nodes'` (backward-compatible default) or
+`'linear_Z_cumulative_mixture'`. The latter evaluates BOTH neighboring source-Z
+histories at the requested age, then combines all cumulative budgets with fixed
+linear birth-Z weights. This is an SSP expectation mixture, not interpolation
+of individual explosion fates or terminal lifetimes. Each branch retains its
+own event time, resolved remnant and wind budget; fixed nonnegative weights
+preserve mass closure, monotonic gross release and split-step equivalence.
+At least two Z branches are required. Z=0 is supported when supplied; no
+logarithmic-Z assumption, physical extrapolation or edge clamp is introduced.
+Only relative 32-epsilon roundoff may match an endpoint. Rotation/engine
+alternatives still require a separate declared source branch.
+
+The selected source-cell convention also scales low-mass AGB payloads by
+M/M_node so WD return uses the same per-initial-mass normalization. Constant
+age payloads remain exactly constant instead of acquiring an artificial
+negative energy increment from interpolation roundoff. Legacy table behavior
+outside this selected route is unchanged. Energy columns are non-bulk source energy;
+the existing bridge separately accounts for directed kinetic energy.
+
+HDF5 particles save the enabled switch and `stellar_source_model_values`:
+actual canonical numerical rows, source labels, resolved remnant/correction,
+timing/mass policy version and population/channel settings. Every MPI rank
+must agree. Restart refuses activation/deactivation, altered values or altered
+preset before restoring/evolving particles. Moving identical input files is
+allowed; a path or user-typed hash alone is not treated as an identity check.
+The identity additionally binds the Z policy, revised low-mass interpolation
+semantics, and every consumed SNIa population/event/coupling value, including
+DTD normalization and energies. Existing exact-Z/high-mass-only/SNIa-off
+identity layout is retained; changed low-mass semantics require a fresh run.
+
+Use `mkrun.py --mode gui` or the CLI full parameter editor's feedback section
+to inspect the choices. Both share `ramses_nml_generator.py`; hydro generation
+now emits the complete required stellar population fields in ONE namelist
+group instead of the old feedback-mode-only stub. Generated inputs still
+need real source assets and runtime admission; `CHANGE_ME` is not runnable.
+
+The reusable `config/high_mass_feedback_reference_smoke.nml` is a SYNTHETIC
+four-step, level-3 CPU hydro/stellar-feedback wiring control, not a physical
+yield package. Copy to `run.nml` in a NEW directory and use the NVAR=30 build
+above with `PHASE0_STELLAR_ENRICHMENT=1`. Unset `SNRT_AGN_MODEL`,
+`SNRT_STELLAR_SED`, `SNRT_DRIVER_TEST_SEED_SOURCE`; set `SNRT_RT_ENABLE=0`,
+`OMP_NUM_THREADS=2`, and
+`PHASE0_YIELD_TABLE=/gpfs/kjhan/LRD_JWST/simulation/snrt/tests/fixtures/phase0/high_mass_history_yields.dat`.
+The profile contains its absolute history path. Its tiny legacy reader table
+is only for existing particle initialization, not the mechanical source.
+Output policy is `noutput=1,aout=2,tout=1e30,foutput=1,fbackup=1000000`;
+four measured dumps total about 1.62 MB. Review output/storage before launching.
+The native fixture `high_mass_history_test.f90` checks all three presets,
+event timing, split-step equivalence, ledger closure and invalid inputs.
+Live single-rank/MPI2 and restart evidence is recorded in
+`provenance/real_source_integration_progress_2026-09-07.md`.
+
+`config/high_mass_snia_z_reference_smoke.nml` exercises the combined path:
+real approved N100/Maoz SNIa plus SYNTHETIC wind/SNII/AGB on Z=0,.02 branches,
+with initial gas Z=.01. Use `PHASE0_YIELD_TABLE` pointing to
+`tests/fixtures/phase0/high_mass_snia_z_yields.dat`, and the SNIa environment
+above; keep the RT environment disabled as in the previous control. The profile
+uses 1 Gyr/code-time so the four-step run crosses the 40 Myr SNIa delay.
+Its intentionally synthetic early WD formation is not physical AGB timing.
+Native tests and live single-rank/MPI2/restart checks passed; DTD and Z-policy
+changes reject on restart. The SNIa namelist's two source-code-style `&`
+continuations were removed for standard GNU/Intel input compatibility; all
+physical numbers remain unchanged.
+
+### Actual LC18 wind with explicitly selected approximations
+
+`tools/build_lc18_native_wind.py` now connects checksum-verified LC18 Set R
+table8 wind isotope ejecta and table7 phase-summed lifetimes to the native
+`user_selected_model_v1` / `wind_only_collapse` route. Python only prepares
+small input files offline; Fortran evaluates and deposits feedback in RAMSES.
+Select one rotation (0, 150 or 300 km/s); each branch contains 40, 60, 80 and
+120 Msun at source Z=0.00003236, 0.0003236, 0.003236 and 0.01345. There is no
+extrapolation to primordial or super-solar metallicity. IMF defaults to
+Chabrier; `--imf-id` also accepts the existing 0, 1 and 4 alternatives.
+
+Example local comparison input (1000 km/s is a test choice, NOT a calibrated
+LC18 wind velocity or a hidden default):
+
+```sh
+python3 simulation/snrt/tools/build_lc18_native_wind.py \
+  --output-dir /gpfs/kjhan/LRD_JWST/NEW_LC18_INPUT \
+  --rotation 0 --wind-speed-km-s 1000 \
+  --timing uniform_until_terminal --composition as_tabulated_mean \
+  --energy isotropic_thermalized
+```
+
+The required options explicitly select uniform release until the actual
+lifetime, constant time-averaged ejecta composition, and wind energy
+E=0.5*M*v^2 thermalized under an unresolved isotropic-wind approximation.
+Net directed wind momentum is zero; the bridge separately adds stellar bulk
+ejecta kinetic energy. Isotopes are assigned to their tabulated parent
+elements without decay. Total mass is the sum of all isotope ejecta, including
+untracked elements; rounded evolutionary masses are not forced to match it.
+There is no terminal explosion and the remaining mass becomes the remnant.
+The exporter supports only a single-star population; it does not silently
+enable the separately approved effective-binary SNIa model.
+
+The new optional history field `net_yield_policy` defaults to `supplied`.
+This exporter selects `unavailable_diagnostic_zero`: all net columns must be
+zero placeholders, explicitly marked unavailable rather than interpreted as
+zero physical net production. Actual gross ejecta drive feedback. Native
+startup logs this distinction, and restart identity binds it along with all
+source values, approximations and wind-speed-dependent energy.
+
+Copy `config/lc18_wind_local_smoke.nml` into a NEW run directory and replace
+its `CHANGE_ME_LC18_INPUT/history.nml` path; point `PHASE0_YIELD_TABLE` to the
+generated `yields.dat`. Retain the disabled RT environment described above.
+The profile uses 100 Myr/code-time, four fixed level-3 steps and the same output
+policy `noutput=1,aout=2,tout=1e30,foutput=1,fbackup=1000000`.
+Review effective namelist, output count and storage before launching.
+Measured four-dump storage is 2,189,868 bytes. Native optimized Intel and GNU
+bounds-checked source tests, live mass/energy checks, same-input restart and
+changed-wind-speed restart rejection passed; details are in the progress log.
+
+**Scope limit:** the actual LC18 wind connection is implemented under these
+explicit comparison approximations. It is not a phase-resolved wind spectrum,
+composition/velocity model, a physical terminal-explosion model, or a complete
+AGB/WD source package. The previous combined SNIa control still has synthetic
+AGB inputs. No all-channel production/publication approval follows from this
+smoke run. Raw sources are unchanged, historical review-only contracts are
+not promoted, and locally generated numerical files are not added for source
+redistribution without resolving the applicable permission.
+
+### KL16 selected gross normalization
+
+The operator-selected KL16 source reader now provides normalized gross ejecta
+in each active row's `selected_ejecta` payload. It uses the sum of ALL 78 raw
+element masses as the denominator, scales to the selected expelled mass, and
+leaves the selected remnant unchanged. Reduce to eleven tracked elements only
+after this step; use `untracked_ejecta_msun` for the remaining metal budget.
+The payload records policy `all_listed_elements_to_selected_expelled_mass_v1`,
+its normalization factor and original sum. Raw data/fingerprints, initial
+compositions, raw net-yield diagnostics and the two excluded nodes are retained
+unchanged. Normalized net yields remain unavailable, not copied from raw net
+diagnostics. This resolves the gross mass-budget mismatch at input preparation;
+it does not by itself provide the missing lifetime/release/energy inputs or
+activate a complete physical AGB/SNIa run. No runtime namelist default changes.
+
+### Actual KL16 lifetime, envelope/WD and wind-energy connection
+
+The subsequent operator-approved implementation connects these missing inputs
+through `tools/build_kl16_lc18_native.py`. `data/kl16_stellar_lifetimes.csv`
+transcribes 71 durations from [Karakas 2014 Table 1](https://arxiv.org/html/1408.5936v1#S3.T1)
+and [Karakas & Lugaro 2016 Table 1](https://arxiv.org/html/1604.02178v1#S2.T1).
+All 62 active yield nodes match exactly in initial mass, Z, initial helium and
+overshoot. M_mix is a post-processing choice, not a different stellar lifetime.
+The source's total stellar duration to the AGB endpoint is used, not an
+empirical lifetime fit or a post-AGB/WD cooling time.
+
+The combined exporter selects 58 ordinary CO-core AGB nodes over the common
+1--6 Msun support at Z=.007,.014,.03. Hybrid CO(Ne), ONe and commented 8 Msun
+yield models do not supply N100 WDs. The history option
+`agb_release_policy='terminal_step'` releases the normalized envelope and
+creates the WD together at each actual node's endpoint. Before that endpoint,
+both are zero. This is an explicit terminal-envelope approximation, not a
+phase-resolved AGB wind. The native evaluator uses nearest source-mass
+fractions with fixed linear-in-Z mixtures; sparse, independently timed source
+nodes do not need manufactured rectangular age grids. Other channel grid
+checks and the default `cumulative_linear` policy are unchanged.
+
+Example isolated comparison input (both speeds are explicit test choices,
+NOT velocities measured or calibrated by KL16/LC18):
+
+```sh
+python3 simulation/snrt/tools/build_kl16_lc18_native.py \
+  --output-dir /gpfs/kjhan/LRD_JWST/NEW_KL16_LC18_INPUT \
+  --rotation 0 --massive-wind-speed-km-s 1000 --agb-wind-speed-km-s 15 \
+  --agb-release terminal_envelope --agb-energy isotropic_thermalized \
+  --population single --imf-id 1
+```
+
+AGB energy is `0.5*M_return*v_wind**2`, thermalized as an unresolved isotropic
+wind; directed wind momentum is zero. Stellar bulk momentum/kinetic energy
+remain the native deposition bridge's responsibility. Net yields remain
+explicitly unavailable; normalized gross ejecta and untracked metals drive
+the return. IMF defaults to Chabrier; this comparison explicitly uses Kroupa.
+The builder refuses existing output directories and binds all source hashes,
+model coordinates, approximation choices and energy values to restart identity.
+
+Use `config/kl16_lc18_local_smoke.nml` in a NEW run directory, replace the
+history placeholder and set `PHASE0_YIELD_TABLE` to the generated table.
+Unset `PHASE0_SNIA_RUNTIME_CONTRACT` for this SNIa-off control. Disable live RT
+as above. Review the effective namelist/output budget before launch. The
+four-step native CPU hydro run and same-input restart pass, with conserved
+gas+star mass and positive internal energy; details and binary/input hashes
+are in the existing progress record. No Python is called by RAMSES.
+
+**SNIa-on qualification is NOT complete.** `--population snia_baseline
+--imf-id 1` prepares the existing effective-binary population without changing
+its approved DTD. This DTD starts at 40 Myr, whereas the selected WD supplier
+first returns WDs at 68.89 Myr. The native combined run rejects the causal WD
+deficit (exit 82), rather than borrowing future WDs, clipping the rate or
+silently delaying the DTD. Checks immediately before WD events also prevent a
+large timestep from hiding an earlier deficit. Resolving this requires an
+explicitly selected, consistent SNIa population/WD-supply model; the current
+AGB+LC18 positive run is not an all-channel production approval.
+
+### Effective SSP SNIa accounting (implemented; bounded native verification)
+
+The operator-approved phenomenological SSP route retains the empirical DTD
+and N100 event source but debits SNIa ejecta from the remaining stellar-particle
+mass AFTER the interval's generic AGB/SNII/wind returns. This is a new accounting
+choice, not proof that KL16 supplies early N100 WDs. The strict WD-supply route
+and its causal rejection remain unchanged and remain the default.
+
+Select the separate example contract explicitly:
+
+```sh
+export PHASE0_SNIA_RUNTIME_CONTRACT=/gpfs/kjhan/LRD_JWST/simulation/snrt/config/fp2_snia_effective_ssp_runtime_v1.nml
+```
+
+Its `&snia_population_realization` group adds
+`mass_accounting='effective_ssp'` and
+`accounting_approval_id='SNIA-EFFECTIVE-SSP-2026-09-07'`. Omitting these fields
+in the original contract retains `strict_wd` with an empty accounting approval.
+Unknown modes, missing effective approval, and a strict mode carrying the
+effective approval reject. The three original DTD/event/thermal group approval
+and source bindings remain unchanged; the new approval covers accounting only.
+The existing Kroupa/binary population applicability is NOT broadened to default
+Chabrier or another IMF by this selector.
+
+Native startup reports the mode and its unresolved-population limitation.
+Effective mode does not call the WD reservoir setter or alter the generic
+living/remnant partition. The existing N100 event-budget arithmetic is reused
+with total SSP capacity as its mass limit; its historical `wd_reservoir_debit`
+field is the equal N100 ejecta mass, not evidence of an actual WD inventory.
+Persisted mass and generic cumulative returns reconstruct prior Ia return,
+which is also checked against the cumulative DTD. All channel deltas and the
+particle mass/progress are staged before commit; overdraw rejects the interval
+rather than clipping its rate. The zero-terminal-remnant invariant still applies.
+Restart binds the new accounting identity and rejects switching modes in either
+direction. The historical strict identity layout is preserved.
+
+These are external SNIa contract fields, not additions to the main lagRamses
+namelist; no `mkrun.py`/`ramses_nml_generator.py` field or default changed.
+Actual KL16+LC18 CPU hydro with effective SNIa and same-input HDF5 restart pass
+within the selected comparison. Common source Z support is .007--.01345,
+not the broader AGB-only grid; wind speeds remain explicit comparison choices.
+Evidence is in the effective-SSP section of the
+[source integration record](../../provenance/real_source_integration_progress_2026-09-07.md).
+
+Microscopic binary evolution is a separate medium-term study, not a prerequisite
+for using this effective route. These bounded checks do not qualify all source
+physics or a simultaneous RT/AGN/dust production run. See the operator decision in the
+[completion plan](../../provenance/production_completion_bundles_2026-09-07.md).

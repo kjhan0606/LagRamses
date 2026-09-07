@@ -18,7 +18,8 @@ module stellar_ramses_runtime
        configured_imf_mass_max, configured_binary_fraction, &
        configured_channel_mass_min, configured_channel_mass_max, &
        channel_owns_terminal_remnant, &
-       production_source_model_supported
+       production_source_model_supported, high_mass_model, high_mass_history_file, user_source_model_requested, &
+       high_mass_max_remnant_adjust_fraction, stellar_fate_policy
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_source_t, delayed_cooling_source_mass, untracked_ejecta_mass, &
        generic_metal_ejecta_mass
@@ -26,22 +27,23 @@ module stellar_ramses_runtime
        set_yield_mass_assignment_mode, yield_mass_assignment_piecewise_constant, &
        yield_table_ok
   use stellar_yield_backend, only: load_yield_backend, backend_ok
-  use stellar_yield_audit, only: audit_yield_table
-  use stellar_enrichment_driver, only: compute_stellar_source_increment
+  use stellar_yield_audit, only: audit_yield_table, prepare_high_mass_history
+  use stellar_enrichment_driver, only: compute_stellar_source_increment, check_agb_wd_causality
   use stellar_population_ledger, only: stellar_population_ledger_t, &
        set_white_dwarf_reservoir, apply_snia_event_budget, &
        population_ledger_ok
   use stellar_snia_population_contract, only: &
        snia_population_realization_t, &
        read_snia_population_realization_namelist, &
-       evaluate_snia_interval_events, snia_population_contract_ok
+       evaluate_snia_interval_events, snia_population_contract_ok, validate_snia_population_binding, &
+       snia_accounting_strict_wd, snia_accounting_effective_ssp
   use stellar_snia_physical_contract, only: snia_physical_contract_t, &
        snia_event_budget_t, read_snia_physical_contract_namelist, &
        build_snia_event_budget, snia_contract_ok
   use stellar_snia_cell_deposition, only: snia_thermal_coupling_t, &
        read_snia_thermal_coupling_namelist, snia_deposition_ok
   use stellar_snia_runtime_accounting, only: &
-       reconstruct_prior_snia_return, snia_accounting_ok
+       reconstruct_prior_snia_return, close_effective_snia_return, snia_accounting_ok
   use stellar_ramses_field_map, only: stellar_field_map_t, clear_field_map, &
        validate_field_map
   use stellar_ramses_bridge, only: build_stellar_source_unew_delta, &
@@ -62,6 +64,7 @@ module stellar_ramses_runtime
 
   type(stellar_yield_table_t), save :: yield_table
   logical, save :: initialized = .false.
+  logical, save :: sources_initialized = .false.
   integer, save :: initialization_ierr = 0
   character(len=1024), save :: loaded_yield_table_path = ''
   integer, save :: loaded_yield_table_rows = 0
@@ -76,95 +79,22 @@ module stellar_ramses_runtime
   public :: phase0_initialize
   public :: phase0_feedback
   public :: phase0_get_runtime_identity
+  public :: phase0_prepare_sources, phase0_source_identity, phase0_check_source_consensus
 
 contains
 
   subroutine phase0_initialize(ierr)
     integer, intent(out) :: ierr
-    character(len=1024) :: filename
-    integer :: status, table_ierr, audit_ierr, coverage_ierr, assignment_ierr
     integer :: map_ierr, element
     character(len=256) :: map_message
-    logical :: exists
 
     if (initialized .or. initialization_ierr /= 0) then
        ierr = initialization_ierr
        return
     end if
 
-    ierr = 0
-    loaded_yield_table_path = ''
-    loaded_yield_table_rows = 0
-    snia_runtime_contract_initialized = .false.
-    if (enable_snia) then
-       call load_snia_runtime_contract(status)
-       if (status /= 0) then
-          ierr = 4
-          initialization_ierr = ierr
-          if (myid == 1) write(*,*) &
-               'Phase 0 SNIa runtime contract is invalid: ', status
-          return
-       end if
-    end if
-    if (.not. production_source_model_supported()) then
-       ierr = 3
-       initialization_ierr = ierr
-       if (myid == 1) write(*,*) &
-            'Phase 0 source model is not implemented for production'
-       return
-    end if
-    call get_environment_variable('PHASE0_YIELD_TABLE', filename, status=status)
-    if (status /= 0 .or. len_trim(filename) == 0) then
-       ierr = 1
-       initialization_ierr = ierr
-       if (myid == 1) write(*,*) &
-            'Phase 0 requires PHASE0_YIELD_TABLE; embedded fallback is disabled'
-       return
-    else
-       inquire(file=trim(filename), exist=exists)
-       if (.not. exists) then
-          ierr = 2
-          initialization_ierr = ierr
-          if (myid == 1) write(*,*) 'Phase 0 yield table not found: ', trim(filename)
-          return
-       end if
-       call load_yield_backend(trim(filename), .false., yield_table, table_ierr)
-    end if
-    if (table_ierr /= backend_ok) then
-       ierr = 10 + table_ierr
-       initialization_ierr = ierr
-       if (myid == 1) write(*,*) 'Phase 0 yield table load failed: ', table_ierr
-       return
-    end if
-    ! Production source evaluation must not invent terminal outcomes between
-    ! discrete source mass nodes.  The mode affects only mass assignment;
-    ! metallicity, age, and any source-node fate axes remain independently
-    ! governed by their resolver contracts.
-    call set_yield_mass_assignment_mode(yield_table, &
-         yield_mass_assignment_piecewise_constant, assignment_ierr)
-    if (assignment_ierr /= yield_table_ok) then
-       ierr = 11
-       initialization_ierr = ierr
-       if (myid == 1) write(*,*) &
-            'Phase 0 source-cell mass assignment mode is invalid: ', assignment_ierr
-       return
-    end if
-    call audit_yield_table(yield_table, 1.0d-8, audit_ierr, .true., &
-         channel_owns_terminal_remnant)
-    if (audit_ierr /= 0) then
-       ierr = 20 + audit_ierr
-       initialization_ierr = ierr
-       if (myid == 1) write(*,*) 'Phase 0 yield table audit failed: ', audit_ierr
-       return
-    end if
-    call audit_enabled_channel_coverage(yield_table, coverage_ierr)
-    if (coverage_ierr /= 0) then
-       ierr = 120 + coverage_ierr
-       initialization_ierr = ierr
-       if (myid == 1) write(*,*) &
-            'Phase 0 yield table does not cover enabled channel: ', coverage_ierr
-       return
-    end if
+    call phase0_prepare_sources(ierr)
+    if(ierr/=0)return
 
     if (.not. metal) then
        ierr = 30
@@ -218,8 +148,6 @@ contains
 
     initialized = .true.
     initialization_ierr = 0
-    loaded_yield_table_path = trim(filename)
-    loaded_yield_table_rows = yield_table%n_rows
     if (myid == 1) then
        write(*,*) 'Phase 0 stellar enrichment enabled'
        write(*,*) '  table rows = ', yield_table%n_rows
@@ -230,6 +158,227 @@ contains
        write(*,*) '  mass assignment = piecewise source-cell'
     end if
   end subroutine phase0_initialize
+
+  subroutine phase0_prepare_sources(ierr)
+    integer,intent(out)::ierr
+    character(len=1024)::filename
+    integer::status,table_ierr,audit_ierr,coverage_ierr,assignment_ierr
+    logical::exists
+    ierr=initialization_ierr
+    if(sources_initialized.or.ierr/=0)return
+    ierr = 0
+    loaded_yield_table_path = ''
+    loaded_yield_table_rows = 0
+    snia_runtime_contract_initialized = .false.
+    if (enable_snia) then
+       call load_snia_runtime_contract(status)
+       if (status /= 0) then
+          ierr = 4
+          initialization_ierr = ierr
+          if (myid == 1) write(*,*) &
+               'Phase 0 SNIa runtime contract is invalid: ', status
+          return
+       end if
+    end if
+    if (.not. production_source_model_supported() .and. .not. user_source_model_requested()) then
+       ierr = 3
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) &
+            'Phase 0 source model is not implemented for production'
+       return
+    end if
+    call get_environment_variable('PHASE0_YIELD_TABLE', filename, status=status)
+    if (status /= 0 .or. len_trim(filename) == 0) then
+       ierr = 1
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) &
+            'Phase 0 requires PHASE0_YIELD_TABLE; embedded fallback is disabled'
+       return
+    else
+       inquire(file=trim(filename), exist=exists)
+       if (.not. exists) then
+          ierr = 2
+          initialization_ierr = ierr
+          if (myid == 1) write(*,*) 'Phase 0 yield table not found: ', trim(filename)
+          return
+       end if
+       call load_yield_backend(trim(filename), .false., yield_table, table_ierr)
+    end if
+    if (table_ierr /= backend_ok) then
+       ierr = 10 + table_ierr
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) 'Phase 0 yield table load failed: ', table_ierr
+       return
+    end if
+    if (user_source_model_requested()) then
+       call prepare_high_mass_history(yield_table, high_mass_history_file, table_ierr)
+       if (table_ierr /= 0) then
+          ierr=200+table_ierr
+          initialization_ierr=ierr
+          if(myid==1)write(*,*) 'High-mass history rejected: ',table_ierr
+          return
+       endif
+    endif
+    ! Production source evaluation must not invent terminal outcomes between
+    ! discrete source mass nodes.  The mode affects only mass assignment;
+    ! metallicity, age, and any source-node fate axes remain independently
+    ! governed by their resolver contracts.
+    call set_yield_mass_assignment_mode(yield_table, &
+         yield_mass_assignment_piecewise_constant, assignment_ierr)
+    if (assignment_ierr /= yield_table_ok) then
+       ierr = 11
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) &
+            'Phase 0 source-cell mass assignment mode is invalid: ', assignment_ierr
+       return
+    end if
+    call audit_yield_table(yield_table, 1.0d-8, audit_ierr, .true., &
+         channel_owns_terminal_remnant,(/enable_wind,enable_agb,enable_snii,.false.,enable_pisn/))
+    if (audit_ierr /= 0) then
+       ierr = 20 + audit_ierr
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) 'Phase 0 yield table audit failed: ', audit_ierr
+       return
+    end if
+    call audit_enabled_channel_coverage(yield_table, coverage_ierr)
+    if (coverage_ierr /= 0) then
+       ierr = 120 + coverage_ierr
+       initialization_ierr = ierr
+       if (myid == 1) write(*,*) &
+            'Phase 0 yield table does not cover enabled channel: ', coverage_ierr
+       return
+    end if
+
+    sources_initialized=.true.
+    loaded_yield_table_path=trim(filename)
+    loaded_yield_table_rows=yield_table%n_rows
+    if(myid==1.and.yield_table%high_mass_ready)then
+       write(*,*) 'HIGH_MASS_HISTORY_READY USER_SELECTED_MODEL ',trim(high_mass_model)
+       write(*,*) 'model: ',trim(yield_table%high_mass_identity(1))
+       write(*,*) 'wind interpolation: cumulative linear; terminal event: lifetime step'
+       write(*,*) 'remnant adjustments [Msun]: ',yield_table%hm_adjustment
+       if(yield_table%net_yield_diagnostic_unavailable)write(*,*) &
+            'Net yields unavailable: zero diagnostic placeholders; gross ejecta drive feedback'
+       if(allocated(yield_table%agb_terminal_row))write(*,*) &
+            'AGB terminal release: envelope and WD together; nearest source-mass fractions'
+    endif
+  end subroutine phase0_prepare_sources
+
+  subroutine phase0_source_identity(values,ierr)
+    real(stellar_dp),allocatable,intent(out)::values(:)
+    integer,intent(out)::ierr
+    real(stellar_dp)::labels(7*128)
+    real(stellar_dp),allocatable::snia_values(:)
+    character(len=128)::names(7)
+    integer::i,j,k
+    call phase0_prepare_sources(ierr)
+    if(ierr/=0)return
+    if(.not.yield_table%high_mass_ready)then
+       ierr=6
+       return
+    endif
+    names(:4)=yield_table%high_mass_identity
+    names(5)=high_mass_model;names(6)=stellar_fate_policy;names(7)='wind_linear_terminal_step_mass_fraction_v1'
+    k=0
+    do i=1,7
+       do j=1,128
+          k=k+1;labels(k)=iachar(names(i)(j:j))
+       enddo
+    enddo
+    ! Checkpoint the actual consumed values, not a path or user-supplied hash.
+    values=[1d0,real(yield_table%n_rows,stellar_dp),real(size(yield_table%hm_mass),stellar_dp), &
+         real(default_imf_id,stellar_dp),real(population_model_id,stellar_dp),configured_binary_fraction, &
+         configured_imf_mass_min,configured_imf_mass_max,high_mass_max_remnant_adjust_fraction, &
+         merge(1d0,0d0,enable_wind),merge(1d0,0d0,enable_agb),merge(1d0,0d0,enable_snii), &
+         merge(1d0,0d0,enable_snia),merge(1d0,0d0,enable_pisn),merge(1d0,0d0,active_element), &
+         configured_channel_mass_min,configured_channel_mass_max,labels, &
+         real(yield_table%channel,stellar_dp),yield_table%initial_mass,yield_table%birth_metallicity, &
+         yield_table%age_gyr,yield_table%returned_mass,yield_table%remnant_mass,yield_table%energy, &
+         reshape(yield_table%momentum,[yield_table%n_rows*3]), &
+         reshape(yield_table%ejected_mass,[yield_table%n_rows*n_stellar_elements]), &
+         reshape(yield_table%net_yield,[yield_table%n_rows*n_stellar_elements]), &
+         yield_table%hm_mass,yield_table%hm_z,yield_table%hm_age,yield_table%hm_remnant,yield_table%hm_adjustment]
+    ! Keep existing exact-Z, SNIa-off checkpoints readable. Extensions bind
+    ! the new Z policy and EVERY consumed SNIa contract value, not just labels.
+    if(yield_table%high_mass_linear_z)values=[values,2d0,1d0]
+    if(yield_table%net_yield_diagnostic_unavailable)values=[values,5d0,1d0]
+    if(allocated(yield_table%agb_terminal_row))values=[values,6d0,1d0]
+    if(enable_agb.or.(enable_wind.and.configured_channel_mass_min(1)<40d0).or. &
+         (enable_snii.and.configured_channel_mass_min(3)<40d0))values=[values,4d0,1d0]
+    if(enable_snia)then
+       call phase0_snia_identity(snia_values)
+       values=[values,3d0,snia_values]
+    endif
+  end subroutine phase0_source_identity
+
+  subroutine phase0_snia_identity(values)
+    real(stellar_dp),allocatable,intent(out)::values(:)
+    character(len=128)::names(11)
+    real(stellar_dp)::labels(11*128)
+    character(len=128)::accounting_names(2)
+    real(stellar_dp)::accounting_labels(256)
+    integer::i,j,k
+    names=[snia_population%population_source_id,snia_population%metallicity_factor_source_id, &
+         snia_population%source_commit_binding,snia_population%approval_id, &
+         snia_physical%yield_source_id,snia_physical%yield_source_sha256, &
+         snia_physical%source_commit_binding,snia_physical%conversion_code_sha256,snia_physical%approval_id, &
+         snia_coupling%source_commit_binding,snia_coupling%approval_id]
+    k=0
+    do i=1,11
+       do j=1,128
+          k=k+1;labels(k)=iachar(names(i)(j:j))
+       enddo
+    enddo
+    values=[labels,merge(1d0,0d0,snia_population%approved), &
+         real(snia_population%population_model_id,stellar_dp),real(snia_population%imf_id,stellar_dp), &
+         snia_population%binary_fraction,snia_population%imf_conversion_factor, &
+         snia_population%minimum_delay_gyr,snia_population%maximum_delay_gyr, &
+         snia_population%power_law_index,snia_population%events_per_initial_msun, &
+         real(snia_population%event_realization_policy,stellar_dp), &
+         real(snia_population%binary_fraction_policy,stellar_dp),real(snia_population%metallicity_policy,stellar_dp), &
+         merge(1d0,0d0,snia_physical%approved),real(snia_physical%wd_debit_policy,stellar_dp), &
+         real(snia_physical%shortfall_policy,stellar_dp),real(snia_physical%momentum_policy,stellar_dp), &
+         snia_physical%returned_mass_per_event,snia_physical%terminal_remnant_per_event, &
+         snia_physical%wd_debit_per_event,snia_physical%energy_per_event,snia_physical%momentum_per_event, &
+         snia_physical%radial_momentum_per_event,snia_physical%ejected_mass_per_event,snia_physical%net_yield_per_event, &
+         merge(1d0,0d0,snia_coupling%approved),real(snia_coupling%mode,stellar_dp), &
+         snia_coupling%thermal_fraction,merge(1d0,0d0,snia_coupling%include_event_momentum_kinetic)]
+    ! Preserve historical strict-WD checkpoints; the new mode adds an explicit
+    ! versioned identity, so switching modes on restart is rejected both ways.
+    if (snia_population%mass_accounting == snia_accounting_effective_ssp) then
+       accounting_names(1)=snia_population%mass_accounting
+       accounting_names(2)=snia_population%accounting_approval_id
+       k=0
+       do i=1,2
+          do j=1,128
+             k=k+1;accounting_labels(k)=iachar(accounting_names(i)(j:j))
+          enddo
+       enddo
+       values=[values,7d0,accounting_labels]
+    endif
+  end subroutine phase0_snia_identity
+
+  subroutine phase0_check_source_consensus(ierr)
+    integer,intent(out)::ierr
+    real(stellar_dp),allocatable::values(:),reference(:)
+    integer::status,info,n,nroot,local_error
+    include 'mpif.h'
+    call phase0_source_identity(values,status)
+    call MPI_Allreduce(status,ierr,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    if(ierr/=0.or.info/=0)then
+       ierr=max(1,ierr)
+       return
+    endif
+    n=size(values);nroot=n
+    call MPI_Bcast(nroot,1,MPI_INTEGER,0,MPI_COMM_WORLD,info)
+    local_error=merge(0,1,n==nroot.and.info==0)
+    call MPI_Allreduce(local_error,ierr,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    if(ierr/=0)return
+    allocate(reference(n));reference=values
+    call MPI_Bcast(reference,n,MPI_DOUBLE_PRECISION,0,MPI_COMM_WORLD,info)
+    local_error=merge(0,1,all(reference==values).and.info==0)
+    call MPI_Allreduce(local_error,ierr,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+  end subroutine phase0_check_source_consensus
 
   subroutine initialize_stellar_feedback_locks()
     integer :: lock_index
@@ -300,7 +449,32 @@ contains
        ierr = 40
        return
     end if
+    call validate_snia_population_binding(snia_population, default_imf_id, &
+         population_model_id, configured_binary_fraction, read_ierr)
+    if (read_ierr /= snia_population_contract_ok) then
+       ierr = 41
+       if (myid == 1) then
+          write(*,'(A,2I4)') ' SNIa IMF mismatch check: runtime / contract=', &
+               default_imf_id, snia_population%imf_id
+          write(*,'(A,2I4)') ' SNIa population check: runtime / contract=', &
+               population_model_id, snia_population%population_model_id
+          write(*,'(A,2ES16.7)') ' SNIa binary fraction check: runtime / contract=', &
+               configured_binary_fraction, snia_population%binary_fraction
+       end if
+       return
+    end if
+    if(trim(snia_population%metallicity_factor_source_id)/='snia_metallicity_factor_constant_unity_v1')then
+       ierr=42 ! The live DTD call supplies unity, not an unimplemented Z model.
+       return
+    endif
     snia_runtime_contract_initialized = .true.
+    if (myid == 1) then
+       write(*,'(a,a)') 'SNIa mass accounting: ', trim(snia_population%mass_accounting)
+       if (snia_population%mass_accounting == snia_accounting_effective_ssp) then
+          write(*,'(a,a)') 'SNIa accounting approval: ', trim(snia_population%accounting_approval_id)
+          write(*,'(a)') 'Effective SSP: aggregate stellar-mass debit; NOT a resolved WD/binary population'
+       endif
+    endif
   end subroutine load_snia_runtime_contract
 
   subroutine phase0_get_runtime_identity(path, n_rows, is_loaded)
@@ -321,6 +495,9 @@ contains
     integer :: channel, row
 
     enabled = (/enable_wind, enable_agb, enable_snii, enable_snia, enable_pisn/)
+    ! SNIa has its own per-event physical input and DTD; no fake canonical
+    ! per-star SNIa rows are required or consumed by the generic SSP driver.
+    enabled(4)=.false.
     ierr = 0
     do channel = 1, n_stellar_channels
        if (.not. enabled(channel)) cycle
@@ -389,6 +566,7 @@ contains
     real(stellar_dp) :: returned_code, snii_returned_code, snia_returned_code
     real(stellar_dp) :: volume
     real(stellar_dp) :: snia_expected_events, snia_available_msun
+    real(stellar_dp) :: snia_prior_events, effective_remaining_code
     real(stellar_dp) :: ejecta_code(n_stellar_elements), metal_ejecta_code
     real(stellar_dp) :: untracked_ejecta_msun, metal_ejecta_msun
     real(stellar_dp) :: ledger_remaining_code, ledger_scale
@@ -623,8 +801,23 @@ contains
           call progress_abort(progress, progress_ierr)
           return
        end if
-       snia_available_msun = population_ledger%channel_remnant_mass(channel_agb) - &
-            prior_snia_returned_code * scale_mass
+       if (snia_population%mass_accounting == snia_accounting_strict_wd) then
+          call check_agb_wd_causality(yield_table,population,snia_population,snia_physical%wd_debit_per_event, &
+               previous_age_gyr,age_gyr,configured_channel_mass_min(channel_agb), &
+               configured_channel_mass_max(channel_agb),phase0_mass_bins,snia_ledger_ierr)
+          if(snia_ledger_ierr/=0)then
+             ierr=82
+             if(myid==1)write(*,*) 'AGB/SNIa rejected: WD supply cannot fund the DTD causally'
+             call progress_abort(progress,progress_ierr)
+             return
+          endif
+          snia_available_msun = population_ledger%channel_remnant_mass(channel_agb) - &
+               prior_snia_returned_code * scale_mass
+       else
+          ! All generic channels for this interval have already been charged.
+          ! This is total SSP mass available, NOT a manufactured WD reservoir.
+          snia_available_msun = (particle_mass_before_code-returned_code)*scale_mass
+       endif
        if (.not. ieee_is_finite(snia_available_msun) .or. &
             snia_available_msun < -source_tolerance * max(1.0d0, &
             population%initial_mass)) then
@@ -640,6 +833,9 @@ contains
           call progress_abort(progress, progress_ierr)
           return
        end if
+       ! The event builder enforces the unchanged N100 zero-remnant mass debit.
+       ! In effective mode its mass-limit argument is total SSP capacity; no
+       ! WD ledger setter or WD/remnant population mutation is used below.
        call build_snia_event_budget(snia_physical, snia_expected_events, &
             snia_available_msun, snia_budget, snia_ledger_ierr)
        if (snia_ledger_ierr /= snia_contract_ok) then
@@ -647,25 +843,49 @@ contains
           call progress_abort(progress, progress_ierr)
           return
        end if
-       call set_white_dwarf_reservoir(population_ledger, snia_available_msun, &
-            source_tolerance, snia_ledger_ierr)
-       if (snia_ledger_ierr /= population_ledger_ok) then
-          ierr = 80
-          call progress_abort(progress, progress_ierr)
-          return
-       end if
-       call apply_snia_event_budget(population_ledger, snia_budget, &
-            source_tolerance, snia_ledger_ierr)
-       if (snia_ledger_ierr /= population_ledger_ok) then
-          ierr = 81
-          call progress_abort(progress, progress_ierr)
-          return
-       end if
+       if (snia_population%mass_accounting == snia_accounting_strict_wd) then
+          call set_white_dwarf_reservoir(population_ledger, snia_available_msun, &
+               source_tolerance, snia_ledger_ierr)
+          if (snia_ledger_ierr /= population_ledger_ok) then
+             ierr = 80
+             call progress_abort(progress, progress_ierr)
+             return
+          end if
+          call apply_snia_event_budget(population_ledger, snia_budget, &
+               source_tolerance, snia_ledger_ierr)
+          if (snia_ledger_ierr /= population_ledger_ok) then
+             ierr = 81
+             call progress_abort(progress, progress_ierr)
+             return
+          end if
+       else
+          call evaluate_snia_interval_events(snia_population, population%initial_mass, &
+               0d0, previous_age_gyr, 1d0, snia_prior_events, snia_ledger_ierr)
+          if (snia_ledger_ierr /= snia_population_contract_ok) then
+             ierr = 78
+             call progress_abort(progress, progress_ierr)
+             return
+          endif
+          call close_effective_snia_return(particle_mass_before_code,returned_code,generic_remaining_code, &
+               prior_snia_returned_code,snia_prior_events*snia_physical%returned_mass_per_event/scale_mass, &
+               snia_budget%returned_mass/scale_mass,particle_mass_scale,source_tolerance, &
+               effective_remaining_code,snia_accounting_ierr)
+          if (snia_accounting_ierr /= snia_accounting_ok) then
+             ierr = 83
+             if(myid==1)write(*,*) 'Effective SSP SNIa rejected: combined mass/DTD history does not close'
+             call progress_abort(progress, progress_ierr)
+             return
+          endif
+       endif
        snia_returned_code = snia_budget%returned_mass / scale_mass
     end if
 
     ledger_remaining_code = (population_ledger%living_mass + &
          population_ledger%remnant_mass) / scale_mass
+    if (enable_snia) then
+       if (snia_population%mass_accounting == snia_accounting_effective_ssp) &
+            ledger_remaining_code = effective_remaining_code+prior_snia_returned_code
+    endif
     ledger_scale = max(particle_mass_scale, abs(particle_mass_before_code), &
          abs(ledger_remaining_code))
     if (.not. ieee_is_finite(ledger_remaining_code) .or. &

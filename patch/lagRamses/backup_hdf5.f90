@@ -52,6 +52,59 @@ end subroutine dump_all_hdf5
 !###########################################################################
 ! Header: simulation parameters as attributes
 !###########################################################################
+subroutine stellar_feedback_hdf5_identity(grp,writing)
+  use amr_commons
+  use ramses_hdf5_io
+  use stellar_enrichment_config, only: user_source_model_requested
+  use stellar_ramses_runtime, only: phase0_source_identity
+  implicit none
+  include 'mpif.h'
+  integer(HID_T),intent(in)::grp
+  logical,intent(in)::writing
+  real(dp),allocatable::values(:),saved(:)
+  logical::exists
+  integer::enabled,stored,status,nlocal
+  enabled=merge(1,0,user_source_model_requested())
+  if(writing)then
+     call hdf5_write_attr_int(grp,'stellar_source_model_enabled',enabled)
+  else
+     call h5aexists_f(grp,'stellar_source_model_enabled',exists,status)
+     call require_ok(status)
+     stored=0
+     if(exists)then
+        call hdf5_read_attr_int_checked(grp,'stellar_source_model_enabled',stored,status)
+        call require_ok(status)
+     endif
+     ! No silent activation, deactivation or legacy migration on restart.
+     call require_ok(merge(0,1,enabled==stored))
+  endif
+  if(enabled==0)return
+  call phase0_source_identity(values,status)
+  call require_ok(status)
+  if(writing)then
+     nlocal=0
+     if(myid==1)nlocal=size(values)
+     call hdf5_write_dataset_1d_dp(grp,'stellar_source_model_values',values,nlocal,0_i8b,int(size(values),i8b))
+  else
+     allocate(saved(size(values)))
+     call hdf5_read_dataset_1d_dp_checked(grp,'stellar_source_model_values',saved,size(saved), &
+          0_i8b,int(size(saved),i8b),status)
+     call require_ok(status)
+     call require_ok(merge(0,1,all(saved==values)))
+     if(myid==1)write(*,*) 'STELLAR_SOURCE_RESTART_IDENTITY_PASS'
+  endif
+contains
+  subroutine require_ok(local_status)
+    integer,intent(in)::local_status
+    integer::global_status,info
+    call MPI_Allreduce(abs(local_status),global_status,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    if(global_status/=0.or.info/=0)then
+       if(myid==1)write(*,*) 'ERROR: stellar source restart identity mismatch or invalid source input'
+       call MPI_Abort(MPI_COMM_WORLD,1,info)
+    endif
+  end subroutine require_ok
+end subroutine stellar_feedback_hdf5_identity
+
 subroutine backup_header_hdf5()
   use amr_commons
   use hydro_commons
@@ -568,6 +621,7 @@ subroutine backup_part_hdf5()
   end do
 
   call hdf5_create_group('/particles', grp_id)
+  call stellar_feedback_hdf5_identity(grp_id,.true.)
   call hdf5_write_attr_int8(grp_id, 'npart_total', npart_total)
   call hdf5_write_attr_int8(grp_id, 'nstar_tot', int(nstar_tot, i8b))
   call hdf5_write_attr_dp(grp_id, 'mstar_tot', mstar_tot)

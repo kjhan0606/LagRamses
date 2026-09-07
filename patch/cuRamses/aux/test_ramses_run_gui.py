@@ -3,6 +3,7 @@
 import contextlib
 import io
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -36,6 +37,60 @@ def collect(overrides=None):
 
 
 class WizardTests(unittest.TestCase):
+    def test_high_mass_history_runtime_contract(self):
+        rng = mkrun.rng
+        valid = dict(feedback_mode='channel_resolved', fate_policy='user_selected_model_v1',
+                     high_mass_preset='wind_only_collapse', high_mass_history_path='/input/history.nml',
+                     population_model='single_star_ssp', yield_source_basis='per_star_cumulative',
+                     binary_fraction=0.0, pic=True, outformat='hdf5', informat='hdf5', nrestart=2,
+                     use_wind=True, use_agb=False, use_snii=True, use_snia=False, use_pisn=False)
+        self.assertFalse([m for m in rng.validate_params(valid) if m.level == 'ERROR'])
+        parsed, _ = rng.parse_namelist(rng.format_namelist(valid))
+        imported = rng.import_to_values(parsed)
+        for key in valid:
+            # The writer intentionally omits values equal to native defaults.
+            self.assertEqual(imported.get(key, rng.PARAM_BY_NAME[key].default), valid[key], key)
+        for quote in ("'", '"'):
+            text = ('&STELLAR_ENRICHMENT_PARAMS high_mass_history_path='
+                    + quote + '/input/metal!Z/history.nml' + quote + ' / ! trailing comment')
+            parsed, groups = rng.parse_namelist(text)
+            self.assertEqual(groups, ['STELLAR_ENRICHMENT_PARAMS'])
+            self.assertEqual(rng.import_to_values(parsed)['high_mass_history_path'],
+                             '/input/metal!Z/history.nml')
+        for edit in (dict(high_mass_history_path=''), dict(fate_policy='review_only_unresolved'),
+                     dict(feedback_mode='legacy'), dict(population_model='binary_ssp'),
+                     dict(pic=False), dict(outformat='original'), dict(informat='original'),
+                     dict(binary_fraction=.1), dict(use_wind=False), dict(use_snii=False),
+                     dict(use_snia=True), dict(use_pisn=True), dict(yield_source_basis=''),
+                     dict(fate_approval_id='not-approved')):
+            with self.subTest(edit=edit):
+                self.assertTrue([m for m in rng.validate_params(dict(valid, **edit))
+                                 if m.level == 'ERROR'])
+        binary = dict(valid, population_model='binary_ssp', binary_fraction=.5, imf_id=1,
+                      use_agb=True, use_snia=True)
+        self.assertFalse([m for m in rng.validate_params(binary) if m.level == 'ERROR'])
+        for edit in (dict(use_agb=False), dict(binary_fraction=0), dict(binary_fraction=float('nan'))):
+            self.assertTrue([m for m in rng.validate_params(dict(binary, **edit)) if m.level == 'ERROR'])
+
+    def test_high_mass_choices_round_trip_and_validation(self):
+        rng = mkrun.rng
+        for preset, limit, valid in (
+                ('source_consistent', 0.0, True), ('wind_only_collapse', 0.0, True),
+                ('mixed_remnant', .02, True), ('mixed_remnant', 0.0, False),
+                ('source_consistent', .02, False), ('unknown', 0.0, False),
+                ('mixed_remnant', float('nan'), False)):
+            values = dict(feedback_mode='channel_resolved', high_mass_preset=preset,
+                          high_mass_remnant_adjust_max_fraction=limit)
+            errors = [m for m in rng.validate_params(values) if m.level == 'ERROR']
+            self.assertEqual(not errors, valid)
+            if valid:
+                parsed, _ = rng.parse_namelist(rng.format_namelist(values))
+                imported = rng.import_to_values(parsed)
+                self.assertEqual(imported['high_mass_preset'], preset)
+                self.assertEqual(imported['high_mass_remnant_adjust_max_fraction'], limit)
+        self.assertTrue(any(m.level == 'ERROR' for m in rng.validate_params(
+            dict(feedback_mode='legacy', high_mass_preset='wind_only_collapse'))))
+
     def test_sink_formation_prerequisites_and_round_trip(self):
         rng = mkrun.rng
         for hydro in (False, True):
@@ -131,7 +186,24 @@ class WizardTests(unittest.TestCase):
                 with mock.patch('builtins.input', side_effect=terminal_input), \
                         contextlib.redirect_stdout(io.StringIO()):
                     old.main()
-                self.assertEqual(preview, {path: Path(path).read_text() for path in preview})
+                old_files = {path: Path(path).read_text() for path in preview}
+                if overrides.get('Run mode') == 'hydro':
+                    # Intentional change: replace the incomplete historical
+                    # stellar group with the complete editable native inputs.
+                    # All non-stellar output remains byte-identical.
+                    pattern = r'&STELLAR_ENRICHMENT_PARAMS\n.*?\n/'
+                    for path in preview:
+                        if path.endswith('.nml'):
+                            parsed, _ = mkrun.rng.parse_namelist(preview[path])
+                            values = mkrun.rng.import_to_values(parsed)
+                            self.assertEqual(values['imf_id'], 2)
+                            self.assertEqual(values['population_model'], 'single_star_ssp')
+                            self.assertEqual(values['high_mass_preset'], 'source_consistent')
+                            self.assertEqual(values['high_mass_remnant_adjust_max_fraction'], 0.0)
+                            self.assertEqual(len(re.findall(pattern, preview[path], re.S)), 1)
+                            old_files[path] = re.sub(pattern, '&STELLAR_ENRICHMENT_PARAMS\n/', old_files[path], flags=re.S)
+                            preview[path] = re.sub(pattern, '&STELLAR_ENRICHMENT_PARAMS\n/', preview[path], flags=re.S)
+                self.assertEqual(preview, old_files)
 
     def test_invalid_inputs_do_not_write(self):
         for settings in ({'Run name (used as file/dir prefix)': '../escape'},

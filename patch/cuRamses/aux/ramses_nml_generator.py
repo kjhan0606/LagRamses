@@ -16,6 +16,7 @@ Requires: Python 3.6+ (no external dependencies)
 from __future__ import print_function
 import argparse
 import copy
+import math
 import os
 import re
 import sys
@@ -156,6 +157,9 @@ PARAMS = [
     ParamDef('tout',      'real_arr','',  'OUTPUT_PARAMS', S_OUTPUT, 'Output times (csv)',
              visible_when='cosmo==False'),
     ParamDef('outformat', 'str',  '',     'OUTPUT_PARAMS', S_OUTPUT, 'Output format',
+             choices=['original','hdf5']),
+    ParamDef('informat', 'str', '', 'OUTPUT_PARAMS', S_OUTPUT,
+             'Restart format (live SNRT AGN requires hdf5 and an HDF5 build)',
              choices=['original','hdf5']),
     ParamDef('output_mode','str', '',     'OUTPUT_PARAMS', S_OUTPUT, 'Output mode'),
     ParamDef('walltime_hrs','real',0.0,   'OUTPUT_PARAMS', S_OUTPUT, 'Walltime limit (hours, 0=off)'),
@@ -339,6 +343,41 @@ PARAMS = [
     ParamDef('omega_b',   'real', 0.0,     'PHYSICS_PARAMS', S_COSMO,'Baryon fraction (physics_params)',
              visible_when='cosmo==True'),
     ParamDef('yieldtablefilename','str','', 'PHYSICS_PARAMS', S_FEED, 'Yield table filename'),
+
+    # Native channel-resolved feedback. These are shared by CLI and GUI.
+    ParamDef('feedback_mode', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Native feedback implementation', choices=['channel_resolved', 'legacy']),
+    ParamDef('imf_id', 'int', None, 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'IMF: 2 Chabrier (default), 1 Kroupa, 0 Salpeter, 4 Miller-Scalo, 3 PopIII',
+             choices=[0, 1, 2, 3, 4]),
+    ParamDef('population_model', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Stellar population', choices=['single_star_ssp', 'binary_ssp']),
+    ParamDef('yield_source_basis', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Yield normalization', choices=['per_star_cumulative']),
+    ParamDef('imf_mass_min_msun', 'real', None, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'IMF lower mass [Msun]'),
+    ParamDef('imf_mass_max_msun', 'real', None, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'IMF upper mass [Msun]'),
+    ParamDef('binary_fraction', 'real', None, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Binary fraction'),
+    ParamDef('channel_mass_min_msun', 'real_arr', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Lower masses: wind, AGB, SNII, SNIa, PISN'),
+    ParamDef('channel_mass_max_msun', 'real_arr', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Upper masses: wind, AGB, SNII, SNIa, PISN'),
+    ParamDef('fate_policy', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Fate admission (not enabled by selecting an endpoint preset)',
+             choices=['review_only_unresolved', 'approved_terminal_map_v1', 'user_selected_model_v1']),
+    ParamDef('fate_map_sha256', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Fate table fingerprint'),
+    ParamDef('fate_approval_id', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Fate approval identifier'),
+    ParamDef('high_mass_preset', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             '40-120 Msun endpoint model (user-selected mode requires a history file)',
+             choices=['source_consistent', 'wind_only_collapse', 'mixed_remnant']),
+    ParamDef('high_mass_history_path', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Native source-node/lifetime namelist; requires user_selected_model_v1 and HDF5 output/restart'),
+    ParamDef('high_mass_remnant_adjust_max_fraction', 'real', None, 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Mixed-model maximum remnant adjustment / INITIAL mass; explicit nonzero limit required'),
+    ParamDef('use_wind', 'bool', True, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable stellar wind source'),
+    ParamDef('use_agb', 'bool', True, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable AGB source (requires its own rows)'),
+    ParamDef('use_snii', 'bool', True, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable core-collapse source/remnant accounting'),
+    ParamDef('use_snia', 'bool', False, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable SNIa; requires matching binary SSP and DTD/event input; strict WD or explicitly approved effective SSP accounting'),
+    ParamDef('use_pisn', 'bool', False, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable PISN (not in user-selected high-mass route)'),
 
     # ====== CPL_PARAMS (Dark Energy) ======
     ParamDef('w0',   'real', -1.0, 'CPL_PARAMS', S_DE, 'DE equation of state w0',
@@ -643,6 +682,44 @@ def validate_params(values):
     values = _normalize_values(values)
     msgs = []
 
+    preset = str(values.get('high_mass_preset') or 'source_consistent').strip().strip("'\"").lower()
+    try:
+        limit = float(values.get('high_mass_remnant_adjust_max_fraction') or 0.0)
+        valid = math.isfinite(limit) and (
+            (preset in ('source_consistent', 'wind_only_collapse') and limit == 0.0) or
+            (preset == 'mixed_remnant' and 0.0 < limit <= 1.0))
+    except (TypeError, ValueError):
+        valid = False
+    if not valid:
+        msgs.append(ValidationMsg('ERROR', 'Invalid high-mass preset/remnant adjustment limit'))
+    if str(values.get('feedback_mode', '')).strip("'\"").lower() == 'legacy' and preset != 'source_consistent':
+        msgs.append(ValidationMsg('ERROR', 'Legacy feedback cannot consume a high-mass model override'))
+    fate = str(values.get('fate_policy') or '').strip("'\"").lower()
+    history = str(values.get('high_mass_history_path') or '').strip("'\"")
+    if (fate == 'user_selected_model_v1') != bool(history):
+        msgs.append(ValidationMsg('ERROR', 'User-selected fate policy and high_mass_history_path must be supplied together'))
+    if fate == 'user_selected_model_v1':
+        if (str(values.get('feedback_mode', '')).strip("'\"") != 'channel_resolved' or
+                not values.get('pic') or str(values.get('outformat', '')).strip("'\"") != 'hdf5' or
+                (values.get('nrestart', 0) > 0 and str(values.get('informat', '')).strip("'\"") != 'hdf5')):
+            msgs.append(ValidationMsg('ERROR', 'User-selected source requires channel-resolved PIC and HDF5 I/O'))
+        if (str(values.get('yield_source_basis', '')).strip("'\"") != 'per_star_cumulative' or
+                not values.get('use_wind', True) or not values.get('use_snii', True) or
+                values.get('use_pisn', False)):
+            msgs.append(ValidationMsg('ERROR', 'User-selected source requires per-star wind+SNII and PISN off'))
+        population = str(values.get('population_model', '')).strip("'\"")
+        try:
+            fraction = float(values.get('binary_fraction', 0.0))
+            valid_population = ((population == 'single_star_ssp' and fraction == 0.0 and not values.get('use_snia', False)) or
+                                (population == 'binary_ssp' and 0.0 < fraction <= 1.0 and values.get('use_snia', False)
+                                 and values.get('use_agb', True)))
+        except (TypeError, ValueError):
+            valid_population = False
+        if not valid_population:
+            msgs.append(ValidationMsg('ERROR', 'This combined SNIa source requires a matching binary population and AGB channel; single-star mode requires binary=0 and SNIa off'))
+        if values.get('fate_map_sha256') or values.get('fate_approval_id'):
+            msgs.append(ValidationMsg('ERROR', 'User-selected source must not claim an approved fate package'))
+
     # --- Mutual exclusion: modified gravity (max 1) ---
     mg_flags = ['use_fr', 'use_ndgp', 'use_mond',
                 'use_symmetron', 'use_dilaton', 'use_galileon']
@@ -713,7 +790,7 @@ def validate_params(values):
 GROUP_ORDER = [
     'RUN_PARAMS', 'COSMO_PARAMS', 'OUTPUT_PARAMS', 'INIT_PARAMS',
     'AMR_PARAMS', 'LIGHTCONE_PARAMS', 'REFINE_PARAMS',
-    'HYDRO_PARAMS', 'POISSON_PARAMS', 'PHYSICS_PARAMS', 'SINK_PARAMS',
+    'HYDRO_PARAMS', 'POISSON_PARAMS', 'PHYSICS_PARAMS', 'SINK_PARAMS', 'STELLAR_ENRICHMENT_PARAMS',
     # Optional groups (only emitted when relevant)
     'CPL_PARAMS', 'NEUTRINO_PARAMS',
     'FR_PARAMS', 'NDGP_PARAMS', 'SYMMETRON_PARAMS',
@@ -900,22 +977,23 @@ def parse_namelist(text):
     cleaned_lines = []
     for line in text.split('\n'):
         # Simple comment removal: strip everything after ! not inside quotes
-        in_str = False
+        quote = None
         result = []
         for ch in line:
-            if ch == "'" and not in_str:
-                in_str = True
-            elif ch == "'" and in_str:
-                in_str = False
-            elif ch == '!' and not in_str:
+            if ch in ("'", '"') and quote is None:
+                quote = ch
+            elif ch == quote:
+                quote = None
+            elif ch == '!' and quote is None:
                 break
             result.append(ch)
         cleaned_lines.append(''.join(result))
 
     content = '\n'.join(cleaned_lines)
 
-    # Find all namelist groups
-    pattern = r'&(\w+)\s*(.*?)\s*/'
+    # Only an unquoted slash terminates a group; absolute source paths and
+    # slashes in model labels must survive import by both CLI and GUI.
+    pattern = r'''&(\w+)\s*((?:'[^']*(?:''[^']*)*'|"[^"]*(?:""[^"]*)*"|[^/'"])*?)/'''
     for m in re.finditer(pattern, content, re.DOTALL):
         group_name = m.group(1).upper()
         body = m.group(2)

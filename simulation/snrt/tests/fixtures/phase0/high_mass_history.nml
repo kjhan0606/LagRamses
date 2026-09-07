@@ -1,0 +1,12 @@
+! Synthetic single-population source-node timing and identity.
+&stellar_high_mass_history
+ version=1,node_count=3,
+ model_id='synthetic_high_mass_history_control_v1',
+ wind_source_id='synthetic_consistent_v1',terminal_source_id='synthetic_consistent_v1',
+ model_coordinates='single_star_ssp; synthetic Z=.01; no physical rotation/engine calibration',
+ timing_policy='wind_linear_terminal_step',
+ input_imf_id=2,input_population_id=0,input_binary_fraction=0,
+ input_imf_min=.08,input_imf_max=120,
+ mass_msun=40,60,120,metallicity=.01,.01,.01,
+ terminal_age_yr=1000,1000,1000,terminal_outcome=1,1,1
+/

@@ -348,7 +348,14 @@
           "metallicity_mass_fraction": 0.03,
           "yield_header_final_mass_msun": 0.774,
           "auxiliary_final_mass_msun": 0.744,
-          "authoritative_value_selected": false
+          "authoritative_value_selected": true,
+          "selected_final_mass_msun": 0.774,
+          "selected_mass_expelled_msun": 3.226,
+          "selected_source": "yield_table_header",
+          "selection_date": "2026-09-07",
+          "selection_authority": "operator_directed_primary_table_precedence",
+          "rationale": "Prefer printed article data where available, otherwise the detailed yield-table header over the auxiliary mass array. The 4 Msun value is NOT printed in KL16 Table 7; 0.774 is supported by the detailed header and Mass(i)/X(i) ejecta denominator. Suspected auxiliary transcription error, not an author-confirmed erratum.",
+          "blocks_implementation": false
         },
         "all_active_gross_sums_exceed_labelled_expelled_mass": true,
         "maximum_active_gross_mass_excess_msun": 0.03361670011913276,
@@ -362,7 +369,9 @@
         "canonical_rows_emitted": 0,
         "physical_approval": false
       },
-      "known_gap_for_this_project": "COLIBRE author's mirror contains 64 model headers over the three published Z values; the two 8 Msun yield blocks at Z=0.014 and 0.03 are commented out and absent from its auxiliary mass arrays. All 64 blocks including those commented records contain the eleven tracked elements, but a descriptive sum of listed gross masses differs from the labelled expelled mass by up to 0.035693969 Msun (maximum relative difference 0.0058363335). Do not uncomment, renormalize or accept these as qualified nodes without source-specific reconciliation. Per-star ages, release ownership, energy, physical population choice and rights remain unresolved.",
+      "selected_gross_normalization_policy": "all_listed_elements_to_selected_expelled_mass_v1",
+      "normalization_selection_basis": "Direct operator instruction: normalize gross ejecta by the sum of all 78 listed elements while retaining selected total expelled/remnant masses and raw data. This is a processing policy, not an established roundoff diagnosis or full physical-package approval.",
+      "known_gap_for_this_project": "The mirror has 62 active models and two commented 8 Msun blocks at Z=0.014/0.03, which remain excluded. Raw gross sums exceed labelled expelled masses; operator-selected all-element normalization now resolves the selected mass budget without changing raw data. Initial-composition/net-yield matching, per-star ages, release ownership, energy, physical population choice and rights remain unresolved. Do not promote these rows to a complete physical package or silently normalize CK22.",
       "source_asset_path": "/gpfs/kjhan/LRD_JWST/external/g2_candidates/colibre2026_yields_acecc180/data/Karakas2016",
       "source_mirror_repository": "https://github.com/correac/COLIBRE_yield_tables",
       "source_mirror_commit": "acecc180347d9505780a7985ec2c4a8a11f5c61f",

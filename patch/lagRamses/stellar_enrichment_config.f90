@@ -55,6 +55,11 @@ module stellar_enrichment_config
        'review_only_unresolved'
   character(len=128), save, public :: stellar_fate_map_sha256 = ''
   character(len=128), save, public :: stellar_fate_approval_id = ''
+  ! Endpoint model selection is not a production approval or a missing-data
+  ! override. All presets retain the same conservation checks.
+  character(len=32), save :: high_mass_model = 'source_consistent'
+  character(len=1024), save :: high_mass_history_file = ''
+  real(stellar_dp), save :: high_mass_max_remnant_adjust_fraction = 0.0_stellar_dp
   ! Build-bound production identity.  These values remain blank in a review
   ! build and may only be populated by the approved source-package promotion
   ! process.  Namelist strings alone must never create a production token.
@@ -130,6 +135,9 @@ contains
     stellar_fate_policy = 'review_only_unresolved'
     stellar_fate_map_sha256 = ''
     stellar_fate_approval_id = ''
+    high_mass_model = 'source_consistent'
+    high_mass_history_file = ''
+    high_mass_max_remnant_adjust_fraction = 0.0_stellar_dp
     unresolved_fate_mass_min = (/0.8d0, 40.0d0/)
     unresolved_fate_mass_max = (/1.0d0, 120.0d0/)
     configured_channel_mass_min = &
@@ -154,6 +162,9 @@ contains
     character(len=32) :: population_model
     character(len=32) :: yield_source_basis
     character(len=32) :: parsed_feedback_mode
+    character(len=32) :: high_mass_preset
+    character(len=1024) :: high_mass_history_path
+    real(stellar_dp) :: high_mass_remnant_adjust_max_fraction
     character(len=64) :: fate_policy
     character(len=128) :: fate_map_sha256, fate_approval_id
     integer :: imf_id, parsed_population_model_id, parsed_yield_source_basis_id
@@ -167,7 +178,8 @@ contains
          use_snii, use_snia, use_pisn, allow_legacy_prompt_snia, feedback_mode, imf_id, &
          population_model, yield_source_basis, imf_mass_min_msun, &
          imf_mass_max_msun, binary_fraction, channel_mass_min_msun, &
-         channel_mass_max_msun, fate_policy, fate_map_sha256, fate_approval_id
+         channel_mass_max_msun, fate_policy, fate_map_sha256, fate_approval_id, &
+         high_mass_preset, high_mass_remnant_adjust_max_fraction, high_mass_history_path
 
     use_h  = active_element(elem_h)
     use_he = active_element(elem_he)
@@ -199,6 +211,9 @@ contains
     channel_mass_min_msun = -1.0_stellar_dp
     channel_mass_max_msun = -1.0_stellar_dp
     parsed_feedback_mode = stellar_feedback_mode
+    high_mass_preset = 'source_consistent'
+    high_mass_history_path = ''
+    high_mass_remnant_adjust_max_fraction = 0.0_stellar_dp
     fate_policy = stellar_fate_policy
     fate_map_sha256 = stellar_fate_map_sha256
     fate_approval_id = stellar_fate_approval_id
@@ -212,11 +227,23 @@ contains
     end if
     if (iostat_out > 0) return
 
+    call lowercase_ascii(high_mass_preset)
+    if (.not. valid_high_mass_choice(high_mass_preset, high_mass_remnant_adjust_max_fraction)) then
+       iostat_out = 1012
+       return
+    end if
+
     call lowercase_ascii(feedback_mode)
     select case (trim(adjustl(feedback_mode)))
     case ('channel_resolved')
        parsed_feedback_mode = 'channel_resolved'
     case ('legacy')
+       ! A legacy executable does not consume the new endpoint model. Do not
+       ! silently accept a requested change and run the old physics instead.
+       if (trim(high_mass_preset) /= 'source_consistent' .or. len_trim(high_mass_history_path)>0) then
+          iostat_out = 1012
+          return
+       end if
        ! Legacy mode does not consume the population/yield-basis fields, but
        ! its element and channel switches still belong to this namelist.
        ! Commit them together only after the complete namelist read succeeds.
@@ -225,6 +252,9 @@ contains
             use_snii, use_snia, use_pisn)
        legacy_prompt_snia_opt_in = allow_legacy_prompt_snia
        stellar_feedback_mode = 'legacy'
+       high_mass_model = high_mass_preset
+       high_mass_history_file = ''
+       high_mass_max_remnant_adjust_fraction = high_mass_remnant_adjust_max_fraction
        return
     case default
        iostat_out = 1001
@@ -313,10 +343,22 @@ contains
           iostat_out = 1011
           return
        end if
+    case ('user_selected_model_v1')
+       ! Explicit user-model execution is distinct from a scientific approval.
+       ! The runtime still has to validate and bind actual source-node data.
+       if (len_trim(high_mass_history_path)==0 .or. &
+            len_trim(fate_map_sha256)>0 .or. len_trim(fate_approval_id)>0) then
+          iostat_out = 1011
+          return
+       end if
     case default
        iostat_out = 1011
        return
     end select
+    if (len_trim(high_mass_history_path)>0 .and. trim(fate_policy)/='user_selected_model_v1') then
+       iostat_out = 1011
+       return
+    end if
     call commit_runtime_switches(use_h, use_he, use_c, use_n, use_o, use_ne, &
          use_mg, use_si, use_s, use_ca, use_fe, use_wind, use_agb, use_snii, &
          use_snia, use_pisn)
@@ -333,7 +375,25 @@ contains
     stellar_fate_policy = trim(adjustl(fate_policy))
     stellar_fate_map_sha256 = trim(adjustl(fate_map_sha256))
     stellar_fate_approval_id = trim(adjustl(fate_approval_id))
+    high_mass_model = trim(adjustl(high_mass_preset))
+    high_mass_history_file = high_mass_history_path
+    high_mass_max_remnant_adjust_fraction = high_mass_remnant_adjust_max_fraction
   end subroutine read_enrichment_namelist
+
+  logical function valid_high_mass_choice(preset, adjustment_limit)
+    character(len=*), intent(in) :: preset
+    real(stellar_dp), intent(in) :: adjustment_limit
+    valid_high_mass_choice = .false.
+    if (.not. ieee_is_finite(adjustment_limit)) return
+    select case (trim(preset))
+    case ('source_consistent', 'wind_only_collapse')
+       valid_high_mass_choice = adjustment_limit == 0.0_stellar_dp
+    case ('mixed_remnant')
+       ! Fraction of INITIAL mass, not a relative change in a small remnant.
+       ! No scientifically arbitrary correction limit is supplied by default.
+       valid_high_mass_choice = adjustment_limit > 0.0_stellar_dp .and. adjustment_limit <= 1.0_stellar_dp
+    end select
+  end function valid_high_mass_choice
 
   subroutine commit_runtime_switches(use_h, use_he, use_c, use_n, use_o, &
        use_ne, use_mg, use_si, use_s, use_ca, use_fe, use_wind, use_agb, &
@@ -387,6 +447,20 @@ contains
           (population_model_id == population_binary_ssp .and. &
            enable_snia .and. configured_binary_fraction > 0.0_stellar_dp))
   end function production_source_model_supported
+
+  logical function user_source_model_requested()
+    user_source_model_requested = use_channel_resolved_feedback() .and. &
+         trim(stellar_fate_policy)=='user_selected_model_v1' .and. len_trim(high_mass_history_file)>0 .and. &
+         yield_source_basis_id==yield_basis_per_star_cumulative .and. .not.enable_pisn .and. &
+         enable_wind .and. enable_snii .and. &
+         ((population_model_id==population_single_star_ssp.and.configured_binary_fraction==0d0.and..not.enable_snia) .or. &
+          (population_model_id==population_binary_ssp.and.configured_binary_fraction>0d0.and.enable_snia.and.enable_agb))
+    ! The binary branch is an explicitly declared effective SSP. Its SNIa
+    ! handoff and yield history must match the same IMF/population/fraction.
+    ! Only ordinary AGB remnants may fund SNIa; not NS/BH high-mass remnants.
+    if(enable_snia)user_source_model_requested=user_source_model_requested.and. &
+         configured_channel_mass_max(channel_agb)<=8d0
+  end function user_source_model_requested
 
   logical function production_fate_policy_supported()
     ! F-P1 is deliberately fail-closed until a reviewed, complete terminal

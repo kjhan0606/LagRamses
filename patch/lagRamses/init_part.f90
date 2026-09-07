@@ -5,6 +5,10 @@ subroutine init_part
   use hydro_parameters, ONLY: ichem
   use clfind_commons
   use ksection
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_enrichment_config, only: user_source_model_requested
+  use stellar_ramses_runtime, only: phase0_check_source_consensus
+#endif
 
 #ifdef RT
   use rt_parameters,only: convert_birth_times
@@ -97,6 +101,20 @@ subroutine init_part
      if(verbose)write(*,*)'Initial conditions already set'
      return
   end if
+
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  if(user_source_model_requested())then
+     if(trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))then
+        if(myid==1)write(*,*) 'ERROR: selected stellar source model requires HDF5 output/restart identity'
+        call MPI_Abort(MPI_COMM_WORLD,1,info)
+     endif
+     call phase0_check_source_consensus(info)
+     if(info/=0)then
+        if(myid==1)write(*,*) 'ERROR: selected stellar source inputs invalid or differ between MPI ranks'
+        call MPI_Abort(MPI_COMM_WORLD,1,i)
+     endif
+  endif
+#endif
 
   ! Allocate particle variables
   allocate(xp    (npartmax,ndim))

@@ -1,0 +1,12 @@
+! Synthetic effective binary SSP; NOT a physical binary yield calculation.
+&stellar_high_mass_history
+ version=1,node_count=6,
+ model_id='synthetic_binary_Z_mixture_v1',
+ wind_source_id='synthetic_consistent_v1',terminal_source_id='synthetic_consistent_v1',
+ model_coordinates='effective binary SSP; synthetic wind/SNII/AGB; physical SNIa separate',
+ timing_policy='wind_linear_terminal_step',metallicity_policy='linear_Z_cumulative_mixture',
+ input_imf_id=1,input_population_id=1,input_binary_fraction=.5,
+ input_imf_min=.08,input_imf_max=120,
+ mass_msun=40,60,120,40,60,120,metallicity=0,0,0,.02,.02,.02,
+ terminal_age_yr=1000,1000,1000,2000,2000,2000,terminal_outcome=1,1,1,0,0,0
+/

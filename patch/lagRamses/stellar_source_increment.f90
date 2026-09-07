@@ -60,6 +60,7 @@ contains
          mass_min, &
          mass_max, n_mass_bins, previous, ssp_ierr)
     if (ssp_ierr /= ssp_source_ok) then
+       if(table%high_mass_ready)write(*,*) 'High-mass previous cumulative failed: ',channel_id,ssp_ierr
        ierr = source_increment_err_ssp
        return
     end if
@@ -67,6 +68,7 @@ contains
     call integrate_ssp_channel(table, population, channel_id, &
          current_age_gyr, mass_min, mass_max, n_mass_bins, current, ssp_ierr)
     if (ssp_ierr /= ssp_source_ok) then
+       if(table%high_mass_ready)write(*,*) 'High-mass current cumulative failed: ',channel_id,ssp_ierr
        ierr = source_increment_err_ssp
        return
     end if

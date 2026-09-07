@@ -10,15 +10,16 @@ module stellar_enrichment_driver
   use stellar_enrichment_config, only: stellar_dp, n_stellar_channels, &
        channel_wind, channel_agb, channel_snii, channel_snia, channel_pisn, &
        enable_wind, enable_agb, enable_snii, enable_snia, enable_pisn, &
-       channel_owns_terminal_remnant, snii_source_node_fate_consumer_available
+       channel_owns_terminal_remnant, unresolved_fate_mass_min, unresolved_fate_mass_max
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, stellar_source_t, clear_cumulative, clear_source
   use stellar_yield_tables, only: stellar_yield_table_t
   use stellar_source_increment, only: integrate_ssp_channel_increment, &
        source_increment_ok
   use stellar_ssp_sources, only: integrate_ssp_channel, ssp_source_ok
+  use stellar_snia_population_contract, only: snia_population_realization_t, evaluate_snia_interval_events
   use stellar_population_ledger, only: stellar_population_ledger_t, &
-       clear_population_ledger, finalize_population_ledger, population_ledger_ok
+       clear_population_ledger, finalize_population_ledger, population_ledger_ok, compute_unresolved_mass_bucket
   implicit none
 
   private
@@ -31,8 +32,62 @@ module stellar_enrichment_driver
 
   public :: compute_stellar_source_increment
   public :: compute_stellar_cumulative
+  public :: check_agb_wd_causality
 
 contains
+
+  subroutine check_agb_wd_causality(table,population,dtd,debit_per_event,previous_age,age, &
+       mass_min,mass_max,n_bins,ierr)
+    ! With stepwise WD formation the worst budget occurs immediately BEFORE
+    ! a formation event or at the interval end. Check those times so a large
+    ! hydro timestep cannot borrow future WDs for earlier DTD events. The
+    ! existing strict shortfall policy is retained: no rate clipping/delay.
+    type(stellar_yield_table_t),intent(in)::table
+    type(stellar_population_t),intent(in)::population
+    type(snia_population_realization_t),intent(in)::dtd
+    real(stellar_dp),intent(in)::debit_per_event,previous_age,age,mass_min,mass_max
+    integer,intent(in)::n_bins
+    integer,intent(out)::ierr
+    type(stellar_cumulative_t)::agb
+    real(stellar_dp)::t,events
+    integer::i,j,row,status,n
+    ierr=enrichment_driver_ok
+    if(.not.allocated(table%agb_terminal_row))return
+    if(.not.all(ieee_is_finite([previous_age,age,debit_per_event])).or. &
+         previous_age<0.or.age<previous_age.or.debit_per_event<=0)then
+       ierr=enrichment_driver_err_argument
+       return
+    endif
+    if(age<=dtd%minimum_delay_gyr)return
+    n=size(table%agb_terminal_row)
+    do i=1,n+1
+       t=age
+       if(i<=n)then
+          row=table%agb_terminal_row(i);t=table%age_gyr(row)
+          if(t<=previous_age.or.t>age.or.t<=dtd%minimum_delay_gyr)cycle
+          ! Duplicate ages across masses/Z need only one check.
+          do j=1,i-1
+             if(table%age_gyr(table%agb_terminal_row(j))==t)exit
+          enddo
+          if(j<i)cycle
+          t=nearest(t,-1d0)
+       endif
+       call integrate_ssp_channel(table,population,channel_agb,t,mass_min,mass_max,n_bins,agb,status)
+       if(status/=ssp_source_ok)then
+          ierr=enrichment_driver_err_source
+          return
+       endif
+       call evaluate_snia_interval_events(dtd,population%initial_mass,0d0,t,1d0,events,status)
+       if(status/=0)then
+          ierr=enrichment_driver_err_source
+          return
+       endif
+       if(events*debit_per_event>agb%remnant_mass+1d-10*population%initial_mass)then
+          ierr=enrichment_driver_err_ledger
+          return
+       endif
+    enddo
+  end subroutine check_agb_wd_causality
 
   subroutine compute_stellar_source_increment(table, population, &
        previous_age_gyr, current_age_gyr, &
@@ -84,7 +139,7 @@ contains
           return
        else if (channel == channel_snii .and. &
             channel_mass_max(channel) > 40.0_stellar_dp .and. &
-            .not. snii_source_node_fate_consumer_available) then
+            .not. table%high_mass_ready) then
           ! The canonical table has no source-node outcome axis.  Never let a
           ! widened candidate window turn unresolved high-mass rows into SNII.
           ierr = enrichment_driver_err_unsupported
@@ -119,6 +174,7 @@ contains
        return
     end if
     if (present(ledger)) ledger = evaluated_ledger
+    if(present(ledger))call update_resolved_bucket(table,population,channel_mass_min,channel_mass_max,ledger)
   end subroutine compute_stellar_source_increment
 
   subroutine compute_stellar_cumulative(table, population, age_gyr, &
@@ -164,7 +220,7 @@ contains
           return
        else if (channel == channel_snii .and. &
             channel_mass_max(channel) > 40.0_stellar_dp .and. &
-            .not. snii_source_node_fate_consumer_available) then
+            .not. table%high_mass_ready) then
           ierr = enrichment_driver_err_unsupported
           return
        end if
@@ -191,7 +247,24 @@ contains
     if (ledger_ierr /= population_ledger_ok) then
        ierr = enrichment_driver_err_ledger
     end if
+    if(ierr==0)call update_resolved_bucket(table,population,channel_mass_min,channel_mass_max,ledger)
   end subroutine compute_stellar_cumulative
+
+  subroutine update_resolved_bucket(table,population,lower,upper,ledger)
+    type(stellar_yield_table_t),intent(in)::table
+    type(stellar_population_t),intent(in)::population
+    real(stellar_dp),intent(in)::lower(:),upper(:)
+    type(stellar_population_ledger_t),intent(inout)::ledger
+    integer::status
+    if(.not.table%high_mass_ready.or..not.enable_wind.or..not.enable_snii)return
+    if(max(lower(channel_wind),lower(channel_snii))>max(40d0,population%imf_mass_min))return
+    if(min(upper(channel_wind),upper(channel_snii))<min(120d0,population%imf_mass_max))return
+    ! Only the high-mass seam is accounted for by this selected model. Keep
+    ! the independent low-mass lifetime seam in the diagnostic, unchanged.
+    call compute_unresolved_mass_bucket(population,unresolved_fate_mass_min(:1), &
+         unresolved_fate_mass_max(:1),1,ledger%unresolved_initial_mass_fraction, &
+         ledger%unresolved_initial_mass,status)
+  end subroutine update_resolved_bucket
 
   logical function channel_is_enabled(channel)
     integer, intent(in) :: channel

@@ -9,8 +9,10 @@
 module stellar_yield_audit
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
-       n_stellar_channels, channel_wind, channel_snii
+       n_stellar_channels, channel_wind, channel_snii, channel_agb, valid_high_mass_choice
   use stellar_yield_tables, only: stellar_yield_table_t
+  use stellar_enrichment_config, only: default_imf_id, population_model_id, configured_binary_fraction, &
+       configured_imf_mass_min, configured_imf_mass_max, high_mass_model, high_mass_max_remnant_adjust_fraction
   implicit none
 
   private
@@ -26,16 +28,312 @@ module stellar_yield_audit
   integer, parameter, public :: yield_audit_err_remnant_ownership = 256
 
   public :: audit_yield_table
+  public :: resolve_high_mass_endpoint
+  public :: prepare_high_mass_history
+
+  type, public :: high_mass_endpoint_t
+     real(stellar_dp) :: initial_mass = 0.0_stellar_dp
+     real(stellar_dp) :: wind_mass = 0.0_stellar_dp
+     real(stellar_dp) :: terminal_mass = 0.0_stellar_dp
+     ! Baryonic residual-mass bookkeeping, NOT a gravitational BH mass.
+     real(stellar_dp) :: remnant_mass = 0.0_stellar_dp
+     real(stellar_dp) :: wind_elements(n_stellar_elements) = 0.0_stellar_dp
+     real(stellar_dp) :: terminal_elements(n_stellar_elements) = 0.0_stellar_dp
+     real(stellar_dp) :: wind_energy = 0.0_stellar_dp
+     real(stellar_dp) :: terminal_energy = 0.0_stellar_dp
+     real(stellar_dp) :: wind_momentum(3) = 0.0_stellar_dp
+     real(stellar_dp) :: terminal_momentum(3) = 0.0_stellar_dp
+  end type high_mass_endpoint_t
 
 contains
 
+  subroutine prepare_high_mass_history(table, filename, ierr)
+    type(stellar_yield_table_t), intent(inout) :: table
+    character(len=*), intent(in) :: filename
+    integer, intent(out) :: ierr
+    integer, parameter :: max_nodes=512
+    integer :: version, node_count, input_imf_id, input_population_id
+    integer :: terminal_outcome(max_nodes), i, j, k, w, s, unit, status
+    real(stellar_dp) :: mass_msun(max_nodes), metallicity(max_nodes), terminal_age_yr(max_nodes)
+    real(stellar_dp) :: input_binary_fraction, input_imf_min, input_imf_max, delta
+    character(len=128) :: model_id, wind_source_id, terminal_source_id, model_coordinates
+    character(len=32) :: timing_policy
+    character(len=32) :: metallicity_policy
+    character(len=32) :: net_yield_policy, agb_release_policy
+    type(stellar_yield_table_t) :: trial
+    type(high_mass_endpoint_t) :: raw, resolved
+    namelist /stellar_high_mass_history/ version, node_count, model_id, wind_source_id, &
+         terminal_source_id, model_coordinates, timing_policy, input_imf_id, input_population_id, &
+         input_binary_fraction, input_imf_min, input_imf_max, mass_msun, metallicity, &
+         terminal_age_yr, terminal_outcome, metallicity_policy, net_yield_policy, agb_release_policy
+
+    ierr=yield_audit_err_table
+    if (allocated(table%hm_mass)) return ! A second application would double-transform a model.
+    call audit_yield_table(table,1d-10,status)
+    if(status/=0)return
+    version=0; node_count=0; input_imf_id=-1; input_population_id=-1
+    input_binary_fraction=-1; input_imf_min=-1; input_imf_max=-1
+    model_id=''; wind_source_id=''; terminal_source_id=''; model_coordinates=''; timing_policy=''
+    metallicity_policy='exact_nodes'
+    net_yield_policy='supplied'
+    agb_release_policy='cumulative_linear'
+    mass_msun=-1; metallicity=-1; terminal_age_yr=-1; terminal_outcome=-1
+    open(newunit=unit,file=filename,status='old',action='read',iostat=status)
+    if(status/=0)return
+    read(unit,nml=stellar_high_mass_history,iostat=status)
+    close(unit)
+    if(status/=0.or.version/=1.or.node_count<2.or.node_count>max_nodes)return
+    if(min(len_trim(model_id),len_trim(wind_source_id),len_trim(terminal_source_id), &
+         len_trim(model_coordinates))==0)return
+    if(timing_policy/='wind_linear_terminal_step')return
+    if(metallicity_policy/='exact_nodes'.and.metallicity_policy/='linear_Z_cumulative_mixture')return
+    if(net_yield_policy/='supplied'.and.net_yield_policy/='unavailable_diagnostic_zero')return
+    if(agb_release_policy/='cumulative_linear'.and.agb_release_policy/='terminal_step')return
+    if(net_yield_policy=='unavailable_diagnostic_zero')then
+       if(any(table%net_yield/=0))return
+    endif
+    if(input_imf_id/=default_imf_id.or.input_population_id/=population_model_id)return
+    if(.not.all(ieee_is_finite([input_binary_fraction,input_imf_min,input_imf_max])))return
+    if(input_binary_fraction/=configured_binary_fraction.or.input_imf_min/=configured_imf_mass_min.or. &
+         input_imf_max/=configured_imf_mass_max)return
+    if(.not.all(ieee_is_finite(mass_msun(:node_count))).or. &
+         .not.all(ieee_is_finite(metallicity(:node_count))).or. &
+         .not.all(ieee_is_finite(terminal_age_yr(:node_count))))return
+    if(any(mass_msun(:node_count)<40).or.any(mass_msun(:node_count)>120).or. &
+         any(metallicity(:node_count)<0).or.any(terminal_age_yr(:node_count)<=0))return
+    if(any(terminal_outcome(:node_count)<0).or.any(terminal_outcome(:node_count)>1))return
+    ! Each exact-Z branch must cover [40,120] in ascending source-node order.
+    do i=1,node_count
+       if(i==1)then
+          if(mass_msun(i)/=40)return
+       else if(metallicity(i)==metallicity(i-1))then
+          if(mass_msun(i)<=mass_msun(i-1))return
+       else
+          if(metallicity(i)<=metallicity(i-1).or.mass_msun(i-1)/=120.or.mass_msun(i)/=40)return
+       endif
+    enddo
+    if(mass_msun(node_count)/=120)return
+    trial=table
+    allocate(trial%hm_mass(node_count),trial%hm_z(node_count),trial%hm_age(node_count), &
+         trial%hm_remnant(node_count),trial%hm_adjustment(node_count), &
+         trial%hm_wind_row(node_count),trial%hm_terminal_row(node_count))
+    trial%hm_mass=mass_msun(:node_count); trial%hm_z=metallicity(:node_count)
+    trial%hm_age=terminal_age_yr(:node_count)*1d-9
+    trial%high_mass_identity=[model_id,wind_source_id,terminal_source_id,model_coordinates]
+    trial%high_mass_wind_only=high_mass_model=='wind_only_collapse'
+    trial%high_mass_linear_z=metallicity_policy=='linear_Z_cumulative_mixture'
+    trial%net_yield_diagnostic_unavailable=net_yield_policy=='unavailable_diagnostic_zero'
+    if(trial%high_mass_linear_z.and.maxval(trial%hm_z)<=minval(trial%hm_z))return
+    do i=1,node_count
+       w=0; s=0
+       do j=1,table%n_rows
+          if(table%initial_mass(j)/=mass_msun(i).or.table%birth_metallicity(j)/=metallicity(i))cycle
+          if(table%age_gyr(j)/=trial%hm_age(i))cycle
+          if(table%channel(j)==channel_wind)w=j
+          if(table%channel(j)==channel_snii)s=j
+       enddo
+       if(w==0.or.s==0)return
+       raw=high_mass_endpoint_t()
+       raw%initial_mass=mass_msun(i)
+       raw%wind_mass=table%returned_mass(w); raw%terminal_mass=table%returned_mass(s)
+       raw%remnant_mass=table%remnant_mass(s)
+       raw%wind_elements=table%ejected_mass(w,:); raw%terminal_elements=table%ejected_mass(s,:)
+       raw%wind_energy=table%energy(w); raw%terminal_energy=table%energy(s)
+       raw%wind_momentum=table%momentum(w,:); raw%terminal_momentum=table%momentum(s,:)
+       if(terminal_outcome(i)==0.and.(raw%terminal_mass/=0.or.raw%terminal_energy/=0.or. &
+            any(raw%terminal_momentum/=0)))return
+       if(terminal_outcome(i)==1.and.raw%terminal_mass<=0)return
+       call resolve_high_mass_endpoint(raw,high_mass_model,wind_source_id==terminal_source_id, &
+            high_mass_max_remnant_adjust_fraction,resolved,delta,status)
+       if(status/=0)then
+          ierr=status
+          return
+       endif
+       trial%hm_wind_row(i)=w; trial%hm_terminal_row(i)=s
+       trial%hm_remnant(i)=resolved%remnant_mass; trial%hm_adjustment(i)=delta
+       ! Input wind starts at zero; both channels have a complete endpoint.
+       ! No terminal leakage before the specified event and no new release
+       ! after it. The earlier generic linear SN ramp is explicitly rejected.
+       k=0
+       do j=1,table%n_rows
+          if(table%initial_mass(j)/=mass_msun(i).or.table%birth_metallicity(j)/=metallicity(i))cycle
+          if(table%channel(j)==channel_wind)then
+             if(table%remnant_mass(j)/=0)return
+             if(table%age_gyr(j)==0)k=k+1
+             if(table%age_gyr(j)>trial%hm_age(i))then
+                if(.not.same_payload(table,j,w))return
+             endif
+          else if(table%channel(j)==channel_snii)then
+             if(table%age_gyr(j)<trial%hm_age(i))then
+                if(table%returned_mass(j)/=0.or.table%remnant_mass(j)/=0.or.table%energy(j)/=0.or. &
+                     any(table%momentum(j,:)/=0).or.any(table%ejected_mass(j,:)/=0).or. &
+                     any(table%net_yield(j,:)/=0))return
+             else
+                if(.not.same_payload(table,j,s))return
+             endif
+          endif
+       enddo
+       if(k/=1)return
+    enddo
+    ! A canonical row above the seam cannot escape the declared node map.
+    do j=1,table%n_rows
+       if(table%channel(j)/=channel_wind.and.table%channel(j)/=channel_snii)cycle
+       if(table%initial_mass(j)<40)cycle
+       if(.not.any(trial%hm_mass==table%initial_mass(j).and.trial%hm_z==table%birth_metallicity(j)))return
+    enddo
+    if(agb_release_policy=='terminal_step')then
+       call prepare_agb_terminal_rows(trial,status)
+       if(status/=0)return
+    endif
+    trial%high_mass_ready=.true.
+    table=trial
+    ierr=yield_audit_ok
+  end subroutine prepare_high_mass_history
+
+  subroutine prepare_agb_terminal_rows(table,ierr)
+    ! The first nonzero row is an explicitly supplied release age, NOT an
+    ! inferred stellar lifetime. Reject ramps, non-closing endpoints and
+    ! duplicate wind ownership instead of fixing physical input here.
+    type(stellar_yield_table_t),intent(inout)::table
+    integer,intent(out)::ierr
+    integer::i,j,k,n,first,zero
+    integer::rows(table%n_rows)
+    real(stellar_dp)::m,z
+    ierr=yield_audit_err_table;n=0
+    do i=1,table%n_rows
+       if(table%channel(i)/=channel_agb)cycle
+       m=table%initial_mass(i);z=table%birth_metallicity(i)
+       if(m>8d0)return ! Ordinary AGB/WD route only, no SAGB fate inference.
+       if(n>0)then
+          if(any(table%initial_mass(rows(:n))==m.and.table%birth_metallicity(rows(:n))==z))cycle
+       endif
+       first=0;zero=0
+       do j=1,table%n_rows
+          if(table%initial_mass(j)/=m.or.table%birth_metallicity(j)/=z)cycle
+          if(table%channel(j)==channel_wind)then
+             if(.not.zero_payload(table,j))return
+          endif
+          if(table%channel(j)/=channel_agb)cycle
+          if(table%age_gyr(j)==0d0.and.zero_payload(table,j))zero=j
+          if(zero_payload(table,j))cycle
+          if(first==0)then
+             first=j
+          else if(table%age_gyr(j)<table%age_gyr(first))then
+             first=j
+          endif
+       enddo
+       if(first==0.or.zero==0)return
+       if(table%age_gyr(first)<=0.or.table%returned_mass(first)<=0.or.table%remnant_mass(first)<=0)return
+       if(abs(table%returned_mass(first)+table%remnant_mass(first)-m)>1d-10*max(1d0,m))return
+       do k=1,table%n_rows
+          if(table%channel(k)/=channel_agb.or.table%initial_mass(k)/=m.or.table%birth_metallicity(k)/=z)cycle
+          if(table%age_gyr(k)<table%age_gyr(first))then
+             if(.not.zero_payload(table,k))return
+          else
+             if(.not.same_payload(table,k,first))return
+          endif
+       enddo
+       n=n+1;rows(n)=first
+    enddo
+    if(n==0)return
+    table%agb_terminal_row=rows(:n)
+    ierr=yield_audit_ok
+  end subroutine prepare_agb_terminal_rows
+
+  logical function zero_payload(table,i)
+    type(stellar_yield_table_t),intent(in)::table
+    integer,intent(in)::i
+    zero_payload=table%returned_mass(i)==0.and.table%remnant_mass(i)==0.and.table%energy(i)==0.and. &
+         all(table%momentum(i,:)==0).and.all(table%ejected_mass(i,:)==0).and.all(table%net_yield(i,:)==0)
+  end function zero_payload
+
+  logical function same_payload(table,i,j)
+    type(stellar_yield_table_t), intent(in) :: table
+    integer,intent(in)::i,j
+    same_payload=table%returned_mass(i)==table%returned_mass(j).and. &
+         table%remnant_mass(i)==table%remnant_mass(j).and.table%energy(i)==table%energy(j).and. &
+         all(table%momentum(i,:)==table%momentum(j,:)).and. &
+         all(table%ejected_mass(i,:)==table%ejected_mass(j,:)).and. &
+         all(table%net_yield(i,:)==table%net_yield(j,:))
+  end function same_payload
+
+  subroutine resolve_high_mass_endpoint(raw, preset, same_source, adjustment_limit, &
+       resolved, remnant_adjustment, ierr)
+    ! Resolve a COMPLETE per-initial-star endpoint, before IMF integration.
+    ! Never use this on a cumulative row at an intermediate age. Timing,
+    ! isotope projection, source identities and fate classification belong
+    ! to the source adapter; a zero Wind table is not filled by this routine.
+    type(high_mass_endpoint_t), intent(in) :: raw
+    character(len=*), intent(in) :: preset
+    logical, intent(in) :: same_source
+    real(stellar_dp), intent(in) :: adjustment_limit
+    type(high_mass_endpoint_t), intent(out) :: resolved
+    real(stellar_dp), intent(out) :: remnant_adjustment
+    integer, intent(out) :: ierr
+    type(high_mass_endpoint_t) :: trial
+    real(stellar_dp), parameter :: tolerance = 1.0e-10_stellar_dp
+    real(stellar_dp) :: residual, scale
+
+    ! Failure has no publishable material or energy, including the correction.
+    resolved = high_mass_endpoint_t()
+    remnant_adjustment = 0.0_stellar_dp
+    ierr = yield_audit_err_value
+    if (.not. valid_high_mass_choice(preset, adjustment_limit)) return
+    if (.not. all(ieee_is_finite((/raw%initial_mass, raw%wind_mass, &
+         raw%terminal_mass, raw%remnant_mass, raw%wind_energy, raw%terminal_energy/)))) return
+    if (.not. all(ieee_is_finite(raw%wind_elements)) .or. &
+         .not. all(ieee_is_finite(raw%terminal_elements)) .or. &
+         .not. all(ieee_is_finite(raw%wind_momentum)) .or. &
+         .not. all(ieee_is_finite(raw%terminal_momentum))) return
+    if (raw%initial_mass < 40.0_stellar_dp .or. raw%initial_mass > 120.0_stellar_dp) return
+    if (min(raw%wind_mass, raw%terminal_mass, raw%remnant_mass, &
+         raw%wind_energy, raw%terminal_energy) < 0.0_stellar_dp) return
+    if (minval(raw%wind_elements) < 0.0_stellar_dp .or. &
+         minval(raw%terminal_elements) < 0.0_stellar_dp) return
+    if (raw%remnant_mass > raw%initial_mass) return
+    scale = raw%initial_mass
+    if (sum(raw%wind_elements) > raw%wind_mass + tolerance*scale .or. &
+         sum(raw%terminal_elements) > raw%terminal_mass + tolerance*scale) return
+    ! These energies are non-bulk source energy; the existing deposition
+    ! bridge separately accounts for each channel's directed kinetic energy.
+    if (raw%wind_mass == 0.0_stellar_dp .and. &
+         (any(raw%wind_momentum /= 0.0_stellar_dp) .or. raw%wind_energy /= 0.0_stellar_dp)) return
+    if (raw%terminal_mass == 0.0_stellar_dp .and. &
+         (any(raw%terminal_momentum /= 0.0_stellar_dp) .or. raw%terminal_energy /= 0.0_stellar_dp)) return
+    trial = raw
+    ierr = yield_audit_err_mass
+    select case (trim(preset))
+    case ('source_consistent')
+       if (.not. same_source) return
+    case ('wind_only_collapse')
+       ! Explicit alternative, not an assertion about all massive stars:
+       ! retain supplied wind and its composition/energy, suppress terminal
+       ! ejecta/energy, put all remaining baryonic mass in the remnant.
+       trial%terminal_mass = 0.0_stellar_dp
+       trial%terminal_elements = 0.0_stellar_dp
+       trial%terminal_energy = 0.0_stellar_dp
+       trial%terminal_momentum = 0.0_stellar_dp
+       trial%remnant_mass = raw%initial_mass - raw%wind_mass
+    case ('mixed_remnant')
+       trial%remnant_mass = raw%initial_mass - raw%wind_mass - raw%terminal_mass
+       if (abs(trial%remnant_mass-raw%remnant_mass) > adjustment_limit*scale) return
+    end select
+    if (trial%remnant_mass < 0.0_stellar_dp) return
+    residual = trial%initial_mass-trial%wind_mass-trial%terminal_mass-trial%remnant_mass
+    if (abs(residual) > tolerance*scale) return
+    resolved = trial
+    remnant_adjustment = trial%remnant_mass-raw%remnant_mass
+    ierr = yield_audit_ok
+  end subroutine resolve_high_mass_endpoint
+
   subroutine audit_yield_table(table, tolerance, ierr, require_complete, &
-       terminal_remnant_owner)
+       terminal_remnant_owner, required_channels)
     type(stellar_yield_table_t), intent(in) :: table
     real(stellar_dp), intent(in) :: tolerance
     integer, intent(out) :: ierr
     logical, intent(in), optional :: require_complete
     logical, intent(in), optional :: terminal_remnant_owner(:)
+    logical, intent(in), optional :: required_channels(n_stellar_channels)
 
     real(stellar_dp) :: tol, ejected_sum, scale
     logical :: require_grid, row_is_finite, channel_is_bad
@@ -189,6 +487,14 @@ contains
 
     if (require_grid) then
        do channel = channel_wind, channel_snii
+          if(present(required_channels))then
+             if(.not.required_channels(channel))cycle
+          endif
+          ! A validated terminal AGB map is sparse by design: each M,Z has
+          ! its own event age and mass grid. prepare_agb_terminal_rows already
+          ! checks every row, the zero origin, endpoint closure and plateau.
+          ! Do not manufacture rectangular interpolation corners for it.
+          if(channel==channel_agb.and.allocated(table%agb_terminal_row))cycle
           call audit_complete_channel(table, channel, tol, channel_is_bad)
           if (channel_is_bad) ierr = ior(ierr, yield_audit_err_grid)
        end do

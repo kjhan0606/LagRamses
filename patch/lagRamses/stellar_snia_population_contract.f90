@@ -27,6 +27,9 @@ module stellar_snia_population_contract
   integer, parameter, public :: snia_binary_fraction_baked_into_rate = 1
   integer, parameter, public :: snia_binary_fraction_scales_rate = 2
   integer, parameter, public :: snia_metallicity_factor_supplied = 1
+  character(len=*), parameter, public :: snia_accounting_strict_wd = 'strict_wd'
+  character(len=*), parameter, public :: snia_accounting_effective_ssp = 'effective_ssp'
+  character(len=*), parameter, public :: snia_effective_ssp_approval = 'SNIA-EFFECTIVE-SSP-2026-09-07'
 
   type, public :: snia_population_realization_t
      logical :: approved = .false.
@@ -45,13 +48,35 @@ module stellar_snia_population_contract
      character(len=128) :: metallicity_factor_source_id = ''
      character(len=128) :: source_commit_binding = ''
      character(len=128) :: approval_id = ''
+     character(len=32) :: mass_accounting = snia_accounting_strict_wd
+     character(len=128) :: accounting_approval_id = ''
   end type snia_population_realization_t
 
   public :: validate_snia_population_realization
   public :: read_snia_population_realization_namelist
   public :: evaluate_snia_interval_events
+  public :: validate_snia_population_binding
 
 contains
+
+  subroutine validate_snia_population_binding(realization, imf_id, population_id, binary_fraction, ierr)
+    ! The empirical DTD is per INITIAL mass of its declared population.
+    ! A valid standalone handoff must also match the actual particle model.
+    ! imf_conversion_factor belongs to that handoff's declared IMF; it must
+    ! not silently authorize using a different runtime IMF.
+    type(snia_population_realization_t), intent(in) :: realization
+    integer, intent(in) :: imf_id, population_id
+    real(stellar_dp), intent(in) :: binary_fraction
+    integer, intent(out) :: ierr
+    call validate_snia_population_realization(realization, ierr)
+    if (ierr /= snia_population_contract_ok) return
+    ierr = snia_population_contract_err_model
+    if (imf_id /= realization%imf_id .or. population_id /= realization%population_model_id) return
+    if (.not. ieee_is_finite(binary_fraction)) return
+    if (abs(binary_fraction-realization%binary_fraction) > &
+         32*epsilon(1.0_stellar_dp)*max(1.0_stellar_dp,abs(realization%binary_fraction))) return
+    ierr = snia_population_contract_ok
+  end subroutine validate_snia_population_binding
 
   subroutine validate_snia_population_realization(realization, ierr)
     type(snia_population_realization_t), intent(in) :: realization
@@ -62,6 +87,21 @@ contains
        ierr = snia_population_contract_err_unapproved
        return
     end if
+    select case (trim(realization%mass_accounting))
+    case (snia_accounting_strict_wd)
+       if (len_trim(realization%accounting_approval_id) /= 0) then
+          ierr = snia_population_contract_err_parameter
+          return
+       end if
+    case (snia_accounting_effective_ssp)
+       if (trim(realization%accounting_approval_id) /= snia_effective_ssp_approval) then
+          ierr = snia_population_contract_err_unapproved
+          return
+       end if
+    case default
+       ierr = snia_population_contract_err_model
+       return
+    end select
     if (len_trim(realization%population_source_id) == 0 .or. &
          realization%population_model_id /= population_binary_ssp .or. &
          realization%imf_id < stellar_imf_salpeter .or. &
@@ -106,7 +146,8 @@ contains
     ! JSON remains the review/provenance sidecar.  A production caller must
     ! pass its separately generated, human-auditable namelist through this
     ! loader so the complete record is populated into the Fortran type before
-    ! validation; no field is silently defaulted during the handoff.
+    ! validation. Only the backward-compatible strict mass-accounting choice
+    ! defaults; effective SSP accounting requires its separate approval ID.
     integer, intent(in) :: iunit
     type(snia_population_realization_t), intent(out) :: realization
     integer, intent(out) :: ierr
@@ -114,6 +155,8 @@ contains
     logical :: approved
     character(len=128) :: population_source_id, metallicity_factor_source_id
     character(len=128) :: source_commit_binding, approval_id
+    character(len=32) :: mass_accounting
+    character(len=128) :: accounting_approval_id
     integer :: population_model_id, imf_id, event_realization_policy
     integer :: binary_fraction_policy, metallicity_policy, read_ierr
     real(stellar_dp) :: binary_fraction, imf_conversion_factor
@@ -125,7 +168,7 @@ contains
          imf_conversion_factor, minimum_delay_gyr, maximum_delay_gyr, &
          power_law_index, events_per_initial_msun, event_realization_policy, &
          metallicity_policy, metallicity_factor_source_id, &
-         source_commit_binding, approval_id
+         source_commit_binding, approval_id, mass_accounting, accounting_approval_id
 
     approved = .false.
     population_source_id = ''
@@ -143,6 +186,8 @@ contains
     metallicity_factor_source_id = ''
     source_commit_binding = ''
     approval_id = ''
+    mass_accounting = snia_accounting_strict_wd
+    accounting_approval_id = ''
 
     read(iunit, nml=snia_population_realization, iostat=read_ierr)
     realization%approved = approved
@@ -161,6 +206,8 @@ contains
     realization%metallicity_factor_source_id = metallicity_factor_source_id
     realization%source_commit_binding = source_commit_binding
     realization%approval_id = approval_id
+    realization%mass_accounting = mass_accounting
+    realization%accounting_approval_id = accounting_approval_id
     if (read_ierr /= 0) then
        ierr = snia_population_contract_err_argument
        return

@@ -50,7 +50,7 @@ def main() -> int:
 
     matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
     if args.include_parked_agb:
-        from read_karakas_lugaro2016 import read_karakas_lugaro2016, _blocks
+        from read_karakas_lugaro2016 import read_karakas_lugaro2016, _blocks, normalize_selected_ejecta
         from read_cinquegrana_karakas2022 import read_cinquegrana_karakas2022, _read_table
         from adapt_g2_candidate_sources import SourceAdapterError
 
@@ -131,7 +131,8 @@ def main() -> int:
                             rel_tol=0, abs_tol=1e-12)
         assert kl16["canonical_rows_emitted"] == 0
         assert kl16["runtime_activation_allowed"] is False
-        assert kl16["renormalization_applied"] is False
+        assert kl16["renormalization_applied"] is True
+        assert kl16["source_values_modified"] is False
         assert kl16["lifetime_yr"] is None and kl16["injected_energy_erg"] is None
         assert all(len(r["elements_by_atomic_number"]) == 78 for r in rows)
         assert all(r["elements_by_atomic_number"][1]["source_symbol"] == "p"
@@ -148,6 +149,13 @@ def main() -> int:
         assert disagreements[0]["coordinate"]["metallicity_mass_fraction"] == 0.03
         assert disagreements[0]["final_mass_msun"] == 0.774
         assert disagreements[0]["auxiliary_final_mass_msun"] == 0.744
+        assert disagreements[0]["selected_final_mass_msun"] == 0.774
+        assert disagreements[0]["selected_mass_expelled_msun"] == 3.226
+        assert disagreements[0]["selected_mass_source"] == "yield_table_header"
+        assert disagreements[0]["auxiliary_mass_disagreement_resolved"] is True
+        assert sample["selected_mass_source"] == "KL16_article_table_7"
+        assert sample["selected_final_mass_msun"] == 0.727
+        assert sample["selected_mass_expelled_msun"] == 2.773
         assert math.isclose(max(r["gross_sum_minus_labelled_expelled_msun"] for r in rows),
                             0.03361670011913276, abs_tol=1e-12)
         for initial in kl16["initial_composition_records"]:
@@ -155,10 +163,85 @@ def main() -> int:
         missing = next(r for r in rows if r["coordinate"]["initial_mass_msun"] == 7.5)
         assert missing["initial_composition_matching_lines"] == []
         assert missing["net_yield_diagnostic_msun"] is None
+        timed = read_karakas_lugaro2016(matrix_path, include_lifetimes=True)["records"]
+        assert len(timed) == 62 and all(r["evolution"]["stellar_lifetime_yr"] > 0 for r in timed)
+        assert sum(r["evolution"]["core_kind"] == "CO" for r in timed) == 60
+        ov = next(r for r in timed if r["coordinate"]["initial_mass_msun"] == 1.75
+                  and r["coordinate"]["metallicity_mass_fraction"] == .014)
+        assert ov["overshoot_label"] == 2 and ov["evolution"]["stellar_lifetime_yr"] == 1755e6
+        assert ov["evolution"]["lifetime_source"] == "KL16:Table1" # Not the K14 no-overshoot 1756 Myr.
+        for row in rows:
+            before = copy.deepcopy(row)
+            selected = normalize_selected_ejecta(row)
+            assert row == before and selected == row["selected_ejecta"]
+            gross = selected["gross_mass_msun_by_atomic_number"]
+            target = row["selected_mass_expelled_msun"]
+            assert len(gross) == 78
+            assert selected["returned_mass_msun"] == target
+            assert selected["remnant_mass_msun"] == row["selected_final_mass_msun"]
+            assert math.isclose(math.fsum(gross.values()), target, rel_tol=2e-15)
+            assert math.isclose(math.fsum(selected["mass_fraction_by_atomic_number"].values()), 1, rel_tol=2e-15)
+            assert math.isclose(target + selected["remnant_mass_msun"], row["coordinate"]["initial_mass_msun"], rel_tol=2e-15)
+            assert math.isclose(math.fsum(selected["tracked_ejected_mass_msun"]) + selected["untracked_ejecta_msun"], target, rel_tol=2e-15)
+            assert selected["untracked_ejecta_msun"] > 0
+            assert math.isclose(gross[1]+gross[2]+selected["total_metal_ejecta_msun"], target, rel_tol=2e-15)
+            assert selected["net_yield_msun"] is None
+            for z, mass in gross.items():
+                raw = row["elements_by_atomic_number"][z]["gross_mass_msun"]
+                assert math.isclose(mass, raw*target/row["listed_gross_sum_msun"], rel_tol=2e-15, abs_tol=0)
+                if raw > 0:
+                    assert math.isclose(mass/gross[1], raw/row["elements_by_atomic_number"][1]["gross_mass_msun"], rel_tol=2e-15)
+        assert all("selected_ejecta" not in row for row in kl16["excluded_commented_records"])
+        # Reject malformed input instead of hiding it with normalization.
+        for value in (-1., float("nan"), float("inf")):
+            bad = copy.deepcopy(rows[0]);bad["elements_by_atomic_number"][1]["gross_mass_msun"] = value
+            try:
+                normalize_selected_ejecta(bad)
+            except SourceAdapterError:
+                pass
+            else:
+                raise AssertionError("invalid normalization mass accepted")
+        for mode in ("zero", "tracked_only", "excluded", "nonclosing"):
+            bad = copy.deepcopy(rows[0])
+            if mode == "zero":
+                for e in bad["elements_by_atomic_number"].values():
+                    e["gross_mass_msun"] = 0.
+            elif mode == "tracked_only":
+                del bad["elements_by_atomic_number"][15]
+            elif mode == "excluded":
+                bad["commented_out"] = True
+            else:
+                bad["selected_final_mass_msun"] += .01
+            try:
+                normalize_selected_ejecta(bad)
+            except SourceAdapterError:
+                pass
+            else:
+                raise AssertionError(f"invalid normalization input accepted: {mode}")
     fingerprints = json.loads(fingerprint_path.read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory(prefix="snrt-g2-selection-") as directory:
         temporary = Path(directory)
         if args.include_parked_agb:
+            bad_policy = copy.deepcopy(matrix)
+            next(c for c in bad_policy["candidates"] if c["candidate_id"] == "karakas_lugaro2016_agb")["selected_gross_normalization_policy"] = "tracked_only"
+            try:
+                read_karakas_lugaro2016(_write(bad_policy, temporary, "bad-normalization.json"))
+            except SourceAdapterError:
+                pass
+            else:
+                raise AssertionError("unselected KL16 normalization policy accepted")
+            for selected, final_mass in ((False, 0.774), (True, 0.744)):
+                bad_mass = copy.deepcopy(matrix)
+                choice = next(c for c in bad_mass["candidates"] if
+                              c["candidate_id"] == "karakas_lugaro2016_agb")["source_row_review"]["mass_disagreement"]
+                choice["authoritative_value_selected"] = selected
+                choice["selected_final_mass_msun"] = final_mass
+                try:
+                    read_karakas_lugaro2016(_write(bad_mass, temporary, "bad-mass-choice.json"))
+                except SourceAdapterError:
+                    pass
+                else:
+                    raise AssertionError("KL16 missing or inconsistent mass selection was accepted")
             bad_evolution = copy.deepcopy(matrix)
             next(c for c in bad_evolution["candidates"] if c["candidate_id"] == "cinquegrana_karakas2022_agb")["evolution_reference"]["sha256"] = "0" * 64
             try:

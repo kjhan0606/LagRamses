@@ -2,7 +2,72 @@
 
 Date: 2026-09-05 (Asia/Seoul)
 Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
-Status: **operator approved reduced plan; KL16/CK22 source-resolution work parked, not physically approved**.
+Status: **operator approved reduced plan; primary-table mass selection and all-element KL16 gross normalization adopted 2026-09-07; other source-resolution work remains separate, not a complete physical-package approval**.
+
+## Latest 2026-09-07 amendment: normalize KL16 gross ejecta
+
+Direct operator instruction: normalize the gross elemental ejecta by their
+full sum. This supersedes the historical prohibition on KL16 normalization
+below, but does not authorize CK22 corrections, activating excluded models,
+or changing raw source files.
+
+For each of the 62 active models, use
+`selected_M_i = selected_M_expelled * raw_M_i / sum_all_78(raw_M_i)`.
+Keep selected expelled and remnant masses fixed. Normalize before reducing
+to eleven tracked elements; retain all other ejecta in the untracked metal
+budget. Every raw elemental ratio is preserved to floating-point roundoff.
+No residual is assigned to H or another selected element.
+
+`read_karakas_lugaro2016.py` returns this derived payload as `selected_ejecta`,
+including the normalization factor, original sum, correction, 78 gross masses,
+normalized fractions, tracked vector and untracked/total metal budgets. Raw
+element rows, initial compositions and the old raw net-yield diagnostic remain
+unchanged. The selected gross payload's net yields remain explicitly unavailable;
+they must not be populated by copying or scaling the old net diagnostic with
+its differently normalized initial composition and incomplete header matching.
+
+This is an operator-selected processing policy, not a verified roundoff-error
+diagnosis, author erratum or full source/population approval. The two commented
+8 Msun nodes remain excluded. Lifetime/release/energy inputs and initial-model
+matching still need their own handling for a complete runtime package. The
+existing source-selection regression covers all nodes, ratio/mass preservation,
+source hashes and malformed-input rejection; no new audit framework is added.
+
+## 2026-09-07 operator amendment: primary tables take precedence
+
+The operator directs using article data instead of discrepant auxiliary data,
+treating the small disagreement as a likely typo and not an implementation
+blocker. This supersedes the unresolved mass-selection statements below.
+The original files and their fingerprints remain unchanged.
+
+The [KL16 article, Table 7](https://arxiv.org/html/1604.02178v1#A1.T7)
+prints a **3.5 Msun, Z=0.03 example**, with final mass 0.727 Msun and expelled
+mass 2.773 Msun. These article values now have explicit precedence in the
+reader. The disputed **4 Msun, Z=0.03** node is not printed in that example:
+its selected final mass is **0.774 Msun**, from the detailed yield-table header,
+with expelled mass **3.226 Msun**, instead of the auxiliary array's 0.744.
+The independent Mass(i)/X(i) denominator supports the header, as documented
+below. This is a source-selection decision, not a verified author erratum or
+a claim that 0.774 was found in the printed article.
+
+The change is 0.030 Msun: 0.75% of the initial mass, about 0.93% of selected
+ejecta and 3.88% of selected remnant mass. It is no longer an unresolved
+mass-source choice. The existing reader exposes selected remnant/ejecta values
+and their origin separately from both raw values, checks mass closure, and
+requires this exact operator selection for the conflicting node. Article
+Table 7's six printed elemental ejecta were already matched by the reader's
+regression and need no numerical replacement.
+
+This does not justify a blanket normalization of all elemental yields or
+invent CK22 calcium, missing model coordinates or late evolutionary endpoints.
+Those separate issues remain deferred; they do not halt independent native
+AGB-wind/feedback implementation. No new audit gate or author contact is needed
+for the selected small mass discrepancy. The 40--120 Msun issue is unchanged.
+
+Verification: the existing `g2_source_selection_gate.py --include-parked-agb`
+regression passes, including the selected values, retention of raw .744,
+article Table 7 values, source fingerprints, and rejection of a missing or
+inconsistent selection. No new simulation or external audit was launched.
 
 ## Current disposition — operator wrap-up, 2026-09-05
 
