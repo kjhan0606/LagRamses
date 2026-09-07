@@ -86,6 +86,40 @@ change the global hydro/feedback OpenMP team settings.
 
 ## Stellar photons and restart
 
+### Separate binary-history source work (not runtime activation)
+
+`tools/build_cosmic_binary_histories.py` runs the **Fortran BSE engine** through
+an isolated `cosmic-popsynth==4.2.0` installation. It generates full linked
+histories for an explicit grid of 1--256 ZAMS binaries, rather than trying to
+invert BPASS's marginal component weights or repair its nonfinite mixed ages.
+It requires the unmodified `examples/Params.ini` from COSMIC commit
+`f9b90f451bca014e9e0adb3a410bee8752e30e53` (SHA256
+`68b2c0a7a90cd179e4f98c27428935472713e161ea0a19e5c8bf7eef8d3d04e9`).
+The complete effective initial conditions, source parameters, shared IDs,
+ordered phase records and surviving companions are retained. Same-age rows
+must not be averaged or deduplicated.
+
+Example (use an isolated Python environment containing that version):
+
+```sh
+python simulation/snrt/tools/build_cosmic_binary_histories.py \
+  --initial-binaries simulation/snrt/tests/fixtures/cosmic_binary_grid.csv \
+  --params /absolute/path/to/COSMIC-v4.2.0-Params.ini \
+  --output-dir /absolute/path/to/new-binary-history-output --seed 20260907
+```
+
+This is an **unweighted comparison grid**, not a sampled SSP, a calibrated
+SNIa rate, or a new simulation namelist option. BPP CO-WD disappearance is
+reported separately from merger-induced massless components; the preceding
+phase row does not supply instantaneous explosion mass. No N100 yields or
+BPASS spectra are attached. The BSE helium-accretion destruction prescription
+also differs from BPASS's Chandrasekhar channel; a current software release
+does not make that prescription modern or publication-validated SNIa physics.
+Channel-resolved event ejecta, population weights and an atmosphere/SED
+calculation consistent with this evolution remain required for runtime use.
+
+### Existing native photon inputs
+
 `SNRT_STELLAR_SED` optionally supplies a native `&snrt_stellar_sed` table.
 Photon rates are per **initial** solar mass, age is proper time in Myr,
 and metallicity is a mass fraction. The table declares IMF identity and mass

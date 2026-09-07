@@ -1,0 +1,5 @@
+system_id,m1_msun,m2_msun,period_days,eccentricity,metallicity,end_age_myr
+merger_control,5,3,1,0,0.01,13700
+co_wd_destruction,5,3,10,0,0.01,13700
+ce_merger_control,5,3,100,0,0.01,13700
+wide_control,5,3,1000,0,0.01,13700

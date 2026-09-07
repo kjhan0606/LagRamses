@@ -7,6 +7,11 @@ model, not an expanding collection of Python gates. Preserve current model
 defaults, approved empirical DTD, effective-SSP comparison, and old restart
 identities. Existing ramses_nml_generator.py deletions are unrelated.
 
+Continuation instruction (2026-09-07): report when the current stage is
+complete and enter the next in-scope task without an approval pause. This
+does not permit declaring unresolved physics complete or silently selecting
+a materially different population model.
+
 ## Source facts and proposed scope
 
 1. Population-matched radiation: current BPASS HDF5 is already integrated
@@ -188,3 +193,148 @@ semantics and event ownership before exporting native SED/feedback histories.
 Keep population normalization, stellar mass loss, surviving companions and
 WD explosion debit coherent. Do not add another empirical DTD or activate an
 unconnected track reader merely to claim a microscopic population is done.
+
+### Post-push component-clock findings (2026-09-07)
+
+Low-Z implementation committed and pushed to `kjhan0606/LagRamses`, main,
+as `d1505550aaf2b61d3f53eff3f3a4d01f8ac05917`. The pre-existing generator
+deletions and scratch outputs were excluded.
+
+The full Z=.010 recipe identified above was scanned, not just the two sample
+tracks. Of 8332 type-2 components, 5095 have zero rejuvenation age and 3237
+have finite positive ages. Of 62 type-3 components, 24 have zero age and
+**38 have Infinity with nonzero rejuvenated weight**. These are secondary
+components referencing single-star tracks, including masses in the WD
+progenitor range. They cannot be silently discarded or assigned age zero
+in a physical WD/SNIa population. This is a finding at Z=.010, not a claim
+that all metallicities have been scanned.
+
+Provider [Hoki CMD code](https://github.com/HeloiseS/hoki/blob/1a2dce0d5907b3c14a176b0aae2cfd74d6d9752a/hoki/cmd.py#L143)
+confirms that total component weight includes the rejuvenated part. For a
+finite shift, contributions are unshifted `(total - mixed)` and shifted
+`mixed`, not two full-weight independent systems. It rounds weights and
+maps Infinity to zero for CMD construction. Its primary-WD omission is
+also a light-counting convention, not physical remnant destruction.
+Neither convention is adopted for feedback/event accounting.
+
+Printed weight precision also differs. One actual type-2 record has total
+8.6395101547241211 and mixed 8.6395102 (shift 300174580 yr); naive subtraction
+produces a small negative weight. This is distinct from the nonfinite
+clock problem; any future reconciliation must preserve total weight and
+be justified by source precision, not a general clipping policy.
+
+The [BPASS v2.2 paper](https://academic.oup.com/mnras/article/479/1/75/5003394)
+ties rejuvenation to mass-transfer onset and the initial/final secondary
+hydrogen-burning lifetimes. The primary terminal age is not a general
+replacement. Next required physical connection is therefore the actual
+primary-to-secondary mapping and those timing inputs, followed by an
+explicit explosion/remnant debit. The public aggregate recipe alone has
+not yet established that connection. No new runtime mode, empirical DTD,
+standalone parser framework, or simulation launch was added for this
+reconnaissance. Existing independent BPASS SED and effective-SSP SNIa
+remain unchanged; common-population SED and microscopic SNIa remain open.
+
+### Genealogy and post-explosion feasibility follow-up (2026-09-07)
+
+The BPASS v2.2.1 manual, pp. 19 and 31, was read from the starter-kit PDF.
+Primary filenames contain initial M1, mass ratio and period; secondary
+filenames contain post-primary M2, remnant mass and period. The input recipe
+contains marginal model weights and rejuvenation fields, not parent IDs or
+conditional transition weights. The [BPASS stochastic-population paper](https://academic.oup.com/mnras/article-abstract/522/3/4430/7140546)
+explicitly describes many-to-many primary/secondary mapping after sampled
+supernova kicks. Thus matching masses/filenames cannot uniquely invert this
+recipe. This establishes a limitation of the inspected products, not proof
+that no additional provider data exists.
+
+Next, the single-degenerate event interpretation was checked against
+[Eldridge, Stanway & Tang 2019, section 2.1.3](https://academic.oup.com/mnras/article/482/1/870/5123725).
+Their model selects a WD initially below 1.2 Msun which accretes to 1.4 Msun;
+this is a model prescription, not a universal explosion criterion. The
+previously identified secondary track (SHA256 `165c4ee5...89289`, full hash
+above) was fetched again by byte range and verified against its full hash.
+Its first 1.4-Msun companion crossing is bracketed by these **1-based rows**:
+
+| Row | Track age (yr) | Donor mass (Msun) | Compact companion (Msun) |
+| --- | ---: | ---: | ---: |
+| 79 | 431262800 | 2.769640 | 1.224356 |
+| 80 | 431273700 | 2.364330 | 1.415459 |
+| 81 | 431278000 | 1.999380 | 1.415459 |
+| 194 | 97442970000 | 0.697240 | 1.417531 |
+
+Linear interpolation gives a diagnostic crossing at 431272818.26 track yr
+with donor mass 2.39711696 Msun. It is NOT an exported SSP event age or an
+assertion of a resolved physical explosion time. The age column is monotone;
+114 rows follow the first sampled crossing. Keeping those rows while also
+ejecting the WD would retain an already-exploded object and continue donor
+evolution in its presence. Truncating the whole system would instead lose
+the surviving donor. A threshold detector alone therefore cannot complete
+conserved population feedback or its SED.
+
+Implementation remains dependent on parent/branch timing and weight data,
+and source-consistent post-explosion donor evolution and ejecta. No WD debit,
+runtime option, or source-table normalization was altered to bypass this.
+The existing empirical SNIa and independent SED remain usable comparisons.
+As a next-source feasibility check, public COSMIC documentation identifies
+linked initial/bpp/bcm histories through bin_num, unlike the inspected BPASS
+marginal recipe. That is only a candidate: it uses a different evolution
+model and is not population-matched to BPASS spectra by sharing an IMF.
+No alternative model was installed or activated.
+
+The local `pdftotext` utility was absent; PDF inspection was completed with
+the already-installed pypdf reader. No new diagnostic framework or job was
+created. This follow-up narrows missing physical inputs; it does not mark
+the common-population implementation or this bundle complete.
+
+### Implemented separate birth-to-remnant source path (2026-09-07)
+
+After the operator requested resolution, an actual alternative was implemented
+within the previously permitted **separate binary comparison** scope. It is
+not a repair of BPASS v2.2.1, and the BPASS missing genealogy is not relabelled
+as recovered. No default, native namelist, or existing yield input was changed.
+
+`simulation/snrt/tools/build_cosmic_binary_histories.py` invokes COSMIC's
+compiled Fortran BSE engine for explicit ZAMS systems and retains initial
+conditions, all phase records, final states and kicks with common system IDs.
+It requires COSMIC 4.2.0 and the pinned release examples/Params.ini (full hash
+in the script). Source commit: `f9b90f451bca014e9e0adb3a410bee8752e30e53`.
+The CLI is bounded to 1--256 low/intermediate-mass initial binaries, a fixed
+explicit seed and existing SSE metallicity range .0001--.03. It does not
+sample an IMF, infer population weights or extrapolate a BPASS age.
+
+Actual execution root: `/gpfs/kjhan/LRD_JWST/.binary-source.AIstqO`.
+COSMIC was installed in its isolated `venv` (608 MB); the four-system physical
+output `reference/` is 99 KB. No existing Python environment was modified and
+no lagRamses job was launched. The input fixture is four 5+3-Msun ZAMS binaries
+at Z=.01, eccentricity zero, periods 1,10,100,1000 days, followed to 13700 Myr.
+These are unweighted examples, **not** a population-normalized SN rate.
+
+The 10-day system forms a CO WD and then records its disappearance at
+156.51229100340674 Myr. Its mass remains zero for the rest of the calculation.
+The donor has 1.267163010011896 Msun at that record, continues evolving and
+ends as a 0.6255253387250216-Msun CO WD. The 60 phase records across all four
+systems preserve simultaneous transitions. Merger-created massless components
+in the control systems are NOT counted as CO-WD no-remnant events. This is
+not an independent reproduction of the BPASS 3+1-Msun secondary sample.
+
+The focused real-engine test `simulation/snrt/tests/cosmic_binary_histories.py`
+passes birth-clock/ID checks, persistent WD removal, donor survival, merger
+exclusion and rejection of nonfinite/missing/resurrected histories. Two fresh
+executions reproduce bpp/bcm/initC/kick CSV bytes exactly with seed 20260907.
+No separate mock evolution engine or generic approval infrastructure was added.
+
+Important physics boundary: the pinned BSE source `evolv2.f`, lines 3200--3246,
+includes a CO-WD helium-accretion destruction prescription after 0.15 Msun
+accumulation as well as Chandrasekhar destruction. These are not interchangeable
+with N100. A BPP previous phase row is not the instantaneous pre-event state;
+the adapter therefore leaves event mass and elemental yields **unset**, instead
+of using a phase-to-phase mass difference as an explosion yield. The output
+explicitly has `runtime_ready=false`. This source path resolves shared clocks,
+component ownership and post-removal survival for the comparison examples;
+it does not validate thermonuclear physics or finish common-population coupling.
+
+Next implementation dependency: obtain channel-resolved instantaneous explosion
+mass/ejecta consistent with the selected evolution prescription, then apply
+explicit population weights and a same-evolution atmosphere/SED calculation.
+Retain the current BPASS SED and empirical SNIa defaults until those choices
+are physically consistent. Do not attach BPASS spectra or N100 through a
+normalization-only adapter. No claim of publication-ready binary physics.
