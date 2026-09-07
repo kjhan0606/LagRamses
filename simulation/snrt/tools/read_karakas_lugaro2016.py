@@ -26,6 +26,71 @@ GROSS_NORMALIZATION_POLICY = "all_listed_elements_to_selected_expelled_mass_v1"
 TRACKED_ATOMIC_NUMBERS = (1, 2, 6, 7, 8, 10, 12, 14, 16, 20, 26)
 LIFETIME_PATH = DEFAULT_MATRIX.parents[1] / 'data/kl16_stellar_lifetimes.csv'
 LIFETIME_SHA256 = '62e7fd40ce1d63d9024c1755f8226bb501ce92db95831c945ef18eaa2f80ee13'
+FISHLOCK_SHA256 = 'b7379ba6eda1018bfeab527ff9bd17fa57fc4da45b2aa5ff845014c31f7eee00'
+
+
+def read_fishlock2014(*, lifetime_model: str) -> list[dict]:
+    """Explicit low-Z comparison: Fishlock yields plus a Padova lifetime fit.
+
+    Fishlock 2014 Table 1 does NOT give total stellar lifetimes. Raiteri96
+    coefficients follow Valiante et al. 2009, equations 3--6 (0905.1691).
+    This is a declared cross-model timing approximation, not Monash ages.
+    Fishlock section 3 identifies the 7-Msun model as ONe; exclude it.
+    Gross mass(i)_lost already includes the residual-envelope assumption
+    described in that paper. No KL16-style normalization is applied here.
+    """
+    if lifetime_model != 'raiteri96_padova':
+        raise SourceAdapterError('Fishlock requires explicit raiteri96_padova lifetime approximation')
+    matrix = json.loads(DEFAULT_MATRIX.read_text())
+    candidate = next(c for c in matrix['candidates'] if c['candidate_id'] == 'karakas_lugaro2016_agb')
+    path = Path(candidate['source_asset_path']) / 'yield_z001.txt'
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != FISHLOCK_SHA256:
+        raise SourceAdapterError('Fishlock source fingerprint mismatch')
+    blocks = []; current = None
+    for line in data.decode().splitlines():
+        match = re.fullmatch(r'\s*#\s*([\d.]+) Msun, Z = ([\d.]+)\s*', line)
+        if match:
+            current = dict(mass=float(match[1]), z=float(match[2]), elements={})
+            blocks.append(current)
+        elif line.strip() and not line.lstrip().startswith('#'):
+            fields = line.split()
+            if current is None or len(fields) != 8:
+                raise SourceAdapterError('malformed Fishlock row')
+            atomic_number = int(fields[1]); values = list(map(float, fields[2:]))
+            if atomic_number in current['elements'] or not all(map(math.isfinite, values)) or values[1] < 0:
+                raise SourceAdapterError('invalid Fishlock element row')
+            current['elements'][atomic_number] = values[1]
+    expected = [1.,1.25,1.5,2.,2.25,2.5,2.75,3.,3.25,3.5,4.,4.5,5.,5.5,6.,7.]
+    if [b['mass'] for b in blocks] != expected or any(b['z'] != .001 for b in blocks):
+        raise SourceAdapterError('unexpected Fishlock source coordinates')
+    # Independent mass-column check: Fishlock Table 1 core masses are printed
+    # to 0.001 Msun. Check against that rounding interval, not against the
+    # final total stellar mass (which still includes an unejected envelope).
+    source_core_masses = (.667,.649,.646,.661,.673,.709,.746,.792,.843,.857,
+                          .883,.908,.938,.972,1.015)
+    records = []
+    for b, source_core in zip(blocks[:-1], source_core_masses, strict=True):
+        m,z,e = b['mass'],b['z'],b['elements']
+        if not set(TRACKED_ATOMIC_NUMBERS) <= e.keys() or len(e) < 70:
+            raise SourceAdapterError('incomplete Fishlock element payload')
+        returned = math.fsum(e.values()); remnant = m-returned
+        if not 0 < returned < m or not 0 < remnant < 1.4:
+            raise SourceAdapterError('Fishlock CO-AGB mass budget invalid')
+        if abs(remnant-source_core) > .0005+1e-12:
+            raise SourceAdapterError('Fishlock gross sum inconsistent with published core mass')
+        x,y = math.log10(m),math.log10(z)
+        a0 = 10.13+.07547*y-.008084*y*y
+        a1 = -4.424-.7939*y-.1187*y*y
+        a2 = 1.262+.3385*y+.05417*y*y
+        lifetime = 10**(a0+a1*x+a2*x*x)
+        records.append(dict(coordinate=dict(initial_mass_msun=m,metallicity_mass_fraction=z),
+                            overshoot_label='Fishlock2014_original',
+                            evolution=dict(stellar_lifetime_yr=lifetime,core_kind='CO',
+                                           lifetime_source='Raiteri96_Padova_fit_not_Fishlock_evolution'),
+                            selected_ejecta=dict(returned_mass_msun=returned,remnant_mass_msun=remnant,
+                                                tracked_ejected_mass_msun=[e[k] for k in TRACKED_ATOMIC_NUMBERS])))
+    return records
 
 
 def attach_kl16_lifetimes(records: list[dict]) -> None:

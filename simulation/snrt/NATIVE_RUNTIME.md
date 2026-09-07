@@ -531,6 +531,42 @@ large timestep from hiding an earlier deficit. Resolving this requires an
 explicitly selected, consistent SNIa population/WD-supply model; the current
 AGB+LC18 positive run is not an all-channel production approval.
 
+### Optional Fishlock low-Z AGB extension
+
+The default KL16/LC18 export is unchanged. To extend the common active-channel
+metallicity hull from `.007--.01345` to `.001--.01345`, add
+`--low-z-agb fishlock2014_raiteri96` to the combined builder above. This selects
+15 Fishlock et al. (2014) gross-yield nodes at Z=.001, initial mass 1--6 Msun;
+the 7-Msun ONe model is excluded. The pinned `yield_z001.txt` is taken from
+the existing COLIBRE source snapshot. Unlike the KL16 rows, these nodes use
+the sum of **all** tabulated gross element masses without renormalization;
+the remnant is the complementary initial mass. Tracked elements are a subset,
+not the total expelled mass. Net-yield diagnostics remain unavailable.
+
+This is an explicit **cross-model comparison**, not source-matched Monash
+evolution: [Fishlock Table 1](https://arxiv.org/html/1410.7457v1) does not give
+total stellar lifetimes. Low-Z event ages use the published Raiteri et al.
+(1996) Padova fit as given in
+[Valiante et al. (2009), equations 3--6](https://arxiv.org/html/0905.1691v1).
+The fit is used only for these Z=.001, 1--6 Msun nodes. KL16 source lifetimes
+are unchanged. The terminal-envelope/WD approximation and native linear-Z
+mixture retain each source node's own event age; no yield extrapolation or
+interpolated individual stellar track is claimed.
+
+Select the exported history with `high_mass_history_path` and the table with
+`PHASE0_YIELD_TABLE`, as above. No new RAMSES namelist field is required.
+For the existing SNIa comparison also use `--population snia_baseline
+--imf-id 1` and its explicitly selected effective-SSP runtime contract.
+This does not solve the strict WD-supply/40-Myr DTD mismatch, establish a
+microscopic binary population, or extend the LC18 upper Z boundary.
+
+The existing native source fixture accepts an optional fourth argument
+`fishlock2014_raiteri96` for the extended input. It checks all 73 AGB nodes,
+time splitting at Z=.004, full effective-SSP DTD mass closure at six Z values,
+and rejection outside the common hull. A four-step native RT/feedback/dust
+run and restart at Z=.004 are recorded in the population bundle progress.
+These short runs test wiring, not a galaxy calibration or late AGB evolution.
+
 ### Effective SSP SNIa accounting (implemented; bounded native verification)
 
 The operator-approved phenomenological SSP route retains the empirical DTD

@@ -18,14 +18,25 @@ program kl16_lc18_native_test
   type(snia_population_realization_t)::dtd
   type(snia_physical_contract_t)::event
   type(snia_event_budget_t)::budget
-  character(len=1024)::yields,history,snia
+  character(len=1024)::yields,history,snia,source_option
   real(stellar_dp)::energy,first_age
   real(stellar_dp)::times(9)=[0d0,.04d0,.05d0,.06889d0,.1d0,.2d0,1d0,5d0,13.7d0]
   ! Common KL16/LC18 Z support, not the broader AGB-only domain.
-  real(stellar_dp)::zs(4)=[.007d0,.01d0,.012d0,.01345d0]
+  real(stellar_dp),allocatable::zs(:)
   real(stellar_dp)::prior,expected_prior,events,remaining,generic_left,all_return,ia_return
-  integer::i,r,ierr,u,iz,it
+  integer::i,r,ierr,u,iz,it,expected_agb_rows
   call get_command_argument(1,yields);call get_command_argument(2,history);call get_command_argument(3,snia)
+  call get_command_argument(4,source_option)
+  expected_agb_rows=58
+  zs=[.007d0,.01d0,.012d0,.01345d0]
+  select case(trim(source_option))
+  case('')
+  case('fishlock2014_raiteri96')
+     expected_agb_rows=73
+     zs=[.001d0,.004d0,.007d0,.01d0,.012d0,.01345d0]
+  case default
+     error stop 'unknown source option'
+  end select
   call set_enrichment_defaults()
   default_imf_id=1;population_model_id=1;configured_binary_fraction=.5d0
   enable_agb=.true.;enable_snia=.true.;high_mass_model='wind_only_collapse'
@@ -35,7 +46,7 @@ program kl16_lc18_native_test
   if(ierr/=0)stop 1
   call prepare_high_mass_history(table,trim(history),ierr)
   if(ierr/=0.or..not.allocated(table%agb_terminal_row))stop 2
-  if(size(table%agb_terminal_row)/=58.or..not.table%net_yield_diagnostic_unavailable)stop 3
+  if(size(table%agb_terminal_row)/=expected_agb_rows.or..not.table%net_yield_diagnostic_unavailable)stop 3
   call set_yield_mass_assignment_mode(table,yield_mass_assignment_piecewise_constant,ierr)
   call audit_yield_table(table,1d-10,ierr,.true.,channel_owns_terminal_remnant, &
        [.true.,.true.,.true.,.false.,.false.])
@@ -54,6 +65,7 @@ program kl16_lc18_native_test
      if(abs(a%energy-energy)>1d-14*energy.or.any(a%momentum/=0))stop 8
   enddo
   pop%initial_mass=10000;pop%current_mass=10000;pop%birth_metallicity=.01d0
+  if(trim(source_option)=='fishlock2014_raiteri96')pop%birth_metallicity=.004d0
   pop%imf_id=1;pop%population_id=1;pop%imf_mass_min=.08d0;pop%imf_mass_max=120
   pop%yield_basis_id=yield_basis_per_star_cumulative
   call compute_stellar_source_increment(table,pop,0d0,.2d0,configured_channel_mass_min, &
@@ -117,5 +129,18 @@ program kl16_lc18_native_test
      if(abs(ia_return-pop%initial_mass*.0013d0*event%returned_mass_per_event)>1d-9)stop 27
      print *, 'EFFECTIVE_SSP_FULL_DTD_MASS_CLOSURE',zs(iz),remaining,all_return,ia_return
   enddo
+  ! The common hull is the intersection of active channel supports; neither
+  ! the lower Fishlock edge nor the upper LC18 edge may be extrapolated.
+  if(trim(source_option)=='fishlock2014_raiteri96')then
+     do iz=1,2
+        pop%current_mass=pop%initial_mass
+        if(iz==1)pop%birth_metallicity=.00099d0
+        if(iz==2)pop%birth_metallicity=.01346d0
+        call compute_stellar_source_increment(table,pop,0d0,.2d0,configured_channel_mass_min, &
+             configured_channel_mass_max,64,whole,ierr)
+        if(ierr==0)stop 28
+     enddo
+     print *, 'FISHLOCK_COMMON_Z_HULL_NO_EXTRAPOLATION_OK'
+  endif
   print *, 'KL16_LC18_EFFECTIVE_SSP_TEST_OK'
 end program kl16_lc18_native_test
