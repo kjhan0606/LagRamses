@@ -30,6 +30,21 @@ module snrt_dust_ir
   end type
   public :: snrt_dust_ir_initialize, snrt_dust_ir_advance, snrt_dust_material_temperature
   abstract interface
+     subroutine dust_transport_dispatch(energy,ghosts,neighbor,remote,blocked,density,direction,sigma, &
+          cdt,ratio,transported,transmit,loss,response,ierr)
+       import real64
+       real(real64),intent(in)::energy(:,:,:),ghosts(:,:,:),density(:),direction(:,:),sigma(:),cdt,ratio
+       integer,intent(in)::neighbor(:,:),remote(:,:)
+       logical,intent(in)::blocked(:,:)
+       real(real64),intent(out)::transported(:,:,:),transmit(:,:),loss(:,:),response(:,:)
+       integer,intent(out)::ierr
+     end subroutine
+     subroutine dust_absorb_dispatch(transported,transmit,loss,response,rate,weight,dt,sum_w,candidate,absorbed,ierr)
+       import real64
+       real(real64),intent(in)::transported(:,:,:),transmit(:,:),loss(:,:),response(:,:),rate(:,:),weight(:),dt,sum_w
+       real(real64),intent(out)::candidate(:,:,:),absorbed(:)
+       integer,intent(out)::ierr
+     end subroutine
      subroutine dust_material_dispatch(heating,density,old_energy,capacity,log_t,power,band, &
           material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr)
        import real64
@@ -248,7 +263,7 @@ contains
 
   subroutine snrt_dust_ir_advance(table, direction, weight, neighbor, dx, dt, c_hat, density, primary, &
        energy, temperature, photons, diagnostics, ierr, tolerance, max_iterations, dust_energy, heat_capacity, &
-       ghost_energy,ghost_index,blocked_face,material_dispatch)
+       ghost_energy,ghost_index,blocked_face,material_dispatch,transport_dispatch,absorb_dispatch)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -273,6 +288,9 @@ contains
     ! Suppress BOTH inflow and outflow here; this is not a vacuum boundary.
     logical, optional, intent(in) :: blocked_face(:,:)
     procedure(dust_material_dispatch),optional :: material_dispatch
+    procedure(dust_transport_dispatch),optional :: transport_dispatch
+    procedure(dust_absorb_dispatch),optional :: absorb_dispatch
+    real(real64),allocatable :: empty_ghost(:,:,:)
     real(real64),allocatable :: dispatch_u(:)
     logical, allocatable :: blocked(:,:)
     real(real64), allocatable :: transported(:,:,:), candidate(:,:,:), rate(:,:), next_t(:)
@@ -364,6 +382,18 @@ contains
     endif
     volume=dx**3
     transported=energy
+    if(present(transport_dispatch))then
+       if(present(ghost_energy))then
+          call transport_dispatch(energy,ghost_energy,neighbor,remote,blocked,density,direction,table%sigma, &
+               c_hat*dt,c_hat*dt/dx,transported,transmit,loss,response,ierr)
+       else
+          allocate(empty_ghost(ng,nd,0))
+          call transport_dispatch(energy,empty_ghost,neighbor,remote,blocked,density,direction,table%sigma, &
+               c_hat*dt,c_hat*dt/dx,transported,transmit,loss,response,ierr)
+       endif
+       if(ierr/=dust_ok)return
+    endif
+    ierr=dust_err_state
     old_total=0
     do i=1,nc
        do d=1,nd
@@ -375,12 +405,15 @@ contains
              end if
              j=neighbor(face,i)
              factor=c_hat*dt/dx*abs(direction(axis,d))
-             if(.not.blocked(outgoing,i)) &
-                  transported(:,d,i)=transported(:,d,i)-factor*energy(:,d,i)
-             if (j>0) transported(:,d,i)=transported(:,d,i)+factor*energy(:,d,j)
+             if(.not.present(transport_dispatch))then
+                if(.not.blocked(outgoing,i)) &
+                     transported(:,d,i)=transported(:,d,i)-factor*energy(:,d,i)
+                if (j>0) transported(:,d,i)=transported(:,d,i)+factor*energy(:,d,j)
+             endif
              ghost=remote(face,i)
              if(ghost>0)then
-                transported(:,d,i)=transported(:,d,i)+factor*ghost_energy(:,d,ghost)
+                if(.not.present(transport_dispatch)) &
+                     transported(:,d,i)=transported(:,d,i)+factor*ghost_energy(:,d,ghost)
                 trial%interface_erg=trial%interface_erg-sum(ghost_energy(:,d,ghost))*weight(d)*factor*volume
              end if
              if (neighbor(outgoing,i)==0.and..not.blocked(outgoing,i)) then
@@ -393,6 +426,7 @@ contains
           end do
        end do
        do g=1,ng
+          if(present(transport_dispatch))exit
           tau=c_hat*dt*table%sigma(g)*density(i)
           if (.not.ieee_is_finite(tau)) return
           transmit(g,i)=exp(-tau)
@@ -429,9 +463,14 @@ contains
        end if
        if (ierr/=dust_ok) return
        absorbed=0; new_total=0
+       if(present(absorb_dispatch))then
+          call absorb_dispatch(transported,transmit,loss,response,rate,weight,dt,sum_w,candidate,absorbed,ierr)
+          if(ierr/=dust_ok)return
+       endif
        do i=1,nc
           do d=1,nd
              do g=1,ng
+                if(present(absorb_dispatch))exit
                 source=dt*rate(g,i)/sum_w
                 candidate(g,d,i)=transported(g,d,i)*transmit(g,i)+source*response(g,i)
                 absorbed(i)=absorbed(i)+weight(d)*(transported(g,d,i)*loss(g,i)+source*(1-response(g,i)))

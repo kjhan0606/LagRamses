@@ -5,7 +5,7 @@ module snrt_dust_live
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use snrt_dust_contract
   use snrt_dust_ir
-  use snrt_runtime_backend, only: snrt_runtime_dust_material
+  use snrt_runtime_backend, only: snrt_runtime_dust_material, snrt_runtime_ir_transport, snrt_runtime_ir_absorb
   use snrt_state, only: snrt_ndirection, snrt_nslot, snrt_state_get_slot
   use amr_commons, only: ngridmax,ncoarse,ncpu,myid,headl,next,son
   use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
@@ -230,7 +230,8 @@ contains
        ierr=dust_ok
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
-            ghosts,remote,blocked,material_dispatch=snrt_runtime_dust_material)
+            ghosts,remote,blocked,material_dispatch=snrt_runtime_dust_material, &
+            transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb)
        if(ierr/=dust_ok.and.size(slots)>0)then
           write(*,'(A,3I6,A,2ES25.16,A,ES14.5)')' SNRT IR rejected state rank/level/error=',myid,ilevel,ierr, &
                ' material_T_range=',minval(material/capacity),maxval(material/capacity), &

@@ -350,7 +350,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
         choices = OrderedDict((key, (label,)) for key, label in (
             ('auto', 'Hybrid: free CUDA stream or CPU thread'), ('openmp', 'Force OpenMP'), ('cuda', 'Force CUDA')))
         primary_backend = ui.ask_choice('Primary RT backend', choices, 'auto')
-        dust_backend = ui.ask_choice('Dust material backend', choices, 'auto')
+        dust_backend = ui.ask_choice('Dust material / IR backend', choices, 'auto')
         if type(ranks) is not int or type(threads) is not int or min(ranks, threads) < 1:
             raise ValueError('MPI ranks and OpenMP threads must be positive integers.')
         if primary_backend not in choices or dust_backend not in choices:
@@ -362,7 +362,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
     source = root / '.agb-physical.4LAOTJ/snia-input'
     binary = root / '.bpass-native.v0ZwR6/ramses_bpass_native3d'
     if parallel:
-        binary = root / '.hybrid-runtime.Vb2XNr/ramses_hybrid3d'
+        binary = root / '.ir-hybrid.dYEXir/ramses_ir3d'
     env = OrderedDict([
         ('OMP_NUM_THREADS', str(threads)), ('I_MPI_FABRICS', 'shm'),
         ('OMP_STACKSIZE', '512M'), ('KMP_STACKSIZE', '512M'),

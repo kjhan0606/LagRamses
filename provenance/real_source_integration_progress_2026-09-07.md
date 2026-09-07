@@ -1803,3 +1803,76 @@ including the copied checkpoint in restart. Budget 224 MB including copy,
 free GPFS space 168 TB. Failed runs produced no full dumps and were retained.
 No speedup, multi-node qualification, GPU mechanical/IR transport, new physical
 approval, external audit, commit or push is claimed by this replacement.
+
+### IR stream hybrid extension
+
+Operator approved reuse of the existing MPI-rank/device placement after a
+read-only examination of current MG and the initial snapshot `e158091`.
+Both contain `local_rank % device_count`, a single device ID per process,
+and stream creation on that selected device. Distributed GPU MG uses MPI
+halo exchange; optional `USE_CUFFTMP` is a separate distributed FFT Poisson
+path. Neither establishes a multi-device stream pool inside one rank. No MG
+code was changed or MG/cuFFTMp execution qualified by this IR work.
+
+Implemented the previously paused IR transport/local absorption extension:
+
+- `snrt_ir_cell.h` shares FP64 scalar formulas between OpenMP and CUDA;
+  `snrt_ir_cuda.cu` uses the existing rank-local stream pool and stream-local
+  allocation, copy, launch, synchronization and cleanup.
+- `snrt_hybrid.cpp` gathers old local/remote neighbors into private batches,
+  preserves blocked-face semantics, and stages all outputs until every batch
+  succeeds. Auto tries one lease per batch; busy/unavailable uses the current
+  CPU worker. Forced OpenMP never leases; forced IR CUDA uses one worker and
+  rejects unavailable leases. No after-launch CPU replay.
+- Optional callbacks in `snrt_dust_ir.f90`, wired through
+  `snrt_runtime_backend.f90` and `snrt_dust_live.f90`, retain independent
+  Fortran reference loops. Outer iteration, boundary ledgers, volume sums,
+  MPI exchange, coarse/fine correction and final commit remain on host.
+- `SNRT_DUST_BACKEND` now covers material and IR. No new main namelist field;
+  existing `n_cuda_streams` and batch size are reused. Makefile keeps its VPATH
+  order. CLI/GUI label and parallel comparison executable updated together;
+  pre-existing generator deletions (88 lines) remain untouched.
+
+Build on `syntax`, isolated directory `.ir-hybrid.dYEXir`, with
+`HDF5=1 USE_CUDA=1 SNRT=1 DUST_LIVE=1 USE_FFTW=0 EXEC=ramses_ir`.
+Executable `ramses_ir3d` SHA256:
+`d6d1f8f3e5848250572ae1fc068843d08afb49cdfa2acbf80b856d2583285209`.
+Object/module cache copied with preserved timestamps; changed native objects
+rebuilt. Successful build logs: `build-smoke.log`, `build-native.log`,
+`build-fortran-final.log`.
+
+Evidence under that directory:
+
+- `hybrid-gpu.log` / `hybrid-cpu.log`: 1031 cells, 64-cell batches, four
+  workers and one stream. IR free-pool cases CPU=16/GPU=1; held/hidden cases
+  17/0. Thin/finite tau, neighbor/ghost batch crossings, both material modes,
+  forced-CUDA success/resource rejection and late-error rollback pass.
+  Primary regression relative difference 1.78814e-7; hidden-GPU result exact.
+- `fortran-final-{auto,openmp,cuda}.log`: independent Fortran IR/material
+  reference, both material models, 1031-cell reciprocal chain, remote ghost,
+  blocked face and optical depths on both sides of the thin-tau branch.
+  Worst relative difference 1.870511e-15. Boundary ledgers exact; closure
+  and late material-error transaction rejection pass. Initial thin-only
+  `fortran-auto.log` is preserved separately.
+- `mpi2-auto/run.nml`: fresh 4-step coupled hydro/feedback/RT/dust test,
+  2 MPI ranks, physical GPUs 1/2, OMP=4, OMP/KMP_STACKSIZE=512M, batch=64,
+  stream=1, both backends auto. Both ranks show first-call CPU=3/GPU=1 for
+  primary, material, IR transport and IR absorption. Exit 0, completed,
+  no MG nonconvergence/ERROR and zero NaN_CHK counts; IR closure <=6.4542e-10.
+- `mpi2-restart-openmp/run.nml`: copied (not moved) step-2 checkpoint,
+  hidden GPUs, two ranks/four threads, both OpenMP, continues through step 4.
+  Exit 0, closure <=5.4072e-10. `restart-comparison.log`: 94 finite hydro/SNRT
+  arrays, 73 exact; maximum array-normalized RT difference 2.294989e-7,
+  dust energy 5.945144e-8, hydro total energy 3.338865e-11. BH position
+  absolute differences <=7.22e-16. No bitwise scheduling guarantee.
+- `mkrun-tests.log`: 27 tests, 26 pass, one display-dependent skip.
+  `git diff --check` passes. No new testing framework or external audit.
+
+Both effective namelists are under the absolute root
+`/gpfs/kjhan/LRD_JWST/.ir-hybrid.dYEXir/` at the paths above. Purpose is short
+evolution/restart, not production: nstepmax=4, noutput=1, unreached aout=2 and
+tout=1e30, foutput=2, fbackup=1000000. Each contains two dump directories
+(including the copied restart input), 110149876 bytes/run, 220299752 total;
+prelaunch free space 167 TB. All prior runs and dumps are preserved.
+No physical model/table changes, multi-node/performance qualification,
+single-rank multi-device pool, commit or push are claimed here.

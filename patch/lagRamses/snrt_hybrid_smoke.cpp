@@ -89,5 +89,60 @@ int main() {
       if(!rc||trial!=saved)return 18;
     }
   }
+  // IR uses independent frozen neighbor/ghost snapshots across batch edges.
+  constexpr int ic=1031,ig=2,id=2,ir=ig*id,igroups=ic*ig;
+  std::vector<double> iq(ic*ir),ghost(ir,.04),rho(ic),directions={1,0,0,-1,0,0};
+  std::vector<double> sigma={1e-7,2.},weights={.5,.5},rate(igroups,.02);
+  std::vector<int> links(6*ic),remote(6*ic),blocked(6*ic);
+  for(int i=0;i<ic;++i) {
+    rho[i]=.5+.01*(i%71);
+    for(int k=0;k<ir;++k)iq[i*ir+k]=.01*(1+(i+k)%19);
+    if(i)links[6*i]=i;
+    if(i+1<ic)links[6*i+1]=i+2;
+  }
+  remote[0]=1;blocked[6*(ic-1)+1]=1;
+  std::vector<double> tr(ic*ir),tx(igroups),lo(igroups),re(igroups),cand(ic*ir),abs(ic);
+  auto transport=[&](auto& t,auto& x,auto& l,auto& r,int mode) {
+    return snrt_ir_transport_c(iq.data(),ghost.data(),links.data(),remote.data(),blocked.data(),rho.data(),
+        directions.data(),sigma.data(),t.data(),x.data(),l.data(),r.data(),ic,ig,id,1,.2,.2,mode);
+  };
+  auto absorb=[&](auto& c,auto& a,int mode) {
+    return snrt_ir_absorb_c(tr.data(),tx.data(),lo.data(),re.data(),rate.data(),weights.data(),
+        c.data(),a.data(),ic,ig,id,.1,1.,mode);
+  };
+  if(transport(tr,tx,lo,re,1)||absorb(cand,abs,1))return 20;
+  for(int busy=0;busy<2;++busy) {
+    const int held=busy&&gpu?cuda_acquire_stream():-1;
+    if(busy&&gpu&&held<0)return 21;
+    auto t=tr,x=tx,l=lo,r=re,c=cand,a=abs;
+    int rc=transport(t,x,l,r,0);
+    int cpu,gp;snrt_hybrid_counts_c(2,&cpu,&gp);
+    if(rc||cpu+gp!=17||((busy||!gpu)&&gp)||(!busy&&gpu&&(!cpu||!gp)))return 22;
+    auto equal=[](const auto& lhs,const auto& rhs) {
+      for(size_t k=0;k<lhs.size();++k)if(!std::isfinite(rhs[k])||std::abs(lhs[k]-rhs[k])>1e-13*std::max(1.,std::abs(lhs[k])))return false;
+      return true;
+    };
+    if(!equal(tr,t)||!equal(tx,x)||!equal(lo,l)||!equal(re,r))return 23;
+    std::printf("IR transport held=%d CPU=%d GPU=%d PASS\n",busy,cpu,gp);
+    rc=absorb(c,a,0);snrt_hybrid_counts_c(3,&cpu,&gp);
+    if(rc||cpu+gp!=17||((busy||!gpu)&&gp)||(!busy&&gpu&&(!cpu||!gp)))return 24;
+    if(!equal(cand,c)||!equal(abs,a))return 25;
+    std::printf("IR absorption held=%d CPU=%d GPU=%d PASS\n",busy,cpu,gp);
+    // Late-batch failure leaves every public output unchanged.
+    const auto st=t,sx=x,sl=l,sr=r,sc=c,sa=a;
+    const double saved_rho=rho.back();rho.back()=std::numeric_limits<double>::quiet_NaN();
+    rc=transport(t,x,l,r,0);rho.back()=saved_rho;
+    if(!rc||t!=st||x!=sx||l!=sl||r!=sr)return 26;
+    rate.back()=std::numeric_limits<double>::quiet_NaN();
+    rc=absorb(c,a,0);rate.back()=.02;
+    if(!rc||c!=sc||a!=sa)return 27;
+    // Explicit CUDA never silently becomes CPU when the only stream is held.
+    if(busy||!gpu) {
+      if(!transport(t,x,l,r,2)||!absorb(c,a,2)||t!=st||x!=sx||l!=sl||r!=sr||c!=sc||a!=sa)return 28;
+    } else {
+      if(transport(t,x,l,r,2)||absorb(c,a,2)||!equal(tr,t)||!equal(cand,c))return 29;
+    }
+    if(held>=0)cuda_release_stream(held);
+  }
   std::printf("HYBRID_MIXED_BUSY_ROLLBACK_PASS gpu=%d primary_relative=%g\n",gpu,worst);
 }

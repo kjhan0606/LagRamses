@@ -7,11 +7,31 @@ module snrt_runtime_backend
   implicit none
   private
   public :: snrt_backend_initialize, snrt_runtime_species_dust_step, snrt_runtime_dust_material
+  public :: snrt_runtime_ir_transport, snrt_runtime_ir_absorb
   integer,save :: mode=0,init_status=0,sharers=1
   logical,save :: initialized=.false.,gpu_ready=.false.
   integer,save :: last_choice=-1,cpu_threads=1
   integer,save :: dust_mode=0,last_dust_choice=-1,world_rank=0
   interface
+     function ir_transport(energy,ghosts,neighbor,remote,blocked,density,direction,sigma,transported, &
+          transmit,loss,response,nc,ng,nd,nghost,cdt,ratio,choice) bind(C,name='snrt_ir_transport_c') result(ierr)
+       import c_double,c_int
+       real(c_double),intent(in)::energy(*),ghosts(*),density(*),direction(*),sigma(*)
+       integer(c_int),intent(in)::neighbor(*),remote(*),blocked(*)
+       real(c_double)::transported(*),transmit(*),loss(*),response(*)
+       integer(c_int),value::nc,ng,nd,nghost,choice
+       real(c_double),value::cdt,ratio
+       integer(c_int)::ierr
+     end function
+     function ir_absorb(transported,transmit,loss,response,rate,weight,candidate,absorbed, &
+          nc,ng,nd,dt,sum_w,choice) bind(C,name='snrt_ir_absorb_c') result(ierr)
+       import c_double,c_int
+       real(c_double),intent(in)::transported(*),transmit(*),loss(*),response(*),rate(*),weight(*)
+       real(c_double)::candidate(*),absorbed(*)
+       integer(c_int),value::nc,ng,nd,choice
+       real(c_double),value::dt,sum_w
+       integer(c_int)::ierr
+     end function
      function hybrid_configure(rank,streams,cells,threads,share,gpu) bind(C,name='snrt_hybrid_configure_c') result(ierr)
        import c_int
        integer(c_int),value::rank,streams,cells,threads,share,gpu
@@ -81,6 +101,33 @@ module snrt_runtime_backend
      end function
   end interface
 contains
+  subroutine snrt_runtime_ir_transport(energy,ghosts,neighbor,remote,blocked,density,direction,sigma, &
+       cdt,ratio,transported,transmit,loss,response,ierr)
+    real(c_double),intent(in)::energy(:,:,:),ghosts(:,:,:),density(:),direction(:,:),sigma(:),cdt,ratio
+    integer,intent(in)::neighbor(:,:),remote(:,:)
+    logical,intent(in)::blocked(:,:)
+    real(c_double),intent(out)::transported(:,:,:),transmit(:,:),loss(:,:),response(:,:)
+    integer,intent(out)::ierr
+    integer(c_int),allocatable::flags(:,:)
+    ierr=7
+    if(.not.initialized.or.init_status/=0)return
+    flags=merge(1_c_int,0_c_int,blocked)
+    ierr=int(ir_transport(energy,ghosts,int(neighbor,c_int),int(remote,c_int),flags,density,direction,sigma, &
+         transported,transmit,loss,response,int(size(density),c_int),int(size(energy,1),c_int), &
+         int(size(energy,2),c_int),int(size(ghosts,3),c_int),cdt,ratio,int(dust_mode,c_int)))
+  end subroutine
+
+  subroutine snrt_runtime_ir_absorb(transported,transmit,loss,response,rate,weight,dt,sum_w,candidate,absorbed,ierr)
+    real(c_double),intent(in)::transported(:,:,:),transmit(:,:),loss(:,:),response(:,:),rate(:,:),weight(:),dt,sum_w
+    real(c_double),intent(out)::candidate(:,:,:),absorbed(:)
+    integer,intent(out)::ierr
+    ierr=7
+    if(.not.initialized.or.init_status/=0)return
+    ierr=int(ir_absorb(transported,transmit,loss,response,rate,weight,candidate,absorbed, &
+         int(size(transported,3),c_int),int(size(transported,1),c_int),int(size(transported,2),c_int), &
+         dt,sum_w,int(dust_mode,c_int)))
+  end subroutine
+
   subroutine snrt_backend_initialize(ierr,nstreams)
 #ifndef WITHOUTMPI
     use mpi_mod

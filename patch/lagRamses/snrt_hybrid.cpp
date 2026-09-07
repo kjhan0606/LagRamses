@@ -4,6 +4,7 @@
 #include <cmath>
 using std::isfinite;
 #include "snrt_dust_material_cell.h"
+#include "snrt_ir_cell.h"
 #include <algorithm>
 #include <vector>
 #include <new>
@@ -13,18 +14,18 @@ using std::isfinite;
 
 namespace {
 int batch_cells=256,team_size=1,device_sharers=1;
-bool gpu_enabled=false,reported[2]={false,false};
-int cpu_count[2]={0,0},gpu_count[2]={0,0};
+bool gpu_enabled=false,reported[4]={false,false,false,false};
+int cpu_count[4]={0,0,0,0},gpu_count[4]={0,0,0,0};
 struct Lease {
   int slot;
-  explicit Lease(long long bytes):slot(gpu_enabled?snrt_hybrid_try_acquire_c(bytes,device_sharers):-1) {}
+  explicit Lease(long long bytes,bool allowed=true):slot(gpu_enabled&&allowed?snrt_hybrid_try_acquire_c(bytes,device_sharers):-1) {}
   ~Lease(){if(slot>=0)cuda_release_stream(slot);}
 };
 void counts(int op,int cpu,int gpu) {
   cpu_count[op]=cpu;gpu_count[op]=gpu;
   if(!reported[op]) {
     std::printf(" SNRT hybrid %s batches CPU=%d GPU=%d batch_cells=%d\n",
-        op==0?"primary":"dust",cpu,gpu,batch_cells);
+        op==0?"primary":op==1?"dust":op==2?"IR transport":"IR absorption",cpu,gpu,batch_cells);
     reported[op]=true;
   }
 }
@@ -37,7 +38,7 @@ extern "C" int snrt_hybrid_configure_c(int rank,int streams,int cells,int thread
   return gpu && !gpu_enabled?2:0;
 }
 extern "C" void snrt_hybrid_counts_c(int op,int *cpu,int *gpu) {
-  if(op<0||op>1){*cpu=*gpu=-1;return;}
+  if(op<0||op>3){*cpu=*gpu=-1;return;}
   *cpu=cpu_count[op];*gpu=gpu_count[op];
 }
 
@@ -162,4 +163,108 @@ extern "C" int snrt_hybrid_dust_material_c(const double *input,const double *tab
     std::copy(trial.begin(),trial.end(),output);
     return 0;
   } catch(const std::bad_alloc&) {return 7;}
+}
+
+// mode: 0 automatic lease/CPU, 1 CPU only, 2 GPU only (reject unavailable).
+// Arrays follow Fortran (group,direction,cell) order. Only immutable old
+// neighbors are gathered; all owned outputs publish together on success.
+extern "C" int snrt_ir_transport_c(const double *energy,const double *ghosts,
+    const int *neighbor,const int *remote,const int *blocked,const double *density,
+    const double *direction,const double *sigma,double *transported,double *transmit,
+    double *loss,double *response,int nc,int ng,int nd,int nghost,double cdt,double ratio,int mode) {
+  if(!energy||!neighbor||!remote||!blocked||!density||!direction||!sigma||!transported||
+      !transmit||!loss||!response||nc<1||ng<1||nd<1||nghost<0||(nghost&&!ghosts)||
+      mode<0||mode>2||!std::isfinite(cdt)||cdt<=0||!std::isfinite(ratio)||ratio<=0)return 7;
+  const size_t limit=std::numeric_limits<size_t>::max()/sizeof(double)/16;
+  if(size_t(ng)>limit/nd/std::max(nc,std::max(1,nghost)))return 7;
+  const size_t rays=size_t(ng)*nd,total=rays*nc,groups=size_t(ng)*nc;
+  for(size_t k=0;k<6*size_t(nc);++k)
+    if(neighbor[k]<0||neighbor[k]>nc||remote[k]<0||remote[k]>nghost||
+        (neighbor[k]&&remote[k])||(blocked[k]&&(neighbor[k]||remote[k])))return 2;
+  try {
+    std::vector<double> trial(total+3*groups),coeff(direction,direction+3*size_t(nd));
+    coeff.insert(coeff.end(),sigma,sigma+ng);
+    const int nbatch=1+(nc-1)/batch_cells,threads=mode==2?1:std::min(team_size,nbatch);
+    int error=0,cpu=0,gpu=0;
+    #pragma omp parallel for num_threads(threads) schedule(dynamic,1) reduction(max:error) reduction(+:cpu,gpu)
+    for(int ib=0;ib<nbatch;++ib) {
+      try {
+        const int first=ib*batch_cells,n=std::min(batch_cells,nc-first);
+        const size_t t=rays*n,g=size_t(ng)*n;
+        std::vector<double> input(7*t+n,0),out(t+3*g);
+        for(int i=0;i<n;++i) {
+          const int cell=first+i;
+          std::copy_n(energy+size_t(cell)*rays,rays,input.data()+size_t(i)*7*rays);
+          for(int face=0;face<6;++face) {
+            const int j=neighbor[6*cell+face],r=remote[6*cell+face];
+            if(j||r)std::copy_n(j?energy+size_t(j-1)*rays:ghosts+size_t(r-1)*rays,
+                rays,input.data()+(size_t(i)*7+face+1)*rays);
+          }
+          input[7*t+i]=density[cell];
+        }
+        Lease lease(8LL*(input.size()+coeff.size()+out.size())+24LL*n+16777216LL,mode!=1);
+        int rc=0;
+        if(lease.slot>=0) {
+          ++gpu;rc=snrt_ir_batch_c(input.data(),blocked+6*first,coeff.data(),out.data(),n,ng,nd,cdt,ratio,lease.slot,0);
+        } else if(mode==2)rc=7;
+        else {
+          ++cpu;
+          for(int i=0;i<n;++i)rc=std::max(rc,snrt_ir_transport_cell(input.data(),input.data()+7*t,
+              blocked+6*first,direction,sigma,out.data(),n,ng,nd,cdt,ratio,i));
+        }
+        if(rc){error=std::max(error,rc);continue;}
+        std::copy_n(out.data(),t,trial.data()+size_t(first)*rays);
+        for(int f=0;f<3;++f)std::copy_n(out.data()+t+f*g,g,trial.data()+total+f*groups+size_t(first)*ng);
+      } catch(const std::bad_alloc&){error=7;}
+    }
+    counts(2,cpu,gpu);
+    if(error)return error;
+    std::copy_n(trial.data(),total,transported);
+    std::copy_n(trial.data()+total,groups,transmit);
+    std::copy_n(trial.data()+total+groups,groups,loss);
+    std::copy_n(trial.data()+total+2*groups,groups,response);
+    return 0;
+  } catch(const std::bad_alloc&){return 7;}
+}
+
+extern "C" int snrt_ir_absorb_c(const double *transported,const double *transmit,const double *loss,
+    const double *response,const double *rate,const double *weight,double *candidate,double *absorbed,
+    int nc,int ng,int nd,double dt,double sum_w,int mode) {
+  if(!transported||!transmit||!loss||!response||!rate||!weight||!candidate||!absorbed||
+      nc<1||ng<1||nd<1||mode<0||mode>2||!std::isfinite(dt)||dt<=0||!std::isfinite(sum_w)||sum_w<=0)return 7;
+  const size_t limit=std::numeric_limits<size_t>::max()/sizeof(double)/16;
+  if(size_t(ng)>limit/nd/nc)return 7;
+  const size_t rays=size_t(ng)*nd,total=rays*nc;
+  try {
+    std::vector<double> trial(total+nc);
+    const double *fields[]={transmit,loss,response,rate};
+    const int nbatch=1+(nc-1)/batch_cells,threads=mode==2?1:std::min(team_size,nbatch);
+    int error=0,cpu=0,gpu=0;
+    #pragma omp parallel for num_threads(threads) schedule(dynamic,1) reduction(max:error) reduction(+:cpu,gpu)
+    for(int ib=0;ib<nbatch;++ib) {
+      try {
+        const int first=ib*batch_cells,n=std::min(batch_cells,nc-first);
+        const size_t t=rays*n,g=size_t(ng)*n;
+        std::vector<double> input(t+4*g),out(t+n);
+        std::copy_n(transported+size_t(first)*rays,t,input.data());
+        for(int f=0;f<4;++f)std::copy_n(fields[f]+size_t(first)*ng,g,input.data()+t+f*g);
+        Lease lease(8LL*(input.size()+nd+out.size())+16777216LL,mode!=1);
+        int rc=0;
+        if(lease.slot>=0) {
+          ++gpu;rc=snrt_ir_batch_c(input.data(),nullptr,weight,out.data(),n,ng,nd,dt,sum_w,lease.slot,1);
+        } else if(mode==2)rc=7;
+        else {
+          ++cpu;
+          for(int i=0;i<n;++i)rc=std::max(rc,snrt_ir_absorb_cell(input.data(),weight,out.data(),n,ng,nd,dt,sum_w,i));
+        }
+        if(rc){error=std::max(error,rc);continue;}
+        std::copy_n(out.data(),t,trial.data()+size_t(first)*rays);
+        std::copy_n(out.data()+t,n,trial.data()+total+first);
+      } catch(const std::bad_alloc&){error=7;}
+    }
+    counts(3,cpu,gpu);
+    if(error)return error;
+    std::copy_n(trial.data(),total,candidate);std::copy_n(trial.data()+total,nc,absorbed);
+    return 0;
+  } catch(const std::bad_alloc&){return 7;}
 }

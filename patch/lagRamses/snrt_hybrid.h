@@ -3,6 +3,11 @@
 using SnrtStep = int(float*,const float*,const int*,const float*,const float*,const float*,
     float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float);
 extern "C" {
+int snrt_ir_batch_c(const double*,const int*,const double*,double*,int,int,int,double,double,int,int);
+int snrt_ir_transport_c(const double*,const double*,const int*,const int*,const int*,const double*,
+    const double*,const double*,double*,double*,double*,double*,int,int,int,int,double,double,int);
+int snrt_ir_absorb_c(const double*,const double*,const double*,const double*,const double*,const double*,
+    double*,double*,int,int,int,double,double,int);
 SnrtStep snrt_openmp_species_dust_c, snrt_serial_species_dust_c, snrt_hybrid_species_dust_c;
 int snrt_cuda_species_dust_batch_c(float*,const float*,const int*,const float*,const float*,const float*,
     float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,int);

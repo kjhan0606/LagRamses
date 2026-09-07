@@ -23,14 +23,15 @@ CUDA runtime libraries. This does not yet provide a toolkit-free CPU build.
 | Primary SNRT transport, H/He inventory cap and primary dust absorption | OpenMP or CUDA; automatic selection available |
 | Stellar/AGN source evolution and mechanical deposition | Existing native CPU/OpenMP implementation; no equivalent CUDA implementation claimed |
 | Dust material implicit energy/temperature solve and group emissivity | Shared FP64 OpenMP/CUDA kernel; automatic selection available |
-| IR transport, outer absorption/re-emission iteration and MPI exchange | Existing native host implementation; not a CUDA port |
+| IR transport and local absorption/source response | Shared FP64 OpenMP/CUDA kernels; stream-availability hybrid |
+| IR outer iteration, conservation sums, MPI exchange and coarse/fine correction | Existing native host implementation |
 
 `SNRT_BACKEND=auto` (default) now means **stream-availability hybrid**, not
 whole-call cell-threshold selection. `openmp` and `cuda` remain explicit
 whole-call overrides. Legacy diagnostic GPU entry points remain GPU-only.
 
-`SNRT_DUST_BACKEND=auto|openmp|cuda` separately places the dust **material**
-solve; when unset it inherits `SNRT_BACKEND`.
+`SNRT_DUST_BACKEND=auto|openmp|cuda` separately places dust material emission
+and IR transport/local absorption; when unset it inherits `SNRT_BACKEND`.
 `SNRT_HYBRID_BATCH_CELLS` sets the work-batch size (default 256, admitted
 range 1--1048576), not a GPU eligibility threshold. The former
 `SNRT_GPU_MIN_CELLS`/`SNRT_DUST_GPU_MIN_CELLS` controls are no longer used.
@@ -43,8 +44,10 @@ The existing `n_cuda_streams` namelist field controls pool size. Slot leases
 are per MPI process/device context, NOT a GPU-wide utilization test or an
 inter-process lock. Different ranks may share a physical GPU.
 GPU admission also checks batch memory plus 16 MiB headroom, a 20% reserve,
-and rank sharing. Forced CUDA retains whole-call admission and rejects missing
-resources. Stream-ordered allocation/copies/kernels/free replace device-wide
+and rank sharing. Forced primary/material CUDA retains whole-call admission.
+Forced IR CUDA processes batches on one worker, requires a lease for every
+batch and rejects missing resources rather than silently using the CPU.
+Stream-ordered allocation/copies/kernels/free replace device-wide
 synchronization in these operators. Initialization remains collective at
 startup, never deferred until only dust-owning ranks enter.
 Both processors use the same 80-iteration FP64 material solve. The original
@@ -54,7 +57,9 @@ This adds no dust physics, namelist field, or persistent device checkpoint.
 SNRT batches gather the six-neighbor snapshot from immutable old state; all
 groups/directions and sequential atom-inventory consumption of a cell stay
 together. Owned outputs are staged until every batch succeeds; ghost workspace
-is not published. Dust likewise stages the full material result. Busy-slot
+is not published. Dust likewise stages material and IR results. IR gathers
+old local/remote neighbor snapshots, honors coarse-owned blocked faces and
+retains the original host boundary ledgers and global conservation sums. Busy-slot
 fallback happens BEFORE GPU execution; a device/physics error rejects the
 transaction rather than replaying a partially executed batch on the CPU.
 Timing-dependent CPU/GPU assignment can produce the measured FP32 rounding
@@ -160,6 +165,17 @@ one stream). Hybrid-to-OpenMP restart has maximum array-normalized difference
 all batches onto CPU, absent GPU, six-neighbor batch/ghost crossings, and
 whole-call rollback on late-batch errors. This is not a speedup benchmark.
 See the [hybrid implementation record](../../provenance/real_source_integration_progress_2026-09-07.md#stream-availability-hybrid-replacement).
+
+The IR extension `.ir-hybrid.dYEXir/ramses_ir3d` additionally exercises IR
+transport and local absorption on both devices in the same two-rank profile:
+each rank's first call has CPU=3/GPU=1 for all four operators. Hidden-GPU
+OpenMP restart has 94 finite hydro/SNRT arrays (73 exact), with maximum
+array-normalized differences 2.30e-7 for RT and 5.95e-8 for dust energy.
+Maximum IR balance is 6.46e-10. Independent Fortran material/IR parity is
+within 1.88e-15 for thin/finite optical depth, cross-batch neighbors, a remote
+ghost and a blocked coarse-owned face. This qualifies neither multi-node
+scaling nor a performance advantage. See the
+[IR extension record](../../provenance/real_source_integration_progress_2026-09-07.md#ir-stream-hybrid-extension).
 
 For this NVECTOR=500/NVAR=30 executable, use `OMP_STACKSIZE=512M` (and ensure
 any Intel `KMP_STACKSIZE` agrees). The compiled `godfine1`+`unsplit` stack

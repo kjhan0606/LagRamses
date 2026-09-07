@@ -59,13 +59,18 @@ that insufficient inherited limit. This is stack capacity per worker, not a
 change to physical arrays or timesteps; include it in node memory planning.
 
 This mode requires the new local executable
-`.hybrid-runtime.Vb2XNr/ramses_hybrid3d`, plus the same preserved
+`.ir-hybrid.dYEXir/ramses_ir3d`, plus the same preserved
 yield inputs. Its README supplies a **manual** `mpiexec -n N` command. Nothing
 is submitted or run by the wizard. `I_MPI_FABRICS=shm` makes this a single-node
 profile: arbitrary positive rank counts may be configured but only one/two
 ranks are exercised here. Reserve appropriate CPUs/GPUs and set
 `CUDA_VISIBLE_DEVICES` before launch. The old fixed single-rank mode and its
 preserved executable remain separate and unchanged.
+
+The dust backend selector covers material emission **and** IR transport/local
+absorption. MPI exchange, the outer iteration and conservation sums remain on
+the host. Streams belong to each rank's assigned GPU; increasing stream count
+does not distribute one rank over multiple GPUs.
 
 ## Shared wizard and save behavior
 
