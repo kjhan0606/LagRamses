@@ -159,6 +159,9 @@ contains
          real(snrt_dust_contract_number_ir,dp),snrt_dust_contract_ir_background_k, &
          snrt_dust_contract_ir_energy_ev,snrt_dust_contract_ir_weight_ev, &
          snrt_dust_contract_ir_absorption_per_h_cm2]
+    ! Bind U(T) itself; metadata alone must not reinterpret saved material energy.
+    if (snrt_dust_contract_version >= 4) dust_values=[dust_values, &
+         snrt_dust_contract_internal_energy_per_h_erg]
     if(writing)then
        call hdf5_write_attr_1d_dp(grp,'dust_contract_values',dust_values,size(dust_values))
     else

@@ -13,7 +13,7 @@ invalid="$repo_root/simulation/snrt/config/dust_native_contract_invalid_status.n
 
 check_reference_modes() {
   local binary="$1" setting expected reference version
-  for version in 2 3; do
+  for version in 2 3 4; do
   reference="$repo_root/simulation/snrt/config/dust_native_reference_control_v${version}.nml"
   for setting in 0 1 invalid 11111111111111111111111111111111; do
     expected=0

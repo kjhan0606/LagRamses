@@ -45,6 +45,9 @@ module snrt_dust_contract
        snrt_dust_contract_max_temperature) = 0.0d0
   real(real64), save, public :: snrt_dust_contract_mass_per_h_g = 0.0d0
   real(real64), save, public :: snrt_dust_contract_heat_capacity_per_h_erg_k = 0.0d0
+  real(real64), save, public :: snrt_dust_contract_internal_energy_per_h_erg( &
+       snrt_dust_contract_max_temperature) = 0.0d0
+  character(len=128), save, public :: snrt_dust_contract_material_sha256 = ''
   logical, save, public :: snrt_dust_contract_loaded = .false.
   logical, save, public :: snrt_dust_contract_runtime_allowed = .false.
   logical, save, public :: snrt_dust_contract_reference_control = .false.
@@ -87,6 +90,8 @@ contains
     real(real64) :: power_input(snrt_dust_contract_max_temperature)
     real(real64) :: mass_per_h_input
     real(real64) :: heat_capacity_per_h_erg_k_input
+    real(real64) :: internal_energy_per_h_erg_input(snrt_dust_contract_max_temperature)
+    character(len=128) :: material_sha256
 
     namelist /snrt_dust_contract/ contract_version, ngroups_input, &
          ntemperature_input, opacity_status, thermal_status, source_id, &
@@ -94,7 +99,8 @@ contains
          thermal_source, edges_input, absorption_input, mean_energy_input, &
          temperature_input, power_input, mass_per_h_input, &
          heat_capacity_per_h_erg_k_input, nir_input, ir_status, ir_energy_input, &
-         ir_weight_input, ir_absorption_input, ir_background_input
+         ir_weight_input, ir_absorption_input, ir_background_input, &
+         internal_energy_per_h_erg_input, material_sha256
 
     call snrt_dust_contract_reset()
     ierr = snrt_dust_contract_ok
@@ -128,6 +134,8 @@ contains
     power_input = -1.0d0
     mass_per_h_input = -1.0d0
     heat_capacity_per_h_erg_k_input = -1.0d0
+    internal_energy_per_h_erg_input = 0
+    material_sha256 = ''
 
     open(newunit=unit, file=trim(filename), status='old', action='read', &
          form='formatted', iostat=open_ierr)
@@ -144,10 +152,10 @@ contains
        snrt_dust_contract_error_message = trim(read_message)
        return
     end if
-    if (contract_version < 1 .or. contract_version > 3) then
+    if (contract_version < 1 .or. contract_version > 4) then
        ierr = snrt_dust_contract_err_version
        snrt_dust_contract_error_message = &
-            'only snrt_dust_contract versions 1 through 3 are supported'
+            'only snrt_dust_contract versions 1 through 4 are supported'
        return
     end if
     if (.not. known_opacity_status(opacity_status) .or. &
@@ -176,12 +184,29 @@ contains
        snrt_dust_contract_error_message = 'reference dust mass per H is invalid'
        return
     end if
-    if (contract_version >= 2 .and. &
+    if (contract_version >= 2 .and. contract_version <= 3 .and. &
          (heat_capacity_per_h_erg_k_input <= 0.0d0 .or. &
           .not. ieee_is_finite(heat_capacity_per_h_erg_k_input))) then
        ierr = snrt_dust_contract_err_values
        snrt_dust_contract_error_message = &
-            'version 2 requires a positive dust heat capacity per H'
+            'versions 2 and 3 require a positive dust heat capacity per H'
+       return
+    end if
+    if (contract_version == 4) then
+       ierr = snrt_dust_contract_err_values
+       snrt_dust_contract_error_message = 'v4 requires increasing positive U(T), its source hash, and zero constant capacity'
+       if (.not.is_sha256(material_sha256)) return
+       if (.not.ieee_is_finite(heat_capacity_per_h_erg_k_input)) return
+       if (heat_capacity_per_h_erg_k_input /= 0) return
+       if (any(.not.ieee_is_finite(internal_energy_per_h_erg_input(1:ntemperature_input)))) return
+       if (any(internal_energy_per_h_erg_input(1:ntemperature_input) <= 0)) return
+       if (any(internal_energy_per_h_erg_input(2:ntemperature_input) <= &
+            internal_energy_per_h_erg_input(1:ntemperature_input-1))) return
+       ierr = snrt_dust_contract_ok
+       snrt_dust_contract_error_message = ''
+    else if (any(internal_energy_per_h_erg_input /= 0) .or. len_trim(material_sha256) /= 0) then
+       ierr = snrt_dust_contract_err_version
+       snrt_dust_contract_error_message = 'tabulated material internal energy requires contract version 4'
        return
     end if
     if (.not. valid_opacity_values(ngroups_input, edges_input, absorption_input, &
@@ -192,7 +217,7 @@ contains
        return
     end if
 
-    if (contract_version == 3) then
+    if (contract_version >= 3) then
        ierr = snrt_dust_contract_err_values
        snrt_dust_contract_error_message = 'invalid IR quadrature or background temperature'
        if (nir_input < 1 .or. nir_input > snrt_dust_contract_max_ir) return
@@ -223,7 +248,7 @@ contains
          any(ir_energy_input /= 0) .or. any(ir_weight_input /= 0) .or. &
          any(ir_absorption_input /= 0) .or. ir_background_input /= 0) then
        ierr = snrt_dust_contract_err_version
-       snrt_dust_contract_error_message = 'IR data require contract version 3'
+       snrt_dust_contract_error_message = 'IR data require contract version 3 or 4'
        return
     end if
 
@@ -243,6 +268,11 @@ contains
     snrt_dust_contract_mass_per_h_g = mass_per_h_input
     if (contract_version >= 2) snrt_dust_contract_heat_capacity_per_h_erg_k = &
          heat_capacity_per_h_erg_k_input
+    if (contract_version == 4) then
+       snrt_dust_contract_internal_energy_per_h_erg(1:ntemperature_input) = &
+            internal_energy_per_h_erg_input(1:ntemperature_input)
+       snrt_dust_contract_material_sha256 = material_sha256
+    end if
     snrt_dust_contract_opacity_status = trim(opacity_status)
     snrt_dust_contract_thermal_status = trim(thermal_status)
     snrt_dust_contract_source_id = trim(source_id)
@@ -257,7 +287,7 @@ contains
          trim(opacity_status) == 'approved_production' .and. &
          trim(thermal_status) == 'approved_thermal_production' .and. &
          len_trim(approval_id) > 0 .and. &
-         heat_capacity_per_h_erg_k_input > 0.0d0
+         (heat_capacity_per_h_erg_k_input > 0.0d0 .or. contract_version == 4)
     snrt_dust_contract_reference_control = &
          trim(opacity_status) == 'reference_control' .and. &
          trim(thermal_status) == 'reference_thermal_control'
@@ -269,7 +299,7 @@ contains
           snrt_dust_contract_runtime_allowed = trim(opt_in) == '1'
        end if
     end if
-    if (contract_version == 3) then
+    if (contract_version >= 3) then
        if (snrt_dust_contract_reference_control) then
           snrt_dust_contract_runtime_allowed = snrt_dust_contract_runtime_allowed .and. &
                trim(ir_status) == 'reference_ir_control'
@@ -316,6 +346,8 @@ contains
     snrt_dust_contract_emitted_power_per_h_erg_s = 0.0d0
     snrt_dust_contract_mass_per_h_g = 0.0d0
     snrt_dust_contract_heat_capacity_per_h_erg_k = 0.0d0
+    snrt_dust_contract_internal_energy_per_h_erg = 0
+    snrt_dust_contract_material_sha256 = ''
     snrt_dust_contract_loaded = .false.
     snrt_dust_contract_runtime_allowed = .false.
     snrt_dust_contract_reference_control = .false.

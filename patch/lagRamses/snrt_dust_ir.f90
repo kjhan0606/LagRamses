@@ -16,6 +16,9 @@ module snrt_dust_ir
      real(real64) :: background=0
      real(real64) :: background_temperature=0
      real(real64), allocatable :: energy(:), sigma(:), log_t(:), power(:), band(:,:)
+     ! Vibrational internal energy per reference H, excluding zero-point
+     ! energy. Interpolate U linearly in log(T), with no extrapolation.
+     real(real64), allocatable :: material_u(:)
   end type
   type, public :: dust_ir_diagnostics
      real(real64) :: escaped_erg=0, absorbed_erg=0, primary_erg=0
@@ -25,12 +28,13 @@ module snrt_dust_ir
      real(real64) :: balance_relative=0, local_relative=0
      integer :: iterations=0
   end type
-  public :: snrt_dust_ir_initialize, snrt_dust_ir_advance
+  public :: snrt_dust_ir_initialize, snrt_dust_ir_advance, snrt_dust_material_temperature
 contains
-  subroutine snrt_dust_ir_initialize(table, energy, frequency_weight, sigma, temperature, cmb, ierr)
+  subroutine snrt_dust_ir_initialize(table, energy, frequency_weight, sigma, temperature, cmb, ierr, material_u)
     type(dust_ir_table), intent(out) :: table
     real(real64), intent(in) :: energy(:), frequency_weight(:), sigma(:), temperature(:), cmb
     integer, intent(out) :: ierr
+    real(real64), optional, intent(in) :: material_u(:)
     integer :: ng, nt, g, t, bath
     real(real64) :: x, occupation, factor
     real(real64), parameter :: h=6.62607015d-27, kb_ev=8.617333262145d-5
@@ -47,6 +51,12 @@ contains
        if (temperature(t)==cmb) bath=t
     end do
     if (bath==0) return
+    if(present(material_u))then
+       if(size(material_u)/=nt)return
+       if(any(.not.ieee_is_finite(material_u)).or.any(material_u<=0))return
+       if(any(material_u(2:)<=material_u(:nt-1)))return
+       table%material_u=material_u
+    endif
     allocate(table%energy(ng),table%sigma(ng),table%log_t(nt),table%power(nt),table%band(ng,nt))
     table%energy=energy; table%sigma=sigma; table%log_t=log(temperature)
     do t=1,nt
@@ -71,6 +81,50 @@ contains
     table%ready=.true.
     ierr=dust_ok
   end subroutine
+
+  subroutine snrt_dust_material_temperature(nodes,u,energy,temperature,ierr)
+    ! Inverse of the v4 material interpolation. Inputs are per reference H;
+    ! caller divides volume energy by nH*relative_dust, not by heat capacity.
+    real(real64), intent(in) :: nodes(:),u(:),energy
+    real(real64), intent(out) :: temperature
+    integer, intent(out) :: ierr
+    integer :: k,n
+    real(real64) :: fraction
+    ierr=dust_err_table; temperature=0; n=size(nodes)
+    if(n<2.or.size(u)/=n)return
+    if(any(.not.ieee_is_finite(nodes)).or.any(.not.ieee_is_finite(u)))return
+    if(any(nodes<=0).or.any(u<=0))return
+    if(any(nodes(2:)<=nodes(:n-1)).or.any(u(2:)<=u(:n-1)))return
+    ierr=dust_err_range
+    if(.not.ieee_is_finite(energy))return
+    if(energy<u(1)*(1-64*epsilon(1d0)).or.energy>u(n)*(1+64*epsilon(1d0)))return
+    k=1
+    do while(k<n-1)
+       if(energy<=u(k+1))exit
+       k=k+1
+    enddo
+    fraction=max(0d0,min(1d0,(energy-u(k))/(u(k+1)-u(k))))
+    temperature=exp(log(nodes(k))+fraction*log(nodes(k+1)/nodes(k)))
+    ierr=dust_ok
+  end subroutine
+
+  real(real64) function material_energy(table,temperature,density,capacity) result(energy)
+    type(dust_ir_table), intent(in) :: table
+    real(real64), intent(in) :: temperature,density,capacity
+    integer :: k,n
+    real(real64) :: log_t,fraction
+    if(.not.allocated(table%material_u))then
+       energy=capacity*temperature
+       return
+    endif
+    n=size(table%log_t); log_t=log(temperature); k=1
+    do while(k<n-1)
+       if(log_t<=table%log_t(k+1))exit
+       k=k+1
+    enddo
+    fraction=max(0d0,min(1d0,(log_t-table%log_t(k))/(table%log_t(k+1)-table%log_t(k))))
+    energy=density*(table%material_u(k)+fraction*(table%material_u(k+1)-table%material_u(k)))
+  end function
 
   subroutine emission(table, heating, density, rate, temperature, ierr)
     type(dust_ir_table), intent(in) :: table
@@ -125,6 +179,10 @@ contains
           if(heating(i)/=0) return
           next_energy(i)=old_energy(i)
           temperature(i)=old_energy(i)/capacity(i)
+          if(allocated(table%material_u))then
+             if(old_energy(i)/=0)return
+             temperature(i)=0
+          endif
           emitted(i)=0
           cycle
        end if
@@ -136,14 +194,16 @@ contains
        ! below the bath is admissible only within the declared solve error.
        ! Do NOT replace old_energy: the full floor correction is charged to
        ! material+radiation closure in advance(), not hidden as bath heating.
-       if(target<capacity(i)*lower*(1-material_tolerance)) return
-       if(target>(capacity(i)*upper+dt*density(i)*(table%power(nt)-table%background)) &
+       if(target<material_energy(table,lower,density(i),capacity(i))*(1-material_tolerance)) return
+       if(target>(material_energy(table,upper,density(i),capacity(i))+ &
+            dt*density(i)*(table%power(nt)-table%background)) &
             *(1+64*epsilon(1d0)))return
        ! Solve for emitted power, not the tiny temperature displacement of a
        ! stiff grain or the difference of two large material energies.
        lower=0d0
        upper=min(density(i)*(table%power(nt)-table%background), &
-            max(heating(i)+(old_energy(i)-capacity(i)*table%background_temperature)/dt,0d0))
+            max(heating(i)+(old_energy(i)- &
+            material_energy(table,table%background_temperature,density(i),capacity(i)))/dt,0d0))
        do iteration=1,80
           mid=lower+0.5d0*(upper-lower)
           power=table%background+mid/density(i)
@@ -154,7 +214,7 @@ contains
           end do
           fraction=(power-table%power(k))/(table%power(k+1)-table%power(k))
           temperature(i)=exp(table%log_t(k)+fraction*(table%log_t(k+1)-table%log_t(k)))
-          residual=(capacity(i)*temperature(i)-old_energy(i))/dt+mid-heating(i)
+          residual=(material_energy(table,temperature(i),density(i),capacity(i))-old_energy(i))/dt+mid-heating(i)
           if(residual>0)then
              upper=mid
           else
@@ -170,7 +230,7 @@ contains
        end do
        fraction=(power-table%power(k))/(table%power(k+1)-table%power(k))
        temperature(i)=exp(table%log_t(k)+fraction*(table%log_t(k+1)-table%log_t(k)))
-       next_energy(i)=capacity(i)*temperature(i)
+       next_energy(i)=material_energy(table,temperature(i),density(i),capacity(i))
     end do
     call emission(table,emitted,density,rate,unused_temperature,ierr)
   end subroutine
@@ -192,6 +252,8 @@ contains
     integer, intent(in) :: max_iterations
     ! Optional finite-capacity material state, both in physical volume units:
     ! energy erg/cm3 and capacity erg/cm3/K. Both or neither must be supplied.
+    ! When table%material_u is present, capacity is only a positive ABI
+    ! placeholder: physical material energy is density*U(T), never capacity*T.
     real(real64), optional, intent(inout) :: dust_energy(:)
     real(real64), optional, intent(in) :: heat_capacity(:)
     real(real64), optional, intent(in) :: ghost_energy(:,:,:)
@@ -249,8 +311,10 @@ contains
        if(any(dust_energy<0).or.any(heat_capacity<=0))return
        do i=1,nc
           if(density(i)<=0)cycle
-          if(dust_energy(i)/heat_capacity(i)<table%background_temperature*(1-material_tolerance).or. &
-               dust_energy(i)/heat_capacity(i)>exp(table%log_t(size(table%log_t)))*(1+64*epsilon(1d0)))return
+          if(dust_energy(i)<material_energy(table,table%background_temperature,density(i),heat_capacity(i)) &
+               *(1-material_tolerance).or.dust_energy(i)> &
+               material_energy(table,exp(table%log_t(size(table%log_t))),density(i),heat_capacity(i)) &
+               *(1+64*epsilon(1d0)))return
        end do
     end if
     ierr=dust_err_config

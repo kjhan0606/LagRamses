@@ -32,12 +32,19 @@ contains
     integer :: ng, nt, old, capacity
     real(dust_dp), allocatable :: expanded(:,:,:)
     ierr=dust_err_config
-    if(snrt_dust_contract_version/=3.or..not.snrt_dust_contract_runtime_allowed)return
+    if(snrt_dust_contract_version<3.or..not.snrt_dust_contract_runtime_allowed)return
     ng=snrt_dust_contract_number_ir; nt=snrt_dust_contract_number_temperature
     if(.not.initialized)then
+       if(snrt_dust_contract_version==4)then
+          call snrt_dust_ir_initialize(table,snrt_dust_contract_ir_energy_ev(1:ng), &
+               snrt_dust_contract_ir_weight_ev(1:ng),snrt_dust_contract_ir_absorption_per_h_cm2(1:ng), &
+               snrt_dust_contract_temperature_k(1:nt),snrt_dust_contract_ir_background_k,ierr, &
+               snrt_dust_contract_internal_energy_per_h_erg(1:nt))
+       else
        call snrt_dust_ir_initialize(table,snrt_dust_contract_ir_energy_ev(1:ng), &
             snrt_dust_contract_ir_weight_ev(1:ng),snrt_dust_contract_ir_absorption_per_h_cm2(1:ng), &
             snrt_dust_contract_temperature_k(1:nt),snrt_dust_contract_ir_background_k,ierr)
+       endif
        if(ierr/=dust_ok)return
        initialized=.true.
     end if

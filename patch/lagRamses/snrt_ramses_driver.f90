@@ -153,7 +153,8 @@ contains
          snrt_dust_contract_absorption_mean_energy_ev, &
          snrt_dust_contract_temperature_k, &
          snrt_dust_contract_mass_per_h_g, &
-         snrt_dust_contract_heat_capacity_per_h_erg_k
+         snrt_dust_contract_heat_capacity_per_h_erg_k, snrt_dust_contract_internal_energy_per_h_erg
+    use snrt_dust_ir, only: snrt_dust_material_temperature
     use snrt_dust_receiver, only: snrt_dust_prepare_cell_optical_depth, &
          snrt_dust_receiver_stage
     use snrt_angular_quadrature, only: snrt_angular_init
@@ -644,7 +645,19 @@ contains
                      dust_relative_abundance(i) * &
                      snrt_dust_contract_heat_capacity_per_h_erg_k
                 dust_old_energy(i) = dust_energy_code * dust_energy_scale
-                dust_old_temperature(i) = dust_old_energy(i) / dust_heat_capacity(i)
+                if(snrt_dust_contract_version==4)then
+                   ! Legacy argument retained for ABI; not a physical capacity
+                   ! in v4. The IR solver uses density*U(T) instead.
+                   dust_heat_capacity(i)=1d0
+                   call snrt_dust_material_temperature( &
+                        snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature), &
+                        snrt_dust_contract_internal_energy_per_h_erg(1:snrt_dust_contract_number_temperature), &
+                        dust_old_energy(i)/(dust_n_hydrogen_cm3(i)*dust_relative_abundance(i)), &
+                        dust_old_temperature(i),ierr)
+                   if(ierr/=0)hydro_state_invalid=.true.
+                else
+                   dust_old_temperature(i) = dust_old_energy(i) / dust_heat_capacity(i)
+                endif
                 if (.not. ieee_is_finite(dust_relative_abundance(i)) .or. &
                      .not. ieee_is_finite(dust_heat_capacity(i)) .or. &
                      .not. ieee_is_finite(dust_old_energy(i)) .or. &
@@ -1077,7 +1090,7 @@ contains
                snrt_dust_contract_absorption_mean_energy_ev(1:snrt_ngroups), dt_s, &
                dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
                dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
-               dust_absorbed_energy, ierr)
+               dust_absorbed_energy, ierr, defer_temperature=snrt_dust_contract_version==4)
           if (ierr /= 0) local_transaction_failure = snrt_failure_receiver
        end if
 #endif

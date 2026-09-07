@@ -516,3 +516,143 @@ not a realistic galaxy initial condition. Mass accounting must include the AGN
 radiative rest-mass loss and count sinks once, not sum their cloud tracers.
 See the combined-control section of the existing integration record for results,
 the retained failed runs and remaining physical-SED/heat-capacity limits.
+
+### Tabulated dust material energy (native v4)
+
+The native IR material solve now accepts a monotonic internal-energy table
+`U(T)` instead of the v2/v3 constant heat capacity. In v4 the conserved volume
+energy is `nH * relative_dust * U(T)`. Both the initial temperature inversion
+and implicit radiative cooling use **linear U in log(T)**, with no physical
+extrapolation. This is not `C(T)*T`. Primary absorption is accounted once in the
+coupled IR/material solve. The full U array is bound to the HDF5 checkpoint;
+changing it rejects restart. Versions 2/3 keep their original representation.
+
+Use the existing `tools/build_draine_dust_thermal.py` with
+`--material-energy-table material.json`, replacing (not combining with)
+`--reference-heat-capacity-per-h`. The material JSON requires:
+
+```json
+{
+  "schema": "snrt_dust_material_energy_v1",
+  "source_id": "YOUR_VERIFIED_MATERIAL_SOURCE",
+  "source_url": "YOUR_PRIMARY_SOURCE_URL",
+  "composition": "YOUR_EXPLICIT_GRAIN_COMPOSITION",
+  "energy_zero": "U(0)=0; no zero-point energy",
+  "temperature_k": [10, 20, 100],
+  "internal_energy_erg_g": [100, 800, 100000]
+}
+```
+
+Numbers above are **synthetic format examples**, not physical data. Temperature
+and specific energy must be positive, finite and strictly increasing, covering
+the requested emission temperature interval and bath. The exporter preserves
+material knots, converts erg/g to erg/reference-H using the optical table's
+reference dust mass, and writes `material_sha256`,
+`internal_energy_per_h_erg_input`, and zero constant capacity in the v4
+namelist. Material/Planck knot union must fit the 256-temperature bound.
+
+The exporter still writes **reference-only** status and empty approval.
+Supplying a thermodynamic table does not establish that its composition and
+grain-size approximation match the optical mixture. No physical table or new
+population assumption is selected automatically. The existing coupled
+KL16/LC18/SNIa/AGN fixture remains v3 until such input is explicitly selected.
+The v4 wiring fixture is `config/dust_native_reference_control_v4.nml`.
+
+### DL01 bulk material connected to the coupled control
+
+`data/dust_dl01_bulk_030_material_v1.json` now provides a literature-based
+graphite/silicate internal-energy model, not the synthetic cubic fixture.
+`tools/build_dl01_dust_material.py` integrates the normalized Debye vibrational
+mode distributions from [Draine & Li (2001)](https://arxiv.org/abs/astro-ph/0011318).
+Graphite has one 2D mode at 863 K and two at 2504 K per atom; the silicate
+prescription has two 2D modes at 500 K and one 3D mode at 1500 K. Energy excludes
+zero-point energy. The implementation recovers three kB per atom for the
+high-temperature heat capacity and uses MgFeSiO4 as the explicit representative
+silicate mass per atom. These are bulk limits, not finite-grain PAH modes.
+
+The supplied **comparison** selects graphite mass fraction 0.30 and silicate
+0.70. This choice is not inferred from WD01 total opacity and is not an exact
+reconstruction of its size-dependent PAH mixture. All material shares one
+temperature. Stochastic heating, sublimation, and material-dependent separate
+temperatures remain outside this closure. No production approval is assigned.
+
+To select another mass fraction or temperature grid, generate new files:
+
+```bash
+simulation/snrt/.venv/bin/python simulation/snrt/tools/build_dl01_dust_material.py \
+  --graphite-mass-fraction 0.30 --output NEW/material.json
+simulation/snrt/.venv/bin/python simulation/snrt/tools/build_draine_dust_thermal.py \
+  --source external/draine_wd01_rv31/kext_albedo_WD_MW_3.1_60_D03.all \
+  --native-source-ledger simulation/snrt/data/p4_pilot_agn_photon_ledger.json \
+  --material-energy-table NEW/material.json \
+  --output NEW/thermal.json --native-output NEW/dust.nml
+```
+
+The tracked export is `config/dust_dl01_bulk_030_reference_v4.nml`.
+For the demonstrated coupled run use
+`config/kl16_lc18_snia_agn_dl01_dust_smoke.nml` with the environment of the
+KL16/LC18/SNIa/AGN control above, except point `SNRT_DUST_CONTRACT` at this v4
+file. Its primitive dust-energy IC has already been converted to U(20 K).
+Do not reuse the old constant-capacity IC energy or an old v3 checkpoint.
+Copy the shared `.ic_sink` fixture (exactly 12 numeric fields) and resolve the
+history placeholder as before. The reference opt-in remains necessary.
+The existing profile with a constant test capacity is retained unchanged.
+
+Stellar radiation is disabled unless `SNRT_STELLAR_SED` is explicitly supplied.
+The user-approved independent BPASS comparison below is now available; the
+existing exact-population v1 control must not be relabeled to bypass matching.
+
+### BPASS independent radiation population (reference comparison, v2)
+
+The existing feedback population remains Kroupa 0.08--120 Msun, binary SSP
+fraction 0.5 in the coupled profile, including the effective-SSP SNIa model.
+BPASS instead retains its own `bin-imf135_300` identity: slopes -1.30/-2.35,
+break 0.5 Msun, mass range 0.1--300 Msun and BPASS's built-in binary recipe.
+It is not Kroupa and its binary recipe is not represented by the feedback's
+scalar fraction. In the native v2 table, IDs/fraction -1 mark this distinction.
+No feedback mass, momentum, thermal energy, IMF or DTD parameter is changed.
+
+For a **fresh**, deliberately selected comparison run with the coupled profile
+above, add this environment setting (retain the reference-control opt-in):
+
+```bash
+export SNRT_STELLAR_SED=/gpfs/kjhan/LRD_JWST/simulation/snrt/config/snrt_stellar_sed_bpass_independent_v2.nml
+```
+
+The explicit `population_binding='independent_radiation_reference'` is accepted
+only with `status='reference_control'`, never `approved_production`. Version 1
+retains exact feedback population matching and its original restart identity.
+Version 2 binds the rates, source SHA, population, escape fraction and policies
+to MPI consensus and HDF5 restart. It cannot be enabled on an old source-free
+checkpoint, or changed on restart. Startup logs name the independent model.
+No new main RAMSES namelist field or generator option is introduced.
+
+`tools/build_bpass_native_sed.py` converts the pinned local Galacticus BPASS
+HDF5 into a ~247 kB native namelist (52 ages, 13 Z, 9 groups). The 531 MB HDF5
+is an **offline input**, not loaded by lagRamses. Its Lsun/Hz spectra already
+have the upstream 1e6-Msun burst normalization removed; the exporter integrates
+photon rates per initial Msun and applies the requested escape fraction once.
+The supplied comparison uses escape fraction 1.0. BPASS's log-solar coordinate
+is converted with its own Zsun=0.02; this does not change feedback solar Z.
+
+Explicit limitations, recorded in `data/snrt_stellar_sed_bpass_independent_v2.json`:
+
+- Birth to 1 Myr holds the first 1-Myr spectrum. This is a named comparison
+  approximation, not an additional BPASS measurement. No other age/Z
+  extrapolation is allowed (source range Z=1e-5--0.04, age up to 100000 Myr).
+- The missing wavelength tails are zero. Integration clips to the measured
+  1--100000 Angstrom domain before inserting boundaries, so it does not invent
+  a triangular IR tail from the 0.01-eV group edge.
+- Common reference AGN/stellar group mean energies and cross sections remain
+  the transport closure. The new SED supplies photon counts, not a new
+  spectrum-specific energy/cross-section calculation.
+- This deliberately mixed population is not a common-population consistency
+  claim or a production/publication approval of the combined physical model.
+
+Native smoke tests can be run with the existing Makefile
+`snrt_stellar_source_smoke` target and
+`python3 simulation/snrt/tests/bpass_native_sed.py --native-smoke PATH_TO_BINARY`.
+The latter checks the actual parser/integrator, legacy matching, spectral
+partition/no-tail leakage, age splitting/bounds and nine invalid inputs.
+Measured live/restart evidence is recorded in
+`provenance/real_source_integration_progress_2026-09-07.md` (repository root).

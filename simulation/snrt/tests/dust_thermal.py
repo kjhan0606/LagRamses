@@ -23,7 +23,8 @@ from snrt_core.dust import (  # noqa: E402
     read_dust_opacity_metadata,
     read_dust_thermal_metadata,
 )
-from tools.build_draine_dust_thermal import build_thermal_metadata  # noqa: E402
+from tools.build_draine_dust_thermal import build_thermal_metadata, build_native_reference_namelist  # noqa: E402
+from tools.build_dl01_dust_material import build_material, KB, AMU, CARBON_AMU, SILICATE_AMU  # noqa: E402
 
 
 EDGES = np.asarray((0.01, 1.0, 5.6, 11.2, 13.6, 24.59, 54.42, 500.0, 2000.0, 10000.0))
@@ -31,6 +32,15 @@ EDGES = np.asarray((0.01, 1.0, 5.6, 11.2, 13.6, 24.59, 54.42, 500.0, 2000.0, 100
 
 def main() -> int:
     jax.config.update("jax_enable_x64", True)
+    knots = np.geomspace(5., 300., 160)
+    bulk = build_material(knots, .3)
+    bulk64 = build_material(knots, .3, order=64)
+    np.testing.assert_allclose(bulk["internal_energy_erg_g"], bulk64["internal_energy_erg_g"], rtol=1e-10)
+    for fraction, atom_mass in ((1., CARBON_AMU), (0., SILICATE_AMU)):
+        hot = build_material(np.array([1e8, 2e8]), fraction)
+        c = np.diff(hot["internal_energy_erg_g"])[0] / 1e8
+        np.testing.assert_allclose(c, 3 * KB / (atom_mass * AMU), rtol=1e-8)
+    print("DL01_MATERIAL_PASS monotonic=1 quadrature=1 high_T_three_modes=1")
     source = ROOT.parents[1] / "external" / "draine_wd01_rv31" / "kext_albedo_WD_MW_3.1_60_D03.all"
     edges_path = ROOT / "config" / "p0_photon_group_edges_ev.txt"
     opacity_path = (
@@ -47,6 +57,36 @@ def main() -> int:
     )
 
     with TemporaryDirectory(prefix="dust-thermal-test-") as directory:
+        ledger = ROOT / "data" / "p4_pilot_agn_photon_ledger.json"
+        constant_native = build_native_reference_namelist(
+            source, ledger, edges_path, np.geomspace(5., 300., 64), 10., 1e-24)
+        assert "contract_version=3" in constant_native
+        material_path = Path(directory) / "material.json"
+        material = dict(schema="snrt_dust_material_energy_v1", source_id="synthetic_cubic_control",
+                        source_url="urn:snrt:synthetic-test", composition="synthetic; NOT physical dust",
+                        energy_zero="U(0)=0; no zero-point energy",
+                        temperature_k=[5., 10., 20., 100., 300.],
+                        internal_energy_erg_g=[125., 1000., 8000., 1e6, 27e6])
+        material_path.write_text(json.dumps(material))
+        native = build_native_reference_namelist(
+            source, ledger, edges_path, np.geomspace(5., 300., 64), 10., None,
+            material_path=material_path)
+        assert "contract_version=4" in native and "internal_energy_per_h_erg_input=" in native
+        assert "material_sha256=" in native and "approval_id=''" in native
+        assert "ntemperature_input=67" in native  # preserves material knots 10,20,100
+        for key, value in (("internal_energy_erg_g", [1., 1., 2., 3., 4.]),
+                           ("energy_zero", "unknown"), ("source_id", "bad'quote"),
+                           ("temperature_k", [6., 10., 20., 100., 300.])):
+            material_path.write_text(json.dumps(dict(material, **{key: value})))
+            try:
+                build_native_reference_namelist(source, ledger, edges_path,
+                                               np.geomspace(5., 300., 64), 10., None,
+                                               material_path=material_path)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"invalid material accepted: {key}")
+        print("DUST_MATERIAL_EXPORT_PASS v3=1 v4=1 knots_preserved=1 failures=4 reference_only=1")
         path = Path(directory) / "thermal.json"
         path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
         closure = read_dust_thermal_metadata(

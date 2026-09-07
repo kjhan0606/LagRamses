@@ -154,10 +154,10 @@ contains
   subroutine snrt_dust_receiver_stage(absorbed_photons_cm3, mean_energy_ev, dt_s, &
        dust_relative_abundance, heat_capacity_erg_cm3_k, old_energy_erg_cm3, &
        old_temperature_k, staged_energy_erg_cm3, staged_temperature_k, &
-       absorbed_energy_erg_cm3, ierr)
-    ! This is a local, constant-capacity thermal step.  A future physical
-    ! grain table can supply a temperature-dependent capacity at this same
-    ! boundary.  The old arrays are never modified by this routine.
+       absorbed_energy_erg_cm3, ierr, defer_temperature)
+    ! For v4 only stage deposited energy; the coupled IR solve obtains T
+    ! from U(T). Do not replace that solve by C(T)*T or by two heating steps.
+    ! The old arrays are never modified by this routine.
     real(real64), intent(in) :: absorbed_photons_cm3(:,:), mean_energy_ev(:)
     real(real64), intent(in) :: dt_s, dust_relative_abundance(:)
     real(real64), intent(in) :: heat_capacity_erg_cm3_k(:)
@@ -165,6 +165,7 @@ contains
     real(real64), intent(out) :: staged_energy_erg_cm3(:), staged_temperature_k(:)
     real(real64), intent(out) :: absorbed_energy_erg_cm3(:)
     integer, intent(out) :: ierr
+    logical, optional, intent(in) :: defer_temperature
     integer :: cell, group, nc, ng
     real(real64) :: energy, residual, scale, tolerance
 
@@ -219,6 +220,9 @@ contains
             absorbed_energy_erg_cm3(cell)
        staged_temperature_k(cell) = old_temperature_k(cell) + &
             absorbed_energy_erg_cm3(cell) / heat_capacity_erg_cm3_k(cell)
+       if(present(defer_temperature))then
+          if(defer_temperature)staged_temperature_k(cell)=old_temperature_k(cell)
+       endif
        residual = staged_energy_erg_cm3(cell) - old_energy_erg_cm3(cell) - &
             absorbed_energy_erg_cm3(cell)
        scale = max(absorbed_energy_erg_cm3(cell), &

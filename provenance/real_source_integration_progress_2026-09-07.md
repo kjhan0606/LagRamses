@@ -1338,3 +1338,253 @@ Output storage including copied/failed-case checkpoints: 330,593,437 bytes,
 within the revised 450 MB budget; GPFS free space 169 TB. Existing results
 are preserved. Next physical input work remains a population-compatible stellar
 SED and dust thermal material input, without reviving the parked BPS prerequisite.
+
+## Dust U(T) implementation and stellar-SED compatibility check
+
+User authorized the next physical-input work. Implemented the missing native
+temperature-dependent material-energy path, **not a production material-model
+approval**. No main RAMSES namelist parameter, IMF, SNIa normalization, stellar
+population or existing combined-control selection was changed. Unrelated
+88-line deletions in `patch/cuRamses/aux/ramses_nml_generator.py` are preserved.
+
+Native contract v4 carries positive, strictly increasing internal energy per
+reference H on the thermal temperature knots and a material-source checksum.
+The old constant capacity must be explicitly zero in v4. Runtime uses
+`E_volume=nH*relative_dust*U(T)`, linear U(log T), for initial inversion,
+implicit emission, and the conserved material state. Primary deposition defers
+temperature to the coupled solve rather than applying constant-capacity heating.
+HDF5 binds the actual U array; v2/v3 layouts are unchanged. The existing exporter
+accepts source-identified specific-energy JSON, preserves its knots, converts
+erg/g to erg/reference-H, rejects extrapolation, and grants no approval.
+
+Evidence (all under `/gpfs/kjhan/LRD_JWST`):
+
+- Existing native contract runner passed with ifx and gfortran, now including
+  v4 nonlinear heating/cooling, known U(log T) inverse, energy closure,
+  range-failure rollback, invalid knot rejection and reference opt-in/reset.
+- Existing `dust_thermal.py` passed including v3/v4 export and four invalid
+  material cases. Existing `dust_ir_transport.py` passed. Its opt-in
+  `native_checks()` passed with `JAX_ENABLE_X64=1`: GNU/Intel relative energy
+  differential errors <=1.12e-15 and temperature errors <=4.45e-16. The first
+  direct native_checks invocation omitted x64 and was rejected before testing;
+  the corrected invocation completed. No new gate framework was introduced.
+- Full root-level Makefile build with HDF5=1 USE_CUDA=1 SNRT=1 DUST_LIVE=1
+  USE_FFTW=0, NVAR=30, lagRamses VPATH first: executable
+  `.dust-material.1056JI/ramses_dust_material3d`, SHA256
+  `205c2c203747dd598b2b8c4d3018b0da4ec0dc061d6fd257138b15b99144a1be`.
+  Existing same-option object cache was reused; changed modules/dependents were
+  rebuilt. Later edits to this module were comments only; added test logic is
+  not part of the RAMSES executable.
+- `.dust-material.1056JI/material.json` is an explicitly **synthetic** cubic
+  knot table. Its exported `dust.nml` uses actual WD01 optical data, 136 IR
+  nodes, 67 temperatures, background 10 K, and reference-only status. It is
+  not DL01 material data and does not close the physical-input gap.
+- First `live` attempt was rejected during namelist admission because its
+  inherited `SNRT_AGN_MODEL=partition_reference_v1` requires enabled AGN.
+  The process returned 0 but no evolution/dump occurred: not a pass. Preserved.
+- Corrected `live-dust-only/run.nml` used `SNRT_AGN_MODEL=legacy` with AGN off,
+  SNRT enabled/OpenMP, two threads, no stars/particles/gravity/gas cooling;
+  8^3 periodic hydro, four steps. It completed (exit 0, ~4.96 s), with four
+  dust IR commits and peak balance 6.1368e-13. Final dust T=10.00000000000001 K,
+  positive material energy and unchanged dust mass; no MG failure.
+- `restart/run.nml`: copied step-2 checkpoint, nrestart=1, resumed to step 4
+  (exit 0, ~2.58 s). All **93 hydro/RT datasets exactly equal** the uninterrupted
+  result; the 1640-entry dust identity attribute also matches exactly.
+- `restart-changed-U/run.nml`: one U knot changed by 1%, original checkpoint
+  linked read-only in intent. Actual HDF5 identity rejection/MPI abort exit 10,
+  before any new output. No existing checkpoint was modified.
+- Effective schedules: noutput=1, aout=2, tout=1e30 (unreached), foutput=2,
+  fbackup=1000000, nstepmax=4. Checkpoint 1=step 2, checkpoint 2=step 4.
+  Four real/copy dump directories total **217,852,901 bytes**, below the
+  declared 220 MB budget; the negative test uses a symlink, not another copy.
+  GPFS free space was 169 TB. No production run was launched.
+
+Stellar SED: directly inspected the local BPASS v2.2.1 HDF5 root/dataset
+attributes. It is a binary population with IMF slopes -1.30 over 0.1--0.5 Msun
+and -2.35 over 0.5--300 Msun, 51 ages from 1 Myr to 100 Gyr, 13 metallicities,
+and Lsun/Hz spectra. It does not match the current Kroupa 0.08--120 Msun plus
+binary-fraction convention. Changing an IMF header or multiplying the total
+spectrum cannot recover missing track-level population weights. No BPASS SED
+was activated, no star younger than 1 Myr was assigned an invented spectrum,
+and no synthetic Chabrier control was relabeled as a physical binary source.
+
+Remaining physical decisions, not extra validation gates:
+
+1. Preserve the current feedback population while obtaining compatible SSP
+   spectra (or track-level spectra/weights permitting actual re-integration).
+   Changing the population to a supplied BPASS preset would be a separate
+   model choice, not an adapter fix. The parked microscopic BPS prerequisite
+   remains parked.
+2. Supply source-identified grain internal energy with explicit composition
+   and size approximation for the WD01 optical mixture. [Draine & Li (2001)](https://arxiv.org/abs/astro-ph/0011318) provides vibrational-mode/thermal
+   models and explains small-grain stochastic heating. Inferring one bulk
+   U(T) from that work still requires a declared mixture approximation;
+   the raw [WD01/D03 opacity table](https://www.astro.princeton.edu/~draine/dust/extcurvs/kext_albedo_WD_MW_3.1_60_D03.all)
+   contains PAH-like small and graphitic large carbonaceous grains plus silicates,
+   not a measured aggregate heat-capacity table. Single-temperature bulk
+   closure is not the stochastic PAH solution. The new native path is ready
+   for such material input, but **physical dust thermal input remains open**.
+
+## Follow-up: literature-based bulk dust material connected
+
+User requested the remaining connections. The dust material gap above is now
+resolved **for an explicitly parameterized bulk comparison closure**, not for
+the full stochastic WD01/PAH mixture. New builder
+`simulation/snrt/tools/build_dl01_dust_material.py` implements the DL01 Debye
+mode prescription via the normalized oscillator density of states and converts
+per-atom energy to erg/g. No zero-point energy and no C(T)*T substitution.
+Graphite/silicate mass fraction is required at the CLI; the supplied comparison
+uses 0.30/0.70 and representative silicate formula MgFeSiO4. It is not an
+opacity-derived or calibrated abundance. Source and approximations are stored
+in the material JSON. Main namelist/generator code was not modified.
+
+Tracked source/export:
+
+- `simulation/snrt/data/dust_dl01_bulk_030_material_v1.json`, SHA256
+  `f9b2109c737d6be003fcb04cf5ae5ec56cdacbf9057759aae7f61fdaff418025`.
+  162 material knots (5--300 K, explicitly including 10/20 K).
+  U(20 K)=862843.9569500614 erg/g.
+- `simulation/snrt/config/dust_dl01_bulk_030_reference_v4.nml`, SHA256
+  `8072b09a592a2f13e9c3607f4d3d0a2c5d6e328072b3bfb8429eee55cced077e`.
+  Actual existing Draine optics plus the material model, 222 union temperature
+  knots, 136 IR quadrature nodes, 10 K bath; reference-only, no approval ID.
+- `simulation/snrt/config/kl16_lc18_snia_agn_dl01_dust_smoke.nml` selects the
+  existing coupled physics and correctly initializes primitive dust energy
+  to 5.43633430456151513e-13 code energy per gas mass at 20 K.
+
+Existing `dust_thermal.py` passes with added checks of material monotonicity,
+64/128-point quadrature agreement (<1e-10), and the independent high-T limit
+3*kB/atom (<1e-8 relative) for pure graphite and pure silicate. Native U(T)
+tests/restart checks from the preceding section were reused, not repeated as
+a new gate ladder. No new simulation binary was necessary: the measured native
+v4 binary `.dust-material.1056JI/ramses_dust_material3d` directly consumes this
+new source, SHA256 unchanged from the preceding section.
+
+Live evidence: `.physical-sed-dust.mkYybi/live-dust-fixed-ic/run.nml` and log.
+Four fixed level-3 steps completed, exit 0, elapsed ~12.72 s, with four IR
+commits, nonzero AGN absorption and physical wind/SNIa inputs retained. Peak
+dust/IR balance=6.6218e-13. Leaf dust T spans 10.000000000000007--71.493316048125 K;
+all material energies and masses positive, RT datasets finite; no MG failure.
+The HDF5 records v4, zero constant capacity, and the actual U(T) array.
+Stellar SED enabled flag remains 0. The run retains the previous high-mass
+numerical BH seed and is not an astrophysical galaxy calibration.
+
+The first `live-dust` launch was rejected before evolution because the tracked
+shared `.ic_sink` example erroneously had 13 numeric fields, whereas the native
+reader requires exactly 12. The previously successful `live/ic_sink` had 12.
+Removed only the extra trailing zero in the shared example. Failed input/log
+are preserved; the successful retry used a new directory. No reader relaxation
+or AMR/sink-algorithm rewrite was made.
+
+Output schedule: noutput=1, aout=2, tout=1e30 (unreached), foutput=2,
+fbackup=1000000, nstepmax=4. Two dumps total **110,228,418 bytes**: the approximate
+110 MB forecast was low by 0.23 MB; an ad-hoc exact-110-MB assertion consequently
+failed, not the simulation or conservation check. Free space 169 TB. There is
+no large follow-on run, checkpoint deletion or production approval.
+
+Stellar SED decision remains open. User was asked whether to allow the supplied
+BPASS population as an explicitly independent radiation comparison or require
+the exact feedback population and obtain/re-integrate appropriate source tracks.
+No answer had arrived during this work; the hard population match is unchanged.
+Additional source check: the provider's
+[BPASS v2.2.1 converter](https://github.com/galacticusorg/galacticus/blob/e8d9c46113eb2639515ecddb8fb29dea98a3989b/scripts/ssps/convertBPASSv2.2.1SSPsToGalacticus.py)
+divides raw 1e6-Msun burst spectra by 1e6, converts L_lambda to L_nu, and uses
+Zsun=0.02 for its log-solar metallicity coordinate. Thus per-initial-Msun
+normalization has provider-code support; this does not solve the IMF/binary
+population mismatch or the absent age<1 Myr spectrum. No scalar IMF correction,
+young-age spectrum, or common-population claim was invented.
+
+### BPASS independent radiation comparison: user approval and native connection
+
+The user's subsequent **"그렇게 해요"** approves the proposed independent
+radiation-population comparison. This supersedes the pending decision above,
+not the earlier scientific limitations. Existing Kroupa/binary feedback,
+KL16/LC18 channels and approved effective-SSP SNIa remain unchanged.
+
+Implemented in `snrt_stellar_source.f90`: explicit v2 independent-population
+reference mode; v1 exact population matching remains the default. v2 retains
+the actual BPASS v2.2.1 bin-imf135_300 population (0.1--300 Msun, slopes
+-1.30/-2.35, break 0.5 Msun, built-in binary recipe). The sentinel IDs and
+binary fraction -1 cannot be mistaken for the feedback's Kroupa/.5 selection.
+Reference mode cannot be promoted by setting approved_production. Source SHA,
+population, escape fraction and age/tail policies are appended to the numeric
+MPI/HDF5 identity for v2 only; v1 identity length/content is preserved.
+Startup records the distinct population and approximations. No main RAMSES
+namelist parameter was added, so no generator change is required. The unrelated
+generator deletions remain untouched. Makefile VPATH is still lagRamses-first.
+
+`tools/build_bpass_native_sed.py` reads the checksum-pinned local BPASS HDF5
+(531204704 bytes, SHA256
+`b53d7bf4e8c50ae0a02458eae9d5b6dff5d5782f9f2b23dd40514ad85716c9b3`).
+The already-normalized Lsun/Hz per initial Msun is integrated as
+Q = integral Lnu*3.827e33/(h*lambda_Angstrom) d(lambda_Angstrom).
+No second 1e6 division or scalar IMF reweighting. Group intervals are clipped
+to actual source wavelengths before integration; this avoids the unmeasured
+low-energy triangular tail of the older candidate ledger integration method.
+The old ledger was not overwritten or silently reinterpreted.
+
+Export `config/snrt_stellar_sed_bpass_independent_v2.nml`: 247448 bytes,
+SHA256 `ebd5e097e0e9eda50ca029747cb12d89f0a1d89ac02dda665f1381fcccbab840`.
+52 ages (explicit young extension plus 51 original nodes), 13 Z, 9 groups.
+Sidecar `data/snrt_stellar_sed_bpass_independent_v2.json` records normalization,
+provider converter link, actual metallicity axis and limitations. Supplied
+escape fraction=1, applied once to rates. Birth--1 Myr holds the first 1-Myr
+spectrum as an explicit comparison approximation; no other extrapolation.
+Wavelength tails outside 1--100000 Angstrom are zero. Transport still uses
+the common reference AGN/stellar grey energies/cross sections. This is neither
+a self-consistent common-population model nor production science approval.
+
+Full native build: `.bpass-native.v0ZwR6/ramses_bpass_native3d`, SHA256
+`5555c1ba1fb428aa643f88332ccafe8eac277c0e37eae3e0ce9c027c2a598dba`.
+HDF5=1 USE_CUDA=1 SNRT=1 DUST_LIVE=1 USE_FFTW=0; NVAR=30, mpiifx/OpenMP,
+same root Makefile and preserved old object cache/binaries. Build evidence:
+`build-final.log`, native smoke results `stellar-tests.log` in that directory.
+The cleanup of temporary debug output affects only the smoke executable.
+
+Focused checks passed: native v1 integration and locator; actual BPASS nonzero
+photons, time splitting, young-age hold, age/Z range rejection; analytical
+group partition with no missing-tail leakage; independent numerical age
+integral vs native at relative tolerance 3e-15; nine invalid inputs rejected
+(including missing independent binding, production promotion, wrong population,
+NaN fraction, invalid SHA and a v1 IMF mismatch). The first exact-node hard-X
+comparison exposed ~1.45e-9 relative error in an extremely weak group under the
+optimized weighted interpolation. Exact metallicity knots now take their table
+values directly, preventing cancellation/contamination; all groups pass the
+original tight tolerance. No tolerance relaxation or source-rate adjustment.
+
+Live run `.bpass-native.v0ZwR6/live/run.nml`: same KL16/LC18/SNIa/AGN/DL01
+profile with SNRT_STELLAR_SED explicitly set to the new v2 table. Actual STAR
+initial mass, age and metallicity feed native interval integration and existing
+cell deposition. Four steps complete, exit 0, elapsed 11.01 s. Active sources
+per step: 0, 513, 512, 512; the extra source in step 2 is the active AGN.
+No chemistry failure, MG nonconvergence or ERROR. All hydro and RT datasets
+finite; all NaN_CHK state counts zero. Existing non-cosmological SFRD diagnostic
+still prints NaN (also present before this connection), not a NaN evolved state;
+this logging issue is not claimed fixed. The numerical high-mass BH seed and
+long first two timesteps remain stress-control choices, not a galaxy model.
+
+Final leaf xHII range 0.9426661027300548--0.999999957882685; dust energy positive,
+5.842855172006147e-16--2.443067655624263e-14 code energy per volume. Four RT/IR
+commits; maximum dust/IR energy balance 6.1550e-10 (native tolerance 1e-9).
+Maximum primary dust-ledger relative error 7.1158e-7. HDF5 stores
+stellar_sed_enabled=1 and the complete 6449-value table/population identity.
+AGB source is loaded; this short run is NOT evidence of terminal AGB events.
+
+Restart `.bpass-native.v0ZwR6/restart/run.nml` from a preserved COPY of step-2
+checkpoint completes to step 4, exit 0. Of 94 hydro/SNRT datasets, 91 are exactly
+equal, including all SNRT, dust mass and energy; only the three leaf momentum
+arrays differ. Maximum absolute difference 1.6543612251060553e-24; maximum
+array-normalized difference 1.1254952277483689e-18. An initial bitwise-all-fields
+assertion consequently failed; this is recorded as roundoff-level restart
+reproduction, not bitwise equality of the entire hydro state. Source-only SHA
+change with identical rates in `restart-source-mismatch` is rejected at HDF5
+restore, exit 10, before evolution or new output. Logs/inputs are preserved.
+
+Launch policy (effective namelists audited before execution): noutput=1,
+aout=2, tout=1e30 (unreached), foutput=2, fbackup=1000000, nstepmax=4. Live
+two dumps total 110145532 bytes. Normal restart adds one dump; negative restart
+adds none. Including two checkpoint copies: 275363830 bytes across five dump
+directories. Reported capacity estimates: 56 MB/dump, 112 MB live plus 168 MB
+restart/copies; free space 168--169 TB. `run-reference.sh` in the scratch build
+records the exact reference environment for reproduction. No production run,
+new gate ladder, external audit, shared-context update, commit or push was done.

@@ -3,7 +3,7 @@ subroutine read_params
   use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_model, snrt_agn_model_reference, &
        snrt_agn_reference_config_ok, snrt_agn_admit_reference
 #ifdef SNRT
-  use snrt_stellar_source, only: stellar_sed_load, stellar_sed_enabled, stellar_sed_consensus
+  use snrt_stellar_source, only: stellar_sed_load, stellar_sed_enabled, stellar_sed_consensus, stellar_sed_report
   use snrt_runtime_backend, only: snrt_backend_initialize
   use snrt_spectral_contract, only: snrt_spectral_contract_load_from_environment, &
        snrt_spectral_contract_status, snrt_spectral_contract_runtime_allowed, &
@@ -1808,6 +1808,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
 #endif
         if(myid==1)write(*,'(A,A)')'SNRT stellar SED photon rates per INITIAL Msun: ', &
              trim(snrt_spectral_contract_status)
+        if(myid==1)call stellar_sed_report()
      endif
      call snrt_secondary_tables_load_from_environment(snrt_thermochemistry_error)
      if (snrt_thermochemistry_error/=snrt_thermochemistry_ok .or. &

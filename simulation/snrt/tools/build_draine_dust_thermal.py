@@ -223,12 +223,14 @@ def main() -> int:
     parser.add_argument("--temperature-count", type=int, default=64)
     parser.add_argument("--source-url", default=DEFAULT_SOURCE_URL)
     parser.add_argument("--native-output", type=Path,
-                        help="also write a reference-only native v3 dust namelist")
+                        help="also write a reference-only native v3/v4 dust namelist")
     parser.add_argument("--native-source-ledger", type=Path,
                         help="AGN photon ledger supplying the actual group representative energies")
     parser.add_argument("--native-background-k", type=float, default=10.0)
     parser.add_argument("--reference-heat-capacity-per-h", type=float,
                         help="explicit constant test capacity, erg/H/K; NOT inferred from opacity")
+    parser.add_argument("--material-energy-table", type=Path,
+                        help="v4 material JSON: temperature_k, internal_energy_erg_g, source_id, source_url, composition")
     args = parser.parse_args()
     if args.temperature_min_k <= 0.0 or args.temperature_max_k <= args.temperature_min_k:
         raise ValueError("invalid thermal temperature bounds")
@@ -247,14 +249,16 @@ def main() -> int:
     if args.native_output is not None:
         if args.native_output.resolve() == args.output.resolve():
             parser.error("JSON and native output must use different paths")
-        if args.native_source_ledger is None or args.reference_heat_capacity_per_h is None:
-            parser.error("native output requires a source ledger and explicit reference heat capacity")
+        if args.native_source_ledger is None:
+            parser.error("native output requires a source ledger")
+        if (args.reference_heat_capacity_per_h is None) == (args.material_energy_table is None):
+            parser.error("choose exactly one: reference heat capacity or material energy table")
         if args.native_output.exists():
             raise FileExistsError(args.native_output)
         native = build_native_reference_namelist(
             args.source, args.native_source_ledger, args.group_edges,
             np.asarray(metadata["temperature_k"]), args.native_background_k,
-            args.reference_heat_capacity_per_h)
+            args.reference_heat_capacity_per_h, material_path=args.material_energy_table)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     if native is not None:
@@ -273,21 +277,25 @@ def main() -> int:
 
 def build_native_reference_namelist(source: Path, ledger_path: Path, edges_path: Path,
                                    temperatures: np.ndarray, background: float,
-                                   reference_capacity: float) -> str:
-    """Export actual Draine optics to the existing native v3 interface.
+                                   reference_capacity: float | None,
+                                   *, material_path: Path | None = None) -> str:
+    """Export actual Draine optics with constant (v3) or tabulated U(T) (v4).
 
     Primary groups are monochromatic at the source ledger's representative
     energy: absorption and deposited energy use that same energy. This is
     an explicit grey approximation, not a source-spectrum weighted opacity.
-    IR uses the existing full-domain spectral quadrature. The constant heat
-    capacity is an explicit numerical control, so this cannot emit production
-    approval. No raw opacity, population, or source spectrum is modified.
+    IR uses the full-domain spectral quadrature. Material identity and
+    composition must be explicit; admitting a U(T) table does NOT establish
+    its compatibility with WD01 optics or confer production approval.
     """
     import jax
     from snrt_core.dust_ir import prepare_spectral_table
 
-    if not np.isfinite(reference_capacity) or reference_capacity <= 0:
-        raise ValueError("reference heat capacity must be finite and positive")
+    if (reference_capacity is None) == (material_path is None):
+        raise ValueError("choose exactly one material representation")
+    if reference_capacity is not None:
+        if not np.isfinite(reference_capacity) or reference_capacity <= 0:
+            raise ValueError("reference heat capacity must be finite and positive")
     edges = read_group_edges(edges_path)
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     if not np.array_equal(np.asarray(ledger["group_edges_ev"]), edges):
@@ -310,32 +318,68 @@ def build_native_reference_namelist(source: Path, ledger_path: Path, edges_path:
     with jax.enable_x64(True):
         spectral = prepare_spectral_table(energy, opacity, temperatures, background)
     temperatures = np.unique(np.append(temperatures, background))
+    material_u = None
+    material_description = "Draine Kirchhoff IR; constant reference heat capacity is NOT physical input"
+    if material_path is not None:
+        material = json.loads(material_path.read_text(encoding="utf-8"))
+        if material.get("schema") != "snrt_dust_material_energy_v1":
+            raise ValueError("unknown material energy table schema")
+        for key in ("source_id", "source_url", "composition"):
+            if not isinstance(material.get(key), str) or not material[key].strip():
+                raise ValueError(f"missing material identity: {key}")
+        if material.get("energy_zero") != "U(0)=0; no zero-point energy":
+            raise ValueError("material internal-energy zero must be explicit")
+        mt = np.asarray(material["temperature_k"], dtype=float)
+        mu = np.asarray(material["internal_energy_erg_g"], dtype=float)
+        if (mt.ndim != 1 or mu.shape != mt.shape or len(mt) < 2 or
+                not np.isfinite(mt).all() or not np.isfinite(mu).all() or
+                np.any(mt <= 0) or np.any(mu <= 0) or
+                np.any(np.diff(mt) <= 0) or np.any(np.diff(mu) <= 0)):
+            raise ValueError("material T and U must be finite, positive and increasing")
+        if temperatures[0] < mt[0] or temperatures[-1] > mt[-1]:
+            raise ValueError("material table cannot extrapolate to the requested temperature/bath")
+        # Use the union: discarding material knots would change the supplied
+        # U(log T) function and its inverse. Rebuild the Planck table there.
+        temperatures = np.unique(np.concatenate((
+            temperatures, mt[(mt >= temperatures[0]) & (mt <= temperatures[-1])])))
+        if len(temperatures) > 256:
+            raise ValueError("union of material and emission knots exceeds native bounds")
+        material_u = np.interp(np.log(temperatures), np.log(mt), mu) * raw["dust_mass_per_h_g"]
+        with jax.enable_x64(True):
+            spectral = prepare_spectral_table(energy, opacity, temperatures, background)
+        material_description = "Draine Kirchhoff IR; tabulated U(log T); " + material["source_id"]
+        if len(material_description) > 256 or any(c in material_description for c in "\n\r'\""):
+            raise ValueError("material source_id cannot be encoded safely in native namelist")
     nodes = np.asarray(spectral.energy_ev)
     weights = np.asarray(spectral.weights_ev)
     sigma = np.asarray(spectral.absorption_per_h_cm2)
     if len(groups) > 32 or len(temperatures) > 256 or len(nodes) > 256:
         raise ValueError("native dust table dimensions exceed the compiled contract bounds")
     rows = [
-        "! Draine WD01/RV3.1 optics + explicit constant TEST heat capacity.",
+        ("! Draine WD01/RV3.1 optics + tabulated material U(T)." if material_path is not None
+         else "! Draine WD01/RV3.1 optics + explicit constant TEST heat capacity."),
         "! Primary opacity is sampled at each source representative energy (grey approximation).",
         "! IR uses full raw-domain quadrature; scattering and stochastic heating are absent.",
         "! This file does not confer production approval.",
         f"! Raw optical source: {DEFAULT_SOURCE_URL}",
         "&snrt_dust_contract",
-        f" contract_version=3, ngroups_input={len(groups)}, ntemperature_input={len(temperatures)},",
+        f" contract_version={4 if material_path is not None else 3}, ngroups_input={len(groups)}, ntemperature_input={len(temperatures)},",
         " opacity_status='reference_control', thermal_status='reference_thermal_control',",
         " source_id='draine_wd01_rv31_monochromatic_source_groups',",
         f" source_sha256='{_sha256(ledger_path)}',",
         f" source_table_sha256='{_sha256(source)}',",
         f" group_edges_sha256='{_sha256(edges_path)}', approval_id='',",
-        " thermal_source='Draine Kirchhoff IR; constant reference heat capacity is NOT physical input',",
+        f" thermal_source='{material_description}',",
         f" mass_per_h_input={raw['dust_mass_per_h_g']:.17e},",
-        f" heat_capacity_per_h_erg_k_input={reference_capacity:.17e},",
+        f" heat_capacity_per_h_erg_k_input={0.0 if material_path is not None else reference_capacity:.17e},",
         f" nir_input={len(nodes)}, ir_status='reference_ir_control', ir_background_input={background:.17e},",
     ]
     arrays = dict(edges_input=edges, absorption_input=primary, mean_energy_input=means,
                   temperature_input=temperatures, power_input=np.asarray(spectral.table.power),
                   ir_energy_input=nodes, ir_weight_input=weights, ir_absorption_input=sigma)
+    if material_path is not None:
+        rows.append(f" material_sha256='{_sha256(material_path)}',")
+        arrays["internal_energy_per_h_erg_input"] = material_u
     for key, values in arrays.items():
         for start in range(0, len(values), 3):
             rows.append((f" {key}=" if start == 0 else " ") +
