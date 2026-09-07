@@ -1723,3 +1723,83 @@ Scope of completion: native dust-material auto dispatch, single-node MPI2
 coupled execution and backend-switch restart are exercised. Multi-node scaling,
 calibrated GPU speedup thresholds, GPU hydro, CUDA mechanical feedback and
 CUDA IR transport are not claimed completed or automatically scheduled.
+
+### Stream-availability hybrid replacement
+
+Operator explicitly requested replacing whole-call auto selection with a
+hybrid: acquire a free CUDA stream, otherwise compute on the CPU thread.
+Implemented at source HEAD `da5bff52548c86c8320be16db3788ba39acefb95` plus
+this turn's uncommitted changes, in the same /gpfs LagRamses workspace.
+
+- `SNRT_BACKEND=auto` and inherited/explicit `SNRT_DUST_BACKEND=auto` now
+  split local cells into batches, default 256 via `SNRT_HYBRID_BATCH_CELLS`.
+  GPU cell-threshold variables are obsolete/ignored, not used as hidden gates.
+  Each OMP worker makes one nonblocking shared cuRamses stream acquisition per
+  batch; busy pool runs that batch on its CPU. Existing `n_cuda_streams`
+  controls the per-process pool. This does not test GPU-wide idleness or lock
+  GPUs across MPI ranks/processes. Rank/device mapping and memory admission
+  are retained. Explicit `openmp`/`cuda` overrides remain whole-call.
+- Primary batches gather complete six-neighbor old-state snapshots, preserving
+  group order and per-cell atom inventories; only owned cells are scattered
+  into private full-call results. Dust uses the same FP64 material cell solve.
+  All batches must succeed before publication. After-launch errors reject,
+  never replay on CPU. Transfers, allocation/free and kernels use the leased
+  stream and stream synchronization, not device-wide synchronization.
+- Pool initialization for SNRT must not enable unrelated kernels: CFL,
+  restriction and hydro synchronization now honor `gpu_hydro`, and force
+  gradients honor `gpu_poisson`. The previously fixed Godunov guards remain.
+  No MG algorithm, physical table, main namelist field or generic generator
+  was changed. `mkrun.py` points its parallel comparison at the new binary
+  and exports the batch control; old fixed-mode binary remains separate.
+
+Build: `.hybrid-runtime.Vb2XNr/ramses_hybrid3d`, SHA256
+`2f4a6125e2c31dc39fc5485aa434a4fa81b2d1459da671b40fe7e27f318d365b`.
+Use the existing isolated Makefile recipe with
+`HDF5=1 USE_CUDA=1 SNRT=1 DUST_LIVE=1 USE_FFTW=0 EXEC=ramses_hybrid`.
+icpx 2025.3 crashed in its SLP vectorizer on the new dust dispatcher;
+only `snrt_hybrid.o` disables SLP, retaining -O3/loop vectorization/precise FP.
+Preserved build logs also show a stale copied-module attempt and a standalone
+link missing stream-pool finalizer dependencies. Correct build used preserved
+cache timestamps and linked actual Poisson/scalar/particle finalizers, not
+stubs. `build-final.log` and `build-smoke-retry.log` record successful builds.
+
+Evidence (all under that scratch directory):
+
+- `hybrid-gpu.log`: 1031 cells, 64-cell batches, four workers, one stream;
+  mixed primary CPU/GPU batches 16/1 and 14/3; material 15/2. Holding the
+  common stream externally yields 17/0 for both operators. Ghost and batch
+  boundaries, zero/nonzero dust, both material modes and late-error atomic
+  rejection pass. Primary max normalized difference 1.19209e-7.
+- `hybrid-cpu.log`: hidden GPU gives 17/0 throughout, exact primary CPU
+  reference results and atomic rejection. `dust-fortran-parity.log`: hybrid
+  vs independent native v3/v4 material worst relative 6.186615e-16.
+  `primary-legacy-parity.log`: OpenMP vs explicit CUDA parity/ledgers pass.
+- `mpi2-hybrid` initially passed one coupled RT/dust update, then crashed
+  in CPU hydro. Environment had `OMP_STACKSIZE=128M`; object disassembly
+  shows `godfine1` frame 0x324a820 plus `unsplit` frame 0x11dd20c0,
+  totaling 336.1115 MiB. Four-thread scheduling exposed the insufficient
+  worker stack. Same binary with 512M completed. Both comparison setup modes
+  now export OMP/KMP_STACKSIZE=512M. This is execution capacity, not physics.
+  The premature `mpi2-restart-openmp` attempt had no source checkpoint and
+  was rejected without evolution/output; its log remains preserved.
+- `mpi2-stack-hybrid/run.nml`: four-step coupled run, two MPI ranks,
+  four OMP threads/rank, physical GPUs 1/2, one stream/rank, 64-cell batches,
+  both auto. Each rank's first primary/material calls show CPU=3/GPU=1.
+  Exit 0, no MG nonconvergence/ERROR, all NaN_CHK state counts zero.
+  Maximum dust/IR closure 6.4541e-10.
+- `mpi2-stack-restart-openmp/run.nml`: preserved COPY of step-2 checkpoint,
+  hidden GPUs, both OpenMP, same four threads/512M; completes step 4, exit 0.
+  94 hydro/SNRT arrays finite; 73 exact. Worst array-normalized difference
+  2.067229e-7 (RT), 6.548250e-8 (dust energy); hydro total energy 2.94e-11.
+  BH positions within 6.66e-16, dust mass/energy nonnegative. Closure 5.4071e-10.
+  Timing-dependent hybrid scheduling is not bitwise reproducibility.
+- `mkrun-final-tests.log`: 27 tests, 26 passed, one real-GUI display skip.
+  `git diff --check` passes. Existing unrelated generator edits preserved.
+
+Launch reports identified each actual namelist before execution: nstepmax=4,
+noutput=1, unreached aout=2/tout=1e30, foutput=2, fbackup=1000000.
+Each successful run contains two dump directories totaling 110149196 bytes,
+including the copied checkpoint in restart. Budget 224 MB including copy,
+free GPFS space 168 TB. Failed runs produced no full dumps and were retained.
+No speedup, multi-node qualification, GPU mechanical/IR transport, new physical
+approval, external audit, commit or push is claimed by this replacement.

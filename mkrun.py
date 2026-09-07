@@ -348,7 +348,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
         ranks = ui.ask('MPI ranks (manual launch only)', 2, int)
         threads = ui.ask('OpenMP threads per rank', 2, int)
         choices = OrderedDict((key, (label,)) for key, label in (
-            ('auto', 'Automatic GPU/OpenMP placement'), ('openmp', 'Force OpenMP'), ('cuda', 'Force CUDA')))
+            ('auto', 'Hybrid: free CUDA stream or CPU thread'), ('openmp', 'Force OpenMP'), ('cuda', 'Force CUDA')))
         primary_backend = ui.ask_choice('Primary RT backend', choices, 'auto')
         dust_backend = ui.ask_choice('Dust material backend', choices, 'auto')
         if type(ranks) is not int or type(threads) is not int or min(ranks, threads) < 1:
@@ -362,12 +362,13 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
     source = root / '.agb-physical.4LAOTJ/snia-input'
     binary = root / '.bpass-native.v0ZwR6/ramses_bpass_native3d'
     if parallel:
-        binary = root / '.parallel-runtime.luzQV6/ramses_parallel_dispatch3d'
+        binary = root / '.hybrid-runtime.Vb2XNr/ramses_hybrid3d'
     env = OrderedDict([
         ('OMP_NUM_THREADS', str(threads)), ('I_MPI_FABRICS', 'shm'),
+        ('OMP_STACKSIZE', '512M'), ('KMP_STACKSIZE', '512M'),
         ('SNRT_RT_ENABLE', '1'), ('SNRT_BACKEND', primary_backend),
         ('SNRT_DUST_BACKEND', dust_backend),
-        ('SNRT_GPU_MIN_CELLS', '256'), ('SNRT_DUST_GPU_MIN_CELLS', '256'),
+        ('SNRT_HYBRID_BATCH_CELLS', '256'),
         ('SNRT_AGN_MODEL', 'partition_reference_v1'), ('SNRT_REDUCED_C', '.01'),
         ('SNRT_RT_LEVEL', '3'), ('SNRT_ALLOW_REFERENCE_CONTROL', '1'), ('SNRT_P1_DIAGNOSTIC', '0'),
         ('SNRT_GROUP_CONTRACT', config / 'snrt_group_contract_reference_control_v1.nml'),
@@ -407,6 +408,8 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
         'Fixed RT/feedback/dust comparison; inputs only, NOT launch approval.\n'
         '{ranks} MPI ranks, OpenMP={threads} per rank; NVAR=30 SNRT/DUST_LIVE/HDF5/CUDA-linked build.\n'
         'Primary RT={primary_backend}; dust material={dust_backend}. Mechanical feedback and IR transport remain host-side.\n'
+        'auto uses per-batch nonblocking stream leases; busy slots run on CPU. n_cuda_streams controls the shared pool.\n'
+        'Worker stack=512M for this NVECTOR=500/NVAR=30 CPU-hydro build; budget memory per thread.\n'
         'Single-node launch (I_MPI_FABRICS=shm); multi-node operation needs separate fabric configuration.\n'
         'No CAMB/IC generator is needed; ic_sink accompanies the uniform gas namelist.\n'
         'noutput=1 aout=2 tout=1e30 (unreached); foutput=2 fbackup=1000000; 4 steps.\n'

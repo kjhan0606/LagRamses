@@ -127,7 +127,8 @@ subroutine courant_fine_hybrid(ilevel, ncache, dx, vol, &
 !$omp&   nleaf, ind_grid, ind_cell, ind_leaf, uu, gg, dt_lev, &
 !$omp&   sbuf, dt_buf, scount, scap, lmass, lekin, leint, ldt) &
 !$omp& reduction(+:mass_loc,ekin_loc,eint_loc) reduction(min:dt_loc)
-  stream_slot = cuda_acquire_stream_c()
+  stream_slot = -1
+  if (gpu_hydro) stream_slot = cuda_acquire_stream_c()
   lmass = 0.0d0; lekin = 0.0d0; leint = 0.0d0; ldt = dt_loc
 
   if (stream_slot >= 0) then

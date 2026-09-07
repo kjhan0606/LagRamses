@@ -1753,7 +1753,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      endif
   end if
   if (snrt_requested_max==1) then
-     call snrt_backend_initialize(agn_contract_error)
+     call snrt_backend_initialize(agn_contract_error,n_cuda_streams)
      if(agn_contract_error/=0)then
         if(myid==1)write(*,*)'SNRT backend startup rejected: invalid controls or forced CUDA unavailable'
         nml_ok=.false.

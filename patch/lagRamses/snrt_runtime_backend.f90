@@ -8,12 +8,34 @@ module snrt_runtime_backend
   private
   public :: snrt_backend_initialize, snrt_runtime_species_dust_step, snrt_runtime_dust_material
   integer,save :: mode=0,init_status=0,sharers=1
-  integer(c_long_long),save :: min_cells=256
   logical,save :: initialized=.false.,gpu_ready=.false.
   integer,save :: last_choice=-1,cpu_threads=1
   integer,save :: dust_mode=0,last_dust_choice=-1,world_rank=0
-  integer(c_long_long),save :: dust_min_cells=256
   interface
+     function hybrid_configure(rank,streams,cells,threads,share,gpu) bind(C,name='snrt_hybrid_configure_c') result(ierr)
+       import c_int
+       integer(c_int),value::rank,streams,cells,threads,share,gpu
+       integer(c_int)::ierr
+     end function
+     function hybrid_dust(input,table,output,nc,ng,nt,use_u,dt,background,bath,tolerance,threads) &
+          bind(C,name='snrt_hybrid_dust_material_c') result(ierr)
+       import c_double,c_int
+       real(c_double),intent(in)::input(*),table(*)
+       real(c_double)::output(*)
+       integer(c_int),value::nc,ng,nt,use_u,threads
+       real(c_double),value::dt,background,bath,tolerance
+       integer(c_int)::ierr
+     end function
+     function hybrid_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+          absorbed_group,absorbed,no,nw,nd,ng,cdt) bind(C,name='snrt_hybrid_species_dust_c') result(ierr)
+       import c_int,c_float
+       integer(c_int),value::no,nw,nd,ng
+       real(c_float),value::cdt
+       real(c_float)::state(*),budget(*),hhe(*),dust(*),returned(*),raw(*),absorbed_group(*),absorbed(*)
+       real(c_float),intent(in)::direction(*),tau(*),stau(*),dtau(*)
+       integer(c_int),intent(in)::neighbor(*)
+       integer(c_int)::ierr
+     end function
      function dust_cpu(input,table,output,nc,ng,nt,use_u,dt,background,bath,tolerance,threads) &
           bind(C,name='snrt_dust_material_openmp_c') result(ierr)
        import c_double,c_int
@@ -59,11 +81,13 @@ module snrt_runtime_backend
      end function
   end interface
 contains
-  subroutine snrt_backend_initialize(ierr)
+  subroutine snrt_backend_initialize(ierr,nstreams)
 #ifndef WITHOUTMPI
     use mpi_mod
 #endif
     integer,intent(out)::ierr
+    integer,intent(in),optional::nstreams
+    integer::stream_count,batch_cells
     integer::status,length,local_rank,local_size,comm,i,info
     character(len=64)::value
     character(c_char)::uuid(33)
@@ -73,6 +97,18 @@ contains
        return
     endif
     initialized=.true.
+    stream_count=1
+    if(present(nstreams))stream_count=nstreams
+    batch_cells=256
+    call get_environment_variable('SNRT_HYBRID_BATCH_CELLS',value,length=length,status=status)
+    if(length>0)then
+       if(status/=0)then
+          init_status=1
+       else
+          read(value,*,iostat=status)batch_cells
+          if(status/=0.or.batch_cells<1.or.batch_cells>1048576)init_status=1
+       endif
+    endif
     call get_environment_variable('SNRT_BACKEND',value,length=length,status=status)
     if(status==1.or.length==0)value='auto'
     select case(trim(value))
@@ -92,24 +128,6 @@ contains
        case('cuda');dust_mode=2
        case default;init_status=1
        end select
-    endif
-    call get_environment_variable('SNRT_DUST_GPU_MIN_CELLS',value,length=length,status=status)
-    if(length>0)then
-       if(status/=0)then
-          init_status=1
-       else
-          read(value,*,iostat=status)dust_min_cells
-          if(status/=0.or.dust_min_cells<0)init_status=1
-       endif
-    endif
-    call get_environment_variable('SNRT_GPU_MIN_CELLS',value,length=length,status=status)
-    if(length>0)then
-       if(status/=0)then
-          init_status=1
-       else
-          read(value,*,iostat=status)min_cells
-          if(status/=0.or.min_cells<0)init_status=1
-       endif
     endif
     local_rank=0;local_size=1
 #ifndef WITHOUTMPI
@@ -139,6 +157,11 @@ contains
     enddo
     sharers=max(1,sharers)
     if((mode==2.or.dust_mode==2).and..not.gpu_ready)init_status=2
+    if(init_status==0)then
+       status=int(hybrid_configure(int(local_rank,c_int),int(stream_count,c_int),int(batch_cells,c_int), &
+            int(cpu_threads,c_int),int(sharers,c_int),merge(1_c_int,0_c_int,gpu_ready)))
+       if(status/=0)init_status=status
+    endif
     ierr=init_status
   end subroutine
 
@@ -159,24 +182,30 @@ contains
     required=4_c_long_long*(2_c_long_long*nw*nd*ng+3_c_long_long*nd+6_c_long_long*no+ &
          12_c_long_long*no*ng+4_c_long_long*no+1)+67108864_c_long_long
     choice=1
-    if(mode/=1.and.gpu_ready)then
+    if(mode==2.and.gpu_ready)then
        free=free_bytes()
        if(real(required,8)<=0.8d0*real(free,8)/sharers)then
-          if(mode==2.or.int(no,c_long_long)>=min_cells)choice=2
+          choice=2
        else if(mode==2)then
           ierr=5
           return
        endif
     endif
+    if(mode==0)choice=3
     if(choice/=last_choice)then
-       if(choice==2)then
+       if(choice==3)then
+          write(*,'(A,I0)')' SNRT backend=hybrid owned_cells=',no
+       else if(choice==2)then
           write(*,'(A,I0,A,I0)')' SNRT backend=CUDA owned_cells=',no,' device_sharers=',sharers
        else
           write(*,'(A,I0,A,I0)')' SNRT backend=OpenMP owned_cells=',no,' threads=',min(no,cpu_threads)
        endif
        last_choice=choice
     endif
-    if(choice==2)then
+    if(choice==3)then
+       ierr=hybrid_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+            absorbed_group,absorbed,no,nw,nd,ng,cdt)
+    else if(choice==2)then
        ierr=snrt_cuda_multigroup_rt_step_species_dust(state,direction,neighbor,tau,stau,dtau, &
             budget,hhe,dust,returned,raw,absorbed_group,absorbed,no,nw,nd,ng,cdt)
        ! Do not replay on CPU after a device error: the enclosing RAMSES
@@ -205,16 +234,19 @@ contains
     if(nc<1.or.ng<1.or.nt<2)return
     required=8_c_long_long*((int(ng,c_long_long)+6)*nc+(int(ng,c_long_long)+3)*nt)+16777216_c_long_long
     choice=1
-    if(dust_mode/=1.and.gpu_ready)then
+    if(dust_mode==2.and.gpu_ready)then
        free=free_bytes()
        if(real(required,8)<=0.8d0*real(free,8)/sharers)then
-          if(dust_mode==2.or.int(nc,c_long_long)>=dust_min_cells)choice=2
+          choice=2
        else if(dust_mode==2)then
           return
        endif
     endif
+    if(dust_mode==0)choice=3
     if(choice/=last_dust_choice)then
-       if(choice==2)then
+       if(choice==3)then
+          write(*,'(A,I0,A,I0)')' SNRT dust material backend=hybrid rank=',world_rank,' cells=',nc
+       else if(choice==2)then
           write(*,'(A,I0,A,I0,A,I0)')' SNRT dust material backend=CUDA rank=',world_rank, &
                ' cells=',nc,' device_sharers=',sharers
        else
@@ -226,7 +258,10 @@ contains
     input=[heating,density,old_energy,capacity]
     coefficients=[log_t,power,material_u,reshape(band,[ng*nt])]
     allocate(output((ng+2)*nc))
-    if(choice==2)then
+    if(choice==3)then
+       ierr=int(hybrid_dust(input,coefficients,output,int(nc,c_int),int(ng,c_int),int(nt,c_int), &
+            merge(1_c_int,0_c_int,use_u),dt,background,bath,tolerance,int(cpu_threads,c_int)))
+    else if(choice==2)then
        ierr=int(dust_cuda(input,coefficients,output,int(nc,c_int),int(ng,c_int),int(nt,c_int), &
             merge(1_c_int,0_c_int,use_u),dt,background,bath,tolerance,int(cpu_threads,c_int)))
     else

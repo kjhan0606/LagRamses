@@ -44,13 +44,22 @@ Run mode retains the same physical inputs but exposes MPI rank count,
 OpenMP threads per rank, primary RT backend and dust material backend together
 in the parallel-placement stage. Defaults are two ranks, two threads/rank and
 `auto` for both operators; `openmp` and `cuda` overrides are available.
-The environment exports `SNRT_BACKEND`, `SNRT_DUST_BACKEND` and their separate
-256-cell GPU thresholds. The latter are initial heuristics, not performance
-guarantees. Thermal/jet deposition and IR transport are not CUDA-enabled by
+The environment exports `SNRT_BACKEND`, `SNRT_DUST_BACKEND` and
+`SNRT_HYBRID_BATCH_CELLS=256`. Auto splits work into cell batches: a free
+shared CUDA stream takes a batch; otherwise the OpenMP worker computes it.
+This is no longer a whole-call cell-threshold decision. The existing namelist
+`n_cuda_streams=1` controls pool size; different MPI processes have separate
+pools even if they share a card. Thermal/jet deposition and IR transport are not CUDA-enabled by
 choosing a dust material backend.
 
+Both comparison setup modes explicitly export `OMP_STACKSIZE=512M` and
+`KMP_STACKSIZE=512M` for their NVECTOR=500/NVAR=30 builds. The native CPU-hydro
+call stack exceeds 128 MiB; changing which OpenMP worker handles hydro exposed
+that insufficient inherited limit. This is stack capacity per worker, not a
+change to physical arrays or timesteps; include it in node memory planning.
+
 This mode requires the new local executable
-`.parallel-runtime.luzQV6/ramses_parallel_dispatch3d`, plus the same preserved
+`.hybrid-runtime.Vb2XNr/ramses_hybrid3d`, plus the same preserved
 yield inputs. Its README supplies a **manual** `mpiexec -n N` command. Nothing
 is submitted or run by the wizard. `I_MPI_FABRICS=shm` makes this a single-node
 profile: arbitrary positive rank counts may be configured but only one/two

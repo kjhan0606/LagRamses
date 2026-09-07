@@ -246,7 +246,8 @@ subroutine force_gradient_hybrid(ilevel, icount, ncache)
   end if
 
   !$omp parallel private(igrid, ngrid, stream_slot, gs)
-  stream_slot = cuda_acquire_stream_c()
+  stream_slot = -1
+  if (gpu_poisson) stream_slot = cuda_acquire_stream_c()
   if (stream_slot >= 0) then
      gs => force_gstates(stream_slot)
      call force_gstate_ensure(gs, FORCE_SUPER_SIZE)

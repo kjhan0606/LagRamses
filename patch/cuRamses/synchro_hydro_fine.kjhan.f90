@@ -88,7 +88,8 @@ subroutine synchro_hydro_hybrid(ilevel, ncache, dteff)
 
 !$omp parallel private(igrid, ngrid, stream_slot, i, ind, &
 !$omp&   ind_grid, ind_cell, sbuf, sidx, scount, scap)
-  stream_slot = cuda_acquire_stream_c()
+  stream_slot = -1
+  if (gpu_hydro) stream_slot = cuda_acquire_stream_c()
 
   if (stream_slot >= 0) then
      scap = SYNC_SUPER_SIZE

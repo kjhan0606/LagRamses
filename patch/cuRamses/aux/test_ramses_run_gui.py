@@ -60,7 +60,7 @@ def comparison_workspace():
         binary = root / '.bpass-native.v0ZwR6/ramses_bpass_native3d'
         binary.parent.mkdir()
         binary.write_text('not an executable: setup tests must never launch it\n')
-        parallel_binary = root / '.parallel-runtime.luzQV6/ramses_parallel_dispatch3d'
+        parallel_binary = root / '.hybrid-runtime.Vb2XNr/ramses_hybrid3d'
         parallel_binary.parent.mkdir()
         parallel_binary.write_text('not an executable: setup tests must never launch it\n')
         with mock.patch.object(mkrun, 'HERE', str(root)):
@@ -80,7 +80,8 @@ class WizardTests(unittest.TestCase):
             self.assertIn('SNRT_DUST_BACKEND=openmp',env)
             self.assertIn('OMP_NUM_THREADS=3',env)
             self.assertIn('mpiexec -n 2',files[str(root / 'fresh/README.txt')])
-            self.assertIn('.parallel-runtime.luzQV6/ramses_parallel_dispatch3d',files[str(root / 'fresh/README.txt')])
+            self.assertIn('.hybrid-runtime.Vb2XNr/ramses_hybrid3d',files[str(root / 'fresh/README.txt')])
+            self.assertIn('Worker stack=512M',files[str(root / 'fresh/README.txt')])
             self.assertEqual(report['values']['imf_id'],1)
             self.assertFalse((root / 'fresh').exists())
             for bad in (0,-1):

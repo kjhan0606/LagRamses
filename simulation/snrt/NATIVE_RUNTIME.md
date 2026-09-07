@@ -25,31 +25,49 @@ CUDA runtime libraries. This does not yet provide a toolkit-free CPU build.
 | Dust material implicit energy/temperature solve and group emissivity | Shared FP64 OpenMP/CUDA kernel; automatic selection available |
 | IR transport, outer absorption/re-emission iteration and MPI exchange | Existing native host implementation; not a CUDA port |
 
-`SNRT_BACKEND=auto` (default), `openmp`, or `cuda` selects the primary
-species+dust operator. Legacy diagnostic GPU entry points remain GPU-only.
-`SNRT_GPU_MIN_CELLS` overrides the default 256 owned-cell crossover; it is a
-placement heuristic, not a measured optimum. Auto uses OpenMP when there is
-no usable device, insufficient device headroom, or a smaller local workload.
-Forced CUDA rejects unavailable/insufficient resources instead of falling back.
+`SNRT_BACKEND=auto` (default) now means **stream-availability hybrid**, not
+whole-call cell-threshold selection. `openmp` and `cuda` remain explicit
+whole-call overrides. Legacy diagnostic GPU entry points remain GPU-only.
 
 `SNRT_DUST_BACKEND=auto|openmp|cuda` separately places the dust **material**
-solve; when unset it inherits `SNRT_BACKEND`. `SNRT_DUST_GPU_MIN_CELLS`
-sets its default 256-cell threshold, likewise a heuristic rather than a
-calibrated speedup crossover. It shares the established rank/device UUID
-mapping and CPU-thread budget. Its array budget adds 16 MiB headroom, applies
-the same 20% reserve and divides by ranks sharing that device. Initialization
-is collective at startup, never deferred until only dust-owning ranks enter.
+solve; when unset it inherits `SNRT_BACKEND`.
+`SNRT_HYBRID_BATCH_CELLS` sets the work-batch size (default 256, admitted
+range 1--1048576), not a GPU eligibility threshold. The former
+`SNRT_GPU_MIN_CELLS`/`SNRT_DUST_GPU_MIN_CELLS` controls are no longer used.
+
+For each batch an OpenMP worker tries the common cuRamses CUDA stream pool
+once: a free slot sends that batch to its stream; a busy pool immediately
+executes that batch on the same CPU worker. Other workers continue processing
+their own batches while the GPU worker waits for its stream, not the device.
+The existing `n_cuda_streams` namelist field controls pool size. Slot leases
+are per MPI process/device context, NOT a GPU-wide utilization test or an
+inter-process lock. Different ranks may share a physical GPU.
+GPU admission also checks batch memory plus 16 MiB headroom, a 20% reserve,
+and rank sharing. Forced CUDA retains whole-call admission and rejects missing
+resources. Stream-ordered allocation/copies/kernels/free replace device-wide
+synchronization in these operators. Initialization remains collective at
+startup, never deferred until only dust-owning ranks enter.
 Both processors use the same 80-iteration FP64 material solve. The original
 Fortran implementation remains the independent test reference. Trial outputs
 publish only after success; CUDA errors are not silently replayed on the CPU.
 This adds no dust physics, namelist field, or persistent device checkpoint.
-Hydro selection remains independent: initialization, hybrid entry and local
-CUDA flux dispatch now all honor `gpu_hydro`. Merely exposing a GPU for
-SNRT/dust must not route `gpu_hydro=.false.` through the hydro hybrid path.
+SNRT batches gather the six-neighbor snapshot from immutable old state; all
+groups/directions and sequential atom-inventory consumption of a cell stay
+together. Owned outputs are staged until every batch succeeds; ghost workspace
+is not published. Dust likewise stages the full material result. Busy-slot
+fallback happens BEFORE GPU execution; a device/physics error rejects the
+transaction rather than replaying a partially executed batch on the CPU.
+Timing-dependent CPU/GPU assignment can produce the measured FP32 rounding
+differences, so hybrid restart is not promised bitwise deterministic.
+
+Hydro selection remains independent: initialization, hybrid entry, local
+CUDA flux dispatch, CFL, restriction and hydro synchronization honor
+`gpu_hydro`; the force-gradient stream path honors `gpu_poisson`.
+Initializing the shared pool for SNRT/dust must not enable these other sectors.
 
 Device assignment follows the existing cuRamses local-rank modulo visible-device
 mapping. Node-local UUID exchange identifies ranks sharing a GPU, including
-rank-specific visibility masks. The memory estimate includes the wrapper's
+rank-specific visibility masks. The forced primary memory estimate includes the wrapper's
 arrays, 64 MiB headroom, a 20% reserve, and division between sharing ranks.
 It is a preflight estimate, not a reservation against unrelated processes.
 An allocation or kernel failure still triggers the enclosing RT transaction's
@@ -128,10 +146,26 @@ scaling, general AMR geometry, or long integrations. See the
 [parallel extension record](../../provenance/real_source_integration_progress_2026-09-07.md#operator-authorized-mpigpuopenmp-extension)
 for executable identity, restart results and limits. No overall speedup is
 claimed from the short, partly concurrent runs.
-With the final binary, two-rank CUDA-to-CUDA restart matches all RT and dust
+With the pre-hybrid `ramses_parallel_dispatch3d`, two-rank CUDA-to-CUDA restart matches all RT and dust
 arrays exactly (91/94 hydro/RT arrays exact; remaining momentum differences
 at most 4.14e-25 absolute). CUDA-to-OpenMP restart has a maximum
 array-normalized difference of 1.61e-7; dust energy differs by 9.62e-8.
+
+The replacement `ramses_hybrid3d` in `.hybrid-runtime.Vb2XNr` exercises mixed
+CPU/GPU batches on two MPI ranks. Each rank's first primary/material call
+processed three batches on CPU and one on GPU (64 cells/batch, four threads,
+one stream). Hybrid-to-OpenMP restart has maximum array-normalized difference
+2.07e-7 (RT), 6.55e-8 (dust energy); dust/IR balance remains below 1e-9.
+`snrt_hybrid_smoke` checks mixed execution, an externally held stream forcing
+all batches onto CPU, absent GPU, six-neighbor batch/ghost crossings, and
+whole-call rollback on late-batch errors. This is not a speedup benchmark.
+See the [hybrid implementation record](../../provenance/real_source_integration_progress_2026-09-07.md#stream-availability-hybrid-replacement).
+
+For this NVECTOR=500/NVAR=30 executable, use `OMP_STACKSIZE=512M` (and ensure
+any Intel `KMP_STACKSIZE` agrees). The compiled `godfine1`+`unsplit` stack
+frames alone consume 336 MiB: an inherited 128 MiB worker stack crashed when
+hydro ran on a worker rather than the main thread. The mkrun comparison
+environment supplies 512M explicitly. Budget memory for the chosen team size.
 
 The live IR solve uses a relative energy tolerance of `1e-9`. Separately
 advected dust mass/energy can arrive slightly below the bath temperature.

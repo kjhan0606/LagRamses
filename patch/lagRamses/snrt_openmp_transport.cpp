@@ -27,12 +27,12 @@ extern "C" int snrt_openmp_configure_c(int local_size) {
   return host_threads;
 }
 
-extern "C" int snrt_openmp_species_dust_c(
+static int snrt_host_species_dust_impl(
     float *state, const float *direction, const int *neighbor,
     const float *tau, const float *species_tau, const float *dust_tau,
     float *available, float *hhe, float *dust, float *returned, float *raw,
     float *group_absorbed, float *absorbed,
-    int nowned, int nwork, int ndirection, int ngroup, float cdt) {
+    int nowned, int nwork, int ndirection, int ngroup, float cdt, int threads) {
   if (!state || !direction || !neighbor || !tau || !species_tau || !dust_tau ||
       !available || !hhe || !dust || !returned || !raw || !group_absorbed || !absorbed ||
       nowned<=0 || nwork<nowned || ndirection<=0 || ngroup<=0 || !std::isfinite(cdt) || cdt<0)
@@ -53,7 +53,7 @@ extern "C" int snrt_openmp_species_dust_c(
        !std::isfinite(sum) || fabsf(tau[i]-sum)>8*FLT_EPSILON*scale) return 2;
   }
   try {
-    const int team=std::min(nowned,host_threads>0?host_threads:omp_get_max_threads());
+    const int team=std::min(nowned,threads);
     std::vector<float> next(state,state+total), removed(total,0), budget(available,available+size_t(3)*nowned);
     std::vector<float> hh(3*groups),dd(groups),rr(groups),raw_stage(groups),aa(groups),sum(nowned);
     int invalid=0;
@@ -86,4 +86,17 @@ extern "C" int snrt_openmp_species_dust_c(
     std::copy(aa.begin(),aa.end(),group_absorbed); std::copy(sum.begin(),sum.end(),absorbed);
     return 0;
   } catch(const std::bad_alloc&) { return 4; }
+}
+
+extern "C" int snrt_openmp_species_dust_c(float *state,const float *direction,const int *neighbor,const float *tau,const float *species_tau,
+    const float *dust_tau,float *available,float *hhe,float *dust,float *returned,float *raw,
+    float *group_absorbed,float *absorbed,int nowned,int nwork,int ndirection,int ngroup,float cdt) {
+  return snrt_host_species_dust_impl(state,direction,neighbor,tau,species_tau,dust_tau,available,hhe,dust,returned,raw,
+      group_absorbed,absorbed,nowned,nwork,ndirection,ngroup,cdt,host_threads>0?host_threads:omp_get_max_threads());
+}
+extern "C" int snrt_serial_species_dust_c(float *state,const float *direction,const int *neighbor,const float *tau,const float *species_tau,
+    const float *dust_tau,float *available,float *hhe,float *dust,float *returned,float *raw,
+    float *group_absorbed,float *absorbed,int nowned,int nwork,int ndirection,int ngroup,float cdt) {
+  return snrt_host_species_dust_impl(state,direction,neighbor,tau,species_tau,dust_tau,available,hhe,dust,returned,raw,
+      group_absorbed,absorbed,nowned,nwork,ndirection,ngroup,cdt,1);
 }

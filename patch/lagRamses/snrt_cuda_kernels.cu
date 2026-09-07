@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <limits>
 #include "snrt_species_dust_cell.h"
+#include "../cuRamses/cuda_stream_pool.h"
 
 namespace {
 
@@ -1198,14 +1199,14 @@ extern "C" int snrt_cuda_multigroup_rt_step_species_c(
 // DUST-7 keeps the existing three-species ABI above untouched.  This wrapper
 // owns the fourth (dust) component and returns separate ledgers so the host
 // partition in DUST-8 does not have to reconstruct raw or returned photons.
-extern "C" int snrt_cuda_multigroup_rt_step_species_dust_c(
+static int snrt_species_dust_stream_impl(
     float *state_host, const float *direction_host, const int *neighbor_host,
     const float *optical_depth_host, const float *optical_depth_species_host,
     const float *optical_depth_dust_host, float *available_species_host,
     float *absorbed_hhe_species_host, float *absorbed_dust_group_host,
     float *returned_group_host, float *raw_group_host,
     float *absorbed_group_host, float *absorbed_host,
-    int nowned, int nwork, int ndirection, int ngroup, float cdt_over_dx) {
+    int nowned, int nwork, int ndirection, int ngroup, float cdt_over_dx, cudaStream_t stream) {
   if (state_host == nullptr || direction_host == nullptr || neighbor_host == nullptr ||
       optical_depth_host == nullptr || optical_depth_species_host == nullptr ||
       optical_depth_dust_host == nullptr || available_species_host == nullptr ||
@@ -1259,33 +1260,33 @@ extern "C" int snrt_cuda_multigroup_rt_step_species_dust_c(
   int *invalid_device = nullptr;
   int status = 1;
 
-  if (cudaMalloc(&state_device, state_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&transport_device, state_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&direction_device, direction_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&neighbor_device, neighbor_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&tau_device, group_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&tau_species_device, species_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&tau_dust_device, group_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&available_species_device, inventory_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&absorbed_hhe_species_device, species_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&absorbed_dust_group_device, group_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&returned_group_device, group_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&raw_group_device, group_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&absorbed_group_device, group_bytes) != cudaSuccess) goto done;
-  if (cudaMalloc(&absorbed_device, static_cast<size_t>(nowned) * sizeof(float)) != cudaSuccess) goto done;
-  if (cudaMalloc(&invalid_device, sizeof(int)) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&state_device, state_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&transport_device, state_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&direction_device, direction_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&neighbor_device, neighbor_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&tau_device, group_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&tau_species_device, species_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&tau_dust_device, group_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&available_species_device, inventory_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&absorbed_hhe_species_device, species_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&absorbed_dust_group_device, group_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&returned_group_device, group_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&raw_group_device, group_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&absorbed_group_device, group_bytes, stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&absorbed_device, static_cast<size_t>(nowned) * sizeof(float), stream) != cudaSuccess) goto done;
+  if (cudaMallocAsync(&invalid_device, sizeof(int), stream) != cudaSuccess) goto done;
 
-  if (cudaMemcpy(state_device, state_host, state_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
-  if (cudaMemcpy(direction_device, direction_host, direction_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
-  if (cudaMemcpy(neighbor_device, neighbor_host, neighbor_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
-  if (cudaMemcpy(tau_device, optical_depth_host, group_bytes, cudaMemcpyHostToDevice) != cudaSuccess) goto done;
-  if (cudaMemcpy(tau_species_device, optical_depth_species_host, species_bytes,
-                 cudaMemcpyHostToDevice) != cudaSuccess) goto done;
-  if (cudaMemcpy(tau_dust_device, optical_depth_dust_host, group_bytes,
-                 cudaMemcpyHostToDevice) != cudaSuccess) goto done;
-  if (cudaMemcpy(available_species_device, available_species_host, inventory_bytes,
-                 cudaMemcpyHostToDevice) != cudaSuccess) goto done;
-  if (cudaMemset(invalid_device, 0, sizeof(int)) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(state_device, state_host, state_bytes, cudaMemcpyHostToDevice, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(direction_device, direction_host, direction_bytes, cudaMemcpyHostToDevice, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(neighbor_device, neighbor_host, neighbor_bytes, cudaMemcpyHostToDevice, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(tau_device, optical_depth_host, group_bytes, cudaMemcpyHostToDevice, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(tau_species_device, optical_depth_species_host, species_bytes,
+                 cudaMemcpyHostToDevice, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(tau_dust_device, optical_depth_dust_host, group_bytes,
+                 cudaMemcpyHostToDevice, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(available_species_device, available_species_host, inventory_bytes,
+                 cudaMemcpyHostToDevice, stream) != cudaSuccess) goto done;
+  if (cudaMemsetAsync(invalid_device, 0, sizeof(int), stream) != cudaSuccess) goto done;
 
   {
     long long validation_total = total;
@@ -1297,15 +1298,16 @@ extern "C" int snrt_cuda_multigroup_rt_step_species_dust_c(
     const int threads = 256;
     const long long block_count = (validation_total + threads - 1) / threads;
     if (block_count <= 0 || block_count > 2147483647LL) goto done;
-    snrt_validate_species_dust_inputs_kernel<<<static_cast<int>(block_count), threads>>>(
+    snrt_validate_species_dust_inputs_kernel<<<static_cast<int>(block_count), threads, 0, stream>>>(
         state_device, direction_device, neighbor_device, tau_device,
         tau_species_device, tau_dust_device, available_species_device,
         nowned, nwork, ndirection, ngroup, invalid_device);
-    if (cudaGetLastError() != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) goto done;
+    if (cudaGetLastError() != cudaSuccess || cudaStreamSynchronize(stream) != cudaSuccess) goto done;
   }
   {
     int invalid = 0;
-    if (cudaMemcpy(&invalid, invalid_device, sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+    if (cudaMemcpyAsync(&invalid, invalid_device, sizeof(int), cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
+    if (cudaStreamSynchronize(stream) != cudaSuccess) goto done;
     if (invalid != 0) {
       status = 2;
       goto done;
@@ -1315,56 +1317,84 @@ extern "C" int snrt_cuda_multigroup_rt_step_species_dust_c(
   {
     const int threads = 256;
     const int blocks = static_cast<int>((total + threads - 1) / threads);
-    snrt_multigroup_upwind_kernel<<<blocks, threads>>>(state_device, transport_device,
+    snrt_multigroup_upwind_kernel<<<blocks, threads, 0, stream>>>(state_device, transport_device,
         direction_device, neighbor_device, nowned, nwork, ndirection, ngroup, cdt_over_dx);
     if (cudaGetLastError() != cudaSuccess) goto done;
-    snrt_multigroup_absorb_kernel<<<blocks, threads>>>(transport_device, state_device,
+    snrt_multigroup_absorb_kernel<<<blocks, threads, 0, stream>>>(transport_device, state_device,
         tau_device, nowned, nwork, ndirection, ngroup);
     if (cudaGetLastError() != cudaSuccess) goto done;
   }
   {
     const int threads = 256;
     const int blocks = (nowned + threads - 1) / threads;
-    snrt_cap_multigroup_species_dust_absorption_kernel<<<blocks, threads>>>(
+    snrt_cap_multigroup_species_dust_absorption_kernel<<<blocks, threads, 0, stream>>>(
         transport_device, state_device, tau_species_device, tau_dust_device,
         available_species_device, absorbed_hhe_species_device,
         absorbed_dust_group_device, returned_group_device, raw_group_device,
         absorbed_group_device, absorbed_device, nowned, nwork, ndirection, ngroup);
-    if (cudaGetLastError() != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) goto done;
+    if (cudaGetLastError() != cudaSuccess || cudaStreamSynchronize(stream) != cudaSuccess) goto done;
   }
 
-  if (cudaMemcpy(state_host, transport_device, state_bytes, cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
-  if (cudaMemcpy(available_species_host, available_species_device, inventory_bytes,
-                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
-  if (cudaMemcpy(absorbed_hhe_species_host, absorbed_hhe_species_device, species_bytes,
-                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
-  if (cudaMemcpy(absorbed_dust_group_host, absorbed_dust_group_device, group_bytes,
-                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
-  if (cudaMemcpy(returned_group_host, returned_group_device, group_bytes,
-                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
-  if (cudaMemcpy(raw_group_host, raw_group_device, group_bytes,
-                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
-  if (cudaMemcpy(absorbed_group_host, absorbed_group_device, group_bytes,
-                 cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
-  if (cudaMemcpy(absorbed_host, absorbed_device,
-                 static_cast<size_t>(nowned) * sizeof(float), cudaMemcpyDeviceToHost) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(state_host, transport_device, state_bytes, cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(available_species_host, available_species_device, inventory_bytes,
+                 cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(absorbed_hhe_species_host, absorbed_hhe_species_device, species_bytes,
+                 cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(absorbed_dust_group_host, absorbed_dust_group_device, group_bytes,
+                 cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(returned_group_host, returned_group_device, group_bytes,
+                 cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(raw_group_host, raw_group_device, group_bytes,
+                 cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(absorbed_group_host, absorbed_group_device, group_bytes,
+                 cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
+  if (cudaMemcpyAsync(absorbed_host, absorbed_device,
+                 static_cast<size_t>(nowned) * sizeof(float), cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
+  if (cudaStreamSynchronize(stream) != cudaSuccess) goto done;
   status = 0;
 
 done:
-  cudaFree(invalid_device);
-  cudaFree(absorbed_device);
-  cudaFree(absorbed_group_device);
-  cudaFree(raw_group_device);
-  cudaFree(returned_group_device);
-  cudaFree(absorbed_dust_group_device);
-  cudaFree(absorbed_hhe_species_device);
-  cudaFree(available_species_device);
-  cudaFree(tau_dust_device);
-  cudaFree(tau_species_device);
-  cudaFree(tau_device);
-  cudaFree(neighbor_device);
-  cudaFree(direction_device);
-  cudaFree(transport_device);
-  cudaFree(state_device);
+  if (invalid_device && cudaFreeAsync(invalid_device, stream) != cudaSuccess) status = 1;
+  if (absorbed_device && cudaFreeAsync(absorbed_device, stream) != cudaSuccess) status = 1;
+  if (absorbed_group_device && cudaFreeAsync(absorbed_group_device, stream) != cudaSuccess) status = 1;
+  if (raw_group_device && cudaFreeAsync(raw_group_device, stream) != cudaSuccess) status = 1;
+  if (returned_group_device && cudaFreeAsync(returned_group_device, stream) != cudaSuccess) status = 1;
+  if (absorbed_dust_group_device && cudaFreeAsync(absorbed_dust_group_device, stream) != cudaSuccess) status = 1;
+  if (absorbed_hhe_species_device && cudaFreeAsync(absorbed_hhe_species_device, stream) != cudaSuccess) status = 1;
+  if (available_species_device && cudaFreeAsync(available_species_device, stream) != cudaSuccess) status = 1;
+  if (tau_dust_device && cudaFreeAsync(tau_dust_device, stream) != cudaSuccess) status = 1;
+  if (tau_species_device && cudaFreeAsync(tau_species_device, stream) != cudaSuccess) status = 1;
+  if (tau_device && cudaFreeAsync(tau_device, stream) != cudaSuccess) status = 1;
+  if (neighbor_device && cudaFreeAsync(neighbor_device, stream) != cudaSuccess) status = 1;
+  if (direction_device && cudaFreeAsync(direction_device, stream) != cudaSuccess) status = 1;
+  if (transport_device && cudaFreeAsync(transport_device, stream) != cudaSuccess) status = 1;
+  if (state_device && cudaFreeAsync(state_device, stream) != cudaSuccess) status = 1;
+  if (cudaStreamSynchronize(stream) != cudaSuccess) status = 1;
   return status;
+}
+
+extern "C" int snrt_cuda_multigroup_rt_step_species_dust_c(
+    float *state_host, const float *direction_host, const int *neighbor_host,
+    const float *optical_depth_host, const float *optical_depth_species_host,
+    const float *optical_depth_dust_host, float *available_species_host,
+    float *absorbed_hhe_species_host, float *absorbed_dust_group_host,
+    float *returned_group_host, float *raw_group_host,
+    float *absorbed_group_host, float *absorbed_host,
+    int nowned, int nwork, int ndirection, int ngroup, float cdt_over_dx) {
+  return snrt_species_dust_stream_impl(state_host,direction_host,neighbor_host,optical_depth_host,optical_depth_species_host,
+      optical_depth_dust_host,available_species_host,absorbed_hhe_species_host,absorbed_dust_group_host,
+      returned_group_host,raw_group_host,absorbed_group_host,absorbed_host,nowned,nwork,ndirection,ngroup,cdt_over_dx,nullptr);
+}
+
+extern "C" int snrt_cuda_species_dust_batch_c(
+    float *state_host, const float *direction_host, const int *neighbor_host,
+    const float *optical_depth_host, const float *optical_depth_species_host,
+    const float *optical_depth_dust_host, float *available_species_host,
+    float *absorbed_hhe_species_host, float *absorbed_dust_group_host,
+    float *returned_group_host, float *raw_group_host,
+    float *absorbed_group_host, float *absorbed_host,
+    int nowned, int nwork, int ndirection, int ngroup, float cdt_over_dx, int slot) {
+  return snrt_species_dust_stream_impl(state_host,direction_host,neighbor_host,optical_depth_host,optical_depth_species_host,
+      optical_depth_dust_host,available_species_host,absorbed_hhe_species_host,absorbed_dust_group_host,
+      returned_group_host,raw_group_host,absorbed_group_host,absorbed_host,nowned,nwork,ndirection,ngroup,cdt_over_dx,cuda_get_stream_internal(slot));
 }
