@@ -37,6 +37,27 @@ no GPU, cosmological or production qualification is inferred. See the
 No main RAMSES namelist field was added: SNRT and SNIa auxiliary contracts are
 connected by the environment file, not invented entries in `RUN_PARAMS`.
 
+## MPI / GPU / OpenMP comparison placement
+
+The additional **RT/feedback/dust comparison (MPI + GPU/OpenMP placement)**
+Run mode retains the same physical inputs but exposes MPI rank count,
+OpenMP threads per rank, primary RT backend and dust material backend together
+in the parallel-placement stage. Defaults are two ranks, two threads/rank and
+`auto` for both operators; `openmp` and `cuda` overrides are available.
+The environment exports `SNRT_BACKEND`, `SNRT_DUST_BACKEND` and their separate
+256-cell GPU thresholds. The latter are initial heuristics, not performance
+guarantees. Thermal/jet deposition and IR transport are not CUDA-enabled by
+choosing a dust material backend.
+
+This mode requires the new local executable
+`.parallel-runtime.luzQV6/ramses_parallel_dispatch3d`, plus the same preserved
+yield inputs. Its README supplies a **manual** `mpiexec -n N` command. Nothing
+is submitted or run by the wizard. `I_MPI_FABRICS=shm` makes this a single-node
+profile: arbitrary positive rank counts may be configured but only one/two
+ranks are exercised here. Reserve appropriate CPUs/GPUs and set
+`CUDA_VISIBLE_DEVICES` before launch. The old fixed single-rank mode and its
+preserved executable remain separate and unchanged.
+
 ## Shared wizard and save behavior
 
 Next/Back navigates whole configuration stages: run files, DMO/hydro, dark

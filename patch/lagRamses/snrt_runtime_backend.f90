@@ -2,16 +2,36 @@
 ! Hydro GPU flags are independent. Host state is authoritative at every call;
 ! automatic fallback occurs only BEFORE launching a device transaction.
 module snrt_runtime_backend
-  use iso_c_binding, only: c_int,c_float,c_long_long,c_char
+  use iso_c_binding, only: c_int,c_float,c_double,c_long_long,c_char
   use snrt_cuda_multigroup_interface, only: snrt_cuda_multigroup_rt_step_species_dust
   implicit none
   private
-  public :: snrt_backend_initialize, snrt_runtime_species_dust_step
+  public :: snrt_backend_initialize, snrt_runtime_species_dust_step, snrt_runtime_dust_material
   integer,save :: mode=0,init_status=0,sharers=1
   integer(c_long_long),save :: min_cells=256
   logical,save :: initialized=.false.,gpu_ready=.false.
   integer,save :: last_choice=-1,cpu_threads=1
+  integer,save :: dust_mode=0,last_dust_choice=-1,world_rank=0
+  integer(c_long_long),save :: dust_min_cells=256
   interface
+     function dust_cpu(input,table,output,nc,ng,nt,use_u,dt,background,bath,tolerance,threads) &
+          bind(C,name='snrt_dust_material_openmp_c') result(ierr)
+       import c_double,c_int
+       real(c_double),intent(in)::input(*),table(*)
+       real(c_double)::output(*)
+       integer(c_int),value::nc,ng,nt,use_u,threads
+       real(c_double),value::dt,background,bath,tolerance
+       integer(c_int)::ierr
+     end function
+     function dust_cuda(input,table,output,nc,ng,nt,use_u,dt,background,bath,tolerance,threads) &
+          bind(C,name='snrt_dust_material_cuda_c') result(ierr)
+       import c_double,c_int
+       real(c_double),intent(in)::input(*),table(*)
+       real(c_double)::output(*)
+       integer(c_int),value::nc,ng,nt,use_u,threads
+       real(c_double),value::dt,background,bath,tolerance
+       integer(c_int)::ierr
+     end function
      function configure_cpu(nrank) bind(C,name='snrt_openmp_configure_c') result(nthreads)
        import c_int
        integer(c_int),value::nrank
@@ -62,6 +82,26 @@ contains
     case default;init_status=1
     end select
     if(status/=0.and.status/=1)init_status=1
+    dust_mode=mode
+    call get_environment_variable('SNRT_DUST_BACKEND',value,length=length,status=status)
+    if(status/=0.and.status/=1)init_status=1
+    if(length>0.and.status==0)then
+       select case(trim(value))
+       case('auto');dust_mode=0
+       case('openmp');dust_mode=1
+       case('cuda');dust_mode=2
+       case default;init_status=1
+       end select
+    endif
+    call get_environment_variable('SNRT_DUST_GPU_MIN_CELLS',value,length=length,status=status)
+    if(length>0)then
+       if(status/=0)then
+          init_status=1
+       else
+          read(value,*,iostat=status)dust_min_cells
+          if(status/=0.or.dust_min_cells<0)init_status=1
+       endif
+    endif
     call get_environment_variable('SNRT_GPU_MIN_CELLS',value,length=length,status=status)
     if(length>0)then
        if(status/=0)then
@@ -73,6 +113,7 @@ contains
     endif
     local_rank=0;local_size=1
 #ifndef WITHOUTMPI
+    call MPI_COMM_RANK(MPI_COMM_WORLD,world_rank,info)
     call MPI_COMM_SPLIT_TYPE(MPI_COMM_WORLD,MPI_COMM_TYPE_SHARED,0,MPI_INFO_NULL,comm,info)
     if(info/=0)then
        init_status=1;ierr=init_status
@@ -83,7 +124,7 @@ contains
 #endif
     cpu_threads=int(configure_cpu(int(local_size,c_int)))
     uuid=' '
-    if(mode/=1)gpu_ready=prepare(int(local_rank,c_int),uuid)==0
+    if(mode/=1.or.dust_mode/=1)gpu_ready=prepare(int(local_rank,c_int),uuid)==0
     if(.not.gpu_ready)uuid=' '
     allocate(uuids(33,local_size))
     uuids(:,1)=uuid
@@ -97,7 +138,7 @@ contains
        if(all(uuids(:,i)==uuid))sharers=sharers+1
     enddo
     sharers=max(1,sharers)
-    if(mode==2.and..not.gpu_ready)init_status=2
+    if((mode==2.or.dust_mode==2).and..not.gpu_ready)init_status=2
     ierr=init_status
   end subroutine
 
@@ -145,4 +186,56 @@ contains
             absorbed_group,absorbed,no,nw,nd,ng,cdt)
     endif
   end function
+
+  subroutine snrt_runtime_dust_material(heating,density,old_energy,capacity,log_t,power,band, &
+       material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr)
+    real(c_double),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
+    real(c_double),intent(in)::material_u(:),dt,background,bath,tolerance
+    logical,intent(in)::use_u
+    real(c_double),intent(out)::rate(:,:),temperature(:),next_energy(:)
+    integer,intent(out)::ierr
+    real(c_double),allocatable::input(:),coefficients(:),output(:)
+    integer::nc,ng,nt,choice
+    integer(c_long_long)::required,free
+    ! Initialization is collective and belongs to read_params, NOT a subset
+    ! of ranks that happens to have local dust cells at this AMR level.
+    ierr=7
+    if(.not.initialized.or.init_status/=0)return
+    nc=size(heating);ng=size(band,1);nt=size(log_t)
+    if(nc<1.or.ng<1.or.nt<2)return
+    required=8_c_long_long*((int(ng,c_long_long)+6)*nc+(int(ng,c_long_long)+3)*nt)+16777216_c_long_long
+    choice=1
+    if(dust_mode/=1.and.gpu_ready)then
+       free=free_bytes()
+       if(real(required,8)<=0.8d0*real(free,8)/sharers)then
+          if(dust_mode==2.or.int(nc,c_long_long)>=dust_min_cells)choice=2
+       else if(dust_mode==2)then
+          return
+       endif
+    endif
+    if(choice/=last_dust_choice)then
+       if(choice==2)then
+          write(*,'(A,I0,A,I0,A,I0)')' SNRT dust material backend=CUDA rank=',world_rank, &
+               ' cells=',nc,' device_sharers=',sharers
+       else
+          write(*,'(A,I0,A,I0,A,I0)')' SNRT dust material backend=OpenMP rank=',world_rank, &
+               ' cells=',nc,' threads=',min(nc,cpu_threads)
+       endif
+       last_dust_choice=choice
+    endif
+    input=[heating,density,old_energy,capacity]
+    coefficients=[log_t,power,material_u,reshape(band,[ng*nt])]
+    allocate(output((ng+2)*nc))
+    if(choice==2)then
+       ierr=int(dust_cuda(input,coefficients,output,int(nc,c_int),int(ng,c_int),int(nt,c_int), &
+            merge(1_c_int,0_c_int,use_u),dt,background,bath,tolerance,int(cpu_threads,c_int)))
+    else
+       ierr=int(dust_cpu(input,coefficients,output,int(nc,c_int),int(ng,c_int),int(nt,c_int), &
+            merge(1_c_int,0_c_int,use_u),dt,background,bath,tolerance,int(cpu_threads,c_int)))
+    endif
+    if(ierr/=0)return ! no after-launch fallback; outer transaction owns rollback
+    rate=reshape(output(1:ng*nc),[ng,nc])
+    temperature=output(ng*nc+1:(ng+1)*nc)
+    next_energy=output((ng+1)*nc+1:)
+  end subroutine
 end module

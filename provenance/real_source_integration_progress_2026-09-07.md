@@ -1612,3 +1612,114 @@ suggested spectrum-specific transport/mixture implementation is now optional
 future physics work, not an open item blocking this closeout. The handover
 proposes a separate combined verification task for later authorization; no
 follow-on calculation is running or automatically scheduled by this closeout.
+
+### Operator-authorized MPI/GPU/OpenMP extension
+
+New request: "MPI/GPU/OpenMP 확대 ... GPU/OpenMP의 auto dispatch를 필요한 곳에 구현".
+This is a separately authorized execution extension, not reopening the closed
+physical-input comparison or adding physical models/gate ladders. Work remains
+in `/gpfs/kjhan/LRD_JWST`, remote `kjhan0606/LagRamses`, source HEAD
+`677a271d8326fe06a374cac24f0800283e334abd` plus the uncommitted changes below.
+The pre-existing unrelated generator deletion is preserved and not included.
+
+Implementation:
+
+- Primary SNRT retains its existing GPU/OpenMP auto dispatch and node-local
+  MPI rank/device UUID mapping. Dust now shares that mapping for the implicit
+  material energy/temperature solve and group emission. CUDA and OpenMP use
+  a shared FP64 scalar kernel; native Fortran remains the independent reference.
+- `SNRT_DUST_BACKEND=auto|openmp|cuda` defaults to inheriting `SNRT_BACKEND`.
+  `SNRT_DUST_GPU_MIN_CELLS=256` is an initial heuristic, not a benchmark-derived
+  optimum. Auto considers device availability, owned-cell count and free memory
+  divided among GPU sharers; forced CUDA rejects absent/insufficient resources.
+  CUDA failures do not cause a CPU replay after device work has begun.
+- Material trials publish only on success, preserving the native enclosing
+  transaction and MPI failure reduction. IR advection/outer re-emission
+  iteration and mechanical feedback remain host-side. No fake CUDA path was
+  attached to sparse shared-cell mechanical deposition. No new main namelist
+  field or generic parameter-generator modification was needed.
+- `mkrun.py` CLI/GUI adds a separate parallel-comparison Run mode with ranks,
+  threads and two backend selectors, setup-only/manual `mpiexec`. It uses the
+  new executable, keeps the old fixed profile/binary separate, and explicitly
+  limits its `I_MPI_FABRICS=shm` launch recipe to one node.
+
+Two directly related native defects were reproduced and corrected:
+
+1. `backup_sink_hdf5` wrote only rank 0's local cloud drift statistics, although
+   BH positions use their global sum. Restore replicated that incomplete value.
+   Initial MPI2 restart moved BH x from ~0.4988 to ~0.3296 and changed the AGN
+   deposition cell (peak gas-energy relative difference ~1). Grid coordinates
+   and order were identical, ruling out output ordering. New output reduces
+   statistics globally and marks `sink_stat_global_schema=1`; restore contributes
+   the sum once, on rank 0, until per-level drift replaces local statistics.
+   Legacy multi-rank sink dumps lacking complete statistics now fail explicitly;
+   legacy single-rank dumps remain admissible. Old files are not rewritten.
+2. Visible GPUs sent `gpu_hydro=.false.` through `godunov_fine_hybrid`; a GPU
+   restart crashed there with SIGSEGV. Initialization, hybrid entry and local
+   CUDA flux dispatch now all require `gpu_hydro`. This respects the existing
+   option and prevents SNRT/dust device availability changing the hydro path.
+   The GPU-enabled hydro hybrid's internal crash is not independently repaired
+   or qualified by this CPU-hydro profile. Makefile VPATH order is unchanged.
+
+Build and evidence under `.parallel-runtime.luzQV6`:
+
+```sh
+make -C .parallel-runtime.luzQV6 -f ../bin/Makefile -j4 \
+  HDF5=1 USE_CUDA=1 SNRT=1 DUST_LIVE=1 USE_FFTW=0 EXEC=ramses_parallel_dispatch
+```
+
+Final executable `ramses_parallel_dispatch3d`, SHA256
+`11755750b5a4e0a0b71f69946fcf2931ef11cf852c20dafabd6ae41724854829`;
+`build-dispatch.log` records the build. The earlier binaries and failed runs
+are retained. `run-env.sh` records the common physical environment without
+launching a job: unchanged KL16/LC18/effective-SSP SNIa, independent BPASS v2,
+reference AGN grey transport and DL01 30/70 material. Physical limitations
+from the closeout still apply. CUDA visibility was physical GPUs 1,2, with two
+OpenMP threads per rank; other GPU processes were not disturbed.
+
+Bounded checks/results:
+
+- `snrt_dust_backend_smoke`: original Fortran vs OpenMP/CUDA v3 and v4,
+  including zero-density cells and material-error rollback. Worst relative
+  difference 6.186615e-16 (v3 2.958816e-16). Auto with no visible GPU selects
+  OpenMP; below-threshold selects OpenMP, threshold zero selects CUDA; forced
+  unavailable dust CUDA rejects startup even when primary backend is OpenMP.
+  Two ranks sharing one visible GPU both identify `device_sharers=2` and pass.
+- Initial four-step `openmp`, `cuda`, `mpi2-auto` runs completed. Compared with
+  the old Fortran-material serial baseline, new OpenMP worst array-relative
+  difference was 2.12e-14; OpenMP/CUDA primary RT difference 1.61e-7 and dust
+  energy 5.52e-8. Serial tests ran concurrently: their ~21 s vs ~11.6 s MPI2
+  times are NOT a controlled speedup measurement.
+- `mpi2-restart-openmp` preserves the original incorrect-position failure.
+  `mpi2-fixed-auto`/`mpi2-fixed-restart-openmp` reproduce its repair before the
+  hydro dispatch fix. `mpi2-fixed-restart-cuda` preserves the hybrid SIGSEGV.
+  `mpi2-legacy-reject` rejects the incomplete old MPI sink checkpoint, exit 1,
+  before evolution/new output. Intermediate binary SHA:
+  `18a66611f67b3b765423629e05301c05a011d191f892d9e11d9fea635c3aa78c`.
+- Final `mpi2-final-auto`: 4 steps, exit 0; each rank owns 256 cells, selects
+  CUDA for primary/material, and has a distinct GPU (`device_sharers=1`).
+  CPU hydro stays outside `HYBRID_ENTRY` despite visible GPUs.
+- Final `mpi2-final-restart-cuda`: copied step-2 checkpoint to step 4, exit 0;
+  91/94 hydro/SNRT datasets exactly equal to uninterrupted execution, including
+  all RT and dust arrays. Only momentum differs: max absolute 4.135903e-25,
+  array-relative 2.816452e-19. BH position max absolute difference 2.78e-16.
+- Final `mpi2-final-restart-openmp`: hides all GPUs, same checkpoint, exit 0;
+  max array-relative difference 1.609612e-7 (RT), 9.618529e-8 (dust energy).
+  BH position agrees within 2.22e-16. Arrays finite, dust mass/energy positive;
+  no MG nonconvergence/ERROR in the three final runs. These are measured
+  backend differences, not bitwise cross-backend equivalence.
+- mkrun tests: 27 run, 26 pass, one real-display test skipped on the headless
+  host; logs in `mkrun-final-tests.log`. No GUI display validation is claimed.
+
+Each launch used a newly created directory and its actual `run.nml` was
+reported before execution: nstepmax=4, noutput=1, aout=2/tout=1e30 unreached,
+foutput=2, fbackup=1000000. Final three runs have 110147610 bytes each across
+two dump directories (including the copied checkpoint in each restart).
+Estimated final storage was 336 MB at 56 MB/dump; free GPFS space was 168 TB.
+Failed/intermediate outputs remain intact. No production calculation, source
+data download, external audit, shared-context write, commit or push was made.
+
+Scope of completion: native dust-material auto dispatch, single-node MPI2
+coupled execution and backend-switch restart are exercised. Multi-node scaling,
+calibrated GPU speedup thresholds, GPU hydro, CUDA mechanical feedback and
+CUDA IR transport are not claimed completed or automatically scheduled.

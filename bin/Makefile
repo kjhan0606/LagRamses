@@ -135,6 +135,7 @@ ifeq ($(SNRT),1)
                 snrt_cuda_sparse_transport_interface.o \
                 snrt_cuda_limited_rt_step_interface.o \
                 snrt_cuda_multigroup_interface.o snrt_runtime_backend.o snrt_openmp_transport.o \
+                snrt_dust_material.o snrt_dust_material_cuda.o \
                 snrt_stellar_source.o snrt_ramses_driver.o
   ifeq ($(SNRT_LEDGER_DIAGNOSTIC),1)
     FFLAGS += -DSNRT_LEDGER_DIAGNOSTIC
@@ -320,6 +321,10 @@ snrt_transport_step.o snrt_ramses_driver.o: snrt_runtime_backend.o
 snrt_runtime_backend.o: snrt_cuda_multigroup_interface.o mpi_mod.o
 snrt_openmp_transport.o: ../patch/lagRamses/snrt_openmp_transport.cpp ../patch/lagRamses/snrt_species_dust_cell.h
 	icpx -O3 -qopenmp -fp-model=precise -c $< -o $@
+snrt_dust_material.o: ../patch/lagRamses/snrt_dust_material.cpp ../patch/lagRamses/snrt_dust_material_cell.h
+	icpx -O3 -qopenmp -fp-model=precise -c $< -o $@
+snrt_dust_material_cuda.o: ../patch/lagRamses/snrt_dust_material_cuda.cu ../patch/lagRamses/snrt_dust_material_cell.h
+	$(NVCC) $(NVCCFLAGS) --fmad=false -c $< -o $@
 snrt_cuda_kernels.o: ../patch/lagRamses/snrt_species_dust_cell.h
 snrt_backend_smoke: snrt_openmp_transport.o snrt_cuda_kernels.o ../patch/lagRamses/snrt_backend_smoke.cpp
 	icpx -O2 -qopenmp ../patch/lagRamses/snrt_backend_smoke.cpp snrt_openmp_transport.o snrt_cuda_kernels.o \
@@ -330,11 +335,16 @@ snrt_stellar_source_smoke: snrt_stellar_source.o snrt_agn_locator.o ../patch/lag
 	  stellar_enrichment_config.o snrt_spectral_contract.o snrt_stellar_source.o -o $@
 snrt_rt_transaction.o: amr_parameters.jaehyun.o mpi_mod.o
 snrt_dust_ir.o: ../patch/lagRamses/snrt_dust_ir.f90
+snrt_dust_backend_smoke: snrt_dust_ir.o snrt_runtime_backend.o snrt_dust_material.o snrt_dust_material_cuda.o \
+                         snrt_openmp_transport.o snrt_cuda_kernels.o ../patch/lagRamses/snrt_dust_backend_smoke.f90
+	$(F90) -fpp -I. ../patch/lagRamses/snrt_dust_backend_smoke.f90 snrt_dust_ir.o snrt_runtime_backend.o \
+	  snrt_cuda_multigroup_interface.o snrt_openmp_transport.o snrt_cuda_kernels.o \
+	  snrt_dust_material.o snrt_dust_material_cuda.o $(LIBS_CUDA) -o $@
 snrt_dust_coupling.o: snrt_thermochemistry.o ../patch/lagRamses/snrt_dust_coupling.f90
 snrt_dust_transaction.o: amr_parameters.jaehyun.o
 snrt_dust_receiver.o: ../patch/lagRamses/snrt_dust_receiver.f90
 snrt_dust_contract.o: ../patch/lagRamses/snrt_dust_contract.f90
-snrt_dust_live.o: snrt_state.o snrt_dust_contract.o snrt_dust_ir.o snrt_amr_topology.o mpi_mod.o
+snrt_dust_live.o: snrt_state.o snrt_dust_contract.o snrt_dust_ir.o snrt_amr_topology.o mpi_mod.o snrt_runtime_backend.o
 snrt_regrid.o: snrt_state.o snrt_dust_live.o hydro_commons.o mpi_mod.o
 ifeq ($(SNRT),1)
 load_balance.kjhan.o: snrt_regrid.o

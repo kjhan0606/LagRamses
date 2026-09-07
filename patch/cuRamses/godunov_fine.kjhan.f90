@@ -179,7 +179,7 @@ subroutine godunov_fine(ilevel)
 
 #ifdef HYDRO_CUDA
   ! One-time CUDA initialization (after hydro parameters are read)
-  if (.not. cuda_init_done) then
+  if (gpu_hydro .and. .not. cuda_init_done) then
      !$omp single
      call cuda_pool_init_f()
      if (cuda_available) then
@@ -199,7 +199,8 @@ subroutine godunov_fine(ilevel)
   ncache=active(ilevel)%ngrid
 
 #ifdef HYDRO_CUDA
-  if (cuda_available .and. hydro_cuda_initialized .and. &
+  ! A GPU used by SNRT/dust must not implicitly enable the hydro dispatcher.
+  if (gpu_hydro .and. cuda_available .and. hydro_cuda_initialized .and. &
        & scheme/='weno5' .and. scheme/='weno5ppm' .and. scheme/='ppm') then
      call godunov_fine_hybrid(ilevel, ncache)
   else
@@ -815,7 +816,7 @@ subroutine godfine1(ilevel, jgrid, mgrid, sbuf)
   !-----------------------------------------------
 #ifdef HYDRO_CUDA
   use_gpu = .false.
-  if (cuda_available .and. hydro_cuda_initialized .and. &
+  if (gpu_hydro .and. cuda_available .and. hydro_cuda_initialized .and. &
        & scheme/='weno5' .and. scheme/='weno5ppm' .and. scheme/='ppm') then
      stream_slot = int(cuda_acquire_stream_c())
      if (stream_slot >= 0) then

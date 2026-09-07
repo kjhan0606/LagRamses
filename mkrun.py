@@ -328,7 +328,7 @@ def save_text(path, text):
         stream.write(text)
 
 
-def generate_comparison(name, outdir, ui, write_text):
+def generate_comparison(name, outdir, ui, write_text, parallel=False):
     """Package the already exercised comparison, not a new physical model.
 
     Preserve the full native template verbatim except for local input paths;
@@ -336,20 +336,38 @@ def generate_comparison(name, outdir, ui, write_text):
     Both the GUI preview and terminal wizard use this same setup-only path.
     """
     ui.info('\n=== RT/feedback/dust comparison ===')
-    ui.info('Reference only: non-cosmological, 1 MPI rank / 2 OpenMP threads, '
+    placement = 'configurable MPI/OpenMP placement' if parallel else '1 MPI rank / 2 OpenMP threads'
+    ui.info(f'Reference only: non-cosmological, {placement}, '
             '4 steps, level 3, BPASS radiation population distinct from feedback. '
             'Not a production/publication approval. No job will be launched.')
     if not ui.ask_bool('Use the fixed reference-only RT/feedback/dust comparison?', False):
         raise ValueError('Comparison not selected; return to Run mode or restart the wizard.')
+    ranks, threads, primary_backend, dust_backend = 1, 2, 'openmp', 'openmp'
+    if parallel:
+        ui.info('\n=== Parallel execution placement ===')
+        ranks = ui.ask('MPI ranks (manual launch only)', 2, int)
+        threads = ui.ask('OpenMP threads per rank', 2, int)
+        choices = OrderedDict((key, (label,)) for key, label in (
+            ('auto', 'Automatic GPU/OpenMP placement'), ('openmp', 'Force OpenMP'), ('cuda', 'Force CUDA')))
+        primary_backend = ui.ask_choice('Primary RT backend', choices, 'auto')
+        dust_backend = ui.ask_choice('Dust material backend', choices, 'auto')
+        if type(ranks) is not int or type(threads) is not int or min(ranks, threads) < 1:
+            raise ValueError('MPI ranks and OpenMP threads must be positive integers.')
+        if primary_backend not in choices or dust_backend not in choices:
+            raise ValueError('Unknown runtime backend.')
     if os.path.lexists(outdir):
         raise ValueError('Comparison requires a NEW output directory; existing runs are preserved.')
     root, dest = Path(HERE), Path(outdir)
     config = root / 'simulation/snrt/config'
     source = root / '.agb-physical.4LAOTJ/snia-input'
     binary = root / '.bpass-native.v0ZwR6/ramses_bpass_native3d'
+    if parallel:
+        binary = root / '.parallel-runtime.luzQV6/ramses_parallel_dispatch3d'
     env = OrderedDict([
-        ('OMP_NUM_THREADS', '2'), ('I_MPI_FABRICS', 'shm'),
-        ('SNRT_RT_ENABLE', '1'), ('SNRT_BACKEND', 'openmp'),
+        ('OMP_NUM_THREADS', str(threads)), ('I_MPI_FABRICS', 'shm'),
+        ('SNRT_RT_ENABLE', '1'), ('SNRT_BACKEND', primary_backend),
+        ('SNRT_DUST_BACKEND', dust_backend),
+        ('SNRT_GPU_MIN_CELLS', '256'), ('SNRT_DUST_GPU_MIN_CELLS', '256'),
         ('SNRT_AGN_MODEL', 'partition_reference_v1'), ('SNRT_REDUCED_C', '.01'),
         ('SNRT_RT_LEVEL', '3'), ('SNRT_ALLOW_REFERENCE_CONTROL', '1'), ('SNRT_P1_DIAGNOSTIC', '0'),
         ('SNRT_GROUP_CONTRACT', config / 'snrt_group_contract_reference_control_v1.nml'),
@@ -387,12 +405,14 @@ def generate_comparison(name, outdir, ui, write_text):
     environment += ['export {}={}'.format(key, shlex.quote(str(value))) for key, value in env.items()]
     instructions = (
         'Fixed RT/feedback/dust comparison; inputs only, NOT launch approval.\n'
-        '1 MPI rank, OpenMP=2; NVAR=30 SNRT/DUST_LIVE/HDF5/CUDA-linked build.\n'
+        '{ranks} MPI ranks, OpenMP={threads} per rank; NVAR=30 SNRT/DUST_LIVE/HDF5/CUDA-linked build.\n'
+        'Primary RT={primary_backend}; dust material={dust_backend}. Mechanical feedback and IR transport remain host-side.\n'
+        'Single-node launch (I_MPI_FABRICS=shm); multi-node operation needs separate fabric configuration.\n'
         'No CAMB/IC generator is needed; ic_sink accompanies the uniform gas namelist.\n'
         'noutput=1 aout=2 tout=1e30 (unreached); foutput=2 fbackup=1000000; 4 steps.\n'
         'Expected dumps: 2 x ~56 MB = ~112 MB. Report actual namelist path and free space before launch.\n'
         'After that separate launch review, in a fresh run with no output_* present:\n\n'
-        'cd {}\nsource {}\n{} {} > run.log 2>&1\n\n'
+        'cd {}\nsource {}\n{launcher}{} {} > run.log 2>&1\n\n'
         'Do not rerun in this directory once evolution has produced outputs.\n'
         'Reject ERROR / MG nonconvergence even if process status is zero.\n'
         'BPASS is an independent population; 0--1 Myr holds the first spectrum; common grey transport.\n'
@@ -402,7 +422,10 @@ def generate_comparison(name, outdir, ui, write_text):
         'Local binary/shared libraries and repository contracts are still required.\n'
         'Full limitations/restart procedure: {}\n'
     ).format(shlex.quote(outdir), shlex.quote(name + '.env.sh'), shlex.quote(str(binary)),
-             shlex.quote(name + '.nml'), root / 'provenance/rt_feedback_dust_comparison_closeout_2026-09-07.md')
+             shlex.quote(name + '.nml'), root / ('simulation/snrt/NATIVE_RUNTIME.md' if parallel else
+                 'provenance/rt_feedback_dust_comparison_closeout_2026-09-07.md'),
+             ranks=ranks, threads=threads, primary_backend=primary_backend, dust_backend=dust_backend,
+             launcher='mpiexec -n {} '.format(ranks) if parallel else '')
     files = OrderedDict([
         (str(dest / (name + '.nml')), text), (str(dest / 'ic_sink'), sink.read_text()),
         (str(dest / history_name), (source / 'history.nml').read_text()),
@@ -449,9 +472,10 @@ def generate_run(ui=None, write_text=save_text):
         ('dmo', ('DMO (dark matter only, N-body + gravity)',)),
         ('hydro', ('Hydro (gas + gravity + N-body)',)),
         ('comparison', ('RT/feedback/dust comparison (fixed non-cosmological reference)',)),
+        ('comparison_parallel', ('RT/feedback/dust comparison (MPI + GPU/OpenMP placement)',)),
     ]), 'dmo')
-    if mode == 'comparison':
-        return generate_comparison(name, outdir, ui, write_text)
+    if mode in ('comparison', 'comparison_parallel'):
+        return generate_comparison(name, outdir, ui, write_text, parallel=(mode == 'comparison_parallel'))
     values['hydro'] = (mode == 'hydro')
 
     dm_choice, extra_dm = collect_dm_sector(values, ui)

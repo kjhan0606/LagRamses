@@ -60,11 +60,33 @@ def comparison_workspace():
         binary = root / '.bpass-native.v0ZwR6/ramses_bpass_native3d'
         binary.parent.mkdir()
         binary.write_text('not an executable: setup tests must never launch it\n')
+        parallel_binary = root / '.parallel-runtime.luzQV6/ramses_parallel_dispatch3d'
+        parallel_binary.parent.mkdir()
+        parallel_binary.write_text('not an executable: setup tests must never launch it\n')
         with mock.patch.object(mkrun, 'HERE', str(root)):
             yield root
 
 
 class WizardTests(unittest.TestCase):
+    def test_parallel_comparison_dispatch_controls(self):
+        with comparison_workspace() as root:
+            settings = {'Run mode': 'comparison_parallel', 'Output directory': str(root / 'fresh'),
+                        'Use the fixed reference-only RT/feedback/dust comparison?': True,
+                        'MPI ranks (manual launch only)': 2, 'OpenMP threads per rank': 3,
+                        'Primary RT backend': 'auto', 'Dust material backend': 'openmp'}
+            _,files,report = collect(settings)
+            env = files[str(root / 'fresh/myrun.env.sh')]
+            self.assertIn('SNRT_BACKEND=auto',env)
+            self.assertIn('SNRT_DUST_BACKEND=openmp',env)
+            self.assertIn('OMP_NUM_THREADS=3',env)
+            self.assertIn('mpiexec -n 2',files[str(root / 'fresh/README.txt')])
+            self.assertIn('.parallel-runtime.luzQV6/ramses_parallel_dispatch3d',files[str(root / 'fresh/README.txt')])
+            self.assertEqual(report['values']['imf_id'],1)
+            self.assertFalse((root / 'fresh').exists())
+            for bad in (0,-1):
+                with self.assertRaisesRegex(ValueError,'positive integers'):
+                    collect(dict(settings, **{'MPI ranks (manual launch only)':bad}))
+
     def test_comparison_cli_gui_same_bundle_and_no_launch(self):
         with comparison_workspace() as root:
             settings = {'Run mode': 'comparison', 'Output directory': str(root / 'new run'),

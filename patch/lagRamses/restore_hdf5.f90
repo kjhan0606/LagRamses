@@ -2263,7 +2263,7 @@ subroutine restore_part_hdf5()
         block
            real(dp), allocatable :: sbuf(:)
            integer, allocatable :: sibuf(:)
-           integer :: ilevel
+           integer :: ilevel, stat_schema
            character(len=20) :: stat_name
 
            allocate(sibuf(nsink))
@@ -2343,12 +2343,22 @@ subroutine restore_part_hdf5()
            ! BH efficiency
            call hdf5_restore_sink_dp_checked(grp_id, 'eps_sink', sbuf, nsink)
            eps_sink(1:nsink) = sbuf(1:nsink)
-           ! Sink statistics
+           ! Global checkpoint statistics must contribute exactly once to
+           ! the next ALLREDUCE. move_fine replaces each level with local
+           ! statistics after its next drift; no persistent ownership change.
+           call h5aexists_f(grp_id,'sink_stat_global_schema',attr_exists,h5err)
+           stat_schema=0
+           if(attr_exists)call hdf5_restore_header_int_checked(grp_id,'sink_stat_global_schema',stat_schema)
+           if((stat_schema/=0.and.stat_schema/=1).or.(stat_schema==0.and.ncpu_file>1))then
+              if(myid==1)write(*,*)'ERROR: MPI sink restart requires global cloud statistics; legacy dump is incomplete'
+              call hdf5_restart_abort
+           endif
            do idim = 1, ndim*2+1
               do ilevel = levelmin, nlevelmax
                  write(stat_name, '(I0,"_",I0)') idim, ilevel
                  call hdf5_restore_sink_dp_checked(grp_id, 'sink_stat_'//trim(stat_name), sbuf, nsink)
-                 sink_stat(1:nsink, ilevel, idim) = sbuf(1:nsink)
+                 sink_stat(1:nsink, ilevel, idim) = 0d0
+                 if(myid==1)sink_stat(1:nsink, ilevel, idim) = sbuf(1:nsink)
               end do
            end do
            deallocate(sbuf)

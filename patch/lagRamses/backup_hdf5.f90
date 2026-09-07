@@ -822,7 +822,7 @@ subroutine backup_sink_hdf5()
 #endif
   integer :: idim, ilevel, pending_status, pending_status_all, info
   integer(HID_T) :: grp_id
-  real(dp), allocatable :: dbuf(:)
+  real(dp), allocatable :: dbuf(:), stat_global(:)
   integer, allocatable :: ibuf(:)
   character(len=10) :: dstr
   character(len=24),parameter :: pending_names(4)=[character(len=24):: &
@@ -857,6 +857,7 @@ subroutine backup_sink_hdf5()
   call hdf5_write_attr_int(grp_id, 'agn_state_schema', 1)
   call hdf5_write_attr_int(grp_id, 'agn_model', snrt_agn_model())
   call hdf5_write_attr_int(grp_id, 'agn_rt_enabled', merge(1,0,snrt_agn_rt_requested()))
+  call hdf5_write_attr_int(grp_id, 'sink_stat_global_schema', 1)
 
   if(nsink > 0) then
      allocate(ibuf(nsink))
@@ -915,14 +916,18 @@ subroutine backup_sink_hdf5()
      ! BH efficiency
      dbuf(1:nsink) = eps_sink(1:nsink)
      call hdf5_write_dataset_serial_dp(grp_id, 'eps_sink', dbuf, nsink, myid)
-     ! Sink statistics
+     ! Unlike xsink, cloud statistics are rank-local. Save their global sum;
+     ! writing rank 0 alone biases the first post-restart BH/source position.
+     allocate(stat_global(nsink))
      do idim = 1, ndim*2+1
         do ilevel = levelmin, nlevelmax
            dbuf(1:nsink) = sink_stat(1:nsink, ilevel, idim)
+           call MPI_Allreduce(dbuf,stat_global,nsink,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
            write(dstr, '(I0,"_",I0)') idim, ilevel
-           call hdf5_write_dataset_serial_dp(grp_id, 'sink_stat_'//trim(dstr), dbuf, nsink, myid)
+           call hdf5_write_dataset_serial_dp(grp_id, 'sink_stat_'//trim(dstr), stat_global, nsink, myid)
         end do
      end do
+     deallocate(stat_global)
      deallocate(dbuf)
   end if
 

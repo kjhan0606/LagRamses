@@ -29,6 +29,17 @@ module snrt_dust_ir
      integer :: iterations=0
   end type
   public :: snrt_dust_ir_initialize, snrt_dust_ir_advance, snrt_dust_material_temperature
+  abstract interface
+     subroutine dust_material_dispatch(heating,density,old_energy,capacity,log_t,power,band, &
+          material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr)
+       import real64
+       real(real64),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
+       real(real64),intent(in)::material_u(:),dt,background,bath,tolerance
+       logical,intent(in)::use_u
+       real(real64),intent(out)::rate(:,:),temperature(:),next_energy(:)
+       integer,intent(out)::ierr
+     end subroutine
+  end interface
 contains
   subroutine snrt_dust_ir_initialize(table, energy, frequency_weight, sigma, temperature, cmb, ierr, material_u)
     type(dust_ir_table), intent(out) :: table
@@ -237,7 +248,7 @@ contains
 
   subroutine snrt_dust_ir_advance(table, direction, weight, neighbor, dx, dt, c_hat, density, primary, &
        energy, temperature, photons, diagnostics, ierr, tolerance, max_iterations, dust_energy, heat_capacity, &
-       ghost_energy,ghost_index,blocked_face)
+       ghost_energy,ghost_index,blocked_face,material_dispatch)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -261,6 +272,8 @@ contains
     ! A coarse face adjoining finer cells is advanced by the fine owner.
     ! Suppress BOTH inflow and outflow here; this is not a vacuum boundary.
     logical, optional, intent(in) :: blocked_face(:,:)
+    procedure(dust_material_dispatch),optional :: material_dispatch
+    real(real64),allocatable :: dispatch_u(:)
     logical, allocatable :: blocked(:,:)
     real(real64), allocatable :: transported(:,:,:), candidate(:,:,:), rate(:,:), next_t(:)
     real(real64), allocatable :: guess(:), absorbed(:), transmit(:,:), loss(:,:), response(:,:)
@@ -345,6 +358,10 @@ contains
     allocate(transported(ng,nd,nc),candidate(ng,nd,nc),rate(ng,nc),next_t(nc))
     allocate(guess(nc),absorbed(nc),transmit(ng,nc),loss(ng,nc),response(ng,nc),emitted_photons(ng,nc))
     if(transient)allocate(trial_dust_energy(nc))
+    if(transient.and.present(material_dispatch))then
+       allocate(dispatch_u(size(table%log_t)));dispatch_u=0
+       if(allocated(table%material_u))dispatch_u=table%material_u
+    endif
     volume=dx**3
     transported=energy
     old_total=0
@@ -399,8 +416,14 @@ contains
     guess=0
     do iteration=0,max_iterations
        if(transient)then
-          call transient_emission(table,primary+guess/dt,density,dt,dust_energy,heat_capacity, &
-               rate,next_t,trial_dust_energy,ierr,material_tolerance)
+          if(present(material_dispatch))then
+             call material_dispatch(primary+guess/dt,density,dust_energy,heat_capacity,table%log_t, &
+                  table%power,table%band,dispatch_u,allocated(table%material_u),dt,table%background, &
+                  table%background_temperature,material_tolerance,rate,next_t,trial_dust_energy,ierr)
+          else
+             call transient_emission(table,primary+guess/dt,density,dt,dust_energy,heat_capacity, &
+                  rate,next_t,trial_dust_energy,ierr,material_tolerance)
+          endif
        else
           call emission(table, primary+guess/dt, density, rate, next_t, ierr)
        end if

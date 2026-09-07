@@ -22,7 +22,8 @@ CUDA runtime libraries. This does not yet provide a toolkit-free CPU build.
 | --- | --- |
 | Primary SNRT transport, H/He inventory cap and primary dust absorption | OpenMP or CUDA; automatic selection available |
 | Stellar/AGN source evolution and mechanical deposition | Existing native CPU/OpenMP implementation; no equivalent CUDA implementation claimed |
-| Live dust thermal/IR evolution | Existing FP64 host implementation; no equivalent CUDA implementation claimed |
+| Dust material implicit energy/temperature solve and group emissivity | Shared FP64 OpenMP/CUDA kernel; automatic selection available |
+| IR transport, outer absorption/re-emission iteration and MPI exchange | Existing native host implementation; not a CUDA port |
 
 `SNRT_BACKEND=auto` (default), `openmp`, or `cuda` selects the primary
 species+dust operator. Legacy diagnostic GPU entry points remain GPU-only.
@@ -30,6 +31,21 @@ species+dust operator. Legacy diagnostic GPU entry points remain GPU-only.
 placement heuristic, not a measured optimum. Auto uses OpenMP when there is
 no usable device, insufficient device headroom, or a smaller local workload.
 Forced CUDA rejects unavailable/insufficient resources instead of falling back.
+
+`SNRT_DUST_BACKEND=auto|openmp|cuda` separately places the dust **material**
+solve; when unset it inherits `SNRT_BACKEND`. `SNRT_DUST_GPU_MIN_CELLS`
+sets its default 256-cell threshold, likewise a heuristic rather than a
+calibrated speedup crossover. It shares the established rank/device UUID
+mapping and CPU-thread budget. Its array budget adds 16 MiB headroom, applies
+the same 20% reserve and divides by ranks sharing that device. Initialization
+is collective at startup, never deferred until only dust-owning ranks enter.
+Both processors use the same 80-iteration FP64 material solve. The original
+Fortran implementation remains the independent test reference. Trial outputs
+publish only after success; CUDA errors are not silently replayed on the CPU.
+This adds no dust physics, namelist field, or persistent device checkpoint.
+Hydro selection remains independent: initialization, hybrid entry and local
+CUDA flux dispatch now all honor `gpu_hydro`. Merely exposing a GPU for
+SNRT/dust must not route `gpu_hydro=.false.` through the hydro hybrid path.
 
 Device assignment follows the existing cuRamses local-rank modulo visible-device
 mapping. Node-local UUID exchange identifies ranks sharing a GPU, including
@@ -79,6 +95,14 @@ rejects duplicates and publishes the commit marker to every replica. Consumption
 occurs only after the global RT/chemistry/dust commit. Mechanical receipt
 publication continues to use the existing collective sink-slot implementation.
 
+New HDF5 sink checkpoints mark `sink_stat_global_schema=1`. Cloud drift
+statistics are rank-local, unlike replicated BH positions: the writer now
+sums them across MPI ranks, and restore contributes that sum on one rank to
+the next position-update reduction. Previously only rank 0's partial sum was
+saved and then restored everywhere, biasing the restarted BH/AGN position.
+Old multi-rank sink dumps without this marker are rejected as incomplete;
+old single-rank dumps remain readable. No old output has been rewritten.
+
 Primary photons and same-level IR use private, at-most-16-component halo
 packets on the established RAMSES emission/reception grid maps. This reduces
 message count without changing the coarse/fine flux calculation or generic
@@ -93,6 +117,21 @@ shared cell cap, checks photon/atom ledgers, and checks atomic bad-input rejecti
 The latter checks analytic photon production, split-step equivalence, pre-birth
 zero emission, and age/Z bounds using the explicit reference table.
 These are implementation regressions, not publication-validation gates.
+
+`snrt_dust_backend_smoke` compares v3/v4 material evolution against the
+original native solver, including zero-density cells and error rollback.
+CPU/GPU worst relative difference was 6.19e-16. The separately authorized
+parallel comparison in `.parallel-runtime.luzQV6` exercises actual stars,
+BH accretion, primary RT and live dust with one rank/OpenMP, one rank/CUDA,
+and two ranks/two GPUs using auto placement. It does not qualify multi-node
+scaling, general AMR geometry, or long integrations. See the
+[parallel extension record](../../provenance/real_source_integration_progress_2026-09-07.md#operator-authorized-mpigpuopenmp-extension)
+for executable identity, restart results and limits. No overall speedup is
+claimed from the short, partly concurrent runs.
+With the final binary, two-rank CUDA-to-CUDA restart matches all RT and dust
+arrays exactly (91/94 hydro/RT arrays exact; remaining momentum differences
+at most 4.14e-25 absolute). CUDA-to-OpenMP restart has a maximum
+array-normalized difference of 1.61e-7; dust energy differs by 9.62e-8.
 
 The live IR solve uses a relative energy tolerance of `1e-9`. Separately
 advected dust mass/energy can arrive slightly below the bath temperature.
