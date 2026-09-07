@@ -55,7 +55,7 @@ subroutine read_params
   ! Non-standard model namelists (read only when enabled)
   namelist/cpl_params/w0,wa,cs2_de,de_table
   namelist/neutrino_params/omega_nu,neutrino_table
-  namelist/fR_params/fR0,fR_n,n_iter_fR,fR_eps
+  namelist/fR_params/fR0,fR_n,n_iter_fR,fR_eps,fR_fft_refined
   namelist/nDGP_params/omega_rc,nDGP_branch,n_iter_nDGP,nDGP_eps
   namelist/symmetron_params/a_ssb,beta_symmetron,L_symmetron, &
        & n_iter_symmetron,symmetron_eps
@@ -740,6 +740,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A)') ' f(R) Hu-Sawicki gravity enabled'
         write(*,'(A,ES10.3,A,I2)') '   fR0=', fR0, '  n=', fR_n
         write(*,'(A,I3,A,ES10.3)') '   max_iter=', n_iter_fR, '  eps=', fR_eps
+        write(*,'(A,L1)') '   FFT on full periodic refined levels = ', fR_fft_refined
      end if
   end if
 
