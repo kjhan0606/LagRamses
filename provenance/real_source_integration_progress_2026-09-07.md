@@ -1255,3 +1255,86 @@ verification complete. This is NOT a self-consistent microscopic binary
 population, a calibrated wind prescription, a broader-Z source approval, or
 simultaneous RT/AGN/dust production qualification. Resume high-level integration
 within these limits. BPS remains medium-term. No commit/push in this increment.
+
+## Commit/push and effective SNIa + AGN/RT/dust integration (2026-09-07)
+
+Operator requested committing/pushing and proceeding. Own accumulated source,
+input adapters, fixtures and decisions were committed as `3fa4d48` (53 files).
+The user's unrelated 88 generator-option deletions and all scratch data/builds
+were excluded. Remote commits `e5900c5` (f(R)) and `f93fd53` (DMO restart) were
+merged without conflict as `5671108` and pushed to `kjhan0606/LagRamses:main`;
+remote tip equality was checked. GUI tests: 23 run, one display skip. The
+upstream particle-type regression also passes after the merge. Neither upstream
+change was undone or reopened as a high-level physics research task.
+
+The next existing integration increment uses the actual KL16/LC18 source and
+effective SNIa alongside accepted BH accretion -> reference AGN primary RT ->
+live Draine-optics dust. It does NOT assign the incompatible Chabrier/single-star
+SED to Kroupa/binary particles: `SNRT_STELLAR_SED` is absent. AGN spectrum and
+constant dust heat capacity retain reference status; no new physical approval.
+Reusable input/seed: `config/kl16_lc18_snia_agn_dust_smoke.{nml,ic_sink}`.
+
+Evidence root `/gpfs/kjhan/LRD_JWST/.feedback-rt-dust.dqHCvB/`. Production
+Makefile build with lagRamses-first VPATH, NVAR=30, SNRT/DUST_LIVE/HDF5/CUDA,
+USE_FFTW=0; merged-base binary `ramses_feedback_rt_dust3d` SHA256
+`0bd35a9f8eb6a67f82b3281407b4bfd948d099e04caddf5223644d7ff879146b`.
+The runtime uses one rank/two OpenMP threads and forced primary OpenMP.
+
+### Measured execution and narrow restart repair
+
+- `live/run.nml`: four CPU hydro/Poisson steps, exit 0, final time
+  102.390489738561 Myr. Real `.agb-physical.4LAOTJ/snia-input` source/history,
+  effective SNIa contract, existing reference AGN group/secondary contracts,
+  `.physical-inputs.A0XtMt/dust_native.nml`. The BH seed is code mass 1e-5,
+  explicitly a numerical stress/control input (2.4527e11 Msun at these units),
+  not a galaxy calibration. Cooling/stellar photons/new sink formation off;
+  existing sink maintenance, mechanical feedback, primary RT and dust IR on.
+  One nonzero accepted AGN source interval, four RT commits and four dust IR
+  commits, no chemistry failures. Maximum IR balance residual 3.7746e-13;
+  primary dust ledger relative error for the active interval 2.2402e-7.
+- `restart/run.nml`: HDF5 stellar, AGN and RT state read successfully, then
+  SIGSEGV exit 174 in `kjhan_sync_sink_particle_coordinates` during sink
+  maintenance. Address 0x7784b5 maps to its next-particle traversal. At this
+  point `create_sink` has gathered particles to level 1 but has not rebuilt
+  fine-level lists; the routine unnecessarily walked every level.
+- Narrow repair in `patch/lagRamses/sink_particle.kjhan.f90`: update canonical
+  BH positions/velocities using the local map freshly filled by cloud creation.
+  Zero entries are nonlocal; invalid index/type/ID rejects. No AMR/tree rewrite,
+  cloud physics, accretion prescription or namelist change.
+- `restart-fixed/run.nml`: copy checkpoint 1 (coarse step 2), nrestart=1, resume
+  to step 4 with repaired binary `ramses_feedback_rt_dust_fixed3d`, SHA256
+  `df124cd4be8bb3cb4ccc2a44ec74f695abbf001d66df1530ae0b6f23dd056a5c`.
+  Exit 0, stellar identity passes. Sorted STAR mass/mp0/Z/IDs/progress/birth
+  times, primary+IR SNRT datasets, dust mass/energy, BH mass and all five AGN
+  pending reservoirs match the uninterrupted run exactly. Leaf hydro differences
+  are <=3.88e-16 peak-relative. BH gas angular momentum, near cancellation,
+  differs by <=1.64646e-24 code units (up to 4.27e-10 relative to its tiny value);
+  do NOT claim all sink diagnostics bitwise/64-epsilon relative reproducibility.
+  This control has spin disabled; spin-sensitive qualification is not established.
+
+Final live/restart STAR count 1733, total stellar return
+1.3072717565418019e-8 code mass. All leaf hydro variables finite, internal
+energy positive (minimum 2.3046861425049755e-8), dust mass/energy nonnegative.
+Gas+STAR+BH mass = .001009905788355202; initial gas+BH = .00101. With epsilon=.1,
+BH growth implies radiative mass loss 9.421164479767314e-8 code mass. Adding this
+back closes to 4.34e-19 absolute. Cloud tracers are NOT counted as additional BH
+mass. The generic mcons/econs lines are not substitutes for this source accounting.
+
+Oldest stellar processed age is 51.363844889651 Myr, before the 68.89 Myr AGB
+terminal event. Thus simultaneous nonzero AGB is NOT demonstrated here, although
+its input is loaded and standalone AGB already passed. No full physical stellar
+SED, physical dust heat capacity, spin-sensitive or combined MPI/AMR promotion.
+
+A smaller-seed exploratory `live-fixed` (1e-7 code mass) was retained but NOT
+admitted: its timestep still shrank and star+cloud particles exhausted npartmax
+4096 at step 4 (exit 1). It never demonstrated the intended later AGB release.
+The reusable seed retains the completed 1e-5 control; do not describe this failed
+case as a successful extension. Defer a deliberately age-covering integrated
+profile rather than starting a parameter-sweep/gate ladder here.
+
+Output policy: noutput=1, aout=2, tout=1e30 (unreached), foutput=2,
+fbackup=1000000, nstepmax=4; checkpoint 1=step 2, checkpoint 2=step 4.
+Output storage including copied/failed-case checkpoints: 330,593,437 bytes,
+within the revised 450 MB budget; GPFS free space 169 TB. Existing results
+are preserved. Next physical input work remains a population-compatible stellar
+SED and dust thermal material input, without reviving the parked BPS prerequisite.

@@ -482,3 +482,37 @@ Microscopic binary evolution is a separate medium-term study, not a prerequisite
 for using this effective route. These bounded checks do not qualify all source
 physics or a simultaneous RT/AGN/dust production run. See the operator decision in the
 [completion plan](../../provenance/production_completion_bundles_2026-09-07.md).
+
+### Effective SNIa / AGN RT / real-opacity dust integrated control
+
+`config/kl16_lc18_snia_agn_dust_smoke.nml` combines the real KL16/LC18 history
+and effective SNIa with accepted BH accretion, reference AGN transport and live
+Draine-opacity dust. Copy it into a NEW run directory, replace the history
+placeholder, and copy `config/kl16_lc18_snia_agn_dust_smoke.ic_sink` as `ic_sink`.
+Use the integrated reference environment above, with these changes:
+
+- Unset `SNRT_STELLAR_SED`: the existing Chabrier/single-star control does NOT
+  match this Kroupa/binary population. Stellar mechanical energy is not a SED.
+- Set `PHASE0_YIELD_TABLE` to the actual `--population snia_baseline --imf-id 1`
+  KL16/LC18 export and `PHASE0_SNIA_RUNTIME_CONTRACT` to the effective contract.
+- Set `SNRT_DUST_CONTRACT` to the native Draine optical/thermal export (the
+  recorded local example is `.physical-inputs.A0XtMt/dust_native.nml`). Its
+  constant TEST heat capacity is still a reference approximation.
+- Use `SNRT_BACKEND=openmp` for this demonstrated profile; all GPU hydro flags
+  are false. The AGN spectrum remains the existing reference group contract.
+
+Four fixed level-3 steps use noutput=1, aout=2, tout=1e30, foutput=2,
+fbackup=1000000. Two periodic dumps are about 55 MB each. Output numbering is
+sequential: checkpoint **1 is coarse step 2**. To resume to step 4, copy
+`output_00001` to another NEW directory, set `nrestart=1`, and keep source inputs
+and all environment contracts identical. Canonical BH coordinate sync now uses
+the freshly rebuilt sink map rather than stale fine-level particle lists.
+
+This measured control reaches 102.39049 Myr, with oldest processed stellar age
+51.36384 Myr: wind/SNIa, AGN primary absorption and dust IR are exercised; AGB
+input is loaded but its first terminal release is not yet reached. The standalone
+AGB evidence above remains separate. The seed is an explicit numerical control,
+not a realistic galaxy initial condition. Mass accounting must include the AGN
+radiative rest-mass loss and count sinks once, not sum their cloud tracers.
+See the combined-control section of the existing integration record for results,
+the retained failed runs and remaining physical-SED/heat-capacity limits.

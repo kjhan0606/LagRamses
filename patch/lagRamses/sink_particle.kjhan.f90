@@ -159,42 +159,36 @@ subroutine kjhan_sync_sink_particle_coordinates
   use amr_commons
   use pm_commons
   implicit none
-  integer::ilevel,icpu,igrid,jgrid,npart1,jpart,ipart,next_part,idim
-  integer(i8b)::ksink
-  real(dp)::r2
+  integer::isink,ipart,idim
 
   ! kjhan_update_sink_position_velocity updates the cloud-averaged sink
   ! center.  Synchronize only the canonical PTYPE_SINK particle before the
   ! particle tree is rebuilt, so Bondi sampling uses the same physical center.
+  ! create_sink has gathered particles to level 1. Fine-level list headers
+  ! are not a valid all-level traversal until the tree is rebuilt below this
+  ! call. Use the local canonical map freshly populated by kjhan_create_cloud
+  ! instead; zero entries belong to another rank and are not local particles.
   if(nsink==0)return
-  do ilevel=1,nlevelmax
-     do icpu=1,ncpu
-        if(numbl(icpu,ilevel)<=0)cycle
-        igrid=headl(icpu,ilevel)
-        do jgrid=1,numbl(icpu,ilevel)
-           npart1=numbp(igrid)
-           if(npart1>0)then
-              ipart=headp(igrid)
-              do jpart=1,npart1
-                 next_part=nextp(ipart)
-                 if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart)>=-nsinkmax)then
-                    ksink=-idp(ipart)
-                    if(ksink>=1 .and. ksink<=nsink .and. &
-                         allocated(canonical_sink_part))then
-                       if(canonical_sink_part(ksink)==ipart)then
-                          do idim=1,ndim
-                             xp(ipart,idim)=xsink(ksink,idim)
-                             vp(ipart,idim)=vsink(ksink,idim)
-                          end do
-                       endif
-                    endif
-                 endif
-                 ipart=next_part
-              end do
-           endif
-           igrid=next(igrid)
-        end do
-     end do
+  if(.not.allocated(canonical_sink_part))return
+  if(size(canonical_sink_part)<nsink)then
+     write(*,*) 'ERROR: incomplete canonical sink map during coordinate sync'
+     call clean_stop
+  endif
+  do isink=1,nsink
+     ipart=canonical_sink_part(isink)
+     if(ipart==0)cycle
+     if(ipart<1.or.ipart>size(idp))then
+        write(*,*) 'ERROR: invalid canonical sink particle during coordinate sync',isink,ipart
+        call clean_stop
+     endif
+     if(ptypep(ipart)/=PTYPE_SINK.or.idp(ipart)/=-int(isink,i8b))then
+        write(*,*) 'ERROR: canonical sink identity mismatch during coordinate sync',isink,ipart
+        call clean_stop
+     endif
+     do idim=1,ndim
+        xp(ipart,idim)=xsink(isink,idim)
+        vp(ipart,idim)=vsink(isink,idim)
+     enddo
   end do
 
 end subroutine kjhan_sync_sink_particle_coordinates

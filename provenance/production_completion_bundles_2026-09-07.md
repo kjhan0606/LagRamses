@@ -284,3 +284,14 @@ existing source integration record. This closes the effective SSP accounting
 increment, not microscopic binary-population qualification or all-channel
 physical production approval. Resume the existing RT/feedback/dust input and
 integration queue; do not reopen the parked BPS work or add another gate ladder.
+
+**Next integration increment:** real KL16/LC18 + effective SNIa now runs with
+accepted BH accretion, reference AGN RT and real-opacity/reference-thermal dust.
+A canonical-sink coordinate-sync traversal defect exposed on restart was fixed
+locally; the continued run reproduces stellar/RT/dust/AGN-reservoir state.
+This is a selected serial/OpenMP control, not joint physical source approval.
+The oldest star is only 51.36 Myr, so nonzero AGB release remains separately
+demonstrated, not combined here. The incompatible stellar SED stays disabled.
+The existing integration record retains successful and failed cases and their
+scope. Remaining physical input priority is a compatible stellar SED and dust
+thermal material data; do not extend microscopic binary studies as a prerequisite.
