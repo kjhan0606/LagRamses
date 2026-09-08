@@ -1,4 +1,4 @@
-! One-moment, fixed-characteristic-size dust mass closure. Metal fields
+! Bulk/two-size dust mass closures and bounded native size-shift reference. Metal fields
 ! denote total (gas+dust) metals; dust is a subset, not additional gas mass.
 module dust_mass_physics
   use, intrinsic :: iso_fortran_env, only: real64
@@ -28,6 +28,119 @@ module dust_mass_physics
   real(real64),parameter :: dust_shock_delta(2)=[.10d0,.15d0],dust_shock_mass_msun=6800d0
   real(real64),parameter :: dust_myr=315576d8
 contains
+  subroutine dust_bin_reconstruct(left,right,number,mass_moment,new_number,slope,ierr)
+    ! McKinnon et al. 2018, eqs 39--43: linear dn/da around bin midpoint.
+    ! mass_moment is integral a^3 dn, i.e. mass/(4*pi*rho_s/3).
+    ! Positivity limiting conserves MASS, not necessarily NUMBER. The caller
+    ! must record that number change rather than claim both were conserved.
+    real(real64),intent(in)::left,right,number,mass_moment
+    real(real64),intent(out)::new_number,slope
+    integer,intent(out)::ierr
+    real(real64)::c,h,a,b,limit
+    ierr=1;new_number=number;slope=0
+    if(.not.all(ieee_is_finite([left,right,number,mass_moment])))return
+    if(left<0.or.right<=left.or.min(number,mass_moment)<0)return
+    if(number==0.or.mass_moment==0)then
+       if(number/=0.or.mass_moment/=0)return
+       ierr=0;return
+    endif
+    c=(left+right)/2;h=(right-left)/2
+    a=c**3+c*h*h;b=2*h**3*(c*c+h*h/5)
+    if(b<=0.or..not.ieee_is_finite(b))return
+    slope=(mass_moment-number*a)/b;limit=number/(2*h*h)
+    if(abs(slope)>limit)then
+       new_number=mass_moment/(a+sign(1d0,slope)*b/(2*h*h))
+       slope=sign(new_number/(2*h*h),slope)
+    endif
+    if(.not.all(ieee_is_finite([new_number,slope])).or.new_number<0)return
+    ierr=0
+  end subroutine
+
+  subroutine dust_bin_moments(left,right,number,slope,lo,hi,shift,moments)
+    ! Exact three-node Gaussian integration of a linear number distribution
+    ! times (a+shift)^k, k=0,2,3 (polynomial degree <=4). Local coordinates
+    ! avoid subtracting nearly equal high powers at narrow bin boundaries.
+    real(real64),intent(in)::left,right,number,slope,lo,hi,shift
+    real(real64),intent(out)::moments(3)
+    real(real64),parameter::node(3)=[-.774596669241483377d0,0d0,.774596669241483377d0]
+    real(real64),parameter::weight(3)=[5d0/9,8d0/9,5d0/9]
+    real(real64)::x,y,f,h,c
+    integer::q
+    moments=0
+    if(hi<=lo)return
+    h=(hi-lo)/2;c=(hi+lo)/2
+    do q=1,3
+       x=c+h*node(q);y=x+shift
+       f=number/(right-left)+slope*(x-(left+right)/2)
+       moments=moments+h*weight(q)*f*[1d0,y*y,y*y*y]
+    enddo
+  end subroutine
+
+  subroutine dust_multibin_shift(edges,number,slope,shift,solid_density,gas_available, &
+       new_number,new_slope,gas_transfer,limiter_number_change,ierr,destroyed_number)
+    ! Bounded native size-advection reference, NOT a live many-bin selector.
+    ! Constant da/dt over this transaction: mantle accretion or sputtering.
+    ! Grains below edges(1) are destroyed; their residual mass returns to gas.
+    ! Upper overflow is rejected (never silently rebinned/clipped). No new
+    ! collision kernel is invented to imitate the two-size transfer closure.
+    real(real64),intent(in)::edges(:),number(:),slope(:),shift,solid_density,gas_available
+    real(real64),intent(out)::new_number(:),new_slope(:),gas_transfer,limiter_number_change
+    integer,intent(out)::ierr
+    real(real64),optional,intent(out)::destroyed_number
+    real(real64)::nn(size(number)),ss(size(number)),mm(size(number)),m(3),old_mass,factor
+    real(real64)::lo,hi,h,tol,exchange,correction,raw_number,removed
+    integer::i,j,n,status
+    ierr=1;gas_transfer=0;limiter_number_change=0
+    if(present(destroyed_number))destroyed_number=0
+    n=size(number)
+    if(size(new_number)/=n.or.size(new_slope)/=n)return
+    new_number=number;new_slope=0
+    if(n<1.or.size(edges)/=n+1.or.size(slope)/=n)return
+    new_slope=slope
+    if(.not.all(ieee_is_finite(edges)).or..not.all(ieee_is_finite(number)))return
+    if(.not.all(ieee_is_finite(slope)).or..not.all(ieee_is_finite([shift,solid_density,gas_available])))return
+    if(edges(1)<0.or.any(edges(2:)<=edges(:n)).or.any(number<0))return
+    if(solid_density<=0.or.gas_available<0)return
+    factor=4*acos(-1d0)*solid_density/3
+    nn=0;mm=0;old_mass=0;removed=0
+    do i=1,n
+       h=(edges(i+1)-edges(i))/2
+       if(abs(slope(i))*h>number(i)/(2*h)*(1+32*epsilon(1d0)))return
+       call dust_bin_moments(edges(i),edges(i+1),number(i),slope(i),edges(i),edges(i+1),0d0,m)
+       old_mass=old_mass+factor*m(3)
+       hi=min(edges(i+1),edges(1)-shift)
+       if(hi>edges(i))then
+          call dust_bin_moments(edges(i),edges(i+1),number(i),slope(i),edges(i),hi,0d0,m)
+          removed=removed+m(1)
+       endif
+       if(shift>0.and.number(i)>0)then
+          ! A positive linear distribution has support in the bin interior.
+          if(edges(i+1)+shift>edges(n+1))return
+       endif
+       do j=1,n
+          lo=max(edges(i),edges(j)-shift);hi=min(edges(i+1),edges(j+1)-shift)
+          if(hi<=lo)cycle
+          call dust_bin_moments(edges(i),edges(i+1),number(i),slope(i),lo,hi,shift,m)
+          nn(j)=nn(j)+m(1);mm(j)=mm(j)+m(3)
+       enddo
+    enddo
+    if(.not.ieee_is_finite(old_mass).or.any(mm<0).or.any(nn<0))return
+    exchange=old_mass-factor*sum(mm)
+    tol=128*epsilon(1d0)*max(old_mass,factor*sum(mm),gas_available,tiny(1d0))
+    if(.not.ieee_is_finite(exchange).or.exchange < -gas_available-tol)return
+    correction=0
+    do j=1,n
+       raw_number=nn(j)
+       call dust_bin_reconstruct(edges(j),edges(j+1),raw_number,mm(j),nn(j),ss(j),status)
+       if(status/=0)return
+       correction=correction+nn(j)-raw_number
+    enddo
+    if(.not.ieee_is_finite(correction))return
+    ! Publish only after all bins and the shared gas-reservoir bound pass.
+    new_number=nn;new_slope=ss;gas_transfer=exchange;limiter_number_change=correction;ierr=0
+    if(present(destroyed_number))destroyed_number=removed
+  end subroutine
+
   logical function dust_mass_parameters_ok() result(ok)
     real(real64)::v(9)
     v=[dust_condensation,dust_grain_radius_cm,dust_grain_density,dust_sticking, &

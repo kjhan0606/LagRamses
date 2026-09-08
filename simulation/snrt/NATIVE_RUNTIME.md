@@ -1520,8 +1520,12 @@ MPI2 x OMP2 continuous/restart equality (90 hydro and 4 RT datasets);
 positive dust/element/thermal states; changed-model restart rejection; and
 mkrun/GUI consistency. Fixed-vs-D03 sensitivity is measured, not calibrated.
 
-This closes the local optical wiring, not the unperformed 8/16-bin accuracy
-study or full radiation-dependent metal NEQ/H2/CO chemistry. WSS09 CIE,
+This closes the local optical wiring, not full many-bin dynamics validation
+or radiation-dependent metal NEQ/H2/CO chemistry. The first native bounded
+8/16/32-bin size-shift reference is now implemented in `dust_mass_physics`;
+its mass/area/number comparison and explicit limiter errors are recorded in
+the provenance document above. It is not a selectable live multibin model.
+WSS09 CIE,
 common grain T, 20 K dielectric and uncalibrated size/SN prescriptions remain
 explicit approximations. PAH stochastic heating, sublimation, separate Fe,
 dust drift/AGN force and cosmological deployment are not supplied by this

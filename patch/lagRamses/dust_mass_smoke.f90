@@ -190,4 +190,88 @@ program dust_mass_smoke
   write(*,*)'DUST_TWO_SIZE_BUDGET_GROWTH_EROSION_COAG_SHATTER_PASS'
   write(*,*)'DUST_SN_AMBIENT_EXPOSURE_FRESH_PROTECTION_PASS'
   write(*,*)'DL01_COMPOSITION_MATERIAL_SIZE_AREA_DOMAIN_PASS'
+  call check_multibin_reference()
+contains
+  real(real64) function power_integral(lo,hi,p) result(v)
+    real(real64),intent(in)::lo,hi,p
+    v=(hi**(p+1)-lo**(p+1))/(p+1)
+  end function
+
+  subroutine check_multibin_reference()
+    real(real64),allocatable::edges(:),numbers(:),slopes(:),nn(:),ss(:)
+    real(real64)::amin,amax,shift,factor,scale,lo,m0,raw,gas_delta,corr,m(3),mass,area,removed
+    real(real64)::truth_mass,truth_area,truth_n,initial_n,elapsed,start,finish
+    real(real64)::mass_error(3),area_error(3),number_error(3),radii(2),fixed_mass,split
+    integer::n,k,j,status,it
+    ! Same initial truncated MRN and imposed radius loss in every resolution.
+    ! No D03 dielectric interpolation or new opacity data is required here.
+    amin=1d-7;amax=1d-4;shift=-amin/2;factor=4*acos(-1d0)*3d0/3
+    scale=1d-3/(factor*power_integral(amin,amax,-.5d0))
+    lo=amin-shift
+    truth_n=scale*power_integral(lo,amax,-3.5d0)
+    truth_area=scale*(power_integral(lo,amax,-1.5d0)+ &
+         2*shift*power_integral(lo,amax,-2.5d0)+shift**2*power_integral(lo,amax,-3.5d0))
+    truth_mass=factor*scale*(power_integral(lo,amax,-.5d0)+ &
+         3*shift*power_integral(lo,amax,-1.5d0)+3*shift**2*power_integral(lo,amax,-2.5d0)+ &
+         shift**3*power_integral(lo,amax,-3.5d0))
+    do k=1,3
+       n=2**(k+2) ! 8,16,32; 32 checks the direction of convergence.
+       allocate(edges(n+1),numbers(n),slopes(n),nn(n),ss(n))
+       do j=1,n+1
+          edges(j)=amin*(amax/amin)**(real(j-1,real64)/n)
+       enddo
+       do j=1,n
+          raw=scale*power_integral(edges(j),edges(j+1),-3.5d0)
+          m0=scale*power_integral(edges(j),edges(j+1),-.5d0)
+          call dust_bin_reconstruct(edges(j),edges(j+1),raw,m0,numbers(j),slopes(j),status)
+          if(status/=0)stop 60
+       enddo
+       initial_n=sum(numbers)
+       call cpu_time(start)
+       do it=1,100
+          call dust_multibin_shift(edges,numbers,slopes,shift,3d0,0d0,nn,ss,gas_delta,corr,status,removed)
+          if(status/=0)stop 61
+       enddo
+       call cpu_time(finish);elapsed=(finish-start)/100
+       mass=0;area=0
+       do j=1,n
+          call dust_bin_moments(edges(j),edges(j+1),nn(j),ss(j),edges(j),edges(j+1),0d0,m)
+          mass=mass+factor*m(3);area=area+m(2)
+          if(nn(j)<0.or.abs(ss(j))*(edges(j+1)-edges(j))/2> &
+               nn(j)/(edges(j+1)-edges(j))*(1+32*epsilon(1d0)))stop 62
+       enddo
+       if(abs(mass+gas_delta-1d-3)>3d-17)stop 63
+       if(abs(sum(nn)+removed-corr-initial_n)>1d-13*initial_n)stop 70
+       mass_error(k)=abs(mass/truth_mass-1)
+       area_error(k)=abs(area/truth_area-1)
+       number_error(k)=abs(sum(nn)/truth_n-1)
+       write(*,'(A,I3,A,5ES13.5)')'DUST_MULTIBIN_MRN n=',n, &
+            ' mass/area/number/limiter/cpu_s=',mass_error(k),area_error(k),number_error(k),corr/initial_n,elapsed
+       ! Upper overflow and insufficient gas for growth reject without edits.
+       call dust_multibin_shift(edges,numbers,slopes,amin,3d0,1d0,nn,ss,gas_delta,corr,status)
+       if(status==0.or.any(nn/=numbers).or.any(ss/=slopes).or.gas_delta/=0)stop 64
+       numbers(n)=0;slopes(n)=0
+       call dust_multibin_shift(edges,numbers,slopes,amin,3d0,0d0,nn,ss,gas_delta,corr,status)
+       if(status==0.or.any(nn/=numbers).or.any(ss/=slopes))stop 65
+       call dust_multibin_shift(edges,numbers,slopes,amin,3d0,1d0,nn,ss,gas_delta,corr,status)
+       if(status/=0.or.gas_delta>=0)stop 66
+       call dust_multibin_shift(edges,numbers,slopes,-2*amax,3d0,0d0,nn,ss,gas_delta,corr,status)
+       if(status/=0.or.any(nn/=0).or.any(ss/=0).or.gas_delta<=0)stop 67
+       deallocate(edges,numbers,slopes,nn,ss)
+    enddo
+    if(mass_error(2)>=mass_error(1).or.mass_error(3)>=mass_error(2))stop 68
+    ! A signed integral moment can have accidental cancellation at 16 bins;
+    ! it need not improve monotonically at every resolution. Both refinements
+    ! must improve on 8, and all measured errors remain in the report.
+    if(maxval(area_error(2:3))>=area_error(1))stop 69
+    ! Native two-size fixed-radius closure, normalized to the same initial
+    ! MRN mass. This is a physical closure comparison, not a discretization
+    ! of the translated distribution: da changes M at fixed representative a.
+    split=3d-6;radii=[5d-7,1d-5]
+    fixed_mass=factor*scale*(power_integral(amin,split,-.5d0)*exp(3*shift/radii(1))+ &
+         power_integral(split,amax,-.5d0)*exp(3*shift/radii(2)))
+    write(*,'(A,2ES14.6)')'DUST_TWO_SIZE_FIXED_VS_RADIUS_SHIFT mass_error,reference_mass=', &
+         abs(fixed_mass/truth_mass-1),truth_mass
+    write(*,*)'DUST_MULTIBIN_MOMENTS_MASS_GAS_BOUNDARY_ROLLBACK_PASS'
+  end subroutine
 end program

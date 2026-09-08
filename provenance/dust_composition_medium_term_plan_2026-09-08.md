@@ -5,7 +5,9 @@ two-size evolution, DL01 material, and local D03 primary/IR optics are now
 connected and tested together. See the final section below; earlier
 "prepared/not live-selected" entries are historical. This closes the live
 comparison-model connection, not the separate full-NEQ/multibin physical
-qualification or cosmological production/calibration work.
+qualification or cosmological production/calibration work. The subsequent
+size-shift reference section records the first measured 8/16/32-bin comparison;
+the earlier "unperformed" description is historical, not its current status.
 
 Operator approved proceeding in this order after closeout commit 5be56ae.
 Workspace / repository: /gpfs/kjhan/LRD_JWST, kjhan0606/LagRamses.
@@ -704,3 +706,70 @@ H2/CO surface chemistry, separate Fe carrier, sublimation or dust drag/AGN
 force remain explicit physical extensions. The noncosmo/no-sink/CPU-hydro
 comparison guards are retained. Cosmological galaxy production and
 COLIBRE-style parameter calibration are not released by this closeout.
+
+## Continued without approval wait: native size-shift reference (2026-09-09)
+
+Operator clarified that the standing approval remains active. Completed
+composition/size/material/optics work was committed and pushed as **93d1719**
+to `kjhan0606/LagRamses/main`. Only the unrelated 88-line generator deletion
+was left unstaged; binary/output directories were not committed. Original
+Draine/WSS09 source whitespace was retained to preserve their byte hashes
+(source-code diff checks exclude those raw-data whitespace warnings).
+
+Added a bounded multi-bin radius-shift operator to **existing native
+`dust_mass_physics.f90`**, exercised through the existing `dust_mass_smoke`.
+This is the planned numerical reference, not another Python framework or a
+new live many-bin namelist selector. Fixed/two-size production code is unchanged.
+
+The number distribution is linear in radius within each bin. An imposed
+radius shift is integrated analytically over source/destination overlaps;
+three-point Gauss integration is exact for the degree-four mass integrand.
+Number and mass determine the new linear reconstruction. Its positivity
+limiter preserves mass but may change number, following
+[McKinnon et al. 2018, section 3.2](https://academic.oup.com/mnras/article/478/3/2851/4995927).
+The limiter correction is returned separately, not hidden as physical
+destruction. Grains below the explicit minimum size are destroyed, including
+return of their residual mass to gas; upper-bound overflow is rejected rather
+than silently redistributed. Growth must fit the available gas reservoir.
+All bins publish together after validity/budget checks. This assumes frozen
+da/dt for the transaction; it is not a new multibin collision prescription.
+
+Measured a common truncated n(a) proportional to a^-3.5, 0.001--1 micron,
+with delta-a=-0.0005 micron, normalized initial mass 0.001 in the test units.
+Analytic shifted moments and the same minimum-size destruction boundary
+provide the independent reference. Three resolutions give:
+
+| Bins | Mass error | Geometric area error | Number error | CPU per call |
+| --- | --- | --- | --- | --- |
+| 8 | 0.156641% | 3.22084% | 8.80473% | 1.03 microseconds |
+| 16 | 0.0102393% | 0.00384499% | 1.86336% | 1.94 microseconds |
+| 32 | 0.00113329% | 0.0216182% | 0.301715% | 4.73 microseconds |
+
+The 16-bin area error happens to cancel more strongly than at 32; the
+initial test incorrectly required every area error to decrease monotonically.
+That assertion was corrected, not the computed values. Both refinements
+improve on 8, while mass converges monotonically. Timings are 100 repeated
+single-cell calls on the shared CPU, not an end-to-end simulation benchmark.
+The 8-bin limiter changes number by -8.55391% of its discrete initial number.
+Conservation checks explicitly include minimum-radius destruction and this
+numerical correction. A same-total-mass two-size fixed-radius closure gives
+0.935742% mass error here; this also changes the physical size representation,
+so it is not a formal convergence point for the multi-bin discretization.
+
+Native checks PASS: old dust physics tests, total dust+gas mass to 3e-14
+relative, transported number with the boundary/limiter terms to 1e-13,
+positive reconstruction, allowed growth, complete erosion, gas exhaustion,
+and upper overflow with unchanged trial outputs. Evidence:
+`.cosmic-ray.kyySgK/dust_multibin{_build,}.log`. No new RAMSES calculation or
+snapshot was needed. Existing tested live D03 binary/output are preserved.
+
+Disposition: this completes the **first bounded size-shift accuracy/cost
+comparison**, not the combined coagulation/shattering or optical-SED study.
+Do not promote 8/16 bins solely from mass accuracy. The importance of bin-edge
+handling and number errors is consistent with the independent discussion in
+[Sumpter & Van Loo 2020](https://academic.oup.com/mnras/article/494/2/2147/5813268).
+Use 32 as the better-resolved reference in this test; a globally optimal live
+bin count is not determined. Continue the physical work under standing
+approval; no audit or user-approval wait was inserted. Full NEQ/molecular
+chemistry still requires actual reaction/rate data and native integration,
+not relabelled CIE tables.
