@@ -49,6 +49,7 @@ contains
     integer,intent(in)::n_bins
     integer,intent(out)::ierr
     type(stellar_cumulative_t)::agb
+    type(stellar_yield_table_t)::co_inventory
     real(stellar_dp)::t,events
     integer::i,j,row,status,n
     ierr=enrichment_driver_ok
@@ -59,6 +60,8 @@ contains
        return
     endif
     if(age<=dtd%minimum_delay_gyr)return
+    co_inventory=table
+    co_inventory%co_wd_inventory_only=.true.
     n=size(table%agb_terminal_row)
     do i=1,n+1
        t=age
@@ -72,7 +75,7 @@ contains
           if(j<i)cycle
           t=nearest(t,-1d0)
        endif
-       call integrate_ssp_channel(table,population,channel_agb,t,mass_min,mass_max,n_bins,agb,status)
+       call integrate_ssp_channel(co_inventory,population,channel_agb,t,mass_min,mass_max,n_bins,agb,status)
        if(status/=ssp_source_ok)then
           ierr=enrichment_driver_err_source
           return

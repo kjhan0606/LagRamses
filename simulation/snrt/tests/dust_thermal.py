@@ -74,6 +74,36 @@ def main() -> int:
         assert "contract_version=4" in native and "internal_energy_per_h_erg_input=" in native
         assert "material_sha256=" in native and "approval_id=''" in native
         assert "ntemperature_input=67" in native  # preserves material knots 10,20,100
+        scattered = build_native_reference_namelist(
+            source, ledger, edges_path, np.geomspace(5., 300., 64), 10., None,
+            material_path=material_path, scattering="isotropic_elastic")
+        assert "scattering_input=" not in native
+        assert "scattering_model='isotropic_elastic'" in scattered and "scattering_input=" in scattered
+        assert "NOT the measured Draine phase function" in scattered
+        exchanged = build_native_reference_namelist(
+            source, ledger, edges_path, np.geomspace(5.,300.,64), 10., None,
+            material_path=material_path, gas_exchange="hydrogen_accommodation",
+            collision_area=3.495e-22, accommodation=.5)
+        assert "gas_exchange_model=" not in native
+        assert "gas_exchange_model='hydrogen_accommodation'" in exchanged
+        assert "collision_area_per_h_input=" in exchanged
+        for area, alpha in ((None,.5),(0.,.5),(1e-21,None),(1e-21,1.01),(1e-21,-.1)):
+            try:
+                build_native_reference_namelist(source, ledger, edges_path,
+                    np.geomspace(5.,300.,64),10.,None,material_path=material_path,
+                    gas_exchange="hydrogen_accommodation",collision_area=area,accommodation=alpha)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("invalid gas exchange parameters accepted")
+        for option in ("isotropic_elastic", "unrecognized"):
+            try:
+                build_native_reference_namelist(source, ledger, edges_path,
+                    np.geomspace(5., 300., 64), 10., 1e-24, scattering=option)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("invalid v3/scattering selection accepted")
         for key, value in (("internal_energy_erg_g", [1., 1., 2., 3., 4.]),
                            ("energy_zero", "unknown"), ("source_id", "bad'quote"),
                            ("temperature_k", [6., 10., 20., 100., 300.])):

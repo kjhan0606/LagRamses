@@ -12,6 +12,87 @@ int main() {
   constexpr int n=1031,nw=n+3,nd=8,ng=9,g=n*ng,total=nw*nd*ng,batch=64;
   const bool gpu=snrt_cuda_available_c()>0;
   if(snrt_hybrid_configure_c(0,1,batch,4,1,gpu))return 1;
+  {
+    constexpr int ec=1031,et=4;
+    double table[2*et]={std::log(10.),std::log(20.),std::log(50.),std::log(100.),1e-23,2e-23,5e-23,1e-22};
+    std::vector<double> in(5*ec),out(4*ec),reference(4*ec);
+    for(int i=0;i<ec;++i){in[5*i]=(i%2?20:80)*1e-24;in[5*i+1]=1e-24;in[5*i+2]=(i%2?80:20)*1e-24;in[5*i+3]=1;in[5*i+4]=i%7?1e-24:0;}
+    for(double dt: {0.,1e-4,10.,1e8}) {
+      if(snrt_dust_exchange_c(in.data(),table,reference.data(),ec,et,dt,10,1))return 80;
+      for(int mode=0;mode<=2;++mode)for(int busy=0;busy<2;++busy) {
+        std::fill(out.begin(),out.end(),-1);
+        int held=busy&&gpu?cuda_acquire_stream():-1;
+        if(busy&&gpu&&held<0)return 81;
+        int rc=snrt_dust_exchange_c(in.data(),table,out.data(),ec,et,dt,10,mode);
+        if(held>=0)cuda_release_stream(held);
+        if(mode==2&&(busy||!gpu)){if(!rc||std::any_of(out.begin(),out.end(),[](double v){return v!=-1;}))return 82;continue;}
+        if(rc)return 83;
+        for(int i=0;i<ec;++i) {
+          const double eg=in[5*i],ed=in[5*i+2],cg=in[5*i+1],eg1=out[4*i],ed1=out[4*i+1],td1=out[4*i+2],q=out[4*i+3];
+          if(std::abs((eg1+ed1)-(eg+ed))>1e-14*(eg+ed)||eg1<0||ed1<0||!std::isfinite(td1))return 84;
+          if(dt==0||in[5*i+4]==0){if(eg1!=eg||ed1!=ed||q!=0)return 85;}
+          else {
+            // Independently check the BE equation with a scale safe at stiff dt.
+            double r=dt*in[5*i+4]/(cg+dt*in[5*i+4]);
+            if(std::abs(q-r*(eg-cg*td1))>1e-13*(eg+ed))return 86;
+            if(i%2?q>0:q<0)return 87;
+          }
+          for(int k=0;k<4;++k)if(std::abs(out[4*i+k]-reference[4*i+k])>1e-12*std::max(std::abs(reference[4*i+k]),1e-24))return 88;
+        }
+        const auto saved=out;in[5*(ec-1)]=std::numeric_limits<double>::quiet_NaN();
+        rc=snrt_dust_exchange_c(in.data(),table,out.data(),ec,et,dt,10,mode);in[5*(ec-1)]=80e-24;
+        if(!rc||out!=saved)return 89;
+      }
+    }
+    std::printf("GAS_DUST_EXCHANGE conservation/heating/cooling/zero/stiff/CPU/GPU/busy/rollback PASS\n");
+  }
+  // Native array order (direction,group,cell), unequal quadrature weights.
+  // Independent analytic reference + half-step composition + atomic failure.
+  {
+    constexpr int sc=1031,sg=3,sd=4;
+    double weights[sd]={1,2,3,4};
+    std::vector<float> initial(sc*sg*sd),expected(initial.size());
+    std::vector<double> tau(sc*sg),half(tau.size()),zero(tau.size(),0);
+    const double optical_depth[4]={0,1e-8,.3,100};
+    for(int i=0;i<sc;++i)for(int g=0;g<sg;++g) {
+      tau[g*sc+i]=optical_depth[(i+g)%4];half[g*sc+i]=.5*tau[g*sc+i];
+      double sum=0;
+      for(int d=0;d<sd;++d){initial[(i*sg+g)*sd+d]=float((d==i%sd?8.:.1)*(g+1));sum+=initial[(i*sg+g)*sd+d];}
+      const double remain=std::exp(-tau[g*sc+i]);
+      for(int d=0;d<sd;++d)expected[(i*sg+g)*sd+d]=float(initial[(i*sg+g)*sd+d]*remain+sum*weights[d]/10*(1-remain));
+    }
+    auto identity=initial;
+    if(snrt_isotropic_scatter_c(identity.data(),zero.data(),weights,sc,sg,sd,1)||identity!=initial)return 61;
+    auto twice=initial;
+    for(int repeat=0;repeat<2;++repeat)
+      if(snrt_isotropic_scatter_c(twice.data(),half.data(),weights,sc,sg,sd,1))return 62;
+    for(int mode=0;mode<=2;++mode)for(int busy=0;busy<2;++busy) {
+      int held=(busy&&gpu)?cuda_acquire_stream():-1;
+      if(busy&&gpu&&held<0)return 63;
+      auto trial=initial;
+      int rc=snrt_isotropic_scatter_c(trial.data(),tau.data(),weights,sc,sg,sd,mode);
+      if(held>=0)cuda_release_stream(held);
+      if(mode==2&&(busy||!gpu)) {if(!rc||trial!=initial)return 64;continue;}
+      if(rc)return 65;
+      int cpu,gpu_batches;snrt_hybrid_counts_c(4,&cpu,&gpu_batches);
+      if(cpu+gpu_batches!=1+(sc-1)/batch)return 66;
+      if((mode==1||busy||!gpu)&&gpu_batches)return 67;
+      if(mode==2&&cpu)return 68;
+      for(int i=0;i<sc;++i)for(int g=0;g<sg;++g) {
+        double before=0,after=0;
+        for(int d=0;d<sd;++d) {
+          int k=(i*sg+g)*sd+d;before+=initial[k];after+=trial[k];
+          if(!std::isfinite(trial[k])||trial[k]<0||std::abs(trial[k]-expected[k])>2e-6f||
+              std::abs(trial[k]-twice[k])>2e-6f)return 69;
+        }
+        if(std::abs(after-before)>1e-7*before)return 70;
+      }
+      const auto saved=trial;const double old=tau.back();tau.back()=std::numeric_limits<double>::quiet_NaN();
+      rc=snrt_isotropic_scatter_c(trial.data(),tau.data(),weights,sc,sg,sd,mode);tau.back()=old;
+      if(!rc||trial!=saved)return 71;
+      std::printf("SCATTER mode=%d held=%d CPU=%d GPU=%d conservation/analytic/rollback PASS\n",mode,busy,cpu,gpu_batches);
+    }
+  }
   double worst=0;
   for(int dusty=0;dusty<2;++dusty) {
     std::vector<float> input(total),dir(3*nd),tau(g),stau(3*g),dtau(g),budget(3*n);
@@ -66,8 +147,10 @@ int main() {
     table[k]=std::log(temp[k]);table[nt+k]=power[k];table[2*nt+k]=temp[k]*temp[k];
     table[3*nt+k*dg]=.4*power[k];table[3*nt+k*dg+1]=.6*power[k];
   }
-  for(int use_u=0;use_u<2;++use_u) {
+  for(int use_u=0;use_u<3;++use_u) {
+    in.resize((use_u==2?7:4)*dc);ref.resize((dg+2+(use_u==2))*dc);
     for(int i=0;i<dc;++i) {in[i]=.3;in[dc+i]=1;in[2*dc+i]=use_u?400:20;in[3*dc+i]=1;}
+    if(use_u==2)for(int i=0;i<dc;++i){in[4*dc+i]=400;in[5*dc+i]=10;in[6*dc+i]=.3;}
     if(snrt_dust_material_openmp_c(in.data(),table.data(),ref.data(),dc,dg,nt,use_u,.1,1,10,1e-9,4))return 11;
     for(int busy=0;busy<2;++busy) {
       const int held=(busy&&gpu)?cuda_acquire_stream():-1;
@@ -81,6 +164,11 @@ int main() {
       if((busy||!gpu)&&gpu_count)return 15;
       if(!busy&&gpu&&(cpu_count==0||gpu_count==0))return 16;
       for(size_t i=0;i<ref.size();++i)if(std::abs(ref[i]-trial[i])>1e-12*std::max(std::abs(ref[i]),1.))return 17;
+      if(use_u==2)for(int i=0;i<dc;++i) {
+        const double q=trial[(dg+2)*dc+i],ed=trial[(dg+1)*dc+i];
+        double emitted=0;for(int g=0;g<dg;++g)emitted+=trial[i*dg+g]*.1;
+        if(q<=0||std::abs((ed-400)+emitted-.03-q)>1e-9)return 90;
+      }
       std::printf("DUST hybrid material_u=%d held=%d CPU=%d GPU=%d PASS\n",use_u,busy,cpu_count,gpu_count);
       const auto saved=trial;
       in[dc-1]=1e99;

@@ -257,10 +257,21 @@ contains
        write(*,*) 'model: ',trim(yield_table%high_mass_identity(1))
        write(*,*) 'wind interpolation: cumulative linear; terminal event: lifetime step'
        write(*,*) 'remnant adjustments [Msun]: ',yield_table%hm_adjustment
-       if(yield_table%net_yield_diagnostic_unavailable)write(*,*) &
-            'Net yields unavailable: zero diagnostic placeholders; gross ejecta drive feedback'
-       if(allocated(yield_table%agb_terminal_row))write(*,*) &
-            'AGB terminal release: envelope and WD together; nearest source-mass fractions'
+       if(yield_table%net_yield_diagnostic_unavailable)then
+          if(any(yield_table%net_yield_channel_available))then
+             write(*,*) 'Net yield availability [wind,AGB,SNII,SNIa,PISN]: ',yield_table%net_yield_channel_available
+             write(*,*) 'Unavailable-channel net columns are placeholders; gross ejecta drive feedback'
+          else
+             write(*,*) 'Net yields unavailable: zero diagnostic placeholders; gross ejecta drive feedback'
+          endif
+       endif
+       if(allocated(yield_table%agb_terminal_row))then
+          if(any(yield_table%agb_terminal_jump_fraction/=1d0))then
+             write(*,*) 'AGB source wind histories; residual envelope and remnant at terminal age'
+          else
+             write(*,*) 'AGB terminal release: envelope and WD together; nearest source-mass fractions'
+          endif
+       endif
     endif
   end subroutine phase0_prepare_sources
 
@@ -302,7 +313,17 @@ contains
     ! the new Z policy and EVERY consumed SNIa contract value, not just labels.
     if(yield_table%high_mass_linear_z)values=[values,2d0,1d0]
     if(yield_table%net_yield_diagnostic_unavailable)values=[values,5d0,1d0]
+    if(any(yield_table%net_yield_channel_available).and..not.all(yield_table%net_yield_channel_available)) &
+         values=[values,8d0,merge(1d0,0d0,yield_table%net_yield_channel_available)]
     if(allocated(yield_table%agb_terminal_row))values=[values,6d0,1d0]
+    if(allocated(yield_table%agb_terminal_jump_fraction))then
+       if(any(yield_table%agb_terminal_jump_fraction/=1d0)) &
+            values=[values,9d0,yield_table%agb_terminal_jump_fraction]
+    endif
+    if(allocated(yield_table%agb_remnant_kind))then
+       if(any(yield_table%agb_remnant_kind/=0))values=[values,7d0,real(size(yield_table%agb_remnant_kind),stellar_dp), &
+            real(yield_table%agb_remnant_kind,stellar_dp)]
+    endif
     if(enable_agb.or.(enable_wind.and.configured_channel_mass_min(1)<40d0).or. &
          (enable_snii.and.configured_channel_mass_min(3)<40d0))values=[values,4d0,1d0]
     if(enable_snia)then

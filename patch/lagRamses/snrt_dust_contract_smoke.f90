@@ -11,6 +11,7 @@ program snrt_dust_contract_smoke
   real(dust_dp) :: before_field(2,2,1), before_energy(1), before_photons(2,1), before_temperature(1), recovered
   integer :: links(6,1)
   character(len=2048) :: valid_path, invalid_path, reference_path
+  character(len=2048) :: scattering_path, exchange_path
   character(len=16) :: expected_reference
   character(len=32) :: error_name
 
@@ -118,5 +119,27 @@ program snrt_dust_contract_smoke
      write(*,'(a,a)') 'SNRT_DUST_REFERENCE_OPT_IN_PASS expected=', trim(expected_reference)
   end if
 
+  call get_command_argument(5, scattering_path)
+  if(len_trim(scattering_path)>0)then
+     call snrt_dust_contract_load(trim(scattering_path),ierr)
+     if(ierr/=0.or..not.snrt_dust_contract_scattering_enabled.or. &
+          .not.any(snrt_dust_contract_scattering_per_h_cm2>0))error stop 22
+     if(snrt_dust_contract_runtime_allowed.neqv.(trim(expected_reference)=='1'))error stop 23
+     call snrt_dust_contract_load(trim(valid_path),ierr)
+     if(ierr/=0.or.snrt_dust_contract_scattering_enabled.or. &
+          any(snrt_dust_contract_scattering_per_h_cm2/=0))error stop 24
+     write(*,'(a)')'SNRT_SCATTER_CONTRACT_OPT_IN_AND_RESET_PASS'
+  endif
+  call get_command_argument(6,exchange_path)
+  if(len_trim(exchange_path)>0)then
+     call snrt_dust_contract_load(trim(exchange_path),ierr)
+     if(ierr/=0.or..not.snrt_dust_contract_exchange_enabled.or. &
+          snrt_dust_contract_collision_area_per_h<=0.or.snrt_dust_contract_accommodation/=.5d0)error stop 25
+     if(snrt_dust_contract_runtime_allowed.neqv.(trim(expected_reference)=='1'))error stop 26
+     call snrt_dust_contract_load(trim(valid_path),ierr)
+     if(ierr/=0.or.snrt_dust_contract_exchange_enabled.or. &
+          snrt_dust_contract_collision_area_per_h/=0.or.snrt_dust_contract_accommodation/=0)error stop 27
+     write(*,'(a)')'SNRT_GAS_DUST_EXCHANGE_CONTRACT_OPT_IN_AND_RESET_PASS'
+  endif
   write(*,'(a)') 'SNRT_NATIVE_DUST_CONTRACT_ADMISSION_OK candidate=1 environment=1 reset=1 runtime_gate=1'
 end program snrt_dust_contract_smoke

@@ -85,7 +85,7 @@ endif
 #############################################################################
 # CUDA GPU hydro support (build with: make USE_CUDA=1)
 #############################################################################
-ifdef USE_CUDA
+ifeq ($(USE_CUDA),1)
   CUDA_DIR = /opt/ohpc/pub/cuda/13.0.2
   NVCC = $(CUDA_DIR)/bin/nvcc
   CUDA_ARCH = -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_89,code=sm_89 -gencode arch=compute_90,code=sm_90
@@ -115,9 +115,6 @@ endif
 EUNHA_MODOBJ = eunha_cooling_mod.o
 
 ifeq ($(SNRT),1)
-  ifneq ($(USE_CUDA),1)
-    $(error SNRT=1 requires USE_CUDA=1)
-  endif
   FFLAGS += -DSNRT
   ifeq ($(DUST_LIVE),1)
     FFLAGS += -DDUST_LIVE
@@ -135,8 +132,18 @@ ifeq ($(SNRT),1)
                 snrt_cuda_sparse_transport_interface.o \
                 snrt_cuda_limited_rt_step_interface.o \
                 snrt_cuda_multigroup_interface.o snrt_runtime_backend.o snrt_openmp_transport.o \
-                snrt_dust_material.o snrt_dust_material_cuda.o snrt_hybrid.o snrt_ir_cuda.o \
+                snrt_dust_material.o snrt_hybrid.o \
                 snrt_stellar_source.o snrt_ramses_driver.o
+  ifeq ($(USE_CUDA),1)
+    SNRT_DEVICE_OBJS = snrt_cuda_kernels.o snrt_dust_material_cuda.o snrt_ir_cuda.o
+    SNRT_MODOBJ += snrt_dust_material_cuda.o snrt_ir_cuda.o
+  else
+    # Link the actual OpenMP physics, with unavailable-device entry points
+    # that reject forced CUDA rather than silently running a different mode.
+    SNRT_DEVICE_OBJS = snrt_cpu_device_stubs.o
+    SNRT_MODOBJ += snrt_cuda_interface.o snrt_cpu_device_stubs.o
+    LIBS_SNRT = -lstdc++
+  endif
   ifeq ($(SNRT_LEDGER_DIAGNOSTIC),1)
     FFLAGS += -DSNRT_LEDGER_DIAGNOSTIC
     SNRT_MODOBJ += snrt_agn_ledger.o
@@ -176,7 +183,7 @@ LIBMPI =
 LIBCUDA = -L/opt/cuda/lib  -lm -lcuda -lcudart
 
 LIBGRACKLE = -lgrackle -lhdf5 -lz
-LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_FFTW)
+LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_SNRT) $(LIBS_FFTW)
 #############################################################################
 # Sources directories are searched in this exact order
 VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):../aton:../hydro:../pm:../poisson:../amr
@@ -274,7 +281,7 @@ write_patch.o: FORCE
 # ifx ICE workaround: phi_fine_cg.kisti crashes with -qopenmp
 phi_fine_cg.kisti.o: phi_fine_cg.kisti.f90
 	mpiifx $(FFLAGS) -c $^ -o $@
-ifdef USE_CUDA
+ifeq ($(USE_CUDA),1)
 %.o:%.cu
 	$(NVCC) $(NVCCFLAGS) -c $< -o $@
 hydro_cuda_kernels.o: cuda_stream_pool.o
@@ -297,6 +304,8 @@ amr_index.o: amr_commons.kjhan.o
 # implicit %.o rule otherwise tries to compile a module before its .mod file
 # exists when a clean production build is requested.
 snrt_spectral_contract.o: amr_parameters.jaehyun.o
+amr_commons.kjhan.o: amr_parameters.jaehyun.o
+random.o: amr_commons.kjhan.o
 snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o
 snrt_hdf5.o: snrt_state.o ramses_hdf5_io.o snrt_agn_efficiency.o snrt_dust_contract.o snrt_dust_live.o
 snrt_hdf5.o: snrt_stellar_source.o
@@ -319,6 +328,8 @@ snrt_transport_step.o: snrt_state.o snrt_angular_quadrature.o \
                         snrt_cuda_multigroup_interface.o
 snrt_transport_step.o snrt_ramses_driver.o: snrt_runtime_backend.o
 snrt_runtime_backend.o: snrt_cuda_multigroup_interface.o mpi_mod.o
+snrt_cpu_device_stubs.o: ../patch/lagRamses/snrt_cpu_device_stubs.cpp ../patch/lagRamses/snrt_hybrid.h
+	icpx -O2 -c $< -o $@
 snrt_openmp_transport.o: ../patch/lagRamses/snrt_openmp_transport.cpp ../patch/lagRamses/snrt_species_dust_cell.h
 	icpx -O3 -qopenmp -fp-model=precise -c $< -o $@
 snrt_dust_material.o: ../patch/lagRamses/snrt_dust_material.cpp ../patch/lagRamses/snrt_dust_material_cell.h
@@ -328,27 +339,31 @@ snrt_hybrid.o: ../patch/lagRamses/snrt_hybrid.cpp ../patch/lagRamses/snrt_hybrid
 	icpx -O3 -qopenmp -fp-model=precise -fno-slp-vectorize -c $< -o $@
 snrt_dust_material_cuda.o: ../patch/lagRamses/snrt_dust_material_cuda.cu ../patch/lagRamses/snrt_dust_material_cell.h
 	$(NVCC) $(NVCCFLAGS) --fmad=false -c $< -o $@
-snrt_ir_cuda.o: ../patch/lagRamses/snrt_ir_cuda.cu ../patch/lagRamses/snrt_ir_cell.h
+snrt_ir_cuda.o: ../patch/lagRamses/snrt_ir_cuda.cu ../patch/lagRamses/snrt_ir_cell.h ../patch/lagRamses/snrt_dust_material_cell.h
 	$(NVCC) $(NVCCFLAGS) --fmad=false -c $< -o $@
 snrt_cuda_kernels.o: ../patch/lagRamses/snrt_species_dust_cell.h
+ifeq ($(USE_CUDA),1)
 SNRT_POOL_OBJS = cuda_stream_pool.o poisson_cuda_kernels.o scalar_cuda_kernels.o particle_cuda_kernels.o
-snrt_backend_smoke: snrt_openmp_transport.o snrt_cuda_kernels.o $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_backend_smoke.cpp
-	icpx -O2 -qopenmp ../patch/lagRamses/snrt_backend_smoke.cpp snrt_openmp_transport.o snrt_cuda_kernels.o \
+else
+SNRT_POOL_OBJS =
+endif
+snrt_backend_smoke: snrt_openmp_transport.o $(SNRT_DEVICE_OBJS) $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_backend_smoke.cpp
+	icpx -O2 -qopenmp ../patch/lagRamses/snrt_backend_smoke.cpp snrt_openmp_transport.o $(SNRT_DEVICE_OBJS) \
 	  $(SNRT_POOL_OBJS) $(LIBS_CUDA) -o $@
 snrt_stellar_source_smoke: snrt_stellar_source.o snrt_agn_locator.o ../patch/lagRamses/snrt_stellar_source_smoke.f90
 	$(F90) -fpp -I. -I../patch/lagRamses ../patch/lagRamses/snrt_stellar_source_smoke.f90 \
 	  amr_parameters.jaehyun.o amr_commons.kjhan.o snrt_agn_locator.o \
 	  stellar_enrichment_config.o snrt_spectral_contract.o snrt_stellar_source.o -o $@
 snrt_rt_transaction.o: amr_parameters.jaehyun.o mpi_mod.o
-snrt_hybrid_smoke: snrt_hybrid.o snrt_ir_cuda.o snrt_openmp_transport.o snrt_cuda_kernels.o snrt_dust_material.o snrt_dust_material_cuda.o $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_hybrid_smoke.cpp
+snrt_hybrid_smoke: snrt_hybrid.o snrt_openmp_transport.o snrt_dust_material.o $(SNRT_DEVICE_OBJS) $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_hybrid_smoke.cpp
 	icpx -O2 -qopenmp ../patch/lagRamses/snrt_hybrid_smoke.cpp snrt_hybrid.o snrt_openmp_transport.o \
-	  snrt_cuda_kernels.o snrt_dust_material.o snrt_dust_material_cuda.o snrt_ir_cuda.o $(SNRT_POOL_OBJS) $(LIBS_CUDA) -o $@
+	  snrt_dust_material.o $(SNRT_DEVICE_OBJS) $(SNRT_POOL_OBJS) $(LIBS_CUDA) -o $@
 snrt_dust_ir.o: ../patch/lagRamses/snrt_dust_ir.f90
-snrt_dust_backend_smoke: snrt_dust_ir.o snrt_runtime_backend.o snrt_dust_material.o snrt_dust_material_cuda.o snrt_ir_cuda.o \
-                         snrt_openmp_transport.o snrt_cuda_kernels.o snrt_hybrid.o $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_dust_backend_smoke.f90
+snrt_dust_backend_smoke: snrt_dust_ir.o snrt_runtime_backend.o snrt_dust_material.o $(SNRT_DEVICE_OBJS) \
+                         snrt_openmp_transport.o snrt_hybrid.o $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_dust_backend_smoke.f90
 	$(F90) -fpp -I. ../patch/lagRamses/snrt_dust_backend_smoke.f90 snrt_dust_ir.o snrt_runtime_backend.o \
-	  snrt_cuda_multigroup_interface.o snrt_openmp_transport.o snrt_cuda_kernels.o \
-	  snrt_dust_material.o snrt_dust_material_cuda.o snrt_hybrid.o snrt_ir_cuda.o $(SNRT_POOL_OBJS) $(LIBS_CUDA) -o $@
+	  snrt_cuda_multigroup_interface.o snrt_openmp_transport.o $(SNRT_DEVICE_OBJS) \
+	  snrt_dust_material.o snrt_hybrid.o $(SNRT_POOL_OBJS) $(LIBS_CUDA) $(LIBS_SNRT) -o $@
 snrt_dust_coupling.o: snrt_thermochemistry.o ../patch/lagRamses/snrt_dust_coupling.f90
 snrt_dust_transaction.o: amr_parameters.jaehyun.o
 snrt_dust_receiver.o: ../patch/lagRamses/snrt_dust_receiver.f90

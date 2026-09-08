@@ -12,9 +12,20 @@ Work/build in `/gpfs/kjhan/LRD_JWST`; repository identity is
 `kjhan0606/LagRamses`. Keep isolated build directories at the same depth as
 `bin` so the Makefile VPATH resolves the intended lagRamses patch first.
 
-The live-dust build is `SNRT=1 DUST_LIVE=1 HDF5=1 USE_CUDA=1 USE_FFTW=0`
-with NVAR=30. A GPU is optional at execution time, but this build still links
-CUDA runtime libraries. This does not yet provide a toolkit-free CPU build.
+The live-dust build is `SNRT=1 DUST_LIVE=1 HDF5=1 USE_FFTW=0`, with NVAR=30.
+Select `USE_CUDA=1` for CUDA/hybrid support, or `USE_CUDA=0` (also the omitted
+option) for a toolkit-free CPU/OpenMP build. Always use separate build
+directories: make does not detect changes in preprocessing flags in existing
+objects. Use `-j1` for an initial clean build; do not rely on the legacy core
+module ordering being a complete parallel-build dependency graph.
+
+The CPU build uses the same host RT/dust kernels, feedback physics and HDF5
+identities. `auto` sends all batches to CPU workers; `openmp` remains the
+explicit host path. Forced `cuda` fails at startup. Unavailable CUDA diagnostic
+entry points return an error without modifying output arrays; they do not
+emulate GPU results. No CUDA headers, nvcc, driver or runtime libraries are
+needed by this build. MPI, Intel Fortran/C++/OpenMP and HDF5 dependencies
+remain. This is execution portability, not added or newly approved physics.
 
 ## Execution placement
 
@@ -823,3 +834,254 @@ The latter checks the actual parser/integrator, legacy matching, spectral
 partition/no-tail leakage, age splitting/bounds and nine invalid inputs.
 Measured live/restart evidence is recorded in
 `provenance/real_source_integration_progress_2026-09-07.md` (repository root).
+# Explicit ordinary CCSN source extension (2026-09-07)
+
+The existing offline builder now accepts `--massive-source lc18_set_r` and
+requires `--snii-energy-erg` for that choice. It supplies LC18 13--120-Msun
+source nodes: table9 winds plus table8-minus-table9 terminal ejecta at
+13/15/20/25; Set R wind-only nodes at 30 and above. Default `wind_only` output
+is unchanged. Python prepares input files; RAMSES consumes them in Fortran.
+
+```sh
+python3 simulation/snrt/tools/build_kl16_lc18_native.py \
+  --output-dir NEW_INPUT_DIRECTORY --rotation 0 \
+  --massive-wind-speed-km-s 1000 --agb-wind-speed-km-s 15 \
+  --agb-release terminal_envelope --agb-energy isotropic_thermalized \
+  --population snia_baseline --imf-id 1 --low-z-agb fishlock2014_raiteri96 \
+  --massive-source lc18_set_r --snii-energy-erg 1e51
+```
+
+These speeds/energy are explicit comparison parameters, not LC18 measurements.
+Use the generated history v2, `PHASE0_YIELD_TABLE`, and channel lower masses
+`13,1,13,3,140` (upper `120,6,120,8,260`). Existing high-mass presets apply
+only at >=40. The nearest-source-cell model uses mass-fraction scaling,
+including energy; it is not discrete SN sampling. No 8--13-Msun yield/fate is
+invented. No extrapolation outside the common active Z hull .001--.01345.
+
+`mkrun.py` terminal/GUI Run mode `comparison_ccsn` packages the locally tested
+input and new executable from `.ccsn-source.lobKc9/`, without launching it.
+It leaves the original comparison modes and radiation/AGN/dust defaults alone.
+The selected BPASS SED is still an independent radiation population, not a
+new same-population proof. A four-step smoke run does not guarantee SN ages.
+Full scope/evidence: `provenance/population_sed_z_snia_bundle_plan_2026-09-07.md`.
+
+## Physical-input extensions (2026-09-08; explicit comparisons)
+
+Sections #1 physical-source/native coupling, #2 additional RT/AGN/dust physics,
+and #3 backend/operations expansion are preapproved in full (operator update,
+2026-09-08). Earlier approval holds below/in historical records are superseded;
+this authorization is not a declaration that missing physical inputs exist.
+The following are optional source selections, not changes to the defaults or
+claims that the whole physical-input programme is complete.
+
+The combined builder additionally accepts:
+
+- `--massive-wind-timing phase_mass_loss_or_uniform`: actual LC18 Table5
+  cumulative mass-loss timing, normalized to the unchanged integrated wind
+  budget. Six of 36 rotation-zero nodes have zero printed phase loss but
+  nonzero isotope winds; these explicitly keep uniform timing. Phase-specific
+  composition and speed are **not** supplied by this option.
+- `--agb-source-scope kl16_envelopes_to7`: KL16 1--7 Msun, including the
+  Z=.007, 7-Msun hybrid CO(Ne) envelope. Its remnant remains in the total
+  ledger but is excluded from the strict CO-WD SNIa supply. With
+  `--low-z-agb fishlock2014_raiteri96`, the Fishlock 7-Msun ONe envelope is
+  also included; its remnant is likewise excluded from strict CO-WD supply.
+- `--agb-net normalized_initial_MZY`: signed AGB net = normalized gross
+  ejecta minus normalized source initial elemental fraction times returned
+  mass. Initial composition is matched by initial M/Z/Y; duplicate records
+  must have identical abundances. Both normalizations are explicit source
+  model choices. Other yield-table channels remain net-unavailable; their
+  placeholder zeros do not mean zero nucleosynthesis. Gas deposition remains
+  gross. For Fishlock, use its own same-model `X0(i)` column instead of a
+  KL16 initial-composition match. Fishlock gross ejecta are not rescaled.
+
+Example: append these three options to the previous command and use
+`--low-z-agb none`. Set channel upper masses to `120,7,120,8,260`.
+The common active Z hull is then .007--.01345, not a new extrapolation.
+Effective SSP SNIa remains separate from a microscopic progenitor model.
+The unmodified 40-Myr DTD still fails a strict source-CO-WD causality check:
+the earliest selected CO-WD appears at 48.44 Myr.
+
+Histories use sparse per-star age knots; no cross-product of every other
+star's phase ages is required. Prepared native wind/SN and terminal AGB
+maps validate their own complete source histories. Source coordinate
+comparison is exact, to preserve real hour-separated late burning phases;
+physical budget tolerances are unchanged.
+
+`mkrun.py` terminal/GUI `comparison_ccsn` now offers `baseline`, `phase`,
+`agb7`, `agb7_net`, `agb7_lowz_net`, and `agb7_pulses`. It copies the selected local inputs and selects the
+corresponding tested binary; no simulation is launched by generation. The
+new inputs/binaries are under `.physical-extension.7rcxv4/`. A fresh clone
+does not include these local scientific assets or executables.
+
+The `agb7_lowz_net` selection combines 77 AGB nodes (61 KL16 + 16 Fishlock),
+LC18 phase winds/ordinary CCSN and the existing effective SSP SNIa. It extends
+the common active Z hull to .001--.01345 for AGB1--7 and signed AGB net.
+Generate it with the combined-builder options above but select
+`--low-z-agb fishlock2014_raiteri96`. The Fishlock7 endpoint returns
+5.855482487283754 Msun, leaving 1.144517512716246 Msun, consistent with the
+1.145-Msun core printed in [Fishlock Table1](https://arxiv.org/pdf/1410.7457).
+Its Raiteri96 age is 53.248752 Myr, an explicit cross-model approximation.
+Do not interpret this as an extension to 8 Msun or as an ECSN prescription.
+Source initial fractions sum to .9999998846994237 before normalization.
+The earlier statement that Fishlock initial composition was unavailable was
+incorrect: the already staged yield file includes the required `X0(i)` column.
+Native GNU/Intel endpoint, mixed-Z CO-inventory, signed-net and full effective
+SSP closure tests pass; existing source inputs/defaults remain byte-identical.
+
+### Fishlock thermal-pulse wind timing
+
+Select `--agb-release fishlock_tp_mass_loss` instead of `terminal_envelope`,
+together with `--low-z-agb fishlock2014_raiteri96`. This uses the pinned
+[Fishlock CDS TP structure table](https://cdsarc.cds.unistra.fr/ftp/J/ApJ/797/44/table2.dat)
+(`external/g2_candidates/fishlock2014_pulses/table2.dat`, local scientific asset).
+The 772 printed rows contain two identical duplicates; the reader collapses
+only those duplicates and retains 770 pulses across 16 stellar models.
+
+The cumulative AGB wind follows initial mass minus tabulated TP total mass,
+at the relative times supplied by the preceding-interpulse periods. The last
+TP **left limit** is aligned to the selected Raiteri96 terminal age. Pre-TP
+loss is explicitly uniform; unresolved final-envelope loss is a terminal
+jump. This is not a measurement of Monash total lifetimes or new post-table
+pulses. Composition remains the integrated mean and speed the selected
+constant; KL16 nodes retain their terminal-envelope prescription.
+
+Native `wind_history_terminal_remnant` separates cumulative wind from WD
+formation. The history's `agb_wind_jump_*` arrays specify each source-node
+terminal jump, and are bound to restart identity. No remnant is created by
+the earlier wind. Gross/net/energy totals and non-CO exclusions are unchanged.
+At 7 Msun/Z=.001 the last TP left limit returns 4.8883 Msun with no remnant;
+the terminal event brings the total to 5.855482487283754 Msun and creates the
+1.144517512716246-Msun ONe remnant (not strict SNIa CO-WD supply).
+
+`mkrun.py` selection `agb7_pulses` packages the local `agb7-pulses` inputs and
+`ramses_physical_pulses3d` binary. Its standard four-step comparison is still
+Z=.01; the focused `live-pulses`/`restart-pulses` checks instead use Z=.004
+to include the Fishlock/KL16 mixture, with matching initial H/metal fractions
+and unchanged dust-to-metal ratio/temperature. This short live check does
+not reach terminal AGB ages; the existing native source fixture tests those.
+
+An independent solar-only 9--13-Msun comparison is also available:
+
+```sh
+python3 simulation/snrt/tools/build_sukhbold_native_lowmass.py \
+  --output-dir NEW_INPUT_DIRECTORY --solar-coordinate .02 \
+  --wind-speed-km-s 100 --lifetime-model raiteri96_padova \
+  --remnant-policy stable_segment_residual --max-remnant-difference-msun .1
+```
+
+It uses the local Sukhbold Z9.6/W18 stable wind and terminal segments and
+PHOTB final kinetic energies. The .02 solar label, Raiteri96 lifetimes,
+uniform fixed-speed winds and residual remnant are explicit approximations;
+they are not recovered KEPLER lifetimes or a non-solar yield grid. Selected
+radioactive sidecars are not added to stable yields (overlap/incomplete
+inventory). Source residual remnants differ from PHOTB values by at most
+.094343 Msun here. History v3 declares [9,13]; old v1/v2 contracts remain
+unchanged. Native consumer/SSP tests cover this input; it is not yet packaged
+as a full RAMSES comparison by mkrun. Use single population, Chabrier id=2,
+binary fraction=0, wind/SN mass range [9,13], and disable absent channels.
+Do not merge it into LC18's non-solar branches or extrapolate it to 8 Msun.
+
+Source descriptions and redistribution restrictions:
+[Sukhbold archive](https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/SEWBJ_2015/index.html).
+Actual builds, endpoint/SSP and live/restart evidence, along with remaining
+physical-input dependencies, are recorded in the project plan cited above.
+
+### Optional native primary dust scattering (2026-09-08)
+
+`mkrun.py` comparison modes offer `Primary dust scattering=isotropic_elastic`.
+The default `none` leaves the absorption-only model and old sidecar identity
+unchanged. The opt-in uses
+`config/dust_dl01_bulk_030_scattering_reference_v4.nml`, regenerated from the
+same Draine raw optics and DL01 material with the existing thermal exporter
+and `--native-scattering isotropic_elastic`. Native v4/reference status and
+`SNRT_ALLOW_REFERENCE_CONTROL=1` remain required. This does not grant
+production/publication approval to the approximation.
+
+For each owned cell and primary photon group, direction-integrated bins obey
+`q'_d = exp(-tau_sca)*q_d + (1-exp(-tau_sca))*sum(q)*w_d/sum(w)`, with
+`tau_sca = nH * relative_dust * sigma_sca * reduced_c*c*dt`.
+The coefficient is `C_ext*albedo`, sampled at the same representative photon
+energy as the absorption/energy ledger. The native CPU and CUDA kernels share
+this cell operator. `SNRT_BACKEND=auto` assigns independent cell batches to
+available shared CUDA streams or OpenMP workers; `openmp`/`cuda` force a leg.
+This is primary RT, not the separate material/IR backend selection.
+
+The update is first-order split after transport and absorption. Every
+nonlinear trial starts from the same incoming state; the scattering result
+is committed once with the existing RT transaction. All batches must succeed
+before publishing. Each group conserves photons and energy to FP32 rounding;
+scattering contributes no absorption or thermal source. Subsequent transport
+uses the redistributed angular state. Actual coefficients and the model
+marker are bound into the existing HDF5 dust identity. Changing the model
+or coefficients on restart is rejected, including switching on/off.
+
+Limits: isotropy is a chosen comparison approximation, **not** the measured
+Draine phase function (the source also supplies anisotropy moments). No
+HG/anisotropic scattering, grain/gas recoil or radiation pressure, frequency
+redistribution, IR scattering, stochastic heating or sublimation is added.
+The split spatial scheme is not asymptotic-preserving in the unresolved
+optically-thick diffusion limit; accurate transport needs spatial/time/angular
+resolution studies. See [Draine source definitions](https://www.astro.princeton.edu/~draine/dust/dustmix.html).
+
+Local tested builds: `.snrt-cpu.OKoz9T/ramses_scatter_cpu3d` and
+`.physical-extension.7rcxv4/ramses_scatter3d`. Existing native hybrid and
+Fortran tests cover analytic isotropization, photon conservation, half-step
+composition, zero opacity, busy streams, forced CPU/CUDA, late-error rollback
+and ABI/layout. The bounded live/restart evidence is in
+`.dust-scatter.CWEvh3/`; no external audit or full-domain MPI/GPU qualification
+is implied by the two-rank local-operator test.
+
+### Native gas/dust/IR thermal coupling (2026-09-08)
+
+Comparison mode now offers `Dust gas thermal exchange=hydrogen_accommodation`.
+Default `none` preserves old inputs. The selected v4 sidecars are
+`dust_dl01_bulk_030_exchange_reference_v4.nml` (absorption-only primary) or
+`dust_dl01_bulk_030_scattering_exchange_reference_v4.nml` (with isotropic
+primary scattering). They declare geometric collision area per reference H
+`3.495e-22 cm2` and thermal accommodation `0.5`. The former is the explicit
+effective-sphere comparison `3*(1.398e-26 g/H)/(4*3 g/cm3*0.1 micron)`,
+**not** a grain-size distribution inferred from Draine optical opacity.
+Other choices require explicit `--collision-area-per-h` / `--accommodation`
+with the existing exporter `--native-gas-exchange hydrogen_accommodation`.
+
+The hydrogen-equivalent geometric law follows equations20--21 of
+[McKinnon et al. (2021)](https://academic.oup.com/mnras/article/502/1/1344/6067372):
+`K = (nH*relative_dust)*area_per_H * nH * sqrt(8*kB*Tgas/(pi*mp)) * 2*kB*alpha`.
+Gas loses `K*(Tgas-Tdust)` to grains per physical volume/time. This is an
+explicit approximation, not an electron/ion Coulomb or molecular collision
+network; gas composition/Cv comes from the existing accepted H/He state.
+Accommodation and effective collision area are model inputs, not newly
+measured properties or production approval of the adopted dust mixture.
+
+The implementation here retains finite tabulated grain U(T); it does not
+assume instantaneous dust equilibrium. Each existing IR substep solves gas,
+material and radiative emission **jointly**, with gas Cv and thermal speed
+frozen during that substep. For gas energy Eg and conductance K, eliminating
+the gas equation gives `Q = r*(Eg-Cg*Td)`, `r=K*dt/(Cg+K*dt)`.
+The same monotone material solver then solves
+`Ed(Td)-Ed_old + dt*P_net(Td) = dt*H_abs + Q`.
+IR reabsorption remains in the existing fixed-point solve; Q is subtracted
+from the gas and included in the existing total-energy residual. Gas,
+material, IR photons and their temperatures publish only on success. The
+ordinary no-exchange ABI layout is unchanged; material mode2 adds gas data
+and transfer to the existing CPU/CUDA/hybrid material kernel.
+
+Do not apply a gas/dust kick after a whole IR step: the first trial of that
+split failed in the real control because a stiff grain reservoir could not
+cool radiatively during the kick. Its log and old binary are preserved, but
+mkrun selects only the replacement joint solver. No temperature clamp, source
+range widening, or reduction of the collision coefficient was used to pass.
+The existing bath/material temperature domain remains enforced (10--300 K
+for this sidecar); cold-gas solutions below the bath, sublimation, charging,
+grain drift/size evolution and radiation-pressure force injection are not
+supplied by this model. Coupling to primary chemistry remains operator split,
+so this is not proof of time-resolution convergence in arbitrary environments.
+
+The code runs natively; `SNRT_DUST_BACKEND=auto` uses the existing nonblocking
+stream/OpenMP material and IR dispatch. Collision model, coefficients and
+joint-solver marker are bound into HDF5 restart identity. Never switch them
+on/off or edit their values during restart. No new main RAMSES namelist key.
+Local tested executables are `.snrt-cpu.OKoz9T/ramses_exchange_coupled_cpu3d`
+and `.physical-extension.7rcxv4/ramses_exchange_coupled3d`. Evidence is in
+`.dust-exchange.WKZl1j/` and the existing population/source bundle record.

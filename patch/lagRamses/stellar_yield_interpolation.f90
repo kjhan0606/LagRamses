@@ -88,11 +88,12 @@ contains
             returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr)
        return
     endif
-    if(table%high_mass_ready.and.query_mass>=40.and. &
-         (channel_id==channel_wind.or.channel_id==channel_snii))then
-       call high_mass_history_value(table,channel_id,query_mass,query_z,query_age_gyr, &
-            returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr)
-       return
+    if(table%high_mass_ready.and.(channel_id==channel_wind.or.channel_id==channel_snii))then
+       if(query_mass>=minval(table%hm_mass))then
+          call high_mass_history_value(table,channel_id,query_mass,query_z,query_age_gyr, &
+               returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr)
+          return
+       endif
     endif
 
     call find_bounds(table, channel_id, 1, query_mass, mass_lo, mass_hi, found)
@@ -186,8 +187,8 @@ contains
     real(stellar_dp),intent(in)::mass,z,age
     real(stellar_dp),intent(out)::returned,remnant,energy,p(3),elements(n_stellar_elements),net(n_stellar_elements)
     integer,intent(out)::ierr
-    real(stellar_dp)::zl,zh,zs(2),weights(2),best,distance,factor,ml,mh
-    integer::i,j,r,node,nz
+    real(stellar_dp)::zl,zh,zs(2),weights(2),best,distance,factor,ml,mh,alpha,jump
+    integer::i,j,r,node,nz,source_index,lo,hi
     returned=0;remnant=0;energy=0;p=0;elements=0;net=0
     ierr=interpolation_err_grid;zl=-huge(1d0);zh=huge(1d0)
     do i=1,size(table%agb_terminal_row)
@@ -206,28 +207,74 @@ contains
        nz=2;weights(2)=(z-zl)/(zh-zl);weights(1)=1-weights(2)
     endif
     do j=1,nz
-       best=huge(1d0);node=0;ml=huge(1d0);mh=0
+       best=huge(1d0);node=0;source_index=0;ml=huge(1d0);mh=0
        do i=1,size(table%agb_terminal_row)
           r=table%agb_terminal_row(i)
           if(table%birth_metallicity(r)/=zs(j))cycle
           ml=min(ml,table%initial_mass(r));mh=max(mh,table%initial_mass(r))
           distance=abs(mass-table%initial_mass(r))
           if(distance<best)then
-             best=distance;node=r
+             best=distance;node=r;source_index=i
           else if(distance==best.and.node>0)then
-             if(table%initial_mass(r)<table%initial_mass(node))node=r
+             if(table%initial_mass(r)<table%initial_mass(node))then
+                node=r;source_index=i
+             endif
           endif
        enddo
        if(node==0.or.mass<ml.or.mass>mh)then
           returned=0;remnant=0;energy=0;p=0;elements=0;net=0
           return
        endif
-       if(age<table%age_gyr(node))cycle
+       if(age<table%age_gyr(node))then
+          if(.not.allocated(table%agb_terminal_jump_fraction))cycle
+          jump=table%agb_terminal_jump_fraction(source_index)
+          if(jump==1d0)cycle
+          lo=0;hi=0
+          do i=1,table%n_rows
+             if(table%channel(i)/=channel_agb.or.table%initial_mass(i)/=table%initial_mass(node).or. &
+                  table%birth_metallicity(i)/=zs(j))cycle
+             if(table%age_gyr(i)<=age)then
+                if(lo==0)then
+                   lo=i
+                else if(table%age_gyr(i)>table%age_gyr(lo))then
+                   lo=i
+                endif
+             endif
+             if(table%age_gyr(i)>=age)then
+                if(hi==0)then
+                   hi=i
+                else if(table%age_gyr(i)<table%age_gyr(hi))then
+                   hi=i
+                endif
+             endif
+          enddo
+          if(lo==0.or.hi==0)return
+          alpha=0
+          if(lo/=hi)alpha=(age-table%age_gyr(lo))/(table%age_gyr(hi)-table%age_gyr(lo))
+          ! Endpoint row is the RIGHT limit. Interpolate to its wind-only
+          ! LEFT limit below the terminal age; never create a WD early.
+          if(hi/=node)jump=0
+          factor=weights(j)*mass/table%initial_mass(node)
+          returned=returned+factor*((1-alpha)*table%returned_mass(lo)+alpha*table%returned_mass(hi)- &
+               alpha*jump*table%returned_mass(node))
+          energy=energy+factor*((1-alpha)*table%energy(lo)+alpha*table%energy(hi)-alpha*jump*table%energy(node))
+          p=p+factor*((1-alpha)*table%momentum(lo,:)+alpha*table%momentum(hi,:)-alpha*jump*table%momentum(node,:))
+          elements=elements+factor*((1-alpha)*table%ejected_mass(lo,:)+alpha*table%ejected_mass(hi,:)- &
+               alpha*jump*table%ejected_mass(node,:))
+          net=net+factor*((1-alpha)*table%net_yield(lo,:)+alpha*table%net_yield(hi,:)- &
+               alpha*jump*table%net_yield(node,:))
+          cycle
+       endif
        ! Same-age mixture, nearest source-mass cells, fractional budgets.
        ! No early envelope return, early WD creation, or interpolated lifetime.
        factor=weights(j)*mass/table%initial_mass(node)
        returned=returned+factor*table%returned_mass(node)
-       remnant=remnant+factor*table%remnant_mass(node)
+       if(table%co_wd_inventory_only)then
+          if(.not.allocated(table%agb_remnant_kind))return
+          if(table%agb_remnant_kind(source_index)==0)remnant=remnant+factor*table%remnant_mass(node)
+       else
+          remnant=remnant+factor*table%remnant_mass(node)
+       endif
        energy=energy+factor*table%energy(node)
        p=p+factor*table%momentum(node,:)
        elements=elements+factor*table%ejected_mass(node,:)
@@ -286,12 +333,15 @@ contains
     real(stellar_dp)::distance,best,tq,fraction,factor
     returned=0;remnant=0;energy=0;p=0;elements=0;net=0
     ierr=interpolation_err_grid
-    if(mass<40.or.mass>120)return
+    if(mass<minval(table%hm_mass).or.mass>maxval(table%hm_mass))return
     ! No interpolation of discrete fates across Z, rotation or source engines.
     ! Mass cells use nearest-node midpoints, with ties assigned to the lower
     ! node. Budgets scale by M_query/M_node, keeping mass fractions conserved.
     best=huge(1d0);node=0
     do i=1,size(table%hm_mass)
+       ! The user-selected >=40 prescription cannot cross into ordinary
+       ! CCSN cells (or vice versa) when the source map includes both.
+       if((mass<40d0).neqv.(table%hm_mass(i)<40d0))cycle
        ! Birth-metallicity division/advection can differ by a few ULPs.
        ! This is relative to Z itself (not max(1,Z)), so primordial and
        ! ultra-low-Z branches cannot acquire a spurious absolute tolerance.
@@ -307,7 +357,7 @@ contains
        ierr=interpolation_ok
        if(age<table%hm_age(node))return
        remnant=factor*table%hm_remnant(node)
-       if(table%high_mass_wind_only)return
+       if(table%high_mass_wind_only.and.table%hm_mass(node)>=40d0)return
        row=table%hm_terminal_row(node)
        returned=factor*table%returned_mass(row); energy=factor*table%energy(row)
        p=factor*table%momentum(row,:);elements=factor*table%ejected_mass(row,:);net=factor*table%net_yield(row,:)

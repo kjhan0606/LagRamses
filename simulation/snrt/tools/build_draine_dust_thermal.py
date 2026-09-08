@@ -227,11 +227,22 @@ def main() -> int:
     parser.add_argument("--native-source-ledger", type=Path,
                         help="AGN photon ledger supplying the actual group representative energies")
     parser.add_argument("--native-background-k", type=float, default=10.0)
+    parser.add_argument("--native-scattering", choices=("none", "isotropic_elastic"), default="none",
+                        help="optional primary elastic isotropization comparison; no recoil or IR scattering")
+    parser.add_argument("--native-gas-exchange", choices=("none", "hydrogen_accommodation"), default="none")
+    parser.add_argument("--collision-area-per-h", type=float,
+                        help="explicit geometric grain cross section per reference H, cm2; not optical opacity")
+    parser.add_argument("--accommodation", type=float, help="explicit thermal accommodation fraction (0,1]")
     parser.add_argument("--reference-heat-capacity-per-h", type=float,
                         help="explicit constant test capacity, erg/H/K; NOT inferred from opacity")
     parser.add_argument("--material-energy-table", type=Path,
                         help="v4 material JSON: temperature_k, internal_energy_erg_g, source_id, source_url, composition")
     args = parser.parse_args()
+    if args.native_scattering != "none" and args.native_output is None:
+        parser.error("native scattering selection requires --native-output")
+    if (args.native_gas_exchange != "none" or args.collision_area_per_h is not None or
+            args.accommodation is not None) and args.native_output is None:
+        parser.error("gas-exchange selection requires --native-output")
     if args.temperature_min_k <= 0.0 or args.temperature_max_k <= args.temperature_min_k:
         raise ValueError("invalid thermal temperature bounds")
     if args.temperature_count < 2:
@@ -258,7 +269,9 @@ def main() -> int:
         native = build_native_reference_namelist(
             args.source, args.native_source_ledger, args.group_edges,
             np.asarray(metadata["temperature_k"]), args.native_background_k,
-            args.reference_heat_capacity_per_h, material_path=args.material_energy_table)
+            args.reference_heat_capacity_per_h, material_path=args.material_energy_table,
+            scattering=args.native_scattering, gas_exchange=args.native_gas_exchange,
+            collision_area=args.collision_area_per_h, accommodation=args.accommodation)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     if native is not None:
@@ -278,7 +291,9 @@ def main() -> int:
 def build_native_reference_namelist(source: Path, ledger_path: Path, edges_path: Path,
                                    temperatures: np.ndarray, background: float,
                                    reference_capacity: float | None,
-                                   *, material_path: Path | None = None) -> str:
+                                   *, material_path: Path | None = None, scattering: str = "none",
+                                   gas_exchange: str = "none", collision_area: float | None = None,
+                                   accommodation: float | None = None) -> str:
     """Export actual Draine optics with constant (v3) or tabulated U(T) (v4).
 
     Primary groups are monochromatic at the source ledger's representative
@@ -293,6 +308,21 @@ def build_native_reference_namelist(source: Path, ledger_path: Path, edges_path:
 
     if (reference_capacity is None) == (material_path is None):
         raise ValueError("choose exactly one material representation")
+    if scattering not in ("none", "isotropic_elastic"):
+        raise ValueError("unknown primary scattering model")
+    if scattering != "none" and material_path is None:
+        raise ValueError("primary scattering comparison requires native v4")
+    if gas_exchange == "none":
+        if collision_area is not None or accommodation is not None:
+            raise ValueError("collision parameters require an enabled gas-exchange model")
+    elif gas_exchange == "hydrogen_accommodation":
+        if material_path is None:
+            raise ValueError("gas-exchange comparison requires native v4")
+        if (collision_area is None or accommodation is None or not np.isfinite(collision_area) or
+                collision_area <= 0 or not np.isfinite(accommodation) or not 0 < accommodation <= 1):
+            raise ValueError("gas exchange requires explicit positive geometric area and accommodation in (0,1]")
+    else:
+        raise ValueError("unknown gas-exchange model")
     if reference_capacity is not None:
         if not np.isfinite(reference_capacity) or reference_capacity <= 0:
             raise ValueError("reference heat capacity must be finite and positive")
@@ -380,6 +410,28 @@ def build_native_reference_namelist(source: Path, ledger_path: Path, edges_path:
     if material_path is not None:
         rows.append(f" material_sha256='{_sha256(material_path)}',")
         arrays["internal_energy_per_h_erg_input"] = material_u
+    if scattering == "isotropic_elastic":
+        # C_sca = C_ext * albedo. Keep exact zero endpoints without taking
+        # log(0); positive segments use the same log-log sampling as absorption.
+        sca = np.asarray(raw["scattering_per_h_cm2"])
+        hi = np.clip(np.searchsorted(energy, means, side="right"), 1, len(energy)-1)
+        lo = hi-1
+        f = np.log(means/energy[lo])/np.log(energy[hi]/energy[lo])
+        sampled = (1-f)*sca[lo]+f*sca[hi]
+        positive = (sca[lo] > 0) & (sca[hi] > 0)
+        sampled[positive] = np.exp((1-f[positive])*np.log(sca[lo[positive]]) +
+                                  f[positive]*np.log(sca[hi[positive]]))
+        rows[2] = "! Primary isotropic elastic scattering ON; IR scattering and stochastic heating absent."
+        rows.insert(3, "! Isotropic is a comparison approximation, NOT the measured Draine phase function.")
+        rows.insert(4, "! First-order split; no radiation pressure/recoil; not asymptotic-preserving diffusion.")
+        rows.append(" scattering_model='isotropic_elastic',")
+        arrays["scattering_input"] = sampled
+    if gas_exchange != "none":
+        rows.insert(1, "! Hydrogen-equivalent geometric gas/dust accommodation; no electron/ion Coulomb model.")
+        rows.insert(2, "! Joint implicit gas/dust/IR thermal solve; frozen speed/Cv per IR substep, split from chemistry.")
+        rows.insert(3, "! Geometric collision area is an EXPLICIT comparison input, not derived from Draine optical opacity.")
+        rows.append(" gas_exchange_model='hydrogen_accommodation',")
+        rows.append(f" collision_area_per_h_input={collision_area:.17e}, accommodation_input={accommodation:.17e},")
     for key, values in arrays.items():
         for start in range(0, len(values), 3):
             rows.append((f" {key}=" if start == 0 else " ") +

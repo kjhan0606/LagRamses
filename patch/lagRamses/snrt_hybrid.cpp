@@ -14,8 +14,8 @@ using std::isfinite;
 
 namespace {
 int batch_cells=256,team_size=1,device_sharers=1;
-bool gpu_enabled=false,reported[4]={false,false,false,false};
-int cpu_count[4]={0,0,0,0},gpu_count[4]={0,0,0,0};
+bool gpu_enabled=false,reported[6]={};
+int cpu_count[6]={},gpu_count[6]={};
 struct Lease {
   int slot;
   explicit Lease(long long bytes,bool allowed=true):slot(gpu_enabled&&allowed?snrt_hybrid_try_acquire_c(bytes,device_sharers):-1) {}
@@ -25,7 +25,7 @@ void counts(int op,int cpu,int gpu) {
   cpu_count[op]=cpu;gpu_count[op]=gpu;
   if(!reported[op]) {
     std::printf(" SNRT hybrid %s batches CPU=%d GPU=%d batch_cells=%d\n",
-        op==0?"primary":op==1?"dust":op==2?"IR transport":"IR absorption",cpu,gpu,batch_cells);
+        op==0?"primary":op==1?"dust":op==2?"IR transport":op==3?"IR absorption":op==4?"dust scattering":"gas-dust exchange",cpu,gpu,batch_cells);
     reported[op]=true;
   }
 }
@@ -38,8 +38,81 @@ extern "C" int snrt_hybrid_configure_c(int rank,int streams,int cells,int thread
   return gpu && !gpu_enabled?2:0;
 }
 extern "C" void snrt_hybrid_counts_c(int op,int *cpu,int *gpu) {
-  if(op<0||op>3){*cpu=*gpu=-1;return;}
+  if(op<0||op>5){*cpu=*gpu=-1;return;}
   *cpu=cpu_count[op];*gpu=gpu_count[op];
+}
+
+extern "C" int snrt_dust_exchange_c(const double *input,const double *table,double *output,
+    int nc,int nt,double dt,double floor_t,int mode) {
+  if(!input||!table||!output||nc<1||nt<2||mode<0||mode>2||!std::isfinite(dt)||dt<0||
+      !std::isfinite(floor_t)||floor_t<=0)return 7;
+  for(int k=0;k<nt;++k) {
+    if(!std::isfinite(table[k])||!std::isfinite(table[nt+k])||table[nt+k]<=0)return 2;
+    if(k && (table[k]<=table[k-1]||table[nt+k]<=table[nt+k-1]))return 2;
+  }
+  if(std::log(floor_t)<table[0]||std::log(floor_t)>table[nt-1])return 5;
+  try {
+    std::vector<double> trial(4*size_t(nc));
+    const int nbatch=1+(nc-1)/batch_cells,threads=mode==2?1:std::min(team_size,nbatch);
+    int error=0,cpu=0,gpu=0;
+    #pragma omp parallel for num_threads(threads) schedule(dynamic,1) reduction(max:error) reduction(+:cpu,gpu)
+    for(int ib=0;ib<nbatch;++ib) {
+      const int first=ib*batch_cells,n=std::min(batch_cells,nc-first);
+      Lease lease(8LL*(9LL*n+2LL*nt)+16777216LL,mode!=1);
+      int rc=0;
+      if(lease.slot>=0){++gpu;rc=snrt_exchange_batch_c(input+5*size_t(first),table,trial.data()+4*size_t(first),n,nt,dt,floor_t,lease.slot);}
+      else if(mode==2)rc=7;
+      else {++cpu;for(int i=first;i<first+n;++i)rc=std::max(rc,dust_exchange_cell(input,table,trial.data(),nt,dt,floor_t,i));}
+      error=std::max(error,rc);
+    }
+    counts(5,cpu,gpu);
+    if(error)return error;
+    std::copy(trial.begin(),trial.end(),output);return 0;
+  } catch(const std::bad_alloc&){return 7;}
+}
+
+extern "C" int snrt_isotropic_scatter_c(float *state,const double *tau,const double *weight,
+    int nc,int ng,int nd,int mode) {
+  if(!state||!tau||!weight||nc<1||ng<1||nd<1||mode<0||mode>2)return 7;
+  const size_t limit=std::numeric_limits<size_t>::max()/sizeof(double)/4;
+  if(size_t(nc)>limit/ng/nd)return 7;
+  double sum_w=0;
+  for(int d=0;d<nd;++d){if(!std::isfinite(weight[d])||weight[d]<=0)return 2;sum_w+=weight[d];}
+  if(!std::isfinite(sum_w)||sum_w<=0)return 2;
+  const size_t rays=size_t(ng)*nd,total=rays*nc;
+  try {
+    std::vector<float> trial(total);
+    const int nbatch=1+(nc-1)/batch_cells,threads=mode==2?1:std::min(team_size,nbatch);
+    int error=0,cpu=0,gpu=0;
+    #pragma omp parallel for num_threads(threads) schedule(dynamic,1) reduction(max:error) reduction(+:cpu,gpu)
+    for(int ib=0;ib<nbatch;++ib) {
+      try {
+        const int first=ib*batch_cells,n=std::min(batch_cells,nc-first);
+        const size_t t=rays*n;
+        std::vector<double> input(t+size_t(n)*ng),out(t);
+        for(int i=0;i<n;++i)for(int g=0;g<ng;++g) {
+          input[t+size_t(i)*ng+g]=tau[size_t(g)*nc+first+i];
+          // Native RAMSES layout: (direction, group, owned cell).
+          for(int d=0;d<nd;++d)input[size_t(i)*rays+size_t(g)*nd+d]=state[size_t(first+i)*rays+size_t(g)*nd+d];
+        }
+        Lease lease(8LL*(input.size()+out.size()+nd)+16777216LL,mode!=1);
+        int rc=0;
+        if(lease.slot>=0){++gpu;rc=snrt_scatter_batch_c(input.data(),weight,out.data(),n,ng,nd,sum_w,lease.slot);}
+        else if(mode==2)rc=7;
+        else {++cpu;for(int i=0;i<n;++i)rc=std::max(rc,snrt_isotropic_scatter_cell(input.data(),weight,out.data(),n,ng,nd,sum_w,i));}
+        if(rc){error=std::max(error,rc);continue;}
+        for(int i=0;i<n;++i)for(int g=0;g<ng;++g)for(int d=0;d<nd;++d) {
+          const float q=static_cast<float>(out[size_t(i)*rays+size_t(g)*nd+d]);
+          if(!std::isfinite(q)){error=2;continue;}
+          trial[size_t(first+i)*rays+size_t(g)*nd+d]=q;
+        }
+      } catch(const std::bad_alloc&){error=7;}
+    }
+    counts(4,cpu,gpu);
+    if(error)return error;
+    std::copy(trial.begin(),trial.end(),state);
+    return 0;
+  } catch(const std::bad_alloc&){return 7;}
 }
 
 extern "C" int snrt_hybrid_species_dust_c(
@@ -134,27 +207,28 @@ extern "C" int snrt_hybrid_dust_material_c(const double *input,const double *tab
     int nc,int ng,int nt,int use_u,double dt,double background,double bath,double tolerance,int) {
   if(!input||!table||!output||nc<1||ng<1||nt<2||!std::isfinite(dt)||dt<=0)return 7;
   try {
-    std::vector<double> trial(size_t(ng+2)*nc);
+    const int extra=use_u==2?1:0,fields=use_u==2?7:4;
+    std::vector<double> trial(size_t(ng+2+extra)*nc);
     const int nbatch=1+(nc-1)/batch_cells;
     int error=0,cpu=0,gpu=0;
     #pragma omp parallel for num_threads(std::min(team_size,nbatch)) schedule(dynamic,1) reduction(max:error) reduction(+:cpu,gpu)
     for(int ib=0;ib<nbatch;++ib) {
       try {
         const int first=ib*batch_cells,n=std::min(batch_cells,nc-first);
-        Lease lease(8LL*((ng+6LL)*n+(ng+3LL)*nt)+16777216LL);
+        Lease lease(8LL*((ng+6LL+4*extra)*n+(ng+3LL)*nt)+16777216LL);
         if(lease.slot<0) {
           ++cpu;
           for(int i=first;i<first+n;++i)error=std::max(error,dust_material_cell(input,table,trial.data(),
               nc,ng,nt,use_u,dt,background,bath,tolerance,i));
         } else {
           ++gpu;
-          std::vector<double> in(4*size_t(n)),out(size_t(ng+2)*n);
-          for(int f=0;f<4;++f)std::copy_n(input+size_t(f)*nc+first,n,in.data()+size_t(f)*n);
+          std::vector<double> in(fields*size_t(n)),out(size_t(ng+2+extra)*n);
+          for(int f=0;f<fields;++f)std::copy_n(input+size_t(f)*nc+first,n,in.data()+size_t(f)*n);
           const int rc=snrt_dust_material_batch_c(in.data(),table,out.data(),n,ng,nt,use_u,
               dt,background,bath,tolerance,lease.slot);
           if(rc){error=std::max(error,rc);continue;}
           std::copy_n(out.data(),size_t(ng)*n,trial.data()+size_t(ng)*first);
-          for(int f=0;f<2;++f)std::copy_n(out.data()+size_t(ng+f)*n,n,trial.data()+size_t(ng+f)*nc+first);
+          for(int f=0;f<2+extra;++f)std::copy_n(out.data()+size_t(ng+f)*n,n,trial.data()+size_t(ng+f)*nc+first);
         }
       } catch(const std::bad_alloc&) {error=7;}
     }

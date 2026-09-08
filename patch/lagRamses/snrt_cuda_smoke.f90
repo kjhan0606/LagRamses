@@ -9,16 +9,28 @@ program snrt_cuda_smoke
   integer, parameter :: ndirection = 80
   integer, parameter :: nbin = 16
   integer :: idir, ibin, ierr, irow
+  character(len=16) :: device_mode
   real(c_float) :: max_tensor_error, max_ledger_error, reference
   real(c_float), allocatable :: directional(:), weights(:), projection(:), &
        binned(:), scalar(:)
 
-  if (.not. snrt_cuda_available()) error stop 'SNRT CUDA smoke: no CUDA device'
+  call get_command_argument(1,device_mode)
+  if (snrt_cuda_available()<=0.and.device_mode/='cpu_only') error stop 'SNRT CUDA smoke: no CUDA device'
   allocate(directional(nrow * ndirection), weights(ndirection), &
        projection(ndirection * nbin), binned(nrow * nbin), scalar(nrow))
   directional = 1.0_c_float
   weights = 1.0_c_float / real(ndirection, c_float)
   projection = 0.0_c_float
+  if(device_mode=='cpu_only')then
+     if(snrt_cuda_available()/=0)error stop 'CPU-only test unexpectedly has a device'
+     binned=-17;scalar=-19
+     call snrt_cuda_angular_reduce_tf32(directional,projection,binned,nrow,ndirection,nbin,ierr)
+     if(ierr==0.or.any(binned/=-17))error stop 'unavailable angular kernel changed output'
+     call snrt_cuda_weighted_sum_fp32(directional,weights,scalar,nrow,ndirection,ierr)
+     if(ierr==0.or.any(scalar/=-19))error stop 'unavailable ledger kernel changed output'
+     write(*,*)'SNRT_CPU_DEVICE_ABI_REJECTION_PASS'
+     stop
+  endif
   do idir = 1, ndirection
      ibin = 1 + mod(idir - 1, nbin)
      projection((idir - 1) * nbin + ibin) = weights(idir)

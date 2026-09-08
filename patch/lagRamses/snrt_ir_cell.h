@@ -61,4 +61,30 @@ IR_HD inline int snrt_ir_absorb_cell(const double *input,const double *weight,do
   out[total+i]=absorbed;
   return 0;
 }
+// Exact local isotropic elastic-scattering solution for direction-integrated
+// photon bins. No absorption/heating; total photons in EACH group is invariant.
+// First-order splitting from spatial transport is owned by the live caller.
+IR_HD inline int snrt_isotropic_scatter_cell(const double *input,const double *weight,double *out,
+    int n,int ng,int nd,double sum_w,int i) {
+  const size_t rays=size_t(ng)*nd,total=rays*n;
+  for(int g=0;g<ng;++g) {
+    const double tau=input[total+size_t(i)*ng+g];
+    if(!isfinite(tau)||tau<0)return 2;
+    double photons=0;
+    for(int d=0;d<nd;++d) {
+      const double q=input[size_t(i)*rays+size_t(g)*nd+d];
+      if(!isfinite(q)||q<0)return 2;
+      photons+=q;
+    }
+    if(!isfinite(photons))return 2;
+    const double mixed=-expm1(-tau);
+    for(int d=0;d<nd;++d) {
+      const size_t k=size_t(i)*rays+size_t(g)*nd+d;
+      const double q=input[k]*(1-mixed)+photons*(weight[d]/sum_w)*mixed;
+      if(!isfinite(q)||q<0)return 2;
+      out[k]=q;
+    }
+  }
+  return 0;
+}
 #undef IR_HD

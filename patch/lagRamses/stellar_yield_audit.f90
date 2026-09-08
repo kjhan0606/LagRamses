@@ -55,7 +55,14 @@ contains
     integer :: version, node_count, input_imf_id, input_population_id
     integer :: terminal_outcome(max_nodes), i, j, k, w, s, unit, status
     real(stellar_dp) :: mass_msun(max_nodes), metallicity(max_nodes), terminal_age_yr(max_nodes)
-    real(stellar_dp) :: input_binary_fraction, input_imf_min, input_imf_max, delta
+    real(stellar_dp) :: input_binary_fraction, input_imf_min, input_imf_max, delta, history_min, history_max
+    real(stellar_dp) :: mass_domain_min, mass_domain_max
+    integer :: agb_non_co_count, agb_non_co_kind(max_nodes), found
+    real(stellar_dp) :: agb_non_co_mass(max_nodes), agb_non_co_z(max_nodes)
+    integer :: agb_wind_jump_count
+    real(stellar_dp) :: agb_wind_jump_mass(max_nodes),agb_wind_jump_z(max_nodes),agb_wind_jump_fraction(max_nodes)
+    logical :: wind_history,declared(max_nodes)
+    logical :: net_channel_available(n_stellar_channels)
     character(len=128) :: model_id, wind_source_id, terminal_source_id, model_coordinates
     character(len=32) :: timing_policy
     character(len=32) :: metallicity_policy
@@ -65,11 +72,13 @@ contains
     namelist /stellar_high_mass_history/ version, node_count, model_id, wind_source_id, &
          terminal_source_id, model_coordinates, timing_policy, input_imf_id, input_population_id, &
          input_binary_fraction, input_imf_min, input_imf_max, mass_msun, metallicity, &
-         terminal_age_yr, terminal_outcome, metallicity_policy, net_yield_policy, agb_release_policy
+         terminal_age_yr, terminal_outcome, metallicity_policy, net_yield_policy, agb_release_policy, &
+         mass_domain_min, mass_domain_max, agb_non_co_count, agb_non_co_mass, agb_non_co_z, agb_non_co_kind, &
+         net_channel_available,agb_wind_jump_count,agb_wind_jump_mass,agb_wind_jump_z,agb_wind_jump_fraction
 
     ierr=yield_audit_err_table
     if (allocated(table%hm_mass)) return ! A second application would double-transform a model.
-    call audit_yield_table(table,1d-10,status)
+    call audit_yield_table(table,1d-10,status,exact_source_coordinates=.true.)
     if(status/=0)return
     version=0; node_count=0; input_imf_id=-1; input_population_id=-1
     input_binary_fraction=-1; input_imf_min=-1; input_imf_max=-1
@@ -77,20 +86,47 @@ contains
     metallicity_policy='exact_nodes'
     net_yield_policy='supplied'
     agb_release_policy='cumulative_linear'
+    mass_domain_min=-1d0;mass_domain_max=-1d0
+    agb_non_co_count=0;agb_non_co_mass=-1;agb_non_co_z=-1;agb_non_co_kind=-1
+    agb_wind_jump_count=0;agb_wind_jump_mass=-1;agb_wind_jump_z=-1;agb_wind_jump_fraction=-1
+    net_channel_available=.false.
     mass_msun=-1; metallicity=-1; terminal_age_yr=-1; terminal_outcome=-1
     open(newunit=unit,file=filename,status='old',action='read',iostat=status)
     if(status/=0)return
     read(unit,nml=stellar_high_mass_history,iostat=status)
     close(unit)
-    if(status/=0.or.version/=1.or.node_count<2.or.node_count>max_nodes)return
+    if(status/=0.or.version<1.or.version>3.or.node_count<2.or.node_count>max_nodes)return
+    ! v1 remains the original [40,120] contract; v2 explicitly includes the
+    ! source-supported ordinary CCSN branch, never an 8--13 extrapolation.
+    history_min=40d0;history_max=120d0
+    if(version==2)history_min=13d0
+    if(version==3)then
+       ! A source-specific comparison may cover only part of the CCSN
+       ! domain. Admission never extrapolates it to the rest of the IMF.
+       if(.not.all(ieee_is_finite([mass_domain_min,mass_domain_max])))return
+       if(mass_domain_min<8d0.or.mass_domain_max>120d0.or.mass_domain_max<=mass_domain_min)return
+       history_min=mass_domain_min;history_max=mass_domain_max
+    else
+       if(mass_domain_min/=-1d0.or.mass_domain_max/=-1d0)return
+    endif
     if(min(len_trim(model_id),len_trim(wind_source_id),len_trim(terminal_source_id), &
          len_trim(model_coordinates))==0)return
     if(timing_policy/='wind_linear_terminal_step')return
     if(metallicity_policy/='exact_nodes'.and.metallicity_policy/='linear_Z_cumulative_mixture')return
-    if(net_yield_policy/='supplied'.and.net_yield_policy/='unavailable_diagnostic_zero')return
-    if(agb_release_policy/='cumulative_linear'.and.agb_release_policy/='terminal_step')return
+    if(net_yield_policy/='supplied'.and.net_yield_policy/='unavailable_diagnostic_zero'.and. &
+         net_yield_policy/='channel_mask')return
+    wind_history=agb_release_policy=='wind_history_terminal_remnant'
+    if(agb_release_policy/='cumulative_linear'.and.agb_release_policy/='terminal_step'.and..not.wind_history)return
+    if(agb_wind_jump_count<0.or.agb_wind_jump_count>max_nodes)return
+    if(wind_history.neqv.(agb_wind_jump_count>0))return
     if(net_yield_policy=='unavailable_diagnostic_zero')then
        if(any(table%net_yield/=0))return
+    endif
+    if(net_yield_policy=='channel_mask')then
+       if(.not.any(net_channel_available))return
+       do i=1,table%n_rows
+          if(.not.net_channel_available(table%channel(i)).and.any(table%net_yield(i,:)/=0))return
+       enddo
     endif
     if(input_imf_id/=default_imf_id.or.input_population_id/=population_model_id)return
     if(.not.all(ieee_is_finite([input_binary_fraction,input_imf_min,input_imf_max])))return
@@ -99,20 +135,20 @@ contains
     if(.not.all(ieee_is_finite(mass_msun(:node_count))).or. &
          .not.all(ieee_is_finite(metallicity(:node_count))).or. &
          .not.all(ieee_is_finite(terminal_age_yr(:node_count))))return
-    if(any(mass_msun(:node_count)<40).or.any(mass_msun(:node_count)>120).or. &
+    if(any(mass_msun(:node_count)<history_min).or.any(mass_msun(:node_count)>history_max).or. &
          any(metallicity(:node_count)<0).or.any(terminal_age_yr(:node_count)<=0))return
     if(any(terminal_outcome(:node_count)<0).or.any(terminal_outcome(:node_count)>1))return
-    ! Each exact-Z branch must cover [40,120] in ascending source-node order.
+    ! Each exact-Z branch must cover the declared domain in source-node order.
     do i=1,node_count
        if(i==1)then
-          if(mass_msun(i)/=40)return
+          if(mass_msun(i)/=history_min)return
        else if(metallicity(i)==metallicity(i-1))then
           if(mass_msun(i)<=mass_msun(i-1))return
        else
-          if(metallicity(i)<=metallicity(i-1).or.mass_msun(i-1)/=120.or.mass_msun(i)/=40)return
+          if(metallicity(i)<=metallicity(i-1).or.mass_msun(i-1)/=history_max.or.mass_msun(i)/=history_min)return
        endif
     enddo
-    if(mass_msun(node_count)/=120)return
+    if(mass_msun(node_count)/=history_max)return
     trial=table
     allocate(trial%hm_mass(node_count),trial%hm_z(node_count),trial%hm_age(node_count), &
          trial%hm_remnant(node_count),trial%hm_adjustment(node_count), &
@@ -122,7 +158,9 @@ contains
     trial%high_mass_identity=[model_id,wind_source_id,terminal_source_id,model_coordinates]
     trial%high_mass_wind_only=high_mass_model=='wind_only_collapse'
     trial%high_mass_linear_z=metallicity_policy=='linear_Z_cumulative_mixture'
-    trial%net_yield_diagnostic_unavailable=net_yield_policy=='unavailable_diagnostic_zero'
+    trial%net_yield_channel_available=net_yield_policy=='supplied'
+    if(net_yield_policy=='channel_mask')trial%net_yield_channel_available=net_channel_available
+    trial%net_yield_diagnostic_unavailable=.not.all(trial%net_yield_channel_available)
     if(trial%high_mass_linear_z.and.maxval(trial%hm_z)<=minval(trial%hm_z))return
     do i=1,node_count
        w=0; s=0
@@ -143,8 +181,15 @@ contains
        if(terminal_outcome(i)==0.and.(raw%terminal_mass/=0.or.raw%terminal_energy/=0.or. &
             any(raw%terminal_momentum/=0)))return
        if(terminal_outcome(i)==1.and.raw%terminal_mass<=0)return
-       call resolve_high_mass_endpoint(raw,high_mass_model,wind_source_id==terminal_source_id, &
-            high_mass_max_remnant_adjust_fraction,resolved,delta,status)
+       if(mass_msun(i)<40d0)then
+          ! High-mass alternatives must not suppress ordinary CCSN. These
+          ! endpoints must close without any mixed-source remnant repair.
+          call resolve_high_mass_endpoint(raw,'source_consistent',wind_source_id==terminal_source_id, &
+               0d0,resolved,delta,status,allow_ordinary=.true.)
+       else
+          call resolve_high_mass_endpoint(raw,high_mass_model,wind_source_id==terminal_source_id, &
+               high_mass_max_remnant_adjust_fraction,resolved,delta,status)
+       endif
        if(status/=0)then
           ierr=status
           return
@@ -178,28 +223,80 @@ contains
     ! A canonical row above the seam cannot escape the declared node map.
     do j=1,table%n_rows
        if(table%channel(j)/=channel_wind.and.table%channel(j)/=channel_snii)cycle
-       if(table%initial_mass(j)<40)cycle
+       if(table%initial_mass(j)<history_min)cycle
        if(.not.any(trial%hm_mass==table%initial_mass(j).and.trial%hm_z==table%birth_metallicity(j)))return
     enddo
-    if(agb_release_policy=='terminal_step')then
-       call prepare_agb_terminal_rows(trial,status)
+    if(agb_release_policy=='terminal_step'.or.wind_history)then
+       call prepare_agb_terminal_rows(trial,status,wind_history)
        if(status/=0)return
+    endif
+    if(wind_history)then
+       if(size(trial%agb_terminal_row)>max_nodes)return
+       declared=.false.
+       do i=1,agb_wind_jump_count
+          if(.not.all(ieee_is_finite([agb_wind_jump_mass(i),agb_wind_jump_z(i),agb_wind_jump_fraction(i)])))return
+          if(agb_wind_jump_fraction(i)<0.or.agb_wind_jump_fraction(i)>1)return
+          found=0
+          do j=1,size(trial%agb_terminal_row)
+             k=trial%agb_terminal_row(j)
+             if(trial%initial_mass(k)/=agb_wind_jump_mass(i).or.trial%birth_metallicity(k)/=agb_wind_jump_z(i))cycle
+             if(declared(j))return
+             trial%agb_terminal_jump_fraction(j)=agb_wind_jump_fraction(i);declared(j)=.true.;found=found+1
+          enddo
+          if(found/=1)return
+       enddo
+       ! No cumulative wind knot may exceed the LEFT limit of the terminal
+       ! jump. Otherwise interpolation would subtract material/energy.
+       do j=1,size(trial%agb_terminal_row)
+          k=trial%agb_terminal_row(j);delta=1-trial%agb_terminal_jump_fraction(j)
+          do i=1,trial%n_rows
+             if(trial%channel(i)/=channel_agb.or.trial%initial_mass(i)/=trial%initial_mass(k).or. &
+                  trial%birth_metallicity(i)/=trial%birth_metallicity(k))cycle
+             if(trial%age_gyr(i)>=trial%age_gyr(k))cycle
+             if(trial%returned_mass(i)>delta*trial%returned_mass(k)+1d-10*trial%initial_mass(k))return
+             if(trial%energy(i)>delta*trial%energy(k)+1d-10*max(1d0,trial%energy(k)))return
+             if(any(trial%ejected_mass(i,:)>delta*trial%ejected_mass(k,:)+1d-10*trial%initial_mass(k)))return
+             if(trial%returned_mass(i)-sum(trial%ejected_mass(i,:))> &
+                  delta*(trial%returned_mass(k)-sum(trial%ejected_mass(k,:)))+1d-10*trial%initial_mass(k))return
+          enddo
+       enddo
+    endif
+    if(agb_non_co_count<0.or.agb_non_co_count>max_nodes)return
+    if(agb_non_co_count>0)then
+       if(.not.allocated(trial%agb_terminal_row))return
+       if(.not.all(ieee_is_finite(agb_non_co_mass(:agb_non_co_count))).or. &
+            .not.all(ieee_is_finite(agb_non_co_z(:agb_non_co_count))))return
+       do i=1,agb_non_co_count
+          if(agb_non_co_kind(i)<1.or.agb_non_co_kind(i)>2)return
+          found=0
+          do j=1,size(trial%agb_terminal_row)
+             k=trial%agb_terminal_row(j)
+             if(trial%initial_mass(k)/=agb_non_co_mass(i).or.trial%birth_metallicity(k)/=agb_non_co_z(i))cycle
+             if(trial%agb_remnant_kind(j)/=0)return ! Duplicate declaration.
+             trial%agb_remnant_kind(j)=agb_non_co_kind(i);found=found+1
+          enddo
+          if(found/=1)return
+       enddo
     endif
     trial%high_mass_ready=.true.
     table=trial
     ierr=yield_audit_ok
   end subroutine prepare_high_mass_history
 
-  subroutine prepare_agb_terminal_rows(table,ierr)
-    ! The first nonzero row is an explicitly supplied release age, NOT an
-    ! inferred stellar lifetime. Reject ramps, non-closing endpoints and
-    ! duplicate wind ownership instead of fixing physical input here.
+  subroutine prepare_agb_terminal_rows(table,ierr,allow_wind)
+    ! The first remnant row defines the supplied terminal age when wind
+    ! histories are selected; legacy terminal-only inputs must remain zero
+    ! before that age. Never infer lifetimes or duplicate wind ownership.
     type(stellar_yield_table_t),intent(inout)::table
     integer,intent(out)::ierr
+    logical,intent(in),optional::allow_wind
+    logical::wind
     integer::i,j,k,n,first,zero
     integer::rows(table%n_rows)
     real(stellar_dp)::m,z
     ierr=yield_audit_err_table;n=0
+    wind=.false.
+    if(present(allow_wind))wind=allow_wind
     do i=1,table%n_rows
        if(table%channel(i)/=channel_agb)cycle
        m=table%initial_mass(i);z=table%birth_metallicity(i)
@@ -216,6 +313,7 @@ contains
           if(table%channel(j)/=channel_agb)cycle
           if(table%age_gyr(j)==0d0.and.zero_payload(table,j))zero=j
           if(zero_payload(table,j))cycle
+          if(wind.and.table%remnant_mass(j)==0)cycle
           if(first==0)then
              first=j
           else if(table%age_gyr(j)<table%age_gyr(first))then
@@ -228,7 +326,11 @@ contains
        do k=1,table%n_rows
           if(table%channel(k)/=channel_agb.or.table%initial_mass(k)/=m.or.table%birth_metallicity(k)/=z)cycle
           if(table%age_gyr(k)<table%age_gyr(first))then
-             if(.not.zero_payload(table,k))return
+             if(wind)then
+                if(table%remnant_mass(k)/=0)return
+             else
+                if(.not.zero_payload(table,k))return
+             endif
           else
              if(.not.same_payload(table,k,first))return
           endif
@@ -237,6 +339,8 @@ contains
     enddo
     if(n==0)return
     table%agb_terminal_row=rows(:n)
+    allocate(table%agb_remnant_kind(n));table%agb_remnant_kind=0
+    allocate(table%agb_terminal_jump_fraction(n));table%agb_terminal_jump_fraction=1d0
     ierr=yield_audit_ok
   end subroutine prepare_agb_terminal_rows
 
@@ -258,7 +362,7 @@ contains
   end function same_payload
 
   subroutine resolve_high_mass_endpoint(raw, preset, same_source, adjustment_limit, &
-       resolved, remnant_adjustment, ierr)
+       resolved, remnant_adjustment, ierr, allow_ordinary)
     ! Resolve a COMPLETE per-initial-star endpoint, before IMF integration.
     ! Never use this on a cumulative row at an intermediate age. Timing,
     ! isotope projection, source identities and fate classification belong
@@ -270,9 +374,10 @@ contains
     type(high_mass_endpoint_t), intent(out) :: resolved
     real(stellar_dp), intent(out) :: remnant_adjustment
     integer, intent(out) :: ierr
+    logical, intent(in), optional :: allow_ordinary
     type(high_mass_endpoint_t) :: trial
     real(stellar_dp), parameter :: tolerance = 1.0e-10_stellar_dp
-    real(stellar_dp) :: residual, scale
+    real(stellar_dp) :: residual, scale, minimum_mass
 
     ! Failure has no publishable material or energy, including the correction.
     resolved = high_mass_endpoint_t()
@@ -285,7 +390,14 @@ contains
          .not. all(ieee_is_finite(raw%terminal_elements)) .or. &
          .not. all(ieee_is_finite(raw%wind_momentum)) .or. &
          .not. all(ieee_is_finite(raw%terminal_momentum))) return
-    if (raw%initial_mass < 40.0_stellar_dp .or. raw%initial_mass > 120.0_stellar_dp) return
+    minimum_mass=40d0
+    if(present(allow_ordinary))then
+       if(allow_ordinary)then
+          if(preset/='source_consistent')return
+          minimum_mass=8d0
+       endif
+    endif
+    if (raw%initial_mass < minimum_mass .or. raw%initial_mass > 120.0_stellar_dp) return
     if (min(raw%wind_mass, raw%terminal_mass, raw%remnant_mass, &
          raw%wind_energy, raw%terminal_energy) < 0.0_stellar_dp) return
     if (minval(raw%wind_elements) < 0.0_stellar_dp .or. &
@@ -327,15 +439,16 @@ contains
   end subroutine resolve_high_mass_endpoint
 
   subroutine audit_yield_table(table, tolerance, ierr, require_complete, &
-       terminal_remnant_owner, required_channels)
+       terminal_remnant_owner, required_channels, exact_source_coordinates)
     type(stellar_yield_table_t), intent(in) :: table
     real(stellar_dp), intent(in) :: tolerance
     integer, intent(out) :: ierr
     logical, intent(in), optional :: require_complete
     logical, intent(in), optional :: terminal_remnant_owner(:)
     logical, intent(in), optional :: required_channels(n_stellar_channels)
+    logical, intent(in), optional :: exact_source_coordinates
 
-    real(stellar_dp) :: tol, ejected_sum, scale
+    real(stellar_dp) :: tol, coordinate_tol, ejected_sum, scale
     logical :: require_grid, row_is_finite, channel_is_bad
     integer :: i, j, channel
 
@@ -343,6 +456,15 @@ contains
     require_grid = .false.
     if (present(require_complete)) require_grid = require_complete
     tol = max(tolerance, 1.0e-12_stellar_dp)
+    coordinate_tol=tol
+    ! Source-node histories use exact table coordinates in the evaluator.
+    ! A physical budget tolerance is not a 0.1-year resolution limit: late
+    ! nuclear phases can be separated by hours. Preserve the legacy generic
+    ! interpolation contract until the explicit history route is requested.
+    if(table%high_mass_ready)coordinate_tol=0d0
+    if(present(exact_source_coordinates))then
+       if(exact_source_coordinates)coordinate_tol=0d0
+    endif
 
     if (.not. table%loaded .or. table%n_rows <= 0) then
        ierr = yield_audit_err_table
@@ -440,10 +562,10 @@ contains
        do j = i + 1, table%n_rows
           if (table%channel(i) /= table%channel(j)) cycle
           if (.not. same_value(table%initial_mass(i), &
-               table%initial_mass(j), tol)) cycle
+               table%initial_mass(j), coordinate_tol)) cycle
           if (.not. same_value(table%birth_metallicity(i), &
-               table%birth_metallicity(j), tol)) cycle
-          if (.not. same_value(table%age_gyr(i), table%age_gyr(j), tol)) cycle
+               table%birth_metallicity(j), coordinate_tol)) cycle
+          if (.not. same_value(table%age_gyr(i), table%age_gyr(j), coordinate_tol)) cycle
           ierr = ior(ierr, yield_audit_err_duplicate)
        end do
     end do
@@ -456,10 +578,10 @@ contains
           if (i == j) cycle
           if (table%channel(i) /= table%channel(j)) cycle
           if (.not. same_value(table%initial_mass(i), &
-               table%initial_mass(j), tol)) cycle
+               table%initial_mass(j), coordinate_tol)) cycle
           if (.not. same_value(table%birth_metallicity(i), &
-               table%birth_metallicity(j), tol)) cycle
-          if (table%age_gyr(i) >= table%age_gyr(j) - tol) cycle
+               table%birth_metallicity(j), coordinate_tol)) cycle
+          if (table%age_gyr(i) >= table%age_gyr(j) - coordinate_tol) cycle
 
           scale = max(1.0_stellar_dp, abs(table%returned_mass(j)))
           if (table%returned_mass(i) > table%returned_mass(j) + tol * scale) then
@@ -495,7 +617,12 @@ contains
           ! checks every row, the zero origin, endpoint closure and plateau.
           ! Do not manufacture rectangular interpolation corners for it.
           if(channel==channel_agb.and.allocated(table%agb_terminal_row))cycle
-          call audit_complete_channel(table, channel, tol, channel_is_bad)
+          ! The validated source-node evaluator likewise uses each wind's
+          ! actual phase knots and the terminal event directly, never a
+          ! Cartesian cross-star age interpolation. Its complete endpoint
+          ! map and every history row were checked by prepare_high_mass_history.
+          if(table%high_mass_ready.and.(channel==channel_wind.or.channel==channel_snii))cycle
+          call audit_complete_channel(table, channel, coordinate_tol, channel_is_bad)
           if (channel_is_bad) ierr = ior(ierr, yield_audit_err_grid)
        end do
     end if

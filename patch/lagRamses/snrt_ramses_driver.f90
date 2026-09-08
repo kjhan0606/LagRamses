@@ -130,7 +130,11 @@ contains
 #ifdef DUST_LIVE
     use snrt_dust_live, only: snrt_dust_live_stage, snrt_dust_live_commit, dust_live_coarse_trial
     use snrt_dust_ir, only: dust_ir_diagnostics
-    use snrt_dust_contract, only: snrt_dust_contract_version
+    use snrt_dust_contract, only: snrt_dust_contract_version, &
+         snrt_dust_contract_scattering_enabled, snrt_dust_contract_scattering_per_h_cm2, &
+         snrt_dust_contract_exchange_enabled, snrt_dust_contract_collision_area_per_h, &
+         snrt_dust_contract_accommodation, snrt_dust_contract_ir_background_k
+    use snrt_runtime_backend, only: snrt_runtime_isotropic_scatter
 #endif
     use snrt_transport_step, only: snrt_transport_absorb_multigroup_prepared_dust_trial
     use snrt_rt_transaction, only: snrt_rt_iteration_config, &
@@ -1057,6 +1061,16 @@ contains
             available_species_transport, incoming_intensity, trial_intensity, &
             coarse_flux_trial, raw_group, absorbed_hhe_group_species, &
             absorbed_dust_group, returned_group, absorbed_group, ierr, leaf_cell, ilevel)
+#ifdef DUST_LIVE
+       ! Lie split after transport/absorption, rebuilt from the same incoming
+       ! state on every nonlinear trial. Scatter only owned leaves; each group
+       ! conserves photons/energy locally and adds no absorption/heating ledger.
+       if (ierr==0.and.snrt_dust_contract_scattering_enabled) &
+            call snrt_runtime_isotropic_scatter(trial_intensity,angular_weight, &
+            dust_n_hydrogen_cm3*dust_relative_abundance, &
+            snrt_dust_contract_scattering_per_h_cm2(1:snrt_ngroups), &
+            snrt_c_cgs*reduced_c*dt_s,ierr)
+#endif
        t_transport = t_transport + omp_get_wtime() - wall_sub
        if (ierr /= 0) then
           local_transaction_failure = snrt_failure_transport
@@ -1368,12 +1382,36 @@ contains
              ! normalized direction and therefore requires weights summing 1.
              ! Stage validates faces and reduces errors collectively before
              ! halo exchange. Never skip this call on a rank-local condition.
+       if(snrt_dust_contract_exchange_enabled)then
+          block
+            real(dp) :: gas_energy(nleaf),gas_capacity(nleaf),transfer(nleaf)
+            do i=1,nleaf
+               icell=leaf_cell(i)
+               kinetic_energy=.5d0*sum(uold(icell,2:ndim+1)**2)/rho_level(i)
+               gas_energy(i)=(trial_thermal(i)-kinetic_energy)*dust_energy_scale
+               molecular_weight=snrt_mean_molecular_weight(trial_hydrogen_ii(i),trial_helium_ii(i),trial_helium_iii(i))
+               gas_capacity(i)=rho_level(i)*dust_energy_scale/((gamma-1)*scale_T2*molecular_weight)
+            enddo
+            ! Solve exchange and IR emission together, inside the IR implicit
+            ! material solve, not as a post-radiation dust temperature kick.
+            call snrt_dust_live_stage(ilevel,leaf_cell,leaf_slot,neighbor, &
+                 transpose(direction_dp),angular_weight/sum(angular_weight),dx_code*scale_l,dt_s,snrt_c_cgs*reduced_c, &
+                 dust_n_hydrogen_cm3*dust_relative_abundance,dust_absorbed_energy,dust_old_energy, &
+                 dust_heat_capacity,dust_ir_trial,dust_trial_energy,dust_trial_temperature,dust_ir_result,ierr, &
+                 dust_ir_coarse,gas_energy,gas_capacity,dust_n_hydrogen_cm3,transfer)
+            if(ierr==0)then
+               trial_thermal=trial_thermal-transfer/dust_energy_scale
+               if(any(.not.ieee_is_finite(trial_thermal)).or.any(trial_thermal<=0))ierr=1
+            endif
+          end block
+       else
              call snrt_dust_live_stage(ilevel,leaf_cell,leaf_slot,neighbor, &
                   transpose(direction_dp),angular_weight/sum(angular_weight), &
                   dx_code*scale_l,dt_s,snrt_c_cgs*reduced_c, &
                   dust_n_hydrogen_cm3*dust_relative_abundance,dust_absorbed_energy,dust_old_energy, &
                   dust_heat_capacity,dust_ir_trial,dust_trial_energy,dust_trial_temperature,dust_ir_result,ierr, &
                   dust_ir_coarse)
+       endif
        if(ierr/=0)then
           local_transaction_failure=snrt_failure_receiver
           if(myid==1)write(*,'(A,I0)')' SNRT live IR staging failed: error=',ierr

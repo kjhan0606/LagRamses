@@ -45,11 +45,18 @@ module stellar_yield_tables
      logical :: high_mass_wind_only = .false.
      logical :: high_mass_linear_z = .false.
      logical :: net_yield_diagnostic_unavailable = .false.
+     logical :: net_yield_channel_available(n_stellar_channels) = .true.
      character(len=128) :: high_mass_identity(4) = ''
      real(stellar_dp), allocatable :: hm_mass(:), hm_z(:), hm_age(:), hm_remnant(:), hm_adjustment(:)
      integer, allocatable :: hm_wind_row(:), hm_terminal_row(:)
      ! Optional single terminal envelope/WD event, indexed by source M,Z.
      integer, allocatable :: agb_terminal_row(:)
+     ! CO=0, hybrid CO(Ne)=1, ONe=2. Only CO can supply the strict Ia ledger.
+     integer, allocatable :: agb_remnant_kind(:)
+     ! Fraction of the final cumulative envelope released as a terminal jump.
+     ! The rest follows source wind knots; remnant creation is always a step.
+     real(stellar_dp), allocatable :: agb_terminal_jump_fraction(:)
+     logical :: co_wd_inventory_only = .false. ! Internal read-only inventory view.
      integer, allocatable :: channel(:)
      real(stellar_dp), allocatable :: initial_mass(:)
      real(stellar_dp), allocatable :: birth_metallicity(:)
@@ -84,10 +91,14 @@ contains
     if (allocated(table%hm_mass)) deallocate(table%hm_mass, table%hm_z, table%hm_age, &
          table%hm_remnant, table%hm_adjustment, table%hm_wind_row, table%hm_terminal_row)
     if (allocated(table%agb_terminal_row)) deallocate(table%agb_terminal_row)
+    if (allocated(table%agb_remnant_kind)) deallocate(table%agb_remnant_kind)
+    if (allocated(table%agb_terminal_jump_fraction)) deallocate(table%agb_terminal_jump_fraction)
+    table%co_wd_inventory_only = .false.
     table%high_mass_ready = .false.
     table%high_mass_wind_only = .false.
     table%high_mass_linear_z = .false.
     table%net_yield_diagnostic_unavailable = .false.
+    table%net_yield_channel_available = .true.
     table%high_mass_identity = ''
 
     table%loaded = .false.

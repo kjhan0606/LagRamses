@@ -24,6 +24,12 @@ check_reference_modes() {
   env -u SNRT_ALLOW_REFERENCE_CONTROL SNRT_DUST_CONTRACT="$valid" \
     "$binary" "$valid" "$invalid" "$reference" 0
   done
+  for setting in 0 1; do
+    SNRT_ALLOW_REFERENCE_CONTROL="$setting" SNRT_DUST_CONTRACT="$valid" \
+      "$binary" "$valid" "$invalid" '' "$setting" \
+      "$repo_root/simulation/snrt/config/dust_dl01_bulk_030_scattering_reference_v4.nml" \
+      "$repo_root/simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml"
+  done
 }
 
 if command -v ifx >/dev/null 2>&1; then

@@ -12,6 +12,12 @@ complete and enter the next in-scope task without an approval pause. This
 does not permit declaring unresolved physics complete or silently selecting
 a materially different population model.
 
+Current authorization (2026-09-08): the operator additionally preapproved
+**all of #2 (additional RT/AGN/dust physics) and #3 (backend/operations
+expansion)** and requested continued implementation. This supersedes the
+historical #2/#3 approval holds below; no further substep approval pause.
+Data dependencies and source/model limitations are still reported honestly.
+
 ## Source facts and proposed scope
 
 1. Population-matched radiation: current BPASS HDF5 is already integrated
@@ -338,3 +344,564 @@ explicit population weights and a same-evolution atmosphere/SED calculation.
 Retain the current BPASS SED and empirical SNIa defaults until those choices
 are physically consistent. Do not attach BPASS spectra or N100 through a
 normalization-only adapter. No claim of publication-ready binary physics.
+
+### Scope reset and ordinary CCSN connection (operator instruction, 2026-09-07)
+
+The operator selected unfinished-work **section #1 (physical inputs and their
+native coupling)** for continued implementation. Sections **#2 (additional
+RT/AGN/dust physics)** and **#3 (backend/operations expansion)** require further
+approval. Do not turn verification work into new implementation gates.
+
+Priority correction: the previous KL16+LC18 comparison enabled SNII but supplied
+only 40/60/80/120-Msun wind-only endpoints, with zero terminal ejecta/energy.
+It did not include ordinary CCSN. This dependency now takes priority over more
+binary-evolution feasibility scripts. Existing empirical SNIa is retained;
+microscopic binary population work remains separate and incomplete.
+
+Implemented explicit `lc18_set_r` alternative in the existing LC18 and combined
+KL16/LC18 offline builders, consumed by the **production Fortran modules**:
+
+- LC18 nodes 13,15,20,25,30,40,60,80,120 at all four source metallicities.
+  The first four nodes have terminal ejecta = table8 minus table9; higher
+  nodes follow the Set R wind-only assumption. All 15,984 isotope differences
+  across 48 low-mass/rotation/Z models are nonnegative; no clipping was needed.
+- Wind and terminal isotope sums define returned mass. Remaining initial mass
+  is the baryonic residual, not a gravitational remnant mass or rounded iron
+  core mass. No new isotope decay/net-yield inference is introduced.
+- History v2 explicitly spans 13--120; v1 retains 40--120. Native terminal
+  events have no pre-lifetime leakage. The >=40 endpoint preset cannot
+  suppress ordinary SN or mix across the 40-Msun seam. Nearest source-cell
+  mass-fraction scaling is unchanged; 25/30 source-cell boundary is 27.5,
+  **not a physical individual-star explodability threshold**.
+- SN energy is a required explicit builder argument, never inferred from the
+  pre-SN binding energy. The local comparison selects 1e51 erg at each exploding
+  source node, effective massive wind 1000 km/s, AGB wind 15 km/s, rotation 0,
+  Kroupa/effective-SSP SNIa and the optional Fishlock low-Z AGB source.
+- `mkrun.py` offers `comparison_ccsn`; old comparisons/defaults remain unchanged.
+  The shared namelist generator documents v1/v2 history support. Its pre-existing
+  unrelated 88-line deletion was preserved, not attributed to this work.
+
+Evidence: `/gpfs/kjhan/LRD_JWST/.ccsn-source.lobKc9/`. Actual input table SHA256
+`48ecb3a36450a93834e4454d30c140330a5d41e20c962823156e9b27384e98e4`,
+history `92a9fb7e9ff93ee4bbf16b702ca9ef5103f184c7f600c6642c2dc13dfb5ca263`.
+Existing builder default output was byte-identical to HEAD; all three LC18
+rotations generate complete 36-node sources. Extended existing
+`kl16_lc18_native_test.f90` passes GNU bounds/FPE checks and Intel production
+objects: 16 exploding endpoints, source-hull rejection, timestep/IMF-bin
+independence, AGB/effective-SNIa closure at six Z values through 13.7 Gyr.
+At initial SSP mass 10000 Msun, Z=.004, by .2 Gyr the ordinary SN channel
+returns 527.075650954212 Msun and 3.77999123914469e52 erg. Old default and
+low-Z-only fixtures and high-mass endpoint/history regressions pass.
+
+RAMSES `ramses_ccsn3d` was rebuilt with the existing Makefile, lagRamses-first
+VPATH, HDF5/SNRT/DUST_LIVE/CUDA linkage and NVAR=30. SHA256:
+`c76dd129a091e16b858e9c18ab930d19455d343b86f7cb0e1689c5b3fa3c996b`.
+The old object cache and binaries were preserved. Fresh `live/ccsn.nml` uses
+1 rank/2 OpenMP threads, 512M worker stacks, CPU hydro/RT/dust, level 3, four
+steps; `restart/ccsn.nml` restarts from step 2 and stops at 4. Both finish;
+the short live run is an initialization/wind-coupling check and does **not**
+claim terminal SN/AGB ages were reached. See native endpoint/SSP tests for
+actual terminal release, and `build.log`, `native-{intel,gnu}.log`, live/restart
+logs for evidence. No production-scale or external-auditor jobs were launched.
+Final HDF5 comparison: source identity and every SNRT dataset are exact;
+hydro maximum absolute difference is 4.14e-25 in momentum. The 512 stars,
+matched by positive unique ID, have exact masses, birth clocks, metallicities,
+progress clocks and positions; velocity differences are at most 2.12e-22.
+Sink-cloud particles share negative IDs, so sorting the entire particle array
+by ID alone is not a valid correspondence (the initially reported apparent
+position mismatch was from those clouds, not stellar-source state loss).
+
+Remaining within #1: first fill the genuinely unsupported **8--13 Msun**
+CCSN/ECSN transition with an explicit compatible source/fate choice; do not
+extrapolate LC18's 13-Msun node down to 8. The same-population SED problem,
+microscopic SNIa, AGB edge masses, wider metallicity support, phase-resolved
+winds, net/isotope treatment and alternate high-mass/PISN source packages
+remain on the previously stated #1 list. This closes the LC18-supported
+ordinary-source connection, **not all of section #1 or publication readiness**.
+
+### Full #1 preapproval and physical extensions (2026-09-08)
+
+Operator: “#1 전체를 지속 진행. 세부항목은 모두 사전승인.” All subitems
+within #1 are approved for implementation; do not pause at tiny substeps.
+#2 and #3 are still approval-held. Scientific data dependencies do not become
+validated physics merely because implementation is preapproved. No external
+audit, production-scale calculation, commit or push was performed in this
+implementation turn. Work remains in /gpfs/kjhan/LRD_JWST, origin
+kjhan0606/LagRamses, main. Shared global context was not changed.
+
+Implemented in the production patch/lagRamses modules, not just Python:
+
+1. **Solar 9--13 CCSN comparison**: 17 Sukhbold nodes, Z9.6 through 12,
+   W18 above 12. Stable-segment wind/terminal gross ejecta and actual PHOTB
+   energies feed native endpoints/SSP. Source-specific history v3 bounds
+   [9,13] reject out-of-range mass/Z. Residual remnant, solar coordinate,
+   Raiteri96 ages and effective wind speed are named comparison choices.
+   Maximum remnant difference from PHOTB .09434268 Msun (12.5-Msun node).
+   8--9, non-solar extension and complete isotope decay remain unsupported.
+2. **LC18 phase timing**: Table5 cumulative-loss shape sets wind timing;
+   integrated composition/energy endpoints stay unchanged. Explicit uniform
+   fallback at six rotation-zero nodes with zero printed phase loss. Sparse
+   per-star age knots reduce the AGB7 input from about 3.6 MB to 176 KB;
+   they are the same piecewise model, not a timing approximation. Native
+   validation no longer treats physically distinct hour-separated phases as
+   duplicates under the 0.1-year budget tolerance. At M=20/Z=.01345, H-end
+   wind at 9,158,200 yr is .499961981828186 Msun; final 12.4590525871584.
+3. **AGB envelopes through 7 Msun**: 61 KL16 nodes. Z=.007/M=7 CO(Ne)
+   contributes its envelope normally but cannot supply a strict CO-WD Ia.
+   CO classification is applied before Z mixing, and participates in restart
+   identity. Other selected nodes retain normal remnant accounting. This
+   does not manufacture a 7--8-Msun common-Z grid or microscopic Ia events.
+4. **Optional signed AGB net**: match source initial M/Z/Y, require identical
+   vectors for duplicate initial entries, normalize initial fractions, then
+   subtract initial composition times returned mass from normalized gross.
+   Initial raw fractions do not sum exactly to one: e.g. Z=.007/M=1 sum
+   1.006061391734592. The normalization is explicitly named and recorded,
+   not presented as exact raw-source abundance recovery. Native channel
+   mask F,T,F,F,F distinguishes supplied AGB net from absent table channels;
+   unavailable channels cannot carry nonzero net columns. Gross gas return
+   is unchanged. The channel mask participates in restart identity.
+
+All are explicit alternatives. Existing builder defaults and the preceding
+ordinary-CCSN input remain byte-identical. mkrun terminal/GUI selections and
+shared namelist-generator history help were updated together. No Makefile
+or VPATH order changes. The unrelated pre-existing generator deletion was
+preserved. No source-derived large table or binary was added to Git.
+
+Evidence root: `.physical-extension.7rcxv4/` (local, retained).
+
+| Input directory | yields.dat SHA256 | history.nml SHA256 |
+| --- | --- | --- |
+| sukhbold | f69d1690d76f3bcd60936f43049924afcf807bce5ae2bc875412e8cf24959a78 | 5be5e46b0a19799e531cdc89a2f2ff334024c971fdd79362ca27afe30b02f0f7 |
+| lc18-phase-sparse | b71c1ac741924aa98a2b3ff63d119a247329d8e85669cae28981171bc3d16f6c | d2a62e64bba38c66eeba9d3957debba54675b9b3812fc1b4165ef890ef7d91f0 |
+| agb7-sparse | 2d61de4b3381ed72ceed472f9d45c08173d06376068efc5616d959c2a3ad2e49 | 63dff962d20081279f86108d1100b1deb0d3723560fa25c5195306280c0ff0ed |
+| agb7-net | 3c3af500c33162cea184e89f072e7841e612a86042c3a140254915961fab817f | 5afb3011d8284836c08b9b2e843fc9d7fc71b59443093dc6023202642c8589e2 |
+
+GNU bounds/FPE and Intel production-object fixtures pass endpoint budgets,
+age splitting, Z-hull rejection, hybrid exclusion and signed net. The
+9--13 comparison at SSP initial 10000 Msun/Z=.02/.1 Gyr returns
+357.497985956766 Msun (SN 335.862657285151), SN energy
+2.11024969527311e52 erg. The AGB7 effective-SSP model at Z=.01/13.7 Gyr
+returns 3343.3696147592855 Msun. These are IMF-integrated native consumer
+results, not a claim that short live runs reach all terminal events.
+
+RAMSES builds used existing Intel -O3 objects plus rebuilt changed modules,
+HDF5=1 USE_CUDA=1 SNRT=1 DUST_LIVE=1 USE_FFTW=0, NVAR=30, lagRamses-first
+VPATH. Latest `ramses_physical_net3d` SHA256:
+`a5a8f269525a0e05f30028dca632529315adbf0cd4e1e681a9c77e582fb79121`.
+GNU/Intel fixtures cover the real terminal release; full RAMSES tests use
+1 rank, 2 threads, OMP/KMP stack512M, CPU hydro/RT/dust, level3, nstepmax4,
+noutput1, aout2/tout1e30 unreachable, foutput2/fbackup1000000. New live run
+`live-net/physical.nml` completed in 17.54s, step2-to4 restart
+`restart-net/physical.nml` in 4.02s. Output size about53MB each, free space
+165TB at launch. No MG nonconvergence or runtime error in positive runs.
+`restart-bad-net-mask` changed only net availability (not source model ID):
+exit1 in init_part before any new output_00002. Earlier `live-sparse` and
+`restart-sparse` pass; `restart-bad-core` likewise rejects a changed CO(Ne)
+classification before any new output. Existing outputs were preserved.
+GUI/model suite: 29 tests, one display-dependent skip, no failures.
+Final live-net/restart-net HDF5 comparison: native source identity and all
+SNRT datasets exact; hydro maximum absolute difference 6.204e-25 in
+momentum. Matching 512 stars by positive unique ID gives exact masses,
+birth/progress clocks, metallicities and positions, velocity differences
+at most4.236e-22. Negative duplicate-ID sink clouds are not a stellar-ID
+correspondence. Previous ordinary CCSN input was regenerated in memory and
+again matched both table/history checksums above without changes.
+
+#### Remaining #1: physical dependencies, not additional test gates
+
+| Original #1 item | Current extent and actual remaining dependency |
+| --- | --- |
+| Ordinary CCSN 8--40 | LC18 13--40 coupled; solar-only Sukhbold 9--13 comparison coupled. 8--9 ECSN fate and non-solar 9--13 still need compatible evolution/yields. |
+| Same-population SED | BPASS independent radiation remains; require spectra/atmospheres and feedback histories from the same IMF/evolution population, not a normalization-only join. |
+| Microscopic SNIa | Effective SSP retained. COSMIC genealogy exists for comparison, but transfer/retention/outflow/orbit re-evolution, population weights and channel-matched ejecta are not complete. |
+| BPASS clock/genealogy | 38 nonfinite source clocks and missing binary genealogy are not repaired by substituting an unrelated lifetime fit. |
+| Wider Z | Optional Fishlock extends CO<=6 to .001; AGB7/net common hull .007--.01345. Outside each source hull requires new physical data. |
+| AGB edge masses | 1--7 envelopes now coupled; 0.8--1 and common-Z 7--8/superAGB fate remain unsupported. |
+| Wind phases | Massive loss timing coupled; phase composition/terminal speeds and detailed AGB time profiles remain approximations. |
+| Net/isotope treatment | AGB normalized-initial net connected. Other channels' initial composition/complete radioactive inventories and decay projection remain absent. |
+| Alternate high-mass source | Solar Sukhbold tail reviewed; cannot blindly join PHOTB post-fallback remnants to KEPLER integrated yields. See findings below. |
+| PPISN/PISN | No selected core-mass/metallicity/rotation-resolved yield and population source. Switch remains disabled; no universal ZAMS threshold invented. |
+
+Read-only full Sukhbold check: stable yield segments vary in length (e.g.
+14-Msun table), so the historical 283-row review contract is not a full-grid
+parser. More importantly, W18 27.3 gives stable wind+terminal minus
+(ZAMS-PHOTB remnant) = +4.34056860167437 Msun, PHOTB fallback4.3871;
+N20 29.6 gives +5.464652019701305 Msun, fallback5.4944. These differences
+are comparable to fallback, not tiny rounding. This suggests a mismatch of
+ejecta/mass-cut stages, but is **not** sufficient evidence to subtract uniform
+element fractions or change the source tables. Tail120 also differs by about
+.37--.39 Msun. No full-grid promotion or increased remnant tolerance was made.
+Consult the [source archive](https://wwwmpa.mpa-garching.mpg.de/ccsnarchive/data/SEWBJ_2015/index.html)
+and [paper, sections4/5 and tables7/8](https://arxiv.org/pdf/1510.04643).
+The archive describes stable vs selected-radioactive segments and PHOTB versus
+KEPLER postprocessing. Source-derived data remain local; redistribution
+permission is not inferred from research access.
+
+Continuation order within the already approved #1 scope: resolve source/fate
+compatibility for the remaining mass/Z cells and fallback/decay stages;
+connect the corresponding native inputs; then complete shared-evolution
+SED and channel-matched binary population coupling. Reuse existing fixtures
+and native integration checks. Do not grow verification gates to replace
+missing physics, and do not relabel this partial progress as all-#1 complete.
+
+### Continued #1: low-Z AGB7 envelopes and net yields (2026-09-08)
+
+Corrected an overly restrictive earlier source assessment: the pinned
+Fishlock element table `yield_z001.txt` already contains each model's X0(i).
+No separate external initial-composition file is needed for this source.
+The existing reader now optionally computes signed net from the same-model
+normalized X0 and gross return. All 78 initial element fractions sum to
+.9999998846994237 before normalization. Fishlock gross return is unchanged,
+not normalized using the KL16 prescription. This extends the selected
+net-yield path to Z=.001, including intermediate-Z cumulative mixtures.
+
+The same source contains a genuine 7-Msun ONe model. It is now included when
+both `kl16_envelopes_to7` and `fishlock2014_raiteri96` are explicitly selected.
+Gross return5.855482487283754 Msun, residual remnant1.144517512716246 Msun;
+the latter is inside the .001-Msun printed rounding interval of Table1's
+1.145-Msun core. No source-value correction was needed. Its 53.248752-Myr
+Raiteri96 lifetime remains a declared approximation, not a source-matched
+Monash age. [Fishlock2014, Table1 and section3](https://arxiv.org/pdf/1410.7457)
+identify the evolution/envelope assumptions; no extra thermal pulses or ECSN
+event were invented.
+
+New selected grid: 61 KL16 + 16 Fishlock =77 AGB nodes, envelope1--7 Msun,
+common active Z=.001--.01345. The history names two non-CO nodes:
+ONe at (7,.001), CO(Ne) at (7,.007). The existing production Fortran
+classification map excludes both from strict CO-WD SNIa inventory while
+retaining their envelope and total-remnant contributions. This filtering
+also works before interpolation: at 7 Msun/Z=.004 neither mixed component
+can create CO-WD supply. Effective SSP SNIa and the original DTD are unchanged.
+
+Generated input: `.physical-extension.7rcxv4/agb7-lowz-net/`.
+Table SHA256 `3b693dcfc12fafc735b8bd3f03a15bf55c2d2edcda2acd4c0b753d7d09dfc1b8`;
+history SHA256 `2554cc6f6fdb5c7c41e3bf3bab0985b7ca6e0a6a5a85a42217ce558e46b70a09`.
+The prior `ramses_physical_net3d` already implements this multi-node map and
+channel mask; no new simulation module or Makefile change was required.
+Native test links its actual Intel production objects; GNU bounds/FPE test
+also passes. Reused `kl16_lc18_native_test.f90`, option
+`lc18_set_r_agb7_lowz_net`, rather than creating another test framework.
+Checks include exact endpoints, non-CO exclusion at exact/mixed Z, signed
+H/He net, rejection outside mass/Z coverage, timestep telescoping and
+effective-SSP closure at six Z values through13.7Gyr. For SSP initial10000
+Msun/Z=.004/.2Gyr, native AGB return662.150277439322 Msun, total return
+1580.23727066374 Msun before effective SNIa. Fishlock7 signed netH/He:
+-.617030706434305 and +.606194676556949 Msun. The strict40-Myr DTD still
+fails causal CO supply, as expected; it was not modified to force a pass.
+
+mkrun terminal/GUI adds explicit `agb7_lowz_net`, changes channel2 upper
+mass to7 and binds these inputs to the tested native binary. No new RAMSES
+namelist keyword. GUI/model suite29 tests passes (one display skip). Old
+ordinary CCSN and `agb7-net` inputs were regenerated and are byte-identical.
+No full RAMSES calculation, external audit, commit or push in this follow-up.
+
+High-mass fallback follow-up: Sukhbold section3 explicitly separates PHOTB
+remnant/energy from KEPLER isotope postprocessing. The available full-zonal
+samples are only12.0,15.2,20.1,25.2 Msun, not the large-fallback examples.
+Griffith2021/VICE W18F is a **forced explosion alternative**, not a documented
+repair of those fallback yields. Neither was used to normalize away the
+4--5-Msun discrepancy. See [Sukhbold2016](https://arxiv.org/pdf/1510.04643)
+and [VICE W18F](https://vice-astro.readthedocs.io/en/v1.2.x/users_guide/pkgcontents/vice.yields.ccsne.S16.W18F.html).
+Doherty's staged super-AGB tables were also checked: missing Ca and matched
+total ages remain actual inputs to resolve, not reasons to pad missing
+elements with physical zeros. #1 remains partial; #2/#3 remain held.
+
+### Continued #1: source-timed AGB winds and terminal WD formation (2026-09-08)
+
+The earlier terminal-envelope option is preserved. New explicit selection
+`--agb-release fishlock_tp_mass_loss` connects actual Fishlock thermal-pulse
+mass histories to native RAMSES. This is a physics/timing change, not another
+Python verification framework. Source:
+[CDS J/ApJ/797/44 ReadMe](https://cdsarc.cds.unistra.fr/ftp/J/ApJ/797/44/ReadMe)
+and [table2.dat](https://cdsarc.cds.unistra.fr/ftp/J/ApJ/797/44/table2.dat).
+The CDS table number differs from the article's printed table numbering.
+Local files are under `external/g2_candidates/fishlock2014_pulses/`:
+
+- ReadMe SHA256: `6fea0aa376e1677e92da47edb21f8a34a2f3e7399049134c98e9b4ef721ad57c`.
+- table2.dat SHA256: `4711e3662df69c490a697fba5725bdbba1a10271076b1b6383041f0077fa9d93`.
+
+772 rows, 17 columns. Exactly repeated (3.5 Msun, TP25) and (4 Msun, TP35)
+rows are identical in every field and collapsed; 770 unique pulses remain
+across 16 models at Z=.001. The initial mass minus tabulated TP total mass
+sets cumulative wind; preceding interpulse periods set relative timing.
+No raw source files are rewritten or presumed redistributable.
+
+Explicit approximations: last-TP left limit at the already selected
+Raiteri96 Padova terminal age; uniform pre-TP loss; unresolved loss after the
+last reported TP included in the terminal jump, not invented later pulses.
+Integrated mean composition and fixed 15 km/s remain. The source is not a
+Monash total-lifetime table. KL16 nodes retain terminal-envelope timing.
+At 7 Msun there are 135 pulses over75687.63yr; first/last TP total mass is
+6.9846/2.1117 Msun. Native return at the first TP is .0154 Msun, at the last
+left limit4.8883 Msun, with **zero remnant at both times**. At the terminal
+event gross return becomes5.855482487283754 and ONe remnant1.144517512716246.
+Its exclusion from strict SNIa CO inventory is unchanged.
+
+Native table admission/interpolation now accepts `wind_history_terminal_remnant`
+and source-specific `agb_wind_jump_*` fields. Ordinary rows interpolate to
+the left limit; the terminal row contains the right limit and creates the WD.
+Admission rejects a wind row exceeding that left limit in total mass,
+elements, untracked mass or energy. Restart identity binds the consumed jump
+fractions as well as the full cumulative table. Old all-terminal identities
+remain unchanged. No new main RAMSES namelist keyword or VPATH change.
+mkrun CLI/GUI adds `agb7_pulses`; shared generator history help is updated.
+
+Generated `.physical-extension.7rcxv4/agb7-pulses/`:
+
+- yields.dat SHA256: `4a42f7d2fd089b0f8fabc3127f3ef27019fcb9eda418f2342b453f1d2b6c3c50`.
+- history.nml SHA256: `67271d116d1c791ffd92c787dbe5f09bf16d2842e0d7e81a71ba0547f6831865`.
+- New binary `ramses_physical_pulses3d` SHA256:
+  `fa879828536954987597e2267a29a8210ef87a51086ca42876c6b2dc2598a897`.
+- Build: `make -C .physical-extension.7rcxv4 -f ../bin/Makefile -j4 HDF5=1
+  USE_CUDA=1 SNRT=1 DUST_LIVE=1 USE_FFTW=0 EXEC=ramses_physical_pulses`.
+  Build log `build-pulses.log`; earlier binaries/outputs preserved.
+
+Reused `kl16_lc18_native_test.f90`, mode `lc18_set_r_agb7_pulses`:
+GNU bounds/FPE and Intel production-object tests pass for all77 endpoints,
+terminal left limits/no early WD, signed net, non-CO filtering, Z mixture,
+SSP interval telescoping, ordinary CCSN and full0--13.7Gyr effective-SSP mass
+closure at six metallicities. Existing40-Myr DTD still fails strict CO-WD
+causality; no DTD change. Old `agb7-net` and `agb7-lowz-net` generation remains
+byte-identical. GUI/model29 tests pass, one display-only skip.
+
+Bounded live check: `live-pulses/physical.nml`, MPI1/OMP2, worker stacks512M,
+level3,4steps, Z=.004, H=.746/He=.25; initial metal/Fe/dust/thermal dust energy
+adjusted together to retain dust-to-metal ratio and20K initial temperature.
+RT, real-source feedback, independent BPASS, AGN and live DL01 dust remain
+the selected comparison, not galaxy calibration. noutput1/aout2/tout1e30
+(unreached), foutput2/fbackup1000000; about2x56MB,165TB free before launch.
+Completes in20.386s. `restart-pulses/physical.nml` resumes a COPY of output1
+(step2) to step4 in4.197s. Both logs complete without MG nonconvergence.
+All161 floating datasets are finite. Hydro/SNRT and48054 source-identity
+values are exact; matching512 positive unique star IDs gives exact masses,
+birth/progress clocks, metallicities, positions and velocities. Negative
+duplicate sink-cloud IDs are not used as unique stellar correspondence.
+Short live evolution tests wind wiring; native long-age tests cover TP/WD
+events. This closes this AGB timing subset, not all of section #1.
+
+Negative restart: `restart-bad-pulse-jump/physical.history.nml` decreases
+only the first terminal-jump fraction by .002, leaving all table values,
+source labels and hashes unchanged. `run-short-path.log` exits1 via
+MPI_Abort at stellar source identity comparison in init_part, before a new
+output2; the consumed timing change cannot hide behind an unchanged label.
+The first invocation's `run.log` did not test this: the legacy80-character
+command-line filename buffer truncated its long absolute path and exited0.
+It was retried with `physical.nml` relative to the same audited workdir.
+The existing files are preserved. No generic path/error-exit rewrite was
+added to this physics task.
+
+Authorization update: the subsequent user instruction preapproves #2 and #3
+as well. Earlier holds are historical. Continue source/native work plus
+additional radiation/dust physics and backend expansion without substep
+approval waits; do not revive unrelated generic HDF5/AMR infrastructure gates.
+
+### #3 execution portability: toolkit-free native CPU build (2026-09-08)
+
+Implemented `SNRT=1 DUST_LIVE=1 HDF5=1 USE_CUDA=0 USE_FFTW=0` in the existing
+Makefile, preserving VPATH. Omitted USE_CUDA is also CPU-only. Primary RT,
+material emission and IR transport/absorption retain their existing OpenMP
+kernels; feedback remains the same native Fortran. `auto` uses only CPU
+batches when the device implementation is absent. Explicit `cuda` rejects at
+startup; unavailable GPU diagnostic ABI calls return errors without output
+writes. No physics, source identity or HDF5 format change.
+
+New local build `.snrt-cpu.OKoz9T/ramses_cpu3d`, SHA256
+`7f875ab3a7cbfb6bb755d91de1f880cb03564d0e6e51563fca4c7aa276187bef`.
+`build-ordered.log` records successful clean CPU compilation/link with no
+nvcc, HYDRO_CUDA or CUDA libraries. `ldd` likewise shows no CUDA dependency.
+Intel MPI/Fortran/C++/OpenMP and HDF5 remain required. Initial `-j4` exposed
+missing base-module dependencies; amr_parameters->amr_commons->random is now
+explicit. The first clean build used `-j1`; no general build-graph rewrite.
+Never reuse CUDA-compiled objects for a CPU build or vice versa.
+
+Also fixed a concrete pre-existing diagnostic ABI mismatch:
+`snrt_cuda_weighted_sum_fp32_c` returns its error as a C function result,
+not a sixth output-pointer argument. The Fortran interface now matches it.
+Reused CUDA smoke: real GPU angular/ledger absolute errors1.1921e-7/7.7486e-7;
+CPU unavailable-device mode rejects both and preserves sentinel outputs.
+
+Reused hybrid smoke passes all primary/dust/IR batches and rollback with
+GPU=0 (primary exact to OpenMP). Dust native reference parity5.063e-16 for
+constant capacity,6.521e-16 for U(T), in auto and explicit OpenMP. Two-rank
+backend initialization/operator smoke passes; this is not a new multi-rank
+domain/AMR qualification. Forced CUDA test exits2 at backend initialization.
+mkrun terminal/GUI now selects `cuda_linked` (unchanged default executable)
+or `cpu_only`, and rejects forced CUDA with the latter before file creation.
+The existing main namelist schema is unchanged. GUI/model30 tests pass,
+one display-dependent skip. No additional Python runtime or gate framework.
+
+Full CPU live `live/physical.nml`: one rank/two OMP, auto primary/dust,
+level3/Z=.004, same AGB-pulse/LC18/SNIa/BPASS/AGN/DL01 reference physics;
+four steps complete in24.351s. Before launch: noutput1/aout2/tout1e30,
+foutput2/fbackup1000000, two expected~56MB dumps,162TB free. Source flags and
+worker stacks512M unchanged. All161 floating HDF5 datasets finite; maximum
+array-normalized hydro/SNRT difference from previous CUDA-linked/OpenMP run
+2.6642e-15. Source identity, birth mass/clocks/Z/positions exact; largest
+stellar mass/velocity absolute differences1.034e-25/1.006e-20.
+
+`restart/physical.nml` uses a preserved COPY of the previous CUDA-linked
+step2 dump, then CPU auto to step4 in7.080s, one new~56MB dump. SNRT and
+source identity exact, hydro momentum maximum absolute difference6.204e-25
+(maximum array-normalized4.221e-19); star masses/clocks/Z/positions exact,
+velocity difference<=4.236e-22. Both complete without MG nonconvergence.
+No production calculation, external audit, commit or push in this continuation.
+All #1--#3 remain authorized; closing this portability subset is not a claim
+that all remaining physics or backend expansion is complete.
+
+### #2 primary dust scattering, native CPU/CUDA/hybrid (2026-09-08)
+
+Resumed actual implementation after the operator queried the repeated stops;
+no new approval request. Implemented an explicit `isotropic_elastic` primary
+scattering comparison in patch/lagRamses, not a Python runtime prototype.
+The old default is `none`. Draine C_ext*albedo is sampled at the existing
+source-ledger representative energies; positive intervals use log-log
+interpolation and exact-zero endpoints avoid log(0). Same original optics,
+thermal grid and DL01 U(T), with a separate v4 reference sidecar:
+`simulation/snrt/config/dust_dl01_bulk_030_scattering_reference_v4.nml`, SHA
+`88d7efbd290f5cfc40775d36660cad3aaa47b11781d71b09c6f107464d9e76c3`.
+
+Algorithm: exact local isotropic elastic mixing of direction-integrated
+photon bins, tau=nH*relative_dust*sigma_sca*reduced_c*c*dt, first-order split
+after transport/absorption on owned leaves. Each nonlinear trial starts from
+the same incoming state, and the existing transaction commits only once.
+No absorption/heating contribution from scattering; group photon number and
+energy conserved to FP32 rounding. Shared CPU/CUDA cell kernel, nonblocking
+stream lease per cell batch; busy stream means the OpenMP worker executes
+that batch. Forced CUDA fails instead of silently switching; whole-call
+outputs remain untouched on any late-batch failure. New native layout is
+(direction,group,cell), independently checked at the Fortran boundary.
+
+This is explicitly not the measured anisotropic Draine phase function; no
+HG scattering, gas/grain recoil or radiation-pressure coupling, Doppler,
+IR scattering, stochastic heating, sublimation, or unresolved diffusion
+limit/AP claim. It remains a selectable reference comparison, not production
+approval or completion of #2. Existing material compatibility limits remain.
+Source definitions: https://www.astro.princeton.edu/~draine/dust/dustmix.html
+
+HDF5 binds actual scattering coefficients and model marker in the existing
+dust attribute (1640 values for old none; 1674 when enabled). Old default
+identities remain unchanged. mkrun GUI/terminal selects the sidecar and a
+capable CPU/CUDA-linked executable; generated README states limitations.
+No new main RAMSES namelist keyword, no unrelated schema/AMR gate expansion.
+
+Preserved old binaries; new CPU executable SHA
+`8d75b5251e6910387d14a843789cf07e97e21a6741e127c54979afd60b8207bf`
+at `.snrt-cpu.OKoz9T/ramses_scatter_cpu3d`; CUDA-linked SHA
+`c832f47e895119d37f95a2495d47bc56f8cc5f4535f56417d7a7753cb2ef35ed`
+at `.physical-extension.7rcxv4/ramses_scatter3d`. Both builds pass. Existing
+hybrid smoke covers zero opacity, unequal angular weights, analytic solution,
+two half steps, positivity/conservation and atomic rollback. On visible A10
+physical device1, auto scattering used CPU16/GPU1 batches; occupied stream
+CPU17/GPU0; forced CUDA CPU0/GPU17. Fortran analytic/layout test passes on
+CPU/forced CUDA; existing material/IR parity <=1.871e-15 on GPU. CPU two-rank
+operator test passes; this is not a full multi-domain MPI qualification.
+Existing Intel/GNU contract tests pass opt-in/reset, thermal/export tests
+pass, mkrun31 tests pass with one display-only skip.
+
+Live evidence `.dust-scatter.CWEvh3/`: audited before launch, one rank/two OMP,
+auto primary/dust, noncosmo level3/Z=.004, same physical source/feedback/AGN/
+BPASS/DL01 control and 512M worker stacks. live/off both finish four steps,
+foutput2 (two ~56MB dumps each), noutput1/aout2/tout1e30 unreached,
+fbackup1000000. GPFS161TB free. `live` takes48.196s while running alongside
+off. The parent `cooling` timer includes SNRT work; it cannot separately
+attribute cooling versus scattering cost. No MG nonconvergence.
+All161 floating datasets finite. Default-off regression versus the earlier
+CPU run is not bit-identical: max array-normalized hydro2.6642e-15,
+SNRT1.9984e-15; near-zero sink angular momenta differ <=4.66e-24 absolute.
+An initial all-dataset exact-equality diagnostic correctly failed; no exact
+regression claim is made. On/off SNRT level3 differs2.2766e-2 in normalized
+payload, dust material energy1.011e-3 relative; these measure short-control
+model response, not a convergence/accuracy bound.
+
+`restart` copies (does not move) live step2, advances to step4 in7.23s.
+SNRT arrays and dust identity exactly match live; hydro momentum differs
+<=6.204e-25 absolute (4.221e-19 array-normalized). Particle slot order changes
+on restart, so physical stars must be aligned by unique positive ID, not
+raw array position. All512 unique positive-ID/PTYPE_STAR=1 stars have exact
+mass, birth mass/clocks, Z and positions; velocities differ <=4.236e-22.
+`bad-restart` uses the same copy but the old none sidecar:
+MPI_Abort10, SNRT checkpoint rejection13 at init_hydro, before new output2.
+All input/output evidence is preserved; no production calculation, external
+audit, commit or push. #1--#3 remain preapproved, not approval-held.
+
+### #2 native gas/dust/IR thermal exchange (2026-09-08)
+
+Continued implementation without requesting approval. Added explicit
+`hydrogen_accommodation` to the existing v4 reference dust contract and mkrun
+GUI/terminal, with `none` default. No main RAMSES namelist keyword, new Python
+runtime, external audit or generic gate framework. The physical collision
+law is the geometric hydrogen-equivalent accommodation of McKinnon et al.
+2021 eqs20--21 (https://academic.oup.com/mnras/article/502/1/1344/6067372).
+This implementation uses finite existing U(T), not that paper's instantaneous
+grain-equilibrium approximation. The control explicitly adopts area/H
+3.495e-22 cm2 and alpha=.5: effective0.1-micron spheres of density3g/cm3 with
+the existing reference dust mass1.398e-26g/H, not a recovered WD01 size law.
+No electron/ion Coulomb, H2 colliders, grain evolution or radiation pressure.
+
+First implemented the conservative implicit isolated gas/dust operator on
+both CPU and CUDA with nonblocking leases. Its analytic BE residual, heating,
+cooling, zero-transfer, stiff and late-error rollback tests pass. However,
+inserting it AFTER IR failed in the actual live control at step0: the dust
+reservoir would leave the material table because it could not radiate during
+that separate kick. The failure returned0 through legacy clean_stop but was
+recognized from the pre-commit rejection log and absence of output. Preserved
+`.dust-exchange.WKZl1j/live/run.log`, initial binaries
+`ramses_exchange_cpu3d` / `ramses_exchange3d`; they are NOT mkrun's selection.
+
+Corrected the physics integration: eliminate the BE gas equation analytically,
+Q=r*(Eg-Cg*Td), r=Kdt/(Cg+Kdt), and solve material+IR emission+Q together in
+the existing monotone material root/fixed-point IR absorption solve. Reuse
+CPU/CUDA/hybrid material dispatch; material mode2 appends gas E/Cv/K and Q,
+while old modes0/1 retain their ABI and independent Fortran parity. Gas Cv
+and thermal speed freeze per existing IR substep; conductance updates between
+substeps. Gas Q enters the existing total-energy residual. No accepted gas,
+dust or IR state changes on failure. Only the accepted sumQ is passed back
+to RAMSES total gas energy, with kinetic energy unchanged. Chemistry remains
+operator split, and the existing bath/material domain is not extrapolated.
+The isolated operator remains available as a no-radiation reference, but the
+live driver uses ONLY the joint material/IR path.
+
+Sidecars: `dust_dl01_bulk_030_exchange_reference_v4.nml` SHA
+`05670f96f7f461db95e46d3b3b232da9d02c49297b566a5d48cb6d799500100a`;
+`dust_dl01_bulk_030_scattering_exchange_reference_v4.nml` SHA
+`b1f27df3a6fcd2f76b7f6ca8a14c794b5811540905cb1c04480586bf7614909d`.
+The latter has1678 HDF5 dust-identity values (old scattering1674 + model6,
+joint algorithm2, area, alpha). All old no-exchange identities remain intact.
+
+Native CPU build `.snrt-cpu.OKoz9T/ramses_exchange_coupled_cpu3d`, SHA
+`ba6bcc99843a69b199693b30dd376c6428b87f0507e99bb3403e5bb01cff61c7`;
+CUDA-linked `.physical-extension.7rcxv4/ramses_exchange_coupled3d`, SHA
+`23b95ab47aa0b32fdc58151b090f35aa84ab2e195af4a089f46b107d5eb24459`.
+Existing joint Fortran tests pass on CPU, forced CUDA and two MPI ranks:
+stiff gas cooling into IR, total energy, material domain and rollback of gas,
+dust, IR and photon outputs. Extended existing hybrid material test mode2:
+auto CPU15/GPU2 free, CPU17/GPU0 occupied, full output parity with CPU and
+energy closure pass. This does not constitute a full multi-domain AMR run.
+Intel/GNU contract opt-in/reset, thermal exporter and mkrun32 tests pass
+(one display-dependent skip). No extra external auditor was invoked.
+
+Actual short evolution: `.dust-exchange.WKZl1j/live-coupled/physical.nml`,
+one rank/two OMP, CPU-only auto, noncosmo level3/Z=.004, same LC18/AGB pulse/
+effective SNIa/BPASS/AGN/DL01+isotropic-scattering reference. Native hydro,
+sink and feedback flags rechecked; MG nonconvergence abort enabled. Four
+steps complete27.390s. Scheduled noutput1/aout2/tout1e30 unreached; foutput2,
+fbackup1000000, two~56MB dumps,161TB GPFS free at launch. The parent cooling
+timer includes SNRT and is not an isolated collisional-kernel cost measure.
+Joint balance residual <=5.0311e-10 under1e-9 tolerance; no MG failure.
+
+`restart/physical.nml` uses a COPY of live step2, CUDA-linked build, visible
+physical GPU1, primary OpenMP/dust auto, then step4 in9.531s. Material, IR
+transport and absorption each visibly use CPU1/GPU1 batches. All161 floating
+datasets finite. Final hydro arrays, source identity and all512 positive-ID
+PTYPE_STAR masses/clocks/Z/positions/velocities exactly match continuous CPU.
+SNRT maximum absolute difference3.312e-277 (not an exact-bit claim); dust
+identity exact. Reconstructed dust temperatures22.682--79.642K remain inside
+the material table. `bad-restart` disables exchange with old scattering
+sidecar: MPI_Abort10 / checkpoint rejection13 before new output2. Existing
+outputs and failed-trial evidence preserved. No production or commit/push.
+
+This closes the native hydrogen-equivalent gas/dust/IR connection, not all
+of #1--#3 or publication readiness. Remaining dust choices include actual
+size/composition-matched collision areas, electron/ion charging, anisotropic
+scattering, radiation pressure, grain evolution and cosmological-domain
+qualification. Source/population gaps previously listed remain open.

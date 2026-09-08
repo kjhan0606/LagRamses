@@ -67,6 +67,13 @@ ranks are exercised here. Reserve appropriate CPUs/GPUs and set
 `CUDA_VISIBLE_DEVICES` before launch. The old fixed single-rank mode and its
 preserved executable remain separate and unchanged.
 
+All comparison modes also offer **Comparison executable**: the existing
+`cuda_linked` binary or the toolkit-free `cpu_only` build at
+`.snrt-cpu.OKoz9T/ramses_cpu3d`. The latter preserves the selected physical
+inputs; `auto` computes all batches on OpenMP workers. Choosing forced `cuda`
+with this executable is rejected before saving. This is a local build asset,
+not an executable shipped by Git. No simulation is launched by this choice.
+
 The dust backend selector covers material emission **and** IR transport/local
 absorption. MPI exchange, the outer iteration and conservation sums remain on
 the host. Streams belong to each rank's assigned GPU; increasing stream count
@@ -106,6 +113,30 @@ physics defaults still require a scientific/storage audit before a real run.
 The current parameter database does not support every sector offered by the
 restored runner (for example FDM when `m_axion` is absent); those selections fail
 with a clear message rather than introducing replacement defaults.
+
+Comparison modes also expose `Primary dust scattering`: `none` preserves
+the old absorption-only model/binary; `isotropic_elastic` selects the native
+scattering-capable CPU or CUDA-linked binary and the separate Draine/DL01
+v4 sidecar. Scattering follows `Primary RT backend`, including nonblocking
+stream/OpenMP dispatch. This is an explicit reference model: isotropic
+elastic redistribution, no measured anisotropic phase function, radiation
+pressure, IR scattering or unresolved diffusion-limit claim. The generated
+README records these limits and the restart prohibition on switching models.
+No new main RAMSES namelist keyword is introduced; the dust sidecar owns
+`scattering_model` and `scattering_input`.
+
+`Dust gas thermal exchange=hydrogen_accommodation` selects the joint native
+gas/dust/IR thermal solver and its separate v4 reference sidecar, with or
+without primary scattering. The comparison declares geometric area/H
+`3.495e-22 cm2` and accommodation `0.5` (effective 0.1-micron spheres of
+density 3 g/cm3, not the WD01 grain distribution). The existing thermal
+exporter accepts explicit `--collision-area-per-h` and `--accommodation`
+with `--native-gas-exchange hydrogen_accommodation` for other inputs.
+All collision fields are sidecar parameters, not new main RAMSES keywords.
+Electron/ion charging and molecular collision physics remain outside this
+hydrogen-equivalent model. Gas, dust and IR are solved together; thermal
+speed and gas Cv are frozen per IR substep, and chemistry is operator split.
+`none` remains the default; changing model/coefficients on restart is rejected.
 
 Run bounded tests from the root:
 

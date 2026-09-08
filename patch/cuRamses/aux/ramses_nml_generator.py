@@ -370,7 +370,7 @@ PARAMS = [
              '40-120 Msun endpoint model (user-selected mode requires a history file)',
              choices=['source_consistent', 'wind_only_collapse', 'mixed_remnant']),
     ParamDef('high_mass_history_path', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
-             'Native source-node/lifetime namelist; requires user_selected_model_v1 and HDF5 output/restart'),
+             'Native history: v1=40--120, v2=13--120, v3=explicit CCSN subdomain; match channel bounds; optional AGB wind history retains terminal WD formation; non-CO tags exclude Ia WD supply; requires user_selected_model_v1 and HDF5 I/O'),
     ParamDef('high_mass_remnant_adjust_max_fraction', 'real', None, 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
              'Mixed-model maximum remnant adjustment / INITIAL mass; explicit nonzero limit required'),
     ParamDef('use_wind', 'bool', True, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable stellar wind source'),

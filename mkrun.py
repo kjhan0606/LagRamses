@@ -328,7 +328,7 @@ def save_text(path, text):
         stream.write(text)
 
 
-def generate_comparison(name, outdir, ui, write_text, parallel=False):
+def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False):
     """Package the already exercised comparison, not a new physical model.
 
     Preserve the full native template verbatim except for local input paths;
@@ -363,6 +363,69 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
     binary = root / '.bpass-native.v0ZwR6/ramses_bpass_native3d'
     if parallel:
         binary = root / '.ir-hybrid.dYEXir/ramses_ir3d'
+    if ccsn:
+        source = root / '.ccsn-source.lobKc9/input'
+        binary = root / '.ccsn-source.lobKc9/ramses_ccsn3d'
+        source_extension = ui.ask_choice('CCSN physical input', OrderedDict([
+            ('baseline', ('LC18 uniform wind + ordinary CO AGB (existing comparison)',)),
+            ('phase', ('LC18 phase mass loss + low-Z ordinary CO AGB',)),
+            ('agb7', ('LC18 phase mass loss + KL16 envelopes to 7 Msun; non-CO Ia exclusion',)),
+            ('agb7_net', ('Same 7-Msun model + AGB net yields from normalized initial M/Z/Y composition',)),
+            ('agb7_lowz_net', ('AGB to 7 Msun and Z=.001 + net yields; exclude ONe and CO(Ne) from Ia supply',)),
+            ('agb7_pulses', ('Same low-Z/net model + Fishlock thermal-pulse wind history; terminal WD formation',)),
+        ]), 'baseline')
+        if source_extension in ('phase','agb7'):
+            source = root / '.physical-extension.7rcxv4' / ('lc18-phase-sparse' if source_extension=='phase' else 'agb7-sparse')
+            binary = root / '.physical-extension.7rcxv4/ramses_physical_sparse3d'
+        elif source_extension in ('agb7_net','agb7_lowz_net'):
+            source = root / '.physical-extension.7rcxv4' / ('agb7-net' if source_extension=='agb7_net' else 'agb7-lowz-net')
+            binary = root / '.physical-extension.7rcxv4/ramses_physical_net3d'
+        elif source_extension == 'agb7_pulses':
+            source = root / '.physical-extension.7rcxv4/agb7-pulses'
+            binary = root / '.physical-extension.7rcxv4/ramses_physical_pulses3d'
+        elif source_extension != 'baseline':
+            raise ValueError('Unknown CCSN physical input.')
+        ui.info('LC18 Set R: source nodes 13--120 Msun; ordinary SN at 13/15/20/25, '
+                'wind-only nodes from 30. Explicit comparison energy=1e51 erg per exploding node. '
+                'No 8--13 Msun source or same-population SED claim; old comparison is unchanged.')
+    executable_kind = ui.ask_choice('Comparison executable', OrderedDict([
+        ('cuda_linked', ('Existing CUDA-linked build (GPU optional at runtime)',)),
+        ('cpu_only', ('Toolkit-free CPU/OpenMP build; forced CUDA is unavailable',)),
+    ]), 'cuda_linked')
+    if executable_kind == 'cpu_only':
+        if primary_backend == 'cuda' or dust_backend == 'cuda':
+            raise ValueError('CPU-only executable cannot use forced CUDA; choose auto or openmp.')
+        binary = root / '.snrt-cpu.OKoz9T/ramses_cpu3d'
+    elif executable_kind != 'cuda_linked':
+        raise ValueError('Unknown comparison executable.')
+    scattering = ui.ask_choice('Primary dust scattering', OrderedDict([
+        ('none', ('Existing absorption-only model (default)',)),
+        ('isotropic_elastic', ('Draine scattering opacity; isotropic elastic comparison, no radiation pressure',)),
+    ]), 'none')
+    dust_contract = config / 'dust_dl01_bulk_030_reference_v4.nml'
+    if scattering == 'isotropic_elastic':
+        dust_contract = config / 'dust_dl01_bulk_030_scattering_reference_v4.nml'
+        binary = root / ('.snrt-cpu.OKoz9T/ramses_scatter_cpu3d' if executable_kind == 'cpu_only'
+                         else '.physical-extension.7rcxv4/ramses_scatter3d')
+        ui.info('Primary scattering follows the primary RT backend; isotropic elastic, first-order split. '
+                'No measured anisotropic phase function, radiation pressure, IR scattering or '
+                'unresolved optically-thick diffusion claim. Explicit reference comparison only.')
+    elif scattering != 'none':
+        raise ValueError('Unknown primary dust scattering model.')
+    exchange = ui.ask_choice('Dust gas thermal exchange', OrderedDict([
+        ('none', ('No collisional exchange (existing default)',)),
+        ('hydrogen_accommodation', ('Hydrogen-equivalent geometric collisions; conservative gas/dust heat exchange',)),
+    ]), 'none')
+    if exchange == 'hydrogen_accommodation':
+        suffix = 'scattering_exchange' if scattering == 'isotropic_elastic' else 'exchange'
+        dust_contract = config / ('dust_dl01_bulk_030_' + suffix + '_reference_v4.nml')
+        binary = root / ('.snrt-cpu.OKoz9T/ramses_exchange_coupled_cpu3d' if executable_kind == 'cpu_only'
+                         else '.physical-extension.7rcxv4/ramses_exchange_coupled3d')
+        ui.info('Explicit collision comparison: area/H=3.495e-22 cm2, accommodation=0.5; '
+                'effective 0.1 micron spheres of density 3 g/cm3, not the WD01 size distribution. '
+                'No electron/ion Coulomb collisions; temperature range remains the supplied material/IR domain.')
+    elif exchange != 'none':
+        raise ValueError('Unknown dust gas thermal exchange model.')
     env = OrderedDict([
         ('OMP_NUM_THREADS', str(threads)), ('I_MPI_FABRICS', 'shm'),
         ('OMP_STACKSIZE', '512M'), ('KMP_STACKSIZE', '512M'),
@@ -373,7 +436,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
         ('SNRT_RT_LEVEL', '3'), ('SNRT_ALLOW_REFERENCE_CONTROL', '1'), ('SNRT_P1_DIAGNOSTIC', '0'),
         ('SNRT_GROUP_CONTRACT', config / 'snrt_group_contract_reference_control_v1.nml'),
         ('SNRT_SECONDARY_TABLE_CONTRACT', config / 'snrt_secondary_table_contract_v1.nml'),
-        ('SNRT_DUST_CONTRACT', config / 'dust_dl01_bulk_030_reference_v4.nml'),
+        ('SNRT_DUST_CONTRACT', dust_contract),
         ('SNRT_STELLAR_SED', config / 'snrt_stellar_sed_bpass_independent_v2.nml'),
         ('PHASE0_SNIA_RUNTIME_CONTRACT', config / 'fp2_snia_effective_ssp_runtime_v1.nml'),
     ])
@@ -387,6 +450,16 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
         raise ValueError('Local comparison assets unavailable (a Git clone alone is insufficient): '
                          + ', '.join(missing))
     text = template.read_text(encoding='utf-8')
+    if ccsn:
+        token = 'channel_mass_min_msun=40d0,1d0,40d0,3d0,140d0'
+        if text.count(token) != 1:
+            raise ValueError('CCSN comparison mass-range template changed.')
+        text = text.replace(token, 'channel_mass_min_msun=13d0,1d0,13d0,3d0,140d0')
+        if source_extension in ('agb7','agb7_net','agb7_lowz_net','agb7_pulses'):
+            token = 'channel_mass_max_msun=120d0,6d0,120d0,8d0,260d0'
+            if text.count(token) != 1:
+                raise ValueError('AGB comparison mass-range template changed.')
+            text = text.replace(token, 'channel_mass_max_msun=120d0,7d0,120d0,8d0,260d0')
     history_token = 'CHANGE_ME_KL16_LC18_INPUT/history.nml'
     fallback_token = '/gpfs/kjhan/LRD_JWST/simulation/snrt/config/snrt_agn_driver_faithful_smoke_yields.dat'
     if text.count(history_token) != 1 or text.count(fallback_token) != 1:
@@ -406,8 +479,8 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
     environment += ['export {}={}'.format(key, shlex.quote(str(value))) for key, value in env.items()]
     instructions = (
         'Fixed RT/feedback/dust comparison; inputs only, NOT launch approval.\n'
-        '{ranks} MPI ranks, OpenMP={threads} per rank; NVAR=30 SNRT/DUST_LIVE/HDF5/CUDA-linked build.\n'
-        'Primary RT={primary_backend}; dust material={dust_backend}. Mechanical feedback and IR transport remain host-side.\n'
+        '{ranks} MPI ranks, OpenMP={threads} per rank; NVAR=30 SNRT/DUST_LIVE/HDF5, {executable_kind} build.\n'
+        'Primary RT={primary_backend}; dust material/IR={dust_backend}. Mechanical feedback and outer IR MPI exchange remain host-side.\n'
         'auto uses per-batch nonblocking stream leases; busy slots run on CPU. n_cuda_streams controls the shared pool.\n'
         'Worker stack=512M for this NVECTOR=500/NVAR=30 CPU-hydro build; budget memory per thread.\n'
         'Single-node launch (I_MPI_FABRICS=shm); multi-node operation needs separate fabric configuration.\n'
@@ -428,7 +501,47 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False):
              shlex.quote(name + '.nml'), root / ('simulation/snrt/NATIVE_RUNTIME.md' if parallel else
                  'provenance/rt_feedback_dust_comparison_closeout_2026-09-07.md'),
              ranks=ranks, threads=threads, primary_backend=primary_backend, dust_backend=dust_backend,
+             executable_kind=executable_kind,
              launcher='mpiexec -n {} '.format(ranks) if parallel else '')
+    instructions += 'Primary dust scattering: {} (follows primary RT backend).\n'.format(scattering)
+    instructions += 'Dust gas thermal exchange: {} (follows dust backend).\n'.format(exchange)
+    if exchange != 'none':
+        instructions += ('Conservative hydrogen-equivalent accommodation: area/H=3.495e-22 cm2, alpha=0.5.\n'
+            'Effective monodisperse collision radius=0.1 micron, density=3 g/cm3; NOT a WD01 size-distribution claim.\n'
+            'No electron/ion Coulomb or molecular collision network; frozen speed/Cv per IR substep.\n'
+            'Gas/dust/IR solved jointly and conservatively, operator split from primary RT/chemistry.\n'
+            'Gas loses exactly the energy gained by dust and vice versa; changing these inputs on restart is forbidden.\n'
+            'Exchange outside the existing IR bath/material temperature domain fails; no clipping or extrapolation.\n')
+    if scattering == 'isotropic_elastic':
+        instructions += ('Draine C_ext*albedo at group representative energies; isotropic elastic angular mixing.\n'
+            'No absorbed energy from scattering, radiation pressure/recoil, anisotropic phase function or IR scattering.\n'
+            'First-order transport split, not an unresolved optically-thick diffusion solver; reference only.\n'
+            'Scattering selection and opacity are bound to restart identity; do not switch on restart.\n')
+    if ccsn:
+        instructions += ('LC18 Set R ordinary CCSN source selected; wind/SNII support 13--120 Msun.\n'
+            '8--13 Msun remains absent. SN energy=1e51 erg is an explicit comparison parameter.\n'
+            'Source-node mass fractions use nearest cells; the 25/30 transition is at 27.5 Msun,\n'
+            'not an assertion of an individual-star explodability threshold. >=40 preset is separate.\n'
+            'Four steps test initialization/wind coupling; they do not guarantee reaching SN lifetimes.\n')
+        if source_extension != 'baseline':
+            instructions += ('Wind timing follows Table5 cumulative loss; zero printed-loss nodes explicitly retain uniform timing.\n'
+                'Mean wind composition and fixed speeds remain approximations.\n')
+        if source_extension in ('agb7','agb7_net'):
+            instructions += ('AGB envelopes extend to 7 Msun. The 7-Msun/Z=.007 CO(Ne) remnant cannot fund strict CO-WD SNIa.\n'
+                'Common metallicity support .007--.01345; low-Z/7--8 Msun coverage is not invented.\n')
+        if source_extension == 'agb7_net':
+            instructions += ('AGB net = normalized gross - normalized initial M/Z/Y composition times return.\n'
+                'Other channels remain net-unavailable, not physical zero production; gas deposition uses gross ejecta.\n')
+        if source_extension in ('agb7_lowz_net','agb7_pulses'):
+            instructions += ('AGB envelopes 1--7 Msun; common metallicity support .001--.01345.\n'
+                'ONe at 7/Z=.001 and CO(Ne) at 7/Z=.007 cannot fund strict CO-WD SNIa.\n'
+                'Fishlock timing uses Raiteri96 Padova ages, not source-matched Monash lifetimes.\n'
+                'AGB net = selected gross - normalized source initial composition times return; Fishlock uses its own X0 column.\n'
+                'Other table channels remain net-unavailable; gas deposition uses gross ejecta. No 7--8 Msun extrapolation.\n')
+        if source_extension == 'agb7_pulses':
+            instructions += ('Fishlock TP wind timing: source interpulse periods/Mtot; last TP left limit aligned to Padova terminal age.\n'
+                'Pre-TP loss is uniform; remaining envelope is a terminal jump; no WD formation during earlier wind release.\n'
+                'AGB composition/speed stay integrated means; KL16 nodes retain terminal-envelope timing.\n')
     files = OrderedDict([
         (str(dest / (name + '.nml')), text), (str(dest / 'ic_sink'), sink.read_text()),
         (str(dest / history_name), (source / 'history.nml').read_text()),
@@ -476,9 +589,11 @@ def generate_run(ui=None, write_text=save_text):
         ('hydro', ('Hydro (gas + gravity + N-body)',)),
         ('comparison', ('RT/feedback/dust comparison (fixed non-cosmological reference)',)),
         ('comparison_parallel', ('RT/feedback/dust comparison (MPI + GPU/OpenMP placement)',)),
+        ('comparison_ccsn', ('LC18 ordinary CCSN + AGB/SNIa/RT/dust comparison (13--120 Msun)',)),
     ]), 'dmo')
-    if mode in ('comparison', 'comparison_parallel'):
-        return generate_comparison(name, outdir, ui, write_text, parallel=(mode == 'comparison_parallel'))
+    if mode in ('comparison', 'comparison_parallel', 'comparison_ccsn'):
+        return generate_comparison(name, outdir, ui, write_text, parallel=(mode != 'comparison'),
+                                   ccsn=(mode == 'comparison_ccsn'))
     values['hydro'] = (mode == 'hydro')
 
     dm_choice, extra_dm = collect_dm_sector(values, ui)

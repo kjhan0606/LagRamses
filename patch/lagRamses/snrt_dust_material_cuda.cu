@@ -16,8 +16,8 @@ static int dust_material_stream(const double *input,const double *table,double *
   if(nc<1||ng<1||nt<2||!isfinite(dt)||dt<=0)return 7;
   double *in_d=nullptr,*table_d=nullptr,*out_d=nullptr;int *error_d=nullptr;
   int status=7,kernel_status=0;
-  const size_t in_bytes=sizeof(double)*4*size_t(nc),table_bytes=sizeof(double)*(ng+3)*size_t(nt);
-  const size_t out_bytes=sizeof(double)*(ng+2)*size_t(nc);
+  const size_t in_bytes=sizeof(double)*(use_u==2?7:4)*size_t(nc),table_bytes=sizeof(double)*(ng+3)*size_t(nt);
+  const size_t out_bytes=sizeof(double)*(ng+2+(use_u==2))*size_t(nc);
   if(cudaMallocAsync(&in_d,in_bytes,stream)!=cudaSuccess)goto done;
   if(cudaMallocAsync(&table_d,table_bytes,stream)!=cudaSuccess)goto done;
   if(cudaMallocAsync(&out_d,out_bytes,stream)!=cudaSuccess)goto done;

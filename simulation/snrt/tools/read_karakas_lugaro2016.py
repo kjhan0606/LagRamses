@@ -29,13 +29,15 @@ LIFETIME_SHA256 = '62e7fd40ce1d63d9024c1755f8226bb501ce92db95831c945ef18eaa2f80e
 FISHLOCK_SHA256 = 'b7379ba6eda1018bfeab527ff9bd17fa57fc4da45b2aa5ff845014c31f7eee00'
 
 
-def read_fishlock2014(*, lifetime_model: str) -> list[dict]:
+def read_fishlock2014(*, lifetime_model: str, include_one: bool = False,
+                     net_yields: bool = False) -> list[dict]:
     """Explicit low-Z comparison: Fishlock yields plus a Padova lifetime fit.
 
     Fishlock 2014 Table 1 does NOT give total stellar lifetimes. Raiteri96
     coefficients follow Valiante et al. 2009, equations 3--6 (0905.1691).
     This is a declared cross-model timing approximation, not Monash ages.
-    Fishlock section 3 identifies the 7-Msun model as ONe; exclude it.
+    Fishlock section 3 identifies the 7-Msun model as ONe; exclude by default.
+    Explicit envelope inclusion must not turn that remnant into a CO-WD.
     Gross mass(i)_lost already includes the residual-envelope assumption
     described in that paper. No KL16-style normalization is applied here.
     """
@@ -51,7 +53,7 @@ def read_fishlock2014(*, lifetime_model: str) -> list[dict]:
     for line in data.decode().splitlines():
         match = re.fullmatch(r'\s*#\s*([\d.]+) Msun, Z = ([\d.]+)\s*', line)
         if match:
-            current = dict(mass=float(match[1]), z=float(match[2]), elements={})
+            current = dict(mass=float(match[1]), z=float(match[2]), elements={}, initial={})
             blocks.append(current)
         elif line.strip() and not line.lstrip().startswith('#'):
             fields = line.split()
@@ -61,6 +63,9 @@ def read_fishlock2014(*, lifetime_model: str) -> list[dict]:
             if atomic_number in current['elements'] or not all(map(math.isfinite, values)) or values[1] < 0:
                 raise SourceAdapterError('invalid Fishlock element row')
             current['elements'][atomic_number] = values[1]
+            if values[4] < 0:
+                raise SourceAdapterError('negative Fishlock initial abundance')
+            current['initial'][atomic_number] = values[4]
     expected = [1.,1.25,1.5,2.,2.25,2.5,2.75,3.,3.25,3.5,4.,4.5,5.,5.5,6.,7.]
     if [b['mass'] for b in blocks] != expected or any(b['z'] != .001 for b in blocks):
         raise SourceAdapterError('unexpected Fishlock source coordinates')
@@ -68,15 +73,16 @@ def read_fishlock2014(*, lifetime_model: str) -> list[dict]:
     # to 0.001 Msun. Check against that rounding interval, not against the
     # final total stellar mass (which still includes an unejected envelope).
     source_core_masses = (.667,.649,.646,.661,.673,.709,.746,.792,.843,.857,
-                          .883,.908,.938,.972,1.015)
+                          .883,.908,.938,.972,1.015,1.145)
     records = []
-    for b, source_core in zip(blocks[:-1], source_core_masses, strict=True):
+    selected = blocks if include_one else blocks[:-1]
+    for b, source_core in zip(selected, source_core_masses[:len(selected)], strict=True):
         m,z,e = b['mass'],b['z'],b['elements']
         if not set(TRACKED_ATOMIC_NUMBERS) <= e.keys() or len(e) < 70:
             raise SourceAdapterError('incomplete Fishlock element payload')
         returned = math.fsum(e.values()); remnant = m-returned
         if not 0 < returned < m or not 0 < remnant < 1.4:
-            raise SourceAdapterError('Fishlock CO-AGB mass budget invalid')
+            raise SourceAdapterError('Fishlock AGB mass budget invalid')
         if abs(remnant-source_core) > .0005+1e-12:
             raise SourceAdapterError('Fishlock gross sum inconsistent with published core mass')
         x,y = math.log10(m),math.log10(z)
@@ -86,11 +92,82 @@ def read_fishlock2014(*, lifetime_model: str) -> list[dict]:
         lifetime = 10**(a0+a1*x+a2*x*x)
         records.append(dict(coordinate=dict(initial_mass_msun=m,metallicity_mass_fraction=z),
                             overshoot_label='Fishlock2014_original',
-                            evolution=dict(stellar_lifetime_yr=lifetime,core_kind='CO',
+                            evolution=dict(stellar_lifetime_yr=lifetime,core_kind='ONe' if m==7 else 'CO',
                                            lifetime_source='Raiteri96_Padova_fit_not_Fishlock_evolution'),
                             selected_ejecta=dict(returned_mass_msun=returned,remnant_mass_msun=remnant,
                                                 tracked_ejected_mass_msun=[e[k] for k in TRACKED_ATOMIC_NUMBERS])))
+        if net_yields:
+            # X0 is supplied in each SAME model's element row. Do not borrow
+            # KL16 initial abundances or substitute a solar mixture.
+            total = math.fsum(b['initial'].values())
+            if not math.isfinite(total) or total <= 0:
+                raise SourceAdapterError('invalid Fishlock initial composition')
+            x = {k:v/total for k,v in b['initial'].items()}
+            records[-1]['selected_net'] = [e[k]-x[k]*returned for k in TRACKED_ATOMIC_NUMBERS]
+            records[-1]['initial_net_model'] = dict(coordinate=records[-1]['coordinate'],
+                source='Fishlock2014_same_model_element_X0_column',
+                initial_sum_before_normalization=total,initial_fractions=x)
     return records
+
+
+FISHLOCK_PULSE_SHA256 = '4711e3662df69c490a697fba5725bdbba1a10271076b1b6383041f0077fa9d93'
+
+
+def attach_fishlock_pulses(records: list[dict]) -> dict:
+    """Source TP mass-loss shape; explicit Padova terminal-age alignment.
+
+    The last tabulated TP is the LEFT limit of the terminal envelope event.
+    Unresolved final loss is a jump, not an invented additional interpulse.
+    Pre-TP loss is uniform; composition and wind speed remain the selected
+    integrated means. No new total stellar lifetime is inferred from tip.
+    """
+    path = DEFAULT_MATRIX.parents[3] / 'external/g2_candidates/fishlock2014_pulses/table2.dat'
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != FISHLOCK_PULSE_SHA256:
+        raise SourceAdapterError('Fishlock thermal-pulse fingerprint mismatch')
+    grid = {}; duplicates = 0
+    for line in data.decode().splitlines():
+        v = list(map(float, line.split()))
+        if len(v)!=17 or not all(map(math.isfinite,v)) or v[1]!=int(v[1]):
+            raise SourceAdapterError('invalid thermal-pulse row')
+        key = (v[0],int(v[1]))
+        if key in grid:
+            if grid[key]!=v:
+                raise SourceAdapterError('conflicting duplicate thermal pulse')
+            duplicates += 1
+        grid[key]=v
+    if len(grid)!=770 or duplicates!=2:
+        raise SourceAdapterError('thermal-pulse grid changed')
+    models=[]
+    for n in records:
+        if n['overshoot_label']!='Fishlock2014_original':
+            continue
+        m=n['coordinate']['initial_mass_msun']; end=n['evolution']['stellar_lifetime_yr']
+        rows=sorted((r for (mass,_),r in grid.items() if mass==m),key=lambda r:r[1])
+        if not rows or [r[1] for r in rows]!=list(range(1,len(rows)+1)):
+            raise SourceAdapterError('missing pulse in selected mass model')
+        if rows[0][10]!=0 or any(r[10]<=0 for r in rows[1:]):
+            raise SourceAdapterError('invalid preceding-interpulse duration')
+        returned=n['selected_ejecta']['returned_mass_msun']
+        knots=[(0.,0.)]
+        for i,r in enumerate(rows):
+            t=end-math.fsum(q[10] for q in rows[i+1:])
+            fraction=(m-r[11])/returned
+            if t<=knots[-1][0] or not knots[-1][1]<=fraction<=1:
+                raise SourceAdapterError('noncausal or nonmonotonic pulse mass history')
+            knots.append((t,fraction))
+        jump=1-knots[-1][1]
+        n['wind_knots']=knots[:-1]+[(end,1.),(2e10,1.)]
+        n['terminal_jump_fraction']=jump
+        models.append(dict(mass=m,z=.001,pulses=len(rows),knots_before_terminal=knots,
+                           terminal_jump_fraction=jump))
+    if not models:
+        raise SourceAdapterError('pulse timing requires a selected Fishlock source')
+    return dict(source_url='https://cdsarc.cds.unistra.fr/ftp/J/ApJ/797/44/table2.dat',
+                source_sha256=FISHLOCK_PULSE_SHA256,exact_duplicates_collapsed=duplicates,
+                age_alignment='last_TP_left_limit_at_selected_Raiteri96_terminal_age',
+                pre_TP='uniform_mass_loss',terminal='unresolved_final_envelope_instantaneous',
+                composition='integrated_mean',models=models)
 
 
 def attach_kl16_lifetimes(records: list[dict]) -> None:

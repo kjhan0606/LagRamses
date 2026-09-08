@@ -110,6 +110,7 @@ contains
        edges(1)=population%imf_mass_min;edges(n_mass_bins+1)=population%imf_mass_max
        count_edges=n_mass_bins+1
        count_edges=count_edges+1;edges(count_edges)=40
+       count_edges=count_edges+1;edges(count_edges)=minval(table%hm_mass)
        do i=2,size(table%hm_mass)
           if(table%hm_z(i)/=table%hm_z(i-1))cycle
           count_edges=count_edges+1;edges(count_edges)=.5d0*(table%hm_mass(i)+table%hm_mass(i-1))

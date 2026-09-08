@@ -50,6 +50,9 @@ def comparison_workspace():
                      'snrt_group_contract_reference_control_v1.nml',
                      'snrt_secondary_table_contract_v1.nml',
                      'dust_dl01_bulk_030_reference_v4.nml',
+                     'dust_dl01_bulk_030_scattering_reference_v4.nml',
+                     'dust_dl01_bulk_030_exchange_reference_v4.nml',
+                     'dust_dl01_bulk_030_scattering_exchange_reference_v4.nml',
                      'snrt_stellar_sed_bpass_independent_v2.nml',
                      'fp2_snia_effective_ssp_runtime_v1.nml'):
             shutil.copyfile(ROOT / 'simulation/snrt/config' / name, config / name)
@@ -63,11 +66,104 @@ def comparison_workspace():
         parallel_binary = root / '.ir-hybrid.dYEXir/ramses_ir3d'
         parallel_binary.parent.mkdir()
         parallel_binary.write_text('not an executable: setup tests must never launch it\n')
+        ccsn_source = root / '.ccsn-source.lobKc9/input'
+        ccsn_source.mkdir(parents=True)
+        (ccsn_source / 'history.nml').write_text('! setup-only CCSN history v2 fixture\n')
+        (ccsn_source / 'yields.dat').write_text('setup-only CCSN yields fixture\n')
+        (ccsn_source.parent / 'ramses_ccsn3d').write_text('not executable: setup-only\n')
+        extension = root / '.physical-extension.7rcxv4'
+        for name in ('lc18-phase-sparse','agb7-sparse','agb7-net','agb7-lowz-net','agb7-pulses'):
+            (extension/name).mkdir(parents=True)
+            (extension/name/'history.nml').write_text('! setup-only extended physical history\n')
+            (extension/name/'yields.dat').write_text('setup-only extended yields\n')
+        (extension/'ramses_physical_sparse3d').write_text('not executable: setup-only\n')
+        (extension/'ramses_physical_net3d').write_text('not executable: setup-only\n')
+        (extension/'ramses_physical_pulses3d').write_text('not executable: setup-only\n')
+        cpu_binary = root / '.snrt-cpu.OKoz9T/ramses_cpu3d'
+        cpu_binary.parent.mkdir()
+        cpu_binary.write_text('not executable: setup-only\n')
+        (cpu_binary.parent/'ramses_scatter_cpu3d').write_text('not executable: setup-only\n')
+        (extension/'ramses_scatter3d').write_text('not executable: setup-only\n')
+        (cpu_binary.parent/'ramses_exchange_coupled_cpu3d').write_text('not executable: setup-only\n')
+        (extension/'ramses_exchange_coupled3d').write_text('not executable: setup-only\n')
         with mock.patch.object(mkrun, 'HERE', str(root)):
             yield root
 
 
 class WizardTests(unittest.TestCase):
+    def test_gas_exchange_binds_collision_parameters_and_executable(self):
+        for scattering in ('none','isotropic_elastic'):
+            with self.subTest(scattering=scattering), comparison_workspace() as root:
+                settings={'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                          'Comparison executable':'cpu_only','Primary dust scattering':scattering,
+                          'Dust gas thermal exchange':'hydrogen_accommodation','Output directory':str(root/'fresh'),
+                          'Use the fixed reference-only RT/feedback/dust comparison?':True}
+                _,files,_=collect(settings)
+                self.assertIn('ramses_exchange_coupled_cpu3d',files[str(root/'fresh/README.txt')])
+                self.assertIn('area/H=3.495e-22',files[str(root/'fresh/README.txt')])
+                suffix='scattering_exchange' if scattering!='none' else 'exchange'
+                self.assertIn('dust_dl01_bulk_030_'+suffix+'_reference_v4.nml',files[str(root/'fresh/myrun.env.sh')])
+                self.assertFalse((root/'fresh').exists())
+
+    def test_primary_scattering_binds_sidecar_and_capable_binary(self):
+        for kind, binary in [('cpu_only','ramses_scatter_cpu3d'),('cuda_linked','ramses_scatter3d')]:
+            with self.subTest(kind=kind), comparison_workspace() as root:
+                settings = {'Run mode':'comparison_ccsn', 'CCSN physical input':'agb7_pulses',
+                            'Comparison executable':kind, 'Primary dust scattering':'isotropic_elastic',
+                            'Output directory':str(root/'fresh'),
+                            'Use the fixed reference-only RT/feedback/dust comparison?':True}
+                with mock.patch('subprocess.run', side_effect=AssertionError('generator launches')):
+                    _,files,_ = collect(settings)
+                self.assertIn(binary, files[str(root/'fresh/README.txt')])
+                self.assertIn('dust_dl01_bulk_030_scattering_reference_v4.nml', files[str(root/'fresh/myrun.env.sh')])
+                self.assertFalse((root/'fresh').exists())
+
+    def test_cpu_only_comparison_binds_executable_and_rejects_forced_cuda(self):
+        with comparison_workspace() as root:
+            settings = {'Run mode': 'comparison_ccsn', 'CCSN physical input': 'agb7_pulses',
+                        'Comparison executable': 'cpu_only', 'Output directory': str(root/'fresh'),
+                        'Use the fixed reference-only RT/feedback/dust comparison?': True}
+            _, files, _ = collect(settings)
+            self.assertIn('.snrt-cpu.OKoz9T/ramses_cpu3d', files[str(root/'fresh/README.txt')])
+            self.assertIn('SNRT_BACKEND=auto', files[str(root/'fresh/myrun.env.sh')])
+            settings.update({'Run mode': 'comparison_parallel', 'Primary RT backend': 'cuda'})
+            with self.assertRaisesRegex(ValueError, 'CPU-only executable cannot use forced CUDA'):
+                collect(settings)
+
+    def test_agb7_comparison_updates_native_channel_maximum(self):
+        for mode, binary in [('agb7','ramses_physical_sparse3d'),('agb7_net','ramses_physical_net3d'),
+                             ('agb7_lowz_net','ramses_physical_net3d'),('agb7_pulses','ramses_physical_pulses3d')]:
+            with self.subTest(mode=mode), comparison_workspace() as root:
+                settings = {'Run mode': 'comparison_ccsn', 'CCSN physical input': mode,
+                            'Output directory': str(root/'fresh'),
+                            'Use the fixed reference-only RT/feedback/dust comparison?': True}
+                _,files,_ = collect(settings)
+                self.assertIn('channel_mass_max_msun=120d0,7d0,120d0,8d0,260d0',files[str(root/'fresh/myrun.nml')])
+                self.assertIn('CO(Ne)',files[str(root/'fresh/README.txt')])
+                self.assertIn('.physical-extension.7rcxv4/'+binary,files[str(root/'fresh/README.txt')])
+                if mode=='agb7_net':
+                    self.assertIn('AGB net = normalized gross',files[str(root/'fresh/README.txt')])
+                if mode in ('agb7_lowz_net','agb7_pulses'):
+                    self.assertIn('common metallicity support .001--.01345',files[str(root/'fresh/README.txt')])
+                    self.assertIn('ONe at 7/Z=.001',files[str(root/'fresh/README.txt')])
+                if mode=='agb7_pulses':
+                    self.assertIn('no WD formation during earlier wind release',files[str(root/'fresh/README.txt')])
+                self.assertFalse((root/'fresh').exists())
+
+    def test_ccsn_comparison_binds_source_mass_range_and_binary(self):
+        with comparison_workspace() as root:
+            settings = {'Run mode': 'comparison_ccsn', 'Output directory': str(root / 'fresh'),
+                        'Use the fixed reference-only RT/feedback/dust comparison?': True}
+            with mock.patch('subprocess.run', side_effect=AssertionError('generator launches')):
+                _, files, report = collect(settings)
+            text = files[str(root / 'fresh/myrun.nml')]
+            self.assertIn('channel_mass_min_msun=13d0,1d0,13d0,3d0,140d0', text)
+            self.assertIn('CCSN history v2', files[str(root / 'fresh/myrun.history.nml')])
+            self.assertIn('.ccsn-source.lobKc9/ramses_ccsn3d', files[str(root / 'fresh/README.txt')])
+            self.assertIn('8--13 Msun remains absent', files[str(root / 'fresh/README.txt')])
+            self.assertEqual(report['values']['imf_id'], 1)
+            self.assertFalse((root / 'fresh').exists())
+
     def test_parallel_comparison_dispatch_controls(self):
         with comparison_workspace() as root:
             settings = {'Run mode': 'comparison_parallel', 'Output directory': str(root / 'fresh'),

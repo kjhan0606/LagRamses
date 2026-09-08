@@ -67,7 +67,8 @@ contains
   end subroutine
 
   subroutine snrt_dust_live_stage(ilevel,cells,slots,neighbors,directions,weights,dx,dt,chat, &
-       density,primary_energy,old_energy,capacity,trial,material,temperature,diagnostics,ierr,coarse)
+       density,primary_energy,old_energy,capacity,trial,material,temperature,diagnostics,ierr,coarse, &
+       gas_energy,gas_capacity,n_hydrogen,gas_transfer)
     integer, intent(in) :: ilevel,cells(:),slots(:),neighbors(:,:)
     real(dust_dp), intent(in) :: directions(:,:),weights(:),dx,dt,chat
     real(dust_dp), intent(in) :: density(:),primary_energy(:),old_energy(:),capacity(:)
@@ -76,6 +77,10 @@ contains
     type(dust_ir_diagnostics), intent(out) :: diagnostics
     integer, intent(out) :: ierr
     type(dust_live_coarse_trial), intent(out) :: coarse
+    real(dust_dp),optional,intent(in)::gas_energy(:),gas_capacity(:),n_hydrogen(:)
+    real(dust_dp),optional,intent(out)::gas_transfer(:)
+    real(dust_dp),allocatable::gas_work(:),conductance(:),exchange(:),exchange_sum(:)
+    real(dust_dp),parameter::kb=1.380649d-16,mp=1.67262192369d-24
     real(dust_dp), allocatable :: photons(:,:),ghosts(:,:,:),field(:)
     real(dust_dp), allocatable :: halo_field(:,:)
     integer,parameter :: halo_tile=16
@@ -96,6 +101,11 @@ contains
     nsub=global_nsub
 #endif
     step_dt=dt/nsub
+    if(present(gas_energy))then
+       gas_work=gas_energy
+       allocate(conductance(size(slots)),exchange(size(slots)),exchange_sum(size(slots)))
+       exchange_sum=0
+    endif
     ng=snrt_dust_contract_number_ir
     has_coarse=0
     if(size(slots)>0)then
@@ -228,10 +238,21 @@ contains
        end if
        step=dust_ir_diagnostics()
        ierr=dust_ok
+       if(present(gas_energy))then
+       conductance=2*kb*n_hydrogen*density*snrt_dust_contract_collision_area_per_h* &
+            snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
+       if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
+            density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
+            ghosts,remote,blocked,material_dispatch=snrt_runtime_dust_material, &
+            transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
+            gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange)
+       if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
+       else
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
             ghosts,remote,blocked,material_dispatch=snrt_runtime_dust_material, &
             transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb)
+       endif
        if(ierr/=dust_ok.and.size(slots)>0)then
           write(*,'(A,3I6,A,2ES25.16,A,ES14.5)')' SNRT IR rejected state rank/level/error=',myid,ilevel,ierr, &
                ' material_T_range=',minval(material/capacity),maxval(material/capacity), &
@@ -254,8 +275,22 @@ contains
     do i=1,size(slots)
        if(density(i)==0)temperature(i)=snrt_dust_contract_ir_background_k
     end do
+    if(present(gas_transfer))gas_transfer=exchange_sum
   contains
     subroutine validate_stage()
+      ierr=dust_err_shape
+      if(snrt_dust_contract_exchange_enabled.neqv.present(gas_energy))return
+      if(present(gas_energy))then
+         if(.not.present(gas_capacity).or..not.present(n_hydrogen).or..not.present(gas_transfer))return
+         if(size(gas_energy)/=size(slots).or.size(gas_capacity)/=size(slots).or. &
+              size(n_hydrogen)/=size(slots).or.size(gas_transfer)/=size(slots))return
+         ierr=dust_err_state
+         if(any(.not.ieee_is_finite(gas_energy)).or.any(gas_energy<0))return
+         if(any(.not.ieee_is_finite(gas_capacity)).or.any(gas_capacity<=0))return
+         if(any(.not.ieee_is_finite(n_hydrogen)).or.any(n_hydrogen<0))return
+      else if(present(gas_capacity).or.present(n_hydrogen).or.present(gas_transfer))then
+         return
+      endif
       ierr=dust_err_shape
       if(size(material)/=size(slots).or.size(temperature)/=size(slots).or.size(cells)/=size(slots))return
       if(size(old_energy)/=size(slots).or.size(capacity)/=size(slots))return

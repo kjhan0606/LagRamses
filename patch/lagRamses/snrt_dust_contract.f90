@@ -27,6 +27,11 @@ module snrt_dust_contract
   integer, save, public :: snrt_dust_contract_number_groups = 0
   integer, save, public :: snrt_dust_contract_number_temperature = 0
   integer, save, public :: snrt_dust_contract_version = 0
+  logical, save, public :: snrt_dust_contract_scattering_enabled = .false.
+  logical, save, public :: snrt_dust_contract_exchange_enabled = .false.
+  real(real64), save, public :: snrt_dust_contract_collision_area_per_h = 0
+  real(real64), save, public :: snrt_dust_contract_accommodation = 0
+  real(real64), save, public :: snrt_dust_contract_scattering_per_h_cm2(snrt_dust_contract_max_groups) = 0
   integer, save, public :: snrt_dust_contract_number_ir = 0
   real(real64), save, public :: snrt_dust_contract_ir_energy_ev(snrt_dust_contract_max_ir) = 0
   real(real64), save, public :: snrt_dust_contract_ir_weight_ev(snrt_dust_contract_max_ir) = 0
@@ -92,6 +97,10 @@ contains
     real(real64) :: heat_capacity_per_h_erg_k_input
     real(real64) :: internal_energy_per_h_erg_input(snrt_dust_contract_max_temperature)
     character(len=128) :: material_sha256
+    character(len=32) :: scattering_model
+    character(len=32) :: gas_exchange_model
+    real(real64) :: collision_area_per_h_input, accommodation_input
+    real(real64) :: scattering_input(snrt_dust_contract_max_groups)
 
     namelist /snrt_dust_contract/ contract_version, ngroups_input, &
          ntemperature_input, opacity_status, thermal_status, source_id, &
@@ -100,7 +109,8 @@ contains
          temperature_input, power_input, mass_per_h_input, &
          heat_capacity_per_h_erg_k_input, nir_input, ir_status, ir_energy_input, &
          ir_weight_input, ir_absorption_input, ir_background_input, &
-         internal_energy_per_h_erg_input, material_sha256
+         internal_energy_per_h_erg_input, material_sha256, scattering_model, scattering_input, &
+         gas_exchange_model, collision_area_per_h_input, accommodation_input
 
     call snrt_dust_contract_reset()
     ierr = snrt_dust_contract_ok
@@ -136,6 +146,11 @@ contains
     heat_capacity_per_h_erg_k_input = -1.0d0
     internal_energy_per_h_erg_input = 0
     material_sha256 = ''
+    scattering_model = 'none'
+    scattering_input = 0
+    gas_exchange_model = 'none'
+    collision_area_per_h_input = 0
+    accommodation_input = 0
 
     open(newunit=unit, file=trim(filename), status='old', action='read', &
          form='formatted', iostat=open_ierr)
@@ -184,6 +199,23 @@ contains
        snrt_dust_contract_error_message = 'reference dust mass per H is invalid'
        return
     end if
+    ! Optional v4 reference comparison: isotropic ELASTIC primary scattering.
+    ! No gas force, frequency redistribution, HG phase function or IR scattering.
+    ierr = snrt_dust_contract_err_values
+    snrt_dust_contract_error_message = 'invalid primary scattering model or opacity'
+    if (any(.not.ieee_is_finite(scattering_input)).or.any(scattering_input<0)) return
+    if (any(scattering_input(ngroups_input+1:)/=0)) return
+    select case(trim(scattering_model))
+    case('none')
+       if (any(scattering_input/=0)) return
+    case('isotropic_elastic')
+       if (contract_version/=4.or.trim(opacity_status)/='reference_control') return
+       if (.not.any(scattering_input(1:ngroups_input)>0)) return
+    case default
+       return
+    end select
+    ierr = snrt_dust_contract_ok
+    snrt_dust_contract_error_message = ''
     if (contract_version >= 2 .and. contract_version <= 3 .and. &
          (heat_capacity_per_h_erg_k_input <= 0.0d0 .or. &
           .not. ieee_is_finite(heat_capacity_per_h_erg_k_input))) then
@@ -252,7 +284,26 @@ contains
        return
     end if
 
+    ierr = snrt_dust_contract_err_values
+    snrt_dust_contract_error_message = 'invalid dust-gas exchange model or collision parameters'
+    if(.not.ieee_is_finite(collision_area_per_h_input).or..not.ieee_is_finite(accommodation_input))return
+    select case(trim(gas_exchange_model))
+    case('none')
+       if(collision_area_per_h_input/=0.or.accommodation_input/=0)return
+    case('hydrogen_accommodation')
+       if(contract_version/=4.or.trim(opacity_status)/='reference_control')return
+       if(collision_area_per_h_input<=0.or.accommodation_input<=0.or.accommodation_input>1)return
+    case default
+       return
+    end select
+    ierr = snrt_dust_contract_ok
+    snrt_dust_contract_error_message = ''
+    snrt_dust_contract_exchange_enabled = trim(gas_exchange_model)=='hydrogen_accommodation'
+    snrt_dust_contract_collision_area_per_h = collision_area_per_h_input
+    snrt_dust_contract_accommodation = accommodation_input
     snrt_dust_contract_version = contract_version
+    snrt_dust_contract_scattering_enabled = trim(scattering_model)=='isotropic_elastic'
+    snrt_dust_contract_scattering_per_h_cm2 = scattering_input
     snrt_dust_contract_number_groups = ngroups_input
     snrt_dust_contract_number_temperature = ntemperature_input
     snrt_dust_contract_group_edges_ev(1:ngroups_input + 1) = &
@@ -330,6 +381,11 @@ contains
 
 
   subroutine snrt_dust_contract_reset()
+    snrt_dust_contract_exchange_enabled = .false.
+    snrt_dust_contract_collision_area_per_h = 0
+    snrt_dust_contract_accommodation = 0
+    snrt_dust_contract_scattering_enabled = .false.
+    snrt_dust_contract_scattering_per_h_cm2 = 0
     snrt_dust_contract_number_groups = 0
     snrt_dust_contract_number_temperature = 0
     snrt_dust_contract_version = 0

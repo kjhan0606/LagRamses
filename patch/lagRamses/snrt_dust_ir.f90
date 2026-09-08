@@ -46,13 +46,16 @@ module snrt_dust_ir
        integer,intent(out)::ierr
      end subroutine
      subroutine dust_material_dispatch(heating,density,old_energy,capacity,log_t,power,band, &
-          material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr)
+          material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr, &
+          gas_energy,gas_capacity,conductance,gas_transfer)
        import real64
        real(real64),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
        real(real64),intent(in)::material_u(:),dt,background,bath,tolerance
        logical,intent(in)::use_u
        real(real64),intent(out)::rate(:,:),temperature(:),next_energy(:)
        integer,intent(out)::ierr
+       real(real64),optional,intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
+       real(real64),optional,intent(out)::gas_transfer(:)
      end subroutine
   end interface
 contains
@@ -263,7 +266,8 @@ contains
 
   subroutine snrt_dust_ir_advance(table, direction, weight, neighbor, dx, dt, c_hat, density, primary, &
        energy, temperature, photons, diagnostics, ierr, tolerance, max_iterations, dust_energy, heat_capacity, &
-       ghost_energy,ghost_index,blocked_face,material_dispatch,transport_dispatch,absorb_dispatch)
+       ghost_energy,ghost_index,blocked_face,material_dispatch,transport_dispatch,absorb_dispatch, &
+       gas_energy,gas_capacity,conductance,gas_transfer)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -290,6 +294,10 @@ contains
     procedure(dust_material_dispatch),optional :: material_dispatch
     procedure(dust_transport_dispatch),optional :: transport_dispatch
     procedure(dust_absorb_dispatch),optional :: absorb_dispatch
+    real(real64),optional,intent(inout)::gas_energy(:)
+    real(real64),optional,intent(in)::gas_capacity(:),conductance(:)
+    real(real64),optional,intent(inout)::gas_transfer(:)
+    real(real64),allocatable::exchange(:)
     real(real64),allocatable :: empty_ghost(:,:,:)
     real(real64),allocatable :: dispatch_u(:)
     logical, allocatable :: blocked(:,:)
@@ -311,6 +319,15 @@ contains
     if(transient.neqv.present(heat_capacity))return
     if(present(ghost_energy).neqv.present(ghost_index))return
     ng=size(table%energy); nd=size(weight); nc=size(density)
+    if(present(gas_energy))then
+       if(.not.transient.or..not.present(material_dispatch).or..not.allocated(table%material_u))return
+       if(.not.present(gas_capacity).or..not.present(conductance).or..not.present(gas_transfer))return
+       if(size(gas_energy)/=nc.or.size(gas_capacity)/=nc.or.size(conductance)/=nc.or.size(gas_transfer)/=nc)return
+       if(any(.not.ieee_is_finite(gas_energy)).or.any(gas_energy<0))return
+       allocate(exchange(nc));exchange=0
+    else if(present(gas_capacity).or.present(conductance).or.present(gas_transfer))then
+       return
+    endif
     if(.not.ieee_is_finite(tolerance).or.tolerance<=0.or.tolerance>=1)return
     material_tolerance=max(tolerance,64*epsilon(1d0))
     ierr=dust_err_shape
@@ -451,9 +468,16 @@ contains
     do iteration=0,max_iterations
        if(transient)then
           if(present(material_dispatch))then
+             if(present(gas_energy))then
+             call material_dispatch(primary+guess/dt,density,dust_energy,heat_capacity,table%log_t, &
+                  table%power,table%band,dispatch_u,allocated(table%material_u),dt,table%background, &
+                  table%background_temperature,material_tolerance,rate,next_t,trial_dust_energy,ierr, &
+                  gas_energy,gas_capacity,conductance,exchange)
+             else
              call material_dispatch(primary+guess/dt,density,dust_energy,heat_capacity,table%log_t, &
                   table%power,table%band,dispatch_u,allocated(table%material_u),dt,table%background, &
                   table%background_temperature,material_tolerance,rate,next_t,trial_dust_energy,ierr)
+             endif
           else
              call transient_emission(table,primary+guess/dt,density,dt,dust_energy,heat_capacity, &
                   rate,next_t,trial_dust_energy,ierr,material_tolerance)
@@ -483,6 +507,11 @@ contains
        if (.not.all(ieee_is_finite(absorbed)) .or. any(absorbed<0)) return
        balance=new_total-old_total+trial%escaped_erg+trial%interface_erg-trial%primary_erg
        if(transient)balance=balance+sum(trial_dust_energy-dust_energy)*volume
+       if(present(gas_energy))then
+          if(any(.not.ieee_is_finite(exchange)).or.any(gas_energy-exchange<0))return
+          balance=balance-sum(exchange)*volume
+          scale=max(scale,sum(abs(exchange))*volume)
+       endif
        trial%balance_relative=abs(balance)/scale
        trial%local_relative=maxval(abs(absorbed-guess)/max(primary*dt+absorbed,tiny(scale)))
        if (max(trial%balance_relative,trial%local_relative)<=tolerance) then
@@ -494,6 +523,10 @@ contains
           if (.not.ieee_is_finite(trial%absorbed_erg)) return
           energy=candidate; temperature=next_t; photons=photons+emitted_photons
           if(transient)dust_energy=trial_dust_energy
+          if(present(gas_energy))then
+             gas_energy=gas_energy-exchange
+             gas_transfer=exchange
+          endif
           diagnostics=trial
           ierr=dust_ok
           return
