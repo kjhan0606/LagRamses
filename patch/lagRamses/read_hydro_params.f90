@@ -4,6 +4,8 @@ subroutine read_hydro_params(nml_ok)
   use amr_parameters, only: grafic_nreaders
   use amr_commons
   use hydro_commons
+  use cosmic_ray_physics
+  use dust_mass_physics
   use eunha_cooling_mod, only: eunha_load_multi_z
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: read_enrichment_namelist, &
@@ -18,6 +20,7 @@ subroutine read_hydro_params(nml_ok)
   include 'mpif.h'
 #endif
   logical::nml_ok
+  logical::cr_ok,dust_ok
   !--------------------------------------------------
   ! Local variables  
   !--------------------------------------------------
@@ -97,6 +100,10 @@ subroutine read_hydro_params(nml_ok)
        & ,agn_coarse_dump,agn_coarse_dump_file                                    &
        & ,bondi,mad_jet,eps_sn1,eps_sn2,tol                             &
        & ,sf_virial,sf_trelax,sf_model,sf_birth_properties &
+       & ,cr_enabled,cr_transport,cr_sn_fraction,cr_snia_fraction,cr_sf_support &
+       & ,dust_mass_enabled,dust_growth,dust_sputtering,dust_condensation &
+       & ,dust_grain_radius_cm,dust_grain_density,dust_sticking,dust_growth_max_temperature &
+       & ,dust_metal_atom_mass,dust_injection_temperature &
        & ,cooling_method,grackle_table
 #ifdef grackle
   namelist/grackle_params/grackle_comoving_coordinates,grackle_with_radiative_cooling,grackle_primordial_chemistry &
@@ -273,6 +280,55 @@ subroutine read_hydro_params(nml_ok)
      nml_ok=.false.
   endif
 #endif
+
+  dust_ok=dust_mass_parameters_ok()
+  if(dust_mass_enabled)then
+#if !defined(SNRT) || !defined(DUST_LIVE) || !defined(HDF5) || !defined(PHASE0_STELLAR_ENRICHMENT)
+     dust_ok=.false.
+#else
+     if(.not.use_channel_resolved_feedback())dust_ok=.false.
+#endif
+     if(.not.hydro.or..not.metal.or.cosmo.or.nboundary>0) dust_ok=.false.
+     ! Total-metal reservoir closure; no element-resolved depleted cooling or sink removal yet.
+     if(sink.or.sink_AGN.or.agn.or.cooling.or.neq_chem.or.delayed_cooling) dust_ok=.false.
+     if(trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))dust_ok=.false.
+  endif
+  if(.not.dust_ok)then
+     if(myid==1)write(*,*)'ERROR: dust mass requires valid bulk parameters, SNRT/DUST_LIVE/HDF5 channel feedback,'
+     if(myid==1)write(*,*)'noncosmo periodic metal hydro; no sinks, external cooling/neq chemistry or delayed cooling'
+     nml_ok=.false.
+  else if(dust_mass_enabled.and.myid==1)then
+     write(*,*)'DUST_MASS_BULK_V1: condensation/growth/sputtering; fixed size/composition reference, total-metal budget'
+  endif
+  call cr_validate(nener,hydro,gpu_hydro,gamma_rad(1),cr_ok)
+  if(cr_enabled)then
+#ifndef HDF5
+     cr_ok=.false.
+#endif
+     ! No cosmological super-comoving CR source or inflow CR state yet.
+     ! simple_boundary is still the "BOUNDARY_PARAMS present" flag here;
+     ! nboundary=0 is normalized to periodic below, even with that block.
+     if(cosmo.or.nboundary>0)cr_ok=.false.
+     if(trim(riemann)/='hllc'.and.trim(riemann)/='hll'.and.trim(riemann)/='llf')cr_ok=.false.
+     if(trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))cr_ok=.false.
+     if(sink.or.sink_AGN.or.agn)cr_ok=.false. ! sink/accretion CR partition not yet qualified
+     if(delayed_cooling)cr_ok=.false. ! no duplicate delayed-SN reservoir
+#ifdef PHASE0_STELLAR_ENRICHMENT
+     if(.not.use_channel_resolved_feedback())cr_ok=.false.
+#else
+     cr_ok=.false.
+#endif
+     if(cr_sf_support.and.(.not.sf_virial.or.(sf_model/=1.and.sf_model/=2.and.sf_model/=4)))cr_ok=.false.
+  endif
+  if(.not.cr_ok)then
+     if(myid==1)write(*,*)'CR requires NENER=1, gamma_rad=4/3, CPU hydro, advective transport, HDF5, no sink/delayed cooling'
+     if(myid==1)write(*,*)'CR SF support requires sf_virial and sf_model=1,2,4; source fractions in [0,1]'
+     if(myid==1)write(*,*)'CR comparison requires noncosmo periodic hydro with hllc/hll/llf'
+     nml_ok=.false.
+  else if(cr_enabled.and.myid==1)then
+     write(*,*)'CR trapped-fluid pressure/work/advection enabled; SNII/Ia energy fractions=',cr_sn_fraction,cr_snia_fraction
+     write(*,*)'CR SF effective pressure support=',cr_sf_support,'; diffusion, streaming and collisional losses absent'
+  endif
 
   !--------------------------------------------------
   ! Check ind_rsink

@@ -86,11 +86,62 @@ def comparison_workspace():
         (extension/'ramses_scatter3d').write_text('not executable: setup-only\n')
         (cpu_binary.parent/'ramses_exchange_nonlinear_cpu3d').write_text('not executable: setup-only\n')
         (extension/'ramses_exchange_nonlinear3d').write_text('not executable: setup-only\n')
+        cr_binary = root / '.cosmic-ray.kyySgK/ramses_cr3d'
+        cr_binary.parent.mkdir()
+        cr_binary.write_text('not executable: setup-only\n')
+        (cr_binary.parent/'ramses_dust_mass3d').write_text('not executable: setup-only\n')
         with mock.patch.object(mkrun, 'HERE', str(root)):
             yield root
 
 
 class WizardTests(unittest.TestCase):
+    def test_dust_mass_profile_binds_binary_and_source(self):
+        with comparison_workspace() as root:
+            _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),
+                'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True})
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn('dust_mass_enabled=.true.',text)
+            self.assertIn('cr_enabled=.false.',text)
+            self.assertIn('prad_region(1,1)=0d0',text)
+            self.assertIn('var_region(1,15)=',text)
+            self.assertIn('ramses_dust_mass3d',files[str(root/'fresh/README.txt')])
+            self.assertNotIn(str(root/'fresh/ic_sink'),files)
+            raw,_=mkrun.rng.parse_namelist(text);values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            for bad in ({'cooling':True},{'sink':True},{'dust_condensation':'0.,1.2,.1'},
+                        {'dust_grain_radius_cm':0},{'cosmo':True}):
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**bad))))
+
+    def test_cosmic_ray_namelist_and_rejected_combinations(self):
+        with comparison_workspace() as root:
+            _, files, _ = collect({'Run mode': 'comparison_ccsn',
+                'CCSN physical input': 'agb7_pulses', 'Output directory': str(root/'fresh'),
+                'Use the fixed reference-only RT/feedback/dust comparison?': True,
+                'enable trapped cosmic-ray fluid (NENER=1 CPU/HDF5 build)?': True})
+            self.assertNotIn(str(root/'fresh/ic_sink'), files)
+            self.assertIn('NENER=1', files[str(root/'fresh/README.txt')])
+            self.assertIn('ramses_cr3d', files[str(root/'fresh/README.txt')])
+            self.assertIn('SNRT_AGN_MODEL=legacy', files[str(root/'fresh/myrun.env.sh')])
+        nml = next(text for name, text in files.items() if name.endswith('.nml'))
+        raw, _ = mkrun.rng.parse_namelist(nml)
+        values = mkrun.rng.import_to_values(raw)
+        self.assertTrue(values['cr_enabled'])
+        self.assertTrue(values['sf_virial'])
+        self.assertTrue(values['cr_sf_support'])
+        self.assertEqual(values['sf_model'], 4)
+        self.assertAlmostEqual(values['cr_sn_fraction'], .1)
+        self.assertFalse(values.get('sink', False))
+        self.assertIn('var_region(1,3)=0.74d0', nml)
+        self.assertIn('var_region(1,15)=', nml)
+        self.assertFalse(any(m.level == 'ERROR' for m in mkrun.rng.validate_params(values)))
+        for override in ({'gpu_hydro': True}, {'sink': True}, {'cr_sn_fraction': 1.1},
+                         {'cr_sn_fraction': float('nan')}, {'sf_model': 5},
+                         {'cr_enabled': False}, {'cr_transport': 'diffusive'},
+                         {'cosmo': True}, {'nboundary': 1}, {'riemann': 'acoustic'}):
+            self.assertTrue(any(m.level == 'ERROR' for m in mkrun.rng.validate_params(dict(values, **override))), override)
+
     def test_gas_exchange_binds_collision_parameters_and_executable(self):
         for scattering in ('none','isotropic_elastic'):
             with self.subTest(scattering=scattering), comparison_workspace() as root:

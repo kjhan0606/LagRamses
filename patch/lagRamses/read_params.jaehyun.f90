@@ -3,6 +3,8 @@ subroutine read_params
   use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_model, snrt_agn_model_reference, &
        snrt_agn_reference_config_ok, snrt_agn_admit_reference
 #ifdef SNRT
+  use dust_mass_physics, only: dust_mass_enabled
+  use dust_mass_runtime, only: dust_injection_specific_energy
   use snrt_stellar_source, only: stellar_sed_load, stellar_sed_enabled, stellar_sed_consensus, stellar_sed_report
   use snrt_runtime_backend, only: snrt_backend_initialize
   use snrt_spectral_contract, only: snrt_spectral_contract_load_from_environment, &
@@ -1937,6 +1939,19 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
 #endif
   endif
   call snrt_agn_admit_reference(nml_ok.and.agn_model_local==snrt_agn_model_reference)
+#ifdef SNRT
+  if(dust_mass_enabled)then
+     block
+       real(dp)::dust_u
+       integer::dust_status
+       call dust_injection_specific_energy(dust_u,dust_status)
+       if(dust_status/=0.or..not.snrt_agn_rt_requested())then
+          if(myid==1)write(*,*)'ERROR: dust mass evolution requires active SNRT and v4 material covering injection temperature'
+          nml_ok=.false.
+       endif
+     end block
+  endif
+#endif
   if(nml_ok.and.agn_model_local==snrt_agn_model_reference.and.myid==1)write(*,*) &
        'SNRT_AGN_MODEL=partition_reference_v1 comparison only; mechanical shares high=0.15 low=1; MAD excluded'
 

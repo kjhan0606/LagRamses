@@ -175,7 +175,7 @@ contains
          snrt_mean_molecular_weight, snrt_inventory_tolerance
     use snrt_cuda_interface, only: snrt_cuda_available
     use amr_parameters, only: dp, ndim, spin_bh, mad_jet, X_floor
-    use hydro_parameters, only: gamma, idust, idust_energy
+    use hydro_parameters, only: gamma, idust, idust_energy, inener
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use iso_c_binding, only: c_float
     use omp_lib, only: omp_get_wtime
@@ -706,6 +706,9 @@ contains
                all(ieee_is_finite(uold(icell,2:ndim+1)))) then
              kinetic_energy = 0.5d0 * sum(uold(icell,2:ndim+1)**2) / rho_code
              internal_energy = level_thermal(i) - kinetic_energy
+#if NENER>0
+             internal_energy=internal_energy-sum(uold(icell,inener:inener+NENER-1))
+#endif
              molecular_weight = snrt_mean_molecular_weight(hydrogen_ionized_fraction, &
                   helium_ionized_fraction, helium_double_ionized_fraction)
              if (ieee_is_finite(internal_energy) .and. internal_energy > 0.0d0) &
@@ -1061,6 +1064,7 @@ contains
             available_species_transport, incoming_intensity, trial_intensity, &
             coarse_flux_trial, raw_group, absorbed_hhe_group_species, &
             absorbed_dust_group, returned_group, absorbed_group, ierr, leaf_cell, ilevel)
+       if(ierr/=0)write(*,*)'SNRT transport failure: rank=',myid,' level=',ilevel,' code=',ierr
 #ifdef DUST_LIVE
        ! Lie split after transport/absorption, rebuilt from the same incoming
        ! state on every nonlinear trial. Scatter only owned leaves; each group
@@ -1074,6 +1078,7 @@ contains
        t_transport = t_transport + omp_get_wtime() - wall_sub
        if (ierr /= 0) then
           local_transaction_failure = snrt_failure_transport
+          write(*,*)'SNRT transport/scatter failure: rank=',myid,' code=',ierr
        end if
        if (local_transaction_failure == snrt_failure_none) then
           ! CUDA is an external FP32 boundary.  Reject a corrupt trial before
@@ -1389,6 +1394,9 @@ contains
                icell=leaf_cell(i)
                kinetic_energy=.5d0*sum(uold(icell,2:ndim+1)**2)/rho_level(i)
                gas_energy(i)=(trial_thermal(i)-kinetic_energy)*dust_energy_scale
+#if NENER>0
+               gas_energy(i)=gas_energy(i)-sum(uold(icell,inener:inener+NENER-1))*dust_energy_scale
+#endif
                molecular_weight=snrt_mean_molecular_weight(trial_hydrogen_ii(i),trial_helium_ii(i),trial_helium_iii(i))
                gas_capacity(i)=rho_level(i)*dust_energy_scale/((gamma-1)*scale_T2*molecular_weight)
             enddo

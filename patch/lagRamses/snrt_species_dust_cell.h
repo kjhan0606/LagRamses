@@ -125,7 +125,17 @@ SNRT_CELL_HD inline void snrt_cap_species_dust_cell(
       }
     }
 
-    const float assigned_hhe = assigned[0] + assigned[1] + assigned[2];
+    float assigned_hhe = assigned[0] + assigned[1] + assigned[2];
+    // Weighted FP32 shares can sum a few ulps above their photon budget.
+    // Correct the shares BEFORE debiting atoms or computing the directional
+    // cap; clipping negative photons afterwards would break the H/He ledger.
+    // Leave all already-admissible (including legacy zero-dust) cases intact.
+    while (assigned_hhe > target_absorbed) {
+      int largest = assigned[1] > assigned[0] ? 1 : 0;
+      if (assigned[2] > assigned[largest]) largest = 2;
+      assigned[largest] = nextafterf(assigned[largest], 0.0f);
+      assigned_hhe = assigned[0] + assigned[1] + assigned[2];
+    }
     const float physical_excess = fmaxf(0.0f, hhe_target_full - eligible_inventory);
     const float guard_return = fmaxf(0.0f,
         hhe_target_full - target_absorbed - physical_excess);

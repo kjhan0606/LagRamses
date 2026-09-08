@@ -273,12 +273,34 @@ PARAMS = [
     ParamDef('g_star',    'real', 1.0,     'PHYSICS_PARAMS', S_COOL, 'Polytropic index for SF EOS'),
     ParamDef('del_star',  'real', 200.0,   'PHYSICS_PARAMS', S_COOL, 'SF overdensity threshold'),
     ParamDef('T2thres_SF','real', 0.0,     'PHYSICS_PARAMS', S_COOL, 'Temperature threshold for SF'),
-    ParamDef('sf_virial', 'int',  0,       'PHYSICS_PARAMS', S_COOL, 'Virial SF criterion (0=off)'),
+    ParamDef('sf_virial', 'bool', False,   'PHYSICS_PARAMS', S_COOL, 'Virial SF criterion'),
     ParamDef('sf_model',  'int',  0,       'PHYSICS_PARAMS', S_COOL, 'SF model selection'),
     ParamDef('star_maker','int',  0,       'PHYSICS_PARAMS', S_COOL, 'Star maker algorithm'),
     ParamDef('star_imf',  'str',  '',      'PHYSICS_PARAMS', S_COOL, 'IMF type'),
 
     # Feedback (SN)
+    ParamDef('dust_mass_enabled','bool',False,'PHYSICS_PARAMS',S_FEED,
+             'Bulk fixed-size dust condensation/growth/sputtering (SNRT v4, no external metal cooling/sinks)'),
+    ParamDef('dust_growth','bool',True,'PHYSICS_PARAMS',S_FEED,'Enable cold gas metal accretion'),
+    ParamDef('dust_sputtering','bool',True,'PHYSICS_PARAMS',S_FEED,'Enable thermal sputtering'),
+    ParamDef('dust_condensation','real_arr','0.,0.2,0.15','PHYSICS_PARAMS',S_FEED,
+             'Fractions of wind, AGB, SNII returned metals condensing into dust; SNIa excluded'),
+    ParamDef('dust_grain_radius_cm','real',1e-5,'PHYSICS_PARAMS',S_FEED,'Fixed characteristic radius [cm]'),
+    ParamDef('dust_grain_density','real',3.,'PHYSICS_PARAMS',S_FEED,'Bulk solid density [g/cm3]'),
+    ParamDef('dust_sticking','real',.3,'PHYSICS_PARAMS',S_FEED,'Cold accretion sticking probability [0,1]'),
+    ParamDef('dust_growth_max_temperature','real',300.,'PHYSICS_PARAMS',S_FEED,'Maximum gas T for accretion [K]'),
+    ParamDef('dust_metal_atom_mass','real',24.,'PHYSICS_PARAMS',S_FEED,'Effective accreting metal atomic mass [mp]'),
+    ParamDef('dust_injection_temperature','real',20.,'PHYSICS_PARAMS',S_FEED,'Dust temperature at stellar injection [K]'),
+    ParamDef('cr_enabled', 'bool', False, 'PHYSICS_PARAMS', S_FEED,
+             'Trapped CR fluid (compile NENER=1, CPU hydro, HDF5, no sinks)'),
+    ParamDef('cr_transport', 'str', 'advective', 'PHYSICS_PARAMS', S_FEED,
+             'CR transport closure; diffusion/streaming not included', choices=['advective']),
+    ParamDef('cr_sn_fraction', 'real', 0.0, 'PHYSICS_PARAMS', S_FEED,
+             'Fraction of SNII total injected energy assigned to CR [0,1]'),
+    ParamDef('cr_snia_fraction', 'real', 0.0, 'PHYSICS_PARAMS', S_FEED,
+             'Fraction of coupled SNIa thermal budget assigned to CR [0,1]'),
+    ParamDef('cr_sf_support', 'bool', False, 'PHYSICS_PARAMS', S_FEED,
+             'Trapped CR effective sound speed in virial SF models 1,2,4'),
     ParamDef('f_w',       'real', 0.0,     'PHYSICS_PARAMS', S_FEED, 'SN mass loading factor'),
     ParamDef('f_ek',      'real', 0.0,     'PHYSICS_PARAMS', S_FEED, 'SN kinetic energy fraction'),
     ParamDef('delayed_cooling','bool',False,'PHYSICS_PARAMS',S_FEED, 'Delayed cooling after SN'),
@@ -681,6 +703,57 @@ def validate_params(values):
     """Run all validation rules. Returns list of ValidationMsg."""
     values = _normalize_values(values)
     msgs = []
+
+    if values.get('dust_mass_enabled'):
+        clean = lambda key: str(values.get(key, '')).strip("'\"").lower()
+        flag = lambda key: clean(key) in ('true', '.true.', 't', '1')
+        try:
+            fractions = [float(x.replace('d','e')) for x in str(values.get('dust_condensation','0.,0.2,0.15')).split(',')]
+            valid = len(fractions)==3 and all(math.isfinite(x) and 0<=x<=1 for x in fractions)
+            for key in ('dust_grain_radius_cm','dust_grain_density','dust_growth_max_temperature',
+                        'dust_metal_atom_mass','dust_injection_temperature'):
+                x=float(values.get(key,PARAM_BY_NAME[key].default));valid=valid and math.isfinite(x) and x>0
+            x=float(values.get('dust_sticking',.3));valid=valid and math.isfinite(x) and 0<=x<=1
+            valid=valid and float(clean('nboundary') or '0')==0
+        except (TypeError,ValueError):
+            valid=False
+        valid=valid and flag('hydro') and flag('metal') and clean('feedback_mode')=='channel_resolved'
+        valid=valid and not any(flag(k) for k in ('cosmo','sink','sink_agn','agn','cooling','neq_chem','delayed_cooling'))
+        valid=valid and clean('outformat')=='hdf5' and (values.get('nrestart',0)==0 or clean('informat')=='hdf5')
+        if not valid:
+            msgs.append(ValidationMsg('ERROR','Dust mass requires valid bulk parameters, periodic noncosmo metal hydro, channel feedback, HDF5, no sinks/external cooling'))
+        msgs.append(ValidationMsg('WARNING','Dust bulk evolution needs active SNRT v4 material; no element-resolved depletion or grain-size evolution claim'))
+
+    cr_on = values.get('cr_enabled', False)
+    fractions = [values.get('cr_sn_fraction', 0.0), values.get('cr_snia_fraction', 0.0)]
+    try:
+        fractions = [float(x) for x in fractions]
+        cr_valid = all(math.isfinite(x) and 0 <= x <= 1 for x in fractions)
+    except (TypeError, ValueError):
+        cr_valid = False
+    if not cr_valid:
+        msgs.append(ValidationMsg('ERROR', 'CR source fractions must be finite and in [0,1]'))
+    if not cr_on and (any(fractions) or values.get('cr_sf_support', False)):
+        msgs.append(ValidationMsg('ERROR', 'CR sources/SF support require cr_enabled'))
+    if cr_on:
+        clean = lambda key: str(values.get(key, '')).strip("'\"").lower()
+        flag = lambda key: clean(key) in ('true', '.true.', 't', '1')
+        try:
+            periodic = float(clean('nboundary').replace('d', 'e') or '0') == 0
+        except ValueError:
+            periodic = False
+        if (not values.get('hydro') or values.get('gpu_hydro') or values.get('cosmo') or
+                not periodic or
+                clean('riemann') not in ('', 'hllc', 'hll', 'llf') or
+                any(flag(key) for key in ('sink', 'sink_agn', 'agn', 'delayed_cooling')) or
+                clean('outformat') != 'hdf5' or
+                (values.get('nrestart', 0) > 0 and clean('informat') != 'hdf5') or
+                clean('feedback_mode') != 'channel_resolved' or
+                clean('cr_transport') not in ('', 'advective')):
+            msgs.append(ValidationMsg('ERROR', 'CR requires noncosmo periodic CPU hydro (hllc/hll/llf), HDF5, channel_resolved feedback, advective transport, no sinks/delayed cooling'))
+        if values.get('cr_sf_support') and (not values.get('sf_virial') or values.get('sf_model') not in (1, 2, 4)):
+            msgs.append(ValidationMsg('ERROR', 'CR SF support requires sf_virial=True and sf_model=1,2,4'))
+        msgs.append(ValidationMsg('WARNING', 'CR requires a separate NENER=1 HDF5 build and gamma_rad(1)=4/3; not a diffusive/streaming CR model'))
 
     preset = str(values.get('high_mass_preset') or 'source_consistent').strip().strip("'\"").lower()
     try:

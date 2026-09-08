@@ -388,10 +388,24 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         ui.info('LC18 Set R: source nodes 13--120 Msun; ordinary SN at 13/15/20/25, '
                 'wind-only nodes from 30. Explicit comparison energy=1e51 erg per exploding node. '
                 'No 8--13 Msun source or same-population SED claim; old comparison is unchanged.')
+    cosmic_rays = ui.ask_bool('enable trapped cosmic-ray fluid (NENER=1 CPU/HDF5 build)?', False)
+    mass_evolution = ui.ask_bool('Evolve dust mass (condensation, cold growth, thermal sputtering)?', False)
+    if mass_evolution:
+        ui.info('Bulk dust reference: wind/AGB/SNII condensation=0/0.2/0.15; fixed radius 0.1 micron, '
+                'solid density 3 g/cm3, sticking 0.3 below 300 K, effective metal mass 24 mp. '
+                'No sinks/AGN or external metal cooling; gas/dust share a total-metal reservoir. '
+                'No evolving grain sizes or element-resolved depletion.')
+    cr_sn_fraction, cr_snia_fraction, cr_sf_support = 0., 0., False
+    if cosmic_rays:
+        cr_sn_fraction = ui.ask('SNII energy fraction into CR [0,1]', .1, float)
+        cr_snia_fraction = ui.ask('coupled SNIa energy fraction into CR [0,1]', 0., float)
+        cr_sf_support = ui.ask_bool('include CR effective pressure support in virial star formation?', True)
+        ui.info('CR comparison turns off sinks/AGN and uses virial SF model 4. '
+                'Trapped/advective only: no diffusion, streaming, losses or cosmological CR source.')
     executable_kind = ui.ask_choice('Comparison executable', OrderedDict([
         ('cuda_linked', ('Existing CUDA-linked build (GPU optional at runtime)',)),
         ('cpu_only', ('Toolkit-free CPU/OpenMP build; forced CUDA is unavailable',)),
-    ]), 'cuda_linked')
+    ]), 'cpu_only' if cosmic_rays or mass_evolution else 'cuda_linked')
     if executable_kind == 'cpu_only':
         if primary_backend == 'cuda' or dust_backend == 'cuda':
             raise ValueError('CPU-only executable cannot use forced CUDA; choose auto or openmp.')
@@ -426,6 +440,10 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 'No electron/ion Coulomb collisions; temperature range remains the supplied material/IR domain.')
     elif exchange != 'none':
         raise ValueError('Unknown dust gas thermal exchange model.')
+    if cosmic_rays or mass_evolution:
+        if executable_kind != 'cpu_only' or 'cuda' in (primary_backend, dust_backend):
+            raise ValueError('The CR/dust mass comparison uses its NENER=1 CPU-only build; forced CUDA is unavailable.')
+        binary = root / ('.cosmic-ray.kyySgK/ramses_dust_mass3d' if mass_evolution else '.cosmic-ray.kyySgK/ramses_cr3d')
     env = OrderedDict([
         ('OMP_NUM_THREADS', str(threads)), ('I_MPI_FABRICS', 'shm'),
         ('OMP_STACKSIZE', '512M'), ('KMP_STACKSIZE', '512M'),
@@ -441,9 +459,13 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         ('PHASE0_SNIA_RUNTIME_CONTRACT', config / 'fp2_snia_effective_ssp_runtime_v1.nml'),
     ])
     template = config / 'kl16_lc18_snia_agn_dl01_dust_smoke.nml'
+    if cosmic_rays or mass_evolution:
+        env['SNRT_AGN_MODEL'] = 'legacy'
     sink = config / 'kl16_lc18_snia_agn_dust_smoke.ic_sink'
     fallback_yields = config / 'snrt_agn_driver_faithful_smoke_yields.dat'
-    required = [template, sink, fallback_yields, binary, source / 'history.nml', source / 'yields.dat']
+    required = [template, fallback_yields, binary, source / 'history.nml', source / 'yields.dat']
+    if not (cosmic_rays or mass_evolution):
+        required.append(sink)
     required += [value for value in env.values() if isinstance(value, Path)]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
@@ -467,6 +489,30 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     history_name = name + '.history.nml'
     text = text.replace(history_token, str(dest / history_name).replace("'", "''"))
     text = text.replace(fallback_token, str(fallback_yields).replace("'", "''"))
+    if cosmic_rays or mass_evolution:
+        text = text.replace('! Real KL16/LC18 + effective SSP SNIa; accepted BH accretion -> reference AGN RT -> live dust.',
+                            '! KL16/LC18 + effective SSP SNIa -> optional CR/dust mass + independent BPASS RT/dust; no AGN.')
+        text = text.replace('! Copy kl16_lc18_snia_agn_dust_smoke.ic_sink as ic_sink in a NEW run directory.',
+                            '! NENER=1 CPU build; uniform gas ICs, no sinks or cosmological expansion.')
+        text = re.sub(r'(sink|smbh|agn|sink_AGN|bondi)=\.true\.', r'\1=.false.', text)
+        token = 'sf_virial=.false.'
+        if text.count(token) != 1:
+            raise ValueError('CR comparison requires the unchanged non-virial IC field layout.')
+        text = text.replace(token, 'sf_virial=.true.\n  sf_model=4\n  cr_enabled=.true.\n'
+                            "  cr_transport='advective'\n  cr_sn_fraction={}\n  cr_snia_fraction={}\n  cr_sf_support={}".format(
+                                rng._fmt_fortran_value(cr_sn_fraction, 'real'),
+                                rng._fmt_fortran_value(cr_snia_fraction, 'real'),
+                                rng._fmt_fortran_value(cr_sf_support, 'bool')))
+        # CR has its own NENER slot. The extra virial passive field shifts H..dust IC columns by one.
+        text = re.sub(r'var_region\(1,(\d+)\)', lambda m: 'var_region(1,{})'.format(
+            1 if int(m[1]) == 1 else int(m[1]) + 1), text)
+        text = text.replace('p_region(1)=1.0d-8', 'p_region(1)=1.0d-8\n  prad_region(1,1)=1d-8')
+        text = text.replace('! metal=6; H..Fe=7..17; dust mass=18; dust energy=19.',
+                            '! CR=6; metal=7; virial=8; H..Fe=9..19; dust=20/21.')
+        if not cosmic_rays:
+            text = text.replace('cr_enabled=.true.', 'cr_enabled=.false.').replace('prad_region(1,1)=1d-8','prad_region(1,1)=0d0')
+        if mass_evolution:
+            text = text.replace("cr_transport='advective'", "cr_transport='advective'\n  dust_mass_enabled=.true.")
     raw, _ = rng.parse_namelist(text)
     values = rng.import_to_values(raw)
     msgs = rng.validate_params(values)
@@ -545,12 +591,32 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 'Pre-TP loss is uniform; remaining envelope is a terminal jump; no WD formation during earlier wind release.\n'
                 'AGB composition/speed stay integrated means; KL16 nodes retain terminal-envelope timing.\n')
     files = OrderedDict([
-        (str(dest / (name + '.nml')), text), (str(dest / 'ic_sink'), sink.read_text()),
+        (str(dest / (name + '.nml')), text), (str(dest / 'ic_sink'), '' if cosmic_rays or mass_evolution else sink.read_text()),
         (str(dest / history_name), (source / 'history.nml').read_text()),
         (str(dest / 'yields.dat'), (source / 'yields.dat').read_text()),
         (str(dest / (name + '.env.sh')), '\n'.join(environment) + '\n'),
         (str(dest / 'README.txt'), instructions),
     ])
+    if cosmic_rays or mass_evolution:
+        files.pop(str(dest / 'ic_sink'))
+        files[str(dest / 'README.txt')] = instructions.replace(
+            'ic_sink accompanies the uniform gas namelist.', 'the uniform gas namelist has no sinks.') + (
+            '\nNENER=1 comparison build, CPU hydro, noncosmo periodic domain; no AGN.\n'
+            'No jobs or calibration are launched.\n')
+        if cosmic_rays:
+            files[str(dest / 'README.txt')] += (
+                'CR trapped-fluid reference: gamma_rad=4/3; SN energy is partitioned, not increased.\n'
+                'SF model 4 uses an explicit effective-compressibility closure; no universal SF suppression claim.\n'
+                'No diffusion/streaming/losses or cosmological CR expansion source.\n'
+                'CR fractions and SF coupling cannot change on restart.\n')
+        if mass_evolution:
+            files[str(dest / 'README.txt')] += (
+                'Dust mass bulk v1: condensation fractions wind/AGB/SNII=0/0.2/0.15; SNIa produces no dust.\n'
+                'Cold geometric accretion and Tsai-Mathews thermal sputtering, fixed characteristic size/composition.\n'
+                'Dust is a subset of total metals/rho, not an added gas mass; external metal cooling is disabled.\n'
+                'Dust injection at 20 K is charged to source energy; mass-exchange heat is charged to gas, not CR.\n'
+                'No latent heat, element-resolved depletion, SN unresolved-shock destruction, shattering or coagulation.\n'
+                'Cosmic-ray pressure enabled: {}.\n'.format(cosmic_rays))
     if write_text is save_text:
         # Reuse the existing setup-only atomic publisher, never overwrite a
         # concurrently created destination. No Tkinter/display is imported.
@@ -709,6 +775,8 @@ def generate_run(ui=None, write_text=save_text):
     ])
     if physics_on:
         values.update(stellar_defaults)
+        print('The trapped CR reference is available in the noncosmological comparison modes. '
+              'Do not enable it for cosmological ICs: the CR expansion source is not implemented.')
 
     advanced = ask_bool(
         '\nOpen the full parameter editor for fine-tuning before writing?', False)

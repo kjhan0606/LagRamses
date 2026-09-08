@@ -3,11 +3,34 @@
 #include <cstdio>
 #include <algorithm>
 #include <limits>
+#include <cstdint>
+#include "snrt_species_dust_cell.h"
 using step_fn=int(float*,const float*,const int*,const float*,const float*,const float*,float*,
     float*,float*,float*,float*,float*,float*,int,int,int,int,float);
 extern "C" step_fn snrt_openmp_species_dust_c,snrt_cuda_multigroup_rt_step_species_dust_c;
 extern "C" int snrt_cuda_available_c();
 int main() {
+  // Fully absorbed cells must never return negative photons through a cap
+  // rounded above one. Exercise zero and trace dust, with ample H/He inventory.
+  uint32_t seed=173;
+  auto sample=[&]() {seed=1664525u*seed+1013904223u;return float(1+(seed>>8)%10000)/10000;};
+  for(int trial=0;trial<4096;++trial) {
+    float state[8]={},removed[8],stau[3],dtau=trial%2?1e-12f:0.0f;
+    for(float &v:removed)v=sample();
+    for(float &v:stau)v=sample();
+    float available[3]={10,10,10},hhe[3],dust,returned,raw,group,total;
+    snrt_cap_species_dust_cell(state,removed,stau,&dtau,available,hhe,&dust,&returned,&raw,
+        &group,&total,1,1,8,1,0);
+    for(float v:state)if(v<0||!std::isfinite(v)) {
+      std::printf("FAIL saturated photon cap trial=%d state=%g raw=%g assigned=%g\n",
+          trial,v,raw,hhe[0]+hhe[1]+hhe[2]);return 60;
+    }
+    if(hhe[0]+hhe[1]+hhe[2]>raw||fabsf(raw-returned-group)>2e-6f||
+        fabsf(group-hhe[0]-hhe[1]-hhe[2]-dust)>2e-6f) {
+      std::printf("FAIL cap ledger trial=%d raw=%.9g HHe=%.9g group=%.9g dust=%.9g return=%.9g\n",
+          trial,raw,hhe[0]+hhe[1]+hhe[2],group,dust,returned);return 61;
+    }
+  }
   constexpr int n=17,nw=19,nd=8,ng=9,g=n*ng,total=nw*nd*ng;
   const bool gpu=snrt_cuda_available_c()>0;
   double worst=0;
@@ -47,7 +70,10 @@ int main() {
         const double inventory_scale=std::max(double(*std::max_element(budget.begin(),budget.end())),
             double(*std::max_element(input.begin(),input.end()))*nd);
         worst=std::max(worst,error/std::max(scale,inventory_scale));
-        return error<=3e-5*scale+8*std::numeric_limits<float>::epsilon()*inventory_scale;
+        const bool ok=error<=3e-5*scale+8*std::numeric_limits<float>::epsilon()*inventory_scale;
+        if(!ok)std::printf("FAIL backend comparison dusty=%d count=%zu state=%d error=%g scale=%g inventory=%g\n",
+            dusty,a.size(),state_array,error,scale,inventory_scale);
+        return ok;
       };
       auto gs=input,ga=budget;std::vector<float> gh(3*g),gd(g),gr(g),gw(g),gg(g),gt(n);
       rc=snrt_cuda_multigroup_rt_step_species_dust_c(gs.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),

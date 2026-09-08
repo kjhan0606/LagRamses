@@ -6,6 +6,11 @@
 ! eleven independently tracked ejecta fields without that overlap.
 
 module stellar_ramses_runtime
+  use cosmic_ray_physics, only: cr_enabled,cr_source_partition
+#if defined(SNRT) && defined(DUST_LIVE)
+  use dust_mass_physics, only: dust_mass_enabled,dust_condense
+  use dust_mass_runtime, only: dust_injection_specific_energy
+#endif
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use omp_lib, only: omp_lock_kind, omp_init_lock, omp_set_lock, omp_unset_lock
   use amr_commons
@@ -13,7 +18,7 @@ module stellar_ramses_runtime
   use hydro_commons
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels, active_element, enable_wind, enable_agb, &
-       enable_snii, enable_snia, enable_pisn, default_imf_id, channel_agb, &
+       enable_snii, enable_snia, enable_pisn, default_imf_id, channel_agb, channel_snii, &
        population_model_id, yield_source_basis_id, configured_imf_mass_min, &
        configured_imf_mass_max, configured_binary_fraction, &
        configured_channel_mass_min, configured_channel_mass_max, &
@@ -583,7 +588,10 @@ contains
     type(stellar_population_ledger_t) :: population_ledger
     real(stellar_dp) :: age_code, code_dt, previous_age_gyr, age_gyr, dt_gyr
     real(stellar_dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
-    real(stellar_dp) :: scale_mass, scale_momentum, scale_energy
+    real(stellar_dp) :: scale_mass, scale_momentum, scale_energy,cr_energy,cr_snia_energy
+#if defined(SNRT) && defined(DUST_LIVE)
+    real(stellar_dp) :: dust_source,dust_specific_u,dust_source_u
+#endif
     real(stellar_dp) :: returned_code, snii_returned_code, snia_returned_code
     real(stellar_dp) :: volume
     real(stellar_dp) :: snia_expected_events, snia_available_msun
@@ -968,6 +976,39 @@ contains
     end if
 
     staged_delta = generic_delta + snia_delta
+    cr_energy=0;cr_snia_energy=0
+    if(enable_snia)cr_snia_energy=snia_budget%energy*snia_coupling%thermal_fraction
+    if(cr_enabled)then
+       call cr_source_partition(source%channel_energy(channel_snii), &
+            cr_snia_energy,cr_energy,snia_bridge_ierr)
+       if(snia_bridge_ierr/=0)then
+          ierr=91
+          call progress_abort(progress,progress_ierr)
+          return
+       endif
+       ! Set an already included total-energy component, not an extra source.
+       ! This row follows the SAME lock, MPI reverse exchange and progress commit.
+       staged_delta(inener)=cr_energy/scale_energy/volume
+    endif
+#if defined(SNRT) && defined(DUST_LIVE)
+    if(dust_mass_enabled)then
+       call dust_condense(source%channel_returned_mass(1:3),source%channel_ejected_mass(1:3,1), &
+            source%channel_ejected_mass(1:3,2),dust_source,snia_bridge_ierr)
+       if(snia_bridge_ierr==0)call dust_injection_specific_energy(dust_specific_u,snia_bridge_ierr)
+       if(snia_bridge_ierr/=0)then
+          ierr=92;call progress_abort(progress,progress_ierr);return
+       endif
+       dust_source_u=dust_source*solar_mass_cgs*dust_specific_u
+       if(.not.ieee_is_finite(dust_source_u).or.dust_source_u>source%energy+cr_snia_energy-cr_energy)then
+          ierr=93;call progress_abort(progress,progress_ierr);return
+       endif
+       ! Dust is part of the returned metal mass already in rho/imetal/elements.
+       ! Its thermal energy is outside gas total energy: partition, never add twice.
+       staged_delta(idust)=dust_source/scale_mass/volume
+       staged_delta(idust_energy)=dust_source_u/scale_energy/volume
+       staged_delta(ndim+2)=staged_delta(ndim+2)-staged_delta(idust_energy)
+    endif
+#endif
     if (.not. all(ieee_is_finite(staged_delta))) then
        ierr = 88
        call progress_abort(progress, progress_ierr)

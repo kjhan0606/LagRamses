@@ -107,6 +107,8 @@ subroutine restore_amr_hdf5()
   ! Step 1: Read header (time, cosmology, nstep, etc.)
   !=====================================================
   call hdf5_open_group('/header', grp_id)
+  call cosmic_ray_hdf5_identity(grp_id,.false.)
+  call dust_mass_hdf5_identity(grp_id,.false.)
   call hdf5_read_attr_int_checked(grp_id, 'ncpu', ncpu_file, hdf5_attr_status)
   call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
        MPI_MAX, MPI_COMM_WORLD, info)

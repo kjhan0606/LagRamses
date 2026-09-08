@@ -105,6 +105,74 @@ contains
   end subroutine require_ok
 end subroutine stellar_feedback_hdf5_identity
 
+subroutine dust_mass_hdf5_identity(grp,writing)
+  use amr_commons
+  use ramses_hdf5_io
+  use dust_mass_physics, only: dust_mass_enabled,dust_mass_identity
+  implicit none
+  integer(HID_T),intent(in)::grp
+  logical,intent(in)::writing
+  real(dp)::values(13),saved(13)
+  integer::status,bad,all_bad,info
+  logical::exists
+  include 'mpif.h'
+  values=dust_mass_identity();bad=0
+  if(writing)then
+     if(dust_mass_enabled)call hdf5_write_attr_1d_dp(grp,'dust_mass_values',values,13)
+  else
+     exists=.false.
+     call h5aexists_f(grp,'dust_mass_values',exists,status)
+     if(status/=0)bad=1
+     if(exists.neqv.dust_mass_enabled)bad=1
+     if(exists.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_mass_values',saved,13,status)
+        if(status/=0)bad=1
+        if(status==0)then
+           if(any(saved/=values))bad=1
+        endif
+     endif
+     call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+     if(all_bad/=0.or.info/=0)then
+        if(myid==1)write(*,*)'ERROR: dust mass-evolution restart identity mismatch'
+        call MPI_ABORT(MPI_COMM_WORLD,11,info)
+     endif
+  endif
+end subroutine dust_mass_hdf5_identity
+
+subroutine cosmic_ray_hdf5_identity(grp,writing)
+  use amr_commons
+  use ramses_hdf5_io
+  use cosmic_ray_physics, only: cr_enabled,cr_identity
+  implicit none
+  integer(HID_T),intent(in)::grp
+  logical,intent(in)::writing
+  real(dp)::values(6),saved(6)
+  integer::status,bad,all_bad,info
+  logical::exists
+  include 'mpif.h'
+  values=cr_identity();bad=0
+  if(writing)then
+     if(cr_enabled)call hdf5_write_attr_1d_dp(grp,'cosmic_ray_values',values,6)
+  else
+     exists=.false.
+     call h5aexists_f(grp,'cosmic_ray_values',exists,status)
+     if(status/=0)bad=1
+     if(exists.neqv.cr_enabled)bad=1
+     if(exists.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'cosmic_ray_values',saved,6,status)
+        if(status/=0)bad=1
+        if(status==0)then
+           if(any(saved/=values))bad=1
+        endif
+     endif
+     call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+     if(all_bad/=0)then
+        if(myid==1)write(*,*)'ERROR: CR model/source/SF restart identity mismatch'
+        call MPI_ABORT(MPI_COMM_WORLD,10,info)
+     endif
+  endif
+end subroutine cosmic_ray_hdf5_identity
+
 subroutine backup_header_hdf5()
   use amr_commons
   use hydro_commons
@@ -121,6 +189,8 @@ subroutine backup_header_hdf5()
   integer(HID_T) :: grp_id
 
   call hdf5_create_group('/header', grp_id)
+  call cosmic_ray_hdf5_identity(grp_id,.true.)
+  call dust_mass_hdf5_identity(grp_id,.true.)
 
   ! Grid parameters
   call hdf5_write_attr_int(grp_id, 'ncpu', ncpu)

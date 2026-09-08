@@ -7,6 +7,34 @@ model, not an expanding collection of Python gates. Preserve current model
 defaults, approved empirical DTD, effective-SSP comparison, and old restart
 identities. Existing ramses_nml_generator.py deletions are unrelated.
 
+## Latest scope decision (2026-09-08)
+
+Closeout follow-up: the operator preapproved the entire current closeout
+without substep pauses. Source review, focused regressions, setup/runtime
+documentation and selective repository handoff are recorded in
+[the closeout result](cosmic_ray_dust_evolution_status_2026-09-08.md#approved-closeout-result-2026-09-08).
+The CR/bulk-dust implementation bundle is closed at its admitted comparison
+scope; this is not a declaration that the unresolved source-data/physical
+programme below has been completed.
+
+The operator approved **current-scope closeout first**, with the newly
+researched advanced dust programme moved to the highest-priority medium-term
+extension. Earlier broad continuation approvals must not be used to keep
+expanding the current bundle with these new dust requirements. Essential
+RT/feedback/CR/bulk-dust connections and defects invalidating the admitted
+model remain current work. Reuse completed native checks; add no per-item
+audit gates. Bulk dust may be handed off as a restricted comparison model,
+not as full physical production-ready dust.
+
+The retained extension groups and closeout boundary are recorded in
+[the CR/dust status](cosmic_ray_dust_evolution_status_2026-09-08.md#current-scope-decision-close-out-first-defer-advanced-dust-2026-09-08).
+Existing unresolved population/SED, source-table and metallicity coverage
+items below are not declared complete or collectively deferred by this
+decision. Final order is current closeout, advanced dust/model selection,
+then final COLIBRE-style tuning; calibration execution requires a separate
+approval. This planning update is not evidence of implementation completion
+or a completed commit/push.
+
 Continuation instruction (2026-09-07): report when the current stage is
 complete and enter the next in-scope task without an approval pause. This
 does not permit declaring unresolved physics complete or silently selecting
@@ -17,6 +45,22 @@ Current authorization (2026-09-08): the operator additionally preapproved
 expansion)** and requested continued implementation. This supersedes the
 historical #2/#3 approval holds below; no further substep approval pause.
 Data dependencies and source/model limitations are still reported honestly.
+
+Authorization extension (2026-09-08): continue remaining implementation to
+completion without substep approvals; add cosmic-ray nonthermal pressure
+and its star-formation coupling (user explicitly clarified cosmic rays,
+not star-particle radiation pressure). Finally inspect actual dust evolution,
+distinct from its optical/thermal response. After implementation/checks,
+prepare a COLIBRE-style resolution-dependent calibration plan and WAIT for
+the user's approval before running calibration. This does not authorize
+inventing missing physical source data or claiming an unsupported domain.
+
+2026-09-08 implementation/status continuation:
+[CR pressure/SF native evidence and actual dust-evolution inspection](cosmic_ray_dust_evolution_status_2026-09-08.md).
+The trapped CR comparison is connected; this is NOT completion of the
+remaining physics programme. Dust thermal response must not be counted as
+dust mass/grain-size evolution. The COLIBRE calibration proposal/execution
+is still downstream of that work and the operator's final approval.
 
 ## Source facts and proposed scope
 
@@ -989,3 +1033,28 @@ This closes temperature-dependent thermal speed in the existing native
 gas/dust/IR coupling, not all of #1--#3. Previously listed source/population
 data gaps and additional dust/radiation physics remain explicitly open;
 no new verification bundles or external audits were inserted.
+
+### Approved continuation: CR pressure/SF and bulk dust mass (2026-09-08)
+
+Native CR trapped-fluid pressure, SN energy partition and virial-SF support
+are now connected and exercised; SNRT thermal extraction excludes CR
+energy. The subsequent dust inspection led directly to implementation of
+stellar condensation, cold accretion and thermal sputtering, rather than
+another audit bundle. Source dust is a subset of returned metals; native
+mass evolution conserves total metals and exchanges material/gas heat.
+The shared mkrun/GUI generator and HDF5 restart binding were updated.
+Evidence and precise limitations are in
+`provenance/cosmic_ray_dust_evolution_status_2026-09-08.md`.
+
+This is explicitly a bulk fixed-size/composition, noncosmological,
+no-AGN comparison with external metal cooling disabled; it does not
+magically close the source/population data requirements or supply grain
+size evolution, cosmic-ray diffusion/streaming or dust radiation force.
+Zero-initial-dust native source integration, cold growth, hot destruction,
+exact restart and changed-coefficient rejection have been exercised.
+The zero-dust trial also exposed and independently reproduced an FP32 RT
+overabsorption bug; the shared CPU/CUDA cell was corrected before claiming
+the dust connection worked. No old outputs or physical source data were
+overwritten. No COLIBRE tuning runs have been launched: finish the remaining
+implementation scope before presenting the bounded calibration proposal
+for the user's approval.

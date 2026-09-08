@@ -557,7 +557,7 @@ subroutine sub1_star_formation(ilevel, igrid,ngrid)
   implicit none
   integer:: ilevel, igrid,ngrid
   integer ,dimension(1:nvector)::ind_grid,ind_cell,ind_cell2,nstar
-  integer:: i,ind,ivar
+  integer:: i,ind,ivar,irad
   real(dp)::d,x,y,z,u,v,w,e,tg,zg,vdisp,dgas
   real(dp)::bx1,bx2,by1,by2,bz1,bz2,A,B,C,emag,beta,fbeta
 
@@ -606,6 +606,7 @@ subroutine sub1_star_formation(ilevel, igrid,ngrid)
 end subroutine sub1_star_formation
 
 subroutine sub2_star_formation(ilevel, igrid,ngrid,ntot,imstar_lost,imstar_tot)
+  use cosmic_ray_physics, only: cr_enabled,cr_sf_support,cr_support_speed2
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -695,6 +696,12 @@ subroutine sub2_star_formation(ilevel, igrid,ngrid,ntot,imstar_lost,imstar_tot)
                  ! Correct from polytrope
                  cs2_poly  = (T2_star/scale_T2)*(uold(ind_cell(i),1)*scale_nH/nISM)**(g_star-1.0)
                  cs2       = cs2-cs2_poly
+                 ! Trapped-CR effective-compressibility closure. Thermal T2
+                 ! and its cooling/eligibility cut above NEVER include CR energy.
+                 if(cr_enabled.and.cr_sf_support)then
+                      cs2=cs2+cr_support_speed2(uold(ind_cell(i),inener),d)
+                      cs2=max(cs2,smallc**2)
+                 endif
                  ! We need to estimate the norm of the gradient of the velocity field in the cell (tensor of 2nd rank)
                  ! i.e. || A ||^2 = trace( A A^T) where A = grad vec(v) is the tensor. 
                  ! So construct values of velocity field on the 6 faces of the cell using simple linear interpolation 
@@ -978,7 +985,7 @@ subroutine sub3_star_formation(ilevel, igrid,ngrid)
   implicit none
   integer:: ilevel, igrid,ngrid
   integer ,dimension(1:nvector)::ind_grid,ind_cell,ind_cell2,nstar
-  integer:: i,ind,ivar
+  integer:: i,ind,ivar,irad
   real(dp)::d,x,y,z,u,v,w,e,tg,zg,vdisp,dgas
   real(dp)::bx1,bx2,by1,by2,bz1,bz2,A,B,C,emag,beta,fbeta
 

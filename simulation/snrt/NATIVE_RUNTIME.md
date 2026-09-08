@@ -186,7 +186,7 @@ The latter checks analytic photon production, split-step equivalence, pre-birth
 zero emission, and age/Z bounds using the explicit reference table.
 These are implementation regressions, not publication-validation gates.
 
-`snrt_dust_backend_smoke` compares v3/v4 material evolution against the
+`snrt_dust_backend_smoke` compares v3/v4 material **thermal** evolution against the
 original native solver, including zero-density cells and error rollback.
 CPU/GPU worst relative difference was 6.19e-16. The separately authorized
 parallel comparison in `.parallel-runtime.luzQV6` exercises actual stars,
@@ -1096,3 +1096,87 @@ rejects marker2 checkpoints instead of silently changing the integrator.
 No-exchange restart identities and sidecar physical coefficients are unchanged.
 Evidence: `.dust-exchange.WKZl1j/` (old) / `.dust-nonlinear.TtLIOc/` (new)
 and the existing population/source bundle record.
+
+### Optional trapped CR comparison (2026-09-08)
+
+In `PHYSICS_PARAMS`, `cr_enabled=.true.` selects the NENER=1 advective
+gamma=4/3 CR fluid. `cr_sn_fraction` and `cr_snia_fraction` partition the
+existing SNII and coupled SNIa energy budgets; both default to zero and
+must lie in [0,1]. `cr_transport='advective'` is the only admitted closure.
+Optional `cr_sf_support=.true.` adds CR effective pressure support to
+`sf_virial=.true.` models 1,2,4; the thermal SF threshold excludes CR energy.
+Diffusion, streaming, losses and CR ionization chemistry are not included.
+
+Use `python3 mkrun.py --mode cli` (or `--mode gui`), select the comparison
+run mode, then explicitly enable CR and/or dust mass. These profiles require
+the documented local physical inputs and CPU binaries; a fresh Git clone
+alone does not include the source datasets or compiled executables. Setup
+checks their presence, writes a new run directory and never launches a job.
+CR requires periodic noncosmological CPU hydro, HDF5, channel feedback,
+no sinks/AGN/delayed cooling, and hllc/hll/llf. The general cosmological
+wizard does not enable this reference. HDF5 binds the CR on/off state,
+fractions and SF coupling, so these cannot change across restart.
+For build commands, executable identities and measured scope, see
+[the CR/dust evidence](../../provenance/cosmic_ray_dust_evolution_status_2026-09-08.md).
+
+### Optional bulk dust mass evolution (2026-09-08)
+
+`PHYSICS_PARAMS` now accepts the following explicit reference model (off
+by default). `mkrun.py` comparison setup and the shared GUI namelist
+generator expose the same parameters; setup never launches a calculation.
+
+```fortran
+  dust_mass_enabled=.true.
+  dust_growth=.true.
+  dust_sputtering=.true.
+  dust_condensation=0d0,.2d0,.15d0 ! wind, AGB, SNII; no SNIa condensation
+  dust_grain_radius_cm=1d-5
+  dust_grain_density=3d0
+  dust_sticking=.3d0
+  dust_growth_max_temperature=300d0
+  dust_metal_atom_mass=24d0
+  dust_injection_temperature=20d0
+```
+
+These are comparison coefficients, not calibrated efficiencies or measured
+element-specific depletion fractions. Dust is a subset of the advected
+total-metal and mixture-density fields, not an additional mass source.
+Stellar injection condenses the selected fraction of each channel's
+returned mass minus H/He; its tabulated material energy at injection
+temperature is taken from the available source energy after CR partition.
+Existing source locking, MPI exchange and progress accounting are reused.
+
+At each leaf level, before the SNRT step, a frozen-rate analytic update
+solves `dD/dt = (A-B)D - A*D*D/Z`. Here D and Z are dust and total-metal
+densities, `A=3*S*rho_Z*v/(4*rho_grain*a)` below the growth temperature cap,
+`v=sqrt(8*k*T/(pi*metal_atom_mass*mp))`. Thermal sputtering uses
+`B=3*3.2e-18*(rho/mp)/a / (1+(2e6/T)^2.5)` in cgs
+([McKinnon et al. 2018, section 3.4](https://arxiv.org/html/1805.04521v1)).
+The update preserves a zero seed and `0<=D<=Z`; total metal mass is not
+changed. Material energy follows mass at fixed grain temperature for this
+split update, with an equal opposite gas-energy transfer. CR and kinetic
+energies are excluded from the available thermal reservoir. Latent heat
+and element/size-resolved grain evolution are not modeled.
+
+Requires SNRT/DUST_LIVE/HDF5, metal hydro and channel-resolved feedback,
+active RT and a v4 material table admitting the injection temperature.
+Current scope is periodic/noncosmological, no sinks/AGN and no external
+metal cooling: gas-phase element depletion is not yet wired into that
+cooling model. Primary H/He chemistry and the existing gas/dust/IR thermal
+solver remain active. Do not describe this bulk fixed-size/composition
+closure as shattering/coagulation, unresolved SN-shock destruction, dust
+drift or radiation pressure. Rates and chemistry are operator split;
+the reference trials below are not arbitrary-resolution convergence.
+
+The 13-value `header/dust_mass_values` HDF5 attribute binds the entire mass
+model and its coefficients. Restart requires exact identity, including
+on/off state; absent attributes remain valid only with evolution off.
+The tested combined CR/dust executable is
+`.cosmic-ray.kyySgK/ramses_dust_mass3d` (NENER=1, CPU hydro). Existing CR
+and no-mass-evolution executable files were preserved. Dust mass evolution
+is a native Fortran level/source update, not a Python postprocessing step.
+RT/material/IR retain their existing stream/OpenMP dispatch; no new GPU
+dispatch or cosmological CR admission is claimed for the mass update.
+
+Evidence: `.dust-mass.w1Jo9A/` and
+`provenance/cosmic_ray_dust_evolution_status_2026-09-08.md`.

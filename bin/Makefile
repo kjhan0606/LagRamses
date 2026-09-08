@@ -133,7 +133,7 @@ ifeq ($(SNRT),1)
                 snrt_cuda_limited_rt_step_interface.o \
                 snrt_cuda_multigroup_interface.o snrt_runtime_backend.o snrt_openmp_transport.o \
                 snrt_dust_material.o snrt_hybrid.o \
-                snrt_stellar_source.o snrt_ramses_driver.o
+                snrt_stellar_source.o snrt_ramses_driver.o dust_mass_runtime.o
   ifeq ($(USE_CUDA),1)
     SNRT_DEVICE_OBJS = snrt_cuda_kernels.o snrt_dust_material_cuda.o snrt_ir_cuda.o
     SNRT_MODOBJ += snrt_dust_material_cuda.o snrt_ir_cuda.o
@@ -193,7 +193,7 @@ MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
-	 $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o agn_feedback_deposition.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
+	 cosmic_ray_physics.o dust_mass_physics.o $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o agn_feedback_deposition.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
 	 $(STELLAR_ENRICHMENT_MODOBJ)
 
 # SIDM object (depends on amr_commons, pm_commons, random)
@@ -341,14 +341,16 @@ snrt_dust_material_cuda.o: ../patch/lagRamses/snrt_dust_material_cuda.cu ../patc
 	$(NVCC) $(NVCCFLAGS) --fmad=false -c $< -o $@
 snrt_ir_cuda.o: ../patch/lagRamses/snrt_ir_cuda.cu ../patch/lagRamses/snrt_ir_cell.h ../patch/lagRamses/snrt_dust_material_cell.h
 	$(NVCC) $(NVCCFLAGS) --fmad=false -c $< -o $@
-snrt_cuda_kernels.o: ../patch/lagRamses/snrt_species_dust_cell.h
+snrt_cuda_kernels.o: ../patch/lagRamses/snrt_cuda_kernels.cu ../patch/lagRamses/snrt_species_dust_cell.h
+	# Match the shared cell's FP32 reduction/cap arithmetic on CPU and CUDA.
+	$(NVCC) $(NVCCFLAGS) --fmad=false -c $< -o $@
 ifeq ($(USE_CUDA),1)
 SNRT_POOL_OBJS = cuda_stream_pool.o poisson_cuda_kernels.o scalar_cuda_kernels.o particle_cuda_kernels.o
 else
 SNRT_POOL_OBJS =
 endif
-snrt_backend_smoke: snrt_openmp_transport.o $(SNRT_DEVICE_OBJS) $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_backend_smoke.cpp
-	icpx -O2 -qopenmp ../patch/lagRamses/snrt_backend_smoke.cpp snrt_openmp_transport.o $(SNRT_DEVICE_OBJS) \
+snrt_backend_smoke: snrt_openmp_transport.o $(SNRT_DEVICE_OBJS) $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_backend_smoke.cpp ../patch/lagRamses/snrt_species_dust_cell.h
+	icpx -O2 -qopenmp -fp-model=precise ../patch/lagRamses/snrt_backend_smoke.cpp snrt_openmp_transport.o $(SNRT_DEVICE_OBJS) \
 	  $(SNRT_POOL_OBJS) $(LIBS_CUDA) -o $@
 snrt_stellar_source_smoke: snrt_stellar_source.o snrt_agn_locator.o ../patch/lagRamses/snrt_stellar_source_smoke.f90
 	$(F90) -fpp -I. -I../patch/lagRamses ../patch/lagRamses/snrt_stellar_source_smoke.f90 \
@@ -411,6 +413,17 @@ pm_commons.o: amr_commons.kjhan.o pm_parameters.o hydro_commons.o poisson_common
 radiation_commons.o: amr_commons.kjhan.o timing.o
 morton_hash.o: morton_keys.o amr_index.o
 hydro_commons.o: hydro_parameters.o
+read_hydro_params.o stellar_ramses_runtime.o star_formation.kjhan.o: cosmic_ray_physics.o
+backup_hdf5.o restore_hdf5.o: cosmic_ray_physics.o
+read_hydro_params.o backup_hdf5.o: dust_mass_physics.o
+dust_mass_runtime.o: amr_commons.kjhan.o hydro_commons.o dust_mass_physics.o snrt_dust_contract.o snrt_state.o snrt_thermochemistry.o
+ifeq ($(SNRT),1)
+amr_step.jaehyun.o stellar_ramses_runtime.o read_params.jaehyun.o: dust_mass_runtime.o
+endif
+dust_mass_smoke: dust_mass_physics.o ../patch/lagRamses/dust_mass_smoke.f90
+	$(F90) -fpp -I. ../patch/lagRamses/dust_mass_smoke.f90 dust_mass_physics.o -o $@
+cosmic_ray_smoke: cosmic_ray_physics.o ../patch/lagRamses/cosmic_ray_smoke.f90
+	$(F90) -fpp -I. ../patch/lagRamses/cosmic_ray_smoke.f90 cosmic_ray_physics.o -o $@
 poisson_commons.o: poisson_parameters.o
 stellar_enrichment_contract.o: stellar_enrichment_config.o
 stellar_snia_dtd.o: stellar_enrichment_config.o

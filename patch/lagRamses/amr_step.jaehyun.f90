@@ -14,6 +14,7 @@ recursive subroutine amr_step(ilevel,icount)
   use hydro_cuda_interface, only: cuda_mesh_free_c
 #endif
 #ifdef SNRT
+  use dust_mass_runtime, only: dust_mass_advance_level
   use snrt_ramses_driver, only: snrt_ramses_diagnose_level, &
        snrt_ramses_advance_level
   use snrt_agn_efficiency, only: snrt_agn_rt_requested
@@ -957,6 +958,7 @@ recursive subroutine amr_step(ilevel,icount)
 #endif
 #ifdef SNRT
   cool_t1=omp_get_wtime()
+  call dust_mass_advance_level(ilevel)
   call snrt_ramses_advance_level(ilevel,snrt_step_start_proper)
   snrt_advance_wall=snrt_advance_wall+omp_get_wtime()-cool_t1
   if(snrt_agn_rt_requested())then
