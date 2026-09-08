@@ -205,9 +205,10 @@ extern "C" int snrt_hybrid_species_dust_c(
 
 extern "C" int snrt_hybrid_dust_material_c(const double *input,const double *table,double *output,
     int nc,int ng,int nt,int use_u,double dt,double background,double bath,double tolerance,int) {
+  if(use_u<0||use_u>3)return 7;
   if(!input||!table||!output||nc<1||ng<1||nt<2||!std::isfinite(dt)||dt<=0)return 7;
   try {
-    const int extra=use_u==2?1:0,fields=use_u==2?7:4;
+    const int extra=use_u>=2?1:0,fields=use_u>=2?7:4;
     std::vector<double> trial(size_t(ng+2+extra)*nc);
     const int nbatch=1+(nc-1)/batch_cells;
     int error=0,cpu=0,gpu=0;

@@ -167,7 +167,7 @@ contains
     if (snrt_dust_contract_scattering_enabled) dust_values=[dust_values, &
          5.0_dp,1.0_dp,snrt_dust_contract_scattering_per_h_cm2]
     if (snrt_dust_contract_exchange_enabled) dust_values=[dust_values, &
-         6.0_dp,2.0_dp,snrt_dust_contract_collision_area_per_h,snrt_dust_contract_accommodation]
+         6.0_dp,3.0_dp,snrt_dust_contract_collision_area_per_h,snrt_dust_contract_accommodation]
     if(writing)then
        call hdf5_write_attr_1d_dp(grp,'dust_contract_values',dust_values,size(dust_values))
     else

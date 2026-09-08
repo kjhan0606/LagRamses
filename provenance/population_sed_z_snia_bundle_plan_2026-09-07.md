@@ -905,3 +905,87 @@ of #1--#3 or publication readiness. Remaining dust choices include actual
 size/composition-matched collision areas, electron/ion charging, anisotropic
 scattering, radiation pressure, grain evolution and cosmological-domain
 qualification. Source/population gaps previously listed remain open.
+
+### Push and next thermal-coupling bundle (2026-09-08)
+
+User requested commit/push then continued implementation. Committed the prior
+native source, CPU-portability, scattering and gas/dust/IR work as `8e7491f`
+and pushed `origin/main` to `kjhan0606/LagRamses`. Forty-four code/config/doc
+files; no scratch binaries, source archives or simulation dumps. Preserved
+the unrelated 88-line deletion in `ramses_nml_generator.py` outside the index;
+only this project's history-field help update was included. Remote and local
+main matched before the commit. Work stayed under `/gpfs/kjhan/LRD_JWST`.
+
+Next bounded #2 bundle implements thermal-speed-dependent gas/dust exchange
+inside the already joint native material/IR solver. The collision law still
+follows [McKinnon et al., equations20--21](https://arxiv.org/pdf/1912.02825);
+no new physical coefficients, grain species, source range or approval gate.
+Instead of freezing K at the start of the IR substep, solve
+`Cg*(Tg-Tg0) + dt*K0*sqrt(Tg/Tg0)*(Tg-Td)=0` along with the material equation.
+Gas Cv/chemistry and geometric/accommodation factors remain fixed during
+each IR substep; this is not a coupled chemistry or multi-species collision
+network. The pre-existing no-radiation helper is still explicitly fixed-K.
+
+The gas equation reduces to a positive-root cubic in sqrt(Tg), scaled to
+avoid stiff-coefficient overflow. Bracketed Newton solves it between the old
+gas and trial dust temperatures. Q is evaluated without subtracting nearly
+equal gas energies in the weak limit. The outer material equation includes
+this Q at both temperature-domain bounds and each trial. Failure rejects the
+whole existing native transaction, not a CPU replay or temperature clamp.
+Modes0/1 retain no-exchange layouts; old fixed-K mode2 remains available in
+the low-level ABI, new mode3 is selected by the Fortran live callback. CPU,
+CUDA and the existing nonblocking stream/OpenMP dispatcher share the kernel.
+
+Existing native tests extended, no new test framework: independent BE gas
+residual/bounds for heating/cooling, zero and stiff coefficients; fixed-Tdust
+analytic ODE refinement in both directions; material modes0--3 parity,
+conservation and late-error rollback; joint gas/material/IR Fortran checks.
+The analytic relation is `u=(sqrt(T)-sqrt(Td))/(sqrt(T)+sqrt(Td))`,
+`u(t)=u(0)*exp(-alpha*sqrt(Td)*t)` for `dT/dt=-alpha*sqrt(T)*(T-Td)`.
+At32/64/128/256 steps, heating T0=1 errors are .0238667/.0119272/.00596190/
+.00298051 K; cooling T0=1000 errors7.99556/4.01593/2.01255/1.00743 K.
+This establishes first-order convergence for the isolated gas equation,
+not arbitrary full-AMR time convergence. An initial T0=5 ratio-only test
+was unsuitable across the ODE's curvature change; used monotone-curvature
+heating/cooling controls, retaining independent residual/bound checks.
+CPU and CUDA native tests pass. Mode3 mixed dispatch uses CPU15/GPU2 free,
+CPU17/GPU0 with its sole stream held. Joint Fortran tests pass CPU, forced
+CUDA and two MPI ranks. GUI/model32 tests pass with one display skip.
+
+Built separate executables, preserving old ones:
+`.snrt-cpu.OKoz9T/ramses_exchange_nonlinear_cpu3d` SHA
+`8c7fa6c124dba287c34541b6197c69782610b54e59a43dee947e067c253bd7b4`;
+`.physical-extension.7rcxv4/ramses_exchange_nonlinear3d` SHA
+`1c5ae8665fbf5c24dbd92abf97826f56471311cb2a4e4802aceeab0d809f3486`.
+VPATH and native main-namelist fields unchanged. mkrun now selects these
+only when exchange is enabled and documents the solver/restart distinction.
+The v4 physical sidecars are unchanged. Exchange HDF5 algorithm marker2->3
+is the only changed entry (index1675, zero-based) of the1678-value dust
+identity. Old no-exchange identities remain unchanged.
+
+Evidence directory `.dust-nonlinear.TtLIOc/`. Effective live namelist
+`live/physical.nml` audited before launch: noncosmo level3/Z=.004,
+SNRT/DUST_LIVE/HDF5/NVAR30/NVECTOR500, one MPI/two OMP, 512M thread stacks;
+LC18/AGB pulse/effective Ia/BPASS/AGN/scattering+exchange reference unchanged.
+Four steps, noutput1/aout2/tout1e30 unreached, foutput2/fbackup1000000;
+two~56MB dumps,161TB GPFS free. MG nonconvergence abort enabled, none seen.
+CPU live completes26.259s; joint balance<=5.0311e-10 under1e-9 tolerance.
+CUDA-linked restart from a COPY of step2 completes step4 in7.425s with
+material/IR transport/absorption each using CPU1/GPU1 batches (visible GPU1).
+Timings are short-run observations, not a performance speedup measurement;
+the cooling parent timer includes SNRT.
+
+All161 floating datasets are finite. Continuous/restart hydro differs only
+in momenta, maximum absolute1.8612e-24 (normalized<=1.27e-18), while SNRT
+maximum absolute difference2.728e-253. Dust and source identities match;
+particle arrays must be matched by unique positive star ID, not file order.
+All512 matched stars have exact masses, birth/progress clocks, metallicities
+and positions; velocity differences are at most4.2352e-22 in code units.
+`reject-old/physical.nml` uses a COPY of the old fixed-speed step2 and is
+rejected before output2 (radiation checkpoint status1 / MPI_Abort10).
+No simulation outputs were deleted, overwritten or moved.
+
+This closes temperature-dependent thermal speed in the existing native
+gas/dust/IR coupling, not all of #1--#3. Previously listed source/population
+data gaps and additional dust/radiation physics remain explicitly open;
+no new verification bundles or external audits were inserted.

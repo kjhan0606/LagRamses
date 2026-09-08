@@ -377,7 +377,7 @@ contains
        if(.not.present(gas_capacity).or..not.present(conductance).or..not.present(gas_transfer))return
        if(.not.use_u)return
        if(size(gas_energy)/=nc.or.size(gas_capacity)/=nc.or.size(conductance)/=nc.or.size(gas_transfer)/=nc)return
-       extra=1;material_mode=2
+       extra=1;material_mode=3 ! Joint BE gas/dust/IR with K(Tgas), frozen chemistry/Cv
     else if(present(gas_capacity).or.present(conductance).or.present(gas_transfer))then
        return
     endif

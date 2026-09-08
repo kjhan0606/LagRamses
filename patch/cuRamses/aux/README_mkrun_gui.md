@@ -135,7 +135,9 @@ with `--native-gas-exchange hydrogen_accommodation` for other inputs.
 All collision fields are sidecar parameters, not new main RAMSES keywords.
 Electron/ion charging and molecular collision physics remain outside this
 hydrogen-equivalent model. Gas, dust and IR are solved together; thermal
-speed and gas Cv are frozen per IR substep, and chemistry is operator split.
+speed follows the implicit gas temperature. Gas Cv stays fixed per IR substep,
+and chemistry is operator split. The nonlinear solver has restart marker 3;
+old frozen-speed (marker 2) exchange checkpoints require the old executable.
 `none` remains the default; changing model/coefficients on restart is rejected.
 
 Run bounded tests from the root:

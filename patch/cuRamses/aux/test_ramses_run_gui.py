@@ -84,8 +84,8 @@ def comparison_workspace():
         cpu_binary.write_text('not executable: setup-only\n')
         (cpu_binary.parent/'ramses_scatter_cpu3d').write_text('not executable: setup-only\n')
         (extension/'ramses_scatter3d').write_text('not executable: setup-only\n')
-        (cpu_binary.parent/'ramses_exchange_coupled_cpu3d').write_text('not executable: setup-only\n')
-        (extension/'ramses_exchange_coupled3d').write_text('not executable: setup-only\n')
+        (cpu_binary.parent/'ramses_exchange_nonlinear_cpu3d').write_text('not executable: setup-only\n')
+        (extension/'ramses_exchange_nonlinear3d').write_text('not executable: setup-only\n')
         with mock.patch.object(mkrun, 'HERE', str(root)):
             yield root
 
@@ -99,7 +99,8 @@ class WizardTests(unittest.TestCase):
                           'Dust gas thermal exchange':'hydrogen_accommodation','Output directory':str(root/'fresh'),
                           'Use the fixed reference-only RT/feedback/dust comparison?':True}
                 _,files,_=collect(settings)
-                self.assertIn('ramses_exchange_coupled_cpu3d',files[str(root/'fresh/README.txt')])
+                self.assertIn('ramses_exchange_nonlinear_cpu3d',files[str(root/'fresh/README.txt')])
+                self.assertIn('joint solver identity 3',files[str(root/'fresh/README.txt')])
                 self.assertIn('area/H=3.495e-22',files[str(root/'fresh/README.txt')])
                 suffix='scattering_exchange' if scattering!='none' else 'exchange'
                 self.assertIn('dust_dl01_bulk_030_'+suffix+'_reference_v4.nml',files[str(root/'fresh/myrun.env.sh')])

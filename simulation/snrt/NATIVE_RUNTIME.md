@@ -1056,16 +1056,22 @@ measured properties or production approval of the adopted dust mixture.
 
 The implementation here retains finite tabulated grain U(T); it does not
 assume instantaneous dust equilibrium. Each existing IR substep solves gas,
-material and radiative emission **jointly**, with gas Cv and thermal speed
-frozen during that substep. For gas energy Eg and conductance K, eliminating
-the gas equation gives `Q = r*(Eg-Cg*Td)`, `r=K*dt/(Cg+K*dt)`.
+material and radiative emission **jointly**, with gas Cv/composition fixed
+during that substep. Thermal speed follows the implicit final gas temperature:
+`K(Tg)=K0*sqrt(Tg/Tg0)`. For gas energy Eg, eliminating the gas equation gives
+`Q = r*(Eg-Cg*Td)`, `r=K(Tg)*dt/(Cg+K(Tg)*dt)`, `Tg=(Eg-Q)/Cg`.
+The positive root is found using a scaled cubic in sqrt(Tg) and bracketed
+Newton iterations; failed roots reject the entire material trial. The
+previous fixed-K mode remains available in the low-level comparison ABI,
+but is no longer the selected live solver.
 The same monotone material solver then solves
 `Ed(Td)-Ed_old + dt*P_net(Td) = dt*H_abs + Q`.
 IR reabsorption remains in the existing fixed-point solve; Q is subtracted
 from the gas and included in the existing total-energy residual. Gas,
 material, IR photons and their temperatures publish only on success. The
-ordinary no-exchange ABI layout is unchanged; material mode2 adds gas data
-and transfer to the existing CPU/CUDA/hybrid material kernel.
+ordinary no-exchange ABI layout is unchanged; material modes2/3 add gas data
+and transfer to the existing CPU/CUDA/hybrid material kernel. Mode2 is the
+frozen-speed comparison and mode3 is the variable-speed live solve.
 
 Do not apply a gas/dust kick after a whole IR step: the first trial of that
 split failed in the real control because a stiff grain reservoir could not
@@ -1082,6 +1088,11 @@ The code runs natively; `SNRT_DUST_BACKEND=auto` uses the existing nonblocking
 stream/OpenMP material and IR dispatch. Collision model, coefficients and
 joint-solver marker are bound into HDF5 restart identity. Never switch them
 on/off or edit their values during restart. No new main RAMSES namelist key.
-Local tested executables are `.snrt-cpu.OKoz9T/ramses_exchange_coupled_cpu3d`
-and `.physical-extension.7rcxv4/ramses_exchange_coupled3d`. Evidence is in
-`.dust-exchange.WKZl1j/` and the existing population/source bundle record.
+Frozen-speed executables remain `.snrt-cpu.OKoz9T/ramses_exchange_coupled_cpu3d`
+and `.physical-extension.7rcxv4/ramses_exchange_coupled3d`. The new mkrun
+selection is `ramses_exchange_nonlinear_cpu3d` / `ramses_exchange_nonlinear3d`
+in the same respective build directories. HDF5 exchange algorithm marker3
+rejects marker2 checkpoints instead of silently changing the integrator.
+No-exchange restart identities and sidecar physical coefficients are unchanged.
+Evidence: `.dust-exchange.WKZl1j/` (old) / `.dust-nonlinear.TtLIOc/` (new)
+and the existing population/source bundle record.

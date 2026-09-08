@@ -121,6 +121,12 @@ program dust_backend_smoke
        +trial_diag%escaped_erg-sum(heat)*1d42
   if(abs(total_change)>1d-10*sum(old_gas)*1d36.or.any(coupled_q<0).or.sum(coupled_q)<=0)stop 41
   if(maxval(trial_t)>100.or.minval(coupled_gas)<0)stop 42
+  do i=1,nc
+     ! Independent variable-speed BE gas equation, with final (not initial) Tgas.
+     expected=1d6*coupled_k(i)*sqrt(coupled_gas(i)/old_gas(i))
+     expected=expected/(coupled_cv(i)+expected)*(old_gas(i)-coupled_cv(i)*trial_t(i))
+     if(abs(expected-coupled_q(i))>1d-11*old_gas(i))stop 44
+  enddo
   old_gas=coupled_gas;old_dust=trial_e;ref=trial;ref_t=trial_t;ref_p=trial_p
   coupled_k(nc)=-1
   call snrt_dust_ir_advance(table,rays,weights,links,1d12,1d6,1d5,rho,heat, &
@@ -130,7 +136,7 @@ program dust_backend_smoke
        conductance=coupled_k,gas_transfer=coupled_q)
   if(ierr==0.or.any(coupled_gas/=old_gas).or.any(trial_e/=old_dust).or.any(trial/=ref).or. &
        any(trial_t/=ref_t).or.any(trial_p/=ref_p))stop 43
-  write(*,*)'GAS_DUST_IR_JOINT_CONSERVATION_STIFF_ROLLBACK_PASS'
+  write(*,*)'GAS_DUST_IR_VARIABLE_SPEED_JOINT_CONSERVATION_STIFF_ROLLBACK_PASS'
   write(*,*)'DUST_BACKEND_PARITY_AND_ROLLBACK_PASS'
   call MPI_FINALIZE(info)
 end program

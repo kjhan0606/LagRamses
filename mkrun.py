@@ -419,8 +419,8 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     if exchange == 'hydrogen_accommodation':
         suffix = 'scattering_exchange' if scattering == 'isotropic_elastic' else 'exchange'
         dust_contract = config / ('dust_dl01_bulk_030_' + suffix + '_reference_v4.nml')
-        binary = root / ('.snrt-cpu.OKoz9T/ramses_exchange_coupled_cpu3d' if executable_kind == 'cpu_only'
-                         else '.physical-extension.7rcxv4/ramses_exchange_coupled3d')
+        binary = root / ('.snrt-cpu.OKoz9T/ramses_exchange_nonlinear_cpu3d' if executable_kind == 'cpu_only'
+                         else '.physical-extension.7rcxv4/ramses_exchange_nonlinear3d')
         ui.info('Explicit collision comparison: area/H=3.495e-22 cm2, accommodation=0.5; '
                 'effective 0.1 micron spheres of density 3 g/cm3, not the WD01 size distribution. '
                 'No electron/ion Coulomb collisions; temperature range remains the supplied material/IR domain.')
@@ -508,7 +508,9 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     if exchange != 'none':
         instructions += ('Conservative hydrogen-equivalent accommodation: area/H=3.495e-22 cm2, alpha=0.5.\n'
             'Effective monodisperse collision radius=0.1 micron, density=3 g/cm3; NOT a WD01 size-distribution claim.\n'
-            'No electron/ion Coulomb or molecular collision network; frozen speed/Cv per IR substep.\n'
+            'No electron/ion Coulomb or molecular collision network; fixed chemistry/Cv per IR substep.\n'
+            'Collision thermal speed follows the implicit final gas temperature (joint solver identity 3).\n'
+            'Old frozen-speed exchange checkpoints require their old binary, not this executable.\n'
             'Gas/dust/IR solved jointly and conservatively, operator split from primary RT/chemistry.\n'
             'Gas loses exactly the energy gained by dust and vice versa; changing these inputs on restart is forbidden.\n'
             'Exchange outside the existing IR bath/material temperature domain fails; no clipping or extrapolation.\n')

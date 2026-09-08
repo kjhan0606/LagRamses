@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <algorithm>
 #include <limits>
+using std::isfinite;
+#include "snrt_dust_material_cell.h"
 extern "C" int snrt_cuda_available_c();
 extern "C" int snrt_dust_material_openmp_c(const double*,const double*,double*,int,int,int,int,double,double,double,double,int);
 extern "C" int snrt_hybrid_dust_material_c(const double*,const double*,double*,int,int,int,int,double,double,double,double,int);
@@ -12,6 +14,39 @@ int main() {
   constexpr int n=1031,nw=n+3,nd=8,ng=9,g=n*ng,total=nw*nd*ng,batch=64;
   const bool gpu=snrt_cuda_available_c()>0;
   if(snrt_hybrid_configure_c(0,1,batch,4,1,gpu))return 1;
+  {
+    // Independent scalar BE residual and analytic fixed-Tdust ODE solution.
+    // This exercises heating, cooling and weak/stiff limits, not CPU parity alone.
+    for(double t0:{1.,20.,80.,1e4})for(double td:{10.,50.,100.})
+      for(double kd:{0.,1e-12,.3,1e4,1e12}) {
+        const double q=dust_gas_transfer(t0,1,kd,td),tg=t0-q;
+        if(!std::isfinite(q)||tg<std::min(t0,td)-1e-11*t0||tg>std::max(t0,td)+1e-11*t0)return 91;
+        const long double scaled_k=kd*sqrtl((long double)tg/t0);
+        const long double r=scaled_k/(1+scaled_k);
+        if(fabsl(q-r*(t0-td))>2e-12L*std::max(t0,td))return 92;
+        if(kd==0&&q!=0)return 93;
+      }
+    for(double t0:{1.,1000.}) {
+      constexpr double td=20.,alpha=.01,duration=10.;
+      const double u=(sqrt(t0)-sqrt(td))/(sqrt(t0)+sqrt(td))*exp(-alpha*sqrt(td)*duration);
+      const double exact=td*std::pow((1+u)/(1-u),2);
+      double previous=0;
+      for(int steps:{32,64,128,256}) {
+        double tg=t0;
+        for(int j=0;j<steps;++j)tg-=dust_gas_transfer(tg,1,alpha*sqrt(tg)*duration/steps,td);
+        const double error=std::abs(tg-exact);
+        if(!std::isfinite(error)||error<=0||(previous>0&&(previous/error<1.8||previous/error>2.2))) {
+          std::printf("GAS_DUST_VARIABLE_SPEED refinement failure T0=%g steps=%d error=%g previous=%g\n",t0,steps,error,previous);
+          return 94;
+        }
+        previous=error;
+        std::printf("GAS_DUST_VARIABLE_SPEED ODE T0=%g steps=%d error=%.8g PASS\n",t0,steps,error);
+      }
+    }
+    const double variable=dust_gas_transfer(1000,1,10,20),frozen=10./11*(1000-20);
+    if(variable>=frozen||frozen-variable<50)return 95;
+    std::printf("GAS_DUST_VARIABLE_SPEED residual/bounds/stiff/analytic_refinement PASS\n");
+  }
   {
     constexpr int ec=1031,et=4;
     double table[2*et]={std::log(10.),std::log(20.),std::log(50.),std::log(100.),1e-23,2e-23,5e-23,1e-22};
@@ -147,10 +182,11 @@ int main() {
     table[k]=std::log(temp[k]);table[nt+k]=power[k];table[2*nt+k]=temp[k]*temp[k];
     table[3*nt+k*dg]=.4*power[k];table[3*nt+k*dg+1]=.6*power[k];
   }
-  for(int use_u=0;use_u<3;++use_u) {
-    in.resize((use_u==2?7:4)*dc);ref.resize((dg+2+(use_u==2))*dc);
+  for(int use_u=0;use_u<4;++use_u) {
+    in.resize((use_u>=2?7:4)*dc);ref.resize((dg+2+(use_u>=2))*dc);
     for(int i=0;i<dc;++i) {in[i]=.3;in[dc+i]=1;in[2*dc+i]=use_u?400:20;in[3*dc+i]=1;}
-    if(use_u==2)for(int i=0;i<dc;++i){in[4*dc+i]=400;in[5*dc+i]=10;in[6*dc+i]=.3;}
+    if(use_u>=2)for(int i=0;i<dc;++i){in[4*dc+i]=use_u==3&&i%2?100:400;in[5*dc+i]=10;in[6*dc+i]=.3;}
+    if(use_u==3)for(int i=0;i<dc;++i)in[6*dc+i]=i%3==0?0:i%3==1?.3:1e8;
     if(snrt_dust_material_openmp_c(in.data(),table.data(),ref.data(),dc,dg,nt,use_u,.1,1,10,1e-9,4))return 11;
     for(int busy=0;busy<2;++busy) {
       const int held=(busy&&gpu)?cuda_acquire_stream():-1;
@@ -164,10 +200,14 @@ int main() {
       if((busy||!gpu)&&gpu_count)return 15;
       if(!busy&&gpu&&(cpu_count==0||gpu_count==0))return 16;
       for(size_t i=0;i<ref.size();++i)if(std::abs(ref[i]-trial[i])>1e-12*std::max(std::abs(ref[i]),1.))return 17;
-      if(use_u==2)for(int i=0;i<dc;++i) {
+      if(use_u>=2)for(int i=0;i<dc;++i) {
         const double q=trial[(dg+2)*dc+i],ed=trial[(dg+1)*dc+i];
         double emitted=0;for(int g=0;g<dg;++g)emitted+=trial[i*dg+g]*.1;
-        if(q<=0||std::abs((ed-400)+emitted-.03-q)>1e-9)return 90;
+        if(std::abs((ed-400)+emitted-.03-q)>1e-9)return 90;
+        const double eg=in[4*dc+i],cg=in[5*dc+i],td=trial[dg*dc+i];
+        const double kd=.1*in[6*dc+i]*(use_u==3?std::sqrt((eg-q)/eg):1);
+        if(std::abs(q-kd/(cg+kd)*(eg-cg*td))>1e-10)return 96;
+        if(use_u==2&&q<=0)return 97;
       }
       std::printf("DUST hybrid material_u=%d held=%d CPU=%d GPU=%d PASS\n",use_u,busy,cpu_count,gpu_count);
       const auto saved=trial;
