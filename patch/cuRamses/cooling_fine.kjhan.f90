@@ -381,7 +381,11 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
         call eunha_solve(nH,T2,Zsolar,dtcool,delta_T2_eunha,nleaf)
      endif
 
-     if(dust_mass_enabled.and.trim(dust_cooling)=='wss09_cie')then
+     if(dust_mass_enabled.and.trim(dust_cooling)=='snrt_hhe_cie_metals')then
+        ! Native SNRT owns the atomic+metal thermal sink together with its
+        ! non-equilibrium H/He update. Do not apply a second CIE sink here.
+        delta_T2(1:nleaf)=0
+     else if(dust_mass_enabled.and.trim(dust_cooling)=='wss09_cie')then
         do i=1,nleaf
            call dust_gas_elements(uold(ind_leaf(i),ichem:ichem+10), &
                 uold(ind_leaf(i),idust_species:idust_species+1),gas_elements,cie_status)

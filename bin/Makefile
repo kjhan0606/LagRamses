@@ -123,7 +123,7 @@ ifeq ($(SNRT),1)
   # in the production link. CUDA entry points are supplied by
   # snrt_cuda_kernels.o; these interface modules only publish the C ABI.
   SNRT_MODOBJ = mpi_mod.o snrt_spectral_contract.o snrt_agn_source.o \
-                snrt_thermochemistry.o snrt_state.o snrt_agn_locator.o \
+                snrt_thermochemistry.o snrt_atomic_cooling.o snrt_state.o snrt_agn_locator.o \
                 snrt_nlte_coupling.o snrt_angular_quadrature.o \
                 snrt_amr_topology.o snrt_transport_step.o \
                 snrt_rt_transaction.o snrt_dust_ir.o snrt_dust_coupling.o \
@@ -318,6 +318,14 @@ snrt_agn_locator.o: amr_commons.kjhan.o
 snrt_agn_source.o: amr_parameters.jaehyun.o
 snrt_nlte_coupling.o: snrt_agn_source.o
 snrt_thermochemistry.o: amr_parameters.jaehyun.o snrt_agn_source.o
+snrt_atomic_cooling.o: snrt_thermochemistry.o dust_element_cooling.o
+snrt_ramses_driver.o dust_mass_runtime.o: snrt_atomic_cooling.o
+ifeq ($(SNRT),1)
+backup_hdf5.o: snrt_atomic_cooling.o
+endif
+snrt_thermochemistry_smoke: ../patch/lagRamses/snrt_thermochemistry_smoke.f90 snrt_atomic_cooling.o snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o
+	$(F90) -fpp -I. ../patch/lagRamses/snrt_thermochemistry_smoke.f90 snrt_atomic_cooling.o \
+	  snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o -o $@
 snrt_angular_quadrature.o: snrt_state.o
 snrt_amr_topology.o: amr_commons.kjhan.o mpi_mod.o snrt_state.o
 snrt_transport_step.o: snrt_state.o snrt_angular_quadrature.o \

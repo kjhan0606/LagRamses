@@ -325,6 +325,8 @@ subroutine read_hydro_params(nml_ok)
           write(*,*)'DUST_COOLING depleted_scalar: solar-mixture curve at (total metal - dust)/rho, NOT element cooling'
      if(trim(dust_cooling)=='wss09_cie') &
           write(*,*)'DUST_COOLING WSS09_CIE: gas-phase H/He + nine metals; CIE comparison, NOT radiation-dependent NEQ'
+     if(trim(dust_cooling)=='snrt_hhe_cie_metals') &
+          write(*,*)'DUST_COOLING SNRT_HHE_CIE_METALS: actual H/He NEQ atomic cooling; WSS09 metals remain CIE'
   endif
   call cr_validate(nener,hydro,gpu_hydro,gamma_rad(1),cr_ok)
   if(cr_enabled)then

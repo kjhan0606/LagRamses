@@ -303,8 +303,8 @@ PARAMS = [
     ParamDef('dust_sn_shocks','bool',False,'PHYSICS_PARAMS',S_FEED,
              'Two-size ambient SN destruction: coupled energy/1e51 erg comparison; fresh ejecta protected, not resolution-calibrated'),
     ParamDef('dust_cooling','str','none','PHYSICS_PARAMS',S_FEED,
-             'none, scalar depleted Z, or WSS09 individual-element CIE comparison (not radiation-dependent NEQ)',
-             choices=['none','depleted_scalar','wss09_cie']),
+             'none, depleted Z, WSS09 CIE, or SNRT H/He NEQ plus CIE metals (not metal NEQ)',
+             choices=['none','depleted_scalar','wss09_cie','snrt_hhe_cie_metals']),
     ParamDef('dust_growth','bool',True,'PHYSICS_PARAMS',S_FEED,'Enable cold gas metal accretion'),
     ParamDef('dust_sputtering','bool',True,'PHYSICS_PARAMS',S_FEED,'Enable thermal sputtering'),
     ParamDef('dust_condensation','real_arr','0.,0.2,0.15','PHYSICS_PARAMS',S_FEED,
@@ -769,11 +769,11 @@ def validate_params(values):
                     valid=valid and [float(x) for x in raw.split(',')]==expected
             except (TypeError,ValueError):
                 valid=False
-        valid=valid and model in ('bulk_v1','carbon_olivine_v1','carbon_olivine_2size_v1') and coupling in ('none','depleted_scalar','wss09_cie')
+        valid=valid and model in ('bulk_v1','carbon_olivine_v1','carbon_olivine_2size_v1') and coupling in ('none','depleted_scalar','wss09_cie','snrt_hhe_cie_metals')
         valid=valid and flag('cooling')==(coupling!='none')
         if flag('dust_sn_shocks'):
             valid=valid and model=='carbon_olivine_2size_v1'
-        if coupling=='wss09_cie':
+        if coupling in ('wss09_cie','snrt_hhe_cie_metals'):
             valid=valid and model in ('carbon_olivine_v1','carbon_olivine_2size_v1')
         if model in ('carbon_olivine_v1','carbon_olivine_2size_v1'):
             valid=valid and not flag('gpu_hydro')

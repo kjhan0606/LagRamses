@@ -95,11 +95,28 @@ def comparison_workspace():
         (cr_binary.parent/'ramses_dust_sizes3d').write_text('not executable: setup-only\n')
         (cr_binary.parent/'ramses_dust_composition_material3d').write_text('not executable: setup-only\n')
         (cr_binary.parent/'ramses_dust_d03_live3d').write_text('not executable: setup-only\n')
+        (cr_binary.parent/'ramses_dust_atomic3d').write_text('not executable: setup-only\n')
         with mock.patch.object(mkrun, 'HERE', str(root)):
             yield root
 
 
 class WizardTests(unittest.TestCase):
+    def test_atomic_cooling_selection(self):
+        with comparison_workspace() as root:
+            _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'snrt_hhe_cie_metals',
+                'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1'})
+            self.assertIn("dust_cooling='snrt_hhe_cie_metals'",files[str(root/'fresh/myrun.nml')])
+            self.assertIn('ramses_dust_atomic3d',files[str(root/'fresh/README.txt')])
+            self.assertIn('NOT a metal NEQ',files[str(root/'fresh/README.txt')])
+            raw,_=mkrun.rng.parse_namelist(files[str(root/'fresh/myrun.nml')])
+            values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            values['dust_mass_model']='bulk_v1'
+            self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+
     def test_d03_live_optics_selection(self):
         with comparison_workspace() as root:
             _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',

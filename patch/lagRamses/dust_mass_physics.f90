@@ -151,8 +151,10 @@ contains
     ok=ok.and.dust_growth_max_temperature>0.and.dust_injection_temperature>0
     ok=ok.and.(trim(dust_mass_model)=='bulk_v1'.or.trim(dust_mass_model)=='carbon_olivine_v1'.or. &
          trim(dust_mass_model)=='carbon_olivine_2size_v1')
-    ok=ok.and.(trim(dust_cooling)=='none'.or.trim(dust_cooling)=='depleted_scalar'.or.trim(dust_cooling)=='wss09_cie')
-    if(trim(dust_cooling)=='wss09_cie')ok=ok.and.dust_composition_enabled()
+    ok=ok.and.(trim(dust_cooling)=='none'.or.trim(dust_cooling)=='depleted_scalar'.or. &
+         trim(dust_cooling)=='wss09_cie'.or.trim(dust_cooling)=='snrt_hhe_cie_metals')
+    if(trim(dust_cooling)=='wss09_cie'.or.trim(dust_cooling)=='snrt_hhe_cie_metals') &
+         ok=ok.and.dust_composition_enabled()
     ok=ok.and.all(ieee_is_finite(dust_size_radius_cm)).and.all(dust_size_radius_cm>0)
     ok=ok.and.dust_size_radius_cm(1)<dust_size_radius_cm(2)
     ok=ok.and.all(ieee_is_finite(dust_size_density)).and.all(dust_size_density>0)
@@ -167,6 +169,10 @@ contains
        ok=ok.and.all(dust_size_radius_cm==[1d-6,1d-5]).and.all(dust_size_density==[2.2d0,3.8d0])
     endif
     if(.not.dust_mass_enabled)ok=ok.and.trim(dust_mass_model)=='bulk_v1'.and.trim(dust_cooling)=='none'
+  end function
+
+  logical function dust_atomic_cooling_enabled() result(enabled)
+    enabled=dust_mass_enabled.and.trim(dust_cooling)=='snrt_hhe_cie_metals'
   end function
 
   logical function dust_composition_enabled() result(enabled)

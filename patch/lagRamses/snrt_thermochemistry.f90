@@ -622,12 +622,13 @@ contains
 
   subroutine snrt_thermochemistry_advance_cell(n_hydrogen_cm3, n_helium_cm3, &
        n_h_unit_cm3, temperature_k, delta_t_s, x_hydrogen_ii, x_helium_ii, &
-       x_helium_iii, absorbed_species_code, excess_energy_ev, result)
+       x_helium_iii, absorbed_species_code, excess_energy_ev, result,defer_recombination)
     real(dp), intent(in) :: n_hydrogen_cm3, n_helium_cm3, n_h_unit_cm3
     real(dp), intent(in) :: temperature_k, delta_t_s
     real(dp), intent(in) :: x_hydrogen_ii, x_helium_ii, x_helium_iii
     real(dp), intent(in) :: absorbed_species_code(:,:), excess_energy_ev(:,:)
     type(snrt_thermochemistry_result), intent(out) :: result
+    logical,optional,intent(in)::defer_recombination
     real(dp) :: primary(3), remaining(3), secondary(3)
     real(dp) :: xh_photo, xheii_photo, xheiii_photo
     real(dp) :: heating_energy, ionization_energy, excitation_energy
@@ -772,6 +773,14 @@ contains
     xh_photo = min(max(xh_photo,0.0d0),1.0d0)
     xheii_photo = min(max(xheii_photo,0.0d0),1.0d0)
     xheiii_photo = min(max(xheiii_photo,0.0d0),max(0.0d0,1.0d0-xheii_photo))
+    if(present(defer_recombination))then
+       if(defer_recombination)then
+          result%x_hydrogen_ii=xh_photo;result%x_helium_ii=xheii_photo;result%x_helium_iii=xheiii_photo
+          result%electron_density_cm3=n_hydrogen_cm3*xh_photo+n_helium_cm3*(xheii_photo+2*xheiii_photo)
+          if(delta_t_s>0)result%heating_rate_erg_cm3_s=heating_energy*snrt_ev_to_erg/delta_t_s
+          return
+       endif
+    endif
     call snrt_apply_case_b_recombination(n_hydrogen_cm3, n_helium_cm3, &
          temperature_k, delta_t_s, xh_photo, xheii_photo, xheiii_photo, result)
     if (result%ierr /= snrt_thermochemistry_ok) return

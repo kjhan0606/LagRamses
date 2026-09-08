@@ -9,6 +9,7 @@ module dust_mass_runtime
   use snrt_dust_contract
   use snrt_state, only: snrt_state_get_slot,snrt_hydrogen_ii,snrt_helium_ii,snrt_helium_iii
   use snrt_thermochemistry, only: snrt_mean_molecular_weight
+  use snrt_atomic_cooling, only: atomic_temperature
 #include "amr_index.h"
   implicit none
 contains
@@ -60,6 +61,7 @@ contains
     real(dp)::sl,st,sd,sv,snh,st2,rho,metal,dust,eg,ed,temp,a,b,next,q,new_ed,dt,mu
     real(dp)::grains(2),next_grains(2),bins(4),next_bins(4),bin_totals(2)
     real(dp)::shocked_bins(4),volume,cell_mass,sn_energy
+    real(dp)::gas_x(11),ions(3)
     real(dp)::material_curve(snrt_dust_contract_max_temperature),td,unew_specific(1)
     integer::nt
     include 'mpif.h'
@@ -89,6 +91,15 @@ contains
           slot=snrt_state_get_slot(cell)
           if(slot>0)mu=snrt_mean_molecular_weight(snrt_hydrogen_ii(slot),snrt_helium_ii(slot),snrt_helium_iii(slot))
           temp=eg/rho*(gamma-1)*st2*mu
+          if(dust_atomic_cooling_enabled())then
+             call dust_gas_elements(uold(cell,ichem:ichem+10),uold(cell,idust_species:idust_species+1),gas_x,status)
+             if(status/=0)then
+                bad=1;cycle
+             endif
+             ions=0
+             if(slot>0)ions=[snrt_hydrogen_ii(slot),snrt_helium_ii(slot),snrt_helium_iii(slot)]
+             temp=atomic_temperature(rho*sd,gas_x/rho,ions,gamma,eg*sd*sv**2)
+          endif
           if(dust_composition_enabled())then
              grains=uold(cell,idust_species:idust_species+1)
              if(abs(sum(grains)-dust)>128*epsilon(1d0)*max(dust,sum(grains),tiny(1d0)))then

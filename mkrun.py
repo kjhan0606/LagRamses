@@ -404,6 +404,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             ('none',('Existing no-external-cooling default',)),
             ('depleted_scalar',('Original solar-mixture cooling at depleted Z; no UV background',)),
             ('wss09_cie',('Composition required: individual gas-phase elements, CIE only; no local-radiation/NEQ metal response',)),
+            ('snrt_hhe_cie_metals',('Actual SNRT H/He non-equilibrium cooling/ionization; depleted WSS09 metals remain CIE',)),
         ]),'none')
         if mass_model=='carbon_olivine_2size_v1':
             dust_shocks=ui.ask_bool('Enable energy-equivalent ambient SN dust destruction (uncalibrated comparison)?',False)
@@ -490,6 +491,8 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             binary=root/'.cosmic-ray.kyySgK/ramses_dust_composition_material3d'
         if optics_model=='d03_transport_v1':
             binary=root/'.cosmic-ray.kyySgK/ramses_dust_d03_live3d'
+        if mass_cooling=='snrt_hhe_cie_metals':
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'
     env = OrderedDict([
         ('OMP_NUM_THREADS', str(threads)), ('I_MPI_FABRICS', 'shm'),
         ('OMP_STACKSIZE', '512M'), ('KMP_STACKSIZE', '512M'),
@@ -736,6 +739,13 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 readme=readme.replace('Draine C_ext*albedo at group representative energies; isotropic elastic angular mixing.',
                                      'D03 local Qsca*(1-g) at group representative energies; delta-isotropic angular mixing.')
                 files[str(dest / 'README.txt')]=readme
+            if mass_cooling=='snrt_hhe_cie_metals':
+                files[str(dest / 'README.txt')] += (
+                    'SNRT H/He: time-dependent collisional ionization, case-B recombination and thermal cooling.\n'
+                    'Actual gas-phase H/He inventories and heat capacity, shared with dust gas exchange.\n'
+                    'WSS09 gas-phase metals only remain CIE (eq. 3); NOT a metal NEQ or molecular network.\n'
+                    'No duplicate original cooling or recombination; photoheating remains separately accounted.\n'
+                    'Atomic domain 1--1e9 K; nonzero metals require 100--9.5907e8 K, no extrapolation.\n')
             if mass_cooling=='wss09_cie':
                 files[str(dest / 'README.txt')] += (
                     'WSS09 CIE: embedded author table; actual gas-phase H/He and C,N,O,Ne,Mg,Si,S,Ca,Fe.\n'

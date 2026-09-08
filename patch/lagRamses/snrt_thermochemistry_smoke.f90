@@ -1,5 +1,7 @@
 program snrt_thermochemistry_smoke
   use amr_parameters, only: dp
+  use snrt_atomic_cooling
+  use dust_element_cooling, only: wss09_metals_rate
   use snrt_thermochemistry, only: &
        snrt_secondary_tables_load_from_environment, snrt_secondary_tables_loaded, &
        snrt_secondary_source_id, snrt_secondary_upstream_commit, &
@@ -155,6 +157,13 @@ program snrt_thermochemistry_smoke
        result%secondary_heating_energy_ev_cm3 > 0.0d0, &
        'secondary ionization unavailable in a saturated H II cell is routed to heat', failures)
 
+  absorbed=0;excess=0
+  call snrt_thermochemistry_advance_cell(1d0,.08d0,1d0,1d4,1d12,.5d0,.2d0,.1d0, &
+       absorbed,excess,result,defer_recombination=.true.)
+  call expect(result%ierr==0.and.result%x_hydrogen_ii==.5d0.and. &
+       result%x_helium_ii==.2d0.and.result%x_helium_iii==.1d0.and. &
+       result%recombination_hydrogen_cm3==0,'deferred recombination has exactly one downstream owner',failures)
+  call check_atomic(failures)
   if (failures == 0) then
      write(*,'(a)') 'SNRT_NATIVE_THERMOCHEMISTRY_OK'
   else
@@ -163,6 +172,47 @@ program snrt_thermochemistry_smoke
   end if
 
 contains
+
+  subroutine check_atomic(failures)
+    integer,intent(inout)::failures
+    real(dp)::g(11),rho,x(3),y(3),z(3),w(3),e,e1,e2,e3,loss,rate,rate2
+    real(dp)::beta(3),alpha(3),rec(3),exc(2),bre,die,expected,t
+    integer::status,j
+    g=0;g(1:2)=[.76d0,.24d0];rho=atomic_mh/.76d0
+    do j=1,2
+       t=10d0**(2*j+2)
+       call atomic_rates(t,beta,alpha,rec,exc,bre,die,status)
+       expected=5.85d-11*sqrt(t)*exp(-157809.1d0/t)/(1+sqrt(t/1d5))
+       call expect(status==0.and.abs(beta(1)/expected-1)<1d-14.and. &
+            alpha(3)==2*snrt_alpha_hydrogen_case_b(t/4),'atomic rate reference at 1e4/1e6 K',failures)
+    enddo
+    x=0;e=atomic_heat_capacity(rho,g,x,5d0/3)*1d4
+    call atomic_advance(rho,g,5d0/3,1d0,1d11,e,x,e1,y,loss,status)
+    call expect(status==0.and.e1==e.and.all(y==x),'neutral electron-free gas: no fabricated collisions',failures)
+    x=[.8d0,.3d0,.2d0];e=atomic_heat_capacity(rho,g,x,5d0/3)*1d4
+    call atomic_advance(rho,g,5d0/3,1d0,1d11,e,x,e1,y,loss,status)
+    call expect(status==0.and.y(1)<x(1).and.e1>0.and.e1<e.and. &
+         abs(e1+loss-e)<epsilon(e)*e,'case-B recombination and positive thermal budget',failures)
+    x=[.01d0,.01d0,.001d0];e=atomic_heat_capacity(rho,g,x,5d0/3)*1d6
+    call atomic_advance(rho,g,5d0/3,1d0,1d10,e,x,e1,y,loss,status)
+    call expect(status==0.and.y(1)>x(1).and.all(y>=0).and.sum(y(2:3))<=1.and.e1>0, &
+         'hot collisional ionization without photons',failures)
+    call atomic_advance(rho,g,5d0/3,1d0,5d9,e,x,e2,z,loss,status)
+    call atomic_advance(rho,g,5d0/3,1d0,5d9,e2,z,e3,w,loss,status)
+    write(*,*)'ATOMIC_DT relative E, absolute fractions: ',abs(e3/e1-1),maxval(abs(w-y))
+    call expect(status==0.and.abs(e3/e1-1)<3d-3.and.maxval(abs(w-y))<3d-3, &
+         'atomic full versus two half timesteps',failures)
+    call atomic_advance(rho,g,5d0/3,1d0,-1d0,e,x,e1,y,loss,status)
+    call expect(status/=0.and.e1==e.and.all(y==x).and.loss==0,'atomic rejection leaves input state intact',failures)
+    g(1)=.759d0;g(3)=.001d0
+    call wss09_metals_rate(1d5,g,rate,status)
+    g(3)=.0005d0
+    call wss09_metals_rate(1d5,g,rate2,status)
+    call expect(status==0.and.rate>0.and.abs(rate2/rate-.5d0)<1d-14, &
+         'metal-only CIE follows the depleted element budget',failures)
+    call wss09_metals_rate(99d0,g,rate,status)
+    call expect(status/=0,'nonzero metals reject out-of-table temperature',failures)
+  end subroutine check_atomic
 
   subroutine expect(condition, label, failures)
     logical, intent(in) :: condition

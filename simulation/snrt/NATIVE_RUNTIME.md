@@ -1530,3 +1530,44 @@ common grain T, 20 K dielectric and uncalibrated size/SN prescriptions remain
 explicit approximations. PAH stochastic heating, sublimation, separate Fe,
 dust drift/AGN force and cosmological deployment are not supplied by this
 option. No new default activation or blanket publication-readiness claim.
+
+### Coupled atomic cooling with the dust comparison (2026-09-09)
+
+`dust_cooling='snrt_hhe_cie_metals'` is an opt-in native alternative to
+`wss09_cie`, not a rename of that model. It requires composition dust and
+the existing active SNRT/v4/HDF5/noncosmo comparison. mkrun and its GUI select
+`.cosmic-ray.kyySgK/ramses_dust_atomic3d` (SNRT/DUST_LIVE, NENER=1, NVAR=30,
+CPU hydro). No simulation-time Python or new hydro fields are introduced.
+
+H/He collisional ionization, case-B recombination and thermal losses use
+the actual SNRT ion fractions, with gas-phase element H/He densities. The
+same number inventories feed absorption and the optical-depth predictor;
+the same ion-dependent heat capacity feeds temperature, dust evolution and
+gas/dust exchange. The photo receiver defers recombination to the atomic
+receiver; cooling_fine does not apply a duplicate CIE thermal sink. Atomic
+evolution also runs in cells without absorbed photons or with dust-only
+absorption. Kinetic and CR energy are excluded from its thermal budget.
+Photoheating remains its own nonnegative ledger; escaped collisional/
+recombination cooling is not claimed to remain in the stored RT field.
+
+Fits follow [Rosdahl et al. 2013, Appendix E](https://academic.oup.com/mnras/article/436/3/2188/1247446).
+A positive implicit H/He substep with frozen temperature/electron density
+is controlled by step doubling (1e-3 local error, 1e-5 fraction scale floor,
+10% relative state-change bound). It charges collisional ionization with
+the same rate and threshold as the reactions. Final publication is atomic
+on success; the existing level transaction handles failure. This is
+operator splitting, not a fully implicit joint radiation/metal network.
+
+Only metal columns of [WSS09](https://arxiv.org/abs/0807.3748) enter this
+closure, weighted by depleted individual abundances (eq. 3). They retain
+CIE ion populations; there is no invented eq. 4 solar-electron correction.
+Metal electrons are not added to the H/He heat capacity. The atomic domain
+is 1--1e9 K; nonzero metals also require the tabulated 100--9.5907e8 K range.
+No extrapolation, H2/CO, molecular cooling or full metal NEQ is supplied.
+The old CIE option and its He-abundance domain remain unchanged.
+
+Restart stores a distinct closure code, the actual WSS09 tables and the
+18-value `dust_atomic_cooling` identity. Changing closures on restart is
+rejected. Native one-zone and coupled MPI2 x OMP2 restart results are in
+the dust provenance document. Neither short-test convergence nor this
+H/He correction qualifies cosmological production or galaxy calibration.

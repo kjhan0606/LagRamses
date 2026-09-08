@@ -8,6 +8,8 @@ comparison-model connection, not the separate full-NEQ/multibin physical
 qualification or cosmological production/calibration work. The subsequent
 size-shift reference section records the first measured 8/16/32-bin comparison;
 the earlier "unperformed" description is historical, not its current status.
+The final atomic-cooling section now records a selectable native SNRT H/He
+NEQ receiver; WSS09 metal cooling remains CIE, not a completed metal network.
 
 Operator approved proceeding in this order after closeout commit 5be56ae.
 Workspace / repository: /gpfs/kjhan/LRD_JWST, kjhan0606/LagRamses.
@@ -773,3 +775,80 @@ bin count is not determined. Continue the physical work under standing
 approval; no audit or user-approval wait was inserted. Full NEQ/molecular
 chemistry still requires actual reaction/rate data and native integration,
 not relabelled CIE tables.
+
+## Continued native thermochemistry: H/He NEQ plus CIE metals (2026-09-09)
+
+No approval wait or external audit was inserted. The earlier CIE/RT
+population mismatch motivated an explicit `snrt_hhe_cie_metals` alternative,
+not an unannounced change to `wss09_cie` or the no-cooling default. The native
+`snrt_atomic_cooling` module is called by `snrt_ramses_driver`, including
+source-free and dust-only-absorption cells. Actual gas-phase H/He inventories
+replace primordial number conversions in this selection only. The optical
+predictor, chemistry, temperature, growth/sputtering and dust gas-exchange
+capacity now use the same composition/ion state.
+
+Photoionization/secondary heat is followed by an adaptive atomic step;
+photo-receiver recombination is deferred and original hydro cooling bypassed
+to avoid applying either twice. Positive implicit H/He reactions and thermal
+losses use Rosdahl+2013 Appendix E, with the existing case-B He coefficients.
+The energy charge for collisional ionization uses the very same beta and
+13.60/24.59/54.42 eV thresholds as the reaction rates. Thermal energy excludes
+kinetic and CR terms. The step uses frozen coefficients/electron density,
+step-doubling tolerance 1e-3 and a 10% state-change bound; it publishes nothing
+on failure. It is first-order operator splitting, not a fully coupled metal
+NEQ solver. Native CPU receiver only; existing dust optical/IR hybrid kernels
+are unchanged, and no GPU atomic-chemistry speedup is claimed.
+
+WSS09 contributes ONLY its nine individual metal columns, with depleted
+gas-phase abundance weights (eq. 3). Metal ionization remains CIE. The author
+table does not supply the separate solar-electron reference for eq. 4, so no
+such correction is invented. Heat capacity includes gas nuclei and actual
+H/He electrons, not invented metal electrons. Atomic fits are bounded to
+1--1e9 K; nonzero metals require T=100--9.5907e8 K. No full metal NEQ,
+H2/CO, molecular cooling, density extrapolation or production release follows.
+Sources: [Rosdahl+2013](https://academic.oup.com/mnras/article/436/3/2188/1247446),
+[WSS09](https://arxiv.org/abs/0807.3748). Existing raw data are unchanged.
+
+The existing `snrt_thermochemistry_smoke` now covers fitted rates at 1e4/1e6 K,
+neutral electron-free cells, no-photon collisional ionization, recombination,
+positive energy/ion simplex, one-owner recombination, depleted metal scaling,
+table-domain rejection and unchanged outputs on invalid input. All PASS;
+dt versus two half steps gives relative energy difference 1.22083e-7 and
+maximum absolute fraction difference 9.62427e-9 in the hot test. This is one
+bounded convergence point, not a general global accuracy claim. Logs:
+`.cosmic-ray.kyySgK/dust_atomic_{build,unit}.log`. GUI: 36 tests, 35 PASS and
+one unavailable-display SKIP; namelist and mkrun updated together.
+
+Native executable `.cosmic-ray.kyySgK/ramses_dust_atomic3d`, SHA256
+`59af16eec8a412618772bce2b9dd095bc3d5262e5c003fb0c769bbfe7a93ec7c`,
+built with lagRamses-first VPATH, SNRT/DUST_LIVE/HDF5, NENER=1, NVAR=30,
+USE_CUDA=0, USE_FFTW=0. Old executables retained.
+
+Live evidence in `.dust-atomic.F7LyEy/`:
+
+- `live/physical.nml`: MPI2 x OMP2, four native steps, 8^3 periodic noncosmo
+  gas, physical channel feedback/SNIa, CR/SF, independent BPASS, D03/DL01 dust
+  and gas exchange. Completed in 17.9 s on the shared host (not a controlled
+  performance benchmark).
+- `restart/physical.nml`: step-2 checkpoint to step 4, completed. All 90
+  hydro and 4 RT datasets agree bitwise, as do dust/CR restart identities.
+  Dust mass/species closure max 2.63467e-16; gas-phase elements and four dust
+  bins nonnegative; thermal/CR energies positive; transient fields 28--30 zero.
+  Final actual-ion Tgas=7975.84--8402.23 K; xHII=0.241858--0.267309.
+- Both use noutput=1, aout=2, tout=1e30, foutput=2, fbackup=1000000.
+  Dumps measure 55 and 67 MiB, GPFS free 157 TiB; outputs and copies retained.
+  Restart binds closure code 3, WSS09 table data and the separate 18-double
+  `dust_atomic_cooling` identity. The noncosmo SFRD text-volume diagnostic
+  is not used to claim conservation; stored fields were checked directly.
+- `legacy/physical.nml`: same new binary with old `wss09_cie`, same output
+  policy; all 94 hydro/RT datasets match the prior D03/CIE execution bitwise.
+  No atomic identity is written for the old closure.
+- `reject/physical.nml`: new-mode checkpoint with old CIE selection; MPI
+  exits 11 before evolution with dust identity mismatch. noutput=1, aout=2,
+  tout=1e30, foutput=fbackup=1000000; no new output, copied input retained.
+
+This completes the actual H/He cooling/ionization connection, not the
+remaining molecular/metal network. Separate Fe, H2/CO competition, PAH
+temperature fluctuations and grain drift remain explicit physical extensions,
+not blockers fabricated from unrelated infrastructure. The driver continues
+the approved physics scope; there is no pending audit or approval request.

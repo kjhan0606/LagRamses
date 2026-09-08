@@ -13,8 +13,33 @@ module dust_element_cooling
   real(real64),parameter :: he(7)=[.0786528d0,.0830474d0,.0875605d0,.0921968d0,.0969616d0,.10186d0,.106898d0]
   real(real64),save :: cie_data(25,cie_n)
   include 'dust_wss09_cie_data.inc'
-  public :: wss09_curve,wss09_step,wss09_rate,wss09_identity
+  public :: wss09_curve,wss09_step,wss09_rate,wss09_identity,wss09_metals_rate
 contains
+  subroutine wss09_metals_rate(temperature,gas_x,rate,ierr)
+    ! Equation (3), metal terms only. No H/He CIE cooling/electron heat
+    ! capacity enters this receiver. Metal ions still assume CIE; NOT NEQ
+    ! metal cooling or an invented equation-(4) solar-electron correction.
+    real(real64),intent(in)::temperature,gas_x(11)
+    real(real64),intent(out)::rate
+    integer,intent(out)::ierr
+    real(real64)::w,weights(9)
+    integer::j
+    ierr=1;rate=0
+    if(.not.all(ieee_is_finite(gas_x)).or.any(gas_x<0))return
+    if(gas_x(1)<=0.or.sum(gas_x)>1+128*epsilon(1d0))return
+    if(.not.ieee_is_finite(temperature).or.temperature<=0)return
+    if(all(gas_x(3:11)==0))then
+       ierr=0;return
+    endif
+    if(temperature<cie_data(1,1).or.temperature>cie_data(1,cie_n))return
+    j=interval(cie_data(1,:),temperature)
+    w=(temperature-cie_data(1,j))/(cie_data(1,j+1)-cie_data(1,j))
+    weights=gas_x(3:11)/(atom(3:11)*gas_x(1)*solar)
+    rate=sum(weights*((1-w)*cie_data(17:25,j)+w*cie_data(17:25,j+1)))
+    if(.not.ieee_is_finite(rate))return
+    ierr=0
+  end subroutine
+
   subroutine wss09_identity(first,second)
     ! Split below the HDF5 per-attribute size limit; bind all numerical data
     ! and conversion coefficients, not merely a path or user-provided label.

@@ -102,6 +102,8 @@ contains
     use amr_commons, only: levelmin, nstep_coarse, myid, dtnew, boxlen, &
          icoarse_min, icoarse_max, ncpu, nrestart, texp, aexp, active
     use hydro_commons, only: uold
+    use dust_mass_physics, only: dust_atomic_cooling_enabled,dust_gas_elements
+    use snrt_atomic_cooling, only: atomic_mh,atomic_temperature,atomic_heat_capacity,atomic_advance
     use pm_commons, only: nsink, xsink, idsink, agn_pending_erg, nindsink, msink, vsink, jsink, &
          dMBH_coarse, dMEd_coarse, dMsmbh, Esave, spinmag, agn_checkpoint_restored, &
          headp, numbp, nextp, ptypep, PTYPE_STAR, xp, mp0, tpp, zp
@@ -178,7 +180,7 @@ contains
          snrt_mean_molecular_weight, snrt_inventory_tolerance
     use snrt_cuda_interface, only: snrt_cuda_available
     use amr_parameters, only: dp, ndim, spin_bh, mad_jet, X_floor
-    use hydro_parameters, only: gamma, idust, idust_energy, inener, idust_species, idust_bins
+    use hydro_parameters, only: gamma, idust, idust_energy, inener, idust_species, idust_bins,ichem
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use iso_c_binding, only: c_float
     use omp_lib, only: omp_get_wtime
@@ -242,6 +244,8 @@ contains
          relaxed_helium_iii(:), trial_hydrogen_ii(:), trial_helium_ii(:), &
          trial_helium_iii(:), trial_neutral_hydrogen(:), trial_thermal(:)
     real(dp), allocatable :: rho_level(:), temperature_level(:)
+    real(dp), allocatable :: h_number_code(:),he_number_code(:),atomic_gas_x(:,:)
+    logical :: atomic_cooling_on
     real(dp), allocatable :: trial_heating_rate(:), trial_unassigned(:)
     real(dp), allocatable :: trial_absorbed_species(:,:,:)
     real(dp), allocatable :: current_fraction(:,:), target_fraction(:,:)
@@ -581,6 +585,11 @@ contains
          trial_heating_rate(nleaf), trial_unassigned(nleaf), &
          trial_absorbed_species(nleaf,3,snrt_ngroups), &
          current_fraction(nleaf,3), target_fraction(nleaf,3))
+    atomic_cooling_on=dust_atomic_cooling_enabled()
+    allocate(h_number_code(nleaf),he_number_code(nleaf))
+    if(atomic_cooling_on)then
+       allocate(atomic_gas_x(11,nleaf));atomic_gas_x=0
+    endif
     hydro_state_invalid = .false.
 #ifdef DUST_LIVE
     allocate(dust_relative_abundance(nleaf), dust_heat_capacity(nleaf), &
@@ -638,8 +647,18 @@ contains
           hydro_state_invalid = .true.
        end if
        rho_level(i) = rho_code
+       h_number_code(i)=rho_code
+       he_number_code(i)=rho_code*snrt_nhelium_per_hydrogen
+       if(atomic_cooling_on.and.rho_code>0)then
+          call dust_gas_elements(uold(icell,ichem:ichem+10), &
+               uold(icell,idust_species:idust_species+1),atomic_gas_x(:,i),ierr)
+          if(ierr/=0)hydro_state_invalid=.true.
+          atomic_gas_x(:,i)=atomic_gas_x(:,i)/rho_code
+          h_number_code(i)=rho_code*scale_d*atomic_gas_x(1,i)/(atomic_mh*scale_nH)
+          he_number_code(i)=rho_code*scale_d*atomic_gas_x(2,i)/(4*atomic_mh*scale_nH)
+       endif
 #ifdef DUST_LIVE
-       dust_n_hydrogen_cm3(i) = rho_code * scale_nH
+       dust_n_hydrogen_cm3(i) = h_number_code(i) * scale_nH
        dust_path_cm(i) = dx_code * scale_l
        dust_relative_abundance(i) = 0.0d0
        dust_heat_capacity(i) = 1.0d0
@@ -752,12 +771,16 @@ contains
              if (ieee_is_finite(internal_energy) .and. internal_energy > 0.0d0) &
                   temperature_level(i) = max(1.0d0,(gamma-1.0d0)*internal_energy/rho_code * &
                   scale_T2*molecular_weight)
+             if(atomic_cooling_on.and.internal_energy>0)temperature_level(i)= &
+                  atomic_temperature(rho_code*scale_d,atomic_gas_x(:,i), &
+                  [hydrogen_ionized_fraction,helium_ionized_fraction,helium_double_ionized_fraction], &
+                  gamma,internal_energy*scale_d*scale_v**2)
           end if
        end if
-       neutral_hydrogen_code = rho_code * (1.0d0-hydrogen_ionized_fraction)
-       neutral_helium_i_code = rho_code * snrt_nhelium_per_hydrogen * &
+       neutral_hydrogen_code = h_number_code(i) * (1.0d0-hydrogen_ionized_fraction)
+       neutral_helium_i_code = he_number_code(i) * &
             (1.0d0-helium_ionized_fraction-helium_double_ionized_fraction)
-       neutral_helium_ii_code = rho_code * snrt_nhelium_per_hydrogen * &
+       neutral_helium_ii_code = he_number_code(i) * &
             helium_ionized_fraction
        available_species_transport(i,1) = real(max(0.0d0, neutral_hydrogen_code), c_float)
        available_species_transport(i,2) = real(max(0.0d0, neutral_helium_i_code), c_float)
@@ -1170,7 +1193,7 @@ contains
              ! checked here as well so the initialized, source-free RAMSES
              ! smoke can exercise the full rollback path without inventing a
              ! physical photon source.
-             if (sum(abs(real(absorbed_group(i,:),dp))) <= 0.0d0) then
+             if (sum(abs(real(absorbed_group(i,:),dp))) <= 0.0d0.and..not.atomic_cooling_on) then
                 if (snrt_transaction_failure_requested(transaction_config, &
                      snrt_failure_receiver, i)) then
                    local_transaction_failure = snrt_failure_receiver
@@ -1195,7 +1218,7 @@ contains
                    local_transaction_failure = snrt_failure_receiver
                    exit
                 end if
-                cycle
+                if(.not.atomic_cooling_on)cycle
 #endif
              end if
              do igroup = 1, snrt_ngroups
@@ -1215,12 +1238,14 @@ contains
                 chemistry_failures = chemistry_failures + 1
                 cycle
              end if
-       n_hydrogen_cm3 = rho_code * scale_nH
+       n_hydrogen_cm3 = h_number_code(i) * scale_nH
        n_helium_cm3 = n_hydrogen_cm3 * snrt_nhelium_per_hydrogen
+       if(atomic_cooling_on)n_helium_cm3=he_number_code(i)*scale_nH
        call snrt_thermochemistry_advance_cell(n_hydrogen_cm3, n_helium_cm3, &
             scale_nH, temperature_level(i), dt_s, start_hydrogen_ii(i), &
             start_helium_ii(i), start_helium_iii(i), &
-            trial_absorbed_species(i,:,:), excess_energy_ev, chemistry_result)
+            trial_absorbed_species(i,:,:), excess_energy_ev, chemistry_result, &
+            defer_recombination=atomic_cooling_on)
              if (chemistry_result%ierr /= snrt_thermochemistry_ok .or. &
                   .not. ieee_is_finite(chemistry_result%x_hydrogen_ii) .or. &
                   .not. ieee_is_finite(chemistry_result%x_helium_ii) .or. &
@@ -1249,6 +1274,27 @@ contains
              end if
              trial_thermal(i) = level_thermal(i) + trial_heating_rate(i)*dt_s / &
                   (scale_d*scale_v**2)
+             if(atomic_cooling_on)then
+                block
+                  real(dp)::nonthermal,e0,e1,x0(3),x1(3),net_loss
+                  nonthermal=.5d0*sum(uold(icell,2:ndim+1)**2)/rho_code
+#if NENER>0
+                  nonthermal=nonthermal+sum(uold(icell,inener:inener+NENER-1))
+#endif
+                  e0=(trial_thermal(i)-nonthermal)*scale_d*scale_v**2
+                  x0=[trial_hydrogen_ii(i),trial_helium_ii(i),trial_helium_iii(i)]
+                  call atomic_advance(rho_code*scale_d,atomic_gas_x(:,i),gamma,aexp,dt_s, &
+                       e0,x0,e1,x1,net_loss,ierr)
+                  if(ierr/=0)then
+                     local_transaction_failure=snrt_failure_chemistry
+                     chemistry_failures=chemistry_failures+1
+                     cycle
+                  endif
+                  trial_thermal(i)=nonthermal+e1/(scale_d*scale_v**2)
+                  trial_hydrogen_ii(i)=x1(1);trial_helium_ii(i)=x1(2);trial_helium_iii(i)=x1(3)
+                  trial_neutral_hydrogen(i)=1-x1(1)
+                end block
+             endif
              if (.not. ieee_is_finite(trial_thermal(i)) .or. &
                   trial_thermal(i) <= 0.0d0) then
                 local_transaction_failure = snrt_failure_receiver
@@ -1308,13 +1354,13 @@ contains
              target_fraction(i,1) = relaxed_hydrogen_ii(i)
              target_fraction(i,2) = relaxed_helium_ii(i)
              target_fraction(i,3) = relaxed_helium_iii(i)
-             neutral_hydrogen_code = rho_level(i) * 0.5d0 * &
+             neutral_hydrogen_code = h_number_code(i) * 0.5d0 * &
                   (start_neutral_hydrogen(i) + &
                   max(0.0d0,1.0d0-relaxed_hydrogen_ii(i)))
-             neutral_helium_i_code = rho_level(i) * snrt_nhelium_per_hydrogen * 0.5d0 * &
+             neutral_helium_i_code = he_number_code(i) * 0.5d0 * &
                   (max(0.0d0,1.0d0-start_helium_ii(i)-start_helium_iii(i)) + &
                   max(0.0d0,1.0d0-relaxed_helium_ii(i)-relaxed_helium_iii(i)))
-             neutral_helium_ii_code = rho_level(i) * snrt_nhelium_per_hydrogen * 0.5d0 * &
+             neutral_helium_ii_code = he_number_code(i) * 0.5d0 * &
                   (start_helium_ii(i) + relaxed_helium_ii(i))
              call snrt_nlte_primordial_optical_depth_groups(neutral_hydrogen_code, &
                   neutral_helium_i_code, neutral_helium_ii_code, scale_nH, dt_s, &
@@ -1442,6 +1488,8 @@ contains
 #endif
                molecular_weight=snrt_mean_molecular_weight(trial_hydrogen_ii(i),trial_helium_ii(i),trial_helium_iii(i))
                gas_capacity(i)=rho_level(i)*dust_energy_scale/((gamma-1)*scale_T2*molecular_weight)
+               if(atomic_cooling_on)gas_capacity(i)=atomic_heat_capacity(rho_level(i)*scale_d, &
+                    atomic_gas_x(:,i),[trial_hydrogen_ii(i),trial_helium_ii(i),trial_helium_iii(i)],gamma)
             enddo
             ! Solve exchange and IR emission together, inside the IR implicit
             ! material solve, not as a post-radiation dust temperature kick.
