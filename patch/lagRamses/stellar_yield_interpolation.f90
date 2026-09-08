@@ -30,7 +30,7 @@ contains
 
   subroutine interpolate_yield_row(table, channel_id, query_mass, query_z, &
        query_age_gyr, returned_mass, remnant_mass, energy, momentum, &
-       ejected_mass, net_yield, ierr)
+       ejected_mass, net_yield, ierr,dust)
     type(stellar_yield_table_t), intent(in) :: table
     integer, intent(in) :: channel_id
     real(stellar_dp), intent(in) :: query_mass, query_z, query_age_gyr
@@ -39,6 +39,7 @@ contains
     real(stellar_dp), intent(out) :: ejected_mass(n_stellar_elements)
     real(stellar_dp), intent(out) :: net_yield(n_stellar_elements)
     integer, intent(out) :: ierr
+    real(stellar_dp),intent(out),optional::dust(2)
 
     real(stellar_dp) :: mass_nodes(2), z_nodes(2), age_nodes(2)
     real(stellar_dp) :: mass_weights(2), z_weights(2), age_weights(2)
@@ -57,6 +58,12 @@ contains
     momentum = 0.0_stellar_dp
     ejected_mass = 0.0_stellar_dp
     net_yield = 0.0_stellar_dp
+    if(present(dust))then
+       dust=0
+       if(.not.allocated(table%dust_ejected))then
+          ierr=interpolation_err_table;return
+       endif
+    endif
 
     if (.not. table%loaded .or. table%n_rows <= 0) then
        ierr = interpolation_err_table
@@ -85,13 +92,13 @@ contains
 
     if(table%high_mass_ready.and.allocated(table%agb_terminal_row).and.channel_id==channel_agb)then
        call agb_terminal_value(table,query_mass,query_z,query_age_gyr, &
-            returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr)
+            returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr,dust)
        return
     endif
     if(table%high_mass_ready.and.(channel_id==channel_wind.or.channel_id==channel_snii))then
        if(query_mass>=minval(table%hm_mass))then
           call high_mass_history_value(table,channel_id,query_mass,query_z,query_age_gyr, &
-               returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr)
+               returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr,dust)
           return
        endif
     endif
@@ -166,6 +173,7 @@ contains
              ejected_mass = ejected_mass + weight * &
                   table%ejected_mass(row,:)
              net_yield = net_yield + weight * table%net_yield(row,:)
+             if(present(dust))dust=dust+weight*table%dust_ejected(row,:)
           end do
        end do
     end do
@@ -182,14 +190,16 @@ contains
     end if
   end subroutine interpolate_yield_row
 
-  subroutine agb_terminal_value(table,mass,z,age,returned,remnant,energy,p,elements,net,ierr)
+  subroutine agb_terminal_value(table,mass,z,age,returned,remnant,energy,p,elements,net,ierr,dust)
     type(stellar_yield_table_t),intent(in)::table
     real(stellar_dp),intent(in)::mass,z,age
     real(stellar_dp),intent(out)::returned,remnant,energy,p(3),elements(n_stellar_elements),net(n_stellar_elements)
     integer,intent(out)::ierr
+    real(stellar_dp),intent(out),optional::dust(2)
     real(stellar_dp)::zl,zh,zs(2),weights(2),best,distance,factor,ml,mh,alpha,jump
     integer::i,j,r,node,nz,source_index,lo,hi
     returned=0;remnant=0;energy=0;p=0;elements=0;net=0
+    if(present(dust))dust=0
     ierr=interpolation_err_grid;zl=-huge(1d0);zh=huge(1d0)
     do i=1,size(table%agb_terminal_row)
        r=table%agb_terminal_row(i)
@@ -263,6 +273,10 @@ contains
                alpha*jump*table%ejected_mass(node,:))
           net=net+factor*((1-alpha)*table%net_yield(lo,:)+alpha*table%net_yield(hi,:)- &
                alpha*jump*table%net_yield(node,:))
+          if(present(dust))then
+             dust=dust+factor*((1-alpha)*table%dust_ejected(lo,:)+alpha*table%dust_ejected(hi,:))
+             if(hi==node)dust=dust-factor*alpha*table%dust_jump(node,:)
+          endif
           cycle
        endif
        ! Same-age mixture, nearest source-mass cells, fractional budgets.
@@ -279,40 +293,54 @@ contains
        p=p+factor*table%momentum(node,:)
        elements=elements+factor*table%ejected_mass(node,:)
        net=net+factor*table%net_yield(node,:)
+       if(present(dust))dust=dust+factor*table%dust_ejected(node,:)
     enddo
     ierr=interpolation_ok
   end subroutine agb_terminal_value
 
-  subroutine high_mass_history_value(table,channel,mass,z,age,returned,remnant,energy,p,elements,net,ierr)
+  subroutine high_mass_history_value(table,channel,mass,z,age,returned,remnant,energy,p,elements,net,ierr,dust)
     type(stellar_yield_table_t),intent(in)::table
     integer,intent(in)::channel
     real(stellar_dp),intent(in)::mass,z,age
     real(stellar_dp),intent(out)::returned,remnant,energy,p(3),elements(n_stellar_elements),net(n_stellar_elements)
     integer,intent(out)::ierr
+    real(stellar_dp),intent(out),optional::dust(2)
+    real(stellar_dp)::da(2),db(2)
     real(stellar_dp)::zl,zh,w,a(6+2*n_stellar_elements),b(6+2*n_stellar_elements),v(6+2*n_stellar_elements)
     integer::i,status
     returned=0;remnant=0;energy=0;p=0;elements=0;net=0
+    if(present(dust))dust=0
     if(.not.table%high_mass_linear_z)then
-       call high_mass_node_value(table,channel,mass,z,age,returned,remnant,energy,p,elements,net,ierr)
+       call high_mass_node_value(table,channel,mass,z,age,returned,remnant,energy,p,elements,net,ierr,dust)
        return
     endif
     ierr=interpolation_err_grid
     zl=-huge(1d0);zh=huge(1d0)
     do i=1,size(table%hm_z)
        if(abs(z-table%hm_z(i))<=32*epsilon(1d0)*max(abs(z),abs(table%hm_z(i)),tiny(1d0)))then
-          call high_mass_node_value(table,channel,mass,table%hm_z(i),age,returned,remnant,energy,p,elements,net,ierr)
+          call high_mass_node_value(table,channel,mass,table%hm_z(i),age,returned,remnant,energy,p,elements,net,ierr,dust)
           return
        endif
        if(table%hm_z(i)<z)zl=max(zl,table%hm_z(i))
        if(table%hm_z(i)>z)zh=min(zh,table%hm_z(i))
     enddo
     if(zl<0.or.zh==huge(1d0))return ! Never extrapolate or clamp physical Z.
-    call high_mass_node_value(table,channel,mass,zl,age,a(1),a(2),a(3),a(4:6), &
-         a(7:6+n_stellar_elements),a(7+n_stellar_elements:),status)
-    if(status/=0)return
-    call high_mass_node_value(table,channel,mass,zh,age,b(1),b(2),b(3),b(4:6), &
-         b(7:6+n_stellar_elements),b(7+n_stellar_elements:),status)
-    if(status/=0)return
+    if(present(dust))then
+       call high_mass_node_value(table,channel,mass,zl,age,a(1),a(2),a(3),a(4:6), &
+            a(7:6+n_stellar_elements),a(7+n_stellar_elements:),status,da)
+       if(status/=0)return
+       call high_mass_node_value(table,channel,mass,zh,age,b(1),b(2),b(3),b(4:6), &
+            b(7:6+n_stellar_elements),b(7+n_stellar_elements:),status,db)
+       if(status/=0)return
+       dust=(1-(z-zl)/(zh-zl))*da+(z-zl)/(zh-zl)*db
+    else
+       call high_mass_node_value(table,channel,mass,zl,age,a(1),a(2),a(3),a(4:6), &
+            a(7:6+n_stellar_elements),a(7+n_stellar_elements:),status)
+       if(status/=0)return
+       call high_mass_node_value(table,channel,mass,zh,age,b(1),b(2),b(3),b(4:6), &
+            b(7:6+n_stellar_elements),b(7+n_stellar_elements:),status)
+       if(status/=0)return
+    endif
     ! Interpolate already resolved cumulative budgets at the SAME age. Fixed
     ! birth-Z weights preserve monotonic return and timestep telescoping even
     ! across different lifetimes/outcomes. This is an SSP expectation mixture,
@@ -323,15 +351,17 @@ contains
     ierr=interpolation_ok
   end subroutine high_mass_history_value
 
-  subroutine high_mass_node_value(table,channel,mass,z,age,returned,remnant,energy,p,elements,net,ierr)
+  subroutine high_mass_node_value(table,channel,mass,z,age,returned,remnant,energy,p,elements,net,ierr,dust)
     type(stellar_yield_table_t),intent(in)::table
     integer,intent(in)::channel
     real(stellar_dp),intent(in)::mass,z,age
     real(stellar_dp),intent(out)::returned,remnant,energy,p(3),elements(n_stellar_elements),net(n_stellar_elements)
     integer,intent(out)::ierr
+    real(stellar_dp),intent(out),optional::dust(2)
     integer::i,node,lo,hi,row
     real(stellar_dp)::distance,best,tq,fraction,factor
     returned=0;remnant=0;energy=0;p=0;elements=0;net=0
+    if(present(dust))dust=0
     ierr=interpolation_err_grid
     if(mass<minval(table%hm_mass).or.mass>maxval(table%hm_mass))return
     ! No interpolation of discrete fates across Z, rotation or source engines.
@@ -361,6 +391,7 @@ contains
        row=table%hm_terminal_row(node)
        returned=factor*table%returned_mass(row); energy=factor*table%energy(row)
        p=factor*table%momentum(row,:);elements=factor*table%ejected_mass(row,:);net=factor*table%net_yield(row,:)
+       if(present(dust))dust=factor*table%dust_ejected(row,:)
        return
     endif
     tq=min(age,table%hm_age(node));lo=0;hi=0
@@ -390,6 +421,7 @@ contains
     p=factor*((1-fraction)*table%momentum(lo,:)+fraction*table%momentum(hi,:))
     elements=factor*((1-fraction)*table%ejected_mass(lo,:)+fraction*table%ejected_mass(hi,:))
     net=factor*((1-fraction)*table%net_yield(lo,:)+fraction*table%net_yield(hi,:))
+    if(present(dust))dust=factor*((1-fraction)*table%dust_ejected(lo,:)+fraction*table%dust_ejected(hi,:))
     ierr=interpolation_ok
   end subroutine high_mass_node_value
 

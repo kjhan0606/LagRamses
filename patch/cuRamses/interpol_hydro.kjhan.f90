@@ -400,6 +400,7 @@ end subroutine upl
 !###########################################################
 !###########################################################
 subroutine interpol_hydro(u1,u2,nn)
+  use dust_mass_physics, only: dust_composition_enabled,dust_two_size_enabled
   use amr_commons
   use hydro_commons
   use poisson_commons
@@ -533,6 +534,16 @@ subroutine interpol_hydro(u1,u2,nn)
      end do
   end if
 
+  ! Same dependent aggregate as the conservative face flux. Each carrier's
+  ! conservative prolongation remains unchanged; do not independently limit
+  ! their sum into an inconsistent extra dust reservoir.
+  if(dust_composition_enabled())then
+     if(dust_two_size_enabled())then
+        u2(1:nn,:,idust_species)=u2(1:nn,:,idust_bins)+u2(1:nn,:,idust_bins+1)
+        u2(1:nn,:,idust_species+1)=u2(1:nn,:,idust_bins+2)+u2(1:nn,:,idust_bins+3)
+     endif
+     u2(1:nn,:,idust)=u2(1:nn,:,idust_species)+u2(1:nn,:,idust_species+1)
+  endif
 end subroutine interpol_hydro
 !###########################################################
 !###########################################################

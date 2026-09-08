@@ -33,6 +33,7 @@ module stellar_enrichment_contract
   ! newly produced/consumed component and may be negative.  The latter is not
   ! a gas-mass source term.
   type :: stellar_cumulative_t
+     real(stellar_dp) :: dust_species(2)=0d0 ! C, MgFeSiO4; subset of gross ejecta
      real(stellar_dp) :: ejected_mass(n_stellar_elements)
      real(stellar_dp) :: net_yield(n_stellar_elements)
      real(stellar_dp) :: returned_mass
@@ -51,6 +52,7 @@ module stellar_enrichment_contract
 
   ! Increment to be deposited during one hydrodynamic timestep.
   type :: stellar_source_t
+     real(stellar_dp) :: dust_species(2)=0d0
      real(stellar_dp) :: ejected_mass(n_stellar_elements)
      real(stellar_dp) :: net_yield(n_stellar_elements)
      real(stellar_dp) :: returned_mass
@@ -93,6 +95,7 @@ contains
     type(stellar_cumulative_t), intent(out) :: state
 
     state%ejected_mass = 0.0_stellar_dp
+    state%dust_species = 0d0
     state%net_yield = 0.0_stellar_dp
     state%returned_mass = 0.0_stellar_dp
     state%remnant_mass = 0.0_stellar_dp
@@ -110,6 +113,7 @@ contains
     type(stellar_source_t), intent(out) :: source
 
     source%ejected_mass = 0.0_stellar_dp
+    source%dust_species = 0d0
     source%net_yield = 0.0_stellar_dp
     source%returned_mass = 0.0_stellar_dp
     source%energy = 0.0_stellar_dp
@@ -127,6 +131,7 @@ contains
     type(stellar_source_t), intent(out) :: source
 
     source%ejected_mass = later%ejected_mass - earlier%ejected_mass
+    source%dust_species = later%dust_species-earlier%dust_species
     source%net_yield = later%net_yield - earlier%net_yield
     source%returned_mass = later%returned_mass - earlier%returned_mass
     source%energy = later%energy - earlier%energy

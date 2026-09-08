@@ -1,0 +1,96 @@
+{
+  "schema": "d03_native_grain_optics_preparation_v1",
+  "sources": [
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_silD03",
+      "sha256": "31072857d3fe8acf08bf58d02dd2ea12b0fd9480ee284450ad68c7ea416afb6b",
+      "bytes": 49590,
+      "usable_energy_ev": [
+        1.2400019445828536e-05,
+        19000.02948953597
+      ]
+    },
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpaD03_0.01",
+      "sha256": "87c609d3ddda2bc0bc5f2343f9b56bbd517fc5833e0754e6a628c8a5c6235a0b",
+      "bytes": 22981,
+      "usable_energy_ev": [
+        1.0000016004742568e-05,
+        18000.028808536623
+      ]
+    },
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpeD03_0.01",
+      "sha256": "663d2939905710d61706d75f52e28ca819fcc5ecde1be2d2971b23c127a351d9",
+      "bytes": 22804,
+      "usable_energy_ev": [
+        1.0000016004742568e-05,
+        18000.028808536623
+      ]
+    },
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpaD03_0.10",
+      "sha256": "518670c9a850f3a3b5c3d011d3809088a6f6c1aaf0f3ebc8316574f1d55005a5",
+      "bytes": 22981,
+      "usable_energy_ev": [
+        1.0000016004742568e-05,
+        18000.028808536623
+      ]
+    },
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpeD03_0.10",
+      "sha256": "7cf5e0dae097e8d8b385606176825501c3f5094dbba2a6a7fb68fda0ca792013",
+      "bytes": 22804,
+      "usable_energy_ev": [
+        1.0000016004742568e-05,
+        18000.028808536623
+      ]
+    }
+  ],
+  "reference": "https://arxiv.org/abs/astro-ph/0308251",
+  "generator_sha256": "b97c264843ae2ae5d671e202e9b725aa2e2fbd1987c37001da254c817154d75d",
+  "contract_sha256": "b1f27df3a6fcd2f76b7f6ca8a14c794b5811540905cb1c04480586bf7614909d",
+  "compiled_sha256": "37c462cec715f0e3009e277249558ab364246c78e373d4049d6e88605f284b54",
+  "miepython_version": "3.3.0",
+  "numpy_version": "2.3.3",
+  "radii_cm": [
+    1e-06,
+    1e-05
+  ],
+  "solid_density_g_cm3": [
+    2.2,
+    3.8
+  ],
+  "dielectric_temperature_k": 20,
+  "ngroup": 9,
+  "nir": 136,
+  "native_status": "live_selected_explicit_comparison",
+  "primary_closure": "monochromatic_at_unchanged_source_representative_energy",
+  "interpolation": "Re(n)-1 linear in log E; Im(n) log-log; no extrapolation",
+  "angular_closure": "raw Qsca and Qsca*g retained; native d03_transport_v1 uses Qsca*(1-g) in primary and IR",
+  "high_group_qabs": [
+    0.00010552107941935523,
+    0.0010546469503845918,
+    0.001162660698144481,
+    0.011558419759115392
+  ],
+  "high_group_qsca": [
+    6.453310724025952e-05,
+    0.006445980879477001,
+    0.00019405554545529245,
+    0.01924582359622057
+  ],
+  "high_group_g": [
+    0.999860982803624,
+    0.9999980551268598,
+    0.9998609774651476,
+    0.9999980482979154
+  ],
+  "limitations": [
+    "Not the old WD01 size-distribution/PAH mixture.",
+    "0.005 micron default bins and 3.3 g/cm3 default silicate are incompatible.",
+    "1/3-2/3 graphite is an approximation, not full anisotropic Maxwell scattering.",
+    "Dielectric functions frozen at 20 K; no stochastic or charge-dependent grains.",
+    "Native delta-isotropic transport matches the first angular moment, not a resolved Mie phase function."
+  ]
+}

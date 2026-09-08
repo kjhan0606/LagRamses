@@ -129,6 +129,9 @@ contains
     use snrt_amr_topology, only: snrt_amr_build_same_level_neighbors
 #ifdef DUST_LIVE
     use snrt_dust_live, only: snrt_dust_live_stage, snrt_dust_live_commit, dust_live_coarse_trial
+    use dust_composition_material, only: dust_material_composition_enabled,dust_composition_curve,dust_composition_area
+    use dust_mass_physics, only: dust_optics_enabled
+    use dust_composition_optics, only: d03_ng,d03_nir,d03_cell_weights,d03_opacity_basis
     use snrt_dust_ir, only: dust_ir_diagnostics
     use snrt_dust_contract, only: snrt_dust_contract_version, &
          snrt_dust_contract_scattering_enabled, snrt_dust_contract_scattering_per_h_cm2, &
@@ -175,7 +178,7 @@ contains
          snrt_mean_molecular_weight, snrt_inventory_tolerance
     use snrt_cuda_interface, only: snrt_cuda_available
     use amr_parameters, only: dp, ndim, spin_bh, mad_jet, X_floor
-    use hydro_parameters, only: gamma, idust, idust_energy, inener
+    use hydro_parameters, only: gamma, idust, idust_energy, inener, idust_species, idust_bins
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use iso_c_binding, only: c_float
     use omp_lib, only: omp_get_wtime
@@ -251,6 +254,10 @@ contains
     real(dp), allocatable :: dust_n_hydrogen_cm3(:), dust_path_cm(:)
     real(dp), allocatable :: dust_tau_dp(:,:)
     real(dp), allocatable :: dust_ir_trial(:,:,:)
+    real(dp), allocatable :: dust_cell_u(:,:),dust_cell_area(:)
+    real(dp),allocatable::dust_weights(:,:),dust_primary_sigma(:,:),dust_scatter_sigma(:,:)
+    real(dp)::d03_pa(d03_ng,4),d03_ps(d03_ng,4),d03_pg(d03_ng,4)
+    real(dp)::d03_ia(d03_nir,4),d03_isc(d03_nir,4),d03_ig(d03_nir,4)
     type(dust_ir_diagnostics) :: dust_ir_result
     type(dust_live_coarse_trial) :: dust_ir_coarse
 #endif
@@ -574,6 +581,7 @@ contains
          trial_heating_rate(nleaf), trial_unassigned(nleaf), &
          trial_absorbed_species(nleaf,3,snrt_ngroups), &
          current_fraction(nleaf,3), target_fraction(nleaf,3))
+    hydro_state_invalid = .false.
 #ifdef DUST_LIVE
     allocate(dust_relative_abundance(nleaf), dust_heat_capacity(nleaf), &
          dust_old_energy(nleaf), dust_old_temperature(nleaf), &
@@ -581,6 +589,16 @@ contains
          dust_absorbed_photons(snrt_ngroups,nleaf), dust_absorbed_energy(nleaf), &
          dust_n_hydrogen_cm3(nleaf), dust_path_cm(nleaf), &
          dust_tau_dp(nleaf,snrt_ngroups))
+    if(dust_material_composition_enabled())then
+       allocate(dust_cell_u(snrt_dust_contract_number_temperature,nleaf),dust_cell_area(nleaf))
+       dust_cell_u=0;dust_cell_area=0
+    endif
+    if(dust_optics_enabled())then
+       allocate(dust_weights(4,nleaf),dust_primary_sigma(snrt_ngroups,nleaf),dust_scatter_sigma(snrt_ngroups,nleaf))
+       dust_weights=.25d0;dust_primary_sigma=0;dust_scatter_sigma=0
+       call d03_opacity_basis(snrt_dust_contract_mass_per_h_g,d03_pa,d03_ps,d03_pg,d03_ia,d03_isc,d03_ig,ierr)
+       if(ierr/=0.or.snrt_ngroups/=d03_ng)hydro_state_invalid=.true.
+    endif
 #endif
     optical_depth_dust = 0.0_c_float
     raw_group = 0.0_c_float
@@ -594,7 +612,6 @@ contains
     excess_energy_ev(3,:) = snrt_group_photoelectron_excess_heii_ev
 
     wall_start = omp_get_wtime()
-    hydro_state_invalid = .false.
 #ifdef DUST_LIVE
     dust_energy_scale = scale_d * scale_v**2
     if (.not. ieee_is_finite(dust_energy_scale) .or. dust_energy_scale <= 0.0d0) &
@@ -634,6 +651,20 @@ contains
             size(uold,2) >= idust_energy) then
           dust_mass_code = uold(icell,idust)
           dust_energy_code = uold(icell,idust_energy)
+          if(dust_optics_enabled())then
+             call d03_cell_weights(uold(icell,idust_bins:idust_bins+3),dust_weights(:,i),ierr)
+             if(ierr/=0)hydro_state_invalid=.true.
+             dust_primary_sigma(:,i)=matmul(d03_pa,dust_weights(:,i))
+             dust_scatter_sigma(:,i)=matmul(d03_ps-d03_pg,dust_weights(:,i))
+          endif
+          if(dust_material_composition_enabled())then
+             call dust_composition_curve(snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature), &
+                  uold(icell,idust_species:idust_species+1),snrt_dust_contract_mass_per_h_g,dust_cell_u(:,i),ierr)
+             if(ierr/=0)hydro_state_invalid=.true.
+             call dust_composition_area(uold(icell,idust_bins:idust_bins+3), &
+                  snrt_dust_contract_mass_per_h_g,dust_cell_area(i),ierr)
+             if(ierr/=0)hydro_state_invalid=.true.
+          endif
           if (.not. ieee_is_finite(dust_mass_code) .or. &
                .not. ieee_is_finite(dust_energy_code) .or. &
                dust_mass_code < 0.0d0 .or. dust_energy_code < 0.0d0) then
@@ -653,11 +684,18 @@ contains
                    ! Legacy argument retained for ABI; not a physical capacity
                    ! in v4. The IR solver uses density*U(T) instead.
                    dust_heat_capacity(i)=1d0
+                   if(dust_material_composition_enabled())then
+                      call snrt_dust_material_temperature( &
+                           snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature), &
+                           dust_cell_u(:,i),dust_old_energy(i)/(dust_n_hydrogen_cm3(i)*dust_relative_abundance(i)), &
+                           dust_old_temperature(i),ierr)
+                   else
                    call snrt_dust_material_temperature( &
                         snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature), &
                         snrt_dust_contract_internal_energy_per_h_erg(1:snrt_dust_contract_number_temperature), &
                         dust_old_energy(i)/(dust_n_hydrogen_cm3(i)*dust_relative_abundance(i)), &
                         dust_old_temperature(i),ierr)
+                   endif
                    if(ierr/=0)hydro_state_invalid=.true.
                 else
                    dust_old_temperature(i) = dust_old_energy(i) / dust_heat_capacity(i)
@@ -748,6 +786,11 @@ contains
     call snrt_dust_prepare_cell_optical_depth(dust_n_hydrogen_cm3, dust_path_cm, &
          dust_relative_abundance, snrt_dust_contract_absorption_per_h_cm2(1:snrt_ngroups), &
          dust_tau_dp, ierr)
+    if(dust_optics_enabled())then
+       do i=1,nleaf
+          dust_tau_dp(i,:)=dust_n_hydrogen_cm3(i)*dust_path_cm(i)*dust_relative_abundance(i)*dust_primary_sigma(:,i)
+       enddo
+    endif
     if (ierr /= 0 .or. any(.not. ieee_is_finite(dust_tau_dp)) .or. &
          any(dust_tau_dp < 0.0d0)) then
        hydro_state_invalid = .true.
@@ -1073,7 +1116,7 @@ contains
             call snrt_runtime_isotropic_scatter(trial_intensity,angular_weight, &
             dust_n_hydrogen_cm3*dust_relative_abundance, &
             snrt_dust_contract_scattering_per_h_cm2(1:snrt_ngroups), &
-            snrt_c_cgs*reduced_c*dt_s,ierr)
+            snrt_c_cgs*reduced_c*dt_s,ierr,dust_scatter_sigma)
 #endif
        t_transport = t_transport + omp_get_wtime() - wall_sub
        if (ierr /= 0) then
@@ -1406,7 +1449,7 @@ contains
                  transpose(direction_dp),angular_weight/sum(angular_weight),dx_code*scale_l,dt_s,snrt_c_cgs*reduced_c, &
                  dust_n_hydrogen_cm3*dust_relative_abundance,dust_absorbed_energy,dust_old_energy, &
                  dust_heat_capacity,dust_ir_trial,dust_trial_energy,dust_trial_temperature,dust_ir_result,ierr, &
-                 dust_ir_coarse,gas_energy,gas_capacity,dust_n_hydrogen_cm3,transfer)
+                 dust_ir_coarse,gas_energy,gas_capacity,dust_n_hydrogen_cm3,transfer,dust_cell_u,dust_cell_area,dust_weights)
             if(ierr==0)then
                trial_thermal=trial_thermal-transfer/dust_energy_scale
                if(any(.not.ieee_is_finite(trial_thermal)).or.any(trial_thermal<=0))ierr=1
@@ -1418,7 +1461,7 @@ contains
                   dx_code*scale_l,dt_s,snrt_c_cgs*reduced_c, &
                   dust_n_hydrogen_cm3*dust_relative_abundance,dust_absorbed_energy,dust_old_energy, &
                   dust_heat_capacity,dust_ir_trial,dust_trial_energy,dust_trial_temperature,dust_ir_result,ierr, &
-                  dust_ir_coarse)
+                  dust_ir_coarse,cell_material_u=dust_cell_u,cell_collision_area=dust_cell_area,cell_weights=dust_weights)
        endif
        if(ierr/=0)then
           local_transaction_failure=snrt_failure_receiver

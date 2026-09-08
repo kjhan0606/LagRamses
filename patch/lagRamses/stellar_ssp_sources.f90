@@ -171,6 +171,7 @@ contains
        end if
 
        star_weight = n_stars
+       state%dust_species=state%dust_species+star_weight*star_state%dust_species
        state%ejected_mass = state%ejected_mass + &
             star_weight * star_state%ejected_mass
        state%net_yield = state%net_yield + star_weight * star_state%net_yield
@@ -425,7 +426,8 @@ contains
   logical function cumulative_values_finite(state)
     type(stellar_cumulative_t), intent(in) :: state
 
-    cumulative_values_finite = ieee_is_finite(state%returned_mass) .and. &
+    cumulative_values_finite = all(ieee_is_finite(state%dust_species)).and. &
+         ieee_is_finite(state%returned_mass) .and. &
          ieee_is_finite(state%remnant_mass) .and. &
          ieee_is_finite(state%living_mass) .and. ieee_is_finite(state%energy) .and. &
          all(ieee_is_finite(state%momentum)) .and. &

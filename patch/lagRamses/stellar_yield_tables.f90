@@ -19,6 +19,7 @@
 
 module stellar_yield_tables
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use dust_mass_physics, only: dust_species_condense
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels
   implicit none
@@ -67,11 +68,13 @@ module stellar_yield_tables
      real(stellar_dp), allocatable :: momentum(:,:)
      real(stellar_dp), allocatable :: ejected_mass(:,:)
      real(stellar_dp), allocatable :: net_yield(:,:)
+     real(stellar_dp), allocatable :: dust_ejected(:,:),dust_jump(:,:)
   end type stellar_yield_table_t
 
   public :: clear_yield_table
   public :: load_yield_table
   public :: set_yield_mass_assignment_mode
+  public :: prepare_dust_yields
 
 contains
 
@@ -88,6 +91,7 @@ contains
     if (allocated(table%momentum)) deallocate(table%momentum)
     if (allocated(table%ejected_mass)) deallocate(table%ejected_mass)
     if (allocated(table%net_yield)) deallocate(table%net_yield)
+    if (allocated(table%dust_ejected)) deallocate(table%dust_ejected,table%dust_jump)
     if (allocated(table%hm_mass)) deallocate(table%hm_mass, table%hm_z, table%hm_age, &
          table%hm_remnant, table%hm_adjustment, table%hm_wind_row, table%hm_terminal_row)
     if (allocated(table%agb_terminal_row)) deallocate(table%agb_terminal_row)
@@ -105,6 +109,63 @@ contains
     table%n_rows = 0
     table%mass_assignment_mode = yield_mass_assignment_linear
   end subroutine clear_yield_table
+
+  subroutine prepare_dust_yields(table,ierr)
+    ! Integrate condensation over physical release segments, BEFORE the
+    ! existing age/Z/IMF mixture. In particular no SSP-averaged C/O switch.
+    type(stellar_yield_table_t),intent(inout)::table
+    integer,intent(out)::ierr
+    integer::r,j,k,previous,selected,pass,status
+    logical,allocatable::done(:)
+    real(stellar_dp)::age,delta(n_stellar_elements),jump(n_stellar_elements),part(2),jp(2),before(2),tol
+    ierr=1
+    if(.not.table%loaded.or.n_stellar_elements/=11)return
+    if(allocated(table%dust_ejected))deallocate(table%dust_ejected,table%dust_jump)
+    allocate(table%dust_ejected(table%n_rows,2),table%dust_jump(table%n_rows,2),done(table%n_rows))
+    table%dust_ejected=0;table%dust_jump=0;done=.false.
+    do pass=1,table%n_rows
+       selected=0;age=huge(1d0)
+       do r=1,table%n_rows
+          if(done(r))cycle
+          if(table%age_gyr(r)<age)then
+             age=table%age_gyr(r);selected=r
+          endif
+       enddo
+       if(selected==0)return
+       r=selected;done(r)=.true.
+       if(table%channel(r)>3)cycle
+       previous=0
+       do j=1,table%n_rows
+          if(table%channel(j)/=table%channel(r).or.table%initial_mass(j)/=table%initial_mass(r).or. &
+               table%birth_metallicity(j)/=table%birth_metallicity(r).or.table%age_gyr(j)>=age)cycle
+          if(previous==0)then
+             previous=j
+          else if(table%age_gyr(j)>table%age_gyr(previous))then
+             previous=j
+          endif
+       enddo
+       delta=table%ejected_mass(r,:);before=0;jump=0
+       if(previous>0)then
+          delta=delta-table%ejected_mass(previous,:);before=table%dust_ejected(previous,:)
+       endif
+       if(allocated(table%agb_terminal_jump_fraction))then
+          do k=1,size(table%agb_terminal_row)
+             if(table%agb_terminal_row(k)==r)jump=table%agb_terminal_jump_fraction(k)*table%ejected_mass(r,:)
+          enddo
+       endif
+       delta=delta-jump
+       tol=64*epsilon(1d0)*max(table%returned_mass(r),tiny(1d0))
+       if(any(delta < -tol))return
+       call dust_species_condense(max(delta,0d0),table%channel(r),part,status)
+       if(status/=0)return
+       call dust_species_condense(jump,table%channel(r),jp,status)
+       if(status/=0)return
+       table%dust_ejected(r,:)=before+part+jp;table%dust_jump(r,:)=jp
+       if(sum(table%dust_ejected(r,:))>table%returned_mass(r)- &
+            sum(table%ejected_mass(r,1:2))+tol)return
+    enddo
+    ierr=0
+  end subroutine prepare_dust_yields
 
   subroutine set_yield_mass_assignment_mode(table, mode, ierr)
     type(stellar_yield_table_t), intent(inout) :: table

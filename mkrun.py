@@ -390,11 +390,40 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 'No 8--13 Msun source or same-population SED claim; old comparison is unchanged.')
     cosmic_rays = ui.ask_bool('enable trapped cosmic-ray fluid (NENER=1 CPU/HDF5 build)?', False)
     mass_evolution = ui.ask_bool('Evolve dust mass (condensation, cold growth, thermal sputtering)?', False)
+    mass_model, mass_cooling = 'bulk_v1', 'none'
+    dust_shocks=False
+    material_model='fixed_mix'
+    optics_model='fixed_mix'
     if mass_evolution:
+        mass_model=ui.ask_choice('Dust mass model',OrderedDict([
+            ('bulk_v1',('Existing fixed-composition total-metal comparison',)),
+            ('carbon_olivine_v1',('Source-segment carbon/olivine budgets; mixed optics still fixed',)),
+            ('carbon_olivine_2size_v1',('Carbon/silicate small+large masses, growth/erosion and size transfer; fixed mixed optics',)),
+        ]),'bulk_v1')
+        mass_cooling=ui.ask_choice('Dust cooling closure',OrderedDict([
+            ('none',('Existing no-external-cooling default',)),
+            ('depleted_scalar',('Original solar-mixture cooling at depleted Z; no UV background',)),
+            ('wss09_cie',('Composition required: individual gas-phase elements, CIE only; no local-radiation/NEQ metal response',)),
+        ]),'none')
+        if mass_model=='carbon_olivine_2size_v1':
+            dust_shocks=ui.ask_bool('Enable energy-equivalent ambient SN dust destruction (uncalibrated comparison)?',False)
+            material_model=ui.ask_choice('Dust material model',OrderedDict([
+                ('fixed_mix',('Existing fixed mixture material/geometry',)),
+                ('dl01_composition_v1',('Local graphite/silicate U(T), actual size collision area; common T, selectable optics',)),
+            ]),'fixed_mix')
+            if material_model=='dl01_composition_v1':
+                optics_model=ui.ask_choice('Dust optical model',OrderedDict([
+                    ('fixed_mix',('Existing WD01 fixed mixture',)),
+                    ('d03_transport_v1',('D03 local four-bin optics; explicit radii 0.01/0.1 micron, density 2.2/3.8; transport scattering',)),
+                ]),'fixed_mix')
         ui.info('Bulk dust reference: wind/AGB/SNII condensation=0/0.2/0.15; fixed radius 0.1 micron, '
                 'solid density 3 g/cm3, sticking 0.3 below 300 K, effective metal mass 24 mp. '
-                'No sinks/AGN or external metal cooling; gas/dust share a total-metal reservoir. '
-                'No evolving grain sizes or element-resolved depletion.')
+                'No sinks/AGN; gas/dust share a total-metal reservoir. '
+                'Composition mode consumes available C and limiting olivine elements, not all metals. '
+                'Two-size option uses 0.005/0.1 micron radii, carbon/silicate densities 2.2/3.3, '
+                'all-large injection and resolved-density coagulation/shattering. '
+                'These are defaults: D03 optics selects 0.01/0.1 micron and 2.2/3.8 g/cm3 instead. '
+                'Cooling is not a unified NEQ model.')
     cr_sn_fraction, cr_snia_fraction, cr_sf_support = 0., 0., False
     if cosmic_rays:
         cr_sn_fraction = ui.ask('SNII energy fraction into CR [0,1]', .1, float)
@@ -412,18 +441,25 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         binary = root / '.snrt-cpu.OKoz9T/ramses_cpu3d'
     elif executable_kind != 'cuda_linked':
         raise ValueError('Unknown comparison executable.')
-    scattering = ui.ask_choice('Primary dust scattering', OrderedDict([
-        ('none', ('Existing absorption-only model (default)',)),
-        ('isotropic_elastic', ('Draine scattering opacity; isotropic elastic comparison, no radiation pressure',)),
-    ]), 'none')
+    if optics_model=='d03_transport_v1':
+        # The base contract's scattering flag must be on; native D03 replaces
+        # its fixed coefficients with local Qsca*(1-g), for primary and IR.
+        scattering='isotropic_elastic'
+        ui.info('D03 selects primary/IR transport scattering together; absorption-only is not this model.')
+    else:
+        scattering = ui.ask_choice('Primary dust scattering', OrderedDict([
+            ('none', ('Existing absorption-only model (default)',)),
+            ('isotropic_elastic', ('Draine scattering opacity; isotropic elastic comparison, no radiation pressure',)),
+        ]), 'none')
     dust_contract = config / 'dust_dl01_bulk_030_reference_v4.nml'
     if scattering == 'isotropic_elastic':
         dust_contract = config / 'dust_dl01_bulk_030_scattering_reference_v4.nml'
         binary = root / ('.snrt-cpu.OKoz9T/ramses_scatter_cpu3d' if executable_kind == 'cpu_only'
                          else '.physical-extension.7rcxv4/ramses_scatter3d')
-        ui.info('Primary scattering follows the primary RT backend; isotropic elastic, first-order split. '
-                'No measured anisotropic phase function, radiation pressure, IR scattering or '
-                'unresolved optically-thick diffusion claim. Explicit reference comparison only.')
+        if optics_model=='fixed_mix':
+            ui.info('Primary scattering follows the primary RT backend; isotropic elastic, first-order split. '
+                    'No measured anisotropic phase function, radiation pressure, IR scattering or '
+                    'unresolved optically-thick diffusion claim. Explicit reference comparison only.')
     elif scattering != 'none':
         raise ValueError('Unknown primary dust scattering model.')
     exchange = ui.ask_choice('Dust gas thermal exchange', OrderedDict([
@@ -444,6 +480,16 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         if executable_kind != 'cpu_only' or 'cuda' in (primary_backend, dust_backend):
             raise ValueError('The CR/dust mass comparison uses its NENER=1 CPU-only build; forced CUDA is unavailable.')
         binary = root / ('.cosmic-ray.kyySgK/ramses_dust_mass3d' if mass_evolution else '.cosmic-ray.kyySgK/ramses_cr3d')
+        if mass_model!='bulk_v1' or mass_cooling!='none':
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_composition_zero_uv3d'
+        if mass_cooling=='wss09_cie':
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_cie3d'
+        if mass_model=='carbon_olivine_2size_v1':
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_sizes3d'
+        if material_model=='dl01_composition_v1':
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_composition_material3d'
+        if optics_model=='d03_transport_v1':
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_d03_live3d'
     env = OrderedDict([
         ('OMP_NUM_THREADS', str(threads)), ('I_MPI_FABRICS', 'shm'),
         ('OMP_STACKSIZE', '512M'), ('KMP_STACKSIZE', '512M'),
@@ -513,6 +559,33 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             text = text.replace('cr_enabled=.true.', 'cr_enabled=.false.').replace('prad_region(1,1)=1d-8','prad_region(1,1)=0d0')
         if mass_evolution:
             text = text.replace("cr_transport='advective'", "cr_transport='advective'\n  dust_mass_enabled=.true.")
+            text=text.replace('dust_mass_enabled=.true.',
+                "dust_mass_enabled=.true.\n  dust_mass_model='{}'\n  dust_cooling='{}'".format(mass_model,mass_cooling))
+            if mass_cooling!='none':
+                text=text.replace('cooling=.false.','cooling=.true.\n  J21=0d0')
+                text=re.sub(r"cooling_method\s*=\s*'[^']*'", "cooling_method='original'", text)
+                text=text.replace('haardt_madau=.true.','haardt_madau=.false.')
+            if mass_model in ('carbon_olivine_v1','carbon_olivine_2size_v1'):
+                # No arbitrary conversion of a fixed-mixture seed to species.
+                # NENER1/virial layout: passive14/15=aggregate dust mass/energy.
+                text=re.sub(r'(var_region\(1,(?:14|15)\)=)[^\n]+',r'\g<1>0d0',text)
+                text=text.replace('var_region(1,15)=0d0',
+                    'var_region(1,15)=0d0\n  var_region(1,16)=0d0\n  var_region(1,17)=0d0')
+                if mass_model=='carbon_olivine_2size_v1':
+                    text=text.replace("dust_cooling='{}'".format(mass_cooling),
+                        "dust_cooling='{}'\n  dust_material_model='{}'".format(mass_cooling,material_model))
+                    if optics_model=='d03_transport_v1':
+                        text=text.replace("dust_material_model='dl01_composition_v1'",
+                            "dust_material_model='dl01_composition_v1'\n  dust_optics_model='d03_transport_v1'\n"
+                            "  dust_size_radius_cm=1d-6,1d-5\n  dust_size_density=2.2d0,3.8d0")
+                    text=text.replace('var_region(1,17)=0d0', 'var_region(1,17)=0d0\n' +
+                        '\n'.join('  var_region(1,{})=0d0'.format(j) for j in range(18,22)))
+                    text=text.replace("dust_mass_model='carbon_olivine_2size_v1'",
+                        "dust_mass_model='carbon_olivine_2size_v1'\n  dust_sn_shocks=" +
+                        rng._fmt_fortran_value(dust_shocks,'bool'))
+                    if dust_shocks:
+                        text=text.replace('var_region(1,21)=0d0','var_region(1,21)=0d0\n' +
+                            '\n'.join('  var_region(1,{})=0d0'.format(j) for j in range(22,25)))
     raw, _ = rng.parse_namelist(text)
     values = rng.import_to_values(raw)
     msgs = rng.validate_params(values)
@@ -611,12 +684,65 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 'CR fractions and SF coupling cannot change on restart.\n')
         if mass_evolution:
             files[str(dest / 'README.txt')] += (
-                'Dust mass bulk v1: condensation fractions wind/AGB/SNII=0/0.2/0.15; SNIa produces no dust.\n'
-                'Cold geometric accretion and Tsai-Mathews thermal sputtering, fixed characteristic size/composition.\n'
-                'Dust is a subset of total metals/rho, not an added gas mass; external metal cooling is disabled.\n'
+                'Dust condensation efficiencies wind/AGB/SNII=0/0.2/0.15; SNIa produces no dust.\n'
+                'Cold geometric accretion and Tsai-Mathews thermal sputtering; representative radii fixed within each bin.\n'
+                'Dust is a subset of total metals/rho, not an added gas mass.\n'
                 'Dust injection at 20 K is charged to source energy; mass-exchange heat is charged to gas, not CR.\n'
-                'No latent heat, element-resolved depletion, SN unresolved-shock destruction, shattering or coagulation.\n'
+                'No latent heat. SN destruction and size transfer require explicit two-size options.\n'
                 'Cosmic-ray pressure enabled: {}.\n'.format(cosmic_rays))
+            files[str(dest / 'README.txt')] += (
+                'Selected dust mass model: {}; cooling: {}.\n'.format(mass_model,mass_cooling))
+            if mass_model in ('carbon_olivine_v1','carbon_olivine_2size_v1'):
+                files[str(dest / 'README.txt')] += (
+                'Composition option: carbon/MgFeSiO4 condensation before age/Z/IMF mixing; no separate Fe dust.\n'
+                'Zero initial species seed; shared fixed optical mixture is an explicit intermediate approximation.\n')
+            files[str(dest / 'README.txt')] += (
+                'depleted_scalar, if selected, uses residual gas-phase total Z, not individual-element cooling rates.\n')
+            if mass_model=='carbon_olivine_2size_v1':
+                files[str(dest / 'README.txt')] += (
+                    'Four masses: C-small/large and MgFeSiO4-small/large; default injection all large.\n'
+                    'Radii=0.005/0.1 micron; solid densities=2.2/3.3 g/cm3.\n'
+                    'Coagulation only at resolved nH>=1000 cm-3,T<10000 K; diffuse shattering below that density.\n'
+                    'Growth retains effective 24-mp accreting atoms; sputtering retains shared Tsai-Mathews erosion.\n'
+                    'No composition/size-dependent opacity or multibin equivalence claim.\n')
+                files[str(dest / 'README.txt')] += (
+                    'Ambient SN destruction={}; coupled (SNII+Ia-CR) energy/1e51 erg, not actual event counts.\n'
+                    'Fresh same-step ejecta protected; not calibrated against resolution or resolved shock sputtering.\n'
+                    'Transient SN/fresh fields 28--30 are consumed before RT/SF/checkpoint, not extra gas species.\n'.format(dust_shocks))
+                files[str(dest / 'README.txt')] += 'Material model: {}.\n'.format(material_model)
+                if material_model=='dl01_composition_v1':
+                    files[str(dest / 'README.txt')] += (
+                        'Local C/silicate mass-weighted DL01 U(T), 5--300 K; one common grain temperature.\n'
+                        'Injection/mass evolution/IR use the same composition energy; area=sum(3*rho_bin/(4*rho_s*a)).\n'
+                        'Graphite bulk limit only; no PAH/stochastic heating, sublimation or grain-specific temperature.\n'
+                        'WD01 optical absorption/scattering/emission coefficients remain the fixed-mixture comparison.\n')
+            if optics_model=='d03_transport_v1':
+                readme=files[str(dest / 'README.txt')]
+                readme=readme.replace('Primary dust scattering: isotropic_elastic',
+                                     'Primary dust scattering: d03_transport_v1')
+                readme=readme.replace('DL01 is a 30/70 bulk single-temperature comparison;',
+                                     'DL01 uses local C/silicate fractions and a common temperature;')
+                readme=readme.replace('shared fixed optical mixture is an explicit intermediate approximation',
+                                     'D03 local optical mixture')
+                readme=readme.replace('Radii=0.005/0.1 micron; solid densities=2.2/3.3 g/cm3.',
+                                     'Radii=0.01/0.1 micron; solid densities=2.2/3.8 g/cm3 (D03).')
+                readme=readme.replace('No composition/size-dependent opacity or multibin equivalence claim.',
+                                     'Local four-bin opacity; no multibin equivalence claim.')
+                readme=readme.replace('WD01 optical absorption/scattering/emission coefficients remain the fixed-mixture comparison.',
+                                     'D03 local absorption/scattering/emission; primary/IR Qsca*(1-g) delta-isotropic transport.\n'
+                                     'IR absorption/emission share opacity. Frozen 20 K dielectric; not a full phase function.')
+                readme=readme.replace('anisotropic phase function or IR scattering.',
+                                     'resolved anisotropic phase function. D03 IR transport scattering is enabled.')
+                readme=readme.replace('Draine C_ext*albedo at group representative energies; isotropic elastic angular mixing.',
+                                     'D03 local Qsca*(1-g) at group representative energies; delta-isotropic angular mixing.')
+                files[str(dest / 'README.txt')]=readme
+            if mass_cooling=='wss09_cie':
+                files[str(dest / 'README.txt')] += (
+                    'WSS09 CIE: embedded author table; actual gas-phase H/He and C,N,O,Ne,Mg,Si,S,Ca,Fe.\n'
+                    'Replaces original cooling, not an additional metal term; local SNRT photoheating stays separate.\n'
+                    'Low-density, trace-metal CIE approximation, NOT LTE or radiation-dependent NEQ metals.\n'
+                    'Published domain T=100--9.5907e8 K, nHe/nH=0.0786528--0.106898; no extrapolation.\n'
+                    'No metal-electron correction, molecular cooling or arbitrary-density qualification.\n')
     if write_text is save_text:
         # Reuse the existing setup-only atomic publisher, never overwrite a
         # concurrently created destination. No Tkinter/display is imported.

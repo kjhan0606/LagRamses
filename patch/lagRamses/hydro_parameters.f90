@@ -107,5 +107,8 @@ module hydro_parameters
   ! They are assigned by read_hydro_params only in the live profile.
   integer::idust=-1
   integer::idust_energy=-1
+  integer::idust_species=-1 ! first of C, MgFeSiO4, only for explicit composition model
+  integer::idust_bins=-1 ! C-small/large, silicate-small/large; two-size model only
+  integer::idust_shock=-1,idust_fresh=-1 ! transient SN energy and fresh C/sil densities; cleared before RT/SF/output
 
 end module hydro_parameters

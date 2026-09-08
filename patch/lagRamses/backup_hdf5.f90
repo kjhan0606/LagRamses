@@ -107,18 +107,47 @@ end subroutine stellar_feedback_hdf5_identity
 
 subroutine dust_mass_hdf5_identity(grp,writing)
   use amr_commons
+  use hydro_parameters, only: idust_species,idust_bins,idust_shock,idust_fresh
   use ramses_hdf5_io
-  use dust_mass_physics, only: dust_mass_enabled,dust_mass_identity
+  use dust_mass_physics, only: dust_mass_enabled,dust_mass_identity,dust_composition_enabled,dust_cooling, &
+       dust_two_size_enabled,dust_size_identity,dust_optics_enabled
+  use dust_element_cooling, only: cie_n,wss09_identity
+  use dust_composition_material, only: dust_material_composition_enabled,dl01_n,dl01_t,dl01_carbon,dl01_silicate
+  use dust_composition_optics, only: d03_identity_size,d03_identity
   implicit none
   integer(HID_T),intent(in)::grp
   logical,intent(in)::writing
   real(dp)::values(13),saved(13)
+  real(dp)::extra(4),saved_extra(4)
+  real(dp)::sizes(16),saved_sizes(16)
+  real(dp)::material(1+3*dl01_n),saved_material(1+3*dl01_n)
+  real(dp)::optics(d03_identity_size),saved_optics(d03_identity_size)
+  real(dp)::cie_a(15*cie_n+30),cie_b(10*cie_n),saved_a(15*cie_n+30),saved_b(10*cie_n)
   integer::status,bad,all_bad,info
-  logical::exists
+  logical::exists,extended
   include 'mpif.h'
   values=dust_mass_identity();bad=0
+  material=[1d0,dl01_t,dl01_carbon,dl01_silicate]
+  optics=d03_identity()
+  extended=dust_composition_enabled().or.trim(dust_cooling)/='none'
+  extra=[1d0,merge(2d0,1d0,dust_composition_enabled()), &
+       merge(1d0,0d0,trim(dust_cooling)=='depleted_scalar'),real(idust_species,dp)]
+  sizes=[dust_size_identity(),real(idust_bins,dp),real(idust_shock,dp),real(idust_fresh,dp)]
+  if(dust_two_size_enabled())extra(2)=3d0
+  if(trim(dust_cooling)=='wss09_cie')then
+     extra(3)=2d0
+     call wss09_identity(cie_a,cie_b)
+  endif
   if(writing)then
      if(dust_mass_enabled)call hdf5_write_attr_1d_dp(grp,'dust_mass_values',values,13)
+     if(extended)call hdf5_write_attr_1d_dp(grp,'dust_composition_values',extra,4)
+     if(dust_two_size_enabled())call hdf5_write_attr_1d_dp(grp,'dust_size_values',sizes,size(sizes))
+     if(dust_material_composition_enabled())call hdf5_write_attr_1d_dp(grp,'dust_material_composition',material,size(material))
+     if(dust_optics_enabled())call hdf5_write_attr_1d_dp(grp,'dust_optics_d03',optics,size(optics))
+     if(trim(dust_cooling)=='wss09_cie')then
+        call hdf5_write_attr_1d_dp(grp,'dust_cie_hhe_values',cie_a,size(cie_a))
+        call hdf5_write_attr_1d_dp(grp,'dust_cie_metal_values',cie_b,size(cie_b))
+     endif
   else
      exists=.false.
      call h5aexists_f(grp,'dust_mass_values',exists,status)
@@ -129,6 +158,71 @@ subroutine dust_mass_hdf5_identity(grp,writing)
         if(status/=0)bad=1
         if(status==0)then
            if(any(saved/=values))bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_composition_values',exists,status)
+     if(status/=0.or.(exists.neqv.extended))bad=1
+     if(exists.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_composition_values',saved_extra,4,status)
+        if(status/=0)bad=1
+        if(status==0)then
+           if(any(saved_extra/=extra))bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_size_values',exists,status)
+     if(status/=0.or.(exists.neqv.dust_two_size_enabled()))bad=1
+     if(exists.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_size_values',saved_sizes,size(saved_sizes),status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_sizes/=sizes))then
+           bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_material_composition',exists,status)
+     if(status/=0.or.(exists.neqv.dust_material_composition_enabled()))bad=1
+     if(exists.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_material_composition',saved_material,size(saved_material),status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_material/=material))then
+           bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_optics_d03',exists,status)
+     if(status/=0.or.(exists.neqv.dust_optics_enabled()))bad=1
+     if(exists.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_optics_d03',saved_optics,size(saved_optics),status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_optics/=optics))then
+           bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_cie_hhe_values',exists,status)
+     if(status/=0.or.(exists.neqv.(trim(dust_cooling)=='wss09_cie')))bad=1
+     if(exists.and.trim(dust_cooling)=='wss09_cie'.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_cie_hhe_values',saved_a,size(saved_a),status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_a/=cie_a))then
+           bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_cie_metal_values',exists,status)
+     if(status/=0.or.(exists.neqv.(trim(dust_cooling)=='wss09_cie')))bad=1
+     if(exists.and.trim(dust_cooling)=='wss09_cie'.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_cie_metal_values',saved_b,size(saved_b),status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_b/=cie_b))then
+           bad=1
         endif
      endif
      call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)

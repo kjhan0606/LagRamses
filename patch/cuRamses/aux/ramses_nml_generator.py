@@ -281,6 +281,30 @@ PARAMS = [
     # Feedback (SN)
     ParamDef('dust_mass_enabled','bool',False,'PHYSICS_PARAMS',S_FEED,
              'Bulk fixed-size dust condensation/growth/sputtering (SNRT v4, no external metal cooling/sinks)'),
+    ParamDef('dust_mass_model','str','bulk_v1','PHYSICS_PARAMS',S_FEED,
+             'Dust mass closure; composition model uses C/MgFeSiO4 with fixed mixed optics',
+             choices=['bulk_v1','carbon_olivine_v1','carbon_olivine_2size_v1']),
+    ParamDef('dust_material_model','str','fixed_mix','PHYSICS_PARAMS',S_FEED,
+             'Fixed material or local DL01 composition U(T) plus size-based gas collision area; common grain T, fixed optics',
+             choices=['fixed_mix','dl01_composition_v1']),
+    ParamDef('dust_optics_model','str','fixed_mix','PHYSICS_PARAMS',S_FEED,
+             'D03 local four-bin absorption/emission and Qsca*(1-g) transport; requires DL01, radii 1e-6/1e-5, density 2.2/3.8',
+             choices=['fixed_mix','d03_transport_v1']),
+    ParamDef('dust_size_radius_cm','real_arr','5e-7,1e-5','PHYSICS_PARAMS',S_FEED,
+             'Two-size reference radii, small/large [cm]'),
+    ParamDef('dust_size_density','real_arr','2.2,3.3','PHYSICS_PARAMS',S_FEED,
+             'Carbon/silicate solid density [g/cm3], two-size model'),
+    ParamDef('dust_small_injection_fraction','real_arr','0.,0.','PHYSICS_PARAMS',S_FEED,
+             'Small fraction of injected carbon/silicate dust; default all large'),
+    ParamDef('dust_coagulation','bool',True,'PHYSICS_PARAMS',S_FEED,
+             'Two-size coagulation, resolved nH>=1000 cm-3 and T<10000 K only'),
+    ParamDef('dust_shattering','bool',True,'PHYSICS_PARAMS',S_FEED,
+             'Two-size shattering at nH<1000 cm-3'),
+    ParamDef('dust_sn_shocks','bool',False,'PHYSICS_PARAMS',S_FEED,
+             'Two-size ambient SN destruction: coupled energy/1e51 erg comparison; fresh ejecta protected, not resolution-calibrated'),
+    ParamDef('dust_cooling','str','none','PHYSICS_PARAMS',S_FEED,
+             'none, scalar depleted Z, or WSS09 individual-element CIE comparison (not radiation-dependent NEQ)',
+             choices=['none','depleted_scalar','wss09_cie']),
     ParamDef('dust_growth','bool',True,'PHYSICS_PARAMS',S_FEED,'Enable cold gas metal accretion'),
     ParamDef('dust_sputtering','bool',True,'PHYSICS_PARAMS',S_FEED,'Enable thermal sputtering'),
     ParamDef('dust_condensation','real_arr','0.,0.2,0.15','PHYSICS_PARAMS',S_FEED,
@@ -714,15 +738,57 @@ def validate_params(values):
                         'dust_metal_atom_mass','dust_injection_temperature'):
                 x=float(values.get(key,PARAM_BY_NAME[key].default));valid=valid and math.isfinite(x) and x>0
             x=float(values.get('dust_sticking',.3));valid=valid and math.isfinite(x) and 0<=x<=1
+            for key in ('dust_size_radius_cm','dust_size_density','dust_small_injection_fraction'):
+                pair=[float(x.strip().lower().replace('d','e')) for x in
+                      str(values.get(key,PARAM_BY_NAME[key].default)).split(',')]
+                valid=valid and len(pair)==2 and all(math.isfinite(x) for x in pair)
+                if key=='dust_small_injection_fraction':
+                    valid=valid and all(0<=x<=1 for x in pair)
+                else:
+                    valid=valid and all(x>0 for x in pair)
+                if key=='dust_size_radius_cm':
+                    valid=valid and len(pair)==2 and pair[0]<pair[1]
             valid=valid and float(clean('nboundary') or '0')==0
         except (TypeError,ValueError):
             valid=False
         valid=valid and flag('hydro') and flag('metal') and clean('feedback_mode')=='channel_resolved'
-        valid=valid and not any(flag(k) for k in ('cosmo','sink','sink_agn','agn','cooling','neq_chem','delayed_cooling'))
+        valid=valid and not any(flag(k) for k in ('cosmo','sink','sink_agn','agn','neq_chem','delayed_cooling'))
+        model=clean('dust_mass_model') or 'bulk_v1'
+        coupling=clean('dust_cooling') or 'none'
+        material=clean('dust_material_model') or 'fixed_mix'
+        valid=valid and material in ('fixed_mix','dl01_composition_v1')
+        if material=='dl01_composition_v1':
+            valid=valid and model=='carbon_olivine_2size_v1'
+        optics=clean('dust_optics_model') or 'fixed_mix'
+        valid=valid and optics in ('fixed_mix','d03_transport_v1')
+        if optics=='d03_transport_v1':
+            valid=valid and material=='dl01_composition_v1'
+            try:
+                for key,expected in [('dust_size_radius_cm',[1e-6,1e-5]),('dust_size_density',[2.2,3.8])]:
+                    raw=str(values.get(key,'')).replace('D','e').replace('d','e')
+                    valid=valid and [float(x) for x in raw.split(',')]==expected
+            except (TypeError,ValueError):
+                valid=False
+        valid=valid and model in ('bulk_v1','carbon_olivine_v1','carbon_olivine_2size_v1') and coupling in ('none','depleted_scalar','wss09_cie')
+        valid=valid and flag('cooling')==(coupling!='none')
+        if flag('dust_sn_shocks'):
+            valid=valid and model=='carbon_olivine_2size_v1'
+        if coupling=='wss09_cie':
+            valid=valid and model in ('carbon_olivine_v1','carbon_olivine_2size_v1')
+        if model in ('carbon_olivine_v1','carbon_olivine_2size_v1'):
+            valid=valid and not flag('gpu_hydro')
+        if coupling!='none':
+            valid=valid and clean('cooling_method') in ('','original')
+            valid=valid and not flag('haardt_madau') and not flag('self_shielding') and values.get('j21',0)==0
         valid=valid and clean('outformat')=='hdf5' and (values.get('nrestart',0)==0 or clean('informat')=='hdf5')
         if not valid:
-            msgs.append(ValidationMsg('ERROR','Dust mass requires valid bulk parameters, periodic noncosmo metal hydro, channel feedback, HDF5, no sinks/external cooling'))
-        msgs.append(ValidationMsg('WARNING','Dust bulk evolution needs active SNRT v4 material; no element-resolved depletion or grain-size evolution claim'))
+            msgs.append(ValidationMsg('ERROR','Dust needs valid parameters, periodic noncosmo metal hydro, channel feedback, HDF5, no sinks; cooling requires explicit closure/original/no UV; WSS09 requires composition'))
+        msgs.append(ValidationMsg('WARNING','Dust needs active SNRT v4 material; D03 is an explicit common-T/transport comparison. WSS09 CIE is not local-radiation/NEQ cooling; no T/He extrapolation'))
+    elif (str(values.get('dust_mass_model','bulk_v1')).strip("'\"")!='bulk_v1' or
+          str(values.get('dust_cooling','none')).strip("'\"")!='none' or values.get('dust_sn_shocks',False) or
+          str(values.get('dust_material_model','fixed_mix')).strip("'\"")!='fixed_mix' or
+          str(values.get('dust_optics_model','fixed_mix')).strip("'\"")!='fixed_mix'):
+        msgs.append(ValidationMsg('ERROR','Dust composition/cooling options require dust_mass_enabled'))
 
     cr_on = values.get('cr_enabled', False)
     fractions = [values.get('cr_sn_fraction', 0.0), values.get('cr_snia_fraction', 0.0)]

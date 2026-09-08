@@ -2,13 +2,14 @@
 ! Hydro GPU flags are independent. Host state is authoritative at every call;
 ! automatic fallback occurs only BEFORE launching a device transaction.
 module snrt_runtime_backend
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use iso_c_binding, only: c_int,c_float,c_double,c_long_long,c_char
   use snrt_cuda_multigroup_interface, only: snrt_cuda_multigroup_rt_step_species_dust
   implicit none
   private
   public :: snrt_backend_initialize, snrt_runtime_species_dust_step, snrt_runtime_dust_material
   public :: snrt_runtime_ir_transport, snrt_runtime_ir_absorb
-  public :: snrt_runtime_isotropic_scatter
+  public :: snrt_runtime_isotropic_scatter,snrt_runtime_ir_scatter
   public :: snrt_runtime_dust_exchange
   integer,save :: mode=0,init_status=0,sharers=1
   logical,save :: initialized=.false.,gpu_ready=.false.
@@ -32,13 +33,20 @@ module snrt_runtime_backend
        integer(c_int),value::nc,ng,nd,choice
        integer(c_int)::ierr
      end function
+     function ir_scatter(state,tau,weight,nc,ng,nd,choice) bind(C,name='snrt_ir_scatter_c') result(ierr)
+       import c_double,c_int
+       real(c_double),intent(inout)::state(*)
+       real(c_double),intent(in)::tau(*),weight(*)
+       integer(c_int),value::nc,ng,nd,choice
+       integer(c_int)::ierr
+     end function
      function ir_transport(energy,ghosts,neighbor,remote,blocked,density,direction,sigma,transported, &
-          transmit,loss,response,nc,ng,nd,nghost,cdt,ratio,choice) bind(C,name='snrt_ir_transport_c') result(ierr)
+          transmit,loss,response,nc,ng,nd,nghost,cdt,ratio,choice,cell_sigma) bind(C,name='snrt_ir_transport_c') result(ierr)
        import c_double,c_int
        real(c_double),intent(in)::energy(*),ghosts(*),density(*),direction(*),sigma(*)
        integer(c_int),intent(in)::neighbor(*),remote(*),blocked(*)
        real(c_double)::transported(*),transmit(*),loss(*),response(*)
-       integer(c_int),value::nc,ng,nd,nghost,choice
+       integer(c_int),value::nc,ng,nd,nghost,choice,cell_sigma
        real(c_double),value::cdt,ratio
        integer(c_int)::ierr
      end function
@@ -160,12 +168,13 @@ contains
     material=output(2,:);temperature=output(3,:);transfer=output(4,:)
   end subroutine
 
-  subroutine snrt_runtime_isotropic_scatter(state,weight,density,sigma,cdt,ierr)
+  subroutine snrt_runtime_isotropic_scatter(state,weight,density,sigma,cdt,ierr,cell_sigma)
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     real(c_float),intent(inout),contiguous::state(:,:,:)
     real(c_double),intent(in)::weight(:),density(:),sigma(:),cdt
     integer,intent(out)::ierr
     real(c_double),allocatable::tau(:,:)
+    real(c_double),optional,intent(in)::cell_sigma(:,:)
     integer::nc,ng,nd,g,allocation_status
     ! Initialization belongs to the collective startup, never a local subset.
     ierr=7
@@ -176,6 +185,10 @@ contains
     if(.not.ieee_is_finite(cdt).or.cdt<0)return
     if(any(.not.ieee_is_finite(density)).or.any(density<0))return
     if(any(.not.ieee_is_finite(sigma)).or.any(sigma<0))return
+    if(present(cell_sigma))then
+       if(any(shape(cell_sigma)/=[ng,nc]))return
+       if(any(.not.ieee_is_finite(cell_sigma)).or.any(cell_sigma<0))return
+    endif
     ierr=0
     if(nc==0)return
     allocate(tau(nc,ng),stat=allocation_status)
@@ -185,26 +198,69 @@ contains
     endif
     do g=1,ng
        tau(:,g)=density*sigma(g)*cdt
+       if(present(cell_sigma))tau(:,g)=density*cell_sigma(g,:)*cdt
     enddo
     ! The C++ batch transaction publishes only after every CPU/GPU batch passes.
     ierr=int(isotropic_scatter(state,tau,weight,int(nc,c_int),int(ng,c_int), &
          int(nd,c_int),int(mode,c_int)))
   end subroutine
 
+  subroutine snrt_runtime_ir_scatter(state,weight,density,cell_sigma,cdt,ierr)
+    real(c_double),intent(inout),contiguous::state(:,:,:)
+    real(c_double),intent(in)::weight(:),density(:),cell_sigma(:,:),cdt
+    integer,intent(out)::ierr
+    real(c_double),allocatable::tau(:,:)
+    integer::nc,ng,nd,g,allocation_status
+    ierr=7
+    if(.not.initialized.or.init_status/=0)return
+    ng=size(state,1);nd=size(state,2);nc=size(state,3)
+    if(nd/=size(weight).or.nc/=size(density))return
+    if(ng<1.or.nd<1.or.any(shape(cell_sigma)/=[ng,nc]))return
+    if(.not.ieee_is_finite(cdt).or.cdt<0)return
+    if(any(.not.ieee_is_finite(density)).or.any(density<0))return
+    if(any(.not.ieee_is_finite(cell_sigma)).or.any(cell_sigma<0))return
+    ierr=0
+    if(nc==0)return
+    allocate(tau(nc,ng),stat=allocation_status)
+    if(allocation_status/=0)then
+       ierr=7
+       return
+    endif
+    do g=1,ng
+       tau(:,g)=density*cell_sigma(g,:)*cdt
+    enddo
+    ierr=int(ir_scatter(state,tau,weight,int(nc,c_int),int(ng,c_int),int(nd,c_int),int(dust_mode,c_int)))
+  end subroutine
+
   subroutine snrt_runtime_ir_transport(energy,ghosts,neighbor,remote,blocked,density,direction,sigma, &
-       cdt,ratio,transported,transmit,loss,response,ierr)
+       cdt,ratio,transported,transmit,loss,response,ierr,cell_sigma)
     real(c_double),intent(in)::energy(:,:,:),ghosts(:,:,:),density(:),direction(:,:),sigma(:),cdt,ratio
     integer,intent(in)::neighbor(:,:),remote(:,:)
     logical,intent(in)::blocked(:,:)
     real(c_double),intent(out)::transported(:,:,:),transmit(:,:),loss(:,:),response(:,:)
     integer,intent(out)::ierr
     integer(c_int),allocatable::flags(:,:)
+    real(c_double),optional,intent(in)::cell_sigma(:,:)
+    real(c_double),allocatable::alpha(:,:)
+    integer::g
     ierr=7
     if(.not.initialized.or.init_status/=0)return
     flags=merge(1_c_int,0_c_int,blocked)
+    if(present(cell_sigma))then
+       if(any(shape(cell_sigma)/=[size(sigma),size(density)]))return
+       if(any(.not.ieee_is_finite(cell_sigma)).or.any(cell_sigma<0))return
+       allocate(alpha(size(sigma),size(density)))
+       do g=1,size(sigma)
+          alpha(g,:)=cell_sigma(g,:)*density
+       enddo
+       ierr=int(ir_transport(energy,ghosts,int(neighbor,c_int),int(remote,c_int),flags,alpha,direction,sigma, &
+            transported,transmit,loss,response,int(size(density),c_int),int(size(energy,1),c_int), &
+            int(size(energy,2),c_int),int(size(ghosts,3),c_int),cdt,ratio,int(dust_mode,c_int),1_c_int))
+       return
+    endif
     ierr=int(ir_transport(energy,ghosts,int(neighbor,c_int),int(remote,c_int),flags,density,direction,sigma, &
          transported,transmit,loss,response,int(size(density),c_int),int(size(energy,1),c_int), &
-         int(size(energy,2),c_int),int(size(ghosts,3),c_int),cdt,ratio,int(dust_mode,c_int)))
+         int(size(energy,2),c_int),int(size(ghosts,3),c_int),cdt,ratio,int(dust_mode,c_int),0_c_int))
   end subroutine
 
   subroutine snrt_runtime_ir_absorb(transported,transmit,loss,response,rate,weight,dt,sum_w,candidate,absorbed,ierr)
@@ -355,7 +411,7 @@ contains
 
   subroutine snrt_runtime_dust_material(heating,density,old_energy,capacity,log_t,power,band, &
        material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr, &
-       gas_energy,gas_capacity,conductance,gas_transfer)
+       gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,basis_power,basis_band)
     real(c_double),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
     real(c_double),intent(in)::material_u(:),dt,background,bath,tolerance
     logical,intent(in)::use_u
@@ -363,8 +419,10 @@ contains
     integer,intent(out)::ierr
     real(c_double),optional,intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
     real(c_double),optional,intent(out)::gas_transfer(:)
+    real(c_double),optional,intent(in)::cell_material_u(:,:)
+    real(c_double),optional,intent(in)::cell_weights(:,:),basis_power(:,:),basis_band(:,:,:)
     real(c_double),allocatable::input(:),coefficients(:),output(:)
-    integer::nc,ng,nt,choice,extra,material_mode
+    integer::nc,ng,nt,choice,extra,material_mode,s
     integer(c_long_long)::required,free
     ! Initialization is collective and belongs to read_params, NOT a subset
     ! of ranks that happens to have local dust cells at this AMR level.
@@ -381,8 +439,31 @@ contains
     else if(present(gas_capacity).or.present(conductance).or.present(gas_transfer))then
        return
     endif
+    if(present(cell_material_u))then
+       if(.not.use_u.or.any(shape(cell_material_u)/=[nt,nc]))return
+       if(any(.not.ieee_is_finite(cell_material_u)).or.any(cell_material_u<=0))return
+       if(any(cell_material_u(2:,:)<=cell_material_u(:nt-1,:)))return
+       material_mode=material_mode+4
+    endif
     required=8_c_long_long*((int(ng,c_long_long)+6)*nc+(int(ng,c_long_long)+3)*nt)+16777216_c_long_long
     required=required+32_c_long_long*extra*nc
+    if(present(cell_material_u))required=required+8_c_long_long*nt*nc
+    if(present(cell_weights))then
+       if(.not.present(basis_power).or..not.present(basis_band).or..not.use_u.or.nt>256)return
+       if(any(shape(cell_weights)/=[4,nc]).or.any(shape(basis_power)/=[nt,4]))return
+       if(any(shape(basis_band)/=[ng,nt,4]))return
+       if(any(.not.ieee_is_finite(cell_weights)).or.any(cell_weights<0))return
+       if(any(abs(sum(cell_weights,dim=1)-1)>1d-12))return
+       if(any(.not.ieee_is_finite(basis_power)).or.any(basis_power<=0))return
+       if(any(basis_power(2:,:)<=basis_power(:nt-1,:)))return
+       if(any(.not.ieee_is_finite(basis_band)).or.any(basis_band<0))return
+       if(any(basis_band(:,2:,:)<basis_band(:,:nt-1,:)))return
+       if(any(abs(sum(basis_band,dim=1)-basis_power)>1d-12*basis_power))return
+       material_mode=material_mode+8
+       required=required+8_c_long_long*(4_c_long_long*nc+4_c_long_long*(ng+1)*nt)
+    else if(present(basis_power).or.present(basis_band))then
+       return
+    endif
     choice=1
     if(dust_mode==2.and.gpu_ready)then
        free=free_bytes()
@@ -407,7 +488,14 @@ contains
     endif
     input=[heating,density,old_energy,capacity]
     if(extra==1)input=[input,gas_energy,gas_capacity,conductance]
+    if(present(cell_material_u))input=[input,reshape(transpose(cell_material_u),[nt*nc])]
+    if(present(cell_weights))input=[input,reshape(transpose(cell_weights),[4*nc])]
     coefficients=[log_t,power,material_u,reshape(band,[ng*nt])]
+    if(present(cell_weights))then
+       do s=1,4
+          coefficients=[coefficients,basis_power(:,s),reshape(basis_band(:,:,s),[ng*nt])]
+       enddo
+    endif
     allocate(output((ng+2+extra)*nc))
     if(choice==3)then
        ierr=int(hybrid_dust(input,coefficients,output,int(nc,c_int),int(ng,c_int),int(nt,c_int), &

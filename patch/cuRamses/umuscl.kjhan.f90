@@ -1148,6 +1148,7 @@ subroutine cmpflxm(qm,im1,im2,jm1,jm2,km1,km2, &
      &             qp,ip1,ip2,jp1,jp2,kp1,kp2, &
      &                ilo,ihi,jlo,jhi,klo,khi, ln,lt1,lt2, &
      &            flx,tmp,ngrid)
+  use dust_mass_physics, only: dust_composition_enabled,dust_two_size_enabled
   use amr_parameters
   use hydro_parameters
   use const
@@ -1238,6 +1239,20 @@ subroutine cmpflxm(qm,im1,im2,jm1,jm2,km1,km2, &
               stop
            end if
            
+           ! Aggregate dust is a dependent sum, not a third independently
+           ! slope-limited carrier. Share the species face flux exactly so
+           ! conservative advection cannot separate D from C+silicate.
+           if(dust_composition_enabled())then
+              if(dust_two_size_enabled())then
+                 do l=1,ngrid
+                    fgdnv(l,idust_species)=fgdnv(l,idust_bins)+fgdnv(l,idust_bins+1)
+                    fgdnv(l,idust_species+1)=fgdnv(l,idust_bins+2)+fgdnv(l,idust_bins+3)
+                 enddo
+              endif
+              do l=1,ngrid
+                 fgdnv(l,idust)=fgdnv(l,idust_species)+fgdnv(l,idust_species+1)
+              enddo
+           endif
            ! Compute fluxes
            
            ! Mass density

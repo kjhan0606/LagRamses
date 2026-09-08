@@ -90,11 +90,38 @@ def comparison_workspace():
         cr_binary.parent.mkdir()
         cr_binary.write_text('not executable: setup-only\n')
         (cr_binary.parent/'ramses_dust_mass3d').write_text('not executable: setup-only\n')
+        (cr_binary.parent/'ramses_dust_composition_zero_uv3d').write_text('not executable: setup-only\n')
+        (cr_binary.parent/'ramses_dust_cie3d').write_text('not executable: setup-only\n')
+        (cr_binary.parent/'ramses_dust_sizes3d').write_text('not executable: setup-only\n')
+        (cr_binary.parent/'ramses_dust_composition_material3d').write_text('not executable: setup-only\n')
+        (cr_binary.parent/'ramses_dust_d03_live3d').write_text('not executable: setup-only\n')
         with mock.patch.object(mkrun, 'HERE', str(root)):
             yield root
 
 
 class WizardTests(unittest.TestCase):
+    def test_d03_live_optics_selection(self):
+        with comparison_workspace() as root:
+            _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'wss09_cie',
+                'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1'})
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn("dust_optics_model='d03_transport_v1'",text)
+            self.assertIn('dust_size_radius_cm=1d-6,1d-5',text)
+            self.assertIn('dust_size_density=2.2d0,3.8d0',text)
+            self.assertIn('ramses_dust_d03_live3d',files[str(root/'fresh/README.txt')])
+            self.assertIn('D03 IR transport scattering is enabled.',files[str(root/'fresh/README.txt')])
+            self.assertNotIn('IR scattering omitted',files[str(root/'fresh/README.txt')])
+            self.assertIn('dust_dl01_bulk_030_scattering_reference_v4.nml',files[str(root/'fresh/myrun.env.sh')])
+            raw,_=mkrun.rng.parse_namelist(text);values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            for bad in ({'dust_size_radius_cm':'5e-7,1e-5'},{'dust_size_density':'2.2,3.3'},
+                        {'dust_material_model':'fixed_mix'},{'dust_mass_enabled':False},
+                        {'dust_optics_model':'typo'}):
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**bad))))
+
     def test_dust_mass_profile_binds_binary_and_source(self):
         with comparison_workspace() as root:
             _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
@@ -112,6 +139,54 @@ class WizardTests(unittest.TestCase):
             self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
             for bad in ({'cooling':True},{'sink':True},{'dust_condensation':'0.,1.2,.1'},
                         {'dust_grain_radius_cm':0},{'cosmo':True}):
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**bad))))
+        with comparison_workspace() as root:
+            _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_v1',
+                'Dust cooling closure':'depleted_scalar'})
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn("dust_mass_model='carbon_olivine_v1'",text)
+            self.assertIn('var_region(1,17)=0d0',text)
+            self.assertIn('cooling=.true.',text)
+            self.assertIn('ramses_dust_composition_zero_uv3d',files[str(root/'fresh/README.txt')])
+            raw,_=mkrun.rng.parse_namelist(text);values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            for bad in ({'haardt_madau':True},{'dust_cooling':'none'},{'cooling_method':'eunha'},
+                        {'gpu_hydro':True},{'dust_mass_enabled':False}):
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**bad))))
+        with comparison_workspace() as root:
+            _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_v1','Dust cooling closure':'wss09_cie'})
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn("dust_cooling='wss09_cie'",text)
+            self.assertIn('ramses_dust_cie3d',files[str(root/'fresh/README.txt')])
+            raw,_=mkrun.rng.parse_namelist(text);values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            values['dust_mass_model']='bulk_v1'
+            self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+        with comparison_workspace() as root:
+            _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'wss09_cie',
+                'Dust material model':'dl01_composition_v1',
+                'Enable energy-equivalent ambient SN dust destruction (uncalibrated comparison)?':True})
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn("dust_mass_model='carbon_olivine_2size_v1'",text)
+            self.assertIn('var_region(1,21)=0d0',text)
+            self.assertIn('var_region(1,24)=0d0',text)
+            self.assertIn('dust_sn_shocks=.true.',text)
+            self.assertIn('ramses_dust_composition_material3d',files[str(root/'fresh/README.txt')])
+            self.assertIn("dust_material_model='dl01_composition_v1'",text)
+            raw,_=mkrun.rng.parse_namelist(text);values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            for bad in ({'dust_size_radius_cm':'1e-5,5e-7'}, {'dust_size_density':'0,3.3'},
+                        {'dust_small_injection_fraction':'0,1.1'}, {'gpu_hydro':True},
+                        {'dust_mass_model':'carbon_olivine_v1'}):
                 self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**bad))))
 
     def test_cosmic_ray_namelist_and_rejected_combinations(self):

@@ -11,7 +11,7 @@
 // reference loops and all domain/interface/energy-balance reductions.
 IR_HD inline int snrt_ir_transport_cell(const double *q,const double *rho,const int *blocked,
     const double *direction,const double *sigma,double *out,int n,int ng,int nd,
-    double cdt,double ratio,int i) {
+    double cdt,double ratio,int i,int cell_sigma=0) {
   const size_t rays=size_t(ng)*nd,total=rays*n,groups=size_t(ng)*n;
   for(int d=0;d<nd;++d)for(int g=0;g<ng;++g) {
     const size_t ray=size_t(d)*ng+g;
@@ -28,7 +28,7 @@ IR_HD inline int snrt_ir_transport_cell(const double *q,const double *rho,const 
     out[size_t(i)*rays+ray]=value;
   }
   for(int g=0;g<ng;++g) {
-    const double tau=cdt*sigma[g]*rho[i];
+    const double tau=cell_sigma?cdt*rho[size_t(i)*ng+g]:cdt*sigma[g]*rho[i];
     if(!isfinite(tau)||tau<0)return 2;
     const double transmit=exp(-tau);
     double loss,response;

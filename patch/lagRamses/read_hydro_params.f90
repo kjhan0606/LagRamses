@@ -9,7 +9,7 @@ subroutine read_hydro_params(nml_ok)
   use eunha_cooling_mod, only: eunha_load_multi_z
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: read_enrichment_namelist, &
-       stellar_feedback_mode, use_channel_resolved_feedback, default_imf_id, &
+       stellar_feedback_mode, use_channel_resolved_feedback, default_imf_id, active_element, &
        population_model_id, yield_source_basis_name, configured_imf_mass_min, &
        configured_imf_mass_max, configured_binary_fraction, stellar_fate_policy, &
        stellar_fate_map_sha256, stellar_fate_approval_id, production_fate_policy_supported, &
@@ -101,9 +101,12 @@ subroutine read_hydro_params(nml_ok)
        & ,bondi,mad_jet,eps_sn1,eps_sn2,tol                             &
        & ,sf_virial,sf_trelax,sf_model,sf_birth_properties &
        & ,cr_enabled,cr_transport,cr_sn_fraction,cr_snia_fraction,cr_sf_support &
-       & ,dust_mass_enabled,dust_growth,dust_sputtering,dust_condensation &
+       & ,dust_mass_enabled,dust_mass_model,dust_cooling,dust_growth,dust_sputtering,dust_condensation &
        & ,dust_grain_radius_cm,dust_grain_density,dust_sticking,dust_growth_max_temperature &
        & ,dust_metal_atom_mass,dust_injection_temperature &
+       & ,dust_size_radius_cm,dust_size_density,dust_small_injection_fraction,dust_coagulation,dust_shattering &
+       & ,dust_sn_shocks &
+       & ,dust_material_model,dust_optics_model &
        & ,cooling_method,grackle_table
 #ifdef grackle
   namelist/grackle_params/grackle_comoving_coordinates,grackle_with_radiative_cooling,grackle_primordial_chemistry &
@@ -287,18 +290,41 @@ subroutine read_hydro_params(nml_ok)
      dust_ok=.false.
 #else
      if(.not.use_channel_resolved_feedback())dust_ok=.false.
+     if(dust_composition_enabled().and..not.all(active_element))dust_ok=.false.
 #endif
      if(.not.hydro.or..not.metal.or.cosmo.or.nboundary>0) dust_ok=.false.
      ! Total-metal reservoir closure; no element-resolved depleted cooling or sink removal yet.
-     if(sink.or.sink_AGN.or.agn.or.cooling.or.neq_chem.or.delayed_cooling) dust_ok=.false.
+     if(sink.or.sink_AGN.or.agn.or.neq_chem.or.delayed_cooling) dust_ok=.false.
+     if(cooling.neqv.(trim(dust_cooling)/='none'))dust_ok=.false.
+     if(trim(dust_cooling)/='none')then
+        ! Explicit collisional scalar-Z comparison; no duplicate UV heating.
+        if(trim(cooling_method)/='original'.or.haardt_madau.or.J21/=0.or.self_shielding) dust_ok=.false.
+#ifdef grackle
+        dust_ok=.false.
+#endif
+     endif
+     if(dust_composition_enabled().and.gpu_hydro)dust_ok=.false.
      if(trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))dust_ok=.false.
   endif
   if(.not.dust_ok)then
      if(myid==1)write(*,*)'ERROR: dust mass requires valid bulk parameters, SNRT/DUST_LIVE/HDF5 channel feedback,'
-     if(myid==1)write(*,*)'noncosmo periodic metal hydro; no sinks, external cooling/neq chemistry or delayed cooling'
+     if(myid==1)write(*,*)'noncosmo periodic metal hydro; no sinks/neq/delayed cooling; cooling needs an explicit dust closure'
      nml_ok=.false.
   else if(dust_mass_enabled.and.myid==1)then
-     write(*,*)'DUST_MASS_BULK_V1: condensation/growth/sputtering; fixed size/composition reference, total-metal budget'
+     write(*,*)'DUST_MASS model=',trim(dust_mass_model),'; condensation/growth/sputtering, total-metal budget'
+     if(dust_composition_enabled())write(*,*)'DUST_COMPOSITION C/MgFeSiO4: source-segment C/O'
+     if(dust_two_size_enabled())write(*,*)'DUST_SIZE: four masses; resolved-density coagulation/shattering'
+     if(dust_material_composition_enabled())write(*,*)'DUST_MATERIAL: local DL01 composition, common T, geometric size area'
+     if(dust_optics_enabled())then
+        write(*,*)'DUST_OPTICS: D03 four populations; primary/IR delta-isotropic Qsca*(1-g); common T'
+     else
+        write(*,*)'DUST_OPTICS: fixed reference mixture'
+     endif
+     if(dust_sn_shocks)write(*,*)'DUST_SHOCK: energy-equivalent unresolved SN comparison; fresh ejecta protected; not resolution-calibrated'
+     if(trim(dust_cooling)=='depleted_scalar') &
+          write(*,*)'DUST_COOLING depleted_scalar: solar-mixture curve at (total metal - dust)/rho, NOT element cooling'
+     if(trim(dust_cooling)=='wss09_cie') &
+          write(*,*)'DUST_COOLING WSS09_CIE: gas-phase H/He + nine metals; CIE comparison, NOT radiation-dependent NEQ'
   endif
   call cr_validate(nener,hydro,gpu_hydro,gamma_rad(1),cr_ok)
   if(cr_enabled)then
@@ -531,6 +557,33 @@ subroutine read_hydro_params(nml_ok)
   ! feedback path is disabled in a particular runtime namelist.
   idust=ichem+11
   idust_energy=idust+1
+  idust_species=-1
+  idust_bins=-1
+  idust_shock=-1;idust_fresh=-1
+  if(dust_composition_enabled())then
+     idust_species=idust_energy+1
+     if(nvar<idust_species+1)then
+        if(myid==1)write(*,*)'ERROR: dust composition requires NVAR >= ',idust_species+1
+        nml_ok=.false.
+     endif
+  endif
+  if(dust_two_size_enabled())then
+     idust_bins=idust_species+2
+     if(nvar<idust_bins+3)then
+        if(myid==1)write(*,*)'ERROR: two-size dust requires NVAR >= ',idust_bins+3
+        nml_ok=.false.
+     endif
+     if(dust_sn_shocks)then
+        idust_shock=idust_bins+4;idust_fresh=idust_shock+1
+        if(nvar<idust_fresh+1)then
+           if(myid==1)write(*,*)'ERROR: dust SN source transaction requires NVAR >= ',idust_fresh+1
+           nml_ok=.false.
+        else if(any(var_region(:,idust_shock-imetal+1:idust_fresh-imetal+2)/=0d0))then
+           if(myid==1)write(*,*)'ERROR: transient dust SN/fresh IC fields must be zero'
+           nml_ok=.false.
+        endif
+     endif
+  endif
   if(.not.hydro)then
      if(myid==1)write(*,*) 'ERROR: DUST_LIVE requires hydro=.true.'
      nml_ok=.false.

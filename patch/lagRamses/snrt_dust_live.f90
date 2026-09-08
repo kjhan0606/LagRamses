@@ -5,7 +5,10 @@ module snrt_dust_live
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use snrt_dust_contract
   use snrt_dust_ir
+  use dust_mass_physics, only: dust_optics_enabled
+  use dust_composition_optics, only: d03_ng,d03_nir,d03_opacity_basis
   use snrt_runtime_backend, only: snrt_runtime_dust_material, snrt_runtime_ir_transport, snrt_runtime_ir_absorb
+  use snrt_runtime_backend, only: snrt_runtime_ir_scatter
   use snrt_state, only: snrt_ndirection, snrt_nslot, snrt_state_get_slot
   use amr_commons, only: ngridmax,ncoarse,ncpu,myid,headl,next,son
   use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
@@ -19,6 +22,7 @@ module snrt_dust_live
   implicit none
   private
   real(dust_dp), allocatable, save :: radiation(:,:,:)
+  real(dust_dp), allocatable, save :: scattering_basis(:,:)
   type(dust_ir_table), save :: table
   logical, save :: initialized=.false.
   type, public :: dust_live_coarse_trial
@@ -32,15 +36,24 @@ contains
     integer, intent(out) :: ierr
     integer :: ng, nt, old, capacity
     real(dust_dp), allocatable :: expanded(:,:,:)
+    real(dust_dp),allocatable::basis(:,:)
+    real(dust_dp)::pa(d03_ng,4),ps(d03_ng,4),pg(d03_ng,4),ia(d03_nir,4),isc(d03_nir,4),ig(d03_nir,4)
     ierr=dust_err_config
     if(snrt_dust_contract_version<3.or..not.snrt_dust_contract_runtime_allowed)return
     ng=snrt_dust_contract_number_ir; nt=snrt_dust_contract_number_temperature
     if(.not.initialized)then
+       if(dust_optics_enabled())then
+          if(ng/=d03_nir)return
+          call d03_opacity_basis(snrt_dust_contract_mass_per_h_g,pa,ps,pg,ia,isc,ig,ierr)
+          if(ierr/=0)return
+          basis=ia
+          scattering_basis=isc-ig
+       endif
        if(snrt_dust_contract_version==4)then
           call snrt_dust_ir_initialize(table,snrt_dust_contract_ir_energy_ev(1:ng), &
                snrt_dust_contract_ir_weight_ev(1:ng),snrt_dust_contract_ir_absorption_per_h_cm2(1:ng), &
                snrt_dust_contract_temperature_k(1:nt),snrt_dust_contract_ir_background_k,ierr, &
-               snrt_dust_contract_internal_energy_per_h_erg(1:nt))
+               snrt_dust_contract_internal_energy_per_h_erg(1:nt),optical_sigma=basis)
        else
        call snrt_dust_ir_initialize(table,snrt_dust_contract_ir_energy_ev(1:ng), &
             snrt_dust_contract_ir_weight_ev(1:ng),snrt_dust_contract_ir_absorption_per_h_cm2(1:ng), &
@@ -68,7 +81,7 @@ contains
 
   subroutine snrt_dust_live_stage(ilevel,cells,slots,neighbors,directions,weights,dx,dt,chat, &
        density,primary_energy,old_energy,capacity,trial,material,temperature,diagnostics,ierr,coarse, &
-       gas_energy,gas_capacity,n_hydrogen,gas_transfer)
+       gas_energy,gas_capacity,n_hydrogen,gas_transfer,cell_material_u,cell_collision_area,cell_weights)
     integer, intent(in) :: ilevel,cells(:),slots(:),neighbors(:,:)
     real(dust_dp), intent(in) :: directions(:,:),weights(:),dx,dt,chat
     real(dust_dp), intent(in) :: density(:),primary_energy(:),old_energy(:),capacity(:)
@@ -79,7 +92,10 @@ contains
     type(dust_live_coarse_trial), intent(out) :: coarse
     real(dust_dp),optional,intent(in)::gas_energy(:),gas_capacity(:),n_hydrogen(:)
     real(dust_dp),optional,intent(out)::gas_transfer(:)
+    real(dust_dp),optional,intent(in)::cell_material_u(:,:),cell_collision_area(:)
+    real(dust_dp),optional,intent(in)::cell_weights(:,:)
     real(dust_dp),allocatable::gas_work(:),conductance(:),exchange(:),exchange_sum(:)
+    real(dust_dp),allocatable::scatter_sigma(:,:)
     real(dust_dp),parameter::kb=1.380649d-16,mp=1.67262192369d-24
     real(dust_dp), allocatable :: photons(:,:),ghosts(:,:,:),field(:)
     real(dust_dp), allocatable :: halo_field(:,:)
@@ -95,6 +111,7 @@ contains
     if(ierr==dust_ok)call validate_stage()
     call collective_error(ierr)
     if(ierr/=dust_ok)return
+    if(present(cell_weights))scatter_sigma=matmul(scattering_basis,cell_weights)
 #ifndef WITHOUTMPI
     call MPI_ALLREDUCE(nsub,global_nsub,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
     if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,info,k)
@@ -241,18 +258,26 @@ contains
        if(present(gas_energy))then
        conductance=2*kb*n_hydrogen*density*snrt_dust_contract_collision_area_per_h* &
             snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
+       if(present(cell_collision_area))conductance=2*kb*n_hydrogen*density*cell_collision_area* &
+            snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
             ghosts,remote,blocked,material_dispatch=snrt_runtime_dust_material, &
             transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
-            gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange)
+            gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange, &
+            cell_material_u=cell_material_u,cell_weights=cell_weights)
        if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
        else
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
             ghosts,remote,blocked,material_dispatch=snrt_runtime_dust_material, &
-            transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb)
+            transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
+            cell_material_u=cell_material_u,cell_weights=cell_weights)
        endif
+       ! Conservative delta-isotropic angular relaxation, Lie-split after
+       ! absorption/emission. No scattering energy is given to the material.
+       if(ierr==dust_ok.and.size(slots)>0.and.allocated(scatter_sigma)) &
+            call snrt_runtime_ir_scatter(trial,weights,density,scatter_sigma,chat*step_dt,ierr)
        if(ierr/=dust_ok.and.size(slots)>0)then
           write(*,'(A,3I6,A,2ES25.16,A,ES14.5)')' SNRT IR rejected state rank/level/error=',myid,ilevel,ierr, &
                ' material_T_range=',minval(material/capacity),maxval(material/capacity), &
@@ -279,6 +304,19 @@ contains
   contains
     subroutine validate_stage()
       ierr=dust_err_shape
+      if(present(cell_weights).neqv.dust_optics_enabled())return
+      if(present(cell_weights))then
+         if(any(shape(cell_weights)/=[4,size(slots)]))return
+         if(any(.not.ieee_is_finite(cell_weights)).or.any(cell_weights<0))return
+         if(any(abs(sum(cell_weights,dim=1)-1d0)>1d-12))return
+      endif
+      if(present(cell_material_u).neqv.present(cell_collision_area))return
+      if(present(cell_material_u))then
+         if(any(shape(cell_material_u)/=[snrt_dust_contract_number_temperature,size(slots)]))return
+         if(size(cell_collision_area)/=size(slots))return
+         if(any(.not.ieee_is_finite(cell_collision_area)).or.any(cell_collision_area<0))return
+         if(any(.not.ieee_is_finite(cell_material_u)).or.any(cell_material_u<=0))return
+      endif
       if(snrt_dust_contract_exchange_enabled.neqv.present(gas_energy))return
       if(present(gas_energy))then
          if(.not.present(gas_capacity).or..not.present(n_hydrogen).or..not.present(gas_transfer))return

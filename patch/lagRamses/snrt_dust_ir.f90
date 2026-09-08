@@ -19,6 +19,7 @@ module snrt_dust_ir
      ! Vibrational internal energy per reference H, excluding zero-point
      ! energy. Interpolate U linearly in log(T), with no extrapolation.
      real(real64), allocatable :: material_u(:)
+     real(real64), allocatable :: optical_sigma(:,:),optical_power(:,:),optical_band(:,:,:)
   end type
   type, public :: dust_ir_diagnostics
      real(real64) :: escaped_erg=0, absorbed_erg=0, primary_erg=0
@@ -31,13 +32,14 @@ module snrt_dust_ir
   public :: snrt_dust_ir_initialize, snrt_dust_ir_advance, snrt_dust_material_temperature
   abstract interface
      subroutine dust_transport_dispatch(energy,ghosts,neighbor,remote,blocked,density,direction,sigma, &
-          cdt,ratio,transported,transmit,loss,response,ierr)
+          cdt,ratio,transported,transmit,loss,response,ierr,cell_sigma)
        import real64
        real(real64),intent(in)::energy(:,:,:),ghosts(:,:,:),density(:),direction(:,:),sigma(:),cdt,ratio
        integer,intent(in)::neighbor(:,:),remote(:,:)
        logical,intent(in)::blocked(:,:)
        real(real64),intent(out)::transported(:,:,:),transmit(:,:),loss(:,:),response(:,:)
        integer,intent(out)::ierr
+       real(real64),optional,intent(in)::cell_sigma(:,:)
      end subroutine
      subroutine dust_absorb_dispatch(transported,transmit,loss,response,rate,weight,dt,sum_w,candidate,absorbed,ierr)
        import real64
@@ -47,7 +49,7 @@ module snrt_dust_ir
      end subroutine
      subroutine dust_material_dispatch(heating,density,old_energy,capacity,log_t,power,band, &
           material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr, &
-          gas_energy,gas_capacity,conductance,gas_transfer)
+          gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,basis_power,basis_band)
        import real64
        real(real64),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
        real(real64),intent(in)::material_u(:),dt,background,bath,tolerance
@@ -56,15 +58,20 @@ module snrt_dust_ir
        integer,intent(out)::ierr
        real(real64),optional,intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
        real(real64),optional,intent(out)::gas_transfer(:)
+       real(real64),optional,intent(in)::cell_material_u(:,:)
+       real(real64),optional,intent(in)::cell_weights(:,:),basis_power(:,:),basis_band(:,:,:)
      end subroutine
   end interface
 contains
-  subroutine snrt_dust_ir_initialize(table, energy, frequency_weight, sigma, temperature, cmb, ierr, material_u)
+  recursive subroutine snrt_dust_ir_initialize(table, energy, frequency_weight, sigma, temperature, cmb, &
+       ierr, material_u, optical_sigma)
     type(dust_ir_table), intent(out) :: table
     real(real64), intent(in) :: energy(:), frequency_weight(:), sigma(:), temperature(:), cmb
     integer, intent(out) :: ierr
     real(real64), optional, intent(in) :: material_u(:)
-    integer :: ng, nt, g, t, bath
+    real(real64),optional,intent(in)::optical_sigma(:,:)
+    type(dust_ir_table)::part
+    integer :: ng, nt, g, t, bath,s
     real(real64) :: x, occupation, factor
     real(real64), parameter :: h=6.62607015d-27, kb_ev=8.617333262145d-5
     ierr=dust_err_table
@@ -107,6 +114,16 @@ contains
     if (any(table%band(:,2:)<table%band(:,:nt-1))) return
     table%background=table%power(bath)
     table%background_temperature=cmb
+    if(present(optical_sigma))then
+       if(any(shape(optical_sigma)/=[ng,4]))return
+       allocate(table%optical_sigma(ng,4),table%optical_power(nt,4),table%optical_band(ng,nt,4))
+       table%optical_sigma=optical_sigma
+       do s=1,4
+          call snrt_dust_ir_initialize(part,energy,frequency_weight,optical_sigma(:,s),temperature,cmb,ierr,material_u)
+          if(ierr/=dust_ok)return
+          table%optical_power(:,s)=part%power;table%optical_band(:,:,s)=part%band
+       enddo
+    endif
     table%ready=.true.
     ierr=dust_ok
   end subroutine
@@ -137,9 +154,10 @@ contains
     ierr=dust_ok
   end subroutine
 
-  real(real64) function material_energy(table,temperature,density,capacity) result(energy)
+  real(real64) function material_energy(table,temperature,density,capacity,cell_u) result(energy)
     type(dust_ir_table), intent(in) :: table
     real(real64), intent(in) :: temperature,density,capacity
+    real(real64),optional,intent(in)::cell_u(:)
     integer :: k,n
     real(real64) :: log_t,fraction
     if(.not.allocated(table%material_u))then
@@ -153,6 +171,7 @@ contains
     enddo
     fraction=max(0d0,min(1d0,(log_t-table%log_t(k))/(table%log_t(k+1)-table%log_t(k))))
     energy=density*(table%material_u(k)+fraction*(table%material_u(k+1)-table%material_u(k)))
+    if(present(cell_u))energy=density*(cell_u(k)+fraction*(cell_u(k+1)-cell_u(k)))
   end function
 
   subroutine emission(table, heating, density, rate, temperature, ierr)
@@ -267,7 +286,7 @@ contains
   subroutine snrt_dust_ir_advance(table, direction, weight, neighbor, dx, dt, c_hat, density, primary, &
        energy, temperature, photons, diagnostics, ierr, tolerance, max_iterations, dust_energy, heat_capacity, &
        ghost_energy,ghost_index,blocked_face,material_dispatch,transport_dispatch,absorb_dispatch, &
-       gas_energy,gas_capacity,conductance,gas_transfer)
+       gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -297,6 +316,9 @@ contains
     real(real64),optional,intent(inout)::gas_energy(:)
     real(real64),optional,intent(in)::gas_capacity(:),conductance(:)
     real(real64),optional,intent(inout)::gas_transfer(:)
+    real(real64),optional,intent(in)::cell_material_u(:,:)
+    real(real64),optional,intent(in)::cell_weights(:,:)
+    real(real64),allocatable::cell_sigma(:,:)
     real(real64),allocatable::exchange(:)
     real(real64),allocatable :: empty_ghost(:,:,:)
     real(real64),allocatable :: dispatch_u(:)
@@ -319,6 +341,20 @@ contains
     if(transient.neqv.present(heat_capacity))return
     if(present(ghost_energy).neqv.present(ghost_index))return
     ng=size(table%energy); nd=size(weight); nc=size(density)
+    if(present(cell_weights).neqv.allocated(table%optical_sigma))return
+    if(present(cell_weights))then
+       if(.not.transient.or..not.present(material_dispatch).or..not.present(cell_material_u))return
+       if(any(shape(cell_weights)/=[4,nc]))return
+       if(any(.not.ieee_is_finite(cell_weights)).or.any(cell_weights<0))return
+       if(any(abs(sum(cell_weights,dim=1)-1)>1d-12))return
+       cell_sigma=matmul(table%optical_sigma,cell_weights)
+    endif
+    if(present(cell_material_u))then
+       if(.not.transient.or..not.present(material_dispatch).or..not.allocated(table%material_u))return
+       if(any(shape(cell_material_u)/=[size(table%log_t),nc]))return
+       if(any(.not.ieee_is_finite(cell_material_u)).or.any(cell_material_u<=0))return
+       if(any(cell_material_u(2:,:)<=cell_material_u(:size(table%log_t)-1,:)))return
+    endif
     if(present(gas_energy))then
        if(.not.transient.or..not.present(material_dispatch).or..not.allocated(table%material_u))return
        if(.not.present(gas_capacity).or..not.present(conductance).or..not.present(gas_transfer))return
@@ -359,6 +395,13 @@ contains
        if(any(dust_energy<0).or.any(heat_capacity<=0))return
        do i=1,nc
           if(density(i)<=0)cycle
+          if(present(cell_material_u))then
+             if(dust_energy(i)<material_energy(table,table%background_temperature,density(i),heat_capacity(i), &
+                  cell_material_u(:,i))*(1-material_tolerance).or.dust_energy(i)> &
+                  material_energy(table,exp(table%log_t(size(table%log_t))),density(i),heat_capacity(i), &
+                  cell_material_u(:,i))*(1+64*epsilon(1d0)))return
+             cycle
+          endif
           if(dust_energy(i)<material_energy(table,table%background_temperature,density(i),heat_capacity(i)) &
                *(1-material_tolerance).or.dust_energy(i)> &
                material_energy(table,exp(table%log_t(size(table%log_t))),density(i),heat_capacity(i)) &
@@ -402,11 +445,11 @@ contains
     if(present(transport_dispatch))then
        if(present(ghost_energy))then
           call transport_dispatch(energy,ghost_energy,neighbor,remote,blocked,density,direction,table%sigma, &
-               c_hat*dt,c_hat*dt/dx,transported,transmit,loss,response,ierr)
+               c_hat*dt,c_hat*dt/dx,transported,transmit,loss,response,ierr,cell_sigma)
        else
           allocate(empty_ghost(ng,nd,0))
           call transport_dispatch(energy,empty_ghost,neighbor,remote,blocked,density,direction,table%sigma, &
-               c_hat*dt,c_hat*dt/dx,transported,transmit,loss,response,ierr)
+               c_hat*dt,c_hat*dt/dx,transported,transmit,loss,response,ierr,cell_sigma)
        endif
        if(ierr/=dust_ok)return
     endif
@@ -445,6 +488,7 @@ contains
        do g=1,ng
           if(present(transport_dispatch))exit
           tau=c_hat*dt*table%sigma(g)*density(i)
+          if(allocated(cell_sigma))tau=c_hat*dt*cell_sigma(g,i)*density(i)
           if (.not.ieee_is_finite(tau)) return
           transmit(g,i)=exp(-tau)
           if (tau<1d-4) then
@@ -472,11 +516,14 @@ contains
              call material_dispatch(primary+guess/dt,density,dust_energy,heat_capacity,table%log_t, &
                   table%power,table%band,dispatch_u,allocated(table%material_u),dt,table%background, &
                   table%background_temperature,material_tolerance,rate,next_t,trial_dust_energy,ierr, &
-                  gas_energy,gas_capacity,conductance,exchange)
+                  gas_energy,gas_capacity,conductance,exchange,cell_material_u,cell_weights, &
+                  table%optical_power,table%optical_band)
              else
              call material_dispatch(primary+guess/dt,density,dust_energy,heat_capacity,table%log_t, &
                   table%power,table%band,dispatch_u,allocated(table%material_u),dt,table%background, &
-                  table%background_temperature,material_tolerance,rate,next_t,trial_dust_energy,ierr)
+                  table%background_temperature,material_tolerance,rate,next_t,trial_dust_energy,ierr, &
+                  cell_material_u=cell_material_u,cell_weights=cell_weights, &
+                  basis_power=table%optical_power,basis_band=table%optical_band)
              endif
           else
              call transient_emission(table,primary+guess/dt,density,dt,dust_energy,heat_capacity, &

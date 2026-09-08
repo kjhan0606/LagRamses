@@ -10,11 +10,12 @@
 // Same FP64 scalar material solve on both processors. The Fortran solver
 // remains the no-exchange independent reference. No persistent writes.
 DUST_HD inline double dust_material_u(const double *a,int nt,int use_u,
-    double temperature,double density,double capacity) {
+    double temperature,double density,double capacity,const double *cell_u=nullptr,int stride=1) {
   if(!use_u) return capacity*temperature;
   const double x=log(temperature); int k=0;
   while(k<nt-2 && x>a[k+1]) ++k;
   const double w=fmax(0.,fmin(1.,(x-a[k])/(a[k+1]-a[k])));
+  if(cell_u)return density*(cell_u[k*stride]+w*(cell_u[(k+1)*stride]-cell_u[k*stride]));
   return density*(a[2*nt+k]+w*(a[2*nt+k+1]-a[2*nt+k]));
 }
 
@@ -54,10 +55,33 @@ DUST_HD inline double dust_gas_transfer(double gas,double cv,double kd,double td
 
 DUST_HD inline int dust_material_cell(const double *input,const double *a,double *out,
     int nc,int ng,int nt,int use_u,double dt,double background,double bath,double tolerance,int i) {
+  // Bit 2: cell U(T); bit 3: four optical weights and shared emissivity bases.
+  const int fields=(use_u%4)>=2?7:4;
+  const double *cell_u=(use_u&4)?input+size_t(fields)*nc+i:nullptr;
+  const double *mix=(use_u&8)?input+size_t(fields+((use_u&4)?nt:0))*nc+i:nullptr;
+  use_u%=4;
   const double heating=input[i],density=input[nc+i],old=input[2*nc+i],capacity=input[3*nc+i];
   if(!isfinite(heating)||!isfinite(density)||!isfinite(old)||!isfinite(capacity)||
       heating<0||density<0||old<0||capacity<=0) return 2;
   const double *p=a+nt,*band=a+3*nt;
+  double local_power[256],fractions[4];
+  const double *bases=a+size_t(ng+3)*nt;
+  if(mix) {
+    if(nt>256)return 7;
+    double sum=0;
+    for(int s=0;s<4;++s){fractions[s]=mix[size_t(s)*nc];sum+=fractions[s];
+      if(!isfinite(fractions[s])||fractions[s]<0)return 2;}
+    if(fabs(sum-1)>1e-12)return 2;
+    for(int t=0;t<nt;++t) {
+      local_power[t]=0;
+      for(int s=0;s<4;++s)local_power[t]+=fractions[s]*bases[size_t(s)*(ng+1)*nt+t];
+      if(!isfinite(local_power[t])||local_power[t]<=0)return 2;
+      if(t&&local_power[t]<=local_power[t-1])return 2;
+    }
+    p=local_power;
+    int k=0;const double x=log(bath);while(k<nt-2&&x>a[k+1])++k;
+    background=p[k]+(x-a[k])/(a[k+1]-a[k])*(p[k+1]-p[k]);
+  }
   // Modes 2/3 share gas ABI; 2 freezes K, 3 solves its thermal speed.
   double gas=0,gas_cv=0,ratio=0,kd=0;
   if(use_u>=2) {
@@ -77,8 +101,8 @@ DUST_HD inline int dust_material_cell(const double *input,const double *a,double
     return 0;
   }
   const double target=old+dt*heating+ratio*gas;
-  const double floor=dust_material_u(a,nt,use_u,bath,density,capacity);
-  const double top=dust_material_u(a,nt,use_u,exp(a[nt-1]),density,capacity);
+  const double floor=dust_material_u(a,nt,use_u,bath,density,capacity,cell_u,nc);
+  const double top=dust_material_u(a,nt,use_u,exp(a[nt-1]),density,capacity,cell_u,nc);
   const double qfloor=use_u==3?dust_gas_transfer(gas,gas_cv,kd,bath):0;
   const double qtop=use_u==3?dust_gas_transfer(gas,gas_cv,kd,exp(a[nt-1])):0;
   if(!isfinite(qfloor)||!isfinite(qtop))return 6;
@@ -93,7 +117,7 @@ DUST_HD inline int dust_material_cell(const double *input,const double *a,double
     const double temperature=exp(a[k]+w*(a[k+1]-a[k]));
     const double q=use_u==3?dust_gas_transfer(gas,gas_cv,kd,temperature):ratio*(gas-gas_cv*temperature);
     if(!isfinite(q))return 6;
-    const double residual=(dust_material_u(a,nt,use_u,temperature,density,capacity)-old)/dt+mid-heating-q/dt;
+    const double residual=(dust_material_u(a,nt,use_u,temperature,density,capacity,cell_u,nc)-old)/dt+mid-heating-q/dt;
     if(residual>0)upper=mid;else lower=mid;
   }
   const double emitted=lower+0.5*(upper-lower),increment=emitted/density;
@@ -102,7 +126,7 @@ DUST_HD inline int dust_material_cell(const double *input,const double *a,double
   const double w=(power-p[k])/(p[k+1]-p[k]);
   const double temperature=exp(a[k]+w*(a[k+1]-a[k]));
   out[size_t(ng)*nc+i]=temperature;
-  out[size_t(ng+1)*nc+i]=dust_material_u(a,nt,use_u,temperature,density,capacity);
+  out[size_t(ng+1)*nc+i]=dust_material_u(a,nt,use_u,temperature,density,capacity,cell_u,nc);
   if(use_u>=2) {
     const double q=use_u==3?dust_gas_transfer(gas,gas_cv,kd,temperature):ratio*(gas-gas_cv*temperature);
     if(!isfinite(q)||gas-q<0)return 5;
@@ -112,8 +136,17 @@ DUST_HD inline int dust_material_cell(const double *input,const double *a,double
   for(int t=0;t<nt-1;++t) {
     const double start=fmax(p[t]-background,0.),finish=fmax(p[t+1]-background,0.);
     const double width=fmax(fmin(increment,finish)-start,0.);
-    for(int g=0;g<ng;++g)
-      rate[g]+=width*(band[size_t(t+1)*ng+g]-band[size_t(t)*ng+g])/(p[t+1]-p[t])*density;
+    for(int g=0;g<ng;++g) {
+      double delta=band[size_t(t+1)*ng+g]-band[size_t(t)*ng+g];
+      if(mix) {
+        delta=0;
+        for(int s=0;s<4;++s) {
+          const double *b=bases+size_t(s)*(ng+1)*nt+nt;
+          delta+=fractions[s]*(b[size_t(t+1)*ng+g]-b[size_t(t)*ng+g]);
+        }
+      }
+      rate[g]+=width*delta/(p[t+1]-p[t])*density;
+    }
   }
   for(int g=0;g<ng;++g)if(!isfinite(rate[g])||rate[g]<0)return 2;
   return isfinite(temperature)&&isfinite(out[size_t(ng+1)*nc+i])?0:2;

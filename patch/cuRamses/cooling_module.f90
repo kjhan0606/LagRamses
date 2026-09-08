@@ -913,21 +913,24 @@ subroutine iterate(i_n,t_rad_spec,h_rad_spec,nbin_T,aexp)
      T2=10d0**table%T2(i_T)
      ! Compute cooling, heating and mean molecular weight
      call cmp_cooling(T2,nH,t_rad_spec,h_rad_spec,cool_tot,heat_tot,cool_com,heat_com,mu,aexp,n_spec)
-     table%cool(i_n,i_T)=log10(cool_tot)
-     table%heat(i_n,i_T)=log10(heat_tot)
-     table%cool_com(i_n,i_T)=log10(cool_com)
-     table%heat_com(i_n,i_T)=log10(heat_com)
+     ! A zero-background table has exactly zero photoheating. Represent
+     ! zero by the same negligible 1e-100 convention used for metal rates,
+     ! avoiding -Inf - (-Inf) derivatives without adding a physical UV floor.
+     table%cool(i_n,i_T)=log10(max(cool_tot,1d-100))
+     table%heat(i_n,i_T)=log10(max(heat_tot,1d-100))
+     table%cool_com(i_n,i_T)=log10(max(cool_com,1d-100))
+     table%heat_com(i_n,i_T)=log10(max(heat_com,1d-100))
      table%mu(i_n,i_T)=mu
      if (if_species_abundances)then
-        table%n_spec(i_n,i_T,1:6)=log10(n_spec(1:6))
+        table%n_spec(i_n,i_T,1:6)=log10(max(n_spec(1:6),1d-100))
      endif
      ! Compute cooling and heating derivatives
      T2_eps=10d0**(table%T2(i_T)+0.01d0)
      call cmp_cooling(T2_eps,nH,t_rad_spec,h_rad_spec,cool_tot_eps,heat_tot_eps,cool_com_eps,heat_com_eps,mu_eps,aexp,n_spec_eps)
-     table%cool_prime(i_n,i_T)=(log10(cool_tot_eps)-log10(cool_tot))/0.01
-     table%heat_prime(i_n,i_T)=(log10(heat_tot_eps)-log10(heat_tot))/0.01
-     table%cool_com_prime(i_n,i_T)=(log10(cool_com_eps)-log10(cool_com))/0.01
-     table%heat_com_prime(i_n,i_T)=(log10(heat_com_eps)-log10(heat_com))/0.01
+     table%cool_prime(i_n,i_T)=(log10(max(cool_tot_eps,1d-100))-table%cool(i_n,i_T))/0.01
+     table%heat_prime(i_n,i_T)=(log10(max(heat_tot_eps,1d-100))-table%heat(i_n,i_T))/0.01
+     table%cool_com_prime(i_n,i_T)=(log10(max(cool_com_eps,1d-100))-table%cool_com(i_n,i_T))/0.01
+     table%heat_com_prime(i_n,i_T)=(log10(max(heat_com_eps,1d-100))-table%heat_com(i_n,i_T))/0.01
      ! Compute metal contribution for solar metallicity
      call cmp_metals(T2,nH,mu,metal_tot,metal_prime,aexp)
      table%metal(i_n,i_T)=log10(metal_tot)
@@ -1628,4 +1631,3 @@ function HsurH0(z,omega0,omegaL,OmegaR)
 end function HsurH0
 
 end module cooling_module
-

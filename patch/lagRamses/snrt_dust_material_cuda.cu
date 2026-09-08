@@ -13,11 +13,13 @@ __global__ void dust_material_kernel(const double *input,const double *table,dou
 
 static int dust_material_stream(const double *input,const double *table,double *output,
     int nc,int ng,int nt,int use_u,double dt,double background,double bath,double tolerance,cudaStream_t stream) {
-  if(nc<1||ng<1||nt<2||use_u<0||use_u>3||!isfinite(dt)||dt<=0)return 7;
+  if(nc<1||ng<1||nt<2||use_u<0||use_u>15||use_u==4||
+      ((use_u&8)&&(!(use_u&1)||nt>256))||!isfinite(dt)||dt<=0)return 7;
   double *in_d=nullptr,*table_d=nullptr,*out_d=nullptr;int *error_d=nullptr;
   int status=7,kernel_status=0;
-  const size_t in_bytes=sizeof(double)*(use_u>=2?7:4)*size_t(nc),table_bytes=sizeof(double)*(ng+3)*size_t(nt);
-  const size_t out_bytes=sizeof(double)*(ng+2+(use_u>=2))*size_t(nc);
+  const size_t in_bytes=sizeof(double)*((use_u%4>=2?7:4)+((use_u&4)?nt:0)+((use_u&8)?4:0))*size_t(nc);
+  const size_t table_bytes=sizeof(double)*(ng+3+((use_u&8)?4*(ng+1):0))*size_t(nt);
+  const size_t out_bytes=sizeof(double)*(ng+2+(use_u%4>=2))*size_t(nc);
   if(cudaMallocAsync(&in_d,in_bytes,stream)!=cudaSuccess)goto done;
   if(cudaMallocAsync(&table_d,table_bytes,stream)!=cudaSuccess)goto done;
   if(cudaMallocAsync(&out_d,out_bytes,stream)!=cudaSuccess)goto done;

@@ -7,6 +7,7 @@
 
 module stellar_source_increment
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use dust_mass_physics, only: dust_gas_elements
   use stellar_enrichment_config, only: stellar_dp
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, stellar_source_t, clear_cumulative, clear_source, &
@@ -91,7 +92,8 @@ contains
     type(stellar_source_t), intent(in) :: source
     integer :: i, j
 
-    source_values_finite = ieee_is_finite(source%returned_mass) .and. &
+    source_values_finite = all(ieee_is_finite(source%dust_species)).and. &
+         ieee_is_finite(source%returned_mass) .and. &
          ieee_is_finite(source%energy)
     do i = 1, 3
        source_values_finite = source_values_finite .and. &
@@ -122,6 +124,8 @@ contains
     type(stellar_source_t), intent(in) :: source
     real(stellar_dp), parameter :: tolerance = 1.0e-12_stellar_dp
     real(stellar_dp) :: scale, tracked_mass, channel_tracked_mass
+    real(stellar_dp)::gas(11)
+    integer::dust_status
     integer :: channel, element
 
     source_values_nonnegative = source%returned_mass >= -tolerance .and. &
@@ -131,6 +135,12 @@ contains
          minval(source%channel_energy) >= -tolerance .and. &
          minval(source%channel_ejected_mass) >= -tolerance
     if (.not. source_values_nonnegative) return
+    if(any(source%dust_species/=0d0))then
+       call dust_gas_elements(source%ejected_mass,source%dust_species,gas,dust_status)
+       if(dust_status/=0)then
+          source_values_nonnegative=.false.;return
+       endif
+    endif
 
     tracked_mass = sum(source%ejected_mass)
     scale = max(1.0_stellar_dp, abs(source%returned_mass), abs(tracked_mass))

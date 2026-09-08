@@ -5,11 +5,12 @@ using SnrtStep = int(float*,const float*,const int*,const float*,const float*,co
 extern "C" {
 int snrt_scatter_batch_c(const double*,const double*,double*,int,int,int,double,int);
 int snrt_isotropic_scatter_c(float*,const double*,const double*,int,int,int,int);
+int snrt_ir_scatter_c(double*,const double*,const double*,int,int,int,int);
 int snrt_exchange_batch_c(const double*,const double*,double*,int,int,double,double,int);
 int snrt_dust_exchange_c(const double*,const double*,double*,int,int,double,double,int);
 int snrt_ir_batch_c(const double*,const int*,const double*,double*,int,int,int,double,double,int,int);
 int snrt_ir_transport_c(const double*,const double*,const int*,const int*,const int*,const double*,
-    const double*,const double*,double*,double*,double*,double*,int,int,int,int,double,double,int);
+    const double*,const double*,double*,double*,double*,double*,int,int,int,int,double,double,int,int=0);
 int snrt_ir_absorb_c(const double*,const double*,const double*,const double*,const double*,const double*,
     double*,double*,int,int,int,double,double,int);
 SnrtStep snrt_openmp_species_dust_c, snrt_serial_species_dust_c, snrt_hybrid_species_dust_c;

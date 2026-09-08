@@ -193,7 +193,7 @@ MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
-	 cosmic_ray_physics.o dust_mass_physics.o $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o agn_feedback_deposition.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
+	 cosmic_ray_physics.o dust_mass_physics.o dust_composition_material.o dust_composition_optics.o dust_element_cooling.o $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o agn_feedback_deposition.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
 	 $(STELLAR_ENRICHMENT_MODOBJ)
 
 # SIDM object (depends on amr_commons, pm_commons, random)
@@ -361,16 +361,18 @@ snrt_hybrid_smoke: snrt_hybrid.o snrt_openmp_transport.o snrt_dust_material.o $(
 	icpx -O2 -qopenmp ../patch/lagRamses/snrt_hybrid_smoke.cpp snrt_hybrid.o snrt_openmp_transport.o \
 	  snrt_dust_material.o $(SNRT_DEVICE_OBJS) $(SNRT_POOL_OBJS) $(LIBS_CUDA) -o $@
 snrt_dust_ir.o: ../patch/lagRamses/snrt_dust_ir.f90
-snrt_dust_backend_smoke: snrt_dust_ir.o snrt_runtime_backend.o snrt_dust_material.o $(SNRT_DEVICE_OBJS) \
+snrt_dust_backend_smoke: dust_composition_optics.o dust_composition_material.o snrt_dust_contract.o \
+                         snrt_dust_ir.o snrt_runtime_backend.o snrt_dust_material.o $(SNRT_DEVICE_OBJS) \
                          snrt_openmp_transport.o snrt_hybrid.o $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_dust_backend_smoke.f90
 	$(F90) -fpp -I. ../patch/lagRamses/snrt_dust_backend_smoke.f90 snrt_dust_ir.o snrt_runtime_backend.o \
+	  dust_composition_optics.o dust_composition_material.o dust_mass_physics.o snrt_dust_contract.o \
 	  snrt_cuda_multigroup_interface.o snrt_openmp_transport.o $(SNRT_DEVICE_OBJS) \
 	  snrt_dust_material.o snrt_hybrid.o $(SNRT_POOL_OBJS) $(LIBS_CUDA) $(LIBS_SNRT) -o $@
 snrt_dust_coupling.o: snrt_thermochemistry.o ../patch/lagRamses/snrt_dust_coupling.f90
 snrt_dust_transaction.o: amr_parameters.jaehyun.o
 snrt_dust_receiver.o: ../patch/lagRamses/snrt_dust_receiver.f90
 snrt_dust_contract.o: ../patch/lagRamses/snrt_dust_contract.f90
-snrt_dust_live.o: snrt_state.o snrt_dust_contract.o snrt_dust_ir.o snrt_amr_topology.o mpi_mod.o snrt_runtime_backend.o
+snrt_dust_live.o: dust_mass_physics.o dust_composition_optics.o snrt_state.o snrt_dust_contract.o snrt_dust_ir.o snrt_amr_topology.o mpi_mod.o snrt_runtime_backend.o
 snrt_regrid.o: snrt_state.o snrt_dust_live.o hydro_commons.o mpi_mod.o
 ifeq ($(SNRT),1)
 load_balance.kjhan.o: snrt_regrid.o
@@ -416,12 +418,21 @@ hydro_commons.o: hydro_parameters.o
 read_hydro_params.o stellar_ramses_runtime.o star_formation.kjhan.o: cosmic_ray_physics.o
 backup_hdf5.o restore_hdf5.o: cosmic_ray_physics.o
 read_hydro_params.o backup_hdf5.o: dust_mass_physics.o
-dust_mass_runtime.o: amr_commons.kjhan.o hydro_commons.o dust_mass_physics.o snrt_dust_contract.o snrt_state.o snrt_thermochemistry.o
+stellar_yield_tables.o stellar_source_increment.o: dust_mass_physics.o
+cooling_fine.kjhan.o backup_hdf5.o: dust_mass_physics.o dust_element_cooling.o
+dust_element_cooling.o: ../patch/lagRamses/dust_wss09_cie_data.inc
+init_time.kjhan.o: dust_mass_physics.o
+umuscl.kjhan.o interpol_hydro.kjhan.o: dust_mass_physics.o
+dust_composition_material.o: dust_mass_physics.o ../patch/lagRamses/dust_dl01_composition_data.inc
+dust_composition_optics.o: ../patch/lagRamses/dust_d03_optics_data.inc
+dust_mass_runtime.o: amr_commons.kjhan.o hydro_commons.o dust_mass_physics.o dust_composition_material.o dust_composition_optics.o stellar_native_units.o snrt_dust_contract.o snrt_dust_ir.o snrt_state.o snrt_thermochemistry.o
+snrt_ramses_driver.o backup_hdf5.o: dust_composition_material.o dust_composition_optics.o
 ifeq ($(SNRT),1)
 amr_step.jaehyun.o stellar_ramses_runtime.o read_params.jaehyun.o: dust_mass_runtime.o
 endif
-dust_mass_smoke: dust_mass_physics.o ../patch/lagRamses/dust_mass_smoke.f90
-	$(F90) -fpp -I. ../patch/lagRamses/dust_mass_smoke.f90 dust_mass_physics.o -o $@
+dust_mass_smoke: dust_mass_physics.o dust_composition_material.o dust_element_cooling.o stellar_yield_tables.o stellar_yield_interpolation.o ../patch/lagRamses/dust_mass_smoke.f90
+	$(F90) -fpp -I. ../patch/lagRamses/dust_mass_smoke.f90 dust_mass_physics.o \
+	  stellar_enrichment_config.o stellar_yield_tables.o stellar_yield_interpolation.o dust_element_cooling.o dust_composition_material.o -o $@
 cosmic_ray_smoke: cosmic_ray_physics.o ../patch/lagRamses/cosmic_ray_smoke.f90
 	$(F90) -fpp -I. ../patch/lagRamses/cosmic_ray_smoke.f90 cosmic_ray_physics.o -o $@
 poisson_commons.o: poisson_parameters.o

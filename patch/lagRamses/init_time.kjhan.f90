@@ -3,6 +3,7 @@ subroutine init_time
   use hydro_commons
   use pm_commons
   use cooling_module
+  use dust_mass_physics, only: dust_mass_enabled,dust_cooling
 #ifdef RT
   use rt_cooling_module
 #endif
@@ -142,6 +143,12 @@ subroutine init_time
              & -1,2, &
              & dble(70./100.),dble(0.04),dble(0.3),dble(0.7), &
              & dble(aexp_ini),T2_sim)
+        ! J21=0 otherwise leaves a residual UV/electron floor. The admitted
+        ! isolated dust comparison uses SNRT radiation, not that background.
+        if(dust_mass_enabled.and.trim(dust_cooling)/='none')then
+           J0min=0d0
+           J0min_ref=0d0
+        endif
      endif
   end if
 #endif
@@ -891,5 +898,3 @@ function de_matfac(a)
      de_matfac = 1.0d0
   end if
 end function de_matfac
-
-

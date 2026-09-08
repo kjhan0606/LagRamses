@@ -71,7 +71,7 @@ extern "C" int snrt_dust_exchange_c(const double *input,const double *table,doub
   } catch(const std::bad_alloc&){return 7;}
 }
 
-extern "C" int snrt_isotropic_scatter_c(float *state,const double *tau,const double *weight,
+template<class T,bool ir_layout> static int scatter_transaction(T *state,const double *tau,const double *weight,
     int nc,int ng,int nd,int mode) {
   if(!state||!tau||!weight||nc<1||ng<1||nd<1||mode<0||mode>2)return 7;
   const size_t limit=std::numeric_limits<size_t>::max()/sizeof(double)/4;
@@ -81,7 +81,7 @@ extern "C" int snrt_isotropic_scatter_c(float *state,const double *tau,const dou
   if(!std::isfinite(sum_w)||sum_w<=0)return 2;
   const size_t rays=size_t(ng)*nd,total=rays*nc;
   try {
-    std::vector<float> trial(total);
+    std::vector<T> trial(total);
     const int nbatch=1+(nc-1)/batch_cells,threads=mode==2?1:std::min(team_size,nbatch);
     int error=0,cpu=0,gpu=0;
     #pragma omp parallel for num_threads(threads) schedule(dynamic,1) reduction(max:error) reduction(+:cpu,gpu)
@@ -92,8 +92,11 @@ extern "C" int snrt_isotropic_scatter_c(float *state,const double *tau,const dou
         std::vector<double> input(t+size_t(n)*ng),out(t);
         for(int i=0;i<n;++i)for(int g=0;g<ng;++g) {
           input[t+size_t(i)*ng+g]=tau[size_t(g)*nc+first+i];
-          // Native RAMSES layout: (direction, group, owned cell).
-          for(int d=0;d<nd;++d)input[size_t(i)*rays+size_t(g)*nd+d]=state[size_t(first+i)*rays+size_t(g)*nd+d];
+          // Primary stores bin-integrated photons (nd,ng,nc); IR stores
+          // intensity (ng,nd,nc). Scatter weighted bins, not IR intensities.
+          for(int d=0;d<nd;++d)input[size_t(i)*rays+size_t(g)*nd+d]=ir_layout ?
+            state[size_t(first+i)*rays+size_t(d)*ng+g]*weight[d] :
+            state[size_t(first+i)*rays+size_t(g)*nd+d];
         }
         Lease lease(8LL*(input.size()+out.size()+nd)+16777216LL,mode!=1);
         int rc=0;
@@ -102,9 +105,9 @@ extern "C" int snrt_isotropic_scatter_c(float *state,const double *tau,const dou
         else {++cpu;for(int i=0;i<n;++i)rc=std::max(rc,snrt_isotropic_scatter_cell(input.data(),weight,out.data(),n,ng,nd,sum_w,i));}
         if(rc){error=std::max(error,rc);continue;}
         for(int i=0;i<n;++i)for(int g=0;g<ng;++g)for(int d=0;d<nd;++d) {
-          const float q=static_cast<float>(out[size_t(i)*rays+size_t(g)*nd+d]);
+          const T q=static_cast<T>(out[size_t(i)*rays+size_t(g)*nd+d]/(ir_layout?weight[d]:1.0));
           if(!std::isfinite(q)){error=2;continue;}
-          trial[size_t(first+i)*rays+size_t(g)*nd+d]=q;
+          trial[size_t(first+i)*rays+(ir_layout?size_t(d)*ng+g:size_t(g)*nd+d)]=q;
         }
       } catch(const std::bad_alloc&){error=7;}
     }
@@ -113,6 +116,15 @@ extern "C" int snrt_isotropic_scatter_c(float *state,const double *tau,const dou
     std::copy(trial.begin(),trial.end(),state);
     return 0;
   } catch(const std::bad_alloc&){return 7;}
+}
+
+extern "C" int snrt_isotropic_scatter_c(float *state,const double *tau,const double *weight,
+    int nc,int ng,int nd,int mode) {
+  return scatter_transaction<float,false>(state,tau,weight,nc,ng,nd,mode);
+}
+extern "C" int snrt_ir_scatter_c(double *state,const double *tau,const double *weight,
+    int nc,int ng,int nd,int mode) {
+  return scatter_transaction<double,true>(state,tau,weight,nc,ng,nd,mode);
 }
 
 extern "C" int snrt_hybrid_species_dust_c(
@@ -205,10 +217,10 @@ extern "C" int snrt_hybrid_species_dust_c(
 
 extern "C" int snrt_hybrid_dust_material_c(const double *input,const double *table,double *output,
     int nc,int ng,int nt,int use_u,double dt,double background,double bath,double tolerance,int) {
-  if(use_u<0||use_u>3)return 7;
+  if(use_u<0||use_u>15||use_u==4||((use_u&8)&&(!(use_u&1)||nt>256)))return 7;
   if(!input||!table||!output||nc<1||ng<1||nt<2||!std::isfinite(dt)||dt<=0)return 7;
   try {
-    const int extra=use_u>=2?1:0,fields=use_u>=2?7:4;
+    const int extra=use_u%4>=2?1:0,fields=(use_u%4>=2?7:4)+((use_u&4)?nt:0)+((use_u&8)?4:0);
     std::vector<double> trial(size_t(ng+2+extra)*nc);
     const int nbatch=1+(nc-1)/batch_cells;
     int error=0,cpu=0,gpu=0;
@@ -216,7 +228,7 @@ extern "C" int snrt_hybrid_dust_material_c(const double *input,const double *tab
     for(int ib=0;ib<nbatch;++ib) {
       try {
         const int first=ib*batch_cells,n=std::min(batch_cells,nc-first);
-        Lease lease(8LL*((ng+6LL+4*extra)*n+(ng+3LL)*nt)+16777216LL);
+        Lease lease(8LL*((ng+2LL+extra+fields)*n+(ng+3LL+((use_u&8)?4LL*(ng+1):0))*nt)+16777216LL);
         if(lease.slot<0) {
           ++cpu;
           for(int i=first;i<first+n;++i)error=std::max(error,dust_material_cell(input,table,trial.data(),
@@ -246,10 +258,10 @@ extern "C" int snrt_hybrid_dust_material_c(const double *input,const double *tab
 extern "C" int snrt_ir_transport_c(const double *energy,const double *ghosts,
     const int *neighbor,const int *remote,const int *blocked,const double *density,
     const double *direction,const double *sigma,double *transported,double *transmit,
-    double *loss,double *response,int nc,int ng,int nd,int nghost,double cdt,double ratio,int mode) {
+    double *loss,double *response,int nc,int ng,int nd,int nghost,double cdt,double ratio,int mode,int cell_sigma) {
   if(!energy||!neighbor||!remote||!blocked||!density||!direction||!sigma||!transported||
       !transmit||!loss||!response||nc<1||ng<1||nd<1||nghost<0||(nghost&&!ghosts)||
-      mode<0||mode>2||!std::isfinite(cdt)||cdt<=0||!std::isfinite(ratio)||ratio<=0)return 7;
+      mode<0||mode>2||cell_sigma<0||cell_sigma>1||!std::isfinite(cdt)||cdt<=0||!std::isfinite(ratio)||ratio<=0)return 7;
   const size_t limit=std::numeric_limits<size_t>::max()/sizeof(double)/16;
   if(size_t(ng)>limit/nd/std::max(nc,std::max(1,nghost)))return 7;
   const size_t rays=size_t(ng)*nd,total=rays*nc,groups=size_t(ng)*nc;
@@ -266,7 +278,7 @@ extern "C" int snrt_ir_transport_c(const double *energy,const double *ghosts,
       try {
         const int first=ib*batch_cells,n=std::min(batch_cells,nc-first);
         const size_t t=rays*n,g=size_t(ng)*n;
-        std::vector<double> input(7*t+n,0),out(t+3*g);
+        std::vector<double> input(7*t+(cell_sigma?g:n),0),out(t+3*g);
         for(int i=0;i<n;++i) {
           const int cell=first+i;
           std::copy_n(energy+size_t(cell)*rays,rays,input.data()+size_t(i)*7*rays);
@@ -275,17 +287,18 @@ extern "C" int snrt_ir_transport_c(const double *energy,const double *ghosts,
             if(j||r)std::copy_n(j?energy+size_t(j-1)*rays:ghosts+size_t(r-1)*rays,
                 rays,input.data()+(size_t(i)*7+face+1)*rays);
           }
-          input[7*t+i]=density[cell];
+          if(cell_sigma)std::copy_n(density+size_t(cell)*ng,ng,input.data()+7*t+size_t(i)*ng);
+          else input[7*t+i]=density[cell];
         }
         Lease lease(8LL*(input.size()+coeff.size()+out.size())+24LL*n+16777216LL,mode!=1);
         int rc=0;
         if(lease.slot>=0) {
-          ++gpu;rc=snrt_ir_batch_c(input.data(),blocked+6*first,coeff.data(),out.data(),n,ng,nd,cdt,ratio,lease.slot,0);
+          ++gpu;rc=snrt_ir_batch_c(input.data(),blocked+6*first,coeff.data(),out.data(),n,ng,nd,cdt,ratio,lease.slot,cell_sigma?2:0);
         } else if(mode==2)rc=7;
         else {
           ++cpu;
           for(int i=0;i<n;++i)rc=std::max(rc,snrt_ir_transport_cell(input.data(),input.data()+7*t,
-              blocked+6*first,direction,sigma,out.data(),n,ng,nd,cdt,ratio,i));
+              blocked+6*first,direction,sigma,out.data(),n,ng,nd,cdt,ratio,i,cell_sigma));
         }
         if(rc){error=std::max(error,rc);continue;}
         std::copy_n(out.data(),t,trial.data()+size_t(first)*rays);

@@ -293,6 +293,7 @@ contains
     type(stellar_source_t), intent(in) :: component
 
     total%ejected_mass = total%ejected_mass + component%ejected_mass
+    total%dust_species=total%dust_species+component%dust_species
     total%net_yield = total%net_yield + component%net_yield
     total%returned_mass = total%returned_mass + component%returned_mass
     total%energy = total%energy + component%energy

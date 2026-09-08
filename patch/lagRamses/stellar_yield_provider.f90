@@ -45,9 +45,15 @@ contains
        return
     end if
 
-    call interpolate_yield_row(table, channel_id, initial_mass, &
+    if(allocated(table%dust_ejected))then
+       call interpolate_yield_row(table, channel_id, initial_mass, &
+            birth_metallicity, age_gyr, returned_mass, remnant_mass, energy, &
+            momentum, ejected_mass, net_yield, interpolation_ierr,state%dust_species)
+    else
+       call interpolate_yield_row(table, channel_id, initial_mass, &
          birth_metallicity, age_gyr, returned_mass, remnant_mass, energy, &
          momentum, ejected_mass, net_yield, interpolation_ierr)
+    endif
     if (interpolation_ierr /= interpolation_ok) then
        ierr = provider_err_interpolation
        return

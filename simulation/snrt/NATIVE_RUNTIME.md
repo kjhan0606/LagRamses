@@ -1180,3 +1180,349 @@ dispatch or cosmological CR admission is claimed for the mass update.
 
 Evidence: `.dust-mass.w1Jo9A/` and
 `provenance/cosmic_ray_dust_evolution_status_2026-09-08.md`.
+
+### Optional composition budgets and depleted scalar cooling (2026-09-08)
+
+The ordered medium-term extension starts with an explicit comparison:
+
+```fortran
+  dust_mass_enabled=.true.
+  dust_mass_model='carbon_olivine_v1' ! default remains bulk_v1
+  dust_cooling='depleted_scalar'    ! default none; opt-in approximation
+  cooling=.true.
+  cooling_method='original'
+  haardt_madau=.false.
+  J21=0d0
+  self_shielding=.false.
+  gpu_hydro=.false.
+```
+
+Carbon and MgFeSiO4 olivine are separate passive mass densities appended
+after dust material energy. All eleven stellar element fields must be active
+and continue to represent gas+dust. The NENER1/virial comparison uses fields
+22/23 for C/olivine; `NVAR=30` has room. Initialize aggregate dust and its
+constituents consistently; the generated composition comparison starts all
+three at zero, not by guessing the composition of an old bulk seed.
+
+Condensation is computed on each physical source release segment before
+age/Z/IMF mixing. AGB ejecta first reserve the smaller C/12 versus O/16 CO
+inventory; only excess carbon/oxygen is eligible for dust. CO is not an
+extra dust carrier or a time-dependent molecular abundance. The existing
+wind/AGB/SNII efficiencies 0/.2/.15 now apply to eligible carbon and
+stoichiometrically limited olivine, rather than all returned metals. Fe
+inside olivine is not counted again as metallic Fe. Aggregate metal return
+still uses total returned mass minus H/He, not the sum of tracked metals.
+
+Growth/sputtering use separate element-limited capacities with the existing
+fixed-radius, shared-density/rate approximation. Gas-phase elements are
+total elements minus grain stoichiometry; they are not separately advected
+or added to mixture density. Aggregate dust face flux and prolongation are
+the sum of constituent fluxes/prolongations. SF removes the appended fields
+through its existing all-passive astration path. Source energy, reverse MPI
+exchange and progress transactions remain shared with feedback; the local
+mass step uses one collective per level, not one per species.
+
+`depleted_scalar` passes `(rho_Z-rho_dust)/rho/0.02` to the actual original
+cooling solver. It retains that solver's equilibrium H/He/Compton thermal
+closure alongside SNRT photoionization/recombination, not a single unified
+non-equilibrium cooling closure. Both J21 and the legacy residual UV floor
+are zero in this admitted isolated comparison. Zero rates in logarithmic
+cooling tables use the existing metal-zero convention of 1e-100; no physical
+UV field is reintroduced to avoid log(0).
+
+This is **not individual-element metal cooling**: selective depletion cannot
+be represented exactly by a solar-mixture curve. Physical element-rate data
+and a qualified receiver remain part of bundle 1, not a completed feature.
+Composition-dependent opacity/material properties, evolving sizes, CO/H2
+chemistry, and their model-selection tests belong to the subsequent bundles.
+Bulk remains selectable and default; its original no-cooling setup is unchanged.
+
+The HDF5 `dust_composition_values` attribute additionally binds the model,
+cooling choice and species index. A changed model is rejected even when
+NVAR is unchanged; old scalar-only checkpoints are not silently converted.
+The tested CPU executable is
+`.cosmic-ray.kyySgK/ramses_dust_composition_zero_uv3d`; `mkrun.py` and the
+shared GUI generator expose these choices. Existing stream/OpenMP RT/dust
+dispatch remains unchanged; GPU hydro is not admitted for these new carriers.
+Evidence and limits: `provenance/dust_composition_medium_term_plan_2026-09-08.md`.
+
+### Individual-element CIE comparison (2026-09-08 continuation)
+
+With `dust_mass_model='carbon_olivine_v1'`, select `dust_cooling='wss09_cie'`
+to replace the original cooling update with an embedded, author-published
+[Wiersma/Schaye/Smith CIE table](https://local.strw.leidenuniv.nl/WSS08/).
+Keep `cooling=.true., cooling_method='original'` for this explicitly selected
+dispatch, and the same no-HM/J21/self-shielding admission above. The mass
+closure and `none`/`depleted_scalar` comparison options are retained.
+`mkrun.py`/GUI select `.cosmic-ray.kyySgK/ramses_dust_cie3d` for this option.
+
+The native routine subtracts grain stoichiometry from actual element fields
+and uses gas H/He and nine individual gas-phase metals. It does not add the
+old scalar-Z contribution on top. H/He net rates and their CIE electron
+density interpolate in the published He/H grid. Metal weights are number
+abundances relative to the table's solar values, WSS09 equation (3). The
+ASCII table omits the solar electron reference for equation (4), so that
+correction is **not** reconstructed from an unrelated H/He-only column.
+Untracked metal mass is not relabelled Fe or renormalized into tracked metals.
+
+The thermal coordinate is T/mu, with CIE H/He particles/electrons and one
+particle per gas-phase metal nucleus; metal-supplied electrons are neglected
+under the stated trace-metal approximation. Physical gas H, not a hardcoded
+primordial H fraction, sets the density conversion in this new update. The
+mass/temperature constants match the active RAMSES `units()` convention.
+A piecewise-linear signed net rate is integrated analytically in T/mu at
+fixed density/composition. Equilibrium zeros cannot be crossed by a large
+cooling timestep. This replaces the original thermal rate, not SNRT's
+photoheating; optically thin radiative losses are not deposited into dust IR.
+
+Published support is T=100--9.5907e8 K and nHe/nH=0.0786528--0.106898;
+outside support, including evolution leaving it, the comparison rejects
+the step instead of extrapolating, clamping or switching secretly to scalar Z.
+It is low-density CIE, **not LTE** and **not a local-radiation/NEQ metal
+network**. Metal-electron effects, dense/molecular gas, super-solar abundance
+accuracy and consistency with time-dependent SNRT ion fractions are not
+qualified by this implementation. In particular it is a baseline for bundle
+3, not the final thermochemistry for an AGN radiation field or cooling shocks.
+
+Source `simulation/snrt/data/wss09_cie_z_collis.txt` has 352 rows/25 columns;
+the numerical import is in `patch/lagRamses/dust_wss09_cie_data.inc`. The
+source's signed element contributions are retained. Two small HDF5 attributes
+`dust_cie_hhe_values` and `dust_cie_metal_values` bind the full compiled table
+and conversion constants, sharing the existing restart-identity collective.
+Legacy `cooling_*.out` remains the original table diagnostic, not a dump of
+the active WSS09 curve; the CIE checkpoint attributes contain that table.
+
+### Two-size carbon/olivine comparison (2026-09-08)
+
+The native `dust_mass_model='carbon_olivine_2size_v1'` option adds four
+transported grain masses, not just diagnostic size fractions. It requires
+the same all-element, channel-feedback, CPU-hydro, noncosmological HDF5/SNRT
+v4 contract as composition mode. `mkrun.py` and the shared namelist/GUI
+generator expose it together. Bulk/none remain the defaults.
+
+```fortran
+  dust_mass_enabled=.true.
+  dust_mass_model='carbon_olivine_2size_v1'
+  dust_size_radius_cm=5d-7,1d-5
+  dust_size_density=2.2d0,3.3d0
+  dust_small_injection_fraction=0d0,0d0
+  dust_coagulation=.true.
+  dust_shattering=.true.
+  dust_sn_shocks=.false.
+```
+
+Size/material definitions and collision reference coefficients are motivated
+by [Dubois et al. 2024](https://arxiv.org/html/2402.18515v2), sections 3.2,
+3.5 and 3.6. This is **not a full reproduction** of that model. Existing
+wind/AGB/SNII condensation coefficients and no-Ia-condensation policy remain.
+Each composition's injected mass is split before the existing source commit;
+default injection is entirely in large grains. Total metals include dust.
+
+With the NENER1/virial comparison layout:
+
+| Native field | Meaning |
+| --- | --- |
+| 20, 21 | Total dust mass density, mixed-reference material energy |
+| 22, 23 | Carbon and MgFeSiO4 total dust densities |
+| 24, 25 | Carbon small and large mass densities |
+| 26, 27 | Silicate small and large mass densities |
+| 28 | Optional transient coupled SN energy density |
+| 29, 30 | Optional transient freshly injected C/silicate dust densities |
+
+Fields 22/23 are sums of their two size bins; field 20 is their sum. Face
+fluxes and AMR prolongation derive those dependent sums from bins, rather
+than independently limiting each aggregate. SF uses the existing passive
+mass-removal path. Initial masses must already obey the sums/element bounds;
+there is no implicit conversion of scalar seeds or old checkpoints.
+
+Growth shares each composition's finite element reservoir between both bins.
+Radii and material densities scale geometric accretion; the effective
+accreting atom mass remains the configured 24-mp reference. Thermal erosion
+retains the shared Tsai-Mathews fit scaled by 1/radius, not the Hu species
+fits. Symmetric analytic reservoir subflows and exact quadratic-donor
+collision transfers preserve nonnegative masses and element limits. The
+growth/erosion rate resolution is 0.1 per substep, capped at 4096 substeps;
+an unsupported stiff interval is rejected, not silently frozen or accepted.
+No automatic hydro-timestep retry is claimed.
+
+Coagulation uses actual local nH>=1000 cm-3 and T<10000 K, cloud fraction
+one, small-grain dispersion 0.1 km/s. Shattering acts below that density.
+There is no hidden unresolved-cloud density replacement, turbulent-PDF
+growth multiplier, grain charge enhancement, ice mantle, or ISM CO network.
+Thermal growth temperature excludes CR/kinetic energy; adding CR pressure
+does not secretly heat grains or supply a turbulent Mach number.
+
+`dust_sn_shocks=.true.` additionally enables an **energy-equivalent ambient
+SN comparison**, not a measured SN event-count model. It uses coupled
+SNII+thermal-Ia energy after CR partition, canonical 1e51 erg events and
+6800 Msun swept mass, with size/material-dependent destruction. Wind/AGN
+energy is excluded. The three transient source rows use the existing cell
+lock, progress commit and reverse-MPI exchange. On the owning cell, after
+hydro/cooling and before growth/RT/SF, expose only pre-existing dust and
+protect all same-step fresh ejecta. Clear all three rows in the same staged
+mass update; no extra MPI collective. They must be zero in uniform ICs and
+at completed checkpoints. Dust energy lost/gained in the combined mass
+update is transferred oppositely to gas thermal energy.
+
+This option is off by default: overlap with resolved shock sputtering,
+event clustering, physical-event counting and spatial/timestep dependence
+are not calibrated. Fresh-ejecta survival depends on the declared timestep
+source split; it is not a separately resolved reverse-shock calculation.
+The 16-value `dust_size_values` checkpoint attribute binds model parameters
+and field indices using the existing restart check. Changed size, injection,
+collision or shock settings cannot silently resume the same checkpoint.
+
+With `dust_optics_model='fixed_mix'`, size/composition-dependent optics are
+not used. The optional composition-dependent internal energy and collision
+area below replace only the material/geometry part of that fixed reference.
+The D03 option described at the end of this document now connects local
+optics as well. WSS09 CIE remains a comparison, not radiation-dependent
+NEQ cooling. The 8/16-bin accuracy/cost reference remains a model-selection
+task; four evolving masses do not establish multibin equivalence.
+
+### Local composition material and grain collision area (2026-09-09)
+
+`dust_material_model='dl01_composition_v1'` is an explicit two-size comparison
+option; default `fixed_mix` is unchanged. It uses local carbon/silicate mass
+fractions to construct U(T), retaining the bulk graphite and olivine-like
+Debye-mode assumptions of `build_dl01_dust_material.py`. Both sizes of a
+composition use its same bulk specific energy. All four bins share one
+temperature: no PAH/finite-size vibrational modes, stochastic heating,
+separate grain temperatures, latent heat or sublimation.
+
+The compiled 162-node 5--300 K curves are generated by the existing material
+builder via `--fortran-composition-output`, stored in
+`patch/lagRamses/dust_dl01_composition_data.inc`, and resampled linearly in
+log T onto the active v4 temperature grid. Out-of-range grids are rejected.
+No molecular/atomic NLTE rate is supplied by these solid heat-capacity data.
+
+Native wiring uses the same material definition at each receiver:
+
+- stellar source energy = sum of the two source dust masses times their
+  U(T_injection), charged to the existing source energy;
+- mass evolution decodes the old common T using old composition, evaluates
+  new-composition U at that T, and exchanges the energy difference with gas;
+- IR's joint gas/dust solve receives each cell's U(T), and uses it for
+  material bounds and all temperature/energy conversions;
+- hydrogen-equivalent gas accommodation uses actual geometric area per
+  volume, sum_bin(3*rho_bin/(4*solid_density*radius)), with the existing
+  accommodation coefficient. This is not an optical cross section.
+
+The per-cell U input is supported by the shared OpenMP/CUDA material cell
+operator and existing free-stream-or-CPU hybrid scheduler. Transport/emission
+opacity and the reference-H normalization remain unchanged; do not interpret
+this as composition-dependent optical radiative transfer. Native hydro for
+this comparison is still CPU-only. CUDA material kernel support does not
+authorize GPU hydro or demonstrate full-GPU hydro integration.
+
+`mkrun.py`/GUI expose the option and select
+`.cosmic-ray.kyySgK/ramses_dust_composition_material3d`. Starting with zero
+dust avoids inventing a composition/energy conversion for old scalar ICs.
+The HDF5 `dust_material_composition` attribute binds model version and all
+compiled U/T values using the existing restart validation. Enabling,
+disabling or changing this material closure on restart is rejected rather
+than reinterpreting saved Ed. The old fixed-material checkpoint path remains.
+
+Optical source limitation found while preparing the next connection:
+the actual [Draine Gra_81 / smoothed-silicate tables](https://www.astro.princeton.edu/~draine/dust/dust.diel.html)
+contain 81 radii and 241 wavelengths spanning 0.001--1000 microns. The
+high-energy end is about 1.24 keV, below the current 2--10 keV group; their
+long-wavelength limit also excludes part of the existing IR grid. They were
+inspected, not substituted for the existing WD01/D03 whole-mixture table.
+Do not zero missing groups, repeat endpoint values or silently extrapolate.
+Full-band source-backed size optics and the RT/CIE/NEQ connection remain open.
+
+### Prepared D03 composition/size optics (2026-09-09)
+
+The narrow Gra_81/suvSil_81 data are not the only available source. Actual
+D03 dielectric files extend to 18--19 keV before their anomalous endpoint
+rows, despite the old web-page 2 keV description. They cover all nine
+source groups and 136 current IR nodes. The offline builder
+`tools/build_d03_grain_optics.py` computes sphere Mie coefficients from five
+cached originals in `data/draine_d03/`, retaining Qabs, Qsca and g. The full
+byte identities and approximations are in `data/dust_d03_optics_generation_v1.json`.
+
+Native `dust_composition_optics.f90` supplies four optical bases and local
+mass-weighted absorption/scattering/g, with an explicit physical unit
+conversion and spectral/size/density checks. This D03 comparison requires
+0.01/0.1 micron radii and graphite/silicate densities 2.2/3.8 g/cm3; it must
+not silently replace the current 0.005/0.1 micron, 2.2/3.3 evolution model.
+See [D03 material assumptions](https://arxiv.org/html/astro-ph/0308251).
+
+Four pure components and one mixture passed the existing native IR
+initializer/advance with identical absorption/emission opacity and matching
+DL01 U(T), including CPU, hybrid and forced CUDA. Energy conservation and
+stationary-background tests passed; reference/backend differences <=6.09e-16.
+The existing offline optical test entry `tests/draine_dust_opacity.py --d03`
+also passes Mie amplitudes, Rayleigh limits, full spectral coverage and angular
+weighting. Generated include and manifest rebuild identically from originals.
+
+**Historical preparation status, superseded by the live option below.**
+At this point the binary linked the new module, but the live driver retained
+fixed-mixture optics. No unconnected namelist/mkrun option was advertised.
+The subsequent implementation needed to switch primary
+absorption/scattering and cell-dependent IR absorption/emission together,
+bind the optical identity on restart, and preserve the existing GPU/CPU lease
+policy. Hard-X g is nearly one: retain the angular information rather than
+misrepresenting the full Qsca as accurate isotropic transport. No stochastic
+heating, separate grain temperatures or RT-dependent metal NEQ is claimed.
+
+### Live D03 size/composition optics (2026-09-09 closeout)
+
+The implemented explicit comparison selection is:
+
+```fortran
+! Within the existing dust-enabled channel-feedback comparison:
+dust_mass_model='carbon_olivine_2size_v1'
+dust_material_model='dl01_composition_v1'
+dust_optics_model='d03_transport_v1'
+dust_size_radius_cm=1d-6,1d-5
+dust_size_density=2.2d0,3.8d0
+```
+
+Default `dust_optics_model='fixed_mix'` is unchanged. D03 requires the v4
+material contract with scattering enabled and exact spectral binding; use
+`dust_dl01_bulk_030_scattering_reference_v4.nml`, or
+`dust_dl01_bulk_030_scattering_exchange_reference_v4.nml` for gas exchange.
+The contract retains its reference-H normalization, bath and spectral grid;
+native D03 replaces its fixed optical coefficients at all receivers.
+`mkrun.py` (including GUI) sets these together and selects the tested CPU
+NENER=1/NVAR=30 `.cosmic-ray.kyySgK/ramses_dust_d03_live3d`. Existing comparison
+guards, including noncosmo/no sinks/CPU hydro, remain in force.
+
+Local four-bin mass fractions now feed primary absorption and scattering,
+IR absorption/emission and IR angular scattering. Absorption is distinct
+from scattering and equals the Kirchhoff emission opacity. Scattering uses
+the labelled delta-isotropic transport approximation Qsca*(1-g) for both
+primary and IR, preserving photon number/weighted IR energy and the first
+angular moment, **not** a resolved Mie phase function or full angular X-ray
+halo. IR scattering is FP64 and uses quadrature-weighted bins, not an
+unweighted sum of intensities. It is first-order operator split within the
+existing transport substeps, with no new MPI synchronization layer.
+
+Four shared optical/emission bases and four weights/cell extend the existing
+joint material/IR receiver. No per-cell T-by-frequency emissivity cube or
+simulation-time Python is needed. Shared OpenMP/CUDA kernels and the existing
+free CUDA stream -> GPU / busy stream -> CPU policy handle these fields.
+Live CPU MPI/restart and forced/automatic CUDA kernel tests passed; this does
+not establish multi-GPU hydro or cosmological production qualification.
+
+Restart attribute `dust_optics_d03` binds 1900 doubles, version 2 (primary
+and IR transport scattering), including all source data and physical sizes.
+Switching optics on/off or changing it on restart is rejected. Earlier
+fixed-mixture checkpoints still use their original unchanged identity.
+The existing local DL01 U(T) identity remains separate and unchanged.
+
+Evidence and limitations are recorded in
+[dust implementation closeout](../../provenance/dust_composition_medium_term_plan_2026-09-08.md#bundle-3-live-optical-connection--driver-closeout-2026-09-09):
+1031-cell heterogeneous native CPU/GPU parity/energy/rollback tests;
+MPI2 x OMP2 continuous/restart equality (90 hydro and 4 RT datasets);
+positive dust/element/thermal states; changed-model restart rejection; and
+mkrun/GUI consistency. Fixed-vs-D03 sensitivity is measured, not calibrated.
+
+This closes the local optical wiring, not the unperformed 8/16-bin accuracy
+study or full radiation-dependent metal NEQ/H2/CO chemistry. WSS09 CIE,
+common grain T, 20 K dielectric and uncalibrated size/SN prescriptions remain
+explicit approximations. PAH stochastic heating, sublimation, separate Fe,
+dust drift/AGN force and cosmological deployment are not supplied by this
+option. No new default activation or blanket publication-readiness claim.

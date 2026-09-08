@@ -101,6 +101,8 @@ end subroutine sub_cooling_fine
 !###########################################################
 !###########################################################
 subroutine coolfine1(ind_grid,ngrid,ilevel)
+  use dust_mass_physics, only: dust_mass_enabled,dust_cooling,dust_gas_elements
+  use dust_element_cooling, only: wss09_step
   use amr_commons
   use hydro_commons
   use cooling_module
@@ -121,7 +123,8 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
   integer,dimension(1:nvector)::ind_grid
   !-------------------------------------------------------------------
   !-------------------------------------------------------------------
-  integer::i,ind,idim,nleaf,nx_loc,ix,iy,iz
+  integer::i,ind,idim,nleaf,nx_loc,ix,iy,iz,cie_status
+  real(dp)::gas_elements(11),rho_cie
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(kind=8)::dtcool,nISM,nCOM,damp_factor,cooling_switch,t_blast
   real(dp)::polytropic_constant,dx_phys_cm
@@ -216,6 +219,15 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
      if(metal)then
         do i=1,nleaf
            Zsolar(i)=uold(ind_leaf(i),imetal)/nH(i)/0.02
+           if(dust_mass_enabled.and.trim(dust_cooling)=='depleted_scalar')then
+              if(uold(ind_leaf(i),idust)<0.or.uold(ind_leaf(i),idust)>uold(ind_leaf(i),imetal))then
+                 write(*,*)'ERROR: depleted scalar cooling received invalid dust/metal mass'
+                 call clean_stop
+              endif
+              ! Only the metal abundance changes; SNRT H/He chemistry is not
+              ! replaced by element-resolved ionization. Explicit approximation.
+              Zsolar(i)=(uold(ind_leaf(i),imetal)-uold(ind_leaf(i),idust))/nH(i)/0.02
+           endif
         end do
      else
         do i=1,nleaf
@@ -369,7 +381,21 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
         call eunha_solve(nH,T2,Zsolar,dtcool,delta_T2_eunha,nleaf)
      endif
 
-     if(cooling_method=='original' .or. cooling_method=='compare') then
+     if(dust_mass_enabled.and.trim(dust_cooling)=='wss09_cie')then
+        do i=1,nleaf
+           call dust_gas_elements(uold(ind_leaf(i),ichem:ichem+10), &
+                uold(ind_leaf(i),idust_species:idust_species+1),gas_elements,cie_status)
+           if(cie_status==0)then
+              rho_cie=uold(ind_leaf(i),1)
+              call wss09_step(rho_cie*scale_d,gas_elements/rho_cie,T2(i),dtcool,gamma,delta_T2(i),cie_status)
+           endif
+           if(cie_status/=0)then
+              write(*,*)'ERROR: WSS09 CIE cooling invalid composition or outside published T/He domain: ', &
+                   ind_leaf(i),T2(i),cie_status
+              call clean_stop
+           endif
+        enddo
+     else if(cooling_method=='original' .or. cooling_method=='compare') then
         if(cooling.and..not.neq_chem) &
              call solve_cooling(nH,T2,Zsolar,boost,dtcool,delta_T2,nleaf)
      endif

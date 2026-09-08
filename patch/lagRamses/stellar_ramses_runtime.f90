@@ -8,7 +8,8 @@
 module stellar_ramses_runtime
   use cosmic_ray_physics, only: cr_enabled,cr_source_partition
 #if defined(SNRT) && defined(DUST_LIVE)
-  use dust_mass_physics, only: dust_mass_enabled,dust_condense
+  use dust_mass_physics, only: dust_mass_enabled,dust_condense,dust_composition_enabled, &
+       dust_two_size_enabled,dust_injection_bins,dust_sn_shocks
   use dust_mass_runtime, only: dust_injection_specific_energy
 #endif
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -224,6 +225,19 @@ contains
           return
        endif
     endif
+#if defined(SNRT) && defined(DUST_LIVE)
+    if(dust_composition_enabled())then
+       block
+         use stellar_yield_tables, only: prepare_dust_yields
+         call prepare_dust_yields(yield_table,table_ierr)
+       end block
+       if(table_ierr/=0)then
+          ierr=300+table_ierr;initialization_ierr=ierr
+          if(myid==1)write(*,*)'Dust source-segment condensation rejected: ',table_ierr
+          return
+       endif
+    endif
+#endif
     ! Production source evaluation must not invent terminal outcomes between
     ! discrete source mass nodes.  The mode affects only mass assignment;
     ! metallicity, age, and any source-node fate axes remain independently
@@ -590,7 +604,7 @@ contains
     real(stellar_dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
     real(stellar_dp) :: scale_mass, scale_momentum, scale_energy,cr_energy,cr_snia_energy
 #if defined(SNRT) && defined(DUST_LIVE)
-    real(stellar_dp) :: dust_source,dust_specific_u,dust_source_u
+    real(stellar_dp) :: dust_source,dust_specific_u,dust_source_u,dust_sn_energy
 #endif
     real(stellar_dp) :: returned_code, snii_returned_code, snia_returned_code
     real(stellar_dp) :: volume
@@ -992,9 +1006,27 @@ contains
     endif
 #if defined(SNRT) && defined(DUST_LIVE)
     if(dust_mass_enabled)then
-       call dust_condense(source%channel_returned_mass(1:3),source%channel_ejected_mass(1:3,1), &
-            source%channel_ejected_mass(1:3,2),dust_source,snia_bridge_ierr)
-       if(snia_bridge_ierr==0)call dust_injection_specific_energy(dust_specific_u,snia_bridge_ierr)
+       if(dust_composition_enabled())then
+          dust_source=sum(source%dust_species);snia_bridge_ierr=0
+          if(any(source%dust_species<0).or..not.all(ieee_is_finite(source%dust_species)))snia_bridge_ierr=1
+          staged_delta(idust_species:idust_species+1)=source%dust_species/scale_mass/volume
+          if(dust_two_size_enabled())staged_delta(idust_bins:idust_bins+3)= &
+               dust_injection_bins(source%dust_species)/scale_mass/volume
+          if(dust_sn_shocks)then
+             dust_sn_energy=source%channel_energy(channel_snii)+cr_snia_energy-cr_energy
+             if(.not.ieee_is_finite(dust_sn_energy).or.dust_sn_energy<0)then
+                ierr=94;call progress_abort(progress,progress_ierr);return
+             endif
+             ! Transient rows use the SAME cell lock, reverse MPI and progress
+             ! commit as all physical sources. No per-particle nonlinear loss.
+             staged_delta(idust_shock)=dust_sn_energy/scale_energy/volume
+             staged_delta(idust_fresh:idust_fresh+1)=staged_delta(idust_species:idust_species+1)
+          endif
+       else
+          call dust_condense(source%channel_returned_mass(1:3),source%channel_ejected_mass(1:3,1), &
+               source%channel_ejected_mass(1:3,2),dust_source,snia_bridge_ierr)
+       endif
+       if(snia_bridge_ierr==0)call dust_injection_specific_energy(dust_specific_u,snia_bridge_ierr,source%dust_species)
        if(snia_bridge_ierr/=0)then
           ierr=92;call progress_abort(progress,progress_ierr);return
        endif
