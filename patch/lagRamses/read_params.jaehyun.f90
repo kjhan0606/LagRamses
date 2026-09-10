@@ -319,9 +319,10 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
 81 continue
   if(myid==1) write(*,'(A,I0)') ' Fine MG max iterations = ',maxiter_fine
   if(myid==1 .and. restart_phi_warm_start) write(*,'(A)') &
-       ' Restart phi policy = valid-marker warm start (explicit opt-in)'
-  if(myid==1 .and. .not.restart_phi_warm_start) write(*,'(A)') &
-       ' Restart phi policy = predictor (default)'
+       ' WARNING: restart_phi_warm_start is deprecated and ignored; rebuilding AMR boundaries'
+  restart_phi_warm_start=.false.
+  if(myid==1) write(*,'(A)') &
+       ' Restart phi policy = cold predictor; checkpoint phi I/O retained'
   if(myid==1) write(*,'(A,L1)') ' Abort on fine MG nonconvergence = ', &
        abort_on_mg_nonconvergence
   rewind(1)
