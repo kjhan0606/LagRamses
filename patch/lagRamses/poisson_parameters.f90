@@ -8,9 +8,9 @@ module poisson_parameters
   ! default, but allow difficult production meshes to request more cycles.
   integer :: maxiter_fine=10
 
-  ! Restarts use the standard predictor by default.  A valid checkpoint
-  ! marker is necessary but not sufficient for the restored-phi warm start;
-  ! this explicit diagnostic opt-in is also required.
+  ! Legacy namelist compatibility only: true is warned about and ignored.
+  ! Saved phi must not seed the fixed AMR boundary RHS on restart.
+  ! Checkpoint potential I/O remains available for analysis.
   logical :: restart_phi_warm_start=.false.
 
   ! Production jobs can fail closed when fine MG reaches maxiter_fine while
