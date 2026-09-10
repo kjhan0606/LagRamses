@@ -40,3 +40,7 @@ ivar_refine=0
 epsilon=1.d-4
 restart_phi_warm_start=.true.
 /
+
+&STELLAR_ENRICHMENT_PARAMS
+feedback_mode='legacy'
+/

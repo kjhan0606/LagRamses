@@ -39,3 +39,7 @@ ivar_refine=0
 &POISSON_PARAMS
 epsilon=1.d-4
 /
+
+&STELLAR_ENRICHMENT_PARAMS
+feedback_mode='legacy'
+/
