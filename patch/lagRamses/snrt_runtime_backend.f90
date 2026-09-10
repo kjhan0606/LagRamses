@@ -5,7 +5,8 @@ module snrt_runtime_backend
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use iso_c_binding, only: c_int,c_float,c_double,c_long_long,c_char,c_ptr,c_loc,c_null_ptr,c_funptr,c_funloc
   use snrt_cuda_multigroup_interface, only: snrt_cuda_multigroup_rt_step_species_dust
-  use snrt_spectral_contract, only: snrt_band_enabled,snrt_group_edges_ev,snrt_node_secondaries_enabled,snrt_band_kind
+  use snrt_spectral_contract, only: snrt_band_enabled,snrt_group_edges_ev,snrt_node_secondaries_enabled,snrt_band_kind, &
+       snrt_chimes_cold_enabled
   use snrt_thermochemistry, only: snrt_secondary_fractions_c
   use snrt_spectral_contract, only: snrt_d03_band_enabled,snrt_fe_band_enabled,snrt_grain_band_bins
   use dust_composition_optics, only: d03_band_ev,d03_band_abs,d03_band_transport
@@ -531,6 +532,17 @@ contains
                      absorbed_group,absorbed,no,nw,nd,ng,cdt,shift,reference_ev,hhe_energy,dust_energy,dust_energy_moment, &
                      species_columns,snrt_group_edges_ev,c_funloc(snrt_secondary_fractions_c),secondary_xi,band_deposition, &
                      grain_columns,fe_six_band_abs,fe_six_band_transport,fe_band_ev,angular_weights,6_c_int)
+             else if(snrt_chimes_cold_enabled())then
+             block
+               real(c_double)::zero_abs(128,9,4)
+               zero_abs=0
+               ! Keep D03 angular scattering, but let the joint gas/grain
+               ! chemistry ODE own ALL absorption after transport.
+               ierr=cpu_band_d03(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+                    absorbed_group,absorbed,no,nw,nd,ng,cdt,shift,reference_ev,hhe_energy,dust_energy,dust_energy_moment, &
+                    species_columns,snrt_group_edges_ev,c_funloc(snrt_secondary_fractions_c),secondary_xi,band_deposition, &
+                    grain_columns,zero_abs,d03_band_transport,d03_band_ev,angular_weights,4_c_int)
+             end block
              else
              ierr=cpu_band_d03(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
                   absorbed_group,absorbed,no,nw,nd,ng,cdt,shift,reference_ev,hhe_energy,dust_energy,dust_energy_moment, &

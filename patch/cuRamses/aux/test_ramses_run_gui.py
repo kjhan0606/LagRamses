@@ -426,6 +426,34 @@ class WizardTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'SUBLIMATION_BINARY'):
                     collect(choices)
 
+    def test_chimes_cold_spectral_profile(self):
+        with comparison_workspace() as root:
+            data=root/'chemistry';data.mkdir()
+            for name in ['main.hdf5','atomic.h5','molecular.h5']+[f'group_{i:02d}.hdf5' for i in range(1,10)]:
+                (data/name).write_text('setup fixture, not a physical table\n')
+            model='chimes_cold_d03_maxent128_fs2010_v1'
+            choices={'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1'}
+            env={'SNRT_CHIMES_BINARY':str(root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'),
+                 'SNRT_CHIMES_MAIN_DATA':str(data/'main.hdf5'),'SNRT_CHIMES_GROUP_DIR':str(data),
+                 'SNRT_CHIMES_BAND_TABLE':str(data/'atomic.h5'),
+                 'SNRT_CHIMES_MOLECULAR_TABLE':str(data/'molecular.h5'),'SNRT_CHIMES_SPECTRAL_MODEL':model}
+            with mock.patch.dict(os.environ,env):
+                _,files,_=collect(choices)
+                self.assertIn('SNRT_SPECTRAL_MODEL='+model,files[str(root/'fresh/myrun.env.sh')])
+                self.assertIn('SNRT_CHIMES_MOLECULAR_TABLE=',files[str(root/'fresh/myrun.env.sh')])
+                raw,_=mkrun.rng.parse_namelist(files[str(root/'fresh/myrun.nml')])
+                values=mkrun.rng.import_to_values(raw)
+                for key in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering','dust_sn_shocks'):
+                    self.assertIs(values[key],False)
+                self.assertIn('10--95499 K',files[str(root/'fresh/README.txt')])
+                with mock.patch.dict(os.environ,{'SNRT_CHIMES_MOLECULAR_TABLE':''}):
+                    with self.assertRaisesRegex(ValueError,'MOLECULAR_TABLE'):
+                        collect(choices)
+
     def test_chimes_live_selection(self):
         with comparison_workspace() as root:
             data=root/'chemistry'

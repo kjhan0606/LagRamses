@@ -657,6 +657,24 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         if not Path(env['SNRT_CHIMES_MAIN_DATA']).is_file() or not all(
                 (Path(env['SNRT_CHIMES_GROUP_DIR'])/f'group_{i:02d}.hdf5').is_file() for i in range(1,10)):
             raise ValueError('CHIMES main data or one of the nine group tables is missing.')
+        # Deliberate profile opt-in, never inherit the ambient RT selector.
+        cold_mode='chimes_cold_d03_maxent128_fs2010_v1'
+        selected=os.environ.get('SNRT_CHIMES_SPECTRAL_MODEL','fixed')
+        if selected not in ('fixed',cold_mode):
+            raise ValueError('SNRT_CHIMES_SPECTRAL_MODEL must be fixed or '+cold_mode)
+        if selected==cold_mode:
+            if optics_model!='d03_transport_v1' or iron_model!='none' or pah_model!='none' or relative_motion or sublimation_model!='none':
+                raise ValueError('Cold spectral CHIMES requires co-advected D03 C/silicate grains without Fe, PAH or sublimation.')
+            if primary_backend=='cuda':
+                raise ValueError('Cold spectral CHIMES transport currently requires OpenMP, not forced CUDA.')
+            env['SNRT_SPECTRAL_MODEL']=cold_mode
+            env['SNRT_BACKEND']='openmp'
+            for key in ('SNRT_CHIMES_BAND_TABLE','SNRT_CHIMES_MOLECULAR_TABLE'):
+                if not os.environ.get(key) or not Path(os.environ[key]).is_file():
+                    raise ValueError(key+' must identify the pinned spectral bank.')
+                env[key]=Path(os.environ[key]).resolve()
+            ui.info('Explicit cold spectral comparison: T=10--95499 K, fixed grain masses; '
+                    'gas and dust compete for photons. Mass growth/destruction/condensation are disabled.')
     if cosmic_rays or mass_evolution:
         env['SNRT_AGN_MODEL'] = 'legacy'
     sink = config / 'kl16_lc18_snia_agn_dust_smoke.ic_sink'
@@ -763,6 +781,11 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     if mass_cooling=='chimes_neq_v1':
         text=re.sub(r'(?im)^(\s*gamma\s*=)[^\n]+',r'\g<1>1.6666666666666667d0',text)
         env['SNRT_RT_LEVEL']='0'
+        if env['SNRT_SPECTRAL_MODEL']=='chimes_cold_d03_maxent128_fs2010_v1':
+            for key in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering','dust_sn_shocks','dust_condensation'):
+                text=re.sub(r'(?im)^\s*'+key+r'\s*=[^\n]+\n','',text)
+                setting='0d0,0d0,0d0' if key=='dust_condensation' else '.false.'
+                text=text.replace('dust_mass_enabled=.true.','dust_mass_enabled=.true.\n  '+key+'='+setting)
     if relative_motion:
         text=text.replace('dust_mass_enabled=.true.',
             'dust_mass_enabled=.true.\n  dust_relative_motion=.true.\n  dust_drag_collision_cross_section_cm2='+
@@ -976,6 +999,12 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                     'FS2010 atomic secondary ionization is charged to primary photoelectron energy inside CHIMES.\n'
                     'Atomic-target-limited primordial table approximation; no molecular electron cascade model.\n'
                     'Translational gamma=5/3, gas temperature 10--1e9 K; no added CR ionization or duplicate dust exchange.\n')
+                if env['SNRT_SPECTRAL_MODEL']=='chimes_cold_d03_maxent128_fs2010_v1':
+                    files[str(dest / 'README.txt')]=files[str(dest / 'README.txt')].replace(
+                        'First-order transport/dust then chemistry split;',
+                        'Transport/scattering then joint gas/grain absorption and dark chemistry;').replace(
+                        'gas temperature 10--1e9 K','gas temperature 10--95499 K (including internal thermal trials)')
+                    files[str(dest / 'README.txt')]+='Cold spectral mode: fixed C/silicate grain masses; no automatic hot/grey fallback.\n'
             if mass_cooling=='wss09_cie':
                 files[str(dest / 'README.txt')] += (
                     'WSS09 CIE: embedded author table; actual gas-phase H/He and C,N,O,Ne,Mg,Si,S,Ca,Fe.\n'

@@ -225,7 +225,7 @@ contains
   subroutine band_checkpoint()
     use dust_composition_optics, only: d03_band_sha256
     use dust_iron_optics, only: fe_band_sha256
-    use snrt_spectral_contract, only: snrt_chimes_bank_sha256
+    use snrt_spectral_contract, only: snrt_chimes_bank_sha256,snrt_chimes_molecular_sha256
     real(c_float),allocatable::saved(:,:,:)
     real(dp),allocatable::saved_shift(:,:,:)
     integer::g,version,nd,ng,ns,bytes,offset,j
@@ -253,9 +253,11 @@ contains
        read(unit)original;close(unit)
        do j=3,snrt_band_kind()
           if(snrt_band_kind()==5.and.j/=5)cycle
+          if(snrt_band_kind()==6.and.j==4)cycle
           if(j==3)offset=index(original,d03_band_sha256)
           if(j==4)offset=index(original,fe_band_sha256)
           if(j==5)offset=index(original,snrt_chimes_bank_sha256)
+          if(j==6)offset=index(original,snrt_chimes_molecular_sha256)
           call expect(offset>0,'compiled spectral node hash serialized',failures)
           if(offset<=0)cycle
           changed=original;changed(offset:offset)='X'

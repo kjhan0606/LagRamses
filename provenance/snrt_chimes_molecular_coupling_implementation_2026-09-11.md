@@ -1,9 +1,10 @@
 # Molecular / competing-grain spectral receiver — 2026-09-11
 
 Project: `/gpfs/kjhan/LRD_JWST`, origin `kjhan0606/LagRamses`.
-Status: **native coupled operator implemented and tested; general live
-RAMSES admission NOT completed**. Do not confuse a successful full binary
-build with an integrated molecular/dust simulation or restart test.
+Current status: **bounded cold molecular/D03 live connection and integrated
+MPI2/OMP2 restart verification completed**. See [live completion](#live-completion)
+below; earlier native-only and pending-driver statements are historical.
+This does not admit an unrestricted all-temperature molecular model.
 
 ## Implemented
 
@@ -111,7 +112,7 @@ Executable: `ramses_molecular_api3d`, SHA256
 The old hot-test executable was preserved. No RAMSES calculation or raw
 snapshot was created in this continuation, so no raw-output deletion is due.
 
-## Work still required within the existing bundle
+## Work remaining at the native-only checkpoint (historical)
 
 1. Explicit model/data identity plus actual multi-cell driver ordering:
    transport retains scattering but no gas/grain absorption; the coupled
@@ -127,3 +128,136 @@ snapshot was created in this continuation, so no raw-output deletion is due.
 No commit or push was requested or performed in this continuation. No new
 namelist field was added; mkrun/generator/GUI have not been given a misleading
 general molecular-spectral option.
+
+## Subsequent commit/push and cell adapter
+
+The operator next requested commit, push, then continuation. Accumulated
+project physics/source/configuration records were committed as `f3c3e91`;
+the two remote Poisson-restart commits were preserved via merge `f6ee416`,
+and `origin/main` was verified at that merge. Private build directories,
+HDF5 inputs and raw outputs were not added to Git.
+
+The subsequent local change adds `chimes_live_molecular_stage` in the real
+RAMSES state adapter. It reads the existing cell chemical/element carriers
+and four C/silicate size masses, forms physical D03 node absorption and
+geometric catalytic area, excludes kinetic/MHD/CR energy from gas thermal
+energy, and returns staged gas plus grain N/E without modifying `uold`.
+Every error leaves caller output arrays unchanged. Non-two-size, Fe, PAH and
+relative-motion states are not admitted by this adapter. Handles and their
+model/data binding remain the enclosing driver's responsibility.
+
+Full post-merge build and a native test linked to the real RAMSES objects
+passed (`.chimes-band-live.PmDxvQ/molecular-cell-build2.log` and
+`molecular-cell-check2.log`). The latter populates actual `uold`, checks
+grain capture and gas energy accounting with nonzero kinetic/CR energy,
+then verifies complete rollback for an invalid grain inventory. It is not
+a multi-cell transport or restart run. No new simulation raw output exists.
+
+These adapter changes follow the pushed commit and are currently local.
+The enclosing RT ordering, model/restart identity and integrated run listed
+above remain unfinished; adding a callable adapter does not complete them.
+
+## Live completion
+
+The operator requested all remaining work. This continuation completes the
+actual driver ordering, explicit model/data/restart binding, frontend setup
+and integrated runs previously missing. It introduces no new audit cycle,
+test framework or follow-on bundle. The general hot/cold extension in the
+historical list is a physical-domain limitation, not silently admitted by
+this completion: no high-temperature rate extrapolation or automatic switch.
+
+Implemented `chimes_cold_d03_maxent128_fs2010_v1` (kind6):
+
+- Transport retains D03 scattering but has zero gas/grain absorption. The
+  joint native operator receives actual directional photon N/E and the
+  unchanged incoming cell state, then stages chemistry, gas total energy,
+  outgoing N/E and accepted grain group N/E. Material/IR receives that
+  grain energy once, before collective commit. No late duplicate chemistry.
+- The spectral bank is runtime-loaded and SHA-bound; native restart13,
+  chemical identity6 and HDF5 base+50 (tested format56) also bind the
+  molecular data, alongside the existing D03/atomic identities. The tested
+  cell state width remains 12324; no extra persistent ODE counters.
+- The cold mode does one transport/photo/dark/material split. Repeating
+  unchanged absorption solves while relaxing diagnostic ion fractions had
+  no feedback into scattering-only transport and wasted runtime; that
+  redundant outer iteration is removed, not a chemistry tolerance relaxed.
+- A genuinely neutral live case exposed a charge sum of
+  `-7.9157552241644482e-315`. Reconciliation now treats only negative
+  subnormal electron requirements with magnitude less than DBL_MIN as
+  zero. Every ion/molecule is retained. This is not a physical electron
+  floor: a normal negative requirement `-1e-300` still rejects unchanged.
+- `mkrun.py` adds deliberate `SNRT_CHIMES_SPECTRAL_MODEL` opt-in, required
+  atomic/molecular paths and fixed-mass flags; default profiles remain
+  fixed/grey. The generic namelist generator/GUI explains the same mode.
+
+### Final evidence
+
+Evidence root: `.chimes-cold-live.b801Be/`. Keep `environment.sh`, all run
+namelists/logs, `seed_radiation.py`, `evaluate.py`, `results.json`, frontend
+and metadata logs, and the raw-output cleanup record. Build/native evidence
+remains under `.chimes-band-live.PmDxvQ/`.
+
+Final binary `ramses_cold_complete3d` SHA256:
+`9ef3c8a130eacf923b44d23535ab1b48678b807dca4b13b1926e830a81906cac`.
+Build SNRT=1, DUST_LIVE=1, NENER=1, HDF5=1, CHIMES=1, USE_FFTW=0;
+Makefile VPATH unchanged. Native thermochemistry: **191 checks PASS**
+(`cold-complete-native.log`). Native metadata corruption/restore smoke:
+**PASS** (`metadata2.log`), including independent molecular identity damage.
+Frontend: **49 tests, 48 PASS / one display-dependent skip**
+(`frontend-final.log`). `git diff --check` clean.
+
+Actual RAMSES fixture: periodic noncosmological 4^3 cells, MPI2/OMP2,
+80 directions, nine primary groups plus IR, hydro/self-gravity and nonzero
+advective CR pressure. Stars/AGN are not active test sources. Fixed carbon
+small/large grains have total mass fraction .002. The molecular fixture
+starts with H2 carrying 20% of H nuclei and HII/electron abundance 1e-4.
+The seeded restart has spatial/directional variation and actual energies
+11.7/12.9, 18/23 and 150/400 eV, rather than only reference group means.
+The original checkpoint is not modified: injection is in a private copy.
+
+| Run | Result |
+|---|---|
+| `live3`, dark four-step molecular/dust run | 4 commits; max IR balance residual 3.276e-14 |
+| `dark-restart`, last two steps | 402 datasets bitwise equal to uninterrupted endpoint |
+| `irradiated-final`, four resumed steps | 4 commits; max IR balance residual 6.6892e-10 |
+| `irradiated-final-restart`, last two steps, final binary | 402 datasets bitwise equal to uninterrupted endpoint |
+| `neutral-final`, fully neutral four-step start, final binary | 4 commits; max IR balance residual 1.5788e-14; no raw dump |
+
+Irradiated primary-energy decrease equals accepted gas plus grain energy
+to relative **1.2552560286081785e-8**. Temperature evolves from 1534.135 K
+to 1445.275--1830.399 K and H2 remains positive. Chemical states and photon
+N/E stay finite/nonnegative; global fixed grain component masses conserve
+to the 1e-10 check. These are bounded coupling/restart results, not a
+galaxy-scale convergence or all-physics qualification.
+
+The uninterrupted irradiated run used the preceding single-pass binary
+`1cd9a22dad7540c9c06a2618f40af480943e6624d4a4bbd4a526db653566e160`;
+the final binary differs by the subnormal correction and its native checks.
+The correction is inactive in that weakly ionized fixture, and its resumed
+final-binary endpoint matches exactly. The fully neutral run separately
+exercises the correction in actual RAMSES.
+
+Failed/interrupted experiments are retained honestly: `live` had an invalid
+test IC (carbon entered into silicate slots); `live2` and
+`neutral-diagnostic4` exposed the now-fixed subnormal charge issue.
+`neutral-diagnostic` passed one step but did not establish four-step success.
+`irradiated` was stopped during redundant outer iterations and superseded
+by `irradiated-final`; `irradiated-restart` was never launched. The first
+metadata smoke wrongly expected a Fe identity in kind6; the test was fixed.
+A misplaced frontend test method was corrected before the final passing run.
+
+The remaining domain restrictions are those already declared above:
+10--10^4.98 K including internal trials, fixed co-advected C/silicate grains,
+no Fe/PAH/drift/sublimation, gamma5/3 and local first-order shielding/thermal
+split. General high-temperature molecular survival and simultaneous grain
+mass evolution are not claimed. Previous grey/hot models remain separate.
+This continuation is local after the earlier pushed merge `f6ee416`.
+
+After successful evaluation, all ten raw snapshot directories of this
+continuation were deleted (101,801,890 apparent bytes, approximately
+97.1 MiB). Exact paths and pre-deletion HDF5 SHA256 hashes are retained in
+`.chimes-cold-live.b801Be/cleanup.json`; small snapshot text metadata is
+retained under `snapshot_metadata/`. Namelists, logs, evaluator/results,
+builds and immutable physical input banks were not deleted. The removed
+raw snapshots require rerunning the retained setup to recover; no raw
+snapshot directory remains under this continuation's run root.

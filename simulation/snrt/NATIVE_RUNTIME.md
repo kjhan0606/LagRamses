@@ -1951,7 +1951,53 @@ chemical identity version5. Changing model or bank rejects the restart;
 fixed/old spectral formats retain their previous interpretation.
 No new namelist field is introduced: the generic generator/GUI explains
 the explicit environment selector. `mkrun.py` cold/dusty comparison bundles
-explicitly export `SNRT_SPECTRAL_MODEL=fixed`, preventing shell inheritance.
+explicitly export `SNRT_SPECTRAL_MODEL=fixed`, preventing shell inheritance,
+unless the deliberate cold comparison opt-in below is supplied.
+
+### Cold molecular / competing D03 spectral live wiring (2026-09-11)
+
+`SNRT_SPECTRAL_MODEL=chimes_cold_d03_maxent128_fs2010_v1` selects the
+explicit cold molecular comparison. Keep the hot-mode atomic bank above
+and set `SNRT_CHIMES_MOLECULAR_TABLE` to the molecular bank with SHA256
+`c313497b68633b5f2909eb02aa14160baf98dbdde1784b73f5dd50f3d9fdad0b`.
+CHIMES main/nine-group data, FS2010 tables and D03 optics are still required.
+Build with SNRT=1, CHIMES=1, DUST_LIVE=1 and HDF5=1; the tested hydro/CR
+profile uses NENER=1, NVAR=187, MPI2 and OMP2. Use `SNRT_BACKEND=openmp`;
+this spectral transport has no CUDA implementation or implicit model fallback.
+
+Select `dust_cooling='chimes_neq_v1'`, `cooling=.true.`, gamma=5/3,
+`dust_mass_model='carbon_olivine_2size_v1'`, DL01 composition material and
+`dust_optics_model='d03_transport_v1'`. Grains may have nonzero masses but
+are co-advected and fixed against local mass processing: condensation all
+zero, growth/sputtering/SN shocks/coagulation/shattering off, no Fe, PAH,
+relative motion or sublimation. Gas must remain in **10--10^4.98 K**
+(approximately 95,499 K upper limit), including internal dark thermal
+trials; require reduced-c times dt no greater than the cell length.
+An invalid state rejects the collective transaction, not its molecules.
+
+Ordering is transport/scattering without absorption, joint atomic/molecular/
+grain photo absorption, dark CHIMES chemistry/cooling, then dust material/IR.
+Gas and grains compete for the same finite directional N/E. Accepted grain
+group energies reach material/IR once; chemistry is not repeated after that
+receiver. This is an explicit first-order split, not a temperature/opacity
+fixed-point iteration. Shielding is frozen locally; the coarse H2/CO line
+projection, translational heat capacity and unresolved fluorescence remain
+declared approximations. No new photoelectric gas heating is added.
+
+The existing directional state width is unchanged. Native restart version13
+and chemical identity6 bind this model; HDF5 uses its base version +50
+(56 for the tested IR+stellar profile). D03, atomic and molecular bank
+identities are checked before restore. Both dark and irradiated MPI2/OMP2
+restarts reproduced all 402 datasets bitwise in the bounded live test.
+
+For `mkrun.py` comparison generation, opt in using
+`SNRT_CHIMES_SPECTRAL_MODEL=chimes_cold_d03_maxent128_fs2010_v1` plus the
+two spectral table paths and the existing CHIMES binary/data settings.
+The generator exports the runtime selector, disables the mass-processing
+flags with an explicit notice, and records the domain in the generated
+README. The generic namelist generator/GUI also describes the selector;
+no new namelist variable was added. See the
+[implementation and integrated evidence](../../provenance/snrt_chimes_molecular_coupling_implementation_2026-09-11.md#live-completion).
 
 ### Fixed-H charged PAH comparison (2026-09-10)
 

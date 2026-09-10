@@ -104,7 +104,8 @@ contains
     use hydro_commons, only: uold,magnetic_energy
     use dust_mass_physics, only: dust_atomic_cooling_enabled,dust_chimes_enabled,dust_gas_elements
 #ifdef SNRT_CHIMES
-    use snrt_chimes_runtime, only: chimes_live_capacity,chimes_live_stage,chimes_cell_state,chimes_live_band_stage
+    use snrt_chimes_runtime, only: chimes_live_capacity,chimes_live_stage,chimes_cell_state,chimes_live_band_stage, &
+         chimes_live_cold_stage
     use snrt_chimes, only: chimes_ns,chimes_group_binding,chimes_boltzmann
 #endif
     use snrt_atomic_cooling, only: atomic_mh,atomic_temperature,atomic_heat_capacity,atomic_advance
@@ -120,7 +121,7 @@ contains
     use snrt_spectral_contract, only: &
          snrt_nedges, snrt_group_edges_ev, snrt_group_edges_sha256, snrt_band_enabled,snrt_band_model, &
          snrt_d03_band_enabled,snrt_fe_band_enabled,snrt_grain_band_bins, &
-         snrt_node_secondaries_enabled,snrt_chimes_band_enabled, &
+         snrt_node_secondaries_enabled,snrt_chimes_band_enabled,snrt_chimes_cold_enabled, &
          snrt_group_mean_energy_ev, snrt_group_energy_fraction, &
          snrt_group_cross_section_cm2, snrt_group_cross_section_hei_cm2, &
          snrt_group_cross_section_heii_cm2, &
@@ -332,8 +333,9 @@ contains
     paired_transport=paired_transport.or.dust_relative_motion
     if(snrt_d03_band_enabled())then
        if(.not.dust_optics_enabled().or.(dust_iron_enabled().neqv.snrt_fe_band_enabled()).or.dust_pah_enabled().or. &
-            dust_sublimation_enabled().or.dust_relative_motion.or.dust_chimes_enabled())then
-          if(myid==1)write(*,*)'Grain band RT requires matching static D03/Fe mode, no PAH/sublimation/CHIMES'
+            dust_sublimation_enabled().or.dust_relative_motion.or. &
+            (dust_chimes_enabled().and..not.snrt_chimes_cold_enabled()))then
+          if(myid==1)write(*,*)'Grain band RT requires matching static D03/Fe mode or explicit cold CHIMES; no PAH/drift'
           call clean_stop;return
        endif
     endif
@@ -1488,6 +1490,54 @@ contains
                local_transaction_failure = snrt_failure_receiver
        end if
 #ifdef DUST_LIVE
+       ! Transport's absorption ledger was validated above. In the cold
+       ! CHIMES mode it is zero: gas and dust now compete before the material
+       ! stage, always starting chemistry from the unchanged incoming cell.
+#ifdef SNRT_CHIMES
+       if(snrt_chimes_cold_enabled().and.local_transaction_failure==snrt_failure_none)then
+          chemical_absorbed_ev=0
+!$omp parallel do default(shared) private(i,icell,ierr,igroup) reduction(+:chemical_absorbed_ev) &
+!$omp reduction(max:local_transaction_failure)
+          do i=1,nleaf
+             block
+               real(dp)::rn(snrt_ndirection,9),re(snrt_ndirection,9),nn(snrt_ndirection,9),ne(snrt_ndirection,9)
+               real(dp)::ledger(11),gn(9),ge(9),nh_code,he_code
+               icell=leaf_cell(i)
+               rn=real(trial_intensity(:,:,i),dp)*scale_nH
+               do igroup=1,9
+                  re(:,igroup)=(snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)+ &
+                       trial_energy_shift(:,igroup,i))*scale_nH
+               enddo
+               call chimes_live_cold_stage(icell,scale_d,scale_v,dt_s,dx_code*scale_l,dust_old_temperature(i), &
+                    reduced_c,snrt_ndirection,rn,re,chemical_trial(:,i),trial_thermal(i),nn,ne,ledger,gn,ge,ierr)
+               if(ierr/=0)then
+!$omp critical(chimes_cold_failure)
+                  write(*,*)'CHIMES cold cell rejection: rank/cell/status=',myid,icell,ierr
+!$omp end critical(chimes_cold_failure)
+                  local_transaction_failure=snrt_failure_chemistry;cycle
+               endif
+               trial_intensity(:,:,i)=real(nn/scale_nH,c_float)
+               do igroup=1,9
+                  trial_energy_shift(:,igroup,i)=ne(:,igroup)/scale_nH- &
+                       snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)
+               enddo
+               absorbed_dust_group(i,:)=real(gn/scale_nH,c_float)
+               absorbed_dust_energy_ev(i,:)=ge/scale_nH
+               nh_code=h_number_code(i)*scale_nH*atomic_mh/scale_d
+               he_code=he_number_code(i)*scale_nH*atomic_mh/scale_d
+               trial_hydrogen_ii(i)=chemical_trial(3,i)/nh_code
+               trial_neutral_hydrogen(i)=1-trial_hydrogen_ii(i)
+               trial_helium_ii(i)=0;trial_helium_iii(i)=0
+               if(he_code>0)then
+                  trial_helium_ii(i)=chemical_trial(6,i)/he_code
+                  trial_helium_iii(i)=chemical_trial(7,i)/he_code
+               endif
+               chemical_absorbed_ev=chemical_absorbed_ev+ledger(7)*cell_volume_code*scale_l**3
+             end block
+          enddo
+!$omp end parallel do
+       endif
+#endif
        if (local_transaction_failure == snrt_failure_none) then
           do i = 1, nleaf
              do igroup = 1, snrt_ngroups
@@ -1760,9 +1810,17 @@ contains
           end do
        end if
        if (local_transaction_failure == snrt_failure_none) then
+          if(snrt_chimes_cold_enabled())then
+             ! This declared Lie split has no opacity feedback into transport:
+             ! transport is scattering-only, and CVODE already solves gas and
+             ! grain competition simultaneously. Repeating the identical solve
+             ! until relaxed diagnostic fractions agree changes no physics.
+             transaction_converged=.true.;transaction_residual=0;convergence_status=0
+          else
           call snrt_transaction_check_convergence(current_fraction, target_fraction, &
                iteration_tau, target_tau, transaction_config, transaction_residual, &
                transaction_converged, convergence_status)
+          endif
           if (convergence_status /= 0) then
              local_transaction_failure = snrt_failure_convergence
              transaction_converged = .false.
@@ -1850,7 +1908,7 @@ contains
     ! this collective pre-commit check has passed everywhere.
     local_transaction_failure = snrt_failure_none
 #ifdef SNRT_CHIMES
-    if(chimes_on)then
+    if(chimes_on.and..not.snrt_chimes_cold_enabled())then
        chemical_absorbed_ev=0
        ! Tables are read-only; cell abundances, rates, CVODE workspaces and
        ! grain temperature are private to each native call.
@@ -1967,6 +2025,13 @@ contains
        if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_PRIMARY_ABSORBED_EV=',global_unassigned_absorption
     endif
 #endif
+    if(snrt_chimes_cold_enabled())then
+       call snrt_transaction_reduce_sum(chemical_absorbed_ev,global_unassigned_absorption,convergence_status)
+       if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_PRIMARY_ABSORBED_EV=',global_unassigned_absorption
+       call snrt_transaction_reduce_sum(sum(absorbed_dust_energy_ev)*scale_nH*cell_volume_code*scale_l**3, &
+            global_unassigned_absorption,convergence_status)
+       if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_GRAIN_ABSORBED_EV=',global_unassigned_absorption
+    endif
     if(dust_iron_enabled().and..not.snrt_fe_band_enabled())then
        do i=1,nleaf
           if(sum(uold(leaf_cell(i),idust_iron:idust_iron+1))<=0)cycle

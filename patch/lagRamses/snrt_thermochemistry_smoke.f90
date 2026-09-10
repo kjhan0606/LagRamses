@@ -395,6 +395,14 @@ contains
             'electron-free numerical-floor charge failure leaves all caller outputs intact',failures)
     endif
     call chimes_molecular_free(mol);call chimes_band_free(handle)
+    elem=0;elem(1)=1;status=chimes_neutral(elem,a)
+    a(4)=1d-315
+    status=chimes_reconcile(elem,a,b)
+    call expect(status==0.and.b(1)==0.and.b(4)==a(4).and.b(2)==a(2), &
+         'underflow-only negative electron sum retains all ions and atoms without an electron floor',failures)
+    a(4)=1d-300
+    status=chimes_reconcile(elem,a,b)
+    call expect(status/=0,'normal negative electron requirement still rejects, however small',failures)
   end subroutine
 
   subroutine check_chimes_competing_dust(failures)

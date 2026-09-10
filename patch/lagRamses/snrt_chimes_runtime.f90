@@ -5,14 +5,16 @@ module snrt_chimes_runtime
   use amr_commons
   use hydro_commons
   use snrt_chimes
-  use snrt_spectral_contract, only: snrt_chimes_band_enabled,snrt_chimes_bank_sha256
+  use snrt_spectral_contract, only: snrt_chimes_band_enabled,snrt_chimes_bank_sha256, &
+       snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256
   use snrt_thermochemistry, only: snrt_secondary_tables_loaded,snrt_secondary_tables_load_from_environment
   use snrt_atomic_cooling, only: atomic_mh
+  use dust_composition_optics, only: d03_band_abs,d03_radius_cm,d03_solid_density
   use dust_phase_state, only: dust_dynamics_enabled,dust_phase_kinetic
   use dust_mass_physics, only: dust_chimes_enabled,dust_gas_elements,olivine_fraction,dust_iron_enabled, &
        dust_pah_enabled,dust_pah_nstate,dust_pah_hc,dust_pah_charged,dust_pah_solid_charge,dust_pah_inventory
   use dust_mass_physics, only: dust_condensation,dust_growth,dust_sputtering,dust_sn_shocks, &
-       dust_sublimation,dust_coagulation,dust_shattering
+       dust_sublimation,dust_coagulation,dust_shattering,dust_two_size_enabled
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
   implicit none
@@ -22,9 +24,12 @@ module snrt_chimes_runtime
   public::chimes_consistent_carriers
   public::chimes_cell_state,chimes_grain_budget,chimes_live_capacity,chimes_live_stage
   public::chimes_live_band_stage
+  public::chimes_live_molecular_stage
+  public::chimes_live_cold_stage
   real(dp),parameter::mass_number(11)=[1d0,4d0,12d0,14d0,16d0,20d0,24d0,28d0,32d0,40d0,56d0]
   logical,save::ready=.false.
   type(c_ptr),save::band_handle=c_null_ptr
+  type(c_ptr),save::molecular_handle=c_null_ptr
 contains
   real(dp) function cell_solid_charge(cell) result(q)
     integer,intent(in)::cell
@@ -108,7 +113,7 @@ contains
     endif
     if(ierr==0.and.snrt_chimes_band_enabled())then
        ierr=1
-       ! This receiver is atomic and dust-free, not a molecular/dust model.
+       ! Both explicit spectral modes keep fixed, co-advected grain masses.
        if(dust_iron_enabled().or.dust_pah_enabled().or.dust_dynamics_enabled())return
        if(any(dust_condensation/=0).or.dust_growth.or.dust_sputtering.or.dust_sn_shocks)return
        if(dust_coagulation.or.dust_shattering.or.trim(dust_sublimation)/='none')return
@@ -126,6 +131,27 @@ contains
        enddo
        if(bank_hash/=snrt_chimes_bank_sha256.or.nreaction/=311.or.nshell/=682)then
           call chimes_band_free(band_handle);band_handle=c_null_ptr;ierr=1;return
+       endif
+       if(snrt_chimes_cold_enabled())then
+          if(.not.dust_two_size_enabled())then
+             ierr=1;return
+          endif
+          call get_environment_variable('SNRT_CHIMES_MOLECULAR_TABLE',main,length=n,status=status)
+          if(status/=0.or.n<1.or.n>=len(main))then
+             ierr=1;return
+          endif
+          ierr=chimes_molecular_load(trim(main)//c_null_char,molecular_handle,bank_identity)
+          if(ierr/=0)return
+          do i=1,32
+             write(bank_hash(2*i-1:2*i),'(Z2.2)')nint(bank_identity(i))
+          enddo
+          do i=1,64
+             n=iachar(bank_hash(i:i))
+             if(n>=iachar('A').and.n<=iachar('F'))bank_hash(i:i)=achar(n+32)
+          enddo
+          if(bank_hash/=snrt_chimes_molecular_sha256)then
+             call chimes_molecular_free(molecular_handle);molecular_handle=c_null_ptr;ierr=1;return
+          endif
        endif
     endif
     if(ierr==0)ready=.true.
@@ -145,6 +171,7 @@ contains
     ! failures, always from the original cell input and with unchanged gates.
     values(321:324)=[4d0,real(ichimes,dp),atomic_mh,chimes_boltzmann()]
     if(snrt_chimes_band_enabled())values(321)=5d0
+    if(snrt_chimes_cold_enabled())values(321)=6d0
   end subroutine
 
   subroutine chimes_cell_state(cell,grains,state,elements,ierr,previous_state,metallic_iron,pah_hc)
@@ -321,6 +348,84 @@ contains
     state=new*elements(1)
     energy=nonthermal+chimes_live_capacity(state,sd)*t/(sd*sv**2)
     if(.not.ieee_is_finite(energy))ierr=1
+  end subroutine
+
+  subroutine chimes_live_cold_stage(cell,sd,sv,dt,length,td,chat,nd,number,radiation_energy, &
+       state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr)
+    integer,intent(in)::cell,nd
+    real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,9),radiation_energy(nd,9)
+    real(dp),intent(inout)::state(chimes_ns),energy,next_number(nd,9),next_energy(nd,9),ledger(11)
+    real(dp),intent(inout)::grain_number(9),grain_energy(9)
+    integer,intent(out)::ierr
+    ierr=1
+    if(.not.snrt_chimes_cold_enabled())return
+    call chimes_live_molecular_stage(cell,band_handle,molecular_handle,sd,sv,dt,length,td,chat,nd, &
+         number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr)
+  end subroutine
+
+  subroutine chimes_live_molecular_stage(cell,atomic_bank,molecular_bank,sd,sv,dt,length,td,chat,nd, &
+       number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr)
+    ! Caller-owned handles must be loaded/bound before threaded cell work.
+    ! This adapter does not select a model or publish uold/radiation. The
+    ! driver must disable transport absorption and stage IR before commit.
+    integer,intent(in)::cell,nd
+    type(c_ptr),intent(in)::atomic_bank,molecular_bank
+    real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,9),radiation_energy(nd,9)
+    real(dp),intent(inout)::state(chimes_ns),energy,next_number(nd,9),next_energy(nd,9),ledger(11)
+    real(dp),intent(inout)::grain_number(9),grain_energy(9)
+    integer,intent(out)::ierr
+    real(dp)::old(chimes_ns),elements(11),new(chimes_ns),controls(9),bins(4),grains(2),alpha(128,9)
+    real(dp)::pn(nd,9),pe(nd,9),budget(11),gn(9),ge(9),row(nvar),staged(chimes_ns)
+    real(dp)::nh,cv,t,nonthermal,thermal,area,ratio,surface,proposed_energy
+    integer::s,k,j
+    ierr=1
+    if(.not.ready.or..not.allocated(uold))return
+    if(cell<lbound(uold,1).or.cell>ubound(uold,1).or.nd<1.or.nd>720)return
+    if(any(.not.ieee_is_finite([sd,sv,dt,length,td,chat])).or.sd<=0.or.sv<=0)return
+    if(abs(gamma-5d0/3d0)>1d-12)return
+    if(.not.dust_two_size_enabled())return
+    if(dust_iron_enabled().or.dust_pah_enabled().or.dust_dynamics_enabled())return
+    if(idust<1.or.idust_bins<1.or.idust_bins+3>nvar.or.idust_species<1.or.idust_species+1>nvar)return
+    row=uold(cell,1:nvar)
+    if(any(.not.ieee_is_finite(row)).or.row(1)<=0)return
+    bins=row(idust_bins:idust_bins+3)
+    if(any(bins<0))return
+    grains=[sum(bins(1:2)),sum(bins(3:4))]
+    if(any(abs(grains-row(idust_species:idust_species+1))>1d-8*max(grains,1d-30)))return
+    if(abs(sum(grains)-row(idust))>1d-8*max(sum(grains),1d-30))return
+    call chimes_cell_state(cell,grains,old,elements,ierr)
+    if(ierr/=0)return
+    ierr=1
+    nonthermal=.5d0*sum(row(2:ndim+1)**2)/row(1)+magnetic_energy(row)
+#if NENER>0
+    nonthermal=nonthermal+sum(row(inener:inener+NENER-1))
+#endif
+    thermal=(row(ndim+2)-nonthermal)*sd*sv**2
+    cv=chimes_live_capacity(old,sd)
+    if(cv<=0.or.thermal<=0)return
+    nh=elements(1)*sd/atomic_mh;t=thermal/cv
+    alpha=0;area=0
+    do s=1,2
+       do k=1,2
+          j=2*(s-1)+k
+          alpha=alpha+bins(j)*sd*d03_band_abs(:,:,j)
+          area=area+bins(j)*sd*.75d0/(d03_solid_density(s)*d03_radius_cm(k))
+       enddo
+    enddo
+    ! Same C/silicate geometric-area normalization as the existing grey
+    ! live receiver. Optical Q is not the catalytic cross section.
+    area=area/nh;ratio=sum(grains)/(elements(1)*.01d0);surface=1
+    if(ratio>0)surface=area/(1d-21*ratio)
+    controls=[nh,t,td,dt,length,ratio,surface,0d0,chat]
+    ierr=chimes_cell_band_cold_molecular(atomic_bank,molecular_bank,nd,controls,elements/elements(1), &
+         old/elements(1),alpha,number,radiation_energy,t,new,pn,pe,budget,gn,ge)
+    if(ierr/=0)return
+    staged=new*elements(1)
+    proposed_energy=nonthermal+chimes_live_capacity(staged,sd)*t/(sd*sv**2)
+    ierr=1
+    if(.not.ieee_is_finite(proposed_energy).or.any(.not.ieee_is_finite(staged)))return
+    state=staged;energy=proposed_energy;next_number=pn;next_energy=pe;ledger=budget
+    grain_number=gn;grain_energy=ge;ierr=0
   end subroutine
 
   subroutine chimes_live_stage(cell,sd,sv,dt,length,td,area,chat,photons,state,energy,next_photons,ierr,staged_row)

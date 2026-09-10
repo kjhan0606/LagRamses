@@ -484,7 +484,7 @@ snrt_chimes_photo.o: ../patch/lagRamses/snrt_chimes_photo.cpp ../patch/lagRamses
 	icpx -std=c++17 -O2 -fp-model=precise -I$(SUNDIALS_DIR)/include -c $< -o $@
 ifeq ($(CHIMES),1)
 snrt_chimes.o: snrt_thermochemistry.o
-snrt_chimes_runtime.o: snrt_chimes.o hydro_commons.o amr_commons.kjhan.o dust_mass_physics.o snrt_atomic_cooling.o snrt_spectral_contract.o
+snrt_chimes_runtime.o: snrt_chimes.o hydro_commons.o amr_commons.kjhan.o dust_mass_physics.o snrt_atomic_cooling.o snrt_spectral_contract.o dust_composition_optics.o
 initialize_chimes_live_state.o: snrt_chimes_runtime.o
 snrt_ramses_driver.o dust_mass_runtime.o amr_step.jaehyun.o backup_hdf5.o: snrt_chimes_runtime.o
 umuscl.kjhan.o interpol_hydro.kjhan.o: snrt_chimes_runtime.o

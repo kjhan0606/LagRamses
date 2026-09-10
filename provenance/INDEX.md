@@ -14,6 +14,15 @@ evidence.
 
 ## Active bundle map
 
+SNRT cold molecular / competing D03 spectra (2026-09-11):
+[implementation and live completion](snrt_chimes_molecular_coupling_implementation_2026-09-11.md#live-completion).
+Actual multi-cell scattering/photo/dark/material wiring, explicit kind6
+data/restart identity and frontend opt-in completed. MPI2/OMP2 dark and
+irradiated restarts match 402 datasets bitwise; neutral four-step run passes.
+Bounded 10--10^4.98 K fixed-grain comparison, not general all-temperature
+molecular/PAH/Fe/dynamic-dust admission. This supersedes the native-only
+status of this connection, not other models' declared physical limits.
+
 SNRT H/He intragroup spectrum (2026-09-10): [native implementation/evidence](snrt_band_implementation_2026-09-10.md).
 Opt-in 64-node maximum-entropy N/E closure, evolving Verner absorption and
 actual energy into chemistry; MPI2/restart exact. Default fixed retained;

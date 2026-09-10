@@ -2,6 +2,7 @@
  * library. No Python interpreter, equilibrium abundance substitution, or
  * process-global per-cell thermochemical state is used here. */
 #include <math.h>
+#include <float.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -576,6 +577,12 @@ int snrt_chimes_reconcile_charged(const double *elements,const double *old,doubl
     }
     work[sp_elec]=solid_q;
     for(int s=1;s<NS;s++)work[sp_elec]+=charge[s]*work[s];
+    /* No physical abundance floor. At underflow, the sum of individually
+     * nonnegative solver populations can require a negative subnormal
+     * electron population (observed -7.9e-315). Keep EVERY ion/molecule and
+     * accept only this <DBL_MIN charge residual as zero electrons. Normal
+     * negative populations, even 1e-300, still reject unchanged. */
+    if(work[sp_elec]<0 && work[sp_elec]>-DBL_MIN)work[sp_elec]=0;
     if(work[sp_elec]<0)return 3;
     if(snrt_chimes_budget(work,measured,&q))return 3;
     for(int e=0;e<11;e++)if(fabs(measured[e]-elements[e])>
@@ -696,7 +703,21 @@ static int cell_charged(const double *controls,const double *elements,const doub
     /* Publish a state satisfying the next step's stricter input contract.
      * Preserve thermal energy when this roundoff correction changes n_tot. */
     double corrected[NS],before=0,after=0;
-    if(snrt_chimes_reconcile_charged(elements,work,solid_q,corrected))return 46;
+    int reconcile_status=snrt_chimes_reconcile_charged(elements,work,solid_q,corrected);
+    if(reconcile_status){
+        static int reported=0;
+        flockfile(stderr);
+        if(!reported){
+            double locked[11]={0},electron=solid_q;
+            for(int s=1;s<NS;s++)electron+=charge[s]*work[s];
+            for(int s=sp_H2;s<NS;s++)for(int e=0;e<11;e++)locked[e]+=nuclei[s][e]*work[s];
+            fprintf(stderr,"CHIMES reconciliation rejected: subcode=%d electron=%.17g\n",reconcile_status,electron);
+            for(int e=0;e<11;e++)if(locked[e]>elements[e])
+                fprintf(stderr,"CHIMES locked excess: element=%d target=%.17g locked=%.17g\n",e,elements[e],locked[e]);
+            reported=1;
+        }
+        funlockfile(stderr);return 46;
+    }
     for(int s=0;s<NS;s++){before+=work[s];after+=corrected[s];}
     if(after<=0)return 47;
     g.temperature*=before/after;

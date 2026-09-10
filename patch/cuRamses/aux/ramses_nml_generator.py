@@ -835,6 +835,7 @@ def validate_params(values):
                 valid=False
             msgs.append(ValidationMsg('WARNING','CHIMES requires CHIMES=1/DUST_LIVE=1/NVAR>=187, native pinned tables and nine-group RT; first-order split and local molecular shielding.'))
             msgs.append(ValidationMsg('WARNING','Optional SNRT_SPECTRAL_MODEL=chimes_hot_atomic_maxent128_fs2010_v1 requires SNRT_CHIMES_BAND_TABLE, T>1e5 K, zero molecules/dust and all dust mass processes off; it is NOT the default grey molecular receiver.'))
+            msgs.append(ValidationMsg('WARNING','Optional chimes_cold_d03_maxent128_fs2010_v1 requires both atomic/molecular spectral banks, D03 optics, T=10--95499 K and fixed C/silicate grain masses; Fe/PAH/drift and hot fallback are not admitted. mkrun opt-in is SNRT_CHIMES_SPECTRAL_MODEL.'))
         if relative:
             relative_valid=(model=='carbon_olivine_2size_v1' and coupling=='chimes_neq_v1' and
                             material=='dl01_composition_v1' and optics=='d03_transport_v1' and

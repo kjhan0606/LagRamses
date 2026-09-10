@@ -14,7 +14,8 @@ module snrt_state
        snrt_spectral_contract_fraction_semantics, &
        snrt_spectral_contract_checkpoint_identity_matches, snrt_group_mean_energy_ev, &
        snrt_band_enabled,snrt_group_edges_ev,snrt_band_kind,snrt_d03_band_enabled, &
-       snrt_chimes_band_enabled,snrt_chimes_bank_sha256
+       snrt_chimes_band_enabled,snrt_chimes_bank_sha256, &
+       snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256
   use snrt_thermochemistry, only: snrt_secondary_source_id, &
        snrt_secondary_upstream_commit, snrt_secondary_manifest_sha256, &
        snrt_secondary_tables_loaded, snrt_secondary_loaded_source_id, &
@@ -365,6 +366,12 @@ contains
           ierr=2;return
        endif
     endif
+    if(snrt_chimes_cold_enabled())then
+       write(unit_id,iostat=ios)snrt_chimes_molecular_sha256
+       if(ios/=0)then
+          ierr=2;return
+       endif
+    endif
     if (snrt_nslot <= 0) return
     write(unit_id, iostat=ios) snrt_cell_id(1:snrt_nslot)
     if (ios /= 0) then
@@ -482,6 +489,15 @@ contains
           ierr=5;return
        endif
        if(checkpoint_grain_sha256/=snrt_chimes_bank_sha256)then
+          ierr=5;return
+       endif
+    endif
+    if(snrt_chimes_cold_enabled())then
+       read(unit_id,iostat=ios)checkpoint_grain_sha256
+       if(ios/=0)then
+          ierr=5;return
+       endif
+       if(checkpoint_grain_sha256/=snrt_chimes_molecular_sha256)then
           ierr=5;return
        endif
     endif
