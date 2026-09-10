@@ -40,6 +40,7 @@ module stellar_ssp_sources
   public :: calculate_imf_normalization
   public :: calculate_imf_mass_fraction
   public :: evaluate_imf
+  public :: build_source_mass_edges
 
 contains
 
@@ -56,9 +57,9 @@ contains
     real(stellar_dp) :: log_mass, mass, dm, n_stars
     real(stellar_dp) :: star_weight
     real(stellar_dp), allocatable :: edges(:)
-    real(stellar_dp) :: left, right, fraction, swap
+    real(stellar_dp) :: left, right, fraction
     type(stellar_cumulative_t) :: star_state
-    integer :: bin, provider_ierr, count_edges, i, j, count_bins, extra, row, other
+    integer :: bin, provider_ierr, count_bins
 
     call clear_cumulative(state)
     ierr = ssp_source_ok
@@ -98,46 +99,11 @@ contains
 
     count_bins=n_mass_bins
     if(table%high_mass_ready)then
-       ! Common IMF cells for every channel prevent wind/remnant quadrature
-       ! mismatch. Split at the seam and at every source-node cell boundary.
-       extra=0
-       if(allocated(table%agb_terminal_row))extra=size(table%agb_terminal_row)
-       allocate(edges(n_mass_bins+size(table%hm_mass)+extra+4))
-       do i=0,n_mass_bins
-          edges(i+1)=population%imf_mass_min*(population%imf_mass_max/population%imf_mass_min)** &
-               (real(i,stellar_dp)/n_mass_bins)
-       enddo
-       edges(1)=population%imf_mass_min;edges(n_mass_bins+1)=population%imf_mass_max
-       count_edges=n_mass_bins+1
-       count_edges=count_edges+1;edges(count_edges)=40
-       count_edges=count_edges+1;edges(count_edges)=minval(table%hm_mass)
-       do i=2,size(table%hm_mass)
-          if(table%hm_z(i)/=table%hm_z(i-1))cycle
-          count_edges=count_edges+1;edges(count_edges)=.5d0*(table%hm_mass(i)+table%hm_mass(i-1))
-       enddo
-       if(allocated(table%agb_terminal_row))then
-          ! Split every AGB nearest-node cell. This makes the WD inventory
-          ! independent of quadrature-bin count even at a discrete event.
-          do i=1,size(table%agb_terminal_row)
-             row=table%agb_terminal_row(i);right=huge(1d0)
-             do j=1,size(table%agb_terminal_row)
-                other=table%agb_terminal_row(j)
-                if(table%birth_metallicity(row)/=table%birth_metallicity(other))cycle
-                if(table%initial_mass(other)>table%initial_mass(row))right=min(right,table%initial_mass(other))
-             enddo
-             if(right==huge(1d0))cycle
-             count_edges=count_edges+1;edges(count_edges)=.5d0*(table%initial_mass(row)+right)
-          enddo
+       call build_source_mass_edges(table,population,n_mass_bins,edges,provider_ierr)
+       if(provider_ierr/=0)then
+          ierr=ssp_source_err_imf;return
        endif
-       do i=2,count_edges
-          swap=edges(i);j=i-1
-          do while(j>=1)
-             if(edges(j)<=swap)exit
-             edges(j+1)=edges(j);j=j-1
-          enddo
-          edges(j+1)=swap
-       enddo
-       count_bins=count_edges-1
+       count_bins=size(edges)-1
     endif
 
     do bin = 1, count_bins
@@ -202,6 +168,63 @@ contains
     ! Remnant contributions remain channel-local here.  The population ledger
     ! owns the single terminal-remnant decision after all channels are known.
   end subroutine integrate_ssp_channel
+
+  subroutine build_source_mass_edges(table,population,n_mass_bins,edges,ierr)
+    ! Shared source-cell partition for feedback AND matched radiation.
+    type(stellar_yield_table_t),intent(in)::table
+    type(stellar_population_t),intent(in)::population
+    integer,intent(in)::n_mass_bins
+    real(stellar_dp),allocatable,intent(out)::edges(:)
+    integer,intent(out)::ierr
+    integer::extra,i,j,row,other,count_edges
+    real(stellar_dp)::right,swap
+    ierr=1
+    if(.not.table%high_mass_ready.or..not.allocated(table%hm_mass))return
+    if(n_mass_bins<1.or.population%imf_mass_min<=0.or. &
+         population%imf_mass_max<=population%imf_mass_min)return
+       ! Common IMF cells for every channel prevent wind/remnant quadrature
+       ! mismatch. Split at the seam and at every source-node cell boundary.
+       extra=0
+       if(allocated(table%agb_terminal_row))extra=size(table%agb_terminal_row)
+       allocate(edges(n_mass_bins+size(table%hm_mass)+extra+4))
+       do i=0,n_mass_bins
+          edges(i+1)=population%imf_mass_min*(population%imf_mass_max/population%imf_mass_min)** &
+               (real(i,stellar_dp)/n_mass_bins)
+       enddo
+       edges(1)=population%imf_mass_min;edges(n_mass_bins+1)=population%imf_mass_max
+       count_edges=n_mass_bins+1
+       count_edges=count_edges+1;edges(count_edges)=40
+       count_edges=count_edges+1;edges(count_edges)=minval(table%hm_mass)
+       do i=2,size(table%hm_mass)
+          if(table%hm_z(i)/=table%hm_z(i-1))cycle
+          count_edges=count_edges+1;edges(count_edges)=.5d0*(table%hm_mass(i)+table%hm_mass(i-1))
+       enddo
+       if(allocated(table%agb_terminal_row))then
+          ! Split every AGB nearest-node cell. This makes the WD inventory
+          ! independent of quadrature-bin count even at a discrete event.
+          do i=1,size(table%agb_terminal_row)
+             row=table%agb_terminal_row(i);right=huge(1d0)
+             do j=1,size(table%agb_terminal_row)
+                other=table%agb_terminal_row(j)
+                if(table%birth_metallicity(row)/=table%birth_metallicity(other))cycle
+                if(table%initial_mass(other)>table%initial_mass(row))right=min(right,table%initial_mass(other))
+             enddo
+             if(right==huge(1d0))cycle
+             count_edges=count_edges+1;edges(count_edges)=.5d0*(table%initial_mass(row)+right)
+          enddo
+       endif
+       do i=2,count_edges
+          swap=edges(i);j=i-1
+          do while(j>=1)
+             if(edges(j)<=swap)exit
+             edges(j+1)=edges(j);j=j-1
+          enddo
+          edges(j+1)=swap
+       enddo
+    edges=edges(:count_edges)
+    ierr=0
+  end subroutine build_source_mass_edges
+
 
   subroutine calculate_imf_normalization(imf_id, mass_min, mass_max, &
        normalization, ierr)

@@ -142,14 +142,49 @@ int main() {
       tau[j*n+i]=stau[j*n+i]+stau[g+j*n+i]+stau[2*g+j*n+i]+dtau[j*n+i];
     }
     std::vector<float> ref=input,atoms=budget,hhe(3*g),dust(g),ret(g),raw(g),abs_g(g),absorbed(n);
-    if(snrt_openmp_species_dust_c(ref.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),
-        atoms.data(),hhe.data(),dust.data(),ret.data(),raw.data(),abs_g.data(),absorbed.data(),n,nw,nd,ng,.2f))return 2;
+    std::vector<double> reference_moment(3*g);
+    if(snrt_openmp_species_dust_moment_c(ref.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),
+        atoms.data(),hhe.data(),dust.data(),ret.data(),raw.data(),abs_g.data(),absorbed.data(),n,nw,nd,ng,.2f,
+        reference_moment.data()))return 2;
+    {
+      auto eq=input,ea=budget;
+      std::vector<double> reference(ng),shift(total),he(3*g),de(g),em(3*g),nm(3*g);
+      std::vector<float> hh(3*g),dd(g),rr(g),ww(g),aa(g),tt(n);
+      for(int j=0;j<ng;++j)reference[j]=20.+j;
+      for(int k=0;k<total;++k)shift[k]=(k%2?-0.75:1.25)*reference[k/(nw*nd)]*input[k];
+      const auto initial_shift=shift;
+      if(snrt_openmp_species_dust_energy_c(eq.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),
+          ea.data(),hh.data(),dd.data(),rr.data(),ww.data(),aa.data(),tt.data(),n,nw,nd,ng,.2f,nm.data(),
+          shift.data(),reference.data(),he.data(),de.data(),em.data()))return 120;
+      if(eq!=ref||ea!=atoms||hh!=hhe||dd!=dust||rr!=ret||ww!=raw||aa!=abs_g||tt!=absorbed||nm!=reference_moment)return 121;
+      for(int busy=0;busy<2;++busy) {
+        const int held=(busy&&gpu)?cuda_acquire_stream():-1;
+        auto q=input,a=budget;auto s=initial_shift;
+        std::vector<double> h(3*g,-1),d(g,-1),m(3*g,-1),number_m(3*g,-1);
+        const int rc=snrt_hybrid_species_dust_energy_c(q.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),
+            a.data(),hh.data(),dd.data(),rr.data(),ww.data(),aa.data(),tt.data(),n,nw,nd,ng,.2f,number_m.data(),
+            s.data(),reference.data(),h.data(),d.data(),m.data());
+        if(held>=0)cuda_release_stream(held);
+        if(rc||q!=eq||a!=ea||s!=shift||h!=he||d!=de||m!=em||number_m!=nm)return 122;
+        int cpu_count,gpu_count;snrt_hybrid_counts_c(0,&cpu_count,&gpu_count);
+        if(cpu_count!=1||gpu_count!=0)return 123;
+        const auto saved_q=q,saved_a=a;
+        const float old=tau[g-1];tau[g-1]=std::numeric_limits<float>::quiet_NaN();
+        const int bad=snrt_hybrid_species_dust_energy_c(q.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),
+            a.data(),hh.data(),dd.data(),rr.data(),ww.data(),aa.data(),tt.data(),n,nw,nd,ng,.2f,number_m.data(),
+            s.data(),reference.data(),h.data(),d.data(),m.data());
+        tau[g-1]=old;
+        if(!bad||q!=saved_q||a!=saved_a||s!=shift||h!=he||d!=de||m!=em||number_m!=nm)return 124;
+      }
+      std::printf("PAIRED hybrid CPU admission / signed multigroup ghosts / scalar parity / failed trial rollback PASS\n");
+    }
     for(int busy=0;busy<2;++busy) {
       const int held=(busy&&gpu)?cuda_acquire_stream():-1;
       if(busy&&gpu&&held<0)return 3;
       auto qs=input,at=budget;std::vector<float> hh(3*g),dd(g),rr(g),ww(g),aa(g),tt(n);
-      int rc=snrt_hybrid_species_dust_c(qs.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),
-          at.data(),hh.data(),dd.data(),rr.data(),ww.data(),aa.data(),tt.data(),n,nw,nd,ng,.2f);
+      std::vector<double> moment(3*g,123);
+      int rc=snrt_hybrid_species_dust_moment_c(qs.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),
+          at.data(),hh.data(),dd.data(),rr.data(),ww.data(),aa.data(),tt.data(),n,nw,nd,ng,.2f,moment.data());
       if(held>=0)cuda_release_stream(held);
       if(rc)return 4;
       int cpu_count,gpu_count;snrt_hybrid_counts_c(0,&cpu_count,&gpu_count);
@@ -165,14 +200,19 @@ int main() {
       if(!compare(ref,qs)||!compare(atoms,at)||!compare(hhe,hh)||!compare(dust,dd)||!compare(ret,rr)||
           !compare(raw,ww)||!compare(abs_g,aa)||!compare(absorbed,tt))return 8;
       if((busy||!gpu)&&(ref!=qs||atoms!=at||hhe!=hh||dust!=dd||ret!=rr||raw!=ww||abs_g!=aa||absorbed!=tt))return 9;
+      for(int k=0;k<3*g;++k)if(!std::isfinite(moment[k])||
+          std::abs(moment[k]-reference_moment[k])>3e-5*std::max(1e-20,double(raw[k%g])))return 72;
+      if((busy||!gpu)&&moment!=reference_moment)return 73;
       std::printf("PRIMARY hybrid dusty=%d held=%d CPU=%d GPU=%d PASS\n",dusty,busy,cpu_count,gpu_count);
       // Late-batch invalid opacity: successful sibling batches must not publish.
       const auto saved=qs,saved_at=at,saved_hh=hh,saved_dd=dd,saved_rr=rr,saved_ww=ww,saved_aa=aa,saved_tt=tt;
+      const auto saved_moment=moment;
       const float old=tau[g-1];tau[g-1]=std::numeric_limits<float>::quiet_NaN();
-      rc=snrt_hybrid_species_dust_c(qs.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),
-          at.data(),hh.data(),dd.data(),rr.data(),ww.data(),aa.data(),tt.data(),n,nw,nd,ng,.2f);
+      rc=snrt_hybrid_species_dust_moment_c(qs.data(),dir.data(),neighbor.data(),tau.data(),stau.data(),dtau.data(),
+          at.data(),hh.data(),dd.data(),rr.data(),ww.data(),aa.data(),tt.data(),n,nw,nd,ng,.2f,moment.data());
       tau[g-1]=old;
       if(!rc||qs!=saved||at!=saved_at||hh!=saved_hh||dd!=saved_dd||rr!=saved_rr||ww!=saved_ww||aa!=saved_aa||tt!=saved_tt)return 10;
+      if(moment!=saved_moment)return 74;
     }
   }
   constexpr int dc=1031,dg=2,nt=4;

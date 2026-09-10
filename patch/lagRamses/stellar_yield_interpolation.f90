@@ -9,7 +9,7 @@
 module stellar_yield_interpolation
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
-       n_stellar_channels, channel_wind, channel_snii, channel_agb
+       n_stellar_channels, channel_wind, channel_snii, channel_agb, channel_pisn
   use stellar_yield_tables, only: stellar_yield_table_t, &
        yield_mass_assignment_linear, yield_mass_assignment_piecewise_constant
   implicit none
@@ -25,6 +25,7 @@ module stellar_yield_interpolation
   integer, parameter, public :: interpolation_err_assignment_mode = 6
 
   public :: interpolate_yield_row
+  public :: source_metallicity_bracket
 
 contains
 
@@ -95,7 +96,8 @@ contains
             returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr,dust)
        return
     endif
-    if(table%high_mass_ready.and.(channel_id==channel_wind.or.channel_id==channel_snii))then
+    if(table%high_mass_ready.and.(channel_id==channel_wind.or.channel_id==channel_snii.or. &
+         (channel_id==channel_pisn.and.table%high_mass_version==4)))then
        if(query_mass>=minval(table%hm_mass))then
           call high_mass_history_value(table,channel_id,query_mass,query_z,query_age_gyr, &
                returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr,dust)
@@ -298,6 +300,27 @@ contains
     ierr=interpolation_ok
   end subroutine agb_terminal_value
 
+  subroutine source_metallicity_bracket(nodes,z,zl,zh,w,ierr)
+    ! Common material/radiation bracket: exact-node roundoff tolerance, then
+    ! a same-age linear-Z mixture. No physical extrapolation or floor.
+    ! Source nodes have already been validated by the table/history loader.
+    real(stellar_dp),intent(in)::nodes(:),z
+    real(stellar_dp),intent(out)::zl,zh,w
+    integer,intent(out)::ierr
+    integer::i
+    ierr=interpolation_err_grid;zl=-huge(1d0);zh=huge(1d0);w=0
+    if(.not.ieee_is_finite(z).or.z<0)return
+    do i=1,size(nodes)
+       if(abs(z-nodes(i))<=32*epsilon(1d0)*max(abs(z),abs(nodes(i)),tiny(1d0)))then
+          zl=nodes(i);zh=zl;ierr=interpolation_ok;return
+       endif
+       if(nodes(i)<z)zl=max(zl,nodes(i))
+       if(nodes(i)>z)zh=min(zh,nodes(i))
+    enddo
+    if(zl<0.or.zh==huge(1d0))return
+    w=(z-zl)/(zh-zl);ierr=interpolation_ok
+  end subroutine source_metallicity_bracket
+
   subroutine high_mass_history_value(table,channel,mass,z,age,returned,remnant,energy,p,elements,net,ierr,dust)
     type(stellar_yield_table_t),intent(in)::table
     integer,intent(in)::channel
@@ -307,7 +330,7 @@ contains
     real(stellar_dp),intent(out),optional::dust(2)
     real(stellar_dp)::da(2),db(2)
     real(stellar_dp)::zl,zh,w,a(6+2*n_stellar_elements),b(6+2*n_stellar_elements),v(6+2*n_stellar_elements)
-    integer::i,status
+    integer::status
     returned=0;remnant=0;energy=0;p=0;elements=0;net=0
     if(present(dust))dust=0
     if(.not.table%high_mass_linear_z)then
@@ -315,16 +338,12 @@ contains
        return
     endif
     ierr=interpolation_err_grid
-    zl=-huge(1d0);zh=huge(1d0)
-    do i=1,size(table%hm_z)
-       if(abs(z-table%hm_z(i))<=32*epsilon(1d0)*max(abs(z),abs(table%hm_z(i)),tiny(1d0)))then
-          call high_mass_node_value(table,channel,mass,table%hm_z(i),age,returned,remnant,energy,p,elements,net,ierr,dust)
-          return
-       endif
-       if(table%hm_z(i)<z)zl=max(zl,table%hm_z(i))
-       if(table%hm_z(i)>z)zh=min(zh,table%hm_z(i))
-    enddo
-    if(zl<0.or.zh==huge(1d0))return ! Never extrapolate or clamp physical Z.
+    call source_metallicity_bracket(table%hm_z,z,zl,zh,w,status)
+    if(status/=interpolation_ok)return
+    if(zl==zh)then
+       call high_mass_node_value(table,channel,mass,zl,age,returned,remnant,energy,p,elements,net,ierr,dust)
+       return
+    endif
     if(present(dust))then
        call high_mass_node_value(table,channel,mass,zl,age,a(1),a(2),a(3),a(4:6), &
             a(7:6+n_stellar_elements),a(7+n_stellar_elements:),status,da)
@@ -383,12 +402,18 @@ contains
     enddo
     if(node==0)return
     factor=mass/table%hm_mass(node)
-    if(channel==channel_snii)then
+    if(channel==channel_snii.or.channel==channel_pisn)then
        ierr=interpolation_ok
        if(age<table%hm_age(node))return
-       remnant=factor*table%hm_remnant(node)
+       if(channel==channel_snii)remnant=factor*table%hm_remnant(node)
        if(table%high_mass_wind_only.and.table%hm_mass(node)>=40d0)return
        row=table%hm_terminal_row(node)
+       if(channel==channel_pisn)then
+          if(.not.allocated(table%hm_pair_row))then
+             ierr=interpolation_err_table;return
+          endif
+          row=table%hm_pair_row(node)
+       endif
        returned=factor*table%returned_mass(row); energy=factor*table%energy(row)
        p=factor*table%momentum(row,:);elements=factor*table%ejected_mass(row,:);net=factor*table%net_yield(row,:)
        if(present(dust))dust=factor*table%dust_ejected(row,:)

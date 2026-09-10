@@ -6,6 +6,7 @@ subroutine diffusion
   use amr_commons
   use hydro_commons
   use mpi_mod
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   integer::info
@@ -67,6 +68,7 @@ end subroutine diffusion
 subroutine diffusion_fine(ilevel,dtdiff)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   real(dp)::dtdiff
@@ -97,6 +99,7 @@ end subroutine diffusion_fine
 subroutine diffine1(ind_grid,ncache,dtdiff,ilevel)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
  implicit none
   integer::ilevel,ncache
   real(dp)::dtdiff
@@ -109,6 +112,7 @@ subroutine diffine1(ind_grid,ncache,dtdiff,ilevel)
   ! conservative variables are stored in array unew(:).
   !-------------------------------------------------------------------
   integer ,dimension(1:nvector,1:threetondim     ),save::nbors_father_cells
+  integer ,dimension(1:nvector,1:twotondim),save::nbors_father_grids
   integer ,dimension(1:nvector,0:twondim         ),save::ibuffer_father
   real(dp),dimension(1:nvector,0:twondim  ,1:6   ),save::B1
   integer ,dimension(1:nvector,0:twondim)         ,save::ind1
@@ -150,7 +154,7 @@ subroutine diffine1(ind_grid,ncache,dtdiff,ilevel)
   do i=1,ncache
      ind_cell(i)=father(ind_grid(i))
   end do
-  call get3cubefather(ind_cell,nbors_father_cells,ncache,ilevel)
+  call get3cubefather(ind_cell,nbors_father_cells,nbors_father_grids,ncache,ilevel)
 
   !---------------------------
   ! Gather 6x6x6 cells stencil
@@ -201,9 +205,8 @@ subroutine diffine1(ind_grid,ncache,dtdiff,ilevel)
      do i2=0,1
 
         ind_son=1+i2+2*j2+4*k2
-        iskip=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncache
-           ind_cell(i)=iskip+igrid_nbor(i)
+           ind_cell(i)=ICELL_OF(igrid_nbor(i),ind_son)
         end do
 
         i3=1+2*(i1-1)+i2
@@ -323,9 +326,8 @@ subroutine diffine1(ind_grid,ncache,dtdiff,ilevel)
   do j3=1,2
   do i3=1,2
      ind_son=i3+2*(j3-1)+4*(k3-1)
-     iskip=ncoarse+(ind_son-1)*ngridmax
      do i=1,ncache
-        ind_cell(i)=iskip+ind_grid(i)
+        ind_cell(i)=ICELL_OF(ind_grid(i),ind_son)
      end do
      ! Update Bx using constraint transport
      do i=1,ncache
@@ -651,6 +653,7 @@ end subroutine diffine1
 subroutine cmp_current(Bx,By,Bz,Ex_arete,Ey_arete,Ez_arete, &
      & Nx,Ny,Nz,ngrid,dx,dy,dz)
   use amr_parameters,ONLY:dp,nvector
+#include "amr_index.h"
   implicit none
   integer :: Nx,Ny,Nz,ngrid
   real(dp),dimension(1:nvector, 0:Nx+2,-1:Ny+2,-1:Nz+2) :: Bx

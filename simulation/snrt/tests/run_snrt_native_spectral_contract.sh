@@ -16,6 +16,13 @@ else
   flags=(-cpp -ffree-line-length-none -DNDIM=3 -DNPRE=8 -DNVAR=18 -J"$build_dir" -I"$build_dir")
   openmp_flags=(-fopenmp)
 fi
+flags+=(-I"$repo_root/patch/lagRamses")
+if [[ "${SNRT_SPECTRAL_MODEL:-fixed}" == hhe_d03*_maxent128_fs2010_v1 ]]; then
+  flags+=(-DDUST_LIVE)
+fi
+if [[ "${SNRT_SPECTRAL_MODEL:-fixed}" == chimes_hot_atomic_maxent128_fs2010_v1 ]]; then
+  flags+=(-DDUST_LIVE -DSNRT_CHIMES)
+fi
 
 "$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/amr_parameters.jaehyun.f90" \
   -o "$build_dir/amr_parameters.o"
@@ -36,6 +43,10 @@ fi
 "$fc" "${flags[@]}" "${openmp_flags[@]}" -c \
   "$repo_root/patch/cuRamses/amr_commons.kjhan.f90" \
   -o "$build_dir/amr_commons.o"
+"$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/dust_composition_optics.f90" \
+  -o "$build_dir/dust_composition_optics.o"
+"$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/dust_iron_optics.f90" \
+  -o "$build_dir/dust_iron_optics.o"
 "$fc" "${flags[@]}" "${openmp_flags[@]}" -c \
   "$repo_root/patch/lagRamses/snrt_state.f90" \
   -o "$build_dir/snrt_state.o"

@@ -330,6 +330,15 @@ subroutine update_time(ilevel)
           & hexp_frw(i-1)*(t-tau_frw(i  ))/(tau_frw(i-1)-tau_frw(i  ))
      texp =    t_frw(i  )*(t-tau_frw(i-1))/(tau_frw(i  )-tau_frw(i-1))+ &
           &    t_frw(i-1)*(t-tau_frw(i  ))/(tau_frw(i-1)-tau_frw(i  ))
+#ifdef SOLVERmhd
+     ! Supercomoving B scales as sqrt(a) for a homogeneous Hubble flow.
+     ! unew is the in-flight state; update its magnetic energy consistently.
+     if(hydro)then
+        do i=1,ilevel
+           call update_cosmomag(i,sqrt(aexp/aexp_old_fine))
+        enddo
+     endif
+#endif
   else
      aexp = 1.0
      hexp = 0.0
@@ -614,7 +623,6 @@ SUBROUTINE getAgeSec(t_birth_proper, age)
   age = (texp - t_birth_proper) * scale_t_sec
 END SUBROUTINE getAgeSec
 !------------------------------------------------------------------------
-
 
 
 

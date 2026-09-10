@@ -6,6 +6,9 @@
 namespace { constexpr int unavailable=7; }
 extern "C" {
 int snrt_cuda_available_c() { return 0; }
+int snrt_cuda_species_dust_energy_c(float*,const float*,const int*,const float*,const float*,const float*,
+    float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,double*,double*,const double*,
+    double*,double*,double*) { return 8; }
 int snrt_cuda_prepare_c(int, char *uuid) {
   if(uuid)std::fill_n(uuid,33,' ');
   return unavailable;
@@ -38,6 +41,10 @@ int snrt_cuda_multigroup_rt_step_species_dust_c(float*,const float*,const int*,c
     const float*,float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float) { return unavailable; }
 int snrt_cuda_species_dust_batch_c(float*,const float*,const int*,const float*,const float*,const float*,
     float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,int) { return unavailable; }
+int snrt_cuda_species_dust_moment_c(float*,const float*,const int*,const float*,const float*,const float*,
+    float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,double*) { return unavailable; }
+int snrt_cuda_species_dust_moment_batch_c(float*,const float*,const int*,const float*,const float*,const float*,
+    float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,int,double*) { return unavailable; }
 int snrt_dust_material_cuda_c(const double*,const double*,double*,int,int,int,int,
     double,double,double,double,int) { return unavailable; }
 int snrt_dust_material_batch_c(const double*,const double*,double*,int,int,int,int,

@@ -9,6 +9,11 @@ program snrt_regrid_smoke
   use snrt_dust_contract
   use snrt_dust_live
   use snrt_dust_ir, only: dust_ir_diagnostics,dust_ok
+  use snrt_runtime_backend, only: snrt_backend_initialize
+  use snrt_spectral_contract, only: snrt_spectral_contract_load_from_environment,snrt_group_mean_energy_ev
+#ifdef HDF5
+  use snrt_hdf5, only: snrt_hdf5_write,snrt_hdf5_read
+#endif
   use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
        SNRT_FACE_COARSE_TO_FINE,SNRT_FACE_FINE_TO_COARSE
   use mpi_mod
@@ -16,15 +21,27 @@ program snrt_regrid_smoke
   real(dp) :: p(snrt_checkpoint_cell_width),q(snrt_checkpoint_cell_width),saved(snrt_checkpoint_cell_width)
   real(dp), allocatable :: ir(:),out_ir(:),saved_ir(:)
   real(dp) :: expected_ions,observed_ions
-  integer :: ierr,info,j,slot,old_slots
+  integer :: ierr,info,j,slot,old_slots,g
   call MPI_INIT(info)
+  call snrt_backend_initialize(ierr)
+  if(ierr/=0)stop 54
   ncoarse=1; ngridmax=4; amr_block_size=1; myid=1; ncpu=1
   allocate(uold(1+8*ngridmax,nvar)); uold=0; uold(:,1)=1
   call snrt_dust_contract_load_from_environment(ierr)
   if(ierr/=0.or.snrt_dust_contract_version/=3.or..not.snrt_dust_contract_runtime_allowed)stop 1
+  call snrt_spectral_contract_load_from_environment(ierr)
   allocate(ir(snrt_dust_contract_number_ir*snrt_ndirection))
   allocate(out_ir(size(ir)),saved_ir(size(ir)))
-  p=1d-4; p(1:4)=[1d0,.25d0,.2d0,.3d0]; ir=1d-23
+  p=0.125_dp; p(1:4)=[1d0,.25d0,.2d0,.3d0]; ir=1d-23
+  ! The old standalone number-only fixture needs no spectral environment.
+  ! When a contract is supplied, exercise both signs of the correction.
+  p(5+snrt_checkpoint_number_width:)=0.0_dp
+  if(ierr==0)then
+  do g=1,snrt_ngroups
+     p(5+snrt_checkpoint_number_width+(g-1)*snrt_ndirection: &
+          4+snrt_checkpoint_number_width+g*snrt_ndirection)=(-1.0_dp)**g*snrt_group_mean_energy_ev(g)/32.0_dp
+  end do
+  end if
   call snrt_state_restore_cell(1,p,ierr)
   if(ierr/=0)stop 2
   call snrt_dust_live_restore(1,ir,ierr)
@@ -53,7 +70,9 @@ program snrt_regrid_smoke
   call snrt_state_pack_cell(1,q,ierr)
   observed_ions=q(2)*36
   if(abs(observed_ions-expected_ions)>1d-13)stop 10
-  if(maxval(abs(q(5:)/p(5:)-4.5d0))>1d-6)stop 11
+  if(maxval(abs(q(5:4+snrt_checkpoint_number_width)/p(5:4+snrt_checkpoint_number_width)-4.5d0))>1d-6)stop 11
+  if(maxval(abs(q(5+snrt_checkpoint_number_width:)-4.5_dp*p(5+snrt_checkpoint_number_width:)))> &
+       1d-6*max(maxval(abs(4.5_dp*p(5+snrt_checkpoint_number_width:))),tiny(1.0_dp)))stop 47
   if(abs(q(3)-.1d0)>1d-15.or.abs(q(4)-.2d0)>1d-15)stop 12
   call snrt_dust_live_pack(1,out_ir,ierr)
   if(ierr/=0.or.maxval(abs(out_ir/ir-4.5d0))>1d-14)stop 13
@@ -122,8 +141,151 @@ program snrt_regrid_smoke
   write(*,'(A)')'SNRT_NATIVE_REGRID_PASS refine=1 restrict=1 rho_weighted_ions=1 retired_clear=1 reject_before_write=1'
   call coarse_ir_checks()
   call defrag_checks()
+#ifdef HDF5
+  call hdf5_checks()
+#endif
   call MPI_FINALIZE(info)
 contains
+#ifdef HDF5
+  subroutine hdf5_checks()
+    use ramses_hdf5_io
+    use amr_commons, only: numbl,varcpu_restart,varcpu_ngrid_file,varcpu_grid_file_idx
+    use amr_parameters, only: nlevelmax,i8b
+    use snrt_agn_efficiency, only: snrt_agn_rt_requested
+    use snrt_thermochemistry, only: snrt_secondary_tables_load_from_environment
+    character(len=1024) :: directory,path
+    character(len=32) :: mode
+    integer(HID_T) :: grp
+    integer :: status,width,old_width,case_id,j,k,first_shift,base
+    logical :: with_ir
+    real(dp), allocatable :: disk(:),legacy(:),expected(:,:),expected_ir(:,:)
+    call get_command_argument(1,directory)
+    if(len_trim(directory)==0)return
+    call snrt_spectral_contract_load_from_environment(status)
+    if(status/=0)stop 47
+    call snrt_secondary_tables_load_from_environment(status)
+    if(status/=0)stop 55
+    call get_command_argument(2,mode)
+    with_ir=trim(mode)/='primary'
+    if(.not.snrt_agn_rt_requested())stop 48
+    path=trim(directory)//'/radiation.h5'
+    nlevelmax=1
+    allocate(numbl(1,1)); numbl=2
+    headl(1,1)=1; next=0; next(1)=2
+    width=snrt_checkpoint_cell_width
+    if(with_ir)then
+       width=width+size(ir)
+    else
+       snrt_dust_contract_version=2
+    end if
+    old_width=width-snrt_checkpoint_number_width
+    first_shift=5+snrt_checkpoint_number_width
+    allocate(expected(snrt_checkpoint_cell_width,16),expected_ir(size(ir),16),disk(16*width),legacy(16*old_width))
+    do j=1,16
+       q=p; q(5:)=p(5:)*j
+       call snrt_state_restore_cell(1+j,q,status)
+       if(status/=0)stop 49
+       if(with_ir)call snrt_dust_live_restore(1+j,ir*j,status)
+       call snrt_state_pack_cell(1+j,expected(:,j),status)
+       if(with_ir)call snrt_dust_live_pack(1+j,expected_ir(:,j),status)
+    end do
+    call hdf5_create_parallel(trim(path),MPI_COMM_WORLD)
+    call snrt_hdf5_write()
+    call hdf5_close_file()
+    ! Read the exact writer payload, then exercise current and old layouts
+    ! through both same-rank and file-grid-map restart paths.
+    call hdf5_open_parallel(trim(path),MPI_COMM_WORLD)
+    call hdf5_open_group('/snrt',grp)
+    call hdf5_read_dataset_1d_dp_checked(grp,'level_1',disk,size(disk),0_i8b,int(size(disk),i8b),status)
+    if(status/=0)stop 50
+    call hdf5_close_group(grp)
+    call hdf5_close_file()
+    allocate(varcpu_ngrid_file(1),varcpu_grid_file_idx(ngridmax))
+    varcpu_ngrid_file=2; varcpu_grid_file_idx=0
+    ! Destination grids 3 and 4 are different from the original grids 1/2.
+    varcpu_grid_file_idx(3)=1; varcpu_grid_file_idx(4)=2
+    do case_id=1,4
+       varcpu_restart=mod(case_id,2)==0
+       base=1
+       if(varcpu_restart)base=3
+       headl(1,1)=base; next=0; next(base)=base+1
+       if(case_id==3)then
+          do j=1,16
+             legacy((j-1)*old_width+1:(j-1)*old_width+first_shift-1)= &
+                  disk((j-1)*width+1:(j-1)*width+first_shift-1)
+             legacy((j-1)*old_width+first_shift:j*old_width)= &
+                  disk((j-1)*width+snrt_checkpoint_cell_width+1:j*width)
+          end do
+          call hdf5_open_rw(path)
+          call hdf5_open_group('/snrt',grp)
+          call h5adelete_f(grp,'format_version',status)
+          call h5adelete_f(grp,'cell_width',status)
+          call hdf5_write_attr_int(grp,'format_version',merge(2,1,with_ir))
+          call hdf5_write_attr_int(grp,'cell_width',old_width)
+          call h5ldelete_f(grp,'level_1',status)
+          call hdf5_write_dataset_1d_dp(grp,'level_1',legacy,size(legacy),0_i8b,int(size(legacy),i8b))
+          call hdf5_close_group(grp)
+          call hdf5_close_file()
+       end if
+       if(case_id==1.and.len_trim(mode)>0.and.trim(mode)/='primary')then
+          ! Corruption is in the last cell: an early valid cell must never
+          ! be published during the checkpoint's first validation pass.
+          call hdf5_open_rw(path)
+          call hdf5_open_group('/snrt',grp)
+          select case(trim(mode))
+          case('bad-shift')
+             disk(15*width+first_shift)=-huge(0.0_dp)
+          case('bad-ir')
+             disk(15*width+snrt_checkpoint_cell_width+1)=-1.0_dp
+          case('bad-width')
+             call h5adelete_f(grp,'cell_width',status)
+             call hdf5_write_attr_int(grp,'cell_width',old_width)
+          case('bad-version')
+             call h5adelete_f(grp,'format_version',status)
+             call hdf5_write_attr_int(grp,'format_version',2)
+          case default
+             stop 51
+          end select
+          call h5ldelete_f(grp,'level_1',status)
+          call hdf5_write_dataset_1d_dp(grp,'level_1',disk,size(disk),0_i8b,int(size(disk),i8b))
+          call hdf5_close_group(grp)
+          call hdf5_close_file()
+       end if
+       do j=1,16
+          k=1+(base-1)*8+j
+          call snrt_state_restore_cell(k,p,status)
+          if(with_ir)call snrt_dust_live_restore(k,0.0_dp*ir,status)
+       end do
+       call hdf5_open_parallel(trim(path),MPI_COMM_WORLD)
+       call snrt_hdf5_read()
+       call hdf5_close_file()
+       do j=1,16
+          k=1+(base-1)*8+j
+          call snrt_state_pack_cell(k,q,status)
+          if(case_id>=3)expected(first_shift:,j)=0.0_dp
+          if(status/=0.or.any(q/=expected(:,j)))stop 52
+          if(with_ir)then
+             call snrt_dust_live_pack(k,out_ir,status)
+             if(status/=0.or.any(out_ir/=expected_ir(:,j)))stop 53
+          end if
+       end do
+    end do
+    write(*,'(A)')'SNRT_NATIVE_HDF5_SHIFT_PASS signed=1 legacy_zero=1 IR_preserved=1 file_grid_map=1'
+  end subroutine hdf5_checks
+
+  subroutine hdf5_open_rw(path)
+    use ramses_hdf5_io
+    character(len=*), intent(in) :: path
+    integer(HID_T) :: access
+    integer :: status
+    call h5open_f(status)
+    call h5pcreate_f(H5P_FILE_ACCESS_F,access,status)
+    call h5pset_fapl_mpio_f(access,MPI_COMM_WORLD,MPI_INFO_NULL,status)
+    call h5fopen_f(trim(path),H5F_ACC_RDWR_F,hdf5_file_id,status,access_prp=access)
+    if(status/=0)stop 56
+    call h5pclose_f(access,status)
+  end subroutine hdf5_open_rw
+#endif
   subroutine defrag_checks()
     real(dp) :: before_p(snrt_checkpoint_cell_width,2),before_ir(size(ir),2)
     integer :: old_cells(2),new_cells(2),map(8),status,j
@@ -165,7 +327,7 @@ contains
     cells=[18,19,20,21]; links=0
     snrt_face_kind=SNRT_FACE_COARSE_TO_FINE; snrt_face_cell=0
     snrt_face_kind(1,:)=SNRT_FACE_FINE_TO_COARSE; snrt_face_cell(1,:)=2
-    rays=0; rays(1,1:40)=1; rays(1,41:80)=-1; weights=1d0/snrt_ndirection
+    rays=0; rays(1,1:snrt_ndirection/2)=1; rays(1,snrt_ndirection/2+1:)=-1; weights=1d0/snrt_ndirection
     call snrt_dust_live_restore(2,2*ir,status)
     do j=1,4
        slots(j)=snrt_state_get_slot(cells(j))
@@ -182,7 +344,7 @@ contains
     end if
     if(diag%escaped_erg/=0.or.size(coarse%slots)/=1)stop 31
     do d=1,snrt_ndirection
-       if(d<=40)then
+       if(d<=snrt_ndirection/2)then
           coarse_expected=2*.6d0**3; expected=1+1.6d0*(1+.6d0+.6d0**2)
        else
           coarse_expected=2+.4d0*(1+.2d0+.2d0**2); expected=.2d0**3

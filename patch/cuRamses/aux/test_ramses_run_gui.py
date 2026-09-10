@@ -101,6 +101,373 @@ def comparison_workspace():
 
 
 class WizardTests(unittest.TestCase):
+    def test_gas_mhd_namelist_contract(self):
+        values=dict(hydro=True,mhd_enabled=True,mhd_seed='0.2,0.1,0.3',
+                    riemann='hlld',scheme='muscl',gpu_hydro=False,outformat='hdf5')
+        self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+        text=mkrun.rng.format_namelist(values)
+        self.assertIn('mhd_enabled=.true.',text)
+        self.assertIn('mhd_seed=',text)
+        for key,value in [('gpu_hydro',True),('dust_relative_motion',True),
+                          ('riemann','hllc'),('outformat','original'),('mhd_seed','nan,0,0')]:
+            with self.subTest(key=key):
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**{key:value}))))
+
+    @contextlib.contextmanager
+    def relative_comparison(self):
+        with comparison_workspace() as root:
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'
+            contract=root/'simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml'
+            data=root/'relative chimes';data.mkdir()
+            (data/'main.hdf5').touch()
+            (data/'PAHneu_30.dat').touch()
+            for i in range(1,10):
+                (data/f'group_{i:02d}.hdf5').touch()
+            settings={'Run mode':'comparison_parallel','Output directory':str(root/'fresh'),
+                'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                'Enable experimental first-order dust/gas relative motion?':True,
+                # Explicit bounded-test input, not a calibrated model recommendation.
+                'Neutral hard-sphere gas collision cross section [cm2]; explicit positive value required':2e-15}
+            with mock.patch.dict(os.environ,{'SNRT_DUST_DYNAMICS_BINARY':str(binary),
+                    'SNRT_DUST_DYNAMICS_CONTRACT':str(contract),
+                    'SNRT_CHIMES_BINARY':str(binary),'SNRT_CHIMES_MAIN_DATA':str(data/'main.hdf5'),
+                    'SNRT_CHIMES_GROUP_DIR':str(data),'SNRT_PAH_NEUTRAL_TABLE':str(data/'PAHneu_30.dat'),
+                    'SNRT_DUST_IRON_BINARY':'','SNRT_DUST_IRON_CONTRACT':'',
+                    'SNRT_DUST_PAH_BINARY':'','SNRT_DUST_PAH_CONTRACT':'',
+                    'SNRT_DUST_SUBLIMATION_BINARY':str(binary),'SNRT_DUST_SUBLIMATION_CONTRACT':str(contract)}):
+                yield root,settings
+
+    def test_relative_phase_layouts_cli_gui_and_no_launch(self):
+        for iron,pah,nvar,phases in ((False,False,199,4),(True,False,207,6),
+                                     (False,True,330,5),(True,True,338,7)):
+            with self.subTest(iron=iron,pah=pah), self.relative_comparison() as (root,settings):
+                settings.update({'Separate metallic Fe':'fe_electric_compare_v1' if iron else 'none',
+                                 'PAH stochastic population':'pah_neutral_absolute_v1' if pah else 'none'})
+                with mock.patch('subprocess.run',side_effect=AssertionError('setup launches')), \
+                        mock.patch('os.makedirs',side_effect=AssertionError('preview writes')):
+                    answers,files,report=collect(settings)
+                    responses=iter(answers)
+                    def terminal_input(_):
+                        value=next(responses)
+                        return ('yes' if value else 'no') if isinstance(value,bool) else str(value)
+                    cli={}
+                    with mock.patch('builtins.input',side_effect=terminal_input), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        mkrun.generate_run(write_text=cli.__setitem__)
+                self.assertEqual(cli,files)
+                self.assertFalse((root/'fresh').exists())
+                values=report['values']
+                self.assertTrue(values['dust_relative_motion'])
+                self.assertEqual(values['dust_drag_collision_cross_section_cm2'],2e-15)
+                self.assertEqual(values['interpol_var'],0)
+                for key in ('cosmo','gpu_hydro','use_sgs','pressure_fix','isothermal',
+                            'sink','smbh','sink_agn','agn','delayed_cooling'):
+                    self.assertIn(str(values[key]).lower(),('false','.false.'),key)
+                self.assertEqual(values['t2_star'],0)
+                text=files[str(root/'fresh/myrun.nml')]
+                self.assertRegex(text,r'&RUN_PARAMS\s+use_sgs=\.false\.')
+                self.assertNotIn('&SGS_PARAMS',text)
+                readme=files[str(root/'fresh/README.txt')]
+                self.assertIn(f'DUST_DYNAMICS=1 SNRT=1 DUST_LIVE=1 CHIMES=1 NENER=1 NVAR={nvar}',readme)
+                self.assertIn(f'{phases} grain phases',readme)
+                self.assertIn('Fe+PAH MPI2/OMP2 two-step integration/restart verified',readme)
+                self.assertIn('not production-ready automatically',readme)
+                self.assertIn('not a universal gas cross section',readme)
+                self.assertNotIn('relative drift or',readme)
+                self.assertNotIn('Co-advection only',readme)
+                self.assertNotIn('No absorbed energy from scattering, radiation pressure/recoil',readme)
+                self.assertEqual(set(re.findall(r'NVAR\s*(?:>=|=)\s*(\d+)',readme)),{str(nvar)})
+                environment=files[str(root/'fresh/myrun.env.sh')]
+                self.assertIn('SNRT_BACKEND=openmp',environment)
+                self.assertIn('SNRT_DUST_BACKEND=openmp',environment)
+                self.assertIn(os.environ['SNRT_DUST_DYNAMICS_CONTRACT'],environment)
+                self.assertFalse(any(m.level=='ERROR' for m in report['messages']))
+
+    def test_relative_required_paths_cross_section_and_cpu(self):
+        with self.relative_comparison() as (root,settings):
+            for key in ('SNRT_DUST_DYNAMICS_BINARY','SNRT_DUST_DYNAMICS_CONTRACT'):
+                for value in ('',str(root),str(root/'absent')):
+                    with self.subTest(key=key,value=value), mock.patch.dict(os.environ,{key:value}):
+                        with self.assertRaisesRegex(ValueError,key):
+                            collect(settings)
+            cross_prompt='Neutral hard-sphere gas collision cross section [cm2]; explicit positive value required'
+            for value in (0,-1,float('nan'),float('inf')):
+                with self.subTest(cross_section=value), self.assertRaisesRegex(ValueError,'positive finite'):
+                    collect(dict(settings,**{cross_prompt:value}))
+            for key in ('Primary RT backend','Dust material / IR backend'):
+                with self.subTest(backend=key), self.assertRaisesRegex(ValueError,'forced CUDA'):
+                    collect(dict(settings,**{key:'cuda'}))
+            with self.assertRaisesRegex(ValueError,'CPU-only'):
+                collect(dict(settings,**{'Comparison executable':'cuda_linked'}))
+
+    def test_relative_validator_constraints_and_mass_processes(self):
+        with self.relative_comparison() as (_,settings):
+            _,_,report=collect(settings)
+            values=report['values']
+            for key,value in [('dust_mass_enabled',False),('cosmo',True),('hydro',False),
+                    ('gpu_hydro',True),('use_sgs',True),('pressure_fix',True),('isothermal',True),
+                    ('sink',True),('sink_agn',True),('agn',True),('delayed_cooling',True),
+                    ('t2_star',1),('nboundary',1),('interpol_var',1),
+                    ('dust_mass_model','bulk_v1'),('dust_material_model','fixed_mix'),
+                    ('dust_optics_model','fixed_mix'),('dust_cooling','none'),
+                    ('dust_sublimation','gd89_xu25_olivine_rt_v1')]+[
+                    ('dust_drag_collision_cross_section_cm2',x) for x in (0,-1,float('nan'),float('inf'))]:
+                with self.subTest(key=key,value=value):
+                    msgs=mkrun.rng.validate_params(dict(values,**{key:value}))
+                    self.assertTrue(any(m.level=='ERROR' for m in msgs),key)
+            for enabled in (True,False):
+                processes={k:enabled for k in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering')}
+                self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**processes))))
+            pdef=mkrun.rng.PARAM_BY_NAME['dust_relative_motion']
+            self.assertIs(pdef.default,False)
+            self.assertEqual(mkrun.rng.PARAM_BY_NAME['dust_drag_collision_cross_section_cm2'].default,0.)
+
+    def test_relative_prompt_only_eligible_and_default_off(self):
+        with self.relative_comparison() as (_,settings):
+            prompt='Enable experimental first-order dust/gas relative motion?'
+            original=gui.ReplayUI.ask_bool
+            seen=[]
+            def ask_bool(ui,label,default=False):
+                if label==prompt:
+                    seen.append(default)
+                return original(ui,label,default)
+            with mock.patch.object(gui.ReplayUI,'ask_bool',ask_bool):
+                for change in ({'Dust cooling closure':'snrt_hhe_cie_metals'},
+                               {'Dust optical model':'fixed_mix'},
+                               {'Dust sublimation':'gd89_xu25_olivine_rt_v1'}):
+                    collect(dict(settings,**change))
+                self.assertEqual(seen,[])
+                settings.pop(prompt)
+                with mock.patch.dict(os.environ,{'SNRT_DUST_DYNAMICS_BINARY':'','SNRT_DUST_DYNAMICS_CONTRACT':''}):
+                    _,files,report=collect(settings)
+            self.assertTrue(seen)
+            self.assertTrue(all(default is False for default in seen))
+            self.assertFalse(report['values'].get('dust_relative_motion',False))
+            self.assertNotIn('dust_relative_motion=.true.','\n'.join(files.values()))
+
+    def test_pah_comparison_selection(self):
+        with comparison_workspace() as root:
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'
+            contract=root/'simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml'
+            data=root/'pah-chimes';data.mkdir()
+            (data/'main.hdf5').touch()
+            (data/'PAHneu_30.dat').touch()
+            (data/'PAHion_30.dat').touch()
+            for i in range(1,10):
+                (data/f'group_{i:02d}.hdf5').touch()
+            with mock.patch.dict(os.environ,{'SNRT_CHIMES_BINARY':str(binary),
+                    'SNRT_CHIMES_MAIN_DATA':str(data/'main.hdf5'),'SNRT_CHIMES_GROUP_DIR':str(data),
+                    'SNRT_DUST_PAH_BINARY':str(binary),'SNRT_DUST_PAH_CONTRACT':str(contract),
+                    'SNRT_PAH_NEUTRAL_TABLE':str(data/'PAHneu_30.dat'),
+                    'SNRT_PAH_ION_TABLE':str(data/'PAHion_30.dat')}):
+                _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                    'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                    'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                    'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                    'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                    'Separate metallic Fe':'fe_electric_compare_v1',
+                    'PAH stochastic population':'pah_neutral_absolute_v1',
+                    'Non-Ia carbon fraction after graphite [0,1]; uncalibrated PAH injection':.05})
+                _,charged,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                    'Output directory':str(root/'charged'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                    'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                    'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                    'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                    'PAH stochastic population':'pah_charge_fixed_h_v1'})
+                _,hydrogen,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                    'Output directory':str(root/'hydrogen'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                    'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                    'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                    'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                    'PAH stochastic population':'pah_hydrogen_m13_dl01_v1'})
+                _,molecular,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                    'Output directory':str(root/'molecular'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                    'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                    'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                    'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                    'PAH stochastic population':'pah_h2_rehydrogenation_v1'})
+            self.assertIn("dust_pah_model='pah_h2_rehydrogenation_v1'",molecular[str(root/'molecular/myrun.nml')])
+            self.assertIn('NVAR=3771',molecular[str(root/'molecular/README.txt')])
+            self.assertIn('M13 bound rate',molecular[str(root/'molecular/README.txt')])
+            self.assertIn('SNRT_PAH_ION_TABLE=',molecular[str(root/'molecular/myrun.env.sh')])
+            molecular_raw,_=mkrun.rng.parse_namelist(molecular[str(root/'molecular/myrun.nml')])
+            molecular_values=mkrun.rng.import_to_values(molecular_raw)
+            molecular_messages=mkrun.rng.validate_params(molecular_values)
+            self.assertFalse(any(m.level=='ERROR' for m in molecular_messages))
+            self.assertTrue(any('Vacancy-refilling H2' in m.msg for m in molecular_messages))
+            for key,value in [('dust_relative_motion',True),('dust_iron_model','fe_electric_compare_v1'),('cosmo',True)]:
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(molecular_values,**{key:value}))))
+            self.assertIn("dust_pah_model='pah_hydrogen_m13_dl01_v1'",hydrogen[str(root/'hydrogen/myrun.nml')])
+            self.assertIn('NVAR=3771',hydrogen[str(root/'hydrogen/README.txt')])
+            self.assertIn('SNRT_PAH_ION_TABLE=',hydrogen[str(root/'hydrogen/myrun.env.sh')])
+            hydrogen_raw,_=mkrun.rng.parse_namelist(hydrogen[str(root/'hydrogen/myrun.nml')])
+            hydrogen_values=mkrun.rng.import_to_values(hydrogen_raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(hydrogen_values)))
+            for key,value in [('dust_relative_motion',True),('dust_iron_model','fe_electric_compare_v1'),('cosmo',True)]:
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(hydrogen_values,**{key:value}))))
+            self.assertIn("dust_pah_model='pah_charge_fixed_h_v1'",charged[str(root/'charged/myrun.nml')])
+            self.assertIn('NVAR=443',charged[str(root/'charged/README.txt')])
+            self.assertIn('SNRT_PAH_ION_TABLE=',charged[str(root/'charged/myrun.env.sh')])
+            charged_raw,_=mkrun.rng.parse_namelist(charged[str(root/'charged/myrun.nml')])
+            charged_values=mkrun.rng.import_to_values(charged_raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(charged_values)))
+            for key,value in [('dust_relative_motion',True),('dust_iron_model','fe_electric_compare_v1')]:
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(charged_values,**{key:value}))))
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn("dust_pah_model='pah_neutral_absolute_v1'",text)
+            self.assertIn('NVAR=317',files[str(root/'fresh/README.txt')])
+            self.assertIn('SNRT_PAH_NEUTRAL_TABLE=',files[str(root/'fresh/myrun.env.sh')])
+            self.assertNotIn('SNRT_STELLAR_SED=',files[str(root/'fresh/myrun.env.sh')])
+            raw,_=mkrun.rng.parse_namelist(text)
+            values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            for key,value in [('dust_pah_model','none'),('cosmo',True),('dust_mass_enabled',False),
+                              ('dust_pah_condensation',float('nan')),('dust_sublimation','gd89_graphite_bulk_v1')]:
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**{key:value}))))
+
+    def test_iron_comparison_selection(self):
+        with comparison_workspace() as root:
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'
+            contract=root/'simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml'
+            data=root/'fe-chimes';data.mkdir()
+            (data/'main.hdf5').touch()
+            for i in range(1,10):
+                (data/f'group_{i:02d}.hdf5').touch()
+            with mock.patch.dict(os.environ,{'SNRT_CHIMES_BINARY':str(binary),
+                    'SNRT_CHIMES_MAIN_DATA':str(data/'main.hdf5'),'SNRT_CHIMES_GROUP_DIR':str(data),
+                    'SNRT_DUST_IRON_BINARY':str(binary),'SNRT_DUST_IRON_CONTRACT':str(contract)}):
+                _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                    'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                    'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                    'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                    'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                    'Separate metallic Fe':'fe_electric_compare_v1'})
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn("dust_iron_model='fe_electric_compare_v1'",text)
+            self.assertIn('dust_fe_kinetics=.false.',text)
+            self.assertIn('dust_fe_sticking=0',text)
+            self.assertIn('NVAR=189',files[str(root/'fresh/README.txt')])
+            self.assertNotIn('SNRT_STELLAR_SED=',files[str(root/'fresh/myrun.env.sh')])
+            raw,_=mkrun.rng.parse_namelist(text)
+            values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            kinetic=dict(values,dust_fe_kinetics=True,dust_fe_sticking=.3)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(kinetic)))
+            for changes in ({'dust_sn_shocks':True},{'dust_fe_sticking':float('nan')},
+                            {'dust_fe_sticking':1.1},{'dust_fe_kinetics':False},
+                            {'dust_iron_model':'none'},{'dust_mass_enabled':False}):
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(kinetic,**changes))))
+            for key,value in [('dust_iron_model','none'),('dust_sublimation','gd89_graphite_bulk_v1'),
+                              ('dust_fe_condensation',float('nan')),('dust_injection_temperature',301)]:
+                invalid=dict(values,dust_fe_condensation=.2)
+                invalid[key]=value
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(invalid)))
+
+    def test_static_iron_without_chimes(self):
+        with comparison_workspace() as root:
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'
+            contract=root/'simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml'
+            with mock.patch.dict(os.environ,{'SNRT_DUST_IRON_BINARY':str(binary),
+                    'SNRT_DUST_IRON_CONTRACT':str(contract)}):
+                _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                    'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                    'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                    'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'none',
+                    'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                    'Separate metallic Fe':'fe_electric_compare_v1'})
+            text=files[str(root/'fresh/myrun.nml')]
+            raw,_=mkrun.rng.parse_namelist(text)
+            values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            self.assertIn('NVAR=32',files[str(root/'fresh/README.txt')])
+            self.assertIn('CHIMES=0',files[str(root/'fresh/README.txt')])
+            self.assertNotIn('SNRT_STELLAR_SED=',files[str(root/'fresh/myrun.env.sh')])
+            for change in ({'dust_fe_condensation':.1},{'dust_growth':True},
+                           {'dust_fe_kinetics':True},{'dust_condensation':[0,.1,0]},
+                           {'dust_relative_motion':True}):
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**change))))
+
+    def test_graphite_sublimation_selection(self):
+        with comparison_workspace() as root:
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'
+            contract=root/'simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml'
+            choices={'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'snrt_hhe_cie_metals',
+                'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                'Dust sublimation':'gd89_graphite_bulk_v1'}
+            with mock.patch.dict(os.environ,{'SNRT_DUST_SUBLIMATION_BINARY':str(binary),
+                    'SNRT_DUST_SUBLIMATION_CONTRACT':str(contract)}):
+                _,files,_=collect(choices)
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn("dust_sublimation='gd89_graphite_bulk_v1'",text)
+            self.assertIn(str(contract),files[str(root/'fresh/myrun.env.sh')])
+            raw,_=mkrun.rng.parse_namelist(text)
+            values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            values['dust_material_model']='fixed_mix'
+            self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            choices['Dust sublimation']='gd89_xu25_olivine_v1'
+            with mock.patch.dict(os.environ,{'SNRT_DUST_SUBLIMATION_BINARY':str(binary),
+                    'SNRT_DUST_SUBLIMATION_CONTRACT':str(contract)}):
+                _,files,_=collect(choices)
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn("dust_sublimation='gd89_xu25_olivine_v1'",text)
+            raw,_=mkrun.rng.parse_namelist(text)
+            values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            self.assertIn('RH95 ideal Fo/Fa',files[str(root/'fresh/README.txt')])
+            with mock.patch.dict(os.environ,{'SNRT_DUST_SUBLIMATION_BINARY':'',
+                    'SNRT_DUST_SUBLIMATION_CONTRACT':''}):
+                with self.assertRaisesRegex(ValueError,'SUBLIMATION_BINARY'):
+                    collect(choices)
+
+    def test_chimes_live_selection(self):
+        with comparison_workspace() as root:
+            data=root/'chemistry'
+            data.mkdir()
+            for name in ['main.hdf5']+[f'group_{i:02d}.hdf5' for i in range(1,10)]:
+                (data/name).write_text('setup fixture, not a physical table\n')
+            binary=root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'
+            with mock.patch.dict(os.environ,{'SNRT_CHIMES_BINARY':str(binary),
+                    'SNRT_CHIMES_MAIN_DATA':str(data/'main.hdf5'),'SNRT_CHIMES_GROUP_DIR':str(data)}):
+                _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                    'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                    'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                    'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                    'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1'})
+            self.assertIn("dust_cooling='chimes_neq_v1'",files[str(root/'fresh/myrun.nml')])
+            self.assertIn('NVAR=187',files[str(root/'fresh/README.txt')])
+            self.assertIn('SNRT_CHIMES_MAIN_DATA=',files[str(root/'fresh/myrun.env.sh')])
+            raw,_=mkrun.rng.parse_namelist(files[str(root/'fresh/myrun.nml')])
+            values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            values['gamma']=1.4
+            self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            contract=root/'simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml'
+            with mock.patch.dict(os.environ,{'SNRT_CHIMES_BINARY':str(binary),
+                    'SNRT_CHIMES_MAIN_DATA':str(data/'main.hdf5'),'SNRT_CHIMES_GROUP_DIR':str(data),
+                    'SNRT_DUST_SUBLIMATION_BINARY':str(binary),'SNRT_DUST_SUBLIMATION_CONTRACT':str(contract)}):
+                _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                    'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                    'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                    'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                    'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                    'Dust sublimation':'gd89_xu25_olivine_rt_v1'})
+            self.assertIn("dust_sublimation='gd89_xu25_olivine_rt_v1'",files[str(root/'fresh/myrun.nml')])
+            self.assertIn('Evaporation is inside the IR material root',files[str(root/'fresh/README.txt')])
+            self.assertIn('adaptive BE step doubling',files[str(root/'fresh/README.txt')])
+            self.assertNotIn('No latent heat.',files[str(root/'fresh/README.txt')])
+            raw,_=mkrun.rng.parse_namelist(files[str(root/'fresh/myrun.nml')])
+            values=mkrun.rng.import_to_values(raw)
+            self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+            values['dust_cooling']='snrt_hhe_cie_metals'
+            self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+
     def test_atomic_cooling_selection(self):
         with comparison_workspace() as root:
             _,files,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
@@ -352,6 +719,7 @@ class WizardTests(unittest.TestCase):
             self.assertIn('var_region(1,14)=5.43633430456151513d-13', text)
             self.assertEqual(preview[str(root / 'new run/myrun.history.nml')], '! setup-only history fixture\n')
             environment = preview[str(root / 'new run/myrun.env.sh')]
+            self.assertIn('SNRT_SPECTRAL_MODEL=fixed', environment)
             self.assertIn('SNRT_STELLAR_SED=', environment)
             self.assertIn('SNRT_DUST_CONTRACT=', environment)
             self.assertIn('PHASE0_SNIA_RUNTIME_CONTRACT=', environment)
@@ -443,6 +811,14 @@ class WizardTests(unittest.TestCase):
         self.assertFalse([m for m in rng.validate_params(binary) if m.level == 'ERROR'])
         for edit in (dict(use_agb=False), dict(binary_fraction=0), dict(binary_fraction=float('nan'))):
             self.assertTrue([m for m in rng.validate_params(dict(binary, **edit)) if m.level == 'ERROR'])
+        pair = dict(valid, high_mass_preset='source_consistent', use_pisn=True,
+                    imf_mass_min_msun=.08, imf_mass_max_msun=600.,
+                    channel_mass_min_msun='14d0,1d0,14d0,3d0,14d0',
+                    channel_mass_max_msun='600d0,8d0,600d0,8d0,600d0')
+        self.assertFalse([m for m in rng.validate_params(pair) if m.level == 'ERROR'])
+        for edit in (dict(imf_mass_max_msun=120), dict(high_mass_preset='wind_only_collapse'),
+                     dict(channel_mass_max_msun='600,8,600,8,599'), dict(channel_mass_min_msun='14,1,14,3,nan')):
+            self.assertTrue([m for m in rng.validate_params(dict(pair, **edit)) if m.level == 'ERROR'])
 
     def test_high_mass_choices_round_trip_and_validation(self):
         rng = mkrun.rng
@@ -497,6 +873,30 @@ class WizardTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'sink creation requires'):
                 mkrun.generate_run(ui, files.__setitem__)
             self.assertEqual(files, {})
+
+    def test_gas_mhd_shared_wizard(self):
+        _, files, report = collect({'Run mode': 'hydro', 'riemann solver': 'hlld',
+            'enable cooling + star formation physics?': False})
+        values = report['values']
+        self.assertTrue(values['mhd_enabled'])
+        self.assertFalse(values['pressure_fix'])
+        self.assertFalse(values['gpu_hydro'])
+        self.assertEqual(values['feedback_mode'], 'legacy')
+        nml = next(text for name, text in files.items() if name.endswith('.nml'))
+        self.assertIn('&STELLAR_ENRICHMENT_PARAMS', nml)
+        self.assertIn('mhd_enabled=.true.', nml)
+
+    def test_mhd_hybrid_shared_wizard(self):
+        _, files, report = collect({'Run mode': 'hydro', 'riemann solver': 'hlld',
+            'enable cooling + star formation physics?': False,
+            'parallel MHD grid batches (OpenMP)?': True,
+            'hybrid CUDA HLLD face batches (USE_CUDA=1, NENER=0)?': True})
+        self.assertTrue(report['values']['mhd_omp'])
+        self.assertTrue(report['values']['mhd_gpu_faces'])
+        self.assertFalse(report['values']['gpu_hydro'])
+        nml = next(text for name, text in files.items() if name.endswith('.nml'))
+        self.assertIn('mhd_omp=.true.', nml)
+        self.assertIn('mhd_gpu_faces=.true.', nml)
 
     def test_preview_never_touches_filesystem(self):
         with mock.patch('builtins.open', side_effect=AssertionError('preview wrote a file')), \

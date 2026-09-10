@@ -6,11 +6,20 @@
 ! eleven independently tracked ejecta fields without that overlap.
 
 module stellar_ramses_runtime
+#ifdef SNRT
+  use snrt_parsec_source, only: parsec_sed_bind
+#endif
+#ifdef DUST_DYNAMICS
+  use dust_phase_state, only: dust_phase_masses
+  use stellar_source_increment, only: source_condensed_donors,source_condensed_momentum
+#endif
   use cosmic_ray_physics, only: cr_enabled,cr_source_partition
 #if defined(SNRT) && defined(DUST_LIVE)
   use dust_mass_physics, only: dust_mass_enabled,dust_condense,dust_composition_enabled, &
-       dust_two_size_enabled,dust_injection_bins,dust_sn_shocks
+       dust_two_size_enabled,dust_injection_bins,dust_sn_shocks,dust_iron_enabled,dust_fe_condensation,olivine_fraction
   use dust_mass_runtime, only: dust_injection_specific_energy
+  use dust_mass_physics, only: dust_pah_enabled,dust_pah_condense,dust_pah_nstate
+  use dust_pah_live_model, only: pah_live_prepare,pah_injection,pah_injection_specific_u
 #endif
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use omp_lib, only: omp_lock_kind, omp_init_lock, omp_set_lock, omp_unset_lock
@@ -19,7 +28,7 @@ module stellar_ramses_runtime
   use hydro_commons
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels, active_element, enable_wind, enable_agb, &
-       enable_snii, enable_snia, enable_pisn, default_imf_id, channel_agb, channel_snii, &
+       enable_snii, enable_snia, enable_pisn, default_imf_id, channel_agb, channel_snii, channel_pisn, &
        population_model_id, yield_source_basis_id, configured_imf_mass_min, &
        configured_imf_mass_max, configured_binary_fraction, &
        configured_channel_mass_min, configured_channel_mass_max, &
@@ -86,6 +95,9 @@ module stellar_ramses_runtime
   public :: phase0_feedback
   public :: phase0_get_runtime_identity
   public :: phase0_prepare_sources, phase0_source_identity, phase0_check_source_consensus
+#ifdef SNRT
+  public :: phase0_bind_radiation
+#endif
 
 contains
 
@@ -164,6 +176,15 @@ contains
        write(*,*) '  mass assignment = piecewise source-cell'
     end if
   end subroutine phase0_initialize
+
+#ifdef SNRT
+  subroutine phase0_bind_radiation(ierr)
+    integer,intent(out)::ierr
+    call phase0_prepare_sources(ierr)
+    if(ierr/=0)return
+    call parsec_sed_bind(yield_table,ierr)
+  end subroutine
+#endif
 
   subroutine phase0_prepare_sources(ierr)
     integer,intent(out)::ierr
@@ -331,6 +352,7 @@ contains
     ! Keep existing exact-Z, SNIa-off checkpoints readable. Extensions bind
     ! the new Z policy and EVERY consumed SNIa contract value, not just labels.
     if(yield_table%high_mass_linear_z)values=[values,2d0,1d0]
+    if(yield_table%high_mass_version==4)values=[values,10d0,4d0,real(yield_table%hm_fate,stellar_dp)]
     if(yield_table%net_yield_diagnostic_unavailable)values=[values,5d0,1d0]
     if(any(yield_table%net_yield_channel_available).and..not.all(yield_table%net_yield_channel_available)) &
          values=[values,8d0,merge(1d0,0d0,yield_table%net_yield_channel_available)]
@@ -604,7 +626,12 @@ contains
     real(stellar_dp) :: scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2
     real(stellar_dp) :: scale_mass, scale_momentum, scale_energy,cr_energy,cr_snia_energy
 #if defined(SNRT) && defined(DUST_LIVE)
-    real(stellar_dp) :: dust_source,dust_specific_u,dust_source_u,dust_sn_energy
+    real(stellar_dp) :: dust_source,dust_specific_u,dust_source_u,dust_sn_energy,dust_fe_source,available_fe
+    real(stellar_dp) :: pah_source,pah_source_u
+#ifdef DUST_DYNAMICS
+    real(stellar_dp)::injected_phase(ndust_phase),injected_momentum(3,ndust_phase)
+    integer::phase_bin,phase_index
+#endif
 #endif
     real(stellar_dp) :: returned_code, snii_returned_code, snia_returned_code
     real(stellar_dp) :: volume
@@ -993,7 +1020,7 @@ contains
     cr_energy=0;cr_snia_energy=0
     if(enable_snia)cr_snia_energy=snia_budget%energy*snia_coupling%thermal_fraction
     if(cr_enabled)then
-       call cr_source_partition(source%channel_energy(channel_snii), &
+       call cr_source_partition(source%channel_energy(channel_snii)+source%channel_energy(channel_pisn), &
             cr_snia_energy,cr_energy,snia_bridge_ierr)
        if(snia_bridge_ierr/=0)then
           ierr=91
@@ -1006,6 +1033,8 @@ contains
     endif
 #if defined(SNRT) && defined(DUST_LIVE)
     if(dust_mass_enabled)then
+       dust_fe_source=0
+       pah_source=0
        if(dust_composition_enabled())then
           dust_source=sum(source%dust_species);snia_bridge_ierr=0
           if(any(source%dust_species<0).or..not.all(ieee_is_finite(source%dust_species)))snia_bridge_ierr=1
@@ -1013,7 +1042,8 @@ contains
           if(dust_two_size_enabled())staged_delta(idust_bins:idust_bins+3)= &
                dust_injection_bins(source%dust_species)/scale_mass/volume
           if(dust_sn_shocks)then
-             dust_sn_energy=source%channel_energy(channel_snii)+cr_snia_energy-cr_energy
+             dust_sn_energy=source%channel_energy(channel_snii)+source%channel_energy(channel_pisn)+ &
+                  cr_snia_energy-cr_energy
              if(.not.ieee_is_finite(dust_sn_energy).or.dust_sn_energy<0)then
                 ierr=94;call progress_abort(progress,progress_ierr);return
              endif
@@ -1026,7 +1056,21 @@ contains
           call dust_condense(source%channel_returned_mass(1:3),source%channel_ejected_mass(1:3,1), &
                source%channel_ejected_mass(1:3,2),dust_source,snia_bridge_ierr)
        endif
-       if(snia_bridge_ierr==0)call dust_injection_specific_energy(dust_specific_u,snia_bridge_ierr,source%dust_species)
+       if(dust_iron_enabled().and.snia_bridge_ierr==0)then
+          ! Explicit comparison fraction of non-Ia Fe AFTER olivine. The
+          ! separately coupled SNIa reservoir is not condensed by this model.
+          available_fe=sum(source%channel_ejected_mass(1:3,11))-olivine_fraction(11)*source%dust_species(2)
+          if(available_fe < -128*epsilon(1d0)*max(source%ejected_mass(11),tiny(1d0)))then
+             snia_bridge_ierr=1
+          else
+             dust_fe_source=dust_fe_condensation*max(0d0,available_fe)
+             staged_delta(idust_iron)=0
+             staged_delta(idust_iron+1)=dust_fe_source/scale_mass/volume
+             dust_source=dust_source+dust_fe_source
+          endif
+       endif
+       if(snia_bridge_ierr==0)call dust_injection_specific_energy( &
+            dust_specific_u,snia_bridge_ierr,source%dust_species,dust_fe_source)
        if(snia_bridge_ierr/=0)then
           ierr=92;call progress_abort(progress,progress_ierr);return
        endif
@@ -1039,6 +1083,53 @@ contains
        staged_delta(idust)=dust_source/scale_mass/volume
        staged_delta(idust_energy)=dust_source_u/scale_energy/volume
        staged_delta(ndim+2)=staged_delta(ndim+2)-staged_delta(idust_energy)
+       if(dust_pah_enabled())then
+          call pah_live_prepare(snia_bridge_ierr)
+          if(snia_bridge_ierr/=0)then
+             ierr=92;call progress_abort(progress,progress_ierr);return
+          endif
+          ! Explicit fraction of non-Ia carbon remaining AFTER graphite.
+          ! Hydrogen is taken from this same ejecta, never from metallicity.
+          call dust_pah_condense(sum(source%channel_ejected_mass(1:3,1)), &
+               sum(source%channel_ejected_mass(1:3,3)),source%dust_species(1), &
+               pah_source,snia_bridge_ierr)
+          if(snia_bridge_ierr/=0)then
+             ierr=92;call progress_abort(progress,progress_ierr);return
+          endif
+          pah_source_u=pah_source*solar_mass_cgs*pah_injection_specific_u
+          if(.not.all(ieee_is_finite([pah_source,pah_source_u])).or. &
+               dust_source_u+pah_source_u>source%energy+cr_snia_energy-cr_energy)then
+             ierr=93;call progress_abort(progress,progress_ierr);return
+          endif
+          staged_delta(idust_pah:idust_pah+dust_pah_nstate()-1)=pah_source/scale_mass/volume*pah_injection
+          staged_delta(ndim+2)=staged_delta(ndim+2)-pah_source_u/scale_energy/volume
+       endif
+       if(dust_relative_motion)then
+#ifdef DUST_DYNAMICS
+          call dust_phase_masses(staged_delta,injected_phase,snia_bridge_ierr)
+          if(snia_bridge_ierr/=0)then
+             ierr=95;call progress_abort(progress,progress_ierr);return
+          endif
+          if(any(injected_phase>0))then
+             call source_condensed_donors(source,dust_fe_source,pah_source,snia_bridge_ierr)
+             if(snia_bridge_ierr==0)call source_condensed_momentum(source,vp(ipart,1:3),scale_mass, &
+                  scale_momentum,volume,dust_iron_enabled(),dust_pah_enabled(),injected_phase, &
+                  injected_momentum,snia_bridge_ierr)
+             if(snia_bridge_ierr/=0)then
+                write(*,*)'ERROR: stellar condensed-mass donor ledger does not close'
+                ierr=95;call progress_abort(progress,progress_ierr);return
+             endif
+             do phase_bin=1,ndust_phase
+                phase_index=idust_momentum+3*(phase_bin-1)
+                staged_delta(phase_index:phase_index+2)=injected_momentum(:,phase_bin)
+             enddo
+             ! Generic total p/E already include all ejecta and channel KE.
+             ! Appending the grain share changes their partition, not totals.
+          endif
+#else
+          ierr=95;call progress_abort(progress,progress_ierr);return
+#endif
+       endif
     endif
 #endif
     if (.not. all(ieee_is_finite(staged_delta))) then

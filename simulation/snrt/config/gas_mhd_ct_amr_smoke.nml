@@ -1,0 +1,110 @@
+! Gas-only 3D CPU CT/HLLD AMR smoke; SOLVER=mhd SNRT=1 HDF5=1.
+! Periodic unit box, uniform code-unit B, localized velocity perturbation.
+! Four coarse steps, two HDF5 dumps. RT/feedback/CR/dust intentionally off.
+&RUN_PARAMS
+ cosmo=.false.
+ pic=.false.
+ poisson=.false.
+ hydro=.true.
+ rt=.false.
+ sink=.false.
+ nrestart=0
+ nstepmax=4
+ ncontrol=1
+ nsubcycle=1,1,1,1,2
+ nremap=0
+ gpu_hydro=.false.
+ gpu_poisson=.false.
+ gpu_fft=.false.
+ gpu_sink=.false.
+ gpu_scalar=.false.
+ gpu_particle=.false.
+ gpu_auto_tune=.false.
+ use_fftw=.false.
+/
+&INIT_PARAMS
+ filetype='ascii'
+ initfile(1)=' '
+ nregion=2
+ region_type(1)='square'
+ x_center(1)=0.5
+ y_center(1)=0.5
+ z_center(1)=0.5
+ length_x(1)=1.0
+ length_y(1)=1.0
+ length_z(1)=1.0
+ exp_region(1)=10
+ d_region(1)=1.0
+ p_region(1)=0.6
+ v_region(1)=-0.1
+ region_type(2)='square'
+ x_center(2)=0.5
+ y_center(2)=0.5
+ z_center(2)=0.5
+ length_x(2)=0.25
+ length_y(2)=0.25
+ length_z(2)=0.25
+ exp_region(2)=10
+ d_region(2)=1.0
+ p_region(2)=0.6
+ v_region(2)=0.1
+/
+&AMR_PARAMS
+ levelmin=4
+ levelmax=5
+ ngridmax=8192
+ npartmax=1
+ nexpand=1
+ boxlen=1.0
+/
+&OUTPUT_PARAMS
+ noutput=1
+ aout=2.0
+ tout=1d30
+ foutput=2
+ fbackup=1000000
+ outformat='hdf5'
+ informat='hdf5'
+/
+&HYDRO_PARAMS
+ mhd_enabled=.true.
+ mhd_seed=0.2,0.1,0.3
+ gamma=1.6666666666666667
+ courant_factor=0.3
+ slope_type=2
+ slope_mag_type=2
+ interpol_mag_type=2
+ scheme='muscl'
+ riemann='hlld'
+ riemann2d='hlld'
+ pressure_fix=.false.
+/
+&BOUNDARY_PARAMS
+ nboundary=0
+/
+&PHYSICS_PARAMS
+ cooling=.false.
+ metal=.false.
+ isothermal=.false.
+ T2_star=0
+ t_star=0
+ eps_star=0
+ n_star=0
+ sink_AGN=.false.
+ agn=.false.
+ cr_enabled=.false.
+ dust_mass_enabled=.false.
+ units_density=1d-24
+ units_length=3.08567758149d18
+ units_time=3.15576d13
+/
+
+&STELLAR_ENRICHMENT_PARAMS
+ feedback_mode='legacy'
+/
+
+&REFINE_PARAMS
+ err_grad_u=0.02
+ interpol_var=1
+ interpol_type=1
+/

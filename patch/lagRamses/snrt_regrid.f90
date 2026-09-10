@@ -96,11 +96,25 @@ contains
     integer, intent(in) :: icell
     real(dp), intent(in) :: payload(:)
     integer, intent(out) :: ierr
+    call validate_restore(icell,payload,ierr)
+    if(ierr/=0)return
     call snrt_state_restore_cell(icell,payload(1:snrt_checkpoint_cell_width),ierr)
     if(ierr/=0)return
 #ifdef DUST_LIVE
     if(ir_width()>0)call snrt_dust_live_restore(icell,payload(snrt_checkpoint_cell_width+1:),ierr)
 #endif
+  end subroutine
+
+  subroutine validate_restore(icell,payload,ierr)
+    integer, intent(in) :: icell
+    real(dp), intent(in) :: payload(:)
+    integer, intent(out) :: ierr
+    ierr=2
+    if(size(payload)/=snrt_checkpoint_cell_width+ir_width())return
+    if(any(.not.ieee_is_finite(payload)))return
+    if(any(payload(snrt_checkpoint_cell_width+1:)<0.0_dp))return
+    if(payload(1)==0.0_dp.and.any(payload/=0.0_dp))return
+    call snrt_state_restore_cell(icell,payload(1:snrt_checkpoint_cell_width),ierr,validate_only=.true.)
   end subroutine
 
   subroutine clear(icell,ierr)
@@ -140,6 +154,10 @@ contains
     if(ierr/=0)return
     call pack(parent,payload,ierr)
     if(ierr/=0)return
+    do j=1,twotondim
+       call validate_restore(children(j),payload,ierr)
+       if(ierr/=0)return
+    end do
     ! First-order, positivity-preserving prolongation of density variables.
     ! Each child has 1/8 the parent volume, so integrated photons/IR are kept.
     do j=1,twotondim
@@ -223,12 +241,9 @@ contains
     end do
     norm=max(1.0_dp,sum(merged(3:4)))
     merged(3:4)=merged(3:4)/norm
-    call validate_cell_payload(merged(1:snrt_checkpoint_cell_width),ierr)
-    if(ierr/=0)return
-    if(any(.not.ieee_is_finite(merged)).or.any(merged<0))then
-       ierr=2
-       return
-    end if
+    ! Number and signed correction densities use the same volume weights.
+    ! Validate the eventual stored FP32 number as well as the FP64 average.
+    call validate_restore(parent,merged,ierr)
   end subroutine
 
   subroutine snrt_regrid_upload(ilevel,ierr)
@@ -302,10 +317,9 @@ contains
        received(j,:)=field(owned)
     end do
     do i=1,nowned
-       call validate_cell_payload(received(1:snrt_checkpoint_cell_width,i),j)
+       call validate_restore(owned(i),received(:,i),j)
        ierr=max(ierr,j)
     end do
-    if(any(.not.ieee_is_finite(received)).or.any(received<0))ierr=max(ierr,3)
 #ifndef WITHOUTMPI
     call MPI_ALLREDUCE(ierr,global_error,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
     if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,10,j)

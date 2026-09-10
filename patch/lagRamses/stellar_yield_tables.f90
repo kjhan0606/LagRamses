@@ -45,11 +45,15 @@ module stellar_yield_tables
      logical :: high_mass_ready = .false.
      logical :: high_mass_wind_only = .false.
      logical :: high_mass_linear_z = .false.
+     integer :: high_mass_version = 0
      logical :: net_yield_diagnostic_unavailable = .false.
      logical :: net_yield_channel_available(n_stellar_channels) = .true.
      character(len=128) :: high_mass_identity(4) = ''
      real(stellar_dp), allocatable :: hm_mass(:), hm_z(:), hm_age(:), hm_remnant(:), hm_adjustment(:)
      integer, allocatable :: hm_wind_row(:), hm_terminal_row(:)
+     ! v4: 1 CCSN, 2 failed SN, 3 PPISN, 4 PISN, 5 direct BH.
+     ! Channel3 owns remnants; channel5 owns pair-instability ejecta only.
+     integer, allocatable :: hm_fate(:), hm_pair_row(:)
      ! Optional single terminal envelope/WD event, indexed by source M,Z.
      integer, allocatable :: agb_terminal_row(:)
      ! CO=0, hybrid CO(Ne)=1, ONe=2. Only CO can supply the strict Ia ledger.
@@ -95,12 +99,14 @@ contains
     if (allocated(table%hm_mass)) deallocate(table%hm_mass, table%hm_z, table%hm_age, &
          table%hm_remnant, table%hm_adjustment, table%hm_wind_row, table%hm_terminal_row)
     if (allocated(table%agb_terminal_row)) deallocate(table%agb_terminal_row)
+    if (allocated(table%hm_fate)) deallocate(table%hm_fate,table%hm_pair_row)
     if (allocated(table%agb_remnant_kind)) deallocate(table%agb_remnant_kind)
     if (allocated(table%agb_terminal_jump_fraction)) deallocate(table%agb_terminal_jump_fraction)
     table%co_wd_inventory_only = .false.
     table%high_mass_ready = .false.
     table%high_mass_wind_only = .false.
     table%high_mass_linear_z = .false.
+    table%high_mass_version = 0
     table%net_yield_diagnostic_unavailable = .false.
     table%net_yield_channel_available = .true.
     table%high_mass_identity = ''

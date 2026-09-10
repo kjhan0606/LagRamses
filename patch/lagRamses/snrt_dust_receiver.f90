@@ -154,7 +154,7 @@ contains
   subroutine snrt_dust_receiver_stage(absorbed_photons_cm3, mean_energy_ev, dt_s, &
        dust_relative_abundance, heat_capacity_erg_cm3_k, old_energy_erg_cm3, &
        old_temperature_k, staged_energy_erg_cm3, staged_temperature_k, &
-       absorbed_energy_erg_cm3, ierr, defer_temperature)
+       absorbed_energy_erg_cm3, ierr, defer_temperature, deposited_spectrum_erg_cm3)
     ! For v4 only stage deposited energy; the coupled IR solve obtains T
     ! from U(T). Do not replace that solve by C(T)*T or by two heating steps.
     ! The old arrays are never modified by this routine.
@@ -166,6 +166,10 @@ contains
     real(real64), intent(out) :: absorbed_energy_erg_cm3(:)
     integer, intent(out) :: ierr
     logical, optional, intent(in) :: defer_temperature
+    ! Actual deposited heat by group after the independently booked grain
+    ! kinetic work. Do not reconstruct it from nominal group means after
+    ! Doppler/scattering evolution of the independent radiation energy.
+    real(real64), optional, intent(in) :: deposited_spectrum_erg_cm3(:,:)
     integer :: cell, group, nc, ng
     real(real64) :: energy, residual, scale, tolerance
 
@@ -199,6 +203,17 @@ contains
        ierr = snrt_dust_receiver_err_input
        return
     end if
+    if(present(deposited_spectrum_erg_cm3))then
+       if(any(shape(deposited_spectrum_erg_cm3)/=[ng,nc]))then
+          ierr=snrt_dust_receiver_err_shape;return
+       endif
+       if(any(.not.ieee_is_finite(deposited_spectrum_erg_cm3)).or.any(deposited_spectrum_erg_cm3<0))then
+          ierr=snrt_dust_receiver_err_input;return
+       endif
+       if(any(absorbed_photons_cm3==0.and.deposited_spectrum_erg_cm3>0))then
+          ierr=snrt_dust_receiver_err_state;return
+       endif
+    endif
     do cell = 1, nc
        energy = 0.0d0
        do group = 1, ng
@@ -206,6 +221,8 @@ contains
                mean_energy_ev(group)
        end do
        absorbed_energy_erg_cm3(cell) = energy * snrt_dust_receiver_ev_to_erg
+       if(present(deposited_spectrum_erg_cm3)) &
+            absorbed_energy_erg_cm3(cell)=sum(deposited_spectrum_erg_cm3(:,cell))
        if (.not. ieee_is_finite(absorbed_energy_erg_cm3(cell)) .or. &
             absorbed_energy_erg_cm3(cell) < 0.0d0) then
           ierr = snrt_dust_receiver_err_input

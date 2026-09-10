@@ -7,7 +7,7 @@
 
 module stellar_source_increment
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use dust_mass_physics, only: dust_gas_elements
+  use dust_mass_physics, only: dust_gas_elements,olivine_fraction,dust_pah_hc,dust_injection_bins
   use stellar_enrichment_config, only: stellar_dp
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, stellar_source_t, clear_cumulative, clear_source, &
@@ -24,6 +24,7 @@ module stellar_source_increment
   integer, parameter, public :: source_increment_err_negative = 8
 
   public :: integrate_ssp_channel_increment
+  public :: source_condensed_donors,source_condensed_momentum
 
 contains
 
@@ -85,8 +86,134 @@ contains
        ierr = source_increment_err_negative
        return
     end if
+    ! Condensation was already evaluated on source-node segments before SSP
+    ! integration. Retain that result here, before channels are summed.
+    source%channel_condensed_mass(channel_id,1:2)=source%dust_species
     if (present(current_cumulative)) current_cumulative = current
   end subroutine integrate_ssp_channel_increment
+
+  subroutine source_condensed_donors(source,iron_mass,pah_mass,ierr)
+    ! Preserve the existing aggregate condensation yields exactly. Only
+    ! resolve their ephemeral mass provenance for component momentum.
+    ! Fe uses residual Fe after olivine. The aggregate PAH minimum consumes
+    ! H and residual C from the already mixed ejecta: sample each element's
+    ! contributing channels proportionally, NOT each channel's total mass.
+    type(stellar_source_t),intent(inout)::source
+    real(stellar_dp),intent(in)::iron_mass,pah_mass
+    integer,intent(out)::ierr
+    real(stellar_dp)::work(size(source%channel_returned_mass),4)
+    real(stellar_dp)::available(size(source%channel_returned_mass)),part(size(source%channel_returned_mass))
+    real(stellar_dp)::target(4),tol,total
+    integer::m,c
+    ierr=source_increment_err_negative;work=source%channel_condensed_mass;work(:,3:4)=0
+    target=[source%dust_species,iron_mass,pah_mass]
+    if(any(.not.ieee_is_finite(target)).or.any(target<0))return
+    if(any(.not.ieee_is_finite(work)).or.any(work<0))return
+    do m=1,2
+       total=sum(work(:,m));tol=256*epsilon(1d0)*max(total,target(m),tiny(1d0))
+       if(abs(total-target(m))>tol)return
+       call distribute(target(m),work(:,m),part,ierr)
+       if(ierr/=0)return
+       work(:,m)=part
+    enddo
+    available=source%channel_ejected_mass(:,11)-olivine_fraction(11)*work(:,2)
+    available(4:)=0 ! No direct Ia/P(P)ISN Fe condensation prescription.
+    tol=256*epsilon(1d0)*max(maxval(abs(source%channel_ejected_mass(:,11))),tiny(1d0))
+    if(any(available < -tol))then
+       ierr=source_increment_err_negative;return
+    endif
+    call distribute(iron_mass,max(available,0d0),part,ierr)
+    if(ierr/=0)return
+    work(:,3)=part
+    do m=1,2
+       if(m==1)then
+          available=source%channel_ejected_mass(:,1)
+       else
+          available=source%channel_ejected_mass(:,3)-work(:,1)
+       endif
+       available(4:)=0 ! Same ordinary-channel donors used by aggregate PAH.
+       tol=256*epsilon(1d0)*max(maxval(abs(source%channel_ejected_mass(:,2*m-1))),tiny(1d0))
+       if(any(available < -tol))then
+          ierr=source_increment_err_negative;return
+       endif
+       call distribute(pah_mass*dust_pah_hc(m),max(available,0d0),part,ierr)
+       if(ierr/=0)return
+       work(:,4)=work(:,4)+part
+    enddo
+    ierr=source_increment_err_negative
+    do c=1,size(work,1)
+       tol=512*epsilon(1d0)*max(source%channel_returned_mass(c),sum(work(c,:)),tiny(1d0))
+       if(sum(work(c,:))>source%channel_returned_mass(c)+tol)return
+    enddo
+    source%channel_condensed_mass=work;ierr=source_increment_ok
+  contains
+    subroutine distribute(amount,reservoir,donated,status)
+      real(stellar_dp),intent(in)::amount,reservoir(:)
+      real(stellar_dp),intent(out)::donated(:)
+      integer,intent(out)::status
+      real(stellar_dp)::s,tolerance
+      integer::largest
+      status=source_increment_err_negative;donated=0;s=sum(reservoir)
+      if(any(.not.ieee_is_finite(reservoir)).or.any(reservoir<0))return
+      tolerance=512*epsilon(1d0)*max(amount,s,tiny(1d0))
+      if(amount>s+tolerance)return
+      if(amount>0)then
+         if(s<=0)return
+         donated=(reservoir/s)*amount
+         largest=maxloc(reservoir,dim=1)
+         donated(largest)=donated(largest)+amount-sum(donated)
+      endif
+      status=source_increment_ok
+    end subroutine
+  end subroutine source_condensed_donors
+
+  subroutine source_condensed_momentum(source,bulk_velocity,scale_mass,scale_momentum,volume, &
+       has_iron,has_pah,phase_mass,phase_momentum,ierr)
+    type(stellar_source_t),intent(in)::source
+    real(stellar_dp),intent(in)::bulk_velocity(3),scale_mass,scale_momentum,volume,phase_mass(:)
+    logical,intent(in)::has_iron,has_pah
+    real(stellar_dp),intent(inout)::phase_momentum(:,:)
+    integer,intent(out)::ierr
+    real(stellar_dp)::bins(size(phase_mass),size(source%channel_returned_mass))
+    real(stellar_dp)::velocity(3),work(3,size(phase_mass)),s,tol,donor_mass
+    integer::c,b,nb,k
+    ierr=source_increment_err_argument;nb=4+merge(2,0,has_iron)+merge(1,0,has_pah)
+    if(size(phase_mass)/=nb.or.any(shape(phase_momentum)/=[3,nb]))return
+    if(min(scale_mass,scale_momentum,volume)<=0)return
+    if(any(.not.ieee_is_finite([bulk_velocity,scale_mass,scale_momentum,volume])))return
+    if(any(.not.ieee_is_finite(phase_mass)).or.any(phase_mass<0))return
+    ierr=source_increment_err_negative;bins=0;work=0
+    if(any(.not.ieee_is_finite(source%channel_condensed_mass)).or.any(source%channel_condensed_mass<0))return
+    do c=1,size(bins,2)
+       bins(1:4,c)=dust_injection_bins(source%channel_condensed_mass(c,1:2));k=4
+       if(has_iron)then
+          bins(6,c)=source%channel_condensed_mass(c,3);k=6
+       endif
+       if(has_pah)bins(k+1,c)=source%channel_condensed_mass(c,4)
+    enddo
+    bins=bins/scale_mass/volume
+    do b=1,nb
+       s=sum(bins(b,:));tol=1024*epsilon(1d0)*max(s,phase_mass(b),tiny(1d0))
+       if(abs(s-phase_mass(b))>tol)return
+       ! Only roundoff closure against the unchanged legacy field increment.
+       if(s>0)bins(b,:)=bins(b,:)*(phase_mass(b)/s)
+    enddo
+    do c=1,size(bins,2)
+       if(.not.ieee_is_finite(source%channel_returned_mass(c)))return
+       if(any(.not.ieee_is_finite(source%channel_momentum(c,:))))return
+       donor_mass=source%channel_returned_mass(c)/scale_mass
+       if(donor_mass<=0)then
+          if(any(bins(:,c)/=0).or.any(source%channel_momentum(c,:)/=0))return
+          cycle
+       endif
+       velocity=bulk_velocity+(source%channel_momentum(c,:)/scale_momentum)/donor_mass
+       do b=1,nb
+          work(:,b)=work(:,b)+bins(b,c)*velocity
+       enddo
+    enddo
+    if(any(.not.ieee_is_finite(work)))return
+    phase_momentum=work;ierr=source_increment_ok
+  end subroutine source_condensed_momentum
 
   logical function source_values_finite(source)
     type(stellar_source_t), intent(in) :: source

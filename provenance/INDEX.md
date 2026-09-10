@@ -14,6 +14,40 @@ evidence.
 
 ## Active bundle map
 
+SNRT H/He intragroup spectrum (2026-09-10): [native implementation/evidence](snrt_band_implementation_2026-09-10.md).
+Opt-in 64-node maximum-entropy N/E closure, evolving Verner absorption and
+actual energy into chemistry; MPI2/restart exact. Default fixed retained;
+not dust/CHIMES/GPU spectral qualification or completion of all medium physics.
+
+SNRT angular refinement (2026-09-10): [live implementation/evidence](snrt_angular_implementation_2026-09-10.md).
+80/320/720 choices, unchanged 80-ray default, refined MPI2 hydro/dust/feedback
+restart and CUDA transport tests. The bounded H/He spectral extension is above;
+full dust/network spectral coupling remains open.
+
+Medium-term physics (2026-09-10): [scope, first Fe implementation and status](medium_physics_implementation_2026-09-10.md).
+Eight groups approved for implementation; the first feature is optional
+metallic-Fe seed growth plus Fe-specific thermal erosion, not completion of
+the entire medium-term program. [Sources](medium_fe_sources_2026-09-10.md).
+Continuation resolves the cold PAH/Fe 5 K bracket with native material/Planck
+physics and four-step MPI2/OMP2 integration plus exact restart comparison.
+Fixed-H PAH charge/photoelectron/IR and CHIMES gas+solid neutrality now connect
+through 256 hydro carriers and exact MPI2/OMP2 restart, with native energy,
+charge and element evidence. The optional H0--13 PAH comparison now adds
+finite-H attachment/loss, binding energy and state-dependent mass through
+3584 hydro carriers. Native/live conservation and exact MPI2/OMP2 restart
+pass; the enlarged H-state physical identity uses checked HDF5 dataset I/O.
+Carbon-skeleton destruction, H2 chemistry, higher charge states, general
+hard-source survival and the other numbered extensions remain incomplete.
+Group 6 now has a [native collision-aware size comparison and decision](dust_collision_comparison_2026-09-10.md):
+coagulation/fragmentation, mass-ledger boundaries and 16/32/64-bin results.
+Keep the live two-size default; no claim of multibin equivalence or a new
+live multibin transport model. PAH carbon-fragmentation [source gaps](pah_fragmentation_sources_2026-09-10.md)
+remain unresolved; no artificial atomization or inert-C22 closure was added.
+
+Gas ideal MHD (2026-09-10): [implementation and native evidence](gas_mhd_implementation_2026-09-10.md).
+CT/HLLD gas evolution, mixed AMR and same-size HDF5 restart verified;
+dust-field and CR-field interactions explicitly deferred to long-term work.
+
 | Bundle | Status / purpose | Plan | Implementation evidence | Plan audit | End audit / disposition |
 |---|---|---|---|---|---|
 | F-P1.2 stellar feedback transaction | active, engineering contract | [plan](fp1_2_stellar_feedback_transaction_bundle_plan_2026-09-04.md) | [evidence](fp1_2_stellar_feedback_transaction_bundle_implementation_evidence_2026-09-04.md) | — | [Opus final](opus5_fp1_2_stellar_feedback_transaction_bundle_final_audit_2026-09-04.md) |
@@ -73,6 +107,8 @@ evidence.
   remains the governing high-level RT/stellar/AGN feedback/dust roadmap.
 - [audit cadence amendment](audit_cadence_amendment_2026-09-05.md) governs one
   plan audit plus one end audit per bundle, with fallback only when needed.
+  Every future plan audit asks **Q-GOAL** (final-objective alignment) first,
+  then **Q-LEAN** (excessive instrumentation/gates); no extra audit or gate.
 - [Fable operational audit](fable_operational_instrumentation_gate_efficiency_audit_2026-09-05.md)
   classified the workspace `OVERINSTRUMENTED`; F-P2.7 is the approved
   consolidation response.

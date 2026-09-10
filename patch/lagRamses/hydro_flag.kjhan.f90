@@ -25,7 +25,7 @@ subroutine sub_hydro_flag(ilevel,igrid,ngrid,iflag)
   real(dp),dimension(1:3)::skip_loc
   real(dp),dimension(1:twotondim,1:3)::xc
   real(dp),dimension(1:nvector,1:ndim)::xx
-  real(dp),dimension(1:nvector,1:nvar)::uug,uum,uud
+  real(dp),dimension(1:nvector,1:nvar_all)::uug,uum,uud
   iflag = 0
   do i=1,ngrid
      ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
@@ -66,14 +66,18 @@ subroutine sub_hydro_flag(ilevel,igrid,ngrid,iflag)
      ! Loop over dimensions
      do idim=1,ndim
         ! Gather hydro variables
-        do ivar=1,nvar
+        do ivar=1,nvar_all
            do i=1,ngrid
               uug(i,ivar)=uold(indn(i,2*idim-1),ivar)
               uum(i,ivar)=uold(ind_cell(i     ),ivar)
               uud(i,ivar)=uold(indn(i,2*idim  ),ivar)
            end do
         end do
+#ifdef SOLVERmhd
+        call hydro_refine(uug,uum,uud,ok,ngrid,ilevel)
+#else
         call hydro_refine(uug,uum,uud,ok,ngrid,ilevel,idim)
+#endif
      end do
   
      if(poisson.and.jeans_refine(ilevel)>0.0)then
@@ -244,7 +248,7 @@ subroutine jeans_length_refine(ind_cell,ok,ncell,ilevel)
      ! the thermal energy
      dens = max(uold(indi,1),smallr)
      if(dens .ge. dthres)then
-     etherm = uold(indi,ndim+2) 
+     etherm = uold(indi,ndim+2)-magnetic_energy(uold(indi,:))
      etherm = etherm - 0.5d0*uold(indi,2)**2/dens
 #if NDIM > 1
      etherm = etherm - 0.5d0*uold(indi,3)**2/dens
@@ -254,7 +258,7 @@ subroutine jeans_length_refine(ind_cell,ok,ncell,ilevel)
 #endif
 #if NENER>0
      do irad=1,nener
-        etherm=etherm-uold(indi,ndim+2+irad)
+        etherm=etherm-uold(indi,nhydro+irad)
      end do
 #endif
      ! the temperature (c_s^2 = gamma*P/rho = (gamma-1)*etherm/rho)

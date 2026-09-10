@@ -6,6 +6,10 @@ subroutine read_params
   use dust_mass_physics, only: dust_mass_enabled
   use dust_mass_runtime, only: dust_injection_specific_energy
   use snrt_stellar_source, only: stellar_sed_load, stellar_sed_enabled, stellar_sed_consensus, stellar_sed_report
+  use snrt_parsec_source, only: parsec_sed_enabled
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_ramses_runtime, only: phase0_bind_radiation
+#endif
   use snrt_runtime_backend, only: snrt_backend_initialize
   use snrt_spectral_contract, only: snrt_spectral_contract_load_from_environment, &
        snrt_spectral_contract_status, snrt_spectral_contract_runtime_allowed, &
@@ -1777,6 +1781,13 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
              trim(snrt_spectral_contract_status),' source=',trim(snrt_spectral_contract_source_id)
      end if
      call stellar_sed_load(agn_contract_error)
+     if(agn_contract_error==0.and.parsec_sed_enabled)then
+#ifdef PHASE0_STELLAR_ENRICHMENT
+        call phase0_bind_radiation(agn_contract_error)
+#else
+        agn_contract_error=1
+#endif
+     endif
      if(agn_contract_error/=0)then
         if(myid==1)write(*,*)'SNRT stellar SED rejected: check table, IMF and common transport identity'
         nml_ok=.false.

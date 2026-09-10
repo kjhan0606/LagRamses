@@ -52,27 +52,27 @@ subroutine mag_unsplit(uin,gravin,flux,emfx,emfy,emfz,tmp,dx,dy,dz,dt,ngrid)
   REAL(dp),DIMENSION(1:nvector,1:3,1:3,1:3)::emfz
 
   ! Primitive variables
-  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar),save::qin
-  real(dp),dimension(1:nvector,iu1:iu2+1,ju1:ju2+1,ku1:ku2+1,1:3),save::bf
+  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar)::qin
+  real(dp),dimension(1:nvector,iu1:iu2+1,ju1:ju2+1,ku1:ku2+1,1:3)::bf
 
   ! Cell-centered slopes
-  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim),save::dq
+  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim)::dq
 
   ! Face-centered slopes
-  REAL(dp),DIMENSION(1:nvector,iu1:iu2+1,ju1:ju2+1,ku1:ku2+1,1:3,1:ndim),save::dbf
+  REAL(dp),DIMENSION(1:nvector,iu1:iu2+1,ju1:ju2+1,ku1:ku2+1,1:3,1:ndim)::dbf
 
   ! Face-averaged left and right state arrays
-  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim),save::qm
-  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim),save::qp
+  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim)::qm
+  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:ndim)::qp
 
   ! Edge-averaged left-right and top-bottom state arrays
-  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3),save::qRT
-  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3),save::qRB
-  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3),save::qLT
-  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3),save::qLB
+  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3)::qRT
+  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3)::qRB
+  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3)::qLT
+  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3)::qLB
 
   ! Intermediate fluxes
-  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)       ,save::emf
+  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)       ::emf
 
   ! Local scalar variables
   integer::i,j,k,l,ivar
@@ -217,11 +217,12 @@ SUBROUTINE  trace1d(q,dq,qm,qp,dx,dt,ngrid)
   REAL(dp)::dtdx
   REAL(dp)::r, u, v, w, p, A, B, C
   REAL(dp)::drx, dux, dvx, dwx, dpx, dAx, dBx, dCx
-  REAL(dp)::sr0, su0=0, sv0=0, sw0=0, sp0, sA0, sB0, sC0
+  REAL(dp)::sr0, su0, sv0, sw0, sp0, sA0, sB0, sC0
 #if NENER>0
   real(dp),dimension(1:nener)::e, dex, se0
 #endif
 
+  su0=0d0; sv0=0d0; sw0=0d0
   dtdx = dt/dx
 
   ilo=MIN(1,iu1+1); ihi=MAX(1,iu2-1)
@@ -382,7 +383,7 @@ SUBROUTINE trace2d(q,bf,dq,dbf,qm,qp,qRT,qRB,qLT,qLB,dx,dy,dt,ngrid)
   REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3)::qLB
 
   ! Declare local variables
-  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2),save::Ez
+  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::Ez
   INTEGER ::i, j, k, l
   INTEGER ::ilo,ihi,jlo,jhi,klo,khi
   INTEGER ::ir, iu, iv, iw, ip, iA, iB, iC
@@ -391,7 +392,7 @@ SUBROUTINE trace2d(q,bf,dq,dbf,qm,qp,qRT,qRB,qLT,qLB,dx,dy,dt,ngrid)
   REAL(dp)::ELL, ELR, ERL, ERR
   REAL(dp)::drx, dux, dvx, dwx, dpx, dBx, dCx
   REAL(dp)::dry, duy, dvy, dwy, dpy, dAy, dCy
-  REAL(dp)::sr0, su0=0, sv0=0, sw0=0, sp0, sC0
+  REAL(dp)::sr0, su0, sv0, sw0, sp0, sC0
   REAL(dp)::AL, AR, BL, BR
   REAL(dp)::dALy, dARy, dBLx, dBRx
   REAL(DP)::sAL0, sAR0, sBL0, sBR0
@@ -403,6 +404,7 @@ SUBROUTINE trace2d(q,bf,dq,dbf,qm,qp,qRT,qRB,qLT,qLB,dx,dy,dt,ngrid)
   INTEGER::n
 #endif
 
+  su0=0d0; sv0=0d0; sw0=0d0
   dtdx = dt/dx
   dtdy = dt/dy
   smallp = smallr*smallc**2/gamma
@@ -722,9 +724,9 @@ SUBROUTINE trace3d(q,bf,dq,dbf,qm,qp,qRT,qRB,qLT,qLB,dx,dy,dz,dt,ngrid)
   REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar,1:3)::qLB
 
   ! Declare local variables
-  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2),save::Ex
-  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2),save::Ey
-  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2),save::Ez
+  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::Ex
+  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::Ey
+  REAL(dp),DIMENSION(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2)::Ez
 
   INTEGER ::i, j, k, l
   INTEGER ::ilo,ihi,jlo,jhi,klo,khi
@@ -737,7 +739,7 @@ SUBROUTINE trace3d(q,bf,dq,dbf,qm,qp,qRT,qRB,qLT,qLB,dx,dy,dz,dt,ngrid)
   REAL(dp)::drx, dux, dvx, dwx, dpx, dBx, dCx
   REAL(dp)::dry, duy, dvy, dwy, dpy, dAy, dCy
   REAL(dp)::drz, duz, dvz, dwz, dpz, dAz, dBz
-  REAL(dp)::sr0, su0=0, sv0=0, sw0=0, sp0
+  REAL(dp)::sr0, su0, sv0, sw0, sp0
   REAL(dp)::AL, AR, BL, BR, CL, CR
   REAL(dp)::dALy, dARy, dALz, dARz
   REAL(dp)::dBLx, dBRx, dBLz, dBRz
@@ -751,6 +753,7 @@ SUBROUTINE trace3d(q,bf,dq,dbf,qm,qp,qRT,qRB,qLT,qLB,dx,dy,dz,dt,ngrid)
   integer ::n
 #endif
 
+  su0=0d0; sv0=0d0; sw0=0d0
   dtdx = dt/dx
   dtdy = dt/dy
   dtdz = dt/dz
@@ -1262,9 +1265,15 @@ subroutine cmpflxm(qm,im1,im2,jm1,jm2,km1,km2, &
      &                ilo,ihi,jlo,jhi,klo,khi, &
      &                ln ,lt1,lt2,bn ,bt1,bt2, &
      &             flux,tmp,idim,dtdx,ngrid)
+  use mhd_dispatch, only: mhd_try_faces,mhd_switch_needed
+  use iso_c_binding, only: c_int
   use amr_parameters
   use hydro_parameters
   use const
+  use dust_mass_physics, only: dust_composition_enabled,dust_two_size_enabled
+#ifdef SNRT_CHIMES
+  use snrt_chimes_runtime, only: chimes_consistent_carriers
+#endif
   implicit none
 
   real(dp)::dtdx
@@ -1279,11 +1288,16 @@ subroutine cmpflxm(qm,im1,im2,jm1,jm2,km1,km2, &
   real(dp),dimension(1:nvector,if1:if2,jf1:jf2,kf1:kf2,1:2,   1:ndim)::tmp
 
   ! local variables
-  integer ::i, j, k, l, xdim
+  integer ::i, j, k, l, xdim,iface,nface
+  real(dp)::left_batch(nvar,ngrid*(ihi-ilo+1)*(jhi-jlo+1)*(khi-klo+1))
+  real(dp)::right_batch(nvar,ngrid*(ihi-ilo+1)*(jhi-jlo+1)*(khi-klo+1))
+  real(dp)::face_flux(nvar+1,ngrid*(ihi-ilo+1)*(jhi-jlo+1)*(khi-klo+1))
+  integer(c_int)::face_mask(ngrid*(ihi-ilo+1)*(jhi-jlo+1)*(khi-klo+1))
+  logical::device_done
   real(dp),dimension(1:nvar)::qleft,qright
   real(dp),dimension(1:nvar+1)::fgdnv
   real(dp)::zero_flux, bn_mean, entho
-  logical::check_switch_solver=.false.
+  logical::check_switch_solver
 
 #if NVAR>NHYDRO
   integer::n
@@ -1292,6 +1306,7 @@ subroutine cmpflxm(qm,im1,im2,jm1,jm2,km1,km2, &
   xdim=ln-1
   entho=one/(gamma-one)
 
+  iface=0
   do k = klo, khi
      do j = jlo, jhi
         do i = ilo, ihi
@@ -1327,23 +1342,30 @@ subroutine cmpflxm(qm,im1,im2,jm1,jm2,km1,km2, &
                  qright(n) = qp(l,i,j,k,n,xdim)
               end do
 #endif
+              iface=iface+1
+              left_batch(:,iface)=qleft;right_batch(:,iface)=qright
+              face_mask(iface)=0
+              if(.not.mhd_switch_needed(qleft,qright))face_mask(iface)=1
+           end do
+        end do
+     end do
+  end do
+  nface=iface
+  device_done=mhd_try_faces(left_batch,right_batch,face_mask,face_flux,nface)
+  iface=0
+  do k=klo,khi
+     do j=jlo,jhi
+        do i=ilo,ihi
+           do l=1,ngrid
+              iface=iface+1
+              qleft=left_batch(:,iface);qright=right_batch(:,iface)
+              if(device_done.and.face_mask(iface)/=0)then
+                 fgdnv=face_flux(:,iface)
+              else
               ! Solve 1D Riemann problem
               zero_flux = one
               IF(ischeme.NE.1)THEN
-              if(allow_switch_solver .and. ((iriemann.eq.2).or.(iriemann.eq.3)))then
-                 ! check for high B**2/P
-                 check_switch_solver = ( (qright(4)**2 + qright(6)**2 + qright(8)**2)/qright(2) .gt. switch_solv_B ) .or. &
-                                     & ( (qleft(4)**2 + qleft(6)**2 + qleft(8)**2)/qleft(2)     .gt. switch_solv_B )
-                 ! check for strong density discontinuities
-                 check_switch_solver = check_switch_solver .or. &
-                                     & ( qleft(1)/qright(1) .gt. switch_solv_dens ) .or. &
-                                     & ( qright(1)/qleft(1) .gt. switch_solv_dens )
-                 ! check for very small densities
-                 check_switch_solver = check_switch_solver .or. &
-                                     & ( MIN(qleft(1), qright(1)) .lt. switch_solv_min_dens )
-              else
-                 check_switch_solver = .false.
-              endif
+              check_switch_solver=mhd_switch_needed(qleft,qright)
               SELECT CASE (iriemann)
               CASE (1)
                     CALL athena_roe    (qleft,qright,fgdnv,zero_flux)
@@ -1373,6 +1395,21 @@ subroutine cmpflxm(qm,im1,im2,jm1,jm2,km1,km2, &
                  CALL upwind(qleft,qright,fgdnv,zero_flux)
               ENDIF
 
+              endif ! CUDA result or CPU solver
+
+              ! Dependent solid carriers must share their constituent flux,
+              ! exactly as in the hydro transport path.
+              if(dust_composition_enabled())then
+                 if(dust_two_size_enabled())then
+                    fgdnv(idust_species)=fgdnv(idust_bins)+fgdnv(idust_bins+1)
+                    fgdnv(idust_species+1)=fgdnv(idust_bins+2)+fgdnv(idust_bins+3)
+                 endif
+                 fgdnv(idust)=fgdnv(idust_species)+fgdnv(idust_species+1)
+                 if(idust_iron>0)fgdnv(idust)=fgdnv(idust)+fgdnv(idust_iron)+fgdnv(idust_iron+1)
+              endif
+#ifdef SNRT_CHIMES
+              call chimes_consistent_carriers(fgdnv(1:nvar))
+#endif
               ! Output fluxes
               flux(l,i,j,k,1  ,idim) = fgdnv(1) * dtdx  ! Mass density
               flux(l,i,j,k,5  ,idim) = fgdnv(2) * dtdx  ! Total energy
@@ -1995,7 +2032,7 @@ subroutine ctoprim(uin,q,bf,gravin,dt,ngrid)
 
   integer ::i, j, k, l, idim
   real(dp)::eint, smalle, smallp, etot
-  real(dp),dimension(1:nvector),save::eken,emag,erad
+  real(dp),dimension(1:nvector)::eken,emag,erad
 
 #if NENER>0
   integer::irad

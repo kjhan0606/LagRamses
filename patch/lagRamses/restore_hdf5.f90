@@ -1323,7 +1323,7 @@ subroutine restore_hydro_hdf5()
 #endif
   integer :: ilevel, i, igrid, ind, ivar, info
   integer :: hdf5_attr_status, hdf5_attr_status_all
-  integer :: ngrid_loc, nvar_file, fidx
+  integer :: ngrid_loc, nvar_file, fidx,mhd_layout_file,nvar_all_file
 #ifdef DUST_LIVE
   integer :: dust_mass_field_file, dust_energy_field_file
 #endif
@@ -1390,6 +1390,26 @@ subroutine restore_hydro_hdf5()
      call hdf5_restart_abort
   end if
 #endif
+  mhd_layout_file=0
+  call hdf5_suppress_errors()
+  call hdf5_read_attr_int_checked(hdr_grp_id,'mhd_ct_layout',mhd_layout_file,hdf5_attr_status)
+  call hdf5_restore_errors()
+#ifdef SOLVERmhd
+  if(hdf5_attr_status/=0.or.mhd_layout_file/=1.or.nvar_file/=nvar)then
+     if(myid==1)write(*,*)'ERROR: MHD restart requires identical face-field layout'
+     call hdf5_restart_abort
+  endif
+  call hdf5_read_attr_int_checked(hdr_grp_id,'nvar_all',nvar_all_file,hdf5_attr_status)
+  if(hdf5_attr_status/=0.or.nvar_all_file/=nvar_all)call hdf5_restart_abort
+#else
+  if(hdf5_attr_status==0)then
+     if(mhd_layout_file/=0)then
+        if(myid==1)write(*,*)'ERROR: cannot restore MHD fields with a hydro executable'
+        call hdf5_restart_abort
+     endif
+  endif
+  nvar_all_file=nvar_file
+#endif
   call hdf5_close_group(hdr_grp_id)
 
   if(nvar_file /= nvar) then
@@ -1448,7 +1468,7 @@ subroutine restore_hydro_hdf5()
               igrid = next(igrid)
            end do
 
-           do ivar = 1, min(nvar, nvar_file)
+           do ivar = 1, min(nvar_all, nvar_all_file)
               write(var_str, '(I0)') ivar
               call hdf5_read_dataset_chunk_dp(lvl_grp_id, &
                    'uold_'//trim(var_str), ubuf_chunk, &
@@ -1512,7 +1532,7 @@ subroutine restore_hydro_hdf5()
         end if
 
         ! Read uold: raw conservative variables
-        do ivar = 1, min(nvar, nvar_file)
+        do ivar = 1, min(nvar_all, nvar_all_file)
            write(var_str, '(I0)') ivar
            call hdf5_read_dataset_1d_dp(lvl_grp_id, 'uold_'//trim(var_str), &
                 ubuf, ngrid_loc * twotondim, offset_cells)
@@ -1543,7 +1563,7 @@ subroutine restore_hydro_hdf5()
   ! Virtual exchange to populate ghost cells
   do ilevel = 1, nlevelmax
      if(numbtot(1, ilevel) == 0) cycle
-     do ivar = 1, nvar
+     do ivar = 1, nvar_all
         call make_virtual_fine_dp(uold(1,ivar), ilevel)
      end do
   end do

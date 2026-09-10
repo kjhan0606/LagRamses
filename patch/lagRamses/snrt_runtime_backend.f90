@@ -3,19 +3,83 @@
 ! automatic fallback occurs only BEFORE launching a device transaction.
 module snrt_runtime_backend
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use iso_c_binding, only: c_int,c_float,c_double,c_long_long,c_char
+  use iso_c_binding, only: c_int,c_float,c_double,c_long_long,c_char,c_ptr,c_loc,c_null_ptr,c_funptr,c_funloc
   use snrt_cuda_multigroup_interface, only: snrt_cuda_multigroup_rt_step_species_dust
+  use snrt_spectral_contract, only: snrt_band_enabled,snrt_group_edges_ev,snrt_node_secondaries_enabled,snrt_band_kind
+  use snrt_thermochemistry, only: snrt_secondary_fractions_c
+  use snrt_spectral_contract, only: snrt_d03_band_enabled,snrt_fe_band_enabled,snrt_grain_band_bins
+  use dust_composition_optics, only: d03_band_ev,d03_band_abs,d03_band_transport
+  use dust_iron_optics, only: fe_band_ev,fe_six_band_abs,fe_six_band_transport
   implicit none
   private
   public :: snrt_backend_initialize, snrt_runtime_species_dust_step, snrt_runtime_dust_material
   public :: snrt_runtime_ir_transport, snrt_runtime_ir_absorb
   public :: snrt_runtime_isotropic_scatter,snrt_runtime_ir_scatter
   public :: snrt_runtime_dust_exchange
+  public :: snrt_runtime_cpu_material_allowed
+  public :: snrt_runtime_energy_admit
   integer,save :: mode=0,init_status=0,sharers=1
   logical,save :: initialized=.false.,gpu_ready=.false.
   integer,save :: last_choice=-1,cpu_threads=1
   integer,save :: dust_mode=0,last_dust_choice=-1,world_rank=0
   interface
+     function cpu_band_d03(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+          absorbed_group,absorbed,no,nw,nd,ng,cdt,shift,reference,hhe_e,dust_e,energy_moment,columns,edges, &
+          callback,xi,deposition,grains,kabs,ksca,node_ev,weights,nb) bind(C,name='snrt_openmp_band_grains_c') result(ierr)
+       import c_int,c_float,c_double,c_funptr
+       type(c_funptr),value::callback
+       integer(c_int),value::no,nw,nd,ng,nb
+       real(c_float),value::cdt
+       real(c_float)::state(*),budget(*),hhe(*),dust(*),returned(*),raw(*),absorbed_group(*),absorbed(*)
+       real(c_float),intent(in)::direction(*),tau(*),stau(*),dtau(*)
+       integer(c_int),intent(in)::neighbor(*)
+       real(c_double)::shift(*),hhe_e(*),dust_e(*),energy_moment(*),deposition(*)
+       real(c_double),intent(in)::reference(*),columns(*),edges(*),xi(*),grains(*),kabs(*),ksca(*),node_ev(*),weights(*)
+       integer(c_int)::ierr
+     end function
+     function cpu_band_secondary(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+          absorbed_group,absorbed,no,nw,nd,ng,cdt,moment,shift,reference,hhe_e,dust_e,energy_moment,columns,edges, &
+          callback,xi,deposition) bind(C,name='snrt_openmp_band_secondary_c') result(ierr)
+       import c_int,c_float,c_double,c_ptr,c_funptr
+       type(c_ptr),value::moment
+       type(c_funptr),value::callback
+       integer(c_int),value::no,nw,nd,ng
+       real(c_float),value::cdt
+       real(c_float)::state(*),budget(*),hhe(*),dust(*),returned(*),raw(*),absorbed_group(*),absorbed(*)
+       real(c_float),intent(in)::direction(*),tau(*),stau(*),dtau(*)
+       integer(c_int),intent(in)::neighbor(*)
+       real(c_double)::shift(*),hhe_e(*),dust_e(*),energy_moment(*),deposition(*)
+       real(c_double),intent(in)::reference(*),columns(*),edges(*),xi(*)
+       integer(c_int)::ierr
+     end function
+     function cpu_band_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+          absorbed_group,absorbed,no,nw,nd,ng,cdt,moment,shift,reference,hhe_e,dust_e,energy_moment,columns,edges) &
+          bind(C,name='snrt_openmp_band_energy_c') result(ierr)
+       import c_int,c_float,c_double,c_ptr
+       type(c_ptr),value::moment
+       integer(c_int),value::no,nw,nd,ng
+       real(c_float),value::cdt
+       real(c_float)::state(*),budget(*),hhe(*),dust(*),returned(*),raw(*),absorbed_group(*),absorbed(*)
+       real(c_float),intent(in)::direction(*),tau(*),stau(*),dtau(*)
+       integer(c_int),intent(in)::neighbor(*)
+       real(c_double)::shift(*),hhe_e(*),dust_e(*),energy_moment(*)
+       real(c_double),intent(in)::reference(*),columns(*),edges(*)
+       integer(c_int)::ierr
+     end function
+     function cpu_energy_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+          absorbed_group,absorbed,no,nw,nd,ng,cdt,moment,shift,reference,hhe_e,dust_e,energy_moment) &
+          bind(C,name='snrt_openmp_species_dust_energy_c') result(ierr)
+       import c_int,c_float,c_double,c_ptr
+       type(c_ptr),value::moment
+       integer(c_int),value::no,nw,nd,ng
+       real(c_float),value::cdt
+       real(c_float)::state(*),budget(*),hhe(*),dust(*),returned(*),raw(*),absorbed_group(*),absorbed(*)
+       real(c_float),intent(in)::direction(*),tau(*),stau(*),dtau(*)
+       integer(c_int),intent(in)::neighbor(*)
+       real(c_double)::shift(*),hhe_e(*),dust_e(*),energy_moment(*)
+       real(c_double),intent(in)::reference(*)
+       integer(c_int)::ierr
+     end function
      function dust_exchange(input,table,output,nc,nt,dt,floor_t,choice) &
           bind(C,name='snrt_dust_exchange_c') result(ierr)
        import c_double,c_int
@@ -74,8 +138,9 @@ module snrt_runtime_backend
        integer(c_int)::ierr
      end function
      function hybrid_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
-          absorbed_group,absorbed,no,nw,nd,ng,cdt) bind(C,name='snrt_hybrid_species_dust_c') result(ierr)
-       import c_int,c_float
+          absorbed_group,absorbed,no,nw,nd,ng,cdt,moment) bind(C,name='snrt_hybrid_species_dust_moment_c') result(ierr)
+       import c_int,c_float,c_ptr
+       type(c_ptr),value::moment
        integer(c_int),value::no,nw,nd,ng
        real(c_float),value::cdt
        real(c_float)::state(*),budget(*),hhe(*),dust(*),returned(*),raw(*),absorbed_group(*),absorbed(*)
@@ -117,8 +182,9 @@ module snrt_runtime_backend
        integer(c_long_long) :: n
      end function
      function cpu_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
-          absorbed_group,absorbed,no,nw,nd,ng,cdt) bind(C,name='snrt_openmp_species_dust_c') result(ierr)
-       import c_int,c_float
+          absorbed_group,absorbed,no,nw,nd,ng,cdt,moment) bind(C,name='snrt_openmp_species_dust_moment_c') result(ierr)
+       import c_int,c_float,c_ptr
+       type(c_ptr),value::moment
        integer(c_int),value :: no,nw,nd,ng
        real(c_float),value :: cdt
        real(c_float) :: state(*),budget(*),hhe(*),dust(*),returned(*),raw(*),absorbed_group(*),absorbed(*)
@@ -126,8 +192,34 @@ module snrt_runtime_backend
        integer(c_int),intent(in) :: neighbor(*)
        integer(c_int) :: ierr
      end function
+     function cuda_moment_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+          absorbed_group,absorbed,no,nw,nd,ng,cdt,moment) bind(C,name='snrt_cuda_species_dust_moment_c') result(ierr)
+       import c_int,c_float,c_ptr
+       type(c_ptr),value::moment
+       integer(c_int),value::no,nw,nd,ng
+       real(c_float),value::cdt
+       real(c_float)::state(*),budget(*),hhe(*),dust(*),returned(*),raw(*),absorbed_group(*),absorbed(*)
+       real(c_float),intent(in)::direction(*),tau(*),stau(*),dtau(*)
+       integer(c_int),intent(in)::neighbor(*)
+       integer(c_int)::ierr
+     end function
   end interface
 contains
+  subroutine snrt_runtime_energy_admit(ierr)
+    integer,intent(out)::ierr
+    call snrt_backend_initialize(ierr)
+    ! Paired correction transport is host-only for now. This is admission,
+    ! before any halo/transport/device work, including ranks with zero leaves.
+    if(mode==2)then
+       ierr=8
+       if(world_rank==0)write(*,'(A)')' SNRT paired energy transport: forced CUDA unsupported (status 8)'
+    endif
+  end subroutine
+
+  logical function snrt_runtime_cpu_material_allowed() result(allowed)
+    allowed=initialized.and.init_status==0.and.dust_mode/=2
+  end function
+
   subroutine snrt_runtime_dust_exchange(gas,heat_capacity,material,density,n_hydrogen, &
        temperature_grid,material_u,area,accommodation,dt,floor_t,temperature,transfer,ierr)
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -280,7 +372,7 @@ contains
 #endif
     integer,intent(out)::ierr
     integer,intent(in),optional::nstreams
-    integer::stream_count,batch_cells
+    integer::stream_count,batch_cells,band_local,band_min,band_max
     integer::status,length,local_rank,local_size,comm,i,info
     character(len=64)::value
     character(c_char)::uuid(33)
@@ -290,6 +382,17 @@ contains
        return
     endif
     initialized=.true.
+    band_local=snrt_band_kind();band_min=band_local;band_max=band_local
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(band_local,band_min,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,info)
+    if(info/=0)init_status=1
+    call MPI_ALLREDUCE(band_local,band_max,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    if(info/=0)init_status=1
+#endif
+    if(band_min/=band_max)then
+       write(*,*)'SNRT_SPECTRAL_MODEL must agree across MPI ranks'
+       init_status=1
+    endif
     stream_count=1
     if(present(nstreams))stream_count=nstreams
     batch_cells=256
@@ -359,7 +462,9 @@ contains
   end subroutine
 
   function snrt_runtime_species_dust_step(state,direction,neighbor,tau,stau,dtau,budget, &
-       hhe,dust,returned,raw,absorbed_group,absorbed,no,nw,nd,ng,cdt) result(ierr)
+       hhe,dust,returned,raw,absorbed_group,absorbed,no,nw,nd,ng,cdt,dust_moment, &
+       shift,reference_ev,hhe_energy,dust_energy,dust_energy_moment,species_columns,secondary_xi,band_deposition, &
+       grain_columns,angular_weights) result(ierr)
     integer(c_int),intent(in)::no,nw,nd,ng
     real(c_float),intent(in)::cdt,direction(*),tau(*),stau(*),dtau(*)
     integer(c_int),intent(in)::neighbor(*)
@@ -367,13 +472,96 @@ contains
     integer(c_int)::ierr
     integer::status,choice
     integer(c_long_long)::required,free
+    real(c_double),optional,intent(inout)::dust_moment(:,:,:)
+    real(c_double),optional,intent(inout)::shift(:,:,:),hhe_energy(:,:,:),dust_energy(:,:),dust_energy_moment(:,:,:)
+    real(c_double),optional,intent(in)::reference_ev(:)
+    real(c_double),optional,intent(in)::species_columns(:,:)
+    real(c_double),optional,intent(in)::secondary_xi(:)
+    real(c_double),optional,intent(inout)::band_deposition(:,:)
+    real(c_double),optional,intent(in)::grain_columns(:,:),angular_weights(:)
+    real(c_double),allocatable,target::moment_stage(:,:,:)
+    type(c_ptr)::moment_pointer
+    moment_pointer=c_null_ptr;ierr=1
+    if(present(species_columns).neqv.snrt_band_enabled())return
+    if(present(grain_columns).neqv.snrt_d03_band_enabled())return
+    if(present(grain_columns).neqv.present(angular_weights))return
+    if(present(grain_columns))then
+       if(any(shape(grain_columns)/=[no,snrt_grain_band_bins()]).or. &
+            size(angular_weights)/=nd.or.present(dust_moment))return
+       if(snrt_fe_band_enabled())then
+          if(any(fe_band_ev/=d03_band_ev))return
+       endif
+    endif
+    if(present(secondary_xi).neqv.snrt_node_secondaries_enabled())return
+    if(present(secondary_xi).neqv.present(band_deposition))return
+    if(present(secondary_xi))then
+       if(size(secondary_xi)/=no.or.any(shape(band_deposition)/=[no,8]))return
+    endif
+    if(present(species_columns))then
+       if(.not.present(shift))return
+       if(any(shape(species_columns)/=[no,3]))return
+    endif
+    if(present(dust_moment))then
+       if(any(shape(dust_moment)/=[no,ng,3]))return
+       allocate(moment_stage(no,ng,3));moment_stage=0
+       if(no>0.and.ng>0)moment_pointer=c_loc(moment_stage(1,1,1))
+    endif
     call snrt_backend_initialize(status)
+    if(present(shift))call snrt_runtime_energy_admit(status)
     ierr=int(status,c_int)
     if(ierr/=0)return
+    if(present(shift))then
+       ierr=1
+       if(.not.present(reference_ev).or..not.present(hhe_energy).or..not.present(dust_energy).or. &
+            .not.present(dust_energy_moment))return
+       if(any(shape(shift)/=[nw,nd,ng]).or.size(reference_ev)/=ng)return
+       if(any(shape(hhe_energy)/=[no,ng,3]).or.any(shape(dust_energy)/=[no,ng]).or. &
+            any(shape(dust_energy_moment)/=[no,ng,3]))return
+       call snrt_runtime_energy_admit(status)
+       ierr=int(status,c_int)
+       if(ierr/=0)return
+       if(last_choice/=4)then
+          write(*,'(A,I0)')' SNRT paired energy transport backend=OpenMP owned_cells=',no
+          last_choice=4
+       endif
+       if(present(species_columns))then
+          if(present(grain_columns))then
+             if(snrt_fe_band_enabled())then
+                ierr=cpu_band_d03(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+                     absorbed_group,absorbed,no,nw,nd,ng,cdt,shift,reference_ev,hhe_energy,dust_energy,dust_energy_moment, &
+                     species_columns,snrt_group_edges_ev,c_funloc(snrt_secondary_fractions_c),secondary_xi,band_deposition, &
+                     grain_columns,fe_six_band_abs,fe_six_band_transport,fe_band_ev,angular_weights,6_c_int)
+             else
+             ierr=cpu_band_d03(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+                  absorbed_group,absorbed,no,nw,nd,ng,cdt,shift,reference_ev,hhe_energy,dust_energy,dust_energy_moment, &
+                  species_columns,snrt_group_edges_ev,c_funloc(snrt_secondary_fractions_c),secondary_xi,band_deposition, &
+                  grain_columns,d03_band_abs,d03_band_transport,d03_band_ev,angular_weights,4_c_int)
+             endif
+          else if(present(secondary_xi))then
+             ierr=cpu_band_secondary(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+                  absorbed_group,absorbed,no,nw,nd,ng,cdt,moment_pointer,shift,reference_ev, &
+                  hhe_energy,dust_energy,dust_energy_moment,species_columns,snrt_group_edges_ev, &
+                  c_funloc(snrt_secondary_fractions_c),secondary_xi,band_deposition)
+          else
+          ierr=cpu_band_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+               absorbed_group,absorbed,no,nw,nd,ng,cdt,moment_pointer,shift,reference_ev, &
+               hhe_energy,dust_energy,dust_energy_moment,species_columns,snrt_group_edges_ev)
+          endif
+       else
+       ierr=cpu_energy_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
+            absorbed_group,absorbed,no,nw,nd,ng,cdt,moment_pointer,shift,reference_ev, &
+            hhe_energy,dust_energy,dust_energy_moment)
+       endif
+       if(present(dust_moment).and.ierr==0)dust_moment=moment_stage
+       return
+    else if(present(reference_ev).or.present(hhe_energy).or.present(dust_energy).or.present(dust_energy_moment))then
+       ierr=1;return
+    endif
     ! Exact array budget of the CUDA wrapper, plus 64 MiB headroom. Leave
     ! twenty percent free; divide usable memory between ranks sharing a UUID.
     required=4_c_long_long*(2_c_long_long*nw*nd*ng+3_c_long_long*nd+6_c_long_long*no+ &
          12_c_long_long*no*ng+4_c_long_long*no+1)+67108864_c_long_long
+    if(present(dust_moment))required=required+24_c_long_long*no*ng
     choice=1
     if(mode==2.and.gpu_ready)then
        free=free_bytes()
@@ -397,15 +585,22 @@ contains
     endif
     if(choice==3)then
        ierr=hybrid_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
-            absorbed_group,absorbed,no,nw,nd,ng,cdt)
+            absorbed_group,absorbed,no,nw,nd,ng,cdt,moment_pointer)
     else if(choice==2)then
-       ierr=snrt_cuda_multigroup_rt_step_species_dust(state,direction,neighbor,tau,stau,dtau, &
-            budget,hhe,dust,returned,raw,absorbed_group,absorbed,no,nw,nd,ng,cdt)
+       ierr=cuda_moment_step(state,direction,neighbor,tau,stau,dtau, &
+            budget,hhe,dust,returned,raw,absorbed_group,absorbed,no,nw,nd,ng,cdt,moment_pointer)
        ! Do not replay on CPU after a device error: the enclosing RAMSES
        ! transaction owns rollback, including partial D2H-copy failures.
     else
        ierr=cpu_step(state,direction,neighbor,tau,stau,dtau,budget,hhe,dust,returned,raw, &
-            absorbed_group,absorbed,no,nw,nd,ng,cdt)
+            absorbed_group,absorbed,no,nw,nd,ng,cdt,moment_pointer)
+    endif
+    if(present(dust_moment).and.ierr==0)then
+       if(any(.not.ieee_is_finite(moment_stage)))then
+          ierr=3 ! Enclosing photon transaction owns rollback on device failure.
+       else
+          dust_moment=moment_stage
+       endif
     endif
   end function
 

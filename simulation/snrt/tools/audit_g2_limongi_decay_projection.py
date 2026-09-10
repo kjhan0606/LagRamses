@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Audit time-horizon-dependent decay projections for Limongi isotope yields.
 
-This tool is review-only. It does not select a decay horizon and cannot emit a
-canonical yield row. The pinned ``radioactivedecay`` matrix handles nuclides it
+The CLI is review-only. It does not select a decay horizon and cannot emit a
+canonical yield row. The explicit prompt-cascade helper is separately used by
+the opt-in native LC18 converter; it does not approve the historical horizons.
+The pinned ``radioactivedecay`` matrix handles nuclides it
 contains; a checksummed NUBASE2020 file is used only for fail-closed handling
 of source nuclides absent from that matrix.
 """
@@ -350,6 +352,120 @@ def project_isotopes(
         "endpoint_total_mass": math.fsum(endpoint.values()),
         "supplemental_beta_mass_loss": supplemental_beta_mass_loss,
     }
+
+
+def build_prompt_projection(labels: Iterable[str]) -> tuple[dict[str, dict[str, float]], dict[str, Any]]:
+    """Baryonic prompt cascade, NOT a finite-time or live decay solution.
+
+    Fully decay states with evaluated half-life<=100yr, stopping at longer-
+    lived/stable daughters. Reuse the pinned data and fail-closed source
+    classification; the review CLI/contract and atomic-horizon API above
+    remain unchanged. A caller must explicitly select this approximation.
+    """
+    labels = sorted(labels)
+    contract = _read_contract(DEFAULT_CONTRACT)
+    dependency = _verify_decay_dependency(contract)
+    # Package identity depends on physical bytes, not the installation path.
+    dependency["runtime_data"] = {k: {"bytes": v["bytes"], "sha256": v["sha256"]}
+                                  for k,v in dependency["runtime_data"].items()}
+    supplement = contract["nubase2020_supplement"]
+    path = Path(supplement["path"])
+    if _sha256(path) != (supplement["bytes"], supplement["sha256"]):
+        raise DecayProjectionError("NUBASE supplement changed")
+    nubase = _parse_nubase(path)
+    by_name = {r["canonical_label"]: r for r in nubase.values()}
+    classification = _classify_source_labels(labels, nubase, 1.38e10)
+    if classification["unresolved"] or len(set(labels)) != 333 or len(labels) != 333:
+        raise DecayProjectionError("prompt projection requires the full classified LC18 inventory")
+    fast = {r["canonical_label"]: r for r in classification["supplemental_fast_decay"]}
+    memo: dict[str, dict[str, float]] = {}
+    visiting: set[str] = set()
+    branch_normalizations = {}
+    cut = 100.
+
+    def mass_number(label):
+        match = CANONICAL_ISOTOPE.fullmatch(label)
+        if match is None:
+            raise DecayProjectionError(f"unsupported daughter {label}")
+        return int(match[2])
+
+    def cascade(label):
+        if label in memo:
+            return memo[label]
+        if label in visiting:
+            raise DecayProjectionError("cyclic nuclear decay graph")
+        visiting.add(label)
+        record = by_name.get(label)
+        # Ground-state decisions use evaluated NUBASE, not old ICRP rates
+        # (notably its Fe60 half-life is1.5Myr, rather than NUBASE2.62Myr).
+        nuclide = None
+        try:
+            nuclide = rd.Nuclide(label)
+        except ValueError:
+            if record is None:
+                raise DecayProjectionError(f"unknown daughter {label}")
+        half = record["half_life_yr"] if record else nuclide.half_life("y")
+        if math.isnan(half) or half < 0:
+            raise DecayProjectionError(f"unknown half-life {label}")
+        if half > cut:
+            result = {label: 1.}
+        else:
+            if label in fast:
+                edges = [(fast[label]["immediate_daughter"], 1., "beta")]
+            elif nuclide is not None:
+                edges = list(zip(nuclide.progeny(), nuclide.branching_fractions(), nuclide.decay_modes()))
+            else:
+                raise DecayProjectionError(f"missing prompt decay branch {label}")
+            branch_sum = math.fsum(b for _,b,_ in edges)
+            # The pinned ICRP branch print precision leaves nine reachable
+            # sums within 5e-6 of unity. Preserve relative branching ratios,
+            # record the correction, and reject larger/nonfinite deficits.
+            if not edges or not math.isfinite(branch_sum) or abs(branch_sum-1) > 1e-5:
+                raise DecayProjectionError(f"nonclosing branches for {label}")
+            if branch_sum != 1.:
+                branch_normalizations[label] = branch_sum
+            result = defaultdict(float)
+            for daughter, probability, mode in edges:
+                if probability < 0 or not math.isfinite(probability):
+                    raise DecayProjectionError("invalid branching probability")
+                probability /= branch_sum
+                difference = mass_number(label)-mass_number(daughter)
+                if mode == "α" and difference == 4:
+                    # The decay inventory library does not inventory emitted
+                    # alpha particles. Return their baryons as helium, once.
+                    result["He-4"] += probability
+                elif mode not in ("beta", "β-", "β+ & EC", "EC", "IT") or difference != 0:
+                    raise DecayProjectionError(f"unsupported particle branch {label}/{mode}")
+                for endpoint, atoms in cascade(daughter).items():
+                    result[endpoint] += probability*atoms
+            if abs(math.fsum(mass_number(k)*v for k,v in result.items())/mass_number(label)-1)>1e-12:
+                raise DecayProjectionError("prompt cascade violates baryon conservation")
+        visiting.remove(label)
+        memo[label] = dict(result)
+        return memo[label]
+
+    projection = {}
+    for source_label in labels:
+        canonical = _source_to_canonical(source_label)
+        result = defaultdict(float)
+        for daughter, atoms in cascade(canonical).items():
+            result[_canonical_element(daughter)] += atoms*mass_number(daughter)/mass_number(canonical)
+        projection[source_label] = dict(result)
+    identity = {
+        "model": "prompt_t12_le_100yr_baryonic_v1", "cutoff_half_life_yr": cut,
+        "timing": "fully_prompt_short_chains_at_stellar_release;long_lived_parents_retained",
+        "not_a_fixed_horizon_or_live_ISM_decay": True,
+        "mass_convention": "A_times_mu;alpha_baryons_returned_to_He4;no_atomic_rest_mass_debit",
+        "decay_energy": "excluded_no_gas_CR_or_SNRT_source",
+        "ground_state_half_lives": "NUBASE2020", "metastable_data": "pinned_ICRP107",
+        "radioactivedecay": dependency, "nubase_sha256": supplement["sha256"],
+        "source_nuclides": len(labels), "cascade_states": len(memo),
+        "branch_sum_before_normalization": dict(sorted(branch_normalizations.items())),
+        "branch_normalization_max_allowed_error": 1e-5,
+        "projection_sha256": hashlib.sha256(json.dumps(projection,sort_keys=True).encode()).hexdigest(),
+        "library_Fe60_half_life_not_used": "ICRP1.5Myr;NUBASE2.62Myr;parent_retained_in_this_model",
+    }
+    return projection, identity
 
 
 def _limongi_isotopic_components(report: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:

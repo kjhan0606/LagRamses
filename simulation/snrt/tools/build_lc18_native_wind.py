@@ -19,12 +19,16 @@ from fp1_limongi_phase_history import build_phase_histories
 
 ELEMENTS = ('H', 'He', 'C', 'N', 'O', 'Ne', 'Mg', 'Si', 'S', 'Ca', 'Fe')
 SOLAR_MASS_CGS = 1.98847e33
+DECAY_MODELS = ('as_tabulated_no_decay', 'prompt_t12_le_100yr_baryonic_v1')
 
 
 def build_native_wind(*, rotation: int, wind_speed_km_s: float,
                       timing: str, composition: str, energy: str,
                       imf_id: int = 2, massive_source: str = 'wind_only',
-                      snii_energy_erg: float | None = None) -> tuple[str, str]:
+                      snii_energy_erg: float | None = None,
+                      decay: str = 'as_tabulated_no_decay') -> tuple[str, str]:
+    if decay not in DECAY_MODELS:
+        raise ValueError('unsupported LC18 isotope projection')
     if massive_source not in ('wind_only', 'lc18_set_r'):
         raise ValueError('unsupported massive source')
     full = massive_source == 'lc18_set_r'
@@ -50,13 +54,26 @@ def build_native_wind(*, rotation: int, wind_speed_km_s: float,
         return (c['rotation_velocity_km_s'], c['metallicity_feh'], c['initial_mass_msun'])
     winds = {coordinate(r): r['source_reported_isotopic_yields']
              for r in components['wind_yields']['records']}
+    projection = None
+    if decay != DECAY_MODELS[0]:
+        # Offline only; the unchanged default does not import or require
+        # the decay library. Wind and table8-minus-table9 are projected once.
+        from audit_g2_limongi_decay_projection import build_prompt_projection
+        labels = components['recommended_yields']['records'][0]['source_reported_isotopic_yields']
+        projection, decay_identity = build_prompt_projection(labels)
     def project(isotopes):
         grouped = {e: [] for e in ELEMENTS}
+        if projection is not None and isotopes.keys() != projection.keys():
+            raise ValueError('LC18 isotope inventory differs from projection')
         for isotope, value in isotopes.items():
             match = re.fullmatch(r'([A-Z][a-z]?)(\d*)', isotope)
             if match is None or not math.isfinite(value) or value < 0:
                 raise ValueError(f'invalid source isotope/value: {isotope}')
-            if match[1] in grouped:
+            if projection is not None:
+                for element, fraction in projection[isotope].items():
+                    if element in grouped:
+                        grouped[element].append(value*fraction)
+            elif match[1] in grouped:
                 grouped[match[1]].append(value)
         return math.fsum(isotopes.values()), [math.fsum(grouped[e]) for e in ELEMENTS]
     nodes = []
@@ -115,8 +132,10 @@ def build_native_wind(*, rotation: int, wind_speed_km_s: float,
     source_files = report['verified_acquisition']['verified_files']
     selection = dict(source_files=source_files, rotation_km_s=rotation, wind_speed_km_s=wind_speed_km_s,
                      timing=timing, composition=composition, energy=energy, imf_id=imf_id,
-                     decay='as_tabulated_no_decay', net='unavailable_diagnostic_zero',
+                     decay=decay, net='unavailable_diagnostic_zero',
                      mass_authority='sum_all_table8_isotopes', version=1)
+    if projection is not None:
+        selection['decay_projection'] = decay_identity
     if full:
         selection.update(version=2, massive_source=massive_source, snii_energy_erg=snii_energy_erg,
             terminal='table8_minus_table9_at_13_15_20_25; wind_only_at_30_and_above',
@@ -140,6 +159,8 @@ def build_native_wind(*, rotation: int, wind_speed_km_s: float,
         header[2] = '# No isotope decay, net-yield inference or directed momentum; terminal ejecta at source lifetimes.'
     if wind_shapes:
         header[3] = '# Table5 mass-loss timing; explicit uniform fallback for unresolved phase mass losses; fixed composition/speed.'
+    if projection is not None:
+        header[2] = '# Explicit prompt short-chain baryonic decay; long-lived parents retained; no decay heating or live isotope evolution.'
     # A common union of actual lifetimes satisfies the existing rectangular
     # age grid. No dense time sampling or large synthetic atlas is needed.
     ages = sorted({0., 2e10, *(n[2] for n in nodes)})
@@ -197,6 +218,8 @@ def build_native_wind(*, rotation: int, wind_speed_km_s: float,
             'terminal_outcome='+','.join(str(int(n[6]>0)) for n in nodes))
     if wind_shapes:
         history = history.replace('; uniform;', '; table5-shape/fallback;')
+    if projection is not None:
+        history = history.replace('; no-decay;', '; prompt-t12<=100yr;')
     return '\n'.join(header+rows)+'\n', history
 
 
@@ -211,12 +234,15 @@ def main():
     p.add_argument('--imf-id', type=int, choices=(0,1,2,4), default=2)
     p.add_argument('--massive-source', choices=('wind_only','lc18_set_r'), default='wind_only')
     p.add_argument('--snii-energy-erg', type=float, help='Required explicit comparison parameter for lc18_set_r')
+    p.add_argument('--decay', choices=DECAY_MODELS, default=DECAY_MODELS[0],
+                   help='Explicit source-side approximation, not a finite-horizon/live decay solver')
     args = p.parse_args()
     if args.output_dir.exists():
         p.error('output directory already exists; source artifacts must not be overwritten')
     table, history = build_native_wind(rotation=args.rotation, wind_speed_km_s=args.wind_speed_km_s,
                                      timing=args.timing, composition=args.composition, energy=args.energy, imf_id=args.imf_id,
-                                     massive_source=args.massive_source, snii_energy_erg=args.snii_energy_erg)
+                                     massive_source=args.massive_source, snii_energy_erg=args.snii_energy_erg,
+                                     decay=args.decay)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     for name, content in [('yields.dat',table),('history.nml',history)]:
         with (args.output_dir/name).open('x') as f:

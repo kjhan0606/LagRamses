@@ -244,6 +244,9 @@ void cuda_pool_init(int local_rank, int n_streams) {
         cudaStreamCreateWithFlags(&g_pool[s].stream, cudaStreamNonBlocking);
         g_pool[s].busy = 0;
         g_pool[s].d_uloc = nullptr; g_pool[s].d_gloc = nullptr;
+        g_pool[s].d_mhd_left = nullptr; g_pool[s].d_mhd_right = nullptr;
+        g_pool[s].d_mhd_flux = nullptr; g_pool[s].d_mhd_mask = nullptr;
+        g_pool[s].mhd_face_cap = 0; g_pool[s].mhd_nvar = 0;
         g_pool[s].d_flux = nullptr; g_pool[s].d_tmp  = nullptr;
         g_pool[s].d_ok   = nullptr; g_pool[s].hydro_cap = 0;
         g_pool[s].d_q  = nullptr; g_pool[s].d_c  = nullptr;
@@ -321,6 +324,10 @@ void cuda_pool_finalize(void) {
         cudaStreamSynchronize(g_pool[s].stream);
         cudaStreamDestroy(g_pool[s].stream);
         if (g_pool[s].d_uloc) cudaFree(g_pool[s].d_uloc);
+        if (g_pool[s].d_mhd_left) cudaFree(g_pool[s].d_mhd_left);
+        if (g_pool[s].d_mhd_right) cudaFree(g_pool[s].d_mhd_right);
+        if (g_pool[s].d_mhd_flux) cudaFree(g_pool[s].d_mhd_flux);
+        if (g_pool[s].d_mhd_mask) cudaFree(g_pool[s].d_mhd_mask);
         if (g_pool[s].d_gloc) cudaFree(g_pool[s].d_gloc);
         if (g_pool[s].d_flux) cudaFree(g_pool[s].d_flux);
         if (g_pool[s].d_tmp)  cudaFree(g_pool[s].d_tmp);
@@ -637,4 +644,3 @@ int*      cuda_get_mesh_son()   { return d_mesh_son; }
 long long cuda_get_mesh_ncell() { return g_mesh_ncell; }
 int       cuda_mesh_is_ready()  { return (g_mesh_ncell > 0 && d_mesh_uold && d_mesh_son) ? 1 : 0; }
 cudaEvent_t cuda_get_upload_event() { return g_upload_done_event; }
-

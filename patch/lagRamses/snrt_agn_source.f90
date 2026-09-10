@@ -196,7 +196,7 @@ contains
 
   subroutine snrt_agn_deposit_transaction(state, slot, emitted_photons, &
        cell_volume_code, length_unit_cm, n_h_unit_cm3, angular_weights, &
-       deposited_density_code, ierr)
+       deposited_density_code, ierr, persistent_energy_shift, group_mean_energy_ev,quantize_source,source_mean_energy_ev)
     ! Prepare and commit all spectral groups for one source atomically.
     !
     ! ``state`` is (direction, group, slot).  Every validation and conversion
@@ -210,12 +210,43 @@ contains
     real(dp), intent(in) :: angular_weights(:)
     real(dp), intent(out) :: deposited_density_code
     integer, intent(out) :: ierr
-    integer :: group
-    real(dp) :: total_weight, state_limit
+    ! Optional paired state: actual E = reference(g)*N + shift, in photon
+    ! CODE density * eV. Supply BOTH arrays only when subsequent operators
+    ! transport the correction. Error 6 rejects a malformed/unrepresentable
+    ! energy state atomically; neither photons nor corrections are published.
+    real(dp), optional, intent(inout) :: persistent_energy_shift(:,:,:)
+    real(dp), optional, intent(in) :: group_mean_energy_ev(:)
+    ! Actual source E/Q, independent of the fixed reference used to encode E.
+    real(dp), optional, intent(in) :: source_mean_energy_ev(:)
+    ! Band two-moment mode injects the representable FP32 packet's energy.
+    ! Do not retain an energy-only photon when a source tail rounds to N=0.
+    ! Bound the total source-energy rounding, never alter the physical table.
+    logical,optional,intent(in)::quantize_source
+    integer :: group, allocation_status
+    real(dp) :: total_weight, state_limit,source_energy,rounding_energy
     real(dp), allocatable :: group_density(:), directional_density(:,:)
+    real(c_float), allocatable :: next_number(:,:)
+    real(dp), allocatable :: next_shift(:,:), actual_energy(:)
+    real(dp), allocatable :: injection_mean(:)
 
     ierr = 0
     deposited_density_code = 0.0d0
+    if(present(source_mean_energy_ev))then
+       if(.not.present(persistent_energy_shift))then
+          ierr=6;return
+       endif
+       if(size(source_mean_energy_ev)/=size(state,2))then
+          ierr=6;return
+       endif
+       if(any(.not.ieee_is_finite(source_mean_energy_ev)).or.any(source_mean_energy_ev<=0d0))then
+          ierr=6;return
+       endif
+    endif
+    if(present(quantize_source))then
+       if(quantize_source.and..not.present(persistent_energy_shift))then
+          ierr=6;return
+       endif
+    endif
     if (slot < 1 .or. slot > size(state,3)) then
        ierr = 1
        return
@@ -228,6 +259,38 @@ contains
        ierr = 3
        return
     end if
+    if(present(persistent_energy_shift).neqv.present(group_mean_energy_ev))then
+       ierr=6
+       return
+    endif
+    if(present(persistent_energy_shift))then
+       injection_mean=group_mean_energy_ev
+       if(present(source_mean_energy_ev))injection_mean=source_mean_energy_ev
+       if(any(shape(persistent_energy_shift)/=shape(state)).or.size(group_mean_energy_ev)/=size(state,2))then
+          ierr=6
+          return
+       endif
+       if(any(.not.ieee_is_finite(group_mean_energy_ev)).or.any(group_mean_energy_ev<=0.0_dp).or. &
+            any(.not.ieee_is_finite(persistent_energy_shift(:,:,slot))).or.any(state(:,:,slot)<0.0_c_float))then
+          ierr=6
+          return
+       endif
+       allocate(next_number(size(state,1),size(state,2)),next_shift(size(state,1),size(state,2)), &
+            actual_energy(size(state,1)),stat=allocation_status)
+       if(allocation_status/=0)then
+          ierr=6
+          return
+       endif
+       do group=1,size(state,2)
+          actual_energy=group_mean_energy_ev(group)*real(state(:,group,slot),dp)+ &
+               persistent_energy_shift(:,group,slot)
+          if(any(.not.ieee_is_finite(actual_energy)).or.any(actual_energy<0.0_dp).or. &
+               any(state(:,group,slot)==0.0_c_float.and.persistent_energy_shift(:,group,slot)/=0.0_dp))then
+             ierr=6
+             return
+          endif
+       enddo
+    endif
     if (.not. ieee_is_finite(cell_volume_code) .or. cell_volume_code <= 0.0d0 .or. &
          .not. ieee_is_finite(length_unit_cm) .or. length_unit_cm <= 0.0d0 .or. &
          .not. ieee_is_finite(n_h_unit_cm3) .or. n_h_unit_cm3 <= 0.0d0 .or. &
@@ -276,7 +339,56 @@ contains
        end if
     end do
 
-    ! Commit is deliberately a separate phase after the complete validation.
+    if(present(persistent_energy_shift))then
+       if(.not.ieee_is_finite(sum(group_density)))then
+          ierr=6
+          return
+       endif
+       if(present(quantize_source))then
+          if(quantize_source)then
+             source_energy=sum(injection_mean*group_density)
+             rounding_energy=0
+             do group=1,size(emitted_photons)
+                next_number(:,group)=real(directional_density(:,group),c_float)
+                rounding_energy=rounding_energy+injection_mean(group)* &
+                     sum(abs(directional_density(:,group)-real(next_number(:,group),dp)))
+             enddo
+             if(.not.ieee_is_finite(source_energy).or..not.ieee_is_finite(rounding_energy).or. &
+                  rounding_energy>8*epsilon(0.0_c_float)*source_energy)then
+                ierr=6;return
+             endif
+             directional_density=real(next_number,dp)
+             group_density=sum(directional_density,dim=1)
+          endif
+       endif
+       do group=1,size(emitted_photons)
+          ! Keep the established FP32 number arithmetic, including rounding
+          ! the increment. Charge the EXACT FP64 directional source to energy.
+          next_number(:,group)=state(:,group,slot)+real(directional_density(:,group),c_float)
+          ! Algebraically oldN+increment-newN, with the FP32 number difference
+          ! formed first so a small source is not lost in a large FP64 oldN.
+          next_shift(:,group)=persistent_energy_shift(:,group,slot)+group_mean_energy_ev(group)* &
+               ((real(state(:,group,slot),dp)-real(next_number(:,group),dp))+directional_density(:,group))
+          if(present(source_mean_energy_ev))then
+             next_shift(:,group)=persistent_energy_shift(:,group,slot)+group_mean_energy_ev(group)* &
+                  (real(state(:,group,slot),dp)-real(next_number(:,group),dp))+ &
+                  injection_mean(group)*directional_density(:,group)
+          endif
+          actual_energy=group_mean_energy_ev(group)*real(next_number(:,group),dp)+next_shift(:,group)
+          if(any(.not.ieee_is_finite(next_shift(:,group))).or.any(.not.ieee_is_finite(actual_energy)).or. &
+               any(actual_energy<0.0_dp).or.any(next_number(:,group)==0.0_c_float.and.next_shift(:,group)/=0.0_dp))then
+             ierr=6
+             return
+          endif
+       enddo
+       ! The complete source is accepted or rejected across ALL groups.
+       state(:,:,slot)=next_number
+       persistent_energy_shift(:,:,slot)=next_shift
+       deposited_density_code=sum(group_density)
+       return
+    endif
+
+    ! Legacy commit arithmetic is unchanged when paired arguments are absent.
     do group = 1, size(emitted_photons)
        state(:,group,slot) = state(:,group,slot) + &
             real(directional_density(:,group),c_float)

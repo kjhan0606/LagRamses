@@ -132,11 +132,14 @@ subroutine init_part
 #ifdef OUTPUT_PARTICLE_POTENTIAL
   allocate(ptcl_phi(npartmax))
 #endif
-  ! Under FDM there are no N-body particles, so no IC reader writes levelp.
-  ! npartmax is small here, so zero the slot-occupancy marker explicitly:
-  ! full-array "levelp>0" scans (backup_part, etc.) must find an empty set,
-  ! otherwise dirty-heap garbage forges phantom particles and corrupts memory.
-  if(use_fdm) levelp = 0
+  ! Readers initialize only active slots (none in a pure FDM run).
+  ! Full-array "levelp>0" scans must not find inactive dirty-heap entries:
+  ! these would forge phantom particles in dumps or particle bookkeeping.
+  ! The occupancy marker must be initialized for *all* IC types: native
+  ! chemistry/library allocations can expose reused heap pages even in a
+  ! small non-FDM stellar run. Only this integer marker is touched, not the
+  ! large inactive position/velocity/chemistry arrays.
+  levelp = 0
   ! Particle arrays: active particles initialized by restart/IC reader.
   ! Free-list particles get zero from mmap lazy page allocation.
   ! Skip full-array zeroing to avoid paging in ~1.7 GB.

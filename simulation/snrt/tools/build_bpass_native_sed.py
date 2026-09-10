@@ -49,7 +49,29 @@ def photon_groups(wavelength: np.ndarray, lnu: np.ndarray, edges: np.ndarray) ->
     return result
 
 
-def build(source: Path, edges_path: Path, ledger_path: Path, escape_fraction: float) -> tuple[str, dict]:
+def energy_groups(wavelength: np.ndarray, lnu: np.ndarray, edges: np.ndarray) -> np.ndarray:
+    """Escaped eV/s: integrate the SAME linear photon integrand times hc/lambda.
+
+    Positive endpoint weights give the analytic segment integral; log1p avoids
+    loss in narrow wavelength intervals. There is no mean-energy interpolation.
+    """
+    integrand = lnu * LSUN / (PLANCK * wavelength)
+    result = np.zeros(len(edges) - 1)
+    for i, (low, high) in enumerate(zip(edges[:-1], edges[1:])):
+        a, b = max(wavelength[0], EV_ANGSTROM / high), min(wavelength[-1], EV_ANGSTROM / low)
+        if b <= a:
+            continue
+        x = np.r_[a, wavelength[(wavelength > a) & (wavelength < b)], b]
+        y = np.interp(x, wavelength, integrand)
+        r = np.diff(x) / x[:-1]
+        log = np.log1p(r)
+        upper = 1. - log / r
+        result[i] = EV_ANGSTROM * np.sum(y[:-1] * (log - upper) + y[1:] * upper)
+    return result
+
+
+def build(source: Path, edges_path: Path, ledger_path: Path, escape_fraction: float,
+          energy_moments: bool = False) -> tuple[str, dict]:
     if not np.isfinite(escape_fraction) or not 0 <= escape_fraction <= 1:
         raise ValueError("escape fraction must be finite and in [0,1]")
     if sha256(source) != BPASS_SHA:
@@ -69,21 +91,29 @@ def build(source: Path, edges_path: Path, ledger_path: Path, escape_fraction: fl
         if not np.all(np.diff(wavelength) > 0) or wavelength[0] <= 0:
             raise ValueError("invalid wavelength axis")
         rates = np.empty((len(metals), len(ages), 9))
+        energies = np.empty_like(rates) if energy_moments else None
         for iz in range(len(metals)):
             for ia in range(len(ages)):
                 spectrum = f["spectra"][iz, ia, :]
                 if not np.isfinite(spectrum).all() or np.any(spectrum < 0):
                     raise ValueError("non-finite/negative source spectrum")
                 rates[iz, ia] = photon_groups(wavelength, spectrum, edges) * escape_fraction
+                if energy_moments:
+                    energies[iz, ia] = energy_groups(wavelength, spectrum, edges) * escape_fraction
     # Explicit young-age comparison approximation, never claimed as a BPASS datum.
     ages = np.r_[0., ages]
     rates = np.concatenate((rates[:, :1, :], rates), axis=1)
+    if energy_moments:
+        energies = np.concatenate((energies[:, :1, :], energies), axis=1)
+        if (not np.isfinite(energies).all() or np.any(energies < rates * edges[:-1] * (1.-1e-12))
+                or np.any(energies > rates * edges[1:] * (1.+1e-12))):
+            raise ValueError("energy moments outside photon group support")
     if not np.isfinite(rates).all() or np.any(rates < 0):
         raise ValueError("invalid group rates")
     rows = ["! BPASS independent radiation population: reference comparison only.",
             "! Source is already per initial Msun. Feedback population is NOT changed.",
             "! 0--1 Myr holds the first spectrum; unmeasured spectral tails are zero.",
-            "&snrt_stellar_sed", f" version=2, na={len(ages)}, nz={len(metals)},",
+            "&snrt_stellar_sed", f" version={3 if energy_moments else 2}, na={len(ages)}, nz={len(metals)},",
             " population_binding='independent_radiation_reference',",
             " radiation_population='BPASS_v2.2.1_bin-imf135_300',",
             f" source_sha256='{BPASS_SHA}',",
@@ -101,6 +131,12 @@ def build(source: Path, edges_path: Path, ledger_path: Path, escape_fraction: fl
             # Sections matter: the compiled array has max_age=128, not na=52.
             for group in range(9):
                 rows.append(f" rates({group+1},{ia+1},{iz+1})={rates[iz,ia,group]:.17e},")
+    if energy_moments:
+        rows.append(" energy_semantics='photon_number_and_energy_v1',")
+        for iz in range(len(metals)):
+            for ia in range(len(ages)):
+                for group in range(9):
+                    rows.append(f" energy_rates({group+1},{ia+1},{iz+1})={energies[iz,ia,group]:.17e},")
     rows.append("/")
     native = "\n".join(rows) + "\n"
     metadata = dict(schema="snrt_bpass_independent_radiation_reference_v2", source_sha256=BPASS_SHA,
@@ -117,6 +153,13 @@ def build(source: Path, edges_path: Path, ledger_path: Path, escape_fraction: fl
                                  "Common reference AGN/stellar grey energy and cross sections are retained.",
                                  "Not a self-consistent common-population or production-approved SED model."],
                     min_rate=float(rates.min()), max_rate=float(rates.max()))
+    if energy_moments:
+        metadata.update(schema="snrt_bpass_independent_radiation_reference_v3",
+                        energy_rate_units="escaped eV/s/initial Msun",
+                        energy_integral="analytic hc/lambda times the piecewise-linear photon integrand",
+                        runtime="hhe_maxent64_v1; actual BPASS injection E; unchanged state Eref",
+                        min_energy_rate=float(energies.min()), max_energy_rate=float(energies.max()))
+        metadata["limitations"][2] = "H/He band closure only; not dust/CHIMES or a full spectral reconstruction."
     return native, metadata
 
 
@@ -126,12 +169,13 @@ def main() -> None:
     p.add_argument("--group-edges", type=Path, default=ROOT / "config/p0_photon_group_edges_ev.txt")
     p.add_argument("--transport-ledger", type=Path, default=ROOT / "data/p4_pilot_agn_photon_ledger.json")
     p.add_argument("--escape-fraction", type=float, required=True)
+    p.add_argument("--energy-moments", action="store_true", help="opt in to v3 paired Q/E for H/He band mode")
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--metadata", type=Path, required=True)
     a = p.parse_args()
     if a.output.exists() or a.metadata.exists() or a.output.resolve() == a.metadata.resolve():
         p.error("use distinct new output paths; existing assets are preserved")
-    native, metadata = build(a.source, a.group_edges, a.transport_ledger, a.escape_fraction)
+    native, metadata = build(a.source, a.group_edges, a.transport_ledger, a.escape_fraction, a.energy_moments)
     with a.output.open("x") as f:
         f.write(native)
     with a.metadata.open("x") as f:

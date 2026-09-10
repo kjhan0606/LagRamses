@@ -1,0 +1,11 @@
+**Q-GOAL: yes, but only through the decision it enables.** The live two-size transfer in `dust_size_exchange` (patch/lagRamses/dust_mass_physics.f90:406) is an empirical timescale closure: 54 Myr shattering below nH 1e3, 0.27 Myr coagulation above. Those rates set the small/large split that feeds RT opacity and dust cooling, and nothing in the repo tests them against a kernel. The existing multibin reference (`dust_multibin_shift`, line 105) only shifts radii and returns underflow to gas, so it cannot answer this. A native kernel operator with HA19 velocities is the minimal way to learn whether the closure is off by 2x or 20x in the regimes the simulation actually samples. It changes no live physics, which matches the approved scope. One gap: the driver-end decision has no stated acceptance criterion. Without a threshold, such as small-mass fraction at 0.03 micron agreeing within a stated factor after a stated time in both regimes, the comparison produces numbers but no decision.
+
+**Q-LEAN: moderately overinstrumented in the comparison matrix, not in the physics.** The operator core is lean and every evidence item listed is load-bearing: zero-rate identity, constant-kernel analytic N(t), mass closure with reservoir, positivity, rollback, analytic a^-3.3 fragment integration, angle-averaged K and K*yield. The excess is 2 regimes x 2 materials x 3 grids plus separate timestep refinement. Grid and timestep convergence are properties of the operator, not the material. Reporting initial projection error per grid is cheap and needed.
+
+**Verdict: approve with three trims and one addition.**
+1. Add an explicit decision criterion to the spec before implementation.
+2. Run grid (16/32/64) and timestep refinement on silicate only, both Mach regimes. Run graphite at 32 bins only, for the paired two-size comparison.
+3. Fix the angle quadrature at a low fixed order (5 Gauss-Legendre nodes in cos theta). Do not make node count a study variable.
+4. Keep the boundary reservoir separate from the existing gas-return path in `dust_multibin_shift`. Report both losses, never merge them.
+
+Scope stays dust_mass_physics.f90 plus dust_mass_smoke.f90, no jobs. The plan file could not be written because the Write tool is disabled in this session, so this message is the review deliverable.

@@ -6,6 +6,8 @@ subroutine make_boundary_hydro(ilevel)
   use amr_commons
   use hydro_commons
   use poisson_parameters
+  use morton_hash, only: morton_nbor_grid
+#include "amr_index.h"
   implicit none
   integer::ilevel
   ! -------------------------------------------------------------------
@@ -147,7 +149,7 @@ subroutine make_boundary_hydro(ilevel)
 
         ! Gather neighboring reference grid
         do i=1,ngrid
-           ind_grid_ref(i)=son(nbor(ind_grid(i),inbor))
+           ind_grid_ref(i)=morton_nbor_grid(ind_grid(i),ilevel,inbor)
         end do
 
         ! Wall or reflexive boundary conditions
@@ -155,21 +157,18 @@ subroutine make_boundary_hydro(ilevel)
 
            ! Loop over cells
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
 
               ! Gather neighboring reference cell
-              iskip_ref=ncoarse+(ind_ref(ind)-1)*ngridmax
               do i=1,ngrid
-                 ind_cell_ref(i)=iskip_ref+ind_grid_ref(i)
+                 ind_cell_ref(i)=ICELL_OF(ind_grid_ref(i),ind_ref(ind))
               end do
 
               ! Gather cell to get the normal magnetic field component
-              iskip_normal=ncoarse+(ind_normal(ind)-1)*ngridmax
               do i=1,ngrid
-                 ind_cell_normal(i)=iskip_normal+ind_grid_ref(i)
+                 ind_cell_normal(i)=ICELL_OF(ind_grid_ref(i),ind_normal(ind))
               end do
 
               ! Gather reference hydro variables
@@ -227,15 +226,13 @@ subroutine make_boundary_hydro(ilevel)
 
            ! Loop over cells
            do ind=1,twotondim
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
 
               ! Gather neighboring reference cell
-              iskip_ref=ncoarse+(ind_ref(ind)-1)*ngridmax
               do i=1,ngrid
-                 ind_cell_ref(i)=iskip_ref+ind_grid_ref(i)
+                 ind_cell_ref(i)=ICELL_OF(ind_grid_ref(i),ind_ref(ind))
               end do
 
               ! Gather reference hydro variables
@@ -315,9 +312,8 @@ subroutine make_boundary_hydro(ilevel)
            ! Loop over cells
            do ind=1,twotondim
 
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
 
               ! Compute cell center in code units
@@ -364,21 +360,18 @@ subroutine make_boundary_hydro(ilevel)
 
                  ind=ind0(icell,iplane)
 
-                 iskip=ncoarse+(ind-1)*ngridmax
                  do i=1,ngrid
-                    ind_cell(i)=iskip+ind_grid(i)
+                    ind_cell(i)=ICELL_OF(ind_grid(i),ind)
                  end do
 
                  ! Gather neighboring reference cell
                  if(iplane==1)then
-                    iskip_ref=ncoarse+(ind_ref(ind)-1)*ngridmax
                     do i=1,ngrid
-                       ind_cell_ref(i)=iskip_ref+ind_grid_ref(i)
+                       ind_cell_ref(i)=ICELL_OF(ind_grid_ref(i),ind_ref(ind))
                     end do
                  else
-                    iskip_ref=ncoarse+(ind0(icell,1)-1)*ngridmax
                     do i=1,ngrid
-                       ind_cell_ref(i)=iskip_ref+ind_grid(i)
+                       ind_cell_ref(i)=ICELL_OF(ind_grid(i),ind0(icell,1))
                     end do
                  endif
 
@@ -403,9 +396,8 @@ subroutine make_boundary_hydro(ilevel)
            ! Loop over cells
            do ind=1,twotondim
 
-              iskip=ncoarse+(ind-1)*ngridmax
               do i=1,ngrid
-                 ind_cell(i)=iskip+ind_grid(i)
+                 ind_cell(i)=ICELL_OF(ind_grid(i),ind)
               end do
 
               do i=1,ngrid

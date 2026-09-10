@@ -3,9 +3,11 @@ module snrt_transport_step
   ! RAMSES virtual cells as read-only GPU ghosts; coarse-fine faces remain a
   ! separate conservative flux-register responsibility.
   use, intrinsic :: iso_c_binding, only: c_int, c_float
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_parameters, only: dp
   use snrt_state, only: snrt_ndirection, snrt_ngroups, snrt_nslot, snrt_intensity
   use snrt_angular_quadrature, only: snrt_angular_init
+  use snrt_spectral_contract, only: snrt_group_mean_energy_ev,snrt_grain_band_bins
   use snrt_amr_topology, only: snrt_amr_build_same_level_neighbors, &
        snrt_amr_exchange_interface_state, snrt_amr_apply_coarse_flux_correction, &
        snrt_face_kind, snrt_face_cell, &
@@ -16,7 +18,7 @@ module snrt_transport_step
   use snrt_cuda_multigroup_interface, only: snrt_cuda_multigroup_rt_step, &
        snrt_cuda_multigroup_rt_step_owned, snrt_cuda_multigroup_rt_step_species, &
        snrt_cuda_multigroup_rt_step_species_dust
-  use snrt_runtime_backend, only: snrt_runtime_species_dust_step
+  use snrt_runtime_backend, only: snrt_runtime_species_dust_step,snrt_runtime_energy_admit
   implicit none
 
 contains
@@ -292,9 +294,23 @@ contains
        optical_depth_by_leaf_dust, available_species_by_leaf, incoming_intensity, &
        trial_intensity, coarse_flux_trial, raw_by_leaf_group, &
        absorbed_hhe_by_leaf_group_species, absorbed_dust_by_leaf_group, &
-       returned_by_leaf_group, absorbed_by_leaf_group, ierr, leaf_cell, ilevel)
+       returned_by_leaf_group, absorbed_by_leaf_group, ierr, leaf_cell, ilevel,dust_moment, &
+       incoming_shift,trial_shift,coarse_shift,absorbed_hhe_energy,absorbed_dust_energy,dust_energy_moment, &
+       species_columns,secondary_xi,band_deposition,grain_columns)
     ! DUST-8 prepared ABI.  H/He species output uses (leaf,group,species),
     ! the same contiguous layout consumed by the CUDA DUST-7 wrapper.
+    ! Optional dust first angular moment (leaf,group,3), in photon code
+    ! density, accumulated over ALL transport substeps before publishing.
+    real(dp),optional,intent(inout)::dust_moment(:,:,:)
+    ! Paired energy ABI: E = reference(g)*N + shift, photonCODEdensity*eV.
+    ! Supply the complete six-argument bundle. Trial/ledger outputs publish
+    ! only on success, so nonlinear retries always restart from incoming_shift.
+    real(dp),optional,intent(in)::incoming_shift(:,:,:),species_columns(:,:)
+    real(dp),optional,intent(in)::secondary_xi(:)
+    real(dp),optional,intent(in)::grain_columns(:,:)
+    real(dp),optional,intent(inout)::band_deposition(:,:)
+    real(dp),optional,intent(inout)::trial_shift(:,:,:),coarse_shift(:,:,:)
+    real(dp),optional,intent(inout)::absorbed_hhe_energy(:,:,:),absorbed_dust_energy(:,:),dust_energy_moment(:,:,:)
     integer, intent(in) :: leaf_slot(:)
     integer, intent(in) :: neighbor(:,:)
     real(dp), intent(in) :: cdt_over_dx
@@ -319,7 +335,9 @@ contains
          available_species_by_leaf, incoming_intensity, trial_intensity, &
          coarse_flux_trial, absorbed_by_leaf_group, ierr, .true., leaf_cell, ilevel, &
          optical_depth_by_leaf_dust, absorbed_hhe_by_leaf_group_species, &
-         absorbed_dust_by_leaf_group, returned_by_leaf_group, raw_by_leaf_group)
+         absorbed_dust_by_leaf_group, returned_by_leaf_group, raw_by_leaf_group,dust_moment, &
+         incoming_shift,trial_shift,coarse_shift,absorbed_hhe_energy,absorbed_dust_energy,dust_energy_moment, &
+       species_columns,secondary_xi,band_deposition,grain_columns)
   end subroutine snrt_transport_absorb_multigroup_prepared_dust_trial
 
   subroutine snrt_transport_absorb_multigroup_prepared_trial_core(leaf_slot, neighbor, &
@@ -327,7 +345,9 @@ contains
        available_species_by_leaf, incoming_intensity, trial_intensity, &
        coarse_flux_trial, absorbed_by_leaf_group, ierr, use_dust, leaf_cell, ilevel, &
        optical_depth_by_leaf_dust, absorbed_hhe_by_leaf_group_species, &
-       absorbed_dust_by_leaf_group, returned_by_leaf_group, raw_by_leaf_group)
+       absorbed_dust_by_leaf_group, returned_by_leaf_group, raw_by_leaf_group,dust_moment, &
+       incoming_shift,trial_shift,coarse_shift,absorbed_hhe_energy,absorbed_dust_energy,dust_energy_moment, &
+       species_columns,secondary_xi,band_deposition,grain_columns)
     ! Prepared-cell ABI used by the RAMSES driver.  Keeping topology outside
     ! this routine lets the driver construct hydro/NLTE fields without a
     ! second AMR traversal.
@@ -360,6 +380,20 @@ contains
     real(c_float), intent(out), optional :: absorbed_dust_by_leaf_group(:,:)
     real(c_float), intent(out), optional :: returned_by_leaf_group(:,:)
     real(c_float), intent(out), optional :: raw_by_leaf_group(:,:)
+    real(dp),optional,intent(inout)::dust_moment(:,:,:)
+    real(dp),optional,intent(in)::incoming_shift(:,:,:),species_columns(:,:)
+    real(dp),optional,intent(in)::secondary_xi(:)
+    real(dp),optional,intent(in)::grain_columns(:,:)
+    real(dp),optional,intent(inout)::band_deposition(:,:)
+    real(dp),optional,intent(inout)::trial_shift(:,:,:),coarse_shift(:,:,:)
+    real(dp),optional,intent(inout)::absorbed_hhe_energy(:,:,:),absorbed_dust_energy(:,:),dust_energy_moment(:,:,:)
+    real(dp),allocatable::shift_packed(:,:,:),shift_work(:,:,:),shift_ghost(:,:,:),shift_coarse(:,:,:),reference(:)
+    real(dp),allocatable::hhe_e_step(:,:,:),dust_e_step(:,:),energy_m_step(:,:,:)
+    real(dp),allocatable::hhe_e_total(:,:,:),dust_e_total(:,:),energy_m_total(:,:,:)
+    real(dp)::face_cdt,face_direction(snrt_ndirection,3)
+    real(dp),allocatable::moment_step(:,:,:),moment_total(:,:,:),column_step(:,:)
+    real(dp),allocatable::secondary_step(:,:),secondary_total(:,:)
+    real(dp),allocatable::grain_step(:,:),normalized_weights(:)
     integer :: nleaf, ilocal, igroup, nsub, isub
     integer :: nmpi, nwork, iwork, iface, ighost
     integer :: face_kind
@@ -382,6 +416,63 @@ contains
     ierr = 0
     absorbed_by_leaf_group = 0.0_c_float
     nleaf = size(leaf_slot)
+    local_error=0
+    if(present(grain_columns))then
+       if(.not.present(species_columns).or..not.present(secondary_xi))local_error=1
+       if(any(shape(grain_columns)/=[nleaf,snrt_grain_band_bins()]))local_error=1
+       if(any(.not.ieee_is_finite(grain_columns)).or.any(grain_columns<0))local_error=1
+    endif
+    if(present(secondary_xi).neqv.present(band_deposition))local_error=1
+    if(present(secondary_xi).and.present(band_deposition))then
+       if(.not.present(species_columns))local_error=1
+       if(size(secondary_xi)/=nleaf.or.any(shape(band_deposition)/=[nleaf,8]))local_error=1
+       if(any(.not.ieee_is_finite(secondary_xi)).or.any(secondary_xi<0).or.any(secondary_xi>1))local_error=1
+    endif
+    if(present(species_columns))then
+       if(.not.present(incoming_shift))local_error=1
+       if(any(shape(species_columns)/=[nleaf,3]))local_error=1
+       if(any(.not.ieee_is_finite(species_columns)).or.any(species_columns<0))local_error=1
+    endif
+    if(present(incoming_shift))then
+       if(.not.use_dust.or..not.present(trial_shift).or..not.present(coarse_shift).or. &
+            .not.present(absorbed_hhe_energy).or..not.present(absorbed_dust_energy).or. &
+            .not.present(dust_energy_moment))then
+          local_error=1
+       else
+          if(any(shape(incoming_shift)/=[snrt_ndirection,snrt_ngroups,nleaf]).or. &
+               any(shape(trial_shift)/=shape(incoming_shift)).or. &
+               any(shape(coarse_shift)/=shape(coarse_flux_trial)))local_error=1
+          if(any(shape(absorbed_hhe_energy)/=[nleaf,snrt_ngroups,3]).or. &
+               any(shape(absorbed_dust_energy)/=[nleaf,snrt_ngroups]).or. &
+               any(shape(dust_energy_moment)/=[nleaf,snrt_ngroups,3]))local_error=1
+          if(any(.not.ieee_is_finite(incoming_shift)))local_error=1
+       endif
+    else if(present(trial_shift).or.present(coarse_shift).or.present(absorbed_hhe_energy).or. &
+         present(absorbed_dust_energy).or.present(dust_energy_moment))then
+       local_error=1
+    endif
+    call snrt_transport_collective_error(local_error,global_error)
+    if(global_error/=0)then
+       ierr=global_error;return
+    endif
+    if(present(incoming_shift))then
+       call snrt_runtime_energy_admit(local_error)
+       call snrt_transport_collective_error(local_error,global_error)
+       if(global_error/=0)then
+          ierr=global_error;return
+       endif
+    endif
+    if(present(dust_moment))then
+       ! Collectively reject before any rank enters AMR exchange.
+       local_error=0
+       if(.not.use_dust.or.any(shape(dust_moment)/=[nleaf,snrt_ngroups,3]))local_error=1
+       call snrt_transport_collective_error(local_error,global_error)
+       if(global_error/=0)then
+          ierr=global_error;return
+       endif
+       allocate(moment_step(nleaf,snrt_ngroups,3),moment_total(nleaf,snrt_ngroups,3))
+       moment_step=0;moment_total=0
+    endif
     trial_intensity = 0.0_c_float
     coarse_flux_trial = 0.0_c_float
     if (present(absorbed_hhe_by_leaf_group_species)) &
@@ -468,6 +559,21 @@ contains
     neighbor_work = neighbor(:,1:nleaf)
     allocate(ghost_kind(nmpi), ghost_cell(nmpi), ghost_face(nmpi), ghost_local(nmpi), &
          ghost_state(nmpi,snrt_ndirection,snrt_ngroups))
+    if(present(incoming_shift))then
+       allocate(shift_packed(nleaf,snrt_ndirection,snrt_ngroups), &
+            shift_work(nwork,snrt_ndirection,snrt_ngroups),shift_ghost(nmpi,snrt_ndirection,snrt_ngroups), &
+            shift_coarse(size(coarse_shift,1),size(coarse_shift,2),size(coarse_shift,3)),reference(snrt_ngroups), &
+            hhe_e_step(nleaf,snrt_ngroups,3),dust_e_step(nleaf,snrt_ngroups),energy_m_step(nleaf,snrt_ngroups,3), &
+            hhe_e_total(nleaf,snrt_ngroups,3),dust_e_total(nleaf,snrt_ngroups),energy_m_total(nleaf,snrt_ngroups,3))
+       shift_coarse=0;shift_ghost=0;reference=snrt_group_mean_energy_ev
+       hhe_e_total=0;dust_e_total=0;energy_m_total=0
+       hhe_e_step=0;dust_e_step=0;energy_m_step=0
+       do ilocal=1,nleaf
+          do igroup=1,snrt_ngroups
+             shift_packed(ilocal,:,igroup)=incoming_shift(:,igroup,ilocal)
+          enddo
+       enddo
+    endif
     if (nmpi > 0) then
        iwork = nleaf
        ighost = 0
@@ -504,6 +610,14 @@ contains
     angular_cfl = maxval(sum(abs(direction_dp), dim=2))
     nsub = max(1, ceiling(cdt_over_dx * angular_cfl))
 
+    if(present(incoming_shift))then
+       ! Admit the actual rounded C coefficients, including the CFL=1 edge.
+       do while(real(real(cdt_over_dx/real(nsub,dp),c_float),dp)* &
+            maxval(sum(abs(real(real(direction_dp,c_float),dp)),dim=2))>1.0_dp)
+          nsub=nsub+1
+       enddo
+    endif
+
     allocate(neighbor_c(6,nleaf), packed(nleaf,snrt_ndirection,snrt_ngroups), &
          tau(nleaf,snrt_ngroups), species_tau(nleaf,snrt_ngroups,3), &
          species_budget(nleaf,3), absorbed_total(nleaf), &
@@ -516,6 +630,11 @@ contains
     end if
     neighbor_c = int(neighbor_work, c_int)
     direction_c = real(transpose(direction_dp), c_float)
+    face_cdt=cdt_over_dx/real(nsub,dp);face_direction=direction_dp
+    if(present(incoming_shift))then
+       face_cdt=real(real(face_cdt,c_float),dp)
+       face_direction=real(transpose(direction_c),dp)
+    endif
     do ilocal = 1, nleaf
        species_budget(ilocal,1:3) = available_species_by_leaf(ilocal,1:3)
        do igroup = 1, snrt_ngroups
@@ -530,12 +649,22 @@ contains
     end do
 
     absorbed_by_leaf_group(1:nleaf,1:snrt_ngroups) = 0.0_c_float
+    if(present(species_columns))then
+       allocate(column_step(nleaf,3));column_step=species_columns/real(nsub,dp)
+       if(present(grain_columns))then
+          allocate(grain_step(nleaf,snrt_grain_band_bins()),normalized_weights(snrt_ndirection))
+          grain_step=grain_columns/real(nsub,dp);normalized_weights=weight/sum(weight)
+       endif
+       if(present(secondary_xi))then
+          allocate(secondary_step(nleaf,8),secondary_total(nleaf,8));secondary_step=0;secondary_total=0
+       endif
+    endif
     do isub = 1, nsub
        ! The AMR exchange is collective even when this rank has no local
        ! ghost faces; the topology routine reduces interface requirements
        ! across all ranks before entering make_virtual_fine_dp.
        call snrt_amr_exchange_interface_state(ilevel, leaf_cell, packed, &
-            ghost_kind, ghost_cell, ghost_face, ghost_state, ierr)
+            ghost_kind, ghost_cell, ghost_face, ghost_state, ierr,shift_packed,shift_ghost)
        local_error = 0
        if (ierr /= 0) local_error = 10 + ierr
        call snrt_transport_collective_error(local_error, global_error)
@@ -545,13 +674,17 @@ contains
        end if
        packed_work = 0.0_c_float
        packed_work(1:nleaf,1:snrt_ndirection,1:snrt_ngroups) = packed
+       if(present(incoming_shift))then
+          shift_work(1:nleaf,:,:)=shift_packed
+          shift_work(nleaf+1:nwork,:,:)=shift_ghost
+       endif
        do ighost = 1, nmpi
           packed_work(nleaf+ighost,1:snrt_ndirection,1:snrt_ngroups) = &
                ghost_state(ighost,1:snrt_ndirection,1:snrt_ngroups)
        end do
        call snrt_amr_apply_coarse_flux_correction(ilevel, leaf_cell, packed_work, &
             ghost_kind, ghost_cell, ghost_face, ghost_local, &
-            cdt_over_dx/real(nsub,dp), direction_dp, coarse_flux_trial, ierr)
+            face_cdt, face_direction, coarse_flux_trial, ierr,shift_work,shift_coarse)
        local_error = 0
        if (ierr /= 0) local_error = 20 + ierr
        call snrt_transport_collective_error(local_error, global_error)
@@ -574,7 +707,9 @@ contains
                   absorbed_hhe_group, absorbed_dust_group, returned_group, raw_group, &
                   absorbed_group, absorbed_total, int(nleaf,c_int), int(nwork,c_int), &
                   int(snrt_ndirection,c_int), int(snrt_ngroups,c_int), &
-                  real(cdt_over_dx/real(nsub,dp),c_float))
+                  real(cdt_over_dx/real(nsub,dp),c_float),moment_step, &
+                  shift_work,reference,hhe_e_step,dust_e_step,energy_m_step,column_step,secondary_xi,secondary_step, &
+                  grain_step,normalized_weights)
           else
              cuda_ierr = snrt_cuda_multigroup_rt_step_species(packed_work, direction_c, &
                   neighbor_c, tau, species_tau, species_budget, absorbed_total, &
@@ -602,15 +737,46 @@ contains
                returned_by_leaf_group(1:nleaf,1:snrt_ngroups) + returned_group
           raw_by_leaf_group(1:nleaf,1:snrt_ngroups) = &
                raw_by_leaf_group(1:nleaf,1:snrt_ngroups) + raw_group
+          if(present(dust_moment))moment_total=moment_total+moment_step
+          if(present(incoming_shift))then
+             hhe_e_total=hhe_e_total+hhe_e_step
+             dust_e_total=dust_e_total+dust_e_step
+             energy_m_total=energy_m_total+energy_m_step
+             if(present(secondary_xi))secondary_total=secondary_total+secondary_step
+             shift_packed=shift_work(1:nleaf,:,:)
+          endif
        end if
        packed = packed_work(1:nleaf,1:snrt_ndirection,1:snrt_ngroups)
     end do
 
+    if(present(incoming_shift))then
+       local_error=0
+       if(any(.not.ieee_is_finite(shift_coarse)).or.any(.not.ieee_is_finite(hhe_e_total)).or. &
+            any(.not.ieee_is_finite(dust_e_total)).or.any(.not.ieee_is_finite(energy_m_total)))local_error=3
+       if(present(secondary_xi))then
+          if(any(.not.ieee_is_finite(secondary_total)).or.any(secondary_total<0))local_error=3
+       endif
+       call snrt_transport_collective_error(local_error,global_error)
+       if(global_error/=0)then
+          ierr=global_error;return
+       endif
+    endif
     do ilocal = 1, nleaf
        do igroup = 1, snrt_ngroups
           trial_intensity(:,igroup,ilocal) = packed(ilocal,:,igroup)
        end do
     end do
+    if(present(dust_moment))dust_moment=moment_total
+    if(present(band_deposition))band_deposition=secondary_total
+    if(present(incoming_shift))then
+       do ilocal=1,nleaf
+          do igroup=1,snrt_ngroups
+             trial_shift(:,igroup,ilocal)=shift_packed(ilocal,:,igroup)
+          enddo
+       enddo
+       coarse_shift=shift_coarse
+       absorbed_hhe_energy=hhe_e_total;absorbed_dust_energy=dust_e_total;dust_energy_moment=energy_m_total
+    endif
     deallocate(neighbor_work, packed_work, ghost_kind, ghost_cell, ghost_face, &
          ghost_local, ghost_state, neighbor_c, packed, tau, species_tau, &
          species_budget, absorbed_total, absorbed_group)

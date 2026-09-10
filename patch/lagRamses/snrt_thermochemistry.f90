@@ -8,6 +8,7 @@
 ! ledgers until their receivers are approved.
 module snrt_thermochemistry
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use iso_c_binding, only: c_int,c_double,c_float
   use amr_parameters, only: dp
   use snrt_agn_source, only: snrt_ev_to_erg
   implicit none
@@ -117,6 +118,9 @@ module snrt_thermochemistry
   public :: snrt_secondary_tables_load_from_environment
   public :: snrt_secondary_tables_reset
   public :: snrt_secondary_fractions
+  public :: snrt_secondary_fractions_c
+  public :: snrt_secondary_energy_slice
+  public :: snrt_secondary_raw_grid
   public :: snrt_alpha_hydrogen_case_b
   public :: snrt_alpha_helium_ii_radiative_case_b
   public :: snrt_alpha_helium_ii_dielectronic_case_b
@@ -419,6 +423,56 @@ contains
     if (present(total_ionization_fraction)) total_ionization_fraction = fion
   end subroutine snrt_secondary_fractions
 
+  recursive function snrt_secondary_fractions_c(energy,xi,f) bind(C) result(ierr)
+    real(c_double),value::energy,xi
+    real(c_double),intent(out)::f(5)
+    integer(c_int)::ierr
+    integer::status
+    ! Tables are loaded on the serial initialization path, never here.
+    call snrt_secondary_fractions(energy,xi,f(1),f(2),f(3),f(4),f(5),status)
+    ierr=int(status,c_int)
+  end function
+
+  subroutine snrt_secondary_raw_grid(energies,xi,values,ierr)
+    real(dp),intent(out)::energies(snrt_secondary_nenergy),xi(14),values(6,14,snrt_secondary_nenergy)
+    integer,intent(out)::ierr
+    ierr=snrt_thermochemistry_err_not_loaded
+    if(.not.snrt_secondary_tables_loaded)return
+    energies=snrt_secondary_energy_ev
+    xi=snrt_xi_grid
+    values(1,:,:)=snrt_secondary_total_ionization
+    values(2,:,:)=snrt_secondary_heating
+    values(3,:,:)=snrt_secondary_excitation
+    values(4,:,:)=snrt_secondary_hydrogen_count
+    values(5,:,:)=snrt_secondary_helium_i_count
+    values(6,:,:)=snrt_secondary_helium_ii_count
+    ierr=0
+  end subroutine
+
+  subroutine snrt_secondary_energy_slice(energy_in,values,xi,ierr)
+    ! Exact energy-side interpolation of the SIX RAW quantities, before
+    ! ionization-count weighting and normalization. A runtime receiver can
+    ! cache this for fixed source energies and interpolate only in xi.
+    real(dp),intent(in)::energy_in
+    real(dp),intent(out)::values(6,snrt_secondary_nxi),xi(snrt_secondary_nxi)
+    integer,intent(out)::ierr
+    real(dp)::energy
+    integer::j
+    values=0;xi=snrt_xi_grid;ierr=snrt_thermochemistry_err_input
+    if(.not.snrt_secondary_tables_loaded.or..not.ieee_is_finite(energy_in))return
+    if(energy_in<snrt_secondary_energy_minimum_ev)return
+    energy=min(energy_in,snrt_secondary_energy_maximum_ev)
+    do j=1,snrt_secondary_nxi
+       values(:,j)=[snrt_bilinear(snrt_secondary_total_ionization,energy,xi(j)), &
+            snrt_bilinear(snrt_secondary_heating,energy,xi(j)), &
+            snrt_bilinear(snrt_secondary_excitation,energy,xi(j)), &
+            snrt_bilinear(snrt_secondary_hydrogen_count,energy,xi(j)), &
+            snrt_bilinear(snrt_secondary_helium_i_count,energy,xi(j)), &
+            snrt_bilinear(snrt_secondary_helium_ii_count,energy,xi(j))]
+    enddo
+    ierr=0
+  end subroutine
+
   real(dp) function snrt_bilinear(values, energy, xh) result(value)
     real(dp), intent(in) :: values(:,:), energy, xh
     integer :: ie, ix
@@ -622,13 +676,16 @@ contains
 
   subroutine snrt_thermochemistry_advance_cell(n_hydrogen_cm3, n_helium_cm3, &
        n_h_unit_cm3, temperature_k, delta_t_s, x_hydrogen_ii, x_helium_ii, &
-       x_helium_iii, absorbed_species_code, excess_energy_ev, result,defer_recombination)
+       x_helium_iii, absorbed_species_code, excess_energy_ev, result,defer_recombination,band_deposition)
     real(dp), intent(in) :: n_hydrogen_cm3, n_helium_cm3, n_h_unit_cm3
     real(dp), intent(in) :: temperature_k, delta_t_s
     real(dp), intent(in) :: x_hydrogen_ii, x_helium_ii, x_helium_iii
     real(dp), intent(in) :: absorbed_species_code(:,:), excess_energy_ev(:,:)
     type(snrt_thermochemistry_result), intent(out) :: result
     logical,optional,intent(in)::defer_recombination
+    ! Code number densities (1:3), code number-density*eV (4:8).
+    ! Integrated at the actual absorption nodes with the same initial xi.
+    real(dp),optional,intent(in)::band_deposition(8)
     real(dp) :: primary(3), remaining(3), secondary(3)
     real(dp) :: xh_photo, xheii_photo, xheiii_photo
     real(dp) :: heating_energy, ionization_energy, excitation_energy
@@ -636,6 +693,7 @@ contains
     real(dp) :: fh, fhi, fhei, fheii, fexc
     real(dp) :: threshold(3), target_available(3), used_count
     real(dp) :: state_tolerance, inventory_tolerance
+    real(dp) :: represented_excess, represented_total
     integer :: species, group, ierr_local
 
     result = snrt_thermochemistry_result()
@@ -679,6 +737,26 @@ contains
     do species = 1, 3
        primary(species) = sum(absorbed_species_code(species,:)) * n_h_unit_cm3
     end do
+    if(present(band_deposition))then
+       if(any(.not.ieee_is_finite(band_deposition)).or.any(band_deposition<0))then
+          result%ierr=snrt_thermochemistry_err_input
+          return
+       endif
+       if(any(abs(primary-band_deposition(1:3)*n_h_unit_cm3)> &
+            8*real(epsilon(0.0_c_float),dp)*max(primary,tiny(1.0_dp))))then
+          result%ierr=snrt_thermochemistry_err_inventory
+          return
+       endif
+       represented_excess=sum(absorbed_species_code*excess_energy_ev)*n_h_unit_cm3
+       represented_total=represented_excess+sum(primary*threshold)
+       if(abs(sum(band_deposition(4:8))*n_h_unit_cm3-represented_excess)> &
+            8*real(epsilon(0.0_c_float),dp)*max(represented_total,tiny(1.0_dp)))then
+          result%ierr=snrt_thermochemistry_err_energy
+          return
+       endif
+       ! Preserve exact accepted primary counts paired with FP64 energy.
+       primary=band_deposition(1:3)*n_h_unit_cm3
+    endif
     remaining(1) = n_hydrogen_cm3 * (1.0d0-x_hydrogen_ii)
     remaining(2) = n_helium_cm3 * (1.0d0-x_helium_ii-x_helium_iii)
     remaining(3) = n_helium_cm3 * x_helium_ii
@@ -698,6 +776,18 @@ contains
     ionization_energy = 0.0d0
     excitation_energy = 0.0d0
     secondary = 0.0d0
+    if(present(band_deposition))then
+       input_energy=sum(band_deposition(4:8))*n_h_unit_cm3
+       heating_energy=band_deposition(4)*n_h_unit_cm3
+       excitation_energy=band_deposition(8)*n_h_unit_cm3
+       do species=1,3
+          electron_energy=band_deposition(4+species)*n_h_unit_cm3
+          used_count=min(electron_energy/threshold(species),remaining(species))
+          secondary(species)=used_count
+          remaining(species)=remaining(species)-used_count
+          heating_energy=heating_energy+electron_energy-used_count*threshold(species)
+       enddo
+    else
     do group = 1, size(absorbed_species_code,2)
        do species = 1, 3
           electron_energy = absorbed_species_code(species,group) * n_h_unit_cm3 * &
@@ -733,6 +823,7 @@ contains
                used_count*threshold(3)
         end do
     end do
+    endif
     ionization_energy = secondary(1)*threshold(1) + secondary(2)*threshold(2) + &
          secondary(3)*threshold(3)
     residual = input_energy - heating_energy - ionization_energy - excitation_energy

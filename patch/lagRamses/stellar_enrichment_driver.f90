@@ -136,8 +136,8 @@ contains
           ! SSP ledger is built.  Keeping it out here prevents the generic
           ! IMF-only integrator from treating a prompt table as a DTD.
           cycle
-       else if (channel == channel_pisn) then
-          ! PISN still needs an explicit population/core-mass gate.
+       else if (channel == channel_pisn.and.(.not.table%high_mass_ready.or.table%high_mass_version/=4)) then
+          ! Only v4 admits a validated source-node pair-instability map.
           ierr = enrichment_driver_err_unsupported
           return
        else if (channel == channel_snii .and. &
@@ -218,7 +218,7 @@ contains
           ! See compute_stellar_source_increment: the runtime owns the DTD
           ! convolution and applies the SNIa ledger transaction separately.
           cycle
-       else if (channel == channel_pisn) then
+       else if (channel == channel_pisn.and.(.not.table%high_mass_ready.or.table%high_mass_version/=4)) then
           ierr = enrichment_driver_err_unsupported
           return
        else if (channel == channel_snii .and. &
@@ -261,7 +261,13 @@ contains
     integer::status
     if(.not.table%high_mass_ready.or..not.enable_wind.or..not.enable_snii)return
     if(max(lower(channel_wind),lower(channel_snii))>max(40d0,population%imf_mass_min))return
-    if(min(upper(channel_wind),upper(channel_snii))<min(120d0,population%imf_mass_max))return
+    if(table%high_mass_version==4)then
+       if(.not.enable_pisn)return
+       if(min(upper(channel_wind),upper(channel_snii),upper(channel_pisn))< &
+            min(maxval(table%hm_mass),population%imf_mass_max))return
+    else
+       if(min(upper(channel_wind),upper(channel_snii))<min(120d0,population%imf_mass_max))return
+    endif
     ! Only the high-mass seam is accounted for by this selected model. Keep
     ! the independent low-mass lifetime seam in the diagnostic, unchanged.
     call compute_unresolved_mass_bucket(population,unresolved_fate_mass_min(:1), &
@@ -294,6 +300,7 @@ contains
 
     total%ejected_mass = total%ejected_mass + component%ejected_mass
     total%dust_species=total%dust_species+component%dust_species
+    total%channel_condensed_mass=total%channel_condensed_mass+component%channel_condensed_mass
     total%net_yield = total%net_yield + component%net_yield
     total%returned_mass = total%returned_mass + component%returned_mass
     total%energy = total%energy + component%energy

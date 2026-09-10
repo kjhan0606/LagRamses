@@ -6,11 +6,13 @@ module dust_composition_optics
   implicit none
   private
   include 'dust_d03_optics_data.inc'
+  include 'dust_d03_band_data.inc'
   integer,parameter,public :: d03_ng=size(d03_primary_ev),d03_nir=size(d03_ir_ev)
   public :: d03_radius_cm,d03_solid_density,d03_edges,d03_primary_ev,d03_ir_ev
   public :: d03_optics_binding,d03_opacity_basis,d03_mix_opacity,d03_absorption_depth
   integer,parameter,public :: d03_identity_size=5+size(d03_edges)+d03_ng+d03_nir+12*(d03_ng+d03_nir)
   public :: d03_identity,d03_cell_weights
+  public :: d03_band_nodes,d03_band_ev,d03_band_abs,d03_band_transport,d03_band_sha256
 contains
   function d03_identity() result(v)
     real(real64)::v(d03_identity_size)

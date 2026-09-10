@@ -1,0 +1,21 @@
+**Q-GOAL: yes, bounded.** The only thing blocking refined discrete-ordinates transport through the production driver is two literals: `snrt_ndirection = 80` at `patch/lagRamses/snrt_state.f90:23` and the 8x10 tables in `snrt_angular_quadrature.f90`. Every backend already takes the direction count at runtime: the OpenMP transport, the hybrid path, the CUDA kernels (grid-stride loops, 128-lane strided reductions), and dust IR via array extents. Both checkpoint formats derive their widths from the constant. Making the level a compile-time choice closes the "angular refinement remains" entry in the group-8 row of the medium-term status note and gives the B03/B04 benchmark checks a production lever above S8. It is parameterization, not new physics. More ordinates reduce ray effects but do not remove them, so the evidence must not claim spatial ray-effect or RT convergence. Cost is 4x/9x in angular state, transport work, and checkpoint width, which must be recorded.
+
+**Q-LEAN: lean if held to these limits.**
+- One Make guard plus one preprocessor error. No NML knob, no runtime switch.
+- No new HDF5 attribute or identity framework. The HDF5 identity check at `snrt_hdf5.f90:137` rejects on cell width before any dataset read, and widths are unique per level (primary 1444, 5764, 12964; the DUST_LIVE IR term keeps them distinct). The native header stores the direction count and rejects at `snrt_state.f90:383` before payload. Add a negative case only if the existing checkpoint smoke lacks a header-dimension case.
+- Extend the existing angular smoke in place with one analytic lobe function, not a suite.
+- MPI2 integrated run with hydro+SNRT only, dust off. Dust adds nothing to the dimension question and multiplies runtime.
+- No Python framework, no new gate script. One provenance note.
+
+**Verdict: proceed.** Small, contained change.
+
+**Plan** (I could not write the plan file: the Write tool is disabled in this session, and the Fable output file in provenance is empty, so this message is the review record).
+
+1. **Shared constants** in `snrt_state.f90`: preprocessor chain on `SNRT_ANGULAR_LEVEL` defining `snrt_nmu`/`snrt_nphi` as 8/10, 16/20, 24/30, with `#error` otherwise, and `snrt_ndirection = snrt_nmu*snrt_nphi`. Checkpoint widths follow automatically.
+2. **Quadrature**: import the two constants from `snrt_state`, keep the 8-point literals verbatim, add 16- and 24-point Gauss-Legendre tables (NIST DLMF 3.5, 16 digits) under the same chain. Same loop order, azimuth midpoints, and weight formula.
+3. **Makefile**: inside the SNRT block near line 201, `SNRT_ANGULAR_LEVEL ?= 0`, a filter-based `$(error)` for unsupported values, and `-DSNRT_ANGULAR_LEVEL=$(...)` in FFLAGS. NVCC and icpx flags unchanged. VPATH untouched. Document that a level change must build in a fresh repo-root sibling directory with a copied Makefile, the established dotted-directory pattern, or after `make clean`.
+4. **Smokes**: extend the angular smoke with positive weights, 4pi norm, zero first moment, second moment 4pi/3 identity, antipodal pairing, and the lobe `exp(k(n.a-1))` with closed-form zeroth and first moments, printing error and cost ratio per level. Generalize the `1:40`/`41:80` split at `snrt_regrid_smoke.f90:330`. Rebuild source/transport and checkpoint smokes at level 1. Leave the standalone CUDA smokes that hard-code a local 80.
+5. **Integrated run**: level-1 build, 2 ranks, smallest existing SNRT driver setup, fresh to one dump then restart. Confirm a level-0 binary rejects the level-1 checkpoint. Delete raw outputs after reading markers.
+6. **Evidence**: one provenance note with per-level quadrature error and cost, smoke markers, MPI2 result, GPU status stated as inspected but not qualified unless a device was available. One INDEX line. Update the group-8 row to say angular refinement is available and spectral reconstruction remains open.
+
+Verification: level-0 node table byte-identical to HEAD; levels 1 and 2 pass all four smokes in separate build dirs with decreasing lobe error; level 3 fails at both Make and preprocessor; MPI2 fresh/restart passes; `git diff --check` clean and no raw outputs left.

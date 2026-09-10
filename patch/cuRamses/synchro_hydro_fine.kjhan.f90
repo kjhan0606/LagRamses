@@ -197,7 +197,7 @@ subroutine synchydrofine1(ind_cell,ncell,dteff)
   !-------------------------------------------------------------------
   ! Gravity update for hydro variables
   !-------------------------------------------------------------------
-  integer::i,idim,neul=ndim+2,nndim=ndim
+  integer::i,idim,nndim=ndim
   real(dp),dimension(1:nvector)::pp
 
   ! Compute internal + magnetic + radiative energy

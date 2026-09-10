@@ -1,3 +1,6 @@
+#ifdef DUST_DYNAMICS
+#define synchro_hydro_fine dust_dynamics_sync_level
+#endif
 recursive subroutine amr_step(ilevel,icount)
   use amr_commons
   use pm_commons
@@ -8,6 +11,9 @@ recursive subroutine amr_step(ilevel,icount)
   use stellar_enrichment_config, only: use_channel_resolved_feedback
 #endif
   use omp_lib, only: omp_get_wtime,omp_get_max_threads
+#ifdef SNRT_CHIMES
+  use snrt_chimes_runtime, only: chimes_prepare_level
+#endif
 #ifdef HYDRO_CUDA
   use cuda_commons, only: cuda_pool_is_initialized_c
   use poisson_cuda_interface, only: cuda_mg_release_arrays_c
@@ -222,7 +228,7 @@ recursive subroutine amr_step(ilevel,icount)
      ! compact the now-consistent hierarchy later.
      do i=nlevelmax,1,-1
         if(hydro)then
-           do ivar=1,nvar
+           do ivar=1,nvar_all
               call make_virtual_fine_dp(uold(1,ivar),i)
            end do
         end if
@@ -868,6 +874,11 @@ recursive subroutine amr_step(ilevel,icount)
      ! Release MG Poisson GPU arrays before hydro mesh allocation
      if(gpu_hydro) call cuda_mg_release_arrays_c()
 #endif
+#ifdef SNRT_CHIMES
+     ! Reconcile neutral ejecta BEFORE constructing chemical face fluxes;
+     ! waiting until post-hydro dust growth would transport stale abundances.
+     call chimes_prepare_level(ilevel,.true.)
+#endif
      call godunov_fine(ilevel)
 #ifdef HYDRO_CUDA
      ! Free hydro mesh from GPU after godunov_fine
@@ -898,6 +909,12 @@ recursive subroutine amr_step(ilevel,icount)
      endif
 
      ! Set uold equal to unew
+#ifdef SOLVERmhd
+     ! The legacy hydro wrapper applies these internally; the CT wrapper
+     ! follows upstream RAMSES and requires them after reverse exchange.
+     if(poisson)call add_gravity_source_terms(ilevel)
+     if(pressure_fix.or.nener>0)call add_pdv_source_terms(ilevel)
+#endif
                                call timer('hydro - set uold','start')
      call set_uold(ilevel)
 
@@ -960,6 +977,11 @@ recursive subroutine amr_step(ilevel,icount)
   cool_t1=omp_get_wtime()
   call dust_mass_advance_level(ilevel)
   call snrt_ramses_advance_level(ilevel,snrt_step_start_proper)
+#ifdef DUST_DYNAMICS
+  ! Lie split: transport/mass/radiation then drag. Total p/E stay unchanged;
+  ! the loss of resolved drift KE is gas heat for the next thermal solve.
+  call dust_dynamics_advance_level(ilevel)
+#endif
   snrt_advance_wall=snrt_advance_wall+omp_get_wtime()-cool_t1
   if(snrt_agn_rt_requested())then
      call snrt_regrid_upload(ilevel,snrt_sync_error)

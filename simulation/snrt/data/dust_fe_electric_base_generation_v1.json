@@ -1,0 +1,33 @@
+{
+  "schema": "fe_electric_eddy_base_v1",
+  "status": "NOT_LIVE_MAGNETIC_RESPONSE_MISSING",
+  "source_sha256": {
+    "werner": "f86156bab5f885fb3c1099fb95352092a0e73ae0574c2e0f724e31e387508eb8",
+    "henke": "cdcd0f4babbc2f07b6268a698a7fd1b61c920afdc7c5ca331efeb80dd1d0e7f5"
+  },
+  "source_urls": [
+    "https://www.nist.gov/document/jpcrd3820091013ppdf",
+    "https://henke.lbl.gov/optical_constants/sf/fe.nff",
+    "https://arxiv.org/html/1205.7021v2"
+  ],
+  "generator_sha256": "a95999118ce4d5c286fdba62454e1eee76c5161d6ea12d41e332f678509d6db1",
+  "contract_sha256": "8bc8c51d07118b2cd63121e4e379f8c73ba01c836f2cefe02a1d975e6fdf706c",
+  "output_sha256": "9bf5ca47769050ef4c7a76ec07872b27e14db925ade58c40c55bde428cd96a13",
+  "miepython_version": "3.3.0",
+  "radii_cm": [
+    1e-06,
+    1e-05
+  ],
+  "density_g_cm3": 7.87,
+  "effective_electrons": 26.453722373463776,
+  "werner_dft_complex_relative_difference_median": 0.11564903690559669,
+  "werner_dft_complex_relative_difference_max": 0.618662877699301,
+  "dielectric_closure": "Werner DFT0.5-40,blend40-45,REELS45-70.5,bridge70.5-75,Henke75-30000 eV; linear bound epsilon2; exact KK; DH13 size Drude",
+  "limitations": [
+    "Composite model, not DH13's original optical/VUV table.",
+    "Bound E tail below0.5eV and E^-3 above30keV are dispersion assumptions.",
+    "Frozen bulk/room-temperature dielectric; no phase-dependent optical data.",
+    "No spin-magnetization absorption; not complete cold Fe cooling.",
+    "No X-ray photoelectron energy partition or live Fe carrier/source/restart wiring."
+  ]
+}

@@ -1,0 +1,412 @@
+diff --git a/generate_cross_sections/generate_cross_sections.py b/generate_cross_sections/generate_cross_sections.py
+index 1d4be6d..46b5a66 100644
+--- a/generate_cross_sections/generate_cross_sections.py
++++ b/generate_cross_sections/generate_cross_sections.py
+@@ -31,15 +31,15 @@ def read_in_V95_cross_sections(filename):
+     Fe = np.zeros((26, 6, 7))
+ 
+     shell_quantum_nos = np.zeros((9, 26, 7, 2))     # dimensions: element, ion, shell, quantum no.
+-    C_shell = np.zeros(6, dtype = np.int)
+-    N_shell = np.zeros(7, dtype = np.int)
+-    O_shell = np.zeros(8, dtype = np.int)
+-    Ne_shell = np.zeros(10, dtype = np.int)
+-    Mg_shell = np.zeros(12, dtype = np.int)
+-    Si_shell = np.zeros(14, dtype = np.int)
+-    S_shell = np.zeros(16, dtype = np.int)
+-    Ca_shell = np.zeros(20, dtype = np.int)
+-    Fe_shell = np.zeros(26, dtype = np.int)
++    C_shell = np.zeros(6, dtype = int)
++    N_shell = np.zeros(7, dtype = int)
++    O_shell = np.zeros(8, dtype = int)
++    Ne_shell = np.zeros(10, dtype = int)
++    Mg_shell = np.zeros(12, dtype = int)
++    Si_shell = np.zeros(14, dtype = int)
++    S_shell = np.zeros(16, dtype = int)
++    Ca_shell = np.zeros(20, dtype = int)
++    Fe_shell = np.zeros(26, dtype = int)
+     
+     for line in file_id:
+         if re.search("#", line) != None:
+@@ -113,7 +113,7 @@ def read_in_V95_cross_sections(filename):
+                 
+     file_id.close()
+     
+-    return np.array([C, N, O, Ne, Mg, Si, S, Ca, Fe, shell_quantum_nos]), np.array([C_shell, N_shell, O_shell, Ne_shell, Mg_shell, Si_shell, S_shell, Ca_shell, Fe_shell])
++    return [C, N, O, Ne, Mg, Si, S, Ca, Fe, shell_quantum_nos], [C_shell, N_shell, O_shell, Ne_shell, Mg_shell, Si_shell, S_shell, Ca_shell, Fe_shell]
+ 
+ def read_in_KM93_tables(filename):
+     N_Aug_C = 2
+@@ -171,7 +171,7 @@ def read_in_KM93_tables(filename):
+                 for i in range(N_Aug_Fe):
+                     Fe[int(values[1]) - 1][int(values[2]) - 1][i] = float(values[i+4])
+     
+-    return np.array([C, N, O, Ne, Mg, Si, S, Ca, Fe])
++    return [C, N, O, Ne, Mg, Si, S, Ca, Fe]
+ 
+ 
+ def read_in_V96_cross_sections(filename):
+@@ -242,7 +242,7 @@ def read_in_V96_cross_sections(filename):
+                 
+     file_id.close()
+     
+-    return np.array([H, He, C, N, O, Ne, Mg, Si, S, Ca, Fe])
++    return [H, He, C, N, O, Ne, Mg, Si, S, Ca, Fe]
+     
+ def read_in_spectrum_file(filename):
+     file_id = open(filename, "r")
+@@ -407,6 +407,19 @@ def main():
+         integral_limit_upper = np.log10(pars["rt_E_max_eV"] / 13.6) 
+     else: 
+         raise Exception("ERROR: rt_coupling_flag = %d not recognised. Aborting" % (pars["rt_coupling_flag"], )) 
++
++    # SNRT offline-table adaptation: integrate only the known support of a
++    # photon bin. Adaptive quadrature over the original many-decade limits
++    # can otherwise miss a narrow, nonzero bin entirely. No rate fit changes.
++    original_quad = integrate.quad
++    def bin_quad(function, lower, upper, **kwargs):
++        if pars["rt_coupling_flag"] == 1:
++            lower = max(lower, integral_limit_lower)
++            upper = min(upper, integral_limit_upper)
++            if lower >= upper:
++                return 0.0, 0.0
++        return original_quad(function, lower, upper, **kwargs)
++    integrate.quad = bin_quad
+     
+     N_Aug_C = 2
+     N_Aug_N = 2
+@@ -449,7 +462,9 @@ def main():
+     shell_quantum_nos_V95 = x_section_pars_new[-1]
+ 
+     # Parameters controlling the accuracy of the integration
+-    myEpsAbs = 1.0e-30
++    # J_nu*sigma can be far below 1e-30; an absolute tolerance larger
++    # than the integral is not an accuracy criterion for normalized bins.
++    myEpsAbs = 1.0e-100
+     myLimit = 300
+ 
+     grey_section_denominator = integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)), integral_limit_lower, integral_limit_upper, epsabs = myEpsAbs, limit=myLimit)[0]
+@@ -459,13 +474,13 @@ def main():
+     if pars["rt_coupling_flag"] == 0: 
+         G0 = integrate.quad(lambda y: np.log(10) * (10.0 ** y) * 13.6 * 1.60217657e-12 * (10**spectrum_function(y)), np.log10(6.0 / 13.6), 0.0, epsabs = myEpsAbs, limit=myLimit)[0] * (4.0 * np.pi / 6.6260755e-27) / (3.0e10 * 5.29e-14)   # energy density 6->13.6 eV, in units of the Habing field 
+     else: 
+-        if pars["rt_E_min_eV"] >= 13.6: 
++        if pars["rt_E_min_eV"] >= 13.6 or pars["rt_E_max_eV"] <= 6.0:
+             G0 = 0.0 
+         else: 
+             if pars["rt_E_max_eV"] > 13.6: 
+                 raise Exception("ERROR: rt_E_min_eV = %.6e, rt_E_max_eV = %.6e. Due to the way in which the normalisations of the spectrum are defined, we cannot currently support energy bins that span the FUV and EUV bands. Aborting." % (pars["rt_E_min_eV"], pars["rt_E_max_eV"])) 
+             else: 
+-                G0 = integrate.quad(lambda y: np.log(10) * (10.0 ** y) * 13.6 * 1.60217657e-12 * (10**spectrum_function(y)), integral_limit_lower, integral_limit_upper, epsabs = myEpsAbs, limit=myLimit)[0] * (4.0 * np.pi / 6.6260755e-27) / (3.0e10 * 5.29e-14)   
++                G0 = integrate.quad(lambda y: np.log(10) * (10.0 ** y) * 13.6 * 1.60217657e-12 * (10**spectrum_function(y)), max(integral_limit_lower,np.log10(6.0/13.6)), integral_limit_upper, epsabs = myEpsAbs, limit=myLimit)[0] * (4.0 * np.pi / 6.6260755e-27) / (3.0e10 * 5.29e-14)
+     
+     G0_parameter = G0 / (isotropic_photon_density * 3.0e10)
+ 
+@@ -695,20 +710,24 @@ def main():
+         epsilon_H_root = np.zeros(3)
+         
+         # HI 
+-        epsilon_H_root[0] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[0][0][2:9], 0), np.log10(x_section_pars[0][0][0] / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[0][0][2:9], 0), np.log10(x_section_pars[0][0][0] / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[0][0][0]) 
++        if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[0][0][0] and pars["rt_E_min_eV"] < x_section_pars[0][0][1]):
++            epsilon_H_root[0] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[0][0][2:9], 0), np.log10(x_section_pars[0][0][0] / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[0][0][2:9], 0), np.log10(x_section_pars[0][0][0] / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[0][0][0]) 
+ 
+         # H- 
+-        epsilon_H_root[1] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma_Hminus(13.6 * (10**y)), np.log10(0.755 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma_Hminus(13.6 * (10**y)), np.log10(0.755 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - 0.755) 
++        if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > 0.755 and pars["rt_E_min_eV"] < x_section_pars[0][0][1]):
++            epsilon_H_root[1] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma_Hminus(13.6 * (10**y)), np.log10(0.755 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma_Hminus(13.6 * (10**y)), np.log10(0.755 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - 0.755) 
+ 
+         # H2 + gamma -> H2+ + e-
+-        epsilon_H_root[2] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma_H2(13.6 * (10**y)), np.log10(15.4 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma_H2(13.6 * (10**y)), np.log10(15.4 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - 15.4) 
++        if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > 15.4 and pars["rt_E_min_eV"] < x_section_pars[0][0][1]):
++            epsilon_H_root[2] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma_H2(13.6 * (10**y)), np.log10(15.4 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma_H2(13.6 * (10**y)), np.log10(15.4 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - 15.4) 
+ 
+         print("H finished")
+         sys.stdout.flush() 
+ 
+         epsilon_He_root = np.zeros(2) 
+         for i in range(2):
+-            epsilon_He_root[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[1][i][2:9], 0), np.log10(x_section_pars[1][i][0] / 13.6), np.log10(x_section_pars[1][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[1][i][2:9], 0), np.log10(x_section_pars[1][i][0] / 13.6), np.log10(x_section_pars[1][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[1][i][0]) 
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[1][i][0] and pars["rt_E_min_eV"] < x_section_pars[1][i][1]):
++                epsilon_He_root[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[1][i][2:9], 0), np.log10(x_section_pars[1][i][0] / 13.6), np.log10(x_section_pars[1][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[1][i][2:9], 0), np.log10(x_section_pars[1][i][0] / 13.6), np.log10(x_section_pars[1][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[1][i][0]) 
+ 
+         print("He finished")
+         sys.stdout.flush() 
+@@ -716,7 +735,8 @@ def main():
+     epsilon_C = np.zeros(6)
+     for i in range(6):
+         if i % N_task == rank: 
+-            epsilon_C[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[2][i][2:9], shell_quantum_nos_V95[0][i][0][1]), np.log10(x_section_pars[2][i][0] / 13.6), np.log10(x_section_pars[2][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[2][i][2:9], shell_quantum_nos_V95[0][i][0][1]), np.log10(x_section_pars[2][i][0] / 13.6), np.log10(x_section_pars[2][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[2][i][0]) 
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[2][i][0] and pars["rt_E_min_eV"] < x_section_pars[2][i][1]):
++                epsilon_C[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[2][i][2:9], shell_quantum_nos_V95[0][i][0][1]), np.log10(x_section_pars[2][i][0] / 13.6), np.log10(x_section_pars[2][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[2][i][2:9], shell_quantum_nos_V95[0][i][0][1]), np.log10(x_section_pars[2][i][0] / 13.6), np.log10(x_section_pars[2][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[2][i][0]) 
+ 
+     comm.Barrier()
+     epsilon_C_root = comm.reduce(epsilon_C, op = MPI.SUM, root = 0)
+@@ -728,7 +748,8 @@ def main():
+     epsilon_N = np.zeros(7)
+     for i in range(7):
+         if i % N_task == rank: 
+-            epsilon_N[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[3][i][2:9], shell_quantum_nos_V95[1][i][0][1]), np.log10(x_section_pars[3][i][0] / 13.6), np.log10(x_section_pars[3][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[3][i][2:9], shell_quantum_nos_V95[1][i][0][1]), np.log10(x_section_pars[3][i][0] / 13.6), np.log10(x_section_pars[3][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[3][i][0]) 
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[3][i][0] and pars["rt_E_min_eV"] < x_section_pars[3][i][1]):
++                epsilon_N[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[3][i][2:9], shell_quantum_nos_V95[1][i][0][1]), np.log10(x_section_pars[3][i][0] / 13.6), np.log10(x_section_pars[3][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[3][i][2:9], shell_quantum_nos_V95[1][i][0][1]), np.log10(x_section_pars[3][i][0] / 13.6), np.log10(x_section_pars[3][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[3][i][0]) 
+         
+     comm.Barrier()
+     epsilon_N_root = comm.reduce(epsilon_N, op = MPI.SUM, root = 0)
+@@ -740,7 +761,8 @@ def main():
+     epsilon_O = np.zeros(8) 
+     for i in range(8):
+         if i % N_task == rank: 
+-            epsilon_O[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[4][i][2:9], shell_quantum_nos_V95[2][i][0][1]), np.log10(x_section_pars[4][i][0] / 13.6), np.log10(x_section_pars[4][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[4][i][2:9], shell_quantum_nos_V95[2][i][0][1]), np.log10(x_section_pars[4][i][0] / 13.6), np.log10(x_section_pars[4][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[4][i][0]) 
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[4][i][0] and pars["rt_E_min_eV"] < x_section_pars[4][i][1]):
++                epsilon_O[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[4][i][2:9], shell_quantum_nos_V95[2][i][0][1]), np.log10(x_section_pars[4][i][0] / 13.6), np.log10(x_section_pars[4][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[4][i][2:9], shell_quantum_nos_V95[2][i][0][1]), np.log10(x_section_pars[4][i][0] / 13.6), np.log10(x_section_pars[4][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[4][i][0]) 
+ 
+     comm.Barrier()
+     epsilon_O_root = comm.reduce(epsilon_O, op = MPI.SUM, root = 0)
+@@ -752,7 +774,8 @@ def main():
+     epsilon_Ne = np.zeros(10)
+     for i in range(10):
+         if i % N_task == rank: 
+-            epsilon_Ne[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[5][i][2:9], shell_quantum_nos_V95[3][i][0][1]), np.log10(x_section_pars[5][i][0] / 13.6), np.log10(x_section_pars[5][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[5][i][2:9], shell_quantum_nos_V95[3][i][0][1]), np.log10(x_section_pars[5][i][0] / 13.6), np.log10(x_section_pars[5][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[5][i][0]) 
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[5][i][0] and pars["rt_E_min_eV"] < x_section_pars[5][i][1]):
++                epsilon_Ne[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[5][i][2:9], shell_quantum_nos_V95[3][i][0][1]), np.log10(x_section_pars[5][i][0] / 13.6), np.log10(x_section_pars[5][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[5][i][2:9], shell_quantum_nos_V95[3][i][0][1]), np.log10(x_section_pars[5][i][0] / 13.6), np.log10(x_section_pars[5][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[5][i][0]) 
+ 
+     comm.Barrier()
+     epsilon_Ne_root = comm.reduce(epsilon_Ne, op = MPI.SUM, root = 0)
+@@ -764,7 +787,8 @@ def main():
+     epsilon_Mg = np.zeros(12) 
+     for i in range(12):
+         if i % N_task == rank: 
+-            epsilon_Mg[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[6][i][2:9], shell_quantum_nos_V95[4][i][0][1]), np.log10(x_section_pars[6][i][0] / 13.6), np.log10(x_section_pars[6][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[6][i][2:9], shell_quantum_nos_V95[4][i][0][1]), np.log10(x_section_pars[6][i][0] / 13.6), np.log10(x_section_pars[6][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[6][i][0]) 
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[6][i][0] and pars["rt_E_min_eV"] < x_section_pars[6][i][1]):
++                epsilon_Mg[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[6][i][2:9], shell_quantum_nos_V95[4][i][0][1]), np.log10(x_section_pars[6][i][0] / 13.6), np.log10(x_section_pars[6][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[6][i][2:9], shell_quantum_nos_V95[4][i][0][1]), np.log10(x_section_pars[6][i][0] / 13.6), np.log10(x_section_pars[6][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[6][i][0]) 
+ 
+     comm.Barrier()
+     epsilon_Mg_root = comm.reduce(epsilon_Mg, op = MPI.SUM, root = 0)
+@@ -776,7 +800,8 @@ def main():
+     epsilon_Si = np.zeros(14)
+     for i in range(14):
+         if i % N_task == rank: 
+-            epsilon_Si[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[7][i][2:9], shell_quantum_nos_V95[5][i][0][1]), np.log10(x_section_pars[7][i][0] / 13.6), np.log10(x_section_pars[7][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[7][i][2:9], shell_quantum_nos_V95[5][i][0][1]), np.log10(x_section_pars[7][i][0] / 13.6), np.log10(x_section_pars[7][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[7][i][0])
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[7][i][0] and pars["rt_E_min_eV"] < x_section_pars[7][i][1]):
++                epsilon_Si[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[7][i][2:9], shell_quantum_nos_V95[5][i][0][1]), np.log10(x_section_pars[7][i][0] / 13.6), np.log10(x_section_pars[7][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[7][i][2:9], shell_quantum_nos_V95[5][i][0][1]), np.log10(x_section_pars[7][i][0] / 13.6), np.log10(x_section_pars[7][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[7][i][0])
+ 
+     comm.Barrier()
+     epsilon_Si_root = comm.reduce(epsilon_Si, op = MPI.SUM, root = 0)
+@@ -788,7 +813,8 @@ def main():
+     epsilon_S = np.zeros(16)
+     for i in range(16):
+         if i % N_task == rank: 
+-            epsilon_S[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[8][i][2:9], shell_quantum_nos_V95[6][i][0][1]), np.log10(x_section_pars[8][i][0] / 13.6), np.log10(x_section_pars[8][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[8][i][2:9], shell_quantum_nos_V95[6][i][0][1]), np.log10(x_section_pars[8][i][0] / 13.6), np.log10(x_section_pars[8][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[8][i][0]) 
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[8][i][0] and pars["rt_E_min_eV"] < x_section_pars[8][i][1]):
++                epsilon_S[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[8][i][2:9], shell_quantum_nos_V95[6][i][0][1]), np.log10(x_section_pars[8][i][0] / 13.6), np.log10(x_section_pars[8][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[8][i][2:9], shell_quantum_nos_V95[6][i][0][1]), np.log10(x_section_pars[8][i][0] / 13.6), np.log10(x_section_pars[8][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[8][i][0]) 
+ 
+     comm.Barrier()
+     epsilon_S_root = comm.reduce(epsilon_S, op = MPI.SUM, root = 0)
+@@ -800,7 +826,8 @@ def main():
+     epsilon_Ca = np.zeros(20)
+     for i in range(20):
+         if i % N_task == rank: 
+-            epsilon_Ca[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[9][i][2:9], shell_quantum_nos_V95[7][i][0][1]), np.log10(x_section_pars[9][i][0] / 13.6), np.log10(x_section_pars[9][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[9][i][2:9], shell_quantum_nos_V95[7][i][0][1]), np.log10(x_section_pars[9][i][0] / 13.6), np.log10(x_section_pars[9][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[9][i][0]) 
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[9][i][0] and pars["rt_E_min_eV"] < x_section_pars[9][i][1]):
++                epsilon_Ca[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[9][i][2:9], shell_quantum_nos_V95[7][i][0][1]), np.log10(x_section_pars[9][i][0] / 13.6), np.log10(x_section_pars[9][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[9][i][2:9], shell_quantum_nos_V95[7][i][0][1]), np.log10(x_section_pars[9][i][0] / 13.6), np.log10(x_section_pars[9][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[9][i][0]) 
+ 
+     comm.Barrier()
+     epsilon_Ca_root = comm.reduce(epsilon_Ca, op = MPI.SUM, root = 0)
+@@ -812,7 +839,8 @@ def main():
+     epsilon_Fe = np.zeros(26) 
+     for i in range(26):
+         if i % N_task == rank: 
+-            epsilon_Fe[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[10][i][2:9], shell_quantum_nos_V95[8][i][0][1]), np.log10(x_section_pars[10][i][0] / 13.6), np.log10(x_section_pars[10][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[10][i][2:9], shell_quantum_nos_V95[8][i][0][1]), np.log10(x_section_pars[10][i][0] / 13.6), np.log10(x_section_pars[10][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[10][i][0]) 
++            if pars["rt_coupling_flag"] == 0 or (pars["rt_E_max_eV"] > x_section_pars[10][i][0] and pars["rt_E_min_eV"] < x_section_pars[10][i][1]):
++                epsilon_Fe[i] = 1.6022e-12 * (13.6*(((integrate.quad(lambda y: np.log(10) * (10**y) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[10][i][2:9], shell_quantum_nos_V95[8][i][0][1]), np.log10(x_section_pars[10][i][0] / 13.6), np.log10(x_section_pars[10][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0])/(integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[10][i][2:9], shell_quantum_nos_V95[8][i][0][1]), np.log10(x_section_pars[10][i][0] / 13.6), np.log10(x_section_pars[10][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]))) - x_section_pars[10][i][0]) 
+ 
+     comm.Barrier()
+     epsilon_Fe_root = comm.reduce(epsilon_Fe, op = MPI.SUM, root = 0)
+@@ -834,7 +862,7 @@ def main():
+     shield_H_1D = np.zeros((3, 3, len(N_x)))        # Dimensions: factor, ion, NHI. 
+ 
+     # HI 
+-    Gamma_H0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[0][0][2:9], 0), np.log10(x_section_pars[0][0][0] / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++    Gamma_H0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[0][0][2:9], 0), np.log10(x_section_pars[0][0][0] / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+     for i in range(len(N_x)):
+         if i % N_task == rank: 
+             # Ionisation suppression from HI for E = 13.6 eV -> 15.4 eV
+@@ -874,7 +902,7 @@ def main():
+                 shield_H_2D[5][0][i][j] = integrate.quad(lambda y: np.log(10) * (10**spectrum_function(y)) * np.exp(- N_x[i] * sigma_Hydrogen(13.6 * (10**y), x_section_pars[0][0][2:9], 0)) * np.exp(- N_x[j] * sigma_Helium(13.6 * (10**y), x_section_pars[1][0][2:9], 0)) * sigma(13.6 * (10**y), x_section_pars[0][0][2:9], 0), np.log10(54.4 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
+ 
+     # H2
+-    Gamma_H20 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma_H2(13.6 * (10**y)), np.log10(15.4 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++    Gamma_H20 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma_H2(13.6 * (10**y)), np.log10(15.4 / 13.6), np.log10(x_section_pars[0][0][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+     for i in range(len(N_x)):
+         for j in range(len(N_x)):
+             work_idx = (i * len(N_x)) + j
+@@ -910,7 +938,7 @@ def main():
+     
+     shield_He_2D = np.zeros((6, 2, len(N_x), len(N_x))) 
+     for i in range(2):
+-        Gamma_He0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[1][i][2:9], 0), np.log10(x_section_pars[1][i][0] / 13.6), np.log10(x_section_pars[1][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++        Gamma_He0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[1][i][2:9], 0), np.log10(x_section_pars[1][i][0] / 13.6), np.log10(x_section_pars[1][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+         for j in range(len(N_x)):
+             for k in range(len(N_x)):
+                 work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+@@ -946,7 +974,7 @@ def main():
+     shield_C_1D = np.zeros((3, 6, len(N_x)))
+     for i in range(6):
+         if x_section_pars[2][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_C0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[2][i][2:9], shell_quantum_nos_V95[0][i][0][1]), np.log10(x_section_pars[2][i][0] / 13.6), np.log10(x_section_pars[2][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_C0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[2][i][2:9], shell_quantum_nos_V95[0][i][0][1]), np.log10(x_section_pars[2][i][0] / 13.6), np.log10(x_section_pars[2][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 work_idx = (i * len(N_x)) + j
+                 if work_idx % N_task == rank: 
+@@ -966,7 +994,7 @@ def main():
+     shield_C_2D = np.zeros((6, 6, len(N_x), len(N_x))) 
+     for i in range(6):
+         if x_section_pars[2][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_C0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[2][i][2:9], shell_quantum_nos_V95[0][i][0][1]), np.log10(x_section_pars[2][i][0] / 13.6), np.log10(x_section_pars[2][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_C0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[2][i][2:9], shell_quantum_nos_V95[0][i][0][1]), np.log10(x_section_pars[2][i][0] / 13.6), np.log10(x_section_pars[2][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 for k in range(len(N_x)):
+                     work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+@@ -1002,7 +1030,7 @@ def main():
+     shield_N_1D = np.zeros((3, 7, len(N_x)))
+     for i in range(7):      
+         if x_section_pars[3][i][0] > 13.6:        # below this threshold, shielding is by dust    
+-            Gamma_N0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[3][i][2:9], shell_quantum_nos_V95[1][i][0][1]), np.log10(x_section_pars[3][i][0] / 13.6), np.log10(x_section_pars[3][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_N0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[3][i][2:9], shell_quantum_nos_V95[1][i][0][1]), np.log10(x_section_pars[3][i][0] / 13.6), np.log10(x_section_pars[3][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 work_idx = (i * len(N_x)) + j
+                 if work_idx % N_task == rank: 
+@@ -1022,7 +1050,7 @@ def main():
+     shield_N_2D = np.zeros((6, 7, len(N_x), len(N_x)))                     
+     for i in range(7):      
+         if x_section_pars[3][i][0] > 13.6:        # below this threshold, shielding is by dust    
+-            Gamma_N0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[3][i][2:9], shell_quantum_nos_V95[1][i][0][1]), np.log10(x_section_pars[3][i][0] / 13.6), np.log10(x_section_pars[3][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_N0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[3][i][2:9], shell_quantum_nos_V95[1][i][0][1]), np.log10(x_section_pars[3][i][0] / 13.6), np.log10(x_section_pars[3][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 for k in range(len(N_x)):
+                     work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+@@ -1058,7 +1086,7 @@ def main():
+     shield_O_1D = np.zeros((3, 8, len(N_x)))
+     for i in range(8):      
+         if x_section_pars[4][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_O0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[4][i][2:9], shell_quantum_nos_V95[2][i][0][1]), np.log10(x_section_pars[4][i][0] / 13.6), np.log10(x_section_pars[4][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_O0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[4][i][2:9], shell_quantum_nos_V95[2][i][0][1]), np.log10(x_section_pars[4][i][0] / 13.6), np.log10(x_section_pars[4][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 work_idx = (i * len(N_x)) + j
+                 if work_idx % N_task == rank:
+@@ -1078,7 +1106,7 @@ def main():
+     shield_O_2D = np.zeros((6, 8, len(N_x), len(N_x)))
+     for i in range(8):      
+         if x_section_pars[4][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_O0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[4][i][2:9], shell_quantum_nos_V95[2][i][0][1]), np.log10(x_section_pars[4][i][0] / 13.6), np.log10(x_section_pars[4][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_O0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[4][i][2:9], shell_quantum_nos_V95[2][i][0][1]), np.log10(x_section_pars[4][i][0] / 13.6), np.log10(x_section_pars[4][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 for k in range(len(N_x)):
+                     work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+@@ -1114,7 +1142,7 @@ def main():
+     shield_Ne_1D = np.zeros((3, 10, len(N_x)))
+     for i in range(10):      
+         if x_section_pars[5][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_Ne0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[5][i][2:9], shell_quantum_nos_V95[3][i][0][1]), np.log10(x_section_pars[5][i][0] / 13.6), np.log10(x_section_pars[5][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Ne0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[5][i][2:9], shell_quantum_nos_V95[3][i][0][1]), np.log10(x_section_pars[5][i][0] / 13.6), np.log10(x_section_pars[5][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 work_idx = (i * len(N_x)) + j
+                 if work_idx % N_task == rank:
+@@ -1134,7 +1162,7 @@ def main():
+     shield_Ne_2D = np.zeros((6, 10, len(N_x), len(N_x)))
+     for i in range(10): 
+         if x_section_pars[5][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_Ne0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[5][i][2:9], shell_quantum_nos_V95[3][i][0][1]), np.log10(x_section_pars[5][i][0] / 13.6), np.log10(x_section_pars[5][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Ne0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[5][i][2:9], shell_quantum_nos_V95[3][i][0][1]), np.log10(x_section_pars[5][i][0] / 13.6), np.log10(x_section_pars[5][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 for k in range(len(N_x)):
+                     work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+@@ -1170,7 +1198,7 @@ def main():
+     shield_Mg_1D = np.zeros((3, 12, len(N_x)))
+     for i in range(12):      
+         if x_section_pars[6][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_Mg0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[6][i][2:9], shell_quantum_nos_V95[4][i][0][1]), np.log10(x_section_pars[6][i][0] / 13.6), np.log10(x_section_pars[6][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Mg0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[6][i][2:9], shell_quantum_nos_V95[4][i][0][1]), np.log10(x_section_pars[6][i][0] / 13.6), np.log10(x_section_pars[6][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 work_idx = (i * len(N_x)) + j
+                 if work_idx % N_task == rank:
+@@ -1190,7 +1218,7 @@ def main():
+     shield_Mg_2D = np.zeros((6, 12, len(N_x), len(N_x)))                    
+     for i in range(12):      
+         if x_section_pars[6][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_Mg0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[6][i][2:9], shell_quantum_nos_V95[4][i][0][1]), np.log10(x_section_pars[6][i][0] / 13.6), np.log10(x_section_pars[6][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Mg0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[6][i][2:9], shell_quantum_nos_V95[4][i][0][1]), np.log10(x_section_pars[6][i][0] / 13.6), np.log10(x_section_pars[6][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 for k in range(len(N_x)):
+                     work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+@@ -1226,7 +1254,7 @@ def main():
+     shield_Si_1D = np.zeros((3, 14, len(N_x)))
+     for i in range(14):      
+         if x_section_pars[7][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_Si0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[7][i][2:9], shell_quantum_nos_V95[5][i][0][1]), np.log10(x_section_pars[7][i][0] / 13.6), np.log10(x_section_pars[7][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Si0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[7][i][2:9], shell_quantum_nos_V95[5][i][0][1]), np.log10(x_section_pars[7][i][0] / 13.6), np.log10(x_section_pars[7][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 work_idx = (i * len(N_x)) + j
+                 if work_idx % N_task == rank:
+@@ -1246,7 +1274,7 @@ def main():
+     shield_Si_2D = np.zeros((6, 14, len(N_x), len(N_x)))                    
+     for i in range(14):      
+         if x_section_pars[7][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_Si0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[7][i][2:9], shell_quantum_nos_V95[5][i][0][1]), np.log10(x_section_pars[7][i][0] / 13.6), np.log10(x_section_pars[7][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Si0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[7][i][2:9], shell_quantum_nos_V95[5][i][0][1]), np.log10(x_section_pars[7][i][0] / 13.6), np.log10(x_section_pars[7][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 for k in range(len(N_x)):
+                     work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+@@ -1282,7 +1310,7 @@ def main():
+     shield_S_1D = np.zeros((3, 16, len(N_x)))
+     for i in range(16):      
+         if x_section_pars[8][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_S0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[8][i][2:9], shell_quantum_nos_V95[6][i][0][1]), np.log10(x_section_pars[8][i][0] / 13.6), np.log10(x_section_pars[8][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_S0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[8][i][2:9], shell_quantum_nos_V95[6][i][0][1]), np.log10(x_section_pars[8][i][0] / 13.6), np.log10(x_section_pars[8][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 work_idx = (i * len(N_x)) + j
+                 if work_idx % N_task == rank:
+@@ -1302,7 +1330,7 @@ def main():
+     shield_S_2D = np.zeros((6, 16, len(N_x), len(N_x)))
+     for i in range(16): 
+         if x_section_pars[8][i][0] > 13.6:        # below this threshold, shielding is by dust
+-            Gamma_S0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[8][i][2:9], shell_quantum_nos_V95[6][i][0][1]), np.log10(x_section_pars[8][i][0] / 13.6), np.log10(x_section_pars[8][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_S0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[8][i][2:9], shell_quantum_nos_V95[6][i][0][1]), np.log10(x_section_pars[8][i][0] / 13.6), np.log10(x_section_pars[8][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 for k in range(len(N_x)):
+                     work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+@@ -1338,7 +1366,7 @@ def main():
+     shield_Ca_1D = np.zeros((3, 20, len(N_x)))
+     for i in range(20):      
+         if x_section_pars[9][i][0] > 13.6:        # below this threshold, shielding is by dust    
+-            Gamma_Ca0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[9][i][2:9], shell_quantum_nos_V95[7][i][0][1]), np.log10(x_section_pars[9][i][0] / 13.6), np.log10(x_section_pars[9][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Ca0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[9][i][2:9], shell_quantum_nos_V95[7][i][0][1]), np.log10(x_section_pars[9][i][0] / 13.6), np.log10(x_section_pars[9][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 work_idx = (i * len(N_x)) + j
+                 if work_idx % N_task == rank:
+@@ -1358,7 +1386,7 @@ def main():
+     shield_Ca_2D = np.zeros((6, 20, len(N_x), len(N_x)))
+     for i in range(20):  
+         if x_section_pars[9][i][0] > 13.6:        # below this threshold, shielding is by dust  
+-            Gamma_Ca0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[9][i][2:9], shell_quantum_nos_V95[7][i][0][1]), np.log10(x_section_pars[9][i][0] / 13.6), np.log10(x_section_pars[9][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Ca0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[9][i][2:9], shell_quantum_nos_V95[7][i][0][1]), np.log10(x_section_pars[9][i][0] / 13.6), np.log10(x_section_pars[9][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 for k in range(len(N_x)):
+                     work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+@@ -1396,7 +1424,7 @@ def main():
+     shield_Fe_1D = np.zeros((3, 26, len(N_x)))
+     for i in range(26):      
+         if x_section_pars[10][i][0] > 13.6:       # below this threshold, shielding is by dust
+-            Gamma_Fe0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[10][i][2:9], shell_quantum_nos_V95[8][i][0][1]), np.log10(x_section_pars[10][i][0] / 13.6), np.log10(x_section_pars[10][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Fe0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[10][i][2:9], shell_quantum_nos_V95[8][i][0][1]), np.log10(x_section_pars[10][i][0] / 13.6), np.log10(x_section_pars[10][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 work_idx = (i * len(N_x)) + j
+                 if work_idx % N_task == rank:
+@@ -1416,7 +1444,7 @@ def main():
+     shield_Fe_2D = np.zeros((6, 26, len(N_x), len(N_x)))
+     for i in range(26):      
+         if x_section_pars[10][i][0] > 13.6:       # below this threshold, shielding is by dust
+-            Gamma_Fe0 = integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[10][i][2:9], shell_quantum_nos_V95[8][i][0][1]), np.log10(x_section_pars[10][i][0] / 13.6), np.log10(x_section_pars[10][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0]
++            Gamma_Fe0 = max(integrate.quad(lambda y: np.log(10) * 4.0 * (np.pi / 6.62606957e-27) * (10**spectrum_function(y)) * sigma(13.6 * (10**y), x_section_pars[10][i][2:9], shell_quantum_nos_V95[8][i][0][1]), np.log10(x_section_pars[10][i][0] / 13.6), np.log10(x_section_pars[10][i][1] / 13.6), epsabs = myEpsAbs, limit = myLimit)[0], min_float_value)
+             for j in range(len(N_x)):
+                 for k in range(len(N_x)):
+                     work_idx = (i * len(N_x) * len(N_x)) + (j * len(N_x)) + k
+

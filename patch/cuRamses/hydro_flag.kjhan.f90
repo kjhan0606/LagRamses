@@ -240,7 +240,7 @@ subroutine jeans_length_refine(ind_cell,ok,ncell,ilevel)
      ! the thermal energy
      dens = max(uold(indi,1),smallr)
      if(dens .ge. dthres)then
-     etherm = uold(indi,ndim+2) 
+     etherm = uold(indi,ndim+2)-magnetic_energy(uold(indi,:))
      etherm = etherm - 0.5d0*uold(indi,2)**2/dens
 #if NDIM > 1
      etherm = etherm - 0.5d0*uold(indi,3)**2/dens
@@ -250,7 +250,7 @@ subroutine jeans_length_refine(ind_cell,ok,ncell,ilevel)
 #endif
 #if NENER>0
      do irad=1,nener
-        etherm=etherm-uold(indi,ndim+2+irad)
+        etherm=etherm-uold(indi,nhydro+irad)
      end do
 #endif
      ! the temperature (c_s^2 = gamma*P/rho = (gamma-1)*etherm/rho)
@@ -270,4 +270,3 @@ subroutine jeans_length_refine(ind_cell,ok,ncell,ilevel)
   end do
 
 end subroutine jeans_length_refine
-

@@ -101,6 +101,9 @@ end subroutine sub_cooling_fine
 !###########################################################
 !###########################################################
 subroutine coolfine1(ind_grid,ngrid,ilevel)
+#ifdef DUST_DYNAMICS
+  use dust_phase_state, only: dust_phase_kinetic
+#endif
   use dust_mass_physics, only: dust_mass_enabled,dust_cooling,dust_gas_elements
   use dust_element_cooling, only: wss09_step
   use amr_commons
@@ -247,6 +250,13 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
            ekk(i)=ekk(i)+0.5*uold(ind_leaf(i),idim+1)**2/nH(i)
         end do
      end do
+#ifdef DUST_DYNAMICS
+     if(dust_relative_motion)then
+        do i=1,nleaf
+           ekk(i)=dust_phase_kinetic(uold(ind_leaf(i),:))
+        enddo
+     endif
+#endif
      do i=1,nleaf
         err(i)=0.0d0
      end do
@@ -381,7 +391,7 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
         call eunha_solve(nH,T2,Zsolar,dtcool,delta_T2_eunha,nleaf)
      endif
 
-     if(dust_mass_enabled.and.trim(dust_cooling)=='snrt_hhe_cie_metals')then
+     if(dust_mass_enabled.and.(trim(dust_cooling)=='snrt_hhe_cie_metals'.or.trim(dust_cooling)=='chimes_neq_v1'))then
         ! Native SNRT owns the atomic+metal thermal sink together with its
         ! non-equilibrium H/He update. Do not apply a second CIE sink here.
         delta_T2(1:nleaf)=0
@@ -557,7 +567,7 @@ subroutine enforce_eeos_after_sink
   integer::ilevel,igrid,ngrid,ncache,ind,i,idim
   integer,dimension(1:nvector)::ind_grid,ind_cell
   logical,dimension(1:nvector)::ok
-  real(dp)::d,e_kin,e_kin_pure,e_total,e_int,e_floor
+  real(dp)::d,e_kin,e_kin_pure,e_total,e_int,e_floor,e_nonthermal
   real(dp)::e_kin_cap,c2,v2,v2_max,factor
   integer::irad
   integer::n_floor,n_mach
@@ -593,12 +603,13 @@ subroutine enforce_eeos_after_sink
                  e_kin_pure=e_kin_pure+0.5d0*uold(ind_cell(i),idim+1)**2/d
               end do
               ! Total "non-thermal kinetic" including NENER
-              e_kin=e_kin_pure
+              e_nonthermal=magnetic_energy(uold(ind_cell(i),:))
 #if NENER>0
               do irad=1,nener
-                 e_kin=e_kin+uold(ind_cell(i),ndim+2+irad)
+                 e_nonthermal=e_nonthermal+uold(ind_cell(i),nhydro+irad)
               end do
 #endif
+              e_kin=e_kin_pure+e_nonthermal
               e_int=e_total-e_kin
 
               ! === Protection 1: eEOS floor ===
@@ -607,12 +618,7 @@ subroutine enforce_eeos_after_sink
                  n_floor = n_floor + 1
                  e_floor_inj = e_floor_inj + (e_floor - e_int)
                  ! Convert kinetic → thermal to satisfy floor
-                 e_kin_cap = max(e_total - e_floor, 0d0)
-#if NENER>0
-                 do irad=1,nener
-                    e_kin_cap = e_kin_cap - uold(ind_cell(i),ndim+2+irad)
-                 end do
-#endif
+                 e_kin_cap = max(e_total - e_floor - e_nonthermal, 0d0)
                  if(e_kin_cap > 0d0 .and. e_kin_pure > 0d0)then
                     factor = sqrt(e_kin_cap / e_kin_pure)
                     do idim=1,ndim
@@ -622,25 +628,14 @@ subroutine enforce_eeos_after_sink
                     do idim=1,ndim
                        uold(ind_cell(i),idim+1) = 0d0
                     end do
-                    uold(ind_cell(i),ndim+2) = e_floor
-#if NENER>0
-                    do irad=1,nener
-                       uold(ind_cell(i),ndim+2) = uold(ind_cell(i),ndim+2) + &
-                            & uold(ind_cell(i),ndim+2+irad)
-                    end do
-#endif
+                    uold(ind_cell(i),ndim+2) = e_floor+e_nonthermal
                  endif
                  ! Recompute after floor fix
                  e_kin_pure=0d0
                  do idim=1,ndim
                     e_kin_pure=e_kin_pure+0.5d0*uold(ind_cell(i),idim+1)**2/d
                  end do
-                 e_int=e_total-e_kin_pure
-#if NENER>0
-                 do irad=1,nener
-                    e_int=e_int-uold(ind_cell(i),ndim+2+irad)
-                 end do
-#endif
+                 e_int=uold(ind_cell(i),ndim+2)-e_kin_pure-e_nonthermal
               endif
 
               ! === Protection 2: Mach cap ===

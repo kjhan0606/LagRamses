@@ -5,10 +5,11 @@
 subroutine condinit(x,u,dx,nn)
   use amr_parameters
   use hydro_parameters
+  use amr_commons, only: boxlen
   implicit none
   integer ::nn                            ! Number of cells
   real(dp)::dx                            ! Cell size
-  real(dp),dimension(1:nvector,1:nvar)::u ! Conservative variables
+  real(dp),dimension(1:nvector,1:nvar_all)::u ! Conservative variables
   real(dp),dimension(1:nvector,1:ndim)::x ! Cell center position.
   !================================================================
   ! This routine generates initial conditions for RAMSES.
@@ -22,11 +23,39 @@ subroutine condinit(x,u,dx,nn)
   ! scalars in the hydro solver.
   ! U(:,:) and Q(:,:) are in user units.
   !================================================================
-  integer::ivar
+  integer::ivar,i
+  real(dp)::phase,by,bz,rho,pres
   real(dp),dimension(1:nvector,1:nvar),save::q   ! Primitive variables
 
   ! Call built-in initial condition generator
   call region_condinit(x,q,dx,nn)
+  u=0d0
+#ifdef SOLVERmhd
+  if(mhd_initial_condition/='uniform')then
+     do i=1,nn
+        select case(trim(mhd_initial_condition))
+        case('alfven_x')
+           ! Right-going circularly polarized wave: rho=Bx=1, v_perp=-B_perp.
+           phase=2d0*acos(-1d0)*x(i,1)/boxlen
+           by=.1d0*cos(phase);bz=.1d0*sin(phase)
+           u(i,1)=1d0;u(i,3)=-by;u(i,4)=-bz
+           u(i,6:8)=[1d0,by,bz]
+           u(i,5)=.1d0/(gamma-1d0)+.5d0+by**2+bz**2
+        case('brio_wu_x')
+           rho=1d0;pres=1d0;by=1d0
+           if(x(i,1)>=.5d0*boxlen)then
+              rho=.125d0;pres=.1d0;by=-1d0
+           endif
+           u(i,1)=rho;u(i,6:8)=[.75d0,by,0d0]
+           u(i,5)=pres/(gamma-1d0)+.5d0*(.75d0**2+by**2)
+        end select
+        ! Tangential fields depend only on x, normal field is constant:
+        ! opposing faces are identical and discrete div(B) is exactly zero.
+        u(i,nvar+1:nvar+3)=u(i,6:8)
+     enddo
+     return
+  endif
+#endif
 
   ! Add here, if you wish, some user-defined initial conditions
   ! ........
@@ -57,13 +86,13 @@ subroutine condinit(x,u,dx,nn)
   ! radiative pressure -> radiative energy
   ! radiative energy -> total fluid energy
   do ivar=1,nener
-     u(1:nn,ndim+2+ivar)=q(1:nn,ndim+2+ivar)/(gamma_rad(ivar)-1.0d0)
-     u(1:nn,ndim+2)=u(1:nn,ndim+2)+u(1:nn,ndim+2+ivar)
+     u(1:nn,nhydro+ivar)=q(1:nn,nhydro+ivar)/(gamma_rad(ivar)-1.0d0)
+     u(1:nn,ndim+2)=u(1:nn,ndim+2)+u(1:nn,nhydro+ivar)
   enddo
 #endif
 #if NVAR>NDIM+2+NENER
   ! passive scalars
-  do ivar=ndim+3+nener,nvar
+  do ivar=nhydro+1+nener,nvar
      u(1:nn,ivar)=q(1:nn,1)*q(1:nn,ivar)
   end do
 #endif

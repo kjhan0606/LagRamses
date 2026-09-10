@@ -1,0 +1,40 @@
+The plan file cannot be written in this session (the Write tool is disabled), so the review verdict is delivered here in full.
+
+## Verdict
+
+**No defensible live carbon-fragmentation closure is currently selectable.** Reject the live extension for now, record the four missing decisions below, and proceed to the next approved group. Nothing should be added to the code, tests, or fixtures for this item.
+
+## Q-GOAL: minimum live capability physically supportable now
+
+None beyond the existing H-state model. The candidate is mechanically consistent with the current semantics, but three physical inputs are missing and each alone blocks a defensible closure.
+
+- **Mechanics already exist.** The sink/daughter path in `dust_stochastic.f90:13-37` is what H loss uses. A carbon-loss edge is one more downward axis in the same triangular solve. Fragments must be written directly into a CHIMES species carrier, the way H loss writes HI into `chemical_trial(2,:)`. CHIMES reconciliation treats molecular nuclei as locked and pushes element-ledger changes into neutral atoms, so the element ledger is the wrong route.
+- **Blocker 1, fragment carrier.** With H present, which is the live state (mean H about 12 in the fixture), Murga's channel is C2H2 loss. CHIMES157 has C2 (species index 143 in Fortran) but no C2H2. Depositing C2H2 as C2 plus atoms, or into the carbon ledger, invents roughly 10 to 17 eV of binding energy per event. Only the dehydrogenated C2 channel has a consistent carrier.
+- **Blocker 2, enthalpies.** Murga's E0 of 4.6 eV with deltaS of 10 cal/K/mol is an activation barrier. Neither Murga nor Lange supplies the reaction enthalpy for C2 or C2H2 loss, nor bond energies for C22 daughter H states. Montillaud's coronene bond table does not transfer. Balancing the transaction by relabelling the barrier as enthalpy is the shortcut you ruled out.
+- **Blocker 3, daughter domain.** The Draine radius map in `dust_pah_radiation.f90:233-234` accepts C22 (a of 3.609e-4 micron, inside the table by 1.7 percent) and rejects C20. The tables support exactly one C2-loss generation. A hot C22 daughter loses C2 at a rate comparable to or above IR cooling near 13.6 eV, so the required rejection fires in any FUV-exposed run. Declaring C22 terminal would be the arbitrary cutoff you forbade.
+
+Optional detail, not blockers: X-ray energy partition, anions and dications, charge-dependent barriers, super-H deltaS, fragment kinetic energy release, constant-IP approximation for C22, and the choice between Murga's Arrhenius form and the existing DOS-ratio form. That last choice must be made once and applied to both H and C channels so they compete consistently.
+
+## Q-LEAN: does the candidate recreate the over-expansion?
+
+Yes, as written. One C22 generation with full H, charge, and 128-state resolution adds 3584 carriers, taking NVAR from 3771 to about 7355. The C2H2 path implies a CHIMES network change that breaks the pinned 157-species ABI5 identity. C22 H-ladder parameters would have to be invented. Cuts that apply regardless of verdict:
+
+- No new advected carriers, generation axis, or NVAR change.
+- No CHIMES network edit and no Draine-table extrapolation below 3.548e-4 micron.
+- No passive carbon-loss rate helper, no Python validator, no new smoke framework, no new gate on the existing H-state option.
+- One short provenance disposition update, not an essay.
+
+## Exact decisions the operator must supply before this can be built
+
+1. **Enthalpies.** A named source for the reaction enthalpies of C2H2 loss from C24Hn and C2 loss from bare C24, neutral and cation, plus C22 skeleton H bond energies.
+2. **Fragment carrier.** Either accept a CHIMES network change adding C2H2, with a new pinned library and identity, or restrict the live model to the H0 C2 channel.
+3. **Daughter domain.** Either a named optics and modes source for skeletons below 21 carbons, or an explicit physical justification for how a C22 daughter's further loss is represented. Rejection at generation two is acceptable only for a diagnostic fixture.
+4. **Rate form.** Murga's microcanonical Arrhenius with deltaS in cal/K/mol, or the existing DOS-ratio form with E0 of 4.6 eV, applied identically to both channels.
+
+## Sizing once those are resolved
+
+The bounded scope would touch the state layout in `dust_mass_physics.f90`, the sink rates and NC=24 check in `dust_pah_hydrogen.f90`, C22 model preparation and identity version 5 in `dust_pah_live_model.f90`, a `gas_c2` array threaded through the mixed receiver, live stage, and driver like `gas_atomic_h`, plus one option string in the Makefile and both generators. Verification would be one new case in the existing `check_pah_hydrogen_physical` smoke and one 4^3 live/restart fixture. Nothing else.
+
+## Only edit recommended now
+
+Update the "Active carbon-fragmentation follow-up (not implemented)" section of the provenance note to state this verdict and the four decisions in a few lines, leaving the group 7 table row unchanged. No code, no tests, no fixture, because no live option is delivered. Then move to the next approved group.

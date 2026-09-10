@@ -1,0 +1,31 @@
+Verdict: approve the plan as written. Q-GOAL yes, Q-LEAN mostly lean with two small notes. Details follow.
+
+**Q-GOAL: does it directly advance simulation-ready RT/feedback/dust? Yes.**
+- Today the stellar path deposits with the AGN contract mean energy per group, at `patch/lagRamses/snrt_ramses_driver.f90:1116-1119`. The band closure transports N and E separately, but every stellar photon carries the AGN reference energy, so the age/Z spectral information the maxent closure exists to use is never supplied. The report line at `snrt_stellar_source.f90:215` states this openly.
+- The v3 table closes exactly that gap using the pinned HDF5 the existing exporter already reads. No new physics data.
+- Ionizing-group mean energies in BPASS fall substantially over the first 10 Myr as massive stars die. Photoheating, the He closure, and downstream dust heating all change, so this is a real step toward a production stellar plus AGN run.
+
+**Q-LEAN: over-instrumented or over-gated? Mostly lean.**
+- Rejecting v3 at load unless band mode is on is justified. Outside band mode the E array is dead weight and a silent-misuse channel. Keep the existing generic failure path in the loader. Do not add a reason-code framework.
+- The "stable log1p/small-interval" wording risks over-building. The per-segment endpoint weights cancel benignly. At 100,000 Angstrom with a 1 Angstrom step the weight is about 5e-6 with absolute error 1e-16, so relative error is about 2e-11. One `log1p` call is enough. Do not add a series branch.
+- Out-of-band E/Q rejection is cheap because clipping to group edges bounds E/Q inside the group by construction. Use a relative tolerance, not exact comparison.
+- The test list, one MPI2 run plus restart, and raw-output removal are proportionate.
+
+**Concrete bounded changes the plan implies**
+1. Exporter in `simulation/snrt/tools/build_bpass_native_sed.py`. Add an energy integral that reuses the same clipped node set as the photon integral, so E/Q is consistent per group. Per linear segment the energy is hc times two positive endpoint weights. A version-3 option writes an extra energies block with the same escape fraction and the same 0 to 1 Myr hold. Default v2 output stays byte-identical.
+2. Loader in `patch/lagRamses/snrt_stellar_source.f90`. Add the energies array to the namelist. Accept version 3 only when band mode is enabled. Reuse all v2 checks and add: finite, nonnegative, zero wherever rates are zero, E/Q inside group edges, and the first-two-ages hold equality extended to energies. Extend the interval integrator with an optional energy output using the same crossed-node weights at lines 170 to 185. Append the energies block to the identity vector for v3 only.
+3. Deposition in `patch/lagRamses/snrt_agn_source.f90`. Add an optional per-group actual mean energy. When present, the source energy and the FP32 rounding bound at lines 333 to 341 use it, and the shift update at lines 354 to 355 charges the actual energy times the exact increment while the state reference stays Eref times N plus shift. Groups with zero photons contribute nothing. Atomic error-6 rejection is unchanged.
+4. Driver. Request the energy output when v3 is active, form per-group means with a zero-photon guard, and pass them only in the paired branch.
+5. MPI and HDF5 identity. No new format guard is needed. The consensus routine bitwise-compares the identity vector across ranks, and the checked reader at `patch/cuRamses/ramses_hdf5_io.f90:766` rejects any dataset whose extent differs from the expected total before reading. A v3 vector is longer than v2, and the version scalar sits inside the compared vector, so a same-length collision cannot occur. This satisfies the plan's "verify before mutation" condition.
+6. Tests. Extend `simulation/snrt/tests/bpass_native_sed.py` with an analytic energy case on the constant-integrand spectrum, a nonlinear E/Q versus mean-interpolation check, and rejection cases for negative E, E with zero Q, out-of-band E/Q, and v3 without band mode. Extend the Fortran smoke to print the interval energy. Add a deposition check that injected energy equals the summed E within the FP32 bound and rolls back atomically. Confirm the v2 exporter output hash is unchanged.
+
+**Scientific and feasibility findings**
+- Interpolating Q and E separately makes the interval integral exact for the declared linear model. E/Q then varies rationally inside an interval, which is why the plan forbids interpolating E/Q. Correct.
+- The shift can go negative when actual energy is below the reference. The existing nonnegative actual-energy check still guards the physical quantity, so no new invariant is needed.
+- The energy integral must be clipped with exactly the same nodes as the photon integral, or the per-group E/Q bound will not hold. Assert this in the exporter test.
+- Namelist growth is nine times 128 times 32 doubles, negligible.
+- The report line should state that injected energy is BPASS actual while the state reference remains the contract mean, to avoid a false same-population reading.
+
+**Verdict.** Approve without scope reduction, with the two lean notes above. The completion criterion, real BPASS Q/E coupling verified in one MPI2 evolution plus restart, is achievable within the listed files. Nothing in the plan needs a new namelist flag, cell tensor, or checkpoint format guard.
+
+One session note: the plan file could not be written because the Write tool is disabled in this session, so this message is the review deliverable.

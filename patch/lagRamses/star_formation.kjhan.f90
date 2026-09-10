@@ -547,6 +547,9 @@ end function erfc
 !###########################################################
 !###########################################################
 subroutine sub1_star_formation(ilevel, igrid,ngrid)
+#ifdef DUST_DYNAMICS
+  use dust_phase_state, only: dust_phase_kinetic
+#endif
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -584,6 +587,9 @@ subroutine sub1_star_formation(ilevel, igrid,ngrid)
         e=e-0.125d0*((bx1+bx2)**2+(by1+by2)**2+(bz1+bz2)**2)
 #endif
         e=e-0.5d0*d*(u**2+v**2+w**2)
+#ifdef DUST_DYNAMICS
+        if(dust_relative_motion)e=uold(ind_cell(i),5)-dust_phase_kinetic(uold(ind_cell(i),:))
+#endif
 #if NENER>0
         do irad=0,nener-1
                  e=e-uold(ind_cell(i),inener+irad)
@@ -975,6 +981,9 @@ end subroutine sub2_star_formation
 !###################################################
 !###################################################
 subroutine sub3_star_formation(ilevel, igrid,ngrid)
+#ifdef DUST_DYNAMICS
+  use dust_phase_state, only: dust_phase_kinetic
+#endif
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -989,6 +998,25 @@ subroutine sub3_star_formation(ilevel, igrid,ngrid)
   real(dp)::d,x,y,z,u,v,w,e,tg,zg,vdisp,dgas
   real(dp)::bx1,bx2,by1,by2,bz1,bz2,A,B,C,emag,beta,fbeta
 
+#ifdef DUST_DYNAMICS
+  if(dust_relative_motion)then
+     ! Existing SF consumes the mixture in proportion. Its stellar velocity
+     ! is barycentric, so the removed total momentum matches the star.
+     ! Restore ALL phase mass and absolute momentum densities before KE.
+     do ind=1,twotondim
+        do i=1,ngrid
+           ind_cell(i)=ICELL_OF(active(ilevel)%igrid(igrid+i-1),ind)
+           d=uold(ind_cell(i),1);e=uold(ind_cell(i),5)*d
+           uold(ind_cell(i),2:4)=uold(ind_cell(i),2:4)*d
+           uold(ind_cell(i),imetal:nvar)=uold(ind_cell(i),imetal:nvar)*d
+           e=e+dust_phase_kinetic(uold(ind_cell(i),:))
+           if(nener>0)e=e+sum(uold(ind_cell(i),inener:inener+nener-1))
+           uold(ind_cell(i),5)=e
+        enddo
+     enddo
+     return
+  endif
+#endif
   do i = 1, ngrid
      ind_grid(i) = active(ilevel)%igrid(igrid+i-1)
   enddo

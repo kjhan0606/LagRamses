@@ -1,0 +1,142 @@
+diff --git a/src/chimes.c b/src/chimes.c
+index bc26493..ce5f5d5 100644
+--- a/src/chimes.c
++++ b/src/chimes.c
+@@ -701,7 +701,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+ 	  chimes_print_gas_vars(stderr, myGasVars, myGlobalVars);
+ 	}
+ 
+-      if ((cv_flag == CV_FIRST_RHSFUNC_ERR) || (cv_flag == CV_UNREC_RHSFUNC_ERR) || (cv_flag == CV_REPTD_RHSFUNC_ERR)) 
++      if (cv_flag < 0 || t < (realtype) myGasVars->hydro_timestep)
+ 	{
+ 	  fprintf(stderr, "CHIMES Warning: CVode encountered a recoverable error in the Right Hand Side function but was unable to correct it.\n");
+ 	  chimes_print_gas_vars(stderr, myGasVars, myGlobalVars);
+diff --git a/src/chimes_cooling.c b/src/chimes_cooling.c
+index 835c282..73909f2 100644
+--- a/src/chimes_cooling.c
++++ b/src/chimes_cooling.c
+@@ -250,6 +250,16 @@ void update_cooling_rates(struct gasVariables *myGasVars, const struct globalVar
+  */ 
+ ChimesFloat calculate_total_cooling_rate(struct gasVariables *myGasVars, const struct globalVariables *myGlobalVars, struct UserData data, int mode) 
+ {
++  if(snrt_chimes_molecular_coefficients && myGlobalVars->StaticMolCooling) {
++    /* The native RT receiver owns continuum attenuation. Molecular line
++     * escape still needs the local, evolving columns, independently of
++     * cellSelfShieldingOn (which RT forbids). Never interpret divVel==0
++     * as an infinite Sobolev column in a finite cell. */
++    ChimesFloat column=myGasVars->cell_size*myGasVars->nH_tot;
++    data.CO_column=myGasVars->abundances[sp_CO]*column;
++    data.H2O_column=myGasVars->abundances[sp_H2O]*column;
++    data.OH_column=myGasVars->abundances[sp_OH]*column;
++  }
+   int i, xHII_index, Psi_index, T_index, T_mol_index, N_CO_rot_index, N_CO_vib_index; 
+   int N_H2O_rot_index, N_H2O_vib_index, T_H2O_index; 
+   ChimesFloat x_elec, log_xHII, d_xHII, log_Psi, dPsi, log_T, dT, G0; 
+diff --git a/src/chimes_proto.h b/src/chimes_proto.h
+index d23064c..7135d02 100644
+--- a/src/chimes_proto.h
++++ b/src/chimes_proto.h
+@@ -828,4 +828,10 @@ enum
+     sp_O2p		/* 156 */
+   };
+ 
+-#endif /* CHIMES_PROTO_H */ 
++/* Optional lagRamses RT receiver hooks; NULL preserves upstream behavior. */
++extern void (*snrt_chimes_molecular_coefficients)(struct gasVariables *, const struct globalVariables *, struct UserData);
++extern ChimesFloat (*snrt_chimes_molecular_opacity)(struct gasVariables *, const struct globalVariables *, struct UserData, int);
++extern void (*snrt_chimes_secondary_rates)(struct Species_Structure *, struct gasVariables *, const struct globalVariables *);
++/* Signed solid charge per gas H nucleus, frozen over a chemistry substep. */
++extern ChimesFloat (*snrt_chimes_solid_charge)(const struct globalVariables *);
++#endif /* CHIMES_PROTO_H */
+diff --git a/src/init_chimes.c b/src/init_chimes.c
+index 3bb4978..ce60217 100644
+--- a/src/init_chimes.c
++++ b/src/init_chimes.c
+@@ -28,6 +28,8 @@
+ #endif 
+ 
+ #include <stdio.h>
++/* lagRamses adapter ABI: zero-initialized disabled reaction channels. */
++int snrt_chimes_receiver_abi(void) { return 5; }
+ #include <stdlib.h>
+ #include <math.h>
+ #include <hdf5.h>
+@@ -35,6 +37,10 @@
+ #include <sundials/sundials_types.h>
+ #include "chimes_proto.h"
+ #include "chimes_vars.h"
++void (*snrt_chimes_molecular_coefficients)(struct gasVariables *, const struct globalVariables *, struct UserData) = NULL;
++ChimesFloat (*snrt_chimes_molecular_opacity)(struct gasVariables *, const struct globalVariables *, struct UserData, int) = NULL;
++void (*snrt_chimes_secondary_rates)(struct Species_Structure *, struct gasVariables *, const struct globalVariables *) = NULL;
++ChimesFloat (*snrt_chimes_solid_charge)(const struct globalVariables *) = NULL;
+ 
+ // CHIMES data tables. 
+ struct chimes_table_bins_struct chimes_table_bins;                               /*!< Structure containing table bins for all of the rate tables. */ 
+@@ -3797,7 +3803,9 @@ void allocate_current_rates_memory(struct chimes_current_rates_struct *chimes_cu
+   determine_current_rates_buffer_size(&buffer_size, myGlobalVars); 
+   buffer_position = 0; 
+ 
+-  chimes_current_rates->data_buffer = (ChimesFloat *) malloc(buffer_size * sizeof(ChimesFloat)); 
++  /* Disabled channels (notably cr_rate == 0) skip update_rates(), while
++   * cooling still reads their arrays. They must start at exactly zero. */
++  chimes_current_rates->data_buffer = (ChimesFloat *) calloc(buffer_size, sizeof(ChimesFloat));
+ 
+   // T_dependent 
+   N_reactions = chimes_table_T_dependent.N_reactions[1]; 
+diff --git a/src/rate_equations.c b/src/rate_equations.c
+index 0005fc2..3e3a128 100644
+--- a/src/rate_equations.c
++++ b/src/rate_equations.c
+@@ -464,6 +464,11 @@ void check_constraint_equations(struct gasVariables *myGasVars, const struct glo
+ 
+   x += myGasVars->abundances[myGlobalVars->speciesIndices[sp_H2p]] + myGasVars->abundances[myGlobalVars->speciesIndices[sp_H3p]];
+ 
++  /* Neutrality includes external solid carriers, not just gaseous ions.
++   * The receiver supplies immutable per-cell context; NULL is upstream. */
++  if (snrt_chimes_solid_charge)
++    x += snrt_chimes_solid_charge(myGlobalVars);
++
+   if (fabs((x - myGasVars->abundances[myGlobalVars->speciesIndices[sp_elec]]) / chimes_max(myGasVars->abundances[myGlobalVars->speciesIndices[sp_elec]], CHIMES_FLT_MIN)) > 0.01f)
+     myGasVars->abundances[myGlobalVars->speciesIndices[sp_elec]] = chimes_max(x, 0.0f);
+ }
+diff --git a/src/update_rates.c b/src/update_rates.c
+index 4c20b41..8341c5e 100644
+--- a/src/update_rates.c
++++ b/src/update_rates.c
+@@ -524,6 +524,8 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
+ { 
+   int i, j, xHII_index; 
+   ChimesFloat log_xHII, d_xHII; 
++  if(myGlobalVars->rt_update_flux && snrt_chimes_molecular_coefficients)
++    snrt_chimes_molecular_coefficients(myGasVars, myGlobalVars, data);
+ 
+   // T_dependent reactions
+   /* For two-body reactions in this group, with rate coefficients in cm^3/s,
+@@ -717,7 +719,9 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
+ 	       * Note that CVode integrates y = ln(n) etc.
+ 	       * so we don't need an extra factor of 
+ 	       * n_gamma or g_gamma here. */ 
+-	      photon_flux_rate[j] = photon_density_rate[j]; 
++              if(snrt_chimes_molecular_opacity)
++                photon_density_rate[j] -= snrt_chimes_molecular_opacity(myGasVars,myGlobalVars,data,j);
++	      photon_flux_rate[j] = photon_density_rate[j];
+ 	      photon_flux_rate[j] *= light_speed; 
+ 	      photon_density_rate[j] *= light_speed;
+ 
+@@ -953,11 +957,13 @@ void update_rate_vector(struct Species_Structure *mySpecies, struct gasVariables
+ 	}
+     }
+ 
+-  return; 
++  if (snrt_chimes_secondary_rates && myGlobalVars->rt_update_flux)
++    snrt_chimes_secondary_rates(mySpecies, myGasVars, myGlobalVars);
++  return;
+ }
+ 
+-/** 
+- * @brief Sets the species structures. 
++/**
++ * @brief Sets the species structures.
+  * 
+  * Determines which species are to be included in 
+  * the CVode integration. Here we exclude species 

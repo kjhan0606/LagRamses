@@ -53,6 +53,11 @@ module stellar_enrichment_contract
   ! Increment to be deposited during one hydrodynamic timestep.
   type :: stellar_source_t
      real(stellar_dp) :: dust_species(2)=0d0
+     ! Ephemeral donor ledger, not a new persisted population variable.
+     ! C, olivine, metallic Fe, PAH constituent mass supplied by each channel.
+     ! PAH H and C may come from different channels in the existing mixed-
+     ! ejecta condensation model; column 4 counts their donated mass.
+     real(stellar_dp) :: channel_condensed_mass(n_stellar_channels,4)=0d0
      real(stellar_dp) :: ejected_mass(n_stellar_elements)
      real(stellar_dp) :: net_yield(n_stellar_elements)
      real(stellar_dp) :: returned_mass
@@ -114,6 +119,7 @@ contains
 
     source%ejected_mass = 0.0_stellar_dp
     source%dust_species = 0d0
+    source%channel_condensed_mass=0d0
     source%net_yield = 0.0_stellar_dp
     source%returned_mass = 0.0_stellar_dp
     source%energy = 0.0_stellar_dp
@@ -132,6 +138,7 @@ contains
 
     source%ejected_mass = later%ejected_mass - earlier%ejected_mass
     source%dust_species = later%dust_species-earlier%dust_species
+    source%channel_condensed_mass=0d0 ! the single-channel increment assigns provenance
     source%net_yield = later%net_yield - earlier%net_yield
     source%returned_mass = later%returned_mass - earlier%returned_mass
     source%energy = later%energy - earlier%energy
@@ -150,10 +157,10 @@ contains
   pure real(stellar_dp) function delayed_cooling_source_mass(source)
     type(stellar_source_t), intent(in) :: source
 
-    ! The unresolved blast reservoir is a core-collapse SN model.  Keep the
-    ! channel selection here so deposition code cannot accidentally substitute
-    ! total mass return (winds + AGB + SNII + SNIa + PISN).
-    delayed_cooling_source_mass = source%channel_returned_mass(channel_snii)
+    ! Explicit shared unresolved-shock prescription for CCSN and pair events.
+    ! Winds, AGB and the separately treated SNIa source do not fund it.
+    delayed_cooling_source_mass = source%channel_returned_mass(channel_snii)+ &
+         source%channel_returned_mass(channel_pisn)
   end function delayed_cooling_source_mass
 
 end module stellar_enrichment_contract

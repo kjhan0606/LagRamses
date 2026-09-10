@@ -58,6 +58,10 @@ subroutine diag_check_eint(label, ilev_check)
            w = uold(icell,4)/d
            etot = uold(icell,5)
            eint = etot - 0.5d0*d*(u*u + v*v + w*w)
+#ifdef SOLVERmhd
+           eint=eint-magnetic_energy(uold(icell,:))
+           if(nener>0)eint=eint-sum(uold(icell,inener:inener+nener-1))
+#endif
            if(eint < 0d0) neg_count_loc = neg_count_loc + 1
            if(eint < eint_min_loc) then
               eint_min_loc = eint

@@ -12,7 +12,7 @@ import json
 import math
 from pathlib import Path
 import re
-from build_lc18_native_wind import build_native_wind, SOLAR_MASS_CGS
+from build_lc18_native_wind import build_native_wind, SOLAR_MASS_CGS, DECAY_MODELS
 from read_karakas_lugaro2016 import (read_karakas_lugaro2016, read_fishlock2014, DEFAULT_MATRIX,
                                     LIFETIME_SHA256, FISHLOCK_SHA256, attach_fishlock_pulses)
 
@@ -21,7 +21,8 @@ def build_combined(*, rotation: int, massive_wind_speed_km_s: float, agb_wind_sp
                    agb_release: str, agb_energy: str, population: str, imf_id: int = 2,
                    low_z_agb: str = 'none', massive_source: str = 'wind_only',
                    snii_energy_erg: float | None = None, massive_wind_timing: str = 'uniform_until_terminal',
-                   agb_source_scope: str = 'co_common', agb_net: str = 'unavailable'):
+                   agb_source_scope: str = 'co_common', agb_net: str = 'unavailable',
+                   massive_decay: str = 'as_tabulated_no_decay'):
     if agb_net not in ('unavailable','normalized_initial_MZY'):
         raise ValueError('unsupported AGB net-yield model')
     if agb_source_scope not in ('co_common','kl16_envelopes_to7'):
@@ -39,7 +40,8 @@ def build_combined(*, rotation: int, massive_wind_speed_km_s: float, agb_wind_sp
     table, history = build_native_wind(rotation=rotation, wind_speed_km_s=massive_wind_speed_km_s,
                                       timing=massive_wind_timing, composition='as_tabulated_mean',
                                       energy='isotropic_thermalized', imf_id=imf_id,
-                                      massive_source=massive_source, snii_energy_erg=snii_energy_erg)
+                                      massive_source=massive_source, snii_energy_erg=snii_energy_erg,
+                                      decay=massive_decay)
     report = read_karakas_lugaro2016(include_lifetimes=True)
     # Common ordinary CO-AGB support is 1--6 Msun. Do not turn ONe or hybrid
     # CO(Ne) cores into an N100 WD supplier or resurrect commented 8 Msun nodes.
@@ -72,6 +74,8 @@ def build_combined(*, rotation: int, massive_wind_speed_km_s: float, agb_wind_sp
                      snia_policy='unchanged_approved_DTD_strict_causal_WD_budget',
                      agb_decay='source_fully_decayed_elements', net='unavailable_diagnostic_zero',
                      kl16_model_coordinates=[dict(**r['coordinate'], overshoot=r['overshoot_label']) for r in nodes])
+    if massive_decay != DECAY_MODELS[0]:
+        selection['massive_decay'] = massive_decay
     if agb_source_scope != 'co_common':
         selection.update(agb_source_scope=agb_source_scope,
             core_selection='all_source_envelopes_1_to7; hybrid_CO_Ne_excluded_from_strict_Ia_CO_inventory',
@@ -192,6 +196,8 @@ def main():
                    default='uniform_until_terminal')
     p.add_argument('--agb-source-scope', choices=('co_common','kl16_envelopes_to7'),default='co_common')
     p.add_argument('--agb-net',choices=('unavailable','normalized_initial_MZY'),default='unavailable')
+    p.add_argument('--massive-decay',choices=DECAY_MODELS,default=DECAY_MODELS[0],
+                   help='LC18-only isotope projection; fully decayed AGB sources stay unchanged')
     args = p.parse_args()
     if args.output_dir.exists():
         p.error('existing output directory refused')
@@ -200,7 +206,8 @@ def main():
                                    agb_energy=args.agb_energy, population=args.population, imf_id=args.imf_id,
                                    low_z_agb=args.low_z_agb, massive_source=args.massive_source,
                                    snii_energy_erg=args.snii_energy_erg, massive_wind_timing=args.massive_wind_timing,
-                                   agb_source_scope=args.agb_source_scope, agb_net=args.agb_net)
+                                   agb_source_scope=args.agb_source_scope, agb_net=args.agb_net,
+                                   massive_decay=args.massive_decay)
     args.output_dir.mkdir(parents=True,exist_ok=False)
     for name, content in [('yields.dat',table),('history.nml',history)]:
         with (args.output_dir/name).open('x') as f:

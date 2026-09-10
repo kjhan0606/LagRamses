@@ -8,6 +8,14 @@ program agn_feedback_deposition_smoke
   real(dp) :: weights(2), lobe_sum(2), axis(3)
   integer :: ierr, i
 
+  ! Magnetic energy stays on the mesh and is not subject to the thermal cap.
+  row=[1d0,0d0,0d0,0d0,105d0]
+  call agn_deposit_cell(row,0d0,[0d0,0d0,0d0],8d0,3d0,2d0,1d0,10d0,deferred,ierr,100d0)
+  call check(ierr==0.and.row(5)==110d0.and.deferred==9d0,'magnetic reservoir excluded from gas cap')
+  row=[1d0,0d0,0d0,0d0,99d0];before=row
+  call agn_deposit_cell(row,0d0,[0d0,0d0,0d0],8d0,3d0,2d0,1d0,10d0,deferred,ierr,100d0)
+  call check(ierr/=0.and.all(row==before),'magnetic energy cannot conceal negative gas heat')
+
   row=[1d0,0d0,0d0,0d0,5d0]
   call agn_deposit_cell(row,0d0,[0d0,0d0,0d0],3d0,3d0,2d0,1d0,10d0,deferred,ierr)
   call check(ierr==0 .and. row(5)==8d0 .and. deferred==0d0,'thermal below cap')

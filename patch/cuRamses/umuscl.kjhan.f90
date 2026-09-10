@@ -20,6 +20,9 @@
 !  ndim        => (const)  number of dimensions
 ! ----------------------------------------------------------------
 subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid,uouter)
+#ifdef DUST_DYNAMICS
+  use dust_dynamics_runtime, only: dust_dynamics_unsplit
+#endif
   use amr_parameters
   use const             
   use hydro_parameters
@@ -81,6 +84,14 @@ subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid,uouter)
   jlo=MIN(1,ju1+2); jhi=MAX(1,ju2-2)
   klo=MIN(1,ku1+2); khi=MAX(1,ku2-2)
 
+  ! The reference relative-phase path consumes CONSERVED states and returns
+  ! the same dt/dx-scaled face arrays used by the AMR/MPI reflux machinery.
+#ifdef DUST_DYNAMICS
+  if(dust_relative_motion)then
+     call dust_dynamics_unsplit(uin,flux,tmp,dx,dy,dz,dt,ngrid)
+     return
+  endif
+#endif
   ! Translate to primative variables, compute sound speeds  
   call ctoprim(uin,qin,cin,gravin,dt,ngrid)
   if(scheme=='weno5'.or.scheme=='weno5ppm'.or.scheme=='ppm')then
@@ -1149,6 +1160,9 @@ subroutine cmpflxm(qm,im1,im2,jm1,jm2,km1,km2, &
      &                ilo,ihi,jlo,jhi,klo,khi, ln,lt1,lt2, &
      &            flx,tmp,ngrid)
   use dust_mass_physics, only: dust_composition_enabled,dust_two_size_enabled
+#ifdef SNRT_CHIMES
+  use snrt_chimes_runtime, only: chimes_consistent_carriers
+#endif
   use amr_parameters
   use hydro_parameters
   use const
@@ -1251,9 +1265,15 @@ subroutine cmpflxm(qm,im1,im2,jm1,jm2,km1,km2, &
               endif
               do l=1,ngrid
                  fgdnv(l,idust)=fgdnv(l,idust_species)+fgdnv(l,idust_species+1)
+                 if(idust_iron>0)fgdnv(l,idust)=fgdnv(l,idust)+fgdnv(l,idust_iron)+fgdnv(l,idust_iron+1)
               enddo
            endif
            ! Compute fluxes
+#ifdef SNRT_CHIMES
+           do l=1,ngrid
+              call chimes_consistent_carriers(fgdnv(l,:))
+           enddo
+#endif
            
            ! Mass density
            do l = 1, ngrid 

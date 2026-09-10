@@ -1,0 +1,38 @@
+The Write tool is disabled in this session, so I cannot create the plan file. The verdict follows directly.
+
+**Q-GOAL: yes, conditionally.** Metallic-Fe mass evolution is a real native physics step, not a framework. Every piece except the rate law already exists and is live: two Fe carriers after CHIMES, elemental reservation in `dust_gas_elements` and `dust_size_step_reserved_iron`, gas-Fe return through the CHIMES reconciliation, Fe enthalpy via `iron_mixture_enthalpy`, and all-large source injection. The condition is that growth and erosion ship together. Growth-only Fe would deplete gas Fe monotonically below 300 K with no destruction channel, since Fe bins are also outside `dust_shock_step`. That is not a defensible comparison.
+
+**Q-LEAN: acceptable as written, with three cuts.** The five listed deliverables each map onto an existing artifact, so keep them. Do not add:
+
+- A new smoke program. Extend the Fe cases already in `dust_mass_smoke.f90` (lines 319 to 814 call the reserved-iron step).
+- A new selector string with its own validation tree. One namelist logical under the existing `fe_electric_compare_v1` gate plus one real for Fe sticking is enough. Fe should honour the global growth and sputtering flags rather than get its own.
+- A separate restart identity dataset. `backup_hdf5.f90:179` already reserves slot 6 of the iron identity as zero. Use it and append the constants. Mismatch rejection already exists.
+
+**Physical feasibility.**
+
+- **Growth is defensible with existing data.** Geometric accretion of gas Fe atoms onto neutral spheres is the same closure as `dust_mass_rates`, with atom mass 56, the two Fe radii, density 7.87, and an explicit sticking parameter. Capacity is gas Fe after the updated olivine reservation. Pin Zhukovska, Henning and Dobbs 2018 as the primary source before coding.
+- **Erosion is defensible only with a newly pinned Fe-specific source.** The repo has no Fe sputtering data. The existing loss rate is Tsai and Mathews with a fixed silicate/graphite constant, and rescaling it by Fe radius is exactly what the plan forbids. Candidates are Nozawa, Kozasa and Habe 2006 or Tielens et al. 1994. Retrieve, hash and read the table first. If that cannot be done, the selector must reject, never run growth-only or zero-rate.
+
+**Minimal acceptable explicit assumptions:**
+
+1. Neutral grains, no Coulomb focusing.
+2. Growth only at T at or below the existing 300 K bounds. Erosion uses gas temperature as C/olivine do.
+3. Sequential split per step: olivine first with Fe reserved, then Fe with capacity from the updated silicate bins. Document the ordering bias at joint Fe starvation.
+4. Sticking defaults to the existing `dust_sticking` value, labelled as a comparison value.
+5. Accreted or eroded Fe carries U(Td). No latent term, since sublimation is required off under Fe.
+6. No Fe coagulation or shattering in this bundle. Small Fe exists only from initial conditions.
+7. Eroded Fe returns as neutral gas Fe through the existing reconciliation.
+
+**Necessary reject conditions:**
+
+- Fe kinetics with SN shock destruction on. There is no Fe shock delta, so Fe would be immune while C/olivine are not.
+- Fe kinetics with relative motion, unless the Fe step is coupled through the existing two-body helpers on phases 5 and 6. Never evolve Fe masses with stale Fe momenta.
+- Erosion source unavailable.
+- Per cell, the existing collective rejections: locked Fe above elemental Fe, non-finite values, capacity overshoot, dust temperature above 300 K.
+- Restart identity changed or selector toggled.
+
+**Zero-rate identity:** with kinetics on and both rate flags off, Fe carriers and all C/olivine outputs must be bitwise equal to the current fixed-Fe path. With the logical off, nothing changes.
+
+**Runtime edits the implementer must not miss:** `dust_mass_runtime.f90` uses the fixed `iron_mass` at the aggregate check, the reserved step calls, the total, and the enthalpy recompute. All four need the evolved value, and the Fe carriers need staging and commit. Halo synchronisation for them is already present.
+
+Verification should reuse only the existing native tests and one 8^3 MPI2/OMP2 fresh plus restart integration modelled on the earlier Fe live run. End evaluation is by the driver.

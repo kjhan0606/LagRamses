@@ -1,0 +1,25 @@
+The plan file cannot be written in this session because Write is disabled, so the audit is delivered here in full.
+
+**Verdict: approve as a bounded-rate, cation-only, vacancy-refilling H2 subchannel, opt-in, defaults unchanged. Do not call it an H2 upper limit.** It does not close the group7 H2 item and does not touch carbon fragmentation.
+
+**Q-GOAL.** The subchannel is consistent with the existing CHIMES and energy semantics, verified in source:
+
+- CHIMES species are advected as particle number times m_H over density, one weight per particle. H2 is stored once per molecule, not as twice-H mass. HI is Fortran index 2 and H2 is index 138 in `chemical_trial` (`snrt_ramses_driver.f90:1936`, `chimes_proto.h:809`).
+- Fixed-gamma capacity is 1.5k per particle, and the mixed step already shifts capacity by the change in atomic H count (`dust_pah_mixed.f90:241`). One consumed H2 lowers capacity by 1.5k.
+- Element ledger: PAH H mass is derived from the state index by `dust_pah_inventory`, subtracted from gas elements, and the reconcile step locks molecules and rescales only atomic species (`snrt_chimes_bridge.c:515`). A direct H2 species debit plus the automatic ledger debit through the PAH inventory leaves free atomic H unchanged. Doing only one of the two is exactly the double-debit or HI-regeneration failure. No separate ledger edit is needed.
+- Rollback is automatic if H2 rides in the transaction's chemical trial array, as HI does.
+- In the model's own closure, bond(n) minus bond(n+2) is 8.0 eV for every n up to 10, so each H2 capture deposits 3.52 eV plus kinetic into the daughter. No state is endothermic, so constant k is not contradicted.
+
+Physical expectation: the bound rate is 100 to 300 times below the atomic attach rates, and dehydrogenation needs FUV that anticorrelates with H2. The comparison will most likely show a weak effect in a narrow shielded band. That is a legitimate closed answer, not a production model.
+
+**Legitimacy of the vacancy-refilling restriction.** Defensible as a named subset, not as an upper limit. The rate over-estimates the truth, but the channel set is a subset of the M13 sensitivity choice, so the result bounds nothing. The excluded single-vacancy channel, C24H11+ plus H2 to C24H12+ plus H, is the abstraction reaction that laboratory work on small dehydrogenated cations reports as reactive. Excluding it is a domain decision to avoid super-hydrogenation via H2, not physics. Name it "vacancy-refilling H2 capture at the M13 bound rate" in the generator and GUI text. I could not fetch Montillaud+2013 this session, so the plan's reading of table 4 as "two H per H2" is unverified by me.
+
+**Q-LEAN.** Lean: same carriers, NVAR unchanged, no new namelist variable, no new ABI. Required cuts and constraints:
+
+1. The "molecular binding inventory" must be a per-step accounting scalar like the existing bond-change term, never a stored or advected field.
+2. Drop the old-model control run. The zero-donor parity smoke test already isolates H2 from CHIMES chemistry.
+3. dt-halving is one loop in the existing refinement pattern (`dust_mass_smoke.f90:318`), not a new gate.
+4. The attach solver gets an optional stride and binding-offset argument, with the stride-1 path bit-identical. The coefficient constraint becomes zero for the top stride states.
+5. Identity vector: append H2 coefficients and D0 only for the new model with a bumped tag. The old vector stays unchanged.
+
+**Executable scope if approved.** Edits in `dust_pah_hydrogen.f90` (stride-2 attach, H2 coefficient vector, donor sequencing after atomic H, D0 in the balance), the mixed and live model files (thread gas H2 like atomic H), the driver (pass index 138 in cm-3), `dust_mass_physics.f90` (model name, hydrogenated true for both, an H2 enable query), and the existing choice lists in mkrun, the nml generator, and the GUI test. Verification extends the existing H-state smoke block plus one MPI2/OMP2 4^3 live evolution and restart on the existing hydrogen fixture.

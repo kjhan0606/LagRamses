@@ -101,20 +101,26 @@ contains
     use amr_parameters, only: sink, sink_AGN
     use amr_commons, only: levelmin, nstep_coarse, myid, dtnew, boxlen, &
          icoarse_min, icoarse_max, ncpu, nrestart, texp, aexp, active
-    use hydro_commons, only: uold
-    use dust_mass_physics, only: dust_atomic_cooling_enabled,dust_gas_elements
+    use hydro_commons, only: uold,magnetic_energy
+    use dust_mass_physics, only: dust_atomic_cooling_enabled,dust_chimes_enabled,dust_gas_elements
+#ifdef SNRT_CHIMES
+    use snrt_chimes_runtime, only: chimes_live_capacity,chimes_live_stage,chimes_cell_state,chimes_live_band_stage
+    use snrt_chimes, only: chimes_ns,chimes_group_binding,chimes_boltzmann
+#endif
     use snrt_atomic_cooling, only: atomic_mh,atomic_temperature,atomic_heat_capacity,atomic_advance
     use pm_commons, only: nsink, xsink, idsink, agn_pending_erg, nindsink, msink, vsink, jsink, &
          dMBH_coarse, dMEd_coarse, dMsmbh, Esave, spinmag, agn_checkpoint_restored, &
          headp, numbp, nextp, ptypep, PTYPE_STAR, xp, mp0, tpp, zp
-    use snrt_stellar_source, only: stellar_sed_enabled, stellar_photon_interval
+    use snrt_stellar_source, only: stellar_sed_enabled, stellar_photon_interval,stellar_sed_has_energy
     use snrt_runtime_backend, only: snrt_backend_initialize
-    use snrt_state, only: snrt_ndirection, snrt_ngroups, snrt_intensity, &
-         snrt_nslot, &
+    use snrt_state, only: snrt_ndirection, snrt_nmu, snrt_nphi, snrt_ngroups, snrt_intensity, &
+         snrt_nslot, snrt_energy_shift, &
          snrt_neutral_fraction, snrt_hydrogen_ii, snrt_helium_ii, &
          snrt_helium_iii, snrt_state_get_slot
     use snrt_spectral_contract, only: &
-         snrt_nedges, snrt_group_edges_ev, snrt_group_edges_sha256, &
+         snrt_nedges, snrt_group_edges_ev, snrt_group_edges_sha256, snrt_band_enabled,snrt_band_model, &
+         snrt_d03_band_enabled,snrt_fe_band_enabled,snrt_grain_band_bins, &
+         snrt_node_secondaries_enabled,snrt_chimes_band_enabled, &
          snrt_group_mean_energy_ev, snrt_group_energy_fraction, &
          snrt_group_cross_section_cm2, snrt_group_cross_section_hei_cm2, &
          snrt_group_cross_section_heii_cm2, &
@@ -132,7 +138,12 @@ contains
 #ifdef DUST_LIVE
     use snrt_dust_live, only: snrt_dust_live_stage, snrt_dust_live_commit, dust_live_coarse_trial
     use dust_composition_material, only: dust_material_composition_enabled,dust_composition_curve,dust_composition_area
-    use dust_mass_physics, only: dust_optics_enabled
+    use dust_mass_physics, only: dust_optics_enabled,dust_sublimation_rt_enabled,dust_iron_enabled,dust_fe_max_primary_ev, &
+         dust_sublimation_enabled
+    use dust_iron_compare, only: iron_compare_curve,iron_compare_weights,iron_compare_temperature,fe_six_opacity_basis
+    use dust_mass_physics, only: dust_pah_enabled,dust_pah_nstate,dust_pah_hc,dust_pah_molecule_g,dust_pah_charged, &
+         dust_pah_inventory,dust_pah_state_mass,dust_pah_hydrogenated,dust_pah_h2_enabled
+    use dust_pah_live_model, only: pah_live_prepare,pah_primary_sigma,pah_primary_alpha,pah_max_primary_ev
     use dust_composition_optics, only: d03_ng,d03_nir,d03_cell_weights,d03_opacity_basis
     use snrt_dust_ir, only: dust_ir_diagnostics
     use snrt_dust_contract, only: snrt_dust_contract_version, &
@@ -140,6 +151,9 @@ contains
          snrt_dust_contract_exchange_enabled, snrt_dust_contract_collision_area_per_h, &
          snrt_dust_contract_accommodation, snrt_dust_contract_ir_background_k
     use snrt_runtime_backend, only: snrt_runtime_isotropic_scatter
+    use dust_phase_state, only: dust_phase_read,dust_phase_kinetic
+    use snrt_moving_scatter, only: snrt_moving_scatter_cell
+    use hydro_parameters, only: dust_relative_motion,ndust_phase,idust_momentum,nvar
 #endif
     use snrt_transport_step, only: snrt_transport_absorb_multigroup_prepared_dust_trial
     use snrt_rt_transaction, only: snrt_rt_iteration_config, &
@@ -168,7 +182,7 @@ contains
          snrt_dust_receiver_stage
     use snrt_angular_quadrature, only: snrt_angular_init
     use snrt_agn_locator, only: snrt_agn_find_local_leaf
-    use snrt_agn_source, only: snrt_c_cgs, snrt_agn_photon_budget_energy, &
+    use snrt_agn_source, only: snrt_c_cgs, snrt_ev_to_erg, snrt_agn_photon_budget_energy, &
          snrt_agn_deposit_transaction, snrt_agn_source_commit
     use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_reference_active
     use snrt_nlte_coupling, only: snrt_nlte_primordial_optical_depth_groups
@@ -180,7 +194,7 @@ contains
          snrt_mean_molecular_weight, snrt_inventory_tolerance
     use snrt_cuda_interface, only: snrt_cuda_available
     use amr_parameters, only: dp, ndim, spin_bh, mad_jet, X_floor
-    use hydro_parameters, only: gamma, idust, idust_energy, inener, idust_species, idust_bins,ichem
+    use hydro_parameters, only: gamma, idust, idust_energy, inener, idust_species, idust_bins,ichem,ichimes,idust_iron,idust_pah
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use iso_c_binding, only: c_float
     use omp_lib, only: omp_get_wtime
@@ -189,6 +203,7 @@ contains
     integer, intent(in) :: ilevel
     real(dp), intent(in), optional :: step_start_proper
     real(dp) :: stellar_photons(snrt_ngroups), stellar_time_scale
+    real(dp),allocatable :: stellar_energy(:),stellar_injection_mean(:)
     integer :: igrid, ipart, ip, ig
     character(len=1024) :: env_value
     integer :: env_length, env_status, read_status
@@ -219,7 +234,8 @@ contains
     real(dp) :: tau_hei_dp(snrt_ngroups), tau_heii_dp(snrt_ngroups)
     real(dp) :: unassigned_absorption_total, ledger_relative_error
     real(dp) :: global_unassigned_absorption
-    real(dp) :: excess_energy_ev(3,snrt_ngroups)
+    real(dp) :: excess_energy_ev(3,snrt_ngroups),cell_excess_ev(3,snrt_ngroups)
+    real(dp),parameter::band_threshold(3)=[13.60d0,24.59d0,54.42d0]
     real(dp) :: deposited_density
     real(dp) :: wall_start
     real(dp) :: transaction_residual, global_transaction_residual
@@ -235,6 +251,9 @@ contains
          absorbed_hhe_group_species(:,:,:), absorbed_dust_group(:,:), returned_group(:,:)
     real(c_float), allocatable :: incoming_intensity(:,:,:), trial_intensity(:,:,:)
     real(c_float), allocatable :: coarse_flux_trial(:,:,:)
+    real(dp),allocatable::incoming_energy_shift(:,:,:),trial_energy_shift(:,:,:),coarse_energy_shift(:,:,:)
+    real(dp),allocatable::hhe_energy(:,:,:),absorbed_dust_energy_ev(:,:),dust_energy_moment(:,:,:)
+    real(dp),allocatable::secondary_xi(:),band_deposition(:,:)
     real(c_float), allocatable :: iteration_tau(:,:), iteration_species_tau(:,:,:)
     real(c_float), allocatable :: target_tau(:,:), target_species_tau(:,:,:)
     real(dp), allocatable :: start_hydrogen_ii(:), start_helium_ii(:), &
@@ -245,7 +264,13 @@ contains
          trial_helium_iii(:), trial_neutral_hydrogen(:), trial_thermal(:)
     real(dp), allocatable :: rho_level(:), temperature_level(:)
     real(dp), allocatable :: h_number_code(:),he_number_code(:),atomic_gas_x(:,:)
-    logical :: atomic_cooling_on
+    logical :: atomic_cooling_on,band_on,paired_transport
+    real(dp),allocatable::species_columns(:,:),target_columns(:,:),grain_columns(:,:)
+    logical :: chimes_on
+#ifdef SNRT_CHIMES
+    real(dp),allocatable::chemical_trial(:,:)
+    real(dp)::chemical_absorbed_ev
+#endif
     real(dp), allocatable :: trial_heating_rate(:), trial_unassigned(:)
     real(dp), allocatable :: trial_absorbed_species(:,:,:)
     real(dp), allocatable :: current_fraction(:,:), target_fraction(:,:)
@@ -255,13 +280,20 @@ contains
     real(dp), allocatable :: dust_old_energy(:), dust_old_temperature(:)
     real(dp), allocatable :: dust_trial_energy(:), dust_trial_temperature(:)
     real(dp), allocatable :: dust_absorbed_photons(:,:), dust_absorbed_energy(:)
+    real(dp),allocatable::pah_number(:,:),pah_primary_energy(:,:),dust_receiver_abundance(:)
+    real(dp)::pah_solid_hc(2),pah_n
     real(dp), allocatable :: dust_n_hydrogen_cm3(:), dust_path_cm(:)
     real(dp), allocatable :: dust_tau_dp(:,:)
     real(dp), allocatable :: dust_ir_trial(:,:,:)
     real(dp), allocatable :: dust_cell_u(:,:),dust_cell_area(:)
+    real(dp),allocatable::sublimation_bins(:,:),sublimation_next(:,:)
     real(dp),allocatable::dust_weights(:,:),dust_primary_sigma(:,:),dust_scatter_sigma(:,:)
-    real(dp)::d03_pa(d03_ng,4),d03_ps(d03_ng,4),d03_pg(d03_ng,4)
-    real(dp)::d03_ia(d03_nir,4),d03_isc(d03_nir,4),d03_ig(d03_nir,4)
+    real(dp)::d03_pa(d03_ng,6),d03_ps(d03_ng,6),d03_pg(d03_ng,6)
+    real(dp)::d03_ia(d03_nir,6),d03_isc(d03_nir,6),d03_ig(d03_nir,6),solid_fe
+    integer::dust_nb
+    real(dp),allocatable::phase_rows(:,:),phase_mass(:,:),phase_pold(:,:,:),phase_pnext(:,:,:)
+    real(dp),allocatable::phase_ir_work(:,:)
+    real(dp),allocatable::primary_heat(:,:),primary_pah_heat(:,:),primary_pah_captures(:,:)
     type(dust_ir_diagnostics) :: dust_ir_result
     type(dust_live_coarse_trial) :: dust_ir_coarse
 #endif
@@ -295,9 +327,21 @@ contains
          'ZERO_SCAFFOLD'
 #endif
 
+    band_on=snrt_band_enabled();paired_transport=band_on
+#ifdef DUST_LIVE
+    paired_transport=paired_transport.or.dust_relative_motion
+    if(snrt_d03_band_enabled())then
+       if(.not.dust_optics_enabled().or.(dust_iron_enabled().neqv.snrt_fe_band_enabled()).or.dust_pah_enabled().or. &
+            dust_sublimation_enabled().or.dust_relative_motion.or.dust_chimes_enabled())then
+          if(myid==1)write(*,*)'Grain band RT requires matching static D03/Fe mode, no PAH/sublimation/CHIMES'
+          call clean_stop;return
+       endif
+    endif
+#endif
     enabled = .false.
     if (.not. enabled_resolved) then
        enabled_latched = snrt_agn_rt_requested()
+       if(enabled_latched.and.band_on.and.myid==1)write(*,'(A,A)')' SNRT spectral absorption model=',snrt_band_model
        if (enabled_latched .and. sink .and. sink_AGN .and. .not.snrt_agn_reference_active()) then
           if(myid==1)write(*,*)'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
           call clean_stop
@@ -347,6 +391,10 @@ contains
                snrt_group_edges_ev)) <= 1.0d-12 * max(1.0d0, &
                maxval(abs(snrt_group_edges_ev)))
        end if
+       if(dust_sublimation_rt_enabled())dust_contract_ok=dust_contract_ok.and. &
+            snrt_dust_contract_exchange_enabled.and.snrt_dust_contract_version==4
+       if(snrt_d03_band_enabled())dust_contract_ok=dust_contract_ok.and. &
+            snrt_dust_contract_version==4.and.snrt_dust_contract_scattering_enabled
        dust_contract_checked = .true.
        if (myid == 1 .and. .not. dust_contract_ok) then
           write(*,'(A)') ' SNRT DUST_LIVE disabled: dust contract does not match the canonical nine-group runtime'
@@ -386,6 +434,8 @@ contains
              write(*,'(A,I0,A,A)') ' SNRT spectral contract loaded: groups=', &
                   snrt_ngroups, ' status=', trim(snrt_spectral_contract_status)
              write(*,'(A,A)') '   source: ', trim(snrt_spectral_contract_source_id)
+             write(*,'(A,I0,A,I0,A,I0)') ' SNRT angular quadrature: mu=',snrt_nmu, &
+                  ' phi=',snrt_nphi,' directions=',snrt_ndirection
              write(*,'(A,F12.8,A,F12.8)') '   represented energy fraction=', &
                   snrt_group_energy_fraction_sum, ' unrepresented=', &
                   snrt_group_unrepresented_energy_fraction
@@ -446,7 +496,7 @@ contains
        transaction_config_reported = .true.
     end if
     if (ilevel < levelmin .or. dtnew(ilevel) <= 0.0d0) return
-    if (level_filter > 0 .and. ilevel /= level_filter) return
+    if (level_filter > 0 .and. ilevel /= level_filter.and..not.dust_chimes_enabled()) return
     local_transaction_failure = snrt_failure_none
     call snrt_backend_initialize(ierr)
     if (ierr /= 0) local_transaction_failure = snrt_failure_transport
@@ -585,12 +635,29 @@ contains
          trial_heating_rate(nleaf), trial_unassigned(nleaf), &
          trial_absorbed_species(nleaf,3,snrt_ngroups), &
          current_fraction(nleaf,3), target_fraction(nleaf,3))
+    if(band_on)allocate(species_columns(nleaf,3),target_columns(nleaf,3))
+    if(snrt_d03_band_enabled())allocate(grain_columns(nleaf,snrt_grain_band_bins()))
     atomic_cooling_on=dust_atomic_cooling_enabled()
+    chimes_on=dust_chimes_enabled()
+    if((band_on.and.chimes_on.and..not.snrt_chimes_band_enabled()).or. &
+         (snrt_chimes_band_enabled().and..not.chimes_on))then
+       if(myid==1)write(*,*)'Band H/He closure has no matched CHIMES coefficients'
+       call clean_stop;return
+    endif
+#ifdef SNRT_CHIMES
+    if(chimes_on)allocate(chemical_trial(chimes_ns,nleaf))
+#endif
     allocate(h_number_code(nleaf),he_number_code(nleaf))
-    if(atomic_cooling_on)then
+    if(atomic_cooling_on.or.chimes_on)then
        allocate(atomic_gas_x(11,nleaf));atomic_gas_x=0
     endif
     hydro_state_invalid = .false.
+#ifdef SNRT_CHIMES
+    if(chimes_on.and..not.snrt_chimes_band_enabled())then
+       ierr=chimes_group_binding(snrt_ngroups,snrt_group_edges_ev,snrt_group_mean_energy_ev)
+       if(ierr/=0)hydro_state_invalid=.true.
+    endif
+#endif
 #ifdef DUST_LIVE
     allocate(dust_relative_abundance(nleaf), dust_heat_capacity(nleaf), &
          dust_old_energy(nleaf), dust_old_temperature(nleaf), &
@@ -602,10 +669,36 @@ contains
        allocate(dust_cell_u(snrt_dust_contract_number_temperature,nleaf),dust_cell_area(nleaf))
        dust_cell_u=0;dust_cell_area=0
     endif
+    if(dust_pah_enabled())then
+       call pah_live_prepare(ierr)
+       if(ierr/=0)hydro_state_invalid=.true.
+       allocate(pah_number(dust_pah_nstate(),nleaf),pah_primary_energy(snrt_ngroups,nleaf))
+       do i=1,nleaf
+          block
+            integer::k
+            do k=1,dust_pah_nstate()
+               pah_number(k,i)=uold(leaf_cell(i),idust_pah+k-1)*scale_d/dust_pah_state_mass(k)
+            enddo
+          end block
+       enddo
+       pah_primary_energy=0
+    endif
+    if(dust_sublimation_rt_enabled())then
+       allocate(sublimation_bins(4,nleaf),sublimation_next(4,nleaf))
+       do i=1,nleaf
+          sublimation_bins(:,i)=uold(leaf_cell(i),idust_bins:idust_bins+3)*scale_d
+       enddo
+    endif
     if(dust_optics_enabled())then
-       allocate(dust_weights(4,nleaf),dust_primary_sigma(snrt_ngroups,nleaf),dust_scatter_sigma(snrt_ngroups,nleaf))
+       dust_nb=merge(6,4,dust_iron_enabled())
+       allocate(dust_weights(dust_nb,nleaf),dust_primary_sigma(snrt_ngroups,nleaf),dust_scatter_sigma(snrt_ngroups,nleaf))
        dust_weights=.25d0;dust_primary_sigma=0;dust_scatter_sigma=0
-       call d03_opacity_basis(snrt_dust_contract_mass_per_h_g,d03_pa,d03_ps,d03_pg,d03_ia,d03_isc,d03_ig,ierr)
+       if(dust_iron_enabled())then
+          call fe_six_opacity_basis(snrt_dust_contract_mass_per_h_g,d03_pa,d03_ps,d03_pg,d03_ia,d03_isc,d03_ig,ierr)
+       else
+          call d03_opacity_basis(snrt_dust_contract_mass_per_h_g,d03_pa(:,1:4),d03_ps(:,1:4),d03_pg(:,1:4), &
+               d03_ia(:,1:4),d03_isc(:,1:4),d03_ig(:,1:4),ierr)
+       endif
        if(ierr/=0.or.snrt_ngroups/=d03_ng)hydro_state_invalid=.true.
     endif
 #endif
@@ -649,10 +742,25 @@ contains
        rho_level(i) = rho_code
        h_number_code(i)=rho_code
        he_number_code(i)=rho_code*snrt_nhelium_per_hydrogen
-       if(atomic_cooling_on.and.rho_code>0)then
+       if((atomic_cooling_on.or.chimes_on).and.rho_code>0)then
           call dust_gas_elements(uold(icell,ichem:ichem+10), &
                uold(icell,idust_species:idust_species+1),atomic_gas_x(:,i),ierr)
+#ifdef DUST_LIVE
+          if(dust_iron_enabled())call dust_gas_elements(uold(icell,ichem:ichem+10), &
+               uold(icell,idust_species:idust_species+1),atomic_gas_x(:,i),ierr, &
+               sum(uold(icell,idust_iron:idust_iron+1)))
+#endif
           if(ierr/=0)hydro_state_invalid=.true.
+#ifdef DUST_LIVE
+          if(dust_pah_enabled())then
+             pah_solid_hc=dust_pah_inventory(uold(icell,idust_pah:idust_pah+dust_pah_nstate()-1))
+             solid_fe=0
+             if(dust_iron_enabled())solid_fe=sum(uold(icell,idust_iron:idust_iron+1))
+             call dust_gas_elements(uold(icell,ichem:ichem+10),uold(icell,idust_species:idust_species+1), &
+                  atomic_gas_x(:,i),ierr,solid_fe,pah_solid_hc)
+             if(ierr/=0)hydro_state_invalid=.true.
+          endif
+#endif
           atomic_gas_x(:,i)=atomic_gas_x(:,i)/rho_code
           h_number_code(i)=rho_code*scale_d*atomic_gas_x(1,i)/(atomic_mh*scale_nH)
           he_number_code(i)=rho_code*scale_d*atomic_gas_x(2,i)/(4*atomic_mh*scale_nH)
@@ -670,13 +778,25 @@ contains
             size(uold,2) >= idust_energy) then
           dust_mass_code = uold(icell,idust)
           dust_energy_code = uold(icell,idust_energy)
+          solid_fe=0
+          if(dust_iron_enabled())solid_fe=sum(uold(icell,idust_iron:idust_iron+1))
           if(dust_optics_enabled())then
-             call d03_cell_weights(uold(icell,idust_bins:idust_bins+3),dust_weights(:,i),ierr)
+             if(dust_iron_enabled())then
+                call iron_compare_weights([uold(icell,idust_bins:idust_bins+3),uold(icell,idust_iron:idust_iron+1)], &
+                     dust_weights(:,i),dust_cell_area(i),snrt_dust_contract_mass_per_h_g,ierr)
+             else
+                call d03_cell_weights(uold(icell,idust_bins:idust_bins+3),dust_weights(:,i),ierr)
+             endif
              if(ierr/=0)hydro_state_invalid=.true.
-             dust_primary_sigma(:,i)=matmul(d03_pa,dust_weights(:,i))
-             dust_scatter_sigma(:,i)=matmul(d03_ps-d03_pg,dust_weights(:,i))
+             dust_primary_sigma(:,i)=matmul(d03_pa(:,1:dust_nb),dust_weights(:,i))
+             dust_scatter_sigma(:,i)=matmul(d03_ps(:,1:dust_nb)-d03_pg(:,1:dust_nb),dust_weights(:,i))
           endif
-          if(dust_material_composition_enabled())then
+          if(dust_iron_enabled())then
+             call iron_compare_curve(snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature), &
+                  uold(icell,idust_species:idust_species+1),solid_fe, &
+                  snrt_dust_contract_mass_per_h_g,dust_cell_u(:,i),ierr)
+             if(ierr/=0)hydro_state_invalid=.true.
+          else if(dust_material_composition_enabled())then
              call dust_composition_curve(snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature), &
                   uold(icell,idust_species:idust_species+1),snrt_dust_contract_mass_per_h_g,dust_cell_u(:,i),ierr)
              if(ierr/=0)hydro_state_invalid=.true.
@@ -703,7 +823,10 @@ contains
                    ! Legacy argument retained for ABI; not a physical capacity
                    ! in v4. The IR solver uses density*U(T) instead.
                    dust_heat_capacity(i)=1d0
-                   if(dust_material_composition_enabled())then
+                   if(dust_iron_enabled().or.dust_pah_enabled())then
+                      call iron_compare_temperature(uold(icell,idust_species:idust_species+1),solid_fe, &
+                           dust_energy_code*scale_v**2,dust_old_temperature(i),ierr)
+                   else if(dust_material_composition_enabled())then
                       call snrt_dust_material_temperature( &
                            snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature), &
                            dust_cell_u(:,i),dust_old_energy(i)/(dust_n_hydrogen_cm3(i)*dust_relative_abundance(i)), &
@@ -762,7 +885,10 @@ contains
           if (rho_code > 0.0d0 .and. level_thermal(i) > 0.0d0 .and. &
                all(ieee_is_finite(uold(icell,2:ndim+1)))) then
              kinetic_energy = 0.5d0 * sum(uold(icell,2:ndim+1)**2) / rho_code
-             internal_energy = level_thermal(i) - kinetic_energy
+#ifdef DUST_LIVE
+             if(dust_relative_motion)kinetic_energy=dust_phase_kinetic(uold(icell,:))
+#endif
+             internal_energy = level_thermal(i) - kinetic_energy-magnetic_energy(uold(icell,:))
 #if NENER>0
              internal_energy=internal_energy-sum(uold(icell,inener:inener+NENER-1))
 #endif
@@ -775,6 +901,10 @@ contains
                   atomic_temperature(rho_code*scale_d,atomic_gas_x(:,i), &
                   [hydrogen_ionized_fraction,helium_ionized_fraction,helium_double_ionized_fraction], &
                   gamma,internal_energy*scale_d*scale_v**2)
+#ifdef SNRT_CHIMES
+             if(chimes_on.and.internal_energy>0)temperature_level(i)=internal_energy*scale_d*scale_v**2/ &
+                  chimes_live_capacity(uold(icell,ichimes:ichimes+chimes_ns-1),scale_d)
+#endif
           end if
        end if
        neutral_hydrogen_code = h_number_code(i) * (1.0d0-hydrogen_ionized_fraction)
@@ -782,6 +912,8 @@ contains
             (1.0d0-helium_ionized_fraction-helium_double_ionized_fraction)
        neutral_helium_ii_code = he_number_code(i) * &
             helium_ionized_fraction
+       if(band_on)species_columns(i,:)=[neutral_hydrogen_code,neutral_helium_i_code,neutral_helium_ii_code]* &
+            (scale_nH*snrt_c_cgs*reduced_c*dt_s)
        available_species_transport(i,1) = real(max(0.0d0, neutral_hydrogen_code), c_float)
        available_species_transport(i,2) = real(max(0.0d0, neutral_helium_i_code), c_float)
        available_species_transport(i,3) = real(max(0.0d0, neutral_helium_ii_code), c_float)
@@ -805,6 +937,14 @@ contains
        optical_depth_species(i,:,2) = optical_depth_helium_i(i,:)
        optical_depth_species(i,:,3) = optical_depth_helium_ii(i,:)
     end do
+    if(chimes_on)then
+       ! The full native receiver owns ALL atomic and molecular absorption.
+       ! Transport still handles dust absorption/scattering; never apply a
+       ! second H/He photon sink or the legacy secondary/recombination step.
+       optical_depth=0;optical_depth_species=0
+       optical_depth_hydrogen=0;optical_depth_helium_i=0;optical_depth_helium_ii=0
+       if(band_on)species_columns=0
+    endif
 #ifdef DUST_LIVE
     call snrt_dust_prepare_cell_optical_depth(dust_n_hydrogen_cm3, dust_path_cm, &
          dust_relative_abundance, snrt_dust_contract_absorption_per_h_cm2(1:snrt_ngroups), &
@@ -814,12 +954,35 @@ contains
           dust_tau_dp(i,:)=dust_n_hydrogen_cm3(i)*dust_path_cm(i)*dust_relative_abundance(i)*dust_primary_sigma(:,i)
        enddo
     endif
+    dust_receiver_abundance=dust_relative_abundance
+    if(dust_pah_enabled().and.allocated(pah_primary_sigma))then
+       do i=1,nleaf
+          pah_n=sum(pah_number(:,i))
+          ! Sum physical opacities before the ONE primary photon debit.
+          ! A PAH-bearing cell need not contain bulk grains. Bulk opacity,
+          ! collision area and IR mass normalization remain bulk-only.
+          dust_tau_dp(i,:)=dust_tau_dp(i,:)+dust_path_cm(i)*pah_primary_alpha(pah_number(:,i))
+          ! This deferred receiver checks only absence/presence, never uses
+          ! this value as a material mass, opacity or heat capacity.
+          if(pah_n>0) dust_receiver_abundance(i)=max(dust_receiver_abundance(i),1d0)
+       enddo
+    endif
     if (ierr /= 0 .or. any(.not. ieee_is_finite(dust_tau_dp)) .or. &
          any(dust_tau_dp < 0.0d0)) then
        hydro_state_invalid = .true.
        dust_tau_dp = 0.0d0
     end if
     optical_depth_dust = real(dust_tau_dp, c_float)
+    if(allocated(grain_columns))then
+       do i=1,nleaf
+          grain_columns(i,1:4)=uold(leaf_cell(i),idust_bins:idust_bins+3)*scale_d*dust_path_cm(i)
+          if(snrt_fe_band_enabled()) &
+               grain_columns(i,5:6)=uold(leaf_cell(i),idust_iron:idust_iron+1)*scale_d*dust_path_cm(i)
+       enddo
+       ! The native node operator owns grain extinction. Legacy group tau
+       ! remains exactly zero and must not supply a second opacity sink.
+       optical_depth_dust=0
+    endif
 #endif
     t_nlte = omp_get_wtime() - wall_start
 
@@ -907,7 +1070,8 @@ contains
     ! provided by this routine.
     call snrt_transaction_begin(transaction, snrt_intensity, leaf_slot, &
          snrt_hydrogen_ii, snrt_helium_ii, snrt_helium_iii, &
-         snrt_neutral_fraction, level_thermal, transaction_status)
+         snrt_neutral_fraction, level_thermal, transaction_status, &
+         persistent_energy_shift=snrt_energy_shift,group_mean_energy_ev=snrt_group_mean_energy_ev)
     transaction_active = transaction%active
     local_transaction_failure = snrt_failure_none
     if (transaction_status /= 0) local_transaction_failure = snrt_failure_transport
@@ -918,7 +1082,7 @@ contains
     if (global_transaction_failure /= snrt_failure_none) then
        if (transaction_active) call snrt_transaction_restore(transaction, snrt_intensity, &
             leaf_slot, snrt_hydrogen_ii, snrt_helium_ii, snrt_helium_iii, &
-            snrt_neutral_fraction, level_thermal, transaction_status)
+            snrt_neutral_fraction, level_thermal, transaction_status,persistent_energy_shift=snrt_energy_shift)
        if (myid == 1) write(*,'(A,A,A,I0)') &
             ' SNRT RT transaction could not start: class=', &
             trim(snrt_transaction_failure_name(global_transaction_failure)), &
@@ -952,6 +1116,7 @@ contains
     ! feedback indtab marker (which was already advanced). Birth mass/epoch
     ! are carried by the native stellar particle and HDF5 particle payload.
     if(stellar_sed_enabled)then
+       if(stellar_sed_has_energy)allocate(stellar_energy(snrt_ngroups),stellar_injection_mean(snrt_ngroups))
        local_transaction_failure=snrt_failure_none
        if(.not.present(step_start_proper))then
           local_transaction_failure=snrt_failure_transport
@@ -964,8 +1129,9 @@ contains
                 if(ptypep(ipart)==PTYPE_STAR)then
                    call stellar_photon_interval((step_start_proper-tpp(ipart))*stellar_time_scale, &
                         (texp-tpp(ipart))*stellar_time_scale,zp(ipart), &
-                        mp0(ipart)*scale_d*scale_l**3/1.98847d33,stellar_photons,ierr)
+                        mp0(ipart)*scale_d*scale_l**3/1.98847d33,stellar_photons,ierr,energy_ev=stellar_energy)
                    if(ierr/=0)then
+                      write(*,*)'SNRT stellar interval rejected: rank, code, Z, initial mass=',myid,ierr,zp(ipart),mp0(ipart)
                       local_transaction_failure=snrt_failure_transport
                    else if(any(stellar_photons>0d0))then
                       call snrt_agn_find_local_leaf(xp(ipart,1:ndim),icell,ilevel_found,igrid,ilevel)
@@ -974,9 +1140,24 @@ contains
                       if(islot<=0)then
                          local_transaction_failure=snrt_failure_transport
                       else
+                         if(paired_transport)then
+                         if(stellar_sed_has_energy)then
+                            stellar_injection_mean=snrt_group_mean_energy_ev
+                            where(stellar_photons>0d0)stellar_injection_mean=stellar_energy/stellar_photons
+                         endif
+                         call snrt_agn_deposit_transaction(snrt_intensity,islot,stellar_photons, &
+                              cell_volume_code,scale_l,scale_nH,angular_weight,deposited_density,ierr, &
+                              persistent_energy_shift=snrt_energy_shift,group_mean_energy_ev=snrt_group_mean_energy_ev, &
+                              quantize_source=band_on,source_mean_energy_ev=stellar_injection_mean)
+                         else
                          call snrt_agn_deposit_transaction(snrt_intensity,islot,stellar_photons, &
                               cell_volume_code,scale_l,scale_nH,angular_weight,deposited_density,ierr)
-                         if(ierr/=0)local_transaction_failure=snrt_failure_transport
+                         endif
+                         if(ierr/=0)then
+                            write(*,*)'SNRT stellar deposition rejected: rank, code, min/max photons=', &
+                                 myid,ierr,minval(stellar_photons),maxval(stellar_photons)
+                            local_transaction_failure=snrt_failure_transport
+                         endif
                          if(ierr==0)n_active_sources=n_active_sources+1
                       endif
                    endif
@@ -989,7 +1170,8 @@ contains
             global_transaction_failure,global_transaction_converged,global_transaction_residual,convergence_status)
        if(global_transaction_failure/=snrt_failure_none.or.convergence_status/=0)then
           call snrt_transaction_restore(transaction,snrt_intensity,leaf_slot,snrt_hydrogen_ii, &
-               snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status)
+               snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status, &
+               persistent_energy_shift=snrt_energy_shift)
           if(myid==1)write(*,*)'SNRT stellar source rejected: age/Z coverage, birth mass or local ownership'
           call clean_stop
           return
@@ -1032,9 +1214,16 @@ contains
                 end do
                 if (source_ok) then
                    wall_sub = omp_get_wtime()
+                   if(paired_transport)then
+                   call snrt_agn_deposit_transaction(snrt_intensity,islot,emitted_groups, &
+                        cell_volume_code,scale_l,scale_nH,angular_weight,deposited_density,ierr, &
+                        persistent_energy_shift=snrt_energy_shift,group_mean_energy_ev=snrt_group_mean_energy_ev, &
+                        quantize_source=band_on)
+                   else
                    call snrt_agn_deposit_transaction(snrt_intensity, islot, &
                         emitted_groups, cell_volume_code, scale_l, scale_nH, &
                         angular_weight, deposited_density, ierr)
+                   endif
                    t_deposit = t_deposit + omp_get_wtime() - wall_sub
                    if (ierr /= 0) source_ok = .false.
                 end if
@@ -1070,7 +1259,8 @@ contains
          global_transaction_failure,global_transaction_converged,global_transaction_residual,convergence_status)
     if(global_transaction_failure/=snrt_failure_none.or.convergence_status/=0)then
        call snrt_transaction_restore(transaction,snrt_intensity,leaf_slot,snrt_hydrogen_ii, &
-            snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status)
+            snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status, &
+            persistent_energy_shift=snrt_energy_shift)
        if(myid==1)write(*,*)'SNRT AGN source failed: invalid budget/deposition or duplicate MPI owner'
        call clean_stop
        return
@@ -1082,9 +1272,38 @@ contains
     ! photons staged above.  Its snapshot predates source injection, so every
     ! coupled rollback restores both the pre-source RT state and the pending
     ! AGN event marker.
+    allocate(incoming_energy_shift(snrt_ndirection,snrt_ngroups,nleaf), &
+         trial_energy_shift(snrt_ndirection,snrt_ngroups,nleaf), &
+         coarse_energy_shift(snrt_ndirection,snrt_ngroups,size(snrt_intensity,3)))
+    trial_energy_shift=0;coarse_energy_shift=0
+    if(paired_transport)allocate(hhe_energy(nleaf,snrt_ngroups,3), &
+         absorbed_dust_energy_ev(nleaf,snrt_ngroups),dust_energy_moment(nleaf,snrt_ngroups,3))
+    if(snrt_node_secondaries_enabled())allocate(secondary_xi(nleaf),band_deposition(nleaf,8))
+#ifdef DUST_LIVE
+    if(dust_relative_motion)then
+       allocate(phase_rows(nvar,nleaf),phase_mass(ndust_phase,nleaf), &
+            phase_pold(3,ndust_phase,nleaf),phase_pnext(3,ndust_phase,nleaf),primary_heat(snrt_ngroups,nleaf), &
+            phase_ir_work(ndust_phase,nleaf))
+       phase_ir_work=0
+       if(dust_pah_enabled())allocate(primary_pah_heat(snrt_ngroups,nleaf),primary_pah_captures(snrt_ngroups,nleaf))
+       do i=1,nleaf
+          block
+            real(dp)::gas_mass,gas_momentum(3),kinetic
+            phase_rows(:,i)=uold(leaf_cell(i),:)
+            call dust_phase_read(phase_rows(:,i),phase_mass(:,i),phase_pold(:,:,i), &
+                 gas_mass,gas_momentum,kinetic,ierr)
+            if(ierr/=0)then
+               call clean_stop;return
+            endif
+          end block
+       enddo
+       phase_mass=phase_mass*scale_d;phase_pold=phase_pold*(scale_d*scale_v)
+    endif
+#endif
     do i = 1, nleaf
        do igroup = 1, snrt_ngroups
           incoming_intensity(:,igroup,i) = snrt_intensity(:,igroup,leaf_slot(i))
+          incoming_energy_shift(:,igroup,i)=snrt_energy_shift(:,igroup,leaf_slot(i))
        end do
     end do
 
@@ -1125,23 +1344,128 @@ contains
        dust_trial_temperature = dust_old_temperature
 #endif
        wall_sub = omp_get_wtime()
+       if(allocated(secondary_xi))secondary_xi=start_hydrogen_ii
+       if(paired_transport)then
+          call snrt_transport_absorb_multigroup_prepared_dust_trial(leaf_slot, neighbor, &
+               cdt_over_dx, iteration_tau, iteration_species_tau, optical_depth_dust, &
+               available_species_transport, incoming_intensity, trial_intensity, &
+               coarse_flux_trial, raw_group, absorbed_hhe_group_species, &
+               absorbed_dust_group, returned_group, absorbed_group, ierr, leaf_cell, ilevel, &
+               incoming_shift=incoming_energy_shift,trial_shift=trial_energy_shift,coarse_shift=coarse_energy_shift, &
+               absorbed_hhe_energy=hhe_energy,absorbed_dust_energy=absorbed_dust_energy_ev, &
+               dust_energy_moment=dust_energy_moment,species_columns=species_columns, &
+               secondary_xi=secondary_xi,band_deposition=band_deposition,grain_columns=grain_columns)
+       else
        call snrt_transport_absorb_multigroup_prepared_dust_trial(leaf_slot, neighbor, &
             cdt_over_dx, iteration_tau, iteration_species_tau, optical_depth_dust, &
             available_species_transport, incoming_intensity, trial_intensity, &
             coarse_flux_trial, raw_group, absorbed_hhe_group_species, &
             absorbed_dust_group, returned_group, absorbed_group, ierr, leaf_cell, ilevel)
+       endif
        if(ierr/=0)write(*,*)'SNRT transport failure: rank=',myid,' level=',ilevel,' code=',ierr
 #ifdef DUST_LIVE
        ! Lie split after transport/absorption, rebuilt from the same incoming
        ! state on every nonlinear trial. Scatter only owned leaves; each group
        ! conserves photons/energy locally and adds no absorption/heating ledger.
-       if (ierr==0.and.snrt_dust_contract_scattering_enabled) &
+       if(ierr==0.and.dust_relative_motion)then
+          phase_pnext=phase_pold;primary_heat=0
+          if(allocated(primary_pah_heat))then
+             primary_pah_heat=0;primary_pah_captures=0
+          endif
+          do i=1,nleaf
+             block
+               real(dp)::sigma(snrt_ngroups,ndust_phase),fractions(snrt_ngroups,ndust_phase)
+               real(dp)::impulse(3,snrt_ngroups),kick(3),velocity(3),heat(snrt_ngroups),work(ndust_phase)
+               real(dp)::tau(ndust_phase,snrt_ngroups),number(snrt_ndirection,snrt_ngroups)
+               real(dp)::radiation_energy(snrt_ndirection,snrt_ngroups),total_sigma,ke_change
+               integer::b,g,k
+               sigma=0;fractions=0;tau=0
+               do b=1,dust_nb
+                  sigma(:,b)=d03_pa(:,b)*phase_mass(b,i)/snrt_dust_contract_mass_per_h_g
+                  tau(b,:)=(d03_ps(:,b)-d03_pg(:,b))*phase_mass(b,i)/ &
+                       snrt_dust_contract_mass_per_h_g*snrt_c_cgs*reduced_c*dt_s
+               enddo
+               if(dust_pah_enabled())sigma(:,ndust_phase)=sum(pah_number(:,i))*pah_primary_sigma
+               do g=1,snrt_ngroups
+                  total_sigma=sum(sigma(g,:))
+                  if(total_sigma>0)fractions(g,:)=sigma(g,:)/total_sigma
+                  if(total_sigma==0.and.absorbed_dust_energy_ev(i,g)>0)ierr=1
+               enddo
+               if(ierr/=0)exit
+               ke_change=0
+               do b=1,ndust_phase
+                  if(phase_mass(b,i)==0)cycle
+                  do g=1,snrt_ngroups
+                     impulse(:,g)=dust_energy_moment(i,g,:)*fractions(g,b)*scale_nH*snrt_ev_to_erg/snrt_c_cgs
+                  enddo
+                  kick=sum(impulse,dim=2)
+                  velocity=(phase_pold(:,b,i)+.5d0*kick)/phase_mass(b,i)
+                  if(sqrt(sum(velocity**2))>.01d0*snrt_c_cgs)then
+                     ierr=1;exit
+                  endif
+                  heat=absorbed_dust_energy_ev(i,:)*fractions(:,b)*scale_nH*snrt_ev_to_erg- &
+                       matmul(velocity,impulse)
+                  if(any(.not.ieee_is_finite(heat)).or.any(heat<0))then
+                     ierr=1;exit
+                  endif
+                  phase_pnext(:,b,i)=phase_pold(:,b,i)+kick
+                  ke_change=ke_change+dot_product(velocity,kick)
+                  primary_heat(:,i)=primary_heat(:,i)+heat
+                  if(dust_pah_enabled().and.b==ndust_phase)then
+                     primary_pah_heat(:,i)=heat
+                     primary_pah_captures(:,i)=real(absorbed_dust_group(i,:),dp)*scale_nH*fractions(:,b)
+                  endif
+               enddo
+               if(ierr/=0)exit
+               if(snrt_dust_contract_scattering_enabled)then
+                  number=real(trial_intensity(:,:,i),dp)*scale_nH
+                  do g=1,snrt_ngroups
+                     radiation_energy(:,g)=(real(trial_intensity(:,g,i),dp)*snrt_group_mean_energy_ev(g)+ &
+                          trial_energy_shift(:,g,i))*scale_nH*snrt_ev_to_erg
+                  enddo
+                  work=0
+                  call snrt_moving_scatter_cell(number,radiation_energy,phase_pnext(:,:,i), &
+                       phase_mass(:,i),tau,transpose(direction_dp),angular_weight,snrt_c_cgs,work,ierr)
+                  if(ierr/=0)exit
+                  trial_intensity(:,:,i)=real(number/scale_nH,c_float)
+                  do g=1,snrt_ngroups
+                     trial_energy_shift(:,g,i)=radiation_energy(:,g)/(scale_nH*snrt_ev_to_erg)- &
+                          snrt_group_mean_energy_ev(g)*real(trial_intensity(:,g,i),dp)
+                  enddo
+                  ke_change=ke_change+sum(work)
+               endif
+               phase_rows(:,i)=uold(leaf_cell(i),:)
+               phase_rows(2:4,i)=phase_rows(2:4,i)+sum(phase_pnext(:,:,i)-phase_pold(:,:,i),dim=2)/(scale_d*scale_v)
+               do b=1,ndust_phase
+                  k=idust_momentum+3*(b-1);phase_rows(k:k+2,i)=phase_pnext(:,b,i)/(scale_d*scale_v)
+               enddo
+               phase_rows(5,i)=phase_rows(5,i)+ke_change/(scale_d*scale_v**2)
+               trial_thermal(i)=trial_thermal(i)+ke_change/(scale_d*scale_v**2)
+             end block
+          enddo
+       endif
+       if (ierr==0.and.snrt_dust_contract_scattering_enabled.and..not.dust_relative_motion.and. &
+            .not.snrt_d03_band_enabled()) &
             call snrt_runtime_isotropic_scatter(trial_intensity,angular_weight, &
             dust_n_hydrogen_cm3*dust_relative_abundance, &
             snrt_dust_contract_scattering_per_h_cm2(1:snrt_ngroups), &
             snrt_c_cgs*reduced_c*dt_s,ierr,dust_scatter_sigma)
 #endif
        t_transport = t_transport + omp_get_wtime() - wall_sub
+#ifdef DUST_LIVE
+       if(dust_pah_enabled().and.ierr==0)then
+          do i=1,nleaf
+             if(sum(pah_number(:,i))<=0)cycle
+             do igroup=1,snrt_ngroups
+                if(snrt_dust_contract_absorption_mean_energy_ev(igroup)<=pah_max_primary_ev)cycle
+                ! A zero unsupported PAH coefficient is a rejection mask,
+                ! NOT permission to propagate hard light through PAH-only
+                ! cells as if those grains were physically transparent.
+                if(any(trial_intensity(:,igroup,i)>0).or.absorbed_dust_group(i,igroup)>0)ierr=1
+             enddo
+          enddo
+       endif
+#endif
        if (ierr /= 0) then
           local_transaction_failure = snrt_failure_transport
           write(*,*)'SNRT transport/scatter failure: rank=',myid,' code=',ierr
@@ -1171,11 +1495,26 @@ contains
                      real(absorbed_dust_group(i,igroup),dp) * scale_nH
              end do
           end do
+          if(snrt_d03_band_enabled())then
+          call snrt_dust_receiver_stage(dust_absorbed_photons, &
+               snrt_dust_contract_absorption_mean_energy_ev(1:snrt_ngroups),dt_s, &
+               dust_receiver_abundance,dust_heat_capacity,dust_old_energy,dust_old_temperature, &
+               dust_trial_energy,dust_trial_temperature,dust_absorbed_energy,ierr, &
+               defer_temperature=.true., &
+               deposited_spectrum_erg_cm3=transpose(absorbed_dust_energy_ev)*scale_nH*snrt_ev_to_erg)
+          else if(.not.dust_relative_motion)then
           call snrt_dust_receiver_stage(dust_absorbed_photons, &
                snrt_dust_contract_absorption_mean_energy_ev(1:snrt_ngroups), dt_s, &
-               dust_relative_abundance, dust_heat_capacity, dust_old_energy, &
+               dust_receiver_abundance, dust_heat_capacity, dust_old_energy, &
                dust_old_temperature, dust_trial_energy, dust_trial_temperature, &
                dust_absorbed_energy, ierr, defer_temperature=snrt_dust_contract_version==4)
+          else
+          call snrt_dust_receiver_stage(dust_absorbed_photons, &
+               snrt_dust_contract_absorption_mean_energy_ev(1:snrt_ngroups),dt_s, &
+               dust_receiver_abundance,dust_heat_capacity,dust_old_energy,dust_old_temperature, &
+               dust_trial_energy,dust_trial_temperature,dust_absorbed_energy,ierr, &
+               defer_temperature=.true.,deposited_spectrum_erg_cm3=primary_heat)
+          endif
           if (ierr /= 0) local_transaction_failure = snrt_failure_receiver
        end if
 #endif
@@ -1186,6 +1525,7 @@ contains
              icell = leaf_cell(i)
              rho_code = rho_level(i)
              if (rho_code <= 0.0d0) cycle
+             if(chimes_on)cycle
              ! With no absorbed photons this bundle has no local chemistry
              ! source to advance.  Do not reject an otherwise untouched cell
              ! merely because its hydro internal-energy reconstruction cannot
@@ -1241,11 +1581,45 @@ contains
        n_hydrogen_cm3 = h_number_code(i) * scale_nH
        n_helium_cm3 = n_hydrogen_cm3 * snrt_nhelium_per_hydrogen
        if(atomic_cooling_on)n_helium_cm3=he_number_code(i)*scale_nH
+       cell_excess_ev=excess_energy_ev
+       if(band_on)then
+          block
+            integer::s,g
+            real(dp)::count,mean
+            cell_excess_ev=0
+            do g=1,snrt_ngroups
+               do s=1,3
+                  count=trial_absorbed_species(i,s,g)
+                  if(count==0)then
+                     if(hhe_energy(i,g,s)/=0)local_transaction_failure=snrt_failure_chemistry
+                     cycle
+                  endif
+                  mean=hhe_energy(i,g,s)/count
+                  if(.not.ieee_is_finite(mean).or.mean<band_threshold(s)*(1-8*epsilon(0.0_c_float))) &
+                       local_transaction_failure=snrt_failure_chemistry
+                  cell_excess_ev(s,g)=max(0.0d0,mean-band_threshold(s))
+               enddo
+            enddo
+          end block
+          if(local_transaction_failure/=snrt_failure_none)exit
+       endif
+       if(allocated(band_deposition))then
+          call snrt_thermochemistry_advance_cell(n_hydrogen_cm3,n_helium_cm3, &
+               scale_nH,temperature_level(i),dt_s,start_hydrogen_ii(i),start_helium_ii(i),start_helium_iii(i), &
+               trial_absorbed_species(i,:,:),cell_excess_ev,chemistry_result, &
+               defer_recombination=atomic_cooling_on,band_deposition=band_deposition(i,:))
+          ! Independent absorption-energy closure. Excitation represents
+          ! escaping line energy here, NOT a transported radiation carrier.
+          if(abs(chemistry_result%absorbed_photon_energy_ev_cm3-sum(hhe_energy(i,:,:))*scale_nH)> &
+               2d-12*max(sum(hhe_energy(i,:,:))*scale_nH,tiny(1.0_dp))) &
+               chemistry_result%ierr=snrt_failure_chemistry
+       else
        call snrt_thermochemistry_advance_cell(n_hydrogen_cm3, n_helium_cm3, &
             scale_nH, temperature_level(i), dt_s, start_hydrogen_ii(i), &
             start_helium_ii(i), start_helium_iii(i), &
-            trial_absorbed_species(i,:,:), excess_energy_ev, chemistry_result, &
+            trial_absorbed_species(i,:,:), cell_excess_ev, chemistry_result, &
             defer_recombination=atomic_cooling_on)
+       endif
              if (chemistry_result%ierr /= snrt_thermochemistry_ok .or. &
                   .not. ieee_is_finite(chemistry_result%x_hydrogen_ii) .or. &
                   .not. ieee_is_finite(chemistry_result%x_helium_ii) .or. &
@@ -1277,7 +1651,7 @@ contains
              if(atomic_cooling_on)then
                 block
                   real(dp)::nonthermal,e0,e1,x0(3),x1(3),net_loss
-                  nonthermal=.5d0*sum(uold(icell,2:ndim+1)**2)/rho_code
+                  nonthermal=.5d0*sum(uold(icell,2:ndim+1)**2)/rho_code+magnetic_energy(uold(icell,:))
 #if NENER>0
                   nonthermal=nonthermal+sum(uold(icell,inener:inener+NENER-1))
 #endif
@@ -1362,6 +1736,8 @@ contains
                   max(0.0d0,1.0d0-relaxed_helium_ii(i)-relaxed_helium_iii(i)))
              neutral_helium_ii_code = he_number_code(i) * 0.5d0 * &
                   (start_helium_ii(i) + relaxed_helium_ii(i))
+             if(band_on)target_columns(i,:)=[neutral_hydrogen_code,neutral_helium_i_code,neutral_helium_ii_code]* &
+                  (scale_nH*snrt_c_cgs*reduced_c*dt_s)
              call snrt_nlte_primordial_optical_depth_groups(neutral_hydrogen_code, &
                   neutral_helium_i_code, neutral_helium_ii_code, scale_nH, dt_s, &
                   snrt_group_cross_section_cm2, snrt_group_cross_section_hei_cm2, &
@@ -1375,6 +1751,10 @@ contains
              target_species_tau(i,:,1) = real(max(tau_hi_dp,0.0d0),c_float)
              target_species_tau(i,:,2) = real(max(tau_hei_dp,0.0d0),c_float)
              target_species_tau(i,:,3) = real(max(tau_heii_dp,0.0d0),c_float)
+             if(chimes_on)then
+                target_species_tau(i,:,:)=0
+                if(band_on)target_columns(i,:)=0
+             endif
              target_tau(i,:) = sum(target_species_tau(i,:,:),dim=2) + &
                   optical_depth_dust(i,:)
           end do
@@ -1411,6 +1791,7 @@ contains
        current_fraction(:,2) = current_helium_ii
        current_fraction(:,3) = current_helium_iii
        iteration_species_tau = target_species_tau
+       if(band_on)species_columns=target_columns
        iteration_tau = sum(iteration_species_tau, dim=3) + optical_depth_dust
     end do
 
@@ -1418,7 +1799,7 @@ contains
          .not. transaction_converged .or. global_transaction_converged == 0) then
        if (transaction_active) call snrt_transaction_restore(transaction, snrt_intensity, &
             leaf_slot, snrt_hydrogen_ii, snrt_helium_ii, snrt_helium_iii, &
-            snrt_neutral_fraction, level_thermal, transaction_status)
+            snrt_neutral_fraction, level_thermal, transaction_status,persistent_energy_shift=snrt_energy_shift)
        if (myid == 1) then
           if (global_transaction_failure /= snrt_failure_none) then
              write(*,'(A,A,A,I0,A,I0,A,ES12.4)') &
@@ -1468,6 +1849,141 @@ contains
     ! outside the existing transaction snapshot; they remain untouched until
     ! this collective pre-commit check has passed everywhere.
     local_transaction_failure = snrt_failure_none
+#ifdef SNRT_CHIMES
+    if(chimes_on)then
+       chemical_absorbed_ev=0
+       ! Tables are read-only; cell abundances, rates, CVODE workspaces and
+       ! grain temperature are private to each native call.
+!$omp parallel do default(shared) private(i,icell,ierr,igroup) reduction(+:chemical_absorbed_ev) &
+!$omp reduction(max:local_transaction_failure)
+       do i=1,nleaf
+          block
+            real(dp)::photons(9),next_photons(9),area,nh_code,he_code,fraction,actual(snrt_ndirection),delta_heat
+            real(dp)::ray_number(snrt_ndirection,9),ray_energy(snrt_ndirection,9)
+            real(dp)::next_number(snrt_ndirection,9),next_energy(snrt_ndirection,9),photo_ledger(9)
+            icell=leaf_cell(i)
+            do igroup=1,9
+               ! Source/transport stores direction-INTEGRATED counts, not I.
+               ! Applying quadrature weights again loses photons here.
+               photons(igroup)=sum(real(trial_intensity(:,igroup,i),dp))*scale_nH
+            enddo
+            area=dust_cell_area(i)*dust_relative_abundance(i)
+            if(dust_iron_enabled().or.dust_pah_charged())then
+               call dust_composition_area(uold(icell,idust_bins:idust_bins+3), &
+                    snrt_dust_contract_mass_per_h_g,area,ierr)
+               if(ierr/=0)then
+                  local_transaction_failure=snrt_failure_receiver
+                  cycle
+               endif
+               area=area*sum(uold(icell,idust_species:idust_species+1))*scale_d/ &
+                    (dust_n_hydrogen_cm3(i)*snrt_dust_contract_mass_per_h_g)
+            endif
+            if(snrt_chimes_band_enabled())then
+            ray_number=real(trial_intensity(:,:,i),dp)*scale_nH
+            do igroup=1,9
+               ray_energy(:,igroup)=(snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)+ &
+                    trial_energy_shift(:,igroup,i))*scale_nH
+            enddo
+            call chimes_live_band_stage(icell,scale_d,scale_v,dt_s,dx_code*scale_l,dust_old_temperature(i), &
+                 reduced_c,snrt_ndirection,ray_number,ray_energy,chemical_trial(:,i),trial_thermal(i), &
+                 next_number,next_energy,photo_ledger,ierr)
+            else if(dust_relative_motion)then
+            call chimes_live_stage(icell,scale_d,scale_v,dt_s,dx_code*scale_l,dust_old_temperature(i), &
+                 area,reduced_c,photons,chemical_trial(:,i),trial_thermal(i),next_photons,ierr,staged_row=phase_rows(:,i))
+            else
+            call chimes_live_stage(icell,scale_d,scale_v,dt_s,dx_code*scale_l,dust_old_temperature(i), &
+                 area,reduced_c,photons,chemical_trial(:,i),trial_thermal(i),next_photons,ierr)
+            endif
+            if(ierr/=0)then
+               local_transaction_failure=snrt_failure_chemistry
+               cycle
+            endif
+            nh_code=h_number_code(i)*scale_nH*atomic_mh/scale_d
+            he_code=he_number_code(i)*scale_nH*atomic_mh/scale_d
+            trial_hydrogen_ii(i)=chemical_trial(3,i)/nh_code
+            ! Preserve the legacy checkpoint complement field. In this mode
+            ! true HI and molecular hydrogen are in the 157 passive species;
+            ! this compatibility value must not be used as a HI opacity.
+            trial_neutral_hydrogen(i)=1d0-trial_hydrogen_ii(i)
+            trial_helium_ii(i)=0;trial_helium_iii(i)=0
+            if(he_code>0)then
+               trial_helium_ii(i)=chemical_trial(6,i)/he_code
+               trial_helium_iii(i)=chemical_trial(7,i)/he_code
+            endif
+            if(snrt_chimes_band_enabled())then
+               ! Transported N is FP32; store the actual outgoing FP64 E,
+               ! rebased to the rounded N, not a uniform group attenuation.
+               trial_intensity(:,:,i)=real(next_number/scale_nH,c_float)
+               do igroup=1,9
+                  trial_energy_shift(:,igroup,i)=next_energy(:,igroup)/scale_nH- &
+                       snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)
+               enddo
+               chemical_absorbed_ev=chemical_absorbed_ev+photo_ledger(7)*cell_volume_code*scale_l**3
+            else
+            do igroup=1,9
+               if(dust_relative_motion.and.photons(igroup)>0)then
+                  fraction=next_photons(igroup)/photons(igroup)
+                  actual=snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)+ &
+                       trial_energy_shift(:,igroup,i)
+                  ! Frozen group-grey reaction tables retain their reference
+                  ! yields. Split off the actual-minus-reference energy of
+                  ! accepted captures; this is not a second photon debit.
+                  delta_heat=(1-fraction)*sum(trial_energy_shift(:,igroup,i))*scale_nH*snrt_ev_to_erg
+                  trial_thermal(i)=trial_thermal(i)+delta_heat/(scale_d*scale_v**2)
+                  chemical_absorbed_ev=chemical_absorbed_ev+delta_heat/snrt_ev_to_erg*cell_volume_code*scale_l**3
+                  trial_intensity(:,igroup,i)=real(real(trial_intensity(:,igroup,i),dp)*fraction,c_float)
+                  trial_energy_shift(:,igroup,i)=actual*fraction- &
+                       snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)
+                  cycle
+               endif
+               if(photons(igroup)>0)trial_intensity(:,igroup,i)=real( &
+                    real(trial_intensity(:,igroup,i),dp)*next_photons(igroup)/photons(igroup),c_float)
+            enddo
+            chemical_absorbed_ev=chemical_absorbed_ev+ &
+                 sum((photons-next_photons)*snrt_group_mean_energy_ev)*cell_volume_code*scale_l**3
+            endif
+            if(dust_relative_motion)then
+               delta_heat=trial_thermal(i)-dust_phase_kinetic(phase_rows(:,i))
+#if NENER>0
+               delta_heat=delta_heat-sum(phase_rows(inener:inener+NENER-1,i))
+#endif
+               if(.not.ieee_is_finite(delta_heat).or.delta_heat<=0) &
+                    local_transaction_failure=snrt_failure_chemistry
+            endif
+          end block
+       enddo
+!$omp end parallel do
+       call snrt_transaction_reduce_decision(local_transaction_failure,1,0d0,global_transaction_failure, &
+            global_transaction_converged,global_transaction_residual,convergence_status)
+       if(global_transaction_failure/=snrt_failure_none.or.convergence_status/=0)then
+          if(transaction_active)call snrt_transaction_restore(transaction,snrt_intensity,leaf_slot, &
+               snrt_hydrogen_ii,snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status, &
+               persistent_energy_shift=snrt_energy_shift)
+          if(myid==1)write(*,*)'ERROR: native CHIMES trial rejected; RT/chemistry not committed'
+          call clean_stop
+          return
+       endif
+       call snrt_transaction_reduce_sum(chemical_absorbed_ev,global_unassigned_absorption,convergence_status)
+       if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_PRIMARY_ABSORBED_EV=',global_unassigned_absorption
+    endif
+#endif
+    if(dust_iron_enabled().and..not.snrt_fe_band_enabled())then
+       do i=1,nleaf
+          if(sum(uold(leaf_cell(i),idust_iron:idust_iron+1))<=0)cycle
+          if(any(dust_absorbed_photons(:,i)>0.and. &
+               snrt_dust_contract_absorption_mean_energy_ev(1:snrt_ngroups)>dust_fe_max_primary_ev)) &
+               local_transaction_failure=snrt_failure_receiver
+       enddo
+       call snrt_transaction_reduce_decision(local_transaction_failure,1,0d0,global_transaction_failure, &
+            global_transaction_converged,global_transaction_residual,convergence_status)
+       if(global_transaction_failure/=snrt_failure_none.or.convergence_status/=0)then
+          if(transaction_active)call snrt_transaction_restore(transaction,snrt_intensity,leaf_slot, &
+               snrt_hydrogen_ii,snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status, &
+               persistent_energy_shift=snrt_energy_shift)
+          if(myid==1)write(*,*)'ERROR: Fe comparison primary absorption exceeds 4 eV; no trial committed'
+          call clean_stop;return
+       endif
+    endif
     if(snrt_dust_contract_version>=3)then
              ! Start from the pre-primary material energy and inject exactly
              ! the accepted primary absorption. Receiver-stage energy already
@@ -1476,13 +1992,34 @@ contains
              ! normalized direction and therefore requires weights summing 1.
              ! Stage validates faces and reduces errors collectively before
              ! halo exchange. Never skip this call on a rank-local condition.
+       if(dust_pah_enabled())then
+          do i=1,snrt_ngroups
+             pah_primary_energy(i,:)=dust_absorbed_photons(i,:)* &
+                  snrt_dust_contract_absorption_mean_energy_ev(i)*snrt_ev_to_erg
+          enddo
+          if(dust_relative_motion)pah_primary_energy=primary_heat
+       endif
        if(snrt_dust_contract_exchange_enabled)then
           block
             real(dp) :: gas_energy(nleaf),gas_capacity(nleaf),transfer(nleaf)
+            real(dp),allocatable :: pah_electrons(:),pah_gas_h(:),pah_gas_h2(:)
+            real(dp)::electron_cv
+            electron_cv=0
+#ifdef SNRT_CHIMES
+            if(dust_pah_charged())then
+               pah_electrons=chemical_trial(1,:)*scale_d/atomic_mh
+               electron_cv=1.5d0*chimes_boltzmann()
+               if(dust_pah_hydrogenated())pah_gas_h=chemical_trial(2,:)*scale_d/atomic_mh
+               ! Pinned CHIMES157: H2 is index138, one native weight per
+               ! molecule, not twice that weight as an H-mass fraction.
+               if(dust_pah_h2_enabled())pah_gas_h2=chemical_trial(138,:)*scale_d/atomic_mh
+            endif
+#endif
             do i=1,nleaf
                icell=leaf_cell(i)
                kinetic_energy=.5d0*sum(uold(icell,2:ndim+1)**2)/rho_level(i)
-               gas_energy(i)=(trial_thermal(i)-kinetic_energy)*dust_energy_scale
+               if(dust_relative_motion)kinetic_energy=dust_phase_kinetic(phase_rows(:,i))
+               gas_energy(i)=(trial_thermal(i)-kinetic_energy-magnetic_energy(uold(icell,:)))*dust_energy_scale
 #if NENER>0
                gas_energy(i)=gas_energy(i)-sum(uold(icell,inener:inener+NENER-1))*dust_energy_scale
 #endif
@@ -1490,6 +2027,9 @@ contains
                gas_capacity(i)=rho_level(i)*dust_energy_scale/((gamma-1)*scale_T2*molecular_weight)
                if(atomic_cooling_on)gas_capacity(i)=atomic_heat_capacity(rho_level(i)*scale_d, &
                     atomic_gas_x(:,i),[trial_hydrogen_ii(i),trial_helium_ii(i),trial_helium_iii(i)],gamma)
+#ifdef SNRT_CHIMES
+               if(chimes_on)gas_capacity(i)=chimes_live_capacity(chemical_trial(:,i),scale_d)
+#endif
             enddo
             ! Solve exchange and IR emission together, inside the IR implicit
             ! material solve, not as a post-radiation dust temperature kick.
@@ -1497,9 +2037,33 @@ contains
                  transpose(direction_dp),angular_weight/sum(angular_weight),dx_code*scale_l,dt_s,snrt_c_cgs*reduced_c, &
                  dust_n_hydrogen_cm3*dust_relative_abundance,dust_absorbed_energy,dust_old_energy, &
                  dust_heat_capacity,dust_ir_trial,dust_trial_energy,dust_trial_temperature,dust_ir_result,ierr, &
-                 dust_ir_coarse,gas_energy,gas_capacity,dust_n_hydrogen_cm3,transfer,dust_cell_u,dust_cell_area,dust_weights)
+                 dust_ir_coarse,gas_energy,gas_capacity,dust_n_hydrogen_cm3,transfer,dust_cell_u,dust_cell_area,dust_weights, &
+                 sublimation_bins,sublimation_next,pah_number,pah_primary_energy, &
+                 primary_pah_heat=primary_pah_heat,primary_pah_captures=primary_pah_captures, &
+                 phase_density=phase_mass,phase_momentum=phase_pnext,phase_work=phase_ir_work, &
+                 gas_electrons=pah_electrons,electron_capacity=electron_cv,gas_atomic_h=pah_gas_h, &
+                 gas_molecular_h2=pah_gas_h2)
             if(ierr==0)then
+#ifdef SNRT_CHIMES
+               if(dust_pah_charged())chemical_trial(1,:)=pah_electrons*atomic_mh/scale_d
+               if(dust_pah_hydrogenated())chemical_trial(2,:)=pah_gas_h*atomic_mh/scale_d
+               if(dust_pah_h2_enabled())chemical_trial(138,:)=pah_gas_h2*atomic_mh/scale_d
+#endif
                trial_thermal=trial_thermal-transfer/dust_energy_scale
+               if(dust_relative_motion)then
+                  trial_thermal=trial_thermal+sum(phase_ir_work,dim=1)/dust_energy_scale
+                  do i=1,nleaf
+                     block
+                       integer::b,k
+                       phase_rows(2:4,i)=uold(leaf_cell(i),2:4)+ &
+                            sum(phase_pnext(:,:,i)-phase_pold(:,:,i),dim=2)/(scale_d*scale_v)
+                       do b=1,ndust_phase
+                          k=idust_momentum+3*(b-1)
+                          phase_rows(k:k+2,i)=phase_pnext(:,b,i)/(scale_d*scale_v)
+                       enddo
+                     end block
+                  enddo
+               endif
                if(any(.not.ieee_is_finite(trial_thermal)).or.any(trial_thermal<=0))ierr=1
             endif
           end block
@@ -1531,6 +2095,22 @@ contains
           end if
        end do
     end if
+#ifdef SNRT_CHIMES
+    if(allocated(sublimation_next).and.local_transaction_failure==snrt_failure_none)then
+       block
+         real(dp)::next_chemical(chimes_ns),elements(11),grains(2)
+         do i=1,nleaf
+            grains=[sum(sublimation_next(1:2,i)),sum(sublimation_next(3:4,i))]/scale_d
+            call chimes_cell_state(leaf_cell(i),grains,next_chemical,elements,ierr,chemical_trial(:,i))
+            if(ierr/=0)then
+               local_transaction_failure=snrt_failure_receiver
+               exit
+            endif
+            chemical_trial(:,i)=next_chemical
+         enddo
+       end block
+    endif
+#endif
     call snrt_transaction_reduce_decision(local_transaction_failure, 1, 0.0d0, &
          global_transaction_failure, global_transaction_converged, &
          global_transaction_residual, convergence_status)
@@ -1538,7 +2118,7 @@ contains
     if (global_transaction_failure /= snrt_failure_none) then
        if (transaction_active) call snrt_transaction_restore(transaction, snrt_intensity, &
             leaf_slot, snrt_hydrogen_ii, snrt_helium_ii, snrt_helium_iii, &
-            snrt_neutral_fraction, level_thermal, transaction_status)
+            snrt_neutral_fraction, level_thermal, transaction_status,persistent_energy_shift=snrt_energy_shift)
        if (myid == 1) write(*,'(A,I0)') &
             ' SNRT DUST_LIVE pre-commit validation failed at level=', ilevel
        deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, optical_depth_species, &
@@ -1564,11 +2144,54 @@ contains
     end if
 #endif
 
+    if(paired_transport)then
+       block
+         integer::slot,g,leaf_of_slot(size(snrt_intensity,3))
+         real(c_float)::base(snrt_ndirection),combined(snrt_ndirection)
+         leaf_of_slot=0
+         do i=1,nleaf
+            leaf_of_slot(leaf_slot(i))=i
+         enddo
+         do slot=1,size(snrt_intensity,3)
+            if(all(coarse_flux_trial(:,:,slot)==0.0_c_float))cycle
+            do g=1,snrt_ngroups
+               base=snrt_intensity(:,g,slot)
+               if(leaf_of_slot(slot)>0)base=trial_intensity(:,g,leaf_of_slot(slot))
+               combined=base+coarse_flux_trial(:,g,slot)
+               ! The topology already rebased accumulation into the flux
+               ! register; this is the separate final addition to cell N.
+               coarse_energy_shift(:,g,slot)=coarse_energy_shift(:,g,slot)+snrt_group_mean_energy_ev(g)* &
+                    (real(base,dp)+real(coarse_flux_trial(:,g,slot),dp)-real(combined,dp))
+            enddo
+         enddo
+       end block
+    endif
+    ! Validate every proposed leaf AND coarse-slot energy before any rank
+    ! publishes and discards its snapshot. A local successful commit cannot
+    ! be rolled back after another rank rejects; this collective comes first.
+    call snrt_transaction_commit_level(transaction,snrt_intensity,leaf_slot, &
+         snrt_hydrogen_ii,snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction, &
+         trial_intensity,coarse_flux_trial,trial_hydrogen_ii,trial_helium_ii, &
+         trial_helium_iii,trial_neutral_hydrogen,level_thermal,trial_thermal,transaction_status, &
+         persistent_energy_shift=snrt_energy_shift,trial_energy_shift=trial_energy_shift, &
+         coarse_energy_shift_trial=coarse_energy_shift,validate_only=.true.)
+    local_transaction_failure=snrt_failure_none
+    if(transaction_status/=0)local_transaction_failure=snrt_failure_receiver
+    call snrt_transaction_reduce_decision(local_transaction_failure,1,0d0,global_transaction_failure, &
+         global_transaction_converged,global_transaction_residual,convergence_status)
+    if(global_transaction_failure/=snrt_failure_none.or.convergence_status/=0)then
+       if(transaction%active)call snrt_transaction_restore(transaction,snrt_intensity,leaf_slot, &
+            snrt_hydrogen_ii,snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status, &
+            persistent_energy_shift=snrt_energy_shift)
+       if(myid==1)write(*,*)'ERROR: collective SNRT commit validation rejected; no primary/material state published'
+       call clean_stop;return
+    endif
     call snrt_transaction_commit_level(transaction, snrt_intensity, leaf_slot, &
          snrt_hydrogen_ii, snrt_helium_ii, snrt_helium_iii, snrt_neutral_fraction, &
          trial_intensity, coarse_flux_trial, trial_hydrogen_ii, trial_helium_ii, &
          trial_helium_iii, trial_neutral_hydrogen, level_thermal, trial_thermal, &
-         transaction_status)
+         transaction_status,persistent_energy_shift=snrt_energy_shift,trial_energy_shift=trial_energy_shift, &
+         coarse_energy_shift_trial=coarse_energy_shift)
     local_transaction_failure = snrt_failure_none
     if (transaction_status /= 0) local_transaction_failure = snrt_failure_receiver
     call snrt_transaction_reduce_decision(local_transaction_failure, 1, 0.0d0, &
@@ -1578,7 +2201,7 @@ contains
     if (global_transaction_failure /= snrt_failure_none) then
        if (transaction%active) call snrt_transaction_restore(transaction, snrt_intensity, &
             leaf_slot, snrt_hydrogen_ii, snrt_helium_ii, snrt_helium_iii, &
-            snrt_neutral_fraction, level_thermal, ierr)
+            snrt_neutral_fraction, level_thermal, ierr,persistent_energy_shift=snrt_energy_shift)
        if (myid == 1) write(*,'(A,A,A,I0)') &
             ' SNRT RT transaction commit failed: class=', &
             trim(snrt_transaction_failure_name(global_transaction_failure)), &
@@ -1624,17 +2247,64 @@ contains
        icell = leaf_cell(i)
        if (icell >= 1 .and. icell <= size(uold,1) .and. &
             size(uold,2) >= energy_index) uold(icell,energy_index) = level_thermal(i)
+#ifdef SNRT_CHIMES
+       if(chimes_on)uold(icell,ichimes:ichimes+chimes_ns-1)=chemical_trial(:,i)
+#endif
 #ifdef DUST_LIVE
+       if(dust_relative_motion)then
+          uold(icell,2:4)=phase_rows(2:4,i)
+          uold(icell,idust_momentum:idust_momentum+3*ndust_phase-1)= &
+               phase_rows(idust_momentum:idust_momentum+3*ndust_phase-1,i)
+       endif
        if (icell >= 1 .and. icell <= size(uold,1) .and. &
             size(uold,2) >= idust_energy) then
           dust_energy_code = dust_trial_energy(i) / dust_energy_scale
           uold(icell,idust_energy) = dust_energy_code
+          if(dust_pah_enabled())then
+             block
+               integer::k
+               do k=1,dust_pah_nstate()
+                  uold(icell,idust_pah+k-1)=pah_number(k,i)*dust_pah_state_mass(k)/scale_d
+               enddo
+             end block
+          endif
+          if(allocated(sublimation_next))then
+             uold(icell,idust_bins:idust_bins+3)=sublimation_next(:,i)/scale_d
+             uold(icell,idust_species:idust_species+1)= &
+                  [sum(sublimation_next(1:2,i)),sum(sublimation_next(3:4,i))]/scale_d
+             uold(icell,idust)=sum(sublimation_next(:,i))/scale_d
+          endif
        end if
 #endif
     end do
 #ifdef DUST_LIVE
+    if(dust_relative_motion)then
+       do i=2,4
+          call make_virtual_fine_dp(uold(1,i),ilevel)
+       enddo
+       do i=idust_momentum,idust_momentum+3*ndust_phase-1
+          call make_virtual_fine_dp(uold(1,i),ilevel)
+       enddo
+       call make_virtual_fine_dp(uold(1,energy_index),ilevel)
+    endif
     if(snrt_dust_contract_version>=3)then
        call snrt_dust_live_commit(leaf_slot,dust_ir_trial,dust_ir_coarse)
+       if(dust_pah_enabled())then
+          do i=idust_pah,idust_pah+dust_pah_nstate()-1
+             call make_virtual_fine_dp(uold(1,i),ilevel)
+          enddo
+       endif
+       if(allocated(sublimation_next))then
+          do i=idust,idust_bins+3
+             call make_virtual_fine_dp(uold(1,i),ilevel)
+          enddo
+          call make_virtual_fine_dp(uold(1,energy_index),ilevel)
+#ifdef SNRT_CHIMES
+          do i=ichimes,ichimes+chimes_ns-1
+             call make_virtual_fine_dp(uold(1,i),ilevel)
+          enddo
+#endif
+       endif
        if(myid==1)write(*,'(A,ES12.4,A,ES12.4)') &
             ' SNRT_DUST_IR_COMMIT_PASS balance=',dust_ir_result%balance_relative, &
             ' escaped_erg=',dust_ir_result%escaped_erg

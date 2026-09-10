@@ -7113,7 +7113,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
         mAGNi=mloadAGN*dMsmbh(iAGN_myid(iAGN))
      endif
      call agn_withdraw_cell(donor_row,scalar_fields,metal_slot,mAGNi,vol_blast(iAGN), &
-          mAGN(iAGN),vloadAGN(iAGN,:),cloadAGN(iAGN,:),cell_ierr)
+          mAGN(iAGN),vloadAGN(iAGN,:),cloadAGN(iAGN,:),cell_ierr,magnetic_energy(uold(ind_blast(iAGN),:)))
      donor_error=max(donor_error,cell_ierr)
      if(cell_ierr/=0)cycle
      uold(ind_blast(iAGN),1:nvar)=donor_row
@@ -7555,7 +7555,7 @@ contains
 
     row=uold(cell,1:nvar)
     call agn_deposit_material(row,scalar_fields,metal_slot,fractions,drho,dmomentum,denergy, &
-         volume,gamma,scale_T2,T2maxAGNz,deferred,ierr)
+         volume,gamma,scale_T2,T2maxAGNz,deferred,ierr,magnetic_energy(uold(cell,:)))
     if(ierr==0)uold(cell,1:nvar)=row
   end subroutine deposit_agn_cell
 end subroutine AGN_blast
@@ -8080,5 +8080,5 @@ subroutine agn_select_scalar_fields(fields,nscalar,metal_slot,ierr)
   if(sf_virial)reserved_fields(2)=ivirial
   if(aton)reserved_fields(3)=ixion
   if(use_sgs)reserved_fields(4)=isgs
-  call agn_scalar_map(nvar,merge(imetal,0,metal),ichem,nelements,reserved_fields,fields(1:nscalar),ierr,ndim+2)
+  call agn_scalar_map(nvar,merge(imetal,0,metal),ichem,nelements,reserved_fields,fields(1:nscalar),ierr,nhydro+nener)
 end subroutine agn_select_scalar_fields

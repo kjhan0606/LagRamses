@@ -1,0 +1,39 @@
+{
+  "schema": "fe_electric_eddy_band_v1",
+  "status": "EXPLICIT_BOUNDED_COMPARISON",
+  "source_sha256": {
+    "werner": "f86156bab5f885fb3c1099fb95352092a0e73ae0574c2e0f724e31e387508eb8",
+    "henke": "cdcd0f4babbc2f07b6268a698a7fd1b61c920afdc7c5ca331efeb80dd1d0e7f5"
+  },
+  "generator_sha256": "85c4277242114e1058f91d29f6ffdf04268dc48558857941319e526369ef5b16",
+  "contract_sha256": "b1f27df3a6fcd2f76b7f6ca8a14c794b5811540905cb1c04480586bf7614909d",
+  "compiled_sha256": "7c5859f538419f26d206d7f6a45e62dd5552df1d9dd94aba3901f4499ec461a4",
+  "node_content_sha256": "36c48264e9fedef3c8441b8bae360cefc0a4b0f1da79ca33421b99bae5253dbd",
+  "nodes": 128,
+  "edges_ev": [
+    0.01,
+    1.0,
+    5.6,
+    11.2,
+    13.6,
+    24.59,
+    54.42,
+    500.0,
+    2000.0,
+    10000.0
+  ],
+  "radii_cm": [
+    1e-06,
+    1e-05
+  ],
+  "density_g_cm3": 7.87,
+  "miepython_version": "3.3.0",
+  "numpy_version": "2.3.3",
+  "units": "cm2/g per actual Fe bin mass; energies eV",
+  "closure": "Existing Werner/Henke KK + size Drude, mu=1 Mie; positive log-node dE prior",
+  "limitations": [
+    "Composite comparison, not complete DH13 optical data or magnetic Fe.",
+    "No spin absorption, photoelectron escape or temperature-dependent optics.",
+    "Shared-temperature six-bin receiver; finite nodal edge resolution."
+  ]
+}

@@ -63,6 +63,24 @@ program snrt_dust_receiver_smoke
   if (ierr /= snrt_dust_receiver_ok .or. any(state_energy /= staged_energy) .or. &
        any(state_temperature /= staged_temperature)) error stop 9
 
+  block
+    real(snrt_dust_receiver_dp)::deposited(ng,nc)
+    integer::g
+    do g=1,ng
+       deposited(g,:)=.75d0*photons(g,:)*mean_energy(g)*snrt_dust_receiver_ev_to_erg
+    enddo
+    call snrt_dust_receiver_stage(photons,mean_energy,10d0,abundance,capacity, &
+         old_energy,old_temperature,staged_energy,staged_temperature,absorbed_energy,ierr, &
+         defer_temperature=.true.,deposited_spectrum_erg_cm3=deposited)
+    if(ierr/=0.or.any(abs(absorbed_energy-.75d0*expected_absorbed)>1d-12))error stop 17
+    if(any(staged_temperature/=old_temperature))error stop 18
+    deposited(3,1)=1d0 ! impossible heat without captured photons
+    call snrt_dust_receiver_stage(photons,mean_energy,10d0,abundance,capacity, &
+         old_energy,old_temperature,staged_energy,staged_temperature,absorbed_energy,ierr, &
+         deposited_spectrum_erg_cm3=deposited)
+    if(ierr/=snrt_dust_receiver_err_state)error stop 19
+  end block
+
   ! Positive dust absorption must never be accepted without a positive cell
   ! abundance.  The persistent state remains unchanged on this failed trial.
   state_energy_before = state_energy

@@ -19,8 +19,8 @@ subroutine hydro_refine(ug,um,ud,ok,nn,ilevel)
   logical ::ok(1:nvector)
 
   integer::k,idim
-  real(dp),dimension(1:nvector),save::eking,ekinm,ekind
-  real(dp),dimension(1:nvector),save::emagg,emagm,emagd
+  real(dp),dimension(1:nvector)::eking,ekinm,ekind
+  real(dp),dimension(1:nvector)::emagg,emagm,emagd
   real(dp)::dg,dm,dd,pg,pm,pd,vg,vm,vd,cg,cm,cd,error,emag_loc,ethres
 
   ! Convert to primitive variables

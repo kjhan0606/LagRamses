@@ -5,10 +5,20 @@ module snrt_dust_live
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use snrt_dust_contract
   use snrt_dust_ir
-  use dust_mass_physics, only: dust_optics_enabled
-  use dust_composition_optics, only: d03_ng,d03_nir,d03_opacity_basis
+  use dust_mass_physics, only: dust_optics_enabled,dust_iron_enabled,dust_fe_max_temperature
+  use dust_iron_optics, only: fe_six_opacity_basis,fe_base_binding,fe_radius_cm,fe_density
+  use dust_iron_radiation, only: iron_radiative_batch,iron_radiative_cell
+  use dust_mass_physics, only: dust_pah_enabled,dust_pah_nstate,dust_pah_molecule_g,dust_pah_charged, &
+       dust_pah_hydrogenated,dust_pah_h2_enabled
+  use dust_pah_live_model, only: pah_live_prepare,pah_ir_sigma
+  use dust_pah_mixed, only: pah_mixed_advance
+  use omp_lib, only: omp_get_max_threads
+  use dust_composition_material, only: dust_composition_curve,dust_composition_area
+  use dust_sublimation_material, only: dust_radiative_sublimation_evolve
+  use dust_composition_optics, only: d03_ng,d03_nir,d03_opacity_basis,d03_cell_weights
   use snrt_runtime_backend, only: snrt_runtime_dust_material, snrt_runtime_ir_transport, snrt_runtime_ir_absorb
   use snrt_runtime_backend, only: snrt_runtime_ir_scatter
+  use snrt_runtime_backend, only: snrt_runtime_cpu_material_allowed
   use snrt_state, only: snrt_ndirection, snrt_nslot, snrt_state_get_slot
   use amr_commons, only: ngridmax,ncoarse,ncpu,myid,headl,next,son
   use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
@@ -23,6 +33,7 @@ module snrt_dust_live
   private
   real(dust_dp), allocatable, save :: radiation(:,:,:)
   real(dust_dp), allocatable, save :: scattering_basis(:,:)
+  real(dust_dp), allocatable, save :: absorption_basis(:,:)
   type(dust_ir_table), save :: table
   logical, save :: initialized=.false.
   type, public :: dust_live_coarse_trial
@@ -34,26 +45,54 @@ module snrt_dust_live
 contains
   subroutine prepare(ierr)
     integer, intent(out) :: ierr
-    integer :: ng, nt, old, capacity
+    integer :: ng, nt, old, capacity,nb
     real(dust_dp), allocatable :: expanded(:,:,:)
     real(dust_dp),allocatable::basis(:,:)
-    real(dust_dp)::pa(d03_ng,4),ps(d03_ng,4),pg(d03_ng,4),ia(d03_nir,4),isc(d03_nir,4),ig(d03_nir,4)
+    real(dust_dp)::pa(d03_ng,6),ps(d03_ng,6),pg(d03_ng,6),ia(d03_nir,6),isc(d03_nir,6),ig(d03_nir,6)
     ierr=dust_err_config
     if(snrt_dust_contract_version<3.or..not.snrt_dust_contract_runtime_allowed)return
     ng=snrt_dust_contract_number_ir; nt=snrt_dust_contract_number_temperature
     if(.not.initialized)then
        if(dust_optics_enabled())then
           if(ng/=d03_nir)return
-          call d03_opacity_basis(snrt_dust_contract_mass_per_h_g,pa,ps,pg,ia,isc,ig,ierr)
+          nb=4
+          if(dust_iron_enabled())then
+             if(.not.snrt_runtime_cpu_material_allowed())return
+             if(snrt_dust_contract_ir_background_k>dust_fe_max_temperature)return
+             if(.not.fe_base_binding( &
+                  snrt_dust_contract_group_edges_ev(1:snrt_dust_contract_number_groups+1), &
+                  snrt_dust_contract_absorption_mean_energy_ev(1:snrt_dust_contract_number_groups), &
+                  snrt_dust_contract_ir_energy_ev(1:ng),fe_radius_cm,fe_density(1)))return
+             nb=6
+             call fe_six_opacity_basis(snrt_dust_contract_mass_per_h_g,pa,ps,pg,ia,isc,ig,ierr)
+          else
+             call d03_opacity_basis(snrt_dust_contract_mass_per_h_g,pa(:,1:4),ps(:,1:4),pg(:,1:4), &
+                  ia(:,1:4),isc(:,1:4),ig(:,1:4),ierr)
+          endif
           if(ierr/=0)return
-          basis=ia
-          scattering_basis=isc-ig
+          basis=ia(:,1:nb)
+          absorption_basis=ia(:,1:nb)
+          scattering_basis=isc(:,1:nb)-ig(:,1:nb)
        endif
        if(snrt_dust_contract_version==4)then
+          if(dust_pah_enabled())then
+             if(.not.snrt_runtime_cpu_material_allowed())return
+             call pah_live_prepare(ierr)
+             if(ierr/=0)return
+             if(.not.snrt_dust_contract_exchange_enabled)then
+                ierr=dust_err_config;return
+             endif
+             ! The PAH comparison has absolute, initially empty IR radiation.
+             ! Its mixed receiver owns both opacity and material components.
+             call snrt_dust_ir_initialize(table,snrt_dust_contract_ir_energy_ev(1:ng), &
+                  snrt_dust_contract_ir_weight_ev(1:ng),snrt_dust_contract_ir_absorption_per_h_cm2(1:ng), &
+                  snrt_dust_contract_temperature_k(1:nt),snrt_dust_contract_ir_background_k,ierr)
+          else
           call snrt_dust_ir_initialize(table,snrt_dust_contract_ir_energy_ev(1:ng), &
                snrt_dust_contract_ir_weight_ev(1:ng),snrt_dust_contract_ir_absorption_per_h_cm2(1:ng), &
                snrt_dust_contract_temperature_k(1:nt),snrt_dust_contract_ir_background_k,ierr, &
                snrt_dust_contract_internal_energy_per_h_erg(1:nt),optical_sigma=basis)
+          endif
        else
        call snrt_dust_ir_initialize(table,snrt_dust_contract_ir_energy_ev(1:ng), &
             snrt_dust_contract_ir_weight_ev(1:ng),snrt_dust_contract_ir_absorption_per_h_cm2(1:ng), &
@@ -81,7 +120,9 @@ contains
 
   subroutine snrt_dust_live_stage(ilevel,cells,slots,neighbors,directions,weights,dx,dt,chat, &
        density,primary_energy,old_energy,capacity,trial,material,temperature,diagnostics,ierr,coarse, &
-       gas_energy,gas_capacity,n_hydrogen,gas_transfer,cell_material_u,cell_collision_area,cell_weights)
+       gas_energy,gas_capacity,n_hydrogen,gas_transfer,cell_material_u,cell_collision_area,cell_weights, &
+       sublimation_bins,sublimation_next,pah_population,primary_spectrum,primary_pah_heat,primary_pah_captures, &
+       phase_density,phase_momentum,phase_work,gas_electrons,electron_capacity,gas_atomic_h,gas_molecular_h2)
     integer, intent(in) :: ilevel,cells(:),slots(:),neighbors(:,:)
     real(dust_dp), intent(in) :: directions(:,:),weights(:),dx,dt,chat
     real(dust_dp), intent(in) :: density(:),primary_energy(:),old_energy(:),capacity(:)
@@ -94,6 +135,30 @@ contains
     real(dust_dp),optional,intent(out)::gas_transfer(:)
     real(dust_dp),optional,intent(in)::cell_material_u(:,:),cell_collision_area(:)
     real(dust_dp),optional,intent(in)::cell_weights(:,:)
+    real(dust_dp),optional,intent(in)::sublimation_bins(:,:)
+    real(dust_dp),optional,intent(out)::sublimation_next(:,:)
+    real(dust_dp),optional,intent(inout)::pah_population(:,:)
+    real(dust_dp),optional,intent(in)::primary_spectrum(:,:)
+    real(dust_dp),optional,intent(in)::primary_pah_heat(:,:),primary_pah_captures(:,:)
+    ! Per-phase cgs absolute momenta are private to this stage until every
+    ! IR substep and rank succeeds. Bulk order is the optical basis order;
+    ! optional PAH fluid follows the 4/6 bulk phases, not 128 excitation bins.
+    real(dust_dp),optional,intent(in)::phase_density(:,:)
+    real(dust_dp),optional,intent(inout)::phase_momentum(:,:,:),phase_work(:,:)
+    real(dust_dp),optional,intent(inout)::gas_electrons(:)
+    real(dust_dp),optional,intent(in)::electron_capacity
+    real(dust_dp),optional,intent(inout)::gas_atomic_h(:)
+    real(dust_dp),optional,intent(inout)::gas_molecular_h2(:)
+    real(dust_dp),allocatable::electron_work(:),electron_initial(:),pah_capacity(:)
+    real(dust_dp),allocatable::primary_pah_population(:,:)
+    real(dust_dp),allocatable::h_work(:),h_initial(:)
+    real(dust_dp),allocatable::h2_work(:),h2_initial(:)
+    real(dust_dp),allocatable::phase_p_stage(:,:,:),phase_alpha(:,:,:),phase_sca(:,:,:)
+    real(dust_dp),allocatable::phase_work_step(:,:),phase_work_sum(:,:)
+    real(dust_dp),allocatable::pah_bulk_bins(:,:)
+    real(dust_dp),allocatable::pah_heat_step(:,:),pah_captures_step(:,:)
+    real(dust_dp),allocatable::sub_bins(:,:),sub_trial(:,:),sub_phase(:),sub_sensible(:)
+    real(dust_dp),allocatable::sub_u(:,:),sub_area(:),sub_weights(:,:),sub_density(:)
     real(dust_dp),allocatable::gas_work(:),conductance(:),exchange(:),exchange_sum(:)
     real(dust_dp),allocatable::scatter_sigma(:,:)
     real(dust_dp),parameter::kb=1.380649d-16,mp=1.67262192369d-24
@@ -105,23 +170,68 @@ contains
     logical, allocatable :: blocked(:,:)
     type(dust_ir_diagnostics) :: step
     real(dust_dp) :: cfl,step_dt,mu,q
-    integer :: nsub,isub,i,ng,face,k,nghost,nfield,g,d,global_nsub,info,has_coarse
+    integer :: nsub,isub,i,ng,face,k,nghost,nfield,g,d,global_nsub,info,has_coarse,b,nbulk
     integer :: grid,child,cell,ncoarse_leaf,axis
     call prepare(ierr)
     if(ierr==dust_ok)call validate_stage()
     call collective_error(ierr)
     if(ierr/=dust_ok)return
     if(present(cell_weights))scatter_sigma=matmul(scattering_basis,cell_weights)
+    if(present(phase_density))then
+       nbulk=size(absorption_basis,2)
+       phase_p_stage=phase_momentum
+       allocate(phase_alpha(size(phase_density,1),size(absorption_basis,1),size(slots)))
+       allocate(phase_sca(size(phase_density,1),size(absorption_basis,1),size(slots)))
+       allocate(phase_work_step(size(phase_density,1),size(slots)),phase_work_sum(size(phase_density,1),size(slots)))
+       phase_alpha=0;phase_sca=0;phase_work_sum=0;phase_work_step=0
+       do i=1,size(slots)
+          do b=1,nbulk
+             phase_alpha(b,:,i)=absorption_basis(:,b)*phase_density(b,i)/snrt_dust_contract_mass_per_h_g
+             phase_sca(b,:,i)=scattering_basis(:,b)*phase_density(b,i)/snrt_dust_contract_mass_per_h_g
+          enddo
+          if(dust_pah_enabled())phase_alpha(nbulk+1,:,i)= &
+               pah_ir_sigma*phase_density(nbulk+1,i)/dust_pah_molecule_g
+       enddo
+       ! Current neutral PAH model supplies absorption/emission only. No
+       ! unprovided PAH scattering cross section is borrowed from bulk dust.
+    endif
 #ifndef WITHOUTMPI
     call MPI_ALLREDUCE(nsub,global_nsub,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
     if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,info,k)
     nsub=global_nsub
 #endif
     step_dt=dt/nsub
+    if(present(primary_pah_heat))then
+       pah_heat_step=primary_pah_heat*(step_dt/dt)
+       pah_captures_step=primary_pah_captures*(step_dt/dt)
+    endif
     if(present(gas_energy))then
        gas_work=gas_energy
        allocate(conductance(size(slots)),exchange(size(slots)),exchange_sum(size(slots)))
        exchange_sum=0
+    endif
+    if(dust_pah_enabled())then
+       allocate(pah_bulk_bins(6,size(slots)));pah_bulk_bins=0
+       pah_capacity=gas_capacity
+       if(dust_pah_charged())then
+          electron_work=gas_electrons;electron_initial=gas_electrons
+          primary_pah_population=pah_population
+          if(dust_pah_hydrogenated())then
+             h_work=gas_atomic_h;h_initial=gas_atomic_h
+             if(dust_pah_h2_enabled())then
+                h2_work=gas_molecular_h2;h2_initial=gas_molecular_h2
+             endif
+          endif
+       endif
+       do i=1,size(slots)
+          pah_bulk_bins(1:size(cell_weights,1),i)=cell_weights(:,i)*density(i)*snrt_dust_contract_mass_per_h_g
+       enddo
+    endif
+    if(present(sublimation_bins))then
+       sub_bins=sublimation_bins
+       allocate(sub_trial(4,size(slots)),sub_phase(size(slots)),sub_sensible(size(slots)), &
+            sub_area(size(slots)),sub_density(size(slots)))
+       allocate(sub_u(snrt_dust_contract_number_temperature,size(slots)),sub_weights(4,size(slots)))
     endif
     ng=snrt_dust_contract_number_ir
     has_coarse=0
@@ -255,29 +365,80 @@ contains
        end if
        step=dust_ir_diagnostics()
        ierr=dust_ok
-       if(present(gas_energy))then
+       if(dust_pah_enabled())then
+          if(dust_pah_charged())pah_capacity=gas_capacity+electron_capacity*(electron_work-electron_initial)
+          if(dust_pah_hydrogenated())pah_capacity=pah_capacity+electron_capacity*(h_work-h_initial)
+          if(dust_pah_h2_enabled())pah_capacity=pah_capacity+electron_capacity*(h2_work-h2_initial)
+          conductance=2*kb*n_hydrogen*density*cell_collision_area* &
+               snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/pah_capacity))
+          if(size(slots)>0)call pah_mixed_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
+               pah_bulk_bins,primary_spectrum*(step_dt/dt),trial,pah_population,material,temperature,photons,step,ierr, &
+               ghosts,remote,blocked,gas_work,pah_capacity,conductance,exchange, &
+               primary_pah_heat=pah_heat_step,primary_pah_captures=pah_captures_step, &
+               phase_density=phase_density,phase_momentum=phase_p_stage,phase_absorption=phase_alpha, &
+               phase_scattering=phase_sca,phase_work=phase_work_step, &
+               gas_electrons=electron_work,electron_capacity=electron_capacity,primary_population=primary_pah_population, &
+               gas_atomic_h=h_work,gas_molecular_h2=h2_work)
+          if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
+       else if(allocated(sub_bins))then
+          do i=1,size(slots)
+             sub_density(i)=sum(sub_bins(:,i))/snrt_dust_contract_mass_per_h_g
+             call dust_composition_curve(snrt_dust_contract_temperature_k(1:size(sub_u,1)), &
+                  [sum(sub_bins(1:2,i)),sum(sub_bins(3:4,i))],snrt_dust_contract_mass_per_h_g,sub_u(:,i),k)
+             if(k/=0)ierr=dust_err_state
+             call dust_composition_area(sub_bins(:,i),snrt_dust_contract_mass_per_h_g,sub_area(i),k)
+             if(k/=0)ierr=dust_err_state
+             call d03_cell_weights(sub_bins(:,i),sub_weights(:,i),k)
+             if(k/=0)ierr=dust_err_state
+          enddo
+          call collective_error(ierr)
+          if(ierr/=dust_ok)return
+          scatter_sigma=matmul(scattering_basis,sub_weights)
+          conductance=2*kb*n_hydrogen*sub_density*sub_area*snrt_dust_contract_accommodation* &
+               sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
+          if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
+               sub_density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
+               ghosts,remote,blocked,material_dispatch=coupled_material, &
+               transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
+               gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange, &
+               cell_material_u=sub_u,cell_weights=sub_weights,thin_reabsorption=.true.)
+          if(ierr==dust_ok)then
+             ! The accepted IR ledger includes phase energy, which is derived
+             ! from lost solids rather than stored in the sensible-energy field.
+             material=sub_sensible
+             sub_bins=sub_trial
+             exchange_sum=exchange_sum+exchange
+          endif
+       else if(present(gas_energy))then
        conductance=2*kb*n_hydrogen*density*snrt_dust_contract_collision_area_per_h* &
             snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
        if(present(cell_collision_area))conductance=2*kb*n_hydrogen*density*cell_collision_area* &
             snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
-            ghosts,remote,blocked,material_dispatch=snrt_runtime_dust_material, &
+            ghosts,remote,blocked,material_dispatch=fixed_material, &
             transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
             gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange, &
-            cell_material_u=cell_material_u,cell_weights=cell_weights)
+            cell_material_u=cell_material_u,cell_weights=cell_weights,phase_density=phase_density, &
+            phase_momentum=phase_p_stage,phase_absorption=phase_alpha,phase_scattering=phase_sca,phase_work=phase_work_step)
        if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
        else
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
-            ghosts,remote,blocked,material_dispatch=snrt_runtime_dust_material, &
+            ghosts,remote,blocked,material_dispatch=fixed_material, &
             transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
-            cell_material_u=cell_material_u,cell_weights=cell_weights)
+            cell_material_u=cell_material_u,cell_weights=cell_weights,phase_density=phase_density, &
+            phase_momentum=phase_p_stage,phase_absorption=phase_alpha,phase_scattering=phase_sca,phase_work=phase_work_step)
        endif
        ! Conservative delta-isotropic angular relaxation, Lie-split after
        ! absorption/emission. No scattering energy is given to the material.
-       if(ierr==dust_ok.and.size(slots)>0.and.allocated(scatter_sigma)) &
-            call snrt_runtime_ir_scatter(trial,weights,density,scatter_sigma,chat*step_dt,ierr)
+       if(ierr==dust_ok.and.size(slots)>0.and.allocated(scatter_sigma).and..not.present(phase_density))then
+          if(allocated(sub_bins))then
+             call snrt_runtime_ir_scatter(trial,weights,sub_density,scatter_sigma,chat*step_dt,ierr)
+          else
+             call snrt_runtime_ir_scatter(trial,weights,density,scatter_sigma,chat*step_dt,ierr)
+          endif
+       endif
        if(ierr/=dust_ok.and.size(slots)>0)then
           write(*,'(A,3I6,A,2ES25.16,A,ES14.5)')' SNRT IR rejected state rank/level/error=',myid,ilevel,ierr, &
                ' material_T_range=',minval(material/capacity),maxval(material/capacity), &
@@ -287,10 +448,12 @@ contains
        if(any(.not.ieee_is_finite(coarse%energy)).or.any(coarse%energy<0))ierr=dust_err_state
        call collective_error(ierr)
        if(ierr/=dust_ok)return
+       if(present(phase_density))phase_work_sum=phase_work_sum+phase_work_step
        diagnostics%escaped_erg=diagnostics%escaped_erg+step%escaped_erg
        diagnostics%absorbed_erg=diagnostics%absorbed_erg+step%absorbed_erg
        diagnostics%primary_erg=diagnostics%primary_erg+step%primary_erg
        diagnostics%interface_erg=diagnostics%interface_erg+step%interface_erg
+       diagnostics%mechanical_erg=diagnostics%mechanical_erg+step%mechanical_erg
        diagnostics%balance_relative=max(diagnostics%balance_relative,step%balance_relative)
        diagnostics%local_relative=max(diagnostics%local_relative,step%local_relative)
        diagnostics%iterations=diagnostics%iterations+step%iterations
@@ -301,12 +464,181 @@ contains
        if(density(i)==0)temperature(i)=snrt_dust_contract_ir_background_k
     end do
     if(present(gas_transfer))gas_transfer=exchange_sum
+    if(dust_pah_charged())gas_electrons=electron_work
+    if(dust_pah_hydrogenated())gas_atomic_h=h_work
+    if(dust_pah_h2_enabled())gas_molecular_h2=h2_work
+    if(present(sublimation_next))sublimation_next=sub_bins
+    if(present(phase_density))then
+       phase_momentum=phase_p_stage;phase_work=phase_work_sum
+    endif
   contains
+    subroutine fixed_material(heating,density,old_energy,capacity,log_t,power,band, &
+         material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr, &
+         gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,basis_power,basis_band)
+      real(dust_dp),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
+      real(dust_dp),intent(in)::material_u(:),dt,background,bath,tolerance
+      logical,intent(in)::use_u
+      real(dust_dp),intent(out)::rate(:,:),temperature(:),next_energy(:)
+      integer,intent(out)::ierr
+      real(dust_dp),optional,intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
+      real(dust_dp),optional,intent(out)::gas_transfer(:)
+      real(dust_dp),optional,intent(in)::cell_material_u(:,:),cell_weights(:,:),basis_power(:,:),basis_band(:,:,:)
+      real(dust_dp),allocatable::bins(:,:),phase(:,:)
+      real(dust_dp),allocatable::moving_band(:,:,:)
+      real(dust_dp)::eg,cv,kappa,qgas
+      integer::cell,nb
+      if(present(phase_density))then
+         ! Moving radiation represents ABSOLUTE energy. Use the existing
+         ! absolute C/silicate/Fe receiver, including when Fe masses are zero;
+         ! no untracked isotropic bath is subtracted from moving emission.
+         ierr=dust_err_config
+         if(.not.present(cell_weights).or..not.present(basis_band))return
+         nb=size(cell_weights,1)
+         if(nb/=4.and.nb/=6)return
+         allocate(bins(6,size(density)),phase(4,size(density)),moving_band(size(rate,1),size(log_t),6))
+         bins=0;moving_band=0
+         bins(1:nb,:)=cell_weights*spread(density*snrt_dust_contract_mass_per_h_g,1,nb)
+         moving_band(:,:,1:nb)=basis_band
+         rate=0;next_energy=old_energy;temperature=bath;phase=0
+         if(present(gas_transfer))gas_transfer=0
+         do cell=1,size(density)
+            eg=0;cv=1;kappa=0
+            if(present(gas_energy))then
+               eg=gas_energy(cell);cv=gas_capacity(cell);kappa=conductance(cell)
+            endif
+            call iron_radiative_cell(snrt_dust_contract_temperature_k(1:size(log_t)),bath,bins(:,cell), &
+                 old_energy(cell),heating(cell),dt,snrt_dust_contract_mass_per_h_g,moving_band,eg,cv,kappa, &
+                 next_energy(cell),temperature(cell),phase(:,cell),rate(:,cell),qgas,ierr,absolute_emission=.true.)
+            if(ierr/=0)return
+            if(present(gas_transfer))gas_transfer(cell)=qgas
+         enddo
+         if(dust_iron_enabled().and.any(temperature>dust_fe_max_temperature))ierr=dust_err_range
+         return
+      endif
+      if(.not.dust_iron_enabled())then
+         call snrt_runtime_dust_material(heating,density,old_energy,capacity,log_t,power,band, &
+              material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr, &
+              gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,basis_power,basis_band)
+         return
+      endif
+      ierr=dust_err_config
+      if(.not.present(cell_weights).or..not.present(basis_band))return
+      bins=cell_weights*spread(density*snrt_dust_contract_mass_per_h_g,1,6)
+      allocate(phase(4,size(density)))
+      rate=0;temperature=bath;next_energy=old_energy;phase=0
+      if(present(gas_transfer))gas_transfer=0
+      call iron_radiative_batch(snrt_dust_contract_temperature_k(1:size(log_t)),bath,bins,old_energy,heating, &
+           dt,snrt_dust_contract_mass_per_h_g,basis_band,omp_get_max_threads(), &
+           next_energy,temperature,phase,rate,ierr,gas_energy,gas_capacity,conductance,gas_transfer)
+      if(ierr/=0)then
+         write(*,'(A,2I6)')'Fe material batch rejected rank/native_status=',myid,ierr
+         ierr=dust_err_range
+      endif
+      ! Rejected outputs are trial-only; the enclosing collective transaction
+      ! never commits a result outside the explicitly selected comparison.
+      if(ierr==0.and.any(temperature>dust_fe_max_temperature))ierr=dust_err_range
+    end subroutine
+
+    subroutine coupled_material(heating,density,old_energy,capacity,log_t,power,band, &
+         material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr, &
+         gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,basis_power,basis_band)
+      real(dust_dp),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
+      real(dust_dp),intent(in)::material_u(:),dt,background,bath,tolerance
+      logical,intent(in)::use_u
+      real(dust_dp),intent(out)::rate(:,:),temperature(:),next_energy(:)
+      integer,intent(out)::ierr
+      real(dust_dp),optional,intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
+      real(dust_dp),optional,intent(out)::gas_transfer(:)
+      real(dust_dp),optional,intent(in)::cell_material_u(:,:),cell_weights(:,:),basis_power(:,:),basis_band(:,:,:)
+      integer::j,status,bad
+      real(dust_dp)::ed
+      ierr=dust_err_config
+      if(.not.present(gas_energy).or..not.present(gas_transfer).or..not.present(basis_band))return
+      bad=0
+      ! Native CPU/OpenMP for this new nonlinear closure; no claim that the
+      ! legacy fixed-composition CUDA material kernel implements sublimation.
+!$omp parallel do private(j,status,ed) reduction(max:bad)
+      do j=1,size(heating)
+         call dust_radiative_sublimation_evolve(snrt_dust_contract_temperature_k(1:size(log_t)), &
+              bath,sub_bins(:,j),old_energy(j),heating(j),dt, &
+              snrt_dust_contract_mass_per_h_g,basis_band,gas_energy(j),gas_capacity(j),conductance(j), &
+              sub_trial(:,j),ed,temperature(j),rate(:,j),gas_transfer(j),sub_phase(j),status)
+         next_energy(j)=ed+sub_phase(j)
+         sub_sensible(j)=ed
+         if(status/=0)then
+            bad=dust_err_range
+            if(j==1)write(*,'(A,2I6,7ES17.8)')'DUST_SUBLIMATION_ROOT_REJECT rank/status/dt/H/Ed/Eg/Cv/K/rhoD=', &
+                 myid,status,dt,heating(j),old_energy(j),gas_energy(j),gas_capacity(j),conductance(j),sum(sub_bins(:,j))
+         endif
+      enddo
+!$omp end parallel do
+      ierr=bad
+    end subroutine
+
     subroutine validate_stage()
       ierr=dust_err_shape
+      if(present(phase_density).neqv.present(phase_momentum))return
+      if(present(phase_density).neqv.present(phase_work))return
+      if(present(phase_density))then
+         if(.not.allocated(absorption_basis).or..not.present(cell_weights))return
+         ! This local interaction freezes masses. Sublimation with donor
+         ! momentum exchange belongs to the separately staged phase update.
+         if(present(sublimation_bins))return
+         if(any(shape(phase_density)/=[size(absorption_basis,2)+merge(1,0,dust_pah_enabled()),size(slots)]))return
+         if(any(shape(phase_momentum)/=[3,size(phase_density,1),size(slots)]))return
+         if(any(shape(phase_work)/=shape(phase_density)))return
+         if(any(.not.ieee_is_finite(phase_density)).or.any(phase_density<0))return
+         if(any(.not.ieee_is_finite(phase_momentum)))return
+      endif
+      if(present(primary_pah_heat).neqv.present(primary_pah_captures))return
+      if(present(primary_pah_heat))then
+         if(.not.dust_pah_enabled())return
+         if(any(shape(primary_pah_heat)/=[snrt_dust_contract_number_groups,size(slots)]))return
+         if(any(shape(primary_pah_captures)/=shape(primary_pah_heat)))return
+         if(any(.not.ieee_is_finite(primary_pah_heat)).or.any(primary_pah_heat<0))return
+         if(any(.not.ieee_is_finite(primary_pah_captures)).or.any(primary_pah_captures<0))return
+      endif
+      if(present(pah_population).neqv.dust_pah_enabled())return
+      if(present(primary_spectrum).neqv.dust_pah_enabled())return
+      if(dust_pah_enabled())then
+         if(dust_pah_charged())then
+            if(.not.present(gas_electrons).or..not.present(electron_capacity))return
+            if(present(phase_density).or.present(primary_pah_heat))return
+            if(size(gas_electrons)/=size(slots))return
+            if(any(.not.ieee_is_finite(gas_electrons)).or.any(gas_electrons<0))return
+            if(dust_pah_hydrogenated())then
+               if(.not.present(gas_atomic_h))return
+               if(size(gas_atomic_h)/=size(slots))return
+               if(any(.not.ieee_is_finite(gas_atomic_h)).or.any(gas_atomic_h<0))return
+            endif
+            if(dust_pah_h2_enabled())then
+               if(.not.present(gas_molecular_h2))return
+               if(size(gas_molecular_h2)/=size(slots))return
+               if(any(.not.ieee_is_finite(gas_molecular_h2)).or.any(gas_molecular_h2<0))return
+            else if(present(gas_molecular_h2))then
+               return
+            endif
+            if(.not.ieee_is_finite(electron_capacity).or.electron_capacity<=0)return
+         endif
+         if(.not.present(gas_energy).or..not.present(cell_weights).or..not.present(cell_collision_area))return
+         if(present(sublimation_bins))return
+         if(any(shape(pah_population)/=[dust_pah_nstate(),size(slots)]))return
+         if(any(shape(primary_spectrum)/=[snrt_dust_contract_number_groups,size(slots)]))return
+         if(any(.not.ieee_is_finite(pah_population)).or.any(pah_population<0))return
+         if(any(.not.ieee_is_finite(primary_spectrum)).or.any(primary_spectrum<0))return
+         if(any(abs(sum(primary_spectrum,dim=1)-primary_energy)> &
+              1d-10*max(primary_energy,tiny(1d0))))return
+      endif
+      if(present(sublimation_bins).neqv.present(sublimation_next))return
+      if(present(sublimation_bins))then
+         if(.not.snrt_runtime_cpu_material_allowed())return
+         if(.not.present(gas_energy).or..not.present(cell_weights).or..not.present(cell_material_u))return
+         if(any(shape(sublimation_bins)/=[4,size(slots)]).or.any(shape(sublimation_next)/=[4,size(slots)]))return
+         if(any(.not.ieee_is_finite(sublimation_bins)).or.any(sublimation_bins<0))return
+      endif
       if(present(cell_weights).neqv.dust_optics_enabled())return
       if(present(cell_weights))then
-         if(any(shape(cell_weights)/=[4,size(slots)]))return
+         if(any(shape(cell_weights)/=[merge(6,4,dust_iron_enabled()),size(slots)]))return
          if(any(.not.ieee_is_finite(cell_weights)).or.any(cell_weights<0))return
          if(any(abs(sum(cell_weights,dim=1)-1d0)>1d-12))return
       endif

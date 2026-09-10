@@ -1,0 +1,34 @@
+**Verdict: PROCEED WITH CORRECTIONS.** The bundle is well scoped and mostly reuses existing paths. Two scientific prechecks are missing, and the native admission is over-gated in one place. I could not write the plan file because no write tool was exposed in this session, so the audit is delivered here.
+
+## Q-GOAL
+
+Yes, directly, though modestly. A star whose birth Z exceeds 0.014 is not degraded today, it is a hard failure. The feedback integrator returns a provider error at `stellar_ssp_sources.f90:131`, and the radiation driver flags a transport failure at `snrt_ramses_driver.f90:1129`. Enriched nuclear gas can cross 0.014 within a few feedback cycles, so the upper bound is a run killer, not a cosmetic gap. The extension also builds the N-metallicity code path that the scientifically dominant low-Z extension will reuse. It does not address that low-Z gap, and the plan says so correctly.
+
+## Q-LEAN
+
+Remove or merge these:
+
+- **Drop the enumerated two-grid allowlist and the 45-per-Z count in Fortran.** The converter is the only place that can vet a grid physically. The binder already requires exact equality of mass, Z, fate, and age arrays with the audited feedback table at `snrt_parsec_source.f90:107`, and the audit already forces every Z branch to span 14 to 600 at `stellar_yield_audit.f90:159`. Keep structural checks only: Z ascending, at least two distinct Z, node count within the existing 512 cap.
+- **One MPI2 run, not two.** Use the phase wind model if it converts cleanly at all five Z, otherwise fixed. Generate the SED once per feedback package. The existing check already asserts fixed and phase SEDs differ only in the model line.
+- **Replace "compare matched source budgets" with one superset assertion.** For the five-grid outputs, every yields row and every SED node block belonging to Z 0.008 or 0.014 must be byte-identical to the two-grid rows. This proves the old physics is untouched inside the new grid more strongly than a budget comparison, and it extends the existing byte check in `.parsec-wind.Soq8Rf/check_sources.py`.
+- **No new fixtures.** Extend the two existing ones. Add Z 0.025 interior and 0.03 endpoint queries beside the current 0.011 checks, and a mismatch mode that binds a five-grid SED against the two-grid feedback and requires rejection.
+
+## Corrections and risks
+
+1. **Energetic domain precheck is missing.** The inventory checked residual nonnegativity only. PPISN energy is interpolated on Woosley 2017 He cores 34 to 64 and PISN on HW02 cores 64 to 133.3, and the converter raises outside both at `build_parsec_pair_feedback.py:87`. Higher Z means stronger mass loss and smaller cores, so a pair node at 0.017 to 0.03 may fall below 34 or 64. Check the M_HE column for every pair-fate node at the three new Z before coding. If any falls outside, the converter fails and that Z stays out. Do not bridge or clamp.
+
+2. **Photon inventory is unverified.** The plan assumes all_photons.zip holds tables for all 45 masses at the three new Z and that each photon end age precedes the track end. The SED converter raises on timing mismatch at `build_parsec_native_sed.py:151`. Confirm both and pin the combined archive hash before implementation. Keep 0.008 and 0.014 reading from the already pinned per-Z archives so their bytes cannot drift.
+
+3. **Grid semantics in the manifest.** The source_domain z entry currently doubles as node list and range. With five nodes a two-element range would silently imply Z 0.01 is inside. Make it the explicit sorted node list and have the SED converter iterate that list, failing if any Z lacks a photon table. Keep the solar_pair value exactly as today so the old manifest still validates. The hard dict compare at `build_parsec_native_sed.py:129` must become a derived check.
+
+4. **Identity strings.** wind_source_id and terminal_source_id are fixed to the Z008_Z014 label at `build_parsec_pair_feedback.py:281`. Give the five-grid its own label. Leave model_id unchanged since the physics model is unchanged.
+
+5. **Native binding semantics.** Three hardcoded sites in `snrt_parsec_source.f90` need generalizing: loader counts and Z values, the two-Z bind loop, and the interval weight. Mirror the feedback bracket search in `stellar_yield_interpolation.f90:319` exactly, including its relative tolerance for exact-node hits. Today the SED uses strict equality while feedback uses a small relative tolerance. That mismatch is harmless at two nodes but grows with more nodes. Same-Z-bracket semantics on both sides is the "common material/photon grid" guarantee.
+
+6. **Phase wind at Z 0.03.** The Eddington check at `build_parsec_pair_feedback.py:63` may reject the most luminous nodes. The plan's rule is correct: fail, do not cap. The deliverable then includes fixed on five-grid and phase only where its domain checks pass.
+
+7. **Restart run choice.** Set the initial metal fraction to about 0.025 so both new nodes and the new mixture are exercised. That Z is rejected by the old source, so the single run also demonstrates the behavior change from hard failure to working source.
+
+8. **Identity growth.** About 225 nodes and roughly 76 thousand knots give an SED identity near 1.7 million doubles, broadcast at startup and stored per dump. That fits existing paths and caps but is worth one line in the summary.
+
+Confirmed as fine: no namelist key or generator change is needed because selection is by file path, the 225-node total fits the 512 cap, helium content follows Z as a source coordinate and needs only a manifest note, and the low-Z branches with negative residuals stay out.

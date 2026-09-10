@@ -400,7 +400,7 @@ end subroutine upl
 !###########################################################
 !###########################################################
 subroutine interpol_hydro(u1,u2,nn)
-  use dust_mass_physics, only: dust_composition_enabled,dust_two_size_enabled
+  use dust_mass_physics, only: dust_composition_enabled,dust_two_size_enabled,dust_chimes_enabled
   use amr_commons
   use hydro_commons
   use poisson_commons
@@ -421,6 +421,15 @@ subroutine interpol_hydro(u1,u2,nn)
   real(dp),dimension(1:nvector)::erad
 
   oneover_twotondim=1.D0/dble(twotondim)
+
+  ! Piecewise-constant conservative prolongation is the admitted first-order
+  ! reference. It preserves phase mass/momentum, chemical sums and total E.
+  if(dust_relative_motion)then
+     do ind=1,twotondim
+        u2(1:nn,ind,:)=u1(1:nn,0,:)
+     enddo
+     return
+  endif
 
   do ind=1,twotondim
      iz=(ind-1)/4
@@ -537,12 +546,28 @@ subroutine interpol_hydro(u1,u2,nn)
   ! Same dependent aggregate as the conservative face flux. Each carrier's
   ! conservative prolongation remains unchanged; do not independently limit
   ! their sum into an inconsistent extra dust reservoir.
+  if(dust_chimes_enabled())then
+     ! Bounded composition prolongation: retain the parent's abundances,
+     ! with the conservative hydro density interpolation. This preserves
+     ! each species integral, charge and molecular/dust element reservation;
+     ! independent high-order species slopes need not preserve that simplex.
+     do i=1,nn
+        if(u1(i,0,1)<=0)then
+           call clean_stop;return
+        endif
+        do ind=1,twotondim
+           u2(i,ind,ichem:nvar)=u1(i,0,ichem:nvar)*u2(i,ind,1)/u1(i,0,1)
+           u2(i,ind,imetal)=u1(i,0,imetal)*u2(i,ind,1)/u1(i,0,1)
+        enddo
+     enddo
+  endif
   if(dust_composition_enabled())then
      if(dust_two_size_enabled())then
         u2(1:nn,:,idust_species)=u2(1:nn,:,idust_bins)+u2(1:nn,:,idust_bins+1)
         u2(1:nn,:,idust_species+1)=u2(1:nn,:,idust_bins+2)+u2(1:nn,:,idust_bins+3)
      endif
      u2(1:nn,:,idust)=u2(1:nn,:,idust_species)+u2(1:nn,:,idust_species+1)
+     if(idust_iron>0)u2(1:nn,:,idust)=u2(1:nn,:,idust)+u2(1:nn,:,idust_iron)+u2(1:nn,:,idust_iron+1)
   endif
 end subroutine interpol_hydro
 !###########################################################

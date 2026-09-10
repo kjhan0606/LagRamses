@@ -62,9 +62,6 @@ S_SIDM     = '17. SIDM'
 S_SGS      = '18. SGS Turbulence'
 S_POISSON  = '19. Poisson Solver'
 S_LIGHTCONE = '20. Lightcone'
-S_FDM      = '21. Fuzzy Dark Matter'
-S_ADM      = '22. Atomic Dark Matter'
-S_PBH      = '23. Primordial Black Holes'
 
 # --- Full parameter database ---
 PARAMS = [
@@ -132,15 +129,7 @@ PARAMS = [
     ParamDef('use_galileon','bool',False,  'RUN_PARAMS', S_MODGRAV,'Galileon scalar field'),
     ParamDef('use_coupled_de','bool',False,'RUN_PARAMS', S_DE,  'Coupled dark energy'),
     ParamDef('use_ede',    'bool', False,  'RUN_PARAMS', S_DE,  'Early dark energy'),
-    ParamDef('use_quintessence','bool',False,'RUN_PARAMS',S_DE, 'Quintessence field-level DE'),
-    ParamDef('use_kessence','bool',False,  'RUN_PARAMS', S_DE,  'Purely kinetic k-essence'),
-    ParamDef('use_chaplygin','bool',False, 'RUN_PARAMS', S_DE,  'Generalized Chaplygin gas'),
-    ParamDef('use_rvm',    'bool', False,  'RUN_PARAMS', S_DE,  'Running vacuum model'),
-    ParamDef('use_horndeski','bool',False, 'RUN_PARAMS', S_MODGRAV,'Horndeski mu(a,k) gravity'),
     ParamDef('use_sgs',    'bool', False,  'RUN_PARAMS', S_SGS, 'SGS turbulence model'),
-    ParamDef('use_fdm',    'bool', False,  'RUN_PARAMS', S_FDM, 'Fuzzy (axion) dark matter'),
-    ParamDef('use_adm',    'bool', False,  'RUN_PARAMS', S_ADM, 'Atomic dark matter'),
-    ParamDef('use_pbh',    'bool', False,  'RUN_PARAMS', S_PBH, 'Primordial black hole admixture'),
 
     # ====== COSMO_PARAMS ======
     ParamDef('omega_b',  'real', 0.045,  'COSMO_PARAMS', S_COSMO, 'Baryon density parameter'),
@@ -179,10 +168,6 @@ PARAMS = [
     ParamDef('nexpand',   'int',  1,       'AMR_PARAMS', S_AMR, 'Buffer cells for refinement'),
     ParamDef('ngridtot',  'int',  0,       'AMR_PARAMS', S_AMR, 'Total grid allocation (0=auto)'),
     ParamDef('nparttot',  'int',  0,       'AMR_PARAMS', S_AMR, 'Total particle allocation (0=auto)'),
-    ParamDef('ngridmax_auto', 'bool', False, 'AMR_PARAMS', S_AMR,
-             'Grow grid capacity at runtime instead of a fixed ngridmax'),
-    ParamDef('npartmax_auto', 'bool', False, 'AMR_PARAMS', S_AMR,
-             'Grow particle capacity at runtime instead of a fixed npartmax'),
     ParamDef('ngridmax',  'int',  0,       'AMR_PARAMS', S_AMR, 'Max grids per CPU (0=auto)'),
     ParamDef('npartmax',  'int',  0,       'AMR_PARAMS', S_AMR, 'Max particles per CPU (0=auto)'),
     ParamDef('boxlen',    'real', 1.0,     'AMR_PARAMS', S_AMR, 'Box length (code units)'),
@@ -215,6 +200,23 @@ PARAMS = [
     ParamDef('d_jeans_thre','real',0.0,    'REFINE_PARAMS', S_FPR, 'Jeans density threshold'),
 
     # ====== HYDRO_PARAMS ======
+    ParamDef('mhd_enabled','bool',False,'HYDRO_PARAMS',S_HYDRO,
+             'Ideal gas MHD: requires SOLVER=mhd build; CT+HLLD',visible_when='hydro==True'),
+    ParamDef('mhd_omp','bool',False,'HYDRO_PARAMS',S_HYDRO,
+             'Parallel MHD grid batches; shared CT/reflux updates serialized',visible_when='mhd_enabled==True'),
+    ParamDef('mhd_gpu_faces','bool',False,'HYDRO_PARAMS',S_HYDRO,
+             'HLLD face batches: free CUDA stream or CPU fallback; USE_CUDA=1, NENER=0',visible_when='mhd_enabled==True'),
+    ParamDef('mhd_seed','real_arr','0,0,0','HYDRO_PARAMS',S_HYDRO,
+             'Uniform Bx,By,Bz in code units (magnetic energy=B^2/2), not gauss',visible_when='mhd_enabled==True'),
+    ParamDef('riemann2d','str','hlld','HYDRO_PARAMS',S_HYDRO,
+             'CT edge EMF solver',visible_when='mhd_enabled==True',choices=['hlld']),
+    ParamDef('mhd_initial_condition','str','uniform','HYDRO_PARAMS',S_HYDRO,
+             'Uniform seed or gas-only analytic verification IC',visible_when='mhd_enabled==True',
+             choices=['uniform','alfven_x','brio_wu_x']),
+    ParamDef('slope_mag_type','int',1,'HYDRO_PARAMS',S_HYDRO,
+             'Magnetic slope limiter',visible_when='mhd_enabled==True',choices=[1,2]),
+    ParamDef('interpol_mag_type','int',1,'HYDRO_PARAMS',S_HYDRO,
+             'Divergence-preserving magnetic AMR interpolation',visible_when='mhd_enabled==True',choices=[0,1,2]),
     ParamDef('gamma',     'real', 1.4,     'HYDRO_PARAMS', S_HYDRO, 'Adiabatic index',
              visible_when='hydro==True'),
     ParamDef('courant_factor','real',0.8,  'HYDRO_PARAMS', S_HYDRO, 'Courant number (CFL)',
@@ -281,6 +283,11 @@ PARAMS = [
     # Feedback (SN)
     ParamDef('dust_mass_enabled','bool',False,'PHYSICS_PARAMS',S_FEED,
              'Bulk fixed-size dust condensation/growth/sputtering (SNRT v4, no external metal cooling/sinks)'),
+    ParamDef('dust_relative_motion','bool',False,'PHYSICS_PARAMS',S_FEED,
+             'Experimental first-order gas/grain dynamics; CHIMES+D03 CPU/OpenMP comparison, bounded Fe+PAH integration/restart verified'),
+    ParamDef('dust_drag_collision_cross_section_cm2','real',0.0,'PHYSICS_PARAMS',S_FEED,
+             'Explicit positive neutral hard-sphere gas cross section [cm2] for mean-free-path validity; no universal value/default',
+             visible_when='dust_relative_motion==True'),
     ParamDef('dust_mass_model','str','bulk_v1','PHYSICS_PARAMS',S_FEED,
              'Dust mass closure; composition model uses C/MgFeSiO4 with fixed mixed optics',
              choices=['bulk_v1','carbon_olivine_v1','carbon_olivine_2size_v1']),
@@ -290,6 +297,25 @@ PARAMS = [
     ParamDef('dust_optics_model','str','fixed_mix','PHYSICS_PARAMS',S_FEED,
              'D03 local four-bin absorption/emission and Qsca*(1-g) transport; requires DL01, radii 1e-6/1e-5, density 2.2/3.8',
              choices=['fixed_mix','d03_transport_v1']),
+    ParamDef('dust_sublimation','str','none','PHYSICS_PARAMS',S_FEED,
+             'Vacuum sublimation with phase energy; graphite-only or graphite+crystalline olivine comparison; DL01 two-size required',
+             choices=['none','gd89_graphite_bulk_v1','gd89_xu25_olivine_v1','gd89_xu25_olivine_rt_v1']),
+    ParamDef('dust_iron_model','str','none','PHYSICS_PARAMS',S_FEED,
+             'Electric-only Fe comparison, T<=300 K, primary representative energy<=4 eV; no magnetic absorption/destruction; growth is a separate opt-in',
+             choices=['none','fe_electric_compare_v1']),
+    ParamDef('dust_fe_condensation','real',0.0,'PHYSICS_PARAMS',S_FEED,
+             'Uncalibrated fraction [0,1] of non-Ia ejecta Fe remaining after olivine; all-large metallic Fe injection'),
+    ParamDef('dust_fe_kinetics','bool',False,'PHYSICS_PARAMS',S_FEED,
+             'Opt-in Fe seed accretion + Choban26/Nozawa06 thermal sputtering; no unresolved SN shocks or nonthermal erosion',
+             visible_when="dust_iron_model=='fe_electric_compare_v1'"),
+    ParamDef('dust_fe_sticking','real',0.0,'PHYSICS_PARAMS',S_FEED,
+             'Fe geometric sticking [0,1]; kinetics and dust_growth required. No nucleation/charge/adsorption heat',
+             visible_when='dust_fe_kinetics==True'),
+    ParamDef('dust_pah_model','str','none','PHYSICS_PARAMS',S_FEED,
+             'C24H12 absolute-IR comparisons: neutral (128 carriers, <=4 eV) or fixed-H neutral/cation (256, <=13.6 eV). No destruction',
+             choices=['none','pah_neutral_absolute_v1','pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1']),
+    ParamDef('dust_pah_condensation','real',0.0,'PHYSICS_PARAMS',S_FEED,
+             'Uncalibrated fraction [0,1] of non-Ia carbon after graphite; hydrogen taken from the same ejecta'),
     ParamDef('dust_size_radius_cm','real_arr','5e-7,1e-5','PHYSICS_PARAMS',S_FEED,
              'Two-size reference radii, small/large [cm]'),
     ParamDef('dust_size_density','real_arr','2.2,3.3','PHYSICS_PARAMS',S_FEED,
@@ -303,8 +329,8 @@ PARAMS = [
     ParamDef('dust_sn_shocks','bool',False,'PHYSICS_PARAMS',S_FEED,
              'Two-size ambient SN destruction: coupled energy/1e51 erg comparison; fresh ejecta protected, not resolution-calibrated'),
     ParamDef('dust_cooling','str','none','PHYSICS_PARAMS',S_FEED,
-             'none, depleted Z, WSS09 CIE, or SNRT H/He NEQ plus CIE metals (not metal NEQ)',
-             choices=['none','depleted_scalar','wss09_cie','snrt_hhe_cie_metals']),
+             'none, depleted Z, WSS09 CIE, H/He NEQ plus CIE metals, or native CHIMES NEQ; spectral selection is SNRT_SPECTRAL_MODEL environment, not a namelist field',
+             choices=['none','depleted_scalar','wss09_cie','snrt_hhe_cie_metals','chimes_neq_v1']),
     ParamDef('dust_growth','bool',True,'PHYSICS_PARAMS',S_FEED,'Enable cold gas metal accretion'),
     ParamDef('dust_sputtering','bool',True,'PHYSICS_PARAMS',S_FEED,'Enable thermal sputtering'),
     ParamDef('dust_condensation','real_arr','0.,0.2,0.15','PHYSICS_PARAMS',S_FEED,
@@ -413,7 +439,7 @@ PARAMS = [
     ParamDef('fate_map_sha256', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Fate table fingerprint'),
     ParamDef('fate_approval_id', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Fate approval identifier'),
     ParamDef('high_mass_preset', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
-             '40-120 Msun endpoint model (user-selected mode requires a history file)',
+             'Endpoint model; v1-v3 <=120 Msun, v4 <=600 Msun requires source_consistent',
              choices=['source_consistent', 'wind_only_collapse', 'mixed_remnant']),
     ParamDef('high_mass_history_path', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
              'Native history: v1=40--120, v2=13--120, v3=explicit CCSN subdomain; match channel bounds; optional AGB wind history retains terminal WD formation; non-CO tags exclude Ia WD supply; requires user_selected_model_v1 and HDF5 I/O'),
@@ -423,7 +449,7 @@ PARAMS = [
     ParamDef('use_agb', 'bool', True, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable AGB source (requires its own rows)'),
     ParamDef('use_snii', 'bool', True, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable core-collapse source/remnant accounting'),
     ParamDef('use_snia', 'bool', False, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable SNIa; requires matching binary SSP and DTD/event input; strict WD or explicitly approved effective SSP accounting'),
-    ParamDef('use_pisn', 'bool', False, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable PISN (not in user-selected high-mass route)'),
+    ParamDef('use_pisn', 'bool', False, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable P(P)ISN: requires a v4 history and matching wind/SNII/PISN mass windows'),
 
     # ====== CPL_PARAMS (Dark Energy) ======
     ParamDef('w0',   'real', -1.0, 'CPL_PARAMS', S_DE, 'DE equation of state w0',
@@ -498,12 +524,6 @@ PARAMS = [
     # ====== COUPLED_DE_PARAMS ======
     ParamDef('beta_cde', 'real', 0.0,     'COUPLED_DE_PARAMS', S_DE, 'Coupled DE coupling constant',
              visible_when='use_coupled_de==True'),
-    ParamDef('cde_friction', 'bool', False, 'COUPLED_DE_PARAMS', S_DE,
-             'Velocity-dependent friction term in the particle kick',
-             visible_when='use_coupled_de==True'),
-    ParamDef('cde_vary_mass', 'bool', False, 'COUPLED_DE_PARAMS', S_DE,
-             'DM mass evolution m(phi) in the Poisson source',
-             visible_when='use_coupled_de==True'),
 
     # ====== EDE_PARAMS ======
     ParamDef('omega_ede','real', 0.0,     'EDE_PARAMS', S_DE, 'Early dark energy density',
@@ -566,62 +586,6 @@ PARAMS = [
              visible_when='sidm==True'),
     ParamDef('sidm_frac_excited','real',0.0,'SIDM_PARAMS',S_SIDM,'Initial excited state fraction',
              visible_when='sidm==True'),
-
-    # ====== QUINT_PARAMS (field-level scalar DE) ======
-    ParamDef('quint_pot',     'int',  1,    'QUINT_PARAMS', S_DE, 'Potential (1=Ratra-Peebles, 2=exponential)',
-             visible_when='use_quintessence==True', choices=[1, 2]),
-    ParamDef('quint_ic_mode', 'int',  0,    'QUINT_PARAMS', S_DE, 'Initial-field mode (0=shooting to omega_l)',
-             visible_when='use_quintessence==True'),
-    ParamDef('quint_alpha',   'real', 1.0,  'QUINT_PARAMS', S_DE, 'Ratra-Peebles index (pot=1)',
-             visible_when='use_quintessence==True'),
-    ParamDef('quint_lambda',  'real', 1.0,  'QUINT_PARAMS', S_DE, 'Exponential slope (pot=2)',
-             visible_when='use_quintessence==True'),
-    ParamDef('quint_phi_ini', 'real', 0.01, 'QUINT_PARAMS', S_DE, 'Initial field value [Mpl] at a=1e-6',
-             visible_when='use_quintessence==True'),
-
-    # ====== KESSENCE_PARAMS (purely kinetic k-essence) ======
-    ParamDef('kes_x0', 'real', 0.5001, 'KESSENCE_PARAMS', S_DE, 'X(a=1) in M^4 units, must be > 0.5',
-             visible_when='use_kessence==True'),
-
-    # ====== CHAPLYGIN_PARAMS (generalized Chaplygin gas) ======
-    ParamDef('chaplygin_As',    'real', 0.7, 'CHAPLYGIN_PARAMS', S_DE, 'Chaplygin A_s (energy-density split at a=1)',
-             visible_when='use_chaplygin==True'),
-    ParamDef('chaplygin_alpha', 'real', 1.0, 'CHAPLYGIN_PARAMS', S_DE, 'Chaplygin alpha exponent (1=standard GCG)',
-             visible_when='use_chaplygin==True'),
-
-    # ====== RVM_PARAMS (running vacuum model) ======
-    ParamDef('rvm_nu', 'real', 0.01, 'RVM_PARAMS', S_DE, 'RVM nu coupling (Lambda(H) ~ nu*H^2)',
-             visible_when='use_rvm==True'),
-
-    # ====== HORNDESKI_PARAMS (quasi-static mu(a,k)) ======
-    ParamDef('hs_mu0',  'real', 0.1, 'HORNDESKI_PARAMS', S_MODGRAV, 'mu(a=1) - 1 (Poisson-source boost)',
-             visible_when='use_horndeski==True'),
-    ParamDef('hs_mass', 'real', 0.0, 'HORNDESKI_PARAMS', S_MODGRAV, 'Compton mass [h/Mpc]; 0 = scale-independent',
-             visible_when='use_horndeski==True'),
-
-    # ====== FDM_PARAMS (fuzzy/axion dark matter, core subset) ======
-    ParamDef('m_axion',    'real', 1.0e-22, 'FDM_PARAMS', S_FDM, 'Axion mass [eV]',
-             visible_when='use_fdm==True'),
-    ParamDef('fdm_courant','real', 0.5,     'FDM_PARAMS', S_FDM, 'FDM (Schrodinger-Poisson) Courant factor',
-             visible_when='use_fdm==True'),
-
-    # ====== ADM_PARAMS (atomic dark matter, core subset) ======
-    ParamDef('adm_alpha',    'real', 0.01,  'ADM_PARAMS', S_ADM, 'Dark fine-structure constant',
-             visible_when='use_adm==True'),
-    ParamDef('adm_mp',       'real', 1.0,   'ADM_PARAMS', S_ADM, 'Dark proton mass [GeV]',
-             visible_when='use_adm==True'),
-    ParamDef('adm_me_ratio', 'real', 1836.0,'ADM_PARAMS', S_ADM, 'Dark proton/electron mass ratio',
-             visible_when='use_adm==True'),
-    ParamDef('adm_xi',       'real', 0.5,   'ADM_PARAMS', S_ADM, 'Dark-to-visible temperature ratio xi=T_dark/T_visible',
-             visible_when='use_adm==True'),
-
-    # ====== PBH_PARAMS (primordial black holes, core subset) ======
-    ParamDef('pbh_table_file', 'str',  '',   'PBH_PARAMS', S_PBH, 'Evaporation table file path',
-             visible_when='use_pbh==True'),
-    ParamDef('pbh_fraction',   'real', 0.01, 'PBH_PARAMS', S_PBH, 'f_PBH: PBH fraction of omega_m',
-             visible_when='use_pbh==True'),
-    ParamDef('pbh_boost',      'real', 1.0,  'PBH_PARAMS', S_PBH, 'Small-scale clustering boost factor',
-             visible_when='use_pbh==True'),
 ]
 
 # Build lookup dict (case-insensitive keys)
@@ -728,6 +692,35 @@ def validate_params(values):
     values = _normalize_values(values)
     msgs = []
 
+    if not values.get('mhd_enabled') and any(values.get(k,False) for k in ('mhd_omp','mhd_gpu_faces')):
+        msgs.append(ValidationMsg('ERROR','MHD execution flags require mhd_enabled and SOLVER=mhd'))
+
+    if values.get('mhd_enabled'):
+        clean_mhd=lambda key: str(values.get(key,'')).strip("'\"").lower()
+        if (not values.get('hydro') or values.get('gpu_hydro',True) or
+                any(values.get(k,False) for k in ('use_sgs','dust_relative_motion')) or
+                clean_mhd('riemann')!='hlld' or clean_mhd('scheme') not in ('','muscl') or
+                clean_mhd('outformat')!='hdf5' or
+                (values.get('nrestart',0)>0 and clean_mhd('informat')!='hdf5')):
+            msgs.append(ValidationMsg('ERROR','Gas MHD requires hydro, CPU hydro, muscl/hlld, HDF5; no SGS or separate dust dynamics'))
+        if any(values.get(k,False) for k in ('sink','sink_agn','agn')):
+            msgs.append(ValidationMsg('WARNING','MHD sink/AGN requires NENER=0; accretion retains magnetic face flux on the mesh.'))
+        ic=clean_mhd('mhd_initial_condition')
+        if ic not in ('','uniform','alfven_x','brio_wu_x'):
+            msgs.append(ValidationMsg('ERROR','Unknown mhd_initial_condition'))
+        if ic in ('alfven_x','brio_wu_x') and values.get('cosmo'):
+            msgs.append(ValidationMsg('ERROR','Analytic MHD wave/shock ICs require cosmo=false'))
+        if ic=='brio_wu_x' and abs(float(values.get('gamma',1.4))-2)>1e-12:
+            msgs.append(ValidationMsg('ERROR','Brio-Wu reference requires gamma=2'))
+        try:
+            raw=values.get('mhd_seed','0,0,0')
+            seed=raw if isinstance(raw,(list,tuple)) else str(raw).split(',')
+            if len(seed)!=3 or not all(math.isfinite(float(str(x).lower().replace('d','e'))) for x in seed):
+                raise ValueError('seed')
+        except (TypeError,ValueError):
+            msgs.append(ValidationMsg('ERROR','mhd_seed requires three finite code-unit components'))
+        msgs.append(ValidationMsg('WARNING','Use a separately built SOLVER=mhd HDF5 binary: B-left=6:8, CR/passives shift by 3, B-right=NVAR+1:NVAR+3. No dust Lorentz force or field-aligned CR transport.'))
+
     if values.get('dust_mass_enabled'):
         clean = lambda key: str(values.get(key, '')).strip("'\"").lower()
         flag = lambda key: clean(key) in ('true', '.true.', 't', '1')
@@ -756,10 +749,74 @@ def validate_params(values):
         model=clean('dust_mass_model') or 'bulk_v1'
         coupling=clean('dust_cooling') or 'none'
         material=clean('dust_material_model') or 'fixed_mix'
+        relative=flag('dust_relative_motion')
+        sublimation=clean('dust_sublimation') or 'none'
+        valid=valid and sublimation in ('none','gd89_graphite_bulk_v1','gd89_xu25_olivine_v1','gd89_xu25_olivine_rt_v1')
+        if sublimation!='none':
+            valid=valid and model=='carbon_olivine_2size_v1' and material=='dl01_composition_v1'
+            if sublimation=='gd89_xu25_olivine_rt_v1':
+                valid=valid and coupling=='chimes_neq_v1' and clean('dust_optics_model')=='d03_transport_v1'
+                msgs.append(ValidationMsg('WARNING','Coupled vacuum sublimation uses adaptive native CPU/OpenMP material, lagged opacities/Cv and an exchange-enabled hot IR contract; SNRT_RT_ENABLE=1 required.'))
+            else:
+                msgs.append(ValidationMsg('WARNING','Vacuum sublimation is split before RT; requires a matching native binary/hot material contract. No PAH evaporation or vapor backpressure.'))
+            if sublimation in ('gd89_xu25_olivine_v1','gd89_xu25_olivine_rt_v1'):
+                msgs.append(ValidationMsg('WARNING','Olivine uses crystalline Xu surface rates and an ideal-endmember atomic phase reference, not a measured amorphous evaporation/latent-heat model.'))
         valid=valid and material in ('fixed_mix','dl01_composition_v1')
         if material=='dl01_composition_v1':
             valid=valid and model=='carbon_olivine_2size_v1'
         optics=clean('dust_optics_model') or 'fixed_mix'
+        iron=clean('dust_iron_model') or 'none'
+        valid=valid and iron in ('none','fe_electric_compare_v1')
+        try:
+            fe_fraction=float(str(values.get('dust_fe_condensation',0)).lower().replace('d','e'))
+            fe_sticking=float(str(values.get('dust_fe_sticking',0)).lower().replace('d','e'))
+            valid=valid and math.isfinite(fe_fraction) and 0<=fe_fraction<=1
+            valid=valid and math.isfinite(fe_sticking) and 0<=fe_sticking<=1
+            if iron=='none':
+                valid=valid and fe_fraction==0 and fe_sticking==0 and not flag('dust_fe_kinetics')
+            else:
+                valid=valid and float(values.get('dust_injection_temperature',20))<=300
+        except (ValueError,TypeError):
+            valid=False
+        if flag('dust_fe_kinetics'):
+            valid=valid and not flag('dust_sn_shocks')
+        else:
+            valid=valid and fe_sticking==0
+        if iron!='none':
+            valid=valid and optics=='d03_transport_v1' and sublimation=='none'
+            if coupling!='chimes_neq_v1':
+                valid=valid and coupling=='none' and not relative and fe_fraction==0 and not flag('dust_fe_kinetics')
+                valid=valid and not any(flag(k) for k in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering','dust_sn_shocks'))
+                try:
+                    valid=valid and all(float(v.lower().replace('d','e'))==0 for v in
+                        str(values.get('dust_condensation','0,.2,.15')).split(','))
+                except (ValueError,TypeError):
+                    valid=False
+            msgs.append(ValidationMsg('WARNING','Fe electric-only comparison needs DUST_IRON=1, CPU/OpenMP material and matching contract. CHIMES=0 permits only static seeds: all grain mass reactions off, NVAR>=32 for NENER1/virial. CHIMES=1 retains kinetics/injection options. Rejects grain T>300 K or absorption above 4 eV; spectral mode tests actual nodes, not a group mean. No magnetic opacity or photoelectron escape.'))
+        pah=clean('dust_pah_model') or 'none'
+        valid=valid and pah in ('none','pah_neutral_absolute_v1','pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1')
+        try:
+            pah_fraction=float(str(values.get('dust_pah_condensation',0)).lower().replace('d','e'))
+            valid=valid and math.isfinite(pah_fraction) and 0<=pah_fraction<=1
+            if pah=='none': valid=valid and pah_fraction==0
+        except (ValueError,TypeError):
+            valid=False
+        if pah!='none':
+            valid=valid and coupling=='chimes_neq_v1' and optics=='d03_transport_v1' and sublimation=='none'
+            valid=valid and not flag('cosmo')
+            pah_nvar=(330 if relative else 315)+(8 if relative else 2)*(iron!='none')
+            if pah in ('pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1'):
+                valid=valid and not relative and iron=='none'
+                msgs.append(ValidationMsg('WARNING','H-state charged PAH: DUST_PAH=1 DUST_PAH_CHARGE=1 DUST_PAH_H=1 CHIMES ABI5, hydro NVAR=3771. H0--13, 3584 carriers; M13 rates with DL01 modes and shared normal-H optics/cooling. Noncosmo, no Fe/drift, gas 10--10000 K, photons <=13.6 eV. No carbon destruction, H2 or higher charge states.'))
+                if pah=='pah_h2_rehydrogenation_v1':
+                    msgs[-1]=ValidationMsg('WARNING',msgs[-1].msg.replace('No carbon destruction, H2 or higher charge states.',
+                        'Vacancy-refilling H2 capture at the M13 bound rate, k=5e-13 cm3/s: cation H0--10 -> H2--12. '
+                        'Not an upper bound on H2 effects. No carbon destruction, H2 formation/superhydrogenation or higher charges.'))
+            elif pah=='pah_charge_fixed_h_v1':
+                valid=valid and not relative and iron=='none'
+                msgs.append(ValidationMsg('WARNING','Fixed-H charged PAH: DUST_PAH=1 DUST_PAH_CHARGE=1 CHIMES=1/ABI5, hydro NVAR=443; SNRT_PAH_NEUTRAL_TABLE and SNRT_PAH_ION_TABLE. Co-advection, no Fe, noncosmo; Tgas 10--10000 K, photons <=13.6 eV. No H loss/addition, destruction or general survival qualification.'))
+            else:
+                msgs.append(ValidationMsg('WARNING',f'PAH needs DUST_PAH=1/CHIMES=1, NVAR={pah_nvar}, SNRT_PAH_NEUTRAL_TABLE and absolute IR. Neutral C24H12, Rayleigh continuation beyond 1000 micron, primary <=4 eV; no charging/destruction/cosmological bath.'))
         valid=valid and optics in ('fixed_mix','d03_transport_v1')
         if optics=='d03_transport_v1':
             valid=valid and material=='dl01_composition_v1'
@@ -769,7 +826,33 @@ def validate_params(values):
                     valid=valid and [float(x) for x in raw.split(',')]==expected
             except (TypeError,ValueError):
                 valid=False
-        valid=valid and model in ('bulk_v1','carbon_olivine_v1','carbon_olivine_2size_v1') and coupling in ('none','depleted_scalar','wss09_cie','snrt_hhe_cie_metals')
+        valid=valid and model in ('bulk_v1','carbon_olivine_v1','carbon_olivine_2size_v1') and coupling in ('none','depleted_scalar','wss09_cie','snrt_hhe_cie_metals','chimes_neq_v1')
+        if coupling=='chimes_neq_v1':
+            valid=valid and model=='carbon_olivine_2size_v1' and material=='dl01_composition_v1'
+            try:
+                valid=valid and abs(float(str(values.get('gamma',5/3)).lower().replace('d','e'))-5/3)<1e-12
+            except (ValueError,TypeError):
+                valid=False
+            msgs.append(ValidationMsg('WARNING','CHIMES requires CHIMES=1/DUST_LIVE=1/NVAR>=187, native pinned tables and nine-group RT; first-order split and local molecular shielding.'))
+            msgs.append(ValidationMsg('WARNING','Optional SNRT_SPECTRAL_MODEL=chimes_hot_atomic_maxent128_fs2010_v1 requires SNRT_CHIMES_BAND_TABLE, T>1e5 K, zero molecules/dust and all dust mass processes off; it is NOT the default grey molecular receiver.'))
+        if relative:
+            relative_valid=(model=='carbon_olivine_2size_v1' and coupling=='chimes_neq_v1' and
+                            material=='dl01_composition_v1' and optics=='d03_transport_v1' and
+                            sublimation!='gd89_xu25_olivine_rt_v1' and
+                            not any(flag(k) for k in ('gpu_hydro','use_sgs','pressure_fix','isothermal')))
+            try:
+                floor=float((clean('t2_star') or '0').replace('d','e'))
+                cross_section=float((clean('dust_drag_collision_cross_section_cm2') or '0').replace('d','e'))
+                relative_valid=relative_valid and math.isfinite(floor) and floor<=0 and math.isfinite(cross_section) and cross_section>0
+                relative_valid=relative_valid and float(clean('interpol_var') or '0')==0
+            except (TypeError,ValueError):
+                relative_valid=False
+            valid=valid and relative_valid
+            if not relative_valid:
+                msgs.append(ValidationMsg('ERROR','Relative dust needs CHIMES+D03/two-size/DL01, CPU hydro, interpol_var=0, positive explicit gas collision cross section; no SGS, pressure_fix, isothermal, T2_star>0 or IR-coupled sublimation.'))
+            phases=4+2*(iron!='none')+(pah!='none')
+            nvar=187+2*(iron!='none')+128*(pah!='none')+3*phases
+            msgs.append(ValidationMsg('WARNING',f'EXPERIMENTAL bounded first-order relative dust: DUST_DYNAMICS=1 SNRT=1 DUST_LIVE=1 CHIMES=1 NENER=1 NVAR={nvar}, {phases} grain phases. Primary paired transport and material require OpenMP, not forced CUDA; version-4 gas-exchange-enabled material contract required. Fe+PAH MPI2/OMP2 two-step integration/restart verified; not production-ready automatically.'))
         valid=valid and flag('cooling')==(coupling!='none')
         if flag('dust_sn_shocks'):
             valid=valid and model=='carbon_olivine_2size_v1'
@@ -784,7 +867,13 @@ def validate_params(values):
         if not valid:
             msgs.append(ValidationMsg('ERROR','Dust needs valid parameters, periodic noncosmo metal hydro, channel feedback, HDF5, no sinks; cooling requires explicit closure/original/no UV; WSS09 requires composition'))
         msgs.append(ValidationMsg('WARNING','Dust needs active SNRT v4 material; D03 is an explicit common-T/transport comparison. WSS09 CIE is not local-radiation/NEQ cooling; no T/He extrapolation'))
-    elif (str(values.get('dust_mass_model','bulk_v1')).strip("'\"")!='bulk_v1' or
+    elif (str(values.get('dust_relative_motion',False)).strip("'\"").lower() in ('true','.true.','t','1') or
+          str(values.get('dust_mass_model','bulk_v1')).strip("'\"")!='bulk_v1' or
+          str(values.get('dust_pah_model','none')).strip("'\"")!='none' or values.get('dust_pah_condensation',0)!=0 or
+          str(values.get('dust_iron_model','none')).strip("'\"")!='none' or values.get('dust_fe_condensation',0)!=0 or
+          values.get('dust_fe_sticking',0)!=0 or
+          str(values.get('dust_fe_kinetics',False)).strip("'\"").lower() in ('true','.true.','t','1') or
+          str(values.get('dust_sublimation','none')).strip("'\"")!='none' or
           str(values.get('dust_cooling','none')).strip("'\"")!='none' or values.get('dust_sn_shocks',False) or
           str(values.get('dust_material_model','fixed_mix')).strip("'\"")!='fixed_mix' or
           str(values.get('dust_optics_model','fixed_mix')).strip("'\"")!='fixed_mix'):
@@ -810,7 +899,7 @@ def validate_params(values):
             periodic = False
         if (not values.get('hydro') or values.get('gpu_hydro') or values.get('cosmo') or
                 not periodic or
-                clean('riemann') not in ('', 'hllc', 'hll', 'llf') or
+                clean('riemann') not in (('', 'hlld') if values.get('mhd_enabled') else ('', 'hllc', 'hll', 'llf')) or
                 any(flag(key) for key in ('sink', 'sink_agn', 'agn', 'delayed_cooling')) or
                 clean('outformat') != 'hdf5' or
                 (values.get('nrestart', 0) > 0 and clean('informat') != 'hdf5') or
@@ -843,9 +932,26 @@ def validate_params(values):
                 (values.get('nrestart', 0) > 0 and str(values.get('informat', '')).strip("'\"") != 'hdf5')):
             msgs.append(ValidationMsg('ERROR', 'User-selected source requires channel-resolved PIC and HDF5 I/O'))
         if (str(values.get('yield_source_basis', '')).strip("'\"") != 'per_star_cumulative' or
-                not values.get('use_wind', True) or not values.get('use_snii', True) or
-                values.get('use_pisn', False)):
-            msgs.append(ValidationMsg('ERROR', 'User-selected source requires per-star wind+SNII and PISN off'))
+                not values.get('use_wind', True) or not values.get('use_snii', True)):
+            msgs.append(ValidationMsg('ERROR', 'User-selected source requires per-star wind+SNII'))
+        if values.get('use_pisn', False):
+            if preset != 'source_consistent':
+                msgs.append(ValidationMsg('ERROR', 'P(P)ISN v4 requires source_consistent'))
+            try:
+                def mass_window(name):
+                    raw = values.get(name, '')
+                    parts = raw.split(',') if isinstance(raw, str) else raw
+                    return [float(str(x).strip().lower().replace('d', 'e')) for x in parts]
+                lo, hi = mass_window('channel_mass_min_msun'), mass_window('channel_mass_max_msun')
+                il, ih = float(values['imf_mass_min_msun']), float(values['imf_mass_max_msun'])
+                good = (len(lo) == len(hi) == 5 and all(math.isfinite(x) for x in lo+hi+[il, ih])
+                        and lo[0] == lo[2] == lo[4] and hi[0] == hi[2] == hi[4]
+                        and 0.08 <= il <= lo[0] < hi[0] <= ih and lo[0] >= 8 and hi[0] <= 600)
+            except (KeyError, TypeError, ValueError):
+                good = False
+            if not good:
+                msgs.append(ValidationMsg('ERROR', 'P(P)ISN v4 needs matching five-entry wind/SNII/PISN mass windows, nested in its IMF and source domain [8,600]'))
+            msgs.append(ValidationMsg('WARNING', 'P(P)ISN requires a validated v4 history: wind/SNII/PISN windows must match its domain and fit the IMF; runtime verifies the file'))
         population = str(values.get('population_model', '')).strip("'\"")
         try:
             fraction = float(values.get('binary_fraction', 0.0))
@@ -935,10 +1041,7 @@ GROUP_ORDER = [
     'FR_PARAMS', 'NDGP_PARAMS', 'SYMMETRON_PARAMS',
     'DILATON_PARAMS', 'GALILEON_PARAMS',
     'COUPLED_DE_PARAMS', 'EDE_PARAMS',
-    'QUINT_PARAMS', 'KESSENCE_PARAMS', 'CHAPLYGIN_PARAMS',
-    'RVM_PARAMS', 'HORNDESKI_PARAMS',
     'MOND_PARAMS', 'SGS_PARAMS', 'SIDM_PARAMS',
-    'FDM_PARAMS', 'ADM_PARAMS', 'PBH_PARAMS',
 ]
 
 # Groups that are always emitted (even if empty)
@@ -964,14 +1067,6 @@ GROUP_REQUIRES = {
     'MOND_PARAMS': 'use_mond',
     'SGS_PARAMS': 'use_sgs',
     'SIDM_PARAMS': 'sidm',
-    'QUINT_PARAMS': 'use_quintessence',
-    'KESSENCE_PARAMS': 'use_kessence',
-    'CHAPLYGIN_PARAMS': 'use_chaplygin',
-    'RVM_PARAMS': 'use_rvm',
-    'HORNDESKI_PARAMS': 'use_horndeski',
-    'FDM_PARAMS': 'use_fdm',
-    'ADM_PARAMS': 'use_adm',
-    'PBH_PARAMS': 'use_pbh',
 }
 
 

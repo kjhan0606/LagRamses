@@ -9,6 +9,12 @@
 #include <cstdlib>
 #include <limits>
 #include "snrt_species_dust_cell.h"
+
+// Explicit capability rejection, before allocations, launches or host writes.
+// Auto mode admits paired transport to OpenMP; forced CUDA must not replay it.
+extern "C" int snrt_cuda_species_dust_energy_c(float*,const float*,const int*,const float*,const float*,const float*,
+    float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,double*,double*,const double*,
+    double*,double*,double*) { return 8; }
 #include "../cuRamses/cuda_stream_pool.h"
 
 namespace {
@@ -978,11 +984,11 @@ __global__ void snrt_cap_multigroup_species_dust_absorption_kernel(
     float *available_species, float *absorbed_hhe_species,
     float *absorbed_dust_group, float *returned_group, float *raw_group,
     float *absorbed_group, float *absorbed_total,
-    int nowned, int nwork, int ndirection, int ngroup) {
+    int nowned, int nwork, int ndirection, int ngroup,const float *direction,double *dust_moment) {
   const int cell = blockIdx.x * blockDim.x + threadIdx.x;
   snrt_cap_species_dust_cell(state,absorbed_direction,optical_depth_species,optical_depth_dust,
       available_species,absorbed_hhe_species,absorbed_dust_group,returned_group,raw_group,
-      absorbed_group,absorbed_total,nowned,nwork,ndirection,ngroup,cell);
+      absorbed_group,absorbed_total,nowned,nwork,ndirection,ngroup,cell,direction,dust_moment);
 }
 
 }  // namespace
@@ -1206,7 +1212,8 @@ static int snrt_species_dust_stream_impl(
     float *absorbed_hhe_species_host, float *absorbed_dust_group_host,
     float *returned_group_host, float *raw_group_host,
     float *absorbed_group_host, float *absorbed_host,
-    int nowned, int nwork, int ndirection, int ngroup, float cdt_over_dx, cudaStream_t stream) {
+    int nowned, int nwork, int ndirection, int ngroup, float cdt_over_dx, cudaStream_t stream,
+    double *dust_moment_host=nullptr) {
   if (state_host == nullptr || direction_host == nullptr || neighbor_host == nullptr ||
       optical_depth_host == nullptr || optical_depth_species_host == nullptr ||
       optical_depth_dust_host == nullptr || available_species_host == nullptr ||
@@ -1224,6 +1231,8 @@ static int snrt_species_dust_stream_impl(
   if (per_group > max_long / ngroup) return 1;
   const long long total = per_group * ngroup;
   const long long group_count = static_cast<long long>(nowned) * ngroup;
+  if(dust_moment_host && static_cast<unsigned long long>(group_count)>
+      std::numeric_limits<size_t>::max()/sizeof(double)/3)return 1;
   if (group_count > max_long / 3) return 1;
   const long long species_count = 3 * group_count;
   const long long inventory_count = 3 * static_cast<long long>(nowned);
@@ -1243,6 +1252,8 @@ static int snrt_species_dust_stream_impl(
   const size_t group_bytes = static_cast<size_t>(group_count) * sizeof(float);
   const size_t species_bytes = static_cast<size_t>(species_count) * sizeof(float);
   const size_t inventory_bytes = static_cast<size_t>(inventory_count) * sizeof(float);
+  const size_t moment_bytes=dust_moment_host?static_cast<size_t>(group_count)*3*sizeof(double):0;
+  double *dust_moment_device=nullptr;
   float *state_device = nullptr;
   float *transport_device = nullptr;
   float *direction_device = nullptr;
@@ -1260,6 +1271,7 @@ static int snrt_species_dust_stream_impl(
   int *invalid_device = nullptr;
   int status = 1;
 
+  if(moment_bytes && cudaMallocAsync(&dust_moment_device,moment_bytes,stream)!=cudaSuccess)goto done;
   if (cudaMallocAsync(&state_device, state_bytes, stream) != cudaSuccess) goto done;
   if (cudaMallocAsync(&transport_device, state_bytes, stream) != cudaSuccess) goto done;
   if (cudaMallocAsync(&direction_device, direction_bytes, stream) != cudaSuccess) goto done;
@@ -1331,10 +1343,12 @@ static int snrt_species_dust_stream_impl(
         transport_device, state_device, tau_species_device, tau_dust_device,
         available_species_device, absorbed_hhe_species_device,
         absorbed_dust_group_device, returned_group_device, raw_group_device,
-        absorbed_group_device, absorbed_device, nowned, nwork, ndirection, ngroup);
+        absorbed_group_device, absorbed_device, nowned, nwork, ndirection, ngroup,direction_device,dust_moment_device);
     if (cudaGetLastError() != cudaSuccess || cudaStreamSynchronize(stream) != cudaSuccess) goto done;
   }
 
+  if(moment_bytes && cudaMemcpyAsync(dust_moment_host,dust_moment_device,moment_bytes,
+      cudaMemcpyDeviceToHost,stream)!=cudaSuccess)goto done;
   if (cudaMemcpyAsync(state_host, transport_device, state_bytes, cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
   if (cudaMemcpyAsync(available_species_host, available_species_device, inventory_bytes,
                  cudaMemcpyDeviceToHost, stream) != cudaSuccess) goto done;
@@ -1354,6 +1368,7 @@ static int snrt_species_dust_stream_impl(
   status = 0;
 
 done:
+  if(dust_moment_device && cudaFreeAsync(dust_moment_device,stream)!=cudaSuccess)status=1;
   if (invalid_device && cudaFreeAsync(invalid_device, stream) != cudaSuccess) status = 1;
   if (absorbed_device && cudaFreeAsync(absorbed_device, stream) != cudaSuccess) status = 1;
   if (absorbed_group_device && cudaFreeAsync(absorbed_group_device, stream) != cudaSuccess) status = 1;
@@ -1397,4 +1412,17 @@ extern "C" int snrt_cuda_species_dust_batch_c(
   return snrt_species_dust_stream_impl(state_host,direction_host,neighbor_host,optical_depth_host,optical_depth_species_host,
       optical_depth_dust_host,available_species_host,absorbed_hhe_species_host,absorbed_dust_group_host,
       returned_group_host,raw_group_host,absorbed_group_host,absorbed_host,nowned,nwork,ndirection,ngroup,cdt_over_dx,cuda_get_stream_internal(slot));
+}
+
+extern "C" int snrt_cuda_species_dust_moment_c(float *state,const float *direction,const int *neighbor,const float *tau,
+    const float *stau,const float *dtau,float *available,float *hhe,float *dust,float *returned,float *raw,
+    float *group,float *absorbed,int no,int nw,int nd,int ng,float cdt,double *moment) {
+  return snrt_species_dust_stream_impl(state,direction,neighbor,tau,stau,dtau,available,hhe,dust,returned,raw,
+      group,absorbed,no,nw,nd,ng,cdt,nullptr,moment);
+}
+extern "C" int snrt_cuda_species_dust_moment_batch_c(float *state,const float *direction,const int *neighbor,const float *tau,
+    const float *stau,const float *dtau,float *available,float *hhe,float *dust,float *returned,float *raw,
+    float *group,float *absorbed,int no,int nw,int nd,int ng,float cdt,int slot,double *moment) {
+  return snrt_species_dust_stream_impl(state,direction,neighbor,tau,stau,dtau,available,hhe,dust,returned,raw,
+      group,absorbed,no,nw,nd,ng,cdt,cuda_get_stream_internal(slot),moment);
 }

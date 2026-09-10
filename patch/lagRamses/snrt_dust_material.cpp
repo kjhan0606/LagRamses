@@ -7,6 +7,10 @@ using std::isfinite;
 #include <new>
 #include <omp.h>
 
+extern "C" double snrt_dust_gas_transfer_c(double gas,double cv,double kdt,double td) {
+  return dust_gas_transfer(gas,cv,kdt,td);
+}
+
 extern "C" int snrt_dust_material_openmp_c(const double *input,const double *table,double *output,
     int nc,int ng,int nt,int use_u,double dt,double background,double bath,double tolerance,int threads) {
   if(nc<1||ng<1||nt<2||use_u<0||use_u>15||use_u==4||

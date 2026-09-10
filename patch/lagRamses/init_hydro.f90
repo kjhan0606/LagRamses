@@ -26,8 +26,8 @@ subroutine init_hydro
   ! Allocate conservative, cell-centered variables arrays
   !------------------------------------------------------
   ncell=ncoarse+twotondim*ngridmax
-  allocate(uold(1:ncell,1:nvar))
-  allocate(unew(1:ncell,1:nvar))
+  allocate(uold(1:ncell,1:nvar_all))
+  allocate(unew(1:ncell,1:nvar_all))
   ! uold/unew: Active cells initialized by restart reader or init_flow_fine.
   ! Free-list cells get zero from mmap(MAP_ANONYMOUS) lazy page allocation.
   ! Skip full-array zeroing to avoid paging in 18 GB at startup.

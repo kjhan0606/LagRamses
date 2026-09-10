@@ -44,8 +44,10 @@ subroutine courant_fine(ilevel)
   ncache=active(ilevel)%ngrid
 
 #ifdef HYDRO_CUDA
-  call courant_fine_hybrid(ilevel, ncache, dx, vol, mass_loc, ekin_loc, eint_loc, dt_loc)
-#else
+  if(.not.dust_relative_motion)then
+     call courant_fine_hybrid(ilevel, ncache, dx, vol, mass_loc, ekin_loc, eint_loc, dt_loc)
+  else
+#endif
 !$omp parallel do private(igrid,ngrid,imass_loc,iekin_loc,ieint_loc,idt_loc) &
 !$omp& reduction(+:mass_loc,ekin_loc,eint_loc), reduction(min:dt_loc)
   do igrid=1,ncache,nvector
@@ -56,6 +58,8 @@ subroutine courant_fine(ilevel)
      eint_loc = eint_loc + ieint_loc
      dt_loc = min(dt_loc, idt_loc)
   enddo
+#ifdef HYDRO_CUDA
+  endif
 #endif
 
   ! Compute global quantities
@@ -273,6 +277,9 @@ end subroutine courant_gpu_flush
 !###############################################
 !###############################################
 subroutine sub_courant_fine(ilevel,igrid,ngrid, mass_loc,ekin_loc,eint_loc,dt_loc)
+#ifdef DUST_DYNAMICS
+  use dust_dynamics_runtime, only: dust_dynamics_eos
+#endif
   use amr_commons
   use hydro_commons
   use poisson_commons
@@ -290,6 +297,10 @@ subroutine sub_courant_fine(ilevel,igrid,ngrid, mass_loc,ekin_loc,eint_loc,dt_lo
   real(kind=8)::mass_loc,ekin_loc,eint_loc,dt_loc
   real(dp),dimension(1:nvector,1:nvar)::uu
   real(dp),dimension(1:nvector,1:ndim)::gg
+#ifdef DUST_DYNAMICS
+  real(dp)::phase_thermal,phase_ke,phase_v(3),phase_speed(3),accel_dt
+  integer::phase_status
+#endif
   mass_loc=0.0d0
   ekin_loc=0.0d0
   eint_loc=0.0d0
@@ -337,6 +348,31 @@ subroutine sub_courant_fine(ilevel,igrid,ngrid, mass_loc,ekin_loc,eint_loc,dt_lo
            end do
         end if
 
+#ifdef DUST_DYNAMICS
+        if(dust_relative_motion)then
+           do i=1,nleaf
+              call dust_dynamics_eos(uu(i,:),phase_thermal,phase_ke,phase_v,phase_speed,phase_status)
+              if(phase_status/=0)then
+                 write(*,*)'ERROR: relative dust CFL state rejected',ind_leaf(i)
+                 call clean_stop
+              endif
+              mass_loc=mass_loc+uu(i,1)*vol
+              ekin_loc=ekin_loc+uu(i,ndim+2)*vol
+              eint_loc=eint_loc+phase_thermal*vol
+              ! Extra factor 1/2 bounds both incident face contributions of
+              ! the shared multidimensional Rusanov positivity estimate.
+              ! A common global maximum bounds faces whose left/right cells
+              ! have different fastest axes, including coarse/fine neighbors.
+              dt_lev=.5d0*courant_factor*dx/(ndim*maxval(phase_speed))
+              if(maxval(abs(gg(i,:)))>0)then
+                 accel_dt=sqrt(dx/maxval(abs(gg(i,:))))
+                 dt_lev=min(dt_lev,.5d0*courant_factor*accel_dt)
+              endif
+              dt_loc=min(dt_loc,dt_lev)
+           enddo
+           cycle
+        endif
+#endif
         ! Compute total mass
         do i=1,nleaf
            mass_loc=mass_loc+uu(i,1)*vol

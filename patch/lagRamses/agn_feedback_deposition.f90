@@ -230,17 +230,23 @@ contains
   end function agn_eddington_ratio
 
   pure subroutine agn_deposit_cell(row, density_delta, momentum_delta, energy_delta, &
-       volume, gamma, scale_t2, temperature_cap, deferred_energy, ierr)
+       volume, gamma, scale_t2, temperature_cap, deferred_energy, ierr, protected_energy)
     real(dp), intent(inout) :: row(5)
     real(dp), intent(in) :: density_delta, momentum_delta(3), energy_delta
     real(dp), intent(in) :: volume, gamma, scale_t2, temperature_cap
     real(dp), intent(out) :: deferred_energy
     integer, intent(out) :: ierr
+    ! Unchanged magnetic/nonthermal energy must never enter a gas temperature cap.
+    real(dp), intent(in), optional :: protected_energy
+    real(dp) :: nonthermal
     real(dp) :: staged(5), kinetic_old, kinetic_new, kinetic_input
     real(dp) :: internal_old, internal_trial, internal_limit, trial_energy, tol
 
     ierr = agn_deposit_invalid_receiver
     deferred_energy = 0d0
+    nonthermal=0d0
+    if(present(protected_energy))nonthermal=protected_energy
+    if(.not.ieee_is_finite(nonthermal).or.nonthermal<0d0)return
     if (.not. all(ieee_is_finite(row)) .or. row(1)<=0d0) return
     ierr = agn_deposit_invalid_source
     if (.not. all(ieee_is_finite(momentum_delta)) .or. &
@@ -261,9 +267,9 @@ contains
     else if (any(momentum_delta /= 0d0)) then
        return
     end if
-    internal_old = row(5) - kinetic_old
+    internal_old = row(5) - kinetic_old - nonthermal
     trial_energy = row(5) + energy_delta
-    internal_trial = trial_energy - kinetic_new
+    internal_trial = trial_energy - kinetic_new - nonthermal
     if (.not. all(ieee_is_finite([kinetic_old, kinetic_new, kinetic_input, &
          internal_old, trial_energy, internal_trial]))) return
     tol = 64d0 * epsilon(1d0) * max(tiny(1d0), abs(row(5)), abs(trial_energy), kinetic_input)
@@ -278,7 +284,7 @@ contains
     internal_limit = max(internal_old, &
          (temperature_cap/scale_t2)/(gamma-1d0)*staged(1))
     if (.not. ieee_is_finite(internal_limit)) return
-    staged(5) = kinetic_new + min(internal_trial, internal_limit)
+    staged(5) = nonthermal + kinetic_new + min(internal_trial, internal_limit)
     deferred_energy = max(0d0, trial_energy-staged(5))*volume
     if (.not. ieee_is_finite(staged(5)) .or. .not. ieee_is_finite(deferred_energy)) then
        deferred_energy = 0d0
@@ -359,13 +365,15 @@ contains
   end subroutine agn_scalar_map
 
   pure subroutine agn_withdraw_cell(row, fields, metal_slot, requested_mass, volume, &
-       loaded_mass, velocity, fractions, ierr)
+       loaded_mass, velocity, fractions, ierr, protected_energy)
     real(dp), intent(inout) :: row(:)
     integer, intent(in) :: fields(:), metal_slot
     real(dp), intent(in) :: requested_mass, volume
     real(dp), intent(out) :: loaded_mass, velocity(3), fractions(:)
     integer, intent(out) :: ierr
     real(dp) :: staged(size(row)), rho, kinetic, internal, ratio, tol
+    real(dp), intent(in), optional :: protected_energy
+    real(dp) :: nonthermal
     loaded_mass=0d0; velocity=0d0; fractions=0d0
     ierr=agn_deposit_invalid_source
     if(size(row)<5 .or. size(fields)/=size(fractions))return
@@ -374,6 +382,9 @@ contains
     if(.not.all(ieee_is_finite([requested_mass,volume])))return
     if(requested_mass<0d0 .or. volume<=0d0)return
     ierr=agn_deposit_invalid_receiver
+    nonthermal=0d0
+    if(present(protected_energy))nonthermal=protected_energy
+    if(.not.ieee_is_finite(nonthermal).or.nonthermal<0d0)return
     if(.not.all(ieee_is_finite(row(1:5))) .or. row(1)<=0d0)return
     if(.not.all(ieee_is_finite(row(fields))) .or. any(row(fields)<0d0))return
     rho=row(1)
@@ -386,7 +397,7 @@ contains
     internal=row(5)-kinetic
     tol=64d0*epsilon(1d0)*max(tiny(1d0),abs(row(5)),kinetic)
     if(.not.all(ieee_is_finite([velocity,fractions,kinetic,internal])))return
-    if(internal < -tol)return
+    if(internal-nonthermal < -tol)return
     loaded_mass=min(requested_mass,0.25d0*rho*volume)
     ratio=(loaded_mass/volume)/rho
     staged=row
@@ -400,13 +411,14 @@ contains
   end subroutine agn_withdraw_cell
 
   pure subroutine agn_deposit_material(row, fields, metal_slot, fractions, drho, momentum, energy, &
-       volume, gamma, scale_t2, cap, deferred, ierr)
+       volume, gamma, scale_t2, cap, deferred, ierr, protected_energy)
     real(dp), intent(inout) :: row(:)
     integer, intent(in) :: fields(:), metal_slot
     real(dp), intent(in) :: fractions(:), drho, momentum(3), energy, volume, gamma, scale_t2, cap
     real(dp), intent(out) :: deferred
     integer, intent(out) :: ierr
     real(dp) :: staged(size(row))
+    real(dp), intent(in), optional :: protected_energy
     deferred=0d0; ierr=agn_deposit_invalid_source
     if(size(row)<5 .or. size(fields)/=size(fractions))return
     if(any(fields<=5) .or. any(fields>size(row)))return
@@ -426,7 +438,7 @@ contains
        staged(fields)=row(fields)+drho*fractions
        if(.not.all(ieee_is_finite(staged(fields))))return
     endif
-    call agn_deposit_cell(staged(1:5),drho,momentum,energy,volume,gamma,scale_t2,cap,deferred,ierr)
+    call agn_deposit_cell(staged(1:5),drho,momentum,energy,volume,gamma,scale_t2,cap,deferred,ierr,protected_energy)
     if(ierr==0)row=staged
   end subroutine agn_deposit_material
 

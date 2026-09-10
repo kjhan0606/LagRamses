@@ -5,7 +5,8 @@ module snrt_amr_topology
   use amr_parameters
   use amr_commons
   use snrt_state, only: snrt_state_sync_level, snrt_state_get_slot, &
-       snrt_state_get_cell, snrt_nslot, snrt_intensity
+       snrt_state_get_cell, snrt_nslot, snrt_intensity, snrt_energy_shift
+  use snrt_spectral_contract, only: snrt_group_mean_energy_ev
 #include "amr_index.h"
   implicit none
 
@@ -359,7 +360,7 @@ contains
   end subroutine
 
   subroutine snrt_amr_exchange_interface_state(ilevel, leaf_cell, state, &
-       ghost_kind, ghost_cell, ghost_face, ghost_state, ierr)
+       ghost_kind, ghost_cell, ghost_face, ghost_state, ierr,state_shift,ghost_shift)
     use iso_c_binding, only: c_float
 #ifndef WITHOUTMPI
     use mpi_mod
@@ -369,10 +370,12 @@ contains
     integer, intent(in) :: leaf_cell(:), ghost_kind(:), ghost_cell(:), ghost_face(:)
     real(c_float), intent(in) :: state(:,:,:)
     real(c_float), intent(out) :: ghost_state(:,:,:)
+    real(dp),optional,intent(in)::state_shift(:,:,:)
+    real(dp),optional,intent(inout)::ghost_shift(:,:,:)
     integer, intent(out) :: ierr
     real(dp), allocatable :: field(:,:)
     integer,parameter :: halo_tile=16
-    integer :: first_component,ncomponent,component,column
+    integer :: first_component,ncomponent,component,column,total_components,number_components
     integer :: ilocal, idir, igroup, ighost, nfield, islot, icell
     integer :: child_grid, child_cell, child, idim, inbor, bit, target_bit
     integer :: nchild
@@ -380,11 +383,16 @@ contains
     integer :: global_need_same, global_need_coarse, global_need_fine, info
     integer :: local_error, global_error
     real(dp) :: face_average
-    logical :: need_same, need_coarse, need_fine
+    logical :: need_same, need_coarse, need_fine,energy_component
 
     ierr = 0
     ghost_state = 0.0_c_float
     local_error = 0
+    if(present(state_shift).neqv.present(ghost_shift))local_error=1
+    if(present(state_shift).and.present(ghost_shift))then
+       if(any(shape(state_shift)/=shape(state)).or.any(shape(ghost_shift)/=shape(ghost_state)))local_error=1
+       if(.not.allocated(snrt_energy_shift))local_error=1
+    endif
     if (size(state,1) < size(leaf_cell) .or. size(ghost_kind) < size(ghost_cell) .or. &
          size(ghost_face) < size(ghost_cell) .or. size(ghost_state,1) < size(ghost_cell) .or. &
          size(ghost_state,2) < size(state,2) .or. size(ghost_state,3) < size(state,3)) &
@@ -402,6 +410,7 @@ contains
 
     nfield = ICELL_OF(ngridmax, twotondim)
     allocate(field(nfield,halo_tile))
+    if(present(ghost_shift))ghost_shift=0.0_dp
     need_same = .false.
     need_coarse = .false.
     need_fine = .false.
@@ -462,22 +471,29 @@ contains
 
     ! Exchange a bounded tile of angular/group components at once. The old
     ! path called the generic scalar halo routine 80*9 times per substep.
-    do first_component=1,size(state,2)*size(state,3),halo_tile
-       ncomponent=min(halo_tile,size(state,2)*size(state,3)-first_component+1)
+    number_components=size(state,2)*size(state,3)
+    total_components=number_components
+    if(present(state_shift))total_components=2*number_components
+    do first_component=1,total_components,halo_tile
+       ncomponent=min(halo_tile,total_components-first_component+1)
        field=0d0
        do column=1,ncomponent
           component=first_component+column-1
+          energy_component=component>number_components
+          if(energy_component)component=component-number_components
           idir=mod(component-1,size(state,2))+1
           igroup=(component-1)/size(state,2)+1
           do islot = 1, snrt_nslot
              icell = snrt_state_get_cell(islot)
              if (icell >= 1 .and. icell <= nfield) then
                 field(icell,column) = real(snrt_intensity(idir,igroup,islot),dp)
+                if(energy_component)field(icell,column)=snrt_energy_shift(idir,igroup,islot)
              end if
           end do
           do ilocal = 1, size(leaf_cell)
              if (leaf_cell(ilocal) >= 1 .and. leaf_cell(ilocal) <= nfield) then
                 field(leaf_cell(ilocal),column) = real(state(ilocal,idir,igroup),dp)
+                if(energy_component)field(leaf_cell(ilocal),column)=state_shift(ilocal,idir,igroup)
              end if
           end do
        enddo
@@ -489,6 +505,8 @@ contains
        if(ierr/=0)return
        do column=1,ncomponent
           component=first_component+column-1
+          energy_component=component>number_components
+          if(energy_component)component=component-number_components
           idir=mod(component-1,size(state,2))+1
           igroup=(component-1)/size(state,2)+1
           do ighost = 1, size(ghost_cell)
@@ -498,7 +516,11 @@ contains
                    ierr = 3
                    cycle
                 end if
-                ghost_state(ighost,idir,igroup) = real(field(ghost_cell(ighost),column),c_float)
+                if(energy_component)then
+                   ghost_shift(ighost,idir,igroup)=field(ghost_cell(ighost),column)
+                else
+                   ghost_state(ighost,idir,igroup) = real(field(ghost_cell(ighost),column),c_float)
+                endif
              case (SNRT_FACE_COARSE_TO_FINE)
                 child_grid = son(ghost_cell(ighost))
                 if (child_grid <= 0) then
@@ -523,7 +545,13 @@ contains
                    nchild = nchild + 1
                 end do
                 if (nchild > 0) then
-                   ghost_state(ighost,idir,igroup) = real(face_average/dble(nchild),c_float)
+                   if(energy_component)then
+                      ghost_shift(ighost,idir,igroup)=ghost_shift(ighost,idir,igroup)+face_average/dble(nchild)
+                   else
+                      ghost_state(ighost,idir,igroup) = real(face_average/dble(nchild),c_float)
+                      if(present(ghost_shift))ghost_shift(ighost,idir,igroup)=snrt_group_mean_energy_ev(igroup)* &
+                           (face_average/dble(nchild)-real(ghost_state(ighost,idir,igroup),dp))
+                   endif
                 else
                    ierr = 6
                 end if
@@ -538,7 +566,7 @@ contains
 
   subroutine snrt_amr_apply_coarse_flux_correction(ilevel, leaf_cell, state_work, &
        ghost_kind, ghost_cell, ghost_face, ghost_local, cdt_over_dx, direction_dp, &
-       coarse_flux_trial, ierr)
+       coarse_flux_trial, ierr,shift_work,coarse_shift)
     use iso_c_binding, only: c_float
 #ifndef WITHOUTMPI
     use mpi_mod
@@ -553,15 +581,32 @@ contains
     ! snrt_intensity array is committed by the transaction layer only after
     ! transport, partition, and chemistry have all succeeded.
     real(c_float), intent(inout) :: coarse_flux_trial(:,:,:)
+    real(dp),optional,intent(in)::shift_work(:,:,:)
+    real(dp),optional,intent(inout)::coarse_shift(:,:,:)
     integer, intent(out) :: ierr
     real(dp), allocatable :: correction(:)
     integer :: nfield, nface_child, ilocal, idir, igroup, ighost
     integer :: parent_cell, idim, fine_sign, coarse_sign, islot, icell
     integer :: local_has, global_has, info
     integer :: local_error, global_error
-    real(dp) :: mu, q_upstream, face_flux
+    real(dp) :: mu, q_upstream, face_flux,old_correction
+    integer::component,components
 
     ierr = 0
+    local_error=0
+    if(present(shift_work).neqv.present(coarse_shift))local_error=1
+    if(present(shift_work).and.present(coarse_shift))then
+       if(any(shape(shift_work)/=shape(state_work)).or. &
+            any(shape(coarse_shift)/=shape(coarse_flux_trial)))local_error=1
+    endif
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(local_error,global_error,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+#else
+    global_error=local_error
+#endif
+    if(global_error/=0)then
+       ierr=global_error;return
+    endif
     local_has = 0
     do ighost = 1, size(ghost_kind)
        if (ghost_kind(ighost) == SNRT_FACE_FINE_TO_COARSE) local_has = 1
@@ -594,6 +639,9 @@ contains
     nface_child = max(1,twotondim/2)
     allocate(correction(nfield))
 
+    components=1
+    if(present(shift_work))components=2
+    do component=1,components
     do igroup = 1, size(state_work,3)
        do idir = 1, size(state_work,2)
           correction = 0.0d0
@@ -614,8 +662,10 @@ contains
              mu = direction_dp(idir,idim)
              if (mu*dble(fine_sign) >= 0.0d0) then
                 q_upstream = real(state_work(ilocal,idir,igroup),dp)
+                if(component==2)q_upstream=shift_work(ilocal,idir,igroup)
              else
                 q_upstream = real(state_work(size(leaf_cell)+ighost,idir,igroup),dp)
+                if(component==2)q_upstream=shift_work(size(leaf_cell)+ighost,idir,igroup)
              end if
              face_flux = mu*q_upstream
              correction(parent_cell) = correction(parent_cell) - &
@@ -628,11 +678,22 @@ contains
              icell = snrt_state_get_cell(islot)
              if (icell >= 1 .and. icell <= nfield .and. correction(icell) /= 0.0d0 .and. &
                   islot >= 1 .and. islot <= size(coarse_flux_trial,3)) then
-                coarse_flux_trial(idir,igroup,islot) = coarse_flux_trial(idir,igroup,islot) + &
-                     real(correction(icell),c_float)
+                if(component==2)then
+                   coarse_shift(idir,igroup,islot)=coarse_shift(idir,igroup,islot)+correction(icell)
+                else
+                   old_correction=real(coarse_flux_trial(idir,igroup,islot),dp)
+                   coarse_flux_trial(idir,igroup,islot) = coarse_flux_trial(idir,igroup,islot) + &
+                        real(correction(icell),c_float)
+                   ! Preserve actual face energy across the FP32 flux-register
+                   ! rounding. The signed shift face flux follows on pass 2.
+                   if(present(coarse_shift))coarse_shift(idir,igroup,islot)=coarse_shift(idir,igroup,islot)+ &
+                        snrt_group_mean_energy_ev(igroup)*(old_correction+correction(icell)- &
+                        real(coarse_flux_trial(idir,igroup,islot),dp))
+                endif
              end if
           end do
        end do
+    end do
     end do
     deallocate(correction)
   end subroutine snrt_amr_apply_coarse_flux_correction

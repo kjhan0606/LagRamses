@@ -1,0 +1,39 @@
+{
+  "schema": "snrt_chimes_atomic_shell_nodes_v1",
+  "main_sha256": "8bde78faacd59249fad5e810cae43311ed03ef09131c62b0a0a5c39e8407cb0a",
+  "fit_sha256": {
+    "cross_section_fits_verner95.dat": "22d3afe50371471ce60838d788fb72433ba2352dc23894798c0157be2d14fd09",
+    "cross_section_fits_verner96.dat": "e8b7883ad2bd683d146c4f96b9598101a32933addffadc4b1927cdbde9e10f2e",
+    "auger_ionisation_probabilities_kaastra93.dat": "48afae9a3bbeca9b9f10db036ea38d85981b6b9facc7e6c8133a119673db1b79"
+  },
+  "tools_generator_sha256": "8ecd6bde09a3809102512a1a578bf77a844d20e592fb79ac51e7855b0db8637e",
+  "wrapper_sha256": "cf76d79577bb8634491a4e019f5639df8f908c4238b3510fcbb2e4a1e4f6fded",
+  "table_sha256": "998970ed5bb4cfeda01913a72cc3fc62af8ce2fdb55dc924f2704e3abb5391de",
+  "nodes": 128,
+  "reactions": 311,
+  "partial_shells": 682,
+  "edges_ev": [
+    0.01,
+    1.0,
+    5.6,
+    11.2,
+    13.6,
+    24.59,
+    54.42,
+    500.0,
+    2000.0,
+    10000.0
+  ],
+  "group_order": [
+    "photoion_fuv",
+    "photoion_euv",
+    "photoion_auger_fuv",
+    "photoion_auger_euv"
+  ],
+  "limitations": [
+    "Atomic/H-/H2 ionization only; NOT the 30 empirical molecular dissociation channels or Leiden lines.",
+    "Same Verner95/96 and KM93 branching as existing grey model; no new cascade/fluorescence energy.",
+    "Finite node quadrature; upper endpoint uses left-limit opacity except final group.",
+    "Not yet a live CVODE N/E receiver. Spectral+CHIMES remains rejected."
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "schema": "d03_native_grain_optics_preparation_v2",
+  "sources": [
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_silD03",
+      "sha256": "31072857d3fe8acf08bf58d02dd2ea12b0fd9480ee284450ad68c7ea416afb6b",
+      "bytes": 49590,
+      "usable_energy_ev": [
+        1.2400019445828536e-05,
+        19000.02948953597
+      ]
+    },
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpaD03_0.01",
+      "sha256": "87c609d3ddda2bc0bc5f2343f9b56bbd517fc5833e0754e6a628c8a5c6235a0b",
+      "bytes": 22981,
+      "usable_energy_ev": [
+        1.0000016004742568e-05,
+        18000.028808536623
+      ]
+    },
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpeD03_0.01",
+      "sha256": "663d2939905710d61706d75f52e28ca819fcc5ecde1be2d2971b23c127a351d9",
+      "bytes": 22804,
+      "usable_energy_ev": [
+        1.0000016004742568e-05,
+        18000.028808536623
+      ]
+    },
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpaD03_0.10",
+      "sha256": "518670c9a850f3a3b5c3d011d3809088a6f6c1aaf0f3ebc8316574f1d55005a5",
+      "bytes": 22981,
+      "usable_energy_ev": [
+        1.0000016004742568e-05,
+        18000.028808536623
+      ]
+    },
+    {
+      "url": "https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpeD03_0.10",
+      "sha256": "7cf5e0dae097e8d8b385606176825501c3f5094dbba2a6a7fb68fda0ca792013",
+      "bytes": 22804,
+      "usable_energy_ev": [
+        1.0000016004742568e-05,
+        18000.028808536623
+      ]
+    }
+  ],
+  "generator_sha256": "a8077f5ff02b8686027c30c09863874abc87f7ca6793af5e1fe315a3b6d23ef2",
+  "compiled_sha256": "acb3ff10a7bcaaed59a669b93be508d55461426eaedda8e80dfb7d9a15f2c1b6",
+  "node_content_sha256": "6109a567615dfbf05e126ae78f5a9ee69dc7576c80dd3706d126570479a8ff41",
+  "nodes": 128,
+  "edges_ev": [
+    0.01,
+    1.0,
+    5.6,
+    11.2,
+    13.6,
+    24.59,
+    54.42,
+    500.0,
+    2000.0,
+    10000.0
+  ],
+  "radii_cm": [
+    1e-06,
+    1e-05
+  ],
+  "solid_density_g_cm3": [
+    2.2,
+    3.8
+  ],
+  "miepython_version": "3.3.0",
+  "numpy_version": "2.3.3",
+  "units": "cm2/g per actual bin mass; energies eV",
+  "node_closure": "log grid with exact endpoints; positive trapezoidal dE prior",
+  "primary_closure": "maxent N/E reconstruction; absorption then elastic delta-isotropic split",
+  "limitations": [
+    "Frozen20K dielectric, graphite1/3--2/3 approximation.",
+    "No grain photoelectron escape, stochastic PAH or relative-motion force.",
+    "Finite quadrature does not resolve every near-edge feature."
+  ]
+}

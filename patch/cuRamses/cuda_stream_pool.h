@@ -71,6 +71,10 @@ typedef struct {
     double *d_uloc, *d_gloc, *d_flux, *d_tmp;
     int *d_ok;
     int hydro_cap;       // allocated grid capacity
+    // Separate MHD face-batch buffers; owned by the same exclusive stream slot.
+    double *d_mhd_left, *d_mhd_right, *d_mhd_flux;
+    int *d_mhd_mask;
+    int mhd_face_cap, mhd_nvar;
 
     // Hydro intermediate arrays (device only)
     double *d_q, *d_c, *d_dq, *d_qm, *d_qp;

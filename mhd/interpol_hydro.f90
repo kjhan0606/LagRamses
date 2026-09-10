@@ -6,15 +6,17 @@ subroutine upload_fine(ilevel)
   use amr_commons
   use hydro_commons
   use amr_constants, only:iii,jjj
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !----------------------------------------------------------------------
   ! This routine performs a restriction operation (averaging down)
   ! for the hydro variables.
   !----------------------------------------------------------------------
-  integer,dimension(1:nvector),save::ind_grid,ind_cell,ind_split
-  integer,dimension(1:nvector),save::ind_unsplit,igrid_son
-  integer ,dimension(1:nvector,0:twondim),save::igridn
+  integer,dimension(1:nvector)::ind_grid,ind_cell,ind_split
+  integer,dimension(1:nvector)::ind_unsplit,igrid_son
+  integer ,dimension(1:nvector,0:twondim)::igridn
+  integer ,dimension(1:nvector,0:twondim)::parent_neighbors
 
   integer::ind_left,ind_right
   integer::id1,id2,ig1,ig2,ih1,ih2
@@ -22,7 +24,7 @@ subroutine upload_fine(ilevel)
 
   real(dp)::emag
 
-  logical,dimension(1:nvector),save::ok,ok_leaf
+  logical,dimension(1:nvector)::ok,ok_leaf
 
   if(ilevel==nlevelmax)return
   if(numbtot(1,ilevel)==0)return
@@ -41,9 +43,8 @@ subroutine upload_fine(ilevel)
 
      ! Loop over cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Gather split cells
@@ -90,12 +91,16 @@ subroutine upload_fine(ilevel)
 
      ! Gather neighboring grids
      do i=1,ngrid
+        ind_cell(i)=father(ind_grid(i))
+     enddo
+     call getnborfather(ind_cell,parent_neighbors,ngrid,ilevel)
+     do i=1,ngrid
         igridn(i,0)=ind_grid(i)
      end do
      do idim=1,ndim
         do i=1,ngrid
-           ind_left =nbor(ind_grid(i),2*idim-1)
-           ind_right=nbor(ind_grid(i),2*idim  )
+           ind_left =parent_neighbors(i,2*idim-1)
+           ind_right=parent_neighbors(i,2*idim  )
            igridn(i,2*idim-1)=son(ind_left )
            igridn(i,2*idim  )=son(ind_right)
         end do
@@ -103,9 +108,8 @@ subroutine upload_fine(ilevel)
 
     ! Loop over cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Gather unsplit cells
@@ -118,10 +122,9 @@ subroutine upload_fine(ilevel)
 
            ! Select unsplit cells with a refined left neighboring cell
            id1=jjj(idim,1,ind); ig1=iii(idim,1,ind)
-           ih1=ncoarse+(id1-1)*ngridmax
            do i=1,ngrid
               if(igridn(i,ig1)>0)then
-                 ok(i)=ok_leaf(i).and.son(igridn(i,ig1)+ih1)>0
+                 ok(i)=ok_leaf(i).and.son(ICELL_OF(igridn(i,ig1),id1))>0
               else
                  ok(i)=.false.
               endif
@@ -140,7 +143,7 @@ subroutine upload_fine(ilevel)
                  if(ok(i))then
                     icell=icell+1
                     ind_unsplit(icell)=ind_cell(i)
-                    igrid_son  (icell)=son(igridn(i,ig1)+ih1)
+                    igrid_son  (icell)=son(ICELL_OF(igridn(i,ig1),id1))
                  end if
               end do
               if(interpol_var==1)then
@@ -164,10 +167,9 @@ subroutine upload_fine(ilevel)
 
            !  Select unsplit cells with a refined right neighboring cell
            id2=jjj(idim,2,ind); ig2=iii(idim,2,ind)
-           ih2=ncoarse+(id2-1)*ngridmax
            do i=1,ngrid
               if(igridn(i,ig2)>0)then
-                 ok(i)=ok_leaf(i).and.son(igridn(i,ig2)+ih2)>0
+                 ok(i)=ok_leaf(i).and.son(ICELL_OF(igridn(i,ig2),id2))>0
               else
                  ok(i)=.false.
               endif
@@ -186,7 +188,7 @@ subroutine upload_fine(ilevel)
                  if(ok(i))then
                     icell=icell+1
                     ind_unsplit(icell)=ind_cell(i)
-                    igrid_son  (icell)=son(igridn(i,ig2)+ih2)
+                    igrid_son  (icell)=son(ICELL_OF(igridn(i,ig2),id2))
                  end if
               end do
               if(interpol_var==1)then
@@ -227,6 +229,7 @@ end subroutine upload_fine
 subroutine upl(ind_cell,ncell)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::ncell
   integer,dimension(1:nvector)::ind_cell
@@ -240,8 +243,8 @@ subroutine upl(ind_cell,ncell)
 #if NENER>0
   integer::irad
 #endif
-  integer ,dimension(1:nvector),save::igrid_son,ind_cell_son
-  real(dp),dimension(1:nvector),save::getx,ekin,emag,erad
+  integer ,dimension(1:nvector)::igrid_son,ind_cell_son
+  real(dp),dimension(1:nvector)::getx,ekin,emag,erad
   integer,dimension(1:6,1:4)::hhh
 
   ! Get child oct index
@@ -257,9 +260,8 @@ subroutine upl(ind_cell,ncell)
   ! L. Romano 14.06.2023 -- apply smallr, preventing errors in passive scalars
   getx(1:ncell)=0.0d0
   do ind_son=1,twotondim
-     iskip_son=ncoarse+(ind_son-1)*ngridmax
      do i=1,ncell
-        ind_cell_son(i)=iskip_son+igrid_son(i)
+        ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
      end do
      ! Update average
      do i=1,ncell
@@ -280,9 +282,8 @@ subroutine upl(ind_cell,ncell)
      ! Average conservative variable
      getx(1:ncell)=0.0d0
      do ind_son=1,twotondim
-        iskip_son=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncell
-           ind_cell_son(i)=iskip_son+igrid_son(i)
+           ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
         end do
         do i=1,ncell
            getx(i)=getx(i)+uold(ind_cell_son(i),ivar)
@@ -298,13 +299,15 @@ subroutine upl(ind_cell,ncell)
   end do
   ! End loop over cell centered variables
 
+  ! Upstream auxiliary equilibrium/momentum arrays are not part of
+  ! lagRamses; its channel-resolved feedback updates conserved uold/unew.
+#ifdef MHD_UPSTREAM_AUXILIARY_FIELDS
   if(momentum_feedback>0)then
 
      getx(1:ncell)=0.0d0
      do ind_son=1,twotondim
-        iskip_son=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncell
-           ind_cell_son(i)=iskip_son+igrid_son(i)
+           ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
         end do
         ! Update average
         do i=1,ncell
@@ -323,9 +326,8 @@ subroutine upl(ind_cell,ncell)
 
      getx(1:ncell)=0.0d0
      do ind_son=1,twotondim
-        iskip_son=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncell
-           ind_cell_son(i)=iskip_son+igrid_son(i)
+           ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
         end do
         ! Update average
         do i=1,ncell
@@ -340,9 +342,8 @@ subroutine upl(ind_cell,ncell)
 
      getx(1:ncell)=0.0d0
      do ind_son=1,twotondim
-        iskip_son=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncell
-           ind_cell_son(i)=iskip_son+igrid_son(i)
+           ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
         end do
         ! Update average
         do i=1,ncell
@@ -357,6 +358,7 @@ subroutine upl(ind_cell,ncell)
 
   endif
 
+#endif
 ! Update cell centered magnetic field also in redundant array
 #if NDIM==1
   do i=1,ncell
@@ -389,9 +391,8 @@ subroutine upl(ind_cell,ncell)
      getx(1:ncell)=0.0d0
      do ind=1,twotondim/2
         ind_son=hhh(2*idim-1,ind)
-        iskip_son=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncell
-           ind_cell_son(i)=iskip_son+igrid_son(i)
+           ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
         end do
         ! Update average
         do i=1,ncell
@@ -409,9 +410,8 @@ subroutine upl(ind_cell,ncell)
      getx(1:ncell)=0.0d0
      do ind=1,twotondim/2
         ind_son=hhh(2*idim,ind)
-        iskip_son=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncell
-           ind_cell_son(i)=iskip_son+igrid_son(i)
+           ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
         end do
         ! Update average
         do i=1,ncell
@@ -433,9 +433,8 @@ subroutine upl(ind_cell,ncell)
 
      getx(1:ncell)=0.0d0
      do ind_son=1,twotondim
-        iskip_son=ncoarse+(ind_son-1)*ngridmax
         do i=1,ncell
-           ind_cell_son(i)=iskip_son+igrid_son(i)
+           ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
         end do
         ! Compute child kinetic energy
         ekin(1:ncell)=0.0d0
@@ -510,6 +509,7 @@ end subroutine upl
 subroutine upl_left(ind_cell,igrid_son,idim,ncell)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::ncell,idim
   integer,dimension(1:nvector)::ind_cell,igrid_son
@@ -518,8 +518,8 @@ subroutine upl_left(ind_cell,igrid_son,idim,ncell)
   ! for the magnetic field on cell faces
   !---------------------------------------------------------------------
   integer::i,ind_son,iskip_son,ind
-  integer ,dimension(1:nvector),save::ind_cell_son
-  real(dp),dimension(1:nvector),save::getx
+  integer ,dimension(1:nvector)::ind_cell_son
+  real(dp),dimension(1:nvector)::getx
   integer,dimension(1:6,1:4)::hhh
 
   hhh(1,1:4)=(/1,3,5,7/)
@@ -536,9 +536,8 @@ subroutine upl_left(ind_cell,igrid_son,idim,ncell)
   getx(1:ncell)=0.0d0
   do ind=1,twotondim/2
      ind_son=hhh(2*idim,ind)
-     iskip_son=ncoarse+(ind_son-1)*ngridmax
      do i=1,ncell
-        ind_cell_son(i)=iskip_son+igrid_son(i)
+        ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
      end do
      ! Update average
      do i=1,ncell
@@ -558,6 +557,7 @@ end subroutine upl_left
 subroutine upl_right(ind_cell,igrid_son,idim,ncell)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::ncell,idim
   integer,dimension(1:nvector)::ind_cell,igrid_son
@@ -566,8 +566,8 @@ subroutine upl_right(ind_cell,igrid_son,idim,ncell)
   ! for the magnetic field on cell faces
   !---------------------------------------------------------------------
   integer::i,ind_son,iskip_son,ind
-  integer ,dimension(1:nvector),save::ind_cell_son
-  real(dp),dimension(1:nvector),save::getx
+  integer ,dimension(1:nvector)::ind_cell_son
+  real(dp),dimension(1:nvector)::getx
   integer,dimension(1:6,1:4)::hhh
 
   hhh(1,1:4)=(/1,3,5,7/)
@@ -584,9 +584,8 @@ subroutine upl_right(ind_cell,igrid_son,idim,ncell)
   getx(1:ncell)=0.0d0
   do ind=1,twotondim/2
      ind_son=hhh(2*idim-1,ind)
-     iskip_son=ncoarse+(ind_son-1)*ngridmax
      do i=1,ncell
-        ind_cell_son(i)=iskip_son+igrid_son(i)
+        ind_cell_son(i)=ICELL_OF(igrid_son(i),ind_son)
      end do
      ! Update average
      do i=1,ncell
@@ -607,6 +606,8 @@ subroutine interpol_hydro(u1,ind1,u2,nn)
   use amr_commons
   use hydro_commons
   use poisson_commons
+  use dust_mass_physics, only: dust_composition_enabled,dust_two_size_enabled,dust_chimes_enabled
+#include "amr_index.h"
   implicit none
   integer::nn
   real(dp),dimension(1:nvector,0:twondim  ,1:nvar+3)::u1
@@ -629,11 +630,11 @@ subroutine interpol_hydro(u1,ind1,u2,nn)
   integer::irad
 #endif
   real(dp),dimension(1:twotondim,1:3)::xc
-  real(dp),dimension(1:nvector,0:twondim),save::a
-  real(dp),dimension(1:nvector,1:ndim),save::w
-  real(dp),dimension(1:nvector),save::ekin,emag,erad
-  real(dp),dimension(1:nvector,0:twondim  ,1:6),save::B1
-  real(dp),dimension(1:nvector,1:twotondim,1:6),save::B2
+  real(dp),dimension(1:nvector,0:twondim)::a
+  real(dp),dimension(1:nvector,1:ndim)::w
+  real(dp),dimension(1:nvector)::ekin,emag,erad
+  real(dp),dimension(1:nvector,0:twondim  ,1:6)::B1
+  real(dp),dimension(1:nvector,1:twotondim,1:6)::B2
 
   ! Set position of cell centers relative to grid center
   do ind=1,twotondim
@@ -784,6 +785,33 @@ subroutine interpol_hydro(u1,ind1,u2,nn)
      end do
   end if
 
+  ! Same dependent aggregate as the conservative face flux. Each carrier's
+  ! conservative prolongation remains unchanged; do not independently limit
+  ! their sum into an inconsistent extra dust reservoir.
+  if(dust_chimes_enabled())then
+     ! Bounded composition prolongation: retain the parent's abundances,
+     ! with the conservative hydro density interpolation. This preserves
+     ! each species integral, charge and molecular/dust element reservation;
+     ! independent high-order species slopes need not preserve that simplex.
+     do i=1,nn
+        if(u1(i,0,1)<=0)then
+           call clean_stop;return
+        endif
+        do ind=1,twotondim
+           u2(i,ind,ichem:nvar)=u1(i,0,ichem:nvar)*u2(i,ind,1)/u1(i,0,1)
+           u2(i,ind,imetal)=u1(i,0,imetal)*u2(i,ind,1)/u1(i,0,1)
+        enddo
+     enddo
+  endif
+  if(dust_composition_enabled())then
+     if(dust_two_size_enabled())then
+        u2(1:nn,:,idust_species)=u2(1:nn,:,idust_bins)+u2(1:nn,:,idust_bins+1)
+        u2(1:nn,:,idust_species+1)=u2(1:nn,:,idust_bins+2)+u2(1:nn,:,idust_bins+3)
+     endif
+     u2(1:nn,:,idust)=u2(1:nn,:,idust_species)+u2(1:nn,:,idust_species+1)
+     if(idust_iron>0)u2(1:nn,:,idust)=u2(1:nn,:,idust)+u2(1:nn,:,idust_iron)+u2(1:nn,:,idust_iron+1)
+  endif
+
 end subroutine interpol_hydro
 !###########################################################
 !###########################################################
@@ -792,6 +820,7 @@ end subroutine interpol_hydro
 subroutine compute_limiter_minmod(a,w,nn)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::nn
   real(dp),dimension(1:nvector,0:twondim)::a
@@ -824,6 +853,7 @@ end subroutine compute_limiter_minmod
 subroutine compute_central(a,w,nn)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::nn
   real(dp),dimension(1:nvector,0:twondim)::a
@@ -847,6 +877,7 @@ end subroutine compute_central
 subroutine compute_limiter_central(a,w,nn)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::nn
   real(dp),dimension(1:nvector,0:twondim)::a
@@ -857,9 +888,9 @@ subroutine compute_limiter_central(a,w,nn)
   integer::i,j,idim,ind,ix,iy,iz
   real(dp),dimension(1:twotondim,1:3)::xc
   real(dp)::xxc
-  real(dp),dimension(1:nvector,1:twotondim),save::ac
-  real(dp),dimension(1:nvector),save::corner,kernel,diff_corner,diff_kernel
-  real(dp),dimension(1:nvector),save::max_limiter,min_limiter,limiter
+  real(dp),dimension(1:nvector,1:twotondim)::ac
+  real(dp),dimension(1:nvector)::corner,kernel,diff_corner,diff_kernel
+  real(dp),dimension(1:nvector)::max_limiter,min_limiter,limiter
 
   ! Set position of cell centers relative to grid center
   do ind=1,twotondim
@@ -983,6 +1014,7 @@ end subroutine compute_limiter_central
 !###########################################################
 subroutine interpol_mag(B1,ind1,B2,nn)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::nn
   real(dp),dimension(1:nvector,0:twondim  ,1:6)::B1
@@ -1000,9 +1032,9 @@ subroutine interpol_mag(B1,ind1,B2,nn)
   ! interpol_mag_type=3: linear interpolation without limiters
   !----------------------------------------------------------
   integer::i,j,k,ind,l,imax,jmax,kmax
-  real(dp),dimension(1:nvector,-1:1,0:1,0:1),save::u
-  real(dp),dimension(1:nvector,0:1,-1:1,0:1),save::v
-  real(dp),dimension(1:nvector,0:1,0:1,-1:1),save::w
+  real(dp),dimension(1:nvector,-1:1,0:1,0:1)::u
+  real(dp),dimension(1:nvector,0:1,-1:1,0:1)::v
+  real(dp),dimension(1:nvector,0:1,0:1,-1:1)::w
 
   imax=1; jmax=0; kmax=0
 #if NDIM>1
@@ -1046,6 +1078,7 @@ end subroutine interpol_mag
 subroutine interpol_faces(b1,u,v,w,nn)
   use amr_commons
   use hydro_commons, ONLY: interpol_mag_type
+#include "amr_index.h"
   implicit none
   integer::nn
   real(dp),dimension(1:nvector,0:twondim,1:6)::b1
@@ -1055,8 +1088,8 @@ subroutine interpol_faces(b1,u,v,w,nn)
 
   ! TVD interpolation from coarse faces
   integer::i,j,k,l,imax,jmax,kmax
-  real(dp),dimension(1:nvector,0:4),save::b
-  real(dp),dimension(1:nvector,1:2),save::s
+  real(dp),dimension(1:nvector,0:4)::b
+  real(dp),dimension(1:nvector,1:2)::s
 
   imax=1; jmax=0; kmax=0
 #if NDIM>1
@@ -1240,6 +1273,7 @@ end subroutine interpol_faces
 subroutine copy_from_refined_faces(ind1,u,v,w,nn)
   use amr_commons
   use hydro_commons, ONLY: nvar,uold,neul
+#include "amr_index.h"
   implicit none
   integer::nn
   integer ,dimension(1:nvector,0:twondim)::ind1
@@ -1262,10 +1296,9 @@ subroutine copy_from_refined_faces(ind1,u,v,w,nn)
   do j=0,jmax
   do k=0,kmax
      ind=1+1+j*2+k*4
-     iskip=ncoarse+(ind-1)*ngridmax
      do l=1,nn
         if(ind1(l,1)>0)then
-           u(l,-1,j,k)=uold(iskip+ind1(l,1),nvar+1)
+           u(l,-1,j,k)=uold(ICELL_OF(ind1(l,1),ind),nvar+1)
         end if
      end do
   end do
@@ -1275,10 +1308,9 @@ subroutine copy_from_refined_faces(ind1,u,v,w,nn)
   do j=0,jmax
   do k=0,kmax
      ind=1+0+j*2+k*4
-     iskip=ncoarse+(ind-1)*ngridmax
      do l=1,nn
         if(ind1(l,2)>0)then
-           u(l,+1,j,k)=uold(iskip+ind1(l,2),neul+1)
+           u(l,+1,j,k)=uold(ICELL_OF(ind1(l,2),ind),neul+1)
         end if
      end do
   end do
@@ -1289,10 +1321,9 @@ subroutine copy_from_refined_faces(ind1,u,v,w,nn)
   do i=0,imax
   do k=0,kmax
      ind=1+i+1*2+k*4
-     iskip=ncoarse+(ind-1)*ngridmax
      do l=1,nn
         if(ind1(l,3)>0)then
-           v(l,i,-1,k)=uold(iskip+ind1(l,3),nvar+2)
+           v(l,i,-1,k)=uold(ICELL_OF(ind1(l,3),ind),nvar+2)
         end if
      end do
   end do
@@ -1302,10 +1333,9 @@ subroutine copy_from_refined_faces(ind1,u,v,w,nn)
   do i=0,imax
   do k=0,kmax
      ind=1+i+0*2+k*4
-     iskip=ncoarse+(ind-1)*ngridmax
      do l=1,nn
         if(ind1(l,4)>0)then
-           v(l,i,+1,k)=uold(iskip+ind1(l,4),neul+2)
+           v(l,i,+1,k)=uold(ICELL_OF(ind1(l,4),ind),neul+2)
         end if
      end do
   end do
@@ -1317,10 +1347,9 @@ subroutine copy_from_refined_faces(ind1,u,v,w,nn)
   do i=0,imax
   do j=0,kmax
      ind=1+i+j*2+1*4
-     iskip=ncoarse+(ind-1)*ngridmax
      do l=1,nn
         if(ind1(l,5)>0)then
-           w(l,i,j,-1)=uold(iskip+ind1(l,5),nvar+3)
+           w(l,i,j,-1)=uold(ICELL_OF(ind1(l,5),ind),nvar+3)
         end if
      end do
   end do
@@ -1330,10 +1359,9 @@ subroutine copy_from_refined_faces(ind1,u,v,w,nn)
   do i=0,imax
   do j=0,kmax
      ind=1+i+j*2+0*4
-     iskip=ncoarse+(ind-1)*ngridmax
      do l=1,nn
         if(ind1(l,6)>0)then
-           w(l,i,j,+1)=uold(iskip+ind1(l,6),neul+3)
+           w(l,i,j,+1)=uold(ICELL_OF(ind1(l,6),ind),neul+3)
         end if
      end do
   end do
@@ -1347,6 +1375,7 @@ end subroutine copy_from_refined_faces
 !###########################################################
 subroutine cmp_central_faces(u,v,w,nn)
   use amr_commons
+#include "amr_index.h"
   implicit none
   integer::nn
   real(dp),dimension(1:nvector,-1:1,0:1,0:1)::u
@@ -1354,7 +1383,7 @@ subroutine cmp_central_faces(u,v,w,nn)
   real(dp),dimension(1:nvector,0:1,0:1,-1:1)::w
 
   integer::i,j,k,l,ii,jj,kk,imax,jmax,kmax
-  real(dp),dimension(1:nvector),save::UXX,VYY,WZZ,UXYZ,VXYZ,WXYZ
+  real(dp),dimension(1:nvector)::UXX,VYY,WZZ,UXYZ,VXYZ,WXYZ
 
   imax=1; jmax=0; kmax=0
 #if NDIM>1
@@ -1473,6 +1502,7 @@ subroutine compute_2d_tvd(b,s,nn)
   use amr_commons, ONLY: nvector
   use hydro_commons, ONLY: interpol_mag_type
   use const
+#include "amr_index.h"
   implicit none
   integer::nn
   real(dp),dimension(1:nvector,0:4)::b
@@ -1527,6 +1557,7 @@ subroutine compute_1d_tvd(b,s,nn)
   use amr_commons, ONLY: nvector
   use hydro_commons, ONLY: interpol_mag_type
   use const
+#include "amr_index.h"
   implicit none
   integer::nn
   real(dp),dimension(1:nvector,0:4)::b

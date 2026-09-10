@@ -10,7 +10,7 @@ program kl16_lc18_native_test
   use stellar_snia_physical_contract
   use stellar_snia_runtime_accounting
   implicit none
-  type(stellar_yield_table_t)::table,co_table
+  type(stellar_yield_table_t)::table,co_table,baseline
   type(stellar_cumulative_t)::a,b
   type(stellar_source_t)::whole,early,late
   type(stellar_population_t)::pop
@@ -18,7 +18,7 @@ program kl16_lc18_native_test
   type(snia_population_realization_t)::dtd
   type(snia_physical_contract_t)::event
   type(snia_event_budget_t)::budget
-  character(len=1024)::yields,history,snia,source_option
+  character(len=1024)::yields,history,snia,source_option,baseline_yields,baseline_history
   real(stellar_dp)::energy,first_age
   real(stellar_dp)::times(9)=[0d0,.04d0,.05d0,.06889d0,.1d0,.2d0,1d0,5d0,13.7d0]
   ! Common KL16/LC18 Z support, not the broader AGB-only domain.
@@ -28,6 +28,7 @@ program kl16_lc18_native_test
   logical::full_ccsn,lowz7,pulses
   call get_command_argument(1,yields);call get_command_argument(2,history);call get_command_argument(3,snia)
   call get_command_argument(4,source_option)
+  call get_command_argument(5,baseline_yields);call get_command_argument(6,baseline_history)
   expected_agb_rows=58
   pulses=trim(source_option)=='lc18_set_r_agb7_pulses'
   lowz7=trim(source_option)=='lc18_set_r_agb7_lowz_net'.or.pulses
@@ -65,6 +66,28 @@ program kl16_lc18_native_test
   call audit_yield_table(table,1d-10,ierr,.true.,channel_owns_terminal_remnant, &
        [.true.,.true.,.true.,.false.,.false.])
   if(ierr/=0)stop 4
+  if(len_trim(baseline_yields)>0)then
+     ! Optional prompt-decay comparison. No change to stellar mass, lifetime,
+     ! remnants, winds/SN energies, AGB yields or the already-approved Ia DTD.
+     call load_yield_table(trim(baseline_yields),baseline,ierr)
+     if(ierr/=0.or.baseline%n_rows/=table%n_rows)stop 64
+     call prepare_high_mass_history(baseline,trim(baseline_history),ierr)
+     if(ierr/=0)stop 65
+     if(baseline%high_mass_identity(1)==table%high_mass_identity(1))stop 66
+     if(any(baseline%channel/=table%channel).or.any(baseline%initial_mass/=table%initial_mass).or. &
+        any(baseline%birth_metallicity/=table%birth_metallicity).or.any(baseline%age_gyr/=table%age_gyr))stop 67
+     if(any(baseline%returned_mass/=table%returned_mass).or.any(baseline%remnant_mass/=table%remnant_mass).or. &
+        any(baseline%energy/=table%energy).or.any(baseline%momentum/=table%momentum))stop 68
+     if(any(baseline%net_yield/=table%net_yield))stop 69
+     do r=1,table%n_rows
+        if(table%channel(r)==2.and.any(baseline%ejected_mass(r,:)/=table%ejected_mass(r,:)))stop 70
+     enddo
+     call evaluate_channel_cumulative(table,3,20d0,.01345d0,.1d0,a,ierr)
+     if(ierr/=0)stop 71
+     call evaluate_channel_cumulative(baseline,3,20d0,.01345d0,.1d0,b,ierr)
+     if(ierr/=0.or.a%ejected_mass(11)-b%ejected_mass(11)<.07d0)stop 72
+     print *, 'LC18_PROMPT_DECAY_NATIVE_IRON_AND_UNCHANGED_BUDGETS',b%ejected_mass(11),a%ejected_mass(11)
+  endif
   if(trim(source_option)=='lc18_set_r_agb7_net'.or.lowz7)then
      if(any(table%net_yield_channel_available.neqv.[.false.,.true.,.false.,.false.,.false.]))stop 49
      if(.not.any(table%net_yield<0).or..not.any(table%net_yield>0))stop 50

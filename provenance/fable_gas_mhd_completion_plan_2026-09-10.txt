@@ -1,0 +1,33 @@
+Write is disabled in this session, so the audit is delivered here rather than in a plan file. All findings below were verified against the tree, not just the two documents.
+
+**Q-GOAL: yes, the plan serves the stated objective, with one off-target item.**
+
+Each bundle removes a specific, verified obstacle between the current gas-only CT build and the target run:
+
+- The runtime guards in `patch/lagRamses/read_hydro_params.f90` at lines 159 and 187 reject GPU hydro, SGS, separate dust dynamics, sink, sink_AGN and agn under MHD. Bundles 2 and 4 are exactly the evidence-backed lifting of those guards.
+- Magnetic-energy-aware thermal extraction already exists in the SNRT driver, cooling, star formation and sink accretion. Bundle 2 is coupling verification, not new physics.
+- The `mhd/` directory has zero OpenMP directives and the CUDA hydro kernel has no HLLD or CT. Bundle 4 is real work, not a stub.
+- The one item that does not serve the goal is "boundary semantics" in bundle 1. The application is a periodic cosmological box, so physical boundaries are never exercised.
+
+**Q-LEAN: cuts**
+
+1. **Bundle 1 boundary semantics.** Replace with a one-line runtime reject of nboundary greater than zero under MHD. No boundary test campaign.
+2. **Bundle 1 different-MPI restart.** Duplicates bundle 3's restart plus load balancing. Do it once in bundle 3 with the integrated namelist.
+3. **Bundle 3 setup tools.** Already done: mkrun.py, the shared CLI/GUI schema, and 45 of 46 tests pass. Touch only if bundle 2 adds a control.
+4. **Bundle 1 zero-field check.** One run with the MHD build and zero seed, compared to the existing hydro evidence. Not a suite.
+5. **Bundle 2 nonthermal energies.** Include only if the frozen profile enables CR. The passive index base already uses the MHD hydro count, so this is a run, not code.
+6. **Bundle 4 parity and performance.** Reuse the bundle-3 namelist. One parity table and one timing table, no separate GPU problem.
+7. **Launch reports.** One template reused per run directory.
+
+**Feasibility verdict**
+
+Bundles 1 to 3 are feasible with small runs. The work is guard lifting, one feedback defect, and a handful of runs. Bundle 4a, OpenMP, is mechanical because the pattern exists in the hydro path. Bundle 4b, CUDA, is feasible but is the dominant cost of the whole plan. Schedule it last and keep it off by default.
+
+**Blocking issues**
+
+- **Profile undefined.** Bundle 2 says "fix a supported profile" but names none. Feedback mode, cooling backend, RT, CR, dust carriers and sink/AGN each route through different energy code. Legacy SN feedback in `feedback.kjhan3.f90` at lines 1836 and 2544 computes internal energy as total minus kinetic with no magnetic subtraction, so B²/2 would be treated as thermal energy during mass loading. The native SNRT path does subtract it. Fix or exclude legacy feedback at profile freeze.
+- **MHD Godunov is not thread-safe.** Both `godfine1` and `mag_unsplit` use `save` work arrays, roughly thirty in total across `mhd/godunov_fine.f90` and `mhd/umuscl.f90`. The coarse reflux and the twelve EMF edge updates write shared `unew` and need the same critical or atomic protection the hydro path uses. Converting to automatic arrays costs tens of MB per thread at NVECTOR 32 and NVAR 21, so OMP_STACKSIZE or heap allocation is required. The wrapper signature must also match the hydro convention for the hybrid dispatcher.
+- **CUDA has no MHD kernels.** The existing 2226-line kernel file is LLF/HLL/HLLC on cell-centred state. A real device path needs MHD primitive conversion, face-B slopes, MHD trace, three 1D HLLD solves, three 2D HLLD edge solves, EMF assembly, nvar+3 gather and scatter, and EMF edge reflux. The stream-slot scheduling and CPU fallback in `godunov_fine_hybrid` are reusable as-is. Mixed CPU/GPU batches within one level need a defined parity tolerance and a divergence check after mixed dispatch.
+- **Sink/AGN.** Accretion in `sink_particle.kjhan.f90` already has twelve MHD hooks, but `agn_feedback_deposition.f90` has none. Verify it only adds to total energy and never re-derives thermal energy from total minus kinetic, then lift the guard.
+- **Wired but untested.** Cosmological B scaling is called from the update-time routine, the different-size restart ghost refresh, and load-balance exchange of the extra three fields. Each is one run inside bundle 1 or 3.
+- **Non-ideal leak.** The magnetic diffusion step in `amr_step.jaehyun.f90` at line 1049 activates on a nonzero eta_mag. The frozen profile must pin it to zero, since non-ideal MHD is explicitly long-term scope.

@@ -315,7 +315,9 @@ contains
           return
        end if
     end do
-    do channel = channel_wind, channel_snii
+    do channel = channel_wind, channel_pisn
+       if(channel==channel_snia)cycle
+       if(channel==channel_pisn.and..not.use_pisn)cycle
        if ((channel == channel_wind .and. .not. use_wind) .or. &
             (channel == channel_agb .and. .not. use_agb) .or. &
             (channel == channel_snii .and. .not. use_snii)) cycle
@@ -451,7 +453,7 @@ contains
   logical function user_source_model_requested()
     user_source_model_requested = use_channel_resolved_feedback() .and. &
          trim(stellar_fate_policy)=='user_selected_model_v1' .and. len_trim(high_mass_history_file)>0 .and. &
-         yield_source_basis_id==yield_basis_per_star_cumulative .and. .not.enable_pisn .and. &
+         yield_source_basis_id==yield_basis_per_star_cumulative .and. &
          enable_wind .and. enable_snii .and. &
          ((population_model_id==population_single_star_ssp.and.configured_binary_fraction==0d0.and..not.enable_snia) .or. &
           (population_model_id==population_binary_ssp.and.configured_binary_fraction>0d0.and.enable_snia.and.enable_agb))

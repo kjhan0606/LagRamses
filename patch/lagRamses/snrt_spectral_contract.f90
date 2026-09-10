@@ -79,8 +79,99 @@ module snrt_spectral_contract
   public :: snrt_spectral_contract_validate_values
   public :: snrt_spectral_contract_error_name
   public :: snrt_spectral_contract_checkpoint_identity_matches
+  public :: snrt_band_enabled,snrt_node_secondaries_enabled,snrt_band_kind,snrt_d03_band_enabled
+  public :: snrt_fe_band_enabled,snrt_grain_band_bins
+  public :: snrt_chimes_band_enabled
+  character(len=*),parameter,public :: snrt_chimes_bank_sha256 = &
+       '998970ed5bb4cfeda01913a72cc3fc62af8ce2fdb55dc924f2704e3abb5391de'
+  character(len=64),save,public :: snrt_band_model='hhe_maxent64_v1'
+  logical,save :: node_secondaries=.false.
+  logical,save :: d03_band=.false.
+  logical,save :: fe_band=.false.
+  logical,save :: chimes_band=.false.
 
 contains
+
+  logical function snrt_band_enabled() result(enabled)
+    ! Latched before any RT state or restart is admitted. No per-cell getenv.
+    logical,save :: resolved=.false.,selected=.false.
+    character(len=64)::value
+    integer::status,length
+    if(.not.resolved)then
+       value=''
+       call get_environment_variable('SNRT_SPECTRAL_MODEL',value,length=length,status=status)
+       if(status==1)then
+          selected=.false.
+       else if(status/=0)then
+          error stop 'SNRT_SPECTRAL_MODEL could not be read'
+       else
+          select case(trim(value))
+          case('','fixed');selected=.false.
+          case('hhe_maxent64_v1');selected=.true.
+          case('hhe_maxent64_fs2010_v1')
+             selected=.true.;node_secondaries=.true.;snrt_band_model=trim(value)
+          case('hhe_d03_maxent128_fs2010_v1')
+             selected=.true.;node_secondaries=.true.;d03_band=.true.;snrt_band_model=trim(value)
+          case('hhe_d03_fe_maxent128_fs2010_v1')
+             selected=.true.;node_secondaries=.true.;d03_band=.true.;fe_band=.true.;snrt_band_model=trim(value)
+          case('chimes_hot_atomic_maxent128_fs2010_v1')
+             selected=.true.;chimes_band=.true.;snrt_band_model=trim(value)
+          case default;error stop 'Unknown SNRT_SPECTRAL_MODEL; see NATIVE_RUNTIME.md'
+          end select
+       endif
+#ifdef SNRT_CHIMES
+       if(selected.and..not.chimes_band)error stop 'HHe spectral modes require CHIMES=0'
+#else
+       if(chimes_band)error stop 'Hot atomic spectral mode requires CHIMES=1'
+#endif
+#ifdef DUST_LIVE
+       if(selected.and..not.(d03_band.or.chimes_band))error stop 'HHe-only spectral modes require DUST_LIVE=0'
+#else
+       if(d03_band)error stop 'D03 spectral mode requires DUST_LIVE=1'
+       if(chimes_band)error stop 'Hot atomic spectral mode requires DUST_LIVE=1 carrier layout (zero dust)'
+#endif
+       resolved=.true.
+    endif
+    enabled=selected
+  end function snrt_band_enabled
+
+  logical function snrt_node_secondaries_enabled() result(enabled)
+    logical::band
+    band=snrt_band_enabled()
+    enabled=band.and.node_secondaries
+  end function
+
+  logical function snrt_d03_band_enabled() result(enabled)
+    logical::band
+    band=snrt_band_enabled()
+    enabled=band.and.d03_band
+  end function
+
+  integer function snrt_band_kind() result(kind)
+    kind=0
+    if(snrt_band_enabled())kind=1
+    if(node_secondaries)kind=2
+    if(d03_band)kind=3
+    if(fe_band)kind=4
+    if(chimes_band)kind=5
+  end function
+
+  logical function snrt_chimes_band_enabled() result(enabled)
+    logical::band
+    band=snrt_band_enabled()
+    enabled=band.and.chimes_band
+  end function
+
+  logical function snrt_fe_band_enabled() result(enabled)
+    logical::band
+    band=snrt_band_enabled()
+    enabled=band.and.fe_band
+  end function
+
+  integer function snrt_grain_band_bins() result(n)
+    n=4
+    if(snrt_fe_band_enabled())n=6
+  end function
 
   subroutine snrt_spectral_contract_load(filename, ierr)
     character(len=*), intent(in) :: filename

@@ -9,10 +9,11 @@
 module stellar_yield_audit
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
-       n_stellar_channels, channel_wind, channel_snii, channel_agb, valid_high_mass_choice
+       n_stellar_channels, channel_wind, channel_snii, channel_agb, channel_pisn, valid_high_mass_choice
   use stellar_yield_tables, only: stellar_yield_table_t
   use stellar_enrichment_config, only: default_imf_id, population_model_id, configured_binary_fraction, &
-       configured_imf_mass_min, configured_imf_mass_max, high_mass_model, high_mass_max_remnant_adjust_fraction
+       configured_imf_mass_min, configured_imf_mass_max, high_mass_model, high_mass_max_remnant_adjust_fraction, &
+       enable_wind,enable_snii,enable_pisn,configured_channel_mass_min,configured_channel_mass_max
   implicit none
 
   private
@@ -54,6 +55,7 @@ contains
     integer, parameter :: max_nodes=512
     integer :: version, node_count, input_imf_id, input_population_id
     integer :: terminal_outcome(max_nodes), i, j, k, w, s, unit, status
+    integer :: terminal_fate(max_nodes),pair,row
     real(stellar_dp) :: mass_msun(max_nodes), metallicity(max_nodes), terminal_age_yr(max_nodes)
     real(stellar_dp) :: input_binary_fraction, input_imf_min, input_imf_max, delta, history_min, history_max
     real(stellar_dp) :: mass_domain_min, mass_domain_max
@@ -72,7 +74,7 @@ contains
     namelist /stellar_high_mass_history/ version, node_count, model_id, wind_source_id, &
          terminal_source_id, model_coordinates, timing_policy, input_imf_id, input_population_id, &
          input_binary_fraction, input_imf_min, input_imf_max, mass_msun, metallicity, &
-         terminal_age_yr, terminal_outcome, metallicity_policy, net_yield_policy, agb_release_policy, &
+         terminal_age_yr, terminal_outcome, terminal_fate, metallicity_policy, net_yield_policy, agb_release_policy, &
          mass_domain_min, mass_domain_max, agb_non_co_count, agb_non_co_mass, agb_non_co_z, agb_non_co_kind, &
          net_channel_available,agb_wind_jump_count,agb_wind_jump_mass,agb_wind_jump_z,agb_wind_jump_fraction
 
@@ -91,23 +93,37 @@ contains
     agb_wind_jump_count=0;agb_wind_jump_mass=-1;agb_wind_jump_z=-1;agb_wind_jump_fraction=-1
     net_channel_available=.false.
     mass_msun=-1; metallicity=-1; terminal_age_yr=-1; terminal_outcome=-1
+    terminal_fate=-1
     open(newunit=unit,file=filename,status='old',action='read',iostat=status)
     if(status/=0)return
     read(unit,nml=stellar_high_mass_history,iostat=status)
     close(unit)
-    if(status/=0.or.version<1.or.version>3.or.node_count<2.or.node_count>max_nodes)return
+    if(status/=0.or.version<1.or.version>4.or.node_count<2.or.node_count>max_nodes)return
+    if(version<4.and.(enable_pisn.or.any(terminal_fate/=-1)))return
     ! v1 remains the original [40,120] contract; v2 explicitly includes the
     ! source-supported ordinary CCSN branch, never an 8--13 extrapolation.
     history_min=40d0;history_max=120d0
     if(version==2)history_min=13d0
-    if(version==3)then
+    if(version>=3)then
        ! A source-specific comparison may cover only part of the CCSN
        ! domain. Admission never extrapolates it to the rest of the IMF.
        if(.not.all(ieee_is_finite([mass_domain_min,mass_domain_max])))return
-       if(mass_domain_min<8d0.or.mass_domain_max>120d0.or.mass_domain_max<=mass_domain_min)return
+       if(mass_domain_min<8d0.or.mass_domain_max>merge(600d0,120d0,version==4).or. &
+            mass_domain_max<=mass_domain_min)return
        history_min=mass_domain_min;history_max=mass_domain_max
     else
        if(mass_domain_min/=-1d0.or.mass_domain_max/=-1d0)return
+    endif
+    if(version==4)then
+       if(high_mass_model/='source_consistent'.or.high_mass_max_remnant_adjust_fraction/=0)return
+       if(.not.enable_wind.or..not.enable_snii.or..not.enable_pisn)return
+       if(any(terminal_outcome/=-1))return ! No ambiguous legacy/new fate encoding.
+       if(any(terminal_fate(:node_count)<1).or.any(terminal_fate(:node_count)>5))return
+       do k=1,n_stellar_channels
+          if(k/=channel_wind.and.k/=channel_snii.and.k/=channel_pisn)cycle
+          if(configured_channel_mass_min(k)/=history_min.or.configured_channel_mass_max(k)/=history_max)return
+       enddo
+       if(history_min<configured_imf_mass_min.or.history_max>configured_imf_mass_max)return
     endif
     if(min(len_trim(model_id),len_trim(wind_source_id),len_trim(terminal_source_id), &
          len_trim(model_coordinates))==0)return
@@ -137,7 +153,9 @@ contains
          .not.all(ieee_is_finite(terminal_age_yr(:node_count))))return
     if(any(mass_msun(:node_count)<history_min).or.any(mass_msun(:node_count)>history_max).or. &
          any(metallicity(:node_count)<0).or.any(terminal_age_yr(:node_count)<=0))return
-    if(any(terminal_outcome(:node_count)<0).or.any(terminal_outcome(:node_count)>1))return
+    if(version<4)then
+       if(any(terminal_outcome(:node_count)<0).or.any(terminal_outcome(:node_count)>1))return
+    endif
     ! Each exact-Z branch must cover the declared domain in source-node order.
     do i=1,node_count
        if(i==1)then
@@ -150,11 +168,16 @@ contains
     enddo
     if(mass_msun(node_count)/=history_max)return
     trial=table
+    trial%high_mass_version=version
     allocate(trial%hm_mass(node_count),trial%hm_z(node_count),trial%hm_age(node_count), &
          trial%hm_remnant(node_count),trial%hm_adjustment(node_count), &
          trial%hm_wind_row(node_count),trial%hm_terminal_row(node_count))
     trial%hm_mass=mass_msun(:node_count); trial%hm_z=metallicity(:node_count)
     trial%hm_age=terminal_age_yr(:node_count)*1d-9
+    if(version==4)then
+       allocate(trial%hm_fate(node_count),trial%hm_pair_row(node_count))
+       trial%hm_fate=terminal_fate(:node_count)
+    endif
     trial%high_mass_identity=[model_id,wind_source_id,terminal_source_id,model_coordinates]
     trial%high_mass_wind_only=high_mass_model=='wind_only_collapse'
     trial%high_mass_linear_z=metallicity_policy=='linear_Z_cumulative_mixture'
@@ -163,12 +186,13 @@ contains
     trial%net_yield_diagnostic_unavailable=.not.all(trial%net_yield_channel_available)
     if(trial%high_mass_linear_z.and.maxval(trial%hm_z)<=minval(trial%hm_z))return
     do i=1,node_count
-       w=0; s=0
+       w=0; s=0;pair=0
        do j=1,table%n_rows
           if(table%initial_mass(j)/=mass_msun(i).or.table%birth_metallicity(j)/=metallicity(i))cycle
           if(table%age_gyr(j)/=trial%hm_age(i))cycle
           if(table%channel(j)==channel_wind)w=j
           if(table%channel(j)==channel_snii)s=j
+          if(table%channel(j)==channel_pisn)pair=j
        enddo
        if(w==0.or.s==0)return
        raw=high_mass_endpoint_t()
@@ -178,9 +202,32 @@ contains
        raw%wind_elements=table%ejected_mass(w,:); raw%terminal_elements=table%ejected_mass(s,:)
        raw%wind_energy=table%energy(w); raw%terminal_energy=table%energy(s)
        raw%wind_momentum=table%momentum(w,:); raw%terminal_momentum=table%momentum(s,:)
-       if(terminal_outcome(i)==0.and.(raw%terminal_mass/=0.or.raw%terminal_energy/=0.or. &
-            any(raw%terminal_momentum/=0)))return
-       if(terminal_outcome(i)==1.and.raw%terminal_mass<=0)return
+       if(version==4)then
+          if(pair==0)return
+          if(table%remnant_mass(pair)/=0)return
+          select case(terminal_fate(i))
+          case(1) ! CCSN: material and remnant in channel3 only.
+             if(.not.zero_payload(table,pair).or.raw%terminal_mass<=0.or.raw%remnant_mass<=0)return
+             if(raw%terminal_energy<=0)return
+          case(2,5) ! Failed/direct collapse: wind is the only gas return.
+             if(.not.zero_payload(table,pair).or..not.zero_ejecta(table,s).or.raw%remnant_mass<=0)return
+          case(3,4) ! Pair material in channel5; only channel3 may own a BH.
+             if(.not.zero_ejecta(table,s).or.table%returned_mass(pair)<=0)return
+             if(table%energy(pair)<=0)return
+             if(terminal_fate(i)==3.and.raw%remnant_mass<=0)return
+             if(terminal_fate(i)==4.and.raw%remnant_mass/=0)return
+          end select
+          raw%terminal_mass=raw%terminal_mass+table%returned_mass(pair)
+          raw%terminal_elements=raw%terminal_elements+table%ejected_mass(pair,:)
+          raw%terminal_energy=raw%terminal_energy+table%energy(pair)
+          raw%terminal_momentum=raw%terminal_momentum+table%momentum(pair,:)
+          trial%hm_pair_row(i)=pair
+          call resolve_high_mass_endpoint(raw,'source_consistent',wind_source_id==terminal_source_id, &
+               0d0,resolved,delta,status,allow_ordinary=.true.,mass_ceiling=history_max)
+       else
+          if(terminal_outcome(i)==0.and.(raw%terminal_mass/=0.or.raw%terminal_energy/=0.or. &
+               any(raw%terminal_momentum/=0)))return
+          if(terminal_outcome(i)==1.and.raw%terminal_mass<=0)return
        if(mass_msun(i)<40d0)then
           ! High-mass alternatives must not suppress ordinary CCSN. These
           ! endpoints must close without any mixed-source remnant repair.
@@ -189,6 +236,7 @@ contains
        else
           call resolve_high_mass_endpoint(raw,high_mass_model,wind_source_id==terminal_source_id, &
                high_mass_max_remnant_adjust_fraction,resolved,delta,status)
+       endif
        endif
        if(status/=0)then
           ierr=status
@@ -208,13 +256,15 @@ contains
              if(table%age_gyr(j)>trial%hm_age(i))then
                 if(.not.same_payload(table,j,w))return
              endif
-          else if(table%channel(j)==channel_snii)then
+          else if(table%channel(j)==channel_snii.or.(version==4.and.table%channel(j)==channel_pisn))then
+             row=s
+             if(table%channel(j)==channel_pisn)row=pair
              if(table%age_gyr(j)<trial%hm_age(i))then
                 if(table%returned_mass(j)/=0.or.table%remnant_mass(j)/=0.or.table%energy(j)/=0.or. &
                      any(table%momentum(j,:)/=0).or.any(table%ejected_mass(j,:)/=0).or. &
                      any(table%net_yield(j,:)/=0))return
              else
-                if(.not.same_payload(table,j,s))return
+                if(.not.same_payload(table,j,row))return
              endif
           endif
        enddo
@@ -222,7 +272,9 @@ contains
     enddo
     ! A canonical row above the seam cannot escape the declared node map.
     do j=1,table%n_rows
-       if(table%channel(j)/=channel_wind.and.table%channel(j)/=channel_snii)cycle
+       if(table%channel(j)/=channel_wind.and.table%channel(j)/=channel_snii.and. &
+            .not.(version==4.and.table%channel(j)==channel_pisn))cycle
+       if(version==4.and.table%channel(j)==channel_pisn.and.table%initial_mass(j)<history_min)return
        if(table%initial_mass(j)<history_min)cycle
        if(.not.any(trial%hm_mass==table%initial_mass(j).and.trial%hm_z==table%birth_metallicity(j)))return
     enddo
@@ -351,6 +403,13 @@ contains
          all(table%momentum(i,:)==0).and.all(table%ejected_mass(i,:)==0).and.all(table%net_yield(i,:)==0)
   end function zero_payload
 
+  logical function zero_ejecta(table,i)
+    type(stellar_yield_table_t),intent(in)::table
+    integer,intent(in)::i
+    zero_ejecta=table%returned_mass(i)==0.and.table%energy(i)==0.and. &
+         all(table%momentum(i,:)==0).and.all(table%ejected_mass(i,:)==0).and.all(table%net_yield(i,:)==0)
+  end function zero_ejecta
+
   logical function same_payload(table,i,j)
     type(stellar_yield_table_t), intent(in) :: table
     integer,intent(in)::i,j
@@ -362,7 +421,7 @@ contains
   end function same_payload
 
   subroutine resolve_high_mass_endpoint(raw, preset, same_source, adjustment_limit, &
-       resolved, remnant_adjustment, ierr, allow_ordinary)
+       resolved, remnant_adjustment, ierr, allow_ordinary,mass_ceiling)
     ! Resolve a COMPLETE per-initial-star endpoint, before IMF integration.
     ! Never use this on a cumulative row at an intermediate age. Timing,
     ! isotope projection, source identities and fate classification belong
@@ -375,9 +434,10 @@ contains
     real(stellar_dp), intent(out) :: remnant_adjustment
     integer, intent(out) :: ierr
     logical, intent(in), optional :: allow_ordinary
+    real(stellar_dp),intent(in),optional::mass_ceiling
     type(high_mass_endpoint_t) :: trial
     real(stellar_dp), parameter :: tolerance = 1.0e-10_stellar_dp
-    real(stellar_dp) :: residual, scale, minimum_mass
+    real(stellar_dp) :: residual, scale, minimum_mass,maximum_mass
 
     ! Failure has no publishable material or energy, including the correction.
     resolved = high_mass_endpoint_t()
@@ -397,7 +457,13 @@ contains
           minimum_mass=8d0
        endif
     endif
-    if (raw%initial_mass < minimum_mass .or. raw%initial_mass > 120.0_stellar_dp) return
+    maximum_mass=120d0
+    if(present(mass_ceiling))then
+       if(.not.ieee_is_finite(mass_ceiling).or.preset/='source_consistent')return
+       if(mass_ceiling<minimum_mass.or.mass_ceiling>600d0)return
+       maximum_mass=mass_ceiling
+    endif
+    if (raw%initial_mass < minimum_mass .or. raw%initial_mass > maximum_mass) return
     if (min(raw%wind_mass, raw%terminal_mass, raw%remnant_mass, &
          raw%wind_energy, raw%terminal_energy) < 0.0_stellar_dp) return
     if (minval(raw%wind_elements) < 0.0_stellar_dp .or. &
@@ -608,7 +674,9 @@ contains
     end do
 
     if (require_grid) then
-       do channel = channel_wind, channel_snii
+       do channel = channel_wind, channel_pisn
+          if(channel==4)cycle ! SNIa has a separate DTD/per-event input.
+          if(channel==channel_pisn.and.table%high_mass_version/=4)cycle
           if(present(required_channels))then
              if(.not.required_channels(channel))cycle
           endif
@@ -621,7 +689,8 @@ contains
           ! actual phase knots and the terminal event directly, never a
           ! Cartesian cross-star age interpolation. Its complete endpoint
           ! map and every history row were checked by prepare_high_mass_history.
-          if(table%high_mass_ready.and.(channel==channel_wind.or.channel==channel_snii))cycle
+          if(table%high_mass_ready.and.(channel==channel_wind.or.channel==channel_snii.or. &
+               (channel==channel_pisn.and.table%high_mass_version==4)))cycle
           call audit_complete_channel(table, channel, coordinate_tol, channel_is_bad)
           if (channel_is_bad) ierr = ior(ierr, yield_audit_err_grid)
        end do

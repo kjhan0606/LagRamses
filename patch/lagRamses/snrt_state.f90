@@ -1,5 +1,7 @@
 ! Persistent local S_N state, indexed by the RAMSES leaf-cell identifier.
 module snrt_state
+  use dust_composition_optics, only: d03_band_sha256
+  use dust_iron_optics, only: fe_band_sha256
   use amr_parameters, only: MAXLEVEL, dp
   use snrt_spectral_contract, only: snrt_spectral_ngroups => snrt_ngroups, &
        snrt_spectral_contract_loaded, snrt_spectral_contract_runtime_allowed, &
@@ -10,7 +12,9 @@ module snrt_state
        snrt_spectral_contract_group_edges_sha256, &
        snrt_spectral_contract_interval_convention, &
        snrt_spectral_contract_fraction_semantics, &
-       snrt_spectral_contract_checkpoint_identity_matches
+       snrt_spectral_contract_checkpoint_identity_matches, snrt_group_mean_energy_ev, &
+       snrt_band_enabled,snrt_group_edges_ev,snrt_band_kind,snrt_d03_band_enabled, &
+       snrt_chimes_band_enabled,snrt_chimes_bank_sha256
   use snrt_thermochemistry, only: snrt_secondary_source_id, &
        snrt_secondary_upstream_commit, snrt_secondary_manifest_sha256, &
        snrt_secondary_tables_loaded, snrt_secondary_loaded_source_id, &
@@ -20,7 +24,18 @@ module snrt_state
 #include "amr_index.h"
   implicit none
 
-  integer, parameter, public :: snrt_ndirection = 80
+  ! Unique product-rule families keep checkpoint dimensions unambiguous.
+  ! Use separate clean build directories when changing this option.
+#ifndef SNRT_ANGULAR_LEVEL
+#define SNRT_ANGULAR_LEVEL 0
+#endif
+#if SNRT_ANGULAR_LEVEL < 0 || SNRT_ANGULAR_LEVEL > 2
+#error "SNRT_ANGULAR_LEVEL must be 0, 1 or 2"
+#endif
+  integer, parameter, public :: snrt_angular_level = SNRT_ANGULAR_LEVEL
+  integer, parameter, public :: snrt_nmu = 8*(snrt_angular_level+1)
+  integer, parameter, public :: snrt_nphi = 10*(snrt_angular_level+1)
+  integer, parameter, public :: snrt_ndirection = snrt_nmu*snrt_nphi
   ! The spectral module owns the canonical nine-group dimensions.  Keep this
   ! local public alias so existing transport code retains its state-facing
   ! interface while all source-dependent moments come from the loaded
@@ -28,6 +43,10 @@ module snrt_state
   integer, parameter, public :: snrt_ngroups = snrt_spectral_ngroups
   integer, public :: snrt_nslot = 0
   real(c_float), allocatable, public :: snrt_intensity(:, :, :)
+  ! Independent signed correction, in photon CODE density * eV. Actual
+  ! energy = group_mean_energy_ev * real(intensity,dp) + energy_shift.
+  ! Count-only sources add reference energy by changing intensity alone.
+  real(dp), allocatable, public :: snrt_energy_shift(:, :, :)
   real(dp), allocatable, public :: snrt_neutral_fraction(:)
   ! H II, He II, and He III are the authoritative persistent chemistry state;
   ! snrt_neutral_fraction remains a compatibility mirror for H I opacity.
@@ -42,7 +61,9 @@ module snrt_state
   private
   public :: snrt_state_sync_level, snrt_state_get_slot, snrt_state_get_cell
   public :: snrt_state_checkpoint_write, snrt_state_checkpoint_read
-  integer, parameter, public :: snrt_checkpoint_cell_width = 4 + snrt_ndirection*snrt_ngroups
+  integer, parameter, public :: snrt_checkpoint_number_width = snrt_ndirection*snrt_ngroups
+  integer, parameter, public :: snrt_checkpoint_cell_width = 4 + 2*snrt_checkpoint_number_width
+  integer, parameter, public :: snrt_checkpoint_version = 7
   public :: snrt_state_pack_cell, snrt_state_restore_cell
   public :: snrt_state_clear_cell, validate_cell_payload
   public :: snrt_state_rebind_cells
@@ -78,6 +99,7 @@ contains
     ! Keep the cell-ID/slot association for pool reuse, but never its retired
     ! photon/chemistry contents. This avoids holes in the raw checkpoint map.
     snrt_intensity(:,:,slot)=0.0_c_float
+    snrt_energy_shift(:,:,slot)=0.0_dp
     snrt_hydrogen_ii(slot)=0.0_dp
     snrt_helium_ii(slot)=0.0_dp
     snrt_helium_iii(slot)=0.0_dp
@@ -95,39 +117,95 @@ contains
     slot = snrt_state_get_slot(icell)
     if(slot == 0) return
     payload(1:4) = [1.0_dp, snrt_hydrogen_ii(slot), snrt_helium_ii(slot), snrt_helium_iii(slot)]
-    payload(5:) = reshape(real(snrt_intensity(:,:,slot),dp),[snrt_ndirection*snrt_ngroups])
+    payload(5:4+snrt_checkpoint_number_width) = &
+         reshape(real(snrt_intensity(:,:,slot),dp),[snrt_checkpoint_number_width])
+    payload(5+snrt_checkpoint_number_width:) = &
+         reshape(snrt_energy_shift(:,:,slot),[snrt_checkpoint_number_width])
     call validate_cell_payload(payload,ierr)
   end subroutine
 
   subroutine validate_cell_payload(payload,ierr)
     real(dp), intent(in) :: payload(snrt_checkpoint_cell_width)
     integer, intent(out) :: ierr
+    integer :: g, first, last
+    real(dp) :: photons(snrt_ndirection), shift(snrt_ndirection), energy(snrt_ndirection)
     ierr = 10
-    if(any(.not.ieee_is_finite(payload)).or.any(payload<0.0_dp)) return
+    if(any(.not.ieee_is_finite(payload))) return
+    if(any(payload(1:4+snrt_checkpoint_number_width)<0.0_dp)) return
     if(payload(1)==0.0_dp)then
        if(any(payload/=0.0_dp)) return
     else if(payload(1)==1.0_dp)then
        if(payload(2)>1.0_dp.or.sum(payload(3:4))>1.0_dp+1.0d-10) return
-       if(any(payload(5:)>real(huge(0.0_c_float),dp))) return
+       if(any(payload(5:4+snrt_checkpoint_number_width)>real(huge(0.0_c_float),dp))) return
+       do g=1,snrt_ngroups
+          first=5+(g-1)*snrt_ndirection
+          last=first+snrt_ndirection-1
+          photons=payload(first:last)
+          shift=payload(first+snrt_checkpoint_number_width:last+snrt_checkpoint_number_width)
+          if(any(photons==0.0_dp.and.shift/=0.0_dp))return
+          ! Zero corrections also work in number-only native fixtures before
+          ! a spectral contract is loaded. Nonzero shifts require its moments.
+          if(all(shift==0.0_dp).and.(.not.snrt_band_enabled().or.all(photons==0.0_dp)))cycle
+          if(.not.ieee_is_finite(snrt_group_mean_energy_ev(g)))return
+          if(snrt_group_mean_energy_ev(g)<=0.0_dp)return
+          energy=snrt_group_mean_energy_ev(g)*photons+shift
+          if(any(.not.ieee_is_finite(energy)).or.any(energy<0.0_dp))return
+          if(snrt_band_enabled())then
+             if(any(energy<snrt_group_edges_ev(g)*photons*(1-8*epsilon(0.0_c_float))).or. &
+                  any(energy>snrt_group_edges_ev(g+1)*photons*(1+8*epsilon(0.0_c_float))))return
+          endif
+       end do
     else
        return
     end if
     ierr = 0
   end subroutine
 
-  subroutine snrt_state_restore_cell(icell,payload,ierr)
+  subroutine snrt_state_restore_cell(icell,payload,ierr,validate_only)
+    use amr_commons, only: ncoarse,ngridmax,twotondim
     integer, intent(in) :: icell
     real(dp), intent(in) :: payload(snrt_checkpoint_cell_width)
     integer, intent(out) :: ierr
+    logical, intent(in), optional :: validate_only
     integer :: slot
+    integer :: g
+    real(c_float) :: photons(snrt_ndirection,snrt_ngroups)
+    real(dp) :: shift(snrt_ndirection,snrt_ngroups)
     call validate_cell_payload(payload,ierr)
     if(ierr/=0) return
-    call snrt_state_initialize()
-    if(icell<1.or.icell>size(snrt_slot_of_cell))then
+    if(icell<1.or.icell>ICELL_OF(ngridmax,twotondim))then
        ierr=11
        return
     end if
-    if(payload(1)==0.0_dp) return
+    if(payload(1)==0.0_dp)then
+       if(present(validate_only))then
+          if(validate_only)return
+       end if
+       call snrt_state_initialize()
+       return
+    end if
+    photons=reshape(real(payload(5:4+snrt_checkpoint_number_width),c_float), &
+         [snrt_ndirection,snrt_ngroups])
+    shift=reshape(payload(5+snrt_checkpoint_number_width:),[snrt_ndirection,snrt_ngroups])
+    ! Restriction can supply FP64 averaged counts. Rebase a nonzero correction
+    ! onto the stored FP32 count, preserving actual energy across rounding.
+    ! Leave exact-zero corrections zero for existing number-only fixtures.
+    do g=1,snrt_ngroups
+       where(shift(:,g)/=0.0_dp.and. &
+            payload(5+(g-1)*snrt_ndirection:4+g*snrt_ndirection)/=real(photons(:,g),dp))
+          shift(:,g)=(snrt_group_mean_energy_ev(g)* &
+               payload(5+(g-1)*snrt_ndirection:4+g*snrt_ndirection)+shift(:,g))- &
+               snrt_group_mean_energy_ev(g)*real(photons(:,g),dp)
+       end where
+    end do
+    call validate_radiation(photons,shift,ierr)
+    if(ierr/=0)return
+    ! Batch AMR/checkpoint callers validate every eventual FP32 conversion
+    ! before publishing any cell. This path does not allocate or rebind slots.
+    if(present(validate_only))then
+       if(validate_only)return
+    end if
+    call snrt_state_initialize()
     slot=snrt_slot_of_cell(icell)
     if(slot==0)then
        call snrt_state_grow(snrt_nslot+1)
@@ -140,7 +218,20 @@ contains
     snrt_neutral_fraction(slot)=1.0_dp-payload(2)
     snrt_helium_ii(slot)=payload(3)
     snrt_helium_iii(slot)=payload(4)
-    snrt_intensity(:,:,slot)=reshape(real(payload(5:),c_float),[snrt_ndirection,snrt_ngroups])
+    snrt_intensity(:,:,slot)=photons
+    snrt_energy_shift(:,:,slot)=shift
+  end subroutine
+
+  subroutine validate_radiation(photons,shift,ierr)
+    real(c_float), intent(in) :: photons(snrt_ndirection,snrt_ngroups)
+    real(dp), intent(in) :: shift(snrt_ndirection,snrt_ngroups)
+    integer, intent(out) :: ierr
+    real(dp) :: payload(snrt_checkpoint_cell_width)
+    payload=0.0_dp
+    payload(1)=1.0_dp
+    payload(5:4+snrt_checkpoint_number_width)=reshape(real(photons,dp),[snrt_checkpoint_number_width])
+    payload(5+snrt_checkpoint_number_width:)=reshape(shift,[snrt_checkpoint_number_width])
+    call validate_cell_payload(payload,ierr)
   end subroutine
 
   function snrt_state_get_slot(icell) result(islot)
@@ -166,8 +257,7 @@ contains
   subroutine snrt_state_checkpoint_write(unit_id, ierr)
     integer, intent(in) :: unit_id
     integer, intent(out) :: ierr
-    integer, parameter :: checkpoint_version = 6
-    integer :: ios
+    integer :: ios, islot
     character(len=128) :: secondary_source_id, secondary_upstream_commit
     character(len=128) :: secondary_manifest_sha256
 
@@ -210,11 +300,11 @@ contains
     end if
     ! Invalid photons must be rejected before even the header is published.
     if (snrt_nslot > 0) then
-       if (.not. allocated(snrt_intensity)) then
+       if (.not. allocated(snrt_intensity).or..not.allocated(snrt_energy_shift)) then
           ierr = 10
           return
        end if
-       if (size(snrt_intensity,3) < snrt_nslot) then
+       if (size(snrt_intensity,3) < snrt_nslot.or.size(snrt_energy_shift,3)<snrt_nslot) then
           ierr = 10
           return
        end if
@@ -223,8 +313,14 @@ contains
           ierr = 10
           return
        end if
+       do islot=1,snrt_nslot
+          call validate_radiation(snrt_intensity(:,:,islot),snrt_energy_shift(:,:,islot),ierr)
+          if(ierr/=0)return
+       end do
     end if
-    write(unit_id, iostat=ios) checkpoint_version, snrt_ndirection, &
+    ! v8 binds hhe_maxent64_v1, with exactly the v7 N+shift payload. Older
+    ! readers reject it; fixed-model files remain v7 byte-layout compatible.
+    write(unit_id, iostat=ios) merge(7+snrt_band_kind(),snrt_checkpoint_version,snrt_band_enabled()), snrt_ndirection, &
          snrt_ngroups, snrt_nslot
     if (ios /= 0) then
        ierr = 1
@@ -251,10 +347,35 @@ contains
        ierr = 2
        return
     end if
+    if(snrt_d03_band_enabled())then
+       write(unit_id,iostat=ios)d03_band_sha256
+       if(ios/=0)then
+          ierr=2;return
+       endif
+    endif
+    if(snrt_band_kind()==4)then
+       write(unit_id,iostat=ios)fe_band_sha256
+       if(ios/=0)then
+          ierr=2;return
+       endif
+    endif
+    if(snrt_chimes_band_enabled())then
+       write(unit_id,iostat=ios)snrt_chimes_bank_sha256
+       if(ios/=0)then
+          ierr=2;return
+       endif
+    endif
     if (snrt_nslot <= 0) return
     write(unit_id, iostat=ios) snrt_cell_id(1:snrt_nslot)
     if (ios /= 0) then
        ierr = 3
+       return
+    end if
+    ! v7 inserts one FP64 correction record before the unchanged photon and
+    ! chemistry records. v6 has no such record and implies exactly zero shift.
+    write(unit_id, iostat=ios) snrt_energy_shift(:,:,1:snrt_nslot)
+    if (ios /= 0) then
+       ierr = 4
        return
     end if
     write(unit_id, iostat=ios) snrt_intensity(:,:,1:snrt_nslot)
@@ -275,7 +396,6 @@ contains
   subroutine snrt_state_checkpoint_read(unit_id, ierr)
     integer, intent(in) :: unit_id
     integer, intent(out) :: ierr
-    integer, parameter :: checkpoint_version = 6
     integer :: ios, version, ndirection_file, ngroups_file, nslot_file
     integer :: islot, icell
     character(len=64) :: checkpoint_status
@@ -286,8 +406,10 @@ contains
     character(len=128) :: checkpoint_secondary_source_id
     character(len=128) :: checkpoint_secondary_upstream_commit
     character(len=128) :: checkpoint_secondary_manifest_sha256
+    character(len=64) :: checkpoint_grain_sha256
     integer, allocatable :: saved_cell_id(:)
     real(c_float), allocatable :: saved_intensity(:,:,:)
+    real(dp), allocatable :: saved_energy_shift(:,:,:)
     real(dp), allocatable :: saved_neutral(:)
     real(dp), allocatable :: saved_hydrogen_ii(:), saved_helium_ii(:), &
          saved_helium_iii(:)
@@ -298,7 +420,8 @@ contains
        ierr = 1
        return
     end if
-    if (version /= checkpoint_version .or. ndirection_file /= snrt_ndirection .or. &
+    if (merge(version/=7+snrt_band_kind(),version/=snrt_checkpoint_version.and.version/=6,snrt_band_enabled()) .or. &
+         ndirection_file /= snrt_ndirection .or. &
          ngroups_file /= snrt_ngroups .or. nslot_file < 0) then
        ierr = 2
        return
@@ -335,13 +458,43 @@ contains
        ierr = 5
        return
     end if
+    if(snrt_d03_band_enabled())then
+       read(unit_id,iostat=ios)checkpoint_grain_sha256
+       if(ios/=0)then
+          ierr=5;return
+       endif
+       if(checkpoint_grain_sha256/=d03_band_sha256)then
+          ierr=5;return
+       endif
+    endif
+    if(snrt_band_kind()==4)then
+       read(unit_id,iostat=ios)checkpoint_grain_sha256
+       if(ios/=0)then
+          ierr=5;return
+       endif
+       if(checkpoint_grain_sha256/=fe_band_sha256)then
+          ierr=5;return
+       endif
+    endif
+    if(snrt_chimes_band_enabled())then
+       read(unit_id,iostat=ios)checkpoint_grain_sha256
+       if(ios/=0)then
+          ierr=5;return
+       endif
+       if(checkpoint_grain_sha256/=snrt_chimes_bank_sha256)then
+          ierr=5;return
+       endif
+    endif
     if (nslot_file == 0) then
+       if (allocated(snrt_intensity)) snrt_intensity=0.0_c_float
+       if (allocated(snrt_energy_shift)) snrt_energy_shift=0.0_dp
        snrt_nslot = 0
        if (allocated(snrt_slot_of_cell)) snrt_slot_of_cell = 0
        return
     end if
 
     allocate(saved_cell_id(nslot_file), &
+         saved_energy_shift(snrt_ndirection,snrt_ngroups,nslot_file), &
          saved_intensity(snrt_ndirection,snrt_ngroups,nslot_file), &
          saved_neutral(nslot_file), saved_hydrogen_ii(nslot_file), &
          saved_helium_ii(nslot_file), saved_helium_iii(nslot_file))
@@ -351,6 +504,14 @@ contains
        deallocate(saved_cell_id, saved_intensity, saved_neutral, &
             saved_hydrogen_ii, saved_helium_ii, saved_helium_iii)
        return
+    end if
+    saved_energy_shift=0.0_dp
+    if(version>=snrt_checkpoint_version)then
+       read(unit_id,iostat=ios) saved_energy_shift
+       if(ios/=0)then
+          ierr=7
+          return
+       end if
     end if
     read(unit_id, iostat=ios) saved_intensity
     if (ios /= 0) then
@@ -380,6 +541,10 @@ contains
             saved_hydrogen_ii, saved_helium_ii, saved_helium_iii)
        return
     end if
+    do islot=1,nslot_file
+       call validate_radiation(saved_intensity(:,:,islot),saved_energy_shift(:,:,islot),ierr)
+       if(ierr/=0)return
+    end do
     if (.not. all(ieee_is_finite(saved_neutral)) .or. &
          .not. all(ieee_is_finite(saved_hydrogen_ii)) .or. &
          .not. all(ieee_is_finite(saved_helium_ii)) .or. &
@@ -404,10 +569,12 @@ contains
     end if
     call snrt_state_grow(nslot_file)
     if (snrt_nslot > 0) snrt_intensity(:,:,1:snrt_nslot) = 0.0_c_float
+    snrt_energy_shift=0.0_dp
     snrt_slot_of_cell = 0
     snrt_nslot = nslot_file
     snrt_cell_id(1:nslot_file) = saved_cell_id
     snrt_intensity(:,:,1:nslot_file) = saved_intensity
+    snrt_energy_shift(:,:,1:nslot_file) = saved_energy_shift
     snrt_neutral_fraction(1:nslot_file) = 1.0d0 - saved_hydrogen_ii
     snrt_hydrogen_ii(1:nslot_file) = saved_hydrogen_ii
     snrt_helium_ii(1:nslot_file) = saved_helium_ii
@@ -446,6 +613,7 @@ contains
              snrt_slot_of_cell(icell) = islot
              snrt_cell_id(islot) = icell
              snrt_intensity(:, :, islot) = 0.0_c_float
+             snrt_energy_shift(:, :, islot) = 0.0_dp
              snrt_neutral_fraction(islot) = 1.0d0
              snrt_hydrogen_ii(islot) = 0.0d0
              snrt_helium_ii(islot) = 0.0d0
@@ -479,6 +647,10 @@ contains
     end if
     if (.not. allocated(snrt_intensity)) &
          allocate(snrt_intensity(snrt_ndirection, snrt_ngroups, max(0,snrt_capacity)))
+    if (.not. allocated(snrt_energy_shift)) then
+       allocate(snrt_energy_shift(snrt_ndirection, snrt_ngroups, max(0,snrt_capacity)))
+       snrt_energy_shift=0.0_dp
+    end if
     if (.not. allocated(snrt_neutral_fraction)) &
          allocate(snrt_neutral_fraction(max(0,snrt_capacity)))
     if (.not. allocated(snrt_hydrogen_ii)) &
@@ -503,6 +675,7 @@ contains
     integer :: next_capacity
     integer, allocatable :: next_cell_id(:)
     real(c_float), allocatable :: next_intensity(:, :, :)
+    real(dp), allocatable :: next_energy_shift(:, :, :)
     real(dp), allocatable :: next_neutral_fraction(:)
     real(dp), allocatable :: next_hydrogen_ii(:), next_helium_ii(:), &
          next_helium_iii(:)
@@ -511,11 +684,13 @@ contains
     next_capacity = max(required, max(1024, 2 * snrt_capacity))
     allocate(next_cell_id(next_capacity))
     allocate(next_intensity(snrt_ndirection, snrt_ngroups, next_capacity))
+    allocate(next_energy_shift(snrt_ndirection, snrt_ngroups, next_capacity))
     allocate(next_neutral_fraction(next_capacity))
     allocate(next_hydrogen_ii(next_capacity), next_helium_ii(next_capacity), &
          next_helium_iii(next_capacity))
     next_cell_id = 0
     next_intensity = 0.0_c_float
+    next_energy_shift = 0.0_dp
     next_neutral_fraction = 1.0d0
     next_hydrogen_ii = 0.0d0
     next_helium_ii = 0.0d0
@@ -523,6 +698,7 @@ contains
     if (snrt_nslot > 0) then
        next_cell_id(1:snrt_nslot) = snrt_cell_id(1:snrt_nslot)
        next_intensity(:, :, 1:snrt_nslot) = snrt_intensity(:, :, 1:snrt_nslot)
+       next_energy_shift(:, :, 1:snrt_nslot) = snrt_energy_shift(:, :, 1:snrt_nslot)
        if (allocated(snrt_neutral_fraction)) then
           next_neutral_fraction(1:snrt_nslot) = &
                snrt_neutral_fraction(1:snrt_nslot)
@@ -536,6 +712,7 @@ contains
     endif
     call move_alloc(next_cell_id, snrt_cell_id)
     call move_alloc(next_intensity, snrt_intensity)
+    call move_alloc(next_energy_shift, snrt_energy_shift)
     call move_alloc(next_neutral_fraction, snrt_neutral_fraction)
     call move_alloc(next_hydrogen_ii, snrt_hydrogen_ii)
     call move_alloc(next_helium_ii, snrt_helium_ii)

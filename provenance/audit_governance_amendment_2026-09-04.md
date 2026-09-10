@@ -5,6 +5,10 @@ Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
 
 ## Current auditor roles
 
+All future plan auditors must begin with **Q-GOAL**, then **Q-LEAN**, as
+specified in the [audit cadence amendment](audit_cadence_amendment_2026-09-05.md#first-questions-in-every-plan-audit-operator-directive-2026-09-09).
+These are questions within the existing review, not additional gates.
+
 - **Fable:** primary plan auditor. Before a new implementation bundle begins,
   Fable reviews the driver's plan for final-purpose alignment,
   scientific/technical justification, feasibility, scope discipline, and

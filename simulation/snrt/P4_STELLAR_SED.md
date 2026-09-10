@@ -89,3 +89,46 @@ baseline 1.0. These assumptions are all recorded in the metadata sidecar and
 must be revisited before a STAR+AGN production merge.
 The staged HDF5 adapter and candidate artifact are checked by
 [`tests/bpass_stellar_ledger.py`](tests/bpass_stellar_ledger.py).
+
+## Native evolving stellar source (2026-09-10)
+
+The live Fortran source is separate from the historical P4 snapshot CSV
+adapter above. [`tools/build_bpass_native_sed.py`](tools/build_bpass_native_sed.py)
+exports the pinned Galacticus BPASS spectrum, whose upstream converter
+already removed the original 1e6-Msun burst normalization. It integrates
+photons per second per **initial** Msun. The native model uses linear age
+in Myr and linear metallicity **mass fraction**, not log coordinates.
+Intervals crossing age knots are integrated exactly for that declared model;
+0--1 Myr explicitly holds the first spectrum. There is no additional age/Z
+extrapolation, IMF reweighting or invented flux outside 1--100000 Angstrom.
+
+The existing v2 asset and default exporter output are unchanged. Optional
+`--energy-moments` produces v3 with both Q and energy rate (eV/s/initial Msun)
+from the same positive piecewise-linear photon integrand. Q uses trapezoids;
+energy analytically integrates that same integrand times hc/lambda. Escape
+fraction applies to both once. Native age/Z interpolation and time integration
+operate separately on Q and E; the injected mean is the final interval E/Q.
+
+Select the retained native v3 comparison with:
+
+```sh
+export SNRT_ALLOW_REFERENCE_CONTROL=1
+export SNRT_GROUP_CONTRACT=/gpfs/kjhan/LRD_JWST/simulation/snrt/config/snrt_group_contract_reference_control_v1.nml
+export SNRT_STELLAR_SED=/gpfs/kjhan/LRD_JWST/simulation/snrt/config/snrt_stellar_sed_bpass_independent_v3.nml
+export SNRT_SPECTRAL_MODEL=hhe_maxent64_v1
+```
+
+This requires the existing SNRT-enabled **DUST_LIVE=0, CHIMES=0** band build
+and the other normal RT/run settings. It is not an independent launch recipe.
+The paired source deposits actual BPASS energy while preserving the fixed
+state encoding `E = Eref*N + shift`. FP32 packet rounding is bounded using
+actual source energy, not Eref. The v3 loader rejects nonphysical moments,
+fixed spectral mode and energy-discarding callers. MPI/restart identity binds
+the full Q/E table and semantics; changing even energy alone rejects restart.
+
+This remains an **independent radiation-population comparison**: BPASS's
+binary IMF/support do not match the selected feedback population. It does
+not establish common-population eleven-element returns, a complete stellar
+SED shape within each group, dust/CHIMES spectral coupling, or production
+approval for combined stellar+AGN physics. See
+[implementation and bounded MPI2 restart evidence](../../provenance/snrt_stellar_energy_implementation_2026-09-10.md).

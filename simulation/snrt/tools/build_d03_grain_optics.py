@@ -120,6 +120,8 @@ def main() -> None:
     p.add_argument("--download-missing", action="store_true")
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--manifest", type=Path, required=True)
+    p.add_argument("--band-nodes", type=int, choices=(0, 64, 128, 256), default=0,
+                   help="Separate nodal absorption/transport-scattering include; leaves original data unchanged")
     args = p.parse_args()
     for path in (args.output, args.manifest):
         if path.exists():
@@ -148,6 +150,54 @@ def main() -> None:
     # Check full group support even though the native reference is monochromatic.
     for data in tables.values():
         index_at(data, edges)
+    if args.band_nodes:
+        n = args.band_nodes
+        # Match Grid<K> exactly in mathematical definition. Runtime checks
+        # libm's final rounding against these actual stored energies.
+        node_energy = np.array([lo*np.exp(np.log(hi/lo)*np.arange(n)/(n-1))
+                                for lo, hi in zip(edges[:-1], edges[1:])]).T
+        node_energy[0] = edges[:-1]
+        node_energy[-1] = edges[1:]
+        q = grain_efficiencies(tables, node_energy.ravel(order="F"))
+        area = .75 / np.array([2.2e-6, 2.2e-5, 3.8e-6, 3.8e-5])
+        absorption = (q[0]*area).reshape((n, len(primary), 4), order="F")
+        scattering = (q[1]*(1-q[2])*area).reshape((n, len(primary), 4), order="F")
+        generated = f"! D03 {n}-node cm2/g; 20K dielectric; 1/3--2/3 graphite.\n"
+        generated += f"integer,parameter :: d03_band_nodes={n}\n"
+        # One group declaration stays within standard continuation limits.
+        for name, data in (("ev", node_energy[..., None]), ("abs", absorption),
+                           ("transport", scattering)):
+            for b in range(data.shape[2]):
+                for g in range(len(primary)):
+                    generated += declaration(f"d03_b_{name}_{b}_{g}", data[:, g, b])
+            pieces = [f"d03_b_{name}_{b}_{g}" for b in range(data.shape[2])
+                      for g in range(len(primary))]
+            shape = (n, len(primary)) if name == "ev" else data.shape
+            dims = ",".join(map(str, shape))
+            generated += f"real(real64),parameter :: d03_band_{name}({dims})=reshape([ &\n"
+            generated += ", &\n".join("  " + ",".join(pieces[i:i+3])
+                                     for i in range(0, len(pieces), 3)) + f"],[{dims}])\n"
+        content_sha = hashlib.sha256(generated.encode()).hexdigest()
+        generated += f"character(len=64),parameter :: d03_band_sha256='{content_sha}'\n"
+        manifest = dict(schema="d03_native_grain_optics_preparation_v2", sources=sources,
+                        generator_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                        compiled_sha256=hashlib.sha256(generated.encode()).hexdigest(),
+                        node_content_sha256=content_sha, nodes=n, edges_ev=edges.tolist(),
+                        radii_cm=[1e-6, 1e-5], solid_density_g_cm3=[2.2, 3.8],
+                        miepython_version=miepython.__version__, numpy_version=np.__version__,
+                        units="cm2/g per actual bin mass; energies eV",
+                        node_closure="log grid with exact endpoints; positive trapezoidal dE prior",
+                        primary_closure="maxent N/E reconstruction; absorption then elastic delta-isotropic split",
+                        limitations=["Frozen20K dielectric, graphite1/3--2/3 approximation.",
+                                     "No grain photoelectron escape, stochastic PAH or relative-motion force.",
+                                     "Finite quadrature does not resolve every near-edge feature."])
+        with args.output.open("x") as out:
+            out.write(generated)
+        with args.manifest.open("x") as out:
+            json.dump(manifest, out, indent=2)
+            out.write("\n")
+        print(json.dumps(manifest, indent=2))
+        return
     q, iq = grain_efficiencies(tables, primary), grain_efficiencies(tables, ir)
     generated = "! Generated D03 sphere reference: 20 K dielectric, 1/3-2/3 graphite.\n"
     generated += "! No PAHs, stochastic heating, default activation, or optical-temperature evolution.\n"

@@ -6,6 +6,7 @@ subroutine courant_fine(ilevel)
 #if USE_TURB==1
   use turb_commons
 #endif
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   integer::info
@@ -59,9 +60,8 @@ subroutine courant_fine(ilevel)
 
      ! Loop over cells
      do ind=1,twotondim
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=ind_grid(i)+iskip
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Gather leaf cells
@@ -187,6 +187,7 @@ subroutine cmpdt(uu,gg,dx,dt,ncell)
   use amr_parameters
   use hydro_parameters
   use const
+#include "amr_index.h"
   implicit none
   integer::ncell
   real(dp)::dx,dt
@@ -294,6 +295,7 @@ end subroutine cmpdt
 subroutine velocity_fine(ilevel)
   use amr_commons
   use hydro_commons
+#include "amr_index.h"
   implicit none
   integer::ilevel
   !----------------------------------------------------------
@@ -350,9 +352,8 @@ subroutine velocity_fine(ilevel)
      do ind=1,twotondim
 
         ! Gather cell indices
-        iskip=ncoarse+(ind-1)*ngridmax
         do i=1,ngrid
-           ind_cell(i)=iskip+ind_grid(i)
+           ind_cell(i)=ICELL_OF(ind_grid(i),ind)
         end do
 
         ! Gather cell centre positions
@@ -369,12 +370,11 @@ subroutine velocity_fine(ilevel)
         end do
 
         ! Impose analytical velocity field
-        select case (condinit_kind)
-            case('ponomarenko')
-               call velana_ponomarenko(xx,vv,dx_loc,t,ngrid)
-            case default
-               call velana(xx,vv,dx_loc,t,ngrid)
-         end select
+        ! lagRamses admits full MHD, not a prescribed-velocity induction run.
+        ! Retain the upstream helper without linking unrelated test ICs.
+        write(*,*)'ERROR: prescribed induction velocity is not enabled in lagRamses'
+        call clean_stop
+        return
 
         ! Impose induction variables
         do i=1,ngrid

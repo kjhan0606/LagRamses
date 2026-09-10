@@ -1,5 +1,192 @@
 # Native runtime controls (implementation, not physical approval)
 
+## PARSEC low-Z printed-precision source (2026-09-10)
+
+Explicit feedback conversion with `--metallicity-grid precision_eleven
+--wind-km-s 1000` supplies495 nonrotating14--600Msun nodes at
+Z=1e-11,.0001,.002,.004,.006,.008,.01,.014,.017,.02,.03. Rebuild the SED
+from that package and select all three existing yield/history/SED paths.
+The native binder requires the new `parsec2025_w17_hw02_precision_rate_v1`
+identity on both sides. No new namelist key or default change.
+
+This model preserves gross elemental yields, reconstructs baryonic masses
+only within actual printed intervals, and uses positive tabulated RATE for
+wind timing with an explicit fixed-speed comparison. Phase-speed extreme-Z
+extrapolation is not admitted. Omitted author Z=1e-6/.001 branches are
+replaced only by the declared neighboring-Z cumulative mixture, not a claim
+to their original fates. Z=0 and <14Msun remain unsupported; this is not a
+full population. [Details and evaluation status](../../provenance/parsec_low_z_precision_implementation_2026-09-10.md).
+
+SNRT Intel builds now require `-no-ftz` on the Fortran MAIN (Makefile
+enforces this). Otherwise subnormal FP32 photon increments can disappear
+while paired FP64 energy remains, corrupting weak hard-band means. This is
+gradual underflow within the existing representation, not an unlimited
+dynamic-range claim or a relaxed spectral admissibility test.
+
+## PARSEC five-metallicity common source (2026-09-10)
+
+Add `--metallicity-grid metal_rich_five` to the PARSEC feedback converter
+to select actual Z=.008/.014/.017/.02/.03 (225 nonrotating14--600Msun nodes).
+Default `solar_pair` and its old two-Z physical payloads are unchanged.
+Rebuild the matched SED from that feedback package; its converter derives
+the exact same Z list. Native material/radiation share the linear-Z bracket
+and relative exact-node tolerance and require actual source binding before
+publication. Select the existing yield/history/SED paths together; no new
+RAMSES namelist key or full-SSP claim. Other Z with unresolved source budgets
+are not silently admitted. [Source, review, native tests and MPI2 exact-restart evidence](../../provenance/parsec_metallicity_extension_implementation_2026-09-10.md).
+
+## LC18 prompt elemental decay (2026-09-10)
+
+The LC18 converter accepts explicit
+`--decay prompt_t12_le_100yr_baryonic_v1`; the combined KL16/LC18 converter
+accepts `--massive-decay` with the same value. Both retain the unchanged
+`as_tabulated_no_decay` default. This completes short nuclear chains at
+stellar release and stops at half-life>100yr; Ni56/Co56 reach tracked Fe,
+but Al26/Fe60 remain in their parent elements. It is not a finite-horizon
+or live ISM decay calculation, and adds no decay heating or photons.
+Total return, remnant, ages, energies and AGB sources stay unchanged.
+Use the ordinary `PHASE0_YIELD_TABLE` / `high_mass_history_path` connection;
+no new NML controls or online Python. Physical source identity binds the
+selected projection. [Prescription, review disposition and native evidence](../../provenance/lc18_prompt_decay_implementation_2026-09-10.md).
+
+## PARSEC phase-dependent wind energy (2026-09-10)
+
+`tools/build_parsec_pair_feedback.py --wind-model phase_escape_f22_v1`
+generates an opt-in cumulative phase-energy table for the existing PARSEC
+v4 population. Do not supply `--wind-km-s` for that named model; default
+`fixed` still requires an explicit speed and preserves the old source bytes.
+Select the output through existing `PHASE0_YIELD_TABLE` and
+`high_mass_history_path`, and rebuild its matched `SNRT_STELLAR_SED` using
+`tools/build_parsec_native_sed.py`. Actual feedback and SED model IDs must
+agree; restart checks all consumed energy rows and photon moments.
+
+Wind energy thermalizes through the existing native source bridge, with no
+second radial kick or SN-class CR partition. Cool10km/s, hot H-poor d1.6
+and other hot d2.6 branches are explicitly simplified escape-speed closures,
+not a resolved atmosphere/LBV/bi-stability model. Mass/element endpoints and
+explosion energy stay unchanged. Both PARSEC converters now use the source's
+Lsun3.846e33, correcting the initial SED converter's nominal-unit assumption.
+No RAMSES namelist key, carrier or default changed.
+[Prescription, invocation, source-unit correction and native/live evidence](../../provenance/parsec_phase_wind_implementation_2026-09-10.md).
+
+## Matched PARSEC high-mass stellar radiation (2026-09-10)
+
+Existing `SNRT_STELLAR_SED` also accepts explicit external source v4 from
+`tools/build_parsec_native_sed.py`. This is **HIGH-MASS ONLY**, nonrotating
+14--600Msun atZ=.008/.014 by default (five-Z extension above), with the same native IMF cells/full .08--600
+denominator and terminal ages as the PARSEC five-fate v4 feedback source.
+It is not a full SSP, default stellar source, or original NLTE spectrum.
+The ordinary low-mass/AGB radiation contribution is not supplied.
+
+The converter uses actual five cumulative-above-edge Q constraints with
+a within-band Planck prior and sub-LW bolometric residual. Missing late
+photon times use actual full-track L/Teff Planck spectra, explicitly NOT
+measured Q. Native code reads positive interval Q/E, integrates the same
+piecewise-linear cumulative law without subtracting large endpoints, and
+binds all consumed moments/weights in MPI and HDF5 restart identity. No
+per-cell source history or online Python is used. No post-terminal photons.
+
+Requires active channel-resolved PARSEC v4 wind/CCSN/pair feedback with
+matching source windows and a supported individual-star IMF. Startup loads
+and checks the actual prepared feedback table before admitting radiation.
+Requires an existing band-spectrum mode and explicit reference-control
+opt-in. It cannot be silently mixed with an independent BPASS source.
+Old v1/v2/v3 sources and all defaults are unchanged. See the
+[implementation, scientific limits and measured tests](../../provenance/parsec_common_radiation_implementation_2026-09-10.md).
+
+## Optional H/He band spectrum (2026-09-10)
+
+`SNRT_SPECTRAL_MODEL=fixed` (also unset) retains fixed source-weighted group
+coefficients. `hhe_maxent64_v1` enables native intragroup maximum-entropy
+N/E reconstruction, Verner H/He spectral absorption, survivor hardening and
+actual accepted photoelectron energy into chemistry. Requires `SNRT=1`,
+`DUST_LIVE=0`, `CHIMES=0`; use the separate D03 option below for live grains.
+`SNRT_BACKEND=auto|openmp` uses OpenMP; forced CUDA is unsupported. The selector
+must match across MPI ranks and restart; no implicit fixed/spectral migration.
+64 quadrature nodes are re-derived, not stored in each cell. Source N/E
+injection is consistently FP32-quantized with a bounded total energy rounding
+check. This does not reconstruct a unique SED; v1/v2 stellar sources use
+nominal energies while v3/v4 supply actual source Q/E. This original mode's
+secondary ionization retains a mean-energy closure; use the FS2010 option
+for node-resolved secondary deposition. CPU cost is appreciably higher, so
+the default is unchanged.
+
+### D03 grain spectral comparison
+
+`SNRT_SPECTRAL_MODEL=hhe_d03_maxent128_fs2010_v1` selects128-node positive
+N/E reconstruction, Verner H/He and node-resolved FS2010, with actual D03
+graphite/silicate absorption and elastic delta-isotropic scattering. It
+requires `SNRT=1 DUST_LIVE=1 CHIMES=0`, `dust_optics_model='d03_transport_v1'`,
+the DL01 two-size material and a v4 scattering-enabled dust contract. Radii
+are .01/.1 micron and densities2.2/3.8 g/cm3, as for the existing D03 mode.
+Fe, PAH, sublimation and relative dust motion reject. CPU/OpenMP only;
+automatic backend selection stays on CPU, forced CUDA rejects.
+
+Four actual grain mass columns compete with H/He at every spectral node.
+Rejected atom-limited captures retain their own E/N; unlike the fixed
+operator they are not transferred through a second dust sink. Captured
+grain energy goes directly to the transactional material/IR solve, not a
+nominal group mean. Elastic angular relaxation of the reconstructed survivor
+spectrum follows absorption; this split does not resolve multiple internal
+scatter/absorb histories or apply a grain force. No grain photoelectric
+escape is added. Old fixed/64-node behavior and namelist defaults remain.
+
+The original D03 representative-energy/IR tables are unchanged. The separate
+`dust_d03_band_data.inc` and `data/draine_d03/band128_manifest.json` bind the
+source grid, actual opacity and transport-scattering coefficients. Native
+checkpoint version10 and the disjoint HDF5 format include the nodal content
+SHA256. Nodes are temporary quadrature, not additional cell carriers. Source
+preparation uses `tools/build_d03_grain_optics.py --band-nodes 128`; runtime
+uses no Python. Fixed20K dielectric data and1/3--2/3 graphite remain physical
+approximations;128 nodes do not resolve every near-edge feature.
+[Physics, finite-inventory convention, numerical bounds and MPI2 restart evidence](../../provenance/snrt_band_implementation_2026-09-10.md).
+
+### Static Fe spectral comparison
+
+`SNRT_SPECTRAL_MODEL=hhe_d03_fe_maxent128_fs2010_v1` adds two actual Fe
+columns to the preceding four-bin operator. Requires the explicit
+`dust_iron_model='fe_electric_compare_v1'`, CPU/OpenMP, CHIMES=0 and a fresh
+`SNRT=1 DUST_LIVE=1 DUST_IRON=1` build. The NENER1/virial hydro profile is
+NVAR32: Fe31:32 follows the reserved dust window. With CHIMES=1 the old
+Fe188:189/NVAR189 profile is unchanged, but spectral modes remain rejected.
+
+Without CHIMES, only static seeds are admitted: `dust_cooling='none'`,
+zero `dust_condensation` and `dust_fe_condensation`, growth/sputtering/
+coagulation/shattering/SN shocks/Fe kinetics all false, Fe sticking zero,
+no relative motion. Both namelist generators implement these prerequisites.
+The generated setup selects no incompatible hard stellar SED by default.
+
+This is NOT general stellar/AGN Fe heating. The existing 300 K and4 eV
+limits stay: nodal absorption above4 eV in an Fe-bearing cell rejects the
+entire trial. A broad1--5.6 eV packet may violate this even with mean2.4 eV;
+no spectral tail is removed. The completed live test uses an explicitly
+synthetic sub-eV source, not a physical SED claimed to pass these limits.
+Electric/eddy mu=1 optics omit spin absorption and photoelectron escape;
+six components share the existing material temperature. No new CUDA path.
+
+`tools/build_fe_grain_optics.py --band-nodes 128` creates the separate
+`dust_fe_band_data.inc`; `data/dust_fe_band128_manifest.json` binds sources.
+Both Fe/D03 node hashes bind native version11 and HDF format40, with no
+additional per-cell spectral carriers. Old modes/identities are unchanged.
+[Bounded implementation, Fe flux repair and exact MPI2 restart evidence](../../provenance/snrt_fe_spectrum_implementation_2026-09-10.md).
+
+## Angular resolution (2026-09-10)
+
+Build `SNRT=1 SNRT_ANGULAR_LEVEL=0|1|2` for respectively 80, 320, or 720
+discrete-ordinates directions (8x10, 16x20, 24x30 Gauss-Legendre/product
+rules). Default0 preserves the old nodes, weights and ordering exactly.
+Use a separate clean build directory when changing this flag: Make does not
+track compiler-option changes. This is not a namelist or runtime switch;
+existing mkrun profiles still use their existing binaries.
+
+Directional storage and work scale by roughly 1:4:9. Source deposition,
+transport, scattering, IR and checkpoint dimensions share the selected count.
+Restart rejects a different angular resolution; there is no implicit remap.
+The [bounded implementation evidence](../../provenance/snrt_angular_implementation_2026-09-10.md)
+includes 320-ray MPI2 hydro+feedback+dust/restart and 320/720-ray native CUDA
+transport. It does not establish angular convergence for every source/mesh,
+full GPU evolution, or new intragroup spectral physics.
+
 The selected single-rank/OpenMP comparison implementation is now closed.
 For its fixed executable, exact inputs, reproduction commands and limits, start
 with the [closeout handover](../../provenance/rt_feedback_dust_comparison_closeout_2026-09-07.md).
@@ -1525,6 +1712,11 @@ or radiation-dependent metal NEQ/H2/CO chemistry. The first native bounded
 8/16/32-bin size-shift reference is now implemented in `dust_mass_physics`;
 its mass/area/number comparison and explicit limiter errors are recorded in
 the provenance document above. It is not a selectable live multibin model.
+A native collision-aware reference now also implements same-material
+coagulation and fragmentation, with explicit noninteracting mass outside
+the radius grid. The [group-6 comparison](../../provenance/dust_collision_comparison_2026-09-10.md)
+finds two-size/multibin differences but retains the live two-size default;
+the collision reference does not add NML options or live hydro carriers.
 WSS09 CIE,
 common grain T, 20 K dielectric and uncalibrated size/SN prescriptions remain
 explicit approximations. PAH stochastic heating, sublimation, separate Fe,
@@ -1571,3 +1763,668 @@ Restart stores a distinct closure code, the actual WSS09 tables and the
 rejected. Native one-zone and coupled MPI2 x OMP2 restart results are in
 the dust provenance document. Neither short-test convergence nor this
 H/He correction qualifies cosmological production or galaxy calibration.
+
+### Hot bulk material extension (2026-09-09, not sublimation)
+
+`dl01_composition_v1` preserves the existing 5--300 K table exactly. For
+300--3000 K it now evaluates the same normalized DL01 bulk vibrational mode
+integrals in native Fortran (16-point quadrature). It does not extrapolate
+the last tabulated slope. This is the harmonic solid's internal energy,
+not a claim of phase stability, latent heat, sublimation, or finite-size PAH
+physics. The actual runtime domain remains the intersection with the
+selected material/IR contract; the default generated run stays at 300 K.
+
+A matching hot contract can be built with the existing material and thermal
+builders using `--temperature-max-k 3000`. Their combined knots must remain
+within the native 256-node bound, and the optical spectral grid must still
+match. All primary/IR/emission receivers and the existing OpenMP/CUDA cell
+layout continue to use the same per-cell curve. No runtime Python is added.
+Cold material checkpoint identity is unchanged; hot contracts use version 2
+with curves sampled through 3000 K. Material/IR contract changes on restart
+remain forbidden. `mkrun.py` documentation reflects this distinction, but
+does not silently select hot contracts or old binaries for them.
+
+The existing native dust test passes independent 256-node integral values,
+300 K continuity, mixture and domain checks. A 1000 K D03 material/IR trial
+conserves energy and agrees between Fortran and OpenMP to 1.03e-16 relative.
+The hot-contract MPI2/OMP2 live/restart pair agrees bitwise on all 565
+hydro/SNRT datasets and its material identity. Optical functions remain
+frozen at 20 K; this is not temperature-dependent optics, a new GPU test or
+sublimation validation. See the remaining-physics provenance for run paths.
+Source: [DL01 mode model](https://arxiv.org/html/astro-ph/0011318).
+
+### Native radiation-dependent chemistry comparison (2026-09-09)
+
+`dust_cooling='chimes_neq_v1'` is a separate opt-in 157-species CHIMES
+receiver, including H2/CO, molecular cooling and all ionization stages of
+eleven elements. It requires two-size DL01 composition dust, the existing
+noncosmological periodic CPU-hydro profile, and gamma=5/3. This does not
+promote the comparison to a calibrated production model.
+
+Build a pinned, double-precision CHIMES library with
+`data/chimes_native_receiver.patch` (adapter ABI5), SUNDIALS 5.8.0 and HDF5.
+ABI4 libraries remain supported for the existing neutral-solid live receiver;
+the new charge-aware cell interface requires ABI5. Build the new library in
+a separate directory: do not overwrite a library needed by retained binaries.
+From a new build directory immediately below the project root:
+
+```sh
+make -f ../bin/Makefile -j1 SNRT=1 DUST_LIVE=1 NENER=1 HDF5=1 \
+  CHIMES=1 USE_FFTW=0 EXEC=ramses_chimes \
+  CHIMES_DIR=/absolute/patched/chimes \
+  SUNDIALS_DIR=/absolute/sundials-install
+```
+
+This profile reserves NVAR=187 and defaults to NVECTOR=32. Retaining the
+legacy 500-grid batch with 157 extra species exceeds a 512 MiB OpenMP
+worker stack in the current MUSCL implementation. The output binary is
+`ramses_chimes3d`; set `SNRT_CHIMES_BINARY` to its absolute path for mkrun.
+Set `SNRT_CHIMES_MAIN_DATA` to the pinned main table and
+`SNRT_CHIMES_GROUP_DIR` to the directory containing all nine group files.
+Use `tools/build_chimes_group_tables.py` and patched official chimes-tools;
+do not substitute broad-spectrum UV background tables for these bins.
+Source versions, hashes, build artifacts and execution evidence are in
+`provenance/dust_remaining_implementation_2026-09-09.md` at the project root.
+
+The actual SNRT photon densities and exact group edges/means feed chemistry.
+The old H/He receiver and generic CIE cooling are bypassed, avoiding duplicate
+absorption and thermal evolution. Species are transported nuclear-number
+carriers, not extra mass. The chemical/dust face fluxes share a common
+normalization; total elemental fluxes follow their nuclei. Grain growth
+reserves molecular C/O and other bound elements. Feedback/destruction adds
+neutral atoms while preserving existing molecules. HDF5 stores all species
+and binds the tables and closure identity; changing them on restart fails.
+
+Limits remain explicit: mean-matched within-bin spectra, local shielding,
+thermal-width cell columns for molecular line escape, translational EOS,
+no additional CR ionization inferred from CR energy, and no transported
+fluorescent/Auger-cascade emission. Photoelectric gas heating is disabled
+until its energy can be removed from the existing dust absorption ledger.
+The existing pinned FS2010 table now partitions primary photoelectron
+energy inside the CHIMES chemical RHS. The corresponding nonthermal share
+is subtracted from primary heating, not added on top of it. Atomic base
+and Auger-producing photoionization channels use the same admitted shell
+energies for both budgets; secondary electrons consume no extra primary
+photons. Atomic target shortages continuously limit the ionization and HI
+excitation fractions, returning the unavailable share to heat. This is a
+declared extension of a primordial atomic-gas table, not a molecular or
+arbitrary-composition electron-degradation model. Excitation photons escape
+in this comparison. The chemical restart identity is now version 4. It
+includes up to two retries of nucleus/charge-failing cells from their
+original input, with solver tolerances tightened by 100 at each retry;
+the conservation acceptance tolerances are unchanged. Version-2 chemistry
+checkpoints require the preserved ABI3 binary/library; version-3 checkpoints
+require their preserved pre-retry binary. The neutral-solid receiver accepts
+ABI4/ABI5; its existing restart identity is unchanged. ABI5 adds a private
+per-cell gas+solid charge constraint for the new local PAH receiver, not an
+automatic change of the live `pah_neutral_absolute_v1` model. The latter still
+rejects its unsupported photon/charge domain. Native component evidence and
+live wiring evidence are in
+[`medium_physics_implementation_2026-09-10.md`](../../provenance/medium_physics_implementation_2026-09-10.md).
+The absorbed-photon diagnostic alone is not a radiation/material energy
+closure test. Metallic Fe grains, stochastic PAH emission, sublimation and
+relative dust dynamics are not implemented by this chemistry selection.
+
+### CHIMES atomic spectral building block (2026-09-10)
+
+`snrt_chimes_spectrum.cpp` supplies an immutable native 128-node bank for
+311 photoionization/Auger reactions and 682 partial shells, using the same
+pinned Verner95/96 and KM93 inputs as the grey model. Fortran bindings are
+in `snrt_chimes`; the CHIMES Makefile profile links the implementation.
+Each direction's photon number/energy reconstructs separately. The returned
+moments are `sum N*sigma`, `sum N*sigma*E`, and
+`sum N*sigma*(E-shell binding)` per reaction and band, before multiplication
+by reduced light speed and target density. They are coefficients, NOT
+accepted finite-inventory captures or net gas heat. A shared loaded handle
+can be read by parallel cell calls; load/free remain outside those calls.
+
+Build the separate input with `tools/build_chimes_group_tables.py
+--chimes-tools <patched-tools> --main-data <pinned-main.hdf5>
+--band-nodes 128 --output <new-directory>`. Native loading requires 128
+nodes; 64/256 builder choices are data-comparison outputs, not live modes.
+Setting `SNRT_CHIMES_BAND_TABLE=<new-directory>/atomic_shells.h5` adds its
+checks to the existing `snrt_thermochemistry_smoke`; the table path alone is
+NOT a RAMSES runtime selector. The explicit hot-only selector is below.
+
+The moment-provider API alone is not an evolving finite-inventory receiver
+and its primary-electron moment must not be treated as net heat. See
+[implementation and native evidence](../../provenance/snrt_chimes_spectrum_implementation_2026-09-10.md).
+
+### Conservative atomic photo operator and hot-cell split (2026-09-11)
+
+`chimes_band_photo_step` now evolves CHIMES157 atomic photoionization/Auger,
+shell/node FS2010 secondaries, and finite directional photon N/E in one
+native CVODE solve. Each occupied energy node has one survival fraction
+shared by its rays; rays are reconstructed independently at entry. The
+operator returns heat, three secondary-ionization energies, excitation,
+unresolved binding/cascade energy, absorbed energy and primary photon count.
+It does not itself include collisional chemistry, recombination, molecular
+dissociation, dust or a gas-temperature update. Failures publish nothing.
+
+`chimes_cell_band_hot_atomic` connects that result to actual nonradiative
+CHIMES with zero photons, updating heat using the changed particle count.
+It is a first-order split with an explicitly selected hot-only live adapter
+(below). Its ninth ledger entry is signed dark-step gas thermal change, NOT
+transported cooling radiation. It requires dust-free atomic gas with zero
+solid charge and T>1e5K (the CHIMES hot-network criterion). Molecular inputs
+and a photo/dark endpoint crossing that threshold reject the staged step;
+H2+ is never silently erased to make the split work.
+
+The existing CHIMES build links this operator and SUNDIALS SPGMR; no external
+CHIMES library replacement, changed defaults or new HDF5 input is needed.
+The same `SNRT_CHIMES_BAND_TABLE` extends the existing native smoke. Tests
+cover photon exhaustion, H-/H2+, metal/Auger/secondary budgets, hot native
+chemistry/cooling, dt convergence and rollback. See
+[implementation, review disposition and evidence](../../provenance/snrt_chimes_photo_implementation_2026-09-11.md).
+Cold molecular spectra, competing grain absorption and full escaping-energy
+closure remain outside this mode; it does not admit a general CHIMES
+spectral simulation.
+
+### Hot atomic spectral live wiring (2026-09-11)
+
+Set `SNRT_SPECTRAL_MODEL=chimes_hot_atomic_maxent128_fs2010_v1` and
+`SNRT_CHIMES_BAND_TABLE` to the pinned 128-node atomic shell bank
+(`998970ed5bb4cfeda01913a72cc3fc62af8ce2fdb55dc924f2704e3abb5391de`).
+Keep the existing `dust_cooling='chimes_neq_v1'`, `cooling=.true.`,
+CHIMES main/group table environment and CHIMES=1/DUST_LIVE=1 build.
+The dust layout is infrastructure only: all dust carriers must be zero,
+two-size/DL01 material layout selected, condensation fractions zero,
+growth/sputtering/coagulation/shattering/SN shocks off, and no sublimation,
+Fe, PAH or relative-motion model. Gas must remain atomic and above 1e5 K
+at operator boundaries. Invalid cells reject the collective staged update.
+Neither cold input nor threshold crossing is silently converted to a grey
+model. The default remains the existing grey receiver.
+
+Paired N/E transport has zero gas absorption; this receiver owns all atomic
+captures. It receives per-direction physical photon number and actual
+energy, performs the photo + dark split once, and commits species, gas
+energy and outgoing N/E together through the existing RT transaction.
+FP64 energy corrections are rebased to outgoing FP32 photon counts.
+The absorbed-energy diagnostic uses actual shell absorption, not the grey
+reference group mean. Excitation/unresolved cascade budgets are not added
+to gas heat or invented as an advected chemical reservoir; escaping
+cooling/cascade radiation remains unresolved as in the native split.
+
+Restart preserves the same directional state width but binds new model
+versions (native 12, HDF5 base version +40), the atomic bank SHA256 and
+chemical identity version5. Changing model or bank rejects the restart;
+fixed/old spectral formats retain their previous interpretation.
+No new namelist field is introduced: the generic generator/GUI explains
+the explicit environment selector. `mkrun.py` cold/dusty comparison bundles
+explicitly export `SNRT_SPECTRAL_MODEL=fixed`, preventing shell inheritance.
+
+### Fixed-H charged PAH comparison (2026-09-10)
+
+`dust_pah_model='pah_charge_fixed_h_v1'` is a separate opt-in model, not a
+relaxation of `pah_neutral_absolute_v1` or general PAH survival admission.
+Build with `DUST_PAH=1 DUST_PAH_CHARGE=1 CHIMES=1 DUST_LIVE=1 NENER=1`:
+hydro NVAR=443, with 128 neutral plus 128 monocation excitation mass states.
+Use receiver ABI5 and both `SNRT_PAH_NEUTRAL_TABLE` and `SNRT_PAH_ION_TABLE`
+original optical tables. The wizard additionally requires an explicit
+`SNRT_DUST_PAH_BINARY` and `SNRT_DUST_PAH_CONTRACT`.
+
+The carriers co-advect with gas and bind HDF5 restart to both charge optics,
+the energy grid and source convention. Cations carry their ionization
+energy through mass times (vibrational energy + 7.02 eV); injection is neutral.
+Primary and IR absorption use the charge-resolved opacity. Already-debited
+primary captures retain the full-step initial charge mixture through IR
+subcycling. Gas photoelectron/recombination heat and electron count commit
+together; heat capacity tracks electron count. CHIMES charge closure includes
+solid cations, converting molecule number to its own carrier-mass convention.
+The gas chemistry and PAH charge solves are first-order split, not a fully
+implicit unified network. Empirical CHIMES grain terms exclude these explicit
+PAHs to avoid duplicating their charging contribution.
+
+This fixed-H C24H12 model admits photons <=13.6 eV and gas 10--10000 K in
+PAH-occupied cells. It rejects cosmology, Fe and relative dust motion. It
+does **not** model H loss/addition, carbon-skeleton destruction, anions or
+dications; the two charge states share the DL01 vibrational-mode prescription.
+These are declared comparison approximations, not demonstrated PDR survival
+or publication/production qualification. The original neutral option and its
+4 eV bound remain available unchanged.
+
+### Graphite sublimation comparison (2026-09-09)
+
+`PHYSICS_PARAMS dust_sublimation='gd89_graphite_bulk_v1'` explicitly opts in;
+the default is `none`. It requires the two-size carbon/olivine model and
+`dl01_composition_v1`. Silicate evaporation is **not** enabled. The graphite
+vacuum bulk law follows [Waxman & Draine, section 3.1, equation 10](https://arxiv.org/html/astro-ph/9909020):
+`da/dt = -nu*(m_C/rho_s)^(1/3)*exp(-81200/Tdust)`, with `nu=2e14 s^-1`.
+The two fixed-radius bins use `lambda=3*abs(da/dt)/a_bin` and backward Euler
+mass loss; this is not a resolved shrinking-grain size distribution.
+
+The native `dust_sublimation_step` solves the remaining grain temperature
+and masses together using the same tabulated `U(log T)` interpolation as
+the IR receiver. Lost graphite takes `L=k*81200/m_C` per gram as latent
+energy and `2*k*T/m_C` as an explicit effusive-atom kinetic-energy closure;
+the latter thermalizes immediately in gas. Total elemental carbon stays
+unchanged; the native chemistry reconciler returns evaporated carbon to
+neutral gas. Silicate masses remain unchanged in this operator.
+
+The energy convention is `Egas + Edust + L*(C_total-C_solid)`. The phase
+term is derived from existing conservative mass carriers, not an additional
+passive scalar. The same binding reference applies to graphite growth,
+sputtering and SN destruction when this option is on. Incoming ejecta carry
+phase energy according to their incoming gas/solid carbon masses; this is
+not added SN thermal energy. HDF5 `dust_sublimation_values` binds the option
+and constants and rejects mismatched restart selections.
+
+The operation is split before RT, not jointly integrated with photon
+absorption. A common grain temperature, frozen D03 dielectric functions,
+vacuum evaporation, bulk graphite and fixed bin radii remain explicit
+approximations. Vapor backpressure, finite-size PAH dissociation, silicate
+evaporation and radiation-heated time-convergence validation remain absent.
+Do not interpret the 3000 K material endpoint as a phase-stability limit.
+
+`mkrun.py` offers this selection and requires existing files supplied through
+`SNRT_DUST_SUBLIMATION_BINARY` and `SNRT_DUST_SUBLIMATION_CONTRACT`; the run
+environment exports that contract as `SNRT_DUST_CONTRACT`. It does not
+silently reuse a binary without the new native implementation. Generator
+validation and the existing GUI tests cover the same option.
+Live verification status is recorded in
+`provenance/dust_remaining_implementation_2026-09-09.md`.
+
+### Explicit olivine sublimation extension (2026-09-09)
+
+`dust_sublimation='gd89_xu25_olivine_v1'` retains the graphite operator and
+also evaporates MgFeSiO4 from the two silicate bins. The graphite-only
+mode and `none` are unchanged. Use the same explicit binary/contract
+environment variables above, with a binary built for this extension.
+
+The Xu table-2 crystalline face rates are averaged over equal exposed
+areas. They are **not** used as latent heats. A separate ideal
+forsterite/fayalite formation-enthalpy reference, neutral atomic gas EOS
+and DL01 sensible energy define `LS=2.21423908e11 erg/g`. Congruent atomic
+Mg/Fe/Si/O vapor returns to the existing element/CHIMES fields; gas receives
+the explicitly modeled effusive heat. Ordinary silicate growth/destruction
+uses the same phase reference. The extra HDF5 `dust_olivine_phase` attribute
+binds the 15 source/model constants and rejects incompatible restarts.
+
+This is a crystalline-rate/ideal-phase comparison, not validation of
+amorphous optical properties, melting, vapor chemistry or back-pressure.
+Radiation and evaporation are still operator-split. Source links, assumptions,
+the closed native energy test and the MPI2/OMP2 fresh/restart evidence are
+recorded in the remaining-implementation provenance. All 565 final physical
+datasets matched bitwise in that test; this does not qualify the whole bundle.
+
+`dust_drag.f90` additionally contains neutral Epstein stopping times and a
+conservative implicit gas/multibin-dust momentum/heat primitive. It is not
+yet wired into persistent live relative-velocity transport and has no
+namelist selector. Do not interpret its existing native smoke test as
+completion of relative dynamics. Separate Fe and stochastic PAH remain in
+the approved, unfinished bundle.
+
+The unconnected `dust_stochastic.f90` primitive now provides DL01 generic
+PAH vibrational modes and canonical U/Cv, thermal-continuous stationary
+populations, and an energy-moment-preserving representative-photon adapter
+with explicit above-grid photon/energy accounting. These are native routines,
+not a renamed equilibrium-temperature curve. They remain linked only into
+the existing dust smoke: actual PAH optical inputs, independent mass/source
+carriers, radiation/transport/restart and namelist activation are unfinished.
+Neither a normalized probability nor a solved truncated matrix proves
+spectral coverage or validity of a stationary approximation.
+
+### Radiation-coupled sublimation (2026-09-09)
+
+`dust_sublimation='gd89_xu25_olivine_rt_v1'` moves graphite/olivine
+evaporation into the live IR material receiver. It requires the CHIMES+D03
+profile, `SNRT_RT_ENABLE=1`, a version-4 hot material contract with gas
+exchange enabled, and an explicitly selected new binary/contract through
+the mkrun environment variables above. The earlier split selections and
+the default `none` retain their behavior. The ordinary pre-RT mass operator
+does not also apply sublimation in this selection.
+
+At fixed radiation/heating coefficients, the cell solves grain sensible
+energy, BE mass loss, latent energy and gas accommodation/effusive vapor
+heat together. The root variable is net emitted power above the background;
+this avoids subtracting nearly equal Planck powers at long timesteps.
+The IR transaction accounts for latent energy without storing it as sensible
+grain heat. The accepted chemical trial receives the neutral evaporated
+atoms. Mass, energy and chemistry are committed only after all-rank acceptance.
+
+A single stiff endpoint can miss an initially hot evaporation pulse even
+when energy closes. The current receiver therefore uses native adaptive BE
+step doubling with relative tolerance `1e-4`, a 25% state-change pre-limit
+and at most 4096 trials. It accepts the two positive half-step states and
+returns the time-averaged IR spectrum; it does not extrapolate mass or
+renormalize emission to repair a failed energy check. The error estimate
+checks sensible energy, individual bin masses, gas transfer and emitted
+band energy. A failed local integration rolls back rather than committing
+part of the requested time interval. Material/emission tables are prepared
+once per cell call, not regenerated for every short local interval.
+
+Opacity and geometric coefficients stay at the start of each outer IR
+substep; gas collision speed follows the evolving gas energy while gas Cv
+stays fixed. This is not a fully implicit opacity/chemistry solver or a
+substitute for outer-timestep/mesh convergence. The same common-temperature,
+fixed-radius, vacuum/crystalline/ideal-phase and frozen-optical-data assumptions
+listed above still apply. No metallic Fe or stochastic PAH is activated.
+
+The new nonlinear material integration is native CPU/OpenMP. `auto` can
+still dispatch primary/IR transport and scattering through their existing
+hybrid paths; an explicit CUDA-only dust-material request is rejected rather
+than silently executing the old CUDA material equation. Sublimation restart
+identity version 3 separates this adaptive selection from the preserved
+version-2 un-subcycled comparison. Old comparisons require their old binaries.
+
+Only this adaptive path requests undamped IR fixed-point updates in cells
+whose reabsorbed-emission fraction is below 0.25 in every band. Other cells
+keep the old 0.5 damping. This reduces repeated hot-transient integrations;
+it does not relax conservation/convergence tolerances or change opacities.
+
+Both the preserved un-subcycled comparison and the current adaptive
+MPI2/OMP2 fresh/restart pair match all 565 final physical datasets. The
+adaptive pair has nucleus error 6.04e-16, IR balance error at most 1.02e-10
+and 0.6075% initial silicate loss in the deliberately 3000 K test. Native
+adaptive tests resolve the missing early evaporation and show tightening-
+tolerance convergence with energy closure around 1e-11. Remaining
+restrictions and artifact paths are recorded separately in
+`provenance/dust_remaining_implementation_2026-09-09.md`;
+the approved four-item bundle remains unfinished, not production-qualified.
+
+### Metallic Fe material building blocks (not a live selection)
+
+`dust_iron_material` uses the pure-Fe condensed-phase table on printed p1225
+of [NIST-JANAF Fourth Edition](https://janaf.nist.gov/pdf/JANAF-FourthEd-1998-Iron.pdf),
+with its source molar mass 55.847 g/mol. It stores bulk enthalpy relative to
+zero kelvin, neglecting condensed pV. Linear enthalpy interpolation preserves
+the alpha/gamma, gamma/delta and melting jumps at 1184, 1665 and 1809 K;
+1042 K is a heat-capacity anomaly, not an extra latent jump. The inverse
+returns temperature and four phase fractions, including plateaus in mixtures
+of graphite, olivine and metallic Fe. Supported maximum is 3000 K; no gas
+branch, supercooling or nanoparticle melting-point correction is implied.
+
+Below 298.15 K it uses the Debye-plus-electronic bulk energy shape of
+[Hensley & Draine (2017), eq. 1](https://arxiv.org/html/1611.08607), explicitly
+scaled by 1.00576510 to meet JANAF's zero-to-298.15 K enthalpy. This is an
+approximation, not interpolation through every low-temperature datum: energy
+at 100/200 K is 6.8122%/2.3013% above the respective JANAF entries. The source
+table, normalization and conventions are carried in the material identity;
+that identity is not yet a live restart attribute. Hydro chemistry's existing
+integer mass-number convention is not changed by this material table.
+
+`iron_radiative_cell` supplies a native six-bin C/silicate/Fe material solve
+for fixed masses and supplied optical band powers. It uses backward Euler,
+net emitted power and the existing gas-collision helper. At each phase
+transition it solves the enthalpy interval explicitly. Fe's latent energy is
+already in returned material energy and must not be added again to the IR
+ledger. This callback does not implement Fe evaporation or provide Fe optical
+constants. Phase-interval tests use declared synthetic spectra; the additional
+six-component IR test uses the provisional electric/eddy Fe optical base
+described below, not a completed Fe optical model.
+
+`iron_radiative_batch` provides a native OpenMP batch implementation with
+explicit reference mass, six mass densities and optional gas exchange. It
+only publishes material energy, temperature, phase fractions, band power and
+gas transfer after **every** cell succeeds. The existing four-basis CUDA
+material ABI is unchanged and must reject six bases. Generic IR tables now
+retain the supplied number of optical bases instead of allocating four;
+transport, absorption and scattering still use the existing native backends.
+
+`dust_fe_electric_base_data.inc` contains a provisional causal dielectric/Mie
+calculation for 10/100 nm Fe spheres, using actual Werner (2009) DFT/REELS
+and Henke Fe inputs with the DH13 finite-size Drude prescription. Its nine
+source groups and 136 IR samples match the D03 group contract. The offline
+builder is `simulation/snrt/tools/build_fe_grain_optics.py`; pinned sources,
+generation hashes and approximations are in
+`simulation/snrt/data/dust_fe_electric_base_generation_v1.json`. There is no
+runtime Python dependency and no rescaling of Fe into silicate opacity.
+
+This is **electric/eddy response only**, not an admitted full Fe model.
+Spin-magnetic absorption, temperature/phase-dependent optics and X-ray
+photoelectron energy partition are absent. The causal composite differs
+from Werner DFT complex epsilon by 11.56% median and 61.87% maximum under
+the declared metric; Kramers--Kronig consistency and a 26.45-electron sum
+do not establish agreement with measured grain opacity. In particular, no
+single-domain magnetic sphere model is silently applied to 100 nm grains.
+`fe_full_optics_admitted` remains false. The six-component radiation test
+heats grains with sub-photoelectric-threshold 2.366 eV photons, not keV
+photons incorrectly assigned wholly to dust heat.
+
+The elemental partition and chemical-state adapter accept optional separate
+metallic Fe. The reserved-Fe wrapper around the existing four-bin growth
+operator subtracts that inventory from both elemental Fe and total available
+metal; it does not invent a Fe accretion/sputtering law. No current live caller
+provides a Fe carrier, and no namelist/GUI option advertises one yet. The old
+four-bin paths, selectors, defaults and restart identities remain unchanged.
+
+### Unified Fe/PAH/relative-motion kernels (initial implementation)
+
+`dust_stochastic_evolve` advances the finite-time thermal-continuous master
+equation, accepting probabilities or transported energy-bin grain number
+densities. It preserves their total, including empty cells, and returns the
+integrated excitation/radiation energy exchange. It does not supply a PAH
+optical spectrum, photon-overflow/destruction model or live population field.
+
+`dust_mixture_split`, `dust_mixture_drag` and `dust_mixture_radiation_kick`
+provide barycentric-to-component momentum conversion, conservative internal
+drag and an energy-funded radiation impulse. Relative momentum is signed,
+and its kinetic energy is additional to barycentric kinetic energy; neither
+may be treated as a normal positive dust-mass passive. Source photon energy
+must pay the kinetic work before grain heat is assigned. No hydro flux,
+pressure, field layout or restart activation follows from these routines.
+
+The gas-element/CHIMES adapter and reserved-solid growth receiver accept
+explicit PAH H/C masses alongside metallic Fe. Only PAH carbon counts
+against metallicity; both atoms are withheld from gas/other grains. The live
+PAH connection is described below; this earlier kernel work alone did not
+activate it. Relative motion remains a separate item.
+
+### Explicit cold Fe electric-only comparison
+
+The operator approved a limited live comparison, not full-band physical
+admission. Select `dust_iron_model='fe_electric_compare_v1'` together with
+CHIMES/DL01 two-size/D03 and `dust_sublimation='none'`. Build with
+`DUST_IRON=1 CHIMES=1 DUST_LIVE=1 SNRT=1 HDF5=1 NENER=1` (NVAR189 in the
+standard virial profile). Fe small/large masses follow the 157 chemical
+fields. They enter the same element-conserving hydro fluxes, source
+transaction, IR receiver and HDF5 restart as the C/silicate carriers.
+
+This mode uses the electric/eddy optical bank, common grain temperature
+and native CPU/OpenMP material callback. It rejects T>300 K and absorbed
+primary group representative energies >4 eV before transaction commit.
+No hard-spectrum extrapolation or silicate substitute is permitted. The
+restriction is on grey representative energies, not the resolved spectrum.
+Magnetic absorption, charge/cascade physics and Fe size exchange/sublimation
+are omitted. Optional Fe mass kinetics is described below. Gas collision exchange remains geometric
+hydrogen accommodation; Fe is excluded from C/silicate catalytic H2 and
+grain-recombination area. Fe co-advection is not relative dust motion.
+
+`dust_fe_condensation=0` is the default. An explicit fraction [0,1] condenses
+non-Ia Fe remaining after olivine into large Fe grains, partitioning thermal
+energy from the existing source; separate SNIa ejecta remain gas. This is
+an uncalibrated comparison parameter. Restart binds exact Fe optical and
+material arrays, source fraction, limits and field offset, including absence
+checks when the mode is disabled. The wizard requires
+`SNRT_DUST_IRON_BINARY`/`SNRT_DUST_IRON_CONTRACT` and omits the incompatible
+hard BPASS SED. Defaults and full-Fe admission remain unchanged.
+
+As of 2026-09-10, `dust_fe_kinetics=.true.` optionally adds geometric seed
+accretion with explicit `dust_fe_sticking` in [0,1], and Fe-specific thermal
+sputtering (Choban 2026 Table 3 fit to Nozawa 2006). The existing
+`dust_growth` and `dust_sputtering` switches apply. Both new parameters
+default off/zero. The implementation uses the same Fe radii/density as the
+optics, reserves the updated olivine Fe, reconciles gas Fe in CHIMES, stages
+the aggregate and two Fe carriers together, and conserves donor momentum
+when relative dynamics is selected. Sensible-energy remapping uses the same
+analytic Fe mixture enthalpy as its native IR callback. It does not add adsorption
+latent heat. The existing Fe optical temperature/photon bounds still apply.
+
+Thermal erosion uses the source's low-Z projectile mixture and resolved
+density, neglects erosion below 1e4 K and rejects gas T>1e9 K when active
+with nonzero Fe. No nonthermal/Coulomb/finite-size correction is implied.
+`dust_sn_shocks` is rejected with Fe kinetics, since there is no selected Fe
+unresolved-shock efficiency. Kinetic parameters and exact sputtering law
+bind restart; the off profile retains the old Fe attribute exactly. This is
+a bounded optional comparison, not a calibrated complete Fe dust model.
+See `provenance/medium_fe_sources_2026-09-10.md` and
+`provenance/medium_physics_implementation_2026-09-10.md` for sources/status.
+
+Detailed implementation and measured evidence:
+`provenance/dust_remaining_implementation_2026-09-09.md`, section
+“Approved bounded comparison: live Fe connection”. Relative momentum still
+needs its own live connection in the same bundle; PAH is described below.
+
+### Live neutral PAH stochastic population (item 1)
+
+Select `dust_pah_model='pah_neutral_absolute_v1'` with the existing
+CHIMES/DL01/two-size/D03 noncosmological comparison and no sublimation.
+Build `DUST_PAH=1 CHIMES=1 DUST_LIVE=1 SNRT=1 HDF5=1 NENER=1`:
+NVAR315, or NVAR317 when `DUST_IRON=1`. VPATH is unchanged. Forced CUDA
+material is rejected; CPU material is supported alongside existing SNRT
+transport/scattering dispatch. This is not a charging/destruction model
+or arbitrary-spectrum/cosmological production qualification.
+
+`idust_pah:idust_pah+127` stores **molecular mass density per excitation
+state**, not number fractions. It follows the CHIMES species and optional
+two Fe fields (188:315 without Fe, 190:317 with Fe in this profile).
+The live mass convention matches CHIMES: C24H12 has mass `300*m_p`, with
+H/C fractions 12/300 and 288/300. Grain optics and modes use Nc=24, Nh=12.
+The stand-alone atomic-mass inventory helper is not the live mass convention.
+`idust` and `idust_energy` remain C/silicate/Fe only. PAH mass is already
+included in total rho/H/C, and excitation energy is derived from these
+128 masses and the common level grid; never add its mass a second time.
+
+One shared IR field transports absolute energy, initially zero in this
+isolated comparison. There is **no untracked thermal bath subtraction**;
+the older modes retain their old excess-above-bath convention. Mixed
+absorption uses the sum of bulk and PAH physical opacities and partitions
+each captured spectral node once. The primary angular photon debit is also
+single, including PAH-only cells. The finite-state backward-Euler solve
+conserves PAH number and excitation/absorbed/emitted energy; overflow rejects
+the whole trial. The bulk receiver, gas collision exchange and PAH population
+share the existing transactional IR/halo/reflux machinery. PAH scattering,
+surface H2/recombination and gas accommodation are not invented from bulk area.
+
+`SNRT_PAH_NEUTRAL_TABLE` selects the original uncompressed Draine neutral
+table. Cross sections are projected onto the existing 136-node IR grid.
+Beyond its 1000-micron boundary an explicitly anchored E^2 Rayleigh/Drude
+continuation is used, not claimed measured data. Unsupported occupied
+high-energy IR and absorbed primary representative energies >4 eV reject;
+the original table's X-ray range does not authorize neutral-grain heating
+without electron-loss/charge/survival physics. Spectral features remain
+limited by this IR quadrature. The absolute PAH receiver now extends bulk
+enthalpy below the first 5 K knot using the DL01 cold Debye limit and the
+existing Fe electronic/Debye law, with per-band Planck emission. It does
+not impose a temperature floor or an untracked CMB bath. Upper bounds
+(including <=300 K with Fe) remain. Material mass exchange and relative
+advection use the same inverse; Fe material and PAH restart identities are
+version 2, rejecting incompatible old physics. No new namelist flag.
+See the [cold integration and remaining group-7 scope](../../provenance/medium_physics_implementation_2026-09-10.md).
+
+`dust_pah_condensation=0` is the default; an explicit [0,1] fraction of
+non-Ia carbon remaining **after graphite** forms PAHs, limited by hydrogen
+from the same ejecta. This is an uncalibrated source parameter, not an
+inferred stellar PAH yield. The existing injection temperature determines
+mean vibrational energy; adjacent energy-state populations preserve that
+mean and molecular mass. The same source transaction pays this energy from
+gas, including its existing CR partition; separately coupled Ia stays gas.
+
+Hydro flux carrier normalization, AMR passive transfer, stellar mass removal,
+gas-phase CHIMES H/C and reserved-solid grain growth include the PAH carriers.
+They co-advect with gas; this does not implement item-2 relative dust motion.
+HDF5 stores every carrier and binds actual optical coefficients, level grid,
+source convention/fraction and field index. A disabled or changed PAH model
+cannot silently read a PAH restart as the old IR convention.
+
+Both `mkrun.py` CLI/GUI and the namelist editor expose these selectors.
+The wizard requires `SNRT_DUST_PAH_BINARY`, `SNRT_DUST_PAH_CONTRACT`, and
+`SNRT_PAH_NEUTRAL_TABLE`; with Fe+PAH it needs one combined binary, not two.
+It removes the incompatible hard BPASS SED and writes the model restrictions
+into the run README. Native evidence is recorded in
+`provenance/dust_remaining_implementation_2026-09-09.md`.
+
+### Relative-motion spatial operator (runtime connection still pending)
+
+`dust_multifluid` supplies a conservative gas + pressureless-grain spatial
+operator and its transactional transport/implicit-drag composition. Total
+rho/p/E and individual grain rho/p are conservative; barycentric relative
+momenta are derived, not advected as positive scalars. Gas pressure removes
+all component kinetic energy. CR advection and pressure work, gas-owned
+chemical tracers and grain-owned energy/population carriers are supported.
+Grain thermal/excitation energies remain outside mixture hydrodynamic E.
+
+The first-order Rusanov face and periodic driver are checked using seven
+components and 128 PAH carriers, including opposite flows with zero net mass
+flux. Stiff local drag stability does not establish asymptotic-preserving
+spatial accuracy or multi-stream dust physics. This is not a selectable
+RAMSES relative-motion model yet: it must replace the co-advection face
+interpretation together with pressure/CFL/source/chemistry/radiation impulse
+and AMR/MPI/restart wiring. No dormant namelist switch has been added.
+
+The primary transport now has an optional `dust_moment(leaf,group,3)`
+output: the first angular moment of accepted dust photon **number**, after
+the H/He inventory cap and returned-photon subtraction. Existing scalar C
+entry points remain valid. Moment-enabled OpenMP, CUDA and stream-lease
+hybrid entry points use the same cell partition; the prepared RAMSES
+transport accumulates all substeps. Ordinary callers that omit the output
+do not allocate or compute it. Photon bins already include angular weights.
+
+`dust_fv_absorption_kick` consumes this moment (transposed to `(3,group)`
+for one cell), accepted photon counts, group energies in erg, grain
+absorption shares and the number/energy/momentum code-unit scales. It uses
+physical c, not reduced c. Hydro E receives mechanical work only; the
+remaining energy is returned for the separate solid/PAH heat receiver.
+This absorption-only adapter does not implement scattering/IR recoil or
+photoelectron energy partition. Its C/Fortran receiver and actual hybrid
+GPU/CPU paths are tested, but the hydro driver does **not yet request or
+apply** this optional moment. This is not live relative-motion admission.
+
+### Optional PAH hydrogen-state comparison
+
+`dust_pah_model='pah_hydrogen_m13_dl01_v1'` extends the fixed-H charge
+comparison with H=0..13, neutral/monocation and 128 excitation states:
+3584 independently advected mass carriers. Build with `DUST_PAH_H=1
+DUST_PAH_CHARGE=1 DUST_PAH=1 CHIMES=1 DUST_LIVE=1 SNRT=1 HDF5=1 NENER=1`
+(hydro NVAR=3771). Both original neutral and ion optical tables and CHIMES
+receiver ABI5 are required. The wizard and GUI generate this choice and its
+environment; neither existing PAH choice nor the default changes.
+
+The rate prescription follows [Montillaud et al. 2013](https://arxiv.org/html/1301.6507v1):
+H-loss prefactor 6.8e17/s, even/odd-H thresholds 4.8/3.2 eV, harmonic
+Beyer--Swinehart density of states, and cation H attachment 1.4e-10/5e-11
+cm3/s for even/odd H. H13 loss uses H11 modes; attachment stops at H13.
+Neutral H attachment and H2 pathways are absent, not established zero in
+nature. Generic DL01 modes replace molecule-specific spectra, so this is
+an explicitly approximate comparison, not a reproduction of that paper.
+
+Photon excitation, IR cooling and H loss use one backward-Euler system.
+Attachment consumes finite gas HI and moves binding/kinetic energy to
+the daughter excitation state. Recombination competes over all H states
+using a single electron inventory. Gas HI/electrons, PAH states, IR and
+thermal energy commit together or roll back together. Per-state molecular
+mass is `(288+H)*1.66e-24 g`, matching the CHIMES nuclear-mass convention;
+the hydro elemental fields retain gas+solid nuclei. H0 remains solid C24,
+not 24 free carbon atoms. Source injection remains neutral H12, with the
+existing declared condensation comparison fraction.
+
+Normal-H charge-dependent optical/cooling coefficients and IP=7.02 eV
+are shared across H states; H-dependent bands/IP are not provided. This
+mode admits occupied photons <=13.6 eV and PAH-bearing gas 10--10000 K;
+cosmology, Fe and relative dust motion are rejected. It does not establish
+carbon fragmentation, PAH survival under hard sources, or a general
+multi-charge network. Restart identity binds H rates, DOS spacing,
+binding energies, optical data and carrier layout. The existing neutral
+and fixed-H restart conventions are preserved. See the active
+[medium-term implementation record](../../provenance/medium_physics_implementation_2026-09-10.md)
+for bounded native/live evidence, not universal production qualification.
+
+### Optional PARSEC pair-instability feedback
+
+History version4 supports five explicit fates (CCSN, failed SN, PPISN, PISN,
+direct BH) on a declared domain no wider than 8--600 Msun. Select
+`source_consistent`, enable wind/SNII/PISN with identical source windows
+nested inside the IMF, and supply the native table/history together. Both
+namelist generators expose this opt-in; defaults and legacy v1--v3 stay
+unchanged. Channel3 owns all remnants; channel5 owns pair ejecta/energy and
+releases them at the source event age. Pair energy shares the declared SN
+CR/shock prescription; direct pair-event dust condensation is excluded.
+
+`tools/build_parsec_pair_feedback.py` constructs the traceable nonrotating
+Z=.008/.014, 14--600 Msun comparison from the original PARSEC tracks/yields,
+HW02 and Woosley2017 energy sources. Its manifest declares the constant wind
+speed, endpoint-calibrated phase composition, unresolved pair pulses and
+62--64 Msun helium-core energetic bridge. No Python is used in the runtime.
+Changing IMF upper mass changes normalization of all channels. This is not
+a matched SED package, radioactive network or universal production approval;
+see [implementation and evidence](../../provenance/parsec_pair_feedback_implementation_2026-09-10.md).

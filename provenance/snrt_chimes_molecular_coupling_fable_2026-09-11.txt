@@ -1,0 +1,50 @@
+I could not create the plan file or call ExitPlanMode: this session exposes only read tools (Glob, Grep, Read) plus mail and calendar connectors, with no Write, AskUserQuestion, or ExitPlanMode. The audit follows here instead. I also could not open the HDF5 tables, so two items below are explicitly unverified.
+
+## Q-GOAL and Q-LEAN
+
+**Q-GOAL: yes, with two honesty limits.** The bundle closes exactly the two gaps the live wiring record leaves open, cold molecular spectra and competing grain absorption, and it reuses the existing survival-fraction ODE in `patch/lagRamses/snrt_chimes_photo.cpp`. The limits are that the photo-then-dark split has no H2 formation during the photo step, so a PDR-like cell near formation/dissociation balance needs the same dt-halving evidence the hot split produced, and that a 128-node grid carries no line information, so shielding stays a declared local closure.
+
+**Q-LEAN trims.**
+- Grain counters per group, not per node or per bin. The D03 receiver consumes a per-group deposited spectrum, see `snrt_dust_receiver.f90:157`, and bin shares are fixed ratios of the constant kappa.
+- No second receiver. The charged receiver already copies the configuration per call at `snrt_chimes_bridge.c:579`, so a per-call Tmol_K field or a thin wrapper suffices.
+- The rate-domain audit is a one-off table scan, not a framework.
+- Leiden node integration only where the data have support, which is groups 3 to 5.
+- The 0.4 eV bound is trivially satisfied for any Lyman-Werner photon. Assert it, do not build machinery.
+
+## Temperature transition
+
+The upstream cut is runtime-only. Tmol_K is read at `chimes.c:227`, at `chimes_cooling.c:804`, and in the bridge hybrid function. Nothing in table initialization depends on it, so a local value is safe and thread-safe. Above the cut, molecules are converted to atoms on entry by `update_rates.c:1187` before any integration, which is the discontinuity the plan wants to avoid.
+
+The molecular flag gates more than reactions. It gates H2 dust formation, H2 photodissociation, H2 collisional dissociation, all molecular cooling, formation and pumping heat, photoelectric heating, grain recombination cooling, and gas-grain transfer, see `chimes_cooling.c:329` through 489. With Tmol_K at 1e9 all of these run in every cell.
+
+Required before admission:
+- Audit the molecular rows of the T-dependent, H2 collisional dissociation, and H2 dust formation tables between 1e5 and 1e9 K. Table lookup clamps to the grid ends at `chimes_interpol.h:42`, so out-of-range fits are silently held or extrapolated by the table builder. I could not read the values here. This is upstream's stated reason for the cut and is the one genuine blocker.
+- Check the molecular cooling temperature grid end. Clamping makes H2 and CO cooling constant above it, proportional to a molecular abundance that collisions should be destroying anyway. Bounded, but must be shown small at the transition.
+- Select the entry per run, not per cell. The hot entry rejects any nonzero molecule at `snrt_chimes.f90:156`. Mixing entries by cell would make model identity state-dependent.
+
+Optional: per-cell hysteresis gives nothing that uniform Tmol_K does not, so skip it. The translational heat capacity in `chimes_live_capacity` and the gamma 5/3 requirement already treat H2 as monatomic. Keep that declared rather than fix it now.
+
+## Line averaging, shielding, competing absorption
+
+**Line averaging is required, and the right operation already exists.** Node support is the trapezoid cell defined by the weights at `snrt_band_spectrum.h:52`. In group 4 the relevant scales are:
+
+| quantity | value |
+|---|---|
+| node width, d ln E | 1.5e-3 |
+| node width at 100 nm | 0.15 nm |
+| H2 Doppler width, b = 1 km/s | 3e-4 nm |
+| Lyman-Werner lines per node | about one |
+
+Point sampling would be wrong by orders of magnitude. The grey `molecular_moments` builder already integrates on the native Leiden grid within an interval, so the node version is that code with node bounds and a flat within-node weight. Unverified: that the retained Leiden grid resolves the lines. Add an assertion on wavelength spacing in the builder. Keep the existing subtraction of Leiden photoionisation, because the atomic bank already carries H2 ionization from species 137, and declare that the two ionization sources differ slightly.
+
+**Shielding is not double counted, and no different closure is needed.** Inside CHIMES the bridge uses only the self-shielding table with the cell column and b index 0, and never the dust or HI factors, because extinction is zero and the ionizing shield tables were set to minus 100 at build. Transport in band mode has zero gas columns and has never carried H2 or CO. A node-averaged sigma times the shielding factor, used identically in the photon sink and the reaction rate, is the grey `molecular_opacity` closure per node. The node grid supplies no saturation information, so the table supplies all of it. Double counting would arise only if the sink used unshielded sigma while the rate used shielded sigma. That would be a non-conservative photon loss, so the product must be shared. Two second-order inaccuracies should be declared: the table gives the transmission at the far cell face, not the cell mean, and the CO table's H2 dependence encodes line overlap that the band-averaged H2 sink partly repeats. Optional improvement: the cell-averaged transmission from the same table.
+
+One coherence condition is required. The ODE path column is n times chat times dt while the shielding column is n times dx. They agree only when chat dt is at most dx, which the paired transport's Courant step enforces. Any future chemistry sub-cycling on a longer dt breaks the local-column closure and must be rejected.
+
+**Competing grain absorption is required in dusty cells, and the data are in place.** Per-node D03 absorption exists as kappa per bin, group, and node and is consumed by `absorb_cell` at `snrt_band_spectrum.h:109`. Today dust absorbs inside transport before chemistry runs, so dust gets first pick of every photon. That is a sequential split, not competition, and in the FUV the dust and H2 optical depths are comparable. Moving the constant dust coefficient into the same survival ODE fixes this. Required consequences: pass a zero absorption table to transport while keeping scattering, take both the dust photon counts and the deposited spectrum from the ledger, and keep them consistent because the receiver rejects zero photons with nonzero energy at `snrt_dust_receiver.f90:213`.
+
+**Habing-shape channels.** The bridge scales these by a per-group parameter derived from the within-group power law in the chimes-tools generator. In node mode the actual 6 to 13.6 eV energy density is simply the sum of surviving node populations times node energy over that window, divided by 5.29e-14. That, not the per-group parameter, is what makes the plan's claim true. Each event should debit one photon from a node in the window with energy weight and carry that node's energy. Nodes of group 3 below 6 eV are excluded. These channels must sit in the photo ODE because the dark step receives zero photons.
+
+**Energy routing.** Dissociation: 4.48 eV to the binding reservoir, 0.4 eV heat from the constant at `chimes_cooling.c:460`, remainder fluorescent and unresolved. Pumping: the constant at line 463 is 16.9 eV per dissociation and encodes a Draine-field pump-to-dissociation ratio. With counted pumps, take the minimum of that form and a per-pump energy of about 2 eV, times the critical-density factor. That factor needs the CHIMES critical densities, so evaluate it in the bridge, not in the C++ operator. CO fragment energy stays unresolved.
+
+**Do the data block honest admission?** No. What they do not support is line transfer, a fluorescent spectrum, CO heating, molecular electron degradation, and the high-temperature rate validity. All but the last are declared budgets. The rate audit and the cold-cell dt evidence are the two items that must precede admission.

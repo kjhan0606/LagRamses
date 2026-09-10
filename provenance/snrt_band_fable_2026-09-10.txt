@@ -1,0 +1,22 @@
+**Q-GOAL: yes.** The plan closes a real gap. The paired-energy transport already carries E = Eref·N + shift through OpenMP (`snrt_openmp_transport.cpp:92-111`), and the cell cap partitions accepted energy across species by photon-count share (`snrt_species_dust_cell.h:223-232`). But chemistry never uses it. The driver feeds the fixed per-group excess table (`snrt_ramses_driver.f90:683-686`, consumed at line 1534). Transported energy is currently inert. Routing accepted species energy minus threshold into chemistry is the physically meaningful step, and intragroup reconstruction is what makes that energy respond to hardening. Default fixed-group path stays untouched.
+
+**Q-LEAN: mostly lean, two items are heavier than needed.**
+
+- **Species-column recovery from reference sigma is fragile.** For groups below a species threshold sigma is zero, so the division is undefined, and cross-group consistency checks add code with no physics. The driver already holds the neutral columns where it builds tau (`snrt_ramses_driver.f90:1644-1656`). Pass one FP64 `(leaf,3)` column array through the existing optional-argument bundle instead.
+- **Evidence scope is right.** Extend the existing backend smoke rather than adding a binary. One MPI2 run plus restart suffices.
+
+Not over-gated. Opt-in env selector, forced-CUDA rejection (existing pattern at `snrt_runtime_backend.f90:160-169`), DUST_LIVE/CHIMES rejection, and checkpoint identity binding all match current conventions.
+
+**Required bounded changes:**
+
+1. **Near-edge moments must not abort the level step.** N is FP32, shift FP64, so E/N can sit within roundoff of a band edge after advection. Reject only if outside the band by more than a stated relative tolerance. Inside it, use the explicit endpoint delta node.
+2. **Groups with zero sigma for all three species bypass reconstruction** and follow the fixed path exactly.
+3. **Cap and return with one fraction per band.** The reservoir cap already returns a uniform directional fraction (`snrt_species_dust_cell.h:205-221`). Apply that same fraction to every node, so returned N and E stay consistent.
+4. **Per-cell excess floored at zero with tolerance.** Chemistry rejects negative excess (`snrt_thermochemistry.f90:695-696`). Excess is accepted energy over accepted count minus threshold, per species and group.
+5. **Driver evidence needs a DUST_LIVE=0 build.** The angular evidence used DUST_LIVE=1, which the new path rejects. Without DUST_LIVE the driver fails closed on nonzero dust absorption (`snrt_ramses_driver.f90:1495-1499`), which is fine with zero dust tau.
+6. **No new checkpoint state.** Reconstruction is re-derived from (N, shift) each substep. Bind only a mode identifier into the native header and HDF5 attribute so fixed-mode and spectral-mode checkpoints refuse each other. Do not bump the default checkpoint version.
+7. **State the cost.** Reconstruction runs per cell, direction, group and substep, with node count multiplying absorption work.
+
+**Verdict: approve with the changes above.** No fatal issue found.
+
+I could not write the plan file because the Write tool is disabled in this session.

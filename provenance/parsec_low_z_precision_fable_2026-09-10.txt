@@ -1,0 +1,29 @@
+**Verdict: PROCEED WITH CORRECTIONS.** The plan file could not be written because no write tool is exposed in this session, so the audit is delivered here.
+
+## Q-GOAL: yes, directly
+
+Today a star born below Z=0.008 is a hard run failure with the PARSEC source, not a degraded query. The shared bracket returns the grid error when no node lies below z at `stellar_yield_interpolation.f90:320`, and the SSP integrator turns that into a provider error at `stellar_ssp_sources.f90:131`. The matched material/photon source is therefore unusable for the pristine and low-Z gas this project actually simulates. The eleven-Z grid closes exactly that gap with the same 14 to 600 cells, fates, ages and bracket. The source inventory matches: the sources directory holds tracks and photons for precisely the eleven listed Z and no 1e-6 or 0.001 archives.
+
+## Q-LEAN: lean, with two removals and one decision
+
+- **Drop separate precheck tooling.** The converter raises are already the prechecks: He-core energy domain, Planck feasibility, photon/track timing, zero-wind and Eddington. Run both converters on the eleven-Z grid and report the exception list.
+- **Make RATE the single wind shape of the new model, not a fallback.** A fallback needs a "resolved enough" threshold, which is a second rule and a second code path. Add one shape input to the existing history routine. Old-Z wind rows inside the new model will then differ from the five-Z artifacts. That is fine because the old artifacts stay under their own model IDs. Require endpoint equality for old nodes, not byte identity.
+- Everything else, including per-node interval records, extended fixtures and one MPI2 run, is already minimal.
+
+## Physical legitimacy
+
+**Mfin/Mbar interval reconstruction is legitimate.** The constraint set is exactly what the converter already enforces at `build_parsec_pair_feedback.py:245`. Choosing F and R inside the printed half-ULP interval is the minimal declared representative, and the largest shift is far below physical uncertainty. Two corrections: derive the half-ULP from the actual printed string of each field per row, and for FSN/DBH require R=F inside the intersection of both intervals. I could not verify the Decimal80 numbers because the ejecta live inside a zip and no driver script exists in the repo. The converter must reproduce them.
+
+**Eleven-Z grid excluding two branches is defensible, with one visible cost.** Complete-branch-or-absent is consistent with the audit rule that each Z branch spans 14 to 600 at `stellar_yield_audit.f90:159`. Dropping 1e-6 is cheap. Dropping 0.001 is the costly one: it is the most relevant metallicity for JWST-epoch galaxies, and its replacement is a linear mixture across a factor 20 in Z. Keep the exclusion, but name the single causing node in the manifest and docs, and run the MPI2 fixture at birth Z near 1e-3 so the replacing mixture is what gets exercised.
+
+**Low-Z mass domain needs a filter.** The author readme states Z=1e-11 to 1e-4 tracks extend to 2000 Msun. The feedback converter iterates every mass in the ejecta table. Restrict to 600 and declare the heavier tracks as outside the IMF domain. Verify the same 45 masses exist at every Z, since the SED converter's per-Z count and the bind cell search assume it.
+
+**RATE shape is the right choice.** Readme column 29 in 1-based numbering is the loss rate in Msun/yr, so the plan's index 28 is consistent with the existing surface-column indexing. Check the sign and reject any accretion rows rather than clipping. One more item the plan misses: the phase-wind Z exponent at Z=1e-11 gives a factor near 0.06, an eight-decade extrapolation no domain check catches. Declare it in the manifest wind block or use fixed for the new model. No floor.
+
+**Exact binding holds with three literals.** The binder already requires equal node arrays and model string. Native edits are one allowlist string at `snrt_parsec_source.f90:40`, one new grid entry with the author's exact Z strings, and a proper source label instead of the index-patched strings. After conversion, confirm the SED knot count stays under the loader's 500000 cap. The identity grows to roughly 33 MB but is written as an HDF5 dataset, not an attribute, so no size failure. Put it in the dump budget line.
+
+**Floating positivity is sound.** Decide feasibility in Decimal first, convert, then step F or R by one ULP toward feasibility if the float margin is negative, asserting the result stays inside the printed interval. The 1e-6 node must fail in Decimal so no float slack admits it.
+
+## Fixtures
+
+Both fixtures hardcode five Z literals at `snrt_parsec_source_smoke.f90:15` and `parsec_pair_history_test.f90:20`. Derive the check list from the unique table Z values rather than adding eleven literals, add one interior query at Z=1e-3 and one below-grid rejection, and check old-node endpoints rather than bytes.

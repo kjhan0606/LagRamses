@@ -41,6 +41,8 @@ module snrt_rt_transaction
   type, public :: snrt_rt_transaction_snapshot
      logical :: active = .false.
      real(c_float), allocatable :: photon_before(:,:,:)
+     real(dp), allocatable :: energy_shift_before(:,:,:)
+     real(dp), allocatable :: group_mean_energy_ev(:)
      real(dp), allocatable :: hydrogen_ii_before(:)
      real(dp), allocatable :: helium_ii_before(:)
      real(dp), allocatable :: helium_iii_before(:)
@@ -174,13 +176,15 @@ contains
   end subroutine snrt_transaction_load_config
 
   subroutine snrt_transaction_begin(transaction, persistent_intensity, leaf_slot, &
-       hydrogen_ii, helium_ii, helium_iii, neutral_hydrogen, thermal, ierr)
+       hydrogen_ii, helium_ii, helium_iii, neutral_hydrogen, thermal, ierr, &
+       persistent_energy_shift, group_mean_energy_ev)
     type(snrt_rt_transaction_snapshot), intent(inout) :: transaction
     real(c_float), intent(in) :: persistent_intensity(:,:,:)
     integer, intent(in) :: leaf_slot(:)
     real(dp), intent(in) :: hydrogen_ii(:), helium_ii(:), helium_iii(:)
     real(dp), intent(in) :: neutral_hydrogen(:), thermal(:)
     integer, intent(out) :: ierr
+    real(dp), intent(in), optional :: persistent_energy_shift(:,:,:), group_mean_energy_ev(:)
     integer :: i, islot, nleaf, max_slot
 
     call snrt_transaction_finalize(transaction)
@@ -196,6 +200,23 @@ contains
        ierr = snrt_transaction_err_shape
        return
     end if
+    ! The correction path is entirely explicit; no state-module dependency or
+    ! global mutation. Its reference moments are fixed for the transaction.
+    if(present(persistent_energy_shift).neqv.present(group_mean_energy_ev))then
+       ierr=snrt_transaction_err_shape
+       return
+    end if
+    if(present(persistent_energy_shift))then
+       if(any(shape(persistent_energy_shift)/=shape(persistent_intensity)))then
+          ierr=snrt_transaction_err_shape
+          return
+       end if
+       call validate_energy(persistent_intensity,persistent_energy_shift,group_mean_energy_ev,ierr)
+       if(ierr/=snrt_transaction_ok)return
+       allocate(transaction%energy_shift_before(size(persistent_intensity,1), &
+            size(persistent_intensity,2),nleaf))
+       transaction%group_mean_energy_ev=group_mean_energy_ev
+    end if
     allocate(transaction%photon_before(size(persistent_intensity,1), &
          size(persistent_intensity,2), nleaf), &
          transaction%hydrogen_ii_before(nleaf), transaction%helium_ii_before(nleaf), &
@@ -204,6 +225,8 @@ contains
     do i = 1, nleaf
        islot = leaf_slot(i)
        transaction%photon_before(:,:,i) = persistent_intensity(:,:,islot)
+       if(present(persistent_energy_shift)) &
+            transaction%energy_shift_before(:,:,i)=persistent_energy_shift(:,:,islot)
        transaction%hydrogen_ii_before(i) = hydrogen_ii(islot)
        transaction%helium_ii_before(i) = helium_ii(islot)
        transaction%helium_iii_before(i) = helium_iii(islot)
@@ -214,20 +237,28 @@ contains
   end subroutine snrt_transaction_begin
 
   subroutine snrt_transaction_restore(transaction, persistent_intensity, leaf_slot, &
-       hydrogen_ii, helium_ii, helium_iii, neutral_hydrogen, thermal, ierr)
+       hydrogen_ii, helium_ii, helium_iii, neutral_hydrogen, thermal, ierr, persistent_energy_shift)
     type(snrt_rt_transaction_snapshot), intent(inout) :: transaction
     real(c_float), intent(inout) :: persistent_intensity(:,:,:)
     integer, intent(in) :: leaf_slot(:)
     real(dp), intent(inout) :: hydrogen_ii(:), helium_ii(:), helium_iii(:)
     real(dp), intent(inout) :: neutral_hydrogen(:), thermal(:)
     integer, intent(out) :: ierr
+    real(dp), intent(inout), optional :: persistent_energy_shift(:,:,:)
     integer :: i, islot, nleaf, max_slot
 
     ierr = snrt_transaction_ok
     nleaf = size(leaf_slot)
     max_slot = 0
     if (nleaf > 0) max_slot = maxval(leaf_slot)
-    if (.not. transaction%active .or. size(transaction%photon_before,3) /= nleaf .or. &
+    ! Fortran need not short circuit: never SIZE an inactive snapshot.
+    if(.not.transaction%active)then
+       ierr=snrt_transaction_err_state
+       return
+    end if
+    if (size(transaction%photon_before,3) /= nleaf .or. &
+         size(transaction%photon_before,1)/=size(persistent_intensity,1).or. &
+         size(transaction%photon_before,2)/=size(persistent_intensity,2).or. &
          size(hydrogen_ii) < max_slot .or. size(helium_ii) < max_slot .or. &
          size(helium_iii) < max_slot .or. size(neutral_hydrogen) < max_slot .or. &
          size(thermal) < nleaf .or. any(leaf_slot < 1) .or. &
@@ -235,9 +266,21 @@ contains
        ierr = snrt_transaction_err_state
        return
     end if
+    if(present(persistent_energy_shift).neqv.allocated(transaction%energy_shift_before))then
+       ierr=snrt_transaction_err_state
+       return
+    end if
+    if(present(persistent_energy_shift))then
+       if(any(shape(persistent_energy_shift)/=shape(persistent_intensity)))then
+          ierr=snrt_transaction_err_shape
+          return
+       end if
+    end if
     do i = 1, nleaf
        islot = leaf_slot(i)
        persistent_intensity(:,:,islot) = transaction%photon_before(:,:,i)
+       if(present(persistent_energy_shift)) &
+            persistent_energy_shift(:,:,islot)=transaction%energy_shift_before(:,:,i)
        hydrogen_ii(islot) = transaction%hydrogen_ii_before(i)
        helium_ii(islot) = transaction%helium_ii_before(i)
        helium_iii(islot) = transaction%helium_iii_before(i)
@@ -251,7 +294,7 @@ contains
        persistent_hydrogen_ii, persistent_helium_ii, persistent_helium_iii, &
        persistent_neutral_hydrogen, trial_intensity, coarse_flux_trial, &
        trial_hydrogen_ii, trial_helium_ii, trial_helium_iii, trial_neutral_hydrogen, &
-       thermal, trial_thermal, ierr)
+       thermal, trial_thermal, ierr, persistent_energy_shift, trial_energy_shift, coarse_energy_shift_trial, validate_only)
     type(snrt_rt_transaction_snapshot), intent(inout) :: transaction
     real(c_float), intent(inout) :: persistent_intensity(:,:,:)
     integer, intent(in) :: leaf_slot(:)
@@ -262,6 +305,12 @@ contains
     real(dp), intent(in) :: trial_neutral_hydrogen(:), trial_thermal(:)
     real(dp), intent(inout) :: thermal(:)
     integer, intent(out) :: ierr
+    real(dp), intent(inout), optional :: persistent_energy_shift(:,:,:)
+    real(dp), intent(in), optional :: trial_energy_shift(:,:,:), coarse_energy_shift_trial(:,:,:)
+    logical, intent(in), optional :: validate_only
+    real(c_float), allocatable :: committed_intensity(:,:,:)
+    real(dp), allocatable :: committed_shift(:,:,:)
+    integer, allocatable :: leaf_of_slot(:)
     integer :: i, islot, nleaf, max_slot
 
     ierr = snrt_transaction_ok
@@ -284,9 +333,63 @@ contains
        ierr = snrt_transaction_err_shape
        return
     end if
+    if((present(persistent_energy_shift).neqv.allocated(transaction%energy_shift_before)).or. &
+         (present(trial_energy_shift).neqv.present(persistent_energy_shift)).or. &
+         (present(coarse_energy_shift_trial).neqv.present(persistent_energy_shift)))then
+       ierr=snrt_transaction_err_state
+       return
+    end if
+    if(present(persistent_energy_shift))then
+       if(any(shape(persistent_energy_shift)/=shape(persistent_intensity)).or. &
+            any(shape(trial_energy_shift)/=shape(trial_intensity)).or. &
+            any(shape(coarse_energy_shift_trial)/=shape(coarse_flux_trial)))then
+          ierr=snrt_transaction_err_shape
+          return
+       end if
+       call validate_energy(trial_intensity,trial_energy_shift,transaction%group_mean_energy_ev,ierr)
+       if(ierr/=snrt_transaction_ok)return
+       if(any(.not.ieee_is_finite(coarse_energy_shift_trial)))then
+          ierr=snrt_transaction_err_state
+          return
+       end if
+       ! Check the entire post-flux state before publishing any photons,
+       ! chemistry, heat, or shift. Coarse corrections also affect non-leaves
+       ! of this transaction and may be signed in both number and energy.
+       allocate(committed_intensity(size(persistent_intensity,1),size(persistent_intensity,2),1), &
+            committed_shift(size(persistent_intensity,1),size(persistent_intensity,2),1), &
+            leaf_of_slot(size(persistent_intensity,3)))
+       leaf_of_slot=0
+       do i=1,nleaf
+          islot=leaf_slot(i)
+          if(leaf_of_slot(islot)/=0)then
+             ierr=snrt_transaction_err_shape
+             return
+          end if
+          leaf_of_slot(islot)=i
+       end do
+       do islot=1,size(persistent_intensity,3)
+          i=leaf_of_slot(islot)
+          if(i>0)then
+             committed_intensity(:,:,1)=trial_intensity(:,:,i)+coarse_flux_trial(:,:,islot)
+             committed_shift(:,:,1)=trial_energy_shift(:,:,i)+coarse_energy_shift_trial(:,:,islot)
+          else
+             committed_intensity(:,:,1)=persistent_intensity(:,:,islot)+coarse_flux_trial(:,:,islot)
+             committed_shift(:,:,1)=persistent_energy_shift(:,:,islot)+coarse_energy_shift_trial(:,:,islot)
+          end if
+          call validate_energy(committed_intensity,committed_shift,transaction%group_mean_energy_ev,ierr)
+          if(ierr/=snrt_transaction_ok)return
+       end do
+    end if
+    ! A dry commit uses the identical checks, retaining all state and the
+    ! snapshot for a collective decision. Inputs must stay unchanged between
+    ! a successful dry commit and the subsequent publishing call.
+    if(present(validate_only))then
+       if(validate_only)return
+    end if
     do i = 1, nleaf
        islot = leaf_slot(i)
        persistent_intensity(:,:,islot) = trial_intensity(:,:,i)
+       if(present(persistent_energy_shift))persistent_energy_shift(:,:,islot)=trial_energy_shift(:,:,i)
        persistent_hydrogen_ii(islot) = trial_hydrogen_ii(i)
        persistent_helium_ii(islot) = trial_helium_ii(i)
        persistent_helium_iii(islot) = trial_helium_iii(i)
@@ -294,8 +397,32 @@ contains
        thermal(i) = trial_thermal(i)
     end do
     persistent_intensity = persistent_intensity + coarse_flux_trial
+    if(present(persistent_energy_shift)) &
+         persistent_energy_shift=persistent_energy_shift+coarse_energy_shift_trial
     call snrt_transaction_finalize(transaction)
   end subroutine snrt_transaction_commit_level
+
+  subroutine validate_energy(photons,shift,reference_ev,ierr)
+    real(c_float), intent(in) :: photons(:,:,:)
+    real(dp), intent(in) :: shift(:,:,:),reference_ev(:)
+    integer, intent(out) :: ierr
+    integer :: g,k
+    real(dp) :: energy(size(photons,1))
+    ierr=snrt_transaction_err_shape
+    if(any(shape(photons)/=shape(shift)).or.size(reference_ev)/=size(photons,2))return
+    ierr=snrt_transaction_err_state
+    if(any(.not.ieee_is_finite(reference_ev)).or.any(reference_ev<=0.0_dp))return
+    if(any(.not.ieee_is_finite(photons)).or.any(photons<0.0_c_float))return
+    if(any(.not.ieee_is_finite(shift)))return
+    if(any(photons==0.0_c_float.and.shift/=0.0_dp))return
+    do k=1,size(photons,3)
+       do g=1,size(photons,2)
+          energy=reference_ev(g)*real(photons(:,g,k),dp)+shift(:,g,k)
+          if(any(.not.ieee_is_finite(energy)).or.any(energy<0.0_dp))return
+       end do
+    end do
+    ierr=snrt_transaction_ok
+  end subroutine validate_energy
 
   subroutine snrt_transaction_check_convergence(current_fraction, target_fraction, &
        current_tau, target_tau, config, residual, converged, ierr)
@@ -461,6 +588,8 @@ contains
     type(snrt_rt_transaction_snapshot), intent(inout) :: transaction
 
     if (allocated(transaction%photon_before)) deallocate(transaction%photon_before)
+    if (allocated(transaction%energy_shift_before)) deallocate(transaction%energy_shift_before)
+    if (allocated(transaction%group_mean_energy_ev)) deallocate(transaction%group_mean_energy_ev)
     if (allocated(transaction%hydrogen_ii_before)) deallocate(transaction%hydrogen_ii_before)
     if (allocated(transaction%helium_ii_before)) deallocate(transaction%helium_ii_before)
     if (allocated(transaction%helium_iii_before)) deallocate(transaction%helium_iii_before)

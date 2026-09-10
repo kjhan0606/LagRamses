@@ -14,7 +14,12 @@ SNRT_CELL_HD inline void snrt_cap_species_dust_cell(
     float *available_species, float *absorbed_hhe_species,
     float *absorbed_dust_group, float *returned_group, float *raw_group,
     float *absorbed_group, float *absorbed_total,
-    int nowned, int nwork, int ndirection, int ngroup, int cell) {
+    int nowned, int nwork, int ndirection, int ngroup, int cell,
+    const float *direction = nullptr, double *dust_moment = nullptr,
+    double *shift = nullptr, const double *transport_energy = nullptr,
+    const float *transport_number = nullptr, const double *reference_ev = nullptr,
+    double *hhe_energy = nullptr, double *dust_energy = nullptr,
+    double *dust_energy_moment = nullptr) {
   if (cell >= nowned) return;
 
   const long long group_count = static_cast<long long>(nowned) * ngroup;
@@ -41,6 +46,19 @@ SNRT_CELL_HD inline void snrt_cap_species_dust_cell(
           absorbed_direction[group_base + static_cast<long long>(idir) * nwork + cell]);
     }
     raw_group[output_index] = raw_absorbed;
+    // Optional first angular moment of ACCEPTED dust photon number.
+    // Layout (nowned,ngroup,3); signed, no second quadrature weight: state
+    // already stores angle-integrated photon bins. h*nu/c is applied by
+    // the physical receiver, never h*nu/c_hat. Keep old scalar ABI intact.
+    if (dust_moment) for (int axis=0;axis<3;++axis)
+      dust_moment[axis*group_count+output_index]=0.0;
+    if (shift) {
+      dust_energy[output_index]=0.0;
+      for(int axis=0;axis<3;++axis) {
+        hhe_energy[axis*group_count+output_index]=0.0;
+        dust_energy_moment[axis*group_count+output_index]=0.0;
+      }
+    }
     if (raw_absorbed <= 0.0f) {
       absorbed_dust_group[output_index] = 0.0f;
       returned_group[output_index] = 0.0f;
@@ -171,12 +189,47 @@ SNRT_CELL_HD inline void snrt_cap_species_dust_cell(
       available[species] = fmaxf(0.0f, available[species] - assigned[species]);
     }
     const float cap = assigned_total > 0.0f ? assigned_total / raw_absorbed : 0.0f;
+    if (dust_moment && assigned_dust>0.0f) {
+      double number=0.0, first[3]={0.0,0.0,0.0};
+      for (int idir=0;idir<ndirection;++idir) {
+        const double removed=fmaxf(0.0f,absorbed_direction[group_base+
+            static_cast<long long>(idir)*nwork+cell]);
+        number+=removed;
+        for (int axis=0;axis<3;++axis)first[axis]+=removed*direction[3*idir+axis];
+      }
+      // Normalize with the same FP64 directional sum. The H/He cap and
+      // guard return have already been excluded from assigned_dust above.
+      if (number>0.0) for (int axis=0;axis<3;++axis)
+        dust_moment[axis*group_count+output_index]=assigned_dust*(first[axis]/number);
+    }
+    double accepted_energy=0.0, energy_first[3]={0.0,0.0,0.0};
     for (int idir = 0; idir < ndirection; ++idir) {
       const long long index = group_base + static_cast<long long>(idir) * nwork + cell;
       const float removed = fmaxf(0.0f, absorbed_direction[index]);
       const float limited_removed = removed * cap;
       state[index] += removed - limited_removed;
       absorbed_direction[index] = limited_removed;
+      if(shift) {
+        // Use the very same accepted directional photon fraction. Rebase on
+        // the stored FP32 N so its rounding cannot create/destroy FP64 energy.
+        const double fraction=transport_number[index]>0.0f ?
+            double(limited_removed)/transport_number[index] : 0.0;
+        const double accepted=transport_energy[index]*fraction;
+        shift[index]=(transport_energy[index]-accepted)-reference_ev[group]*state[index];
+        accepted_energy+=accepted;
+        for(int axis=0;axis<3;++axis)energy_first[axis]+=accepted*direction[3*idir+axis];
+      }
+    }
+    if(shift) {
+      const double partition=double(assigned[0])+assigned[1]+assigned[2]+assigned_dust;
+      if(partition>0.0) {
+        const double dust_share=double(assigned_dust)/partition;
+        dust_energy[output_index]=accepted_energy*dust_share;
+        for(int axis=0;axis<3;++axis) {
+          hhe_energy[axis*group_count+output_index]=accepted_energy*(double(assigned[axis])/partition);
+          dust_energy_moment[axis*group_count+output_index]=energy_first[axis]*dust_share;
+        }
+      }
     }
     // Match the legacy per-group reduction order.  This keeps the zero-dust
     // ABI comparison meaningful while the raw/returned ledgers remain

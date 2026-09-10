@@ -1,6 +1,7 @@
 program snrt_rt_transaction_smoke
   use, intrinsic :: iso_c_binding, only: c_float
   use amr_parameters, only: dp
+  use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_positive_inf
   use snrt_rt_transaction
   implicit none
 
@@ -127,6 +128,15 @@ program snrt_rt_transaction_smoke
   call snrt_transaction_commit_level(transaction, persistent, leaf_slot, hydrogen, &
        helium_ii, helium_iii, neutral, trial_intensity, coarse_flux, &
        trial_hydrogen, trial_helium_ii, trial_helium_iii, trial_neutral, &
+       thermal, trial_thermal, ierr, validate_only=.true.)
+  call assert_true(ierr == snrt_transaction_ok .and. transaction%active .and. &
+       all(persistent == persistent_before) .and. all(hydrogen == hydrogen_before) .and. &
+       all(helium_ii == helium_ii_before) .and. all(helium_iii == helium_iii_before) .and. &
+       all(neutral == neutral_before) .and. all(thermal == thermal_before), &
+       'number-only dry commit published state or cleared snapshot')
+  call snrt_transaction_commit_level(transaction, persistent, leaf_slot, hydrogen, &
+       helium_ii, helium_iii, neutral, trial_intensity, coarse_flux, &
+       trial_hydrogen, trial_helium_ii, trial_helium_iii, trial_neutral, &
        thermal, trial_thermal, ierr)
   call assert_true(ierr == snrt_transaction_ok .and. .not. transaction%active, &
        'commit failed')
@@ -214,11 +224,98 @@ program snrt_rt_transaction_smoke
           'production failure injection was not rejected')
   end if
 
+  call energy_shift_cases()
   write(*,'(A)') 'SNRT_NATIVE_RT_TRANSACTION_SMOKE_PASS'
   write(*,'(A,I0,A,ES12.4)') 'SNRT_NATIVE_RT_TRANSACTION_MAX_ITER=', &
        config%max_iterations, ' residual=', residual
 
 contains
+
+  subroutine energy_shift_cases()
+    real(dp) :: shift(2,2,3), before(2,2,3), trial_shift(2,2,2), flux_shift(2,2,3)
+    real(dp) :: reference_ev(2), bad(4)
+    integer :: c
+    persistent=persistent_before
+    hydrogen=hydrogen_before
+    thermal=thermal_before
+    reference_ev=[10.0_dp,20.0_dp]
+    shift=-0.5_dp
+    shift(:,2,:)=0.125_dp
+    before=shift
+    call snrt_transaction_begin(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+         helium_iii,neutral,thermal,ierr,shift,reference_ev)
+    call assert_true(ierr==0.and.transaction%active,'shift begin')
+    shift(:,:,1)=99.0_dp
+    persistent(:,:,1)=0.0_c_float
+    hydrogen(1)=0.99_dp
+    call snrt_transaction_restore(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+         helium_iii,neutral,thermal,ierr)
+    call assert_true(ierr/=0.and.transaction%active.and.all(shift(:,:,1)==99.0_dp), &
+         'omitted shift restore must leave snapshot and state intact')
+    call snrt_transaction_restore(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+         helium_iii,neutral,thermal,ierr,shift)
+    call assert_true(ierr==0.and.all(shift==before).and.all(persistent==persistent_before).and. &
+         all(hydrogen==hydrogen_before),'signed shift rollback')
+    call snrt_transaction_restore(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+         helium_iii,neutral,thermal,ierr,shift)
+    call assert_true(ierr/=0,'inactive restore safely rejected')
+
+    call snrt_transaction_begin(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+         helium_iii,neutral,thermal,ierr,shift,reference_ev)
+    trial_intensity=7.0_c_float
+    trial_shift=-2.0_dp
+    coarse_flux=-0.25_c_float
+    flux_shift=0.125_dp
+    call snrt_transaction_commit_level(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+         helium_iii,neutral,trial_intensity,coarse_flux,trial_hydrogen,trial_helium_ii, &
+         trial_helium_iii,trial_neutral,thermal,trial_thermal,ierr,shift,trial_shift)
+    call assert_true(ierr/=0.and.transaction%active.and.all(shift==before), &
+         'partial shift commit rejected')
+    ! These failures are in slot 2, outside the trial leaves. All radiation,
+    ! chemistry and thermal state must remain unpublished on rejection.
+    bad=[-1.0d9,ieee_value(0.0_dp,ieee_quiet_nan), &
+         ieee_value(0.0_dp,ieee_positive_inf),0.0_dp]
+    do c=1,4
+       flux_shift(1,1,2)=bad(c)
+       if(c==4)coarse_flux(1,1,2)=-persistent(1,1,2)
+       call snrt_transaction_commit_level(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+            helium_iii,neutral,trial_intensity,coarse_flux,trial_hydrogen,trial_helium_ii, &
+            trial_helium_iii,trial_neutral,thermal,trial_thermal,ierr,shift,trial_shift,flux_shift)
+       call assert_true(ierr/=0.and.transaction%active.and.all(shift==before).and. &
+            all(persistent==persistent_before).and.all(hydrogen==hydrogen_before).and. &
+            all(thermal==thermal_before),'invalid final coarse energy is atomic')
+    end do
+    coarse_flux=-0.25_c_float
+    flux_shift=0.125_dp
+    call snrt_transaction_commit_level(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+         helium_iii,neutral,trial_intensity,coarse_flux,trial_hydrogen,trial_helium_ii, &
+         trial_helium_iii,trial_neutral,thermal,trial_thermal,ierr,shift,trial_shift,flux_shift)
+    call assert_true(ierr==0.and..not.transaction%active.and.all(shift(:,:,1)==-1.875_dp).and. &
+         all(shift(:,:,3)==-1.875_dp).and.all(shift(:,:,2)==before(:,:,2)+0.125_dp).and. &
+         all(persistent(:,:,1)==6.75_c_float).and. &
+         all(persistent(:,:,2)==persistent_before(:,:,2)-0.25_c_float),'signed coarse shift commit')
+
+    persistent=0.0_c_float
+    shift=0.0_dp
+    shift(1,1,1)=1.0_dp
+    call snrt_transaction_begin(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+         helium_iii,neutral,thermal,ierr,shift,reference_ev)
+    call assert_true(ierr/=0.and..not.transaction%active,'zero photons cannot hold positive energy')
+    shift=0.0_dp
+    call snrt_transaction_begin(transaction,persistent,leaf_slot,hydrogen,helium_ii, &
+         helium_iii,neutral,thermal,ierr,shift(:,:,:2),reference_ev)
+    call assert_true(ierr/=0.and..not.transaction%active,'shift shape mismatch')
+    ! Allocated empty ranks use the same optional API, including zero flux.
+    call snrt_transaction_begin(transaction,persistent(:,:,:0),leaf_slot(:0),hydrogen(:0), &
+         helium_ii(:0),helium_iii(:0),neutral(:0),thermal(:0),ierr,shift(:,:,:0),reference_ev)
+    call assert_true(ierr==0.and.transaction%active,'empty shift begin')
+    call snrt_transaction_commit_level(transaction,persistent(:,:,:0),leaf_slot(:0),hydrogen(:0), &
+         helium_ii(:0),helium_iii(:0),neutral(:0),trial_intensity(:,:,:0),coarse_flux(:,:,:0), &
+         trial_hydrogen(:0),trial_helium_ii(:0),trial_helium_iii(:0),trial_neutral(:0), &
+         thermal(:0),trial_thermal(:0),ierr,shift(:,:,:0),trial_shift(:,:,:0),flux_shift(:,:,:0))
+    call assert_true(ierr==0.and..not.transaction%active,'empty shift commit')
+    write(*,'(A)') 'SNRT_NATIVE_RT_TRANSACTION_ENERGY_SHIFT_PASS'
+  end subroutine energy_shift_cases
 
   subroutine assert_true(condition, message)
     logical, intent(in) :: condition

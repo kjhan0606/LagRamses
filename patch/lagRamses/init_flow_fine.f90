@@ -4,7 +4,7 @@
 !################################################################
 subroutine init_flow  
   use amr_commons
-  use hydro_commons, ONLY: nvar, uold
+  use hydro_commons, ONLY: nvar_all, uold
   implicit none
 
   integer::ilevel,ivar
@@ -13,7 +13,7 @@ subroutine init_flow
   do ilevel=nlevelmax,1,-1
      if(ilevel>=levelmin)call init_flow_fine(ilevel)
      call upload_fine(ilevel)
-     do ivar=1,nvar
+     do ivar=1,nvar_all
         call make_virtual_fine_dp(uold(1,ivar),ilevel)
      end do
      if(simple_boundary)call make_boundary_hydro(ilevel)
@@ -26,6 +26,9 @@ end subroutine init_flow
 !################################################################
 !################################################################
 subroutine init_flow_fine(ilevel)
+#ifdef DUST_DYNAMICS
+  use dust_phase_state, only: dust_phase_comoving
+#endif
   use amr_commons
   use hydro_commons
   use cooling_module
@@ -40,6 +43,7 @@ subroutine init_flow_fine(ilevel)
   integer::ind,idim,ivar,ix,iy,iz,nx_loc
   integer::i1,i2,i3,i1_min,i1_max,i2_min,i2_max,i3_min,i3_max
   integer::buf_count,info,nvar_in
+  integer(kind=4)::header_record_bytes
   integer(kind=8)::byte_pos,hdr_bytes,plane_bytes
   integer ,dimension(1:nvector),save::ind_grid,ind_cell
 
@@ -49,7 +53,7 @@ subroutine init_flow_fine(ilevel)
   real(dp),dimension(1:twotondim,1:3)::xc
   real(dp),dimension(1:nvector)       ,save::vv
   real(dp),dimension(1:nvector,1:ndim),save::xx
-  real(dp),dimension(1:nvector,1:nvar),save::uu
+  real(dp),dimension(1:nvector,1:nvar_all),save::uu
 
   real(dp),allocatable,dimension(:,:,:)::init_array
   real(kind=4),allocatable,dimension(:,:)  ::init_plane
@@ -114,7 +118,8 @@ subroutine init_flow_fine(ilevel)
      read(34,'(a8,I10)')a1,dum
      read(34,'(a8,I10)')a1,dum
      read(34,'(a11,I10)')a1,nelt
-     allocate(elem_list_local(dum))
+     ! This record contains nelt element names, not the preceding table count.
+     allocate(elem_list_local(nelt))
      write(nelt_str,'(I2.2)') nelt
      if(nelt.gt.0)then
         format_string = '(a15,'//trim(nelt_str)//'a3)'
@@ -275,6 +280,9 @@ subroutine init_flow_fine(ilevel)
         if(ncache>0)allocate(init_array(i1_min:i1_max,i2_min:i2_max,k0:k1))
      ! Loop over input variables
      do ivar=1,nvar
+#ifdef SOLVERmhd
+        if(ivar>=6.and.ivar<=8)cycle
+#endif
         if(cosmo)then
            ! Read baryons initial overdensity and displacement at a=aexp
            if(multiple)then
@@ -319,7 +327,7 @@ subroutine init_flow_fine(ilevel)
         endif
         call title(ivar,ncharvar)
         if(ivar>5)then
-           call title(ivar-5,ncharvar)
+           call title(ivar-nhydro,ncharvar)
            filename=TRIM(initfile(ilevel))//'/ic_pvar_'//TRIM(ncharvar)
         endif
 
@@ -369,7 +377,15 @@ subroutine init_flow_fine(ilevel)
                  ! Clamp to valid IC sub-grid range for zoom-in ICs
                  init_array=0d0
                  open(10,file=filename,access='stream',form='unformatted',status='old')
-                 hdr_bytes = 52_8   ! 4 + 44 + 4 (GRAFIC2 header record)
+                 ! GRAFIC headers can include the omega_b extension (48,
+                 ! not 44 payload bytes). Derive the slab offset from the
+                 ! record marker rather than shifting every density plane.
+                 read(10,pos=1)header_record_bytes
+                 if(header_record_bytes/=44.and.header_record_bytes/=48)then
+                    write(*,*)'ERROR: unsupported GRAFIC header size ',header_record_bytes
+                    call clean_stop
+                 endif
+                 hdr_bytes = int(header_record_bytes,8)+8_8
                  plane_bytes = int(n1(ilevel),8) * int(n2(ilevel),8) * 4_8 + 8_8
                  do i3=max(1,k0),min(n3(ilevel),k1)
                     byte_pos = hdr_bytes + int(i3-1,8)*plane_bytes + 5_8
@@ -528,7 +544,7 @@ subroutine init_flow_fine(ilevel)
            end do
 #if NVAR > NDIM + 2
            ! Compute passive variable density
-           do ivar=ndim+3,nvar
+           do ivar=nhydro+1,nvar
               do i=1,ngrid
                  rr=uold(ind_cell(i),1)
                  uold(ind_cell(i),ivar)=rr*uold(ind_cell(i),ivar)
@@ -573,7 +589,7 @@ subroutine init_flow_fine(ilevel)
            ! Call initial condition routine
            call condinit(xx,uu,dx_loc,ngrid)
            ! Scatter variables
-           do ivar=1,nvar
+           do ivar=1,nvar_all
               do i=1,ngrid
                  uold(ind_cell(i),ivar)=uu(i,ivar)
               end do
@@ -585,6 +601,35 @@ subroutine init_flow_fine(ilevel)
 
   end if
   
+#ifdef SOLVERmhd
+  ! Uniform face seed is exactly discrete-divergence-free, including AMR.
+  ! Code units are explicit; no automatic physical/comoving conversion.
+  if(mhd_initial_condition=='uniform')then
+  do ind=1,twotondim
+     do i=1,active(ilevel)%ngrid
+        ivar=ICELL_OF(active(ilevel)%igrid(i),ind)
+        uold(ivar,6:8)=mhd_seed
+        uold(ivar,nvar+1:nvar+3)=mhd_seed
+        uold(ivar,5)=uold(ivar,5)+.5d0*sum(mhd_seed**2)
+     enddo
+  enddo
+  endif
+#endif
+#ifdef DUST_DYNAMICS
+  if(dust_relative_motion.and.nrestart==0)then
+     ! Both file-backed and condinit fresh states enter here after conversion
+     ! to conserved rho/p/E and after all independent solid masses are set.
+     do ind=1,twotondim
+        do i=1,active(ilevel)%ngrid
+           call dust_phase_comoving(uold(ICELL_OF(active(ilevel)%igrid(i),ind),:),ivar)
+           if(ivar/=0)then
+              write(*,*)'ERROR: relative dust co-moving initialization rejected'
+              call clean_stop
+           endif
+        enddo
+     enddo
+  endif
+#endif
 111 format('   Entering init_flow_fine for level ',I2)
 
 end subroutine init_flow_fine
@@ -657,12 +702,12 @@ subroutine region_condinit(x,q,dx,nn)
               q(i,ndim+2)=p_region(k)
 #if NENER>0
               do ivar=1,nener
-                 q(i,ndim+2+ivar)=prad_region(k,ivar)
+                 q(i,nhydro+ivar)=prad_region(k,ivar)
               enddo
 #endif
 #if NVAR>NDIM+2+NENER
-              do ivar=ndim+3+nener,nvar
-                 q(i,ivar)=var_region(k,ivar-ndim-2-nener)
+              do ivar=nhydro+1+nener,nvar
+                 q(i,ivar)=var_region(k,ivar-nhydro-nener)
               end do
 #endif
            end if
@@ -697,12 +742,12 @@ subroutine region_condinit(x,q,dx,nn)
            q(i,ndim+2)=q(i,ndim+2)+p_region(k)*r/vol
 #if NENER>0
            do ivar=1,nener
-              q(i,ndim+2+ivar)=q(i,ndim+2+ivar)+prad_region(k,ivar)*r/vol
+              q(i,nhydro+ivar)=q(i,nhydro+ivar)+prad_region(k,ivar)*r/vol
            enddo
 #endif
 #if NVAR>NDIM+2+NENER
-           do ivar=ndim+3+nener,nvar
-              q(i,ivar)=var_region(k,ivar-ndim-2-nener)
+           do ivar=nhydro+1+nener,nvar
+              q(i,ivar)=var_region(k,ivar-nhydro-nener)
            end do
 #endif
         end do

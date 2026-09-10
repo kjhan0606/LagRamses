@@ -106,34 +106,106 @@ contains
 end subroutine stellar_feedback_hdf5_identity
 
 subroutine dust_mass_hdf5_identity(grp,writing)
+#ifdef SNRT_CHIMES
+  use snrt_chimes_runtime, only: chimes_live_identity
+#endif
   use amr_commons
-  use hydro_parameters, only: idust_species,idust_bins,idust_shock,idust_fresh
+  use hydro_parameters, only: idust_species,idust_bins,idust_shock,idust_fresh,idust_iron, &
+       dust_relative_motion,idust_momentum,ndust_phase,dust_drag_collision_cross_section_cm2
+  use dust_iron_compare, only: iron_material_identity,iron_identity_n,fe_optics_identity,fe_optics_identity_n
+  use hydro_parameters, only: idust_pah
+  use dust_mass_physics, only: dust_pah_enabled,dust_pah_condensation,dust_pah_hydrogenated
+  use dust_pah_live_model, only: pah_live_identity
   use ramses_hdf5_io
   use dust_mass_physics, only: dust_mass_enabled,dust_mass_identity,dust_composition_enabled,dust_cooling, &
-       dust_two_size_enabled,dust_size_identity,dust_optics_enabled
+       dust_two_size_enabled,dust_size_identity,dust_optics_enabled, &
+       dust_sublimation_enabled,dust_sublimation_identity,dust_silicate_sublimation_enabled, &
+       dust_iron_enabled,dust_fe_condensation,dust_fe_sticking,dust_fe_kinetics, &
+       dust_fe_sputter_coeff,dust_fe_sputter_min_t,dust_fe_sputter_max_t,dust_fe_max_temperature,dust_fe_max_primary_ev
   use dust_element_cooling, only: cie_n,wss09_identity
 #ifdef SNRT
   use snrt_atomic_cooling, only: atomic_identity
 #endif
-  use dust_composition_material, only: dust_material_composition_enabled,dl01_n,dl01_t,dl01_carbon,dl01_silicate
+  use dust_composition_material, only: dust_material_composition_enabled,dl01_n,dl01_t,dust_material_identity, &
+       dust_olivine_phase_identity
+  use snrt_dust_contract, only: snrt_dust_contract_temperature_k,snrt_dust_contract_number_temperature
   use dust_composition_optics, only: d03_identity_size,d03_identity
   implicit none
   integer(HID_T),intent(in)::grp
   logical,intent(in)::writing
   real(dp)::values(13),saved(13)
+  real(dp)::dynamics(9),saved_dynamics(9)
+  real(dp),allocatable::pah(:),saved_pah(:),pah_definition(:)
   real(dp)::extra(4),saved_extra(4)
+  real(dp),allocatable::iron(:),saved_iron(:)
   real(dp)::atomic(18),saved_atomic(18)
   real(dp)::sizes(16),saved_sizes(16)
+  real(dp)::sublimation(6),saved_sublimation(6)
+  real(dp)::olivine_phase(15),saved_olivine_phase(15)
   real(dp)::material(1+3*dl01_n),saved_material(1+3*dl01_n)
   real(dp)::optics(d03_identity_size),saved_optics(d03_identity_size)
   real(dp)::cie_a(15*cie_n+30),cie_b(10*cie_n),saved_a(15*cie_n+30),saved_b(10*cie_n)
-  integer::status,bad,all_bad,info
-  logical::exists,extended,uses_cie,uses_atomic
+  integer::status,bad,all_bad,info,pah_first,pah_last
+  logical::exists,extended,uses_cie,uses_atomic,uses_chimes,pah_dataset,pah_attribute
+#ifdef SNRT_CHIMES
+  real(dp)::chemical(324),saved_chemical(324)
+#endif
   include 'mpif.h'
   values=dust_mass_identity();bad=0
-  material=[1d0,dl01_t,dl01_carbon,dl01_silicate]
+  ! Version 1: absolute p_d, total rho/p/E, all-component KE, common-T bulk
+  ! enthalpy, first-order conserved faces and conservative prolongation.
+  dynamics=[1d0,real(idust_momentum,dp),real(ndust_phase,dp),3d0,1d0,1d0,1d0, &
+       dust_drag_collision_cross_section_cm2,1d0] ! last: PAH equal-volume carbon sphere
+  if(writing)then
+     if(dust_relative_motion)call hdf5_write_attr_1d_dp(grp,'dust_absolute_phase_dynamics',dynamics,size(dynamics))
+  else
+     exists=.false.
+     call h5aexists_f(grp,'dust_absolute_phase_dynamics',exists,status)
+     if(status/=0.or.(exists.neqv.dust_relative_motion))bad=1
+     if(exists.and.dust_relative_motion.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_absolute_phase_dynamics',saved_dynamics,size(dynamics),status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_dynamics/=dynamics))then
+           bad=1
+        endif
+     endif
+  endif
+  if(dust_pah_enabled())then
+     call pah_live_identity(pah_definition,status)
+     if(status/=0)call MPI_ABORT(MPI_COMM_WORLD,11,info)
+     pah=[real(idust_pah,dp),dust_pah_condensation,pah_definition]
+     allocate(saved_pah(size(pah)))
+  endif
+  allocate(iron(6+iron_identity_n+fe_optics_identity_n+merge(12,0,dust_fe_kinetics)))
+  allocate(saved_iron(size(iron)))
+  ! Kinetics appends its exact law. The embedded material identity separately
+  ! versions the zero-temperature continuation; old material restarts reject.
+  iron(1:6)=[1d0,real(idust_iron,dp),dust_fe_condensation,dust_fe_max_temperature,dust_fe_max_primary_ev, &
+       merge(1d0,0d0,dust_fe_kinetics)]
+  call iron_material_identity(iron(7:6+iron_identity_n))
+  iron(7+iron_identity_n:6+iron_identity_n+fe_optics_identity_n)=fe_optics_identity()
+  if(dust_fe_kinetics)iron(size(iron)-11:)=[dust_fe_sticking,dust_fe_sputter_coeff, &
+       dust_fe_sputter_min_t,dust_fe_sputter_max_t,56d0,31557600d0,1d0] ! final: resolved clumping C2
+  sublimation=dust_sublimation_identity()
+  if(dust_silicate_sublimation_enabled())then
+     call dust_olivine_phase_identity(olivine_phase,status)
+     if(status/=0)call MPI_ABORT(MPI_COMM_WORLD,11,info)
+  endif
+  call dust_material_identity(any(snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature) &
+       >dl01_t(dl01_n)),material)
   optics=d03_identity()
   uses_atomic=trim(dust_cooling)=='snrt_hhe_cie_metals'
+  uses_chimes=trim(dust_cooling)=='chimes_neq_v1'
+#ifdef SNRT_CHIMES
+  if(uses_chimes)then
+     call chimes_live_identity(chemical,status)
+     if(status/=0)then
+        if(myid==1)write(*,*)'ERROR: CHIMES table/ABI identity unavailable'
+        call MPI_ABORT(MPI_COMM_WORLD,31,info)
+     endif
+  endif
+#endif
   uses_cie=trim(dust_cooling)=='wss09_cie'.or.uses_atomic
   atomic=0
 #ifdef SNRT
@@ -149,18 +221,127 @@ subroutine dust_mass_hdf5_identity(grp,writing)
      call wss09_identity(cie_a,cie_b)
   endif
   if(uses_atomic)extra(3)=3d0
+  if(uses_chimes)extra(3)=4d0
   if(writing)then
+     if(dust_pah_enabled())then
+        if(dust_pah_hydrogenated())then
+           ! H-resolved rates exceed the legacy HDF5 object-header attribute
+           ! limit. Store one distributed dataset, not truncated coefficients
+           ! or a weaker path-only identity. Older PAH formats stay unchanged.
+           pah_first=int(int(size(pah),i8b)*int(myid-1,i8b)/int(ncpu,i8b))+1
+           pah_last=int(int(size(pah),i8b)*int(myid,i8b)/int(ncpu,i8b))
+           call hdf5_write_dataset_1d_dp(grp,'dust_pah_absolute_comparison',pah(pah_first:pah_last), &
+                pah_last-pah_first+1,int(pah_first-1,i8b),int(size(pah),i8b))
+           ! The legacy writer has no status return. Check this restart-
+           ! critical payload immediately, so failed I/O cannot mark a dump
+           ! complete. All ranks read the same small physical definition.
+           call hdf5_read_dataset_1d_dp_checked(grp,'dust_pah_absolute_comparison',saved_pah, &
+                size(pah),0_i8b,int(size(pah),i8b),status)
+           if(status/=0)then
+              bad=1
+           else if(any(saved_pah/=pah))then
+              bad=1
+           endif
+           call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+           if(all_bad/=0.or.info/=0)then
+              if(myid==1)write(*,*)'ERROR: PAH H-state checkpoint identity write failed'
+              call MPI_ABORT(MPI_COMM_WORLD,11,info)
+           endif
+        else
+           call hdf5_write_attr_1d_dp(grp,'dust_pah_absolute_comparison',pah,size(pah))
+        endif
+     endif
+     if(dust_iron_enabled())call hdf5_write_attr_1d_dp(grp,'dust_iron_electric_comparison',iron,size(iron))
      if(dust_mass_enabled)call hdf5_write_attr_1d_dp(grp,'dust_mass_values',values,13)
+     if(dust_sublimation_enabled())call hdf5_write_attr_1d_dp(grp,'dust_sublimation_values',sublimation,6)
+     if(dust_silicate_sublimation_enabled()) &
+          call hdf5_write_attr_1d_dp(grp,'dust_olivine_phase',olivine_phase,15)
      if(extended)call hdf5_write_attr_1d_dp(grp,'dust_composition_values',extra,4)
      if(dust_two_size_enabled())call hdf5_write_attr_1d_dp(grp,'dust_size_values',sizes,size(sizes))
      if(dust_material_composition_enabled())call hdf5_write_attr_1d_dp(grp,'dust_material_composition',material,size(material))
      if(dust_optics_enabled())call hdf5_write_attr_1d_dp(grp,'dust_optics_d03',optics,size(optics))
      if(uses_atomic)call hdf5_write_attr_1d_dp(grp,'dust_atomic_cooling',atomic,size(atomic))
+#ifdef SNRT_CHIMES
+     if(uses_chimes)call hdf5_write_attr_1d_dp(grp,'dust_chimes_neq',chemical,size(chemical))
+#endif
      if(uses_cie)then
         call hdf5_write_attr_1d_dp(grp,'dust_cie_hhe_values',cie_a,size(cie_a))
         call hdf5_write_attr_1d_dp(grp,'dust_cie_metal_values',cie_b,size(cie_b))
      endif
   else
+     pah_attribute=.false.;pah_dataset=.false.
+     call h5aexists_f(grp,'dust_pah_absolute_comparison',pah_attribute,status)
+     if(status/=0)bad=1
+     call h5lexists_f(grp,'dust_pah_absolute_comparison',pah_dataset,status)
+     if(status/=0)bad=1
+     if((pah_attribute.neqv.(dust_pah_enabled().and..not.dust_pah_hydrogenated())).or. &
+          (pah_dataset.neqv.dust_pah_hydrogenated()))bad=1
+     ! The dataset read is collective: no rank may skip it alone after a
+     ! metadata error (including a preceding dust-dynamics mismatch).
+     call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+     if(all_bad/=0.or.info/=0)then
+        if(myid==1)write(*,*)'ERROR: PAH/dust checkpoint identity layout mismatch'
+        call MPI_ABORT(MPI_COMM_WORLD,11,info)
+     endif
+     if(dust_pah_enabled())then
+        if(dust_pah_hydrogenated())then
+           call hdf5_read_dataset_1d_dp_checked(grp,'dust_pah_absolute_comparison',saved_pah, &
+                size(pah),0_i8b,int(size(pah),i8b),status)
+        else
+           call hdf5_read_attr_1d_dp_checked(grp,'dust_pah_absolute_comparison',saved_pah,size(saved_pah),status)
+        endif
+        if(status/=0)then
+           bad=1
+        else if(any(saved_pah/=pah))then
+           bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_iron_electric_comparison',exists,status)
+     if(status/=0.or.(exists.neqv.dust_iron_enabled()))bad=1
+     if(exists.and.dust_iron_enabled().and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_iron_electric_comparison',saved_iron,size(saved_iron),status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_iron/=iron))then
+           bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_olivine_phase',exists,status)
+     if(status/=0.or.(exists.neqv.dust_silicate_sublimation_enabled()))bad=1
+     if(exists.and.dust_silicate_sublimation_enabled().and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_olivine_phase',saved_olivine_phase,15,status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_olivine_phase/=olivine_phase))then
+           bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_sublimation_values',exists,status)
+     if(status/=0.or.(exists.neqv.dust_sublimation_enabled()))bad=1
+     if(exists.and.dust_sublimation_enabled().and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_sublimation_values',saved_sublimation,6,status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_sublimation/=sublimation))then
+           bad=1
+        endif
+     endif
+     exists=.false.
+     call h5aexists_f(grp,'dust_chimes_neq',exists,status)
+     if(status/=0.or.(exists.neqv.uses_chimes))bad=1
+#ifdef SNRT_CHIMES
+     if(exists.and.uses_chimes.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'dust_chimes_neq',saved_chemical,size(saved_chemical),status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved_chemical/=chemical))then
+           bad=1
+        endif
+     endif
+#endif
      exists=.false.
      call h5aexists_f(grp,'dust_mass_values',exists,status)
      if(status/=0)bad=1
@@ -324,6 +505,10 @@ subroutine backup_header_hdf5()
 
   ! Hydro
   call hdf5_write_attr_int(grp_id, 'nvar', nvar)
+#ifdef SOLVERmhd
+  call hdf5_write_attr_int(grp_id, 'mhd_ct_layout', 1)
+  call hdf5_write_attr_int(grp_id, 'nvar_all', nvar_all)
+#endif
 #ifdef DUST_LIVE
   call hdf5_write_attr_int(grp_id, 'dust_mass_field_index', idust)
   call hdf5_write_attr_int(grp_id, 'dust_energy_field_index', idust_energy)
@@ -618,7 +803,7 @@ subroutine backup_hydro_hdf5()
         allocate(ubuf(1))
      end if
 
-     do ivar = 1, nvar
+     do ivar = 1, nvar_all
         igrid = headl(myid, ilevel)
         do i = 1, ngrid_loc
            do ind = 1, twotondim

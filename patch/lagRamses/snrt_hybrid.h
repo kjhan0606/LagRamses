@@ -2,7 +2,17 @@
 #include <cstddef>
 using SnrtStep = int(float*,const float*,const int*,const float*,const float*,const float*,
     float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float);
+using SnrtMomentStep = int(float*,const float*,const int*,const float*,const float*,const float*,
+    float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,double*);
+// Moment ABI plus FP64 correction (work,dir,group), reference (group),
+// accepted HHe energy (owned,group,3), dust energy (owned,group),
+// dust ENERGY first moment (owned,group,3). Return 8: CUDA unsupported,
+// rejected before any device transaction or caller write.
+using SnrtEnergyStep = int(float*,const float*,const int*,const float*,const float*,const float*,
+    float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,double*,
+    double*,const double*,double*,double*,double*);
 extern "C" {
+SnrtEnergyStep snrt_openmp_species_dust_energy_c,snrt_hybrid_species_dust_energy_c,snrt_cuda_species_dust_energy_c;
 int snrt_scatter_batch_c(const double*,const double*,double*,int,int,int,double,int);
 int snrt_isotropic_scatter_c(float*,const double*,const double*,int,int,int,int);
 int snrt_ir_scatter_c(double*,const double*,const double*,int,int,int,int);
@@ -14,6 +24,10 @@ int snrt_ir_transport_c(const double*,const double*,const int*,const int*,const 
 int snrt_ir_absorb_c(const double*,const double*,const double*,const double*,const double*,const double*,
     double*,double*,int,int,int,double,double,int);
 SnrtStep snrt_openmp_species_dust_c, snrt_serial_species_dust_c, snrt_hybrid_species_dust_c;
+SnrtMomentStep snrt_openmp_species_dust_moment_c,snrt_serial_species_dust_moment_c,
+    snrt_hybrid_species_dust_moment_c,snrt_cuda_species_dust_moment_c;
+int snrt_cuda_species_dust_moment_batch_c(float*,const float*,const int*,const float*,const float*,const float*,
+    float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,int,double*);
 int snrt_cuda_species_dust_batch_c(float*,const float*,const int*,const float*,const float*,const float*,
     float*,float*,float*,float*,float*,float*,float*,int,int,int,int,float,int);
 int snrt_dust_material_batch_c(const double*,const double*,double*,int,int,int,int,

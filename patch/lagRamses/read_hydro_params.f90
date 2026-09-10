@@ -1,11 +1,19 @@
 ! Patch change:
 ! - added parameters for Kimm feedback and star formation
 subroutine read_hydro_params(nml_ok)
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_parameters, only: grafic_nreaders
   use amr_commons
   use hydro_commons
   use cosmic_ray_physics
   use dust_mass_physics
+#ifdef DUST_DYNAMICS
+  use snrt_dust_contract, only: snrt_dust_contract_loaded,snrt_dust_contract_load_from_environment, &
+       snrt_dust_contract_version,snrt_dust_contract_exchange_enabled
+#endif
+#ifdef SNRT
+  use snrt_agn_efficiency, only: snrt_agn_rt_requested
+#endif
   use eunha_cooling_mod, only: eunha_load_multi_z
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: read_enrichment_namelist, &
@@ -24,7 +32,7 @@ subroutine read_hydro_params(nml_ok)
   !--------------------------------------------------
   ! Local variables  
   !--------------------------------------------------
-  integer::i,idim,nboundary_true=0,dum
+  integer::i,idim,ivar,nboundary_true=0,dum
 #ifdef PHASE0_STELLAR_ENRICHMENT
   integer::stellar_nml_iostat
 #endif
@@ -47,6 +55,7 @@ subroutine read_hydro_params(nml_ok)
        & ,d_region,u_region,v_region,w_region,p_region
   namelist/hydro_params/gamma,courant_factor,smallr,smallc &
        & ,niter_riemann,slope_type,difmag &
+       & ,mhd_enabled,mhd_omp,mhd_gpu_faces,mhd_seed,mhd_initial_condition,riemann2d,slope_mag_type,interpol_mag_type &
 #if NENER>0
        & ,gamma_rad &
 #endif
@@ -78,6 +87,7 @@ subroutine read_hydro_params(nml_ok)
 #endif
        & ,d_bound,u_bound,v_bound,w_bound,p_bound,no_inflow
   namelist/physics_params/cooling,haardt_madau,metal,isothermal &
+       & ,dust_relative_motion,dust_drag_collision_cross_section_cm2 &
        & ,m_star,t_star,n_star,T2_star,g_star,del_star,eps_star,jeans_ncells &
        & ,rbubble,f_ek,ndebris,f_w,mass_gmc,kappa_IR &
        & ,J21,a_spec,z_ave,z_reion,ind_rsink,delayed_cooling,T2max &
@@ -106,7 +116,9 @@ subroutine read_hydro_params(nml_ok)
        & ,dust_metal_atom_mass,dust_injection_temperature &
        & ,dust_size_radius_cm,dust_size_density,dust_small_injection_fraction,dust_coagulation,dust_shattering &
        & ,dust_sn_shocks &
-       & ,dust_material_model,dust_optics_model &
+       & ,dust_material_model,dust_optics_model,dust_sublimation &
+       & ,dust_iron_model,dust_fe_condensation,dust_fe_kinetics,dust_fe_sticking &
+       & ,dust_pah_model,dust_pah_condensation &
        & ,cooling_method,grackle_table
 #ifdef grackle
   namelist/grackle_params/grackle_comoving_coordinates,grackle_with_radiative_cooling,grackle_primordial_chemistry &
@@ -124,6 +136,70 @@ subroutine read_hydro_params(nml_ok)
   if(nlevelmax>levelmin)read(1,NML=refine_params)
   rewind(1)
   if(hydro)read(1,NML=hydro_params)
+#ifndef SOLVERmhd
+  if(mhd_omp.or.mhd_gpu_faces)then
+     write(*,*)'ERROR: MHD execution flags require SOLVER=mhd'
+     call clean_stop
+  endif
+  if(mhd_enabled.or.any(mhd_seed/=0d0).or.riemann=='hlld'.or.mhd_initial_condition/='uniform')then
+     write(*,*)'ERROR: magnetic fields require a SOLVER=mhd executable'
+     call clean_stop
+  endif
+#endif
+#ifdef SOLVERmhd
+  if(hydro)then
+     if(mhd_gpu_faces)then
+#ifndef HYDRO_CUDA
+        write(*,*)'ERROR: mhd_gpu_faces requires USE_CUDA=1'
+        call clean_stop
+#endif
+        if(nener/=0)then
+           write(*,*)'ERROR: CUDA MHD face solver currently requires NENER=0'
+           call clean_stop
+        endif
+     endif
+     select case(trim(mhd_initial_condition))
+     case('uniform')
+     case('alfven_x','brio_wu_x')
+        if(cosmo.or.any(initfile/=' ').or.nener/=0)then
+           write(*,*)'ERROR: analytic MHD ICs require noncosmo, empty initfile and NENER=0'
+           call clean_stop
+        endif
+        if(mhd_initial_condition=='brio_wu_x'.and.abs(gamma-2d0)>1d-12)then
+           write(*,*)'ERROR: Brio-Wu reference requires gamma=2'
+           call clean_stop
+        endif
+     case default
+        write(*,*)'ERROR: unknown mhd_initial_condition'
+        call clean_stop
+     end select
+     if(any(.not.ieee_is_finite(mhd_seed)))then
+        write(*,*)'ERROR: mhd_seed must contain finite code-unit components'
+        call clean_stop
+     endif
+     if(.not.mhd_enabled)then
+        write(*,*)'ERROR: SOLVER=mhd requires explicit mhd_enabled=.true.'
+        call clean_stop
+     endif
+     if(scheme/='muscl'.or.riemann/='hlld'.or.riemann2d/='hlld')then
+        write(*,*)'ERROR: gas MHD requires muscl / hlld / hlld'
+        call clean_stop
+     endif
+     if(gpu_hydro.or.use_sgs.or.dust_relative_motion)then
+        write(*,*)'ERROR: gas MHD currently requires CPU hydro, no SGS or separate dust dynamics'
+        call clean_stop
+     endif
+#ifndef HDF5
+     write(*,*)'ERROR: gas MHD requires HDF5 checkpoint support'
+     call clean_stop
+#endif
+     if(outformat/='hdf5'.or.(nrestart>0.and.informat/='hdf5'))then
+        write(*,*)'ERROR: gas MHD requires HDF5 output/restart (face fields included)'
+        call clean_stop
+     endif
+     ischeme=0;iriemann=3;iriemann2d=5
+  endif
+#endif
   rewind(1)
   read(1,NML=boundary_params,END=103)
   simple_boundary=.true.
@@ -136,6 +212,16 @@ subroutine read_hydro_params(nml_ok)
   rewind(1)
   read(1,NML=physics_params,END=105)
 105 continue
+#ifdef SOLVERmhd
+  if(hydro.and.(use_sgs.or.dust_relative_motion))then
+     write(*,*)'ERROR: gas MHD does not yet admit SGS or separate dust dynamics'
+     call clean_stop
+  endif
+  if(hydro.and.nener>0.and.(sink.or.sink_AGN.or.agn))then
+     write(*,*)'ERROR: MHD sink/AGN profile requires NENER=0 (no accreted CR closure)'
+     call clean_stop
+  endif
+#endif
 #ifdef PHASE0_STELLAR_ENRICHMENT
   rewind(1)
   call read_enrichment_namelist(1,stellar_nml_iostat)
@@ -285,6 +371,16 @@ subroutine read_hydro_params(nml_ok)
 #endif
 
   dust_ok=dust_mass_parameters_ok()
+#ifdef SNRT
+  if(dust_sublimation_rt_enabled().and..not.snrt_agn_rt_requested())dust_ok=.false.
+#endif
+  if(dust_chimes_enabled())then
+#ifndef SNRT_CHIMES
+     dust_ok=.false.
+#endif
+     ! CHIMES thermal evolution uses translational 3/2 n_tot k_B T.
+     if(abs(gamma-5d0/3)>1d-12)dust_ok=.false.
+  endif
   if(dust_mass_enabled)then
 #if !defined(SNRT) || !defined(DUST_LIVE) || !defined(HDF5) || !defined(PHASE0_STELLAR_ENRICHMENT)
      dust_ok=.false.
@@ -315,6 +411,11 @@ subroutine read_hydro_params(nml_ok)
      if(dust_composition_enabled())write(*,*)'DUST_COMPOSITION C/MgFeSiO4: source-segment C/O'
      if(dust_two_size_enabled())write(*,*)'DUST_SIZE: four masses; resolved-density coagulation/shattering'
      if(dust_material_composition_enabled())write(*,*)'DUST_MATERIAL: local DL01 composition, common T, geometric size area'
+     if(dust_sublimation_enabled())write(*,*)'DUST_SUBLIMATION: ',trim(dust_sublimation),'; vacuum, fixed-radius BE'
+     if(dust_sublimation_rt_enabled())write(*,*) &
+          'DUST_SUBLIMATION_RT: adaptive IR/material/phase; lagged opacities/Cv; native CPU/OpenMP'
+     if(dust_silicate_sublimation_enabled())write(*,*) &
+          'DUST_OLIVINE: Xu crystalline surface rates; RH95 ideal-mixture atomic phase reference; congruent vapor'
      if(dust_optics_enabled())then
         write(*,*)'DUST_OPTICS: D03 four populations; primary/IR delta-isotropic Qsca*(1-g); common T'
      else
@@ -337,7 +438,11 @@ subroutine read_hydro_params(nml_ok)
      ! simple_boundary is still the "BOUNDARY_PARAMS present" flag here;
      ! nboundary=0 is normalized to periodic below, even with that block.
      if(cosmo.or.nboundary>0)cr_ok=.false.
+#ifdef SOLVERmhd
+     if(trim(riemann)/='hlld')cr_ok=.false.
+#else
      if(trim(riemann)/='hllc'.and.trim(riemann)/='hll'.and.trim(riemann)/='llf')cr_ok=.false.
+#endif
      if(trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))cr_ok=.false.
      if(sink.or.sink_AGN.or.agn)cr_ok=.false. ! sink/accretion CR partition not yet qualified
      if(delayed_cooling)cr_ok=.false. ! no duplicate delayed-SN reservoir
@@ -494,6 +599,9 @@ subroutine read_hydro_params(nml_ok)
   ! Compute boundary conservative variables
   !--------------------------------------------------
   do i=1,nboundary
+#ifdef SOLVERmhd
+     boundary_var(i,:)=0d0
+#endif
      boundary_var(i,1)=MAX(d_bound(i),smallr)
      boundary_var(i,2)=d_bound(i)*u_bound(i)
 #if NDIM>1
@@ -507,6 +615,20 @@ subroutine read_hydro_params(nml_ok)
         ek_bound=ek_bound+0.5d0*boundary_var(i,idim+1)**2/boundary_var(i,1)
      end do
      boundary_var(i,ndim+2)=ek_bound+P_bound(i)/(gamma-1.0d0)
+#ifdef SOLVERmhd
+     boundary_var(i,6:8)=mhd_seed
+     boundary_var(i,nvar+1:nvar+3)=mhd_seed
+     boundary_var(i,5)=boundary_var(i,5)+.5d0*sum(mhd_seed**2)
+#if NENER>0
+     do ivar=1,nener
+        boundary_var(i,nhydro+ivar)=prad_bound(i,ivar)/(gamma_rad(ivar)-1d0)
+        boundary_var(i,5)=boundary_var(i,5)+boundary_var(i,nhydro+ivar)
+     enddo
+#endif
+     do ivar=nhydro+nener+1,nvar
+        boundary_var(i,ivar)=boundary_var(i,1)*var_bound(i,ivar-nhydro-nener)
+     enddo
+#endif
   end do
 
   !-----------------------------------
@@ -539,8 +661,8 @@ subroutine read_hydro_params(nml_ok)
   !-----------------------------------
   ! Sort out passive variable indices
   !-----------------------------------
-  inener=ndim+3 ! MUST BE THIS VALUE !!!                                                                                                   
-  imetal=nener+ndim+3
+  inener=nhydro+1
+  imetal=nener+nhydro+1
   idelay=imetal
   if(metal)idelay=imetal+1
   ivirial=idelay
@@ -559,8 +681,58 @@ subroutine read_hydro_params(nml_ok)
   ! feedback path is disabled in a particular runtime namelist.
   idust=ichem+11
   idust_energy=idust+1
+  idust_iron=-1
+  idust_pah=-1
+  ichimes=-1
+  if(dust_chimes_enabled())then
+     ichimes=idust+11 ! Reserve the complete existing dust/source field window.
+     if(nvar<ichimes+156)then
+        if(myid==1)write(*,*)'ERROR: CHIMES live chemistry requires NVAR >= ',ichimes+156
+        nml_ok=.false.
+     endif
+  endif
   idust_species=-1
+  if(dust_iron_enabled())then
+     idust_iron=ichimes+157
+     if(.not.dust_chimes_enabled())idust_iron=idust+11
+     if(.not.dust_chimes_enabled().and.dust_relative_motion)nml_ok=.false.
+     if(nvar<idust_iron+1)then
+        if(myid==1)write(*,*)'ERROR: Fe comparison requires NVAR >= ',idust_iron+1
+        nml_ok=.false.
+     endif
+     if(myid==1)then
+        write(*,*)'Fe ELECTRIC-ONLY comparison: grain T<=300 K, primary<=4 eV'
+        if(.not.dust_chimes_enabled())write(*,*)'Fe static comparison: CHIMES off; all grain mass reactions disabled'
+        if(dust_fe_kinetics)then
+           write(*,*)'Fe kinetics: geometric seed growth + Choban26/Nozawa06 thermal sputtering; sticking=',dust_fe_sticking
+        else
+           write(*,*)'Fe kinetics OFF: fixed mass after injection'
+        endif
+     endif
+  endif
   idust_bins=-1
+  if(dust_pah_enabled())then
+     if(dust_pah_charged().and.dust_relative_motion)then
+        if(myid==1)write(*,*)'ERROR: charged PAH comparisons require coadvected grains'
+        call clean_stop
+     endif
+     idust_pah=ichimes+157+merge(2,0,dust_iron_enabled())
+     if(ichimes<1.or.nvar<idust_pah+dust_pah_nstate()-1.or.cosmo)then
+        if(myid==1)write(*,*)'ERROR: PAH comparison requires noncosmo CHIMES and NVAR >= ',idust_pah+dust_pah_nstate()-1
+        nml_ok=.false.
+     endif
+     if(myid==1)then
+        if(dust_pah_hydrogenated())then
+           write(*,*)'PAH H/charge M13-DL01 comparison: 3584 states, H=0--13, <=13.6 eV; no carbon destruction'
+           if(dust_pah_h2_enabled())write(*,*) &
+                'PAH H2 vacancy-refilling: cation H0--10, M13 bound rate; not a bound on the total H2 effect'
+        else if(dust_pah_charged())then
+           write(*,*)'PAH FIXED-H charge comparison: 256 states, <=13.6 eV, gas 10--10000 K; NO H loss/destruction'
+        else
+           write(*,*)'PAH neutral C24H12 comparison: absolute IR; Rayleigh long-wave tail; primary<=4 eV'
+        endif
+     endif
+  endif
   idust_shock=-1;idust_fresh=-1
   if(dust_composition_enabled())then
      idust_species=idust_energy+1
@@ -598,6 +770,49 @@ subroutine read_hydro_params(nml_ok)
      call clean_stop
   endif
 #endif
+  idust_momentum=-1;ndust_phase=0
+  if(dust_relative_motion)then
+#if defined(DUST_DYNAMICS) && defined(DUST_LIVE) && defined(SNRT_CHIMES) && !defined(SOLVERmhd)
+     ndust_phase=4+merge(2,0,dust_iron_enabled())+merge(1,0,dust_pah_enabled())
+     idust_momentum=ichimes+157
+     if(idust_iron>0)idust_momentum=max(idust_momentum,idust_iron+2)
+     if(idust_pah>0)idust_momentum=max(idust_momentum,idust_pah+dust_pah_nstate())
+     if(.not.dust_chimes_enabled().or..not.dust_two_size_enabled().or..not.hydro.or.cosmo) nml_ok=.false.
+     if(.not.dust_material_composition_enabled().or..not.dust_optics_enabled().or.dust_sublimation_rt_enabled())then
+        if(myid==1)write(*,*)'ERROR: relative dust requires DL01/D03; coupled RT sublimation is not admitted'
+        nml_ok=.false.
+     endif
+     if(dust_iron_enabled().and.dust_sublimation_enabled())then
+        if(myid==1)write(*,*)'ERROR: relative Fe sublimation needs a C/S/Fe common-enthalpy phase solver'
+        nml_ok=.false.
+     endif
+     dum=0
+     if(.not.snrt_dust_contract_loaded)call snrt_dust_contract_load_from_environment(dum)
+     if(dum/=0.or.snrt_dust_contract_version/=4.or..not.snrt_dust_contract_exchange_enabled)then
+        if(myid==1)write(*,*)'ERROR: relative dust requires version-4 live dust contract with gas exchange'
+        nml_ok=.false.
+     endif
+     if(idust_momentum+3*ndust_phase-1>nvar)then
+        if(myid==1)write(*,*)'ERROR: relative dust requires NVAR >= ',idust_momentum+3*ndust_phase-1
+        nml_ok=.false.
+     endif
+     if(ndim/=3.or.nboundary>0.or.pressure_fix.or.interpol_var/=0.or.use_sgs.or.isothermal) nml_ok=.false.
+     if(gpu_hydro)then
+        if(myid==1)write(*,*)'ERROR: relative dust requires CPU/OMP hydro; RT CUDA may remain enabled'
+        nml_ok=.false.
+     endif
+     if(.not.ieee_is_finite(dust_drag_collision_cross_section_cm2).or.dust_drag_collision_cross_section_cm2<=0)then
+        if(myid==1)write(*,*)'ERROR: relative dust needs explicit gas collision cross section for Epstein validity'
+        nml_ok=.false.
+     endif
+     if(sink.or.sink_AGN.or.agn.or.delayed_cooling.or.T2_star>0) nml_ok=.false.
+     if(myid==1)write(*,*)'Relative dust: first-order conserved Rusanov, absolute phase momenta, common-T solids'
+     if(myid==1)write(*,*)'  idust_momentum, ndust_phase = ',idust_momentum,ndust_phase
+#else
+     if(myid==1)write(*,*)'ERROR: relative dust requires DUST_DYNAMICS/DUST_LIVE/CHIMES hydro build'
+     nml_ok=.false.
+#endif
+  endif
   if(myid==1) then
      write(*,*) 'Hydro var indices:'
 #if NENER>0

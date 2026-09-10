@@ -127,16 +127,17 @@ extern "C" int snrt_ir_scatter_c(double *state,const double *tau,const double *w
   return scatter_transaction<double,true>(state,tau,weight,nc,ng,nd,mode);
 }
 
-extern "C" int snrt_hybrid_species_dust_c(
+extern "C" int snrt_hybrid_species_dust_moment_c(
     float *state,const float *direction,const int *neighbor,const float *tau,const float *species_tau,
     const float *dust_tau,float *available,float *hhe,float *dust,float *returned,float *raw,
-    float *group_absorbed,float *absorbed,int nowned,int nwork,int ndirection,int ngroup,float cdt) {
+    float *group_absorbed,float *absorbed,int nowned,int nwork,int ndirection,int ngroup,float cdt,double *dust_moment) {
   if(!state||!direction||!neighbor||!tau||!species_tau||!dust_tau||!available||!hhe||!dust||
       !returned||!raw||!group_absorbed||!absorbed||nowned<1||nwork<nowned||ndirection<1||ngroup<1||
       !std::isfinite(cdt)||cdt<0)return 1;
   const size_t limit=std::numeric_limits<size_t>::max()/sizeof(float);
   if(size_t(nwork)>limit/ndirection/ngroup||size_t(nowned)>limit/ngroup/3)return 1;
   const size_t total=size_t(nwork)*ndirection*ngroup,groups=size_t(nowned)*ngroup;
+  if(dust_moment && groups>std::numeric_limits<size_t>::max()/sizeof(double)/3)return 1;
   // Validate indices before gathering. Unused ghosts must also satisfy the
   // same input contract as the original full-array operator.
   for(size_t k=0;k<6*size_t(nowned);++k)if(neighbor[k]<0||neighbor[k]>nwork)return 2;
@@ -144,6 +145,7 @@ extern "C" int snrt_hybrid_species_dust_c(
   try {
     std::vector<float> next(state,state+total),atoms(available,available+3*size_t(nowned));
     std::vector<float> hh(3*groups),dd(groups),rr(groups),raw_out(groups),aa(groups),sum(nowned);
+    std::vector<double> moment(dust_moment?3*groups:0);
     const int nbatch=1+(nowned-1)/batch_cells;
     int error=0,cpu=0,gpu=0;
     #pragma omp parallel for num_threads(std::min(team_size,nbatch)) schedule(dynamic,1) reduction(max:error) reduction(+:cpu,gpu)
@@ -155,6 +157,7 @@ extern "C" int snrt_hybrid_species_dust_c(
         // ghosts). No batch ever reads another batch's updated photon state.
         std::vector<float> q(t),ta(g),st(3*g),dt(g),at(3*size_t(n));
         std::vector<float> bh(3*g),bd(g),br(g),bw(g),ba(g),bt(n);
+        std::vector<double> bm(dust_moment?3*g:0);
         std::vector<int> links(6*size_t(n));
         for(int i=0;i<n;++i) {
           const int cell=first+i;
@@ -176,16 +179,18 @@ extern "C" int snrt_hybrid_species_dust_c(
         }
         // Mirrors wrapper arrays, plus headroom. This is admission, not a
         // reservation against other processes; errors after launch reject.
-        Lease lease(4LL*(2*t+3LL*ndirection+10LL*n+12*g+1)+16777216LL);
+        Lease lease(4LL*(2*t+3LL*ndirection+10LL*n+12*g+1)+(dust_moment?24LL*g:0)+16777216LL);
         int rc;
         if(lease.slot>=0) {
           ++gpu;
-          rc=snrt_cuda_species_dust_batch_c(q.data(),direction,links.data(),ta.data(),st.data(),dt.data(),
-              at.data(),bh.data(),bd.data(),br.data(),bw.data(),ba.data(),bt.data(),n,nw,ndirection,ngroup,cdt,lease.slot);
+          rc=snrt_cuda_species_dust_moment_batch_c(q.data(),direction,links.data(),ta.data(),st.data(),dt.data(),
+              at.data(),bh.data(),bd.data(),br.data(),bw.data(),ba.data(),bt.data(),n,nw,ndirection,ngroup,cdt,lease.slot,
+              dust_moment?bm.data():nullptr);
         } else {
           ++cpu;
-          rc=snrt_serial_species_dust_c(q.data(),direction,links.data(),ta.data(),st.data(),dt.data(),
-              at.data(),bh.data(),bd.data(),br.data(),bw.data(),ba.data(),bt.data(),n,nw,ndirection,ngroup,cdt);
+          rc=snrt_serial_species_dust_moment_c(q.data(),direction,links.data(),ta.data(),st.data(),dt.data(),
+              at.data(),bh.data(),bd.data(),br.data(),bw.data(),ba.data(),bt.data(),n,nw,ndirection,ngroup,cdt,
+              dust_moment?bm.data():nullptr);
         }
         if(rc){error=std::max(error,rc);continue;}
         for(int i=0;i<n;++i) {
@@ -196,6 +201,7 @@ extern "C" int snrt_hybrid_species_dust_c(
             const size_t dst=size_t(j)*nowned+cell,src=size_t(j)*n+i;
             dd[dst]=bd[src];rr[dst]=br[src];raw_out[dst]=bw[src];aa[dst]=ba[src];
             for(int s=0;s<3;++s)hh[size_t(s)*groups+dst]=bh[size_t(s)*g+src];
+            if(dust_moment)for(int axis=0;axis<3;++axis)moment[size_t(axis)*groups+dst]=bm[size_t(axis)*g+src];
             for(int d=0;d<ndirection;++d)
               next[(size_t(j)*ndirection+d)*nwork+cell]=q[(size_t(j)*ndirection+d)*nw+i];
           }
@@ -207,12 +213,34 @@ extern "C" int snrt_hybrid_species_dust_c(
     for(float v:next)if(!std::isfinite(v)||v<0)return 3;
     for(float v:sum)if(!std::isfinite(v)||v<0)return 3;
     for(float v:raw_out)if(!std::isfinite(v)||v<0)return 3;
+    for(double v:moment)if(!std::isfinite(v))return 3;
     std::copy(next.begin(),next.end(),state);std::copy(atoms.begin(),atoms.end(),available);
     std::copy(hh.begin(),hh.end(),hhe);std::copy(dd.begin(),dd.end(),dust);
     std::copy(rr.begin(),rr.end(),returned);std::copy(raw_out.begin(),raw_out.end(),raw);
     std::copy(aa.begin(),aa.end(),group_absorbed);std::copy(sum.begin(),sum.end(),absorbed);
+    if(dust_moment)std::copy(moment.begin(),moment.end(),dust_moment);
     return 0;
   } catch(const std::bad_alloc&) {return 4;}
+}
+
+extern "C" int snrt_hybrid_species_dust_c(float *state,const float *direction,const int *neighbor,const float *tau,
+    const float *species_tau,const float *dust_tau,float *available,float *hhe,float *dust,float *returned,float *raw,
+    float *group_absorbed,float *absorbed,int nowned,int nwork,int ndirection,int ngroup,float cdt) {
+  return snrt_hybrid_species_dust_moment_c(state,direction,neighbor,tau,species_tau,dust_tau,available,hhe,dust,returned,raw,
+      group_absorbed,absorbed,nowned,nwork,ndirection,ngroup,cdt,nullptr);
+}
+
+extern "C" int snrt_hybrid_species_dust_energy_c(float *state,const float *direction,const int *neighbor,const float *tau,
+    const float *species_tau,const float *dust_tau,float *available,float *hhe,float *dust,float *returned,float *raw,
+    float *group_absorbed,float *absorbed,int no,int nw,int nd,int ng,float cdt,double *moment,
+    double *shift,const double *reference,double *hhe_energy,double *dust_energy,double *energy_moment) {
+  // Capability admission for auto mode: the paired operator currently has
+  // one CPU transaction. No lease is acquired and no GPU failure is replayed.
+  const int rc=snrt_openmp_species_dust_energy_c(state,direction,neighbor,tau,species_tau,dust_tau,available,
+      hhe,dust,returned,raw,group_absorbed,absorbed,no,nw,nd,ng,cdt,moment,shift,reference,
+      hhe_energy,dust_energy,energy_moment);
+  counts(0,1,0);
+  return rc;
 }
 
 extern "C" int snrt_hybrid_dust_material_c(const double *input,const double *table,double *output,

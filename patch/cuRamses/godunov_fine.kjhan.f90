@@ -175,6 +175,10 @@ subroutine godunov_fine(ilevel)
 
   if(numbtot(1,ilevel)==0)return
   if(static)return
+  if(dust_relative_motion.and.gpu_hydro)then
+     write(*,*)'ERROR: forced hydro CUDA is unsupported for relative dust'
+     call clean_stop;return
+  endif
   if(verbose)write(*,111)ilevel
 
 #ifdef HYDRO_CUDA
@@ -294,6 +298,9 @@ end subroutine set_unew
 !###########################################################
 !###########################################################
 subroutine set_uold(ilevel)
+#ifdef DUST_DYNAMICS
+  use dust_dynamics_runtime, only: dust_dynamics_eos
+#endif
   use amr_commons
   use hydro_commons
   use poisson_commons
@@ -307,6 +314,11 @@ subroutine set_uold(ilevel)
   integer::i,ivar,irad,ind,nx_loc,ind_cell
   real(dp)::scale,d,u,v,w
   real(dp)::e_kin,e_cons,e_prim,e_trunc,div,dx,fact,d_old
+#ifdef DUST_DYNAMICS
+  integer::phase_status,phase_bad,phase_all_bad,phase_info
+  real(dp)::phase_thermal,phase_ke,phase_v(3),phase_speed(3)
+  include 'mpif.h'
+#endif
 
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
@@ -326,6 +338,24 @@ subroutine set_uold(ilevel)
      call add_pdv_source_terms(ilevel)
   endif
 
+#ifdef DUST_DYNAMICS
+  if(dust_relative_motion)then
+     phase_bad=0
+     do ind=1,twotondim
+        do i=1,active(ilevel)%ngrid
+           ind_cell=ICELL_OF(active(ilevel)%igrid(i),ind)
+           call dust_dynamics_eos(unew(ind_cell,:),phase_thermal,phase_ke,phase_v,phase_speed,phase_status)
+           if(phase_status/=0)phase_bad=1
+           if(any(unew(ind_cell,ndim+3+nener:idust_momentum-1)<0))phase_bad=1
+        enddo
+     enddo
+     call MPI_ALLREDUCE(phase_bad,phase_all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,phase_info)
+     if(phase_all_bad/=0.or.phase_info/=0)then
+        if(myid==1)write(*,*)'ERROR: relative dust hydro update rejected before uold commit'
+        call MPI_ABORT(MPI_COMM_WORLD,11,phase_info)
+     endif
+  endif
+#endif
   ! Set uold to unew for myid cells
 !$omp parallel do private(ind,ivar,i,ind_cell,d,u,v,w,e_kin,e_cons,e_prim,div,e_trunc)
   do ind=1,twotondim
@@ -390,6 +420,9 @@ end subroutine set_uold
 !###########################################################
 !###########################################################
 subroutine add_gravity_source_terms(ilevel)
+#ifdef DUST_DYNAMICS
+  use dust_phase_state, only: dust_phase_gravity
+#endif
   use amr_commons
   use hydro_commons
   use poisson_commons
@@ -402,6 +435,9 @@ subroutine add_gravity_source_terms(ilevel)
   ! total energy are modified in array unew.
   !--------------------------------------------------------------------------
   integer::i,ivar,ind,nx_loc,ind_cell
+#ifdef DUST_DYNAMICS
+  integer::phase_status
+#endif
   real(dp)::d,u,v,w,e_kin,e_prim,d_old,fact
 
   if(numbtot(1,ilevel)==0)return
@@ -411,10 +447,21 @@ subroutine add_gravity_source_terms(ilevel)
 ! do ind=1,twotondim
 !    iskip=ncoarse+(ind-1)*ngridmax
 !    do i=1,active(ilevel)%ngrid
-!$omp parallel do private(ind,i,ind_cell,d,u,v,w,e_kin,d_old,e_prim,fact)
+!$omp parallel do private(ind,i,ind_cell,d,u,v,w,e_kin,d_old,e_prim,fact) &
+#ifdef DUST_DYNAMICS
+!$omp& private(phase_status) &
+#endif
+!$omp& schedule(static)
   do i=1,active(ilevel)%ngrid
      do ind=1,twotondim
         ind_cell=ICELL_OF(active(ilevel)%igrid(i),ind)
+#ifdef DUST_DYNAMICS
+        if(dust_relative_motion)then
+           call dust_phase_gravity(unew(ind_cell,:),uold(ind_cell,:),f(ind_cell,:),.5d0*dtnew(ilevel),phase_status)
+           if(phase_status/=0)call clean_stop
+           cycle
+        endif
+#endif
         d=max(unew(ind_cell,1),smallr)
         u=0.0; v=0.0; w=0.0
         if(ndim>0)u=unew(ind_cell,2)/d
@@ -467,6 +514,9 @@ subroutine add_pdv_source_terms(ilevel)
 end subroutine add_pdv_source_terms
 
 subroutine sub_add_pdv_source_terms(ilevel,igrid,ngrid)
+#ifdef DUST_DYNAMICS
+  use dust_phase_state, only: dust_phase_gas_velocity
+#endif
   use amr_commons
   use hydro_commons
   use morton_hash
@@ -535,9 +585,15 @@ subroutine sub_add_pdv_source_terms(ilevel,igrid,ngrid)
            do i=1,ngrid
               if(igridn(i,ig1)>0)then
                  velg(i,idim,1:ndim) = uold(ICELL_OF(igridn(i,ig1),id1),2:ndim+1)/max(uold(ICELL_OF(igridn(i,ig1),id1),1),smallr)
+#ifdef DUST_DYNAMICS
+                 if(dust_relative_motion)velg(i,idim,:)=dust_phase_gas_velocity(uold(ICELL_OF(igridn(i,ig1),id1),:))
+#endif
                  dx_g(i,idim) = dx_loc
               else
                  velg(i,idim,1:ndim) = uold(ind_left(i,idim),2:ndim+1)/max(uold(ind_left(i,idim),1),smallr)
+#ifdef DUST_DYNAMICS
+                 if(dust_relative_motion)velg(i,idim,:)=dust_phase_gas_velocity(uold(ind_left(i,idim),:))
+#endif
                  dx_g(i,idim) = dx_loc*1.5_dp
               end if
            enddo
@@ -545,9 +601,15 @@ subroutine sub_add_pdv_source_terms(ilevel,igrid,ngrid)
            do i=1,ngrid
               if(igridn(i,ig2)>0)then
                  veld(i,idim,1:ndim)= uold(ICELL_OF(igridn(i,ig2),id2),2:ndim+1)/max(uold(ICELL_OF(igridn(i,ig2),id2),1),smallr)
+#ifdef DUST_DYNAMICS
+                 if(dust_relative_motion)veld(i,idim,:)=dust_phase_gas_velocity(uold(ICELL_OF(igridn(i,ig2),id2),:))
+#endif
                  dx_d(i,idim)=dx_loc
               else
                  veld(i,idim,1:ndim)= uold(ind_right(i,idim),2:ndim+1)/max(uold(ind_right(i,idim),1),smallr)
+#ifdef DUST_DYNAMICS
+                 if(dust_relative_motion)veld(i,idim,:)=dust_phase_gas_velocity(uold(ind_right(i,idim),:))
+#endif
                  dx_d(i,idim)=dx_loc*1.5_dp
               end if
            enddo
