@@ -15,7 +15,8 @@ module snrt_hdf5
        snrt_spectral_contract_group_edges_sha256, snrt_spectral_contract_status, &
        snrt_spectral_contract_fraction_semantics,snrt_band_enabled,snrt_band_model,snrt_band_kind, &
        snrt_d03_band_enabled,snrt_chimes_band_enabled,snrt_chimes_bank_sha256, &
-       snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256
+       snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256, &
+       snrt_chimes_transition_enabled,snrt_chimes_atomization_sha256
   use snrt_thermochemistry, only: snrt_secondary_loaded_manifest_sha256
 #ifdef DUST_LIVE
   use snrt_dust_contract
@@ -142,6 +143,8 @@ contains
        if(snrt_band_kind()==4)call hdf5_write_attr_string(grp,'fe_node_sha256',fe_band_sha256)
        if(snrt_chimes_band_enabled())call hdf5_write_attr_string(grp,'chimes_bank_sha256',snrt_chimes_bank_sha256)
        if(snrt_chimes_cold_enabled())call hdf5_write_attr_string(grp,'chimes_molecular_sha256',snrt_chimes_molecular_sha256)
+       if(snrt_chimes_transition_enabled())call hdf5_write_attr_string(grp,'chimes_atomization_sha256', &
+            snrt_chimes_atomization_sha256)
        call hdf5_write_attr_string(grp,'primary_shift_units','photon CODE density * eV per direction')
        if(snrt_checkpoint_cell_width>primary_width) &
             call hdf5_write_attr_string(grp,'ir_energy_units','erg/cm3 per normalized direction')
@@ -174,6 +177,11 @@ contains
              call hdf5_read_attr_string_checked(grp,'chimes_molecular_sha256',loaded,status)
              call require_ok(status)
              call require_ok(merge(0,1,trim(loaded)==snrt_chimes_molecular_sha256))
+          endif
+          if(snrt_chimes_transition_enabled())then
+             call hdf5_read_attr_string_checked(grp,'chimes_atomization_sha256',loaded,status)
+             call require_ok(status)
+             call require_ok(merge(0,1,trim(loaded)==snrt_chimes_atomization_sha256))
           endif
        endif
        if(legacy_number_only)snrt_checkpoint_file_width=snrt_checkpoint_cell_width-snrt_checkpoint_number_width

@@ -1999,6 +1999,80 @@ README. The generic namelist generator/GUI also describes the selector;
 no new namelist variable was added. See the
 [implementation and integrated evidence](../../provenance/snrt_chimes_molecular_coupling_implementation_2026-09-11.md#live-completion).
 
+### Energy-aware high-temperature transition (2026-09-11)
+
+`SNRT_SPECTRAL_MODEL=chimes_transition_d03_maxent128_fs2010_v1` selects
+the operator-approved rapid-dissociation comparison (kind7). Use the same
+atomic/molecular banks, FS2010 data, D03 grains and build options as
+the cold comparison above, but rebuild CHIMES with receiver **ABI6** from
+`data/chimes_native_receiver.patch`. Existing ABI4/5 libraries remain usable
+for their original models; they cannot run kind7. The build must include
+the matching library, not merely set a new environment selector.
+
+Gas is admitted on **10--1e9 K**, not an unbounded/relativistic domain.
+At entry, after photo heating, or at an upward dark-solve temperature root
+at the loaded molecular ceiling (10^4.98 K), remaining molecules are
+converted to atomic fragments. ATcT v1.130 0 K formation enthalpies specify
+each of the twenty dissociation costs. Nuclei and charge are conserved,
+electrons unchanged, and the binding cost is debited from thermal energy
+before temperature is recomputed using translational gamma=5/3 capacity.
+For a +1 molecule the charge goes to its lowest-ionization-cost H/C/O atom.
+This fragment prescription is a declared approximation, not branching data.
+
+ABI6 locates dark crossings using CVODE's accepted solution and an upward
+root, with the requested integration endpoint as stop time. Only numerical
+RHS trials beyond the boundary use boundary rates; this does not extend
+the physical molecular trajectory above the data ceiling. The remainder
+of that step uses atomic NEQ, even if it cools below the ceiling; molecular
+formation can resume next step. The operator split is first order. This
+is not a finite-time high-temperature molecular shock network.
+
+Joint gas/grain absorption and subsequent material/IR wiring remain. Kind7
+also admits existing C/silicate `dust_growth`, `dust_sputtering`,
+`dust_coagulation` and `dust_shattering` switches. The mass step runs before
+RT and reconstructs gas carriers, grain material energy and current opacity.
+Molecular heavy nuclei are reserved for accretion; atomic ions deplete in
+their existing proportions and electrons reconcile to charge. Erosion
+returns neutral atoms. This retains the existing comparison convention,
+not a new charge-dependent sticking/recombination heat model. Size exchange
+uses TOTAL H nuclei, including H2; this density correction also applies to
+the pre-existing grey CHIMES mass path. C/olivine do not accrete hydrogen.
+No new cell carriers, material binding-energy model or numerical ledger.
+
+No Fe/PAH, condensation, SN shocks, relative motion or sublimation is admitted.
+The wizard's new growth/sputtering/size-exchange question defaults to false,
+preserving its fixed-grain profile. Fixed grains and the existing effective
+erosion laws are comparison assumptions, not general dust survival predictions.
+CPU/OpenMP remains required. Kind5/kind6 mass restrictions stay unchanged.
+
+Photo integration uses accumulated optical depth with survival `exp(-tau)`:
+the old survival-fraction ODE could produce tiny negative terminal values
+despite CVODE constraints. Nuclear/charge/photon budget acceptance thresholds
+are unchanged; local solver accuracy is tightened for the nonlinear survival
+and independently integrated absorption counters. At cold/transition live
+storage only, subnormal FP32 counts and their FP64 energies round together
+at unchanged E/N. This numerical energy change must be no greater than
+64 FP64 epsilons of the cell's incoming primary energy, otherwise it rejects.
+No physical abundance floor or heat source is introduced. The rounded tail
+is storage roundoff, not claimed gas/grain absorption. Normal FP32 counts
+retain the existing FP64 energy-rebasing convention.
+
+Native restart version14, chemical identity7, and HDF5 base version +58
+(64 for the tested IR+stellar profile) distinguish this model. The ATcT
+data identity is additionally bound to SHA256
+`0bfa808eda56b7ea41b1a9e083e5379106caa2960f4b8a242f6e2e902606a045`.
+Existing checkpoint species/carrier widths are unchanged; older model
+checkpoints must not be relabelled as kind7.
+
+For wizard/GUI generation use
+`SNRT_CHIMES_SPECTRAL_MODEL=chimes_transition_d03_maxent128_fs2010_v1`
+and the existing binary/data settings. Generated environment and README
+record this opt-in and its restrictions. No new namelist field is needed.
+Existing dust mass/size restart identities bind the selected process flags;
+changing them across restart still rejects. See the
+[grain mass connection and evaluation](../../provenance/snrt_transition_dust_evolution_2026-09-11.md).
+See [implementation and live evaluation](../../provenance/snrt_hot_transition_plan_2026-09-11.md#approved-implementation-and-live-evaluation).
+
 ### Fixed-H charged PAH comparison (2026-09-10)
 
 `dust_pah_model='pah_charge_fixed_h_v1'` is a separate opt-in model, not a

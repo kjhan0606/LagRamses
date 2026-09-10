@@ -12,6 +12,7 @@
 #include <mpi.h>
 #include "chimes_proto.h"
 #include "chimes_vars.h"
+#include "snrt_chimes_atomization.h"
 
 #define NS 157
 #define NG 9
@@ -20,6 +21,10 @@ extern int snrt_chimes_receiver_abi(void);
  * this optional hook without changing either CHIMES structure layout. */
 typedef ChimesFloat (*solid_charge_fn)(const struct globalVariables *);
 static solid_charge_fn *solid_charge_hook;
+typedef double (*thermal_ceiling_fn)(const struct globalVariables *);
+typedef void (*thermal_root_fn)(const struct globalVariables *,double);
+static thermal_ceiling_fn *thermal_ceiling_hook;
+static thermal_root_fn *thermal_root_hook;
 static int receiver_abi;
 static struct globalVariables configuration;
 static int initialized;
@@ -45,12 +50,64 @@ static const double group_energy[NG]={.1,2.3664319132398464,10.56942670578782,12
 static int nuclei[NS][11],charge[NS];
 static const int neutral[11]={sp_HI,sp_HeI,sp_CI,sp_NI,sp_OI,sp_NeI,sp_MgI,sp_SiI,sp_SI,sp_CaI,sp_FeI};
 static const int atomic_z[11]={1,2,6,7,8,10,12,14,16,20,26};
+int snrt_chimes_budget(const double *,double *,double *);
 
 struct cell_context {
     double solid_q;
     double molecular_temperature_max; /* zero for unchanged legacy/hot calls */
     int outside_molecular_domain;
+    double event_ceiling,event_time;
 };
+
+static double thermal_ceiling(const struct globalVariables *c)
+{
+    const struct cell_context *p=c->hybrid_data;
+    return p?p->event_ceiling:0;
+}
+static void thermal_root(const struct globalVariables *c,double time)
+{
+    struct cell_context *p=c->hybrid_data;
+    if(p)p->event_time=time;
+}
+int snrt_chimes_transition_supported(void) { return initialized==1 && receiver_abi==6; }
+
+/* Energy/nucleus/charge preserving instantaneous atomization. All arrays
+ * stay untouched on failure. Chemical energy cost is per gas H nucleus. */
+int snrt_chimes_atomize(double temperature,const double *old,double *next,double *new_temperature,double *cost_ev)
+{
+    if(initialized!=1 || !isfinite(temperature) || temperature<10 || temperature>1e9)return 1;
+    double e0[11],e1[11],q0,q1,work[NS],cost=0,before=0,after=0;
+    if(snrt_chimes_budget(old,e0,&q0))return 1;
+    memcpy(work,old,sizeof(work));
+    const int element[3]={0,2,4};
+    for(int s=sp_H2;s<NS;s++) {
+        double channel=-atomization_hf0[s-sp_H2];
+        int ion=-1;
+        for(int k=0;k<3;k++) {
+            int count=nuclei[s][element[k]];
+            work[neutral[element[k]]]+=count*old[s];
+            channel+=count*atomization_atom_hf0[k];
+            if(count && (ion<0 || atomization_ion_hf0[k]-atomization_atom_hf0[k]
+                <atomization_ion_hf0[ion]-atomization_atom_hf0[ion]))ion=k;
+        }
+        if(charge[s]==1 && ion>=0) {
+            work[neutral[element[ion]]]-=old[s];
+            work[neutral[element[ion]]+1]+=old[s];
+            channel+=atomization_ion_hf0[ion]-atomization_atom_hf0[ion];
+        } else if(charge[s]!=0)return 2;
+        if(channel<=0 || !isfinite(channel))return 2;
+        cost+=old[s]*channel*atomization_kjmol_to_ev;
+        work[s]=0;
+    }
+    if(snrt_chimes_budget(work,e1,&q1))return 2;
+    for(int e=0;e<11;e++)if(fabs(e1[e]-e0[e])>1e-12*fmax(e0[e],1e-30))return 2;
+    if(fabs(q1-q0)>1e-12 || work[sp_elec]!=old[sp_elec])return 2;
+    for(int s=0;s<NS;s++){before+=old[s];after+=work[s];}
+    if(before<=0 || after<=0)return 2;
+    double t=(1.5*BOLTZMANNCGS*before*temperature-cost*ev_erg)/(1.5*BOLTZMANNCGS*after);
+    if(!isfinite(t) || t<10 || t>1e9)return 3;
+    memcpy(next,work,sizeof(work));*new_temperature=t;*cost_ev=cost;return 0;
+}
 
 double snrt_chimes_molecular_temperature_max(void)
 {
@@ -104,7 +161,7 @@ int snrt_chimes_identity(double *values)
 }
 
 double snrt_chimes_boltzmann(void) { return BOLTZMANNCGS; }
-int snrt_chimes_charge_supported(void) { return initialized==1 && receiver_abi==5; }
+int snrt_chimes_charge_supported(void) { return initialized==1 && receiver_abi>=5; }
 
 int snrt_chimes_group_binding(int n,const double *edges,const double *means)
 {
@@ -444,15 +501,20 @@ int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,
 {
     receiver_abi=snrt_chimes_receiver_abi();
     if(initialized || NS!=CHIMES_TOTSIZE || sizeof(ChimesFloat)!=sizeof(double) ||
-       (receiver_abi!=4 && receiver_abi!=5))return 1;
+       (receiver_abi!=4 && receiver_abi!=5 && receiver_abi!=6))return 1;
     /* Lookup avoids ELF copy relocations turning an optional data symbol
      * into a mandatory runtime dependency when loading an ABI4 library. */
-    if(receiver_abi==5){
+    if(receiver_abi>=5){
         void *handle=dlopen(NULL,RTLD_NOW);
         if(!handle)return 1;
         solid_charge_hook=(solid_charge_fn *)dlsym(handle,"snrt_chimes_solid_charge");
+        if(receiver_abi==6){
+            thermal_ceiling_hook=(thermal_ceiling_fn *)dlsym(handle,"snrt_chimes_thermal_ceiling");
+            thermal_root_hook=(thermal_root_fn *)dlsym(handle,"snrt_chimes_thermal_root_found");
+        }
         dlclose(handle); /* CHIMES itself remains a linked dependency. */
         if(!solid_charge_hook)return 1;
+        if(receiver_abi==6 && (!thermal_ceiling_hook || !thermal_root_hook))return 1;
     }
     if(nspectra>0 && !snrt_chimes_fs_ready())return 1;
     if(!main_path || strlen(main_path)>=500 || (nspectra!=0 && nspectra!=NG))return 2;
@@ -499,7 +561,8 @@ int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,
     /* init_chimes intentionally resets these callback pointers. Install the
      * receiver only after initialization has finished. */
     configuration.hybrid_cooling_fn=remove_duplicate_dust_energy;
-    if(receiver_abi==5)*solid_charge_hook=solid_charge;
+    if(receiver_abi>=5)*solid_charge_hook=solid_charge;
+    if(receiver_abi==6){*thermal_ceiling_hook=thermal_ceiling;*thermal_root_hook=thermal_root;}
     if(configuration.totalNumberOfSpecies!=NS)return 3;
     for(int i=0;i<NS;i++)if(configuration.speciesIndices[i]!=i)return 3;
     int nf=chimes_table_photoion_auger_fuv.N_reactions[1];
@@ -612,7 +675,7 @@ int snrt_chimes_locked(const double *abundance,double *elements)
  * Return only complete trial states. Native caller owns their publication. */
 static int cell_charged(const double *controls,const double *elements,const double *old_abundance,
                      double solid_q,
-                     const double *old_photons,double *temperature,double *abundance,double *photons,int cold_spectral)
+                     const double *old_photons,double *temperature,double *abundance,double *photons,int mode,double *elapsed)
 {
     *temperature=controls[1];
     memcpy(abundance,old_abundance,NS*sizeof(double));
@@ -635,14 +698,21 @@ static int cell_charged(const double *controls,const double *elements,const doub
     }
     if(controls[3]==0)return 0;
     struct globalVariables c=configuration; /* Tdust is local, thread-safe. */
-    if(cold_spectral){
+    if(mode==1 || mode==3){
         if(controls[1]>snrt_chimes_molecular_temperature_max())return 2;
         // Resolve the molecular photo/dark split below the default grey
         // network's thermal truncation error; do not change global tables,
         // tolerances or Tmol_K for other receivers.
         c.relativeTolerance=1e-10;c.absoluteTolerance=1e-17;c.explicitTolerance=1e-10;
     }
-    struct cell_context context={solid_q,cold_spectral?snrt_chimes_molecular_temperature_max():0,0};
+    if(mode>=2 && receiver_abi!=6)return 4;
+    if(mode==2){
+        for(int s=sp_H2;s<NS;s++)if(old_abundance[s]!=0)return 3;
+        c.Tmol_K=0; /* Atomic remainder may cool below the event temperature. */
+    }
+    if(mode==3){c.Tmol_K=snrt_chimes_molecular_temperature_max();c.explicitTolerance=0;}
+    struct cell_context context={solid_q,mode==1?snrt_chimes_molecular_temperature_max():0,0,
+        mode==3?snrt_chimes_molecular_temperature_max():0,-1};
     c.hybrid_data=&context;
     struct gasVariables g={0};
     double work[NS],radiation[NG],reduction[NG],G0[NG],dissoc[NG],source[NG]={0};
@@ -667,6 +737,7 @@ static int cell_charged(const double *controls,const double *elements,const doub
     const struct gasVariables initial_g=g;
     int status=0;
     for(int attempt=0;attempt<3;attempt++){
+        context.event_time=-1;
         g=initial_g;
         memcpy(work,old_abundance,sizeof(work));
         memcpy(radiation,old_photons,sizeof(radiation));
@@ -730,20 +801,29 @@ static int cell_charged(const double *controls,const double *elements,const doub
     for(int b=0;b<c.N_spectra;b++)if(old_photons[b]==0)radiation[b]=0;
     *temperature=g.temperature;
     memcpy(abundance,work,sizeof(work));memcpy(photons,radiation,sizeof(radiation));
-    return 0;
+    if(elapsed)*elapsed=context.event_time>=0?context.event_time:controls[3];
+    return mode==3 && context.event_time>=0?51:0; /* accepted thermal root */
 }
 
 int snrt_chimes_cell_charged(const double *controls,const double *elements,const double *old,
     double solid_q,const double *number,double *temperature,double *next,double *next_number)
 {
-    return cell_charged(controls,elements,old,solid_q,number,temperature,next,next_number,0);
+    return cell_charged(controls,elements,old,solid_q,number,temperature,next,next_number,0,NULL);
 }
 
 int snrt_chimes_cell_cold_dark(const double *controls,const double *elements,const double *old,
     double *temperature,double *next)
 {
     double zero[NG]={0},out[NG];
-    return cell_charged(controls,elements,old,0,zero,temperature,next,out,1);
+    return cell_charged(controls,elements,old,0,zero,temperature,next,out,1,NULL);
+}
+
+int snrt_chimes_cell_transition_dark(const double *controls,const double *elements,const double *old,
+    int atomic,double *temperature,double *next,double *elapsed)
+{
+    double zero[NG]={0},out[NG];
+    if(elapsed)*elapsed=controls[3];
+    return cell_charged(controls,elements,old,0,zero,temperature,next,out,atomic?2:3,elapsed);
 }
 
 int snrt_chimes_cell(const double *controls,const double *elements,const double *old_abundance,

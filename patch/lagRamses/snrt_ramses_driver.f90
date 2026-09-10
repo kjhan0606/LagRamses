@@ -106,7 +106,7 @@ contains
 #ifdef SNRT_CHIMES
     use snrt_chimes_runtime, only: chimes_live_capacity,chimes_live_stage,chimes_cell_state,chimes_live_band_stage, &
          chimes_live_cold_stage
-    use snrt_chimes, only: chimes_ns,chimes_group_binding,chimes_boltzmann
+    use snrt_chimes, only: chimes_ns,chimes_group_binding,chimes_boltzmann,chimes_round_subnormal_survivors
 #endif
     use snrt_atomic_cooling, only: atomic_mh,atomic_temperature,atomic_heat_capacity,atomic_advance
     use pm_commons, only: nsink, xsink, idsink, agn_pending_erg, nindsink, msink, vsink, jsink, &
@@ -121,7 +121,7 @@ contains
     use snrt_spectral_contract, only: &
          snrt_nedges, snrt_group_edges_ev, snrt_group_edges_sha256, snrt_band_enabled,snrt_band_model, &
          snrt_d03_band_enabled,snrt_fe_band_enabled,snrt_grain_band_bins, &
-         snrt_node_secondaries_enabled,snrt_chimes_band_enabled,snrt_chimes_cold_enabled, &
+         snrt_node_secondaries_enabled,snrt_chimes_band_enabled,snrt_chimes_cold_enabled,snrt_chimes_transition_enabled, &
          snrt_group_mean_energy_ev, snrt_group_energy_fraction, &
          snrt_group_cross_section_cm2, snrt_group_cross_section_hei_cm2, &
          snrt_group_cross_section_heii_cm2, &
@@ -270,7 +270,7 @@ contains
     logical :: chimes_on
 #ifdef SNRT_CHIMES
     real(dp),allocatable::chemical_trial(:,:)
-    real(dp)::chemical_absorbed_ev
+    real(dp)::chemical_absorbed_ev,chemical_events,chemical_dissociation_ev
 #endif
     real(dp), allocatable :: trial_heating_rate(:), trial_unassigned(:)
     real(dp), allocatable :: trial_absorbed_species(:,:,:)
@@ -1496,12 +1496,13 @@ contains
 #ifdef SNRT_CHIMES
        if(snrt_chimes_cold_enabled().and.local_transaction_failure==snrt_failure_none)then
           chemical_absorbed_ev=0
+          chemical_events=0;chemical_dissociation_ev=0
 !$omp parallel do default(shared) private(i,icell,ierr,igroup) reduction(+:chemical_absorbed_ev) &
-!$omp reduction(max:local_transaction_failure)
+!$omp reduction(max:local_transaction_failure) reduction(+:chemical_events,chemical_dissociation_ev)
           do i=1,nleaf
              block
                real(dp)::rn(snrt_ndirection,9),re(snrt_ndirection,9),nn(snrt_ndirection,9),ne(snrt_ndirection,9)
-               real(dp)::ledger(11),gn(9),ge(9),nh_code,he_code
+               real(dp)::ledger(11),gn(9),ge(9),nh_code,he_code,events(2)
                icell=leaf_cell(i)
                rn=real(trial_intensity(:,:,i),dp)*scale_nH
                do igroup=1,9
@@ -1509,7 +1510,8 @@ contains
                        trial_energy_shift(:,igroup,i))*scale_nH
                enddo
                call chimes_live_cold_stage(icell,scale_d,scale_v,dt_s,dx_code*scale_l,dust_old_temperature(i), &
-                    reduced_c,snrt_ndirection,rn,re,chemical_trial(:,i),trial_thermal(i),nn,ne,ledger,gn,ge,ierr)
+                    reduced_c,snrt_ndirection,rn,re,chemical_trial(:,i),trial_thermal(i),nn,ne,ledger,gn,ge,ierr,events)
+               if(ierr==0)ierr=chimes_round_subnormal_survivors(scale_nH,sum(re),nn,ne)
                if(ierr/=0)then
 !$omp critical(chimes_cold_failure)
                   write(*,*)'CHIMES cold cell rejection: rank/cell/status=',myid,icell,ierr
@@ -1533,6 +1535,8 @@ contains
                   trial_helium_iii(i)=chemical_trial(7,i)/he_code
                endif
                chemical_absorbed_ev=chemical_absorbed_ev+ledger(7)*cell_volume_code*scale_l**3
+               chemical_events=chemical_events+events(1)
+               chemical_dissociation_ev=chemical_dissociation_ev+events(2)*cell_volume_code*scale_l**3
              end block
           enddo
 !$omp end parallel do
@@ -2031,6 +2035,12 @@ contains
        call snrt_transaction_reduce_sum(sum(absorbed_dust_energy_ev)*scale_nH*cell_volume_code*scale_l**3, &
             global_unassigned_absorption,convergence_status)
        if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_GRAIN_ABSORBED_EV=',global_unassigned_absorption
+       if(snrt_chimes_transition_enabled())then
+          call snrt_transaction_reduce_sum(chemical_events,global_unassigned_absorption,convergence_status)
+          if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_ATOMIZATION_EVENTS=',global_unassigned_absorption
+          call snrt_transaction_reduce_sum(chemical_dissociation_ev,global_unassigned_absorption,convergence_status)
+          if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_DISSOCIATION_COST_EV=',global_unassigned_absorption
+       endif
     endif
     if(dust_iron_enabled().and..not.snrt_fe_band_enabled())then
        do i=1,nleaf

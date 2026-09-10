@@ -475,7 +475,7 @@ endif
 snrt_thermochemistry_smoke: ../patch/lagRamses/snrt_thermochemistry_smoke.f90 snrt_atomic_cooling.o snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o snrt_dust_receiver.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS)
 	$(F90) $(FFLAGS) -I. ../patch/lagRamses/snrt_thermochemistry_smoke.f90 snrt_atomic_cooling.o \
 	  snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o snrt_dust_receiver.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(LIBS_CHIMES) -o $@
-snrt_chimes_bridge.o: ../patch/lagRamses/snrt_chimes_bridge.c $(CHIMES_DIR)/src/chimes_proto.h
+snrt_chimes_bridge.o: ../patch/lagRamses/snrt_chimes_bridge.c ../patch/lagRamses/snrt_chimes_atomization.h $(CHIMES_DIR)/src/chimes_proto.h
 	mpicc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -DCHIMES_USE_DOUBLE_PRECISION -O2 -Wall -Wextra \
 	  -I$(CHIMES_DIR)/src -I$(SUNDIALS_DIR)/include -I$(HDF5_DIR)/include -c $< -o $@
 snrt_chimes_spectrum.o: ../patch/lagRamses/snrt_chimes_spectrum.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h

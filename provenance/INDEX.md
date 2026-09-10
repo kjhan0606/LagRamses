@@ -14,6 +14,24 @@ evidence.
 
 ## Active bundle map
 
+SNRT high-temperature / evolving C-silicate grains (2026-09-11):
+[completed connection and Fable disposition](snrt_transition_dust_evolution_2026-09-11.md).
+Kind7 optionally admits existing growth/sputtering/coagulation/shattering,
+with total-H collision density fixed across CHIMES mass paths. Current-bin
+opacity/material/chemistry coupling passes dense cold/hot MPI2/OMP2 evolution
+and two exact394-dataset restarts. Native254 PASS; exhausted-photon ODE and
+bounded FP32-tail storage repaired. Existing fixed defaults and explicit
+Fe/PAH/condensation/shock/drift/sublimation exclusions remain.
+
+SNRT energy-aware high-temperature continuation (2026-09-11):
+[approved implementation and live evaluation](snrt_hot_transition_plan_2026-09-11.md#approved-implementation-and-live-evaluation).
+Explicit kind7 rapid-dissociation/atomic-NEQ comparison on 10--1e9 K;
+ATcT binding costs, accepted-solution thermal root and ABI6. Native 251
+checks pass; mixed-temperature and irradiated MPI2/OMP2 restarts each match
+402 datasets bitwise. The subsequent mass-evolution connection is above;
+fixed-grain results remain valid as that explicit comparison. First-order
+topology assumptions remain; this is not unlimited molecular kinetics.
+
 SNRT cold molecular / competing D03 spectra (2026-09-11):
 [implementation and live completion](snrt_chimes_molecular_coupling_implementation_2026-09-11.md#live-completion).
 Actual multi-cell scattering/photo/dark/material wiring, explicit kind6

@@ -24,7 +24,25 @@ module snrt_chimes
   public::chimes_molecular_temperature_max
   public::chimes_band_photo_molecular_groups
   public::chimes_cell_band_hot_atomic
+  public::chimes_atomize,chimes_transition_supported,chimes_cell_transition_dark
+  public::chimes_round_subnormal_survivors
   interface
+     integer(c_int) function chimes_transition_supported() bind(C,name='snrt_chimes_transition_supported')
+       import
+     end function
+     integer(c_int) function chimes_atomize(t,old,new,tnext,cost) bind(C,name='snrt_chimes_atomize')
+       import
+       real(c_double),value::t
+       real(c_double),intent(in)::old(chimes_ns)
+       real(c_double),intent(inout)::new(chimes_ns),tnext,cost
+     end function
+     integer(c_int) function chimes_cell_transition_dark(controls,elements,old,atomic,t,new,elapsed) &
+          bind(C,name='snrt_chimes_cell_transition_dark')
+       import
+       real(c_double),intent(in)::controls(9),elements(11),old(chimes_ns)
+       integer(c_int),value::atomic
+       real(c_double),intent(out)::t,new(chimes_ns),elapsed
+     end function
      real(c_double) function chimes_molecular_temperature_max() bind(C,name='snrt_chimes_molecular_temperature_max')
        import
      end function
@@ -191,56 +209,124 @@ module snrt_chimes
      end function
   end interface
 contains
+  integer function chimes_round_subnormal_survivors(scale,incoming_energy,number,energy) result(status)
+    ! FP32 storage of photon N cannot retain subnormal survivors with an
+    ! independent FP64 energy. Round ONLY this storage tail as a paired N/E
+    ! packet, preserving its mean energy. Bound the absolute energy change
+    ! to FP64 roundoff of this cell's incoming radiation, not a physical floor.
+    real(c_double),intent(in)::scale,incoming_energy
+    real(c_double),intent(inout)::number(:,:),energy(:,:)
+    real(c_double)::n(size(number,1),size(number,2)),e(size(number,1),size(number,2)),q,change
+    integer::i,g
+    status=1
+    if(any(shape(number)/=shape(energy)).or..not.ieee_is_finite(scale).or.scale<=0)return
+    if(.not.ieee_is_finite(incoming_energy).or.incoming_energy<0)return
+    if(any(.not.ieee_is_finite(number)).or.any(.not.ieee_is_finite(energy)))return
+    if(any(number<0).or.any(energy<0).or.any((number==0).neqv.(energy==0)))return
+    n=number;e=energy;change=0
+    do g=1,size(n,2)
+       do i=1,size(n,1)
+          if(n(i,g)<=0.or.n(i,g)/scale>=real(tiny(0.0_c_float),c_double))cycle
+          q=real(real(n(i,g)/scale,c_float),c_double)*scale
+          e(i,g)=e(i,g)*(q/n(i,g));n(i,g)=q
+          change=change+abs(e(i,g)-energy(i,g))
+       enddo
+    enddo
+    if(change>64*epsilon(1d0)*incoming_energy)return
+    number=n;energy=e;status=0
+  end function
+
   integer function chimes_cell_band_cold_molecular(handle,mol,nd,controls,elements,old,alpha,number,energy, &
-       temperature,new,next_number,next_energy,ledger,grain_number,grain_energy) result(status)
-    ! Bounded cold-cell split; NOT permission to raise upstream Tmol_K.
-    ! No species are deleted to force a temperature transition to succeed.
+       temperature,new,next_number,next_energy,ledger,grain_number,grain_energy,transition,event_info) result(status)
+    ! Cold split, optionally extended by the explicit energy-aware transition.
+    ! Molecular carriers convert only through the budgeted atomization helper;
+    ! this is NOT permission to extrapolate molecular rates or raise Tmol_K.
     ! Shielding/pump factors are frozen at entry (first-order coefficient split).
     type(c_ptr),intent(in)::handle,mol
     integer,intent(in)::nd
     real(c_double),intent(in)::controls(9),elements(11),old(chimes_ns),alpha(128,9),number(nd,9),energy(nd,9)
     real(c_double),intent(inout)::temperature,new(chimes_ns),next_number(nd,9),next_energy(nd,9),ledger(11)
     real(c_double),optional,intent(inout)::grain_number(9),grain_energy(9)
+    logical,optional,intent(in)::transition
+    real(c_double),optional,intent(inout)::event_info(2) ! event count, cost eV/cm3
     real(c_double)::photo(chimes_ns),chem(chimes_ns),pn(nd,9),pe(nd,9),budget(11),ctl(9),factors(3)
     real(c_double)::measured(11),charge,temp,gn(9),ge(9),post_photo,tmax
+    real(c_double)::incoming(chimes_ns),projected(chimes_ns),tin,elapsed,root_time,cost,entry_cost,events(2)
+    logical::general,atomic_remainder
     real(c_double),parameter::ev_erg=1.602176634d-12
     status=2
     tmax=chimes_molecular_temperature_max()
+    general=.false.;if(present(transition))general=transition
+    if(general.and.chimes_transition_supported()/=1)return
     if(nd<1.or.nd>720.or..not.c_associated(handle).or..not.c_associated(mol))return
     if(any(.not.ieee_is_finite(controls)).or.any(controls<0).or.controls(1)<=0)return
-    if(controls(2)<10.or.controls(2)>tmax.or.controls(3)<1.or.controls(3)>1d4)return
+    if(controls(2)<10.or.controls(2)>merge(1d9,tmax,general).or.controls(3)<1.or.controls(3)>1d4)return
     if(controls(9)<=0.or.controls(9)>1.or.any(.not.ieee_is_finite(elements)).or.any(elements<0))return
     if(2.99792458d10*controls(9)*controls(4)>controls(5)*(1+1d-12))return
     status=chimes_budget(old,measured,charge)
     if(status/=0)return
     status=2
     if(any(abs(measured-elements)>1d-8*max(elements,1d-20)).or.abs(charge)>1d-10)return
-    status=chimes_molecular_factors(controls(2),controls(1),controls(5),old,factors)
+    incoming=old;tin=controls(2);entry_cost=0;events=0;atomic_remainder=.false.
+    if(general.and.tin>=tmax.and.controls(4)>0)then
+       status=chimes_atomize(tin,incoming,projected,temp,cost)
+       if(status/=0)return
+       events=[merge(1d0,0d0,any(incoming(138:157)>0)),cost*controls(1)]
+       incoming=projected;tin=temp;entry_cost=cost*controls(1);atomic_remainder=.true.
+    endif
+    if(atomic_remainder.or.(general.and.tin>=tmax))then
+       factors=[1d0,1d0,0d0];status=0
+    else
+       status=chimes_molecular_factors(tin,controls(1),controls(5),incoming,factors)
+    endif
     if(status/=0)return
     status=chimes_band_photo_molecular_groups(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
-         alpha,factors(1:2),factors(3),old,number,energy,photo,pn,pe,budget(1:10),gn,ge)
+         alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge)
     if(status/=0)return
     if(controls(4)==0)then
        temperature=controls(2);new=old;next_number=number;next_energy=energy;ledger=0
        if(present(grain_number))grain_number=0
        if(present(grain_energy))grain_energy=0
+       if(present(event_info))event_info=0
        return
     endif
     status=8
     if(sum(photo)<=0)return
     ctl=controls
-    ctl(2)=(controls(2)*sum(old)+budget(1)*ev_erg/(1.5d0*chimes_boltzmann()*controls(1)))/sum(photo)
-    if(.not.ieee_is_finite(ctl(2)).or.ctl(2)<10.or.ctl(2)>tmax)return
+    ctl(2)=(tin*sum(incoming)+budget(1)*ev_erg/(1.5d0*chimes_boltzmann()*controls(1)))/sum(photo)
+    if(.not.ieee_is_finite(ctl(2)).or.ctl(2)<10.or.ctl(2)>merge(1d9,tmax,general))return
     post_photo=1.5d0*chimes_boltzmann()*controls(1)*sum(photo)*ctl(2)
-    status=chimes_cell_cold_dark(ctl,elements,photo,temp,chem)
+    if(general)then
+       if(ctl(2)>=tmax)then
+          status=chimes_atomize(ctl(2),photo,projected,temp,cost)
+          if(status/=0)return
+          events=events+[merge(1d0,0d0,any(photo(138:157)>0)),cost*controls(1)]
+          photo=projected;ctl(2)=temp;atomic_remainder=.true.
+       endif
+       status=chimes_cell_transition_dark(ctl,elements,photo,merge(1,0,atomic_remainder),temp,chem,elapsed)
+       if(status==51)then
+          ! A CVODE root, not a failed Newton trial or bisection on status50.
+          status=8
+          if(abs(temp-tmax)>1d-7*tmax.or.elapsed<0.or.elapsed>ctl(4))return
+          root_time=elapsed
+          status=chimes_atomize(temp,chem,projected,tin,cost)
+          if(status/=0)return
+          events=events+[merge(1d0,0d0,any(chem(138:157)>0)),cost*controls(1)]
+          ctl(2)=tin;ctl(4)=max(0d0,ctl(4)-root_time)
+          status=chimes_cell_transition_dark(ctl,elements,projected,1,temp,chem,elapsed)
+       endif
+    else
+       status=chimes_cell_cold_dark(ctl,elements,photo,temp,chem)
+    endif
     if(status/=0)return
     status=8
-    if(temp<10.or.temp>tmax)return
-    budget(11)=(1.5d0*chimes_boltzmann()*controls(1)*sum(chem)*temp-post_photo)/ev_erg
+    if(temp<10.or.temp>merge(1d9,tmax,general))return
+    budget(11)=(1.5d0*chimes_boltzmann()*controls(1)*sum(chem)*temp-post_photo)/ev_erg-entry_cost
     if(.not.ieee_is_finite(budget(11)))return
     temperature=temp;new=chem;next_number=pn;next_energy=pe;ledger=budget;status=0
     if(present(grain_number))grain_number=gn
     if(present(grain_energy))grain_energy=ge
+    if(present(event_info))event_info=events
   end function
 
   integer function chimes_cell_band_hot_atomic(handle,nd,controls,elements,old,solid_q,number,energy, &

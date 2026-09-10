@@ -1,0 +1,30 @@
+The Write tool is disabled in this session, so I cannot create the plan file. The review is complete, so I'm delivering it here directly.
+
+## Review verdict: CONDITIONAL
+
+**Q-GOAL: yes, this completes a necessary existing connection.** The dust-mass step already runs before the RT receiver every level and step at `amr_step.jaehyun.f90:978`. The driver rebuilds D03 weights, sigma, material curve and grain columns from the current bins on every RT call at `snrt_ramses_driver.f90:785-806` and again at line 980. There is no frozen opacity cache. The only blocker was the admission gate in `snrt_chimes_runtime.f90`. Without this, kind7 never destroys dust in feedback-heated gas, which the runtime doc itself calls a comparison assumption rather than physics.
+
+**Q-LEAN: yes, with one caution.** The change is a three-line gate relaxation, one frontend boolean, doc text, and tests. No new carriers or identity version are needed. The restart identity already binds growth, sputtering, sticking and T_max through `dust_mass_identity` and coagulation, shattering and shocks through `dust_size_identity`, and both are compared exactly in `backup_hdf5.f90`. Kind7 with all rates off is bitwise the old behavior because the mass step, size exchange and material energy all return identity at zero rate. Caution: do not add per-step grain-mass diagnostics to the driver.
+
+**Working tree note.** Another session is already implementing this. The gate is relaxed at `snrt_chimes_runtime.f90:114-122`, the frontend opt-in exists in `mkrun.py`, and the GUI test and generator warning are updated. The runtime dust file, the runtime doc and the live evidence are not yet done.
+
+## Conditions
+
+**1. Physics, indispensable: collision density must be total H nuclei.** In `dust_mass_physics.f90` the size step derives n_H from the first element entry at line 709 and uses it both to choose shattering versus coagulation and to scale coagulation at lines 627 to 637. In the CHIMES path that entry is the molecular-depleted budget from `chimes_grain_budget`, which subtracts every nucleus locked in molecules. In an H2-dominated cold cell, exactly where coagulation should act, n_H collapses to residual atomic H, the regime flips to shattering, and coagulation is suppressed. The Fe path already documents and uses the correct total-nuclei convention at `dust_mass_runtime.f90:232-235`. Fix with one line in the runtime after the grain budget call: restore the hydrogen entry to the total from the chemistry field. This is safe because C/olivine capacities never use hydrogen, and hydrogen locking in the element check only applies to PAH, which kind7 excludes. Declare that this also corrects kind5 in H2-bearing cells and rerun the dust native regression. Do not make it kind7-only.
+
+**2. Verification: the mixed run must actually exercise the rates.** The retained fixture has n_H near 1e-3 and cold cells at 1622 K. That gives no growth, no coagulation and negligible sputtering, so rerunning it proves nothing. Add one cold region with n_H at or above 1e3 and T near 20 K, keeping the hot irradiated cells. With the current courant factor the per-step rate products are roughly 0.05 for growth and 0.04 for sputtering, well below the existing 4096-substep rejection that would abort the run. Extend the evaluation script with: bins increase in cold cells and decrease in hot cells; element ledger per cell from CHIMES carriers plus grain-locked C and olivine equals the total element field; charge closure; grain absorption per step varies with mass; the same bitwise restart comparison with rates on. Total live energy closure is not possible without a cooling-loss ledger. Do not add one. Material exchange is covered natively by the existing dust mass smoke and by the fixed-T_d charge with rejection at `dust_mass_runtime.f90:326`.
+
+**3. Docs and record.** Update the kind7 section of the runtime doc, which currently says no mass processing is admitted. Complete the provenance record and index line, including the kind5 consequence of Condition 1.
+
+**4. Evidence hygiene.** Same as before: inputs, logs, results, hashes, cleanup manifest, raw snapshots removed.
+
+## Verified correct, no action
+
+- Molecular nuclei are reserved for accretion. The reconciliation in `snrt_chimes_bridge.c:630-633` refuses to break molecules.
+- Erosion returns neutrals with zero added thermal energy at line 635. Accretion scales atomic ions proportionally and recomputes electrons from charge. This is the existing convention and should be stated, not changed.
+- Rate temperature is the CHIMES translational T, the same capacity the receiver uses.
+- The gate still rejects Fe, PAH, drift, condensation, SN shocks and sublimation, and kind5-band and kind6 keep fixed masses.
+
+## Known limits to state, not fix
+
+The substep cap aborts loudly in dense hot gas with very long steps. Shattering applies below n_H of 1e3 at any temperature under the existing law. Neither is a high-T grain survival model. The split remains first order.

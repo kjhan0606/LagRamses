@@ -83,6 +83,9 @@ module snrt_spectral_contract
   public :: snrt_fe_band_enabled,snrt_grain_band_bins
   public :: snrt_chimes_band_enabled
   public :: snrt_chimes_cold_enabled
+  public :: snrt_chimes_transition_enabled
+  character(len=*),parameter,public :: snrt_chimes_atomization_sha256 = &
+       '0bfa808eda56b7ea41b1a9e083e5379106caa2960f4b8a242f6e2e902606a045'
   character(len=*),parameter,public :: snrt_chimes_molecular_sha256 = &
        'c313497b68633b5f2909eb02aa14160baf98dbdde1784b73f5dd50f3d9fdad0b'
   character(len=*),parameter,public :: snrt_chimes_bank_sha256 = &
@@ -93,6 +96,7 @@ module snrt_spectral_contract
   logical,save :: fe_band=.false.
   logical,save :: chimes_band=.false.
   logical,save :: chimes_cold=.false.
+  logical,save :: chimes_transition=.false.
 
 contains
 
@@ -123,6 +127,9 @@ contains
           case('chimes_cold_d03_maxent128_fs2010_v1')
              selected=.true.;chimes_band=.true.;chimes_cold=.true.;d03_band=.true.;snrt_band_model=trim(value)
              node_secondaries=.true.
+          case('chimes_transition_d03_maxent128_fs2010_v1')
+             selected=.true.;chimes_band=.true.;chimes_cold=.true.;d03_band=.true.;snrt_band_model=trim(value)
+             node_secondaries=.true.;chimes_transition=.true.
           case default;error stop 'Unknown SNRT_SPECTRAL_MODEL; see NATIVE_RUNTIME.md'
           end select
        endif
@@ -162,6 +169,13 @@ contains
     if(fe_band)kind=4
     if(chimes_band)kind=5
     if(chimes_cold)kind=6
+    if(chimes_transition)kind=7
+  end function
+
+  logical function snrt_chimes_transition_enabled() result(enabled)
+    logical::band
+    band=snrt_band_enabled()
+    enabled=band.and.chimes_transition
   end function
 
   logical function snrt_chimes_cold_enabled() result(enabled)

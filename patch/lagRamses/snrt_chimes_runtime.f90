@@ -6,7 +6,7 @@ module snrt_chimes_runtime
   use hydro_commons
   use snrt_chimes
   use snrt_spectral_contract, only: snrt_chimes_band_enabled,snrt_chimes_bank_sha256, &
-       snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256
+       snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256,snrt_chimes_transition_enabled
   use snrt_thermochemistry, only: snrt_secondary_tables_loaded,snrt_secondary_tables_load_from_environment
   use snrt_atomic_cooling, only: atomic_mh
   use dust_composition_optics, only: d03_band_abs,d03_radius_cm,d03_solid_density
@@ -113,10 +113,13 @@ contains
     endif
     if(ierr==0.and.snrt_chimes_band_enabled())then
        ierr=1
-       ! Both explicit spectral modes keep fixed, co-advected grain masses.
+       ! Old spectral modes keep fixed masses. Kind7 also admits the existing
+       ! mass/size operator, before opacity is reconstructed.
        if(dust_iron_enabled().or.dust_pah_enabled().or.dust_dynamics_enabled())return
-       if(any(dust_condensation/=0).or.dust_growth.or.dust_sputtering.or.dust_sn_shocks)return
-       if(dust_coagulation.or.dust_shattering.or.trim(dust_sublimation)/='none')return
+       if(any(dust_condensation/=0).or.dust_sn_shocks.or.trim(dust_sublimation)/='none')return
+       if(.not.snrt_chimes_transition_enabled())then
+          if(dust_growth.or.dust_sputtering.or.dust_coagulation.or.dust_shattering)return
+       endif
        call get_environment_variable('SNRT_CHIMES_BAND_TABLE',main,length=n,status=status)
        if(status/=0.or.n<1.or.n>=len(main))return
        ierr=chimes_band_load(trim(main)//c_null_char,band_handle,nreaction,nshell,bank_identity)
@@ -154,6 +157,9 @@ contains
           endif
        endif
     endif
+    if(ierr==0.and.snrt_chimes_transition_enabled())then
+       if(chimes_transition_supported()/=1)ierr=1
+    endif
     if(ierr==0)ready=.true.
   end subroutine
 
@@ -172,6 +178,7 @@ contains
     values(321:324)=[4d0,real(ichimes,dp),atomic_mh,chimes_boltzmann()]
     if(snrt_chimes_band_enabled())values(321)=5d0
     if(snrt_chimes_cold_enabled())values(321)=6d0
+    if(snrt_chimes_transition_enabled())values(321)=7d0
   end subroutine
 
   subroutine chimes_cell_state(cell,grains,state,elements,ierr,previous_state,metallic_iron,pah_hc)
@@ -225,6 +232,10 @@ contains
     elements=uold(cell,ichem:ichem+10)
     ierr=chimes_locked(uold(cell,ichimes:ichimes+chimes_ns-1),locked)
     if(ierr/=0)return
+    ! H is not a C/olivine growth donor. Size exchange uses total hydrogen
+    ! nuclei, including H2, not the molecular-depleted accretion reservoir.
+    ! Apply to every CHIMES mass path, not only the spectral comparison.
+    locked(1)=0
     elements=elements-locked*mass_number
     if(any(elements<0))ierr=1
   end subroutine
@@ -351,20 +362,21 @@ contains
   end subroutine
 
   subroutine chimes_live_cold_stage(cell,sd,sv,dt,length,td,chat,nd,number,radiation_energy, &
-       state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr)
+       state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info)
     integer,intent(in)::cell,nd
     real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,9),radiation_energy(nd,9)
     real(dp),intent(inout)::state(chimes_ns),energy,next_number(nd,9),next_energy(nd,9),ledger(11)
     real(dp),intent(inout)::grain_number(9),grain_energy(9)
     integer,intent(out)::ierr
+    real(dp),optional,intent(inout)::event_info(2)
     ierr=1
     if(.not.snrt_chimes_cold_enabled())return
     call chimes_live_molecular_stage(cell,band_handle,molecular_handle,sd,sv,dt,length,td,chat,nd, &
-         number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr)
+         number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info)
   end subroutine
 
   subroutine chimes_live_molecular_stage(cell,atomic_bank,molecular_bank,sd,sv,dt,length,td,chat,nd, &
-       number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr)
+       number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info)
     ! Caller-owned handles must be loaded/bound before threaded cell work.
     ! This adapter does not select a model or publish uold/radiation. The
     ! driver must disable transport absorption and stage IR before commit.
@@ -374,9 +386,10 @@ contains
     real(dp),intent(inout)::state(chimes_ns),energy,next_number(nd,9),next_energy(nd,9),ledger(11)
     real(dp),intent(inout)::grain_number(9),grain_energy(9)
     integer,intent(out)::ierr
+    real(dp),optional,intent(inout)::event_info(2)
     real(dp)::old(chimes_ns),elements(11),new(chimes_ns),controls(9),bins(4),grains(2),alpha(128,9)
     real(dp)::pn(nd,9),pe(nd,9),budget(11),gn(9),ge(9),row(nvar),staged(chimes_ns)
-    real(dp)::nh,cv,t,nonthermal,thermal,area,ratio,surface,proposed_energy
+    real(dp)::nh,cv,t,nonthermal,thermal,area,ratio,surface,proposed_energy,events(2)
     integer::s,k,j
     ierr=1
     if(.not.ready.or..not.allocated(uold))return
@@ -418,7 +431,8 @@ contains
     if(ratio>0)surface=area/(1d-21*ratio)
     controls=[nh,t,td,dt,length,ratio,surface,0d0,chat]
     ierr=chimes_cell_band_cold_molecular(atomic_bank,molecular_bank,nd,controls,elements/elements(1), &
-         old/elements(1),alpha,number,radiation_energy,t,new,pn,pe,budget,gn,ge)
+         old/elements(1),alpha,number,radiation_energy,t,new,pn,pe,budget,gn,ge, &
+         transition=snrt_chimes_transition_enabled(),event_info=events)
     if(ierr/=0)return
     staged=new*elements(1)
     proposed_energy=nonthermal+chimes_live_capacity(staged,sd)*t/(sd*sv**2)
@@ -426,6 +440,7 @@ contains
     if(.not.ieee_is_finite(proposed_energy).or.any(.not.ieee_is_finite(staged)))return
     state=staged;energy=proposed_energy;next_number=pn;next_energy=pe;ledger=budget
     grain_number=gn;grain_energy=ge;ierr=0
+    if(present(event_info))event_info=events
   end subroutine
 
   subroutine chimes_live_stage(cell,sd,sv,dt,length,td,area,chat,photons,state,energy,next_photons,ierr,staged_row)

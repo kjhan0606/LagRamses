@@ -1,0 +1,137 @@
+{
+  "source": "https://atct.anl.gov/Thermochemical%20Data/version%201.130/",
+  "version": "1.130",
+  "quantity": "gas ground-state formation enthalpy at 0 K, kJ/mol",
+  "channel": "neutral atoms; for +1 species replace one atom by lowest-ionization-cost H/C/O fragment, electrons unchanged",
+  "atoms": {
+    "H": 216.034,
+    "C": 711.396,
+    "O": 246.844,
+    "H+": 1528.084,
+    "C+": 1797.849,
+    "O+": 1560.786
+  },
+  "molecules": [
+    {
+      "chimes_index_zero_based": 137,
+      "species": "H2",
+      "atct_id": "1333-74-0*0",
+      "hf0_kj_mol": 0
+    },
+    {
+      "chimes_index_zero_based": 138,
+      "species": "H2+",
+      "atct_id": "12184-90-6*0",
+      "hf0_kj_mol": 1488.364
+    },
+    {
+      "chimes_index_zero_based": 139,
+      "species": "H3+ (para)",
+      "atct_id": "28132-48-1*2",
+      "hf0_kj_mol": 1110.304
+    },
+    {
+      "chimes_index_zero_based": 140,
+      "species": "OH",
+      "atct_id": "3352-57-6*0",
+      "hf0_kj_mol": 37.279
+    },
+    {
+      "chimes_index_zero_based": 141,
+      "species": "H2O",
+      "atct_id": "7732-18-5*0",
+      "hf0_kj_mol": -238.902
+    },
+    {
+      "chimes_index_zero_based": 142,
+      "species": "C2",
+      "atct_id": "12070-15-4*0",
+      "hf0_kj_mol": 819.991
+    },
+    {
+      "chimes_index_zero_based": 143,
+      "species": "O2",
+      "atct_id": "7782-44-7*0",
+      "hf0_kj_mol": 0
+    },
+    {
+      "chimes_index_zero_based": 144,
+      "species": "HCO+",
+      "atct_id": "17030-74-9*0",
+      "hf0_kj_mol": 827.754
+    },
+    {
+      "chimes_index_zero_based": 145,
+      "species": "CH",
+      "atct_id": "3315-37-5*0",
+      "hf0_kj_mol": 592.832
+    },
+    {
+      "chimes_index_zero_based": 146,
+      "species": "CH2 (triplet)",
+      "atct_id": "2465-56-7*1",
+      "hf0_kj_mol": 391.05
+    },
+    {
+      "chimes_index_zero_based": 147,
+      "species": "CH3+",
+      "atct_id": "14531-53-4*0",
+      "hf0_kj_mol": 1099.347
+    },
+    {
+      "chimes_index_zero_based": 148,
+      "species": "CO",
+      "atct_id": "630-08-0*0",
+      "hf0_kj_mol": -113.8
+    },
+    {
+      "chimes_index_zero_based": 149,
+      "species": "CH+",
+      "atct_id": "24361-82-8*0",
+      "hf0_kj_mol": 1619.753
+    },
+    {
+      "chimes_index_zero_based": 150,
+      "species": "CH2+",
+      "atct_id": "15091-72-2*0",
+      "hf0_kj_mol": 1393.18
+    },
+    {
+      "chimes_index_zero_based": 151,
+      "species": "OH+",
+      "atct_id": "12259-29-9*0",
+      "hf0_kj_mol": 1293.361
+    },
+    {
+      "chimes_index_zero_based": 152,
+      "species": "H2O+",
+      "atct_id": "56583-62-1*0",
+      "hf0_kj_mol": 978.496
+    },
+    {
+      "chimes_index_zero_based": 153,
+      "species": "H3O+",
+      "atct_id": "13968-08-6*0",
+      "hf0_kj_mol": 605.88
+    },
+    {
+      "chimes_index_zero_based": 154,
+      "species": "CO+",
+      "atct_id": "12144-04-6*0",
+      "hf0_kj_mol": 1238.31
+    },
+    {
+      "chimes_index_zero_based": 155,
+      "species": "HOC+",
+      "atct_id": "60528-75-8*0",
+      "hf0_kj_mol": 986.01
+    },
+    {
+      "chimes_index_zero_based": 156,
+      "species": "O2+",
+      "atct_id": "12185-07-8*0",
+      "hf0_kj_mol": 1164.585
+    }
+  ],
+  "limits": "Rapid complete dissociation comparison, not kinetic high-T molecular rates. Fixed gamma=5/3 translational capacity."
+}

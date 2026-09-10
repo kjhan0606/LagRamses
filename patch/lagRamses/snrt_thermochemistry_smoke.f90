@@ -394,6 +394,7 @@ contains
             all(gn==-7).and.all(ge==-7).and.all(full_ledger==-7), &
             'electron-free numerical-floor charge failure leaves all caller outputs intact',failures)
     endif
+    if(chimes_transition_supported()==1)call check_chimes_transition(handle,mol,failures)
     call chimes_molecular_free(mol);call chimes_band_free(handle)
     elem=0;elem(1)=1;status=chimes_neutral(elem,a)
     a(4)=1d-315
@@ -403,6 +404,87 @@ contains
     a(4)=1d-300
     status=chimes_reconcile(elem,a,b)
     call expect(status/=0,'normal negative electron requirement still rejects, however small',failures)
+  end subroutine
+
+  subroutine check_chimes_transition(handle,mol,failures)
+    type(c_ptr),intent(in)::handle,mol
+    integer,intent(inout)::failures
+    real(dp)::a(157),b(157),c(157),el(11),measured(11),q,qn,cost,t,tmax,elapsed,root_time
+    real(dp)::ctl(9),n(2,9),e(2,9),nn(2,9),ee(2,9),alpha(128,9),ledger(11),gn(9),ge(9),events(2)
+    real(dp)::before,after,temps(6),photo_state(157),reference_cost
+    integer::s,status,j
+    real(dp),parameter::ev=1.602176634d-12
+    tmax=chimes_molecular_temperature_max()
+    do s=138,157
+       a=0;a(2)=1;a(s)=.01d0
+       status=chimes_budget(a,el,q);a(1)=q
+       before=1.5d0*chimes_boltzmann()*sum(a)*1d6
+       status=chimes_atomize(1d6,a,b,t,cost)
+       call expect(status==0.and.cost>0.and.all(b(138:157)==0).and.b(1)==a(1), &
+            'source-backed atomization retains electrons for each of twenty species',failures)
+       if(status/=0)cycle
+       after=1.5d0*chimes_boltzmann()*sum(b)*t
+       status=chimes_budget(b,measured,qn)
+       call expect(status==0.and.maxval(abs(measured-el))<1d-12.and.abs(qn)<1d-12.and. &
+            abs(after+cost*ev-before)<1d-12*before,'atomization conserves each nucleus charge and thermal plus binding',failures)
+    enddo
+    el=0;el(1)=1;status=chimes_neutral(el,a);a(2)=.8d0;a(138)=.1d0
+    status=chimes_atomize(1.01d5,a,b,t,cost)
+    reference_cost=.1d0*432.068d3/(6.02214076d23*1.602176634d-19)
+    call expect(status==0.and.abs(cost-reference_cost)<1d-12.and.t<1.01d5*.9d0, &
+         'H2 uses ATcT dissociation cost and removes the legacy artificial eleven-percent heat',failures)
+    b=-7;t=-7;cost=-7
+    status=chimes_atomize(10d0,a,b,t,cost)
+    call expect(status/=0.and.all(b==-7).and.t==-7.and.cost==-7,'unaffordable atomization rejects transaction intact',failures)
+    temps=[tmax*(1-1d-8),tmax*(1+1d-8),1d5,1d6,1d8,1d9]
+    n=0;e=0;alpha=1d-22
+    do j=1,size(temps)
+       ctl=[1d0,temps(j),20d0,1d-12,1d18,.1d0,1d0,0d0,.01d0]
+       before=1.5d0*chimes_boltzmann()*sum(a)*ctl(2)
+       status=chimes_cell_band_cold_molecular(handle,mol,2,ctl,el,a,alpha,n,e,t,b,nn,ee,ledger,gn,ge, &
+            transition=.true.,event_info=events)
+       call expect(status==0,'transition admits cold edge through one billion K without a dead temperature band',failures)
+       if(status/=0)cycle
+       after=1.5d0*chimes_boltzmann()*sum(b)*t
+       call expect(abs(after-before-(ledger(1)+ledger(11))*ev)<1d-10*before.and.all(nn==0).and.all(ee==0), &
+            'complete spectral split includes entry dissociation cost without inventing photons',failures)
+    enddo
+    ctl=[1d0,9d4,20d0,1d8,1d18,0d0,1d0,1d-6,.01d0]
+    status=chimes_cell_transition_dark(ctl,el,a,0,t,b,elapsed)
+    write(*,*)'TRANSITION_ROOT_STATUS_TIME_T=',status,elapsed,t
+    call expect(status==51.and.elapsed>0.and.elapsed<ctl(4).and.abs(t-tmax)<1d-7*tmax, &
+         'cold dark evolution returns an accepted CVODE thermal root before invalid molecular rates',failures)
+    if(status==51)then
+       root_time=elapsed;ctl(4)=root_time/2
+       status=chimes_cell_transition_dark(ctl,el,a,0,t,b,elapsed)
+       call expect(status==0.and.t<tmax.and.elapsed==ctl(4), &
+            'root detection never uses an internal overshoot after the requested endpoint',failures)
+       ctl(4)=1d8
+       status=chimes_cell_band_cold_molecular(handle,mol,2,ctl,el,a,alpha,n,e,t,b,nn,ee,ledger,gn,ge, &
+            transition=.true.,event_info=events)
+       call expect(status==0.and.events(1)>=1.and.events(2)>0, &
+            'dark thermal root atomizes survivors and finishes the atomic remainder',failures)
+    endif
+    ! Photo heating across the edge, with competing grains and full rollback.
+    ctl=[1d0,9d4,20d0,1d8,1d18,.1d0,1d0,0d0,.01d0]
+    n=0;n(:,7)=1d5;e=0;e(:,7)=n(:,7)*400d0;alpha=1d-22
+    before=1.5d0*chimes_boltzmann()*sum(a)*ctl(2)
+    status=chimes_cell_band_cold_molecular(handle,mol,2,ctl,el,a,alpha,n,e,t,b,nn,ee,ledger,gn,ge, &
+         transition=.true.,event_info=events)
+    write(*,*)'TRANSITION_PHOTO_STATUS_T_EVENTS=',status,t,events
+    call expect(status==0.and.events(1)>=1.and.sum(ge)>0, &
+         'photo heating crosses the boundary while gas and grains share one finite photon budget',failures)
+    if(status==0)then
+       after=1.5d0*chimes_boltzmann()*sum(b)*t
+       call expect(abs(after-before-(ledger(1)+ledger(11))*ev)<1d-8*max(before,after).and. &
+            abs(sum(e-ee)-ledger(7)-ledger(9))<1d-7*sum(e), &
+            'photo-boundary dissociation and grain absorption close their separate energy ledgers',failures)
+    endif
+    ctl(2)=1.001d9;b=-7;t=-7;nn=-7;ee=-7;ledger=-7;events=-7
+    status=chimes_cell_band_cold_molecular(handle,mol,2,ctl,el,a,alpha,n,e,t,b,nn,ee,ledger,gn,ge, &
+         transition=.true.,event_info=events)
+    call expect(status/=0.and.all(b==-7).and.t==-7.and.all(events==-7).and.all(nn==-7), &
+         'finite upper physical domain still rejects instead of claiming unbounded temperature',failures)
   end subroutine
 
   subroutine check_chimes_competing_dust(failures)
@@ -445,10 +527,23 @@ contains
     alpha=1d-12
     status=chimes_band_photo_dust_step(handle,2,1d0,1d10,3d8,alpha,a,n,e,b,nn,ee,l)
     call expect(status==0.and.sum(nn)<1d-9.and.l(9)>0,'optically thick dust exhaustion preserves nonnegative photons',failures)
+    alpha=1d-16
+    a(9)=1d-200;a(10)=1d-250;a(1)=1d-200+2d-250
+    status=chimes_band_photo_dust_step(handle,2,2d3,1d12,3d8,alpha,a,n,e,b,nn,ee,l)
+    call expect(status==0.and.all(nn>=0).and.sum(nn)<1d-9, &
+         'dense gas and grains exhaust photons on an accepted nonnegative state',failures)
     alpha(1,1)=-1;b=-7;nn=-7;ee=-7;l=-7
     status=chimes_band_photo_dust_step(handle,2,1d0,1d10,3d8,alpha,a,n,e,b,nn,ee,l)
     call expect(status/=0.and.all(b==-7).and.all(nn==-7).and.all(ee==-7).and.all(l==-7), &
          'invalid grain opacity rejects without publishing any state',failures)
+    nn=0;nn(:,5)=[1d-200,1d-42];ee=20*nn;cn=nn;ce=ee
+    status=chimes_round_subnormal_survivors(1d0,sum(ee),nn,ee)
+    call expect(status/=0.and.all(nn==cn).and.all(ee==ce), &
+         'storage rounding rejects a tail significant to the entire incoming photon budget',failures)
+    status=chimes_round_subnormal_survivors(1d0,1d-3,nn,ee)
+    call expect(status==0.and.nn(1,5)==0.and.ee(1,5)==0.and.nn(2,5)>0.and. &
+         abs(ee(2,5)/nn(2,5)-20d0)<1d-12.and.sum(abs(ee-ce))<64*epsilon(1d0)*1d-3, &
+         'negligible FP32 tail rounds paired photon N/E without a physical abundance floor',failures)
     call chimes_band_free(handle)
   end subroutine
 

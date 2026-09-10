@@ -450,6 +450,24 @@ class WizardTests(unittest.TestCase):
                 for key in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering','dust_sn_shocks'):
                     self.assertIs(values[key],False)
                 self.assertIn('10--95499 K',files[str(root/'fresh/README.txt')])
+                with mock.patch.dict(os.environ,{'SNRT_CHIMES_SPECTRAL_MODEL':'chimes_transition_d03_maxent128_fs2010_v1'}):
+                    _,general,_=collect(choices)
+                    self.assertIn('SNRT_SPECTRAL_MODEL=chimes_transition_d03_maxent128_fs2010_v1',
+                                  general[str(root/'fresh/myrun.env.sh')])
+                    self.assertIn('CHIMES receiver ABI6',general[str(root/'fresh/README.txt')])
+                    self.assertIn('not finite-time molecular shock kinetics',general[str(root/'fresh/README.txt')])
+                    raw,_=mkrun.rng.parse_namelist(general[str(root/'fresh/myrun.nml')])
+                    self.assertIs(mkrun.rng.import_to_values(raw)['dust_growth'],False)
+                    evolving=dict(choices)
+                    evolving['Enable grain growth, sputtering and size exchange in the transition model?']=True
+                    _,dynamic,_=collect(evolving)
+                    raw,_=mkrun.rng.parse_namelist(dynamic[str(root/'fresh/myrun.nml')])
+                    values=mkrun.rng.import_to_values(raw)
+                    for key in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering'):
+                        self.assertIs(values[key],True)
+                    self.assertIs(values['dust_sn_shocks'],False)
+                    self.assertIn('dust_condensation=0d0,0d0,0d0',dynamic[str(root/'fresh/myrun.nml')])
+                    self.assertIn('Evolving co-advected C/silicate masses',dynamic[str(root/'fresh/README.txt')])
                 with mock.patch.dict(os.environ,{'SNRT_CHIMES_MOLECULAR_TABLE':''}):
                     with self.assertRaisesRegex(ValueError,'MOLECULAR_TABLE'):
                         collect(choices)

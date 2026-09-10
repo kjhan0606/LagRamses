@@ -390,6 +390,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 'No 8--13 Msun source or same-population SED claim; old comparison is unchanged.')
     cosmic_rays = ui.ask_bool('enable trapped cosmic-ray fluid (NENER=1 CPU/HDF5 build)?', False)
     mass_evolution = ui.ask_bool('Evolve dust mass (condensation, cold growth, thermal sputtering)?', False)
+    spectral_grain_evolution = False
     mass_model, mass_cooling = 'bulk_v1', 'none'
     dust_shocks=False
     material_model='fixed_mix'
@@ -659,22 +660,27 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             raise ValueError('CHIMES main data or one of the nine group tables is missing.')
         # Deliberate profile opt-in, never inherit the ambient RT selector.
         cold_mode='chimes_cold_d03_maxent128_fs2010_v1'
+        transition_mode='chimes_transition_d03_maxent128_fs2010_v1'
         selected=os.environ.get('SNRT_CHIMES_SPECTRAL_MODEL','fixed')
-        if selected not in ('fixed',cold_mode):
-            raise ValueError('SNRT_CHIMES_SPECTRAL_MODEL must be fixed or '+cold_mode)
-        if selected==cold_mode:
+        if selected not in ('fixed',cold_mode,transition_mode):
+            raise ValueError('SNRT_CHIMES_SPECTRAL_MODEL must be fixed, '+cold_mode+' or '+transition_mode)
+        if selected in (cold_mode,transition_mode):
             if optics_model!='d03_transport_v1' or iron_model!='none' or pah_model!='none' or relative_motion or sublimation_model!='none':
-                raise ValueError('Cold spectral CHIMES requires co-advected D03 C/silicate grains without Fe, PAH or sublimation.')
+                raise ValueError('Spectral CHIMES requires co-advected D03 C/silicate grains without Fe, PAH or sublimation.')
             if primary_backend=='cuda':
-                raise ValueError('Cold spectral CHIMES transport currently requires OpenMP, not forced CUDA.')
-            env['SNRT_SPECTRAL_MODEL']=cold_mode
+                raise ValueError('Spectral CHIMES transport currently requires OpenMP, not forced CUDA.')
+            env['SNRT_SPECTRAL_MODEL']=selected
             env['SNRT_BACKEND']='openmp'
             for key in ('SNRT_CHIMES_BAND_TABLE','SNRT_CHIMES_MOLECULAR_TABLE'):
                 if not os.environ.get(key) or not Path(os.environ[key]).is_file():
                     raise ValueError(key+' must identify the pinned spectral bank.')
                 env[key]=Path(os.environ[key]).resolve()
-            ui.info('Explicit cold spectral comparison: T=10--95499 K, fixed grain masses; '
-                    'gas and dust compete for photons. Mass growth/destruction/condensation are disabled.')
+            domain='10--95499 K' if selected==cold_mode else '10--1e9 K, rapid dissociation approximation, CHIMES receiver ABI6'
+            if selected==transition_mode:
+                spectral_grain_evolution=ui.ask_bool('Enable grain growth, sputtering and size exchange in the transition model?', False)
+            mass_notice=('evolving C/silicate masses; no condensation or SN shocks' if spectral_grain_evolution
+                         else 'fixed grain masses; mass processes disabled')
+            ui.info('Explicit spectral comparison: T='+domain+', '+mass_notice+'; gas and dust compete for photons.')
     if cosmic_rays or mass_evolution:
         env['SNRT_AGN_MODEL'] = 'legacy'
     sink = config / 'kl16_lc18_snia_agn_dust_smoke.ic_sink'
@@ -781,10 +787,11 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     if mass_cooling=='chimes_neq_v1':
         text=re.sub(r'(?im)^(\s*gamma\s*=)[^\n]+',r'\g<1>1.6666666666666667d0',text)
         env['SNRT_RT_LEVEL']='0'
-        if env['SNRT_SPECTRAL_MODEL']=='chimes_cold_d03_maxent128_fs2010_v1':
+        if env['SNRT_SPECTRAL_MODEL'] in ('chimes_cold_d03_maxent128_fs2010_v1','chimes_transition_d03_maxent128_fs2010_v1'):
             for key in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering','dust_sn_shocks','dust_condensation'):
                 text=re.sub(r'(?im)^\s*'+key+r'\s*=[^\n]+\n','',text)
-                setting='0d0,0d0,0d0' if key=='dust_condensation' else '.false.'
+                setting='0d0,0d0,0d0' if key=='dust_condensation' else (
+                    '.true.' if spectral_grain_evolution and key!='dust_sn_shocks' else '.false.')
                 text=text.replace('dust_mass_enabled=.true.','dust_mass_enabled=.true.\n  '+key+'='+setting)
     if relative_motion:
         text=text.replace('dust_mass_enabled=.true.',
@@ -1005,6 +1012,17 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                         'Transport/scattering then joint gas/grain absorption and dark chemistry;').replace(
                         'gas temperature 10--1e9 K','gas temperature 10--95499 K (including internal thermal trials)')
                     files[str(dest / 'README.txt')]+='Cold spectral mode: fixed C/silicate grain masses; no automatic hot/grey fallback.\n'
+                if env['SNRT_SPECTRAL_MODEL']=='chimes_transition_d03_maxent128_fs2010_v1':
+                    files[str(dest / 'README.txt')]=files[str(dest / 'README.txt')].replace(
+                        'First-order transport/dust then chemistry split;',
+                        'Transport/scattering then joint gas/grain photo, dark chemistry and material/IR;')
+                    files[str(dest / 'README.txt')]+=(
+                        'Explicit rapid dissociation at 10^4.98 K: ATcT0 K energy cost, charge-preserving atomic products.\n'
+                        'Requires CHIMES receiver ABI6 root events; atomic remainder may cool below the boundary.\n'
+                        'Molecular formation resumes on the next cold step; not finite-time molecular shock kinetics.\n'+
+                        ('Evolving co-advected C/silicate masses: growth, sputtering and size exchange; no condensation/SN shocks.\n'
+                         if spectral_grain_evolution else 'Fixed co-advected C/silicate masses.\n')+
+                        'No Fe/PAH/drift/sublimation or unbounded-temperature claim.\n')
             if mass_cooling=='wss09_cie':
                 files[str(dest / 'README.txt')] += (
                     'WSS09 CIE: embedded author table; actual gas-phase H/He and C,N,O,Ne,Mg,Si,S,Ca,Fe.\n'

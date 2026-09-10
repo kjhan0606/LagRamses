@@ -1,13 +1,66 @@
 diff --git a/src/chimes.c b/src/chimes.c
-index bc26493..ce5f5d5 100644
+index bc26493..0468932 100644
 --- a/src/chimes.c
 +++ b/src/chimes.c
-@@ -701,7 +701,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+@@ -37,6 +37,33 @@
+ #include "chimes_proto.h"
+ #include "chimes_vars.h"
+ 
++/* Root is computed from the actual solver energy/species, not the bounded
++ * temperature used for off-domain Newton trials in f(). */
++static int snrt_temperature_root(realtype t,N_Vector y,realtype *gout,void *ptr)
++{
++  (void)t;
++  struct UserData *d=ptr;
++  double sum=0;int i=0;
++  for(int s=0;s<d->myGlobalVars->totalNumberOfSpecies;s++)
++    if(d->species[s].include_species==1)sum+=NV_Ith_S(y,i++);
++    else sum+=d->myGasVars->abundances[s];
++  if(!isfinite(sum) || sum<=0)return -1;
++  gout[0]=NV_Ith_S(y,d->network_size)/(1.5*BOLTZMANNCGS*d->myGasVars->nH_tot*sum)
++    -snrt_chimes_thermal_ceiling(d->myGlobalVars);
++  return isfinite(gout[0])?0:-1;
++}
++
++static void snrt_install_temperature_root(void *mem,const struct globalVariables *c,double end)
++{
++  if(snrt_chimes_thermal_ceiling && snrt_chimes_thermal_ceiling(c)>0) {
++    int direction=1;
++    CVodeRootInit(mem,1,snrt_temperature_root);
++    CVodeSetRootDirection(mem,&direction);
++    /* Do not report an internal overshoot event beyond the requested step. */
++    CVodeSetStopTime(mem,end);
++  }
++}
++
+ /** 
+  * @brief Sets equilibrium abundances. 
+  * 
+@@ -577,6 +604,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+        * equations), the initial time 0.0 and the 
+        * initial conditions, in y. */  
+       CVodeInit(cvode_mem, f, 0.0f, y);
++      snrt_install_temperature_root(cvode_mem,myGlobalVars,myGasVars->hydro_timestep);
+ 
+       /* Use CVodeSVtolerances to specify the scalar
+        * relative and absolute tolerances. */
+@@ -656,6 +684,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+ 	      CVodeSetMaxNumSteps(cvode_mem, MAXSTEPS);
+ 	      CVodeSetErrHandlerFn(cvode_mem, chimes_err_handler_fn, &data); 
+ 	      CVodeInit(cvode_mem, f, t, y);
++              snrt_install_temperature_root(cvode_mem,myGlobalVars,myGasVars->hydro_timestep);
+ 	      
+ 	      if ((myGasVars->ThermEvolOn == 0) && (myGlobalVars->scale_metal_tolerances == 0))
+ 		CVodeSStolerances(cvode_mem, reltol, abstol_scalar);
+@@ -701,7 +730,10 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
  	  chimes_print_gas_vars(stderr, myGasVars, myGlobalVars);
  	}
  
 -      if ((cv_flag == CV_FIRST_RHSFUNC_ERR) || (cv_flag == CV_UNREC_RHSFUNC_ERR) || (cv_flag == CV_REPTD_RHSFUNC_ERR)) 
-+      if (cv_flag < 0 || t < (realtype) myGasVars->hydro_timestep)
++      int thermal_root = cv_flag==CV_ROOT_RETURN && snrt_chimes_thermal_ceiling &&
++        snrt_chimes_thermal_ceiling(myGlobalVars)>0 && snrt_chimes_thermal_root_found;
++      if(thermal_root)snrt_chimes_thermal_root_found(myGlobalVars,t);
++      if (cv_flag < 0 || (t < (realtype) myGasVars->hydro_timestep && !thermal_root))
  	{
  	  fprintf(stderr, "CHIMES Warning: CVode encountered a recoverable error in the Right Hand Side function but was unable to correct it.\n");
  	  chimes_print_gas_vars(stderr, myGasVars, myGlobalVars);
@@ -33,10 +86,10 @@ index 835c282..73909f2 100644
    int N_H2O_rot_index, N_H2O_vib_index, T_H2O_index; 
    ChimesFloat x_elec, log_xHII, d_xHII, log_Psi, dPsi, log_T, dT, G0; 
 diff --git a/src/chimes_proto.h b/src/chimes_proto.h
-index d23064c..7135d02 100644
+index d23064c..18e1791 100644
 --- a/src/chimes_proto.h
 +++ b/src/chimes_proto.h
-@@ -828,4 +828,10 @@ enum
+@@ -828,4 +828,12 @@ enum
      sp_O2p		/* 156 */
    };
  
@@ -47,9 +100,11 @@ index d23064c..7135d02 100644
 +extern void (*snrt_chimes_secondary_rates)(struct Species_Structure *, struct gasVariables *, const struct globalVariables *);
 +/* Signed solid charge per gas H nucleus, frozen over a chemistry substep. */
 +extern ChimesFloat (*snrt_chimes_solid_charge)(const struct globalVariables *);
++extern double (*snrt_chimes_thermal_ceiling)(const struct globalVariables *);
++extern void (*snrt_chimes_thermal_root_found)(const struct globalVariables *, double);
 +#endif /* CHIMES_PROTO_H */
 diff --git a/src/init_chimes.c b/src/init_chimes.c
-index 3bb4978..ce60217 100644
+index 3bb4978..05f06c6 100644
 --- a/src/init_chimes.c
 +++ b/src/init_chimes.c
 @@ -28,6 +28,8 @@
@@ -57,11 +112,11 @@ index 3bb4978..ce60217 100644
  
  #include <stdio.h>
 +/* lagRamses adapter ABI: zero-initialized disabled reaction channels. */
-+int snrt_chimes_receiver_abi(void) { return 5; }
++int snrt_chimes_receiver_abi(void) { return 6; }
  #include <stdlib.h>
  #include <math.h>
  #include <hdf5.h>
-@@ -35,6 +37,10 @@
+@@ -35,6 +37,12 @@
  #include <sundials/sundials_types.h>
  #include "chimes_proto.h"
  #include "chimes_vars.h"
@@ -69,10 +124,12 @@ index 3bb4978..ce60217 100644
 +ChimesFloat (*snrt_chimes_molecular_opacity)(struct gasVariables *, const struct globalVariables *, struct UserData, int) = NULL;
 +void (*snrt_chimes_secondary_rates)(struct Species_Structure *, struct gasVariables *, const struct globalVariables *) = NULL;
 +ChimesFloat (*snrt_chimes_solid_charge)(const struct globalVariables *) = NULL;
++double (*snrt_chimes_thermal_ceiling)(const struct globalVariables *) = NULL;
++void (*snrt_chimes_thermal_root_found)(const struct globalVariables *, double) = NULL;
  
  // CHIMES data tables. 
  struct chimes_table_bins_struct chimes_table_bins;                               /*!< Structure containing table bins for all of the rate tables. */ 
-@@ -3797,7 +3803,9 @@ void allocate_current_rates_memory(struct chimes_current_rates_struct *chimes_cu
+@@ -3797,7 +3805,9 @@ void allocate_current_rates_memory(struct chimes_current_rates_struct *chimes_cu
    determine_current_rates_buffer_size(&buffer_size, myGlobalVars); 
    buffer_position = 0; 
  
@@ -84,7 +141,7 @@ index 3bb4978..ce60217 100644
    // T_dependent 
    N_reactions = chimes_table_T_dependent.N_reactions[1]; 
 diff --git a/src/rate_equations.c b/src/rate_equations.c
-index 0005fc2..3e3a128 100644
+index 0005fc2..f4ae4b5 100644
 --- a/src/rate_equations.c
 +++ b/src/rate_equations.c
 @@ -464,6 +464,11 @@ void check_constraint_equations(struct gasVariables *myGasVars, const struct glo
@@ -99,6 +156,22 @@ index 0005fc2..3e3a128 100644
    if (fabs((x - myGasVars->abundances[myGlobalVars->speciesIndices[sp_elec]]) / chimes_max(myGasVars->abundances[myGlobalVars->speciesIndices[sp_elec]], CHIMES_FLT_MIN)) > 0.01f)
      myGasVars->abundances[myGlobalVars->speciesIndices[sp_elec]] = chimes_max(x, 0.0f);
  }
+@@ -543,6 +548,15 @@ int f(realtype t, N_Vector y, N_Vector ydot, void *user_data)
+   if (data->myGasVars->ThermEvolOn == 1)
+     data->myGasVars->temperature = chimes_max(((ChimesFloat) NV_Ith_S(y, data->network_size)) / (1.5f * calculate_total_number_density(data->myGasVars->abundances, data->myGasVars->nH_tot, data->myGlobalVars) * BOLTZMANNCGS), 10.1f); /* The rates are not defined below ~10 K */
+ 
++  /* Numerical continuation only for a root-enabled cold solve. No accepted
++   * trajectory may pass this ceiling: CVODE returns the first upward root.
++   * Its Newton/bracketing trials use boundary rates, never invalid fits. */
++  if(snrt_chimes_thermal_ceiling) {
++    double ceiling=snrt_chimes_thermal_ceiling(data->myGlobalVars);
++    if(ceiling>0 && data->myGasVars->temperature>ceiling)
++      data->myGasVars->temperature=ceiling;
++  }
++
+   /* If Radiative Transfer is enabled, the final entries in the 
+    * vector y are the photon densities and flux reduction factors. */
+   int rt_start_index = data->network_size; 
 diff --git a/src/update_rates.c b/src/update_rates.c
 index 4c20b41..8341c5e 100644
 --- a/src/update_rates.c

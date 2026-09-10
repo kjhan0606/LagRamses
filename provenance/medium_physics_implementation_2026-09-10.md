@@ -48,6 +48,17 @@ with CVODE and connect to actual nonradiative chemistry/cooling. Native142
 checks and first-order dt convergence pass; cold molecular, grain competition
 and live driver/restart wiring remain unfinished. No runtime guard was removed.
 
+**2026-09-11 update (supersedes the preceding native-only checkpoint):**
+the [cold molecular connection](snrt_chimes_molecular_coupling_implementation_2026-09-11.md),
+[energy-aware hot continuation](snrt_hot_transition_plan_2026-09-11.md), and
+[existing grain-mass evolution connection](snrt_transition_dust_evolution_2026-09-11.md)
+now include native/live MPI2/OMP2 and restart evidence. CHIMES atomic/molecular
+reactions and competing C/silicate grain spectra are no longer an unconnected
+building block. Kind7 can use existing growth/sputtering/size exchange, with
+explicit rapid-dissociation and depletion conventions. Fe/PAH/drift spectra,
+condensation/SN shocks and sublimation in this particular path remain excluded;
+other numbered population/data constraints are not silently marked complete.
+
 No remaining group has been silently reclassified as complete, rejected, or
 awaiting another operator approval. The full requested implementation is
 still unfinished. "Data-dependent" is not a claim that all public sources

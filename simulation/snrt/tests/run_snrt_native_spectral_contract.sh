@@ -21,7 +21,8 @@ if [[ "${SNRT_SPECTRAL_MODEL:-fixed}" == hhe_d03*_maxent128_fs2010_v1 ]]; then
   flags+=(-DDUST_LIVE)
 fi
 if [[ "${SNRT_SPECTRAL_MODEL:-fixed}" == chimes_hot_atomic_maxent128_fs2010_v1 || \
-      "${SNRT_SPECTRAL_MODEL:-fixed}" == chimes_cold_d03_maxent128_fs2010_v1 ]]; then
+      "${SNRT_SPECTRAL_MODEL:-fixed}" == chimes_cold_d03_maxent128_fs2010_v1 || \
+      "${SNRT_SPECTRAL_MODEL:-fixed}" == chimes_transition_d03_maxent128_fs2010_v1 ]]; then
   flags+=(-DDUST_LIVE -DSNRT_CHIMES)
 fi
 

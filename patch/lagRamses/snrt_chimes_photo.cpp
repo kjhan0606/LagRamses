@@ -25,6 +25,7 @@ struct Photo {
   std::vector<int> node;
   std::vector<double> initial;
   std::vector<double> dust_alpha,node_energy;
+  std::vector<double> survival;
   std::vector<Term> terms;
   std::vector<MolecularTerm> molecular;
   std::vector<EnergyIndex> samples;
@@ -77,12 +78,17 @@ int rhs(realtype,N_Vector y,N_Vector dy,void *context){
     const double *v=N_VGetArrayPointer(y);double *out=N_VGetArrayPointer(dy);
     for(int j=0;j<li+nledger;++j)if(!std::isfinite(v[j]))return 1;
     std::fill(out,out+li+nledger,0.);partition(p,v);
+    // Integrate accumulated optical depth, not the exponentially exhausted
+    // fraction. d(tau)/ds = c*dt*opacity; survival=exp(-tau) cannot cross zero.
+    // max is only for Newton trial tau; accepted negative states still reject.
+    for(int k=0;k<nn;++k)p.survival[k]=std::exp(-std::max(0.,v[ns+k]));
     const double all_heat[5]={1,0,0,0,0};
     for(const auto &t:p.terms){
       // Positive trial rates for Newton iterations, not published clipping.
-      const double factor=p.cdt*t.sigma*std::max(0.,v[t.from])*std::max(0.,v[ns+t.node]);
+      const double opacity=p.cdt*t.sigma*std::max(0.,v[t.from]);
+      const double factor=opacity*p.survival[t.node];
       const double rate=factor*p.initial[t.node]; // events per H over t/dt
-      out[ns+t.node]-=factor*p.nh;
+      out[ns+t.node]+=opacity*p.nh;
       out[t.from]-=rate;out[t.to]+=rate;out[0]+=rate*t.electrons;
       const double *f=t.sample<0 ? all_heat : p.fractions[t.sample].data();
       const double power=rate*t.excess;
@@ -97,20 +103,22 @@ int rhs(realtype,N_Vector y,N_Vector dy,void *context){
       out[li+6]+=rate*(t.binding+t.excess);
       out[li+7]+=rate;
     }
-    // Fixed grain inventories compete with gas in the SAME survival ODE.
+    // Grain inventories are frozen within this photo step only and compete
+    // with gas in the SAME accumulated optical depth and capture ledger.
     // alpha already includes grain mass density (cm^-1), not a cross section
     // per H. Normalize grain counters per H like the gas counters here.
     for(int k=0;k<nn;++k){
-      const double loss=p.cdt*p.dust_alpha[k]*std::max(0.,v[ns+k]);
+      const double loss=p.cdt*p.dust_alpha[k]*p.survival[k];
       const double rate=loss*p.initial[k]/p.nh;
-      out[ns+k]-=loss;
+      out[ns+k]+=p.cdt*p.dust_alpha[k];
       const int g=p.node[k]/K;
       out[li+8+g]+=rate*p.node_energy[k];out[li+8+ng+g]+=rate;
     }
     for(const auto &t:p.molecular){
-      const double factor=p.cdt*t.sigma*std::max(0.,v[t.from])*std::max(0.,v[ns+t.node]);
+      const double opacity=p.cdt*t.sigma*std::max(0.,v[t.from]);
+      const double factor=opacity*p.survival[t.node];
       const double captures=factor*p.initial[t.node],events=captures*t.yield;
-      out[ns+t.node]-=factor*p.nh;
+      out[ns+t.node]+=opacity*p.nh;
       out[t.from]-=events;out[t.to1]+=events;out[t.to2]+=events;
       const double power=captures*p.node_energy[t.node];
       // Native Draine-field pumping estimate, bounded by counted fluorescent
@@ -216,23 +224,23 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     if(p.node.empty()){identity();return 0;}
     p.fractions.resize(p.samples.size());
     const int nn=p.node.size(),li=ns+nn,size=li+nledger;
+    p.survival.resize(nn);
     Solver solver;solver.y=N_VNew_Serial(size);solver.tol=N_VNew_Serial(size);solver.constraints=N_VNew_Serial(size);
     require(solver.y && solver.tol && solver.constraints);
     double *y=N_VGetArrayPointer(solver.y),*tol=N_VGetArrayPointer(solver.tol);
-    std::copy(old,old+ns,y);std::fill(y+ns,y+li,1.);std::fill(y+li,y+size,0.);
-    std::fill(tol,tol+ns,1e-14);std::fill(tol+ns,tol+li,1e-12);
+    std::copy(old,old+ns,y);std::fill(y+ns,y+size,0.);
+    std::fill(tol,tol+ns,1e-16);std::fill(tol+ns,tol+li,1e-14);
     const double scale=initial_energy/nh;
-    std::fill(tol+li,tol+size,std::max(1e-30,scale*1e-12));
-    tol[li+7]=std::max(1e-30,scale/b.grids.back().e.back()*1e-12);
+    std::fill(tol+li,tol+size,std::max(1e-30,scale*1e-14));
+    tol[li+7]=std::max(1e-30,scale/b.grids.back().e.back()*1e-14);
     std::fill(tol+li+8+ng,tol+size,tol[li+7]);
-    N_VConst(1.,solver.constraints); // nonnegative accepted species/fractions/counters
+    N_VConst(1.,solver.constraints); // nonnegative accepted species/tau/counters
     solver.cv=CVodeCreate(CV_BDF);require(solver.cv);
     require(CVodeInit(solver.cv,rhs,0.,solver.y)==0 && CVodeSetUserData(solver.cv,&p)==0);
-    require(CVodeSVtolerances(solver.cv,1e-9,solver.tol)==0 && CVodeSetConstraints(solver.cv,solver.constraints)==0);
+    require(CVodeSVtolerances(solver.cv,1e-11,solver.tol)==0 && CVodeSetConstraints(solver.cv,solver.constraints)==0);
     require(CVodeSetMaxNumSteps(solver.cv,10000)==0);
-    // Constraints apply to accepted internal steps, not CV_NORMAL's dense
-    // interpolation back from an overshoot. End on an actual constrained
-    // step so a nearly exhausted photon population cannot interpolate <0.
+    // Keep the requested endpoint; never interpolate backwards from a
+    // later step with a different gas/grain capture budget.
     require(CVodeSetStopTime(solver.cv,1.)==0);
     solver.linear=SUNLinSol_SPGMR(solver.y,PREC_NONE,30);require(solver.linear);
     require(CVodeSetLinearSolver(solver.cv,solver.linear,nullptr)==0);
@@ -245,7 +253,7 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     for(int e=0;e<11;++e)if(std::abs(new_nuclei[e]-nuclei[e])>1e-8*std::max(nuclei[e],1e-20))return 6;
     if(std::abs(new_charge-charge)>1e-8)return 6;
     std::vector<double> survival(ng*K,1),out_n(number,number+ng*nd),out_e(energy,energy+ng*nd);
-    for(int k=0;k<nn;++k){if(y[ns+k]>1)return 52;survival[p.node[k]]=y[ns+k];}
+    for(int k=0;k<nn;++k)survival[p.node[k]]=std::exp(-y[ns+k]);
     double absorbed_n=0,absorbed_e=0;
     for(int g=0;g<ng;++g)for(int d=0;d<nd;++d){
       const int i=g*nd+d;double total_n=0,total_e=0,survive_n=0,survive_e=0;
