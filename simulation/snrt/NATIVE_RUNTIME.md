@@ -2087,6 +2087,11 @@ The setup wizard exposes this default-off option using an explicit
 nor the physical approval status of its reference AGN model. For multilevel
 live IR, leave `SNRT_RT_LEVEL` unset. See the
 [actual-source connection and its evaluation status](../../provenance/snrt_actual_source_transition_2026-09-11.md).
+The subsequent [multilevel AMR repair](../../provenance/snrt_multilevel_amr_fix_2026-09-11.md)
+allows empty leaf batches without bypassing MPI collectives and uses the
+current grid's parent-based ownership for halo faces. Fully covered and
+mixed/derefining MPI2/OMP2 cases pass; this is not a general subcycling,
+cosmological or GPU convergence claim.
 The new wizard profile retains uniform levelmin3 but allows levelmax4 with
 refinement explicitly disabled: the sink cloud radius4*dx_min is thenL/4,
 strictly inside the periodic half-box boundary. Do not interpret changing

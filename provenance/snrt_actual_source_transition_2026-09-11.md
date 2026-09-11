@@ -329,3 +329,7 @@ inputs, logs, binaries, build identities, compact JSON evidence and the
 [cleanup manifest](snrt_actual_source_cleanup_2026-09-11.md) remain. The operator
 subsequently requested committing/pushing this completed bundle before fixing
 the separate multilevel AMR issue; this record accompanies that bundle commit.
+
+Follow-up: the recorded AMR failure and a mixed-mesh ownership failure are
+resolved in the [subsequent bounded AMR repair](snrt_multilevel_amr_fix_2026-09-11.md).
+The historical failed attempts above remain evidence, not current blockers.

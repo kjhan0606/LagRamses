@@ -125,10 +125,13 @@ contains
     nc = size(n_hydrogen_cm3)
     ng = size(sigma_per_h_cm2)
     if (size(path_cm) /= nc .or. size(dust_relative_abundance) /= nc .or. &
-         any(shape(tau_dust) /= [nc, ng]) .or. nc < 1 .or. ng < 1) then
+         any(shape(tau_dust) /= [nc, ng]) .or. ng < 1) then
        ierr = snrt_dust_receiver_err_shape
        return
     end if
+    ! An AMR level/rank may own no leaves. Validate its group contract and
+    ! shapes normally, then allow the empty cell loops as a successful no-op.
+    ! The caller must still enter transport/IR MPI collectives.
     if (.not. all(ieee_is_finite(n_hydrogen_cm3)) .or. &
          .not. all(ieee_is_finite(path_cm)) .or. &
          .not. all(ieee_is_finite(dust_relative_abundance)) .or. &
@@ -185,7 +188,7 @@ contains
          size(old_temperature_k) /= nc .or. &
          size(staged_energy_erg_cm3) /= nc .or. &
          size(staged_temperature_k) /= nc .or. &
-         size(absorbed_energy_erg_cm3) /= nc .or. nc < 1 .or. ng < 1) then
+         size(absorbed_energy_erg_cm3) /= nc .or. ng < 1) then
        ierr = snrt_dust_receiver_err_shape
        return
     end if

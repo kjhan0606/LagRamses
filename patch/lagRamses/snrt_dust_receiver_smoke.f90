@@ -124,5 +124,22 @@ program snrt_dust_receiver_smoke
     if (ierr /= 0 .or. any(abs(absorbed_energy-expected_absorbed) > 1.0d-12)) error stop 16
     write(*,'(a)') 'SNRT_DUST_NINE_GROUP_PADDED_CONTRACT_PASS'
   end block
+  block
+    ! Fully covered AMR levels and ranks without leaves still participate in
+    ! the collective transaction. Their local receiver batch is an empty no-op.
+    real(snrt_dust_receiver_dp) :: empty(0), tau0(0,ng), photons0(ng,0)
+    real(snrt_dust_receiver_dp) :: energy0(0), temperature0(0), absorbed0(0)
+    call snrt_dust_prepare_cell_optical_depth(empty,empty,empty,sigma,tau0,ierr)
+    if(ierr/=snrt_dust_receiver_ok)error stop 20
+    call snrt_dust_receiver_stage(photons0,mean_energy,10d0,empty,empty, &
+         empty,empty,energy0,temperature0,absorbed0,ierr)
+    if(ierr/=snrt_dust_receiver_ok)error stop 21
+    call snrt_dust_prepare_cell_optical_depth(empty,empty,n_h,sigma,tau0,ierr)
+    if(ierr/=snrt_dust_receiver_err_shape)error stop 22
+    call snrt_dust_receiver_stage(photons0,mean_energy,-1d0,empty,empty, &
+         empty,empty,energy0,temperature0,absorbed0,ierr)
+    if(ierr/=snrt_dust_receiver_err_input)error stop 23
+    write(*,'(a)') 'SNRT_DUST_EMPTY_AMR_RECEIVER_PASS'
+  end block
   write(*,'(a)') 'SNRT_NATIVE_DUST_MAPPING_RECEIVER_OK binding=1 mapping=1 opacity=1 thermal=1 closure=1 rollback=1'
 end program snrt_dust_receiver_smoke

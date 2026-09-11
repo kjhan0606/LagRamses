@@ -21,6 +21,23 @@ module snrt_amr_topology
 
 contains
 
+  integer function snrt_cell_grid_owner(cell) result(owner)
+    integer, intent(in) :: cell
+    integer :: grid, parent
+    ! cpu_map(cell) owns a prospective child oct, not this cell's hydro
+    ! storage. A Hilbert boundary can cut that oct's eight cells. Existing
+    ! grid ownership follows its father, as in RAMSES communicator setup.
+    owner = 0
+    if (.not. allocated(father) .or. .not. allocated(cpu_map)) return
+    if (cell <= ncoarse .or. cell > size(cpu_map)) return
+    grid = IGRID_OF(cell)
+    if (grid < 1 .or. grid > size(father)) return
+    parent = father(grid)
+    if (parent < 1 .or. parent > size(cpu_map)) return
+    if (cpu_map(parent) < 1 .or. cpu_map(parent) > ncpu) return
+    owner = cpu_map(parent)
+  end function snrt_cell_grid_owner
+
   subroutine snrt_amr_build_same_level_neighbors(ilevel, leaf_cell, leaf_slot, &
        neighbor, nleaf, n_interface_face)
     integer, intent(in) :: ilevel
@@ -134,7 +151,7 @@ contains
                    if (cell_hash_key(hash_pos) == 0) exit
                    hash_pos = 1 + mod(hash_pos,hash_size)
                 end do
-                if (local_cell == 0 .and. cpu_map(neighbor_cell) == myid .and. &
+                if (local_cell == 0 .and. snrt_cell_grid_owner(neighbor_cell) == myid .and. &
                      .not. report_hash_miss) then
                    direct_match = 0
                    do j = 1, nleaf
@@ -171,7 +188,7 @@ contains
     integer :: ilocal, face, idim, inbor, ind, igrid
     integer :: parent_cell, neighbor_grid, neighbor_cell, neighbor_ind
     integer :: bitmask, current_bit, cross_boundary, grid_face
-    integer :: cell_index, nunmapped
+    integer :: cell_index, nunmapped, neighbor_owner
     logical, save :: report_unmapped = .false.
 
     if (allocated(snrt_face_kind)) deallocate(snrt_face_kind)
@@ -199,9 +216,10 @@ contains
           neighbor_cell = raw_neighbor(face,ilocal)
           if (neighbor_cell > 0) then
              snrt_face_cell(face,ilocal) = neighbor_cell
+             neighbor_owner = snrt_cell_grid_owner(neighbor_cell)
              if (son(neighbor_cell) > 0) then
                 snrt_face_kind(face,ilocal) = SNRT_FACE_COARSE_TO_FINE
-             else if (cpu_map(neighbor_cell) /= myid) then
+             else if (neighbor_owner > 0 .and. neighbor_owner /= myid) then
                 snrt_face_kind(face,ilocal) = SNRT_FACE_MPI
              else
                 snrt_face_kind(face,ilocal) = SNRT_FACE_UNMAPPED
@@ -251,9 +269,10 @@ contains
           end if
           neighbor_cell = ICELL_OF(neighbor_grid, neighbor_ind)
           snrt_face_cell(face,ilocal) = neighbor_cell
+          neighbor_owner = snrt_cell_grid_owner(neighbor_cell)
           if (son(neighbor_cell) > 0) then
              snrt_face_kind(face,ilocal) = SNRT_FACE_COARSE_TO_FINE
-          else if (cpu_map(neighbor_cell) /= myid) then
+          else if (neighbor_owner > 0 .and. neighbor_owner /= myid) then
              snrt_face_kind(face,ilocal) = SNRT_FACE_MPI
           else
              snrt_face_kind(face,ilocal) = SNRT_FACE_UNMAPPED
@@ -264,7 +283,7 @@ contains
                      cell_index, ' face=', face, ' ind=', ind, ' igrid=', igrid, &
                      ' neighbor_cell=', neighbor_cell, ' parent=', parent_cell, &
                      ' neighbor_grid=', neighbor_grid, ' son=', son(neighbor_cell), &
-                     ' owner=', cpu_map(neighbor_cell), ' slot=', &
+                     ' owner=', neighbor_owner, ' slot=', &
                      snrt_state_get_slot(neighbor_cell)
                 report_unmapped = .true.
              end if
