@@ -391,6 +391,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     cosmic_rays = ui.ask_bool('enable trapped cosmic-ray fluid (NENER=1 CPU/HDF5 build)?', False)
     mass_evolution = ui.ask_bool('Evolve dust mass (condensation, cold growth, thermal sputtering)?', False)
     spectral_grain_evolution = False
+    spectral_grain_sources = False
     spectral_sink = False
     mass_model, mass_cooling = 'bulk_v1', 'none'
     dust_shocks=False
@@ -419,7 +420,11 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             ('chimes_neq_v1',('Native 157-species radiation-dependent chemistry; requires two-size DL01, CHIMES build and tables',)),
         ]),'none')
         if mass_model=='carbon_olivine_2size_v1':
-            dust_shocks=ui.ask_bool('Enable energy-equivalent ambient SN dust destruction (uncalibrated comparison)?',False)
+            # Kind7 has one explicit source/shock opt-in below; do not ask
+            # twice or inherit condensation efficiencies from the template.
+            if not (mass_cooling=='chimes_neq_v1' and os.environ.get('SNRT_CHIMES_SPECTRAL_MODEL')==
+                    'chimes_transition_d03_maxent128_fs2010_v1'):
+                dust_shocks=ui.ask_bool('Enable energy-equivalent ambient SN dust destruction (uncalibrated comparison)?',False)
             material_model=ui.ask_choice('Dust material model',OrderedDict([
                 ('fixed_mix',('Existing fixed mixture material/geometry',)),
                 ('dl01_composition_v1',('Local graphite/silicate U(T), actual size collision area; common T, selectable optics',)),
@@ -439,6 +444,8 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                     iron_model=ui.ask_choice('Separate metallic Fe',OrderedDict([
                         ('none',('Existing default',)),
                         ('fe_electric_compare_v1',('Electric-only cold comparison; optional seed growth/thermal erosion, NOT full-band production',)),
+                        ('fe_thermal_limit_v1',('Full Fe absorbed-photon thermal retention through 10000 eV; no photoelectrons, fixed-group comparison',)),
+                        ('fe_uv_cycle_v1',('Stationary trace-charge OML/HD2017 cycles through 13.6 eV; CHIMES, fixed groups, no PAH/drift',)),
                     ]),'none')
                     if iron_model!='none':
                         fe_condensation=ui.ask('Non-Ia Fe fraction after olivine [0,1]; uncalibrated, all-large',0.,float)
@@ -457,6 +464,8 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                         ('pah_charge_fixed_h_v1',('Fixed-H neutral/cation C24H12 comparison, 256 carriers; <=13.6 eV, no destruction, Fe or relative drift',)),
                         ('pah_hydrogen_m13_dl01_v1',('H0--13/neutral-cation comparison, 3584 carriers; shared normal-H optics, H exchange; no carbon destruction',)),
                         ('pah_h2_rehydrogenation_v1',('Vacancy-refilling H2 capture at M13 bound rate; same H/charge carriers, not an upper bound on H2 effects',)),
+                        ('pah_h2_catalytic_v1',('H2 vacancy capture plus H13+H abstraction; explicit M13/Boschman hybrid, ground-state H2 and gas heating; no new carriers',)),
+                        ('pah_atomization_limit_v1',('Catalytic model plus unit complete atomization at the current 869.634 eV mono group; not broadband survival physics',)),
                     ]),'none')
                     if pah_model!='none':
                         pah_condensation=ui.ask('Non-Ia carbon fraction after graphite [0,1]; uncalibrated PAH injection',0.,float)
@@ -466,6 +475,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             iron_model=ui.ask_choice('Separate metallic Fe',OrderedDict([
                 ('none',('Existing default',)),
                 ('fe_electric_compare_v1',('Static cold seeds only; CHIMES off, all grain mass reactions disabled',)),
+                ('fe_thermal_limit_v1',('Static cold Fe seeds; full thermal retention through 10000 eV, no photoelectrons or grain reactions',)),
             ]),'none')
             if iron_model!='none':
                 dust_shocks=False
@@ -576,7 +586,34 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         ui.info(f'Sublimation model: {sublimation_model}; phase energy also applies to growth/destruction. '
                 'Vacuum, common grain temperature, fixed-radius two-size and lagged optical coefficients; '
                 'no PAH treatment or unresolved bright-source timestep guarantee.')
-    if iron_model!='none' and pah_model=='none' and not relative_motion:
+    fe_photons=iron_model in ('fe_thermal_limit_v1','fe_uv_cycle_v1')
+    if fe_photons:
+        if pah_model!='none' or relative_motion:
+            raise ValueError('Fe photon comparisons require fixed groups, no PAH or relative motion.')
+        if iron_model=='fe_uv_cycle_v1' and mass_cooling!='chimes_neq_v1':
+            raise ValueError('Fe UV cycles require CHIMES.')
+        if os.environ.get('SNRT_CHIMES_SPECTRAL_MODEL','fixed')!='fixed':
+            raise ValueError('Fe photon comparisons require SNRT_CHIMES_SPECTRAL_MODEL=fixed.')
+        if dust_backend=='cuda':
+            raise ValueError('Fe material requires auto/openmp, not forced CUDA.')
+        prefix='SNRT_DUST_FE_UV' if iron_model=='fe_uv_cycle_v1' else 'SNRT_DUST_FE_THERMAL'
+        selected_binary=ui.ask(f'Fe photon comparison binary ({iron_model})',os.environ.get(prefix+'_BINARY',''))
+        selected_contract=ui.ask(f'Fe photon comparison IR contract ({iron_model})',os.environ.get(prefix+'_CONTRACT',''))
+        for path,key in ((selected_binary,prefix+'_BINARY'),(selected_contract,prefix+'_CONTRACT')):
+            if not path or not Path(path).is_file():
+                raise ValueError(f'{key}: explicitly select an existing newly compiled Fe photon binary and matching IR contract.')
+        binary=Path(selected_binary).resolve()
+        dust_contract=Path(selected_contract).resolve()
+        if iron_model=='fe_uv_cycle_v1':
+            # Contract keys are not RAMSES parameters, so use the raw parser.
+            raw_contract=rng.parse_namelist(dust_contract.read_text())[0]
+            if (str(raw_contract.get('contract_version','')).strip()!='4' or
+                    str(raw_contract.get('gas_exchange_model','')).strip().strip("'\"")!='hydrogen_accommodation'):
+                raise ValueError('Fe UV cycles require a v4 exchange-enabled IR contract.')
+        ui.info(f'Fe photon model: {iron_model}; Tdust<=300 K, fixed groups, no PAH/drift. '
+                'Explicit new binary required; an old Fe executable is not implicitly compatible. '
+                'Named electric/eddy-optics comparison, not full Fe physics or production approval.')
+    if iron_model=='fe_electric_compare_v1' and pah_model=='none' and not relative_motion:
         for key in ('SNRT_DUST_IRON_BINARY','SNRT_DUST_IRON_CONTRACT'):
             if not os.environ.get(key) or not Path(os.environ[key]).is_file():
                 raise ValueError(f'{key} must select the NVAR189 native comparison binary and matching IR contract.')
@@ -588,26 +625,46 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 'Fixed Fe after injection, electric/eddy opacity only, no relative velocity. '
                 'The generated comparison omits the incompatible hard BPASS radiation source; no full-band claim.')
     if pah_model!='none':
-        if pah_model in ('pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1') and (relative_motion or iron_model!='none'):
+        if pah_model in ('pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1') and (relative_motion or iron_model!='none'):
             raise ValueError('Charged PAH comparisons exclude Fe and relative dust motion.')
         pah_paths=('SNRT_PAH_NEUTRAL_TABLE',) if relative_motion else (
             'SNRT_DUST_PAH_BINARY','SNRT_DUST_PAH_CONTRACT','SNRT_PAH_NEUTRAL_TABLE')
-        if pah_model in ('pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1'): pah_paths+=('SNRT_PAH_ION_TABLE',)
+        if pah_model=='pah_atomization_limit_v1':
+            if mass_cooling!='chimes_neq_v1' or os.environ.get('SNRT_CHIMES_SPECTRAL_MODEL','fixed')!='fixed':
+                raise ValueError('PAH atomization requires CHIMES and fixed groups (SNRT_CHIMES_SPECTRAL_MODEL=fixed).')
+            pah_atomization_binary=ui.ask('PAH atomization comparison binary (new native build)',
+                os.environ.get('SNRT_DUST_PAH_ATOMIZATION_BINARY',''))
+            if not pah_atomization_binary or not Path(pah_atomization_binary).is_file():
+                raise ValueError('SNRT_DUST_PAH_ATOMIZATION_BINARY must explicitly select an existing new atomization binary; no old catalytic binary fallback.')
+            pah_paths=('SNRT_DUST_PAH_CONTRACT','SNRT_PAH_NEUTRAL_TABLE')
+        if pah_model in ('pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1'): pah_paths+=('SNRT_PAH_ION_TABLE',)
         for key in pah_paths:
             if not os.environ.get(key) or not Path(os.environ[key]).is_file():
                 raise ValueError(f'{key} must select the PAH native binary, matching contract and original neutral table.')
         if dust_backend=='cuda':
             raise ValueError('PAH material uses native CPU; forced CUDA is not implemented.')
         if not relative_motion:
-            binary=Path(os.environ['SNRT_DUST_PAH_BINARY']).resolve()
+            binary=Path(pah_atomization_binary if pah_model=='pah_atomization_limit_v1' else os.environ['SNRT_DUST_PAH_BINARY']).resolve()
             dust_contract=Path(os.environ['SNRT_DUST_PAH_CONTRACT']).resolve()
-        if pah_model in ('pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1'):
-            ui.info('PAH H-state comparison: 3584 carriers, H=0--13, CHIMES ABI5; normal-H optics/cooling '
+        if pah_model in ('pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1'):
+            notice=('PAH H-state comparison: 3584 carriers, H=0--13, CHIMES ABI5; normal-H optics/cooling '
                     'shared across H states, M13 rates with generic DL01 modes. Photon <=13.6 eV, gas 10--10000 K. '
-                    'No carbon destruction, H2 formation, Fe or drift. Not general PAH survival qualification.')
-            if pah_model=='pah_h2_rehydrogenation_v1':
+                    'No carbon destruction, Fe or drift. Not general PAH survival qualification.')
+            if pah_model=='pah_atomization_limit_v1':
+                notice=notice.replace('Photon <=13.6 eV','Soft photons <=13.6 eV plus current 869.634 eV mono atomization only')
+                notice=notice.replace('No carbon destruction, Fe or drift.',
+                    'Unit complete atomization to atomic C/C+/H; retained excess is local heat. No Fe or drift.')
+            ui.info(notice)
+            if pah_model in ('pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1'):
                 ui.info('H2 vacancy refilling: cation H0--10 -> H2--12, k=5e-13 cm3/s; finite H2 donor and molecular binding energy. '
                         'No single-vacancy abstraction or H2 superhydrogenation; not a bound on total H2 effects.')
+            if pah_model in ('pah_h2_catalytic_v1','pah_atomization_limit_v1'):
+                ui.info('Catalytic H2 comparison: H13+H -> H12+H2 for both charges, one barrierless site at 0.06 Angstrom^2. '
+                        'M13/Boschman hybrid; ground H2, net 1.2781 eV/event gas heat and unchanged PAH excitation.')
+            if pah_model=='pah_atomization_limit_v1':
+                ui.info('Other occupied hard groups (~17/34/106/4023 eV) reject; not continuous broadband hard-photon coverage. '
+                        'Atomic-donor formation binding heat applies only to actual PAH injection; no new passives. '
+                        'The explicit new binary must contain the atomization hooks; setup does not verify native integration.')
         elif pah_model=='pah_charge_fixed_h_v1':
             ui.info('PAH: fixed-H neutral/cation C24H12 comparison; 256 carriers, CHIMES ABI5, '
                     'absolute IR and photoelectron heat; primary <=13.6 eV, gas T=10--10000 K. '
@@ -645,10 +702,12 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     ])
     if iron_model!='none':
         env.pop('SNRT_STELLAR_SED',None)
+    if fe_photons:
+        env['SNRT_SPECTRAL_MODEL']='fixed'
     if pah_model!='none':
         env.pop('SNRT_STELLAR_SED',None)
         env['SNRT_PAH_NEUTRAL_TABLE']=Path(os.environ['SNRT_PAH_NEUTRAL_TABLE']).resolve()
-        if pah_model in ('pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1'):
+        if pah_model in ('pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1'):
             env['SNRT_PAH_ION_TABLE']=Path(os.environ['SNRT_PAH_ION_TABLE']).resolve()
     template = config / 'kl16_lc18_snia_agn_dl01_dust_smoke.nml'
     if mass_cooling=='chimes_neq_v1':
@@ -666,8 +725,12 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         if selected not in ('fixed',cold_mode,transition_mode):
             raise ValueError('SNRT_CHIMES_SPECTRAL_MODEL must be fixed, '+cold_mode+' or '+transition_mode)
         if selected in (cold_mode,transition_mode):
-            if optics_model!='d03_transport_v1' or iron_model!='none' or pah_model!='none' or relative_motion or sublimation_model!='none':
-                raise ValueError('Spectral CHIMES requires co-advected D03 C/silicate grains without Fe, PAH or sublimation.')
+            if optics_model!='d03_transport_v1' or iron_model!='none' or pah_model!='none':
+                raise ValueError('Spectral CHIMES requires D03 C/silicate grains without Fe or PAH.')
+            if selected==cold_mode and (relative_motion or sublimation_model!='none'):
+                raise ValueError('Cold spectral CHIMES requires fixed co-advected grains without sublimation.')
+            if relative_motion and sublimation_model=='gd89_xu25_olivine_rt_v1':
+                raise ValueError('Relative dust excludes IR-coupled sublimation; select split sublimation.')
             if primary_backend=='cuda':
                 raise ValueError('Spectral CHIMES transport currently requires OpenMP, not forced CUDA.')
             env['SNRT_SPECTRAL_MODEL']=selected
@@ -679,15 +742,26 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             domain='10--95499 K' if selected==cold_mode else '10--1e9 K, rapid dissociation approximation, CHIMES receiver ABI6'
             if selected==transition_mode:
                 spectral_grain_evolution=ui.ask_bool('Enable grain growth, sputtering and size exchange in the transition model?', False)
-                if not cosmic_rays:
+                spectral_grain_sources=ui.ask_bool('Enable grain source condensation and SN shock processing?', False)
+                dust_shocks=spectral_grain_sources
+                if not cosmic_rays and not relative_motion and sublimation_model=='none':
                     spectral_sink=ui.ask_bool('Enable existing-sink Bondi/AGN with coadvected transition dust (NENER=0)?', False)
                     if spectral_sink:
                         selected_binary=os.environ.get('SNRT_CHIMES_SINK_BINARY','')
                         if not selected_binary or not Path(selected_binary).is_file():
                             raise ValueError('SNRT_CHIMES_SINK_BINARY must select the material-transfer NENER=0 CHIMES binary.')
                         binary=Path(selected_binary).resolve()
-            mass_notice=('evolving C/silicate masses; no condensation or SN shocks' if spectral_grain_evolution
-                         else 'fixed grain masses; mass processes disabled')
+                        dust_shocks=False
+                        ui.info('Sink profile retains opted-in condensation only; SN shocks, sublimation and relative motion are excluded.')
+                if not spectral_sink and not relative_motion and sublimation_model=='none':
+                    selected_binary=os.environ.get('SNRT_CHIMES_BINARY','')
+                    if not selected_binary or not Path(selected_binary).is_file():
+                        raise ValueError('SNRT_CHIMES_BINARY must explicitly select the matching kind7 CPU/OpenMP binary.')
+                    binary=Path(selected_binary).resolve()
+                env['SNRT_DUST_BACKEND']='openmp'
+                primary_backend=dust_backend='openmp'
+            mass_notice=('selected C/silicate processes; frozen grain opacity during each photo step'
+                         if selected==transition_mode else 'fixed grain masses; mass processes disabled')
             ui.info('Explicit spectral comparison: T='+domain+', '+mass_notice+'; gas and dust compete for photons.')
     if (cosmic_rays or mass_evolution) and not spectral_sink:
         env['SNRT_AGN_MODEL'] = 'legacy'
@@ -755,7 +829,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                         rng._fmt_fortran_value(pah_condensation,'real'))
                 if iron_model!='none':
                     text=text.replace('dust_mass_enabled=.true.',
-                        "dust_mass_enabled=.true.\n  dust_iron_model='fe_electric_compare_v1'\n  dust_fe_condensation="+
+                        f"dust_mass_enabled=.true.\n  dust_iron_model='{iron_model}'\n  dust_fe_condensation="+
                         rng._fmt_fortran_value(fe_condensation,'real')+'\n  dust_fe_kinetics='+
                         rng._fmt_fortran_value(fe_kinetics,'bool')+'\n  dust_fe_sticking='+
                         rng._fmt_fortran_value(fe_sticking,'real'))
@@ -785,7 +859,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                             '\n'.join('  var_region(1,{})=0d0'.format(j) for j in range(22,25)))
     if iron_model!='none' and mass_cooling=='none':
         text=text.replace('dust_mass_enabled=.true.',
-            "dust_mass_enabled=.true.\n  dust_iron_model='fe_electric_compare_v1'\n  dust_fe_condensation=0d0\n"
+            f"dust_mass_enabled=.true.\n  dust_iron_model='{iron_model}'\n  dust_fe_condensation=0d0\n"
             "  dust_fe_kinetics=.false.\n  dust_fe_sticking=0d0")
         for key in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering','dust_sn_shocks'):
             text=re.sub(r'(?im)^\s*'+key+r'\s*=[^\n]+\n','',text)
@@ -798,8 +872,12 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         if env['SNRT_SPECTRAL_MODEL'] in ('chimes_cold_d03_maxent128_fs2010_v1','chimes_transition_d03_maxent128_fs2010_v1'):
             for key in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering','dust_sn_shocks','dust_condensation'):
                 text=re.sub(r'(?im)^\s*'+key+r'\s*=[^\n]+\n','',text)
-                setting='0d0,0d0,0d0' if key=='dust_condensation' else (
-                    '.true.' if spectral_grain_evolution and key!='dust_sn_shocks' else '.false.')
+                if key=='dust_condensation':
+                    setting='0d0,.2d0,.15d0' if spectral_grain_sources else '0d0,0d0,0d0'
+                elif key=='dust_sn_shocks':
+                    setting=rng._fmt_fortran_value(spectral_grain_sources and not spectral_sink,'bool')
+                else:
+                    setting=rng._fmt_fortran_value(spectral_grain_evolution,'bool')
                 text=text.replace('dust_mass_enabled=.true.','dust_mass_enabled=.true.\n  '+key+'='+setting)
     if spectral_sink:
         # Match the NENER=0, non-virial material layout of the source run.
@@ -929,7 +1007,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 'NENER=0 comparison build, CPU hydro, noncosmo periodic domain; reference Bondi/AGN enabled.')
             files[str(dest/'README.txt')]+=('Co-advected dust aggregates, bins, solid thermal energy and CHIMES carriers '
                 'follow swallowed/jet-loaded material; solid energy is separate from gas feedback energy.\n'
-                'Requires SNRT_CHIMES_SINK_BINARY; no CR/MHD, new sinks, Fe/PAH/drift or condensation/shocks.\n')
+                'Requires SNRT_CHIMES_SINK_BINARY; optional condensation only, no CR/MHD, new sinks, Fe/PAH/drift, sublimation or SN shocks.\n')
             files[str(dest/'README.txt')]+=('Uniform levelmin=3, allowed levelmax=4 with refinement disabled; '
                 'sink cloud radius is L/4, avoiding the ambiguous periodic half-box boundary.\n')
         if cosmic_rays:
@@ -1057,9 +1135,18 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                         'Explicit rapid dissociation at 10^4.98 K: ATcT0 K energy cost, charge-preserving atomic products.\n'
                         'Requires CHIMES receiver ABI6 root events; atomic remainder may cool below the boundary.\n'
                         'Molecular formation resumes on the next cold step; not finite-time molecular shock kinetics.\n'+
-                        ('Evolving co-advected C/silicate masses: growth, sputtering and size exchange; no condensation/SN shocks.\n'
-                         if spectral_grain_evolution else 'Fixed co-advected C/silicate masses.\n')+
-                        'No Fe/PAH/drift/sublimation or unbounded-temperature claim.\n')
+                        ('Evolving '+('relative' if relative_motion else 'co-advected')+
+                         ' C/silicate masses: growth, sputtering and size exchange enabled.\n'
+                         if spectral_grain_evolution else 'Grain growth, sputtering and size exchange disabled.\n')+
+                        f'Grain source condensation enabled: {spectral_grain_sources}; SN shock processing enabled: {dust_shocks}.\n'
+                        'Grain inventories/opacities are frozen during photo absorption; mass evolution and material/IR '
+                        'are first-order split, not a simultaneous opacity/sublimation solve.\n'
+                        'Split sublimation acts before RT; coupled-IR sublimation acts after photo, within material/IR only.\n'
+                        'No Fe/PAH or unbounded-temperature claim; sinks exclude shocks, sublimation and relative motion.\n')
+                if env['SNRT_SPECTRAL_MODEL'] in ('chimes_cold_d03_maxent128_fs2010_v1','chimes_transition_d03_maxent128_fs2010_v1'):
+                    files[str(dest/'README.txt')]=files[str(dest/'README.txt')].replace(
+                        'Dust condensation efficiencies wind/AGB/SNII=0/0.2/0.15;',
+                        'Dust condensation efficiencies wind/AGB/SNII='+('0/0.2/0.15' if spectral_grain_sources else '0/0/0')+';')
             if mass_cooling=='wss09_cie':
                 files[str(dest / 'README.txt')] += (
                     'WSS09 CIE: embedded author table; actual gas-phase H/He and C,N,O,Ne,Mg,Si,S,Ca,Fe.\n'
@@ -1092,6 +1179,40 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                     readme+=(f'Fe sticking={fe_sticking:g}; global dust_growth/dust_sputtering switches apply. '
                         'Choban26/Nozawa06 low-Z projectile mixture, resolved density, cold sputtering cutoff 1e4 K, '
                         'gas T>1e9 K rejected with active erosion. No charge, adsorption heat, nonthermal sputtering or unresolved SN shocks.\n')
+                if fe_photons:
+                    readme=readme.replace('no separate Fe dust.', 'separate metallic Fe selected below.')
+                    readme=readme.replace('BPASS is an independent population; 0--1 Myr holds the first spectrum; common grey transport.',
+                        'No BPASS or other stellar SED is selected automatically for this Fe photon comparison.')
+                    readme=re.sub(r'Dust gas thermal exchange:[^\n]*',
+                        'Dust gas thermal exchange: determined by the explicitly selected IR contract.',readme)
+                    readme=re.sub(r'Worker stack=[^\n]*',
+                        'Worker stack=512M; verify the selected new binary NVECTOR and per-thread workspace.',readme)
+                    readme=re.sub(r'Expected dumps:[^\n]*',
+                        'Expected dumps: 2; size for the selected new binary is unmeasured. Check free space before launch.',readme)
+                    readme=readme.replace('Fe ELECTRIC-ONLY comparison:',f'Fe photon comparison {iron_model}:')
+                    limit='10000' if iron_model=='fe_thermal_limit_v1' else '13.6'
+                    readme=readme.replace('primary group representative energy<=4 eV',
+                                          f'primary fixed-group photon energy<={limit} eV')
+                    readme=readme.replace('No BPASS SED is selected in this bounded cold comparison; hard-photon sources would be rejected.',
+                        'No stellar SED is automatically selected; supply a separately matched source inside this model photon domain.')
+                    readme=readme.replace('Spectral Fe mode is a sub-eV comparison, not full stellar/AGN qualification.',
+                        'Fixed groups only; not full stellar/AGN qualification.')
+                    readme+=('Both new Fe photon selectors exclude PAH, relative motion and spectral-node modes.\n'
+                             'Use the explicitly selected new binary and matching contract; no old Fe binary fallback.\n'
+                             'Restart binds the 12-value Fe photon model identity in addition to optical/material fields.\n')
+                    if iron_model=='fe_thermal_limit_v1':
+                        readme+=('Thermal-retention limit: all absorbed Fe primary energy stays as grain heat; '
+                                 'no photoelectron escape or PE gas heating. This is a named comparison, not measured full-band retention.\n')
+                    else:
+                        readme=readme.replace('gas temperature 10--1e9 K', 'Fe UV cycle gas temperature 10--10000 K')
+                        readme=readme.replace('Photoelectric gas heating is disabled: primary dust absorption currently heats grains only.',
+                            'C/silicate absorption heats grains; Fe UV cycles partition photon energy between photoelectrons and grain heat.')
+                        readme=readme.replace('No charge, adsorption heat, nonthermal sputtering or unresolved SN shocks.',
+                            'Mass kinetics retain neutral geometric sticking; no adsorption heat, nonthermal sputtering or unresolved SN shocks.')
+                        readme+=('Stationary trace-charge OML/HD2017 UV cycles; CHIMES required, photons<=13.6 eV.\n'
+                                 'Requires a v4 exchange-enabled IR contract for signed gas/grain energy receipts.\n'
+                                 'Actual attenuation input and its restart identity must be supplied by the native UV interface; '
+                                 'frontend does not synthesize attenuation from Qabs or a label.\n')
                 files[str(dest/'README.txt')]=readme
             if pah_model!='none':
                 nvar=317 if iron_model!='none' else 315
@@ -1116,7 +1237,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                         'Fixed H: NO H-loss/addition, destruction, anions/dications or general PDR survival qualification.\n'
                         'Injection is neutral. Carrier layout and both optical projections bind restart; neutral checkpoints reject.\n')
                     files[str(dest/'README.txt')]=readme
-                elif pah_model in ('pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1'):
+                elif pah_model in ('pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1'):
                     readme=readme[:readme.index('PAH NEUTRAL ABSOLUTE-IR comparison:')]
                     readme+=('H-STATE PAH COMPARISON: DUST_PAH=1 DUST_PAH_CHARGE=1 DUST_PAH_H=1 '
                         'CHIMES=1/ABI5 DUST_LIVE=1 NENER=1 NVAR=3771 (hydro). Rebuild explicitly.\n'
@@ -1127,16 +1248,55 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                         'Gas H and photoelectrons exchange conservatively; source injection is neutral C24H12.\n'
                         'Noncosmo, coadvected, no Fe; gas T=10--10000 K, photons <=13.6 eV.\n'
                         'NO carbon-skeleton destruction, H2 formation/addition, anions or dications.\n')
-                    if pah_model=='pah_h2_rehydrogenation_v1':
+                    if pah_model in ('pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1'):
                         readme=readme.replace('H2 formation/addition','H2 formation or superhydrogenation')
                         readme+=('Vacancy-refilling H2 capture at the M13 bound rate: cation H0--10 -> H2--12, k=5e-13 cm3/s.\n'
                             'Finite CHIMES molecular donor; D0=4.4781 eV and gas translational energy explicitly accounted.\n'
                             'A restricted comparison, not a bound on the total H2 effect. No single-vacancy abstraction.\n')
+                    if pah_model in ('pah_h2_catalytic_v1','pah_atomization_limit_v1'):
+                        readme=readme.replace('NO carbon-skeleton destruction, H2 formation or superhydrogenation, anions or dications.',
+                            'NO carbon-skeleton destruction, H>13 superhydrogenation, anions or dications.')
+                        readme+=('Catalytic H2: barrierless H13+H -> H12+H2, both charges, one site, sigma=0.06 Angstrom^2.\n'
+                            'Explicit M13/Boschman hybrid: ground H2, net 1.2781 eV/event gas heat, retained PAH excitation.\n'
+                            'No resolved outgoing H2 energy distribution; finite shared H donor, no new passive fields.\n')
+                    if pah_model=='pah_atomization_limit_v1':
+                        readme=readme.replace('H-STATE PAH COMPARISON:', 'PAH ATOMIZATION LIMIT pah_atomization_limit_v1:')
+                        readme=readme.replace('gas T=10--10000 K, photons <=13.6 eV.',
+                            'gas T=10--10000 K; fixed groups: soft <=13.6 eV plus current mono 869.634 eV only.')
+                        readme=readme.replace('NO carbon-skeleton destruction, H>13 superhydrogenation, anions or dications.',
+                            'Unit complete carbon-skeleton atomization in the admitted hard mono group; no H>13, anions or dications.')
+                        readme=readme.replace('BPASS is an independent population; 0--1 Myr holds the first spectrum; common grey transport.',
+                            'No BPASS or other stellar SED is selected automatically; its occupied groups must fit this narrow comparison.')
+                        readme=readme.replace('Photoelectric gas heating is disabled: primary dust absorption currently heats grains only.',
+                            'PAH soft photoelectrons and retained hard-atomization excess couple to local gas heat; C/silicate absorption heats grains.')
+                        readme=re.sub(r'NVAR\s*(?:>=|=)\s*\d+','NVAR=3771',readme)
+                        readme=re.sub(r'Worker stack=[^\n]*',
+                            'Worker stack=512M; verify new atomization binary NVECTOR and per-thread memory.',readme)
+                        readme=re.sub(r'Expected dumps:[^\n]*',
+                            'Expected dumps: 2; new binary output size unmeasured. Check free space before launch.',readme)
+                        readme+=('Strict opt-in extension of pah_h2_catalytic_v1: the soft H/charge/H2 processes are retained.\n'
+                            'Complete atomization probability=1 at the CURRENT mono representative 869.634 eV only; '
+                            'not the full 500--2000 eV band and not a measured fragmentation yield.\n'
+                            'Other occupied hard groups (~17/34/106/4023 eV) are rejected by native admission.\n'
+                            'Returns atomic C/C+/H, not molecules/fragments; all retained excess is local heat.\n'
+                            'Atomic-donor formation binding heat is applied only to actual source injection, not dormant populations.\n'
+                            'Same 3584 H/charge/excitation states, NVAR=3771; no new passives. Original neutral/ion optical tables required.\n'
+                            'Requires explicit new atomization binary; no fallback to an old catalytic executable.\n'
+                            'No Fe/drift or spectral-node modes. Named comparison, NOT broadband destruction, survival or production qualification.\n')
                     files[str(dest/'README.txt')]=readme
     if relative_motion:
         phases=4+2*(iron_model!='none')+(pah_model!='none')
         nvar=187+2*(iron_model!='none')+128*(pah_model!='none')+3*phases
         readme=files[str(dest/'README.txt')]
+        if env['SNRT_SPECTRAL_MODEL']=='chimes_transition_d03_maxent128_fs2010_v1':
+            readme=readme.replace('Transport/scattering then joint gas/grain photo, dark chemistry and material/IR;',
+                'Transport then joint gas/grain photo and dark chemistry, moving-grain scattering and material/IR;')
+            readme+=('Kind7 absorption uses accepted node-resolved per-phase energy and directional moments; '
+                'mechanical work is debited once before material heating.\n'
+                'Moving-grain scattering reconstructs 128-node spectra to form photon-weighted group-grey phase opacities, '
+                'then uses the existing nine-group moving-scatter solver; not node-resolved scattering. '
+                'This is a first-order split with no cross-group transfer. '
+                'Stationary primary scattering is disabled, not applied a second time.\n')
         readme=re.sub(r'NVAR\s*(?:>=|=)\s*\d+',f'NVAR={nvar}',readme)
         readme=readme.replace('Co-advection only. Fe growth/erosion/size exchange and relative momentum are not enabled.',
                               'Fe mass growth/erosion/size exchange remain disabled; its momentum evolves as a separate phase.')
@@ -1162,7 +1322,10 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 'C/silicate grains share a temperature; the separately selected PAH excitation population is stochastic.')
         readme=re.sub(r'Expected dumps:[^\n]*',
             f'Expected dumps: 2; enlarged NVAR={nvar} output size is unmeasured. Budget storage/free space before manual launch.',readme)
-        readme=('EXPERIMENTAL DUST RELATIVE MOTION: Fe+PAH MPI2/OMP2 two-step integration/restart verified; not production-ready automatically.\n'+
+        relative_notice=('EXPERIMENTAL KIND7 C/SILICATE RELATIVE MOTION: first-order spectral comparison; no Fe/PAH or sinks.\n'
+                         if env['SNRT_SPECTRAL_MODEL']=='chimes_transition_d03_maxent128_fs2010_v1' else
+                         'EXPERIMENTAL DUST RELATIVE MOTION: Fe+PAH MPI2/OMP2 two-step integration/restart verified; not production-ready automatically.\n')
+        readme=(relative_notice+
                 readme+f'\nRequired build: DUST_DYNAMICS=1 SNRT=1 DUST_LIVE=1 CHIMES=1 NENER=1 NVAR={nvar}; '
                 f'{phases} grain phases, CPU/OpenMP hydro.\n'+
                 ('DUST_IRON=1 required for the selected Fe phases.\n' if iron_model!='none' else '')+
@@ -1343,6 +1506,7 @@ def generate_run(ui=None, write_text=save_text):
         ('channel_mass_max_msun', '120.0,8.0,120.0,8.0,260.0'),
         ('fate_policy', 'review_only_unresolved'), ('high_mass_preset', 'source_consistent'),
         ('high_mass_remnant_adjust_max_fraction', 0.0),
+        ('radioactive_model', 'none'),
         ('use_wind', True), ('use_agb', True), ('use_snii', True),
         ('use_snia', False), ('use_pisn', False),
     ])
@@ -1351,6 +1515,12 @@ def generate_run(ui=None, write_text=save_text):
         print('P(P)ISN is opt-in through use_pisn in the full editor: supply a v4 '
               'source_consistent history and matching wind/SNII/PISN windows inside the IMF. '
               'Existing <=120 Msun defaults are unchanged.')
+        print('The full editor also exposes lc18_al26_fe60_transparent_v1: gas-only '
+              'Al26/Fe60 subsets, a matched LC18 companion and RADIOACTIVE=1 build; '
+              'no dust/CHIMES coupling or decay heating.')
+        print('For mixed v5 plus empirical SNIa, the full editor exposes population_model=effective_ssp: '
+              'binary_fraction=0, use_snia=True, and a matching effective-SSP DTD sidecar are required. '
+              'This debits total SSP mass, not a resolved WD reservoir.')
         print('The trapped CR reference is available in the noncosmological comparison modes. '
               'Do not enable it for cosmological ICs: the CR expansion source is not implemented.')
 

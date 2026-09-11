@@ -316,7 +316,7 @@ contains
        ghost_energy,ghost_index,blocked_face,material_dispatch,transport_dispatch,absorb_dispatch, &
        gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,thin_reabsorption, &
        population,population_dispatch,cell_absorption,phase_density,phase_momentum,phase_absorption, &
-       phase_scattering,phase_work,moving_material_dispatch)
+       phase_scattering,phase_work,moving_material_dispatch,population_loss)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -364,6 +364,9 @@ contains
     real(real64),optional,intent(in)::phase_density(:,:),phase_absorption(:,:,:),phase_scattering(:,:,:)
     real(real64),optional,intent(inout)::phase_momentum(:,:,:),phase_work(:,:)
     procedure(dust_moving_population_dispatch),optional::moving_material_dispatch
+    ! Explicit destructive endpoint: caller owns atom/charge/chemical-energy
+    ! receipts. Default populations remain number-conserving; no births here.
+    logical,optional,intent(in)::population_loss
     real(real64),allocatable::phase_heat(:,:,:),heat_guess(:,:,:),phase_events(:,:,:),event_guess(:,:,:)
     real(real64),allocatable::phase_rate(:,:,:),beta_guess(:,:,:),beta_next(:,:,:),momentum_next(:,:,:)
     real(real64),allocatable::work_next(:,:),scatter_work(:),scatter_e(:,:),scatter_tau(:,:)
@@ -402,6 +405,10 @@ contains
     if(present(population).neqv.(present(population_dispatch).or.present(moving_material_dispatch)))return
     if(present(moving_material_dispatch).and.present(population_dispatch))return
     if(moving.and.present(population).and..not.present(moving_material_dispatch))return
+    if(present(population_loss))then
+       if(population_loss.and.(.not.present(population_dispatch).or.moving.or. &
+            .not.present(cell_absorption)))return
+    endif
     if(present(population))then
        if(.not.transient)return
        if(present(material_dispatch).or.present(gas_energy).or.present(cell_material_u).or. &
@@ -508,14 +515,21 @@ contains
           if(present(population))cycle
           if(density(i)<=0)cycle
           if(present(cell_material_u))then
-             if(dust_energy(i)<material_energy(table,table%background_temperature,density(i),heat_capacity(i), &
-                  cell_material_u(:,i))*(1-material_tolerance).or.dust_energy(i)> &
+             ! Moving radiation is absolute, not excess over a hidden bath.
+             ! Its material callback owns the analytic cold energy domain;
+             ! retain nonnegative/finite inputs and the same upper bound.
+             if(.not.moving.and.dust_energy(i)< &
+                  material_energy(table,table%background_temperature,density(i),heat_capacity(i), &
+                  cell_material_u(:,i))*(1-material_tolerance))return
+             if(dust_energy(i)> &
                   material_energy(table,exp(table%log_t(size(table%log_t))),density(i),heat_capacity(i), &
                   cell_material_u(:,i))*(1+64*epsilon(1d0)))return
              cycle
           endif
-          if(dust_energy(i)<material_energy(table,table%background_temperature,density(i),heat_capacity(i)) &
-               *(1-material_tolerance).or.dust_energy(i)> &
+          if(.not.moving.and.dust_energy(i)< &
+               material_energy(table,table%background_temperature,density(i),heat_capacity(i)) &
+               *(1-material_tolerance))return
+          if(dust_energy(i)> &
                material_energy(table,exp(table%log_t(size(table%log_t))),density(i),heat_capacity(i)) &
                *(1+64*epsilon(1d0)))return
        end do
@@ -669,8 +683,18 @@ contains
              if(ierr/=dust_ok)return
              ierr=dust_err_state
              if(any(.not.ieee_is_finite(trial_population)).or.any(trial_population<0))return
-             if(any(abs(sum(trial_population,dim=1)-sum(population,dim=1))> &
-                  512*epsilon(1d0)*size(population,1)*max(sum(population,dim=1),tiny(1d0))))return
+             if(present(population_loss))then
+                if(population_loss)then
+                   if(any(sum(trial_population,dim=1)-sum(population,dim=1)> &
+                        512*epsilon(1d0)*size(population,1)*max(sum(population,dim=1),tiny(1d0))))return
+                else
+                   if(any(abs(sum(trial_population,dim=1)-sum(population,dim=1))> &
+                        512*epsilon(1d0)*size(population,1)*max(sum(population,dim=1),tiny(1d0))))return
+                endif
+             else
+                if(any(abs(sum(trial_population,dim=1)-sum(population,dim=1))> &
+                     512*epsilon(1d0)*size(population,1)*max(sum(population,dim=1),tiny(1d0))))return
+             endif
              if(any(.not.ieee_is_finite(rate)).or.any(rate<0))return
              if(any(.not.ieee_is_finite(trial_dust_energy)).or.any(trial_dust_energy<0))return
              if(any(.not.ieee_is_finite(next_t)).or.any(next_t<0))return

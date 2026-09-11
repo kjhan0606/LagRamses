@@ -115,6 +115,8 @@ subroutine dust_mass_hdf5_identity(grp,writing)
   use dust_iron_compare, only: iron_material_identity,iron_identity_n,fe_optics_identity,fe_optics_identity_n
   use hydro_parameters, only: idust_pah
   use dust_mass_physics, only: dust_pah_enabled,dust_pah_condensation,dust_pah_hydrogenated
+  use dust_mass_physics, only: dust_fe_photon_comparison,dust_fe_photon_identity,dust_fe_uv_enabled
+  use dust_iron_photons, only: fe_photon_data_identity
   use dust_pah_live_model, only: pah_live_identity
   use ramses_hdf5_io
   use dust_mass_physics, only: dust_mass_enabled,dust_mass_identity,dust_composition_enabled,dust_cooling, &
@@ -178,7 +180,6 @@ subroutine dust_mass_hdf5_identity(grp,writing)
      allocate(saved_pah(size(pah)))
   endif
   allocate(iron(6+iron_identity_n+fe_optics_identity_n+merge(12,0,dust_fe_kinetics)))
-  allocate(saved_iron(size(iron)))
   ! Kinetics appends its exact law. The embedded material identity separately
   ! versions the zero-temperature continuation; old material restarts reject.
   iron(1:6)=[1d0,real(idust_iron,dp),dust_fe_condensation,dust_fe_max_temperature,dust_fe_max_primary_ev, &
@@ -187,6 +188,11 @@ subroutine dust_mass_hdf5_identity(grp,writing)
   iron(7+iron_identity_n:6+iron_identity_n+fe_optics_identity_n)=fe_optics_identity()
   if(dust_fe_kinetics)iron(size(iron)-11:)=[dust_fe_sticking,dust_fe_sputter_coeff, &
        dust_fe_sputter_min_t,dust_fe_sputter_max_t,56d0,31557600d0,1d0] ! final: resolved clumping C2
+  ! Opt-in photon closures extend the identity; old Fe restarts retain their
+  ! original vector. Never switch UV charge cycles/full-retention on restart.
+  if(dust_fe_photon_comparison())iron=[iron,dust_fe_photon_identity()]
+  if(dust_fe_uv_enabled())iron=[iron,fe_photon_data_identity()]
+  allocate(saved_iron(size(iron)))
   sublimation=dust_sublimation_identity()
   if(dust_silicate_sublimation_enabled())then
      call dust_olivine_phase_identity(olivine_phase,status)

@@ -5,11 +5,14 @@ module dust_pah_mixed
   use dust_pah_live_model
   use dust_pah_radiation, only: pah_absorbed_step,pah_charged_absorbed_step
   use dust_pah_hydrogen, only: pah_hydrogen_charged_step,pah_h2_binding
+  use dust_pah_atomization_physics, only: pah_atomization_batch,pah_atomization_receipt,pah_atomization_bond, &
+       pah_atomization_ev
   use dust_iron_radiation, only: iron_radiative_cell
   use dust_iron_optics, only: fe_six_opacity_basis
   use dust_composition_optics, only: d03_opacity_basis,d03_ng,d03_nir
   use dust_mass_physics, only: dust_iron_enabled,dust_fe_max_temperature,dust_pah_nbin,dust_pah_molecule_g, &
-       dust_pah_charged,dust_pah_nstate,dust_pah_hydrogenated,dust_pah_charge_size,dust_pah_h2_enabled
+       dust_pah_charged,dust_pah_nstate,dust_pah_hydrogenated,dust_pah_charge_size,dust_pah_h2_enabled, &
+       dust_pah_atomization
   use snrt_dust_contract
   use snrt_dust_ir
   implicit none
@@ -20,7 +23,7 @@ contains
        radiation,population,bulk_energy,temperature,photons,diag,ierr,ghosts,remote,blocked, &
        gas_energy,gas_capacity,conductance,transfer,primary_pah_heat,primary_pah_captures, &
        phase_density,phase_momentum,phase_absorption,phase_scattering,phase_work,gas_electrons,electron_capacity, &
-       primary_population,gas_atomic_h,gas_molecular_h2)
+       primary_population,gas_atomic_h,gas_molecular_h2,gas_atomic_c,gas_carbon_ion)
     type(dust_ir_table),intent(in)::table
     real(dust_dp),intent(in)::direction(:,:),weight(:),dx,dt,chat,bins(:,:),primary(:,:)
     integer,intent(in)::neighbors(:,:)
@@ -41,19 +44,24 @@ contains
     real(dust_dp),optional,intent(in)::primary_population(:,:)
     real(dust_dp),optional,intent(inout)::gas_atomic_h(:)
     real(dust_dp),optional,intent(inout)::gas_molecular_h2(:)
+    real(dust_dp),optional,intent(inout)::gas_atomic_c(:),gas_carbon_ion(:)
     real(dust_dp)::pa(d03_ng,6),ps(d03_ng,6),pg(d03_ng,6),ia(d03_nir,6),isc(d03_nir,6),ig(d03_nir,6)
     real(dust_dp),allocatable::band(:,:,:),sigma(:,:),pf(:,:),irf(:,:),total(:),unit_density(:),capacity(:)
     real(dust_dp),allocatable::eb(:),qb(:),number(:),work_t(:),old_pop(:,:)
     real(dust_dp),allocatable::pfc(:,:,:),irfc(:,:,:),peheat(:),next_ne(:)
     real(dust_dp),allocatable::next_h(:)
     real(dust_dp),allocatable::next_h2(:)
+    real(dust_dp),allocatable::next_c(:),next_cp(:),atom_u(:),atom_bond(:),atom_photon(:,:)
+    integer,allocatable::atom_h(:),atom_q(:)
+    logical::atomize,material_called
     real(dust_dp)::charge_number(2),alpha(2)
     real(dust_dp)::x,occ,photon,denom,reference,phase(4)
-    integer::ng,nt,nc,i,j,k,g,status,nbulk
-    ierr=dust_err_config;transfer=0
+    integer::ng,nt,nc,i,j,k,g,status,nbulk,nh,q
+    ierr=dust_err_config;transfer=0;material_called=.false.
     call pah_live_prepare(status)
     if(status/=0)return
     ng=snrt_dust_contract_number_ir;nt=snrt_dust_contract_number_temperature;nc=size(bulk_energy)
+    atomize=dust_pah_atomization()
     if(ng/=d03_nir.or.any(shape(bins)/=[6,nc]))return
     if(any(shape(primary)/=[d03_ng,nc]).or.any(shape(population)/=[dust_pah_nstate(),nc]))return
     if(dust_pah_charged())then
@@ -77,6 +85,20 @@ contains
        if(size(gas_molecular_h2)/=nc)return
        if(any(.not.ieee_is_finite(gas_molecular_h2)).or.any(gas_molecular_h2<0))return
     else if(present(gas_molecular_h2))then
+       return
+    endif
+    if(atomize)then
+       if(dust_iron_enabled().or.present(phase_density))return
+       if(.not.present(gas_atomic_c).or..not.present(gas_carbon_ion))return
+       if(size(gas_atomic_c)/=nc.or.size(gas_carbon_ion)/=nc)return
+       if(any(.not.ieee_is_finite(gas_atomic_c)).or.any(.not.ieee_is_finite(gas_carbon_ion)))return
+       if(any(gas_atomic_c<0).or.any(gas_carbon_ion<0))return
+       ! The endpoint creates monatomic particles: use the SAME 3kB/2
+       ! coefficient as the caller's gas EOS, already checked positive and
+       ! finite above. Pinned CHIMES uses its own rounded BOLTZMANNCGS;
+       ! comparing it bitwise against a different SI constant rejects a
+       ! valid gas state and would split the thermal-energy reference.
+    else if(present(gas_atomic_c).or.present(gas_carbon_ion))then
        return
     endif
     nbulk=merge(6,4,dust_iron_enabled())
@@ -112,6 +134,23 @@ contains
     if(dust_pah_charged())next_ne=gas_electrons
     if(dust_pah_hydrogenated())next_h=gas_atomic_h
     if(dust_pah_h2_enabled())next_h2=gas_molecular_h2
+    if(atomize)then
+       next_c=gas_atomic_c;next_cp=gas_carbon_ion
+       allocate(atom_u(dust_pah_nstate()),atom_bond(dust_pah_nstate()), &
+            atom_h(dust_pah_nstate()),atom_q(dust_pah_nstate()),atom_photon(d03_ng,dust_pah_nstate()))
+       do q=0,1
+          do nh=0,13
+             do j=1,dust_pah_nbin
+                k=(q*14+nh)*dust_pah_nbin+j
+                ! Neutral H12 stores the unshifted vibrational grid. Avoid
+                ! subtracting binding/IP from near-zero shifted levels.
+                atom_u(k)=pah_level(12*dust_pah_nbin+j)
+                atom_bond(k)=pah_atomization_bond(nh);atom_h(k)=nh;atom_q(k)=q
+                atom_photon(:,k)=snrt_dust_contract_absorption_mean_energy_ev(1:d03_ng)*pah_atomization_ev
+             enddo
+          enddo
+       enddo
+    endif
     unit_density=1;capacity=1;eb=bulk_energy;qb=0;work_t=temperature
     do i=1,nc
        total(i)=bulk_energy(i)+gas_energy(i)+dot_product(pah_level,population(:,i))
@@ -140,7 +179,9 @@ contains
           pf(g,i)=0
           if(denom>0)pfc(g,:,i)=alpha/denom
           pf(g,i)=sum(pfc(g,:,i))
-          if(number(i)>0.and.snrt_dust_contract_absorption_mean_energy_ev(g)>pah_max_primary_ev.and.primary(g,i)>0)return
+          if(number(i)>0.and.primary(g,i)>0)then
+             if(.not.pah_primary_supported(snrt_dust_contract_absorption_mean_energy_ev(g)))return
+          endif
        enddo
     enddo
     ! Same Planck quadrature as the existing bulk receiver; units per ref H.
@@ -163,16 +204,28 @@ contains
          thin_reabsorption=.true.,population=population,cell_absorption=sigma,phase_density=phase_density, &
          phase_momentum=phase_momentum,phase_absorption=phase_absorption,phase_scattering=phase_scattering, &
          phase_work=phase_work,moving_material_dispatch=moving_material)
+    else if(atomize)then
+    call snrt_dust_ir_advance(table,direction,weight,neighbors,dx,dt,chat,unit_density,sum(primary,dim=1)/dt, &
+         radiation,work_t,photons,diag,ierr,1d-9,256,total,capacity,ghosts,remote,blocked, &
+         thin_reabsorption=.true.,population=population,population_dispatch=material,cell_absorption=sigma, &
+         population_loss=.true.)
     else
     call snrt_dust_ir_advance(table,direction,weight,neighbors,dx,dt,chat,unit_density,sum(primary,dim=1)/dt, &
          radiation,work_t,photons,diag,ierr,1d-9,256,total,capacity,ghosts,remote,blocked, &
          thin_reabsorption=.true.,population=population,population_dispatch=material,cell_absorption=sigma)
     endif
-    if(ierr/=0)return
+    if(ierr/=0)then
+       write(*,'(A,I6,L2,*(ES23.15,1X))')' PAH mixed IR rejected status/callback/dt/min_total/min_T: ', &
+            ierr,material_called,dt,minval(total),minval(work_t)
+       return
+    endif
     bulk_energy=eb;gas_energy=gas_energy+peheat-qb;transfer=qb-peheat;temperature=work_t
     if(dust_pah_charged())gas_electrons=next_ne
     if(dust_pah_hydrogenated())gas_atomic_h=next_h
     if(dust_pah_h2_enabled())gas_molecular_h2=next_h2
+    if(atomize)then
+       gas_atomic_c=next_c;gas_carbon_ion=next_cp
+    endif
   contains
     subroutine moving_material(ir_heat,ir_captured,step_dt,old,next,phase_rate,next_energy,next_t,status)
       real(dust_dp),intent(in)::ir_heat(:,:,:),ir_captured(:,:,:),step_dt,old(:,:)
@@ -227,11 +280,18 @@ contains
       real(dust_dp)::charge_old(dust_pah_nbin,2),charge_next(dust_pah_nbin,2),captures(d03_ng+ng,2)
       real(dust_dp)::h_old(dust_pah_nbin,0:13,2),h_next(dust_pah_nbin,0:13,2)
       real(dust_dp)::energies(d03_ng+ng),ip_change,cv,eg
-      integer::q
+      real(dust_dp),allocatable::hard_captured(:,:),hard_removed(:,:),atom_next(:)
+      real(dust_dp)::charge_total,chem_temperature
+      type(pah_atomization_receipt)::atom_receipt
+      integer::q,g,s,lo,hi
       integer::cell
+      material_called=.true.
       next=old;rate=0;next_energy=0;next_t=0;status=1
+      if(atomize)allocate(hard_captured(d03_ng,dust_pah_nstate()), &
+           hard_removed(d03_ng,dust_pah_nstate()),atom_next(dust_pah_nstate()))
       do cell=1,nc
          pu=0;pt=0;pah_rate=0
+         atom_receipt=pah_atomization_receipt()
          pah_heat=primary(:,cell)*pf(:,cell)
          cv=gas_capacity(cell);eg=gas_energy(cell)
          if(dust_pah_charged())then
@@ -245,16 +305,71 @@ contains
             if(dust_pah_hydrogenated())then
                h_old=reshape(old(:,cell),[dust_pah_nbin,14,2]);h_next=h_old
                next_ne(cell)=gas_electrons(cell);next_h(cell)=gas_atomic_h(cell)
+               chem_temperature=eg/cv
+               if(atomize)then
+                  ! Captures are already charged-opacity partitioned above.
+                  ! Distribute EACH hard event over its old charge population;
+                  ! never combine energies or assign them to cheaper grains.
+                  hard_captured=0;hard_removed=0;atom_next=old(:,cell)
+                  do q=1,2
+                     lo=(q-1)*dust_pah_charge_size()+1;hi=q*dust_pah_charge_size()
+                     charge_total=sum(old(lo:hi,cell))
+                     do g=1,d03_ng
+                        if(energies(g)<=13.6d0.or.captures(g,q)==0)cycle
+                        if(charge_total<=0)then
+                           status=dust_err_state;return
+                        endif
+                        do s=lo,hi
+                           hard_captured(g,s)=captures(g,q)*(old(s,cell)/charge_total)
+                        enddo
+                     enddo
+                  enddo
+                  call pah_atomization_batch(atom_u,atom_bond,atom_h,atom_q,atom_photon,hard_captured, &
+                       old(:,cell),atom_next,hard_removed,atom_receipt,status)
+                  if(status/=0)then
+                     write(*,'(A,2I6,*(ES23.15,1X))')' PAH mixed atomization rejected cell/status/dt/N/captures: ', &
+                          cell,status,step_dt,sum(old(:,cell)),sum(hard_captured)
+                     return
+                  endif
+                  ! This bounded selector admits hard events only if every
+                  ! addressed state can atomize. A failed hard event is NOT
+                  ! silently sent into the <=13.6 eV legacy receiver.
+                  if(any(hard_removed/=hard_captured))then
+                     status=dust_err_range;return
+                  endif
+                  do g=1,d03_ng
+                     if(energies(g)>13.6d0)captures(g,:)=0
+                  enddo
+                  h_old=reshape(atom_next,[dust_pah_nbin,14,2]);h_next=h_old
+                  next_h(cell)=gas_atomic_h(cell)+atom_receipt%hydrogen
+                  next_c(cell)=gas_atomic_c(cell)+atom_receipt%carbon
+                  next_cp(cell)=gas_carbon_ion(cell)+atom_receipt%carbon_ion
+                  cv=cv+electron_capacity*(atom_receipt%carbon+atom_receipt%carbon_ion)
+                  chem_temperature=(eg+atom_receipt%gas_heat)/(cv+electron_capacity*atom_receipt%hydrogen)
+                  if(.not.all(ieee_is_finite([next_h(cell),next_c(cell),next_cp(cell),cv,chem_temperature])))then
+                     status=dust_err_state;return
+                  endif
+               endif
                if(dust_pah_h2_enabled())then
                   next_h2(cell)=gas_molecular_h2(cell)
-                  call pah_hydrogen_charged_step(pah_h_models,energies,captures,h_old,step_dt,eg/cv, &
+                  call pah_hydrogen_charged_step(pah_h_models,energies,captures,h_old,step_dt,chem_temperature, &
                        h_next,next_ne(cell),next_h(cell),peheat(cell),pah_rate,status,gas_h2=next_h2(cell))
                   cv=cv+electron_capacity*(next_h2(cell)-gas_molecular_h2(cell))
                else
-                  call pah_hydrogen_charged_step(pah_h_models,energies,captures,h_old,step_dt,eg/cv, &
+                  call pah_hydrogen_charged_step(pah_h_models,energies,captures,h_old,step_dt,chem_temperature, &
                        h_next,next_ne(cell),next_h(cell),peheat(cell),pah_rate,status)
                endif
-               if(status/=0)return
+               if(status/=0)then
+                  write(*,'(A,2I6,*(ES23.15,1X))')' PAH mixed H/charge rejected cell/status/dt/T/ne/nH/N0/Nplus/H13/captures: ', &
+                       cell,status,step_dt,chem_temperature,next_ne(cell),next_h(cell), &
+                       sum(h_old(:,:,1)),sum(h_old(:,:,2)),sum(h_old(:,13,:)),sum(captures)
+                  write(*,'(A,*(ES23.15,1X))')' PAH mixed H/charge Eg/Cv/atom_heat/atom_H: ', &
+                       eg,cv,atom_receipt%gas_heat,atom_receipt%hydrogen
+                  if(dust_pah_h2_enabled())write(*,'(A,ES23.15)')' PAH mixed H/charge input nH2: ', &
+                       gas_molecular_h2(cell)
+                  return
+               endif
+               if(atomize)peheat(cell)=peheat(cell)+atom_receipt%gas_heat
                next(:,cell)=reshape(h_next,[dust_pah_nstate()])
                cv=cv+electron_capacity*(next_h(cell)-gas_atomic_h(cell))
             else
@@ -305,6 +420,8 @@ contains
          ! and not an additional advected variable or a negative energy bath.
          if(dust_pah_h2_enabled())next_energy(cell)=next_energy(cell)+ &
               (gas_molecular_h2(cell)-next_h2(cell))*pah_h2_binding
+         if(atomize)next_energy(cell)=next_energy(cell)+atom_receipt%binding_increase+ &
+              atom_receipt%gas_ionization_increase
       enddo
       status=0
     end subroutine

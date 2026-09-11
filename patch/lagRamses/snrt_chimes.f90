@@ -23,10 +23,30 @@ module snrt_chimes
   public::chimes_molecular_factors,chimes_cell_band_cold_molecular
   public::chimes_molecular_temperature_max
   public::chimes_band_photo_molecular_groups
+  public::chimes_band_nodes,chimes_band_photo_molecular_phases
   public::chimes_cell_band_hot_atomic
   public::chimes_atomize,chimes_transition_supported,chimes_cell_transition_dark
   public::chimes_round_subnormal_survivors
   interface
+     integer(c_int) function chimes_band_nodes(handle,nd,number,energy,nn,ne) bind(C,name='snrt_chimes_band_nodes')
+       import
+       type(c_ptr),value::handle
+       integer(c_int),value::nd
+       real(c_double),intent(in)::number(nd,9),energy(nd,9)
+       real(c_double),intent(inout)::nn(nd,128,9),ne(nd,128,9)
+     end function
+     integer(c_int) function chimes_band_photo_molecular_phases(handle,mol,nd,nh,dt,chat,alpha,shield, &
+          pumping,old,number,energy,new,next_number,next_energy,ledger,grain_number,grain_energy, &
+          phase_alpha,directions,phase_energy,phase_moment) bind(C,name='snrt_chimes_band_photo_molecular_phases')
+       import
+       type(c_ptr),value::handle,mol
+       integer(c_int),value::nd
+       real(c_double),value::nh,dt,chat,pumping
+       real(c_double),intent(in)::alpha(128,9),shield(2),old(chimes_ns),number(nd,9),energy(nd,9)
+       real(c_double),intent(in)::phase_alpha(128,9,4),directions(3,nd)
+       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,9),next_energy(nd,9),ledger(10)
+       real(c_double),intent(inout)::grain_number(9),grain_energy(9),phase_energy(9,4),phase_moment(3,4)
+     end function
      integer(c_int) function chimes_transition_supported() bind(C,name='snrt_chimes_transition_supported')
        import
      end function
@@ -237,7 +257,8 @@ contains
   end function
 
   integer function chimes_cell_band_cold_molecular(handle,mol,nd,controls,elements,old,alpha,number,energy, &
-       temperature,new,next_number,next_energy,ledger,grain_number,grain_energy,transition,event_info) result(status)
+       temperature,new,next_number,next_energy,ledger,grain_number,grain_energy,transition,event_info, &
+       phase_alpha,directions,phase_energy,phase_moment) result(status)
     ! Cold split, optionally extended by the explicit energy-aware transition.
     ! Molecular carriers convert only through the budgeted atomization helper;
     ! this is NOT permission to extrapolate molecular rates or raise Tmol_K.
@@ -249,12 +270,18 @@ contains
     real(c_double),optional,intent(inout)::grain_number(9),grain_energy(9)
     logical,optional,intent(in)::transition
     real(c_double),optional,intent(inout)::event_info(2) ! event count, cost eV/cm3
+    real(c_double),optional,intent(in)::phase_alpha(128,9,4),directions(3,nd)
+    real(c_double),optional,intent(inout)::phase_energy(9,4),phase_moment(3,4)
+    real(c_double)::phase_e(9,4),phase_p(3,4)
     real(c_double)::photo(chimes_ns),chem(chimes_ns),pn(nd,9),pe(nd,9),budget(11),ctl(9),factors(3)
     real(c_double)::measured(11),charge,temp,gn(9),ge(9),post_photo,tmax
     real(c_double)::incoming(chimes_ns),projected(chimes_ns),tin,elapsed,root_time,cost,entry_cost,events(2)
     logical::general,atomic_remainder
     real(c_double),parameter::ev_erg=1.602176634d-12
     status=2
+    if(present(phase_alpha).neqv.present(directions))return
+    if(present(phase_alpha).neqv.present(phase_energy))return
+    if(present(phase_alpha).neqv.present(phase_moment))return
     tmax=chimes_molecular_temperature_max()
     general=.false.;if(present(transition))general=transition
     if(general.and.chimes_transition_supported()/=1)return
@@ -280,14 +307,22 @@ contains
        status=chimes_molecular_factors(tin,controls(1),controls(5),incoming,factors)
     endif
     if(status/=0)return
-    status=chimes_band_photo_molecular_groups(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
-         alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge)
+    if(present(phase_alpha))then
+       status=chimes_band_photo_molecular_phases(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
+            alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge, &
+            phase_alpha,directions,phase_e,phase_p)
+    else
+       status=chimes_band_photo_molecular_groups(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
+            alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge)
+    endif
     if(status/=0)return
     if(controls(4)==0)then
        temperature=controls(2);new=old;next_number=number;next_energy=energy;ledger=0
        if(present(grain_number))grain_number=0
        if(present(grain_energy))grain_energy=0
        if(present(event_info))event_info=0
+       if(present(phase_energy))phase_energy=0
+       if(present(phase_moment))phase_moment=0
        return
     endif
     status=8
@@ -327,6 +362,8 @@ contains
     if(present(grain_number))grain_number=gn
     if(present(grain_energy))grain_energy=ge
     if(present(event_info))event_info=events
+    if(present(phase_energy))phase_energy=phase_e
+    if(present(phase_moment))phase_moment=phase_p
   end function
 
   integer function chimes_cell_band_hot_atomic(handle,nd,controls,elements,old,solid_q,number,energy, &

@@ -1,11 +1,13 @@
 ! Shared definition for neutral, fixed-H charged and H-state PAH comparisons.
 ! Source, transport, chemistry and restart use the same state-dependent mass,
 ! excitation/binding energy and charge-resolved optical projections. H loss
-! is optional; carbon-skeleton destruction is not represented.
+! is optional; the named single-photon atomization limit has no survivors.
 module dust_pah_live_model
   use dust_mass_physics, only: dust_pah_nbin,dust_pah_nstate,dust_pah_charged, &
        dust_pah_molecule_g,dust_pah_hc,dust_injection_temperature,dust_pah_hydrogenated, &
-       dust_pah_charge_size,dust_pah_state_mass,dust_pah_h2_enabled
+       dust_pah_charge_size,dust_pah_state_mass,dust_pah_h2_enabled,dust_pah_catalytic,dust_pah_atomization
+  use dust_pah_atomization_physics, only: pah_atomization_a12,pah_atomization_carbon_ip,pah_atomization_ip, &
+       pah_atomization_threshold,pah_atomization_bond,pah_atomization_ev
   use dust_pah_radiation
   use dust_pah_hydrogen
   use dust_stochastic_physics, only: dust_pah_modes,dust_vibrational_curve
@@ -25,8 +27,28 @@ module dust_pah_live_model
   logical,save::charged=.false.
   logical,save::hydrogenated=.false.
   logical,save::molecular_capture=.false.
+  logical,save::molecular_abstraction=.false.
+  logical,save::atomization=.false.
   public::pah_live_prepare,pah_live_identity,pah_mass_excitation,pah_primary_alpha
+  public::pah_primary_supported,pah_injection_binding
 contains
+  logical function pah_primary_supported(energy_ev) result(ok)
+    real(real64),intent(in)::energy_ev
+    ok=energy_ev>=0.and.energy_ev<=pah_max_primary_ev
+    if(atomization.and.energy_ev>13.6d0)ok=ok.and.energy_ev*pah_atomization_ev>= &
+         pah_atomization_threshold(0d0,pah_atomization_bond(13),1)
+  end function
+
+  real(real64) function pah_injection_binding() result(specific_binding)
+    ! erg/g released ONLY by actual condensation from atomic gross ejecta.
+    ! This derived energy is not included in nonnegative stochastic levels.
+    specific_binding=0
+    ! Injection is neutral H12 in the hydrogenated state layout. Use its
+    ! actual carrier mass, as pah_injection_specific_u does, not the legacy
+    ! fixed-H molecular mass (which uses a different atomic-mass reference).
+    if(dust_pah_atomization())specific_binding= &
+         pah_atomization_a12/dust_pah_state_mass(12*dust_pah_nbin+1)
+  end function
   function pah_primary_alpha(population) result(alpha)
     real(real64),intent(in)::population(:)
     real(real64)::alpha(size(pah_primary_sigma))
@@ -59,11 +81,15 @@ contains
        if(charged.neqv.dust_pah_charged())ierr=1
        if(hydrogenated.neqv.dust_pah_hydrogenated())ierr=1
        if(molecular_capture.neqv.dust_pah_h2_enabled())ierr=1
+       if(molecular_abstraction.neqv.dust_pah_catalytic())ierr=1
+       if(atomization.neqv.dust_pah_atomization())ierr=1
        return
     endif
     ierr=1
     charged=dust_pah_charged();hydrogenated=dust_pah_hydrogenated()
     molecular_capture=dust_pah_h2_enabled()
+    molecular_abstraction=dust_pah_catalytic()
+    atomization=dust_pah_atomization()
     pah_max_primary_ev=merge(13.6d0,4d0,charged)
     if(.not.snrt_dust_contract_loaded.or.snrt_dust_contract_version/=4)return
     call get_environment_variable('SNRT_PAH_NEUTRAL_TABLE',path,status=status)
@@ -78,6 +104,7 @@ contains
        if(size(ei)/=size(e))return
        if(any(ei/=e).or.any(wi/=w))return
     endif
+    if(atomization)pah_max_primary_ev=e(size(e))
     n=snrt_dust_contract_number_ir;nt=snrt_dust_contract_number_temperature
     if(n<2.or.nt<2)return
     if(allocated(pah_ir_sigma))deallocate(pah_ir_sigma,pah_ir_supported,pah_primary_sigma, &
@@ -103,14 +130,14 @@ contains
           pah_ir_sigma(i)=sample(x,cs)
           if(charged)pah_ir_ion_sigma(i)=sample(x,ci)
        endif
-       if(charged.and.x>pah_max_primary_ev)then
+       if(charged.and..not.pah_primary_supported(x))then
           pah_ir_sigma(i)=0;pah_ir_ion_sigma(i)=0;pah_ir_supported(i)=0
        endif
     enddo
     pah_primary_sigma=0
     do i=1,size(pah_primary_sigma)
        x=snrt_dust_contract_absorption_mean_energy_ev(i)
-       if(x>=e(1).and.x<=pah_max_primary_ev)then
+       if(x>=e(1).and.pah_primary_supported(x))then
           pah_primary_sigma(i)=sample(x,cs)
           if(charged)pah_primary_ion_sigma(i)=sample(x,ci)
        endif
@@ -151,7 +178,7 @@ contains
           call pah_hydrogen_parameters(q-1,bond,attach,status)
           if(status/=0)return
           call pah_hydrogen_prepare(pah_h_models(q),pah_charge_models(q),q-1,.0005d0*1.602176634d-12,status, &
-               h2_capture=molecular_capture)
+               h2_capture=molecular_capture,h2_abstraction=molecular_abstraction)
           if(status/=0)return
           do nh=0,13
              offset=((q-1)*14+nh)*dust_pah_nbin
@@ -200,6 +227,13 @@ contains
        if(ierr/=0)return
        values=[4d0,values(2:),14d0,1.66d-24,h1,h2]
        if(molecular_capture)values(1)=5d0
+       if(molecular_abstraction)values(1)=6d0
+    endif
+    if(atomization)then
+       ! Unit individual-photon destruction yield; complete local retention;
+       ! atomic-donor formation heat; monochromatic fixed-group closure.
+       values=[7d0,values(2:),pah_max_primary_ev,pah_atomization_a12,pah_atomization_carbon_ip, &
+            pah_atomization_ip,13.6d0,1d0,1d0,1d0,1d0]
     endif
   end subroutine
 end module

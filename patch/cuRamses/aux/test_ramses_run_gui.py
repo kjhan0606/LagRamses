@@ -2,6 +2,7 @@
 """Bounded setup-only tests: python3 -B -m unittest discover -s patch/cuRamses/aux -p test_ramses_run_gui.py -v."""
 import contextlib
 import io
+import json
 import os
 import re
 import shutil
@@ -289,6 +290,16 @@ class WizardTests(unittest.TestCase):
                     'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
                     'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
                     'PAH stochastic population':'pah_h2_rehydrogenation_v1'})
+                _,catalytic,_=collect({'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                    'Output directory':str(root/'catalytic'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                    'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                    'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                    'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                    'PAH stochastic population':'pah_h2_catalytic_v1'})
+            self.assertIn("dust_pah_model='pah_h2_catalytic_v1'",catalytic[str(root/'catalytic/myrun.nml')])
+            self.assertIn('NVAR=3771',catalytic[str(root/'catalytic/README.txt')])
+            self.assertIn('1.2781 eV/event',catalytic[str(root/'catalytic/README.txt')])
+            self.assertIn('SNRT_PAH_ION_TABLE=',catalytic[str(root/'catalytic/myrun.env.sh')])
             self.assertIn("dust_pah_model='pah_h2_rehydrogenation_v1'",molecular[str(root/'molecular/myrun.nml')])
             self.assertIn('NVAR=3771',molecular[str(root/'molecular/README.txt')])
             self.assertIn('M13 bound rate',molecular[str(root/'molecular/README.txt')])
@@ -298,6 +309,11 @@ class WizardTests(unittest.TestCase):
             molecular_messages=mkrun.rng.validate_params(molecular_values)
             self.assertFalse(any(m.level=='ERROR' for m in molecular_messages))
             self.assertTrue(any('Vacancy-refilling H2' in m.msg for m in molecular_messages))
+            catalytic_values=dict(molecular_values,dust_pah_model='pah_h2_catalytic_v1')
+            catalytic_messages=mkrun.rng.validate_params(catalytic_values)
+            self.assertFalse(any(m.level=='ERROR' for m in catalytic_messages))
+            self.assertTrue(any('1.2781 eV/event' in m.msg for m in catalytic_messages))
+            self.assertTrue(any('H13+H' in m.msg for m in catalytic_messages))
             for key,value in [('dust_relative_motion',True),('dust_iron_model','fe_electric_compare_v1'),('cosmo',True)]:
                 self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(molecular_values,**{key:value}))))
             self.assertIn("dust_pah_model='pah_hydrogen_m13_dl01_v1'",hydrogen[str(root/'hydrogen/myrun.nml')])
@@ -327,6 +343,108 @@ class WizardTests(unittest.TestCase):
             for key,value in [('dust_pah_model','none'),('cosmo',True),('dust_mass_enabled',False),
                               ('dust_pah_condensation',float('nan')),('dust_sublimation','gd89_graphite_bulk_v1')]:
                 self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**{key:value}))))
+
+    @contextlib.contextmanager
+    def pah_atomization_comparison(self):
+        with comparison_workspace() as root:
+            binary=root/'new PAH atomization binary'
+            binary.write_text('not executable: atomization frontend test only\n')
+            contract=root/'simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml'
+            data=root/'atomization chimes';data.mkdir()
+            for name in ['main.hdf5','PAHneu_30.dat','PAHion_30.dat']+[
+                    f'group_{i:02d}.hdf5' for i in range(1,10)]:
+                (data/name).touch()
+            settings={'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':'chimes_neq_v1',
+                'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                'PAH stochastic population':'pah_atomization_limit_v1'}
+            env={'SNRT_CHIMES_BINARY':str(binary),'SNRT_CHIMES_MAIN_DATA':str(data/'main.hdf5'),
+                'SNRT_CHIMES_GROUP_DIR':str(data),'SNRT_CHIMES_SPECTRAL_MODEL':'fixed',
+                'SNRT_DUST_PAH_BINARY':str(root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'),
+                'SNRT_DUST_PAH_CONTRACT':str(contract),'SNRT_DUST_PAH_ATOMIZATION_BINARY':str(binary),
+                'SNRT_PAH_NEUTRAL_TABLE':str(data/'PAHneu_30.dat'),'SNRT_PAH_ION_TABLE':str(data/'PAHion_30.dat')}
+            with mock.patch.dict(os.environ,env):
+                yield root,settings,binary
+
+    def test_pah_atomization_emission_cli_gui_and_narrow_domain(self):
+        with self.pah_atomization_comparison() as (root,settings,binary):
+            menus=[]
+            original=gui.ReplayUI.ask_choice
+            def ask_choice(ui,label,options,default):
+                if label=='PAH stochastic population':menus.append((set(options),default))
+                return original(ui,label,options,default)
+            with mock.patch('subprocess.run',side_effect=AssertionError('setup launches')), \
+                    mock.patch.object(gui.ReplayUI,'ask_choice',ask_choice):
+                answers,files,report=collect(settings)
+                responses=iter(answers)
+                def terminal_input(_):
+                    value=next(responses)
+                    return ('yes' if value else 'no') if isinstance(value,bool) else str(value)
+                cli={}
+                with mock.patch('builtins.input',side_effect=terminal_input), contextlib.redirect_stdout(io.StringIO()):
+                    mkrun.generate_run(write_text=cli.__setitem__)
+            self.assertTrue(menus)
+            for choices,default in menus:
+                self.assertEqual(default,'none')
+                self.assertTrue({'pah_h2_catalytic_v1','pah_atomization_limit_v1'}<=choices)
+            self.assertEqual(cli,files)
+            self.assertFalse((root/'fresh').exists())
+            text=files[str(root/'fresh/myrun.nml')]
+            self.assertIn("dust_pah_model='pah_atomization_limit_v1'",text)
+            self.assertNotIn("dust_pah_model='pah_h2_catalytic_v1'",text)
+            raw,_=mkrun.rng.parse_namelist(text)
+            values=mkrun.rng.import_to_values(raw)
+            messages=mkrun.rng.validate_params(values)
+            self.assertFalse(any(m.level=='ERROR' for m in messages+report['messages']))
+            warnings='\n'.join(m.msg for m in messages)
+            for token in ['869.634','17/34/106/4023','3584','1.2781','actual injection','not broadband']:
+                self.assertIn(token,warnings)
+            readme=files[str(root/'fresh/README.txt')]
+            for token in ['pah_atomization_limit_v1','pah_h2_catalytic_v1','3584','DUST_PAH_H=1',
+                          '10--10000 K','869.634','17/34/106/4023','atomic C/C+/H','actual source injection',
+                          'no new passives','not the full 500--2000 eV band','NOT broadband',
+                          'No Fe/drift or spectral-node modes']:
+                self.assertIn(token,readme)
+            self.assertEqual(set(re.findall(r'NVAR\s*(?:>=|=)\s*(\d+)',readme)),{'3771'})
+            self.assertNotIn('NO carbon-skeleton destruction',readme)
+            self.assertNotIn('Photoelectric gas heating is disabled:',readme)
+            self.assertNotIn('BPASS is an independent population;',readme)
+            self.assertIn(str(binary),readme)
+            environment=files[str(root/'fresh/myrun.env.sh')]
+            for key in ('SNRT_PAH_NEUTRAL_TABLE','SNRT_PAH_ION_TABLE'):
+                self.assertIn(key+'=',environment)
+                self.assertIn(os.environ[key],environment)
+            self.assertIn('SNRT_SPECTRAL_MODEL=fixed',environment)
+            self.assertNotIn('SNRT_STELLAR_SED=',environment)
+            for edit in ({'dust_relative_motion':True},{'dust_iron_model':'fe_electric_compare_v1'},
+                         {'cosmo':True},{'dust_cooling':'none'},{'dust_mass_enabled':False}):
+                self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**edit))))
+
+    def test_pah_atomization_requires_new_binary_tables_and_fixed_groups(self):
+        with self.pah_atomization_comparison() as (root,settings,binary):
+            for key in ('SNRT_DUST_PAH_ATOMIZATION_BINARY','SNRT_PAH_NEUTRAL_TABLE','SNRT_PAH_ION_TABLE'):
+                for value in ('',str(root),str(root/'absent')):
+                    with self.subTest(key=key,value=value), mock.patch.dict(os.environ,{key:value}):
+                        with self.assertRaisesRegex(ValueError,key):
+                            collect(settings)
+            # Supplying the new binary through its actual prompt also works;
+            # SNRT_DUST_PAH_BINARY is deliberately neither needed nor reused.
+            with mock.patch.dict(os.environ,{'SNRT_DUST_PAH_ATOMIZATION_BINARY':'','SNRT_DUST_PAH_BINARY':''}):
+                _,_,report=collect(dict(settings,**{'PAH atomization comparison binary (new native build)':str(binary)}))
+                self.assertFalse(any(m.level=='ERROR' for m in report['messages']))
+            for edit in ({'Separate metallic Fe':'fe_electric_compare_v1'},
+                         {'Enable experimental first-order dust/gas relative motion?':True,
+                          'Neutral hard-sphere gas collision cross section [cm2]; explicit positive value required':2e-15}):
+                with self.assertRaisesRegex(ValueError,'exclude Fe and relative'):
+                    collect(dict(settings,**edit))
+            for spectral in ('chimes_cold_d03_maxent128_fs2010_v1','chimes_transition_d03_maxent128_fs2010_v1'):
+                with mock.patch.dict(os.environ,{'SNRT_CHIMES_SPECTRAL_MODEL':spectral}):
+                    with self.assertRaisesRegex(ValueError,'atomization requires CHIMES and fixed groups'):
+                        collect(settings)
+            with self.assertRaisesRegex(ValueError,'forced CUDA'):
+                collect(dict(settings,**{'Dust material / IR backend':'cuda'}))
 
     def test_iron_comparison_selection(self):
         with comparison_workspace() as root:
@@ -365,6 +483,119 @@ class WizardTests(unittest.TestCase):
                 invalid=dict(values,dust_fe_condensation=.2)
                 invalid[key]=value
                 self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(invalid)))
+
+    @contextlib.contextmanager
+    def fe_photon_comparison(self, model='fe_uv_cycle_v1', cooling='chimes_neq_v1'):
+        with comparison_workspace() as root:
+            binary=root/'new Fe photon binary'
+            binary.write_text('not executable: new Fe photon setup only\n')
+            contract=root/'simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml'
+            data=root/'fe photon chimes';data.mkdir()
+            (data/'main.hdf5').touch()
+            for i in range(1,10):
+                (data/f'group_{i:02d}.hdf5').touch()
+            settings={'Run mode':'comparison_ccsn','CCSN physical input':'agb7_pulses',
+                'Output directory':str(root/'fresh'),'Use the fixed reference-only RT/feedback/dust comparison?':True,
+                'Evolve dust mass (condensation, cold growth, thermal sputtering)?':True,
+                'Dust mass model':'carbon_olivine_2size_v1','Dust cooling closure':cooling,
+                'Dust material model':'dl01_composition_v1','Dust optical model':'d03_transport_v1',
+                'Separate metallic Fe':model}
+            env={'SNRT_CHIMES_BINARY':str(binary),'SNRT_CHIMES_MAIN_DATA':str(data/'main.hdf5'),
+                 'SNRT_CHIMES_GROUP_DIR':str(data),'SNRT_CHIMES_SPECTRAL_MODEL':'fixed',
+                 'SNRT_DUST_IRON_BINARY':str(root/'.cosmic-ray.kyySgK/ramses_dust_atomic3d'),
+                 'SNRT_DUST_IRON_CONTRACT':str(contract),
+                 'SNRT_DUST_FE_UV_BINARY':str(binary),'SNRT_DUST_FE_UV_CONTRACT':str(contract),
+                 'SNRT_DUST_FE_THERMAL_BINARY':str(binary),'SNRT_DUST_FE_THERMAL_CONTRACT':str(contract)}
+            with mock.patch.dict(os.environ,env):
+                yield root,settings,binary,contract
+
+    def test_fe_photon_selectors_emit_actual_model_and_native_requirements(self):
+        for model,cooling,nvar in [('fe_thermal_limit_v1','none',32),
+                ('fe_thermal_limit_v1','chimes_neq_v1',189),('fe_uv_cycle_v1','chimes_neq_v1',189)]:
+            with self.subTest(model=model,cooling=cooling), self.fe_photon_comparison(model,cooling) as (root,settings,binary,_):
+                menus=[]
+                original=gui.ReplayUI.ask_choice
+                def ask_choice(ui,label,options,default):
+                    if label=='Separate metallic Fe': menus.append((set(options),default))
+                    return original(ui,label,options,default)
+                with mock.patch('subprocess.run',side_effect=AssertionError('setup launches')), \
+                        mock.patch.object(gui.ReplayUI,'ask_choice',ask_choice):
+                    answers,files,report=collect(settings)
+                    responses=iter(answers)
+                    def terminal_input(_):
+                        value=next(responses)
+                        return ('yes' if value else 'no') if isinstance(value,bool) else str(value)
+                    cli={}
+                    with mock.patch('builtins.input',side_effect=terminal_input), contextlib.redirect_stdout(io.StringIO()):
+                        mkrun.generate_run(write_text=cli.__setitem__)
+                self.assertTrue(menus)
+                for choices,default in menus:
+                    self.assertEqual(default,'none')
+                    self.assertIn('fe_electric_compare_v1',choices)
+                    self.assertIn('fe_thermal_limit_v1',choices)
+                    self.assertEqual('fe_uv_cycle_v1' in choices,cooling=='chimes_neq_v1')
+                self.assertEqual(cli,files)
+                self.assertFalse((root/'fresh').exists())
+                text=files[str(root/'fresh/myrun.nml')]
+                self.assertIn(f"dust_iron_model='{model}'",text)
+                self.assertNotIn("dust_iron_model='fe_electric_compare_v1'",text)
+                parsed,_=mkrun.rng.parse_namelist(text)
+                values=mkrun.rng.import_to_values(parsed)
+                self.assertEqual(values['dust_iron_model'],model)
+                self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(values)))
+                self.assertFalse(any(m.level=='ERROR' for m in report['messages']))
+                readme=files[str(root/'fresh/README.txt')]
+                self.assertIn(f'NVAR={nvar}',readme)
+                self.assertIn(model,readme)
+                self.assertIn('no old Fe binary fallback',readme)
+                self.assertNotIn('primary group representative energy<=4 eV',readme)
+                self.assertNotIn('no separate Fe dust.',readme)
+                self.assertNotIn('BPASS is an independent population;',readme)
+                self.assertNotIn('Dust gas thermal exchange: none',readme)
+                if model=='fe_uv_cycle_v1':
+                    self.assertIn('OML/HD2017',readme)
+                    self.assertIn('v4 exchange-enabled',readme)
+                    self.assertNotIn('Photoelectric gas heating is disabled:',readme)
+                else:
+                    self.assertIn('no photoelectron escape or PE gas heating',readme)
+                    self.assertIn('10000 eV',readme)
+                self.assertIn(str(binary),'\n'.join(files.values()))
+                environment=files[str(root/'fresh/myrun.env.sh')]
+                self.assertIn('SNRT_SPECTRAL_MODEL=fixed',environment)
+                self.assertNotIn('SNRT_STELLAR_SED=',environment)
+                for edit in ({'dust_relative_motion':True},{'dust_pah_model':'pah_neutral_absolute_v1'},
+                             {'dust_injection_temperature':301},{'dust_iron_model':'unknown'}):
+                    self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(dict(values,**edit))))
+                if model=='fe_uv_cycle_v1':
+                    static=dict(values,dust_cooling='none',dust_condensation='0,0,0',dust_fe_condensation=0,
+                                dust_fe_kinetics=False,dust_fe_sticking=0)
+                    static.update({k:False for k in ('dust_growth','dust_sputtering','dust_coagulation','dust_shattering','dust_sn_shocks')})
+                    self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(static)))
+
+    def test_fe_photon_explicit_paths_and_excluded_runtime_modes(self):
+        for model,prefix in [('fe_thermal_limit_v1','SNRT_DUST_FE_THERMAL'),('fe_uv_cycle_v1','SNRT_DUST_FE_UV')]:
+            with self.subTest(model=model), self.fe_photon_comparison(model) as (root,settings,binary,contract):
+                for suffix in ('_BINARY','_CONTRACT'):
+                    for value in ('',str(root),str(root/'absent')):
+                        # Old Fe paths are valid, but may never serve as fallback.
+                        with self.subTest(key=prefix+suffix,path=value), mock.patch.dict(os.environ,{prefix+suffix:value}):
+                            with self.assertRaisesRegex(ValueError,prefix+suffix):
+                                collect(settings)
+                for edit in ({'PAH stochastic population':'pah_neutral_absolute_v1'},
+                             {'Enable experimental first-order dust/gas relative motion?':True,
+                              'Neutral hard-sphere gas collision cross section [cm2]; explicit positive value required':2e-15}):
+                    with self.assertRaisesRegex(ValueError,'no PAH or relative motion'):
+                        collect(dict(settings,**edit))
+                with mock.patch.dict(os.environ,{'SNRT_CHIMES_SPECTRAL_MODEL':'chimes_cold_d03_maxent128_fs2010_v1'}):
+                    with self.assertRaisesRegex(ValueError,'SPECTRAL_MODEL=fixed'):
+                        collect(settings)
+                with self.assertRaisesRegex(ValueError,'forced CUDA'):
+                    collect(dict(settings,**{'Dust material / IR backend':'cuda'}))
+                if model=='fe_uv_cycle_v1':
+                    no_exchange=root/'simulation/snrt/config/dust_dl01_bulk_030_scattering_reference_v4.nml'
+                    with mock.patch.dict(os.environ,{prefix+'_CONTRACT':str(no_exchange)}):
+                        with self.assertRaisesRegex(ValueError,'v4 exchange-enabled'):
+                            collect(settings)
 
     def test_static_iron_without_chimes(self):
         with comparison_workspace() as root:
@@ -442,7 +673,9 @@ class WizardTests(unittest.TestCase):
                  'SNRT_CHIMES_BAND_TABLE':str(data/'atomic.h5'),
                  'SNRT_CHIMES_MOLECULAR_TABLE':str(data/'molecular.h5'),'SNRT_CHIMES_SPECTRAL_MODEL':model}
             with mock.patch.dict(os.environ,env):
-                _,files,_=collect(choices)
+                _,files,_=collect(dict(choices,**{
+                    'Enable energy-equivalent ambient SN dust destruction (uncalibrated comparison)?':True,
+                    'Enable grain source condensation and SN shock processing?':True}))
                 self.assertIn('SNRT_SPECTRAL_MODEL='+model,files[str(root/'fresh/myrun.env.sh')])
                 self.assertIn('SNRT_CHIMES_MOLECULAR_TABLE=',files[str(root/'fresh/myrun.env.sh')])
                 raw,_=mkrun.rng.parse_namelist(files[str(root/'fresh/myrun.nml')])
@@ -479,8 +712,12 @@ class WizardTests(unittest.TestCase):
                     self.assertIn('NENER=0',coupled[str(root/'fresh/README.txt')])
                     self.assertIn('SNRT_AGN_MODEL=partition_reference_v1',coupled[str(root/'fresh/myrun.env.sh')])
                     self.assertFalse(any(m.level=='ERROR' for m in report['messages']))
+                    self.assertEqual(report['values']['dust_condensation'],'0d0,0d0,0d0')
+                    self.assertIs(report['values']['dust_sn_shocks'],False)
+                    self.assertFalse(any(m.level=='ERROR' for m in mkrun.rng.validate_params(
+                        dict(report['values'],dust_condensation='0.,.2,.15'))))
                     for bad in ({'create_sinks':True},{'cr_enabled':True},{'mad_jet':True},
-                                {'dust_sn_shocks':True},{'dust_condensation':'0.,.2,.15'},
+                                {'dust_sn_shocks':True},{'dust_sublimation':'gd89_graphite_bulk_v1'},
                                 {'dust_relative_motion':True},{'accretion_scheme':'threshold'}):
                         self.assertTrue(any(m.level=='ERROR' for m in
                             mkrun.rng.validate_params(dict(report['values'],**bad))))
@@ -492,9 +729,80 @@ class WizardTests(unittest.TestCase):
                     self.assertIs(values['dust_sn_shocks'],False)
                     self.assertIn('dust_condensation=0d0,0d0,0d0',dynamic[str(root/'fresh/myrun.nml')])
                     self.assertIn('Evolving co-advected C/silicate masses',dynamic[str(root/'fresh/README.txt')])
+                    with_sink['Enable grain source condensation and SN shock processing?']=True
+                    with mock.patch.dict(os.environ,{'SNRT_CHIMES_SINK_BINARY':env['SNRT_CHIMES_BINARY']}):
+                        _,injected,report=collect(with_sink)
+                    self.assertEqual(report['values']['dust_condensation'],'0d0,.2d0,.15d0')
+                    self.assertIs(report['values']['dust_sn_shocks'],False)
+                    self.assertIn('optional condensation only',injected[str(root/'fresh/README.txt')])
+                    with mock.patch.dict(os.environ,{'SNRT_CHIMES_BINARY':''}):
+                        with self.assertRaisesRegex(ValueError,'SNRT_CHIMES_BINARY'):
+                            collect(choices)
                 with mock.patch.dict(os.environ,{'SNRT_CHIMES_MOLECULAR_TABLE':''}):
                     with self.assertRaisesRegex(ValueError,'MOLECULAR_TABLE'):
                         collect(choices)
+
+    def test_kind7_source_sublimation_relative_admission(self):
+        with self.relative_comparison() as (root,settings):
+            data=root/'relative chimes'
+            for name in ('atomic.h5','molecular.h5'):
+                (data/name).touch()
+            env={'SNRT_CHIMES_SPECTRAL_MODEL':'chimes_transition_d03_maxent128_fs2010_v1',
+                 'SNRT_CHIMES_BAND_TABLE':str(data/'atomic.h5'),
+                 'SNRT_CHIMES_MOLECULAR_TABLE':str(data/'molecular.h5')}
+            source_prompt='Enable grain source condensation and SN shock processing?'
+            sink_prompt='Enable existing-sink Bondi/AGN with coadvected transition dust (NENER=0)?'
+            old_shock_prompt='Enable energy-equivalent ambient SN dust destruction (uncalibrated comparison)?'
+            relative_prompt='Enable experimental first-order dust/gas relative motion?'
+            with mock.patch.dict(os.environ,env):
+                for relative,sublimation in ((False,'none'),(False,'gd89_graphite_bulk_v1'),
+                        (False,'gd89_xu25_olivine_rt_v1'),(True,'none'),(True,'gd89_xu25_olivine_v1')):
+                    with self.subTest(relative=relative,sublimation=sublimation):
+                        choices=dict(settings,**{relative_prompt:relative,'Dust sublimation':sublimation,
+                                                source_prompt:True})
+                        answers,files,report=collect(choices)
+                        values=report['values'];readme=files[str(root/'fresh/README.txt')]
+                        self.assertFalse(any(m.level=='ERROR' for m in report['messages']))
+                        self.assertEqual(values['dust_condensation'],'0d0,.2d0,.15d0')
+                        self.assertIs(values['dust_sn_shocks'],True)
+                        self.assertIs(values['dust_growth'],False)
+                        self.assertEqual(values.get('dust_sublimation','none'),sublimation)
+                        self.assertEqual(values.get('dust_relative_motion',False),relative)
+                        self.assertIn('first-order split, not a simultaneous opacity',readme)
+                        self.assertIn('SNRT_BACKEND=openmp',files[str(root/'fresh/myrun.env.sh')])
+                        self.assertIn('SNRT_DUST_BACKEND=openmp',files[str(root/'fresh/myrun.env.sh')])
+                        self.assertNotIn('no condensation/SN shocks',readme)
+                        if relative:
+                            self.assertIn('Stationary primary scattering is disabled',readme)
+                            self.assertIn('no cross-group transfer',readme)
+                            self.assertTrue(any(m.level=='ERROR' for m in mkrun.rng.validate_params(
+                                dict(values,dust_sublimation='gd89_xu25_olivine_rt_v1'))))
+                        # Replay one completed walk: the source question occurs
+                        # once, defaults off, and never replaces a sink answer.
+                        prompts=[];original=gui.ReplayUI.ask_bool
+                        def record(ui,label,default=False):
+                            prompts.append((label,default))
+                            return original(ui,label,default)
+                        with mock.patch.object(gui.ReplayUI,'ask_bool',record):
+                            mkrun.generate_run(gui.ReplayUI(answers),lambda *_:None)
+                        self.assertEqual(prompts.count((source_prompt,False)),1)
+                        self.assertNotIn((old_shock_prompt,False),prompts)
+                        self.assertEqual((sink_prompt,False) in prompts,not relative and sublimation=='none')
+                # The independent source opt-in must not inherit the old
+                # template's .2/.15 condensation, even with relative dynamics.
+                _,files,report=collect(settings)
+                self.assertEqual(report['values']['dust_condensation'],'0d0,0d0,0d0')
+                self.assertIs(report['values']['dust_sn_shocks'],False)
+                self.assertIn('efficiencies wind/AGB/SNII=0/0/0',files[str(root/'fresh/README.txt')])
+                for change in ({'Separate metallic Fe':'fe_electric_compare_v1'},
+                               {'PAH stochastic population':'pah_neutral_absolute_v1'}):
+                    with self.subTest(change=change), self.assertRaisesRegex(ValueError,'without Fe or PAH'):
+                        collect(dict(settings,**change))
+                with mock.patch.dict(os.environ,{'SNRT_CHIMES_SPECTRAL_MODEL':'chimes_cold_d03_maxent128_fs2010_v1'}):
+                    with self.assertRaisesRegex(ValueError,'fixed co-advected'):
+                        collect(settings)
+                    with self.assertRaisesRegex(ValueError,'fixed co-advected'):
+                        collect(dict(settings,**{relative_prompt:False,'Dust sublimation':'gd89_graphite_bulk_v1'}))
 
     def test_chimes_live_selection(self):
         with comparison_workspace() as root:
@@ -847,6 +1155,116 @@ class WizardTests(unittest.TestCase):
             for path, text in files.items():
                 self.assertEqual(Path(path).read_text(), text)
 
+    @staticmethod
+    def radioactive_lc18_values():
+        # Setup-only paths: native runtime verifies the actual matched LC18
+        # companion/history contents. No fake scientific payload or executable.
+        return dict(hydro=True, metal=True, pic=True, cosmo=False,
+                    gpu_hydro=False, mhd_enabled=False, scheme='muscl',
+                    use_sgs=False, dust_mass_enabled=False,
+                    dust_cooling='none', outformat='hdf5', informat='hdf5',
+                    feedback_mode='channel_resolved', fate_policy='user_selected_model_v1',
+                    high_mass_preset='source_consistent',
+                    high_mass_history_path='/input/LC18 gas/history.nml',
+                    radioactive_model='lc18_al26_fe60_transparent_v1',
+                    radioactive_companion_path='/input/LC18 gas/isotopes_v2.nml',
+                    population_model='single_star_ssp', yield_source_basis='per_star_cumulative',
+                    binary_fraction=0., imf_id=2, imf_mass_min_msun=.08,
+                    imf_mass_max_msun=120., channel_mass_min_msun='13,1,13,3,140',
+                    channel_mass_max_msun='120,8,120,8,260',
+                    use_wind=True, use_agb=False, use_snii=True, use_snia=False, use_pisn=False)
+
+    def test_radioactive_defaults_and_shared_wizard_remain_off(self):
+        rng = mkrun.rng
+        model = rng.PARAM_BY_NAME['radioactive_model']
+        companion = rng.PARAM_BY_NAME['radioactive_companion_path']
+        self.assertEqual(model.default, 'none')
+        self.assertEqual(model.choices, ['none', 'lc18_al26_fe60_transparent_v1'])
+        self.assertEqual(companion.default, '')
+        self.assertEqual(model.group, 'STELLAR_ENRICHMENT_PARAMS')
+        self.assertEqual(companion.group, model.group)
+        with mock.patch('subprocess.run', side_effect=AssertionError('setup launches')), \
+                mock.patch('builtins.open', side_effect=AssertionError('preview writes')):
+            _, files, report = collect({'Run mode': 'hydro', 'IC pipeline': 'none'})
+        self.assertEqual(report['values']['radioactive_model'], 'none')
+        self.assertEqual(report['values'].get('radioactive_companion_path', ''), '')
+        for text in files.values():
+            self.assertNotIn("radioactive_model='lc18_al26_fe60_transparent_v1'", text)
+        text = rng.format_namelist(dict(radioactive_model='none', radioactive_companion_path=''))
+        self.assertNotIn('radioactive_model=', text)
+        self.assertNotIn('radioactive_companion_path=', text)
+
+    def test_radioactive_gas_lc18_emission_round_trip_and_gui_edit(self):
+        rng = mkrun.rng
+        valid = self.radioactive_lc18_values()
+        for restart in (0, 2):
+            with self.subTest(restart=restart):
+                values = dict(valid, nrestart=restart)
+                messages = rng.validate_params(values)
+                self.assertFalse([m for m in messages if m.level == 'ERROR'])
+                self.assertTrue(any('RADIOACTIVE=1' in m.msg and 'noncosmo' in m.msg and 'no decay heating' in m.msg
+                                    for m in messages))
+                text = rng.format_namelist(values)
+                self.assertIn("radioactive_model='lc18_al26_fe60_transparent_v1'", text)
+                self.assertIn("radioactive_companion_path='/input/LC18 gas/isotopes_v2.nml'", text)
+                parsed, _ = rng.parse_namelist(text)
+                imported = rng.import_to_values(parsed)
+                for key, value in values.items():
+                    self.assertEqual(imported.get(key, rng.PARAM_BY_NAME[key].default), value, key)
+                self.assertFalse([m for m in rng.validate_params(imported) if m.level == 'ERROR'])
+        omitted_scheme = dict(valid)
+        del omitted_scheme['scheme']
+        self.assertFalse([m for m in rng.validate_params(omitted_scheme) if m.level == 'ERROR'])
+        question = gui.Question('edit', 'Advanced namelist parameters', {})
+        edited = gui.parse_answer(question, json.dumps(valid), mkrun)
+        self.assertEqual(edited, valid)
+        answers, _, _ = collect({'Run mode': 'hydro', 'IC pipeline': 'none',
+            'enable cooling + star formation physics?': False,
+            'Open the full parameter editor for fine-tuning before writing?': True})
+        ui = gui.ReplayUI(answers)
+        files = {}
+        with mock.patch.object(ui, 'edit', return_value=edited), \
+                mock.patch('subprocess.run', side_effect=AssertionError('setup launches')), \
+                mock.patch('builtins.open', side_effect=AssertionError('preview writes')):
+            report = mkrun.generate_run(ui, files.__setitem__)
+        self.assertFalse([m for m in report['messages'] if m.level == 'ERROR'])
+        nml = next(text for name, text in files.items() if name.endswith('.nml'))
+        parsed, _ = rng.parse_namelist(nml)
+        imported = rng.import_to_values(parsed)
+        for key in ('radioactive_model', 'radioactive_companion_path', 'high_mass_history_path'):
+            self.assertEqual(imported[key], valid[key])
+
+    def test_radioactive_invalid_pairs_legacy_dust_and_no_write(self):
+        valid = self.radioactive_lc18_values()
+        answers, _, _ = collect({'Run mode': 'hydro', 'IC pipeline': 'none',
+            'enable cooling + star formation physics?': False,
+            'Open the full parameter editor for fine-tuning before writing?': True})
+        cases = [({'radioactive_model': 'unknown'}, 'Unknown radioactive'),
+                 ({'radioactive_companion_path': ''}, 'model and companion path'),
+                 ({'radioactive_model': 'none'}, 'model and companion path'),
+                 ({'feedback_mode': 'legacy'}, 'Radioactive comparison requires'),
+                 ({'dust_mass_enabled': True}, 'Radioactive comparison requires'),
+                 ({'use_sgs': True}, 'Radioactive comparison requires'),
+                 ({'cosmo': True}, 'Radioactive comparison requires'),
+                 ({'gpu_hydro': True}, 'Radioactive comparison requires'),
+                 ({'mhd_enabled': True}, 'Radioactive comparison requires'),
+                 ({'scheme': 'plmde'}, 'Radioactive comparison requires'),
+                 ({'hydro': False}, 'Radioactive comparison requires'),
+                 ({'metal': False}, 'Radioactive comparison requires'),
+                 ({'high_mass_history_path': ''}, 'Radioactive comparison requires')]
+        for changes, expected in cases:
+            with self.subTest(changes=changes):
+                values = dict(valid, **changes)
+                errors = [m.msg for m in mkrun.rng.validate_params(values) if m.level == 'ERROR']
+                self.assertTrue(any(expected in message for message in errors), errors)
+                ui, files = gui.ReplayUI(answers), {}
+                with mock.patch.object(ui, 'edit', return_value=values), \
+                        mock.patch('subprocess.run', side_effect=AssertionError('setup launches')), \
+                        mock.patch('builtins.open', side_effect=AssertionError('invalid setup writes')):
+                    with self.assertRaisesRegex(ValueError, expected):
+                        mkrun.generate_run(ui, files.__setitem__)
+                self.assertEqual(files, {})
+
     def test_high_mass_history_runtime_contract(self):
         rng = mkrun.rng
         valid = dict(feedback_mode='channel_resolved', fate_policy='user_selected_model_v1',
@@ -886,6 +1304,15 @@ class WizardTests(unittest.TestCase):
                     channel_mass_min_msun='14d0,1d0,14d0,3d0,14d0',
                     channel_mass_max_msun='600d0,8d0,600d0,8d0,600d0')
         self.assertFalse([m for m in rng.validate_params(pair) if m.level == 'ERROR'])
+        effective = dict(pair, population_model='effective_ssp', use_agb=True, use_snia=True,
+                         channel_mass_min_msun='2,2,2,3,2',
+                         channel_mass_max_msun='600,600,600,8,600')
+        self.assertIn('effective_ssp', rng.PARAM_BY_NAME['population_model'].choices)
+        self.assertFalse([m for m in rng.validate_params(effective) if m.level == 'ERROR'])
+        parsed, _ = rng.parse_namelist(rng.format_namelist(effective))
+        self.assertEqual(rng.import_to_values(parsed)['population_model'], 'effective_ssp')
+        for edit in (dict(binary_fraction=.5), dict(use_snia=False), dict(use_agb=False)):
+            self.assertTrue([m for m in rng.validate_params(dict(effective, **edit)) if m.level == 'ERROR'])
         for edit in (dict(imf_mass_max_msun=120), dict(high_mass_preset='wind_only_collapse'),
                      dict(channel_mass_max_msun='600,8,600,8,599'), dict(channel_mass_min_msun='14,1,14,3,nan')):
             self.assertTrue([m for m in rng.validate_params(dict(pair, **edit)) if m.level == 'ERROR'])
@@ -908,6 +1335,29 @@ class WizardTests(unittest.TestCase):
                 self.assertEqual(imported['high_mass_remnant_adjust_max_fraction'], limit)
         self.assertTrue(any(m.level == 'ERROR' for m in rng.validate_params(
             dict(feedback_mode='legacy', high_mass_preset='wind_only_collapse'))))
+
+    def test_uniform_levels_preserve_mass_sph_for_positive_star_mass(self):
+        rng = mkrun.rng
+        values = dict(hydro=True, levelmin=3, levelmax=3, mass_sph=.03125, m_star=2.)
+        direct = rng.format_namelist(values)
+        answers, _, _ = collect({'Run mode':'hydro', 'IC pipeline':'none',
+            'levelmin (base/coarse level)':3, 'levelmax (AMR max level)':3,
+            'Open the full parameter editor for fine-tuning before writing?':True})
+        ui, files = gui.ReplayUI(answers), {}
+        with mock.patch.object(ui, 'edit', side_effect=lambda current: dict(current, **values)), \
+                mock.patch('subprocess.run', side_effect=AssertionError('setup launches')), \
+                mock.patch('builtins.open', side_effect=AssertionError('preview writes')):
+            report = mkrun.generate_run(ui, files.__setitem__)
+        self.assertFalse(any(m.level=='ERROR' for m in report['messages']))
+        shared = next(text for name,text in files.items() if name.endswith('.nml'))
+        for text in (direct, shared):
+            self.assertEqual(text.count('&REFINE_PARAMS'), 1)
+            group = re.search(r'&REFINE_PARAMS\b(.*?)/', text, re.S).group(1)
+            self.assertIn('mass_sph=', group)
+            parsed, _ = rng.parse_namelist(text)
+            imported = rng.import_to_values(parsed)
+            for key in ('levelmin','levelmax','mass_sph','m_star'):
+                self.assertEqual(imported[key], values[key], key)
 
     def test_sink_formation_prerequisites_and_round_trip(self):
         rng = mkrun.rng

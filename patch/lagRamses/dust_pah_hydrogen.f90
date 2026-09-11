@@ -10,12 +10,14 @@ module dust_pah_hydrogen
   implicit none
   private
   real(real64),parameter::ev=1.602176634d-12
+  real(real64),parameter::er_sigma=.06d-16,er_kb=1.380649d-16,er_mh=1.6735575d-24
   ! Molecular ground-state dissociation energy, not an activation barrier.
   real(real64),parameter,public::pah_h2_binding=4.4781d0*ev
   public::pah_hydrogen_parameters,pah_harmonic_dissociation
   public::pah_hydrogen_cool,pah_hydrogen_attach
   public::pah_hydrogen_prepare,pah_hydrogen_absorbed_step
   public::pah_hydrogen_charged_step
+  public::pah_h13_abstraction
   public::pah_hydrogen_identity
   type,public::pah_hydrogen_model
      private
@@ -24,6 +26,7 @@ module dust_pah_hydrogen
      real(real64)::bond(0:13),attach(0:13)
      real(real64)::attach_h2(0:13)=0
      logical::h2_enabled=.false.
+     logical::h2_abstraction=.false.
      real(real64)::spacing=0
   end type
 contains
@@ -35,6 +38,7 @@ contains
     if(.not.model%ready)return
     values=[1d0,model%spacing,model%bond,model%attach,reshape(model%diss,[size(model%diss)])]
     if(model%h2_enabled)values=[2d0,values(2:),model%attach_h2,pah_h2_binding]
+    if(model%h2_abstraction)values=[3d0,values(2:),er_sigma,13d0,12d0,0d0,1d0,er_kb,er_mh,8/acos(-1d0)]
     ierr=0
   end subroutine
   subroutine pah_hydrogen_charged_step(model,photon_ev,captured,old,dt,temperature, &
@@ -56,6 +60,7 @@ contains
     ierr=1
     if(.not.all(model%ready))return
     if(any(model%h2_enabled).neqv.all(model%h2_enabled))return
+    if(any(model%h2_abstraction).neqv.all(model%h2_abstraction))return
     if(model(1)%h2_enabled.neqv.present(gas_h2))return
     gh2=0;molecular_change=0
     if(present(gas_h2))then
@@ -78,7 +83,10 @@ contains
     flat=reshape(old,[n*14,2]);allocate(vib(size(photon_ev),2));vib=0
     ne=electrons;gh=gas_h;heat=0;stored=0
     call pah_coronene_photoionize(photon_ev,captured,flat,ne,vib,heat,stored,status)
-    if(status/=0)return
+    if(status/=0)then
+       write(*,*)'PAH H/charge photoionize rejected status=',status
+       return
+    endif
     allocate(p(n,0:13,2),trial(n,0:13),bands(ng,2));bands=0;p=reshape(flat,[n,14,2])
     ip_before=sum(old(:,:,2))*7.02d0*ev;bond_before=0
     do q=1,2
@@ -91,26 +99,53 @@ contains
        trial=p(:,:,q);attach_heat=0;db=0
        call pah_hydrogen_attach(model(q)%level,model(q)%bond,model(q)%attach,p(:,:,q),dt,kinetic, &
             trial,gh,attach_heat,db,status)
-       if(status/=0)return
+       if(status/=0)then
+          write(*,*)'PAH H/charge atomic attachment rejected q/status=',q,status
+          return
+       endif
        heat=heat+attach_heat;p(:,:,q)=trial
        if(model(q)%h2_enabled)then
           call pah_hydrogen_attach(model(q)%level,model(q)%bond,model(q)%attach_h2,p(:,:,q),dt,kinetic, &
                trial,gh2,attach_heat,db,status,capture_stride=2,donor_binding=pah_h2_binding)
-          if(status/=0)return
+          if(status/=0)then
+             write(*,*)'PAH H/charge molecular attachment rejected q/status=',q,status
+             return
+          endif
           heat=heat+attach_heat;p(:,:,q)=trial
        endif
        call pah_hydrogen_absorbed_step(model(q),photon_ev,vib(:,q),p(:,:,q),dt,trial,gh,bands(:,q),db,status)
        if(status/=0)then
+          write(*,*)'PAH H/charge absorbed step rejected q/status=',q,status
           ierr=status;return
        endif
        p(:,:,q)=trial
     enddo
+    if(all(model%h2_abstraction))then
+       ! Explicit frozen-T operator split. Both charges compete for ONE H
+       ! donor, after the existing attachment/photo/IR operators. H2 returns
+       ! in its ground state; net bond release is immediately thermalized.
+       block
+         real(real64)::abstraction_heat,breaking(2)
+         real(real64),allocatable::abstracted(:,:,:)
+         breaking=[model(1)%bond(12)-model(1)%bond(13),model(2)%bond(12)-model(2)%bond(13)]
+         abstracted=p;abstraction_heat=0
+         call pah_h13_abstraction(p,dt,temperature,breaking,abstracted,gh,gh2,abstraction_heat,status)
+         if(status/=0)then
+            write(*,*)'PAH H/charge H13 abstraction rejected status=',status
+            return
+         endif
+         p=abstracted;heat=heat+abstraction_heat
+       end block
+    endif
     ! Use the existing exact bimolecular count ONCE for all H states. A
     ! sequential per-H recombination solve would bias their competing rates.
     allocate(rec(n,2));rec=0;np=sum(p(:,:,2));rec(1,2)=np
     rec_ne=ne;rec_heat=0;rec_ip=np*7.02d0*ev
     call pah_coronene_recombine(model(1)%level,temperature,dt,rec,rec_ne,rec_heat,rec_ip,status)
-    if(status/=0)return
+    if(status/=0)then
+       write(*,*)'PAH H/charge recombination rejected status=',status
+       return
+    endif
     f=0
     if(np>0)f=sum(rec(:,1))/np
     overflow=0;change=0;kinetic=1.380649d-16*temperature
@@ -154,7 +189,7 @@ contains
     endif
     next=p;electrons=ne;gas_h=gh;gas_heat=heat;rate=sum(bands,dim=2);ierr=0
   end subroutine
-  subroutine pah_hydrogen_prepare(model,normal,charge,spacing,ierr,h2_capture)
+  subroutine pah_hydrogen_prepare(model,normal,charge,spacing,ierr,h2_capture,h2_abstraction)
     ! Explicit M13/DL01 comparison closure: H-state-dependent generic DL01
     ! harmonic DOS, but normal-H cooling/optics at every H state, as assumed
     ! for cooling in Montillaud+2013 section3.3.1. Not an H-dependent AIB
@@ -166,6 +201,7 @@ contains
     real(real64),intent(in)::spacing
     integer,intent(out)::ierr
     logical,optional,intent(in)::h2_capture
+    logical,optional,intent(in)::h2_abstraction
     real(real64),allocatable::modes(:)
     integer::nh,ns,status,nc,normal_h
     ierr=1
@@ -174,6 +210,8 @@ contains
     call pah_hydrogen_parameters(charge,model%bond,model%attach,status)
     if(status/=0)return
     if(present(h2_capture))model%h2_enabled=h2_capture
+    if(present(h2_abstraction))model%h2_abstraction=h2_abstraction
+    if(model%h2_abstraction.and..not.model%h2_enabled)return
     ! M13 bound RATE, but only the two-vacancy subset, not an effect bound.
     ! No molecular superhydrogenation or single-vacancy abstraction implied.
     if(model%h2_enabled.and.charge==1)model%attach_h2(0:10)=5d-13
@@ -190,6 +228,66 @@ contains
        deallocate(modes)
     enddo
     model%spacing=spacing;model%ready=.true.;ierr=0
+  end subroutine
+
+  subroutine pah_h13_abstraction(old,dt,temperature,breaking,next,gas_h,gas_h2,gas_heat,ierr)
+    ! Boschman2015 Eq3/TableA1: C24H13^(0/+) + H -> C24H12^(0/+) + H2,
+    ! one barrierless site, sigma=.06 Angstrom^2. Retain the M13 bond ladder:
+    ! this is a named hybrid comparison, not the full Boschman H0--36 model.
+    ! Exact bimolecular counts at frozen T, shared by both charges and all
+    ! excitation states. No charge change, photon, new carrier or H2 pumping.
+    ! PAH excitation is retained; D(H2)-breaking goes into the gas heat.
+    real(real64),intent(in)::old(:,0:,:),dt,temperature,breaking(2)
+    real(real64),intent(inout)::next(:,0:,:),gas_h,gas_h2,gas_heat
+    integer,intent(out)::ierr
+    real(real64)::np,nlim,a,delta,x,ratio,loss,denom,events,f,heat,scale,balance
+    real(real64)::by_charge(2),transferred(size(old,1),2)
+    real(real64),allocatable::trial(:,:,:)
+    ierr=1
+    if(size(old,1)<1.or.size(old,2)/=14.or.size(old,3)/=2)return
+    if(any(shape(next)/=shape(old)))return
+    if(any(.not.ieee_is_finite(old)).or.any(old<0))return
+    if(.not.all(ieee_is_finite([dt,temperature,gas_h,gas_h2,breaking])))return
+    if(dt<0.or.temperature<10.or.temperature>1d4.or.min(gas_h,gas_h2)<0)return
+    if(any(breaking<0).or.any(breaking>pah_h2_binding))return
+    np=sum(old(:,13,:));nlim=min(np,gas_h)
+    if(.not.ieee_is_finite(np))return
+    if(dt==0.or.nlim==0)then
+       next=old;gas_heat=0;ierr=0;return
+    endif
+    a=er_sigma*sqrt(8*er_kb*temperature/(acos(-1d0)*er_mh))*dt
+    delta=abs(np-gas_h);x=a*delta
+    if(.not.all(ieee_is_finite([a,x])))return
+    if(x<1d-4)then
+       ratio=1-x/2+x*x/6-x**3/24
+       loss=x*ratio
+    else
+       loss=1-exp(-x);ratio=loss/x
+    endif
+    denom=a*nlim*ratio
+    if(.not.ieee_is_finite(denom))return
+    events=nlim*(loss+denom)/(1+denom)
+    if(events<0.or.events>nlim)return
+    f=events/np
+    if(.not.ieee_is_finite(f).or.f<0.or.f>1)return
+    transferred=f*old(:,13,:)
+    by_charge=sum(transferred,dim=1)
+    heat=dot_product(by_charge,pah_h2_binding-breaking)
+    trial=old
+    ! Both factors are nonnegative. Subtracting the rounded transfer from
+    ! subnormal H13 tails can acquire a negative sign under optimized
+    ! reassociation; form survival directly, without clipping any donor.
+    trial(:,13,:)=(1d0-f)*old(:,13,:)
+    trial(:,12,:)=old(:,12,:)+transferred
+    ! Debit the analytic event count. Population summation differs from it
+    ! only at floating-point precision, checked below, never by donor clipping.
+    balance=sum(by_charge)-events
+    scale=max(np,gas_h,tiny(1d0))
+    if(abs(balance)>512*epsilon(1d0)*scale)return
+    if(any(.not.ieee_is_finite(trial)).or.any(trial<0))return
+    if(.not.all(ieee_is_finite([heat,gas_h2+events])))return
+    if(abs(sum(trial)-sum(old))>512*epsilon(1d0)*max(sum(old),tiny(1d0)))return
+    next=trial;gas_h=gas_h-events;gas_h2=gas_h2+events;gas_heat=heat;ierr=0
   end subroutine
 
   subroutine pah_hydrogen_absorbed_step(model,photon_ev,captured,old,dt,next,gas_h,rate,bond_change,ierr)

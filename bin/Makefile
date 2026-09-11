@@ -116,6 +116,9 @@ else
   NHYDRO = $(shell expr $(NDIM) + 2)
 endif
 PATCH = ../patch/lagRamses
+ifeq ($(RADIOACTIVE),1)
+  NVAR := $(shell expr $(NVAR) + 2)
+endif
 EXEC = ramses_final
 #############################################################################
 GITBRANCH = $(shell git rev-parse --abbrev-ref HEAD)
@@ -124,6 +127,9 @@ GITREPO = $(shell git config --get remote.origin.url)
 BUILDDATE = $(shell date +"%D-%T")
 DEFINES = -DNVECTOR=$(NVECTOR) -DNDIM=$(NDIM) -DNPRE=$(NPRE) -DNENER=$(NENER) -DNVAR=$(NVAR) \
           -DSOLVER=$(SOLVER)
+ifeq ($(RADIOACTIVE),1)
+  DEFINES += -DSTELLAR_RADIOACTIVE
+endif
 ifeq ($(SOLVER),mhd)
   DEFINES += -DSOLVERmhd -DNHYDRO=$(NHYDRO)
 endif
@@ -228,7 +234,7 @@ ifeq ($(SNRT),1)
                 snrt_cuda_multigroup_interface.o snrt_runtime_backend.o snrt_openmp_transport.o \
                 snrt_dust_material.o snrt_hybrid.o \
                 snrt_parsec_source.o snrt_stellar_source.o snrt_ramses_driver.o dust_sublimation.o dust_sublimation_material.o dust_mass_runtime.o \
-                dust_iron_radiation.o dust_stochastic.o dust_pah_radiation.o dust_pah_hydrogen.o dust_pah_live_model.o dust_pah_mixed.o \
+                dust_iron_radiation.o dust_stochastic.o dust_pah_radiation.o dust_pah_hydrogen.o dust_pah_atomization.o dust_pah_live_model.o dust_pah_mixed.o \
                 snrt_moving_scatter.o
   ifeq ($(DUST_DYNAMICS),1)
     SNRT_MODOBJ += dust_dynamics_runtime.o
@@ -319,7 +325,7 @@ MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
 	 cosmic_ray_physics.o dust_mass_physics.o dust_phase_state.o dust_drag.o dust_multifluid.o \
          dust_composition_material.o dust_composition_optics.o dust_element_cooling.o \
-         dust_iron_material.o dust_iron_optics.o dust_iron_compare.o $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o agn_feedback_deposition.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
+         dust_iron_material.o dust_iron_optics.o dust_iron_compare.o dust_iron_photons.o $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o agn_feedback_deposition.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
 	 $(STELLAR_ENRICHMENT_MODOBJ)
 ifeq ($(SOLVER),mhd)
   MODOBJ += mhd_dispatch.o
@@ -374,6 +380,11 @@ ATON_OBJ = observe.o init_radiation.o rad_init.o rad_boundary.o rad_stars.o rad_
 
 # Phase 0 Fortran-native stellar enrichment modules.
 PHASE0_STELLAR_ENRICHMENT ?= 1
+ifeq ($(RADIOACTIVE),1)
+  ifneq ($(PHASE0_STELLAR_ENRICHMENT),1)
+    $(error RADIOACTIVE=1 requires PHASE0_STELLAR_ENRICHMENT=1)
+  endif
+endif
 ifeq ($(PHASE0_STELLAR_ENRICHMENT),1)
   FFLAGS += -DPHASE0_STELLAR_ENRICHMENT
 endif
@@ -454,6 +465,7 @@ amr_index.o: amr_commons.kjhan.o
 # exists when a clean production build is requested.
 snrt_spectral_contract.o: amr_parameters.jaehyun.o
 amr_commons.kjhan.o: amr_parameters.jaehyun.o
+morton_keys.o: amr_commons.kjhan.o
 random.o: amr_commons.kjhan.o
 snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o dust_composition_optics.o dust_iron_optics.o
 snrt_hdf5.o: snrt_state.o ramses_hdf5_io.o snrt_agn_efficiency.o snrt_dust_contract.o snrt_dust_live.o
@@ -484,7 +496,9 @@ snrt_chimes_photo.o: ../patch/lagRamses/snrt_chimes_photo.cpp ../patch/lagRamses
 	icpx -std=c++17 -O2 -fp-model=precise -I$(SUNDIALS_DIR)/include -c $< -o $@
 ifeq ($(CHIMES),1)
 snrt_chimes.o: snrt_thermochemistry.o
-snrt_chimes_runtime.o: snrt_chimes.o hydro_commons.o amr_commons.kjhan.o dust_mass_physics.o snrt_atomic_cooling.o snrt_spectral_contract.o dust_composition_optics.o
+snrt_chimes_long_interval_test: ../simulation/snrt/tests/fixtures/phase0/chimes_photo_long_interval_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS)
+	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(LIBS_CHIMES) -o $@
+snrt_chimes_runtime.o: snrt_chimes.o hydro_commons.o amr_commons.kjhan.o dust_mass_physics.o snrt_atomic_cooling.o snrt_spectral_contract.o dust_composition_optics.o snrt_moving_scatter.o dust_iron_photons.o
 initialize_chimes_live_state.o: snrt_chimes_runtime.o
 snrt_ramses_driver.o dust_mass_runtime.o amr_step.jaehyun.o backup_hdf5.o: snrt_chimes_runtime.o
 umuscl.kjhan.o interpol_hydro.kjhan.o: snrt_chimes_runtime.o
@@ -541,8 +555,8 @@ snrt_dust_ir.o: snrt_moving_scatter.o ../patch/lagRamses/snrt_dust_ir.f90
 snrt_dust_backend_smoke: dust_multifluid.o dust_pah_mixed.o dust_iron_optics.o dust_iron_radiation.o dust_sublimation_material.o dust_composition_optics.o dust_composition_material.o snrt_dust_contract.o \
                          snrt_dust_ir.o snrt_runtime_backend.o snrt_dust_material.o $(SNRT_DEVICE_OBJS) \
                          snrt_openmp_transport.o snrt_hybrid.o $(SNRT_POOL_OBJS) ../patch/lagRamses/snrt_dust_backend_smoke.f90
-	$(F90) -fpp -I. ../patch/lagRamses/snrt_dust_backend_smoke.f90 snrt_moving_scatter.o snrt_dust_ir.o snrt_runtime_backend.o dust_drag.o dust_multifluid.o \
-	  dust_stochastic.o dust_pah_radiation.o dust_pah_hydrogen.o dust_pah_live_model.o dust_pah_mixed.o \
+	$(F90) $(FFLAGS) -I. ../patch/lagRamses/snrt_dust_backend_smoke.f90 snrt_moving_scatter.o snrt_dust_ir.o snrt_runtime_backend.o dust_drag.o dust_multifluid.o \
+	  dust_stochastic.o dust_pah_radiation.o dust_pah_hydrogen.o dust_pah_atomization.o dust_pah_live_model.o dust_pah_mixed.o \
 	  dust_composition_optics.o dust_composition_material.o dust_iron_optics.o dust_iron_material.o dust_iron_radiation.o dust_mass_physics.o dust_sublimation.o dust_sublimation_material.o snrt_dust_contract.o \
 	  snrt_cuda_multigroup_interface.o snrt_openmp_transport.o $(SNRT_DEVICE_OBJS) \
 	  snrt_thermochemistry.o snrt_agn_source.o snrt_spectral_contract.o snrt_dust_material.o snrt_hybrid.o $(SNRT_POOL_OBJS) $(LIBS_CUDA) $(LIBS_SNRT) -o $@
@@ -612,6 +626,17 @@ dust_iron_material.o: dust_composition_material.o ../patch/lagRamses/dust_iron_j
 dust_iron_radiation.o: dust_iron_material.o
 dust_iron_optics.o: dust_composition_optics.o ../patch/lagRamses/dust_fe_electric_base_data.inc ../patch/lagRamses/dust_fe_band_data.inc
 dust_iron_compare.o: dust_iron_material.o dust_iron_optics.o
+# Pure Fe comparison kernel: no CHIMES symbol or external-library dependency.
+# Its optional callback is supplied only by the CHIMES-enabled live adapter.
+dust_iron_photons.o: dust_mass_physics.o dust_iron_optics.o ../patch/lagRamses/dust_fe_photon_data.inc
+backup_hdf5.o: dust_iron_photons.o
+ifeq ($(CHIMES),1)
+FE_PHOTON_SECONDARY_OBJS = snrt_thermochemistry.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS)
+endif
+dust_iron_photons_smoke: dust_iron_photons.o dust_iron_compare.o snrt_dust_receiver.o $(FE_PHOTON_SECONDARY_OBJS) ../patch/lagRamses/dust_iron_photons_smoke.f90
+	$(F90) $(FFLAGS) -I. ../patch/lagRamses/dust_iron_photons_smoke.f90 dust_iron_photons.o \
+	  dust_iron_compare.o dust_mass_physics.o dust_iron_optics.o dust_composition_optics.o \
+	  dust_iron_material.o dust_composition_material.o snrt_dust_receiver.o $(FE_PHOTON_SECONDARY_OBJS) $(LIBS_CHIMES) -o $@
 snrt_dust_live.o: dust_iron_compare.o dust_iron_radiation.o
 dust_mass_runtime.o snrt_ramses_driver.o: dust_iron_compare.o
 backup_hdf5.o: dust_iron_compare.o
@@ -635,7 +660,7 @@ endif
 dust_stochastic.o: ../patch/lagRamses/dust_stochastic.f90
 dust_pah_radiation.o: dust_stochastic.o snrt_dust_ir.o ../patch/lagRamses/dust_pah_radiation.f90
 dust_pah_hydrogen.o: dust_pah_radiation.o ../patch/lagRamses/dust_pah_hydrogen.f90
-dust_pah_live_model.o: dust_pah_hydrogen.o dust_pah_radiation.o dust_mass_physics.o snrt_dust_contract.o
+dust_pah_live_model.o: dust_pah_atomization.o dust_pah_hydrogen.o dust_pah_radiation.o dust_mass_physics.o snrt_dust_contract.o
 dust_pah_mixed.o: dust_pah_live_model.o dust_iron_radiation.o dust_iron_optics.o dust_composition_optics.o
 snrt_dust_live.o: dust_pah_mixed.o
 snrt_dust_live.o snrt_ramses_driver.o backup_hdf5.o stellar_ramses_runtime.o: dust_pah_live_model.o
@@ -644,9 +669,14 @@ snrt_ramses_driver.o backup_hdf5.o: dust_composition_material.o dust_composition
 ifeq ($(SNRT),1)
 amr_step.jaehyun.o stellar_ramses_runtime.o read_params.jaehyun.o: dust_mass_runtime.o
 endif
-dust_mass_smoke: dust_multifluid.o dust_iron_material.o dust_pah_hydrogen.o dust_pah_radiation.o dust_stochastic.o dust_drag.o dust_sublimation.o dust_mass_physics.o dust_composition_material.o dust_element_cooling.o stellar_yield_tables.o stellar_yield_interpolation.o ../patch/lagRamses/dust_mass_smoke.f90
-	$(F90) -fpp -I. ../patch/lagRamses/dust_mass_smoke.f90 dust_mass_physics.o \
-	  stellar_enrichment_config.o stellar_yield_tables.o stellar_yield_interpolation.o dust_element_cooling.o dust_composition_material.o dust_iron_material.o dust_sublimation.o dust_drag.o dust_multifluid.o dust_stochastic.o dust_pah_radiation.o dust_pah_hydrogen.o snrt_dust_ir.o snrt_moving_scatter.o -o $@
+dust_mass_smoke: dust_multifluid.o dust_iron_material.o dust_pah_atomization.o dust_pah_hydrogen.o dust_pah_radiation.o dust_stochastic.o dust_drag.o dust_sublimation.o dust_mass_physics.o dust_composition_material.o dust_element_cooling.o stellar_yield_tables.o stellar_yield_interpolation.o \
+                 stellar_enrichment_config.o snrt_dust_ir.o snrt_moving_scatter.o snrt_dust_contract.o \
+                 dust_composition_optics.o dust_iron_optics.o dust_iron_radiation.o dust_pah_live_model.o \
+                 dust_pah_mixed.o snrt_dust_material.o ../patch/lagRamses/dust_mass_smoke.f90
+	$(F90) $(FFLAGS) -I. ../patch/lagRamses/dust_mass_smoke.f90 dust_mass_physics.o \
+	  stellar_enrichment_config.o stellar_yield_tables.o stellar_yield_interpolation.o dust_element_cooling.o dust_composition_material.o dust_iron_material.o dust_sublimation.o dust_drag.o dust_multifluid.o dust_stochastic.o dust_pah_radiation.o dust_pah_hydrogen.o dust_pah_atomization.o snrt_dust_ir.o snrt_moving_scatter.o \
+	  snrt_dust_contract.o dust_composition_optics.o dust_iron_optics.o dust_iron_radiation.o \
+	  dust_pah_live_model.o dust_pah_mixed.o snrt_dust_material.o -lstdc++ -o $@
 cosmic_ray_smoke: cosmic_ray_physics.o ../patch/lagRamses/cosmic_ray_smoke.f90
 	$(F90) -fpp -I. ../patch/lagRamses/cosmic_ray_smoke.f90 cosmic_ray_physics.o -o $@
 poisson_commons.o: poisson_parameters.o
@@ -666,6 +696,12 @@ stellar_yield_interpolation.o: stellar_enrichment_config.o stellar_yield_tables.
 stellar_yield_provider.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_interpolation.o
 stellar_ssp_sources.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_provider.o
 stellar_source_increment.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_ssp_sources.o
+ifeq ($(RADIOACTIVE),1)
+stellar_radioactive_sources.o: stellar_radioactive_decay.o stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_yield_interpolation.o stellar_ssp_sources.o
+stellar_source_increment.o stellar_ramses_runtime.o: stellar_radioactive_sources.o stellar_radioactive_decay.o
+stellar_radioactive_runtime.o: amr_commons.kjhan.o hydro_commons.o stellar_enrichment_config.o stellar_native_units.o stellar_radioactive_decay.o stellar_radioactive_transport.o
+amr_step.jaehyun.o umuscl.kjhan.o interpol_hydro.kjhan.o: stellar_radioactive_runtime.o
+endif
 stellar_population_ledger.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_ssp_sources.o stellar_snia_physical_contract.o
 stellar_enrichment_driver.o: stellar_enrichment_config.o stellar_enrichment_contract.o stellar_yield_tables.o stellar_ssp_sources.o stellar_source_increment.o stellar_population_ledger.o stellar_snia_population_contract.o
 stellar_cell_deposition.o: stellar_enrichment_config.o stellar_enrichment_contract.o

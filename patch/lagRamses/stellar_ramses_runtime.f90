@@ -6,6 +6,12 @@
 ! eleven independently tracked ejecta fields without that overlap.
 
 module stellar_ramses_runtime
+#ifdef STELLAR_RADIOACTIVE
+  use stellar_enrichment_config, only: configured_radioactive_model,configured_radioactive_path
+  use stellar_radioactive_sources, only: configure_radioactive_source,radioactive_source_identity
+  use stellar_radioactive_decay, only: radioactive_model
+  use stellar_source_increment, only: age_radioactive_source
+#endif
 #ifdef SNRT
   use snrt_parsec_source, only: parsec_sed_bind
 #endif
@@ -19,7 +25,7 @@ module stellar_ramses_runtime
        dust_two_size_enabled,dust_injection_bins,dust_sn_shocks,dust_iron_enabled,dust_fe_condensation,olivine_fraction
   use dust_mass_runtime, only: dust_injection_specific_energy
   use dust_mass_physics, only: dust_pah_enabled,dust_pah_condense,dust_pah_nstate
-  use dust_pah_live_model, only: pah_live_prepare,pah_injection,pah_injection_specific_u
+  use dust_pah_live_model, only: pah_live_prepare,pah_injection,pah_injection_specific_u,pah_injection_binding
 #endif
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use omp_lib, only: omp_lock_kind, omp_init_lock, omp_set_lock, omp_unset_lock
@@ -51,7 +57,8 @@ module stellar_ramses_runtime
        snia_population_realization_t, &
        read_snia_population_realization_namelist, &
        evaluate_snia_interval_events, snia_population_contract_ok, validate_snia_population_binding, &
-       snia_accounting_strict_wd, snia_accounting_effective_ssp
+       snia_accounting_strict_wd, snia_accounting_effective_ssp, &
+       snia_event_model_identity,validate_snia_event_source
   use stellar_snia_physical_contract, only: snia_physical_contract_t, &
        snia_event_budget_t, read_snia_physical_contract_namelist, &
        build_snia_event_budget, snia_contract_ok
@@ -154,6 +161,9 @@ contains
           runtime_field_map%element_index(element) = 0
        end if
     end do
+#ifdef STELLAR_RADIOACTIVE
+    if(trim(configured_radioactive_model)/='none')runtime_field_map%radioactive_index=[iradioactive,iradioactive+1]
+#endif
     call validate_field_map(runtime_field_map, nvar, ndim, map_ierr, map_message)
     if (map_ierr /= 0) then
        ierr = 33
@@ -289,6 +299,17 @@ contains
        return
     end if
 
+#ifdef STELLAR_RADIOACTIVE
+    if(trim(configured_radioactive_model)/='none')then
+       ierr=160
+       if(trim(configured_radioactive_model)/=radioactive_model.or..not.all(active_element))return
+       call configure_radioactive_source(yield_table,trim(configured_radioactive_path),ierr)
+       if(ierr/=0)then
+          if(myid==1)write(*,*)'Radioactive companion binding failed: ',ierr
+          return
+       endif
+    endif
+#endif
     sources_initialized=.true.
     loaded_yield_table_path=trim(filename)
     loaded_yield_table_rows=yield_table%n_rows
@@ -320,6 +341,9 @@ contains
     integer,intent(out)::ierr
     real(stellar_dp)::labels(7*128)
     real(stellar_dp),allocatable::snia_values(:)
+#ifdef STELLAR_RADIOACTIVE
+    real(stellar_dp),allocatable::radioactive_values(:)
+#endif
     character(len=128)::names(7)
     integer::i,j,k
     call phase0_prepare_sources(ierr)
@@ -353,6 +377,9 @@ contains
     ! the new Z policy and EVERY consumed SNIa contract value, not just labels.
     if(yield_table%high_mass_linear_z)values=[values,2d0,1d0]
     if(yield_table%high_mass_version==4)values=[values,10d0,4d0,real(yield_table%hm_fate,stellar_dp)]
+    if(yield_table%high_mass_version==5)values=[values,11d0,5d0, &
+         real(yield_table%hm_fate,stellar_dp),real(yield_table%hm_terminal_channel,stellar_dp), &
+         real(yield_table%hm_remnant_kind,stellar_dp),yield_table%hm_radiation_stop]
     if(yield_table%net_yield_diagnostic_unavailable)values=[values,5d0,1d0]
     if(any(yield_table%net_yield_channel_available).and..not.all(yield_table%net_yield_channel_available)) &
          values=[values,8d0,merge(1d0,0d0,yield_table%net_yield_channel_available)]
@@ -371,10 +398,17 @@ contains
        call phase0_snia_identity(snia_values)
        values=[values,3d0,snia_values]
     endif
+#ifdef STELLAR_RADIOACTIVE
+    if(trim(configured_radioactive_model)/='none')then
+       call radioactive_source_identity(radioactive_values)
+       values=[values,12d0,real(iradioactive,stellar_dp),real(iradioactive+1,stellar_dp),radioactive_values]
+    endif
+#endif
   end subroutine phase0_source_identity
 
   subroutine phase0_snia_identity(values)
     real(stellar_dp),allocatable,intent(out)::values(:)
+    real(stellar_dp),allocatable::event_values(:)
     character(len=128)::names(11)
     real(stellar_dp)::labels(11*128)
     character(len=128)::accounting_names(2)
@@ -418,6 +452,8 @@ contains
        enddo
        values=[values,7d0,accounting_labels]
     endif
+    call snia_event_model_identity(snia_population,event_values)
+    if(size(event_values)>0)values=[values,event_values]
   end subroutine phase0_snia_identity
 
   subroutine phase0_check_source_consensus(ierr)
@@ -529,6 +565,13 @@ contains
        ierr=42 ! The live DTD call supplies unity, not an unimplemented Z model.
        return
     endif
+    call validate_snia_event_source(snia_population,snia_physical%returned_mass_per_event, &
+         snia_physical%wd_debit_per_event,snia_physical%terminal_remnant_per_event, &
+         snia_physical%yield_source_id,snia_physical%yield_source_sha256,read_ierr)
+    if(read_ierr/=snia_population_contract_ok)then
+       ierr=43
+       return
+    endif
     snia_runtime_contract_initialized = .true.
     if (myid == 1) then
        write(*,'(a,a)') 'SNIa mass accounting: ', trim(snia_population%mass_accounting)
@@ -627,7 +670,7 @@ contains
     real(stellar_dp) :: scale_mass, scale_momentum, scale_energy,cr_energy,cr_snia_energy
 #if defined(SNRT) && defined(DUST_LIVE)
     real(stellar_dp) :: dust_source,dust_specific_u,dust_source_u,dust_sn_energy,dust_fe_source,available_fe
-    real(stellar_dp) :: pah_source,pah_source_u
+    real(stellar_dp) :: pah_source,pah_source_u,pah_source_binding
 #ifdef DUST_DYNAMICS
     real(stellar_dp)::injected_phase(ndust_phase),injected_momentum(3,ndust_phase)
     integer::phase_bin,phase_index
@@ -741,6 +784,16 @@ contains
        return
     end if
 
+#ifdef STELLAR_RADIOACTIVE
+    call age_radioactive_source(yield_table,population,previous_age_gyr,age_gyr, &
+         configured_channel_mass_min,configured_channel_mass_max,phase0_mass_bins,source,source_ierr)
+    if(source_ierr/=0)then
+       ierr=160+source_ierr
+       if(myid==1)write(*,*)'Radioactive interval source failed: ',source_ierr
+       call progress_abort(progress,progress_ierr)
+       return
+    endif
+#endif
     if (.not. ieee_is_finite(source%returned_mass) .or. &
          .not. ieee_is_finite(source%energy) .or. source%returned_mass < 0.0d0 .or. &
          source%energy < 0.0d0 .or. &
@@ -897,7 +950,8 @@ contains
        end if
        snia_available_msun = max(0.0d0, snia_available_msun)
        call evaluate_snia_interval_events(snia_population, population%initial_mass, &
-            previous_age_gyr, age_gyr, 1.0d0, snia_expected_events, snia_ledger_ierr)
+            previous_age_gyr, age_gyr, 1.0d0, snia_expected_events, snia_ledger_ierr, &
+            birth_metallicity=population%birth_metallicity)
        if (snia_ledger_ierr /= snia_population_contract_ok) then
           ierr = 78
           call progress_abort(progress, progress_ierr)
@@ -930,7 +984,8 @@ contains
           end if
        else
           call evaluate_snia_interval_events(snia_population, population%initial_mass, &
-               0d0, previous_age_gyr, 1d0, snia_prior_events, snia_ledger_ierr)
+               0d0, previous_age_gyr, 1d0, snia_prior_events, snia_ledger_ierr, &
+               birth_metallicity=population%birth_metallicity)
           if (snia_ledger_ierr /= snia_population_contract_ok) then
              ierr = 78
              call progress_abort(progress, progress_ierr)
@@ -1097,12 +1152,19 @@ contains
              ierr=92;call progress_abort(progress,progress_ierr);return
           endif
           pah_source_u=pah_source*solar_mass_cgs*pah_injection_specific_u
-          if(.not.all(ieee_is_finite([pah_source,pah_source_u])).or. &
-               dust_source_u+pah_source_u>source%energy+cr_snia_energy-cr_energy)then
+          pah_source_binding=pah_source*solar_mass_cgs*pah_injection_binding()
+          if(.not.all(ieee_is_finite([pah_source,pah_source_u,pah_source_binding])).or. &
+               dust_source_u+pah_source_u-pah_source_binding>source%energy+cr_snia_energy-cr_energy)then
              ierr=93;call progress_abort(progress,progress_ierr);return
           endif
           staged_delta(idust_pah:idust_pah+dust_pah_nstate()-1)=pah_source/scale_mass/volume*pah_injection
           staged_delta(ndim+2)=staged_delta(ndim+2)-pah_source_u/scale_energy/volume
+          ! Named atomization comparison: actual condensation from atomic
+          ! gross ejecta releases -Ebinding locally. The resulting negative
+          ! PAH binding is derived from the injected number, not extra energy
+          ! or a new passive. Zero for all previously supported selectors.
+          if(pah_source_binding/=0)staged_delta(ndim+2)=staged_delta(ndim+2)+ &
+               pah_source_binding/scale_energy/volume
        endif
        if(dust_relative_motion)then
 #ifdef DUST_DYNAMICS

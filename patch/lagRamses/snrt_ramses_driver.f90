@@ -105,7 +105,7 @@ contains
     use dust_mass_physics, only: dust_atomic_cooling_enabled,dust_chimes_enabled,dust_gas_elements
 #ifdef SNRT_CHIMES
     use snrt_chimes_runtime, only: chimes_live_capacity,chimes_live_stage,chimes_cell_state,chimes_live_band_stage, &
-         chimes_live_cold_stage
+         chimes_live_cold_stage,chimes_live_grain_scatter,chimes_live_fe_uv_stage
     use snrt_chimes, only: chimes_ns,chimes_group_binding,chimes_boltzmann,chimes_round_subnormal_survivors
 #endif
     use snrt_atomic_cooling, only: atomic_mh,atomic_temperature,atomic_heat_capacity,atomic_advance
@@ -140,11 +140,13 @@ contains
     use snrt_dust_live, only: snrt_dust_live_stage, snrt_dust_live_commit, dust_live_coarse_trial
     use dust_composition_material, only: dust_material_composition_enabled,dust_composition_curve,dust_composition_area
     use dust_mass_physics, only: dust_optics_enabled,dust_sublimation_rt_enabled,dust_iron_enabled,dust_fe_max_primary_ev, &
-         dust_sublimation_enabled
-    use dust_iron_compare, only: iron_compare_curve,iron_compare_weights,iron_compare_temperature,fe_six_opacity_basis
+         dust_sublimation_enabled,dust_fe_primary_limit,dust_fe_photon_comparison,dust_fe_uv_enabled
+    use dust_iron_compare, only: iron_compare_curve,iron_compare_weights,iron_compare_temperature,fe_six_opacity_basis, &
+         iron_compare_neutral_area,iron_compare_source_receipt
     use dust_mass_physics, only: dust_pah_enabled,dust_pah_nstate,dust_pah_hc,dust_pah_molecule_g,dust_pah_charged, &
-         dust_pah_inventory,dust_pah_state_mass,dust_pah_hydrogenated,dust_pah_h2_enabled
-    use dust_pah_live_model, only: pah_live_prepare,pah_primary_sigma,pah_primary_alpha,pah_max_primary_ev
+         dust_pah_inventory,dust_pah_state_mass,dust_pah_hydrogenated,dust_pah_h2_enabled,dust_pah_atomization
+    use dust_pah_live_model, only: pah_live_prepare,pah_primary_sigma,pah_primary_alpha,pah_max_primary_ev, &
+         pah_primary_supported
     use dust_composition_optics, only: d03_ng,d03_nir,d03_cell_weights,d03_opacity_basis
     use snrt_dust_ir, only: dust_ir_diagnostics
     use snrt_dust_contract, only: snrt_dust_contract_version, &
@@ -270,7 +272,7 @@ contains
     logical :: chimes_on
 #ifdef SNRT_CHIMES
     real(dp),allocatable::chemical_trial(:,:)
-    real(dp)::chemical_absorbed_ev,chemical_events,chemical_dissociation_ev
+    real(dp)::chemical_absorbed_ev,chemical_events,chemical_dissociation_ev,fe_cycle_totals(4),fe_cycle_global(4)
 #endif
     real(dp), allocatable :: trial_heating_rate(:), trial_unassigned(:)
     real(dp), allocatable :: trial_absorbed_species(:,:,:)
@@ -331,11 +333,24 @@ contains
     band_on=snrt_band_enabled();paired_transport=band_on
 #ifdef DUST_LIVE
     paired_transport=paired_transport.or.dust_relative_motion
+    if(dust_pah_atomization())then
+       if(band_on.or.dust_relative_motion.or.dust_iron_enabled())then
+          if(myid==1)write(*,*)'PAH atomization limit requires monoenergetic fixed groups, coadvection, no Fe'
+          call clean_stop;return
+       endif
+    endif
+    if(dust_fe_photon_comparison())then
+       ! Explicit static fixed-group comparisons, not kind4/6/7 admission.
+       if(band_on.or.dust_relative_motion.or.dust_pah_enabled())then
+          if(myid==1)write(*,*)'Fe photon comparisons require fixed groups, no PAH or relative motion'
+          call clean_stop;return
+       endif
+    endif
     if(snrt_d03_band_enabled())then
        if(.not.dust_optics_enabled().or.(dust_iron_enabled().neqv.snrt_fe_band_enabled()).or.dust_pah_enabled().or. &
-            dust_sublimation_enabled().or.dust_relative_motion.or. &
+            ((dust_sublimation_enabled().or.dust_relative_motion).and..not.snrt_chimes_transition_enabled()).or. &
             (dust_chimes_enabled().and..not.snrt_chimes_cold_enabled()))then
-          if(myid==1)write(*,*)'Grain band RT requires matching static D03/Fe mode or explicit cold CHIMES; no PAH/drift'
+          if(myid==1)write(*,*)'Grain band RT requires matching D03/Fe mode; sublimation/drift need kind7; no PAH'
           call clean_stop;return
        endif
     endif
@@ -791,6 +806,9 @@ contains
              endif
              if(ierr/=0)hydro_state_invalid=.true.
              dust_primary_sigma(:,i)=matmul(d03_pa(:,1:dust_nb),dust_weights(:,i))
+             ! UV Fe owns its bulk+detachment photon debit after CHIMES.
+             ! Retain the all-material normalization and scattering/IR.
+             if(dust_fe_uv_enabled())dust_primary_sigma(:,i)=matmul(d03_pa(:,1:4),dust_weights(1:4,i))
              dust_scatter_sigma(:,i)=matmul(d03_ps(:,1:dust_nb)-d03_pg(:,1:dust_nb),dust_weights(:,i))
           endif
           if(dust_iron_enabled())then
@@ -825,7 +843,7 @@ contains
                    ! Legacy argument retained for ABI; not a physical capacity
                    ! in v4. The IR solver uses density*U(T) instead.
                    dust_heat_capacity(i)=1d0
-                   if(dust_iron_enabled().or.dust_pah_enabled())then
+                   if(dust_iron_enabled().or.dust_pah_enabled().or.dust_relative_motion)then
                       call iron_compare_temperature(uold(icell,idust_species:idust_species+1),solid_fe, &
                            dust_energy_code*scale_v**2,dust_old_temperature(i),ierr)
                    else if(dust_material_composition_enabled())then
@@ -984,6 +1002,10 @@ contains
        ! The native node operator owns grain extinction. Legacy group tau
        ! remains exactly zero and must not supply a second opacity sink.
        optical_depth_dust=0
+       ! Kind7 moving scattering is staged after competitive photo chemistry,
+       ! with phase work. Disable only the stationary transport grain operator;
+       ! the chemical receiver rebuilds its physical opacity from the live bins.
+       if(dust_relative_motion.and.snrt_chimes_transition_enabled())grain_columns=0
     endif
 #endif
     t_nlte = omp_get_wtime() - wall_start
@@ -1369,7 +1391,7 @@ contains
        ! Lie split after transport/absorption, rebuilt from the same incoming
        ! state on every nonlinear trial. Scatter only owned leaves; each group
        ! conserves photons/energy locally and adds no absorption/heating ledger.
-       if(ierr==0.and.dust_relative_motion)then
+       if(ierr==0.and.dust_relative_motion.and..not.snrt_chimes_cold_enabled())then
           phase_pnext=phase_pold;primary_heat=0
           if(allocated(primary_pah_heat))then
              primary_pah_heat=0;primary_pah_captures=0
@@ -1459,7 +1481,7 @@ contains
           do i=1,nleaf
              if(sum(pah_number(:,i))<=0)cycle
              do igroup=1,snrt_ngroups
-                if(snrt_dust_contract_absorption_mean_energy_ev(igroup)<=pah_max_primary_ev)cycle
+                if(pah_primary_supported(snrt_dust_contract_absorption_mean_energy_ev(igroup)))cycle
                 ! A zero unsupported PAH coefficient is a rejection mask,
                 ! NOT permission to propagate hard light through PAH-only
                 ! cells as if those grains were physically transparent.
@@ -1503,14 +1525,54 @@ contains
              block
                real(dp)::rn(snrt_ndirection,9),re(snrt_ndirection,9),nn(snrt_ndirection,9),ne(snrt_ndirection,9)
                real(dp)::ledger(11),gn(9),ge(9),nh_code,he_code,events(2)
+               real(dp)::phase_e(9,4),phase_p(3,4),kick(3),velocity(3),work(4),heat(9),ke_change,ep,wp
+               integer::b,k
                icell=leaf_cell(i)
                rn=real(trial_intensity(:,:,i),dp)*scale_nH
                do igroup=1,9
                   re(:,igroup)=(snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)+ &
                        trial_energy_shift(:,igroup,i))*scale_nH
                enddo
+               if(dust_relative_motion)then
+                  phase_rows(:,i)=uold(icell,:);phase_pnext(:,:,i)=phase_pold(:,:,i);primary_heat(:,i)=0
+                  call chimes_live_cold_stage(icell,scale_d,scale_v,dt_s,dx_code*scale_l,dust_old_temperature(i), &
+                       reduced_c,snrt_ndirection,rn,re,chemical_trial(:,i),trial_thermal(i),nn,ne,ledger,gn,ge,ierr,events, &
+                       staged_row=phase_rows(:,i),directions=transpose(direction_dp),phase_energy=phase_e,phase_moment=phase_p)
+                  if(ierr==0)then
+                     ke_change=0
+                     do b=1,4
+                        if(phase_mass(b,i)==0)cycle
+                        kick=phase_p(:,b)*snrt_ev_to_erg/snrt_c_cgs
+                        velocity=(phase_pold(:,b,i)+.5d0*kick)/phase_mass(b,i)
+                        ep=sum(phase_e(:,b))*snrt_ev_to_erg;wp=dot_product(velocity,kick)
+                        if(sqrt(sum(velocity**2))>.01d0*snrt_c_cgs.or.wp>ep)then
+                           ierr=1;exit
+                        endif
+                        heat=phase_e(:,b)*snrt_ev_to_erg
+                        if(ep>0)heat=heat*(1-wp/ep)
+                        primary_heat(:,i)=primary_heat(:,i)+heat
+                        phase_pnext(:,b,i)=phase_pold(:,b,i)+kick;ke_change=ke_change+wp
+                     enddo
+                     if(ierr==0.and.snrt_dust_contract_scattering_enabled)then
+                        work=0
+                        call chimes_live_grain_scatter(snrt_ndirection,nn,ne,phase_pnext(:,:,i),phase_mass(:,i), &
+                             transpose(direction_dp),angular_weight,dt_s,reduced_c,work,ierr)
+                        ke_change=ke_change+sum(work)
+                     endif
+                     if(ierr==0)then
+                        phase_rows(2:4,i)=phase_rows(2:4,i)+sum(phase_pnext(:,:,i)-phase_pold(:,:,i),dim=2)/(scale_d*scale_v)
+                        do b=1,4
+                           k=idust_momentum+3*(b-1)
+                           phase_rows(k:k+2,i)=phase_pnext(:,b,i)/(scale_d*scale_v)
+                        enddo
+                        trial_thermal(i)=trial_thermal(i)+ke_change/(scale_d*scale_v**2)
+                        phase_rows(5,i)=trial_thermal(i)
+                     endif
+                  endif
+               else
                call chimes_live_cold_stage(icell,scale_d,scale_v,dt_s,dx_code*scale_l,dust_old_temperature(i), &
                     reduced_c,snrt_ndirection,rn,re,chemical_trial(:,i),trial_thermal(i),nn,ne,ledger,gn,ge,ierr,events)
+               endif
                if(ierr==0)ierr=chimes_round_subnormal_survivors(scale_nH,sum(re),nn,ne)
                if(ierr/=0)then
 !$omp critical(chimes_cold_failure)
@@ -1549,7 +1611,7 @@ contains
                      real(absorbed_dust_group(i,igroup),dp) * scale_nH
              end do
           end do
-          if(snrt_d03_band_enabled())then
+          if(snrt_d03_band_enabled().and..not.dust_relative_motion)then
           call snrt_dust_receiver_stage(dust_absorbed_photons, &
                snrt_dust_contract_absorption_mean_energy_ev(1:snrt_ngroups),dt_s, &
                dust_receiver_abundance,dust_heat_capacity,dust_old_energy,dust_old_temperature, &
@@ -1913,16 +1975,17 @@ contains
     local_transaction_failure = snrt_failure_none
 #ifdef SNRT_CHIMES
     if(chimes_on.and..not.snrt_chimes_cold_enabled())then
-       chemical_absorbed_ev=0
+       chemical_absorbed_ev=0;fe_cycle_totals=0
        ! Tables are read-only; cell abundances, rates, CVODE workspaces and
        ! grain temperature are private to each native call.
-!$omp parallel do default(shared) private(i,icell,ierr,igroup) reduction(+:chemical_absorbed_ev) &
+!$omp parallel do default(shared) private(i,icell,ierr,igroup) reduction(+:chemical_absorbed_ev,fe_cycle_totals) &
 !$omp reduction(max:local_transaction_failure)
        do i=1,nleaf
           block
             real(dp)::photons(9),next_photons(9),area,nh_code,he_code,fraction,actual(snrt_ndirection),delta_heat
             real(dp)::ray_number(snrt_ndirection,9),ray_energy(snrt_ndirection,9)
             real(dp)::next_number(snrt_ndirection,9),next_energy(snrt_ndirection,9),photo_ledger(9)
+            real(dp)::fe_ledger(8),fe_solid,fe_before(9)
             icell=leaf_cell(i)
             do igroup=1,9
                ! Source/transport stores direction-INTEGRATED counts, not I.
@@ -1961,6 +2024,30 @@ contains
                cycle
             endif
             nh_code=h_number_code(i)*scale_nH*atomic_mh/scale_d
+            if(dust_fe_uv_enabled())then
+               ! The complete level transaction still owns publication.
+               fe_before=next_photons;fe_ledger=0
+               fe_solid=dust_old_energy(i)+dust_absorbed_energy(i)
+               call chimes_live_fe_uv_stage(icell,scale_d,scale_v,dt_s,dust_old_temperature(i),snrt_c_cgs*reduced_c, &
+                    next_photons,chemical_trial(:,i),trial_thermal(i),fe_solid,fe_ledger,ierr)
+               if(ierr==0)call iron_compare_source_receipt(fe_ledger(3)*snrt_ev_to_erg, &
+                    dust_old_energy(i),dust_absorbed_energy(i),ierr)
+               if(ierr==0)call iron_compare_neutral_area(dust_weights(:,i),snrt_dust_contract_mass_per_h_g, &
+                    chemical_trial(2,i)/nh_code,dust_cell_area(i),ierr)
+               if(ierr/=0)then
+!$omp critical(fe_uv_failure_report)
+                  write(*,*)'Fe UV catalytic trial rejected cell/status: ',icell,ierr
+!$omp end critical(fe_uv_failure_report)
+                  local_transaction_failure=snrt_failure_chemistry
+                  cycle
+               endif
+               ! Keep primary photon diagnostics, not the signed collision
+               ! receipt, in the photon counter. IR receives net sensible E.
+               dust_absorbed_photons(:,i)=dust_absorbed_photons(:,i)+fe_before-next_photons
+               fe_cycle_totals=fe_cycle_totals+fe_ledger(1:4)*cell_volume_code*scale_l**3
+               chemical_absorbed_ev=chemical_absorbed_ev- &
+                    sum((fe_before-next_photons)*snrt_group_mean_energy_ev)*cell_volume_code*scale_l**3
+            endif
             he_code=he_number_code(i)*scale_nH*atomic_mh/scale_d
             trial_hydrogen_ii(i)=chemical_trial(3,i)/nh_code
             ! Preserve the legacy checkpoint complement field. In this mode
@@ -2027,6 +2114,12 @@ contains
        endif
        call snrt_transaction_reduce_sum(chemical_absorbed_ev,global_unassigned_absorption,convergence_status)
        if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_PRIMARY_ABSORBED_EV=',global_unassigned_absorption
+       if(dust_fe_uv_enabled())then
+          do i=1,4
+             call snrt_transaction_reduce_sum(fe_cycle_totals(i),fe_cycle_global(i),convergence_status)
+          enddo
+          if(myid==1)write(*,'(A,4ES18.10)')' SNRT_FE_UV_EV absorbed/gas/solid/excitation=',fe_cycle_global
+       endif
     endif
 #endif
     if(snrt_chimes_cold_enabled())then
@@ -2042,11 +2135,11 @@ contains
           if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_DISSOCIATION_COST_EV=',global_unassigned_absorption
        endif
     endif
-    if(dust_iron_enabled().and..not.snrt_fe_band_enabled())then
+    if(dust_iron_enabled().and..not.snrt_fe_band_enabled().and..not.dust_fe_uv_enabled())then
        do i=1,nleaf
           if(sum(uold(leaf_cell(i),idust_iron:idust_iron+1))<=0)cycle
           if(any(dust_absorbed_photons(:,i)>0.and. &
-               snrt_dust_contract_absorption_mean_energy_ev(1:snrt_ngroups)>dust_fe_max_primary_ev)) &
+               snrt_dust_contract_absorption_mean_energy_ev(1:snrt_ngroups)>dust_fe_primary_limit())) &
                local_transaction_failure=snrt_failure_receiver
        enddo
        call snrt_transaction_reduce_decision(local_transaction_failure,1,0d0,global_transaction_failure, &
@@ -2055,7 +2148,7 @@ contains
           if(transaction_active)call snrt_transaction_restore(transaction,snrt_intensity,leaf_slot, &
                snrt_hydrogen_ii,snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction,level_thermal,transaction_status, &
                persistent_energy_shift=snrt_energy_shift)
-          if(myid==1)write(*,*)'ERROR: Fe comparison primary absorption exceeds 4 eV; no trial committed'
+          if(myid==1)write(*,*)'ERROR: Fe comparison primary absorption exceeds limit eV=',dust_fe_primary_limit()
           call clean_stop;return
        endif
     endif
@@ -2078,6 +2171,7 @@ contains
           block
             real(dp) :: gas_energy(nleaf),gas_capacity(nleaf),transfer(nleaf)
             real(dp),allocatable :: pah_electrons(:),pah_gas_h(:),pah_gas_h2(:)
+            real(dp),allocatable :: pah_gas_c(:),pah_gas_cp(:)
             real(dp)::electron_cv
             electron_cv=0
 #ifdef SNRT_CHIMES
@@ -2088,6 +2182,12 @@ contains
                ! Pinned CHIMES157: H2 is index138, one native weight per
                ! molecule, not twice that weight as an H-mass fraction.
                if(dust_pah_h2_enabled())pah_gas_h2=chemical_trial(138,:)*scale_d/atomic_mh
+               if(dust_pah_atomization())then
+                  ! CHIMES stores m_H per particle, also for C and C+.
+                  ! Charge moves PAH+ -> C+; no electron is invented.
+                  pah_gas_c=chemical_trial(8,:)*scale_d/atomic_mh
+                  pah_gas_cp=chemical_trial(9,:)*scale_d/atomic_mh
+               endif
             endif
 #endif
             do i=1,nleaf
@@ -2117,12 +2217,16 @@ contains
                  primary_pah_heat=primary_pah_heat,primary_pah_captures=primary_pah_captures, &
                  phase_density=phase_mass,phase_momentum=phase_pnext,phase_work=phase_ir_work, &
                  gas_electrons=pah_electrons,electron_capacity=electron_cv,gas_atomic_h=pah_gas_h, &
-                 gas_molecular_h2=pah_gas_h2)
+                 gas_molecular_h2=pah_gas_h2,gas_atomic_c=pah_gas_c,gas_carbon_ion=pah_gas_cp)
             if(ierr==0)then
 #ifdef SNRT_CHIMES
                if(dust_pah_charged())chemical_trial(1,:)=pah_electrons*atomic_mh/scale_d
                if(dust_pah_hydrogenated())chemical_trial(2,:)=pah_gas_h*atomic_mh/scale_d
                if(dust_pah_h2_enabled())chemical_trial(138,:)=pah_gas_h2*atomic_mh/scale_d
+               if(dust_pah_atomization())then
+                  chemical_trial(8,:)=pah_gas_c*atomic_mh/scale_d
+                  chemical_trial(9,:)=pah_gas_cp*atomic_mh/scale_d
+               endif
 #endif
                trial_thermal=trial_thermal-transfer/dust_energy_scale
                if(dust_relative_motion)then

@@ -12,7 +12,8 @@ module stellar_ssp_sources
        n_stellar_channels, yield_basis_per_star_cumulative, stellar_imf_miller_scalo
   use stellar_enrichment_contract, only: stellar_population_t, &
        stellar_cumulative_t, clear_cumulative
-  use stellar_yield_tables, only: stellar_yield_table_t
+  use stellar_yield_tables, only: stellar_yield_table_t,mixed_source_node
+  use stellar_yield_interpolation, only: source_metallicity_bracket
   use stellar_yield_provider, only: evaluate_channel_cumulative, provider_ok
   implicit none
 
@@ -41,6 +42,7 @@ module stellar_ssp_sources
   public :: calculate_imf_mass_fraction
   public :: evaluate_imf
   public :: build_source_mass_edges
+  public :: mixed_source_weights
 
 contains
 
@@ -56,7 +58,8 @@ contains
     real(stellar_dp) :: imf_norm, log_min, log_max, dlog_mass
     real(stellar_dp) :: log_mass, mass, dm, n_stars
     real(stellar_dp) :: star_weight
-    real(stellar_dp), allocatable :: edges(:)
+    real(stellar_dp), allocatable :: edges(:),node_weights(:)
+    real(stellar_dp)::zl,zh,wz,zw
     real(stellar_dp) :: left, right, fraction
     type(stellar_cumulative_t) :: star_state
     integer :: bin, provider_ierr, count_bins
@@ -84,6 +87,49 @@ contains
        ierr = ssp_source_err_basis
        return
     end if
+
+    if(table%high_mass_ready.and.table%high_mass_version==5)then
+       if(mass_min/=2d0.or.mass_max/=600d0)then
+          ierr=ssp_source_err_argument;return
+       endif
+       call mixed_source_weights(table,population,n_mass_bins,node_weights,provider_ierr)
+       if(provider_ierr/=0)then
+          ierr=ssp_source_err_imf;return
+       endif
+       call source_metallicity_bracket(table%hm_z,population%birth_metallicity,zl,zh,wz,provider_ierr)
+       if(provider_ierr/=0)then
+          ierr=ssp_source_err_provider;return
+       endif
+       do bin=1,size(node_weights)
+          zw=0
+          if(table%hm_z(bin)==zl)then
+             zw=1-wz
+          else if(table%hm_z(bin)==zh)then
+             zw=wz
+          endif
+          star_weight=population%initial_mass*zw*node_weights(bin)
+          if(star_weight==0)cycle
+          call evaluate_channel_cumulative(table,channel_id,table%hm_mass(bin),table%hm_z(bin), &
+               age_gyr,star_state,provider_ierr)
+          if(provider_ierr/=0)then
+             ierr=ssp_source_err_provider;return
+          endif
+          state%dust_species=state%dust_species+star_weight*star_state%dust_species
+          state%ejected_mass=state%ejected_mass+star_weight*star_state%ejected_mass
+          state%net_yield=state%net_yield+star_weight*star_state%net_yield
+          state%returned_mass=state%returned_mass+star_weight*star_state%returned_mass
+          state%remnant_mass=state%remnant_mass+star_weight*star_state%remnant_mass
+          state%energy=state%energy+star_weight*star_state%energy
+          state%momentum=state%momentum+star_weight*star_state%momentum
+       enddo
+       state%channel_returned_mass(channel_id)=state%returned_mass
+       state%channel_energy(channel_id)=state%energy
+       state%channel_momentum(channel_id,:)=state%momentum
+       state%channel_ejected_mass(channel_id,:)=state%ejected_mass
+       state%channel_net_yield(channel_id,:)=state%net_yield
+       if(.not.cumulative_values_finite(state))ierr=ssp_source_err_nonfinite
+       return
+    endif
 
     call calculate_imf_normalization(population%imf_id, &
          population%imf_mass_min, population%imf_mass_max, imf_norm, &
@@ -224,6 +270,41 @@ contains
     edges=edges(:count_edges)
     ierr=0
   end subroutine build_source_mass_edges
+
+  subroutine mixed_source_weights(table,population,n_mass_bins,weights,ierr)
+    ! Identical extensive photon and material weighting. No renormalization
+    ! of the supported source subset and no independent AGB nearest grid.
+    type(stellar_yield_table_t),intent(in)::table
+    type(stellar_population_t),intent(in)::population
+    integer,intent(in)::n_mass_bins
+    real(stellar_dp),allocatable,intent(out)::weights(:)
+    integer,intent(out)::ierr
+    real(stellar_dp),allocatable::edges(:),zs(:)
+    real(stellar_dp)::lo,hi,fraction,total
+    integer::j,b,node,status
+    ierr=1
+    if(table%high_mass_version/=5.or..not.table%high_mass_ready)return
+    if(population%imf_mass_min/=.08d0.or.population%imf_mass_max/=600d0)return
+    call build_source_mass_edges(table,population,n_mass_bins,edges,status)
+    if(status/=0)return
+    allocate(weights(size(table%hm_mass)));weights=0
+    zs=pack(table%hm_z,[.true.,table%hm_z(2:)/=table%hm_z(:size(table%hm_z)-1)])
+    call calculate_imf_mass_fraction(population%imf_id,.08d0,600d0,2d0,600d0,total,status)
+    if(status/=0)return
+    do j=1,size(zs)
+       do b=1,size(edges)-1
+          lo=max(2d0,edges(b));hi=min(600d0,edges(b+1))
+          if(hi<=lo)cycle
+          node=mixed_source_node(table,sqrt(lo*hi),zs(j))
+          if(node==0)return
+          call calculate_imf_mass_fraction(population%imf_id,.08d0,600d0,lo,hi,fraction,status)
+          if(status/=0)return
+          weights(node)=weights(node)+fraction/table%hm_mass(node)
+       enddo
+       if(abs(sum(weights*table%hm_mass,mask=table%hm_z==zs(j))-total)>1d-12)return
+    enddo
+    ierr=0
+  end subroutine
 
 
   subroutine calculate_imf_normalization(imf_id, mass_min, mass_max, &

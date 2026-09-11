@@ -66,3 +66,18 @@ is not a complete atomization or daughter-evolution model.
 No new passive tensor, chemical ABI, namelist option or destruction rate has
 been activated on the strength of these source checks alone. The Fable plan
 assessment addresses the least expensive physically defensible live scope.
+
+## September11 primary-source correction
+
+The blanket absence of reaction-energy information is too strong.
+[Laser-induced fragmentation of coronene cations, Fig8/section4.1](https://pure.uva.nl/ws/files/198208796/Laser-induced_fragmentation_of_coronene_cations.pdf)
+supplies a calculated isomer-specific product level9.10eV above C24H12+ for
+the four-membered-ring C22H10+ daughter plus **vinylidene CCH2**. Its5.09eV
+value is relative to the4.01eV intermediate, not the intact parent; these
+must not be confused with the separately tabulated transition-state barrier.
+This supplies one endpoint energy, not a full H/charge ladder or reaction rate.
+[The corannulene/sumanene study](https://pubs.rsc.org/en/content/articlehtml/2024/cp/d4cp01247j)
+distinguishes vinylidene from acetylene and calculates a1.85eV separation.
+The retained acetylene cross sections cannot simply be assigned to vinylidene.
+Neither paper supplies the entire subsequent coronene-daughter network.
+No live fragmentation option is admitted on this single endpoint alone.

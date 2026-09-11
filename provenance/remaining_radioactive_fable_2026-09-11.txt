@@ -1,0 +1,28 @@
+The plan file cannot be written in this session, so the verdict is delivered here directly.
+
+**Verdict: defer bundle 5 as a physics bundle.** It is scientifically fit as an abundance-only model, but its live term is below the sensitivity of every consumer in the code. The gas-only, incomplete-host-network scope is not the problem.
+
+**Q-GOAL.** The one physically large radioisotope term, Ni56 at 0.07 Msun per 13 to 25 Msun star against Fe56 of 0.013 to 0.024 Msun, is already moved into tracked Fe at release by the completed prompt projection. What live evolution would add is only Al26 to Mg and Fe60 to Ni. From LC18 table8 at solar metallicity:
+
+| node | Al26 / Mg24 | Fe60 / Fe56 |
+|---|---|---|
+| v=0, 20 Msun | 0.06 % | 0.04 % |
+| v=0, 25 Msun | 0.07 % | 0.16 % |
+| v=150, 20 Msun | 0.2 % | 2.6 % |
+| v=0, 120 Msun wind | 0.7 % | negligible |
+
+Rotation alone changes Mg24 by a factor of three at 20 Msun. The SNRT groups stop at 10 keV, CHIMES and cooling use elemental abundances far coarser than 1 %, and dust condensation is isotope-blind and excluded here. Nothing downstream can see this change.
+
+**Q-LEAN.** Five carriers where only Al26 and Fe60 survive a galaxy timestep. Ni56 and Co56 survival after a Myr step is exactly zero, and Co60 at 5.27 yr is a secular-equilibrium intermediate whose daughter is obtained analytically without a carrier. With the prompt-projected table selected, live Ni56/Co56 carriers would either double count Fe or force the runtime to undo the prompt projection. With the no-decay table, the runtime would re-derive the completed prompt correction with a weeks-scale delay. Either way they are redundant.
+
+**Indispensable issues if it proceeds anyway:**
+
+- **Table decision.** Consume the prompt-projected table only, since it retains Al26 and Fe60 in their parent elements, which is exactly the inventory the carriers must move. Drop Ni56, Co56 and Co60. Two carriers total.
+- **Daughter transfers.** Al26 moves mass from untracked metal into tracked Mg. Fe60 moves mass out of tracked Fe into untracked metal. Same baryonic mass, total metal unchanged. That is the entire live physics.
+- **Slot placement.** "Append after the element window" collides with the hard reservation at `patch/lagRamses/read_hydro_params.f90:698`, where dust starts at the element window plus eleven and the CHIMES and dust windows follow. Reserve the slots after the maximum existing window or under an explicit compile-time offset bound to identity.
+- **Convolution.** Closed-form on the existing piecewise-linear wind knots plus exact terminal ages, hooked at the previous/current age pair already passed into `patch/lagRamses/stellar_source_increment.f90:31`. No new kernel or dispatch.
+- **Provenance line.** State that the live term is at most about 1 % of Mg or Fe, 2.6 % at one rotating node, so nobody later treats it as feedback- or dust-relevant.
+
+**Scientifically missing decision.** Name the consumer of the live Al26/Fe60 gas inventory. In the current code there is none. The only real consumers are the 1.809 MeV and 1.173/1.332 MeV line maps and Fe60 incorporated in grains, and those are exactly the excluded MeV and dust items. If no consumer is named, bundle 5 delivers no simulation-ready physics for the final goal and the preapproval is better spent on bundles 1 to 4. If a gamma-line or isotope-in-dust use is intended, that is a scope change requiring the excluded decision, not more gas carriers.
+
+**Minimal evidence for the reduced two-carrier form, if chosen:** the existing native source fixture for parent/daughter closure and zero-dt identity, one-step versus split-step equality on a single LC18 node with real wind knots, disabled-default byte identity of yields, history and old checkpoints, and one MPI2/OMP2 gas-only HDF5 injection, evolution and restart with raw output deleted afterward.

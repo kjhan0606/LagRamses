@@ -1,7 +1,7 @@
 module stellar_ramses_mapped_bridge
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements
   use stellar_enrichment_contract, only: stellar_source_t, &
-       generic_metal_ejecta_mass
+       generic_metal_ejecta_mass,radioactive_source_valid
   use stellar_ramses_field_map, only: stellar_field_map_t, validate_field_map
   implicit none
   private
@@ -27,6 +27,12 @@ contains
 
     ierr = 0
     if (present(message)) message = ''
+    if(.not.radioactive_source_valid(source).or. &
+         (any(source%radioactive_parent/=0).and.any(field_map%radioactive_index==0)))then
+       ierr=8
+       if(present(message))message='invalid or unmapped radioactive source subsets'
+       return
+    endif
 
     call validate_field_map(field_map, nvar, ndim, map_ierr, map_message)
     if (map_ierr /= 0) then
@@ -84,6 +90,11 @@ contains
     do i = 1, ncell
        if (weights(i) == 0.0_stellar_dp) cycle
        volume_factor = weights(i) / (weight_sum * cell_volume(i))
+       do j=1,2
+          if(field_map%radioactive_index(j)==0)cycle
+          uold(field_map%radioactive_index(j),i)=uold(field_map%radioactive_index(j),i)+ &
+               volume_factor*source%radioactive_parent(j)
+       enddo
        uold(field_map%density_index, i) = uold(field_map%density_index, i) + &
             volume_factor * source%returned_mass
        uold(field_map%energy_index, i) = uold(field_map%energy_index, i) + &

@@ -281,6 +281,47 @@ contains
             abs(ge(j)-sum(e(:,j))*loss)<2d-7*sum(e(:,j)), &
             'individual grain band matches its own analytic optical depth and energy',failures)
     enddo
+    block
+      real(dp)::pa(128,9,4),dir(3,2),pge(9,4),pgm(3,4),old_ge(9),nodes(2,128,9),node_e(2,128,9)
+      real(dp)::expected_e(9,4),expected_p(3,4),fraction(4),capture
+      integer::g,h,d,bphase
+      dir=0;dir(1,:)=[1d0,-1d0];expected_e=0;expected_p=0
+      status=chimes_band_nodes(handle,2,n,e,nodes,node_e)
+      call expect(status==0.and.maxval(abs(sum(nodes,dim=2)-n))<1d-15.and. &
+           maxval(abs(sum(node_e,dim=2)-e))<1d-12,'moving grain node reconstruction retains ray N/E',failures)
+      do g=1,9
+         do h=1,128
+            fraction=[dble(h)/129d0,1d0-dble(h)/129d0,0d0,0d0]
+            pa(h,g,:)=alpha(h,g)*fraction
+            do d=1,2
+               capture=node_e(d,h,g)*(1-exp(-.3d0*g))
+               do bphase=1,4
+                  expected_e(g,bphase)=expected_e(g,bphase)+capture*fraction(bphase)
+                  expected_p(:,bphase)=expected_p(:,bphase)+capture*fraction(bphase)*dir(:,d)
+               enddo
+            enddo
+         enddo
+      enddo
+      old_ge=ge
+      status=chimes_band_photo_molecular_phases(handle,mol,2,1d0,1d11,3d8,alpha,shield,0d0, &
+           a,n,e,b,nn,ee,l,gn,ge,pa,dir,pge,pgm)
+      call expect(status==0.and.maxval(abs(pge-expected_e))<2d-7*sum(e), &
+           'node-varying grain fractions retain phase spectral energy',failures)
+      call expect(status==0.and.maxval(abs(pgm-expected_p))<2d-7*sum(e).and.any(pgm<0), &
+           'opposing hardened rays retain signed phase absorption impulse',failures)
+      call expect(status==0.and.maxval(abs(sum(pge,dim=2)-ge))<2d-7*sum(e).and. &
+           maxval(abs(ge-old_ge))<2d-7*sum(e),'phase counters close existing group absorption',failures)
+      pge=-99;pgm=-99
+      status=chimes_band_photo_molecular_phases(handle,mol,2,1d0,0d0,3d8,alpha,shield,0d0, &
+           a,n,e,b,nn,ee,l,gn,ge,pa,dir,pge,pgm)
+      call expect(status==0.and.all(pge==0).and.all(pgm==0).and.all(nn==n).and.all(ee==e), &
+           'zero-time phase receiver is identity',failures)
+      pge=-99;pgm=-99;pa(1,1,1)=2*alpha(1,1)
+      status=chimes_band_photo_molecular_phases(handle,mol,2,1d0,1d11,3d8,alpha,shield,0d0, &
+           a,n,e,b,nn,ee,l,gn,ge,pa,dir,pge,pgm)
+      call expect(status/=0.and.all(pge==-99).and.all(pgm==-99), &
+           'inconsistent grain phase opacity rejects without publish',failures)
+    end block
     ! A tiny charged molecular tail must be depleted without publishing a
     ! negative CVODE constraint-correction remnant. No abundance floor.
     elem=0;elem(1)=1;status=chimes_neutral(elem,a)

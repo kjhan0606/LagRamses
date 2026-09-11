@@ -5,11 +5,11 @@ module snrt_dust_live
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use snrt_dust_contract
   use snrt_dust_ir
-  use dust_mass_physics, only: dust_optics_enabled,dust_iron_enabled,dust_fe_max_temperature
+  use dust_mass_physics, only: dust_optics_enabled,dust_iron_enabled,dust_fe_max_temperature,dust_fe_uv_enabled
   use dust_iron_optics, only: fe_six_opacity_basis,fe_base_binding,fe_radius_cm,fe_density
   use dust_iron_radiation, only: iron_radiative_batch,iron_radiative_cell
   use dust_mass_physics, only: dust_pah_enabled,dust_pah_nstate,dust_pah_molecule_g,dust_pah_charged, &
-       dust_pah_hydrogenated,dust_pah_h2_enabled
+       dust_pah_hydrogenated,dust_pah_h2_enabled,dust_pah_atomization
   use dust_pah_live_model, only: pah_live_prepare,pah_ir_sigma
   use dust_pah_mixed, only: pah_mixed_advance
   use omp_lib, only: omp_get_max_threads
@@ -51,6 +51,11 @@ contains
     real(dust_dp)::pa(d03_ng,6),ps(d03_ng,6),pg(d03_ng,6),ia(d03_nir,6),isc(d03_nir,6),ig(d03_nir,6)
     ierr=dust_err_config
     if(snrt_dust_contract_version<3.or..not.snrt_dust_contract_runtime_allowed)return
+    ! UV signed sensible receipts require the existing implicit, exchanging
+    ! material solve, not the absorption-only receiver's precomputed U.
+    if(dust_fe_uv_enabled())then
+       if(snrt_dust_contract_version/=4.or..not.snrt_dust_contract_exchange_enabled)return
+    endif
     ng=snrt_dust_contract_number_ir; nt=snrt_dust_contract_number_temperature
     if(.not.initialized)then
        if(dust_optics_enabled())then
@@ -122,7 +127,8 @@ contains
        density,primary_energy,old_energy,capacity,trial,material,temperature,diagnostics,ierr,coarse, &
        gas_energy,gas_capacity,n_hydrogen,gas_transfer,cell_material_u,cell_collision_area,cell_weights, &
        sublimation_bins,sublimation_next,pah_population,primary_spectrum,primary_pah_heat,primary_pah_captures, &
-       phase_density,phase_momentum,phase_work,gas_electrons,electron_capacity,gas_atomic_h,gas_molecular_h2)
+       phase_density,phase_momentum,phase_work,gas_electrons,electron_capacity,gas_atomic_h,gas_molecular_h2, &
+       gas_atomic_c,gas_carbon_ion)
     integer, intent(in) :: ilevel,cells(:),slots(:),neighbors(:,:)
     real(dust_dp), intent(in) :: directions(:,:),weights(:),dx,dt,chat
     real(dust_dp), intent(in) :: density(:),primary_energy(:),old_energy(:),capacity(:)
@@ -149,10 +155,12 @@ contains
     real(dust_dp),optional,intent(in)::electron_capacity
     real(dust_dp),optional,intent(inout)::gas_atomic_h(:)
     real(dust_dp),optional,intent(inout)::gas_molecular_h2(:)
+    real(dust_dp),optional,intent(inout)::gas_atomic_c(:),gas_carbon_ion(:)
     real(dust_dp),allocatable::electron_work(:),electron_initial(:),pah_capacity(:)
     real(dust_dp),allocatable::primary_pah_population(:,:)
     real(dust_dp),allocatable::h_work(:),h_initial(:)
     real(dust_dp),allocatable::h2_work(:),h2_initial(:)
+    real(dust_dp),allocatable::c_work(:),c_initial(:),cp_work(:),cp_initial(:)
     real(dust_dp),allocatable::phase_p_stage(:,:,:),phase_alpha(:,:,:),phase_sca(:,:,:)
     real(dust_dp),allocatable::phase_work_step(:,:),phase_work_sum(:,:)
     real(dust_dp),allocatable::pah_bulk_bins(:,:)
@@ -215,6 +223,10 @@ contains
        pah_capacity=gas_capacity
        if(dust_pah_charged())then
           electron_work=gas_electrons;electron_initial=gas_electrons
+          if(dust_pah_atomization())then
+             c_work=gas_atomic_c;c_initial=gas_atomic_c
+             cp_work=gas_carbon_ion;cp_initial=gas_carbon_ion
+          endif
           primary_pah_population=pah_population
           if(dust_pah_hydrogenated())then
              h_work=gas_atomic_h;h_initial=gas_atomic_h
@@ -369,6 +381,8 @@ contains
           if(dust_pah_charged())pah_capacity=gas_capacity+electron_capacity*(electron_work-electron_initial)
           if(dust_pah_hydrogenated())pah_capacity=pah_capacity+electron_capacity*(h_work-h_initial)
           if(dust_pah_h2_enabled())pah_capacity=pah_capacity+electron_capacity*(h2_work-h2_initial)
+          if(dust_pah_atomization())pah_capacity=pah_capacity+ &
+               electron_capacity*(c_work-c_initial+cp_work-cp_initial)
           conductance=2*kb*n_hydrogen*density*cell_collision_area* &
                snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/pah_capacity))
           if(size(slots)>0)call pah_mixed_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
@@ -378,7 +392,7 @@ contains
                phase_density=phase_density,phase_momentum=phase_p_stage,phase_absorption=phase_alpha, &
                phase_scattering=phase_sca,phase_work=phase_work_step, &
                gas_electrons=electron_work,electron_capacity=electron_capacity,primary_population=primary_pah_population, &
-               gas_atomic_h=h_work,gas_molecular_h2=h2_work)
+               gas_atomic_h=h_work,gas_molecular_h2=h2_work,gas_atomic_c=c_work,gas_carbon_ion=cp_work)
           if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
        else if(allocated(sub_bins))then
           do i=1,size(slots)
@@ -467,6 +481,9 @@ contains
     if(dust_pah_charged())gas_electrons=electron_work
     if(dust_pah_hydrogenated())gas_atomic_h=h_work
     if(dust_pah_h2_enabled())gas_molecular_h2=h2_work
+    if(dust_pah_atomization())then
+       gas_atomic_c=c_work;gas_carbon_ion=cp_work
+    endif
     if(present(sublimation_next))sublimation_next=sub_bins
     if(present(phase_density))then
        phase_momentum=phase_p_stage;phase_work=phase_work_sum
@@ -506,9 +523,13 @@ contains
             if(present(gas_energy))then
                eg=gas_energy(cell);cv=gas_capacity(cell);kappa=conductance(cell)
             endif
-            call iron_radiative_cell(snrt_dust_contract_temperature_k(1:size(log_t)),bath,bins(:,cell), &
+            ! Absolute IR has no implicit bath floor. The existing analytic
+            ! cold branch requires the first knot and physical band energies.
+            call iron_radiative_cell(snrt_dust_contract_temperature_k(1:size(log_t)), &
+                 snrt_dust_contract_temperature_k(1),bins(:,cell), &
                  old_energy(cell),heating(cell),dt,snrt_dust_contract_mass_per_h_g,moving_band,eg,cv,kappa, &
-                 next_energy(cell),temperature(cell),phase(:,cell),rate(:,cell),qgas,ierr,absolute_emission=.true.)
+                 next_energy(cell),temperature(cell),phase(:,cell),rate(:,cell),qgas,ierr,absolute_emission=.true., &
+                 photon_ev=snrt_dust_contract_ir_energy_ev(1:size(rate,1)))
             if(ierr/=0)return
             if(present(gas_transfer))gas_transfer(cell)=qgas
          enddo
@@ -601,6 +622,14 @@ contains
       if(present(pah_population).neqv.dust_pah_enabled())return
       if(present(primary_spectrum).neqv.dust_pah_enabled())return
       if(dust_pah_enabled())then
+         if(dust_pah_atomization())then
+            if(.not.present(gas_atomic_c).or..not.present(gas_carbon_ion))return
+            if(size(gas_atomic_c)/=size(slots).or.size(gas_carbon_ion)/=size(slots))return
+            if(any(.not.ieee_is_finite(gas_atomic_c)).or.any(.not.ieee_is_finite(gas_carbon_ion)))return
+            if(any(gas_atomic_c<0).or.any(gas_carbon_ion<0))return
+         else if(present(gas_atomic_c).or.present(gas_carbon_ion))then
+            return
+         endif
          if(dust_pah_charged())then
             if(.not.present(gas_electrons).or..not.present(electron_capacity))return
             if(present(phase_density).or.present(primary_pah_heat))return

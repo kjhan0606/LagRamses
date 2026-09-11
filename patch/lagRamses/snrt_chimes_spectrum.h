@@ -10,6 +10,14 @@ void snrt_chimes_band_free(void *handle);
 int snrt_chimes_molecular_load(const char *path,void **handle,double *identity);
 void snrt_chimes_molecular_free(void *handle);
 int snrt_chimes_band_reactions(void *handle, int reactions, int *mapping);
+// Reconstruct each incident ray with the same 128-node maximum-entropy bank
+// used by photo chemistry. Input N/E: C [group][direction], Fortran (nd,9).
+// Output node N/E: C [group][node][direction], Fortran (nd,128,9), in cm^-3
+// and eV/cm3. Each ray retains its incoming N/E normalization. This is a
+// reconstruction only, not attenuation, scattering or a momentum update.
+// Requires 1 <= directions <= 720; failure leaves both outputs untouched.
+int snrt_chimes_band_nodes(void *handle,int directions,const double *number,
+    const double *energy,double *node_number,double *node_energy);
 // N[band][direction] = photons/cm3, E = eV/cm3, direction-integrated shares.
 // Output [band][moment][reaction]: sum N*sigma, N*sigma*E and
 // N*sigma*(E-shell binding). Multiply by c_hat and target number density
@@ -62,6 +70,29 @@ int snrt_chimes_band_photo_molecular_groups(void *handle,void *molecules,int dir
     const double *abundance,const double *number,const double *energy,
     double *next_abundance,double *next_number,double *next_energy,double *ledger,
     double *grain_number,double *grain_energy);
+// Same group outputs plus four frozen grain-phase capture ledgers. Appended
+// phase_alpha is C [phase][group][128 nodes], Fortran (128,9,4), in cm^-1;
+// every entry is nonnegative and its phase sum must match dust_alpha at
+// EACH node (relative tolerance 1e-12, no nonzero absolute floor).
+// direction_vectors is C [direction][xyz], Fortran (3,directions), containing
+// finite unit directions (squared-norm tolerance 1e-10), not angular weights:
+// number/energy already contain direction-integrated shares.
+// phase_energy is C [phase][group], Fortran (9,4), in eV/cm3, and sums by
+// phase to grain_energy. phase_moment is C [phase][xyz], Fortran (3,4), the
+// SIGNED absorbed-energy direction moment in eV/cm3; divide by physical c
+// (and convert eV as needed) downstream to obtain momentum density.
+// Both use the same accepted node dust captures and initial node-resolved
+// angular fractions, never grey ratios or total gas+grain extinction.
+// Only this API appends solver counters; +/- moment parts are nonnegative
+// internally. No force, kinetic-work debit or material heating is done here.
+// All appended pointers are required. All outputs are unchanged on failure;
+// valid zero-dt/no-capture calls return zero ledgers and identity state/N/E.
+int snrt_chimes_band_photo_molecular_phases(void *handle,void *molecules,int directions,
+    double nH,double dt,double c_hat,const double *dust_alpha,const double *shield,double pumping,
+    const double *abundance,const double *number,const double *energy,
+    double *next_abundance,double *next_number,double *next_energy,double *ledger,
+    double *grain_number,double *grain_energy,const double *phase_alpha,
+    const double *direction_vectors,double *phase_energy,double *phase_moment);
 #ifdef __cplusplus
 }
 #endif

@@ -75,9 +75,8 @@ contains
     real(dp),intent(in)::row(:),mass(:),sv
     real(dp),intent(out)::enthalpy(:)
     integer,intent(out)::ierr
-    real(dp)::grains(2),fe,td,total,curve(1),unit(2),w
-    real(dp)::mix(snrt_dust_contract_number_temperature),pure(snrt_dust_contract_number_temperature)
-    integer::nt,b,m,j
+    real(dp)::grains(2),fe,td,total,curve(1),unit(2)
+    integer::nt,b,m
     ierr=1;enthalpy=0
     total=sum(mass(1:4));fe=0
     if(idust_iron>0)fe=sum(mass(5:6))
@@ -90,32 +89,16 @@ contains
     grains=[sum(mass(1:2)),sum(mass(3:4))]
     nt=snrt_dust_contract_number_temperature
     if(nt<2)return
-    if(idust_iron>0.or.idust_pah>0)then
-       call iron_compare_temperature(grains,fe,row(idust_energy)*sv**2,td,ierr)
-    else
-       call dust_composition_curve(snrt_dust_contract_temperature_k(1:nt),grains,1d0,mix,ierr)
-       if(ierr==0)call snrt_dust_material_temperature(snrt_dust_contract_temperature_k(1:nt), &
-            mix,row(idust_energy)*sv**2/total,td,ierr)
-    endif
+    ! Relative IR is absolute, including pure C/silicate grains. Use the
+    ! same mixture U(T) as its material callback, with the existing DL01
+    ! cold continuation; no net-bath or first-knot energy floor applies.
+    call iron_compare_temperature(grains,fe,row(idust_energy)*sv**2,td,ierr)
     if(ierr/=0)return
-    j=1
-    do while(j<nt-1)
-       if(td<=snrt_dust_contract_temperature_k(j+1))exit
-       j=j+1
-    enddo
-    w=0
-    if(idust_iron<=0.and.idust_pah<=0)w=log(td/snrt_dust_contract_temperature_k(j))/ &
-         log(snrt_dust_contract_temperature_k(j+1)/snrt_dust_contract_temperature_k(j))
     do b=1,4+merge(2,0,idust_iron>0)
        if(mass(b)==0)cycle
        m=(b+1)/2;unit=0
        if(m<=2)unit(m)=1
-       if(idust_iron>0.or.idust_pah>0)then
-          call iron_compare_curve([td],unit,merge(1d0,0d0,m==3),1d0,curve,ierr)
-       else
-          call dust_composition_curve(snrt_dust_contract_temperature_k(1:nt),unit,1d0,pure,ierr)
-          curve(1)=(1-w)*pure(j)+w*pure(j+1)
-       endif
+       call iron_compare_curve([td],unit,merge(1d0,0d0,m==3),1d0,curve,ierr)
        if(ierr/=0)return
        enthalpy(b)=mass(b)*curve(1)/sv**2
     enddo

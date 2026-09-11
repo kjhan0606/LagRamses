@@ -13,7 +13,8 @@ module stellar_yield_audit
   use stellar_yield_tables, only: stellar_yield_table_t
   use stellar_enrichment_config, only: default_imf_id, population_model_id, configured_binary_fraction, &
        configured_imf_mass_min, configured_imf_mass_max, high_mass_model, high_mass_max_remnant_adjust_fraction, &
-       enable_wind,enable_snii,enable_pisn,configured_channel_mass_min,configured_channel_mass_max
+       enable_wind,enable_snii,enable_pisn,enable_agb,enable_snia,population_effective_ssp, &
+       configured_channel_mass_min,configured_channel_mass_max
   implicit none
 
   private
@@ -52,10 +53,12 @@ contains
     type(stellar_yield_table_t), intent(inout) :: table
     character(len=*), intent(in) :: filename
     integer, intent(out) :: ierr
-    integer, parameter :: max_nodes=512
+    integer, parameter :: max_nodes=1024
     integer :: version, node_count, input_imf_id, input_population_id
     integer :: terminal_outcome(max_nodes), i, j, k, w, s, unit, status
     integer :: terminal_fate(max_nodes),pair,row
+    integer :: terminal_channel(max_nodes),remnant_kind(max_nodes)
+    real(stellar_dp) :: radiation_stop_age_yr(max_nodes)
     real(stellar_dp) :: mass_msun(max_nodes), metallicity(max_nodes), terminal_age_yr(max_nodes)
     real(stellar_dp) :: input_binary_fraction, input_imf_min, input_imf_max, delta, history_min, history_max
     real(stellar_dp) :: mass_domain_min, mass_domain_max
@@ -76,12 +79,11 @@ contains
          input_binary_fraction, input_imf_min, input_imf_max, mass_msun, metallicity, &
          terminal_age_yr, terminal_outcome, terminal_fate, metallicity_policy, net_yield_policy, agb_release_policy, &
          mass_domain_min, mass_domain_max, agb_non_co_count, agb_non_co_mass, agb_non_co_z, agb_non_co_kind, &
-         net_channel_available,agb_wind_jump_count,agb_wind_jump_mass,agb_wind_jump_z,agb_wind_jump_fraction
+         net_channel_available,agb_wind_jump_count,agb_wind_jump_mass,agb_wind_jump_z,agb_wind_jump_fraction, &
+         terminal_channel,remnant_kind,radiation_stop_age_yr
 
     ierr=yield_audit_err_table
     if (allocated(table%hm_mass)) return ! A second application would double-transform a model.
-    call audit_yield_table(table,1d-10,status,exact_source_coordinates=.true.)
-    if(status/=0)return
     version=0; node_count=0; input_imf_id=-1; input_population_id=-1
     input_binary_fraction=-1; input_imf_min=-1; input_imf_max=-1
     model_id=''; wind_source_id=''; terminal_source_id=''; model_coordinates=''; timing_policy=''
@@ -94,11 +96,40 @@ contains
     net_channel_available=.false.
     mass_msun=-1; metallicity=-1; terminal_age_yr=-1; terminal_outcome=-1
     terminal_fate=-1
+    terminal_channel=-1;remnant_kind=-1;radiation_stop_age_yr=-1
     open(newunit=unit,file=filename,status='old',action='read',iostat=status)
     if(status/=0)return
     read(unit,nml=stellar_high_mass_history,iostat=status)
     close(unit)
-    if(status/=0.or.version<1.or.version>4.or.node_count<2.or.node_count>max_nodes)return
+    if(status/=0.or.version<1.or.version>5.or.node_count<2.or.node_count>max_nodes)return
+    if(version<5.and.node_count>512)return
+    if(version==5)then
+       if(model_id/='parsec_mixed_lowmass_truncated_v1')return
+       if(high_mass_model/='source_consistent'.or.high_mass_max_remnant_adjust_fraction/=0)return
+       if(.not.(enable_wind.and.enable_agb.and.enable_snii.and.enable_pisn))return
+       if(.not.((population_model_id==0.and..not.enable_snia).or. &
+            (population_model_id==population_effective_ssp.and.enable_snia)))return
+       if(input_population_id/=0.or.input_binary_fraction/=0.or. &
+            configured_binary_fraction/=0)return
+       if(input_imf_id/=default_imf_id.or.input_imf_min/=.08d0.or.input_imf_max/=600d0)return
+       if(configured_imf_mass_min/=.08d0.or.configured_imf_mass_max/=600d0)return
+       if(any(configured_channel_mass_min([1,2,3,5])/=2d0).or. &
+            any(configured_channel_mass_max([1,2,3,5])/=600d0))return
+       if(mass_domain_min/=2d0.or.mass_domain_max/=600d0)return
+       if(timing_policy/='wind_linear_terminal_step'.or.metallicity_policy/='linear_Z_cumulative_mixture')return
+       if(net_yield_policy/='unavailable_diagnostic_zero'.or.agb_release_policy/='terminal_step')return
+       if(agb_non_co_count/=0.or.agb_wind_jump_count/=0.or.any(terminal_outcome/=-1))return
+       if(min(len_trim(wind_source_id),len_trim(terminal_source_id),len_trim(model_coordinates))==0)return
+       call prepare_mixed_history(table,mass_msun(:node_count),metallicity(:node_count), &
+            terminal_age_yr(:node_count),radiation_stop_age_yr(:node_count),terminal_channel(:node_count), &
+            remnant_kind(:node_count),terminal_fate(:node_count), &
+            [model_id,wind_source_id,terminal_source_id,model_coordinates],ierr)
+       return
+    endif
+    if(population_model_id==population_effective_ssp)return ! only reviewed v5 ordinary history
+    if(any(terminal_channel/=-1).or.any(remnant_kind/=-1).or.any(radiation_stop_age_yr/=-1))return
+    call audit_yield_table(table,1d-10,status,exact_source_coordinates=.true.)
+    if(status/=0)return
     if(version<4.and.(enable_pisn.or.any(terminal_fate/=-1)))return
     ! v1 remains the original [40,120] contract; v2 explicitly includes the
     ! source-supported ordinary CCSN branch, never an 8--13 extrapolation.
@@ -335,6 +366,115 @@ contains
     ierr=yield_audit_ok
   end subroutine prepare_high_mass_history
 
+  subroutine prepare_mixed_history(table,m,z,t,stop,ch,kind,fate,identity,ierr)
+    type(stellar_yield_table_t),intent(inout)::table
+    real(stellar_dp),intent(in)::m(:),z(:),t(:),stop(:)
+    integer,intent(in)::ch(:),kind(:),fate(:)
+    character(len=128),intent(in)::identity(4)
+    integer,intent(out)::ierr
+    type(stellar_yield_table_t)::trial
+    integer::n,i,c,r,first,last,owner,k,j
+    real(stellar_dp)::ret,rem,tol
+    ierr=yield_audit_err_table;n=size(m)
+    if(.not.table%loaded.or.table%n_rows<8*n)return
+    if(any(.not.ieee_is_finite(m)).or.any(.not.ieee_is_finite(z)).or. &
+         any(.not.ieee_is_finite(t)).or.any(.not.ieee_is_finite(stop)))return
+    if(any(m<2).or.any(m>600).or.any(z<0).or.any(z>1).or.any(t<=0).or.any(stop<=0).or.any(stop>t))return
+    if(m(1)/=2.or.m(n)/=600)return
+    do i=1,n
+       if(i>1)then
+          if(z(i)<z(i-1))return
+          if(z(i)==z(i-1))then
+             if(m(i)<=m(i-1))return
+          else
+             if(m(i-1)/=600.or.m(i)/=2)return
+          endif
+       endif
+       if(ch(i)==2)then
+          if(m(i)>=9.or.fate(i)/=0.or.kind(i)<0.or.kind(i)>3)return
+          if(m(i)>7.and.kind(i)/=3)return
+       else
+          if(m(i)<9.or.kind(i)/=4.or.fate(i)<1.or.fate(i)>5)return
+          if(ch(i)/=3.and.ch(i)/=5)return
+          if((ch(i)==5).neqv.(fate(i)==3.or.fate(i)==4))return
+       endif
+    enddo
+    if(z(1)==z(n))return
+    trial=table
+    allocate(trial%hm_mass(n),trial%hm_z(n),trial%hm_age(n),trial%hm_remnant(n),trial%hm_adjustment(n), &
+         trial%hm_wind_row(n),trial%hm_terminal_row(n),trial%hm_pair_row(n),trial%hm_fate(n), &
+         trial%hm_terminal_channel(n),trial%hm_remnant_kind(n),trial%hm_radiation_stop(n), &
+         trial%hm_first(5,n),trial%hm_count(5,n))
+    trial%hm_mass=m;trial%hm_z=z;trial%hm_age=t*1d-9;trial%hm_radiation_stop=stop*1d-9
+    trial%hm_terminal_channel=ch;trial%hm_remnant_kind=kind;trial%hm_fate=fate
+    trial%hm_adjustment=0;trial%hm_first=0;trial%hm_count=0
+    ! Canonical v5 order is Z,M,channel,age. Every non-Ia channel has a
+    ! zero origin and terminal endpoint, even when its contribution is zero.
+    r=1
+    do i=1,n
+       ret=0;rem=0;owner=3
+       if(ch(i)==2)owner=2
+       tol=1d-10*m(i)
+       do c=1,5
+          if(c==4)cycle
+          first=r
+          do while(r<=table%n_rows)
+             if(table%initial_mass(r)/=m(i).or.table%birth_metallicity(r)/=z(i).or.table%channel(r)/=c)exit
+             if(.not.finite_row(table,r))return
+             if(table%age_gyr(r)<0.or.table%age_gyr(r)>trial%hm_age(i))return
+             if(min(table%returned_mass(r),table%remnant_mass(r),table%energy(r), &
+                  minval(table%ejected_mass(r,:)))<0.or.any(table%net_yield(r,:)/=0))return
+             if(sum(table%ejected_mass(r,:))>table%returned_mass(r)+tol)return
+             if(table%remnant_mass(r)>0.and.c/=owner)return
+             if(r==first)then
+                if(table%age_gyr(r)/=0.or..not.zero_payload(table,r))return
+             else
+                if(table%age_gyr(r)<=table%age_gyr(r-1))return
+                if(table%returned_mass(r)<table%returned_mass(r-1)-tol.or. &
+                     any(table%ejected_mass(r,:)<table%ejected_mass(r-1,:)-tol))return
+                if(table%returned_mass(r)-sum(table%ejected_mass(r,:)) < &
+                     table%returned_mass(r-1)-sum(table%ejected_mass(r-1,:))-tol)return
+                if(table%energy(r)<table%energy(r-1)*(1d0-1d-12))return
+             endif
+             if(c/=1)then
+                if(table%age_gyr(r)<trial%hm_age(i).and..not.zero_payload(table,r))return
+                if(c/=ch(i))then
+                   if(table%returned_mass(r)/=0.or.table%energy(r)/=0.or. &
+                        any(table%ejected_mass(r,:)/=0).or.any(table%momentum(r,:)/=0))return
+                endif
+             endif
+             r=r+1
+          enddo
+          last=r-1
+          if(last-first+1<2)return
+          if(table%age_gyr(last)/=trial%hm_age(i))return
+          trial%hm_first(c,i)=first;trial%hm_count(c,i)=last-first+1
+          if(c==1)trial%hm_wind_row(i)=last
+          if(c==ch(i))trial%hm_terminal_row(i)=last
+          if(c==5)trial%hm_pair_row(i)=last
+          if(c==owner)trial%hm_remnant(i)=table%remnant_mass(last)
+          ret=ret+table%returned_mass(last);rem=rem+table%remnant_mass(last)
+       enddo
+       if(abs(ret+rem-m(i))>tol)return
+       if(fate(i)==4.and.rem/=0)return
+       if(fate(i)==2.or.fate(i)==5)then
+          last=trial%hm_terminal_row(i)
+          if(table%returned_mass(last)/=0.or.table%energy(last)/=0)return
+       endif
+    enddo
+    if(r/=table%n_rows+1)return
+    k=count(ch==2)
+    allocate(trial%agb_terminal_row(k),trial%agb_remnant_kind(k));j=0
+    do i=1,n
+       if(ch(i)/=2)cycle
+       j=j+1;trial%agb_terminal_row(j)=trial%hm_terminal_row(i);trial%agb_remnant_kind(j)=kind(i)
+    enddo
+    trial%high_mass_version=5;trial%high_mass_ready=.true.;trial%high_mass_linear_z=.true.
+    trial%high_mass_identity=identity;trial%net_yield_diagnostic_unavailable=.true.
+    trial%net_yield_channel_available=.false.
+    table=trial;ierr=0
+  end subroutine
+
   subroutine prepare_agb_terminal_rows(table,ierr,allow_wind)
     ! The first remnant row defines the supplied terminal age when wind
     ! histories are selected; legacy terminal-only inputs must remain zero
@@ -516,7 +656,7 @@ contains
 
     real(stellar_dp) :: tol, coordinate_tol, ejected_sum, scale
     logical :: require_grid, row_is_finite, channel_is_bad
-    integer :: i, j, channel
+    integer :: i, j, channel,jlast
 
     ierr = yield_audit_ok
     require_grid = .false.
@@ -625,7 +765,9 @@ contains
     ! A duplicate coordinate would make the interpolation result depend on
     ! row order.  Reject it even when the duplicate values happen to agree.
     do i = 1, table%n_rows
-       do j = i + 1, table%n_rows
+       jlast=table%n_rows
+       if(table%high_mass_ready.and.table%high_mass_version==5)jlast=min(i+1,table%n_rows)
+       do j = i + 1, jlast
           if (table%channel(i) /= table%channel(j)) cycle
           if (.not. same_value(table%initial_mass(i), &
                table%initial_mass(j), coordinate_tol)) cycle
@@ -640,7 +782,9 @@ contains
     ! Actual cumulative material, returned mass, and injected energy must not
     ! decrease with age.  Net yields and momentum are allowed to be signed.
     do i = 1, table%n_rows
-       do j = 1, table%n_rows
+       jlast=table%n_rows
+       if(table%high_mass_ready.and.table%high_mass_version==5)jlast=min(i+1,table%n_rows)
+       do j = merge(i+1,1,table%high_mass_ready.and.table%high_mass_version==5), jlast
           if (i == j) cycle
           if (table%channel(i) /= table%channel(j)) cycle
           if (.not. same_value(table%initial_mass(i), &
@@ -676,6 +820,7 @@ contains
     if (require_grid) then
        do channel = channel_wind, channel_pisn
           if(channel==4)cycle ! SNIa has a separate DTD/per-event input.
+          if(table%high_mass_ready.and.table%high_mass_version==5)cycle ! Sorted complete v5 ranges validated on admission.
           if(channel==channel_pisn.and.table%high_mass_version/=4)cycle
           if(present(required_channels))then
              if(.not.required_channels(channel))cycle

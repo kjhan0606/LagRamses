@@ -46,6 +46,9 @@ module stellar_enrichment_config
   integer, parameter, public :: stellar_imf_miller_scalo = 4
   integer, parameter, public :: population_single_star_ssp = 0
   integer, parameter, public :: population_binary_ssp = 1
+  ! Single-star ordinary histories plus a full-initial-mass empirical DTD.
+  ! binary_fraction=0 means no resolved binary population, not zero Ia rate.
+  integer, parameter, public :: population_effective_ssp = 2
   integer, parameter, public :: enrichment_namelist_err_missing = 1005
   integer, parameter, public :: yield_basis_per_star_cumulative = 0
   integer, parameter, public :: yield_basis_per_event_cumulative = 1
@@ -59,6 +62,8 @@ module stellar_enrichment_config
   ! override. All presets retain the same conservation checks.
   character(len=32), save :: high_mass_model = 'source_consistent'
   character(len=1024), save :: high_mass_history_file = ''
+  character(len=64), save :: configured_radioactive_model = 'none'
+  character(len=1024), save :: configured_radioactive_path = ''
   real(stellar_dp), save :: high_mass_max_remnant_adjust_fraction = 0.0_stellar_dp
   ! Build-bound production identity.  These values remain blank in a review
   ! build and may only be populated by the approved source-package promotion
@@ -137,6 +142,8 @@ contains
     stellar_fate_approval_id = ''
     high_mass_model = 'source_consistent'
     high_mass_history_file = ''
+    configured_radioactive_model = 'none'
+    configured_radioactive_path = ''
     high_mass_max_remnant_adjust_fraction = 0.0_stellar_dp
     unresolved_fate_mass_min = (/0.8d0, 40.0d0/)
     unresolved_fate_mass_max = (/1.0d0, 120.0d0/)
@@ -164,6 +171,8 @@ contains
     character(len=32) :: parsed_feedback_mode
     character(len=32) :: high_mass_preset
     character(len=1024) :: high_mass_history_path
+    character(len=64) :: radioactive_model
+    character(len=1024) :: radioactive_companion_path
     real(stellar_dp) :: high_mass_remnant_adjust_max_fraction
     character(len=64) :: fate_policy
     character(len=128) :: fate_map_sha256, fate_approval_id
@@ -179,7 +188,8 @@ contains
          population_model, yield_source_basis, imf_mass_min_msun, &
          imf_mass_max_msun, binary_fraction, channel_mass_min_msun, &
          channel_mass_max_msun, fate_policy, fate_map_sha256, fate_approval_id, &
-         high_mass_preset, high_mass_remnant_adjust_max_fraction, high_mass_history_path
+         high_mass_preset, high_mass_remnant_adjust_max_fraction, high_mass_history_path, &
+         radioactive_model, radioactive_companion_path
 
     use_h  = active_element(elem_h)
     use_he = active_element(elem_he)
@@ -213,6 +223,8 @@ contains
     parsed_feedback_mode = stellar_feedback_mode
     high_mass_preset = 'source_consistent'
     high_mass_history_path = ''
+    radioactive_model = 'none'
+    radioactive_companion_path = ''
     high_mass_remnant_adjust_max_fraction = 0.0_stellar_dp
     fate_policy = stellar_fate_policy
     fate_map_sha256 = stellar_fate_map_sha256
@@ -227,6 +239,23 @@ contains
     end if
     if (iostat_out > 0) return
 
+    call lowercase_ascii(radioactive_model)
+    select case(trim(radioactive_model))
+    case('none')
+       if(len_trim(radioactive_companion_path)>0)then
+          iostat_out=1013
+          return
+       endif
+    case('lc18_al26_fe60_transparent_v1')
+       if(len_trim(radioactive_companion_path)==0)then
+          iostat_out=1013
+          return
+       endif
+    case default
+       iostat_out=1013
+       return
+    end select
+
     call lowercase_ascii(high_mass_preset)
     if (.not. valid_high_mass_choice(high_mass_preset, high_mass_remnant_adjust_max_fraction)) then
        iostat_out = 1012
@@ -238,6 +267,10 @@ contains
     case ('channel_resolved')
        parsed_feedback_mode = 'channel_resolved'
     case ('legacy')
+       if(trim(radioactive_model)/='none')then
+          iostat_out=1013
+          return
+       endif
        ! A legacy executable does not consume the new endpoint model. Do not
        ! silently accept a requested change and run the old physics instead.
        if (trim(high_mass_preset) /= 'source_consistent' .or. len_trim(high_mass_history_path)>0) then
@@ -254,6 +287,8 @@ contains
        stellar_feedback_mode = 'legacy'
        high_mass_model = high_mass_preset
        high_mass_history_file = ''
+       configured_radioactive_model = 'none'
+       configured_radioactive_path = ''
        high_mass_max_remnant_adjust_fraction = high_mass_remnant_adjust_max_fraction
        return
     case default
@@ -286,6 +321,8 @@ contains
        parsed_population_model_id = population_single_star_ssp
     case ('binary_ssp')
        parsed_population_model_id = population_binary_ssp
+    case ('effective_ssp')
+       parsed_population_model_id = population_effective_ssp
     case default
        iostat_out = 1003
        return
@@ -299,7 +336,7 @@ contains
     end if
     if (.not. ieee_is_finite(binary_fraction) .or. binary_fraction < 0.0_stellar_dp .or. &
          binary_fraction > 1.0_stellar_dp .or. &
-         (parsed_population_model_id == population_single_star_ssp .and. &
+         (parsed_population_model_id /= population_binary_ssp .and. &
           binary_fraction /= 0.0_stellar_dp) .or. &
          (parsed_population_model_id == population_binary_ssp .and. &
           binary_fraction <= 0.0_stellar_dp)) then
@@ -361,6 +398,12 @@ contains
        iostat_out = 1011
        return
     end if
+    if(trim(radioactive_model)/='none')then
+       if(len_trim(high_mass_history_path)==0.or.trim(fate_policy)/='user_selected_model_v1')then
+          iostat_out=1013
+          return
+       endif
+    endif
     call commit_runtime_switches(use_h, use_he, use_c, use_n, use_o, use_ne, &
          use_mg, use_si, use_s, use_ca, use_fe, use_wind, use_agb, use_snii, &
          use_snia, use_pisn)
@@ -379,6 +422,8 @@ contains
     stellar_fate_approval_id = trim(adjustl(fate_approval_id))
     high_mass_model = trim(adjustl(high_mass_preset))
     high_mass_history_file = high_mass_history_path
+    configured_radioactive_model = radioactive_model
+    configured_radioactive_path = radioactive_companion_path
     high_mass_max_remnant_adjust_fraction = high_mass_remnant_adjust_max_fraction
   end subroutine read_enrichment_namelist
 
@@ -456,11 +501,13 @@ contains
          yield_source_basis_id==yield_basis_per_star_cumulative .and. &
          enable_wind .and. enable_snii .and. &
          ((population_model_id==population_single_star_ssp.and.configured_binary_fraction==0d0.and..not.enable_snia) .or. &
-          (population_model_id==population_binary_ssp.and.configured_binary_fraction>0d0.and.enable_snia.and.enable_agb))
+          (population_model_id==population_binary_ssp.and.configured_binary_fraction>0d0.and.enable_snia.and.enable_agb).or. &
+          (population_model_id==population_effective_ssp.and.configured_binary_fraction==0d0.and.enable_snia.and.enable_agb))
     ! The binary branch is an explicitly declared effective SSP. Its SNIa
     ! handoff and yield history must match the same IMF/population/fraction.
     ! Only ordinary AGB remnants may fund SNIa; not NS/BH high-mass remnants.
-    if(enable_snia)user_source_model_requested=user_source_model_requested.and. &
+    if(enable_snia.and.population_model_id/=population_effective_ssp) &
+         user_source_model_requested=user_source_model_requested.and. &
          configured_channel_mass_max(channel_agb)<=8d0
   end function user_source_model_requested
 

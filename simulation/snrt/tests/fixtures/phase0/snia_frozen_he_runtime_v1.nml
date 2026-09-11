@@ -1,0 +1,85 @@
+! Effective hybrid, NOT a self-consistent WD/donor/ordinary-SSP population.
+! Contact and 2e-6Msun/yr incident He feed are prescribed, NOT inferred.
+! Original-ZAMS age; full-initial-SSP weight, no extra binary/IMF scaling.
+! Imposed-event donor survivor (comparison only): 0.64108431081508321 Msun.
+&snia_population_realization
+ event_model='tabulated_frozen_he_contact_v1'
+ mass_accounting='effective_ssp'
+ accounting_approval_id='SNIA-EFFECTIVE-SSP-2026-09-07'
+ approved=.true.
+ population_source_id="cosmic:system169:frozen_he_contact:effective_hybrid"
+ population_model_id=1
+ imf_id=1
+ binary_fraction=0.5d0
+ binary_fraction_policy=1
+ imf_conversion_factor=1.0d0
+ minimum_delay_gyr=0.04d0
+ maximum_delay_gyr=13.7d0
+ power_law_index=-1.07d0
+ events_per_initial_msun=1.84394554437682475e-05
+ event_realization_policy=1
+ metallicity_policy=1
+ metallicity_factor_source_id="snia_metallicity_factor_constant_unity_v1"
+ source_commit_binding="c6c8042b03406b9d69bc50434fe5d6af7f542be6"
+ approval_id="FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
+/
+
+&snia_frozen_he_event
+ row%birth_z=1.00000000000000002e-02
+ row%age_yr=8.61448988812216967e+07
+ row%weight=1.84394554437682475e-05
+ row%contact_age_yr=8.59619054893119633e+07
+ row%seed_wd=1.03447660922947504e+00
+ row%seed_donor=1.00712708834324882e+00
+ row%donor_background_loss=5.59937086963557817e-05
+ row%transfer_rate=1.99999999999999991e-06
+ row%threshold=1.40046339304894429e+00
+ row%history_end_age=1.00000000000000000e+08
+ row%initial_binary_mass=1.27740000000000009e+01
+ row%retention_reference_z=2.00000000000000004e-02
+ row%retention_mass_ceiling=1.35000000000000009e+00
+ row%history_bin_num=169
+ row%closure_id='imposed_contact_stable_eta1_frozen135_v1'
+ row%comparison_approval='SNIA-FROZEN-HE-HYBRID-2026-09-11'
+ row%source_commit='f9b90f451bca014e9e0adb3a410bee8752e30e53'
+ row%source_sha256(1)='83ce89ccd931bcdd423be14de976aae53a4f45c9fb284c8a7debaa8b3ea266c5'
+ row%source_sha256(2)='bae23f738983cc2af94d017c2432e674e74bb6a1ac1e04f569d8efbb86c46976'
+ row%source_sha256(3)='0a88c863c958b04a84b1b340a2bfaf9f508a2780ee6719aa512f6e4410e9590a'
+ row%source_sha256(4)='1ef93b7930cf1023b1ae48af3b0189b103493e6ca23952bdb4039a8aebb042a7'
+ row%source_sha256(5)='68b2c0a7a90cd179e4f98c27428935472713e161ea0a19e5c8bf7eef8d3d04e9'
+ row%source_sha256(6)='0427c739553007ffaf1e60503600c8feff75575b0efd1da72cf4adc86892bf4c'
+ row%source_sha256(7)='541212a155e801f8c155d06b935a01a231a3dac721224377d7d3499c6d03ff5e'
+ row%source_sha256(8)='a93e22a32d7566c711601cc92d6554c27caaa5ed7e3ad68dabefb02be06e7e5f'
+ row%source_sha256(9)='3a167ebaf393bd2ac11217cb0a8b278e2e8da793a91c4b36e8a57e4464e4dff5'
+/
+
+&snia_physical_contract
+ approved=.true.
+ wd_debit_policy=1
+ shortfall_policy=1
+ momentum_policy=2
+ returned_mass_per_event=1.4004633930489443d0
+ terminal_remnant_per_event=0.0d0
+ wd_debit_per_event=1.4004633930489443d0
+ energy_per_event=1.5063100005966762d51
+ momentum_per_event=0.0d0,0.0d0,0.0d0
+ radial_momentum_per_event=0.0d0
+ yield_source_id="hesma:yysd4-xap92:n100"
+ yield_source_sha256="bb9325de2e07bf86acd1ef4abf7c950fb44e74e6513b8c9c88336d910f8814c0"
+ source_commit_binding="c6c8042b03406b9d69bc50434fe5d6af7f542be6"
+ conversion_code_sha256="3a831b6f99df0abb549eb62798340dab7aed99e01382930e9231dcf9f9d1923b"
+ approval_id="FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
+ ejected_mass_per_event=7.33d-15,0.000831d0,0.00304d0,3.22d-6,0.101d0,
+ 0.00357d0,0.0154d0,0.287d0,0.115d0,0.0148d0,0.74d0
+ net_yield_per_event=0.0d0,0.0d0,0.0d0,0.0d0,0.0d0,0.0d0,
+ 0.0d0,0.0d0,0.0d0,0.0d0,0.0d0,
+/
+
+&snia_thermal_coupling
+ approved=.true.
+ mode=1
+ thermal_fraction=1.0d0
+ include_event_momentum_kinetic=.false.
+ source_commit_binding="c6c8042b03406b9d69bc50434fe5d6af7f542be6"
+ approval_id="FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ"
+/

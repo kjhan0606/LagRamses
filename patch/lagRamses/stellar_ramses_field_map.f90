@@ -14,6 +14,7 @@ module stellar_ramses_field_map
      integer :: total_metal_index = 0
      integer :: delayed_cooling_index = 0
      integer :: element_index(n_stellar_elements) = 0
+     integer :: radioactive_index(2) = 0 ! Al26, Fe60 subsets, not extra rho/Z
      logical :: volume_is_physical = .true.
   end type stellar_field_map_t
 
@@ -28,6 +29,7 @@ contains
     field_map%total_metal_index = 0
     field_map%delayed_cooling_index = 0
     field_map%element_index = 0
+    field_map%radioactive_index = 0
     field_map%volume_is_physical = .true.
   end subroutine clear_field_map
 
@@ -186,6 +188,21 @@ contains
           end if
        end do
     end do
+    if(any(field_map%radioactive_index/=0))then
+       ierr=21
+       if(present(message))message='invalid or overlapping radioactive subset fields/hosts'
+       if(any(field_map%element_index==0).or.field_map%total_metal_index==0)return
+       do i=1,2
+          index=field_map%radioactive_index(i)
+          if(.not.valid_index(index,nvar))return
+          if(index==field_map%density_index.or.index==field_map%energy_index.or. &
+               index==field_map%total_metal_index.or.index==field_map%delayed_cooling_index)return
+          if(any(index==field_map%momentum_index).or.any(index==field_map%element_index))return
+       enddo
+       if(field_map%radioactive_index(1)==field_map%radioactive_index(2))return
+       ierr=0
+       if(present(message))message=''
+    endif
   end subroutine validate_field_map
 
   logical function valid_index(index, nvar)

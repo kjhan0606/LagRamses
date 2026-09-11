@@ -150,6 +150,33 @@ extern "C" int snrt_chimes_band_reactions(void *handle,int reactions,int *mappin
   if(!handle || reactions!=nr || !mapping)return 1;
   const auto &b=*static_cast<const Bank*>(handle);std::copy(b.reaction.begin(),b.reaction.end(),mapping);return 0;
 }
+extern "C" int snrt_chimes_band_nodes(void *handle,int nd,const double *number,const double *energy,
+    double *node_number,double *node_energy) {
+  // Private moving-grain staging: reconstruct every ray using the SAME bank
+  // as photo chemistry. Output layout is Fortran (nd,128,9); publish atomically.
+  if(!handle || nd<1 || nd>720 || !number || !energy || !node_number || !node_energy)return 1;
+  const auto &b=*static_cast<const Bank*>(handle);
+  try {
+    std::vector<double> nn(size_t(nd)*K*ng,0),ee(nn.size(),0);
+    for(int g=0;g<ng;++g)for(int d=0;d<nd;++d){
+      const int ray=g*nd+d;const double n=number[ray],e=energy[ray];
+      if(!std::isfinite(n)||!std::isfinite(e)||n<0||e<0||(n==0&&e!=0))return 2;
+      if(n==0)continue;
+      std::array<double,K> w;const double mean=e/n;
+      if(mean<b.grids[g].e.front()*(1-2e-13)||mean>b.grids[g].e.back()*(1+2e-13)||
+          !b.grids[g].reconstruct(mean,w))return 2;
+      double sum_n=0,sum_e=0;
+      for(int k=0;k<K;++k){sum_n+=w[k];sum_e+=w[k]*b.grids[g].e[k];}
+      if(!(sum_n>0&&sum_e>0))return 2;
+      for(int k=0;k<K;++k){
+        const size_t j=d+size_t(nd)*(k+K*g);
+        nn[j]=n*(w[k]/sum_n);ee[j]=e*(w[k]*b.grids[g].e[k]/sum_e);
+      }
+    }
+    std::copy(nn.begin(),nn.end(),node_number);std::copy(ee.begin(),ee.end(),node_energy);return 0;
+  }catch(...){return 3;}
+}
+
 extern "C" int snrt_chimes_band_moments(void *handle,int directions,int reactions,
     const double *number,const double *energy,double *moments) {
   if(!handle || directions<=0 || directions>100000 || reactions!=nr || !number || !energy || !moments)return 1;

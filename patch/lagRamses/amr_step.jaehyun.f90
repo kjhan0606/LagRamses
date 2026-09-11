@@ -2,6 +2,9 @@
 #define synchro_hydro_fine dust_dynamics_sync_level
 #endif
 recursive subroutine amr_step(ilevel,icount)
+#ifdef STELLAR_RADIOACTIVE
+  use stellar_radioactive_runtime, only: radioactive_advance_level
+#endif
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -784,6 +787,11 @@ recursive subroutine amr_step(ilevel,icount)
      dtnew(ilevel)=MIN(dtnew(ilevel-1)/real(nsubcycle(ilevel-1)),dtnew(ilevel))
   end if
 
+#ifdef STELLAR_RADIOACTIVE
+  ! Decay old owned gas before initializing flux storage and finer recursion.
+  ! Fresh stellar ejecta are separately aged to interval end before deposition.
+  if(hydro)call radioactive_advance_level(ilevel)
+#endif
   ! Set unew equal to uold
                                call timer('hydro - set unew','start')
   if(hydro)call set_unew(ilevel)

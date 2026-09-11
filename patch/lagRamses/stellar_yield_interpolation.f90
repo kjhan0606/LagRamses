@@ -11,7 +11,7 @@ module stellar_yield_interpolation
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels, channel_wind, channel_snii, channel_agb, channel_pisn
   use stellar_yield_tables, only: stellar_yield_table_t, &
-       yield_mass_assignment_linear, yield_mass_assignment_piecewise_constant
+       yield_mass_assignment_linear, yield_mass_assignment_piecewise_constant,mixed_source_node
   implicit none
 
   private
@@ -91,6 +91,11 @@ contains
        return
     end if
 
+    if(table%high_mass_ready.and.table%high_mass_version==5)then
+       call high_mass_history_value(table,channel_id,query_mass,query_z,query_age_gyr, &
+            returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr,dust)
+       return
+    endif
     if(table%high_mass_ready.and.allocated(table%agb_terminal_row).and.channel_id==channel_agb)then
        call agb_terminal_value(table,query_mass,query_z,query_age_gyr, &
             returned_mass,remnant_mass,energy,momentum,ejected_mass,net_yield,ierr,dust)
@@ -383,6 +388,10 @@ contains
     if(present(dust))dust=0
     ierr=interpolation_err_grid
     if(mass<minval(table%hm_mass).or.mass>maxval(table%hm_mass))return
+    if(table%high_mass_version==5)then
+       call mixed_node_value(table,channel,mass,z,age,returned,remnant,energy,p,elements,net,ierr,dust)
+       return
+    endif
     ! No interpolation of discrete fates across Z, rotation or source engines.
     ! Mass cells use nearest-node midpoints, with ties assigned to the lower
     ! node. Budgets scale by M_query/M_node, keeping mass fractions conserved.
@@ -449,6 +458,53 @@ contains
     if(present(dust))dust=factor*((1-fraction)*table%dust_ejected(lo,:)+fraction*table%dust_ejected(hi,:))
     ierr=interpolation_ok
   end subroutine high_mass_node_value
+
+  subroutine mixed_node_value(table,channel,mass,z,age,returned,remnant,energy,p,elements,net,ierr,dust)
+    type(stellar_yield_table_t),intent(in)::table
+    integer,intent(in)::channel
+    real(stellar_dp),intent(in)::mass,z,age
+    real(stellar_dp),intent(out)::returned,remnant,energy,p(3),elements(n_stellar_elements),net(n_stellar_elements)
+    integer,intent(out)::ierr
+    real(stellar_dp),intent(out),optional::dust(2)
+    integer::node,lo,hi,mid,owner
+    real(stellar_dp)::factor,f,tq
+    returned=0;remnant=0;energy=0;p=0;elements=0;net=0
+    if(present(dust))dust=0
+    ierr=interpolation_err_grid;node=mixed_source_node(table,mass,z)
+    if(node==0)return
+    ierr=interpolation_ok
+    if(channel==4)return ! This comparison contains no binary/Ia population.
+    factor=mass/table%hm_mass(node)
+    if(channel/=1)then
+       if(age<table%hm_age(node))return
+       owner=3
+       if(table%hm_terminal_channel(node)==2)owner=2
+       if(channel/=table%hm_terminal_channel(node).and.channel/=owner)return
+       lo=table%hm_first(channel,node)+table%hm_count(channel,node)-1;hi=lo;f=0
+    else
+       lo=table%hm_first(channel,node);hi=lo+table%hm_count(channel,node)-1
+       tq=min(age,table%hm_age(node))
+       do while(hi-lo>1)
+          mid=(hi+lo)/2
+          if(table%age_gyr(mid)<=tq)then
+             lo=mid
+          else
+             hi=mid
+          endif
+       enddo
+       f=(tq-table%age_gyr(lo))/(table%age_gyr(hi)-table%age_gyr(lo))
+    endif
+    returned=factor*((1-f)*table%returned_mass(lo)+f*table%returned_mass(hi))
+    remnant=factor*((1-f)*table%remnant_mass(lo)+f*table%remnant_mass(hi))
+    if(channel==2.and.table%co_wd_inventory_only)then
+       if(table%hm_remnant_kind(node)/=0)remnant=0
+    endif
+    energy=factor*((1-f)*table%energy(lo)+f*table%energy(hi))
+    p=factor*((1-f)*table%momentum(lo,:)+f*table%momentum(hi,:))
+    elements=factor*((1-f)*table%ejected_mass(lo,:)+f*table%ejected_mass(hi,:))
+    net=factor*((1-f)*table%net_yield(lo,:)+f*table%net_yield(hi,:))
+    if(present(dust))dust=factor*((1-f)*table%dust_ejected(lo,:)+f*table%dust_ejected(hi,:))
+  end subroutine
 
   subroutine find_bounds(table, channel_id, axis, query, lower, upper, found)
     type(stellar_yield_table_t), intent(in) :: table

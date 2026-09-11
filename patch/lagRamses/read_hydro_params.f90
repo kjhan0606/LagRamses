@@ -22,7 +22,8 @@ subroutine read_hydro_params(nml_ok)
        population_model_id, yield_source_basis_name, configured_imf_mass_min, &
        configured_imf_mass_max, configured_binary_fraction, stellar_fate_policy, &
        stellar_fate_map_sha256, stellar_fate_approval_id, production_fate_policy_supported, &
-       high_mass_model, high_mass_max_remnant_adjust_fraction, user_source_model_requested, high_mass_history_file
+       high_mass_model, high_mass_max_remnant_adjust_fraction, user_source_model_requested, high_mass_history_file, &
+       configured_radioactive_model, configured_radioactive_path
 #endif
   implicit none
 #ifndef WITHOUTMPI
@@ -33,7 +34,7 @@ subroutine read_hydro_params(nml_ok)
   !--------------------------------------------------
   ! Local variables  
   !--------------------------------------------------
-  integer::i,idim,ivar,nboundary_true=0,dum
+  integer::i,idim,ivar,nboundary_true=0,dum,refine_status
 #ifdef PHASE0_STELLAR_ENRICHMENT
   integer::stellar_nml_iostat
 #endif
@@ -134,7 +135,18 @@ subroutine read_hydro_params(nml_ok)
 101 write(*,*)' You need to set up namelist &INIT_PARAMS in parameter file'
   call clean_stop
 102 rewind(1)
-  if(nlevelmax>levelmin)read(1,NML=refine_params)
+  if(nlevelmax>levelmin)then
+     read(1,NML=refine_params)
+  else
+     ! mass_sph also sets the stellar particle mass when m_star>0. A
+     ! uniform grid must consume an explicitly supplied refinement group;
+     ! omission remains legal when no refinement is requested.
+     read(1,NML=refine_params,iostat=refine_status)
+     if(refine_status>0)then
+        if(myid==1)write(*,*)'ERROR: invalid optional &REFINE_PARAMS on uniform grid'
+        call clean_stop
+     endif
+  endif
   rewind(1)
   if(hydro)read(1,NML=hydro_params)
 #ifndef SOLVERmhd
@@ -400,7 +412,7 @@ subroutine read_hydro_params(nml_ok)
           sink.and.sink_AGN.and.agn.and..not.mad_jet.and. &
           dust_chimes_enabled().and.dust_two_size_enabled().and.dust_optics_enabled().and. &
           .not.dust_relative_motion.and..not.dust_iron_enabled().and..not.dust_pah_enabled().and. &
-          all(dust_condensation==0d0).and..not.dust_sn_shocks.and.trim(dust_sublimation)=='none'
+          .not.dust_sn_shocks.and.trim(dust_sublimation)=='none'
 #endif
      if((sink.or.sink_AGN.or.agn).and..not.dust_sink_ok)dust_ok=.false.
      ! SINK_PARAMS is read after this routine; validate create_sinks and
@@ -717,7 +729,14 @@ subroutine read_hydro_params(nml_ok)
         nml_ok=.false.
      endif
      if(myid==1)then
-        write(*,*)'Fe ELECTRIC-ONLY comparison: grain T<=300 K, primary<=4 eV'
+        select case(trim(dust_iron_model))
+        case('fe_uv_cycle_v1')
+           write(*,*)'Fe UV stationary-charge comparison: grain T<=300 K, primary<=13.6 eV'
+        case('fe_thermal_limit_v1')
+           write(*,*)'Fe full thermal-retention LIMIT: grain T<=300 K, primary<=10000 eV; no photoelectric/Auger'
+        case default
+           write(*,*)'Fe ELECTRIC-ONLY comparison: grain T<=300 K, primary<=4 eV'
+        end select
         if(.not.dust_chimes_enabled())write(*,*)'Fe static comparison: CHIMES off; all grain mass reactions disabled'
         if(dust_fe_kinetics)then
            write(*,*)'Fe kinetics: geometric seed growth + Choban26/Nozawa06 thermal sputtering; sticking=',dust_fe_sticking
@@ -738,7 +757,10 @@ subroutine read_hydro_params(nml_ok)
         nml_ok=.false.
      endif
      if(myid==1)then
-        if(dust_pah_hydrogenated())then
+        if(dust_pah_atomization())then
+           write(*,*)'PAH single-photon atomization LIMIT: 3584 states; individual thresholds; atomic-donor binding'
+           write(*,*)'PAH hard groups require explicit table/threshold admission; NOT a broad-spectrum model'
+        else if(dust_pah_hydrogenated())then
            write(*,*)'PAH H/charge M13-DL01 comparison: 3584 states, H=0--13, <=13.6 eV; no carbon destruction'
            if(dust_pah_h2_enabled())write(*,*) &
                 'PAH H2 vacancy-refilling: cation H0--10, M13 bound rate; not a bound on the total H2 effect'
@@ -864,6 +886,41 @@ subroutine read_hydro_params(nml_ok)
      end if
      call clean_stop
   end if
+  iradioactive=-1
+  if(trim(configured_radioactive_model)/='none')then
+#ifdef STELLAR_RADIOACTIVE
+     ! Two host-element subsets at the tail; no overlap with any existing
+     ! window. This comparison is intentionally gas-only, without chemistry
+     ! or dust exchange, whose isotope ownership is not represented here.
+     iradioactive=nvar-1
+     if(.not.hydro.or..not.metal.or..not.use_channel_resolved_feedback().or. &
+          iradioactive<=ichem+10.or.use_sgs.or.gpu_hydro.or.mhd_enabled.or.scheme/='muscl'.or.cosmo)then
+        if(myid==1)write(*,*)'ERROR: radioactive gas comparison requires metal hydro, eleven elements, no SGS'
+        if(myid==1)write(*,*)'  supported isotope transport: noncosmo CPU/OpenMP MUSCL hydro, not GPU hydro or MHD'
+        nml_ok=.false.
+     endif
+     if(.not.pic.or.trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))then
+        if(myid==1)write(*,*)'ERROR: radioactive source comparison requires PIC and HDF5 restart identity'
+        nml_ok=.false.
+     endif
+#ifdef DUST_LIVE
+     if(myid==1)write(*,*)'ERROR: radioactive gas comparison cannot use a DUST_LIVE build'
+     nml_ok=.false.
+#endif
+#ifdef SNRT_CHIMES
+     if(myid==1)write(*,*)'ERROR: radioactive gas comparison cannot use CHIMES'
+     nml_ok=.false.
+#endif
+     if(myid==1)then
+        write(*,*)'Radioactive comparison: ',trim(configured_radioactive_model),' first carrier=',iradioactive
+        write(*,*)'  companion: ',trim(configured_radioactive_path)
+        write(*,*)'  gas-only parent subsets; transparent MeV photons; no decay heating'
+     endif
+#else
+     if(myid==1)write(*,*)'ERROR: radioactive comparison requires RADIOACTIVE=1 build'
+     nml_ok=.false.
+#endif
+  endif
 #endif
 
 end subroutine read_hydro_params

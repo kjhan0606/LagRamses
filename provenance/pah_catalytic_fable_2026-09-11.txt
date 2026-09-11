@@ -1,0 +1,17 @@
+**Verdict: CONDITIONAL**
+
+**Q-GOAL.** Not on the critical path for the default simulation-ready run, since defaults stay untouched. Within the authorized bundle2 comparison it is the minimal closure that makes the existing M13 cation cycle meaningful. The current selector admits no H14 and sets attach(13) to zero, so H13 is a dead end in unirradiated gas. Abstraction is the only non-photolytic H13 sink and the only H2 return path. Keep exactly one channel and do not extend toward the full H0-36 network.
+
+**Q-LEAN.** Lean in state: no slots, existing molecular H2 carrier, existing energy ledger. The capacity ledger in snrt_dust_live.f90 lines 369-371 counts H and H2 identically, so H to H2 conversion leaves gas capacity invariant. This matches the plan's "no kinetic created or removed" statement. The listed checks are extensions of asserts already in pah_hydrogen_charged_step lines 138-154, not new instrumentation. Two trims: excitation preservation and per-charge molecule balance are structural under proportional transfer within one bin, so test them once in the smoke and add no runtime gates. Timestep refinement is a one-off smoke comparison, not a gate.
+
+**Energy and conservation.** The ledger closes with existing conventions. Per event: bond rises by 3.2 eV, gas heat gains 1.2781 eV, the molecular term contributes minus 4.4781 eV, excitation unchanged. The balance line at 138-139 sums to zero. The H nuclei check at lines 148-152 gives minus one atomic, plus two molecular, minus one bound, which is zero. Charge and molecule number are trivially preserved.
+
+**Indispensable changes (3):**
+
+1. **State the selector-to-carrier relation.** The H2 carrier is passed only when the H2-capture flag is on, and charged_step line 59 rejects a mismatch. Define the catalytic selector as a strict superset of the existing H2-capture selector. That avoids any wiring change and isolates abstraction against the existing H2 selector as the comparison baseline.
+2. **Pin the thermal speed and the identity vector.** Use the Maxwell mean speed, not the rms speed, and say so. Append the cross section and enable flag to the identity vector with a new leading tag, keeping old selectors' vectors byte-identical.
+3. **Fix the operator position.** Run abstraction after the per-charge attach, H2-capture and absorbed loop at lines 90-107 and before recombination at line 110, drawing on the remaining atomic H. Use the same closed-form common-coefficient bimolecular count as the recombination routine over the summed H13 population, then apply one uniform fraction per excitation bin and charge.
+
+**Non-blocking.** Record in the doc that immediate accommodation is the gas-heating bound and that release into PAH excitation is the opposite bound if ever needed. Sequential donor sharing with attachment is already acknowledged and the bias is small, since the abstraction coefficient is roughly one percent of the attachment coefficient at the even H12 state.
+
+I could not write the plan file because the Write tool is disabled in this session. The review above is the complete deliverable.

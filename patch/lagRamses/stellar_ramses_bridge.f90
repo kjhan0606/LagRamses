@@ -11,7 +11,7 @@ module stellar_ramses_bridge
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements
   use stellar_enrichment_contract, only: stellar_source_t, &
-       delayed_cooling_source_mass, generic_metal_ejecta_mass
+       delayed_cooling_source_mass, generic_metal_ejecta_mass,radioactive_source_valid
   use stellar_snia_physical_contract, only: snia_event_budget_t
   use stellar_snia_cell_deposition, only: snia_thermal_coupling_t, &
        snia_cell_increment_t, &
@@ -39,7 +39,7 @@ contains
 
   subroutine deposit_source_to_uold(source, nvar, n_cells, cell_volume, &
        weights, density_var, energy_var, momentum_var, element_var, uold, &
-       tolerance, ierr, total_metal_var)
+       tolerance, ierr, total_metal_var,radioactive_var)
     type(stellar_source_t), intent(in) :: source
     integer, intent(in) :: nvar, n_cells
     real(stellar_dp), intent(in) :: cell_volume(n_cells)
@@ -51,13 +51,30 @@ contains
     real(stellar_dp), intent(in) :: tolerance
     integer, intent(out) :: ierr
     integer, intent(in), optional :: total_metal_var
+    integer, intent(in), optional :: radioactive_var(2)
 
     real(stellar_dp) :: tol, weight_sum, ejected_sum, scale
     real(stellar_dp) :: normalized_weight, cell_mass, element_mass
     real(stellar_dp) :: generic_metal_mass
     integer :: cell, element
+    type(stellar_field_map_t)::isotope_map
+    integer::map_status
 
     ierr = ramses_bridge_ok
+    if(.not.radioactive_source_valid(source).or. &
+         (any(source%radioactive_parent/=0).and..not.present(radioactive_var)))then
+       ierr=ramses_bridge_err_source;return
+    endif
+    if(present(radioactive_var))then
+       isotope_map%density_index=density_var;isotope_map%energy_index=energy_var
+       isotope_map%momentum_index=momentum_var;isotope_map%element_index=element_var
+       if(present(total_metal_var))isotope_map%total_metal_index=total_metal_var
+       isotope_map%radioactive_index=radioactive_var
+       call validate_field_map(isotope_map,nvar,3,map_status)
+       if(map_status/=0.or.(any(source%radioactive_parent/=0).and.any(radioactive_var==0)))then
+          ierr=ramses_bridge_err_index;return
+       endif
+    endif
     tol = max(tolerance, 1.0e-12_stellar_dp)
 
     if (nvar <= 0 .or. n_cells <= 0 .or. density_var < 1 .or. &
@@ -105,6 +122,13 @@ contains
     ! All validation is completed before uold is modified.
     do cell = 1, n_cells
        normalized_weight = weights(cell) / weight_sum
+       if(present(radioactive_var))then
+          do element=1,2
+             if(radioactive_var(element)==0)cycle
+             uold(radioactive_var(element),cell)=uold(radioactive_var(element),cell)+ &
+                  normalized_weight*source%radioactive_parent(element)/cell_volume(cell)
+          enddo
+       endif
        cell_mass = normalized_weight * source%returned_mass / cell_volume(cell)
        uold(density_var,cell) = uold(density_var,cell) + cell_mass
        if (present(total_metal_var)) then
@@ -158,6 +182,10 @@ contains
 
     ierr = ramses_bridge_ok
     delta = 0.0_stellar_dp
+    if(.not.radioactive_source_valid(source).or. &
+         (any(source%radioactive_parent/=0).and.any(field_map%radioactive_index==0)))then
+       ierr=ramses_bridge_err_source;return
+    endif
     tol = max(tolerance, 1.0e-12_stellar_dp)
     if (nvar <= 0 .or. size(delta) < nvar .or. ndim /= 3 .or. &
          .not. ieee_is_finite(tolerance) .or. tolerance < 0.0_stellar_dp .or. &
@@ -291,6 +319,10 @@ contains
        delta(field_map%element_index(element)) = &
             source%ejected_mass(element) / scale_mass / volume_code
     end do
+    do element=1,2
+       if(field_map%radioactive_index(element)==0)cycle
+       delta(field_map%radioactive_index(element))=source%radioactive_parent(element)/scale_mass/volume_code
+    enddo
     if (.not. all(ieee_is_finite(delta(1:nvar)))) then
        delta = 0.0_stellar_dp
        ierr = ramses_bridge_err_result

@@ -9,6 +9,46 @@ module dust_iron_compare
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
 contains
+  subroutine iron_compare_neutral_area(weights,normalization,neutral_fraction,area,ierr)
+    ! Remove H+ from ONLY the Fe part of the old H-nucleus collision area:
+    ! the UV catalytic operator already includes those ion impacts.
+    real(real64),intent(in)::weights(6),normalization,neutral_fraction
+    real(real64),intent(inout)::area
+    integer,intent(out)::ierr
+    real(real64)::next,cs_area
+    ierr=1
+    if(.not.all(ieee_is_finite([weights,normalization,neutral_fraction,area])))return
+    if(any(weights<0).or.normalization<=0.or.neutral_fraction<0.or.neutral_fraction>1)return
+    call dust_composition_area(weights(1:4),normalization,cs_area,ierr)
+    if(ierr/=0)return
+    ierr=1
+    next=cs_area*sum(weights(1:4))+neutral_fraction*normalization*.75d0* &
+         sum(weights(5:6)/(fe_density(1)*fe_radius_cm))
+    if(next<0)return
+    area=next;ierr=0
+  end subroutine
+
+  subroutine iron_compare_source_receipt(delta,old,primary,ierr)
+    ! Signed catalytic sensible-energy receipt, not an invented photon heat.
+    ! Feed a positive source to the existing implicit IR solve; any net loss
+    ! debits only the funded pre-step material reservoir.
+    real(real64),intent(in)::delta
+    real(real64),intent(inout)::old,primary
+    integer,intent(out)::ierr
+    real(real64)::source
+    ierr=1
+    if(.not.all(ieee_is_finite([delta,old,primary])))return
+    if(min(old,primary)<0)return
+    source=primary+delta
+    if(old+source<0)return
+    if(source>=0)then
+       primary=source
+    else
+       old=old+source;primary=0
+    endif
+    ierr=0
+  end subroutine
+
   subroutine iron_compare_curve(nodes,grains,fe,normalization,curve,ierr)
     real(real64),intent(in)::nodes(:),grains(2),fe,normalization
     real(real64),intent(out)::curve(size(nodes))

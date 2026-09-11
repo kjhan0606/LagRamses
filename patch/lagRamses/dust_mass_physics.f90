@@ -31,6 +31,9 @@ module dust_mass_physics
        [-156.88d0,82.110d0,-18.238d0,2.0692d0,-.11933d0,.0027788d0]
   real(real64),parameter :: dust_fe_sputter_min_t=1d4,dust_fe_sputter_max_t=1d9
   real(real64),parameter :: dust_fe_max_temperature=300d0,dust_fe_max_primary_ev=4d0
+  ! Named photon comparisons; old 4 eV constant and selector are unchanged.
+  real(real64),parameter :: dust_fe_trace_charge=1d-3,dust_fe_trace_energy=1d-3,dust_fe_relax_ratio=1d-2
+  integer,parameter :: dust_fe_photon_identity_n=12
   ! GD89 graphite BULK vacuum evaporation; not Mg2SiO4 coefficients for our MgFeSiO4.
   real(real64),parameter :: dust_carbon_atom=12.011d0*1.66053906660d-24
   real(real64),parameter :: dust_carbon_nu=2d14,dust_carbon_binding_k=81200d0
@@ -388,7 +391,9 @@ contains
        ok=ok.and.all(dust_size_radius_cm==[1d-6,1d-5]).and.all(dust_size_density==[2.2d0,3.8d0])
     endif
     if(.not.dust_mass_enabled)ok=ok.and.trim(dust_mass_model)=='bulk_v1'.and.trim(dust_cooling)=='none'
-    ok=ok.and.(trim(dust_iron_model)=='none'.or.trim(dust_iron_model)=='fe_electric_compare_v1')
+    ok=ok.and.(trim(dust_iron_model)=='none'.or.trim(dust_iron_model)=='fe_electric_compare_v1'.or. &
+         trim(dust_iron_model)=='fe_thermal_limit_v1'.or.trim(dust_iron_model)=='fe_uv_cycle_v1')
+    if(dust_fe_uv_enabled())ok=ok.and.dust_chimes_enabled().and..not.dust_pah_enabled()
     ok=ok.and.ieee_is_finite(dust_fe_condensation).and.dust_fe_condensation>=0.and.dust_fe_condensation<=1
     ok=ok.and.ieee_is_finite(dust_fe_sticking).and.dust_fe_sticking>=0.and.dust_fe_sticking<=1
     if(trim(dust_iron_model)/='none')then
@@ -410,7 +415,8 @@ contains
     if(.not.dust_fe_kinetics)ok=ok.and.dust_fe_sticking==0
     ok=ok.and.(trim(dust_pah_model)=='none'.or.trim(dust_pah_model)=='pah_neutral_absolute_v1'.or. &
          trim(dust_pah_model)=='pah_charge_fixed_h_v1'.or.trim(dust_pah_model)=='pah_hydrogen_m13_dl01_v1'.or. &
-         trim(dust_pah_model)=='pah_h2_rehydrogenation_v1')
+         trim(dust_pah_model)=='pah_h2_rehydrogenation_v1'.or.trim(dust_pah_model)=='pah_h2_catalytic_v1'.or. &
+         trim(dust_pah_model)=='pah_atomization_limit_v1')
     if(dust_pah_charged())ok=ok.and..not.dust_iron_enabled()
     ok=ok.and.ieee_is_finite(dust_pah_condensation).and.dust_pah_condensation>=0.and.dust_pah_condensation<=1
     if(trim(dust_pah_model)/='none')then
@@ -433,7 +439,15 @@ contains
   end function
 
   logical function dust_pah_h2_enabled() result(enabled)
-    enabled=dust_mass_enabled.and.trim(dust_pah_model)=='pah_h2_rehydrogenation_v1'
+    enabled=dust_mass_enabled.and.(trim(dust_pah_model)=='pah_h2_rehydrogenation_v1'.or.dust_pah_catalytic())
+  end function
+
+  logical function dust_pah_catalytic() result(enabled)
+    enabled=dust_mass_enabled.and.(trim(dust_pah_model)=='pah_h2_catalytic_v1'.or.dust_pah_atomization())
+  end function
+
+  logical function dust_pah_atomization() result(enabled)
+    enabled=dust_mass_enabled.and.trim(dust_pah_model)=='pah_atomization_limit_v1'
   end function
 
   integer function dust_pah_charge_size() result(n)
@@ -496,7 +510,36 @@ contains
   end subroutine
 
   logical function dust_iron_enabled() result(enabled)
-    enabled=dust_mass_enabled.and.trim(dust_iron_model)=='fe_electric_compare_v1'
+    enabled=dust_mass_enabled.and.(trim(dust_iron_model)=='fe_electric_compare_v1'.or. &
+         trim(dust_iron_model)=='fe_thermal_limit_v1'.or.trim(dust_iron_model)=='fe_uv_cycle_v1')
+  end function
+
+  logical function dust_fe_uv_enabled() result(enabled)
+    enabled=dust_mass_enabled.and.trim(dust_iron_model)=='fe_uv_cycle_v1'
+  end function
+
+  logical function dust_fe_photon_comparison() result(enabled)
+    enabled=dust_mass_enabled.and.(trim(dust_iron_model)=='fe_uv_cycle_v1'.or. &
+         trim(dust_iron_model)=='fe_thermal_limit_v1')
+  end function
+
+  real(real64) function dust_fe_primary_limit() result(limit)
+    limit=dust_fe_max_primary_ev
+    if(trim(dust_iron_model)=='fe_thermal_limit_v1')limit=1d4
+    if(trim(dust_iron_model)=='fe_uv_cycle_v1')limit=13.6d0
+  end function
+
+  function dust_fe_photon_identity() result(v)
+    real(real64)::v(dust_fe_photon_identity_n)
+    integer::model
+    model=0
+    if(trim(dust_iron_model)=='fe_electric_compare_v1')model=1
+    if(trim(dust_iron_model)=='fe_thermal_limit_v1')model=2
+    if(trim(dust_iron_model)=='fe_uv_cycle_v1')model=3
+    ! schema,model,Emax,Tmax,trace Q,trace F,relax,OML,full accommodation,
+    ! ground atom return,stationary trace cycles,fixed-group photon energies.
+    v=[1d0,real(model,real64),dust_fe_primary_limit(),dust_fe_max_temperature, &
+         dust_fe_trace_charge,dust_fe_trace_energy,dust_fe_relax_ratio,1d0,1d0,1d0,1d0,1d0]
   end function
 
   logical function dust_atomic_cooling_enabled() result(enabled)

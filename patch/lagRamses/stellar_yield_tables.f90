@@ -54,6 +54,11 @@ module stellar_yield_tables
      ! v4: 1 CCSN, 2 failed SN, 3 PPISN, 4 PISN, 5 direct BH.
      ! Channel3 owns remnants; channel5 owns pair-instability ejecta only.
      integer, allocatable :: hm_fate(:), hm_pair_row(:)
+     ! v5 mixed evolution: terminal emission owner is independent of remnant
+     ! kind. AGB remnants belong to channel2, all massive remnants to channel3.
+     integer, allocatable :: hm_terminal_channel(:),hm_remnant_kind(:)
+     real(stellar_dp), allocatable :: hm_radiation_stop(:) ! Gyr, may precede death
+     integer, allocatable :: hm_first(:,:),hm_count(:,:) ! channel,node row ranges
      ! Optional single terminal envelope/WD event, indexed by source M,Z.
      integer, allocatable :: agb_terminal_row(:)
      ! CO=0, hybrid CO(Ne)=1, ONe=2. Only CO can supply the strict Ia ledger.
@@ -79,8 +84,27 @@ module stellar_yield_tables
   public :: load_yield_table
   public :: set_yield_mass_assignment_mode
   public :: prepare_dust_yields
+  public :: mixed_source_node
 
 contains
+
+  integer function mixed_source_node(table,m,z) result(node)
+    type(stellar_yield_table_t),intent(in)::table
+    real(stellar_dp),intent(in)::m,z
+    integer::i
+    real(stellar_dp)::d,best
+    node=0;best=huge(1d0)
+    if(.not.allocated(table%hm_mass))return
+    if(m<minval(table%hm_mass).or.m>maxval(table%hm_mass))return
+    do i=1,size(table%hm_mass)
+       if((m<40d0).neqv.(table%hm_mass(i)<40d0))cycle
+       if(abs(z-table%hm_z(i))>32*epsilon(1d0)*max(abs(z),abs(table%hm_z(i)),tiny(1d0)))cycle
+       d=abs(m-table%hm_mass(i))
+       if(d<best)then
+          best=d;node=i
+       endif
+    enddo
+  end function
 
   subroutine clear_yield_table(table)
     type(stellar_yield_table_t), intent(inout) :: table
@@ -100,6 +124,8 @@ contains
          table%hm_remnant, table%hm_adjustment, table%hm_wind_row, table%hm_terminal_row)
     if (allocated(table%agb_terminal_row)) deallocate(table%agb_terminal_row)
     if (allocated(table%hm_fate)) deallocate(table%hm_fate,table%hm_pair_row)
+    if (allocated(table%hm_terminal_channel))deallocate(table%hm_terminal_channel, &
+         table%hm_remnant_kind,table%hm_radiation_stop,table%hm_first,table%hm_count)
     if (allocated(table%agb_remnant_kind)) deallocate(table%agb_remnant_kind)
     if (allocated(table%agb_terminal_jump_fraction)) deallocate(table%agb_terminal_jump_fraction)
     table%co_wd_inventory_only = .false.
@@ -121,7 +147,7 @@ contains
     ! existing age/Z/IMF mixture. In particular no SSP-averaged C/O switch.
     type(stellar_yield_table_t),intent(inout)::table
     integer,intent(out)::ierr
-    integer::r,j,k,previous,selected,pass,status
+    integer::r,j,k,previous,selected,pass,status,c,node,last
     logical,allocatable::done(:)
     real(stellar_dp)::age,delta(n_stellar_elements),jump(n_stellar_elements),part(2),jp(2),before(2),tol
     ierr=1
@@ -129,6 +155,32 @@ contains
     if(allocated(table%dust_ejected))deallocate(table%dust_ejected,table%dust_jump)
     allocate(table%dust_ejected(table%n_rows,2),table%dust_jump(table%n_rows,2),done(table%n_rows))
     table%dust_ejected=0;table%dust_jump=0;done=.false.
+    if(table%high_mass_ready.and.table%high_mass_version==5)then
+       ! v5 admission proves sorted, disjoint channel/node ranges. Linear
+       ! work rather than the legacy global O(rows**2) selection loop.
+       do node=1,size(table%hm_mass)
+          do c=1,3
+             previous=0
+             last=table%hm_first(c,node)+table%hm_count(c,node)-1
+             do r=table%hm_first(c,node),last
+                delta=table%ejected_mass(r,:);before=0
+                if(previous>0)then
+                   delta=delta-table%ejected_mass(previous,:)
+                   before=table%dust_ejected(previous,:)
+                endif
+                tol=64*epsilon(1d0)*max(table%returned_mass(r),tiny(1d0))
+                if(any(delta < -tol))return
+                call dust_species_condense(max(delta,0d0),c,part,status)
+                if(status/=0)return
+                table%dust_ejected(r,:)=before+part
+                if(sum(table%dust_ejected(r,:))>table%returned_mass(r)- &
+                     sum(table%ejected_mass(r,1:2))+tol)return
+                previous=r
+             enddo
+          enddo
+       enddo
+       ierr=0;return
+    endif
     do pass=1,table%n_rows
        selected=0;age=huge(1d0)
        do r=1,table%n_rows

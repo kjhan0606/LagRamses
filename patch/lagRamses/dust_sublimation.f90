@@ -71,6 +71,16 @@ contains
        if(any(us>=latent_s))return
     endif
     mix=sum(bins(1:2))*uc+sum(bins(3:4))*us
+    if(energy<mix(1))then
+       ! Absolute moving-grain radiation may cool below the first U(T)
+       ! knot. Bound erosion by its value at that (warmer) knot. Only an
+       ! exactly unchanged represented mass permits this cold identity;
+       ! do not invent heat or extrapolate a finite sublimation rate.
+       call dust_sublimation_at_temperature(nodes,uc,us,bins,nodes(1),dt,latent_s, &
+            trial,ed,heat,latent,status)
+       if(status==0.and.all(trial==bins))ierr=0
+       return
+    endif
     call snrt_dust_material_temperature(nodes,mix,energy,initial_t,status)
     if(status/=0)return
     ! The validated inverse evaluates exp(log(T)); snap its roundoff at a

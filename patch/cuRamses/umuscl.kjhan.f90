@@ -20,6 +20,9 @@
 !  ndim        => (const)  number of dimensions
 ! ----------------------------------------------------------------
 subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid,uouter)
+#ifdef STELLAR_RADIOACTIVE
+  use stellar_radioactive_runtime, only: radioactive_limit_faces
+#endif
 #ifdef DUST_DYNAMICS
   use dust_dynamics_runtime, only: dust_dynamics_unsplit
 #endif
@@ -130,6 +133,9 @@ subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid,uouter)
 #endif
   endif
 
+#ifdef STELLAR_RADIOACTIVE
+  call radioactive_limit_faces(qin,qm,qp,ngrid)
+#endif
   ! Solve for 1D flux in X direction
   call cmpflxm(qm,iu1+1,iu2+1,ju1  ,ju2  ,ku1  ,ku2  , &
        &       qp,iu1  ,iu2  ,ju1  ,ju2  ,ku1  ,ku2  , &

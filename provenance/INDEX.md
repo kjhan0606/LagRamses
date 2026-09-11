@@ -14,6 +14,49 @@ evidence.
 
 ## Active bundle map
 
+Sequential effective-model implementation:
+[v5/empirical-SNIa connection and integrated execution](effective_population_execution_2026-09-11.md).
+Step1 native/live/restart passes; step2 configuration selected; step3 short
+coupled execution/restart passes. The recorded long-macrostep CHIMES failure
+is now [reproduced and repaired](chimes_long_interval_repair_2026-09-11.md):
+unchanged~68.65Myr intervals complete the four-step coupled run, with the
+original conservation thresholds. It was not deferred as microscopic physics.
+[COLIBRE-type calibration and resolution convergence](galaxy_calibration_science_plan.md)
+is a separate science campaign, not an implementation completion gate.
+
+Latest completion standard (operator-approved2026-09-11):
+[galaxy-scale effective physical model](general_physics_completion_plan_2026-09-11.md).
+Declared literature-based approximations are allowed; conservation and native
+coupling remain required. [Direct microscopic calculations](microscopic_physics_long_term_backlog.md)
+are long-term research, not additional completion gates. This scope approval
+does not itself constitute implementation or production qualification.
+
+Approved remaining bundles1--5 (2026-09-11):
+[execution and physical-data boundaries](remaining_physics_bundle_execution_2026-09-11.md).
+Kind7 condensation/shock/sublimation/relative connection is
+[complete within its bounded evaluated scope](kind7_dust_process_implementation_2026-09-11.md);
+native tests, coadvected/relative live execution and bitwise restart pass.
+Completed raw outputs were removed, with compact evidence retained. Do not infer
+completion of PAH hard-source survival or a full matched stellar population.
+
+Approved comparison-model execution (2026-09-11):
+[PAH catalytic H2 complete within its stated domain](pah_catalytic_comparison_implementation_2026-09-11.md),
+including shared H donor, thermal energy receipt and MPI2/OMP2 restart parity
+for7,565 datasets. Four evaluated raw directories removed; inputs, binary,
+hashes and compact results retained.
+[Wind bi-stability velocity comparison](parsec_bistability_comparison_2026-09-11.md)
+has physical-grid and native source/SED binding evidence; it does not add LBV
+mass ejections. [Selective four-plan review and driver disposition](remaining_comparison_fable_2026-09-11.md)
+records the comparison designs. [Mixed/truncated low-mass source](parsec_mixed_lowmass_evidence_2026-09-11.md),
+[frozen-contact effective SNIa](snia_frozen_he_hybrid_plan_2026-09-11.md) and
+[Al26/Fe60 transparent-decay material](stellar_radioactive_implementation_2026-09-11.md)
+now have bounded actual MPI/live/restart evidence, with evaluated raw cleaned.
+[Fe photon limits](fe_photon_comparisons_plan_2026-09-11.md) also pass bounded
+MPI2/OMP2 live comparison. [PAH single-photon atomization](pah_single_photon_atomization_plan_2026-09-11.md)
+passes actual weak/strong-source comparison, carbon return and7591-dataset
+restart matching. These complete the approved named-comparison scope, not a
+universal broadband source or self-consistent full stellar population.
+
 Kind7 actual-source multilevel AMR repair (2026-09-11):
 [completed empty-leaf and MPI ownership repair](snrt_multilevel_amr_fix_2026-09-11.md).
 Consistent empty receiver batches are successful no-ops without skipping

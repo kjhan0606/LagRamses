@@ -35,6 +35,8 @@ program dust_mass_smoke
   write(*,*)'PAH_NATIVE_NONIA_POST_GRAPHITE_H_C_INJECTION_PASS'
   call check_pah_charge_events()
   call check_pah_hydrogen()
+  call check_pah_catalytic()
+  call check_pah_atomization()
   dust_mass_enabled=.true.
   call dust_condense([1d0,2d0,3d0],[.7d0,1d0,1d0],[.2d0,.5d0,1d0],d,ierr)
   if(ierr/=0.or.abs(d-.25d0)>1d-14)stop 2
@@ -238,6 +240,336 @@ program dust_mass_smoke
   call check_iron_material()
   call check_iron_kinetics()
 contains
+  subroutine check_pah_atomization()
+    use dust_pah_atomization_physics
+    use dust_pah_hydrogen, only: pah_hydrogen_parameters
+    use, intrinsic :: iso_fortran_env, only: int64
+    use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan,ieee_is_finite
+    integer,parameter::ns=12,ng=3
+    real(real64),parameter::ev=1.602176634d-12,kb=1.380649d-16,na=6.02214076d23
+    real(real64)::u(ns),bond(ns),old(ns),next(ns),saved(ns),threshold(ns),photon(ng,ns),captured(ng,ns)
+    real(real64)::destroyed(ng,ns),saved_destroyed(ng,ns),native_bond(0:13),attach(0:13)
+    real(real64)::modes(102),thermal(1),cv(1),hf0,a12,energy,loss(ns),nan,bond_error,max_bond_ulp
+    integer::hydrogen(ns),charge(ns),s,h,q,j,status,case_id
+    type(pah_atomization_receipt)::receipt,keep
+    call dust_pah_modes(24,12,modes,status)
+    if(status/=0)stop 701
+    call dust_vibrational_curve(modes,[298.15d0],thermal,cv,status)
+    if(status/=0)stop 702
+    hf0=295d0-(thermal(1)+4*kb*298.15d0)*na/1d10+24*1.050d0+6*8.468d0
+    a12=(24*711.396d0+12*216.034d0-hf0)*1d10/na
+    if(abs(a12-pah_atomization_a12)>2d-13*ev)stop 703
+    if(abs(a12/ev-200.3871563964464d0)>1d-11)stop 704
+    if(abs(pah_atomization_carbon_ip/ev-11.260291860855d0)>1d-12)stop 705
+    max_bond_ulp=0
+    do q=0,1
+       call pah_hydrogen_parameters(q,native_bond,attach,status)
+       if(status/=0)stop 706
+       do h=0,13
+          ! Identical constants, but Intel's scalar partial sum and full
+          ! array recurrence differ by one ULP at H4. This comparison is
+          ! not a photon admission threshold (those remain exact below).
+          bond_error=abs(pah_atomization_bond(h)-native_bond(h))
+          max_bond_ulp=max(max_bond_ulp,bond_error/spacing(max(abs(native_bond(h)),ev)))
+          if(.not.ieee_is_finite(bond_error).or.bond_error>4*spacing(max(abs(native_bond(h)),ev)).or. &
+               (h==12.and.pah_atomization_bond(h)/=0d0))then
+             write(*,*)'PAH_ATOMIZATION_BOND_MISMATCH charge/H/error=',q,h,bond_error
+             stop 707
+          endif
+       enddo
+    enddo
+    write(*,'(A,F6.2)')'PAH_ATOMIZATION_NATIVE_BOND_MAX_ULP=',max_bond_ulp
+    s=0
+    do q=0,1
+       do j=0,1
+          do h=1,3
+             s=s+1;hydrogen(s)=0
+             if(h==2)hydrogen(s)=12
+             if(h==3)hydrogen(s)=13
+             charge(s)=q;u(s)=j*64d0*ev;bond(s)=pah_atomization_bond(hydrogen(s))
+             threshold(s)=pah_atomization_threshold(u(s),bond(s),q)
+             if(.not.ieee_is_finite(threshold(s)).or.threshold(s)<=0)stop 708
+             photon(:,s)=[nearest(threshold(s),-1d0),threshold(s),nearest(threshold(s),1d0)]
+          enddo
+       enddo
+    enddo
+    old=2;next=-77;destroyed=-88;captured=.25d0
+    call pah_atomization_batch(u,bond,hydrogen,charge,photon,captured,old,next,destroyed,receipt,status)
+    if(status/=0.or.any(next/=1.5d0).or.any(destroyed(1,:)/=0))stop 709
+    if(any(destroyed(2:,:)/=.25d0).or.receipt%photon_number/=6)stop 710
+    loss=sum(destroyed,dim=1)
+    if(receipt%hydrogen/=dot_product(real(hydrogen,real64),loss))stop 711
+    if(receipt%carbon+receipt%carbon_ion/=24*sum(loss))stop 712
+    if(receipt%carbon_ion/=dot_product(real(charge,real64),old-next))stop 713
+    energy=receipt%gas_heat-receipt%pah_level_removed+receipt%binding_increase+receipt%gas_ionization_increase
+    if(abs(energy-receipt%photon_energy)>2d-13*receipt%photon_energy)stop 714
+    if(receipt%gas_heat<0.or.receipt%gas_heat>1d-12*receipt%photon_energy)stop 715
+    if(abs(receipt%pah_level_removed-dot_product(u+bond+charge*pah_atomization_ip,old-next))>1d-13*ev)stop 716
+    if(abs(receipt%binding_increase-a12*sum(loss))>2d-12*ev)stop 717
+    if(abs(receipt%gas_ionization_increase-pah_atomization_carbon_ip*receipt%carbon_ion)>1d-13*ev)stop 718
+    ! Two cold H12 endpoints with a 250 eV photon: explicit excess gas heat.
+    u=0;bond=0;hydrogen=12;charge=0;old=1;captured=0;photon=250*ev
+    captured(1,1)=1
+    do q=0,1
+       charge(1)=q
+       call pah_atomization_batch(u,bond,hydrogen,charge,photon,captured,old,next,destroyed,receipt,status)
+       if(status/=0.or.next(1)/=0.or.sum(destroyed)/=1)stop 719
+       if(receipt%carbon/=24-q.or.receipt%carbon_ion/=q.or.receipt%hydrogen/=12)stop 720
+       energy=250*ev-a12-q*(pah_atomization_carbon_ip-pah_atomization_ip)
+       if(abs(receipt%gas_heat-energy)>1d-13*ev)stop 721
+    enddo
+    ! Each grain's 64 eV excitation can help that grain, never a neighbour.
+    charge=0;u(1)=64*ev;u(2)=0;captured=0;captured(1,1:2)=1;photon=150*ev
+    call pah_atomization_batch(u,bond,hydrogen,charge,photon,captured,old,next,destroyed,receipt,status)
+    if(status/=0.or.next(1)/=0.or.next(2)/=1.or.receipt%photon_number/=1)stop 722
+    ! Arbitrarily many individually subthreshold captures are not pooled.
+    u=0;captured=1d6;photon=50*ev
+    call pah_atomization_batch(u,bond,hydrogen,charge,photon,captured,old,next,destroyed,receipt,status)
+    if(status/=0.or.any(next/=old).or.any(destroyed/=0).or.receipt%gas_heat/=0)stop 723
+    ! One 1000 eV event destroys ONE parent, not floor(E/A12) parents.
+    captured(3,1)=1;photon(3,1)=1000*ev
+    call pah_atomization_batch(u,bond,hydrogen,charge,photon,captured,old,next,destroyed,receipt,status)
+    if(status/=0.or.sum(old-next)/=1.or.receipt%photon_number/=1)stop 724
+    if(receipt%photon_energy/=1000*ev.or.abs(receipt%gas_heat-(1000*ev-a12))>1d-12*ev)stop 725
+    ! Atomic-donor source formation followed by destruction closes in the
+    ! same reference: gas += A12-Uinject, then += eps+Uinject-A12.
+    u(1)=.3d0*ev;captured=0;captured(1,1)=1;photon=250*ev
+    call pah_atomization_batch(u,bond,hydrogen,charge,photon,captured,old,next,destroyed,receipt,status)
+    if(status/=0.or.abs(a12-u(1)+receipt%gas_heat-250*ev)>1d-13*ev)stop 726
+    ! Invalid/exhausted batches leave EVERY output bitwise untouched.
+    saved=next;saved_destroyed=destroyed;keep=receipt;nan=ieee_value(0d0,ieee_quiet_nan)
+    do case_id=1,12
+       next=saved;destroyed=saved_destroyed;receipt=keep
+       old=1;u=0;bond=0;hydrogen=12;charge=0;captured=0;photon=250*ev
+       select case(case_id)
+       case(1)
+          captured(1,1)=-1
+       case(2)
+          photon(1,1)=nan
+       case(3)
+          u(1)=nan
+       case(4)
+          hydrogen(1)=14
+       case(5)
+          charge(1)=2
+       case(6)
+          ! Exactly zero ground energy. The independently reconstructed
+          ! thermochemical reference above agrees to roundoff, not bits.
+          bond(1)=pah_atomization_a12
+       case(7)
+          photon(1,1)=0;captured(1,1)=1
+       case(8)
+          old(1)=0;captured(1,1)=1
+       case(9)
+          old(1)=huge(1d0)/2;captured(1,1)=old(1)
+       case(10)
+          captured(1,1)=.75d0;captured(2,1)=.5d0
+       case(11)
+          u(1)=.75d0*huge(1d0);photon(1,1)=u(1);captured(1,1)=1
+       case(12)
+          old=huge(1d0)/30;captured(1,:)=old
+       end select
+       call pah_atomization_batch(u,bond,hydrogen,charge,photon,captured,old,next,destroyed,receipt,status)
+       if(status==0.or.any(next/=saved).or.any(destroyed/=saved_destroyed))then
+          write(*,*)'PAH_ATOMIZATION_REJECTION_FAILED case/status=',case_id,status
+          stop 727
+       endif
+       if(any(transfer(receipt,[0_int64],9)/=transfer(keep,[0_int64],9)))stop 728
+       if(case_id==10.and.status/=pah_atomization_exhausted)stop 729
+    enddo
+    ! Empty capture arrays are a zero operation; invalid shapes reject.
+    u=0;bond=0;hydrogen=12;charge=0;old=1;captured=0;photon=0
+    call pah_atomization_batch(u,bond,hydrogen,charge,photon,captured,old,next,destroyed,receipt,status)
+    if(status/=0.or.any(next/=old).or.any(destroyed/=0).or.receipt%photon_number/=0)stop 730
+    if(receipt%photon_energy/=0.or.receipt%gas_heat/=0.or.receipt%binding_increase/=0)stop 731
+    saved=next;saved_destroyed=destroyed;keep=receipt
+    call pah_atomization_batch(u(:ns-1),bond,hydrogen,charge,photon,captured,old,next,destroyed,receipt,status)
+    if(status==0.or.any(next/=saved).or.any(destroyed/=saved_destroyed))stop 732
+    if(any(transfer(receipt,[0_int64],9)/=transfer(keep,[0_int64],9)))stop 733
+    write(*,'(A,2ES24.16)')'PAH_ATOMIZATION_A12_IC_EV=',a12/ev,pah_atomization_carbon_ip/ev
+    write(*,*)'PAH_SINGLE_PHOTON_ATOMIZATION_THRESHOLD_H_C_CHARGE_ENERGY_NO_POOLING_ROLLBACK_PASS'
+    call check_pah_atomization_mixed()
+  end subroutine check_pah_atomization
+
+  subroutine check_pah_atomization_mixed()
+    use, intrinsic :: iso_fortran_env, only: real32
+    use dust_pah_atomization_physics
+    use dust_pah_mixed, only: pah_mixed_advance
+    use dust_pah_live_model, only: pah_live_prepare,pah_level,pah_primary_supported, &
+         pah_injection,pah_injection_specific_u,pah_injection_binding
+    use dust_pah_hydrogen, only: pah_h2_binding
+    use dust_composition_optics, only: d03_ng,d03_nir,d03_primary_ev,d03_ir_ev
+    use snrt_dust_contract
+    use snrt_dust_ir, only: dust_ir_table,snrt_dust_ir_initialize
+    integer,parameter::nc=2,nd=2,nt=5
+    real(real64),parameter::ev=1.602176634d-12,ec=1.5d0*1.380649d-16,step_dt=1d0
+    ! Pinned CHIMES chimes_vars.h: BOLTZMANNCGS 1.38064852e-16f,
+    ! promoted to double by snrt_chimes_boltzmann before the gas EOS uses it.
+    real(real64),parameter::ec_chimes=1.5d0*real(1.38064852e-16_real32,real64)
+    real(real64)::ec_case
+    type(dust_ir_table)::ir_table
+    type(dust_ir_diagnostics)::diag,keep_diag
+    real(real64)::nodes(nt),weights(d03_nir),rays(3,nd),angular(nd),grains(6,nc),primary(d03_ng,nc)
+    real(real64)::radiation(d03_nir,nd,nc),saved_radiation(d03_nir,nd,nc),light(d03_nir,nc)
+    real(real64)::ghosts(d03_nir,nd,0),bulk(nc),td(nc),eg(nc),cv(nc),conductance(nc),transfer(nc)
+    real(real64)::gas_h(nc),gas_h2(nc),gas_c(nc),gas_cp(nc),electrons(nc),before(nc),after(nc),loss(nc)
+    real(real64)::saved_gas(5,nc),saved_eg(nc),saved_bulk(nc),saved_td(nc),saved_light(d03_nir,nc),bound_h(nc)
+    real(real64),allocatable::population(:,:),saved_population(:,:)
+    integer::neighbors(6,nc),remote(6,nc),status,j,mode,nstate,cation_index,case_id
+    logical::blocked(6,nc)
+    character(len=16)::enabled
+    character(len=32)::old_model,old_iron
+    logical::old_enabled
+    ! Explicit native fixture, no RAMSES/MPI launch. Reuses the retained
+    ! original optical files from SNRT_PAH_NEUTRAL_TABLE/SNRT_PAH_ION_TABLE.
+    call get_environment_variable('SNRT_PAH_ATOMIZATION_SMOKE',enabled,status=status)
+    if(status/=0.or.trim(enabled)/='1')return
+    old_model=dust_pah_model;old_iron=dust_iron_model;old_enabled=dust_mass_enabled
+    dust_mass_enabled=.true.;dust_pah_model='pah_atomization_limit_v1';dust_iron_model='none'
+    nodes=[5d0,20d0,100d0,1000d0,1d4]
+    weights(1)=(d03_ir_ev(2)-d03_ir_ev(1))/2
+    weights(d03_nir)=(d03_ir_ev(d03_nir)-d03_ir_ev(d03_nir-1))/2
+    weights(2:d03_nir-1)=(d03_ir_ev(3:)-d03_ir_ev(:d03_nir-2))/2
+    snrt_dust_contract_loaded=.true.;snrt_dust_contract_version=4
+    snrt_dust_contract_number_groups=d03_ng;snrt_dust_contract_number_ir=d03_nir
+    snrt_dust_contract_number_temperature=nt;snrt_dust_contract_temperature_k(1:nt)=nodes
+    snrt_dust_contract_mass_per_h_g=1.398d-26
+    snrt_dust_contract_absorption_mean_energy_ev(1:d03_ng)=d03_primary_ev
+    snrt_dust_contract_ir_energy_ev(1:d03_nir)=d03_ir_ev
+    snrt_dust_contract_ir_weight_ev(1:d03_nir)=weights
+    call pah_live_prepare(status)
+    if(status/=0)stop 734
+    if(.not.pah_primary_supported(d03_primary_ev(8)))stop 735
+    if(pah_primary_supported(d03_primary_ev(7)).or.pah_primary_supported(d03_primary_ev(9)))stop 736
+    call snrt_dust_ir_initialize(ir_table,d03_ir_ev,weights,spread(1d-24,1,d03_nir),nodes,5d0,status)
+    if(status/=0)stop 737
+    nstate=dust_pah_nstate();allocate(population(nstate,nc),saved_population(nstate,nc))
+    block
+      ! Exercise the actual source distribution and both live erg/g helpers,
+      ! not a second hard-coded molecular mass. Atomic source condensation
+      ! followed by single-photon destruction must leave just photon heat.
+      real(real64)::injected_mass,injected_u,injected_binding,injected_number,source_residual
+      real(real64)::initial(nstate),next(nstate),u(nstate),bond(nstate),events(1,nstate),removed(1,nstate)
+      real(real64)::photon(1,nstate)
+      integer::hydrogen(nstate),charge(nstate)
+      type(pah_atomization_receipt)::receipt
+      injected_mass=dust_pah_state_mass(12*dust_pah_nbin+1)
+      do j=1,nstate
+         initial(j)=injected_mass*pah_injection(j)/dust_pah_state_mass(j)
+         hydrogen(j)=mod((j-1)/dust_pah_nbin,14)
+         charge(j)=(j-1)/dust_pah_charge_size()
+         bond(j)=pah_atomization_bond(hydrogen(j))
+         u(j)=max(0d0,pah_level(j)-bond(j)-charge(j)*pah_atomization_ip)
+      enddo
+      injected_number=sum(initial)
+      injected_u=injected_mass*pah_injection_specific_u
+      injected_binding=injected_mass*pah_injection_binding()
+      if(abs(injected_binding-pah_atomization_a12*injected_number)> &
+           32*epsilon(1d0)*pah_atomization_a12*injected_number)stop 'PAH_SOURCE_BINDING_NUMBER_MISMATCH'
+      if(abs(injected_u-dot_product(pah_level,initial))> &
+           32*epsilon(1d0)*max(ev*injected_number,abs(injected_u)))stop 'PAH_SOURCE_EXCITATION_MISMATCH'
+      events(1,:)=initial;photon=d03_primary_ev(8)*ev
+      call pah_atomization_batch(u,bond,hydrogen,charge,photon,events,initial,next,removed,receipt,status)
+      if(status/=0.or.any(next/=0).or.receipt%carbon_ion/=0)stop 'PAH_SOURCE_DESTRUCTION_FAILED'
+      if(abs(receipt%carbon-24*injected_number)>1d-12.or. &
+           abs(receipt%hydrogen-12*injected_number)>1d-12)stop 'PAH_SOURCE_DESTRUCTION_INVENTORY'
+      source_residual=injected_binding-injected_u+receipt%gas_heat-receipt%photon_energy
+      if(abs(source_residual)>64*epsilon(1d0)*receipt%photon_energy)stop 'PAH_SOURCE_CYCLE_ENERGY'
+      dust_pah_model='pah_h2_catalytic_v1'
+      if(pah_injection_binding()/=0d0)stop 'PAH_OLD_SOURCE_BINDING_NONZERO'
+      dust_pah_model='pah_atomization_limit_v1'
+      write(*,'(A,ES22.14)')'PAH_ATOMIC_SOURCE_INJECTION_DESTRUCTION_ENERGY_RELATIVE=', &
+           abs(source_residual)/receipt%photon_energy
+      write(*,*)'PAH_ATOMIC_SOURCE_ACTUAL_STATE_MASS_BINDING_EXCITATION_CYCLE_PASS'
+    end block
+    cation_index=dust_pah_charge_size()+12*dust_pah_nbin+1
+    rays(:,1)=[1d0,0d0,0d0];rays(:,2)=[-1d0,0d0,0d0];angular=.5d0
+    neighbors=0;remote=0;blocked=.true.;grains=0;conductance=0
+    do mode=1,6
+       ec_case=ec
+       if(mode==6)ec_case=ec_chimes
+       population=0
+       if(mode==1.or.mode==6)then
+          population(12*dust_pah_nbin+1,:)=.5d0;population(cation_index,:)=.5d0
+          loss=.25d0
+       else if(mode==2)then
+          population(12*dust_pah_nbin+1,:)=1;loss=1
+       else if(mode==3)then
+          population(cation_index,:)=1;loss=1
+       else
+          population(12*dust_pah_nbin+1,:)=1;loss=0
+          if(mode==5)loss=.25d0
+       endif
+       saved_population=population
+       gas_h=0;gas_h2=0;gas_c=1d4;gas_cp=0;electrons=0
+       cv=ec_case*gas_c;eg=cv*300;bulk=0;td=5;radiation=0;light=0
+       primary=0;primary(8,:)=loss*d03_primary_ev(8)*ev
+       if(mode==4.or.mode==5)primary(2,:)=.125d0*d03_primary_ev(2)*ev
+       saved_eg=eg
+       do j=1,nc
+          before(j)=eg(j)+dot_product(pah_level,population(:,j))-pah_atomization_a12*sum(population(:,j))
+       enddo
+       call pah_mixed_advance(ir_table,rays,angular,neighbors,1d10,step_dt,1d0,grains,primary, &
+            radiation,population,bulk,td,light,diag,status,ghosts,remote,blocked,eg,cv,conductance,transfer, &
+            gas_electrons=electrons,electron_capacity=ec_case,gas_atomic_h=gas_h,gas_molecular_h2=gas_h2, &
+            gas_atomic_c=gas_c,gas_carbon_ion=gas_cp)
+       if(status/=0)then
+          write(*,*)'PAH_ATOMIZATION_MIXED_FAILED mode/status=',mode,status
+          stop 738
+       endif
+       if(maxval(abs(sum(saved_population-population,dim=1)-loss))>1d-12)stop 739
+       ! The surviving cations may reattach freshly liberated H during the
+       ! normal H2 catalytic step; test TOTAL H, not frozen gas H alone.
+       bound_h=0
+       do j=1,nstate
+          bound_h=bound_h+mod((j-1)/dust_pah_nbin,14)*population(j,:)
+       enddo
+       if(maxval(abs(gas_h+2*gas_h2+bound_h-12d0))>1d-11.or.any(electrons/=0))stop 740
+       if(maxval(abs(gas_c+gas_cp-1d4-24*loss))>1d-10)stop 741
+       if((mode==1.or.mode==6).and.maxval(abs(gas_cp-.5d0*loss))>1d-12)stop 742
+       if(mode==2.and.any(gas_cp/=0))stop 743
+       if(mode==3.and.maxval(abs(gas_cp-loss))>1d-12)stop 744
+       do j=1,nc
+          after(j)=eg(j)+bulk(j)+dot_product(pah_level,population(:,j))- &
+               pah_atomization_a12*sum(population(:,j))+pah_atomization_carbon_ip*gas_cp(j)- &
+               pah_h2_binding*gas_h2(j)+sum(matmul(radiation(:,:,j),angular))
+       enddo
+       if(maxval(abs(after-before-sum(primary,dim=1)))/maxval(sum(primary,dim=1))>1d-10)stop 745
+       if((mode<=3.or.mode==6).and.any(eg<=saved_eg))stop 746
+       if(any(population<0))stop 746
+       write(*,'(A,I2,2ES22.14)')'PAH_ATOMIZATION_MIXED mode/loss/energy_relative=', &
+            mode,loss(1),maxval(abs(after-before-sum(primary,dim=1)))/maxval(sum(primary,dim=1))
+       if(mode==6)write(*,'(A,ES24.16)')'PAH_ATOMIZATION_CHIMES_ROUNDED_EOS_CAPACITY_PASS=',ec_case
+    enddo
+    ! A late cell rejects after the first cell's local atom receipts were
+    ! formed. None of the staged gas/PAH/IR/material outputs may commit.
+    do case_id=1,3
+       population=0;population(12*dust_pah_nbin+1,:)=1
+       gas_h=0;gas_h2=0;gas_c=1d4;gas_cp=0;electrons=0
+       cv=ec*gas_c;eg=cv*300;bulk=0;td=5;radiation=0;light=0
+       primary=0;primary(8,:)=.25d0*d03_primary_ev(8)*ev
+       if(case_id==1)primary(8,2)=2*d03_primary_ev(8)*ev
+       if(case_id==2)primary(7,2)=d03_primary_ev(7)*ev
+       if(case_id==3)gas_cp(2)=-1
+       saved_population=population;saved_radiation=radiation;saved_light=light
+       saved_bulk=bulk;saved_td=td;saved_eg=eg;keep_diag=diag
+       saved_gas(1,:)=gas_h;saved_gas(2,:)=gas_h2;saved_gas(3,:)=gas_c
+       saved_gas(4,:)=gas_cp;saved_gas(5,:)=electrons
+       call pah_mixed_advance(ir_table,rays,angular,neighbors,1d10,step_dt,1d0,grains,primary, &
+            radiation,population,bulk,td,light,diag,status,ghosts,remote,blocked,eg,cv,conductance,transfer, &
+            gas_electrons=electrons,electron_capacity=ec,gas_atomic_h=gas_h,gas_molecular_h2=gas_h2, &
+            gas_atomic_c=gas_c,gas_carbon_ion=gas_cp)
+       if(status==0.or.any(population/=saved_population).or.any(radiation/=saved_radiation))stop 747
+       if(any(eg/=saved_eg).or.any(bulk/=saved_bulk).or.any(td/=saved_td).or.any(light/=saved_light))stop 748
+       if(any(gas_h/=saved_gas(1,:)).or.any(gas_h2/=saved_gas(2,:)).or.any(gas_c/=saved_gas(3,:)))stop 749
+       if(any(gas_cp/=saved_gas(4,:)).or.any(electrons/=saved_gas(5,:)))stop 750
+       if(diag%primary_erg/=keep_diag%primary_erg)stop 751
+    enddo
+    write(*,*)'PAH_ATOMIZATION_MIXED_NATIVE_C_CPLUS_H_IR_ENERGY_COMPLETE_LOSS_LATE_ROLLBACK_PASS'
+    dust_pah_model=old_model;dust_iron_model=old_iron;dust_mass_enabled=old_enabled
+    call snrt_dust_contract_reset()
+  end subroutine check_pah_atomization_mixed
+
   subroutine check_pah_hydrogen()
     use dust_pah_hydrogen
     integer,parameter::n=129
@@ -1429,7 +1761,7 @@ contains
          energy/abs(total_before),gas_h-initial_h,ne-initial_ne,heat
     write(*,*)'PAH_H_PHOTOELECTRON_RECOMBINATION_H_ATTACHMENT_SHARED_IR_PASS'
     block
-      type(pah_hydrogen_model)::molecular(2)
+      type(pah_hydrogen_model)::molecular(2),catalytic(2)
       real(real64)::molecules,h2_initial,keep_h,keep_ne,keep_heat,keep_h2
       real(real64)::zero_result(size(levels),0:13,2),keep_rate(size(rate)),nuclear_error
       real(real64),allocatable::old_id(:),new_id(:)
@@ -1479,8 +1811,116 @@ contains
       if(status==0.or.any(charge_next/=zero_result).or.ne/=keep_ne.or.gas_h/=keep_h.or.heat/=keep_heat)stop 619
       if(any(rate/=keep_rate).or.molecules/=keep_h2)stop 620
       write(*,*)'PAH_H2_ZERO_DONOR_PARITY_PHYSICAL_CHARGE_ENERGY_IDENTITY_ROLLBACK_PASS'
+      call pah_hydrogen_prepare(catalytic(1),physical,0,.0005d0*ev,status, &
+           h2_capture=.true.,h2_abstraction=.true.)
+      if(status/=0)stop 634
+      call pah_hydrogen_prepare(catalytic(2),ionized,1,.0005d0*ev,status, &
+           h2_capture=.true.,h2_abstraction=.true.)
+      if(status/=0)stop 635
+      call pah_hydrogen_identity(catalytic(2),old_id,status)
+      if(status/=0.or.size(old_id)/=size(new_id)+8.or.old_id(1)/=3)stop 636
+      if(any(old_id(2:size(new_id))/=new_id(2:)))stop 637
+      charge_old=0;charge_old(1,13,1)=.001d0;charge_next=charge_old;captures=0
+      gas_h=.005d0;initial_h=gas_h;ne=0;molecules=.003d0;h2_initial=molecules
+      total_before=sum(charge_old(:,13,:))*bond(13)
+      call pah_hydrogen_charged_step(catalytic,[12d0],captures,charge_old,1d13,300d0, &
+           charge_next,ne,gas_h,heat,rate,status,gas_h2=molecules)
+      if(status/=0.or.molecules<=h2_initial.or.heat<=0)stop 638
+      total_after=sum(matmul(levels,sum(charge_next,dim=3))) &
+           +dot_product(bond,sum(sum(charge_next,dim=3),dim=1))+sum(charge_next(:,:,2))*7.02d0*ev
+      energy=total_after-total_before+heat+1d13*sum(rate)+(h2_initial-molecules)*pah_h2_binding
+      nuclear_error=gas_h-initial_h+2*(molecules-h2_initial)+ &
+           dot_product(axis,sum(sum(charge_next-charge_old,dim=3),dim=1))
+      if(abs(energy)>1d-12*abs(total_before).or.abs(nuclear_error)>1d-14.or.ne/=0)stop 639
+      write(*,'(A,3ES22.14)')'PAH_CATALYTIC_PHYSICAL energy_relative,H_nuclei,H2_produced=', &
+           energy/abs(total_before),nuclear_error,molecules-h2_initial
+      write(*,*)'PAH_CATALYTIC_SHARED_PHOTO_IR_H2_BINDING_NATIVE_CONNECTION_PASS'
+      block
+        real(real64)::abundance(size(levels),0:13,2),previous(size(levels),0:13,2),h2_convergence(4)
+        integer::resolution,substep,nsub
+        do resolution=1,4
+           nsub=2**(resolution-1)
+           abundance=0;abundance(1,12,2)=1d-4
+           gas_h=100;molecules=0;ne=0;captures=0
+           do substep=1,nsub
+              previous=abundance
+              call pah_hydrogen_charged_step(catalytic,[12d0],captures,previous,1d9/nsub,300d0, &
+                   abundance,ne,gas_h,heat,rate,status,gas_h2=molecules)
+              if(status/=0)stop 640
+           enddo
+           h2_convergence(resolution)=molecules
+        enddo
+        if(any(h2_convergence<=0))stop 641
+        if(abs(h2_convergence(4)-h2_convergence(3))>=abs(h2_convergence(2)-h2_convergence(1)))stop 642
+        write(*,'(A,4ES22.14)')'PAH_CATALYTIC_SPLIT_CYCLE_H2_DT_DT2_DT4_DT8=',h2_convergence
+      end block
     end block
     call check_pah_h2_donor(levels)
+  end subroutine
+
+  subroutine check_pah_catalytic()
+    use dust_pah_hydrogen
+    real(real64)::old(2,0:13,2),next(2,0:13,2),split(2,0:13,2),saved(2,0:13,2),before(2,0:13,2)
+    real(real64)::donor,h2,heat,breaking(2),k,dt,expect,events,gas0,n0,other,split_h2,split_heat,total_heat
+    real(real64),parameter::ev=1.602176634d-12
+    integer::status,j,step
+    k=.06d-16*sqrt(8*1.380649d-16*300/(acos(-1d0)*1.6735575d-24))
+    breaking=3.2d0*ev
+    do j=1,3
+       old=0;old(1,13,1)=.25d0;old(2,13,2)=.75d0
+       gas0=10d0**(j-2);n0=sum(old);dt=1/k;donor=gas0;h2=.2d0;heat=-999;next=-999
+       call pah_h13_abstraction(old,dt,300d0,breaking,next,donor,h2,heat,status)
+       if(status/=0.or.donor<0.or.h2<.2d0)stop 621
+       events=h2-.2d0
+       if(abs(donor+events-gas0)>1d-13.or.abs(sum(next)-n0)>1d-13)stop 622
+       if(abs(sum(next(:,12,:))-events)>1d-13)stop 623
+       if(abs(sum(next(1,:,:))-.25d0)>1d-13.or.abs(sum(next(2,:,:))-.75d0)>1d-13)stop 624
+       if(abs(heat-events*1.2781d0*ev)>1d-13*ev)stop 625
+       if(j==2)then
+          expect=n0*k*dt/(1+n0*k*dt)
+          if(abs(events-expect)>1d-13)stop 626
+       endif
+       split=old;other=gas0;split_h2=.2d0;total_heat=0
+       do step=1,4
+          before=split
+          call pah_h13_abstraction(before,dt/4,300d0,breaking,split,other,split_h2,split_heat,status)
+          if(status/=0)stop 627
+          total_heat=total_heat+split_heat
+       enddo
+       if(maxval(abs(next-split))>1d-13.or.abs(other-donor)>1d-13)stop 628
+       if(abs(split_h2-h2)>1d-13.or.abs(total_heat-heat)>1d-13*ev)stop 629
+    enddo
+    saved=next;donor=gas0;h2=.2d0;heat=-999
+    call pah_h13_abstraction(old,0d0,300d0,breaking,next,donor,h2,heat,status)
+    if(status/=0.or.any(next/=old).or.donor/=gas0.or.h2/=.2d0.or.heat/=0)stop 630
+    donor=0
+    call pah_h13_abstraction(old,1d30,300d0,breaking,next,donor,h2,heat,status)
+    if(status/=0.or.any(next/=old).or.donor/=0.or.h2/=.2d0.or.heat/=0)stop 631
+    next=saved;heat=-999
+    call pah_h13_abstraction(old,-1d0,300d0,breaking,next,donor,h2,heat,status)
+    if(status==0.or.any(next/=saved).or.donor/=0.or.h2/=.2d0.or.heat/=-999)stop 632
+    breaking=5d0*ev
+    call pah_h13_abstraction(old,1d30,300d0,breaking,next,donor,h2,heat,status)
+    if(status==0.or.any(next/=saved).or.heat/=-999)stop 633
+    block
+      use iso_fortran_env, only: int64
+      real(real64)::tail(128,0:13,2),survived(128,0:13,2)
+      ! Resolved H13 populations with subnormal excitation tails, as in
+      ! the O2/-no-ftz first-step mixed callback. Preserve, never clip, tails.
+      tail=0;tail(1,13,1)=6.644518272425249d-7;tail(1,13,2)=3.322259136212625d-7
+      tail(2:128,13,:)=transfer(int(z'0000000000100000',int64),0d0)
+      survived=tail;donor=6.398987043189369d0;gas0=donor;h2=.5d0;heat=0;breaking=3.2d0*ev
+      call pah_h13_abstraction(tail,2.70789982006d11,152.7887923825651d0,breaking, &
+           survived,donor,h2,heat,status)
+      if(status/=0.or.any(survived<0))stop 'PAH_H13_SUBNORMAL_SURVIVAL'
+      if(any(survived(2:128,13,:)<=0))stop 'PAH_H13_SUBNORMAL_TAIL_ERASED'
+      events=sum(survived(:,12,:))
+      if(abs(donor+events-gas0)>1d-13.or.abs(h2-.5d0-events)>1d-13)stop 'PAH_H13_TAIL_DONOR'
+      if(abs(sum(survived)-sum(tail))>1d-13*sum(tail))stop 'PAH_H13_TAIL_NUMBER'
+      if(abs(heat-events*1.2781d0*ev)>1d-13*ev)stop 'PAH_H13_TAIL_ENERGY'
+      write(*,*)'PAH_H13_SUBNORMAL_POSITIVE_SURVIVAL_DONOR_ENERGY_PASS'
+    end block
+    write(*,*)'PAH_CATALYTIC_H13_FINITE_SHARED_DONOR_EXACT_SPLIT_H_CHARGE_ENERGY_ROLLBACK_PASS'
   end subroutine
 
   subroutine check_pah_h2_donor(level)
@@ -1680,6 +2120,11 @@ contains
     if(new(3)/old(3)>=new(4)/old(4))stop 119
     write(*,'(A,3ES17.8)')'OLIVINE_SUBLIMATION loss/latent_specific/energy_balance=',sum(old-new),ls, &
          (ed+heat+latent-energy)/energy
+    old=[.2d0,.3d0,.1d0,.4d0]
+    energy=.01d0*(sum(old(1:2))*uc(1)+sum(old(3:4))*us(1))
+    call dust_sublimation_step(nodes,10d0,old,energy,1d100,new,ed,heat,latent,status)
+    if(status/=0.or.any(new/=old).or.ed/=energy.or.heat/=0.or.latent/=0)stop 120
+    write(*,*)'COLD_SUBLIMATION_ZERO_EROSION_BOUND_NO_BATH_HEAT_PASS'
     dust_sublimation='none';dust_material_model='fixed_mix';dust_mass_model='bulk_v1'
   end subroutine
 

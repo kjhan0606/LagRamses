@@ -14,6 +14,10 @@ module stellar_source_increment
        cumulative_difference
   use stellar_yield_tables, only: stellar_yield_table_t
   use stellar_ssp_sources, only: integrate_ssp_channel, ssp_source_ok
+#ifdef STELLAR_RADIOACTIVE
+  use stellar_radioactive_sources, only: active_radioactive_companion,integrate_radioactive_channel
+  use stellar_radioactive_decay, only: radioactive_element_shift
+#endif
   implicit none
 
   private
@@ -25,8 +29,46 @@ module stellar_source_increment
 
   public :: integrate_ssp_channel_increment
   public :: source_condensed_donors,source_condensed_momentum
+  public :: age_radioactive_source
 
 contains
+
+  subroutine age_radioactive_source(table,population,previous_age_gyr,current_age_gyr, &
+       mass_min,mass_max,n_mass_bins,source,ierr)
+    ! Append AFTER ordinary SSP channel summation. No changes to source
+    ! clocks, returned mass, stable cumulative ledgers, momentum or energy.
+    type(stellar_yield_table_t),intent(in)::table
+    type(stellar_population_t),intent(in)::population
+    real(stellar_dp),intent(in)::previous_age_gyr,current_age_gyr,mass_min(:),mass_max(:)
+    integer,intent(in)::n_mass_bins
+    type(stellar_source_t),intent(inout)::source
+    integer,intent(out)::ierr
+#ifdef STELLAR_RADIOACTIVE
+    type(stellar_source_t)::trial
+    real(stellar_dp)::s(2),d(2),delta(11)
+    integer::c,status
+#endif
+    ierr=0
+#ifdef STELLAR_RADIOACTIVE
+    if(.not.active_radioactive_companion%loaded)return
+    ierr=source_increment_err_argument
+    if(size(mass_min)<3.or.size(mass_max)<3)return
+    if(any(source%radioactive_parent/=0))return ! Never age an already-aged source twice.
+    trial=source
+    do c=1,3,2
+       if(source%channel_returned_mass(c)==0)cycle
+       call integrate_radioactive_channel(table,active_radioactive_companion,population,c, &
+            previous_age_gyr,current_age_gyr,mass_min(c),mass_max(c),n_mass_bins,s,d,status)
+       if(status/=0)return
+       delta=radioactive_element_shift(d)
+       trial%radioactive_parent=trial%radioactive_parent+s
+       trial%ejected_mass=trial%ejected_mass+delta
+       trial%channel_ejected_mass(c,:)=trial%channel_ejected_mass(c,:)+delta
+    enddo
+    if(.not.source_values_finite(trial).or..not.source_values_nonnegative(trial))return
+    source=trial;ierr=0
+#endif
+  end subroutine
 
   subroutine integrate_ssp_channel_increment(table, population, channel_id, &
        previous_age_gyr, current_age_gyr, mass_min, mass_max, n_mass_bins, &
@@ -219,7 +261,8 @@ contains
     type(stellar_source_t), intent(in) :: source
     integer :: i, j
 
-    source_values_finite = all(ieee_is_finite(source%dust_species)).and. &
+    source_values_finite = all(ieee_is_finite(source%radioactive_parent)).and. &
+         all(ieee_is_finite(source%dust_species)).and. &
          ieee_is_finite(source%returned_mass) .and. &
          ieee_is_finite(source%energy)
     do i = 1, 3
@@ -262,6 +305,16 @@ contains
          minval(source%channel_energy) >= -tolerance .and. &
          minval(source%channel_ejected_mass) >= -tolerance
     if (.not. source_values_nonnegative) return
+    if(any(source%radioactive_parent<0))then
+       source_values_nonnegative=.false.;return
+    endif
+    if(any(source%radioactive_parent>0))then
+       scale=64*epsilon(1d0)*max(source%returned_mass,tiny(1d0))
+       if(source%radioactive_parent(1)>source%returned_mass-sum(source%ejected_mass)+scale.or. &
+            source%radioactive_parent(2)>source%ejected_mass(11)+scale)then
+          source_values_nonnegative=.false.;return
+       endif
+    endif
     if(any(source%dust_species/=0d0))then
        call dust_gas_elements(source%ejected_mass,source%dust_species,gas,dust_status)
        if(dust_status/=0)then

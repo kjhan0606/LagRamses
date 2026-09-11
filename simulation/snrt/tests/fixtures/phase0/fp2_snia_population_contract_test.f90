@@ -1,6 +1,6 @@
 program fp2_snia_population_contract_test
   use stellar_enrichment_config, only: stellar_dp, population_binary_ssp, &
-       stellar_imf_kroupa
+       stellar_imf_kroupa, population_effective_ssp
   use stellar_snia_population_contract, only: &
        snia_population_realization_t, snia_population_contract_ok, &
        snia_population_contract_err_unapproved, &
@@ -9,7 +9,9 @@ program fp2_snia_population_contract_test
        snia_realization_poisson, snia_binary_fraction_baked_into_rate, &
        snia_binary_fraction_scales_rate, snia_metallicity_factor_supplied, &
        validate_snia_population_realization, &
-       read_snia_population_realization_namelist, evaluate_snia_interval_events
+       read_snia_population_realization_namelist, evaluate_snia_interval_events, &
+       snia_accounting_effective_ssp,snia_effective_ssp_approval,snia_accounting_strict_wd, &
+       validate_snia_population_binding
   implicit none
 
   type(snia_population_realization_t) :: realization
@@ -125,6 +127,24 @@ program fp2_snia_population_contract_test
   call validate_snia_population_realization(realization, ierr)
   call expect(ierr == snia_population_contract_err_parameter, &
        'non-increasing delay support is rejected', failures)
+
+  realization=loaded_realization
+  realization%population_model_id=population_effective_ssp
+  realization%binary_fraction=0d0
+  realization%mass_accounting=snia_accounting_effective_ssp
+  realization%accounting_approval_id=snia_effective_ssp_approval
+  call evaluate_snia_interval_events(realization,100d0,.01d0,.1d0,.5d0,repeat_events,ierr)
+  call expect(ierr==0,'explicit effective population with zero binary placeholder is admitted',failures)
+  call expect_close(repeat_events,1d0/30d0,'baked empirical rate is not multiplied by zero',failures)
+  call validate_snia_population_binding(realization,stellar_imf_kroupa,population_binary_ssp,.5d0,ierr)
+  call expect(ierr/=0,'effective sidecar rejects different runtime population',failures)
+  realization%binary_fraction_policy=snia_binary_fraction_scales_rate
+  call validate_snia_population_realization(realization,ierr)
+  call expect(ierr/=0,'effective population rejects binary-scaled rate',failures)
+  realization%binary_fraction_policy=snia_binary_fraction_baked_into_rate
+  realization%mass_accounting=snia_accounting_strict_wd;realization%accounting_approval_id=''
+  call validate_snia_population_realization(realization,ierr)
+  call expect(ierr/=0,'effective population cannot claim strict WD accounting',failures)
 
   if (failures > 0) then
      write(*, '(a,i0)') 'FP2_SNIa_POPULATION_CONTRACT_TEST_FAILED failures=', failures

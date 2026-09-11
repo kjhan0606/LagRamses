@@ -5,6 +5,7 @@
 ! the yield engine and the AMR deposition layer.
 
 module stellar_enrichment_contract
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements, &
        n_stellar_channels, elem_h, elem_he, elem_c, elem_n, elem_o, elem_ne, &
        elem_mg, elem_si, elem_s, elem_ca, elem_fe, channel_wind, channel_agb, &
@@ -52,6 +53,9 @@ module stellar_enrichment_contract
 
   ! Increment to be deposited during one hydrodynamic timestep.
   type :: stellar_source_t
+     ! End-of-interval surviving Al26, Fe60. Subsets of actual gross ejecta;
+     ! populated AFTER the ordinary channel sum, never an extra mass source.
+     real(stellar_dp) :: radioactive_parent(2)=0d0
      real(stellar_dp) :: dust_species(2)=0d0
      ! Ephemeral donor ledger, not a new persisted population variable.
      ! C, olivine, metallic Fe, PAH constituent mass supplied by each channel.
@@ -73,6 +77,23 @@ module stellar_enrichment_contract
   end type stellar_source_t
 
 contains
+
+  logical function radioactive_source_valid(source) result(valid)
+    type(stellar_source_t),intent(in)::source
+    real(stellar_dp)::tol
+    valid=.false.
+    if(.not.all(ieee_is_finite(source%radioactive_parent)))return
+    if(any(source%radioactive_parent<0))return
+    if(all(source%radioactive_parent==0))then
+       valid=.true.;return
+    endif
+    if(.not.ieee_is_finite(source%returned_mass))return
+    if(.not.all(ieee_is_finite(source%ejected_mass)))return
+    tol=64*epsilon(1d0)*abs(source%returned_mass)
+    if(source%radioactive_parent(1)>source%returned_mass-sum(source%ejected_mass)+tol)return
+    if(source%radioactive_parent(2)>source%ejected_mass(elem_fe)+tol)return
+    valid=.true.
+  end function radioactive_source_valid
 
   pure real(stellar_dp) function untracked_ejecta_mass(returned_mass, &
        ejected_mass)
@@ -117,6 +138,7 @@ contains
   subroutine clear_source(source)
     type(stellar_source_t), intent(out) :: source
 
+    source%radioactive_parent=0d0
     source%ejected_mass = 0.0_stellar_dp
     source%dust_species = 0d0
     source%channel_condensed_mass=0d0
@@ -136,6 +158,7 @@ contains
     type(stellar_cumulative_t), intent(in) :: earlier
     type(stellar_source_t), intent(out) :: source
 
+    source%radioactive_parent=0d0
     source%ejected_mass = later%ejected_mass - earlier%ejected_mass
     source%dust_species = later%dust_species-earlier%dust_species
     source%channel_condensed_mass=0d0 ! the single-channel increment assigns provenance

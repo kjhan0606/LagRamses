@@ -400,6 +400,9 @@ end subroutine upl
 !###########################################################
 !###########################################################
 subroutine interpol_hydro(u1,u2,nn)
+#ifdef STELLAR_RADIOACTIVE
+  use stellar_radioactive_runtime, only: radioactive_limit_children
+#endif
   use dust_mass_physics, only: dust_composition_enabled,dust_two_size_enabled,dust_chimes_enabled
   use amr_commons
   use hydro_commons
@@ -543,6 +546,9 @@ subroutine interpol_hydro(u1,u2,nn)
      end do
   end if
 
+#ifdef STELLAR_RADIOACTIVE
+  call radioactive_limit_children(u1,u2,nn)
+#endif
   ! Same dependent aggregate as the conservative face flux. Each carrier's
   ! conservative prolongation remains unchanged; do not independently limit
   ! their sum into an inconsistent extra dust reservoir.

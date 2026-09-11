@@ -89,7 +89,7 @@ contains
     if(ios/=0)goto 900
     read(unit,nml=snrt_stellar_sed,iostat=ios)
     close(unit)
-    if(ios/=0.or.version<1.or.version>4)goto 900
+    if(ios/=0.or.version<1.or.version>5)goto 900
     if(version<4)then
        if(na<2.or.na>max_age.or.nz<2.or.nz>max_z)goto 900
        if(trim(interpolation)/='linear_age_linear_Z'.or.node_history_file/='')goto 900
@@ -118,9 +118,15 @@ contains
        enddo
        if(young_age_policy/='hold_first_to_zero'.or.spectral_tail_policy/='zero_outside_source_domain')goto 900
        if(ages(1)/=0d0.or.ages(2)/=1d0.or.any(rates(:,1,1:nz)/=rates(:,2,1:nz)))goto 900
-    case(4)
-       if(population_binding/='match_feedback_high_mass_only'.or.status/='reference_control')goto 900
-       if(radiation_population/='PARSEC_v2_nonrot_high_mass_only')goto 900
+    case(4,5)
+       if(status/='reference_control')goto 900
+       if(version==4)then
+          if(population_binding/='match_feedback_high_mass_only')goto 900
+          if(radiation_population/='PARSEC_v2_nonrot_high_mass_only')goto 900
+       else
+          if(population_binding/='common_imf_mixed_evolution')goto 900
+          if(radiation_population/='PARSEC_mixed_lowmass_comparison')goto 900
+       endif
        if(imf_id/=default_imf_id.or.population_id/=population_model_id.or. &
             imf_min/=configured_imf_mass_min.or.imf_max/=configured_imf_mass_max.or. &
             binary_fraction/=configured_binary_fraction)goto 900
@@ -130,7 +136,9 @@ contains
        if(fraction_semantics/='escaped'.or..not.snrt_band_enabled())goto 900
        if(energy_semantics/='photon_number_and_energy_v1')goto 900
        if(interpolation/='linear_cumulative_age_linear_Z'.or.node_history_file=='')goto 900
-       if(young_age_policy/='hold_first_to_zero'.or.spectral_tail_policy/='Q5_Planck_and_track_tail_v1')goto 900
+       if(young_age_policy/='hold_first_to_zero')goto 900
+       if(version==4.and.spectral_tail_policy/='Q5_Planck_and_track_tail_v1')goto 900
+       if(version==5.and.spectral_tail_policy/='zero_after_track_or_terminal_v1')goto 900
        if(len_trim(source_sha256)/=64)goto 900
        do i=1,64
           if(index('0123456789abcdef',source_sha256(i:i))==0)goto 900
@@ -151,8 +159,8 @@ contains
     end select
     if(transport_sha256/=snrt_spectral_contract_source_sha256.or. &
          edges_sha256/=snrt_spectral_contract_group_edges_sha256)goto 900
-    if(version==4)then
-       call parsec_sed_load(trim(node_history_file),ios)
+    if(version>=4)then
+       call parsec_sed_load(trim(node_history_file),ios,expected_version=version)
        if(ios/=0)goto 900
        load_status=0;stellar_sed_enabled=.true.;stellar_sed_has_energy=.true.
        ierr=0;return
@@ -191,7 +199,7 @@ contains
     if(present(energy_ev))energy_ev=0d0
     if(.not.stellar_sed_enabled)return
     if(stellar_sed_has_energy.neqv.present(energy_ev))return
-    if(version==4)then
+    if(version>=4)then
        call parsec_photon_interval(age0,age1,metallicity,mass_msun,photons,energy_ev,ierr)
        return
     endif
@@ -270,7 +278,7 @@ contains
     endif
     if(version==3)values=[values,reshape(energy_rates(:,1:na,1:nz),[snrt_ngroups*na*nz]), &
          (real(iachar(energy_semantics(i:i)),dp),i=1,len(energy_semantics))]
-    if(version==4)then
+    if(version>=4)then
        call parsec_sed_identity(node_values)
        values=[values,(real(iachar(energy_semantics(i:i)),dp),i=1,len(energy_semantics)),node_values]
     endif
@@ -280,6 +288,15 @@ contains
     if(.not.stellar_sed_enabled)return
     write(*,'(A,A)')'SNRT stellar population binding: ',trim(population_binding)
     if(version<2)return
+    if(version==5)then
+       write(*,'(A)')'SNRT MIXED POPULATION COMPARISON: common IMF cells, NOT a common stellar evolution grid or full SSP'
+       write(*,'(A)')'SNRT mixed low mass: PARSEC pre-terminal Q/E, independently selected terminal yields/lifetimes'
+       write(*,'(A)')'SNRT mixed radiation: zero after selected track/terminal cutoff; missing late light is not recovered'
+       write(*,'(A)')'SNRT mixed source: below2 Msun remains in full .08--600 IMF denominator without a supplied source'
+       write(*,'(A,A)')'SNRT mixed source SHA256: ',source_sha256
+       write(*,'(A,ES16.8)')'SNRT mixed escaped fraction already applied: ',escape_fraction
+       return
+    endif
     if(version==4)then
        write(*,'(A)')'SNRT PARSEC HIGH-MASS ONLY: matched 14--600 Msun; full IMF denominator .08--600; not full SSP'
        write(*,'(A)')'SNRT PARSEC: measured Q5 + within-band Planck prior; missing photon tails use full-track Planck'

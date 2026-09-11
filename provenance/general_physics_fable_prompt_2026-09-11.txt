@@ -1,0 +1,23 @@
+Read-only PLAN review. Do not edit files, execute commands, contact people,
+launch jobs, or delegate. Work only in /gpfs/kjhan/LRD_JWST.
+
+Answer Q-GOAL FIRST: Does this scope materially serve simulation-ready RT,
+stellar/AGN feedback and dust, and does it honestly distinguish deployable
+physical closure from a claim of universally exact/comprehensive physics?
+Answer Q-LEAN SECOND: Does it avoid excessive instrumentation and gates?
+
+User now requests "complete the general physical model" after explicitly
+approximate comparisons were implemented. Read:
+provenance/general_physics_completion_plan_2026-09-11.md
+provenance/remaining_physics_bundle_execution_2026-09-11.md
+and only directly relevant existing source records if needed.
+
+Give one bundled plan verdict, identify the smallest scientifically valid
+native next step, and distinguish missing data from missing code. Challenge
+any claim that mixed stellar libraries must be forbidden for galaxy-scale
+production: consistency means explicit budgets/ownership, not necessarily
+one author or code. Conversely do not let renaming a comparison count as a
+general model. Are any listed exclusions not necessary for the actual galaxy
+simulation goal? Which genuinely need a user domain/closure choice before
+implementation? No speculative numerical inputs or new mandatory audit
+campaign. We have not selected a new stellar library or transport closure.

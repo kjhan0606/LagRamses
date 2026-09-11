@@ -7,7 +7,7 @@
 module stellar_cell_deposition
   use stellar_enrichment_config, only: stellar_dp, n_stellar_elements
   use stellar_enrichment_contract, only: stellar_source_t, &
-       generic_metal_ejecta_mass
+       generic_metal_ejecta_mass,radioactive_source_valid
   implicit none
 
   private
@@ -22,7 +22,7 @@ contains
 
   subroutine deposit_stellar_source(source, n_cells, cell_volume, weights, &
        gas_density, gas_element_density, gas_energy_density, &
-       gas_momentum_density, tolerance, ierr, gas_metal_density)
+       gas_momentum_density, tolerance, ierr, gas_metal_density,gas_radioactive_density)
     type(stellar_source_t), intent(in) :: source
     integer, intent(in) :: n_cells
     real(stellar_dp), intent(in) :: cell_volume(n_cells)
@@ -36,6 +36,7 @@ contains
     real(stellar_dp), intent(in) :: tolerance
     integer, intent(out) :: ierr
     real(stellar_dp), intent(inout), optional :: gas_metal_density(n_cells)
+    real(stellar_dp), intent(inout), optional :: gas_radioactive_density(2,n_cells)
 
     real(stellar_dp) :: tol, weight_sum, ejected_sum, scale
     real(stellar_dp) :: normalized_weight, delta_mass, delta_element
@@ -43,6 +44,10 @@ contains
     integer :: cell, element
 
     ierr = deposition_ok
+    if(.not.radioactive_source_valid(source).or. &
+         (any(source%radioactive_parent/=0).and..not.present(gas_radioactive_density)))then
+       ierr=deposition_err_source;return
+    endif
     tol = max(tolerance, 1.0e-12_stellar_dp)
 
     if (n_cells <= 0) then
@@ -80,6 +85,8 @@ contains
     ! every gas array unchanged.
     do cell = 1, n_cells
        normalized_weight = weights(cell) / weight_sum
+       if(present(gas_radioactive_density))gas_radioactive_density(:,cell)= &
+            gas_radioactive_density(:,cell)+normalized_weight*source%radioactive_parent/cell_volume(cell)
        delta_mass = normalized_weight * source%returned_mass
        gas_density(cell) = gas_density(cell) + &
             delta_mass / cell_volume(cell)

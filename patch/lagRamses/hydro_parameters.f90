@@ -144,6 +144,7 @@ module hydro_parameters
   integer::idust_bins=-1 ! C-small/large, silicate-small/large; two-size model only
   integer::idust_shock=-1,idust_fresh=-1 ! transient SN energy and fresh C/sil densities; cleared before RT/SF/output
   integer::ichimes=-1 ! 157 transported m_H*n_species densities; NOT additional baryon mass
+  integer::iradioactive=-1 ! Al26/Fe60 gas mass subsets, never extra baryon or metal mass
   integer::idust_iron=-1 ! Fe after CHIMES or reserved dust window (static only); subset of rho/Fe/idust
   integer::idust_pah=-1 ! 128 neutral or 256 neutral/cation mass states; separate from bulk idust/energy
   ! Internal admission only: main exposes the namelist after radiation wiring.

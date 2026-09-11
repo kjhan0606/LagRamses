@@ -78,8 +78,8 @@ contains
     real(dp)::iron_mass,enthalpy_hi,solid_pah(2),iron_bins(2),next_iron(2)
     real(dp)::gas_x(11),ions(3)
     real(dp)::material_curve(snrt_dust_contract_max_temperature),td,unew_specific(2),material_weight
-    real(dp)::evaporated_bins(4),evaporated_ed,vapor_heat,phase_energy,olivine_latent
-    integer::nt,material_interval
+    real(dp)::evaporated_bins(4),evaporated_code(4),evaporated_ed,vapor_heat,phase_energy,olivine_latent
+    integer::nt,material_interval,grain_bin
 #ifdef DUST_DYNAMICS
     real(dp)::phase_mass(ndust_phase),phase_pd(3,ndust_phase),phase_rg,phase_pg(3),phase_ke
     real(dp)::phase_p(3,0:6),fe_phase_p(3,0:2),mixing_heat,phase_row(nvar)
@@ -136,6 +136,7 @@ contains
           if(dust_relative_motion)then
              call dust_phase_read(uold(cell,:),phase_mass,phase_pd,phase_rg,phase_pg,phase_ke,status)
              if(status/=0)then
+                if(bad==0)write(*,*)'Dust initial phase state rejected: ',cell,status
                 bad=1;cycle
              endif
              eg=uold(cell,ndim+2)-phase_ke
@@ -164,6 +165,7 @@ contains
              if(dust_chimes_enabled())then
                 call chimes_grain_budget(cell,grain_elements,status)
                 if(status/=0)then
+                   if(bad==0)write(*,*)'Dust atomic grain budget rejected: ',cell,status
                    bad=1;cycle
                 endif
                 temp=eg*sd*sv**2/chimes_live_capacity(uold(cell,ichimes:ichimes+chimes_ns-1),sd)
@@ -196,6 +198,7 @@ contains
                 if(dust_relative_motion)then
                    call dust_phase_erode(bins,shocked_bins,phase_p(:,0),phase_p(:,1:4),status)
                    if(status/=0)then
+                      if(bad==0)write(*,*)'Dust shock phase transfer rejected: ',cell,status,bins,shocked_bins
                       bad=1;cycle
                    endif
                    if(dust_iron_enabled().or.dust_pah_enabled())then
@@ -273,8 +276,8 @@ contains
              eg=eg+phase_ke-dust_phase_kinetic(phase_row)
           endif
 #endif
-          if((dust_iron_enabled().or.dust_pah_enabled()).and.dust>0)then
-             ! Fe's native IR callback uses the analytic mixture enthalpy
+          if((dust_iron_enabled().or.dust_pah_enabled().or.dust_relative_motion).and.dust>0)then
+             ! Fe and relative IR callbacks use the analytic mixture enthalpy
              ! (including phase plateaus), unlike the C/silicate U(log T) path.
              call iron_compare_temperature(grains,iron_mass,ed*sv**2,td,status)
              if(status==0)call iron_mixture_enthalpy(td,[next_grains,sum(next_iron)],new_ed,enthalpy_hi,status)
@@ -330,15 +333,37 @@ contains
                   snrt_dust_contract_ir_background_k,next_bins*sd,new_ed*sd*sv**2,dt, &
                   evaporated_bins,evaporated_ed,vapor_heat,phase_energy,status)
              if(status==0)then
+                ! Transfer the represented survival fraction, not a cgs/code
+                ! round trip of the absolute mass. Exact zero erosion must
+                ! remain an identity; a one-ulp increase is not solid growth.
+                evaporated_code=0
+                do grain_bin=1,4
+                   if(next_bins(grain_bin)<=0)cycle
+                   if(next_bins(grain_bin)*sd<=0)then
+                      status=1;exit
+                   endif
+                   if(evaporated_bins(grain_bin)==next_bins(grain_bin)*sd)then
+                      evaporated_code(grain_bin)=next_bins(grain_bin)
+                   else
+                      evaporated_code(grain_bin)=next_bins(grain_bin)* &
+                           (evaporated_bins(grain_bin)/(next_bins(grain_bin)*sd))
+                   endif
+                enddo
+                if(status/=0)then
+                   bad=1;cycle
+                endif
 #ifdef DUST_DYNAMICS
                 if(dust_relative_motion)then
-                   call dust_phase_erode(next_bins,evaporated_bins/sd,phase_p(:,0),phase_p(:,1:4),status)
+                   call dust_phase_erode(next_bins,evaporated_code,phase_p(:,0),phase_p(:,1:4),status)
                    if(status/=0)then
+                      if(bad==0)write(*,*)'Dust sublimation phase transfer rejected: ',cell,status,next_bins,evaporated_code
+                      if(bad==0)write(*,*)'Dust sublimation mass delta/nonfinite momentum: ', &
+                           evaporated_code-next_bins,count(.not.ieee_is_finite(phase_p(:,0:4)))
                       bad=1;cycle
                    endif
                 endif
 #endif
-                next_bins=evaporated_bins/sd
+                next_bins=evaporated_code
                 next_grains=[sum(next_bins(1:2)),sum(next_bins(3:4))];next=sum(next_grains)
                 new_ed=evaporated_ed/(sd*sv**2)
                 q=q-vapor_heat/(sd*sv**2)
@@ -352,7 +377,10 @@ contains
 #ifdef SNRT_CHIMES
           if(dust_chimes_enabled())then
              call chimes_cell_state(cell,next_grains,chemical_stage(:,k),elements,status,metallic_iron=sum(next_iron))
-             if(status/=0)bad=1
+             if(status/=0)then
+                if(bad==0)write(*,*)'Dust final chemical reconciliation rejected: ',cell,status
+                bad=1
+             endif
           endif
 #endif
           if(dust_composition_enabled())stage(k,4:5)=next_grains
@@ -370,7 +398,10 @@ contains
              enddo
              eg=phase_row(ndim+2)-dust_phase_kinetic(phase_row)
              if(nener>0)eg=eg-sum(phase_row(inener:inener+nener-1))
-             if(.not.ieee_is_finite(eg).or.eg<0)bad=1
+             if(.not.ieee_is_finite(eg).or.eg<0)then
+                if(bad==0)write(*,*)'Dust final phase energy rejected: ',cell,eg
+                bad=1
+             endif
           endif
 #endif
        enddo

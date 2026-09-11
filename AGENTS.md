@@ -1,5 +1,22 @@
 # Project instructions: lagRamses high-level RT / feedback / dust
 
+## General physical-model completion scope
+
+Operator decision (2026-09-11): completion means a galaxy-formation effective
+model using justified, declared literature-based approximations, with
+consistent mass/energy/element accounting and working RT/feedback/dust
+coupling inside its stated domain. Direct microscopic calculations are
+long-term research, NOT prerequisites or new gates for this closeout.
+See `provenance/general_physics_completion_plan_2026-09-11.md` and
+`provenance/microscopic_physics_long_term_backlog.md`.
+Do not relabel comparison limits as calibrated physics, remove physical
+admission checks, or claim implementation complete merely from this scope
+approval. Existing scientific limitations remain documented.
+
+COLIBRE-type galaxy-observable calibration and resolution convergence form
+a separate science plan (`provenance/galaxy_calibration_science_plan.md`),
+not additional prerequisites for the approved three-step implementation.
+
 ## Completed test output retention
 
 Operator directive (2026-09-10): after a simulation test AND its stage

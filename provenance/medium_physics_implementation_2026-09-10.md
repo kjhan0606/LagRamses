@@ -6,6 +6,13 @@ stellar data or to claim universal production qualification.
 
 ## Scope and ordering
 
+Continuation2026-09-11: the preapproved remaining bundles1--5 are tracked in
+[the execution record](remaining_physics_bundle_execution_2026-09-11.md).
+Bundle1's kind7 C/silicate condensation, shocks, sublimation and relative
+dynamics connection has [completed native/live/restart evaluation](kind7_dust_process_implementation_2026-09-11.md).
+This supersedes older limitations for that bounded connection below, not
+the outstanding PAH/Fe or stellar source-data limitations.
+
 Operator continuation (2026-09-10): complete group 7 and then all remaining
 numbered medium-term groups; implementation is preapproved. Continue the
 existing work streams below, without per-helper approval/audit gates. First

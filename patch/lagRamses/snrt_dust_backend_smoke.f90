@@ -28,6 +28,7 @@ program dust_backend_smoke
   real(dust_dp)::cell_u(4,nc),test_power(4),test_band(2,4),test_rate(2,nc)
   real(dust_dp)::one_rate(2,1),one_t(1),one_e(1),one_q(1)
   real(dust_dp),parameter::fe_test_reference_mass=1.398d-26
+  real(dust_dp)::moving_cold_bins(6),moving_cold_basis(fe_nir,fe_nt,6)
   call MPI_INIT(info)
   if(snrt_d03_band_enabled())then
      call check_d03_spectrum()
@@ -736,7 +737,94 @@ subroutine check_fe_cold_live_cell
        0d0,1d0,0d0,ed,td,phase,rate,q,status,absolute_emission=.true.,photon_ev=fe_ir_ev)
   if(status/=0.or.ed/=0.or.td/=0.or.any(rate/=0).or.q/=0)stop 8
   write(*,*)'FE_PAH_COLD_ABSOLUTE_PLANCK_GAS_ENERGY_ZERO_STATE_PASS'
+  call check_moving_cold_ir(bins,basis,ia)
 end subroutine
+
+  subroutine check_moving_cold_ir(bins,basis,sigma)
+    real(dust_dp),intent(in)::bins(6),basis(fe_nir,fe_nt,6),sigma(fe_nir,6)
+    type(dust_ir_table)::cold_table
+    type(dust_ir_diagnostics)::diag
+    real(dust_dp)::u(fe_nt,1),mass(3),hi,rays(3,6),w(6),field(fe_nir,6,1),saved(fe_nir,6,1)
+    real(dust_dp)::ph(fe_nir,1),ed(1),td(1),old_ed,old_t,density(1),cap(1),primary(1)
+    real(dust_dp)::rho(6,1),p(3,6,1),p0(3,6,1),work(6,1),alpha(6,fe_nir,1),total,residual
+    integer::links(6,1),j,b,s,mode,status
+    logical::blocked(6,1)
+    moving_cold_bins=bins;moving_cold_basis=basis
+    mass=[sum(bins(1:2)),sum(bins(3:4)),sum(bins(5:6))]
+    do j=1,fe_nt
+       call iron_mixture_enthalpy(fe_temperature(j),mass,u(j,1),hi,status)
+       if(status/=0)stop 260
+    enddo
+    call snrt_dust_ir_initialize(cold_table,fe_ir_ev,fe_ir_weight_ev, &
+         matmul(sigma,bins)/fe_test_reference_mass,fe_temperature,10d0,status,u(:,1))
+    if(status/=0)stop 261
+    rays=0;w=1d0/6;links=0;blocked=.true.;density=1;cap=1;primary=0;rho(:,1)=bins
+    do j=1,3
+       rays(j,2*j-1)=1;rays(j,2*j)=-1
+    enddo
+    do b=1,6
+       alpha(b,:,1)=sigma(:,b)*bins(b)/fe_test_reference_mass
+    enddo
+    ! Exercise both per-cell U(T) and table U(T) prechecks. The second
+    ! long step starts below the 10 K bath and below the first 5 K knot.
+    do mode=1,2
+       call iron_mixture_enthalpy(20d0,mass,ed(1),hi,status)
+       if(status/=0)stop 262
+       td=20;field=0;ph=0;p=0
+       p(1,:,1)=bins*2.99792458d10*1d-4
+       do s=1,2
+          old_ed=ed(1);old_t=td(1);saved=field;p0=p;work=0
+          total=old_ed+sum(field)/6
+          if(mode==1)then
+             call snrt_dust_ir_advance(cold_table,rays,w,links,1d20,1d17,1d0,density,primary, &
+                  field,td,ph,diag,status,1d-9,256,ed,cap,blocked_face=blocked, &
+                  material_dispatch=moving_cold_material,cell_material_u=u,thin_reabsorption=.true., &
+                  phase_density=rho,phase_momentum=p,phase_absorption=alpha,phase_work=work)
+          else
+             call snrt_dust_ir_advance(cold_table,rays,w,links,1d20,1d17,1d0,density,primary, &
+                  field,td,ph,diag,status,1d-9,256,ed,cap,blocked_face=blocked, &
+                  material_dispatch=moving_cold_material,thin_reabsorption=.true., &
+                  phase_density=rho,phase_momentum=p,phase_absorption=alpha,phase_work=work)
+          endif
+          write(*,'(A,3I4,3ES20.10)')'MOVING_COLD_IR mode,step,status,T,E,work=',mode,s,status,td,ed,sum(work)
+          if(status/=dust_ok.or.td(1)<=0.or.td(1)>=min(old_t,5d0).or.ed(1)<=0)stop 263
+          residual=ed(1)-old_ed+sum(field-saved)/6+sum(work)
+          if(abs(residual)>2d-9*total.or.diag%balance_relative>1d-9)stop 264
+          if(any(field<0).or.any(ph<0))stop 265
+       enddo
+       ! Net-bath callers still reject this cold state without publication.
+       saved=field;old_ed=ed(1);old_t=td(1)
+       call snrt_dust_ir_advance(cold_table,rays,w,links,1d20,1d17,1d0,density,primary, &
+            field,td,ph,diag,status,1d-9,256,ed,cap,blocked_face=blocked,material_dispatch=moving_cold_material)
+       if(status==dust_ok.or.any(field/=saved).or.ed(1)/=old_ed.or.td(1)/=old_t)stop 266
+       ! The moving branch retains the upper-energy guard and rollback.
+       ed=2*u(fe_nt,1);old_ed=ed(1);p0=p;work=-123
+       call snrt_dust_ir_advance(cold_table,rays,w,links,1d20,1d17,1d0,density,primary, &
+            field,td,ph,diag,status,1d-9,256,ed,cap,blocked_face=blocked, &
+            material_dispatch=moving_cold_material,phase_density=rho,phase_momentum=p, &
+            phase_absorption=alpha,phase_work=work)
+       if(status==dust_ok.or.any(field/=saved).or.ed(1)/=old_ed.or.any(p/=p0).or.any(work/=-123))stop 267
+    enddo
+    write(*,*)'MOVING_COLD_IR_ANALYTIC_PLANCK_LONG_STEP_ENERGY_ROLLBACK_PASS'
+  end subroutine
+
+  subroutine moving_cold_material(heating,density,old_energy,capacity,log_t,power,band, &
+       material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr, &
+       gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,basis_power,basis_band)
+    real(dust_dp),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
+    real(dust_dp),intent(in)::material_u(:),dt,background,bath,tolerance
+    logical,intent(in)::use_u
+    real(dust_dp),intent(out)::rate(:,:),temperature(:),next_energy(:)
+    integer,intent(out)::ierr
+    real(dust_dp),optional,intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
+    real(dust_dp),optional,intent(out)::gas_transfer(:)
+    real(dust_dp),optional,intent(in)::cell_material_u(:,:),cell_weights(:,:),basis_power(:,:),basis_band(:,:,:)
+    real(dust_dp)::phase(4),q
+    call iron_radiative_cell(fe_temperature,fe_temperature(1),moving_cold_bins,old_energy(1),heating(1),dt, &
+         fe_test_reference_mass,moving_cold_basis,0d0,1d0,0d0,next_energy(1),temperature(1),phase,rate(:,1),q,ierr, &
+         absolute_emission=.true.,photon_ev=fe_ir_ev)
+    if(present(gas_transfer))gas_transfer=q
+  end subroutine
 
   subroutine check_radiative_sublimation()
     use dust_mass_physics

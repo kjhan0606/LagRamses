@@ -1,5 +1,76 @@
 # Native runtime controls (implementation, not physical approval)
 
+## Explicit effective SSP population (2026-09-11)
+
+`population_model='effective_ssp'`, `binary_fraction=0`, `use_snia=.true.`
+selects ordinary mixed-v5 histories plus a full-initial-mass empirical DTD.
+This is population ID2, not a resolved binary population or a zero Ia rate.
+The SED wrapper must bind the actual IMF and population ID2, while the v5
+ordinary history retains its original single-star input identity. It requires
+all four ordinary channels, their2--600Msun source windows, full.08--600 IMF
+normalization and `user_selected_model_v1`/`source_consistent` settings.
+The DTD sidecar must use `mass_accounting='effective_ssp'` and a baked-in
+binary-incidence rate. Strict-WD and frozen-contact modes are not admitted
+for ID2. Existing ID0/ID1 behavior and default Chabrier selection are unchanged.
+
+`config/fp2_snia_effective_population_runtime_v1.nml` supplies the existing
+Kroupa Maoz/N100 reference under ID2; it is not a Chabrier rate conversion.
+Explicitly select matching material/SED IMF identities. The old zero-binary
+single-star setup does not become Ia-enabled merely by setting use_snia.
+[Native and actual MPI2/OMP2 evidence](../../provenance/effective_population_execution_2026-09-11.md).
+
+## Explicit approximation comparisons (2026-09-11)
+
+Defaults are unchanged; comparison admission is not a physical-production
+approval. Select a matched source package as a unit, not independently mixed
+yield/history/SED files.
+
+- `dust_pah_model='pah_h2_catalytic_v1'`: existing H0--13 neutral/cation
+  states plus H13+H -> H12+H2, shared finite atomic-H donor and explicit
+  local thermal accommodation. Same3584 PAH carriers; CHIMES/fixed groups,
+  no Fe or drift. [Bounded native/live/restart PASS](../../provenance/pah_catalytic_comparison_implementation_2026-09-11.md).
+- `parsec_mixed_lowmass_truncated_v1`: version5 material/history/SED
+  package, sources2--600Msun with the full.08--600 IMF denominator. Different
+  evolutionary/terminal grids and omitted post-track light are explicit;
+  no SNIa or binary population. [Actual-source and MPI2/OMP2 restart PASS](../../provenance/parsec_mixed_lowmass_evidence_2026-09-11.md).
+- Converter `phase_escape_f22_bistability_v1`: wind-velocity comparison,
+  not a new mass-loss/LBV history. [Native binding and source evidence](../../provenance/parsec_bistability_comparison_2026-09-11.md).
+- `radioactive_model='lc18_al26_fe60_transparent_v1'` with
+  `radioactive_companion_path`: matched prompt-projected LC18 only,
+  `RADIOACTIVE=1`, two additional tail fields. Al26/Fe60 are subsets of
+  existing gas metals, not extra mass. Transparent MeV photons, no decay
+  heating; noncosmo CPU/OpenMP MUSCL, no dust/CHIMES/MHD/SGS/GPU hydro.
+  [Native and MPI2/OMP2 live/restart evidence](../../provenance/stellar_radioactive_implementation_2026-09-11.md).
+- Frozen-He-contact SNIa replaces empirical event counts only under
+  explicitly effective SSP accounting and exact birth Z=.01. It is not a
+  disjoint microscopic binary population. [Contract and native/MPI restart evidence](../../provenance/snia_frozen_he_hybrid_plan_2026-09-11.md).
+
+- `dust_iron_model='fe_uv_cycle_v1'`: metallic-Fe UV stationary-charge
+  comparison through13.6eV, CHIMES electron/ion cycles and secondary-electron
+  partition; trace-charge/energy and relaxation-domain checks remain strict.
+- `dust_iron_model='fe_thermal_limit_v1'`: full thermal-retention upper
+  comparison through10000eV, NOT a photoelectric/Auger cascade model. Both
+  Fe choices retain the300K grain-temperature domain and exclude PAH/drift.
+  [Physics, native and MPI2/OMP2 live evidence](../../provenance/fe_photon_comparisons_plan_2026-09-11.md).
+- `dust_pah_model='pah_atomization_limit_v1'`: catalytic H2 plus single-photon
+  complete C24 atomization into H/C/C+, with unit energy-allowed yield and
+  local excess-energy retention. No daughter-grain network or higher charges.
+  Only explicitly admitted fixed monochromatic groups are supported; the
+  current hard group is869.634149eV, not its entire broadband interval.
+  Atomic source condensation releases the same derived binding energy used
+  by destruction; selecting the model does not heat pre-existing material.
+  [Physics, native and actual comparative MPI/restart evidence](../../provenance/pah_single_photon_atomization_plan_2026-09-11.md).
+
+Fe photon comparisons pass bounded three-step MPI2/OMP2 live evaluation;
+this is not a Fe restart or full hard-photon cascade qualification. PAH
+atomization passes the weak/strong mono-group8 live comparison and7591-dataset
+restart match, with measurable carbon return distinct from stellar uptake.
+Neither result is a universal broadband-source or calibrated-galaxy approval.
+Frontends currently pass57 tests (one display-dependent Tk skip); native
+configuration passes48 assertions (`.frontend-final.NGzCu0`).
+See the [execution record](../../provenance/remaining_physics_bundle_execution_2026-09-11.md)
+for current scope, source limitations and completed raw-output cleanup.
+
 ## PARSEC low-Z printed-precision source (2026-09-10)
 
 Explicit feedback conversion with `--metallicity-grid precision_eleven
@@ -2039,11 +2110,33 @@ uses TOTAL H nuclei, including H2; this density correction also applies to
 the pre-existing grey CHIMES mass path. C/olivine do not accrete hydrogen.
 No new cell carriers, material binding-energy model or numerical ledger.
 
-No Fe/PAH, condensation, SN shocks, relative motion or sublimation is admitted.
-The wizard's new growth/sputtering/size-exchange question defaults to false,
-preserving its fixed-grain profile. Fixed grains and the existing effective
-erosion laws are comparison assumptions, not general dust survival predictions.
-CPU/OpenMP remains required. Kind5/kind6 mass restrictions stay unchanged.
+The subsequent [process connection](../../provenance/kind7_dust_process_bundle_plan_2026-09-11.md)
+admits existing source condensation, unresolved SN destruction, sublimation
+and C/silicate relative dynamics in kind7. Fe/PAH remain excluded. Process
+questions default off; fixed grains and the existing effective erosion laws
+remain comparison assumptions, not general dust survival predictions.
+CPU/OpenMP remains required. Kind5/kind6 restrictions stay unchanged.
+
+With relative motion, competitive node-resolved photo absorption accumulates
+four phase energies and directional moments on the accepted trajectory.
+Absorption impulse uses physical c; midpoint mechanical work is subtracted
+once from solid heating. Cold chemistry reads the staged phase-aware kinetic
+energy. Stationary primary scattering is disabled; after photo, reconstructed
+nodes supply photon-weighted group-grey phase transport opacity to the existing
+nine-group work-conserving moving-scatter solver. This is not node-resolved
+moving scattering or cross-group Doppler transport. Split sublimation is
+allowed with drift, but coupled-IR sublimation remains coadvected-only.
+Grain opacity is frozen during photo: subsequent material/IR sublimation
+updates the next call's opacity, not an implicit photo/sublimation solution.
+Transient photo counters add no checkpoint carriers.
+Relative C/silicate material also uses the existing DL01 low-temperature
+continuation and per-band Planck continuation for absolute IR, not the
+net-bath energy floor. Phase enthalpy reconstruction and mass exchange use
+that same mixture energy. Below the sublimation table, a cold no-op is
+accepted only when the warmer first-knot evaluation gives exactly unchanged
+represented masses. No bath heating or finite-rate extrapolation is added.
+The separate CHIMES grain-temperature input bounds still apply; this is not
+permission to extrapolate its reaction tables to zero temperature.
 
 Photo integration uses accumulated optical depth with survival `exp(-tau)`:
 the old survival-fraction ODE could produce tiny negative terminal values
@@ -2077,8 +2170,9 @@ Kind7 additionally admits the explicit existing-sink, non-MAD Bondi
 `partition_reference_v1` comparison with **NENER=0 hydro** and active SNRT.
 Use `sink`, `sink_AGN`, `agn`, `bondi`, `create_sinks=.false.` and
 `accretion_scheme='bondi'`; retain the C/silicate coadvection restrictions
-above. CR, MHD, new sink formation and the excluded grain processes are not
-admitted by this connection. The checked AGN scalar map transports all157
+above. Optional condensation is admitted; CR, MHD, new sink formation,
+SN shocks, sublimation and relative motion remain excluded with sinks.
+The checked AGN scalar map transports all157
 chemical densities plus eight dust mass/solid-energy descriptors through
 gross accretion and jet loading/deposition. Solid thermal energy is separate
 from gas mechanical energy; swallowed solid energy leaves the modeled grid.

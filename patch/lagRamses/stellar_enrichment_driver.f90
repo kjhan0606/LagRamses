@@ -136,7 +136,7 @@ contains
           ! SSP ledger is built.  Keeping it out here prevents the generic
           ! IMF-only integrator from treating a prompt table as a DTD.
           cycle
-       else if (channel == channel_pisn.and.(.not.table%high_mass_ready.or.table%high_mass_version/=4)) then
+       else if (channel == channel_pisn.and.(.not.table%high_mass_ready.or.table%high_mass_version<4)) then
           ! Only v4 admits a validated source-node pair-instability map.
           ierr = enrichment_driver_err_unsupported
           return
@@ -218,7 +218,7 @@ contains
           ! See compute_stellar_source_increment: the runtime owns the DTD
           ! convolution and applies the SNIa ledger transaction separately.
           cycle
-       else if (channel == channel_pisn.and.(.not.table%high_mass_ready.or.table%high_mass_version/=4)) then
+       else if (channel == channel_pisn.and.(.not.table%high_mass_ready.or.table%high_mass_version<4)) then
           ierr = enrichment_driver_err_unsupported
           return
        else if (channel == channel_snii .and. &
@@ -260,6 +260,19 @@ contains
     type(stellar_population_ledger_t),intent(inout)::ledger
     integer::status
     if(.not.table%high_mass_ready.or..not.enable_wind.or..not.enable_snii)return
+    if(table%high_mass_version==5)then
+       if(.not.enable_agb.or..not.enable_pisn)return
+       if(any(lower([channel_wind,channel_agb,channel_snii,channel_pisn])>minval(table%hm_mass)))return
+       if(any(upper([channel_wind,channel_agb,channel_snii,channel_pisn])< &
+            min(maxval(table%hm_mass),population%imf_mass_max)))return
+       ! Coverage of the declared mixed model, not a scientific matched-SSP
+       ! claim. Below-grid mass remains explicitly unresolved, never removed
+       ! from the IMF denominator or reassigned to the first source node.
+       call compute_unresolved_mass_bucket(population,[population%imf_mass_min], &
+            [minval(table%hm_mass)],1,ledger%unresolved_initial_mass_fraction, &
+            ledger%unresolved_initial_mass,status)
+       return
+    endif
     if(max(lower(channel_wind),lower(channel_snii))>max(40d0,population%imf_mass_min))return
     if(table%high_mass_version==4)then
        if(.not.enable_pisn)return

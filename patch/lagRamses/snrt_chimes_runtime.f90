@@ -5,11 +5,13 @@ module snrt_chimes_runtime
   use amr_commons
   use hydro_commons
   use snrt_chimes
+  use dust_iron_photons, only: fe_uv_step
   use snrt_spectral_contract, only: snrt_chimes_band_enabled,snrt_chimes_bank_sha256, &
        snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256,snrt_chimes_transition_enabled
   use snrt_thermochemistry, only: snrt_secondary_tables_loaded,snrt_secondary_tables_load_from_environment
   use snrt_atomic_cooling, only: atomic_mh
-  use dust_composition_optics, only: d03_band_abs,d03_radius_cm,d03_solid_density
+  use dust_composition_optics, only: d03_band_abs,d03_band_transport,d03_radius_cm,d03_solid_density
+  use snrt_moving_scatter, only: snrt_moving_scatter_cell,snrt_scatter_c
   use dust_phase_state, only: dust_dynamics_enabled,dust_phase_kinetic
   use dust_mass_physics, only: dust_chimes_enabled,dust_gas_elements,olivine_fraction,dust_iron_enabled, &
        dust_pah_enabled,dust_pah_nstate,dust_pah_hc,dust_pah_charged,dust_pah_solid_charge,dust_pah_inventory
@@ -26,6 +28,8 @@ module snrt_chimes_runtime
   public::chimes_live_band_stage
   public::chimes_live_molecular_stage
   public::chimes_live_cold_stage
+  public::chimes_live_grain_scatter
+  public::chimes_live_fe_uv_stage
   real(dp),parameter::mass_number(11)=[1d0,4d0,12d0,14d0,16d0,20d0,24d0,28d0,32d0,40d0,56d0]
   logical,save::ready=.false.
   type(c_ptr),save::band_handle=c_null_ptr
@@ -115,9 +119,10 @@ contains
        ierr=1
        ! Old spectral modes keep fixed masses. Kind7 also admits the existing
        ! mass/size operator, before opacity is reconstructed.
-       if(dust_iron_enabled().or.dust_pah_enabled().or.dust_dynamics_enabled())return
-       if(any(dust_condensation/=0).or.dust_sn_shocks.or.trim(dust_sublimation)/='none')return
+       if(dust_iron_enabled().or.dust_pah_enabled())return
        if(.not.snrt_chimes_transition_enabled())then
+          if(dust_dynamics_enabled())return
+          if(any(dust_condensation/=0).or.dust_sn_shocks.or.trim(dust_sublimation)/='none')return
           if(dust_growth.or.dust_sputtering.or.dust_coagulation.or.dust_shattering)return
        endif
        call get_environment_variable('SNRT_CHIMES_BAND_TABLE',main,length=n,status=status)
@@ -362,21 +367,26 @@ contains
   end subroutine
 
   subroutine chimes_live_cold_stage(cell,sd,sv,dt,length,td,chat,nd,number,radiation_energy, &
-       state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info)
+       state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info, &
+       staged_row,directions,phase_energy,phase_moment)
     integer,intent(in)::cell,nd
     real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,9),radiation_energy(nd,9)
     real(dp),intent(inout)::state(chimes_ns),energy,next_number(nd,9),next_energy(nd,9),ledger(11)
     real(dp),intent(inout)::grain_number(9),grain_energy(9)
     integer,intent(out)::ierr
     real(dp),optional,intent(inout)::event_info(2)
+    real(dp),optional,intent(in)::staged_row(nvar),directions(3,nd)
+    real(dp),optional,intent(inout)::phase_energy(9,4),phase_moment(3,4)
     ierr=1
     if(.not.snrt_chimes_cold_enabled())return
     call chimes_live_molecular_stage(cell,band_handle,molecular_handle,sd,sv,dt,length,td,chat,nd, &
-         number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info)
+         number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info, &
+         staged_row,directions,phase_energy,phase_moment)
   end subroutine
 
   subroutine chimes_live_molecular_stage(cell,atomic_bank,molecular_bank,sd,sv,dt,length,td,chat,nd, &
-       number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info)
+       number,radiation_energy,state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info, &
+       staged_row,directions,phase_energy,phase_moment)
     ! Caller-owned handles must be loaded/bound before threaded cell work.
     ! This adapter does not select a model or publish uold/radiation. The
     ! driver must disable transport absorption and stage IR before commit.
@@ -387,6 +397,9 @@ contains
     real(dp),intent(inout)::grain_number(9),grain_energy(9)
     integer,intent(out)::ierr
     real(dp),optional,intent(inout)::event_info(2)
+    real(dp),optional,intent(in)::staged_row(nvar),directions(3,nd)
+    real(dp),optional,intent(inout)::phase_energy(9,4),phase_moment(3,4)
+    real(dp)::alpha_phase(128,9,4),phase_e(9,4),phase_p(3,4)
     real(dp)::old(chimes_ns),elements(11),new(chimes_ns),controls(9),bins(4),grains(2),alpha(128,9)
     real(dp)::pn(nd,9),pe(nd,9),budget(11),gn(9),ge(9),row(nvar),staged(chimes_ns)
     real(dp)::nh,cv,t,nonthermal,thermal,area,ratio,surface,proposed_energy,events(2)
@@ -397,9 +410,15 @@ contains
     if(any(.not.ieee_is_finite([sd,sv,dt,length,td,chat])).or.sd<=0.or.sv<=0)return
     if(abs(gamma-5d0/3d0)>1d-12)return
     if(.not.dust_two_size_enabled())return
-    if(dust_iron_enabled().or.dust_pah_enabled().or.dust_dynamics_enabled())return
+    if(dust_iron_enabled().or.dust_pah_enabled())return
+    if(dust_dynamics_enabled().and..not.snrt_chimes_transition_enabled())return
+    if(present(staged_row).neqv.dust_dynamics_enabled())return
+    if(present(directions).neqv.dust_dynamics_enabled())return
+    if(present(phase_energy).neqv.dust_dynamics_enabled())return
+    if(present(phase_moment).neqv.dust_dynamics_enabled())return
     if(idust<1.or.idust_bins<1.or.idust_bins+3>nvar.or.idust_species<1.or.idust_species+1>nvar)return
     row=uold(cell,1:nvar)
+    if(present(staged_row))row=staged_row
     if(any(.not.ieee_is_finite(row)).or.row(1)<=0)return
     bins=row(idust_bins:idust_bins+3)
     if(any(bins<0))return
@@ -410,6 +429,7 @@ contains
     if(ierr/=0)return
     ierr=1
     nonthermal=.5d0*sum(row(2:ndim+1)**2)/row(1)+magnetic_energy(row)
+    if(dust_dynamics_enabled())nonthermal=dust_phase_kinetic(row)+magnetic_energy(row)
 #if NENER>0
     nonthermal=nonthermal+sum(row(inener:inener+NENER-1))
 #endif
@@ -421,7 +441,8 @@ contains
     do s=1,2
        do k=1,2
           j=2*(s-1)+k
-          alpha=alpha+bins(j)*sd*d03_band_abs(:,:,j)
+          alpha_phase(:,:,j)=bins(j)*sd*d03_band_abs(:,:,j)
+          alpha=alpha+alpha_phase(:,:,j)
           area=area+bins(j)*sd*.75d0/(d03_solid_density(s)*d03_radius_cm(k))
        enddo
     enddo
@@ -430,9 +451,16 @@ contains
     area=area/nh;ratio=sum(grains)/(elements(1)*.01d0);surface=1
     if(ratio>0)surface=area/(1d-21*ratio)
     controls=[nh,t,td,dt,length,ratio,surface,0d0,chat]
+    if(dust_dynamics_enabled())then
+    ierr=chimes_cell_band_cold_molecular(atomic_bank,molecular_bank,nd,controls,elements/elements(1), &
+         old/elements(1),alpha,number,radiation_energy,t,new,pn,pe,budget,gn,ge, &
+         transition=snrt_chimes_transition_enabled(),event_info=events,phase_alpha=alpha_phase, &
+         directions=directions,phase_energy=phase_e,phase_moment=phase_p)
+    else
     ierr=chimes_cell_band_cold_molecular(atomic_bank,molecular_bank,nd,controls,elements/elements(1), &
          old/elements(1),alpha,number,radiation_energy,t,new,pn,pe,budget,gn,ge, &
          transition=snrt_chimes_transition_enabled(),event_info=events)
+    endif
     if(ierr/=0)return
     staged=new*elements(1)
     proposed_energy=nonthermal+chimes_live_capacity(staged,sd)*t/(sd*sv**2)
@@ -441,7 +469,87 @@ contains
     state=staged;energy=proposed_energy;next_number=pn;next_energy=pe;ledger=budget
     grain_number=gn;grain_energy=ge;ierr=0
     if(present(event_info))event_info=events
+    if(present(phase_energy))phase_energy=phase_e
+    if(present(phase_moment))phase_moment=phase_p
   end subroutine
+
+  subroutine chimes_live_grain_scatter(nd,number,energy,momentum,mass,directions,weights,dt,chat,work,ierr)
+    integer,intent(in)::nd
+    real(dp),intent(inout)::number(nd,9),energy(nd,9),momentum(3,4),work(4)
+    real(dp),intent(in)::mass(4),directions(3,nd),weights(nd),dt,chat
+    integer,intent(out)::ierr
+    real(dp),allocatable::nn(:,:),ee(:,:)
+    real(dp)::tau(4,9),p(3,4),w(4),gn(nd,9),ge(nd,9),group_n
+    integer::b,g,k,j
+    real(dp),parameter::ev_erg=1.602176634d-12
+    ierr=1
+    if(.not.ready.or..not.snrt_chimes_transition_enabled())return
+    if(nd<1.or.nd>720.or.any(.not.ieee_is_finite([mass,dt,chat])).or.any(mass<0).or.dt<0.or.chat<=0.or.chat>1)return
+    allocate(nn(nd,128*9),ee(nd,128*9))
+    ierr=chimes_band_nodes(band_handle,nd,number,energy,nn,ee)
+    if(ierr/=0)return
+    p=momentum;w=0;tau=0
+    ! Explicit group-grey moving closure: photon-weighted D03 transport Q
+    ! from the current per-ray node reconstruction, frozen for this call.
+    ! The existing nine-group moving solver conserves N and kinetic+lab E;
+    ! this is not a new node-resolved or cross-group Doppler transport model.
+    do g=1,9
+       group_n=sum(number(:,g))
+       if(group_n<=0)cycle
+       do k=1,128
+          j=k+128*(g-1)
+          do b=1,4
+             tau(b,g)=tau(b,g)+sum(nn(:,j))/group_n*mass(b)*d03_band_transport(k,g,b)*snrt_scatter_c*chat*dt
+          enddo
+       enddo
+    enddo
+    gn=number;ge=energy*ev_erg
+    call snrt_moving_scatter_cell(gn,ge,p,mass,tau,directions,weights,snrt_scatter_c,w,ierr)
+    if(ierr/=0)return
+    number=gn;energy=ge/ev_erg;momentum=p;work=w
+  end subroutine chimes_live_grain_scatter
+
+  subroutine chimes_live_fe_uv_stage(cell,sd,sv,dt,td,chat,photons,state,energy,solid,ledger,ierr)
+    ! Operate on the ALREADY staged CHIMES state; never restore pre-chemistry
+    ! abundances here. All arguments remain unchanged if any check fails.
+    ! Here chat is cm/s, NOT the dimensionless light-speed fraction passed
+    ! to chimes_live_stage's external CHIMES controls.
+    integer,intent(in)::cell
+    real(dp),intent(in)::sd,sv,dt,td,chat
+    real(dp),intent(inout)::photons(9),state(chimes_ns),energy,solid,ledger(8)
+    integer,intent(out)::ierr
+    real(dp)::elements(11),after(11),q0,q1,nh,nonthermal,e,u,n(9),s(chimes_ns),receipt(8),bins(6)
+    ierr=1
+    if(.not.ready.or.min(sd,sv)<=0)return
+    ierr=chimes_budget(state,elements,q0)
+    if(ierr/=0)return
+    ierr=1
+    if(elements(1)<=0)return
+    nh=elements(1)*sd/atomic_mh
+    nonthermal=.5d0*sum(uold(cell,2:ndim+1)**2)/uold(cell,1)+magnetic_energy(uold(cell,:))
+#if NENER>0
+    nonthermal=nonthermal+sum(uold(cell,inener:inener+NENER-1))
+#endif
+    e=(energy-nonthermal)*sd*sv**2;u=solid;n=photons;s=state/elements(1);receipt=0
+    bins=[uold(cell,idust_bins:idust_bins+3),uold(cell,idust_iron:idust_iron+1)]*sd
+    call fe_uv_step(dt,chat,nh,td,bins,n,s,e,u,fe_secondary,receipt,ierr)
+    if(ierr/=0)return
+    s=s*elements(1)
+    ierr=chimes_budget(s,after,q1)
+    if(ierr/=0)return
+    ierr=9
+    if(any(abs(after-elements)>2d-12*max(elements,tiny(1d0))))return
+    if(abs(q1-q0)>2d-12*max(sum(state),tiny(1d0)))return
+    state=s;photons=n;energy=nonthermal+e/(sd*sv**2);solid=u;ledger=receipt;ierr=0
+  contains
+    subroutine fe_secondary(electron_ev,abundance,f,status)
+      real(dp),intent(in)::electron_ev,abundance(157)
+      real(dp),intent(out)::f(5)
+      integer,intent(out)::status
+      f=0
+      status=chimes_secondary_partition(electron_ev,abundance,f)
+    end subroutine
+  end subroutine chimes_live_fe_uv_stage
 
   subroutine chimes_live_stage(cell,sd,sv,dt,length,td,area,chat,photons,state,energy,next_photons,ierr,staged_row)
     integer,intent(in)::cell

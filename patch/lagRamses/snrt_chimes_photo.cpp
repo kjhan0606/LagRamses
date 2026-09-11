@@ -14,6 +14,7 @@ extern "C" int snrt_chimes_budget(const double *,double *,double *);
 
 namespace {
 constexpr int ns=157,ng=9,K=128,nledger=8+2*ng;
+constexpr int nphase=4,nphase_energy=ng*nphase,nphase_moment=6*nphase;
 constexpr int ne=258;
 using snrt_chimes_detail::Bank;
 void require(bool ok){if(!ok)throw std::runtime_error("atomic photo integration failed");}
@@ -23,10 +24,14 @@ struct EnergyIndex {int index;double weight;};
 struct Photo {
   double nh,cdt;
   double pumping=0;
+  bool phases=false;
   std::vector<int> node;
   std::vector<double> initial;
   std::vector<double> dust_alpha,node_energy;
+  std::vector<std::array<double,nphase>> phase_fraction;
+  std::vector<std::array<double,3>> node_direction;
   std::vector<double> survival;
+  std::vector<double> inverse_diagonal;
   std::vector<Term> terms;
   std::vector<MolecularTerm> molecular;
   std::vector<EnergyIndex> samples;
@@ -77,8 +82,9 @@ int rhs(realtype,N_Vector y,N_Vector dy,void *context){
   try{
     auto &p=*static_cast<Photo*>(context);const int nn=p.node.size(),li=ns+nn;
     const double *v=N_VGetArrayPointer(y);double *out=N_VGetArrayPointer(dy);
-    for(int j=0;j<li+nledger;++j)if(!std::isfinite(v[j]))return 1;
-    std::fill(out,out+li+nledger,0.);partition(p,v);
+    const int size=li+nledger+(p.phases?nphase_energy+nphase_moment:0);
+    for(int j=0;j<size;++j)if(!std::isfinite(v[j]))return 1;
+    std::fill(out,out+size,0.);partition(p,v);
     // Integrate accumulated optical depth, not the exponentially exhausted
     // fraction. d(tau)/ds = c*dt*opacity; survival=exp(-tau) cannot cross zero.
     // max is only for Newton trial tau; accepted negative states still reject.
@@ -114,6 +120,20 @@ int rhs(realtype,N_Vector y,N_Vector dy,void *context){
       out[ns+k]+=p.cdt*p.dust_alpha[k];
       const int g=p.node[k]/K;
       out[li+8+g]+=rate*p.node_energy[k];out[li+8+ng+g]+=rate;
+      if(p.phases)for(int s=0;s<nphase;++s){
+        // Exact frozen-opacity share of this same CVODE dust capture, not
+        // a group opacity ratio or an attribution of total gas+grain loss.
+        const double power=rate*p.node_energy[k]*p.phase_fraction[k][s];
+        out[li+nledger+s*ng+g]+=power;
+        for(int axis=0;axis<3;++axis){
+          const double direction=p.node_direction[k][axis];
+          // All solver counters remain nonnegative, including anisotropic
+          // absorption. Subtract the +/- integrals only after acceptance.
+          const int m=li+nledger+nphase_energy+s*6+2*axis;
+          out[m]+=power*std::max(0.,direction);
+          out[m+1]+=power*std::max(0.,-direction);
+        }
+      }
     }
     for(const auto &t:p.molecular){
       const double opacity=p.cdt*t.sigma*std::max(0.,v[t.from]);
@@ -131,9 +151,38 @@ int rhs(realtype,N_Vector y,N_Vector dy,void *context){
       out[li]+=heat;out[li+5]+=power-heat;
       out[li+6]+=power;out[li+7]+=captures;
     }
-    for(int j=0;j<li+nledger;++j)if(!std::isfinite(out[j]))return 1;
+    for(int j=0;j<size;++j)if(!std::isfinite(out[j]))return 1;
     return 0;
   }catch(...){return -1;}
+}
+// Resolve stiff destruction modes in the Krylov solve instead of leaving
+// trace carriers to an unpreconditioned residual dominated by major ions.
+// P = diag(1 + gamma*k_destroy) approximates I - gamma*J. Production,
+// secondary-ionization and opacity cross derivatives remain in CVODE's
+// matrix-free Jacobian; omitting them ONLY from P does not change the ODE.
+int prec_setup(realtype,N_Vector y,N_Vector,booleantype,booleantype *current,
+    realtype gamma,void *context){
+  try{
+    auto &p=*static_cast<Photo*>(context);
+    const int nn=p.node.size(),size=ns+nn+nledger+(p.phases?nphase_energy+nphase_moment:0);
+    const double *v=N_VGetArrayPointer(y);
+    p.inverse_diagonal.assign(size,1.);
+    for(const auto &t:p.terms)
+      p.inverse_diagonal[t.from]+=gamma*p.cdt*t.sigma*std::exp(-std::max(0.,v[ns+t.node]))*p.initial[t.node];
+    for(const auto &t:p.molecular)
+      p.inverse_diagonal[t.from]+=gamma*p.cdt*t.sigma*std::exp(-std::max(0.,v[ns+t.node]))*p.initial[t.node]*t.yield;
+    for(double &d:p.inverse_diagonal){
+      if(!std::isfinite(d) || d<=0)return 1;
+      d=1./d;
+    }
+    *current=SUNTRUE;return 0;
+  }catch(...){return -1;}
+}
+int prec_solve(realtype,N_Vector,N_Vector,N_Vector r,N_Vector z,realtype,realtype,int,void *context){
+  const auto &p=*static_cast<Photo*>(context);
+  const double *in=N_VGetArrayPointer(r);double *out=N_VGetArrayPointer(z);
+  for(size_t j=0;j<p.inverse_diagonal.size();++j)out[j]=in[j]*p.inverse_diagonal[j];
+  return 0;
 }
 }
 
@@ -141,8 +190,12 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     const snrt_chimes_detail::MoleculeBank *molecules,const double *shield,double pumping,
     const double *old,const double *number,const double *energy,double *next,
     double *next_number,double *next_energy,double *ledger,
-    double *grain_number=nullptr,double *grain_energy=nullptr){
+    double *grain_number=nullptr,double *grain_energy=nullptr,
+    const double *phase_alpha=nullptr,const double *directions=nullptr,
+    double *phase_energy=nullptr,double *phase_moment=nullptr){
   if(!handle || nd<1 || nd>720 || !old || !number || !energy || !next || !next_number || !next_energy || !ledger)return 1;
+  const bool phases=phase_alpha || directions || phase_energy || phase_moment;
+  if(phases && (!dust_alpha || !phase_alpha || !directions || !phase_energy || !phase_moment))return 1;
   if(!std::isfinite(nh) || nh<=0 || !std::isfinite(dt) || dt<0 || !std::isfinite(chat) || chat<=0 || chat>2.99792458e10)return 2;
   const auto &b=*static_cast<const Bank*>(handle);
   double nuclei[11],charge;
@@ -150,10 +203,33 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
   // A fixed external solid charge is allowed: preserve the incoming gas
   // charge, do not reinterpret it as a new electron reservoir.
   try{
-    Photo p;p.nh=nh;p.cdt=chat*dt;p.pumping=pumping;require(std::isfinite(p.cdt));
+    Photo p;p.nh=nh;p.cdt=chat*dt;p.pumping=pumping;p.phases=phases;require(std::isfinite(p.cdt));
     if(!std::isfinite(pumping) || pumping<0 || pumping>1)return 2;
     if(dust_alpha)for(int j=0;j<ng*K;++j)
       if(!std::isfinite(dust_alpha[j]) || dust_alpha[j]<0)return 2;
+    if(phases){
+      for(int node=0;node<ng*K;++node){
+        double sum=0;
+        for(int s=0;s<nphase;++s){
+          const double alpha=phase_alpha[s*ng*K+node];
+          if(!std::isfinite(alpha) || alpha<0)return 2;
+          sum+=alpha;
+        }
+        // No absolute floor: even a small opacity must have a real phase
+        // owner. In particular total alpha=0 requires every phase alpha=0.
+        if(!std::isfinite(sum) || std::abs(sum-dust_alpha[node])>
+            1e-12*std::max(sum,dust_alpha[node]))return 2;
+      }
+      for(int d=0;d<nd;++d){
+        double norm=0;
+        for(int axis=0;axis<3;++axis){
+          const double v=directions[3*d+axis];
+          if(!std::isfinite(v))return 2;
+          norm+=v*v;
+        }
+        if(!std::isfinite(norm) || std::abs(norm-1.)>1e-10)return 2;
+      }
+    }
     if(molecules && (!shield || !std::isfinite(shield[0]) || !std::isfinite(shield[1]) ||
         shield[0]<0 || shield[0]>1 || shield[1]<0 || shield[1]>1))return 2;
     std::vector<double> rays(size_t(ng)*nd*K,0),initial(ng*K,0);
@@ -176,6 +252,10 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
       std::copy(energy,energy+nd*ng,next_energy);std::fill(ledger,ledger+10,0.);
       if(grain_number)std::fill(grain_number,grain_number+ng,0.);
       if(grain_energy)std::fill(grain_energy,grain_energy+ng,0.);
+      if(phases){
+        std::fill(phase_energy,phase_energy+nphase_energy,0.);
+        std::fill(phase_moment,phase_moment+3*nphase,0.);
+      }
     };
     if(dt==0 || initial_energy==0){identity();return 0;}
     require(snrt_chimes_fs_ready());
@@ -220,11 +300,24 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
       if(present || alpha>0){
         p.node.push_back(node);p.initial.push_back(initial[node]);
         p.dust_alpha.push_back(alpha);p.node_energy.push_back(b.energy[node]);
+        if(phases){
+          std::array<double,nphase> fraction{};
+          if(alpha>0)for(int s=0;s<nphase;++s)fraction[s]=phase_alpha[s*ng*K+node]/alpha;
+          std::array<double,3> direction{};
+          // At fixed node all rays see the same scalar gas+grain opacity,
+          // so their INITIAL angular fractions remain exact throughout the
+          // solve, even as gas chemistry and competitive opacity evolve.
+          for(int d=0;d<nd;++d){
+            const double weight=rays[(size_t(node/K)*nd+d)*K+node%K]/initial[node];
+            for(int axis=0;axis<3;++axis)direction[axis]+=weight*directions[3*d+axis];
+          }
+          p.phase_fraction.push_back(fraction);p.node_direction.push_back(direction);
+        }
       }
     }
     if(p.node.empty()){identity();return 0;}
     p.fractions.resize(p.samples.size());
-    const int nn=p.node.size(),li=ns+nn,size=li+nledger;
+    const int nn=p.node.size(),li=ns+nn,size=li+nledger+(phases?nphase_energy+nphase_moment:0);
     p.survival.resize(nn);
     Solver solver;solver.y=N_VNew_Serial(size);solver.tol=N_VNew_Serial(size);solver.constraints=N_VNew_Serial(size);
     require(solver.y && solver.tol && solver.constraints);
@@ -248,7 +341,7 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     const double scale=initial_energy/nh;
     std::fill(tol+li,tol+size,std::max(1e-30,scale*1e-14));
     tol[li+7]=std::max(1e-30,scale/b.grids.back().e.back()*1e-14);
-    std::fill(tol+li+8+ng,tol+size,tol[li+7]);
+    std::fill(tol+li+8+ng,tol+li+nledger,tol[li+7]);
     N_VConst(1.,solver.constraints); // nonnegative accepted species/tau/counters
     solver.cv=CVodeCreate(CV_BDF);require(solver.cv);
     require(CVodeInit(solver.cv,rhs,0.,solver.y)==0 && CVodeSetUserData(solver.cv,&p)==0);
@@ -257,8 +350,9 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     // Keep the requested endpoint; never interpolate backwards from a
     // later step with a different gas/grain capture budget.
     require(CVodeSetStopTime(solver.cv,1.)==0);
-    solver.linear=SUNLinSol_SPGMR(solver.y,PREC_NONE,30);require(solver.linear);
+    solver.linear=SUNLinSol_SPGMR(solver.y,PREC_LEFT,30);require(solver.linear);
     require(CVodeSetLinearSolver(solver.cv,solver.linear,nullptr)==0);
+    require(CVodeSetPreconditioner(solver.cv,prec_setup,prec_solve)==0);
     // CVODE's constraint correction can lose its final cancellation in a
     // vanishing molecular tail (observed HCO+ = -1.7e-167 in cv_zn[0]).
     // Check each accepted step, not only the requested endpoint. Retry a
@@ -270,7 +364,9 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     int retries=0;
     for(int steps=0;accepted_time<1. && steps<10000;++steps){
       const int result=CVode(solver.cv,1.,solver.y,&reached,CV_ONE_STEP);
-      if(result!=CV_SUCCESS && result!=CV_TSTOP_RETURN)return 4;
+      if(result!=CV_SUCCESS && result!=CV_TSTOP_RETURN){
+        std::fprintf(stderr,"CHIMES photo CVODE failure flag=%d step=%d t=%.17g dt=%.17g\n",result,steps,accepted_time,dt);return 4;
+      }
       bool negative=false;
       for(int j=0;j<size;++j){
         if(!std::isfinite(y[j]))return 51;
@@ -278,7 +374,11 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
       }
       if(negative){
         const double half=.5*(reached-accepted_time);
-        if(++retries>64 || !(half>0) || accepted_time+half==accepted_time)return 51;
+        if(++retries>64 || !(half>0) || accepted_time+half==accepted_time){
+          const int j=std::min_element(y,y+size)-y;
+          std::fprintf(stderr,"CHIMES photo negative recovery index=%d value=%.17g previous=%.17g t=%.17g reached=%.17g retry=%d step=%d dt=%.17g\n",j,y[j],accepted[j],accepted_time,reached,retries,steps,dt);
+          return 51;
+        }
         std::copy(accepted.begin(),accepted.end(),y);
         require(CVodeReInit(solver.cv,accepted_time,solver.y)==0);
         require(CVodeSetStopTime(solver.cv,1.)==0);
@@ -290,7 +390,9 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
       // Restore ordinary adaptive stepping after a successful recovery.
       require(CVodeSetMaxStep(solver.cv,0.)==0);
     }
-    if(accepted_time!=1.)return 4;
+    if(accepted_time!=1.){
+      std::fprintf(stderr,"CHIMES photo work limit t=%.17g retries=%d dt=%.17g\n",accepted_time,retries,dt);return 4;
+    }
     double new_nuclei[11],new_charge;
     if(snrt_chimes_budget(y,new_nuclei,&new_charge))return 5;
     for(int e=0;e<11;++e)if(std::abs(new_nuclei[e]-nuclei[e])>1e-8*std::max(nuclei[e],1e-20)){
@@ -336,10 +438,42 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
        std::abs(absorbed_e-budget[6]-budget[8])>1e-7*e_scale)return 7;
     double accounted=0;for(int j=0;j<6;++j)accounted+=budget[j];
     if(std::abs(accounted-budget[6])>1e-8*e_scale)return 7;
+    std::array<double,nphase_energy> phase_e{};
+    std::array<double,3*nphase> phase_p{};
+    if(phases){
+      double total=0;
+      for(int g=0;g<ng;++g){
+        double sum=0;
+        for(int s=0;s<nphase;++s){
+          const int i=s*ng+g;
+          phase_e[i]=y[li+nledger+i]*nh;
+          if(!std::isfinite(phase_e[i]) || phase_e[i]<0)return 7;
+          sum+=phase_e[i];
+        }
+        if(!std::isfinite(sum) || std::abs(sum-dust_e[g])>1e-8*e_scale)return 7;
+        total+=sum;
+      }
+      if(!std::isfinite(total) || std::abs(total-budget[8])>1e-8*e_scale)return 7;
+      for(int s=0;s<nphase;++s){
+        double energy_sum=0,norm=0;
+        for(int g=0;g<ng;++g)energy_sum+=phase_e[s*ng+g];
+        for(int axis=0;axis<3;++axis){
+          const int m=li+nledger+nphase_energy+s*6+2*axis;
+          const double moment=(y[m]-y[m+1])*nh;
+          if(!std::isfinite(moment))return 7;
+          phase_p[s*3+axis]=moment;norm=std::hypot(norm,moment);
+        }
+        if(!std::isfinite(energy_sum) || norm>energy_sum+1e-8*e_scale)return 7;
+      }
+    }
     std::copy(y,y+ns,next);std::copy(out_n.begin(),out_n.end(),next_number);
     std::copy(out_e.begin(),out_e.end(),next_energy);std::copy(budget.begin(),budget.end(),ledger);
     if(grain_number)std::copy(dust_n.begin(),dust_n.end(),grain_number);
     if(grain_energy)std::copy(dust_e.begin(),dust_e.end(),grain_energy);
+    if(phases){
+      std::copy(phase_e.begin(),phase_e.end(),phase_energy);
+      std::copy(phase_p.begin(),phase_p.end(),phase_moment);
+    }
     return 0;
   }catch(...){return 3;}
 }
@@ -379,4 +513,17 @@ extern "C" int snrt_chimes_band_photo_molecular_groups(void *handle,void *molecu
   return photo_step(handle,nd,nh,dt,chat,dust_alpha,
       static_cast<const snrt_chimes_detail::MoleculeBank*>(molecules),shield,pumping,
       old,number,energy,next,next_number,next_energy,ledger,grain_number,grain_energy);
+}
+
+extern "C" int snrt_chimes_band_photo_molecular_phases(void *handle,void *molecules,int nd,
+    double nh,double dt,double chat,const double *dust_alpha,const double *shield,double pumping,
+    const double *old,const double *number,const double *energy,double *next,
+    double *next_number,double *next_energy,double *ledger,double *grain_number,double *grain_energy,
+    const double *phase_alpha,const double *directions,double *phase_energy,double *phase_moment){
+  if(!molecules || !dust_alpha || !grain_number || !grain_energy || !phase_alpha ||
+      !directions || !phase_energy || !phase_moment)return 1;
+  return photo_step(handle,nd,nh,dt,chat,dust_alpha,
+      static_cast<const snrt_chimes_detail::MoleculeBank*>(molecules),shield,pumping,
+      old,number,energy,next,next_number,next_energy,ledger,grain_number,grain_energy,
+      phase_alpha,directions,phase_energy,phase_moment);
 }

@@ -138,6 +138,8 @@ MSUN = 1.98847e33
 # Actual RSTAR/Teff columns independently recover3.84598265e33 with modern sigma.
 PARSEC_LSUN = 3.846e33
 PHASE_WIND_MODEL = "parsec2025_w17_hw02_phase_escape_f22_v1"
+BISTABILITY_SELECTOR = "phase_escape_f22_bistability_v1"
+BISTABILITY_MODEL = "parsec2025_w17_hw02_phase_escape_f22_bistability_v1"
 
 
 def phase_wind_speed(track, z):
@@ -170,6 +172,30 @@ def phase_wind_speed(track, z):
     return speed, branch, {"gamma_e_max": float(gamma.max()),
                            "radius_consistency_max_relative": radius_error,
                            "wind_speed_range_km_s": [float(speed.min()/1e5), float(speed.max()/1e5)]}
+
+
+def bistability_wind_speed(track, z):
+    """Velocity-only F22/Vink2001 comparison; not a new mass-loss history.
+
+    H-rich d=1.3 below 22500 K, linear in T to 2.6 at 27500 K.
+    Vink2001 section8 supplies endpoints/bracket, NOT this interpolation.
+    Continuing d=1.3 from12500 down to the inherited10000 K cool boundary
+    is explicitly a comparison extrapolation; no second jump/LBV model.
+    Branch ids: inherited cool/H-poor/hot-H-rich, cool-H-rich, transition.
+    """
+    if not np.isfinite(z) or not .008 <= z <= .03:
+        raise ValueError("bistability comparison requires .008 <= Z <= .03")
+    speed, branch, stats = phase_wind_speed(track, z)
+    temperature = 10**track[:, 4]
+    rich = branch == 2
+    cool = rich & (temperature <= 22500.)
+    transition = rich & (temperature > 22500.) & (temperature < 27500.)
+    speed[cool] *= .5
+    speed[transition] *= (1.3 + 1.3*(temperature[transition]-22500.)/5000.)/2.6
+    branch[cool] = 3
+    branch[transition] = 4
+    stats["wind_speed_range_km_s"] = [float(speed.min()/1e5), float(speed.max()/1e5)]
+    return speed, branch, stats
 
 
 def project(row):
@@ -218,7 +244,7 @@ def compress(age, values, tolerance):
 
 
 def wind_history(track, mass, returned, target, initial, tolerance, speed=None, branch=None,
-                 rate_shape=False, surface_half_units=None):
+                 rate_shape=False, surface_half_units=None, branch_count=3):
     age = track[:, 1]
     if np.any(np.diff(age) < 0) or np.any(np.diff(track[:, 0]) > 0):
         raise ValueError("nonmonotone stellar mass or age")
@@ -306,7 +332,9 @@ def wind_history(track, mass, returned, target, initial, tolerance, speed=None, 
         if branch is not None:
             phase_stats["closure_branch_mass_fraction"] = []
             phase_stats["closure_branch_energy_fraction"] = []
-            for k in range(3):
+            if branch.shape != age.shape or np.any(branch < 0) or np.any(branch >= branch_count):
+                raise ValueError("invalid wind closure branch history")
+            for k in range(branch_count):
                 left, right = (branch[:-1] == k).astype(float), (branch[1:] == k).astype(float)
                 phase_stats["closure_branch_mass_fraction"].append(float(
                     np.sum(interval_mass*.5*(left+right))/returned))
@@ -343,15 +371,20 @@ def build(args):
     for name, expected in inputs.items():
         if hashlib.sha256((args.source_dir/name).read_bytes()).hexdigest() != expected:
             raise ValueError(f"source checksum mismatch: {name}")
-    phase_wind = args.wind_model == "phase_escape_f22_v1"
+    if args.wind_model not in ("fixed", "phase_escape_f22_v1", BISTABILITY_SELECTOR):
+        raise ValueError("unsupported wind model")
+    bistability = args.wind_model == BISTABILITY_SELECTOR
+    phase_wind = args.wind_model == "phase_escape_f22_v1" or bistability
     if precision and phase_wind:
         raise ValueError('precision_eleven uses the fixed-speed comparison; no extreme-Z speed extrapolation')
     if phase_wind:
         if args.wind_km_s is not None:
-            raise ValueError("phase_escape_f22_v1 fixes its own speeds; do not supply --wind-km-s")
+            raise ValueError(f"{args.wind_model} fixes its own speeds; do not supply --wind-km-s")
     elif args.wind_km_s is None or not np.isfinite(args.wind_km_s) or not 0 < args.wind_km_s < 3e5:
         raise ValueError("positive nonrelativistic comparison wind speed required")
     model = PHASE_WIND_MODEL if phase_wind else "parsec2025_w17_hw02_composite_v1"
+    if bistability:
+        model = BISTABILITY_MODEL
     if precision:
         model = PRECISION_MODEL
     if not np.isfinite(args.ccsn_erg) or args.ccsn_erg <= 0:
@@ -412,10 +445,12 @@ def build(args):
                     if precision:
                         half_units = np.array([[float(printed_half_unit(s)) for s in line.split()[29:31]]
                                                for line in raw_track.decode('ascii').splitlines()[3:] if line.strip()])
-                    speed, branch, speed_stats = phase_wind_speed(track, z) if phase_wind else (None, None, {})
+                    speed_law = bistability_wind_speed if bistability else phase_wind_speed
+                    speed, branch, speed_stats = speed_law(track, z) if phase_wind else (None, None, {})
                     age, cumulative, stats = wind_history(track, mass, ret_w, wind, initial,
                                                          args.wind_tolerance, speed, branch,
-                                                         rate_shape=precision, surface_half_units=half_units)
+                                                         rate_shape=precision, surface_half_units=half_units,
+                                                         branch_count=5 if bistability else 3)
                     stats.update(speed_stats)
                     for t, row in zip(age, cumulative):
                         energy_wind = row[12] if phase_wind else .5*MSUN*row[0]*(args.wind_km_s*1e5)**2
@@ -451,6 +486,9 @@ def build(args):
     if phase_wind:
         history[6] = (" model_coordinates='nonrot;W17_62_64_bridge;terminal_at_end;"
                       "phase_endpoint_calibrated;phase_escape_f22_v1'")
+    if bistability:
+        history[6] = (" model_coordinates='nonrot;W17_62_64_bridge;terminal_at_end;"
+                      "phase_endpoint_calibrated;f22_vink01_velocity_ramp_v1'")
     manifest = {"model": model, "status": "explicit_comparison_not_production_approval",
                 "inputs_sha256": inputs, "elements": ELEMENTS, "imf_id": args.imf_id, "imf_domain": [.08, 600],
                 "source_domain": {"mass": [14, 600], "z": [float(z) for z,_ in coordinates], "rotation": 0},
@@ -479,6 +517,22 @@ def build(args):
             "phase_classifier": "simplified_not_author_HRD_optical_depth_classifier",
             "above_158_Msun": "explicit_formula_extension_not_author_grid",
             "bistability_LBV_dense_wind_atmosphere": "not_resolved"}
+    if bistability:
+        manifest["wind_model"].update({
+            "id": BISTABILITY_SELECTOR,
+            "bistability_source": "https://arxiv.org/abs/astro-ph/0101509",
+            "bistability_source_location": "section8_equations24_25_and_adjacent_text",
+            "hot_h_rich_d": "1.3+1.3*clip((Teff-22500)/5000,0,1)",
+            "h_rich_cool_d": 1.3, "h_rich_hot_d": 2.6,
+            "transition_temperature_K": [22500, 27500],
+            "transition_law": "linear_in_T_comparison_not_author_density_dependent_jump",
+            "branch_order": ["cool", "hot_H_poor", "hot_H_rich", "cool_H_rich", "transition_H_rich"],
+            "below_12500_K": "d1.3_continuation_to_inherited_10000K_boundary_is_comparison_extrapolation",
+            "above_50000_K": "inherited_d2.6_not_Vink2001_grid_validation",
+            "applicability": "H_rich_proxy_not_OB_supergiant_classification;nonrot_Z008_to_Z03;14_to_600_Msun",
+            "mass_loss": "unchanged_PARSEC_history_no_jump_multiplier",
+            "bistability_LBV_dense_wind_atmosphere": "velocity_only_comparison_no_LBV_or_second_jump_or_atmosphere",
+        })
     if precision:
         manifest.update(baryonic_policy='Decimal80_printed_half_unit_representative_no_isotope_normalization',
             wind_shape='positive_RATE_trapezoid_surface_positive_endpoint_interval_balancing',
@@ -500,7 +554,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--wind-model", choices=("fixed", "phase_escape_f22_v1"), default="fixed")
+    parser.add_argument("--wind-model", choices=("fixed", "phase_escape_f22_v1", BISTABILITY_SELECTOR), default="fixed")
     parser.add_argument("--metallicity-grid", choices=tuple(Z_GRIDS), default="solar_pair")
     parser.add_argument("--wind-km-s", type=float, help="Required only for the fixed comparison")
     parser.add_argument("--ccsn-erg", type=float, default=1e51)

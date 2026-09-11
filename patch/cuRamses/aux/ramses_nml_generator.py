@@ -301,19 +301,19 @@ PARAMS = [
              'Vacuum sublimation with phase energy; graphite-only or graphite+crystalline olivine comparison; DL01 two-size required',
              choices=['none','gd89_graphite_bulk_v1','gd89_xu25_olivine_v1','gd89_xu25_olivine_rt_v1']),
     ParamDef('dust_iron_model','str','none','PHYSICS_PARAMS',S_FEED,
-             'Electric-only Fe comparison, T<=300 K, primary representative energy<=4 eV; no magnetic absorption/destruction; growth is a separate opt-in',
-             choices=['none','fe_electric_compare_v1']),
+             'Cold electric/eddy Fe: legacy <=4 eV, full thermal-retention limit <=10000 eV, or CHIMES trace-charge UV cycles <=13.6 eV; not full Fe physics',
+             choices=['none','fe_electric_compare_v1','fe_thermal_limit_v1','fe_uv_cycle_v1']),
     ParamDef('dust_fe_condensation','real',0.0,'PHYSICS_PARAMS',S_FEED,
              'Uncalibrated fraction [0,1] of non-Ia ejecta Fe remaining after olivine; all-large metallic Fe injection'),
     ParamDef('dust_fe_kinetics','bool',False,'PHYSICS_PARAMS',S_FEED,
              'Opt-in Fe seed accretion + Choban26/Nozawa06 thermal sputtering; no unresolved SN shocks or nonthermal erosion',
-             visible_when="dust_iron_model=='fe_electric_compare_v1'"),
+             visible_when="dust_iron_model!='none'"),
     ParamDef('dust_fe_sticking','real',0.0,'PHYSICS_PARAMS',S_FEED,
              'Fe geometric sticking [0,1]; kinetics and dust_growth required. No nucleation/charge/adsorption heat',
              visible_when='dust_fe_kinetics==True'),
     ParamDef('dust_pah_model','str','none','PHYSICS_PARAMS',S_FEED,
-             'C24H12 absolute-IR comparisons: neutral (128 carriers, <=4 eV) or fixed-H neutral/cation (256, <=13.6 eV). No destruction',
-             choices=['none','pah_neutral_absolute_v1','pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1']),
+             'C24H12 absolute-IR comparisons; optional H/charge/H2 chemistry or named mono hard-photon atomization limit, not broadband survival',
+             choices=['none','pah_neutral_absolute_v1','pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1']),
     ParamDef('dust_pah_condensation','real',0.0,'PHYSICS_PARAMS',S_FEED,
              'Uncalibrated fraction [0,1] of non-Ia carbon after graphite; hydrogen taken from the same ejecta'),
     ParamDef('dust_size_radius_cm','real_arr','5e-7,1e-5','PHYSICS_PARAMS',S_FEED,
@@ -423,7 +423,7 @@ PARAMS = [
              'IMF: 2 Chabrier (default), 1 Kroupa, 0 Salpeter, 4 Miller-Scalo, 3 PopIII',
              choices=[0, 1, 2, 3, 4]),
     ParamDef('population_model', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
-             'Stellar population', choices=['single_star_ssp', 'binary_ssp']),
+             'Stellar population', choices=['single_star_ssp', 'binary_ssp', 'effective_ssp']),
     ParamDef('yield_source_basis', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
              'Yield normalization', choices=['per_star_cumulative']),
     ParamDef('imf_mass_min_msun', 'real', None, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'IMF lower mass [Msun]'),
@@ -439,17 +439,22 @@ PARAMS = [
     ParamDef('fate_map_sha256', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Fate table fingerprint'),
     ParamDef('fate_approval_id', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Fate approval identifier'),
     ParamDef('high_mass_preset', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
-             'Endpoint model; v1-v3 <=120 Msun, v4 <=600 Msun requires source_consistent',
+             'Endpoint model; v1-v3 <=120 Msun, v4/v5 <=600 Msun require source_consistent',
              choices=['source_consistent', 'wind_only_collapse', 'mixed_remnant']),
     ParamDef('high_mass_history_path', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
-             'Native history: v1=40--120, v2=13--120, v3=explicit CCSN subdomain; match channel bounds; optional AGB wind history retains terminal WD formation; non-CO tags exclude Ia WD supply; requires user_selected_model_v1 and HDF5 I/O'),
+             'Native history: v1=40--120, v2=13--120, v3=CCSN subdomain, v4=massive PARSEC, v5=mixed/truncated 2--600 comparison (no SNIa); match channel bounds and radiation package; requires user_selected_model_v1 and HDF5 I/O'),
+    ParamDef('radioactive_model', 'str', 'none', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Gas-only Al26/Fe60 subsets; RADIOACTIVE=1; transparent decay photons, no heating',
+             choices=['none', 'lc18_al26_fe60_transparent_v1']),
+    ParamDef('radioactive_companion_path', 'str', '', 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
+             'Matched LC18 prompt-projected v2 isotope companion; not PARSEC; no dust/CHIMES/SGS'),
     ParamDef('high_mass_remnant_adjust_max_fraction', 'real', None, 'STELLAR_ENRICHMENT_PARAMS', S_FEED,
              'Mixed-model maximum remnant adjustment / INITIAL mass; explicit nonzero limit required'),
     ParamDef('use_wind', 'bool', True, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable stellar wind source'),
     ParamDef('use_agb', 'bool', True, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable AGB source (requires its own rows)'),
     ParamDef('use_snii', 'bool', True, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable core-collapse source/remnant accounting'),
     ParamDef('use_snia', 'bool', False, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable SNIa; requires matching binary SSP and DTD/event input; strict WD or explicitly approved effective SSP accounting'),
-    ParamDef('use_pisn', 'bool', False, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable P(P)ISN: requires a v4 history and matching wind/SNII/PISN mass windows'),
+    ParamDef('use_pisn', 'bool', False, 'STELLAR_ENRICHMENT_PARAMS', S_FEED, 'Enable P(P)ISN: requires v4 or explicit mixed v5 history and matching wind/SNII/PISN windows'),
 
     # ====== CPL_PARAMS (Dark Energy) ======
     ParamDef('w0',   'real', -1.0, 'CPL_PARAMS', S_DE, 'DE equation of state w0',
@@ -767,7 +772,7 @@ def validate_params(values):
             valid=valid and model=='carbon_olivine_2size_v1'
         optics=clean('dust_optics_model') or 'fixed_mix'
         iron=clean('dust_iron_model') or 'none'
-        valid=valid and iron in ('none','fe_electric_compare_v1')
+        valid=valid and iron in ('none','fe_electric_compare_v1','fe_thermal_limit_v1','fe_uv_cycle_v1')
         try:
             fe_fraction=float(str(values.get('dust_fe_condensation',0)).lower().replace('d','e'))
             fe_sticking=float(str(values.get('dust_fe_sticking',0)).lower().replace('d','e'))
@@ -793,9 +798,18 @@ def validate_params(values):
                         str(values.get('dust_condensation','0,.2,.15')).split(','))
                 except (ValueError,TypeError):
                     valid=False
-            msgs.append(ValidationMsg('WARNING','Fe electric-only comparison needs DUST_IRON=1, CPU/OpenMP material and matching contract. CHIMES=0 permits only static seeds: all grain mass reactions off, NVAR>=32 for NENER1/virial. CHIMES=1 retains kinetics/injection options. Rejects grain T>300 K or absorption above 4 eV; spectral mode tests actual nodes, not a group mean. No magnetic opacity or photoelectron escape.'))
+            if iron=='fe_electric_compare_v1':
+                msgs.append(ValidationMsg('WARNING','Fe electric-only comparison needs DUST_IRON=1, CPU/OpenMP material and matching contract. CHIMES=0 permits only static seeds: all grain mass reactions off, NVAR>=32 for NENER1/virial. CHIMES=1 retains kinetics/injection options. Rejects grain T>300 K or absorption above 4 eV; spectral mode tests actual nodes, not a group mean. No magnetic opacity or photoelectron escape.'))
+            else:
+                valid=valid and not relative and clean('dust_pah_model') in ('','none')
+                if iron=='fe_uv_cycle_v1':
+                    valid=valid and coupling=='chimes_neq_v1'
+                    msgs.append(ValidationMsg('WARNING','Fe UV stationary trace-charge OML/HD2017 comparison: photons<=13.6 eV, Tdust<=300 K, CHIMES and v4 exchange-enabled IR contract required. Actual attenuation data and identity required; no PAH/relative motion. Fixed-group RT only; runtime checks the environment/source domain.'))
+                else:
+                    msgs.append(ValidationMsg('WARNING','Fe thermal-retention limit: photons<=10000 eV, Tdust<=300 K, all Fe absorbed energy retained as heat, no photoelectron escape. Fixed-group RT only, no PAH/relative motion. CHIMES=0 permits static seeds only, all grain mass reactions off.'))
+                msgs.append(ValidationMsg('WARNING','New Fe photon binary required: DUST_IRON=1, DUST_LIVE=1, CPU/OpenMP material, matching contract. Two Fe fields: NVAR189 with CHIMES or NVAR32 without, for the NENER1/virial profile. Not full magnetic-opacity or production qualification.'))
         pah=clean('dust_pah_model') or 'none'
-        valid=valid and pah in ('none','pah_neutral_absolute_v1','pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1')
+        valid=valid and pah in ('none','pah_neutral_absolute_v1','pah_charge_fixed_h_v1','pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1')
         try:
             pah_fraction=float(str(values.get('dust_pah_condensation',0)).lower().replace('d','e'))
             valid=valid and math.isfinite(pah_fraction) and 0<=pah_fraction<=1
@@ -806,13 +820,27 @@ def validate_params(values):
             valid=valid and coupling=='chimes_neq_v1' and optics=='d03_transport_v1' and sublimation=='none'
             valid=valid and not flag('cosmo')
             pah_nvar=(330 if relative else 315)+(8 if relative else 2)*(iron!='none')
-            if pah in ('pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1'):
+            if pah in ('pah_hydrogen_m13_dl01_v1','pah_h2_rehydrogenation_v1','pah_h2_catalytic_v1','pah_atomization_limit_v1'):
                 valid=valid and not relative and iron=='none'
                 msgs.append(ValidationMsg('WARNING','H-state charged PAH: DUST_PAH=1 DUST_PAH_CHARGE=1 DUST_PAH_H=1 CHIMES ABI5, hydro NVAR=3771. H0--13, 3584 carriers; M13 rates with DL01 modes and shared normal-H optics/cooling. Noncosmo, no Fe/drift, gas 10--10000 K, photons <=13.6 eV. No carbon destruction, H2 or higher charge states.'))
                 if pah=='pah_h2_rehydrogenation_v1':
                     msgs[-1]=ValidationMsg('WARNING',msgs[-1].msg.replace('No carbon destruction, H2 or higher charge states.',
                         'Vacancy-refilling H2 capture at the M13 bound rate, k=5e-13 cm3/s: cation H0--10 -> H2--12. '
                         'Not an upper bound on H2 effects. No carbon destruction, H2 formation/superhydrogenation or higher charges.'))
+                elif pah in ('pah_h2_catalytic_v1','pah_atomization_limit_v1'):
+                    msgs[-1]=ValidationMsg('WARNING',msgs[-1].msg.replace('No carbon destruction, H2 or higher charge states.',
+                        'H2 vacancy capture plus barrierless H13+H abstraction (0.06 Angstrom^2, one site). '
+                        'Explicit M13/Boschman hybrid: ground H2, 1.2781 eV/event gas heat, unchanged PAH excitation. '
+                        'No carbon destruction, H>13, higher charges or resolved H2 pumping.'))
+                    if pah=='pah_atomization_limit_v1':
+                        msgs[-1]=ValidationMsg('WARNING',msgs[-1].msg.replace('photons <=13.6 eV',
+                            'fixed groups: soft <=13.6 eV plus current mono 869.634 eV only').replace(
+                            'No carbon destruction, H>13, higher charges or resolved H2 pumping.',
+                            'Unit complete atomization to atomic C/C+/H with all retained excess as local heat. '
+                            'Atomic-donor formation binding heat only on actual injection. '
+                            'Other occupied hard groups (~17/34/106/4023 eV) reject; not broadband destruction or production physics. '
+                            'Same 3584 states/NVAR3771; explicit new atomization binary and original neutral/ion tables required. '
+                            'No H>13, higher charges or resolved H2 pumping.'))
             elif pah=='pah_charge_fixed_h_v1':
                 valid=valid and not relative and iron=='none'
                 msgs.append(ValidationMsg('WARNING','Fixed-H charged PAH: DUST_PAH=1 DUST_PAH_CHARGE=1 CHIMES=1/ABI5, hydro NVAR=443; SNRT_PAH_NEUTRAL_TABLE and SNRT_PAH_ION_TABLE. Co-advection, no Fe, noncosmo; Tgas 10--10000 K, photons <=13.6 eV. No H loss/addition, destruction or general survival qualification.'))
@@ -837,7 +865,9 @@ def validate_params(values):
             msgs.append(ValidationMsg('WARNING','CHIMES requires CHIMES=1/DUST_LIVE=1/NVAR>=187, native pinned tables and nine-group RT; first-order split and local molecular shielding.'))
             msgs.append(ValidationMsg('WARNING','Optional SNRT_SPECTRAL_MODEL=chimes_hot_atomic_maxent128_fs2010_v1 requires SNRT_CHIMES_BAND_TABLE, T>1e5 K, zero molecules/dust and all dust mass processes off; it is NOT the default grey molecular receiver.'))
             msgs.append(ValidationMsg('WARNING','Optional chimes_cold_d03_maxent128_fs2010_v1 requires both atomic/molecular spectral banks, D03 optics, T=10--95499 K and fixed C/silicate grain masses; Fe/PAH/drift and hot fallback are not admitted. mkrun opt-in is SNRT_CHIMES_SPECTRAL_MODEL.'))
-            msgs.append(ValidationMsg('WARNING','chimes_transition_d03_maxent128_fs2010_v1 is a separate 10--1e9 K rapid-dissociation comparison with CHIMES receiver ABI6 and ATcT energy debit; optional C/silicate growth, sputtering and size exchange use existing dust switches and atomic-ion depletion convention. No condensation/SN shocks/Fe/PAH/drift/sublimation or full high-T molecular kinetics.'))
+            msgs.append(ValidationMsg('WARNING','chimes_transition_d03_maxent128_fs2010_v1 is a separate 10--1e9 K rapid-dissociation comparison with CHIMES receiver ABI6 and ATcT energy debit. Optional C/silicate condensation, SN shocks, growth, sputtering, size exchange and sublimation use existing switches and gas-species reconciliation. Grain opacity is frozen during photo absorption: split sublimation precedes RT, coupled-IR sublimation follows photo in material/IR; first-order split, not simultaneous opacity evolution. No Fe/PAH or full high-T molecular kinetics. Explicit matching CPU/OpenMP binary and pinned spectral banks required.'))
+            if relative:
+                msgs.append(ValidationMsg('WARNING','Kind7 relative C/silicate grains permit split sublimation only, no sinks or coupled-IR sublimation. Accepted node captures supply per-phase absorption heat/momentum. Scattering reconstructs nodes for photon-weighted group-grey phase opacities, then uses the existing nine-group moving-scatter solver, not node-resolved scattering. It replaces stationary primary scattering, with mechanical work charged once and no cross-group transfer. Kind6 remains fixed-grain/coadvected without sublimation.'))
         if relative:
             relative_valid=(model=='carbon_olivine_2size_v1' and coupling=='chimes_neq_v1' and
                             material=='dl01_composition_v1' and optics=='d03_transport_v1' and
@@ -855,7 +885,7 @@ def validate_params(values):
                 msgs.append(ValidationMsg('ERROR','Relative dust needs CHIMES+D03/two-size/DL01, CPU hydro, interpol_var=0, positive explicit gas collision cross section; no SGS, pressure_fix, isothermal, T2_star>0 or IR-coupled sublimation.'))
             phases=4+2*(iron!='none')+(pah!='none')
             nvar=187+2*(iron!='none')+128*(pah!='none')+3*phases
-            msgs.append(ValidationMsg('WARNING',f'EXPERIMENTAL bounded first-order relative dust: DUST_DYNAMICS=1 SNRT=1 DUST_LIVE=1 CHIMES=1 NENER=1 NVAR={nvar}, {phases} grain phases. Primary paired transport and material require OpenMP, not forced CUDA; version-4 gas-exchange-enabled material contract required. Fe+PAH MPI2/OMP2 two-step integration/restart verified; not production-ready automatically.'))
+            msgs.append(ValidationMsg('WARNING',f'EXPERIMENTAL bounded first-order relative dust: DUST_DYNAMICS=1 SNRT=1 DUST_LIVE=1 CHIMES=1 NENER=1 NVAR={nvar}, {phases} grain phases. Primary paired transport and material require OpenMP, not forced CUDA; explicit matching SNRT_DUST_DYNAMICS_BINARY and version-4 gas-exchange-enabled SNRT_DUST_DYNAMICS_CONTRACT required. Existing fixed-spectrum Fe+PAH MPI2/OMP2 two-step integration/restart was verified, not kind7 Fe/PAH admission or automatic production qualification.'))
         valid=valid and flag('cooling')==(coupling!='none')
         if flag('dust_sn_shocks'):
             valid=valid and model=='carbon_olivine_2size_v1'
@@ -873,10 +903,10 @@ def validate_params(values):
                 not any(flag(k) for k in ('create_sinks','mad_jet','cr_enabled','mhd_enabled')) and
                 model=='carbon_olivine_2size_v1' and coupling=='chimes_neq_v1' and
                 optics=='d03_transport_v1' and not relative and iron=='none' and pah=='none' and
-                sublimation=='none' and fractions==[0.,0.,0.] and not flag('dust_sn_shocks'))
+                sublimation=='none' and not flag('dust_sn_shocks'))
             valid=valid and sink_valid
             msgs.append(ValidationMsg('WARNING','Periodic sink clouds have radius 4*dx_min; keep this strictly below half the box to avoid antipodal centroid ambiguity. The kind7 comparison wizard uses levelmax=4 with refinement disabled.'))
-            msgs.append(ValidationMsg('WARNING','Dust/Bondi requires NENER=0 hydro, material-transfer binary, SNRT_AGN_MODEL=partition_reference_v1 and SNRT_SPECTRAL_MODEL=chimes_transition_d03_maxent128_fs2010_v1; runtime checks these environment/build choices. Existing sinks only.'))
+            msgs.append(ValidationMsg('WARNING','Dust/Bondi requires NENER=0 hydro, material-transfer CPU/OpenMP binary, SNRT_AGN_MODEL=partition_reference_v1 and SNRT_SPECTRAL_MODEL=chimes_transition_d03_maxent128_fs2010_v1; runtime checks these environment/build choices. Existing sinks and optional condensation only; no SN shocks, sublimation, relative motion or Fe/PAH.'))
         if not valid:
             msgs.append(ValidationMsg('ERROR','Dust needs valid parameters, periodic noncosmo metal hydro, channel feedback, HDF5; sinks only with coadvected kind7/NENER=0 reference Bondi; cooling requires explicit closure/original/no UV; WSS09 requires composition'))
         msgs.append(ValidationMsg('WARNING','Dust needs active SNRT v4 material; D03 is an explicit common-T/transport comparison. WSS09 CIE is not local-radiation/NEQ cooling; no T/He extrapolation'))
@@ -937,6 +967,20 @@ def validate_params(values):
         msgs.append(ValidationMsg('ERROR', 'Legacy feedback cannot consume a high-mass model override'))
     fate = str(values.get('fate_policy') or '').strip("'\"").lower()
     history = str(values.get('high_mass_history_path') or '').strip("'\"")
+    radioactive = str(values.get('radioactive_model') or 'none').strip("'\"").lower()
+    radioactive_path = str(values.get('radioactive_companion_path') or '').strip("'\"")
+    if radioactive not in ('none', 'lc18_al26_fe60_transparent_v1'):
+        msgs.append(ValidationMsg('ERROR', 'Unknown radioactive comparison model'))
+    if (radioactive != 'none') != bool(radioactive_path):
+        msgs.append(ValidationMsg('ERROR', 'Radioactive model and companion path must be supplied together'))
+    if radioactive != 'none':
+        if (not values.get('hydro') or not values.get('metal') or
+                str(values.get('feedback_mode', '')).strip("'\"") != 'channel_resolved' or
+                not history or values.get('dust_mass_enabled') or values.get('use_sgs') or
+                values.get('cosmo') or values.get('gpu_hydro') or values.get('mhd_enabled') or
+                str(values.get('scheme') or 'muscl').strip("'\"") != 'muscl'):
+            msgs.append(ValidationMsg('ERROR', 'Radioactive comparison requires noncosmo metal CPU/OpenMP MUSCL hydro, channel-resolved LC18 history, no dust/CHIMES/SGS/MHD'))
+        msgs.append(ValidationMsg('WARNING', 'Use a RADIOACTIVE=1 noncosmo gas-only build with two additional isotope fields; matched LC18 v2 only, no decay heating'))
     if (fate == 'user_selected_model_v1') != bool(history):
         msgs.append(ValidationMsg('ERROR', 'User-selected fate policy and high_mass_history_path must be supplied together'))
     if fate == 'user_selected_model_v1':
@@ -949,7 +993,7 @@ def validate_params(values):
             msgs.append(ValidationMsg('ERROR', 'User-selected source requires per-star wind+SNII'))
         if values.get('use_pisn', False):
             if preset != 'source_consistent':
-                msgs.append(ValidationMsg('ERROR', 'P(P)ISN v4 requires source_consistent'))
+                msgs.append(ValidationMsg('ERROR', 'P(P)ISN v4/v5 requires source_consistent'))
             try:
                 def mass_window(name):
                     raw = values.get(name, '')
@@ -959,22 +1003,26 @@ def validate_params(values):
                 il, ih = float(values['imf_mass_min_msun']), float(values['imf_mass_max_msun'])
                 good = (len(lo) == len(hi) == 5 and all(math.isfinite(x) for x in lo+hi+[il, ih])
                         and lo[0] == lo[2] == lo[4] and hi[0] == hi[2] == hi[4]
-                        and 0.08 <= il <= lo[0] < hi[0] <= ih and lo[0] >= 8 and hi[0] <= 600)
+                        and 0.08 <= il <= lo[0] < hi[0] <= ih and lo[0] >= 2 and hi[0] <= 600)
             except (KeyError, TypeError, ValueError):
                 good = False
             if not good:
-                msgs.append(ValidationMsg('ERROR', 'P(P)ISN v4 needs matching five-entry wind/SNII/PISN mass windows, nested in its IMF and source domain [8,600]'))
-            msgs.append(ValidationMsg('WARNING', 'P(P)ISN requires a validated v4 history: wind/SNII/PISN windows must match its domain and fit the IMF; runtime verifies the file'))
+                msgs.append(ValidationMsg('ERROR', 'P(P)ISN v4/v5 needs matching five-entry wind/SNII/PISN mass windows, nested in its IMF and source domain'))
+            msgs.append(ValidationMsg('WARNING', 'P(P)ISN requires validated v4 or mixed v5 history: native checks exact source domain and ownership; v5 needs matching AGB window and single-star or explicit effective SSP accounting'))
         population = str(values.get('population_model', '')).strip("'\"")
         try:
             fraction = float(values.get('binary_fraction', 0.0))
             valid_population = ((population == 'single_star_ssp' and fraction == 0.0 and not values.get('use_snia', False)) or
                                 (population == 'binary_ssp' and 0.0 < fraction <= 1.0 and values.get('use_snia', False)
+                                 and values.get('use_agb', True)) or
+                                (population == 'effective_ssp' and fraction == 0.0 and values.get('use_snia', False)
                                  and values.get('use_agb', True)))
         except (TypeError, ValueError):
             valid_population = False
         if not valid_population:
-            msgs.append(ValidationMsg('ERROR', 'This combined SNIa source requires a matching binary population and AGB channel; single-star mode requires binary=0 and SNIa off'))
+            msgs.append(ValidationMsg('ERROR', 'SNIa requires matching binary SSP or explicit effective_ssp (binary=0), and AGB; single-star mode requires SNIa off'))
+        if population == 'effective_ssp':
+            msgs.append(ValidationMsg('WARNING', 'effective_ssp requires native mixed v5 histories and an empirical full-initial-mass DTD sidecar with effective_ssp accounting; not a resolved WD/binary model'))
         if values.get('fate_map_sha256') or values.get('fate_approval_id'):
             msgs.append(ValidationMsg('ERROR', 'User-selected source must not claim an approved fate package'))
 

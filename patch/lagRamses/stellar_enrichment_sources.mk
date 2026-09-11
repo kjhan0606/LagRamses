@@ -4,6 +4,17 @@
 # module dependency order and keeps all new stellar-enrichment source in this
 # patch directory.
 
+STELLAR_RADIOACTIVE_SOURCE_MODULES =
+STELLAR_RADIOACTIVE_RUNTIME_MODULES =
+ifeq ($(RADIOACTIVE),1)
+STELLAR_RADIOACTIVE_SOURCE_MODULES = \
+  patch/lagRamses/stellar_radioactive_decay.f90 \
+  patch/lagRamses/stellar_radioactive_sources.f90
+STELLAR_RADIOACTIVE_RUNTIME_MODULES = \
+  patch/lagRamses/stellar_radioactive_transport.f90 \
+  patch/lagRamses/stellar_radioactive_runtime.f90
+endif
+
 PHASE0_STELLAR_ENRICHMENT_SOURCES = \
   patch/lagRamses/stellar_enrichment_config.f90 \
   patch/lagRamses/stellar_snia_dtd.f90 \
@@ -20,6 +31,7 @@ PHASE0_STELLAR_ENRICHMENT_SOURCES = \
   patch/lagRamses/stellar_yield_provider.f90 \
   patch/lagRamses/stellar_yield_backend.f90 \
   patch/lagRamses/stellar_ssp_sources.f90 \
+  $(STELLAR_RADIOACTIVE_SOURCE_MODULES) \
   patch/lagRamses/stellar_source_increment.f90 \
   patch/lagRamses/stellar_population_ledger.f90 \
   patch/lagRamses/stellar_enrichment_driver.f90 \
@@ -28,4 +40,5 @@ PHASE0_STELLAR_ENRICHMENT_SOURCES = \
   patch/lagRamses/stellar_ramses_bridge.f90 \
   patch/lagRamses/stellar_ramses_mapped_bridge.f90 \
   patch/lagRamses/stellar_yield_audit.f90 \
+  $(STELLAR_RADIOACTIVE_RUNTIME_MODULES) \
   patch/lagRamses/stellar_ramses_runtime.f90
