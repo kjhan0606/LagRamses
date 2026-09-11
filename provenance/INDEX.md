@@ -23,6 +23,9 @@ unchanged~68.65Myr intervals complete the four-step coupled run, with the
 original conservation thresholds. It was not deferred as microscopic physics.
 [COLIBRE-type calibration and resolution convergence](galaxy_calibration_science_plan.md)
 is a separate science campaign, not an implementation completion gate.
+Its concrete proposal now awaits operator approval: preparation/up to3 pilots
+within5,000 CPU-core-hours/1TiB first; priced23--29-run, three-resolution
+ensemble requires later approval. No science simulation has been launched.
 
 Latest completion standard (operator-approved2026-09-11):
 [galaxy-scale effective physical model](general_physics_completion_plan_2026-09-11.md).
