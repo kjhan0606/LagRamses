@@ -460,6 +460,30 @@ class WizardTests(unittest.TestCase):
                     self.assertIs(mkrun.rng.import_to_values(raw)['dust_growth'],False)
                     evolving=dict(choices)
                     evolving['Enable grain growth, sputtering and size exchange in the transition model?']=True
+                    with_sink=dict(evolving)
+                    with_sink['Enable existing-sink Bondi/AGN with coadvected transition dust (NENER=0)?']=True
+                    with mock.patch.dict(os.environ,{'SNRT_CHIMES_SINK_BINARY':''}):
+                        with self.assertRaisesRegex(ValueError,'SNRT_CHIMES_SINK_BINARY'):
+                            collect(with_sink)
+                    with mock.patch.dict(os.environ,{'SNRT_CHIMES_SINK_BINARY':env['SNRT_CHIMES_BINARY']}):
+                        _,coupled,report=collect(with_sink)
+                    coupled_text=coupled[str(root/'fresh/myrun.nml')]
+                    self.assertIn(str(root/'fresh/ic_sink'),coupled)
+                    self.assertIn('sink=.true.',coupled_text)
+                    self.assertIn('gpu_sink=.false.',coupled_text)
+                    self.assertIn('sf_virial=.false.',coupled_text)
+                    self.assertEqual(report['values']['levelmax'],4)
+                    self.assertIn('m_refine=-1d0',coupled_text)
+                    self.assertIn('var_region(1,2)=0.74d0',coupled_text)
+                    self.assertNotIn('prad_region(',coupled_text)
+                    self.assertIn('NENER=0',coupled[str(root/'fresh/README.txt')])
+                    self.assertIn('SNRT_AGN_MODEL=partition_reference_v1',coupled[str(root/'fresh/myrun.env.sh')])
+                    self.assertFalse(any(m.level=='ERROR' for m in report['messages']))
+                    for bad in ({'create_sinks':True},{'cr_enabled':True},{'mad_jet':True},
+                                {'dust_sn_shocks':True},{'dust_condensation':'0.,.2,.15'},
+                                {'dust_relative_motion':True},{'accretion_scheme':'threshold'}):
+                        self.assertTrue(any(m.level=='ERROR' for m in
+                            mkrun.rng.validate_params(dict(report['values'],**bad))))
                     _,dynamic,_=collect(evolving)
                     raw,_=mkrun.rng.parse_namelist(dynamic[str(root/'fresh/myrun.nml')])
                     values=mkrun.rng.import_to_values(raw)

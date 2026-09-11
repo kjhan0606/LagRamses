@@ -391,6 +391,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     cosmic_rays = ui.ask_bool('enable trapped cosmic-ray fluid (NENER=1 CPU/HDF5 build)?', False)
     mass_evolution = ui.ask_bool('Evolve dust mass (condensation, cold growth, thermal sputtering)?', False)
     spectral_grain_evolution = False
+    spectral_sink = False
     mass_model, mass_cooling = 'bulk_v1', 'none'
     dust_shocks=False
     material_model='fixed_mix'
@@ -481,7 +482,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                         'not a universal gas cross section. Setup only; no submission or simulation launch.')
         ui.info('Bulk dust reference: wind/AGB/SNII condensation=0/0.2/0.15; fixed radius 0.1 micron, '
                 'solid density 3 g/cm3, sticking 0.3 below 300 K, effective metal mass 24 mp. '
-                'No sinks/AGN; gas/dust share a total-metal reservoir. '
+                'Sinks/AGN are off unless the separate kind7 coadvected-source option is selected; gas/dust share a total-metal reservoir. '
                 'Composition mode consumes available C and limiting olivine elements, not all metals. '
                 'Two-size option uses 0.005/0.1 micron radii, carbon/silicate densities 2.2/3.3, '
                 'all-large injection and resolved-density coagulation/shattering. '
@@ -678,15 +679,22 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             domain='10--95499 K' if selected==cold_mode else '10--1e9 K, rapid dissociation approximation, CHIMES receiver ABI6'
             if selected==transition_mode:
                 spectral_grain_evolution=ui.ask_bool('Enable grain growth, sputtering and size exchange in the transition model?', False)
+                if not cosmic_rays:
+                    spectral_sink=ui.ask_bool('Enable existing-sink Bondi/AGN with coadvected transition dust (NENER=0)?', False)
+                    if spectral_sink:
+                        selected_binary=os.environ.get('SNRT_CHIMES_SINK_BINARY','')
+                        if not selected_binary or not Path(selected_binary).is_file():
+                            raise ValueError('SNRT_CHIMES_SINK_BINARY must select the material-transfer NENER=0 CHIMES binary.')
+                        binary=Path(selected_binary).resolve()
             mass_notice=('evolving C/silicate masses; no condensation or SN shocks' if spectral_grain_evolution
                          else 'fixed grain masses; mass processes disabled')
             ui.info('Explicit spectral comparison: T='+domain+', '+mass_notice+'; gas and dust compete for photons.')
-    if cosmic_rays or mass_evolution:
+    if (cosmic_rays or mass_evolution) and not spectral_sink:
         env['SNRT_AGN_MODEL'] = 'legacy'
     sink = config / 'kl16_lc18_snia_agn_dust_smoke.ic_sink'
     fallback_yields = config / 'snrt_agn_driver_faithful_smoke_yields.dat'
     required = [template, fallback_yields, binary, source / 'history.nml', source / 'yields.dat']
-    if not (cosmic_rays or mass_evolution):
+    if spectral_sink or not (cosmic_rays or mass_evolution):
         required.append(sink)
     required += [value for value in env.values() if isinstance(value, Path)]
     missing = [str(path) for path in required if not path.is_file()]
@@ -793,6 +801,24 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
                 setting='0d0,0d0,0d0' if key=='dust_condensation' else (
                     '.true.' if spectral_grain_evolution and key!='dust_sn_shocks' else '.false.')
                 text=text.replace('dust_mass_enabled=.true.','dust_mass_enabled=.true.\n  '+key+'='+setting)
+    if spectral_sink:
+        # Match the NENER=0, non-virial material layout of the source run.
+        # Only the virial passive shifts var_region (not the separate NENER).
+        text=re.sub(r'(?m)^(\s*)(sink|smbh|agn|sink_AGN|bondi)=\.false\.',r'\1\2=.true.',text)
+        text=re.sub(r'(?m)^\s*prad_region\([^\n]+\n','',text)
+        text=text.replace('sf_virial=.true.','sf_virial=.false.')
+        # Keep the periodic sink cloud (4*dx_min) strictly inside half a box.
+        # The uniform mesh stays at levelmin=3; no extra grids are requested.
+        text=re.sub(r'(?m)^(\s*levelmax\s*=)3\s*$',r'\g<1>4',text)
+        text+='\n&REFINE_PARAMS\n  m_refine=-1d0\n  jeans_refine=-1d0\n/\n'
+        text=re.sub(r'var_region\(1,(\d+)\)',lambda m:'var_region(1,{})'.format(
+            1 if int(m[1])==1 else int(m[1])-1),text)
+        text=text.replace('! NENER=1 CPU build; uniform gas ICs, no sinks or cosmological expansion.',
+                          '! NENER=0 CPU build; existing sink/Bondi/AGN with coadvected kind7 material.')
+        text=text.replace('! CR=6; metal=7; virial=8; H..Fe=9..19; dust=20/21.',
+                          '! NENER=0/non-virial: metal=6; H..Fe=7..17; dust=18/19.')
+        text=text.replace('! KL16/LC18 + effective SSP SNIa -> optional CR/dust mass + independent BPASS RT/dust; no AGN.',
+                          '! KL16/LC18 + effective SSP SNIa, independent BPASS and reference AGN; coadvected kind7 dust.')
     if relative_motion:
         text=text.replace('dust_mass_enabled=.true.',
             'dust_mass_enabled=.true.\n  dust_relative_motion=.true.\n  dust_drag_collision_cross_section_cm2='+
@@ -895,6 +921,17 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             'ic_sink accompanies the uniform gas namelist.', 'the uniform gas namelist has no sinks.') + (
             '\nNENER=1 comparison build, CPU hydro, noncosmo periodic domain; no AGN.\n'
             'No jobs or calibration are launched.\n')
+        if spectral_sink:
+            files[str(dest/'ic_sink')]=sink.read_text()
+            files[str(dest/'README.txt')]=files[str(dest/'README.txt')].replace(
+                'the uniform gas namelist has no sinks.', 'ic_sink supplies an existing BH; new sink formation is disabled.').replace(
+                'NENER=1 comparison build, CPU hydro, noncosmo periodic domain; no AGN.',
+                'NENER=0 comparison build, CPU hydro, noncosmo periodic domain; reference Bondi/AGN enabled.')
+            files[str(dest/'README.txt')]+=('Co-advected dust aggregates, bins, solid thermal energy and CHIMES carriers '
+                'follow swallowed/jet-loaded material; solid energy is separate from gas feedback energy.\n'
+                'Requires SNRT_CHIMES_SINK_BINARY; no CR/MHD, new sinks, Fe/PAH/drift or condensation/shocks.\n')
+            files[str(dest/'README.txt')]+=('Uniform levelmin=3, allowed levelmax=4 with refinement disabled; '
+                'sink cloud radius is L/4, avoiding the ambiguous periodic half-box boundary.\n')
         if cosmic_rays:
             files[str(dest / 'README.txt')] += (
                 'CR trapped-fluid reference: gamma_rad=4/3; SN energy is partitioned, not increased.\n'

@@ -14,6 +14,17 @@ evidence.
 
 ## Active bundle map
 
+Actual stellar/AGN sources with kind7 evolving grains (2026-09-11):
+[completed bounded connection and driver evaluation](snrt_actual_source_transition_2026-09-11.md#final-driver-disposition).
+Checked177-field AGN material map, narrow existing-sink/NENER0 admission and
+both generators updated. Bondi empty-level/canonical-migration and coarse
+donor-search defects repaired; trace-metal photo accuracy and negative-tail
+retry fixed without relaxing budgets. MPI2/OMP2 actual source/thermal-to-jet
+integration and restart pass: all hydro/chemistry/dust/RT/gravity/AGN queues
+bitwise equal (441/449 datasets; eight near-zero velocity/momentum differences).
+Native258 PASS; frontend48 PASS/1 skip. Uniform reference scope only; the
+recorded multilevel failure and excluded models are not declared production-ready.
+
 SNRT high-temperature / evolving C-silicate grains (2026-09-11):
 [completed connection and Fable disposition](snrt_transition_dust_evolution_2026-09-11.md).
 Kind7 optionally admits existing growth/sputtering/coagulation/shattering,

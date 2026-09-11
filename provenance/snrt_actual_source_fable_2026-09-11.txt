@@ -1,0 +1,41 @@
+Write is disabled in this session, so the review is delivered here rather than in a plan file. Nothing else is needed; the read-only inspection is complete.
+
+## Q-GOAL: needed. Yes.
+
+Removing the guard at `read_hydro_params.f90:393` alone is wrong, and I confirmed why. Bondi accretion (`accrete_bondi`, 4619 and 4668-4681) rescales rho and only the selected scalars. Jet withdraw and deposit do the same. With the current map (Z + 11 elements only) dust and CHIMES carriers stay fixed while rho, Z and elements drop.
+
+The failure is fatal, not silent. The CHIMES cell state derives gas-phase elements as total elements minus grain-locked elements (`snrt_chimes_runtime.f90:209`). A negative result aborts `chimes_prepare_level`, which runs before every hydro step (`amr_step.jaehyun.f90:880`). The restart ledger check aborts on any species-versus-element mismatch. The flux normalizer `chimes_consistent_carriers` is called only from the Riemann solver and never repairs cell states.
+
+Dust is part of rho, and solid thermal energy is outside gas total energy. Both facts are established by the stellar source (`stellar_ramses_runtime.f90:1081-1085`). So the proposed treatment (scale dust with swallowed mass, carry solid U as its own scalar) is the correct closure.
+
+## Q-LEAN: yes, with three trims
+
+Everything downstream is already layout-agnostic. The helpers accept any field list. The MPI payload and load arrays size themselves from nscalar. Post-AGN boundary sync loops cover all variables. Star formation already scales the whole passive window, so uniform scaling of all carriers is the established convention. Verification gates already exist: reconciliation abort, restart ledger, accretion notice counters, donor-withdrawal reject, coarse AGN JSON dump. No new instrumentation is needed.
+
+Trims:
+- **Drop mkrun wiring.** mkrun forces sinks off on CHIMES paths, and the bundle uses a hand-authored namelist. The path is not exposed.
+- **No per-field physical bounds** (dust ≤ Z, species ≤ elements). Range, reserved and duplicate checks suffice because every operation is linear.
+- **Wording fix.** Accretion scales carriers by the gross removed mass, not the retained mass. The code is right; the plan text is not.
+
+## Verdict: CONDITIONAL
+
+Indispensable changes:
+
+1. **Extend `agn_scalar_map`, do not bypass it.** Add an optional extra-index list to the pure builder so extra fields pass the same range, reserved and duplicate loop. In the selector, under the supported dust path only, append idust, idust_energy, two species, four bins and the 157 CHIMES carriers. Never append the SN-shock transients; they are -1 with shocks off and would fail the map.
+
+2. **Split admission by call order.** `read_hydro_params` runs before the AGN model is resolved and admitted (`read_params.jaehyun.f90:1452` versus 1932 and 1961). Relax only structural conditions in read_hydro_params: bondi, no sink creation, non-MAD, NENER=0, CHIMES two-size dust, no drift, Fe, PAH, shocks, sublimation or condensation. Put the partition_reference_v1 requirement in the existing dust block near line 1955 where the model is known. Keep neq_chem and delayed_cooling blocked.
+
+3. **Smoke regression** in the existing helper smoke, with three CHIMES carriers rather than 157. Assert: overlap or duplicate rejection; one common accretion factor with bin, species, aggregate and Z sums preserved; withdraw plus two receivers conserving every carrier and solid U, donor gas internal unchanged, donor solid U scaled by the removed ratio; NaN in one carrier leaves the row untouched.
+
+4. **Fix the combined namelist before launch.** This blocks the only verification run. The working stellar and coupled namelists put H at `var_region(1,2)`, and their logs print `ichem = 7`. The new `combined/physical.nml` shifts every IC index by one (H at 3, dust at 14, first CHIMES carrier at 25, HI at 162). With sf_virial, delayed cooling and aton all off, slot 7 would hold H = 0 and CHIMES reconciliation aborts on step one regardless of the selector.
+
+5. **Run acceptance from existing log strings only.** No donor withdrawal rejection, no reconciliation failure, no deposition rejection, a zero or explained "accretion skipped for finite invalid composition" count, a passing restart ledger check, sink mass growth, and at least one heat or jet event in the coarse AGN dump.
+
+## Consistency risks the selector does not cover
+
+- **Negative-tolerance asymmetry.** Accretion skips the event and counts it. Withdraw and deposit are fatal. With 157 carriers the exposure rises. Do not clamp; watch the counter.
+- **Temperature cap convention.** The deposit cap assumes mu = 1 while the CHIMES gas temperature uses translational n_tot. Pre-existing in the reference model, unchanged.
+- **Energy asymmetry.** Donor gas internal energy stays behind under cold loading. Solid U moves with the mass. Both are conserved; the plan should say so explicitly.
+- **Reserved slots** (idelay, ivirial, ixion, isgs) are scaled by star formation but not by AGN. None is enabled in this run.
+- **Ordering.** Both AGN calls precede reconciliation, which is an identity only for linear-consistent changes. The smoke test's linearity assertions are what protect this.
+- **`gpu_sink=.true.`** in the namelist is inert; it is retained for namelist compatibility only, so no GPU path bypasses the helpers.

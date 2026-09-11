@@ -2073,6 +2073,26 @@ changing them across restart still rejects. See the
 [grain mass connection and evaluation](../../provenance/snrt_transition_dust_evolution_2026-09-11.md).
 See [implementation and live evaluation](../../provenance/snrt_hot_transition_plan_2026-09-11.md#approved-implementation-and-live-evaluation).
 
+Kind7 additionally admits the explicit existing-sink, non-MAD Bondi
+`partition_reference_v1` comparison with **NENER=0 hydro** and active SNRT.
+Use `sink`, `sink_AGN`, `agn`, `bondi`, `create_sinks=.false.` and
+`accretion_scheme='bondi'`; retain the C/silicate coadvection restrictions
+above. CR, MHD, new sink formation and the excluded grain processes are not
+admitted by this connection. The checked AGN scalar map transports all157
+chemical densities plus eight dust mass/solid-energy descriptors through
+gross accretion and jet loading/deposition. Solid thermal energy is separate
+from gas mechanical energy; swallowed solid energy leaves the modeled grid.
+The setup wizard exposes this default-off option using an explicit
+`SNRT_CHIMES_SINK_BINARY`. It changes neither the default stellar population
+nor the physical approval status of its reference AGN model. For multilevel
+live IR, leave `SNRT_RT_LEVEL` unset. See the
+[actual-source connection and its evaluation status](../../provenance/snrt_actual_source_transition_2026-09-11.md).
+The new wizard profile retains uniform levelmin3 but allows levelmax4 with
+refinement explicitly disabled: the sink cloud radius4*dx_min is thenL/4,
+strictly inside the periodic half-box boundary. Do not interpret changing
+this allowed level as a mesh-convergence experiment; it also sets minimum
+stellar particle mass and AGN support scales.
+
 ### Fixed-H charged PAH comparison (2026-09-10)
 
 `dust_pah_model='pah_charge_fixed_h_v1'` is a separate opt-in model, not a

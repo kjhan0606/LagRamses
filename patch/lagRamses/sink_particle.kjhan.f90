@@ -103,6 +103,10 @@ subroutine create_sink
   end do
   t_tree_rebuild=t_tree_rebuild+omp_get_wtime()-t_stage
 
+  ! Tree migration changes local particle slots. The pre-migration map used
+  ! for coordinate synchronization cannot be used for Bondi sampling.
+  if(bondi)call kjhan_refresh_canonical_sink_map
+
   call diag_check_nan('sink_pre_virt')
 
   ! Update hydro quantities for split cells
@@ -192,6 +196,47 @@ subroutine kjhan_sync_sink_particle_coordinates
   end do
 
 end subroutine kjhan_sync_sink_particle_coordinates
+! Rebuild only from owned particles after tree migration. Coordinates were
+! synchronized exactly before migration; no nearest-cloud approximation.
+subroutine kjhan_refresh_canonical_sink_map
+  use amr_commons
+  use pm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ilevel,igrid,i,ipart,isink,info
+  integer,allocatable::counts(:),global_counts(:)
+  if(nsink==0)return
+  if(.not.allocated(canonical_sink_part))allocate(canonical_sink_part(nsinkmax))
+  canonical_sink_part=0
+  allocate(counts(nsink),global_counts(nsink));counts=0
+  do ilevel=levelmin,nlevelmax
+     do i=1,active(ilevel)%ngrid
+        igrid=active(ilevel)%igrid(i)
+        ipart=headp(igrid)
+        do while(ipart>0)
+           if(ptypep(ipart)==PTYPE_SINK.and.idp(ipart)<0.and.idp(ipart)>=-int(nsink,i8b))then
+              isink=int(-idp(ipart))
+              if(all(xp(ipart,1:ndim)==xsink(isink,1:ndim)))then
+                 counts(isink)=counts(isink)+1
+                 canonical_sink_part(isink)=ipart
+              endif
+           endif
+           ipart=nextp(ipart)
+        enddo
+     enddo
+  enddo
+  global_counts=counts
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(counts,global_counts,nsink,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+#endif
+  if(any(global_counts/=1))then
+     if(myid==1)write(*,*)'ERROR: Bondi requires one owned central particle per sink after migration',global_counts
+     call clean_stop
+  endif
+  deallocate(counts,global_counts)
+end subroutine kjhan_refresh_canonical_sink_map
 !################################################################
 !################################################################
 !################################################################
@@ -4049,6 +4094,9 @@ subroutine grow_bondi(ilevel)
      velocity=0d0
      volume=0d0
      do i=levelmin,nlevelmax
+        ! A globally empty level has no donor gas. Ignore both never-filled
+        ! buffers and stale contributions left after derefinement.
+        if(numbtot(1,i)==0)cycle
         density=density+weighted_density(isink,i)
         c2mean =c2mean +weighted_c2   (isink,i)
         velocity(1)=velocity(1)+weighted_momentum(isink,i,1)
@@ -4555,6 +4603,8 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         end do
         if(.not.all(ieee_is_finite([r2k(ksink),total_volume(ksink), &
              dMBHoverdt(ksink),dMEdoverdt(ksink),dtnew(ilevel)])))then
+           if(receipt_error==0)write(*,*)'Bondi invalid inputs rank/sink/r2k/volume/rates/dt:', &
+                myid,ksink,r2k(ksink),total_volume(ksink),dMBHoverdt(ksink),dMEdoverdt(ksink),dtnew(ilevel)
            receipt_error=1
            cycle
         endif
@@ -4563,6 +4613,8 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
            cycle
         endif
         if(r2k(ksink)<=0d0.or.total_volume(ksink)<=0d0)then
+           if(receipt_error==0)write(*,*)'Bondi invalid support rank/sink/r2k/volume:', &
+                myid,ksink,r2k(ksink),total_volume(ksink)
            receipt_error=1
            cycle
         endif
@@ -4575,6 +4627,7 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
 
         donor_row=uold(indp(j),1:nvar)
         if(.not.all(ieee_is_finite(donor_row(1:ndim+2))).or.donor_row(1)<=0d0)then
+           if(receipt_error==0)write(*,*)'Bondi invalid donor rank/cell/hydro:',myid,indp(j),donor_row(1:ndim+2)
            receipt_error=1
            call omp_unset_lock(bondi_cell_locks(ilock))
            cycle
@@ -4622,6 +4675,8 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
            if(cell_ierr==2)then
               notice(1)=notice(1)+1
            else
+              if(receipt_error==0)write(*,*)'Bondi invalid receipt rank/cell/status/rho/rho0/volume/request:', &
+                   myid,indp(j),cell_ierr,d,d_ini,vol_loc,acc_mass
               receipt_error=1
            endif
            call omp_unset_lock(bondi_cell_locks(ilock))
@@ -6802,6 +6857,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
   real(dp)::jtot,j_x,j_y,j_z,drjet,dzjet,psy
   real(dp)::eint,ekk
   integer :: nbin, nbx, nby, nbz, ibx, iby, ibz, jbx, jby, jbz
+  integer :: donor_bin_reach
   real(dp) :: inv_bin_size, bin_xmin, bin_ymin, bin_zmin
   integer, allocatable :: bin_head(:,:,:), agn_next(:)
   integer :: nAGN_local
@@ -6934,6 +6990,10 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
      dx=0.5D0**ilevel
      dx_loc=dx*scale
      vol_loc=dx_loc**ndim
+     ! A coarse donor centre can lie farther than rmax from its sink. The
+     ! containing-cell lookup must cover half a cell, not only the physical
+     ! injection radius. Geometry below still uses the unchanged rmax.
+     donor_bin_reach=max(1,ceiling(0.5d0*dx_loc*inv_bin_size))
      ! Cells center position relative to grid center position
      do ind=1,twotondim
         iz=(ind-1)/4
@@ -6972,10 +7032,10 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
                ibx=max(1,min(nbx,int((x-bin_xmin)*inv_bin_size)+1))
                iby=max(1,min(nby,int((y-bin_ymin)*inv_bin_size)+1))
                ibz=max(1,min(nbz,int((z-bin_zmin)*inv_bin_size)+1))
-               ! Loop over 27 neighbor bins
-               do jbz=max(1,ibz-1),min(nbz,ibz+1)
-               do jby=max(1,iby-1),min(nby,iby+1)
-               do jbx=max(1,ibx-1),min(nbx,ibx+1)
+               ! Include the containing donor even when its cell is coarse.
+               do jbz=max(1,ibz-donor_bin_reach),min(nbz,ibz+donor_bin_reach)
+               do jby=max(1,iby-donor_bin_reach),min(nby,iby+donor_bin_reach)
+               do jbx=max(1,ibx-donor_bin_reach),min(nbx,ibx+donor_bin_reach)
                   iAGN=bin_head(jbx,jby,jbz)
                   do while(iAGN > 0)
                   dxx=x-xAGN(iAGN,1)
@@ -8058,18 +8118,34 @@ subroutine agn_select_scalar_fields(fields,nscalar,metal_slot,ierr)
   use agn_feedback_deposition, only: agn_scalar_map
   use amr_commons
   use hydro_commons
+#ifdef SNRT_CHIMES
+  use dust_mass_physics, only: dust_mass_enabled
+#endif
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: use_channel_resolved_feedback, n_stellar_elements
 #endif
   implicit none
   integer,intent(out)::fields(nvar),nscalar,metal_slot,ierr
-  integer::nelements,reserved_fields(4)
+  integer::nelements,reserved_fields(4),material_fields(165),nmaterial,i
   nelements=nelt
 #ifdef PHASE0_STELLAR_ENRICHMENT
   if(use_channel_resolved_feedback())nelements=n_stellar_elements
 #endif
   metal_slot=merge(1,0,metal)
   nscalar=metal_slot+max(0,nelements)
+  nmaterial=0
+#ifdef SNRT_CHIMES
+  if(dust_mass_enabled)then
+     ! Admission is restricted by read_hydro_params to coadvected C/silicate
+     ! kind7 without CR, Fe/PAH, shocks or sink formation. Carry redundant
+     ! aggregate/bin/element descriptors and solid thermal energy as densities,
+     ! never as extra baryon mass or part of the gas mechanical-energy input.
+     nmaterial=165
+     material_fields(1:8)=[(idust+i,i=0,7)]
+     material_fields(9:165)=[(ichimes+i,i=0,156)]
+  endif
+#endif
+  nscalar=nscalar+nmaterial
   fields=0; ierr=1
   if(nscalar>nvar)then
      nscalar=0
@@ -8080,5 +8156,6 @@ subroutine agn_select_scalar_fields(fields,nscalar,metal_slot,ierr)
   if(sf_virial)reserved_fields(2)=ivirial
   if(aton)reserved_fields(3)=ixion
   if(use_sgs)reserved_fields(4)=isgs
-  call agn_scalar_map(nvar,merge(imetal,0,metal),ichem,nelements,reserved_fields,fields(1:nscalar),ierr,nhydro+nener)
+  call agn_scalar_map(nvar,merge(imetal,0,metal),ichem,nelements,reserved_fields,fields(1:nscalar),ierr, &
+       nhydro+nener,material_fields(:nmaterial))
 end subroutine agn_select_scalar_fields

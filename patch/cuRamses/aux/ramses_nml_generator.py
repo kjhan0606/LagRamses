@@ -282,7 +282,7 @@ PARAMS = [
 
     # Feedback (SN)
     ParamDef('dust_mass_enabled','bool',False,'PHYSICS_PARAMS',S_FEED,
-             'Bulk fixed-size dust condensation/growth/sputtering (SNRT v4, no external metal cooling/sinks)'),
+             'Dust mass evolution; sinks only in explicit coadvected kind7/NENER=0 Bondi comparison'),
     ParamDef('dust_relative_motion','bool',False,'PHYSICS_PARAMS',S_FEED,
              'Experimental first-order gas/grain dynamics; CHIMES+D03 CPU/OpenMP comparison, bounded Fe+PAH integration/restart verified'),
     ParamDef('dust_drag_collision_cross_section_cm2','real',0.0,'PHYSICS_PARAMS',S_FEED,
@@ -724,6 +724,7 @@ def validate_params(values):
     if values.get('dust_mass_enabled'):
         clean = lambda key: str(values.get(key, '')).strip("'\"").lower()
         flag = lambda key: clean(key) in ('true', '.true.', 't', '1')
+        fractions=[]
         try:
             fractions = [float(x.replace('d','e')) for x in str(values.get('dust_condensation','0.,0.2,0.15')).split(',')]
             valid = len(fractions)==3 and all(math.isfinite(x) and 0<=x<=1 for x in fractions)
@@ -745,7 +746,7 @@ def validate_params(values):
         except (TypeError,ValueError):
             valid=False
         valid=valid and flag('hydro') and flag('metal') and clean('feedback_mode')=='channel_resolved'
-        valid=valid and not any(flag(k) for k in ('cosmo','sink','sink_agn','agn','neq_chem','delayed_cooling'))
+        valid=valid and not any(flag(k) for k in ('cosmo','neq_chem','delayed_cooling'))
         model=clean('dust_mass_model') or 'bulk_v1'
         coupling=clean('dust_cooling') or 'none'
         material=clean('dust_material_model') or 'fixed_mix'
@@ -866,8 +867,18 @@ def validate_params(values):
             valid=valid and clean('cooling_method') in ('','original')
             valid=valid and not flag('haardt_madau') and not flag('self_shielding') and values.get('j21',0)==0
         valid=valid and clean('outformat')=='hdf5' and (values.get('nrestart',0)==0 or clean('informat')=='hdf5')
+        if any(flag(k) for k in ('sink','sink_agn','agn')):
+            sink_valid=(all(flag(k) for k in ('sink','sink_agn','agn','bondi')) and
+                clean('accretion_scheme')=='bondi' and
+                not any(flag(k) for k in ('create_sinks','mad_jet','cr_enabled','mhd_enabled')) and
+                model=='carbon_olivine_2size_v1' and coupling=='chimes_neq_v1' and
+                optics=='d03_transport_v1' and not relative and iron=='none' and pah=='none' and
+                sublimation=='none' and fractions==[0.,0.,0.] and not flag('dust_sn_shocks'))
+            valid=valid and sink_valid
+            msgs.append(ValidationMsg('WARNING','Periodic sink clouds have radius 4*dx_min; keep this strictly below half the box to avoid antipodal centroid ambiguity. The kind7 comparison wizard uses levelmax=4 with refinement disabled.'))
+            msgs.append(ValidationMsg('WARNING','Dust/Bondi requires NENER=0 hydro, material-transfer binary, SNRT_AGN_MODEL=partition_reference_v1 and SNRT_SPECTRAL_MODEL=chimes_transition_d03_maxent128_fs2010_v1; runtime checks these environment/build choices. Existing sinks only.'))
         if not valid:
-            msgs.append(ValidationMsg('ERROR','Dust needs valid parameters, periodic noncosmo metal hydro, channel feedback, HDF5, no sinks; cooling requires explicit closure/original/no UV; WSS09 requires composition'))
+            msgs.append(ValidationMsg('ERROR','Dust needs valid parameters, periodic noncosmo metal hydro, channel feedback, HDF5; sinks only with coadvected kind7/NENER=0 reference Bondi; cooling requires explicit closure/original/no UV; WSS09 requires composition'))
         msgs.append(ValidationMsg('WARNING','Dust needs active SNRT v4 material; D03 is an explicit common-T/transport comparison. WSS09 CIE is not local-radiation/NEQ cooling; no T/He extrapolation'))
     elif (str(values.get('dust_relative_motion',False)).strip("'\"").lower() in ('true','.true.','t','1') or
           str(values.get('dust_mass_model','bulk_v1')).strip("'\"")!='bulk_v1' or

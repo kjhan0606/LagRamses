@@ -71,6 +71,10 @@ subroutine init_sink
   allocate(weighted_volume (1:nsinkmax,1:nlevelmax))
   allocate(weighted_momentum(1:nsinkmax,1:nlevelmax,1:ndim))
   allocate(weighted_c2 (1:nsinkmax,1:nlevelmax))
+  ! Levels without grids never enter bondi_hoyle: their contribution must
+  ! be zero, including after restart (ALLOCATE does not initialize memory).
+  weighted_density=0d0; weighted_volume=0d0
+  weighted_momentum=0d0; weighted_c2=0d0
   allocate(oksink_new(1:nsinkmax))
   allocate(oksink_all(1:nsinkmax))
   allocate(jsink(1:nsinkmax,1:ndim))
@@ -388,6 +392,8 @@ subroutine init_sink_alloc
   allocate(weighted_volume (1:nsinkmax,1:nlevelmax))
   allocate(weighted_momentum(1:nsinkmax,1:nlevelmax,1:ndim))
   allocate(weighted_c2 (1:nsinkmax,1:nlevelmax))
+  weighted_density=0d0; weighted_volume=0d0
+  weighted_momentum=0d0; weighted_c2=0d0
   allocate(oksink_new(1:nsinkmax))
   allocate(oksink_all(1:nsinkmax))
   allocate(jsink(1:nsinkmax,1:ndim))

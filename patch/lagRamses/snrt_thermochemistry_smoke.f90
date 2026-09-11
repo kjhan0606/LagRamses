@@ -281,6 +281,27 @@ contains
             abs(ge(j)-sum(e(:,j))*loss)<2d-7*sum(e(:,j)), &
             'individual grain band matches its own analytic optical depth and energy',failures)
     enddo
+    ! A tiny charged molecular tail must be depleted without publishing a
+    ! negative CVODE constraint-correction remnant. No abundance floor.
+    elem=0;elem(1)=1;status=chimes_neutral(elem,a)
+    a(2)=0;a(3)=1;a(1)=1;a(145)=1d-150;alpha=0;shield=1
+    status=chimes_band_photo_molecular_step(handle,mol,2,1d0,1d14,3d8,alpha,shield,0d0,a,n,e,b,nn,ee,l)
+    call expect(status==0.and.all(b>=0).and.b(145)<a(145).and.all(nn>=0), &
+         'vanishing HCO+ tail remains nonnegative under repeated accepted-step checks',failures)
+    call expect(status==0.and.abs(sum(e-ee)-l(7))<1d-8.and.abs(sum(l(1:6))-l(7))<1d-8, &
+         'molecular tail recovery preserves the original photon and energy ledgers',failures)
+    ! Newly injected trace metals can be far below the original absolute
+    ! species tolerance even when their relative conservation matters.
+    elem=0;elem(1)=1;elem(2)=.08d0;elem(3)=1d-4;elem(5)=1d-4
+    elem(4)=1d-13;elem(6)=1d-13;elem(9)=1d-14;elem(10)=1d-16
+    status=chimes_neutral(elem,a);alpha=0;shield=1
+    status=chimes_band_photo_molecular_step(handle,mol,2,1d-3,1d13,3d8,alpha,shield,0d0,a,n,e,b,nn,ee,l)
+    call expect(status==0,'strong photo step retains freshly injected trace metal inventories',failures)
+    if(status==0)then
+       status=chimes_budget(b,measured,q)
+       call expect(status==0.and.all(abs(measured-elem)<=1d-8*max(elem,1d-20)), &
+            'trace and abundant nuclei obey the same unchanged relative budget',failures)
+    endif
     elem=0;elem(1)=1;elem(3)=1d-4;elem(5)=1d-4
     status=chimes_neutral(elem,a)
     a(2)=.6d0;a(138)=.2d0;a(8)=0;a(24)=0;a(149)=1d-4

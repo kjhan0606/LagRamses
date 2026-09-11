@@ -1512,6 +1512,14 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         nml_ok=.false.
      endif
   endif
+#ifdef SNRT
+  if(dust_mass_enabled.and.sink)then
+     if(create_sinks.or.trim(accretion_scheme)/='bondi'.or..not.bondi)then
+        if(myid==1)write(*,*)'ERROR: coadvected dust sinks require existing-sink-only Bondi accretion'
+        nml_ok=.false.
+     endif
+  endif
+#endif
   if (clumpfind)call read_clumpfind_params
   if (movie)call set_movie_vars
 

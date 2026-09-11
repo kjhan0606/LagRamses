@@ -7,6 +7,12 @@ program agn_feedback_deposition_smoke
   real(dp) :: volumes(3), offsets(3), total_mass, total_momentum(3), total_energy
   real(dp) :: weights(2), lobe_sum(2), axis(3)
   integer :: ierr, i
+  ! Synthetic NENER=0 layout: metal6, elements7:17, reserved18,
+  ! dust19:26 (aggregate,U,C,silicate,four bins), CHIMES157 at27:183.
+  integer,parameter :: material_nvar=184,material_nscalar=177,chem_first=27
+  integer,parameter :: neutral_species(11)=[2,5,8,16,24,34,45,58,73,90,111]
+  real(dp),parameter :: atomic_mass(11)=[1d0,4d0,12d0,14d0,16d0,20d0,24d0,28d0,32d0,40d0,56d0]
+  real(dp),parameter :: silicate_mass(11)=[0d0,0d0,0d0,0d0,64d0,0d0,24d0,28d0,0d0,0d0,56d0]/172d0
 
   ! Magnetic energy stays on the mesh and is not subject to the thermal cap.
   row=[1d0,0d0,0d0,0d0,105d0]
@@ -77,12 +83,169 @@ program agn_feedback_deposition_smoke
   call entrainment_event([17d0,-11d0,5d0],.false.,1d0)
   call entrainment_event([0d0,0d0,0d0],.true.,1d0)
   call layouts_and_payload()
+  call material_transport()
   call accepted_accretion()
   call overlapping_events(.false.)
   call overlapping_events(.true.)
   call legacy_energy_contract()
   write(*,'(A)') 'AGN_NATIVE_CELL_COUPLING_SMOKE_OK'
 contains
+  subroutine material_transport()
+    integer::fields(material_nscalar),extra(165),bad_extra(165),short_fields(material_nscalar-1)
+    integer::plain(12),empty(0),status,k
+    real(dp)::gas(material_nvar,4),initial(material_nvar,4),snapshot(material_nvar),loss(material_nvar)
+    real(dp)::vol(4),frac(material_nscalar),bad_frac(material_nscalar),loaded,velocity(3),gross,net,radiated
+    real(dp)::norm(2),lw(2),ax(3),pos(3),drho,dpvec(3),de,dsave,saved,change(material_nvar)
+    real(dp)::packed(4+material_nscalar),unpacked_mass,unpacked_velocity(3),unpacked_frac(material_nscalar)
+    extra=[(k,k=19,183)]
+    call agn_scalar_map(material_nvar,6,7,11,[18,184],fields,status,5,extra)
+    call check(status==0.and.all(fields(:12)==[(k,k=6,17)]).and.all(fields(13:)==extra), &
+         'material map appends eight dust and all 157 species densities')
+    call agn_scalar_map(material_nvar,6,7,11,[18,184],plain,status,material_fields=empty)
+    call check(status==0.and.all(plain==fields(:12)),'empty optional materials preserve old map')
+    call agn_scalar_map(material_nvar,6,7,11,[18,184],short_fields,status,material_fields=extra)
+    call check(status/=0.and.all(short_fields==0),'material map checks complete output extent before filling')
+    do k=1,6
+       bad_extra=extra
+       select case(k)
+       case(1);bad_extra(165)=extra(1) ! Duplicate within material fields.
+       case(2);bad_extra(165)=7        ! Duplicate an elemental carrier.
+       case(3);bad_extra(165)=6        ! Duplicate total metal.
+       case(4);bad_extra(165)=184      ! Reserved field.
+       case(5);bad_extra(165)=185      ! Beyond row extent.
+       case(6);bad_extra(165)=5        ! Gas total energy is not a material density.
+       end select
+       call agn_scalar_map(material_nvar,6,7,11,[18,184],fields,status,material_fields=bad_extra)
+       call check(status/=0,'invalid appended material index rejected by shared map validation')
+    enddo
+    call agn_scalar_map(material_nvar,6,7,11,[18,184],fields,status,material_fields=extra)
+    call check(status==0,'restore valid material map')
+
+    vol=[2d0,1d0,2d0,3d0];pos=[-0.5d0,0d0,0.5d0]
+    do k=1,4
+       call material_row(gas(:,k),real(k+1,dp),1d0)
+    enddo
+    call material_row(gas(:,1),8d0,2d0)
+    initial=gas
+    call material_budgets(gas(:,1))
+    call agn_accretion_receipt(8d0,8d0,vol(1),100d0,.75d0,.1d0,1d0,gross,net,radiated,status)
+    call check(status==0.and.gross==4d0,'material accretion uses actual floor-limited gross mass')
+    call agn_accrete_scalars(gas(:,1),fields,1,gross,vol(1),status)
+    call check(status==0.and.all(gas(1:5,1)==initial(1:5,1)), &
+         'material accretion leaves gas hydro update to caller')
+    loss=(initial(:,1)-gas(:,1))*vol(1)
+    call check(maxval(abs(loss(fields)-gross*initial(fields,1)/initial(1,1)))<1d-12, &
+         'accreted elements species dust and solid U follow gross rather than retained BH mass')
+    ! Model the caller's NENER=0 hydro removal, separately from material U.
+    gas(1:5,1)=initial(1:5,1)*(1d0-gross/(initial(1,1)*vol(1)))
+    call material_budgets(gas(:,1))
+    call check(all(gas([18,184],1)==initial([18,184],1)),'accretion preserves unselected fields')
+
+    gas=initial
+    call agn_withdraw_cell(gas(:,1),fields,1,4d0,vol(1),loaded,velocity,frac,status)
+    call check(status==0.and.loaded==4d0,'jet withdraws nonzero coadvected material')
+    call material_budgets(gas(:,1))
+    call check(abs(gas(5,1)-.5d0*sum(gas(2:4,1)**2)/gas(1,1)-16d0)<1d-12, &
+         'cold loading retains donor gas heat while separately withdrawing solid U')
+    call check(abs((initial(20,1)-gas(20,1))*vol(1)-loaded*frac(14))<1d-12, &
+         'solid U is a transported density in the loading payload')
+    call agn_pack_load(loaded,velocity,frac,packed)
+    call agn_unpack_load(packed,unpacked_mass,unpacked_velocity,unpacked_frac)
+    call check(unpacked_mass==loaded.and.all(unpacked_velocity==velocity).and.all(unpacked_frac==frac), &
+         'expanded jet payload retains all material fields')
+    norm=0d0
+    do k=1,3
+       call agn_jet_geometry([pos(k),0d0,0d0],[1d0,0d0,0d0],1d0,lw,ax)
+       norm=norm+lw*vol(k+1)
+    enddo
+    saved=0d0
+    do k=1,3
+       call agn_jet_geometry([pos(k),0d0,0d0],[1d0,0d0,0d0],1d0,lw,ax)
+       ! Four units loaded at speed2 supplies eight units jet kinetic energy.
+       call agn_jet_delta(unpacked_mass,lw,norm,unpacked_velocity,ax,2d0,drho,dpvec,de)
+       call agn_deposit_material(gas(:,k+1),fields,1,unpacked_frac,drho,dpvec,de,vol(k+1), &
+            5d0/3d0,1d0,.1d0,dsave,status)
+       call check(status==0,'jet deposits full material payload with active thermal cap')
+       saved=saved+dsave
+       call material_budgets(gas(:,k+1))
+    enddo
+    change=0d0
+    do k=1,4
+       change=change+(gas(:,k)-initial(:,k))*vol(k)
+    enddo
+    call check(maxval(abs(change(1:4)))<1d-12,'material jet conserves mass and vector momentum')
+    call check(maxval(abs(change(fields)))<1d-12,'material jet conserves every redundant carrier and solid U')
+    call check(saved>0d0.and.abs(change(5)+saved-8d0)<1d-12, &
+         'gas plus deferred jet energy excludes separately conserved solid U')
+    call check(gas(19,2)/gas(1,2)>initial(19,2)/initial(1,2), &
+         'receiver dust abundance changes toward loaded donor')
+    call check(all(gas([18,184],:)==initial([18,184],:)),'jet preserves unselected fields')
+
+    ! Reject a late material input without committing earlier gas/dust fields.
+    gas(:,1)=initial(:,1);gas(183,1)=-1d-8;snapshot=gas(:,1)
+    call agn_accrete_scalars(gas(:,1),fields,1,4d0,vol(1),status)
+    call check(status/=0.and.all(gas(:,1)==snapshot),'negative final species accretion rollback')
+    call agn_withdraw_cell(gas(:,1),fields,1,4d0,vol(1),loaded,velocity,bad_frac,status)
+    call check(status/=0.and.all(gas(:,1)==snapshot),'negative final species jet withdrawal rollback')
+    gas(:,1)=initial(:,1);snapshot=gas(:,1);bad_frac=frac;bad_frac(material_nscalar)=-1d-8
+    call agn_deposit_material(gas(:,1),fields,1,bad_frac,.5d0,[0d0,0d0,0d0],2d0,vol(1), &
+         5d0/3d0,1d0,100d0,dsave,status)
+    call check(status/=0.and.all(gas(:,1)==snapshot),'negative final species deposition rollback')
+    bad_frac=frac;bad_frac(14)=ieee_value(0d0,ieee_quiet_nan)
+    call agn_deposit_material(gas(:,1),fields,1,bad_frac,.5d0,[0d0,0d0,0d0],2d0,vol(1), &
+         5d0/3d0,1d0,100d0,dsave,status)
+    call check(status/=0.and.all(gas(:,1)==snapshot),'nonfinite solid U deposition rollback')
+    call agn_deposit_material(gas(:,1),fields,1,frac,.5d0,[3d0,0d0,0d0],0d0,vol(1), &
+         5d0/3d0,1d0,100d0,dsave,status)
+    call check(status/=0.and.all(gas(:,1)==snapshot),'failed gas energy validation rolls back staged material payload')
+  end subroutine material_transport
+
+  subroutine material_row(values,rho,zscale)
+    real(dp),intent(out)::values(material_nvar)
+    real(dp),intent(in)::rho,zscale
+    real(dp)::elements(11),species(157),co,o2ion,hion,h2,cion
+    values=0d0
+    values(1:5)=[rho,3d0*rho,0d0,0d0,6.5d0*rho]
+    values(7:17)=rho*[.75d0-.02d0*zscale,.25d0, &
+         .004d0*zscale,.001d0*zscale,.006d0*zscale,.001d0*zscale,.001d0*zscale, &
+         .001d0*zscale,.001d0*zscale,.0002d0*zscale,.0048d0*zscale]
+    values(6)=sum(values(9:17));values(18)=7d0;values(184)=11d0
+    values(21:22)=.001d0*rho*zscale
+    values(19)=sum(values(21:22));values(20)=.07d0*rho*zscale
+    values(23:26)=[.3d0*values(21),.7d0*values(21),.4d0*values(22),.6d0*values(22)]
+    elements=values(7:17)-silicate_mass*values(22)
+    elements(3)=elements(3)-values(21)
+    species=0d0;species(neutral_species)=elements/atomic_mass
+    ! Pinned CHIMES ordering, m_H*n_i densities: HI/HII, CII, H2, CO, O2+.
+    hion=.1d0*species(2);h2=.1d0*species(2);cion=.2d0*species(8)
+    co=.1d0*min(species(8),species(24));o2ion=.01d0*species(24)
+    species(2)=species(2)-hion-2d0*h2;species(3)=hion;species(138)=h2
+    species(8)=species(8)-cion-co;species(9)=cion;species(149)=co
+    species(24)=species(24)-co-2d0*o2ion;species(157)=o2ion
+    species(1)=hion+cion+o2ion
+    values(chem_first:chem_first+156)=species
+  end subroutine material_row
+
+  subroutine material_budgets(values)
+    real(dp),intent(in)::values(material_nvar)
+    real(dp)::species(157),nuclei(11),elements(11),charge
+    species=values(chem_first:chem_first+156)
+    nuclei=species(neutral_species)
+    nuclei(1)=nuclei(1)+species(3)+2d0*species(138)
+    nuclei(3)=nuclei(3)+species(9)+species(149)
+    nuclei(5)=nuclei(5)+species(149)+2d0*species(157)
+    elements=nuclei*atomic_mass+silicate_mass*values(22)
+    elements(3)=elements(3)+values(21)
+    charge=species(3)+species(9)+species(157)-species(1)
+    call check(all(values(6:183)>=0d0).and.maxval(abs(elements-values(7:17)))<1d-12, &
+         'transport preserves gas species plus solid elemental inventory')
+    call check(abs(charge)<1d-12.and.abs(sum(elements)-values(1))<1d-12.and. &
+         abs(sum(elements(3:11))-values(6))<1d-12,'transport preserves charge total mass and total metal closure')
+    call check(abs(values(19)-sum(values(21:22)))<1d-12.and. &
+         abs(values(21)-sum(values(23:24)))<1d-12.and.abs(values(22)-sum(values(25:26)))<1d-12, &
+         'transport preserves aggregate composition and four-bin dust redundancy')
+  end subroutine material_budgets
+
   subroutine accepted_accretion()
     real(dp)::gas(9),initial(9),gross,net,erg,erg2,merged(2),reordered(2),gas1(4),gas2(5)
     integer::status,field(1)

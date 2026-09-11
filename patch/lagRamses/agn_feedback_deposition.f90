@@ -341,21 +341,28 @@ contains
     kinetic_delta=0.5d0*(drho(1)*sum(plus**2)+drho(2)*sum(minus**2))
   end subroutine agn_jet_delta
 
-  pure subroutine agn_scalar_map(nvars, metal_index, first_element, nelements, reserved, fields, ierr,hydro_last)
+  pure subroutine agn_scalar_map(nvars, metal_index, first_element, nelements, reserved, fields, ierr, &
+       hydro_last,material_fields)
     integer, intent(in) :: nvars, metal_index, first_element, nelements, reserved(:)
     integer, intent(out) :: fields(:), ierr
     integer, optional, intent(in) :: hydro_last
-    integer :: k, nmetal,last
+    ! Additional coadvected densities (including redundant dust masses,
+    ! separate solid energy and chemical species), not extra gas mass/energy.
+    integer, optional, intent(in) :: material_fields(:)
+    integer :: k, nmetal,last,nmaterial
     fields=0; ierr=agn_deposit_invalid_source
     last=5
     if(present(hydro_last))last=hydro_last
     if(last<3.or.last>nvars)return
     nmetal=merge(1,0,metal_index/=0)
-    if(nelements<0 .or. size(fields)/=nmetal+nelements)return
+    nmaterial=0
+    if(present(material_fields))nmaterial=size(material_fields)
+    if(nelements<0 .or. size(fields)/=nmetal+nelements+nmaterial)return
     if(nmetal==1)fields(1)=metal_index
     do k=1,nelements
        fields(nmetal+k)=first_element+k-1
     enddo
+    if(present(material_fields))fields(nmetal+nelements+1:)=material_fields
     do k=1,size(fields)
        if(fields(k)<=last .or. fields(k)>nvars)return
        if(any(fields(k)==reserved))return

@@ -6,6 +6,7 @@
 #include <sunlinsol/sunlinsol_spgmr.h>
 #include <unordered_map>
 #include <stdexcept>
+#include <cstdio>
 
 extern "C" int snrt_chimes_fs_ready(void);
 extern "C" int snrt_chimes_fs_grid(int,double *,double *,double *);
@@ -230,6 +231,20 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     double *y=N_VGetArrayPointer(solver.y),*tol=N_VGetArrayPointer(solver.tol);
     std::copy(old,old+ns,y);std::fill(y+ns,y+size,0.);
     std::fill(tol,tol+ns,1e-16);std::fill(tol+ns,tol+li,1e-14);
+    // A single absolute abundance tolerance does not resolve trace metals
+    // freshly returned by stars (e.g. S/H ~ 1e-14). Scale each carrier to
+    // its limiting nuclear inventory, using the receiver's own stoichiometry.
+    // This tightens solver accuracy, not the unchanged acceptance budgets.
+    static const auto composition=[](){
+      std::array<std::array<double,11>,ns> result{};
+      for(int s=0;s<ns;++s){
+        double unit[ns]={},q;unit[s]=1.;
+        require(snrt_chimes_budget(unit,result[s].data(),&q)==0);
+      }
+      return result;
+    }();
+    for(int s=0;s<ns;++s)for(int e=0;e<11;++e)if(composition[s][e]>0)
+      tol[s]=std::min(tol[s],std::max(1e-32,1e-12*nuclei[e]/composition[s][e]));
     const double scale=initial_energy/nh;
     std::fill(tol+li,tol+size,std::max(1e-30,scale*1e-14));
     tol[li+7]=std::max(1e-30,scale/b.grids.back().e.back()*1e-14);
@@ -244,14 +259,46 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     require(CVodeSetStopTime(solver.cv,1.)==0);
     solver.linear=SUNLinSol_SPGMR(solver.y,PREC_NONE,30);require(solver.linear);
     require(CVodeSetLinearSolver(solver.cv,solver.linear,nullptr)==0);
-    double reached=0;
-    const int result=CVode(solver.cv,1.,solver.y,&reached,CV_NORMAL);
-    if((result!=CV_SUCCESS && result!=CV_TSTOP_RETURN) || reached!=1.)return 4;
-    for(int j=0;j<size;++j)if(!std::isfinite(y[j]) || y[j]<0)return 51;
+    // CVODE's constraint correction can lose its final cancellation in a
+    // vanishing molecular tail (observed HCO+ = -1.7e-167 in cv_zn[0]).
+    // Check each accepted step, not only the requested endpoint. Retry a
+    // negative step from the last valid state at half its step size, with
+    // the SAME spectral nodes, chemical rates and absorption counters.
+    // No species clipping or moment reconstruction between internal steps.
+    double reached=0,accepted_time=0;
+    std::vector<double> accepted(y,y+size);
+    int retries=0;
+    for(int steps=0;accepted_time<1. && steps<10000;++steps){
+      const int result=CVode(solver.cv,1.,solver.y,&reached,CV_ONE_STEP);
+      if(result!=CV_SUCCESS && result!=CV_TSTOP_RETURN)return 4;
+      bool negative=false;
+      for(int j=0;j<size;++j){
+        if(!std::isfinite(y[j]))return 51;
+        negative=negative || y[j]<0;
+      }
+      if(negative){
+        const double half=.5*(reached-accepted_time);
+        if(++retries>64 || !(half>0) || accepted_time+half==accepted_time)return 51;
+        std::copy(accepted.begin(),accepted.end(),y);
+        require(CVodeReInit(solver.cv,accepted_time,solver.y)==0);
+        require(CVodeSetStopTime(solver.cv,1.)==0);
+        require(CVodeSetInitStep(solver.cv,half)==0 && CVodeSetMaxStep(solver.cv,half)==0);
+        continue;
+      }
+      if(!(reached>accepted_time) || reached>1.)return 4;
+      accepted_time=reached;std::copy(y,y+size,accepted.begin());
+      // Restore ordinary adaptive stepping after a successful recovery.
+      require(CVodeSetMaxStep(solver.cv,0.)==0);
+    }
+    if(accepted_time!=1.)return 4;
     double new_nuclei[11],new_charge;
     if(snrt_chimes_budget(y,new_nuclei,&new_charge))return 5;
-    for(int e=0;e<11;++e)if(std::abs(new_nuclei[e]-nuclei[e])>1e-8*std::max(nuclei[e],1e-20))return 6;
-    if(std::abs(new_charge-charge)>1e-8)return 6;
+    for(int e=0;e<11;++e)if(std::abs(new_nuclei[e]-nuclei[e])>1e-8*std::max(nuclei[e],1e-20)){
+      std::fprintf(stderr,"CHIMES photo nuclear budget rejection element=%d initial=%.17g final=%.17g nh=%.17g dt=%.17g\n",e,nuclei[e],new_nuclei[e],nh,dt);return 6;
+    }
+    if(std::abs(new_charge-charge)>1e-8){
+      std::fprintf(stderr,"CHIMES photo charge budget rejection initial=%.17g final=%.17g\n",charge,new_charge);return 6;
+    }
     std::vector<double> survival(ng*K,1),out_n(number,number+ng*nd),out_e(energy,energy+ng*nd);
     for(int k=0;k<nn;++k)survival[p.node[k]]=std::exp(-y[ns+k]);
     double absorbed_n=0,absorbed_e=0;

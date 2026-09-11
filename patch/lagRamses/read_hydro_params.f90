@@ -12,7 +12,8 @@ subroutine read_hydro_params(nml_ok)
        snrt_dust_contract_version,snrt_dust_contract_exchange_enabled
 #endif
 #ifdef SNRT
-  use snrt_agn_efficiency, only: snrt_agn_rt_requested
+  use snrt_agn_efficiency, only: snrt_agn_rt_requested,snrt_agn_model,snrt_agn_model_reference
+  use snrt_spectral_contract, only: snrt_chimes_transition_enabled
 #endif
   use eunha_cooling_mod, only: eunha_load_multi_z
 #ifdef PHASE0_STELLAR_ENRICHMENT
@@ -28,7 +29,7 @@ subroutine read_hydro_params(nml_ok)
   include 'mpif.h'
 #endif
   logical::nml_ok
-  logical::cr_ok,dust_ok
+  logical::cr_ok,dust_ok,dust_sink_ok
   !--------------------------------------------------
   ! Local variables  
   !--------------------------------------------------
@@ -389,8 +390,22 @@ subroutine read_hydro_params(nml_ok)
      if(dust_composition_enabled().and..not.all(active_element))dust_ok=.false.
 #endif
      if(.not.hydro.or..not.metal.or.cosmo.or.nboundary>0) dust_ok=.false.
-     ! Total-metal reservoir closure; no element-resolved depleted cooling or sink removal yet.
-     if(sink.or.sink_AGN.or.agn.or.neq_chem.or.delayed_cooling) dust_ok=.false.
+     ! Only the explicit coadvected kind7/Bondi path carries all material
+     ! densities through sink accretion and mechanical loading. New sink
+     ! formation and other energy/phase layouts are not covered by that map.
+     dust_sink_ok=.false.
+#if defined(SNRT_CHIMES) && !defined(SOLVERmhd)
+     dust_sink_ok=snrt_chimes_transition_enabled().and.snrt_agn_rt_requested().and. &
+          snrt_agn_model()==snrt_agn_model_reference.and.nener==0.and. &
+          sink.and.sink_AGN.and.agn.and..not.mad_jet.and. &
+          dust_chimes_enabled().and.dust_two_size_enabled().and.dust_optics_enabled().and. &
+          .not.dust_relative_motion.and..not.dust_iron_enabled().and..not.dust_pah_enabled().and. &
+          all(dust_condensation==0d0).and..not.dust_sn_shocks.and.trim(dust_sublimation)=='none'
+#endif
+     if((sink.or.sink_AGN.or.agn).and..not.dust_sink_ok)dust_ok=.false.
+     ! SINK_PARAMS is read after this routine; validate create_sinks and
+     ! the final accretion scheme there, never against their startup defaults.
+     if(neq_chem.or.delayed_cooling) dust_ok=.false.
      if(cooling.neqv.(trim(dust_cooling)/='none'))dust_ok=.false.
      if(trim(dust_cooling)/='none')then
         ! Explicit collisional scalar-Z comparison; no duplicate UV heating.
@@ -404,7 +419,8 @@ subroutine read_hydro_params(nml_ok)
   endif
   if(.not.dust_ok)then
      if(myid==1)write(*,*)'ERROR: dust mass requires valid bulk parameters, SNRT/DUST_LIVE/HDF5 channel feedback,'
-     if(myid==1)write(*,*)'noncosmo periodic metal hydro; no sinks/neq/delayed cooling; cooling needs an explicit dust closure'
+     if(myid==1)write(*,*)'noncosmo periodic metal hydro; no neq/delayed cooling; cooling needs an explicit dust closure'
+     if(myid==1)write(*,*)'Dust sinks require NENER=0 kind7 reference Bondi, existing sinks, coadvected C/silicate only'
      nml_ok=.false.
   else if(dust_mass_enabled.and.myid==1)then
      write(*,*)'DUST_MASS model=',trim(dust_mass_model),'; condensation/growth/sputtering, total-metal budget'
