@@ -240,10 +240,65 @@ index 0005fc2..ecf4ba0 100644
    update_rate_vector(data->species, data->myGasVars, data->myGlobalVars, *data); 
    
 diff --git a/src/update_rates.c b/src/update_rates.c
-index 4c20b41..c319b95 100644
+index 4c20b41..a4b58de 100644
 --- a/src/update_rates.c
 +++ b/src/update_rates.c
-@@ -524,6 +524,8 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
+@@ -29,6 +29,12 @@
+ #include "chimes_proto.h"
+ #include "chimes_vars.h"
+ 
++/* Exact-temperature reuse is confined to one cell's current-rate buffer.
++ * The initial-rate entry resets the identity even if an allocator reuses
++ * an address. No rounded temperature, inter-cell reuse or shared state. */
++static _Thread_local struct chimes_current_rates_struct *snrt_cached_rates;
++static _Thread_local ChimesFloat snrt_cached_temperature;
++
+ /** 
+  * @brief Updates the photochemistry coefficients for RT.
+  * 
+@@ -115,7 +121,8 @@ void update_rt_photochemistry_coefficients(struct gasVariables *myGasVars, const
+  * @param data The #UserData struct containing the input data. 
+  */ 
+ void set_initial_rate_coefficients(struct gasVariables *myGasVars, const struct globalVariables *myGlobalVars, struct UserData data) 
+-{ 
++{
++  snrt_cached_rates = NULL;
+   int i, j, NHI_index, NH_eff_index, NHeI_index, NHe_eff_index, NCO_index, NH2_index; 
+   ChimesFloat dNHI, dNH_eff, dNHeI, dNHe_eff, dNCO, dNH2;
+   ChimesFloat flux, G0, log_NCO, log_NH2; 
+@@ -346,6 +353,15 @@ void set_initial_rate_coefficients(struct gasVariables *myGasVars, const struct
+  */ 
+ void update_rate_coefficients(struct gasVariables *myGasVars, const struct globalVariables *myGlobalVars, struct UserData data, int mode) 
+ {
++  /* With no spectra, Psi is fixed. Temperature-only coefficients, case-B
++   * choice and grain temperature are fixed at equal T during this cell.
++   * mode=0 STILL recomputes abundance-dependent collisional coefficients
++   * below. Illuminated cells always retain the upstream evaluation. */
++  int requested_mode = mode;
++  if (mode && myGlobalVars->N_spectra == 0 &&
++      snrt_cached_rates == data.chimes_current_rates &&
++      snrt_cached_temperature == myGasVars->temperature)
++    mode = 0;
+   int i, j, T_index, Psi_index, T_dust_index, NH2_index, b_index; 
+   ChimesFloat log_T, log_Psi, log_T_dust, dT, dPsi, dT_dust, log_NH2, dNH2, log_b, db; 
+   ChimesFloat flux, G0, n_over_cr;
+@@ -504,8 +520,13 @@ void update_rate_coefficients(struct gasVariables *myGasVars, const struct globa
+ 	data.chimes_current_rates->CO_cosmic_ray_rate_coefficient[i] = chimes_exp10(chimes_interpol_2d_fix_x(chimes_table_CO_cosmic_ray.rates, i, T_index, dT, N_T)) * myGasVars->abundances[myGlobalVars->speciesIndices[sp_H2]] * myGasVars->cr_rate;
+     }
+   
+-  return; 
+-} 
++  if (requested_mode && myGlobalVars->N_spectra == 0)
++    {
++      snrt_cached_rates = data.chimes_current_rates;
++      snrt_cached_temperature = myGasVars->temperature;
++    }
++  return;
++}
+ 
+ /** 
+  * @brief Update the current rates. 
+@@ -524,6 +545,8 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
  { 
    int i, j, xHII_index; 
    ChimesFloat log_xHII, d_xHII; 
@@ -252,7 +307,7 @@ index 4c20b41..c319b95 100644
  
    // T_dependent reactions
    /* For two-body reactions in this group, with rate coefficients in cm^3/s,
-@@ -717,7 +719,9 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
+@@ -717,7 +740,9 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
  	       * Note that CVode integrates y = ln(n) etc.
  	       * so we don't need an extra factor of 
  	       * n_gamma or g_gamma here. */ 
@@ -263,7 +318,7 @@ index 4c20b41..c319b95 100644
  	      photon_flux_rate[j] *= light_speed; 
  	      photon_density_rate[j] *= light_speed;
  
-@@ -759,6 +763,13 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
+@@ -759,6 +784,13 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
  void update_rate_vector(struct Species_Structure *mySpecies, struct gasVariables *myGasVars, const struct globalVariables *myGlobalVars, struct UserData data) 
  {
    int i, j; 
@@ -277,7 +332,7 @@ index 4c20b41..c319b95 100644
  
    /* NOTE: some reactions may involve species where the 
     * element abundance is zero, but the element_incl flag 
-@@ -953,11 +964,13 @@ void update_rate_vector(struct Species_Structure *mySpecies, struct gasVariables
+@@ -953,11 +985,13 @@ void update_rate_vector(struct Species_Structure *mySpecies, struct gasVariables
  	}
      }
  

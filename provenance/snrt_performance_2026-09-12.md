@@ -203,6 +203,10 @@ integration, not photo chemistry. Primary/preIR/liveIR/tail wall:
 
 ## Dark integration optimization
 
+Subsequent [exact-temperature rate reuse](chimes_rate_cache_2026-09-12.md)
+job542050: cold52.333s, whole150.466105s, actual CPU03:04:34; same-node
+comparison to542047 reduces cold17.9% and CPU11.3%, all checks pass.
+
 Latest: [SUNDIALS build correction and cost attribution](chimes_solver_cost_2026-09-12.md).
 The previous numerical library was built without optimization. Precise FP64
 Release gives same-node job542047 cold63.739s / whole162.228304s /

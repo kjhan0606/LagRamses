@@ -26,6 +26,10 @@ zero-photon-only work reduction, native parity and one-step integration evidence
 unoptimized numerical-library build identified; separate precise-FP64 release
 build, native cost attribution and same-node integrated comparison.
 
+[Exact-temperature dark rate reuse](chimes_rate_cache_2026-09-12.md):
+same-cell temperature-only coefficient reuse; composition-dependent rates
+and all illuminated chemistry remain recomputed.
+
 Sequential effective-model implementation:
 [v5/empirical-SNIa connection and integrated execution](effective_population_execution_2026-09-11.md).
 Step1 native/live/restart passes; step2 configuration selected; step3 short
