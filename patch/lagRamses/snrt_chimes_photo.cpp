@@ -232,7 +232,9 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     }
     if(molecules && (!shield || !std::isfinite(shield[0]) || !std::isfinite(shield[1]) ||
         shield[0]<0 || shield[0]>1 || shield[1]<0 || shield[1]>1))return 2;
-    std::vector<double> rays(size_t(ng)*nd*K,0),initial(ng*K,0);
+    // Delay the large ray workspace until a validated nonzero ray needs it.
+    // Zero-light cells still undergo all input/opacity/phase validation.
+    std::vector<double> rays,initial(ng*K,0);
     double initial_energy=0;
     for(int g=0;g<ng;++g)for(int d=0;d<nd;++d){
       const size_t i=size_t(g)*nd+d;const double n=number[i],e=energy[i];
@@ -244,6 +246,7 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
       // N/E themselves are never projected; debit the actual absorbed nodes.
       if(mean<b.grids[g].e.front()*(1-2e-13) || mean>b.grids[g].e.back()*(1+2e-13) ||
          !b.grids[g].reconstruct(mean,weights))return 2;
+      if(rays.empty())rays.resize(size_t(ng)*nd*K,0);
       for(int j=0;j<K;++j){const double q=n*weights[j];rays[i*K+j]=q;initial[g*K+j]+=q;}
     }
     require(std::isfinite(initial_energy));

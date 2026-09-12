@@ -25,6 +25,7 @@ module snrt_dust_ir
   type, public :: dust_ir_diagnostics
      real(real64) :: escaped_erg=0, absorbed_erg=0, primary_erg=0
      real(real64) :: mechanical_erg=0 ! signed grain kinetic gain, never heat
+     real(real64) :: background_erg=0 ! external optically thin bath receipt
      ! Signed outward MPI boundary flux; unlike physical escape, it cancels
      ! when neighboring ranks' ledgers are summed.
      real(real64) :: interface_erg=0
@@ -34,6 +35,14 @@ module snrt_dust_ir
   public :: snrt_dust_ir_initialize, snrt_dust_ir_advance, snrt_dust_material_temperature
   public :: dust_moving_population_dispatch
   abstract interface
+     subroutine dust_bath_dispatch(heating,density,old_energy,log_t,basis_band,cell_weights,dt, &
+          gas_energy,gas_capacity,conductance,rate,temperature,next_energy,gas_transfer,background_transfer,ierr)
+       import real64
+       real(real64),intent(in)::heating(:),density(:),old_energy(:),log_t(:),basis_band(:,:,:),cell_weights(:,:),dt
+       real(real64),intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
+       real(real64),intent(out)::rate(:,:),temperature(:),next_energy(:),gas_transfer(:),background_transfer(:)
+       integer,intent(out)::ierr
+     end subroutine
      subroutine dust_moving_population_dispatch(ir_heat,ir_captured,dt,old_population,next_population, &
           phase_rate,next_energy,temperature,ierr)
        ! heat/captures/phase_rate: (phase,group,cell). Heat is COMOVING
@@ -99,7 +108,7 @@ contains
     real(real64),optional,intent(in)::optical_sigma(:,:)
     type(dust_ir_table)::part
     integer :: ng, nt, g, t, bath,s,nbasis
-    real(real64) :: x, occupation, factor
+    real(real64) :: x, occupation, factor, bath_fraction
     real(real64), parameter :: h=6.62607015d-27, kb_ev=8.617333262145d-5
     ierr=dust_err_table
     ng=size(energy); nt=size(temperature)
@@ -109,11 +118,17 @@ contains
     if (.not.ieee_is_finite(cmb)) return
     if (any(energy<=0) .or. any(frequency_weight<=0) .or. any(sigma<0) .or. any(temperature<=0)) return
     if (any(energy(2:)<=energy(:ng-1)) .or. any(temperature(2:)<=temperature(:nt-1))) return
-    bath=0
-    do t=1,nt
-       if (temperature(t)==cmb) bath=t
-    end do
-    if (bath==0) return
+    ! An epoch-derived CMB need not coincide with a material-table knot.
+    ! Use the SAME log(T)-linear power interpolation as the material solver,
+    ! so zero excess radiation and Tgrain=Tcmb remain an exact equilibrium.
+    ! This alone does not rebase a persistent radiation field when CMB evolves.
+    if(cmb<temperature(1).or.cmb>temperature(nt))return
+    bath=1
+    do while(bath<nt-1)
+       if(cmb<=temperature(bath+1))exit
+       bath=bath+1
+    enddo
+    bath_fraction=log(cmb/temperature(bath))/log(temperature(bath+1)/temperature(bath))
     if(present(material_u))then
        if(size(material_u)/=nt)return
        if(any(.not.ieee_is_finite(material_u)).or.any(material_u<=0))return
@@ -139,7 +154,10 @@ contains
     if (any(table%band<0) .or. any(table%power<=0)) return
     if (any(table%power(2:)<=table%power(:nt-1))) return
     if (any(table%band(:,2:)<table%band(:,:nt-1))) return
-    table%background=table%power(bath)
+    table%background=table%power(bath)+bath_fraction*(table%power(bath+1)-table%power(bath))
+    ! Preserve existing knot-bound reference runs without subtract/add drift.
+    if(cmb==temperature(bath))table%background=table%power(bath)
+    if(cmb==temperature(bath+1))table%background=table%power(bath+1)
     table%background_temperature=cmb
     if(present(optical_sigma))then
        nbasis=size(optical_sigma,2)
@@ -316,7 +334,7 @@ contains
        ghost_energy,ghost_index,blocked_face,material_dispatch,transport_dispatch,absorb_dispatch, &
        gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,thin_reabsorption, &
        population,population_dispatch,cell_absorption,phase_density,phase_momentum,phase_absorption, &
-       phase_scattering,phase_work,moving_material_dispatch,population_loss)
+       phase_scattering,phase_work,moving_material_dispatch,population_loss,bath_dispatch)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -341,6 +359,7 @@ contains
     ! Suppress BOTH inflow and outflow here; this is not a vacuum boundary.
     logical, optional, intent(in) :: blocked_face(:,:)
     procedure(dust_material_dispatch),optional :: material_dispatch
+    procedure(dust_bath_dispatch),optional :: bath_dispatch
     procedure(dust_transport_dispatch),optional :: transport_dispatch
     procedure(dust_absorb_dispatch),optional :: absorb_dispatch
     real(real64),optional,intent(inout)::gas_energy(:)
@@ -376,7 +395,7 @@ contains
     real(real64),allocatable::trial_population(:,:),spectral_guess(:,:),spectral_absorbed(:,:)
     logical,allocatable::direct_update(:)
     real(real64),allocatable::cell_sigma(:,:)
-    real(real64),allocatable::exchange(:)
+    real(real64),allocatable::exchange(:),bath_exchange(:)
     real(real64),allocatable :: empty_ghost(:,:,:)
     real(real64),allocatable :: dispatch_u(:)
     logical, allocatable :: blocked(:,:)
@@ -387,6 +406,8 @@ contains
     logical :: transient
     real(real64) :: cfl, volume, factor, tau, source, old_total, new_total, scale, balance, sum_w
     real(real64) :: material_tolerance
+    real(real64) :: escaped_total,interface_total
+    integer :: invalid_tau
     integer :: ng, nd, nc, i, j, g, d, axis, face, outgoing, opposite, iteration, ghost
     integer, allocatable :: remote(:,:)
     type(dust_ir_diagnostics) :: trial
@@ -396,6 +417,11 @@ contains
     transient=present(dust_energy)
     moving=present(phase_density)
     ierr=dust_err_config
+    if(present(bath_dispatch))then
+       if(.not.transient.or.moving.or.present(population).or.present(material_dispatch))return
+       if(.not.present(gas_energy).or..not.present(cell_weights))return
+       if(.not.allocated(table%optical_band))return
+    endif
     if(moving.neqv.present(phase_momentum))return
     if(moving.neqv.present(phase_absorption))return
     if(moving.neqv.present(phase_work))return
@@ -461,24 +487,30 @@ contains
     endif
     if(present(cell_weights).neqv.allocated(table%optical_sigma))return
     if(present(cell_weights))then
-       if(.not.transient.or..not.present(material_dispatch).or..not.present(cell_material_u))return
+       if(.not.transient.or..not.present(cell_material_u))return
+       if(.not.present(material_dispatch).and..not.present(bath_dispatch))return
        if(any(shape(cell_weights)/=[size(table%optical_sigma,2),nc]))return
        if(any(.not.ieee_is_finite(cell_weights)).or.any(cell_weights<0))return
        if(any(abs(sum(cell_weights,dim=1)-1)>1d-12))return
        cell_sigma=matmul(table%optical_sigma,cell_weights)
     endif
     if(present(cell_material_u))then
-       if(.not.transient.or..not.present(material_dispatch).or..not.allocated(table%material_u))return
+       if(.not.transient.or..not.allocated(table%material_u))return
+       if(.not.present(material_dispatch).and..not.present(bath_dispatch))return
        if(any(shape(cell_material_u)/=[size(table%log_t),nc]))return
        if(any(.not.ieee_is_finite(cell_material_u)).or.any(cell_material_u<=0))return
        if(any(cell_material_u(2:,:)<=cell_material_u(:size(table%log_t)-1,:)))return
     endif
     if(present(gas_energy))then
-       if(.not.transient.or..not.present(material_dispatch).or..not.allocated(table%material_u))return
+       if(.not.transient.or..not.allocated(table%material_u))return
+       if(.not.present(material_dispatch).and..not.present(bath_dispatch))return
        if(.not.present(gas_capacity).or..not.present(conductance).or..not.present(gas_transfer))return
        if(size(gas_energy)/=nc.or.size(gas_capacity)/=nc.or.size(conductance)/=nc.or.size(gas_transfer)/=nc)return
        if(any(.not.ieee_is_finite(gas_energy)).or.any(gas_energy<0))return
        allocate(exchange(nc));exchange=0
+       if(present(bath_dispatch))then
+          allocate(bath_exchange(nc));bath_exchange=0
+       endif
     else if(present(gas_capacity).or.present(conductance).or.present(gas_transfer))then
        return
     endif
@@ -518,7 +550,7 @@ contains
              ! Moving radiation is absolute, not excess over a hidden bath.
              ! Its material callback owns the analytic cold energy domain;
              ! retain nonnegative/finite inputs and the same upper bound.
-             if(.not.moving.and.dust_energy(i)< &
+             if(.not.moving.and..not.present(bath_dispatch).and.dust_energy(i)< &
                   material_energy(table,table%background_temperature,density(i),heat_capacity(i), &
                   cell_material_u(:,i))*(1-material_tolerance))return
              if(dust_energy(i)> &
@@ -526,7 +558,7 @@ contains
                   cell_material_u(:,i))*(1+64*epsilon(1d0)))return
              cycle
           endif
-          if(.not.moving.and.dust_energy(i)< &
+          if(.not.moving.and..not.present(bath_dispatch).and.dust_energy(i)< &
                material_energy(table,table%background_temperature,density(i),heat_capacity(i)) &
                *(1-material_tolerance))return
           if(dust_energy(i)> &
@@ -571,7 +603,7 @@ contains
        if(allocated(table%material_u))dispatch_u=table%material_u
     endif
     volume=dx**3
-    transported=energy
+    if(.not.present(transport_dispatch))transported=energy
     if(present(transport_dispatch))then
        if(present(ghost_energy))then
           call transport_dispatch(energy,ghost_energy,neighbor,remote,blocked,density,direction,table%sigma, &
@@ -585,6 +617,9 @@ contains
     endif
     ierr=dust_err_state
     old_total=0
+    escaped_total=trial%escaped_erg;interface_total=trial%interface_erg;invalid_tau=0
+!$omp parallel do private(d,axis,face,outgoing,j,factor,ghost,g,tau) &
+!$omp reduction(+:old_total,escaped_total,interface_total) reduction(max:invalid_tau) schedule(static)
     do i=1,nc
        do d=1,nd
           old_total=old_total+sum(energy(:,d,i))*weight(d)*volume
@@ -604,13 +639,13 @@ contains
              if(ghost>0)then
                 if(.not.present(transport_dispatch)) &
                      transported(:,d,i)=transported(:,d,i)+factor*ghost_energy(:,d,ghost)
-                trial%interface_erg=trial%interface_erg-sum(ghost_energy(:,d,ghost))*weight(d)*factor*volume
+                interface_total=interface_total-sum(ghost_energy(:,d,ghost))*weight(d)*factor*volume
              end if
              if (neighbor(outgoing,i)==0.and..not.blocked(outgoing,i)) then
                 if(remote(outgoing,i)>0)then
-                   trial%interface_erg=trial%interface_erg+sum(energy(:,d,i))*weight(d)*factor*volume
+                   interface_total=interface_total+sum(energy(:,d,i))*weight(d)*factor*volume
                 else
-                   trial%escaped_erg=trial%escaped_erg+sum(energy(:,d,i))*weight(d)*factor*volume
+                   escaped_total=escaped_total+sum(energy(:,d,i))*weight(d)*factor*volume
                 end if
              end if
           end do
@@ -619,7 +654,10 @@ contains
           if(present(transport_dispatch))exit
           tau=c_hat*dt*table%sigma(g)*density(i)
           if(allocated(cell_sigma))tau=c_hat*dt*cell_sigma(g,i)*density(i)
-          if (.not.ieee_is_finite(tau)) return
+          if (.not.ieee_is_finite(tau)) then
+             invalid_tau=1
+             cycle
+          endif
           transmit(g,i)=exp(-tau)
           if (tau<1d-4) then
              loss(g,i)=tau*(1-tau/2+tau*tau/6-tau**3/24)
@@ -630,6 +668,9 @@ contains
           end if
        end do
     end do
+!$omp end parallel do
+    if(invalid_tau/=0)return
+    trial%escaped_erg=escaped_total;trial%interface_erg=interface_total
     trial%primary_erg=sum(primary)*dt*volume
     if(present(population))then
        ! Known absorption of transported OLD radiation belongs in the very
@@ -670,7 +711,18 @@ contains
     endif
     do iteration=0,max_iterations
        if(transient)then
-          if(present(population_dispatch).or.present(moving_material_dispatch))then
+          if(present(bath_dispatch))then
+             call bath_dispatch(primary+guess/dt,density,dust_energy,table%log_t,table%optical_band, &
+                  cell_weights,dt,gas_energy,gas_capacity,conductance,rate,next_t,trial_dust_energy, &
+                  exchange,bath_exchange,ierr)
+             if(ierr/=dust_ok)return
+             ierr=dust_err_state
+             if(any(.not.ieee_is_finite(bath_exchange)).or.any(bath_exchange<0))return
+             if(any(.not.ieee_is_finite(rate)).or.any(rate<0))return
+             if(any(.not.ieee_is_finite(trial_dust_energy)).or.any(trial_dust_energy<0))return
+             if(any(.not.ieee_is_finite(next_t)).or.any(next_t<0))return
+             ierr=dust_ok
+          else if(present(population_dispatch).or.present(moving_material_dispatch))then
              if(moving)then
                 call moving_material_dispatch(heat_guess,event_guess,dt,population,trial_population, &
                      phase_rate,trial_dust_energy,next_t,ierr)
@@ -765,6 +817,7 @@ contains
           call absorb_dispatch(transported,transmit,loss,response,rate,weight,dt,sum_w,candidate,absorbed,ierr)
           if(ierr/=dust_ok)return
        endif
+!$omp parallel do private(d,g,source) reduction(+:new_total) schedule(static)
        do i=1,nc
           do d=1,nd
              do g=1,ng
@@ -778,6 +831,7 @@ contains
              new_total=new_total+sum(candidate(:,d,i))*weight(d)*volume
           end do
        end do
+!$omp end parallel do
        endif ! moving versus static interaction
        ierr=dust_err_state
        if (.not.all(ieee_is_finite(candidate)) .or. any(candidate<0) .or. .not.ieee_is_finite(new_total)) return
@@ -789,6 +843,11 @@ contains
           if(any(.not.ieee_is_finite(exchange)).or.any(gas_energy-exchange<0))return
           balance=balance-sum(exchange)*volume
           scale=max(scale,sum(abs(exchange))*volume)
+       endif
+       if(present(bath_dispatch))then
+          trial%background_erg=sum(bath_exchange)*volume
+          balance=balance-trial%background_erg
+          scale=max(scale,trial%background_erg)
        endif
        trial%balance_relative=abs(balance)/scale
        trial%local_relative=maxval(abs(absorbed-guess)/max(primary*dt+absorbed,tiny(scale)))

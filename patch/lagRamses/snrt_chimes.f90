@@ -2,15 +2,20 @@
 ! the no-CHIMES production baseline never needs this external dependency.
 module snrt_chimes
   use iso_c_binding
+  use omp_lib, only: omp_get_wtime
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use snrt_thermochemistry, only: snrt_secondary_fractions,snrt_secondary_tables_loaded, &
        snrt_secondary_energy_slice,snrt_secondary_raw_grid,snrt_secondary_nenergy
   implicit none
   private
   integer,parameter,public::chimes_ns=157,chimes_ng=9
+  ! Last local split timings; thread-private, never part of the physical state.
+  real(c_double),public,save::chimes_last_split_wall(2)=0
+!$omp threadprivate(chimes_last_split_wall)
   public::chimes_initialize,chimes_neutral,chimes_budget,chimes_cell
   public::chimes_reconcile,chimes_locked,chimes_identity
   public::chimes_boltzmann
+  public::chimes_set_expansion,chimes_cmb_temperature
   public::chimes_nuclear_sums
   public::chimes_group_binding
   public::chimes_secondary_partition
@@ -28,6 +33,13 @@ module snrt_chimes
   public::chimes_atomize,chimes_transition_supported,chimes_cell_transition_dark
   public::chimes_round_subnormal_survivors
   interface
+     integer(c_int) function chimes_set_expansion(a) bind(C,name='snrt_chimes_set_expansion')
+       import
+       real(c_double),value::a
+     end function
+     real(c_double) function chimes_cmb_temperature() bind(C,name='snrt_chimes_cmb_temperature')
+       import
+     end function
      integer(c_int) function chimes_band_nodes(handle,nd,number,energy,nn,ne) bind(C,name='snrt_chimes_band_nodes')
        import
        type(c_ptr),value::handle
@@ -277,8 +289,10 @@ contains
     real(c_double)::measured(11),charge,temp,gn(9),ge(9),post_photo,tmax
     real(c_double)::incoming(chimes_ns),projected(chimes_ns),tin,elapsed,root_time,cost,entry_cost,events(2)
     logical::general,atomic_remainder
+    real(c_double)::split_start
     real(c_double),parameter::ev_erg=1.602176634d-12
     status=2
+    chimes_last_split_wall=0
     if(present(phase_alpha).neqv.present(directions))return
     if(present(phase_alpha).neqv.present(phase_energy))return
     if(present(phase_alpha).neqv.present(phase_moment))return
@@ -307,6 +321,7 @@ contains
        status=chimes_molecular_factors(tin,controls(1),controls(5),incoming,factors)
     endif
     if(status/=0)return
+    split_start=omp_get_wtime()
     if(present(phase_alpha))then
        status=chimes_band_photo_molecular_phases(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
             alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge, &
@@ -316,6 +331,7 @@ contains
             alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge)
     endif
     if(status/=0)return
+    chimes_last_split_wall(1)=omp_get_wtime()-split_start
     if(controls(4)==0)then
        temperature=controls(2);new=old;next_number=number;next_energy=energy;ledger=0
        if(present(grain_number))grain_number=0
@@ -331,6 +347,7 @@ contains
     ctl(2)=(tin*sum(incoming)+budget(1)*ev_erg/(1.5d0*chimes_boltzmann()*controls(1)))/sum(photo)
     if(.not.ieee_is_finite(ctl(2)).or.ctl(2)<10.or.ctl(2)>merge(1d9,tmax,general))return
     post_photo=1.5d0*chimes_boltzmann()*controls(1)*sum(photo)*ctl(2)
+    split_start=omp_get_wtime()
     if(general)then
        if(ctl(2)>=tmax)then
           status=chimes_atomize(ctl(2),photo,projected,temp,cost)
@@ -355,6 +372,7 @@ contains
     endif
     if(status/=0)return
     status=8
+    chimes_last_split_wall(2)=omp_get_wtime()-split_start
     if(temp<10.or.temp>merge(1d9,tmax,general))return
     budget(11)=(1.5d0*chimes_boltzmann()*controls(1)*sum(chem)*temp-post_photo)/ev_erg-entry_cost
     if(.not.ieee_is_finite(budget(11)))return

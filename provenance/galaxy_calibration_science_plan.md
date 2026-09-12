@@ -1,11 +1,164 @@
-# Galaxy calibration and convergence — approval proposal
+# Galaxy calibration and convergence — small-box pilot
 
-Status2026-09-11: **awaiting operator approval; no science runs launched**.
+Status2026-09-12: **operator authorized preparation/execution of the small-box
+pilot, including parallel-performance checks; bounded actual-IC coupled
+startup job540015 and performance comparison job541239 completed, not a
+calibrated/source-active science run**. See the
+[performance record](snrt_performance_2026-09-12.md): RAMSES wall
+1000.53 -> 947.75 seconds, actual CPU 28.56 -> 27.43 core hours, with
+node/load caveats. CUDA stream-count tuning is stopped per operator direction.
+A new128^3 small-box IC is now [generated](galaxy_new_ic_2026-09-11.md);
+RAMSES hydro/element reader checks and the bounded cosmological CMB/dust/gas
+coupling test have passed; see the active coupling record.
+This is not full cosmological RT/feedback/dust admission. The operator has deferred pc-scale
+zoom to long-term work; halo selection/refined zoom is not an active prerequisite.
+The former volume-first execution matrix below
+is superseded, not authorized for launch.
 Baseline `66d58a81dd069041a912389ae43f066851675ea1`, pushed to
 `kjhan0606/LagRamses/main`. Separate science campaign, not a reopening of
 completed implementation gates. See [repair evidence](chimes_long_interval_repair_2026-09-11.md).
 
-## Decision requested
+## Active operator decision: pc zoom deferred
+
+Latest operator instruction: move pc-scale zoom to long-term work and proceed
+with the current small-box campaign. Do not generate a halo-selection campaign
+or demand few-pc attainment as a condition for this pilot. Retain the existing
+12.5cMpc128^3 gas/DM IC; its coarse mass resolution is explicitly documented.
+
+For future matched resolution comparisons, keep the same volume,
+large-scale phases, physical prescriptions and diagnostic definitions. Report
+four distinct quantities: actual dense-gas cell widths, gas cell masses,
+stellar particle birth masses and high-resolution DM particle masses. Maximum
+AMR level alone is not evidence that star-forming gas reaches that resolution.
+Use physical pc at each epoch; for a comoving box,
+dx_phys=L_com/[2^level*(1+z)]. AMR gas refinement does not increase the
+initial DM particle sampling or add missing initial small-scale modes.
+
+For this campaign, choose a computationally feasible resolution
+from the existing IC and measured workload.
+Do not call this intermediate milestone attainment of the ultimate target,
+and do not invent a fixed few-pc runtime/cost before selecting the IC.
+At finer scales, check how the existing SF/feedback closures apply without
+automatically adding new physical models or an audit gate per refinement.
+
+Local comparisons prioritize star formation, gas phases, feedback response
+and dust evolution/conservation. A selected zoom is **not** a volume-complete
+sample: the GAMA mass function and cosmic SFR density remain later population
+validation targets, not likelihoods computed from a handful of chosen haloes.
+Conditional galaxy relations can be compared with declared selection; no
+claim of population calibration from an unrepresentative zoom sample.
+
+Approval covers this direction and scoped preparation. Exact IC identity,
+halo/sample choice, achieved resolution and revised resource/output plan
+must be stated before science execution. Do not launch the former25cMpc
+23--29-run ensemble, or retain its startup-only pilot matrix as the new plan.
+No IC ownership transfer is implied. Existing physics applicability and retention rules
+below remain in force; old resource numbers are proposals, not reservations.
+
+## Active pilot preparation and parallel performance
+
+Prelaunch inspection found a material applicability blocker:
+`patch/lagRamses/read_hydro_params.f90` explicitly sets dust_ok=false when
+`dust_mass_enabled` and `cosmo` are both true (line404 at inspection).
+The subsequent diagnostic requires noncosmological periodic metal hydro.
+This is a runtime admission restriction, not an IC-format failure. The existing
+integrated evidence was noncosmological; cosmological RT/feedback/dust tuning
+was not qualified by it. At that inspection no guard had been removed; no dust-off calculation
+has been represented as full-model calibration. Subsequent bounded dust-off
+readers are recorded below; no full-model cosmological science run was submitted.
+Supporting the requested cosmological combination requires a scoped coupling
+assessment (expansion/unit conversions, material/thermal conservation,
+primordial initialization and source-table domain), then justified changes
+and a bounded expanding-box execution. The guard alone does not establish
+which of those mechanisms actually need code changes. The operator has now
+approved that scoped repair and preapproved routine implementation/tests.
+See [active coupling progress](cosmological_coupling_progress_2026-09-11.md).
+Update2026-09-12: the scoped CMB/expansion repair and a uniform4^3 MPI2/OMP2
+live test passed (job539357). The guard now admits only coadvected C/silicate
+DL01/D03/CHIMES kind7/NENER=0 with an explicitly ledgered optically thin
+`2.727/a` CMB bath; Fe/PAH, CR/SGS, MHD, drift, sublimation, SN shocks and
+cosmological sinks/AGN remain excluded. No 10K cosmological dust floor or
+instantaneous grain-energy projection. Fixed-group IR dilutes as a^-3 without
+frequency redshift. This closes the bounded CMB/material coupling item, not
+the full cosmological source/AMR campaign or galaxy calibration. The test used
+manufactured Z=.02 dusty gas, not the pre-enriched galaxy IC below.
+The operator subsequently approved [trace pre-enrichment at Z=1e-10](galaxy_pilot_preenrichment_2026-09-11.md).
+The [actual-IC coupled startup pilot](galaxy_coupled_pilot_2026-09-12.md) now
+uses that same128^3 input on four normal nodes, retaining the full spectral
+and angular layout, with a two-step/20-minute bound and no scheduled dumps.
+Submission is not evidence of completion or a performance result.
+Use its new explicit passive IC files for the active pilot, preserving the
+original zero-metal IC view. This is initial pre-enrichment, not runtime clamping.
+
+Operator instruction (2026-09-11): start work and track CPU time during
+parameter fine tuning. First execution venue is the grammar cluster's `debug`
+partition, node `grammar-debug`; submit through `grammar`, not syntax Slurm.
+Read-only recheck: 64 physical cores, 257647 MiB configured memory, no GPU
+GRES; 16 cores and 64000 MiB allocated at inspection. GPFS is shared, with
+approximately 95 TiB free (not a project quota or storage reservation).
+Initial candidate layout: MPI8 x OMP2, 16 physical cores, at most128 GiB.
+Recheck availability and size the selected IC before submission.
+
+Native pre-enriched initial-step comparisons are complete:8x2 versus4x4 at
+16 cores, same input/binary. Actual compute CPU432.315s versus415.706s,
+RAMSES elapsed23.9596s versus25.3040s; no statistically established optimum.
+Both are hydro-only costs, not full RT/CHIMES scaling measurements.
+
+Full dense IR memory cannot inherit the reader's allocation:136 frequencies
+x80 directions x128^3 cells x8 bytes is170GiB for ONE field alone. Current
+native live/operator code has persistent, trial, transported and candidate
+fields, at least680GiB globally before halos/capacity growth/other physics.
+Consequently grammar-debug's252GiB is appropriate for small coupling tests,
+not this dense128^3 full-IR run. Normal grammar nodes report515697MiB each;
+the eventual128^3 resource request must size aggregate/per-rank peaks and
+communication for multiple nodes. Do not weaken physical resolution or claim
+full-IR performance from a dust-off reader. This is resource sizing, not a new
+physics implementation gate or authorization for an unconstrained ensemble.
+
+The registered `p4_pilot_zoom_agn_candidates.json` and
+`p4_high_density_manifest.json` describe a 32^3 RT extraction from an external
+Run0 snapshot, NOT self-consistent cosmological zoom ICs. They are not admitted
+as calibration ICs. The external legacy restart and its binary/chemistry layout
+are not interchangeable with the current coupled model. No compatible matched
+three-resolution IC family has been identified in the inspected project records.
+The operator subsequently authorized new IC generation. See the linked new-IC
+record for the completed small-box input; the external extraction is not used.
+
+Use existing phase/direct-cooling/SNRT timers and Slurm accounting; do not add
+a profiling framework or modify physics solely for timing. Record separately:
+
+- wall seconds for initialization, evolution and output;
+- allocated core-hours = AllocCPUS * ElapsedRaw /3600;
+- measured process CPU hours = Slurm TotalCPU /3600 (user + system over ranks
+  and threads, using the compute step without double-counting parent records);
+- CPU utilization = measured CPU seconds / allocated core-seconds, peak RSS,
+  MPI/OpenMP layout, binding, co-tenant/load information and exit state;
+- coarse steps, simulated time advanced and AMR leaf-cell updates, alongside
+  chemistry/RT/feedback/dust phase costs where existing timers expose them.
+
+`CPUTimeRAW` is allocated CPU time, not measured process CPU time. Timing the
+launcher alone does not measure all MPI ranks. Missing accounting remains
+missing, not zero. MPI spin-wait can consume process CPU: high utilization
+does not by itself demonstrate useful work or good parallel efficiency.
+
+After the selected IC's initial-step check, reuse a bounded source-active
+window for MPI16xOMP1, MPI8xOMP2 and MPI4xOMP4 at16 cores. Fix binary, physical
+parameters, initial state, stopping interval, output policy and binding policy.
+This tests rank/thread layout, not strong scaling. Compare the best layout
+with an8-core counterpart for strong scaling; speedup is T8/T16 and parallel
+efficiency is (T8/T16)/2 for genuinely matched work. Repeat the selected layout
+once if timing differences are comparable to run-to-run variability. Avoid a
+full performance matrix for every physical parameter point. Recheck a late
+source-active/refined state because startup timing does not price that regime.
+For all tuning runs retain wall time AND allocated/measured CPU hours; compare
+physical runtime changes with actual work counts rather than confusing changes
+in SF/AMR/chemistry workload with changes in parallel efficiency.
+
+Per-dump size, total storage, effective absolute namelist, all output clocks,
+runtime/step cap and model applicability will be reported with the chosen IC
+before launch. No new job has been submitted during this preparation record.
+
+## Historical volume-first proposal — superseded execution design
 
 Approve this design and **preparation/pilot only**: register compatible ICs
 and observational data; at most3 bounded runs, total5,000 CPU-core-hours,
@@ -95,7 +248,7 @@ this is not a claim to tune every SN feedback parameter. If the sample has
 no thermal-mode AGN response, freeze `eAGN_T` and label it unidentifiable,
 not successfully fitted. BH seeding is not an extra nuisance parameter.
 
-## Resolution and finite ensemble design
+## Historical resolution and ensemble matrix — not the active run plan
 
 Proposed25 comoving Mpc periodic box, z_init99 to0, matched large-scale
 phases. Proposed fixed cosmology Omega_m=.315, Omega_b=.049, h=.674,
@@ -132,7 +285,7 @@ held-out intermediate test; that additional study is not in this allocation.
 Strong convergence (fixed parameters) and weak convergence (refit) stay
 separate throughout.
 
-## Cost, storage and launch policy
+## Historical budget estimates and retained launch-safety rules
 
 Pilot covers startup and at least one cold/source-active state if physically
 compatible ICs/checkpoints are available. Do not manufacture cross-resolution
@@ -203,7 +356,7 @@ approved run ceiling; insufficient counts or failed fits are reported results.
 No publication-ready galaxy prediction claim without matched selection,
 resolved scales and independent observational support.
 
-## Approval boundary
+## Historical approval request — replaced by the active decision above
 
 Requested now: design and preparation/pilot only,5,000 core-hours/1TiB.
 No simulations launched. The priced23--29-run ensemble and any material

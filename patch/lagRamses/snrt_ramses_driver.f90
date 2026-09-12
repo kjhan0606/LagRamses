@@ -100,13 +100,14 @@ contains
   subroutine snrt_ramses_advance_level(ilevel,step_start_proper)
     use amr_parameters, only: sink, sink_AGN
     use amr_commons, only: levelmin, nstep_coarse, myid, dtnew, boxlen, &
-         icoarse_min, icoarse_max, ncpu, nrestart, texp, aexp, active
+         icoarse_min, icoarse_max, ncpu, nrestart, texp, aexp, active, cosmo
     use hydro_commons, only: uold,magnetic_energy
     use dust_mass_physics, only: dust_atomic_cooling_enabled,dust_chimes_enabled,dust_gas_elements
 #ifdef SNRT_CHIMES
     use snrt_chimes_runtime, only: chimes_live_capacity,chimes_live_stage,chimes_cell_state,chimes_live_band_stage, &
          chimes_live_cold_stage,chimes_live_grain_scatter,chimes_live_fe_uv_stage
-    use snrt_chimes, only: chimes_ns,chimes_group_binding,chimes_boltzmann,chimes_round_subnormal_survivors
+    use snrt_chimes, only: chimes_ns,chimes_group_binding,chimes_boltzmann,chimes_round_subnormal_survivors, &
+         chimes_last_split_wall
 #endif
     use snrt_atomic_cooling, only: atomic_mh,atomic_temperature,atomic_heat_capacity,atomic_advance
     use pm_commons, only: nsink, xsink, idsink, agn_pending_erg, nindsink, msink, vsink, jsink, &
@@ -244,6 +245,10 @@ contains
     real(dp) :: transaction_residual, global_transaction_residual
     real(dp) :: wall_sub
     real(dp) :: t_setup, t_topology, t_nlte, t_source, t_transport, t_coupling
+    real(dp) :: t_cold_chemistry, cold_chemistry_start
+    real(dp) :: t_cold_worker, t_scatter_worker
+    real(dp) :: t_photo_worker,t_dark_worker,t_primary_done,t_pre_ir,t_live_ir,wall_ir_start
+    real(dp) :: t_decision_wait,decision_start
     real(dp) :: t_source_overhead, t_locator, t_budget, t_deposit
     real(c_float), allocatable :: optical_depth(:,:), optical_depth_species(:,:,:), &
          optical_depth_dust(:,:)
@@ -843,7 +848,7 @@ contains
                    ! Legacy argument retained for ABI; not a physical capacity
                    ! in v4. The IR solver uses density*U(T) instead.
                    dust_heat_capacity(i)=1d0
-                   if(dust_iron_enabled().or.dust_pah_enabled().or.dust_relative_motion)then
+                   if(dust_iron_enabled().or.dust_pah_enabled().or.dust_relative_motion.or.cosmo)then
                       call iron_compare_temperature(uold(icell,idust_species:idust_species+1),solid_fe, &
                            dust_energy_code*scale_v**2,dust_old_temperature(i),ierr)
                    else if(dust_material_composition_enabled())then
@@ -1346,6 +1351,10 @@ contains
     unassigned_absorption_total = 0.0d0
     t_transport = 0.0d0
     t_coupling = 0.0d0
+    t_cold_chemistry = 0.0d0
+    t_cold_worker = 0.0d0; t_scatter_worker = 0.0d0
+    t_photo_worker=0; t_dark_worker=0; t_pre_ir=0; t_live_ir=0
+    t_decision_wait=0
     transaction_converged = .false.
     global_transaction_converged = 0
     global_transaction_failure = snrt_failure_none
@@ -1517,14 +1526,17 @@ contains
        ! stage, always starting chemistry from the unchanged incoming cell.
 #ifdef SNRT_CHIMES
        if(snrt_chimes_cold_enabled().and.local_transaction_failure==snrt_failure_none)then
+          cold_chemistry_start=omp_get_wtime()
           chemical_absorbed_ev=0
           chemical_events=0;chemical_dissociation_ev=0
 !$omp parallel do default(shared) private(i,icell,ierr,igroup) reduction(+:chemical_absorbed_ev) &
-!$omp reduction(max:local_transaction_failure) reduction(+:chemical_events,chemical_dissociation_ev)
+!$omp reduction(max:local_transaction_failure) reduction(+:chemical_events,chemical_dissociation_ev) &
+!$omp reduction(+:t_cold_worker,t_scatter_worker,t_photo_worker,t_dark_worker)
           do i=1,nleaf
              block
                real(dp)::rn(snrt_ndirection,9),re(snrt_ndirection,9),nn(snrt_ndirection,9),ne(snrt_ndirection,9)
                real(dp)::ledger(11),gn(9),ge(9),nh_code,he_code,events(2)
+               real(dp)::worker_start
                real(dp)::phase_e(9,4),phase_p(3,4),kick(3),velocity(3),work(4),heat(9),ke_change,ep,wp
                integer::b,k
                icell=leaf_cell(i)
@@ -1535,9 +1547,13 @@ contains
                enddo
                if(dust_relative_motion)then
                   phase_rows(:,i)=uold(icell,:);phase_pnext(:,:,i)=phase_pold(:,:,i);primary_heat(:,i)=0
+                  worker_start=omp_get_wtime()
                   call chimes_live_cold_stage(icell,scale_d,scale_v,dt_s,dx_code*scale_l,dust_old_temperature(i), &
                        reduced_c,snrt_ndirection,rn,re,chemical_trial(:,i),trial_thermal(i),nn,ne,ledger,gn,ge,ierr,events, &
                        staged_row=phase_rows(:,i),directions=transpose(direction_dp),phase_energy=phase_e,phase_moment=phase_p)
+                  t_cold_worker=t_cold_worker+omp_get_wtime()-worker_start
+                  t_photo_worker=t_photo_worker+chimes_last_split_wall(1)
+                  t_dark_worker=t_dark_worker+chimes_last_split_wall(2)
                   if(ierr==0)then
                      ke_change=0
                      do b=1,4
@@ -1555,8 +1571,10 @@ contains
                      enddo
                      if(ierr==0.and.snrt_dust_contract_scattering_enabled)then
                         work=0
+                        worker_start=omp_get_wtime()
                         call chimes_live_grain_scatter(snrt_ndirection,nn,ne,phase_pnext(:,:,i),phase_mass(:,i), &
                              transpose(direction_dp),angular_weight,dt_s,reduced_c,work,ierr)
+                        t_scatter_worker=t_scatter_worker+omp_get_wtime()-worker_start
                         ke_change=ke_change+sum(work)
                      endif
                      if(ierr==0)then
@@ -1570,8 +1588,12 @@ contains
                      endif
                   endif
                else
+               worker_start=omp_get_wtime()
                call chimes_live_cold_stage(icell,scale_d,scale_v,dt_s,dx_code*scale_l,dust_old_temperature(i), &
                     reduced_c,snrt_ndirection,rn,re,chemical_trial(:,i),trial_thermal(i),nn,ne,ledger,gn,ge,ierr,events)
+               t_cold_worker=t_cold_worker+omp_get_wtime()-worker_start
+               t_photo_worker=t_photo_worker+chimes_last_split_wall(1)
+               t_dark_worker=t_dark_worker+chimes_last_split_wall(2)
                endif
                if(ierr==0)ierr=chimes_round_subnormal_survivors(scale_nH,sum(re),nn,ne)
                if(ierr/=0)then
@@ -1602,6 +1624,7 @@ contains
              end block
           enddo
 !$omp end parallel do
+          t_cold_chemistry=t_cold_chemistry+omp_get_wtime()-cold_chemistry_start
        endif
 #endif
        if (local_transaction_failure == snrt_failure_none) then
@@ -1895,10 +1918,12 @@ contains
        local_transaction_converged = 0
        if (local_transaction_failure == snrt_failure_none .and. &
             transaction_converged) local_transaction_converged = 1
+       decision_start=omp_get_wtime()
        call snrt_transaction_reduce_decision(local_transaction_failure, &
             local_transaction_converged, transaction_residual, &
             global_transaction_failure, global_transaction_converged, &
             global_transaction_residual, convergence_status)
+       t_decision_wait=t_decision_wait+omp_get_wtime()-decision_start
        if (convergence_status /= 0) then
           global_transaction_failure = snrt_failure_transport
           global_transaction_converged = 0
@@ -1919,6 +1944,7 @@ contains
        iteration_tau = sum(iteration_species_tau, dim=3) + optical_depth_dust
     end do
 
+    t_primary_done=omp_get_wtime()-wall_start
     if (global_transaction_failure /= snrt_failure_none .or. &
          .not. transaction_converged .or. global_transaction_converged == 0) then
        if (transaction_active) call snrt_transaction_restore(transaction, snrt_intensity, &
@@ -2153,6 +2179,8 @@ contains
        endif
     endif
     if(snrt_dust_contract_version>=3)then
+       wall_ir_start=omp_get_wtime()
+       t_pre_ir=wall_ir_start-wall_start-t_primary_done
              ! Start from the pre-primary material energy and inject exactly
              ! the accepted primary absorption. Receiver-stage energy already
              ! includes that absorption and must NOT be fed as old energy.
@@ -2259,6 +2287,7 @@ contains
           if(myid==1)write(*,'(A,I0)')' SNRT live IR staging failed: error=',ierr
        end if
     end if
+    if(snrt_dust_contract_version>=3)t_live_ir=omp_get_wtime()-wall_ir_start
     if (any(.not. ieee_is_finite(dust_trial_energy)) .or. &
          any(.not. ieee_is_finite(dust_trial_temperature)) .or. &
          any(dust_trial_energy < 0.0d0) .or. &
@@ -2487,6 +2516,8 @@ contains
        if(myid==1)write(*,'(A,ES12.4,A,ES12.4)') &
             ' SNRT_DUST_IR_COMMIT_PASS balance=',dust_ir_result%balance_relative, &
             ' escaped_erg=',dust_ir_result%escaped_erg
+       if(cosmo)write(*,'(A,2I8,A,ES22.12)') &
+            ' SNRT_CMB_COMMIT rank/level=',myid,ilevel,' background_erg=',dust_ir_result%background_erg
     end if
 #endif
     ! Fuel consumption is the final accounting action of the coupled source
@@ -2520,6 +2551,16 @@ contains
          ' setup=', t_setup, ' topology=', t_topology, ' nlte=', t_nlte, &
          ' source=', t_source, ' transport=', t_transport, &
          ' coupling=', t_coupling
+       ! Rank-local wall time, included in coupling (not an additive stage).
+       if(snrt_chimes_cold_enabled())write(*,'(A,F12.3)') &
+            ' SNRT cold chemistry wall (within coupling)=',t_cold_chemistry
+       if(snrt_chimes_cold_enabled())write(*,'(A,2F12.3)') &
+            ' SNRT cold/scatter summed worker wall (not CPU time)=',t_cold_worker,t_scatter_worker
+       if(snrt_chimes_cold_enabled())write(*,'(A,2F12.3)') &
+            ' SNRT photo/dark summed worker wall (within cold)=',t_photo_worker,t_dark_worker
+       write(*,'(A,4F12.3)')' SNRT coupling wall primary/preIR/liveIR/tail=', &
+            t_primary_done,t_pre_ir,t_live_ir,t_coupling-t_primary_done-t_pre_ir-t_live_ir
+       write(*,'(A,F12.3)')' SNRT primary decision collective wall (within primary)=',t_decision_wait
     endif
 
     deallocate(leaf_cell, leaf_slot, neighbor, optical_depth, optical_depth_species, &

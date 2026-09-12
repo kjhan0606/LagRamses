@@ -401,7 +401,21 @@ subroutine read_hydro_params(nml_ok)
      if(.not.use_channel_resolved_feedback())dust_ok=.false.
      if(dust_composition_enabled().and..not.all(active_element))dust_ok=.false.
 #endif
-     if(.not.hydro.or..not.metal.or.cosmo.or.nboundary>0) dust_ok=.false.
+     if(.not.hydro.or..not.metal.or.nboundary>0) dust_ok=.false.
+     if(cosmo)then
+        ! Narrow cosmological path: coadvected C/silicate and an explicitly
+        ! ledgered optically thin CMB. Other phase/energy layouts stay closed.
+#if defined(SNRT_CHIMES) && !defined(SOLVERmhd)
+        if(.not.snrt_chimes_transition_enabled().or..not.snrt_agn_rt_requested().or.nener/=0)dust_ok=.false.
+        if(.not.dust_chimes_enabled().or..not.dust_two_size_enabled().or. &
+             .not.dust_optics_enabled().or..not.dust_material_composition_enabled())dust_ok=.false.
+        if(dust_relative_motion.or.dust_iron_enabled().or.dust_pah_enabled().or. &
+             trim(dust_sublimation)/='none'.or.dust_sn_shocks.or.cr_enabled.or.use_sgs)dust_ok=.false.
+        if(sink.or.sink_AGN.or.agn)dust_ok=.false.
+#else
+        dust_ok=.false.
+#endif
+     endif
      ! Only the explicit coadvected kind7/Bondi path carries all material
      ! densities through sink accretion and mechanical loading. New sink
      ! formation and other energy/phase layouts are not covered by that map.
@@ -431,7 +445,8 @@ subroutine read_hydro_params(nml_ok)
   endif
   if(.not.dust_ok)then
      if(myid==1)write(*,*)'ERROR: dust mass requires valid bulk parameters, SNRT/DUST_LIVE/HDF5 channel feedback,'
-     if(myid==1)write(*,*)'noncosmo periodic metal hydro; no neq/delayed cooling; cooling needs an explicit dust closure'
+     if(myid==1)write(*,*)'periodic metal hydro; no neq/delayed cooling; cooling needs an explicit dust closure'
+     if(myid==1)write(*,*)'Cosmo dust: kind7/NENER=0 C/silicate DL01+D03/CHIMES; no sinks, CR, SGS, Fe, PAH or drift'
      if(myid==1)write(*,*)'Dust sinks require NENER=0 kind7 reference Bondi, existing sinks, coadvected C/silicate only'
      nml_ok=.false.
   else if(dust_mass_enabled.and.myid==1)then

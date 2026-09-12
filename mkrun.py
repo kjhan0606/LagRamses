@@ -1523,6 +1523,11 @@ def generate_run(ui=None, write_text=save_text):
               'This debits total SSP mass, not a resolved WD reservoir.')
         print('The trapped CR reference is available in the noncosmological comparison modes. '
               'Do not enable it for cosmological ICs: the CR expansion source is not implemented.')
+        print('Cosmological dust in the full editor is restricted to coadvected C/silicate '
+              'two-size DL01/D03 with kind7 CHIMES, NENER=0 and CPU material. '
+              'It uses a ledgered optically thin CMB at 2.727/a, without a 10 K floor; '
+              'no sinks, CR, SGS, Fe, PAH, drift or sublimation. Fixed-group IR has no spectral redshift. '
+              'This does not certify a calibrated galaxy run.')
 
     advanced = ask_bool(
         '\nOpen the full parameter editor for fine-tuning before writing?', False)

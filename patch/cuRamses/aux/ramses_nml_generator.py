@@ -751,7 +751,7 @@ def validate_params(values):
         except (TypeError,ValueError):
             valid=False
         valid=valid and flag('hydro') and flag('metal') and clean('feedback_mode')=='channel_resolved'
-        valid=valid and not any(flag(k) for k in ('cosmo','neq_chem','delayed_cooling'))
+        valid=valid and not any(flag(k) for k in ('neq_chem','delayed_cooling'))
         model=clean('dust_mass_model') or 'bulk_v1'
         coupling=clean('dust_cooling') or 'none'
         material=clean('dust_material_model') or 'fixed_mix'
@@ -907,8 +907,15 @@ def validate_params(values):
             valid=valid and sink_valid
             msgs.append(ValidationMsg('WARNING','Periodic sink clouds have radius 4*dx_min; keep this strictly below half the box to avoid antipodal centroid ambiguity. The kind7 comparison wizard uses levelmax=4 with refinement disabled.'))
             msgs.append(ValidationMsg('WARNING','Dust/Bondi requires NENER=0 hydro, material-transfer CPU/OpenMP binary, SNRT_AGN_MODEL=partition_reference_v1 and SNRT_SPECTRAL_MODEL=chimes_transition_d03_maxent128_fs2010_v1; runtime checks these environment/build choices. Existing sinks and optional condensation only; no SN shocks, sublimation, relative motion or Fe/PAH.'))
+        if flag('cosmo'):
+            valid=valid and model=='carbon_olivine_2size_v1' and material=='dl01_composition_v1'
+            valid=valid and coupling=='chimes_neq_v1' and optics=='d03_transport_v1'
+            valid=valid and not relative and iron=='none' and pah=='none' and sublimation=='none'
+            valid=valid and not any(flag(k) for k in ('sink','sink_agn','agn','cr_enabled','use_sgs',
+                                                     'mhd_enabled','dust_sn_shocks'))
+            msgs.append(ValidationMsg('WARNING','Cosmological dust requires NENER=0 CPU material, kind7 CHIMES, SNRT_RT_ENABLE=1 and exchange-enabled v4 IR. Analytic optically thin CMB at 2.727/a with explicit energy receipt; no 10 K floor. Fixed-group IR dilutes as a^-3 without spectral redshift. This is not galaxy-calibration qualification.'))
         if not valid:
-            msgs.append(ValidationMsg('ERROR','Dust needs valid parameters, periodic noncosmo metal hydro, channel feedback, HDF5; sinks only with coadvected kind7/NENER=0 reference Bondi; cooling requires explicit closure/original/no UV; WSS09 requires composition'))
+            msgs.append(ValidationMsg('ERROR','Dust needs valid parameters, periodic metal hydro, channel feedback, HDF5; cosmology only coadvected C/silicate kind7/NENER=0 with CHIMES/DL01/D03 and no sinks/CR/SGS; cooling requires explicit closure/original/no UV'))
         msgs.append(ValidationMsg('WARNING','Dust needs active SNRT v4 material; D03 is an explicit common-T/transport comparison. WSS09 CIE is not local-radiation/NEQ cooling; no T/He extrapolation'))
     elif (str(values.get('dust_relative_motion',False)).strip("'\"").lower() in ('true','.true.','t','1') or
           str(values.get('dust_mass_model','bulk_v1')).strip("'\"")!='bulk_v1' or

@@ -23,6 +23,42 @@ module dust_mass_runtime
 #include "amr_index.h"
   implicit none
 contains
+  subroutine dust_expansion_level(ilevel,expansion_ratio)
+    ! Pressureless grain enthalpy has no Hubble PdV term. Its physical
+    ! specific energy stays fixed, whereas scale_v**2 varies as a**(-2).
+    ! Update only the in-flight conserved reservoir, at the same global
+    ! clock boundary used by update_cosmomag, before the hydro flux update.
+    ! Mass carriers and gas total energy must NOT receive this factor.
+    integer,intent(in)::ilevel
+    real(dp),intent(in)::expansion_ratio
+    real(dp)::factor
+    integer::ind,i,cell,icpu
+    if(.not.dust_mass_enabled)return
+    if(.not.ieee_is_finite(expansion_ratio).or.expansion_ratio<=0)then
+       write(*,*)'ERROR: invalid dust expansion ratio'
+       call clean_stop
+       return
+    endif
+    factor=expansion_ratio**2
+    if(.not.ieee_is_finite(factor).or.factor<=0)then
+       write(*,*)'ERROR: invalid dust expansion factor'
+       call clean_stop
+       return
+    endif
+    do ind=1,twotondim
+       do i=1,active(ilevel)%ngrid
+          cell=ICELL_OF(active(ilevel)%igrid(i),ind)
+          unew(cell,idust_energy)=unew(cell,idust_energy)*factor
+       enddo
+       do icpu=1,ncpu
+          do i=1,reception(icpu,ilevel)%ngrid
+             cell=ICELL_OF(reception(icpu,ilevel)%igrid(i),ind)
+             unew(cell,idust_energy)=unew(cell,idust_energy)*factor
+          enddo
+       enddo
+    enddo
+  end subroutine
+
   subroutine dust_injection_specific_energy(value,ierr,grains,metallic_iron)
     real(dp),intent(out)::value ! erg / gram of dust
     integer,intent(out)::ierr
@@ -276,8 +312,8 @@ contains
              eg=eg+phase_ke-dust_phase_kinetic(phase_row)
           endif
 #endif
-          if((dust_iron_enabled().or.dust_pah_enabled().or.dust_relative_motion).and.dust>0)then
-             ! Fe and relative IR callbacks use the analytic mixture enthalpy
+          if((dust_iron_enabled().or.dust_pah_enabled().or.dust_relative_motion.or.cosmo).and.dust>0)then
+             ! Fe, relative IR and cosmological CMB use analytic mixture enthalpy
              ! (including phase plateaus), unlike the C/silicate U(log T) path.
              call iron_compare_temperature(grains,iron_mass,ed*sv**2,td,status)
              if(status==0)call iron_mixture_enthalpy(td,[next_grains,sum(next_iron)],new_ed,enthalpy_hi,status)

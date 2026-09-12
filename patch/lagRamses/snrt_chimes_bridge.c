@@ -161,6 +161,21 @@ int snrt_chimes_identity(double *values)
 }
 
 double snrt_chimes_boltzmann(void) { return BOLTZMANNCGS; }
+/* Set once on the serial level boundary, before any OpenMP cell callbacks.
+ * Each cell copies configuration privately below. Never call this setter
+ * concurrently with a cell solve. a=1 retains the historical noncosmo value. */
+int snrt_chimes_set_expansion(double a)
+{
+    if(initialized!=1 || !isfinite(a) || a<=0)return 1;
+    const double temperature=2.727/a;
+    if(!isfinite(temperature) || temperature<=0)return 1;
+    configuration.cmb_temperature=temperature;
+    return 0;
+}
+double snrt_chimes_cmb_temperature(void)
+{
+    return initialized==1 ? configuration.cmb_temperature : NAN;
+}
 int snrt_chimes_charge_supported(void) { return initialized==1 && receiver_abi>=5; }
 
 int snrt_chimes_group_binding(int n,const double *edges,const double *means)
@@ -295,6 +310,7 @@ static void secondary_channel(double rate,double energy,const double *samples,in
 static void secondary_budget(struct gasVariables *g,const struct globalVariables *c,double *rates,double *loss)
 {
     memset(rates,0,3*sizeof(double));*loss=0;
+    if(c->N_spectra==0)return; /* No primary photoelectron source. */
     double state[NS];
     /* CVODE Newton trials can briefly leave the positive cone. This local
      * rate evaluation uses nonnegative reactants, not published clipping. */
@@ -389,6 +405,17 @@ static void molecular_coefficients(struct gasVariables *g,const struct globalVar
         r->photodissoc_group1_rate_coefficient[i]=0;
     for(int i=0;i<chimes_table_photodissoc_group2.N_reactions[d.mol_flag_index];i++)
         r->photodissoc_group2_rate_coefficient[i]=0;
+    if(c->N_spectra==0){
+        /* Retain exact-zero photorates; skip only photon shielding, never
+         * molecular cooling columns or collisional dissociation. */
+        if(d.mol_flag_index){
+            r->H2_photodissoc_rate_coefficient[0]=0;
+            r->CO_photodissoc_rate_coefficient[0]=0;
+            r->H2_photodissoc_shield_factor[0]=1;
+            r->CO_photodissoc_shield_factor[0]=1;
+        }
+        return;
+    }
     double sh2=1,sco=1;
     if(d.mol_flag_index){
         double nh2=g->nH_tot*g->cell_size*fmax(g->abundances[sp_H2],0);
@@ -698,6 +725,20 @@ static int cell_charged(const double *controls,const double *elements,const doub
     }
     if(controls[3]==0)return 0;
     struct globalVariables c=configuration; /* Tdust is local, thread-safe. */
+    /* The split dark entrypoints pass identically zero radiation. Remove
+     * its 2*N_spectra ODE variables and photo-rate work, NOT the species
+     * or thermal network. Keep rt_update_flux/on-the-spot unchanged: they
+     * select case B even though this local solve has no photon variables.
+     * Never apply this to the general (possibly illuminated) mode 0.
+     * Without on-the-spot recombination the zero-radiation subspace need
+     * not be invariant, so retain the original system in that case. */
+    /* Retain the original hot/atomic system (mode 2): neutral hot probes
+     * can trigger its strict negative-electron admission under the changed
+     * CVODE norm. Do not relax that gate to obtain a performance result. */
+    if((mode==1 || mode==3) && c.rt_update_flux==1 && c.rt_use_on_the_spot_approx==1){
+        for(int b=0;b<NG;b++)if(old_photons[b]!=0)return 3;
+        c.N_spectra=0;
+    }
     if(mode==1 || mode==3){
         if(controls[1]>snrt_chimes_molecular_temperature_max())return 2;
         // Resolve the molecular photo/dark split below the default grey

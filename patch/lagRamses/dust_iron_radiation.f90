@@ -78,7 +78,7 @@ contains
   end subroutine
 
   subroutine iron_radiative_cell(nodes,bath,bins,old_energy,heating,dt,reference_mass,basis_band, &
-       eg,cv,conductance,energy,temperature,phase,rate,transfer,ierr,absolute_emission,photon_ev)
+       eg,cv,conductance,energy,temperature,phase,rate,transfer,ierr,absolute_emission,photon_ev,cmb_exchange)
     ! Backward Euler, fixed masses/optical coefficients during this call.
     ! cgs: bins=g/cm3, Ed/Eg=erg/cm3, heating=erg/cm3/s; band power/reference H.
     ! phase is [alpha,gamma,delta,liquid] fraction of metallic Fe. Ed contains
@@ -91,22 +91,31 @@ contains
     integer,intent(out)::ierr
     real(real64)::bands(size(rate),size(nodes)),power(size(nodes)),mass(3),work_rate(size(rate))
     logical,optional,intent(in)::absolute_emission
-    ! Supplying physical quadrature energies admits Planck emission below
-    ! the first knot for the ABSOLUTE field only. Net-bath callers unchanged.
+    ! Physical quadrature energies admit the analytic cold Planck branch
+    ! for absolute radiation or the explicitly ledgered analytic CMB bath.
     real(real64),optional,intent(in)::photon_ev(:)
-    logical::absolute
+    ! Optically thin analytic bath: negative NET emission is energy supplied
+    ! by the external background, not a negative transported IR intensity.
+    ! Returned receipt is erg/cm3, distinct from gas transfer and primary heat.
+    real(real64),optional,intent(out)::cmb_exchange
+    logical::absolute,cmb
+    real(real64)::bath_spectrum(size(rate)),sample_spectrum(size(rate)),spectrum_sum
     real(real64)::bath_power,lower,upper,mid,lo_u,hi_u,t,q,target,tol,residual,trial_energy
     real(real64)::trans_t(3),trans_power,fraction,start,finish,width,p(4)
     integer::n,k,j,it,status
     energy=old_energy;temperature=bath;phase=0;rate=0;transfer=0;ierr=1
     absolute=.false.;if(present(absolute_emission))absolute=absolute_emission
+    cmb=present(cmb_exchange)
+    if(cmb)cmb_exchange=0
+    if(cmb.and.(absolute.or..not.present(photon_ev).or.any(bins(5:6)/=0)))return
     n=size(nodes)
     if(n<2.or.size(rate)<1.or.any(shape(basis_band)/=[size(rate),n,6]))return
     if(any(.not.ieee_is_finite(nodes)).or.any(nodes<=0))return
     if(any(nodes(2:)<=nodes(:n-1)))return
     if(.not.all(ieee_is_finite([bath,bins,old_energy,heating,dt,reference_mass,eg,cv,conductance])))return
     if(minval(bins)<0.or.min(old_energy,heating,eg,conductance)<0.or.min(dt,reference_mass,cv)<=0)return
-    if(bath<nodes(1).or.bath>nodes(n))return
+    if(bath<=0.or.bath>nodes(n))return
+    if(.not.cmb.and.bath<nodes(1))return
     if(present(photon_ev))then
        if(size(photon_ev)/=size(rate))return
        if(any(.not.ieee_is_finite(photon_ev)).or.any(photon_ev<=0))return
@@ -135,6 +144,11 @@ contains
     if(any(.not.ieee_is_finite(power)).or.any(power(2:)<=power(:n-1)))return
     bath_power=power_at(bath)
     lower=0;upper=power(n)-bath_power
+    if(cmb)then
+       call spectrum_at(bath,bath_spectrum)
+       bath_power=sum(bath_spectrum)
+       lower=-bath_power;upper=power(n)-bath_power
+    endif
     if(absolute)then
        bath_power=0;lower=power_at(bath);upper=power(n)
        if(present(photon_ev))then
@@ -207,6 +221,33 @@ contains
 100 continue
     if(eg-q<0.or..not.all(ieee_is_finite([trial_energy,t,q])))return
     work_rate=0
+    if(cmb)then
+       call spectrum_at(temperature_at(mid),sample_spectrum)
+       work_rate=abs(sample_spectrum-bath_spectrum)
+       ! Avoid subtracting nearly equal blackbodies for stiff equilibrium.
+       if(abs(mid)<sqrt(epsilon(1d0))*bath_power)then
+          if(bath<nodes(1))then
+             work_rate=bath_spectrum*photon_ev/(8.617333262145d-5*bath)
+             do k=1,size(rate)
+                work_rate(k)=work_rate(k)/one_minus_exp(photon_ev(k)/(8.617333262145d-5*bath))
+             enddo
+          else
+             k=1
+             do while(k<n-1)
+                if(bath<nodes(k+1).or.(bath==nodes(k+1).and.mid<0))exit
+                k=k+1
+             enddo
+             work_rate=bands(:,k+1)-bands(:,k)
+          endif
+       endif
+       spectrum_sum=sum(work_rate)
+       if(mid==0)then
+          work_rate=0
+       else
+          if(spectrum_sum<=0)return
+          work_rate=work_rate*(mid/spectrum_sum)
+       endif
+    else
     if(absolute)work_rate=bands(:,1)
     do k=1,n-1
        start=max(power(k)-bath_power,0d0);finish=max(power(k+1)-bath_power,0d0)
@@ -214,13 +255,44 @@ contains
        width=max(min(mid,finish)-start,0d0)
        work_rate=work_rate+width*(bands(:,k+1)-bands(:,k))/(power(k+1)-power(k))
     enddo
-    if(any(.not.ieee_is_finite(work_rate)).or.any(work_rate<0))return
+    endif
+    if(any(.not.ieee_is_finite(work_rate)))return
+    if(.not.cmb.and.any(work_rate<0))return
     residual=trial_energy-old_energy+dt*(sum(work_rate)-heating)-q
     if(.not.ieee_is_finite(residual).or.abs(residual)>tol)then
        ierr=16;return
     endif
     energy=trial_energy;temperature=t;phase=p;rate=work_rate;transfer=q;ierr=0
+    if(cmb)then
+       cmb_exchange=-dt*sum(min(work_rate,0d0))
+       rate=max(work_rate,0d0)
+    endif
   contains
+    subroutine spectrum_at(td,spectrum)
+      real(real64),intent(in)::td
+      real(real64),intent(out)::spectrum(:)
+      real(real64)::x0,x,f
+      integer::i,g
+      spectrum=0
+      if(td<=0)return
+      if(td<nodes(1))then
+         do g=1,size(rate)
+            if(bands(g,1)==0)cycle
+            if(td<photon_ev(g)/(8.617333262145d-5*745d0))cycle
+            x0=photon_ev(g)/(8.617333262145d-5*nodes(1))
+            x=photon_ev(g)/(8.617333262145d-5*td)
+            spectrum(g)=bands(g,1)*exp(x0-x)*one_minus_exp(x0)/one_minus_exp(x)
+         enddo
+      else
+         i=1
+         do while(i<n-1)
+            if(td<=nodes(i+1))exit
+            i=i+1
+         enddo
+         f=log(td/nodes(i))/log(nodes(i+1)/nodes(i))
+         spectrum=bands(:,i)+f*(bands(:,i+1)-bands(:,i))
+      endif
+    end subroutine
     subroutine cold_absolute()
       real(real64)::left_t,right_t,trial_t,x0,x,ratio,one0,one
       real(real64)::cold_rate(size(rate)),cold_power,err
@@ -275,6 +347,11 @@ contains
       real(real64),intent(in)::td
       integer::i
       real(real64)::f
+      if(cmb.and.td<nodes(1))then
+         call spectrum_at(td,sample_spectrum)
+         value=sum(sample_spectrum)
+         return
+      endif
       i=1
       do while(i<n-1)
          if(td<=nodes(i+1))exit
@@ -286,7 +363,26 @@ contains
     real(real64) function temperature_at(net_power) result(td)
       real(real64),intent(in)::net_power
       integer::i
-      real(real64)::f
+      real(real64)::f,left_t,right_t,wanted
+      integer::iteration
+      wanted=bath_power+net_power
+      if(cmb.and.wanted<power(1))then
+         left_t=0;right_t=nodes(1)
+         if(wanted<=0)then
+            td=0;return
+         endif
+         do iteration=1,80
+            td=.5d0*(left_t+right_t)
+            call spectrum_at(td,sample_spectrum)
+            if(sum(sample_spectrum)>wanted)then
+               right_t=td
+            else
+               left_t=td
+            endif
+         enddo
+         td=.5d0*(left_t+right_t)
+         return
+      endif
       i=1
       do while(i<n-1)
          if(bath_power+net_power<=power(i+1))exit
@@ -294,6 +390,7 @@ contains
       enddo
       f=(bath_power+net_power-power(i))/(power(i+1)-power(i))
       td=max(bath,min(nodes(n),exp(log(nodes(i))+f*log(nodes(i+1)/nodes(i)))))
+      if(cmb)td=exp(log(nodes(i))+f*log(nodes(i+1)/nodes(i)))
     end function
     subroutine evaluate(net_power,td)
       real(real64),intent(in)::net_power,td
@@ -302,7 +399,7 @@ contains
       if(status/=0)return
       if(conductance>0)q=gas_transfer_native(eg,cv,dt*conductance,td)
       target=old_energy+dt*(heating-net_power)+q
-      tol=2d-12*max(old_energy,abs(target),lo_u,hi_u,dt*heating,dt*net_power,abs(q),tiny(1d0))
+      tol=2d-12*max(old_energy,abs(target),lo_u,hi_u,dt*heating,abs(dt*net_power),abs(q),tiny(1d0))
       if(.not.all(ieee_is_finite([target,q,tol])))status=1
     end subroutine
   end subroutine

@@ -64,8 +64,33 @@ done:
 
 __global__ void ir_transport_kernel(const double *q,const double *rho,const int *blocked,
     const double *dir,const double *sigma,double *out,int *error,int n,int ng,int nd,double cdt,double ratio,int cell_sigma) {
-  const int i=blockIdx.x*blockDim.x+threadIdx.x;
-  if(i<n){int rc=snrt_ir_transport_cell(q,rho,blocked,dir,sigma,out,n,ng,nd,cdt,ratio,i,cell_sigma);if(rc)atomicMax(error,rc);}
+  // A block owns one cell: adjacent lanes read/write adjacent frequencies.
+  // Keep the original axis order and FP64 expressions; no reduced precision.
+  const int i=blockIdx.x;
+  const size_t rays=size_t(ng)*nd,total=rays*n,groups=size_t(ng)*n;
+  for(size_t ray=threadIdx.x;ray<rays;ray+=blockDim.x) {
+    const int d=ray/ng;
+    const double old=q[size_t(i)*7*rays+ray];double value=old;
+    for(int axis=0;axis<3;++axis) {
+      int face=2*axis,outgoing=face+1;
+      if(dir[3*d+axis]<0){face=2*axis+1;outgoing=face-1;}
+      const double factor=ratio*fabs(dir[3*d+axis]);
+      if(!blocked[6*i+outgoing])value-=factor*old;
+      value+=factor*q[(size_t(i)*7+face+1)*rays+ray];
+    }
+    if(!isfinite(value))atomicMax(error,2);
+    out[size_t(i)*rays+ray]=value;
+  }
+  for(int g=threadIdx.x;g<ng;g+=blockDim.x) {
+    const double tau=cell_sigma?cdt*rho[size_t(i)*ng+g]:cdt*sigma[g]*rho[i];
+    if(!isfinite(tau)||tau<0){atomicMax(error,2);continue;}
+    const double transmit=exp(-tau);
+    const double loss=tau<1e-4?tau*(1-tau/2+tau*tau/6-tau*tau*tau/24):1-transmit;
+    const double response=tau<1e-4?1-tau/2+tau*tau/6:loss/fmax(tau,DBL_MIN);
+    out[total+size_t(i)*ng+g]=transmit;
+    out[total+groups+size_t(i)*ng+g]=loss;
+    out[total+2*groups+size_t(i)*ng+g]=response;
+  }
 }
 __global__ void ir_absorb_kernel(const double *input,const double *weight,double *out,
     int *error,int n,int ng,int nd,double dt,double sum_w) {
@@ -92,7 +117,7 @@ extern "C" int snrt_ir_batch_c(const double *input,const int *blocked,const doub
   if(cudaMemcpyAsync(buf,input,ni*sizeof(double),cudaMemcpyHostToDevice,stream)!=cudaSuccess)goto done;
   if(cudaMemcpyAsync(buf+ni,coeff,nk*sizeof(double),cudaMemcpyHostToDevice,stream)!=cudaSuccess)goto done;
   if(cudaMemsetAsync(error,0,sizeof(int),stream)!=cudaSuccess)goto done;
-  if(op!=1)ir_transport_kernel<<<(n+127)/128,128,0,stream>>>(buf,buf+7*rays*n,flags,
+  if(op!=1)ir_transport_kernel<<<n,128,0,stream>>>(buf,buf+7*rays*n,flags,
       buf+ni,buf+ni+3*nd,buf+ni+nk,error,n,ng,nd,a,b,op==2);
   else ir_absorb_kernel<<<(n+127)/128,128,0,stream>>>(buf,buf+ni,buf+ni+nk,error,n,ng,nd,a,b);
   if(cudaGetLastError()!=cudaSuccess)goto done;

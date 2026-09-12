@@ -1,5 +1,5 @@
 diff --git a/src/chimes.c b/src/chimes.c
-index bc26493..0468932 100644
+index bc26493..01e7e21 100644
 --- a/src/chimes.c
 +++ b/src/chimes.c
 @@ -37,6 +37,33 @@
@@ -36,7 +36,59 @@ index bc26493..0468932 100644
  /** 
   * @brief Sets equilibrium abundances. 
   * 
-@@ -577,6 +604,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+@@ -186,7 +213,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+   void *cvode_mem;
+   int chimes_return_code = 0; 
+ 
+-  ChimesFloat internal_energy;
++  ChimesFloat internal_energy, T_floor;
+   int total_network_size, nonmolecular_network_size, i, j;
+   struct Species_Structure species[myGlobalVars->totalNumberOfSpecies];  
+   struct UserData data;
+@@ -328,18 +355,21 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+    * Try the explicit solution * 
+    *****************************/ 
+ 
++  /* A zero explicit tolerance disables acceptance (not the implicit solve).
++   * Keep all initial coefficients/constraints above, but do not construct
++   * an Euler candidate that cannot pass the strict acceptance comparison. */
++  if (myGlobalVars->explicitTolerance > 0.0)
++  {
+   // Update rates 
+   int indices[CHIMES_TOTSIZE]; 
+   update_rates(data.myGasVars, data.myGlobalVars, data); 
+   
+-  // Zero all species rates 
++  // Build the active mapping; update_rate_vector resets ALL accumulators.
+   i = 0; 
+   for (j = 0; j < myGlobalVars->totalNumberOfSpecies; j++)
+     {
+       if (data.species[j].include_species == 1)
+ 	{
+-	  data.species[i].creation_rate = 0.0f;
+-	  data.species[i].destruction_rate = 0.0f;
+ 	  indices[i] = j; 
+ 	  i++; 
+ 	}
+@@ -351,7 +381,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+   ChimesFloat new_abundances[CHIMES_TOTSIZE]; 
+   ChimesFloat new_photon_density[CHIMES_MAX_UV_SPECTRA]; 
+   ChimesFloat new_flux_reduction_factor[CHIMES_MAX_UV_SPECTRA]; 
+-  ChimesFloat old_energy, cool_rate, relative_change, this_absolute_tolerance, T_floor; 
++  ChimesFloat old_energy, cool_rate, relative_change, this_absolute_tolerance;
+   ChimesFloat new_energy = 0.0f; 
+   ChimesFloat max_relative_change = 0.0f; 
+   
+@@ -468,7 +498,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+ 
+       return chimes_return_code; 
+     }
+-  else 
++  }
+     {
+       /************************************** 
+        * Explicit solution is insufficient. * 
+@@ -577,6 +607,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
         * equations), the initial time 0.0 and the 
         * initial conditions, in y. */  
        CVodeInit(cvode_mem, f, 0.0f, y);
@@ -44,7 +96,7 @@ index bc26493..0468932 100644
  
        /* Use CVodeSVtolerances to specify the scalar
         * relative and absolute tolerances. */
-@@ -656,6 +684,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+@@ -656,6 +687,7 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
  	      CVodeSetMaxNumSteps(cvode_mem, MAXSTEPS);
  	      CVodeSetErrHandlerFn(cvode_mem, chimes_err_handler_fn, &data); 
  	      CVodeInit(cvode_mem, f, t, y);
@@ -52,7 +104,7 @@ index bc26493..0468932 100644
  	      
  	      if ((myGasVars->ThermEvolOn == 0) && (myGlobalVars->scale_metal_tolerances == 0))
  		CVodeSStolerances(cvode_mem, reltol, abstol_scalar);
-@@ -701,7 +730,10 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
+@@ -701,7 +733,10 @@ int chimes_network(struct gasVariables *myGasVars, const struct globalVariables
  	  chimes_print_gas_vars(stderr, myGasVars, myGlobalVars);
  	}
  
@@ -141,7 +193,7 @@ index 3bb4978..05f06c6 100644
    // T_dependent 
    N_reactions = chimes_table_T_dependent.N_reactions[1]; 
 diff --git a/src/rate_equations.c b/src/rate_equations.c
-index 0005fc2..f4ae4b5 100644
+index 0005fc2..ecf4ba0 100644
 --- a/src/rate_equations.c
 +++ b/src/rate_equations.c
 @@ -464,6 +464,11 @@ void check_constraint_equations(struct gasVariables *myGasVars, const struct glo
@@ -172,8 +224,23 @@ index 0005fc2..f4ae4b5 100644
    /* If Radiative Transfer is enabled, the final entries in the 
     * vector y are the photon densities and flux reduction factors. */
    int rt_start_index = data->network_size; 
+@@ -583,13 +597,7 @@ int f(realtype t, N_Vector y, N_Vector ydot, void *user_data)
+ 
+   update_rates(data->myGasVars, data->myGlobalVars, *data); 
+ 
+-  // Zero all species rates 
+-  for (i = 0; i < data->network_size; i++)
+-    {
+-      data->species[indices[i]].creation_rate = 0.0f;
+-      data->species[indices[i]].destruction_rate = 0.0f;
+-    }
+-
++  // update_rate_vector resets all reaction destinations, including inactive species.
+   // Compute creation and destruction rates 
+   update_rate_vector(data->species, data->myGasVars, data->myGlobalVars, *data); 
+   
 diff --git a/src/update_rates.c b/src/update_rates.c
-index 4c20b41..8341c5e 100644
+index 4c20b41..c319b95 100644
 --- a/src/update_rates.c
 +++ b/src/update_rates.c
 @@ -524,6 +524,8 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
@@ -196,7 +263,21 @@ index 4c20b41..8341c5e 100644
  	      photon_flux_rate[j] *= light_speed; 
  	      photon_density_rate[j] *= light_speed;
  
-@@ -953,11 +957,13 @@ void update_rate_vector(struct Species_Structure *mySpecies, struct gasVariables
+@@ -759,6 +763,13 @@ void update_rates(struct gasVariables *myGasVars, const struct globalVariables *
+ void update_rate_vector(struct Species_Structure *mySpecies, struct gasVariables *myGasVars, const struct globalVariables *myGlobalVars, struct UserData data) 
+ {
+   int i, j; 
++  /* Reaction tables accumulate into inactive species too. Reset every
++   * destination, not just the compact ODE mapping, on EVERY evaluation. */
++  for (i = 0; i < myGlobalVars->totalNumberOfSpecies; i++)
++    {
++      mySpecies[i].creation_rate = 0.0;
++      mySpecies[i].destruction_rate = 0.0;
++    }
+ 
+   /* NOTE: some reactions may involve species where the 
+    * element abundance is zero, but the element_incl flag 
+@@ -953,11 +964,13 @@ void update_rate_vector(struct Species_Structure *mySpecies, struct gasVariables
  	}
      }
  

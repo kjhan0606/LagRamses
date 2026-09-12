@@ -496,6 +496,10 @@ snrt_chimes_photo.o: ../patch/lagRamses/snrt_chimes_photo.cpp ../patch/lagRamses
 	icpx -std=c++17 -O2 -fp-model=precise -I$(SUNDIALS_DIR)/include -c $< -o $@
 ifeq ($(CHIMES),1)
 snrt_chimes.o: snrt_thermochemistry.o
+snrt_chimes_dark_mixed_test: ../simulation/snrt/tests/fixtures/phase0/chimes_dark_mixed_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS)
+	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(LIBS_CHIMES) -o $@
+snrt_chimes_rate_reset_test: ../simulation/snrt/tests/fixtures/phase0/chimes_rate_reset_test.c
+	mpicc -O2 -DCHIMES_USE_DOUBLE_PRECISION -I$(CHIMES_DIR)/src -I$(SUNDIALS_DIR)/include -I$(HDF5_DIR)/include $< -Wl,--no-as-needed -lm -ldl $(LIBS_CHIMES) -o $@
 snrt_chimes_long_interval_test: ../simulation/snrt/tests/fixtures/phase0/chimes_photo_long_interval_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS)
 	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(LIBS_CHIMES) -o $@
 snrt_chimes_runtime.o: snrt_chimes.o hydro_commons.o amr_commons.kjhan.o dust_mass_physics.o snrt_atomic_cooling.o snrt_spectral_contract.o dust_composition_optics.o snrt_moving_scatter.o dust_iron_photons.o
@@ -588,6 +592,7 @@ init_sink.o: pm_commons.o
 sink_particle.kjhan.o: snrt_agn_efficiency.o agn_feedback_deposition.o amr_parameters.jaehyun.o pm_commons.o
 ifeq ($(PHASE0_STELLAR_ENRICHMENT),1)
 sink_particle.kjhan.o: stellar_enrichment_config.o
+init_flow_fine.o: stellar_enrichment_config.o
 endif
 read_params.jaehyun.o: snrt_agn_efficiency.o
 read_params.jaehyun.o: snrt_thermochemistry.o snrt_dust_contract.o
@@ -668,6 +673,12 @@ dust_mass_runtime.o: dust_sublimation.o amr_commons.kjhan.o hydro_commons.o dust
 snrt_ramses_driver.o backup_hdf5.o: dust_composition_material.o dust_composition_optics.o snrt_dust_contract.o
 ifeq ($(SNRT),1)
 amr_step.jaehyun.o stellar_ramses_runtime.o read_params.jaehyun.o: dust_mass_runtime.o
+ifeq ($(DUST_LIVE),1)
+update_time.o: dust_mass_runtime.o snrt_dust_live.o
+dust_expansion_smoke.o: dust_mass_runtime.o snrt_dust_live.o
+dust_expansion_native: $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) dust_expansion_smoke.o
+	$(F90) $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) dust_expansion_smoke.o -o $@ $(LIBS)
+endif
 endif
 dust_mass_smoke: dust_multifluid.o dust_iron_material.o dust_pah_atomization.o dust_pah_hydrogen.o dust_pah_radiation.o dust_stochastic.o dust_drag.o dust_sublimation.o dust_mass_physics.o dust_composition_material.o dust_element_cooling.o stellar_yield_tables.o stellar_yield_interpolation.o \
                  stellar_enrichment_config.o snrt_dust_ir.o snrt_moving_scatter.o snrt_dust_contract.o \

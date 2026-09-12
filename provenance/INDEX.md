@@ -14,6 +14,18 @@ evidence.
 
 ## Active bundle map
 
+[SNRT runtime performance and hybrid measurements](snrt_performance_2026-09-12.md):
+CPU/GPU IR improvements, integrated cost breakdown, and Tensor Core limitations;
+stream-count tuning stopped per operator instruction.
+
+[CHIMES dark audit synthesis and P0/P1 implementation](chimes_dark_bundle_2026-09-12.md):
+deterministic species-rate initialization, disabled explicit-candidate removal,
+zero-photon-only work reduction, native parity and one-step integration evidence.
+
+[CHIMES solver cost and optimized SUNDIALS](chimes_solver_cost_2026-09-12.md):
+unoptimized numerical-library build identified; separate precise-FP64 release
+build, native cost attribution and same-node integrated comparison.
+
 Sequential effective-model implementation:
 [v5/empirical-SNIa connection and integrated execution](effective_population_execution_2026-09-11.md).
 Step1 native/live/restart passes; step2 configuration selected; step3 short
@@ -23,9 +35,21 @@ unchanged~68.65Myr intervals complete the four-step coupled run, with the
 original conservation thresholds. It was not deferred as microscopic physics.
 [COLIBRE-type calibration and resolution convergence](galaxy_calibration_science_plan.md)
 is a separate science campaign, not an implementation completion gate.
-Its concrete proposal now awaits operator approval: preparation/up to3 pilots
-within5,000 CPU-core-hours/1TiB first; priced23--29-run, three-resolution
-ensemble requires later approval. No science simulation has been launched.
+The operator now defers pc-scale zoom to long-term work and proceeds with the
+small-box pilot. The previous25cMpc23--29-run design and its pilot matrix are
+superseded. Report actual gas/star/DM mass and spatial resolution.
+Local zoom results are not volume-complete galaxy-population calibration.
+[New small-box hydro IC](galaxy_new_ic_2026-09-11.md):12.5cMpc,z99,128^3,
+separate gas/DM, CAMB+2LPT/LLA; file checks pass. RAMSES reader/evolution and
+halo-selected refined zoom is deferred. CPU costs include setup failures.
+The scoped cosmological CMB/material repair and bounded MPI test passed;
+the [actual128^3 coupled startup pilot](galaxy_coupled_pilot_2026-09-12.md)
+is submitted as job540015. This is not galaxy calibration or source-active
+performance qualification; its resource/startup result is tracked separately.
+No science simulation has been launched.
+[Approved initial Z=1e-10](galaxy_pilot_preenrichment_2026-09-11.md): new explicit
+GRAFIC element fields prepared; actual yield/SED Z brackets verified. Native
+reader and full cosmological coupled-model admission remain pending.
 
 Latest completion standard (operator-approved2026-09-11):
 [galaxy-scale effective physical model](general_physics_completion_plan_2026-09-11.md).

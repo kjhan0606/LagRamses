@@ -26,6 +26,9 @@ end subroutine init_flow
 !################################################################
 !################################################################
 subroutine init_flow_fine(ilevel)
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_enrichment_config, only: use_channel_resolved_feedback,elem_h,elem_he
+#endif
 #ifdef DUST_DYNAMICS
   use dust_phase_state, only: dust_phase_comoving
 #endif
@@ -112,6 +115,14 @@ subroutine init_flow_fine(ilevel)
   ! iHelium stay -1 and the H/He default-abundance lines below are no-ops.
   iHydrogen=-1
   iHelium=-1
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  if(use_channel_resolved_feedback())then
+     ! Native element ordering is owned by the compiled enrichment contract,
+     ! not by an optional, unrelated legacy text yield table.
+     iHydrogen=ichem+elem_h-1
+     iHelium=ichem+elem_he-1
+  else
+#endif
   inquire(file=trim(yieldtablefilename),exist=ok_file)
   if(ok_file)then
      open(34,file=trim(yieldtablefilename),status='old', form='formatted')
@@ -133,6 +144,9 @@ subroutine init_flow_fine(ilevel)
         if(elem_list_local(ielt)=='He') iHelium=ichem+ielt-1
      enddo
   endif
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  endif
+#endif
 
   !--------------------------------------
   ! Compute initial conditions from files

@@ -1,0 +1,14 @@
+! Initial-composition fragment, not a complete runnable science namelist.
+! Operator-approved Z=1e-10 mass fraction, NOT Z/Zsun=1e-10.
+! GRAFIC pvar files are authoritative. Requires nhydro=5,NENER=0,metal=T,
+! sf_virial=F,delayed_cooling=F,aton=F,use_sgs=F: imetal=6,ichem=7.
+&INIT_PARAMS
+ filetype='grafic'
+ initfile(1)='/gpfs/kjhan/LRD_JWST/.galaxy-preenriched.IJ8aeX/ics/level_007'
+/
+&PHYSICS_PARAMS
+ metal=.true.
+ z_ave=5d-9
+ sf_virial=.false.
+ delayed_cooling=.false.
+/

@@ -306,6 +306,40 @@ extern "C" int snrt_ir_transport_c(const double *energy,const double *ghosts,
       try {
         const int first=ib*batch_cells,n=std::min(batch_cells,nc-first);
         const size_t t=rays*n,g=size_t(ng)*n;
+        // Lease before gathering: CPU workers read the immutable global
+        // stencil directly, avoiding seven copies of each spectral cell.
+        Lease lease(8LL*(8*t+(cell_sigma?g:n)+3*g+coeff.size())+24LL*n+16777216LL,mode!=1);
+        if(lease.slot<0) {
+          if(mode==2){error=7;continue;}
+          ++cpu;
+          for(int i=first;i<first+n;++i) {
+            for(int d=0;d<nd;++d)for(int g0=0;g0<ng;++g0) {
+              const size_t ray=size_t(d)*ng+g0,at=size_t(i)*rays+ray;
+              const double old=energy[at];double value=old;
+              for(int axis=0;axis<3;++axis) {
+                int face=2*axis,outgoing=face+1;
+                if(direction[3*d+axis]<0){face=2*axis+1;outgoing=face-1;}
+                const double factor=ratio*std::abs(direction[3*d+axis]);
+                if(!blocked[6*i+outgoing])value-=factor*old;
+                const int j=neighbor[6*i+face],r=remote[6*i+face];
+                const double incoming=j?energy[size_t(j-1)*rays+ray]:r?ghosts[size_t(r-1)*rays+ray]:0.;
+                value+=factor*incoming;
+              }
+              if(!std::isfinite(value))error=2;
+              trial[at]=value;
+            }
+            for(int g0=0;g0<ng;++g0) {
+              const double tau=cell_sigma?cdt*density[size_t(i)*ng+g0]:cdt*sigma[g0]*density[i];
+              if(!std::isfinite(tau)||tau<0){error=2;continue;}
+              const double tr=std::exp(-tau);
+              const double lo=tau<1e-4?tau*(1-tau/2+tau*tau/6-tau*tau*tau/24):1-tr;
+              const double re=tau<1e-4?1-tau/2+tau*tau/6:lo/std::fmax(tau,DBL_MIN);
+              const size_t at=total+size_t(i)*ng+g0;
+              trial[at]=tr;trial[at+groups]=lo;trial[at+2*groups]=re;
+            }
+          }
+          continue;
+        }
         std::vector<double> input(7*t+(cell_sigma?g:n),0),out(t+3*g);
         for(int i=0;i<n;++i) {
           const int cell=first+i;
@@ -318,7 +352,6 @@ extern "C" int snrt_ir_transport_c(const double *energy,const double *ghosts,
           if(cell_sigma)std::copy_n(density+size_t(cell)*ng,ng,input.data()+7*t+size_t(i)*ng);
           else input[7*t+i]=density[cell];
         }
-        Lease lease(8LL*(input.size()+coeff.size()+out.size())+24LL*n+16777216LL,mode!=1);
         int rc=0;
         if(lease.slot>=0) {
           ++gpu;rc=snrt_ir_batch_c(input.data(),blocked+6*first,coeff.data(),out.data(),n,ng,nd,cdt,ratio,lease.slot,cell_sigma?2:0);
@@ -361,10 +394,28 @@ extern "C" int snrt_ir_absorb_c(const double *transported,const double *transmit
       try {
         const int first=ib*batch_cells,n=std::min(batch_cells,nc-first);
         const size_t t=rays*n,g=size_t(ng)*n;
+        Lease lease(8LL*(2*t+4*g+nd+n)+16777216LL,mode!=1);
+        if(lease.slot<0){
+          if(mode==2){error=7;continue;}
+          ++cpu;
+          for(int i=first;i<first+n;++i){
+            double receipt=0;
+            for(int d=0;d<nd;++d)for(int g0=0;g0<ng;++g0){
+              const size_t k=size_t(i)*ng+g0,ray=size_t(i)*rays+size_t(d)*ng+g0;
+              const double source=dt*rate[k]/sum_w;
+              const double value=transported[ray]*transmit[k]+source*response[k];
+              receipt+=weight[d]*(transported[ray]*loss[k]+source*(1-response[k]));
+              if(!std::isfinite(value)||value<0)error=2;
+              trial[ray]=value;
+            }
+            if(!std::isfinite(receipt)||receipt<0)error=2;
+            trial[total+i]=receipt;
+          }
+          continue;
+        }
         std::vector<double> input(t+4*g),out(t+n);
         std::copy_n(transported+size_t(first)*rays,t,input.data());
         for(int f=0;f<4;++f)std::copy_n(fields[f]+size_t(first)*ng,g,input.data()+t+f*g);
-        Lease lease(8LL*(input.size()+nd+out.size())+16777216LL,mode!=1);
         int rc=0;
         if(lease.slot>=0) {
           ++gpu;rc=snrt_ir_batch_c(input.data(),nullptr,weight,out.data(),n,ng,nd,dt,sum_w,lease.slot,1);

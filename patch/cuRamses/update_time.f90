@@ -182,6 +182,10 @@ subroutine reset_timer
 end subroutine
 !=======================================================================
 subroutine update_time(ilevel)
+#ifdef DUST_LIVE
+  use dust_mass_runtime, only: dust_expansion_level
+  use snrt_dust_live, only: snrt_dust_live_expand
+#endif
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -337,6 +341,19 @@ subroutine update_time(ilevel)
         do i=1,ilevel
            call update_cosmomag(i,sqrt(aexp/aexp_old_fine))
         enddo
+     endif
+#endif
+#ifdef DUST_LIVE
+     if(hydro)then
+        do i=1,ilevel
+           call dust_expansion_level(i,aexp/aexp_old_fine)
+        enddo
+        ! Slot-indexed radiation is global to this rank, not one field/level.
+        call snrt_dust_live_expand(aexp/aexp_old_fine,info)
+        if(info/=0)then
+           write(*,*)'ERROR: invalid cosmological IR dilution'
+           call clean_stop
+        endif
      endif
 #endif
   else
@@ -623,8 +640,5 @@ SUBROUTINE getAgeSec(t_birth_proper, age)
   age = (texp - t_birth_proper) * scale_t_sec
 END SUBROUTINE getAgeSec
 !------------------------------------------------------------------------
-
-
-
 
 

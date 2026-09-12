@@ -17,6 +17,7 @@ program chimes_photo_long_interval_test
   real(c_double) :: ledger(10),gn(9),ge(9),identity(320),ident2(320)
   real(c_double),allocatable :: values(:),n(:,:),e(:,:),nn(:,:),ee(:,:)
   real(c_double) :: initial(11),final(11),q0,q1,t0,t1,elem_error,photon_error,energy_error
+  real(c_double) :: cmb_elements(11),cmb_old(157),cmb_new(157),cmb_photons(9),cmb_ctl(9),cold_t,hot_t
   call get_command_argument(1,path)
   open(10,file=trim(path),form='formatted',status='old',action='read')
   read(10,*)nd,nvalues
@@ -48,6 +49,33 @@ program chimes_photo_long_interval_test
   enddo
   status=chimes_initialize(trim(path)//c_null_char,9,groups,500)
   if(status/=0)stop 4
+  ! CMB epoch changes are serial; invalid inputs must not mutate configuration.
+  if(chimes_cmb_temperature()/=2.727d0)stop 20
+  status=chimes_set_expansion(.01d0)
+  if(status/=0.or.abs(chimes_cmb_temperature()-272.7d0)>1d-12)stop 21
+  status=chimes_set_expansion(0d0)
+  if(status==0.or.abs(chimes_cmb_temperature()-272.7d0)>1d-12)stop 22
+  status=chimes_set_expansion(1d0)
+  if(status/=0.or.chimes_cmb_temperature()/=2.727d0)stop 23
+  ! Exercise the real Compton term, not only the configuration accessor.
+  ! Dilute ionized H suppresses collisional losses; CMB above/below100K
+  ! must reverse the thermal response from the identical initial state.
+  cmb_elements=0;cmb_elements(1)=1
+  status=chimes_neutral(cmb_elements,cmb_old)
+  if(status/=0)stop 24
+  cmb_old(1)=1;cmb_old(2)=0;cmb_old(3)=1
+  cmb_ctl=[1d-8,100d0,20d0,1d12,1d18,0d0,1d0,0d0,1d0]
+  status=chimes_cell(cmb_ctl,cmb_elements,cmb_old,[(0d0,j=1,9)],cold_t,cmb_new,cmb_photons)
+  if(status/=0)stop 25
+  status=chimes_set_expansion(.01d0)
+  if(status/=0)stop 26
+  status=chimes_cell(cmb_ctl,cmb_elements,cmb_old,[(0d0,j=1,9)],hot_t,cmb_new,cmb_photons)
+  if(status/=0.or.hot_t<=100d0.or.cold_t>=100d0)stop 27
+  print *, 'CMB_NATIVE_THERMAL_RESPONSE cold,hot=',cold_t,hot_t
+  status=chimes_budget(cmb_new,final,q1)
+  if(status/=0.or.maxval(abs(final-cmb_elements))>1d-8.or.abs(q1)>1d-8)stop 28
+  status=chimes_set_expansion(1d0)
+  if(status/=0)stop 29
   call get_environment_variable('SNRT_CHIMES_BAND_TABLE',path)
   status=chimes_band_load(trim(path)//c_null_char,bank,nr,nsh,identity)
   if(status/=0)stop 5

@@ -260,6 +260,9 @@ contains
     include 'mpif.h'
     if(.not.dust_chimes_enabled())return
     call chimes_live_initialize(status)
+    ! Serial level boundary: update the proper CMB before private cell solves.
+    ! This is derived from the restored AMR clock, not independent restart state.
+    if(status==0)status=chimes_set_expansion(merge(aexp,1d0,cosmo))
     bad=merge(0,1,status==0);k=0
     n=active(ilevel)%ngrid*twotondim
     allocate(cells(n),stage(chimes_ns,n))
@@ -485,14 +488,19 @@ contains
     ierr=1
     if(.not.ready.or..not.snrt_chimes_transition_enabled())return
     if(nd<1.or.nd>720.or.any(.not.ieee_is_finite([mass,dt,chat])).or.any(mass<0).or.dt<0.or.chat<=0.or.chat>1)return
-    allocate(nn(nd,128*9),ee(nd,128*9))
-    ierr=chimes_band_nodes(band_handle,nd,number,energy,nn,ee)
-    if(ierr/=0)return
     p=momentum;w=0;tau=0
     ! Explicit group-grey moving closure: photon-weighted D03 transport Q
     ! from the current per-ray node reconstruction, frozen for this call.
     ! The existing nine-group moving solver conserves N and kinetic+lab E;
     ! this is not a new node-resolved or cross-group Doppler transport model.
+    ! Exact zero incident N AND E: no node reconstruction is needed.
+    ! Still run the receiver below to validate phase state/directions and
+    ! preserve its transactional work/momentum contract. This is local
+    ! scattering only, never permission to skip transport or dark chemistry.
+    if(any(number/=0).or.any(energy/=0))then
+    allocate(nn(nd,128*9),ee(nd,128*9))
+    ierr=chimes_band_nodes(band_handle,nd,number,energy,nn,ee)
+    if(ierr/=0)return
     do g=1,9
        group_n=sum(number(:,g))
        if(group_n<=0)cycle
@@ -503,6 +511,7 @@ contains
           enddo
        enddo
     enddo
+    endif
     gn=number;ge=energy*ev_erg
     call snrt_moving_scatter_cell(gn,ge,p,mass,tau,directions,weights,snrt_scatter_c,w,ierr)
     if(ierr/=0)return

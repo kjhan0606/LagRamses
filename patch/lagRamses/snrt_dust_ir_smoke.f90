@@ -86,6 +86,7 @@ program snrt_dust_ir_smoke
   call coupling_checks()
   call transient_checks()
   call halo_checks()
+  call off_knot_bath_check()
 contains
   subroutine halo_checks()
     type(dust_ir_table) :: halo_table
@@ -329,6 +330,30 @@ contains
     if (local_ierr /= dust_coupling_err_shape .or. any(bad_heat/=0d0)) stop 33
     write(*,'(a)') 'NATIVE_DUST_COUPLING_OK proportional=1 saturation=1 zero_dust=1 heating=1 invalid=1'
   end subroutine coupling_checks
+
+  subroutine off_knot_bath_check()
+    type(dust_ir_table)::bath_table
+    type(dust_ir_diagnostics)::result
+    real(dust_dp)::rays(3,2),weights(2),field(2,2,1),emitted(2,1),grain_t(1)
+    real(dust_dp)::grain_e(1),capacity(1),bath_t
+    integer::links(6,1),status
+    bath_t=sqrt(20d0*50d0)
+    rays(:,1)=[1d0,0d0,0d0];rays(:,2)=-rays(:,1)
+    weights=.5d0;links=0;field=0;emitted=0
+    capacity=1d-24;grain_t=bath_t;grain_e=capacity*grain_t
+    call snrt_dust_ir_initialize(bath_table,[.001d0,.01d0],[.001d0,.01d0], &
+         [1d-21,1d-21],[10d0,20d0,50d0,100d0],bath_t,status)
+    if(status/=dust_ok)stop 101
+    call snrt_dust_ir_advance(bath_table,rays,weights,links,1d12,1d6,1d5,[1d0],[0d0], &
+         field,grain_t,emitted,result,status,1d-10,128,grain_e,capacity)
+    if(status/=dust_ok)stop 102
+    if(abs(grain_t(1)/bath_t-1)>1d-12.or.any(abs(field)>1d-35))stop 103
+    if(abs(grain_e(1)/(capacity(1)*bath_t)-1)>1d-12)stop 104
+    call snrt_dust_ir_initialize(bath_table,[.001d0,.01d0],[.001d0,.01d0], &
+         [1d-21,1d-21],[10d0,20d0,50d0,100d0],101d0,status)
+    if(status/=dust_err_table)stop 105
+    write(*,'(A)')'NATIVE_DUST_OFF_KNOT_BATH_OK equilibrium=1 no_extrapolation=1'
+  end subroutine
 
   subroutine assert_unchanged()
     if (any(transfer(energy,[0_int64],size(energy))/=transfer(before,[0_int64],size(before)))) stop 11

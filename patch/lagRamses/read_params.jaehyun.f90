@@ -22,6 +22,7 @@ subroutine read_params
   use snrt_dust_contract, only: snrt_dust_contract_load_from_environment, &
        snrt_dust_contract_loaded, snrt_dust_contract_runtime_allowed, &
        snrt_dust_contract_reference_control, snrt_dust_contract_version, &
+       snrt_dust_contract_exchange_enabled, &
        snrt_dust_contract_error_name, snrt_dust_contract_error_message
 #endif
   use pm_parameters
@@ -1866,6 +1867,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
            nml_ok=.false.
         else if (snrt_dust_contract_runtime_allowed) then
 #ifdef DUST_LIVE
+           if(cosmo.and.(.not.dust_mass_enabled.or.snrt_dust_contract_version/=4.or. &
+                .not.snrt_dust_contract_exchange_enabled))then
+              nml_ok=.false.
+              if(myid==1)write(*,'(A)')'Cosmological IR requires live dust mass and a v4 gas-exchange contract'
+           endif
            if(snrt_dust_contract_version>=3)then
               if(levelmin/=nlevelmax)then
                  call get_environment_variable('SNRT_RT_LEVEL',snrt_dust_contract_env, &
@@ -1875,9 +1881,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
                     if(myid==1)write(*,'(A)')'SNRT IR AMR requires all levels: unset SNRT_RT_LEVEL'
                  end if
               end if
-              if(cosmo.or.nremap/=0.or.trim(outformat)/='hdf5')then
+              ! Cosmological material eligibility is checked by read_hydro_params;
+              ! retain the IR layout/output constraints independently here.
+              if(nremap/=0.or.trim(outformat)/='hdf5')then
                  if(myid==1)write(*,'(A)') &
-                      'SNRT IR requires noncosmological mesh, nremap=0 and HDF5 output'
+                      'SNRT IR requires nremap=0 and HDF5 output'
                  nml_ok=.false.
               else if(levelmin/=nlevelmax.and..not.snrt_dust_contract_reference_control)then
                  if(myid==1)write(*,'(A)')'SNRT IR AMR qualification is reference-control only'

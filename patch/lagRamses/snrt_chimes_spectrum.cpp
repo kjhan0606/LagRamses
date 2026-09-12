@@ -157,6 +157,18 @@ extern "C" int snrt_chimes_band_nodes(void *handle,int nd,const double *number,c
   if(!handle || nd<1 || nd>720 || !number || !energy || !node_number || !node_energy)return 1;
   const auto &b=*static_cast<const Bank*>(handle);
   try {
+    bool dark=true;
+    for(int ray=0;ray<ng*nd;++ray){
+      const double n=number[ray],e=energy[ray];
+      if(!std::isfinite(n)||!std::isfinite(e)||n<0||e<0||(n==0&&e!=0))return 2;
+      if(n!=0)dark=false;
+    }
+    if(dark){
+      // No failing work remains: publish zeros without private node copies.
+      std::fill_n(node_number,size_t(nd)*K*ng,0.);
+      std::fill_n(node_energy,size_t(nd)*K*ng,0.);
+      return 0;
+    }
     std::vector<double> nn(size_t(nd)*K*ng,0),ee(nn.size(),0);
     for(int g=0;g<ng;++g)for(int d=0;d<nd;++d){
       const int ray=g*nd+d;const double n=number[ray],e=energy[ray];

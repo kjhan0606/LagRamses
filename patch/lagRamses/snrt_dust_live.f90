@@ -12,7 +12,7 @@ module snrt_dust_live
        dust_pah_hydrogenated,dust_pah_h2_enabled,dust_pah_atomization
   use dust_pah_live_model, only: pah_live_prepare,pah_ir_sigma
   use dust_pah_mixed, only: pah_mixed_advance
-  use omp_lib, only: omp_get_max_threads
+  use omp_lib, only: omp_get_max_threads,omp_get_wtime
   use dust_composition_material, only: dust_composition_curve,dust_composition_area
   use dust_sublimation_material, only: dust_radiative_sublimation_evolve
   use dust_composition_optics, only: d03_ng,d03_nir,d03_opacity_basis,d03_cell_weights
@@ -20,7 +20,7 @@ module snrt_dust_live
   use snrt_runtime_backend, only: snrt_runtime_ir_scatter
   use snrt_runtime_backend, only: snrt_runtime_cpu_material_allowed
   use snrt_state, only: snrt_ndirection, snrt_nslot, snrt_state_get_slot
-  use amr_commons, only: ngridmax,ncoarse,ncpu,myid,headl,next,son
+  use amr_commons, only: ngridmax,ncoarse,ncpu,myid,headl,next,son,cosmo,aexp
   use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
        snrt_halo_tile_exchange, &
        SNRT_FACE_LOCAL,SNRT_FACE_PHYSICAL,SNRT_FACE_MPI, &
@@ -42,7 +42,29 @@ module snrt_dust_live
   end type
   public :: snrt_dust_live_stage, snrt_dust_live_commit
   public :: snrt_dust_live_pack, snrt_dust_live_restore
+  public :: snrt_dust_live_expand
 contains
+  subroutine snrt_dust_live_expand(expansion_ratio,ierr)
+    ! Called ONCE at the global clock advance, outside the per-level loop.
+    ! This field is physical erg/cm3; fixed-group photon energies therefore
+    ! require a^-3 dilution. Spectral redshift is NOT supplied by this hook.
+    ! No saved epoch is needed: restart values already belong to restart a.
+    real(dust_dp),intent(in)::expansion_ratio
+    integer,intent(out)::ierr
+    real(dust_dp)::factor
+    ierr=dust_err_state
+    if(.not.ieee_is_finite(expansion_ratio).or.expansion_ratio<=0)return
+    factor=(1d0/expansion_ratio)**3
+    if(.not.ieee_is_finite(factor).or.factor<=0)return
+    if(allocated(radiation))then
+       if(factor>1d0)then
+          if(maxval(radiation)>huge(1d0)/factor)return
+       endif
+       radiation=radiation*factor
+    endif
+    ierr=dust_ok
+  end subroutine
+
   subroutine prepare(ierr)
     integer, intent(out) :: ierr
     integer :: ng, nt, old, capacity,nb
@@ -178,6 +200,7 @@ contains
     logical, allocatable :: blocked(:,:)
     type(dust_ir_diagnostics) :: step
     real(dust_dp) :: cfl,step_dt,mu,q
+    real(dust_dp) :: phase_start,halo_wall,solve_wall,scatter_wall
     integer :: nsub,isub,i,ng,face,k,nghost,nfield,g,d,global_nsub,info,has_coarse,b,nbulk
     integer :: grid,child,cell,ncoarse_leaf,axis
     call prepare(ierr)
@@ -324,28 +347,39 @@ contains
        call collective_error(ierr)
        if(ierr/=dust_ok)return
     end if
+    halo_wall=0;solve_wall=0;scatter_wall=0
     do isub=1,nsub
+       phase_start=omp_get_wtime()
        ! Reuse RAMSES' real halo communicator, in FP64. All ranks participate
        ! in every substep, including a rank with no local MPI boundary faces.
        if(ncpu>1)then
           do first_component=1,ng*snrt_ndirection,halo_tile
              ncomponent=min(halo_tile,ng*snrt_ndirection-first_component+1)
              halo_field=0d0
-             do column=1,ncomponent
-                component=first_component+column-1
-                g=mod(component-1,ng)+1;d=(component-1)/ng+1
-                halo_field(cells,column)=trial(g,d,:)
+             ! Cell-major packing reuses adjacent frequencies in each cache
+             ! line instead of rereading the entire strided field per column.
+!$omp parallel do private(i,column,component,g,d) schedule(static)
+             do i=1,size(cells)
+                do column=1,ncomponent
+                   component=first_component+column-1
+                   g=mod(component-1,ng)+1;d=(component-1)/ng+1
+                   halo_field(cells(i),column)=trial(g,d,i)
+                enddo
              enddo
+!$omp end parallel do
              call snrt_halo_tile_exchange(halo_field(:,1:ncomponent),ilevel,ierr)
              call collective_error(ierr)
              if(ierr/=dust_ok)return
-             do column=1,ncomponent
-                component=first_component+column-1
-                g=mod(component-1,ng)+1;d=(component-1)/ng+1
-                do k=1,nghost
-                   if(ghost_kind(k)==SNRT_FACE_MPI)ghosts(g,d,k)=halo_field(ghost_cells(k),column)
-                end do
+!$omp parallel do private(k,column,component,g,d) schedule(static)
+             do k=1,nghost
+                if(ghost_kind(k)/=SNRT_FACE_MPI)cycle
+                do column=1,ncomponent
+                   component=first_component+column-1
+                   g=mod(component-1,ng)+1;d=(component-1)/ng+1
+                   ghosts(g,d,k)=halo_field(ghost_cells(k),column)
+                enddo
              end do
+!$omp end parallel do
           end do
        end if
        if(has_coarse/=0)then
@@ -375,6 +409,8 @@ contains
              end do
           end do
        end if
+       halo_wall=halo_wall+omp_get_wtime()-phase_start
+       phase_start=omp_get_wtime()
        step=dust_ir_diagnostics()
        ierr=dust_ok
        if(dust_pah_enabled())then
@@ -423,6 +459,18 @@ contains
              sub_bins=sub_trial
              exchange_sum=exchange_sum+exchange
           endif
+       else if(cosmo.and.present(gas_energy))then
+       conductance=2*kb*n_hydrogen*density*snrt_dust_contract_collision_area_per_h* &
+            snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
+       if(present(cell_collision_area))conductance=2*kb*n_hydrogen*density*cell_collision_area* &
+            snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
+       if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
+            density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
+            ghosts,remote,blocked,bath_dispatch=cosmological_material, &
+            transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
+            gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange, &
+            cell_material_u=cell_material_u,cell_weights=cell_weights)
+       if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
        else if(present(gas_energy))then
        conductance=2*kb*n_hydrogen*density*snrt_dust_contract_collision_area_per_h* &
             snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
@@ -444,6 +492,8 @@ contains
             cell_material_u=cell_material_u,cell_weights=cell_weights,phase_density=phase_density, &
             phase_momentum=phase_p_stage,phase_absorption=phase_alpha,phase_scattering=phase_sca,phase_work=phase_work_step)
        endif
+       solve_wall=solve_wall+omp_get_wtime()-phase_start
+       phase_start=omp_get_wtime()
        ! Conservative delta-isotropic angular relaxation, Lie-split after
        ! absorption/emission. No scattering energy is given to the material.
        if(ierr==dust_ok.and.size(slots)>0.and.allocated(scatter_sigma).and..not.present(phase_density))then
@@ -453,6 +503,7 @@ contains
              call snrt_runtime_ir_scatter(trial,weights,density,scatter_sigma,chat*step_dt,ierr)
           endif
        endif
+       scatter_wall=scatter_wall+omp_get_wtime()-phase_start
        if(ierr/=dust_ok.and.size(slots)>0)then
           write(*,'(A,3I6,A,2ES25.16,A,ES14.5)')' SNRT IR rejected state rank/level/error=',myid,ilevel,ierr, &
                ' material_T_range=',minval(material/capacity),maxval(material/capacity), &
@@ -468,14 +519,18 @@ contains
        diagnostics%primary_erg=diagnostics%primary_erg+step%primary_erg
        diagnostics%interface_erg=diagnostics%interface_erg+step%interface_erg
        diagnostics%mechanical_erg=diagnostics%mechanical_erg+step%mechanical_erg
+       diagnostics%background_erg=diagnostics%background_erg+step%background_erg
        diagnostics%balance_relative=max(diagnostics%balance_relative,step%balance_relative)
        diagnostics%local_relative=max(diagnostics%local_relative,step%local_relative)
        diagnostics%iterations=diagnostics%iterations+step%iterations
     end do
     ! Empty dust cells carry zero material energy, not a fictitious heat bath.
+    if(myid==1)write(*,'(A,I0,A,I0,3(A,F12.4))')' SNRT_IR timings level=',ilevel,' substeps=',nsub, &
+         ' halo=',halo_wall,' solve=',solve_wall,' scatter=',scatter_wall
     ! Their reported temperature is only a harmless diagnostic placeholder.
     do i=1,size(slots)
        if(density(i)==0)temperature(i)=snrt_dust_contract_ir_background_k
+       if(cosmo.and.density(i)==0)temperature(i)=2.727d0/aexp
     end do
     if(present(gas_transfer))gas_transfer=exchange_sum
     if(dust_pah_charged())gas_electrons=electron_work
@@ -489,6 +544,39 @@ contains
        phase_momentum=phase_p_stage;phase_work=phase_work_sum
     endif
   contains
+    subroutine cosmological_material(heating,density,old_energy,log_t,basis_band,cell_weights,dt, &
+         gas_energy,gas_capacity,conductance,rate,temperature,next_energy,gas_transfer,background_transfer,ierr)
+      ! Optically thin analytic CMB: only positive excess enters transport.
+      ! Negative net emission is supplied by the explicitly recorded bath.
+      real(dust_dp),intent(in)::heating(:),density(:),old_energy(:),log_t(:),basis_band(:,:,:),cell_weights(:,:),dt
+      real(dust_dp),intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
+      real(dust_dp),intent(out)::rate(:,:),temperature(:),next_energy(:),gas_transfer(:),background_transfer(:)
+      integer,intent(out)::ierr
+      real(dust_dp)::bins(6),phase(4),bath
+      real(dust_dp),allocatable::bands(:,:,:)
+      integer::cell,status,bad
+      ierr=dust_err_config
+      if(.not.ieee_is_finite(aexp).or.aexp<=0)return
+      if(size(cell_weights,1)/=4.or.size(basis_band,3)/=4)return
+      if(present(phase_density).or.dust_iron_enabled().or.dust_pah_enabled())return
+      bath=2.727d0/aexp
+      allocate(bands(size(rate,1),size(log_t),6));bands=0;bands(:,:,1:4)=basis_band
+      rate=0;temperature=bath;next_energy=old_energy;gas_transfer=0;background_transfer=0
+      bad=0
+!$omp parallel do private(cell,bins,phase,status) reduction(max:bad) schedule(static)
+      do cell=1,size(density)
+         bins=0
+         bins(1:4)=cell_weights(:,cell)*density(cell)*snrt_dust_contract_mass_per_h_g
+         call iron_radiative_cell(exp(log_t),bath,bins,old_energy(cell),heating(cell),dt, &
+              snrt_dust_contract_mass_per_h_g,bands,gas_energy(cell),gas_capacity(cell),conductance(cell), &
+              next_energy(cell),temperature(cell),phase,rate(:,cell),gas_transfer(cell),status, &
+              photon_ev=snrt_dust_contract_ir_energy_ev(1:size(rate,1)),cmb_exchange=background_transfer(cell))
+         bad=max(bad,status)
+      enddo
+!$omp end parallel do
+      ierr=bad
+    end subroutine
+
     subroutine fixed_material(heating,density,old_energy,capacity,log_t,power,band, &
          material_u,use_u,dt,background,bath,tolerance,rate,temperature,next_energy,ierr, &
          gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,basis_power,basis_band)
@@ -597,6 +685,14 @@ contains
     end subroutine
 
     subroutine validate_stage()
+      ierr=dust_err_config
+      if(cosmo)then
+         if(.not.ieee_is_finite(aexp).or.aexp<=0)return
+         if(2.727d0/aexp>snrt_dust_contract_temperature_k(snrt_dust_contract_number_temperature))return
+         if(.not.present(gas_energy).or..not.present(cell_weights).or..not.present(cell_material_u))return
+         if(present(phase_density).or.present(sublimation_bins).or.dust_iron_enabled().or.dust_pah_enabled())return
+         if(.not.snrt_runtime_cpu_material_allowed())return
+      endif
       ierr=dust_err_shape
       if(present(phase_density).neqv.present(phase_momentum))return
       if(present(phase_density).neqv.present(phase_work))return
