@@ -22,6 +22,7 @@ program snrt_regrid_smoke
   real(dp), allocatable :: ir(:),out_ir(:),saved_ir(:)
   real(dp) :: expected_ions,observed_ions
   integer :: ierr,info,j,slot,old_slots,g
+  character(len=32) :: transport_check
   call MPI_INIT(info)
   call snrt_backend_initialize(ierr)
   if(ierr/=0)stop 54
@@ -32,6 +33,12 @@ program snrt_regrid_smoke
   call snrt_spectral_contract_load_from_environment(ierr)
   allocate(ir(snrt_dust_contract_number_ir*snrt_ndirection))
   allocate(out_ir(size(ir)),saved_ir(size(ir)))
+  call get_command_argument(3,transport_check)
+  if(trim(transport_check)=='moment')then
+     call moment_checks()
+     call MPI_FINALIZE(info)
+     stop
+  endif
   p=0.125_dp; p(1:4)=[1d0,.25d0,.2d0,.3d0]; ir=1d-23
   ! The old standalone number-only fixture needs no spectral environment.
   ! When a contract is supplied, exercise both signs of the correction.
@@ -146,6 +153,209 @@ program snrt_regrid_smoke
 #endif
   call MPI_FINALIZE(info)
 contains
+  subroutine moment_checks()
+    use amr_parameters, only: snrt_transport_model,snrt_moment_order,nlevelmax,i8b
+    use snrt_moment_live
+    use snrt_moment_transport, only: mn_project,mn_ok
+#ifdef HDF5
+    use ramses_hdf5_io
+    use amr_commons, only: numbl,varcpu_restart,varcpu_ngrid_file,varcpu_grid_file_idx
+    use snrt_thermochemistry, only: snrt_secondary_tables_load_from_environment
+    use snrt_agn_efficiency, only: snrt_agn_rt_requested
+#endif
+    real(dp),allocatable :: angular(:),number(:,:),energy(:,:),irm(:,:),npad(:,:),epad(:,:),ipad(:,:)
+    real(dp),allocatable :: original(:,:),original_ir(:,:)
+    real(dp),allocatable :: material_ir(:,:),projection(:,:),tile_ir(:,:,:),tile_projection(:,:,:),tile_before(:,:,:)
+    real(dp),allocatable :: tile_material(:),tile_temperature(:),tile_density(:),tile_primary(:),tile_old(:),tile_capacity(:)
+    real(dp) :: material_energy,material_temperature,balance,initial_energy
+    type(dust_ir_diagnostics) :: diag
+    integer :: k,ngir,status,pass,base,cell
+    integer :: tile_cells(2),tile_slots(2)
+    character(len=1024) :: directory,path
+    snrt_transport_model='tensor_mn';snrt_moment_order=5
+    call mn_live_initialize(5,snrt_ngroups,status)
+    if(status/=mn_ok)stop 101
+    ngir=snrt_dust_contract_number_ir
+    allocate(angular(mn_live_basis%nq),number(36,snrt_ngroups),energy(36,snrt_ngroups),irm(36,ngir))
+    allocate(npad(snrt_ndirection,snrt_ngroups),epad(snrt_ndirection,snrt_ngroups),ipad(ngir,snrt_ndirection))
+    do k=1,snrt_ngroups
+       angular=exp(.4d0*mn_live_basis%direction(1,:)-.2d0*mn_live_basis%direction(3,:))*k
+       call mn_project(mn_live_basis,angular,number(:,k),status)
+       if(status/=mn_ok)stop 102
+       energy(:,k)=snrt_group_mean_energy_ev(k)*number(:,k)
+    enddo
+    do k=1,ngir
+       angular=1d-23*k*exp(-.3d0*mn_live_basis%direction(2,:))
+       call mn_project(mn_live_basis,angular,irm(:,k),status)
+       if(status/=mn_ok)stop 103
+    enddo
+    npad=0;epad=0;ipad=0
+    npad(1:36,:)=number;epad(1:36,:)=energy;ipad(:,1:36)=transpose(irm)
+    p=0;p(1:4)=[105d0,.25d0,.2d0,.3d0]
+    p(5:4+snrt_checkpoint_number_width)=reshape(npad,[snrt_checkpoint_number_width])
+    p(5+snrt_checkpoint_number_width:)=reshape(epad,[snrt_checkpoint_number_width])
+    ir=reshape(ipad,[size(ir)])
+    if(.not.any(p(5:)<0).or..not.any(ir<0))stop 104
+    call snrt_state_restore_cell(1,p,status)
+    if(status/=0)stop 105
+    if(size(snrt_intensity,1)/=0.or.size(snrt_energy_shift,1)/=0)stop 106
+    call snrt_dust_live_restore(1,ir,status)
+    if(status/=0)stop 107
+    call snrt_regrid_refine(1,1,status)
+    if(status/=0)stop 108
+    expected_ions=0
+    do k=1,8
+       call snrt_state_pack_cell(k+1,q,status)
+       if(status/=0.or.any(q/=p))stop 109
+       call snrt_dust_live_pack(k+1,out_ir,status)
+       if(status/=0.or.any(out_ir/=ir))stop 110
+       q=p;q(2)=real(k,dp)/16;q(5:)=p(5:)*k;uold(k+1,1)=k
+       expected_ions=expected_ions+k*q(2)
+       call snrt_state_restore_cell(k+1,q,status)
+       if(status/=0)stop 111
+       call snrt_dust_live_restore(k+1,ir*k,status)
+       if(status/=0)stop 112
+    enddo
+    call snrt_regrid_coarsen(1,1,status)
+    if(status/=0)stop 113
+    call snrt_state_pack_cell(1,q,status)
+    if(status/=0.or.abs(q(2)*36-expected_ions)>1d-13)stop 114
+    if(maxval(abs(q(5:)-4.5d0*p(5:)))>1d-12*maxval(abs(p(5:))))stop 115
+    call snrt_dust_live_pack(1,out_ir,status)
+    if(status/=0.or.maxval(abs(out_ir-4.5d0*ir))>1d-13*maxval(abs(ir)))stop 116
+    saved=q;saved_ir=out_ir
+    do k=1,8
+       call snrt_state_pack_cell(k+1,q,status)
+       if(status/=0.or.any(q(2:)/=0))stop 117
+       call snrt_dust_live_pack(k+1,out_ir,status)
+       if(status/=0.or.any(out_ir/=0))stop 118
+    enddo
+    q=p;q(1)=1
+    call snrt_state_restore_cell(1,q,status)
+    if(status==0)stop 119
+    q=p;q(5+36)=1
+    call snrt_state_restore_cell(1,q,status)
+    if(status==0)stop 120
+    q=p;q(5)=-1
+    call snrt_state_restore_cell(1,q,status)
+    if(status==0)stop 121
+    call snrt_state_pack_cell(1,q,status)
+    if(status/=0.or.any(q/=saved))stop 122
+    call snrt_dust_live_pack(1,out_ir,status)
+    if(status/=0.or.any(out_ir/=saved_ir))stop 123
+    ! Slab metadata growth moves ownership without losing primary or IR.
+    call mn_live_reserve(2048,status)
+    if(status/=0)stop 124
+    call snrt_state_pack_cell(1,q,status)
+    if(status/=0.or.any(q/=saved))stop 125
+    call snrt_dust_live_pack(1,out_ir,status)
+    if(status/=0.or.any(out_ir/=saved_ir))stop 126
+    write(*,'(A)')'SNRT_M5_NATIVE_REGRID_PASS signed_moments=1 no_SN_allocation=1 refine_restrict=1 reject_atomic=1'
+    ! Reuse the actual live table, material callback and runtime backend.
+    ! No topology is allocated here: local matter must not touch a halo or
+    ! MPI collective, even when ncpu says this is a decomposed simulation.
+    material_ir=irm;allocate(projection(36,ngir));projection=0
+    material_energy=2d-23;material_temperature=20;diag=dust_ir_diagnostics()
+    initial_energy=sum(material_ir(1,:))+material_energy
+    ncpu=2
+    call snrt_dust_live_moment_cell(1,1,snrt_state_get_slot(1),1d0,1d-4,2.99792458d8, &
+         1d0,1d-25,2d-23,1d-24,material_ir,material_energy,material_temperature,diag,projection,status)
+    ncpu=1
+    if(status/=0)then
+       write(*,*)'M5 live dust cell status=',status
+       stop 134
+    endif
+    balance=sum(material_ir(1,:))+material_energy-initial_energy-1d-25-sum(projection(1,:))
+    if(abs(balance)>1d-9*(initial_energy+1d-25))stop 135
+    if(diag%escaped_erg/=0.or.diag%interface_erg/=0.or.diag%balance_relative>1d-9)stop 136
+    call snrt_dust_live_pack(1,out_ir,status)
+    if(status/=0.or.any(out_ir/=saved_ir))stop 137
+    number(:,1)=material_ir(:,1);energy(:,1)=projection(:,1)
+    initial_energy=material_energy
+    call snrt_dust_live_moment_cell(1,1,snrt_state_get_slot(1),1d0,1d-4,2.99792458d8, &
+         1d0,1d-25,2d-23,-1d-24,material_ir,material_energy,material_temperature,diag,projection,status)
+    if(status==0.or.material_energy/=initial_energy)stop 138
+    if(any(material_ir(:,1)/=number(:,1)).or.any(projection(:,1)/=energy(:,1)))stop 139
+    write(*,'(A,ES14.5)')'SNRT_M5_LIVE_DUST_CELL_PASS material_only=1 no_halo=1 rollback=1 balance=',balance
+    ! The tile adapter must reproduce the one-cell transaction while making
+    ! exactly one material-only stage call.  It must also keep both cells and
+    ! their output projection untouched when one member is rejected.
+    allocate(tile_ir(36,ngir,2),tile_projection(36,ngir,2),tile_before(36,ngir,2), &
+         tile_material(2),tile_temperature(2),tile_density(2),tile_primary(2),tile_old(2),tile_capacity(2))
+    tile_ir(:,:,1)=irm;tile_ir(:,:,2)=irm;tile_projection=0;tile_before=tile_ir
+    tile_cells=[1,2];tile_slots=[snrt_state_get_slot(1),snrt_state_get_slot(2)]
+    tile_density=1d0;tile_primary=1d-25;tile_old=2d-23;tile_capacity=1d-24
+    tile_material=2d-23;tile_temperature=20;diag=dust_ir_diagnostics()
+    call snrt_dust_live_moment_tile(1,tile_cells,tile_slots,1d0,1d-4,2.99792458d8, &
+         tile_density,tile_primary,tile_old,tile_capacity,tile_ir,tile_material,tile_temperature,diag, &
+         tile_projection,status)
+    if(status/=dust_ok)then
+       write(*,*)'M5 live dust tile status=',status
+       stop 140
+    endif
+    if(maxval(abs(tile_ir(:,:,1)-material_ir))>1d-12*max(1d0,maxval(abs(material_ir))))stop 141
+    if(maxval(abs(tile_projection(:,:,1)-projection))>1d-12*max(1d0,maxval(abs(projection))))stop 142
+    if(abs(tile_material(1)-material_energy)>1d-12*max(1d0,abs(material_energy)))stop 143
+    if(maxval(abs(tile_ir(:,:,2)-tile_ir(:,:,1)))>1d-12*max(1d0,maxval(abs(tile_ir(:,:,1)))) .or. &
+       abs(tile_material(2)-tile_material(1))>1d-12*max(1d0,abs(tile_material(1))))stop 144
+    tile_before=tile_ir;tile_projection(:,:,1)=projection;tile_projection(:,:,2)=projection
+    tile_material=[material_energy,material_energy]
+    tile_capacity=[-1d-24,1d-24]
+    call snrt_dust_live_moment_tile(1,tile_cells,tile_slots,1d0,1d-4,2.99792458d8, &
+         tile_density,tile_primary,tile_old,tile_capacity,tile_ir,tile_material,tile_temperature,diag, &
+         tile_projection,status)
+    if(status==dust_ok)stop 145
+    if(any(tile_ir/=tile_before).or.any(tile_projection(:,:,1)/=projection).or. &
+       any(tile_projection(:,:,2)/=projection).or.any(tile_material/=[material_energy,material_energy]))stop 146
+    write(*,'(A)')'SNRT_M5_LIVE_DUST_TILE_PASS batch=2 one_stage=1 parity=1 rollback=1'
+#ifdef HDF5
+    call get_command_argument(1,directory)
+    if(len_trim(directory)==0)stop 127
+    if(.not.snrt_agn_rt_requested())stop 128
+    call snrt_secondary_tables_load_from_environment(status)
+    if(status/=0)stop 129
+    nlevelmax=1
+    allocate(headl(1,1),next(ngridmax),numbl(1,1))
+    headl=1;next=0;next(1)=2;numbl=2
+    allocate(original(snrt_checkpoint_cell_width,16),original_ir(size(ir),16))
+    do k=1,16
+       q=p;q(5:)=p(5:)*k
+       call snrt_state_restore_cell(k+1,q,status)
+       if(status/=0)stop 130
+       call snrt_dust_live_restore(k+1,ir*k,status)
+       if(status/=0)stop 131
+       call snrt_state_pack_cell(k+1,original(:,k),status)
+       call snrt_dust_live_pack(k+1,original_ir(:,k),status)
+    enddo
+    path=trim(directory)//'/moment_radiation.h5'
+    call hdf5_create_parallel(path,MPI_COMM_WORLD)
+    call snrt_hdf5_write()
+    call hdf5_close_file()
+    allocate(varcpu_ngrid_file(1),varcpu_grid_file_idx(ngridmax))
+    varcpu_ngrid_file=2;varcpu_grid_file_idx=[0,0,1,2]
+    do pass=1,2
+       varcpu_restart=pass==2;base=1
+       if(varcpu_restart)base=3
+       headl=base;next=0;next(base)=base+1
+       do k=1,16
+          cell=1+(base-1)*8+k
+          call snrt_state_restore_cell(cell,p,status)
+          call snrt_dust_live_restore(cell,ir*0d0,status)
+       enddo
+       call hdf5_open_parallel(path,MPI_COMM_WORLD)
+       call snrt_hdf5_read()
+       call hdf5_close_file()
+       do k=1,16
+          cell=1+(base-1)*8+k
+          call snrt_state_pack_cell(cell,q,status)
+          if(status/=0.or.any(q/=original(:,k)))stop 132
+          call snrt_dust_live_pack(cell,out_ir,status)
+          if(status/=0.or.any(out_ir/=original_ir(:,k)))stop 133
+       enddo
+    enddo
+    write(*,'(A)')'SNRT_M5_NATIVE_HDF5_PASS exact_N_E_IR=1 file_grid_remap=1'
+#endif
+  end subroutine
 #ifdef HDF5
   subroutine hdf5_checks()
     use ramses_hdf5_io

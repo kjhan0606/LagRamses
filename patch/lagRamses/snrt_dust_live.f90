@@ -19,7 +19,9 @@ module snrt_dust_live
   use snrt_runtime_backend, only: snrt_runtime_dust_material, snrt_runtime_ir_transport, snrt_runtime_ir_absorb
   use snrt_runtime_backend, only: snrt_runtime_ir_scatter
   use snrt_runtime_backend, only: snrt_runtime_cpu_material_allowed
-  use snrt_state, only: snrt_ndirection, snrt_nslot, snrt_state_get_slot
+  use snrt_state, only: snrt_ndirection, snrt_nslot, snrt_state_get_slot,snrt_state_is_moment
+  use snrt_moment_live, only: mn_live_ir_pack,mn_live_ir_unpack,mn_live_ir_expand,mn_live_basis
+  use snrt_moment_transport, only: mn_project,mn_reconstruct,mn_ok
   use amr_commons, only: ngridmax,ncoarse,ncpu,myid,headl,next,son,cosmo,aexp
   use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
        snrt_halo_tile_exchange, &
@@ -31,7 +33,14 @@ module snrt_dust_live
 #include "amr_index.h"
   implicit none
   private
-  real(dust_dp), allocatable, save :: radiation(:,:,:)
+  ! Stable slabs avoid retaining a full old+new dense IR field on growth.
+  ! Pointer components transfer ownership without deep-copying slab data.
+  integer, parameter :: ir_slab_slots=128
+  type :: ir_slab
+     real(dust_dp), pointer :: values(:,:,:)=>null()
+  end type
+  type(ir_slab), allocatable, save :: radiation(:)
+  integer,save::ir_ready_slots=0
   real(dust_dp), allocatable, save :: scattering_basis(:,:)
   real(dust_dp), allocatable, save :: absorption_basis(:,:)
   type(dust_ir_table), save :: table
@@ -41,9 +50,27 @@ module snrt_dust_live
      real(dust_dp), allocatable :: energy(:,:,:)
   end type
   public :: snrt_dust_live_stage, snrt_dust_live_commit
+  public :: snrt_dust_live_prepare
   public :: snrt_dust_live_pack, snrt_dust_live_restore
+  public :: snrt_dust_live_validate_payload
   public :: snrt_dust_live_expand
+  public :: snrt_dust_live_moment_cell
+  public :: snrt_dust_live_moment_tile
 contains
+  function ir_slot(slot) result(values)
+    integer,intent(in)::slot
+    real(dust_dp),pointer::values(:,:)
+    values=>radiation((slot-1)/ir_slab_slots+1)%values(:,:,mod(slot-1,ir_slab_slots)+1)
+  end function
+
+  subroutine ir_store(slot,values)
+    integer,intent(in)::slot
+    real(dust_dp),intent(in)::values(:,:)
+    real(dust_dp),pointer::destination(:,:)
+    destination=>ir_slot(slot)
+    destination=values
+  end subroutine
+
   subroutine snrt_dust_live_expand(expansion_ratio,ierr)
     ! Called ONCE at the global clock advance, outside the per-level loop.
     ! This field is physical erg/cm3; fixed-group photon energies therefore
@@ -52,23 +79,34 @@ contains
     real(dust_dp),intent(in)::expansion_ratio
     integer,intent(out)::ierr
     real(dust_dp)::factor
+    integer::b
     ierr=dust_err_state
     if(.not.ieee_is_finite(expansion_ratio).or.expansion_ratio<=0)return
     factor=(1d0/expansion_ratio)**3
     if(.not.ieee_is_finite(factor).or.factor<=0)return
+    if(snrt_state_is_moment())then
+       call mn_live_ir_expand(factor,ierr)
+       return
+    endif
     if(allocated(radiation))then
        if(factor>1d0)then
-          if(maxval(radiation)>huge(1d0)/factor)return
+          do b=1,size(radiation)
+             if(.not.associated(radiation(b)%values))cycle
+             if(maxval(radiation(b)%values)>huge(1d0)/factor)return
+          enddo
        endif
-       radiation=radiation*factor
+       do b=1,size(radiation)
+          if(.not.associated(radiation(b)%values))cycle
+          radiation(b)%values=radiation(b)%values*factor
+       enddo
     endif
     ierr=dust_ok
   end subroutine
 
   subroutine prepare(ierr)
     integer, intent(out) :: ierr
-    integer :: ng, nt, old, capacity,nb
-    real(dust_dp), allocatable :: expanded(:,:,:)
+    integer :: ng, nt, old, capacity,nb,b,status
+    type(ir_slab), allocatable :: expanded(:)
     real(dust_dp),allocatable::basis(:,:)
     real(dust_dp)::pa(d03_ng,6),ps(d03_ng,6),pg(d03_ng,6),ia(d03_nir,6),isc(d03_nir,6),ig(d03_nir,6)
     ierr=dust_err_config
@@ -128,20 +166,300 @@ contains
        if(ierr/=dust_ok)return
        initialized=.true.
     end if
+    if(snrt_state_is_moment())then
+       ! Physical table preparation is shared; compact slots must never
+       ! acquire a second persistent angular IR field here.
+       ierr=dust_ok;return
+    endif
+    if(snrt_nslot<=ir_ready_slots)then
+       ierr=dust_ok;return
+    endif
     old=0
     if(allocated(radiation))then
-       if(size(radiation,1)/=ng)then
+       if(size(radiation)>0)then
+       if(associated(radiation(1)%values))then
+       if(size(radiation(1)%values,1)/=ng)then
           ierr=dust_err_config
           return
        end if
-       old=size(radiation,3)
+       endif
+       endif
+       old=size(radiation)
     end if
-    if(old<snrt_nslot)then
-       capacity=max(snrt_nslot,max(16,2*old))
-       allocate(expanded(ng,snrt_ndirection,capacity)); expanded=0
-       if(old>0)expanded(:,:,1:old)=radiation
+    capacity=(snrt_nslot+ir_slab_slots-1)/ir_slab_slots
+    if(old<capacity)then
+       allocate(expanded(capacity),stat=status)
+       if(status/=0)then
+          ierr=dust_err_state;return
+       endif
+       if(old>0)expanded(1:old)=radiation
        call move_alloc(expanded,radiation)
     end if
+    do b=1,capacity
+       if(associated(radiation(b)%values))cycle
+       allocate(radiation(b)%values(ng,snrt_ndirection,ir_slab_slots),stat=status)
+       if(status/=0)then
+          ierr=dust_err_state;return
+       endif
+       radiation(b)%values=0
+    enddo
+    ir_ready_slots=capacity*ir_slab_slots
+    ierr=dust_ok
+  end subroutine
+
+  subroutine snrt_dust_live_prepare(ierr)
+    ! Complete all lazy, shared dust/PAH initialization before the caller
+    ! enters a cell-parallel region.  The per-cell stage retains its guard
+    ! for serial/restart callers, but must not be the first initializer from
+    ! multiple OpenMP workers.
+    integer,intent(out)::ierr
+    call prepare(ierr)
+  end subroutine
+
+  subroutine snrt_dust_live_moment_cell(ilevel,cell,slot,dx,dt,chat,density,primary_energy,old_energy,capacity, &
+       energy,material,temperature,diagnostics,projection,ierr, &
+       gas_energy,gas_capacity,n_hydrogen,gas_transfer,cell_material_u,cell_collision_area,cell_weights, &
+       sublimation_bins,sublimation_next,pah_population,primary_spectrum,primary_pah_heat,primary_pah_captures, &
+       phase_density,phase_momentum,phase_work,gas_electrons,electron_capacity,gas_atomic_h,gas_molecular_h2, &
+       gas_atomic_c,gas_carbon_ion)
+    ! Actual live dust physics, with one-cell angular scratch. The optional
+    ! material arrays retain the existing ABI (last extent = one cell).
+    ! Neither persistent slots nor RAMSES uold are modified. All mutable
+    ! outputs, including PAH/phase/gas state, publish only after final closure.
+    integer,intent(in) :: ilevel,cell,slot
+    real(dust_dp),intent(in) :: dx,dt,chat,density,primary_energy,old_energy,capacity
+    real(dust_dp),intent(inout) :: energy(:,:),material,temperature,projection(:,:)
+    type(dust_ir_diagnostics),intent(inout) :: diagnostics
+    integer,intent(out) :: ierr
+    real(dust_dp),optional,intent(in) :: gas_energy(:),gas_capacity(:),n_hydrogen(:)
+    real(dust_dp),optional,intent(inout) :: gas_transfer(:)
+    real(dust_dp),optional,intent(in) :: cell_material_u(:,:),cell_collision_area(:),cell_weights(:,:)
+    real(dust_dp),optional,intent(in) :: sublimation_bins(:,:)
+    real(dust_dp),optional,intent(inout) :: sublimation_next(:,:),pah_population(:,:)
+    real(dust_dp),optional,intent(in) :: primary_spectrum(:,:),primary_pah_heat(:,:),primary_pah_captures(:,:)
+    real(dust_dp),optional,intent(in) :: phase_density(:,:),electron_capacity
+    real(dust_dp),optional,intent(inout) :: phase_momentum(:,:,:),phase_work(:,:),gas_electrons(:)
+    real(dust_dp),optional,intent(inout) :: gas_atomic_h(:),gas_molecular_h2(:),gas_atomic_c(:),gas_carbon_ion(:)
+    real(dust_dp) :: angular(size(energy,2),mn_live_basis%nq,1),check(mn_live_basis%nq)
+    real(dust_dp) :: candidate(size(energy,1),size(energy,2)),receipt(size(energy,1),size(energy,2))
+    real(dust_dp) :: next_material(1),next_temperature(1)
+    real(dust_dp),allocatable :: next_angular(:,:,:),next_transfer(:),next_sublimation(:,:),next_population(:,:)
+    real(dust_dp),allocatable :: next_momentum(:,:,:),next_work(:,:),next_electrons(:),next_h(:),next_h2(:)
+    real(dust_dp),allocatable :: next_c(:),next_cp(:)
+    type(dust_ir_diagnostics) :: trial
+    type(dust_live_coarse_trial) :: coarse
+    integer :: g,status,neighbors(6,1)
+    ierr=dust_err_config
+    if(.not.snrt_state_is_moment().or.mn_live_basis%nm<1)return
+    ierr=dust_err_shape
+    if(any(shape(energy)/=[mn_live_basis%nm,snrt_dust_contract_number_ir]))return
+    if(any(shape(projection)/=shape(energy)))return
+    do g=1,size(energy,2)
+       call mn_reconstruct(mn_live_basis,energy(:,g),angular(g,:,1),status)
+       if(status/=mn_ok)then
+          ierr=100+status;return
+       endif
+       call mn_project(mn_live_basis,angular(g,:,1),candidate(:,g),status)
+       if(status/=mn_ok)then
+          ierr=100+status;return
+       endif
+    enddo
+    ! Numerical reclosure is a separate density receipt, not material heat.
+    receipt=candidate-energy;neighbors=0
+    if(present(gas_transfer))allocate(next_transfer(size(gas_transfer)),source=0d0)
+    if(present(sublimation_next))allocate(next_sublimation(size(sublimation_next,1),size(sublimation_next,2)),source=0d0)
+    if(present(pah_population))next_population=pah_population
+    if(present(phase_momentum))next_momentum=phase_momentum
+    if(present(phase_work))next_work=phase_work
+    if(present(gas_electrons))next_electrons=gas_electrons
+    if(present(gas_atomic_h))next_h=gas_atomic_h
+    if(present(gas_molecular_h2))next_h2=gas_molecular_h2
+    if(present(gas_atomic_c))next_c=gas_atomic_c
+    if(present(gas_carbon_ion))next_cp=gas_carbon_ion
+    call snrt_dust_live_stage(ilevel,[cell],[slot],neighbors,mn_live_basis%direction,mn_live_basis%weight, &
+         dx,dt,chat,[density],[primary_energy],[old_energy],[capacity], &
+         next_angular,next_material,next_temperature,trial,ierr,coarse, &
+         gas_energy=gas_energy,gas_capacity=gas_capacity,n_hydrogen=n_hydrogen,gas_transfer=next_transfer, &
+         cell_material_u=cell_material_u,cell_collision_area=cell_collision_area,cell_weights=cell_weights, &
+         sublimation_bins=sublimation_bins,sublimation_next=next_sublimation,pah_population=next_population, &
+         primary_spectrum=primary_spectrum,primary_pah_heat=primary_pah_heat,primary_pah_captures=primary_pah_captures, &
+         phase_density=phase_density,phase_momentum=next_momentum,phase_work=next_work, &
+         gas_electrons=next_electrons,electron_capacity=electron_capacity,gas_atomic_h=next_h,gas_molecular_h2=next_h2, &
+         gas_atomic_c=next_c,gas_carbon_ion=next_cp,incoming_radiation=angular)
+    if(ierr/=dust_ok)return
+    do g=1,size(energy,2)
+       call mn_project(mn_live_basis,next_angular(g,:,1),candidate(:,g),status)
+       if(status/=mn_ok)then
+          ierr=100+status;return
+       endif
+       call mn_reconstruct(mn_live_basis,candidate(:,g),check,status)
+       if(status/=mn_ok)then
+          ierr=100+status;return
+       endif
+    enddo
+    energy=candidate;material=next_material(1);temperature=next_temperature(1);projection=receipt;diagnostics=trial
+    if(present(gas_transfer))gas_transfer=next_transfer
+    if(present(sublimation_next))sublimation_next=next_sublimation
+    if(present(pah_population))pah_population=next_population
+    if(present(phase_momentum))phase_momentum=next_momentum
+    if(present(phase_work))phase_work=next_work
+    if(present(gas_electrons))gas_electrons=next_electrons
+    if(present(gas_atomic_h))gas_atomic_h=next_h
+    if(present(gas_molecular_h2))gas_molecular_h2=next_h2
+    if(present(gas_atomic_c))gas_atomic_c=next_c
+    if(present(gas_carbon_ion))gas_carbon_ion=next_cp
+  end subroutine
+
+  subroutine snrt_dust_live_moment_tile(ilevel,cells,slots,dx,dt,chat,density,primary_energy,old_energy,capacity, &
+       energy,material,temperature,diagnostics,projection,ierr, &
+       gas_energy,gas_capacity,n_hydrogen,gas_transfer,cell_material_u,cell_collision_area,cell_weights, &
+       sublimation_bins,sublimation_next,pah_population,primary_spectrum,primary_pah_heat,primary_pah_captures, &
+       phase_density,phase_momentum,phase_work,gas_electrons,electron_capacity,gas_atomic_h,gas_molecular_h2, &
+       gas_atomic_c,gas_carbon_ion)
+    ! Batch counterpart of snrt_dust_live_moment_cell.  The incoming M_N
+    ! moments are reconstructed for all cells, then one material-only stage
+    ! owns the complete tile transaction.  Spatial transport remains outside
+    ! this adapter: incoming_radiation is the conservative angular state
+    ! already produced by the M_N transport operator.
+    !
+    ! All optional mutable fields are copied to tile-local next-state arrays.
+    ! Thus a rejected cell or material solve cannot partially publish gas,
+    ! PAH, sublimation, or phase updates.  The public arrays are assigned only
+    ! after every cell has passed projection/reconstruction closure.
+    integer,intent(in) :: ilevel,cells(:),slots(:)
+    real(dust_dp),intent(in) :: dx,dt,chat,density(:),primary_energy(:),old_energy(:),capacity(:)
+    real(dust_dp),intent(inout) :: energy(:,:,:),material(:),temperature(:),projection(:,:,:)
+    type(dust_ir_diagnostics),intent(inout) :: diagnostics
+    integer,intent(out) :: ierr
+    real(dust_dp),optional,intent(in) :: gas_energy(:),gas_capacity(:),n_hydrogen(:)
+    real(dust_dp),optional,intent(inout) :: gas_transfer(:)
+    real(dust_dp),optional,intent(in) :: cell_material_u(:,:),cell_collision_area(:),cell_weights(:,:)
+    real(dust_dp),optional,intent(in) :: sublimation_bins(:,:)
+    real(dust_dp),optional,intent(inout) :: sublimation_next(:,:),pah_population(:,:)
+    real(dust_dp),optional,intent(in) :: primary_spectrum(:,:),primary_pah_heat(:,:),primary_pah_captures(:,:)
+    real(dust_dp),optional,intent(in) :: phase_density(:,:),electron_capacity
+    real(dust_dp),optional,intent(inout) :: phase_momentum(:,:,:),phase_work(:,:),gas_electrons(:)
+    real(dust_dp),optional,intent(inout) :: gas_atomic_h(:),gas_molecular_h2(:),gas_atomic_c(:),gas_carbon_ion(:)
+    integer :: nc,ng,nm,nq,i,g,status
+    integer,allocatable :: neighbors(:,:)
+    real(dust_dp),allocatable :: angular(:,:,:),candidate(:,:,:),receipt(:,:,:)
+    real(dust_dp),allocatable :: next_angular(:,:,:),next_material(:),next_temperature(:)
+    real(dust_dp),allocatable :: next_transfer(:),next_sublimation(:,:),next_population(:,:)
+    real(dust_dp),allocatable :: next_momentum(:,:,:),next_work(:,:),next_electrons(:)
+    real(dust_dp),allocatable :: next_h(:),next_h2(:),next_c(:),next_cp(:)
+    real(dust_dp),allocatable :: check(:)
+    type(dust_ir_diagnostics) :: trial
+    type(dust_live_coarse_trial) :: coarse
+
+    ierr=dust_err_config
+    if(.not.snrt_state_is_moment().or.mn_live_basis%nm<1)return
+    nc=size(cells);ng=snrt_dust_contract_number_ir;nm=mn_live_basis%nm;nq=mn_live_basis%nq
+    if(nc<1)return
+    ierr=dust_err_shape
+    if(size(slots)/=nc.or.size(density)/=nc.or.size(primary_energy)/=nc.or.size(old_energy).or. &
+       size(capacity)/=nc.or.size(material)/=nc.or.size(temperature)/=nc)return
+    if(any(shape(energy)/=[nm,ng,nc]).or.any(shape(projection)/=shape(energy)))return
+    if(size(mn_live_basis%direction,1)/=3.or.size(mn_live_basis%direction,2)/=nq.or. &
+       size(mn_live_basis%weight)/=nq)return
+    if(present(gas_energy))then
+       if(size(gas_energy)/=nc)return
+    endif
+    if(present(gas_capacity))then
+       if(size(gas_capacity)/=nc)return
+    endif
+    if(present(n_hydrogen))then
+       if(size(n_hydrogen)/=nc)return
+    endif
+    if(present(gas_transfer))then
+       if(size(gas_transfer)/=nc)return
+    endif
+
+    allocate(angular(ng,nq,nc),candidate(nm,ng,nc),receipt(nm,ng,nc),check(nq),neighbors(6,nc))
+    neighbors=0
+    do i=1,nc
+       do g=1,ng
+          call mn_reconstruct(mn_live_basis,energy(:,g,i),angular(g,:,i),status)
+          if(status/=mn_ok)then
+             ierr=100+status;return
+          endif
+          call mn_project(mn_live_basis,angular(g,:,i),candidate(:,g,i),status)
+          if(status/=mn_ok)then
+             ierr=100+status;return
+          endif
+       enddo
+    enddo
+    ! Numerical reclosure is a separate density receipt, not material heat.
+    receipt=candidate-energy
+
+    ! These local copies are the tile's transaction write set.  In particular,
+    ! do not pass caller-owned inout arrays into the stage itself.
+    if(present(gas_transfer))allocate(next_transfer(nc),source=0d0)
+    if(present(sublimation_next))then
+       allocate(next_sublimation(size(sublimation_next,1),size(sublimation_next,2)),source=0d0)
+    endif
+    if(present(pah_population))then
+       allocate(next_population(size(pah_population,1),size(pah_population,2)))
+       next_population=pah_population
+    endif
+    if(present(phase_momentum))then
+       allocate(next_momentum(size(phase_momentum,1),size(phase_momentum,2),size(phase_momentum,3)))
+       next_momentum=phase_momentum
+    endif
+    if(present(phase_work))then
+       allocate(next_work(size(phase_work,1),size(phase_work,2)))
+       next_work=phase_work
+    endif
+    if(present(gas_electrons))then
+       allocate(next_electrons(nc));next_electrons=gas_electrons
+    endif
+    if(present(gas_atomic_h))then
+       allocate(next_h(nc));next_h=gas_atomic_h
+    endif
+    if(present(gas_molecular_h2))then
+       allocate(next_h2(nc));next_h2=gas_molecular_h2
+    endif
+    if(present(gas_atomic_c))then
+       allocate(next_c(nc));next_c=gas_atomic_c
+    endif
+    if(present(gas_carbon_ion))then
+       allocate(next_cp(nc));next_cp=gas_carbon_ion
+    endif
+    allocate(next_material(nc),next_temperature(nc))
+
+    call snrt_dust_live_stage(ilevel,cells,slots,neighbors,mn_live_basis%direction,mn_live_basis%weight, &
+         dx,dt,chat,density,primary_energy,old_energy,capacity,next_angular,next_material,next_temperature, &
+         trial,ierr,coarse,gas_energy=gas_energy,gas_capacity=gas_capacity,n_hydrogen=n_hydrogen, &
+         gas_transfer=next_transfer,cell_material_u=cell_material_u,cell_collision_area=cell_collision_area, &
+         cell_weights=cell_weights,sublimation_bins=sublimation_bins,sublimation_next=next_sublimation, &
+         pah_population=next_population,primary_spectrum=primary_spectrum,primary_pah_heat=primary_pah_heat, &
+         primary_pah_captures=primary_pah_captures,phase_density=phase_density,phase_momentum=next_momentum, &
+         phase_work=next_work,gas_electrons=next_electrons,electron_capacity=electron_capacity,gas_atomic_h=next_h, &
+         gas_molecular_h2=next_h2,gas_atomic_c=next_c,gas_carbon_ion=next_cp,incoming_radiation=angular)
+    if(ierr/=dust_ok)return
+    do i=1,nc
+       do g=1,ng
+          call mn_project(mn_live_basis,next_angular(g,:,i),candidate(:,g,i),status)
+          if(status/=mn_ok)then
+             ierr=100+status;return
+          endif
+          call mn_reconstruct(mn_live_basis,candidate(:,g,i),check,status)
+          if(status/=mn_ok)then
+             ierr=100+status;return
+          endif
+       enddo
+    enddo
+
+    energy=candidate;material=next_material;temperature=next_temperature;projection=receipt;diagnostics=trial
+    if(present(gas_transfer))gas_transfer=next_transfer
+    if(present(sublimation_next))sublimation_next=next_sublimation
+    if(present(pah_population))pah_population=next_population
+    if(present(phase_momentum))phase_momentum=next_momentum
+    if(present(phase_work))phase_work=next_work
+    if(present(gas_electrons))gas_electrons=next_electrons
+    if(present(gas_atomic_h))gas_atomic_h=next_h
+    if(present(gas_molecular_h2))gas_molecular_h2=next_h2
+    if(present(gas_atomic_c))gas_atomic_c=next_c
+    if(present(gas_carbon_ion))gas_carbon_ion=next_cp
     ierr=dust_ok
   end subroutine
 
@@ -150,7 +468,7 @@ contains
        gas_energy,gas_capacity,n_hydrogen,gas_transfer,cell_material_u,cell_collision_area,cell_weights, &
        sublimation_bins,sublimation_next,pah_population,primary_spectrum,primary_pah_heat,primary_pah_captures, &
        phase_density,phase_momentum,phase_work,gas_electrons,electron_capacity,gas_atomic_h,gas_molecular_h2, &
-       gas_atomic_c,gas_carbon_ion)
+       gas_atomic_c,gas_carbon_ion,incoming_radiation)
     integer, intent(in) :: ilevel,cells(:),slots(:),neighbors(:,:)
     real(dust_dp), intent(in) :: directions(:,:),weights(:),dx,dt,chat
     real(dust_dp), intent(in) :: density(:),primary_energy(:),old_energy(:),capacity(:)
@@ -178,6 +496,11 @@ contains
     real(dust_dp),optional,intent(inout)::gas_atomic_h(:)
     real(dust_dp),optional,intent(inout)::gas_molecular_h2(:)
     real(dust_dp),optional,intent(inout)::gas_atomic_c(:),gas_carbon_ion(:)
+    ! Supplying radiation selects a strictly local material stage. Spatial
+    ! M_N transport is done by the conservative moment operator, never again
+    ! by the legacy IR stencil. This path performs NO MPI collectives, so
+    ! the caller may use bounded per-cell/tile scratch on unequal rank loads.
+    real(dust_dp),optional,intent(in)::incoming_radiation(:,:,:)
     real(dust_dp),allocatable::electron_work(:),electron_initial(:),pah_capacity(:)
     real(dust_dp),allocatable::primary_pah_population(:,:)
     real(dust_dp),allocatable::h_work(:),h_initial(:)
@@ -192,20 +515,29 @@ contains
     real(dust_dp),allocatable::gas_work(:),conductance(:),exchange(:),exchange_sum(:)
     real(dust_dp),allocatable::scatter_sigma(:,:)
     real(dust_dp),parameter::kb=1.380649d-16,mp=1.67262192369d-24
-    real(dust_dp), allocatable :: photons(:,:),ghosts(:,:,:),field(:)
+    real(dust_dp), allocatable :: photons(:,:),field(:)
+    real(dust_dp), allocatable,target :: ghosts(:,:,:)
+    real(dust_dp),pointer :: ghost_arg(:,:,:)
+    integer,pointer :: remote_arg(:,:)
+    procedure(dust_transport_dispatch),pointer :: transport_arg
     real(dust_dp), allocatable :: halo_field(:,:)
     integer,parameter :: halo_tile=16
     integer :: first_component,ncomponent,component,column
-    integer, allocatable :: remote(:,:),ghost_cells(:),ghost_kind(:),coarse_cells(:)
+    integer, allocatable,target :: remote(:,:)
+    integer, allocatable :: ghost_cells(:),ghost_kind(:),coarse_cells(:)
+    logical :: local_material
     logical, allocatable :: blocked(:,:)
     type(dust_ir_diagnostics) :: step
     real(dust_dp) :: cfl,step_dt,mu,q
     real(dust_dp) :: phase_start,halo_wall,solve_wall,scatter_wall
     integer :: nsub,isub,i,ng,face,k,nghost,nfield,g,d,global_nsub,info,has_coarse,b,nbulk
-    integer :: grid,child,cell,ncoarse_leaf,axis
+    integer :: grid,child,cell,ncoarse_leaf,axis,nd
+    local_material=present(incoming_radiation);nd=size(weights)
+    nullify(ghost_arg,remote_arg,transport_arg)
+    if(.not.local_material)transport_arg=>snrt_runtime_ir_transport
     call prepare(ierr)
     if(ierr==dust_ok)call validate_stage()
-    call collective_error(ierr)
+    call stage_error(ierr)
     if(ierr/=dust_ok)return
     if(present(cell_weights))scatter_sigma=matmul(scattering_basis,cell_weights)
     if(present(phase_density))then
@@ -227,9 +559,11 @@ contains
        ! unprovided PAH scattering cross section is borrowed from bulk dust.
     endif
 #ifndef WITHOUTMPI
+    if(.not.local_material)then
     call MPI_ALLREDUCE(nsub,global_nsub,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
     if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,info,k)
     nsub=global_nsub
+    endif
 #endif
     step_dt=dt/nsub
     if(present(primary_pah_heat))then
@@ -270,17 +604,17 @@ contains
     endif
     ng=snrt_dust_contract_number_ir
     has_coarse=0
-    if(size(slots)>0)then
+    if(size(slots)>0.and..not.local_material)then
        if(any(snrt_face_kind==SNRT_FACE_FINE_TO_COARSE))has_coarse=1
     end if
     ! Use the same global decision on empty ranks and on coarse-only owners.
-    call collective_error(has_coarse)
+    call stage_error(has_coarse)
     ierr=dust_ok
     if(has_coarse/=0)then
        if(ilevel<=1)ierr=dust_err_config
        if(.not.allocated(headl).or..not.allocated(next).or..not.allocated(son))ierr=dust_err_config
     end if
-    call collective_error(ierr)
+    call stage_error(ierr)
     if(ierr/=dust_ok)return
     ncoarse_leaf=0
     if(has_coarse/=0)then
@@ -294,7 +628,7 @@ contains
        end do
     end if
     allocate(coarse_cells(ncoarse_leaf),coarse%slots(ncoarse_leaf))
-    allocate(coarse%energy(ng,snrt_ndirection,ncoarse_leaf))
+    allocate(coarse%energy(ng,nd,ncoarse_leaf))
     k=0
     if(has_coarse/=0)then
        grid=headl(myid,ilevel-1)
@@ -309,21 +643,35 @@ contains
     end if
     ierr=dust_ok
     if(any(coarse%slots<1).or.any(coarse%slots>snrt_nslot))ierr=dust_err_state
-    call collective_error(ierr)
+    call stage_error(ierr)
     if(ierr/=dust_ok)return
-    if(ncoarse_leaf>0)coarse%energy=radiation(:,:,coarse%slots)
-    allocate(trial(ng,snrt_ndirection,size(slots)),photons(ng,size(slots)))
-    if(size(slots)>0)trial=radiation(:,:,slots)
+    do i=1,ncoarse_leaf
+       coarse%energy(:,:,i)=ir_slot(coarse%slots(i))
+    enddo
+    allocate(trial(ng,nd,size(slots)),photons(ng,size(slots)))
+    if(local_material)then
+       trial=incoming_radiation
+    else
+    do i=1,size(slots)
+       trial(:,:,i)=ir_slot(slots(i))
+    enddo
+    endif
     photons=0
     material=old_energy
     temperature=material/capacity
     nghost=0
     allocate(remote(6,size(slots)),blocked(6,size(slots))); remote=0; blocked=.false.
-    if(size(slots)>0)then
+    if(size(slots)>0.and..not.local_material)then
        nghost=count(snrt_face_kind==SNRT_FACE_MPI.or.snrt_face_kind==SNRT_FACE_FINE_TO_COARSE)
        blocked=snrt_face_kind==SNRT_FACE_COARSE_TO_FINE
     end if
-    allocate(ghost_cells(nghost),ghost_kind(nghost),ghosts(ng,snrt_ndirection,nghost),field(nfield))
+    allocate(ghost_cells(nghost),ghost_kind(nghost),ghosts(ng,nd,nghost))
+    if(local_material)then
+       blocked=.true.
+       allocate(field(0))
+    else
+    allocate(field(nfield))
+    ghost_arg=>ghosts;remote_arg=>remote
     if(ncpu>1)allocate(halo_field(nfield,halo_tile))
     k=0
     do i=1,size(slots)
@@ -333,6 +681,7 @@ contains
           ghost_kind(k)=snrt_face_kind(face,i)
        end do
     end do
+    endif
     diagnostics=dust_ir_diagnostics()
     if(has_coarse/=0)then
        ! A missing coarse donor must not silently appear as vacuum. The
@@ -344,7 +693,7 @@ contains
           if(ghost_kind(k)/=SNRT_FACE_FINE_TO_COARSE)cycle
           if(field(ghost_cells(k))/=1)ierr=dust_err_state
        end do
-       call collective_error(ierr)
+       call stage_error(ierr)
        if(ierr/=dust_ok)return
     end if
     halo_wall=0;solve_wall=0;scatter_wall=0
@@ -352,9 +701,9 @@ contains
        phase_start=omp_get_wtime()
        ! Reuse RAMSES' real halo communicator, in FP64. All ranks participate
        ! in every substep, including a rank with no local MPI boundary faces.
-       if(ncpu>1)then
-          do first_component=1,ng*snrt_ndirection,halo_tile
-             ncomponent=min(halo_tile,ng*snrt_ndirection-first_component+1)
+       if(ncpu>1.and..not.local_material)then
+          do first_component=1,ng*nd,halo_tile
+             ncomponent=min(halo_tile,ng*nd-first_component+1)
              halo_field=0d0
              ! Cell-major packing reuses adjacent frequencies in each cache
              ! line instead of rereading the entire strided field per column.
@@ -368,7 +717,7 @@ contains
              enddo
 !$omp end parallel do
              call snrt_halo_tile_exchange(halo_field(:,1:ncomponent),ilevel,ierr)
-             call collective_error(ierr)
+             call stage_error(ierr)
              if(ierr/=dust_ok)return
 !$omp parallel do private(k,column,component,g,d) schedule(static)
              do k=1,nghost
@@ -383,7 +732,7 @@ contains
           end do
        end if
        if(has_coarse/=0)then
-          do d=1,snrt_ndirection
+          do d=1,nd
              do g=1,ng
                 field=0; field(coarse_cells)=coarse%energy(g,d,:)
                 if(ncpu>1)call make_virtual_fine_dp(field,ilevel-1)
@@ -423,12 +772,13 @@ contains
                snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/pah_capacity))
           if(size(slots)>0)call pah_mixed_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
                pah_bulk_bins,primary_spectrum*(step_dt/dt),trial,pah_population,material,temperature,photons,step,ierr, &
-               ghosts,remote,blocked,gas_work,pah_capacity,conductance,exchange, &
+               ghost_arg,remote_arg,blocked,gas_work,pah_capacity,conductance,exchange, &
                primary_pah_heat=pah_heat_step,primary_pah_captures=pah_captures_step, &
                phase_density=phase_density,phase_momentum=phase_p_stage,phase_absorption=phase_alpha, &
                phase_scattering=phase_sca,phase_work=phase_work_step, &
                gas_electrons=electron_work,electron_capacity=electron_capacity,primary_population=primary_pah_population, &
-               gas_atomic_h=h_work,gas_molecular_h2=h2_work,gas_atomic_c=c_work,gas_carbon_ion=cp_work)
+               gas_atomic_h=h_work,gas_molecular_h2=h2_work,gas_atomic_c=c_work,gas_carbon_ion=cp_work, &
+               material_only=local_material)
           if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
        else if(allocated(sub_bins))then
           do i=1,size(slots)
@@ -441,17 +791,17 @@ contains
              call d03_cell_weights(sub_bins(:,i),sub_weights(:,i),k)
              if(k/=0)ierr=dust_err_state
           enddo
-          call collective_error(ierr)
+          call stage_error(ierr)
           if(ierr/=dust_ok)return
           scatter_sigma=matmul(scattering_basis,sub_weights)
           conductance=2*kb*n_hydrogen*sub_density*sub_area*snrt_dust_contract_accommodation* &
                sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
           if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
                sub_density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
-               ghosts,remote,blocked,material_dispatch=coupled_material, &
-               transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
+               ghost_arg,remote_arg,blocked,material_dispatch=coupled_material, &
+               transport_dispatch=transport_arg,absorb_dispatch=snrt_runtime_ir_absorb, &
                gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange, &
-               cell_material_u=sub_u,cell_weights=sub_weights,thin_reabsorption=.true.)
+               cell_material_u=sub_u,cell_weights=sub_weights,thin_reabsorption=.true.,material_only=local_material)
           if(ierr==dust_ok)then
              ! The accepted IR ledger includes phase energy, which is derived
              ! from lost solids rather than stored in the sensible-energy field.
@@ -466,10 +816,10 @@ contains
             snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
-            ghosts,remote,blocked,bath_dispatch=cosmological_material, &
-            transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
+            ghost_arg,remote_arg,blocked,bath_dispatch=cosmological_material, &
+            transport_dispatch=transport_arg,absorb_dispatch=snrt_runtime_ir_absorb, &
             gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange, &
-            cell_material_u=cell_material_u,cell_weights=cell_weights)
+            cell_material_u=cell_material_u,cell_weights=cell_weights,material_only=local_material)
        if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
        else if(present(gas_energy))then
        conductance=2*kb*n_hydrogen*density*snrt_dust_contract_collision_area_per_h* &
@@ -478,19 +828,21 @@ contains
             snrt_dust_contract_accommodation*sqrt((8*kb/(acos(-1d0)*mp))*(gas_work/gas_capacity))
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
-            ghosts,remote,blocked,material_dispatch=fixed_material, &
-            transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
+            ghost_arg,remote_arg,blocked,material_dispatch=fixed_material, &
+            transport_dispatch=transport_arg,absorb_dispatch=snrt_runtime_ir_absorb, &
             gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange, &
             cell_material_u=cell_material_u,cell_weights=cell_weights,phase_density=phase_density, &
-            phase_momentum=phase_p_stage,phase_absorption=phase_alpha,phase_scattering=phase_sca,phase_work=phase_work_step)
+            phase_momentum=phase_p_stage,phase_absorption=phase_alpha,phase_scattering=phase_sca,phase_work=phase_work_step, &
+            material_only=local_material)
        if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
        else
        if(size(slots)>0)call snrt_dust_ir_advance(table,directions,weights,neighbors,dx,step_dt,chat, &
             density,primary_energy/dt,trial,temperature,photons,step,ierr,1d-9,256,material,capacity, &
-            ghosts,remote,blocked,material_dispatch=fixed_material, &
-            transport_dispatch=snrt_runtime_ir_transport,absorb_dispatch=snrt_runtime_ir_absorb, &
+            ghost_arg,remote_arg,blocked,material_dispatch=fixed_material, &
+            transport_dispatch=transport_arg,absorb_dispatch=snrt_runtime_ir_absorb, &
             cell_material_u=cell_material_u,cell_weights=cell_weights,phase_density=phase_density, &
-            phase_momentum=phase_p_stage,phase_absorption=phase_alpha,phase_scattering=phase_sca,phase_work=phase_work_step)
+            phase_momentum=phase_p_stage,phase_absorption=phase_alpha,phase_scattering=phase_sca,phase_work=phase_work_step, &
+            material_only=local_material)
        endif
        solve_wall=solve_wall+omp_get_wtime()-phase_start
        phase_start=omp_get_wtime()
@@ -511,7 +863,7 @@ contains
           if(nghost>0)write(*,'(A,ES14.5)')' SNRT IR rejected min_ghost_IR=',minval(ghosts)
        endif
        if(any(.not.ieee_is_finite(coarse%energy)).or.any(coarse%energy<0))ierr=dust_err_state
-       call collective_error(ierr)
+       call stage_error(ierr)
        if(ierr/=dust_ok)return
        if(present(phase_density))phase_work_sum=phase_work_sum+phase_work_step
        diagnostics%escaped_erg=diagnostics%escaped_erg+step%escaped_erg
@@ -525,7 +877,7 @@ contains
        diagnostics%iterations=diagnostics%iterations+step%iterations
     end do
     ! Empty dust cells carry zero material energy, not a fictitious heat bath.
-    if(myid==1)write(*,'(A,I0,A,I0,3(A,F12.4))')' SNRT_IR timings level=',ilevel,' substeps=',nsub, &
+    if(myid==1.and..not.local_material)write(*,'(A,I0,A,I0,3(A,F12.4))')' SNRT_IR timings level=',ilevel,' substeps=',nsub, &
          ' halo=',halo_wall,' solve=',solve_wall,' scatter=',scatter_wall
     ! Their reported temperature is only a harmless diagnostic placeholder.
     do i=1,size(slots)
@@ -544,6 +896,11 @@ contains
        phase_momentum=phase_p_stage;phase_work=phase_work_sum
     endif
   contains
+    subroutine stage_error(status)
+      integer,intent(inout) :: status
+      if(.not.local_material)call collective_error(status)
+    end subroutine
+
     subroutine cosmological_material(heating,density,old_energy,log_t,basis_band,cell_weights,dt, &
          gas_energy,gas_capacity,conductance,rate,temperature,next_energy,gas_transfer,background_transfer,ierr)
       ! Optically thin analytic CMB: only positive excess enters transport.
@@ -686,6 +1043,7 @@ contains
 
     subroutine validate_stage()
       ierr=dust_err_config
+      if(snrt_state_is_moment().and..not.local_material)return
       if(cosmo)then
          if(.not.ieee_is_finite(aexp).or.aexp<=0)return
          if(2.727d0/aexp>snrt_dust_contract_temperature_k(snrt_dust_contract_number_temperature))return
@@ -790,12 +1148,19 @@ contains
       if(size(material)/=size(slots).or.size(temperature)/=size(slots).or.size(cells)/=size(slots))return
       if(size(old_energy)/=size(slots).or.size(capacity)/=size(slots))return
       if(size(density)/=size(slots).or.size(primary_energy)/=size(slots))return
-      if(any(shape(directions)/=[3,snrt_ndirection]).or.size(weights)/=snrt_ndirection)return
+      if(nd<1.or.any(shape(directions)/=[3,nd]))return
+      if(.not.local_material.and.nd/=snrt_ndirection)return
       if(any(shape(neighbors)/=[6,size(slots)]))return
+      if(local_material)then
+         if(any(shape(incoming_radiation)/=[snrt_dust_contract_number_ir,nd,size(slots)]))return
+         if(any(neighbors/=0))return
+         ierr=dust_err_state
+         if(any(.not.ieee_is_finite(incoming_radiation)).or.any(incoming_radiation<0))return
+      endif
       if(any(slots<1).or.any(slots>snrt_nslot))return
       nfield=ICELL_OF(ngridmax,twotondim)
       if(any(cells<1).or.any(cells>nfield))return
-      if(size(slots)>0)then
+      if(size(slots)>0.and..not.local_material)then
          if(.not.allocated(snrt_face_kind).or..not.allocated(snrt_face_cell))return
          if(any(shape(snrt_face_kind)/=[6,size(slots)]))return
          if(any(shape(snrt_face_cell)/=[6,size(slots)]))return
@@ -819,9 +1184,12 @@ contains
       if(any(capacity<=0).or.any(.not.ieee_is_finite(capacity)))return
       ierr=dust_err_config
       if(.not.all(ieee_is_finite([dx,dt,chat])).or.min(dx,dt,chat)<=0)return
-      cfl=chat*dt/dx*maxval(sum(abs(directions),dim=1))
-      if(.not.ieee_is_finite(cfl).or.cfl>real(huge(nsub)-1,dust_dp))return
-      nsub=max(1,ceiling(cfl))
+      nsub=1
+      if(.not.local_material)then
+         cfl=chat*dt/dx*maxval(sum(abs(directions),dim=1))
+         if(.not.ieee_is_finite(cfl).or.cfl>real(huge(nsub)-1,dust_dp))return
+         nsub=max(1,ceiling(cfl))
+      endif
       ierr=dust_ok
     end subroutine
   end subroutine
@@ -840,10 +1208,15 @@ contains
     integer, intent(in) :: slots(:)
     real(dust_dp), intent(in) :: trial(:,:,:)
     type(dust_live_coarse_trial), intent(in) :: coarse
+    integer::i
     ! Called only after the primary transaction commits; no allocation or
     ! fallible conversion remains here. Stage has validated the slot window.
-    if(size(slots)>0)radiation(:,:,slots)=trial
-    if(size(coarse%slots)>0)radiation(:,:,coarse%slots)=coarse%energy
+    do i=1,size(slots)
+       call ir_store(slots(i),trial(:,:,i))
+    enddo
+    do i=1,size(coarse%slots)
+       call ir_store(coarse%slots(i),coarse%energy(:,:,i))
+    enddo
   end subroutine
 
   subroutine snrt_dust_live_pack(icell,payload,ierr)
@@ -857,7 +1230,11 @@ contains
     slot=snrt_state_get_slot(icell)
     call prepare(ierr)
     if(ierr/=dust_ok.or.slot==0)return
-    payload=reshape(radiation(:,:,slot),[size(payload)])
+    if(snrt_state_is_moment())then
+       call mn_live_ir_pack(slot,snrt_dust_contract_number_ir,snrt_ndirection,payload,ierr)
+       return
+    endif
+    payload=reshape(ir_slot(slot),[size(payload)])
     if(any(.not.ieee_is_finite(payload)).or.any(payload<0))ierr=dust_err_state
   end subroutine
 
@@ -866,17 +1243,38 @@ contains
     real(dust_dp), intent(in) :: payload(:)
     integer, intent(out) :: ierr
     integer :: slot
-    ierr=dust_err_shape
-    if(size(payload)/=snrt_dust_contract_number_ir*snrt_ndirection)return
-    ierr=dust_err_state
-    if(any(.not.ieee_is_finite(payload)).or.any(payload<0))return
+    call snrt_dust_live_validate_payload(payload,ierr)
+    if(ierr/=dust_ok)return
     slot=snrt_state_get_slot(icell)
     if(slot==0)then
+       ierr=dust_err_state
        if(all(payload==0))ierr=dust_ok
        return
     end if
     call prepare(ierr)
     if(ierr/=dust_ok)return
-    radiation(:,:,slot)=reshape(payload,[snrt_dust_contract_number_ir,snrt_ndirection])
+    if(snrt_state_is_moment())then
+       call mn_live_ir_unpack(slot,snrt_dust_contract_number_ir,snrt_ndirection,payload,ierr)
+       return
+    endif
+    call ir_store(slot,reshape(payload,[snrt_dust_contract_number_ir,snrt_ndirection]))
+  end subroutine
+
+  subroutine snrt_dust_live_validate_payload(payload,ierr)
+    real(dust_dp),intent(in) :: payload(:)
+    integer,intent(out) :: ierr
+    ierr=dust_err_shape
+    if(size(payload)/=snrt_dust_contract_number_ir*snrt_ndirection)return
+    ierr=dust_err_state
+    if(any(.not.ieee_is_finite(payload)))return
+    if(snrt_state_is_moment())then
+       if(all(payload==0))then
+          ierr=dust_ok;return
+       endif
+       call mn_live_ir_unpack(0,snrt_dust_contract_number_ir,snrt_ndirection,payload,ierr,validate_only=.true.)
+    else
+       if(any(payload<0))return
+       ierr=dust_ok
+    endif
   end subroutine
 end module
