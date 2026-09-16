@@ -21,6 +21,7 @@ module snrt_dust_live
   use snrt_runtime_backend, only: snrt_runtime_cpu_material_allowed
   use snrt_state, only: snrt_ndirection, snrt_nslot, snrt_state_get_slot,snrt_state_is_moment
   use snrt_moment_live, only: mn_live_ir_pack,mn_live_ir_unpack,mn_live_ir_expand,mn_live_basis
+  use snrt_moment_dispatch, only: mn_dispatch_closure,mn_dispatch_project
   use snrt_moment_transport, only: mn_project,mn_reconstruct,mn_ok
   use amr_commons, only: ngridmax,ncoarse,ncpu,myid,headl,next,son,cosmo,aexp
   use snrt_amr_topology, only: snrt_face_kind,snrt_face_cell, &
@@ -348,6 +349,8 @@ contains
     real(dust_dp),allocatable :: next_momentum(:,:,:),next_work(:,:),next_electrons(:)
     real(dust_dp),allocatable :: next_h(:),next_h2(:),next_c(:),next_cp(:)
     real(dust_dp),allocatable :: check(:)
+    real(dust_dp),allocatable :: closure_input(:,:),closure_projected(:,:),closure_cache(:,:)
+    real(dust_dp),allocatable :: closure_warm(:,:),closure_angular(:,:)
     type(dust_ir_diagnostics) :: trial
     type(dust_live_coarse_trial) :: coarse
 
@@ -375,17 +378,22 @@ contains
     endif
 
     allocate(angular(ng,nq,nc),candidate(nm,ng,nc),receipt(nm,ng,nc),check(nq),neighbors(6,nc))
+    allocate(closure_input(nm,nc),closure_projected(nm,nc),closure_cache(nm+1,nc), &
+         closure_warm(nm-1,nc),closure_angular(nq,nc))
     neighbors=0
-    do i=1,nc
-       do g=1,ng
-          call mn_reconstruct(mn_live_basis,energy(:,g,i),angular(g,:,i),status)
-          if(status/=mn_ok)then
-             ierr=100+status;return
-          endif
-          call mn_project(mn_live_basis,angular(g,:,i),candidate(:,g,i),status)
-          if(status/=mn_ok)then
-             ierr=100+status;return
-          endif
+    do g=1,ng
+       do i=1,nc
+          closure_input(:,i)=energy(:,g,i)
+       enddo
+       closure_warm=0d0
+       call mn_dispatch_closure(mn_live_basis,closure_input,closure_projected,closure_cache,closure_warm,status, &
+            angular_out=closure_angular)
+       if(status/=mn_ok)then
+          ierr=100+status;return
+       endif
+       do i=1,nc
+          candidate(:,g,i)=closure_projected(:,i)
+          angular(g,:,i)=closure_angular(:,i)
        enddo
     enddo
     ! Numerical reclosure is a separate density receipt, not material heat.
@@ -436,16 +444,20 @@ contains
          phase_work=next_work,gas_electrons=next_electrons,electron_capacity=electron_capacity,gas_atomic_h=next_h, &
          gas_molecular_h2=next_h2,gas_atomic_c=next_c,gas_carbon_ion=next_cp,incoming_radiation=angular)
     if(ierr/=dust_ok)return
-    do i=1,nc
-       do g=1,ng
-          call mn_project(mn_live_basis,next_angular(g,:,i),candidate(:,g,i),status)
-          if(status/=mn_ok)then
-             ierr=100+status;return
-          endif
-          call mn_reconstruct(mn_live_basis,candidate(:,g,i),check,status)
-          if(status/=mn_ok)then
-             ierr=100+status;return
-          endif
+    do g=1,ng
+       do i=1,nc
+          closure_angular(:,i)=next_angular(g,:,i)
+       enddo
+       ! The material stage publishes a validated nonnegative angular field.
+       ! Its projection is therefore already inside the realizable cone; a
+       ! second Newton reconstruction here only repeats the expensive closure
+       ! solve and cannot add physical validation.
+       call mn_dispatch_project(mn_live_basis,closure_angular,closure_projected,status)
+       if(status/=mn_ok)then
+          ierr=100+status;return
+       endif
+       do i=1,nc
+          candidate(:,g,i)=closure_projected(:,i)
        enddo
     enddo
 

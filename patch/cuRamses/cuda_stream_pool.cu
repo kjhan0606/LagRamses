@@ -288,11 +288,12 @@ int cuda_acquire_stream(void) {
                 return s;
             }
         }
-        if (cudaStreamQuery(g_pool[s].stream) == cudaSuccess) {
-            if (__sync_lock_test_and_set(&g_pool[s].busy, 1) == 0) {
-                return s;
-            }
-        }
+        // A successful query only says that the stream has no queued CUDA
+        // work at this instant; it does not transfer ownership from the
+        // thread that still holds the lease.  Reusing a busy slot here lets
+        // concurrent OpenMP workers alias its stream-local scratch buffers
+        // and can deadlock or corrupt a transaction.  The caller's hybrid
+        // policy deliberately falls back to CPU when every lease is owned.
     }
     return -1;
 }

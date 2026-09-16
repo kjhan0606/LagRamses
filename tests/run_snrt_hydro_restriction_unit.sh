@@ -10,7 +10,9 @@ SOURCE="$ROOT/patch/lagRamses/amr_step.jaehyun.f90"
 
 [[ -f "$SOURCE" ]] || { echo "SNRT_HYDRO_RESTRICTION_FAIL missing_source=$SOURCE" >&2; exit 1; }
 
-snrt_line="$(rg -n '^ *call snrt_ramses_advance_level\(ilevel\)' "$SOURCE" | cut -d: -f1)"
+# The production call carries an optional proper-time argument.  Match the
+# call site rather than an obsolete zero-argument spelling.
+snrt_line="$(rg -n '^ *call snrt_ramses_advance_level\(ilevel([,)]|$)' "$SOURCE" | cut -d: -f1)"
 post_upload_line="$(awk -v start="$snrt_line" 'NR > start && /if\(hydro \.and\. snrt_agn_rt_requested\(\)\) call upload_fine\(ilevel\)/ { print NR; exit }' "$SOURCE")"
 diagnose_line="$(rg -n '^ *call snrt_ramses_diagnose_level\(ilevel\)' "$SOURCE" | cut -d: -f1)"
 

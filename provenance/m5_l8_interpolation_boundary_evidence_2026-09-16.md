@@ -378,3 +378,62 @@ rollback gate. It does not yet replace the RAMSES `material_cell` call site:
 the upstream CHIMES per-cell preparation/post-publication code still needs a
 separate, bounded tile collector before production runs can claim end-to-end
 batched throughput.
+
+## L8 coupled rerun and unresolved-item disposition (2026-09-17)
+
+The remaining code-side failures in the first boundary reproduction were
+repaired and tested in a fresh run directory.  The repairs were deliberately
+limited to the demonstrated path:
+
+1. the RAMSES material transaction width was increased from 32 to 256 cells,
+   reducing the 262,144-leaf reproduction from roughly 8,192 to 1,024
+   material dispatches;
+2. the restore path no longer reads the unallocated `packet%gas_momentum`
+   component (the earlier width-256 run's genuine SIGSEGV at line 529);
+3. a CUDA stream that is still leased is never reclaimed merely because
+   `cudaStreamQuery` succeeds; an exhausted pool falls back to CPU in auto
+   mode, preserving stream-local scratch ownership;
+4. the M5 closure dispatch can replay the GPU-exported dual cache to produce
+   the identical angular state without a second CPU Newton solve; and
+5. the post-material angular projection is dispatched through the same
+   OpenMP/CUDA lease policy, with the existing CUDA `live_project` kernel.
+
+The CUDA+CHIMES+HDF5 build completed with bounds checking and Intel MPI.  The
+final executable was `bin/ramses_m5_width256f3d`, SHA256
+`94f75470abe9a038eead55f0740f7bdfdad43a4326820002d04e1f124f4ecc81`.
+The source build included the new `snrt_moment_dispatch` and
+`snrt_moment_live_cuda` objects through the existing Makefile/VPATH order.
+
+The final bounded run was Slurm job `373873` in
+`.m5-l8-width256f-rerun-20260917/`, using the exact coupled L8 input contract,
+`n_cuda_streams=3` in the validation namelist only, `SNRT_BACKEND=auto`,
+`SNRT_DUST_BACKEND=auto`, eight MPI ranks, four OpenMP threads per rank, and
+one A40 allocation.  It passed initialization, the 46,425-grid Morton checks,
+hydro/Poisson, pre-RT NaN checks, and the M5/material transaction entry.  The
+log recorded both CPU and GPU material batches (`batch_cells=256`) and no
+SIGSEGV, OOM, non-finite state, rejected transaction, MPI abort, or MG
+nonconvergence.  MaxRSS was `28,803,236 KiB` and TotalCPU was `02:32:17`.
+
+The job reached its declared 45-minute wall limit (`TIMEOUT`, `00:45:02`)
+before the bounded completion marker could be emitted.  This is an
+**inconclusive cost-bound result**, not a correctness failure: the full
+per-cell CHIMES/material transaction is still too expensive to certify within
+this short boundary allocation.  No `output_*` directory was created.  The
+earlier diagnostic jobs `373789`, `373832`, and `373855` remain historical
+cancelled/inconclusive runs; they are not relabeled as passes.
+
+Consequently the active unresolved list is now split cleanly:
+
+- **Closed engineering defects:** tile over-fragmentation, the unallocated
+  restore read, CUDA stream ownership race, and duplicated CPU M5 closure/
+  projection work.
+- **Still open performance/science qualification:** a full L8 coupled
+  transaction completion and the previously planned 128^3/256^3/512^3
+  science campaign.  These require a separately budgeted production
+  allocation and are not silently converted into a pass by the bounded run.
+- **Out of this M5 boundary:** the already recorded physical-source gates
+  (including the 40--120 M_sun and external AGB-source admission issues) remain
+  fail-closed/parked according to their own provenance records; they are not
+  changed by this runtime repair.
+
+No new scientific parameter or acceptance gate was introduced.

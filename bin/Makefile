@@ -222,18 +222,18 @@ ifeq ($(SNRT),1)
   # The driver is not self-contained: keep the complete Fortran module graph
   # in the production link. CUDA entry points are supplied by
   # snrt_cuda_kernels.o; these interface modules only publish the C ABI.
-  SNRT_MODOBJ = mpi_mod.o snrt_spectral_contract.o snrt_agn_source.o \
+  SNRT_MODOBJ = mpi_mod.o snrt_moment_transport.o snrt_moment_storage.o snrt_moment_spectrum.o snrt_moment_band.o snrt_moment_live.o snrt_moment_material.o snrt_spectral_contract.o snrt_agn_source.o \
                 snrt_thermochemistry.o snrt_atomic_cooling.o snrt_state.o snrt_agn_locator.o \
                 snrt_nlte_coupling.o snrt_angular_quadrature.o \
-                snrt_amr_topology.o snrt_transport_step.o \
-                snrt_rt_transaction.o snrt_dust_ir.o snrt_dust_coupling.o \
+                snrt_amr_topology.o snrt_moment_dispatch.o snrt_moment_amr.o snrt_transport_step.o \
+                snrt_rt_transaction.o snrt_dust_ir.o snrt_moment_dust_ir.o snrt_dust_coupling.o \
                 snrt_dust_transaction.o snrt_dust_receiver.o snrt_dust_contract.o snrt_dust_live.o snrt_regrid.o \
                 snrt_cuda_ledger_interface.o \
                 snrt_cuda_sparse_transport_interface.o \
                 snrt_cuda_limited_rt_step_interface.o \
                 snrt_cuda_multigroup_interface.o snrt_runtime_backend.o snrt_openmp_transport.o \
                 snrt_dust_material.o snrt_hybrid.o \
-                snrt_parsec_source.o snrt_stellar_source.o snrt_ramses_driver.o dust_sublimation.o dust_sublimation_material.o dust_mass_runtime.o \
+                snrt_parsec_source.o snrt_stellar_source.o snrt_moment_ramses.o snrt_ramses_driver.o dust_sublimation.o dust_sublimation_material.o dust_mass_runtime.o \
                 dust_iron_radiation.o dust_stochastic.o dust_pah_radiation.o dust_pah_hydrogen.o dust_pah_atomization.o dust_pah_live_model.o dust_pah_mixed.o \
                 snrt_moving_scatter.o
   ifeq ($(DUST_DYNAMICS),1)
@@ -241,7 +241,7 @@ ifeq ($(SNRT),1)
   endif
   ifeq ($(USE_CUDA),1)
     SNRT_DEVICE_OBJS = snrt_cuda_kernels.o snrt_dust_material_cuda.o snrt_ir_cuda.o
-    SNRT_MODOBJ += snrt_dust_material_cuda.o snrt_ir_cuda.o
+    SNRT_MODOBJ += snrt_dust_material_cuda.o snrt_ir_cuda.o snrt_moment_live_cuda.o
   else
     # Link the actual OpenMP physics, with unavailable-device entry points
     # that reject forced CUDA rather than silently running a different mode.
@@ -464,10 +464,35 @@ amr_index.o: amr_commons.kjhan.o
 # implicit %.o rule otherwise tries to compile a module before its .mod file
 # exists when a clean production build is requested.
 snrt_spectral_contract.o: amr_parameters.jaehyun.o
+snrt_moment_storage.o: snrt_moment_transport.o
+snrt_moment_spectrum.o: snrt_moment_transport.o
+snrt_moment_live.o: snrt_moment_spectrum.o snrt_spectral_contract.o
+snrt_moment_material.o: snrt_moment_transport.o snrt_dust_coupling.o
+snrt_moment_dust_ir.o: snrt_moment_transport.o snrt_dust_ir.o
+# Optional standalone moment-benchmark linkage for compiler-generated BLAS.
+# Empty by default: portable builds have no new runtime dependency.
+MN_BENCH_LIBS ?=
+MN_NVCC ?= $(if $(NVCC),$(NVCC),nvcc)
+MN_CUDA_LIBS ?= $(if $(CUDA_DIR),-L$(CUDA_DIR)/lib64) -lcudart -lstdc++
+MN_CUDA_FLAGS ?= -O3 -std=c++17 -arch=compute_80 -code=sm_80,compute_80 --fmad=false
+snrt_moment_smoke: snrt_moment_transport.o snrt_moment_storage.o snrt_moment_spectrum.o ../patch/lagRamses/snrt_moment_smoke.f90
+	$(F90) $(FFLAGS) -I. ../patch/lagRamses/snrt_moment_smoke.f90 snrt_moment_transport.o snrt_moment_storage.o snrt_moment_spectrum.o $(MN_BENCH_LIBS) -o $@
+snrt_moment_material_smoke: snrt_moment_transport.o snrt_moment_material.o snrt_moment_dust_ir.o snrt_dust_ir.o snrt_moving_scatter.o snrt_dust_coupling.o snrt_thermochemistry.o snrt_agn_source.o ../patch/lagRamses/snrt_moment_material_smoke.f90
+	$(F90) $(FFLAGS) -I. ../patch/lagRamses/snrt_moment_material_smoke.f90 snrt_moment_transport.o snrt_moment_material.o snrt_moment_dust_ir.o snrt_dust_ir.o snrt_moving_scatter.o snrt_dust_coupling.o snrt_thermochemistry.o snrt_agn_source.o $(MN_BENCH_LIBS) -o $@
+snrt_ionization_benchmark: snrt_moment_transport.o ../patch/lagRamses/snrt_ionization_benchmark.f90
+	$(F90) $(FFLAGS) -cpp -I. ../patch/lagRamses/snrt_ionization_benchmark.f90 snrt_moment_transport.o $(MN_BENCH_LIBS) -o $@
+snrt_moment_cuda.o: ../patch/lagRamses/snrt_moment_cuda.cu ../patch/lagRamses/snrt_cweno3.h
+	$(MN_NVCC) $(MN_CUDA_FLAGS) -c $< -o $@
+snrt_moment_live_cuda.o: ../patch/lagRamses/snrt_moment_cuda.cu ../patch/lagRamses/snrt_cweno3.h ../patch/cuRamses/cuda_stream_pool.h
+	$(MN_NVCC) $(MN_CUDA_FLAGS) -DMN_LIVE_POOL -c $< -o $@
+snrt_ionization_benchmark_cuda: snrt_moment_transport.o snrt_moment_cuda.o ../patch/lagRamses/snrt_ionization_benchmark.f90
+	$(F90) $(FFLAGS) -cpp -DMN_CUDA -I. ../patch/lagRamses/snrt_ionization_benchmark.f90 snrt_moment_transport.o snrt_moment_cuda.o $(MN_BENCH_LIBS) $(MN_CUDA_LIBS) -o $@
+snrt_moment_m5_regression: snrt_moment_transport.o ../patch/lagRamses/snrt_moment_m5_regression.f90
+	$(F90) $(FFLAGS) -I. ../patch/lagRamses/snrt_moment_m5_regression.f90 snrt_moment_transport.o $(MN_BENCH_LIBS) -o $@
 amr_commons.kjhan.o: amr_parameters.jaehyun.o
 morton_keys.o: amr_commons.kjhan.o
 random.o: amr_commons.kjhan.o
-snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o dust_composition_optics.o dust_iron_optics.o
+snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o dust_composition_optics.o dust_iron_optics.o snrt_moment_live.o
 snrt_hdf5.o: snrt_state.o ramses_hdf5_io.o snrt_agn_efficiency.o snrt_dust_contract.o snrt_dust_live.o
 snrt_hdf5.o: snrt_stellar_source.o
 ifeq ($(SNRT),1)
@@ -509,6 +534,15 @@ umuscl.kjhan.o interpol_hydro.kjhan.o: snrt_chimes_runtime.o
 endif
 snrt_angular_quadrature.o: snrt_state.o
 snrt_amr_topology.o: amr_commons.kjhan.o mpi_mod.o snrt_state.o
+snrt_moment_dispatch.o: snrt_moment_transport.o snrt_runtime_backend.o
+snrt_moment_amr.o: snrt_amr_topology.o snrt_moment_transport.o snrt_moment_dispatch.o
+snrt_moment_ramses.o: snrt_moment_amr.o snrt_moment_material.o snrt_moment_live.o snrt_agn_locator.o \
+                     snrt_stellar_source.o snrt_rt_transaction.o snrt_dust_live.o snrt_atomic_cooling.o \
+                     hydro_commons.o pm_commons.o dust_composition_material.o dust_composition_optics.o
+snrt_ramses_driver.o: snrt_moment_ramses.o
+ifeq ($(CHIMES),1)
+snrt_moment_ramses.o: snrt_chimes_runtime.o
+endif
 snrt_transport_step.o: snrt_state.o snrt_angular_quadrature.o \
                         snrt_amr_topology.o \
                         mpi_mod.o \
@@ -521,6 +555,8 @@ snrt_cpu_device_stubs.o: ../patch/lagRamses/snrt_cpu_device_stubs.cpp ../patch/l
 	icpx -O2 -c $< -o $@
 snrt_openmp_transport.o: ../patch/lagRamses/snrt_openmp_transport.cpp ../patch/lagRamses/snrt_species_dust_cell.h ../patch/lagRamses/snrt_band_spectrum.h
 	icpx -O3 -qopenmp -fp-model=precise -c $< -o $@
+snrt_moment_band.o: ../patch/lagRamses/snrt_moment_band.cpp ../patch/lagRamses/snrt_band_spectrum.h
+	icpx -O3 -qopenmp -fp-model=precise -no-ftz -c $< -o $@
 snrt_dust_material.o: ../patch/lagRamses/snrt_dust_material.cpp ../patch/lagRamses/snrt_dust_material_cell.h
 	icpx -O3 -qopenmp -fp-model=precise -c $< -o $@
 snrt_hybrid.o: ../patch/lagRamses/snrt_hybrid.cpp ../patch/lagRamses/snrt_hybrid.h ../patch/lagRamses/snrt_dust_material_cell.h ../patch/lagRamses/snrt_ir_cell.h
@@ -615,6 +651,7 @@ snrt_agn_ledger.o: amr_commons.kjhan.o pm_commons.o
 # [RESIZABLE] grow_grid_capacity preserves every capacity bundle, including
 # the optional radiation fields; build those modules before pm_commons.mod.
 pm_commons.o: amr_commons.kjhan.o pm_parameters.o hydro_commons.o poisson_commons.o morton_hash.o radiation_commons.o
+bisection.o: pm_commons.o
 radiation_commons.o: amr_commons.kjhan.o timing.o
 morton_hash.o: morton_keys.o amr_index.o
 hydro_commons.o: hydro_parameters.o

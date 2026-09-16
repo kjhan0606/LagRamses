@@ -107,7 +107,10 @@ contains
     real(dp) :: state_range(4),global_range(4),balance_scale(2),global_scale(2)
     integer :: nm,ng,ni,i,j,g,s,k,nsub,cell,found,grid,part,ip,ig,status,info
     integer :: tile_index,tile_first,tile_last,ntile
-    integer,parameter :: material_tile_width=32
+    ! Keep the RAMSES-side transaction large enough to amortize the native
+    ! material/IR dispatch.  The backend still applies its own memory-aware
+    ! GPU batch policy; this is only the caller-owned write-set bound.
+    integer,parameter :: material_tile_width=256
     integer,allocatable :: accepted(:),owners(:)
     logical :: atomic_on,band_on,chimes_on
     logical,save :: host_reported=.false.
@@ -523,7 +526,7 @@ contains
          old_row=packet%old_row;next_fraction=packet%next_fraction
          nn=packet%nn;ee=packet%ee;an=packet%an;ae=packet%ae;gasx=packet%gasx
          gas_energy=packet%gas_energy;gas_capacity=packet%gas_capacity
-         transfer=packet%transfer;gas_momentum=packet%gas_momentum
+         transfer=packet%transfer
 #ifdef SNRT_CHIMES
          if(packet%has_chimes)chemical=packet%chemical
 #endif
