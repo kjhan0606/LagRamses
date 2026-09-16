@@ -437,3 +437,26 @@ Consequently the active unresolved list is now split cleanly:
   changed by this runtime repair.
 
 No new scientific parameter or acceptance gate was introduced.
+
+## Binary-identity correction and latest resource check (2026-09-17)
+
+The SHA256 shown above belongs to the executable used by the formal `373873`
+45-minute run.  It must not be called the latest `width256f3d` executable.
+The rebuilt current executable is `bin/ramses_m5_width256f3d`, SHA256
+`2dc3985abb9f9511043d8a3bc1510aa7dc835c6b4f8697c60b76e7341905e458`.
+
+The first 4-GPU retry (`373941`) was stopped after detecting that its copied
+executable had the older `94f75470...` identity.  It is excluded from evidence.
+Two fresh checks used the current SHA and the same coupled L8 input: `373942`
+used four OpenMP threads per rank, and `373943` used eight OpenMP threads per
+rank to consume the allocated eight CPUs.  Both reached initialization,
+Morton checks, time integration, M5/material hybrid calls, and showed no
+SIGSEGV, OOM, non-finite state, rejected transaction, or MPI abort.  They were
+operator-stopped before completion to avoid repeating the already established
+long CHIMES cost plateau; neither is a completion claim.  No `output_*`
+directory was produced.
+
+The focused hydro-restriction wiring test and the current CUDA projection
+symbol check pass.  Therefore the recheck found no new code-side defect.  The
+only unresolved item in this boundary remains the separately budgeted full
+L8 completion/performance qualification, not a failed correctness gate.
