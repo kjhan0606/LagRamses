@@ -34,12 +34,20 @@ check_reference_modes() {
 
 if command -v ifx >/dev/null 2>&1; then
   ifx -fpp -DWITHOUTMPI -module "$module_dir" -I"$module_dir" \
+    -c "$repo_root/patch/lagRamses/snrt_moving_scatter.f90" \
+    -o "$build_dir/snrt_moving_scatter_ifx.o"
+  ifx -fpp -DWITHOUTMPI -module "$module_dir" -I"$module_dir" \
     -c "$repo_root/patch/lagRamses/snrt_dust_contract.f90" \
     -o "$build_dir/snrt_dust_contract_ifx.o"
   ifx -fpp -DWITHOUTMPI -module "$module_dir" -I"$module_dir" \
-    "$repo_root/patch/lagRamses/snrt_dust_ir.f90" \
-    "$repo_root/patch/lagRamses/snrt_dust_contract_smoke.f90" \
-    "$build_dir/snrt_dust_contract_ifx.o" -o "$build_dir/snrt_dust_contract_ifx"
+    -c "$repo_root/patch/lagRamses/snrt_dust_ir.f90" \
+    -o "$build_dir/snrt_dust_ir_ifx.o"
+  ifx -fpp -DWITHOUTMPI -module "$module_dir" -I"$module_dir" \
+    -c "$repo_root/patch/lagRamses/snrt_dust_contract_smoke.f90" \
+    -o "$build_dir/snrt_dust_contract_smoke_ifx.o"
+  ifx "$build_dir/snrt_moving_scatter_ifx.o" "$build_dir/snrt_dust_contract_ifx.o" \
+    "$build_dir/snrt_dust_ir_ifx.o" "$build_dir/snrt_dust_contract_smoke_ifx.o" \
+    -o "$build_dir/snrt_dust_contract_ifx"
   SNRT_DUST_CONTRACT="$valid" "$build_dir/snrt_dust_contract_ifx" "$valid" "$invalid"
   check_reference_modes "$build_dir/snrt_dust_contract_ifx"
   echo SNRT_NATIVE_DUST_CONTRACT_IFX_PASS
@@ -52,13 +60,23 @@ if command -v gfortran >/dev/null 2>&1; then
   mkdir -p "$gnu_module_dir"
   gfortran -cpp -ffree-line-length-none -DWITHOUTMPI \
     -J"$gnu_module_dir" -I"$gnu_module_dir" \
+    -c "$repo_root/patch/lagRamses/snrt_moving_scatter.f90" \
+    -o "$build_dir/snrt_moving_scatter_gnu.o"
+  gfortran -cpp -ffree-line-length-none -DWITHOUTMPI \
+    -J"$gnu_module_dir" -I"$gnu_module_dir" \
     -c "$repo_root/patch/lagRamses/snrt_dust_contract.f90" \
     -o "$build_dir/snrt_dust_contract_gnu.o"
   gfortran -cpp -ffree-line-length-none -DWITHOUTMPI \
     -J"$gnu_module_dir" -I"$gnu_module_dir" \
-    "$repo_root/patch/lagRamses/snrt_dust_ir.f90" \
-    "$repo_root/patch/lagRamses/snrt_dust_contract_smoke.f90" \
-    "$build_dir/snrt_dust_contract_gnu.o" -o "$build_dir/snrt_dust_contract_gnu"
+    -c "$repo_root/patch/lagRamses/snrt_dust_ir.f90" \
+    -o "$build_dir/snrt_dust_ir_gnu.o"
+  gfortran -cpp -ffree-line-length-none -DWITHOUTMPI \
+    -J"$gnu_module_dir" -I"$gnu_module_dir" \
+    -c "$repo_root/patch/lagRamses/snrt_dust_contract_smoke.f90" \
+    -o "$build_dir/snrt_dust_contract_smoke_gnu.o"
+  gfortran "$build_dir/snrt_moving_scatter_gnu.o" "$build_dir/snrt_dust_contract_gnu.o" \
+    "$build_dir/snrt_dust_ir_gnu.o" "$build_dir/snrt_dust_contract_smoke_gnu.o" \
+    -o "$build_dir/snrt_dust_contract_gnu"
   SNRT_DUST_CONTRACT="$valid" "$build_dir/snrt_dust_contract_gnu" "$valid" "$invalid"
   check_reference_modes "$build_dir/snrt_dust_contract_gnu"
   echo SNRT_NATIVE_DUST_CONTRACT_GNU_PASS

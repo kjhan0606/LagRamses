@@ -22,16 +22,22 @@ fi
   -o "$build_dir/snrt_agn_source.o"
 "$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_thermochemistry.f90" \
   -o "$build_dir/snrt_thermochemistry.o"
+"$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/dust_element_cooling.f90" \
+  -o "$build_dir/dust_element_cooling.o"
+"$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_atomic_cooling.f90" \
+  -o "$build_dir/snrt_atomic_cooling.o"
 "$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_thermochemistry_smoke.f90" \
   -o "$build_dir/snrt_thermochemistry_smoke.o"
 "$fc" "$build_dir/amr_parameters.o" "$build_dir/snrt_agn_source.o" \
-  "$build_dir/snrt_thermochemistry.o" "$build_dir/snrt_thermochemistry_smoke.o" \
+  "$build_dir/snrt_thermochemistry.o" "$build_dir/dust_element_cooling.o" \
+  "$build_dir/snrt_atomic_cooling.o" "$build_dir/snrt_thermochemistry_smoke.o" \
   -o "$build_dir/snrt_thermochemistry_smoke"
 "$fc" "${flags[@]}" -c \
   "$repo_root/patch/lagRamses/snrt_thermochemistry_loader_smoke.f90" \
   -o "$build_dir/snrt_thermochemistry_loader_smoke.o"
 "$fc" "$build_dir/amr_parameters.o" "$build_dir/snrt_agn_source.o" \
-  "$build_dir/snrt_thermochemistry.o" "$build_dir/snrt_thermochemistry_loader_smoke.o" \
+  "$build_dir/snrt_thermochemistry.o" "$build_dir/dust_element_cooling.o" \
+  "$build_dir/snrt_atomic_cooling.o" "$build_dir/snrt_thermochemistry_loader_smoke.o" \
   -o "$build_dir/snrt_thermochemistry_loader_smoke"
 
 table_dir="$repo_root/simulation/snrt/data/furlanetto_stoever_2010"
