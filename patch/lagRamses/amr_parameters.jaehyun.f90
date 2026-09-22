@@ -493,7 +493,7 @@ module amr_parameters
   real(dp)::fR0=-1.0d-6                 ! f_{R,0} amplitude (< 0)
   integer ::fR_n=1                       ! Hu-Sawicki power-law index
   integer ::n_iter_fR=200                ! Max Newton-GS iterations per level
-  real(dp)::fR_eps=1.0d-6               ! Convergence threshold
+  real(dp)::fR_eps=1.0d-5               ! Convergence threshold
   logical ::fR_fft_refined=.false.       ! Opt-in FFT correction on full periodic refined levels
 
   ! nDGP gravity parameters
