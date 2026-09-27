@@ -72,6 +72,7 @@ subroutine read_params
   !--------------------------------------------------
 !jhshin1
   namelist/run_params/clumpfind,cosmo,pic,sink,sinkprops,lightcone,poisson,hydro,rt,verbose,debug &
+       & ,snrt_transport_model,snrt_moment_order &
        & ,nrestart,ncontrol,nstepmax,nsubcycle,nremap,remap_thresh,ordering &
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
   & ,memory_balance,memory_balance_fast_particles,particle_tree_fast_relink &
@@ -298,12 +299,40 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   open(1,file=infile)
   rewind(1)
   read(1,NML=run_params)
+  select case(trim(snrt_transport_model))
+  case('sn')
+     ! Preserve the original model and all of its checkpoint semantics.
+  case('tensor_mn')
+#ifdef SNRT
+     if(myid==1)write(*,*)'SNRT compact M_N selected: MC15/SSPRK2 transport; explicit material capability checks'
+#ifndef HDF5
+     if(myid==1)write(*,*)'ERROR: tensor_mn requires HDF5=1 for typed compact radiation checkpoints'
+     call clean_stop
+#endif
+#else
+     if(myid==1)write(*,*)'ERROR: tensor_mn requires a binary compiled with SNRT=1'
+     call clean_stop
+#endif
+  case default
+     if(myid==1)write(*,*)'ERROR: snrt_transport_model must be sn or tensor_mn'
+     call clean_stop
+  end select
+  if(snrt_moment_order<1.or.snrt_moment_order>5)then
+     if(myid==1)write(*,*)'ERROR: snrt_moment_order must be 1, 2, 3, 4 or 5 (4, 9, 16, 25 or 36 moments)'
+     call clean_stop
+  endif
   if(aexp_step_limit<=0.0d0)then
      if(myid==1)write(*,*)'ERROR: aexp_step_limit must be positive'
      call clean_stop
   endif
   rewind(1)
   read(1,NML=output_params)
+  if(trim(snrt_transport_model)=='tensor_mn')then
+     if(trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))then
+        if(myid==1)write(*,*)'ERROR: tensor_mn requires HDF5 output and HDF5 restart input (no legacy angular payload)'
+        call clean_stop
+     endif
+  endif
   rewind(1)
   read(1,NML=amr_params)
   rewind(1)

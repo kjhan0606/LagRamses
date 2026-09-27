@@ -182,7 +182,11 @@ contains
       real(dp),intent(in) :: input(:,:)
       real(dp),intent(out) :: output(:,:),projected_base(:,:),boundary(:),receipt(:)
       integer,intent(out) :: status
-      integer,parameter :: angle_tile=8,field_tile=32
+      ! Keep the same quadrature and face flux formula, but submit four times
+      ! more angular nodes per device transaction.  The old width of eight
+      ! made each 384-node M5 sweep pay a separate allocation/copy/sync cost
+      ! for every face batch; 32 remains a bounded live-kernel payload.
+      integer,parameter :: angle_tile=32,field_tile=32
       real(dp),allocatable :: field(:,:),extended(:,:),cache(:,:),theta(:),samples(:),slopes(:,:)
       real(dp),allocatable :: donor(:,:,:),delta(:,:)
       real(dp),allocatable :: all_projected(:,:),left(:,:,:),right(:,:,:),geometry(:,:),face_flux(:,:)
@@ -240,6 +244,13 @@ contains
             enddo
          enddo
       enddo
+      ! The first exchange uses moment tiles (field_tile columns), whereas
+      ! the angular donor exchange needs four columns per angular node. Grow
+      ! the same work array only after the moment exchange has finished; this
+      ! prevents the old 32-column out-of-bounds condition at angle_tile=32
+      ! without carrying two mesh-indexed work arrays simultaneously.
+      deallocate(field)
+      allocate(field(mesh%nfield,4*angle_tile))
       do first=1,b%nq,angle_tile
          nq=min(angle_tile,b%nq-first+1);donor=0;field=0
          do k=1,nq

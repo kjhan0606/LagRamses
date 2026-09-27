@@ -113,6 +113,12 @@ PARAMS = [
     ParamDef('use_fftw',   'bool', True,   'RUN_PARAMS', S_GPU, 'FFTW3 CPU direct Poisson solver'),
 
     # Misc run_params
+    ParamDef('snrt_transport_model','str','sn','RUN_PARAMS',S_HYDRO,
+             'Native radiation representation; tensor_mn uses compact MC15/SSPRK2, gas/dust coupling and CUDA/OpenMP dispatch',
+             choices=['sn','tensor_mn']),
+    ParamDef('snrt_moment_order','int',3,'RUN_PARAMS',S_HYDRO,
+             'Tensor M_N order 1/2/3/4/5 stores 4/9/16/25/36 moments per spectral group',
+             visible_when="snrt_transport_model=='tensor_mn'",choices=[1,2,3,4,5]),
     ParamDef('jobcontrolfile','str','',    'RUN_PARAMS', S_TIME, 'Job control file path'),
     ParamDef('dump_pk',    'bool', False,  'RUN_PARAMS', S_OUTPUT, 'Dump power spectrum'),
     ParamDef('sinkprops',  'bool', False,  'RUN_PARAMS', S_SIMTYPE, 'Output sink properties'),
@@ -696,6 +702,19 @@ def validate_params(values):
     """Run all validation rules. Returns list of ValidationMsg."""
     values = _normalize_values(values)
     msgs = []
+
+    transport = str(values.get('snrt_transport_model','sn')).strip("'\"")
+    if transport not in ('sn','tensor_mn'):
+        msgs.append(ValidationMsg('ERROR','snrt_transport_model must be sn or tensor_mn'))
+    order = values.get('snrt_moment_order',3)
+    if isinstance(order,str) and re.fullmatch(r'[1-5]',order.strip()):
+        order = int(order.strip())  # Imported namelists carry raw Fortran strings.
+    if type(order) is not int or order not in (1,2,3,4,5):
+        msgs.append(ValidationMsg('ERROR','snrt_moment_order must be integer 1, 2, 3, 4 or 5'))
+    if transport == 'tensor_mn':
+        msgs.append(ValidationMsg('WARNING','tensor_mn requires SNRT=1 and HDF5=1. Band mode uses native bounded endpoint moments and a distinct restart identity. CHIMES/dust require their compiled modules and compatible physical inputs; GPU requires USE_CUDA=1; no SN fallback.'))
+        if str(values.get('outformat','hdf5')).strip("'\"") != 'hdf5':
+            msgs.append(ValidationMsg('ERROR','tensor_mn requires HDF5 output for its typed compact radiation payload.'))
 
     if not values.get('mhd_enabled') and any(values.get(k,False) for k in ('mhd_omp','mhd_gpu_faces')):
         msgs.append(ValidationMsg('ERROR','MHD execution flags require mhd_enabled and SOLVER=mhd'))

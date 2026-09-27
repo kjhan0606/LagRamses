@@ -266,10 +266,14 @@ template<class Real,bool Global> __global__ void reconstruct(Basis b,int n,const
   for(int seed_attempt=0;seed_attempt<2;++seed_attempt){
     if(threadIdx.x==0){
       s.status=0;s.radius=1;
-      s.warm=seed_attempt==0&&!retrying&&hint_valid&&hint_valid[cell];
+      s.warm=seed_attempt==0&&!retrying&&hint&&(!hint_valid||hint_valid[cell]);
       if(s.warm)for(int j=0;j<d;++j){
-        double a=hint[size_t(cell)*d+j],target=hint_target[size_t(cell)*d+j];
-        if(!isfinite(a)||fabs(a)>1e6||!isfinite(target)||fabs(target-u[cell*b.nm+j+1]/s.norm)>.25)s.warm=0;
+        double a=hint[size_t(cell)*d+j];
+        if(!isfinite(a)||fabs(a)>1e6)s.warm=0;
+        if(hint_target){
+          double target=hint_target[size_t(cell)*d+j];
+          if(!isfinite(target)||fabs(target-u[cell*b.nm+j+1]/s.norm)>.25)s.warm=0;
+        }
       }
       if(s.warm)atomicAdd(stats+4,1ULL);
     }
@@ -332,7 +336,7 @@ template<class Real,bool Global> __global__ void reconstruct(Basis b,int n,const
             angular[t*b.nq+q]=s.norm*exp(eta-top)/z;
           }
         }
-        if(hint){
+        if(next_hint){
           for(int j=threadIdx.x;j<d;j+=blockDim.x){
             next_hint[size_t(cell)*d+j]=s.alpha[j];
             next_target[size_t(cell)*d+j]=u[cell*b.nm+j+1]/s.norm;
@@ -795,21 +799,23 @@ __global__ void live_face_flux(int nf,int nm,int nq,const double *y,const double
 }
 }
 static int snrt_mn_cuda_closure_impl(int slot,int nc,int nm,int nq,const double *y,const double *w,
-    const double *direction,const double *input,double *projected,double *cache,double *angular_host){
-  if(slot<0||nc<1||nc>256||nm<9||nm>36||nq!=384)return 7;
-  LiveBuffers mem(slot);double *dy=nullptr,*dw=nullptr,*dd=nullptr,*du=nullptr,*da=nullptr,*dp=nullptr,*dc=nullptr;
+    const double *direction,const double *input,const double *warm_host,double *projected,double *cache,double *angular_host){
+  if(slot<0||nc<1||nc>256||nm<4||nm>36||nq!=384)return 7;
+  LiveBuffers mem(slot);double *dy=nullptr,*dw=nullptr,*dd=nullptr,*du=nullptr,*da=nullptr,*dp=nullptr,*dc=nullptr,*dh=nullptr;
   int *failure=nullptr;unsigned long long *stats=nullptr;int failed=0;
   if(!mem.alloc(dy,nm*nq)||!mem.alloc(dw,nq)||!mem.alloc(dd,3*nq)||!mem.alloc(du,nm*nc)||
-     !mem.alloc(da,nq*nc)||!mem.alloc(dp,nm*nc)||!mem.alloc(dc,(nm+1)*nc)||!mem.alloc(failure,1)||!mem.alloc(stats,8))return 7;
+     !mem.alloc(da,nq*nc)||!mem.alloc(dp,nm*nc)||!mem.alloc(dc,(nm+1)*nc)||!mem.alloc(failure,1)||!mem.alloc(stats,8)||
+     (warm_host&&!mem.alloc(dh,(nm-1)*nc)))return 7;
   auto copy=[&](double *d,const double *h,size_t n){return cudaMemcpyAsync(d,h,8*n,cudaMemcpyHostToDevice,mem.stream)==cudaSuccess;};
-  if(!copy(dy,y,nm*nq)||!copy(dw,w,nq)||!copy(dd,direction,3*nq)||!copy(du,input,nm*nc))return 7;
+  if(!copy(dy,y,nm*nq)||!copy(dw,w,nq)||!copy(dd,direction,3*nq)||!copy(du,input,nm*nc)||
+     (warm_host&&!copy(dh,warm_host,(nm-1)*nc)))return 7;
   if(cudaMemsetAsync(failure,0,sizeof(int),mem.stream)!=cudaSuccess||
      cudaMemsetAsync(stats,0,8*sizeof(unsigned long long),mem.stream)!=cudaSuccess||
      cudaMemsetAsync(dc,0,8*(nm+1)*nc,mem.stream)!=cudaSuccess)return 7;
   if(cudaFuncSetAttribute(reconstruct<double,false>,cudaFuncAttributeMaxDynamicSharedMemorySize,sizeof(Workspace<double,false>))!=cudaSuccess)return 7;
   Basis b{nm,nq,3,dy,dw,dd};
   reconstruct<double,false><<<nc,THREADS,sizeof(Workspace<double,false>),mem.stream>>>(b,1,du,da,0,0,0,0,0,0,
-      0,nc,0,failure,2e-12,nullptr,0,stats,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,0,nullptr,dc);
+      0,nc,0,failure,2e-12,nullptr,0,stats,dh,nullptr,nullptr,nullptr,nullptr,nullptr,0,nullptr,dc);
   if(cudaGetLastError()!=cudaSuccess)return 7;
   if(cudaMemcpyAsync(&failed,failure,sizeof(int),cudaMemcpyDeviceToHost,mem.stream)!=cudaSuccess||cudaStreamSynchronize(mem.stream)!=cudaSuccess)return 7;
   if(failed)return 2;
@@ -822,11 +828,15 @@ static int snrt_mn_cuda_closure_impl(int slot,int nc,int nm,int nq,const double 
 }
 extern "C" int snrt_mn_cuda_closure_c(int slot,int nc,int nm,int nq,const double *y,const double *w,
     const double *direction,const double *input,double *projected,double *cache){
-  return snrt_mn_cuda_closure_impl(slot,nc,nm,nq,y,w,direction,input,projected,cache,nullptr);
+  return snrt_mn_cuda_closure_impl(slot,nc,nm,nq,y,w,direction,input,nullptr,projected,cache,nullptr);
+}
+extern "C" int snrt_mn_cuda_closure_hint_c(int slot,int nc,int nm,int nq,const double *y,const double *w,
+    const double *direction,const double *input,const double *warm,double *projected,double *cache){
+  return snrt_mn_cuda_closure_impl(slot,nc,nm,nq,y,w,direction,input,warm,projected,cache,nullptr);
 }
 extern "C" int snrt_mn_cuda_closure_angular_c(int slot,int nc,int nm,int nq,const double *y,const double *w,
     const double *direction,const double *input,double *projected,double *cache,double *angular){
-  return snrt_mn_cuda_closure_impl(slot,nc,nm,nq,y,w,direction,input,projected,cache,angular);
+  return snrt_mn_cuda_closure_impl(slot,nc,nm,nq,y,w,direction,input,nullptr,projected,cache,angular);
 }
 extern "C" int snrt_mn_cuda_project_c(int slot,int nc,int nm,int nq,const double *y,const double *w,
     const double *angular,double *moments){
@@ -845,7 +855,7 @@ extern "C" int snrt_mn_cuda_project_c(int slot,int nc,int nm,int nq,const double
 }
 extern "C" int snrt_mn_cuda_flux_c(int slot,int nf,int nm,int nq,const double *y,const double *w,
     const double *direction,const double *left,const double *right,const double *geometry,double *flux){
-  if(slot<0||nf<1||nf>256||nm<9||nm>36||nq<1||nq>8)return 7;
+  if(slot<0||nf<1||nf>256||nm<4||nm>36||nq<1||nq>32)return 7;
   LiveBuffers mem(slot);double *dy=nullptr,*dw=nullptr,*dd=nullptr,*dl=nullptr,*dr=nullptr,*dg=nullptr,*df=nullptr;
   if(!mem.alloc(dy,nm*nq)||!mem.alloc(dw,nq)||!mem.alloc(dd,3*nq)||!mem.alloc(dl,4*nq*nf)||
      !mem.alloc(dr,4*nq*nf)||!mem.alloc(dg,5*nf)||!mem.alloc(df,nm*nf))return 7;

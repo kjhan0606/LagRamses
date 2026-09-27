@@ -56,6 +56,9 @@ module amr_parameters
   logical::sink    =.false.   ! Sink particles activated
   logical::sinkprops=.false.  ! Write sink properties at each coarse step
   logical::rt      =.false.   ! Radiative transfer activated
+  ! Native SNRT representation, independent of CPU/CUDA backend selection.
+  character(len=16)::snrt_transport_model='sn'
+  integer::snrt_moment_order=3 ! M1--M5: 4/9/16/25/36 real harmonics
   logical::debug   =.false.   ! Debug mode activated
   logical::static  =.false.   ! Static mode activated
   logical::tracer  =.false.   ! Tracer particles activated

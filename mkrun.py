@@ -328,6 +328,23 @@ def save_text(path, text):
         stream.write(text)
 
 
+def collect_snrt_transport(ui):
+    """Keep algorithm selection separate from CPU/CUDA execution placement."""
+    model = ui.ask_choice('Native RT representation', OrderedDict([
+        ('sn', ('Existing discrete ordinates (unchanged default)',)),
+        ('tensor_mn', ('Compact maximum-entropy moments; gas/chemistry/dust/IR coupling with shared-stream CUDA/OpenMP transport',)),
+    ]), 'sn')
+    if model not in ('sn', 'tensor_mn'):
+        raise ValueError('Unknown native RT representation.')
+    order = 3
+    if model == 'tensor_mn':
+        order = ui.ask('Moment order: 1=4, 2=9, 3=16, 4=25, 5=36 components', 3, int)
+        if type(order) is not int or order not in (1, 2, 3, 4, 5):
+            raise ValueError('Moment order must be 1, 2, 3, 4 or 5.')
+        ui.info('M_N requires SNRT=1, HDF5=1 and HDF5 output. Spectral bands store bounded endpoint moments; CHIMES/dust options retain their physical compatibility checks. SNRT_BACKEND selects openmp/cuda/auto (hybrid); no SN fallback.')
+    return {'snrt_transport_model': model, 'snrt_moment_order': order}
+
+
 def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False):
     """Package comparison inputs, including explicitly experimental opt-ins.
 
@@ -342,6 +359,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             'Not a production/publication approval. No job will be launched.')
     if not ui.ask_bool('Use the fixed reference-only RT/feedback/dust comparison?', False):
         raise ValueError('Comparison not selected; return to Run mode or restart the wizard.')
+    transport_options = collect_snrt_transport(ui)
     ranks, threads, primary_backend, dust_backend = 1, 2, 'openmp', 'openmp'
     if parallel:
         ui.info('\n=== Parallel execution placement ===')
@@ -776,6 +794,8 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         raise ValueError('Local comparison assets unavailable (a Git clone alone is insufficient): '
                          + ', '.join(missing))
     text = template.read_text(encoding='utf-8')
+    if transport_options['snrt_transport_model'] != 'sn':
+        text = merge_into_group(text, 'RUN_PARAMS', list(transport_options), transport_options)
     if ccsn:
         token = 'channel_mass_min_msun=40d0,1d0,40d0,3d0,140d0'
         if text.count(token) != 1:
@@ -1477,6 +1497,7 @@ def generate_run(ui=None, write_text=save_text):
 
     if values['hydro']:
         print('\n=== Hydro solver ===')
+        values.update(collect_snrt_transport(ui))
         values['gamma'] = ask('gamma', 1.6666667, float)
         values['courant_factor'] = ask('courant_factor', 0.8, float)
         values['slope_type'] = ask('slope_type', 2, int)

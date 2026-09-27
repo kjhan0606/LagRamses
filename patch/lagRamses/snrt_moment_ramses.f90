@@ -150,7 +150,7 @@ contains
     ni=snrt_dust_contract_number_ir
     if(snrt_dust_contract_version<3.or.ni<1)ierr=1
 #endif
-    if(nm<9.or.nm>36)ierr=1
+    if(nm<4.or.nm>36)ierr=1
     call mn_collective_status(ierr)
     if(ierr/=0)then
        write(*,*)'M_N payload configuration rejected nm/ni/dustversion=',nm,ni,snrt_dust_contract_version

@@ -408,6 +408,10 @@ ifdef STELLAR_EMBEDDED_YIELDS
 endif
 #############################################################################
 ramses:	$(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o
+ifeq ($(SNRT)$(USE_CUDA),11)
+	@nm -u snrt_moment_dispatch.o | grep -F ' U snrt_mn_cuda_closure_hint_c' >/dev/null || { \
+	  echo 'ERROR: SNRT CUDA build has a CPU-only M_N dispatcher; rebuild snrt_moment_dispatch.o with USE_CUDA=1'; exit 1; }
+endif
 	$(F90) $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) ramses.o -o $(EXEC)$(NDIM)d $(LIBS)
 	rm -f $(WRITE_MAKEFILE_SOURCE)
 ifeq ($(SNRT),1)
@@ -415,6 +419,10 @@ ifeq ($(SNRT),1)
 ramses.o: $(firstword $(MAKEFILE_LIST))
 endif
 snrt_regrid_native: $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) snrt_regrid_smoke.o
+ifeq ($(SNRT)$(USE_CUDA),11)
+	@nm -u snrt_moment_dispatch.o | grep -F ' U snrt_mn_cuda_closure_hint_c' >/dev/null || { \
+	  echo 'ERROR: native M_N test has a CPU-only dispatcher in a CUDA build'; exit 1; }
+endif
 	$(F90) $(MODOBJ) $(AMRLIB) $(CUDA_OBJS) snrt_regrid_smoke.o -o $(EXEC)_regrid $(LIBS)
 snrt_regrid_smoke.o: snrt_regrid.o snrt_dust_live.o
 ifeq ($(HDF5),1)
@@ -534,7 +542,10 @@ umuscl.kjhan.o interpol_hydro.kjhan.o: snrt_chimes_runtime.o
 endif
 snrt_angular_quadrature.o: snrt_state.o
 snrt_amr_topology.o: amr_commons.kjhan.o mpi_mod.o snrt_state.o
-snrt_moment_dispatch.o: snrt_moment_transport.o snrt_runtime_backend.o
+# This small dispatcher must follow the current USE_CUDA choice even when
+# reusing objects from a CPU build. Linked CUDA symbols alone do not prove
+# that its Fortran call sites were compiled with HYDRO_CUDA.
+snrt_moment_dispatch.o: snrt_moment_transport.o snrt_runtime_backend.o FORCE
 snrt_moment_amr.o: snrt_amr_topology.o snrt_moment_transport.o snrt_moment_dispatch.o
 snrt_moment_ramses.o: snrt_moment_amr.o snrt_moment_material.o snrt_moment_live.o snrt_agn_locator.o \
                      snrt_stellar_source.o snrt_rt_transaction.o snrt_dust_live.o snrt_atomic_cooling.o \
