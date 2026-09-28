@@ -18,6 +18,12 @@ evidence.
 CPU/GPU IR improvements, integrated cost breakdown, and Tensor Core limitations;
 stream-count tuning stopped per operator instruction.
 
+[CHIMES MPI/OpenMP layout comparison](mpi_omp_decomposition_2026-09-28.md):
+fixed-total-core 1x28/2x14/4x7 comparison on 512- and 4096-cell controls;
+4x7 was fastest on both. At 4096 cells, active-step times were
+273.12/203.74/170.00 s. Per-cell photo-chemistry cost remains; production
+scaling is not established by these single-run controls.
+
 [CHIMES dark audit synthesis and P0/P1 implementation](chimes_dark_bundle_2026-09-12.md):
 deterministic species-rate initialization, disabled explicit-candidate removal,
 zero-photon-only work reduction, native parity and one-step integration evidence.
