@@ -331,3 +331,136 @@ Final native fixture pinned as `.cosmo-coupling.g8Heia/dust_cmb_native`, SHA256
 rerun `cmb-native-final.log` passed. Source diff whitespace check and both
 namelist frontend syntax checks passed. No GPU run, cosmological stellar/AGN
 source run, full128^3 cost measurement or galaxy calibration is claimed.
+
+## 2026-09-25 live D03 CMB recheck (current uncommitted work)
+
+An initial source inspection incorrectly treated the fixed 10 K reference
+table background as the live cosmological bath. In git HEAD the live callback
+actually computed `2.727/a` itself and passed it to the signed-net
+`iron_radiative_cell` C/silicate receiver with Fe mass zero. The receiver
+accepts baths below the first 5 K table knot via analytic DL01 cold enthalpy
+and per-band Planck ratios. Native tests already covered a 2.727 K bath,
+cold gas drawing energy from grains slightly below the bath, and the explicit
+CMB receipt. The older integrated z=99 test did exercise that receiver, but
+does not prove all later coupling changes or low-z live integration.
+The two-size dust mass runtime explicitly checks that the sums of the first
+two and last two size bins equal the C and silicate species carriers within
+128 machine epsilons; thus the receiver's four-bin mass weights and the
+driver's two-species enthalpy curve share the admitted composition.
+
+A proposed replacement with the C++ material backend and an instantaneous
+`U(Tcmb)` projection was a physical regression: that backend bounds the
+temperature below by the bath and cannot account continuously for CMB
+support of heat lost to colder gas. It was removed after a read-only Fable
+physics review (Q-GOAL: restore signed-net receiver; Q-LEAN: no extra knot
+or background rebasing). The current callback keeps the expanded interface
+needed by the newer IR operator but derives physical bath independently of
+the 10 K reference table, then uses the original signed-net C/silicate solve.
+The native transport fixture now checks that the table bath remains 10 K
+while the material receiver uses 272.7 K. With `SNRT=1 DUST_LIVE=1`, changed
+modules compiled and the dust backend smoke passed. This is not yet a new
+integrated pass.
+
+A full-AMR smoke link in the reused `bin/` directory failed on mixed-option
+HDF5/CHIMES/dust-dynamics objects, so no result from that link counts.
+Isolated full-option `SNRT=1 DUST_LIVE=1 DUST_DYNAMICS=1 CHIMES=1 HDF5=1`
+build plus the source-free cosmological 4^3 two-step fixture is Slurm job
+403334. Its effective namelist is `.cmb-epoch-validate-20260925/run.nml`
+(SHA256 `c3c145905ce8e3fd767051eada74763211e8ae17c4d12d5e2f95119ae2fa4de0`),
+with no full dump expected. The job was held while correcting the regression
+and released after the changed modules compiled. Inspect build log, source
+hashes, CMB receipts, exit status, and absent `output_*` before changing the
+integrated verdict. The originally dependent low-T preparation-only job
+403338 was canceled before execution because it did not exercise the live
+material solver. Replacement dependency 403359 runs the existing native
+CMB material, IR-transport and expansion smoke after a successful 403334.
+The in-flight
+128^3 H200 job has a copied older binary and cannot validate this patch.
+For the two-rank/two-step fixture, the script's minimum two CMB markers is
+only a launch sanity check: final evaluation requires four rank-local
+`SNRT_CMB_COMMIT` records, both `Main step=1` and `Main step=2`, finite
+nonnegative receipts, explicit IR balance/rollback checks, and no full dump.
+
+The first isolated build job 403334 became runnable after broadening its
+eligible GPU partitions, but failed before source compilation: Lmod required
+`intel/tbb`, `intel/compiler-rt`, and `intel/umf` before the Intel compiler.
+Its dependent 403359 never ran and was canceled. Corrected scripts load all
+three prerequisites, then Intel compiler/MPI; the sequence was checked on
+the login node without running compute there. Replacement build/integration
+job 403389 and dependent native smoke 403390 were submitted across
+`a10,a40,a100,h100`. Their status and outputs supersede the pending wording
+above; the module failure is not a physics or code-test result.
+
+Job 403389 then reached compilation but failed in one second because a clean
+`make -j4` raced Fortran module production: `pm_parameters` and
+`hydro_parameters` read `amr_parameters.mod` before it existed. This is a
+Make dependency/order error, not a source or physics verdict. Its build log
+is retained as `build-403389-failed.log`; valid completed objects were left
+in the isolated build directory. Dependent 403390 never ran and was canceled.
+The corrected sequential build/integration is job 403394, with dependent
+native smoke 403395. No previous full simulation outputs were deleted.
+
+## 2026-09-25 resolved integrated CMB check and bounded MPI-cost correction
+
+Jobs 403394 and 403395 completed `0:0` with the isolated full-option build.
+The actual two-rank/two-step run emitted four positive CMB receipts, two
+`SNRT_RT_CLOSURE_PASS` and `SNRT_DUST_IR_COMMIT_PASS` records, both main steps,
+and `Run completed`. IR relative balances were `6.0272e-14` and `3.0358e-13`.
+The CMB material, transport/rollback, dilution and expansion native fixtures
+also passed. Source hashes were identical before/after the run; no `output_*`
+tree was created. This validates the restored signed-net live receiver for
+this manufactured source-free z=99 start, not an approved stellar/AGN SED or
+all-redshift science production run.
+
+This tiny run exposed an MPI efficiency failure: 80 directions times 136 IR
+groups were exchanged in 16-component halo tiles, causing about 53 s of halo
+wall per step. `snrt_dust_live.f90` now enlarges tiles only where the field is
+small, with at most 8 MiB additional scratch over the previous 16-column
+tile. The same effective NML (SHA256
+`c3c145905ce8e3fd767051eada74763211e8ae17c4d12d5e2f95119ae2fa4de0`)
+in `.cmb-halo-validate-20260925/` gave 1.105/1.115 s halo times. Its
+integrated simulation finished both steps and reproduced the old printed
+CMB receipts, RT closure, IR balances and main-step values exactly. Batch
+403477 ended `FAILED 1:0` only because its post-run native fixture was
+invoked without the MPI launcher. A first native-only retry lacked the dust
+contract environment (`STOP 9`); corrected job 403519 passed all native
+checks. Neither failure is a simulation/physics rejection.
+
+The remaining ~329 s/step came from `snrt_regrid_upload`: it reversed each
+component of the combined photon/IR parent payload in a separate MPI call.
+It now packs the same per-component parent densities into bounded tiles and
+uses the existing reverse-add AMR halo exchange. The parent multiplicity,
+collective validation and commit rules remain unchanged. Its Makefile module
+dependency was made explicit. Fresh full-option job 403527 completed `0:0`;
+both steps and native fixtures passed. The two-step RAMSES wall fell from
+783.58 s (403394) to 657.66 s (halo change only, 403477) to 48.18 s
+(both changes, 403527). This is an identical 4^3 fixture comparison on
+different GPU nodes, not a large-run speedup or an accelerator claim. Source
+hashes were identical before/after job 403527. The old and final S_N logs
+match exactly at printed precision for CMB receipts, IR balances, RT closure,
+and main-step conservation values. Effective NML:
+`/gpfs/kjhan/LRD_JWST/.cmb-regrid-validate-20260925/run.nml`.
+
+The same final binary (SHA256
+`6c8e8180517d7464345955127d891d9c38328780a82d39329e15e68d14d21543`)
+also passed a two-rank/two-step M5 run, job 403540 `0:0`, with only
+`snrt_transport_model='tensor_mn', snrt_moment_order=5` changed in its NML.
+Both M5 commits have zero printed photon/energy residual, main-loop steps
+complete with the same printed `mcons`/`econs` values, and RAMSES wall is
+39.52 s. Effective M5 NML:
+`/gpfs/kjhan/LRD_JWST/.cmb-m5-validate-20260925/run.nml` (SHA256
+`6e4fea14dbca7ef282d04a5cf81c4887f3152faac6c7d2d29966069c0c4056c8`).
+All three evaluated comparison directories had zero raw `output_*` dumps;
+no deletion was necessary. These are wiring/conservation and tiny-cost
+checks only. Reference-control source/group/dust inputs and larger evolving
+AMR/illuminated runs remain separate production-readiness limitations.
+
+The pre-existing `snrt_regrid_native` fixture initially stopped before any
+upload check (`STOP 2`): its old +/-mean/32 signed test shift violates the
+current group's energy-edge admission for some bands. The fixture alone was
+reduced to +/-mean/1000, retaining both signs and all existing assertions.
+Job 403560 then passed `SNRT_NATIVE_LEVEL_UPLOAD_PASS`,
+`SNRT_NATIVE_REGRID_PASS`, the coarse/fine IR conservation/rollback test,
+and the defragmentation checks. No production acceptance range or transport
+arithmetic was relaxed for this fixture repair. The preceding failed native
+job 403553 and its log remain in `.cmb-regrid-validate-20260925/`.

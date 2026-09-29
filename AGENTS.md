@@ -17,6 +17,30 @@ COLIBRE-type galaxy-observable calibration and resolution convergence form
 a separate science plan (`provenance/galaxy_calibration_science_plan.md`),
 not additional prerequisites for the approved three-step implementation.
 
+## Short-term M5 transport and coupling objective
+
+Operator decision (2026-09-14): the short-term objective is to select and
+implement conservative transport of M5 moments, then connect it to the
+existing gas and dust physics. M5 is the angular representation/closure;
+spatial transport and radiation-matter coupling are separate design choices.
+Retain the current conservative kinetic M5 transport and S_N path as comparison
+options. A direct moment Riemann solver is a candidate, not an established cure
+for the observed angular/spatial artifacts.
+
+Judge transport by propagation and flux errors, shadows, conservation,
+positive/realizable states, and runtime/memory cost, not spherical appearance
+alone. Preserve physical anisotropy in inhomogeneous density fields. Reuse the
+existing controls documented in
+`provenance/snrt_m5_origin_controls_2026-09-14.md`; do not create an expanding
+benchmark or gate program as a substitute for implementation.
+
+Reuse the existing gas and dust source-term interfaces where applicable,
+checking photon, energy and momentum exchange consistently with the selected
+reduced-light-speed convention and enabled physics. Standalone fixed-gas M5
+tests do not establish coupled simulation readiness: a bounded integrated
+gas/dust run must verify the connection. Unrelated physics extensions and
+galaxy calibration remain outside this short-term objective.
+
 ## Completed test output retention
 
 Operator directive (2026-09-10): after a simulation test AND its stage
@@ -31,6 +55,11 @@ directory and origin before mutations; do not infer project identity from
 the directory name alone.
 
 ## Planning audits
+
+Current operator-role update (2026-09-16): Fable performs plan reviews and
+bundle-end audits; Claude Opus 5 performs code implementation/structure
+audits. The default Fable plan-audit timeout is 600 seconds (10 minutes). A
+timeout is recorded as no verdict, not as approval or rejection.
 
 Operator-approved reduction (2026-09-10): Fable is not a routine per-bundle
 gate. Request a plan review for a new physical model, a substantive change

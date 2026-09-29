@@ -1,5 +1,29 @@
 # Galaxy calibration and convergence — small-box pilot
 
+Current operator direction (2026-09-28): the cosmological calculation must
+reach the local Universe so its galaxy observables can be compared with
+low-redshift data and used to tune parameters. Keep the existing 12.5 cMpc box;
+do not enlarge it. A z=6 endpoint alone does not meet this calibration
+objective. Price and prepare a z≈0 trajectory in that fixed volume, beginning
+with the existing 128^3 IC; use matched 256^3/512^3 runs only after the 128^3
+cost and observable sample are known. This is a science calibration campaign,
+not a completed execution or a resolution-only test.
+
+Historical update (2026-09-15): operator had approved resuming 128^3 only to
+z=6 with the completed M5 connection. That endpoint and its launch record
+remain historical; it does not satisfy the newer low-redshift calibration
+objective.
+See the [former z=6 M5 launch plan](galaxy128_m5_resume_2026-09-15.md).
+256^3/512^3 still require measured 128^3 cost and priced allocations.
+
+Historical execution update (2026-09-28): the approved 128^3 z=99-to-z=6
+attempt, job 549945, did not complete. Its log ends at level-7 grid growth
+(18,752 to 89,664 grids) with an OOM kill; the last SNRT stage reported zero
+active sources. No usable z=6 snapshot or resolved galaxy catalogue resulted.
+This was an early startup/evolution attempt, not a successful cosmological
+science run or an observational calibration. Preserve its inputs and logs;
+the new target is z≈0 in the same box.
+
 Status2026-09-12: **operator authorized preparation/execution of the small-box
 pilot, including parallel-performance checks; bounded actual-IC coupled
 startup job540015 and performance comparison job541239 completed, not a
@@ -55,6 +79,84 @@ must be stated before science execution. Do not launch the former25cMpc
 No IC ownership transfer is implied. Existing physics applicability and retention rules
 below remain in force; old resource numbers are proposals, not reservations.
 
+## Operator clarification — observational calibration is the objective
+
+Operator clarification (2026-09-28): the cosmological campaign is intended to
+reach low redshift, produce galaxy observables that can be compared with
+observations, and use those comparisons to tune the model parameters. The box
+remains 12.5 cMpc. Resolution/runtime tests support that objective; they are
+not the scientific deliverable by themselves.
+
+The first low-redshift comparison set is the stellar mass function and
+rest-frame color versus stellar mass from GAMA; stellar metallicity versus
+stellar mass from a measurement-compatible MaNGA subset; dust-to-gas versus
+gas-phase metallicity from DustPedia; and HI gas fraction versus stellar mass
+from xGASS. Supporting diagnostics are the star-forming main sequence and
+gas-phase metallicity versus stellar mass. Candidate source papers/data are
+[GAMA DR4 stellar mass functions](https://arxiv.org/abs/2203.08539),
+[GAMA rest-frame color--mass measurements](https://academic.oup.com/mnras/article/453/4/3519/2593730),
+[MaNGA stellar metallicities](https://academic.oup.com/mnras/article/532/2/2832/7700710),
+[DustPedia dust/metallicity measurements](https://openaccess.inaf.it/bitstreams/4d8c59d9-f3ec-46ba-873b-a68028bf3d52/download),
+and [xGASS gas scaling relations](https://arxiv.org/abs/1802.02373). Freeze
+the exact catalogue release and measurement convention before fitting.
+
+Colors require synthetic photometry from stellar ages/metallicities, a
+declared population-synthesis model and filters, with modeled dust attenuation
+and the same rest-frame convention as the data; native gas RT moments alone
+are not observed galaxy colors. Match whether stellar metallicity is
+mass-weighted or light-weighted. Do not compare those definitions as though
+they were identical.
+
+For every statistic, compare at matched low redshift and apply the
+observational selection, IMF/SPS convention, aperture and uncertainty
+treatment. Tune on a declared calibration sample, then hold the selected
+parameters fixed for the matched-resolution comparison; report any later
+resolution-specific refit as weak convergence, separately from
+fixed-parameter strong convergence. Because the 12.5 cMpc box has only
+1953.1 cMpc^3, it lacks long-wavelength modes and may contain too few massive
+galaxies for a stable global mass function or rare-object claims. Restrict
+fits to populated, numerically resolved bins; propagate finite-volume
+uncertainty and label the result as a small-volume calibration. Do not enlarge
+the box or compensate by relaxing resolution/sample cuts.
+
+### Fixed-volume statistical feasibility
+
+The 12.5 cMpc periodic volume is 1,953.1 cMpc^3. As a first-order sampling
+check, applying the z<0.1 GAMA DR4 binned GSMF (Table 6, 0.25-dex bins,
+renormalized to z=0 and converted from its h70 convention) to that volume
+predicts only about 17 galaxies with Mstar >= 10^9.5 Msun. Approximate
+expected counts per bin are:
+
+| log10(Mstar/Msun), GAMA bin centre | Expected objects in 12.5-cMpc box |
+| ---: | ---: |
+| 9.66 | 3.8 |
+| 9.91 | 3.2 |
+| 10.16 | 2.8 |
+| 10.41 | 2.7 |
+| 10.66 | 2.3 |
+| 10.91 | 1.4 |
+| 11.16 | 0.6 |
+| 11.41 | 0.2 |
+| 11.66 | <0.02 |
+
+These are expectations from the observed number density, not a prediction of
+the realization. They ignore the simulation's numerical resolution and
+selection, which can only reduce the usable sample. Thus one realization
+cannot support a precise multi-bin GSMF fit, and median color,
+stellar-metallicity, HI-fraction or dust scaling relations may also have too
+few independent galaxies. Treat the GSMF as a volume-aware, Poisson and
+sample-variance benchmark unless the actual catalogue demonstrates adequate
+counts; do not infer a precise population calibration from empty or
+one-object bins.
+
+If population-level statistics remain a required calibration target while the
+box size is fixed, independent same-size initial-condition phases can improve
+sample counts and estimate phase variance, but they do not restore modes
+larger than 12.5 cMpc. Their compute cost must be priced before submission. A
+single fixed-phase run can still measure paired parameter responses for its
+resolved galaxies and support a constrained small-volume calibration, but
+must not be presented as a volume-complete GSMF fit.
+
 ## Active pilot preparation and parallel performance
 
 Prelaunch inspection found a material applicability blocker:
@@ -65,7 +167,9 @@ This is a runtime admission restriction, not an IC-format failure. The existing
 integrated evidence was noncosmological; cosmological RT/feedback/dust tuning
 was not qualified by it. At that inspection no guard had been removed; no dust-off calculation
 has been represented as full-model calibration. Subsequent bounded dust-off
-readers are recorded below; no full-model cosmological science run was submitted.
+readers are recorded below. Job 549945 was later submitted with the coupled
+cosmological model but ended at early grid growth with OOM; no full-model
+cosmological science run completed.
 Supporting the requested cosmological combination requires a scoped coupling
 assessment (expansion/unit conversions, material/thermal conservation,
 primordial initialization and source-table domain), then justified changes
@@ -202,38 +306,40 @@ Preparation must explicitly resolve applicability, without bypassing guards:
   observational SPS/IMF inference with uncertainty, not a guessed offset.
 - Verify mass/Z/age coverage and primordial gas treatment. Do not extrapolate
   stellar tables to Z=0 or absent ages merely to finish a run.
-- No science IC is selected yet. Register actual paths/hashes, cosmology,
-  source assets and effective namelist before launch. Do not take over
-  unrelated simulations. Startup-only timing cannot establish late-time cost.
+- The selected starting candidate is the existing 12.5-cMpc 128^3 gas/DM IC.
+  Re-register its exact paths/hashes, cosmology, source assets and the new
+  effective z≈0 namelist before launch. Do not take over unrelated
+  simulations. Startup-only timing cannot establish late-time cost.
 
 ## Observables: fit versus independent prediction
 
 | Role | Dataset/statistic | Required comparison |
 | --- | --- | --- |
-| Primary fit | GAMA DR4 low-z total stellar mass function | Published completeness/volume selection, IMF/SPS and aperture matching; .25dex bins |
-| Primary fit | GAMA Lange mass--half-light-radius relation | Same band, projected light, morphology and surface-brightness cuts; not raw 3D half-mass radius |
-| Dust fit | DustPedia dust/gas versus gas-phase O/H, training subset | One metallicity calibration; consistent dust emissivity and HI/H2/He conventions |
-| Independent holdout | Remaining DustPedia objects; xGASS HI fractions vs mass and sSFR | Galaxy-identity split; upper limits/censoring and survey weights |
-| Predictions only | SFR, quenched fraction, gas/stellar metallicity, z=1/2 evolution, supported AGN trends | Publish discrepancies; do not silently add these to the fit |
+| Population benchmark | GAMA DR4 low-z stellar mass function | Match IMF/SPS and completeness; use a count likelihood with finite-volume uncertainty; do not fit sparse bins as precise data |
+| Conditional comparison | GAMA rest-frame color versus stellar mass | Only after aperture/selection-matched synthetic photometry; report the distribution and actual object count, not just a median |
+| Conditional comparison | MaNGA light-weighted stellar metallicity versus stellar mass | Generate the corresponding light-weighted quantity and apply MaNGA mass/size selection; report sparse-sample limits |
+| Exploratory dust constraint | DustPedia dust-to-gas versus gas-phase O/H | Use compatible late-type objects and one abundance calibration; match HI/H2/He conventions; do not claim a population fit from a handful of simulated galaxies |
+| Independent check | xGASS HI fraction versus stellar mass and sSFR | Include non-detections/upper limits and survey selection; report only populated simulation mass bins |
+| Supporting relation | Star-forming main sequence and gas-phase metallicity versus stellar mass | Apply the observed SFR timescale and strong-line abundance calibration consistently |
+| Predictions only | Mass-size relation, quenched fraction, z>0 evolution, AGN trends | Publish discrepancies; do not tune unsupported physics or claim the small box samples rare systems |
 
-Sources: [GAMA DR4](https://arxiv.org/abs/2203.08539),
-[GAMA releases](https://www.gama-survey.org/),
-[Lange et al.](https://arxiv.org/abs/1411.6355),
-[DustPedia De Vis et al.](https://arxiv.org/abs/1901.09040),
-[CDS catalogue](https://vizier.cfa.harvard.edu/viz-bin/VizieR-3?-source=J%2FA%2BA%2F623%2FA5),
-[xGASS](https://xgass.icrar.org/).
-DustPedia's main site did not load in this check; use paper/CDS and verify
-the required dust/gas fields rather than assuming one table has everything.
-No data download/checksum is claimed completed in this planning turn.
-
-Preassign DustPedia70/30 train/holdout, stratified by mass/metallicity, seed
-20260911. Account for shared GAMA objects/covariance. Apply selection to
-synthetic observables. If matched photometry is unavailable, report that
-before fitting sizes; an intrinsic radius is not an equivalent substitute.
+Sources: [GAMA DR4 mass functions](https://arxiv.org/abs/2203.08539),
+[GAMA rest-frame color--mass relation](https://academic.oup.com/mnras/article/453/4/3519/2593730),
+[MaNGA stellar metallicity relation](https://academic.oup.com/mnras/article/532/2/2832/7700710),
+[DustPedia dust/metallicity data](https://arxiv.org/abs/1901.09040),
+[xGASS](https://arxiv.org/abs/1802.02373). Confirm the exact catalogue
+release, columns, covariance and measurement convention before fitting; this
+plan does not claim that the catalogues have been downloaded or transformed.
+Do not split a small observed catalogue randomly and present that as
+independent simulation-volume validation. Use published uncertainties and
+reserve an observable or a declared dataset for the independent check.
 
 ## Four existing parameters
 
-These are proposed search bounds, **not literature-calibrated priors**.
+These are proposed search bounds, **not literature-calibrated priors**. A
+single fixed-volume realization is not presumed to identify all controls;
+freeze parameters that its resolved sample cannot constrain and expose
+degeneracies rather than forcing a multi-parameter fit.
 
 | Namelist control | Centre; range | Meaning |
 | --- | --- | --- |
@@ -247,6 +353,15 @@ definitions. SN/SNIa energy, IMF, DTD and yield normalization stay fixed;
 this is not a claim to tune every SN feedback parameter. If the sample has
 no thermal-mode AGN response, freeze `eAGN_T` and label it unidentifiable,
 not successfully fitted. BH seeding is not an extra nuisance parameter.
+
+For the currently admitted no-cosmological-AGN scope, assess paired responses
+of `eps_star` against resolved stellar-mass/SFR statistics, and assess
+`dust_sticking` plus the tied condensation control against dust-to-gas
+statistics only if the actual sample supports them. Use the
+stellar-metallicity relations to test enrichment/feedback consistency while
+IMF, yields and SN energetics remain frozen. Do not include `eAGN_T` in this
+fit unless a physically justified cosmological BH-seed/source path is first
+admitted; changing an inactive AGN control cannot calibrate the run.
 
 ## Historical resolution and ensemble matrix — not the active run plan
 

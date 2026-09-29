@@ -14,9 +14,49 @@ evidence.
 
 ## Active bundle map
 
+[Full live M5 connection](snrt_m5_full_connection_2026-09-15.md):
+current wiring/evaluation record for native band A/B state, actual stellar/AGN
+sources, H/He/CHIMES, dust/IR/Fe/PAH/relative phases, MHD coadvection,
+MPI/AMR/restart, and live shared-stream CUDA/OpenMP closure/face dispatch.
+The earlier [high-order work log](m5_high_order_coupling_work_2026-09-14.md)
+and fixed-group-only report are historical intermediate scope, not current
+startup exclusions. S_N defaults and existing physical exclusions are retained.
+Completed with final strong-source, parallel and restart controls. This is
+bounded engineering integration, not galaxy calibration or proof of all
+physical combinations; exact control results are in the linked report.
+
+[128^3 M5 runtime diagnosis](snrt_m5_cost_diagnosis_2026-09-14.md):
+separate short kernel/closure cost measurement; original shadow run unchanged,
+not a solver modification or a new physical gate.
+
+[Density-selective ionization / shielding pilot](snrt_self_shielding_2026-09-13.md):
+native Gaussian/lognormal density and luminosity comparisons; fixed temperature,
+not a cooling-time experiment or angular-converged reference.
+
+[CUDA/Tensor Core RT comparison and angular artifacts](snrt_cuda_and_angular_2026-09-13.md):
+standalone S_N/M_N GPU backends, explicit mixed precision, and quadrature-rotation
+diagnosis; not coupled RAMSES accelerator admission or angular-converged physics.
+
+[Angular-method ionization comparisons](snrt_ionization_comparison_2026-09-13.md):
+native fixed-grid evolving H tests and 128^3 reference execution; distinct from
+coupled RAMSES production integration.
+
+[M5 solver safeguards](snrt_m5_solver_2026-09-13.md):
+covariance-metric step constraint with unchanged physical moments; native
+near-boundary and directed-beam regressions, not coupled production approval.
+
+[Selectable tensor M_N implementation](snrt_tensor_mn_implementation_2026-09-13.md):
+9/16/25/36-moment native closure, conservative predictor/corrector and compact
+state tests; historical standalone stage. Its blanket live-startup rejection
+has been superseded by the full live connection above.
+
 [SNRT runtime performance and hybrid measurements](snrt_performance_2026-09-12.md):
 CPU/GPU IR improvements, integrated cost breakdown, and Tensor Core limitations;
 stream-count tuning stopped per operator instruction.
+
+[CHIMES photo/M5 high-thread tail](chimes_photo_omp_tail_2026-09-28.md):
+bounded two-tile OpenMP preparation queue, 16/31-core A/B timing and physical
+parity; speculative CVODE RHS skip rejected after integrated measurement.
 
 [CHIMES MPI/OpenMP layout comparison](mpi_omp_decomposition_2026-09-28.md):
 fixed-total-core 1x28/2x14/4x7 comparison on 512- and 4096-cell controls;
@@ -35,6 +75,10 @@ build, native cost attribution and same-node integrated comparison.
 [Exact-temperature dark rate reuse](chimes_rate_cache_2026-09-12.md):
 same-cell temperature-only coefficient reuse; composition-dependent rates
 and all illuminated chemistry remain recomputed.
+
+[Three-step repeated-state verification](chimes_multistep_2026-09-12.md):
+job542054 completed3 steps/96 CMB commits/3 IR commits without rejection;
+initial-state validation only, no source-active galaxy claim.
 
 Sequential effective-model implementation:
 [v5/empirical-SNIa connection and integrated execution](effective_population_execution_2026-09-11.md).
@@ -247,6 +291,12 @@ dust-field and CR-field interactions explicitly deferred to long-term work.
   AMR scaling and publication convergence require their own evidence.
 
 ## Classification rules
+
+Latest M5 wiring evidence: [full live M5 connection, 2026-09-15](snrt_m5_full_connection_2026-09-15.md).
+This supersedes the [fixed-group-only intermediate report](snrt_m5_live_connection_2026-09-15.md).
+Advanced material connections and live CUDA dispatch are implemented within
+the existing physical admission domain; see the current report for exact tests
+and limits, not the older blanket exclusions.
 
 1. A bundle evidence file is the authoritative entry point for its native
    smokes, build/link, hashes, and conclusions.

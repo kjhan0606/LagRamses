@@ -9,6 +9,12 @@ This section supersedes the historical per-bundle review/re-audit cadence,
 external end-auditor assignment and approval-wait wording below. Existing
 operator preapprovals remain effective; do not add an approval wait.
 
+Current operator-role and timeout update (2026-09-16): Fable is assigned the
+plan and bundle-end audits, while Claude Opus 5 is assigned code
+implementation/structure audits. The default wall-clock limit for a Fable
+plan audit is 600 seconds (10 minutes). A timeout is recorded as no verdict;
+it is never treated as approval or rejection.
+
 - Call Fable for a new physical model, a substantive conservation-law or
   module-coupling design change, or a scientific question the driver cannot
   confidently resolve. Explicit operator requests also take precedence.

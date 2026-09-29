@@ -79,12 +79,34 @@ owner before live coupling is eligible.
    claim of a new physical correction.
 3. Deposit the resulting total hydro energy exactly once.  Do not add the
    same event energy to a second thermal or delayed-cooling receiver.
-4. Retain the current delayed-cooling field convention as an explicitly
-   channel-owned SNII returned-mass tracer used by the existing threshold and
-   decay prescription, not as a blast-energy reservoir.  Winds, AGB, SNIa,
-   and PISN must not populate it.  A new delayed-cooling energy model or its
-   physical calibration is outside this bundle and will not be inferred from
-   a yield table.
+4. The delayed-cooling field is a decaying ejecta-mass tracer used by the
+   existing threshold prescription, not a blast-energy reservoir. The
+   original FP1.2 plan was SNII-only. The later approved PARSEC pair-feedback
+   bundle superseded that ownership rule: channel 3 (CCSN) and channel 5
+   (P(P)ISN) share the tracer as a declared shock prescription; legacy mode
+   still adds total `mloss`. This is not a calibrated PISN efficiency or a
+   delayed-cooling energy model; see
+   [`parsec_pair_feedback_implementation_2026-09-10.md`](parsec_pair_feedback_implementation_2026-09-10.md).
+   **Optional-mode semantics (rechecked 2026-09-25):**
+   `cooling_fine.kjhan.f90` computes `q=idelay/rho`, suppresses cooling only
+   while `q>1e-3`, and decays `idelay` by `exp(-dt/t_diss)`. For fixed
+   density, one impulse `q0` suppresses cooling for
+   `t_diss*ln(q0/1e-3)` only if `q0>1e-3`; a smaller impulse gives no
+   suppression. Repeated deposits replenish this leaky tracer and may keep
+   the threshold active. Therefore the implementation is a rate-like
+   threshold, not an absolute event timer. Repeated injection can extend the
+   effective suppression interval, but calling that behavior a bug requires
+   adopting a different physical closure; no non-renewing clock is currently
+   implemented. The current 128^3 M5/CHIMES/D03 run has
+   `delayed_cooling=.false.`, and hydro admission rejects delayed cooling
+   together with live dust or CR, so this optional model is outside the
+   active M5-L8 gate.
+   **Plan advice:** Claude Fable 5-1's read-only review (2026-09-25) judged a
+   non-renewing clock indirect to the immediate goal and recommended deferring
+   code changes, while correcting the semantics above. This is advice, not
+   approval of any future clock model; a future comparison must declare its
+   duration/source convention and test repeated events, channel ownership,
+   restart, and AMR behavior.
 5. Retain the reduced-chemistry rule: tracked ejecta enter their mapped
    element fields, while the untracked residual enters only the generic
    metallicity field.  `net_yield` remains diagnostic and is never deposited

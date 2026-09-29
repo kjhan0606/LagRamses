@@ -2678,3 +2678,22 @@ speed, endpoint-calibrated phase composition, unresolved pair pulses and
 Changing IMF upper mass changes normalization of all channels. This is not
 a matched SED package, radioactive network or universal production approval;
 see [implementation and evidence](../../provenance/parsec_pair_feedback_implementation_2026-09-10.md).
+
+### CHIMES reaction parallelism (2026-09-27)
+
+The optional `data/chimes_parallel_rates.patch` follows
+`data/chimes_native_receiver.patch` without changing its ABI. It adds
+independent reaction-product SIMD (GCC x86_64 AVX2/default runtime dispatch),
+exact-zero accumulator elision and per-thread, per-cell reuse of
+temperature-only dark cooling coefficients. Density-dependent cooling and
+species/thermal weighting remain live; no tolerance, network or timestep
+changes. Compile update_rates.c with `-O3 -ffp-contract=off -fopenmp-simd`
+and rebuild chimes_cooling.c too (it defines the cache-reset routine).
+Keep FP64 and the existing release SUNDIALS; do not use fast-math.
+
+Select a separately built library explicitly; do not overwrite a frozen
+run's dependency. Native OMP/serial, baseline/candidate state, rate-reset,
+long photo/CMB and target-duration regressions pass. Measured native dark
+time reduction is about 9--10%, not a whole-simulation speedup claim.
+Integrated comparison remains pending; see
+[measured evidence and library identities](../../provenance/chimes_parallel_efficiency_2026-09-27.md).
