@@ -98,6 +98,8 @@ contains
   end subroutine snrt_ramses_diagnose_level
 
   subroutine snrt_ramses_advance_level(ilevel,step_start_proper)
+    use snrt_moment_ramses, only: mn_ramses_advance
+    use snrt_state, only: snrt_state_is_moment
     use amr_parameters, only: sink, sink_AGN
     use amr_commons, only: levelmin, nstep_coarse, myid, dtnew, boxlen, &
          icoarse_min, icoarse_max, ncpu, nrestart, texp, aexp, active, cosmo
@@ -188,7 +190,7 @@ contains
     use snrt_agn_locator, only: snrt_agn_find_local_leaf
     use snrt_agn_source, only: snrt_c_cgs, snrt_ev_to_erg, snrt_agn_photon_budget_energy, &
          snrt_agn_deposit_transaction, snrt_agn_source_commit
-    use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_reference_active
+    use snrt_agn_efficiency, only: snrt_transport_selected, snrt_agn_reference_active
     use snrt_nlte_coupling, only: snrt_nlte_primordial_optical_depth_groups
     use snrt_thermochemistry, only: snrt_thermochemistry_result, &
          snrt_secondary_tables_load_from_environment, snrt_secondary_tables_loaded, &
@@ -362,7 +364,7 @@ contains
 #endif
     enabled = .false.
     if (.not. enabled_resolved) then
-       enabled_latched = snrt_agn_rt_requested()
+       enabled_latched = snrt_transport_selected()
        if(enabled_latched.and.band_on.and.myid==1)write(*,'(A,A)')' SNRT spectral absorption model=',snrt_band_model
        if (enabled_latched .and. sink .and. sink_AGN .and. .not.snrt_agn_reference_active()) then
           if(myid==1)write(*,*)'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
@@ -391,7 +393,7 @@ contains
             env_value(1:1) == '1'
        enabled_resolved = .true.
        if (enabled_latched .and. myid == 1) write(*,'(A,F8.4)') &
-            ' SNRT S_N RT enabled; reduced speed factor=', reduced_c
+            ' SNRT RT enabled; reduced speed factor=', reduced_c
        if (enabled_latched .and. myid == 1 .and. level_filter > 0) &
             write(*,'(A,I0)') ' SNRT RT level filter=', level_filter
     end if
@@ -456,7 +458,7 @@ contains
              write(*,'(A,I0,A,A)') ' SNRT spectral contract loaded: groups=', &
                   snrt_ngroups, ' status=', trim(snrt_spectral_contract_status)
              write(*,'(A,A)') '   source: ', trim(snrt_spectral_contract_source_id)
-             write(*,'(A,I0,A,I0,A,I0)') ' SNRT angular quadrature: mu=',snrt_nmu, &
+             write(*,'(A,I0,A,I0,A,I0)') ' SNRT legacy S_N quadrature (not M_N): mu=',snrt_nmu, &
                   ' phi=',snrt_nphi,' directions=',snrt_ndirection
              write(*,'(A,F12.8,A,F12.8)') '   represented energy fraction=', &
                   snrt_group_energy_fraction_sum, ' unrepresented=', &
@@ -595,12 +597,43 @@ contains
              Esave(1) = 0.0d0
              spinmag(1) = 0.0d0
              agn_pending_erg(1) = 1.0d-6
+             env_value=''
+             call get_environment_variable('SNRT_DRIVER_TEST_SOURCE_ERG',env_value,status=env_status)
+             if(env_status==0.and.len_trim(env_value)>0)then
+                read(env_value,*,iostat=read_status)agn_pending_erg(1)
+                if(read_status/=0.or..not.ieee_is_finite(agn_pending_erg(1)).or.agn_pending_erg(1)<=0)then
+                   if(myid==1)write(*,*)'ERROR: invalid diagnostic source energy'
+                   call clean_stop;return
+                endif
+             endif
              if (myid == 1) write(*,'(A)') &
                   ' SNRT_DRIVER_TEST_SEED_SOURCE applied: NONPRODUCTION'
           end if
        end if
     end if
 
+    if(snrt_state_is_moment())then
+       call mn_ramses_advance(ilevel,reduced_c,transaction_config,ierr,step_start_proper)
+       if(ierr/=0)then
+          if(myid==1)write(*,*)'ERROR: M_N level transaction rejected; no source receipt consumed; code=',ierr
+          call clean_stop
+       endif
+       ! Bounded M5-L8 test mode: value 2 stops only after the selected
+       ! level-8 M5 transaction has returned successfully.  This gives one
+       ! coupled transition without allowing the run to continue into a
+       ! production trajectory.  Value 1 is handled by diag_check_eint before
+       ! M5; neither mode changes the physical state or receiver semantics.
+       if(ilevel==levelmin+1)then
+          env_value=''
+          call get_environment_variable('SNRT_HYDRO_ENTRY_STOP',env_value, &
+               length=env_length,status=env_status)
+          if(env_status==0 .and. env_length==1 .and. env_value(1:1)=='2')then
+             if(myid==1)write(*,*)'SNRT bounded M5 level-8 transaction completed; stopping before later level work'
+             call clean_stop
+          endif
+       endif
+       return
+    endif
     wall_start = omp_get_wtime()
     call units(scale_l, scale_t, scale_d, scale_v, scale_nH, scale_T2)
     dt_s = dtnew(ilevel) * scale_t
@@ -2147,7 +2180,6 @@ contains
           if(myid==1)write(*,'(A,4ES18.10)')' SNRT_FE_UV_EV absorbed/gas/solid/excitation=',fe_cycle_global
        endif
     endif
-#endif
     if(snrt_chimes_cold_enabled())then
        call snrt_transaction_reduce_sum(chemical_absorbed_ev,global_unassigned_absorption,convergence_status)
        if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_PRIMARY_ABSORBED_EV=',global_unassigned_absorption
@@ -2161,6 +2193,7 @@ contains
           if(myid==1)write(*,'(A,ES18.10)')' SNRT_CHIMES_DISSOCIATION_COST_EV=',global_unassigned_absorption
        endif
     endif
+#endif
     if(dust_iron_enabled().and..not.snrt_fe_band_enabled().and..not.dust_fe_uv_enabled())then
        do i=1,nleaf
           if(sum(uold(leaf_cell(i),idust_iron:idust_iron+1))<=0)cycle

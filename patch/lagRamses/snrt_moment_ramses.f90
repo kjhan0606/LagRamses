@@ -44,7 +44,7 @@ module snrt_moment_ramses
 #ifdef SNRT_CHIMES
   use snrt_chimes_runtime, only: chimes_cell_state,chimes_live_capacity,chimes_live_stage,chimes_live_band_stage, &
        chimes_live_cold_stage,chimes_live_grain_scatter,chimes_live_fe_uv_stage
-  use snrt_chimes, only: chimes_ns,chimes_boltzmann,chimes_group_binding
+  use snrt_chimes, only: chimes_ns,chimes_boltzmann,chimes_group_binding,chimes_last_split_wall
 #endif
   use iso_c_binding, only: c_int,c_double,c_funptr,c_null_funptr,c_funloc
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -107,12 +107,16 @@ contains
     real(dp) :: state_range(4),global_range(4),balance_scale(2),global_scale(2)
     integer :: nm,ng,ni,i,j,g,s,k,nsub,cell,found,grid,part,ip,ig,status,info
     integer :: tile_index,tile_first,tile_last,ntile
+    integer :: oldn_stride,olde_stride,oldir_stride
     ! Keep the RAMSES-side transaction large enough to amortize the native
     ! material/IR dispatch.  The backend still applies its own memory-aware
     ! GPU batch policy; this is only the caller-owned write-set bound.
     integer,parameter :: material_tile_width=256
     integer,allocatable :: accepted(:),owners(:)
     logical :: atomic_on,band_on,chimes_on
+    character(len=16) :: perf_env,perf_all_env
+    integer :: perf_status,perf_all_status
+    logical :: perf_diagnostic,perf_all
     logical,save :: host_reported=.false.
 
     ierr=0;clock0=omp_get_wtime();receipt=0
@@ -121,6 +125,11 @@ contains
        if(myid==1)write(*,*)'SNRT M_N live AMR transport: shared-stream CUDA/OpenMP, MPI, FP64, 16x24 quadrature'
        host_reported=.true.
     endif
+    perf_diagnostic=.false.;perf_all=.false.
+    call get_environment_variable('SNRT_PERF_DIAGNOSTIC',perf_env,status=perf_status)
+    if(perf_status==0)perf_diagnostic=trim(perf_env)/='' .and. trim(perf_env)/='0'
+    call get_environment_variable('SNRT_PERF_DIAGNOSTIC_ALL',perf_all_env,status=perf_all_status)
+    if(perf_all_status==0)perf_all=trim(perf_all_env)/='' .and. trim(perf_all_env)/='0'
     band_on=snrt_band_enabled();chimes_on=dust_chimes_enabled()
     if((band_on.and.chimes_on.and..not.snrt_chimes_band_enabled()).or. &
          (snrt_chimes_band_enabled().and..not.chimes_on))ierr=1
@@ -183,7 +192,14 @@ contains
        if(any(.not.ieee_is_finite(rows(:,i))).or.rows(1,i)<=0.or.any(fraction(:,i)<0).or. &
             fraction(1,i)>1.or.sum(fraction(2:3,i))>1)ierr=1
     enddo
-    oldn=number;olde=energy;oldir=infrared
+    call mn_rollback_snapshot(number,oldn,oldn_stride,status)
+    ierr=max(ierr,status)
+    call mn_rollback_snapshot(energy,olde,olde_stride,status)
+    ierr=max(ierr,status)
+    call mn_rollback_snapshot(infrared,oldir,oldir_stride,status)
+    ierr=max(ierr,status)
+    call mn_collective_status(ierr)
+    if(ierr/=0)return
     allocate(accepted(max(1,nsink)),owners(max(1,nsink)));accepted=0
     if(nsink>0)then
        if(.not.allocated(agn_pending_erg).or..not.allocated(xsink).or..not.allocated(idsink))then
@@ -324,22 +340,19 @@ contains
        enddo
 #ifdef DUST_LIVE
        if(snrt_dust_contract_exchange_enabled)then
-          ! CHIMES preparation remains per cell, but the expensive material/
-          ! IR receiver is committed once per bounded tile.  The tile width
-          ! is deliberately fixed here: it is a work-unit bound, not a GPU
-          ! stream tuning parameter.
-          ntile=(mesh%nleaf+material_tile_width-1)/material_tile_width
-!$omp parallel do schedule(dynamic,1) private(tile_index,tile_first,tile_last,status) reduction(max:ierr)
+          ! Prepare two tiles in one dynamic cell queue to hide rare long
+          ! CHIMES cells. Material/IR transactions still commit in 256-cell
+          ! order, without nesting their backend OpenMP teams.
+          ntile=(mesh%nleaf+2*material_tile_width-1)/(2*material_tile_width)
           do tile_index=1,ntile
-             tile_first=(tile_index-1)*material_tile_width+1
-             tile_last=min(mesh%nleaf,tile_first+material_tile_width-1)
+             tile_first=(tile_index-1)*2*material_tile_width+1
+             tile_last=min(mesh%nleaf,tile_first+2*material_tile_width-1)
              call material_tile(tile_first,tile_last,subdt,status)
              if(status/=0)then
                 write(*,*)'M_N material tile failure rank/level/tile/substep/code=',myid,lev,tile_index,k,status
                 ierr=max(ierr,status)
              endif
           enddo
-!$omp end parallel do
        else
 #endif
 !$omp parallel do schedule(dynamic,1) private(i,status) reduction(max:ierr)
@@ -409,8 +422,9 @@ contains
     call mn_collective_status(ierr)
     if(ierr/=0)then
        do i=1,mesh%nowned
-          call mn_live_write(mesh%slots(i),oldn(:,:,i),olde(:,:,i),status)
-          if(ni>0)call mn_live_ir_write(mesh%slots(i),oldir(:,:,i),status)
+          call mn_live_write(mesh%slots(i),oldn(:,:,1+(i-1)*oldn_stride), &
+               olde(:,:,1+(i-1)*olde_stride),status)
+          if(ni>0)call mn_live_ir_write(mesh%slots(i),oldir(:,:,1+(i-1)*oldir_stride),status)
        enddo
        return
     endif
@@ -516,7 +530,7 @@ contains
          if(.not.packet%valid.or.packet%index/=index)then
             status=1;return
          endif
-         restoring=.true.
+         restoring=.true.;status=0
          rho=packet%rho;density=packet%density;primary=packet%primary
          material=packet%material;capacity=packet%capacity
          material_next=packet%material_next;temperature=packet%temperature
@@ -635,9 +649,11 @@ contains
       if(snrt_dust_contract_version==4)then
          capacity=1
          if(density>0)then
-            if(dust_iron_enabled().or.dust_pah_enabled().or.dust_relative_motion.or.cosmo)then
-               ! These receivers use absolute material energy, including
-               ! their existing analytic cold branch below the first knot.
+            if(dust_iron_enabled().or.dust_pah_enabled().or.dust_relative_motion)then
+               ! Fe/PAH/moving receivers own their distinct absolute-energy
+               ! domains.  Cosmology alone must NOT select the Fe receiver:
+               ! D03/local-composition dust uses its own U(T) curve and the
+               ! cosmological CMB bath is handled by cosmological_material.
                call iron_compare_temperature(rows(idust_species:idust_species+1,index),solid_fe, &
                     rows(idust_energy,index)*sv**2,old_temperature,status)
             else if(allocated(curve))then
@@ -1114,14 +1130,83 @@ contains
 
 #ifdef DUST_LIVE
     subroutine material_tile(first,last,cell_dt,status)
-      ! Keep the expensive CHIMES preparation in the existing per-cell code,
-      ! but submit its IR/material write sets as one bounded M_N tile.  This
-      ! routine is called by one OpenMP worker per tile; the tile adapter then
-      ! owns the only material-stage transaction for all its cells.
+      ! At most two 256-cell write sets are prepared together. This lets
+      ! workers take cells from the next tile while a slow CHIMES cell runs.
       integer,intent(in) :: first,last
       real(dp),intent(in) :: cell_dt
       integer,intent(out) :: status
       type(material_stage_packet),allocatable :: packet(:)
+      integer,allocatable :: prep_codes(:)
+      integer :: nc,j,index,status_cell,stage_first,stage_last,offset,stage_n
+      real(dp) :: perf_start,prep_s,perf_chimes(2)
+#ifdef SNRT_CHIMES
+      logical :: perf_cold
+      real(dp),allocatable :: perf_chimes_cell(:,:)
+#endif
+
+      status=1;nc=last-first+1
+      if(nc<1.or.nc>2*material_tile_width)return
+      perf_start=omp_get_wtime()
+#ifdef SNRT_CHIMES
+      perf_cold=perf_diagnostic.and.(perf_all.or.myid==1).and.snrt_chimes_cold_enabled()
+      if(perf_cold)then
+         allocate(perf_chimes_cell(2,nc));perf_chimes_cell=0
+      endif
+#endif
+      allocate(packet(nc),prep_codes(nc))
+!$omp parallel do schedule(dynamic,1) private(index,status_cell)
+      do j=1,nc
+         index=first+j-1
+#ifdef SNRT_CHIMES
+         if(perf_cold)chimes_last_split_wall=0
+#endif
+         call material_cell(index,cell_dt,status_cell,packet(j),.true.)
+         prep_codes(j)=status_cell
+#ifdef SNRT_CHIMES
+         if(perf_cold.and.status_cell==0)perf_chimes_cell(:,j)=chimes_last_split_wall
+#endif
+      enddo
+!$omp end parallel do
+      do j=1,nc
+         if(prep_codes(j)==0)cycle
+         status=prep_codes(j);return
+      enddo
+      prep_s=omp_get_wtime()-perf_start
+      do stage_first=first,last,material_tile_width
+         stage_last=min(last,stage_first+material_tile_width-1)
+         offset=stage_first-first;stage_n=stage_last-stage_first+1
+         perf_chimes=0
+#ifdef SNRT_CHIMES
+         if(perf_cold)then
+            perf_chimes=sum(perf_chimes_cell(:,offset+1:offset+stage_n),dim=2)
+            if(stage_first==1)then
+               write(*,'(A,I0,A,F12.6,A,I0,A,I0)')'SNRT PERF DARK rank=',myid, &
+                    ' max_s=',maxval(perf_chimes_cell(2,offset+1:offset+stage_n)), &
+                    ' over_0p1_s=',count(perf_chimes_cell(2,offset+1:offset+stage_n)>0.1d0), &
+                    ' over_1_s=',count(perf_chimes_cell(2,offset+1:offset+stage_n)>1d0)
+            endif
+            j=maxloc(perf_chimes_cell(1,offset+1:offset+stage_n),dim=1)
+            write(*,'(A,I0,A,I0,A,I0,A,F12.6,A,I0,A,I0,A,I0)') &
+                 'SNRT PERF PHOTO rank=',myid,' first=',stage_first,' last=',stage_last, &
+                 ' max_s=',perf_chimes_cell(1,offset+j),' cell=',mesh%cells(stage_first+j-1), &
+                 ' over_1_s=',count(perf_chimes_cell(1,offset+1:offset+stage_n)>1d0), &
+                 ' over_5_s=',count(perf_chimes_cell(1,offset+1:offset+stage_n)>5d0)
+         endif
+#endif
+         call material_tile_commit(stage_first,stage_last,cell_dt,packet(offset+1:offset+stage_n), &
+              prep_s,perf_chimes,status)
+         if(status/=0)return
+         ! Charge the shared preparation time once, to keep tile sums valid.
+         prep_s=0
+      enddo
+      status=0
+    end subroutine
+
+    subroutine material_tile_commit(first,last,cell_dt,packet,prep_s,perf_chimes,status)
+      integer,intent(in) :: first,last
+      real(dp),intent(in) :: cell_dt,prep_s,perf_chimes(2)
+      type(material_stage_packet),intent(inout) :: packet(:)
+      integer,intent(out) :: status
       integer,allocatable :: tile_cells(:),tile_slots(:)
       real(dp),allocatable :: tile_ir(:,:,:),tile_projection(:,:,:),tile_density(:),tile_primary(:)
       real(dp),allocatable :: tile_old(:),tile_capacity(:),tile_material(:),tile_temperature(:)
@@ -1133,26 +1218,23 @@ contains
       real(dp),allocatable :: tile_electrons(:),tile_atomic_h(:),tile_molecular_h2(:)
       real(dp),allocatable :: tile_atomic_c(:),tile_carbon_ion(:)
       type(dust_ir_diagnostics) :: tile_diag
-      integer :: nc,j,index,status_cell,nb
+      integer :: nc,j,status_cell,nb
       logical :: has_exchange,has_curve,has_weights,has_sub,has_pah,has_phase,has_chimes
+      real(dp) :: perf_prep,perf_stage,perf_commit
 
-      status=1;nc=last-first+1
-      if(nc<1)return
-      allocate(packet(nc),tile_cells(nc),tile_slots(nc))
-      do j=1,nc
-         index=first+j-1
-         call material_cell(index,cell_dt,status_cell,packet(j),.true.)
-         if(status_cell/=0)return
-      enddo
+      status=1;nc=size(packet)
+      if(nc<1.or.nc>material_tile_width.or.last-first+1/=nc)return
+      perf_prep=omp_get_wtime()
+      allocate(tile_cells(nc),tile_slots(nc))
       has_exchange=packet(1)%has_exchange;has_curve=packet(1)%has_curve
       has_weights=packet(1)%has_weights;has_sub=packet(1)%has_sublimation
       has_pah=packet(1)%has_pah;has_phase=packet(1)%has_phase;has_chimes=packet(1)%has_chimes
       do j=1,nc
          if(.not.packet(j)%valid)return
-         if(packet(j)%has_exchange.neqv.has_exchange.or.packet(j)%has_curve.neqv.has_curve.or. &
-            packet(j)%has_weights.neqv.has_weights.or.packet(j)%has_sublimation.neqv.has_sub.or. &
-            packet(j)%has_pah.neqv.has_pah.or.packet(j)%has_phase.neqv.has_phase.or. &
-            packet(j)%has_chimes.neqv.has_chimes)return
+         if((packet(j)%has_exchange.neqv.has_exchange).or.(packet(j)%has_curve.neqv.has_curve).or. &
+            (packet(j)%has_weights.neqv.has_weights).or.(packet(j)%has_sublimation.neqv.has_sub).or. &
+            (packet(j)%has_pah.neqv.has_pah).or.(packet(j)%has_phase.neqv.has_phase).or. &
+            (packet(j)%has_chimes.neqv.has_chimes))return
       enddo
       if(.not.has_exchange)return
 
@@ -1233,6 +1315,7 @@ contains
            gas_electrons=tile_electrons,electron_capacity=packet(1)%electron_cv,gas_atomic_h=tile_atomic_h, &
            gas_molecular_h2=tile_molecular_h2,gas_atomic_c=tile_atomic_c,gas_carbon_ion=tile_carbon_ion)
       if(status/=0)return
+      perf_stage=omp_get_wtime()
 
       do j=1,nc
          packet(j)%material_next=tile_material(j);packet(j)%temperature=tile_temperature(j)
@@ -1250,6 +1333,11 @@ contains
          call material_cell(packet(j)%index,cell_dt,status_cell,packet(j),.false.)
          if(status_cell/=0)then;status=status_cell;return;endif
       enddo
+      perf_commit=omp_get_wtime()
+      if(perf_diagnostic.and.(perf_all.or.myid==1))write(*,'(A,I0,A,I0,A,I0,5(A,F10.3))') &
+           'SNRT PERF TILE rank=',myid,' first=',first,' last=',last,' prep_s=',prep_s, &
+           ' stage_s=',perf_stage-perf_prep,' commit_s=',perf_commit-perf_stage, &
+           ' chimes_photo_s=',perf_chimes(1),' chimes_dark_s=',perf_chimes(2)
       status=0
     end subroutine
 #endif

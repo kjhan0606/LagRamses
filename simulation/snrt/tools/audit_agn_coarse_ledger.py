@@ -211,10 +211,10 @@ def _static_audit(
             and "MPI owner" in driver
             and "local" in driver.lower()
         ),
-        "rt_enable_latched_once": (
+        "transport_selector_is_not_environment_driven": (
             "enabled_latched" in driver
-            and "Runtime control is latched once per process" in driver
-            and driver.count("get_environment_variable('SNRT_RT_ENABLE'") == 1
+            and "snrt_transport_selected()" in driver
+            and "get_environment_variable('SNRT_RT_ENABLE'" not in driver
         ),
         "transaction_module_present": (
             "subroutine snrt_agn_deposit_transaction" in module_text

@@ -8,10 +8,11 @@ module snrt_regrid
   use hydro_commons, only: uold
   use snrt_state, only: snrt_nslot,snrt_ndirection,snrt_checkpoint_cell_width, &
        snrt_state_get_slot,snrt_state_pack_cell,snrt_state_restore_cell, &
-       snrt_state_clear_cell,validate_cell_payload,snrt_state_get_cell,snrt_state_rebind_cells
+       snrt_state_clear_cell,validate_cell_payload,snrt_state_get_cell,snrt_state_rebind_cells,snrt_state_payload_tag
+  use snrt_amr_topology, only: snrt_halo_tile_exchange
 #ifdef DUST_LIVE
   use snrt_dust_contract, only: snrt_dust_contract_version,snrt_dust_contract_number_ir
-  use snrt_dust_live, only: snrt_dust_live_pack,snrt_dust_live_restore
+  use snrt_dust_live, only: snrt_dust_live_pack,snrt_dust_live_restore,snrt_dust_live_validate_payload
 #endif
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
@@ -112,9 +113,11 @@ contains
     ierr=2
     if(size(payload)/=snrt_checkpoint_cell_width+ir_width())return
     if(any(.not.ieee_is_finite(payload)))return
-    if(any(payload(snrt_checkpoint_cell_width+1:)<0.0_dp))return
     if(payload(1)==0.0_dp.and.any(payload/=0.0_dp))return
     call snrt_state_restore_cell(icell,payload(1:snrt_checkpoint_cell_width),ierr,validate_only=.true.)
+#ifdef DUST_LIVE
+    if(ierr==0.and.ir_width()>0)call snrt_dust_live_validate_payload(payload(snrt_checkpoint_cell_width+1:),ierr)
+#endif
   end subroutine
 
   subroutine clear(icell,ierr)
@@ -221,7 +224,7 @@ contains
        return
     end if
     ierr=2
-    if(any(payload(1,:)/=1))return
+    if(any(payload(1,:)/=snrt_state_payload_tag()))return
     if(.not.allocated(uold))return
     if(maxval(children)>size(uold,1))return
     weight=uold(children,1)
@@ -235,7 +238,7 @@ contains
     ! rho*x inventories; averaging fractions by volume loses ions when rho
     ! differs among children. Hydro owns the corresponding mass restriction.
     merged=sum(payload/real(twotondim,dp),dim=2)
-    merged(1)=1
+    merged(1)=snrt_state_payload_tag()
     do j=2,4
        merged(j)=min(1.0_dp,sum(payload(j,:)*weight))
     end do
@@ -253,9 +256,11 @@ contains
     integer, intent(in) :: ilevel
     integer, intent(out) :: ierr
     integer :: nfield,ncache,width,i,j,g,parent,owner_grid,ind,nowned,info,global_error
+    integer :: first_column,column,ncolumn,tile_width
+    integer(kind=8),parameter :: tile_extra_bytes=8_8*1024_8*1024_8
     integer :: local_counts(2),global_counts(2)
     integer, allocatable :: parents(:),owned(:)
-    real(dp), allocatable :: reduced(:,:),received(:,:),field(:),count_field(:)
+    real(dp), allocatable :: reduced(:,:),received(:,:),field(:),count_field(:),tile(:,:)
     ierr=0
     if(ilevel<=1)return
     nfield=ICELL_OF(ngridmax,twotondim)
@@ -308,13 +313,31 @@ contains
        end do
        owner_grid=next(owner_grid)
     end do
-    do j=1,width
-       field=0
-       do i=1,ncache
-          field(parents(i))=field(parents(i))+reduced(j,i)
+    ! The scalar reverse exchange performed one MPI message/handshake per
+    ! photon or IR component. Pack the same parent densities into bounded
+    ! tiles and use the existing reverse-add halo map. No reduction order
+    ! changes within a component; the final validation/commit stays below.
+    tile_width=max(16,min(width,int(tile_extra_bytes/(8_8*max(1_8,int(nfield,8))))))
+    allocate(tile(nfield,tile_width))
+    do first_column=1,width,tile_width
+       ncolumn=min(tile_width,width-first_column+1)
+       tile(:,1:ncolumn)=0
+       do column=1,ncolumn
+          j=first_column+column-1
+          do i=1,ncache
+             tile(parents(i),column)=tile(parents(i),column)+reduced(j,i)
+          end do
        end do
-       if(ncpu>1)call make_virtual_reverse_dp(field,ilevel-1)
-       received(j,:)=field(owned)
+       if(ncpu>1)then
+          call snrt_halo_tile_exchange(tile(:,1:ncolumn),ilevel-1,j,reverse=.true.)
+          if(j/=0)then
+             ierr=j
+             return
+          end if
+       end if
+       do column=1,ncolumn
+          received(first_column+column-1,:)=tile(owned,column)
+       end do
     end do
     do i=1,nowned
        call validate_restore(owned(i),received(:,i),j)

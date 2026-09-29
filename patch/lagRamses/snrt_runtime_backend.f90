@@ -19,6 +19,7 @@ module snrt_runtime_backend
   public :: snrt_runtime_dust_exchange
   public :: snrt_runtime_cpu_material_allowed
   public :: snrt_runtime_energy_admit
+  public :: snrt_runtime_mn_policy
   integer,save :: mode=0,init_status=0,sharers=1
   logical,save :: initialized=.false.,gpu_ready=.false.
   integer,save :: last_choice=-1,cpu_threads=1
@@ -206,6 +207,12 @@ module snrt_runtime_backend
      end function
   end interface
 contains
+  subroutine snrt_runtime_mn_policy(choice,sharing,threads,ierr)
+    integer,intent(out)::choice,sharing,threads,ierr
+    ! Collective initialization only at the level boundary, never in workers.
+    call snrt_backend_initialize(ierr)
+    choice=mode;sharing=sharers;threads=cpu_threads
+  end subroutine
   subroutine snrt_runtime_energy_admit(ierr)
     integer,intent(out)::ierr
     call snrt_backend_initialize(ierr)
@@ -409,7 +416,7 @@ contains
     call get_environment_variable('SNRT_BACKEND',value,length=length,status=status)
     if(status==1.or.length==0)value='auto'
     select case(trim(value))
-    case('auto');mode=0
+    case('auto','hybrid');mode=0
     case('openmp');mode=1
     case('cuda');mode=2
     case default;init_status=1
@@ -420,7 +427,7 @@ contains
     if(status/=0.and.status/=1)init_status=1
     if(length>0.and.status==0)then
        select case(trim(value))
-       case('auto');dust_mode=0
+       case('auto','hybrid');dust_mode=0
        case('openmp');dust_mode=1
        case('cuda');dust_mode=2
        case default;init_status=1

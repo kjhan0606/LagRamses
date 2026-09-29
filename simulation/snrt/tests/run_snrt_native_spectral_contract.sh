@@ -50,6 +50,12 @@ fi
 "$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/dust_iron_optics.f90" \
   -o "$build_dir/dust_iron_optics.o"
 "$fc" "${flags[@]}" "${openmp_flags[@]}" -c \
+  "$repo_root/patch/lagRamses/snrt_moment_transport.f90" \
+  -o "$build_dir/snrt_moment_transport.o"
+"$fc" "${flags[@]}" "${openmp_flags[@]}" -c \
+  "$repo_root/patch/lagRamses/snrt_moment_live.f90" \
+  -o "$build_dir/snrt_moment_live.o"
+"$fc" "${flags[@]}" "${openmp_flags[@]}" -c \
   "$repo_root/patch/lagRamses/snrt_state.f90" \
   -o "$build_dir/snrt_state.o"
 "$fc" "${flags[@]}" "${openmp_flags[@]}" -c \
@@ -58,6 +64,7 @@ fi
 "$fc" "${openmp_flags[@]}" "$build_dir/amr_parameters.o" \
   "$build_dir/amr_commons.o" "$build_dir/snrt_agn_source.o" \
   "$build_dir/snrt_thermochemistry.o" "$build_dir/snrt_spectral_contract.o" \
+  "$build_dir/snrt_moment_transport.o" "$build_dir/snrt_moment_live.o" \
   "$build_dir/snrt_state.o" "$build_dir/snrt_checkpoint_smoke.o" \
   -o "$build_dir/snrt_checkpoint_smoke"
 "$fc" "$build_dir/amr_parameters.o" "$build_dir/snrt_spectral_contract.o" \

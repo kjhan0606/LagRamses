@@ -46,8 +46,10 @@ program snrt_regrid_smoke
   p(5+snrt_checkpoint_number_width:)=0.0_dp
   if(ierr==0)then
   do g=1,snrt_ngroups
+     ! Both signs must remain inside the current group's admitted energy
+     ! interval after adding the correction to the 0.125 photon count.
      p(5+snrt_checkpoint_number_width+(g-1)*snrt_ndirection: &
-          4+snrt_checkpoint_number_width+g*snrt_ndirection)=(-1.0_dp)**g*snrt_group_mean_energy_ev(g)/32.0_dp
+          4+snrt_checkpoint_number_width+g*snrt_ndirection)=(-1.0_dp)**g*snrt_group_mean_energy_ev(g)/1000.0_dp
   end do
   end if
   call snrt_state_restore_cell(1,p,ierr)
@@ -158,6 +160,9 @@ contains
     use amr_parameters, only: snrt_transport_model,snrt_moment_order,nlevelmax,i8b,radiation_transport
     use snrt_moment_live
     use snrt_moment_transport, only: mn_project,mn_ok
+    use snrt_moment_dispatch, only: mn_dispatch_initialize,mn_dispatch_closure,mn_dispatch_project, &
+         mn_cpu_closures,mn_gpu_closures
+    use omp_lib, only: omp_get_wtime,omp_get_max_threads
 #ifdef HDF5
     use ramses_hdf5_io
     use amr_commons, only: numbl,varcpu_restart,varcpu_ngrid_file,varcpu_grid_file_idx
@@ -168,17 +173,48 @@ contains
     real(dp),allocatable :: original(:,:),original_ir(:,:)
     real(dp),allocatable :: material_ir(:,:),projection(:,:),tile_ir(:,:,:),tile_projection(:,:,:),tile_before(:,:,:)
     real(dp),allocatable :: tile_material(:),tile_temperature(:),tile_density(:),tile_primary(:),tile_old(:),tile_capacity(:)
-    real(dp) :: material_energy,material_temperature,balance,initial_energy
+    real(dp),allocatable :: batch_input(:,:),batch_output(:,:),batch_cache(:,:),batch_warm(:,:),batch_angular(:,:)
+    real(dp),allocatable :: snapshot_input(:,:,:),snapshot_saved(:,:,:)
+    real(dp) :: material_energy,material_temperature,balance,initial_energy,dispatch_start,closure_wall,project_wall
     type(dust_ir_diagnostics) :: diag
-    integer :: k,ngir,status,pass,base,cell
+    integer :: k,ngir,status,pass,base,cell,snapshot_stride
     integer :: tile_cells(2),tile_slots(2)
     character(len=1024) :: directory,path
     radiation_transport='snrt_mn';snrt_transport_model='tensor_mn';snrt_moment_order=5
     call mn_live_initialize(5,snrt_ngroups,status)
     if(status/=mn_ok)stop 101
+    call mn_dispatch_initialize(status)
+    if(status/=0)stop 147
     ngir=snrt_dust_contract_number_ir
+    allocate(snapshot_input(36,ngir,3));snapshot_input=0d0
+    call mn_rollback_snapshot(snapshot_input,snapshot_saved,snapshot_stride,status)
+    if(status/=mn_ok.or.snapshot_stride/=0.or.size(snapshot_saved,3)/=1)stop 156
+    do k=1,3
+       if(any(snapshot_saved(:,:,1+(k-1)*snapshot_stride)/=snapshot_input(:,:,k)))stop 157
+    enddo
+    ! Never compress a weak nonzero field or lose signed higher moments.
+    snapshot_input(1,1,2)=tiny(1d0);snapshot_input(2,1,3)=-1d-40
+    call mn_rollback_snapshot(snapshot_input,snapshot_saved,snapshot_stride,status)
+    if(status/=mn_ok.or.snapshot_stride/=1.or.any(shape(snapshot_saved)/=shape(snapshot_input)))stop 158
+    if(any(snapshot_saved/=snapshot_input))stop 159
+    snapshot_input=0d0
+    if(snapshot_saved(1,1,2)/=tiny(1d0).or.snapshot_saved(2,1,3)/=-1d-40)stop 160
+    deallocate(snapshot_input,snapshot_saved)
+    write(*,'(A)')'SNRT_M5_ROLLBACK_SNAPSHOT_PASS exact_zero=1 nonzero_copy=1 independent_backup=1'
     allocate(angular(mn_live_basis%nq),number(36,snrt_ngroups),energy(36,snrt_ngroups),irm(36,ngir))
     allocate(npad(snrt_ndirection,snrt_ngroups),epad(snrt_ndirection,snrt_ngroups),ipad(ngir,snrt_ndirection))
+    number=0d0;energy=0d0;irm=0d0
+    call mn_live_validate(number,energy,status)
+    if(status/=mn_ok)stop 161
+    number(2,1)=tiny(1d0)
+    call mn_live_validate(number,energy,status)
+    if(status==mn_ok)stop 162
+    call mn_live_ir_write(0,irm,status,validate_only=.true.)
+    if(status/=mn_ok)stop 163
+    irm(2,1)=tiny(1d0)
+    call mn_live_ir_write(0,irm,status,validate_only=.true.)
+    if(status==mn_ok)stop 164
+    write(*,'(A)')'SNRT_M5_ZERO_VALIDATION_PASS exact_zero=1 invalid_weak_moment_rejected=1'
     do k=1,snrt_ngroups
        angular=exp(.4d0*mn_live_basis%direction(1,:)-.2d0*mn_live_basis%direction(3,:))*k
        call mn_project(mn_live_basis,angular,number(:,k),status)
@@ -190,6 +226,26 @@ contains
        call mn_project(mn_live_basis,angular,irm(:,k),status)
        if(status/=mn_ok)stop 103
     enddo
+    ! More than four 256-column work units exercise simultaneous OpenMP and
+    ! stream leases. Use a realizable anisotropic input with varying scale.
+    allocate(batch_input(36,1031),batch_output(36,1031),batch_cache(37,1031), &
+         batch_warm(35,1031),batch_angular(mn_live_basis%nq,1031))
+    do k=1,1031
+       batch_input(:,k)=number(:,1)*(1d0+real(k,dp)/1031d0)
+    enddo
+    batch_warm=0
+    dispatch_start=omp_get_wtime()
+    call mn_dispatch_closure(mn_live_basis,batch_input,batch_output,batch_cache,batch_warm,status,batch_angular)
+    closure_wall=omp_get_wtime()-dispatch_start
+    if(status/=0)stop 153
+    if(maxval(abs(batch_output-batch_input))>1d-8*maxval(abs(batch_input)))stop 154
+    dispatch_start=omp_get_wtime()
+    call mn_dispatch_project(mn_live_basis,batch_angular,batch_output,status)
+    project_wall=omp_get_wtime()-dispatch_start
+    if(status/=0.or.maxval(abs(batch_output-batch_input))>1d-8*maxval(abs(batch_input)))stop 155
+    write(*,'(A,I0,2(A,F12.6))')'SNRT_M5_BATCH_PARITY_PASS threads=',omp_get_max_threads(), &
+         ' closure_s=',closure_wall,' project_s=',project_wall
+    deallocate(batch_input,batch_output,batch_cache,batch_warm,batch_angular)
     npad=0;epad=0;ipad=0
     npad(1:36,:)=number;epad(1:36,:)=energy;ipad(:,1:36)=transpose(irm)
     p=0;p(1:4)=[105d0,.25d0,.2d0,.3d0]
@@ -294,11 +350,13 @@ contains
        write(*,*)'M5 live dust tile status=',status
        stop 140
     endif
-    if(maxval(abs(tile_ir(:,:,1)-material_ir))>1d-12*max(1d0,maxval(abs(material_ir))))stop 141
-    if(maxval(abs(tile_projection(:,:,1)-projection))>1d-12*max(1d0,maxval(abs(projection))))stop 142
-    if(abs(tile_material(1)-material_energy)>1d-12*max(1d0,abs(material_energy)))stop 143
-    if(maxval(abs(tile_ir(:,:,2)-tile_ir(:,:,1)))>1d-12*max(1d0,maxval(abs(tile_ir(:,:,1)))) .or. &
-       abs(tile_material(2)-tile_material(1))>1d-12*max(1d0,abs(tile_material(1))))stop 144
+    ! Energies here are ~1e-23: a max(1,energy) absolute tolerance would
+    ! accept completely wrong results. Scale by the actual physical input.
+    if(maxval(abs(tile_ir(:,:,1)-material_ir))>1d-8*max(tiny(1d0),maxval(abs(material_ir))))stop 141
+    if(maxval(abs(tile_projection(:,:,1)-projection))>1d-8*max(tiny(1d0),maxval(abs(irm))))stop 142
+    if(abs(tile_material(1)-material_energy)>1d-8*max(tiny(1d0),abs(material_energy)))stop 143
+    if(maxval(abs(tile_ir(:,:,2)-tile_ir(:,:,1)))>1d-8*max(tiny(1d0),maxval(abs(tile_ir(:,:,1)))) .or. &
+       abs(tile_material(2)-tile_material(1))>1d-8*max(tiny(1d0),abs(tile_material(1))))stop 144
     tile_before=tile_ir;tile_projection(:,:,1)=projection;tile_projection(:,:,2)=projection
     tile_material=[material_energy,material_energy]
     tile_capacity=[-1d-24,1d-24]
@@ -309,6 +367,30 @@ contains
     if(any(tile_ir/=tile_before).or.any(tile_projection(:,:,1)/=projection).or. &
        any(tile_projection(:,:,2)/=projection).or.any(tile_material/=[material_energy,material_energy]))stop 146
     write(*,'(A)')'SNRT_M5_LIVE_DUST_TILE_PASS batch=2 one_stage=1 parity=1 rollback=1'
+    ! The exact empty operator must agree with the full angular one-cell
+    ! adapter, including its temperature convention. Invalid capacity must
+    ! still reject without publishing the transaction write set.
+    material_ir=0;projection=0;material_energy=0;material_temperature=0
+    call snrt_dust_live_moment_cell(1,1,tile_slots(1),1d0,1d-4,2.99792458d8, &
+         0d0,0d0,0d0,1d-24,material_ir,material_energy,material_temperature,diag,projection,status)
+    if(status/=dust_ok)stop 148
+    tile_ir=0;tile_projection=7;tile_density=0;tile_primary=0;tile_old=0;tile_capacity=1d-24
+    tile_material=0;tile_temperature=0
+    call snrt_dust_live_moment_tile(1,tile_cells,tile_slots,1d0,1d-4,2.99792458d8, &
+         tile_density,tile_primary,tile_old,tile_capacity,tile_ir,tile_material,tile_temperature,diag, &
+         tile_projection,status)
+    if(status/=dust_ok)stop 149
+    if(any(tile_ir/=0).or.any(tile_projection/=0).or.any(tile_material/=material_energy).or. &
+         any(tile_temperature/=material_temperature))stop 150
+    if(diag%absorbed_erg/=0.or.diag%primary_erg/=0.or.diag%background_erg/=0)stop 151
+    tile_capacity(2)=-1d-24;tile_projection=7;tile_material=13;tile_temperature=17
+    call snrt_dust_live_moment_tile(1,tile_cells,tile_slots,1d0,1d-4,2.99792458d8, &
+         tile_density,tile_primary,tile_old,tile_capacity,tile_ir,tile_material,tile_temperature,diag, &
+         tile_projection,status)
+    if(status==dust_ok.or.any(tile_ir/=0).or.any(tile_projection/=7).or. &
+         any(tile_material/=13).or.any(tile_temperature/=17))stop 152
+    write(*,'(A)')'SNRT_M5_EMPTY_DUST_TILE_PASS exact_zero=1 temperature_parity=1 reject_atomic=1'
+    write(*,'(A,2I12)')'SNRT_M5_NATIVE_DISPATCH CPU/GPU=',mn_cpu_closures,mn_gpu_closures
 #ifdef HDF5
     call get_command_argument(1,directory)
     if(len_trim(directory)==0)stop 127

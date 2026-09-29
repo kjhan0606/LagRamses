@@ -7,8 +7,8 @@ module snrt_hdf5
   use ramses_hdf5_io
   use snrt_state, only: primary_width=>snrt_checkpoint_cell_width, snrt_ndirection, &
        primary_pack=>snrt_state_pack_cell, primary_restore=>snrt_state_restore_cell, &
-       snrt_checkpoint_number_width, snrt_state_clear_cell
-  use snrt_agn_efficiency, only: snrt_agn_rt_requested
+       snrt_checkpoint_number_width, snrt_state_clear_cell,snrt_state_is_moment
+  use snrt_agn_efficiency, only: snrt_transport_selected
   use snrt_stellar_source, only: stellar_sed_enabled, stellar_sed_identity
   use snrt_spectral_contract, only: snrt_spectral_contract_source_sha256, &
        snrt_spectral_contract_source_commit_binding, snrt_spectral_contract_approval_id, &
@@ -20,7 +20,7 @@ module snrt_hdf5
   use snrt_thermochemistry, only: snrt_secondary_loaded_manifest_sha256
 #ifdef DUST_LIVE
   use snrt_dust_contract
-  use snrt_dust_live, only: snrt_dust_live_pack, snrt_dust_live_restore
+  use snrt_dust_live, only: snrt_dust_live_pack, snrt_dust_live_restore,snrt_dust_live_validate_payload
 #endif
 #include "amr_index.h"
   implicit none
@@ -65,7 +65,6 @@ contains
        payload=file_payload
     end if
     if(any(.not.ieee_is_finite(payload)))return
-    if(any(payload(primary_width+1:)<0.0_dp))return
     if(payload(1)==0.and.any(payload/=0))return
     call primary_restore(icell,payload(1:primary_width),ierr,validate_only=.true.)
     if(ierr/=0)return
@@ -73,6 +72,8 @@ contains
     ! Prepare/validate the IR contract before a primary cell can be published.
     ! Packing may reserve storage, but preserves every existing IR value.
     if(snrt_checkpoint_cell_width>primary_width)then
+       call snrt_dust_live_validate_payload(payload(primary_width+1:),ierr)
+       if(ierr/=0)return
        call snrt_dust_live_pack(icell,saved_ir,ierr)
        if(ierr/=0)return
     end if
@@ -101,7 +102,7 @@ contains
   subroutine identity(grp,writing)
     integer(HID_T), intent(in) :: grp
     logical, intent(in) :: writing
-    character(len=128) :: values(7), loaded
+    character(len=128) :: values(7), loaded,primary_units,ir_units
     character(len=20) :: names(7)
     integer :: k,status,width,version,file_version,stellar_switch,count
     logical :: exists
@@ -127,6 +128,14 @@ contains
     ! Spectral closure gets a disjoint identity, not additional cell state.
     ! No migration from a fixed-SED run merely by changing an environment flag.
     version=version+8*snrt_band_kind()
+    primary_units='photon CODE density * eV per direction'
+    ir_units='erg/cm3 per normalized direction'
+    if(snrt_state_is_moment())then
+       version=version+1000
+       primary_units='photon CODE density * eV real SH moments (actual energy)'
+       if(snrt_band_enabled())primary_units='photon CODE density real SH endpoint weights A/B'
+       ir_units='erg/cm3 real SH moments'
+    endif
     legacy_number_only=.false.
     snrt_checkpoint_file_width=snrt_checkpoint_cell_width
     names=[character(len=20)::'source_sha256','source_commit','approval','edges_sha256', &
@@ -138,6 +147,18 @@ contains
     if(writing)then
        call hdf5_write_attr_int(grp,'cell_width',snrt_checkpoint_cell_width)
        call hdf5_write_attr_int(grp,'format_version',version)
+       if(snrt_state_is_moment())then
+          call hdf5_write_attr_string(grp,'transport_model','compact_mn_mc15_v1')
+          call hdf5_write_attr_int(grp,'moment_order',snrt_moment_order)
+          call hdf5_write_attr_int(grp,'moment_mu',16)
+          call hdf5_write_attr_int(grp,'moment_phi',24)
+          if(snrt_band_enabled())then
+             call hdf5_write_attr_string(grp,'primary_energy_encoding','native_endpoint_weights')
+             call hdf5_write_attr_string(grp,'spectral_angular_closure','bounded_two_measure_mn_v1')
+          else
+             call hdf5_write_attr_string(grp,'primary_energy_encoding','actual_moments')
+          endif
+       endif
        if(snrt_band_enabled())call hdf5_write_attr_string(grp,'band_model',snrt_band_model)
        if(snrt_d03_band_enabled())call hdf5_write_attr_string(grp,'d03_node_sha256',d03_band_sha256)
        if(snrt_band_kind()==4)call hdf5_write_attr_string(grp,'fe_node_sha256',fe_band_sha256)
@@ -145,15 +166,39 @@ contains
        if(snrt_chimes_cold_enabled())call hdf5_write_attr_string(grp,'chimes_molecular_sha256',snrt_chimes_molecular_sha256)
        if(snrt_chimes_transition_enabled())call hdf5_write_attr_string(grp,'chimes_atomization_sha256', &
             snrt_chimes_atomization_sha256)
-       call hdf5_write_attr_string(grp,'primary_shift_units','photon CODE density * eV per direction')
+       call hdf5_write_attr_string(grp,'primary_shift_units',trim(primary_units))
        if(snrt_checkpoint_cell_width>primary_width) &
-            call hdf5_write_attr_string(grp,'ir_energy_units','erg/cm3 per normalized direction')
+            call hdf5_write_attr_string(grp,'ir_energy_units',trim(ir_units))
     else
        call hdf5_read_attr_int_checked(grp,'format_version',file_version,status)
        call require_ok(status)
        call require_ok(merge(0,1,file_version==version.or. &
-            (file_version==version-4.and..not.snrt_band_enabled())))
-       legacy_number_only=file_version==version-4.and..not.snrt_band_enabled()
+            (file_version==version-4.and..not.snrt_band_enabled().and..not.snrt_state_is_moment())))
+       legacy_number_only=file_version==version-4.and..not.snrt_band_enabled().and..not.snrt_state_is_moment()
+       if(snrt_state_is_moment())then
+          call hdf5_read_attr_string_checked(grp,'transport_model',loaded,status)
+          call require_ok(status)
+          call require_ok(merge(0,1,trim(loaded)=='compact_mn_mc15_v1'))
+          call hdf5_read_attr_int_checked(grp,'moment_order',count,status)
+          call require_ok(status);call require_ok(merge(0,1,count==snrt_moment_order))
+          call hdf5_read_attr_int_checked(grp,'moment_mu',count,status)
+          call require_ok(status);call require_ok(merge(0,1,count==16))
+          call hdf5_read_attr_int_checked(grp,'moment_phi',count,status)
+          call require_ok(status);call require_ok(merge(0,1,count==24))
+          call hdf5_read_attr_string_checked(grp,'primary_energy_encoding',loaded,status)
+          call require_ok(status)
+          if(snrt_band_enabled())then
+             call require_ok(merge(0,1,trim(loaded)=='native_endpoint_weights'))
+             call hdf5_read_attr_string_checked(grp,'spectral_angular_closure',loaded,status)
+             call require_ok(status);call require_ok(merge(0,1,trim(loaded)=='bounded_two_measure_mn_v1'))
+          else
+             call require_ok(merge(0,1,trim(loaded)=='actual_moments'))
+          endif
+          if(snrt_checkpoint_cell_width>primary_width)then
+             call hdf5_read_attr_string_checked(grp,'ir_energy_units',loaded,status)
+             call require_ok(status);call require_ok(merge(0,1,trim(loaded)==trim(ir_units)))
+          endif
+       endif
        if(snrt_band_enabled())then
           call hdf5_read_attr_string_checked(grp,'band_model',loaded,status)
           call require_ok(status)
@@ -191,7 +236,7 @@ contains
        if(.not.legacy_number_only)then
           call hdf5_read_attr_string_checked(grp,'primary_shift_units',loaded,status)
           call require_ok(status)
-          call require_ok(merge(0,1,trim(loaded)=='photon CODE density * eV per direction'))
+          call require_ok(merge(0,1,trim(loaded)==trim(primary_units)))
        end if
     end if
     do k=1,size(names)
@@ -276,7 +321,7 @@ contains
     character(len=32) :: name
     real(dp), allocatable :: buffer(:)
     include 'mpif.h'
-    if(.not.snrt_agn_rt_requested())return
+    if(.not.snrt_transport_selected())return
     snrt_checkpoint_cell_width=primary_width
 #ifdef DUST_LIVE
     if(snrt_dust_contract_version>=3) &
@@ -330,7 +375,7 @@ contains
     character(len=32) :: name
     real(dp), allocatable :: buffer(:)
     include 'mpif.h'
-    if(.not.snrt_agn_rt_requested())return
+    if(.not.snrt_transport_selected())return
     call h5gopen_f(hdf5_file_id,'/snrt',grp,status)
     call require_ok(abs(status))
     call identity(grp,.false.)

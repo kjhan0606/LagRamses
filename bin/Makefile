@@ -616,7 +616,7 @@ snrt_dust_transaction.o: amr_parameters.jaehyun.o
 snrt_dust_receiver.o: ../patch/lagRamses/snrt_dust_receiver.f90
 snrt_dust_contract.o: ../patch/lagRamses/snrt_dust_contract.f90
 snrt_dust_live.o: dust_mass_physics.o dust_composition_optics.o snrt_state.o snrt_dust_contract.o snrt_dust_ir.o snrt_amr_topology.o mpi_mod.o snrt_runtime_backend.o
-snrt_regrid.o: snrt_state.o snrt_dust_live.o hydro_commons.o mpi_mod.o
+snrt_regrid.o: snrt_state.o snrt_dust_live.o snrt_amr_topology.o hydro_commons.o mpi_mod.o
 ifeq ($(SNRT),1)
 load_balance.kjhan.o: snrt_regrid.o
 refine_utils.o: snrt_regrid.o

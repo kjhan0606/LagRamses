@@ -1,8 +1,10 @@
-! Persistent local S_N state, indexed by the RAMSES leaf-cell identifier.
+! Persistent radiation shares the RAMSES cell-slot map. S_N and compact M_N
+! payloads have distinct storage and restart identities.
 module snrt_state
   use dust_composition_optics, only: d03_band_sha256
   use dust_iron_optics, only: fe_band_sha256
-  use amr_parameters, only: MAXLEVEL, dp
+  use amr_parameters, only: MAXLEVEL, dp,snrt_transport_model,snrt_moment_order
+  use snrt_moment_live, only: mn_live_initialize,mn_live_reserve,mn_live_clear,mn_live_pack,mn_live_unpack
   use snrt_spectral_contract, only: snrt_spectral_ngroups => snrt_ngroups, &
        snrt_spectral_contract_loaded, snrt_spectral_contract_runtime_allowed, &
        snrt_spectral_contract_status, snrt_spectral_contract_source_id, &
@@ -69,8 +71,18 @@ module snrt_state
   public :: snrt_state_pack_cell, snrt_state_restore_cell
   public :: snrt_state_clear_cell, validate_cell_payload
   public :: snrt_state_rebind_cells
+  public :: snrt_state_is_moment,snrt_state_payload_tag
 
 contains
+  pure logical function snrt_state_is_moment() result(active)
+    active=trim(snrt_transport_model)=='tensor_mn'
+  end function
+
+  pure real(dp) function snrt_state_payload_tag() result(tag)
+    tag=1d0
+    if(snrt_state_is_moment())tag=real(100+snrt_moment_order,dp)
+  end function
+
   subroutine snrt_state_rebind_cells(cells,ierr)
     integer, intent(in) :: cells(:)
     integer, intent(out) :: ierr
@@ -102,6 +114,7 @@ contains
     ! photon/chemistry contents. This avoids holes in the raw checkpoint map.
     snrt_intensity(:,:,slot)=0.0_c_float
     snrt_energy_shift(:,:,slot)=0.0_dp
+    if(snrt_state_is_moment())call mn_live_clear(slot)
     snrt_hydrogen_ii(slot)=0.0_dp
     snrt_helium_ii(slot)=0.0_dp
     snrt_helium_iii(slot)=0.0_dp
@@ -118,7 +131,16 @@ contains
     ierr = 0
     slot = snrt_state_get_slot(icell)
     if(slot == 0) return
-    payload(1:4) = [1.0_dp, snrt_hydrogen_ii(slot), snrt_helium_ii(slot), snrt_helium_iii(slot)]
+    payload(1:4) = [snrt_state_payload_tag(), snrt_hydrogen_ii(slot), snrt_helium_ii(slot), snrt_helium_iii(slot)]
+    if(snrt_state_is_moment())then
+       call mn_live_pack(slot,snrt_ndirection,payload(5:4+snrt_checkpoint_number_width), &
+            payload(5+snrt_checkpoint_number_width:),ierr)
+       ! The private compact radiation store has already validated its
+       ! payload; this is a bitwise copy. Chemistry remains public state.
+       if(any(.not.ieee_is_finite(payload(2:4))).or.any(payload(2:4)<0).or. &
+            payload(2)>1.or.sum(payload(3:4))>1+1d-10)ierr=10
+       return
+    endif
     payload(5:4+snrt_checkpoint_number_width) = &
          reshape(real(snrt_intensity(:,:,slot),dp),[snrt_checkpoint_number_width])
     payload(5+snrt_checkpoint_number_width:) = &
@@ -133,6 +155,20 @@ contains
     real(dp) :: photons(snrt_ndirection), shift(snrt_ndirection), energy(snrt_ndirection)
     ierr = 10
     if(any(.not.ieee_is_finite(payload))) return
+    if(snrt_state_is_moment())then
+       if(any(payload(1:4)<0))return
+       if(payload(1)==0)then
+          if(any(payload/=0))return
+          ierr=0;return
+       endif
+       if(payload(1)/=snrt_state_payload_tag())return
+       if(payload(2)>1.or.sum(payload(3:4))>1+1d-10)return
+       call mn_live_initialize(snrt_moment_order,snrt_ngroups,ierr)
+       if(ierr/=0)return
+       call mn_live_unpack(0,snrt_ndirection,payload(5:4+snrt_checkpoint_number_width), &
+            payload(5+snrt_checkpoint_number_width:),ierr,validate_only=.true.)
+       return
+    endif
     if(any(payload(1:4+snrt_checkpoint_number_width)<0.0_dp)) return
     if(payload(1)==0.0_dp)then
        if(any(payload/=0.0_dp)) return
@@ -186,6 +222,25 @@ contains
        call snrt_state_initialize()
        return
     end if
+    if(snrt_state_is_moment())then
+       ! Payload was validated above without an angular FP32 round trip.
+       if(present(validate_only))then
+          if(validate_only)return
+       endif
+       call snrt_state_initialize()
+       slot=snrt_slot_of_cell(icell)
+       if(slot==0)then
+          call snrt_state_grow(snrt_nslot+1)
+          snrt_nslot=snrt_nslot+1;slot=snrt_nslot
+          snrt_slot_of_cell(icell)=slot;snrt_cell_id(slot)=icell
+       endif
+       call mn_live_unpack(slot,snrt_ndirection,payload(5:4+snrt_checkpoint_number_width), &
+            payload(5+snrt_checkpoint_number_width:),ierr)
+       if(ierr/=0)return
+       snrt_hydrogen_ii(slot)=payload(2);snrt_neutral_fraction(slot)=1-payload(2)
+       snrt_helium_ii(slot)=payload(3);snrt_helium_iii(slot)=payload(4)
+       return
+    endif
     photons=reshape(real(payload(5:4+snrt_checkpoint_number_width),c_float), &
          [snrt_ndirection,snrt_ngroups])
     shift=reshape(payload(5+snrt_checkpoint_number_width:),[snrt_ndirection,snrt_ngroups])
@@ -263,6 +318,10 @@ contains
     character(len=128) :: secondary_source_id, secondary_upstream_commit
     character(len=128) :: secondary_manifest_sha256
 
+    ierr = 12
+    ! This legacy sequential-record S_N API is used by native fixtures.
+    ! Live compact restart uses the typed HDF5 cell payload/metadata path.
+    if(snrt_state_is_moment())return
     ierr = 0
     if (.not. snrt_spectral_contract_loaded .or. &
          .not. snrt_spectral_contract_runtime_allowed) then
@@ -428,6 +487,8 @@ contains
     real(dp), allocatable :: saved_hydrogen_ii(:), saved_helium_ii(:), &
          saved_helium_iii(:)
 
+    ierr = 12
+    if(snrt_state_is_moment())return
     ierr = 0
     read(unit_id, iostat=ios) version, ndirection_file, ngroups_file, nslot_file
     if (ios /= 0) then
@@ -646,6 +707,7 @@ contains
              snrt_cell_id(islot) = icell
              snrt_intensity(:, :, islot) = 0.0_c_float
              snrt_energy_shift(:, :, islot) = 0.0_dp
+             if(snrt_state_is_moment())call mn_live_clear(islot)
              snrt_neutral_fraction(islot) = 1.0d0
              snrt_hydrogen_ii(islot) = 0.0d0
              snrt_helium_ii(islot) = 0.0d0
@@ -660,7 +722,7 @@ contains
     use amr_commons, only: ncoarse, ngridmax, twotondim
     implicit none
 
-    integer :: cell_capacity
+    integer :: cell_capacity,angular_extent,status
     integer, allocatable :: expanded_map(:)
 
     ! Keep zero-sized payloads allocated on ranks with no local leaves.  The
@@ -677,10 +739,18 @@ contains
        expanded_map(1:size(snrt_slot_of_cell))=snrt_slot_of_cell
        call move_alloc(expanded_map,snrt_slot_of_cell)
     end if
+    angular_extent=snrt_ndirection
+    if(snrt_state_is_moment())then
+       call mn_live_initialize(snrt_moment_order,snrt_ngroups,status)
+       if(status/=0)error stop 'SNRT compact state configuration mismatch'
+       call mn_live_reserve(snrt_capacity,status)
+       if(status/=0)error stop 'SNRT compact slot allocation failed'
+       angular_extent=0 ! No hidden persistent S_N angular copy in M_N mode.
+    endif
     if (.not. allocated(snrt_intensity)) &
-         allocate(snrt_intensity(snrt_ndirection, snrt_ngroups, max(0,snrt_capacity)))
+         allocate(snrt_intensity(angular_extent, snrt_ngroups, max(0,snrt_capacity)))
     if (.not. allocated(snrt_energy_shift)) then
-       allocate(snrt_energy_shift(snrt_ndirection, snrt_ngroups, max(0,snrt_capacity)))
+       allocate(snrt_energy_shift(angular_extent, snrt_ngroups, max(0,snrt_capacity)))
        snrt_energy_shift=0.0_dp
     end if
     if (.not. allocated(snrt_neutral_fraction)) &
@@ -704,7 +774,7 @@ contains
     implicit none
 
     integer, intent(in) :: required
-    integer :: next_capacity
+    integer :: next_capacity,angular_extent,status
     integer, allocatable :: next_cell_id(:)
     real(c_float), allocatable :: next_intensity(:, :, :)
     real(dp), allocatable :: next_energy_shift(:, :, :)
@@ -714,9 +784,15 @@ contains
 
     if (required <= snrt_capacity) return
     next_capacity = max(required, max(1024, 2 * snrt_capacity))
+    angular_extent=snrt_ndirection
+    if(snrt_state_is_moment())then
+       call mn_live_reserve(next_capacity,status)
+       if(status/=0)error stop 'SNRT compact slot growth failed'
+       angular_extent=0
+    endif
     allocate(next_cell_id(next_capacity))
-    allocate(next_intensity(snrt_ndirection, snrt_ngroups, next_capacity))
-    allocate(next_energy_shift(snrt_ndirection, snrt_ngroups, next_capacity))
+    allocate(next_intensity(angular_extent, snrt_ngroups, next_capacity))
+    allocate(next_energy_shift(angular_extent, snrt_ngroups, next_capacity))
     allocate(next_neutral_fraction(next_capacity))
     allocate(next_hydrogen_ii(next_capacity), next_helium_ii(next_capacity), &
          next_helium_iii(next_capacity))

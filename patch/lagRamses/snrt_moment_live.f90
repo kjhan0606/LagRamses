@@ -18,7 +18,30 @@ module snrt_moment_live
   public :: mn_live_initialize,mn_live_reserve,mn_live_clear,mn_live_read,mn_live_write
   public :: mn_live_pack,mn_live_unpack,mn_live_validate,mn_live_ir_read,mn_live_ir_write
   public :: mn_live_ir_pack,mn_live_ir_unpack,mn_live_ir_expand
+  public :: mn_rollback_snapshot
 contains
+  subroutine mn_rollback_snapshot(values,saved,stride,ierr)
+    ! Lossless transaction backup. A wholly zero field needs one zero cell,
+    ! otherwise preserve every cell. Restore column 1+(cell-1)*stride.
+    ! This is neither a radiation cutoff nor a change to persistent state.
+    real(mn_dp),intent(in) :: values(:,:,:)
+    real(mn_dp),allocatable,intent(out) :: saved(:,:,:)
+    integer,intent(out) :: stride,ierr
+    integer :: nc,status
+    stride=0;nc=1;ierr=mn_bad_input
+    if(any(values/=0d0))then
+       stride=1;nc=size(values,3)
+    endif
+    allocate(saved(size(values,1),size(values,2),nc),stat=status)
+    if(status/=0)return
+    if(stride==0)then
+       saved=0d0
+    else
+       saved=values
+    endif
+    ierr=mn_ok
+  end subroutine
+
   subroutine mn_live_initialize(order,ng,ierr)
     integer,intent(in) :: order,ng
     integer,intent(out) :: ierr
@@ -84,6 +107,9 @@ contains
     ierr=mn_bad_input
     if(any(shape(number)/=[mn_live_basis%nm,primary_groups]))return
     if(any(shape(energy)/=shape(number)).or.mn_live_basis%nm==0)return
+    if(all(number==0d0).and.all(energy==0d0))then
+       ierr=mn_ok;return
+    endif
     do g=1,primary_groups
        hint=0
        call mn_reconstruct(mn_live_basis,number(:,g),angular,ierr,dual_hint=hint)
@@ -199,10 +225,14 @@ contains
     integer :: block,offset,g,status
     ierr=mn_bad_input
     if(size(energy,1)/=mn_live_basis%nm.or.size(energy,2)<1)return
+    if(mn_live_basis%nm<1)return
+    ierr=mn_ok
+    if(.not.all(energy==0d0))then
     do g=1,size(energy,2)
        call mn_reconstruct(mn_live_basis,energy(:,g),angular,ierr)
        if(ierr/=mn_ok)return
     enddo
+    endif
     if(present(validate_only))then
        if(validate_only)return
     endif

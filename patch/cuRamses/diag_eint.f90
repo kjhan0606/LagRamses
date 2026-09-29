@@ -26,6 +26,8 @@ subroutine diag_check_eint(label, ilev_check)
   ! For negative eint reporting
   real(dp) :: d_worst, u_worst, v_worst, w_worst, etot_worst
   integer :: neg_count_loc, neg_count_glob
+  character(len=8) :: entry_stop_env
+  integer :: entry_stop_status, entry_stop_length
 
   ! Diagnostic reads uold; only allocated when hydro=.true.
   ! Several callers in amr_step.jaehyun.f90 (e.g. the unconditional
@@ -112,6 +114,21 @@ subroutine diag_check_eint(label, ilev_check)
              ' lev=', ilev_check, &
              ' eint_min=', eint_min_loc, ' neg=', neg_count_loc, &
              ' d=', d_worst, ' v=', u_worst, v_worst, w_worst
+     endif
+  endif
+
+  ! Bounded boundary-test mode.  Value 1 is opt-in producer isolation and
+  ! acts at the focused level-entry label, after emitting the diagnostic and
+  ! before M5.  Value 2 is consumed by the M5 driver after a successful
+  ! level-8 transaction. Neither mode is a physical floor or a change to the
+  ! material receiver's rejection semantics.
+  if(trim(label)=='level-entry')then
+     entry_stop_env=''
+     call get_environment_variable('SNRT_HYDRO_ENTRY_STOP',entry_stop_env, &
+          length=entry_stop_length,status=entry_stop_status)
+     if(entry_stop_status==0 .and. entry_stop_length==1 .and. &
+          entry_stop_env(1:1)=='1')then
+        call clean_stop
      endif
   endif
 

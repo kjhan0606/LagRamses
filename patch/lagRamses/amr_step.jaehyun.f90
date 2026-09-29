@@ -802,6 +802,12 @@ recursive subroutine amr_step(ilevel,icount)
   if(rt)call rt_set_unew(ilevel)
 #endif
 
+  ! Focused M5-L8 boundary diagnostic: inspect the first refined level after
+  ! state initialization and before any fine-level Godunov work.  This keeps
+  ! the producer test outside the M5 transaction and distinguishes a bad AMR
+  ! interpolation/entry state from later hydro synchronization effects.
+  if(hydro .and. ilevel==levelmin+1)call diag_check_eint('level-entry',ilevel)
+
   ! Record this level step's starting scale factor for the PBH update
   ! (aexp still holds the step-start value here; after the recursion
   ! update_time has advanced it to the step end)

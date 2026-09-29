@@ -138,7 +138,10 @@ contains
           do face = 1, 2*ndim
              raw_neighbor(face,ilocal) = indn(1,face)
              neighbor_cell = indn(1,face)
-             if (neighbor_cell > 0 .and. son(neighbor_cell) == 0) then
+             ! getnborcells returns zero at coarse interfaces. Fortran does
+             ! not promise short-circuit .and.; never evaluate son(0).
+             if(neighbor_cell<=0)cycle
+             if (son(neighbor_cell) == 0) then
                 hash_code = modulo(int(neighbor_cell,8)*1000003_8 + 17_8, &
                      int(hash_size,8))
                 hash_pos = 1 + int(hash_code)
@@ -296,7 +299,7 @@ contains
     end if
   end subroutine snrt_amr_classify_faces
 
-  subroutine snrt_halo_tile_exchange(field,ilevel,ierr)
+  subroutine snrt_halo_tile_exchange(field,ilevel,ierr,reverse)
     ! Reuse the established RAMSES grid maps, but keep SNRT packet buffers
     ! private. No mutation of generic hydro exchange/autotuning state. Each
     ! peer message carries a bounded tile, with the same per-grid ordering.
@@ -306,16 +309,27 @@ contains
     real(dp),intent(inout)::field(:,:)
     integer,intent(in)::ilevel
     integer,intent(out)::ierr
+    logical,optional,intent(in)::reverse
 #ifndef WITHOUTMPI
     real(dp),allocatable::sendbuf(:),recvbuf(:)
     integer::sc(ncpu),rc(ncpu),so(ncpu),ro(ncpu),req(2*ncpu)
     integer::cpu,i,j,col,grid,k,nreq,info,status,global_status,ns,nr,width
     integer(kind=8)::total_send,total_recv
+    logical :: reverse_sum
+    integer :: send_grids(ncpu),recv_grids(ncpu)
+    reverse_sum=.false.
+    if(present(reverse))reverse_sum=reverse
     width=twotondim*size(field,2)
     status=0;total_send=0;total_recv=0
     do cpu=1,ncpu
-       total_send=total_send+int(emission(cpu,ilevel)%ngrid,8)*width
-       total_recv=total_recv+int(reception(cpu,ilevel)%ngrid,8)*width
+       send_grids(cpu)=emission(cpu,ilevel)%ngrid
+       recv_grids(cpu)=reception(cpu,ilevel)%ngrid
+       if(reverse_sum)then
+          send_grids(cpu)=reception(cpu,ilevel)%ngrid
+          recv_grids(cpu)=emission(cpu,ilevel)%ngrid
+       endif
+       total_send=total_send+int(send_grids(cpu),8)*width
+       total_recv=total_recv+int(recv_grids(cpu),8)*width
     enddo
     if(max(total_send,total_recv)>huge(1))status=1
     call MPI_ALLREDUCE(status,global_status,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
@@ -329,12 +343,16 @@ contains
     ns=0;nr=0
     do cpu=1,ncpu
        so(cpu)=ns;ro(cpu)=nr
-       sc(cpu)=emission(cpu,ilevel)%ngrid*width
-       rc(cpu)=reception(cpu,ilevel)%ngrid*width
+       sc(cpu)=send_grids(cpu)*width
+       rc(cpu)=recv_grids(cpu)*width
        ns=ns+sc(cpu);nr=nr+rc(cpu)
        k=so(cpu)
-       do i=1,emission(cpu,ilevel)%ngrid
-          grid=emission(cpu,ilevel)%igrid(i)
+       do i=1,send_grids(cpu)
+          if(reverse_sum)then
+             grid=reception(cpu,ilevel)%igrid(i)
+          else
+             grid=emission(cpu,ilevel)%igrid(i)
+          endif
           do col=1,size(field,2)
              do j=1,twotondim
                 k=k+1
@@ -363,12 +381,20 @@ contains
     if(ierr/=0)return
     do cpu=1,ncpu
        k=ro(cpu)
-       do i=1,reception(cpu,ilevel)%ngrid
-          grid=reception(cpu,ilevel)%igrid(i)
+       do i=1,recv_grids(cpu)
+          if(reverse_sum)then
+             grid=emission(cpu,ilevel)%igrid(i)
+          else
+             grid=reception(cpu,ilevel)%igrid(i)
+          endif
           do col=1,size(field,2)
              do j=1,twotondim
                 k=k+1
-                field(ICELL_OF(grid,j),col)=recvbuf(k)
+                if(reverse_sum)then
+                   field(ICELL_OF(grid,j),col)=field(ICELL_OF(grid,j),col)+recvbuf(k)
+                else
+                   field(ICELL_OF(grid,j),col)=recvbuf(k)
+                endif
              enddo
           enddo
        enddo

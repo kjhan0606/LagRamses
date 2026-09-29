@@ -163,3 +163,68 @@ and projection calls to CPU. Native CUDA closure throughput is favorable on
 A100 for 64/256-cell batches, but production-scale end-to-end speedup and
 hardware-specific break-even thresholds remain unmeasured. Do not label the
 reference-control 4^3 case a production performance qualification.
+
+## 2026-09-28 source-active 8^3 paired comparison
+
+To test the coupled-time consequence without adding timing instrumentation,
+job 407084 ran OpenMP, hybrid, hybrid, OpenMP sequentially on one A40 node
+(MPI1/OMP4, FP64, one GPU). It used one frozen executable
+`ec5b1082cc13f6b59e4a9a2fc281491684e6b36de8d8adf30baf389928eab864`
+and four identical effective namelists
+`61a867b5046ac14b131cc44092d7ca89811dc9ca24070b4a3e6818180552f7bd`
+under `.mn-scale-20260928/{openmp-1,hybrid-1,hybrid-2,openmp-2}/`.
+The sole resolution changes from the 4^3 control were `levelmin=3`,
+`levelmax=5`, and `ngridmax=2048`; this is a bounded two-step source-active
+engineering comparison, **not** a production-size or calibrated galaxy run.
+`noutput=1` with unreachable `aout=2`, `tout=1e30`, and
+`foutput=fbackup=1000000` requested no full dumps. All four runs completed,
+printed zero NaN counters, and produced no raw output directories. The job
+ended `COMPLETED 0:0`.
+
+| A40 arm | Batch wall (s) | Evolution timer (s) | Active M5 commit (s) | Active material preparation (s) | Closure CPU/GPU cells |
+|---|---:|---:|---:|---:|---:|
+| OpenMP 1 | 507 | 213.235 | 195.578 | 176.445 | 192512 / 0 |
+| Hybrid 1 | 504 | 211.685 | 193.790 | 176.223 | 82400 / 110112 |
+| Hybrid 2 | 504 | 212.383 | 195.344 | 177.574 | 80832 / 111680 |
+| OpenMP 2 | 506 | 214.171 | 196.418 | 176.817 | 192512 / 0 |
+
+All four printed the same source photons (4.3035366367379e-4 code-ledger
+units). OpenMP/hybrid absorbed-photon values differed by under 9e-12
+relative, and the maximum xHII difference was 2e-14 absolute. Photon
+residuals were below 1e-15 of source photons. On this A40, paired whole-job
+time differed by about 0.5%, and active-commit time by about 0.7%, comparable
+to the repeat variation; **no material end-to-end speedup is established**.
+The first two-step run spent roughly five minutes before the evolution timer,
+which must not be attributed to M5 transport. The active material preparation
+alone consumed about 176--178 s of each 194--196 s commit. These numbers
+support retaining the GPU closure as a functioning comparison arm but not
+hardware-independent claims about its production benefit.
+
+The same-input A100/H100-dependent comparison was submitted as job 407086
+with a dependency on the completed A40 gate. It ran on one H100 NVL node
+(syn09), using the identical frozen binary and namelist hashes above and
+fresh effective inputs under `.mn-scale-high-20260928/`. All four arms
+ended normally with zero NaN counters, source-active M5 ledgers, and no raw
+output directories; Slurm ended `COMPLETED 0:0`.
+
+| H100 arm | Batch wall (s) | Evolution timer (s) | Active M5 commit (s) | Active material preparation (s) | Closure CPU/GPU cells |
+|---|---:|---:|---:|---:|---:|
+| OpenMP 1 | 506 | 212.567 | 195.342 | 176.451 | 192512 / 0 |
+| Hybrid 1 | 506 | 213.143 | 196.250 | 175.948 | 56144 / 136368 |
+| Hybrid 2 | 506 | 213.221 | 194.805 | 177.883 | 59824 / 132688 |
+| OpenMP 2 | 505 | 213.352 | 195.857 | 176.563 | 192512 / 0 |
+
+H100 hybrid sent about 69--71% of the active closure cells to GPU, with
+the cheap face flux left on CPU. Source photons matched exactly at printed
+precision; absorbed photons agreed within 9e-12 relative and maximum xHII
+within 2e-14 absolute. Photon residuals were below 1e-15 of source photons.
+The mean batch time was 505.5 s OpenMP versus 506 s hybrid; mean evolution
+time 212.959 versus 213.182 s; mean active commit 195.600 versus 195.528 s.
+These differences are smaller than the run-to-run/material-preparation
+variation: **the H100 also provides no demonstrated coupled end-to-end
+speedup for this workload**. The test confirms functional M5 GPU dispatch,
+numerical parity, and an approximately 176--178 s CHIMES/material bottleneck
+within each approximately 195 s active commit. It does not measure
+production-scale MPI/AMR throughput, card-wide multi-rank arbitration, or
+the smaller M1--M4 orders in a coupled run. No new stream-count tuning or
+production-speedup claim follows from this bounded result.
