@@ -1495,6 +1495,21 @@ class WizardTests(unittest.TestCase):
                             self.assertEqual(len(re.findall(pattern, preview[path], re.S)), 1)
                             old_files[path] = re.sub(pattern, '&STELLAR_ENRICHMENT_PARAMS\n/', old_files[path], flags=re.S)
                             preview[path] = re.sub(pattern, '&STELLAR_ENRICHMENT_PARAMS\n/', preview[path], flags=re.S)
+                # The validated AMR-boundary repair changes the generated
+                # cosmological default from straight injection to the tested
+                # limited MinMod interpolation.  Keep this historical
+                # byte-comparison test focused on unrelated generator output.
+                for path in preview:
+                    if path.endswith('.nml'):
+                        # Local transport is now an explicit operator choice;
+                        # the pre-selector CLI baseline emitted `none` while
+                        # the new wizard defaults to SNRT_S_N. Normalize only
+                        # this intentional selector change for byte comparison.
+                        preview[path] = preview[path].replace(
+                            "radiation_transport='snrt_sn'",
+                            "radiation_transport='none'")
+                        old_files[path] = old_files[path].replace(
+                            'interpol_type=0', 'interpol_type=1')
                 self.assertEqual(preview, old_files)
 
     def test_invalid_inputs_do_not_write(self):
@@ -1580,7 +1595,7 @@ class WizardTests(unittest.TestCase):
                 if overrides.get('Zoom-in run?'):
                     self.assertEqual(stages['Zoom region'], 7)
                 if overrides.get('Run mode') == 'hydro':
-                    self.assertEqual(stages['Hydro solver'], 6)
+                    self.assertEqual(stages['Hydro solver'], 7)  # Includes native RT representation.
 
     def test_stage_navigation_and_invalid_pair_are_atomic(self):
         wizard = gui.RunWizard.__new__(gui.RunWizard)

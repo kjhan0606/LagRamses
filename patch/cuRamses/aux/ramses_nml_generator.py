@@ -665,7 +665,9 @@ PRESETS = OrderedDict([
             'gamma': 1.6666667, 'courant_factor': 0.8,
             'scheme': 'muscl', 'slope_type': 1,
             'm_refine': '9*8.', 'ivar_refine': 0,
-            'interpol_var': 1, 'interpol_type': 0,
+            # The level-boundary repair was tested with internal-energy
+            # interpolation plus the limited MinMod slope.
+            'interpol_var': 1, 'interpol_type': 1,
             'q_refine_holdback': True, 'dr_proper': 2.27,
             'jeans_ncells': 4,
             'cooling': True, 'haardt_madau': True, 'metal': True,

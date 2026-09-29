@@ -1617,7 +1617,10 @@ def generate_run(ui=None, write_text=save_text):
     values.setdefault('nexpand', 1)
     values.setdefault('m_refine', '{}*8.'.format(levelmin))
     values.setdefault('interpol_var', 1)
-    values.setdefault('interpol_type', 0)
+    # Match the tested internal-energy path and hydro_parameters default.
+    # Straight injection (0) was not the bounded producer-isolation case;
+    # keep the limited MinMod slope (1) explicit in generated runs.
+    values.setdefault('interpol_type', 1)
     values.setdefault('use_fftw', True)
     values.setdefault('nrestart', 0)
     values.setdefault('nremap', 10)
@@ -1631,6 +1634,16 @@ def generate_run(ui=None, write_text=save_text):
 
     # ---- render RAMSES namelist ----
     nml_text = rng.format_namelist(values)
+    # Keep the AMR energy-interpolation choice visible in the effective
+    # namelist even when it equals the generator database default.  This is
+    # part of the production contract, not an implicit compiler default.
+    refine_extra = {}
+    record(values, refine_extra, 'REFINE_PARAMS', [
+        ('interpol_var', values['interpol_var']),
+        ('interpol_type', values['interpol_type']),
+    ])
+    nml_text = merge_into_group(nml_text, 'REFINE_PARAMS',
+                                refine_extra['REFINE_PARAMS'], values)
     for group, names in extra_dm.items():
         nml_text = merge_into_group(nml_text, group, names, values)
     for group, names in extra_grav.items():
