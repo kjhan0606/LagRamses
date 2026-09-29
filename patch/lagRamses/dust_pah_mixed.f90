@@ -23,15 +23,16 @@ contains
        radiation,population,bulk_energy,temperature,photons,diag,ierr,ghosts,remote,blocked, &
        gas_energy,gas_capacity,conductance,transfer,primary_pah_heat,primary_pah_captures, &
        phase_density,phase_momentum,phase_absorption,phase_scattering,phase_work,gas_electrons,electron_capacity, &
-       primary_population,gas_atomic_h,gas_molecular_h2,gas_atomic_c,gas_carbon_ion)
+       primary_population,gas_atomic_h,gas_molecular_h2,gas_atomic_c,gas_carbon_ion,material_only)
     type(dust_ir_table),intent(in)::table
     real(dust_dp),intent(in)::direction(:,:),weight(:),dx,dt,chat,bins(:,:),primary(:,:)
     integer,intent(in)::neighbors(:,:)
     real(dust_dp),intent(inout)::radiation(:,:,:),population(:,:),bulk_energy(:),temperature(:),photons(:,:)
     type(dust_ir_diagnostics),intent(inout)::diag
     integer,intent(out)::ierr
-    real(dust_dp),intent(in)::ghosts(:,:,:)
-    integer,intent(in)::remote(:,:)
+    real(dust_dp),optional,intent(in)::ghosts(:,:,:)
+    integer,optional,intent(in)::remote(:,:)
+    logical,optional,intent(in)::material_only
     logical,intent(in)::blocked(:,:)
     real(dust_dp),intent(inout)::gas_energy(:)
     real(dust_dp),intent(in)::gas_capacity(:),conductance(:)
@@ -163,7 +164,10 @@ contains
           if(sigma(g,i)>0)irfc(g,:,i)=alpha/sigma(g,i)
           irf(g,i)=sum(irfc(g,:,i))
           if(number(i)>0.and.pah_ir_supported(g)==0)then
-             if(any(radiation(g,:,i)>0).or.any(ghosts(g,:,:)>0))return
+             if(any(radiation(g,:,i)>0))return
+             if(present(ghosts))then
+                if(any(ghosts(g,:,:)>0))return
+             endif
           endif
        enddo
        do g=1,d03_ng
@@ -203,16 +207,17 @@ contains
          radiation,work_t,photons,diag,ierr,1d-9,256,total,capacity,ghosts,remote,blocked, &
          thin_reabsorption=.true.,population=population,cell_absorption=sigma,phase_density=phase_density, &
          phase_momentum=phase_momentum,phase_absorption=phase_absorption,phase_scattering=phase_scattering, &
-         phase_work=phase_work,moving_material_dispatch=moving_material)
+         phase_work=phase_work,moving_material_dispatch=moving_material,material_only=material_only)
     else if(atomize)then
     call snrt_dust_ir_advance(table,direction,weight,neighbors,dx,dt,chat,unit_density,sum(primary,dim=1)/dt, &
          radiation,work_t,photons,diag,ierr,1d-9,256,total,capacity,ghosts,remote,blocked, &
          thin_reabsorption=.true.,population=population,population_dispatch=material,cell_absorption=sigma, &
-         population_loss=.true.)
+         population_loss=.true.,material_only=material_only)
     else
     call snrt_dust_ir_advance(table,direction,weight,neighbors,dx,dt,chat,unit_density,sum(primary,dim=1)/dt, &
          radiation,work_t,photons,diag,ierr,1d-9,256,total,capacity,ghosts,remote,blocked, &
-         thin_reabsorption=.true.,population=population,population_dispatch=material,cell_absorption=sigma)
+         thin_reabsorption=.true.,population=population,population_dispatch=material,cell_absorption=sigma, &
+         material_only=material_only)
     endif
     if(ierr/=0)then
        write(*,'(A,I6,L2,*(ES23.15,1X))')' PAH mixed IR rejected status/callback/dt/min_total/min_T: ', &

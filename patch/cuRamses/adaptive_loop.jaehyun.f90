@@ -4,6 +4,7 @@ subroutine adaptive_loop
   use pm_commons
   use poisson_commons
   use cooling_module
+  use dust_mass_physics, only: dust_chimes_enabled
   use ksection, only: ksection_trim_done
   use morton_hash, only: morton_hash_epoch
 #ifdef RT
@@ -83,7 +84,9 @@ subroutine adaptive_loop
      ! Compute cooling table at current aexp
   endif
 #else  
-  if(cooling.and..not.neq_chem) &
+  ! CHIMES owns the thermal rates in this admitted mode. Retain init_time's
+  ! initial gas temperature, but do not build the unused RAMSES CIE table.
+  if(cooling.and..not.neq_chem.and..not.dust_chimes_enabled()) &
        call set_table(dble(aexp))    ! Initialize cooling look up table
 #endif
   if(pic)call init_part              ! Initialize particle variables

@@ -6,6 +6,8 @@
 #include <cfloat>
 #include <vector>
 #include <cstdio>
+#include <limits>
+#include <type_traits>
 
 // hhe_maxent64_v1: a two-moment closure, NOT recovery of a unique SED.
 // Positive trapezoidal dE prior on logarithmic nodes, including endpoints.
@@ -51,9 +53,9 @@ template<int K=nodes> struct Grid {
     }
     for(int j=0;j<K;++j)w[j]=(e[std::min(j+1,K-1)]-e[std::max(j-1,0)])/(2*(hi-lo));
   }
-  bool reconstruct(double mean,std::array<double,K>&p) const {
-    if(!std::isfinite(mean) || mean<e[0]*(1-moment_tolerance) ||
-        mean>e[K-1]*(1+moment_tolerance))return false;
+  bool reconstruct(double mean,std::array<double,K>&p,double tolerance=moment_tolerance) const {
+    if(!std::isfinite(mean) || mean<e[0]*(1-tolerance) ||
+        mean>e[K-1]*(1+tolerance))return false;
     p.fill(0);
     if(mean<=e[0]){p[0]=1;return true;}
     if(mean>=e[K-1]){p[K-1]=1;return true;}
@@ -81,12 +83,13 @@ template<int K=nodes> struct Grid {
 // directions and nodes within a band; rejected packets retain E/N. A depleted
 // species must not veto absorption by another species with remaining atoms.
 // Every pointer here addresses transaction scratch, never published state.
-template<int K=nodes> inline int absorb_cell(float *next,double *shift,const float *number,const double *energy,
+template<int K=nodes,class Real=float> inline int absorb_cell(Real *next,double *shift,const Real *number,const double *energy,
     const double *reference,const double *columns,const std::vector<Grid<K>>&grids,
-    float *budget,float *hhe,double *hhe_e,float *returned,float *raw,float *absorbed,float *total,
+    Real *budget,Real *hhe,double *hhe_e,Real *returned,Real *raw,Real *absorbed,Real *total,
     int no,int nw,int nd,int ng,int cell,Secondary secondary=nullptr,
     const double *xi=nullptr,double *deposition=nullptr,const Dust *grains=nullptr,
-    float *dust=nullptr,double *dust_e=nullptr) {
+    Real *dust=nullptr,double *dust_e=nullptr) {
+  constexpr double eps=std::numeric_limits<Real>::epsilon();
   struct Ray {double n[4]={},e[4]={},survive=0,survive_e=0;};
   std::vector<Ray> rays(nd);
   const size_t groups=size_t(no)*ng;
@@ -124,14 +127,14 @@ template<int K=nodes> inline int absorb_cell(float *next,double *shift,const flo
       if(number[k]==0)continue;
       std::array<double,K> p;
       const double mean=energy[k]/number[k];
-      if(!grid.reconstruct(mean,p)){
+      if(!grid.reconstruct(mean,p,8*eps)){
         std::fprintf(stderr,"SNRT band inadmissible transported mean cell=%d group=%d N=%.17g E=%.17g mean=%.17g\n",cell,g, double(number[k]),energy[k],mean);
         return 3;
       }
       // Endpoint projection is only a FP32 moment-roundoff operation. Scale
       // represented number (within that tolerance) to preserve actual E.
       const double bounded=std::max(grid.e[0],std::min(grid.e.back(),mean));
-      const double count=energy[k]/bounded;
+      const double count=std::is_same<Real,float>::value?energy[k]/bounded:number[k];
       for(int j=0;j<K;++j) {
         const double q=count*p[j];
         // Preserve the live Fe comparison's <=4 eV absorption restriction.
@@ -151,12 +154,12 @@ template<int K=nodes> inline int absorb_cell(float *next,double *shift,const flo
     for(int s=0;s<3;++s)if(wanted[s]>0) {
       // Leave only rounding headroom, not a physical residual reservoir.
       const double available=budget[s*no+cell];
-      if(wanted[s]>=available*(1-4*FLT_EPSILON))
-        cap[s]=std::min(1.,available*(1-4*FLT_EPSILON)/wanted[s]);
+      if(wanted[s]>=available*(1-4*eps))
+        cap[s]=std::min(1.,available*(1-4*eps)/wanted[s]);
     }
     double requested=0,accepted=0;
     for(int s=0;s<3;++s) {
-      const float used=float(cap[s]*wanted[s]);
+      const Real used=Real(cap[s]*wanted[s]);
       hhe[s*groups+out]=used;hhe_e[s*groups+out]=cap[s]*wanted_e[s];
       budget[s*no+cell]-=used;
       if(budget[s*no+cell]<0)return 3;
@@ -178,10 +181,10 @@ template<int K=nodes> inline int absorb_cell(float *next,double *shift,const flo
     // Grain captures are not atom-limited. Rejected H/He packets are
     // returned with their energy, not passed through a second dust sink.
     if(occupied){
-      dust[out]=float(wanted[3]);dust_e[out]=wanted_e[3];
+      dust[out]=Real(wanted[3]);dust_e[out]=wanted_e[3];
       requested+=wanted[3];accepted+=wanted[3];
     }
-    raw[out]=float(requested);returned[out]=float(requested-accepted);absorbed[out]=float(accepted);
+    raw[out]=Real(requested);returned[out]=Real(requested-accepted);absorbed[out]=Real(accepted);
     total[cell]+=absorbed[out];
     for(int d=0;d<nd;++d) {
       const size_t k=(size_t(g)*nd+d)*nw+cell;
@@ -189,7 +192,7 @@ template<int K=nodes> inline int absorb_cell(float *next,double *shift,const flo
       for(int s=0;s<3;++s){n+=(1-cap[s])*r.n[s];e+=(1-cap[s])*r.e[s];}
       // Stable positive survivor sums avoid subtracting nearly equal E's
       // in optically thick cells. Moment solve conserves E to FP64 tolerance.
-      next[k]=float(n);shift[k]=e-reference[g]*next[k];
+      next[k]=Real(n);shift[k]=e-reference[g]*next[k];
       if(!std::isfinite(n)||!std::isfinite(e)||n<0||e<0 || (next[k]==0 && e!=0)){
         std::fprintf(stderr,"SNRT band unrepresentable survivor cell=%d group=%d N=%.17g E=%.17g\n",cell,g,n,e);
         return 3;
@@ -199,7 +202,7 @@ template<int K=nodes> inline int absorb_cell(float *next,double *shift,const flo
   return 0;
 }
 
-template<int K> inline int scatter_cell(float *number,double *shift,const double *reference,
+template<int K,class Real=float> inline int scatter_cell(Real *number,double *shift,const double *reference,
     const std::vector<Grid<K>>&grids,const Dust &grains,int no,int nw,int nd,int ng,int cell) {
   bool occupied=false;
   for(int b=0;b<grains.bins;++b)occupied=occupied || grains.columns[b*no+cell]>0;
@@ -222,8 +225,8 @@ template<int K> inline int scatter_cell(float *number,double *shift,const double
       if(number[k]==0)continue;
       const double e=reference[g]*number[k]+shift[k],mean=e/number[k];
       std::array<double,K> p;
-      if(!grid.reconstruct(mean,p))return 3;
-      const double count=e/std::max(grid.e[0],std::min(grid.e.back(),mean));
+      if(!grid.reconstruct(mean,p,8*std::numeric_limits<Real>::epsilon()))return 3;
+      const double count=std::is_same<Real,float>::value?e/std::max(grid.e[0],std::min(grid.e.back(),mean)):number[k];
       for(int j=0;j<K;++j){
         const double scattered=count*p[j]*fraction[j],kept=count*p[j]*(1-fraction[j]);
         keep_n[d]+=kept;keep_e[d]+=kept*grid.e[j];
@@ -235,7 +238,7 @@ template<int K> inline int scatter_cell(float *number,double *shift,const double
     for(int d=0;d<nd;++d){
       const size_t k=(size_t(g)*nd+d)*nw+cell;
       const double n=keep_n[d]+grains.weights[d]*sum_n,e=keep_e[d]+grains.weights[d]*sum_e;
-      number[k]=float(n);shift[k]=e-reference[g]*number[k];
+      number[k]=Real(n);shift[k]=e-reference[g]*number[k];
       if(!std::isfinite(n)||!std::isfinite(e)||n<0||e<0 || (number[k]==0 && e!=0))return 3;
     }
   }

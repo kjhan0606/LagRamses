@@ -13,6 +13,7 @@ subroutine cooling_fine(ilevel)
   use amr_commons
   use hydro_commons
   use cooling_module
+  use dust_mass_physics, only: dust_chimes_enabled
   use eunha_cooling_mod, only: eunha_report, eunha_interp_redshift
   implicit none
 #ifndef WITHOUTMPI
@@ -47,7 +48,7 @@ subroutine cooling_fine(ilevel)
      call eunha_report(nstep_coarse)
   endif
 
-  if((cooling.and..not.neq_chem).and.ilevel==levelmin.and.cosmo)then
+  if((cooling.and..not.neq_chem).and.ilevel==levelmin.and.cosmo.and..not.dust_chimes_enabled())then
      if(myid==1)write(*,*)'Computing new cooling table'
 #ifdef grackle
      ! Compute new cooling table at current aexp with grackle

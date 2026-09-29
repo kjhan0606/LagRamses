@@ -159,18 +159,33 @@ contains
          abs(residual)/diag%background_erg
   end subroutine
 
-  subroutine test_material(heating,density,old_energy,log_t,basis_band,cell_weights,dt, &
-       gas_energy,gas_capacity,conductance,rate,temperature,next_energy,gas_transfer,background_transfer,ierr)
+  subroutine test_material(heating,density,old_energy,capacity,log_t,power,band,material_u,use_u, &
+       dt,background,bath,tolerance,rate,temperature,next_energy,gas_energy,gas_capacity,conductance, &
+       gas_transfer,cell_material_u,cell_weights,basis_power,basis_band,background_transfer,ierr)
     use snrt_dust_contract
-    real(dp),intent(in)::heating(:),density(:),old_energy(:),log_t(:),basis_band(:,:,:),cell_weights(:,:),dt
+    real(dp),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:),material_u(:),dt
+    real(dp),intent(in)::background,bath,tolerance
+    logical,intent(in)::use_u
     real(dp),intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
+    real(dp),optional,intent(in)::cell_material_u(:,:),cell_weights(:,:),basis_power(:,:),basis_band(:,:,:)
     real(dp),intent(out)::rate(:,:),temperature(:),next_energy(:),gas_transfer(:),background_transfer(:)
     integer,intent(out)::ierr
-    real(dp)::bins(6),phase(4),bands(size(rate,1),size(log_t),6)
-    integer::i
+    real(dp)::bins(6),phase(4),bands(size(rate,1),size(log_t),6),f,expected_background
+    integer::i,k
     ! Deliberately fill rejected trial outputs; none may leak into caller state.
     rate=0;temperature=0;next_energy=0;gas_transfer=0;background_transfer=0;ierr=2
     if(reject_bath)return
+    ! The reference table remains at 10 K. The cosmological receiver must
+    ! derive its physical bath from the epoch, independently of this input.
+    if(abs(bath/snrt_dust_contract_ir_background_k-1d0)>1d-12)return
+    k=1
+    do while(k<size(log_t)-1)
+       if(log(bath)<=log_t(k+1))exit
+       k=k+1
+    enddo
+    f=(log(bath)-log_t(k))/(log_t(k+1)-log_t(k))
+    expected_background=power(k)+f*(power(k+1)-power(k))
+    if(abs(background/expected_background-1d0)>1d-12)return
     bands=0;bands(:,:,1:4)=basis_band
     do i=1,size(density)
        bins=0;bins(1:4)=cell_weights(:,i)*density(i)*snrt_dust_contract_mass_per_h_g

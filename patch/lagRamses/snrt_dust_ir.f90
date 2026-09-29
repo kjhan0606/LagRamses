@@ -1,7 +1,7 @@
 ! Native secondary dust-energy operator. Equal-width reciprocal cell sets,
 ! vacuum exterior; no primary photons, species budgets, live AMR or gas writes.
 module snrt_dust_ir
-  use, intrinsic :: iso_fortran_env, only: real64
+  use, intrinsic :: iso_fortran_env, only: real64,output_unit
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use snrt_moving_scatter, only: snrt_moving_scatter_energy_cell,snrt_scatter_beta_limit
   implicit none
@@ -32,15 +32,22 @@ module snrt_dust_ir
      real(real64) :: balance_relative=0, local_relative=0
      integer :: iterations=0
   end type
-  public :: snrt_dust_ir_initialize, snrt_dust_ir_advance, snrt_dust_material_temperature
+  public :: snrt_dust_ir_initialize
+  public :: snrt_dust_ir_advance, snrt_dust_material_temperature
   public :: dust_moving_population_dispatch
+  public :: dust_material_dispatch,dust_population_dispatch,dust_bath_dispatch,dust_absorb_dispatch
+  public :: dust_transport_dispatch
   abstract interface
-     subroutine dust_bath_dispatch(heating,density,old_energy,log_t,basis_band,cell_weights,dt, &
-          gas_energy,gas_capacity,conductance,rate,temperature,next_energy,gas_transfer,background_transfer,ierr)
+     subroutine dust_bath_dispatch(heating,density,old_energy,capacity,log_t,power,band,material_u,use_u, &
+          dt,background,bath,tolerance,rate,temperature,next_energy,gas_energy,gas_capacity,conductance, &
+          gas_transfer,cell_material_u,cell_weights,basis_power,basis_band,background_transfer,ierr)
        import real64
-       real(real64),intent(in)::heating(:),density(:),old_energy(:),log_t(:),basis_band(:,:,:),cell_weights(:,:),dt
+       real(real64),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
+       real(real64),intent(in)::material_u(:),dt,background,bath,tolerance
+       logical,intent(in)::use_u
        real(real64),intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
        real(real64),intent(out)::rate(:,:),temperature(:),next_energy(:),gas_transfer(:),background_transfer(:)
+       real(real64),optional,intent(in)::cell_material_u(:,:),cell_weights(:,:),basis_power(:,:),basis_band(:,:,:)
        integer,intent(out)::ierr
      end subroutine
      subroutine dust_moving_population_dispatch(ir_heat,ir_captured,dt,old_population,next_population, &
@@ -334,7 +341,7 @@ contains
        ghost_energy,ghost_index,blocked_face,material_dispatch,transport_dispatch,absorb_dispatch, &
        gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,thin_reabsorption, &
        population,population_dispatch,cell_absorption,phase_density,phase_momentum,phase_absorption, &
-       phase_scattering,phase_work,moving_material_dispatch,population_loss,bath_dispatch)
+       phase_scattering,phase_work,moving_material_dispatch,population_loss,bath_dispatch,material_only)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -386,6 +393,10 @@ contains
     ! Explicit destructive endpoint: caller owns atom/charge/chemical-energy
     ! receipts. Default populations remain number-conserving; no births here.
     logical,optional,intent(in)::population_loss
+    ! Split local matter operator for compact radiation adapters. This mode
+    ! does not transport: no neighbor/ghost/transport callback may be supplied.
+    ! Absorption/emission, thermal/population and moving physics are unchanged.
+    logical,optional,intent(in)::material_only
     real(real64),allocatable::phase_heat(:,:,:),heat_guess(:,:,:),phase_events(:,:,:),event_guess(:,:,:)
     real(real64),allocatable::phase_rate(:,:,:),beta_guess(:,:,:),beta_next(:,:,:),momentum_next(:,:,:)
     real(real64),allocatable::work_next(:,:),scatter_work(:),scatter_e(:,:),scatter_tau(:,:)
@@ -403,20 +414,38 @@ contains
     real(real64), allocatable :: guess(:), absorbed(:), transmit(:,:), loss(:,:), response(:,:)
     real(real64), allocatable :: emitted_photons(:,:)
     real(real64), allocatable :: trial_dust_energy(:)
-    logical :: transient
+    logical :: transient,local_material
     real(real64) :: cfl, volume, factor, tau, source, old_total, new_total, scale, balance, sum_w
     real(real64) :: material_tolerance
     real(real64) :: escaped_total,interface_total
     integer :: invalid_tau
     integer :: ng, nd, nc, i, j, g, d, axis, face, outgoing, opposite, iteration, ghost
+    character(len=16) :: perf_env,rank_env,perf_all_env
+    integer :: perf_status,rank_status,perf_all_status,perf_rank,perf_start,perf_now,perf_rate
+    logical :: perf_diagnostic,perf_all,perf_leader,perf_sample
     integer, allocatable :: remote(:,:)
     type(dust_ir_diagnostics) :: trial
     trial=dust_ir_diagnostics()
+    perf_diagnostic=.false.; perf_leader=.false.; perf_rank=-1
+    call get_environment_variable('SNRT_PERF_DIAGNOSTIC',perf_env,status=perf_status)
+    if(perf_status==0)perf_diagnostic=trim(perf_env)/='' .and. trim(perf_env)/='0'
+    call get_environment_variable('SNRT_PERF_DIAGNOSTIC_ALL',perf_all_env,status=perf_all_status)
+    perf_all=.false.
+    if(perf_all_status==0)perf_all=trim(perf_all_env)/='' .and. trim(perf_all_env)/='0'
+    call get_environment_variable('SLURM_PROCID',rank_env,status=rank_status)
+    if(rank_status==0)read(rank_env,*,iostat=perf_status)perf_rank
+    perf_leader=perf_rank==0.or.perf_all
+    call system_clock(perf_start,perf_rate)
     ierr=dust_err_table
     if (.not.table%ready) return
     transient=present(dust_energy)
     moving=present(phase_density)
     ierr=dust_err_config
+    local_material=.false.
+    if(present(material_only))local_material=material_only
+    if(local_material)then
+       if(any(neighbor/=0).or.present(ghost_energy).or.present(ghost_index).or.present(transport_dispatch))return
+    endif
     if(present(bath_dispatch))then
        if(.not.transient.or.moving.or.present(population).or.present(material_dispatch))return
        if(.not.present(gas_energy).or..not.present(cell_weights))return
@@ -521,23 +550,32 @@ contains
     if (any(shape(direction)/=[3,nd]) .or. any(shape(neighbor)/=[6,nc])) return
     if (any(shape(energy)/=[ng,nd,nc]) .or. any(shape(photons)/=[ng,nc])) return
     if (size(temperature)/=nc .or. size(primary)/=nc) return
-    allocate(remote(6,nc)); remote=0
-    allocate(blocked(6,nc)); blocked=.false.
-    if(present(ghost_index))then
-       if(any(shape(ghost_index)/=[6,nc]))return
-       if(size(ghost_energy,1)/=ng.or.size(ghost_energy,2)/=nd)return
-       if(any(ghost_index<0).or.any(ghost_index>size(ghost_energy,3)))return
-       if(any(ghost_index>0.and.neighbor/=0))return
-       ierr=dust_err_state
-       if(any(.not.ieee_is_finite(ghost_energy)).or.any(ghost_energy<0))return
-       remote=ghost_index
-    end if
-    ierr=dust_err_shape
-    if(present(blocked_face))then
+    ! A material-only call is already supplied with the spatially transported
+    ! incoming field.  It cannot have neighbors, ghosts, or a transport
+    ! callback (validated above), so do not allocate or validate the spatial
+    ! face payload here.  This is an execution-path optimization only: the
+    ! absorption/emission fixed point below still runs in full.
+    if(.not.local_material)then
+       allocate(remote(6,nc)); remote=0
+       allocate(blocked(6,nc)); blocked=.false.
+       if(present(ghost_index))then
+          if(any(shape(ghost_index)/=[6,nc]))return
+          if(size(ghost_energy,1)/=ng.or.size(ghost_energy,2)/=nd)return
+          if(any(ghost_index<0).or.any(ghost_index>size(ghost_energy,3)))return
+          if(any(ghost_index>0.and.neighbor/=0))return
+          ierr=dust_err_state
+          if(any(.not.ieee_is_finite(ghost_energy)).or.any(ghost_energy<0))return
+          remote=ghost_index
+       end if
+       ierr=dust_err_shape
+       if(present(blocked_face))then
+          if(any(shape(blocked_face)/=[6,nc]))return
+          blocked=blocked_face
+          if(any(blocked.and.(neighbor/=0.or.remote/=0)))return
+       end if
+    else if(present(blocked_face))then
        if(any(shape(blocked_face)/=[6,nc]))return
-       blocked=blocked_face
-       if(any(blocked.and.(neighbor/=0.or.remote/=0)))return
-    end if
+    endif
     if(transient)then
        if(size(dust_energy)/=nc.or.size(heat_capacity)/=nc)return
        ierr=dust_err_state
@@ -573,7 +611,8 @@ contains
     sum_w=sum(weight)
     if (any(weight<=0) .or. abs(sum_w-1)>1d-12) return
     if (any(abs(sqrt(sum(direction**2,dim=1))-1)>1d-6)) return
-    cfl=c_hat*dt/dx*maxval(sum(abs(direction),dim=1))
+    cfl=0
+    if(.not.local_material)cfl=c_hat*dt/dx*maxval(sum(abs(direction),dim=1))
     ierr=dust_err_cfl
     if (.not.ieee_is_finite(cfl) .or. cfl>1+1d-12) return
     ierr=dust_err_state
@@ -598,7 +637,7 @@ contains
        allocate(trial_population(size(population,1),nc),spectral_guess(ng,nc),spectral_absorbed(ng,nc))
        spectral_guess=0
     endif
-    if(transient.and.present(material_dispatch))then
+    if(transient.and.(present(material_dispatch).or.present(bath_dispatch)))then
        allocate(dispatch_u(size(table%log_t)));dispatch_u=0
        if(allocated(table%material_u))dispatch_u=table%material_u
     endif
@@ -618,6 +657,34 @@ contains
     ierr=dust_err_state
     old_total=0
     escaped_total=trial%escaped_erg;interface_total=trial%interface_erg;invalid_tau=0
+    if(local_material)then
+       ! No spatial flux is possible in this branch: transport is the input
+       ! field itself.  Compute only the per-cell optical response needed by
+       ! the material fixed point, rather than replaying the six-face stencil.
+!$omp parallel do private(d,g,tau) reduction(+:old_total) reduction(max:invalid_tau) schedule(static)
+       do i=1,nc
+          do d=1,nd
+             old_total=old_total+sum(energy(:,d,i))*weight(d)*volume
+          enddo
+          do g=1,ng
+             tau=c_hat*dt*table%sigma(g)*density(i)
+             if(allocated(cell_sigma))tau=c_hat*dt*cell_sigma(g,i)*density(i)
+             if(.not.ieee_is_finite(tau))then
+                invalid_tau=1
+                cycle
+             endif
+             transmit(g,i)=exp(-tau)
+             if(tau<1d-4)then
+                loss(g,i)=tau*(1-tau/2+tau*tau/6-tau**3/24)
+                response(g,i)=1-tau/2+tau*tau/6
+             else
+                loss(g,i)=1-transmit(g,i)
+                response(g,i)=loss(g,i)/max(tau,tiny(tau))
+             endif
+          enddo
+       enddo
+!$omp end parallel do
+    else
 !$omp parallel do private(d,axis,face,outgoing,j,factor,ghost,g,tau) &
 !$omp reduction(+:old_total,escaped_total,interface_total) reduction(max:invalid_tau) schedule(static)
     do i=1,nc
@@ -669,6 +736,7 @@ contains
        end do
     end do
 !$omp end parallel do
+    endif
     if(invalid_tau/=0)return
     trial%escaped_erg=escaped_total;trial%interface_erg=interface_total
     trial%primary_erg=sum(primary)*dt*volume
@@ -710,11 +778,22 @@ contains
        endif
     endif
     do iteration=0,max_iterations
+       perf_sample=perf_diagnostic.and.perf_leader.and.(iteration==0.or.mod(iteration,8)==0)
+       if(perf_sample)then
+          call system_clock(perf_now)
+          write(output_unit,'(A,I0,A,I0,A,I0,A,I0,A,I0,A,F12.3)') &
+               'SNRT PERF IR rank=',perf_rank,' phase=iteration_begin iter=',iteration,' nc=',nc,' ng=',ng,' nd=',nd, &
+               ' elapsed_s=',real(perf_now-perf_start,real64)/real(max(perf_rate,1),real64)
+          flush(output_unit)
+       endif
        if(transient)then
           if(present(bath_dispatch))then
-             call bath_dispatch(primary+guess/dt,density,dust_energy,table%log_t,table%optical_band, &
-                  cell_weights,dt,gas_energy,gas_capacity,conductance,rate,next_t,trial_dust_energy, &
-                  exchange,bath_exchange,ierr)
+             call bath_dispatch(primary+guess/dt,density,dust_energy,heat_capacity,table%log_t,table%power, &
+                  table%band,dispatch_u,allocated(table%material_u),dt,table%background, &
+                  table%background_temperature,material_tolerance,rate,next_t,trial_dust_energy,gas_energy, &
+                  gas_capacity,conductance, &
+                  exchange,cell_material_u,cell_weights,table%optical_power,table%optical_band, &
+                  bath_exchange,ierr)
              if(ierr/=dust_ok)return
              ierr=dust_err_state
              if(any(.not.ieee_is_finite(bath_exchange)).or.any(bath_exchange<0))return
@@ -722,6 +801,12 @@ contains
              if(any(.not.ieee_is_finite(trial_dust_energy)).or.any(trial_dust_energy<0))return
              if(any(.not.ieee_is_finite(next_t)).or.any(next_t<0))return
              ierr=dust_ok
+             if(perf_sample)then
+                call system_clock(perf_now)
+                write(output_unit,'(A,I0,A,I0,A,F12.3)')'SNRT PERF IR rank=',perf_rank,' phase=material_done iter=',iteration, &
+                     ' elapsed_s=',real(perf_now-perf_start,real64)/real(max(perf_rate,1),real64)
+                flush(output_unit)
+             endif
           else if(present(population_dispatch).or.present(moving_material_dispatch))then
              if(moving)then
                 call moving_material_dispatch(heat_guess,event_guess,dt,population,trial_population, &
@@ -816,6 +901,12 @@ contains
        if(present(absorb_dispatch))then
           call absorb_dispatch(transported,transmit,loss,response,rate,weight,dt,sum_w,candidate,absorbed,ierr)
           if(ierr/=dust_ok)return
+          if(perf_sample)then
+             call system_clock(perf_now)
+             write(output_unit,'(A,I0,A,I0,A,F12.3)')'SNRT PERF IR rank=',perf_rank,' phase=absorb_done iter=',iteration, &
+                  ' elapsed_s=',real(perf_now-perf_start,real64)/real(max(perf_rate,1),real64)
+             flush(output_unit)
+          endif
        endif
 !$omp parallel do private(d,g,source) reduction(+:new_total) schedule(static)
        do i=1,nc
@@ -852,6 +943,13 @@ contains
        trial%balance_relative=abs(balance)/scale
        trial%local_relative=maxval(abs(absorbed-guess)/max(primary*dt+absorbed,tiny(scale)))
        if(moving)trial%local_relative=moving_residual
+       if(perf_sample)then
+          call system_clock(perf_now)
+          write(output_unit,'(A,I0,A,I0,A,ES12.4,A,ES12.4,A,F12.3)')'SNRT PERF IR rank=',perf_rank,' phase=residual iter=',iteration, &
+               ' balance=',trial%balance_relative,' local=',trial%local_relative, &
+               ' elapsed_s=',real(perf_now-perf_start,real64)/real(max(perf_rate,1),real64)
+          flush(output_unit)
+       endif
        if(present(population).and..not.moving)then
           ! Equal total heating does not imply equal PAH excitation: require
           ! spectral fixed-point convergence, not just cancellation in sum(g).

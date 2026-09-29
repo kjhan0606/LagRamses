@@ -35,6 +35,7 @@ struct Photo {
   std::vector<Term> terms;
   std::vector<MolecularTerm> molecular;
   std::vector<EnergyIndex> samples;
+  std::vector<int> active_energy;
   std::vector<std::array<double,5>> fractions;
   std::array<double,14> xi;
   std::array<double,ne> energy;
@@ -56,6 +57,7 @@ struct Solver {
 // Samples retain six raw channels; averaging already-normalized fractions
 // at the xi endpoints would introduce a different interpolation law.
 void partition(Photo &p,const double *state){
+  if(p.samples.empty())return;
   const double ion=std::max(0.,std::min(1.,state[2]));
   const double xi=std::max(p.xi[0],std::min(p.xi[13],ion));
   int ix=0;while(ix<12 && xi>p.xi[ix+1])++ix;
@@ -65,7 +67,10 @@ void partition(Photo &p,const double *state){
     std::min(1.,std::max(0.,state[4])/(he*(1-xr))),
     std::min(1.,std::max(0.,state[5])/(he*xr))};
   double by_energy[ne][6];
-  for(int e=0;e<ne;++e)for(int j=0;j<6;++j)
+  // The FS grid is dense, but only the endpoints bracketed by this cell's
+  // actual secondary-ionization samples enter the RHS. Keep the original
+  // interpolation and normalization order for every sampled endpoint.
+  for(int e:p.active_energy)for(int j=0;j<6;++j)
     by_energy[e][j]=(1-wx)*p.grid[e][ix*6+j]+wx*p.grid[e][(ix+1)*6+j];
   for(size_t k=0;k<p.samples.size();++k){
     const auto &s=p.samples[k];auto &f=p.fractions[k];double v[6],w[3];
@@ -167,10 +172,13 @@ int prec_setup(realtype,N_Vector y,N_Vector,booleantype,booleantype *current,
     const int nn=p.node.size(),size=ns+nn+nledger+(p.phases?nphase_energy+nphase_moment:0);
     const double *v=N_VGetArrayPointer(y);
     p.inverse_diagonal.assign(size,1.);
+    // Many reactions share a spectral node. Compute its trial attenuation
+    // once, as in the RHS, instead of repeating exp() for every reaction.
+    for(int k=0;k<nn;++k)p.survival[k]=std::exp(-std::max(0.,v[ns+k]));
     for(const auto &t:p.terms)
-      p.inverse_diagonal[t.from]+=gamma*p.cdt*t.sigma*std::exp(-std::max(0.,v[ns+t.node]))*p.initial[t.node];
+      p.inverse_diagonal[t.from]+=gamma*p.cdt*t.sigma*p.survival[t.node]*p.initial[t.node];
     for(const auto &t:p.molecular)
-      p.inverse_diagonal[t.from]+=gamma*p.cdt*t.sigma*std::exp(-std::max(0.,v[ns+t.node]))*p.initial[t.node]*t.yield;
+      p.inverse_diagonal[t.from]+=gamma*p.cdt*t.sigma*p.survival[t.node]*p.initial[t.node]*t.yield;
     for(double &d:p.inverse_diagonal){
       if(!std::isfinite(d) || d<=0)return 1;
       d=1./d;
@@ -319,6 +327,9 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
       }
     }
     if(p.node.empty()){identity();return 0;}
+    std::array<bool,ne> used_energy{};
+    for(const auto &s:p.samples){used_energy[s.index]=true;used_energy[s.index+1]=true;}
+    for(int e=0;e<ne;++e)if(used_energy[e])p.active_energy.push_back(e);
     p.fractions.resize(p.samples.size());
     const int nn=p.node.size(),li=ns+nn,size=li+nledger+(phases?nphase_energy+nphase_moment:0);
     p.survival.resize(nn);

@@ -341,7 +341,10 @@ contains
     real(dust_dp),optional,intent(in) :: phase_density(:,:),electron_capacity
     real(dust_dp),optional,intent(inout) :: phase_momentum(:,:,:),phase_work(:,:),gas_electrons(:)
     real(dust_dp),optional,intent(inout) :: gas_atomic_h(:),gas_molecular_h2(:),gas_atomic_c(:),gas_carbon_ion(:)
-    integer :: nc,ng,nm,nq,i,g,status
+    integer :: nc,ng,nm,nq,i,g,status,first_group,last_group,column,ncolumn
+    integer,parameter :: group_batch=8
+    logical :: empty_tile
+    real(dust_dp),allocatable :: stage_direction(:,:),stage_weight(:)
     integer,allocatable :: neighbors(:,:)
     real(dust_dp),allocatable :: angular(:,:,:),candidate(:,:,:),receipt(:,:,:)
     real(dust_dp),allocatable :: next_angular(:,:,:),next_material(:),next_temperature(:)
@@ -377,27 +380,58 @@ contains
        if(size(gas_transfer)/=nc)return
     endif
 
+    ! No radiation, grains, or injected energy: the local material operator
+    ! is identically zero. Use one angular sample for its existing admission
+    ! checks instead of materializing 384 identical zeros in every IR band.
+    ! Gas/CHIMES evolution is performed by the caller before this adapter.
+    ! Nonzero states and the additional material populations retain the
+    ! complete quadrature and operator.
+    empty_tile=all(energy==0d0).and.all(density==0d0).and.all(primary_energy==0d0).and.all(old_energy==0d0) &
+         .and..not.present(phase_density).and..not.present(sublimation_bins).and..not.present(pah_population) &
+         .and..not.dust_pah_enabled()
+    if(empty_tile)then
+       nq=1
+       allocate(stage_direction(3,1),stage_weight(1))
+       stage_direction(:,1)=[1d0,0d0,0d0];stage_weight=1d0
+    else
+       stage_direction=mn_live_basis%direction;stage_weight=mn_live_basis%weight
+    endif
     allocate(angular(ng,nq,nc),candidate(nm,ng,nc),receipt(nm,ng,nc),check(nq),neighbors(6,nc))
-    allocate(closure_input(nm,nc),closure_projected(nm,nc),closure_cache(nm+1,nc), &
-         closure_warm(nm-1,nc),closure_angular(nq,nc))
     neighbors=0
-    do g=1,ng
-       do i=1,nc
-          closure_input(:,i)=energy(:,g,i)
+    if(empty_tile)then
+       angular=0d0;candidate=0d0;receipt=0d0
+    else
+    ! A single 256-cell group provided only one dispatch work unit, leaving
+    ! the other OMP workers idle. Batch up to eight independent groups into
+    ! the existing 256-column stream/CPU scheduler with bounded scratch.
+    ncolumn=nc*min(group_batch,ng)
+    allocate(closure_input(nm,ncolumn),closure_projected(nm,ncolumn),closure_cache(nm+1,ncolumn), &
+         closure_warm(nm-1,ncolumn),closure_angular(nq,ncolumn))
+    do first_group=1,ng,group_batch
+       last_group=min(ng,first_group+group_batch-1);ncolumn=nc*(last_group-first_group+1)
+       do g=first_group,last_group
+          do i=1,nc
+             column=(g-first_group)*nc+i
+             closure_input(:,column)=energy(:,g,i)
+          enddo
        enddo
        closure_warm=0d0
-       call mn_dispatch_closure(mn_live_basis,closure_input,closure_projected,closure_cache,closure_warm,status, &
-            angular_out=closure_angular)
+       call mn_dispatch_closure(mn_live_basis,closure_input(:,1:ncolumn),closure_projected(:,1:ncolumn), &
+            closure_cache(:,1:ncolumn),closure_warm(:,1:ncolumn),status,angular_out=closure_angular(:,1:ncolumn))
        if(status/=mn_ok)then
           ierr=100+status;return
        endif
-       do i=1,nc
-          candidate(:,g,i)=closure_projected(:,i)
-          angular(g,:,i)=closure_angular(:,i)
+       do g=first_group,last_group
+          do i=1,nc
+             column=(g-first_group)*nc+i
+             candidate(:,g,i)=closure_projected(:,column)
+             angular(g,:,i)=closure_angular(:,column)
+          enddo
        enddo
     enddo
     ! Numerical reclosure is a separate density receipt, not material heat.
     receipt=candidate-energy
+    endif
 
     ! These local copies are the tile's transaction write set.  In particular,
     ! do not pass caller-owned inout arrays into the stage itself.
@@ -434,7 +468,7 @@ contains
     endif
     allocate(next_material(nc),next_temperature(nc))
 
-    call snrt_dust_live_stage(ilevel,cells,slots,neighbors,mn_live_basis%direction,mn_live_basis%weight, &
+    call snrt_dust_live_stage(ilevel,cells,slots,neighbors,stage_direction,stage_weight, &
          dx,dt,chat,density,primary_energy,old_energy,capacity,next_angular,next_material,next_temperature, &
          trial,ierr,coarse,gas_energy=gas_energy,gas_capacity=gas_capacity,n_hydrogen=n_hydrogen, &
          gas_transfer=next_transfer,cell_material_u=cell_material_u,cell_collision_area=cell_collision_area, &
@@ -444,22 +478,36 @@ contains
          phase_work=next_work,gas_electrons=next_electrons,electron_capacity=electron_capacity,gas_atomic_h=next_h, &
          gas_molecular_h2=next_h2,gas_atomic_c=next_c,gas_carbon_ion=next_cp,incoming_radiation=angular)
     if(ierr/=dust_ok)return
-    do g=1,ng
-       do i=1,nc
-          closure_angular(:,i)=next_angular(g,:,i)
+    if(empty_tile)then
+       ! Never discard an unexpected nonzero source from the material stage.
+       if(any(next_angular/=0d0).or.any(next_material/=0d0))then
+          ierr=dust_err_state;return
+       endif
+    else
+    do first_group=1,ng,group_batch
+       last_group=min(ng,first_group+group_batch-1);ncolumn=nc*(last_group-first_group+1)
+       do g=first_group,last_group
+          do i=1,nc
+             column=(g-first_group)*nc+i
+             closure_angular(:,column)=next_angular(g,:,i)
+          enddo
        enddo
        ! The material stage publishes a validated nonnegative angular field.
        ! Its projection is therefore already inside the realizable cone; a
        ! second Newton reconstruction here only repeats the expensive closure
        ! solve and cannot add physical validation.
-       call mn_dispatch_project(mn_live_basis,closure_angular,closure_projected,status)
+       call mn_dispatch_project(mn_live_basis,closure_angular(:,1:ncolumn),closure_projected(:,1:ncolumn),status)
        if(status/=mn_ok)then
           ierr=100+status;return
        endif
-       do i=1,nc
-          candidate(:,g,i)=closure_projected(:,i)
+       do g=first_group,last_group
+          do i=1,nc
+             column=(g-first_group)*nc+i
+             candidate(:,g,i)=closure_projected(:,column)
+          enddo
        enddo
     enddo
+    endif
 
     energy=candidate;material=next_material;temperature=next_temperature;projection=receipt;diagnostics=trial
     if(present(gas_transfer))gas_transfer=next_transfer
@@ -533,8 +581,11 @@ contains
     integer,pointer :: remote_arg(:,:)
     procedure(dust_transport_dispatch),pointer :: transport_arg
     real(dust_dp), allocatable :: halo_field(:,:)
-    integer,parameter :: halo_tile=16
-    integer :: first_component,ncomponent,component,column
+    ! Retain the established 16-component tile for large AMR fields, but
+    ! amortize MPI setup on small fields without adding more than 8 MiB to
+    ! the existing halo scratch allocation.
+    integer(kind=8),parameter :: halo_extra_bytes=8_8*1024_8*1024_8
+    integer :: halo_tile,first_component,ncomponent,component,column
     integer, allocatable,target :: remote(:,:)
     integer, allocatable :: ghost_cells(:),ghost_kind(:),coarse_cells(:)
     logical :: local_material
@@ -551,6 +602,25 @@ contains
     if(ierr==dust_ok)call validate_stage()
     call stage_error(ierr)
     if(ierr/=dust_ok)return
+    if(local_material.and..not.present(phase_density).and..not.present(sublimation_bins).and. &
+         .not.dust_pah_enabled())then
+       if(all(density==0d0).and.all(primary_energy==0d0).and.all(old_energy==0d0))then
+          if(all(incoming_radiation==0d0))then
+             ! Keep all ordinary state/contract validation above. These
+             ! angular checks normally live in the IR integrator below.
+             ierr=dust_err_config
+             if(any(.not.ieee_is_finite(directions)).or.any(.not.ieee_is_finite(weights)))return
+             if(any(weights<=0d0).or.abs(sum(weights)-1d0)>1d-12)return
+             if(any(abs(sqrt(sum(directions**2,dim=1))-1d0)>1d-6))return
+             trial=incoming_radiation;material=0d0
+             temperature=snrt_dust_contract_ir_background_k
+             if(cosmo)temperature=2.727d0/aexp
+             diagnostics=dust_ir_diagnostics()
+             if(present(gas_transfer))gas_transfer=0d0
+             ierr=dust_ok;return
+          endif
+       endif
+    endif
     if(present(cell_weights))scatter_sigma=matmul(scattering_basis,cell_weights)
     if(present(phase_density))then
        nbulk=size(absorption_basis,2)
@@ -684,6 +754,7 @@ contains
     else
     allocate(field(nfield))
     ghost_arg=>ghosts;remote_arg=>remote
+    halo_tile=max(16,min(ng*nd,int(halo_extra_bytes/(8_8*max(1_8,int(nfield,8))))))
     if(ncpu>1)allocate(halo_field(nfield,halo_tile))
     k=0
     do i=1,size(slots)
@@ -913,30 +984,41 @@ contains
       if(.not.local_material)call collective_error(status)
     end subroutine
 
-    subroutine cosmological_material(heating,density,old_energy,log_t,basis_band,cell_weights,dt, &
-         gas_energy,gas_capacity,conductance,rate,temperature,next_energy,gas_transfer,background_transfer,ierr)
-      ! Optically thin analytic CMB: only positive excess enters transport.
-      ! Negative net emission is supplied by the explicitly recorded bath.
-      real(dust_dp),intent(in)::heating(:),density(:),old_energy(:),log_t(:),basis_band(:,:,:),cell_weights(:,:),dt
+    subroutine cosmological_material(heating,density,old_energy,capacity,log_t,power,band,material_u,use_u, &
+         dt,background,bath,tolerance,rate,temperature,next_energy,gas_energy,gas_capacity,conductance, &
+         gas_transfer,cell_material_u,cell_weights,basis_power,basis_band,background_transfer,ierr)
+      ! The six-bin receiver accepts four C/silicate D03 optical bases with
+      ! zero metallic-Fe mass. Its C/silicate enthalpy is the same DL01
+      ! composition law as the local material curve, including T<5 K. The
+      ! signed net Planck solve permits Tgrain<Tcmb under cold-gas exchange;
+      ! negative spectral power is an explicit external CMB receipt.
+      real(dust_dp),intent(in)::heating(:),density(:),old_energy(:),capacity(:),log_t(:),power(:),band(:,:)
+      real(dust_dp),intent(in)::material_u(:),dt,background,bath,tolerance
+      logical,intent(in)::use_u
       real(dust_dp),intent(in)::gas_energy(:),gas_capacity(:),conductance(:)
       real(dust_dp),intent(out)::rate(:,:),temperature(:),next_energy(:),gas_transfer(:),background_transfer(:)
+      real(dust_dp),optional,intent(in)::cell_material_u(:,:),cell_weights(:,:),basis_power(:,:),basis_band(:,:,:)
       integer,intent(out)::ierr
-      real(dust_dp)::bins(6),phase(4),bath
+      real(dust_dp)::bins(6),phase(4),physical_bath
       real(dust_dp),allocatable::bands(:,:,:)
       integer::cell,status,bad
       ierr=dust_err_config
       if(.not.ieee_is_finite(aexp).or.aexp<=0)return
+      if(.not.use_u.or..not.present(cell_material_u).or..not.present(cell_weights))return
+      if(.not.present(basis_power).or..not.present(basis_band))return
       if(size(cell_weights,1)/=4.or.size(basis_band,3)/=4)return
       if(present(phase_density).or.dust_iron_enabled().or.dust_pah_enabled())return
-      bath=2.727d0/aexp
+      if(size(cell_material_u,1)/=size(log_t).or.size(cell_material_u,2)/=size(density))return
+      physical_bath=2.727d0/aexp
+      if(.not.ieee_is_finite(physical_bath).or.physical_bath<=0)return
       allocate(bands(size(rate,1),size(log_t),6));bands=0;bands(:,:,1:4)=basis_band
-      rate=0;temperature=bath;next_energy=old_energy;gas_transfer=0;background_transfer=0
+      rate=0;temperature=physical_bath;next_energy=old_energy;gas_transfer=0;background_transfer=0
       bad=0
 !$omp parallel do private(cell,bins,phase,status) reduction(max:bad) schedule(static)
       do cell=1,size(density)
          bins=0
          bins(1:4)=cell_weights(:,cell)*density(cell)*snrt_dust_contract_mass_per_h_g
-         call iron_radiative_cell(exp(log_t),bath,bins,old_energy(cell),heating(cell),dt, &
+         call iron_radiative_cell(exp(log_t),physical_bath,bins,old_energy(cell),heating(cell),dt, &
               snrt_dust_contract_mass_per_h_g,bands,gas_energy(cell),gas_capacity(cell),conductance(cell), &
               next_energy(cell),temperature(cell),phase,rate(:,cell),gas_transfer(cell),status, &
               photon_ev=snrt_dust_contract_ir_energy_ev(1:size(rate,1)),cmb_exchange=background_transfer(cell))

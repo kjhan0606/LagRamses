@@ -32,13 +32,21 @@ module snrt_chimes_runtime
   public::chimes_live_fe_uv_stage
   real(dp),parameter::mass_number(11)=[1d0,4d0,12d0,14d0,16d0,20d0,24d0,28d0,32d0,40d0,56d0]
   logical,save::ready=.false.
+  logical,save::capture_one_enabled=.false.
+  integer,save::capture_one_done=0
   type(c_ptr),save::band_handle=c_null_ptr
   type(c_ptr),save::molecular_handle=c_null_ptr
 contains
-  real(dp) function cell_solid_charge(cell) result(q)
+  real(dp) function cell_solid_charge(cell,staged_row) result(q)
     integer,intent(in)::cell
+    real(dp),optional,intent(in)::staged_row(:)
     q=0
-    if(dust_pah_charged())q=dust_pah_solid_charge(uold(cell,idust_pah:idust_pah+dust_pah_nstate()-1),atomic_mh)
+    if(.not.dust_pah_charged())return
+    if(present(staged_row))then
+       q=dust_pah_solid_charge(staged_row(idust_pah:idust_pah+dust_pah_nstate()-1),atomic_mh)
+    else
+       q=dust_pah_solid_charge(uold(cell,idust_pah:idust_pah+dust_pah_nstate()-1),atomic_mh)
+    endif
   end function
   subroutine chimes_consistent_carriers(values)
     ! Consistent multi-species advection: one common normalization for all
@@ -89,6 +97,7 @@ contains
   subroutine chimes_live_initialize(ierr)
     integer,intent(out)::ierr
     character(len=500)::main,dir,paths(9)
+    character(len=16)::capture_env
     character(len=2)::number
     integer::i,n,status,nreaction,nshell
     character(len=64)::bank_hash
@@ -165,7 +174,12 @@ contains
     if(ierr==0.and.snrt_chimes_transition_enabled())then
        if(chimes_transition_supported()/=1)ierr=1
     endif
-    if(ierr==0)ready=.true.
+    if(ierr==0)then
+       capture_env=''
+       call get_environment_variable('SNRT_CHIMES_CAPTURE_ONE',capture_env,status=status)
+       capture_one_enabled=status==0.and.trim(capture_env)/=''.and.trim(capture_env)/='0'
+       ready=.true.
+    endif
   end subroutine
 
   subroutine chimes_live_identity(values,ierr)
@@ -186,7 +200,7 @@ contains
     if(snrt_chimes_transition_enabled())values(321)=7d0
   end subroutine
 
-  subroutine chimes_cell_state(cell,grains,state,elements,ierr,previous_state,metallic_iron,pah_hc)
+  subroutine chimes_cell_state(cell,grains,state,elements,ierr,previous_state,metallic_iron,pah_hc,staged_row)
     integer,intent(in)::cell
     real(dp),intent(in)::grains(2)
     real(dp),intent(out)::state(chimes_ns),elements(11)
@@ -195,37 +209,43 @@ contains
     real(dp),optional,intent(in)::previous_state(chimes_ns)
     real(dp),optional,intent(in)::metallic_iron
     real(dp),optional,intent(in)::pah_hc(2)
+    real(dp),optional,intent(in)::staged_row(:)
+    real(dp)::row(nvar_all)
     state=0;elements=0;ierr=1
     if(.not.ready.or.ichimes<1.or.ichimes+chimes_ns-1>nvar)return
+    row=uold(cell,1:nvar_all)
+    if(present(staged_row))then
+       if(size(staged_row)/=nvar.and.size(staged_row)/=nvar_all)return
+       row(1:size(staged_row))=staged_row
+    endif
+    if(any(.not.ieee_is_finite(row)).or.row(1)<=0)return
     solid_fe=0
     if(dust_iron_enabled())then
-       if(any(.not.ieee_is_finite(uold(cell,idust_iron:idust_iron+1))))return
-       if(any(uold(cell,idust_iron:idust_iron+1)<0))return
-       solid_fe=sum(uold(cell,idust_iron:idust_iron+1))
+       if(any(row(idust_iron:idust_iron+1)<0))return
+       solid_fe=sum(row(idust_iron:idust_iron+1))
     endif
     if(present(metallic_iron))solid_fe=metallic_iron
     solid_pah=0
     if(dust_pah_enabled())then
-       if(any(.not.ieee_is_finite(uold(cell,idust_pah:idust_pah+dust_pah_nstate()-1))))return
-       if(any(uold(cell,idust_pah:idust_pah+dust_pah_nstate()-1)<0))return
-       solid_pah=dust_pah_inventory(uold(cell,idust_pah:idust_pah+dust_pah_nstate()-1))
+       if(any(row(idust_pah:idust_pah+dust_pah_nstate()-1)<0))return
+       solid_pah=dust_pah_inventory(row(idust_pah:idust_pah+dust_pah_nstate()-1))
     endif
     if(present(pah_hc))solid_pah=pah_hc
-    call dust_gas_elements(uold(cell,ichem:ichem+10),grains,gas,ierr,solid_fe,solid_pah)
+    call dust_gas_elements(row(ichem:ichem+10),grains,gas,ierr,solid_fe,solid_pah)
     if(ierr/=0)return
     elements=gas/mass_number
     if(elements(1)<=0)then
        ierr=1;return
     endif
-    if(all(uold(cell,ichimes:ichimes+chimes_ns-1)==0d0).and.nrestart>0)then
+    if(all(row(ichimes:ichimes+chimes_ns-1)==0d0).and.nrestart>0)then
        ierr=1;return
     endif
     ! Feedback adds neutral atoms; dust destruction returns neutral atoms.
     ! For an evolved cell, preserve the transported ion/molecular state.
     if(present(previous_state))then
-       ierr=chimes_reconcile_charged(elements,previous_state,cell_solid_charge(cell),state)
+       ierr=chimes_reconcile_charged(elements,previous_state,cell_solid_charge(cell,row),state)
     else
-       ierr=chimes_reconcile_charged(elements,uold(cell,ichimes:ichimes+chimes_ns-1),cell_solid_charge(cell),state)
+       ierr=chimes_reconcile_charged(elements,row(ichimes:ichimes+chimes_ns-1),cell_solid_charge(cell,row),state)
     endif
   end subroutine
 
@@ -272,19 +292,29 @@ contains
              cell=ICELL_OF(active(ilevel)%igrid(i),ind)
              if(son(cell)/=0)cycle
              k=k+1;cells(k)=cell
-             call chimes_cell_state(cell,uold(cell,idust_species:idust_species+1),stage(:,k),elements,status)
-             if(status/=0)bad=1
           enddo
        enddo
+       ! Each reconciliation reads an independent cell and writes only its
+       ! private stage column. Keep publication and MPI admission collective.
+!$omp parallel do schedule(static) private(cell,status,elements) reduction(max:bad)
+       do i=1,k
+          cell=cells(i)
+          call chimes_cell_state(cell,uold(cell,idust_species:idust_species+1),stage(:,i),elements,status)
+          if(status/=0)bad=1
+       enddo
+!$omp end parallel do
     endif
     call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
     if(all_bad/=0.or.info/=0)then
        if(myid==1)write(*,*)'ERROR: CHIMES element/transport/source reconciliation failed'
        call MPI_ABORT(MPI_COMM_WORLD,31,info)
     endif
+    ! cells(:k) contains each leaf exactly once, so publication is disjoint.
+!$omp parallel do schedule(static)
     do i=1,k
        uold(cells(i),ichimes:ichimes+chimes_ns-1)=stage(:,i)
     enddo
+!$omp end parallel do
     deallocate(cells,stage)
     if(present(synchronize))then
        if(synchronize)then
@@ -338,22 +368,29 @@ contains
   end subroutine
 
   subroutine chimes_live_band_stage(cell,sd,sv,dt,length,td,chat,nd,number,radiation_energy, &
-       state,energy,next_number,next_energy,ledger,ierr)
+       state,energy,next_number,next_energy,ledger,ierr,staged_row)
     integer,intent(in)::cell,nd
     real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,9),radiation_energy(nd,9)
     real(dp),intent(out)::state(chimes_ns),energy,next_number(nd,9),next_energy(nd,9),ledger(9)
     integer,intent(out)::ierr
+    real(dp),optional,intent(in)::staged_row(:)
+    real(dp)::row(nvar_all)
     real(dp)::old(chimes_ns),elements(11),abundance(chimes_ns),new(chimes_ns),controls(9)
     real(dp)::nonthermal,nh,t,cv
-    state=0;energy=uold(cell,ndim+2);next_number=number;next_energy=radiation_energy;ledger=0;ierr=1
+    row=uold(cell,1:nvar_all)
+    if(present(staged_row))then
+       if(size(staged_row)/=nvar.and.size(staged_row)/=nvar_all)return
+       row(1:size(staged_row))=staged_row
+    endif
+    state=0;energy=row(ndim+2);next_number=number;next_energy=radiation_energy;ledger=0;ierr=1
     if(.not.ready.or..not.snrt_chimes_band_enabled())return
-    if(any(uold(cell,idust:idust+10)/=0))return
-    call chimes_cell_state(cell,[0d0,0d0],old,elements,ierr)
+    if(any(row(idust:idust+10)/=0))return
+    call chimes_cell_state(cell,[0d0,0d0],old,elements,ierr,staged_row=row)
     if(ierr/=0)return
     state=old
-    nonthermal=.5d0*sum(uold(cell,2:ndim+1)**2)/uold(cell,1)+magnetic_energy(uold(cell,:))
+    nonthermal=.5d0*sum(row(2:ndim+1)**2)/row(1)+magnetic_energy(row)
 #if NENER>0
-    nonthermal=nonthermal+sum(uold(cell,inener:inener+NENER-1))
+    nonthermal=nonthermal+sum(row(inener:inener+NENER-1))
 #endif
     cv=chimes_live_capacity(old,sd)
     ierr=1
@@ -378,7 +415,7 @@ contains
     real(dp),intent(inout)::grain_number(9),grain_energy(9)
     integer,intent(out)::ierr
     real(dp),optional,intent(inout)::event_info(2)
-    real(dp),optional,intent(in)::staged_row(nvar),directions(3,nd)
+    real(dp),optional,intent(in)::staged_row(:),directions(3,nd)
     real(dp),optional,intent(inout)::phase_energy(9,4),phase_moment(3,4)
     ierr=1
     if(.not.snrt_chimes_cold_enabled())return
@@ -400,13 +437,13 @@ contains
     real(dp),intent(inout)::grain_number(9),grain_energy(9)
     integer,intent(out)::ierr
     real(dp),optional,intent(inout)::event_info(2)
-    real(dp),optional,intent(in)::staged_row(nvar),directions(3,nd)
+    real(dp),optional,intent(in)::staged_row(:),directions(3,nd)
     real(dp),optional,intent(inout)::phase_energy(9,4),phase_moment(3,4)
     real(dp)::alpha_phase(128,9,4),phase_e(9,4),phase_p(3,4)
     real(dp)::old(chimes_ns),elements(11),new(chimes_ns),controls(9),bins(4),grains(2),alpha(128,9)
-    real(dp)::pn(nd,9),pe(nd,9),budget(11),gn(9),ge(9),row(nvar),staged(chimes_ns)
+    real(dp)::pn(nd,9),pe(nd,9),budget(11),gn(9),ge(9),row(nvar_all),staged(chimes_ns)
     real(dp)::nh,cv,t,nonthermal,thermal,area,ratio,surface,proposed_energy,events(2)
-    integer::s,k,j
+    integer::s,k,j,capture_seen
     ierr=1
     if(.not.ready.or..not.allocated(uold))return
     if(cell<lbound(uold,1).or.cell>ubound(uold,1).or.nd<1.or.nd>720)return
@@ -415,24 +452,27 @@ contains
     if(.not.dust_two_size_enabled())return
     if(dust_iron_enabled().or.dust_pah_enabled())return
     if(dust_dynamics_enabled().and..not.snrt_chimes_transition_enabled())return
-    if(present(staged_row).neqv.dust_dynamics_enabled())return
+    if(dust_dynamics_enabled().and..not.present(staged_row))return
     if(present(directions).neqv.dust_dynamics_enabled())return
     if(present(phase_energy).neqv.dust_dynamics_enabled())return
     if(present(phase_moment).neqv.dust_dynamics_enabled())return
     if(idust<1.or.idust_bins<1.or.idust_bins+3>nvar.or.idust_species<1.or.idust_species+1>nvar)return
-    row=uold(cell,1:nvar)
-    if(present(staged_row))row=staged_row
+    row=uold(cell,1:nvar_all)
+    if(present(staged_row))then
+       if(size(staged_row)/=nvar.and.size(staged_row)/=nvar_all)return
+       row(1:size(staged_row))=staged_row
+    endif
     if(any(.not.ieee_is_finite(row)).or.row(1)<=0)return
     bins=row(idust_bins:idust_bins+3)
     if(any(bins<0))return
     grains=[sum(bins(1:2)),sum(bins(3:4))]
     if(any(abs(grains-row(idust_species:idust_species+1))>1d-8*max(grains,1d-30)))return
     if(abs(sum(grains)-row(idust))>1d-8*max(sum(grains),1d-30))return
-    call chimes_cell_state(cell,grains,old,elements,ierr)
+    call chimes_cell_state(cell,grains,old,elements,ierr,staged_row=row)
     if(ierr/=0)return
     ierr=1
     nonthermal=.5d0*sum(row(2:ndim+1)**2)/row(1)+magnetic_energy(row)
-    if(dust_dynamics_enabled())nonthermal=dust_phase_kinetic(row)+magnetic_energy(row)
+    if(dust_dynamics_enabled())nonthermal=dust_phase_kinetic(row(1:nvar))+magnetic_energy(row)
 #if NENER>0
     nonthermal=nonthermal+sum(row(inener:inener+NENER-1))
 #endif
@@ -454,6 +494,26 @@ contains
     area=area/nh;ratio=sum(grains)/(elements(1)*.01d0);surface=1
     if(ratio>0)surface=area/(1d-21*ratio)
     controls=[nh,t,td,dt,length,ratio,surface,0d0,chat]
+    ! One real receiver input, only when explicitly requested for a bounded
+    ! performance diagnosis. No simulation state or acceptance rule changes.
+    if(capture_one_enabled.and.myid==1)then
+       !$omp atomic read
+       capture_seen=capture_one_done
+       if(capture_seen==0)then
+          !$omp critical(snrt_chimes_capture_one)
+          if(capture_one_done==0)then
+             write(*,'(A,3(I0,1X),2(ES24.16E3,1X))') &
+                  'SNRT_CHIMES_CAPTURE_META ',myid,cell,nd,sum(number),sum(radiation_energy)
+             write(*,'(A,*(ES24.16E3,1X))')'SNRT_CHIMES_CAPTURE_CONTROLS ',controls
+             write(*,'(A,*(ES24.16E3,1X))')'SNRT_CHIMES_CAPTURE_ELEMENTS ',elements/elements(1)
+             write(*,'(A,*(ES24.16E3,1X))')'SNRT_CHIMES_CAPTURE_SPECIES ',old/elements(1)
+             flush(6)
+             !$omp atomic write
+             capture_one_done=1
+          endif
+          !$omp end critical(snrt_chimes_capture_one)
+       endif
+    endif
     if(dust_dynamics_enabled())then
     ierr=chimes_cell_band_cold_molecular(atomic_bank,molecular_bank,nd,controls,elements/elements(1), &
          old/elements(1),alpha,number,radiation_energy,t,new,pn,pe,budget,gn,ge, &
@@ -518,7 +578,7 @@ contains
     number=gn;energy=ge/ev_erg;momentum=p;work=w
   end subroutine chimes_live_grain_scatter
 
-  subroutine chimes_live_fe_uv_stage(cell,sd,sv,dt,td,chat,photons,state,energy,solid,ledger,ierr)
+  subroutine chimes_live_fe_uv_stage(cell,sd,sv,dt,td,chat,photons,state,energy,solid,ledger,ierr,staged_row)
     ! Operate on the ALREADY staged CHIMES state; never restore pre-chemistry
     ! abundances here. All arguments remain unchanged if any check fails.
     ! Here chat is cm/s, NOT the dimensionless light-speed fraction passed
@@ -527,20 +587,27 @@ contains
     real(dp),intent(in)::sd,sv,dt,td,chat
     real(dp),intent(inout)::photons(9),state(chimes_ns),energy,solid,ledger(8)
     integer,intent(out)::ierr
+    real(dp),optional,intent(in)::staged_row(:)
+    real(dp)::row(nvar_all)
     real(dp)::elements(11),after(11),q0,q1,nh,nonthermal,e,u,n(9),s(chimes_ns),receipt(8),bins(6)
     ierr=1
     if(.not.ready.or.min(sd,sv)<=0)return
+    row=uold(cell,1:nvar_all)
+    if(present(staged_row))then
+       if(size(staged_row)/=nvar.and.size(staged_row)/=nvar_all)return
+       row(1:size(staged_row))=staged_row
+    endif
     ierr=chimes_budget(state,elements,q0)
     if(ierr/=0)return
     ierr=1
     if(elements(1)<=0)return
     nh=elements(1)*sd/atomic_mh
-    nonthermal=.5d0*sum(uold(cell,2:ndim+1)**2)/uold(cell,1)+magnetic_energy(uold(cell,:))
+    nonthermal=.5d0*sum(row(2:ndim+1)**2)/row(1)+magnetic_energy(row)
 #if NENER>0
-    nonthermal=nonthermal+sum(uold(cell,inener:inener+NENER-1))
+    nonthermal=nonthermal+sum(row(inener:inener+NENER-1))
 #endif
     e=(energy-nonthermal)*sd*sv**2;u=solid;n=photons;s=state/elements(1);receipt=0
-    bins=[uold(cell,idust_bins:idust_bins+3),uold(cell,idust_iron:idust_iron+1)]*sd
+    bins=[row(idust_bins:idust_bins+3),row(idust_iron:idust_iron+1)]*sd
     call fe_uv_step(dt,chat,nh,td,bins,n,s,e,u,fe_secondary,receipt,ierr)
     if(ierr/=0)return
     s=s*elements(1)
@@ -565,33 +632,31 @@ contains
     real(dp),intent(in)::sd,sv,dt,length,td,area,chat,photons(9)
     real(dp),intent(out)::state(chimes_ns),energy,next_photons(9)
     integer,intent(out)::ierr
-    ! Optional hydro state AFTER staged mechanical/thermal updates. Read E,
-    ! component kinetic energy and CR/nonthermal carriers from this SAME row
-    ! so chemistry preserves prior radiation work. Chemical abundances and
-    ! grain inventories still come from cell; this is not a composition stage.
+    ! Optional complete material state. Composition, grain charge, E and
+    ! momenta must come from the SAME substep; never reset chemistry to uold.
     real(dp),optional,intent(in)::staged_row(:)
     real(dp)::old(chimes_ns),elements(11),controls(9),nh,cv,t,e,nonthermal,surface
     real(dp)::abundance(chimes_ns),next_abundance(chimes_ns),reactive_dust
-    real(dp)::row(nvar)
+    real(dp)::row(nvar_all)
     logical,save::failure_reported=.false.
-    row=uold(cell,1:nvar);energy=row(ndim+2);next_photons=photons;state=0;ierr=1
+    row=uold(cell,1:nvar_all);energy=row(ndim+2);next_photons=photons;state=0;ierr=1
     if(present(staged_row))then
-       if(size(staged_row)/=nvar)return
+       if(size(staged_row)/=nvar.and.size(staged_row)/=nvar_all)return
        if(any(.not.ieee_is_finite(staged_row)).or.staged_row(1)<=0)return
-       row=staged_row;energy=row(ndim+2)
+       row(1:size(staged_row))=staged_row;energy=row(ndim+2)
     endif
-    call chimes_cell_state(cell,uold(cell,idust_species:idust_species+1),old,elements,ierr)
+    call chimes_cell_state(cell,row(idust_species:idust_species+1),old,elements,ierr,staged_row=row)
     state=old
     if(ierr/=0)return
     if(dust_dynamics_enabled())then
-       nonthermal=dust_phase_kinetic(row)
+       nonthermal=dust_phase_kinetic(row(1:nvar))
     else
        nonthermal=.5d0*sum(row(2:ndim+1)**2)/row(1)
     endif
 #if NENER>0
     nonthermal=nonthermal+sum(row(inener:inener+NENER-1))
 #endif
-    nonthermal=nonthermal+magnetic_energy(uold(cell,:))
+    nonthermal=nonthermal+magnetic_energy(row)
     e=(energy-nonthermal)*sd*sv**2
     cv=chimes_live_capacity(old,sd)
     if(cv<=0.or.e<=0)then
@@ -606,13 +671,13 @@ contains
     ! is independent of this bookkeeping MW mass normalization. Applying
     ! the same area scaling to grain recombination is a comparison closure.
     surface=1d0
-    reactive_dust=uold(cell,idust)
-    if(dust_iron_enabled().or.dust_pah_charged())reactive_dust=sum(uold(cell,idust_species:idust_species+1))
+    reactive_dust=row(idust)
+    if(dust_iron_enabled().or.dust_pah_charged())reactive_dust=sum(row(idust_species:idust_species+1))
     ! The Fe comparison does NOT assign C/silicate catalytic formation or
     ! grain recombination coefficients to metallic surfaces.
     if(reactive_dust>0)surface=area/(1d-21*reactive_dust/(elements(1)*.01d0))
     controls=[nh,t,td,dt,length,reactive_dust/(elements(1)*.01d0),surface,0d0,chat]
-    ierr=chimes_cell_charged(controls,elements/elements(1),abundance,cell_solid_charge(cell)/elements(1), &
+    ierr=chimes_cell_charged(controls,elements/elements(1),abundance,cell_solid_charge(cell,row)/elements(1), &
          photons,t,next_abundance,next_photons)
     if(ierr/=0)then
 !$omp critical(chimes_failure_report)

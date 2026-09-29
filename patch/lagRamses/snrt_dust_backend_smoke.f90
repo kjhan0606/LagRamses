@@ -29,8 +29,10 @@ program dust_backend_smoke
   real(dust_dp)::one_rate(2,1),one_t(1),one_e(1),one_q(1)
   real(dust_dp),parameter::fe_test_reference_mass=1.398d-26
   real(dust_dp)::moving_cold_bins(6),moving_cold_basis(fe_nir,fe_nt,6)
+  character(len=16)::material_only
   call MPI_INIT(info)
-  if(snrt_d03_band_enabled())then
+  call get_environment_variable('SNRT_MATERIAL_ONLY',material_only)
+  if(snrt_d03_band_enabled().and.trim(material_only)/='1')then
      call check_d03_spectrum()
      call MPI_FINALIZE(info)
      stop
@@ -195,6 +197,11 @@ program dust_backend_smoke
      enddo
   enddo
   write(*,*)'DUST_CELL_MATERIAL_HETEROGENEOUS_HYBRID_LAYOUT_PASS'
+  if(trim(material_only)=='1')then
+     write(*,*)'DUST_MATERIAL_TILE_BACKEND_CONTRACT_PASS'
+     call MPI_FINALIZE(info)
+     stop
+  endif
   call check_d03_optics()
   call check_radiative_sublimation()
   call check_iron_radiation()
