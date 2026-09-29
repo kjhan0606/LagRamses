@@ -65,6 +65,8 @@ subroutine star_formation(ilevel)
   character(LEN=2)::nvar_write_str
   character(len=15)::starlog_format
   logical::file_exist
+  integer::birth_io_status,birth_cmd_status
+  character(len=80),save::birth_directory_ready=''
   integer, dimension(:), allocatable:: threadnnew, cumulnnew
   real(dp):: imstar_lost, imstar_tot,jmstar_lost, jmstar_tot
   common /star_formation_1/ scale,factG,mstar,nISM,vol_loc,dx_loc,scale_nH,&
@@ -80,10 +82,33 @@ subroutine star_formation(ilevel)
   if(sf_birth_properties) then
      call title(ifout-1,nchar)
      if(IOGROUPSIZEREP>0) then
+        call title((myid-1)/IOGROUPSIZEREP+1,ncharcpu)
         filedirini='output_'//TRIM(nchar)//'/'
         filedir='output_'//TRIM(nchar)//'/group_'//TRIM(ncharcpu)//'/'
      else
         filedir='output_'//TRIM(nchar)//'/'
+     endif
+     ! Birth records may precede the first full snapshot. Prepare only their
+     ! directory, independently of dump_all; mkdir -p is safe across ranks.
+     ! Cache the directory per rank so this is not a per-cell/step operation.
+     if(trim(birth_directory_ready)/=trim(filedir))then
+        birth_io_status=0
+        birth_cmd_status=0
+#ifndef NOSYSTEM
+        call execute_command_line('mkdir -p '//trim(filedir), &
+             exitstat=birth_io_status,cmdstat=birth_cmd_status)
+#else
+        inquire(file=trim(filedir)//'.',exist=file_exist)
+        if(.not.file_exist)birth_io_status=1
+#endif
+        if(birth_io_status/=0.or.birth_cmd_status/=0)then
+           write(*,*)'ERROR: cannot prepare stellar birth directory: ',trim(filedir)
+#ifndef WITHOUTMPI
+           call MPI_ABORT(MPI_COMM_WORLD,1,info2)
+#endif
+           error stop 1
+        endif
+        birth_directory_ready=filedir
      endif
      filename=TRIM(filedir)//'stars_'//TRIM(nchar)//'.out'
      ilun=myid+10
@@ -101,9 +126,18 @@ subroutine star_formation(ilevel)
    
      inquire(file=fileloc,exist=file_exist)
      if((.not.file_exist)) then
-        open(ilun, file=fileloc, form='unformatted',access='stream')
+        open(ilun, file=fileloc, status='new',action='write', &
+             form='unformatted',access='stream',iostat=birth_io_status)
      else
-        open(ilun, file=fileloc, status='old', position='append', action='write', form='unformatted',access='stream')
+        open(ilun, file=fileloc, status='old', position='append', action='write', &
+             form='unformatted',access='stream',iostat=birth_io_status)
+     endif
+     if(birth_io_status/=0)then
+        write(*,*)'ERROR: cannot open stellar birth record: ',trim(fileloc),birth_io_status
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,1,info2)
+#endif
+        error stop 1
      endif
 
   endif
