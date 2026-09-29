@@ -62,6 +62,18 @@ configuration uses the Intel `ifx` compiler with HDF5 parallel I/O and
 optional CUDA acceleration (`make HDF5=1 USE_CUDA=1`). 128-bit Morton
 keys for deep-AMR runs are enabled with `MORTON128=1`.
 
+### Binary particle restart compatibility
+
+The binary particle reader supports both legacy RAMSES part files without a
+compact `ptypep` record and LagRamses files that store `ptypep` immediately
+after `levelp`. It uses `part_file_descriptor.txt` when available; for older
+descriptor-free files it checks the complete expected record layout before
+reading and stops if the layout is ambiguous. Keep any descriptor alongside
+its particle output files. A legacy file without `ptypep` can reconstruct only
+the standard DM/star/sink classes from IDs and birth times; SIDM/ADM restarts
+require the explicit particle-type record and are rejected otherwise. This
+compatibility rule applies to binary particle restarts, not the HDF5 reader.
+
 Refined-level multigrid phase profiling can be enabled independently with
 `make MG_PROFILE=1 HDF5=1 USE_FFTW=1`. This retains the production `-O3`
 flags and adds cumulative `MGPROF` reports; it does not enable the broader

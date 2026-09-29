@@ -22,7 +22,7 @@ subroutine init_part
   ! Allocate particle-based arrays.
   ! Read particles positions and velocities from grafic files
   !------------------------------------------------------------
-  integer::npart2,ndim2,ncpu2
+  integer::npart2,ndim2,ncpu2,ptype_layout_status
   integer::ipart,jpart,ipart_old,ilevel,idim
   integer::i,igrid,ncache,ngrid,isink
   integer::ind,ix,iy,iz,ilun,info,icpu,nx_loc
@@ -73,6 +73,7 @@ subroutine init_part
 #endif
 
   logical::error,keep_part,eof,jumped,ic_sink=.false.,read_pos=.false.,ok
+  logical::has_ptype_record
   character(LEN=80)::filename,filename_x
   character(LEN=80)::fileloc
   character(LEN=20)::filetype_loc
@@ -318,6 +319,17 @@ subroutine init_part
            call clean_stop
         endif
      endif
+     call detect_binary_part_ptype_record(fileloc,npart2,ndim2, &
+          has_ptype_record,ptype_layout_status)
+     if(ptype_layout_status/=0)then
+        write(*,*)'ERROR: cannot determine binary particle-type record layout: ',TRIM(fileloc)
+        call clean_stop
+     endif
+     if((sidm.or.use_adm).and..not.has_ptype_record)then
+        write(*,*)'ERROR: binary restart lacks ptypep required to restore SIDM/ADM states: ',TRIM(fileloc)
+        call clean_stop
+     endif
+     if(myid==1)write(*,*)'Binary restart particle-type record present=',has_ptype_record
      ! Read position
      allocate(xdp(1:npart2))
      do idim=1,ndim
@@ -343,11 +355,15 @@ subroutine init_part
      read(ilun)isp
      levelp(1:npart2)=isp
      deallocate(isp)
-     ! The standard RAMSES binary part backup has no compact ptypep record.
-     ! Its next record is the particle potential (when enabled), followed by
-     ! the stellar birth/metallicity fields.  Reading ptypep here shifts the
-     ! stream by one record and eventually produces an EOF on valid legacy
-     ! outputs.  Reconstruct the compact type below from idp and tp instead.
+     ! The self-describing LagRamses format stores ptypep after levelp.  Older
+     ! standard RAMSES binary outputs omit it; detect the layout before reading
+     ! so the optional potential and stellar records remain aligned.
+     if(has_ptype_record)then
+        allocate(isp1(1:npart2))
+        read(ilun)isp1
+        ptypep(1:npart2)=isp1
+        deallocate(isp1)
+     endif
 #ifdef OUTPUT_PARTICLE_POTENTIAL
      allocate(xdp(1:npart2))
      read(ilun)xdp
@@ -381,21 +397,21 @@ subroutine init_part
         deallocate(xdp)
      end if
 
-     ! Legacy binary backups encode the particle class implicitly:
-     ! negative ids are sink/cloud particles, positive ids with non-zero tp
-     ! are stars, and the remaining positive ids are dark matter.
-     ptypep(1:npart2)=PTYPE_DM
-     do i=1,npart2
-        if(idp(i)<0_i8b)then
-           ptypep(i)=PTYPE_SINK
-        else if(star.or.sink)then
-           ! Fortran .and. need not short-circuit.  A DMO restart has no
-           ! allocated tp array, so guard its access with a separate IF.
-           if(idp(i)>0_i8b.and.tp(i)/=0.0d0)then
-              ptypep(i)=PTYPE_STAR
+     if(.not.has_ptype_record)then
+        ! Legacy files without a ptypep record can recover only the standard
+        ! DM/star/sink classes from identity and birth time.
+        ptypep(1:npart2)=PTYPE_DM
+        do i=1,npart2
+           if(idp(i)<0_i8b)then
+              ptypep(i)=PTYPE_SINK
+           else if(star.or.sink)then
+              ! Fortran .and. need not short-circuit; guard tp separately.
+              if(idp(i)>0_i8b.and.tp(i)/=0.0d0)then
+                 ptypep(i)=PTYPE_STAR
+              endif
            endif
-        endif
-     enddo
+        enddo
+     endif
      close(ilun)
 
      !determine NDM
@@ -1459,7 +1475,7 @@ subroutine restore_part_binary_varcpu
   include 'mpif.h'
 #endif
   integer :: icpu_file, idim, i, info, ilun
-  integer :: ncpu2, ndim2, npart2, npart_this
+  integer :: ncpu2, ndim2, npart2, npart_this, ptype_layout_status
   integer :: ipart, nread, read_start, read_end
   integer :: nDMloc
   integer(i8b) :: npart_total, npp, remainder, my_offset, tmp_long
@@ -1470,6 +1486,7 @@ subroutine restore_part_binary_varcpu
   integer(i8b), allocatable :: isp8(:)
   integer, allocatable :: isp(:)
   integer(kind=1), allocatable :: isp1(:)
+  logical :: has_ptype_record
   character(LEN=80) :: fileloc
   character(LEN=5) :: nchar, ncharcpu
 
@@ -1585,6 +1602,17 @@ subroutine restore_part_binary_varcpu
      call title(icpu_file, ncharcpu)
      fileloc=TRIM(fileloc)//TRIM(ncharcpu)
 
+     call detect_binary_part_ptype_record(fileloc,npart_this,ndim, &
+          has_ptype_record,ptype_layout_status)
+     if(ptype_layout_status/=0)then
+        write(*,*)'ERROR: cannot determine binary particle-type record layout: ',TRIM(fileloc)
+        call clean_stop
+     endif
+     if((sidm.or.use_adm).and..not.has_ptype_record)then
+        write(*,*)'ERROR: binary restart lacks ptypep required to restore SIDM/ADM states: ',TRIM(fileloc)
+        call clean_stop
+     endif
+
      open(unit=ilun, file=fileloc, form='unformatted')
      ! Skip header (8 records)
      do i = 1, 8
@@ -1619,11 +1647,14 @@ subroutine restore_part_binary_varcpu
      levelp(ipart+1:ipart+nread) = isp(read_start:read_end)
      deallocate(isp)
 
-     ! Read particle type
-     allocate(isp1(1:npart_this))
-     read(ilun) isp1
-     ptypep(ipart+1:ipart+nread) = isp1(read_start:read_end)
-     deallocate(isp1)
+     ! The standard RAMSES layout omits ptypep; LagRamses writes it after
+     ! levelp.  Keep the following optional records aligned for either format.
+     if(has_ptype_record)then
+        allocate(isp1(1:npart_this))
+        read(ilun) isp1
+        ptypep(ipart+1:ipart+nread) = isp1(read_start:read_end)
+        deallocate(isp1)
+     endif
 
 #ifdef OUTPUT_PARTICLE_POTENTIAL
      allocate(xdp(1:npart_this))
@@ -1654,6 +1685,17 @@ subroutine restore_part_binary_varcpu
         deallocate(xdp)
      end if
 
+     if(.not.has_ptype_record)then
+        ptypep(ipart+1:ipart+nread)=PTYPE_DM
+        do i=ipart+1,ipart+nread
+           if(idp(i)<0_i8b)then
+              ptypep(i)=PTYPE_SINK
+           else if(star.or.sink)then
+              if(idp(i)>0_i8b.and.tp(i)/=0.0d0)ptypep(i)=PTYPE_STAR
+           endif
+        enddo
+     endif
+
      close(ilun)
      ipart = ipart + nread
      global_offset = global_offset + npart_this
@@ -1682,6 +1724,129 @@ subroutine restore_part_binary_varcpu
   if(myid==1) write(*,*) 'Binary varcpu particle restore done. npart_total=', npart_total
 
 end subroutine restore_part_binary_varcpu
+!################################################################
+! Detect whether a binary part file has the compact ptypep record.  Newer
+! outputs carry part_file_descriptor.txt; older files are distinguished by
+! their exact sequential-unformatted size without attempting a mismatched
+! READ (which can leave a Fortran unit's position undefined).
+!################################################################
+subroutine detect_binary_part_ptype_record(filename,npart_in,ndim_in,has_record,status)
+  use amr_commons
+  use pm_commons
+  implicit none
+  character(len=*),intent(in)::filename
+  integer,intent(in)::npart_in,ndim_in
+  logical,intent(out)::has_record
+  integer,intent(out)::status
+  character(len=512)::descriptor,line
+  integer::idesc,unit,ios,version,header_iolen,header_int_probe
+  integer::i1_iolen,int_iolen,i8_iolen,dp_iolen,nreal_records,nrecords
+  integer(kind=8)::file_size,base_payload,expected_without,expected_with
+  integer(kind=8)::probe_size,marker_overhead
+  integer::probe_unit,probe_int
+  integer(kind=8)::probe_i8
+  integer(kind=1)::probe_i1
+  real(dp)::probe_dp
+  logical::descriptor_exists,found_version,found_columns,found_ptype
+
+  has_record=.false.
+  status=0
+  descriptor=' '
+  idesc=index(trim(filename),'part_',back=.true.)
+  if(idesc>1)then
+     descriptor=filename(1:idesc-1)//'part_file_descriptor.txt'
+     inquire(file=trim(descriptor),exist=descriptor_exists,iostat=ios)
+     if(ios/=0)then
+        status=1
+        return
+     endif
+     if(descriptor_exists)then
+        open(newunit=unit,file=trim(descriptor),status='old',form='formatted', &
+             action='read',iostat=ios)
+        if(ios/=0)then
+           status=2
+           return
+        endif
+        found_version=.false.
+        found_columns=.false.
+        found_ptype=.false.
+        version=-1
+        do
+           read(unit,'(A)',iostat=ios)line
+           if(ios<0)exit
+           if(ios>0)exit
+           if(index(line,'# version:')==1)then
+              read(line(11:),*,iostat=ios)version
+              if(ios/=0)exit
+              found_version=.true.
+           endif
+           if(index(line,'# ivar, variable_name, variable_type')==1)found_columns=.true.
+           if(index(line,'ptypep')>0)found_ptype=.true.
+        enddo
+        close(unit)
+        if(ios>0.or..not.found_version.or..not.found_columns.or.version/=1)then
+           status=3
+           return
+        endif
+        has_record=found_ptype
+        return
+     endif
+  endif
+
+  ! Header and array payload lengths, all in Fortran file-storage units.
+  inquire(iolength=header_iolen)header_int_probe,header_int_probe,header_int_probe,localseed, &
+       nstar_tot,mstar_tot,mstar_lost,nsink
+  inquire(iolength=i1_iolen)probe_i1
+  inquire(iolength=int_iolen)probe_int
+  inquire(iolength=i8_iolen)probe_i8
+  inquire(iolength=dp_iolen)probe_dp
+
+  ! Measure this compiler's sequential-unformatted record framing on a
+  ! scratch file, rather than assuming a particular marker width.
+  open(newunit=probe_unit,status='scratch',form='unformatted', &
+       access='sequential',action='write',iostat=ios)
+  if(ios/=0)then
+     status=4
+     return
+  endif
+  write(probe_unit,iostat=ios)probe_int
+  if(ios==0)inquire(unit=probe_unit,size=probe_size,iostat=ios)
+  close(probe_unit)
+  if(ios/=0)then
+     status=4
+     return
+  endif
+  marker_overhead=probe_size-int(int_iolen,8)
+  if(marker_overhead<=0)then
+     status=4
+     return
+  endif
+
+  inquire(file=trim(filename),size=file_size,iostat=ios)
+  if(ios/=0)then
+     status=5
+     return
+  endif
+
+  nreal_records=2*ndim_in+1
+#ifdef OUTPUT_PARTICLE_POTENTIAL
+  nreal_records=nreal_records+1
+#endif
+  if(star.or.sink)nreal_records=nreal_records+4+merge(1,0,metal)
+  nrecords=8+nreal_records+2
+  base_payload=int(header_iolen,8)+int(npart_in,8)*( &
+       int(nreal_records,8)*int(dp_iolen,8)+int(i8_iolen,8)+int(int_iolen,8))
+  expected_without=base_payload+int(nrecords,8)*marker_overhead
+  expected_with=expected_without+int(npart_in,8)*int(i1_iolen,8)+marker_overhead
+
+  if(file_size==expected_with)then
+     has_record=.true.
+  else if(file_size==expected_without)then
+     has_record=.false.
+  else
+     status=6
+  endif
+end subroutine detect_binary_part_ptype_record
 !################################################################
 !################################################################
 !################################################################
