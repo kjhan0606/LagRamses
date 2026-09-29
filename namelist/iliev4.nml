@@ -2,7 +2,7 @@
 hydro=.true.
 static=.true.
 nrestart=0
-rt=.true.
+radiation_transport='ramses_rt'
 /
 
 &INIT_PARAMS

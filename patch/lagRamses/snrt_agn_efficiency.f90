@@ -4,12 +4,13 @@
 ! Both the coarse-state writer and the SNRT source driver call this routine so
 ! that the coefficient used for Lbol and photons cannot silently diverge.
 module snrt_agn_efficiency
-  use amr_parameters, only: dp
+  use amr_parameters, only: dp,radiation_transport
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
 
   private
   public :: snrt_agn_resolve_efficiency
+  public :: snrt_transport_selected
   public :: snrt_agn_rt_requested
   public :: snrt_agn_model, snrt_agn_reference_active, snrt_agn_admit_reference
   public :: snrt_agn_reference_config_ok
@@ -98,19 +99,16 @@ contains
          .and.ieee_is_finite(xfloor).and.xfloor>0d0
   end function snrt_agn_reference_config_ok
 
+  logical function snrt_transport_selected() result(selected)
+    ! Runtime dispatch has one authority: the validated RUN_PARAMS selector.
+    ! The old SNRT_RT_ENABLE environment switch is rejected during preflight.
+    selected=trim(radiation_transport)=='snrt_sn'.or.trim(radiation_transport)=='snrt_mn'
+  end function snrt_transport_selected
+
   logical function snrt_agn_rt_requested() result(requested)
-    ! One process-lifetime latch, shared by namelist preflight, legacy
-    ! dispatch and the live driver. Preflight checks MPI agreement explicitly.
-    logical, save :: resolved=.false., latched=.false.
-    character(len=8) :: value
-    integer :: length, status
-    if (.not.resolved) then
-       value=''
-       call get_environment_variable('SNRT_RT_ENABLE',value,length=length,status=status)
-       latched=status==0 .and. length==1 .and. value(1:1)=='1'
-       resolved=.true.
-    end if
-    requested=latched
+    ! Transitional in-tree API alias. This is not an independent switch;
+    ! it resolves exclusively through the validated transport selector.
+    requested=snrt_transport_selected()
   end function snrt_agn_rt_requested
 
   pure subroutine snrt_agn_resolve_efficiency(raw_efficiency, spin_bh, bondi_rate, &

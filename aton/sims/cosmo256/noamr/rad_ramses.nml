@@ -2,7 +2,7 @@
 ! Uses equilibrium cooling.
 
 &RUN_PARAMS
-aton=.true.
+radiation_transport='ramses_rt'
 cosmo=.true.
 pic=.true.
 poisson=.true.

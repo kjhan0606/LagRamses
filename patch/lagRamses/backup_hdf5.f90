@@ -1190,8 +1190,9 @@ end subroutine backup_part_hdf5
 !###########################################################################
 subroutine backup_sink_hdf5()
   use amr_commons
+  use amr_parameters, only: radiation_transport
   use pm_commons
-  use snrt_agn_efficiency, only: snrt_agn_model, snrt_agn_rt_requested
+  use snrt_agn_efficiency, only: snrt_agn_model, snrt_transport_selected
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use ramses_hdf5_io
   implicit none
@@ -1232,9 +1233,10 @@ subroutine backup_sink_hdf5()
   call hdf5_write_attr_int(grp_id, 'nindsink', nindsink)
   call hdf5_write_attr_int(grp_id, 'levelmin', levelmin)
   call hdf5_write_attr_int(grp_id, 'nlevelmax', nlevelmax)
-  call hdf5_write_attr_int(grp_id, 'agn_state_schema', 1)
+  call hdf5_write_attr_int(grp_id, 'agn_state_schema', 2)
   call hdf5_write_attr_int(grp_id, 'agn_model', snrt_agn_model())
-  call hdf5_write_attr_int(grp_id, 'agn_rt_enabled', merge(1,0,snrt_agn_rt_requested()))
+  call hdf5_write_attr_int(grp_id, 'agn_rt_enabled', merge(1,0,snrt_transport_selected()))
+  call hdf5_write_attr_string(grp_id, 'radiation_transport', trim(radiation_transport))
   call hdf5_write_attr_int(grp_id, 'sink_stat_global_schema', 1)
 
   if(nsink > 0) then

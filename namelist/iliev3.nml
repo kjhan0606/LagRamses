@@ -5,7 +5,7 @@ nremap=10
 nsubcycle=10*2
 verbose=.false.
 static=.true.
-rt=.true.
+radiation_transport='ramses_rt'
 /
 
 &INIT_PARAMS

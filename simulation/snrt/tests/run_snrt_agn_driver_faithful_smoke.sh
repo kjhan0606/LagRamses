@@ -43,7 +43,7 @@ run_case() {
       cd -- "$case_dir"
       env -u SNRT_RT_TX_TEST_FAIL_STAGE -u SNRT_RT_TX_TEST_FAIL_LEAF \
         SNRT_RT_TX_DIAGNOSTIC_MODE=1 \
-        SNRT_RT_ENABLE=1 SNRT_AGN_MODEL=partition_reference_v1 \
+        SNRT_AGN_MODEL=partition_reference_v1 \
         SNRT_DRIVER_TEST_SEED_SOURCE=1 \
         SNRT_REDUCED_C=0.01 SNRT_RT_LEVEL=3 \
         SNRT_GROUP_CONTRACT="$GROUP_CONTRACT" \
@@ -54,7 +54,7 @@ run_case() {
   else
     (
       cd -- "$case_dir"
-      env SNRT_RT_ENABLE=1 SNRT_AGN_MODEL=partition_reference_v1 \
+      env SNRT_AGN_MODEL=partition_reference_v1 \
         SNRT_DRIVER_TEST_SEED_SOURCE=1 \
         SNRT_REDUCED_C=0.01 SNRT_RT_LEVEL=3 \
         SNRT_GROUP_CONTRACT="$GROUP_CONTRACT" \

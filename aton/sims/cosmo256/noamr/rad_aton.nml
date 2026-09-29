@@ -2,7 +2,7 @@
 ! Uses non-equilibrium cooling.
 
 &RUN_PARAMS
-aton=.true.
+radiation_transport='aton'
 cosmo=.true.
 pic=.true.
 poisson=.true.

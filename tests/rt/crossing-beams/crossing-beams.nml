@@ -1,7 +1,7 @@
 &RUN_PARAMS
 nrestart=0                      ! Restart from some snapshot
 hydro=.true.                    ! Baryons included? (Must be for RT)
-rt=.true.                       ! Activate radiative transfer
+radiation_transport='ramses_rt' ! Activate RAMSES-RT transport
 static=.true.                   ! Deactivate hydrodynamics (RHD if false)
 /
 

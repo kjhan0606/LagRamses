@@ -5,7 +5,7 @@
 
 &RUN_PARAMS
 hydro=.true.
-rt=.false.
+radiation_transport='none'
 nrestart=0
 nremap=10
 poisson=.true.

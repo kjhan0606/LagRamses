@@ -508,7 +508,8 @@ Use the NVAR=30 build above. The environment is:
 
 ```sh
 OMP_NUM_THREADS=2
-SNRT_RT_ENABLE=1
+# RUN_PARAMS: radiation_transport='snrt_sn' (the sole transport selector).
+# SNRT_BACKEND controls placement only; it does not choose/enable a model.
 SNRT_BACKEND=auto
 SNRT_AGN_MODEL=partition_reference_v1
 SNRT_REDUCED_C=0.01
@@ -519,6 +520,15 @@ SNRT_SECONDARY_TABLE_CONTRACT=/gpfs/kjhan/LRD_JWST/simulation/snrt/config/snrt_s
 SNRT_STELLAR_SED=/gpfs/kjhan/LRD_JWST/simulation/snrt/config/snrt_stellar_sed_reference_control_v1.nml
 SNRT_DUST_CONTRACT=/gpfs/kjhan/LRD_JWST/simulation/snrt/config/dust_native_reference_control_v3.nml
 ```
+
+`SNRT_RT_LEVEL` limits which AMR levels the SNRT driver visits; it does not
+enable transport. The model selector is always `radiation_transport`. UV
+background/self-shielding (`haardt_madau`, `J21`, `self_shielding`), RAMSES
+non-equilibrium chemistry (`neq_chem`), and dust evolution (`dust_mass_enabled`
+and its submodels) are separate `PHYSICS_PARAMS` controls, subject to their
+documented physical compatibility checks. The obsolete `SNRT_RT_ENABLE`
+environment variable is rejected by the executable and cleared by generated
+comparison environments.
 
 Export these values for the executable and unset any `SNRT_DRIVER_TEST_SEED_SOURCE`
 or RT failure-injection controls. This profile intentionally uses CPU hydro and
@@ -677,7 +687,8 @@ The reusable `config/high_mass_feedback_reference_smoke.nml` is a SYNTHETIC
 four-step, level-3 CPU hydro/stellar-feedback wiring control, not a physical
 yield package. Copy to `run.nml` in a NEW directory and use the NVAR=30 build
 above with `PHASE0_STELLAR_ENRICHMENT=1`. Unset `SNRT_AGN_MODEL`,
-`SNRT_STELLAR_SED`, `SNRT_DRIVER_TEST_SEED_SOURCE`; set `SNRT_RT_ENABLE=0`,
+`SNRT_STELLAR_SED`, `SNRT_DRIVER_TEST_SEED_SOURCE`; leave `radiation_transport='none'`
+in RUN_PARAMS (do not set the obsolete SNRT_RT_ENABLE variable),
 `OMP_NUM_THREADS=2`, and
 `PHASE0_YIELD_TABLE=/gpfs/kjhan/LRD_JWST/simulation/snrt/tests/fixtures/phase0/high_mass_history_yields.dat`.
 The profile contains its absolute history path. Its tiny legacy reader table
@@ -2307,7 +2318,7 @@ spectral coverage or validity of a stationary approximation.
 
 `dust_sublimation='gd89_xu25_olivine_rt_v1'` moves graphite/olivine
 evaporation into the live IR material receiver. It requires the CHIMES+D03
-profile, `SNRT_RT_ENABLE=1`, a version-4 hot material contract with gas
+profile, `radiation_transport='snrt_sn'` (or `'snrt_mn'`), a version-4 hot material contract with gas
 exchange enabled, and an explicitly selected new binary/contract through
 the mkrun environment variables above. The earlier split selections and
 the default `none` retain their behavior. The ordinary pre-RT mass operator

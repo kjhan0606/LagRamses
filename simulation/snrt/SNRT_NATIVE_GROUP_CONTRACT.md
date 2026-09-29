@@ -48,8 +48,10 @@ The process does not parse the JSON ledger. The namelist must carry:
 - a non-empty source identifier, a 64-hex source digest, a 40-hex source
   commit binding, and an approval/control identifier.
 
-Any failure leaves the contract unloaded and causes `SNRT_RT_ENABLE=1` to
-return without changing the radiation state. A candidate explicit SED status
+Any failure leaves the contract unloaded and causes startup to reject a run
+that selects `radiation_transport='snrt_sn'` or `'snrt_mn'`; it never silently
+changes the radiation state. `SNRT_RT_ENABLE` is obsolete and rejected. A
+candidate explicit SED status
 may be inspected by the loader but is not runtime-admissible. A
 `reference_control` contract additionally requires
 `SNRT_ALLOW_REFERENCE_CONTROL=1`; an `approved_production` contract does not.

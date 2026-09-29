@@ -4,7 +4,7 @@ nrestart=0
 nremap=0
 nsubcycle=10*2
 verbose=.false.
-rt=.true.
+radiation_transport='ramses_rt'
 /
 
 &INIT_PARAMS

@@ -3971,7 +3971,7 @@ end subroutine kjhan_average_density
 !################################################################
 !################################################################
 subroutine grow_bondi(ilevel)
-  use snrt_agn_efficiency, only: snrt_agn_rt_requested
+  use snrt_agn_efficiency, only: snrt_transport_selected
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use pm_commons
   use amr_commons
@@ -4029,7 +4029,7 @@ subroutine grow_bondi(ilevel)
   endif
   capture_radiation=.false.
 #ifdef SNRT
-  capture_radiation=snrt_agn_rt_requested()
+  capture_radiation=snrt_transport_selected()
 #endif
 
   !$omp parallel shared(nthreads) private(mythread)
@@ -6356,7 +6356,7 @@ end subroutine kjhan_growspin
 subroutine AGN_feedback
   use agn_feedback_deposition, only: agn_eddington_ratio, agn_reference_event, agn_reference_commit, agn_heat_ready, &
        agn_reference_receiver_ready, agn_reference_jet_speed_ok
-  use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_reference_active
+  use snrt_agn_efficiency, only: snrt_transport_selected, snrt_agn_reference_active
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_commons
   use pm_commons
@@ -6431,7 +6431,7 @@ subroutine AGN_feedback
 
 #ifdef SNRT
   reference_model=snrt_agn_reference_active()
-  if (snrt_agn_rt_requested().and..not.reference_model) then
+  if (snrt_transport_selected().and..not.reference_model) then
      if (myid == 1) write(*,*) 'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
      call clean_stop
   end if

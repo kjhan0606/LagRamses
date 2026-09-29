@@ -55,16 +55,21 @@ module amr_parameters
   logical::star    =.false.   ! Star formation activated
   logical::sink    =.false.   ! Sink particles activated
   logical::sinkprops=.false.  ! Write sink properties at each coarse step
-  logical::rt      =.false.   ! Radiative transfer activated
-  ! Native SNRT representation, independent of CPU/CUDA backend selection.
-  character(len=16)::snrt_transport_model='sn'
+  ! The only user-facing local-radiation transport selector. The legacy
+  ! rt/aton booleans are retained solely for rejecting active old namelists;
+  ! they are never independent runtime controls.
+  character(len=16)::radiation_transport='none'
+  logical::rt      =.false.   ! Internal dispatch flag derived from selector
+  ! Internal SNRT representation.  A nonblank value read from an old
+  ! namelist is rejected; read_params sets this from radiation_transport.
+  character(len=16)::snrt_transport_model=''
   integer::snrt_moment_order=3 ! M1--M5: 4/9/16/25/36 real harmonics
   logical::debug   =.false.   ! Debug mode activated
   logical::static  =.false.   ! Static mode activated
   logical::tracer  =.false.   ! Tracer particles activated
   logical::lightcone=.false.  ! Enable lightcone generation
   logical::clumpfind=.false.  ! Enable clump finder
-  logical::aton=.false.       ! Enable ATON coarse grid radiation transfer
+  logical::aton=.false.       ! Internal dispatch flag derived from selector
 
   ! GPU acceleration (requires USE_CUDA compilation)
   logical::gpu_hydro=.true.    ! GPU hydro solver (hybrid CPU/GPU).

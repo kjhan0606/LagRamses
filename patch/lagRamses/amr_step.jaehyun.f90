@@ -26,7 +26,7 @@ recursive subroutine amr_step(ilevel,icount)
   use dust_mass_runtime, only: dust_mass_advance_level
   use snrt_ramses_driver, only: snrt_ramses_diagnose_level, &
        snrt_ramses_advance_level
-  use snrt_agn_efficiency, only: snrt_agn_rt_requested
+  use snrt_agn_efficiency, only: snrt_transport_selected
   use snrt_state, only: snrt_state_sync_level
   use snrt_regrid, only: snrt_regrid_upload,snrt_regrid_check
 #endif
@@ -814,7 +814,7 @@ recursive subroutine amr_step(ilevel,icount)
   snrt_step_start_proper=texp
   ! Fine transport can deposit flux in a coarse leaf before the coarse RT
   ! solve runs. Establish those receiver slots before entering recursion.
-  if(snrt_agn_rt_requested())call snrt_state_sync_level(ilevel,snrt_sync_leaves,snrt_sync_new)
+  if(snrt_transport_selected())call snrt_state_sync_level(ilevel,snrt_sync_leaves,snrt_sync_new)
 #endif
   if(lb_timing_sample)then
      call cpu_time(t_lb_cpu_child_start)
@@ -991,7 +991,7 @@ recursive subroutine amr_step(ilevel,icount)
   call dust_dynamics_advance_level(ilevel)
 #endif
   snrt_advance_wall=snrt_advance_wall+omp_get_wtime()-cool_t1
-  if(snrt_agn_rt_requested())then
+  if(snrt_transport_selected())then
      call snrt_regrid_upload(ilevel,snrt_sync_error)
      call snrt_regrid_check(snrt_sync_error)
   end if
@@ -999,7 +999,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! ilevel+1. Radiation upload above takes the completed fine level and
   ! refreshes its parents at ilevel-1; the two argument conventions differ.
   ! Keep hydro's own covered-cell update for an explicitly requested SNRT run.
-  if(hydro .and. snrt_agn_rt_requested()) call upload_fine(ilevel)
+  if(hydro .and. snrt_transport_selected()) call upload_fine(ilevel)
 #ifndef SNRT_LEDGER_ONLY
   cool_t1=omp_get_wtime()
   call snrt_ramses_diagnose_level(ilevel)

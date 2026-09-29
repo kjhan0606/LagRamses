@@ -6,7 +6,7 @@
 
 &RUN_PARAMS
 hydro=.true.
-aton=.true.
+radiation_transport='aton'
 ncontrol=1
 nrestart=0
 nremap=0

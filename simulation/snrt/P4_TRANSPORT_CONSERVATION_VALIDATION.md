@@ -24,7 +24,8 @@ Fortran wiring correction documented in
 [`SNRT_NATIVE_GROUP_CONTRACT.md`](SNRT_NATIVE_GROUP_CONTRACT.md); it does not
 retroactively promote the historical HDF5 result below to a nine-group live
 RAMSES result. The checked-in native numbers are a reference-control closure,
-and `SNRT_RT_ENABLE` still requires an explicit contract path, CUDA, and the
+and `radiation_transport` must explicitly select an SNRT mode; the mode still
+requires an explicit contract path, CUDA, and the
 separate physical-source approvals.
 The native contract records whether group fractions are intrinsic or escaped;
 the resolved-domain injection gate accepts only `escaped`, and the checked-in

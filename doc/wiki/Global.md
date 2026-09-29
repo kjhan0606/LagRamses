@@ -6,6 +6,12 @@ This block, called `&RUN_PARAMS`, contains the run global control
 parameters. These parameters are now briefly described.
 More thorough explanations will be given in dedicated sections of the wiki.
 
+In this LagRamses fork, select local radiation transport only with
+`radiation_transport` (exactly one of `none`, `snrt_sn`, `snrt_mn`,
+`ramses_rt`, or `aton`). The legacy `rt` and `aton` booleans are not selectors
+and a true value is rejected. Metagalactic UV, non-equilibrium chemistry, and
+dust evolution are independent physics controls in `&PHYSICS_PARAMS`.
+
 
 | Variable name, syntax, default value | Fortran type  | Description               |
 |:---------------------------- |:------------- |:------------------------- |
@@ -18,8 +24,7 @@ More thorough explanations will be given in dedicated sections of the wiki.
 | `make_mergertree=.false.`    |  `logical`    | Make merger trees |
 | `poisson=.false.`            |  `logical`    | Activate Poisson solver for self-gravity |
 | `hydro=.false.`              |  `logical`    | Activate hydro or MHD solver. |
-| `rt=.false.`                 |  `logical`    | Activate radiative transfer using CPU-based M1 solver. This solver works on the AMR grid. |
-| `aton=.false.`               |  `logical`    | Activate radiative transfer using GPU-based M1 solver. This solver works only on unigrid at `levelmin`. |
+| `radiation_transport='none'` | `character`   | The sole local transport selector: `none`, `snrt_sn`, `snrt_mn`, `ramses_rt`, or `aton`. Must match the compiled solver. |
 | `verbose=.false.`            |  `logical`    | Activate verbose mode. |
 | `cost_weighting=.true.`      |  `logical`    | Load balancing based on computational cost, not memory. This is rather expensive in term of memory usage. For memory limited runs, using `cost_weighting=.false.` is better. |
 | `nrestart=0`                 |  `integer`    | Output file number from which the code loads backup data and resumes the simulation, The default value, zero, is for a fresh start from the beginning (time=0).   |

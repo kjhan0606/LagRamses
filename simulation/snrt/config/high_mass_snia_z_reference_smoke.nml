@@ -5,7 +5,7 @@
   pic=.true.
   poisson=.true.
   hydro=.true.
-  rt=.false.
+  radiation_transport='none'
   sink=.false.
   sinkprops=.false.
   nrestart=0

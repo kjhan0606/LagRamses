@@ -1,6 +1,6 @@
 subroutine read_params
   use amr_commons
-  use snrt_agn_efficiency, only: snrt_agn_rt_requested, snrt_agn_model, snrt_agn_model_reference, &
+  use snrt_agn_efficiency, only: snrt_transport_selected, snrt_agn_model, snrt_agn_model_reference, &
        snrt_agn_reference_config_ok, snrt_agn_admit_reference
 #ifdef SNRT
   use dust_mass_physics, only: dust_mass_enabled
@@ -40,6 +40,8 @@ subroutine read_params
   !--------------------------------------------------
   integer::i,narg,iargc,ierr,levelmax,sink_nml_iostat
   integer::agn_model_local,agn_model_min,agn_model_max,agn_contract_error
+  integer :: transport_selector_local(16),transport_selector_min(16),transport_selector_max(16)
+  integer :: transport_selector_char
   logical::agn_snrt_built
 #ifdef SNRT
   integer :: snrt_requested_local, snrt_requested_min, snrt_requested_max
@@ -58,6 +60,8 @@ subroutine read_params
   real(kind=8)::delta_tout=0,tend=0
   real(kind=8)::delta_aout=0,aend=0
   logical::nml_ok,check_energies=.true.,bondi_use_vrel=.true.
+  integer::legacy_rt_env_length,legacy_rt_env_status
+  character(len=256)::legacy_rt_env
   logical::sink_descent=.false.
   real(dp)::mass_smbh_seed=0d0,mass_merger_vel_check=1d100
   real(dp)::eddington_cap=1d0,AGN_fbk_frac_ener=1d0,AGN_fbk_frac_mom=0d0
@@ -72,7 +76,7 @@ subroutine read_params
   !--------------------------------------------------
 !jhshin1
   namelist/run_params/clumpfind,cosmo,pic,sink,sinkprops,lightcone,poisson,hydro,rt,verbose,debug &
-       & ,snrt_transport_model,snrt_moment_order &
+       & ,radiation_transport,snrt_transport_model,snrt_moment_order &
        & ,nrestart,ncontrol,nstepmax,nsubcycle,nremap,remap_thresh,ordering &
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
   & ,memory_balance,memory_balance_fast_particles,particle_tree_fast_relink &
@@ -299,10 +303,38 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   open(1,file=infile)
   rewind(1)
   read(1,NML=run_params)
-  select case(trim(snrt_transport_model))
-  case('sn')
-     ! Preserve the original model and all of its checkpoint semantics.
-  case('tensor_mn')
+  legacy_rt_env=''
+  call get_environment_variable('SNRT_RT_ENABLE',legacy_rt_env, &
+       length=legacy_rt_env_length,status=legacy_rt_env_status)
+  if(legacy_rt_env_status/=1)then
+     if(myid==1)write(*,'(A)') &
+          'ERROR: SNRT_RT_ENABLE is obsolete; select radiation_transport in RUN_PARAMS instead.'
+     call clean_stop
+  endif
+  if(len_trim(snrt_transport_model)>0)then
+     if(myid==1)write(*,'(A)') &
+          'ERROR: snrt_transport_model is obsolete; use radiation_transport=snrt_sn or snrt_mn.'
+     call clean_stop
+  endif
+  if(rt.or.aton)then
+     if(myid==1)write(*,'(A)') &
+          'ERROR: legacy rt/aton flags cannot select transport; set radiation_transport only.'
+     call clean_stop
+  endif
+
+  rt=.false.;aton=.false.;snrt_transport_model='sn'
+  select case(trim(radiation_transport))
+  case('none')
+     ! UV background, non-equilibrium chemistry and dust remain independent.
+  case('snrt_sn')
+#ifdef SNRT
+     snrt_transport_model='sn'
+#else
+     if(myid==1)write(*,'(A)')'ERROR: radiation_transport=snrt_sn requires a binary built with SNRT=1.'
+     call clean_stop
+#endif
+  case('snrt_mn')
+     snrt_transport_model='tensor_mn'
 #ifdef SNRT
      if(myid==1)write(*,*)'SNRT compact M_N selected: MC15/SSPRK2 transport; explicit material capability checks'
 #ifndef HDF5
@@ -313,12 +345,48 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(myid==1)write(*,*)'ERROR: tensor_mn requires a binary compiled with SNRT=1'
      call clean_stop
 #endif
+  case('ramses_rt')
+#ifdef RT
+     rt=.true.
+#else
+     if(myid==1)write(*,'(A)')'ERROR: radiation_transport=ramses_rt requires a binary built with RT.'
+     call clean_stop
+#endif
+  case('aton')
+#ifdef ATON
+     aton=.true.
+#else
+     if(myid==1)write(*,'(A)')'ERROR: radiation_transport=aton requires a binary built with ATON.'
+     call clean_stop
+#endif
   case default
-     if(myid==1)write(*,*)'ERROR: snrt_transport_model must be sn or tensor_mn'
+     if(myid==1)write(*,'(A,A,A)')'ERROR: radiation_transport must be none, snrt_sn, snrt_mn, ', &
+          'ramses_rt or aton; received "',trim(radiation_transport)//'".'
      call clean_stop
   end select
   if(snrt_moment_order<1.or.snrt_moment_order>5)then
      if(myid==1)write(*,*)'ERROR: snrt_moment_order must be 1, 2, 3, 4 or 5 (4, 9, 16, 25 or 36 moments)'
+     call clean_stop
+  endif
+  if(trim(radiation_transport)/='snrt_mn'.and.snrt_moment_order/=3)then
+     if(myid==1)write(*,'(A)')'ERROR: snrt_moment_order applies only when radiation_transport=snrt_mn.'
+     call clean_stop
+  endif
+  if(myid==1)write(*,'(A,A)')'Radiation transport selector: ',trim(radiation_transport)
+  do transport_selector_char=1,len(radiation_transport)
+     transport_selector_local(transport_selector_char)= &
+          iachar(radiation_transport(transport_selector_char:transport_selector_char))
+  enddo
+  transport_selector_min=transport_selector_local
+  transport_selector_max=transport_selector_local
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(transport_selector_local,transport_selector_min,len(radiation_transport), &
+       MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr)
+  call MPI_ALLREDUCE(transport_selector_local,transport_selector_max,len(radiation_transport), &
+       MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
+#endif
+  if(any(transport_selector_min/=transport_selector_max))then
+     if(myid==1)write(*,'(A)')'ERROR: radiation_transport differs across MPI ranks.'
      call clean_stop
   endif
   if(aexp_step_limit<=0.0d0)then
@@ -1766,20 +1834,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   end if
 
 #ifdef SNRT
-  ! Check before any sink feedback or RT state mutation, including before
-  ! sinks are first created. Do not allow rank-local environment selection
-  ! to split collective RT execution or the source ownership decision.
-  snrt_requested_local=merge(1,0,snrt_agn_rt_requested())
+  ! The exact selector was checked across ranks immediately after RUN_PARAMS
+  ! parsing, before any source, sink or radiation state is mutated.
+  snrt_requested_local=merge(1,0,snrt_transport_selected())
   snrt_requested_min=snrt_requested_local
   snrt_requested_max=snrt_requested_local
-#ifndef WITHOUTMPI
-  call MPI_ALLREDUCE(snrt_requested_local,snrt_requested_min,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr)
-  call MPI_ALLREDUCE(snrt_requested_local,snrt_requested_max,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
-#endif
-  if (snrt_requested_min/=snrt_requested_max) then
-     if(myid==1)write(*,*)'SNRT_RT_ENABLE must agree across MPI ranks'
-     nml_ok=.false.
-  end if
   if (snrt_requested_max==1 .and. sink .and. sink_AGN .and. &
        snrt_agn_model()/=snrt_agn_model_reference) then
      if(myid==1)write(*,*)'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
@@ -1964,6 +2023,30 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   end if
 #endif
 
+#ifdef SNRT
+  ! Dust mass/thermal evolution is separate from local photon transport.
+  ! It still needs admitted v4 material data for the injection-energy
+  ! closure, while radiative dust submodels are checked against the selector.
+  if(dust_mass_enabled.and..not.snrt_transport_selected())then
+     snrt_dust_contract_env=''
+     call get_environment_variable('SNRT_DUST_CONTRACT',snrt_dust_contract_env, &
+          length=snrt_dust_contract_env_length)
+     if(snrt_dust_contract_env_length<=0)then
+        if(myid==1)write(*,'(A)')'Dust mass without local RT requires SNRT_DUST_CONTRACT v4 material data.'
+        nml_ok=.false.
+     else
+        call snrt_dust_contract_load_from_environment(snrt_dust_contract_error)
+        if(snrt_dust_contract_error/=0.or..not.snrt_dust_contract_loaded.or. &
+             .not.snrt_dust_contract_runtime_allowed.or.snrt_dust_contract_version/=4)then
+           if(myid==1)write(*,'(A)')'Dust-only startup rejected: require admitted SNRT_DUST_CONTRACT v4 material data.'
+           nml_ok=.false.
+        else if(myid==1)then
+           write(*,'(A)')'Dust material contract admitted independently of local photon transport.'
+        endif
+     endif
+  endif
+#endif
+
   ! The comparison profile is opt-in and rank-uniform. Accepted receipts
   ! are replicated; photon ownership and final consumption are collective.
   agn_model_local=snrt_agn_model()
@@ -1981,7 +2064,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   agn_snrt_built=.true.
 #endif
   if(agn_model_max==snrt_agn_model_reference)then
-     if(.not.snrt_agn_reference_config_ok(agn_snrt_built,snrt_agn_rt_requested(),hydro,sink,bondi, &
+     if(.not.snrt_agn_reference_config_ok(agn_snrt_built,snrt_transport_selected(),hydro,sink,bondi, &
           sink_AGN,mad_jet,ndim,nener,ncpu,nrestart,X_floor))then
         if(myid==1)write(*,*) 'partition_reference_v1 requires 3D NENER=0 non-MAD Bondi + RT + AGN'
         nml_ok=.false.
@@ -2002,13 +2085,21 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        real(dp)::dust_u
        integer::dust_status
        call dust_injection_specific_energy(dust_u,dust_status)
-       if(dust_status/=0.or..not.snrt_agn_rt_requested())then
-          if(myid==1)write(*,*)'ERROR: dust mass evolution requires active SNRT and v4 material covering injection temperature'
+       if(dust_status/=0)then
+          if(myid==1)write(*,*)'ERROR: dust mass evolution requires an admitted v4 material contract covering injection temperature'
           nml_ok=.false.
        endif
      end block
   endif
 #endif
+  if(myid==1)then
+     write(*,'(A,L1,A,ES12.4,A,L1)')'Physics switches: Haardt-Madau UV=',haardt_madau, &
+          ' J21=',J21,' self-shielding=',self_shielding
+     write(*,'(A,L1)')'  RAMSES non-equilibrium chemistry (neq_chem)=',neq_chem
+#ifdef SNRT
+     write(*,'(A,L1)')'  Dust mass/thermal evolution (dust_mass_enabled)=',dust_mass_enabled
+#endif
+  endif
   if(nml_ok.and.agn_model_local==snrt_agn_model_reference.and.myid==1)write(*,*) &
        'SNRT_AGN_MODEL=partition_reference_v1 comparison only; mechanical shares high=0.15 low=1; MAD excluded'
 

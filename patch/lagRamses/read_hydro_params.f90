@@ -12,7 +12,7 @@ subroutine read_hydro_params(nml_ok)
        snrt_dust_contract_version,snrt_dust_contract_exchange_enabled
 #endif
 #ifdef SNRT
-  use snrt_agn_efficiency, only: snrt_agn_rt_requested,snrt_agn_model,snrt_agn_model_reference
+  use snrt_agn_efficiency, only: snrt_transport_selected,snrt_agn_model,snrt_agn_model_reference
   use snrt_spectral_contract, only: snrt_chimes_transition_enabled
 #endif
   use eunha_cooling_mod, only: eunha_load_multi_z
@@ -385,7 +385,8 @@ subroutine read_hydro_params(nml_ok)
 
   dust_ok=dust_mass_parameters_ok()
 #ifdef SNRT
-  if(dust_sublimation_rt_enabled().and..not.snrt_agn_rt_requested())dust_ok=.false.
+  if((dust_sublimation_rt_enabled().or.dust_fe_uv_enabled().or.dust_pah_enabled()).and. &
+       .not.snrt_transport_selected())dust_ok=.false.
 #endif
   if(dust_chimes_enabled())then
 #ifndef SNRT_CHIMES
@@ -406,7 +407,7 @@ subroutine read_hydro_params(nml_ok)
         ! Narrow cosmological path: coadvected C/silicate and an explicitly
         ! ledgered optically thin CMB. Other phase/energy layouts stay closed.
 #if defined(SNRT_CHIMES) && !defined(SOLVERmhd)
-        if(.not.snrt_chimes_transition_enabled().or..not.snrt_agn_rt_requested().or.nener/=0)dust_ok=.false.
+        if(.not.snrt_chimes_transition_enabled().or..not.snrt_transport_selected().or.nener/=0)dust_ok=.false.
         if(.not.dust_chimes_enabled().or..not.dust_two_size_enabled().or. &
              .not.dust_optics_enabled().or..not.dust_material_composition_enabled())dust_ok=.false.
         if(dust_relative_motion.or.dust_iron_enabled().or.dust_pah_enabled().or. &
@@ -421,7 +422,7 @@ subroutine read_hydro_params(nml_ok)
      ! formation and other energy/phase layouts are not covered by that map.
      dust_sink_ok=.false.
 #if defined(SNRT_CHIMES) && !defined(SOLVERmhd)
-     dust_sink_ok=snrt_chimes_transition_enabled().and.snrt_agn_rt_requested().and. &
+     dust_sink_ok=snrt_chimes_transition_enabled().and.snrt_transport_selected().and. &
           snrt_agn_model()==snrt_agn_model_reference.and.nener==0.and. &
           sink.and.sink_AGN.and.agn.and..not.mad_jet.and. &
           dust_chimes_enabled().and.dust_two_size_enabled().and.dust_optics_enabled().and. &
@@ -444,10 +445,15 @@ subroutine read_hydro_params(nml_ok)
      if(trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))dust_ok=.false.
   endif
   if(.not.dust_ok)then
-     if(myid==1)write(*,*)'ERROR: dust mass requires valid bulk parameters, SNRT/DUST_LIVE/HDF5 channel feedback,'
+     if(myid==1)write(*,*)'ERROR: dust mass requires valid parameters and SNRT-module/DUST_LIVE/HDF5 channel feedback,'
      if(myid==1)write(*,*)'periodic metal hydro; no neq/delayed cooling; cooling needs an explicit dust closure'
      if(myid==1)write(*,*)'Cosmo dust: kind7/NENER=0 C/silicate DL01+D03/CHIMES; no sinks, CR, SGS, Fe, PAH or drift'
      if(myid==1)write(*,*)'Dust sinks require NENER=0 kind7 reference Bondi, existing sinks, coadvected C/silicate only'
+#ifdef SNRT
+     if((dust_sublimation_rt_enabled().or.dust_fe_uv_enabled().or.dust_pah_enabled()).and. &
+          .not.snrt_transport_selected().and.myid==1)write(*,'(A)') &
+          'UV/IR-coupled dust submodels require radiation_transport=snrt_sn or snrt_mn'
+#endif
      nml_ok=.false.
   else if(dust_mass_enabled.and.myid==1)then
      write(*,*)'DUST_MASS model=',trim(dust_mass_model),'; condensation/growth/sputtering, total-metal budget'

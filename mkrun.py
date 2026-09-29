@@ -156,6 +156,51 @@ def merge_into_group(nml_text, group, names, values):
     return nml_text[:close_idx] + insertion + nml_text[close_idx:]
 
 
+def set_group_values(nml_text, group, values, remove=()):
+    """Update or remove selected assignments inside exactly one namelist group.
+
+    Comparison templates carry useful defaults, but an explicit operator
+    choice must override those defaults. Limit edits to the named group and
+    reject duplicate keys rather than silently preserving ambiguous inputs.
+    """
+    group_re = re.compile(
+        r'(?ims)(^[ \t]*&' + re.escape(group) + r'[ \t]*\n)'
+        r'(.*?)'
+        r'(^[ \t]*/[ \t]*(?:![^\n]*)?$)'
+    )
+    matches = list(group_re.finditer(nml_text))
+    if len(matches) > 1:
+        raise ValueError('Template contains multiple &{} namelist groups.'.format(group))
+    if not matches:
+        return nml_text
+
+    match = matches[0]
+    body = match.group(2)
+    assignments = {name.lower(): value for name, value in values.items()}
+    remove_names = {name.lower() for name in remove}
+    keys = set(assignments) | remove_names
+    for key in keys:
+        key_re = re.compile(r'(?im)^([ \t]*)' + re.escape(key) + r'[ \t]*=.*$')
+        found = list(key_re.finditer(body))
+        if len(found) > 1:
+            raise ValueError('Template contains duplicate {} assignments in &{}.'.format(key, group))
+        if not found:
+            continue
+        item = found[0]
+        if key in remove_names:
+            body = body[:item.start()] + body[item.end():]
+            continue
+        value = assignments[key]
+        fval = rng._fmt_fortran_value(value, ftype_of(key))
+        if fval is None:
+            raise ValueError('Cannot serialize {} for &{}.'.format(key, group))
+        replacement = '{}{}={}'.format(item.group(1), key, fval)
+        body = body[:item.start()] + replacement + body[item.end():]
+
+    updated = match.group(1) + body + match.group(3)
+    return nml_text[:match.start()] + updated + nml_text[match.end():]
+
+
 # ---------------------------------------------------------------------------
 # dark-matter sector
 # ---------------------------------------------------------------------------
@@ -329,20 +374,23 @@ def save_text(path, text):
 
 
 def collect_snrt_transport(ui):
-    """Keep algorithm selection separate from CPU/CUDA execution placement."""
-    model = ui.ask_choice('Native RT representation', OrderedDict([
-        ('sn', ('Existing discrete ordinates (unchanged default)',)),
-        ('tensor_mn', ('Compact maximum-entropy moments; gas/chemistry/dust/IR coupling with shared-stream CUDA/OpenMP transport',)),
-    ]), 'sn')
-    if model not in ('sn', 'tensor_mn'):
-        raise ValueError('Unknown native RT representation.')
+    """Select the comparison's sole transport method; placement stays orthogonal."""
+    model = ui.ask_choice('Local radiation transport (this comparison uses SNRT)', OrderedDict([
+        ('snrt_sn', ('SNRT discrete ordinates',)),
+        ('snrt_mn', ('SNRT compact M_N moments with conservative transport',)),
+    ]), 'snrt_sn')
+    if model not in ('snrt_sn', 'snrt_mn'):
+        raise ValueError('Unknown radiation_transport selection.')
     order = 3
-    if model == 'tensor_mn':
+    if model == 'snrt_mn':
         order = ui.ask('Moment order: 1=4, 2=9, 3=16, 4=25, 5=36 components', 3, int)
         if type(order) is not int or order not in (1, 2, 3, 4, 5):
             raise ValueError('Moment order must be 1, 2, 3, 4 or 5.')
-        ui.info('M_N requires SNRT=1, HDF5=1 and HDF5 output. Spectral bands store bounded endpoint moments; CHIMES/dust options retain their physical compatibility checks. SNRT_BACKEND selects openmp/cuda/auto (hybrid); no SN fallback.')
-    return {'snrt_transport_model': model, 'snrt_moment_order': order}
+        ui.info('SNRT M_N requires SNRT=1, HDF5=1 and HDF5 output. Spectral bands store bounded endpoint moments; CHIMES/dust retain their physical compatibility checks. SNRT_BACKEND selects OpenMP/CUDA/auto; no fallback to S_N.')
+    selected = {'radiation_transport': model}
+    if model == 'snrt_mn':
+        selected['snrt_moment_order'] = order
+    return selected
 
 
 def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False):
@@ -704,7 +752,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     env = OrderedDict([
         ('OMP_NUM_THREADS', str(threads)), ('I_MPI_FABRICS', 'shm'),
         ('OMP_STACKSIZE', '512M'), ('KMP_STACKSIZE', '512M'),
-        ('SNRT_RT_ENABLE', '1'), ('SNRT_BACKEND', primary_backend),
+        ('SNRT_BACKEND', primary_backend),
         # The comparison IC is cold/dusty. Never inherit a hot-only spectral
         # receiver (or any other spectral model) from the invoking shell.
         ('SNRT_SPECTRAL_MODEL', 'fixed'),
@@ -794,8 +842,14 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         raise ValueError('Local comparison assets unavailable (a Git clone alone is insufficient): '
                          + ', '.join(missing))
     text = template.read_text(encoding='utf-8')
-    if transport_options['snrt_transport_model'] != 'sn':
-        text = merge_into_group(text, 'RUN_PARAMS', list(transport_options), transport_options)
+    text = set_group_values(
+        text,
+        'RUN_PARAMS',
+        transport_options,
+        remove=() if transport_options['radiation_transport'] == 'snrt_mn'
+        else ('snrt_moment_order',),
+    )
+    text = merge_into_group(text, 'RUN_PARAMS', list(transport_options), transport_options)
     if ccsn:
         token = 'channel_mass_min_msun=40d0,1d0,40d0,3d0,140d0'
         if text.count(token) != 1:
@@ -937,7 +991,7 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         raise ValueError('Invalid comparison namelist: ' + '; '.join(errors))
     env['PHASE0_YIELD_TABLE'] = dest / 'yields.dat'
     environment = ['# Source this file; it does NOT execute a simulation.',
-                   'unset SNRT_DRIVER_TEST_SEED_SOURCE SNRT_RT_TX_DIAGNOSTIC_MODE']
+                   'unset SNRT_RT_ENABLE SNRT_DRIVER_TEST_SEED_SOURCE SNRT_RT_TX_DIAGNOSTIC_MODE']
     environment += ['export {}={}'.format(key, shlex.quote(str(value))) for key, value in env.items()]
     instructions = (
         'Fixed RT/feedback/dust comparison; inputs only, NOT launch approval.\n'

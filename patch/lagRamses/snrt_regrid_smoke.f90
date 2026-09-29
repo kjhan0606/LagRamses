@@ -1,6 +1,6 @@
 ! Exercises production state/IR/regrid objects, not a surrogate remap.
 program snrt_regrid_smoke
-  use amr_parameters, only: dp,ngridmax,amr_block_size,twotondim
+  use amr_parameters, only: dp,ngridmax,amr_block_size,twotondim,radiation_transport
   use hydro_parameters, only: nvar
   use amr_commons, only: ncoarse,myid,ncpu,active,father,headl,next,son
   use hydro_commons, only: uold
@@ -24,6 +24,7 @@ program snrt_regrid_smoke
   integer :: ierr,info,j,slot,old_slots,g
   character(len=32) :: transport_check
   call MPI_INIT(info)
+  radiation_transport='snrt_sn'
   call snrt_backend_initialize(ierr)
   if(ierr/=0)stop 54
   ncoarse=1; ngridmax=4; amr_block_size=1; myid=1; ncpu=1
@@ -154,14 +155,14 @@ program snrt_regrid_smoke
   call MPI_FINALIZE(info)
 contains
   subroutine moment_checks()
-    use amr_parameters, only: snrt_transport_model,snrt_moment_order,nlevelmax,i8b
+    use amr_parameters, only: snrt_transport_model,snrt_moment_order,nlevelmax,i8b,radiation_transport
     use snrt_moment_live
     use snrt_moment_transport, only: mn_project,mn_ok
 #ifdef HDF5
     use ramses_hdf5_io
     use amr_commons, only: numbl,varcpu_restart,varcpu_ngrid_file,varcpu_grid_file_idx
     use snrt_thermochemistry, only: snrt_secondary_tables_load_from_environment
-    use snrt_agn_efficiency, only: snrt_agn_rt_requested
+    use snrt_agn_efficiency, only: snrt_transport_selected
 #endif
     real(dp),allocatable :: angular(:),number(:,:),energy(:,:),irm(:,:),npad(:,:),epad(:,:),ipad(:,:)
     real(dp),allocatable :: original(:,:),original_ir(:,:)
@@ -172,7 +173,7 @@ contains
     integer :: k,ngir,status,pass,base,cell
     integer :: tile_cells(2),tile_slots(2)
     character(len=1024) :: directory,path
-    snrt_transport_model='tensor_mn';snrt_moment_order=5
+    radiation_transport='snrt_mn';snrt_transport_model='tensor_mn';snrt_moment_order=5
     call mn_live_initialize(5,snrt_ngroups,status)
     if(status/=mn_ok)stop 101
     ngir=snrt_dust_contract_number_ir
@@ -311,7 +312,7 @@ contains
 #ifdef HDF5
     call get_command_argument(1,directory)
     if(len_trim(directory)==0)stop 127
-    if(.not.snrt_agn_rt_requested())stop 128
+    if(.not.snrt_transport_selected())stop 128
     call snrt_secondary_tables_load_from_environment(status)
     if(status/=0)stop 129
     nlevelmax=1
@@ -361,7 +362,7 @@ contains
     use ramses_hdf5_io
     use amr_commons, only: numbl,varcpu_restart,varcpu_ngrid_file,varcpu_grid_file_idx
     use amr_parameters, only: nlevelmax,i8b
-    use snrt_agn_efficiency, only: snrt_agn_rt_requested
+    use snrt_agn_efficiency, only: snrt_transport_selected
     use snrt_thermochemistry, only: snrt_secondary_tables_load_from_environment
     character(len=1024) :: directory,path
     character(len=32) :: mode
@@ -377,7 +378,7 @@ contains
     if(status/=0)stop 55
     call get_command_argument(2,mode)
     with_ir=trim(mode)/='primary'
-    if(.not.snrt_agn_rt_requested())stop 48
+    if(.not.snrt_transport_selected())stop 48
     path=trim(directory)//'/radiation.h5'
     nlevelmax=1
     allocate(numbl(1,1)); numbl=2

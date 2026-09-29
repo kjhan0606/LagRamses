@@ -4,7 +4,7 @@ ncontrol=100
 nrestart=0
 nremap=0
 nsubcycle=10*2
-rt=.true.
+radiation_transport='ramses_rt'
 /
 
 &AMR_PARAMS

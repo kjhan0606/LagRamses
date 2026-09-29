@@ -7,7 +7,7 @@
   pic=.false.
   poisson=.false.
   hydro=.true.
-  rt=.false.
+  radiation_transport='snrt_sn'
   sink=.false.
   sinkprops=.false.
   ncontrol=1

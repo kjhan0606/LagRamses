@@ -1878,8 +1878,9 @@ end subroutine restore_poisson_hdf5
 !###########################################################################
 subroutine restore_part_hdf5()
   use amr_commons
+  use amr_parameters, only: radiation_transport
   use pm_commons
-  use snrt_agn_efficiency, only: snrt_agn_model, snrt_agn_model_legacy, snrt_agn_rt_requested
+  use snrt_agn_efficiency, only: snrt_agn_model, snrt_agn_model_legacy, snrt_transport_selected
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use stellar_enrichment_config, only: stellar_hdf5_state_schema_version
   use ramses_hdf5_io
@@ -1906,6 +1907,7 @@ subroutine restore_part_hdf5()
   integer :: hdf5_attr_status_all
   integer :: nindsink_file
   integer :: agn_schema, agn_saved_model, agn_saved_rt, pending_status, pending_status_all
+  character(len=16) :: agn_saved_transport
   logical :: agn_schema_present
   real(dp),allocatable :: pending_radiation(:), pending_mechanical(:,:)
   character(len=24),parameter :: pending_names(4)=[character(len=24):: &
@@ -2270,12 +2272,32 @@ subroutine restore_part_hdf5()
         call hdf5_restore_header_int_checked(grp_id,'agn_state_schema',agn_schema)
         call hdf5_restore_header_int_checked(grp_id,'agn_model',agn_saved_model)
         call hdf5_restore_header_int_checked(grp_id,'agn_rt_enabled',agn_saved_rt)
-        if(agn_schema/=1.or.agn_saved_model/=snrt_agn_model().or. &
-             agn_saved_rt/=merge(1,0,snrt_agn_rt_requested()))then
-           if(myid==1)write(*,*)'ERROR: AGN checkpoint schema/model/RT ownership mismatch'
+        agn_saved_transport=''
+        if(agn_schema==2)then
+           call hdf5_restore_header_string_checked(grp_id,'radiation_transport',agn_saved_transport)
+           if(trim(agn_saved_transport)/=trim(radiation_transport))then
+              if(myid==1)write(*,'(A,A,A,A)')'ERROR: checkpoint radiation_transport=', &
+                   trim(agn_saved_transport),' differs from requested ',trim(radiation_transport)
+              call hdf5_restart_abort
+           endif
+        else if(agn_schema==1)then
+           ! Legacy schema 1 records only the old SNRT boolean. It cannot
+           ! distinguish other transport modes, so migrate only a positively
+           ! identified SNRT restart; all non-SNRT selections fail closed.
+           if((trim(radiation_transport)/='snrt_sn'.and.trim(radiation_transport)/='snrt_mn').or. &
+                agn_saved_rt/=1)then
+              if(myid==1)write(*,*)'ERROR: legacy checkpoint lacks an exact radiation_transport identity'
+              call hdf5_restart_abort
+           endif
+        else
+           if(myid==1)write(*,*)'ERROR: unsupported AGN checkpoint schema'
            call hdf5_restart_abort
         endif
-     else if(snrt_agn_model()/=snrt_agn_model_legacy.or.snrt_agn_rt_requested())then
+        if(agn_saved_model/=snrt_agn_model().or.agn_saved_rt/=merge(1,0,snrt_transport_selected()))then
+           if(myid==1)write(*,*)'ERROR: AGN checkpoint model/transport ownership mismatch'
+           call hdf5_restart_abort
+        endif
+     else if(snrt_agn_model()/=snrt_agn_model_legacy.or.snrt_transport_selected())then
         if(myid==1)write(*,*)'ERROR: AGN checkpoint is missing the accepted-event ledger'
         call hdf5_restart_abort
      endif

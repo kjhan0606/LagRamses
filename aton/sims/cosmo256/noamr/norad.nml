@@ -1,6 +1,6 @@
 
 &RUN_PARAMS
-aton=.false.
+radiation_transport='none'
 cosmo=.true.
 pic=.true.
 poisson=.true.

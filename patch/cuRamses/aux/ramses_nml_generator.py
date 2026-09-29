@@ -74,7 +74,9 @@ PARAMS = [
     ParamDef('create_sinks', 'bool', True, 'SINK_PARAMS', S_SIMTYPE,
              'Form new sinks (requires hydro and self-gravity; false keeps existing sinks)',
              visible_when='sink==True'),
-    ParamDef('rt',      'bool', False, 'RUN_PARAMS', S_SIMTYPE, 'Radiative transfer'),
+    ParamDef('radiation_transport','str','none','RUN_PARAMS',S_SIMTYPE,
+             'Single local transport selector; UV background, non-equilibrium chemistry and dust remain separate physics controls',
+             choices=['none','snrt_sn','snrt_mn','ramses_rt','aton']),
     ParamDef('lightcone','bool',False, 'RUN_PARAMS', S_SIMTYPE, 'Lightcone output'),
     ParamDef('clumpfind','bool',False, 'RUN_PARAMS', S_SIMTYPE, 'Clump finder'),
     ParamDef('verbose', 'bool', False, 'RUN_PARAMS', S_SIMTYPE, 'Verbose output'),
@@ -112,13 +114,10 @@ PARAMS = [
     ParamDef('gpu_auto_tune','bool',True,  'RUN_PARAMS', S_GPU, 'Auto-tune CPU vs GPU (disable for benchmarks)'),
     ParamDef('use_fftw',   'bool', True,   'RUN_PARAMS', S_GPU, 'FFTW3 CPU direct Poisson solver'),
 
-    # Misc run_params
-    ParamDef('snrt_transport_model','str','sn','RUN_PARAMS',S_HYDRO,
-             'Native radiation representation; tensor_mn uses compact MC15/SSPRK2, gas/dust coupling and CUDA/OpenMP dispatch',
-             choices=['sn','tensor_mn']),
+    # SNRT representation detail; it is not a second transport selector.
     ParamDef('snrt_moment_order','int',3,'RUN_PARAMS',S_HYDRO,
              'Tensor M_N order 1/2/3/4/5 stores 4/9/16/25/36 moments per spectral group',
-             visible_when="snrt_transport_model=='tensor_mn'",choices=[1,2,3,4,5]),
+             visible_when="radiation_transport=='snrt_mn'",choices=[1,2,3,4,5]),
     ParamDef('jobcontrolfile','str','',    'RUN_PARAMS', S_TIME, 'Job control file path'),
     ParamDef('dump_pk',    'bool', False,  'RUN_PARAMS', S_OUTPUT, 'Dump power spectrum'),
     ParamDef('sinkprops',  'bool', False,  'RUN_PARAMS', S_SIMTYPE, 'Output sink properties'),
@@ -257,7 +256,10 @@ PARAMS = [
     # ====== PHYSICS_PARAMS ======
     # Cooling & SF
     ParamDef('cooling',   'bool', False,   'PHYSICS_PARAMS', S_COOL, 'Radiative cooling'),
-    ParamDef('haardt_madau','bool',False,   'PHYSICS_PARAMS', S_COOL, 'Haardt-Madau UV background'),
+    ParamDef('haardt_madau','bool',False,   'PHYSICS_PARAMS', S_COOL,
+             'Haardt-Madau metagalactic UV background; independent of local radiation_transport'),
+    ParamDef('neq_chem','bool',False,'PHYSICS_PARAMS',S_COOL,
+             'RAMSES non-equilibrium chemistry/cooling; independent of local radiation_transport'),
     ParamDef('metal',     'bool', False,   'PHYSICS_PARAMS', S_COOL, 'Metal cooling'),
     ParamDef('isothermal','bool', False,   'PHYSICS_PARAMS', S_COOL, 'Isothermal EOS'),
     ParamDef('cooling_method','str','original','PHYSICS_PARAMS',S_COOL,'Cooling method',
@@ -267,7 +269,8 @@ PARAMS = [
     ParamDef('z_reion',   'real', 8.5,     'PHYSICS_PARAMS', S_COOL, 'Reionization redshift',
              visible_when='cooling==True'),
     ParamDef('z_ave',     'real', 0.0,     'PHYSICS_PARAMS', S_COOL, 'Average metallicity'),
-    ParamDef('J21',       'real', 0.0,     'PHYSICS_PARAMS', S_COOL, 'LW background intensity'),
+    ParamDef('J21',       'real', 0.0,     'PHYSICS_PARAMS', S_COOL,
+             'LW background intensity; independent of local radiation_transport'),
     ParamDef('a_spec',    'real', 1.0,     'PHYSICS_PARAMS', S_COOL, 'UV spectral index'),
     ParamDef('self_shielding','bool',False,'PHYSICS_PARAMS', S_COOL, 'Self-shielding from UV'),
     ParamDef('T2max',     'real', 0.0,     'PHYSICS_PARAMS', S_COOL, 'Max temperature for cooling'),
@@ -288,7 +291,7 @@ PARAMS = [
 
     # Feedback (SN)
     ParamDef('dust_mass_enabled','bool',False,'PHYSICS_PARAMS',S_FEED,
-             'Dust mass evolution; sinks only in explicit coadvected kind7/NENER=0 Bondi comparison'),
+             'Dust mass/thermal evolution switch; independent of local transport except explicitly radiative dust submodels'),
     ParamDef('dust_relative_motion','bool',False,'PHYSICS_PARAMS',S_FEED,
              'Experimental first-order gas/grain dynamics; CHIMES+D03 CPU/OpenMP comparison, bounded Fe+PAH integration/restart verified'),
     ParamDef('dust_drag_collision_cross_section_cm2','real',0.0,'PHYSICS_PARAMS',S_FEED,
@@ -703,18 +706,27 @@ def validate_params(values):
     values = _normalize_values(values)
     msgs = []
 
-    transport = str(values.get('snrt_transport_model','sn')).strip("'\"")
-    if transport not in ('sn','tensor_mn'):
-        msgs.append(ValidationMsg('ERROR','snrt_transport_model must be sn or tensor_mn'))
+    transport = str(values.get('radiation_transport','none')).strip("'\"")
+    transports = ('none','snrt_sn','snrt_mn','ramses_rt','aton')
+    if transport not in transports:
+        msgs.append(ValidationMsg('ERROR','radiation_transport must be one of: '+', '.join(transports)))
     order = values.get('snrt_moment_order',3)
     if isinstance(order,str) and re.fullmatch(r'[1-5]',order.strip()):
         order = int(order.strip())  # Imported namelists carry raw Fortran strings.
     if type(order) is not int or order not in (1,2,3,4,5):
         msgs.append(ValidationMsg('ERROR','snrt_moment_order must be integer 1, 2, 3, 4 or 5'))
-    if transport == 'tensor_mn':
+    if transport == 'snrt_mn':
         msgs.append(ValidationMsg('WARNING','tensor_mn requires SNRT=1 and HDF5=1. Band mode uses native bounded endpoint moments and a distinct restart identity. CHIMES/dust require their compiled modules and compatible physical inputs; GPU requires USE_CUDA=1; no SN fallback.'))
         if str(values.get('outformat','hdf5')).strip("'\"") != 'hdf5':
-            msgs.append(ValidationMsg('ERROR','tensor_mn requires HDF5 output for its typed compact radiation payload.'))
+            msgs.append(ValidationMsg('ERROR','radiation_transport=snrt_mn requires HDF5 output for its typed compact radiation payload.'))
+    elif transport!='snrt_mn' and type(order) is int and order!=3:
+        msgs.append(ValidationMsg('ERROR','snrt_moment_order is only meaningful for radiation_transport=snrt_mn'))
+    if transport=='snrt_sn':
+        msgs.append(ValidationMsg('WARNING','radiation_transport=snrt_sn requires a binary built with SNRT=1.'))
+    if transport=='ramses_rt':
+        msgs.append(ValidationMsg('WARNING','radiation_transport=ramses_rt requires a binary built with RT.'))
+    if transport=='aton':
+        msgs.append(ValidationMsg('WARNING','radiation_transport=aton requires an ATON-enabled binary.'))
 
     if not values.get('mhd_enabled') and any(values.get(k,False) for k in ('mhd_omp','mhd_gpu_faces')):
         msgs.append(ValidationMsg('ERROR','MHD execution flags require mhd_enabled and SOLVER=mhd'))
@@ -781,7 +793,7 @@ def validate_params(values):
             valid=valid and model=='carbon_olivine_2size_v1' and material=='dl01_composition_v1'
             if sublimation=='gd89_xu25_olivine_rt_v1':
                 valid=valid and coupling=='chimes_neq_v1' and clean('dust_optics_model')=='d03_transport_v1'
-                msgs.append(ValidationMsg('WARNING','Coupled vacuum sublimation uses adaptive native CPU/OpenMP material, lagged opacities/Cv and an exchange-enabled hot IR contract; SNRT_RT_ENABLE=1 required.'))
+                msgs.append(ValidationMsg('WARNING','Coupled vacuum sublimation uses adaptive native CPU/OpenMP material, lagged opacities/Cv and an exchange-enabled hot IR contract; select radiation_transport=snrt_sn or snrt_mn.'))
             else:
                 msgs.append(ValidationMsg('WARNING','Vacuum sublimation is split before RT; requires a matching native binary/hot material contract. No PAH evaporation or vapor backpressure.'))
             if sublimation in ('gd89_xu25_olivine_v1','gd89_xu25_olivine_rt_v1'):
@@ -932,7 +944,7 @@ def validate_params(values):
             valid=valid and not relative and iron=='none' and pah=='none' and sublimation=='none'
             valid=valid and not any(flag(k) for k in ('sink','sink_agn','agn','cr_enabled','use_sgs',
                                                      'mhd_enabled','dust_sn_shocks'))
-            msgs.append(ValidationMsg('WARNING','Cosmological dust requires NENER=0 CPU material, kind7 CHIMES, SNRT_RT_ENABLE=1 and exchange-enabled v4 IR. Analytic optically thin CMB at 2.727/a with explicit energy receipt; no 10 K floor. Fixed-group IR dilutes as a^-3 without spectral redshift. This is not galaxy-calibration qualification.'))
+            msgs.append(ValidationMsg('WARNING','Cosmological dust requires NENER=0 CPU material, kind7 CHIMES, SNRT transport selection and exchange-enabled v4 IR. Analytic optically thin CMB at 2.727/a with explicit energy receipt; no 10 K floor. Fixed-group IR dilutes as a^-3 without spectral redshift. This is not galaxy-calibration qualification.'))
         if not valid:
             msgs.append(ValidationMsg('ERROR','Dust needs valid parameters, periodic metal hydro, channel feedback, HDF5; cosmology only coadvected C/silicate kind7/NENER=0 with CHIMES/DL01/D03 and no sinks/CR/SGS; cooling requires explicit closure/original/no UV'))
         msgs.append(ValidationMsg('WARNING','Dust needs active SNRT v4 material; D03 is an explicit common-T/transport comparison. WSS09 CIE is not local-radiation/NEQ cooling; no T/He extrapolation'))
@@ -1237,13 +1249,21 @@ def format_namelist(values, emit_defaults=False):
             group_params[p.group] = []
         val = values.get(p.name.lower())
         if val is None:
-            if emit_defaults and p.default is not None:
+            if p.name.lower()=='radiation_transport':
+                val=p.default
+            elif emit_defaults and p.default is not None:
                 val = p.default
             else:
                 continue
-        # Skip default values unless emit_defaults
+        # Keep AMR interpolation choices explicit whenever the caller
+        # supplied them.  Their numeric defaults are compiler/runtime
+        # behavior, so hiding an explicitly selected production choice makes
+        # an effective namelist ambiguous.
         if not emit_defaults:
-            if val == p.default:
+            explicit_run_choice = (p.name.lower()=='radiation_transport' or
+                                   (p.name.lower() in ('interpol_var','interpol_type') and
+                                    p.name.lower() in values))
+            if val == p.default and not explicit_run_choice:
                 continue
         # Format the value
         fval = _fmt_fortran_value(val, p.ftype)

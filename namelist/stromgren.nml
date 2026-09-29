@@ -1,6 +1,6 @@
 &RUN_PARAMS
 hydro=.true.
-rt=.true.
+radiation_transport='ramses_rt'
 nrestart=0
 nremap=0
 nsubcycle=10*1

@@ -44,7 +44,7 @@ if [ -f "$cpu/run.nml" ] && [ -f "$gpu/run.nml" ]; then
     required_settings=(
       'cosmo=.true.' 'pic=.true.' 'poisson=.true.' 'hydro=.false.'
       'clumpfind=.false.' 'sink=.false.' 'sinkprops=.false.'
-      'lightcone=.false.' 'rt=.false.' 'aton=.false.'
+      'lightcone=.false.' "radiation_transport='none'"
       'verbose=.false.' 'debug=.false.' 'dump_pk=.false.'
       'de_perturb=.false.' 'sidm=.false.' 'use_nDGP=.true.'
       'use_fR=.false.' 'use_symmetron=.false.' 'use_dilaton=.false.'

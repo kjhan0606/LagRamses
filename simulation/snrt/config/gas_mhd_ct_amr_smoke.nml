@@ -6,7 +6,7 @@
  pic=.false.
  poisson=.false.
  hydro=.true.
- rt=.false.
+ radiation_transport='none'
  sink=.false.
  nrestart=0
  nstepmax=4

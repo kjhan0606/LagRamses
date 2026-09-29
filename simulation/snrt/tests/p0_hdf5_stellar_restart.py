@@ -347,7 +347,9 @@ def _run_fortran_hdf5_roundtrip(root: Path) -> dict[str, object]:
             "&INIT_PARAMS\n", "&INIT_PARAMS\nfiletype='ascii'\ninitfile(1)='.'\n", 1
         )
         namelist_text = namelist_text.replace("stellar=.true.\n", "", 1)
-        namelist_text = namelist_text.replace("rt=.true.\n", "rt=.false.\n", 1)
+        namelist_text = namelist_text.replace(
+            "radiation_transport='ramses_rt'", "radiation_transport='none'", 1
+        )
         namelist_text = namelist_text.replace("nremap=10", "nremap=0", 1)
         namelist_text = namelist_text.replace("levelmin=6", "levelmin=4", 1)
         namelist_text = namelist_text.replace("levelmax=8", "levelmax=4", 1)
