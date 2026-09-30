@@ -9,7 +9,8 @@ program dark_probe
   character(64)::target_subdt_text,target_repeats_text,molecular_case
   character(2)::num
   real(c_double)::elements(11),old(157),next(157),ctl(9),t,elapsed,start,measured(11),q
-  real(c_double),parameter::temps(3)=[100d0,1d4,1d6],dens(3)=[1d-4,.2d0,100d0]
+  ! Moderate densities locate the dense/SPGMR performance crossover; physics is unchanged.
+  real(c_double),parameter::temps(3)=[100d0,1d4,1d6],dens(6)=[1d-4,.2d0,.5d0,1d0,10d0,100d0]
   real(c_double)::thread_state(157,32),thread_t(32),thread_elapsed(32)
   real(c_double)::target_subdt
   integer::thread_status(32)
@@ -156,7 +157,7 @@ program dark_probe
   endif
   ! Neutral/molecular and ionized carriers in the same valid H inventory.
   old(1)=.01d0;old(2)=.97d0;old(3)=.01d0;old(138)=.01d0
-  do j=1,3
+  do j=1,size(dens)
     do i=1,2
       ctl=[dens(j),temps(i),272.7d0,1d10,1d20,0d0,1d0,0d0,.01d0]
       atomic=merge(1,0,i==3)

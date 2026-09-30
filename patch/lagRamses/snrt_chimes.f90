@@ -288,7 +288,7 @@ contains
     real(c_double)::photo(chimes_ns),chem(chimes_ns),pn(nd,9),pe(nd,9),budget(11),ctl(9),factors(3)
     real(c_double)::measured(11),charge,temp,gn(9),ge(9),post_photo,tmax
     real(c_double)::incoming(chimes_ns),projected(chimes_ns),tin,elapsed,root_time,cost,entry_cost,events(2)
-    logical::general,atomic_remainder
+    logical::general,atomic_remainder,zero_incident
     real(c_double)::split_start
     real(c_double),parameter::ev_erg=1.602176634d-12
     status=2
@@ -315,7 +315,11 @@ contains
        events=[merge(1d0,0d0,any(incoming(138:157)>0)),cost*controls(1)]
        incoming=projected;tin=temp;entry_cost=cost*controls(1);atomic_remainder=.true.
     endif
-    if(atomic_remainder.or.(general.and.tin>=tmax))then
+    zero_incident=all(number==0d0).and.all(energy==0d0)
+    if(atomic_remainder.or.(general.and.tin>=tmax).or.zero_incident)then
+       ! Shielding/pumping factors affect only photo-rates. Keep the native
+       ! photo adapter call below so it still validates the zero field and
+       ! returns its exact identity transaction; dark chemistry still runs.
        factors=[1d0,1d0,0d0];status=0
     else
        status=chimes_molecular_factors(tin,controls(1),controls(5),incoming,factors)

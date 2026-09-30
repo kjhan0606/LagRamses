@@ -2697,3 +2697,28 @@ long photo/CMB and target-duration regressions pass. Measured native dark
 time reduction is about 9--10%, not a whole-simulation speedup claim.
 Integrated comparison remains pending; see
 [measured evidence and library identities](../../provenance/chimes_parallel_efficiency_2026-09-27.md).
+
+### RT-independent cosmological dust + CHIMES matter stage (2026-09-30)
+
+For the admitted cosmological two-size C/silicate + DL01/D03 + CHIMES profile,
+`radiation_transport='none'` now means zero local transported photons, not zero
+matter thermochemistry. The level sequence advances dust mass, then CHIMES
+dark chemistry, then the existing local dust-material operator against the
+analytic CMB bath. CHIMES and dust share one staged gas-energy reservoir;
+gas--dust transfer is applied once, and the material transaction commits only
+after the rank-wide validity decision. Dust IR emitted in this mode is
+optically thin/escaped; CMB exchange is recorded separately. No CMB photons are
+inserted into ionizing groups.
+
+This is a dark-ISM comparison: local photo-rates and the UV background are
+absent, so molecular fractions can be high and grain temperatures are a lower
+bound. The cosmological admission remains narrow (kind-7 CHIMES transition,
+NENER=0, C/silicate DL01/D03; no sinks, CR, SGS, Fe, PAH or drift). `snrt_sn`
+and `snrt_mn` retain their existing shared finite-photon/material transactions;
+other RT engines are not admitted for this profile. No new namelist selector
+or restart field is introduced.
+The existing `gpu_*` RUN_PARAMS remain independent: `radiation_transport='none'`
+does not turn CUDA hydro/Poisson on or off. The current cosmological dust
+composition admission explicitly rejects `gpu_hydro`; the H200 comparison
+therefore keeps hydro on CPU and enables `gpu_poisson`. Other unused GPU
+subsystems remain disabled.

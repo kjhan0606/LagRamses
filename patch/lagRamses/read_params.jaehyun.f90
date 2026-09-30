@@ -2038,7 +2038,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         call snrt_dust_contract_load_from_environment(snrt_dust_contract_error)
         if(snrt_dust_contract_error/=0.or..not.snrt_dust_contract_loaded.or. &
              .not.snrt_dust_contract_runtime_allowed.or.snrt_dust_contract_version/=4)then
-           if(myid==1)write(*,'(A)')'Dust-only startup rejected: require admitted SNRT_DUST_CONTRACT v4 material data.'
+           if(myid==1)write(*,'(A)') &
+                'Radiation-free dust/CHIMES startup rejected: require admitted SNRT_DUST_CONTRACT v4 material data.'
            nml_ok=.false.
         else if(myid==1)then
            write(*,'(A)')'Dust material contract admitted independently of local photon transport.'

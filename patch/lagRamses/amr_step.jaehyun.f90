@@ -16,6 +16,7 @@ recursive subroutine amr_step(ilevel,icount)
   use omp_lib, only: omp_get_wtime,omp_get_max_threads
 #ifdef SNRT_CHIMES
   use snrt_chimes_runtime, only: chimes_prepare_level
+  use snrt_dark_matter_runtime, only: snrt_dark_matter_advance_level
 #endif
 #ifdef HYDRO_CUDA
   use cuda_commons, only: cuda_pool_is_initialized_c
@@ -990,6 +991,12 @@ recursive subroutine amr_step(ilevel,icount)
 #ifdef SNRT
   cool_t1=omp_get_wtime()
   call dust_mass_advance_level(ilevel)
+#ifdef SNRT_CHIMES
+  ! Radiation-free CHIMES and the optically thin CMB/material solve are
+  ! independent matter operators; the RT drivers retain their existing
+  ! shared-photon transaction when a transport scheme is selected.
+  call snrt_dark_matter_advance_level(ilevel)
+#endif
   call snrt_ramses_advance_level(ilevel,snrt_step_start_proper)
 #ifdef DUST_DYNAMICS
   ! Lie split: transport/mass/radiation then drag. Total p/E stay unchanged;

@@ -306,7 +306,7 @@ ifeq ($(CHIMES),1)
   FFLAGS += -DSNRT_CHIMES
   CHIMES_OBJS = snrt_chimes_bridge.o snrt_chimes_spectrum.o snrt_chimes_photo.o snrt_chimes.o
   CHIMES_CHARGE_TEST_OBJS = dust_stochastic.o dust_pah_radiation.o snrt_moving_scatter.o snrt_dust_ir.o
-  SNRT_MODOBJ += $(CHIMES_OBJS) snrt_chimes_runtime.o initialize_chimes_live_state.o
+  SNRT_MODOBJ += $(CHIMES_OBJS) snrt_chimes_runtime.o initialize_chimes_live_state.o snrt_dark_matter_runtime.o
   LIBS_CHIMES = -L$(CHIMES_DIR) -lchimes -Wl,-rpath,$(CHIMES_DIR) \
     -Wl,-rpath,$(SUNDIALS_DIR)/lib -Wl,-rpath,$(SUNDIALS_DIR)/lib64 \
     -Wl,--no-as-needed -L$(SUNDIALS_DIR)/lib64 -L$(SUNDIALS_DIR)/lib \
@@ -536,8 +536,13 @@ snrt_chimes_rate_reset_test: ../simulation/snrt/tests/fixtures/phase0/chimes_rat
 snrt_chimes_long_interval_test: ../simulation/snrt/tests/fixtures/phase0/chimes_photo_long_interval_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS)
 	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(LIBS_CHIMES) -o $@
 snrt_chimes_runtime.o: snrt_chimes.o hydro_commons.o amr_commons.kjhan.o dust_mass_physics.o snrt_atomic_cooling.o snrt_spectral_contract.o dust_composition_optics.o snrt_moving_scatter.o dust_iron_photons.o
+snrt_dark_matter_runtime.o: amr_parameters.jaehyun.o amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
+                            dust_mass_physics.o snrt_dust_contract.o snrt_dust_live.o snrt_dust_ir.o \
+                            dust_composition_material.o dust_composition_optics.o snrt_chimes_runtime.o \
+                            snrt_chimes.o snrt_spectral_contract.o snrt_atomic_cooling.o snrt_agn_source.o
 initialize_chimes_live_state.o: snrt_chimes_runtime.o
 snrt_ramses_driver.o dust_mass_runtime.o amr_step.jaehyun.o backup_hdf5.o: snrt_chimes_runtime.o
+amr_step.jaehyun.o: snrt_dark_matter_runtime.o
 umuscl.kjhan.o interpol_hydro.kjhan.o: snrt_chimes_runtime.o
 endif
 snrt_angular_quadrature.o: snrt_state.o

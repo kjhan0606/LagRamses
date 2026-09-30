@@ -2,7 +2,7 @@
 ! - added parameters for Kimm feedback and star formation
 subroutine read_hydro_params(nml_ok)
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use amr_parameters, only: grafic_nreaders
+  use amr_parameters, only: grafic_nreaders,radiation_transport
   use amr_commons
   use hydro_commons
   use cosmic_ray_physics
@@ -404,10 +404,12 @@ subroutine read_hydro_params(nml_ok)
 #endif
      if(.not.hydro.or..not.metal.or.nboundary>0) dust_ok=.false.
      if(cosmo)then
-        ! Narrow cosmological path: coadvected C/silicate and an explicitly
-        ! ledgered optically thin CMB. Other phase/energy layouts stay closed.
+        ! Narrow cosmological path: coadvected C/silicate with CHIMES and an
+        ! explicitly ledgered optically thin CMB. RT may be absent (dark-ISM
+        ! matter operator) or SNRT; unrelated RT engines/layouts stay closed.
 #if defined(SNRT_CHIMES) && !defined(SOLVERmhd)
-        if(.not.snrt_chimes_transition_enabled().or..not.snrt_transport_selected().or.nener/=0)dust_ok=.false.
+        if(.not.snrt_chimes_transition_enabled().or. &
+             (.not.snrt_transport_selected().and.trim(radiation_transport)/='none').or.nener/=0)dust_ok=.false.
         if(.not.dust_chimes_enabled().or..not.dust_two_size_enabled().or. &
              .not.dust_optics_enabled().or..not.dust_material_composition_enabled())dust_ok=.false.
         if(dust_relative_motion.or.dust_iron_enabled().or.dust_pah_enabled().or. &
@@ -447,7 +449,8 @@ subroutine read_hydro_params(nml_ok)
   if(.not.dust_ok)then
      if(myid==1)write(*,*)'ERROR: dust mass requires valid parameters and SNRT-module/DUST_LIVE/HDF5 channel feedback,'
      if(myid==1)write(*,*)'periodic metal hydro; no neq/delayed cooling; cooling needs an explicit dust closure'
-     if(myid==1)write(*,*)'Cosmo dust: kind7/NENER=0 C/silicate DL01+D03/CHIMES; no sinks, CR, SGS, Fe, PAH or drift'
+     if(myid==1)write(*,*)'Cosmo dust: kind7/NENER=0 C/silicate DL01+D03/CHIMES; none=dark-ISM+CMB, SNRT=shared photons'
+     if(myid==1)write(*,*)'  no sinks, CR, SGS, Fe, PAH or drift'
      if(myid==1)write(*,*)'Dust sinks require NENER=0 kind7 reference Bondi, existing sinks, coadvected C/silicate only'
 #ifdef SNRT
      if((dust_sublimation_rt_enabled().or.dust_fe_uv_enabled().or.dust_pah_enabled()).and. &

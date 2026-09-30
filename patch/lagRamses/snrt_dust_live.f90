@@ -528,7 +528,7 @@ contains
        gas_energy,gas_capacity,n_hydrogen,gas_transfer,cell_material_u,cell_collision_area,cell_weights, &
        sublimation_bins,sublimation_next,pah_population,primary_spectrum,primary_pah_heat,primary_pah_captures, &
        phase_density,phase_momentum,phase_work,gas_electrons,electron_capacity,gas_atomic_h,gas_molecular_h2, &
-       gas_atomic_c,gas_carbon_ion,incoming_radiation)
+       gas_atomic_c,gas_carbon_ion,incoming_radiation,thin_local_escape)
     integer, intent(in) :: ilevel,cells(:),slots(:),neighbors(:,:)
     real(dust_dp), intent(in) :: directions(:,:),weights(:),dx,dt,chat
     real(dust_dp), intent(in) :: density(:),primary_energy(:),old_energy(:),capacity(:)
@@ -561,6 +561,8 @@ contains
     ! by the legacy IR stencil. This path performs NO MPI collectives, so
     ! the caller may use bounded per-cell/tile scratch on unequal rank loads.
     real(dust_dp),optional,intent(in)::incoming_radiation(:,:,:)
+    ! RT-off cosmological closure: count net emitted IR as escaped energy.
+    logical,optional,intent(in)::thin_local_escape
     real(dust_dp),allocatable::electron_work(:),electron_initial(:),pah_capacity(:)
     real(dust_dp),allocatable::primary_pah_population(:,:)
     real(dust_dp),allocatable::h_work(:),h_initial(:)
@@ -588,7 +590,7 @@ contains
     integer :: halo_tile,first_component,ncomponent,component,column
     integer, allocatable,target :: remote(:,:)
     integer, allocatable :: ghost_cells(:),ghost_kind(:),coarse_cells(:)
-    logical :: local_material
+    logical :: local_material,escape_local_emission
     logical, allocatable :: blocked(:,:)
     type(dust_ir_diagnostics) :: step
     real(dust_dp) :: cfl,step_dt,mu,q
@@ -596,8 +598,14 @@ contains
     integer :: nsub,isub,i,ng,face,k,nghost,nfield,g,d,global_nsub,info,has_coarse,b,nbulk
     integer :: grid,child,cell,ncoarse_leaf,axis,nd
     local_material=present(incoming_radiation);nd=size(weights)
+    escape_local_emission=.false.
+    if(present(thin_local_escape))escape_local_emission=thin_local_escape
     nullify(ghost_arg,remote_arg,transport_arg)
     if(.not.local_material)transport_arg=>snrt_runtime_ir_transport
+    if(escape_local_emission.and.(.not.local_material.or..not.cosmo.or..not.present(gas_energy).or. &
+         present(phase_density).or.present(sublimation_bins).or.dust_iron_enabled().or.dust_pah_enabled()))then
+       ierr=dust_err_config;return
+    endif
     call prepare(ierr)
     if(ierr==dust_ok)call validate_stage()
     call stage_error(ierr)
@@ -902,7 +910,8 @@ contains
             ghost_arg,remote_arg,blocked,bath_dispatch=cosmological_material, &
             transport_dispatch=transport_arg,absorb_dispatch=snrt_runtime_ir_absorb, &
             gas_energy=gas_work,gas_capacity=gas_capacity,conductance=conductance,gas_transfer=exchange, &
-            cell_material_u=cell_material_u,cell_weights=cell_weights,material_only=local_material)
+            cell_material_u=cell_material_u,cell_weights=cell_weights,material_only=local_material, &
+            optically_thin_escape=escape_local_emission)
        if(ierr==dust_ok)exchange_sum=exchange_sum+exchange
        else if(present(gas_energy))then
        conductance=2*kb*n_hydrogen*density*snrt_dust_contract_collision_area_per_h* &
@@ -1143,7 +1152,10 @@ contains
          if(2.727d0/aexp>snrt_dust_contract_temperature_k(snrt_dust_contract_number_temperature))return
          if(.not.present(gas_energy).or..not.present(cell_weights).or..not.present(cell_material_u))return
          if(present(phase_density).or.present(sublimation_bins).or.dust_iron_enabled().or.dust_pah_enabled())return
-         if(.not.snrt_runtime_cpu_material_allowed())return
+         ! A caller-owned local material solve (including the RT-off CMB
+         ! bath) dispatches directly to the CPU/OpenMP material operator and
+         ! deliberately does not initialize the photon-transport backend.
+         if(.not.local_material.and..not.snrt_runtime_cpu_material_allowed())return
       endif
       ierr=dust_err_shape
       if(present(phase_density).neqv.present(phase_momentum))return
@@ -1251,7 +1263,11 @@ contains
          ierr=dust_err_state
          if(any(.not.ieee_is_finite(incoming_radiation)).or.any(incoming_radiation<0))return
       endif
-      if(any(slots<1).or.any(slots>snrt_nslot))return
+      ! A caller-owned zero-beam material stage has no RT slot to reference.
+      ! Existing local M_N material calls may still supply a valid slot, but
+      ! only transport/spatial stages require every slot to be positive.
+      if(any(slots<0).or.any(slots>snrt_nslot))return
+      if(.not.local_material.and.any(slots<1))return
       nfield=ICELL_OF(ngridmax,twotondim)
       if(any(cells<1).or.any(cells>nfield))return
       if(size(slots)>0.and..not.local_material)then

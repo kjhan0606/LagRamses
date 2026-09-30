@@ -341,7 +341,8 @@ contains
        ghost_energy,ghost_index,blocked_face,material_dispatch,transport_dispatch,absorb_dispatch, &
        gas_energy,gas_capacity,conductance,gas_transfer,cell_material_u,cell_weights,thin_reabsorption, &
        population,population_dispatch,cell_absorption,phase_density,phase_momentum,phase_absorption, &
-       phase_scattering,phase_work,moving_material_dispatch,population_loss,bath_dispatch,material_only)
+       phase_scattering,phase_work,moving_material_dispatch,population_loss,bath_dispatch,material_only, &
+       optically_thin_escape)
     ! energy(g,d,cell): erg/cm3 per normalized direction; density: nH*relative_dust;
     ! primary: erg/cm3/s. photons(g,cell) accumulates emitted photons/cm3.
     ! Only success commits energy/temperature/photons/diagnostics. All trials
@@ -397,6 +398,10 @@ contains
     ! does not transport: no neighbor/ghost/transport callback may be supplied.
     ! Absorption/emission, thermal/population and moving physics are unchanged.
     logical,optional,intent(in)::material_only
+    ! RT-off cosmological closure: solve CMB/gas/dust once per cell and treat
+    ! the resulting positive net IR emission as escaped, with no local IR
+    ! absorption iteration or stored radiation field.
+    logical,optional,intent(in)::optically_thin_escape
     real(real64),allocatable::phase_heat(:,:,:),heat_guess(:,:,:),phase_events(:,:,:),event_guess(:,:,:)
     real(real64),allocatable::phase_rate(:,:,:),beta_guess(:,:,:),beta_next(:,:,:),momentum_next(:,:,:)
     real(real64),allocatable::work_next(:,:),scatter_work(:),scatter_e(:,:),scatter_tau(:,:)
@@ -414,7 +419,7 @@ contains
     real(real64), allocatable :: guess(:), absorbed(:), transmit(:,:), loss(:,:), response(:,:)
     real(real64), allocatable :: emitted_photons(:,:)
     real(real64), allocatable :: trial_dust_energy(:)
-    logical :: transient,local_material
+    logical :: transient,local_material,escape_local_emission
     real(real64) :: cfl, volume, factor, tau, source, old_total, new_total, scale, balance, sum_w
     real(real64) :: material_tolerance
     real(real64) :: escaped_total,interface_total
@@ -443,6 +448,12 @@ contains
     ierr=dust_err_config
     local_material=.false.
     if(present(material_only))local_material=material_only
+    escape_local_emission=.false.
+    if(present(optically_thin_escape))escape_local_emission=optically_thin_escape
+    if(escape_local_emission)then
+       if(.not.local_material.or..not.transient.or..not.present(bath_dispatch).or. &
+            .not.present(gas_energy).or..not.present(gas_transfer).or.moving.or.present(population))return
+    endif
     if(local_material)then
        if(any(neighbor/=0).or.present(ghost_energy).or.present(ghost_index).or.present(transport_dispatch))return
     endif
@@ -756,6 +767,42 @@ contains
        scale=max(scale,sum(dust_energy)*volume)
        if(.not.ieee_is_finite(scale))return
     end if
+    if(escape_local_emission)then
+       ! This is the deliberate RT-off optically-thin closure. No incident or
+       ! primary radiation is admitted; emitted net IR leaves the cell and is
+       ! recorded as escaped energy, while the analytic CMB receipt and gas
+       ! transfer remain explicit terms in the conservative material ledger.
+       ierr=dust_err_config
+       if(any(energy/=0d0).or.any(photons/=0d0).or.any(primary/=0d0))return
+       call bath_dispatch(primary,density,dust_energy,heat_capacity,table%log_t,table%power,table%band, &
+            dispatch_u,allocated(table%material_u),dt,table%background,table%background_temperature, &
+            material_tolerance,rate,next_t,trial_dust_energy,gas_energy,gas_capacity,conductance, &
+            exchange,cell_material_u,cell_weights,table%optical_power,table%optical_band,bath_exchange,ierr)
+       if(ierr/=dust_ok)return
+       ierr=dust_err_state
+       if(any(.not.ieee_is_finite(rate)).or.any(rate<0))return
+       if(any(.not.ieee_is_finite(trial_dust_energy)).or.any(trial_dust_energy<0))return
+       if(any(.not.ieee_is_finite(next_t)).or.any(next_t<0))return
+       if(any(.not.ieee_is_finite(exchange)).or.any(.not.ieee_is_finite(bath_exchange)))return
+       if(any(bath_exchange<0).or.any(gas_energy-exchange<0))return
+       trial%escaped_erg=sum(rate)*dt*volume
+       trial%absorbed_erg=0d0
+       trial%background_erg=sum(bath_exchange)*volume
+       trial%primary_erg=0d0
+       trial%interface_erg=0d0
+       trial%iterations=1
+       scale=max(scale,sum(abs(dust_energy))*volume,sum(abs(trial_dust_energy))*volume, &
+            trial%escaped_erg,trial%background_erg,sum(abs(exchange))*volume,tiny(scale))
+       balance=sum(trial_dust_energy-dust_energy)*volume+trial%escaped_erg- &
+            sum(exchange)*volume-trial%background_erg
+       trial%balance_relative=abs(balance)/scale
+       trial%local_relative=0d0
+       if(.not.ieee_is_finite(trial%balance_relative).or.trial%balance_relative>material_tolerance)return
+       energy=0d0;photons=0d0;temperature=next_t;dust_energy=trial_dust_energy
+       gas_energy=gas_energy-exchange;gas_transfer=exchange
+       diagnostics=trial;ierr=dust_ok
+       return
+    endif
     guess=0
     allocate(direct_update(nc));direct_update=.false.
     if(present(thin_reabsorption))then
