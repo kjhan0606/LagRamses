@@ -13,6 +13,10 @@
 #include "chimes_proto.h"
 #include "chimes_vars.h"
 #include "snrt_chimes_atomization.h"
+#ifdef SNRT_CHIMES_CUDA
+#include "snrt_chimes_cvode_cuda.h"
+#include "snrt_chimes_rhs_cuda.h"
+#endif
 
 #define NS 157
 #define NG 9
@@ -526,6 +530,41 @@ static ChimesFloat remove_duplicate_dust_energy(struct gasVariables *g,const str
 
 int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,int stride)
 {
+    if(initialized)return 1;
+    const char *cvode_backend=getenv("SNRT_CHIMES_CVODE_BACKEND");
+    if(cvode_backend && *cvode_backend && strcmp(cvode_backend,"cpu")) {
+#ifdef SNRT_CHIMES_CUDA
+        /* Reject a stale external CHIMES library instead of silently running
+         * CPU under a requested GPU mode. No change to the structure ABI. */
+        void *factory_handle=dlopen(NULL,RTLD_NOW);
+        if(!factory_handle)return 5;
+        int (*factory_abi)(void)=(int (*)(void))dlsym(factory_handle,"snrt_chimes_cvode_factory_abi");
+        int factory_ok=factory_abi && factory_abi()==1;
+        dlclose(factory_handle);
+        if(!factory_ok)return 5;
+#else
+        fprintf(stderr,"CHIMES CUDA backend requested but CHIMES_CUDA=1 is absent\n");
+        return 5;
+#endif
+    }
+#ifdef SNRT_CHIMES_CUDA
+    if(snrt_chimes_cvode_configure())return 5;
+#endif
+    const char *rhs_backend=getenv("SNRT_CHIMES_RHS_BACKEND");
+    if(rhs_backend && *rhs_backend && strcmp(rhs_backend,"cpu")) {
+#ifdef SNRT_CHIMES_CUDA
+        void *handle=dlopen(NULL,RTLD_NOW);
+        if(!handle)return 5;
+        int (*abi)(void)=(int (*)(void))dlsym(handle,"snrt_chimes_dark_rhs_abi");
+        int ok=abi && abi()==1;dlclose(handle);
+        if(!ok)return 5;
+#else
+        fprintf(stderr,"CHIMES device RHS requires CHIMES_CUDA=1\n");return 5;
+#endif
+    }
+#ifdef SNRT_CHIMES_CUDA
+    if(snrt_chimes_rhs_configure())return 5;
+#endif
     receiver_abi=snrt_chimes_receiver_abi();
     if(initialized || NS!=CHIMES_TOTSIZE || sizeof(ChimesFloat)!=sizeof(double) ||
        (receiver_abi!=4 && receiver_abi!=5 && receiver_abi!=6))return 1;
@@ -700,7 +739,7 @@ int snrt_chimes_locked(const double *abundance,double *elements)
 /* Controls: nH [cm^-3], Tgas, Tdust [K], dt [s], length [cm], D/D_MW,
  * grain surface correction, CR HI rate [s^-1], chat/c. Abundances n_i/nH.
  * Return only complete trial states. Native caller owns their publication. */
-static int cell_charged(const double *controls,const double *elements,const double *old_abundance,
+static int cell_charged_impl(const double *controls,const double *elements,const double *old_abundance,
                      double solid_q,
                      const double *old_photons,double *temperature,double *abundance,double *photons,int mode,double *elapsed)
 {
@@ -844,6 +883,24 @@ static int cell_charged(const double *controls,const double *elements,const doub
     memcpy(abundance,work,sizeof(work));memcpy(photons,radiation,sizeof(radiation));
     if(elapsed)*elapsed=context.event_time>=0?context.event_time:controls[3];
     return mode==3 && context.event_time>=0?51:0; /* accepted thermal root */
+}
+
+static int cell_charged(const double *controls,const double *elements,const double *old,
+    double solid_q,const double *old_photons,double *temperature,double *next,double *photons,int mode,double *elapsed)
+{
+#ifdef SNRT_CHIMES_CUDA
+    snrt_chimes_rhs_cell_begin();
+#endif
+    int status=cell_charged_impl(controls,elements,old,solid_q,old_photons,temperature,next,photons,mode,elapsed);
+#ifdef SNRT_CHIMES_CUDA
+    if(snrt_chimes_rhs_cell_retry()) {
+        /* Fresh private gas/rates/CVODE state and original input/tolerances.
+         * Never mix CPU/GPU RHS arithmetic inside a numerical Jacobian. */
+        status=cell_charged_impl(controls,elements,old,solid_q,old_photons,temperature,next,photons,mode,elapsed);
+    }
+    snrt_chimes_rhs_cell_end();
+#endif
+    return status;
 }
 
 int snrt_chimes_cell_charged(const double *controls,const double *elements,const double *old,

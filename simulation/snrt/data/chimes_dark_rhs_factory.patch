@@ -1,0 +1,48 @@
+--- a/src/rate_equations.c
++++ b/src/rate_equations.c
+@@ -34,6 +34,12 @@
+ #include <sundials/sundials_dense.h> 
+ #include "chimes_proto.h"
+ #include "chimes_vars.h"
++
++/* Optional fused dark reaction stage. Returning zero requests the original
++ * CPU path. Cooling, vector mapping and CVODE state ownership remain here. */
++extern int snrt_chimes_dark_rhs_gpu(struct UserData *) __attribute__((weak));
++extern void snrt_chimes_rate_cache_invalidate(void);
++int snrt_chimes_dark_rhs_abi(void) { return 1; }
+ 
+ /** 
+  * @brief Checks the constraint equations. 
+@@ -589,7 +595,11 @@
+     }
+   
+-  // Update rates 
++  // Update rates. Device output is staged and published only on success.
++  int device_reactions = snrt_chimes_dark_rhs_gpu ? snrt_chimes_dark_rhs_gpu(data) : 0;
++  if (device_reactions < 0) return -1;
++  if (device_reactions) snrt_chimes_rate_cache_invalidate();
++  if (!device_reactions) {
+   update_rate_coefficients(data->myGasVars, data->myGlobalVars, *data, data->myGasVars->ThermEvolOn); 
+   
+   if (data->myGlobalVars->rt_update_flux == 1) 
+     update_rt_photochemistry_coefficients(data->myGasVars, data->myGlobalVars, *data); 
+@@ -601,6 +611,7 @@
+   // update_rate_vector resets all reaction destinations, including inactive species.
+   // Compute creation and destruction rates 
+   update_rate_vector(data->species, data->myGasVars, data->myGlobalVars, *data); 
++  }
+   
+   /* Now set the output ydot vector for the chemical abundances */
+   for (i = 0; i < data->network_size; i++)
+--- a/src/update_rates.c
++++ b/src/update_rates.c
+@@ -34,6 +34,9 @@
+  * an address. No rounded temperature, inter-cell reuse or shared state. */
+ static _Thread_local struct chimes_current_rates_struct *snrt_cached_rates;
+ static _Thread_local ChimesFloat snrt_cached_temperature;
++/* A device reaction stage updates thermal consumers' coefficient fields.
++ * Invalidate on the owning thread before a later CPU callback can reuse. */
++void snrt_chimes_rate_cache_invalidate(void) { snrt_cached_rates = NULL; }
+ 
+ /** 
+  * @brief Updates the photochemistry coefficients for RT.

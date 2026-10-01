@@ -1,0 +1,25 @@
+--- a/src/chimes.c
++++ b/src/chimes.c
+@@ -36,6 +36,12 @@
+ #include <sunmatrix/sunmatrix_dense.h> 
+ #include "chimes_proto.h"
+ #include "chimes_vars.h"
++
++/* Optional host-owned SUNDIALS backend. Keep CVODE, its private per-cell
++ * vectors and all physics callbacks unchanged. Default remains CPU dense. */
++extern SUNLinearSolver snrt_chimes_cvode_linear_solver(N_Vector, SUNMatrix)
++  __attribute__((weak));
++int snrt_chimes_cvode_factory_abi(void) { return 1; }
+ 
+ /* Root is computed from the actual solver energy/species, not the bounded
+  * temperature used for off-domain Newton trials in f(). */
+@@ -624,7 +630,8 @@
+       /* Create a denst SUNLinearSolver object 
+        * to use in CVode. */ 
+       SUNLinearSolver LS_sun; 
+-      LS_sun = SUNLinSol_Dense(y, A_sun);
++      LS_sun = snrt_chimes_cvode_linear_solver ?
++        snrt_chimes_cvode_linear_solver(y, A_sun) : SUNLinSol_Dense(y, A_sun);
+ 
+       /* Attach the matrix and linear 
+        * solver to CVode. */ 

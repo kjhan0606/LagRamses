@@ -290,6 +290,12 @@ LIBCUDA = -L/opt/cuda/lib  -lm -lcuda -lcudart
 LIBGRACKLE = -lgrackle -lhdf5 -lz
 # Optional native chemistry; external libraries must both be double precision.
 CHIMES ?= 0
+CHIMES_CUDA ?= 0
+ifeq ($(CHIMES_CUDA),1)
+  ifneq ($(CHIMES)$(USE_CUDA),11)
+    $(error CHIMES_CUDA=1 requires CHIMES=1 and USE_CUDA=1)
+  endif
+endif
 ifeq ($(CHIMES),1)
   ifneq ($(HDF5),1)
     $(error CHIMES=1 requires HDF5=1)
@@ -305,6 +311,13 @@ ifeq ($(CHIMES),1)
   endif
   FFLAGS += -DSNRT_CHIMES
   CHIMES_OBJS = snrt_chimes_bridge.o snrt_chimes_spectrum.o snrt_chimes_photo.o snrt_chimes.o
+  ifeq ($(CHIMES_CUDA),1)
+    CHIMES_OBJS += snrt_chimes_cvode_cuda.o snrt_chimes_rhs_cuda.o
+    CHIMES_C_FLAGS = -DSNRT_CHIMES_CUDA
+    CHIMES_GPU_TEST_OBJS = cuda_stream_pool.o poisson_cuda_kernels.o scalar_cuda_kernels.o particle_cuda_kernels.o
+    # External CHIMES discovers the optional factory in the executable.
+    LIBMPI += -Wl,--export-dynamic
+  endif
   CHIMES_CHARGE_TEST_OBJS = dust_stochastic.o dust_pah_radiation.o snrt_moving_scatter.o snrt_dust_ir.o
   SNRT_MODOBJ += $(CHIMES_OBJS) snrt_chimes_runtime.o initialize_chimes_live_state.o snrt_dark_matter_runtime.o
   LIBS_CHIMES = -L$(CHIMES_DIR) -lchimes -Wl,-rpath,$(CHIMES_DIR) \
@@ -312,6 +325,9 @@ ifeq ($(CHIMES),1)
     -Wl,--no-as-needed -L$(SUNDIALS_DIR)/lib64 -L$(SUNDIALS_DIR)/lib \
     -lsundials_cvode -lsundials_nvecserial -lsundials_sunlinsoldense -lsundials_sunmatrixdense -lsundials_sunlinsolspgmr \
     $(LIBS_HDF5) -lcrypto -ldl -lstdc++ -Wl,--as-needed
+  ifeq ($(CHIMES_CUDA),1)
+    LIBS_CHIMES += $(LIBS_CUDA) -Wl,--export-dynamic -pthread
+  endif
 endif
 LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_SNRT) $(LIBS_FFTW) $(LIBS_CHIMES)
 #############################################################################
@@ -517,24 +533,30 @@ snrt_ramses_driver.o dust_mass_runtime.o: snrt_atomic_cooling.o
 ifeq ($(SNRT),1)
 backup_hdf5.o: snrt_atomic_cooling.o
 endif
-snrt_thermochemistry_smoke: ../patch/lagRamses/snrt_thermochemistry_smoke.f90 snrt_atomic_cooling.o snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o snrt_dust_receiver.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS)
+snrt_thermochemistry_smoke: ../patch/lagRamses/snrt_thermochemistry_smoke.f90 snrt_atomic_cooling.o snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o snrt_dust_receiver.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(CHIMES_GPU_TEST_OBJS)
 	$(F90) $(FFLAGS) -I. ../patch/lagRamses/snrt_thermochemistry_smoke.f90 snrt_atomic_cooling.o \
-	  snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o snrt_dust_receiver.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(LIBS_CHIMES) -o $@
-snrt_chimes_bridge.o: ../patch/lagRamses/snrt_chimes_bridge.c ../patch/lagRamses/snrt_chimes_atomization.h $(CHIMES_DIR)/src/chimes_proto.h
-	mpicc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -DCHIMES_USE_DOUBLE_PRECISION -O2 -Wall -Wextra \
+	  snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o snrt_dust_receiver.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(CHIMES_GPU_TEST_OBJS) $(LIBS_CHIMES) -o $@
+.PHONY: FORCE_CHIMES_BACKEND
+FORCE_CHIMES_BACKEND:
+snrt_chimes_bridge.o: ../patch/lagRamses/snrt_chimes_bridge.c ../patch/lagRamses/snrt_chimes_atomization.h $(CHIMES_DIR)/src/chimes_proto.h FORCE_CHIMES_BACKEND
+	mpicc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -DCHIMES_USE_DOUBLE_PRECISION $(CHIMES_C_FLAGS) -O2 -Wall -Wextra \
 	  -I$(CHIMES_DIR)/src -I$(SUNDIALS_DIR)/include -I$(HDF5_DIR)/include -c $< -o $@
+snrt_chimes_cvode_cuda.o: ../patch/lagRamses/snrt_chimes_cvode_cuda.cu ../patch/lagRamses/snrt_chimes_cvode_cuda.h
+	$(NVCC) $(NVCCFLAGS) -std=c++17 --fmad=false -Xcompiler -fopenmp -I$(SUNDIALS_DIR)/include -c $< -o $@
+snrt_chimes_rhs_cuda.o: ../patch/lagRamses/snrt_chimes_rhs_cuda.cu ../patch/lagRamses/snrt_chimes_rhs_cuda.h $(CHIMES_DIR)/src/chimes_proto.h
+	$(NVCC) $(NVCCFLAGS) -std=c++17 --fmad=false -Xcompiler -fopenmp -DCHIMES_USE_DOUBLE_PRECISION -I$(SUNDIALS_DIR)/include -I$(CHIMES_DIR)/src -I$(HDF5_DIR)/include -c $< -o $@
 snrt_chimes_spectrum.o: ../patch/lagRamses/snrt_chimes_spectrum.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h
 	mpiicpx -std=c++17 -O2 -fp-model=precise -I$(HDF5_DIR)/include -c $< -o $@
 snrt_chimes_photo.o: ../patch/lagRamses/snrt_chimes_photo.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h
 	icpx -std=c++17 -O2 -fp-model=precise -I$(SUNDIALS_DIR)/include -c $< -o $@
 ifeq ($(CHIMES),1)
 snrt_chimes.o: snrt_thermochemistry.o
-snrt_chimes_dark_mixed_test: ../simulation/snrt/tests/fixtures/phase0/chimes_dark_mixed_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS)
-	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(LIBS_CHIMES) -o $@
+snrt_chimes_dark_mixed_test: ../simulation/snrt/tests/fixtures/phase0/chimes_dark_mixed_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(CHIMES_GPU_TEST_OBJS)
+	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(CHIMES_GPU_TEST_OBJS) $(LIBS_CHIMES) -o $@
 snrt_chimes_rate_reset_test: ../simulation/snrt/tests/fixtures/phase0/chimes_rate_reset_test.c
 	mpicc -O2 -DCHIMES_USE_DOUBLE_PRECISION -I$(CHIMES_DIR)/src -I$(SUNDIALS_DIR)/include -I$(HDF5_DIR)/include $< -Wl,--no-as-needed -lm -ldl $(LIBS_CHIMES) -o $@
-snrt_chimes_long_interval_test: ../simulation/snrt/tests/fixtures/phase0/chimes_photo_long_interval_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS)
-	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(LIBS_CHIMES) -o $@
+snrt_chimes_long_interval_test: ../simulation/snrt/tests/fixtures/phase0/chimes_photo_long_interval_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(CHIMES_GPU_TEST_OBJS)
+	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(CHIMES_GPU_TEST_OBJS) $(LIBS_CHIMES) -o $@
 snrt_chimes_runtime.o: snrt_chimes.o hydro_commons.o amr_commons.kjhan.o dust_mass_physics.o snrt_atomic_cooling.o snrt_spectral_contract.o dust_composition_optics.o snrt_moving_scatter.o dust_iron_photons.o
 snrt_dark_matter_runtime.o: amr_parameters.jaehyun.o amr_commons.kjhan.o hydro_parameters.o hydro_commons.o \
                             dust_mass_physics.o snrt_dust_contract.o snrt_dust_live.o snrt_dust_ir.o \
@@ -689,7 +711,7 @@ dust_iron_compare.o: dust_iron_material.o dust_iron_optics.o
 dust_iron_photons.o: dust_mass_physics.o dust_iron_optics.o ../patch/lagRamses/dust_fe_photon_data.inc
 backup_hdf5.o: dust_iron_photons.o
 ifeq ($(CHIMES),1)
-FE_PHOTON_SECONDARY_OBJS = snrt_thermochemistry.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS)
+FE_PHOTON_SECONDARY_OBJS = snrt_thermochemistry.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(CHIMES_GPU_TEST_OBJS)
 endif
 dust_iron_photons_smoke: dust_iron_photons.o dust_iron_compare.o snrt_dust_receiver.o $(FE_PHOTON_SECONDARY_OBJS) ../patch/lagRamses/dust_iron_photons_smoke.f90
 	$(F90) $(FFLAGS) -I. ../patch/lagRamses/dust_iron_photons_smoke.f90 dust_iron_photons.o \
