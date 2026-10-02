@@ -42,7 +42,7 @@ mkdir "${run_dir}"
 cp "${fixture}/smbh-multiple.nml" "${run_dir}/cosmo.nml"
 if [[ "${fixture_mode}" == three-step-sink-refined ]]; then
   sed -i 's/^levelmax=4$/levelmax=5/' "${run_dir}/cosmo.nml"
-  sed -i '/^&HYDRO_PARAMS$/i\&REFINE_PARAMS\nm_refine=1.0d6\nsink_refine=.true.\n/\n' \
+  sed -i '/^&HYDRO_PARAMS$/i\&REFINE_PARAMS\nm_refine=1.0d6\nmass_sph=1.0d0\nsink_refine=.true.\n/\n' \
     "${run_dir}/cosmo.nml"
   sed -i 's/^nlevelmax_sink=4$/nlevelmax_sink=5/' "${run_dir}/cosmo.nml"
 fi
