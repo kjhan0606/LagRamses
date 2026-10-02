@@ -144,6 +144,9 @@ subroutine init_part
   end if
 
   if(star.or.sink)then
+     ! Sink-only evolution needs the particle history arrays but no stellar
+     ! yield table. The stellar channel keeps its original reader unchanged.
+     if(star)then
      !Read the yield table
      open(33,file=trim(yieldtablefilename),status='old', form='formatted')
      read(33,'(a8,I10)')a1,nmetal
@@ -159,6 +162,7 @@ subroutine init_part
         format_string = '(a15)'
      endif
      read(33,format_string)a1,elem_list
+     endif
 
      allocate(tpp(npartmax))
      tpp=0.0
@@ -170,6 +174,7 @@ subroutine init_part
 !     cep=0.d0
      call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
      astarconv = 1d9*365.*24.*3600.*scale_t
+     if(star)then
      allocate(yieldtab%astar(nsteps),yieldtab%zstar(nmetal))
      allocate(yieldtab%Eeject(nsteps,nmetal,nelt))
      allocate(yieldtab%Zeject(nsteps,nmetal),yieldtab%Meject(nsteps,nmetal))
@@ -194,6 +199,7 @@ subroutine init_part
         enddo
      enddo
      close(33)
+     endif
 
      ilun=2*ncpu+myid+10
 
