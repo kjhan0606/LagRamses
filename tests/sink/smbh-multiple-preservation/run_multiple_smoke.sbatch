@@ -35,6 +35,9 @@ cp "${fixture}/smbh-multiple.nml" "${run_dir}/cosmo.nml"
 if [[ "${fixture_mode}" == empty-top-level ]]; then
   # Exercise nlevelmax>levelmin with no level-5 sink or cloud particles.
   sed -i 's/^levelmax=4$/levelmax=5/' "${run_dir}/cosmo.nml"
+  # read_hydro_params requires REFINE_PARAMS when levelmax exceeds levelmin.
+  sed -i '/^&HYDRO_PARAMS$/i\&REFINE_PARAMS\nm_refine=-1.0\nsink_refine=.false.\n/\n' \
+    "${run_dir}/cosmo.nml"
 elif [[ "${fixture_mode}" != uniform ]]; then
   printf 'unsupported fixture mode: %s\n' "${fixture_mode}" >&2
   exit 2
