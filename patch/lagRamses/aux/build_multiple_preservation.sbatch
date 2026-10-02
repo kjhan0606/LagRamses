@@ -13,6 +13,7 @@
 # Compilation only: no simulation, snapshots, or physical acceptance.
 set -euo pipefail
 module purge
+module load intel/tbb/2022.3 intel/compiler-rt/2025.3.0 intel/umf/1.0.2
 module load intel/compiler/2025.3.0 intel/mpi/2021.17 gnu13/13.2.0
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 repo=${1:?Provide the isolated lagRamses checkout}
