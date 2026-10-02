@@ -40,6 +40,10 @@ def read_sinks(root: Path, output: int) -> dict[str, np.ndarray]:
             raise ValueError("HDF5 live SMBH counts are wrong")
         if int(np.asarray(group.attrs["sink_stat_format"]).item()) != 20261003:
             raise ValueError("HDF5 global sink-stat marker is missing")
+        levelmin = int(np.asarray(group.attrs["levelmin"]).item())
+        levelmax = int(np.asarray(group.attrs["nlevelmax"]).item())
+        if levelmin < 1 or levelmax < levelmin:
+            raise ValueError("invalid HDF5 sink-stat level range")
         values = {name: group[name][...] for name in group.keys()}
     ids = values["idsink"]
     if set(map(int, ids)) != EXPECTED_IDS:
@@ -47,8 +51,15 @@ def read_sinks(root: Path, output: int) -> dict[str, np.ndarray]:
     for name, field in values.items():
         if field.shape != (4,) or not np.all(np.isfinite(field)):
             raise ValueError(f"invalid HDF5 SMBH field {name}")
-    statistics = [name for name in values if name.startswith("sink_stat_")]
-    if len(statistics) != 7 or not any(np.any(values[name] != 0) for name in statistics):
+    statistics = {name for name in values if name.startswith("sink_stat_")}
+    expected_statistics = {
+        f"sink_stat_{channel}_{level}"
+        for level in range(levelmin, levelmax + 1)
+        for channel in range(1, 8)
+    }
+    if statistics != expected_statistics or not any(
+        np.any(values[name] != 0) for name in statistics
+    ):
         raise ValueError("global HDF5 sink statistics are absent")
     return values
 
