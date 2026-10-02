@@ -64,6 +64,42 @@ def read_sinks(root: Path, output: int) -> dict[str, np.ndarray]:
     return values
 
 
+def compare_particle_records(reference: h5py.Group, actual: h5py.Group) -> set[str]:
+    """Allow only rank-local permutations of complete particle records."""
+
+    counts = reference["npart_per_cpu"][...]
+    if counts.ndim != 1 or not np.array_equal(counts, actual["npart_per_cpu"][...]):
+        raise ValueError("HDF5 restart particle rank counts differ")
+    total = int(np.sum(counts))
+    names = sorted(
+        name for name in reference
+        if name not in {"indtab", "npart_per_cpu"} and reference[name].shape == (total,)
+    )
+    required = {
+        "identity", "levelp", "mass", "ptypep",
+        *(f"x_{axis}" for axis in range(1, 4)),
+        *(f"v_{axis}" for axis in range(1, 4)),
+    }
+    if not required.issubset(names) or not names:
+        raise ValueError("HDF5 restart particle records are incomplete")
+    for name in names:
+        if actual[name].shape != (total,) or actual[name].dtype != reference[name].dtype:
+            raise ValueError(f"HDF5 restart particle field differs at {name}")
+    start = 0
+    for rank, count in enumerate(counts):
+        stop = start + int(count)
+        rows = [
+            np.rec.fromarrays([group[name][start:stop] for name in names], names=names)
+            for group in (reference, actual)
+        ]
+        if not np.array_equal(np.sort(rows[0], order=names), np.sort(rows[1], order=names)):
+            raise ValueError(f"HDF5 restart particle records differ on rank {rank}")
+        start = stop
+    if start != total:
+        raise ValueError("HDF5 restart particle rank counts do not close")
+    return set(names)
+
+
 def compare_full_checkpoint(continuous: Path, restarted: Path, output: int) -> tuple[int, int]:
     name = f"output_{output:05d}/data_{output:05d}.h5"
     with h5py.File(continuous / name, "r") as reference, \
@@ -74,6 +110,9 @@ def compare_full_checkpoint(continuous: Path, restarted: Path, output: int) -> t
         actual.visit(actual_names.append)
         if reference_names != actual_names:
             raise ValueError("HDF5 restart object topology differs")
+        permutation_fields = compare_particle_records(
+            reference["particles"], actual["particles"]
+        )
         dataset_count = 0
         attribute_count = 0
         for path in reference_names:
@@ -86,7 +125,11 @@ def compare_full_checkpoint(continuous: Path, restarted: Path, output: int) -> t
                     raise ValueError(f"HDF5 restart attribute differs at {path}:{key}")
             if isinstance(left, h5py.Dataset):
                 dataset_count += 1
-                if left.dtype != right.dtype or not np.array_equal(left[...], right[...]):
+                if left.dtype != right.dtype:
+                    raise ValueError(f"HDF5 restart dataset type differs at {path}")
+                if path.startswith("particles/") and path[10:] in permutation_fields:
+                    continue
+                if not np.array_equal(left[...], right[...]):
                     raise ValueError(f"HDF5 restart dataset differs at {path}")
     return dataset_count, attribute_count
 
