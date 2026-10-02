@@ -22,6 +22,7 @@
 ! AMR restore from HDF5
 !###########################################################################
 subroutine restore_amr_hdf5()
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_commons
   use amr_parameters, only: restart_output_index
   use hydro_commons
@@ -48,6 +49,7 @@ subroutine restore_amr_hdf5()
   character(len=10) :: lvl_str
   character(len=5) :: nchar
   character(len=128) :: ordering_file
+  logical :: restore_file_hilbert_bounds
 
   ! Grid creation variables
   integer :: igrid_new, igrid_prev_cpu, igrid_father, ind_cell
@@ -115,13 +117,11 @@ subroutine restore_amr_hdf5()
           hdf5_attr_status_all
      call hdf5_restart_abort
   end if
-  if(sink.and.(ncpu_file>1.or.ncpu>1))then
-     ! The same-ncpu HDF5 AMR reader currently replicates every grid on every
-     ! rank instead of reconstructing the rank-local/virtual tree.  A two-rank
-     ! sink test changes cloud counts and trajectories after restart even with
-     ! correctly summed sink_stat.  Reject it until that AMR reader is fixed.
+  if(sink.and.ncpu_file/=ncpu)then
+     ! A changed rank count also redistributes sink clouds and has not passed
+     ! the strict SMBH restart comparison.  Keep this mode fail-closed.
      if(myid==1)write(*,*) &
-          'ERROR: MPI HDF5 sink restart lacks rank-local AMR reconstruction'
+          'ERROR: variable-ncpu HDF5 sink restart is not validated'
      call hdf5_restart_abort
   endif
   nlevelmax_header = 0
@@ -184,6 +184,8 @@ subroutine restore_amr_hdf5()
   call hdf5_restore_header_dp_checked(grp_id, 'mass_sph', mass_sph)
   call hdf5_restore_header_string_checked(grp_id, 'ordering', ordering_file)
   call hdf5_close_group(grp_id)
+  restore_file_hilbert_bounds=sink.and.ncpu>1.and.ncpu_file==ncpu.and. &
+       trim(ordering_file)=='hilbert'.and.trim(ordering)=='hilbert'
 
   iout=restart_output_index(cosmo,noutput,aout,tout,aexp,t)
   nstep_coarse_old = nstep_coarse
@@ -193,12 +195,22 @@ subroutine restore_amr_hdf5()
   !=====================================================
   ! Step 2: Check ncpu_file vs ncpu
   !=====================================================
-  if(ncpu_file /= ncpu .or. trim(ordering_file) /= trim(ordering)) then
+  if(sink.and.ncpu>1.and..not.restore_file_hilbert_bounds)then
+     if(myid==1)write(*,*) &
+          'ERROR: MPI HDF5 sink restart requires same-layout Hilbert AMR restore'
+     call hdf5_restart_abort
+  endif
+  if(ncpu_file /= ncpu .or. trim(ordering_file) /= trim(ordering) .or. &
+       (sink.and.ncpu>1)) then
      ! Variable-ncpu, ksection, or cross-ordering: use distributed varcpu path
      ! (the same-ncpu path replicates ALL grids on every rank, requiring
      !  ngridmax >= total_grids, which is prohibitively expensive)
      varcpu_restart = .true.
-     varcpu_restart_done = .true.   ! flag in amr_commons: force load_balance on first step
+     ! The distributed reconstruction is already rank-local.  A same-layout
+     ! sink restart must not force an extra remap before cloud compaction: the
+     ! remap can detach the canonical particle from its rebuilt tree.
+     varcpu_restart_done = (ncpu_file/=ncpu .or. &
+          trim(ordering_file)/=trim(ordering))
      if(myid==1) then
         write(*,*) '============================================================'
         write(*,*) '============================================================'
@@ -291,23 +303,62 @@ subroutine restore_amr_hdf5()
            real(dp) :: x_tmp(1:1,1:3), dx_loc
            integer(8) :: iix, iiy, iiz
 
-           order_all_min =  huge(0.0_qdp)
-           order_all_max = -huge(0.0_qdp)
-           dx_loc = 0.5d0**1
-           do iiz = kcoarse_min, kcoarse_max
-           do iiy = jcoarse_min, jcoarse_max
-           do iix = icoarse_min, icoarse_max
-              x_tmp(1,1) = (dble(iix) + 0.5d0 - dble(icoarse_min)) * scale
-              x_tmp(1,2) = (dble(iiy) + 0.5d0 - dble(jcoarse_min)) * scale
-              x_tmp(1,3) = (dble(iiz) + 0.5d0 - dble(kcoarse_min)) * scale
-              call cmp_minmaxorder(x_tmp, order_min_tmp, order_max_tmp, dx_loc, 1)
-              order_all_min = min(order_all_min, order_min_tmp(1))
-              order_all_max = max(order_all_max, order_max_tmp(1))
-           end do
-           end do
-           end do
            if(.not. allocated(bound_key)) allocate(bound_key(0:ndomain))
            if(.not. allocated(bound_key2)) allocate(bound_key2(0:ndomain))
+           if(restore_file_hilbert_bounds)then
+              block
+                 real(dp),allocatable :: file_bound_hi(:),file_bound_lo(:)
+                 integer :: split_format
+                 allocate(file_bound_hi(ndomain+1),file_bound_lo(ndomain+1))
+                 call hdf5_open_group('/domain', grp_id)
+                 split_format=0
+                 call hdf5_read_attr_int_checked(grp_id,'bound_key_split_format', &
+                      split_format,hdf5_attr_status)
+                 if(hdf5_attr_status/=0.or.split_format/=1)then
+                    if(myid==1)write(*,*) &
+                         'ERROR: MPI sink HDF5 restart requires lossless Hilbert bound_key'
+                    call hdf5_restart_abort
+                 endif
+                 call hdf5_read_dataset_all_dp_checked(grp_id,'bound_key_hi', &
+                      file_bound_hi,ndomain+1,hdf5_attr_status)
+                 if(hdf5_attr_status/=0)call hdf5_restart_abort
+                 call hdf5_read_dataset_all_dp_checked(grp_id,'bound_key_lo', &
+                      file_bound_lo,ndomain+1,hdf5_attr_status)
+                 if(hdf5_attr_status/=0)call hdf5_restart_abort
+                 if(any(.not.ieee_is_finite(file_bound_hi)).or. &
+                      any(.not.ieee_is_finite(file_bound_lo)))then
+                    if(myid==1)write(*,*)'ERROR: non-finite HDF5 Hilbert bound_key'
+                    call hdf5_restart_abort
+                 endif
+                 bound_key(0:ndomain)=real(file_bound_hi,qdp)+real(file_bound_lo,qdp)
+                 if(any(bound_key(1:ndomain)<=bound_key(0:ndomain-1)))then
+                    if(myid==1)write(*,*)'ERROR: non-monotone HDF5 Hilbert bound_key'
+                    call hdf5_restart_abort
+                 endif
+                 bound_key2(0:ndomain)=bound_key(0:ndomain)
+                 call hdf5_close_group(grp_id)
+                 deallocate(file_bound_hi,file_bound_lo)
+              end block
+              allocate(varcpu_domain_load(1:ndomain))
+              varcpu_domain_load=0_8
+              if(myid==1)write(*,*)'HDF5: preserving checkpoint Hilbert bound_key'
+           else
+              order_all_min =  huge(0.0_qdp)
+              order_all_max = -huge(0.0_qdp)
+              dx_loc = 0.5d0**1
+              do iiz = kcoarse_min, kcoarse_max
+              do iiy = jcoarse_min, jcoarse_max
+              do iix = icoarse_min, icoarse_max
+                 x_tmp(1,1) = (dble(iix) + 0.5d0 - dble(icoarse_min)) * scale
+                 x_tmp(1,2) = (dble(iiy) + 0.5d0 - dble(jcoarse_min)) * scale
+                 x_tmp(1,3) = (dble(iiz) + 0.5d0 - dble(kcoarse_min)) * scale
+                 call cmp_minmaxorder(x_tmp, order_min_tmp, order_max_tmp, dx_loc, 1)
+                 order_all_min = min(order_all_min, order_min_tmp(1))
+                 order_all_max = max(order_all_max, order_max_tmp(1))
+              end do
+              end do
+              end do
+           endif
         end block
      end if
   else
@@ -487,7 +538,7 @@ subroutine restore_amr_hdf5()
      ! collective chunk schedule deliberately mirror Stage A below.  No AMR
      ! payload other than xg_1/xg_2/xg_3 is read here.
      !===================================================
-     if(ordering /= 'ksection') then
+     if(ordering /= 'ksection'.and..not.restore_file_hilbert_bounds) then
         varcpu_nbin = max(varcpu_min_nbin, ndomain * varcpu_bins_per_domain)
         allocate(varcpu_hist(1:varcpu_nbin))
         varcpu_hist = 0_8

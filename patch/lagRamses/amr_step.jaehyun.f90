@@ -45,6 +45,7 @@ recursive subroutine amr_step(ilevel,icount)
 !!$  integer::i,idim,ivar
 !!$  logical::ok_defrag
   logical,save::first_step=.true.
+  logical,save::restart_diagnostic_pending=.true.
   integer:: info
 
   real(kind=4):: real_mem, real_mem_tot
@@ -855,6 +856,15 @@ recursive subroutine amr_step(ilevel,icount)
   !---------------------------
   if(lb_timing_sample)then
      call cpu_time(t_lb_cpu_child_start)
+  endif
+  ! On the first resumed coarse step, the checkpoint's nstep_coarse_old was
+  ! set equal to nstep_coarse to suppress duplicate output.  Keep that guard
+  ! through output controls, then release it before recursive time updates.
+  ! The first descendant update_time advances mass and energy references as
+  ! in uninterrupted evolution.
+  if(ilevel==levelmin.and.nrestart>0.and.restart_diagnostic_pending)then
+     if(nstep_coarse_old==nstep_coarse)nstep_coarse_old=nstep_coarse-1
+     restart_diagnostic_pending=.false.
   endif
   if(ilevel<nlevelmax)then
      if(numbtot(1,ilevel+1)>0)then

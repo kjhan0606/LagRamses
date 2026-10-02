@@ -197,17 +197,33 @@ subroutine backup_amr_hdf5()
      end block
   else
      ! Hilbert ordering: write bound_key (all ranks have same copy)
-     ! bound_key is real(qdp), write as dp (sufficient for restart)
+     ! Keep the legacy dp field, but also store a lossless high/low split for
+     ! same-layout MPI sink restarts.  A single dp can round a quad key across
+     ! a domain boundary and change which rank owns a sink cloud.
      block
-        real(dp), allocatable :: bkey_dp(:)
-        integer :: nd
+        real(dp), allocatable :: bkey_dp(:),bkey_low(:)
+        integer :: nd,exact_local,exact_all
         nd = ndomain + 1
-        allocate(bkey_dp(nd))
+        allocate(bkey_dp(nd),bkey_low(nd))
+        exact_local=1
         do i = 0, ndomain
            bkey_dp(i+1) = real(bound_key(i), dp)
+           bkey_low(i+1) = real(bound_key(i)-real(bkey_dp(i+1),qdp),dp)
+           if(real(bkey_dp(i+1),qdp)+real(bkey_low(i+1),qdp) /= &
+                bound_key(i)) exact_local=0
         end do
+        call MPI_ALLREDUCE(exact_local,exact_all,1,MPI_INTEGER,MPI_MIN, &
+             MPI_COMM_WORLD,info)
         call hdf5_write_dataset_serial_dp(grp_id, 'bound_key', bkey_dp, nd, myid)
-        deallocate(bkey_dp)
+        call hdf5_write_attr_int(grp_id,'bound_key_split_format',exact_all)
+        if(exact_all==1)then
+           call hdf5_write_dataset_serial_dp(grp_id,'bound_key_hi',bkey_dp,nd,myid)
+           call hdf5_write_dataset_serial_dp(grp_id,'bound_key_lo',bkey_low,nd,myid)
+        else
+           if(myid==1)write(*,*) &
+                'WARN: Hilbert bound_key is not lossless in two doubles; MPI sink HDF5 restart disabled'
+        endif
+        deallocate(bkey_dp,bkey_low)
      end block
   end if
   call hdf5_close_group(grp_id)

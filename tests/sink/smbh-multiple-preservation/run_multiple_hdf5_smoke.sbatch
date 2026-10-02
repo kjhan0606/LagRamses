@@ -20,6 +20,14 @@ if [[ -r /usr/lib64/libpmi2.so ]]; then
   export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi2.so
 fi
 repo=${1:?Provide the isolated HDF5 lagRamses checkout}
+fixture_mode=${2:-two-step}
+steps=2
+if [[ "${fixture_mode}" == three-step ]]; then
+  steps=3
+elif [[ "${fixture_mode}" != two-step ]]; then
+  printf 'unsupported fixture mode: %s\n' "${fixture_mode}" >&2
+  exit 2
+fi
 test -z "$(git -C "${repo}" status --porcelain)"
 revision=$(git -C "${repo}" rev-parse HEAD)
 fixture=${repo}/tests/sink/smbh-multiple-preservation
@@ -30,6 +38,9 @@ mkdir -p "${root}"
 run_dir=${root}/${SLURM_JOB_ID}
 mkdir "${run_dir}"
 cp "${fixture}/smbh-multiple.nml" "${run_dir}/cosmo.nml"
+if [[ "${steps}" == 3 ]]; then
+  sed -i 's/^nstepmax=2$/nstepmax=3/' "${run_dir}/cosmo.nml"
+fi
 sed -i '/^&OUTPUT_PARAMS$/a outformat="hdf5"\ninformat="hdf5"' "${run_dir}/cosmo.nml"
 cp "${fixture}/ic_sink" "${run_dir}/ic_sink"
 printf '%s\n' "${revision}" > "${run_dir}/source-revision.txt"
@@ -37,8 +48,10 @@ sha256sum "${binary}" > "${run_dir}/binary.sha256"
 sha256sum "${run_dir}/cosmo.nml" "${run_dir}/ic_sink" > "${run_dir}/inputs.sha256"
 printf 'effective_namelist=%s\n' "${run_dir}/cosmo.nml"
 printf 'run_purpose=short_hdf5_evolution_test\n'
-printf 'noutput=0; aout=none; foutput=1; fbackup=1; nstepmax=2\n'
-printf 'expected_full_dumps=2; estimated_max_total_storage=200MiB\n'
+printf 'fixture_mode=%s; noutput=0; aout=none; foutput=1; fbackup=1; nstepmax=%s\n' \
+  "${fixture_mode}" "${steps}"
+printf 'expected_full_dumps=%s; estimated_max_total_storage=%sMiB\n' \
+  "${steps}" "$((steps*100))"
 df -h /gpfs
 cd "${run_dir}"
 : > jobcontrol.txt
@@ -47,10 +60,16 @@ srun --kill-on-bad-exit=1 --mpi=pmi2 -n2 -c1 --cpu-bind=cores \
 grep -Fq 'Run completed' run.log
 test -f output_00001/COMPLETE
 test -f output_00002/COMPLETE
-test ! -e output_00003
+if [[ "${steps}" == 3 ]]; then
+  test -f output_00003/COMPLETE
+  test ! -e output_00004
+else
+  test ! -e output_00003
+fi
 python "${repo}/patch/lagRamses/aux/validate_smbh_capture_ledger.py" \
   smbh_capture_ledger_v1.jsonl > capture-validation.json
-python "${fixture}/verify_multiple_hdf5.py" "${run_dir}" > multiple-verification.json
+python "${fixture}/verify_multiple_hdf5.py" "${run_dir}" \
+  --target-output "${steps}" > multiple-verification.json
 test "$(git -C "${repo}" rev-parse HEAD)" = "${revision}"
 test -z "$(git -C "${repo}" status --porcelain)"
 printf 'multiple_hdf5_smoke_status=passed\n'

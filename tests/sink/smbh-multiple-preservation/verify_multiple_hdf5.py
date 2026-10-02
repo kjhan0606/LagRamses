@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from fractions import Fraction
 import json
 from pathlib import Path
 
@@ -18,6 +19,21 @@ def read_sinks(root: Path, output: int) -> dict[str, np.ndarray]:
     if not (path.parent / "COMPLETE").is_file():
         raise ValueError(f"incomplete HDF5 checkpoint: {path}")
     with h5py.File(path, "r") as stream:
+        domain = stream["domain"]
+        if int(np.asarray(domain.attrs["bound_key_split_format"]).item()) != 1:
+            raise ValueError("HDF5 Hilbert bounds are not losslessly split")
+        high = domain["bound_key_hi"][...]
+        low = domain["bound_key_lo"][...]
+        legacy = domain["bound_key"][...]
+        if high.shape != low.shape or high.shape != legacy.shape or \
+                high.size < 2 or not np.array_equal(high, legacy) or \
+                not np.all(np.isfinite(high)) or not np.all(np.isfinite(low)):
+            raise ValueError("invalid HDF5 split Hilbert bounds")
+        exact_bounds = [Fraction(float(hi)) + Fraction(float(lo))
+                        for hi, lo in zip(high, low, strict=True)]
+        if any(left >= right for left, right in
+               zip(exact_bounds, exact_bounds[1:])):
+            raise ValueError("non-monotone HDF5 Hilbert bounds")
         group = stream["sinks"]
         if int(np.asarray(group.attrs["nsink"]).item()) != 4 or \
                 int(np.asarray(group.attrs["nindsink"]).item()) != 5:
@@ -37,10 +53,38 @@ def read_sinks(root: Path, output: int) -> dict[str, np.ndarray]:
     return values
 
 
+def compare_full_checkpoint(continuous: Path, restarted: Path, output: int) -> tuple[int, int]:
+    name = f"output_{output:05d}/data_{output:05d}.h5"
+    with h5py.File(continuous / name, "r") as reference, \
+            h5py.File(restarted / name, "r") as actual:
+        reference_names = ["/"]
+        actual_names = ["/"]
+        reference.visit(reference_names.append)
+        actual.visit(actual_names.append)
+        if reference_names != actual_names:
+            raise ValueError("HDF5 restart object topology differs")
+        dataset_count = 0
+        attribute_count = 0
+        for path in reference_names:
+            left, right = reference[path], actual[path]
+            if type(left) is not type(right) or set(left.attrs) != set(right.attrs):
+                raise ValueError(f"HDF5 restart object or attributes differ at {path}")
+            for key in left.attrs:
+                attribute_count += 1
+                if not np.array_equal(left.attrs[key], right.attrs[key]):
+                    raise ValueError(f"HDF5 restart attribute differs at {path}:{key}")
+            if isinstance(left, h5py.Dataset):
+                dataset_count += 1
+                if left.dtype != right.dtype or not np.array_equal(left[...], right[...]):
+                    raise ValueError(f"HDF5 restart dataset differs at {path}")
+    return dataset_count, attribute_count
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("continuous_directory", type=Path)
     parser.add_argument("restart_directory", type=Path, nargs="?")
+    parser.add_argument("--target-output", type=int, default=2)
     args = parser.parse_args()
     first = read_sinks(args.continuous_directory, 1)
     second = read_sinks(args.continuous_directory, 2)
@@ -51,6 +95,8 @@ def main() -> None:
     if not np.isclose(sum(masses.values()), 0.150, rtol=1e-12, atol=1e-12):
         raise ValueError("HDF5 binary compaction does not conserve seed mass")
     if args.restart_directory is None:
+        if args.target_output > 2:
+            read_sinks(args.continuous_directory, args.target_output)
         binary_events, multiple_events = check_ledger(
             args.continuous_directory / "smbh_capture_ledger_v1.jsonl"
         )
@@ -60,23 +106,24 @@ def main() -> None:
                           "dataset_count": len(second)}, sort_keys=True))
         return
 
-    restarted = read_sinks(args.restart_directory, 2)
-    if set(second) != set(restarted):
+    target = second if args.target_output == 2 else read_sinks(
+        args.continuous_directory, args.target_output
+    )
+    restarted = read_sinks(args.restart_directory, args.target_output)
+    if set(target) != set(restarted):
         raise ValueError("HDF5 sink dataset sets differ after restart")
-    largest = 0.0
-    for name in second:
-        expected, actual = second[name], restarted[name]
-        largest = max(largest, float(np.max(np.abs(expected - actual))))
-        if np.issubdtype(expected.dtype, np.integer):
-            matches = np.array_equal(expected, actual)
-        else:
-            matches = np.allclose(expected, actual, rtol=1e-8, atol=1e-10)
-        if not matches:
+    for name in target:
+        expected, actual = target[name], restarted[name]
+        if not np.array_equal(expected, actual):
             raise ValueError(f"HDF5 restart state differs in {name}: "
                              f"continuous={expected}, restarted={actual}")
+    dataset_count, attribute_count = compare_full_checkpoint(
+        args.continuous_directory, args.restart_directory, args.target_output
+    )
     print(json.dumps({"status": "hdf5_multiple_restart_passed",
-                      "compared_datasets": len(second),
-                      "largest_absolute_difference": largest}, sort_keys=True))
+                      "compared_sink_datasets": len(target),
+                      "compared_checkpoint_datasets": dataset_count,
+                      "compared_checkpoint_attributes": attribute_count}, sort_keys=True))
 
 
 if __name__ == "__main__":
