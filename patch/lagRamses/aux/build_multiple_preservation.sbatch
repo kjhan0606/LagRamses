@@ -17,6 +17,7 @@ module load intel/tbb/2022.3 intel/compiler-rt/2025.3.0 intel/umf/1.0.2
 module load intel/compiler/2025.3.0 intel/mpi/2021.17 gnu13/13.2.0
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 repo=${1:?Provide the isolated lagRamses checkout}
+build_mode=${2:-default}
 test -f "${repo}/patch/lagRamses/sink_particle.kjhan.f90"
 test -z "$(git -C "${repo}" status --porcelain)"
 build_revision=$(git -C "${repo}" rev-parse HEAD)
@@ -25,9 +26,21 @@ mkdir "${run_dir}"
 module list 2>&1 | tee "${run_dir}/modules.log"
 printf '%s\n' "${build_revision}" | tee "${run_dir}/source-revision.txt"
 # The upstream module graph is incomplete for a fresh parallel build.
-make --directory="${repo}/bin" -j1 ramses 2>&1 | tee "${run_dir}/build.log"
+if [[ "${build_mode}" == default ]]; then
+  make --directory="${repo}/bin" -j1 ramses 2>&1 | tee "${run_dir}/build.log"
+elif [[ "${build_mode}" == hdf5-sources ]]; then
+  make --directory="${repo}/bin" -j1 HDF5=1 ramses_hdf5_io.o \
+    backup_hdf5.o restore_hdf5.o 2>&1 | tee "${run_dir}/build.log"
+else
+  printf 'unsupported build mode: %s\n' "${build_mode}" >&2
+  exit 2
+fi
 test "$(git -C "${repo}" rev-parse HEAD)" = "${build_revision}"
 test -z "$(git -C "${repo}" status --porcelain)"
-test -x "${repo}/bin/ramses_final3d"
-sha256sum "${repo}/bin/ramses_final3d" | tee "${run_dir}/binary.sha256"
-printf '%s\n' 'compile_status=passed'
+if [[ "${build_mode}" == default ]]; then
+  test -x "${repo}/bin/ramses_final3d"
+  sha256sum "${repo}/bin/ramses_final3d" | tee "${run_dir}/binary.sha256"
+  printf '%s\n' 'compile_status=passed'
+else
+  printf '%s\n' 'compile_status=hdf5_sources_passed'
+fi

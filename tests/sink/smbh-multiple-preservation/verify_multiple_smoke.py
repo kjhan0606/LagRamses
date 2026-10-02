@@ -12,6 +12,7 @@ import struct
 
 EXPECTED_IDS = {1, 2, 3, 5}
 INITIAL_MASS_BY_ID = {1: 0.081, 2: 0.022, 3: 0.023, 5: 0.024}
+SINK_STAT_GLOBAL_MARKER = 20261003
 
 
 def read_record(stream) -> bytes:
@@ -53,6 +54,28 @@ def read_checkpoint(path: Path) -> dict[int, tuple[float, ...]]:
     return by_id
 
 
+def read_sink_statistics(path: Path) -> dict[int, tuple[float, ...]]:
+    """Read the seven MPI-summed channels in this uniform-level fixture."""
+    with path.open("rb") as stream:
+        read_record(stream)  # nsink
+        read_record(stream)  # nindsink
+        ids = struct.unpack("<4i", read_record(stream))
+        for _ in range(20):
+            read_record(stream)
+        fields = [struct.unpack("<4d", read_record(stream)) for _ in range(7)]
+        marker = struct.unpack("<i", read_record(stream))[0]
+        if marker != SINK_STAT_GLOBAL_MARKER or stream.read(1):
+            raise ValueError("invalid or trailing sink-stat checkpoint format")
+    if not all(math.isfinite(value) for field in fields for value in field):
+        raise ValueError("non-finite global sink statistic")
+    by_id = {sink_id: tuple(field[index] for field in fields)
+             for index, sink_id in enumerate(ids)}
+    if set(by_id) != EXPECTED_IDS or not any(any(value != 0 for value in row)
+                                             for row in by_id.values()):
+        raise ValueError("global sink statistics are absent")
+    return by_id
+
+
 def check_ledger(path: Path) -> tuple[int, int]:
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     binary = 0
@@ -86,6 +109,7 @@ def main() -> None:
     for output in (1, 2):
         path = root / f"output_{output:05d}" / f"sink_{output:05d}.out"
         ids_by_output[output] = read_checkpoint(path)
+        read_sink_statistics(path)
     first = ids_by_output[1]
     second = ids_by_output[2]
     for sink_id, initial_mass in INITIAL_MASS_BY_ID.items():

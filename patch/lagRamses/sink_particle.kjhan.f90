@@ -26,6 +26,7 @@ subroutine create_sink
   real(dp)::t_stage,t_kill_tree,t_rho_star,t_make_sink,t_kill_cloud
   real(dp)::t_update_pos,t_merge_sink,t_create_cloud,t_tree_rebuild
   real(dp)::t_hydro_sync,t_final_bondi
+  real(dp),allocatable::canonical_count(:)
 
   t_kill_tree=0d0
   t_rho_star=0d0
@@ -128,10 +129,24 @@ subroutine create_sink
   jsink=0d0
   ! Compute Bondi parameters and gather particle
   t_stage=omp_get_wtime()
+  if(bondi.and.nsink>0)then
+     allocate(canonical_count(nsink))
+     canonical_count=0d0
+  endif
   do ilevel=nlevelmax,levelmin,-1
-     if(bondi)call bondi_hoyle(ilevel)
+     if(bondi)then
+        call bondi_hoyle(ilevel)
+        if(nsink>0)canonical_count=canonical_count+oksink_all(1:nsink)
+     endif
      call merge_tree_fine(ilevel)
   end do
+  if(bondi.and.nsink>0)then
+     if(any(canonical_count/=1d0))then
+        if(myid==1)write(*,*)'ERROR: Bondi canonical sink count across levels: ',canonical_count
+        call clean_stop
+     endif
+     deallocate(canonical_count)
+  endif
   t_final_bondi=t_final_bondi+omp_get_wtime()-t_stage
 
   call diag_check_nan('sink_post_bondi')
@@ -4083,7 +4098,7 @@ subroutine grow_bondi(ilevel)
   real(dp),allocatable,dimension(:)::sink_sbuf,sink_rbuf
   real(dp),dimension(1:3)::velocity
   integer,dimension(1:nvector)::ind_grid,ind_part,ind_grid_part
-  real(dp)::r2,density,volume,sample_volume,sample_density
+  real(dp)::r2,density,volume,sample_volume,sample_density,sample_c2,sample_momentum
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
   integer::ind,ivar
   real(dp)::alpha,d_star,pi,factG,c2mean,nfloor,sigmav2,v2mean
@@ -4154,13 +4169,23 @@ subroutine grow_bondi(ilevel)
   do isink=1,nsink
      sample_volume=sum(weighted_volume(isink,levelmin:nlevelmax))
      sample_density=sum(weighted_density(isink,levelmin:nlevelmax))
+     sample_c2=sum(weighted_c2(isink,levelmin:nlevelmax))
      if(.not.ieee_is_finite(sample_volume) .or. &
           & .not.ieee_is_finite(sample_density) .or. &
-          & sample_volume<=0d0 .or. sample_density<=0d0)then
+          & .not.ieee_is_finite(sample_c2) .or. &
+          & sample_volume<=0d0 .or. sample_density<=0d0 .or. sample_c2<=0d0)then
         if(myid==1)write(*,*)'ERROR: invalid Bondi cloud sample for sink ', &
-             & idsink(isink),sample_volume,sample_density
+             & idsink(isink),sample_volume,sample_density,sample_c2
         call clean_stop
      endif
+     do idim=1,ndim
+        sample_momentum=sum(weighted_momentum(isink,levelmin:nlevelmax,idim))
+        if(.not.ieee_is_finite(sample_momentum))then
+           if(myid==1)write(*,*)'ERROR: invalid Bondi momentum sample for sink ', &
+                & idsink(isink),idim,sample_momentum
+           call clean_stop
+        endif
+     enddo
   enddo
 
   ! Compute Bondi-Hoyle accretion rate

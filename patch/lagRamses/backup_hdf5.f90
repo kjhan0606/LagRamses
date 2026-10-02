@@ -751,17 +751,32 @@ subroutine backup_sink_hdf5()
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
-  integer :: idim, ilevel
+  integer :: idim, ilevel, info
   integer(HID_T) :: grp_id
   real(dp), allocatable :: dbuf(:)
+  real(dp), allocatable :: local_stat(:,:,:), global_stat(:,:,:)
   integer, allocatable :: ibuf(:)
   character(len=10) :: dstr
+  integer, parameter :: sink_stat_global_marker=20261003
+
+  if(nsink>0)then
+     allocate(local_stat(nsink,levelmin:nlevelmax,2*ndim+1))
+     allocate(global_stat(nsink,levelmin:nlevelmax,2*ndim+1))
+     local_stat=sink_stat(1:nsink,levelmin:nlevelmax,1:2*ndim+1)
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(local_stat,global_stat,size(local_stat), &
+          MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+     global_stat=local_stat
+#endif
+  endif
 
   call hdf5_create_group('/sinks', grp_id)
   call hdf5_write_attr_int(grp_id, 'nsink', nsink)
   call hdf5_write_attr_int(grp_id, 'nindsink', nindsink)
   call hdf5_write_attr_int(grp_id, 'levelmin', levelmin)
   call hdf5_write_attr_int(grp_id, 'nlevelmax', nlevelmax)
+  call hdf5_write_attr_int(grp_id, 'sink_stat_format', sink_stat_global_marker)
 
   if(nsink > 0) then
      allocate(ibuf(nsink))
@@ -817,12 +832,13 @@ subroutine backup_sink_hdf5()
      ! Sink statistics
      do idim = 1, ndim*2+1
         do ilevel = levelmin, nlevelmax
-           dbuf(1:nsink) = sink_stat(1:nsink, ilevel, idim)
+           dbuf(1:nsink) = global_stat(1:nsink, ilevel, idim)
            write(dstr, '(I0,"_",I0)') idim, ilevel
            call hdf5_write_dataset_serial_dp(grp_id, 'sink_stat_'//trim(dstr), dbuf, nsink, myid)
         end do
      end do
      deallocate(dbuf)
+     deallocate(local_stat,global_stat)
   end if
 
   call hdf5_close_group(grp_id)

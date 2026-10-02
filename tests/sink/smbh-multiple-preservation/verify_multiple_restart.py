@@ -8,7 +8,7 @@ import json
 import math
 from pathlib import Path
 
-from verify_multiple_smoke import read_checkpoint
+from verify_multiple_smoke import read_checkpoint, read_sink_statistics
 
 
 def main() -> None:
@@ -20,6 +20,12 @@ def main() -> None:
         args.continuous_directory / "output_00002/sink_00002.out"
     )
     restarted = read_checkpoint(
+        args.restart_directory / "output_00002/sink_00002.out"
+    )
+    continuous_statistics = read_sink_statistics(
+        args.continuous_directory / "output_00002/sink_00002.out"
+    )
+    restarted_statistics = read_sink_statistics(
         args.restart_directory / "output_00002/sink_00002.out"
     )
     largest_absolute_difference = 0.0
@@ -34,11 +40,22 @@ def main() -> None:
                     f"restart state differs for sink {sink_id}, field {field_index}: "
                     f"continuous={expected}, restarted={actual}"
                 )
+        for field_index, (expected, actual) in enumerate(
+            zip(continuous_statistics[sink_id], restarted_statistics[sink_id], strict=True)
+        ):
+            difference = abs(expected - actual)
+            largest_absolute_difference = max(largest_absolute_difference, difference)
+            if not math.isclose(expected, actual, rel_tol=1e-8, abs_tol=1e-10):
+                raise ValueError(
+                    f"restart sink_stat differs for sink {sink_id}, channel {field_index}: "
+                    f"continuous={expected}, restarted={actual}"
+                )
     print(json.dumps({
         "status": "multiple_restart_passed",
         "retained_sink_ids": sorted(restarted),
         "compared_checkpoint": "output_00002/sink_00002.out",
         "compared_fields_per_sink": len(next(iter(continuous.values()))),
+        "compared_sink_stat_channels_per_sink": len(next(iter(continuous_statistics.values()))),
         "largest_absolute_difference": largest_absolute_difference,
     }, sort_keys=True))
 

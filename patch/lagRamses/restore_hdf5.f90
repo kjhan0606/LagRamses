@@ -1845,6 +1845,8 @@ subroutine restore_part_hdf5()
   integer :: stellar_state_read_status
   integer :: hdf5_attr_status_all
   integer :: nindsink_file
+  integer :: sink_stat_format
+  integer, parameter :: sink_stat_global_marker=20261003
 
   call title(nrestart, nchar)
   h5filename = 'output_'//trim(nchar)//'/data_'//trim(nchar)//'.h5'
@@ -2195,6 +2197,28 @@ subroutine restore_part_hdf5()
         call hdf5_restart_abort
      end if
 
+     if(nsink>0)then
+        call h5aexists_f(grp_id, 'sink_stat_format', attr_exists, h5err)
+        if(h5err/=0)then
+           if(myid==1)write(*,*)'ERROR: cannot inspect HDF5 sink-stat format'
+           call hdf5_restart_abort
+        endif
+        if(attr_exists)then
+           call hdf5_read_attr_int_checked(grp_id, 'sink_stat_format', &
+                sink_stat_format, stellar_state_read_status)
+           call MPI_Allreduce(stellar_state_read_status, hdf5_attr_status_all, &
+                1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, h5err)
+           if(hdf5_attr_status_all/=0 .or. sink_stat_format/=sink_stat_global_marker)then
+              if(myid==1)write(*,*)'ERROR: unsupported HDF5 sink-stat format'
+              call hdf5_restart_abort
+           endif
+        else if(ncpu_file>1)then
+           ! Old MPI files contain only rank 1's local statistic.
+           if(myid==1)write(*,*)'ERROR: legacy MPI HDF5 sink statistics are incomplete'
+           call hdf5_restart_abort
+        endif
+     endif
+
      if(nsink > 0) then
         block
            real(dp), allocatable :: sbuf(:)
@@ -2266,6 +2290,7 @@ subroutine restore_part_hdf5()
                  write(stat_name, '(I0,"_",I0)') idim, ilevel
                  call hdf5_restore_sink_dp_checked(grp_id, 'sink_stat_'//trim(stat_name), sbuf, nsink)
                  sink_stat(1:nsink, ilevel, idim) = sbuf(1:nsink)
+                 if(myid>1)sink_stat(1:nsink, ilevel, idim)=0d0
               end do
            end do
            deallocate(sbuf)
