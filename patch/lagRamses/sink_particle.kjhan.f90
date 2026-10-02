@@ -3145,6 +3145,14 @@ subroutine bondi_hoyle(ilevel)
   integer(i8b)::ks1,ks2
 
 
+  ! A level with no sink particles must not retain samples from a prior step.
+  if(nsink>0)then
+     weighted_density(1:nsink,ilevel)=0d0
+     weighted_volume(1:nsink,ilevel)=0d0
+     weighted_momentum(1:nsink,ilevel,1:ndim)=0d0
+     weighted_c2(1:nsink,ilevel)=0d0
+     oksink_all(1:nsink)=0d0
+  endif
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
 
@@ -3299,7 +3307,8 @@ subroutine bondi_hoyle(ilevel)
   endif
 
   if(nsink>0)then
-     if(any(oksink_all(1:nsink)/=1d0))then
+     if(any(oksink_all(1:nsink)>1d0) .or. &
+          & (levelmin==nlevelmax .and. any(oksink_all(1:nsink)/=1d0)))then
         if(myid==1)write(*,*)'ERROR: Bondi canonical sink count at level ', &
              & ilevel,': ',oksink_all(1:nsink)
         call clean_stop
@@ -3482,7 +3491,8 @@ subroutine bondi_hoyle(ilevel)
 
   if(nsink>0)then
      if(any(.not.ieee_is_finite(wvol_new(1:nsink))) .or. &
-          & any(wvol_new(1:nsink)<=0d0))then
+          & any(wvol_new(1:nsink)<0d0) .or. &
+          & (levelmin==nlevelmax .and. any(wvol_new(1:nsink)<=0d0)))then
         if(myid==1)write(*,*)'ERROR: Bondi cloud weights at level ', &
              & ilevel,': ',wvol_new(1:nsink)
         call clean_stop
@@ -4054,6 +4064,7 @@ subroutine grow_bondi(ilevel)
   use amr_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH, twopi
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use omp_lib, ONLY: omp_get_thread_num, omp_get_num_threads, omp_lock_kind, &
        & omp_init_lock
 #include "amr_index.h"
@@ -4072,7 +4083,7 @@ subroutine grow_bondi(ilevel)
   real(dp),allocatable,dimension(:)::sink_sbuf,sink_rbuf
   real(dp),dimension(1:3)::velocity
   integer,dimension(1:nvector)::ind_grid,ind_part,ind_grid_part
-  real(dp)::r2,density,volume
+  real(dp)::r2,density,volume,sample_volume,sample_density
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
   integer::ind,ivar
   real(dp)::alpha,d_star,pi,factG,c2mean,nfloor,sigmav2,v2mean
@@ -4137,6 +4148,20 @@ subroutine grow_bondi(ilevel)
   sigmav2=(sigmav_max*1d5/scale_v)**2d0
 
   c_avgptr=0d0;v_avgptr=0d0;d_avgptr=0d0
+
+  ! A missing or invalid cloud sample is a broken sink state, not a zero
+  ! accretion-rate estimate.  Stop before dividing by its volume or density.
+  do isink=1,nsink
+     sample_volume=sum(weighted_volume(isink,levelmin:nlevelmax))
+     sample_density=sum(weighted_density(isink,levelmin:nlevelmax))
+     if(.not.ieee_is_finite(sample_volume) .or. &
+          & .not.ieee_is_finite(sample_density) .or. &
+          & sample_volume<=0d0 .or. sample_density<=0d0)then
+        if(myid==1)write(*,*)'ERROR: invalid Bondi cloud sample for sink ', &
+             & idsink(isink),sample_volume,sample_density
+        call clean_stop
+     endif
+  enddo
 
   ! Compute Bondi-Hoyle accretion rate
   !$omp parallel do schedule(static) private(isink,density,c2mean,velocity, &

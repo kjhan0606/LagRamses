@@ -11,7 +11,7 @@ subroutine init_sink
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   integer::idim,ilevel
   integer::ic_unit,ic_status
-  integer::sink_stat_marker
+  integer::sink_stat_marker,source_ncpu
   integer,parameter::sink_stat_global_marker=20261003
   real(dp)::ic_values(12)
   real(dp)::seed_pos(1:nvector,1:ndim)
@@ -23,7 +23,7 @@ subroutine init_sink
   real(dp),allocatable,dimension(:)::xdp
   integer,allocatable,dimension(:)::isp
   logical,allocatable,dimension(:)::nb
-  logical::eof,ic_sink=.false.
+  logical::eof,ic_sink=.false.,sink_file_exists
   character(LEN=80)::filename
   character(LEN=80)::fileloc
   character(LEN=5)::nchar,ncharcpu
@@ -72,6 +72,10 @@ subroutine init_sink
   allocate(weighted_volume (1:nsinkmax,1:nlevelmax))
   allocate(weighted_momentum(1:nsinkmax,1:nlevelmax,1:ndim))
   allocate(weighted_c2 (1:nsinkmax,1:nlevelmax))
+  weighted_density=0d0
+  weighted_volume=0d0
+  weighted_momentum=0d0
+  weighted_c2=0d0
   allocate(oksink_new(1:nsinkmax))
   allocate(oksink_all(1:nsinkmax))
   allocate(jsink(1:nsinkmax,1:ndim))
@@ -116,6 +120,17 @@ subroutine init_sink
 
 !     call title(myid,nchar)
      fileloc=TRIM(fileloc)!//TRIM(nchar)
+     inquire(file=trim(fileloc),exist=sink_file_exists)
+     if(.not.sink_file_exists.and.IOGROUPSIZEREP>0)then
+        ! backup_sink writes the shared SMBH state only from rank 1,
+        ! including when the particle shards use multiple I/O groups.
+        fileloc='output_'//trim(nchar)//'/group_00001/sink_'//trim(nchar)//'.out'
+        inquire(file=trim(fileloc),exist=sink_file_exists)
+     endif
+     if(.not.sink_file_exists)then
+        if(myid==1)write(*,*)'ERROR: missing SMBH checkpoint ',trim(fileloc)
+        call clean_stop
+     endif
 
      ! Wait for the token                                                                                                                                                                    
 #ifndef WITHOUTMPI
@@ -190,10 +205,15 @@ subroutine init_sink
         else if(ic_status==iostat_end)then
            ! Older multi-rank files contain only rank 1's local statistic.
            ! Its missing rank contributions cannot be reconstructed safely.
-           if(ncpu>1.and.any(sink_stat(1:nsink,levelmin:nlevelmax,:)/=0d0))then
+           source_ncpu=ncpu
+           if(varcpu_restart.and.ncpu_file>0)source_ncpu=ncpu_file
+           if(source_ncpu>1)then
               if(myid==1)write(*,*)'ERROR: legacy MPI sink checkpoint lacks global sink statistics'
               call clean_stop
            endif
+           ! A one-rank legacy source has a complete statistic, even when
+           ! restored with more ranks. Seed it once before MPI reduction.
+           if(myid>1)sink_stat(1:nsink,levelmin:nlevelmax,:)=0d0
         else
            if(myid==1)write(*,*)'ERROR: cannot read SMBH sink-stat format marker'
            call clean_stop
@@ -371,6 +391,10 @@ subroutine init_sink_alloc
   allocate(weighted_volume (1:nsinkmax,1:nlevelmax))
   allocate(weighted_momentum(1:nsinkmax,1:nlevelmax,1:ndim))
   allocate(weighted_c2 (1:nsinkmax,1:nlevelmax))
+  weighted_density=0d0
+  weighted_volume=0d0
+  weighted_momentum=0d0
+  weighted_c2=0d0
   allocate(oksink_new(1:nsinkmax))
   allocate(oksink_all(1:nsinkmax))
   allocate(jsink(1:nsinkmax,1:ndim))
