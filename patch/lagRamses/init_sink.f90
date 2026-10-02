@@ -11,6 +11,8 @@ subroutine init_sink
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   integer::idim,ilevel
   integer::ic_unit,ic_status
+  integer::sink_stat_marker
+  integer,parameter::sink_stat_global_marker=20261003
   real(dp)::ic_values(12)
   real(dp)::seed_pos(1:nvector,1:ndim)
   integer::seed_cpu(1:nvector)
@@ -176,6 +178,26 @@ subroutine init_sink
               sink_stat(1:nsink,ilevel,idim)=xdp
            enddo
         enddo
+        read(ilun,iostat=ic_status)sink_stat_marker
+        if(ic_status==0)then
+           if(sink_stat_marker/=sink_stat_global_marker)then
+              if(myid==1)write(*,*)'ERROR: unsupported SMBH sink-stat checkpoint format'
+              call clean_stop
+           endif
+           ! The checkpoint stores the global sum once.  Assign it to one
+           ! rank so the first post-restart MPI reduction recovers it exactly.
+           if(myid>1)sink_stat(1:nsink,levelmin:nlevelmax,:)=0d0
+        else if(ic_status==iostat_end)then
+           ! Older multi-rank files contain only rank 1's local statistic.
+           ! Its missing rank contributions cannot be reconstructed safely.
+           if(ncpu>1.and.any(sink_stat(1:nsink,levelmin:nlevelmax,:)/=0d0))then
+              if(myid==1)write(*,*)'ERROR: legacy MPI sink checkpoint lacks global sink statistics'
+              call clean_stop
+           endif
+        else
+           if(myid==1)write(*,*)'ERROR: cannot read SMBH sink-stat format marker'
+           call clean_stop
+        endif
         deallocate(xdp)
      end if
      close(ilun)

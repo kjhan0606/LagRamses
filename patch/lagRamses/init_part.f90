@@ -72,7 +72,7 @@ subroutine init_part
   character(LEN=80)::filename,filename_x
   character(LEN=80)::fileloc
   character(LEN=20)::filetype_loc
-  character(LEN=5)::nchar,ncharcpu
+  character(LEN=5)::nchar,ncharcpu,restart_nchar
   integer,parameter::tagg=1109,tagg2=1110,tagg3=1111
   integer::dummy_io,info2
 
@@ -260,6 +260,7 @@ subroutine init_part
 
      ilun=2*ncpu+myid+10
      call title(nrestart,nchar)
+     restart_nchar=nchar
 
      if(IOGROUPSIZEREP>0)then
         call title(((myid-1)/IOGROUPSIZEREP)+1,ncharcpu)
@@ -281,6 +282,13 @@ subroutine init_part
      endif
      part_descriptor=fileloc(1:part_descriptor_index-1)//'part_file_descriptor.txt'
      inquire(file=trim(part_descriptor),exist=part_descriptor_exists)
+     if(.not.part_descriptor_exists.and.IOGROUPSIZEREP>0)then
+        ! The active writer emits one shared descriptor from rank 1, even
+        ! when particle shards are placed in separate group directories.
+        part_descriptor='output_'//trim(restart_nchar)// &
+             & '/group_00001/part_file_descriptor.txt'
+        inquire(file=trim(part_descriptor),exist=part_descriptor_exists)
+     endif
      has_ptype_record=.false.
      if(part_descriptor_exists)then
         open(newunit=part_descriptor_unit,file=trim(part_descriptor), &
