@@ -42,7 +42,7 @@ mkdir "${run_dir}"
 cp "${fixture}/smbh-multiple.nml" "${run_dir}/cosmo.nml"
 if [[ "${fixture_mode}" == three-step-sink-refined ]]; then
   sed -i 's/^levelmax=4$/levelmax=5/' "${run_dir}/cosmo.nml"
-  sed -i '/^&HYDRO_PARAMS$/i\&REFINE_PARAMS\nm_refine=8.0\nsink_refine=.true.\n/\n' \
+  sed -i '/^&HYDRO_PARAMS$/i\&REFINE_PARAMS\nm_refine=1.0d6\nsink_refine=.true.\n/\n' \
     "${run_dir}/cosmo.nml"
   sed -i 's/^nlevelmax_sink=4$/nlevelmax_sink=5/' "${run_dir}/cosmo.nml"
 fi
@@ -67,7 +67,7 @@ srun --kill-on-bad-exit=1 --mpi=pmi2 -n2 -c1 --cpu-bind=cores \
   "${binary}" cosmo.nml > run.log 2>&1
 grep -Fq 'Run completed' run.log
 if [[ "${fixture_mode}" == three-step-sink-refined ]]; then
-  grep -Eq 'Level +5 has +[1-9][0-9]* grids' run.log
+  awk '/Level +5 has/ {if ($4 > 0 && $4 < 4096) populated=1; if ($4 >= 4096) full=1} END {exit !populated || full}' run.log
 fi
 test -f output_00001/COMPLETE
 test -f output_00002/COMPLETE
