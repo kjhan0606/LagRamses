@@ -29,6 +29,15 @@ permutation is rebuilt for the OpenMP path, so no member is lost or assigned to
 another group. The normal DM provenance sidecar records this runtime switch;
 the ledger event records `multiple_members_preserved`.
 
+The compaction pass also remaps the state declared by the VPATH-selected
+`patch/cuRamses/pm_commons.f90`. Local efficiency and environment quantities
+follow the surviving primary ID. Coarse Bondi/Eddington mass counters, gas
+angular momentum, and sink-statistic sums are added for a numerical binary
+merge; for a retained singleton they remain its original values. The compiled
+identity regression uses that actual production module and an interleaved
+binary/MULTIPLE fixture to detect stale array-slot associations. It does not
+replace a full evolution or snapshot/restart comparison.
+
 This switch preserves the sinks and their ordinary snapshot/restart fields;
 it adds no unresolved few-body solver or physical coalescence criterion. A
 later FOF call may find a different grouping and compact a two-member group.

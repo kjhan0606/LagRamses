@@ -1700,6 +1700,9 @@ subroutine merge_sink(ilevel)
   end do
 ! call MPI_BARRIER(MPI_COMM_WORLD, info) if(verbose) print *,'###4'
 
+  if(smbh .and. smbh_preserve_multiple) then
+     call compact_smbh_identity_state(nsink,new_sink,gsink,rank_old)
+  endif
   nsink=new_sink
   msink (1:nsink)=msink_new (1:nsink)
   dMsmbh(1:nsink)=dMsmbh_new(1:nsink)
@@ -1867,6 +1870,52 @@ subroutine preserve_smbh_multiple_groups(n,ngrp,groups,order,ierr)
   ngrp=new_count
   ierr=0
 end subroutine preserve_smbh_multiple_groups
+!################################################################
+subroutine compact_smbh_identity_state(n,ngrp,groups,primary)
+  use pm_commons
+  use amr_commons
+  implicit none
+  integer,intent(in)::n,ngrp,groups(n),primary(ngrp)
+  real(dp)::old_bondi(n),old_eddington(n),old_jsink(n,ndim)
+  real(dp)::old_stat(n,levelmin:nlevelmax,2*ndim+1)
+  integer::i,g
+
+  ! Every persistent or predictor field must follow its surviving identity.
+  ! For singleton groups these assignments preserve the complete old state.
+  ! For numerical binary merges local intensive/predictor fields follow the
+  ! same most-massive primary used for idsink; extensive counters are summed.
+  if(allocated(eps_sink)) eps_sink(1:ngrp)=eps_sink(primary)
+  if(allocated(r2sink)) r2sink(1:ngrp)=r2sink(primary)
+  if(allocated(v2sink)) v2sink(1:ngrp)=v2sink(primary)
+  if(allocated(r2k)) r2k(1:ngrp)=r2k(primary)
+  if(allocated(dMBHoverdt)) dMBHoverdt(1:ngrp)=dMBHoverdt(primary)
+  if(allocated(dMEdoverdt)) dMEdoverdt(1:ngrp)=dMEdoverdt(primary)
+  if(allocated(c2sink)) c2sink(1:ngrp)=c2sink(primary)
+  if(allocated(total_volume)) total_volume(1:ngrp)=total_volume(primary)
+  if(allocated(c_avgptr)) c_avgptr(1:ngrp)=c_avgptr(primary)
+  if(allocated(v_avgptr)) v_avgptr(1:ngrp)=v_avgptr(primary)
+  if(allocated(d_avgptr)) d_avgptr(1:ngrp)=d_avgptr(primary)
+  if(allocated(weighted_density)) weighted_density(1:ngrp,:)=weighted_density(primary,:)
+  if(allocated(weighted_volume)) weighted_volume(1:ngrp,:)=weighted_volume(primary,:)
+  if(allocated(weighted_c2)) weighted_c2(1:ngrp,:)=weighted_c2(primary,:)
+  if(allocated(weighted_momentum)) weighted_momentum(1:ngrp,:,:)=weighted_momentum(primary,:,:)
+
+  old_bondi=dMBH_coarse(1:n)
+  old_eddington=dMEd_coarse(1:n)
+  old_jsink=jsink(1:n,:)
+  old_stat=sink_stat(1:n,levelmin:nlevelmax,:)
+  dMBH_coarse(1:ngrp)=0d0
+  dMEd_coarse(1:ngrp)=0d0
+  jsink(1:ngrp,:)=0d0
+  sink_stat(1:ngrp,levelmin:nlevelmax,:)=0d0
+  do i=1,n
+     g=groups(i)
+     dMBH_coarse(g)=dMBH_coarse(g)+old_bondi(i)
+     dMEd_coarse(g)=dMEd_coarse(g)+old_eddington(i)
+     jsink(g,:)=jsink(g,:)+old_jsink(i,:)
+     sink_stat(g,levelmin:nlevelmax,:)=sink_stat(g,levelmin:nlevelmax,:)+old_stat(i,:,:)
+  enddo
+end subroutine compact_smbh_identity_state
 !################################################################
 !################################################################
 !################################################################
