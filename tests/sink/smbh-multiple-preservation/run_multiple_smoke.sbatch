@@ -37,7 +37,7 @@ sha256sum "${binary}" > "${run_dir}/binary.sha256"
 sha256sum "${run_dir}/cosmo.nml" "${run_dir}/ic_sink" > "${run_dir}/inputs.sha256"
 printf 'effective_namelist=%s\n' "${run_dir}/cosmo.nml"
 printf 'run_purpose=short_evolution_test\n'
-printf 'noutput=0; aout=none; foutput=1; fbackup=1; nstepmax=2\n'
+printf 'noutput=0; aout=none; foutput=1; fbackup=1; nstepmax=3 (two evolved steps)\n'
 printf 'estimated_max_full_dumps=2; estimated_max_total_storage=200MiB\n'
 df -h /gpfs
 cd "${run_dir}"

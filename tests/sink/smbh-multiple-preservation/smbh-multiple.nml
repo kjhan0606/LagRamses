@@ -2,7 +2,7 @@
 hydro=.true.
 rt=.false.
 nrestart=0
-nstepmax=2
+nstepmax=3
 nremap=10
 poisson=.true.
 pic=.true.
@@ -39,7 +39,7 @@ boxlen=1. ! kpc
 noutput=0
 foutput=1
 fbackup=1
-tend=0.05  ! 0.05 Myr
+tend=2.0 ! stopping is controlled by the two-step nstepmax gate
 /
 
 &HYDRO_PARAMS

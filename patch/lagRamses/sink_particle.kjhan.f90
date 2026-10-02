@@ -1619,9 +1619,19 @@ subroutine merge_sink(ilevel)
              & + 2d0*SQRT(3d0) + t2*mu + t3*mu**2
         af = 1d0 / ( 1d0 + q )**2 * SQRT( a1**2 + a2**2*q**4 + 2d0*a1*a2*q**2*a1a2 &
              & + 2d0 * ( a1*a1L + a2*q**2*a2L ) * Lmodana*q + Lmodana**2*q**2 )
-        bhspin_new(igrp,1)=1d0/(1d0+q)**2 * ( a1*ax1+a2*ax2*q**2+(Lx/Lmod)*Lmodana*q )
-        bhspin_new(igrp,2)=1d0/(1d0+q)**2 * ( a1*ay1+a2*ay2*q**2+(Ly/Lmod)*Lmodana*q )
-        bhspin_new(igrp,3)=1d0/(1d0+q)**2 * ( a1*az1+a2*az2*q**2+(Lz/Lmod)*Lmodana*q )
+        ! The circular-orbit remnant-spin fit has no defined orbital axis
+        ! when a numerical merger has exactly zero orbital angular momentum.
+        ! In that limit retain only the intrinsic spin vectors; inventing an
+        ! orbital-spin direction would both divide by zero and assign a
+        ! spurious finite remnant spin to a radial, initially non-spinning pair.
+        bhspin_new(igrp,1)=1d0/(1d0+q)**2 * (a1*ax1+a2*ax2*q**2)
+        bhspin_new(igrp,2)=1d0/(1d0+q)**2 * (a1*ay1+a2*ay2*q**2)
+        bhspin_new(igrp,3)=1d0/(1d0+q)**2 * (a1*az1+a2*az2*q**2)
+        if(Lmod>0d0)then
+           bhspin_new(igrp,1)=bhspin_new(igrp,1)+Lx/Lmod*Lmodana*q/(1d0+q)**2
+           bhspin_new(igrp,2)=bhspin_new(igrp,2)+Ly/Lmod*Lmodana*q/(1d0+q)**2
+           bhspin_new(igrp,3)=bhspin_new(igrp,3)+Lz/Lmod*Lmodana*q/(1d0+q)**2
+        endif
         spinmag_new(igrp)=SQRT(bhspin_new(igrp,1)**2 + bhspin_new(igrp,2)**2 + bhspin_new(igrp,3)**2 )
         if(spinmag_new(igrp).gt.+maxspin) spinmag_new(igrp)=+maxspin
         if(spinmag_new(igrp).lt.-maxspin) spinmag_new(igrp)=-maxspin
@@ -1629,9 +1639,15 @@ subroutine merge_sink(ilevel)
         ay1=bhspin_new(igrp,2)
         az1=bhspin_new(igrp,3)
         a1mod=SQRT(ax1**2+ay1**2+az1**2)
-        bhspin_new(igrp,1)=ax1/a1mod
-        bhspin_new(igrp,2)=ay1/a1mod
-        bhspin_new(igrp,3)=az1/a1mod
+        if(a1mod>0d0)then
+           bhspin_new(igrp,1)=ax1/a1mod
+           bhspin_new(igrp,2)=ay1/a1mod
+           bhspin_new(igrp,3)=az1/a1mod
+        else
+           ! A zero spin has no direction; use the canonical finite axis.
+           bhspin_new(igrp,1:ndim)=0d0
+           bhspin_new(igrp,ndim)=1d0
+        endif
      else
         if ( msink(isink) .gt. msink_new(igrp) )then
            ! Case it's not a merger
@@ -4141,7 +4157,10 @@ subroutine grow_bondi(ilevel)
      v_avgptr(isink)=dsqrt(SUM((velocity(1:3)-vsink(isink,1:3))**2))
      v2mean =min(SUM((velocity(1:3)-vsink(isink,1:3))**2),sigmav2)
      total_volume(isink)=volume
-     alpha=max((density/d_star)**boost_acc,1d0)
+     ! No star-formation threshold is defined in a sink-only hydro run.
+     ! Such a run uses the unboosted Bondi rate instead of density/zero.
+     alpha=1d0
+     if(d_star>0d0)alpha=max((density/d_star)**boost_acc,1d0)
      if(Esave(isink).eq.0d0)then
         dMBHoverdt(isink)=alpha * fourpi *density* (factG*msink(isink))**2 &
              & / (c2mean+v2mean)**1.5d0
