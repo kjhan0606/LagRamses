@@ -3213,15 +3213,14 @@ subroutine bondi_hoyle(ilevel)
              if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart).ge.-nsinkmax)then
                ksink=-idp(ipart)
                if(ksink>=1 .and. ksink<=nsink)then
-                  if(allocated(canonical_sink_part))then
-                     is_canonical=(canonical_sink_part(ksink)==ipart)
-                  else
-                     r2=0.0
-                     do idim=1,ndim
-                        r2=r2+(xp(ipart,idim)-xsink(ksink,idim))**2
-                     end do
-                     is_canonical=(r2==0.0)
-                  endif
+                  ! Particle-tree rebuilds can renumber particle slots after
+                  ! create_cloud.  The cached slot is then stale, whereas the
+                  ! synchronized central particle remains at xsink exactly.
+                  r2=0d0
+                  do idim=1,ndim
+                     r2=r2+(xp(ipart,idim)-xsink(ksink,idim))**2
+                  end do
+                  is_canonical=(r2==0d0)
                end if
              endif
              if(is_canonical)npart2=npart2+1
@@ -3243,15 +3242,11 @@ subroutine bondi_hoyle(ilevel)
              if(ptypep(ipart)==PTYPE_SINK .and. idp(ipart).ge.-nsinkmax)then
                ksink=-idp(ipart)
                if(ksink>=1 .and. ksink<=nsink)then
-                  if(allocated(canonical_sink_part))then
-                     is_canonical=(canonical_sink_part(ksink)==ipart)
-                  else
-                     r2=0.0
-                     do idim=1,ndim
-                        r2=r2+(xp(ipart,idim)-xsink(ksink,idim))**2
-                     end do
-                     is_canonical=(r2==0.0)
-                  endif
+                  r2=0d0
+                  do idim=1,ndim
+                     r2=r2+(xp(ipart,idim)-xsink(ksink,idim))**2
+                  end do
+                  is_canonical=(r2==0d0)
                endif
                if(is_canonical)then
                   if(ig==0)then
