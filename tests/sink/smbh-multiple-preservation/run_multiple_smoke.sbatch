@@ -49,6 +49,7 @@ test -f output_00001/COMPLETE
 test -f output_00002/COMPLETE
 python "${repo}/patch/lagRamses/aux/validate_smbh_capture_ledger.py" \
   smbh_capture_ledger_v1.jsonl > capture-validation.json
+python "${fixture}/verify_multiple_smoke.py" "${run_dir}" > multiple-verification.json
 test "$(git -C "${repo}" rev-parse HEAD)" = "${revision}"
 test -z "$(git -C "${repo}" status --porcelain)"
 printf 'multiple_smoke_status=passed\n'
