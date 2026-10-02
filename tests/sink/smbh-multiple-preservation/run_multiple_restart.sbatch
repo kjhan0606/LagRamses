@@ -22,6 +22,7 @@ if [[ -r /usr/lib64/libpmi2.so ]]; then
 fi
 repo=${1:?Provide the isolated lagRamses checkout}
 continuous=${2:?Provide the complete two-output smoke directory}
+restart_phi_policy=${3:-predictor}
 fixture=${repo}/tests/sink/smbh-multiple-preservation
 binary=${repo}/bin/ramses_final3d
 test -z "$(git -C "${repo}" status --porcelain)"
@@ -40,10 +41,17 @@ run_dir=${root}/${SLURM_JOB_ID}
 mkdir "${run_dir}"
 cp -a "${continuous}/output_00001" "${run_dir}/output_00001"
 cp "${continuous}/cosmo.nml" "${run_dir}/cosmo.nml"
+if [[ "${restart_phi_policy}" == warm ]]; then
+  sed -i '/^&POISSON_PARAMS$/a restart_phi_warm_start=.true.' "${run_dir}/cosmo.nml"
+elif [[ "${restart_phi_policy}" != predictor ]]; then
+  printf 'unsupported restart phi policy: %s\n' "${restart_phi_policy}" >&2
+  exit 2
+fi
 printf '%s\n' "$(git -C "${repo}" rev-parse HEAD)" > "${run_dir}/test-revision.txt"
 sha256sum "${run_dir}/cosmo.nml" > "${run_dir}/inputs.sha256"
 printf 'effective_namelist=%s\n' "${run_dir}/cosmo.nml"
 printf 'command_line_nrestart=1\n'
+printf 'restart_phi_policy=%s\n' "${restart_phi_policy}"
 printf 'run_purpose=restart_short_evolution_test\n'
 printf 'noutput=0; aout=none; foutput=1; fbackup=1; nstepmax=2\n'
 printf 'expected_copied_dumps=1; expected_new_dumps=1; estimated_max_total_storage=200MiB\n'
