@@ -32,12 +32,18 @@ mkdir -p "${root}"
 run_dir=${root}/${SLURM_JOB_ID}
 mkdir "${run_dir}"
 cp "${fixture}/smbh-multiple.nml" "${run_dir}/cosmo.nml"
-if [[ "${fixture_mode}" == empty-top-level ]]; then
-  # Exercise nlevelmax>levelmin with no level-5 sink or cloud particles.
+if [[ "${fixture_mode}" == empty-top-level || "${fixture_mode}" == sink-refined ]]; then
+  # Exercise a higher AMR level; sink-refined also populates level 5.
   sed -i 's/^levelmax=4$/levelmax=5/' "${run_dir}/cosmo.nml"
   # read_hydro_params requires REFINE_PARAMS when levelmax exceeds levelmin.
-  sed -i '/^&HYDRO_PARAMS$/i\&REFINE_PARAMS\nm_refine=-1.0\nsink_refine=.false.\n/\n' \
-    "${run_dir}/cosmo.nml"
+  if [[ "${fixture_mode}" == sink-refined ]]; then
+    sed -i '/^&HYDRO_PARAMS$/i\&REFINE_PARAMS\nm_refine=8.0\nsink_refine=.true.\n/\n' \
+      "${run_dir}/cosmo.nml"
+    sed -i 's/^nlevelmax_sink=4$/nlevelmax_sink=5/' "${run_dir}/cosmo.nml"
+  else
+    sed -i '/^&HYDRO_PARAMS$/i\&REFINE_PARAMS\nm_refine=-1.0\nsink_refine=.false.\n/\n' \
+      "${run_dir}/cosmo.nml"
+  fi
 elif [[ "${fixture_mode}" != uniform ]]; then
   printf 'unsupported fixture mode: %s\n' "${fixture_mode}" >&2
   exit 2
@@ -56,6 +62,9 @@ cd "${run_dir}"
 : > jobcontrol.txt
 srun --kill-on-bad-exit=1 --mpi=pmi2 -n2 -c1 --cpu-bind=cores "${binary}" cosmo.nml > run.log 2>&1
 grep -Fq 'Run completed' run.log
+if [[ "${fixture_mode}" == sink-refined ]]; then
+  grep -Eq 'Level +5 has +[1-9][0-9]* grids' run.log
+fi
 test -f smbh_capture_ledger_v1.jsonl
 test -f output_00001/COMPLETE
 test -f output_00002/COMPLETE

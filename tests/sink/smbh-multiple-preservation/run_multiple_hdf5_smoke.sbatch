@@ -24,6 +24,8 @@ fixture_mode=${2:-two-step}
 steps=2
 if [[ "${fixture_mode}" == three-step ]]; then
   steps=3
+elif [[ "${fixture_mode}" == three-step-sink-refined ]]; then
+  steps=3
 elif [[ "${fixture_mode}" != two-step ]]; then
   printf 'unsupported fixture mode: %s\n' "${fixture_mode}" >&2
   exit 2
@@ -38,6 +40,12 @@ mkdir -p "${root}"
 run_dir=${root}/${SLURM_JOB_ID}
 mkdir "${run_dir}"
 cp "${fixture}/smbh-multiple.nml" "${run_dir}/cosmo.nml"
+if [[ "${fixture_mode}" == three-step-sink-refined ]]; then
+  sed -i 's/^levelmax=4$/levelmax=5/' "${run_dir}/cosmo.nml"
+  sed -i '/^&HYDRO_PARAMS$/i\&REFINE_PARAMS\nm_refine=8.0\nsink_refine=.true.\n/\n' \
+    "${run_dir}/cosmo.nml"
+  sed -i 's/^nlevelmax_sink=4$/nlevelmax_sink=5/' "${run_dir}/cosmo.nml"
+fi
 if [[ "${steps}" == 3 ]]; then
   sed -i 's/^nstepmax=2$/nstepmax=3/' "${run_dir}/cosmo.nml"
 fi
@@ -58,6 +66,9 @@ cd "${run_dir}"
 srun --kill-on-bad-exit=1 --mpi=pmi2 -n2 -c1 --cpu-bind=cores \
   "${binary}" cosmo.nml > run.log 2>&1
 grep -Fq 'Run completed' run.log
+if [[ "${fixture_mode}" == three-step-sink-refined ]]; then
+  grep -Eq 'Level +5 has +[1-9][0-9]* grids' run.log
+fi
 test -f output_00001/COMPLETE
 test -f output_00002/COMPLETE
 if [[ "${steps}" == 3 ]]; then
