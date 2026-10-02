@@ -31,16 +31,20 @@ if [[ "${build_mode}" == default ]]; then
 elif [[ "${build_mode}" == hdf5-sources ]]; then
   make --directory="${repo}/bin" -j1 HDF5=1 ramses_hdf5_io.o \
     backup_hdf5.o restore_hdf5.o 2>&1 | tee "${run_dir}/build.log"
+elif [[ "${build_mode}" == hdf5-full ]]; then
+  make --directory="${repo}/bin" -j1 HDF5=1 ramses 2>&1 | tee "${run_dir}/build.log"
 else
   printf 'unsupported build mode: %s\n' "${build_mode}" >&2
   exit 2
 fi
 test "$(git -C "${repo}" rev-parse HEAD)" = "${build_revision}"
 test -z "$(git -C "${repo}" status --porcelain)"
-if [[ "${build_mode}" == default ]]; then
+if [[ "${build_mode}" == default || "${build_mode}" == hdf5-full ]]; then
   test -x "${repo}/bin/ramses_final3d"
   sha256sum "${repo}/bin/ramses_final3d" | tee "${run_dir}/binary.sha256"
+fi
+if [[ "${build_mode}" == default ]]; then
   printf '%s\n' 'compile_status=passed'
 else
-  printf '%s\n' 'compile_status=hdf5_sources_passed'
+  printf 'compile_status=%s_passed\n' "${build_mode}"
 fi
