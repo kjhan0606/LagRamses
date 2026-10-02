@@ -3108,6 +3108,7 @@ subroutine bondi_hoyle(ilevel)
   use pm_commons
   use amr_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH , twopi
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
@@ -3302,6 +3303,13 @@ subroutine bondi_hoyle(ilevel)
 #endif
   endif
 
+  if(nsink>0)then
+     if(any(oksink_all(1:nsink)/=1d0))then
+        if(myid==1)write(*,*)'ERROR: Bondi canonical sink count at level ', &
+             & ilevel,': ',oksink_all(1:nsink)
+        call clean_stop
+     endif
+  endif
 !!$omp parallel do private(isink)
   do isink=1,nsink
      if(oksink_all(isink)==1d0)then
@@ -3475,6 +3483,15 @@ subroutine bondi_hoyle(ilevel)
      wmom_new=wmom
      jsink_all=jsink_new
 #endif
+  endif
+
+  if(nsink>0)then
+     if(any(.not.ieee_is_finite(wvol_new(1:nsink))) .or. &
+          & any(wvol_new(1:nsink)<=0d0))then
+        if(myid==1)write(*,*)'ERROR: Bondi cloud weights at level ', &
+             & ilevel,': ',wvol_new(1:nsink)
+        call clean_stop
+     endif
   endif
 
 !!$omp parallel do private(isink,i)
