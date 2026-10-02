@@ -87,6 +87,9 @@ subroutine init_part
   character(LEN=2)::nelt_str
   character(LEN=11)::format_string
   logical::file_exist
+  logical::part_descriptor_exists,has_ptype_record
+  integer::part_descriptor_unit,part_descriptor_status,part_descriptor_index
+  character(LEN=80)::part_descriptor,part_descriptor_line
 
   real(kind=4):: real_mem,real_mem_tot
 
@@ -267,6 +270,36 @@ subroutine init_part
 
      call title(myid,nchar)
      fileloc=TRIM(fileloc)//TRIM(nchar)
+     ! The VPATH-selected cuRamses writer records ptypep explicitly, whereas
+     ! older RAMSES particle backups omit it.  Its native descriptor declares
+     ! the stream layout, so use that evidence rather than guessing from
+     ! particle IDs or blindly shifting every subsequent Fortran record.
+     part_descriptor_index=index(fileloc,'part_')
+     if(part_descriptor_index<=1)then
+        write(*,*)'ERROR: invalid particle backup filename ',trim(fileloc)
+        call clean_stop
+     endif
+     part_descriptor=fileloc(1:part_descriptor_index-1)//'part_file_descriptor.txt'
+     inquire(file=trim(part_descriptor),exist=part_descriptor_exists)
+     has_ptype_record=.false.
+     if(part_descriptor_exists)then
+        open(newunit=part_descriptor_unit,file=trim(part_descriptor), &
+             & status='old',action='read',iostat=part_descriptor_status)
+        if(part_descriptor_status/=0)then
+           write(*,*)'ERROR: cannot open particle descriptor ',trim(part_descriptor)
+           call clean_stop
+        endif
+        do
+           read(part_descriptor_unit,'(A)',iostat=part_descriptor_status) part_descriptor_line
+           if(part_descriptor_status<0)exit
+           if(part_descriptor_status>0)then
+              write(*,*)'ERROR: cannot read particle descriptor ',trim(part_descriptor)
+              call clean_stop
+           endif
+           if(index(part_descriptor_line,', ptypep, b')>0)has_ptype_record=.true.
+        enddo
+        close(part_descriptor_unit)
+     endif
      ! Wait for the token
 #ifndef WITHOUTMPI
      if(IOGROUPSIZE>0) then
@@ -328,11 +361,12 @@ subroutine init_part
      read(ilun)isp
      levelp(1:npart2)=isp
      deallocate(isp)
-     ! The standard RAMSES binary part backup has no compact ptypep record.
-     ! Its next record is the particle potential (when enabled), followed by
-     ! the stellar birth/metallicity fields.  Reading ptypep here shifts the
-     ! stream by one record and eventually produces an EOF on valid legacy
-     ! outputs.  Reconstruct the compact type below from idp and tp instead.
+     if(has_ptype_record)then
+        allocate(isp1(1:npart2))
+        read(ilun)isp1
+        ptypep(1:npart2)=isp1
+        deallocate(isp1)
+     endif
 #ifdef OUTPUT_PARTICLE_POTENTIAL
      allocate(xdp(1:npart2))
      read(ilun)xdp
@@ -366,17 +400,17 @@ subroutine init_part
         deallocate(xdp)
      end if
 
-     ! Legacy binary backups encode the particle class implicitly:
-     ! negative ids are sink/cloud particles, positive ids with non-zero tp
-     ! are stars, and the remaining positive ids are dark matter.
-     ptypep(1:npart2)=PTYPE_DM
-     do i=1,npart2
-        if(idp(i)<0_i8b)then
-           ptypep(i)=PTYPE_SINK
-        else if((star.or.sink).and.idp(i)>0_i8b.and.tp(i)/=0.0d0)then
-           ptypep(i)=PTYPE_STAR
-        endif
-     enddo
+     if(.not.has_ptype_record)then
+        ! Legacy binary backups encode particle class implicitly.
+        ptypep(1:npart2)=PTYPE_DM
+        do i=1,npart2
+           if(idp(i)<0_i8b)then
+              ptypep(i)=PTYPE_SINK
+           else if((star.or.sink).and.idp(i)>0_i8b.and.tp(i)/=0.0d0)then
+              ptypep(i)=PTYPE_STAR
+           endif
+        enddo
+     endif
      close(ilun)
 
      !determine NDM
