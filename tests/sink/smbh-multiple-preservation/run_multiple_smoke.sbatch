@@ -21,6 +21,7 @@ if [[ -r /usr/lib64/libpmi2.so ]]; then
   export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi2.so
 fi
 repo=${1:?Provide the isolated lagRamses checkout}
+fixture_mode=${2:-uniform}
 test -z "$(git -C "${repo}" status --porcelain)"
 revision=$(git -C "${repo}" rev-parse HEAD)
 fixture=${repo}/tests/sink/smbh-multiple-preservation
@@ -31,12 +32,20 @@ mkdir -p "${root}"
 run_dir=${root}/${SLURM_JOB_ID}
 mkdir "${run_dir}"
 cp "${fixture}/smbh-multiple.nml" "${run_dir}/cosmo.nml"
+if [[ "${fixture_mode}" == empty-top-level ]]; then
+  # Exercise nlevelmax>levelmin with no level-5 sink or cloud particles.
+  sed -i 's/^levelmax=4$/levelmax=5/' "${run_dir}/cosmo.nml"
+elif [[ "${fixture_mode}" != uniform ]]; then
+  printf 'unsupported fixture mode: %s\n' "${fixture_mode}" >&2
+  exit 2
+fi
 cp "${fixture}/ic_sink" "${run_dir}/ic_sink"
 printf '%s\n' "${revision}" > "${run_dir}/source-revision.txt"
 sha256sum "${binary}" > "${run_dir}/binary.sha256"
 sha256sum "${run_dir}/cosmo.nml" "${run_dir}/ic_sink" > "${run_dir}/inputs.sha256"
 printf 'effective_namelist=%s\n' "${run_dir}/cosmo.nml"
 printf 'run_purpose=short_evolution_test\n'
+printf 'fixture_mode=%s\n' "${fixture_mode}"
 printf 'noutput=0; aout=none; foutput=1; fbackup=1; nstepmax=2 (two evolved steps)\n'
 printf 'estimated_max_full_dumps=2; estimated_max_total_storage=200MiB\n'
 df -h /gpfs

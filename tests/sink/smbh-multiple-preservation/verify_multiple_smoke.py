@@ -55,16 +55,24 @@ def read_checkpoint(path: Path) -> dict[int, tuple[float, ...]]:
 
 
 def read_sink_statistics(path: Path) -> dict[int, tuple[float, ...]]:
-    """Read the seven MPI-summed channels in this uniform-level fixture."""
+    """Read all MPI-summed channels through the trailing format marker."""
     with path.open("rb") as stream:
         read_record(stream)  # nsink
         read_record(stream)  # nindsink
         ids = struct.unpack("<4i", read_record(stream))
         for _ in range(20):
             read_record(stream)
-        fields = [struct.unpack("<4d", read_record(stream)) for _ in range(7)]
-        marker = struct.unpack("<i", read_record(stream))[0]
-        if marker != SINK_STAT_GLOBAL_MARKER or stream.read(1):
+        fields = []
+        while True:
+            payload = read_record(stream)
+            if len(payload) == 4:
+                marker = struct.unpack("<i", payload)[0]
+                break
+            if len(payload) != 4 * 8:
+                raise ValueError("invalid sink-stat channel width")
+            fields.append(struct.unpack("<4d", payload))
+        if marker != SINK_STAT_GLOBAL_MARKER or stream.read(1) or \
+                len(fields) < 7 or len(fields) % 7:
             raise ValueError("invalid or trailing sink-stat checkpoint format")
     if not all(math.isfinite(value) for field in fields for value in field):
         raise ValueError("non-finite global sink statistic")
