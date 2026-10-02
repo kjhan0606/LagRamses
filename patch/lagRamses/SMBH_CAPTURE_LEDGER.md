@@ -1,8 +1,9 @@
 # SMBH pre-compaction capture ledger
 
 `merge_sink` irreversibly replaces every FOF sink group with one centre-of-mass
-sink.  The version-1 capture ledger records the group immediately before that
-replacement.  Logging is rank-0-only and does not change group membership,
+sink under the historical policy. The version-1 capture ledger records the
+original group before compaction or optional MULTIPLE preservation.
+Logging is rank-0-only and does not change group membership,
 sink forces, masses, spins, or the existing merge decision.
 
 ## Runtime controls
@@ -12,11 +13,27 @@ The `&physics_params` namelist accepts:
 ```fortran
 smbh_capture_ledger = .true.
 smbh_capture_ledger_file = 'smbh_capture_ledger_v1.jsonl'
+smbh_preserve_multiple = .true.
 ```
 
 Logging is enabled by default.  Give every independent simulation a separate
 ledger path; provenance also remains tied to the RAMSES output directory and
 its `info`/build metadata.
+
+`smbh_preserve_multiple` defaults to false to reproduce historical compaction.
+When enabled in an SMBH run, every member of an original FOF group with three
+or more sinks remains a separate live sink. The complete original group is
+logged first; only the subsequent compaction grouping is split into singletons.
+Two-member groups retain the existing numerical merge rule. The sorted member
+permutation is rebuilt for the OpenMP path, so no member is lost or assigned to
+another group. The normal DM provenance sidecar records this runtime switch;
+the ledger event records `multiple_members_preserved`.
+
+This switch preserves the sinks and their ordinary snapshot/restart fields;
+it adds no unresolved few-body solver or physical coalescence criterion. A
+later FOF call may find a different grouping and compact a two-member group.
+The namelist switch must also be supplied on restart. Until full solver and
+MPI/restart integration tests pass, this mode is experimental.
 
 The writer is invoked only when `smbh = .true.`.  In other sink modes the
 ledger controls are ignored.  When enabled for an SMBH run, failure to open,
@@ -44,14 +61,18 @@ Every event is a contiguous JSONL transaction:
 Two-member groups are `BINARY`; larger transitive FOF groups are `MULTIPLE`.
 No arbitrary binary ordering is inferred for a multiple.
 
-`primary_sink_id` is the global ID retained by `merge_sink`: the most massive
+`primary_sink_id` identifies the most massive
 member, with the lowest pre-compaction sink index breaking exact mass ties.
 It is stored in both `event_begin` and every `member` row.  Thus each captured
 sink row carries the requested `(sink_id, primary_sink_id)` relation without
 having to reconstruct the compaction order.
+With MULTIPLE preservation enabled it is a group representative; all original
+IDs survive, rather than only this primary ID.
 
 The deterministic event UID contains coarse step, level, minimum/maximum sink
-ID, and member count.  A restart may append the same complete transaction
+ID, member count, and the hexadecimal bits of the code time. Distinct substeps
+within a coarse step therefore remain distinct observations of a retained
+MULTIPLE. A restart may append the same complete transaction
 again.  Consumers must deduplicate identical UIDs.  If a crash occurs between
 `event_begin` and `event_end`, consumers must reject that incomplete
 transaction.  A repeated UID with different content is a provenance conflict,

@@ -316,6 +316,7 @@ module amr_parameters
   real(dp)::star_ratio_floor=0.25d0
   real(dp)::d_jeans_thre=0.d0 ! Gas density threshold to trigger Jeans-based refinement criterion
   logical ::smbh_capture_ledger=.true. ! Log complete pre-compaction sink groups
+  logical ::smbh_preserve_multiple=.false. ! Retain all members of >=3-member SMBH FOF groups
   character(len=256)::smbh_capture_ledger_file='smbh_capture_ledger_v1.jsonl'
   ! Immutable CDM zoom input attestations.  These remain blank for ordinary
   ! runs; a non-compacting zoom supplies all five SHA-256 values in its input.

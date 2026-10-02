@@ -431,6 +431,8 @@ subroutine output_dm_run_provenance(filename)
   write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'smbh_capture_ledger_enabled = ', &
        & smbh_capture_ledger
   if(ios /= 0) call dm_run_provenance_fatal('write capture-ledger flag',filename,ios,iomsg)
+  write(ilun,'(A,L1)',iostat=ios,iomsg=iomsg) 'smbh_preserve_multiple = ',smbh_preserve_multiple
+  if(ios /= 0) call dm_run_provenance_fatal('write multiple-preservation flag',filename,ios,iomsg)
   write(ilun,'(A,A)',iostat=ios,iomsg=iomsg) 'smbh_capture_ledger_file = ', &
        & trim(smbh_capture_ledger_file)
   if(ios /= 0) call dm_run_provenance_fatal('write capture-ledger path',filename,ios,iomsg)

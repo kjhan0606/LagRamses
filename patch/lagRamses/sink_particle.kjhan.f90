@@ -1419,6 +1419,17 @@ subroutine merge_sink(ilevel)
   endif
 
 
+  ! Keep the ledger's original transitive FOF group intact as evidence, then
+  ! make each MULTIPLE member a singleton for the existing compaction path.
+  ! Rebuild psink as well: the OpenMP path requires contiguous group members.
+  if(smbh .and. smbh_preserve_multiple) then
+     call preserve_smbh_multiple_groups(nsink,new_sink,gsink,psink,info)
+     if(info /= 0) then
+        if(myid==1) write(*,*) 'ERROR: invalid grouping in SMBH MULTIPLE preservation'
+        call clean_stop
+     endif
+  endif
+
   !----------------------------------------------------
   ! Compute group centre of mass and average velocity
   !----------------------------------------------------
@@ -1805,6 +1816,58 @@ subroutine merge_sink(ilevel)
 
 end subroutine merge_sink
 !################################################################
+subroutine preserve_smbh_multiple_groups(n,ngrp,groups,order,ierr)
+  implicit none
+  integer,intent(in)::n
+  integer,intent(inout)::ngrp
+  integer,intent(inout)::groups(n),order(n)
+  integer,intent(out)::ierr
+  integer::counts(n),mapping(n),offsets(n),old_groups(n)
+  integer::i,g,new_count,cursor
+
+  ! Validate before mutating anything; callers stop on any invalid FoF result.
+  ierr=1
+  if(n < 1 .or. ngrp < 1 .or. ngrp > n) return
+  if(any(groups < 1) .or. any(groups > ngrp)) return
+  counts=0
+  do i=1,n
+     counts(groups(i))=counts(groups(i))+1
+  enddo
+  if(any(counts(1:ngrp)==0)) return
+  old_groups=groups
+  mapping=0
+  new_count=0
+  do i=1,n
+     g=old_groups(i)
+     if(counts(g)>2) then
+        new_count=new_count+1
+        groups(i)=new_count
+     else
+        if(mapping(g)==0) then
+           new_count=new_count+1
+           mapping(g)=new_count
+        endif
+        groups(i)=mapping(g)
+     endif
+  enddo
+  counts=0
+  do i=1,n
+     counts(groups(i))=counts(groups(i))+1
+  enddo
+  cursor=0
+  do g=1,new_count
+     offsets(g)=cursor
+     cursor=cursor+counts(g)
+  enddo
+  do i=1,n
+     g=groups(i)
+     offsets(g)=offsets(g)+1
+     order(offsets(g))=i
+  enddo
+  ngrp=new_count
+  ierr=0
+end subroutine preserve_smbh_multiple_groups
+!################################################################
 !################################################################
 !################################################################
 !################################################################
@@ -1812,7 +1875,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   use pm_commons
   use amr_commons
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use, intrinsic :: iso_fortran_env, only: error_unit
+  use, intrinsic :: iso_fortran_env, only: error_unit, int64
   implicit none
 
   integer,intent(in)::ilevel,ngrp
@@ -1923,8 +1986,11 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         enddo
      enddo
 
-     write(event_uid,'(I0,"-",I0,"-",I0,"-",I0,"-",I0)') &
-          & nstep_coarse,ilevel,min_id,max_id,nmember
+     ! A preserved group can be seen on several substeps within one coarse
+     ! step. Include the exact time bits so later states are distinct events,
+     ! while an exact checkpoint replay still has the same deterministic UID.
+     write(event_uid,'(I0,"-",I0,"-",I0,"-",I0,"-",I0,"-",Z16.16)') &
+          & nstep_coarse,ilevel,min_id,max_id,nmember,transfer(t,0_int64)
      if(nmember == 2) then
         classification='BINARY'
      else
@@ -1936,7 +2002,9 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
           & '{"schema_version":1,"record_type":"event_begin","event_uid":"'// &
           & trim(event_uid)//'","classification":"'//trim(classification)// &
-          & '","nstep_coarse":'//trim(json_int(nstep_coarse))// &
+          & '","multiple_members_preserved":'// &
+          & trim(json_logical(nmember>2 .and. smbh_preserve_multiple))// &
+          & ',"nstep_coarse":'//trim(json_int(nstep_coarse))// &
           & ',"ilevel":'//trim(json_int(ilevel))// &
           & ',"group_index":'//trim(json_int(igrp))// &
           & ',"primary_sink_id":'//trim(json_int(primary_sink_id))// &
