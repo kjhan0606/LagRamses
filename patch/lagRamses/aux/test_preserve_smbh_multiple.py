@@ -76,3 +76,37 @@ def test_invalid_grouping_is_rejected_before_mutation(regroup_executable, groups
     assert status == [1, ngrp]
     assert actual == groups
     assert order == list(range(1, len(groups) + 1))
+
+
+def test_writer_uid_distinguishes_substeps_and_repeats_on_exact_replay(tmp_path):
+    compiler = shutil.which("gfortran")
+    if compiler is None:
+        pytest.skip("gfortran is required for the compiled UID test")
+    source = (Path(__file__).resolve().parents[1] / "sink_particle.kjhan.f90").read_text()
+    begin = source.index("     write(event_uid,'(I0")
+    end = source.index("transfer(t,0_int64)", begin) + len("transfer(t,0_int64)")
+    statement = source[begin:end]
+    driver = tmp_path / "uid.f90"
+    driver.write_text("""
+program test_uid
+  use iso_fortran_env, only: int64
+  implicit none
+  integer :: nstep_coarse=10, ilevel=3, min_id=7, max_id=9, nmember=3, i
+  real(kind(1d0)) :: t
+  character(len=96) :: event_uid
+  do i=1,3
+     t=1d0
+     if(i==2) t=nearest(t,1d0)
+""" + statement + """
+     write(*,'(A)') trim(event_uid)
+  enddo
+end program test_uid
+""")
+    executable = tmp_path / "uid"
+    subprocess.run([compiler, "-std=f2008", "-fcheck=all", "-o", str(executable), str(driver)],
+                   check=True, capture_output=True, text=True, timeout=30)
+    result = subprocess.run([str(executable)], check=True, capture_output=True, text=True, timeout=5)
+    first, later, replay = result.stdout.splitlines()
+    assert first == replay
+    assert first != later
+    assert first.startswith("10-3-7-9-3-")

@@ -3,7 +3,7 @@
 #SBATCH --partition=a10
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
 #SBATCH --time=00:30:00
@@ -24,7 +24,8 @@ run_dir=/gpfs/kjhan/FDM_WRITER_BUILD/multiple-build-${SLURM_JOB_ID}
 mkdir "${run_dir}"
 module list 2>&1 | tee "${run_dir}/modules.log"
 printf '%s\n' "${build_revision}" | tee "${run_dir}/source-revision.txt"
-make --directory="${repo}/bin" -j4 ramses 2>&1 | tee "${run_dir}/build.log"
+# The upstream module graph is incomplete for a fresh parallel build.
+make --directory="${repo}/bin" -j1 ramses 2>&1 | tee "${run_dir}/build.log"
 test "$(git -C "${repo}" rev-parse HEAD)" = "${build_revision}"
 test -z "$(git -C "${repo}" status --porcelain)"
 test -x "${repo}/bin/ramses_final3d"
