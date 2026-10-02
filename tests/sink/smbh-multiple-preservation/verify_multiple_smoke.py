@@ -11,6 +11,7 @@ import struct
 
 
 EXPECTED_IDS = {1, 2, 3, 5}
+INITIAL_MASS_BY_ID = {1: 0.081, 2: 0.022, 3: 0.023, 5: 0.024}
 
 
 def read_record(stream) -> bytes:
@@ -85,6 +86,20 @@ def main() -> None:
     for output in (1, 2):
         path = root / f"output_{output:05d}" / f"sink_{output:05d}.out"
         ids_by_output[output] = read_checkpoint(path)
+    first = ids_by_output[1]
+    second = ids_by_output[2]
+    for sink_id, initial_mass in INITIAL_MASS_BY_ID.items():
+        if not math.isclose(first[sink_id][0], initial_mass, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValueError(f"pre-evolution sink mass conservation failed for {sink_id}")
+        if second[sink_id][0] < first[sink_id][0]:
+            raise ValueError(f"sink mass decreased across the smoke evolution: {sink_id}")
+    if not math.isclose(sum(state[0] for state in first.values()), 0.150,
+                        rel_tol=1e-12, abs_tol=1e-12):
+        raise ValueError("binary compaction did not conserve the five seed masses")
+    if first[1][15:19] != (0.0, 0.0, 1.0, 0.0):
+        raise ValueError("zero-angular-momentum binary acquired a spurious remnant spin")
+    if any(state[9] <= 0.0 for state in second.values()):
+        raise ValueError("sink-only Bondi growth has no positive finite rate integral")
     binary, multiple = check_ledger(root / "smbh_capture_ledger_v1.jsonl")
     print(json.dumps({
         "status": "live_multiple_smoke_passed",
