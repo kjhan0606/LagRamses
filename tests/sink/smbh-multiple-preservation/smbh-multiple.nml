@@ -2,7 +2,7 @@
 hydro=.true.
 rt=.false.
 nrestart=0
-nstepmax=3
+nstepmax=2
 nremap=10
 poisson=.true.
 pic=.true.
