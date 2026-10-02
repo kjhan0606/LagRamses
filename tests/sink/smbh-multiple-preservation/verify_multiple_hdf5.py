@@ -19,9 +19,10 @@ def read_sinks(root: Path, output: int) -> dict[str, np.ndarray]:
         raise ValueError(f"incomplete HDF5 checkpoint: {path}")
     with h5py.File(path, "r") as stream:
         group = stream["sinks"]
-        if int(group.attrs["nsink"]) != 4 or int(group.attrs["nindsink"]) != 5:
+        if int(np.asarray(group.attrs["nsink"]).item()) != 4 or \
+                int(np.asarray(group.attrs["nindsink"]).item()) != 5:
             raise ValueError("HDF5 live SMBH counts are wrong")
-        if int(group.attrs["sink_stat_format"]) != 20261003:
+        if int(np.asarray(group.attrs["sink_stat_format"]).item()) != 20261003:
             raise ValueError("HDF5 global sink-stat marker is missing")
         values = {name: group[name][...] for name in group.keys()}
     ids = values["idsink"]

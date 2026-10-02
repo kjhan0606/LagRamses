@@ -21,6 +21,7 @@ if [[ -r /usr/lib64/libpmi2.so ]]; then
 fi
 repo=${1:?Provide the isolated HDF5 lagRamses checkout}
 continuous=${2:?Provide the complete two-output HDF5 smoke directory}
+expectation=${3:-pass}
 test -z "$(git -C "${repo}" status --porcelain)"
 binary=${repo}/bin/ramses_final3d
 test -x "${binary}"
@@ -36,12 +37,25 @@ cp "${continuous}/cosmo.nml" "${run_dir}/cosmo.nml"
 sha256sum "${run_dir}/cosmo.nml" > "${run_dir}/inputs.sha256"
 printf 'effective_namelist=%s\n' "${run_dir}/cosmo.nml"
 printf 'command_line_nrestart=1\n'
-printf 'run_purpose=restart_short_hdf5_evolution_test\n'
+printf 'run_purpose=restart_short_hdf5_evolution_test; expectation=%s\n' "${expectation}"
 printf 'noutput=0; aout=none; foutput=1; fbackup=1; nstepmax=2\n'
 printf 'expected_copied_dumps=1; expected_new_dumps=1; estimated_max_total_storage=200MiB\n'
 df -h /gpfs
 cd "${run_dir}"
 : > jobcontrol.txt
+if [[ "${expectation}" == reject ]]; then
+  if srun --kill-on-bad-exit=1 --mpi=pmi2 -n2 -c1 --cpu-bind=cores \
+      "${binary}" cosmo.nml 1 > run.log 2>&1; then
+    printf '%s\n' 'ERROR: unsafe MPI HDF5 sink restart was accepted' >&2
+    exit 1
+  fi
+  grep -Fq 'ERROR: MPI HDF5 sink restart lacks rank-local AMR reconstruction' run.log
+  test ! -e output_00002
+  printf 'multiple_hdf5_restart_status=correctly_rejected\n'
+  printf 'run_directory=%s\n' "${run_dir}"
+  exit 0
+fi
+test "${expectation}" = pass
 srun --kill-on-bad-exit=1 --mpi=pmi2 -n2 -c1 --cpu-bind=cores \
   "${binary}" cosmo.nml 1 > run.log 2>&1
 grep -Fq 'Run completed' run.log

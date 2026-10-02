@@ -115,6 +115,15 @@ subroutine restore_amr_hdf5()
           hdf5_attr_status_all
      call hdf5_restart_abort
   end if
+  if(sink.and.(ncpu_file>1.or.ncpu>1))then
+     ! The same-ncpu HDF5 AMR reader currently replicates every grid on every
+     ! rank instead of reconstructing the rank-local/virtual tree.  A two-rank
+     ! sink test changes cloud counts and trajectories after restart even with
+     ! correctly summed sink_stat.  Reject it until that AMR reader is fixed.
+     if(myid==1)write(*,*) &
+          'ERROR: MPI HDF5 sink restart lacks rank-local AMR reconstruction'
+     call hdf5_restart_abort
+  endif
   nlevelmax_header = 0
   call hdf5_read_attr_int_checked(grp_id, 'nlevelmax', nlevelmax_header, hdf5_attr_status)
   call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
