@@ -225,6 +225,61 @@ def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
     return [begin, *members, *pairs, end]
 
 
+def committed_batch(
+    rows: list[dict], batch_uid: str = "10-1", attempt_uid: str = "attempt-a"
+) -> list[dict]:
+    versioned = copy.deepcopy(rows)
+    for row in versioned:
+        row["schema_version"] = 2
+        row["batch_uid"] = batch_uid
+    count = sum(row["record_type"] == "event_end" for row in versioned)
+    return [
+        {
+            "schema_version": 2,
+            "record_type": "attempt_begin",
+            "attempt_uid": attempt_uid,
+            "run_uuid": "run-a",
+            "ledger_file": "ledger.jsonl",
+            "parent_checkpoint_uid": None,
+            "restart_output_index": 0,
+            "restart_nstep_coarse": 0,
+        },
+        {
+            "schema_version": 2,
+            "record_type": "batch_begin",
+            "batch_uid": batch_uid,
+            "attempt_uid": attempt_uid,
+            "committed_batch_seq": 1,
+            "nstep_coarse": 10,
+            "ilevel": 1,
+            "expected_events": count,
+            "committed": False,
+        },
+        *versioned,
+        {
+            "schema_version": 2,
+            "record_type": "batch_prepared",
+            "batch_uid": batch_uid,
+            "attempt_uid": attempt_uid,
+            "committed_batch_seq": 1,
+            "nstep_coarse": 10,
+            "event_count": count,
+            "prepared": True,
+            "committed": False,
+        },
+        {
+            "schema_version": 2,
+            "record_type": "batch_commit",
+            "batch_uid": batch_uid,
+            "attempt_uid": attempt_uid,
+            "committed_batch_seq": 1,
+            "nstep_coarse": 10,
+            "event_count": count,
+            "committed": True,
+        },
+    ]
+
+
 class LedgerValidationTests(unittest.TestCase):
     def validate_rows(self, rows: list[object], **kwargs):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -239,6 +294,240 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertTrue(report.valid)
         self.assertEqual(report.unique_events, 1)
         self.assertEqual(report.binary_events, 1)
+
+    def test_v2_events_are_visible_only_after_batch_commit(self):
+        committed = committed_batch(binary_rows())
+        report = self.validate_rows(committed)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.committed_batches, 1)
+        self.assertEqual(report.unique_events, 1)
+
+        strict = self.validate_rows(committed[:-1])
+        allowed = self.validate_rows(committed[:-1], allow_incomplete_tail=True)
+        self.assertFalse(strict.valid)
+        self.assertTrue(allowed.valid, allowed.errors)
+        self.assertEqual(allowed.incomplete_batches, 1)
+        self.assertEqual(allowed.unique_events, 0)
+
+    def test_v2_batch_before_attempt_begin_is_rejected(self):
+        report = self.validate_rows(committed_batch(binary_rows())[1:])
+        self.assertFalse(report.valid)
+        self.assertEqual(report.committed_batches, 0)
+        self.assertEqual(report.unique_events, 0)
+
+    def test_checkpoint_uid_requires_output_root(self):
+        report = self.validate_rows(
+            committed_batch(binary_rows()), checkpoint_uid="attempt-a-output-00001"
+        )
+        self.assertFalse(report.valid)
+        self.assertIn("checkpoint_uid requires output_root", report.errors)
+
+    def test_no_event_restart_supersedes_ancestor_tail_after_checkpoint(self):
+        rows = committed_batch(binary_rows(), attempt_uid="attempt-a")
+        rows.append(
+            {
+                "schema_version": 2,
+                "record_type": "attempt_begin",
+                "attempt_uid": "attempt-b",
+                "run_uuid": "run-a",
+                "ledger_file": "ledger.jsonl",
+                "parent_checkpoint_uid": "attempt-a-output-00001",
+                "restart_output_index": 1,
+                "restart_nstep_coarse": 5,
+            }
+        )
+        # This committed child tail is not authoritative until a COMPLETE
+        # checkpoint sidecar raises the leaf high-water above zero.
+        rows.extend(committed_batch(binary_rows(), attempt_uid="attempt-b")[1:])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ledger = root / "ledger.jsonl"
+            ledger.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+            )
+            output = root / "output_00001"
+            output.mkdir()
+            (output / "COMPLETE").write_text("00001\n", encoding="utf-8")
+            (output / "SMBH_CAPTURE_LINEAGE").write_text(
+                "\n".join(
+                    [
+                        "LAGRAMSES_SMBH_CAPTURE_LINEAGE_V1",
+                        "checkpoint_uid=attempt-a-output-00001",
+                        "attempt_uid=attempt-a",
+                        "run_uuid=run-a",
+                        "ledger_file=ledger.jsonl",
+                        "committed_batch_seq=0",
+                        "nstep_coarse=5",
+                        "output_index=1",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            leaf_output = root / "output_00002"
+            leaf_output.mkdir()
+            (leaf_output / "COMPLETE").write_text("00002\n", encoding="utf-8")
+            (leaf_output / "SMBH_CAPTURE_LINEAGE").write_text(
+                "\n".join(
+                    [
+                        "LAGRAMSES_SMBH_CAPTURE_LINEAGE_V1",
+                        "checkpoint_uid=attempt-b-output-00002",
+                        "attempt_uid=attempt-b",
+                        "run_uuid=run-a",
+                        "ledger_file=ledger.jsonl",
+                        "committed_batch_seq=0",
+                        "nstep_coarse=6",
+                        "output_index=2",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            report = validate_ledger(ledger, output_root=root)
+            leaf_marker = leaf_output / "SMBH_CAPTURE_LINEAGE"
+            leaf_marker.write_text(
+                leaf_marker.read_text(encoding="utf-8").replace(
+                    "committed_batch_seq=0", "committed_batch_seq=1"
+                ),
+                encoding="utf-8",
+            )
+            step_overrun = validate_ledger(ledger, output_root=root)
+            leaf_marker.write_text(
+                leaf_marker.read_text(encoding="utf-8").replace(
+                    "committed_batch_seq=1", "committed_batch_seq=2"
+                ),
+                encoding="utf-8",
+            )
+            missing_commit = validate_ledger(ledger, output_root=root)
+            leaf_marker.write_text(
+                leaf_marker.read_text(encoding="utf-8").replace(
+                    "committed_batch_seq=2", "committed_batch_seq=0"
+                ),
+                encoding="utf-8",
+            )
+            bad_rows = copy.deepcopy(rows)
+            next(
+                row
+                for row in bad_rows
+                if row.get("record_type") == "attempt_begin"
+                and row.get("attempt_uid") == "attempt-b"
+            )["restart_nstep_coarse"] = 999
+            ledger.write_text(
+                "".join(json.dumps(row) + "\n" for row in bad_rows), encoding="utf-8"
+            )
+            restart_mismatch = validate_ledger(ledger, output_root=root)
+            ledger.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+            )
+            duplicate_output = root / "output_00003"
+            duplicate_output.mkdir()
+            (duplicate_output / "COMPLETE").write_text("00003\n", encoding="utf-8")
+            (duplicate_output / "SMBH_CAPTURE_LINEAGE").write_text(
+                leaf_marker.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            duplicate_checkpoint = validate_ledger(ledger, output_root=root)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.committed_batches, 0)
+        self.assertEqual(report.unique_events, 0)
+        self.assertFalse(step_overrun.valid)
+        self.assertTrue(
+            any("batch step exceeds" in error for error in step_overrun.errors)
+        )
+        self.assertFalse(missing_commit.valid)
+        self.assertTrue(
+            any("high-water exceeds" in error for error in missing_commit.errors)
+        )
+        self.assertFalse(restart_mismatch.valid)
+        self.assertTrue(
+            any("parent checkpoint identity mismatch" in error for error in restart_mismatch.errors)
+        )
+        self.assertFalse(duplicate_checkpoint.valid)
+        self.assertTrue(
+            any("duplicate checkpoint UID" in error for error in duplicate_checkpoint.errors)
+        )
+
+    def test_complete_earlier_event_is_censored_when_multigroup_batch_fails(self):
+        rows = committed_batch(binary_rows() + multiple_rows(), "20-1")
+        prepared_only = rows[:-1]
+        report = self.validate_rows(prepared_only, allow_incomplete_tail=True)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.incomplete_batches, 1)
+        self.assertEqual(report.unique_events, 0)
+        self.assertEqual(report.binary_events, 0)
+        self.assertEqual(report.multiple_events, 0)
+
+    def test_exact_committed_batch_restart_duplicate_is_deduplicated(self):
+        rows = committed_batch(binary_rows())
+        report = self.validate_rows(rows + rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.committed_batches, 1)
+        self.assertEqual(report.duplicate_batches, 1)
+        self.assertEqual(report.unique_events, 1)
+
+    def test_duplicate_sequence_with_changed_batch_step_conflicts(self):
+        rows = committed_batch(binary_rows())
+        changed = copy.deepcopy(rows)
+        for row in changed:
+            if row.get("record_type") in {
+                "batch_begin",
+                "batch_prepared",
+                "batch_commit",
+            }:
+                row["nstep_coarse"] = 11
+        report = self.validate_rows(rows + changed)
+        self.assertFalse(report.valid)
+        self.assertTrue(
+            any("committed batch sequence has conflicting data" in error for error in report.errors)
+        )
+
+    def test_restart_can_replay_an_abandoned_prepared_batch(self):
+        committed = committed_batch(binary_rows())
+        report = self.validate_rows(committed[:-1] + committed)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.incomplete_batches, 1)
+        self.assertEqual(report.committed_batches, 1)
+        self.assertEqual(report.unique_events, 1)
+
+    def test_restart_can_replay_after_abandoned_incomplete_v2_event(self):
+        committed = committed_batch(binary_rows())
+        # First attempt ends after event_begin plus one member. The following
+        # batch_begin is an explicit restart boundary for this v2 batch only.
+        abandoned = committed[:3]
+        report = self.validate_rows(abandoned + committed)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.incomplete_events, 1)
+        self.assertEqual(report.incomplete_batches, 1)
+        self.assertEqual(report.unique_events, 1)
+
+    def test_standalone_v1_incomplete_event_before_replay_remains_invalid(self):
+        report = self.validate_rows(binary_rows()[:2] + binary_rows())
+        self.assertFalse(report.valid)
+        self.assertTrue(any("missing event_end" in error for error in report.errors))
+
+    def test_invalid_prepare_never_promotes_events(self):
+        rows = committed_batch(binary_rows())
+        rows[-2]["event_count"] = 99
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertEqual(report.committed_batches, 0)
+        self.assertEqual(report.unique_events, 0)
+
+    def test_malformed_batch_begin_never_promotes_events(self):
+        rows = committed_batch(binary_rows())
+        rows[1]["committed"] = True
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertEqual(report.committed_batches, 0)
+        self.assertEqual(report.unique_events, 0)
+
+    def test_event_end_schema_mismatch_never_promotes_batch(self):
+        rows = committed_batch(binary_rows())
+        event_end = next(row for row in rows if row["record_type"] == "event_end")
+        event_end["schema_version"] = 1
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertEqual(report.committed_batches, 0)
+        self.assertEqual(report.unique_events, 0)
 
     def test_pre_primary_extension_schema_v1_remains_valid(self):
         rows = binary_rows()

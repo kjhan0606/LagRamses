@@ -74,6 +74,12 @@ subroutine dump_all
            open(unit=11,file=TRIM(filename),status='old')
            close(11,status='delete')
         end if
+        filename='output_'//TRIM(nchar)//'/SMBH_CAPTURE_LINEAGE'
+        inquire(file=TRIM(filename),exist=marker_exists)
+        if(marker_exists)then
+           open(unit=11,file=TRIM(filename),status='old')
+           close(11,status='delete')
+        end if
      end if
 #ifndef WITHOUTMPI
      call MPI_BARRIER(MPI_COMM_WORLD,info)
@@ -337,6 +343,9 @@ subroutine dump_all
      ! The resolved-physics inventory is deliberately written before COMPLETE.
      ! It indexes raw files only; consumers must still require COMPLETE before
      ! reading any listed snapshot or treating its diagnostic as durable.
+     if(myid==1 .and. smbh .and. smbh_capture_ledger)then
+        call write_smbh_capture_checkpoint_lineage(nchar)
+     endif
      if(myid==1)then
         filename='output_'//TRIM(nchar)//'/COMPLETE'
         open(unit=11,file=TRIM(filename),form='formatted')

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass
@@ -40,6 +40,9 @@ class LedgerReport:
     multiple_events: int = 0
     duplicate_events: int = 0
     incomplete_events: int = 0
+    committed_batches: int = 0
+    duplicate_batches: int = 0
+    incomplete_batches: int = 0
     invalid_json_lines: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -56,6 +59,9 @@ class LedgerReport:
             "multiple_events": self.multiple_events,
             "duplicate_events": self.duplicate_events,
             "incomplete_events": self.incomplete_events,
+            "committed_batches": self.committed_batches,
+            "duplicate_batches": self.duplicate_batches,
+            "incomplete_batches": self.incomplete_batches,
             "invalid_json_lines": self.invalid_json_lines,
             "errors": self.errors,
         }
@@ -371,7 +377,7 @@ def _validate_complete_block(
     if not uid:
         errors.append(f"line {block.begin_line}: event_uid is empty")
         return None
-    if begin.get("schema_version") != SCHEMA_VERSION:
+    if begin.get("schema_version") not in {1, SCHEMA_VERSION}:
         errors.append(f"{uid}: unsupported schema version")
     if begin.get("complete") is not False or end.get("complete") is not True:
         errors.append(f"{uid}: begin/end completion markers are invalid")
@@ -473,10 +479,40 @@ def _validate_complete_block(
     return _event_digest(rows)
 
 
-def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> LedgerReport:
+def validate_ledger(
+    path: Path,
+    *,
+    allow_incomplete_tail: bool = False,
+    output_root: Path | None = None,
+    checkpoint_uid: str | None = None,
+) -> LedgerReport:
     report = LedgerReport()
+    if checkpoint_uid is not None and output_root is None:
+        report.errors.append("checkpoint_uid requires output_root")
     current: EventBlock | None = None
     digests: dict[str, str] = {}
+    batches: dict[str, str] = {}
+    batch: dict[str, Any] | None = None
+    attempts: dict[str, Any] = {}
+    active_attempt: str | None = None
+    committed_payloads: list[tuple[str, int, int, list[tuple[str, str, Any]]]] = []
+    batch_sequences: dict[str, set[int]] = {}
+
+    def register_event(uid: str, digest: str, classification: Any) -> None:
+        previous = digests.get(uid)
+        if previous is None:
+            digests[uid] = digest
+            report.unique_events += 1
+            if classification == "BINARY":
+                report.binary_events += 1
+            elif classification == "MULTIPLE":
+                report.multiple_events += 1
+        elif previous == digest:
+            report.duplicate_events += 1
+        else:
+            report.errors.append(
+                f"{uid}: deterministic UID has conflicting event data"
+            )
 
     with path.open("r", encoding="utf-8") as handle:
         for line_number, raw_line in enumerate(handle, start=1):
@@ -499,11 +535,116 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
                 continue
 
             record_type = record.get("record_type")
-            if record_type == "event_begin":
+            if record_type == "attempt_begin":
+                if current is not None or batch is not None:
+                    if current is not None:
+                        report.incomplete_events += 1
+                    if batch is not None:
+                        report.incomplete_batches += 1
+                    current = None
+                    batch = None
+                uid = record.get("attempt_uid")
+                parent = record.get("parent_checkpoint_uid")
+                run_uuid = record.get("run_uuid")
+                ledger_file = record.get("ledger_file")
+                valid = (
+                    record.get("schema_version") == 2
+                    and isinstance(uid, str)
+                    and bool(uid)
+                    and (parent is None or (isinstance(parent, str) and bool(parent)))
+                    and isinstance(run_uuid, str)
+                    and bool(run_uuid)
+                    and isinstance(ledger_file, str)
+                    and bool(ledger_file)
+                    and isinstance(record.get("restart_output_index"), int)
+                    and not isinstance(record.get("restart_output_index"), bool)
+                    and isinstance(record.get("restart_nstep_coarse"), int)
+                    and not isinstance(record.get("restart_nstep_coarse"), bool)
+                    and ((parent is None) == (record.get("restart_output_index") == 0))
+                )
+                signature = (
+                    run_uuid,
+                    ledger_file,
+                    parent,
+                    record.get("restart_output_index"),
+                    record.get("restart_nstep_coarse"),
+                )
+                if not valid:
+                    report.errors.append(f"line {line_number}: invalid attempt_begin")
+                elif uid in attempts and attempts[uid] != signature:
+                    report.errors.append(f"{uid}: conflicting attempt_begin")
+                else:
+                    attempts[uid] = signature
+                    active_attempt = uid
+            elif record_type == "batch_begin":
+                if current is not None:
+                    report.incomplete_events += 1
+                    if not (
+                        current.begin.get("schema_version") == 2
+                        and batch is not None
+                        and current.begin.get("batch_uid") == batch["uid"]
+                    ):
+                        report.errors.append(
+                            f"{current.uid}: missing event_end before line {line_number}"
+                        )
+                    current = None
+                if batch is not None:
+                    report.incomplete_batches += 1
+                    # A restart may append a replay after a crash left an
+                    # earlier prepare uncommitted. Its events stay censored;
+                    # the new batch marker is an unambiguous recovery boundary.
+                uid = record.get("batch_uid")
+                expected = record.get("expected_events")
+                attempt_uid = record.get("attempt_uid")
+                sequence = record.get("committed_batch_seq")
+                batch_begin_valid = not (
+                    record.get("schema_version") != 2
+                    or not isinstance(uid, str)
+                    or not uid
+                    or isinstance(expected, bool)
+                    or not isinstance(expected, int)
+                    or expected < 1
+                    or attempt_uid != active_attempt
+                    or not isinstance(sequence, int)
+                    or isinstance(sequence, bool)
+                    or sequence < 1
+                    or not isinstance(record.get("nstep_coarse"), int)
+                    or isinstance(record.get("nstep_coarse"), bool)
+                    or record.get("committed") is not False
+                )
+                if not batch_begin_valid:
+                    report.errors.append(f"line {line_number}: invalid batch_begin")
+                batch = {
+                    "uid": str(uid or ""),
+                    "attempt_uid": attempt_uid,
+                    "sequence": sequence,
+                    "nstep_coarse": record.get("nstep_coarse"),
+                    "begin_record": record,
+                    "prepared_record": None,
+                    "expected": expected,
+                    "events": [],
+                    "prepared": False,
+                    "valid": batch_begin_valid,
+                    # Any subsequent structural, JSON, or invariant error
+                    # while this batch is active makes it non-promotable.
+                    "error_start": len(report.errors),
+                }
+            elif record_type == "event_begin":
                 if current is not None:
                     report.incomplete_events += 1
                     report.errors.append(
                         f"{current.uid}: missing event_end before line {line_number}"
+                    )
+                if record.get("schema_version") == 2:
+                    if batch is None or record.get("batch_uid") != batch["uid"]:
+                        report.errors.append(
+                            f"line {line_number}: v2 event appears outside its batch"
+                        )
+                        if batch is not None:
+                            batch["valid"] = False
+                elif batch is not None:
+                    report.errors.append(
+                        f"line {line_number}: legacy event appears inside a v2 batch"
                     )
                 current = EventBlock(record, line_number)
             elif record_type in {"member", "pair"}:
@@ -516,6 +657,24 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
                     report.errors.append(
                         f"line {line_number}: record UID does not match active event"
                     )
+                    if batch is not None:
+                        batch["valid"] = False
+                if record.get("schema_version") != current.begin.get("schema_version"):
+                    report.errors.append(
+                        f"line {line_number}: record schema does not match active event"
+                    )
+                    if batch is not None:
+                        batch["valid"] = False
+                if current.begin.get("schema_version") == 2 and (
+                    batch is None
+                    or record.get("batch_uid") != batch["uid"]
+                    or record.get("batch_uid") != current.begin.get("batch_uid")
+                ):
+                    report.errors.append(
+                        f"line {line_number}: record batch UID does not match active batch"
+                    )
+                    if batch is not None:
+                        batch["valid"] = False
                 current.rows.append(record)
                 if record_type == "member":
                     current.members.append(record)
@@ -527,23 +686,115 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
                         f"line {line_number}: event_end appears outside an event"
                     )
                     continue
+                if record.get("schema_version") != current.begin.get("schema_version"):
+                    report.errors.append(
+                        f"line {line_number}: event_end schema does not match event_begin"
+                    )
+                errors_before = len(report.errors)
                 digest = _validate_complete_block(current, record, report)
+                if batch is not None and len(report.errors) != errors_before:
+                    batch["valid"] = False
                 if digest is not None:
-                    previous = digests.get(current.uid)
-                    if previous is None:
-                        digests[current.uid] = digest
-                        report.unique_events += 1
-                        if current.begin.get("classification") == "BINARY":
-                            report.binary_events += 1
-                        elif current.begin.get("classification") == "MULTIPLE":
-                            report.multiple_events += 1
-                    elif previous == digest:
-                        report.duplicate_events += 1
+                    if current.begin.get("schema_version") == 2:
+                        if batch is None or record.get("batch_uid") != batch["uid"]:
+                            report.errors.append(
+                                f"{current.uid}: v2 event_end is outside its batch"
+                            )
+                        else:
+                            batch["events"].append(
+                                (current.uid, digest, current.begin.get("classification"))
+                            )
                     else:
-                        report.errors.append(
-                            f"{current.uid}: deterministic UID has conflicting event data"
+                        register_event(
+                            current.uid, digest, current.begin.get("classification")
                         )
                 current = None
+            elif record_type == "batch_prepared":
+                if current is not None or batch is None:
+                    report.errors.append(
+                        f"line {line_number}: batch_prepared appears outside a complete batch"
+                    )
+                    continue
+                count = record.get("event_count")
+                if (
+                    record.get("schema_version") != 2
+                    or record.get("batch_uid") != batch["uid"]
+                    or record.get("attempt_uid") != batch["attempt_uid"]
+                    or record.get("committed_batch_seq") != batch["sequence"]
+                    or record.get("nstep_coarse") != batch["nstep_coarse"]
+                    or record.get("prepared") is not True
+                    or record.get("committed") is not False
+                    or count != batch["expected"]
+                    or count != len(batch["events"])
+                ):
+                    report.errors.append(f"{batch['uid']}: invalid batch_prepared")
+                    batch["valid"] = False
+                else:
+                    batch["prepared"] = True
+                    batch["prepared_record"] = record
+            elif record_type == "batch_commit":
+                if current is not None or batch is None:
+                    report.errors.append(
+                        f"line {line_number}: batch_commit appears outside a prepared batch"
+                    )
+                    continue
+                uid = batch["uid"]
+                if (
+                    record.get("schema_version") != 2
+                    or record.get("batch_uid") != uid
+                    or record.get("attempt_uid") != batch["attempt_uid"]
+                    or record.get("committed_batch_seq") != batch["sequence"]
+                    or record.get("nstep_coarse") != batch["nstep_coarse"]
+                    or record.get("committed") is not True
+                    or record.get("event_count") != batch["expected"]
+                    or not batch["prepared"]
+                    or not batch["valid"]
+                    or len(report.errors) != batch["error_start"]
+                ):
+                    report.errors.append(f"{uid}: invalid batch_commit")
+                else:
+                    payload = json.dumps(
+                        {
+                            "begin": batch["begin_record"],
+                            "events": batch["events"],
+                            "prepared": batch["prepared_record"],
+                            "commit": record,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                    batch_key = f"{batch['attempt_uid']}:{batch['sequence']}"
+                    identity_digest = f"{uid}:{digest}"
+                    previous = batches.get(batch_key)
+                    if previous is None:
+                        batches[batch_key] = identity_digest
+                        committed_payloads.append(
+                            (
+                                batch["attempt_uid"],
+                                batch["sequence"],
+                                batch["nstep_coarse"],
+                                batch["events"],
+                            )
+                        )
+                        batch_sequences.setdefault(batch["attempt_uid"], set()).add(
+                            batch["sequence"]
+                        )
+                        report.committed_batches += 1
+                        for event_uid, event_digest, classification in batch["events"]:
+                            register_event(
+                                f"{batch['attempt_uid']}:{event_uid}",
+                                event_digest,
+                                classification,
+                            )
+                    elif previous == identity_digest:
+                        report.duplicate_batches += 1
+                        report.duplicate_events += len(batch["events"])
+                    else:
+                        report.errors.append(
+                            f"{uid}: committed batch sequence has conflicting data"
+                        )
+                batch = None
             else:
                 report.errors.append(
                     f"line {line_number}: unknown record_type {record_type!r}"
@@ -553,6 +804,157 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
         report.incomplete_events += 1
         if not allow_incomplete_tail:
             report.errors.append(f"{current.uid}: incomplete event at end of ledger")
+    if batch is not None:
+        report.incomplete_batches += 1
+        if not allow_incomplete_tail:
+            report.errors.append(f"{batch['uid']}: uncommitted batch at end of ledger")
+    for attempt_uid, sequences in batch_sequences.items():
+        if sequences and (min(sequences) != 1 or len(sequences) != max(sequences)):
+            report.errors.append(
+                f"{attempt_uid}: committed batch sequence is not contiguous from one"
+            )
+
+    if output_root is not None:
+        markers: dict[str, dict[str, Any]] = {}
+        for marker_path in sorted(output_root.glob("output_*/SMBH_CAPTURE_LINEAGE")):
+            complete_path = marker_path.parent / "COMPLETE"
+            if not complete_path.is_file():
+                continue
+            try:
+                complete_value = complete_path.read_text(encoding="utf-8").strip()
+                lines = marker_path.read_text(encoding="utf-8").splitlines()
+                if not lines or lines[0] != "LAGRAMSES_SMBH_CAPTURE_LINEAGE_V1":
+                    raise ValueError("bad magic")
+                pairs = [line.split("=", 1) for line in lines[1:]]
+                values = dict(pairs)
+                if len(values) != len(pairs):
+                    raise ValueError("duplicate marker field")
+                marker = {
+                    **values,
+                    "committed_batch_seq": int(values["committed_batch_seq"]),
+                    "nstep_coarse": int(values["nstep_coarse"]),
+                    "output_index": int(values["output_index"]),
+                }
+                if marker["committed_batch_seq"] < 0:
+                    raise ValueError("negative committed batch sequence")
+                if marker["checkpoint_uid"] in markers:
+                    raise ValueError("duplicate checkpoint UID")
+                if marker_path.parent.name != f"output_{marker['output_index']:05d}":
+                    raise ValueError("output index mismatch")
+                if complete_value != f"{marker['output_index']:05d}":
+                    raise ValueError("COMPLETE payload mismatch")
+                expected_uid = (
+                    f"{marker['attempt_uid']}-output-{marker['output_index']:05d}"
+                )
+                if marker["checkpoint_uid"] != expected_uid:
+                    raise ValueError("checkpoint UID binding mismatch")
+                markers[marker["checkpoint_uid"]] = marker
+            except (OSError, KeyError, ValueError) as exc:
+                report.errors.append(f"{marker_path}: invalid lineage marker: {exc}")
+
+        parent_attempts: set[str] = set()
+        parent_for: dict[str, tuple[str, int]] = {}
+        for uid, signature in attempts.items():
+            run_uuid, ledger_file, parent_checkpoint, restart_output, restart_step = signature
+            if parent_checkpoint is None:
+                continue
+            marker = markers.get(parent_checkpoint)
+            if marker is None:
+                report.errors.append(f"{uid}: parent checkpoint marker is unavailable")
+                continue
+            parent_uid = marker["attempt_uid"]
+            parent_signature = attempts.get(parent_uid)
+            if (
+                parent_signature is None
+                or marker["run_uuid"] != run_uuid
+                or marker["ledger_file"] != ledger_file
+                or parent_signature[0] != run_uuid
+                or parent_signature[1] != ledger_file
+                or marker["output_index"] != restart_output
+                or marker["nstep_coarse"] != restart_step
+            ):
+                report.errors.append(f"{uid}: parent checkpoint identity mismatch")
+                continue
+            parent_for[uid] = (parent_uid, marker["committed_batch_seq"])
+            parent_attempts.add(parent_uid)
+
+        leaves = set(attempts) - parent_attempts
+        selected_marker = markers.get(checkpoint_uid) if checkpoint_uid else None
+        if checkpoint_uid is not None:
+            if selected_marker is None or selected_marker["attempt_uid"] not in leaves:
+                report.errors.append(
+                    "selected checkpoint is unavailable or does not belong to a leaf attempt"
+                )
+                selected_leaf = None
+            else:
+                selected_leaf = selected_marker["attempt_uid"]
+        elif len(leaves) == 1:
+            selected_leaf = next(iter(leaves))
+        else:
+            report.errors.append(
+                f"lineage has {len(leaves)} leaves; select a COMPLETE checkpoint explicitly"
+            )
+            selected_leaf = None
+
+        if selected_leaf is not None:
+            cursor = selected_leaf
+            leaf_markers = [
+                marker for marker in markers.values() if marker["attempt_uid"] == cursor
+            ]
+            if checkpoint_uid is not None:
+                selected = selected_marker
+            elif len(leaf_markers) == 1:
+                selected = leaf_markers[0]
+            else:
+                report.errors.append(
+                    f"leaf attempt has {len(leaf_markers)} COMPLETE checkpoints; select one explicitly"
+                )
+                selected = None
+
+            cutoffs: dict[str, tuple[int, int]] = {}
+            if selected is not None:
+                cutoffs[cursor] = (
+                    selected["committed_batch_seq"], selected["nstep_coarse"]
+                )
+            while selected is not None and cursor in parent_for:
+                parent_uid, cutoff = parent_for[cursor]
+                if parent_uid in cutoffs:
+                    report.errors.append("capture lineage contains a cycle")
+                    break
+                parent_marker = markers[attempts[cursor][2]]
+                cutoffs[parent_uid] = (cutoff, parent_marker["nstep_coarse"])
+                cursor = parent_uid
+
+            for attempt_uid, (cutoff, _) in cutoffs.items():
+                available = batch_sequences.get(attempt_uid, set())
+                if cutoff > len(available) or (cutoff > 0 and max(available, default=0) < cutoff):
+                    report.errors.append(
+                        f"{attempt_uid}: checkpoint high-water exceeds committed ledger sequence"
+                    )
+
+            report.committed_batches = 0
+            report.duplicate_batches = 0
+            report.unique_events = 0
+            report.binary_events = 0
+            report.multiple_events = 0
+            report.duplicate_events = 0
+            digests.clear()
+            for attempt_uid, sequence, batch_step, events in committed_payloads:
+                if attempt_uid not in cutoffs:
+                    continue
+                cutoff, checkpoint_step = cutoffs[attempt_uid]
+                if sequence > cutoff:
+                    continue
+                if batch_step > checkpoint_step:
+                    report.errors.append(
+                        f"{attempt_uid}: retained batch step exceeds checkpoint step"
+                    )
+                    continue
+                report.committed_batches += 1
+                for event_uid, event_digest, classification in events:
+                    register_event(
+                        f"{attempt_uid}:{event_uid}", event_digest, classification
+                    )
     return report
 
 
@@ -564,9 +966,23 @@ def main() -> int:
         action="store_true",
         help="report but do not fail solely for a final begin block without event_end",
     )
+    parser.add_argument(
+        "--checkpoint-uid",
+        help="terminal COMPLETE checkpoint UID; required when the leaf has multiple outputs",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        help="resolve restart supersession from COMPLETE output lineage markers",
+    )
     args = parser.parse_args()
+    if args.checkpoint_uid and args.output_root is None:
+        parser.error("--checkpoint-uid requires --output-root")
     report = validate_ledger(
-        args.ledger, allow_incomplete_tail=args.allow_incomplete_tail
+        args.ledger,
+        allow_incomplete_tail=args.allow_incomplete_tail,
+        output_root=args.output_root,
+        checkpoint_uid=args.checkpoint_uid,
     )
     print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
     return 0 if report.valid else 1

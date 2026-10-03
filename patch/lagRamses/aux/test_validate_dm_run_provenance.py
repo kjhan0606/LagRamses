@@ -25,7 +25,7 @@ def records(model: str) -> dict[str, str]:
         "namelist_copy": "namelist.txt",
         "compilation_copy": "compilation.txt",
         "smbh_capture_ledger_enabled": ".true.",
-        "smbh_capture_ledger_file": "smbh_capture_ledger_v1.jsonl",
+        "smbh_capture_ledger_file": "smbh_capture_ledger_v2.jsonl",
     }
     if model == "cdm":
         result["dm_transport"] = "collisionless_nbody"

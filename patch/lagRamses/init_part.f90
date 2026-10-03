@@ -1321,6 +1321,7 @@ subroutine init_part
   endif
 
   if(sink .and. .not. allocated(idsink)) call init_sink
+  if(smbh .and. smbh_capture_ledger) call initialize_smbh_capture_lineage
 
 end subroutine init_part
 !################################################################

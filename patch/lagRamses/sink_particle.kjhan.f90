@@ -1180,18 +1180,28 @@ subroutine merge_sink(ilevel)
   ! busy the machine was when the run happened to measure itself.
   integer, parameter:: FOF_OMP_MIN = 300
   integer, dimension(:,:), allocatable:: GroupData
-  integer:: ngrp,sisink, fisink,ijsink
+  integer:: ngrp,sisink, fisink,ijsink,capture_batch_events
+  character(len=192)::capture_batch_uid
 !#endif
   interface
-     subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG)
+     subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG, &
+          & batch_uid,batch_events)
        import :: dp
        integer,intent(in)::ilevel,ngrp
        integer,dimension(:),intent(in)::gsink
        real(dp),intent(in)::dx_min,scale,factG
        real(dp),dimension(1:3),intent(in)::xbound
+       character(len=*),intent(out)::batch_uid
+       integer,intent(out)::batch_events
      end subroutine write_smbh_capture_ledger
+     subroutine commit_smbh_capture_ledger(batch_uid,batch_events)
+       character(len=*),intent(in)::batch_uid
+       integer,intent(in)::batch_events
+     end subroutine commit_smbh_capture_ledger
   end interface
   pi=twopi/2.0d0
+  capture_batch_events=0
+  capture_batch_uid=''
   factG=1d0
   if(cosmo)factG=3d0/8d0/pi*omega_m*aexp
 
@@ -1694,7 +1704,7 @@ subroutine merge_sink(ilevel)
   ! alter the existing FOF grouping or sink dynamics.
   if(smbh .and. smbh_capture_ledger .and. new_sink < nsink) then
      call write_smbh_capture_ledger(ilevel,new_sink,gsink,dx_min,scale, &
-          & xbound,factG)
+          & xbound,factG,capture_batch_uid,capture_batch_events)
 #ifndef WITHOUTMPI
      ! Rank 1 performs the I/O.  Do not let any rank enter irreversible
      ! compaction until the complete transaction has been flushed and closed.
@@ -1817,6 +1827,18 @@ subroutine merge_sink(ilevel)
 102  end do
   ! End loop over cpus
 
+  if(smbh .and. smbh_capture_ledger .and. capture_batch_events > 0) then
+#ifndef WITHOUTMPI
+     ! All ranks must finish irreversible array and particle compaction before
+     ! rank 1 may assert that this batch physically committed.
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+     call commit_smbh_capture_ledger(capture_batch_uid,capture_batch_events)
+#ifndef WITHOUTMPI
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+  endif
+
 111 format('  +Entering merge_sink for level ',I2)
 
 end subroutine merge_sink
@@ -1824,22 +1846,326 @@ end subroutine merge_sink
 !################################################################
 !################################################################
 !################################################################
-subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG)
+subroutine initialize_smbh_capture_lineage
+  use amr_commons
+  use pm_commons
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ios,ledger_unit,log_ios,clock_count,info,parsed_sequence,i
+  integer::parsed_count,parsed_step,next_sequence,pending_sequence,pending_count,pending_step
+  integer,dimension(8)::date_values
+  character(len=5)::nchar
+  character(len=256)::filename
+  character(len=1024)::line,expected_line
+  character(len=512)::iomsg
+  character(len=160)::parent_uid
+  character(len=192)::parsed_batch_uid,pending_batch_uid
+  character(len=96)::parent_attempt
+  character(len=96)::parent_run_uuid
+  character(len=256)::parent_ledger_file
+  integer(i8b)::parent_seq
+  integer::parent_step,parent_output
+  logical::complete_exists,marker_exists,valid_marker,ledger_identity_found,marker_open
+  logical::field_ok,pending_prepared,complete_open
+
+  smbh_capture_committed_batch_seq=0_i8b
+  smbh_capture_attempt_uid=''
+  smbh_capture_run_uuid=''
+  smbh_capture_parent_checkpoint_uid=''
+  if(myid==1)then
+     if(index(trim(smbh_capture_ledger_file),'"')>0 .or. &
+          index(trim(smbh_capture_ledger_file),achar(92))>0)then
+        write(error_unit,'(A)') &
+             'FATAL: SMBH capture ledger filename cannot contain quote or backslash'
+        call clean_stop
+     endif
+     do i=1,len_trim(smbh_capture_ledger_file)
+        if(iachar(smbh_capture_ledger_file(i:i))<32)then
+           write(error_unit,'(A)') &
+                'FATAL: SMBH capture ledger filename cannot contain control characters'
+           call clean_stop
+        endif
+     enddo
+     parent_uid=''
+     if(nrestart>0)then
+        call title(nrestart,nchar)
+        filename='output_'//trim(nchar)//'/COMPLETE'
+        inquire(file=trim(filename),exist=complete_exists)
+        if(complete_exists)then
+           complete_open=.false.
+           open(newunit=ledger_unit,file=trim(filename),status='old',action='read', &
+                & form='formatted',iostat=ios,iomsg=iomsg)
+           complete_open=ios==0
+           if(ios==0) read(ledger_unit,'(A)',iostat=ios) line
+           if(complete_open) close(ledger_unit)
+           complete_exists=ios==0 .and. trim(line)==trim(nchar)
+        endif
+        filename='output_'//trim(nchar)//'/SMBH_CAPTURE_LINEAGE'
+        inquire(file=trim(filename),exist=marker_exists)
+        valid_marker=complete_exists .and. marker_exists
+        parent_attempt=''; parent_run_uuid=''; parent_ledger_file=''
+        parent_seq=-1_i8b; parent_step=-1; parent_output=-1
+        marker_open=.false.
+        if(valid_marker)then
+           open(newunit=ledger_unit,file=trim(filename),status='old',action='read', &
+                & form='formatted',iostat=ios,iomsg=iomsg)
+           marker_open=ios==0
+           if(ios==0) read(ledger_unit,'(A)',iostat=ios) line
+           valid_marker=ios==0 .and. trim(line)=='LAGRAMSES_SMBH_CAPTURE_LINEAGE_V1'
+           if(valid_marker)then
+              read(ledger_unit,'(A)',iostat=ios) line
+              if(ios==0 .and. index(line,'checkpoint_uid=')==1) &
+                   parent_uid=adjustl(line(len('checkpoint_uid=')+1:))
+              valid_marker=ios==0 .and. len_trim(parent_uid)>0
+           endif
+           if(valid_marker)then
+              read(ledger_unit,'(A)',iostat=ios) line
+              if(ios==0 .and. index(line,'attempt_uid=')==1) &
+                   parent_attempt=adjustl(line(len('attempt_uid=')+1:))
+              valid_marker=ios==0 .and. len_trim(parent_attempt)>0 .and. &
+                   trim(parent_uid)==trim(parent_attempt)//'-output-'//trim(nchar)
+           endif
+           if(valid_marker)then
+              read(ledger_unit,'(A)',iostat=ios) line
+              if(ios==0 .and. index(line,'run_uuid=')==1) &
+                   parent_run_uuid=adjustl(line(len('run_uuid=')+1:))
+              valid_marker=ios==0 .and. len_trim(parent_run_uuid)>0
+           endif
+           if(valid_marker)then
+              read(ledger_unit,'(A)',iostat=ios) line
+              if(ios==0 .and. index(line,'ledger_file=')==1) &
+                   parent_ledger_file=adjustl(line(len('ledger_file=')+1:))
+              valid_marker=ios==0 .and. &
+                   trim(parent_ledger_file)==trim(smbh_capture_ledger_file)
+           endif
+           if(valid_marker)then
+              read(ledger_unit,'(A)',iostat=ios) line
+              if(ios==0 .and. index(line,'committed_batch_seq=')==1) &
+                   read(line(len('committed_batch_seq=')+1:),*,iostat=ios) parent_seq
+              valid_marker=ios==0 .and. parent_seq>=0_i8b
+           endif
+           if(valid_marker)then
+              read(ledger_unit,'(A)',iostat=ios) line
+              if(ios==0 .and. index(line,'nstep_coarse=')==1) &
+                   read(line(len('nstep_coarse=')+1:),*,iostat=ios) parent_step
+              valid_marker=ios==0 .and. parent_step==nstep_coarse
+           endif
+           if(valid_marker)then
+              read(ledger_unit,'(A)',iostat=ios) line
+              if(ios==0 .and. index(line,'output_index=')==1) &
+                   read(line(len('output_index=')+1:),*,iostat=ios) parent_output
+              valid_marker=ios==0 .and. parent_output==nrestart
+           endif
+           if(marker_open) close(ledger_unit)
+        endif
+        ! The pathname recorded by the checkpoint is not sufficient identity:
+        ! refuse a copied checkpoint paired with an empty or different ledger.
+        if(valid_marker)then
+           ledger_identity_found=.false.
+           if(parent_seq>int(huge(0)-1,kind=i8b)) valid_marker=.false.
+           next_sequence=1
+           pending_prepared=.false.
+           open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file),status='old', &
+                & action='read',form='formatted',iostat=ios,iomsg=iomsg)
+           if(ios==0)then
+              do
+                 read(ledger_unit,'(A)',iostat=ios) line
+                 if(ios/=0) exit
+                 if(index(line,'{"schema_version":2,"record_type":"attempt_begin",'// &
+                      '"attempt_uid":"'//trim(parent_attempt)//'"')==1 .and. &
+                      index(line,'"attempt_uid":"'//trim(parent_attempt)//'"')>0 .and. &
+                      index(line,'"run_uuid":"'//trim(parent_run_uuid)//'"')>0 .and. &
+                      index(line,'"ledger_file":"'//trim(parent_ledger_file)//'"')>0)then
+                    ledger_identity_found=.true.
+                 endif
+                 if(index(line,'{"schema_version":2,"record_type":"batch_prepared"')==1 .and. &
+                      index(line,'"attempt_uid":"'//trim(parent_attempt)//'"')>0)then
+                    field_ok=.true.
+                    call lineage_json_string_field(line,'batch_uid',parsed_batch_uid,field_ok)
+                    call lineage_json_int_field(line,'committed_batch_seq',parsed_sequence,field_ok)
+                    call lineage_json_int_field(line,'nstep_coarse',parsed_step,field_ok)
+                    call lineage_json_int_field(line,'event_count',parsed_count,field_ok)
+                    expected_line='{"schema_version":2,"record_type":"batch_prepared",'// &
+                         '"batch_uid":"'//trim(parsed_batch_uid)//'","attempt_uid":"'// &
+                         trim(parent_attempt)//'","committed_batch_seq":'// &
+                         trim(lineage_json_int(parsed_sequence))//',"nstep_coarse":'// &
+                         trim(lineage_json_int(parsed_step))//',"event_count":'// &
+                         trim(lineage_json_int(parsed_count))// &
+                         ',"prepared":true,"committed":false}'
+                    field_ok=field_ok .and. trim(line)==trim(expected_line)
+                    field_ok=field_ok .and. len_trim(parsed_batch_uid)>0 .and. &
+                         parsed_sequence>=1 .and. parsed_count>=1 .and. parsed_step>=0
+                    if(field_ok .and. parsed_sequence<=int(parent_seq))then
+                       pending_batch_uid=parsed_batch_uid
+                       pending_sequence=parsed_sequence
+                       pending_step=parsed_step
+                       pending_count=parsed_count
+                       pending_prepared=.true.
+                    endif
+                 endif
+                 if(index(line,'{"schema_version":2,"record_type":"batch_commit"')==1 .and. &
+                      index(line,'"attempt_uid":"'//trim(parent_attempt)//'"')>0)then
+                    field_ok=.true.
+                    call lineage_json_string_field(line,'batch_uid',parsed_batch_uid,field_ok)
+                    call lineage_json_int_field(line,'committed_batch_seq',parsed_sequence,field_ok)
+                    call lineage_json_int_field(line,'nstep_coarse',parsed_step,field_ok)
+                    call lineage_json_int_field(line,'event_count',parsed_count,field_ok)
+                    expected_line='{"schema_version":2,"record_type":"batch_commit",'// &
+                         '"batch_uid":"'//trim(parsed_batch_uid)//'","attempt_uid":"'// &
+                         trim(parent_attempt)//'","committed_batch_seq":'// &
+                         trim(lineage_json_int(parsed_sequence))//',"nstep_coarse":'// &
+                         trim(lineage_json_int(parsed_step))//',"event_count":'// &
+                         trim(lineage_json_int(parsed_count))//',"committed":true}'
+                    field_ok=field_ok .and. trim(line)==trim(expected_line)
+                    field_ok=field_ok .and. len_trim(parsed_batch_uid)>0 .and. &
+                         parsed_sequence>=1 .and. parsed_count>=1 .and. parsed_step>=0
+                    if(field_ok .and. parsed_sequence<=int(parent_seq))then
+                       valid_marker=valid_marker .and. pending_prepared .and. &
+                            parsed_sequence==next_sequence .and. &
+                            parsed_sequence==pending_sequence .and. &
+                            parsed_batch_uid==pending_batch_uid .and. &
+                            parsed_count==pending_count .and. parsed_step==pending_step .and. &
+                            parsed_step<=parent_step
+                       if(valid_marker) next_sequence=next_sequence+1
+                       pending_prepared=.false.
+                    endif
+                 endif
+              enddo
+              close(ledger_unit)
+           endif
+           valid_marker=valid_marker .and. ledger_identity_found
+           valid_marker=valid_marker .and. next_sequence==int(parent_seq)+1
+        endif
+        if(.not.valid_marker)then
+           write(error_unit,'(A,I0,A)') 'FATAL: SMBH capture ledger restart output ', &
+                nrestart,' lacks a valid COMPLETE lineage marker'
+           flush(error_unit,iostat=log_ios)
+           call clean_stop
+        endif
+        smbh_capture_parent_checkpoint_uid=trim(parent_uid)
+        smbh_capture_run_uuid=trim(parent_run_uuid)
+     endif
+
+     call date_and_time(values=date_values)
+     call system_clock(count=clock_count)
+     write(smbh_capture_attempt_uid, &
+          '(I4.4,5I2.2,"-",I3.3,"-",I0,"-",I0,"-",I0)') &
+          date_values(1),date_values(2),date_values(3),date_values(5), &
+          date_values(6),date_values(7),date_values(8),clock_count,nrestart,nstep_coarse
+     if(nrestart==0) smbh_capture_run_uuid='run-'//trim(smbh_capture_attempt_uid)
+
+     iomsg=''
+     open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file),status='unknown', &
+          & position='append',action='write',form='formatted',iostat=ios,iomsg=iomsg)
+     if(ios==0)then
+        if(nrestart>0)then
+           write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
+                '{"schema_version":2,"record_type":"attempt_begin","attempt_uid":"'// &
+                trim(smbh_capture_attempt_uid)//'","run_uuid":"'// &
+                trim(smbh_capture_run_uuid)//'","ledger_file":"'// &
+                trim(smbh_capture_ledger_file)//'","parent_checkpoint_uid":"'// &
+                trim(smbh_capture_parent_checkpoint_uid)//'","restart_output_index":'// &
+                trim(lineage_json_int(nrestart))//',"restart_nstep_coarse":'// &
+                trim(lineage_json_int(nstep_coarse))//'}'
+        else
+           write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
+                '{"schema_version":2,"record_type":"attempt_begin","attempt_uid":"'// &
+                trim(smbh_capture_attempt_uid)//'","run_uuid":"'// &
+                trim(smbh_capture_run_uuid)//'","ledger_file":"'// &
+                trim(smbh_capture_ledger_file)//'","parent_checkpoint_uid":null,'// &
+                '"restart_output_index":0,"restart_nstep_coarse":0}'
+        endif
+     endif
+     if(ios==0) flush(ledger_unit,iostat=ios,iomsg=iomsg)
+     if(ios==0) close(ledger_unit,iostat=ios,iomsg=iomsg)
+     if(ios/=0)then
+        write(error_unit,'(A,I0,1X,A)') &
+             'FATAL: SMBH capture ledger attempt_begin I/O failure iostat=',ios,trim(iomsg)
+        flush(error_unit,iostat=log_ios)
+        call clean_stop
+     endif
+  endif
+#ifndef WITHOUTMPI
+  call MPI_BCAST(smbh_capture_attempt_uid,len(smbh_capture_attempt_uid), &
+       MPI_CHARACTER,0,MPI_COMM_WORLD,info)
+  call MPI_BCAST(smbh_capture_run_uuid,len(smbh_capture_run_uuid), &
+       MPI_CHARACTER,0,MPI_COMM_WORLD,info)
+  call MPI_BCAST(smbh_capture_parent_checkpoint_uid, &
+       len(smbh_capture_parent_checkpoint_uid),MPI_CHARACTER,0,MPI_COMM_WORLD,info)
+  call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+
+contains
+  subroutine lineage_json_string_field(json,name,value,ok)
+    character(len=*),intent(in)::json,name
+    character(len=*),intent(out)::value
+    logical,intent(inout)::ok
+    integer::first,last
+    character(len=128)::token
+    if(.not.ok) return
+    token='"'//trim(name)//'":"'
+    first=index(json,trim(token))
+    if(first<=0)then
+       ok=.false.; return
+    endif
+    first=first+len_trim(token)
+    last=index(json(first:),'"')
+    if(last<=1 .or. last-1>len(value))then
+       ok=.false.; return
+    endif
+    value=json(first:first+last-2)
+  end subroutine lineage_json_string_field
+
+  subroutine lineage_json_int_field(json,name,value,ok)
+    character(len=*),intent(in)::json,name
+    integer,intent(out)::value
+    logical,intent(inout)::ok
+    integer::first,read_status
+    character(len=128)::token
+    if(.not.ok) return
+    token='"'//trim(name)//'":'
+    first=index(json,trim(token))
+    if(first<=0)then
+       ok=.false.; return
+    endif
+    first=first+len_trim(token)
+    read(json(first:),*,iostat=read_status) value
+    if(read_status/=0) ok=.false.
+  end subroutine lineage_json_int_field
+
+  function lineage_json_int(value) result(text)
+    integer,intent(in)::value
+    character(len=32)::text
+    write(text,'(I0)') value
+    text=adjustl(text)
+  end function lineage_json_int
+end subroutine initialize_smbh_capture_lineage
+!################################################################
+!################################################################
+subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG, &
+     & batch_uid,batch_events)
   use pm_commons
   use amr_commons
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use, intrinsic :: iso_fortran_env, only: error_unit
+  use, intrinsic :: iso_fortran_env, only: error_unit,int64
   implicit none
 
   integer,intent(in)::ilevel,ngrp
   integer,dimension(:),intent(in)::gsink
   real(dp),intent(in)::dx_min,scale,factG
   real(dp),dimension(1:3),intent(in)::xbound
+  character(len=*),intent(out)::batch_uid
+  integer,intent(out)::batch_events
 
   integer::ledger_unit,ios,igrp,isink,jsink_member,idim
   integer::nmember,member_index,pair_index,anchor,min_id,max_id
   integer::primary_index,primary_sink_id
   integer::expected_pairs
+  integer(int64)::id_sum,population_identity,id64
+  integer(i8b)::batch_seq
   real(dp)::box_size,total_mass,max_separation
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
   real(dp)::redshift
@@ -1855,7 +2181,27 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   character(len=8)::classification
   character(len=512)::iomsg
 
-  if(myid /= 1 .or. nsink < 2) return
+  ! Include the pre-compaction population identity: merge_sink can be entered
+  ! more than once at the same coarse step/level under subcycling, while an
+  ! exact restart replay must retain the same deterministic UID.
+  id_sum=0_int64
+  population_identity=0_int64
+  do isink=1,nsink
+     id64=int(idsink(isink),kind=int64)
+     id_sum=id_sum+id64
+     population_identity=ieor(population_identity,ishftc(id64,mod(isink,63)))
+     population_identity=ieor(population_identity, &
+          & ishftc(int(gsink(isink),kind=int64),mod(3*isink+1,63)))
+  enddo
+  write(batch_uid,'(I0,"-",I0,"-",I0,"-",I0,"-",I0,"-",I0,"-",I0)') &
+       & nstep_coarse,ilevel,minval(idsink(1:nsink)),maxval(idsink(1:nsink)),nsink, &
+       & id_sum,population_identity
+  batch_events=0
+  do igrp=1,ngrp
+     if(count(gsink(1:nsink) == igrp) >= 2) batch_events=batch_events+1
+  enddo
+  if(myid /= 1 .or. nsink < 2 .or. batch_events == 0) return
+  batch_seq=smbh_capture_committed_batch_seq+1_i8b
 
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
   scale_m=scale_d*scale_l**3
@@ -1903,6 +2249,18 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   if(ios /= 0) then
      call ledger_io_fatal('open','',ios,iomsg)
   endif
+
+  iomsg=''
+  write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       & '{"schema_version":2,"record_type":"batch_begin","batch_uid":"'// &
+       & trim(batch_uid)//'","attempt_uid":"'//trim(smbh_capture_attempt_uid)// &
+       & '","committed_batch_seq":'//trim(json_int64(batch_seq))// &
+       & ',"nstep_coarse":'//trim(json_int(nstep_coarse))// &
+       & ',"ilevel":'//trim(json_int(ilevel))//',"expected_events":'// &
+       & trim(json_int(batch_events))//',"sink_id_sum":'//trim(json_int64(id_sum))// &
+       & ',"population_identity_xor":'//trim(json_int64(population_identity))// &
+       & ',"committed":false}'
+  if(ios /= 0) call ledger_io_fatal('write batch_begin',batch_uid,ios,iomsg)
 
   do igrp=1,ngrp
      nmember=count(gsink(1:nsink) == igrp)
@@ -1992,8 +2350,9 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
 
      iomsg=''
      write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
-          & '{"schema_version":1,"record_type":"event_begin","event_uid":"'// &
-          & trim(event_uid)//'","classification":"'//trim(classification)// &
+          & '{"schema_version":2,"record_type":"event_begin","batch_uid":"'// &
+          & trim(batch_uid)//'","event_uid":"'//trim(event_uid)// &
+          & '","classification":"'//trim(classification)// &
           & '","nstep_coarse":'//trim(json_int(nstep_coarse))// &
           & ',"ilevel":'//trim(json_int(ilevel))// &
           & ',"group_index":'//trim(json_int(igrp))// &
@@ -2046,8 +2405,9 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         endif
         iomsg=''
         write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
-             & '{"schema_version":1,"record_type":"member","event_uid":"'// &
-             & trim(event_uid)//'","member_index":'//trim(json_int(member_index))// &
+             & '{"schema_version":2,"record_type":"member","batch_uid":"'// &
+             & trim(batch_uid)//'","event_uid":"'//trim(event_uid)// &
+             & '","member_index":'//trim(json_int(member_index))// &
              & ',"sink_id":'//trim(json_int(idsink(isink)))// &
              & ',"primary_sink_id":'//trim(json_int(primary_sink_id))// &
              & ',"is_primary":'//trim(json_logical(isink == primary_index))// &
@@ -2121,8 +2481,9 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
 
            iomsg=''
            write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
-                & '{"schema_version":1,"record_type":"pair","event_uid":"'// &
-                & trim(event_uid)//'","pair_index":'//trim(json_int(pair_index))// &
+                & '{"schema_version":2,"record_type":"pair","batch_uid":"'// &
+                & trim(batch_uid)//'","event_uid":"'//trim(event_uid)// &
+                & '","pair_index":'//trim(json_int(pair_index))// &
                 & ',"sink_id_1":'//trim(json_int(idsink(isink)))// &
                 & ',"sink_id_2":'//trim(json_int(idsink(jsink_member)))// &
                 & ',"delta_position_code":['//trim(json_real(delta_pos(1)))//','// &
@@ -2152,14 +2513,27 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
 
      iomsg=''
      write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
-          & '{"schema_version":1,"record_type":"event_end","event_uid":"'// &
-          & trim(event_uid)//'","nmember":'//trim(json_int(nmember))// &
+          & '{"schema_version":2,"record_type":"event_end","batch_uid":"'// &
+          & trim(batch_uid)//'","event_uid":"'//trim(event_uid)// &
+          & '","nmember":'//trim(json_int(nmember))// &
           & ',"npair":'//trim(json_int(pair_index))//',"complete":true}'
      if(ios /= 0) call ledger_io_fatal('write event_end',event_uid,ios,iomsg)
      iomsg=''
      flush(ledger_unit,iostat=ios,iomsg=iomsg)
      if(ios /= 0) call ledger_io_fatal('flush transaction',event_uid,ios,iomsg)
   enddo
+
+  iomsg=''
+  write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       & '{"schema_version":2,"record_type":"batch_prepared","batch_uid":"'// &
+       & trim(batch_uid)//'","attempt_uid":"'//trim(smbh_capture_attempt_uid)// &
+       & '","committed_batch_seq":'//trim(json_int64(batch_seq))// &
+       & ',"nstep_coarse":'//trim(json_int(nstep_coarse))// &
+       & ',"event_count":'//trim(json_int(batch_events))// &
+       & ',"prepared":true,"committed":false}'
+  if(ios /= 0) call ledger_io_fatal('write batch_prepared',batch_uid,ios,iomsg)
+  flush(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call ledger_io_fatal('flush batch prepare',batch_uid,ios,iomsg)
 
   iomsg=''
   close(ledger_unit,iostat=ios,iomsg=iomsg)
@@ -2215,6 +2589,13 @@ contains
     endif
   end function json_real
 
+  function json_int64(value) result(text)
+    integer(int64),intent(in)::value
+    character(len=32)::text
+    write(text,'(I0)') value
+    text=adjustl(text)
+  end function json_int64
+
   function json_optional_real(value,available) result(text)
     real(dp),intent(in)::value
     logical,intent(in)::available
@@ -2237,6 +2618,103 @@ contains
   end function json_logical
 
 end subroutine write_smbh_capture_ledger
+!################################################################
+!################################################################
+subroutine commit_smbh_capture_ledger(batch_uid,batch_events)
+  use pm_commons
+  use amr_commons
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+  character(len=*),intent(in)::batch_uid
+  integer,intent(in)::batch_events
+  integer::ledger_unit,ios,log_ios
+  character(len=512)::iomsg
+  character(len=32)::event_text
+  character(len=32)::sequence_text
+
+  if(myid /= 1 .or. batch_events <= 0) return
+  write(event_text,'(I0)') batch_events
+  write(sequence_text,'(I0)') smbh_capture_committed_batch_seq+1_i8b
+  iomsg=''
+  open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file),status='old', &
+       & position='append',action='write',form='formatted',iostat=ios,iomsg=iomsg)
+  if(ios == 0) write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       & '{"schema_version":2,"record_type":"batch_commit","batch_uid":"'// &
+       & trim(batch_uid)//'","attempt_uid":"'//trim(smbh_capture_attempt_uid)// &
+       & '","committed_batch_seq":'//trim(adjustl(sequence_text))// &
+       & ',"nstep_coarse":'//trim(adjustl(lineage_commit_int(nstep_coarse)))// &
+       & ',"event_count":'//trim(adjustl(event_text))// &
+       & ',"committed":true}'
+  if(ios == 0) flush(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios == 0) close(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) then
+     write(error_unit,'(A,1X,A,1X,A,I0,1X,A)') &
+          & 'FATAL: SMBH capture ledger I/O failure during batch commit', &
+          & 'batch_uid='//trim(batch_uid),'iostat=',ios,trim(iomsg)
+     flush(error_unit,iostat=log_ios)
+     call clean_stop
+  endif
+  smbh_capture_committed_batch_seq=smbh_capture_committed_batch_seq+1_i8b
+contains
+  function lineage_commit_int(value) result(text)
+    integer,intent(in)::value
+    character(len=32)::text
+    write(text,'(I0)') value
+  end function lineage_commit_int
+end subroutine commit_smbh_capture_ledger
+!################################################################
+!################################################################
+subroutine write_smbh_capture_checkpoint_lineage(output_char)
+  use amr_commons
+  use pm_commons
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+  character(len=*),intent(in)::output_char
+  integer::lineage_unit,ios,log_ios,output_index
+  character(len=512)::iomsg
+  character(len=160)::checkpoint_uid
+  character(len=256)::filename
+
+  if(myid/=1) return
+  if(len_trim(smbh_capture_attempt_uid)==0)then
+     write(error_unit,'(A)') 'FATAL: cannot checkpoint an uninitialized SMBH capture attempt'
+     call clean_stop
+  endif
+  read(output_char,*,iostat=ios) output_index
+  if(ios/=0)then
+     write(error_unit,'(A,A)') 'FATAL: invalid SMBH capture output index ',trim(output_char)
+     call clean_stop
+  endif
+  checkpoint_uid=trim(smbh_capture_attempt_uid)//'-output-'//trim(output_char)
+  filename='output_'//trim(output_char)//'/SMBH_CAPTURE_LINEAGE'
+  iomsg=''
+  open(newunit=lineage_unit,file=trim(filename),status='replace',action='write', &
+       & form='formatted',iostat=ios,iomsg=iomsg)
+  if(ios==0) write(lineage_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       'LAGRAMSES_SMBH_CAPTURE_LINEAGE_V1'
+  if(ios==0) write(lineage_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       'checkpoint_uid='//trim(checkpoint_uid)
+  if(ios==0) write(lineage_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       'attempt_uid='//trim(smbh_capture_attempt_uid)
+  if(ios==0) write(lineage_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       'run_uuid='//trim(smbh_capture_run_uuid)
+  if(ios==0) write(lineage_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       'ledger_file='//trim(smbh_capture_ledger_file)
+  if(ios==0) write(lineage_unit,'(A,I0)',iostat=ios,iomsg=iomsg) &
+       'committed_batch_seq=',smbh_capture_committed_batch_seq
+  if(ios==0) write(lineage_unit,'(A,I0)',iostat=ios,iomsg=iomsg) &
+       'nstep_coarse=',nstep_coarse
+  if(ios==0) write(lineage_unit,'(A,I0)',iostat=ios,iomsg=iomsg) &
+       'output_index=',output_index
+  if(ios==0) flush(lineage_unit,iostat=ios,iomsg=iomsg)
+  if(ios==0) close(lineage_unit,iostat=ios,iomsg=iomsg)
+  if(ios/=0)then
+     write(error_unit,'(A,I0,1X,A)') &
+          'FATAL: SMBH capture checkpoint-lineage I/O failure iostat=',ios,trim(iomsg)
+     flush(error_unit,iostat=log_ios)
+     call clean_stop
+  endif
+end subroutine write_smbh_capture_checkpoint_lineage
 !################################################################
 !################################################################
 !################################################################

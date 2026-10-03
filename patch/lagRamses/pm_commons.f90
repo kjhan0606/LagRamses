@@ -29,6 +29,12 @@ module pm_commons
   real(dp),allocatable,dimension(:)::eps_sink
   integer ,allocatable,dimension(:)::idsink,idsink_new,idsink_all
   integer::nindsink=0
+  ! Capture-ledger branch identity.  Each process invocation owns one attempt;
+  ! checkpoints publish the committed batch high-water mark for restart.
+  character(len=96)::smbh_capture_attempt_uid=''
+  character(len=96)::smbh_capture_run_uuid=''
+  character(len=160)::smbh_capture_parent_checkpoint_uid=''
+  integer(i8b)::smbh_capture_committed_batch_seq=0_i8b
 
   ! Particles related arrays
   real(dp),allocatable,dimension(:,:)::xp       ! Positions
