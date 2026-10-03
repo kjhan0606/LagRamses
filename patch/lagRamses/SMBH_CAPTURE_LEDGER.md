@@ -30,7 +30,9 @@ a capture event.
 Every event is a contiguous JSONL transaction:
 
 1. `event_begin`: integration time, cosmology, code-unit conversions, merge
-   radius, FOF group size, classification, group COM, and maximum separation.
+   radius, FOF group size, classification, group COM, maximum separation,
+   and the three code-coordinate periodic box extents. The latter, not the
+   scalar cosmological `boxlen`, define minimum-image distances.
 2. one `member` row for every original sink: ID, the surviving primary ID,
    a primary flag, mass, position, velocity,
    formation time, accretion/feedback accumulators, BH spin, gas angular
@@ -56,6 +58,12 @@ again.  Consumers must deduplicate identical UIDs.  If a crash occurs between
 `event_begin` and `event_end`, consumers must reject that incomplete
 transaction.  A repeated UID with different content is a provenance conflict,
 not a valid restart duplicate.
+
+An `event_end` proves only that the pre-compaction group was written. It does
+not prove that sink compaction finished or that the event belongs to the final
+restart lineage. Until batch commits and output checkpoints are emitted by
+the simulation, these legacy rows must not be admitted as confirmed capture
+inputs for the downstream delay model.
 
 Validate a ledger with:
 

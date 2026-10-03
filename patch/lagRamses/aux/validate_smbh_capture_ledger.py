@@ -112,15 +112,14 @@ def _require_logical(
 
 
 def _minimum_image_delta(
-    position1: list[float], position2: list[float], boxlen: float
+    position1: list[float], position2: list[float], box_size: list[float]
 ) -> list[float]:
     delta = [b - a for a, b in zip(position1, position2)]
-    half_box = 0.5 * boxlen
     for index, value in enumerate(delta):
-        if value > half_box:
-            delta[index] -= boxlen
-        if value < -half_box:
-            delta[index] += boxlen
+        if value > 0.5 * box_size[index]:
+            delta[index] -= box_size[index]
+        if value < -0.5 * box_size[index]:
+            delta[index] += box_size[index]
     return delta
 
 
@@ -153,7 +152,7 @@ def _validate_pair_invariants(
     uid: str,
     pair: dict[str, Any],
     members: dict[int, dict[str, Any]],
-    boxlen: float | None,
+    box_size: list[float] | None,
     fact_g: float | None,
     merge_radius: float | None,
     errors: list[str],
@@ -196,8 +195,8 @@ def _validate_pair_invariants(
     position2 = _require_vector(members[id2], "position_code", uid, errors)
     velocity1 = _require_vector(members[id1], "velocity_code", uid, errors)
     velocity2 = _require_vector(members[id2], "velocity_code", uid, errors)
-    if boxlen is not None and position1 is not None and position2 is not None:
-        expected_delta_position = _minimum_image_delta(position1, position2, boxlen)
+    if box_size is not None and position1 is not None and position2 is not None:
+        expected_delta_position = _minimum_image_delta(position1, position2, box_size)
         if any(
             not _close(got, expected)
             for got, expected in zip(delta_position, expected_delta_position)
@@ -285,8 +284,13 @@ def _validate_event_invariants(
     begin: dict[str, Any],
     members: list[dict[str, Any]],
     errors: list[str],
-) -> tuple[float | None, float | None, float | None]:
+) -> tuple[list[float] | None, float | None, float | None]:
     boxlen = _require_number(begin, "boxlen", uid, errors)
+    box_size = (
+        _require_vector(begin, "periodic_box_size_code", uid, errors)
+        if "periodic_box_size_code" in begin
+        else None
+    )
     fact_g = _require_number(begin, "factG_code", uid, errors)
     merge_radius = _require_number(begin, "merge_radius_code", uid, errors)
     reported_mass = _require_number(begin, "total_mass_code", uid, errors)
@@ -298,6 +302,11 @@ def _validate_event_invariants(
     if boxlen is not None and boxlen <= 0.0:
         errors.append(f"{uid}: boxlen must be positive")
         boxlen = None
+    if box_size is None and "periodic_box_size_code" not in begin and boxlen is not None:
+        box_size = [boxlen] * 3
+    if box_size is not None and any(extent <= 0.0 for extent in box_size):
+        errors.append(f"{uid}: periodic box extents must be positive")
+        box_size = None
     if merge_radius is not None and merge_radius < 0.0:
         errors.append(f"{uid}: merge_radius_code must be non-negative")
         merge_radius = None
@@ -315,27 +324,29 @@ def _validate_event_invariants(
         positions.append(position)
         velocities.append(velocity)
     if len(masses) != len(members):
-        return boxlen, fact_g, merge_radius
+        return box_size, fact_g, merge_radius
 
     total_mass = sum(masses)
     if total_mass <= 0.0:
         errors.append(f"{uid}: total member mass must be positive")
-        return boxlen, fact_g, merge_radius
+        return box_size, fact_g, merge_radius
     if reported_mass is not None and not _close(reported_mass, total_mass):
         errors.append(f"{uid}: total-mass invariant failed")
 
-    if boxlen is None or not positions:
-        return boxlen, fact_g, merge_radius
+    if box_size is None or not positions:
+        return box_size, fact_g, merge_radius
     anchor = positions[0]
     com_position = [0.0, 0.0, 0.0]
     com_velocity = [0.0, 0.0, 0.0]
     for mass, position, velocity in zip(masses, positions, velocities):
-        delta = _minimum_image_delta(anchor, position, boxlen)
+        delta = _minimum_image_delta(anchor, position, box_size)
         for index in range(3):
             com_position[index] += mass * delta[index]
             com_velocity[index] += mass * velocity[index]
     for index in range(3):
-        com_position[index] = (anchor[index] + com_position[index] / total_mass) % boxlen
+        com_position[index] = (
+            anchor[index] + com_position[index] / total_mass
+        ) % box_size[index]
         com_velocity[index] /= total_mass
     if reported_com_position is not None and any(
         not _close(got, expected)
@@ -351,13 +362,13 @@ def _validate_event_invariants(
     max_separation = 0.0
     for position1, position2 in combinations(positions, 2):
         max_separation = max(
-            max_separation, _norm(_minimum_image_delta(position1, position2, boxlen))
+            max_separation, _norm(_minimum_image_delta(position1, position2, box_size))
         )
     if reported_max_separation is not None and not _close(
         reported_max_separation, max_separation
     ):
         errors.append(f"{uid}: maximum-separation invariant failed")
-    return boxlen, fact_g, merge_radius
+    return box_size, fact_g, merge_radius
 
 
 def _validate_complete_block(
@@ -441,7 +452,7 @@ def _validate_complete_block(
             ):
                 errors.append(f"{uid}: member is_primary flag is inconsistent")
 
-    boxlen, fact_g, merge_radius = _validate_event_invariants(
+    box_size, fact_g, merge_radius = _validate_event_invariants(
         uid, begin, block.members, errors
     )
 
@@ -462,7 +473,7 @@ def _validate_complete_block(
             errors.append(f"{uid}: pair {id_pair} references a non-member sink")
             continue
         _validate_pair_invariants(
-            uid, pair, member_by_id, boxlen, fact_g, merge_radius, errors
+            uid, pair, member_by_id, box_size, fact_g, merge_radius, errors
         )
     if actual_id_pairs != expected_id_pairs:
         errors.append(f"{uid}: pair records do not cover every member pair exactly once")

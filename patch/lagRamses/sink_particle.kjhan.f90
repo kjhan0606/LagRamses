@@ -1893,7 +1893,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   real(dp)::box_size,total_mass,max_separation
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
   real(dp)::redshift
-  real(dp),dimension(1:3)::com_pos,com_vel,delta_pos,delta_vel
+  real(dp),dimension(1:3)::com_pos,com_vel,delta_pos,delta_vel,periodic_box
   real(dp),dimension(1:3)::specific_h,relative_L
   real(dp)::separation2,separation,vrel2,vrel,reduced_mass
   real(dp)::relative_kinetic,potential_1overr,specific_energy
@@ -1921,10 +1921,13 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
        & .not.ieee_is_finite(scale) .or. scale <= 0d0) then
      call ledger_state_fatal('invalid capture geometry or gravity',0)
   endif
-  do idim=1,ndim
+  do idim=1,3
      if(.not.ieee_is_finite(xbound(idim)) .or. xbound(idim) <= 0d0) &
           & call ledger_state_fatal('invalid periodic box',0)
   enddo
+  periodic_box=scale*xbound
+  if(any(.not.ieee_is_finite(periodic_box)) .or. any(periodic_box <= 0d0)) &
+       & call ledger_state_fatal('invalid scaled periodic box',0)
   do igrp=1,ngrp
      nmember=count(gsink(1:nsink) == igrp)
      if(nmember < 2) cycle
@@ -2050,6 +2053,8 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
           & ',"levelmin":'//trim(json_int(levelmin))// &
           & ',"nlevelmax":'//trim(json_int(nlevelmax))// &
           & ',"boxlen":'//trim(json_real(boxlen))// &
+          & ',"periodic_box_size_code":['//trim(json_real(periodic_box(1)))//','// &
+          & trim(json_real(periodic_box(2)))//','//trim(json_real(periodic_box(3)))//']'// &
           & ',"omega_m":'//trim(json_real(omega_m))// &
           & ',"h0":'//trim(json_real(h0))// &
           & ',"factG_code":'//trim(json_real(factG))// &

@@ -292,6 +292,30 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertEqual(report.unique_events, 1)
         self.assertEqual(report.multiple_events, 1)
 
+    def test_periodic_box_extents_override_legacy_scalar_boxlen(self):
+        rows = binary_rows()
+        rows[0].update(
+            periodic_box_size_code=[2.0, 10.0, 30.0],
+            com_position_code=[1.7, 0.0, 0.0],
+            max_pair_separation_code=0.5,
+        )
+        rows[2]["position_code"] = [1.5, 0.0, 0.0]
+        rows[-2].update(
+            delta_position_code=[-0.5, 0.0, 0.0],
+            separation_code=0.5,
+            newtonian_potential_1overr_code=-12.0,
+            two_body_specific_energy_code=-8.0,
+            specific_angular_momentum_code=[0.0, 0.0, -1.0],
+            relative_angular_momentum_code=[0.0, 0.0, -1.2],
+            legacy_binding_proxy_1overr2_code=24.0,
+        )
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        rows[0]["periodic_box_size_code"] = [10.0, 10.0, 30.0]
+        self.assertFalse(self.validate_rows(rows).valid)
+        rows[0]["periodic_box_size_code"] = [2.0, 0.0, 30.0]
+        self.assertFalse(self.validate_rows(rows).valid)
+
     def test_multiple_conservation_and_binding_failures_are_rejected(self):
         mutations = {
             "total mass": lambda rows: rows[0].__setitem__("total_mass_code", 11.0),
