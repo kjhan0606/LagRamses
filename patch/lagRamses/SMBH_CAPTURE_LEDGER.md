@@ -25,6 +25,14 @@ any rank enters the irreversible sink-compaction section.  A partially
 written tail from that failed run remains invalid and must not be consumed as
 a capture event.
 
+The JSONL file is not atomic across several FOF groups in one `merge_sink`
+call. If a later group's I/O fails, earlier groups from that call may already
+have complete `event_end` rows even though compaction never occurred. Do not
+promote events from an aborted run to a physical catalogue; require a
+successful run/checkpoint provenance gate. A file-level batch commit marker is
+still needed before individual completed rows can prove a whole merge call
+committed after an I/O failure.
+
 ## Transaction layout
 
 Every event is a contiguous JSONL transaction:

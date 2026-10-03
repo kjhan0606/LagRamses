@@ -1409,20 +1409,6 @@ subroutine merge_sink(ilevel)
      !end do
   endif
 
-  ! Record every member of each group before the irreversible COM
-  ! compaction below.  The ledger is diagnostic only: it does not alter
-  ! the existing FOF grouping or sink dynamics.
-  if(smbh .and. smbh_capture_ledger .and. new_sink < nsink) then
-     call write_smbh_capture_ledger(ilevel,new_sink,gsink,dx_min,scale, &
-          & xbound,factG)
-#ifndef WITHOUTMPI
-     ! Rank 1 performs the I/O.  Do not let any rank enter irreversible
-     ! compaction until the complete transaction has been flushed and closed.
-     call MPI_BARRIER(MPI_COMM_WORLD,info)
-#endif
-  endif
-
-
   !----------------------------------------------------
   ! Compute group centre of mass and average velocity
   !----------------------------------------------------
@@ -1703,6 +1689,19 @@ subroutine merge_sink(ilevel)
   end do
 ! call MPI_BARRIER(MPI_COMM_WORLD, info) if(verbose) print *,'###4'
 
+  ! Record every member only after all pre-compaction validation and
+  ! calculations have succeeded.  The ledger is diagnostic only: it does not
+  ! alter the existing FOF grouping or sink dynamics.
+  if(smbh .and. smbh_capture_ledger .and. new_sink < nsink) then
+     call write_smbh_capture_ledger(ilevel,new_sink,gsink,dx_min,scale, &
+          & xbound,factG)
+#ifndef WITHOUTMPI
+     ! Rank 1 performs the I/O.  Do not let any rank enter irreversible
+     ! compaction until the complete transaction has been flushed and closed.
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+  endif
+
   agn_pending_erg(1:new_sink)=pending_new(1:new_sink)
   agn_pending_erg(new_sink+1:nsinkmax)=0d0
   deallocate(pending_new)
@@ -1862,6 +1861,40 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   scale_m=scale_d*scale_l**3
   redshift=0d0
   if(aexp > 0d0) redshift=1d0/aexp-1d0
+
+  ! Validate every recordable group before opening the append-only ledger.
+  ! Otherwise a bad later group could leave earlier groups marked complete
+  ! even though merge_sink subsequently stops without compacting any sinks.
+  do igrp=1,ngrp
+     nmember=count(gsink(1:nsink) == igrp)
+     if(nmember < 2) cycle
+     anchor=0
+     primary_index=0
+     total_mass=0d0
+     do isink=1,nsink
+        if(gsink(isink) /= igrp) cycle
+        if(.not.ieee_is_finite(msink(isink)) .or. msink(isink) <= 0d0) then
+           call ledger_group_fatal(igrp,isink, &
+                & 'non-finite or non-positive member mass')
+        endif
+        if(anchor == 0) anchor=isink
+        if(primary_index == 0) then
+           primary_index=isink
+        else if(msink(isink) > msink(primary_index)) then
+           primary_index=isink
+        endif
+        total_mass=total_mass+msink(isink)
+     enddo
+     if(.not.ieee_is_finite(total_mass) .or. total_mass <= 0d0) then
+        call ledger_group_fatal(igrp,0,'non-finite or non-positive total mass')
+     endif
+     if(anchor < 1 .or. anchor > nsink) then
+        call ledger_group_fatal(igrp,anchor,'invalid anchor index')
+     endif
+     if(primary_index < 1 .or. primary_index > nsink) then
+        call ledger_group_fatal(igrp,primary_index,'invalid primary index')
+     endif
+  enddo
 
   iomsg=''
   open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file), &
