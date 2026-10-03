@@ -1912,6 +1912,11 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   redshift=0d0
   if(aexp > 0d0) redshift=1d0/aexp-1d0
 
+  ! A later invalid group must not leave an earlier, complete-looking capture
+  ! event in the ledger when merge_sink will abort before any compaction.
+  ! Inspect the entire capture batch before opening or appending to the file.
+  call preflight_capture_groups
+
   iomsg=''
   open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file), &
        & status='unknown',position='append',action='write', &
@@ -1931,22 +1936,11 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      total_mass=0d0
      com_pos=0d0
      com_vel=0d0
+     ! Every member was validated before the file was opened.  The sink
+     ! arrays are read-only until merge_sink's compaction after this call.
      do isink=1,nsink
         if(gsink(isink) /= igrp) cycle
         if(anchor == 0) anchor=isink
-        if(.not.ieee_is_finite(msink(isink)) .or. msink(isink) <= 0d0) then
-           call ledger_group_fatal(igrp,'non-positive or non-finite member mass')
-        endif
-        if(any(.not.ieee_is_finite(xsink(isink,1:ndim))) .or. &
-             & any(.not.ieee_is_finite(vsink(isink,1:ndim)))) then
-           call ledger_group_fatal(igrp,'non-finite member position or velocity')
-        endif
-        do jsink_member=1,isink-1
-           if(gsink(jsink_member) /= igrp) cycle
-           if(idsink(jsink_member) == idsink(isink)) then
-              call ledger_group_fatal(igrp,'duplicate member sink ID')
-           endif
-        enddo
         ! This is exactly the survivor rule used by merge_sink below:
         ! strictly larger mass replaces the primary; a mass tie keeps the
         ! first member, and members are traversed in increasing sink index.
@@ -2189,6 +2183,56 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   if(ios /= 0) call ledger_io_fatal('close','',ios,iomsg)
 
 contains
+
+  subroutine preflight_capture_groups
+    integer::group_index,member,earlier
+    real(dp)::group_mass
+
+    if(.not.ieee_is_finite(aexp) .or. aexp <= 0d0 .or. &
+         & .not.ieee_is_finite(redshift) .or. &
+         & .not.ieee_is_finite(t) .or. .not.ieee_is_finite(texp) .or. &
+         & .not.ieee_is_finite(boxlen) .or. boxlen <= 0d0 .or. &
+         & .not.ieee_is_finite(scale) .or. scale <= 0d0 .or. &
+         & any(.not.ieee_is_finite(scale*xbound)) .or. &
+         & any(scale*xbound <= 0d0) .or. &
+         & .not.ieee_is_finite(dx_min) .or. dx_min <= 0d0 .or. &
+         & .not.ieee_is_finite(rmerge) .or. rmerge < 0d0 .or. &
+         & .not.ieee_is_finite(rmerge*dx_min) .or. &
+         & .not.ieee_is_finite(factG) .or. &
+         & .not.ieee_is_finite(omega_m) .or. .not.ieee_is_finite(h0) .or. &
+         & .not.ieee_is_finite(scale_l) .or. scale_l <= 0d0 .or. &
+         & .not.ieee_is_finite(scale_t) .or. scale_t <= 0d0 .or. &
+         & .not.ieee_is_finite(scale_d) .or. scale_d <= 0d0 .or. &
+         & .not.ieee_is_finite(scale_v) .or. scale_v <= 0d0 .or. &
+         & .not.ieee_is_finite(scale_m) .or. scale_m <= 0d0) then
+       call ledger_group_fatal(0,'non-finite or invalid event metadata/units')
+    endif
+
+    do group_index=1,ngrp
+       if(count(gsink(1:nsink) == group_index) < 2) cycle
+       group_mass=0d0
+       do member=1,nsink
+          if(gsink(member) /= group_index) cycle
+          if(.not.ieee_is_finite(msink(member)) .or. msink(member) <= 0d0) then
+             call ledger_group_fatal(group_index,'non-positive or non-finite member mass')
+          endif
+          if(any(.not.ieee_is_finite(xsink(member,1:ndim))) .or. &
+               & any(.not.ieee_is_finite(vsink(member,1:ndim)))) then
+             call ledger_group_fatal(group_index,'non-finite member position or velocity')
+          endif
+          do earlier=1,member-1
+             if(gsink(earlier) /= group_index) cycle
+             if(idsink(earlier) == idsink(member)) then
+                call ledger_group_fatal(group_index,'duplicate member sink ID')
+             endif
+          enddo
+          group_mass=group_mass+msink(member)
+       enddo
+       if(.not.ieee_is_finite(group_mass) .or. group_mass <= 0d0) then
+          call ledger_group_fatal(group_index,'invalid total mass')
+       endif
+    enddo
+  end subroutine preflight_capture_groups
 
   subroutine ledger_group_fatal(group_index,reason)
     integer,intent(in)::group_index

@@ -27,6 +27,12 @@ a capture event.
 An SMBH group with non-positive/non-finite member mass, non-finite member
 position/velocity, or duplicate sink IDs also stops before compaction; such a
 group is never silently omitted from an otherwise complete ledger.
+Before opening the file, the writer checks metadata/units and **all** capture
+groups in that merge call. Thus a bad later group cannot leave an earlier
+complete-looking event from the same call. This preflight does not make a
+filesystem append or subsequent sink compaction atomic: an I/O or process
+failure after a complete event still requires run/checkpoint provenance review
+before that event is treated as a completed numerical merge.
 
 ## Transaction layout
 

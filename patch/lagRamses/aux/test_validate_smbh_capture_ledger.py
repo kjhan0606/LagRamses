@@ -226,6 +226,26 @@ def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
 
 
 class LedgerValidationTests(unittest.TestCase):
+    def test_writer_preflights_entire_batch_before_append(self):
+        source = (Path(__file__).resolve().parents[1] / "sink_particle.kjhan.f90").read_text(
+            encoding="utf-8"
+        )
+        writer = source.split("subroutine write_smbh_capture_ledger(", 2)[-1]
+        before_open = writer.split("open(newunit=ledger_unit", 1)[0]
+        self.assertIn("call preflight_capture_groups", before_open)
+        preflight = writer.split("  subroutine preflight_capture_groups", 1)[1].split(
+            "  end subroutine preflight_capture_groups", 1
+        )[0]
+        for required in (
+            "do group_index=1,ngrp",
+            "non-positive or non-finite member mass",
+            "non-finite member position or velocity",
+            "duplicate member sink ID",
+            "invalid total mass",
+            "invalid event metadata/units",
+        ):
+            self.assertIn(required, preflight)
+
     def validate_rows(self, rows: list[object], **kwargs):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "ledger.jsonl"
