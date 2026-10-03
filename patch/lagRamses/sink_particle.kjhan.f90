@@ -1933,6 +1933,10 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      com_vel=0d0
      do isink=1,nsink
         if(gsink(isink) /= igrp) cycle
+        if(.not.ieee_is_finite(msink(isink)) .or. msink(isink) <= 0d0) then
+           call ledger_group_fatal(igrp,isink, &
+                & 'non-finite or non-positive member mass')
+        endif
         if(anchor == 0) anchor=isink
         ! This is exactly the survivor rule used by merge_sink below:
         ! strictly larger mass replaces the primary; a mass tie keeps the
@@ -1947,10 +1951,14 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         total_mass=total_mass+msink(isink)
      enddo
 
-     if(total_mass <= 0d0 .or. anchor == 0 .or. primary_index == 0) then
-        write(*,'(A,I0,A,I0)') 'WARNING: invalid SMBH capture group ',igrp, &
-             & ' at coarse step ',nstep_coarse
-        cycle
+     if(.not.ieee_is_finite(total_mass) .or. total_mass <= 0d0) then
+        call ledger_group_fatal(igrp,0,'non-finite or non-positive total mass')
+     endif
+     if(anchor < 1 .or. anchor > nsink) then
+        call ledger_group_fatal(igrp,anchor,'invalid anchor index')
+     endif
+     if(primary_index < 1 .or. primary_index > nsink) then
+        call ledger_group_fatal(igrp,primary_index,'invalid primary index')
      endif
      primary_sink_id=idsink(primary_index)
 
@@ -2192,6 +2200,18 @@ contains
     flush(error_unit,iostat=log_ios)
     call clean_stop
   end subroutine ledger_io_fatal
+
+  subroutine ledger_group_fatal(group_index,sink_index,message)
+    integer,intent(in)::group_index,sink_index
+    character(len=*),intent(in)::message
+    integer::log_ios
+
+    write(error_unit,'(A,I0,1X,A,I0,1X,A,I0,1X,A)') &
+         & 'FATAL: invalid SMBH capture ledger group',group_index, &
+         & 'sink_index=',sink_index,'nstep_coarse=',nstep_coarse,trim(message)
+    flush(error_unit,iostat=log_ios)
+    call clean_stop
+  end subroutine ledger_group_fatal
 
   function json_int(value) result(text)
     integer,intent(in)::value
