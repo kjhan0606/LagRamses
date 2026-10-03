@@ -33,7 +33,8 @@ group is never silently omitted from an otherwise complete ledger.
 Every event is a contiguous JSONL transaction:
 
 1. `event_begin`: integration time, cosmology, code-unit conversions, merge
-   radius, FOF group size, classification, group COM, and maximum separation.
+   radius, FOF group size, classification, axis-specific periodic box extents,
+   group COM, and maximum separation.
 2. one `member` row for every original sink: ID, the surviving primary ID,
    a primary flag, mass, position, velocity,
    formation time, accretion/feedback accumulators, BH spin, gas angular
@@ -59,6 +60,9 @@ again.  Consumers must deduplicate identical UIDs.  If a crash occurs between
 `event_begin` and `event_end`, consumers must reject that incomplete
 transaction.  A repeated UID with different content is a provenance conflict,
 not a valid restart duplicate.
+New transactions record `periodic_box_size_code` as three extents. The
+validator uses these for minimum-image and COM checks; older version-1
+transactions without the field retain their historical cubic-`boxlen` check.
 
 Validate a ledger with:
 

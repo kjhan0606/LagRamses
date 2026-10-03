@@ -292,6 +292,36 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertEqual(report.unique_events, 1)
         self.assertEqual(report.multiple_events, 1)
 
+    def test_axis_specific_periodic_extents_validate_capture_geometry(self):
+        rows = binary_rows()
+        rows[0]["periodic_box_size_code"] = [10.0, 20.0, 30.0]
+        rows[0]["com_position_code"] = [0.0, 0.1, 0.0]
+        rows[1]["position_code"] = [0.0, 19.5, 0.0]
+        rows[2]["position_code"] = [0.0, 0.5, 0.0]
+        rows[3]["delta_position_code"] = [0.0, 1.0, 0.0]
+        rows[3]["specific_angular_momentum_code"] = [0.0, 0.0, 0.0]
+        rows[3]["relative_angular_momentum_code"] = [0.0, 0.0, 0.0]
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+
+        rows[0]["periodic_box_size_code"] = [10.0, 10.0, 30.0]
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("minimum-image position" in error for error in report.errors))
+
+    def test_transaction_rejects_mixed_schema_and_pair_index(self):
+        for index, field, value, reason in (
+            (1, "schema_version", 2, "schema version"),
+            (-1, "schema_version", 2, "schema version"),
+            (4, "pair_index", 2, "pair_index sequence"),
+        ):
+            with self.subTest(index=index, field=field):
+                rows = multiple_rows()
+                rows[index][field] = value
+                report = self.validate_rows(rows)
+                self.assertFalse(report.valid)
+                self.assertTrue(any(reason in error for error in report.errors))
+
     def test_multiple_conservation_and_binding_failures_are_rejected(self):
         mutations = {
             "total mass": lambda rows: rows[0].__setitem__("total_mass_code", 11.0),

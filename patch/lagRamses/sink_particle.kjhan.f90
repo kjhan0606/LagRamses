@@ -2034,6 +2034,9 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
           & ',"levelmin":'//trim(json_int(levelmin))// &
           & ',"nlevelmax":'//trim(json_int(nlevelmax))// &
           & ',"boxlen":'//trim(json_real(boxlen))// &
+          & ',"periodic_box_size_code":['//trim(json_real(scale*xbound(1)))//','// &
+          & trim(json_real(scale*xbound(2)))//','// &
+          & trim(json_real(scale*xbound(3)))//']'// &
           & ',"omega_m":'//trim(json_real(omega_m))// &
           & ',"h0":'//trim(json_real(h0))// &
           & ',"factG_code":'//trim(json_real(factG))// &
