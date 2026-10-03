@@ -17,22 +17,29 @@ commit:
 ```bash
 sbatch tests/sink/capture-ledger/run_smoke.sbatch
 sbatch tests/sink/capture-ledger/run_restart_smoke.sbatch
+sbatch --ntasks=2 tests/sink/capture-ledger/run_restart_smoke.sbatch
 ```
 
 The first job requests no full dump (`noutput=1`, unreachable `aout`/`tout`,
 and `foutput=fbackup=100000`). The restart job materializes `noutput=2`,
 `tout=0,1e100`, `aout=1.1,1.1`, and `tend=0`: only the first scheduled output
-is reachable in its two-step run. The second slot must be explicit; an
+is reachable in its two-step run. The third command repeats the restart gate
+with two MPI ranks. The second output slot must be explicit; an
 unspecified `tout(2)` caused an unintended second full dump in an earlier
 attempt. A successful restart job checks that only `output_00001/COMPLETE`
 exists, that both attempts are individually valid, and that the final lineage
 has one accepted three-member event and one superseded batch.
+The scripts use Slurm's `pmi2` MPI launcher; without it, this site's Intel MPI
+starts two independent one-rank programs instead of one two-rank program.
 
 After a successful restart job, the negative completeness test can use its
 exact run directory:
 
 ```bash
 sbatch --export=ALL,CAPTURE_SOURCE_RUN=/gpfs/kjhan/lagramses_capture_restart_JOBID \
+  tests/sink/capture-ledger/run_missing_complete.sbatch
+sbatch --ntasks=2 \
+  --export=ALL,CAPTURE_SOURCE_RUN=/gpfs/kjhan/lagramses_capture_restart_TWO_RANK_JOBID \
   tests/sink/capture-ledger/run_missing_complete.sbatch
 ```
 

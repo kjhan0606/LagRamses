@@ -69,11 +69,15 @@ def evaluate(run: Path) -> dict:
     assert len([row for row in blocks[0] if row["record_type"] == "pair"]) == 3
 
     diagnostics = {}
+    rank_counts = []
     for name in ("fresh", "restart"):
         log = (run / f"{name}.log").read_text()
         assert "Run completed" in log
         assert "FFT direct solve DONE" in log
         assert "Fine multigrid Poisson failed to converge" not in log
+        rank_match = re.search(r"Working with nproc\s*=\s*(\d+)", log)
+        assert rank_match, name
+        rank_counts.append(int(rank_match.group(1)))
         diagnostics[name] = {
             "negative_internal_energy_cells": [
                 int(value) for value in re.findall(r"neg_cells=\s*(\d+)", log)
@@ -86,11 +90,16 @@ def evaluate(run: Path) -> dict:
             ],
         }
     assert diagnostics["fresh"] == diagnostics["restart"]
+    assert rank_counts[0] == rank_counts[1]
+    assert blocks[0][0]["ncpu"] == rank_counts[0]
+    info_ncpu = re.search(r"^ncpu\s*=\s*(\d+)", info, re.MULTILINE)
+    assert info_ncpu and int(info_ncpu.group(1)) == rank_counts[0]
     return {
         "status": "structural_pass",
         "physics_admission": "not_admitted_synthetic_initial_conditions",
         "run_directory": str(run),
         "checkpoint": outputs[0],
+        "mpi_ranks": rank_counts[0],
         "active_multiple_events": 1,
         "superseded_batches": 1,
         "replayed_event_records_identical": True,

@@ -18,6 +18,8 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export I_MPI_FABRICS=shm
+export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi2.so
+export I_MPI_PIN=0
 
 code=/home/kjhan/BACKUP/lagRamses-capture-ledger
 input="$code/tests/sink/capture-ledger"
@@ -43,7 +45,7 @@ sed -e 's/noutput=1/noutput=2/' -e 's/aout=1.1/aout=1.1,1.1/' \
     -e 's/tout=1.0d100/tout=0.0d0,1.0d100/' -e 's/tend=1.0d100/tend=0.0d0/' \
     -e 's/nrestart=0/nrestart=1/' \
     "$input/capture-ledger.nml" >"$run/restart.nml"
-echo "purpose=one-rank hydrodynamic checkpoint/restart structural smoke"
+echo "purpose=${SLURM_NTASKS}-rank hydrodynamic checkpoint/restart structural smoke"
 echo "fresh_effective_namelist=$run/fresh.nml"
 echo "restart_effective_namelist=$run/restart.nml"
 echo "run_directory=$run"
@@ -52,12 +54,14 @@ sha256sum "$run/fresh.nml" "$run/restart.nml" "$run/ic_sink" \
     "$run/legacy_yields.dat" "$run/ramses_final3d" \
     "$run/validate_ledger.py" "$run/verify_restart_smoke.py"
 cd "$run"
-srun --kill-on-bad-exit=1 -n 1 ./ramses_final3d fresh.nml >fresh.log 2>&1
+srun --kill-on-bad-exit=1 --mpi=pmi2 --cpu-bind=none \
+    -n "${SLURM_NTASKS}" ./ramses_final3d fresh.nml >fresh.log 2>&1
 test -f output_00001/COMPLETE
 test ! -e output_00002
 python3 validate_ledger.py capture.jsonl >fresh_validation.json
 python3 -c 'import json; d=json.load(open("fresh_validation.json")); assert d["status"]=="valid" and d["multiple_events"]==1 and d["committed_batches"]==1, d'
-srun --kill-on-bad-exit=1 -n 1 ./ramses_final3d restart.nml >restart.log 2>&1
+srun --kill-on-bad-exit=1 --mpi=pmi2 --cpu-bind=none \
+    -n "${SLURM_NTASKS}" ./ramses_final3d restart.nml >restart.log 2>&1
 test ! -e output_00002
 python3 validate_ledger.py capture.jsonl >restart_validation.json
 python3 -c 'import json; d=json.load(open("restart_validation.json")); assert d["status"]=="valid" and d["multiple_events"]==1 and d["superseded_batches"]==1 and d["run_attempts"]==2, d'

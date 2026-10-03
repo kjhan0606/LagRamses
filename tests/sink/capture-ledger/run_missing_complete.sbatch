@@ -18,10 +18,17 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export I_MPI_FABRICS=shm
+export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi2.so
+export I_MPI_PIN=0
 
 source_run=${CAPTURE_SOURCE_RUN:?set CAPTURE_SOURCE_RUN to the completed smoke directory}
 test -f "$source_run/output_00001/COMPLETE"
 test -f "$source_run/restart.nml"
+source_ncpu=$(awk '$1 == "ncpu" {print $3; exit}' "$source_run/output_00001/info_00001.txt")
+if [ "$source_ncpu" != "$SLURM_NTASKS" ]; then
+    echo "FATAL: source checkpoint ncpu=$source_ncpu differs from Slurm tasks=$SLURM_NTASKS"
+    exit 2
+fi
 run=/gpfs/kjhan/lagramses_capture_missing_complete_${SLURM_JOB_ID:?}
 if [ -e "$run" ]; then
     echo "FATAL: refusing existing run directory $run"
@@ -39,7 +46,8 @@ echo "source_checkpoint=$source_run/output_00001"
 echo "effective_namelist=$run/effective.nml"
 sha256sum "$run/effective.nml" "$run/ramses_final3d"
 cd "$run"
-if srun --kill-on-bad-exit=1 -n 1 ./ramses_final3d effective.nml >run.log 2>&1; then
+if srun --kill-on-bad-exit=1 --mpi=pmi2 --cpu-bind=none \
+    -n "${SLURM_NTASKS}" ./ramses_final3d effective.nml >run.log 2>&1; then
     echo 'FATAL: restart without COMPLETE was accepted'
     exit 1
 fi
