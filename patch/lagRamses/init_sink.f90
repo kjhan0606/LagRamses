@@ -14,6 +14,7 @@ subroutine init_sink
   integer::ilun,nx_loc
   integer::nsinkold
   real(dp)::xx1,xx2,xx3,vv1,vv2,vv3,mm1,ll1,ll2,ll3
+  real(dp)::sm2,dmf
   real(dp),allocatable,dimension(:)::xdp
   integer,allocatable,dimension(:)::isp
   logical,allocatable,dimension(:)::nb
@@ -218,6 +219,63 @@ subroutine init_sink
         filename='ic_sink'
         INQUIRE(FILE=filename, EXIST=ic_sink)
      end if
+  end if
+
+  ! Load the standard formatted 12-column sink seed file.  On a fresh start
+  ! this is ic_sink; on restart an optional ic_sink_restart may append sinks
+  ! after the checkpoint population, preserving the established semantics.
+  if (ic_sink)then
+#ifndef WITHOUTMPI
+     if(IOGROUPSIZE>0) then
+        if (mod(myid-1,IOGROUPSIZE)/=0) then
+           call MPI_RECV(dummy_io,1,MPI_INTEGER,myid-1-1,tag2, &
+                & MPI_COMM_WORLD,MPI_STATUS_IGNORE,info2)
+        end if
+     endif
+#endif
+
+     open(10,file=filename,form='formatted')
+     do
+        read(10,*,end=103)mm1,xx1,xx2,xx3,vv1,vv2,vv3,ll1,ll2,ll3,sm2,dmf
+        if(nsink>=nsinkmax)then
+           if(myid==1)write(*,*)'init_sink: ic_sink holds more than nsinkmax sinks'
+           call clean_stop
+        end if
+        nsink=nsink+1
+        nindsink=nindsink+1
+        idsink(nsink)=nindsink
+        msink(nsink)=mm1
+        xsink(nsink,1)=xx1+boxlen/2
+        xsink(nsink,2)=xx2+boxlen/2
+        xsink(nsink,3)=xx3+boxlen/2
+        vsink(nsink,1)=vv1
+        vsink(nsink,2)=vv2
+        vsink(nsink,3)=vv3
+        jsink(nsink,1)=ll1
+        jsink(nsink,2)=ll2
+        jsink(nsink,3)=ll3
+        tsink(nsink)=t
+        dMsmbh(nsink)=0d0
+        dMBH_coarse(nsink)=0d0
+        dMEd_coarse(nsink)=0d0
+        Esave(nsink)=0d0
+        bhspin(nsink,1:ndim)=0d0
+        spinmag(nsink)=0d0
+        sink_stat(nsink,levelmin:nlevelmax,1:ndim*2+1)=0d0
+     end do
+103  continue
+     close(10)
+     if(myid==1)write(*,*)'init_sink: loaded ',nsink,' sinks from ',TRIM(filename)
+
+#ifndef WITHOUTMPI
+     if(IOGROUPSIZE>0) then
+        if(mod(myid,IOGROUPSIZE)/=0 .and.(myid.lt.ncpu))then
+           dummy_io=1
+           call MPI_SEND(dummy_io,1,MPI_INTEGER,myid-1+1,tag2, &
+                & MPI_COMM_WORLD,info2)
+        end if
+     endif
+#endif
   end if
 
 end subroutine init_sink
