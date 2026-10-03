@@ -1934,6 +1934,19 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      do isink=1,nsink
         if(gsink(isink) /= igrp) cycle
         if(anchor == 0) anchor=isink
+        if(.not.ieee_is_finite(msink(isink)) .or. msink(isink) <= 0d0) then
+           call ledger_group_fatal(igrp,'non-positive or non-finite member mass')
+        endif
+        if(any(.not.ieee_is_finite(xsink(isink,1:ndim))) .or. &
+             & any(.not.ieee_is_finite(vsink(isink,1:ndim)))) then
+           call ledger_group_fatal(igrp,'non-finite member position or velocity')
+        endif
+        do jsink_member=1,isink-1
+           if(gsink(jsink_member) /= igrp) cycle
+           if(idsink(jsink_member) == idsink(isink)) then
+              call ledger_group_fatal(igrp,'duplicate member sink ID')
+           endif
+        enddo
         ! This is exactly the survivor rule used by merge_sink below:
         ! strictly larger mass replaces the primary; a mass tie keeps the
         ! first member, and members are traversed in increasing sink index.
@@ -1947,10 +1960,9 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         total_mass=total_mass+msink(isink)
      enddo
 
-     if(total_mass <= 0d0 .or. anchor == 0 .or. primary_index == 0) then
-        write(*,'(A,I0,A,I0)') 'WARNING: invalid SMBH capture group ',igrp, &
-             & ' at coarse step ',nstep_coarse
-        cycle
+     if(.not.ieee_is_finite(total_mass) .or. total_mass <= 0d0 .or. &
+          & anchor == 0 .or. primary_index == 0) then
+        call ledger_group_fatal(igrp,'invalid total mass or primary')
      endif
      primary_sink_id=idsink(primary_index)
 
@@ -2174,6 +2186,18 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   if(ios /= 0) call ledger_io_fatal('close','',ios,iomsg)
 
 contains
+
+  subroutine ledger_group_fatal(group_index,reason)
+    integer,intent(in)::group_index
+    character(len=*),intent(in)::reason
+    integer::log_ios
+
+    write(error_unit,'(A,I0,A,I0,1X,A)') &
+         & 'FATAL: SMBH capture ledger cannot record group ',group_index, &
+         & ' at coarse step ',nstep_coarse,trim(reason)
+    flush(error_unit,iostat=log_ios)
+    call clean_stop
+  end subroutine ledger_group_fatal
 
   subroutine ledger_io_fatal(operation,uid,status,message)
     character(len=*),intent(in)::operation,uid,message

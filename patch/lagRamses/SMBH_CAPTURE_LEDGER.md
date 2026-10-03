@@ -24,6 +24,9 @@ write, flush, or close the ledger is fatal: RAMSES calls `clean_stop` before
 any rank enters the irreversible sink-compaction section.  A partially
 written tail from that failed run remains invalid and must not be consumed as
 a capture event.
+An SMBH group with non-positive/non-finite member mass, non-finite member
+position/velocity, or duplicate sink IDs also stops before compaction; such a
+group is never silently omitted from an otherwise complete ledger.
 
 ## Transaction layout
 

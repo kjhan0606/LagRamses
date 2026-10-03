@@ -344,6 +344,15 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertFalse(non_object_report.valid)
         self.assertTrue(any("JSON object" in item for item in non_object_report.errors))
 
+    def test_nonpositive_member_mass_cannot_validate_as_capture(self):
+        rows = binary_rows()
+        rows[1]["mass_code"] = 0.0
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(
+            any("member mass must be positive" in item for item in report.errors)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

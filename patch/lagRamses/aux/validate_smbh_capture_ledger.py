@@ -182,8 +182,8 @@ def _validate_pair_invariants(
 
     mass1 = _require_number(members[id1], "mass_code", uid, errors)
     mass2 = _require_number(members[id2], "mass_code", uid, errors)
-    if mass1 is None or mass2 is None or mass1 + mass2 <= 0.0:
-        errors.append(f"{uid}: pair {id1}-{id2} has an invalid mass sum")
+    if mass1 is None or mass2 is None or mass1 <= 0.0 or mass2 <= 0.0:
+        errors.append(f"{uid}: pair {id1}-{id2} has a non-positive member mass")
         return
     expected_mu = mass1 * mass2 / (mass1 + mass2)
     expected_kinetic = 0.5 * expected_mu * expected_v**2
@@ -310,6 +310,9 @@ def _validate_event_invariants(
         position = _require_vector(member, "position_code", uid, errors)
         velocity = _require_vector(member, "velocity_code", uid, errors)
         if mass is None or position is None or velocity is None:
+            continue
+        if mass <= 0.0:
+            errors.append(f"{uid}: member mass must be positive")
             continue
         masses.append(mass)
         positions.append(position)
