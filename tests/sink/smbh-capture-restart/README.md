@@ -27,67 +27,65 @@ the build log if stronger toolchain provenance is required.
 ## 1. Build a fresh CPU binary from the eventual committed HEAD
 
 First commit the runner changes that are to be tested. Do not use the dirty hub
-checkout as either the runner or build source. The job below resolves the then-
-current HEAD and makes one clean detached worktree containing the runner,
-validator, source, and resulting binary.
-
-Submit the compilation itself to Slurm; do not compile on the login node. This
-job refuses an existing build path, creates a detached worktree, pins the
-compiler/MPI module versions, and leaves an external build log:
+checkout as either the runner or build source. On the actual `LagEunha` CPU
+host, the commands below resolve the current HEAD and make one clean detached
+worktree containing the runner, validator, source, and resulting binary. They
+refuse an existing build path and pin the compiler/MPI module versions:
 
 ```bash
+set -euo pipefail
+[[ $(hostname -s | tr '[:upper:]' '[:lower:]') == lageunha ]] || exit 1
+module purge
+module load intel/tbb/2022.3 intel/umf/1.0.2 \
+  intel/compiler-rt/2025.3.0 intel/compiler/2025.3.0 intel/mpi/2021.17
 repo=/home/kjhan/BACKUP/lagRamses
 commit=$(git -C "$repo" rev-parse HEAD)
-sbatch --export=ALL,LAGRAMSES_REPO="$repo",LAGRAMSES_COMMIT="$commit" <<'SBATCH'
-#!/usr/bin/env bash
-#SBATCH --job-name=build_capture_smoke
-#SBATCH --partition=a10
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=8G
-#SBATCH --gres=gpu:1
-#SBATCH --time=00:30:00
-#SBATCH --output=/scratch/%u/lagRamses-build-capture-%j.log
-set -euo pipefail
-module purge
-module load intel/compiler/2025.3.0
-module load intel/mpi/2021.17
-repo=$LAGRAMSES_REPO
-commit=$LAGRAMSES_COMMIT
-build_tree=/scratch/$USER/lagRamses-build-capture-smoke
+short_commit=$(git -C "$repo" rev-parse --short=8 HEAD)
+build_tree=/home/kjhan/BACKUP/lagRamses-build-capture-smoke-$short_commit
 [[ ! -e $build_tree ]] || { echo "refusing existing build path: $build_tree" >&2; exit 1; }
 git -C "$repo" worktree add --detach "$build_tree" "$commit"
 test -z "$(git -C "$build_tree" status --porcelain --untracked-files=normal)"
 export LD_LIBRARY_PATH=/home/kjhan/local/hdf5/lib:/home/kjhan/local/lib:${LD_LIBRARY_PATH:-}
 make -C "$build_tree/bin" clean
-make -C "$build_tree/bin" HDF5=1 USE_FFTW=1
+make -C "$build_tree/bin" -j1 HDF5=1 USE_FFTW=1
 test -x "$build_tree/bin/ramses_final3d"
 test -z "$(git -C "$build_tree" status --porcelain --untracked-files=normal)"
 echo "source_commit=$commit"
 sha256sum "$build_tree/bin/ramses_final3d"
-SBATCH
 ```
 
-Wait for a successful build job and retain its Slurm log. These are instructions
-only; no build is performed by the runner. Keep the worktree and binary
-unchanged through execution.
+These are manual Lageunha CPU-build instructions; no GPU or Slurm allocation is
+needed. No build is performed by the runner. Retain the terminal/build log and
+keep the worktree and binary unchanged through execution.
 
-## 2. Prepare and inspect on the login node
+Use `-j1` explicitly. On Lageunha, a clean `-j4` build exposed a Fortran module
+dependency race (`amr_commons` was compiled before `amr_parameters.mod`), while
+the serial command above succeeded. The clean test build at commit `35a307d`
+produced `bin/ramses_final3d` with SHA-256
+`8a89cc49466e0bbf748e7e172b9216a2f83aa73955f58af3bb009b96a2930421`.
+That digest is evidence for that exact build only; the dynamic committed-HEAD
+workflow must use and approve the digest printed by its own clean build.
 
-Choose a never-before-used run path and a measured/conservative output size:
+## 2. Prepare and inspect on Lageunha
+
+On the same Lageunha server that will execute the manual smoke, choose a
+never-before-used `/home` run path and a measured/conservative output size:
 
 ```bash
-build_tree=/scratch/$USER/lagRamses-build-capture-smoke
+build_tree=/home/kjhan/BACKUP/lagRamses-build-capture-smoke-COMMIT8
 commit=$(git -C "$build_tree" rev-parse HEAD)
+short_commit=$(git -C "$build_tree" rev-parse --short=8 HEAD)
 binary="$build_tree/bin/ramses_final3d"
-run_dir=/scratch/$USER/smbh-capture-restart-prepared
+run_dir=/home/kjhan/BACKUP/smbh-capture-restart-$short_commit
 "$build_tree/tests/sink/smbh-capture-restart/run_smoke.sh" \
   --prepare --run-dir "$run_dir" --binary "$binary" \
   --source-tree "$build_tree" --expected-source-commit "$commit" \
   --bytes-per-output 500000000
 python3 -m json.tool "$run_dir/preflight_manifest.json" | less
 manifest_sha256=$(sha256sum "$run_dir/preflight_manifest.json" | awk '{print $1}')
+# Required manual evidence on Lageunha; retain this output with the manifest.
+mmlsquota aicpuhome -u "$USER"
+df -h /home
 ```
 
 Audit both effective namelists, output schedule, projected bytes, reserve/free
@@ -97,11 +95,39 @@ was reported; they do not create an invented "free quota" value. The runner
 records that evidence and separately gates on filesystem free bytes. If either
 the quota or hard-limit field is nonzero, it also requires the projected bytes
 plus reserve to fit below the stricter nonzero ceiling at prepare and launch.
+For the manual `/home` path, the runner still gates on `/home` filesystem free
+bytes. The operator must also capture the GPFS `mmlsquota` report above. The
+observed `quota=0, limit=0` means no explicit numeric user ceiling was reported,
+not infinite invented free quota.
 
-## 3. Execute that prepared directory under Slurm
+## 3. Execute manually on Lageunha (CPU-only)
 
-Use the identical absolute paths. Do not derive a new run directory from the
-job ID: preparation has already fixed and sealed it.
+For this one-rank CPU smoke, the normal path is manual execution on the actual
+`LagEunha` host. The runner checks the hostname case-insensitively, performs the
+same sealed launch revalidation, and invokes the binary directly and serially:
+
+```bash
+build_tree=/home/kjhan/BACKUP/lagRamses-build-capture-smoke-COMMIT8
+binary="$build_tree/bin/ramses_final3d"
+short_commit=$(git -C "$build_tree" rev-parse --short=8 HEAD)
+run_dir=/home/kjhan/BACKUP/smbh-capture-restart-$short_commit
+manifest_sha256=REPLACE_WITH_APPROVED_64_HEX_DIGEST
+"$build_tree/tests/sink/smbh-capture-restart/run_smoke.sh" \
+  --manual-lageunha --run-dir "$run_dir" --binary "$binary" \
+  --manifest-sha256 "$manifest_sha256"
+```
+
+`--manual-lageunha` refuses other hosts and never uses `srun`. It is not an
+authorization to run a GPU workload manually.
+
+## 4. Optional execution under Slurm
+
+Slurm may use `/scratch`, but it needs a distinct preparation there; a sealed
+manual `/home` manifest cannot be moved. On the Slurm login host where
+`/scratch/$USER` exists, invoke the same clean-worktree `--prepare` command with
+the unique `run_dir=/scratch/$USER/smbh-capture-restart-$short_commit-slurm`.
+Inspect its filesystem/Lustre report and approve that manifest SHA. Then use
+those exact paths:
 
 ```bash
 sbatch <<'SBATCH'
@@ -115,9 +141,10 @@ sbatch <<'SBATCH'
 #SBATCH --gres=gpu:1
 #SBATCH --time=00:10:00
 set -euo pipefail
-build_tree=/scratch/$USER/lagRamses-build-capture-smoke
+build_tree=/home/kjhan/BACKUP/lagRamses-build-capture-smoke-COMMIT8
 binary="$build_tree/bin/ramses_final3d"
-run_dir=/scratch/$USER/smbh-capture-restart-prepared
+short_commit=$(git -C "$build_tree" rev-parse --short=8 HEAD)
+run_dir=/scratch/$USER/smbh-capture-restart-$short_commit-slurm
 manifest_sha256=REPLACE_WITH_APPROVED_64_HEX_DIGEST
 "$build_tree/tests/sink/smbh-capture-restart/run_smoke.sh" \
   --execute --run-dir "$run_dir" --binary "$binary" \

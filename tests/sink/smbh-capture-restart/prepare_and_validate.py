@@ -303,6 +303,10 @@ def launch_check(args: argparse.Namespace) -> None:
     if not isinstance(source_tree_raw, str) or not isinstance(expected_commit, str):
         fail("manifest source identity is missing or malformed")
     validate_clean_source(Path(source_tree_raw), expected_commit)
+    source_tree = Path(source_tree_raw).resolve()
+    expected_here = source_tree / "tests" / "sink" / "smbh-capture-restart"
+    if ROOT.resolve() != source_tree or HERE.resolve() != expected_here:
+        fail("runner/validator is not the prepared clean source-worktree copy")
     prepared_files = manifest.get("files")
     if not isinstance(prepared_files, dict):
         fail("manifest prepared-file map is missing or malformed")
@@ -356,6 +360,16 @@ def launch_check(args: argparse.Namespace) -> None:
     if free < required:
         fail(f"insufficient launch-time space: need {required} bytes including reserve")
     print("launch_revalidation=PASS")
+
+
+def execution_context(args: argparse.Namespace) -> None:
+    host = args.hostname.split(".", 1)[0].lower()
+    if args.execution_mode == "manual-lageunha":
+        if host != "lageunha":
+            fail(f"manual execution requires hostname LagEunha, found {args.hostname}")
+    elif not args.slurm_job_id:
+        fail("Slurm execution requires SLURM_JOB_ID")
+    print(f"execution_context=PASS mode={args.execution_mode} hostname={args.hostname}")
 
 
 def postcheck(args: argparse.Namespace) -> None:
@@ -427,6 +441,10 @@ def main() -> None:
     launch.add_argument("run_dir", type=Path)
     launch.add_argument("--binary", type=Path, required=True)
     launch.add_argument("--manifest-sha256", required=True)
+    context = sub.add_parser("execution-context")
+    context.add_argument("--execution-mode", choices=("manual-lageunha", "slurm"), required=True)
+    context.add_argument("--hostname", required=True)
+    context.add_argument("--slurm-job-id")
     check = sub.add_parser("postcheck")
     check.add_argument("run_dir", type=Path)
     args = parser.parse_args()
@@ -434,6 +452,8 @@ def main() -> None:
         prepare(args)
     elif args.mode == "launch-check":
         launch_check(args)
+    elif args.mode == "execution-context":
+        execution_context(args)
     else:
         postcheck(args)
 

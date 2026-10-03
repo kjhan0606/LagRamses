@@ -33,11 +33,16 @@ class TwoPhasePreflightTest(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.source), "config", "user.name", "Test"], check=True)
         subprocess.run(["git", "-C", str(self.source), "config", "user.email", "test@example.invalid"], check=True)
         (self.source / "bin").mkdir()
+        fixture_dir = self.source / "tests" / "sink" / "smbh-capture-restart"
+        fixture_dir.mkdir(parents=True)
+        for name in ("prepare_and_validate.py", "smoke.nml.in", "ic_sink"):
+            shutil.copy2(HERE / name, fixture_dir / name)
+        self.tool = fixture_dir / "prepare_and_validate.py"
         (self.source / ".gitignore").write_text("/bin/ramses3d\n", encoding="utf-8")
         (self.source / "tracked.txt").write_text("clean\n", encoding="utf-8")
         self.binary = self.source / "bin" / "ramses3d"
         shutil.copy2("/bin/true", self.binary)
-        subprocess.run(["git", "-C", str(self.source), "add", ".gitignore", "tracked.txt"], check=True)
+        subprocess.run(["git", "-C", str(self.source), "add", ".gitignore", "tracked.txt", "tests"], check=True)
         subprocess.run(["git", "-C", str(self.source), "commit", "-qm", "fixture"], check=True)
         self.commit = subprocess.check_output(
             ["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True
@@ -46,7 +51,7 @@ class TwoPhasePreflightTest(unittest.TestCase):
 
     def command(self, *extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(TOOL), *extra], text=True,
+            ["python3", str(self.tool), *extra], text=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
 
@@ -123,6 +128,16 @@ class TwoPhasePreflightTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no longer pristine", result.stdout)
 
+    def test_rejects_runner_from_hub_checkout(self) -> None:
+        self.assertEqual(self.prepare().returncode, 0)
+        result = subprocess.run(
+            ["python3", str(TOOL), "launch-check", str(self.run_dir),
+             "--binary", str(self.binary), "--manifest-sha256", self.manifest_hash()],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not the prepared clean source-worktree copy", result.stdout)
+
     def test_quota_evidence_uses_stricter_nonzero_ceiling(self) -> None:
         output = """Disk quotas for usr test (uid 1):
 Filesystem kbytes quota limit grace files quota limit grace
@@ -144,6 +159,18 @@ Filesystem kbytes quota limit grace files quota limit grace
             evidence = PREPARE_MODULE.lustre_quota_evidence(Path("/scratch/test/run"))
         self.assertIsNotNone(evidence)
         self.assertIsNone(evidence["remaining_bytes_under_stricter_limit"])
+
+    def test_manual_context_rejects_syntax_host(self) -> None:
+        result = self.command("execution-context", "--execution-mode", "manual-lageunha",
+                              "--hostname", "syntax")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires hostname LagEunha", result.stdout)
+
+    def test_manual_context_accepts_named_host_case_insensitively(self) -> None:
+        result = self.command("execution-context", "--execution-mode", "manual-lageunha",
+                              "--hostname", "LagEunha.cluster.example")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("execution_context=PASS", result.stdout)
 
 
 if __name__ == "__main__":
