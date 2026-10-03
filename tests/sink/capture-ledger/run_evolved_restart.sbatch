@@ -1,5 +1,5 @@
 #!/bin/bash
-# Step-2 HDF5 checkpoint of a mildly perturbed gas and three-sink capture.
+# Step-2 HDF5 checkpoint and step-4 state replay of mildly perturbed gas.
 #SBATCH --job-name=smbh_capture_evolved_h5
 #SBATCH --partition=a10
 #SBATCH --nodes=1
@@ -34,15 +34,18 @@ cp "$input/legacy_yields.dat" "$run/legacy_yields.dat"
 cp "$code/bin/ramses_final3d" "$run/ramses_final3d"
 ldd "$run/ramses_final3d" | grep -F libhdf5_fortran
 cp "$code/patch/lagRamses/aux/validate_smbh_capture_ledger.py" "$run/validate_ledger.py"
+cp "$input/compare_evolved_hdf5.py" "$run/compare_evolved_hdf5.py"
 
 # The first reachable time is after step 1 sets the conservation baseline.
-# The second slot remains unreachable; periodic clocks are inactive in 4 steps.
+# The second slot produces a comparison dump at step 4; periodic clocks are inactive.
 sed -e 's/noutput=1/noutput=2/' -e 's/aout=1.1/aout=1.1,1.1/' \
-    -e 's/tout=1.0d100/tout=3.0d-2,1.0d100/' -e 's/tend=1.0d100/tend=0.0d0/' \
+    -e 's/tout=1.0d100/tout=3.0d-2,7.5d-2/' -e 's/tend=1.0d100/tend=0.0d0/' \
+    -e 's/nstepmax=4/nstepmax=5/' \
     -e '/^fbackup=100000$/a\informat="hdf5"\noutformat="hdf5"' \
     "$input/capture-ledger-perturbed.nml" >"$run/fresh.nml"
 sed -e 's/noutput=1/noutput=2/' -e 's/aout=1.1/aout=1.1,1.1/' \
-    -e 's/tout=1.0d100/tout=3.0d-2,1.0d100/' -e 's/tend=1.0d100/tend=0.0d0/' \
+    -e 's/tout=1.0d100/tout=3.0d-2,7.5d-2/' -e 's/tend=1.0d100/tend=0.0d0/' \
+    -e 's/nstepmax=4/nstepmax=5/' \
     -e 's/nrestart=0/nrestart=1/' \
     -e '/^fbackup=100000$/a\informat="hdf5"\noutformat="hdf5"' \
     "$input/capture-ledger-perturbed.nml" >"$run/restart.nml"
@@ -51,23 +54,36 @@ echo "fresh_effective_namelist=$run/fresh.nml"
 echo "restart_effective_namelist=$run/restart.nml"
 echo "run_directory=$run"
 echo "source_commit=$(git -C "$code" rev-parse HEAD)"
+echo 'full_dump_policy=noutput=2 tout=0.03,0.075 aout=1.1,1.1 foutput=fbackup=100000'
+echo 'expected_storage=two HDF5 dumps, about 14 MiB based on the prior fixture; free space checked before submission'
 sha256sum "$run/fresh.nml" "$run/restart.nml" "$run/ic_sink" \
-    "$run/legacy_yields.dat" "$run/ramses_final3d" "$run/validate_ledger.py"
+    "$run/legacy_yields.dat" "$run/ramses_final3d" "$run/validate_ledger.py" "$run/compare_evolved_hdf5.py"
 cd "$run"
 srun --kill-on-bad-exit=1 --mpi=pmi2 --cpu-bind=none -n 2 \
     ./ramses_final3d fresh.nml >fresh.log 2>&1
 test -f output_00001/COMPLETE
 test -f output_00001/data_00001.h5
-test ! -e output_00002
+test -f output_00002/COMPLETE
+test -f output_00002/data_00002.h5
+grep -Eq '^nstep_coarse=[[:space:]]*4[[:space:]]*$' output_00002/info_00002.txt
 grep -Eq '^nstep_coarse=[[:space:]]*2[[:space:]]*$' output_00001/info_00001.txt
 python3 -c 'import h5py; h=h5py.File("output_00001/data_00001.h5"); a=h["/header"].attrs; assert a["nstep_coarse"].item()==2 and a["mass_tot_0"].item()>0 and a["const"].item()!=0; print("checkpoint_step=2 mass_tot_0=",a["mass_tot_0"]," const=",a["const"])'
 sha256sum output_00001/data_00001.h5 >checkpoint.sha256
 python3 validate_ledger.py capture.jsonl >fresh_validation.json
 python3 -c 'import json; d=json.load(open("fresh_validation.json")); assert d["status"]=="valid" and d["multiple_events"]==1 and d["committed_batches"]==1 and d["run_attempts"]==1, d'
+mv output_00002 fresh_output_00002
 srun --kill-on-bad-exit=1 --mpi=pmi2 --cpu-bind=none -n 2 \
     ./ramses_final3d restart.nml >restart.log 2>&1
 sha256sum -c checkpoint.sha256
-test ! -e output_00002
+test -f output_00002/COMPLETE
+test -f output_00002/data_00002.h5
+grep -Eq '^nstep_coarse=[[:space:]]*4[[:space:]]*$' output_00002/info_00002.txt
 python3 validate_ledger.py capture.jsonl >restart_validation.json
 python3 -c 'import json; d=json.load(open("restart_validation.json")); assert d["status"]=="valid" and d["multiple_events"]==1 and d["committed_batches"]==1 and d["superseded_batches"]==0 and d["run_attempts"]==2, d'
-echo 'CAPTURE_EVOLVED_HDF5_LEDGER_STRUCTURAL_PASS_HYDRO_PENDING'
+python3 compare_evolved_hdf5.py fresh_output_00002/data_00002.h5 output_00002/data_00002.h5 >evolved_state_comparison.json
+echo 'CAPTURE_EVOLVED_HDF5_LEDGER_STRUCTURAL_PASS'
+if ! python3 -c 'import json,sys; d=json.load(open("evolved_state_comparison.json")); sys.exit(0 if d["active_state_exact"] else 1)'; then
+    echo 'CAPTURE_EVOLVED_HDF5_ACTIVE_STATE_REPLAY_FAIL'
+    exit 1
+fi
+echo 'CAPTURE_EVOLVED_HDF5_ACTIVE_STATE_REPLAY_EXACT'
