@@ -23,6 +23,7 @@ export I_MPI_PIN=0
 
 code=/home/kjhan/BACKUP/lagRamses-capture-ledger
 input="$code/tests/sink/capture-ledger"
+binary=${CAPTURE_TEST_BINARY:-$code/bin/ramses_final3d}
 run=/gpfs/kjhan/lagramses_capture_evolved_hdf5_restart_${SLURM_JOB_ID:?}
 if [ -e "$run" ]; then
     echo "FATAL: refusing existing run directory $run"
@@ -31,7 +32,8 @@ fi
 mkdir "$run"
 cp "$input/ic_sink" "$run/ic_sink"
 cp "$input/legacy_yields.dat" "$run/legacy_yields.dat"
-cp "$code/bin/ramses_final3d" "$run/ramses_final3d"
+test -x "$binary"
+cp "$binary" "$run/ramses_final3d"
 ldd "$run/ramses_final3d" | grep -F libhdf5_fortran
 cp "$code/patch/lagRamses/aux/validate_smbh_capture_ledger.py" "$run/validate_ledger.py"
 cp "$input/compare_evolved_hdf5.py" "$run/compare_evolved_hdf5.py"
@@ -53,6 +55,7 @@ echo 'purpose=two-rank moving-gas step-2 checkpoint capture restart diagnostic'
 echo "fresh_effective_namelist=$run/fresh.nml"
 echo "restart_effective_namelist=$run/restart.nml"
 echo "run_directory=$run"
+echo "binary_source=$binary"
 echo "source_commit=$(git -C "$code" rev-parse HEAD)"
 echo 'full_dump_policy=noutput=3 tout=0.03,0.055,0.075 aout=1.1,1.1,1.1 foutput=fbackup=100000'
 echo 'expected_storage=three HDF5 dumps, about 21 MiB based on the prior fixture; free space checked before submission'

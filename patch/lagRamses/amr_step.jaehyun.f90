@@ -315,6 +315,9 @@ recursive subroutine amr_step(ilevel,icount)
   call system_clock(pt_t2)
   pt_mktree = pt_mktree + dble(pt_t2-pt_t1)/dble(pt_rate)
   if(ilevel==levelmin) call diag_check_nan('post_maketree')
+#ifdef CAPTURE_RESTART_DIAG
+  if(ilevel==levelmin)call capture_restart_probe('pre_output',ilevel)
+#endif
   
   !------------------------
   ! Output results to files
@@ -341,8 +344,14 @@ recursive subroutine amr_step(ilevel,icount)
         if(.not.ok_defrag)then
            call defrag
         endif
+#ifdef CAPTURE_RESTART_DIAG
+        call capture_restart_probe('post_defrag',ilevel)
+#endif
 
         call dump_all
+#ifdef CAPTURE_RESTART_DIAG
+        call capture_restart_probe('post_dump',ilevel)
+#endif
 
         ! Run the clumpfinder, (produce output, don't keep arrays alive on output)
         if(clumpfind .and. ndim==3) call clump_finder(.true.,.false.)
@@ -1034,6 +1043,9 @@ recursive subroutine amr_step(ilevel,icount)
      call move_fine(ilevel) ! Only remaining particles
      call system_clock(pt_t2)
      pt_move = pt_move + dble(pt_t2-pt_t1)/dble(pt_rate)
+#ifdef CAPTURE_RESTART_DIAG
+     if(ilevel==levelmin)call capture_restart_probe('post_move',ilevel)
+#endif
   end if
 
   !----------------------------------
@@ -1255,6 +1267,60 @@ recursive subroutine amr_step(ilevel,icount)
 999 format(' Entering amr_step',i1,' for level',i2, '  for a levelmin ',i3)
 
 end subroutine amr_step
+
+#ifdef CAPTURE_RESTART_DIAG
+! Test-build-only census at two coarse-step phases. No production binary calls it.
+subroutine capture_restart_probe(stage,ilevel)
+  use amr_commons
+  use pm_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  character(len=*),intent(in)::stage
+  integer,intent(in)::ilevel
+  integer::igrid,jgrid,jpart,ipart,nowned,nowned_all,info
+  real(dp)::sumx,sumx_all,stat,stat_all
+
+  if(.not.sink.or.nsink/=1.or.nstep_coarse>4)return
+  nowned=0
+  sumx=0d0
+  igrid=headl(myid,ilevel)
+  do jgrid=1,numbl(myid,ilevel)
+     ipart=headp(igrid)
+     do jpart=1,numbp(igrid)
+        if(ipart<1.or.ipart>npartmax)then
+           write(*,*)'CAPTURE_RESTART_PROBE_BAD_LINK',stage,myid,ilevel,igrid,ipart
+#ifndef WITHOUTMPI
+           call MPI_ABORT(MPI_COMM_WORLD,86,info)
+#else
+           stop 86
+#endif
+        endif
+        if(ptypep(ipart)==PTYPE_SINK)then
+           nowned=nowned+1
+           sumx=sumx+xp(ipart,1)
+        endif
+        ipart=nextp(ipart)
+     enddo
+     igrid=next(igrid)
+  enddo
+  stat=sink_stat(1,ilevel,ndim*2+1)
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(nowned,nowned_all,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(sumx,sumx_all,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(stat,stat_all,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+  nowned_all=nowned
+  sumx_all=sumx
+  stat_all=stat
+#endif
+  write(*,'(A,1X,A,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,ES20.12,1X,A,ES20.12)') &
+       'CAPTURE_RESTART_PROBE',trim(stage),'step=',nstep_coarse,'rank=',myid, &
+       'local_owned=',nowned,'global_owned=',nowned_all, &
+       'global_sumx=',sumx_all,'global_sink_stat=',stat_all
+end subroutine capture_restart_probe
+#endif
 
 !##########################################################################
 !##########################################################################

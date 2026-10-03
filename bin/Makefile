@@ -147,6 +147,9 @@ endif
 ifdef FDMTRACE
   FFLAGS += -DFDMDEBUG
 endif
+ifeq ($(CAPTURE_RESTART_DIAG),1)
+  FFLAGS += -DCAPTURE_RESTART_DIAG
+endif
 ifeq ($(MG_PROFILE),1)
   # Refined-level multigrid phase timers only; retain the production -O3 flags.
   FFLAGS += -DMG_PROFILE
