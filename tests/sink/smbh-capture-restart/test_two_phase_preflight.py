@@ -48,6 +48,8 @@ class TwoPhasePreflightTest(unittest.TestCase):
             ["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True
         ).strip()
         self.run_dir = base / "prepared"
+        self.yield_table = base / "external-yield-table.asc"
+        self.yield_table.write_text("fixture yield table\n", encoding="utf-8")
 
     def command(self, *extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -64,6 +66,7 @@ class TwoPhasePreflightTest(unittest.TestCase):
             "--source-tree", str(self.source),
             "--expected-source-commit", self.commit,
             "--bytes-per-output", "1", "--reserve-bytes", "0",
+            "--yield-table-source", str(self.yield_table),
         )
 
     def test_prepare_then_launch_check(self) -> None:
@@ -76,11 +79,16 @@ class TwoPhasePreflightTest(unittest.TestCase):
             PREPARE_MODULE.STELLAR_ENRICHMENT_POLICY,
         )
         self.assertEqual(manifest["boundary_policy"], PREPARE_MODULE.BOUNDARY_POLICY)
+        run_table = self.run_dir / PREPARE_MODULE.YIELD_TABLE_NAME
+        self.assertEqual(manifest["yield_table"]["source_path"], str(self.yield_table))
+        self.assertEqual(manifest["yield_table"]["run_local_path"], str(run_table))
+        self.assertEqual(run_table.read_bytes(), self.yield_table.read_bytes())
         for stage in ("stage1", "stage2"):
             values = manifest["effective_namelists"][stage]["assignments"]
             self.assertNotIn("nboundary", values)
             for key, expected in PREPARE_MODULE.STELLAR_ENRICHMENT_POLICY.items():
                 self.assertEqual(values[key], [expected])
+            self.assertEqual(values["yieldtablefilename"], [f"'{run_table}'"])
         result = self.command("launch-check", str(self.run_dir), "--binary", str(self.binary),
                               "--manifest-sha256", self.manifest_hash())
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -98,17 +106,39 @@ class TwoPhasePreflightTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("hash mismatch", result.stdout)
 
+    def test_prepare_rejects_missing_yield_table(self) -> None:
+        self.yield_table.unlink()
+        result = self.prepare()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--yield-table-source must be a readable regular file", result.stdout)
+        self.assertFalse(self.run_dir.exists())
+
+    def test_launch_rejects_tampered_run_local_yield_table(self) -> None:
+        self.assertEqual(self.prepare().returncode, 0)
+        (self.run_dir / PREPARE_MODULE.YIELD_TABLE_NAME).write_text(
+            "tampered\n", encoding="utf-8"
+        )
+        result = self.command("launch-check", str(self.run_dir), "--binary", str(self.binary),
+                              "--manifest-sha256", self.manifest_hash())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("prepared input hash mismatch", result.stdout)
+
     def test_render_rejects_inactive_enrichment_policy_drift(self) -> None:
         template = (HERE / "smoke.nml.in").read_text(encoding="utf-8")
         drifted = template.replace("use_snii=.false.", "use_snii=.true.")
         with self.assertRaisesRegex(SystemExit, "use_snii"):
-            PREPARE_MODULE.render(drifted, 0, 1)
+            PREPARE_MODULE.render(drifted, 0, 1, Path("/tmp/yield_table.asc"))
 
     def test_render_rejects_physical_boundary_block(self) -> None:
         template = (HERE / "smoke.nml.in").read_text(encoding="utf-8")
         drifted = template + "\n&BOUNDARY_PARAMS\nnboundary=6\n/\n"
         with self.assertRaisesRegex(SystemExit, "BOUNDARY_PARAMS must be absent"):
-            PREPARE_MODULE.render(drifted, 0, 1)
+            PREPARE_MODULE.render(drifted, 0, 1, Path("/tmp/yield_table.asc"))
+
+    def test_render_rejects_overlong_yield_table_path(self) -> None:
+        template = (HERE / "smoke.nml.in").read_text(encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "exceeds Fortran character"):
+            PREPARE_MODULE.render(template, 0, 1, Path("/tmp/" + "x" * 200))
 
     def test_malformed_manifest_fails_cleanly(self) -> None:
         self.assertEqual(self.prepare().returncode, 0)

@@ -19,6 +19,7 @@ ROOT = HERE.parents[2]
 TEMPLATE = HERE / "smoke.nml.in"
 LEDGER_NAME = "smbh_capture_ledger_v2.jsonl"
 MANIFEST_NAME = "preflight_manifest.json"
+YIELD_TABLE_NAME = "yield_table.asc"
 POLICY = {
     "noutput": "1",
     "tout": "1.0d100",
@@ -139,7 +140,7 @@ def assignments(text: str) -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     for raw in text.splitlines():
         line = raw.split("!", 1)[0]
-        match = re.match(r"\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*([^/]*)", line)
+        match = re.match(r"\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$", line)
         if match:
             value = match.group(2).strip().rstrip(",").strip()
             found.setdefault(match.group(1).lower(), []).append(value)
@@ -160,8 +161,15 @@ def assert_periodic_boundary(text: str, context: str) -> None:
         fail(f"{context}: BOUNDARY_PARAMS must be absent for the periodic fixture")
 
 
-def render(template: str, restart: int, steps: int) -> str:
-    text = template.replace("__NRESTART__", str(restart)).replace("__NSTEPMAX__", str(steps))
+def render(template: str, restart: int, steps: int, yield_table: Path) -> str:
+    yield_table_text = str(yield_table)
+    if len(yield_table_text) > 200:
+        fail("run-local yield-table path exceeds Fortran character(len=200)")
+    if "'" in yield_table_text:
+        fail("run-local yield-table path cannot contain a single quote")
+    text = (template.replace("__NRESTART__", str(restart))
+            .replace("__NSTEPMAX__", str(steps))
+            .replace("__YIELD_TABLE__", yield_table_text))
     if "__" in text:
         fail("unresolved template token")
     values = assignments(text)
@@ -180,10 +188,12 @@ def render(template: str, restart: int, steps: int) -> str:
     assert_one(values, "smbh_capture_ledger_file", f"'{LEDGER_NAME}'")
     assert_one(values, "vrel_merge", ".false.")
     assert_one(values, "nsinkmax", "5")
+    assert_one(values, "yieldtablefilename", f"'{yield_table_text}'")
     return text
 
 
-def validate_written_namelist(path: Path, restart: int, steps: int) -> None:
+def validate_written_namelist(path: Path, restart: int, steps: int,
+                              yield_table: Path) -> None:
     text = path.read_text(encoding="utf-8")
     values = assignments(text)
     assert_one(values, "nrestart", str(restart))
@@ -201,6 +211,7 @@ def validate_written_namelist(path: Path, restart: int, steps: int) -> None:
     assert_one(values, "smbh_capture_ledger_file", f"'{LEDGER_NAME}'")
     assert_one(values, "vrel_merge", ".false.")
     assert_one(values, "nsinkmax", "5")
+    assert_one(values, "yieldtablefilename", f"'{yield_table}'")
 
 
 def validate_fixture_geometry() -> None:
@@ -238,6 +249,10 @@ def prepare(args: argparse.Namespace) -> None:
         binary.relative_to(source_tree)
     except ValueError:
         fail(f"binary must be inside the validated source worktree: {source_tree}")
+    yield_table_source = args.yield_table_source.resolve(strict=False)
+    if (args.yield_table_source.is_symlink() or not yield_table_source.is_file() or
+            not os.access(yield_table_source, os.R_OK)):
+        fail(f"--yield-table-source must be a readable regular file, not a symlink: {args.yield_table_source}")
     expected_outputs = 2
     required = args.bytes_per_output * expected_outputs + args.reserve_bytes
     usage = shutil.disk_usage(run_dir.parent)
@@ -247,6 +262,7 @@ def prepare(args: argparse.Namespace) -> None:
     print("effective_run_policy=cosmo=.false. hydro=.true. pic=.true. poisson=.true. sink=.true.")
     print("effective_boundary_policy=periodic (BOUNDARY_PARAMS absent; nboundary=0 default)")
     print("effective_stellar_enrichment_policy=legacy compatibility mode; all elements and channels disabled; legacy prompt SNIa disabled")
+    print("yield_table_role=required sink-initialization compatibility input; no chemistry or feedback activation is claimed")
     print("effective_output_policy=noutput=1 tout=1.0d100 foutput=1 fbackup=1000000")
     print("scheduled_times=tout=1.0d100; scheduled_scale_factors=none")
     print("periodic_outputs=foutput=1; backups=fbackup=1000000")
@@ -268,21 +284,23 @@ def prepare(args: argparse.Namespace) -> None:
         fail(f"insufficient space: need {required} bytes including reserve")
     validate_fixture_geometry()
     template = TEMPLATE.read_text(encoding="utf-8")
-    stage1 = render(template, 0, 1)
-    stage2 = render(template, 1, 2)
+    yield_table = run_dir / YIELD_TABLE_NAME
+    stage1 = render(template, 0, 1, yield_table)
+    stage2 = render(template, 1, 2, yield_table)
     run_dir.mkdir(parents=False)
     (run_dir / "stage1.nml").write_text(stage1, encoding="utf-8")
     (run_dir / "stage2.nml").write_text(stage2, encoding="utf-8")
     shutil.copy2(HERE / "ic_sink", run_dir / "ic_sink")
+    shutil.copy2(yield_table_source, yield_table)
     # Audit the actual files that RAMSES will consume, not just the template.
-    validate_written_namelist(run_dir / "stage1.nml", 0, 1)
-    validate_written_namelist(run_dir / "stage2.nml", 1, 2)
+    validate_written_namelist(run_dir / "stage1.nml", 0, 1, yield_table)
+    validate_written_namelist(run_dir / "stage2.nml", 1, 2, yield_table)
     files = {}
-    for name in ("stage1.nml", "stage2.nml", "ic_sink"):
+    for name in ("stage1.nml", "stage2.nml", "ic_sink", YIELD_TABLE_NAME):
         path = run_dir / name
         files[name] = {"sha256": sha256(path), "bytes": path.stat().st_size}
     manifest = {
-        "schema": 1,
+        "schema": 2,
         "run_class": "short evolution test (synthetic capture/restart)",
         "run_dir": str(run_dir),
         "expected_source_commit": args.expected_source_commit,
@@ -294,6 +312,13 @@ def prepare(args: argparse.Namespace) -> None:
         "run_policy": RUN_POLICY,
         "boundary_policy": BOUNDARY_POLICY,
         "stellar_enrichment_policy": STELLAR_ENRICHMENT_POLICY,
+        "yield_table": {
+            "role": "sink-initialization compatibility input; chemistry and feedback remain disabled",
+            "source_path": str(yield_table_source),
+            "run_local_path": str(yield_table),
+            "sha256": files[YIELD_TABLE_NAME]["sha256"],
+            "bytes": files[YIELD_TABLE_NAME]["bytes"],
+        },
         "expected_outputs": ["output_00001", "output_00002"],
         "bytes_per_output": args.bytes_per_output,
         "total_expected_output_bytes": args.bytes_per_output * expected_outputs,
@@ -336,7 +361,7 @@ def launch_check(args: argparse.Namespace) -> None:
         fail(f"cannot read valid prepared manifest: {error}")
     if not isinstance(manifest, dict):
         fail("prepared manifest root must be an object")
-    if manifest.get("schema") != 1 or manifest.get("run_dir") != str(run_dir):
+    if manifest.get("schema") != 2 or manifest.get("run_dir") != str(run_dir):
         fail("manifest schema or absolute run directory mismatch")
     if (manifest.get("output_policy") != POLICY or
             manifest.get("run_policy") != RUN_POLICY or
@@ -356,15 +381,22 @@ def launch_check(args: argparse.Namespace) -> None:
     if not isinstance(prepared_files, dict):
         fail("manifest prepared-file map is missing or malformed")
     for name, expected in prepared_files.items():
-        if name not in {"stage1.nml", "stage2.nml", "ic_sink"} or not isinstance(expected, dict):
+        if name not in {"stage1.nml", "stage2.nml", "ic_sink", YIELD_TABLE_NAME} or not isinstance(expected, dict):
             fail("manifest prepared-file entry is invalid")
         path = run_dir / name
         if path.is_symlink() or not path.is_file() or sha256(path) != expected.get("sha256"):
             fail(f"prepared input hash mismatch: {path}")
-    if set(prepared_files) != {"stage1.nml", "stage2.nml", "ic_sink"}:
+    if set(prepared_files) != {"stage1.nml", "stage2.nml", "ic_sink", YIELD_TABLE_NAME}:
         fail("manifest prepared-file set is invalid")
-    validate_written_namelist(run_dir / "stage1.nml", 0, 1)
-    validate_written_namelist(run_dir / "stage2.nml", 1, 2)
+    yield_table = run_dir / YIELD_TABLE_NAME
+    yield_identity = manifest.get("yield_table")
+    if (not isinstance(yield_identity, dict) or
+            yield_identity.get("run_local_path") != str(yield_table) or
+            yield_identity.get("sha256") != prepared_files[YIELD_TABLE_NAME].get("sha256") or
+            yield_identity.get("bytes") != prepared_files[YIELD_TABLE_NAME].get("bytes")):
+        fail("manifest yield-table identity is missing or malformed")
+    validate_written_namelist(run_dir / "stage1.nml", 0, 1, yield_table)
+    validate_written_namelist(run_dir / "stage2.nml", 1, 2, yield_table)
     binary = args.binary.resolve()
     expected_binary = manifest.get("binary", {})
     if not isinstance(expected_binary, dict):
@@ -482,6 +514,7 @@ def main() -> None:
     prep.add_argument("--binary", type=Path, required=True)
     prep.add_argument("--expected-source-commit", required=True)
     prep.add_argument("--source-tree", type=Path, required=True)
+    prep.add_argument("--yield-table-source", type=Path, required=True)
     launch = sub.add_parser("launch-check")
     launch.add_argument("run_dir", type=Path)
     launch.add_argument("--binary", type=Path, required=True)

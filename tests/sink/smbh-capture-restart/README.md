@@ -17,13 +17,21 @@ unchanged.  The preflight rejects any added `BOUNDARY_PARAMS` block so a
 boundary-topology change cannot be mistaken for a capture-ledger test change.
 
 The workflow is deliberately two phase. `--prepare` is safe on a login node:
-it creates only two effective namelists, `ic_sink`, and a JSON audit manifest;
+it creates only two effective namelists, `ic_sink`, a run-local
+`yield_table.asc`, and a JSON audit manifest;
 it never builds or runs RAMSES. The run directory must not exist. `--execute`
 works only inside Slurm and only with that existing directory. It revalidates
 the exact input hashes and policies, clean source worktree and HEAD, binary path
 and SHA-256, pristine output state, and current free space before `srun`.
 Execution also requires the manifest SHA-256 printed by preparation, so the
 approved manifest cannot silently redefine its own hashes or space estimate.
+
+The required `--yield-table-source` is copied rather than referenced in place.
+Both effective namelists contain the exact absolute run-local path, and the
+copy's size and SHA-256 are sealed into the manifest and revalidated before
+launch. This table satisfies the current unconditional sink initialization
+open; all enrichment channels and AGN remain disabled, so its presence is not
+evidence that chemistry or feedback is active.
 
 The manifest records complete parsed stage-1/stage-2 namelists and absolute
 paths, the output schedule (`noutput=1`, no `aout`, `tout=1.0d100`,
@@ -86,10 +94,12 @@ build_tree=/home/kjhan/BACKUP/lagRamses-build-capture-smoke-COMMIT8
 commit=$(git -C "$build_tree" rev-parse HEAD)
 short_commit=$(git -C "$build_tree" rev-parse --short=8 HEAD)
 binary="$build_tree/bin/ramses_final3d"
+yield_table_source=/gpfs/kjhan/Run_JWST/opt_run/yield_table.asc
 run_dir=/home/kjhan/BACKUP/smbh-capture-restart-$short_commit
 "$build_tree/tests/sink/smbh-capture-restart/run_smoke.sh" \
   --prepare --run-dir "$run_dir" --binary "$binary" \
   --source-tree "$build_tree" --expected-source-commit "$commit" \
+  --yield-table-source "$yield_table_source" \
   --bytes-per-output 500000000
 python3 -m json.tool "$run_dir/preflight_manifest.json" | less
 manifest_sha256=$(sha256sum "$run_dir/preflight_manifest.json" | awk '{print $1}')
@@ -132,7 +142,8 @@ authorization to run a GPU workload manually.
 
 ## 4. Optional execution under Slurm
 
-Slurm may use `/scratch`, but it needs a distinct preparation there; a sealed
+Slurm may use `/scratch`, but it needs a distinct preparation there (including
+the same explicit `--yield-table-source` argument); a sealed
 manual `/home` manifest cannot be moved. On the Slurm login host where
 `/scratch/$USER` exists, invoke the same clean-worktree `--prepare` command with
 the unique `run_dir=/scratch/$USER/smbh-capture-restart-$short_commit-slurm`.

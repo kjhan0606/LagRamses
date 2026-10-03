@@ -4,7 +4,7 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
-  echo "prepare: $0 --prepare --run-dir NEW_DIR --binary RAMSES --source-tree CLEAN_TREE --expected-source-commit COMMIT --bytes-per-output BYTES [--reserve-bytes BYTES]" >&2
+  echo "prepare: $0 --prepare --run-dir NEW_DIR --binary RAMSES --source-tree CLEAN_TREE --expected-source-commit COMMIT --yield-table-source FILE --bytes-per-output BYTES [--reserve-bytes BYTES]" >&2
   echo "execute: $0 --execute --run-dir PREPARED_DIR --binary RAMSES --manifest-sha256 SHA256" >&2
   echo "manual:  $0 --manual-lageunha --run-dir PREPARED_DIR --binary RAMSES --manifest-sha256 SHA256" >&2
   exit 2
@@ -20,6 +20,7 @@ manual_lageunha=false
 expected_source_commit=
 source_tree=
 manifest_sha256=
+yield_table_source=
 while (($#)); do
   case "$1" in
     --run-dir) run_dir=${2:?}; shift 2 ;;
@@ -29,6 +30,7 @@ while (($#)); do
     --expected-source-commit) expected_source_commit=${2:?}; shift 2 ;;
     --source-tree) source_tree=${2:?}; shift 2 ;;
     --manifest-sha256) manifest_sha256=${2:?}; shift 2 ;;
+    --yield-table-source) yield_table_source=${2:?}; shift 2 ;;
     --prepare) prepare=true; shift ;;
     --execute) execute=true; shift ;;
     --manual-lageunha) manual_lageunha=true; shift ;;
@@ -45,10 +47,11 @@ mode_count=0
 binary=$(realpath -- "$binary")
 [[ -x $binary ]] || { echo "CAPTURE-RESTART: binary is not executable: $binary" >&2; exit 1; }
 if [[ $prepare == true ]]; then
-  [[ -n $bytes_per_output && -n $expected_source_commit && -n $source_tree ]] || usage
+  [[ -n $bytes_per_output && -n $expected_source_commit && -n $source_tree && -n $yield_table_source ]] || usage
   python3 "$here/prepare_and_validate.py" prepare "$run_dir" \
     --binary "$binary" --expected-source-commit "$expected_source_commit" \
     --source-tree "$source_tree" \
+    --yield-table-source "$yield_table_source" \
     --bytes-per-output "$bytes_per_output" --reserve-bytes "$reserve_bytes"
   exit 0
 fi
@@ -86,7 +89,8 @@ source_commit=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[
   echo 'source_status_begin'
   git -C "$source_root" status --porcelain --untracked-files=normal
   echo 'source_status_end'
-  sha256sum "$run_dir/stage1.nml" "$run_dir/stage2.nml" "$run_dir/ic_sink"
+  sha256sum "$run_dir/stage1.nml" "$run_dir/stage2.nml" "$run_dir/ic_sink" \
+    "$run_dir/yield_table.asc"
   sha256sum "$run_dir/preflight_manifest.json"
 } | tee "$run_dir/preflight_provenance.txt"
 
