@@ -3,8 +3,8 @@ subroutine backup_sink(filename)
   use pm_commons
   implicit none
 #ifndef WITHOUTMPI
-  include 'mpif.h'  
-#endif 
+  include 'mpif.h'
+#endif
 
   character(LEN=80)::filename
 
@@ -83,7 +83,7 @@ subroutine backup_sink(filename)
            xdp(i)=xsink(i,idim)
         end do
         write(ilun)xdp
-     enddo 
+     enddo
      ! Write velocity
      do idim=1,ndim
         do i=1,nsink
@@ -157,7 +157,7 @@ subroutine backup_sink(filename)
 
   endif
   if(allocated(stat_global))deallocate(stat_global)
-  
+
   ! Send the token
 #ifndef WITHOUTMPI
   if(IOGROUPSIZEOUT>0) then
@@ -168,7 +168,7 @@ subroutine backup_sink(filename)
      end if
   endif
 #endif
-  
+
 end subroutine backup_sink
 
 
@@ -190,15 +190,15 @@ subroutine output_sink(filename)
 
   ilun=myid+10
 
-  ! Conversion factor from user units to cgs units                                                                   
+  ! Conversion factor from user units to cgs units
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
   scale_m=scale_d*scale_l**3d0
   nx_loc=(icoarse_max-icoarse_min+1)
   scale=boxlen/dble(nx_loc)
   dx_min=scale*0.5D0**nlevelmax/aexp
-  
+
   if(verbose)write(*,*)'Entering output_sink'
-  
+
   ilun=2*ncpu+myid+10
 
   fileloc=TRIM(filename)
@@ -211,7 +211,7 @@ subroutine output_sink(filename)
   write(ilun,'(" ================================================================================================================================== ")')
   write(ilun,'("        Id       Mass(Msol)             x                y                z               vx               vy               vz      ")')
   write(ilun,'(" ================================================================================================================================== ")')
-  
+
   do isink=1,nsink
      write(ilun,'(I10,7(2X,E15.7))')idsink(isink),msink(isink)*scale_m/2d33,xsink(isink,1:ndim),vsink(isink,1:ndim)
   end do
