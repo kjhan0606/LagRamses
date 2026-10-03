@@ -1450,20 +1450,6 @@ subroutine merge_sink(ilevel)
      !end do
   endif
 
-  ! Record every member of each group before the irreversible COM
-  ! compaction below.  The ledger is diagnostic only: it does not alter
-  ! the existing FOF grouping or sink dynamics.
-  if(smbh .and. smbh_capture_ledger .and. new_sink < nsink) then
-     call write_smbh_capture_ledger(ilevel,new_sink,gsink,dx_min,scale, &
-          & xbound,factG)
-#ifndef WITHOUTMPI
-     ! Rank 1 performs the I/O.  Do not let any rank enter irreversible
-     ! compaction until the complete transaction has been flushed and closed.
-     call MPI_BARRIER(MPI_COMM_WORLD,info)
-#endif
-  endif
-
-
   !----------------------------------------------------
   ! Compute group centre of mass and average velocity
   !----------------------------------------------------
@@ -1483,6 +1469,21 @@ subroutine merge_sink(ilevel)
      if(myid==1)write(*,*) 'Invalid AGN pending energy/merger map before sink compaction'
      call clean_stop
   endif
+
+  ! This pending-energy validation must precede ledger I/O.  An invalid
+  ! pending map stops compaction, so it must not leave a complete-looking
+  ! capture event in the ledger.
+  ! Record every member before the irreversible COM compaction below.
+  if(smbh .and. smbh_capture_ledger .and. new_sink < nsink) then
+     call write_smbh_capture_ledger(ilevel,new_sink,gsink,dx_min,scale, &
+          & xbound,factG)
+#ifndef WITHOUTMPI
+     ! Rank 1 performs the I/O.  Do not let any rank enter irreversible
+     ! compaction until the complete transaction has been flushed and closed.
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+  endif
+
   xsink_new=0d0; vsink_new=0d0; msink_new=0d0; dMsmbh_new=0d0; Esave_new=0d0; idsink_new=0
   oksink_all=0d0; oksink_new=0d0; tsink_new=0d0
   rank_old=0; idsink_old=0d0; tsink_old=0d0
@@ -2208,14 +2209,20 @@ contains
        call ledger_group_fatal(0,'non-finite or invalid event metadata/units')
     endif
 
+    ! The subsequent compaction visits singleton groups too.  A zero-mass
+    ! singleton triggers its spin-merger STOP before sink state is committed,
+    ! so reject every invalid mass before any capture event is written.
+    do member=1,nsink
+       if(.not.ieee_is_finite(msink(member)) .or. msink(member) <= 0d0) then
+          call ledger_group_fatal(gsink(member),'non-positive or non-finite sink mass')
+       endif
+    enddo
+
     do group_index=1,ngrp
        if(count(gsink(1:nsink) == group_index) < 2) cycle
        group_mass=0d0
        do member=1,nsink
           if(gsink(member) /= group_index) cycle
-          if(.not.ieee_is_finite(msink(member)) .or. msink(member) <= 0d0) then
-             call ledger_group_fatal(group_index,'non-positive or non-finite member mass')
-          endif
           if(any(.not.ieee_is_finite(xsink(member,1:ndim))) .or. &
                & any(.not.ieee_is_finite(vsink(member,1:ndim)))) then
              call ledger_group_fatal(group_index,'non-finite member position or velocity')

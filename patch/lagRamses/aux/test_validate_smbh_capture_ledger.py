@@ -238,13 +238,34 @@ class LedgerValidationTests(unittest.TestCase):
         )[0]
         for required in (
             "do group_index=1,ngrp",
-            "non-positive or non-finite member mass",
+            "do member=1,nsink",
+            "non-positive or non-finite sink mass",
             "non-finite member position or velocity",
             "duplicate member sink ID",
             "invalid total mass",
             "invalid event metadata/units",
         ):
             self.assertIn(required, preflight)
+        self.assertLess(
+            preflight.index("do member=1,nsink"),
+            preflight.index("do group_index=1,ngrp"),
+        )
+
+    def test_pending_energy_gate_precedes_capture_write_and_compaction(self):
+        source = (Path(__file__).resolve().parents[1] / "sink_particle.kjhan.f90").read_text(
+            encoding="utf-8"
+        )
+        merge = source.split("subroutine merge_sink", 1)[1].split(
+            "end subroutine merge_sink", 1
+        )[0]
+        self.assertLess(
+            merge.index("if(pending_error/=0)"),
+            merge.index("call write_smbh_capture_ledger(ilevel,new_sink"),
+        )
+        self.assertLess(
+            merge.index("call write_smbh_capture_ledger(ilevel,new_sink"),
+            merge.index("xsink_new=0d0"),
+        )
 
     def validate_rows(self, rows: list[object], **kwargs):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -33,6 +33,10 @@ complete-looking event from the same call. This preflight does not make a
 filesystem append or subsequent sink compaction atomic: an I/O or process
 failure after a complete event still requires run/checkpoint provenance review
 before that event is treated as a completed numerical merge.
+It rejects invalid masses for singleton groups as well, since those groups
+also pass through the downstream compaction loop.
+The AGN pending-energy/merger-map check also runs before ledger I/O; failure
+there cannot leave a complete event for a compaction that never starts.
 
 ## Transaction layout
 
