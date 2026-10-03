@@ -1,0 +1,4 @@
+! mass_code, centered x/y/z, vx/vy/vz, gas angular momentum x/y/z, unused BH mass, drag fraction
+1.0d-7 -0.006d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
+1.0d-7  0.000d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
+1.0d-7  0.006d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
