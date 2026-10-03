@@ -19,12 +19,13 @@ ledger path; a fresh run refuses to append to a nonempty ledger. A restart
 requires its earlier ledger at the same path. Provenance also remains tied to
 the RAMSES output directory and its `info`/build metadata.
 
-The writer is invoked only when `smbh = .true.`.  In other sink modes the
-ledger controls are ignored.  When enabled for an SMBH run, failure to open,
-write, flush, or close the ledger is fatal: RAMSES calls `clean_stop` before
-any rank enters the irreversible sink-compaction section.  A partially
-written tail from that failed run remains invalid and must not be consumed as
-a capture event.
+The writer is invoked only when `smbh = .true.`. In other sink modes the
+ledger controls are ignored. When enabled for an SMBH run, failure to open,
+write, flush, or close the ledger is fatal. Preflight and event-write failures
+call `clean_stop` before irreversible sink compaction. A batch-commit failure
+occurs after compaction and stops the run before it can proceed or publish
+that batch as committed. A partially written tail remains invalid and must
+not be consumed as a capture event.
 
 ## Transaction layout
 
@@ -104,3 +105,33 @@ The last Bondi context is a local scalar diagnostic, not the stellar/gas/FDM
 radial profile needed by the delay model.  Profile extraction and host/galaxy
 provenance are separate, non-destructive follow-up products keyed by the sink
 IDs and capture time.
+
+## Bounded two-format runtime checks (2026-10-04)
+
+A clean, serial, non-HDF5 build completed in Slurm job 411889. A separate
+two-rank uniform-gas run and original-format restart completed in job 411891.
+The final ledger validated with one active `MULTIPLE` event (three members,
+three pairs), one active committed batch, one superseded batch/event, and two
+attempts. The fresh and replayed event rows were identical. The synthetic
+fixture passed its static hydro roundoff and native unit/conservation gates;
+FDM_TOY's strict capture reader independently recovered the same three
+members and pairs and verified native conservation. Logs, namelists, ledger,
+validation summaries and build identity are retained at
+`/gpfs/kjhan/capture_ledger_native_smoke_411891/`. The evaluated raw
+`output_00001` snapshot was removed; `cleanup_manifest.json` records the
+irreversible cleanup and retained evidence.
+
+A clean HDF5+SNRT build completed in job 411892, followed by a separate
+two-rank HDF5 output/restore and replay in job 411893. The HDF5 smoke had
+the same capture-ledger SHA-256 as the original-format smoke. Both reported
+one active `MULTIPLE` event, three original members and pairs, two attempts,
+and one superseded batch/event. HDF5 restore occurred; hydro replay was not
+bitwise identical but passed the bounded roundoff tolerance. FDM_TOY's
+strict reader also verified the HDF5-run ledger. Retained evidence is at
+`/gpfs/kjhan/capture_ledger_hdf5_smoke_411893/`; its evaluated raw snapshot
+was removed and recorded in `cleanup_manifest.json`.
+
+These are structural synthetic tests, not astrophysical calibration or proof
+of every runtime configuration. An HDF5 build with SNRT disabled failed at
+link on unrelated dust/SNRT symbols; the tested HDF5 build enabled SNRT but
+kept radiation transport inactive in the namelist.

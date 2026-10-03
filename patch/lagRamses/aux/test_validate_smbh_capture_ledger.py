@@ -263,10 +263,13 @@ class LedgerValidationTests(unittest.TestCase):
         report = self.validate_rows(rows)
         self.assertTrue(report.valid, report.errors)
         self.assertEqual(report.unique_events, 1)
+        self.assertEqual(report.as_dict()["committed_batches"], 1)
+        self.assertEqual(report.as_dict()["run_attempts"], 1)
         incomplete = self.validate_rows(rows[:-1], allow_incomplete_tail=True)
         self.assertTrue(incomplete.valid, incomplete.errors)
         self.assertEqual(incomplete.unique_events, 0)
         self.assertEqual(incomplete.censored_batches, 1)
+        self.assertEqual(incomplete.as_dict()["incomplete_batches"], 1)
         self.assertFalse(self.validate_rows(rows[:-1]).valid)
         missing_extent = copy.deepcopy(rows)
         missing_extent[2].pop("periodic_box_size_code")
@@ -285,10 +288,16 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertTrue(report.valid, report.errors)
         self.assertEqual(report.unique_events, 1)
         self.assertEqual(report.binary_events, 1)
+        self.assertEqual(report.as_dict()["run_attempts"], 2)
+        self.assertEqual(report.as_dict()["committed_batches"], 1)
+        self.assertEqual(report.as_dict()["superseded_batches"], 1)
+        self.assertEqual(report.as_dict()["superseded_events"], 1)
         rows = [attempt, *batch_rows(), checkpoint, restart, *batch_rows(step=11)]
         report = self.validate_rows(rows)
         self.assertTrue(report.valid, report.errors)
         self.assertEqual(report.unique_events, 2)
+        self.assertEqual(report.as_dict()["committed_batches"], 2)
+        self.assertEqual(report.as_dict()["superseded_batches"], 0)
 
     def test_interrupted_batch_is_censored_only_by_valid_restart(self):
         attempt = {"schema_version": 1, "record_type": "attempt_begin",

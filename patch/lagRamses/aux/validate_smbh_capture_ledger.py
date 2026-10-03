@@ -50,8 +50,14 @@ class LedgerReport:
     multiple_events: int = 0
     duplicate_events: int = 0
     incomplete_events: int = 0
+    censored_events: int = 0
     censored_batches: int = 0
+    incomplete_batches: int = 0
     invalid_json_lines: int = 0
+    committed_batches: int = 0
+    run_attempts: int = 0
+    superseded_batches: int = 0
+    superseded_events: int = 0
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -67,8 +73,14 @@ class LedgerReport:
             "multiple_events": self.multiple_events,
             "duplicate_events": self.duplicate_events,
             "incomplete_events": self.incomplete_events,
+            "censored_events": self.censored_events,
             "censored_batches": self.censored_batches,
+            "incomplete_batches": self.incomplete_batches,
             "invalid_json_lines": self.invalid_json_lines,
+            "committed_batches": self.committed_batches,
+            "run_attempts": self.run_attempts,
+            "superseded_batches": self.superseded_batches,
+            "superseded_events": self.superseded_events,
             "errors": self.errors,
         }
 
@@ -568,6 +580,8 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
             if record_type == "attempt_begin":
                 if current is not None:
                     report.incomplete_events += 1
+                    if batch is not None:
+                        report.censored_events += 1
                     if batch is None:
                         report.errors.append(f"{current.uid}: missing event_end")
                     current = None
@@ -718,10 +732,13 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
         report.errors.append("corrupt batch tail has no restart attempt")
     if current is not None:
         report.incomplete_events += 1
+        if batch is not None:
+            report.censored_events += 1
         if not allow_incomplete_tail:
             report.errors.append(f"{current.uid}: incomplete event at end of ledger")
     if batch is not None:
         report.censored_batches += 1
+        report.incomplete_batches += 1
         if not allow_incomplete_tail:
             report.errors.append(f"{batch.uid}: incomplete batch at end of ledger")
 
@@ -736,14 +753,20 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
             active_cutoffs[index] = cutoff
             _, index, cutoff = attempts[index]
 
+    report.run_attempts = len(attempts)
     for begin, digest in legacy:
         accept(begin, digest)
     for batch_index, (owner, committed_batch, digest) in enumerate(committed):
         if owner not in active_cutoffs:
+            report.superseded_batches += 1
+            report.superseded_events += len(committed_batch.events)
             continue
         cutoff = active_cutoffs[owner]
         if cutoff is not None and batch_index >= cutoff:
+            report.superseded_batches += 1
+            report.superseded_events += len(committed_batch.events)
             continue
+        report.committed_batches += 1
         previous = batch_digests.get(committed_batch.uid)
         if previous is not None and previous != digest:
             report.errors.append(f"{committed_batch.uid}: conflicting deterministic batch UID")
