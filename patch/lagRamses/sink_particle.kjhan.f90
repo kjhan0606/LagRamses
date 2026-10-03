@@ -1912,6 +1912,36 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   redshift=0d0
   if(aexp > 0d0) redshift=1d0/aexp-1d0
 
+  ! Check every group before appending any event.  A warning followed by
+  ! CYCLE would let merge_sink compact a group without a capture record;
+  ! checking all groups first also avoids a valid-looking prefix if a later
+  ! group has invalid state.
+  if(.not.ieee_is_finite(factG) .or. factG <= 0d0 .or. &
+       & .not.ieee_is_finite(dx_min) .or. dx_min <= 0d0 .or. &
+       & .not.ieee_is_finite(scale) .or. scale <= 0d0) then
+     call ledger_state_fatal('invalid capture geometry or gravity',0)
+  endif
+  do idim=1,ndim
+     if(.not.ieee_is_finite(xbound(idim)) .or. xbound(idim) <= 0d0) &
+          & call ledger_state_fatal('invalid periodic box',0)
+  enddo
+  do igrp=1,ngrp
+     nmember=count(gsink(1:nsink) == igrp)
+     if(nmember < 2) cycle
+     total_mass=0d0
+     do isink=1,nsink
+        if(gsink(isink) /= igrp) cycle
+        if(.not.ieee_is_finite(msink(isink)) .or. msink(isink) <= 0d0) &
+             & call ledger_state_fatal('invalid member mass',igrp)
+        if(any(.not.ieee_is_finite(xsink(isink,1:ndim))) .or. &
+             & any(.not.ieee_is_finite(vsink(isink,1:ndim)))) &
+             & call ledger_state_fatal('invalid member position or velocity',igrp)
+        total_mass=total_mass+msink(isink)
+     enddo
+     if(.not.ieee_is_finite(total_mass) .or. total_mass <= 0d0) &
+          & call ledger_state_fatal('invalid group total mass',igrp)
+  enddo
+
   iomsg=''
   open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file), &
        & status='unknown',position='append',action='write', &
@@ -1947,11 +1977,9 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         total_mass=total_mass+msink(isink)
      enddo
 
-     if(total_mass <= 0d0 .or. anchor == 0 .or. primary_index == 0) then
-        write(*,'(A,I0,A,I0)') 'WARNING: invalid SMBH capture group ',igrp, &
-             & ' at coarse step ',nstep_coarse
-        cycle
-     endif
+     if(.not.ieee_is_finite(total_mass) .or. total_mass <= 0d0 .or. &
+          & anchor == 0 .or. primary_index == 0) &
+          & call ledger_state_fatal('invalid capture group after preflight',igrp)
      primary_sink_id=idsink(primary_index)
 
      do isink=1,nsink
@@ -2174,6 +2202,18 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   if(ios /= 0) call ledger_io_fatal('close','',ios,iomsg)
 
 contains
+
+  subroutine ledger_state_fatal(reason,group_index)
+    character(len=*),intent(in)::reason
+    integer,intent(in)::group_index
+    integer::log_ios
+
+    write(error_unit,'(A,1X,A,1X,A,I0,1X,A,I0)') &
+         & 'FATAL: SMBH capture ledger cannot record group:',trim(reason), &
+         & 'group=',group_index,'coarse_step=',nstep_coarse
+    flush(error_unit,iostat=log_ios)
+    call clean_stop
+  end subroutine ledger_state_fatal
 
   subroutine ledger_io_fatal(operation,uid,status,message)
     character(len=*),intent(in)::operation,uid,message
