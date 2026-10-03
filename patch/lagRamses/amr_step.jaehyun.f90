@@ -1273,18 +1273,23 @@ end subroutine amr_step
 subroutine capture_restart_probe(stage,ilevel)
   use amr_commons
   use pm_commons
+#include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   character(len=*),intent(in)::stage
   integer,intent(in)::ilevel
-  integer::igrid,jgrid,jpart,jrecv,ipart,icpu,nowned,nowned_all,info
+  integer::igrid,jgrid,jpart,jrecv,ipart,icpu,idim,ind,nowned,nowned_all,info
   integer::nactive,nactive_all,nreception,nreception_all,nremote,nremote_all
   integer::nfree_active,nfree_active_all,norphan,norphan_all
   integer::nother_grid,nother_grid_all
-  integer::nnew_grid_cloud
-  real(dp)::sumx,sumx_all,stat,stat_all
+  integer::nnew_grid_cloud,ninside,nrefined
+  integer::ilevel_scan,icpu_scan,igrid_scan,jgrid_scan
+  integer::grid_level,grid_cpu,grid_memberships
+  real(dp)::sumx,sumx_all,stat,stat_all,dx,scale,coord
+  real(dp),dimension(1:3)::skip_loc
+  logical::inside
   logical,allocatable::seen_tree(:),seen_free(:)
 
   if(.not.sink.or.nsink/=1.or.nstep_coarse>4)return
@@ -1296,6 +1301,12 @@ subroutine capture_restart_probe(stage,ilevel)
   norphan=0
   nother_grid=0
   sumx=0d0
+  dx=0.5d0**(ilevel-1)
+  scale=boxlen/dble(icoarse_max-icoarse_min+1)
+  skip_loc=0d0
+  if(ndim>0)skip_loc(1)=dble(icoarse_min)
+  if(ndim>1)skip_loc(2)=dble(jcoarse_min)
+  if(ndim>2)skip_loc(3)=dble(kcoarse_min)
   allocate(seen_tree(npartmax),seen_free(npartmax))
   seen_tree=.false.
   seen_free=.false.
@@ -1368,6 +1379,8 @@ subroutine capture_restart_probe(stage,ilevel)
   do igrid=1,ngridmax
      if(numbp(igrid)<=0)cycle
      nnew_grid_cloud=0
+     ninside=0
+     nrefined=0
      ipart=headp(igrid)
      do jpart=1,numbp(igrid)
         if(ipart<1.or.ipart>npartmax)then
@@ -1382,14 +1395,47 @@ subroutine capture_restart_probe(stage,ilevel)
            if(ptypep(ipart)==PTYPE_SINK)then
               nother_grid=nother_grid+1
               nnew_grid_cloud=nnew_grid_cloud+1
+              inside=.true.
+              ind=1
+              do idim=1,ndim
+                 coord=xp(ipart,idim)/scale+skip_loc(idim)
+                 inside=inside.and.coord>=xg(igrid,idim)-dx.and. &
+                      coord<xg(igrid,idim)+dx
+                 if(coord>=xg(igrid,idim))ind=ind+2**(idim-1)
+              enddo
+              if(inside)then
+                 ninside=ninside+1
+                 if(son(ICELL_OF(igrid,ind))>0)nrefined=nrefined+1
+              endif
            endif
            seen_tree(ipart)=.true.
         endif
         ipart=nextp(ipart)
      enddo
      if(nnew_grid_cloud>0)then
+        grid_level=0
+        grid_cpu=0
+        grid_memberships=0
+        do ilevel_scan=1,nlevelmax
+           do icpu_scan=1,ncpu
+              igrid_scan=headl(icpu_scan,ilevel_scan)
+              do jgrid_scan=1,numbl(icpu_scan,ilevel_scan)
+                 if(igrid_scan==igrid)then
+                    grid_level=ilevel_scan
+                    grid_cpu=icpu_scan
+                    grid_memberships=grid_memberships+1
+                 endif
+                 igrid_scan=next(igrid_scan)
+              enddo
+           enddo
+        enddo
+        if(grid_level/=ilevel-1)then
+           ninside=-1
+           nrefined=-1
+        endif
         write(*,*)'CAPTURE_RESTART_OTHER_GRID_DETAIL',trim(stage),nstep_coarse,myid, &
-             igrid,nnew_grid_cloud,numbp(igrid),father(igrid),xg(igrid,1:ndim)
+             igrid,nnew_grid_cloud,numbp(igrid),father(igrid), &
+             grid_level,grid_cpu,grid_memberships,ninside,nrefined,xg(igrid,1:ndim)
      endif
   enddo
   ipart=headp_free

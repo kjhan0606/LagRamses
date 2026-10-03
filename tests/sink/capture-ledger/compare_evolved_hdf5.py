@@ -19,6 +19,33 @@ def datasets(handle):
     return result
 
 
+def particle_rows_equal(reference, replay):
+    """Compare particle records, not rank-local slot order in the HDF5 file."""
+    names = sorted(name for name in reference["/particles"] if name != "npart_per_cpu")
+    if names != sorted(name for name in replay["/particles"] if name != "npart_per_cpu"):
+        return False
+    if not names:
+        return False
+    dtype = np.dtype([(f"field_{i}", reference["/particles"][name].dtype)
+                      for i, name in enumerate(names)])
+    count = reference["/particles"][names[0]].size
+    if count != replay["/particles"][names[0]].size:
+        return False
+    original = np.empty(count, dtype=dtype)
+    resumed = np.empty(count, dtype=dtype)
+    for i, name in enumerate(names):
+        left = reference["/particles"][name][...]
+        right = replay["/particles"][name][...]
+        if left.shape != (count,) or right.shape != (count,) or left.dtype != right.dtype:
+            return False
+        original[f"field_{i}"] = left
+        resumed[f"field_{i}"] = right
+    order = dtype.names
+    original.sort(order=order)
+    resumed.sort(order=order)
+    return bool(np.array_equal(original, resumed))
+
+
 def main(reference_path, replay_path):
     with h5py.File(reference_path) as reference, h5py.File(replay_path) as replay:
         reference_sets = datasets(reference)
@@ -86,19 +113,22 @@ def main(reference_path, replay_path):
                 "replay": right.tolist(),
                 "exact": bool(np.array_equal(left, right)),
             }
+        particle_records_exact = particle_rows_equal(reference, replay)
 
     report = {
         "reference": reference_path,
         "replay": replay_path,
         "dataset_count": len(reference_sets),
         "all_datasets_exact": all(item["unequal_datasets"] == 0 for item in groups.values()),
+        "particle_records_exact": particle_records_exact,
+        "sink_values_finite": groups["sinks"]["nonfinite_values"] == 0,
         "active_state_exact": all(
             groups[group]["unequal_datasets"] == 0
             for group in ("hydro", "gravity", "sinks")
-        ),
+        ) and particle_records_exact and all(item["exact"] for item in header.values()),
         "groups": groups,
         "header": header,
-        "interpretation": "Exact active-state replay is a strict regression check, not a physical calibration claim.",
+        "interpretation": "Particle records ignore output slot order. Active-state exactness permits matching sink NaN masks; sink_values_finite must be checked separately. Only three selected header attributes are compared. This is a replay check, not a physical calibration claim.",
     }
     print(json.dumps(report, indent=2, sort_keys=True))
 

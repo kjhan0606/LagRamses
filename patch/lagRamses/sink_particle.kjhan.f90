@@ -98,8 +98,11 @@ subroutine create_sink
   t_stage=omp_get_wtime()
   do ilevel=1,nlevelmax
      call make_tree_fine(ilevel)
-     call kill_tree_fine(ilevel)
      call virtual_tree_fine(ilevel)
+     ! Newly received particles must be present on the owning rank before
+     ! sorting into refined children. Otherwise cross-rank clouds delivered
+     ! at this level remain on a parent grid until a restart rebuilds the tree.
+     call kill_tree_fine(ilevel)
   end do
   t_tree_rebuild=t_tree_rebuild+omp_get_wtime()-t_stage
 

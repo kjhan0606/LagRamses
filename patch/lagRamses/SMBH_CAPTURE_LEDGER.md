@@ -56,6 +56,22 @@ the same coarse-step number.
 The named output directory and its `COMPLETE` marker must also be checked
 against the run's on-disk provenance before production use.
 
+The cloud-particle tree must be settled before a checkpoint: in `create_sink`,
+cross-rank transfer now precedes descent to the next AMR level, so particles
+arriving on an owning rank are not stranded on a refined parent grid. HDF5
+checkpoints store the global sink-cloud statistic on rank 1 only for MPI
+reduction after restart. The legacy binary sink file now does the same and
+ends with integer schema marker `20261003`. Older multi-rank legacy files
+stored only rank 1's local statistic, so a sink restart from them
+is rejected rather than silently using an incomplete or duplicated global
+value; one-rank old files remain readable. This checkpoint schema concerns
+restart physics, not the version-1 JSONL event format.
+
+The legacy sink-file path has not been validated with
+`IOGROUPSIZEREP>0`: the writer produces one file while grouped readers
+select separate group paths. Do not use grouped legacy sink restart until
+that path has an explicit passing regression.
+
 Each new merge call writes `batch_begin`, then contiguous event transactions,
 then `batch_commit` after compaction. The begin row records coarse step,
 level, sink counts before/after, and expected event count; the commit row

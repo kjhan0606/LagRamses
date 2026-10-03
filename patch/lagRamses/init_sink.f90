@@ -1,5 +1,5 @@
 ! Project-local override of patch/cuRamses/init_sink.f90: initialize the
-! accepted AGN reservoirs (persisted in HDF5; legacy binary layout unchanged).
+! accepted AGN reservoirs and versioned legacy sink-stat restoration.
 subroutine init_sink
   use amr_commons
   use pm_commons
@@ -10,7 +10,7 @@ subroutine init_sink
   include 'mpif.h'
 #endif
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
-  integer::idim,ilevel
+  integer::idim,ilevel,sink_stat_schema_read,sink_stat_schema_ios
   integer::i,isink
   integer::ilun,nx_loc
   integer::nsinkold
@@ -24,6 +24,7 @@ subroutine init_sink
   character(LEN=5)::nchar,ncharcpu
 
   integer,parameter::tag=1112,tag2=1113
+  integer,parameter::sink_stat_global_schema=20261003
   integer::dummy_io,info2
   integer::ic_status,ic_extra_status,ic_line,ic_owner(nvector),ic_part
   real(dp)::ic_row(12),ic_position(nvector,ndim)
@@ -98,6 +99,8 @@ subroutine init_sink
   allocate(Esave_all      (1:nsinkmax))
   allocate(sink_stat      (1:nsinkmax,levelmin:nlevelmax,1:ndim*2+1))
   allocate(sink_stat_all  (1:nsinkmax,levelmin:nlevelmax,1:ndim*2+1))
+  sink_stat=0d0
+  sink_stat_all=0d0
   allocate(v_avgptr(1:nsinkmax))
   allocate(c_avgptr(1:nsinkmax))
   allocate(d_avgptr(1:nsinkmax))
@@ -190,6 +193,38 @@ subroutine init_sink
         enddo
         deallocate(xdp)
      end if
+     read(ilun,iostat=sink_stat_schema_ios)sink_stat_schema_read
+     if(sink_stat_schema_ios==0)then
+        if(sink_stat_schema_read/=sink_stat_global_schema)then
+           write(*,*)'FATAL: unsupported legacy sink_stat schema',sink_stat_schema_read
+#ifndef WITHOUTMPI
+           call MPI_ABORT(MPI_COMM_WORLD,91,info2)
+#else
+           stop 91
+#endif
+        endif
+        ! New files store the global sum once. Only rank 1 contributes it
+        ! when later sink updates reduce rank-local statistics.
+        if(myid/=1)sink_stat=0d0
+     else if(sink_stat_schema_ios<0)then
+        ! Older files stored only rank 1's local value. Any multi-rank sink
+        ! restart cannot recover the missing ranks' cloud statistic.
+        if(ncpu>1.and.nsink>0)then
+           write(*,*)'FATAL: legacy sink_stat lacks global schema for multi-rank restart'
+#ifndef WITHOUTMPI
+           call MPI_ABORT(MPI_COMM_WORLD,92,info2)
+#else
+           stop 92
+#endif
+        endif
+     else
+        write(*,*)'FATAL: cannot read legacy sink_stat schema',sink_stat_schema_ios
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,93,info2)
+#else
+        stop 93
+#endif
+     endif
      close(ilun)
      ! Send the token
 #ifndef WITHOUTMPI
