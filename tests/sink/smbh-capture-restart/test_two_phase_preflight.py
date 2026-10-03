@@ -71,6 +71,14 @@ class TwoPhasePreflightTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         manifest = json.loads((self.run_dir / "preflight_manifest.json").read_text())
         self.assertEqual(manifest["expected_outputs"], ["output_00001", "output_00002"])
+        self.assertEqual(
+            manifest["stellar_enrichment_policy"],
+            PREPARE_MODULE.STELLAR_ENRICHMENT_POLICY,
+        )
+        for stage in ("stage1", "stage2"):
+            values = manifest["effective_namelists"][stage]["assignments"]
+            for key, expected in PREPARE_MODULE.STELLAR_ENRICHMENT_POLICY.items():
+                self.assertEqual(values[key], [expected])
         result = self.command("launch-check", str(self.run_dir), "--binary", str(self.binary),
                               "--manifest-sha256", self.manifest_hash())
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -87,6 +95,12 @@ class TwoPhasePreflightTest(unittest.TestCase):
                               "--manifest-sha256", self.manifest_hash())
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("hash mismatch", result.stdout)
+
+    def test_render_rejects_inactive_enrichment_policy_drift(self) -> None:
+        template = (HERE / "smoke.nml.in").read_text(encoding="utf-8")
+        drifted = template.replace("use_snii=.false.", "use_snii=.true.")
+        with self.assertRaisesRegex(SystemExit, "use_snii"):
+            PREPARE_MODULE.render(drifted, 0, 1)
 
     def test_malformed_manifest_fails_cleanly(self) -> None:
         self.assertEqual(self.prepare().returncode, 0)

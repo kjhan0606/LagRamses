@@ -106,6 +106,27 @@ g_star=1.0
 eps_star=1e-10
 /
 
+&STELLAR_ENRICHMENT_PARAMS
+feedback_mode='legacy'
+use_h=.false.
+use_he=.false.
+use_c=.false.
+use_n=.false.
+use_o=.false.
+use_ne=.false.
+use_mg=.false.
+use_si=.false.
+use_s=.false.
+use_ca=.false.
+use_fe=.false.
+use_wind=.false.
+use_agb=.false.
+use_snii=.false.
+use_snia=.false.
+use_pisn=.false.
+allow_legacy_prompt_snia=.false.
+/
+
 &SINK_PARAMS
 smbh=.true.
 agn=.false.

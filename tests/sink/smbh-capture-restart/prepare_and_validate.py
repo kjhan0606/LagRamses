@@ -32,6 +32,26 @@ RUN_POLICY = {
     "poisson": ".true.",
     "sink": ".true.",
 }
+STELLAR_ENRICHMENT_POLICY = {
+    "feedback_mode": "'legacy'",
+    "use_h": ".false.",
+    "use_he": ".false.",
+    "use_c": ".false.",
+    "use_n": ".false.",
+    "use_o": ".false.",
+    "use_ne": ".false.",
+    "use_mg": ".false.",
+    "use_si": ".false.",
+    "use_s": ".false.",
+    "use_ca": ".false.",
+    "use_fe": ".false.",
+    "use_wind": ".false.",
+    "use_agb": ".false.",
+    "use_snii": ".false.",
+    "use_snia": ".false.",
+    "use_pisn": ".false.",
+    "allow_legacy_prompt_snia": ".false.",
+}
 
 
 def fail(message: str) -> None:
@@ -139,6 +159,8 @@ def render(template: str, restart: int, steps: int) -> str:
         assert_one(values, key, expected)
     for key, expected in RUN_POLICY.items():
         assert_one(values, key, expected)
+    for key, expected in STELLAR_ENRICHMENT_POLICY.items():
+        assert_one(values, key, expected)
     if "aout" in values:
         fail(f"aout must be absent, found {values['aout']!r}")
     assert_one(values, "smbh_capture_ledger", ".true.")
@@ -156,6 +178,8 @@ def validate_written_namelist(path: Path, restart: int, steps: int) -> None:
     for key, expected in POLICY.items():
         assert_one(values, key, expected)
     for key, expected in RUN_POLICY.items():
+        assert_one(values, key, expected)
+    for key, expected in STELLAR_ENRICHMENT_POLICY.items():
         assert_one(values, key, expected)
     if "aout" in values:
         fail(f"{path}: aout must be absent, found {values['aout']!r}")
@@ -207,6 +231,7 @@ def prepare(args: argparse.Namespace) -> None:
     print(f"run_dir={run_dir}")
     print("run_class=short evolution test (synthetic capture/restart)")
     print("effective_run_policy=cosmo=.false. hydro=.true. pic=.true. poisson=.true. sink=.true.")
+    print("effective_stellar_enrichment_policy=legacy compatibility mode; all elements and channels disabled; legacy prompt SNIa disabled")
     print("effective_output_policy=noutput=1 tout=1.0d100 foutput=1 fbackup=1000000")
     print("scheduled_times=tout=1.0d100; scheduled_scale_factors=none")
     print("periodic_outputs=foutput=1; backups=fbackup=1000000")
@@ -252,6 +277,7 @@ def prepare(args: argparse.Namespace) -> None:
         "files": files,
         "output_policy": POLICY,
         "run_policy": RUN_POLICY,
+        "stellar_enrichment_policy": STELLAR_ENRICHMENT_POLICY,
         "expected_outputs": ["output_00001", "output_00002"],
         "bytes_per_output": args.bytes_per_output,
         "total_expected_output_bytes": args.bytes_per_output * expected_outputs,
@@ -296,7 +322,9 @@ def launch_check(args: argparse.Namespace) -> None:
         fail("prepared manifest root must be an object")
     if manifest.get("schema") != 1 or manifest.get("run_dir") != str(run_dir):
         fail("manifest schema or absolute run directory mismatch")
-    if manifest.get("output_policy") != POLICY or manifest.get("run_policy") != RUN_POLICY:
+    if (manifest.get("output_policy") != POLICY or
+            manifest.get("run_policy") != RUN_POLICY or
+            manifest.get("stellar_enrichment_policy") != STELLAR_ENRICHMENT_POLICY):
         fail("manifest policy differs from runner policy")
     source_tree_raw = manifest.get("source_tree")
     expected_commit = manifest.get("expected_source_commit")
