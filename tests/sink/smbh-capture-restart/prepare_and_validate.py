@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +18,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 TEMPLATE = HERE / "smoke.nml.in"
 LEDGER_NAME = "smbh_capture_ledger_v2.jsonl"
+MANIFEST_NAME = "preflight_manifest.json"
 POLICY = {
     "noutput": "1",
     "tout": "1.0d100",
@@ -34,13 +38,87 @@ def fail(message: str) -> None:
     raise SystemExit(f"CAPTURE-RESTART: {message}")
 
 
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_clean_source(source_tree: Path, expected_commit: str) -> None:
+    if not re.fullmatch(r"[0-9a-f]{40}", expected_commit):
+        fail("expected source commit must be a full 40-character lowercase SHA")
+    try:
+        root = Path(subprocess.check_output(
+            ["git", "-C", str(source_tree), "rev-parse", "--show-toplevel"],
+            text=True, stderr=subprocess.STDOUT,
+        ).strip()).resolve()
+        head = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        status = subprocess.check_output(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal"],
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        fail(f"cannot validate source tree {source_tree}: {error}")
+    if root != source_tree.resolve():
+        fail(f"--source-tree is not a Git worktree root: {source_tree}")
+    if head != expected_commit:
+        fail(f"source HEAD {head} differs from expected {expected_commit}")
+    if status:
+        fail(f"source worktree is not clean: {root}")
+
+
+def lustre_quota_evidence(path: Path) -> dict[str, object] | None:
+    """Record /scratch quota evidence; zero limits mean default/unreported."""
+    resolved = path.resolve()
+    try:
+        resolved.relative_to("/scratch")
+    except ValueError:
+        return None
+    user = os.environ.get("USER")
+    if not user:
+        fail("USER is unset; cannot establish /scratch quota evidence")
+    try:
+        raw = subprocess.check_output(
+            ["lfs", "quota", "-u", user, "/scratch"], text=True,
+            stderr=subprocess.STDOUT,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        fail(f"cannot establish /scratch quota evidence: {error}")
+    row = next((line.split() for line in raw.splitlines()
+                if line.split() and line.split()[0] == "/scratch"), None)
+    if row is None or len(row) < 4:
+        fail("cannot parse /scratch quota evidence")
+    try:
+        used_kib, quota_kib, limit_kib = map(int, row[1:4])
+    except ValueError:
+        fail("/scratch quota evidence has nonnumeric block fields")
+    ceilings = [value for value in (quota_kib, limit_kib) if value > 0]
+    remaining_bytes = None
+    if ceilings:
+        remaining_bytes = max(0, (min(ceilings) - used_kib) * 1024)
+    return {
+        "command": f"lfs quota -u {user} /scratch",
+        "used_kib": used_kib,
+        "quota_kib": quota_kib,
+        "limit_kib": limit_kib,
+        "explicit_numeric_limit": bool(quota_kib or limit_kib),
+        "remaining_bytes_under_stricter_limit": remaining_bytes,
+        "raw": raw.rstrip(),
+    }
+
+
 def assignments(text: str) -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     for raw in text.splitlines():
         line = raw.split("!", 1)[0]
-        match = re.match(r"\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*([^,/]*)", line)
+        match = re.match(r"\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*([^/]*)", line)
         if match:
-            found.setdefault(match.group(1).lower(), []).append(match.group(2).strip())
+            value = match.group(2).strip().rstrip(",").strip()
+            found.setdefault(match.group(1).lower(), []).append(value)
     return found
 
 
@@ -111,9 +189,21 @@ def prepare(args: argparse.Namespace) -> None:
         fail(f"refusing existing run directory: {run_dir}")
     if args.bytes_per_output <= 0:
         fail("--bytes-per-output must be a positive measured or conservative estimate")
+    if args.reserve_bytes < 0:
+        fail("--reserve-bytes must be nonnegative")
+    binary = args.binary.resolve()
+    if not binary.is_file() or not binary.stat().st_mode & 0o111:
+        fail(f"binary is not an executable regular file: {binary}")
+    source_tree = args.source_tree.resolve()
+    validate_clean_source(source_tree, args.expected_source_commit)
+    try:
+        binary.relative_to(source_tree)
+    except ValueError:
+        fail(f"binary must be inside the validated source worktree: {source_tree}")
     expected_outputs = 2
     required = args.bytes_per_output * expected_outputs + args.reserve_bytes
     usage = shutil.disk_usage(run_dir.parent)
+    quota = lustre_quota_evidence(run_dir.parent)
     print(f"run_dir={run_dir}")
     print("run_class=short evolution test (synthetic capture/restart)")
     print("effective_run_policy=cosmo=.false. hydro=.true. pic=.true. poisson=.true. sink=.true.")
@@ -125,6 +215,15 @@ def prepare(args: argparse.Namespace) -> None:
     print(f"total_expected_output_bytes={args.bytes_per_output * expected_outputs}")
     print(f"reserve_bytes={args.reserve_bytes}")
     print(f"free_bytes={usage.free}")
+    if quota is not None:
+        print(f"lustre_quota_used_kib={quota['used_kib']}")
+        print(f"lustre_quota_kib={quota['quota_kib']}")
+        print(f"lustre_limit_kib={quota['limit_kib']}")
+        print(f"lustre_explicit_numeric_limit={str(quota['explicit_numeric_limit']).lower()}")
+        print(f"lustre_remaining_bytes_under_stricter_limit={quota['remaining_bytes_under_stricter_limit']}")
+        quota_remaining = quota["remaining_bytes_under_stricter_limit"]
+        if quota_remaining is not None and quota_remaining < required:
+            fail(f"insufficient /scratch quota: need {required} bytes including reserve")
     if usage.free < required:
         fail(f"insufficient space: need {required} bytes including reserve")
     validate_fixture_geometry()
@@ -138,9 +237,125 @@ def prepare(args: argparse.Namespace) -> None:
     # Audit the actual files that RAMSES will consume, not just the template.
     validate_written_namelist(run_dir / "stage1.nml", 0, 1)
     validate_written_namelist(run_dir / "stage2.nml", 1, 2)
+    files = {}
+    for name in ("stage1.nml", "stage2.nml", "ic_sink"):
+        path = run_dir / name
+        files[name] = {"sha256": sha256(path), "bytes": path.stat().st_size}
+    manifest = {
+        "schema": 1,
+        "run_class": "short evolution test (synthetic capture/restart)",
+        "run_dir": str(run_dir),
+        "expected_source_commit": args.expected_source_commit,
+        "source_tree": str(source_tree),
+        "binary": {"path": str(binary), "sha256": sha256(binary),
+                   "bytes": binary.stat().st_size},
+        "files": files,
+        "output_policy": POLICY,
+        "run_policy": RUN_POLICY,
+        "expected_outputs": ["output_00001", "output_00002"],
+        "bytes_per_output": args.bytes_per_output,
+        "total_expected_output_bytes": args.bytes_per_output * expected_outputs,
+        "reserve_bytes": args.reserve_bytes,
+        "required_free_bytes": required,
+        "free_bytes_at_prepare": usage.free,
+        "lustre_quota_at_prepare": quota,
+        "effective_namelists": {
+            "stage1": {"path": str(run_dir / "stage1.nml"),
+                       "assignments": assignments(stage1)},
+            "stage2": {"path": str(run_dir / "stage2.nml"),
+                       "assignments": assignments(stage2)},
+        },
+    }
+    (run_dir / MANIFEST_NAME).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(f"effective_stage1_namelist={run_dir / 'stage1.nml'}")
     print(f"effective_stage2_namelist={run_dir / 'stage2.nml'}")
+    print(f"preflight_manifest={run_dir / MANIFEST_NAME}")
+    print(f"preflight_manifest_sha256={sha256(run_dir / MANIFEST_NAME)}")
+    print(f"binary={binary}")
+    print(f"binary_sha256={manifest['binary']['sha256']}")
+    print(f"expected_source_commit={args.expected_source_commit}")
     print("preflight=PASS")
+
+
+def launch_check(args: argparse.Namespace) -> None:
+    run_dir = args.run_dir.resolve()
+    manifest_path = run_dir / MANIFEST_NAME
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        fail(f"missing prepared manifest: {manifest_path}")
+    if not re.fullmatch(r"[0-9a-f]{64}", args.manifest_sha256):
+        fail("--manifest-sha256 must be a full lowercase SHA-256")
+    if sha256(manifest_path) != args.manifest_sha256:
+        fail("prepared manifest SHA-256 differs from the operator-approved identity")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        fail(f"cannot read valid prepared manifest: {error}")
+    if not isinstance(manifest, dict):
+        fail("prepared manifest root must be an object")
+    if manifest.get("schema") != 1 or manifest.get("run_dir") != str(run_dir):
+        fail("manifest schema or absolute run directory mismatch")
+    if manifest.get("output_policy") != POLICY or manifest.get("run_policy") != RUN_POLICY:
+        fail("manifest policy differs from runner policy")
+    source_tree_raw = manifest.get("source_tree")
+    expected_commit = manifest.get("expected_source_commit")
+    if not isinstance(source_tree_raw, str) or not isinstance(expected_commit, str):
+        fail("manifest source identity is missing or malformed")
+    validate_clean_source(Path(source_tree_raw), expected_commit)
+    prepared_files = manifest.get("files")
+    if not isinstance(prepared_files, dict):
+        fail("manifest prepared-file map is missing or malformed")
+    for name, expected in prepared_files.items():
+        if name not in {"stage1.nml", "stage2.nml", "ic_sink"} or not isinstance(expected, dict):
+            fail("manifest prepared-file entry is invalid")
+        path = run_dir / name
+        if path.is_symlink() or not path.is_file() or sha256(path) != expected.get("sha256"):
+            fail(f"prepared input hash mismatch: {path}")
+    if set(prepared_files) != {"stage1.nml", "stage2.nml", "ic_sink"}:
+        fail("manifest prepared-file set is invalid")
+    validate_written_namelist(run_dir / "stage1.nml", 0, 1)
+    validate_written_namelist(run_dir / "stage2.nml", 1, 2)
+    binary = args.binary.resolve()
+    expected_binary = manifest.get("binary", {})
+    if not isinstance(expected_binary, dict):
+        fail("manifest binary identity is malformed")
+    if str(binary) != expected_binary.get("path") or not binary.is_file():
+        fail("launch binary path differs from prepared binary identity")
+    if sha256(binary) != expected_binary.get("sha256"):
+        fail("launch binary SHA-256 differs from prepared binary identity")
+    forbidden = [name for name in ("stage1.log", "stage2.log", LEDGER_NAME,
+                                   "preflight_provenance.txt") if (run_dir / name).exists()]
+    forbidden += [path.name for path in run_dir.glob("output_*")]
+    if forbidden:
+        fail(f"prepared directory is no longer pristine: {sorted(forbidden)}")
+    free = shutil.disk_usage(run_dir).free
+    quota = lustre_quota_evidence(run_dir)
+    try:
+        required = int(manifest["required_free_bytes"])
+    except (KeyError, TypeError, ValueError):
+        fail("manifest required-free-space value is missing or malformed")
+    if required < 0:
+        fail("manifest required-free-space value is negative")
+    print(f"launch_run_dir={run_dir}")
+    print(f"effective_stage1_namelist={run_dir / 'stage1.nml'}")
+    print(f"effective_stage2_namelist={run_dir / 'stage2.nml'}")
+    print(f"binary_sha256={expected_binary['sha256']}")
+    print(f"expected_source_commit={manifest['expected_source_commit']}")
+    print(f"required_free_bytes={required}")
+    print(f"free_bytes={free}")
+    if quota is not None:
+        print(f"lustre_quota_used_kib={quota['used_kib']}")
+        print(f"lustre_quota_kib={quota['quota_kib']}")
+        print(f"lustre_limit_kib={quota['limit_kib']}")
+        print(f"lustre_explicit_numeric_limit={str(quota['explicit_numeric_limit']).lower()}")
+        print(f"lustre_remaining_bytes_under_stricter_limit={quota['remaining_bytes_under_stricter_limit']}")
+        quota_remaining = quota["remaining_bytes_under_stricter_limit"]
+        if quota_remaining is not None and quota_remaining < required:
+            fail(f"insufficient launch-time /scratch quota: need {required} bytes including reserve")
+    if free < required:
+        fail(f"insufficient launch-time space: need {required} bytes including reserve")
+    print("launch_revalidation=PASS")
 
 
 def postcheck(args: argparse.Namespace) -> None:
@@ -205,10 +420,22 @@ def main() -> None:
     prep.add_argument("run_dir", type=Path)
     prep.add_argument("--bytes-per-output", type=int, required=True)
     prep.add_argument("--reserve-bytes", type=int, default=1_073_741_824)
+    prep.add_argument("--binary", type=Path, required=True)
+    prep.add_argument("--expected-source-commit", required=True)
+    prep.add_argument("--source-tree", type=Path, required=True)
+    launch = sub.add_parser("launch-check")
+    launch.add_argument("run_dir", type=Path)
+    launch.add_argument("--binary", type=Path, required=True)
+    launch.add_argument("--manifest-sha256", required=True)
     check = sub.add_parser("postcheck")
     check.add_argument("run_dir", type=Path)
     args = parser.parse_args()
-    prepare(args) if args.mode == "prepare" else postcheck(args)
+    if args.mode == "prepare":
+        prepare(args)
+    elif args.mode == "launch-check":
+        launch_check(args)
+    else:
+        postcheck(args)
 
 
 if __name__ == "__main__":

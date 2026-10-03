@@ -4,7 +4,8 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
-  echo "usage: $0 --run-dir NEW_DIR --binary RAMSES --bytes-per-output BYTES [--reserve-bytes BYTES] --execute" >&2
+  echo "prepare: $0 --prepare --run-dir NEW_DIR --binary RAMSES --source-tree CLEAN_TREE --expected-source-commit COMMIT --bytes-per-output BYTES [--reserve-bytes BYTES]" >&2
+  echo "execute: $0 --execute --run-dir PREPARED_DIR --binary RAMSES --manifest-sha256 SHA256" >&2
   exit 2
 }
 
@@ -13,43 +14,66 @@ binary=
 bytes_per_output=
 reserve_bytes=1073741824
 execute=false
+prepare=false
+expected_source_commit=
+source_tree=
+manifest_sha256=
 while (($#)); do
   case "$1" in
     --run-dir) run_dir=${2:?}; shift 2 ;;
     --binary) binary=${2:?}; shift 2 ;;
     --bytes-per-output) bytes_per_output=${2:?}; shift 2 ;;
     --reserve-bytes) reserve_bytes=${2:?}; shift 2 ;;
+    --expected-source-commit) expected_source_commit=${2:?}; shift 2 ;;
+    --source-tree) source_tree=${2:?}; shift 2 ;;
+    --manifest-sha256) manifest_sha256=${2:?}; shift 2 ;;
+    --prepare) prepare=true; shift ;;
     --execute) execute=true; shift ;;
     *) usage ;;
   esac
 done
 
-[[ -n $run_dir && -n $binary && -n $bytes_per_output ]] || usage
-[[ $execute == true ]] || { echo 'CAPTURE-RESTART: --execute is required; nothing launched' >&2; exit 2; }
+[[ -n $run_dir && -n $binary ]] || usage
+[[ $prepare != $execute ]] || { echo 'CAPTURE-RESTART: choose exactly one of --prepare or --execute' >&2; exit 2; }
+binary=$(realpath -- "$binary")
+[[ -x $binary ]] || { echo "CAPTURE-RESTART: binary is not executable: $binary" >&2; exit 1; }
+if [[ $prepare == true ]]; then
+  [[ -n $bytes_per_output && -n $expected_source_commit && -n $source_tree ]] || usage
+  python3 "$here/prepare_and_validate.py" prepare "$run_dir" \
+    --binary "$binary" --expected-source-commit "$expected_source_commit" \
+    --source-tree "$source_tree" \
+    --bytes-per-output "$bytes_per_output" --reserve-bytes "$reserve_bytes"
+  exit 0
+fi
 [[ -n ${SLURM_JOB_ID:-} ]] || {
   echo 'CAPTURE-RESTART: a live Slurm allocation (SLURM_JOB_ID) is required; refusing login-node execution' >&2
   exit 2
 }
 command -v srun >/dev/null 2>&1 || { echo 'CAPTURE-RESTART: srun is unavailable' >&2; exit 1; }
-binary=$(realpath -- "$binary")
-[[ -x $binary ]] || { echo "CAPTURE-RESTART: binary is not executable: $binary" >&2; exit 1; }
-python3 "$here/prepare_and_validate.py" prepare "$run_dir" \
-  --bytes-per-output "$bytes_per_output" --reserve-bytes "$reserve_bytes"
+[[ -n $manifest_sha256 ]] || usage
 run_dir=$(realpath -- "$run_dir")
+python3 "$here/prepare_and_validate.py" launch-check "$run_dir" --binary "$binary" \
+  --manifest-sha256 "$manifest_sha256"
 
-source_root=$(git -C "$here" rev-parse --show-toplevel)
+source_root=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_tree"])' \
+  "$run_dir/preflight_manifest.json")
+source_commit=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["expected_source_commit"])' \
+  "$run_dir/preflight_manifest.json")
 {
   echo "slurm_job_id=$SLURM_JOB_ID"
   echo "host=$(hostname)"
   echo "binary=$binary"
   echo "binary_sha256=$(sha256sum "$binary" | awk '{print $1}')"
+  echo "manifest=$run_dir/preflight_manifest.json"
+  echo "manifest_sha256=$manifest_sha256"
   echo "source_root=$source_root"
-  echo "source_commit=$(git -C "$source_root" rev-parse HEAD)"
+  echo "source_commit=$source_commit"
   echo "source_branch=$(git -C "$source_root" branch --show-current)"
   echo 'source_status_begin'
   git -C "$source_root" status --porcelain --untracked-files=normal
   echo 'source_status_end'
   sha256sum "$run_dir/stage1.nml" "$run_dir/stage2.nml" "$run_dir/ic_sink"
+  sha256sum "$run_dir/preflight_manifest.json"
 } | tee "$run_dir/preflight_provenance.txt"
 
 (
