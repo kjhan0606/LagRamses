@@ -164,7 +164,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
   namelist/output_params/noutput,foutput,fbackup,aout,tout,output_mode &
        & ,tend,delta_tout,aend,delta_aout,gadget_output,walltime_hrs,minutes_dump &
-       & ,informat,outformat,match_aout
+       & ,informat,outformat,match_aout,IOGROUPSIZEREP
   namelist/amr_params/levelmin,levelmax,ngridmax,ngridtot &
        & ,npartmax,nparttot,ngridmax_auto,npartmax_auto &
        & ,nexpand,boxlen,nsinkmax,nlevel_collapse

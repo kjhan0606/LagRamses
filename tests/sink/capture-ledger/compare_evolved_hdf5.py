@@ -103,7 +103,8 @@ def main(reference_path, replay_path):
                 summary["worst_relative_dataset"] = name
 
         header = {}
-        for name in ("nstep_coarse", "const", "mass_tot_0"):
+        for name in ("nstep_coarse", "const", "mass_tot_0",
+                     "epot_tot_old", "epot_tot_int", "aexp_old"):
             if name not in reference["/header"].attrs or name not in replay["/header"].attrs:
                 raise ValueError(f"missing checkpoint header attribute {name}")
             left = np.asarray(reference["/header"].attrs[name])
@@ -121,14 +122,15 @@ def main(reference_path, replay_path):
         "dataset_count": len(reference_sets),
         "all_datasets_exact": all(item["unequal_datasets"] == 0 for item in groups.values()),
         "particle_records_exact": particle_records_exact,
-        "sink_values_finite": groups["sinks"]["nonfinite_values"] == 0,
+        "sink_values_finite": groups.get("sinks", {}).get("nonfinite_values", 0) == 0,
         "active_state_exact": all(
-            groups[group]["unequal_datasets"] == 0
-            for group in ("hydro", "gravity", "sinks")
-        ) and particle_records_exact and all(item["exact"] for item in header.values()),
+            summary["unequal_datasets"] == 0
+            for group, summary in groups.items() if group != "particles"
+        ) and particle_records_exact and all(item["exact"] for item in header.values()) \
+            and groups.get("sinks", {}).get("nonfinite_values", 0) == 0,
         "groups": groups,
         "header": header,
-        "interpretation": "Particle records ignore output slot order. Active-state exactness permits matching sink NaN masks; sink_values_finite must be checked separately. Only three selected header attributes are compared. This is a replay check, not a physical calibration claim.",
+        "interpretation": "Particle records ignore output slot order; every other dataset is compared. Active-state exactness also requires finite sink fields. Six selected header attributes include coarse energy history. This is a replay check, not a physical calibration claim.",
     }
     print(json.dumps(report, indent=2, sort_keys=True))
 

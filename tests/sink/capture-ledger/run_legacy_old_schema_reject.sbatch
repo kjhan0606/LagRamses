@@ -35,11 +35,15 @@ fi
 mkdir "$run"
 cp -a "$source_run/output_00001" "$run/output_00001"
 cp "$source_run/restart.nml" "$run/restart.nml"
+if [ "${CAPTURE_DISABLE_LEDGER:-0}" = 1 ]; then
+    sed -i 's/smbh_capture_ledger=\.true\./smbh_capture_ledger=.false./' "$run/restart.nml"
+    grep -Fq 'smbh_capture_ledger=.false.' "$run/restart.nml"
+fi
 cp "$source_run/capture.jsonl" "$run/capture.jsonl"
 cp "$source_run/legacy_yields.dat" "$run/legacy_yields.dat"
 cp "$source_run/ic_sink" "$run/ic_sink"
 cp "$binary" "$run/ramses_final3d"
-echo 'purpose=negative two-rank pre-schema sink_stat restart gate'
+echo "purpose=negative two-rank pre-schema sink_stat restart gate; ledger_disabled=${CAPTURE_DISABLE_LEDGER:-0}"
 echo "source_checkpoint=$source_run/output_00001"
 echo "effective_namelist=$run/restart.nml"
 echo 'full_dump_policy=restart should fail before any new dump; source noutput=2 tout=0.03,1e100 foutput=fbackup=100000'

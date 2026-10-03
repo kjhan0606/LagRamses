@@ -1679,9 +1679,18 @@ subroutine merge_sink(ilevel)
              & + 2d0*SQRT(3d0) + t2*mu + t3*mu**2
         af = 1d0 / ( 1d0 + q )**2 * SQRT( a1**2 + a2**2*q**4 + 2d0*a1*a2*q**2*a1a2 &
              & + 2d0 * ( a1*a1L + a2*q**2*a2L ) * Lmodana*q + Lmodana**2*q**2 )
-        bhspin_new(igrp,1)=1d0/(1d0+q)**2 * ( a1*ax1+a2*ax2*q**2+(Lx/Lmod)*Lmodana*q )
-        bhspin_new(igrp,2)=1d0/(1d0+q)**2 * ( a1*ay1+a2*ay2*q**2+(Ly/Lmod)*Lmodana*q )
-        bhspin_new(igrp,3)=1d0/(1d0+q)**2 * ( a1*az1+a2*az2*q**2+(Lz/Lmod)*Lmodana*q )
+        if(Lmod>0d0)then
+           bhspin_new(igrp,1)=1d0/(1d0+q)**2 * ( a1*ax1+a2*ax2*q**2+(Lx/Lmod)*Lmodana*q )
+           bhspin_new(igrp,2)=1d0/(1d0+q)**2 * ( a1*ay1+a2*ay2*q**2+(Ly/Lmod)*Lmodana*q )
+           bhspin_new(igrp,3)=1d0/(1d0+q)**2 * ( a1*az1+a2*az2*q**2+(Lz/Lmod)*Lmodana*q )
+        else
+           ! The orbital direction is undefined for a head-on/static pair.
+           ! Omit the orbital-spin fit term and retain the two intrinsic
+           ! angular-momentum vectors with their usual mass-squared weights.
+           bhspin_new(igrp,1)=1d0/(1d0+q)**2 * ( a1*ax1+a2*ax2*q**2 )
+           bhspin_new(igrp,2)=1d0/(1d0+q)**2 * ( a1*ay1+a2*ay2*q**2 )
+           bhspin_new(igrp,3)=1d0/(1d0+q)**2 * ( a1*az1+a2*az2*q**2 )
+        endif
         spinmag_new(igrp)=SQRT(bhspin_new(igrp,1)**2 + bhspin_new(igrp,2)**2 + bhspin_new(igrp,3)**2 )
         if(spinmag_new(igrp).gt.+maxspin) spinmag_new(igrp)=+maxspin
         if(spinmag_new(igrp).lt.-maxspin) spinmag_new(igrp)=-maxspin
@@ -1689,9 +1698,13 @@ subroutine merge_sink(ilevel)
         ay1=bhspin_new(igrp,2)
         az1=bhspin_new(igrp,3)
         a1mod=SQRT(ax1**2+ay1**2+az1**2)
-        bhspin_new(igrp,1)=ax1/a1mod
-        bhspin_new(igrp,2)=ay1/a1mod
-        bhspin_new(igrp,3)=az1/a1mod
+        if(a1mod>0d0)then
+           bhspin_new(igrp,1)=ax1/a1mod
+           bhspin_new(igrp,2)=ay1/a1mod
+           bhspin_new(igrp,3)=az1/a1mod
+        else
+           bhspin_new(igrp,1:3)=0d0
+        endif
      else
         if ( msink(isink) .gt. msink_new(igrp) )then
            ! Case it's not a merger

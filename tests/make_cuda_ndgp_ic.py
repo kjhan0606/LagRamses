@@ -43,9 +43,8 @@ def record(payload: bytes) -> bytes:
     return marker + payload + marker
 
 
-def header(dx_mpc: float, offset_mpc: float) -> bytes:
-    return struct.pack(
-        "<3i8f",
+def header(dx_mpc: float, offset_mpc: float, omega_b: float | None = None) -> bytes:
+    values = (
         N,
         N,
         N,
@@ -58,6 +57,9 @@ def header(dx_mpc: float, offset_mpc: float) -> bytes:
         OMEGA_L,
         H0,
     )
+    if omega_b is None:
+        return struct.pack("<3i8f", *values)
+    return struct.pack("<3i9f", *values, omega_b)
 
 
 def write_float_field(path: pathlib.Path, grafic_header: bytes, value) -> None:
@@ -309,11 +311,14 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def generate(root: pathlib.Path, profile: str = HARSH_PROFILE) -> str:
+def generate(root: pathlib.Path, profile: str = HARSH_PROFILE,
+             omega_b_header: float | None = None) -> str:
     if root.exists() and any(root.iterdir()):
         raise RuntimeError(f"refusing non-empty output directory: {root}")
     if profile not in (HARSH_PROFILE, SMOOTH_PROFILE, MATCHED_PROFILE):
         raise RuntimeError(f"unsupported profile: {profile}")
+    if omega_b_header is not None and not (0.0 < omega_b_header < OMEGA_M):
+        raise RuntimeError("omega_b_header must lie strictly between 0 and omega_m")
     zero = lambda _x, _y, _z: 0.0
     level_specs = (
         (LEVELMIN, 1.0, 0.0, 0),
@@ -322,7 +327,7 @@ def generate(root: pathlib.Path, profile: str = HARSH_PROFILE) -> str:
     for level_number, dx_mpc, offset_mpc, identity_offset in level_specs:
         level = root / f"level_{level_number:03d}"
         level.mkdir(parents=True, exist_ok=True)
-        grafic_header = header(dx_mpc, offset_mpc)
+        grafic_header = header(dx_mpc, offset_mpc, omega_b_header)
         write_float_field(level / "ic_velcx", grafic_header, zero)
         write_float_field(level / "ic_velcy", grafic_header, zero)
         write_float_field(level / "ic_velcz", grafic_header, zero)
@@ -412,6 +417,9 @@ def generate(root: pathlib.Path, profile: str = HARSH_PROFILE) -> str:
         "occupancy_histogram": {str(key): occupancy[key] for key in sorted(occupancy)},
         "header": "legacy GRAFIC 3i+8f (44-byte payload; no omega_b extension)",
     }
+    if omega_b_header is not None:
+        metadata["header"] = "extended GRAFIC 3i+9f (48-byte payload; omega_b included)"
+        metadata["omega_b"] = omega_b_header
     if profile in (SMOOTH_PROFILE, MATCHED_PROFILE):
         metadata.pop("occupancy_histogram")
         level_diagnostics: dict[str, dict[str, float]] = {}
@@ -507,9 +515,10 @@ def main() -> int:
         default=HARSH_PROFILE,
     )
     parser.add_argument("--verify-manifest", type=pathlib.Path)
+    parser.add_argument("--omega-b-header", type=float)
     args = parser.parse_args()
     try:
-        manifest = generate(args.output.resolve(), args.profile)
+        manifest = generate(args.output.resolve(), args.profile, args.omega_b_header)
         if args.verify_manifest:
             expected = args.verify_manifest.read_text(encoding="ascii")
             if manifest != expected:

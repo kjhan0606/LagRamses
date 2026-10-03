@@ -458,6 +458,9 @@ subroutine init_amr
      read(ilun)const,mass_tot_0,rho_tot
      read(ilun)omega_m,omega_l,omega_k,omega_b,h0,aexp_ini,boxlen_ini
      read(ilun)aexp,hexp,aexp_old,epot_tot_int,epot_tot_old
+     ! dump_all precedes update_time: consume this coarse-step accounting
+     ! once after restart without changing output/AGN step guards.
+     restart_coarse_bookkeeping_pending=.true.
      if(cosmo)then
         read(ilun)mass_sph
      else
@@ -827,6 +830,7 @@ subroutine restore_amr_binary_varcpu(ncpu2_in, nlevelmax2_in)
   read(ilun) const, mass_tot_0, rho_tot
   read(ilun) omega_m, omega_l, omega_k, omega_b, h0, aexp_ini, boxlen_ini
   read(ilun) aexp, hexp, aexp_old, epot_tot_int, epot_tot_old
+  restart_coarse_bookkeeping_pending=.true.
   if(cosmo)then
      read(ilun) mass_sph
   else

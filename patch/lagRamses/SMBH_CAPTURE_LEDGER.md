@@ -67,10 +67,16 @@ is rejected rather than silently using an incomplete or duplicated global
 value; one-rank old files remain readable. This checkpoint schema concerns
 restart physics, not the version-1 JSONL event format.
 
-The legacy sink-file path has not been validated with
-`IOGROUPSIZEREP>0`: the writer produces one file while grouped readers
-select separate group paths. Do not use grouped legacy sink restart until
-that path has an explicit passing regression.
+For grouped legacy I/O, `backup_sink` writes the shared sink record only
+under `group_00001`; every rank's sink reader therefore selects that path
+irrespective of its AMR reader group. Each grouped particle directory also
+receives its own `part_file_descriptor.txt`. A two-rank, two-group evolved
+ownership replay passed; other rank counts and group sizes remain untested.
+
+Checkpoint output occurs before that coarse step's `update_time`. A dedicated
+restart-pending flag therefore consumes mass/energy bookkeeping exactly once
+on the first restarted `update_time` call. It does not alter
+`nstep_coarse_old`, which also controls output and other step guards.
 
 Each new merge call writes `batch_begin`, then contiguous event transactions,
 then `batch_commit` after compaction. The begin row records coarse step,

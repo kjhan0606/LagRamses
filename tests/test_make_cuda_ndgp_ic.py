@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import pathlib
+import struct
 import tempfile
 import unittest
 
@@ -12,6 +13,11 @@ import make_cuda_ndgp_ic as fixture
 
 
 class SmoothProfileTest(unittest.TestCase):
+    def test_extended_omega_b_header(self) -> None:
+        payload = fixture.header(1.0, 0.0, 0.05)
+        self.assertEqual(len(payload), 48)
+        self.assertAlmostEqual(struct.unpack("<3i9f", payload)[-1], 0.05)
+
     @staticmethod
     def manifest_entries(name: str) -> dict[str, str]:
         path = pathlib.Path(__file__).resolve().parent / name

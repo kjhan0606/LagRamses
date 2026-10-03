@@ -180,6 +180,8 @@ subroutine restore_amr_hdf5()
 
   iout=restart_output_index(cosmo,noutput,aout,tout,aexp,t)
   nstep_coarse_old = nstep_coarse
+  ! This checkpoint was written before update_time for nstep_coarse.
+  restart_coarse_bookkeeping_pending = .true.
 
   if(myid==1) write(*,*) 'Restarting at t=', t, ' nstep_coarse=', nstep_coarse
 

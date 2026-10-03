@@ -42,7 +42,16 @@ sed -e 's/noutput=1/noutput=2/' -e 's/aout=1.1/aout=1.1,1.1/' \
     -e 's/tout=1.0d100/tout=3.0d-2,1.0d100/' -e 's/tend=1.0d100/tend=0.0d0/' \
     -e 's/nrestart=0/nrestart=1/' \
     "$input/capture-ledger-perturbed.nml" >"$run/restart.nml"
-echo 'purpose=two-rank evolving-gas legacy restart ownership discriminator'
+if [ "${CAPTURE_GROUPED_IO:-0}" = 1 ]; then
+    sed -i '/^fbackup=100000$/a IOGROUPSIZEREP=1' "$run/fresh.nml" "$run/restart.nml"
+    checkpoint_info=output_00001/group_00001/info_00001.txt
+    particle_files=(output_00001/group_00001/part_00001.out00001 \
+        output_00001/group_00002/part_00001.out00002)
+else
+    checkpoint_info=output_00001/info_00001.txt
+    particle_files=(output_00001/part_00001.out00001 output_00001/part_00001.out00002)
+fi
+echo "purpose=two-rank evolving-gas legacy restart ownership discriminator; grouped_io=${CAPTURE_GROUPED_IO:-0}"
 echo 'full_dump_policy=noutput=2 tout=0.03,1e100 aout=1.1,1.1 foutput=fbackup=100000; only one reachable dump'
 echo 'expected_storage=one small legacy dump, below 15 MiB based on the HDF5 fixture; free space checked before submission'
 echo "fresh_effective_namelist=$run/fresh.nml"
@@ -54,8 +63,12 @@ cd "$run"
 srun --kill-on-bad-exit=1 --mpi=pmi2 --cpu-bind=none -n 2 ./ramses_final3d fresh.nml >fresh.log 2>&1
 test -f output_00001/COMPLETE
 test ! -e output_00002
-grep -Eq '^nstep_coarse=[[:space:]]*2[[:space:]]*$' output_00001/info_00001.txt
-sha256sum output_00001/part_00001.out* >checkpoint_particles.sha256
+grep -Eq '^nstep_coarse=[[:space:]]*2[[:space:]]*$' "$checkpoint_info"
+if [ "${CAPTURE_GROUPED_IO:-0}" = 1 ]; then
+    test -f output_00001/group_00001/sink_00001.out
+    test ! -e output_00001/group_00002/sink_00001.out
+fi
+sha256sum "${particle_files[@]}" >checkpoint_particles.sha256
 python3 validate_ledger.py capture.jsonl >fresh_validation.json
 python3 -c 'import json; d=json.load(open("fresh_validation.json")); assert d["status"]=="valid" and d["multiple_events"]==1 and d["run_attempts"]==1, d'
 srun --kill-on-bad-exit=1 --mpi=pmi2 --cpu-bind=none -n 2 ./ramses_final3d restart.nml >restart.log 2>&1

@@ -117,7 +117,10 @@ subroutine init_sink
      call title(nrestart,nchar)
 
      if(IOGROUPSIZEREP>0)then
-        call title(((myid-1)/IOGROUPSIZEREP)+1,ncharcpu)
+        ! backup_sink serializes the shared sink record only from rank 1,
+        ! whose output directory is always group_00001. Every rank must
+        ! restore that same record, independent of its AMR reader group.
+        call title(1,ncharcpu)
         fileloc='output_'//TRIM(nchar)//'/group_'//TRIM(ncharcpu)//'/sink_'//TRIM(nchar)//'.out'
      else
         fileloc='output_'//TRIM(nchar)//'/sink_'//TRIM(nchar)//'.out'

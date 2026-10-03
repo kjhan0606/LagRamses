@@ -47,6 +47,26 @@ coarse hydro diagnostics replay identically. A capture-ledger structural pass
 with divergent hydro diagnostics remains outside the physical conservation
 gate.
 
+The pre-`update_time` checkpoint accounting gate uses the synthetic
+cosmological DMO fixture in `run_cosmo_energy_restart.sbatch`. Supply a tested
+HDF5 binary with `CAPTURE_TEST_BINARY`; the job generates a two-level GRAFIC
+IC with an extended `omega_b` header, materializes and hashes both effective
+namelists, and compares steps 3–5 after a step-2 restart. It requires a
+nonzero expansion-energy integral and `1e-12` reference-peak-relative replay
+for floating fields while requiring exact discrete mesh/domain fields. An
+older binary can be tested as a negative control with
+`CAPTURE_EXPECT_REPLAY_FAIL=1`. This fixture checks numerical restart
+accounting; its synthetic displacements are not a physical matter transfer
+function and do not constitute a production DMO model.
+
+For a two-rank grouped legacy sink-file check, rebuild the legacy probe and
+submit `run_evolved_legacy_probe.sbatch` with `CAPTURE_GROUPED_IO=1`. The
+runner sets `IOGROUPSIZEREP=1` in both effective namelists, requires one
+shared sink file in `group_00001`, checks rank-local particle files and
+their hashes in both groups, and compares global cloud ownership and
+`sink_stat` at restart entry. The same runner with grouping off is a control.
+This is an ownership regression, not a full legacy trajectory comparison.
+
 For a bounded static-uniform-gas round-off smoke, set
 `CAPTURE_CASE=uniform` alongside `CAPTURE_FORMAT=hdf5` or run the original
 binary format. The separate `capture-ledger-uniform.nml` sets a box-wide

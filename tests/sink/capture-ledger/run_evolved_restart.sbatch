@@ -74,6 +74,7 @@ grep -Eq '^nstep_coarse=[[:space:]]*3[[:space:]]*$' output_00002/info_00002.txt
 grep -Eq '^nstep_coarse=[[:space:]]*4[[:space:]]*$' output_00003/info_00003.txt
 grep -Eq '^nstep_coarse=[[:space:]]*2[[:space:]]*$' output_00001/info_00001.txt
 python3 -c 'import h5py; h=h5py.File("output_00001/data_00001.h5"); a=h["/header"].attrs; assert a["nstep_coarse"].item()==2 and a["mass_tot_0"].item()>0 and a["const"].item()!=0; print("checkpoint_step=2 mass_tot_0=",a["mass_tot_0"]," const=",a["const"])'
+python3 -c 'import h5py,numpy as np; h=h5py.File("output_00001/data_00001.h5"); names=("bhspin_1","bhspin_2","bhspin_3","spinmag"); assert all(np.isfinite(h["/sinks/"+n][...]).all() for n in names); print("checkpoint_sink_spin_finite=True")'
 sha256sum output_00001/data_00001.h5 >checkpoint.sha256
 python3 validate_ledger.py capture.jsonl >fresh_validation.json
 python3 -c 'import json; d=json.load(open("fresh_validation.json")); assert d["status"]=="valid" and d["multiple_events"]==1 and d["committed_batches"]==1 and d["run_attempts"]==1, d'
