@@ -90,6 +90,22 @@ def binary_rows(uid: str = "10-1-7-9-2") -> list[dict]:
     return [begin, *members, pair, end]
 
 
+def batch_rows(step: int = 10) -> list[dict]:
+    uid = f"{step}-1-7-9-2"
+    rows = binary_rows(uid)
+    rows[0].update(nstep_coarse=step, ilevel=1,
+                   periodic_box_size_code=[10.0, 10.0, 10.0])
+    batch_uid = f"{step}-1-2-1"
+    return [
+        {"schema_version": 1, "record_type": "batch_begin", "batch_uid": batch_uid,
+         "nstep_coarse": step, "ilevel": 1, "nsink_before": 2,
+         "nsink_after": 1, "expected_events": 1},
+        *rows,
+        {"schema_version": 1, "record_type": "batch_commit", "batch_uid": batch_uid,
+         "nsink_after": 1},
+    ]
+
+
 def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
     begin = {
         "schema_version": 1,
@@ -239,6 +255,109 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertTrue(report.valid)
         self.assertEqual(report.unique_events, 1)
         self.assertEqual(report.binary_events, 1)
+
+    def test_batch_is_visible_only_after_post_compaction_commit(self):
+        attempt = {"schema_version": 1, "record_type": "attempt_begin",
+                   "restart_output": 0, "resume_step": 0}
+        rows = [attempt, *batch_rows()]
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.unique_events, 1)
+        incomplete = self.validate_rows(rows[:-1], allow_incomplete_tail=True)
+        self.assertTrue(incomplete.valid, incomplete.errors)
+        self.assertEqual(incomplete.unique_events, 0)
+        self.assertEqual(incomplete.censored_batches, 1)
+        self.assertFalse(self.validate_rows(rows[:-1]).valid)
+        missing_extent = copy.deepcopy(rows)
+        missing_extent[2].pop("periodic_box_size_code")
+        self.assertFalse(self.validate_rows(missing_extent).valid)
+
+    def test_restart_uses_completed_snapshot_cutline(self):
+        attempt = {"schema_version": 1, "record_type": "attempt_begin",
+                   "restart_output": 0, "resume_step": 0}
+        checkpoint = {"schema_version": 1, "record_type": "checkpoint",
+                      "output_number": 1, "nstep_coarse": 10}
+        restart = {"schema_version": 1, "record_type": "attempt_begin",
+                   "restart_output": 1, "resume_step": 10}
+        # The first capture follows the snapshot and is superseded on restart.
+        rows = [attempt, checkpoint, *batch_rows(), restart, *batch_rows(step=11)]
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.unique_events, 1)
+        self.assertEqual(report.binary_events, 1)
+        rows = [attempt, *batch_rows(), checkpoint, restart, *batch_rows(step=11)]
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.unique_events, 2)
+
+    def test_interrupted_batch_is_censored_only_by_valid_restart(self):
+        attempt = {"schema_version": 1, "record_type": "attempt_begin",
+                   "restart_output": 0, "resume_step": 0}
+        checkpoint = {"schema_version": 1, "record_type": "checkpoint",
+                      "output_number": 1, "nstep_coarse": 10}
+        restart = {"schema_version": 1, "record_type": "attempt_begin",
+                   "restart_output": 1, "resume_step": 10}
+        rows = [attempt, checkpoint, *batch_rows()[:-1], restart, *batch_rows(step=11)]
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.censored_batches, 1)
+        self.assertEqual(report.unique_events, 1)
+        bad = self.validate_rows([attempt, *batch_rows()[:-1], restart])
+        self.assertFalse(bad.valid)
+        self.assertTrue(any("matching ledger checkpoint" in item for item in bad.errors))
+
+    def test_torn_final_json_row_requires_valid_following_restart(self):
+        attempt = {"schema_version": 1, "record_type": "attempt_begin",
+                   "restart_output": 0, "resume_step": 0}
+        checkpoint = {"schema_version": 1, "record_type": "checkpoint",
+                      "output_number": 1, "nstep_coarse": 10}
+        restart = {"schema_version": 1, "record_type": "attempt_begin",
+                   "restart_output": 1, "resume_step": 10}
+        rows = [attempt, checkpoint, *batch_rows()[:-1]]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "ledger.jsonl"
+            payload = "".join(json.dumps(row) + "\n" for row in rows)
+            payload += '{"record_type":"batch_commit"\n\n'
+            payload += "".join(
+                json.dumps(row) + "\n" for row in [restart, *batch_rows(step=11)]
+            )
+            path.write_text(payload, encoding="utf-8")
+            report = validate_ledger(path)
+            self.assertTrue(report.valid, report.errors)
+            self.assertEqual(report.censored_batches, 1)
+            self.assertEqual(report.unique_events, 1)
+            path.write_text(payload.replace('"restart_output": 1', '"restart_output": 2'),
+                            encoding="utf-8")
+            self.assertFalse(validate_ledger(path).valid)
+
+    def test_batch_sink_count_conservation_is_required(self):
+        attempt = {"schema_version": 1, "record_type": "attempt_begin",
+                   "restart_output": 0, "resume_step": 0}
+        rows = [attempt, *batch_rows()]
+        rows[1]["nsink_before"] = 3
+        rows[1]["batch_uid"] = "10-1-3-1"
+        rows[-1]["batch_uid"] = "10-1-3-1"
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("sink-count conservation" in item for item in report.errors))
+
+    def test_committed_multiple_retains_all_members_and_pairs(self):
+        rows = multiple_rows()
+        rows[0].update(nstep_coarse=20, ilevel=1,
+                       periodic_box_size_code=[10.0, 10.0, 10.0])
+        report = self.validate_rows([
+            {"schema_version": 1, "record_type": "attempt_begin",
+             "restart_output": 0, "resume_step": 0},
+            {"schema_version": 1, "record_type": "batch_begin",
+             "batch_uid": "20-1-3-1", "nstep_coarse": 20, "ilevel": 1,
+             "nsink_before": 3, "nsink_after": 1, "expected_events": 1},
+            *rows,
+            {"schema_version": 1, "record_type": "batch_commit",
+             "batch_uid": "20-1-3-1", "nsink_after": 1},
+        ])
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.multiple_events, 1)
+        self.assertEqual(report.unique_events, 1)
 
     def test_pre_primary_extension_schema_v1_remains_valid(self):
         rows = binary_rows()

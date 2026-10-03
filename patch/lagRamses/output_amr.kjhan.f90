@@ -339,9 +339,28 @@ subroutine dump_all
      ! reading any listed snapshot or treating its diagnostic as durable.
      if(myid==1)then
         filename='output_'//TRIM(nchar)//'/COMPLETE'
-        open(unit=11,file=TRIM(filename),form='formatted')
-        write(11,'(A)')TRIM(nchar)
-        close(11)
+        open(unit=11,file=TRIM(filename),form='formatted',status='replace',iostat=ierr)
+        if(ierr/=0)then
+           write(*,*)'Cannot open output completion marker: ',TRIM(filename)
+           call clean_stop
+        endif
+        write(11,'(A)',iostat=ierr)TRIM(nchar)
+        if(ierr/=0)then
+           write(*,*)'Cannot write output completion marker: ',TRIM(filename)
+           call clean_stop
+        endif
+        flush(11,iostat=ierr)
+        if(ierr/=0)then
+           write(*,*)'Cannot flush output completion marker: ',TRIM(filename)
+           call clean_stop
+        endif
+        close(11,iostat=ierr)
+        if(ierr/=0)then
+           write(*,*)'Cannot close output completion marker: ',TRIM(filename)
+           call clean_stop
+        endif
+        if(smbh .and. smbh_capture_ledger) &
+             & call capture_ledger_protocol('checkpoint',0,0,0,0,ifout-1)
      endif
 
   end if

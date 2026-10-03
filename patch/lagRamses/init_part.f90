@@ -100,6 +100,8 @@ subroutine init_part
 
   if(allocated(xp))then
      if(verbose)write(*,*)'Initial conditions already set'
+     if(smbh .and. smbh_capture_ledger) &
+          & call capture_ledger_protocol('attempt',0,0,0,0,0)
      return
   end if
 
@@ -1362,6 +1364,8 @@ subroutine init_part
   endif
 
   if(sink .and. .not. allocated(idsink)) call init_sink
+  if(smbh .and. smbh_capture_ledger) &
+       & call capture_ledger_protocol('attempt',0,0,0,0,0)
 
 end subroutine init_part
 !################################################################

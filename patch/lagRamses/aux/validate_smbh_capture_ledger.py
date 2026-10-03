@@ -34,12 +34,23 @@ class EventBlock:
 
 
 @dataclass
+class BatchBlock:
+    begin: dict[str, Any]
+    events: list[tuple[dict[str, Any], str, set[int]]] = field(default_factory=list)
+
+    @property
+    def uid(self) -> str:
+        return str(self.begin.get("batch_uid", ""))
+
+
+@dataclass
 class LedgerReport:
     unique_events: int = 0
     binary_events: int = 0
     multiple_events: int = 0
     duplicate_events: int = 0
     incomplete_events: int = 0
+    censored_batches: int = 0
     invalid_json_lines: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -56,6 +67,7 @@ class LedgerReport:
             "multiple_events": self.multiple_events,
             "duplicate_events": self.duplicate_events,
             "incomplete_events": self.incomplete_events,
+            "censored_batches": self.censored_batches,
             "invalid_json_lines": self.invalid_json_lines,
             "errors": self.errors,
         }
@@ -384,6 +396,8 @@ def _validate_complete_block(
         return None
     if begin.get("schema_version") != SCHEMA_VERSION:
         errors.append(f"{uid}: unsupported schema version")
+    if any(row.get("schema_version") != SCHEMA_VERSION for row in rows):
+        errors.append(f"{uid}: unsupported row schema version")
     if begin.get("complete") is not False or end.get("complete") is not True:
         errors.append(f"{uid}: begin/end completion markers are invalid")
     if end.get("event_uid") != uid:
@@ -487,7 +501,39 @@ def _validate_complete_block(
 def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> LedgerReport:
     report = LedgerReport()
     current: EventBlock | None = None
+    batch: BatchBlock | None = None
+    seen_protocol = False
+    legacy: list[tuple[dict[str, Any], str]] = []
+    committed: list[tuple[int, BatchBlock, str]] = []
+    # Each attempt stores (resume_step, parent_attempt, parent_batch_cutoff).
+    attempts: list[tuple[int, int | None, int | None]] = []
+    # A checkpoint is tied to the number of committed batches BEFORE it.
+    checkpoints: dict[int, tuple[int, int, int]] = {}
     digests: dict[str, str] = {}
+    batch_digests: dict[str, str] = {}
+    corrupt_restart_tail = False
+
+    def integer(record: dict[str, Any], key: str, minimum: int = 0) -> int | None:
+        value = record.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            report.errors.append(f"{key} must be an integer >= {minimum}")
+            return None
+        return value
+
+    def accept(begin: dict[str, Any], digest: str) -> None:
+        uid = str(begin.get("event_uid", ""))
+        previous = digests.get(uid)
+        if previous is None:
+            digests[uid] = digest
+            report.unique_events += 1
+            if begin.get("classification") == "BINARY":
+                report.binary_events += 1
+            elif begin.get("classification") == "MULTIPLE":
+                report.multiple_events += 1
+        elif previous == digest:
+            report.duplicate_events += 1
+        else:
+            report.errors.append(f"{uid}: deterministic UID has conflicting event data")
 
     with path.open("r", encoding="utf-8") as handle:
         for line_number, raw_line in enumerate(handle, start=1):
@@ -496,6 +542,9 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
             try:
                 record = json.loads(raw_line)
             except json.JSONDecodeError as exc:
+                if seen_protocol and batch is not None and not corrupt_restart_tail:
+                    corrupt_restart_tail = True
+                    continue
                 report.invalid_json_lines += 1
                 report.errors.append(f"line {line_number}: invalid JSON: {exc.msg}")
                 if current is not None:
@@ -510,12 +559,73 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
                 continue
 
             record_type = record.get("record_type")
-            if record_type == "event_begin":
+            if corrupt_restart_tail:
+                if record_type != "attempt_begin":
+                    report.errors.append(
+                        f"line {line_number}: corrupt batch tail lacks restart attempt"
+                    )
+                corrupt_restart_tail = False
+            if record_type == "attempt_begin":
+                if current is not None:
+                    report.incomplete_events += 1
+                    if batch is None:
+                        report.errors.append(f"{current.uid}: missing event_end")
+                    current = None
+                if batch is not None:
+                    report.censored_batches += 1
+                    batch = None
+                if record.get("schema_version") != SCHEMA_VERSION:
+                    report.errors.append("unsupported attempt schema")
+                restart_output = integer(record, "restart_output")
+                resume_step = integer(record, "resume_step")
+                if restart_output is None or resume_step is None:
+                    continue
+                if restart_output == 0:
+                    if attempts or committed or legacy:
+                        report.errors.append("fresh attempt appended to existing ledger")
+                    parent, cutoff = None, None
+                else:
+                    if legacy:
+                        report.errors.append("legacy events cannot prove restart lineage")
+                    checkpoint = checkpoints.get(restart_output)
+                    if checkpoint is None or checkpoint[1] != resume_step:
+                        report.errors.append("restart has no matching ledger checkpoint")
+                        parent, cutoff = None, None
+                    else:
+                        parent, _, cutoff = checkpoint
+                attempts.append((resume_step, parent, cutoff))
+                seen_protocol = True
+            elif record_type == "checkpoint":
+                if current is not None or batch is not None or not attempts:
+                    report.errors.append("checkpoint outside a completed batch/attempt")
+                    continue
+                if record.get("schema_version") != SCHEMA_VERSION:
+                    report.errors.append("unsupported checkpoint schema")
+                output = integer(record, "output_number", 1)
+                step = integer(record, "nstep_coarse")
+                if output is not None and step is not None:
+                    if step < attempts[-1][0]:
+                        report.errors.append("checkpoint predates active attempt")
+                    checkpoints[output] = (len(attempts) - 1, step, len(committed))
+            elif record_type == "batch_begin":
+                if current is not None or batch is not None:
+                    report.errors.append("missing event_end or batch_commit before next batch")
+                    continue
+                if not attempts:
+                    report.errors.append("batch has no run attempt marker")
+                    continue
+                if record.get("schema_version") != SCHEMA_VERSION:
+                    report.errors.append("unsupported batch schema")
+                batch = BatchBlock(record)
+                seen_protocol = True
+            elif record_type == "event_begin":
                 if current is not None:
                     report.incomplete_events += 1
                     report.errors.append(
                         f"{current.uid}: missing event_end before line {line_number}"
                     )
+                if seen_protocol and batch is None:
+                    report.errors.append("bare event after batch protocol began")
                 current = EventBlock(record, line_number)
             elif record_type in {"member", "pair"}:
                 if current is None:
@@ -538,32 +648,108 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
                         f"line {line_number}: event_end appears outside an event"
                     )
                     continue
+                if batch is not None:
+                    if "periodic_box_size_code" not in current.begin:
+                        report.errors.append(f"{current.uid}: batched event lacks periodic box extents")
+                    if "primary_sink_id" not in current.begin:
+                        report.errors.append(f"{current.uid}: batched event lacks primary sink ID")
                 digest = _validate_complete_block(current, record, report)
                 if digest is not None:
-                    previous = digests.get(current.uid)
-                    if previous is None:
-                        digests[current.uid] = digest
-                        report.unique_events += 1
-                        if current.begin.get("classification") == "BINARY":
-                            report.binary_events += 1
-                        elif current.begin.get("classification") == "MULTIPLE":
-                            report.multiple_events += 1
-                    elif previous == digest:
-                        report.duplicate_events += 1
+                    if batch is None:
+                        legacy.append((current.begin, digest))
                     else:
-                        report.errors.append(
-                            f"{current.uid}: deterministic UID has conflicting event data"
-                        )
+                        member_ids = {row.get("sink_id") for row in current.members}
+                        if not all(isinstance(item, int) and not isinstance(item, bool)
+                                   for item in member_ids):
+                            report.errors.append(f"{current.uid}: invalid batched member IDs")
+                        else:
+                            batch.events.append((current.begin, digest, member_ids))
                 current = None
+            elif record_type == "batch_commit":
+                if batch is None or current is not None:
+                    report.errors.append("batch_commit without complete open batch")
+                    continue
+                begin = batch.begin
+                step = integer(begin, "nstep_coarse")
+                level = integer(begin, "ilevel", 1)
+                before = integer(begin, "nsink_before", 1)
+                after = integer(begin, "nsink_after", 1)
+                expected = integer(begin, "expected_events", 1)
+                committed_after = integer(record, "nsink_after", 1)
+                if None not in (step, level, before, after, expected, committed_after):
+                    uid = f"{step}-{level}-{before}-{after}"
+                    if (begin.get("schema_version") != SCHEMA_VERSION
+                        or record.get("schema_version") != SCHEMA_VERSION
+                        or batch.uid != uid or record.get("batch_uid") != uid
+                        or committed_after != after or before <= after
+                        or step < attempts[-1][0] or len(batch.events) != expected):
+                        report.errors.append(f"{uid}: invalid batch commit or metadata")
+                    reduction = sum(len(ids) - 1 for _, _, ids in batch.events)
+                    if reduction != before - after:
+                        report.errors.append(f"{uid}: sink-count conservation failed")
+                    seen_members: set[int] = set()
+                    seen_uids: set[str] = set()
+                    for event_begin, _, member_ids in batch.events:
+                        event_uid = str(event_begin.get("event_uid", ""))
+                        expected_uid = (
+                            f"{step}-{level}-{min(member_ids)}-{max(member_ids)}-"
+                            f"{len(member_ids)}" if member_ids else ""
+                        )
+                        if (event_uid != expected_uid
+                            or event_begin.get("nstep_coarse") != step
+                            or event_begin.get("ilevel") != level
+                            or event_uid in seen_uids or seen_members & member_ids):
+                            report.errors.append(f"{uid}: inconsistent batched event")
+                        seen_members.update(member_ids)
+                        seen_uids.add(event_uid)
+                    payload = [begin, [(event.get("event_uid"), digest)
+                                       for event, digest, _ in batch.events], record]
+                    batch_digest = hashlib.sha256(
+                        json.dumps(payload, sort_keys=True).encode("utf-8")
+                    ).hexdigest()
+                    committed.append((len(attempts) - 1, batch, batch_digest))
+                batch = None
             else:
                 report.errors.append(
                     f"line {line_number}: unknown record_type {record_type!r}"
                 )
 
+    if corrupt_restart_tail:
+        report.errors.append("corrupt batch tail has no restart attempt")
     if current is not None:
         report.incomplete_events += 1
         if not allow_incomplete_tail:
             report.errors.append(f"{current.uid}: incomplete event at end of ledger")
+    if batch is not None:
+        report.censored_batches += 1
+        if not allow_incomplete_tail:
+            report.errors.append(f"{batch.uid}: incomplete batch at end of ledger")
+
+    active_cutoffs: dict[int, int | None] = {}
+    if attempts:
+        index: int | None = len(attempts) - 1
+        cutoff: int | None = None
+        while index is not None:
+            if index in active_cutoffs:
+                report.errors.append("restart lineage cycle")
+                break
+            active_cutoffs[index] = cutoff
+            _, index, cutoff = attempts[index]
+
+    for begin, digest in legacy:
+        accept(begin, digest)
+    for batch_index, (owner, committed_batch, digest) in enumerate(committed):
+        if owner not in active_cutoffs:
+            continue
+        cutoff = active_cutoffs[owner]
+        if cutoff is not None and batch_index >= cutoff:
+            continue
+        previous = batch_digests.get(committed_batch.uid)
+        if previous is not None and previous != digest:
+            report.errors.append(f"{committed_batch.uid}: conflicting deterministic batch UID")
+        batch_digests[committed_batch.uid] = digest
+        for begin, event_digest, _ in committed_batch.events:
+            accept(begin, event_digest)
     return report
 
 

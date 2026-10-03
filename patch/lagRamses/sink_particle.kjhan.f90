@@ -1180,7 +1180,8 @@ subroutine merge_sink(ilevel)
   real(dp), allocatable :: pending_new(:)
   integer :: pending_error,pending_error_all,pending_channel,channel_error
   real(dp),allocatable::mechanical_merged(:,:)
-  integer::j,isink,ii,jj,kk,ind,idim,new_sink
+  integer::j,isink,ii,jj,kk,ind,idim,new_sink,capture_nsink_before
+  logical::capture_batch_open
   real(dp)::dx_loc,scale,dx_min,xx,yy,zz,rr,rmax2,rmax
   integer::igrid,jgrid,ipart,jpart,next_part,info
   integer::i,ig,ip,npart1,npart2,icpu,nx_loc
@@ -1442,6 +1443,7 @@ subroutine merge_sink(ilevel)
 ! call MPI_Bcast(gsink, nsink, MPI_INTEGER, 0, MPI_COMM_WORLD, info)
 #endif
   new_sink=igrp
+  capture_batch_open=.false.
 ! call mpi_barrier(MPI_COMM_WORLD, info)
   if(myid==1)then
      write(*,*)'Found ',new_sink,' groups from', nsink
@@ -1454,8 +1456,10 @@ subroutine merge_sink(ilevel)
   ! compaction below.  The ledger is diagnostic only: it does not alter
   ! the existing FOF grouping or sink dynamics.
   if(smbh .and. smbh_capture_ledger .and. new_sink < nsink) then
+     capture_nsink_before=nsink
      call write_smbh_capture_ledger(ilevel,new_sink,gsink,dx_min,scale, &
           & xbound,factG)
+     capture_batch_open=.true.
 #ifndef WITHOUTMPI
      ! Rank 1 performs the I/O.  Do not let any rank enter irreversible
      ! compaction until the complete transaction has been flushed and closed.
@@ -1867,6 +1871,18 @@ subroutine merge_sink(ilevel)
 102  end do
   ! End loop over cpus
 
+  if(capture_batch_open)then
+#ifndef WITHOUTMPI
+     ! Every rank must finish sink compaction before rank 1 commits the batch.
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+     if(myid==1) call capture_ledger_protocol('commit',ilevel, &
+          & capture_nsink_before,new_sink,0,0)
+#ifndef WITHOUTMPI
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+  endif
+
 111 format('  +Entering merge_sink for level ',I2)
 
 end subroutine merge_sink
@@ -1889,7 +1905,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   integer::ledger_unit,ios,igrp,isink,jsink_member,idim
   integer::nmember,member_index,pair_index,anchor,min_id,max_id
   integer::primary_index,primary_sink_id
-  integer::expected_pairs
+  integer::expected_pairs,expected_events
   real(dp)::box_size,total_mass,max_separation
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
   real(dp)::redshift
@@ -1928,9 +1944,19 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   periodic_box=scale*xbound
   if(any(.not.ieee_is_finite(periodic_box)) .or. any(periodic_box <= 0d0)) &
        & call ledger_state_fatal('invalid scaled periodic box',0)
+  if(.not.ieee_is_finite(aexp) .or. aexp <= 0d0 .or. &
+       & .not.ieee_is_finite(boxlen) .or. boxlen <= 0d0 .or. &
+       & .not.ieee_is_finite(rmerge*dx_min) .or. rmerge*dx_min <= 0d0 .or. &
+       & any(.not.ieee_is_finite((/t,texp,redshift,omega_m,h0/)))) &
+       & call ledger_state_fatal('invalid capture epoch or metadata',0)
+  if(any(.not.ieee_is_finite((/scale_l,scale_t,scale_d,scale_v,scale_m/))) .or. &
+       & min(scale_l,scale_t,scale_d,scale_v,scale_m) <= 0d0) &
+       & call ledger_state_fatal('invalid capture unit scale',0)
+  expected_events=0
   do igrp=1,ngrp
      nmember=count(gsink(1:nsink) == igrp)
      if(nmember < 2) cycle
+     expected_events=expected_events+1
      total_mass=0d0
      do isink=1,nsink
         if(gsink(isink) /= igrp) cycle
@@ -1939,11 +1965,19 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         if(any(.not.ieee_is_finite(xsink(isink,1:ndim))) .or. &
              & any(.not.ieee_is_finite(vsink(isink,1:ndim)))) &
              & call ledger_state_fatal('invalid member position or velocity',igrp)
+        if(idsink(isink) <= 0 .or. &
+             & any(.not.ieee_is_finite((/tsink(isink),dMsmbh(isink), &
+             & spinmag(isink)/))) .or. &
+             & any(.not.ieee_is_finite(bhspin(isink,1:3))) .or. &
+             & any(.not.ieee_is_finite(jsink(isink,1:3)))) &
+             & call ledger_state_fatal('invalid member identity or diagnostic',igrp)
         total_mass=total_mass+msink(isink)
      enddo
      if(.not.ieee_is_finite(total_mass) .or. total_mass <= 0d0) &
           & call ledger_state_fatal('invalid group total mass',igrp)
   enddo
+  if(expected_events <= 0) call ledger_state_fatal('empty capture batch',0)
+  call capture_ledger_protocol('begin',ilevel,nsink,ngrp,expected_events,0)
 
   iomsg=''
   open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file), &
@@ -2033,7 +2067,8 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
           & '{"schema_version":1,"record_type":"event_begin","event_uid":"'// &
           & trim(event_uid)//'","classification":"'//trim(classification)// &
-          & '","nstep_coarse":'//trim(json_int(nstep_coarse))// &
+          & '","multiple_members_preserved":'//trim(json_logical(nmember > 2))// &
+          & ',"nstep_coarse":'//trim(json_int(nstep_coarse))// &
           & ',"ilevel":'//trim(json_int(ilevel))// &
           & ',"group_index":'//trim(json_int(igrp))// &
           & ',"primary_sink_id":'//trim(json_int(primary_sink_id))// &
@@ -2278,6 +2313,131 @@ contains
   end function json_logical
 
 end subroutine write_smbh_capture_ledger
+!################################################################
+!################################################################
+!################################################################
+!################################################################
+subroutine capture_ledger_protocol(action,ilevel,nsink_before,nsink_after,expected_events,output_number)
+  use amr_commons
+  use pm_commons
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+
+  character(len=*),intent(in)::action
+  integer,intent(in)::ilevel,nsink_before,nsink_after,expected_events,output_number
+  integer::ledger_unit,ios,log_ios
+  integer(kind=8)::file_size
+  logical::file_exists
+  logical,save::attempt_started=.false.,batch_open=.false.
+  integer,save::batch_step=-1,batch_level=-1,batch_before=-1,batch_after=-1
+  character(len=96),save::batch_uid=''
+  character(len=512)::record,iomsg
+
+  if(myid /= 1) return
+  record=''
+  select case(action)
+  case('attempt')
+     if(attempt_started .or. batch_open) call protocol_fatal('duplicate attempt marker')
+     file_size=-1
+     inquire(file=trim(smbh_capture_ledger_file),exist=file_exists,size=file_size,iostat=ios)
+     if(ios /= 0) call protocol_fatal('cannot inspect ledger before attempt')
+     if(nrestart == 0 .and. file_exists .and. file_size > 0) &
+          & call protocol_fatal('fresh run would append to an existing ledger')
+     if(nrestart > 0 .and. (.not.file_exists .or. file_size <= 0)) &
+          & call protocol_fatal('restart has no existing capture ledger')
+     record='{"schema_version":1,"record_type":"attempt_begin","restart_output":'// &
+          & trim(protocol_int(nrestart))//',"resume_step":'//trim(protocol_int(nstep_coarse))//'}'
+  case('begin')
+     if(.not.attempt_started .or. batch_open) call protocol_fatal('batch begins outside attempt')
+     if(ilevel < 1 .or. nsink_before <= nsink_after .or. nsink_after < 1 .or. &
+          & expected_events < 1) call protocol_fatal('invalid batch metadata')
+     write(batch_uid,'(I0,"-",I0,"-",I0,"-",I0)') &
+          & nstep_coarse,ilevel,nsink_before,nsink_after
+     batch_step=nstep_coarse
+     batch_level=ilevel
+     batch_before=nsink_before
+     batch_after=nsink_after
+     record='{"schema_version":1,"record_type":"batch_begin","batch_uid":"'// &
+          & trim(batch_uid)//'","nstep_coarse":'//trim(protocol_int(nstep_coarse))// &
+          & ',"ilevel":'//trim(protocol_int(ilevel))// &
+          & ',"nsink_before":'//trim(protocol_int(nsink_before))// &
+          & ',"nsink_after":'//trim(protocol_int(nsink_after))// &
+          & ',"expected_events":'//trim(protocol_int(expected_events))//'}'
+  case('commit')
+     if(.not.attempt_started .or. .not.batch_open) &
+          & call protocol_fatal('batch commit without open batch')
+     if(nstep_coarse /= batch_step .or. ilevel /= batch_level .or. &
+          & nsink_before /= batch_before .or. nsink_after /= batch_after .or. &
+          & nsink /= nsink_after) call protocol_fatal('batch changed before commit')
+     record='{"schema_version":1,"record_type":"batch_commit","batch_uid":"'// &
+          & trim(batch_uid)//'","nsink_after":'//trim(protocol_int(nsink_after))//'}'
+  case('checkpoint')
+     if(.not.attempt_started .or. batch_open .or. output_number < 1) &
+          & call protocol_fatal('checkpoint outside completed attempt')
+     record='{"schema_version":1,"record_type":"checkpoint","output_number":'// &
+          & trim(protocol_int(output_number))// &
+          & ',"nstep_coarse":'//trim(protocol_int(nstep_coarse))//'}'
+  case default
+     call protocol_fatal('unknown ledger protocol action')
+  end select
+
+  iomsg=''
+  open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file), &
+       & status='unknown',position='append',action='write', &
+       & form='formatted',iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call protocol_io_fatal('open',ios,iomsg)
+  if(action == 'attempt' .and. nrestart > 0)then
+     ! A crash can tear the final JSON row. Isolate it before the new marker;
+     ! readers censor that one row only after validating this restart attempt.
+     iomsg=''
+     write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) ''
+     if(ios /= 0) call protocol_io_fatal('separate restart tail',ios,iomsg)
+  endif
+  iomsg=''
+  write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) trim(record)
+  if(ios /= 0) call protocol_io_fatal('write',ios,iomsg)
+  iomsg=''
+  flush(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call protocol_io_fatal('flush',ios,iomsg)
+  iomsg=''
+  close(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call protocol_io_fatal('close',ios,iomsg)
+
+  select case(action)
+  case('attempt')
+     attempt_started=.true.
+  case('begin')
+     batch_open=.true.
+  case('commit')
+     batch_open=.false.
+  end select
+
+contains
+
+  subroutine protocol_fatal(reason)
+    character(len=*),intent(in)::reason
+    write(error_unit,'(A,1X,A)') 'FATAL: SMBH capture ledger protocol:',trim(reason)
+    flush(error_unit,iostat=log_ios)
+    call clean_stop
+  end subroutine protocol_fatal
+
+  subroutine protocol_io_fatal(operation,status,message)
+    character(len=*),intent(in)::operation,message
+    integer,intent(in)::status
+    write(error_unit,'(A,1X,A,1X,A,I0,1X,A)') &
+         & 'FATAL: SMBH capture ledger protocol I/O:',trim(operation), &
+         & 'iostat=',status,trim(message)
+    flush(error_unit,iostat=log_ios)
+    call clean_stop
+  end subroutine protocol_io_fatal
+
+  function protocol_int(value) result(text)
+    integer,intent(in)::value
+    character(len=32)::text
+    write(text,'(I0)') value
+  end function protocol_int
+
+end subroutine capture_ledger_protocol
 !################################################################
 !################################################################
 !################################################################
