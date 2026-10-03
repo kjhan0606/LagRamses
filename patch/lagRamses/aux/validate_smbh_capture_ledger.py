@@ -51,6 +51,7 @@ class AttemptBlock:
     resume_step: int | None
     restart_output: int | None
     parent_index: int | None
+    parent_batch_cutoff: int | None
 
 
 @dataclass
@@ -209,6 +210,19 @@ def _validate_pair_invariants(
     if None in (delta_position, delta_velocity, specific_h, relative_l):
         return
 
+    position1 = _require_vector(members[id1], "position_code", uid, errors)
+    position2 = _require_vector(members[id2], "position_code", uid, errors)
+    velocity1 = _require_vector(members[id1], "velocity_code", uid, errors)
+    velocity2 = _require_vector(members[id2], "velocity_code", uid, errors)
+    separation_scale = (
+        _norm(max(abs(a), abs(b)) for a, b in zip(position1, position2))
+        if position1 is not None and position2 is not None else 0.0
+    )
+    speed_scale = (
+        _norm(max(abs(a), abs(b)) for a, b in zip(velocity1, velocity2))
+        if velocity1 is not None and velocity2 is not None else 0.0
+    )
+
     separation = _require_number(pair, "separation_code", uid, errors)
     relative_speed = _require_number(pair, "relative_speed_code", uid, errors)
     reduced_mass = _require_number(pair, "reduced_mass_code", uid, errors)
@@ -217,9 +231,9 @@ def _validate_pair_invariants(
     expected_v2 = sum(value * value for value in delta_velocity)
     expected_r = math.sqrt(expected_r2)
     expected_v = math.sqrt(expected_v2)
-    if separation is not None and not _close(separation, expected_r):
+    if separation is not None and not _close(separation, expected_r, scale=separation_scale):
         errors.append(f"{uid}: pair {id1}-{id2} separation invariant failed")
-    if relative_speed is not None and not _close(relative_speed, expected_v):
+    if relative_speed is not None and not _close(relative_speed, expected_v, scale=speed_scale):
         errors.append(f"{uid}: pair {id1}-{id2} relative-speed invariant failed")
 
     mass1 = _require_number(members[id1], "mass_code", uid, errors)
@@ -231,13 +245,11 @@ def _validate_pair_invariants(
     expected_kinetic = 0.5 * expected_mu * expected_v2
     if reduced_mass is not None and not _close(reduced_mass, expected_mu):
         errors.append(f"{uid}: pair {id1}-{id2} reduced-mass invariant failed")
-    if relative_kinetic is not None and not _close(relative_kinetic, expected_kinetic):
+    if relative_kinetic is not None and not _close(
+        relative_kinetic, expected_kinetic, scale=expected_mu * expected_v * speed_scale
+    ):
         errors.append(f"{uid}: pair {id1}-{id2} kinetic-energy invariant failed")
 
-    position1 = _require_vector(members[id1], "position_code", uid, errors)
-    position2 = _require_vector(members[id2], "position_code", uid, errors)
-    velocity1 = _require_vector(members[id1], "velocity_code", uid, errors)
-    velocity2 = _require_vector(members[id2], "velocity_code", uid, errors)
     if box_size is not None and position1 is not None and position2 is not None:
         expected_delta_position = _minimum_image_delta(position1, position2, box_size)
         if any(
@@ -296,7 +308,8 @@ def _validate_pair_invariants(
     legacy_pair_bound = _require_logical(pair, "legacy_pair_bound", uid, errors)
     if merge_radius is not None and within_rmerge is not None:
         expected_within = expected_r2 <= merge_radius**2
-        if not _close(expected_r2, merge_radius**2) and within_rmerge is not expected_within:
+        if not _close(expected_r2, merge_radius**2,
+                      scale=2.0 * expected_r * separation_scale) and within_rmerge is not expected_within:
             errors.append(f"{uid}: pair {id1}-{id2} within-rmerge invariant failed")
 
     finite_pair = expected_r > sys.float_info.min
@@ -326,16 +339,22 @@ def _validate_pair_invariants(
     specific_gravity = fact_g * (mass1 + mass2) / expected_r
     expected_specific_energy = specific_kinetic - specific_gravity
     expected_legacy_proxy = fact_g * mass1 * mass2 / expected_r2
-    if potential_value is not None and not _close(potential_value, expected_potential):
+    radius_error_factor = separation_scale / expected_r
+    if potential_value is not None and not _close(
+        potential_value, expected_potential,
+        scale=abs(expected_potential) * radius_error_factor,
+    ):
         errors.append(f"{uid}: pair {id1}-{id2} potential-energy invariant failed")
     if specific_energy_value is not None and not _close(
         specific_energy_value,
         expected_specific_energy,
-        scale=abs(specific_kinetic) + abs(specific_gravity),
+        scale=abs(specific_kinetic) + abs(specific_gravity)
+        + expected_v * speed_scale + abs(specific_gravity) * radius_error_factor,
     ):
         errors.append(f"{uid}: pair {id1}-{id2} specific-energy invariant failed")
     if legacy_proxy_value is not None and not _close(
-        legacy_proxy_value, expected_legacy_proxy
+        legacy_proxy_value, expected_legacy_proxy,
+        scale=2.0 * abs(expected_legacy_proxy) * radius_error_factor,
     ):
         errors.append(f"{uid}: pair {id1}-{id2} legacy-binding-proxy invariant failed")
     if (
@@ -343,7 +362,8 @@ def _validate_pair_invariants(
         and not _close(
             expected_specific_energy,
             0.0,
-            scale=abs(specific_kinetic) + abs(specific_gravity),
+            scale=abs(specific_kinetic) + abs(specific_gravity)
+            + expected_v * speed_scale + abs(specific_gravity) * radius_error_factor,
         )
         and two_body_bound is not (expected_specific_energy < 0.0)
     ):
@@ -353,7 +373,9 @@ def _validate_pair_invariants(
         and not _close(
             expected_kinetic,
             expected_legacy_proxy,
-            scale=abs(expected_kinetic) + abs(expected_legacy_proxy),
+            scale=abs(expected_kinetic) + abs(expected_legacy_proxy)
+            + expected_mu * expected_v * speed_scale
+            + 2.0 * abs(expected_legacy_proxy) * radius_error_factor,
         )
         and legacy_pair_bound is not (expected_kinetic < expected_legacy_proxy)
     ):
@@ -435,7 +457,10 @@ def _validate_event_invariants(
         for index in range(3)
     ]
     if reported_com_position is not None and any(
-        not _close(got, expected, scale=box_size[index])
+        not _close(
+            _minimum_image_delta([expected], [got], [box_size[index]])[0],
+            0.0, scale=box_size[index],
+        )
         for index, (got, expected) in enumerate(
             zip(reported_com_position, com_position)
         )
@@ -450,12 +475,17 @@ def _validate_event_invariants(
         errors.append(f"{uid}: centre-of-mass velocity invariant failed")
 
     max_separation = 0.0
+    max_separation_scale = 0.0
     for position1, position2 in combinations(positions, 2):
         max_separation = max(
             max_separation, _norm(_minimum_image_delta(position1, position2, box_size))
         )
+        max_separation_scale = max(
+            max_separation_scale,
+            _norm(max(abs(a), abs(b)) for a, b in zip(position1, position2)),
+        )
     if reported_max_separation is not None and not _close(
-        reported_max_separation, max_separation
+        reported_max_separation, max_separation, scale=max_separation_scale
     ):
         errors.append(f"{uid}: maximum-separation invariant failed")
     return box_size, fact_g, merge_radius
@@ -591,7 +621,10 @@ def validate_ledger(
     legacy_events: list[tuple[EventBlock, str]] = []
     committed: list[tuple[BatchBlock, str, int | None]] = []
     attempts: list[AttemptBlock] = []
-    checkpoint_owner: dict[int, tuple[int, int]] = {}
+    # A checkpoint marker records the exact committed-batch prefix present in
+    # its snapshot.  Coarse-step equality cannot distinguish captures before
+    # and after an output written in that same step.
+    checkpoint_owner: dict[int, tuple[int, int, int]] = {}
     digests: dict[str, str] = {}
     batch_digests: dict[str, str] = {}
 
@@ -754,6 +787,7 @@ def validate_ledger(
                         f"line {line_number}: cannot prove restart censoring for legacy bare events"
                     )
                 parent_index = None
+                parent_batch_cutoff = None
                 if restart_output is not None and restart_output > 0:
                     checkpoint = checkpoint_owner.get(restart_output)
                     if checkpoint is None:
@@ -761,12 +795,14 @@ def validate_ledger(
                             f"line {line_number}: restart output {restart_output} has no ledger checkpoint"
                         )
                     else:
-                        parent_index, checkpoint_step = checkpoint
+                        parent_index, checkpoint_step, parent_batch_cutoff = checkpoint
                         if resume_step != checkpoint_step:
                             report.errors.append(
                                 f"line {line_number}: restart step differs from checkpoint"
                             )
-                attempts.append(AttemptBlock(resume_step, restart_output, parent_index))
+                attempts.append(AttemptBlock(
+                    resume_step, restart_output, parent_index, parent_batch_cutoff
+                ))
                 active_resume_step = resume_step
                 report.run_attempts += 1
                 seen_batch_protocol = True
@@ -805,6 +841,7 @@ def validate_ledger(
                     checkpoint_owner[output_number] = (
                         len(attempts) - 1,
                         checkpoint_step,
+                        len(committed),
                     )
             elif record_type == "batch_begin":
                 seen_batch_protocol = True
@@ -898,12 +935,11 @@ def validate_ledger(
                 break
             active_cutoffs[attempt_index] = cutoff
             attempt = attempts[attempt_index]
-            cutoff = attempt.resume_step
+            cutoff = attempt.parent_batch_cutoff
             attempt_index = attempt.parent_index
     for block, digest in legacy_events:
         accept_event(block, digest)
-    for committed_batch, digest, owner in committed:
-        step = committed_batch.begin.get("nstep_coarse")
+    for batch_index, (committed_batch, digest, owner) in enumerate(committed):
         if attempts and owner is None:
             report.errors.append(
                 f"{committed_batch.uid}: batch predates first run attempt marker"
@@ -913,8 +949,7 @@ def validate_ledger(
             owner not in active_cutoffs
             or (
                 active_cutoffs[owner] is not None
-                and isinstance(step, int)
-                and step >= active_cutoffs[owner]
+                and batch_index >= active_cutoffs[owner]
             )
         ):
             report.superseded_batches += 1

@@ -49,8 +49,10 @@ step; the snapshot's `COMPLETE` marker is written **last**. SMBH capture
 restarts reject outputs without `COMPLETE`. The validator resolves each
 restart to the latest checkpoint row for
 that output, checks the step, and follows parent attempts from the final
-attempt. It excludes other branches and any ancestor events at or after the
-child's checkpoint step: those in-memory merges were not in that snapshot.
+attempt. It excludes other branches and ancestor batches **recorded after**
+the child's checkpoint marker: those in-memory merges were not in that
+snapshot. Record order matters because a capture and a checkpoint can share
+the same coarse-step number.
 The named output directory and its `COMPLETE` marker must also be checked
 against the run's on-disk provenance before production use.
 

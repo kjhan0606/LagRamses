@@ -324,6 +324,30 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertFalse(_close(1.0e-12, 1.001e-12))
         self.assertTrue(_close(1.0e-20, 1.0e-20 * (1.0 + 1.0e-13)))
 
+    def test_close_pair_far_from_origin_uses_coordinate_roundoff_scale(self):
+        rows = binary_rows()
+        begin, first, second, pair, _ = rows
+        first["position_code"] = [5.0, 0.0, 0.0]
+        second["position_code"] = [5.000001, 0.0, 0.0]
+        separation = second["position_code"][0] - first["position_code"][0]
+        begin["com_position_code"] = [5.0 + 0.6 * separation, 0.0, 0.0]
+        begin["max_pair_separation_code"] = separation + 1.0e-16
+        pair.update(
+            delta_position_code=[separation, 0.0, 0.0],
+            separation_code=separation + 1.0e-16,
+            specific_angular_momentum_code=[0.0, 0.0, 2.0 * separation],
+            relative_angular_momentum_code=[0.0, 0.0, 2.4 * separation],
+            newtonian_potential_1overr_code=-6.0 / separation,
+            two_body_specific_energy_code=2.0 - 5.0 / separation,
+            legacy_binding_proxy_1overr2_code=6.0 / separation**2,
+        )
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        pair["separation_code"] += 1.0e-6
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("separation invariant" in error for error in report.errors))
+
     def test_marginal_binding_uses_uncancelled_energy_scale(self):
         rows = binary_rows()
         rows[0]["total_mass_code"] = 2.0
@@ -510,6 +534,12 @@ class LedgerValidationTests(unittest.TestCase):
         )
         self.assertTrue(retained.valid, retained.errors)
         self.assertEqual(retained.unique_events, 2)
+
+        same_step_retained = self.validate_rows(
+            [attempt_row(0, 0), *old, checkpoint_row(5, 10), attempt_row(10, 5)]
+        )
+        self.assertTrue(same_step_retained.valid, same_step_retained.errors)
+        self.assertEqual(same_step_retained.unique_events, 2)
 
     def test_restart_cutline_allows_changed_runtime_metadata(self):
         old = batched_binary_rows()
