@@ -337,6 +337,15 @@ subroutine dump_all
      ! The resolved-physics inventory is deliberately written before COMPLETE.
      ! It indexes raw files only; consumers must still require COMPLETE before
      ! reading any listed snapshot or treating its diagnostic as durable.
+     if(sink .and. smbh .and. smbh_capture_ledger)then
+        ! Publish lineage before COMPLETE.  A crash between these operations
+        ! leaves an output that restart must reject, not a valid snapshot
+        ! silently attributed to an older attempt with the same output number.
+        call write_smbh_capture_checkpoint(ifout-1)
+#ifndef WITHOUTMPI
+        call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+     endif
      if(myid==1)then
         filename='output_'//TRIM(nchar)//'/COMPLETE'
         open(unit=11,file=TRIM(filename),form='formatted')

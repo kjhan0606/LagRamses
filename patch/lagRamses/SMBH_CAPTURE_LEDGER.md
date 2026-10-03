@@ -20,19 +20,20 @@ its `info`/build metadata.
 
 The writer is invoked only when `smbh = .true.`.  In other sink modes the
 ledger controls are ignored.  When enabled for an SMBH run, failure to open,
-write, flush, or close the ledger is fatal: RAMSES calls `clean_stop` before
-any rank enters the irreversible sink-compaction section.  A partially
-written tail from that failed run remains invalid and must not be consumed as
-a capture event.
+write, flush, or close either the pre-compaction ledger block or the
+post-compaction commit marker is fatal: rank 1 calls `MPI_ABORT` in MPI builds
+so other ranks cannot hang at the ledger barrier. A partially
+written tail from a failed run must not be consumed as a capture event.
 An SMBH group with non-positive/non-finite member mass, non-finite member
 position/velocity, or duplicate sink IDs also stops before compaction; such a
 group is never silently omitted from an otherwise complete ledger.
 Before opening the file, the writer checks metadata/units and **all** capture
 groups in that merge call. Thus a bad later group cannot leave an earlier
-complete-looking event from the same call. This preflight does not make a
-filesystem append or subsequent sink compaction atomic: an I/O or process
-failure after a complete event still requires run/checkpoint provenance review
-before that event is treated as a completed numerical merge.
+complete-looking event from the same call. A `batch_begin` encloses all events
+from one merge call. Only a `batch_commit` written after the sink arrays and
+particles are updated makes those events countable. I/O or process failure
+before that marker leaves the entire batch censored, even if an `event_end`
+was already written.
 It rejects invalid masses for singleton groups as well, since those groups
 also pass through the downstream compaction loop.
 The AGN pending-energy/merger-map check also runs before ledger I/O; failure
@@ -40,7 +41,25 @@ there cannot leave a complete event for a compaction that never starts.
 
 ## Transaction layout
 
-Every event is a contiguous JSONL transaction:
+After sink initialization and before the first step/output of each process
+invocation, `attempt_begin` records the restored coarse step and
+restart-output number, even if no capture follows. After all snapshot data
+have been written, a `checkpoint` row records its output number and coarse
+step; the snapshot's `COMPLETE` marker is written **last**. SMBH capture
+restarts reject outputs without `COMPLETE`. The validator resolves each
+restart to the latest checkpoint row for
+that output, checks the step, and follows parent attempts from the final
+attempt. It excludes other branches and any ancestor events at or after the
+child's checkpoint step: those in-memory merges were not in that snapshot.
+The named output directory and its `COMPLETE` marker must also be checked
+against the run's on-disk provenance before production use.
+
+Each new merge call writes `batch_begin`, then contiguous event transactions,
+then `batch_commit` after compaction. The begin row records coarse step,
+level, sink counts before/after, and expected event count; the commit row
+confirms the post-compaction sink count. The deterministic batch UID contains
+coarse step, level, and before/after sink counts. The validator checks that
+the sum of `nmember-1` equals the sink-count reduction. Every event contains:
 
 1. `event_begin`: integration time, cosmology, code-unit conversions, merge
    radius, FOF group size, classification, axis-specific periodic box extents,
@@ -53,7 +72,8 @@ Every event is a contiguous JSONL transaction:
    relative velocity, reduced mass, Newtonian two-body energy, angular
    momentum, the current code's legacy `1/r^2` binding proxy, and both binding
    flags.
-4. `event_end`: expected member/pair counts and `complete=true`.
+4. `event_end`: expected member/pair counts and `complete=true` (record block
+   complete, not a committed numerical merge without `batch_commit`).
 
 Two-member groups are `BINARY`; larger transitive FOF groups are `MULTIPLE`.
 No arbitrary binary ordering is inferred for a multiple.
@@ -69,7 +89,9 @@ ID, and member count.  A restart may append the same complete transaction
 again.  Consumers must deduplicate identical UIDs.  If a crash occurs between
 `event_begin` and `event_end`, consumers must reject that incomplete
 transaction.  A repeated UID with different content is a provenance conflict,
-not a valid restart duplicate.
+not a valid restart duplicate. Identical committed batches are deduplicated.
+Older version-1 files containing bare events remain readable, but they do
+not gain retrospective batch-commit evidence.
 New transactions record `periodic_box_size_code` as three extents. The
 validator uses these for minimum-image and COM checks; older version-1
 transactions without the field retain their historical cubic-`boxlen` check.
@@ -81,8 +103,21 @@ python3 patch/lagRamses/aux/validate_smbh_capture_ledger.py \
   smbh_capture_ledger_v1.jsonl
 ```
 
-For a ledger being written, `--allow-incomplete-tail` reports a final partial
-transaction without treating that condition alone as invalid.
+For a ledger being written, `--allow-incomplete-tail` censors a final partial
+event or batch without treating that condition alone as invalid. An aborted
+attempt followed by a restart's new `batch_begin` can be censored explicitly
+with `--allow-incomplete-batches`. Neither option counts uncommitted events.
+Malformed JSON and conflicting committed batch UIDs remain errors; repair a
+truncated final line before validating a restarted JSONL file. The writer
+inserts a blank separator before each new batch so a torn line cannot swallow
+the next `batch_begin`. Once batched records appear, a later bare event is an
+error rather than a legacy transaction.
+
+The batch marker proves in-memory compaction in its run attempt, not survival
+in a later checkpoint. `attempt_begin` and `checkpoint` provide the restart
+lineage and cutline used to censor superseded commits; identical replay
+deduplication alone is insufficient. A final production analysis must verify
+that the named restart output still exists and matches the recorded step.
 
 ## Physical interpretation
 

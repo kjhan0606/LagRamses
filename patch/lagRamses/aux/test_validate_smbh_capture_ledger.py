@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from validate_smbh_capture_ledger import validate_ledger  # noqa: E402
+from validate_smbh_capture_ledger import _close, validate_ledger  # noqa: E402
 
 
 def binary_rows(uid: str = "10-1-7-9-2") -> list[dict]:
@@ -23,6 +23,7 @@ def binary_rows(uid: str = "10-1-7-9-2") -> list[dict]:
         "nmember": 2,
         "expected_pairs": 1,
         "boxlen": 10.0,
+        "periodic_box_size_code": [10.0, 10.0, 10.0],
         "factG_code": 1.0,
         "merge_radius_code": 1.0,
         "total_mass_code": 5.0,
@@ -100,6 +101,7 @@ def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
         "nmember": 3,
         "expected_pairs": 3,
         "boxlen": 10.0,
+        "periodic_box_size_code": [10.0, 10.0, 10.0],
         "factG_code": 1.0,
         "merge_radius_code": 1.5,
         "total_mass_code": 10.0,
@@ -225,7 +227,125 @@ def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
     return [begin, *members, *pairs, end]
 
 
+def batched_binary_rows() -> list[dict]:
+    first = binary_rows()
+    second = copy.deepcopy(binary_rows("10-1-12-14-2"))
+    for row in second:
+        for key in ("sink_id", "primary_sink_id", "sink_id_1", "sink_id_2"):
+            if key in row:
+                row[key] += 5
+    for rows in (first, second):
+        rows[0]["nstep_coarse"] = 10
+        rows[0]["ilevel"] = 1
+    return [
+        {
+            "schema_version": 1,
+            "record_type": "batch_begin",
+            "batch_uid": "10-1-4-2",
+            "nstep_coarse": 10,
+            "ilevel": 1,
+            "nsink_before": 4,
+            "nsink_after": 2,
+            "expected_events": 2,
+        },
+        *first,
+        *second,
+        {
+            "schema_version": 1,
+            "record_type": "batch_commit",
+            "batch_uid": "10-1-4-2",
+            "nsink_after": 2,
+        },
+    ]
+
+
+def attempt_row(step: int, restart_output: int) -> dict:
+    return {
+        "schema_version": 1,
+        "record_type": "attempt_begin",
+        "resume_step": step,
+        "restart_output": restart_output,
+    }
+
+
+def checkpoint_row(output_number: int, step: int) -> dict:
+    return {
+        "schema_version": 1,
+        "record_type": "checkpoint",
+        "output_number": output_number,
+        "nstep_coarse": step,
+    }
+
+
+def shifted_batch(step: int, id_offset: int) -> list[dict]:
+    rows = copy.deepcopy(batched_binary_rows())
+    for row in rows:
+        if "batch_uid" in row:
+            row["batch_uid"] = f"{step}-1-4-2"
+        if "event_uid" in row:
+            _, level, minimum, maximum, nmember = row["event_uid"].split("-")
+            row["event_uid"] = (
+                f"{step}-{level}-{int(minimum) + id_offset}-"
+                f"{int(maximum) + id_offset}-{nmember}"
+            )
+        if "nstep_coarse" in row:
+            row["nstep_coarse"] = step
+        for key in ("sink_id", "primary_sink_id", "sink_id_1", "sink_id_2"):
+            if key in row:
+                row[key] += id_offset
+    return rows
+
+
 class LedgerValidationTests(unittest.TestCase):
+    def test_binary_restart_keeps_sink_id_high_water_mark(self):
+        source = (Path(__file__).resolve().parents[1] / "init_sink.f90").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("nindsink=MAX(nindsink,MAXVAL(idsink(1:nsink)))", source)
+
+    def test_checkpoint_lineage_precedes_complete_and_restart_requires_it(self):
+        root = Path(__file__).resolve().parents[1]
+        output = (root / "output_amr.kjhan.f90").read_text(encoding="utf-8")
+        dump = output.split("subroutine dump_all", 1)[1].split(
+            "end subroutine dump_all", 1
+        )[0]
+        self.assertLess(
+            dump.index("call write_smbh_capture_checkpoint(ifout-1)"),
+            dump.rindex("write(11,'(A)')TRIM(nchar)"),
+        )
+        init_part = (root / "init_part.f90").read_text(encoding="utf-8")
+        self.assertLess(
+            init_part.index("inquire(file=trim(filename),exist=capture_restart_complete)"),
+            init_part.index("call write_smbh_capture_attempt"),
+        )
+
+    def test_small_code_unit_invariants_cannot_hide_under_absolute_tolerance(self):
+        self.assertFalse(_close(1.0e-20, -1.0e-20))
+        self.assertFalse(_close(1.0e-12, 1.001e-12))
+        self.assertTrue(_close(1.0e-20, 1.0e-20 * (1.0 + 1.0e-13)))
+
+    def test_marginal_binding_uses_uncancelled_energy_scale(self):
+        rows = binary_rows()
+        rows[0]["total_mass_code"] = 2.0
+        rows[1]["mass_code"] = 0.8
+        rows[2]["mass_code"] = 1.2
+        pair = rows[3]
+        pair["reduced_mass_code"] = 0.48
+        pair["relative_kinetic_code"] = 0.96
+        pair["newtonian_potential_1overr_code"] = -0.96
+        pair["two_body_specific_energy_code"] = 1.0e-15
+        pair["relative_angular_momentum_code"] = [0.0, 0.0, 0.96]
+        pair["legacy_binding_proxy_1overr2_code"] = 0.96
+        pair["two_body_bound"] = True
+        pair["legacy_pair_bound"] = True
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+
+        pair["two_body_specific_energy_code"] = 1.0e-6
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("specific-energy invariant" in error for error in report.errors))
+
     def test_writer_preflights_entire_batch_before_append(self):
         source = (Path(__file__).resolve().parents[1] / "sink_particle.kjhan.f90").read_text(
             encoding="utf-8"
@@ -239,6 +359,7 @@ class LedgerValidationTests(unittest.TestCase):
         for required in (
             "do group_index=1,ngrp",
             "do member=1,nsink",
+            "group_counts(gsink(member))=group_counts(gsink(member))+1",
             "non-positive or non-finite sink mass",
             "non-finite member position or velocity",
             "duplicate member sink ID",
@@ -249,6 +370,22 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertLess(
             preflight.index("do member=1,nsink"),
             preflight.index("do group_index=1,ngrp"),
+        )
+        self.assertIn("nmember=group_counts(igrp)", writer)
+        for fatal_name in ("ledger_group_fatal", "ledger_io_fatal"):
+            fatal = writer.split(f"  subroutine {fatal_name}", 1)[1].split(
+                f"  end subroutine {fatal_name}", 1
+            )[0]
+            self.assertIn("call MPI_ABORT(MPI_COMM_WORLD,2,abort_info)", fatal)
+
+    def test_batch_start_is_separated_from_torn_previous_line(self):
+        source = (Path(__file__).resolve().parents[1] / "sink_particle.kjhan.f90").read_text(
+            encoding="utf-8"
+        )
+        writer = source.split("subroutine write_smbh_capture_ledger(", 2)[-1]
+        self.assertLess(
+            writer.index("write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) ''"),
+            writer.index('"record_type":"batch_begin"'),
         )
 
     def test_pending_energy_gate_precedes_capture_write_and_compaction(self):
@@ -266,6 +403,10 @@ class LedgerValidationTests(unittest.TestCase):
             merge.index("call write_smbh_capture_ledger(ilevel,new_sink"),
             merge.index("xsink_new=0d0"),
         )
+        self.assertLess(
+            merge.index("call kjhan_kill_sink(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)"),
+            merge.index("call commit_smbh_capture_batch(ilevel,capture_nsink_before,nsink)"),
+        )
 
     def validate_rows(self, rows: list[object], **kwargs):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -280,6 +421,207 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertTrue(report.valid)
         self.assertEqual(report.unique_events, 1)
         self.assertEqual(report.binary_events, 1)
+
+    def test_batch_counts_only_after_post_compaction_commit(self):
+        rows = batched_binary_rows()
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.committed_batches, 1)
+        self.assertEqual(report.unique_events, 2)
+
+        uncommitted = self.validate_rows(rows[:-1])
+        self.assertFalse(uncommitted.valid)
+        self.assertEqual(uncommitted.unique_events, 0)
+        self.assertEqual(uncommitted.censored_events, 2)
+        allowed = self.validate_rows(rows[:-1], allow_incomplete_tail=True)
+        self.assertTrue(allowed.valid, allowed.errors)
+        self.assertEqual(allowed.unique_events, 0)
+
+    def test_later_partial_event_censors_earlier_complete_event(self):
+        rows = batched_binary_rows()
+        partial = rows[:-2]
+        report = self.validate_rows(partial, allow_incomplete_tail=True)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.unique_events, 0)
+        self.assertEqual(report.incomplete_events, 1)
+        self.assertEqual(report.censored_events, 1)
+
+    def test_restart_can_censor_uncommitted_attempt_without_counting_it(self):
+        rows = batched_binary_rows()
+        restarted = rows[:-1] + rows
+        strict = self.validate_rows(restarted)
+        self.assertFalse(strict.valid)
+        self.assertEqual(strict.unique_events, 2)
+        report = self.validate_rows(restarted, allow_incomplete_batches=True)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.incomplete_batches, 1)
+        self.assertEqual(report.censored_events, 2)
+        self.assertEqual(report.unique_events, 2)
+
+        partial = rows[:-2] + rows
+        report = self.validate_rows(partial, allow_incomplete_batches=True)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.incomplete_events, 1)
+        self.assertEqual(report.censored_events, 1)
+        self.assertEqual(report.unique_events, 2)
+
+    def test_identical_batch_restart_deduplicates_and_conflict_fails(self):
+        rows = batched_binary_rows()
+        report = self.validate_rows(rows + rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.committed_batches, 1)
+        self.assertEqual(report.unique_events, 2)
+        self.assertEqual(report.duplicate_events, 2)
+
+        conflicting = copy.deepcopy(rows)
+        conflicting[0]["extra_provenance"] = "different replay"
+        report = self.validate_rows(rows + conflicting)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("conflicting data" in error for error in report.errors))
+
+    def test_restart_cutline_discards_prior_in_memory_commits(self):
+        old = batched_binary_rows()
+        replay = copy.deepcopy(old)
+        for row in replay:
+            if "batch_uid" in row:
+                row["batch_uid"] = "11-1-4-2"
+            if "event_uid" in row:
+                row["event_uid"] = row["event_uid"].replace("10-1-", "11-1-", 1)
+            if "nstep_coarse" in row:
+                row["nstep_coarse"] = 11
+        report = self.validate_rows(
+            [attempt_row(0, 0), checkpoint_row(5, 10), *old, attempt_row(10, 5), *replay]
+        )
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.run_attempts, 2)
+        self.assertEqual(report.superseded_batches, 1)
+        self.assertEqual(report.superseded_events, 2)
+        self.assertEqual(report.unique_events, 2)
+        self.assertEqual(report.committed_batches, 1)
+
+        no_replay = self.validate_rows(
+            [attempt_row(0, 0), checkpoint_row(5, 10), *old, attempt_row(10, 5)]
+        )
+        self.assertTrue(no_replay.valid, no_replay.errors)
+        self.assertEqual(no_replay.unique_events, 0)
+
+        retained = self.validate_rows(
+            [attempt_row(0, 0), *old, checkpoint_row(5, 11), attempt_row(11, 5)]
+        )
+        self.assertTrue(retained.valid, retained.errors)
+        self.assertEqual(retained.unique_events, 2)
+
+    def test_restart_cutline_allows_changed_runtime_metadata(self):
+        old = batched_binary_rows()
+        replay = copy.deepcopy(old)
+        for row in replay:
+            if row.get("record_type") == "event_begin":
+                row["ncpu"] = 32
+        report = self.validate_rows(
+            [attempt_row(0, 0), checkpoint_row(5, 10), *old, attempt_row(10, 5), *replay]
+        )
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.unique_events, 2)
+        self.assertEqual(report.duplicate_events, 0)
+
+    def test_restart_cannot_silently_censor_legacy_events_or_append_fresh_run(self):
+        report = self.validate_rows(
+            binary_rows() + [attempt_row(10, 5), *batched_binary_rows()]
+        )
+        self.assertFalse(report.valid)
+        self.assertTrue(any("legacy bare events" in error for error in report.errors))
+
+        rows = batched_binary_rows()
+        report = self.validate_rows(
+            [attempt_row(0, 0), *rows, attempt_row(0, 0), *rows]
+        )
+        self.assertFalse(report.valid)
+        self.assertTrue(any("fresh run appended" in error for error in report.errors))
+
+        report = self.validate_rows([attempt_row(11, 5), *batched_binary_rows()])
+        self.assertFalse(report.valid)
+        self.assertTrue(any("predates active attempt" in error for error in report.errors))
+
+    def test_restart_from_older_branch_checkpoint_restores_that_lineage(self):
+        rows = [
+            attempt_row(0, 0),
+            *shifted_batch(10, 0),
+            checkpoint_row(5, 11),
+            *shifted_batch(20, 20),
+            checkpoint_row(10, 21),
+            attempt_row(11, 5),
+            *shifted_batch(12, 40),
+            checkpoint_row(6, 13),
+            attempt_row(21, 10),
+        ]
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.run_attempts, 3)
+        self.assertEqual(report.unique_events, 4)
+        self.assertEqual(report.superseded_batches, 1)
+        self.assertEqual(report.superseded_events, 2)
+
+        # A missing checkpoint must never silently select a parent attempt.
+        missing = [row for row in rows if row.get("output_number") != 10]
+        report = self.validate_rows(missing)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("has no ledger checkpoint" in error for error in report.errors))
+
+    def test_rewritten_output_number_uses_latest_completed_lineage_row(self):
+        rows = [
+            attempt_row(0, 0),
+            *shifted_batch(10, 0),
+            checkpoint_row(5, 11),
+            *shifted_batch(11, 20),
+            checkpoint_row(6, 12),
+            attempt_row(11, 5),
+            *shifted_batch(11, 40),
+            checkpoint_row(6, 12),
+            attempt_row(12, 6),
+        ]
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.unique_events, 4)
+        self.assertEqual(report.superseded_batches, 1)
+
+    def test_bare_event_and_orphan_batch_commit_do_not_fake_a_batch(self):
+        rows = batched_binary_rows()
+        report = self.validate_rows(binary_rows() + [rows[-1]])
+        self.assertFalse(report.valid)
+        self.assertEqual(report.unique_events, 1)
+        self.assertEqual(report.committed_batches, 0)
+
+        report = self.validate_rows(rows + binary_rows("11-1-7-9-2"))
+        self.assertFalse(report.valid)
+        self.assertEqual(report.unique_events, 2)
+        self.assertTrue(any("bare event after batch protocol" in error for error in report.errors))
+
+    def test_batch_sink_count_and_commit_mismatch_are_rejected(self):
+        for key, value in (("nsink_before", 5), ("expected_events", 1)):
+            rows = batched_binary_rows()
+            rows[0][key] = value
+            report = self.validate_rows(rows)
+            self.assertFalse(report.valid)
+            self.assertEqual(report.unique_events, 0)
+        rows = batched_binary_rows()
+        rows[-1]["nsink_after"] = 3
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertEqual(report.unique_events, 0)
+
+    def test_batched_events_require_new_fields_and_disjoint_sink_ids(self):
+        rows = batched_binary_rows()
+        rows[1].pop("periodic_box_size_code")
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("lacks periodic_box_size_code" in error for error in report.errors))
+
+        rows = batched_binary_rows()
+        rows[7]["sink_id"] = 7
+        rows[9]["sink_id_1"] = 7
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("multiple groups" in error for error in report.errors))
 
     def test_pre_primary_extension_schema_v1_remains_valid(self):
         rows = binary_rows()

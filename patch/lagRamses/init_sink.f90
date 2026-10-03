@@ -145,7 +145,10 @@ subroutine init_sink
         read(ilun)isp
         idsink(1:nsink)=isp
         ! Important for the indexation of sinks
-        nindsink=MAXVAL(idsink)
+        ! The saved counter may exceed every surviving ID after a merger.
+        ! Keep that high-water mark so a binary restart cannot recycle a
+        ! captured sink ID and corrupt capture-ledger provenance.
+        nindsink=MAX(nindsink,MAXVAL(idsink(1:nsink)))
         deallocate(isp)
         read(ilun)xdp
         msink(1:nsink)=xdp

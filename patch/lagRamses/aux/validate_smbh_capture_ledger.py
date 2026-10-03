@@ -34,6 +34,26 @@ class EventBlock:
 
 
 @dataclass
+class BatchBlock:
+    begin: dict[str, Any]
+    begin_line: int
+    error_count: int
+    invalid_json_count: int
+    events: list[tuple[EventBlock, str]] = field(default_factory=list)
+
+    @property
+    def uid(self) -> str:
+        return str(self.begin.get("batch_uid", ""))
+
+
+@dataclass
+class AttemptBlock:
+    resume_step: int | None
+    restart_output: int | None
+    parent_index: int | None
+
+
+@dataclass
 class LedgerReport:
     unique_events: int = 0
     binary_events: int = 0
@@ -41,6 +61,12 @@ class LedgerReport:
     duplicate_events: int = 0
     incomplete_events: int = 0
     invalid_json_lines: int = 0
+    committed_batches: int = 0
+    incomplete_batches: int = 0
+    censored_events: int = 0
+    run_attempts: int = 0
+    superseded_batches: int = 0
+    superseded_events: int = 0
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -57,12 +83,26 @@ class LedgerReport:
             "duplicate_events": self.duplicate_events,
             "incomplete_events": self.incomplete_events,
             "invalid_json_lines": self.invalid_json_lines,
+            "committed_batches": self.committed_batches,
+            "incomplete_batches": self.incomplete_batches,
+            "censored_events": self.censored_events,
+            "run_attempts": self.run_attempts,
+            "superseded_batches": self.superseded_batches,
+            "superseded_events": self.superseded_events,
             "errors": self.errors,
         }
 
 
-def _close(a: float, b: float, *, rtol: float = 2.0e-12) -> bool:
-    return math.isclose(float(a), float(b), rel_tol=rtol, abs_tol=1.0e-14)
+def _close(
+    a: float, b: float, *, rtol: float = 2.0e-12, scale: float = 0.0
+) -> bool:
+    # Code-unit masses and pair energies can be far below 1e-14.  A fixed
+    # absolute floor would accept even sign-flipped values at those scales.
+    # For cancellation-dominated expressions, callers pass the size of the
+    # uncancelled terms as scale instead of the small residual.
+    return abs(float(a) - float(b)) <= rtol * max(
+        abs(float(a)), abs(float(b)), abs(float(scale))
+    )
 
 
 def _norm(vector: Iterable[float]) -> float:
@@ -173,8 +213,10 @@ def _validate_pair_invariants(
     relative_speed = _require_number(pair, "relative_speed_code", uid, errors)
     reduced_mass = _require_number(pair, "reduced_mass_code", uid, errors)
     relative_kinetic = _require_number(pair, "relative_kinetic_code", uid, errors)
-    expected_r = _norm(delta_position)
-    expected_v = _norm(delta_velocity)
+    expected_r2 = sum(value * value for value in delta_position)
+    expected_v2 = sum(value * value for value in delta_velocity)
+    expected_r = math.sqrt(expected_r2)
+    expected_v = math.sqrt(expected_v2)
     if separation is not None and not _close(separation, expected_r):
         errors.append(f"{uid}: pair {id1}-{id2} separation invariant failed")
     if relative_speed is not None and not _close(relative_speed, expected_v):
@@ -186,7 +228,7 @@ def _validate_pair_invariants(
         errors.append(f"{uid}: pair {id1}-{id2} has a non-positive member mass")
         return
     expected_mu = mass1 * mass2 / (mass1 + mass2)
-    expected_kinetic = 0.5 * expected_mu * expected_v**2
+    expected_kinetic = 0.5 * expected_mu * expected_v2
     if reduced_mass is not None and not _close(reduced_mass, expected_mu):
         errors.append(f"{uid}: pair {id1}-{id2} reduced-mass invariant failed")
     if relative_kinetic is not None and not _close(relative_kinetic, expected_kinetic):
@@ -199,8 +241,14 @@ def _validate_pair_invariants(
     if box_size is not None and position1 is not None and position2 is not None:
         expected_delta_position = _minimum_image_delta(position1, position2, box_size)
         if any(
-            not _close(got, expected)
-            for got, expected in zip(delta_position, expected_delta_position)
+            not _close(
+                got,
+                expected,
+                scale=max(abs(position1[i]), abs(position2[i])),
+            )
+            for i, (got, expected) in enumerate(
+                zip(delta_position, expected_delta_position)
+            )
         ):
             errors.append(
                 f"{uid}: pair {id1}-{id2} minimum-image position invariant failed"
@@ -208,22 +256,36 @@ def _validate_pair_invariants(
     if velocity1 is not None and velocity2 is not None:
         expected_delta_velocity = [b - a for a, b in zip(velocity1, velocity2)]
         if any(
-            not _close(got, expected)
-            for got, expected in zip(delta_velocity, expected_delta_velocity)
+            not _close(
+                got,
+                expected,
+                scale=max(abs(velocity1[i]), abs(velocity2[i])),
+            )
+            for i, (got, expected) in enumerate(zip(delta_velocity, expected_delta_velocity))
         ):
             errors.append(
                 f"{uid}: pair {id1}-{id2} member-velocity invariant failed"
             )
 
     expected_h = _cross(delta_position, delta_velocity)
-    for got, expected in zip(specific_h, expected_h):
-        if not _close(got, expected):
+    h_scale = [
+        abs(delta_position[1] * delta_velocity[2])
+        + abs(delta_position[2] * delta_velocity[1]),
+        abs(delta_position[2] * delta_velocity[0])
+        + abs(delta_position[0] * delta_velocity[2]),
+        abs(delta_position[0] * delta_velocity[1])
+        + abs(delta_position[1] * delta_velocity[0]),
+    ]
+    for got, expected, scale in zip(specific_h, expected_h, h_scale):
+        if not _close(got, expected, scale=scale):
             errors.append(
                 f"{uid}: pair {id1}-{id2} specific-angular-momentum invariant failed"
             )
             break
-    for got, expected in zip(relative_l, (expected_mu * x for x in expected_h)):
-        if not _close(got, expected):
+    for got, expected, scale in zip(
+        relative_l, (expected_mu * x for x in expected_h), h_scale
+    ):
+        if not _close(got, expected, scale=expected_mu * scale):
             errors.append(
                 f"{uid}: pair {id1}-{id2} relative-angular-momentum invariant failed"
             )
@@ -233,8 +295,8 @@ def _validate_pair_invariants(
     two_body_bound = _require_logical(pair, "two_body_bound", uid, errors)
     legacy_pair_bound = _require_logical(pair, "legacy_pair_bound", uid, errors)
     if merge_radius is not None and within_rmerge is not None:
-        expected_within = expected_r <= merge_radius
-        if within_rmerge is not expected_within:
+        expected_within = expected_r2 <= merge_radius**2
+        if not _close(expected_r2, merge_radius**2) and within_rmerge is not expected_within:
             errors.append(f"{uid}: pair {id1}-{id2} within-rmerge invariant failed")
 
     finite_pair = expected_r > sys.float_info.min
@@ -260,22 +322,40 @@ def _validate_pair_invariants(
         pair, "legacy_binding_proxy_1overr2_code", uid, errors
     )
     expected_potential = -fact_g * mass1 * mass2 / expected_r
-    expected_specific_energy = 0.5 * expected_v**2 - fact_g * (mass1 + mass2) / expected_r
-    expected_legacy_proxy = fact_g * mass1 * mass2 / expected_r**2
+    specific_kinetic = 0.5 * expected_v2
+    specific_gravity = fact_g * (mass1 + mass2) / expected_r
+    expected_specific_energy = specific_kinetic - specific_gravity
+    expected_legacy_proxy = fact_g * mass1 * mass2 / expected_r2
     if potential_value is not None and not _close(potential_value, expected_potential):
         errors.append(f"{uid}: pair {id1}-{id2} potential-energy invariant failed")
     if specific_energy_value is not None and not _close(
-        specific_energy_value, expected_specific_energy
+        specific_energy_value,
+        expected_specific_energy,
+        scale=abs(specific_kinetic) + abs(specific_gravity),
     ):
         errors.append(f"{uid}: pair {id1}-{id2} specific-energy invariant failed")
     if legacy_proxy_value is not None and not _close(
         legacy_proxy_value, expected_legacy_proxy
     ):
         errors.append(f"{uid}: pair {id1}-{id2} legacy-binding-proxy invariant failed")
-    if two_body_bound is not None and two_body_bound is not (expected_specific_energy < 0.0):
+    if (
+        two_body_bound is not None
+        and not _close(
+            expected_specific_energy,
+            0.0,
+            scale=abs(specific_kinetic) + abs(specific_gravity),
+        )
+        and two_body_bound is not (expected_specific_energy < 0.0)
+    ):
         errors.append(f"{uid}: pair {id1}-{id2} two-body-bound invariant failed")
-    if legacy_pair_bound is not None and legacy_pair_bound is not (
-        expected_kinetic < expected_legacy_proxy
+    if (
+        legacy_pair_bound is not None
+        and not _close(
+            expected_kinetic,
+            expected_legacy_proxy,
+            scale=abs(expected_kinetic) + abs(expected_legacy_proxy),
+        )
+        and legacy_pair_bound is not (expected_kinetic < expected_legacy_proxy)
     ):
         errors.append(f"{uid}: pair {id1}-{id2} legacy-pair-bound invariant failed")
 
@@ -349,14 +429,23 @@ def _validate_event_invariants(
             anchor[index] + com_position[index] / total_mass
         ) % box_size[index]
         com_velocity[index] /= total_mass
+    velocity_scale = [
+        sum(abs(mass * velocity[index]) for mass, velocity in zip(masses, velocities))
+        / total_mass
+        for index in range(3)
+    ]
     if reported_com_position is not None and any(
-        not _close(got, expected)
-        for got, expected in zip(reported_com_position, com_position)
+        not _close(got, expected, scale=box_size[index])
+        for index, (got, expected) in enumerate(
+            zip(reported_com_position, com_position)
+        )
     ):
         errors.append(f"{uid}: centre-of-mass position invariant failed")
     if reported_com_velocity is not None and any(
-        not _close(got, expected)
-        for got, expected in zip(reported_com_velocity, com_velocity)
+        not _close(got, expected, scale=velocity_scale[index])
+        for index, (got, expected) in enumerate(
+            zip(reported_com_velocity, com_velocity)
+        )
     ):
         errors.append(f"{uid}: centre-of-mass velocity invariant failed")
 
@@ -488,10 +577,125 @@ def _validate_complete_block(
     return _event_digest(rows)
 
 
-def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> LedgerReport:
+def validate_ledger(
+    path: Path,
+    *,
+    allow_incomplete_tail: bool = False,
+    allow_incomplete_batches: bool = False,
+) -> LedgerReport:
     report = LedgerReport()
     current: EventBlock | None = None
+    batch: BatchBlock | None = None
+    seen_batch_protocol = False
+    active_resume_step: int | None = None
+    legacy_events: list[tuple[EventBlock, str]] = []
+    committed: list[tuple[BatchBlock, str, int | None]] = []
+    attempts: list[AttemptBlock] = []
+    checkpoint_owner: dict[int, tuple[int, int]] = {}
     digests: dict[str, str] = {}
+    batch_digests: dict[str, str] = {}
+
+    def accept_event(block: EventBlock, digest: str) -> None:
+        previous = digests.get(block.uid)
+        if previous is None:
+            digests[block.uid] = digest
+            report.unique_events += 1
+            if block.begin.get("classification") == "BINARY":
+                report.binary_events += 1
+            elif block.begin.get("classification") == "MULTIPLE":
+                report.multiple_events += 1
+        elif previous == digest:
+            report.duplicate_events += 1
+        else:
+            report.errors.append(
+                f"{block.uid}: deterministic UID has conflicting event data"
+            )
+
+    def censor_batch(reason: str, *, allowed: bool) -> None:
+        nonlocal batch
+        assert batch is not None
+        report.incomplete_batches += 1
+        report.censored_events += len(batch.events)
+        if not allowed:
+            report.errors.append(f"{batch.uid}: {reason}")
+        batch = None
+
+    def commit_batch(record: dict[str, Any]) -> None:
+        nonlocal batch
+        assert batch is not None
+        uid = batch.uid
+        begin = batch.begin
+        if begin.get("schema_version") != SCHEMA_VERSION or record.get(
+            "schema_version"
+        ) != SCHEMA_VERSION:
+            report.errors.append(f"{uid}: unsupported batch schema version")
+        if not uid or record.get("batch_uid") != uid:
+            report.errors.append(f"{uid}: batch_commit UID does not match batch_begin")
+        step = _require_integer(begin, "nstep_coarse", uid, report.errors)
+        level = _require_integer(begin, "ilevel", uid, report.errors)
+        before = _require_integer(begin, "nsink_before", uid, report.errors)
+        after = _require_integer(begin, "nsink_after", uid, report.errors)
+        expected = _require_integer(begin, "expected_events", uid, report.errors)
+        commit_after = _require_integer(record, "nsink_after", uid, report.errors)
+        if None not in (step, level, before, after):
+            if uid != f"{step}-{level}-{before}-{after}":
+                report.errors.append(f"{uid}: batch UID is inconsistent with metadata")
+            if before <= after or after < 1:
+                report.errors.append(f"{uid}: invalid sink-count transition")
+        if step is not None and active_resume_step is not None and step < active_resume_step:
+            report.errors.append(f"{uid}: batch predates active attempt resume_step")
+        if commit_after != after:
+            report.errors.append(f"{uid}: committed sink count does not match batch")
+        if expected is None or expected < 1 or len(batch.events) != expected:
+            report.errors.append(f"{uid}: batch event count does not match")
+        if before is not None and after is not None:
+            sink_reduction = sum(
+                block.begin["nmember"] - 1
+                for block, _ in batch.events
+                if isinstance(block.begin.get("nmember"), int)
+                and not isinstance(block.begin["nmember"], bool)
+            )
+            if before - after != sink_reduction:
+                report.errors.append(f"{uid}: batch sink-count conservation failed")
+        event_uids = [block.uid for block, _ in batch.events]
+        if len(set(event_uids)) != len(event_uids):
+            report.errors.append(f"{uid}: duplicate event UID inside batch")
+        seen_members: set[int] = set()
+        for block, _ in batch.events:
+            if block.begin.get("nstep_coarse") != step or block.begin.get("ilevel") != level:
+                report.errors.append(f"{uid}: event step/level differs from batch")
+            for required in ("primary_sink_id", "periodic_box_size_code"):
+                if required not in block.begin:
+                    report.errors.append(f"{uid}: batched event lacks {required}")
+            member_ids = {
+                member["sink_id"]
+                for member in block.members
+                if isinstance(member.get("sink_id"), int)
+                and not isinstance(member["sink_id"], bool)
+            }
+            if step is not None and level is not None and member_ids:
+                expected_uid = (
+                    f"{step}-{level}-{min(member_ids)}-{max(member_ids)}-"
+                    f"{len(block.members)}"
+                )
+                if block.uid != expected_uid:
+                    report.errors.append(f"{uid}: event UID does not match member IDs")
+            if member_ids & seen_members:
+                report.errors.append(f"{uid}: sink ID occurs in multiple groups")
+            seen_members.update(member_ids)
+        if (
+            len(report.errors) == batch.error_count
+            and report.invalid_json_lines == batch.invalid_json_count
+        ):
+            payload = json.dumps(
+                [begin, [(block.uid, digest) for block, digest in batch.events], record],
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            owner = len(attempts) - 1 if attempts else None
+            committed.append((batch, digest, owner))
+        batch = None
 
     with path.open("r", encoding="utf-8") as handle:
         for line_number, raw_line in enumerate(handle, start=1):
@@ -514,7 +718,116 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
                 continue
 
             record_type = record.get("record_type")
-            if record_type == "event_begin":
+            if record_type == "attempt_begin":
+                if current is not None:
+                    report.incomplete_events += 1
+                    if batch is None or not allow_incomplete_batches:
+                        report.errors.append(
+                            f"{current.uid}: missing event_end before line {line_number}"
+                        )
+                    current = None
+                if batch is not None:
+                    censor_batch(
+                        f"missing batch_commit before line {line_number}",
+                        allowed=allow_incomplete_batches,
+                    )
+                if record.get("schema_version") != SCHEMA_VERSION:
+                    report.errors.append(f"line {line_number}: unsupported attempt schema")
+                resume_step = _require_integer(
+                    record, "resume_step", f"line {line_number}", report.errors
+                )
+                restart_output = _require_integer(
+                    record, "restart_output", f"line {line_number}", report.errors
+                )
+                if resume_step is not None and resume_step < 0:
+                    report.errors.append(f"line {line_number}: negative resume_step")
+                if restart_output is not None and restart_output < 0:
+                    report.errors.append(f"line {line_number}: negative restart_output")
+                if restart_output == 0 and (
+                    report.run_attempts > 0 or committed or legacy_events
+                ):
+                    report.errors.append(
+                        f"line {line_number}: fresh run appended to an existing ledger"
+                    )
+                if legacy_events and restart_output is not None and restart_output > 0:
+                    report.errors.append(
+                        f"line {line_number}: cannot prove restart censoring for legacy bare events"
+                    )
+                parent_index = None
+                if restart_output is not None and restart_output > 0:
+                    checkpoint = checkpoint_owner.get(restart_output)
+                    if checkpoint is None:
+                        report.errors.append(
+                            f"line {line_number}: restart output {restart_output} has no ledger checkpoint"
+                        )
+                    else:
+                        parent_index, checkpoint_step = checkpoint
+                        if resume_step != checkpoint_step:
+                            report.errors.append(
+                                f"line {line_number}: restart step differs from checkpoint"
+                            )
+                attempts.append(AttemptBlock(resume_step, restart_output, parent_index))
+                active_resume_step = resume_step
+                report.run_attempts += 1
+                seen_batch_protocol = True
+            elif record_type == "checkpoint":
+                if current is not None or batch is not None:
+                    report.errors.append(
+                        f"line {line_number}: checkpoint appears inside an event or batch"
+                    )
+                    continue
+                if record.get("schema_version") != SCHEMA_VERSION or not attempts:
+                    report.errors.append(
+                        f"line {line_number}: checkpoint has no valid run attempt"
+                    )
+                    continue
+                output_number = _require_integer(
+                    record, "output_number", f"line {line_number}", report.errors
+                )
+                checkpoint_step = _require_integer(
+                    record, "nstep_coarse", f"line {line_number}", report.errors
+                )
+                if output_number is not None and output_number <= 0:
+                    report.errors.append(f"line {line_number}: invalid output_number")
+                if (
+                    checkpoint_step is not None
+                    and active_resume_step is not None
+                    and checkpoint_step < active_resume_step
+                ):
+                    report.errors.append(
+                        f"line {line_number}: checkpoint predates active attempt"
+                    )
+                if (
+                    output_number is not None
+                    and output_number > 0
+                    and checkpoint_step is not None
+                ):
+                    checkpoint_owner[output_number] = (
+                        len(attempts) - 1,
+                        checkpoint_step,
+                    )
+            elif record_type == "batch_begin":
+                seen_batch_protocol = True
+                if current is not None:
+                    report.incomplete_events += 1
+                    if batch is None or not allow_incomplete_batches:
+                        report.errors.append(
+                            f"{current.uid}: missing event_end before line {line_number}"
+                        )
+                    current = None
+                if batch is not None:
+                    censor_batch(
+                        f"missing batch_commit before line {line_number}",
+                        allowed=allow_incomplete_batches,
+                    )
+                batch = BatchBlock(
+                    record, line_number, len(report.errors), report.invalid_json_lines
+                )
+            elif record_type == "event_begin":
+                if batch is None and seen_batch_protocol:
+                    report.errors.append(
+                        f"line {line_number}: bare event after batch protocol began"
+                    )
                 if current is not None:
                     report.incomplete_events += 1
                     report.errors.append(
@@ -544,21 +857,23 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
                     continue
                 digest = _validate_complete_block(current, record, report)
                 if digest is not None:
-                    previous = digests.get(current.uid)
-                    if previous is None:
-                        digests[current.uid] = digest
-                        report.unique_events += 1
-                        if current.begin.get("classification") == "BINARY":
-                            report.binary_events += 1
-                        elif current.begin.get("classification") == "MULTIPLE":
-                            report.multiple_events += 1
-                    elif previous == digest:
-                        report.duplicate_events += 1
-                    else:
-                        report.errors.append(
-                            f"{current.uid}: deterministic UID has conflicting event data"
-                        )
+                    if batch is not None:
+                        batch.events.append((current, digest))
+                    elif not seen_batch_protocol:
+                        legacy_events.append((current, digest))
                 current = None
+            elif record_type == "batch_commit":
+                if batch is None:
+                    report.errors.append(
+                        f"line {line_number}: batch_commit appears outside a batch"
+                    )
+                elif current is not None:
+                    report.incomplete_events += 1
+                    report.errors.append(f"{current.uid}: missing event_end before batch_commit")
+                    current = None
+                    censor_batch("batch_commit followed an incomplete event", allowed=False)
+                else:
+                    commit_batch(record)
             else:
                 report.errors.append(
                     f"line {line_number}: unknown record_type {record_type!r}"
@@ -566,8 +881,55 @@ def validate_ledger(path: Path, *, allow_incomplete_tail: bool = False) -> Ledge
 
     if current is not None:
         report.incomplete_events += 1
-        if not allow_incomplete_tail:
+        if batch is None and not allow_incomplete_tail:
             report.errors.append(f"{current.uid}: incomplete event at end of ledger")
+    if batch is not None:
+        censor_batch(
+            "incomplete batch at end of ledger",
+            allowed=allow_incomplete_tail or allow_incomplete_batches,
+        )
+    active_cutoffs: dict[int, int | None] = {}
+    if attempts:
+        attempt_index: int | None = len(attempts) - 1
+        cutoff: int | None = None
+        while attempt_index is not None:
+            if attempt_index in active_cutoffs:
+                report.errors.append("restart checkpoint lineage contains a cycle")
+                break
+            active_cutoffs[attempt_index] = cutoff
+            attempt = attempts[attempt_index]
+            cutoff = attempt.resume_step
+            attempt_index = attempt.parent_index
+    for block, digest in legacy_events:
+        accept_event(block, digest)
+    for committed_batch, digest, owner in committed:
+        step = committed_batch.begin.get("nstep_coarse")
+        if attempts and owner is None:
+            report.errors.append(
+                f"{committed_batch.uid}: batch predates first run attempt marker"
+            )
+            continue
+        if attempts and (
+            owner not in active_cutoffs
+            or (
+                active_cutoffs[owner] is not None
+                and isinstance(step, int)
+                and step >= active_cutoffs[owner]
+            )
+        ):
+            report.superseded_batches += 1
+            report.superseded_events += len(committed_batch.events)
+            continue
+        uid = committed_batch.uid
+        previous = batch_digests.get(uid)
+        if previous is None:
+            batch_digests[uid] = digest
+            report.committed_batches += 1
+        elif previous != digest:
+            report.errors.append(f"{uid}: deterministic batch UID has conflicting data")
+            continue
+        for block, event_digest in committed_batch.events:
+            accept_event(block, event_digest)
     return report
 
 
@@ -577,11 +939,18 @@ def main() -> int:
     parser.add_argument(
         "--allow-incomplete-tail",
         action="store_true",
-        help="report but do not fail solely for a final begin block without event_end",
+        help="censor a final incomplete event or batch without treating it as fatal",
+    )
+    parser.add_argument(
+        "--allow-incomplete-batches",
+        action="store_true",
+        help="censor uncommitted batches superseded by a restart attempt",
     )
     args = parser.parse_args()
     report = validate_ledger(
-        args.ledger, allow_incomplete_tail=args.allow_incomplete_tail
+        args.ledger,
+        allow_incomplete_tail=args.allow_incomplete_tail,
+        allow_incomplete_batches=args.allow_incomplete_batches,
     )
     print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
     return 0 if report.valid else 1

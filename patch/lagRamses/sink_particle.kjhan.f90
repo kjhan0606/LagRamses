@@ -1180,7 +1180,8 @@ subroutine merge_sink(ilevel)
   real(dp), allocatable :: pending_new(:)
   integer :: pending_error,pending_error_all,pending_channel,channel_error
   real(dp),allocatable::mechanical_merged(:,:)
-  integer::j,isink,ii,jj,kk,ind,idim,new_sink
+  integer::j,isink,ii,jj,kk,ind,idim,new_sink,capture_nsink_before
+  logical::capture_ledger_pending
   real(dp)::dx_loc,scale,dx_min,xx,yy,zz,rr,rmax2,rmax
   integer::igrid,jgrid,ipart,jpart,next_part,info
   integer::i,ig,ip,npart1,npart2,icpu,nx_loc
@@ -1231,6 +1232,9 @@ subroutine merge_sink(ilevel)
        real(dp),intent(in)::dx_min,scale,factG
        real(dp),dimension(1:3),intent(in)::xbound
      end subroutine write_smbh_capture_ledger
+     subroutine commit_smbh_capture_batch(ilevel,nsink_before,nsink_after)
+       integer,intent(in)::ilevel,nsink_before,nsink_after
+     end subroutine commit_smbh_capture_batch
   end interface
   pi=twopi/2.0d0
   factG=1d0
@@ -1474,7 +1478,9 @@ subroutine merge_sink(ilevel)
   ! pending map stops compaction, so it must not leave a complete-looking
   ! capture event in the ledger.
   ! Record every member before the irreversible COM compaction below.
-  if(smbh .and. smbh_capture_ledger .and. new_sink < nsink) then
+  capture_ledger_pending=smbh .and. smbh_capture_ledger .and. new_sink < nsink
+  if(capture_ledger_pending) then
+     capture_nsink_before=nsink
      call write_smbh_capture_ledger(ilevel,new_sink,gsink,dx_min,scale, &
           & xbound,factG)
 #ifndef WITHOUTMPI
@@ -1868,6 +1874,15 @@ subroutine merge_sink(ilevel)
 102  end do
   ! End loop over cpus
 
+  if(capture_ledger_pending) then
+     ! A complete event block alone is not evidence that compaction finished.
+     ! Publish the batch commit only after sink arrays and particles are updated.
+     call commit_smbh_capture_batch(ilevel,capture_nsink_before,nsink)
+#ifndef WITHOUTMPI
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+  endif
+
 111 format('  +Entering merge_sink for level ',I2)
 
 end subroutine merge_sink
@@ -1881,6 +1896,9 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use, intrinsic :: iso_fortran_env, only: error_unit
   implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
 
   integer,intent(in)::ilevel,ngrp
   integer,dimension(:),intent(in)::gsink
@@ -1890,7 +1908,8 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   integer::ledger_unit,ios,igrp,isink,jsink_member,idim
   integer::nmember,member_index,pair_index,anchor,min_id,max_id
   integer::primary_index,primary_sink_id
-  integer::expected_pairs
+  integer::expected_pairs,expected_events
+  integer,allocatable::group_counts(:)
   real(dp)::box_size,total_mass,max_separation
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
   real(dp)::redshift
@@ -1903,6 +1922,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   logical::pair_finite,within_rmerge,two_body_bound,legacy_pair_bound
   logical::bondi_context_available
   character(len=96)::event_uid
+  character(len=96)::batch_uid
   character(len=8)::classification
   character(len=512)::iomsg
 
@@ -1926,8 +1946,26 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      call ledger_io_fatal('open','',ios,iomsg)
   endif
 
+  ! Separate a restart attempt from a torn final JSON line.  The damaged
+  ! line remains an error, but cannot swallow this batch_begin on append.
+  iomsg=''
+  write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) ''
+  if(ios /= 0) call ledger_io_fatal('write batch separator','',ios,iomsg)
+
+  write(batch_uid,'(I0,"-",I0,"-",I0,"-",I0)') nstep_coarse,ilevel,nsink,ngrp
+  expected_events=count(group_counts >= 2)
+  iomsg=''
+  write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       & '{"schema_version":1,"record_type":"batch_begin","batch_uid":"'// &
+       & trim(batch_uid)//'","nstep_coarse":'//trim(json_int(nstep_coarse))// &
+       & ',"ilevel":'//trim(json_int(ilevel))// &
+       & ',"nsink_before":'//trim(json_int(nsink))// &
+       & ',"nsink_after":'//trim(json_int(ngrp))// &
+       & ',"expected_events":'//trim(json_int(expected_events))//'}'
+  if(ios /= 0) call ledger_io_fatal('write batch_begin',batch_uid,ios,iomsg)
+
   do igrp=1,ngrp
-     nmember=count(gsink(1:nsink) == igrp)
+     nmember=group_counts(igrp)
      if(nmember < 2) cycle
 
      anchor=0
@@ -2182,6 +2220,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   iomsg=''
   close(ledger_unit,iostat=ios,iomsg=iomsg)
   if(ios /= 0) call ledger_io_fatal('close','',ios,iomsg)
+  deallocate(group_counts)
 
 contains
 
@@ -2212,14 +2251,20 @@ contains
     ! The subsequent compaction visits singleton groups too.  A zero-mass
     ! singleton triggers its spin-merger STOP before sink state is committed,
     ! so reject every invalid mass before any capture event is written.
+    allocate(group_counts(1:ngrp))
+    group_counts=0
     do member=1,nsink
+       if(gsink(member) < 1 .or. gsink(member) > ngrp) then
+          call ledger_group_fatal(0,'sink group index outside 1..ngrp')
+       endif
+       group_counts(gsink(member))=group_counts(gsink(member))+1
        if(.not.ieee_is_finite(msink(member)) .or. msink(member) <= 0d0) then
           call ledger_group_fatal(gsink(member),'non-positive or non-finite sink mass')
        endif
     enddo
 
     do group_index=1,ngrp
-       if(count(gsink(1:nsink) == group_index) < 2) cycle
+       if(group_counts(group_index) < 2) cycle
        group_mass=0d0
        do member=1,nsink
           if(gsink(member) /= group_index) cycle
@@ -2245,18 +2290,27 @@ contains
     integer,intent(in)::group_index
     character(len=*),intent(in)::reason
     integer::log_ios
+#ifndef WITHOUTMPI
+    integer::abort_info
+#endif
 
     write(error_unit,'(A,I0,A,I0,1X,A)') &
          & 'FATAL: SMBH capture ledger cannot record group ',group_index, &
          & ' at coarse step ',nstep_coarse,trim(reason)
     flush(error_unit,iostat=log_ios)
-    call clean_stop
+#ifndef WITHOUTMPI
+    call MPI_ABORT(MPI_COMM_WORLD,2,abort_info)
+#endif
+    stop 2
   end subroutine ledger_group_fatal
 
   subroutine ledger_io_fatal(operation,uid,status,message)
     character(len=*),intent(in)::operation,uid,message
     integer,intent(in)::status
     integer::log_ios
+#ifndef WITHOUTMPI
+    integer::abort_info
+#endif
 
     if(len_trim(uid) > 0) then
        write(error_unit,'(A,1X,A,1X,A,1X,A,I0,1X,A)') &
@@ -2268,7 +2322,10 @@ contains
             & 'file='//trim(smbh_capture_ledger_file),'iostat=',status,trim(message)
     endif
     flush(error_unit,iostat=log_ios)
-    call clean_stop
+#ifndef WITHOUTMPI
+    call MPI_ABORT(MPI_COMM_WORLD,2,abort_info)
+#endif
+    stop 2
   end subroutine ledger_io_fatal
 
   function json_int(value) result(text)
@@ -2311,6 +2368,176 @@ contains
   end function json_logical
 
 end subroutine write_smbh_capture_ledger
+!################################################################
+!################################################################
+!################################################################
+!################################################################
+subroutine write_smbh_capture_attempt
+  use amr_commons
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ledger_unit,ios,log_ios
+#ifndef WITHOUTMPI
+  integer::abort_info
+#endif
+  character(len=32)::step_text,restart_text
+  character(len=512)::iomsg
+
+  if(myid /= 1) return
+  write(step_text,'(I0)') nstep_coarse
+  write(restart_text,'(I0)') nrestart
+  iomsg=''
+  open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file), &
+       & status='unknown',position='append',action='write', &
+       & form='formatted',iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call attempt_io_fatal('open',ios,iomsg)
+  ! The separator preserves this marker after a torn line from a crash.
+  iomsg=''
+  write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) ''
+  if(ios /= 0) call attempt_io_fatal('write separator',ios,iomsg)
+  iomsg=''
+  write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       & '{"schema_version":1,"record_type":"attempt_begin","resume_step":'// &
+       & trim(step_text)//',"restart_output":'//trim(restart_text)//'}'
+  if(ios /= 0) call attempt_io_fatal('write attempt_begin',ios,iomsg)
+  iomsg=''
+  flush(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call attempt_io_fatal('flush',ios,iomsg)
+  iomsg=''
+  close(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call attempt_io_fatal('close',ios,iomsg)
+
+contains
+
+  subroutine attempt_io_fatal(operation,status,message)
+    character(len=*),intent(in)::operation,message
+    integer,intent(in)::status
+    write(error_unit,'(A,1X,A,1X,A,I0,1X,A)') &
+         & 'FATAL: SMBH capture attempt I/O failure during',trim(operation), &
+         & 'iostat=',status,trim(message)
+    flush(error_unit,iostat=log_ios)
+#ifndef WITHOUTMPI
+    call MPI_ABORT(MPI_COMM_WORLD,2,abort_info)
+#endif
+    stop 2
+  end subroutine attempt_io_fatal
+
+end subroutine write_smbh_capture_attempt
+!################################################################
+!################################################################
+!################################################################
+!################################################################
+subroutine write_smbh_capture_checkpoint(output_number)
+  use amr_commons
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::output_number
+  integer::ledger_unit,ios,log_ios
+#ifndef WITHOUTMPI
+  integer::abort_info
+#endif
+  character(len=32)::step_text,output_text
+  character(len=512)::iomsg
+
+  if(myid /= 1) return
+  write(step_text,'(I0)') nstep_coarse
+  write(output_text,'(I0)') output_number
+  iomsg=''
+  open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file), &
+       & status='old',position='append',action='write', &
+       & form='formatted',iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call checkpoint_io_fatal('open',ios,iomsg)
+  iomsg=''
+  write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       & '{"schema_version":1,"record_type":"checkpoint","output_number":'// &
+       & trim(output_text)//',"nstep_coarse":'//trim(step_text)//'}'
+  if(ios /= 0) call checkpoint_io_fatal('write',ios,iomsg)
+  iomsg=''
+  flush(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call checkpoint_io_fatal('flush',ios,iomsg)
+  iomsg=''
+  close(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call checkpoint_io_fatal('close',ios,iomsg)
+
+contains
+
+  subroutine checkpoint_io_fatal(operation,status,message)
+    character(len=*),intent(in)::operation,message
+    integer,intent(in)::status
+    write(error_unit,'(A,1X,A,1X,A,I0,1X,A)') &
+         & 'FATAL: SMBH capture checkpoint I/O failure during',trim(operation), &
+         & 'iostat=',status,trim(message)
+    flush(error_unit,iostat=log_ios)
+#ifndef WITHOUTMPI
+    call MPI_ABORT(MPI_COMM_WORLD,2,abort_info)
+#endif
+    stop 2
+  end subroutine checkpoint_io_fatal
+
+end subroutine write_smbh_capture_checkpoint
+!################################################################
+!################################################################
+!################################################################
+!################################################################
+subroutine commit_smbh_capture_batch(ilevel,nsink_before,nsink_after)
+  use pm_commons
+  use amr_commons
+  use, intrinsic :: iso_fortran_env, only: error_unit
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel,nsink_before,nsink_after
+  integer::ledger_unit,ios,log_ios
+  character(len=96)::batch_uid,after_text
+  character(len=512)::iomsg
+
+  if(myid /= 1) return
+  write(batch_uid,'(I0,"-",I0,"-",I0,"-",I0)') &
+       & nstep_coarse,ilevel,nsink_before,nsink_after
+  write(after_text,'(I0)') nsink_after
+  iomsg=''
+  open(newunit=ledger_unit,file=trim(smbh_capture_ledger_file), &
+       & status='old',position='append',action='write', &
+       & form='formatted',iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call commit_io_fatal('open',ios,iomsg)
+  iomsg=''
+  write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
+       & '{"schema_version":1,"record_type":"batch_commit","batch_uid":"'// &
+       & trim(batch_uid)//'","nsink_after":'//trim(after_text)//'}'
+  if(ios /= 0) call commit_io_fatal('write',ios,iomsg)
+  iomsg=''
+  flush(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call commit_io_fatal('flush',ios,iomsg)
+  iomsg=''
+  close(ledger_unit,iostat=ios,iomsg=iomsg)
+  if(ios /= 0) call commit_io_fatal('close',ios,iomsg)
+
+contains
+
+  subroutine commit_io_fatal(operation,status,message)
+    character(len=*),intent(in)::operation,message
+    integer,intent(in)::status
+#ifndef WITHOUTMPI
+    integer::abort_info
+#endif
+    write(error_unit,'(A,1X,A,1X,A,1X,A,I0,1X,A)') &
+         & 'FATAL: SMBH capture batch commit I/O failure during',trim(operation), &
+         & 'batch_uid='//trim(batch_uid),'iostat=',status,trim(message)
+    flush(error_unit,iostat=log_ios)
+#ifndef WITHOUTMPI
+    call MPI_ABORT(MPI_COMM_WORLD,2,abort_info)
+#endif
+    stop 2
+  end subroutine commit_io_fatal
+
+end subroutine commit_smbh_capture_batch
 !################################################################
 !################################################################
 !################################################################

@@ -92,11 +92,31 @@ subroutine init_part
   character(LEN=2)::nelt_str
   character(LEN=11)::format_string
   logical::file_exist
+  logical::capture_restart_complete
 
   real(kind=4):: real_mem,real_mem_tot
 
 
   if(verbose)write(*,*)'Entering init_part'
+  if(nrestart>0 .and. sink .and. smbh .and. smbh_capture_ledger)then
+     capture_restart_complete=.false.
+     if(myid==1)then
+        call title(nrestart,nchar)
+        filename='output_'//TRIM(nchar)//'/COMPLETE'
+        inquire(file=trim(filename),exist=capture_restart_complete)
+     endif
+#ifndef WITHOUTMPI
+     call MPI_BCAST(capture_restart_complete,1,MPI_LOGICAL,0,MPI_COMM_WORLD,info)
+#endif
+     if(.not.capture_restart_complete)then
+        if(myid==1)write(*,'(A,I0)') &
+             & 'FATAL: SMBH capture restart lacks COMPLETE output ',nrestart
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,2,info)
+#endif
+        stop 2
+     endif
+  endif
 
   if(allocated(xp))then
      if(verbose)write(*,*)'Initial conditions already set'
@@ -1362,6 +1382,14 @@ subroutine init_part
   endif
 
   if(sink .and. .not. allocated(idsink)) call init_sink
+  if(sink .and. smbh .and. smbh_capture_ledger)then
+     ! The restored nstep_coarse is the checkpoint cutline.  Mark this
+     ! process invocation before the first output or capture event.
+     call write_smbh_capture_attempt
+#ifndef WITHOUTMPI
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+#endif
+  endif
 
 end subroutine init_part
 !################################################################
