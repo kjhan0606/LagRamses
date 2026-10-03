@@ -47,6 +47,24 @@ coarse hydro diagnostics replay identically. A capture-ledger structural pass
 with divergent hydro diagnostics remains outside the physical conservation
 gate.
 
+For a bounded static-uniform-gas round-off smoke, set
+`CAPTURE_CASE=uniform` alongside `CAPTURE_FORMAT=hdf5` or run the original
+binary format. The separate `capture-ledger-uniform.nml` sets a box-wide
+square region with `exp_region(1)=100` and enough initial thermal pressure to
+avoid the low-density exterior of the original spherical (`exp_region=2`)
+fixture. Its time unit makes `G_cgs*rho_unit*t_unit^2=1`, consistent with the
+non-cosmological solver's code gravity factor. The original low-pressure
+fixture's 1 Myr time unit does not have that property and must not be used to
+interpret its ledger orbits physically. The runner additionally requires
+positive sampled internal energy, zero reported NaNs, mass/energy errors no
+larger than `1e-10`, and agreement of the printed fresh/restart conservation
+diagnostics within `1e-10` absolute tolerance. The checkpoint is at step 0,
+so it does not test recovery of an
+evolved fluid state or an established conservation baseline. Near-static
+uniform gas has negligible fluxes; this smoke can detect gross numerical
+failures but cannot establish conservation for moving, inhomogeneous flow or
+a calibrated galaxy/SMBH inspiral model.
+
 After a successful restart job, the negative completeness test can use its
 exact run directory:
 

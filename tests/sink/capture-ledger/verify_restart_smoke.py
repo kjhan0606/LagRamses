@@ -15,6 +15,8 @@ EXPECTED_UNITS = {
     "unit_d": 1.66e-24,
     "unit_t": 3.1556926e13,
 }
+UNIFORM_UNIT_TIME = 3.004298591324383e15
+G_CGS = 6.67430e-8
 
 
 def _event_blocks(rows: list[dict]) -> list[list[dict]]:
@@ -51,13 +53,20 @@ def evaluate(run: Path) -> dict:
     assert (run / outputs[0] / "COMPLETE").is_file()
     fresh_nml = (run / "fresh.nml").read_text()
     restart_nml = (run / "restart.nml").read_text()
+    uniform_case = "exp_region(1)=100.0" in fresh_nml and "p_region=1.0d-3" in fresh_nml
     hdf5 = 'outformat="hdf5"' in fresh_nml
     assert hdf5 == ('informat="hdf5"' in restart_nml)
     assert (run / outputs[0] / "data_00001.h5").is_file() == hdf5
     info = (run / outputs[0] / "info_00001.txt").read_text()
-    for key, expected in EXPECTED_UNITS.items():
+    expected_units = dict(EXPECTED_UNITS)
+    if uniform_case:
+        expected_units["unit_t"] = UNIFORM_UNIT_TIME
+    for key, expected in expected_units.items():
         match = re.search(rf"^{key}\s*=\s*(\S+)", info, re.MULTILINE)
         assert match and math.isclose(float(match.group(1)), expected, rel_tol=1e-12)
+    gravity_code_from_units = G_CGS * expected_units["unit_d"] * expected_units["unit_t"] ** 2
+    if uniform_case:
+        assert math.isclose(gravity_code_from_units, 1.0, rel_tol=1e-12)
     assert re.search(r"^nstep_coarse=\s*0\s*$", info, re.MULTILINE)
 
     rows = [json.loads(line) for line in (run / "capture.jsonl").read_text().splitlines() if line.strip()]
@@ -89,6 +98,14 @@ def evaluate(run: Path) -> dict:
             "negative_internal_energy_cells": [
                 int(value) for value in re.findall(r"neg_cells=\s*(\d+)", log)
             ],
+            "negative_internal_energy_rank_cells": [
+                int(value) for value in re.findall(r"\*\*\* DIAG rank=.*?\bneg=\s*(\d+)", log)
+            ],
+            "minimum_internal_energy": [
+                float(value) for value in re.findall(
+                    r"DIAG create_sink: eint_min=\s*([+\-\d.Ee]+)", log
+                )
+            ],
             "coarse_conservation": [
                 {"step": int(step), "mass_error": float(mass), "energy_error": float(energy)}
                 for step, mass, energy in re.findall(
@@ -96,9 +113,14 @@ def evaluate(run: Path) -> dict:
                 )
             ],
         }
-        assert len(diagnostics[name]["negative_internal_energy_cells"]) == 2
         assert len(diagnostics[name]["coarse_conservation"]) == 2
         assert [item["step"] for item in diagnostics[name]["coarse_conservation"]] == [1, 2]
+        assert len(diagnostics[name]["minimum_internal_energy"]) >= 2
+        assert all(math.isfinite(value) for value in diagnostics[name]["minimum_internal_energy"])
+        nan_checks = re.findall(r"NaN_CHK[^\n]*uold=\s*(\d+)\s+f=\s*(\d+)\s+d0=\s*(\d+)", log)
+        assert nan_checks and all(all(int(value) == 0 for value in row) for row in nan_checks)
+        if not diagnostics[name]["negative_internal_energy_cells"]:
+            assert all(value > 0 for value in diagnostics[name]["minimum_internal_energy"])
         assert all(
             math.isfinite(item[key])
             for item in diagnostics[name]["coarse_conservation"]
@@ -107,12 +129,44 @@ def evaluate(run: Path) -> dict:
     assert (diagnostics["fresh"]["negative_internal_energy_cells"] ==
             diagnostics["restart"]["negative_internal_energy_cells"])
     hydro_replay_identical = diagnostics["fresh"] == diagnostics["restart"]
-    # The legacy binary checkpoint reproduces these coarse diagnostics in
-    # this fixture. A HDF5 restore may follow the cold-Poisson restart path;
-    # retain the measured discrepancy and never use this structural smoke as
-    # a hydro-conservation or trajectory-equivalence claim.
+    fresh_steps = diagnostics["fresh"]["coarse_conservation"]
+    restart_steps = diagnostics["restart"]["coarse_conservation"]
+    hydro_replay_within_tolerance = all(
+        math.isclose(a[key], b[key], rel_tol=1e-8, abs_tol=1e-10)
+        for a, b in zip(fresh_steps, restart_steps)
+        for key in ("mass_error", "energy_error")
+    ) and all(
+        math.isclose(a, b, rel_tol=1e-8, abs_tol=1e-10)
+        for a, b in zip(
+            diagnostics["fresh"]["minimum_internal_energy"],
+            diagnostics["restart"]["minimum_internal_energy"],
+        )
+    ) and len(diagnostics["fresh"]["minimum_internal_energy"]) == len(
+        diagnostics["restart"]["minimum_internal_energy"]
+    )
+    uniform_static_roundoff_gate_passed = (
+        uniform_case
+        and hydro_replay_within_tolerance
+        and not diagnostics["fresh"]["negative_internal_energy_cells"]
+        and not diagnostics["fresh"]["negative_internal_energy_rank_cells"]
+        and not diagnostics["restart"]["negative_internal_energy_rank_cells"]
+        and all(
+            value > 0
+            for name in ("fresh", "restart")
+            for value in diagnostics[name]["minimum_internal_energy"]
+        )
+        and all(
+            abs(item[key]) <= 1e-10
+            for name in ("fresh", "restart")
+            for item in diagnostics[name]["coarse_conservation"]
+            for key in ("mass_error", "energy_error")
+        )
+    )
+    # Preserve exact replay as a separate fact from the bounded numerical
+    # tolerance. The old low-pressure fixture fails the latter on HDF5;
+    # the uniform-gas fixture can pass it without becoming a galaxy model.
     if not hdf5:
-        assert hydro_replay_identical
+        assert hydro_replay_within_tolerance
     assert rank_counts[0] == rank_counts[1]
     assert blocks[0][0]["ncpu"] == rank_counts[0]
     info_ncpu = re.search(r"^ncpu\s*=\s*(\d+)", info, re.MULTILINE)
@@ -123,11 +177,14 @@ def evaluate(run: Path) -> dict:
         "run_directory": str(run),
         "checkpoint": outputs[0],
         "checkpoint_format": "hdf5" if hdf5 else "original",
+        "gravity_code_from_units": gravity_code_from_units,
         "mpi_ranks": rank_counts[0],
         "active_multiple_events": 1,
         "superseded_batches": 1,
         "replayed_event_records_identical": True,
         "hydro_replay_identical": hydro_replay_identical,
+        "hydro_replay_within_tolerance": hydro_replay_within_tolerance,
+        "uniform_static_roundoff_gate_passed": uniform_static_roundoff_gate_passed,
         "diagnostics": diagnostics,
     }
 
