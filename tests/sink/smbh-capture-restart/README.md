@@ -6,6 +6,16 @@ that COMPLETE checkpoint and writes `output_00002`. Postcheck requires one
 committed `BINARY`, one committed `MULTIPLE`, member counts 2+3, both lineage
 sidecars, and a validator-selected active restart branch.
 
+The fixture is periodic: `BOUNDARY_PARAMS` is intentionally absent, selecting
+RAMSES's default `nboundary=0` topology.  This isolates the capture/restart
+contract for five central sinks; it is a fixture workaround, not a repair or
+regression diagnosis for the six-boundary `make_grid_fine` failure preserved
+in the `21d62e4` Lageunha run.  Nonperiodic AMR initialization remains
+unvalidated and requires a separate minimal reproducer and source-level
+investigation before any repair.  The existing Bondi physics test remains
+unchanged.  The preflight rejects any added `BOUNDARY_PARAMS` block so a
+boundary-topology change cannot be mistaken for a capture-ledger test change.
+
 The workflow is deliberately two phase. `--prepare` is safe on a login node:
 it creates only two effective namelists, `ic_sink`, and a JSON audit manifest;
 it never builds or runs RAMSES. The run directory must not exist. `--execute`

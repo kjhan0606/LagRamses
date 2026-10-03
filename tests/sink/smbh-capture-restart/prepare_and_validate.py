@@ -32,6 +32,10 @@ RUN_POLICY = {
     "poisson": ".true.",
     "sink": ".true.",
 }
+BOUNDARY_POLICY = {
+    "mode": "periodic",
+    "boundary_params_block": "absent",
+}
 STELLAR_ENRICHMENT_POLICY = {
     "feedback_mode": "'legacy'",
     "use_h": ".false.",
@@ -148,6 +152,14 @@ def assert_one(values: dict[str, list[str]], key: str, expected: str) -> None:
         fail(f"{key}: expected exactly {expected!r}, found {actual!r}")
 
 
+def assert_periodic_boundary(text: str, context: str) -> None:
+    # RAMSES selects its nboundary=0 periodic topology when this optional
+    # namelist block is absent.  Do not let a physical-boundary experiment
+    # silently change the topology of this central, synthetic sink fixture.
+    if re.search(r"(?im)^\s*&BOUNDARY_PARAMS\b", text):
+        fail(f"{context}: BOUNDARY_PARAMS must be absent for the periodic fixture")
+
+
 def render(template: str, restart: int, steps: int) -> str:
     text = template.replace("__NRESTART__", str(restart)).replace("__NSTEPMAX__", str(steps))
     if "__" in text:
@@ -161,6 +173,7 @@ def render(template: str, restart: int, steps: int) -> str:
         assert_one(values, key, expected)
     for key, expected in STELLAR_ENRICHMENT_POLICY.items():
         assert_one(values, key, expected)
+    assert_periodic_boundary(text, "rendered namelist")
     if "aout" in values:
         fail(f"aout must be absent, found {values['aout']!r}")
     assert_one(values, "smbh_capture_ledger", ".true.")
@@ -181,6 +194,7 @@ def validate_written_namelist(path: Path, restart: int, steps: int) -> None:
         assert_one(values, key, expected)
     for key, expected in STELLAR_ENRICHMENT_POLICY.items():
         assert_one(values, key, expected)
+    assert_periodic_boundary(text, str(path))
     if "aout" in values:
         fail(f"{path}: aout must be absent, found {values['aout']!r}")
     assert_one(values, "smbh_capture_ledger", ".true.")
@@ -231,6 +245,7 @@ def prepare(args: argparse.Namespace) -> None:
     print(f"run_dir={run_dir}")
     print("run_class=short evolution test (synthetic capture/restart)")
     print("effective_run_policy=cosmo=.false. hydro=.true. pic=.true. poisson=.true. sink=.true.")
+    print("effective_boundary_policy=periodic (BOUNDARY_PARAMS absent; nboundary=0 default)")
     print("effective_stellar_enrichment_policy=legacy compatibility mode; all elements and channels disabled; legacy prompt SNIa disabled")
     print("effective_output_policy=noutput=1 tout=1.0d100 foutput=1 fbackup=1000000")
     print("scheduled_times=tout=1.0d100; scheduled_scale_factors=none")
@@ -277,6 +292,7 @@ def prepare(args: argparse.Namespace) -> None:
         "files": files,
         "output_policy": POLICY,
         "run_policy": RUN_POLICY,
+        "boundary_policy": BOUNDARY_POLICY,
         "stellar_enrichment_policy": STELLAR_ENRICHMENT_POLICY,
         "expected_outputs": ["output_00001", "output_00002"],
         "bytes_per_output": args.bytes_per_output,
@@ -324,6 +340,7 @@ def launch_check(args: argparse.Namespace) -> None:
         fail("manifest schema or absolute run directory mismatch")
     if (manifest.get("output_policy") != POLICY or
             manifest.get("run_policy") != RUN_POLICY or
+            manifest.get("boundary_policy") != BOUNDARY_POLICY or
             manifest.get("stellar_enrichment_policy") != STELLAR_ENRICHMENT_POLICY):
         fail("manifest policy differs from runner policy")
     source_tree_raw = manifest.get("source_tree")

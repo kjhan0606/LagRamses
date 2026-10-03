@@ -72,18 +72,6 @@ interpol_var=1
 sink_refine=.false.
 /
 
-&BOUNDARY_PARAMS
-nboundary=6
-no_inflow=.true.
-bound_type=2,2,2,2,2,2
-ibound_min=-1,+1,-1,-1,-1,-1
-ibound_max=-1,+1,+1,+1,+1,+1
-jbound_min=0,0,-1,+1,-1,-1
-jbound_max=0,0,-1,+1,+1,+1
-kbound_min=0,0,0,0,-1,+1
-kbound_max=0,0,0,0,-1,+1
-/
-
 &POISSON_PARAMS
 gravity_type=0
 epsilon=1.0d-4

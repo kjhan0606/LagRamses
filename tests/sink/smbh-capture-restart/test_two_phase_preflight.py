@@ -75,8 +75,10 @@ class TwoPhasePreflightTest(unittest.TestCase):
             manifest["stellar_enrichment_policy"],
             PREPARE_MODULE.STELLAR_ENRICHMENT_POLICY,
         )
+        self.assertEqual(manifest["boundary_policy"], PREPARE_MODULE.BOUNDARY_POLICY)
         for stage in ("stage1", "stage2"):
             values = manifest["effective_namelists"][stage]["assignments"]
+            self.assertNotIn("nboundary", values)
             for key, expected in PREPARE_MODULE.STELLAR_ENRICHMENT_POLICY.items():
                 self.assertEqual(values[key], [expected])
         result = self.command("launch-check", str(self.run_dir), "--binary", str(self.binary),
@@ -100,6 +102,12 @@ class TwoPhasePreflightTest(unittest.TestCase):
         template = (HERE / "smoke.nml.in").read_text(encoding="utf-8")
         drifted = template.replace("use_snii=.false.", "use_snii=.true.")
         with self.assertRaisesRegex(SystemExit, "use_snii"):
+            PREPARE_MODULE.render(drifted, 0, 1)
+
+    def test_render_rejects_physical_boundary_block(self) -> None:
+        template = (HERE / "smoke.nml.in").read_text(encoding="utf-8")
+        drifted = template + "\n&BOUNDARY_PARAMS\nnboundary=6\n/\n"
+        with self.assertRaisesRegex(SystemExit, "BOUNDARY_PARAMS must be absent"):
             PREPARE_MODULE.render(drifted, 0, 1)
 
     def test_malformed_manifest_fails_cleanly(self) -> None:
