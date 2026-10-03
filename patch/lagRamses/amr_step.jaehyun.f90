@@ -1279,12 +1279,31 @@ subroutine capture_restart_probe(stage,ilevel)
 #endif
   character(len=*),intent(in)::stage
   integer,intent(in)::ilevel
-  integer::igrid,jgrid,jpart,ipart,nowned,nowned_all,info
+  integer::igrid,jgrid,jpart,jrecv,ipart,icpu,nowned,nowned_all,info
+  integer::nactive,nactive_all,nreception,nreception_all,nremote,nremote_all
+  integer::nfree_active,nfree_active_all,norphan,norphan_all
+  integer::nother_grid,nother_grid_all
+  integer::nnew_grid_cloud
   real(dp)::sumx,sumx_all,stat,stat_all
+  logical,allocatable::seen_tree(:),seen_free(:)
 
   if(.not.sink.or.nsink/=1.or.nstep_coarse>4)return
   nowned=0
+  nactive=0
+  nreception=0
+  nremote=0
+  nfree_active=0
+  norphan=0
+  nother_grid=0
   sumx=0d0
+  allocate(seen_tree(npartmax),seen_free(npartmax))
+  seen_tree=.false.
+  seen_free=.false.
+  do ipart=1,npartmax
+     if(levelp(ipart)>0)then
+        if(ptypep(ipart)==PTYPE_SINK)nactive=nactive+1
+     endif
+  enddo
   igrid=headl(myid,ilevel)
   do jgrid=1,numbl(myid,ilevel)
      ipart=headp(igrid)
@@ -1301,17 +1320,118 @@ subroutine capture_restart_probe(stage,ilevel)
            nowned=nowned+1
            sumx=sumx+xp(ipart,1)
         endif
+        seen_tree(ipart)=.true.
         ipart=nextp(ipart)
      enddo
      igrid=next(igrid)
   enddo
+  do icpu=1,ncpu
+     if(icpu==myid)cycle
+     igrid=headl(icpu,ilevel)
+     do jgrid=1,numbl(icpu,ilevel)
+        ipart=headp(igrid)
+        do jrecv=1,numbp(igrid)
+           if(ipart<1.or.ipart>npartmax)then
+              write(*,*)'CAPTURE_RESTART_PROBE_BAD_REMOTE_LINK',stage,myid,ilevel,igrid,ipart
+#ifndef WITHOUTMPI
+              call MPI_ABORT(MPI_COMM_WORLD,88,info)
+#else
+              stop 88
+#endif
+           endif
+           if(ptypep(ipart)==PTYPE_SINK)nremote=nremote+1
+           seen_tree(ipart)=.true.
+           ipart=nextp(ipart)
+        enddo
+        igrid=next(igrid)
+     enddo
+  enddo
+  do icpu=1,ncpu
+     do jgrid=1,reception(icpu,ilevel)%ngrid
+        igrid=reception(icpu,ilevel)%igrid(jgrid)
+        ipart=headp(igrid)
+        do jrecv=1,numbp(igrid)
+           if(ipart<1.or.ipart>npartmax)then
+              write(*,*)'CAPTURE_RESTART_PROBE_BAD_RECEPTION_LINK',stage,myid,ilevel,igrid,ipart
+#ifndef WITHOUTMPI
+              call MPI_ABORT(MPI_COMM_WORLD,87,info)
+#else
+              stop 87
+#endif
+           endif
+           if(ptypep(ipart)==PTYPE_SINK)nreception=nreception+1
+           seen_tree(ipart)=.true.
+           ipart=nextp(ipart)
+        enddo
+     enddo
+  enddo
+  do igrid=1,ngridmax
+     if(numbp(igrid)<=0)cycle
+     nnew_grid_cloud=0
+     ipart=headp(igrid)
+     do jpart=1,numbp(igrid)
+        if(ipart<1.or.ipart>npartmax)then
+           write(*,*)'CAPTURE_RESTART_PROBE_BAD_OTHER_GRID_LINK',stage,myid,igrid,ipart
+#ifndef WITHOUTMPI
+           call MPI_ABORT(MPI_COMM_WORLD,90,info)
+#else
+           stop 90
+#endif
+        endif
+        if(.not.seen_tree(ipart))then
+           if(ptypep(ipart)==PTYPE_SINK)then
+              nother_grid=nother_grid+1
+              nnew_grid_cloud=nnew_grid_cloud+1
+           endif
+           seen_tree(ipart)=.true.
+        endif
+        ipart=nextp(ipart)
+     enddo
+     if(nnew_grid_cloud>0)then
+        write(*,*)'CAPTURE_RESTART_OTHER_GRID_DETAIL',trim(stage),nstep_coarse,myid, &
+             igrid,nnew_grid_cloud,numbp(igrid),father(igrid),xg(igrid,1:ndim)
+     endif
+  enddo
+  ipart=headp_free
+  do jpart=1,numbp_free
+     if(ipart<1.or.ipart>npartmax)then
+        write(*,*)'CAPTURE_RESTART_PROBE_BAD_FREE_LINK',stage,myid,ipart,jpart,numbp_free
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,89,info)
+#else
+        stop 89
+#endif
+     endif
+     seen_free(ipart)=.true.
+     ipart=nextp(ipart)
+  enddo
+  do ipart=1,npartmax
+     if(levelp(ipart)>0)then
+        if(ptypep(ipart)==PTYPE_SINK)then
+           if(seen_free(ipart))nfree_active=nfree_active+1
+           if(.not.seen_tree(ipart))norphan=norphan+1
+        endif
+     endif
+  enddo
   stat=sink_stat(1,ilevel,ndim*2+1)
 #ifndef WITHOUTMPI
   call MPI_ALLREDUCE(nowned,nowned_all,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(nactive,nactive_all,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(nreception,nreception_all,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(nremote,nremote_all,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(nfree_active,nfree_active_all,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(norphan,norphan_all,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(nother_grid,nother_grid_all,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(sumx,sumx_all,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(stat,stat_all,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
 #else
   nowned_all=nowned
+  nactive_all=nactive
+  nreception_all=nreception
+  nremote_all=nremote
+  nfree_active_all=nfree_active
+  norphan_all=norphan
+  nother_grid_all=nother_grid
   sumx_all=sumx
   stat_all=stat
 #endif
@@ -1319,6 +1439,21 @@ subroutine capture_restart_probe(stage,ilevel)
        'CAPTURE_RESTART_PROBE',trim(stage),'step=',nstep_coarse,'rank=',myid, &
        'local_owned=',nowned,'global_owned=',nowned_all, &
        'global_sumx=',sumx_all,'global_sink_stat=',stat_all
+  write(*,'(A,1X,A,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,I0)') &
+       'CAPTURE_RESTART_RECEPTION',trim(stage),'step=',nstep_coarse,'rank=',myid, &
+       'local_active=',nactive,'local_reception=',nreception, &
+       'global_active=',nactive_all,'global_reception=',nreception_all
+  write(*,'(A,1X,A,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,I0)') &
+       'CAPTURE_RESTART_REMOTE',trim(stage),'step=',nstep_coarse,'rank=',myid, &
+       'local_remote=',nremote,'global_remote=',nremote_all
+  write(*,'(A,1X,A,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,I0)') &
+       'CAPTURE_RESTART_ORPHAN',trim(stage),'step=',nstep_coarse,'rank=',myid, &
+       'local_orphan=',norphan,'global_orphan=',norphan_all, &
+       'local_free_active=',nfree_active,'global_free_active=',nfree_active_all
+  write(*,'(A,1X,A,1X,A,I0,1X,A,I0,1X,A,I0,1X,A,I0)') &
+       'CAPTURE_RESTART_OTHER_GRID',trim(stage),'step=',nstep_coarse,'rank=',myid, &
+       'local_other_grid=',nother_grid,'global_other_grid=',nother_grid_all
+  deallocate(seen_tree,seen_free)
 end subroutine capture_restart_probe
 #endif
 
