@@ -117,7 +117,9 @@ subroutine dust_mass_hdf5_identity(grp,writing)
   use dust_mass_physics, only: dust_pah_enabled,dust_pah_condensation,dust_pah_hydrogenated
   use dust_mass_physics, only: dust_fe_photon_comparison,dust_fe_photon_identity,dust_fe_uv_enabled
   use dust_iron_photons, only: fe_photon_data_identity
+#ifdef SNRT
   use dust_pah_live_model, only: pah_live_identity
+#endif
   use ramses_hdf5_io
   use dust_mass_physics, only: dust_mass_enabled,dust_mass_identity,dust_composition_enabled,dust_cooling, &
        dust_two_size_enabled,dust_size_identity,dust_optics_enabled, &
@@ -130,7 +132,9 @@ subroutine dust_mass_hdf5_identity(grp,writing)
 #endif
   use dust_composition_material, only: dust_material_composition_enabled,dl01_n,dl01_t,dust_material_identity, &
        dust_olivine_phase_identity
+#ifdef SNRT
   use snrt_dust_contract, only: snrt_dust_contract_temperature_k,snrt_dust_contract_number_temperature
+#endif
   use dust_composition_optics, only: d03_identity_size,d03_identity
   implicit none
   integer(HID_T),intent(in)::grp
@@ -174,10 +178,17 @@ subroutine dust_mass_hdf5_identity(grp,writing)
      endif
   endif
   if(dust_pah_enabled())then
+#ifdef SNRT
      call pah_live_identity(pah_definition,status)
      if(status/=0)call MPI_ABORT(MPI_COMM_WORLD,11,info)
      pah=[real(idust_pah,dp),dust_pah_condensation,pah_definition]
      allocate(saved_pah(size(pah)))
+#else
+     ! read_hydro_params rejects active dust without SNRT. Keep the HDF5
+     ! checkpoint path fail-closed if that contract is ever bypassed.
+     if(myid==1)write(*,*)'ERROR: PAH checkpoint identity requires SNRT'
+     call MPI_ABORT(MPI_COMM_WORLD,11,info)
+#endif
   endif
   allocate(iron(6+iron_identity_n+fe_optics_identity_n+merge(12,0,dust_fe_kinetics)))
   ! Kinetics appends its exact law. The embedded material identity separately
@@ -198,8 +209,14 @@ subroutine dust_mass_hdf5_identity(grp,writing)
      call dust_olivine_phase_identity(olivine_phase,status)
      if(status/=0)call MPI_ABORT(MPI_COMM_WORLD,11,info)
   endif
+#ifdef SNRT
   call dust_material_identity(any(snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature) &
        >dl01_t(dl01_n)),material)
+#else
+  ! The hot material identity is sourced by the SNRT temperature contract.
+  ! Non-SNRT builds cannot enable live dust, so retain the cold identity.
+  call dust_material_identity(.false.,material)
+#endif
   optics=d03_identity()
   uses_atomic=trim(dust_cooling)=='snrt_hhe_cie_metals'
   uses_chimes=trim(dust_cooling)=='chimes_neq_v1'

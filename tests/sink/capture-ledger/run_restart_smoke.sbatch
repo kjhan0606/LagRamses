@@ -23,7 +23,12 @@ export I_MPI_PIN=0
 
 code=/home/kjhan/BACKUP/lagRamses-capture-ledger
 input="$code/tests/sink/capture-ledger"
-run=/gpfs/kjhan/lagramses_capture_restart_${SLURM_JOB_ID:?}
+format=${CAPTURE_FORMAT:-original}
+case "$format" in
+    original) run=/gpfs/kjhan/lagramses_capture_restart_${SLURM_JOB_ID:?} ;;
+    hdf5) run=/gpfs/kjhan/lagramses_capture_hdf5_restart_${SLURM_JOB_ID:?} ;;
+    *) echo "FATAL: unsupported CAPTURE_FORMAT=$format"; exit 2 ;;
+esac
 if [ -e "$run" ]; then
     echo "FATAL: refusing existing run directory $run"
     exit 2
@@ -32,6 +37,12 @@ mkdir "$run"
 cp "$input/ic_sink" "$run/ic_sink"
 cp "$input/legacy_yields.dat" "$run/legacy_yields.dat"
 cp "$code/bin/ramses_final3d" "$run/ramses_final3d"
+if [ "$format" = hdf5 ]; then
+    ldd "$run/ramses_final3d" | grep -F libhdf5_fortran || {
+        echo 'FATAL: requested HDF5 restart with a non-HDF5 binary'
+        exit 2
+    }
+fi
 cp "$code/patch/lagRamses/aux/validate_smbh_capture_ledger.py" "$run/validate_ledger.py"
 cp "$input/verify_restart_smoke.py" "$run/verify_restart_smoke.py"
 # Mechanical materialization of the committed source namelist.  In read_params,
@@ -45,7 +56,15 @@ sed -e 's/noutput=1/noutput=2/' -e 's/aout=1.1/aout=1.1,1.1/' \
     -e 's/tout=1.0d100/tout=0.0d0,1.0d100/' -e 's/tend=1.0d100/tend=0.0d0/' \
     -e 's/nrestart=0/nrestart=1/' \
     "$input/capture-ledger.nml" >"$run/restart.nml"
+if [ "$format" = hdf5 ]; then
+    for nml in "$run/fresh.nml" "$run/restart.nml"; do
+        awk '/^fbackup=100000$/ {print; print "informat=\"hdf5\""; print "outformat=\"hdf5\""; next} {print}' \
+            "$nml" >"$nml.tmp"
+        mv -- "$nml.tmp" "$nml"
+    done
+fi
 echo "purpose=${SLURM_NTASKS}-rank hydrodynamic checkpoint/restart structural smoke"
+echo "checkpoint_format=$format"
 echo "fresh_effective_namelist=$run/fresh.nml"
 echo "restart_effective_namelist=$run/restart.nml"
 echo "run_directory=$run"
@@ -57,6 +76,11 @@ cd "$run"
 srun --kill-on-bad-exit=1 --mpi=pmi2 --cpu-bind=none \
     -n "${SLURM_NTASKS}" ./ramses_final3d fresh.nml >fresh.log 2>&1
 test -f output_00001/COMPLETE
+if [ "$format" = hdf5 ]; then
+    test -f output_00001/data_00001.h5
+else
+    test ! -e output_00001/data_00001.h5
+fi
 test ! -e output_00002
 python3 validate_ledger.py capture.jsonl >fresh_validation.json
 python3 -c 'import json; d=json.load(open("fresh_validation.json")); assert d["status"]=="valid" and d["multiple_events"]==1 and d["committed_batches"]==1, d'
@@ -66,4 +90,9 @@ test ! -e output_00002
 python3 validate_ledger.py capture.jsonl >restart_validation.json
 python3 -c 'import json; d=json.load(open("restart_validation.json")); assert d["status"]=="valid" and d["multiple_events"]==1 and d["superseded_batches"]==1 and d["run_attempts"]==2, d'
 python3 verify_restart_smoke.py "$run" >restart_evaluation.json
-echo 'CAPTURE_RESTART_SMOKE_PASS'
+if [ "$format" = hdf5 ]; then
+    python3 -c 'import json; d=json.load(open("restart_evaluation.json")); assert d["checkpoint_format"]=="hdf5" and d["replayed_event_records_identical"] and d["active_multiple_events"]==1, d'
+    echo 'CAPTURE_HDF5_LEDGER_STRUCTURAL_PASS_HYDRO_NOT_ADMITTED'
+else
+    echo 'CAPTURE_RESTART_SMOKE_PASS'
+fi

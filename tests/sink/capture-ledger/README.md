@@ -32,6 +32,21 @@ has one accepted three-member event and one superseded batch.
 The scripts use Slurm's `pmi2` MPI launcher; without it, this site's Intel MPI
 starts two independent one-rank programs instead of one two-rank program.
 
+For HDF5, first build with `sbatch tests/sink/capture-ledger/build_hdf5.sbatch`
+and confirm its `CAPTURE_HDF5_BUILD_PASS` marker. Then submit the same bounded
+restart case using the HDF5 binary and format controls:
+
+```bash
+sbatch --ntasks=2 --export=ALL,CAPTURE_FORMAT=hdf5 \
+  tests/sink/capture-ledger/run_restart_smoke.sbatch
+```
+
+The HDF5 gate requires `output_00001/data_00001.h5` and an actual HDF5 AMR
+restore marker; a legacy checkpoint cannot satisfy it. It reports whether
+coarse hydro diagnostics replay identically. A capture-ledger structural pass
+with divergent hydro diagnostics remains outside the physical conservation
+gate.
+
 After a successful restart job, the negative completeness test can use its
 exact run directory:
 
@@ -43,9 +58,10 @@ sbatch --ntasks=2 \
   tests/sink/capture-ledger/run_missing_complete.sbatch
 ```
 
-It copies only that output into a new directory, removes `COMPLETE` from the
-copy, and requires the solver to reject restart before appending to the
-ledger. The source checkpoint is not changed.
+It copies that output and its ledger into a new directory, removes `COMPLETE`
+from the checkpoint copy, and requires the solver to reject restart without
+changing the copied ledger SHA-256. The source checkpoint and ledger are not
+changed.
 
 `verify_restart_smoke.py RUN_DIRECTORY` independently checks checkpoint
 ordering, units, one output, three sink members, three pair rows, and exact

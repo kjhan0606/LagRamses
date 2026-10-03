@@ -49,6 +49,11 @@ def evaluate(run: Path) -> dict:
     outputs = sorted(p.name for p in run.iterdir() if p.is_dir() and p.name.startswith("output_"))
     assert outputs == ["output_00001"], outputs
     assert (run / outputs[0] / "COMPLETE").is_file()
+    fresh_nml = (run / "fresh.nml").read_text()
+    restart_nml = (run / "restart.nml").read_text()
+    hdf5 = 'outformat="hdf5"' in fresh_nml
+    assert hdf5 == ('informat="hdf5"' in restart_nml)
+    assert (run / outputs[0] / "data_00001.h5").is_file() == hdf5
     info = (run / outputs[0] / "info_00001.txt").read_text()
     for key, expected in EXPECTED_UNITS.items():
         match = re.search(rf"^{key}\s*=\s*(\S+)", info, re.MULTILINE)
@@ -75,6 +80,8 @@ def evaluate(run: Path) -> dict:
         assert "Run completed" in log
         assert "FFT direct solve DONE" in log
         assert "Fine multigrid Poisson failed to converge" not in log
+        if hdf5 and name == "restart":
+            assert "HDF5 restore AMR" in log
         rank_match = re.search(r"Working with nproc\s*=\s*(\d+)", log)
         assert rank_match, name
         rank_counts.append(int(rank_match.group(1)))
@@ -89,7 +96,23 @@ def evaluate(run: Path) -> dict:
                 )
             ],
         }
-    assert diagnostics["fresh"] == diagnostics["restart"]
+        assert len(diagnostics[name]["negative_internal_energy_cells"]) == 2
+        assert len(diagnostics[name]["coarse_conservation"]) == 2
+        assert [item["step"] for item in diagnostics[name]["coarse_conservation"]] == [1, 2]
+        assert all(
+            math.isfinite(item[key])
+            for item in diagnostics[name]["coarse_conservation"]
+            for key in ("mass_error", "energy_error")
+        )
+    assert (diagnostics["fresh"]["negative_internal_energy_cells"] ==
+            diagnostics["restart"]["negative_internal_energy_cells"])
+    hydro_replay_identical = diagnostics["fresh"] == diagnostics["restart"]
+    # The legacy binary checkpoint reproduces these coarse diagnostics in
+    # this fixture. A HDF5 restore may follow the cold-Poisson restart path;
+    # retain the measured discrepancy and never use this structural smoke as
+    # a hydro-conservation or trajectory-equivalence claim.
+    if not hdf5:
+        assert hydro_replay_identical
     assert rank_counts[0] == rank_counts[1]
     assert blocks[0][0]["ncpu"] == rank_counts[0]
     info_ncpu = re.search(r"^ncpu\s*=\s*(\d+)", info, re.MULTILINE)
@@ -99,10 +122,12 @@ def evaluate(run: Path) -> dict:
         "physics_admission": "not_admitted_synthetic_initial_conditions",
         "run_directory": str(run),
         "checkpoint": outputs[0],
+        "checkpoint_format": "hdf5" if hdf5 else "original",
         "mpi_ranks": rank_counts[0],
         "active_multiple_events": 1,
         "superseded_batches": 1,
         "replayed_event_records_identical": True,
+        "hydro_replay_identical": hydro_replay_identical,
         "diagnostics": diagnostics,
     }
 

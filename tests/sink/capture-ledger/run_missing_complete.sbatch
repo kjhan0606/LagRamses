@@ -37,6 +37,7 @@ fi
 mkdir "$run"
 cp -a "$source_run/output_00001" "$run/output_00001"
 cp "$source_run/restart.nml" "$run/effective.nml"
+cp "$source_run/capture.jsonl" "$run/capture.jsonl"
 cp "$source_run/legacy_yields.dat" "$run/legacy_yields.dat"
 cp "$source_run/ramses_final3d" "$run/ramses_final3d"
 # Delete only the marker in this new test copy, never in the source checkpoint.
@@ -46,11 +47,14 @@ echo "source_checkpoint=$source_run/output_00001"
 echo "effective_namelist=$run/effective.nml"
 sha256sum "$run/effective.nml" "$run/ramses_final3d"
 cd "$run"
+ledger_sha_before=$(sha256sum capture.jsonl | awk '{print $1}')
 if srun --kill-on-bad-exit=1 --mpi=pmi2 --cpu-bind=none \
     -n "${SLURM_NTASKS}" ./ramses_final3d effective.nml >run.log 2>&1; then
     echo 'FATAL: restart without COMPLETE was accepted'
     exit 1
 fi
 grep -Fq 'FATAL: SMBH capture restart lacks COMPLETE output 1' run.log
-test ! -e capture.jsonl
+ledger_sha_after=$(sha256sum capture.jsonl | awk '{print $1}')
+test "$ledger_sha_before" = "$ledger_sha_after"
+echo "unchanged_capture_ledger_sha256=$ledger_sha_after"
 echo 'MISSING_COMPLETE_RESTART_REJECTED_PASS'
