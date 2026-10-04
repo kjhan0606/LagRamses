@@ -318,11 +318,14 @@ recursive subroutine amr_step(ilevel,icount)
      if((nstep_coarse>0.and.mod(nstep_coarse,foutput)==0).or. &
           & aexp>=aout(iout).or.t>=tout(iout).or.output_now_all.EQV..true.)then
                                call timer('io','start')
+        call diagnose_active_level1('output_pre_defrag')
         if(.not.ok_defrag)then
            call defrag
         endif
+        call diagnose_active_level1('output_post_defrag')
 
         call dump_all
+        call diagnose_active_level1('output_post_dump')
 
         ! Run the clumpfinder, (produce output, don't keep arrays alive on output)
         if(clumpfind .and. ndim==3) call clump_finder(.true.,.false.)
@@ -1569,3 +1572,32 @@ subroutine check_load_imbalance(did_remap)
   end if
 
 end subroutine check_load_imbalance
+
+!################################################################
+!################################################################
+subroutine diagnose_active_level1(stage)
+  use amr_commons
+  implicit none
+  character(len=*),intent(in)::stage
+  integer::active_grid
+
+  active_grid=-1
+  if(active(1)%ngrid>0)then
+     if(.not.associated(active(1)%igrid))then
+        write(*,*)'ACTIVE_LEVEL1_INVALID stage=',trim(stage), &
+             ' myid=',myid,' numbl=',numbl(myid,1),' headl=',headl(myid,1), &
+             ' active_ngrid=',active(1)%ngrid,' active_allocated=F'
+        call clean_stop
+     endif
+     active_grid=active(1)%igrid(1)
+  endif
+  write(*,*)'ACTIVE_LEVEL1_STATE stage=',trim(stage), &
+       ' myid=',myid,' numbl=',numbl(myid,1),' headl=',headl(myid,1), &
+       ' active_ngrid=',active(1)%ngrid,' active_grid1=',active_grid
+  if(active(1)%ngrid/=numbl(myid,1).or. &
+       (active(1)%ngrid>0.and. &
+        (active_grid<1.or.active_grid>ngridmax)))then
+     write(*,*)'ACTIVE_LEVEL1_INVALID stage=',trim(stage)
+     call clean_stop
+  endif
+end subroutine diagnose_active_level1

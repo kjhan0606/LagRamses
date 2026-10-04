@@ -11,9 +11,32 @@ SOURCE = (
     / "lagRamses"
     / "particle_tree.kjhan.f90"
 ).read_text(encoding="utf-8")
+AMR_STEP_SOURCE = (
+    Path(__file__).resolve().parents[3]
+    / "patch"
+    / "lagRamses"
+    / "amr_step.jaehyun.f90"
+).read_text(encoding="utf-8")
 
 
 class ParticleTreeDiagnosticTest(unittest.TestCase):
+    def test_output_path_brackets_active_level1_owner_transition(self) -> None:
+        pre = AMR_STEP_SOURCE.index("diagnose_active_level1('output_pre_defrag')")
+        defrag = AMR_STEP_SOURCE.index("call defrag", pre)
+        post_defrag = AMR_STEP_SOURCE.index(
+            "diagnose_active_level1('output_post_defrag')", defrag
+        )
+        dump = AMR_STEP_SOURCE.index("call dump_all", post_defrag)
+        post_dump = AMR_STEP_SOURCE.index(
+            "diagnose_active_level1('output_post_dump')", dump
+        )
+        self.assertLess(pre, defrag)
+        self.assertLess(defrag, post_defrag)
+        self.assertLess(post_defrag, dump)
+        self.assertLess(dump, post_dump)
+        self.assertIn("active(1)%ngrid/=numbl(myid,1)", AMR_STEP_SOURCE)
+        self.assertIn("call clean_stop", AMR_STEP_SOURCE[post_dump:])
+
     def test_make_tree_distinguishes_source_from_staging_failure(self) -> None:
         self.assertIn("MAKE_TREE_SOURCE_GRID_INVALID", SOURCE)
         self.assertIn("MAKE_TREE_STAGE_GRID_MISMATCH", SOURCE)
