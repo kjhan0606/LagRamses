@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -58,9 +59,134 @@ STELLAR_ENRICHMENT_POLICY = {
     "allow_legacy_prompt_snia": ".false.",
 }
 
+EXPECTED_GROUPS = ((1, 2), (3, 4, 5))
+EXPECTED_PRIMARY_IDS = {2, 5}
+
 
 def fail(message: str) -> None:
     raise SystemExit(f"CAPTURE-RESTART: {message}")
+
+
+def parse_finite_csv(path: Path, expected_columns: int) -> list[list[float]]:
+    """Parse a headerless numeric CSV, rejecting malformed and nonfinite fields."""
+    if not path.is_file():
+        fail(f"missing {path}")
+    rows: list[list[float]] = []
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        fields = [field.strip() for field in line.split(",")]
+        if len(fields) != expected_columns:
+            fail(f"{path}:{lineno}: expected {expected_columns} numeric fields, found {len(fields)}")
+        try:
+            row = [float(field) for field in fields]
+        except ValueError:
+            fail(f"{path}:{lineno}: nonnumeric CSV field")
+        if not all(math.isfinite(value) for value in row):
+            fail(f"{path}:{lineno}: nonfinite numeric field")
+        rows.append(row)
+    if not rows:
+        fail(f"{path}: no data rows")
+    return rows
+
+
+def parse_seed_sinks(path: Path) -> dict[int, tuple[float, tuple[float, ...], tuple[float, ...]]]:
+    rows = parse_finite_csv(path, 12)
+    if len(rows) != 5:
+        fail(f"{path}: expected exactly five seed sinks, found {len(rows)}")
+    seeds = {}
+    for sink_id, row in enumerate(rows, 1):
+        # ic_sink coordinates are centered on zero; RAMSES stores [0,1) positions.
+        seeds[sink_id] = (row[0], tuple(value + 0.5 for value in row[1:4]), tuple(row[4:7]))
+    return seeds
+
+
+def parse_sink_snapshot(path: Path) -> dict[int, tuple[float, tuple[float, ...], tuple[float, ...], float, float]]:
+    parsed = {}
+    for lineno, row in enumerate(parse_finite_csv(path, 10), 1):
+        sink_id = int(row[0])
+        if row[0] != sink_id or sink_id in parsed:
+            fail(f"{path}:{lineno}: sink ID must be a unique integer")
+        parsed[sink_id] = (row[1], tuple(row[2:5]), tuple(row[5:8]), row[8], row[9])
+    return parsed
+
+
+def assert_close(actual: float, expected: float, context: str) -> None:
+    if not math.isclose(actual, expected, rel_tol=1.0e-10, abs_tol=1.0e-12):
+        fail(f"{context}: expected {expected:.17g}, found {actual:.17g}")
+
+
+def validate_sink_state(run_dir: Path) -> None:
+    """Fail-closed conservation and restart-continuity checks for this fixture."""
+    seeds = parse_seed_sinks(run_dir / "ic_sink")
+    snapshots = {
+        index: parse_sink_snapshot(run_dir / f"output_{index:05d}" / f"sink_{index:05d}.csv")
+        for index in (1, 2)
+    }
+    for index, snapshot in snapshots.items():
+        if set(snapshot) != EXPECTED_PRIMARY_IDS:
+            fail(f"output_{index:05d}: expected surviving sink IDs {sorted(EXPECTED_PRIMARY_IDS)}, found {sorted(snapshot)}")
+        for group in EXPECTED_GROUPS:
+            primary = max(group)
+            expected_mass = sum(seeds[sink_id][0] for sink_id in group)
+            expected_position = tuple(
+                sum(seeds[sink_id][0] * seeds[sink_id][1][axis] for sink_id in group) / expected_mass
+                for axis in range(3)
+            )
+            expected_momentum = tuple(
+                sum(seeds[sink_id][0] * seeds[sink_id][2][axis] for sink_id in group)
+                for axis in range(3)
+            )
+            mass, position, velocity, _, _ = snapshot[primary]
+            assert_close(mass, expected_mass, f"output_{index:05d} sink {primary} mass")
+            for axis in range(3):
+                assert_close(position[axis], expected_position[axis],
+                             f"output_{index:05d} sink {primary} position[{axis}]")
+                assert_close(mass * velocity[axis], expected_momentum[axis],
+                             f"output_{index:05d} sink {primary} momentum[{axis}]")
+        assert_close(sum(row[0] for row in snapshot.values()),
+                     sum(row[0] for row in seeds.values()),
+                     f"output_{index:05d} total sink mass")
+
+    for sink_id in sorted(EXPECTED_PRIMARY_IDS):
+        first, second = snapshots[1][sink_id], snapshots[2][sink_id]
+        for label, left, right in (("mass", first[0], second[0]),
+                                   *[(f"position[{axis}]", first[1][axis], second[1][axis]) for axis in range(3)],
+                                   *[(f"velocity[{axis}]", first[2][axis], second[2][axis]) for axis in range(3)]):
+            assert_close(right, left, f"restart continuity sink {sink_id} {label}")
+
+    log_rows = parse_finite_csv(run_dir / "sink_log.csv", 10)
+    if len(log_rows) != 4 or {int(row[3]) for row in log_rows} != EXPECTED_PRIMARY_IDS:
+        fail("sink_log.csv: expected two finite records for each surviving sink")
+    if any(row[3] != int(row[3]) for row in log_rows):
+        fail("sink_log.csv: sink IDs must be integers")
+    counts = {sink_id: sum(int(row[3]) == sink_id for row in log_rows)
+              for sink_id in EXPECTED_PRIMARY_IDS}
+    if any(count != 2 for count in counts.values()):
+        fail(f"sink_log.csv: expected two records per survivor, found {counts}")
+
+
+def validate_particle_text_header(path: Path) -> None:
+    if not path.is_file():
+        fail(f"missing {path}")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    fields = {}
+    for index, line in enumerate(lines[:-1]):
+        label = line.strip()
+        if label.startswith("Total number of"):
+            try:
+                fields[label] = int(lines[index + 1].strip())
+            except ValueError:
+                fail(f"{path}: invalid count after {label!r}")
+    expected = {
+        "Total number of particles": 0,
+        "Total number of dark matter particles": 0,
+        "Total number of star particles": 0,
+        "Total number of sink particles": 2,
+        "Total number of cloud particles (including sinks)": 0,
+    }
+    if fields != expected:
+        fail(f"{path}: unexpected particle counts {fields!r}")
 
 
 def sha256(path: Path) -> str:
@@ -476,6 +602,11 @@ def postcheck(args: argparse.Namespace) -> None:
     stage1_log = (run_dir / "stage1.log").read_text(encoding="utf-8", errors="replace")
     if not re.search(r"init_sink:\s*loaded\s+5\s+sinks\s+from", stage1_log):
         fail("stage1.log does not prove exactly five seed sinks were loaded")
+    validate_sink_state(run_dir)
+    for index in (1, 2):
+        validate_particle_text_header(
+            run_dir / f"output_{index:05d}" / f"header_{index:05d}.txt"
+        )
     sys.path.insert(0, str(ROOT / "patch" / "lagRamses" / "aux"))
     from validate_smbh_capture_ledger import validate_ledger  # type: ignore
 
