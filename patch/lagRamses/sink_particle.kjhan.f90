@@ -2179,7 +2179,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   real(dp)::box_size,total_mass,max_separation
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
   real(dp)::redshift
-  real(dp),dimension(1:3)::com_pos,com_vel,delta_pos,delta_vel
+  real(dp),dimension(1:3)::com_pos,com_vel,delta_pos,delta_vel,periodic_box_size
   real(dp),dimension(1:3)::specific_h,relative_L
   real(dp)::separation2,separation,vrel2,vrel,reduced_mass
   real(dp)::relative_kinetic,potential_1overr,specific_energy
@@ -2217,6 +2217,14 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   scale_m=scale_d*scale_l**3
   redshift=0d0
   if(aexp > 0d0) redshift=1d0/aexp-1d0
+
+  do idim=1,3
+     periodic_box_size(idim)=scale*xbound(idim)
+     if(.not.ieee_is_finite(periodic_box_size(idim)) .or. &
+          & periodic_box_size(idim) <= 0d0) then
+        call ledger_group_fatal(0,idim,'non-finite or non-positive periodic box extent')
+     endif
+  enddo
 
   ! Validate every recordable group before opening the append-only ledger.
   ! Otherwise a bad later group could leave earlier groups marked complete
@@ -2318,7 +2326,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         if(gsink(isink) /= igrp) cycle
         do idim=1,ndim
            delta_pos(idim)=xsink(isink,idim)-xsink(anchor,idim)
-           box_size=scale*xbound(idim)
+           box_size=periodic_box_size(idim)
            if(delta_pos(idim) >  0.5d0*box_size) delta_pos(idim)=delta_pos(idim)-box_size
            if(delta_pos(idim) < -0.5d0*box_size) delta_pos(idim)=delta_pos(idim)+box_size
            com_pos(idim)=com_pos(idim)+msink(isink)*delta_pos(idim)
@@ -2326,7 +2334,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         enddo
      enddo
      do idim=1,ndim
-        box_size=scale*xbound(idim)
+        box_size=periodic_box_size(idim)
         com_pos(idim)=xsink(anchor,idim)+com_pos(idim)/total_mass
         if(com_pos(idim) >= box_size) com_pos(idim)=com_pos(idim)-box_size
         if(com_pos(idim) <  0d0)      com_pos(idim)=com_pos(idim)+box_size
@@ -2341,7 +2349,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
            delta_pos=0d0
            do idim=1,ndim
               delta_pos(idim)=xsink(jsink_member,idim)-xsink(isink,idim)
-              box_size=scale*xbound(idim)
+              box_size=periodic_box_size(idim)
               if(delta_pos(idim) >  0.5d0*box_size) delta_pos(idim)=delta_pos(idim)-box_size
               if(delta_pos(idim) < -0.5d0*box_size) delta_pos(idim)=delta_pos(idim)+box_size
            enddo
@@ -2383,6 +2391,10 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
           & ',"levelmin":'//trim(json_int(levelmin))// &
           & ',"nlevelmax":'//trim(json_int(nlevelmax))// &
           & ',"boxlen":'//trim(json_real(boxlen))// &
+          & ',"periodic_box_size_code":['// &
+          & trim(json_real(periodic_box_size(1)))//','// &
+          & trim(json_real(periodic_box_size(2)))//','// &
+          & trim(json_real(periodic_box_size(3)))//']'// &
           & ',"omega_m":'//trim(json_real(omega_m))// &
           & ',"h0":'//trim(json_real(h0))// &
           & ',"factG_code":'//trim(json_real(factG))// &
@@ -2456,7 +2468,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
            delta_vel=0d0
            do idim=1,ndim
               delta_pos(idim)=xsink(jsink_member,idim)-xsink(isink,idim)
-              box_size=scale*xbound(idim)
+              box_size=periodic_box_size(idim)
               if(delta_pos(idim) >  0.5d0*box_size) delta_pos(idim)=delta_pos(idim)-box_size
               if(delta_pos(idim) < -0.5d0*box_size) delta_pos(idim)=delta_pos(idim)+box_size
               delta_vel(idim)=vsink(jsink_member,idim)-vsink(isink,idim)
