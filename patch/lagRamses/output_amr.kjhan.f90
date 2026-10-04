@@ -88,6 +88,7 @@ subroutine dump_all
      ! Output header: must be called by each process !
      filename=TRIM(filedir)//'header_'//TRIM(nchar)//'.txt'
      call output_header(filename)
+     call diagnose_active_level1('dump_after_header')
 #ifndef WITHOUTMPI
      if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif     
@@ -171,6 +172,7 @@ subroutine dump_all
 #ifndef WITHOUTMPI
      if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
+     call diagnose_active_level1('dump_after_info')
      if(myid==1.and.print_when_io) write(*,*)'End backup info etc.'
 
 #ifdef HDF5
@@ -183,6 +185,7 @@ subroutine dump_all
      if(myid==1.and.print_when_io) write(*,*)'Start backup amr'
      filename=TRIM(filedir)//'amr_'//TRIM(nchar)//'.out'
      call backup_amr(filename)
+     call diagnose_active_level1('dump_after_amr')
 #ifndef WITHOUTMPI
      if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
@@ -192,6 +195,7 @@ subroutine dump_all
         if(myid==1.and.print_when_io) write(*,*)'Start backup hydro'
         filename=TRIM(filedir)//'hydro_'//TRIM(nchar)//'.out'
         call backup_hydro(filename)
+        call diagnose_active_level1('dump_after_hydro')
 #ifndef WITHOUTMPI
         if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
@@ -214,9 +218,11 @@ subroutine dump_all
         if(myid==1.and.print_when_io) write(*,*)'Start backup part'
         filename=TRIM(filedir)//'part_'//TRIM(nchar)//'.out'
         call backup_part(filename)
+        call diagnose_active_level1('dump_after_part')
         if(sink)then
            filename=TRIM(filedir)//'sink_'//TRIM(nchar)//'.out'
            call backup_sink(filename)
+           call diagnose_active_level1('dump_after_sink')
         end if
 #ifndef WITHOUTMPI
         if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
@@ -229,6 +235,7 @@ subroutine dump_all
         if(myid==1) call flush(6)
         filename=TRIM(filedir)//'grav_'//TRIM(nchar)//'.out'
         call backup_poisson(filename)
+        call diagnose_active_level1('dump_after_poisson')
 #ifndef WITHOUTMPI
         if(synchro_when_io) call MPI_BARRIER(MPI_COMM_WORLD,info)
 #endif
@@ -346,6 +353,7 @@ subroutine dump_all
      if(myid==1 .and. smbh .and. smbh_capture_ledger)then
         call write_smbh_capture_checkpoint_lineage(nchar)
      endif
+     call diagnose_active_level1('dump_after_sidecars')
      if(myid==1)then
         filename='output_'//TRIM(nchar)//'/COMPLETE'
         open(unit=11,file=TRIM(filename),form='formatted')

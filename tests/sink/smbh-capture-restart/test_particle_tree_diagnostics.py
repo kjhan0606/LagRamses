@@ -37,6 +37,21 @@ class ParticleTreeDiagnosticTest(unittest.TestCase):
         self.assertIn("active(1)%ngrid/=numbl(myid,1)", AMR_STEP_SOURCE)
         self.assertIn("call clean_stop", AMR_STEP_SOURCE[post_dump:])
 
+    def test_dump_components_are_individually_guarded(self) -> None:
+        output_source = (
+            Path(__file__).resolve().parents[3]
+            / "patch"
+            / "lagRamses"
+            / "output_amr.kjhan.f90"
+        ).read_text(encoding="utf-8")
+        for component in (
+            "header", "info", "amr", "hydro", "part", "sink", "poisson", "sidecars"
+        ):
+            self.assertIn(
+                f"diagnose_active_level1('dump_after_{component}')",
+                output_source,
+            )
+
     def test_make_tree_distinguishes_source_from_staging_failure(self) -> None:
         self.assertIn("MAKE_TREE_SOURCE_GRID_INVALID", SOURCE)
         self.assertIn("MAKE_TREE_STAGE_GRID_MISMATCH", SOURCE)
