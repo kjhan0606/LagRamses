@@ -72,6 +72,20 @@ class ParticleTreeDiagnosticTest(unittest.TestCase):
         self.assertIn("stop 1", guard)
         self.assertNotIn("call clean_stop", guard)
 
+    def test_particle_slots_start_unconditionally_free(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[3]
+            / "patch"
+            / "lagRamses"
+            / "init_part.f90"
+        ).read_text(encoding="utf-8")
+        allocation = source.index("allocate(levelp(npartmax))")
+        initialization = source.index("levelp=0", allocation)
+        first_reader = source.index("if(nrestart>0)", initialization)
+        self.assertLess(allocation, initialization)
+        self.assertLess(initialization, first_reader)
+        self.assertNotIn("if(use_fdm) levelp = 0", source)
+
     def test_make_tree_distinguishes_source_from_staging_failure(self) -> None:
         self.assertIn("MAKE_TREE_SOURCE_GRID_INVALID", SOURCE)
         self.assertIn("MAKE_TREE_STAGE_GRID_MISMATCH", SOURCE)
