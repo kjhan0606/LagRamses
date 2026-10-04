@@ -191,6 +191,26 @@ The runner uses exactly two MPI ranks with one OpenMP thread each, checks
 smoke. A failed MPI run must be retained for diagnosis, never relabelled as a
 passed one-rank run.
 
+The first two-rank execution on LagEunha passed on 2026-10-04 using clean
+source commit `cb924745be266bf15fe5c7b28261124d1d48a2c3` and binary
+SHA-256 `c6a534f87c82174ab58391779d200b9f2dd9ab597cb8ebd54350443c90c4425d`.
+The prepared manifest SHA-256 was
+`646c49feba2e2e4e259f700bea4e3f1e2cc3d25138fc9a6f2778474c0355107a`.
+The preserved run is
+`/home/kjhan/BACKUP/smbh-capture-restart-mpi2-cb92474-20261004/`;
+its ledger SHA-256 is
+`914f8f6dbd4b666bc71933ceacfaa0c69271862c0edd94639b224e36b505744f`.
+Both outputs report `ncpu=2`; postcheck found one committed `BINARY`
+(two members) and one committed `MULTIPLE` (three members), no duplicate or
+incomplete batches, mass conservation, and sink-state continuity across the
+restart. An independent read-only review confirmed the ledger and lineage.
+`committed_batch_seq` is per attempt: output 1 has one committed batch, while
+the new restart attempt has none and correctly writes zero in output 2.
+This smoke uses zero-velocity sinks, so its momentum check is algebraically
+correct but trivial; it does not validate sink motion or a new capture after
+restart. It also does not validate nonperiodic AMR boundaries or a physical
+galaxy-merger capture rate.
+
 ## 5. Optional execution under Slurm
 
 Slurm may use `/scratch`, but it needs a distinct preparation there (including
