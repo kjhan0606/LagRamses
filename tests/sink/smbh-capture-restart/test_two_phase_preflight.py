@@ -73,6 +73,8 @@ class TwoPhasePreflightTest(unittest.TestCase):
         result = self.prepare()
         self.assertEqual(result.returncode, 0, result.stdout)
         manifest = json.loads((self.run_dir / "preflight_manifest.json").read_text())
+        self.assertEqual(manifest["schema"], 3)
+        self.assertEqual(manifest["expected_mpi_ranks"], 1)
         self.assertEqual(manifest["expected_outputs"], ["output_00001", "output_00002"])
         self.assertEqual(
             manifest["stellar_enrichment_policy"],
@@ -223,6 +225,46 @@ Filesystem kbytes quota limit grace files quota limit grace
                               "--hostname", "LagEunha.cluster.example")
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("execution_context=PASS", result.stdout)
+
+    def test_mpi2_manifest_and_execution_rank_are_sealed(self) -> None:
+        result = self.command(
+            "prepare", str(self.run_dir), "--binary", str(self.binary),
+            "--source-tree", str(self.source),
+            "--expected-source-commit", self.commit,
+            "--bytes-per-output", "1", "--reserve-bytes", "0",
+            "--yield-table-source", str(self.yield_table), "--mpi-ranks", "2",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        manifest = json.loads((self.run_dir / "preflight_manifest.json").read_text())
+        self.assertEqual(manifest["expected_mpi_ranks"], 2)
+        accepted = self.command(
+            "launch-check", str(self.run_dir), "--binary", str(self.binary),
+            "--manifest-sha256", self.manifest_hash(), "--expected-mpi-ranks", "2",
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stdout)
+        rejected = self.command(
+            "launch-check", str(self.run_dir), "--binary", str(self.binary),
+            "--manifest-sha256", self.manifest_hash(), "--expected-mpi-ranks", "1",
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("rank count differs", rejected.stdout)
+
+    def test_mpi2_host_and_output_rank_gates(self) -> None:
+        rejected = self.command(
+            "execution-context", "--execution-mode", "manual-lageunha-mpi2",
+            "--hostname", "syntax",
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        accepted = self.command(
+            "execution-context", "--execution-mode", "manual-lageunha-mpi2",
+            "--hostname", "LagEunha",
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stdout)
+        info = Path(self.temp.name) / "info_00001.txt"
+        info.write_text("ncpu        =          2\n")
+        PREPARE_MODULE.validate_info_ncpu(info, 2)
+        with self.assertRaisesRegex(SystemExit, "expected ncpu=1"):
+            PREPARE_MODULE.validate_info_ncpu(info, 1)
 
 
 if __name__ == "__main__":

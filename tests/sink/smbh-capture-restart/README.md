@@ -1,10 +1,12 @@
 # SMBH capture-ledger restart smoke
 
-This serial synthetic smoke starts five SMBHs in a two-member group and a
+This synthetic smoke starts five SMBHs in a two-member group and a
 transitive three-member chain. Stage 1 writes `output_00001`; stage 2 restarts
 that COMPLETE checkpoint and writes `output_00002`. Postcheck requires one
 committed `BINARY`, one committed `MULTIPLE`, member counts 2+3, both lineage
-sidecars, and a validator-selected active restart branch.
+sidecars, and a validator-selected active restart branch. The original
+one-rank path remains available; a separately sealed two-rank manual path
+checks MPI rank count in both outputs.
 
 The fixture is periodic: `BOUNDARY_PARAMS` is intentionally absent, selecting
 RAMSES's default `nboundary=0` topology.  This isolates the capture/restart
@@ -104,7 +106,7 @@ run_dir=/home/kjhan/BACKUP/smbh-capture-restart-$short_commit
 python3 -m json.tool "$run_dir/preflight_manifest.json" | less
 manifest_sha256=$(sha256sum "$run_dir/preflight_manifest.json" | awk '{print $1}')
 # Required manual evidence on Lageunha; retain this output with the manifest.
-mmlsquota aicpuhome -u "$USER"
+/usr/lpp/mmfs/bin/mmlsquota -u "$USER" aicpuhome
 df -h /home
 ```
 
@@ -140,7 +142,56 @@ manifest_sha256=REPLACE_WITH_APPROVED_64_HEX_DIGEST
 `--manual-lageunha` refuses other hosts and never uses `srun`. It is not an
 authorization to run a GPU workload manually.
 
-## 4. Optional execution under Slurm
+## 4. Two-rank manual MPI regression on LagEunha
+
+For a two-rank MPI regression on LagEunha, prepare a new, never-used run
+directory with `--mpi-ranks 2` and a separately audited output-size estimate.
+Do not reuse the one-rank manifest or output directory. The manifest binds the
+rank count, and `--manual-lageunha-mpi2` refuses a manifest prepared for one
+rank. The runner also requires the Intel MPI launcher and the same Intel MPI
+library prefix in the binary. Old schema-2 serial manifests are intentionally
+not accepted by the new schema-3 runner; prepare a fresh run rather than
+rewriting an approved manifest. Load the build-matched modules, then run:
+
+```bash
+module purge
+module load intel/tbb/2022.3 intel/umf/1.0.2 \
+  intel/compiler-rt/2025.3.0 intel/compiler/2025.3.0 intel/mpi/2021.17
+export LD_LIBRARY_PATH=/home/kjhan/local/hdf5/lib:/home/kjhan/local/lib:${LD_LIBRARY_PATH:-}
+build_tree=/home/kjhan/BACKUP/lagRamses-build-capture-smoke-COMMIT8
+binary="$build_tree/bin/ramses_final3d"
+commit=$(git -C "$build_tree" rev-parse HEAD)
+short_commit=$(git -C "$build_tree" rev-parse --short=8 HEAD)
+run_dir=/home/kjhan/BACKUP/smbh-capture-restart-mpi2-$short_commit
+"$build_tree/tests/sink/smbh-capture-restart/run_smoke.sh" \
+  --prepare --run-dir "$run_dir" --binary "$binary" \
+  --source-tree "$build_tree" --expected-source-commit "$commit" \
+  --yield-table-source /gpfs/kjhan/Run_JWST/opt_run/yield_table.asc \
+  --bytes-per-output 1000000000 --mpi-ranks 2
+# Inspect the effective namelists, output projection, quota/free-space report,
+# and source/binary identities before continuing.
+/usr/lpp/mmfs/bin/mmlsquota -u "$USER" aicpuhome
+df -h /home
+```
+
+Stop here. Inspect the effective files, projected storage, quota/free-space
+evidence, clean source and binary hash. Only after that review, use the
+manifest digest printed by preparation in a separate command:
+
+```bash
+manifest_sha256=$(sha256sum "$run_dir/preflight_manifest.json" | awk '{print $1}')
+"$build_tree/tests/sink/smbh-capture-restart/run_smoke.sh" \
+  --manual-lageunha-mpi2 --run-dir "$run_dir" --binary "$binary" \
+  --manifest-sha256 "$manifest_sha256"
+```
+
+The runner uses exactly two MPI ranks with one OpenMP thread each, checks
+`ncpu=2` in both RAMSES output headers, then applies the same mass, momentum,
+`BINARY`/`MULTIPLE`, lineage, and restart-continuity postcheck as the serial
+smoke. A failed MPI run must be retained for diagnosis, never relabelled as a
+passed one-rank run.
+
+## 5. Optional execution under Slurm
 
 Slurm may use `/scratch`, but it needs a distinct preparation there (including
 the same explicit `--yield-table-source` argument); a sealed

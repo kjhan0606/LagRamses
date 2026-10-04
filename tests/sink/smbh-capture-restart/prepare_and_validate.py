@@ -366,6 +366,8 @@ def prepare(args: argparse.Namespace) -> None:
         fail("--bytes-per-output must be a positive measured or conservative estimate")
     if args.reserve_bytes < 0:
         fail("--reserve-bytes must be nonnegative")
+    if args.mpi_ranks not in (1, 2):
+        fail("capture smoke supports exactly one or two MPI ranks")
     binary = args.binary.resolve()
     if not binary.is_file() or not binary.stat().st_mode & 0o111:
         fail(f"binary is not an executable regular file: {binary}")
@@ -385,6 +387,7 @@ def prepare(args: argparse.Namespace) -> None:
     quota = lustre_quota_evidence(run_dir.parent)
     print(f"run_dir={run_dir}")
     print("run_class=short evolution test (synthetic capture/restart)")
+    print(f"expected_mpi_ranks={args.mpi_ranks}")
     print("effective_run_policy=cosmo=.false. hydro=.true. pic=.true. poisson=.true. sink=.true.")
     print("effective_boundary_policy=periodic (BOUNDARY_PARAMS absent; nboundary=0 default)")
     print("effective_stellar_enrichment_policy=legacy compatibility mode; all elements and channels disabled; legacy prompt SNIa disabled")
@@ -426,8 +429,9 @@ def prepare(args: argparse.Namespace) -> None:
         path = run_dir / name
         files[name] = {"sha256": sha256(path), "bytes": path.stat().st_size}
     manifest = {
-        "schema": 2,
+        "schema": 3,
         "run_class": "short evolution test (synthetic capture/restart)",
+        "expected_mpi_ranks": args.mpi_ranks,
         "run_dir": str(run_dir),
         "expected_source_commit": args.expected_source_commit,
         "source_tree": str(source_tree),
@@ -487,8 +491,13 @@ def launch_check(args: argparse.Namespace) -> None:
         fail(f"cannot read valid prepared manifest: {error}")
     if not isinstance(manifest, dict):
         fail("prepared manifest root must be an object")
-    if manifest.get("schema") != 2 or manifest.get("run_dir") != str(run_dir):
+    if manifest.get("schema") != 3 or manifest.get("run_dir") != str(run_dir):
         fail("manifest schema or absolute run directory mismatch")
+    ranks = manifest.get("expected_mpi_ranks")
+    if type(ranks) is not int or ranks not in (1, 2):
+        fail("manifest MPI rank count is invalid")
+    if args.expected_mpi_ranks is not None and ranks != args.expected_mpi_ranks:
+        fail("execution MPI rank count differs from prepared manifest")
     if (manifest.get("output_policy") != POLICY or
             manifest.get("run_policy") != RUN_POLICY or
             manifest.get("boundary_policy") != BOUNDARY_POLICY or
@@ -549,6 +558,7 @@ def launch_check(args: argparse.Namespace) -> None:
     print(f"effective_stage2_namelist={run_dir / 'stage2.nml'}")
     print(f"binary_sha256={expected_binary['sha256']}")
     print(f"expected_source_commit={manifest['expected_source_commit']}")
+    print(f"expected_mpi_ranks={ranks}")
     print(f"required_free_bytes={required}")
     print(f"free_bytes={free}")
     if quota is not None:
@@ -567,7 +577,7 @@ def launch_check(args: argparse.Namespace) -> None:
 
 def execution_context(args: argparse.Namespace) -> None:
     host = args.hostname.split(".", 1)[0].lower()
-    if args.execution_mode == "manual-lageunha":
+    if args.execution_mode in ("manual-lageunha", "manual-lageunha-mpi2"):
         if host != "lageunha":
             fail(f"manual execution requires hostname LagEunha, found {args.hostname}")
     elif not args.slurm_job_id:
@@ -575,10 +585,25 @@ def execution_context(args: argparse.Namespace) -> None:
     print(f"execution_context=PASS mode={args.execution_mode} hostname={args.hostname}")
 
 
+def validate_info_ncpu(info_path: Path, ranks: int) -> None:
+    try:
+        info = info_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        fail(f"cannot read MPI rank evidence {info_path}: {error}")
+    ncpu = re.search(r"(?m)^ncpu\s*=\s*(\d+)\s*$", info)
+    if ncpu is None or int(ncpu.group(1)) != ranks:
+        fail(f"{info_path}: expected ncpu={ranks}")
+
+
 def postcheck(args: argparse.Namespace) -> None:
     run_dir = args.run_dir.resolve()
+    ranks = args.expected_mpi_ranks
+    if type(ranks) is not int or ranks not in (1, 2):
+        fail("postcheck MPI rank count must be one or two")
     for index in (1, 2):
         output = run_dir / f"output_{index:05d}"
+        info_path = output / f"info_{index:05d}.txt"
+        validate_info_ncpu(info_path, ranks)
         complete = output / "COMPLETE"
         lineage = output / "SMBH_CAPTURE_LINEAGE"
         if not complete.is_file() or complete.read_text(encoding="utf-8").strip() != f"{index:05d}":
@@ -642,6 +667,7 @@ def main() -> None:
     prep.add_argument("run_dir", type=Path)
     prep.add_argument("--bytes-per-output", type=int, required=True)
     prep.add_argument("--reserve-bytes", type=int, default=1_073_741_824)
+    prep.add_argument("--mpi-ranks", type=int, choices=(1, 2), default=1)
     prep.add_argument("--binary", type=Path, required=True)
     prep.add_argument("--expected-source-commit", required=True)
     prep.add_argument("--source-tree", type=Path, required=True)
@@ -650,12 +676,14 @@ def main() -> None:
     launch.add_argument("run_dir", type=Path)
     launch.add_argument("--binary", type=Path, required=True)
     launch.add_argument("--manifest-sha256", required=True)
+    launch.add_argument("--expected-mpi-ranks", type=int, choices=(1, 2))
     context = sub.add_parser("execution-context")
-    context.add_argument("--execution-mode", choices=("manual-lageunha", "slurm"), required=True)
+    context.add_argument("--execution-mode", choices=("manual-lageunha", "manual-lageunha-mpi2", "slurm"), required=True)
     context.add_argument("--hostname", required=True)
     context.add_argument("--slurm-job-id")
     check = sub.add_parser("postcheck")
     check.add_argument("run_dir", type=Path)
+    check.add_argument("--expected-mpi-ranks", type=int, choices=(1, 2), default=1)
     args = parser.parse_args()
     if args.mode == "prepare":
         prepare(args)
