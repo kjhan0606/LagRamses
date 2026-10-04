@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Source-level guards for failures exercised by the two-phase smoke test."""
 
-import re
 import unittest
 from pathlib import Path
 
@@ -29,18 +28,19 @@ class MergeCloudRegressionTest(unittest.TestCase):
             SOURCE,
         )
 
-    def test_zero_angular_momentum_spin_update_has_no_zero_norm_division(self) -> None:
-        merger = re.search(
-            r"subroutine merge_sink\(ilevel\)(.*?)end subroutine merge_sink",
-            SOURCE,
-            flags=re.DOTALL | re.IGNORECASE,
+    def test_sink_and_cloud_removal_use_actual_parent_grids(self) -> None:
+        self.assertEqual(
+            SOURCE.count("ind_parent_grid(j)=ind_grid(ind_grid_part(j))"),
+            2,
         )
-        self.assertIsNotNone(merger)
-        body = merger.group(1).lower()
-        self.assertRegex(body, r"if\s*\(lmod>0d0\)\s*then")
-        self.assertRegex(body, r"if\s*\(a1mod>0d0\)\s*then")
-        self.assertIn("bhspin_new(igrp,1:3)=0d0", body)
-
+        self.assertEqual(
+            SOURCE.count("call remove_list(ind_part,ind_parent_grid,ok,np)"),
+            2,
+        )
+        self.assertNotIn(
+            "call remove_list(ind_part,ind_grid_part,ok,np)",
+            SOURCE,
+        )
 
 if __name__ == "__main__":
     unittest.main()
