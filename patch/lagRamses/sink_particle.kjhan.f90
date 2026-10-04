@@ -1618,9 +1618,21 @@ subroutine merge_sink(ilevel)
              & + 2d0*SQRT(3d0) + t2*mu + t3*mu**2
         af = 1d0 / ( 1d0 + q )**2 * SQRT( a1**2 + a2**2*q**4 + 2d0*a1*a2*q**2*a1a2 &
              & + 2d0 * ( a1*a1L + a2*q**2*a2L ) * Lmodana*q + Lmodana**2*q**2 )
-        bhspin_new(igrp,1)=1d0/(1d0+q)**2 * ( a1*ax1+a2*ax2*q**2+(Lx/Lmod)*Lmodana*q )
-        bhspin_new(igrp,2)=1d0/(1d0+q)**2 * ( a1*ay1+a2*ay2*q**2+(Ly/Lmod)*Lmodana*q )
-        bhspin_new(igrp,3)=1d0/(1d0+q)**2 * ( a1*az1+a2*az2*q**2+(Lz/Lmod)*Lmodana*q )
+        ! A radial, stationary merger has no defined orbital-spin axis.  In
+        ! that degenerate case retain only the defined intrinsic-spin vector;
+        ! the resulting magnitude is a numerical guard, not a calibrated
+        ! physical remnant-spin prediction.  Do not manufacture a direction
+        ! by dividing the zero vector by its norm.  This also covers the
+        ! synthetic zero-spin capture fixture.
+        if(Lmod>0d0)then
+           bhspin_new(igrp,1)=1d0/(1d0+q)**2 * ( a1*ax1+a2*ax2*q**2+(Lx/Lmod)*Lmodana*q )
+           bhspin_new(igrp,2)=1d0/(1d0+q)**2 * ( a1*ay1+a2*ay2*q**2+(Ly/Lmod)*Lmodana*q )
+           bhspin_new(igrp,3)=1d0/(1d0+q)**2 * ( a1*az1+a2*az2*q**2+(Lz/Lmod)*Lmodana*q )
+        else
+           bhspin_new(igrp,1)=1d0/(1d0+q)**2 * ( a1*ax1+a2*ax2*q**2 )
+           bhspin_new(igrp,2)=1d0/(1d0+q)**2 * ( a1*ay1+a2*ay2*q**2 )
+           bhspin_new(igrp,3)=1d0/(1d0+q)**2 * ( a1*az1+a2*az2*q**2 )
+        endif
         spinmag_new(igrp)=SQRT(bhspin_new(igrp,1)**2 + bhspin_new(igrp,2)**2 + bhspin_new(igrp,3)**2 )
         if(spinmag_new(igrp).gt.+maxspin) spinmag_new(igrp)=+maxspin
         if(spinmag_new(igrp).lt.-maxspin) spinmag_new(igrp)=-maxspin
@@ -1628,9 +1640,13 @@ subroutine merge_sink(ilevel)
         ay1=bhspin_new(igrp,2)
         az1=bhspin_new(igrp,3)
         a1mod=SQRT(ax1**2+ay1**2+az1**2)
-        bhspin_new(igrp,1)=ax1/a1mod
-        bhspin_new(igrp,2)=ay1/a1mod
-        bhspin_new(igrp,3)=az1/a1mod
+        if(a1mod>0d0)then
+           bhspin_new(igrp,1)=ax1/a1mod
+           bhspin_new(igrp,2)=ay1/a1mod
+           bhspin_new(igrp,3)=az1/a1mod
+        else
+           bhspin_new(igrp,1:3)=0d0
+        endif
      else
         if ( msink(isink) .gt. msink_new(igrp) )then
            ! Case it's not a merger
@@ -3232,9 +3248,11 @@ subroutine kjhan_mk_cloud(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! Particle-based arrays
 #ifndef _OPENMP
   integer ,dimension(1:nvector),save::ind_cloud
+  integer ,dimension(1:nvector),save::ind_cloud_grid
   logical ,dimension(1:nvector),save::ok_true=.true.
 #else
   integer ,dimension(1:nvector)::ind_cloud
+  integer ,dimension(1:nvector)::ind_cloud_grid
   logical ,dimension(1:nvector)::ok_true=.true.
 #endif
   real(dp)::vol_min,dx
@@ -3291,9 +3309,12 @@ subroutine kjhan_mk_cloud(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
       xx=dble(ii)*dx_min/2.0
       rr=sqrt(xx*xx+yy*yy+zz*zz)
       if(rr>0.and.rr<=rmax)then
+         do j=1,np
+            ind_cloud_grid(j)=ind_grid(ind_grid_part(j))
+         enddo
 !$omp critical
          call remove_free(ind_cloud,np)
-         call add_list(ind_cloud,ind_grid_part,ok_true,np)
+         call add_list(ind_cloud,ind_cloud_grid,ok_true,np)
 !$omp end critical
          do j=1,np
        ksink=-idp(ind_part(j))
