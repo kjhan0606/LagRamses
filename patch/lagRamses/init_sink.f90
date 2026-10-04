@@ -55,6 +55,8 @@ subroutine init_sink
   allocate(xsink_all(1:nsinkmax,1:ndim))
   allocate(dMBHoverdt(1:nsinkmax))
   allocate(dMEdoverdt(1:nsinkmax))
+  dMBHoverdt=0d0
+  dMEdoverdt=0d0
   allocate(r2sink(1:nsinkmax))
   allocate(r2k(1:nsinkmax))
   allocate(v2sink(1:nsinkmax))
@@ -317,6 +319,8 @@ subroutine init_sink_alloc
   allocate(xsink_all(1:nsinkmax,1:ndim))
   allocate(dMBHoverdt(1:nsinkmax))
   allocate(dMEdoverdt(1:nsinkmax))
+  dMBHoverdt=0d0
+  dMEdoverdt=0d0
   allocate(r2sink(1:nsinkmax))
   allocate(r2k(1:nsinkmax))
   allocate(v2sink(1:nsinkmax))

@@ -4592,28 +4592,36 @@ subroutine grow_bondi(ilevel)
         velocity(3)=velocity(3)+weighted_momentum(isink,i,3)
         volume =volume +weighted_volume (isink,i)
      end do
-     density=density/volume
-     ! --------------------------
-     ! If volume-weighted
-     ! --------------------------
-     !velocity(1:3)=velocity(1:3)/volume
-     !c2mean =c2mean /volume
-     ! --------------------------
-     ! If mass-weighted
-     ! --------------------------
-     velocity(1:3)=velocity(1:3)/volume/density
-     c2mean =c2mean /volume/density
-     ! --------------------------
-     v_avgptr(isink)=dsqrt(SUM((velocity(1:3)-vsink(isink,1:3))**2))
-     v2mean =min(SUM((velocity(1:3)-vsink(isink,1:3))**2),sigmav2)
      total_volume(isink)=volume
-     alpha=max((density/d_star)**boost_acc,1d0)
-     if(Esave(isink).eq.0d0)then
-        dMBHoverdt(isink)=alpha * fourpi *density* (factG*msink(isink))**2 &
-             & / (c2mean+v2mean)**1.5d0
+     if(volume>0d0)then
+        density=density/volume
+        ! Mass-weighted gas velocity and sound speed.
+        if(density>0d0)then
+           velocity(1:3)=velocity(1:3)/volume/density
+           c2mean=c2mean/volume/density
+        else
+           velocity(1:3)=vsink(isink,1:3)
+           c2mean=0d0
+        endif
+        v_avgptr(isink)=dsqrt(SUM((velocity(1:3)-vsink(isink,1:3))**2))
+        v2mean=min(SUM((velocity(1:3)-vsink(isink,1:3))**2),sigmav2)
+        alpha=1d0
+        if(d_star>0d0.and.density>0d0) &
+             alpha=max((density/d_star)**boost_acc,1d0)
+        if(Esave(isink).eq.0d0.and.density>0d0.and.c2mean+v2mean>0d0)then
+           dMBHoverdt(isink)=alpha * fourpi *density* (factG*msink(isink))**2 &
+                & / (c2mean+v2mean)**1.5d0
+        else
+           dMBHoverdt(isink)=0d0
+        endif
      else
-        ! Prevent the accretion of new material onto the BH if
-        ! energy has not been released in the previous coarse time step
+        ! No cloud contributed a gas sample.  There is no measured inflow;
+        ! leave the physical accretion rate at zero rather than forming 0/0.
+        density=0d0
+        c2mean=0d0
+        velocity(1:3)=vsink(isink,1:3)
+        v_avgptr(isink)=0d0
+        v2mean=0d0
         dMBHoverdt(isink)=0d0
      endif
 !!$     dMEdoverdt(isink)=fourpi*6.67d-8*msink(isink)*scale_m*1.66d-24/(0.1*6.652d-25*3d10) &

@@ -86,6 +86,18 @@ class ParticleTreeDiagnosticTest(unittest.TestCase):
         self.assertLess(initialization, first_reader)
         self.assertNotIn("if(use_fdm) levelp = 0", source)
 
+    def test_bondi_rate_has_finite_empty_sample_lifecycle(self) -> None:
+        root = Path(__file__).resolve().parents[3] / "patch" / "lagRamses"
+        init_source = (root / "init_sink.f90").read_text(encoding="utf-8")
+        sink_source = (root / "sink_particle.kjhan.f90").read_text(encoding="utf-8")
+        self.assertEqual(init_source.count("dMBHoverdt=0d0"), 2)
+        self.assertEqual(init_source.count("dMEdoverdt=0d0"), 2)
+        self.assertIn("if(volume>0d0)then", sink_source)
+        self.assertIn("alpha=1d0", sink_source)
+        self.assertIn("if(d_star>0d0.and.density>0d0)", sink_source)
+        self.assertIn("density>0d0.and.c2mean+v2mean>0d0", sink_source)
+        self.assertIn("No cloud contributed a gas sample", sink_source)
+
     def test_make_tree_distinguishes_source_from_staging_failure(self) -> None:
         self.assertIn("MAKE_TREE_SOURCE_GRID_INVALID", SOURCE)
         self.assertIn("MAKE_TREE_STAGE_GRID_MISMATCH", SOURCE)
