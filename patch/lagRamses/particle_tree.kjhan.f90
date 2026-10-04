@@ -245,6 +245,15 @@ subroutine make_tree_fine(ilevel)
         else
            igrid=reception(icpu,ilevel)%igrid(jgrid)
         end if
+        if(igrid<1.or.igrid>ngridmax)then
+!$omp critical(make_tree_stage_diagnostic)
+           write(*,*)'MAKE_TREE_SOURCE_GRID_INVALID', &
+                ' ilevel=',ilevel,' myid=',myid,' icpu=',icpu, &
+                ' jgrid=',jgrid,' ncache=',ncache,' grid=',igrid, &
+                ' thread=',mythread
+!$omp end critical(make_tree_stage_diagnostic)
+           call clean_stop
+        endif
         npart1=numbp(igrid)
         if(npart1>0)then
            ig=1
@@ -257,12 +266,34 @@ subroutine make_tree_fine(ilevel)
               ind_part(ip)=ipart
               ind_grid_part(ip)=1
               if(ip==nvector)then
+                 if(ind_grid(1)/=igrid)then
+!$omp critical(make_tree_stage_diagnostic)
+                    write(*,*)'MAKE_TREE_STAGE_GRID_MISMATCH', &
+                         ' ilevel=',ilevel,' myid=',myid,' icpu=',icpu, &
+                         ' jgrid=',jgrid,' ncache=',ncache,' grid=',igrid, &
+                         ' staged_grid=',ind_grid(1),' npart1=',npart1, &
+                         ' head=',headp(igrid),' thread=',mythread
+!$omp end critical(make_tree_stage_diagnostic)
+                    call clean_stop
+                 endif
                  call check_tree(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
                  ip=0
               end if
               ipart=next_part
            end do
-           if(ip>0)call check_tree(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+           if(ip>0)then
+              if(ind_grid(1)/=igrid)then
+!$omp critical(make_tree_stage_diagnostic)
+                 write(*,*)'MAKE_TREE_STAGE_GRID_MISMATCH', &
+                      ' ilevel=',ilevel,' myid=',myid,' icpu=',icpu, &
+                      ' jgrid=',jgrid,' ncache=',ncache,' grid=',igrid, &
+                      ' staged_grid=',ind_grid(1),' npart1=',npart1, &
+                      ' head=',headp(igrid),' thread=',mythread
+!$omp end critical(make_tree_stage_diagnostic)
+                 call clean_stop
+              endif
+              call check_tree(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+           endif
         end if
      end do
 #else
