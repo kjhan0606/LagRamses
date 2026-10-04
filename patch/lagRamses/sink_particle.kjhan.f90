@@ -1163,7 +1163,7 @@ subroutine merge_sink(ilevel)
   real(dp)::d0,mstar,nISM,nCOM,vr,cs,factG
   real(dp)::egrav,ekin,uxcom,uycom,uzcom,v2rel1,v2rel2,dx_min2
   real(dp)::xc,yc,zc,vxc,vyc,vzc,xx1,yy1,zz1,xx2,yy2,zz2,vvx1,vvy1,vvz1,vvx2,vvy2,vvz2,Lx1,Ly1,Lz1,Lx2,Ly2,Lz2
-  real(dp)::q,M1,M2,a1,a2,a1a2,a1L,a2L,Lx,Ly,Lz,Lmod,a1mod,a2mod,mu,af,Lmodana
+  real(dp)::q,M1,M2,a1,a2,a1a2,a1L,a2L,Lx,Ly,Lz,Lmod,a1mod,a2mod,mu,Lmodana
   real(dp)::ax1,ay1,az1,ax2,ay2,az2,x1,y1,z1,x2,y2,z2,vx1,vy1,vz1,vx2,vy2,vz2
   real(dp)::s4=-0.129d0,s5=-0.384d0,t0=-2.686d0,t2=-3.454d0,t3=+2.353d0,pi
 !#ifdef _OPENMP
@@ -1453,7 +1453,7 @@ subroutine merge_sink(ilevel)
 !$omp ax2,ay2,az2,xx1,yy1,zz1,xx2,yy2,zz2,vvx1,vvy1,vvz1,vvx2,vvy2, &
 !$omp vvz2,q,mu,a1mod,a2mod,a1a2,xx,yy,zz,xc,yc,zc,vxc,vyc,vzc,x1,y1, &
 !$omp z1,x2,y2,z2,vx1,vy1,vz1,vx2,vy2,vz2,Lx1,Ly1,Lz1,Lx2,Ly2,Lz2,Lx, &
-!$omp Ly,Lz,Lmod,a1L,a2L,Lmodana,af)
+!$omp Ly,Lz,Lmod,a1L,a2L,Lmodana)
   do igrp=1, ngrp
   do ijsink = GroupData(igrp, 1), GroupData(igrp,2)
      isink = psink(ijsink)
@@ -1616,21 +1616,31 @@ subroutine merge_sink(ilevel)
         Lmodana = s4 / ( 1d0 + q**2 )**2 * ( a1**2 + a2**2*q**4 + 2d0*a1*a2*q**2*a1a2 ) &
              & + ( s5*mu + t0 + 2d0 ) / ( 1d0 + q**2 ) * ( a1*a1L + a2*q**2*a2L ) &
              & + 2d0*SQRT(3d0) + t2*mu + t3*mu**2
-        af = 1d0 / ( 1d0 + q )**2 * SQRT( a1**2 + a2**2*q**4 + 2d0*a1*a2*q**2*a1a2 &
-             & + 2d0 * ( a1*a1L + a2*q**2*a2L ) * Lmodana*q + Lmodana**2*q**2 )
-        bhspin_new(igrp,1)=1d0/(1d0+q)**2 * ( a1*ax1+a2*ax2*q**2+(Lx/Lmod)*Lmodana*q )
-        bhspin_new(igrp,2)=1d0/(1d0+q)**2 * ( a1*ay1+a2*ay2*q**2+(Ly/Lmod)*Lmodana*q )
-        bhspin_new(igrp,3)=1d0/(1d0+q)**2 * ( a1*az1+a2*az2*q**2+(Lz/Lmod)*Lmodana*q )
-        spinmag_new(igrp)=SQRT(bhspin_new(igrp,1)**2 + bhspin_new(igrp,2)**2 + bhspin_new(igrp,3)**2 )
-        if(spinmag_new(igrp).gt.+maxspin) spinmag_new(igrp)=+maxspin
-        if(spinmag_new(igrp).lt.-maxspin) spinmag_new(igrp)=-maxspin
+        if(Lmod>0d0)then
+           bhspin_new(igrp,1)=1d0/(1d0+q)**2 * ( a1*ax1+a2*ax2*q**2+(Lx/Lmod)*Lmodana*q )
+           bhspin_new(igrp,2)=1d0/(1d0+q)**2 * ( a1*ay1+a2*ay2*q**2+(Ly/Lmod)*Lmodana*q )
+           bhspin_new(igrp,3)=1d0/(1d0+q)**2 * ( a1*az1+a2*az2*q**2+(Lz/Lmod)*Lmodana*q )
+        else
+           ! A zero-angular-momentum encounter has no orbital direction.  Do
+           ! not infer one: this finite progenitor-spin fallback is not a
+           ! physical coalescence-spin prediction from the quasi-circular fit.
+           bhspin_new(igrp,1)=1d0/(1d0+q)**2 * (a1*ax1+a2*ax2*q**2)
+           bhspin_new(igrp,2)=1d0/(1d0+q)**2 * (a1*ay1+a2*ay2*q**2)
+           bhspin_new(igrp,3)=1d0/(1d0+q)**2 * (a1*az1+a2*az2*q**2)
+        endif
         ax1=bhspin_new(igrp,1)
         ay1=bhspin_new(igrp,2)
         az1=bhspin_new(igrp,3)
         a1mod=SQRT(ax1**2+ay1**2+az1**2)
-        bhspin_new(igrp,1)=ax1/a1mod
-        bhspin_new(igrp,2)=ay1/a1mod
-        bhspin_new(igrp,3)=az1/a1mod
+        if(a1mod>0d0)then
+           spinmag_new(igrp)=MIN(a1mod,maxspin)
+           bhspin_new(igrp,1)=ax1/a1mod
+           bhspin_new(igrp,2)=ay1/a1mod
+           bhspin_new(igrp,3)=az1/a1mod
+        else
+           spinmag_new(igrp)=0d0
+           bhspin_new(igrp,1:ndim)=0d0
+        endif
      else
         if ( msink(isink) .gt. msink_new(igrp) )then
            ! Case it's not a merger
