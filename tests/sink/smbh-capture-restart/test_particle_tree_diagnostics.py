@@ -52,6 +52,26 @@ class ParticleTreeDiagnosticTest(unittest.TestCase):
                 output_source,
             )
 
+    def test_particle_backup_preflights_exact_packing_cardinality(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[3]
+            / "patch"
+            / "lagRamses"
+            / "output_part.f90"
+        ).read_text(encoding="utf-8")
+        check = source.index("npart_active=count(levelp(1:npartmax)>0)")
+        delegate = source.index("call backup_part_payload(filename)")
+        include = source.index('#include "../cuRamses/output_part.f90"')
+        self.assertLess(check, delegate)
+        self.assertLess(delegate, include)
+        self.assertIn("npart_active/=npart", source[check:delegate])
+        self.assertIn("BACKUP_PART_CARDINALITY_INVALID", source[check:delegate])
+        guard = source[check:delegate]
+        self.assertIn("call flush(6)", guard)
+        self.assertIn("call MPI_ABORT(MPI_COMM_WORLD,1,info)", guard)
+        self.assertIn("stop 1", guard)
+        self.assertNotIn("call clean_stop", guard)
+
     def test_make_tree_distinguishes_source_from_staging_failure(self) -> None:
         self.assertIn("MAKE_TREE_SOURCE_GRID_INVALID", SOURCE)
         self.assertIn("MAKE_TREE_STAGE_GRID_MISMATCH", SOURCE)
