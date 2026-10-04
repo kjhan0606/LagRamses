@@ -339,8 +339,8 @@ subroutine check_tree(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   !-----------------------------------------------------------------------
   ! This routine is called by make_tree_fine.
   !-----------------------------------------------------------------------
-  logical::error
-  integer::i,j,idim,nx_loc
+  logical::error,tree_parent_invalid
+  integer::i,j,idim,nx_loc,igrid_diag,ifather_diag,ipart_diag,next_diag,ndiag
   real(dp)::dx,xxx,scale
   real(dp),dimension(1:3)::xbound
   ! Grid-based arrays
@@ -373,6 +373,48 @@ subroutine check_tree(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   if(ndim>1)skip_loc(2)=dble(jcoarse_min)
   if(ndim>2)skip_loc(3)=dble(kcoarse_min)
   scale=boxlen/dble(nx_loc)
+
+  ! Fail closed with bounded evidence before get3cubefather's level-1
+  ! invariant abort.  Grid indices are checked before any grid-array access.
+  tree_parent_invalid=.false.
+  if(ilevel==1)then
+     do i=1,ng
+        igrid_diag=ind_grid(i)
+        ifather_diag=-1
+        if(igrid_diag>=1.and.igrid_diag<=ngridmax) &
+             ifather_diag=father(igrid_diag)
+        if(igrid_diag<1.or.igrid_diag>ngridmax.or. &
+             ifather_diag<1.or.ifather_diag>ncoarse)then
+           tree_parent_invalid=.true.
+!$omp critical(check_tree_parent_diagnostic)
+           write(*,*)'CHECK_TREE_LEVEL1_PARENT_INVALID', &
+                ' ilevel=',ilevel,' myid=',myid,' grid=',igrid_diag, &
+                ' father=',ifather_diag,' ncoarse=',ncoarse
+           if(igrid_diag>=1.and.igrid_diag<=ngridmax)then
+              write(*,*)'CHECK_TREE_LEVEL1_LIST', &
+                   ' numbp=',numbp(igrid_diag),' head=',headp(igrid_diag), &
+                   ' tail=',tailp(igrid_diag)
+              ipart_diag=headp(igrid_diag)
+              do ndiag=1,min(5,max(0,numbp(igrid_diag)))
+                 if(ipart_diag<1.or.ipart_diag>npartmax)then
+                    write(*,*)'CHECK_TREE_LEVEL1_PART_INVALID', &
+                         ' ordinal=',ndiag,' particle=',ipart_diag
+                    exit
+                 endif
+                 next_diag=nextp(ipart_diag)
+                 write(*,*)'CHECK_TREE_LEVEL1_PART', &
+                      ' ordinal=',ndiag,' particle=',ipart_diag, &
+                      ' id=',idp(ipart_diag),' xp=',xp(ipart_diag,1:ndim), &
+                      ' levelp=',levelp(ipart_diag),' next=',next_diag
+                 ipart_diag=next_diag
+              enddo
+           endif
+!$omp end critical(check_tree_parent_diagnostic)
+           exit
+        endif
+     enddo
+     if(tree_parent_invalid)call clean_stop
+  endif
 
   ! Lower left corner of 3x3x3 grid-cube
   do idim=1,ndim
