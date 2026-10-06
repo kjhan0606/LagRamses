@@ -1,0 +1,21 @@
+--- update_rates.c
++++ update_rates.c
+@@ -409,3 +409,17 @@
+       for (i = 0; i < N_react; i++)
+-	T_dep_rate_coeff[i] = chimes_exp10(chimes_interpol_2d_fix_x(T_dep_rates, i, T_index, dT, N_T));
++        {
++          /* A zero elemental budget and an exactly zero reactant make
++           * this reaction identically zero throughout this cell solve.
++           * Never skip a merely small abundance or an included ion whose
++           * abundance can change under a Jacobian perturbation. */
++          const int a = chimes_table_T_dependent.reactants[3*i];
++          const int b = chimes_table_T_dependent.reactants[3*i+1];
++          const int absent = myGlobalVars->N_spectra == 0 &&
++            ((data.species[a].element_abundance == 0 &&
++              myGasVars->abundances[a] == 0) ||
++             (data.species[b].element_abundance == 0 &&
++              myGasVars->abundances[b] == 0));
++          T_dep_rate_coeff[i] = absent ? 0.0 :
++            chimes_exp10(chimes_interpol_2d_fix_x(T_dep_rates, i, T_index, dT, N_T));
++        }
+ 

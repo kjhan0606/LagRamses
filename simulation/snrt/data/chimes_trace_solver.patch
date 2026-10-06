@@ -1,0 +1,42 @@
+--- a/src/chimes.c
++++ b/src/chimes.c
+@@ -551,6 +551,17 @@
+ 
+       if (myGasVars->ThermEvolOn == 1)
+ 	{
++          /* Resolve trace molecules without tightening energy/atomic
++           * tolerances. Relative error and physical acceptance are unchanged. */
++          if (myGlobalVars->N_spectra == 0 && data.mol_flag_index == 1)
++            {
++              int q=0;
++              for(int s=0;s<myGlobalVars->totalNumberOfSpecies;s++)
++                if(species[s].include_species==1) {
++                  if(s>=sp_H2)NV_Ith_S(abstol_vector,q)*=0.001;
++                  q++;
++                }
++            }
+ 	  internal_energy = myGasVars->temperature * 1.5f * calculate_total_number_density(myGasVars->abundances, myGasVars->nH_tot, myGlobalVars) * BOLTZMANNCGS;
+ 	  NV_Ith_S(y, data.network_size) = (realtype) internal_energy;
+ 
+@@ -644,6 +655,21 @@
+       /* Call CVode() to integrate the chemistry. */ 
+       int cv_flag;
+       cv_flag = CVode(cvode_mem, (realtype) myGasVars->hydro_timestep, y, &t, CV_NORMAL);
++      /* A stiff trace-species transient can invalidate multistep history.
++       * Restart only from CVODE's returned last accepted state, retaining
++       * tolerances, root functions, stop time and all physical variables.
++       * Bounded and dark/molecular only; all other failures still propagate. */
++      if (myGlobalVars->N_spectra == 0 && data.mol_flag_index == 1)
++        for (int retry=0; retry<4 && cv_flag==CV_ERR_FAILURE &&
++             t<(realtype)myGasVars->hydro_timestep; retry++)
++          {
++            realtype previous=t;
++            int reset=CVodeReInit(cvode_mem,t,y);
++            if(reset){cv_flag=reset;break;}
++            cv_flag=CVode(cvode_mem,(realtype)myGasVars->hydro_timestep,y,&t,CV_NORMAL);
++            if(t<=previous)break;
++          }
++
+ 
+       if ((cv_flag == CV_REPTD_RHSFUNC_ERR) && (t < myGasVars->hydro_timestep)) 
+ 	{

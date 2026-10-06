@@ -1,0 +1,13 @@
+--- chimes_cooling.c
++++ chimes_cooling.c
+@@ -156,3 +156,9 @@
+   for (i = 0; i < chimes_table_cooling.N_coolants; i++)
+-    cooling_rate[i] = chimes_exp10(chimes_interpol_2d_fix_x(cool_rates, i, T_index, dT, N_T));
++    {
++      const int s = chimes_table_cooling.coolants[i];
++      const int absent = myGlobalVars->N_spectra == 0 &&
++        data.species[s].element_abundance == 0 && myGasVars->abundances[s] == 0;
++      cooling_rate[i] = absent ? 0.0 :
++        chimes_exp10(chimes_interpol_2d_fix_x(cool_rates, i, T_index, dT, N_T));
++    }
+ 

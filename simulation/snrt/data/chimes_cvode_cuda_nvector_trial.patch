@@ -1,0 +1,44 @@
+--- a/src/chimes.c
++++ b/src/chimes.c
+@@ -38,0 +39,26 @@
++
++#include <sunlinsol/sunlinsol_spgmr.h>
++extern int snrt_chimes_cvode_is_cuda_vector(N_Vector);
++/* Experimental: CVODE control and the CHIMES RHS remain on the host; only
++ * SUNDIALS N_Vector operations are CUDA-backed. */
++#ifdef SNRT_CHIMES_CVODE_CUDA_NVECTOR
++extern N_Vector N_VNewManaged_Cuda(sunindextype length);
++static N_Vector snrt_chimes_nvector_new(sunindextype length)
++{
++  const char *mode = getenv("SNRT_CHIMES_CVODE_NVECTOR");
++  if (!mode || !*mode || strcmp(mode,"cpu") == 0) return N_VNew_Serial(length);
++  if (strcmp(mode,"cuda_managed") == 0) return N_VNewManaged_Cuda(length);
++  fprintf(stderr,"Unknown SNRT_CHIMES_CVODE_NVECTOR=%s; expected cpu|cuda_managed\n",mode);
++  return NULL;
++}
++#undef NV_Ith_S
++#define NV_Ith_S(v,i) (N_VGetArrayPointer(v)[i])
++#define N_VNew_Serial(n) snrt_chimes_nvector_new(n)
++#define N_VDestroy_Serial(v) N_VDestroy(v)
++static int snrt_chimes_cvode_set_linear_solver(void *mem, N_Vector y,
++                                                SUNLinearSolver ls, SUNMatrix a)
++{
++  return snrt_chimes_cvode_is_cuda_vector(y) ?
++    CVodeSetLinearSolver(mem,ls,NULL) : CVodeSetLinearSolver(mem,ls,a);
++}
++#endif
+@@ -656,1 +682,1 @@
+-      CVodeSetLinearSolver(cvode_mem, LS_sun, A_sun);
++      snrt_chimes_cvode_set_linear_solver(cvode_mem,y,LS_sun,A_sun);
+@@ -722,1 +748,1 @@
+-	      CVodeSetLinearSolver(cvode_mem, LS_sun, A_sun);
++	      snrt_chimes_cvode_set_linear_solver(cvode_mem,y,LS_sun,A_sun);
+--- a/src/rate_equations.c
++++ b/src/rate_equations.c
+@@ -36,0 +37,6 @@
++
++/* The managed CUDA vector exposes its host view through the generic accessor. */
++#ifdef SNRT_CHIMES_CVODE_CUDA_NVECTOR
++#undef NV_Ith_S
++#define NV_Ith_S(v,i) (N_VGetArrayPointer(v)[i])
++#endif
