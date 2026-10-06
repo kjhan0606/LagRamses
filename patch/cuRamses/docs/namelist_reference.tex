@@ -544,6 +544,32 @@ Hopper), GPU MG may provide a benefit.}
 \end{quote}
 
 % ------------------------------------------------------------------
+\paramheader{mg\_dynamic\_hybrid}{logical}{.false.}
+\label{param:mg_dynamic_hybrid}
+
+\begin{quote}
+Experimental Godunov-style dynamic dispatch for the MG red--black smoother.
+Within each color pass, OpenMP workers dynamically claim independent active
+grid batches. Workers atomically lease idle streams from the rank-local CUDA
+pool and submit batches asynchronously. While a worker's submitted batch is
+pending, it computes subsequent batches on the CPU. Workers without a free
+stream also compute on the CPU. Each stream owns separate staging buffers,
+allocated before the parallel region. GPU results
+are merged to the host and CPU-owned color updates are sparsely scattered to
+the device before the next color. The existing exclusive GPU smoother remains
+the default when this flag is false.
+
+\textbf{Requires} \paramref{gpu_poisson}\texttt{=.true.}, a CUDA build and
+the 3-D MG path. It preserves the red/black color barrier; it does not make
+red and black updates concurrent. This mode has not yet been benchmarked for
+production and must be compared numerically and by whole-solver wall time
+against both CPU-only and GPU-only smoothing.
+The runtime \texttt{n\_cuda\_streams} controls the pool size. Each MPI rank
+uses its assigned GPU; multiple ranks may use different GPUs. A single rank
+does not currently replicate MG state across multiple GPUs.
+\end{quote}
+
+% ------------------------------------------------------------------
 \paramheader{gpu\_fft}{logical}{.false.}
 \label{param:gpu_fft}
 

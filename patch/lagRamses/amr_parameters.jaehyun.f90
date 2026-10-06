@@ -107,6 +107,11 @@ module amr_parameters
   !            independence of the residual from the rank count (slightly slower)
   logical::mg_merged_rb=.true.
 
+  ! Experimental Godunov-style dynamic OMP/CUDA dispatch for MG red-black
+  ! smoothing. CPU workers process independent active grids while one worker
+  ! batches grids on the rank-local MG GPU lane. Disabled by default.
+  logical::mg_dynamic_hybrid=.false.
+
   ! Power spectrum measurement at output time (requires USE_FFTW)
   logical::dump_pk=.false.     ! Dump P(k) at each output snapshot
 

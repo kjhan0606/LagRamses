@@ -653,16 +653,37 @@ subroutine multigrid_fine(ilevel,icount)
          if(use_mg_gpu) then
             safe_int = 0
             if(safe_mode(ilevel)) safe_int = 1
-            call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
-                 int(ngridmax,c_int), int(ncoarse,c_int), &
-                 int(amr_block_size,c_int), int(twotondim,c_int), &
-                 dx2_mg, 0, safe_int)
-            if(.not.mg_merged_rb) call make_virtual_fine_dp_gpu(ilevel)
-            call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
-                 int(ngridmax,c_int), int(ncoarse,c_int), &
-                 int(amr_block_size,c_int), int(twotondim,c_int), &
-                 dx2_mg, 1, safe_int)
-            call make_virtual_fine_dp_gpu(ilevel)
+            if(mg_dynamic_hybrid.and.twotondim==8)then
+#ifdef FDMDEBUG
+               call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
+               call gauss_seidel_mg_fine_hybrid(ilevel,.true.,dx2_mg)
+#ifdef FDMDEBUG
+               call mgp_stop(MGP_FINE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+                    int(active(ilevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
+               if(.not.mg_merged_rb) call make_virtual_fine_dp_gpu(ilevel)
+#ifdef FDMDEBUG
+               call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
+               call gauss_seidel_mg_fine_hybrid(ilevel,.false.,dx2_mg)
+#ifdef FDMDEBUG
+               call mgp_stop(MGP_FINE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+                    int(active(ilevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
+               call make_virtual_fine_dp_gpu(ilevel)
+            else
+               call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
+                    int(ngridmax,c_int), int(ncoarse,c_int), &
+                    int(amr_block_size,c_int), int(twotondim,c_int), &
+                    dx2_mg, 0, safe_int)
+               if(.not.mg_merged_rb) call make_virtual_fine_dp_gpu(ilevel)
+               call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
+                    int(ngridmax,c_int), int(ncoarse,c_int), &
+                    int(amr_block_size,c_int), int(twotondim,c_int), &
+                    dx2_mg, 1, safe_int)
+               call make_virtual_fine_dp_gpu(ilevel)
+            endif
          else
 #endif
 #ifdef FDMDEBUG
@@ -796,6 +817,8 @@ subroutine multigrid_fine(ilevel,icount)
             call cuda_mg_interp_execute_c(int(active(ilevel)%ngrid,c_int), &
                  int(ngridmax,c_int), int(ncoarse,c_int), &
                  int(amr_block_size,c_int), int(twotondim,c_int))
+            ! Hybrid CPU batches must see the GPU coarse-grid correction.
+            if(mg_dynamic_hybrid)call cuda_mg_download_phi_c(phi,ncell_tot_c)
             call make_virtual_fine_dp_gpu(ilevel)
          else
 #endif
@@ -827,16 +850,37 @@ subroutine multigrid_fine(ilevel,icount)
          if(use_mg_gpu) then
             safe_int = 0
             if(safe_mode(ilevel)) safe_int = 1
-            call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
-                 int(ngridmax,c_int), int(ncoarse,c_int), &
-                 int(amr_block_size,c_int), int(twotondim,c_int), &
-                 dx2_mg, 0, safe_int)
-            if(.not.mg_merged_rb) call make_virtual_fine_dp_gpu(ilevel)
-            call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
-                 int(ngridmax,c_int), int(ncoarse,c_int), &
-                 int(amr_block_size,c_int), int(twotondim,c_int), &
-                 dx2_mg, 1, safe_int)
-            call make_virtual_fine_dp_gpu(ilevel)
+            if(mg_dynamic_hybrid.and.twotondim==8)then
+#ifdef FDMDEBUG
+               call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
+               call gauss_seidel_mg_fine_hybrid(ilevel,.true.,dx2_mg)
+#ifdef FDMDEBUG
+               call mgp_stop(MGP_FINE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+                    int(active(ilevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
+               if(.not.mg_merged_rb) call make_virtual_fine_dp_gpu(ilevel)
+#ifdef FDMDEBUG
+               call mgp_start(mgp_phase_wall,mgp_phase_cpu)
+#endif
+               call gauss_seidel_mg_fine_hybrid(ilevel,.false.,dx2_mg)
+#ifdef FDMDEBUG
+               call mgp_stop(MGP_FINE_SMOOTH,mgp_phase_wall,mgp_phase_cpu, &
+                    int(active(ilevel)%ngrid,kind=8)*int(twotondim/2,kind=8))
+#endif
+               call make_virtual_fine_dp_gpu(ilevel)
+            else
+               call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
+                    int(ngridmax,c_int), int(ncoarse,c_int), &
+                    int(amr_block_size,c_int), int(twotondim,c_int), &
+                    dx2_mg, 0, safe_int)
+               if(.not.mg_merged_rb) call make_virtual_fine_dp_gpu(ilevel)
+               call cuda_mg_gauss_seidel_c(int(active(ilevel)%ngrid,c_int), &
+                    int(ngridmax,c_int), int(ncoarse,c_int), &
+                    int(amr_block_size,c_int), int(twotondim,c_int), &
+                    dx2_mg, 1, safe_int)
+               call make_virtual_fine_dp_gpu(ilevel)
+            endif
          else
 #endif
 #ifdef FDMDEBUG

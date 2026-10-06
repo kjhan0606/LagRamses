@@ -11,6 +11,8 @@
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
+#include <atomic>
+#include <vector>
 
 #ifdef USE_CUFFTMP
 #include <mpi.h>
@@ -70,6 +72,23 @@ static long long g_mg_restrict_launches = 0;
 static long long g_mg_interp_launches = 0;
 static int g_mg_block_size = 0;
 static int g_mg_child_count = 0;
+static std::vector<int> g_mg_host_igrid;
+struct MgHybridSlot {
+    int* ids = nullptr;
+    double* values = nullptr;
+    int* host_ids = nullptr;
+    double* host_values = nullptr;
+    int capacity = 0, nwork = 0, color = 0;
+};
+static MgHybridSlot g_mg_hybrid_slots[MAX_CUDA_STREAMS];
+static int* d_mg_hybrid_ids = nullptr;
+static double* d_mg_hybrid_values = nullptr;
+static int* h_mg_hybrid_ids = nullptr;
+static double* h_mg_hybrid_values = nullptr;
+static int g_mg_hybrid_capacity = 0;
+static std::atomic<unsigned long long> g_mg_hybrid_batches{0};
+static std::atomic<unsigned long long> g_mg_hybrid_gpu_grids{0};
+static unsigned long long g_mg_hybrid_cpu_grids = 0;
 
 // Pinned host buffer for partial norm2 reduction
 static double* h_mg_partial_norm2 = nullptr;
@@ -77,6 +96,7 @@ static int     h_mg_partial_cap   = 0;
 
 // Dedicated stream for MG operations
 static cudaStream_t g_mg_stream = nullptr;
+static int g_mg_device_id = 0;
 
 // Forward declarations for restrict/interp arrays (used by cuda_mg_finalize)
 // Constant memory for interpolation coefficients
@@ -114,8 +134,8 @@ static void mg_require_block_layout(
         fflush(stderr);
         std::abort();
     }
-    g_mg_block_size = block_size;
-    g_mg_child_count = child_count;
+    if (g_mg_block_size == 0) g_mg_block_size = block_size;
+    if (g_mg_child_count == 0) g_mg_child_count = child_count;
 }
 
 static void mg_require_launch(const char* context, cudaError_t sync_error)
@@ -192,13 +212,16 @@ __global__ void gauss_seidel_mg_fine_kernel(
     const int* __restrict__ nbor_grid,  // (7, ngrid) — nbor_grid[igrid_mg*7 + j]
     const int* __restrict__ igrid_arr,
     int ngrid, int ngridmax, int ncoarse, int block_size, int child_count,
-    double dx2, int color, int safe_mode_flag)
+    double dx2, int color, int safe_mode_flag,
+    const int* __restrict__ work_list,
+    double* __restrict__ work_values)
 {
     // NOTE: All cell/grid indices (icell, igrid_amr, etc.) are 1-based Fortran indices.
     // C arrays are 0-based, so we subtract 1 when accessing: arr[idx - 1].
 
-    int igrid_mg = blockIdx.x * blockDim.x + threadIdx.x;
-    if (igrid_mg >= ngrid) return;
+    int work_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (work_idx >= ngrid) return;
+    int igrid_mg = work_list ? work_list[work_idx] : work_idx;
 
     int igrid_amr = igrid_arr[igrid_mg]; // 1-based Fortran grid index
 
@@ -233,8 +256,10 @@ __global__ void gauss_seidel_mg_fine_kernel(
         } else {
             // Slow path: boundary cell
             double mask_c = f3[icell - 1];
-            if (mask_c <= 0.0) continue;
-            if (safe_mode_flag && mask_c < 1.0) continue;
+            if (mask_c <= 0.0 || (safe_mode_flag && mask_c < 1.0)) {
+                if (work_values) work_values[work_idx * 4 + ind0] = phi[icell - 1];
+                continue;
+            }
 
             double weight = 0.0;
             for (int idim = 0; idim < 3; idim++) {
@@ -260,7 +285,63 @@ __global__ void gauss_seidel_mg_fine_kernel(
             }
             phi[icell - 1] = (nb_sum - dx2 * f2[icell - 1]) / (6.0 - weight);
         }
+        if (work_values) work_values[work_idx * 4 + ind0] = phi[icell - 1];
     }
+}
+
+__global__ void mg_scatter_values_kernel(
+    double* __restrict__ phi, const int* __restrict__ cell_ids,
+    const double* __restrict__ values, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) phi[cell_ids[i]] = values[i];
+}
+
+static bool mg_hybrid_buffers_ensure(int capacity)
+{
+    if (capacity <= g_mg_hybrid_capacity && d_mg_hybrid_ids &&
+        d_mg_hybrid_values && h_mg_hybrid_ids && h_mg_hybrid_values) return true;
+    if (d_mg_hybrid_ids) cudaFree(d_mg_hybrid_ids);
+    if (d_mg_hybrid_values) cudaFree(d_mg_hybrid_values);
+    if (h_mg_hybrid_ids) cudaFreeHost(h_mg_hybrid_ids);
+    if (h_mg_hybrid_values) cudaFreeHost(h_mg_hybrid_values);
+    d_mg_hybrid_ids = nullptr; d_mg_hybrid_values = nullptr;
+    h_mg_hybrid_ids = nullptr; h_mg_hybrid_values = nullptr;
+    g_mg_hybrid_capacity = 0;
+    if (capacity <= 0) return false;
+    const size_t value_count = (size_t)capacity * 4;
+    if (cudaMalloc(&d_mg_hybrid_ids, value_count * sizeof(int)) != cudaSuccess ||
+        cudaMalloc(&d_mg_hybrid_values, value_count * sizeof(double)) != cudaSuccess ||
+        cudaMallocHost(&h_mg_hybrid_ids, value_count * sizeof(int)) != cudaSuccess ||
+        cudaMallocHost(&h_mg_hybrid_values, value_count * sizeof(double)) != cudaSuccess) {
+        if (d_mg_hybrid_ids) cudaFree(d_mg_hybrid_ids);
+        if (d_mg_hybrid_values) cudaFree(d_mg_hybrid_values);
+        if (h_mg_hybrid_ids) cudaFreeHost(h_mg_hybrid_ids);
+        if (h_mg_hybrid_values) cudaFreeHost(h_mg_hybrid_values);
+        d_mg_hybrid_ids = nullptr; d_mg_hybrid_values = nullptr;
+        h_mg_hybrid_ids = nullptr; h_mg_hybrid_values = nullptr;
+        return false;
+    }
+    g_mg_hybrid_capacity = capacity;
+    return true;
+}
+
+static void mg_hybrid_buffers_free()
+{
+    for (auto& slot : g_mg_hybrid_slots) {
+        if (slot.ids) cudaFree(slot.ids);
+        if (slot.values) cudaFree(slot.values);
+        if (slot.host_ids) cudaFreeHost(slot.host_ids);
+        if (slot.host_values) cudaFreeHost(slot.host_values);
+        slot = MgHybridSlot{};
+    }
+    if (d_mg_hybrid_ids) cudaFree(d_mg_hybrid_ids);
+    if (d_mg_hybrid_values) cudaFree(d_mg_hybrid_values);
+    if (h_mg_hybrid_ids) cudaFreeHost(h_mg_hybrid_ids);
+    if (h_mg_hybrid_values) cudaFreeHost(h_mg_hybrid_values);
+    d_mg_hybrid_ids = nullptr; d_mg_hybrid_values = nullptr;
+    h_mg_hybrid_ids = nullptr; h_mg_hybrid_values = nullptr;
+    g_mg_hybrid_capacity = 0;
 }
 
 // ==========================================================================
@@ -409,15 +490,25 @@ void cuda_mg_upload(const double* phi, const double* f,
                     const int* nbor_grid, const int* igrid, int ngrid)
 {
     if (!is_pool_initialized()) return;
+    // Clear stale runtime status before capturing the device selected for
+    // this MPI rank by cuda_pool_init.
+    cudaGetLastError();
+    cudaError_t device_error = cudaGetDevice(&g_mg_device_id);
+    if (device_error != cudaSuccess) {
+        fprintf(stderr, "CUDA MG: cannot query rank-local device: %s\n",
+                cudaGetErrorString(device_error));
+        g_mg_ready = false;
+        return;
+    }
     g_mg_gs_launches = 0;
     g_mg_res_launches = 0;
     g_mg_restrict_launches = 0;
     g_mg_interp_launches = 0;
+    g_mg_hybrid_batches = 0;
+    g_mg_hybrid_gpu_grids = 0;
+    g_mg_hybrid_cpu_grids = 0;
     g_mg_block_size = 0;
     g_mg_child_count = 0;
-
-    // Clear any stale CUDA error from previous operations (e.g., mesh_upload SKIP)
-    cudaGetLastError();
 
     // Create dedicated MG stream on first call
     if (!g_mg_stream) {
@@ -508,6 +599,13 @@ void cuda_mg_upload(const double* phi, const double* f,
     // So direct memcpy works!
     cudaMemcpy(d_mg_nbor,  nbor_grid, (size_t)ngrid * 7 * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_mg_igrid, igrid,     (size_t)ngrid * sizeof(int), cudaMemcpyHostToDevice);
+    try {
+        g_mg_host_igrid.assign(igrid, igrid + ngrid);
+    } catch (...) {
+        fprintf(stderr, "CUDA MG: host grid-index cache allocation failed\n");
+        g_mg_ready = false;
+        return;
+    }
 
     g_mg_ready = true;
     cudaDeviceSynchronize();
@@ -553,12 +651,180 @@ void cuda_mg_gauss_seidel(int ngrid, int ngridmax, int ncoarse,
         d_mg_phi, d_mg_f2, d_mg_f3, d_mg_flag2,
         d_mg_nbor, d_mg_igrid,
         ngrid, ngridmax, ncoarse, block_size, child_count,
-        dx2, color, safe_mode);
+        dx2, color, safe_mode, nullptr, nullptr);
 
     // Sync after kernel (phi is needed by next color sweep)
     const cudaError_t sync_error = cudaStreamSynchronize(g_mg_stream);
     mg_require_launch("gauss_seidel", sync_error);
     g_mg_gs_launches++;
+}
+
+int cuda_mg_hybrid_try_acquire(void)
+{
+    if (!g_mg_ready || !g_mg_stream) return 0;
+    const int slot = cuda_acquire_stream();
+    if (slot < 0) return 0;
+    int device = -1;
+    if (cudaGetDevice(&device) != cudaSuccess || device != g_mg_device_id) {
+        cuda_release_stream(slot);
+        return 0;
+    }
+    const cudaError_t status = cudaStreamQuery(cuda_get_stream_internal(slot));
+    if (status == cudaErrorNotReady) {
+        cuda_release_stream(slot);
+        return 0;
+    }
+    mg_require_launch("hybrid stream query", status);
+    return slot + 1;
+}
+
+void cuda_mg_hybrid_prepare(int capacity, int ngridmax, int ncoarse,
+                            int block_size, int child_count)
+{
+    mg_require_block_layout(ngridmax, ncoarse, block_size, child_count,
+                            "hybrid preparation");
+    // Allocate before entering the OMP region: cudaMalloc can synchronize.
+    for (int i = 0; i < MAX_CUDA_STREAMS; ++i) {
+        if (!cuda_get_stream_internal(i)) continue;
+        auto& slot = g_mg_hybrid_slots[i];
+        if (slot.capacity >= capacity) continue;
+        if (slot.nwork) std::abort();
+        if (slot.ids) cudaFree(slot.ids);
+        if (slot.values) cudaFree(slot.values);
+        if (slot.host_ids) cudaFreeHost(slot.host_ids);
+        if (slot.host_values) cudaFreeHost(slot.host_values);
+        slot = MgHybridSlot{};
+        mg_require_launch("hybrid ids allocation", cudaMalloc(&slot.ids, (size_t)capacity * sizeof(int)));
+        mg_require_launch("hybrid values allocation", cudaMalloc(&slot.values, (size_t)capacity * 4 * sizeof(double)));
+        mg_require_launch("hybrid host ids allocation", cudaMallocHost(&slot.host_ids, (size_t)capacity * sizeof(int)));
+        mg_require_launch("hybrid host values allocation", cudaMallocHost(&slot.host_values, (size_t)capacity * 4 * sizeof(double)));
+        slot.capacity = capacity;
+    }
+}
+
+static int mg_hybrid_color_child(int color, int ordinal)
+{
+    int seen = 0;
+    for (int child = 1; child <= 8; ++child) {
+        if ((__builtin_popcount((unsigned)(child - 1)) & 1) != color) continue;
+        if (seen++ == ordinal) return child;
+    }
+    return 0;
+}
+
+void cuda_mg_gauss_seidel_hybrid_batch(
+    int lease, const int* work_ids, int nwork, int ngridmax, int ncoarse,
+    int block_size, int child_count, double dx2, int color,
+    int safe_mode, double* host_phi)
+{
+    if (!g_mg_ready || !g_mg_stream || !work_ids || !host_phi ||
+        nwork <= 0 || child_count != 8 || color < 0 || color > 1 ||
+        (size_t)nwork > g_mg_host_igrid.size()) {
+        fprintf(stderr, "CUDA MG hybrid batch: invalid state or work extent\n");
+        std::abort();
+    }
+    mg_require_block_layout(ngridmax, ncoarse, block_size, child_count,
+                            "hybrid_gauss_seidel");
+    if (lease < 1 || lease > MAX_CUDA_STREAMS) std::abort();
+    auto& slot = g_mg_hybrid_slots[lease - 1];
+    if (slot.nwork || nwork > slot.capacity) std::abort();
+    const cudaStream_t stream = cuda_get_stream_internal(lease - 1);
+    std::memcpy(slot.host_ids, work_ids, (size_t)nwork * sizeof(int));
+    cudaError_t err = cudaMemcpyAsync(slot.ids, slot.host_ids,
+        (size_t)nwork * sizeof(int), cudaMemcpyHostToDevice, stream);
+    if (err != cudaSuccess) mg_require_launch("hybrid batch upload", err);
+    const int block = 256;
+    const int grid = (nwork + block - 1) / block;
+    gauss_seidel_mg_fine_kernel<<<grid, block, 0, stream>>>(
+        d_mg_phi, d_mg_f2, d_mg_f3, d_mg_flag2, d_mg_nbor, d_mg_igrid,
+        nwork, ngridmax, ncoarse, block_size, child_count, dx2, color,
+        safe_mode, slot.ids, slot.values);
+    err = cudaGetLastError();
+    if (err == cudaSuccess) err = cudaMemcpyAsync(slot.host_values,
+        slot.values, (size_t)nwork * 4 * sizeof(double),
+        cudaMemcpyDeviceToHost, stream);
+    mg_require_launch("hybrid_gauss_seidel", err);
+    slot.nwork = nwork;
+    slot.color = color;
+    ++g_mg_hybrid_batches;
+    g_mg_hybrid_gpu_grids += (unsigned long long)nwork;
+}
+
+int cuda_mg_hybrid_finish(int lease, int wait, double* host_phi, int ncoarse,
+                          int block_size, int child_count)
+{
+    if (lease < 1 || lease > MAX_CUDA_STREAMS || !host_phi) std::abort();
+    auto& slot = g_mg_hybrid_slots[lease - 1];
+    const cudaStream_t stream = cuda_get_stream_internal(lease - 1);
+    const cudaError_t status = wait ? cudaStreamSynchronize(stream) : cudaStreamQuery(stream);
+    if (status == cudaErrorNotReady) return 0;
+    mg_require_launch("hybrid completion", status);
+    for (int i = 0; i < slot.nwork; ++i) {
+        const int active_index = slot.host_ids[i];
+        if (active_index < 0 || (size_t)active_index >= g_mg_host_igrid.size())
+            std::abort();
+        const int amr_grid = g_mg_host_igrid[(size_t)active_index];
+        for (int c = 0; c < 4; ++c) {
+            const int child = mg_hybrid_color_child(slot.color, c);
+            const long long cell = amr_cuda_cell_1based(
+                amr_grid, child, ncoarse, block_size, child_count);
+            host_phi[cell - 1] = slot.host_values[(size_t)i * 4 + c];
+        }
+    }
+    slot.nwork = 0;
+    cuda_release_stream(lease - 1);
+    return 1;
+}
+
+void cuda_mg_hybrid_upload_cpu_subset(
+    const double* host_phi, const int* work_ids, int nwork, int color,
+    int ngridmax, int ncoarse, int block_size, int child_count)
+{
+    if (!g_mg_ready || !g_mg_stream || !host_phi || !work_ids ||
+        nwork <= 0 || child_count != 8 || color < 0 || color > 1 ||
+        (size_t)nwork > g_mg_host_igrid.size()) {
+        fprintf(stderr, "CUDA MG hybrid CPU scatter: invalid state or work extent\n");
+        std::abort();
+    }
+    mg_require_block_layout(ngridmax, ncoarse, block_size, child_count,
+                            "hybrid_cpu_scatter");
+    if (!mg_hybrid_buffers_ensure(nwork)) {
+        fprintf(stderr, "CUDA MG hybrid CPU scatter: scratch allocation failed\n");
+        std::abort();
+    }
+    size_t count = (size_t)nwork * 4;
+    for (int i = 0; i < nwork; ++i) {
+        const int active_index = work_ids[i];
+        if (active_index < 0 || (size_t)active_index >= g_mg_host_igrid.size())
+        {
+            fprintf(stderr, "CUDA MG hybrid CPU scatter: invalid active-grid index\n");
+            std::abort();
+        }
+        const int amr_grid = g_mg_host_igrid[(size_t)active_index];
+        for (int c = 0; c < 4; ++c) {
+            const int child = mg_hybrid_color_child(color, c);
+            const long long cell = amr_cuda_cell_1based(
+                amr_grid, child, ncoarse, block_size, child_count);
+            const size_t k = (size_t)i * 4 + c;
+            h_mg_hybrid_ids[k] = (int)(cell - 1);
+            h_mg_hybrid_values[k] = host_phi[cell - 1];
+        }
+    }
+    cudaError_t err = cudaMemcpyAsync(d_mg_hybrid_ids, h_mg_hybrid_ids,
+        count * sizeof(int), cudaMemcpyHostToDevice, g_mg_stream);
+    if (err == cudaSuccess) err = cudaMemcpyAsync(d_mg_hybrid_values,
+        h_mg_hybrid_values, count * sizeof(double), cudaMemcpyHostToDevice,
+        g_mg_stream);
+    if (err == cudaSuccess) {
+        const int block = 256;
+        const int grid = ((int)count + block - 1) / block;
+        mg_scatter_values_kernel<<<grid, block, 0, g_mg_stream>>>(
+            d_mg_phi, d_mg_hybrid_ids, d_mg_hybrid_values, (int)count);
+        err = cudaGetLastError();
+    }
+    if (err == cudaSuccess) err = cudaStreamSynchronize(g_mg_stream);
+    mg_require_launch("hybrid_cpu_scatter", err);
+    g_mg_hybrid_cpu_grids += (unsigned long long)nwork;
 }
 
 void cuda_mg_residual(int ngrid, int ngridmax, int ncoarse,
@@ -612,10 +878,13 @@ void cuda_mg_free(void)
 {
     if (g_mg_gs_launches + g_mg_res_launches +
         g_mg_restrict_launches + g_mg_interp_launches > 0) {
-        printf("[CUDA_MG] B=%d C=%d gs=%lld residual=%lld restrict=%lld interp=%lld\n",
+        printf("[CUDA_MG] B=%d C=%d gs=%lld residual=%lld restrict=%lld interp=%lld "
+               "hybrid_batches=%llu gpu_grids=%llu cpu_grids=%llu\n",
                g_mg_block_size, g_mg_child_count,
                g_mg_gs_launches, g_mg_res_launches,
-               g_mg_restrict_launches, g_mg_interp_launches);
+               g_mg_restrict_launches, g_mg_interp_launches,
+               g_mg_hybrid_batches.load(), g_mg_hybrid_gpu_grids.load(),
+               g_mg_hybrid_cpu_grids);
         fflush(stdout);
     }
     g_mg_ready = false;
@@ -632,6 +901,8 @@ void cuda_mg_free(void)
     if (d_mg_nbor)  { cudaFree(d_mg_nbor);  d_mg_nbor  = nullptr; }
     if (d_mg_igrid) { cudaFree(d_mg_igrid); d_mg_igrid = nullptr; }
     g_mg_alloc_ngrid = 0;
+    mg_hybrid_buffers_free();
+    g_mg_host_igrid.clear();
 
     // Free partial norm2 buffers
     if (d_mg_partial_norm2) { cudaFree(d_mg_partial_norm2); d_mg_partial_norm2 = nullptr; }
@@ -690,6 +961,8 @@ void cuda_mg_finalize(void)
     if (d_mg_igrid) { cudaFree(d_mg_igrid); d_mg_igrid = nullptr; }
     if (d_mg_partial_norm2) { cudaFree(d_mg_partial_norm2); d_mg_partial_norm2 = nullptr; }
     if (h_mg_partial_norm2) { cudaFreeHost(h_mg_partial_norm2); h_mg_partial_norm2 = nullptr; }
+    mg_hybrid_buffers_free();
+    g_mg_host_igrid.clear();
     if (g_mg_stream) {
         cudaStreamSynchronize(g_mg_stream);
         cudaStreamDestroy(g_mg_stream);
@@ -714,6 +987,8 @@ void cuda_mg_release_arrays(void)
     if (d_mg_partial_norm2) { cudaFree(d_mg_partial_norm2); d_mg_partial_norm2 = nullptr; }
     if (h_mg_partial_norm2) { cudaFreeHost(h_mg_partial_norm2); h_mg_partial_norm2 = nullptr; }
     h_mg_partial_cap = 0;
+    mg_hybrid_buffers_free();
+    g_mg_host_igrid.clear();
     // Free halo exchange arrays
     if (d_halo_emit_cells) { cudaFree(d_halo_emit_cells); d_halo_emit_cells = nullptr; }
     if (d_halo_recv_cells) { cudaFree(d_halo_recv_cells); d_halo_recv_cells = nullptr; }

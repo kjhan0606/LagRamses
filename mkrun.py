@@ -1678,6 +1678,9 @@ def generate_run(ui=None, write_text=save_text):
                                    ['feedback_mode'], values)
 
     msgs = rng.validate_params(values)
+    if values.get('mg_dynamic_hybrid'):
+        print('MG dynamic hybrid is experimental: asynchronous pool streams and OpenMP CPU workers share '
+              'independent 3-D red/black grids; benchmark against both CPU-only and GPU-only MG before use.')
     if values.get('nrestart', 0) > 0:
         print('Restart input format: {}. Live SNRT AGN needs informat=hdf5, '
               'an HDF5 build and a saved AGN energy ledger.'.format(

@@ -91,7 +91,7 @@ subroutine read_params
   & ,jobcontrolfile &
        & ,gpu_hydro,gpu_poisson,gpu_fft,gpu_sink,gpu_scalar,gpu_particle,pm_gpu_min_part,gpu_auto_tune,n_cuda_streams &
        & ,use_fftw &
-       & ,mg_merged_rb &
+       & ,mg_merged_rb,mg_dynamic_hybrid &
        & ,dump_pk &
        & ,exchange_method &
        & ,use_neutrino &
@@ -592,6 +592,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         write(*,'(A)') ' Multigrid GPU smoother in merged red/black mode (mg_merged_rb=T)'
      else
         write(*,'(A)') ' Multigrid GPU smoother in strict red/black mode (mg_merged_rb=F, bitwise NCPU independent)'
+     end if
+     if(mg_dynamic_hybrid) then
+        write(*,'(A)') ' Multigrid red/black smoother: dynamic OpenMP/CUDA hybrid enabled (experimental)'
+        if(.not.gpu_poisson)write(*,'(A)') ' WARNING: mg_dynamic_hybrid requires gpu_poisson; CPU MG will be used'
+        if(ndim/=3)write(*,'(A)') ' WARNING: dynamic MG hybrid is 3-D only; legacy MG backend will be used'
      end if
   end if
 

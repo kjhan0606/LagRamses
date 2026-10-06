@@ -52,6 +52,47 @@ module poisson_cuda_interface
        integer(c_int), value :: color, safe_mode
      end subroutine
 
+     function cuda_mg_hybrid_try_acquire_c() result(ok) &
+          bind(C, name='cuda_mg_hybrid_try_acquire')
+       import :: c_int
+       integer(c_int) :: ok
+     end function
+
+     subroutine cuda_mg_hybrid_prepare_c(capacity,ngridmax_c,ncoarse_c,block_size_c,child_count_c) &
+          bind(C,name='cuda_mg_hybrid_prepare')
+       import :: c_int
+       integer(c_int), value :: capacity,ngridmax_c,ncoarse_c,block_size_c,child_count_c
+     end subroutine
+
+     function cuda_mg_hybrid_finish_c(lease,wait,phi,ncoarse_c,block_size_c,child_count_c) result(done) &
+          bind(C,name='cuda_mg_hybrid_finish')
+       import :: c_int,c_double
+       integer(c_int), value :: lease,wait,ncoarse_c,block_size_c,child_count_c
+       real(c_double) :: phi(*)
+       integer(c_int) :: done
+     end function
+
+     subroutine cuda_mg_gauss_seidel_hybrid_batch_c(lease,work_ids,nwork,ngridmax_c,ncoarse_c, &
+          block_size_c,child_count_c,dx2,color,safe_mode,phi) &
+          bind(C, name='cuda_mg_gauss_seidel_hybrid_batch')
+       import :: c_int, c_double
+       integer(c_int) :: work_ids(*)
+       integer(c_int), value :: lease,nwork,ngridmax_c,ncoarse_c
+       integer(c_int), value :: block_size_c,child_count_c,color,safe_mode
+       real(c_double), value :: dx2
+       real(c_double) :: phi(*)
+     end subroutine
+
+     subroutine cuda_mg_hybrid_upload_cpu_subset_c(phi,work_ids,nwork,color, &
+          ngridmax_c,ncoarse_c,block_size_c,child_count_c) &
+          bind(C, name='cuda_mg_hybrid_upload_cpu_subset')
+       import :: c_int, c_double
+       real(c_double) :: phi(*)
+       integer(c_int) :: work_ids(*)
+       integer(c_int), value :: nwork,color,ngridmax_c,ncoarse_c
+       integer(c_int), value :: block_size_c,child_count_c
+     end subroutine
+
      subroutine cuda_mg_residual_c(ngrid, ngridmax_c, ncoarse_c, &
           block_size_c, child_count_c, oneoverdx2, dtwondim, dx2_norm, &
           norm2, compute_norm) &

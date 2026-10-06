@@ -109,6 +109,9 @@ PARAMS = [
     # GPU & FFTW
     ParamDef('gpu_hydro',  'bool', False,  'RUN_PARAMS', S_GPU, 'GPU-accelerated hydro'),
     ParamDef('gpu_poisson','bool', False,  'RUN_PARAMS', S_GPU, 'GPU-accelerated Poisson MG'),
+    ParamDef('mg_dynamic_hybrid','bool',False,'RUN_PARAMS',S_GPU,
+             'Experimental dynamic CPU/GPU dispatch inside each MG red/black color; requires gpu_poisson',
+             visible_when='gpu_poisson==True'),
     ParamDef('gpu_fft',    'bool', False,  'RUN_PARAMS', S_GPU, 'GPU FFT for direct Poisson'),
     ParamDef('gpu_sink',   'bool', False,  'RUN_PARAMS', S_GPU, 'GPU sink particle'),
     ParamDef('gpu_auto_tune','bool',True,  'RUN_PARAMS', S_GPU, 'Auto-tune CPU vs GPU (disable for benchmarks)'),
@@ -707,6 +710,13 @@ def validate_params(values):
     """Run all validation rules. Returns list of ValidationMsg."""
     values = _normalize_values(values)
     msgs = []
+
+    if values.get('mg_dynamic_hybrid') and not values.get('gpu_poisson'):
+        msgs.append(ValidationMsg('ERROR',
+            'mg_dynamic_hybrid requires gpu_poisson=.true.; it is an experimental CUDA/OpenMP MG path'))
+    elif values.get('mg_dynamic_hybrid'):
+        msgs.append(ValidationMsg('WARNING',
+            'mg_dynamic_hybrid is experimental and currently supports the 3-D red/black MG smoother only'))
 
     transport = str(values.get('radiation_transport','none')).strip("'\"")
     transports = ('none','snrt_sn','snrt_mn','ramses_rt','aton')

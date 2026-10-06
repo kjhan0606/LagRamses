@@ -449,6 +449,157 @@ subroutine gauss_seidel_mg_fine(ilevel,redstep)
 end subroutine gauss_seidel_mg_fine
 
 ! ------------------------------------------------------------------------
+! Dynamic CPU/GPU red-black smoother (experimental, 3-D GPU path)
+! Each OpenMP worker claims independent batches dynamically. Free pool streams
+! receive asynchronous batches; workers compute CPU batches while streams are
+! busy. At each color barrier
+! GPU results are merged to phi and CPU-owned color cells are sparsely uploaded
+! to d_mg_phi before the next color can read them.
+! ------------------------------------------------------------------------
+#ifdef HYDRO_CUDA
+subroutine gauss_seidel_mg_fine_hybrid(ilevel,redstep,dx2)
+   use amr_commons
+   use pm_commons
+   use poisson_commons
+   use poisson_cuda_interface
+   use iso_c_binding
+#include "amr_index.h"
+   implicit none
+   integer, intent(in) :: ilevel
+   logical, intent(in) :: redstep
+   real(dp), intent(in) :: dx2
+
+   integer, parameter :: gpu_batch_capacity=4096
+   integer, dimension(1:3,1:2,1:8) :: iii,jjj
+   integer, dimension(1:3,1:4) :: ired,iblack
+   integer(c_int), allocatable :: cpu_work(:),gpu_work(:)
+   integer(c_int) :: gpu_lane,done
+   integer(c_int) :: cpu_count
+   integer :: ngrid,ind,ind0,igrid_mg,igrid_amr,icell_amr
+   integer :: idim,inbor,igshift,igrid_nbor_amr,icell_nbor_amr
+   integer :: gpu_count,cpu_pos,color,ibatch,first_grid,last_grid
+   real(dp) :: nb_sum,weight,u_mask
+   real(dp) :: dtwondim
+
+   ngrid=active(ilevel)%ngrid
+   if(ngrid<=0)return
+   if(twotondim/=8)then
+      call gauss_seidel_mg_fine(ilevel,redstep)
+      return
+   endif
+
+   ired(1,1:4)=(/1,0,0,0/); iblack(1,1:4)=(/2,0,0,0/)
+   ired(2,1:4)=(/1,4,0,0/); iblack(2,1:4)=(/2,3,0,0/)
+   ired(3,1:4)=(/1,4,6,7/); iblack(3,1:4)=(/2,3,5,8/)
+   iii(1,1,1:8)=(/1,0,1,0,1,0,1,0/); jjj(1,1,1:8)=(/2,1,4,3,6,5,8,7/)
+   iii(1,2,1:8)=(/0,2,0,2,0,2,0,2/); jjj(1,2,1:8)=(/2,1,4,3,6,5,8,7/)
+   iii(2,1,1:8)=(/3,3,0,0,3,3,0,0/); jjj(2,1,1:8)=(/3,4,1,2,7,8,5,6/)
+   iii(2,2,1:8)=(/0,0,4,4,0,0,4,4/); jjj(2,2,1:8)=(/3,4,1,2,7,8,5,6/)
+   iii(3,1,1:8)=(/5,5,5,5,0,0,0,0/); jjj(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
+   iii(3,2,1:8)=(/0,0,0,0,6,6,6,6/); jjj(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
+   dtwondim=dble(twondim)
+   color=merge(0,1,redstep)
+   allocate(cpu_work(ngrid))
+   cpu_count=0
+   call cuda_mg_hybrid_prepare_c(int(gpu_batch_capacity,c_int),int(ngridmax,c_int), &
+        int(ncoarse,c_int),int(amr_block_size,c_int),int(twotondim,c_int))
+
+!$omp parallel default(shared) &
+!$omp private(gpu_lane,done,gpu_work,gpu_count,igrid_mg,igrid_amr,icell_amr,ind,ind0, &
+!$omp& ibatch,first_grid,last_grid, &
+!$omp& idim,inbor,igshift,igrid_nbor_amr,icell_nbor_amr,nb_sum,weight,u_mask,cpu_pos)
+   gpu_lane=0
+   allocate(gpu_work(gpu_batch_capacity))
+   gpu_count=0
+!$omp do schedule(dynamic,1)
+   do ibatch=1,(ngrid+gpu_batch_capacity-1)/gpu_batch_capacity
+      first_grid=(ibatch-1)*gpu_batch_capacity+1
+      last_grid=min(ngrid,ibatch*gpu_batch_capacity)
+      if(gpu_lane/=0)then
+         done=cuda_mg_hybrid_finish_c(gpu_lane,0_c_int,phi,int(ncoarse,c_int), &
+              int(amr_block_size,c_int),int(twotondim,c_int))
+         if(done/=0)gpu_lane=0
+      endif
+      if(gpu_lane==0)then
+         gpu_lane=cuda_mg_hybrid_try_acquire_c()
+         if(gpu_lane/=0)then
+            gpu_count=last_grid-first_grid+1
+            do igrid_mg=first_grid,last_grid
+               gpu_work(igrid_mg-first_grid+1)=int(igrid_mg-1,c_int)
+            enddo
+            call cuda_mg_gauss_seidel_hybrid_batch_c(gpu_lane,gpu_work,int(gpu_count,c_int), &
+                 int(ngridmax,c_int),int(ncoarse,c_int),int(amr_block_size,c_int), &
+                 int(twotondim,c_int),dx2,color,merge(1,0,safe_mode(ilevel)),phi)
+            cycle
+         endif
+      endif
+!$omp atomic capture
+      cpu_pos=cpu_count
+      cpu_count=cpu_count+last_grid-first_grid+1
+!$omp end atomic
+      do igrid_mg=first_grid,last_grid
+         igrid_amr=active(ilevel)%igrid(igrid_mg)
+         do ind0=1,twotondim/2
+            if(redstep)then
+               ind=ired(ndim,ind0)
+            else
+               ind=iblack(ndim,ind0)
+            endif
+            icell_amr=ICELL_OF(igrid_amr,ind)
+            nb_sum=0d0
+            if(flag2(icell_amr)/ngridmax==0)then
+               do inbor=1,2
+                  do idim=1,ndim
+                     igshift=iii(idim,inbor,ind)
+                     igrid_nbor_amr=nbor_grid_fine(igshift,igrid_mg)
+                     icell_nbor_amr=ICELL_OF(igrid_nbor_amr,jjj(idim,inbor,ind))
+                     nb_sum=nb_sum+phi(icell_nbor_amr)
+                  enddo
+               enddo
+               phi(icell_amr)=(nb_sum-dx2*f(icell_amr,2))/dtwondim
+            else
+               u_mask=f(icell_amr,3)
+               if(u_mask<=0d0)cycle
+               if(safe_mode(ilevel).and.u_mask<1d0)cycle
+               weight=0d0
+               do inbor=1,2
+                  do idim=1,ndim
+                     igshift=iii(idim,inbor,ind)
+                     igrid_nbor_amr=nbor_grid_fine(igshift,igrid_mg)
+                     if(igrid_nbor_amr==0)then
+                        weight=weight-1d0/u_mask
+                     else
+                        icell_nbor_amr=ICELL_OF(igrid_nbor_amr,jjj(idim,inbor,ind))
+                        if(f(icell_nbor_amr,3)<=0d0)then
+                           weight=weight+f(icell_nbor_amr,3)/u_mask
+                        else
+                           nb_sum=nb_sum+phi(icell_nbor_amr)
+                        endif
+                     endif
+                  enddo
+               enddo
+               phi(icell_amr)=(nb_sum-dx2*f(icell_amr,2))/(dtwondim-weight)
+            endif
+         enddo
+         cpu_work(cpu_pos+igrid_mg-first_grid+1)=int(igrid_mg-1,c_int)
+      enddo
+   enddo
+!$omp end do nowait
+   if(gpu_lane/=0)then
+      done=cuda_mg_hybrid_finish_c(gpu_lane,1_c_int,phi,int(ncoarse,c_int), &
+           int(amr_block_size,c_int),int(twotondim,c_int))
+   endif
+   deallocate(gpu_work)
+!$omp end parallel
+
+   if(cpu_count>0)call cuda_mg_hybrid_upload_cpu_subset_c(phi,cpu_work, &
+        cpu_count,color,int(ngridmax,c_int),int(ncoarse,c_int), &
+        int(amr_block_size,c_int),int(twotondim,c_int))
+   deallocate(cpu_work)
+end subroutine gauss_seidel_mg_fine_hybrid
+#endif
+
+! ------------------------------------------------------------------------
 ! Residual restriction (top-down, OBSOLETE, UNUSED)
 ! ------------------------------------------------------------------------
 
