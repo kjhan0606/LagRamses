@@ -56,12 +56,82 @@ static const int neutral[11]={sp_HI,sp_HeI,sp_CI,sp_NI,sp_OI,sp_NeI,sp_MgI,sp_Si
 static const int atomic_z[11]={1,2,6,7,8,10,12,14,16,20,26};
 int snrt_chimes_budget(const double *,double *,double *);
 
+/* Production-facing selector for the complete CHIMES cell solve. The two
+ * lower-level switches remain available for isolated backend experiments. */
+static int resolve_compute_backend(int *selected)
+{
+    *selected=-1;
+    const char *value=getenv("SNRT_CHIMES_COMPUTE_BACKEND");
+    if(!value || !*value)return 0;
+
+    const char *cvode_expected=NULL,*rhs_expected=NULL;
+    if(!strcmp(value,"cpu")) {
+        *selected=0;cvode_expected="cpu";rhs_expected="cpu";
+    } else if(!strcmp(value,"cuda_integrated")) {
+        *selected=1;cvode_expected="cuda_batched_lu";rhs_expected="cuda_dark_reactions";
+    } else {
+        fprintf(stderr,"Unknown SNRT_CHIMES_COMPUTE_BACKEND=%s; expected cpu|cuda_integrated\n",value);
+        return 1;
+    }
+
+    const char *old_cvode=getenv("SNRT_CHIMES_CVODE_BACKEND");
+    const char *old_rhs=getenv("SNRT_CHIMES_RHS_BACKEND");
+    if((old_cvode && *old_cvode && strcmp(old_cvode,cvode_expected)) ||
+       (old_rhs && *old_rhs && strcmp(old_rhs,rhs_expected))) {
+        fprintf(stderr,"SNRT_CHIMES_COMPUTE_BACKEND conflicts with legacy CHIMES backend selectors\n");
+        return 1;
+    }
+    return 0;
+}
+
+/* Serial startup query: use the same selector admission as initialization.
+ * It does not configure CHIMES or create a device context. */
+int snrt_chimes_cuda_requested(void)
+{
+    int selected;
+    if(resolve_compute_backend(&selected))return -1;
+    if(selected>=0)return selected==1;
+    const char *cvode=getenv("SNRT_CHIMES_CVODE_BACKEND");
+    const char *rhs=getenv("SNRT_CHIMES_RHS_BACKEND");
+    return (cvode && *cvode && strcmp(cvode,"cpu")) ||
+           (rhs && *rhs && strcmp(rhs,"cpu"));
+}
+
 struct cell_context {
     double solid_q;
     double molecular_temperature_max; /* zero for unchanged legacy/hot calls */
     int outside_molecular_domain;
     double event_ceiling,event_time;
 };
+
+#ifdef SNRT_CHIMES_JACOBIAN_TESTING
+/* Private copies for the bounded parallel-Jacobian experiment. In particular,
+ * the molecular-domain diagnostic must not be written by concurrent workers. */
+int snrt_chimes_jac_context_clone(const struct globalVariables *src,
+                                 struct globalVariables *dst)
+{
+    *dst=*src;
+    if(!src->hybrid_data)return 0;
+    struct cell_context *copy=malloc(sizeof(*copy));
+    if(!copy)return -1;
+    *copy=*(const struct cell_context *)src->hybrid_data;
+    dst->hybrid_data=copy;
+    return 0;
+}
+void snrt_chimes_jac_context_release(const struct globalVariables *src,
+                                   struct globalVariables *copy)
+{
+    /* Trial flags are not published: the experiment performs the reference
+     * RHS/serial fallback on the owner for side effects before returning. */
+    if(copy->hybrid_data!=src->hybrid_data)free(copy->hybrid_data);
+    copy->hybrid_data=NULL;
+}
+int snrt_chimes_jac_context_flag(const struct globalVariables *copy)
+{
+    const struct cell_context *p=copy->hybrid_data;
+    return p && p->outside_molecular_domain;
+}
+#endif
 
 static double thermal_ceiling(const struct globalVariables *c)
 {
@@ -350,6 +420,15 @@ static void secondary_rates(struct Species_Structure *species,struct gasVariable
     }
 }
 
+#ifdef SNRT_CHIMES_JACOBIAN_TESTING
+/* The reaction dependency experiment must not silently omit an unknown
+ * extension. This registered photoelectron hook is a no-op in the dark. */
+int snrt_chimes_jac_secondary_is_dark_noop(const struct globalVariables *c)
+{
+    return c->N_spectra==0 && snrt_chimes_secondary_rates==secondary_rates;
+}
+#endif
+
 /* Local molecular shielding only. Ionizing attenuation and dust extinction
  * are owned by RT, so cellSelfShieldingOn stays zero. The unresolved turbulent
  * width is explicitly 1 km/s (matching the admitted CO line data). */
@@ -531,8 +610,16 @@ static ChimesFloat remove_duplicate_dust_energy(struct gasVariables *g,const str
 int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,int stride)
 {
     if(initialized)return 1;
+    int compute_backend=-1;
+    if(resolve_compute_backend(&compute_backend))return 5;
+    int unified_cuda=compute_backend==1;
     const char *cvode_backend=getenv("SNRT_CHIMES_CVODE_BACKEND");
-    if(cvode_backend && *cvode_backend && strcmp(cvode_backend,"cpu")) {
+    int cvode_cuda=compute_backend>=0?unified_cuda:
+        (cvode_backend && *cvode_backend && strcmp(cvode_backend,"cpu"));
+    const char *rhs_backend=getenv("SNRT_CHIMES_RHS_BACKEND");
+    int rhs_cuda=compute_backend>=0?unified_cuda:
+        (rhs_backend && *rhs_backend && strcmp(rhs_backend,"cpu"));
+    if(cvode_cuda) {
 #ifdef SNRT_CHIMES_CUDA
         /* Reject a stale external CHIMES library instead of silently running
          * CPU under a requested GPU mode. No change to the structure ABI. */
@@ -547,11 +634,7 @@ int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,
         return 5;
 #endif
     }
-#ifdef SNRT_CHIMES_CUDA
-    if(snrt_chimes_cvode_configure())return 5;
-#endif
-    const char *rhs_backend=getenv("SNRT_CHIMES_RHS_BACKEND");
-    if(rhs_backend && *rhs_backend && strcmp(rhs_backend,"cpu")) {
+    if(rhs_cuda) {
 #ifdef SNRT_CHIMES_CUDA
         void *handle=dlopen(NULL,RTLD_NOW);
         if(!handle)return 5;
@@ -563,7 +646,12 @@ int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,
 #endif
     }
 #ifdef SNRT_CHIMES_CUDA
-    if(snrt_chimes_rhs_configure())return 5;
+    if(compute_backend>=0) {
+        if(snrt_chimes_cvode_configure_mode(unified_cuda) ||
+           snrt_chimes_rhs_configure_mode(unified_cuda))return 5;
+        fprintf(stderr,"CHIMES integrated compute backend: %s\n",
+            unified_cuda?"cuda_integrated":"cpu");
+    } else if(snrt_chimes_cvode_configure() || snrt_chimes_rhs_configure())return 5;
 #endif
     receiver_abi=snrt_chimes_receiver_abi();
     if(initialized || NS!=CHIMES_TOTSIZE || sizeof(ChimesFloat)!=sizeof(double) ||
@@ -764,6 +852,11 @@ static int cell_charged_impl(const double *controls,const double *elements,const
     }
     if(controls[3]==0)return 0;
     struct globalVariables c=configuration; /* Tdust is local, thread-safe. */
+#ifdef SNRT_CHIMES_CVODE_DIAGNOSTICS
+    const char *cv_diag=getenv("SNRT_CHIMES_CVODE_DIAGNOSTICS");
+    if(cv_diag && !strcmp(cv_diag,"1") && fabs(controls[0]-.11)<1e-14 &&
+       controls[1]==1e4 && controls[3]>=1e10 && old_abundance[sp_H2]==.05)c.chimes_debug=1;
+#endif
     /* The split dark entrypoints pass identically zero radiation. Remove
      * its 2*N_spectra ODE variables and photo-rate work, NOT the species
      * or thermal network. Keep rt_update_flux/on-the-spot unchanged: they

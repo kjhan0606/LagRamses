@@ -114,7 +114,8 @@ index bc26493..01e7e21 100644
 +      if(thermal_root)snrt_chimes_thermal_root_found(myGlobalVars,t);
 +      if (cv_flag < 0 || (t < (realtype) myGasVars->hydro_timestep && !thermal_root))
  	{
- 	  fprintf(stderr, "CHIMES Warning: CVode encountered a recoverable error in the Right Hand Side function but was unable to correct it.\n");
+-	  fprintf(stderr, "CHIMES Warning: CVode encountered a recoverable error in the Right Hand Side function but was unable to correct it.\n");
++	  fprintf(stderr, "CHIMES Warning: CVode incomplete integration: flag=%d reached=%.17g requested=%.17g.\n", cv_flag, (double)t, (double)myGasVars->hydro_timestep);
  	  chimes_print_gas_vars(stderr, myGasVars, myGlobalVars);
 diff --git a/src/chimes_cooling.c b/src/chimes_cooling.c
 index 835c282..73909f2 100644

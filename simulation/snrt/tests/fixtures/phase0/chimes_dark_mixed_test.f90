@@ -77,6 +77,23 @@ program dark_probe
     endif
     print *,'CHIMES_REPLAY_PASS cell=',capture_cell,' wall_s=',omp_get_wtime()-start, &
          ' T_K=',t,' elapsed_s=',elapsed
+    ! Optional bounded warm measurement, using the same captured initial state
+    ! each time. Defaults to one solve; never changes the physical interval.
+    call get_environment_variable('SNRT_CHIMES_REPLAY_REPEATS',target_repeats_text,status=target_status)
+    if(target_status==0)then
+      read(target_repeats_text,*,iostat=s)target_repeats
+      if(s/=0)stop 26
+      if(target_repeats<1.or.target_repeats>1000)stop 26
+      thread_state(:,1)=next;thread_t(1)=t
+      start=omp_get_wtime()
+      do repeat_index=1,target_repeats
+        s=chimes_cell_transition_dark(ctl,elements,old,0,t,next,elapsed)
+        if(s/=0.or.elapsed/=ctl(4))stop 27
+        if(any(next/=thread_state(:,1)).or.t/=thread_t(1))stop 28
+      enddo
+      print *,'CHIMES_REPLAY_WARM repeats=',target_repeats,' mean_wall_s=', &
+           (omp_get_wtime()-start)/target_repeats
+    endif
     write(*,'(A,158ES25.16)')'REPLAY_STATE ',t,next
     stop
   endif

@@ -62,6 +62,44 @@ configuration uses the Intel `ifx` compiler with HDF5 parallel I/O and
 optional CUDA acceleration (`make HDF5=1 USE_CUDA=1`). 128-bit Morton
 keys for deep-AMR runs are enabled with `MORTON128=1`.
 
+The independent dust/CHIMES path can use
+`SNRT_CHIMES_COMPUTE_BACKEND=cuda_integrated` in a matching CHIMES/CUDA build
+even with `radiation_transport='none'` and all other GPU modules disabled.
+CHIMES then requests the shared stream pool at serial startup. This backend
+is experimental, not a demonstrated production speedup; CPU remains the
+default. See the [native runtime guide](./simulation/snrt/NATIVE_RUNTIME.md)
+for requirements and current numerical/performance limits.
+
+For experimental CHIMES worker assignment comparisons,
+`SNRT_CHIMES_GPU_WORKER=thread0` permits only OpenMP worker 0 to submit
+reaction batches to CUDA; other workers compute chemistry on the CPU.
+The default `any` allows whichever worker acquires an available stream.
+Both use the existing dynamic cohort scheduling. The selected GPU worker
+still waits for each current-state RHS batch before continuing host CVODE;
+fixed worker assignment alone does not guarantee acceleration.
+
+`SNRT_CHIMES_CELL_SCHEDULER=level_queue` selects an experimental level-wide
+queue for the RT-off cold CHIMES/dust path. CPU-only uses all OpenMP workers
+on native cell solves; `cuda_integrated` reserves worker 0 for an event-based
+broker with up to 128 independent CVODE continuations, batches of at most 64,
+two staging buffers and one leased stream. Other workers execute native CPU
+chemistry without per-RHS shared counters. Chemistry completes before the
+existing dust stage and collective level commit. Each continuation resumes
+only after its own current candidate's GPU result is ready; stale RHS values
+are not substituted. `SNRT_CHIMES_GPU_BROKERS=4` with worker policy `any`
+permits workers 0–3 to broker independent cells, each leasing its own stream
+and two private staging buffers; configure `n_cuda_streams=4` for four leases.
+Remaining workers run native CPU solves. The default broker count is one.
+The matched one-broker 128³ test passed numerical regression but did not
+accelerate CPU-only; four-broker performance remains experimental.
+
+The dark GPU RHS normally returns a compact FP64 result: species creation
+and destruction rates plus the reaction fields read by host cooling. Full
+reaction scratch remains on device. `SNRT_CHIMES_GPU_RESULT=full` retains
+the previous full-result transfer for comparison; paired rate verification
+and flux callbacks automatically use full results. Compact results do not
+change the chemical network, CVODE tolerances, or thermal formulas.
+
 ### Binary particle restart compatibility
 
 The binary particle reader supports both legacy RAMSES part files without a

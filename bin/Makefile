@@ -314,6 +314,7 @@ ifeq ($(CHIMES),1)
   ifeq ($(CHIMES_CUDA),1)
     CHIMES_OBJS += snrt_chimes_cvode_cuda.o snrt_chimes_rhs_cuda.o
     CHIMES_C_FLAGS = -DSNRT_CHIMES_CUDA
+    FFLAGS += -DSNRT_CHIMES_CUDA
     CHIMES_GPU_TEST_OBJS = cuda_stream_pool.o poisson_cuda_kernels.o scalar_cuda_kernels.o particle_cuda_kernels.o
     # External CHIMES discovers the optional factory in the executable.
     LIBMPI += -Wl,--export-dynamic
@@ -544,7 +545,7 @@ snrt_chimes_bridge.o: ../patch/lagRamses/snrt_chimes_bridge.c ../patch/lagRamses
 snrt_chimes_cvode_cuda.o: ../patch/lagRamses/snrt_chimes_cvode_cuda.cu ../patch/lagRamses/snrt_chimes_cvode_cuda.h
 	$(NVCC) $(NVCCFLAGS) -std=c++17 --fmad=false -Xcompiler -fopenmp -I$(SUNDIALS_DIR)/include -c $< -o $@
 snrt_chimes_rhs_cuda.o: ../patch/lagRamses/snrt_chimes_rhs_cuda.cu ../patch/lagRamses/snrt_chimes_rhs_cuda.h $(CHIMES_DIR)/src/chimes_proto.h
-	$(NVCC) $(NVCCFLAGS) -std=c++17 --fmad=false -Xcompiler -fopenmp -DCHIMES_USE_DOUBLE_PRECISION -I$(SUNDIALS_DIR)/include -I$(CHIMES_DIR)/src -I$(HDF5_DIR)/include -c $< -o $@
+	$(NVCC) $(NVCCFLAGS) -std=c++17 --fmad=false -Xcompiler -fopenmp -Xcompiler -ffp-contract=off -DCHIMES_USE_DOUBLE_PRECISION -I$(SUNDIALS_DIR)/include -I$(CHIMES_DIR)/src -I$(HDF5_DIR)/include -c $< -o $@
 snrt_chimes_spectrum.o: ../patch/lagRamses/snrt_chimes_spectrum.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h
 	mpiicpx -std=c++17 -O2 -fp-model=precise -I$(HDF5_DIR)/include -c $< -o $@
 snrt_chimes_photo.o: ../patch/lagRamses/snrt_chimes_photo.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h

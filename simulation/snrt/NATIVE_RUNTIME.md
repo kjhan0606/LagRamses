@@ -2722,3 +2722,128 @@ does not turn CUDA hydro/Poisson on or off. The current cosmological dust
 composition admission explicitly rejects `gpu_hydro`; the H200 comparison
 therefore keeps hydro on CPU and enables `gpu_poisson`. Other unused GPU
 subsystems remain disabled.
+
+### Opt-in dark molecular trace-solver correction (2026-10-01)
+
+`data/chimes_trace_solver.patch` is a separate, opt-in layer on the patched
+CHIMES source. `tools/build_chimes_cpu_library.sh ... trace` applies it into
+a fresh build directory; it does not replace the source or default library.
+It tightens molecular absolute tolerances by 1e-3 for dark molecular thermal
+solves, leaving atomic/energy/photon and relative tolerances unchanged. On
+`CV_ERR_FAILURE` only, dark molecular integration may restart multistep history
+from the last accepted state, at most four times and only while making progress.
+No abundance clipping, reaction changes or weaker acceptance criteria are used.
+
+The existing 96-case CPU matrix, its tenfold tighter comparison, OMP 1/8 parity
+and native Fortran mixed tests passed. The captured-cell cost increased about
+10%, so this is a numerical correction, not a performance claim or a general
+GPU validation. The experimental semi-analytic Jacobian remains slower and is
+not enabled. Existing production binaries are unchanged. Reproduction details,
+rejected alternatives and measured bounds are in
+`provenance/chimes_gpu_followup_2026-10-01.md`.
+
+### Unified experimental CHIMES CUDA solve selection (2026-10-01)
+
+`SNRT_CHIMES_COMPUTE_BACKEND=cpu|cuda_integrated` is the production-facing
+selector for the complete CHIMES cell call. `cpu` selects the existing CPU
+CVODE and reaction-rate paths. `cuda_integrated` selects the experimental
+batched CUDA dense-LU setup and dark-reaction RHS together. A conflicting
+legacy `SNRT_CHIMES_CVODE_BACKEND` or `SNRT_CHIMES_RHS_BACKEND` is rejected;
+the two legacy variables remain available when the unified selector is unset
+for isolated backend experiments. CPU remains the default.
+
+The integrated selection requires a CUDA-enabled build and matching
+receiver/backend ABI. It retains per-cell host CVODE state and adaptive error
+control, CPU cooling and unsupported chemistry paths, and the existing CPU
+fallback/retry behavior. Reaction inputs and outputs still cross the host/device
+boundary on RHS callbacks. This wires both CUDA components through a single
+full-cell solve selection; it does not provide a tile-resident integrator.
+
+For independent RT-off dust/CHIMES, the adaptive loop initializes the shared
+CUDA stream pool when the CHIMES CUDA selector requests it, before OpenMP
+cell callbacks. No hydro/Poisson/RT GPU flag is needed to enable that pool.
+`n_cuda_streams` retains its existing meaning and MPI node-local-rank mapping.
+CPU selection does not request a GPU context; a requested CUDA mode with no
+available pool stops with an error. Check the device mapping and
+`Adaptive loop: CUDA pool early-init, available=T` startup messages: selector
+admission alone is not evidence of device work or acceleration.
+
+The bounded H100 NVL qualification passed CPU parity and conservation checks
+for the default/mixed compositions at `dt` factors 0.1 and 1. All 24 cells
+were accepted in each case; device errors and status mismatches were zero.
+Across three alternating warm samples, however, the integrated GPU path was
+10.9–18.7x slower than CPU on this fixture. CPU remains the default, and
+`cuda_integrated` is not a production acceleration recommendation. Evidence
+and exact timings are in
+`provenance/chimes_gpu_followup_2026-10-01.md` and
+`.cvode-gpu/integrated-409782/`.
+
+### Experimental OMP/rank-to-GPU multi-stream CHIMES dispatch (2026-10-01)
+
+The dark-reaction RHS and batched dense-LU setup now let concurrent OpenMP cell
+solves reserve disjoint, compatible batches and lease separate entries from
+the shared CUDA stream pool. The existing MPI node-local-rank mapping assigns
+each rank to a visible GPU; threads in that rank share its configured streams.
+Stable reaction tables and per-stream staging/device buffers remain resident
+after their first upload. If no stream lease is available, new RHS trajectories
+fall back to the original CPU path. Legacy per-callback callers request a
+fresh whole-cell CPU restart on mid-trajectory contention; there is no
+unbounded stream-acquisition wait. Pool loss or device/admission failure also
+requests a fresh whole-cell CPU restart; that
+decision stays sticky until the bridge restarts, so the finite-difference
+Jacobian never mixes implementations.
+LU setup falls back independently to the original CPU
+factorization. The stream pool's atomic lease is the ownership check;
+stream-query state is not used as a lock.
+
+The completed actual 128-cubed dark cosmological two-step comparison on A100
+with OMP8/one stream accepted CPU/GPU endpoint parity, but took 1952.894 s on
+CPU and 4795.146 s with the integrated GPU path (2.4554x slower). Hydro/carrier
+fields were identical and the maximum pointwise relative difference was
+8.57e-10 in trace chemistry. This cold, near-primordial, initially dust-free
+comparison does not qualify nonzero-dust or illuminated states. CPU remains
+the production default; device work alone does not establish acceleration.
+
+CUDA copies, reaction kernels and LU batches are submitted asynchronously to
+independent streams, so separate cell batches can overlap. Each RHS caller
+still waits for its own results before CVODE continues: CVODE's current host
+callback contract is synchronous. This is not an asynchronous cell integrator
+or tile-resident solver, and per-callback abundance/temperature inputs and
+reaction outputs still cross the host/device boundary. The previous accepted
+cell state initializes the next integration; each RHS evaluation uses the
+current CVODE candidate state. CUDA dispatch does not substitute a stale RHS
+from an earlier iteration or timestep, and does not loosen CVODE convergence
+or error tests.
+
+The single-GPU H100 and A100 fixtures pass their bounded parity/conservation
+checks and show concurrent batches on separate streams. The A100 integrated
+path is still 9.4–13.2x slower than CPU OMP8; a two-task/two-A100 qualification
+is pending resources. This does not establish multi-GPU scaling or production
+acceleration. CPU remains the production default. The fixture reports peak
+concurrent RHS and LU batches plus distinct stream slots used; detailed
+results are in `provenance/chimes_gpu_followup_2026-10-01.md`.
+
+### Experimental staged dark CHIMES cohorts (2026-10-02)
+
+The CUDA-enabled cold/transition RT-off material operator now has a staged
+path: prepare dust/receiver inputs, run disjoint 16-cell OpenMP cohorts into
+temporary chemistry/energy arrays, validate, then use the unchanged dust
+solve and level-wide commit. A cohort leases a stream once at entry; if none
+is available, that entire cohort runs on CPU. Other OpenMP workers can run
+CPU cohorts while GPU cohorts execute. Within a GPU cohort, bounded host
+continuations collect current CVODE RHS candidates and batch their reaction
+work. Separate cells have no physical dependency. Exact rate caches and
+adapter controls are switched explicitly; no stale timestep RHS is used.
+The existing adapter retains temperature-root transitions, atomization and
+conservation checks rather than bypassing them with a new chemistry model.
+
+This is not a GPU-resident CVODE integrator: host cooling, CVODE and dense LU
+remain on CPU in this path. Device batches still synchronize before their
+results are consumed; a worker does not yet steal additional cohorts while
+its own batch is in flight. Each continuation stack is 256 KiB, reused per
+worker, with up to 16 active production cells (4 MiB per worker). The generic
+test dispatcher admits at most 128 cells. No additional OS threads are
+created. The initial 24-cell staged fixture passed parity/conservation and
+busy-pool CPU fallback, but was slower than CPU OMP8 (0.14915 vs 0.01882 s).
+Production compilation and concurrent-cohort/retry regression are pending;
+actual-workload acceleration is not established. CPU remains the default.

@@ -1,19 +1,21 @@
 --- a/src/rate_equations.c
 +++ b/src/rate_equations.c
-@@ -34,6 +34,12 @@
+@@ -34,6 +34,14 @@
  #include <sundials/sundials_dense.h> 
  #include "chimes_proto.h"
  #include "chimes_vars.h"
 +
 +/* Optional fused dark reaction stage. Returning zero requests the original
-+ * CPU path. Cooling, vector mapping and CVODE state ownership remain here. */
++ * CPU path. CVODE state ownership remains here. A published dark net cooling
++ * rate replaces calculate_total_cooling_rate; the temperature floor stays. */
 +extern int snrt_chimes_dark_rhs_gpu(struct UserData *) __attribute__((weak));
++extern int snrt_chimes_gpu_net_cooling(double *net) __attribute__((weak));
 +extern void snrt_chimes_rate_cache_invalidate(void);
 +int snrt_chimes_dark_rhs_abi(void) { return 1; }
  
  /** 
   * @brief Checks the constraint equations. 
-@@ -589,7 +595,11 @@
+@@ -589,7 +597,11 @@
      }
    
 -  // Update rates 
@@ -26,7 +28,7 @@
    
    if (data->myGlobalVars->rt_update_flux == 1) 
      update_rt_photochemistry_coefficients(data->myGasVars, data->myGlobalVars, *data); 
-@@ -601,6 +611,7 @@
+@@ -601,6 +613,7 @@
    // update_rate_vector resets all reaction destinations, including inactive species.
    // Compute creation and destruction rates 
    update_rate_vector(data->species, data->myGasVars, data->myGlobalVars, *data); 
@@ -34,6 +36,26 @@
    
    /* Now set the output ydot vector for the chemical abundances */
    for (i = 0; i < data->network_size; i++)
+@@ -632,6 +645,18 @@
+       else
+ 	T_floor = data->myGasVars->TempFloor;
+       
+-      ChimesFloat net_cool = calculate_total_cooling_rate(data->myGasVars, data->myGlobalVars, *data, 0); 
++      ChimesFloat net_cool;
++      int have_device_cool = 0;
++      if (device_reactions && snrt_chimes_gpu_net_cooling)
++	{
++	  double got_cool;
++	  if (snrt_chimes_gpu_net_cooling(&got_cool))
++	    {
++	      have_device_cool = 1;
++	      net_cool = (ChimesFloat) got_cool;
++	    }
++	}
++      if (!have_device_cool)
++	net_cool = calculate_total_cooling_rate(data->myGasVars, data->myGlobalVars, *data, 0);
+       if (data->myGasVars->temperature > T_floor)
+ 	NV_Ith_S(ydot, data->network_size) = (realtype) -net_cool;
 --- a/src/update_rates.c
 +++ b/src/update_rates.c
 @@ -34,6 +34,9 @@

@@ -40,6 +40,18 @@ subroutine adaptive_loop
   integer::icell,igrid_sgs,ind_sgs,ncell_sgs
   ! Sink/AGN coarse-step log
   integer::isink_log
+#ifdef HYDRO_CUDA
+  logical::chimes_gpu_requested
+#ifdef SNRT_CHIMES
+  integer(c_int)::chimes_gpu_request
+  interface
+     function snrt_chimes_cuda_requested_c() result(requested) bind(C, name='snrt_chimes_cuda_requested')
+       import::c_int
+       integer(c_int)::requested
+     end function
+  end interface
+#endif
+#endif
 
 #ifndef WITHOUTMPI
   tt1=MPI_WTIME()
@@ -126,10 +138,28 @@ subroutine adaptive_loop
   ! Early CUDA pool init: must happen before first multigrid_fine call so the
   ! cuFFT direct-solve gate (cuda_pool_is_initialized_c()/=0) passes on every
   ! rank. Previously init was lazy in godunov_fine, missing the first force solve.
+  ! Independent dust/CHIMES CUDA must not depend on RT or hydro GPU flags.
+  ! Pool initialization is collective and precedes all OpenMP cell callbacks.
+  chimes_gpu_requested=.false.
+#ifdef SNRT_CHIMES
+  if(dust_chimes_enabled())then
+     chimes_gpu_request=snrt_chimes_cuda_requested_c()
+     if(chimes_gpu_request<0)then
+        call clean_stop
+        return
+     endif
+     chimes_gpu_requested=chimes_gpu_request/=0
+  endif
+#endif
   if(gpu_hydro .or. gpu_poisson .or. gpu_fft .or. gpu_sink .or. gpu_scalar &
-       & .or. gpu_particle .or. mhd_gpu_faces) then
+       & .or. gpu_particle .or. mhd_gpu_faces .or. chimes_gpu_requested) then
      call cuda_pool_init_f()
      if(myid==1) write(*,'(A,L1)') ' Adaptive loop: CUDA pool early-init, available=', cuda_available
+     if(chimes_gpu_requested.and..not.cuda_available)then
+        if(myid==1)write(*,*)'ERROR: CHIMES CUDA requested but no CUDA stream pool is available'
+        call clean_stop
+        return
+     endif
   end if
 #endif
 

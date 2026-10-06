@@ -3,6 +3,7 @@
 ! transaction; this level operator reuses the same CHIMES and dust-material
 ! kernels with an exactly empty photon field and an analytic CMB bath.
 module snrt_dark_matter_runtime
+  use iso_c_binding, only: c_int,c_double,c_ptr,c_funptr,c_loc,c_funloc,c_f_pointer,c_null_ptr
   use amr_commons
   use amr_parameters, only: radiation_transport
   use hydro_commons, only: uold,magnetic_energy
@@ -25,14 +26,93 @@ module snrt_dark_matter_runtime
   implicit none
   private
   public :: snrt_dark_matter_advance_level
+#ifdef SNRT_CHIMES_CUDA
+  ! Each callback writes disjoint staging slots. No AMR publication or MPI is
+  ! allowed inside a continuation; the existing level transaction commits.
+  type,bind(C)::dark_tile_context
+     integer(c_int)::count,width,first,offset,level_queue
+     real(c_double)::sd,sv,dt,dx
+     type(c_ptr)::cells,chemical,gas_total,hydrogen,td,status
+  end type
+  interface
+     integer(c_int) function dark_cuda_requested() bind(C,name='snrt_chimes_cuda_requested')
+       import c_int
+     end function
+     integer(c_int) function dark_level_requested() bind(C,name='snrt_chimes_rhs_level_requested')
+       import c_int
+     end function
+     integer(c_int) function dark_level_run(n,callback,context) bind(C,name='snrt_chimes_rhs_level_run')
+       import c_int,c_funptr,c_ptr
+       integer(c_int),value::n
+       type(c_funptr),value::callback
+       type(c_ptr),value::context
+     end function
+     integer(c_int) function dark_tile_run(n,callback,context) bind(C,name='snrt_chimes_rhs_tile_run')
+       import c_int,c_funptr,c_ptr
+       integer(c_int),value::n
+       type(c_funptr),value::callback
+       type(c_ptr),value::context
+     end function
+  end interface
+#endif
 contains
+#ifdef SNRT_CHIMES_CUDA
+  subroutine dark_tile_cell(index,context) bind(C)
+    integer(c_int),value::index
+    type(c_ptr),value::context
+    type(dark_tile_context),pointer::work
+    integer(c_int),pointer::cells(:),status(:)
+    real(c_double),pointer::chemical(:,:),gas_total(:),hydrogen(:),td(:)
+    integer::j,k,cell,ierr
+    real(dp)::row(nvar_all),state(chimes_ns),energy,number(1,9),radiation(1,9)
+    real(dp)::next_n(1,9),next_e(1,9),ledger(11),grain_n(9),grain_e(9),cell_td,cell_density
+    real(dp)::cell_curve(snrt_dust_contract_number_temperature)
+    call c_f_pointer(context,work)
+    call c_f_pointer(work%cells,cells,[work%count])
+    call c_f_pointer(work%chemical,chemical,[chimes_ns,work%count])
+    call c_f_pointer(work%gas_total,gas_total,[work%count])
+    call c_f_pointer(work%hydrogen,hydrogen,[work%count])
+    if(work%level_queue==0)call c_f_pointer(work%td,td,[work%width])
+    call c_f_pointer(work%status,status,[work%width])
+    j=work%offset+index;k=work%first+j-1;cell=cells(k)
+    row=uold(cell,1:nvar_all);state=row(ichimes:ichimes+chimes_ns-1);energy=row(ndim+2)
+    if(work%level_queue/=0)then
+       status(j)=1
+       if(.not.all(ieee_is_finite(row)).or.row(1)<=0)return
+       cell_density=row(idust)*work%sd/snrt_dust_contract_mass_per_h_g
+       if(cell_density>0)then
+          call dust_composition_curve(snrt_dust_contract_temperature_k(1:size(cell_curve)), &
+               row(idust_species:idust_species+1),snrt_dust_contract_mass_per_h_g,cell_curve,ierr)
+          if(ierr/=0)return
+          call snrt_dust_material_temperature(snrt_dust_contract_temperature_k(1:size(cell_curve)), &
+               cell_curve,row(idust_energy)*work%sv**2/cell_density,cell_td,ierr)
+          if(ierr/=0)return
+       else
+          cell_td=2.727d0/aexp
+       endif
+    else
+       cell_td=td(j)
+    endif
+    number=0;radiation=0;next_n=0;next_e=0;ledger=0;grain_n=0;grain_e=0
+    call chimes_live_cold_stage(cell,work%sd,work%sv,work%dt,work%dx,cell_td,.01d0,1, &
+         number,radiation,state,energy,next_n,next_e,ledger,grain_n,grain_e,ierr,staged_row=row)
+    status(j)=ierr
+    if(ierr/=0)return
+    if(any(next_n/=0d0).or.any(next_e/=0d0))then
+       status(j)=1;return
+    endif
+    chemical(:,k)=state;gas_total(k)=energy;hydrogen(k)=max(row(ichem)*work%sd/atomic_mh,0d0)
+  end subroutine dark_tile_cell
+#endif
   subroutine snrt_dark_matter_advance_level(ilevel)
     integer,intent(in)::ilevel
     integer,parameter::tile_width=128
     integer::i,ind,cell,k,n,first,last,m,j,status,bad,all_bad,info,nt,ni
     integer::iteration_sum,iteration_max,global_iteration_sum,global_iteration_max
-    integer,allocatable::cells(:),slots(:),neighbors(:,:)
-    real(dp),allocatable::chemical(:,:),gas_total(:),dust_energy(:),hydrogen(:)
+    integer,allocatable,target::cells(:)
+    integer,allocatable::slots(:),neighbors(:,:)
+    real(dp),allocatable,target::chemical(:,:),gas_total(:),hydrogen(:)
+    real(dp),allocatable::dust_energy(:)
     real(dp),allocatable::density(:),primary(:),old_material(:),capacity(:),material(:),temperature(:)
     real(dp),allocatable::gas_energy(:),gas_capacity(:),gas_transfer(:),area(:),weights(:,:),curve(:,:)
     real(dp),allocatable::incoming(:,:,:),ir_trial(:,:,:)
@@ -46,6 +126,15 @@ contains
     type(dust_ir_diagnostics)::diag
     type(dust_live_coarse_trial)::coarse
     logical,save::entry_reported=.false.
+    logical::staged_cuda,level_queue
+#ifdef SNRT_CHIMES_CUDA
+    integer,parameter::cohort_width=16
+    integer::group,dispatch_status
+    integer(c_int),target::cell_status(tile_width)
+    real(c_double),target::cell_td(tile_width)
+    integer(c_int),allocatable,target::level_status(:)
+    type(dark_tile_context),target::context
+#endif
     include 'mpif.h'
 
     if(.not.dust_chimes_enabled().or.trim(radiation_transport)/='none')return
@@ -105,6 +194,30 @@ contains
     allocate(slots(tile_width),neighbors(6,tile_width));slots=0;neighbors=0;incoming=0
     bad=0;local_budget=0;local_balance=0
     chimes_wall=0d0;dust_wall=0d0;iteration_sum=0;iteration_max=0
+    staged_cuda=.false.
+    level_queue=.false.
+#ifdef SNRT_CHIMES_CUDA
+    staged_cuda=snrt_chimes_cold_enabled().and.dark_cuda_requested()==1
+    level_queue=snrt_chimes_cold_enabled().and.dark_level_requested()==1
+    if(level_queue)then
+       allocate(level_status(k));level_status=1
+       context%count=n;context%width=k;context%first=1;context%offset=1;context%level_queue=1
+       context%sd=sd;context%sv=sv;context%dt=dt;context%dx=dx
+       context%cells=c_loc(cells);context%chemical=c_loc(chemical)
+       context%gas_total=c_loc(gas_total);context%hydrogen=c_loc(hydrogen)
+       context%td=c_null_ptr;context%status=c_loc(level_status)
+       tile_chimes_start=omp_get_wtime()
+       dispatch_status=dark_level_run(int(k,c_int),c_funloc(dark_tile_cell),c_loc(context))
+       chimes_wall=omp_get_wtime()-tile_chimes_start
+       if(dispatch_status/=0.or.any(level_status/=0))bad=1
+       deallocate(level_status)
+       call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+       if(all_bad/=0.or.info/=0)then
+          call MPI_ABORT(MPI_COMM_WORLD,33,info)
+          return
+       endif
+    endif
+#endif
 
     do first=1,k,tile_width
        last=min(k,first+tile_width-1);m=last-first+1
@@ -150,6 +263,17 @@ contains
           if(status/=0)then
              bad=1;cycle
           endif
+#ifdef SNRT_CHIMES_CUDA
+          if(level_queue)then
+             gas_delta=(gas_total(first+j-1)-row(ndim+2))*energy_unit*volume
+             local_budget(1)=local_budget(1)+gas_delta
+             cycle ! Chemistry already finished from the same read-only uold.
+          endif
+          if(staged_cuda)then
+             cell_td(j)=td
+             cycle ! Prepare first; independent chemistry runs in cohorts below.
+          endif
+#endif
           gas_code=row(ndim+2)
           if(snrt_chimes_cold_enabled())then
              call chimes_live_cold_stage(cell,sd,sv,dt,dx,td,.01d0,1,zero_n,zero_e,next_state,gas_code, &
@@ -171,6 +295,30 @@ contains
           hydrogen(first+j-1)=max(nhydrogen,0d0)
        enddo
 !$omp end parallel do
+#ifdef SNRT_CHIMES_CUDA
+       if(staged_cuda.and..not.level_queue.and.bad==0)then
+          cell_status=0
+!$omp parallel do schedule(dynamic,1) private(group,context,dispatch_status) reduction(max:bad)
+          do group=1,m,cohort_width
+             context%count=n;context%width=tile_width;context%first=first;context%offset=group;context%level_queue=0
+             context%sd=sd;context%sv=sv;context%dt=dt;context%dx=dx
+             context%cells=c_loc(cells);context%chemical=c_loc(chemical)
+             context%gas_total=c_loc(gas_total);context%hydrogen=c_loc(hydrogen)
+             context%td=c_loc(cell_td);context%status=c_loc(cell_status)
+             dispatch_status=dark_tile_run(int(min(cohort_width,m-group+1),c_int), &
+                  c_funloc(dark_tile_cell),c_loc(context))
+             if(dispatch_status/=0)bad=1
+          enddo
+!$omp end parallel do
+          if(any(cell_status(1:m)/=0))bad=1
+          if(bad==0)then
+             do j=1,m
+                cell=cells(first+j-1)
+                local_budget(1)=local_budget(1)+(gas_total(first+j-1)-uold(cell,ndim+2))*energy_unit*volume
+             enddo
+          endif
+       endif
+#endif
        tile_chimes_wall=omp_get_wtime()-tile_chimes_start
        chimes_wall=chimes_wall+tile_chimes_wall
        if(bad/=0)cycle
