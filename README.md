@@ -80,18 +80,19 @@ fixed worker assignment alone does not guarantee acceleration.
 
 `SNRT_CHIMES_CELL_SCHEDULER=level_queue` selects an experimental level-wide
 queue for the RT-off cold CHIMES/dust path. CPU-only uses all OpenMP workers
-on native cell solves; `cuda_integrated` reserves worker 0 for an event-based
-broker with up to 128 independent CVODE continuations, batches of at most 64,
-two staging buffers and one leased stream. Other workers execute native CPU
-chemistry without per-RHS shared counters. Chemistry completes before the
-existing dust stage and collective level commit. Each continuation resumes
-only after its own current candidate's GPU result is ready; stale RHS values
-are not substituted. `SNRT_CHIMES_GPU_BROKERS=4` with worker policy `any`
-permits workers 0–3 to broker independent cells, each leasing its own stream
-and two private staging buffers; configure `n_cuda_streams=4` for four leases.
-Remaining workers run native CPU solves. The default broker count is one.
-The matched one-broker 128³ test passed numerical regression but did not
-accelerate CPU-only; four-broker performance remains experimental.
+on native cell solves. `cuda_integrated` makes every worker a broker unless
+`SNRT_CHIMES_GPU_BROKERS` sets a smaller count. Each broker keeps up to 128
+CVODE continuations and its own stream. A broker launches once enough of its
+own fibers are blocked, so the rest of its host integration overlaps that
+batch. One shared launcher was slower on H200: batches grew to about 64
+cells, but a single stream cut the 512-cell hybrid to about 0.34× the
+8-thread CPU wall. A level with fewer than 16 cells per worker stays on the
+CPU, because a short GPU batch loses to the parallel CPU team. Chemistry
+completes before the existing dust stage and collective level commit. Each
+continuation resumes only after its own current candidate's GPU result is
+ready; stale RHS values are not substituted. The matched one-broker 128³
+test passed numerical regression but did not accelerate CPU-only. That
+one-broker schedule is no longer the default.
 
 The dark GPU RHS normally returns a compact FP64 result: species creation
 and destruction rates plus the reaction fields read by host cooling. Full

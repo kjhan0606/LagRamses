@@ -27,6 +27,7 @@ void snrt_chimes_rate_cache_invalidate(void);
 #include <cfloat>
 #include <cstdint>
 #include <cstddef>
+#include <thread>
 #include <cuda_profiler_api.h>
 #include <nvtx3/nvToolsExt.h>
 static_assert(sizeof(ChimesFloat)==8 && sizeof(sunindextype)==8,
@@ -111,6 +112,7 @@ bool level_queue_enabled=false;
 bool compact_results=true;
 bool gpu_cooling=true;
 int level_gpu_brokers=1;
+bool brokers_explicit=false;
 thread_local bool cpu_direct=false;
 thread_local double gpu_net_cooling=0;
 thread_local int gpu_net_cooling_ready=0;
@@ -425,7 +427,11 @@ struct Buffers {
 };
 Buffers buffers[MAX_CUDA_STREAMS];
 Buffers broker_extra[MAX_CUDA_STREAMS];
-struct Request {UserData *d;Input input;bool claimed=false,done=false;int ok=0;bool required=false;int cooling_valid=0;double net_cooling=0;};
+struct Request {
+ UserData *d;Input input;bool claimed=false,done=false,ready=false;int ok=0;bool required=false;
+ int cooling_valid=0;double net_cooling=0;
+ const CompactOutput *crow=nullptr;const Output *frow=nullptr;std::atomic<int> *consume_left=nullptr;
+};
 // Each host continuation retains its own CVODE stack and candidate state.
 // There are no additional OS threads and no cross-cell physical dependency.
 struct TileFiber {
@@ -436,7 +442,7 @@ struct TileFiber {
 #endif
 };
 struct TileRun {
- FastCtx sched{};int slot=-1,active=-1;
+ FastCtx sched{};int slot=-1,active=-1;bool shared=false;
  snrt_chimes_tile_cell_fn callback=nullptr;void *context=nullptr;
 };
 thread_local TileRun *tile_run=nullptr;
@@ -455,6 +461,44 @@ bool copy_result_async(Buffers &b,int n,cudaStream_t stream){
  return (b.compact?cudaMemcpyAsync(b.hp,b.dp,n*sizeof(CompactOutput),cudaMemcpyDeviceToHost,stream):
    cudaMemcpyAsync(b.ho,b.dout,n*sizeof(Output),cudaMemcpyDeviceToHost,stream))==cudaSuccess;
 }
+void apply_compact_result(Request &q,const CompactOutput &o){
+ if(!o.valid){invalid_device_outputs++;q.ok=0;return;}
+ auto &d=*q.d;const auto &t=host.t;auto *c=d.chimes_current_rates;
+ std::memcpy(c->cosmic_ray_rate,o.cosmic,t.count[CR][d.mol_flag_index]*sizeof(double));
+ if(d.mol_flag_index){
+   c->T_dependent_rate_coefficient[t.cooling_index[0]]=o.molecular[0];
+   c->H2_collis_dissoc_rate_coefficient[t.cooling_index[1]]=o.molecular[1];
+   c->T_dependent_rate[t.cooling_index[2]]=o.molecular[2];
+   c->constant_rate[t.cooling_index[3]]=o.molecular[3];
+   c->H2_dust_formation_rate=o.molecular[4];
+   c->H2_collis_dissoc_crit_H=o.crit[0];c->H2_collis_dissoc_crit_H2=o.crit[1];c->H2_collis_dissoc_crit_He=o.crit[2];
+ }
+ for(int s=0;s<ns;s++){d.species[s].destruction_rate=o.destroy[s];d.species[s].creation_rate=o.create[s];}
+ q.ok=1;q.net_cooling=o.net_cooling;
+ q.cooling_valid=o.cooling_valid && std::isfinite(o.net_cooling);
+ used++;
+}
+void apply_full_result(Request &q,const Output &o){
+ auto &d=*q.d;auto &t=host.t;auto *c=d.chimes_current_rates;
+ bool valid=true;for(int k=0;k<t.nr;k++)if(!std::isfinite(o.rate[k])||!std::isfinite(o.coefficient[k]))valid=false;
+ for(double v:o.crit)if(!std::isfinite(v))valid=false;
+ for(int s=0;s<ns;s++)if(!std::isfinite(o.destroy[s])||!std::isfinite(o.create[s]))valid=false;
+ if(!valid){invalid_device_outputs++;q.ok=0;return;}
+#define COPY(field,group) std::memcpy(c->field,o.rate+t.base[group],t.count[group][d.mol_flag_index]*sizeof(double))
+ COPY(T_dependent_rate,TD);COPY(constant_rate,CON);COPY(recombination_AB_rate,REC);
+ COPY(grain_recombination_rate,GRAIN);COPY(cosmic_ray_rate,CR);
+ std::memcpy(c->T_dependent_rate_coefficient,o.coefficient+t.base[TD],t.count[TD][d.mol_flag_index]*sizeof(double));
+ if(d.mol_flag_index){
+   std::memcpy(c->H2_collis_dissoc_rate_coefficient,o.coefficient+t.base[H2C],t.count[H2C][1]*sizeof(double));
+   c->H2_collis_dissoc_crit_H=o.crit[0];c->H2_collis_dissoc_crit_H2=o.crit[1];c->H2_collis_dissoc_crit_He=o.crit[2];
+ }
+ if(d.mol_flag_index){c->H2_dust_formation_rate=o.rate[t.base[H2D]];COPY(H2_collis_dissoc_rate,H2C);COPY(CO_cosmic_ray_rate,CO);}
+#undef COPY
+ for(int s=0;s<ns;s++){d.species[s].destruction_rate=o.destroy[s];d.species[s].creation_rate=o.create[s];}
+ q.ok=1;q.net_cooling=o.net_cooling;
+ q.cooling_valid=o.cooling_valid && std::isfinite(o.net_cooling);
+ used++;
+}
 void consume_outputs(std::vector<Request*> &requests,Buffers &b,bool ok){
  const int n=(int)requests.size();
  if(ok){
@@ -462,42 +506,8 @@ void consume_outputs(std::vector<Request*> &requests,Buffers &b,bool ok){
    if(b.compact)compact_batches++;else full_batches++;
    result_bytes+=(unsigned long long)n*(b.compact?sizeof(CompactOutput):sizeof(Output));
    for(int i=0;i<n;i++){
-     if(b.compact){
-       const auto &o=b.hp[i];auto &d=*requests[i]->d;const auto &t=host.t;auto *c=d.chimes_current_rates;
-       if(!o.valid){invalid_device_outputs++;continue;}
-       std::memcpy(c->cosmic_ray_rate,o.cosmic,t.count[CR][d.mol_flag_index]*sizeof(double));
-       if(d.mol_flag_index){
-         c->T_dependent_rate_coefficient[t.cooling_index[0]]=o.molecular[0];
-         c->H2_collis_dissoc_rate_coefficient[t.cooling_index[1]]=o.molecular[1];
-         c->T_dependent_rate[t.cooling_index[2]]=o.molecular[2];
-         c->constant_rate[t.cooling_index[3]]=o.molecular[3];
-         c->H2_dust_formation_rate=o.molecular[4];
-         c->H2_collis_dissoc_crit_H=o.crit[0];c->H2_collis_dissoc_crit_H2=o.crit[1];c->H2_collis_dissoc_crit_He=o.crit[2];
-       }
-       for(int s=0;s<ns;s++){d.species[s].destruction_rate=o.destroy[s];d.species[s].creation_rate=o.create[s];}
-       requests[i]->ok=1;requests[i]->net_cooling=o.net_cooling;
-       requests[i]->cooling_valid=o.cooling_valid && std::isfinite(o.net_cooling);
-       used++;continue;
-     }
-     auto &o=b.ho[i];auto &d=*requests[i]->d;auto &t=host.t;auto *c=d.chimes_current_rates;
-     bool valid=true;for(int k=0;k<t.nr;k++)if(!std::isfinite(o.rate[k])||!std::isfinite(o.coefficient[k]))valid=false;
-     for(double v:o.crit)if(!std::isfinite(v))valid=false;
-     for(int s=0;s<ns;s++)if(!std::isfinite(o.destroy[s])||!std::isfinite(o.create[s]))valid=false;
-     if(!valid){invalid_device_outputs++;continue;} // original CPU RHS decides recoverable state status
-#define COPY(field,group) std::memcpy(c->field,o.rate+t.base[group],t.count[group][d.mol_flag_index]*sizeof(double))
-     COPY(T_dependent_rate,TD);COPY(constant_rate,CON);COPY(recombination_AB_rate,REC);
-     COPY(grain_recombination_rate,GRAIN);COPY(cosmic_ray_rate,CR);
-     std::memcpy(c->T_dependent_rate_coefficient,o.coefficient+t.base[TD],t.count[TD][d.mol_flag_index]*sizeof(double));
-     if(d.mol_flag_index){
-       std::memcpy(c->H2_collis_dissoc_rate_coefficient,o.coefficient+t.base[H2C],t.count[H2C][1]*sizeof(double));
-       c->H2_collis_dissoc_crit_H=o.crit[0];c->H2_collis_dissoc_crit_H2=o.crit[1];c->H2_collis_dissoc_crit_He=o.crit[2];
-     }
-     if(d.mol_flag_index){c->H2_dust_formation_rate=o.rate[t.base[H2D]];COPY(H2_collis_dissoc_rate,H2C);COPY(CO_cosmic_ray_rate,CO);}
-#undef COPY
-     for(int s=0;s<ns;s++){d.species[s].destruction_rate=o.destroy[s];d.species[s].creation_rate=o.create[s];}
-     requests[i]->ok=1;requests[i]->net_cooling=o.net_cooling;
-     requests[i]->cooling_valid=o.cooling_valid && std::isfinite(o.net_cooling);
-     used++;
+     if(b.compact)apply_compact_result(*requests[i],b.hp[i]);
+     else apply_full_result(*requests[i],b.ho[i]);
    }
  }else{errors+=n;}
 }
@@ -662,12 +672,14 @@ extern "C" int snrt_chimes_rhs_configure_mode(int use_cuda){
  level_queue_enabled=scheduler && !std::strcmp(scheduler,"level_queue");
  const char *broker_env=std::getenv("SNRT_CHIMES_GPU_BROKERS");
  level_gpu_brokers=1;
+ brokers_explicit=false;
  if(broker_env && *broker_env){
    char *end=nullptr;const long value=std::strtol(broker_env,&end,10);
    if(*end || value<1 || value>64 || (gpu_thread0_only && value!=1)){
      std::fprintf(stderr,"Invalid SNRT_CHIMES_GPU_BROKERS=%s (1..64; thread0 requires 1)\n",broker_env);return 1;
    }
    level_gpu_brokers=(int)value;
+   brokers_explicit=true;
  }
  const char *verify_env=std::getenv("SNRT_CHIMES_RHS_VERIFY");
  verify=verify_env && *verify_env && std::strcmp(verify_env,"0");
@@ -703,7 +715,7 @@ extern "C" int snrt_chimes_dark_rhs_gpu(UserData *d){
  if(!enabled)return 0;
  if(cpu_direct)return 0; // native CPU lane: no per-RHS shared atomic
  if(gpu_thread0_only && omp_get_thread_num()!=0){cell_backend=0;fallback++;return 0;}
- if(tile_run && tile_run->slot<0){cell_backend=0;fallback++;return 0;}
+ if(tile_run && tile_run->slot<0 && !tile_run->shared){cell_backend=0;fallback++;return 0;}
  if(cell_backend<=-2 || cell_backend==0){fallback++;return 0;}
  // A discarded GPU trajectory must stay discarded until the bridge starts
  // its whole-cell CPU retry. CVODE may call f again while unwinding an
@@ -926,21 +938,45 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
  const bool trace=trace_env && !std::strcmp(trace_env,"1") && !timeline_claimed.exchange(true);
  std::chrono::steady_clock::time_point trace_start;
  std::atomic<int> next{0};
- std::vector<unsigned long long> completed(omp_get_max_threads(),0);
-#pragma omp parallel
+ const int workers=std::max(1,omp_get_max_threads());
+ /* One broker thread serializes every CVODE continuation it owns. That loses
+  * to a full CPU team unless every worker runs continuations and each has
+  * enough cells for GPU latency to hide behind the other fibers' host work.
+  * Smaller levels stay on the CPU. */
+ int active_brokers=0;
+ if(enabled){
+   active_brokers=gpu_thread0_only?1:(brokers_explicit?std::min(level_gpu_brokers,workers):workers);
+   if(workers>1 && cells<16*workers) active_brokers=0;
+ }
+ pending.clear();
+ std::atomic<int> shared_launcher{0};
+ std::atomic<int> shared_healthy{1};
+ // Counted up front so a broker cannot observe zero before its siblings enter.
+ std::atomic<int> brokers_running{0};
+ std::vector<unsigned long long> completed(workers,0);
+#pragma omp parallel num_threads(workers)
  {
    const int worker=omp_get_thread_num();
    const int saved_backend=cell_backend;const bool saved_retry=retry_cell;
    const bool saved_direct=cpu_direct;
    std::uint32_t worker_mxcsr=0;std::uint16_t worker_fcw=0;
    capture_fp(worker_mxcsr,worker_fcw);
-   int slot=(enabled && worker<level_gpu_brokers)?cuda_acquire_stream():-1;
+   /* Job 414163 filled one shared batch to ~64 cells and matched the CPU
+    * result, but that single stream ran the 512-cell hybrid at 0.34x the
+    * 8-thread CPU wall. Each broker keeps its own stream instead. */
+   const bool shared_team=false;
+   int slot=-1;
+   if(shared_team){
+     if(worker==0) slot=cuda_acquire_stream();
+   }else if(worker<active_brokers){
+     slot=cuda_acquire_stream();
+   }
    bool prepared=false;
    int initial[128];std::fill(initial,initial+128,-1);
    cudaEvent_t events[2]={nullptr,nullptr};
    if(slot>=0){
-     const auto stream=cuda_get_stream_internal(slot);
-     prepared=build_tables() && buffers[slot].init(stream) && broker_extra[slot].init(stream);
+     const auto setup_stream=cuda_get_stream_internal(slot);
+     prepared=build_tables() && buffers[slot].init(setup_stream) && broker_extra[slot].init(setup_stream);
      try{
        tile_fibers.resize(128);
        for(auto &fiber:tile_fibers){
@@ -951,31 +987,47 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
      for(auto &event:events)if(prepared)
        prepared=cudaEventCreateWithFlags(&event,cudaEventDisableTiming)==cudaSuccess;
      if(!prepared){
-       cudaStreamSynchronize(stream);
+       cudaStreamSynchronize(setup_stream);
        for(auto &event:events)if(event){cudaEventDestroy(event);event=nullptr;}
        cuda_release_stream(slot);slot=-1;
      }
    }
-   const int reserve_limit=std::min(128,std::max(1,cells/std::min(level_gpu_brokers,omp_get_num_threads())));
-   if(slot>=0)for(int i=0;i<reserve_limit;i++){
-     const int cell=next.fetch_add(1);
-     if(cell>=cells)break;
-     initial[i]=cell;
+   if(shared_team && worker<active_brokers && slot<0){
+     try{
+       tile_fibers.resize(128);
+       for(auto &fiber:tile_fibers){
+         fiber.stack.resize(256*1024);fiber.done=true;fiber.global_cell=-1;
+         fiber.waiting=nullptr;fiber.queued=false;
+       }
+       prepared=true;
+     }catch(...){prepared=false;}
    }
+   const int reserve_limit=active_brokers?std::min(128,std::max(1,cells/active_brokers)):0;
+   const int submit_at=std::max(1,std::min(nb,std::max(8,reserve_limit/2)));
    if(trace && worker==0){
      if(cudaProfilerStart()!=cudaSuccess)std::abort();
      trace_start=std::chrono::steady_clock::now();
      std::fprintf(stderr,"CHIMES_TIMELINE_BEGIN window_s=20 cells=%d\n",cells);
    }
-   // One startup rendezvous makes device preparation and initial ownership
-   // explicit; there are no per-tile chemistry barriers after this point.
 #pragma omp barrier
-   if(slot<0){
+   if(worker==0) shared_launcher.store(shared_team && slot>=0 && prepared?1:0);
+#pragma omp barrier
+   const bool shared=shared_launcher.load()!=0;
+   const bool fiber=shared?(worker<active_brokers && prepared):slot>=0;
+   if(shared && fiber) brokers_running.fetch_add(1);
+#pragma omp barrier
+   if(fiber)for(int i=0;i<reserve_limit;i++){
+     const int cell=next.fetch_add(1);
+     if(cell>=cells)break;
+     initial[i]=cell;
+   }
+   cudaStream_t stream=nullptr;
+   if(!fiber){
      cpu_direct=true;
      for(int cell=next.fetch_add(1);cell<cells;cell=next.fetch_add(1)){
        callback(cell,context);++completed[worker];
      }
-   }else{
+   }else if(!shared){
      struct Flight {
        Buffers *buffer=nullptr;cudaEvent_t event=nullptr;bool busy=false;
        unsigned long long sequence=0;
@@ -988,7 +1040,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
      }
      TileRun run;run.slot=slot;run.callback=callback;run.context=context;
      tile_run=&run;cpu_direct=false;
-     const auto stream=cuda_get_stream_internal(slot);
+     stream=cuda_get_stream_internal(slot);
      used_worker_mask.fetch_or(1ull<<worker);used_stream_mask.fetch_or(1ull<<slot);
      bool healthy=true,exhausted=false;
      bool trace_stopped=false;unsigned long long sequence=0;
@@ -1002,6 +1054,48 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
          fiber.waiting=nullptr;fiber.queued=false;
        }
        flight.busy=false;flight.requests.clear();flight.owners.clear();
+     };
+     // Launch one idle flight. A full group starts as soon as submit_at
+     // fibers are blocked so the remaining fibers' host CVODE overlaps it.
+     // Leftovers smaller than that wait until every owned fiber is swept.
+     auto submit_flight=[&](bool allow_partial)->bool{
+       if(!healthy) return false;
+       Flight *flight=nullptr;
+       for(auto &candidate:flights) if(!candidate.busy){flight=&candidate;break;}
+       if(!flight) return false;
+       for(int i=0;i<128 && (int)flight->requests.size()<nb;i++){
+         auto &fiber=tile_fibers[i];
+         if(fiber.waiting && !fiber.queued){
+           flight->requests.push_back(fiber.waiting);flight->owners.push_back(i);fiber.queued=true;
+         }
+       }
+       const int n=(int)flight->requests.size();
+       if(n==0 || (!allow_partial && n<submit_at)){
+         for(int owner:flight->owners) tile_fibers[owner].queued=false;
+         flight->requests.clear();flight->owners.clear();
+         return false;
+       }
+       auto &b=*flight->buffer;
+       flight->sequence=++sequence;
+       if(trace){
+         char label[128];std::snprintf(label,sizeof(label),"CHIMES submit worker=%d flight=%ld seq=%llu n=%d",worker,flight-flights,flight->sequence,n);
+         nvtxRangePushA(label);
+       }
+       for(int i=0;i<n;i++) b.hi[i]=flight->requests[i]->input;
+       bool ok=cudaMemcpyAsync(b.di,b.hi,n*sizeof(Input),cudaMemcpyHostToDevice,stream)==cudaSuccess;
+       b.compact=select_compact(flight->requests);
+       if(ok){reactions<<<n,256,0,stream>>>(host.t,b.v,b.r,b.entry,b.di,b.dout,b.compact?b.dp:nullptr);ok=cudaGetLastError()==cudaSuccess;}
+       if(ok) ok=launch_dark_cooling(host.t,cool,b.v,b.entry,b.di,b.dout,b.compact?b.dp:nullptr,b.cr_heat,n,stream);
+       if(ok) ok=copy_result_async(b,n,stream);
+#ifdef SNRT_CHIMES_RHS_TESTING
+       if(ok && submit_fail_after && submit_attempts.fetch_add(1)>=submit_fail_after) ok=false;
+#endif
+       if(ok) ok=cudaEventRecord(flight->event,stream)==cudaSuccess;
+       if(trace) nvtxRangePop();
+       flight->busy=true;
+       if(!ok) healthy=false;
+       else peak_active_batches.store(std::max(peak_active_batches.load(),1ull));
+       return ok;
      };
      for(;;){
        bool progressed=false,alive=false;
@@ -1055,38 +1149,17 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
          fiber.calls=cell_calls;
 #endif
          progressed=true;
+         if(healthy && fiber.waiting && !fiber.queued){
+           int unqueued=0;
+           for(int j=0;j<128;j++) if(tile_fibers[j].waiting && !tile_fibers[j].queued) unqueued++;
+           if(unqueued>=submit_at && submit_flight(false)) progressed=true;
+         }
        }
        if(trace)nvtxRangePop();
        if(!alive)break;
-       if(healthy)for(auto &flight:flights)if(!flight.busy){
-         for(int i=0;i<128 && flight.requests.size()<nb;i++){
-           auto &fiber=tile_fibers[i];
-           if(fiber.waiting && !fiber.queued){
-             flight.requests.push_back(fiber.waiting);flight.owners.push_back(i);fiber.queued=true;
-           }
-         }
-         if(flight.requests.empty())continue;
-         auto &b=*flight.buffer;const int n=(int)flight.requests.size();
-         flight.sequence=++sequence;
-         if(trace){
-           char label[128];std::snprintf(label,sizeof(label),"CHIMES submit worker=%d flight=%ld seq=%llu n=%d",worker,&flight-flights,flight.sequence,n);
-           nvtxRangePushA(label);
-         }
-         for(int i=0;i<n;i++)b.hi[i]=flight.requests[i]->input;
-         bool ok=cudaMemcpyAsync(b.di,b.hi,n*sizeof(Input),cudaMemcpyHostToDevice,stream)==cudaSuccess;
-         b.compact=select_compact(flight.requests);
-         if(ok){reactions<<<n,256,0,stream>>>(host.t,b.v,b.r,b.entry,b.di,b.dout,b.compact?b.dp:nullptr);ok=cudaGetLastError()==cudaSuccess;}
-         if(ok)ok=launch_dark_cooling(host.t,cool,b.v,b.entry,b.di,b.dout,b.compact?b.dp:nullptr,b.cr_heat,n,stream);
-         if(ok)ok=copy_result_async(b,n,stream);
-#ifdef SNRT_CHIMES_RHS_TESTING
-         if(ok && submit_fail_after && submit_attempts.fetch_add(1)>=submit_fail_after)ok=false;
-#endif
-         if(ok)ok=cudaEventRecord(flight.event,stream)==cudaSuccess;
-         if(trace)nvtxRangePop();
-         flight.busy=true;progressed=true;
-         if(!ok){healthy=false;break;}
-         peak_active_batches.store(std::max(peak_active_batches.load(),1ull));
-       }
+       // Cells still running stay off this launch. A short tail launches only
+       // after the sweep, when every owned fiber is blocked or finished.
+       if(submit_flight(true)) progressed=true;
        // Wait only when all owned continuations are suspended. CPU workers
        // still draw independent cells from the level queue during this wait.
        if(!progressed){
@@ -1108,8 +1181,227 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
        }
      }
      tile_run=nullptr;
+   }else{
+     if(worker==0) std::fprintf(stderr,"CHIMES shared batch launcher=0 batch=%d\n",nb);
+     struct Flight {
+       Buffers *buffer=nullptr;cudaEvent_t event=nullptr;bool busy=false,consuming=false;
+       unsigned long long sequence=0;std::atomic<int> consume_left{0};
+       std::vector<Request*> requests;
+     };
+     Flight flights[2];
+     if(worker==0){
+       stream=cuda_get_stream_internal(slot);
+       flights[0].buffer=&buffers[slot];flights[1].buffer=&broker_extra[slot];
+       for(int i=0;i<2;i++){flights[i].event=events[i];flights[i].requests.reserve(nb);}
+       used_worker_mask.fetch_or(1ull<<worker);used_stream_mask.fetch_or(1ull<<slot);
+     }
+     TileRun run;run.slot=worker==0?slot:-1;run.shared=true;run.callback=callback;run.context=context;
+     tile_run=&run;cpu_direct=false;
+     bool healthy=worker!=0 || slot>=0,exhausted=false;
+     unsigned long long sequence=0;int stall=0,last_have=-1;
+     auto fail_request=[&](Request *r){
+       r->ok=0;r->crow=nullptr;r->frow=nullptr;r->consume_left=nullptr;r->ready=true;
+     };
+     auto pending_have=[&](){
+       std::lock_guard<std::mutex> lock(mutex);return (int)pending.size();
+     };
+     auto publish_fiber=[&](TileFiber &one){
+       if(!one.waiting || one.queued) return;
+       std::lock_guard<std::mutex> lock(mutex);
+       if(!one.waiting || one.queued) return;
+       auto *r=one.waiting;
+       r->done=false;r->claimed=true;r->ok=0;r->ready=false;r->crow=nullptr;r->frow=nullptr;r->consume_left=nullptr;
+       pending.push_back(r);one.queued=true;
+     };
+     auto reclaim_index=[&](int index)->bool{
+       auto &one=tile_fibers[index];
+       if(!one.waiting || !one.queued) return false;
+       const CompactOutput *crow=nullptr;const Output *frow=nullptr;std::atomic<int> *left=nullptr;Request *req=nullptr;
+       {
+         std::lock_guard<std::mutex> lock(mutex);
+         if(!one.waiting || !one.waiting->ready) return false;
+         req=one.waiting;crow=req->crow;frow=req->frow;left=req->consume_left;req->ready=false;
+       }
+       if(crow) apply_compact_result(*req,*crow);
+       else if(frow) apply_full_result(*req,*frow);
+       else req->ok=0;
+       if(left) left->fetch_sub(1,std::memory_order_acq_rel);
+       one.waiting=nullptr;one.queued=false;return true;
+     };
+     auto release_consumed=[&](){
+       if(worker!=0) return;
+       for(auto &flight:flights){
+         if(flight.consuming && flight.consume_left.load(std::memory_order_acquire)==0){
+           flight.consuming=false;flight.busy=false;flight.requests.clear();
+         }
+       }
+     };
+     auto mark_ready=[&](Flight &flight){
+       auto &b=*flight.buffer;const int n=(int)flight.requests.size();
+       flight.consume_left.store(n,std::memory_order_relaxed);flight.consuming=true;
+       {
+         std::lock_guard<std::mutex> lock(mutex);
+         for(int i=0;i<n;i++){
+           Request *r=flight.requests[i];
+           r->crow=b.compact?&b.hp[i]:nullptr;r->frow=b.compact?nullptr:&b.ho[i];
+           r->consume_left=&flight.consume_left;r->ready=true;
+         }
+       }
+       batches++;if(b.compact)compact_batches++;else full_batches++;
+       result_bytes+=(unsigned long long)n*(b.compact?sizeof(CompactOutput):sizeof(Output));
+     };
+     auto fail_flight=[&](Flight &flight){
+       const int n=(int)flight.requests.size();
+       {
+         std::lock_guard<std::mutex> lock(mutex);
+         for(auto *r:flight.requests) fail_request(r);
+       }
+       if(n) errors+=n;
+       flight.requests.clear();flight.busy=false;flight.consuming=false;flight.consume_left.store(0);
+     };
+     auto fail_pending=[&](){
+       std::lock_guard<std::mutex> lock(mutex);
+       for(auto *r:pending) fail_request(r);
+       pending.clear();
+     };
+     auto shared_poll=[&]()->bool{
+       if(worker!=0 || !healthy) return false;
+       bool any=false;
+       for(auto &flight:flights){
+         if(!flight.busy || flight.consuming) continue;
+         const auto status=cudaEventQuery(flight.event);
+         if(status==cudaSuccess){mark_ready(flight);any=true;}
+         else if(status!=cudaErrorNotReady){healthy=false;shared_healthy.store(0);fail_flight(flight);any=true;}
+       }
+       if(!healthy){
+         cudaStreamSynchronize(stream);
+         for(auto &flight:flights) if(flight.busy && !flight.consuming) fail_flight(flight);
+         fail_pending();
+       }
+       return any;
+     };
+     auto shared_busy=[&](){
+       for(auto &flight:flights) if(flight.busy) return true;
+       return false;
+     };
+     auto submit_shared=[&](bool allow_partial)->bool{
+       if(worker!=0 || !healthy) return false;
+       Flight *flight=nullptr;
+       for(auto &candidate:flights) if(!candidate.busy){flight=&candidate;break;}
+       if(!flight) return false;
+       {
+         std::lock_guard<std::mutex> lock(mutex);
+         const int have=(int)pending.size();
+         if(have==0 || (!allow_partial && have<32)) return false;
+         const int n=std::min(have,nb);
+         flight->requests.assign(pending.begin(),pending.begin()+n);
+         pending.erase(pending.begin(),pending.begin()+n);
+       }
+       const int n=(int)flight->requests.size();auto &b=*flight->buffer;
+       flight->sequence=++sequence;
+       for(int i=0;i<n;i++) b.hi[i]=flight->requests[i]->input;
+       bool ok=cudaMemcpyAsync(b.di,b.hi,n*sizeof(Input),cudaMemcpyHostToDevice,stream)==cudaSuccess;
+       b.compact=select_compact(flight->requests);
+       if(ok){reactions<<<n,256,0,stream>>>(host.t,b.v,b.r,b.entry,b.di,b.dout,b.compact?b.dp:nullptr);ok=cudaGetLastError()==cudaSuccess;}
+       if(ok) ok=launch_dark_cooling(host.t,cool,b.v,b.entry,b.di,b.dout,b.compact?b.dp:nullptr,b.cr_heat,n,stream);
+       if(ok) ok=copy_result_async(b,n,stream);
+       if(ok) ok=cudaEventRecord(flight->event,stream)==cudaSuccess;
+       if(!ok){healthy=false;shared_healthy.store(0);fail_flight(*flight);fail_pending();return false;}
+       flight->busy=true;flight->consuming=false;
+       peak_active_batches.store(std::max(peak_active_batches.load(),1ull));
+       return true;
+     };
+     auto wait_oldest=[&]()->bool{
+       if(worker!=0 || !healthy) return false;
+       Flight *oldest=nullptr;
+       for(auto &flight:flights) if(flight.busy && !flight.consuming && (!oldest || flight.sequence<oldest->sequence)) oldest=&flight;
+       if(!oldest) return false;
+       if(cudaEventSynchronize(oldest->event)!=cudaSuccess){healthy=false;shared_healthy.store(0);fail_flight(*oldest);fail_pending();return false;}
+       mark_ready(*oldest);return true;
+     };
+     auto runnable_now=[&](){
+       for(int i=0;i<128;i++) if(!tile_fibers[i].done && !tile_fibers[i].waiting) return true;
+       return false;
+     };
+     // Launch once 32 cells are waiting and take up to nb. The tail, smaller
+     // than that, launches only when this thread has no runnable fiber and the
+     // queue has stopped growing. Only worker 0 calls CUDA.
+     auto pump=[&](bool allow_partial)->bool{
+       if(worker!=0) return false;
+       bool did=shared_poll();release_consumed();
+       const int have=pending_have();
+       if(have>=32){if(submit_shared(false)){did=true;stall=0;}}
+       else if(allow_partial && have>0 && have==last_have){if(++stall>=8 && submit_shared(true)){did=true;stall=0;}}
+       else if(have!=last_have) stall=0;
+       last_have=pending_have();
+       if(allow_partial && !did && shared_busy()){if(wait_oldest()) did=true;}
+       return did;
+     };
+     for(;;){
+       bool progressed=false,alive=false;
+       if(worker==0 && !healthy){shared_poll();fail_pending();}
+       for(int i=0;i<128;i++){
+         auto &one=tile_fibers[i];
+         if(reclaim_index(i)) progressed=true;
+         if(one.done){
+           if(one.global_cell>=0){++completed[worker];one.global_cell=-1;}
+           if(exhausted && initial[i]<0)continue;
+           const int cell=initial[i]>=0?initial[i]:next.fetch_add(1);
+           initial[i]=-1;
+           if(cell>=cells){exhausted=true;continue;}
+           one.global_cell=cell;one.done=false;one.retry=false;one.backend=-2;
+           one.waiting=nullptr;one.queued=false;
+#ifdef SNRT_CHIMES_RHS_TESTING
+           one.calls=0;
+#endif
+           fast_reset(one.ctx,one.stack.data(),one.stack.size(),worker_mxcsr,worker_fcw);
+         }
+         alive=true;
+         if(one.waiting)continue;
+         run.active=i;cell_backend=one.backend;retry_cell=one.retry;
+#ifdef SNRT_CHIMES_RHS_TESTING
+         cell_calls=one.calls;
+#endif
+         snrt_chimes_rate_cache_invalidate();
+         snrt_chimes_fast_swap(&run.sched,&one.ctx);
+         one.backend=cell_backend;one.retry=retry_cell;
+#ifdef SNRT_CHIMES_RHS_TESTING
+         one.calls=cell_calls;
+#endif
+         progressed=true;
+         if(one.waiting && !one.queued){
+           if(!shared_healthy.load(std::memory_order_acquire)){one.waiting->ok=0;one.waiting=nullptr;one.queued=false;}
+           else publish_fiber(one);
+         }
+         if(worker==0 && pump(false)) progressed=true;
+       }
+       if(!alive){
+         brokers_running.fetch_sub(1);
+         if(worker==0){
+           const auto drain_start=std::chrono::steady_clock::now();
+           while(brokers_running.load()>0 || pending_have()>0 || shared_busy()){
+             if(!pump(true)) std::this_thread::sleep_for(std::chrono::microseconds(50));
+             if(std::chrono::steady_clock::now()-drain_start>std::chrono::seconds(10)){
+               std::fprintf(stderr,"CHIMES shared drain timeout pending=%d brokers=%d\n",pending_have(),brokers_running.load());
+               healthy=false;shared_healthy.store(0);shared_poll();fail_pending();
+               break;
+             }
+           }
+           const auto wait_consume=std::chrono::steady_clock::now();
+           while(shared_busy() && std::chrono::steady_clock::now()-wait_consume<std::chrono::seconds(2)){
+             release_consumed();std::this_thread::sleep_for(std::chrono::microseconds(50));
+           }
+         }
+         break;
+       }
+       if(pump(!runnable_now())) progressed=true;
+       if(!runnable_now() && !progressed) std::this_thread::sleep_for(std::chrono::microseconds(50));
+     }
+     tile_run=nullptr;
+   }
+   if(slot>=0){
      cudaStreamSynchronize(stream);
-     for(auto event:events)cudaEventDestroy(event);
+     for(auto event:events)if(event)cudaEventDestroy(event);
      cuda_release_stream(slot);
    }
    cpu_direct=saved_direct;cell_backend=saved_backend;retry_cell=saved_retry;
@@ -1117,7 +1409,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
  }
  unsigned long long total=0;for(auto count:completed)total+=count;
  std::fprintf(stderr,"CHIMES_LEVEL_QUEUE cells=%d completed=%llu workers=%zu gpu_brokers=%d active_limit_per_broker=128 batch_limit=%d buffers_per_broker=2\n",
-     cells,total,completed.size(),enabled?level_gpu_brokers:0,nb);
+     cells,total,completed.size(),active_brokers,nb);
  for(size_t i=0;i<completed.size();i++)std::fprintf(stderr,"CHIMES_LEVEL_WORKER worker=%zu cells=%llu\n",i,completed[i]);
  return total==(unsigned long long)cells?0:1;
 }
