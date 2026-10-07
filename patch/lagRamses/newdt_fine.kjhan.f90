@@ -31,7 +31,7 @@ subroutine newdt_fine(ilevel)
 !$omp threadprivate(/openmpthreads/)
 #endif
 
-  real(kind=8)::dt_loc,dt_all,ekin_loc,ekin_all,dt_acc_min,dt_to_out,tau_out
+  real(kind=8)::dt_loc,dt_all,ekin_loc,ekin_all,dt_acc_min,dt_to_out,tau_out,dt_eps
   real(kind=8)::idt_loc,iekin_loc
   real(kind=8)::jdt_loc,jekin_loc
   real(dp)::tff,fourpi,threepi2
@@ -89,8 +89,14 @@ subroutine newdt_fine(ilevel)
              & (aexp_frw(iout_frw-1)-aexp_frw(iout_frw))
         ! Cross the comparison threshold by round-off only, so dump_all
         ! reliably advances iout while the written epoch remains the target.
+        ! A positive remainder smaller than a few ulps of t does not change t,
+        ! so aexp never reaches aout and the same dt is repeated.
         dt_to_out=(tau_out-t)*(1.0d0+1.0d-12)
-        if(dt_to_out>0.0d0) dtnew(ilevel)=MIN(dtnew(ilevel),dt_to_out)
+        if(dt_to_out>0.0d0)then
+           dt_eps=4.0d0*spacing(t)
+           if(dt_to_out<dt_eps)dt_to_out=dt_eps
+           dtnew(ilevel)=MIN(dtnew(ilevel),dt_to_out)
+        end if
      end if
   end if
   ! HJM CFL debug: after gravity+cosmo constraints
