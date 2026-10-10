@@ -82,3 +82,34 @@ and diff/conservation checks PASS.  The temporary linked test binary had
 SHA-256
 `684dec40632e94058f5fd35028aeda20985418eb37a365bd33303f31f7f6ada0` and
 was removed by the gate after the run.
+
+## Current G0 audit scope correction — 2026-10-10
+
+The current checkout is `/gpfs/kjhan/chimes-cvode-gpu-20261001` with origin
+`kjhan0606/LagRamses`. The external-assets registry is a project-wide
+migration/comparison inventory, not a list of assets all selected into one
+production run. The G0 auditor previously required production license and
+provenance metadata, and rejected blocked/comparison statuses, for every
+registry entry. It now applies those admission checks only to IDs in
+`required_production_assets`; an absent selected ID reports
+`required_asset_not_registered` without a redundant metadata-missing error.
+Registry-wide duplicate-ID and absolute-path integrity checks remain.
+
+Verification: `simulation/snrt/tests/production_manifest.py` passes, including
+an unselected `not_migrated` legacy comparison asset (must not block), and
+selected legacy, missing metadata, missing registry entry and blocked-status
+negative cases (must fail closed). `git diff --check` is clean. A read-only
+audit of the current manifest still returns `production_gate_pass=false` with
+12 concrete blockers: pending thermal-atlas license; missing metadata for the
+selected executable, CUDA smoke binary and P4 input; the manifest's recorded
+dirty-source status; four unregistered physical stellar/AGN/dust assets; and
+the P4 input's missing path/checksum plus `not_migrated` status. These are
+not waived by narrowing the audit, and no external registry, physical asset,
+license record or source table was changed.
+
+The 2026-09-06 statement that the live driver had no dust state/receivers is
+historical and superseded by the integrated relative-motion and effective
+population evidence in `dust_remaining_implementation_2026-09-09.md` and
+`effective_population_execution_2026-09-11.md`. Those bounded
+noncosmological CPU/OpenMP results do not convert this G0 manifest to PASS or
+qualify the cosmological production profile.

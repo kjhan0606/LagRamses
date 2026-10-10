@@ -67,6 +67,19 @@ def audit_manifest(
     if not isinstance(assets, list) or not assets:
         blockers.append("registry_assets_missing")
         assets = []
+
+    required_assets = production.get("required_production_assets", [])
+    required_ids: list[str] = []
+    if not isinstance(required_assets, list):
+        blockers.append("required_production_assets_invalid")
+        required_assets = []
+    for requirement in required_assets:
+        if not isinstance(requirement, dict) or not isinstance(requirement.get("id"), str):
+            blockers.append("required_asset_record_invalid")
+            continue
+        required_ids.append(requirement["id"])
+    required_id_set = set(required_ids)
+
     asset_by_id: dict[str, dict[str, Any]] = {}
     duplicate_ids: list[str] = []
     for asset in assets:
@@ -80,16 +93,17 @@ def audit_manifest(
         path_value = asset.get("path")
         if not isinstance(path_value, str) or not Path(path_value).is_absolute():
             blockers.append(f"asset_path_not_absolute:{asset_id}")
-        status = asset.get("status")
-        if status in BLOCKING_STATUSES:
-            blockers.append(f"asset_status_blocked:{asset_id}:{status}")
-        simulation = asset.get("simulation")
-        comparison_role = simulation.get("comparison_role") if isinstance(simulation, dict) else None
-        if comparison_role in {
-            "legacy_comparison_only",
-            "phase0_preselector_transitional",
-        }:
-            blockers.append(f"comparison_asset_in_production_registry:{asset_id}")
+        if asset_id in required_id_set:
+            status = asset.get("status")
+            if status in BLOCKING_STATUSES:
+                blockers.append(f"required_asset_status_blocked:{asset_id}:{status}")
+            simulation = asset.get("simulation")
+            comparison_role = simulation.get("comparison_role") if isinstance(simulation, dict) else None
+            if comparison_role in {
+                "legacy_comparison_only",
+                "phase0_preselector_transitional",
+            }:
+                blockers.append(f"comparison_asset_selected_for_production:{asset_id}")
     if duplicate_ids:
         blockers.extend(f"duplicate_asset_id:{asset_id}" for asset_id in duplicate_ids)
 
@@ -100,7 +114,11 @@ def audit_manifest(
         if not isinstance(metadata, dict):
             blockers.append("asset_metadata_not_object")
             metadata = {}
-        for asset_id in asset_by_id:
+        for asset_id in required_ids:
+            if asset_id not in asset_by_id:
+                # The missing registry record is reported by the required-
+                # asset gate below; metadata cannot meaningfully be audited.
+                continue
             record = metadata.get(asset_id)
             if not isinstance(record, dict):
                 blockers.append(f"asset_metadata_missing:{asset_id}")
@@ -113,17 +131,10 @@ def audit_manifest(
             if record.get("provenance_status") not in policy.get("accepted_provenance_statuses", []):
                 blockers.append(f"asset_provenance_unapproved:{asset_id}")
 
-    required_assets = production.get("required_production_assets", [])
-    required_ids: list[str] = []
-    if not isinstance(required_assets, list):
-        blockers.append("required_production_assets_invalid")
-        required_assets = []
     for requirement in required_assets:
         if not isinstance(requirement, dict) or not isinstance(requirement.get("id"), str):
-            blockers.append("required_asset_record_invalid")
             continue
         asset_id = requirement["id"]
-        required_ids.append(asset_id)
         asset = asset_by_id.get(asset_id)
         if asset is None:
             blockers.append(f"required_asset_not_registered:{asset_id}")
@@ -131,8 +142,6 @@ def audit_manifest(
         asset_path = asset.get("path")
         if not isinstance(asset_path, str) or not Path(asset_path).exists():
             blockers.append(f"required_asset_path_missing:{asset_id}")
-        if asset.get("status") in BLOCKING_STATUSES:
-            blockers.append(f"required_asset_status_blocked:{asset_id}")
         asset_sha256 = asset.get("sha256")
         if not isinstance(asset_sha256, str) or len(asset_sha256) != 64:
             blockers.append(f"required_asset_sha256_missing:{asset_id}")

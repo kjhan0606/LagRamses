@@ -82,12 +82,30 @@ def main() -> None:
             "path": str(lock_path),
             "sha256": hashlib.sha256(lock_path.read_bytes()).hexdigest(),
         }
+        registry["assets"].append(
+            {
+                "id": "optional_legacy_comparison",
+                "path": str(root / "legacy_comparison"),
+                "status": "not_migrated",
+                "sha256": "c" * 64,
+                "simulation": {"comparison_role": "legacy_comparison_only"},
+            }
+        )
         for path, payload in zip(paths, (registry, production, environment)):
             write(path, payload)
         report = audit_manifest(*paths)
+        # The external registry is a project inventory; unselected controls do
+        # not need production approval metadata or block the selected runtime.
         assert report["production_gate_pass"] is True
 
+        registry["assets"][0]["simulation"] = {"comparison_role": "legacy_comparison_only"}
+        write(paths[0], registry)
+        report = audit_manifest(*paths)
+        assert "comparison_asset_selected_for_production:approved_binary" in report["blocking_reasons"]
+        registry["assets"][0]["simulation"] = {}
+
         production["repository"]["working_tree_at_recording"] = "dirty"
+        write(paths[0], registry)
         write(paths[1], production)
         report = audit_manifest(*paths)
         assert report["status"] == "blocked"
@@ -98,7 +116,27 @@ def main() -> None:
         write(paths[0], registry)
         write(paths[1], production)
         report = audit_manifest(*paths)
-        assert "asset_status_blocked:approved_binary:not_migrated" in report["blocking_reasons"]
+        assert "required_asset_status_blocked:approved_binary:not_migrated" in report["blocking_reasons"]
+
+        registry["assets"][0]["status"] = "available_local_approved"
+        production["asset_metadata"] = {}
+        write(paths[0], registry)
+        write(paths[1], production)
+        report = audit_manifest(*paths)
+        assert "asset_metadata_missing:approved_binary" in report["blocking_reasons"]
+
+        production["asset_metadata"] = {
+            "approved_binary": {
+                "license_status": "verified",
+                "provenance_status": "approved",
+                "owner": "test",
+            }
+        }
+        production["required_production_assets"].append({"id": "absent_asset"})
+        write(paths[1], production)
+        report = audit_manifest(*paths)
+        assert "required_asset_not_registered:absent_asset" in report["blocking_reasons"]
+        assert "asset_metadata_missing:absent_asset" not in report["blocking_reasons"]
 
     print("PRODUCTION_MANIFEST_TEST_OK fail_closed=true")
 
