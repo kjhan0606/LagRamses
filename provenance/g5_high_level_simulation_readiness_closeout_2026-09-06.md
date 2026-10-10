@@ -97,15 +97,19 @@ Registry-wide duplicate-ID and absolute-path integrity checks remain.
 
 Verification: `simulation/snrt/tests/production_manifest.py` passes, including
 an unselected `not_migrated` legacy comparison asset (must not block), and
-selected legacy, missing metadata, missing registry entry and blocked-status
-negative cases (must fail closed). `git diff --check` is clean. A read-only
-audit of the current manifest still returns `production_gate_pass=false` with
-12 concrete blockers: pending thermal-atlas license; missing metadata for the
-selected executable, CUDA smoke binary and P4 input; the manifest's recorded
-dirty-source status; four unregistered physical stellar/AGN/dust assets; and
-the P4 input's missing path/checksum plus `not_migrated` status. These are
-not waived by narrowing the audit, and no external registry, physical asset,
-license record or source table was changed.
+selected legacy, missing metadata, missing registry entry, blocked-status,
+dirty-worktree and commit-mismatch cases (must fail closed). The auditor now
+checks the declared repository path, live Git HEAD and actual worktree state
+against the manifest's existing source-identity fields. `git diff --check` is
+clean. A read-only audit of the current manifest returns
+`production_gate_pass=false` with 13 concrete blockers: pending thermal-atlas
+license; missing metadata for the selected executable, CUDA smoke binary and
+P4 input; the manifest's recorded dirty-source state and a source-commit mismatch
+(the auditor also enforces a clean live worktree);
+four unregistered physical stellar/AGN/dust assets; and the P4 input's missing
+path/checksum plus `not_migrated` status. These are not waived by narrowing
+the audit, and no external registry, physical asset, license record or source
+table was changed.
 
 The 2026-09-06 statement that the live driver had no dust state/receivers is
 historical and superseded by the integrated relative-motion and effective

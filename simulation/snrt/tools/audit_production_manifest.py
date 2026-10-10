@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -41,6 +43,79 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _audit_repository_identity(
+    repository: dict[str, Any],
+    production_root_value: Any,
+    environment_root_value: Any,
+    blockers: list[str],
+) -> None:
+    repository_path_value = repository.get("path")
+    if not isinstance(repository_path_value, str) or not Path(repository_path_value).is_absolute():
+        blockers.append("production_repository_path_invalid")
+        return
+    repository_path = Path(repository_path_value)
+    try:
+        repository_path = repository_path.resolve(strict=True)
+    except OSError:
+        blockers.append("production_repository_path_missing")
+        return
+    if not repository_path.is_dir():
+        blockers.append("production_repository_path_missing")
+        return
+
+    for value, reason in (
+        (production_root_value, "production_root_invalid"),
+        (environment_root_value, "environment_root_invalid"),
+    ):
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            blockers.append(reason)
+            continue
+        try:
+            if Path(value).resolve(strict=True) != repository_path:
+                blockers.append(reason)
+        except OSError:
+            blockers.append(reason)
+
+    def git_output(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(repository_path), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+    try:
+        top = git_output("rev-parse", "--show-toplevel")
+        head = git_output("rev-parse", "HEAD")
+        status = git_output("status", "--porcelain", "--untracked-files=normal")
+    except (OSError, subprocess.TimeoutExpired):
+        blockers.append("production_repository_probe_failed")
+        return
+    if top.returncode != 0 or head.returncode != 0 or status.returncode != 0:
+        blockers.append("production_repository_probe_failed")
+        return
+    try:
+        actual_top = Path(top.stdout.strip()).resolve(strict=True)
+    except OSError:
+        blockers.append("production_repository_root_mismatch")
+        return
+    if actual_top != repository_path:
+        blockers.append("production_repository_root_mismatch")
+
+    expected_head = repository.get("head_at_recording")
+    actual_head = head.stdout.strip().lower()
+    if not isinstance(expected_head, str) or re.fullmatch(r"[0-9a-fA-F]{40}", expected_head) is None:
+        blockers.append("production_source_commit_invalid")
+    elif actual_head != expected_head.lower():
+        blockers.append("production_source_commit_mismatch")
+
+    if repository.get("production_clean_tree_required") and (
+        repository.get("working_tree_at_recording") != "clean" or status.stdout.strip()
+    ):
+        blockers.append("production_repository_dirty")
+
+
 def audit_manifest(
     registry_path: Path,
     production_path: Path,
@@ -58,10 +133,16 @@ def audit_manifest(
         blockers.append("production_schema_invalid")
     if environment.get("schema") != "snrt_environment_v1":
         blockers.append("environment_schema_invalid")
-    if production.get("project_root") != "/gpfs/kjhan/LRD_JWST":
-        blockers.append("production_root_invalid")
-    if environment.get("project_root") != "/gpfs/kjhan/LRD_JWST":
-        blockers.append("environment_root_invalid")
+    repository = production.get("repository", {})
+    if not isinstance(repository, dict):
+        blockers.append("production_repository_record_invalid")
+        repository = {}
+    _audit_repository_identity(
+        repository,
+        production.get("project_root"),
+        environment.get("project_root"),
+        blockers,
+    )
 
     assets = registry.get("assets", [])
     if not isinstance(assets, list) or not assets:
@@ -167,10 +248,6 @@ def audit_manifest(
             blockers.append("environment_resolved_lock_sha256_mismatch")
     if environment.get("reproducibility_status") != "locked":
         blockers.append("environment_not_locked")
-
-    repository = production.get("repository", {})
-    if repository.get("production_clean_tree_required") and repository.get("working_tree_at_recording") != "clean":
-        blockers.append("production_repository_dirty")
 
     if not production.get("production_rules", {}).get("reject_embedded_yield_fallback"):
         blockers.append("embedded_fallback_rejection_not_enabled")
