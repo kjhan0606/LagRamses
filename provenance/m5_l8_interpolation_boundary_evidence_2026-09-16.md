@@ -460,3 +460,36 @@ The focused hydro-restriction wiring test and the current CUDA projection
 symbol check pass.  Therefore the recheck found no new code-side defect.  The
 only unresolved item in this boundary remains the separately budgeted full
 L8 completion/performance qualification, not a failed correctness gate.
+
+## Current-source wiring reconciliation (2026-10-10)
+
+The September 16/17 entries above are historical snapshots. Their statement
+that the tile adapter did not yet replace the RAMSES `material_cell` call site
+is superseded by the current source. At the current repository revision, the
+`snrt_dust_contract_exchange_enabled` M_N branch in
+`patch/lagRamses/snrt_moment_ramses.f90` invokes `material_tile` over local
+leaf cells. `material_tile` prepares packets in an OpenMP dynamic cell loop,
+then `material_tile_commit` gathers each 256-cell stage, calls
+`snrt_dust_live_moment_tile`, and restores/commits each packet through the
+existing `material_cell(..., packet, .false.)` path. The latter reaches the
+M_N tile adapter in `patch/lagRamses/snrt_dust_live.f90`; that adapter keeps
+mutable dust/gas/chemistry state in a tile-local candidate and publishes it
+only after its material/projection checks pass.
+
+Thus the *M5-to-dust/material tile adapter is wired into the current RAMSES
+M_N call path*; the old “not yet connected” statement must not be used as a
+current status. This source inspection does **not** establish a completed
+integrated simulation. In particular, packet preparation still invokes the
+existing per-cell `material_cell` work (including CHIMES where enabled), so
+the tile adapter is not evidence that the expensive chemistry RHS/integration
+has become a single batched solver. End-to-end status remains bounded by the
+full coupled level-8 transaction not reaching its completion marker in the
+recorded runs. No integrated M5/dust/CHIMES pass, cosmological production
+qualification, or physical-asset admission is claimed here.
+
+The saved September run input is also historical, not reusable verbatim:
+current `read_params.jaehyun.f90` rejects the obsolete
+`snrt_transport_model` and legacy `rt` selectors and requires the single
+`radiation_transport='snrt_mn'` selector for this path. Any fresh bounded
+reproduction must use a new run directory, a current binary/build identity,
+and the current selector contract; existing run artifacts are preserved.
