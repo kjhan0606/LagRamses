@@ -4,15 +4,18 @@
 &snrt_rt_transaction_contract
   contract_version = 1
   max_iterations = 32
-  max_iteration_limit = 32
+  max_iteration_limit = 512
   fraction_absolute_tolerance = 1.0d-6
   tau_relative_tolerance = 1.0d-5
+  tau_absolute_tolerance = 1.0d-10
   tau_floor = 1.0d-12
   relaxation = 0.5d0
   incoming_radiation = 'frozen'
   start_inventory = 'frozen'
   preheating_temperature = 'frozen'
   opacity_neutral_fraction = 'time_centered_start_relaxed_end'
+  tau_tolerance = 'absolute_plus_relative_optical_depth'
+  picard_acceleration = 'safeguarded_anderson_depth_1'
   decision = 'mpi_collective_max_failure_min_converged_max_residual'
   residual_semantics = 'successive_under_relaxed_opacity_predictors'
   failure_injection = 'smoke_only_rejected_when_runtime_admissible'

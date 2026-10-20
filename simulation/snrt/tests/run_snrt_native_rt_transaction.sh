@@ -2,13 +2,16 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-build_dir="$(mktemp -d /gpfs/kjhan/LRD_JWST/.snrt-rt-transaction.XXXXXX)"
+build_dir="$(mktemp -d "$project_dir/.snrt-rt-transaction.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 module_dir="$build_dir/modules"
 mkdir -p "$module_dir"
 
 if command -v ifx >/dev/null 2>&1; then
-  ifx -fpp -DWITHOUTMPI -I"$project_dir/bin" -module "$module_dir" \
+  ifx -fpp -DWITHOUTMPI -I"$module_dir" -I"$project_dir/bin" -module "$module_dir" \
+    -c "$project_dir/simulation/snrt/tests/fortran/amr_parameters_transaction_smoke_stub.f90" \
+    -o "$build_dir/amr_parameters_ifx.o"
+  ifx -fpp -DWITHOUTMPI -I"$module_dir" -I"$project_dir/bin" -module "$module_dir" \
     -c "$project_dir/patch/lagRamses/snrt_rt_transaction.f90" \
     -o "$build_dir/snrt_rt_transaction.o"
   ifx -fpp -DWITHOUTMPI -I"$module_dir" -I"$project_dir/bin" \
@@ -20,7 +23,7 @@ if command -v ifx >/dev/null 2>&1; then
     SNRT_RT_TX_TEST_FAIL_STAGE="$failure_stage" SNRT_RT_TX_TEST_FAIL_LEAF=2 \
       "$build_dir/snrt_rt_transaction_smoke"
   done
-  if SNRT_RT_TX_MAX_ITER=33 "$build_dir/snrt_rt_transaction_smoke" >/dev/null 2>&1; then
+  if SNRT_RT_TX_MAX_ITER=513 "$build_dir/snrt_rt_transaction_smoke" >/dev/null 2>&1; then
     echo "SNRT_NATIVE_RT_TRANSACTION_SMOKE_FAIL: iteration limit was not enforced" >&2
     exit 1
   fi

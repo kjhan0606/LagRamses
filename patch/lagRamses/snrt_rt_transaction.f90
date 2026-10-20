@@ -18,7 +18,7 @@ module snrt_rt_transaction
   integer, parameter, public :: snrt_transaction_err_config = 3
   integer, parameter, public :: snrt_transaction_err_mpi = 4
   integer, parameter, public :: snrt_transaction_contract_version = 1
-  integer, parameter, public :: snrt_transaction_max_iterations_limit = 32
+  integer, parameter, public :: snrt_transaction_max_iterations_limit = 512
 
   integer, parameter, public :: snrt_failure_none = 0
   integer, parameter, public :: snrt_failure_partition = 1
@@ -29,9 +29,10 @@ module snrt_rt_transaction
   integer, parameter, public :: snrt_failure_unassigned = 6
 
   type, public :: snrt_rt_iteration_config
-     integer :: max_iterations = snrt_transaction_max_iterations_limit
+     integer :: max_iterations = 32
      real(dp) :: fraction_absolute_tolerance = 1.0d-6
      real(dp) :: tau_relative_tolerance = 1.0d-5
+     real(dp) :: tau_absolute_tolerance = 1.0d-10
      real(dp) :: tau_floor = 1.0d-12
      real(dp) :: relaxation = 0.5d0
      integer :: failure_stage = snrt_failure_none
@@ -55,6 +56,7 @@ module snrt_rt_transaction
   public :: snrt_transaction_restore
   public :: snrt_transaction_commit_level
   public :: snrt_transaction_check_convergence
+  public :: snrt_transaction_picard_update
   public :: snrt_transaction_reduce_decision
   public :: snrt_transaction_reduce_sum
   public :: snrt_transaction_failure_requested
@@ -62,6 +64,52 @@ module snrt_rt_transaction
   public :: snrt_transaction_error_message
 
 contains
+
+  subroutine snrt_transaction_picard_update(guess,residual,previous_guess,previous_residual, &
+       have_previous,relaxation,updated,used_acceleration,ierr)
+    real(dp),intent(in)::guess(:),residual(:),previous_guess(:),previous_residual(:),relaxation
+    logical,intent(in)::have_previous
+    real(dp),intent(out)::updated(:)
+    logical,intent(out)::used_acceleration
+    integer,intent(out)::ierr
+    real(dp)::history_delta(size(guess)),step_delta(size(guess)),base_step(size(guess))
+    real(dp)::candidate(size(guess)),denominator,gamma
+
+    ierr=snrt_transaction_ok;used_acceleration=.false.
+    if(size(guess)/=3.or.size(residual)/=3.or.size(previous_guess)/=3.or. &
+         size(previous_residual)/=3.or.size(updated)/=3)then
+       ierr=snrt_transaction_err_shape;return
+    endif
+    updated=guess
+    if(.not.ieee_is_finite(relaxation).or.relaxation<=0.or.relaxation>1.or. &
+         any(.not.ieee_is_finite(guess)).or.any(.not.ieee_is_finite(residual)).or. &
+         any(guess<0).or.any(guess>1).or.guess(2)+guess(3)>1)then
+       ierr=snrt_transaction_err_state;return
+    endif
+
+    base_step=relaxation*residual
+    updated=guess+base_step
+    if(any(.not.ieee_is_finite(updated)).or.any(updated<0).or.any(updated>1).or. &
+         updated(2)+updated(3)>1)then
+       ierr=snrt_transaction_err_state;return
+    endif
+    if(.not.have_previous)return
+    if(any(.not.ieee_is_finite(previous_guess)).or.any(.not.ieee_is_finite(previous_residual)))return
+
+    ! Depth-1 Anderson on G(x)=x+relaxation*(F(x)-x).  The physical simplex
+    ! and a half-unit step cap make the extrapolation fail closed to the
+    ! ordinary under-relaxed Picard update whenever it is unsafe.
+    history_delta=relaxation*(residual-previous_residual)
+    denominator=dot_product(history_delta,history_delta)
+    if(.not.ieee_is_finite(denominator).or.denominator<=1.0d-30)return
+    gamma=dot_product(history_delta,base_step)/denominator
+    if(.not.ieee_is_finite(gamma))return
+    step_delta=(guess-previous_guess)+history_delta
+    candidate=updated-step_delta*gamma
+    if(any(.not.ieee_is_finite(candidate)).or.any(candidate<0).or.any(candidate>1).or. &
+         candidate(2)+candidate(3)>1.or.maxval(abs(candidate-guess))>0.5d0)return
+    updated=candidate;used_acceleration=.true.
+  end subroutine snrt_transaction_picard_update
 
   subroutine snrt_transaction_load_config(production_allowed, config, ierr, message)
     logical, intent(in) :: production_allowed
@@ -101,6 +149,16 @@ contains
        if (read_status /= 0) then
           ierr = snrt_transaction_err_config
           message = 'SNRT_RT_TX_TAU_TOL is not a number'
+          return
+       end if
+    end if
+    value = ''
+    call get_environment_variable('SNRT_RT_TX_TAU_ABS_TOL', value, length=length, status=status)
+    if (status == 0 .and. length > 0) then
+       read(value(1:length),*,iostat=read_status) config%tau_absolute_tolerance
+       if (read_status /= 0) then
+          ierr = snrt_transaction_err_config
+          message = 'SNRT_RT_TX_TAU_ABS_TOL is not a number'
           return
        end if
     end if
@@ -156,11 +214,12 @@ contains
     if (config%max_iterations < 1 .or. &
          config%max_iterations > snrt_transaction_max_iterations_limit .or. &
          config%fraction_absolute_tolerance < 0.0d0 .or. &
-         config%tau_relative_tolerance < 0.0d0 .or. config%tau_floor <= 0.0d0 .or. &
+         config%tau_relative_tolerance < 0.0d0 .or. config%tau_absolute_tolerance < 0.0d0 .or. &
+         config%tau_floor <= 0.0d0 .or. &
          config%relaxation <= 0.0d0 .or. config%relaxation > 1.0d0 .or. &
          config%failure_leaf < 0) then
        ierr = snrt_transaction_err_config
-       message = 'native RT transaction configuration is outside its declared domain (max 32 trials)'
+       message = 'native RT transaction configuration is outside its declared domain (max 512 trials)'
        return
     end if
     if (config%failure_stage /= snrt_failure_none .and. config%failure_leaf <= 0) then
@@ -471,13 +530,14 @@ contains
           current_value = max(0.0d0, real(current_tau(i,j),dp))
           target_value = max(0.0d0, real(target_tau(i,j),dp))
           if (max(current_value,target_value) <= config%tau_floor) cycle
-          denominator = max(current_value, config%tau_floor)
+          denominator = max(config%tau_absolute_tolerance + &
+               config%tau_relative_tolerance*max(current_value,target_value), config%tau_floor)
           tau_residual = max(tau_residual, abs(target_value-current_value)/denominator)
        end do
     end do
     residual = max(fraction_residual, tau_residual)
     converged = fraction_residual <= config%fraction_absolute_tolerance .and. &
-         tau_residual <= config%tau_relative_tolerance
+         tau_residual <= 1.0d0
   end subroutine snrt_transaction_check_convergence
 
   subroutine snrt_transaction_reduce_decision(local_failed, local_converged, local_residual, &

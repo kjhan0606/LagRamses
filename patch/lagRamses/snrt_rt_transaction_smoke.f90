@@ -23,9 +23,11 @@ program snrt_rt_transaction_smoke
   type(snrt_rt_iteration_config) :: config
   type(snrt_rt_transaction_snapshot) :: transaction
   character(len=128) :: message
-  integer :: ierr, i, j, k, global_failed, global_converged
+  integer :: ierr, i, j, k, global_failed, global_converged, iteration
   real(dp) :: global_residual, lo, hi, midpoint
-  logical :: converged
+  real(dp) :: anderson_guess(3),anderson_root(3),anderson_residual(3),anderson_updated(3)
+  real(dp) :: anderson_previous_guess(3),anderson_previous_residual(3)
+  logical :: converged,have_previous,used_acceleration,acceleration_seen
 
   persistent = 0.0_c_float
   do k = 1, 3
@@ -177,6 +179,38 @@ program snrt_rt_transaction_smoke
        current_tau, target_tau, config, residual, converged, ierr)
   call assert_true(ierr == snrt_transaction_ok .and. .not. converged, &
        'non-converged fixed-point check failed')
+  target_fraction = current_fraction
+  current_tau = 1.0e-6_c_float
+  target_tau = current_tau
+  target_tau(1,1) = target_tau(1,1) + 5.0e-11_c_float
+  call snrt_transaction_check_convergence(current_fraction, target_fraction, &
+       current_tau, target_tau, config, residual, converged, ierr)
+  call assert_true(ierr == snrt_transaction_ok .and. converged, &
+       'small absolute opacity residual was rejected by relative-only scaling')
+  target_tau(1,1) = current_tau(1,1) + 2.0e-10_c_float
+  call snrt_transaction_check_convergence(current_fraction, target_fraction, &
+       current_tau, target_tau, config, residual, converged, ierr)
+  call assert_true(ierr == snrt_transaction_ok .and. .not. converged, &
+       'opacity residual above absolute tolerance was accepted')
+
+  anderson_guess=[0.2d0,0.3d0,0.1d0]
+  anderson_root=[0.7d0,0.4d0,0.2d0]
+  anderson_previous_guess=anderson_guess;anderson_previous_residual=0
+  have_previous=.false.;acceleration_seen=.false.
+  do iteration=1,4
+     anderson_residual=0.1d0*(anderson_root-anderson_guess)
+     call snrt_transaction_picard_update(anderson_guess,anderson_residual, &
+          anderson_previous_guess,anderson_previous_residual,have_previous,0.5d0, &
+          anderson_updated,used_acceleration,ierr)
+     call assert_true(ierr==snrt_transaction_ok,'Anderson/Picard update rejected valid state')
+     acceleration_seen=acceleration_seen.or.used_acceleration
+     anderson_previous_guess=anderson_guess
+     anderson_previous_residual=anderson_residual
+     have_previous=.true.;anderson_guess=anderson_updated
+  enddo
+  call assert_true(acceleration_seen.and.maxval(abs(anderson_guess-anderson_root))<1.0d-12, &
+       'depth-1 Anderson did not converge the affine fixed point')
+  write(*,'(A)') 'SNRT_NATIVE_RT_TRANSACTION_ANDERSON_PASS'
 
   ! One-cell bisection is the deterministic reference for the bounded
   ! fixed-point evidence.  A deliberately one-trial contract must remain
