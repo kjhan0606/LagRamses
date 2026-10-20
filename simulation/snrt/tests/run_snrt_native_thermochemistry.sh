@@ -5,7 +5,7 @@ set -euo pipefail
 # interpolation, inventory partition, H/He chemistry, and case-B closure; it
 # does not start RAMSES and does not import Python/JAX.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-build_dir="$(mktemp -d /gpfs/kjhan/LRD_JWST/.snrt-thermochemistry.XXXXXX)"
+build_dir="$(mktemp -d "$repo_root/.snrt-thermochemistry.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 
 fc="${FC:-gfortran}"

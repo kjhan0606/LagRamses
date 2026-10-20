@@ -913,6 +913,17 @@ contains
     enddo
     status=chimes_reconcile_charged(elem,a,-.002d0,b)
     call expect(status/=0.and.all(b==a),'impossible negative solid charge cannot manufacture electrons',failures)
+    elem(11)=1d-3
+    a(111)=-256d0*epsilon(1d0)*elem(11) ! CHIMES sp_FeI, one-based index 111
+    status=chimes_reconcile_charged(elem,a,0d0,c)
+    if(status==0)status=chimes_budget(c,measured,q)
+    call expect(status==0.and.c(111)>=0d0.and.abs(measured(11)-elem(11))<1d-15, &
+         'bounded negative trace FeI roundoff is repaired with exact elemental closure',failures)
+    a(111)=-1024d0*epsilon(1d0)*elem(11)
+    status=chimes_reconcile_charged(elem,a,0d0,b)
+    call expect(status/=0.and.all(b==a), &
+         'negative CHIMES species beyond elemental roundoff bound reject unchanged',failures)
+    elem(11)=0d0;a(111)=0d0
     if(chimes_charge_supported()==1)then
        !$omp parallel do private(j)
        do j=1,4
