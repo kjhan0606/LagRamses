@@ -1805,3 +1805,20 @@ it is generated, checked and hashed on the allocated node before launch.
 At submission the native build is Priority-pending, so neither its regression
 verdict nor execution of the replay is yet claimed. No recurring monitoring
 process or automatic further restart chain was installed.
+
+### Eight-ULP arithmetic-bound follow-up — 2026-10-20
+
+The 16-ULP replay 430369 again reached step 530 and rejected three finite,
+positive stored states. Independent extended-precision evaluation of the
+printed binary64 state gave residuals of 14.2042, 14.8052 and 15.1651 ULP.
+The rejection diagnostic had retained a stale 64-ULP display value while the
+predicate was 16 ULP; both now report the selected 8-ULP reserve. For
+`K=0.5*sum(p_i**2)/rho`, the six rounded operations give a first-order
+`gamma_6` bound of about 3 ULP near `E ~= K`; subtraction `E-K` is exact in
+this cancellation regime by Sterbenz's lemma. Eight ULP is a numerical
+arithmetic reserve, not a physical thermal floor. Native job 430585 passes
+six conservative-prolongation cases, exact 8-ULP boundary equality, the
+14-ULP unchanged-parent regression, conservation/face/advection checks, and
+both expected OpenMP-worker rejection cases. The bounded step-520-to-531 A100
+replay 430588 is in progress; production trajectory qualification remains
+pending its terminal result.

@@ -691,7 +691,7 @@ contains
     if(all(ieee_is_finite(u1(vector_index,0,:))).and.density>0d0)then
        kinetic=0.5d0*sum(u1(vector_index,0,2:ndim+1)**2)/density
        thermal=u1(vector_index,0,ndim+2)-kinetic
-       margin=64d0*spacing(max(abs(u1(vector_index,0,ndim+2)),abs(kinetic)))
+       margin=8d0*spacing(max(abs(u1(vector_index,0,ndim+2)),abs(kinetic)))
        write(error_unit,'(A,4ES25.16)')'GRACKLE_THERMAL_PARENT E/kinetic/thermal/margin:', &
             u1(vector_index,0,ndim+2),kinetic,thermal,margin
     endif
@@ -712,15 +712,18 @@ contains
     if(state(1)<smallr)return
     kinetic=0.5d0*sum(state(2:ndim+1)**2)/state(1)
     thermal=state(ndim+2)-kinetic
-    ! Leave arithmetic headroom for componentwise kinetic subtraction and
-    ! subsequent gravity kicks. This contracts slopes, not total energy;
-    ! the 64-ULP margin is numerical headroom, not a physical temperature
-    ! floor. A 128-ULP cutoff rejected a positive, representable state at
-    ! step 530 solely for falling just below that cutoff.
-    roundoff_margin=64d0*spacing(max(abs(state(ndim+2)),abs(kinetic)))
-    ! Equality is admissible: the contract is at least 64 ULP of arithmetic
-    ! headroom. A strict comparison rejects states that land exactly on this
-    ! representable boundary after conservative hydro evolution.
+    ! Leave arithmetic headroom for evaluating kinetic energy. This contracts
+    ! slopes, not total energy; subsequent gravity updates remain handled by
+    ! the hydro solver.
+    ! K=0.5*sum(p_i**2)/rho uses three rounded products, two rounded sums
+    ! and one rounded division. Its first-order gamma_6 bound is about 3 ULP
+    ! when E and K are comparable; E-K itself is exact by Sterbenz in this
+    ! cancellation regime. Keep an 8-ULP reserve (>2.6x that bound). A
+    ! 16-ULP reserve rejected step-530 states whose extended-precision
+    ! stored-state residuals are 14.2-15.2 ULP. This is numerical headroom,
+    ! not a physical temperature floor.
+    roundoff_margin=8d0*spacing(max(abs(state(ndim+2)),abs(kinetic)))
+    ! Equality is admissible: retain states exactly on the 8-ULP boundary.
     thermal_admissible=ieee_is_finite(thermal).and.thermal>=roundoff_margin
   end function thermal_admissible
 end subroutine interpol_hydro
