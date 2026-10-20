@@ -1838,3 +1838,41 @@ a positive 4-ULP parent, a negative 1-ULP parent rejected from an OpenMP
 worker, and mass/face/advection conservation gates. The integrated A100 replay
 430769 restarted from step 520 and is running; production trajectory
 qualification remains pending its step-530/531 result.
+
+### Step-530 total-energy cancellation blocker — 2026-10-21
+
+Integrated replay 430769 terminated at step 530 with status 17 after 1:19:48;
+it did not reach the requested step 531 and produced no new RAMSES dump. Four
+finite parents (rank/vector 1/11, 4/4, 3/11, 2/14) had `E-K == 0` in the
+binary64 arithmetic used by RAMSES/Grackle. Re-evaluation of the exact stored
+binary64 inputs in extended precision gives positive residuals of only
+0.4291–0.5628 ULP. The current guard deliberately rejects these states because
+the downstream production path also computes `E-K` in binary64; this is not a
+rejection by the 8-ULP reserve alone. Relaxing that reserve cannot resolve a
+zero binary64 thermal state.
+
+An offline reproduction from the four logged seven-cell stencils, applying the
+current minmod slopes and common conservative contraction, found no tested
+contraction that yields eight strictly positive binary64 child thermal
+energies. At ordinary contraction factors, only four children are positive;
+the remaining four are negative, while zero contraction leaves all children
+at zero. Thus preserving the conserved parent total energy and momentum does
+not provide admissible positive-pressure children for these stored states.
+The failure is a high-Mach total-energy cancellation/thermal-resolution limit,
+not evidence of an OOM or a Grackle rate-table failure. The native tests that
+passed on job 430767 exercised nearby but representably positive binary64
+states and did not cover this zero-residual case.
+
+The effective input has `pressure_fix=.true.` and `beta_fix=0`. Existing
+`enew` is initialized from the same binary64 `E-K` residual at each hydro step;
+it is not a persistent independent thermal/entropy state and therefore does
+not recover the lost thermal information here. Do not weaken the rejection,
+inject an arbitrary energy floor, or call the simulation qualified. The next
+physics/numerics bundle must design and test a genuinely independent thermal
+state (dual-energy/internal-energy or entropy evolution), including shock
+heating switches, Grackle source updates, AMR prolongation/restriction, restart
+and feedback coupling, before another long replay. This is the established
+high-Mach use case for dual-energy schemes (e.g. [Bryan et al. 1995](https://doi.org/10.1016/0010-4655(94)00191-4)); the project still needs a RAMSES-specific conservation and coupling design.
+
+The separate A40 job 430823 passed the bounded current-source M5+dust+CHIMES
+wiring smoke; it does not qualify this cosmological Grackle/thermal gate.
