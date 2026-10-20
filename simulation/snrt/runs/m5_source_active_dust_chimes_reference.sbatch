@@ -19,8 +19,13 @@ readonly ASSETS=/gpfs/kjhan/LRD_JWST
 readonly PROFILE=${M5_SOURCE_PROFILE:-agn_reference}
 readonly VERIFY_RESTART=${M5_VERIFY_RESTART:-0}
 readonly AMR_INTERFACE=${M5_AMR_INTERFACE_CHECK:-0}
+readonly A40_SMOKE=${M5_ALLOW_A40_SMOKE:-0}
 readonly TRANSPORT_BACKEND=${M5_TRANSPORT_BACKEND:-auto}
 readonly MATERIAL_BACKEND=${M5_MATERIAL_BACKEND:-auto}
+case "$A40_SMOKE" in
+  0|1) ;;
+  *) echo 'M5_ALLOW_A40_SMOKE must be 0 or 1' >&2; exit 2 ;;
+esac
 case "$TRANSPORT_BACKEND:$MATERIAL_BACKEND" in
   auto:auto|openmp:auto|openmp:openmp|auto:openmp) ;;
   *) echo 'Invalid M5 diagnostic backend selection' >&2; exit 2 ;;
@@ -89,10 +94,18 @@ module load intel/compiler/2025.3.0 intel/mpi/2021.17 cuda/13.0.2
 gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | sed -n '1p')
 case "$gpu_name" in
   *A100*|*H100*) ;;
+  *A40*)
+    if [[ "$A40_SMOKE" != 1 || "$PROFILE" != effective_population || \
+          "$VERIFY_RESTART" != 0 || "$AMR_INTERFACE" != 1 ]]; then
+      echo 'A40 is allowed only for the approved effective-population AMR smoke' >&2
+      exit 2
+    fi
+    ;;
   *) echo "Refusing non-A100/H100 GPU allocation: $gpu_name" >&2; exit 2 ;;
 esac
 printf 'GPU=%s\nJOB_ID=%s\nBINARY=%s\n' "$gpu_name" "$SLURM_JOB_ID" "$BINARY" \
   | tee "$WORK/launch.txt"
+printf 'A40_SMOKE_OVERRIDE=%s\n' "$A40_SMOKE" | tee -a "$WORK/launch.txt"
 
 test -f "$TABLE" -a -f "$GROUP_DIR/manifest.json"
 test -f "$SUN/include/cvode/cvode.h" -a -f "$HDF5_ROOT/include/hdf5.h"
