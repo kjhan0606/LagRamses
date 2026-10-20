@@ -37,7 +37,7 @@ program check_prolongation
   do test_case=1,4
      internal=1d-6
      if(test_case==2)internal=1d-2
-     if(test_case==4)internal=2d-13
+     if(test_case==4)internal=128d0*spacing(.5d0)
      parent=1d-3;parent(1)=1d0;parent(2:ndim+1)=0d0
      parent(2)=1d0;parent(ndim+2)=0.5d0+internal
      u1=0d0
@@ -67,7 +67,9 @@ program check_prolongation
      if(maxval(abs(average-parent))>128d0*spacing(1d0))error stop 'parent average not conserved'
      do ind=1,twotondim
         thermal=u2(1,ind,ndim+2)-0.5d0*sum(u2(1,ind,2:ndim+1)**2)/u2(1,ind,1)
-        if(thermal<=0d0)error stop 'nonpositive limited child'
+        if(thermal<=64d0*spacing(max(abs(u2(1,ind,ndim+2)), &
+             abs(0.5d0*sum(u2(1,ind,2:ndim+1)**2)/u2(1,ind,1))))) &
+             error stop 'limited child fell below the 64-ULP arithmetic margin'
      enddo
      if(test_case==2.or.test_case==3)then
         if(any(u2(1,:,:)/=unlimited(1,:,:)))error stop 'admissible stencil changed'

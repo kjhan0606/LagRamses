@@ -1773,6 +1773,31 @@ binary/source hashes in its prologue. Preserve the new nearby checkpoint
 for diagnosis rather than repeatedly replaying from step 380. Automatic
 continuous monitoring remains stopped per the operator's instruction.
 
+### 64-ULP thermal-admissibility follow-up — 2026-10-20
+
+The bounded replay 422623 reproduced the step-530 rejection with a finite,
+positive parent thermal energy of `1.0757318430129614e-19`; the former
+128-ULP cutoff was `1.0842021724855044e-19`. Thus this was a representable
+positive state narrowly below an implementation margin, not negative thermal
+energy. The slope-contraction criterion is now 64 ULP (still purely numerical,
+not a physical temperature floor); total energy and physical state are not
+floored or renormalized. The cold-state native fixture now starts at 128 ULP
+and verifies conservative prolongation keeps every child above the new margin.
+
+Build/regression job 429929 completes 0:0 on syn103 without requesting a GPU.
+All four native thermal/conservation cases, composition mass closure, face
+closure, inherited-residual advection, and both intended OpenMP-worker fatal
+diagnostic cases pass. The latter deliberately exit 17; the Slurm build wrapper
+checks their diagnostics and itself completes successfully. This qualifies the
+numerical interpolation gate only, not the cosmological trajectory.
+
+The targeted integration replay 429930 is configured to restart from the
+verified step-520 `output_00003` written by failed replay 422623 and stop at
+step 531, with no scheduled raw output. It requires one H100, MPI4 x OMP2 and
+384 GiB. At this record update it is pending with `QOSGrpGRES`; no post-change
+simulation result is available and the thermal producer is not yet considered
+resolved. The step-520 checkpoint is retained.
+
 Submitted bounded replay **422623**, `afterok:422621`, using
 `GRACKLE_THERMAL_BUILD_JOB=422621`. Intended effective input is
 `/gpfs/kjhan/chimes-cvode-gpu-20261001/.galaxy128-grackle-thermal-replay-422623/effective.nml`;

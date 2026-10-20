@@ -714,8 +714,10 @@ contains
     thermal=state(ndim+2)-kinetic
     ! Leave arithmetic headroom for componentwise kinetic subtraction and
     ! subsequent gravity kicks. This contracts slopes, not total energy;
-    ! the margin scales in floating-point ULPs, not physical temperature.
-    roundoff_margin=128d0*spacing(max(abs(state(ndim+2)),abs(kinetic)))
+    ! the 64-ULP margin is numerical headroom, not a physical temperature
+    ! floor. A 128-ULP cutoff rejected a positive, representable state at
+    ! step 530 solely for falling just below that cutoff.
+    roundoff_margin=64d0*spacing(max(abs(state(ndim+2)),abs(kinetic)))
     thermal_admissible=ieee_is_finite(thermal).and.thermal>roundoff_margin
   end function thermal_admissible
 end subroutine interpol_hydro
