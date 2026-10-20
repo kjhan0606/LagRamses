@@ -188,14 +188,14 @@ contains
       ! for every face batch; 32 remains a bounded live-kernel payload.
       integer,parameter :: angle_tile=32,field_tile=32
       real(dp),allocatable :: field(:,:),extended(:,:),cache(:,:),theta(:),samples(:),slopes(:,:)
-      real(dp),allocatable :: donor(:,:,:),delta(:,:)
+      real(dp),allocatable :: donor(:,:,:),integrated_flux(:,:)
       real(dp),allocatable :: all_projected(:,:),left(:,:,:),right(:,:,:),geometry(:,:),face_flux(:,:)
       integer,allocatable :: faces(:,:)
       real(dp) :: angular(b%nq),moments(b%nm),flux(b%nm),mu,il,ir,signface,flow,dl,dr,s
-      integer :: first,last,col,j,i,q,f,a,r,k,nq,component,ncol,nface,ff,fl,fi,fs
+      integer :: first,last,col,j,i,q,f,a,r,k,nq,component,ncol,nface,ff,fl,fi,fs,opposite,reverse_tile
       allocate(field(mesh%nfield,field_tile),extended(b%nm,mesh%nall),cache(b%nm+1,mesh%nall))
       allocate(theta(mesh%nowned),samples(mesh%nall),slopes(3,mesh%nowned))
-      allocate(donor(4,angle_tile,mesh%nall),delta(b%nm,mesh%nall))
+      allocate(donor(4,angle_tile,mesh%nall))
       allocate(all_projected(b%nm,mesh%nall),faces(3,6*mesh%nleaf))
       allocate(left(4,angle_tile,256),right(4,angle_tile,256),geometry(5,256),face_flux(b%nm,256))
       nface=0
@@ -225,11 +225,16 @@ contains
             extended(first:last,i)=field(mesh%cells(i),1:ncol)
          enddo
       enddo
-      status=0;receipt=0;boundary=0;theta=1;delta=0
+      status=0;receipt=0;boundary=0;theta=1
       call mn_dispatch_closure(b,extended,all_projected,cache,warm,status)
       call mn_collective_status(status)
       if(status/=0)return
       projected_base=all_projected(:,1:mesh%nowned)
+      deallocate(all_projected)
+      ! Integrate each shared face in quadrature order before combining
+      ! faces. Grouping partial cell sums by MPI owner made the otherwise
+      ! identical restart transport depend on the new rank decomposition.
+      allocate(integrated_flux(b%nm,nface));integrated_flux=0
       do i=1,mesh%nowned
          receipt=receipt+mesh%volume(i)*(projected_base(:,i)-input(:,i))
       enddo
@@ -286,29 +291,50 @@ contains
                  geometry(:,1:fl-fs+1),face_flux(:,1:fl-fs+1),status)
             if(status/=0)exit
             do fi=1,fl-fs+1
-               ff=fs+fi-1;i=faces(1,ff);r=faces(2,ff)
-               delta(:,i)=delta(:,i)-face_flux(:,fi)
-               if(r>0)then
-                  delta(:,r)=delta(:,r)+face_flux(:,fi)
-               else
-                  boundary=boundary+face_flux(:,fi)
-               endif
+               ff=fs+fi-1
+               integrated_flux(:,ff)=integrated_flux(:,ff)+face_flux(:,fi)
             enddo
          enddo
          call mn_collective_status(status)
          if(status/=0)return
       enddo
-      ! Reverse SUM sends the face owner's already integrated flux to the
-      ! remote cell owner, for same-level and coarse receivers separately.
-      do first=1,b%nm,field_tile
-         last=min(b%nm,first+field_tile-1);ncol=last-first+1;field=0
-         do i=1,mesh%nall
-            field(mesh%cells(i),1:ncol)=delta(first:last,i)
+      deallocate(donor,left,right,geometry,face_flux)
+      do ff=1,nface
+         if(faces(2,ff)==0)boundary=boundary+integrated_flux(:,ff)
+      enddo
+      ! Keep -x,+x,-y,+y,-z,+z channels separate through reverse SUM, then
+      ! combine in that physical order at the receiving cell. A face is
+      ! still computed once with equal/opposite conservative increments.
+      ! Fine-to-coarse faces continue to SUM into their coarse face channel.
+      ! Reuse the existing 128-column donor exchange workspace: no new
+      ! mesh-capacity-sized work array and no persistent angular state.
+      reverse_tile=min(field_tile,size(field,2)/6)
+      do first=1,b%nm,reverse_tile
+         last=min(b%nm,first+reverse_tile-1);ncol=last-first+1;field=0
+         do ff=1,nface
+            i=faces(1,ff);r=faces(2,ff);f=faces(3,ff)
+            opposite=f+1
+            if(mod(f,2)==0)opposite=f-1
+            do col=1,ncol
+               component=first+col-1
+               j=6*(col-1)+f
+               field(mesh%cells(i),j)=field(mesh%cells(i),j)-integrated_flux(component,ff)
+               if(r>0)then
+                  j=6*(col-1)+opposite
+                  field(mesh%cells(r),j)=field(mesh%cells(r),j)+integrated_flux(component,ff)
+               endif
+            enddo
          enddo
-         call exchange(field(:,1:ncol),.true.,status)
+         call exchange(field(:,1:6*ncol),.true.,status)
          if(status/=0)return
          do i=1,mesh%nowned
-            output(first:last,i)=projected_base(first:last,i)+field(mesh%cells(i),1:ncol)/mesh%volume(i)
+            flux(1:ncol)=0
+            do f=1,6
+               do col=1,ncol
+                  flux(col)=flux(col)+field(mesh%cells(i),6*(col-1)+f)
+               enddo
+            enddo
+            output(first:last,i)=projected_base(first:last,i)+flux(1:ncol)/mesh%volume(i)
          enddo
       enddo
       status=0

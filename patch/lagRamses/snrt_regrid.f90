@@ -1,7 +1,9 @@
 ! Conservative state transfer at the actual grid creation/destruction hooks.
-! This does not implement coarse-fine transport or load-balance migration.
+! Coarse-fine transport remains separate; migration copies the typed primary
+! and IR payload before the old communication/ownership maps are retired.
 module snrt_regrid
-  use amr_commons, only: dp,ncoarse,ngridmax,myid,ncpu,active,father,headl,next
+  use amr_commons, only: dp,ncoarse,ngridmax,myid,ncpu,active,father,headl,next, &
+       emission,reception,cpu_map,cpu_map2
 #ifndef WITHOUTMPI
   use mpi_mod
 #endif
@@ -20,7 +22,130 @@ module snrt_regrid
   private
   public :: snrt_regrid_refine,snrt_regrid_coarsen,snrt_regrid_check,snrt_regrid_upload
   public :: snrt_regrid_defrag
+  public :: snrt_regrid_migrate
 contains
+  subroutine snrt_regrid_migrate(ilevel,ierr)
+    ! Expanded reception grids still belong to their OLD owners here. Copy
+    ! only grids becoming locally owned, using the existing matched peer
+    ! grid order. Never allocate capacity*full_angular_payload scratch.
+    integer, intent(in) :: ilevel
+    integer, intent(out) :: ierr
+#ifndef WITHOUTMPI
+    integer :: sc(ncpu),rc(ncpu),expected(ncpu),so(ncpu),ro(ncpu),req(2*ncpu)
+    integer :: cpu,i,j,g,k,width,info,global_error,npeer,global_peers,batch
+    integer :: rounds,global_rounds,round,nreq,ns,nr,first,last,err,base
+    integer, allocatable :: sends(:),receives(:)
+    real(dp), allocatable :: sbuf(:),rbuf(:)
+    integer(kind=8), parameter :: scratch_bytes=64_8*1024_8*1024_8
+    ierr=0
+    if(ncpu<=1)return
+    width=twotondim*(snrt_checkpoint_cell_width+ir_width())
+    sc=0;rc=0
+    do cpu=1,ncpu
+       do i=1,emission(cpu,ilevel)%ngrid
+          g=emission(cpu,ilevel)%igrid(i)
+          if(cpu_map(father(g))==myid.and.cpu_map2(father(g))==cpu.and.cpu/=myid)sc(cpu)=sc(cpu)+1
+       end do
+       do i=1,reception(cpu,ilevel)%ngrid
+          g=reception(cpu,ilevel)%igrid(i)
+          if(cpu_map(father(g))==cpu.and.cpu_map2(father(g))==myid.and.cpu/=myid)rc(cpu)=rc(cpu)+1
+       end do
+    end do
+    call MPI_ALLTOALL(sc,1,MPI_INTEGER,expected,1,MPI_INTEGER,MPI_COMM_WORLD,info)
+    ierr=max(abs(info),merge(0,1,all(rc==expected)))
+    call MPI_ALLREDUCE(ierr,global_error,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    ierr=max(global_error,abs(info));if(ierr/=0)return
+    npeer=count(sc>0)+count(rc>0)
+    call MPI_ALLREDUCE(npeer,global_peers,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    ierr=abs(info);if(ierr/=0.or.global_peers==0)return
+    batch=max(1,min(8,int(scratch_bytes/(8_8*int(width,8)*global_peers))))
+    rounds=(max(maxval(sc),maxval(rc))+batch-1)/batch
+    call MPI_ALLREDUCE(rounds,global_rounds,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    ierr=abs(info);if(ierr/=0)return
+    ns=0;nr=0
+    do cpu=1,ncpu
+       so(cpu)=ns;ro(cpu)=nr;ns=ns+sc(cpu);nr=nr+rc(cpu)
+    end do
+    allocate(sends(ns),receives(nr))
+    do cpu=1,ncpu
+       k=so(cpu)
+       do i=1,emission(cpu,ilevel)%ngrid
+          g=emission(cpu,ilevel)%igrid(i)
+          if(cpu_map(father(g))/=myid.or.cpu_map2(father(g))/=cpu.or.cpu==myid)cycle
+          k=k+1;sends(k)=g
+       end do
+       k=ro(cpu)
+       do i=1,reception(cpu,ilevel)%ngrid
+          g=reception(cpu,ilevel)%igrid(i)
+          if(cpu_map(father(g))/=cpu.or.cpu_map2(father(g))/=myid.or.cpu==myid)cycle
+          k=k+1;receives(k)=g
+       end do
+    end do
+    allocate(sbuf(max(1,sum(min(sc,batch))*width)),rbuf(max(1,sum(min(rc,batch))*width)))
+    do round=1,global_rounds
+       first=(round-1)*batch+1;k=0
+       do cpu=1,ncpu
+          last=min(sc(cpu),first+batch-1)
+          do i=first,last
+             g=sends(so(cpu)+i)
+             do j=1,twotondim
+                call pack(ICELL_OF(g,j),sbuf(k+1:k+width/twotondim),err)
+                ierr=max(ierr,err);k=k+width/twotondim
+             end do
+          end do
+       end do
+       call MPI_ALLREDUCE(ierr,global_error,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+       ierr=max(global_error,abs(info));if(ierr/=0)return
+       nreq=0;k=0
+       do cpu=1,ncpu
+          nr=max(0,min(batch,rc(cpu)-first+1))*width
+          if(nr==0)cycle
+          nreq=nreq+1
+          call MPI_IRECV(rbuf(k+1),nr,MPI_DOUBLE_PRECISION,cpu-1,937,MPI_COMM_WORLD,req(nreq),info)
+          if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,10,err)
+          k=k+nr
+       end do
+       k=0
+       do cpu=1,ncpu
+          ns=max(0,min(batch,sc(cpu)-first+1))*width
+          if(ns==0)cycle
+          nreq=nreq+1
+          call MPI_ISEND(sbuf(k+1),ns,MPI_DOUBLE_PRECISION,cpu-1,937,MPI_COMM_WORLD,req(nreq),info)
+          if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,10,err)
+          k=k+ns
+       end do
+       call MPI_WAITALL(nreq,req,MPI_STATUSES_IGNORE,info)
+       ierr=abs(info)
+       call MPI_ALLREDUCE(ierr,global_error,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+       ierr=max(global_error,abs(info));if(ierr/=0)return
+       ! Validate the whole received batch on every rank before publication.
+       do base=1,2
+          k=0
+          do cpu=1,ncpu
+             last=min(rc(cpu),first+batch-1)
+             do i=first,last
+                g=receives(ro(cpu)+i)
+                do j=1,twotondim
+                   if(base==1)then
+                      call validate_restore(ICELL_OF(g,j),rbuf(k+1:k+width/twotondim),err)
+                   else if(rbuf(k+1)==0)then
+                      call clear(ICELL_OF(g,j),err)
+                   else
+                      call restore(ICELL_OF(g,j),rbuf(k+1:k+width/twotondim),err)
+                   endif
+                   ierr=max(ierr,err);k=k+width/twotondim
+                end do
+             end do
+          end do
+          call MPI_ALLREDUCE(ierr,global_error,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+          ierr=max(global_error,abs(info));if(ierr/=0)return
+       end do
+    end do
+#else
+    ierr=0
+#endif
+  end subroutine
+
   subroutine snrt_regrid_defrag(grid_map,ierr)
     integer, intent(in) :: grid_map(:)
     integer, intent(out) :: ierr

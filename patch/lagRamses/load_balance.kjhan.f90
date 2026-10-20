@@ -13,6 +13,10 @@ recursive subroutine load_balance
   use bisection
   use ksection
   use iso_c_binding, only: c_int, c_size_t
+#ifdef SNRT
+  use snrt_regrid, only: snrt_regrid_migrate,snrt_regrid_check
+  use snrt_agn_efficiency, only: snrt_transport_selected
+#endif
 #include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
@@ -25,6 +29,9 @@ recursive subroutine load_balance
   integer::idim,ivar,icpu,jcpu,kcpu
   integer::nxny,ix,iy,iz
   integer::required_grid_capacity
+#ifdef SNRT
+  integer::snrt_migration_error
+#endif
   integer(i8b),dimension(nlevelmax,3)::comm_buffin,comm_buffout
   integer,allocatable::numbp_save(:)
   integer::nsave,isave
@@ -289,6 +296,12 @@ recursive subroutine load_balance
         call make_virtual_fine_dp(psi_re(1),ilevel)
         call make_virtual_fine_dp(psi_im(1),ilevel)
      end if
+#ifdef SNRT
+     if(snrt_transport_selected())then
+        call snrt_regrid_migrate(ilevel,snrt_migration_error)
+        call snrt_regrid_check(snrt_migration_error)
+     endif
+#endif
   end do
   tt1 = MPI_WTIME(); te_phys = tt1 - tt0
 

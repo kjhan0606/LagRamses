@@ -20,7 +20,7 @@ module snrt_moment_ramses
   use snrt_agn_source, only: snrt_c_cgs,snrt_ev_to_erg,snrt_agn_photon_budget_energy,snrt_agn_source_commit
   use snrt_agn_locator, only: snrt_agn_find_local_leaf
   use snrt_stellar_source, only: stellar_sed_enabled,stellar_photon_interval,stellar_sed_has_energy
-  use snrt_rt_transaction, only: snrt_rt_iteration_config
+  use snrt_rt_transaction, only: snrt_rt_iteration_config, snrt_transaction_picard_update, snrt_transaction_ok
   use snrt_thermochemistry
   use snrt_atomic_cooling, only: atomic_mh,atomic_temperature,atomic_heat_capacity,atomic_advance
   use dust_mass_physics, only: dust_atomic_cooling_enabled,dust_chimes_enabled,dust_gas_elements, &
@@ -57,13 +57,14 @@ module snrt_moment_ramses
   public :: mn_ramses_advance
   interface
      function band_material(nd,ng,nb,scatter,n,e,edges,columns,budget,an,ae,returned,secondary,xi,deposition, &
-          grains,kabs,ksca,nodes,weights) bind(C,name='snrt_mn_band_material_c') result(ierr)
+          direction,first,grains,kabs,ksca,nodes,weights) bind(C,name='snrt_mn_band_material_c') result(ierr)
        import c_int,c_double,c_funptr
        integer(c_int),value::nd,ng,nb,scatter
        type(c_funptr),value::secondary
        real(c_double),value::xi
        real(c_double)::n(*),e(*),budget(*),an(*),ae(*),returned(*),deposition(*)
-       real(c_double),intent(in)::edges(*),columns(*),grains(*),kabs(*),ksca(*),nodes(*),weights(*)
+       real(c_double),intent(in)::edges(*),columns(*),direction(*),grains(*),kabs(*),ksca(*),nodes(*),weights(*)
+       real(c_double),intent(out)::first(*)
        integer(c_int)::ierr
      end function
   end interface
@@ -79,7 +80,7 @@ module snrt_moment_ramses
      real(dp) :: rho=0d0,density=0d0,primary=0d0,material=0d0,capacity=0d0
      real(dp) :: material_next=0d0,temperature=0d0,gas_next=0d0,nonthermal=0d0
      real(dp) :: heat=0d0,primary_work=0d0,projection_n=0d0,projection_e=0d0
-     real(dp) :: electron_cv=0d0,phase_ke=0d0
+     real(dp) :: electron_cv=0d0,phase_ke=0d0,ir_first_before(3)=0d0
      real(dp),allocatable :: nn(:,:),ee(:,:),an(:,:),ae(:,:),old_row(:),next_fraction(:),gasx(:),chemical(:)
      real(dp),allocatable :: gas_energy(:),gas_capacity(:),n_hydrogen(:),transfer(:)
      real(dp),allocatable :: curve(:,:),area(:),weights(:,:)
@@ -351,6 +352,7 @@ contains
              if(status/=0)then
                 write(*,*)'M_N material tile failure rank/level/tile/substep/code=',myid,lev,tile_index,k,status
                 ierr=max(ierr,status)
+                exit
              endif
           enddo
        else
@@ -497,6 +499,7 @@ contains
 #endif
       real(dp) :: nn(nm,ng),ee(nm,ng),start(3),guess(3),next_fraction(3),gasx(11)
       real(dp) :: tau(3,ng),target_tau(3,ng),dust_tau(ng),available(3),an(4,ng),ae(4,ng),af(3,4,ng)
+      real(dp) :: picard_residual(3),picard_previous_guess(3),picard_previous_residual(3),picard_updated(3)
       real(dp) :: returned(ng),unassigned(ng),excess(3,ng),threshold(3),hcode,hecode,rho,internal,temp
       real(dp) :: nonthermal,heat,gas_next,loss,density,primary,capacity,material,temperature,irproj(nm,ni)
       real(dp) :: gas_energy(1),gas_capacity(1),transfer(1),opacity(ng),scatter(ng),factor,mu,material_next
@@ -504,6 +507,10 @@ contains
       real(dp) :: ia_ray(mn_live_basis%nq),ib_ray(mn_live_basis%nq),in_n,in_e,out_n,out_e,projection_n,projection_e
       real(dp) :: columns(3),deposition(8),solid_fe,solid_pah(2),old_temperature,chemical_area,delta_heat
       real(dp) :: primary_spectrum(ng,1),old_row(nvar_all),total_chemical_energy,gas_mass,gas_momentum(3),phase_ke,primary_work
+      real(dp) :: uv_first_before(3),uv_first_after(3),ir_first_before(3),ir_first_after(3)
+      real(dp) :: radiation_impulse(3),gas_impulse(3),gas_work,gas_mass_cgs,gas_momentum_cgs(3)
+      real(dp) :: momentum_state_change(3),momentum_state_error(3),phase_state_change(3),phase_state_error(3)
+      real(dp) :: momentum_check_scale,momentum_check_tolerance
       type(c_funptr)::secondary
 #ifdef DUST_LIVE
       real(dp),allocatable :: curve(:,:),area(:),weights(:,:)
@@ -521,8 +528,8 @@ contains
       real(dp)::chemical(chimes_ns),elements(11),next_photons(9),old_photons(9),photo_ledger(11),gn(9),ge(9),fe_ledger(8)
 #endif
       type(snrt_thermochemistry_result) :: chemistry
-      integer :: iteration,q,a,b,nb,jj
-      logical :: converged,restoring
+      integer :: iteration,q,a,b,nb,jj,picard_ierr,anderson_accepts
+      logical :: converged,restoring,picard_have_previous,picard_accelerated
 #ifdef DUST_LIVE
       restoring=.false.
       gasx=0
@@ -537,6 +544,8 @@ contains
          gas_next=packet%gas_next;nonthermal=packet%nonthermal;heat=packet%heat
          primary_work=packet%primary_work;projection_n=packet%projection_n
          projection_e=packet%projection_e;phase_ke=packet%phase_ke
+         ir_first_before=packet%ir_first_before
+         uv_first_before=[-sum(energy(3,:,index)),-sum(energy(4,:,index)),sum(energy(2,:,index))]/sqrt(3d0)
          old_row=packet%old_row;next_fraction=packet%next_fraction
          nn=packet%nn;ee=packet%ee;an=packet%an;ae=packet%ae;gasx=packet%gasx
          gas_energy=packet%gas_energy;gas_capacity=packet%gas_capacity
@@ -583,6 +592,10 @@ contains
       restoring=.false.
 #endif
       status=1;rho=rows(1,index);start=fraction(:,index);guess=start;solid_fe=0
+      uv_first_before=0;ir_first_before=0;radiation_impulse=0;gas_impulse=0;gas_work=0
+#ifdef DUST_LIVE
+      ir_first_before=[-sum(infrared(3,:,index)),-sum(infrared(4,:,index)),sum(infrared(2,:,index))]/sqrt(3d0)
+#endif
       old_row=rows(:,index)
       nonthermal=.5d0*sum(rows(2:4,index)**2)/rho+magnetic_energy(rows(:,index))
 #ifdef DUST_LIVE
@@ -701,10 +714,12 @@ contains
       endif
 #endif
       threshold=[13.60d0,24.59d0,54.42d0];converged=.false.
+      picard_have_previous=.false.;anderson_accepts=0
       do iteration=1,config%max_iterations
          nn=number(:,:,index);ee=energy(:,:,index)
+         uv_first_before=[-sum(ee(3,:)),-sum(ee(4,:)),sum(ee(2,:))]/sqrt(3d0)
          available=[hcode*(1-start(1)),hecode*(1-start(2)-start(3)),hecode*start(2)]
-         call opacity_hhe(guess,hcode,hecode,cell_dt,tau)
+         call opacity_hhe(start,guess,hcode,hecode,cell_dt,tau)
          if(chimes_on)then
             tau=0;available=0
          endif
@@ -726,17 +741,18 @@ contains
                if(dust_iron_enabled())then
                   grain_columns(5:6)=rows(idust_iron:idust_iron+1,index)*sd*chat*cell_dt
                   status=band_material(mn_live_basis%nq,ng,6,1,rn,re,snrt_group_edges_ev,columns,available, &
-                       an,ae,returned,secondary,start(1),deposition,grain_columns,fe_six_band_abs, &
+                       an,ae,returned,secondary,start(1),deposition,mn_live_basis%direction,af,grain_columns,fe_six_band_abs, &
                        fe_six_band_transport,fe_band_ev,mn_live_basis%weight)
                else
                   status=band_material(mn_live_basis%nq,ng,4,1,rn,re,snrt_group_edges_ev,columns,available, &
-                       an,ae,returned,secondary,start(1),deposition,grain_columns,d03_band_abs, &
+                       an,ae,returned,secondary,start(1),deposition,mn_live_basis%direction,af,grain_columns,d03_band_abs, &
                        d03_band_transport,d03_band_ev,mn_live_basis%weight)
                endif
             else
 #endif
                status=band_material(mn_live_basis%nq,ng,0,0,rn,re,snrt_group_edges_ev,columns,available, &
-                    an,ae,returned,secondary,start(1),deposition,[0d0],[0d0],[0d0],[0d0],mn_live_basis%weight)
+                    an,ae,returned,secondary,start(1),deposition,mn_live_basis%direction,af, &
+                    [0d0],[0d0],[0d0],[0d0],mn_live_basis%weight)
 #ifdef DUST_LIVE
             endif
 #endif
@@ -749,7 +765,6 @@ contains
                write(*,*)'M_N band angular projection rejected cell/status=',mesh%cells(index),status
                return
             endif
-            af=0
          else
          call mn_absorb_groups(mn_live_basis,nn,ee,tau,dust_tau,available,an,ae,af,returned,unassigned,status, &
               validated_input=.true.)
@@ -785,15 +800,36 @@ contains
             if(status/=0)return
             gas_next=gas_energy(1);next_fraction=available
          endif
-         call opacity_hhe(next_fraction,hcode,hecode,cell_dt,target_tau)
+         call opacity_hhe(start,next_fraction,hcode,hecode,cell_dt,target_tau)
          converged=maxval(abs(next_fraction-guess))<=config%fraction_absolute_tolerance.and. &
-              maxval(abs(target_tau-tau)/max(tau,config%tau_floor))<=config%tau_relative_tolerance
+              maxval(abs(target_tau-tau)/max(config%tau_absolute_tolerance+ &
+                   config%tau_relative_tolerance*max(tau,target_tau),config%tau_floor))<=1.0d0
          if(converged)exit
-         guess=(1-config%relaxation)*guess+config%relaxation*next_fraction
+         picard_residual=next_fraction-guess
+         call snrt_transaction_picard_update(guess,picard_residual,picard_previous_guess, &
+              picard_previous_residual,picard_have_previous,config%relaxation,picard_updated, &
+              picard_accelerated,picard_ierr)
+         if(picard_ierr/=snrt_transaction_ok)then
+            status=4;return
+         endif
+         if(picard_accelerated)anderson_accepts=anderson_accepts+1
+         picard_previous_guess=guess;picard_previous_residual=picard_residual
+         picard_have_previous=.true.;guess=picard_updated
       enddo
       status=1
       if(.not.converged)then
-         write(*,*)'M_N HHe Picard interval did not converge cell=',mesh%cells(index)
+         write(*,'(A,I0,A,I0,A,I0,A,16(1X,ES13.5))')'M_N HHe Picard nonconvergence cell=',mesh%cells(index), &
+              ' max_iter=',config%max_iterations, &
+              ' Anderson_accepts=',anderson_accepts, &
+              ' frac_H/HeII/HeIII,tau_H/HeI/HeII,abs_tau_H/HeI/HeII,tau_max,target_tau_max,guess_min/max,next_min/max,T=', &
+              abs(next_fraction(1)-guess(1)),abs(next_fraction(2)-guess(2)),abs(next_fraction(3)-guess(3)), &
+              maxval(abs(target_tau(1,:)-tau(1,:))/max(tau(1,:),config%tau_floor)), &
+              maxval(abs(target_tau(2,:)-tau(2,:))/max(tau(2,:),config%tau_floor)), &
+              maxval(abs(target_tau(3,:)-tau(3,:))/max(tau(3,:),config%tau_floor)), &
+              maxval(abs(target_tau(1,:)-tau(1,:))),maxval(abs(target_tau(2,:)-tau(2,:))), &
+              maxval(abs(target_tau(3,:)-tau(3,:))), &
+              maxval(tau),maxval(target_tau),minval(guess),maxval(guess),minval(next_fraction), &
+              maxval(next_fraction),temp
          status=4;return
       endif
       primary=sum(ae(4,:))*snh*snrt_ev_to_erg
@@ -999,6 +1035,7 @@ contains
          packet%primary_work=primary_work;packet%projection_n=projection_n;packet%projection_e=projection_e
          packet%electron_cv=electron_cv;packet%phase_ke=phase_ke
          packet%nn=nn;packet%ee=ee;packet%an=an;packet%ae=ae;packet%old_row=old_row
+         packet%ir_first_before=ir_first_before
          packet%next_fraction=next_fraction;packet%gasx=gasx;packet%gas_energy=gas_energy
          packet%gas_capacity=gas_capacity;packet%n_hydrogen=[hcode*snh];packet%transfer=transfer
          packet%irproj=irproj
@@ -1049,11 +1086,49 @@ contains
          return
       endif
       rows(idust_energy,index)=material_next/energy_unit
+      ! Material recoil is the signed loss of the l=1 radiation-energy
+      ! moment.  UV moments are per H and in eV; the separate IR field is
+      ! already in cgs energy density.  Both impulses use physical c, never
+      ! the reduced transport speed.  With drifting grains, their staged
+      ! momentum changes own the dust share and the gas gets the residual.
+      uv_first_after=[-sum(ee(3,:)),-sum(ee(4,:)),sum(ee(2,:))]/sqrt(3d0)
+      ir_first_after=ir_first_before
+#ifdef DUST_LIVE
+      ir_first_after=[-sum(infrared(3,:,index)),-sum(infrared(4,:,index)),sum(infrared(2,:,index))]/sqrt(3d0)
+#endif
+      radiation_impulse=((uv_first_before-uv_first_after)*snh*snrt_ev_to_erg+ &
+           ir_first_before-ir_first_after)/snrt_c_cgs
+      if(any(.not.ieee_is_finite(radiation_impulse)))then
+         write(*,'(A,I0,A,3ES22.13)')'M_N radiation momentum finite check failed cell=',mesh%cells(index), &
+              ' impulse=',radiation_impulse
+         status=1;return
+      endif
+      gas_impulse=radiation_impulse
+      if(dust_relative_motion)then
+         gas_impulse=gas_impulse-sum(phase_next(:,:,1)-phase_old(:,:,1),dim=2)
+         gas_mass_cgs=gas_mass*sd;gas_momentum_cgs=gas_momentum*sd*sv
+      else
+         gas_mass_cgs=rho*sd;gas_momentum_cgs=old_row(2:4)*sd*sv
+      endif
+      if(.not.ieee_is_finite(gas_mass_cgs).or.gas_mass_cgs<=0)then
+         write(*,'(A,I0,A,ES22.13)')'M_N radiation momentum finite check failed cell=',mesh%cells(index), &
+              ' gas_mass_cgs=',gas_mass_cgs
+         status=1;return
+      endif
+      gas_work=dot_product((gas_momentum_cgs+.5d0*gas_impulse)/gas_mass_cgs,gas_impulse)
+      if(.not.ieee_is_finite(gas_work))then
+         write(*,'(A,I0,A,ES22.13)')'M_N radiation momentum finite check failed cell=',mesh%cells(index), &
+              ' gas_work=',gas_work
+         status=1;return
+      endif
       ! Positive transfer is gas -> dust; the material receiver already
       ! added it to dust. Subtract it exactly once from the gas reservoir.
       gas_next=gas_next-transfer(1)
       if(dust_relative_motion)then
-         rows(2:4,index)=old_row(2:4)+sum(phase_next(:,:,1)-phase_old(:,:,1),dim=2)/(sd*sv)
+         ! RAMSES stores total gas+solid momentum here; phase rows carry the
+         ! dust partition.  The residual impulse above is therefore gas-only
+         ! work, while the mixture row receives the full radiation impulse.
+         rows(2:4,index)=old_row(2:4)+radiation_impulse/(sd*sv)
          do b=1,ndust_phase
             jj=idust_momentum+3*(b-1);rows(jj:jj+2,index)=phase_next(:,b,1)/(sd*sv)
          enddo
@@ -1061,6 +1136,42 @@ contains
 #if NENER>0
          nonthermal=nonthermal+sum(rows(inener:inener+NENER-1,index))
 #endif
+      else
+         rows(2:4,index)=old_row(2:4)+radiation_impulse/(sd*sv)
+         nonthermal=.5d0*sum(rows(2:4,index)**2)/rho+magnetic_energy(rows(:,index))
+#if NENER>0
+         nonthermal=nonthermal+sum(rows(inener:inener+NENER-1,index))
+#endif
+      endif
+      ! Check the accepted RAMSES state, not only the pre-update impulse
+      ! algebra.  Stored mixture momentum must receive the complete UV+IR
+      ! recoil after the code-unit round trip.  In the relative-dust layout,
+      ! every separately stored phase must likewise match its staged impulse.
+      momentum_state_change=(rows(2:4,index)-old_row(2:4))*sd*sv
+      momentum_state_error=momentum_state_change-radiation_impulse
+      momentum_check_scale=max(maxval(abs(radiation_impulse)), &
+           maxval(abs(old_row(2:4)))*sd*sv,tiny(1d0))
+      momentum_check_tolerance=128d0*epsilon(1d0)*momentum_check_scale
+      if(any(.not.ieee_is_finite(momentum_state_change)).or.any(.not.ieee_is_finite(momentum_state_error)).or. &
+           maxval(abs(momentum_state_error))>momentum_check_tolerance)then
+         write(*,'(A,I0,A,3ES22.13)')'M_N RAMSES momentum closure failed cell=',mesh%cells(index), &
+              ' residual=',momentum_state_error
+         status=1;return
+      endif
+      if(dust_relative_motion)then
+         do b=1,ndust_phase
+            jj=idust_momentum+3*(b-1)
+            phase_state_change=(rows(jj:jj+2,index)-old_row(jj:jj+2))*sd*sv
+            phase_state_error=phase_state_change-(phase_next(:,b,1)-phase_old(:,b,1))
+            momentum_check_scale=max(maxval(abs(phase_next(:,b,1))),maxval(abs(phase_old(:,b,1))),tiny(1d0))
+            momentum_check_tolerance=128d0*epsilon(1d0)*momentum_check_scale
+            if(any(.not.ieee_is_finite(phase_state_change)).or.any(.not.ieee_is_finite(phase_state_error)).or. &
+                 maxval(abs(phase_state_error))>momentum_check_tolerance)then
+               write(*,'(A,I0,A,I0,A,3ES22.13)')'M_N RAMSES dust momentum closure failed cell=',mesh%cells(index), &
+                    ' phase=',b,' residual=',phase_state_error
+               status=1;return
+            endif
+         enddo
       endif
       if(dust_pah_enabled())then
          do b=1,dust_pah_nstate()
@@ -1114,6 +1225,7 @@ contains
       endif
 #endif
 #endif
+      gas_next=gas_next-gas_work
       if(.not.ieee_is_finite(gas_next).or.gas_next<=0)then
          status=1;return
       endif
@@ -1169,7 +1281,9 @@ contains
 !$omp end parallel do
       do j=1,nc
          if(prep_codes(j)==0)cycle
-         status=prep_codes(j);return
+         status=prep_codes(j)
+         write(*,*)'M_N material preparation rejected cell/status=',mesh%cells(first+j-1),status
+         return
       enddo
       prep_s=omp_get_wtime()-perf_start
       do stage_first=first,last,material_tile_width
@@ -1314,7 +1428,10 @@ contains
            phase_density=tile_phase_density,phase_momentum=tile_phase_momentum,phase_work=tile_phase_work, &
            gas_electrons=tile_electrons,electron_capacity=packet(1)%electron_cv,gas_atomic_h=tile_atomic_h, &
            gas_molecular_h2=tile_molecular_h2,gas_atomic_c=tile_atomic_c,gas_carbon_ion=tile_carbon_ion)
-      if(status/=0)return
+      if(status/=0)then
+         write(*,*)'M_N dust/IR tile transaction rejected first/last/code=',first,last,status
+         return
+      endif
       perf_stage=omp_get_wtime()
 
       do j=1,nc
@@ -1396,12 +1513,14 @@ contains
       call mn_live_validate(n,e,status)
     end subroutine
 
-    subroutine opacity_hhe(x,h,he,cell_dt,tau)
-      real(dp),intent(in) :: x(3),h,he,cell_dt
+    subroutine opacity_hhe(x_start,x_end,h,he,cell_dt,tau)
+      real(dp),intent(in) :: x_start(3),x_end(3),h,he,cell_dt
       real(dp),intent(out) :: tau(3,ng)
-      tau(1,:)=h*(1-x(1))*snh*chat*cell_dt*snrt_group_cross_section_cm2
-      tau(2,:)=he*(1-x(2)-x(3))*snh*chat*cell_dt*snrt_group_cross_section_hei_cm2
-      tau(3,:)=he*x(2)*snh*chat*cell_dt*snrt_group_cross_section_heii_cm2
+      ! H opacity is time-centered across this interval; He uses the implicit
+      ! endpoint fractions used by its backward-Euler population update.
+      tau(1,:)=h*(1-0.5d0*(x_start(1)+x_end(1)))*snh*chat*cell_dt*snrt_group_cross_section_cm2
+      tau(2,:)=he*(1-x_end(2)-x_end(3))*snh*chat*cell_dt*snrt_group_cross_section_hei_cm2
+      tau(3,:)=he*x_end(2)*snh*chat*cell_dt*snrt_group_cross_section_heii_cm2
     end subroutine
   end subroutine
 end module
