@@ -25,6 +25,21 @@ not a full L8 completion or production qualification. The earlier
 this checkout and must not be treated as evidence. Existing physical-asset
 admission blockers remain in force.
 
+Correction from the current-source A40 integration smoke (2026-10-21,
+Slurm job430823): a fresh binary built from source HEAD
+`f459f6dc1febdaf1eb5c9ae25c97924be553e188` plus the recorded dirty working
+tree (`DUST_LIVE=1`, `CHIMES=1`, `USE_CUDA=1`) completed four coupled order-5
+M_N steps. The effective run exercised dust-live material/IR and
+CHIMES photo/dark chemistry paths on 56 coarse and 64 fine leaf cells, with
+CUDA material batches on one A40; `Run completed`, zero raw snapshots and the
+`M5_COUPLED_AMR_INTERFACE_PASS` marker are recorded under
+`/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-amr-430823/` and the
+binary/build hashes under `.m5-current-source-active-dust-chimes-build-430823/`.
+This closes the bounded integrated source-active smoke previously missing
+from this record. It is still a one-rank, four-step reference-control test
+(CHIMES CPU backend, no restart comparison), not cosmological or production
+qualification; physical-asset admission blockers are unchanged.
+
 The current source does contain a compile-time `DUST_LIVE=1` RAMSES field,
 HDF5 identity/restore contract, and M_N material-coupling path. The queued
 `run_snrt_bundle_gate.sbatch` does not enable that profile (`DUST_LIVE` defaults
