@@ -691,7 +691,7 @@ contains
     if(all(ieee_is_finite(u1(vector_index,0,:))).and.density>0d0)then
        kinetic=0.5d0*sum(u1(vector_index,0,2:ndim+1)**2)/density
        thermal=u1(vector_index,0,ndim+2)-kinetic
-       margin=128d0*spacing(max(abs(u1(vector_index,0,ndim+2)),abs(kinetic)))
+       margin=64d0*spacing(max(abs(u1(vector_index,0,ndim+2)),abs(kinetic)))
        write(error_unit,'(A,4ES25.16)')'GRACKLE_THERMAL_PARENT E/kinetic/thermal/margin:', &
             u1(vector_index,0,ndim+2),kinetic,thermal,margin
     endif
@@ -718,7 +718,10 @@ contains
     ! floor. A 128-ULP cutoff rejected a positive, representable state at
     ! step 530 solely for falling just below that cutoff.
     roundoff_margin=64d0*spacing(max(abs(state(ndim+2)),abs(kinetic)))
-    thermal_admissible=ieee_is_finite(thermal).and.thermal>roundoff_margin
+    ! Equality is admissible: the contract is at least 64 ULP of arithmetic
+    ! headroom. A strict comparison rejects states that land exactly on this
+    ! representable boundary after conservative hydro evolution.
+    thermal_admissible=ieee_is_finite(thermal).and.thermal>=roundoff_margin
   end function thermal_admissible
 end subroutine interpol_hydro
 !###########################################################

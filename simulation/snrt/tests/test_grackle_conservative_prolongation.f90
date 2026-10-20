@@ -34,17 +34,18 @@ program check_prolongation
   if(len_trim(mode)>0)error stop 'unknown native regression mode'
   imetal=6;ichem=7;igrackle=19
   interpol_var=0;interpol_type=1
-  do test_case=1,4
+  do test_case=1,5
      internal=1d-6
      if(test_case==2)internal=1d-2
      if(test_case==4)internal=128d0*spacing(.5d0)
+     if(test_case==5)internal=64d0*spacing(.5d0)
      parent=1d-3;parent(1)=1d0;parent(2:ndim+1)=0d0
      parent(2)=1d0;parent(ndim+2)=0.5d0+internal
      u1=0d0
      do j=0,twondim
         u1(1,j,:)=parent
      enddo
-     if(test_case/=3)then
+     if(test_case/=3.and.test_case/=5)then
         do j=1,2
            momentum=1d0+merge(-0.01d0,0.01d0,j==1)
            u1(1,j,2)=momentum
@@ -67,15 +68,18 @@ program check_prolongation
      if(maxval(abs(average-parent))>128d0*spacing(1d0))error stop 'parent average not conserved'
      do ind=1,twotondim
         thermal=u2(1,ind,ndim+2)-0.5d0*sum(u2(1,ind,2:ndim+1)**2)/u2(1,ind,1)
-        if(thermal<=64d0*spacing(max(abs(u2(1,ind,ndim+2)), &
+        if(thermal<64d0*spacing(max(abs(u2(1,ind,ndim+2)), &
              abs(0.5d0*sum(u2(1,ind,2:ndim+1)**2)/u2(1,ind,1))))) &
              error stop 'limited child fell below the 64-ULP arithmetic margin'
+        if(test_case==5.and.thermal/=64d0*spacing(.5d0)) &
+             error stop 'exact 64-ULP boundary state was not preserved'
      enddo
      if(test_case==2.or.test_case==3)then
         if(any(u2(1,:,:)/=unlimited(1,:,:)))error stop 'admissible stencil changed'
      endif
      write(*,*)'PROLONGATION_PASS case=',test_case,' max_budget_error=',maxval(abs(average-parent))
   enddo
+  write(*,*)'GRACKLE_THERMAL_BOUNDARY_EQUALITY_PASS'
 contains
   subroutine reject_parent_from_worker(positive_below_margin)
     use omp_lib, only: omp_get_thread_num,omp_get_num_threads
@@ -92,7 +96,7 @@ contains
           stencil(1,neighbor,1)=1d0
           stencil(1,neighbor,2)=1d0
           stencil(1,neighbor,ndim+2)=.4d0
-          if(positive_below_margin)stencil(1,neighbor,ndim+2)=.5d0+64d0*spacing(.5d0)
+          if(positive_below_margin)stencil(1,neighbor,ndim+2)=.5d0+32d0*spacing(.5d0)
        enddo
        write(*,*)'GRACKLE_THERMAL_REJECT_WORKER=',omp_get_thread_num()
        call interpol_hydro(stencil,children,1)
