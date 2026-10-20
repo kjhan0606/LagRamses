@@ -422,6 +422,15 @@ subroutine interpol_hydro(u1,u2,nn)
   real(dp),dimension(1:nvector,1:ndim)::w
   real(dp),dimension(1:nvector)::ekin,mom
   real(dp),dimension(1:nvector)::erad
+  real(dp)::theta,theta_lo,theta_hi,theta_mid
+  real(dp),dimension(1:nvar)::trial_child
+  integer::positivity_iter
+  logical::children_valid
+#ifdef GRACKLE_CLOSURE_TRACE
+  logical,save::closure_reported=.false.
+  logical::closure_seen
+  real(dp)::closure_parent,closure_child
+#endif
 
   oneover_twotondim=1.D0/dble(twotondim)
 
@@ -503,6 +512,46 @@ subroutine interpol_hydro(u1,u2,nn)
      end do
   end do
 
+  ! Cold, kinetic-energy-dominated Grackle gas can acquire negative thermal
+  ! energy under independent conservative-variable slopes. Contract ALL
+  ! child deviations by one common factor about the parent, rather than
+  ! interpolating internal energy and adding unresolved kinetic energy.
+  ! The symmetric child offsets still average to the conserved parent for
+  ! every field. No energy/temperature floor or chemistry update is applied.
+  ! This scope is hydro-only; additional energy reservoirs are not limited.
+#ifndef SOLVERmhd
+  if(cooling_method=='grackle_neq'.and.interpol_var==0.and.nener==0)then
+     do i=1,nn
+        children_valid=.true.
+        do ind=1,twotondim
+           if(.not.thermal_admissible(u2(i,ind,:)))children_valid=.false.
+        enddo
+        if(children_valid)cycle
+        if(.not.thermal_admissible(u1(i,0,:)))then
+           call reject_thermal_parent(i)
+        endif
+        theta_lo=0d0;theta_hi=1d0
+        do positivity_iter=1,52
+           theta_mid=0.5d0*(theta_lo+theta_hi)
+           children_valid=.true.
+           do ind=1,twotondim
+              trial_child=u1(i,0,:)+theta_mid*(u2(i,ind,:)-u1(i,0,:))
+              if(.not.thermal_admissible(trial_child))children_valid=.false.
+           enddo
+           if(children_valid)then
+              theta_lo=theta_mid
+           else
+              theta_hi=theta_mid
+           endif
+        enddo
+        theta=theta_lo*(1d0-64d0*spacing(1d0))
+        do ind=1,twotondim
+           u2(i,ind,:)=u1(i,0,:)+theta*(u2(i,ind,:)-u1(i,0,:))
+        enddo
+     enddo
+  endif
+#endif
+
   if(interpol_var==1 .or. interpol_var==2)then
      if(interpol_var==2)then
         do ind=1,twotondim
@@ -575,6 +624,100 @@ subroutine interpol_hydro(u1,u2,nn)
      u2(1:nn,:,idust)=u2(1:nn,:,idust_species)+u2(1:nn,:,idust_species+1)
      if(idust_iron>0)u2(1:nn,:,idust)=u2(1:nn,:,idust)+u2(1:nn,:,idust_iron)+u2(1:nn,:,idust_iron+1)
   endif
+#ifdef GRACKLE_NEQ
+  if(cooling_method=='grackle_neq')then
+     ! Transport composition with the final child density. Independent
+     ! nonlinear slopes need not preserve H+He+Z=rho in each child. Symmetric
+     ! density prolongation retains every parent's carrier integral; this
+     ! also preserves charge and H/He species budgets for a consistent parent.
+     ! Restrict to the actual element/Grackle windows, leaving delay and other
+     ! passive fields alone. An inconsistent parent remains inconsistent.
+     do i=1,nn
+        do ind=1,twotondim
+           u2(i,ind,imetal)=u1(i,0,imetal)*(u2(i,ind,1)/u1(i,0,1))
+           u2(i,ind,ichem:ichem+10)=u1(i,0,ichem:ichem+10)*(u2(i,ind,1)/u1(i,0,1))
+           u2(i,ind,igrackle:igrackle+8)=u1(i,0,igrackle:igrackle+8)*(u2(i,ind,1)/u1(i,0,1))
+        enddo
+     enddo
+  endif
+#endif
+#ifdef GRACKLE_CLOSURE_TRACE
+  ! Preserve the first actual stencil whose admitted parent creates a child
+  ! outside the unchanged Grackle mass tolerance. No state is repaired here.
+!$omp atomic read
+  closure_seen=closure_reported
+  if(cooling_method=='grackle_neq'.and..not.closure_seen)then
+     do i=1,nn
+        closure_parent=u1(i,0,ichem)+u1(i,0,ichem+1)+u1(i,0,imetal)-u1(i,0,1)
+        if(abs(closure_parent)>1d-8*u1(i,0,1))cycle
+        do ind=1,twotondim
+           closure_child=u2(i,ind,ichem)+u2(i,ind,ichem+1)+u2(i,ind,imetal)-u2(i,ind,1)
+           if(abs(closure_child)<=1d-8*u2(i,ind,1))cycle
+!$omp critical(grackle_prolongation_trace)
+           if(.not.closure_reported)then
+              write(*,*)'GRACKLE_CLOSURE_PROLONG rank/step/vector/child:',myid,nstep_coarse,i,ind
+              do j=0,twondim
+                 write(*,'(A,I2,4ES25.16)')'GRACKLE_CLOSURE_STENCIL rho/H/He/Z ',j, &
+                      u1(i,j,1),u1(i,j,ichem),u1(i,j,ichem+1),u1(i,j,imetal)
+              enddo
+              do ind2=1,twotondim
+                 write(*,'(A,I2,4ES25.16)')'GRACKLE_CLOSURE_CHILD rho/H/He/Z ',ind2, &
+                      u2(i,ind2,1),u2(i,ind2,ichem),u2(i,ind2,ichem+1),u2(i,ind2,imetal)
+              enddo
+!$omp atomic write
+              closure_reported=.true.
+           endif
+!$omp end critical(grackle_prolongation_trace)
+        enddo
+     enddo
+  endif
+#endif
+contains
+  subroutine reject_thermal_parent(vector_index)
+    use, intrinsic :: iso_fortran_env, only: error_unit
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    integer,intent(in)::vector_index
+    integer::neighbor
+    real(dp)::density,kinetic,thermal,margin
+    ! This path is also reached inside Godunov's OpenMP region. clean_stop
+    ! collects MPI timers and finalizes MPI: neither is legal here while
+    ! other threads/ranks are still evolving. Fail the process without MPI;
+    ! the Slurm launcher uses --kill-on-bad-exit for the remaining ranks.
+!$omp critical(grackle_thermal_parent_failure)
+    write(error_unit,*)'ERROR: conservative Grackle AMR parent is thermally inadmissible'
+    write(error_unit,*)'GRACKLE_THERMAL_PARENT rank/step/vector:',myid,nstep_coarse,vector_index
+    density=u1(vector_index,0,1)
+    write(error_unit,'(A,2ES25.16)')'GRACKLE_THERMAL_PARENT density/smallr:',density,smallr
+    if(all(ieee_is_finite(u1(vector_index,0,:))).and.density>0d0)then
+       kinetic=0.5d0*sum(u1(vector_index,0,2:ndim+1)**2)/density
+       thermal=u1(vector_index,0,ndim+2)-kinetic
+       margin=128d0*spacing(max(abs(u1(vector_index,0,ndim+2)),abs(kinetic)))
+       write(error_unit,'(A,4ES25.16)')'GRACKLE_THERMAL_PARENT E/kinetic/thermal/margin:', &
+            u1(vector_index,0,ndim+2),kinetic,thermal,margin
+    endif
+    do neighbor=0,twondim
+       write(error_unit,'(A,I2,*(1X,ES25.16))')'GRACKLE_THERMAL_STENCIL ',neighbor,u1(vector_index,neighbor,:)
+    enddo
+    flush(error_unit)
+    error stop 17
+!$omp end critical(grackle_thermal_parent_failure)
+  end subroutine reject_thermal_parent
+
+  pure logical function thermal_admissible(state)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    real(dp),intent(in)::state(nvar)
+    real(dp)::thermal,kinetic,roundoff_margin
+    thermal_admissible=.false.
+    if(.not.all(ieee_is_finite(state)))return
+    if(state(1)<smallr)return
+    kinetic=0.5d0*sum(state(2:ndim+1)**2)/state(1)
+    thermal=state(ndim+2)-kinetic
+    ! Leave arithmetic headroom for componentwise kinetic subtraction and
+    ! subsequent gravity kicks. This contracts slopes, not total energy;
+    ! the margin scales in floating-point ULPs, not physical temperature.
+    roundoff_margin=128d0*spacing(max(abs(state(ndim+2)),abs(kinetic)))
+    thermal_admissible=ieee_is_finite(thermal).and.thermal>roundoff_margin
+  end function thermal_admissible
 end subroutine interpol_hydro
 !###########################################################
 !###########################################################
