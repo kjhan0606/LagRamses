@@ -9,7 +9,7 @@
     "head_at_manifest_creation": "894a39f5ce7f8eacec5fe9655f39291495303c0e",
     "implementation_changes": "committed",
     "implementation_commit": "894a39f5ce7f8eacec5fe9655f39291495303c0e",
-    "rebuild_recipe_commit": "4b0f585",
+    "rebuild_recipe_commit": "7d0ba30",
     "worktree_has_unrelated_changes": true,
     "release_commit": null
   },
