@@ -6,11 +6,17 @@ program check_prolongation
   real(dp)::u2(nvector,twotondim,nvar),unlimited(nvector,twotondim,nvar)
   real(dp)::internal,momentum,thermal,min_thermal,average(nvar)
   integer::test_case,j,ind
+  integer,parameter::qp=selected_real_kind(33,4931)
+  real(qp)::exact_child_kinetic,exact_child_thermal
   character(40)::mode
   call get_command_argument(1,mode)
-  if(trim(mode)=='--reject-thermal-parent'.or.trim(mode)=='--reject-thermal-margin')then
-     call reject_parent_from_worker(trim(mode)=='--reject-thermal-margin')
+  if(trim(mode)=='--reject-thermal-parent')then
+     call reject_parent_from_worker()
      error stop 'invalid parent was accepted'
+  endif
+  if(trim(mode)=='--accept-thermal-margin')then
+     call check_submargin_parent()
+     stop
   endif
   if(trim(mode)=='--reproduce-mass-closure')then
      call reproduce_mass_closure(.true.)
@@ -69,9 +75,10 @@ program check_prolongation
      if(maxval(abs(average-parent))>128d0*spacing(1d0))error stop 'parent average not conserved'
      do ind=1,twotondim
         thermal=u2(1,ind,ndim+2)-0.5d0*sum(u2(1,ind,2:ndim+1)**2)/u2(1,ind,1)
-        if(thermal<8d0*spacing(max(abs(u2(1,ind,ndim+2)), &
-             abs(0.5d0*sum(u2(1,ind,2:ndim+1)**2)/u2(1,ind,1))))) &
-             error stop 'limited child fell below the 8-ULP arithmetic margin'
+        exact_child_kinetic=0.5_qp*sum(real(u2(1,ind,2:ndim+1),qp)**2)/real(u2(1,ind,1),qp)
+        exact_child_thermal=real(u2(1,ind,ndim+2),qp)-exact_child_kinetic
+        if(thermal<=0d0.or.exact_child_thermal<=0._qp) &
+             error stop 'limited child is not thermally positive in double and extended precision'
         if(test_case==5.and.thermal/=8d0*spacing(.5d0)) &
              error stop 'exact 8-ULP boundary state was not preserved'
         if(test_case==6.and.thermal/=14d0*spacing(.5d0)) &
@@ -83,10 +90,22 @@ program check_prolongation
      write(*,*)'PROLONGATION_PASS case=',test_case,' max_budget_error=',maxval(abs(average-parent))
   enddo
   write(*,*)'GRACKLE_THERMAL_BOUNDARY_EQUALITY_PASS'
+  call check_runtime_parent(6.0224011572532203d-2, &
+       2.9694834334669629d-4,-2.9898351544043049d-5,-5.9883391717737419d-5, &
+       7.6927996180911619d-7,'rank1-vector11')
+  call check_runtime_parent(3.1771656350967686d-1, &
+       -8.4576341883053094d-4,-1.1312328652722783d-3,-1.7432285066087646d-3, &
+       7.9219180875411757d-6,'rank4-vector4')
+  call check_runtime_parent(2.3974987490560998d-2, &
+       -2.4274468670122109d-5,-1.0518456302331167d-5,9.2086595984272390d-5, &
+       1.9144595833022912d-7,'rank3-vector8')
+  call check_runtime_parent(2.0619790522295375d-1, &
+       7.8543022308416848d-4,5.1513466580278204d-4,-9.0783119697291498d-4, &
+       4.1378253566591302d-6,'rank2-vector14')
+  write(*,*)'GRACKLE_THERMAL_RUNTIME_PARENT_FALLBACK_PASS count=4'
 contains
-  subroutine reject_parent_from_worker(positive_below_margin)
+  subroutine reject_parent_from_worker()
     use omp_lib, only: omp_get_thread_num,omp_get_num_threads
-    logical,intent(in)::positive_below_margin
     real(dp)::stencil(nvector,0:twondim,nvar),children(nvector,twotondim,nvar)
     integer::neighbor
     imetal=6;ichem=7;igrackle=19
@@ -98,14 +117,58 @@ contains
        do neighbor=0,twondim
           stencil(1,neighbor,1)=1d0
           stencil(1,neighbor,2)=1d0
-          stencil(1,neighbor,ndim+2)=.4d0
-          if(positive_below_margin)stencil(1,neighbor,ndim+2)=.5d0+4d0*spacing(.5d0)
+          stencil(1,neighbor,3:ndim+1)=0d0
+          stencil(1,neighbor,ndim+2)=.5d0-spacing(.5d0)
        enddo
        write(*,*)'GRACKLE_THERMAL_REJECT_WORKER=',omp_get_thread_num()
        call interpol_hydro(stencil,children,1)
     endif
 !$omp end parallel
   end subroutine reject_parent_from_worker
+
+  subroutine check_runtime_parent(rho,px,py,pz,energy,label)
+    real(dp),intent(in)::rho,px,py,pz,energy
+    character(*),intent(in)::label
+    real(dp)::state(nvar),stencil(nvector,0:twondim,nvar),children(nvector,twotondim,nvar)
+    real(qp)::exact_thermal,scale_q
+    integer::neighbor,child
+    state=1d-3
+    state(1)=rho
+    state(2:ndim+1)=[px,py,pz]
+    state(ndim+2)=energy
+    exact_thermal=real(energy,qp)-sum(real(state(2:ndim+1),qp)**2)/(2._qp*real(rho,qp))
+    scale_q=real(spacing(max(abs(energy),abs(0.5d0*sum(state(2:ndim+1)**2)/rho))),qp)
+    if(exact_thermal<=0._qp.or.exact_thermal>=8._qp*scale_q) &
+         error stop 'runtime-parent fixture is not positive and below the 8-ULP fast path'
+    do neighbor=0,twondim
+       stencil(1,neighbor,:)=state
+    enddo
+    cooling_method='grackle_neq'
+    call interpol_hydro(stencil,children,1)
+    do child=1,twotondim
+       if(any(children(1,child,:)/=state))error stop 'positive near-cancellation parent changed'
+    enddo
+    write(*,'(A,A,A,ES12.4)')'GRACKLE_THERMAL_NEAR_MARGIN_PARENT_PASS case=',label, &
+         ' residual_ULP=',real(exact_thermal/scale_q,dp)
+  end subroutine check_runtime_parent
+
+  subroutine check_submargin_parent()
+    real(dp)::stencil(nvector,0:twondim,nvar),children(nvector,twotondim,nvar),state(nvar)
+    integer::neighbor,child
+    imetal=6;ichem=7;igrackle=19
+    interpol_var=0;interpol_type=1;cooling_method='grackle_neq'
+    state=1d-3
+    state(1)=1d0;state(2:ndim+1)=0d0;state(2)=1d0
+    state(ndim+2)=.5d0+4d0*spacing(.5d0)
+    do neighbor=0,twondim
+       stencil(1,neighbor,:)=state
+    enddo
+    call interpol_hydro(stencil,children,1)
+    do child=1,twotondim
+       if(any(children(1,child,:)/=state))error stop 'positive 4-ULP parent changed'
+    enddo
+    write(*,*)'GRACKLE_THERMAL_SUBMARGIN_POSITIVE_ACCEPT_PASS residual_ULP=4'
+  end subroutine check_submargin_parent
 
   subroutine check_face_closure(expect_defect,inherited_residual)
     logical,intent(in)::expect_defect

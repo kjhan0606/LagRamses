@@ -1816,9 +1816,25 @@ predicate was 16 ULP; both now report the selected 8-ULP reserve. For
 `K=0.5*sum(p_i**2)/rho`, the six rounded operations give a first-order
 `gamma_6` bound of about 3 ULP near `E ~= K`; subtraction `E-K` is exact in
 this cancellation regime by Sterbenz's lemma. Eight ULP is a numerical
-arithmetic reserve, not a physical thermal floor. Native job 430585 passes
+arithmetic reserve, not a physical thermal floor. Native job 430585 passed
 six conservative-prolongation cases, exact 8-ULP boundary equality, the
 14-ULP unchanged-parent regression, conservation/face/advection checks, and
 both expected OpenMP-worker rejection cases. The bounded step-520-to-531 A100
-replay 430588 is in progress; production trajectory qualification remains
-pending its terminal result.
+replay 430588 terminated at step 530 with status 17. Four finite positive
+parent states were rejected because their computed double residuals were
+6.1-7.6 ULP, below the imposed 8-ULP reserve. Independent decimal evaluation
+of the round-tripped binary64 values gives positive exact stored-state
+residuals of 6.0829, 6.7414, 6.8214, and 7.5793 ULP. This falsifies the hard
+8-ULP admission threshold as overly restrictive for the observed trajectory;
+it is not evidence for negative thermal energy, an OOM, or Grackle cooling
+instability. The four source stencils and Slurm accounting are retained in
+`.galaxy128-grackle-thermal-margin-replay-430588/run.log` and the matching
+Slurm log. The repair keeps the 8-ULP double fast path and evaluates the
+stored-state sign in extended precision only inside the near-cancellation
+region; it also requires the downstream double-precision residual itself to
+be strictly positive. Native job 430767 passed the prior six prolongation
+cases, all four captured runtime states unchanged, the exact 8-ULP boundary,
+a positive 4-ULP parent, a negative 1-ULP parent rejected from an OpenMP
+worker, and mass/face/advection conservation gates. The integrated A100 replay
+430769 restarted from step 520 and is running; production trajectory
+qualification remains pending its step-530/531 result.

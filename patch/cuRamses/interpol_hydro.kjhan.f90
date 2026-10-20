@@ -416,6 +416,7 @@ subroutine interpol_hydro(u1,u2,nn)
   ! operation for newly refined cells or buffer cells.
   !----------------------------------------------------------
   integer::i,j,ivar,irad,idim,ind,ix,iy,iz,ind2
+  integer,parameter::thermal_qp=selected_real_kind(33,4931)
   real(dp)::oneover_twotondim
   real(dp),dimension(1:twotondim,1:3)::xc
   real(dp),dimension(1:nvector,0:twondim)::a
@@ -679,6 +680,7 @@ contains
     integer,intent(in)::vector_index
     integer::neighbor
     real(dp)::density,kinetic,thermal,margin
+    real(thermal_qp)::kinetic_q,thermal_q
     ! This path is also reached inside Godunov's OpenMP region. clean_stop
     ! collects MPI timers and finalizes MPI: neither is legal here while
     ! other threads/ranks are still evolving. Fail the process without MPI;
@@ -694,6 +696,12 @@ contains
        margin=8d0*spacing(max(abs(u1(vector_index,0,ndim+2)),abs(kinetic)))
        write(error_unit,'(A,4ES25.16)')'GRACKLE_THERMAL_PARENT E/kinetic/thermal/margin:', &
             u1(vector_index,0,ndim+2),kinetic,thermal,margin
+       kinetic_q=0.5_thermal_qp*sum(real(u1(vector_index,0,2:ndim+1),thermal_qp)**2)/ &
+            real(density,thermal_qp)
+       thermal_q=real(u1(vector_index,0,ndim+2),thermal_qp)-kinetic_q
+       write(error_unit,'(A,2ES25.16)')'GRACKLE_THERMAL_PARENT extended_residual/ULP:', &
+            real(thermal_q,dp),real(thermal_q/real(spacing(max(abs(u1(vector_index,0,ndim+2)), &
+            abs(kinetic))),thermal_qp),dp)
     endif
     do neighbor=0,twondim
        write(error_unit,'(A,I2,*(1X,ES25.16))')'GRACKLE_THERMAL_STENCIL ',neighbor,u1(vector_index,neighbor,:)
@@ -707,24 +715,29 @@ contains
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     real(dp),intent(in)::state(nvar)
     real(dp)::thermal,kinetic,roundoff_margin
+    real(thermal_qp)::kinetic_q,thermal_q
     thermal_admissible=.false.
     if(.not.all(ieee_is_finite(state)))return
     if(state(1)<smallr)return
     kinetic=0.5d0*sum(state(2:ndim+1)**2)/state(1)
     thermal=state(ndim+2)-kinetic
-    ! Leave arithmetic headroom for evaluating kinetic energy. This contracts
-    ! slopes, not total energy; subsequent gravity updates remain handled by
-    ! the hydro solver.
-    ! K=0.5*sum(p_i**2)/rho uses three rounded products, two rounded sums
-    ! and one rounded division. Its first-order gamma_6 bound is about 3 ULP
-    ! when E and K are comparable; E-K itself is exact by Sterbenz in this
-    ! cancellation regime. Keep an 8-ULP reserve (>2.6x that bound). A
-    ! 16-ULP reserve rejected step-530 states whose extended-precision
-    ! stored-state residuals are 14.2-15.2 ULP. This is numerical headroom,
-    ! not a physical temperature floor.
+    ! An 8-ULP reserve is the fast path. Near cancellation, evaluate the sign
+    ! of E-K in extended precision rather than turning this reserve into a
+    ! physical floor: integrated step-530 parents have positive stored-state
+    ! residuals of 6.1-7.6 ULP. The fallback is reached only near cancellation;
+    ! it adds no energy and leaves genuinely zero/negative states inadmissible.
     roundoff_margin=8d0*spacing(max(abs(state(ndim+2)),abs(kinetic)))
-    ! Equality is admissible: retain states exactly on the 8-ULP boundary.
-    thermal_admissible=ieee_is_finite(thermal).and.thermal>=roundoff_margin
+    if(.not.ieee_is_finite(thermal))return
+    ! Downstream hydro evaluates the same residual in dp, so a nonpositive
+    ! dp result cannot be made admissible by a wider-precision sign check.
+    if(thermal<=0d0)return
+    if(thermal>=roundoff_margin)then
+       thermal_admissible=.true.
+    else
+       kinetic_q=0.5_thermal_qp*sum(real(state(2:ndim+1),thermal_qp)**2)/real(state(1),thermal_qp)
+       thermal_q=real(state(ndim+2),thermal_qp)-kinetic_q
+       thermal_admissible=thermal_q>0._thermal_qp
+    endif
   end function thermal_admissible
 end subroutine interpol_hydro
 !###########################################################
