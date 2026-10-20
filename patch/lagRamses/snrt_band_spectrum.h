@@ -88,9 +88,11 @@ template<int K=nodes,class Real=float> inline int absorb_cell(Real *next,double 
     Real *budget,Real *hhe,double *hhe_e,Real *returned,Real *raw,Real *absorbed,Real *total,
     int no,int nw,int nd,int ng,int cell,Secondary secondary=nullptr,
     const double *xi=nullptr,double *deposition=nullptr,const Dust *grains=nullptr,
-    Real *dust=nullptr,double *dust_e=nullptr) {
+    Real *dust=nullptr,double *dust_e=nullptr,const double *direction=nullptr,double *first=nullptr) {
   constexpr double eps=std::numeric_limits<Real>::epsilon();
   struct Ray {double n[4]={},e[4]={},survive=0,survive_e=0;};
+  if((direction==nullptr)!=(first==nullptr))return 3;
+  if(first)std::fill(first,first+3*4*ng,0.0);
   std::vector<Ray> rays(nd);
   const size_t groups=size_t(no)*ng;
   bool occupied=false;
@@ -183,6 +185,15 @@ template<int K=nodes,class Real=float> inline int absorb_cell(Real *next,double 
     if(occupied){
       dust[out]=Real(wanted[3]);dust_e[out]=wanted_e[3];
       requested+=wanted[3];accepted+=wanted[3];
+    }
+    // Signed angular first moment of energy absorbed by each receiver.  The
+    // direction quadrature and exact node-resolved energy are shared with the
+    // scalar photon/energy accounting above, so this is the matching recoil
+    // source (still without division by physical c).
+    if(first)for(int d=0;d<nd;++d){
+      const Ray &r=rays[d];
+      for(int s=0;s<4;++s)for(int a=0;a<3;++a)
+        first[a+3*(s+4*g)]+=direction[3*d+a]*(s<3?cap[s]:1.0)*r.e[s];
     }
     raw[out]=Real(requested);returned[out]=Real(requested-accepted);absorbed[out]=Real(accepted);
     total[cell]+=absorbed[out];
