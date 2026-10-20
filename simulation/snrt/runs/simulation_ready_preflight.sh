@@ -5,11 +5,10 @@ set -euo pipefail
 # script does not submit a job and does not create a run directory. It makes
 # the allowed simulation class explicit before a caller supplies sbatch/srun.
 
-PROJECT_ROOT=/gpfs/kjhan/LRD_JWST
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 DEFAULT_GROUP_CONTRACT="$PROJECT_ROOT/simulation/snrt/config/snrt_group_contract_reference_control_v1.nml"
 DEFAULT_SECONDARY_CONTRACT="$PROJECT_ROOT/simulation/snrt/config/snrt_secondary_table_contract_v1.nml"
-READINESS_MANIFEST="$PROJECT_ROOT/manifests/production_readiness_manifest_v1.json"
-SNRT_DRIVER="$PROJECT_ROOT/patch/lagRamses/snrt_ramses_driver.f90"
+READINESS_MANIFEST="$PROJECT_ROOT/manifests/native_m5_release_candidate_2026-10-12.json"
 
 MODE=
 BINARY_PATH=
@@ -25,11 +24,12 @@ Usage:
 MODE:
   reference-control    bounded nine-group SNRT + hydro wiring qualification
   legacy-comparison    legacy stellar/feedback comparison binary, no SNRT
-  physical-production  physical production request; currently fail-closed
+  physical-production  approved release only; manifest/source/input identity checked
 
 Options:
   --group-contract PATH       reference-control spectral contract
   --secondary-contract PATH   reference-control secondary-ionization contract
+  --production-manifest PATH  explicit production release manifest
 EOF
 }
 
@@ -101,6 +101,11 @@ while (($# > 0)); do
       SECONDARY_CONTRACT="$(repo_path "$2")"
       shift 2
       ;;
+    --production-manifest)
+      (($# >= 2)) || { usage; exit 64; }
+      READINESS_MANIFEST="$(repo_path "$2")"
+      shift 2
+      ;;
     -h|--help)
       usage >&1
       exit 0
@@ -124,17 +129,19 @@ require_file namelist "$NAMELIST_PATH"
 command -v nm >/dev/null 2>&1 || fail_preflight missing_command=nm
 
 if [[ "$MODE" == physical-production ]]; then
-  # This is deliberately an explicit refusal. A future physical release
-  # must change the manifest, source contracts, and this admission boundary
-  # together; a caller must not bypass it by selecting a different binary.
-  if grep -Fq '"production_status": "blocked_until_all_required_assets_are_approved"' \
-       "$READINESS_MANIFEST"; then
-    fail_preflight 'physical_production_manifest_blocked'
+  require_file production_manifest "$READINESS_MANIFEST"
+  command -v python3 >/dev/null 2>&1 || fail_preflight missing_command=python3
+  # No approval is manufactured here. The existing G0 audit checks the
+  # selected asset/source/environment records plus this exact launch's
+  # checkout, executable, namelist and physics-selection environment.
+  if ! python3 -B "$PROJECT_ROOT/simulation/snrt/tools/audit_production_manifest.py" \
+      --production-manifest "$READINESS_MANIFEST" --launch-root "$PROJECT_ROOT" \
+      --binary "$BINARY_PATH" --namelist "$NAMELIST_PATH"; then
+    fail_preflight physical_production_release_not_verified
   fi
-  if grep -Fq 'ZERO_SCAFFOLD' "$SNRT_DRIVER"; then
-    fail_preflight 'physical_production_live_dust_is_zero_scaffold'
-  fi
-  fail_preflight physical_production_requires_explicit_release_record
+  printf 'SIMULATION_READY_PASS mode=physical-production binary=%s namelist=%s\n' \
+      "$BINARY_PATH" "$NAMELIST_PATH"
+  exit 0
 fi
 
 require_nml_pattern hydro '^[[:space:]]*hydro[[:space:]]*=[[:space:]]*\.true\.'
