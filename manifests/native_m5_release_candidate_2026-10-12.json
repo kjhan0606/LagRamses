@@ -1,0 +1,268 @@
+{
+  "schema": "lagramses-native-release-candidate-v1",
+  "created_at": "2026-10-12",
+  "status": "operator_approved_effective_model_pending_release",
+  "launch_admission_manifest": false,
+  "project_root": "/gpfs/kjhan/chimes-cvode-gpu-20261001",
+  "repository": {
+    "origin": "git@github.com:kjhan0606/LagRamses.git",
+    "head": "894a39f5ce7f8eacec5fe9655f39291495303c0e",
+    "implementation_changes": "committed",
+    "implementation_commit": "894a39f5ce7f8eacec5fe9655f39291495303c0e",
+    "worktree_has_unrelated_changes": true,
+    "release_commit": null
+  },
+  "executable": {
+    "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-ramses-momentum-build-420011/bin/ramses_m5_ramses_momentum_closure_v13d",
+    "sha256": "1a4a3240482d3d827e85add2d68c3c439c9418cf1a0af1b63027d54b9a15fd65",
+    "build_job": 420011,
+    "options": {
+      "SNRT": 1,
+      "DUST_LIVE": 1,
+      "CHIMES": 1,
+      "HDF5": 1,
+      "USE_CUDA": 1,
+      "USE_FFTW": 1,
+      "NENER": 0,
+      "NVAR": 187,
+      "NVECTOR": 32
+    },
+    "compiler": "Intel oneAPI 2025.3.0",
+    "mpi": "Intel MPI 2021.17",
+    "cuda": "13.0.2",
+    "build_record": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-ramses-momentum-build-420011/build.sha256",
+    "build_record_sha256": "c1679ae60a8037e4073fb51da58bdcd77ed8abd6bc0610740b6af87f335b89c2"
+  },
+  "selected_profile": {
+    "model_scope_approval": "provenance/general_physics_completion_plan_2026-09-11.md",
+    "scope": "declared galaxy-scale effective population; not unrestricted microscopic or cosmological qualification",
+    "imf": "Kroupa; global Chabrier default unchanged",
+    "population": "effective_ssp",
+    "ordinary_sources": "mixed_v5_common_imf_single_evolution",
+    "snia": "empirical Maoz DTD/N100 with actual remaining-SSP debit",
+    "radiation": "M5 conservative kinetic transport; reduced_c=0.01",
+    "dust": "coadvected carbon/silicate two-size; DL01 material/D03 optics",
+    "chemistry": "CHIMES157 kind7 spectral coupling; CPU CVODE",
+    "inactive_in_test": [
+      "CR",
+      "MHD",
+      "relative_dust_motion",
+      "metallic_Fe",
+      "PAH",
+      "resolved_binary_evolution"
+    ],
+    "tested_domain": {
+      "cosmological": false,
+      "owned_leaf_cells": 64,
+      "mpi": 2,
+      "omp_per_rank": 2,
+      "coarse_steps": 4,
+      "approximate_age_myr": 0.206
+    }
+  },
+  "inputs": {
+    "namelist": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-restart-420012/continuous/effective.nml",
+    "namelist_sha256": "f3c7e4bb8f51f60895e3136be12911aa88678aa80417de9795916c1d19f859a4",
+    "restart_namelist": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-restart-420012/resumed/effective.nml",
+    "restart_namelist_sha256": "b367b29be16a95cf79e27501795b054634cf1f40ac8ce18a5123abc297f48e18",
+    "complete_tested_input_inventory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-restart-420012/inputs.sha256",
+    "inventory_sha256": "3b71e4c4a64a162b4ac1dc39c96bb26016ede82c3155b2e5b10e6d743fed48b5",
+    "external_asset_root": "/gpfs/kjhan/LRD_JWST",
+    "external_worktree_identity": "independently identified; not the active checkout; unmodified"
+  },
+  "source_contracts": [
+    {
+      "role": "ordinary_yields",
+      "path": "/gpfs/kjhan/LRD_JWST/.mixed-lowmass.Rbb2fZ/input-v5/yields.dat",
+      "sha256": "a442f8b5637d8cb80260b835f02efae93908b6989029b1dd511f132fe4c140c6",
+      "usage": "operator-selected effective mixed model; approximate terminal proxies and no invented tracks",
+      "upstream_provenance_record": "/gpfs/kjhan/LRD_JWST/.mixed-lowmass.Rbb2fZ/input-v5/manifest.json",
+      "upstream_provenance_sha256": "8117b5000e0d1e3e2f509f2d33a2ffa22d028aff8c5e09981af0165c0c422a74",
+      "agb_source_license_status_at_inspection": "public_research_mirror_no_explicit_repository_license_found_original_terms_pending",
+      "license_record_for_this_release": null
+    },
+    {
+      "role": "stellar_sed",
+      "path": "/gpfs/kjhan/LRD_JWST/.effective-population.gQodLz/inputs/source.nml",
+      "sha256": "19504d2845e4ea8faf46ddced0c2e01e561dda3dfa804449221bb559ede2aea9",
+      "contract_status": "reference_control",
+      "approval_id": "",
+      "limitations": [
+        "mass<2_Msun radiation omitted in the full-IMF normalization",
+        "mixed terminal/evolution proxies",
+        "zero radiation beyond selected track/terminal support"
+      ],
+      "license_record_for_this_release": null
+    },
+    {
+      "role": "agn_groups",
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/simulation/snrt/config/snrt_group_contract_reference_control_v1.nml",
+      "sha256": "5825dae4d55d5f4448880c0ebd5b9b727ecfa97cbcf573b609b6e9bfa6e6ca94",
+      "contract_status": "reference_control",
+      "approval_id": "reference_control_not_science_approved",
+      "source_id": "p4_pilot_agn_photon_ledger.json",
+      "runtime_model": "partition_reference_v1",
+      "license_record_for_this_release": null
+    },
+    {
+      "role": "dust_material_optics",
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml",
+      "sha256": "b1f27df3a6fcd2f76b7f6ca8a14c794b5811540905cb1c04480586bf7614909d",
+      "contract_status": "reference_control/reference_thermal_control/reference_ir_control",
+      "approval_id": "",
+      "limitations": [
+        "selected bulk material/accommodation and scattering approximations",
+        "136 IR groups with the test's explicit 10 K background",
+        "M5 native radiation momentum verified separately from this older material-contract description"
+      ],
+      "license_record_for_this_release": null
+    },
+    {
+      "role": "snia",
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/simulation/snrt/config/fp2_snia_effective_population_runtime_v1.nml",
+      "sha256": "2fa8341815db02defbcf40ac4b9496d485c0c5cfcd98fa1241bd7ba04683f74e",
+      "approved": true,
+      "approval_id": "FP2-SNIA-PHYSICAL-2026-09-03-N100-MAOZ",
+      "accounting_approval_id": "SNIA-EFFECTIVE-SSP-2026-09-07",
+      "source_purity": "empirical population, not resolved WD/binary evolution",
+      "nonzero_ia_evidence": "provenance/effective_population_execution_2026-09-11.md Step1; no due event in the young M5 test"
+    }
+  ],
+  "environment_bindings": {
+    "SNRT_BACKEND": "auto",
+    "SNRT_DUST_BACKEND": "auto",
+    "SNRT_AGN_MODEL": "partition_reference_v1",
+    "SNRT_REDUCED_C": "0.01",
+    "SNRT_ALLOW_REFERENCE_CONTROL": "1",
+    "SNRT_GROUP_CONTRACT": "/gpfs/kjhan/chimes-cvode-gpu-20261001/simulation/snrt/config/snrt_group_contract_reference_control_v1.nml",
+    "SNRT_SECONDARY_TABLE_CONTRACT": "/gpfs/kjhan/chimes-cvode-gpu-20261001/simulation/snrt/config/snrt_secondary_table_contract_v1.nml",
+    "SNRT_STELLAR_SED": "/gpfs/kjhan/LRD_JWST/.effective-population.gQodLz/inputs/source.nml",
+    "SNRT_DUST_CONTRACT": "/gpfs/kjhan/chimes-cvode-gpu-20261001/simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml",
+    "SNRT_SPECTRAL_MODEL": "chimes_transition_d03_maxent128_fs2010_v1",
+    "SNRT_CHIMES_BINARY": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-ramses-momentum-build-420011/bin/ramses_m5_ramses_momentum_closure_v13d",
+    "SNRT_CHIMES_MAIN_DATA": "/gpfs/kjhan/LRD_JWST/.dust-extension.AOz7mU/chimes-data/chimes_main_data.hdf5",
+    "SNRT_CHIMES_GROUP_DIR": "/gpfs/kjhan/LRD_JWST/.dust-extension.AOz7mU/groups-v7",
+    "SNRT_CHIMES_BAND_TABLE": "/gpfs/kjhan/LRD_JWST/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5",
+    "SNRT_CHIMES_MOLECULAR_TABLE": "/gpfs/kjhan/LRD_JWST/.chimes-molecular.U6ZQCr/bank/molecular_nodes.h5",
+    "SNRT_CHIMES_COMPUTE_BACKEND": "cpu",
+    "SNRT_PERF_DIAGNOSTIC": "1",
+    "PHASE0_YIELD_TABLE": "/gpfs/kjhan/LRD_JWST/.mixed-lowmass.Rbb2fZ/input-v5/yields.dat",
+    "PHASE0_SNIA_RUNTIME_CONTRACT": "/gpfs/kjhan/chimes-cvode-gpu-20261001/simulation/snrt/config/fp2_snia_effective_population_runtime_v1.nml"
+  },
+  "implementation_snapshot": {
+    "bin/Makefile": "475d14394def8aca32e17bee3a628734dd5fdafe105e382d89d48dbca9540ad1",
+    "patch/lagRamses/snrt_moment_amr.f90": "83073bd2dc904057034d2a8fa5185821aa875ddb3e54b0d7e765784321e105c3",
+    "patch/lagRamses/snrt_regrid.f90": "daf6972c08cdbf6f6ed94975ffe1f309a0410ac6f6ff93baaee1256da24d42f2",
+    "patch/lagRamses/load_balance.kjhan.f90": "34d75d5d028a0e62b86b46c1ae28299a3d93dd241de82e03709dffe79966a243",
+    "patch/lagRamses/snrt_moment_ramses.f90": "b0e08425eb04063e11be2cde358e83adf08c4672990fe8f9b0de7fc97c38bd5f",
+    "patch/lagRamses/snrt_moment_band.cpp": "a4ed9ce19732ebdd4faf482aea7ff1e7fe909cf9e5efd4c9b4dd080e8577a2bd",
+    "simulation/snrt/tests/snrt_moment_band_momentum_smoke.cpp": "1c7713d1fbfcdff88c4264a36bfbc4b77ae32c2d49df061d4d8e53329d0bd053"
+  },
+  "verification": {
+    "job": 420012,
+    "status": "M5_COUPLED_RESTART_PASS",
+    "artifact": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-restart-420012/restart-comparison.json",
+    "sha256": "309e6ba7b7109fdb9b1acc684d459dab887a5768a612111b5115546e0742601b",
+    "compared_datasets": 449,
+    "bitwise_datasets": 427,
+    "exact_contract_attributes": 39,
+    "rtol": 1e-12,
+    "atol": 1e-25,
+    "clocks_bitwise": true,
+    "source_mass_return_code": 2.1016243221234917e-12,
+    "scope": "same MPI2/static64-cell coupled model; not universal AMR/rank-count invariance",
+    "raw_outputs": "evaluated and deleted; regeneration required for future restart",
+    "cleanup_manifest": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-ramses-momentum-build-420011/evaluated-raw-cleanup-420015.json"
+  },
+  "mixed_amr_verification": {
+    "job": 420024,
+    "status": "M5_COUPLED_AMR_INTERFACE_PASS",
+    "slurm_state": "COMPLETED",
+    "exit_code": "0:0",
+    "elapsed_seconds": 177,
+    "artifact": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-amr-420024/result.txt",
+    "artifact_sha256": "74288455ae230d133b0089066c8c84733eebd6a07f370e4530ad8c163dba0241",
+    "namelist": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-amr-420024/effective.nml",
+    "namelist_sha256": "dbd00a880b477d0bdd4b905c68dae69582d81774cae317d0f100ecd5c1999dc9",
+    "input_inventory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-amr-420024/inputs.sha256",
+    "inventory_sha256": "df20743aee4cc8fe1385df964e67609cabb1ef178f932f79fe7520e23c13909d",
+    "runner_sha256": "7b04ef4ccdc40f2775239219c7617cd59635cd5aa79f60104598968eb63fdd6d",
+    "binary": "same trace-free 420011 executable as restart verification",
+    "mpi": 2,
+    "omp_per_rank": 2,
+    "coarse_steps": 4,
+    "coarse_leaf_cells": 56,
+    "fine_leaf_cells": 64,
+    "committed_moment_levels": [2, 3],
+    "final_star_count": 417,
+    "maximum_printed_photon_accounting_residual": 9.1356580416678e-23,
+    "native_runtime_guards": "finite state, material momentum assertions and nonconvergence rejection passed",
+    "raw_outputs": 0,
+    "scope": "selected noncosmological source-active mixed-level execution; not AMR restart equivalence, resolution convergence, cosmological qualification or all-rank reproducibility"
+  },
+  "release_conditions_remaining": [
+    "Record selected external-data license/provenance for this exact release; no approval inferred from public availability.",
+    "Rebuild/recheck the selected binary from committed source identity 894a39f5ce7f8eacec5fe9655f39291495303c0e.",
+    "Promote only after an actual-root native environment/selected-asset release manifest passes the existing launch preflight; the old-root G0 manifest is historical."
+  ],
+  "approval_request": {
+    "state": "approved_for_conditional_candidate_use",
+    "approval_id": "LRD-EFFECTIVE-SOURCE-USE-2026-10-12",
+    "approved_at_kst": "2026-10-12",
+    "authority": "operator reply: 승인 to the exact pending three-input candidate-use request",
+    "requested_roles": ["stellar_sed", "agn_groups", "dust_material_optics"],
+    "request_scope": "conditional candidate use of the selected effective approximations with their stated limitations, not unrestricted physics or raw-data redistribution",
+    "existing_model_scope_approval_unchanged": true,
+    "upstream_license_confirmation_not_implied": true
+  },
+  "selected_data_use_review": {
+    "checked_at": "2026-10-12",
+    "scope": "source identity and explicit notices only; no legal permission or scientific approval inferred",
+    "draine_d03": {
+      "official_table": "https://www.astro.princeton.edu/~draine/dust/extcurvs/kext_albedo_WD_MW_3.1_60_D03.all",
+      "official_description": "https://www.astro.princeton.edu/~draine/dust/dustmix.html",
+      "current_official_file_sha256": "b56680cc38b85f051f20c4405303e8c480cc9bec714fd5ba722a257a40ae840c",
+      "matches_selected_contract_source_table": true,
+      "explicit_data_license": "not located in the inspected description/table; unresolved",
+      "raw_data_changed": false
+    },
+    "parsec_v2_vms": {
+      "official_database": "https://stev.oapd.inaf.it/PARSEC/Database/PARSECv2.0_VMS/",
+      "paper": "https://arxiv.org/html/2501.12917v2",
+      "retained_readme": "/gpfs/kjhan/LRD_JWST/.parsec-sources.9ZIUlJ/readme.html",
+      "retained_readme_sha256": "d4dcbc8db36e6d71780a16d9eb21a260d9ec5db3fbc23e8bcab67be247525e31",
+      "current_https_check": "certificate issuer verification failed; verification was not disabled",
+      "explicit_data_license": "unresolved; paper CC BY notice and embedded Microsoft CSS MIT notice are not attributed to external track archives",
+      "raw_data_changed": false
+    },
+    "kl16_mirror": {
+      "repository": "https://github.com/correac/COLIBRE_yield_tables",
+      "pinned_revision": "acecc180347d9505780a7985ec2c4a8a11f5c61f",
+      "pinned_tree_query": "https://api.github.com/repos/correac/COLIBRE_yield_tables/git/trees/acecc180347d9505780a7985ec2c4a8a11f5c61f",
+      "root_tree_query_truncated": false,
+      "explicit_data_license": "no root license file or license statement in pinned README; original data terms unresolved",
+      "raw_data_changed": false
+    },
+    "chimes": {
+      "official_download": "https://richings.bitbucket.io/chimes/download.html",
+      "official_citation": "https://richings.bitbucket.io/chimes/acknowledgements.html",
+      "data_readme": "https://api.bitbucket.org/2.0/repositories/richings/chimes-data/src/master/README.md",
+      "data_root_listing": "https://api.bitbucket.org/2.0/repositories/richings/chimes-data/src/master/?pagelen=100",
+      "data_root_listing_next": null,
+      "software_notice": "LGPL-3.0-or-later in local chimes.c header",
+      "software_license_file": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.cvode-gpu/chimes/COPYING.LESSER",
+      "software_license_sha256": "a5681bf9b05db14d86776930017c647ad9e6e56ff6bbcfdf21e5848288dfaf1b",
+      "explicit_data_license": "not located in inspected data root/README; software notice not promoted to data approval",
+      "data_revision_claim": "current master metadata inspection only; selected input bytes remain bound by tested inventories",
+      "raw_data_changed": false
+    }
+  },
+  "not_new_requirements": [
+    "unselected P4 snapshot ingestion payload",
+    "unselected production thermal atlas",
+    "P0 JAX runtime for this native binary",
+    "all comparison combinations",
+    "direct microscopic physics",
+    "COLIBRE observable calibration/resolution campaign"
+  ]
+}
