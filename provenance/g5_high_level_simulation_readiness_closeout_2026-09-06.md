@@ -399,3 +399,19 @@ binary and CHIMES-library hashes are retained in
 source snapshot/clean release commit was not produced. The result therefore
 does not update the native production-candidate binding above or close its
 release/license conditions.
+
+### Native CHIMES thermochemistry closure smoke — 2026-10-21
+
+The production Makefile's `snrt_thermochemistry_smoke` target was linked with
+`CHIMES=1`, `CHIMES_CUDA=0`, and the A40 integrated build's current CHIMES
+objects/libraries, then run with the selected CPU backend and the same pinned
+reaction, spectral and molecular tables. `SNRT_NATIVE_THERMOCHEMISTRY_OK`
+passed, including the actual 157-species element/charge closures and the new
+negative-trace test: a `-256*epsilon*Fe` roundoff residue is reconciled with
+elemental closure, while `-1024*epsilon*Fe` rejects without publishing a
+modified state. The default standalone H/He-only script was also run; its
+compile mode omits `SNRT_CHIMES`, so it does not execute those conditional
+CHIMES assertions. The explicit production-target run closes that coverage
+gap for this bounded code path. This is a native CPU smoke, not a live
+simulation or production release qualification; the linked objects came from
+the same dirty source tree recorded for job430823, not a clean release commit.
