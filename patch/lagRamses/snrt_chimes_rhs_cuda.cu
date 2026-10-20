@@ -137,6 +137,18 @@ std::atomic<unsigned long long> active_batches{0},peak_active_batches{0},used_st
 std::atomic<unsigned long long> used_worker_mask{0};
 std::atomic<unsigned long long> compact_batches{0},full_batches{0},result_bytes{0};
 
+/* Count batches submitted to CUDA but not yet observed complete. This is an
+ * in-flight queue-depth measure, not proof of simultaneous kernel execution. */
+void batch_submitted(){
+ const auto active=active_batches.fetch_add(1)+1;
+ auto peak=peak_active_batches.load();
+ while(peak<active && !peak_active_batches.compare_exchange_weak(peak,active)){}
+}
+void batch_completed(){
+ const auto active=active_batches.fetch_sub(1);
+ if(active==0)std::abort();
+}
+
 struct CoolTables {
  int enabled=0,n1=0,n2=0,n4=0;
  int nT2=0,nNe2=0,nThi2=0,nT4=0,nHI4=0,nNe4=0,nHII4=0,nThi4=0;
@@ -519,9 +531,7 @@ void execute(std::vector<Request*> &requests,int slot,bool release=true){
  bool ok=build_tables() && b.init(stream);int n=(int)requests.size();
  bool tracking=false;
  if(ok){
-   const auto active=active_batches.fetch_add(1)+1;
-   auto peak=peak_active_batches.load();
-   while(peak<active && !peak_active_batches.compare_exchange_weak(peak,active)){}
+   batch_submitted();
    if(slot>=0 && slot<64)used_stream_mask.fetch_or(1ull<<slot);
    tracking=true;
    for(int i=0;i<n;i++)b.hi[i]=requests[i]->input;
@@ -532,7 +542,7 @@ void execute(std::vector<Request*> &requests,int slot,bool release=true){
    if(ok)ok=copy_result_async(b,n,stream);
  }
  if(cudaStreamSynchronize(stream)!=cudaSuccess)ok=false;
- if(tracking)active_batches.fetch_sub(1);
+ if(tracking)batch_completed();
  consume_outputs(requests,b,ok);
  if(!ok)b.clear();
  if(release)cuda_release_stream(slot);
@@ -669,7 +679,9 @@ extern "C" int snrt_chimes_rhs_configure_mode(int use_cuda){
  if(scheduler && *scheduler && std::strcmp(scheduler,"cohort") && std::strcmp(scheduler,"level_queue")){
    std::fprintf(stderr,"Unknown SNRT_CHIMES_CELL_SCHEDULER=%s; expected cohort|level_queue\n",scheduler);return 1;
  }
- level_queue_enabled=scheduler && !std::strcmp(scheduler,"level_queue");
+ const char *compute_backend=std::getenv("SNRT_CHIMES_COMPUTE_BACKEND");
+ level_queue_enabled=(scheduler && !std::strcmp(scheduler,"level_queue")) ||
+   (compute_backend && !std::strcmp(compute_backend,"hybrid"));
  const char *broker_env=std::getenv("SNRT_CHIMES_GPU_BROKERS");
  level_gpu_brokers=1;
  brokers_explicit=false;
@@ -1003,7 +1015,10 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
      }catch(...){prepared=false;}
    }
    const int reserve_limit=active_brokers?std::min(128,std::max(1,cells/active_brokers)):0;
-   const int submit_at=std::max(1,std::min(nb,std::max(8,reserve_limit/2)));
+   // Prefer a full configured batch when each broker owns enough independent
+   // continuations. Other workers keep consuming CPU cells while this broker
+   // gathers candidates; the final short batch is still submitted at drain.
+   const int submit_at=std::max(1,std::min(nb,std::max(8,reserve_limit)));
    if(trace && worker==0){
      if(cudaProfilerStart()!=cudaSuccess)std::abort();
      trace_start=std::chrono::steady_clock::now();
@@ -1029,7 +1044,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
      }
    }else if(!shared){
      struct Flight {
-       Buffers *buffer=nullptr;cudaEvent_t event=nullptr;bool busy=false;
+       Buffers *buffer=nullptr;cudaEvent_t event=nullptr;bool busy=false,tracked=false;
        unsigned long long sequence=0;
        std::vector<Request*> requests;std::vector<int> owners;
      };
@@ -1045,6 +1060,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
      bool healthy=true,exhausted=false;
      bool trace_stopped=false;unsigned long long sequence=0;
      auto finish=[&](Flight &flight,bool ok){
+       if(flight.tracked){batch_completed();flight.tracked=false;}
        consume_outputs(flight.requests,*flight.buffer,ok);
        for(size_t i=0;i<flight.owners.size();i++){
          auto &fiber=tile_fibers[flight.owners[i]];
@@ -1094,7 +1110,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
        if(trace) nvtxRangePop();
        flight->busy=true;
        if(!ok) healthy=false;
-       else peak_active_batches.store(std::max(peak_active_batches.load(),1ull));
+       else {batch_submitted();flight->tracked=true;}
        return ok;
      };
      for(;;){
@@ -1184,7 +1200,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
    }else{
      if(worker==0) std::fprintf(stderr,"CHIMES shared batch launcher=0 batch=%d\n",nb);
      struct Flight {
-       Buffers *buffer=nullptr;cudaEvent_t event=nullptr;bool busy=false,consuming=false;
+       Buffers *buffer=nullptr;cudaEvent_t event=nullptr;bool busy=false,consuming=false,tracked=false;
        unsigned long long sequence=0;std::atomic<int> consume_left{0};
        std::vector<Request*> requests;
      };
@@ -1237,6 +1253,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
        }
      };
      auto mark_ready=[&](Flight &flight){
+       if(flight.tracked){batch_completed();flight.tracked=false;}
        auto &b=*flight.buffer;const int n=(int)flight.requests.size();
        flight.consume_left.store(n,std::memory_order_relaxed);flight.consuming=true;
        {
@@ -1251,6 +1268,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
        result_bytes+=(unsigned long long)n*(b.compact?sizeof(CompactOutput):sizeof(Output));
      };
      auto fail_flight=[&](Flight &flight){
+       if(flight.tracked){batch_completed();flight.tracked=false;}
        const int n=(int)flight.requests.size();
        {
          std::lock_guard<std::mutex> lock(mutex);
@@ -1308,7 +1326,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
        if(ok) ok=cudaEventRecord(flight->event,stream)==cudaSuccess;
        if(!ok){healthy=false;shared_healthy.store(0);fail_flight(*flight);fail_pending();return false;}
        flight->busy=true;flight->consuming=false;
-       peak_active_batches.store(std::max(peak_active_batches.load(),1ull));
+       batch_submitted();flight->tracked=true;
        return true;
      };
      auto wait_oldest=[&]()->bool{
@@ -1408,8 +1426,8 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
    snrt_chimes_rate_cache_invalidate();
  }
  unsigned long long total=0;for(auto count:completed)total+=count;
- std::fprintf(stderr,"CHIMES_LEVEL_QUEUE cells=%d completed=%llu workers=%zu gpu_brokers=%d active_limit_per_broker=128 batch_limit=%d buffers_per_broker=2\n",
-     cells,total,completed.size(),active_brokers,nb);
+ std::fprintf(stderr,"CHIMES_LEVEL_QUEUE cells=%d completed=%llu workers=%zu gpu_brokers=%d gpu_worker_mask=0x%llx active_limit_per_broker=128 batch_limit=%d buffers_per_broker=2\n",
+     cells,total,completed.size(),active_brokers,used_worker_mask.load(),nb);
  for(size_t i=0;i<completed.size();i++)std::fprintf(stderr,"CHIMES_LEVEL_WORKER worker=%zu cells=%llu\n",i,completed[i]);
  return total==(unsigned long long)cells?0:1;
 }

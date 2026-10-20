@@ -67,10 +67,17 @@ static int resolve_compute_backend(int *selected)
     const char *cvode_expected=NULL,*rhs_expected=NULL;
     if(!strcmp(value,"cpu")) {
         *selected=0;cvode_expected="cpu";rhs_expected="cpu";
+    } else if(!strcmp(value,"hybrid")) {
+        *selected=2;cvode_expected="cpu";rhs_expected="cuda_dark_reactions";
+        const char *scheduler=getenv("SNRT_CHIMES_CELL_SCHEDULER");
+        if(scheduler && *scheduler && strcmp(scheduler,"level_queue")) {
+            fprintf(stderr,"CHIMES hybrid requires level_queue scheduling\n");
+            return 1;
+        }
     } else if(!strcmp(value,"cuda_integrated")) {
         *selected=1;cvode_expected="cuda_batched_lu";rhs_expected="cuda_dark_reactions";
     } else {
-        fprintf(stderr,"Unknown SNRT_CHIMES_COMPUTE_BACKEND=%s; expected cpu|cuda_integrated\n",value);
+        fprintf(stderr,"Unknown SNRT_CHIMES_COMPUTE_BACKEND=%s; expected cpu|hybrid (cuda_integrated is experimental)\n",value);
         return 1;
     }
 
@@ -90,7 +97,7 @@ int snrt_chimes_cuda_requested(void)
 {
     int selected;
     if(resolve_compute_backend(&selected))return -1;
-    if(selected>=0)return selected==1;
+    if(selected>=0)return selected!=0;
     const char *cvode=getenv("SNRT_CHIMES_CVODE_BACKEND");
     const char *rhs=getenv("SNRT_CHIMES_RHS_BACKEND");
     return (cvode && *cvode && strcmp(cvode,"cpu")) ||
@@ -617,7 +624,7 @@ int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,
     int cvode_cuda=compute_backend>=0?unified_cuda:
         (cvode_backend && *cvode_backend && strcmp(cvode_backend,"cpu"));
     const char *rhs_backend=getenv("SNRT_CHIMES_RHS_BACKEND");
-    int rhs_cuda=compute_backend>=0?unified_cuda:
+    int rhs_cuda=compute_backend>=0?(compute_backend!=0):
         (rhs_backend && *rhs_backend && strcmp(rhs_backend,"cpu"));
     if(cvode_cuda) {
 #ifdef SNRT_CHIMES_CUDA
@@ -648,8 +655,9 @@ int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,
 #ifdef SNRT_CHIMES_CUDA
     if(compute_backend>=0) {
         if(snrt_chimes_cvode_configure_mode(unified_cuda) ||
-           snrt_chimes_rhs_configure_mode(unified_cuda))return 5;
+           snrt_chimes_rhs_configure_mode(rhs_cuda))return 5;
         fprintf(stderr,"CHIMES integrated compute backend: %s\n",
+            compute_backend==2?"hybrid (host CVODE/LU, asynchronous device RHS/cooling)":
             unified_cuda?"cuda_integrated":"cpu");
     } else if(snrt_chimes_cvode_configure() || snrt_chimes_rhs_configure())return 5;
 #endif
@@ -779,9 +787,36 @@ int snrt_chimes_reconcile_charged(const double *elements,const double *old,doubl
     double measured[11],q,work[NS],locked[11]={0};
     memcpy(next,old,NS*sizeof(double));
     if(!isfinite(solid_q))return 1;
-    if(snrt_chimes_budget(old,measured,&q))return 1;
     memcpy(work,old,sizeof(work));
-    for(int s=sp_H2;s<NS;s++)for(int e=0;e<11;e++)locked[e]+=nuclei[s][e]*old[s];
+    for(int e=0;e<11;e++)if(!isfinite(elements[e]) || elements[e]<0)return 2;
+    /* Conservative cell transport can leave a trace neutral/ion population
+     * a few hundred ulps below zero when subtracting nearly equal face
+     * fluxes. Admit only negatives whose elemental debit is <=512 ulps of
+     * every affected live element reservoir; set those roundoff residues to
+     * zero, then let the ordinary conservative reconciliation restore the
+     * element ledger and derive electrons from charge. This is not an
+     * abundance floor: larger negatives and negative electrons remain hard
+     * failures. */
+    for(int s=0;s<NS;s++){
+        if(!isfinite(work[s]))return 1;
+        if(work[s]>=0)continue;
+        if(s==sp_elec)return 1;
+        int has_nucleus=0;
+        for(int e=0;e<11;e++)if(nuclei[s][e]>0){
+            has_nucleus=1;
+            double debit=-work[s]*nuclei[s][e];
+            double tolerance=512*DBL_EPSILON*fmax(elements[e],DBL_MIN);
+            if(!isfinite(debit) || debit>tolerance)return 1;
+        }
+        if(!has_nucleus)return 1;
+        work[s]=0;
+    }
+    if(snrt_chimes_budget(work,measured,&q))return 1;
+    /* Lock only the accepted post-roundoff species state. Using old here
+     * would let a clipped negative molecule perturb the amount of atomic
+     * material available for grain exchange, leaving a small element-ledger
+     * drift when the requested gas-phase reservoir also changes. */
+    for(int s=sp_H2;s<NS;s++)for(int e=0;e<11;e++)locked[e]+=nuclei[s][e]*work[s];
     for(int e=0;e<11;e++){
         if(!isfinite(elements[e]) || elements[e]<0 ||
            elements[e]<locked[e]-1e-12*fmax(elements[e],locked[e]))return 2;
@@ -884,6 +919,19 @@ static int cell_charged_impl(const double *controls,const double *elements,const
         c.Tmol_K=0; /* Atomic remainder may cool below the event temperature. */
     }
     if(mode==3){c.Tmol_K=snrt_chimes_molecular_temperature_max();c.explicitTolerance=0;}
+#ifdef SNRT_CHIMES_CVODE_DIAGNOSTICS
+    /* Diagnostic executable only: tighten the cold-dark tolerance vector.
+     * Environment is set before starting the fixed-worker parallel region. */
+    const char *tol_factor=getenv("SNRT_CHIMES_TEST_TOLERANCE_FACTOR");
+    if(mode==1 && tol_factor){
+        char *end=NULL;
+        const double factor=strtod(tol_factor,&end);
+        if(end==tol_factor || *end || !isfinite(factor) || factor<=0 || factor>1)return 2;
+        c.relativeTolerance*=factor;
+        c.absoluteTolerance*=factor;
+        c.explicitTolerance*=factor;
+    }
+#endif
     struct cell_context context={solid_q,mode==1?snrt_chimes_molecular_temperature_max():0,0,
         mode==3?snrt_chimes_molecular_temperature_max():0,-1};
     c.hybrid_data=&context;

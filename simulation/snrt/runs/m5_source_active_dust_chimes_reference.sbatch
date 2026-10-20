@@ -20,11 +20,16 @@ readonly PROFILE=${M5_SOURCE_PROFILE:-agn_reference}
 readonly VERIFY_RESTART=${M5_VERIFY_RESTART:-0}
 readonly AMR_INTERFACE=${M5_AMR_INTERFACE_CHECK:-0}
 readonly A40_SMOKE=${M5_ALLOW_A40_SMOKE:-0}
+readonly CHIMES_BACKEND=${M5_CHIMES_BACKEND:-cpu}
 readonly TRANSPORT_BACKEND=${M5_TRANSPORT_BACKEND:-auto}
 readonly MATERIAL_BACKEND=${M5_MATERIAL_BACKEND:-auto}
 case "$A40_SMOKE" in
   0|1) ;;
   *) echo 'M5_ALLOW_A40_SMOKE must be 0 or 1' >&2; exit 2 ;;
+esac
+case "$CHIMES_BACKEND" in
+  cpu|hybrid) ;;
+  *) echo 'M5_CHIMES_BACKEND must be cpu or hybrid' >&2; exit 2 ;;
 esac
 case "$TRANSPORT_BACKEND:$MATERIAL_BACKEND" in
   auto:auto|openmp:auto|openmp:openmp|auto:openmp) ;;
@@ -83,6 +88,12 @@ readonly BINARY=$(realpath "$M5_CHIMES_BINARY")
 readonly CHIMES_INSTALL=$(realpath "$(dirname "$BINARY")/../chimes-install")
 test -x "$BINARY"
 test -f "$CHIMES_INSTALL/libchimes.so"
+if [[ "$CHIMES_BACKEND" == hybrid ]]; then
+  grep -aFq 'hybrid (host CVODE/LU, asynchronous device RHS/cooling)' "$BINARY" || {
+    echo 'Hybrid CHIMES requested with a binary lacking the CHIMES_CUDA backend' >&2
+    exit 3
+  }
+fi
 test ! -e "$WORK"
 mkdir "$WORK"
 cp "$RANK_BIND" "$WORK/rank-bind.sh"
@@ -241,12 +252,17 @@ export SNRT_SPECTRAL_MODEL=chimes_transition_d03_maxent128_fs2010_v1
 export SNRT_CHIMES_BINARY="$BINARY" SNRT_CHIMES_MAIN_DATA="$TABLE" SNRT_CHIMES_GROUP_DIR="$GROUP_DIR"
 export SNRT_CHIMES_BAND_TABLE=$ASSETS/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5
 export SNRT_CHIMES_MOLECULAR_TABLE=$ASSETS/.chimes-molecular.U6ZQCr/bank/molecular_nodes.h5
-export SNRT_CHIMES_COMPUTE_BACKEND=cpu SNRT_PERF_DIAGNOSTIC=1
+export SNRT_CHIMES_COMPUTE_BACKEND="$CHIMES_BACKEND" SNRT_PERF_DIAGNOSTIC=1
 export PHASE0_YIELD_TABLE=$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5/yields.dat
 unset SNRT_DRIVER_TEST_SEED_SOURCE SNRT_RT_ENABLE SNRT_RT_TX_TEST_FAIL_STAGE SNRT_RT_TX_TEST_FAIL_LEAF
 unset SNRT_CHIMES_CVODE_BACKEND SNRT_CHIMES_RHS_BACKEND SNRT_CHIMES_CELL_SCHEDULER
 unset SNRT_CHIMES_GPU_BROKERS SNRT_CHIMES_GPU_WORKER SNRT_CHIMES_GPU_BATCH_CELLS
 unset SNRT_CHIMES_GPU_RESULT SNRT_CHIMES_GPU_COOLING
+if [[ "$CHIMES_BACKEND" == hybrid ]]; then
+  export SNRT_CHIMES_CELL_SCHEDULER=level_queue SNRT_CHIMES_GPU_WORKER=any
+  export SNRT_CHIMES_GPU_BROKERS=1 SNRT_CHIMES_GPU_BATCH_CELLS=64
+  export SNRT_CHIMES_GPU_RESULT=compact SNRT_CHIMES_GPU_COOLING=1
+fi
 unset PHASE0_SNIA_RUNTIME_CONTRACT
 if [[ "$PROFILE" == effective_population ]]; then
   export PHASE0_SNIA_RUNTIME_CONTRACT="$SNIA_CONTRACT"
@@ -254,8 +270,8 @@ if [[ "$PROFILE" == effective_population ]]; then
 fi
 
 printf 'PROFILE=%s_M5_live_dust_CHIMES_reference_NONPRODUCTION\n' "$PROFILE" | tee -a "$WORK/launch.txt"
-printf 'MPI=%s OMP=%s; real_BH_accretion_sink; SED_and_dust_contracts=reference_control; CHIMES_backend=cpu; VERIFY_RESTART=%s\n' \
-  "$SLURM_NTASKS" "$OMP_NUM_THREADS" "$VERIFY_RESTART" \
+printf 'MPI=%s OMP=%s; real_BH_accretion_sink; SED_and_dust_contracts=reference_control; CHIMES_backend=%s; VERIFY_RESTART=%s\n' \
+  "$SLURM_NTASKS" "$OMP_NUM_THREADS" "$CHIMES_BACKEND" "$VERIFY_RESTART" \
   | tee -a "$WORK/launch.txt"
 printf 'TRANSPORT_BACKEND=%s MATERIAL_BACKEND=%s\n' "$TRANSPORT_BACKEND" "$MATERIAL_BACKEND" \
   | tee -a "$WORK/launch.txt"
@@ -358,6 +374,10 @@ if ((${#raw_outputs[@]})); then
   exit 4
 fi
 if [[ "$AMR_INTERFACE" == 1 ]]; then
+  if [[ "$CHIMES_BACKEND" == hybrid ]]; then
+    grep -Fq 'CHIMES integrated compute backend: hybrid (host CVODE/LU, asynchronous device RHS/cooling)' run.log
+    grep -Eq 'CHIMES_LEVEL_QUEUE cells=(3[2-9]|[4-9][0-9]|[1-9][0-9][0-9]+).*gpu_brokers=1 gpu_worker_mask=0x[1-9a-f][0-9a-f]*' run.log
+  fi
   grep -Eq 'Level[[:space:]]+3 has[[:space:]]+8 grids' run.log
   grep -Eq 'SNRT_MN_COMMIT level/order/substeps=[[:space:]]+2[[:space:]]+5' run.log
   grep -Eq 'SNRT_MN_COMMIT level/order/substeps=[[:space:]]+3[[:space:]]+5' run.log

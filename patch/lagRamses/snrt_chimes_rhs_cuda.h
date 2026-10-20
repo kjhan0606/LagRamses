@@ -8,7 +8,7 @@ extern "C" {
  * cooling rate so the host can skip calculate_total_cooling_rate. */
 int snrt_chimes_rhs_configure(void);
 int snrt_chimes_rhs_configure_mode(int use_cuda);
-/* Calls, fallback, batches, errors, uploads, peak concurrent batches, streams used. */
+/* Calls, fallback, batches, errors, uploads, peak submitted-but-incomplete batches, streams used. */
 void snrt_chimes_rhs_counts(unsigned long long out[7]);
 unsigned long long snrt_chimes_rhs_worker_mask(void);
 /* Completed compact/full batches and returned payload bytes. */

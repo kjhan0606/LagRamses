@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <climits>
+#include <cfloat>
 #include <algorithm>
 #include <dlfcn.h>
 #include <openssl/evp.h>
@@ -29,6 +30,7 @@ void cuda_pm_finalize(void){}
 int snrt_chimes_initialize(const char*,int,const char*,int);
 int snrt_chimes_neutral(const double*,double*);
 int snrt_chimes_budget(const double*,double*,double*);
+int snrt_chimes_reconcile_charged(const double*,const double*,double,double*);
 int snrt_chimes_cell_cold_dark(const double*,const double*,const double*,double*,double*);
 int snrt_chimes_fs_ready(void){return 0;}
 int snrt_chimes_fs_fractions(double,double,double*){std::abort();}
@@ -83,6 +85,24 @@ static double lu_test(int threads,int repeats,bool singular) {
 #endif
 constexpr int nc=SNRT_CHIMES_TEST_NCELL,ns=157;
 struct Cell {double controls[9],elements[11],old[ns],next[ns],temperature;int status,tile_worker,tile_gpu_lease;};
+static void reconcile_roundoff_test(){
+    double initial[11]={},target[11]={},old[ns],next[ns],measured[11],charge;
+    initial[0]=1.;initial[2]=1e-4;std::copy(initial,initial+11,target);
+    require(!snrt_chimes_neutral(initial,old),"roundoff fixture neutral state");
+    target[0]=.8;
+    old[sp_H2]=-200.*DBL_EPSILON; // H debit remains below the 512-ulp reservoir allowance.
+    require(!snrt_chimes_reconcile_charged(target,old,0.,next),"roundoff molecular clipping accepted");
+    require(next[sp_H2]==0.,"roundoff molecule clipped");
+    require(!snrt_chimes_budget(next,measured,&charge),"roundoff reconciled state is admissible");
+    require(std::abs(measured[0]-target[0])<=4.*DBL_EPSILON &&
+            std::abs(measured[2]-target[2])<=4.*DBL_EPSILON,
+            "roundoff clipping preserves changed element reservoirs");
+    double bad[ns];std::copy(old,old+ns,bad);bad[sp_H2]=-1024.*DBL_EPSILON;
+    require(snrt_chimes_reconcile_charged(target,bad,0.,next)!=0,"material negative molecule rejected");
+    std::copy(old,old+ns,bad);bad[sp_H2]=0.;bad[sp_elec]=-DBL_MIN;
+    require(snrt_chimes_reconcile_charged(target,bad,0.,next)!=0,"negative electron rejected");
+    puts("CHIMES_ROUNDOFF_RECONCILE_CONSERVATION_PASS");
+}
 static Cell input[nc];
 static int fixture_cell_index[nc];
 static const bool diagnostic_mode=std::getenv("SNRT_CHIMES_RHS_DIAGNOSTIC")!=nullptr;
@@ -188,14 +208,20 @@ static int compare(const Cell *ref,const Cell *trial,const char *label,bool stri
         temp=std::max(temp,std::abs(trial[i].temperature/ref[i].temperature-1));
         energy=std::max(energy,std::abs(b*trial[i].temperature/(a*ref[i].temperature)-1));
     }
-    std::printf("PHYSICS %s failed=%d species_scaled_error=%.17g temperature_rel=%.17g energy_rel=%.17g nuclei_rel=%.17g charge_abs=%.17g\n",label,failed,species,temp,energy,nuclei,charge);
-    std::printf("STATUSES %s mismatch=%d cpu_rejected=%d trial_rejected=%d\n",label,mismatch,cpu_rejected,trial_rejected);
+    std::printf("PHYSICS %s failed=%d compared=%d species_scaled_error=%.17g temperature_rel=%.17g energy_rel=%.17g nuclei_rel=%.17g charge_abs=%.17g\n",
+        label,failed,nc-failed,failed<nc?species:NAN,failed<nc?temp:NAN,
+        failed<nc?energy:NAN,failed<nc?nuclei:NAN,failed<nc?charge:NAN);
+    std::printf("STATUSES %s mismatch=%d cpu_rejected=%d trial_rejected=%d compared=%d physics_available=%d\n",
+        label,mismatch,cpu_rejected,trial_rejected,nc-failed,failed<nc);
     if(wi>=0)std::printf("WORST_SPECIES %s cell=%d species=%d cpu=%.17g gpu=%.17g abs_diff=%.17g\n",label,wi,ws,ref[wi].next[ws],trial[wi].next[ws],std::abs(ref[wi].next[ws]-trial[wi].next[ws]));
     require(failed<nc || diagnostic_mode,"all fixture cells rejected");
     if(diagnostic_mode)require(nuclei<1e-8 && charge<1e-10,"dark CPU/GPU conservation diagnostic");
     else require(species<=1 && temp<1e-6 && energy<1e-6 && nuclei<1e-8 && charge<1e-10,"dark CPU/GPU physics parity");
     return mismatch;
 }
+#ifdef SNRT_CHIMES_FIXED_DIAGNOSTIC
+#include "chimes_cvode_fixed_diagnostic.hpp"
+#endif
 static void rhs_test() {
     const char *verify_mode=std::getenv("SNRT_CHIMES_RHS_VERIFY");
     std::printf("RHS_EXECUTION_MODE=%s paired_return=%s diagnostic_only=%d\n",
@@ -421,9 +447,21 @@ static void tile_route_diagnostic(){
     puts("CHIMES_TILE_ROUTE_DIAGNOSTIC_COMPLETE");
 }
 #ifndef SNRT_CHIMES_CPU_BUILD_ONLY
-static void bundle_test(bool rhs,bool benchmark,bool integrated=false) {
+static void bundle_test(bool rhs,bool benchmark,bool integrated=false,bool level=false) {
     require(!diagnostic_mode,"qualification cannot use diagnostic bypass");
     make_cells();Cell reference[nc],trial[nc];
+    if(level){
+        setenv("SNRT_CHIMES_CELL_SCHEDULER","level_queue",1);
+        setenv("SNRT_CHIMES_GPU_WORKER","any",1);
+        omp_set_num_threads(8);
+    }
+    auto evolve_selected=[&](Cell *out){
+        if(!level)return evolve(out,8);
+        std::memcpy(out,input,sizeof(input));
+        const double start=omp_get_wtime();
+        require(!snrt_chimes_rhs_level_run(nc,tile_cell,out),"bundle level dispatcher");
+        return omp_get_wtime()-start;
+    };
     auto select=[&](bool gpu){
         if(integrated) {
             require(!snrt_chimes_cvode_configure_mode(gpu?1:0),"integrated CVODE configure");
@@ -435,7 +473,7 @@ static void bundle_test(bool rhs,bool benchmark,bool integrated=false) {
         }
     };
     auto accepted=[](const Cell *cells){for(int i=0;i<nc;i++)require(cells[i].status==0,"bundle requires every cell accepted");};
-    double start=omp_get_wtime();cuda_pool_init(gpu_local_rank(),3);
+    double start=omp_get_wtime();cuda_pool_init(gpu_local_rank(),level?8:3);
     std::printf("BUNDLE_POOL_INIT_S=%.9g\n",omp_get_wtime()-start);
     double cold=0;
     if(integrated) {
@@ -452,8 +490,8 @@ static void bundle_test(bool rhs,bool benchmark,bool integrated=false) {
         std::printf("INTEGRATED_COLD_S=%.9g gpu_lu=%llu gpu_rhs=%llu\n",cold,
             lu_after[1]-lu_before[1],rhs_after[0]-rhs_before[0]);
     } else {
-        select(false);evolve(reference,8);accepted(reference);
-        select(true);cold=evolve(trial,8);accepted(trial);compare(reference,trial,"bundle-cold");
+        select(false);evolve_selected(reference);accepted(reference);
+        select(true);cold=evolve_selected(trial);accepted(trial);compare(reference,trial,"bundle-cold");
         std::printf("BUNDLE_COLD_S=%.9g\n",cold);
     }
     unsigned long long lu0[10],lu1[10],r0[7],r1[7];
@@ -464,18 +502,27 @@ static void bundle_test(bool rhs,bool benchmark,bool integrated=false) {
         bool capture=gpu && sample==0 && std::getenv("SNRT_CHIMES_BUNDLE_PROFILE");
         auto profiler=[&](const char *symbol){auto fn=(int(*)())dlsym(RTLD_DEFAULT,symbol);require(fn && fn()==0,"CUDA profiler range");};
         if(capture)profiler("cudaProfilerStart");
-        double seconds=evolve(trial,8);
+        double seconds=evolve_selected(trial);
         if(capture)profiler("cudaProfilerStop");
         accepted(trial);compare(reference,trial,gpu?"bundle-warm-gpu":"bundle-warm-cpu");
         std::printf("BUNDLE_TIME backend=%s arm=%s sample=%d cells=%d seconds=%.9g\n",
-            integrated?"integrated":(rhs?"rhs":"lu"),gpu?"gpu":"cpu",sample+1,nc,seconds);
+            level?"level":(integrated?"integrated":(rhs?"rhs":"lu")),gpu?"gpu":"cpu",sample+1,nc,seconds);
     }
     snrt_chimes_cvode_counts(lu1);snrt_chimes_rhs_counts(r1);
-    std::printf("BUNDLE_GPU_WORK lu_factors=%llu lu_batches=%llu lu_errors=%llu lu_peak_concurrent=%llu lu_streams_used=%llu rhs_calls=%llu rhs_batches=%llu rhs_errors=%llu warm_table_uploads=%llu rhs_peak_concurrent=%llu rhs_streams_used=%llu\n",
+    std::printf("BUNDLE_GPU_WORK lu_factors=%llu lu_batches=%llu lu_errors=%llu lu_peak_concurrent=%llu lu_streams_used=%llu rhs_calls=%llu rhs_batches=%llu rhs_errors=%llu warm_table_uploads=%llu rhs_peak_inflight=%llu rhs_streams_used=%llu\n",
         lu1[1]-lu0[1],lu1[2]-lu0[2],lu1[4]-lu0[4],lu1[6],lu1[7],r1[0]-r0[0],r1[2]-r0[2],r1[3]-r0[3],r1[4]-r0[4],r1[5],r1[6]);
     if(integrated)require(r1[0]>r0[0],"integrated warm GPU RHS exercised");
     else require(rhs?r1[0]>r0[0]:lu1[1]>lu0[1],"GPU work exercised");
-    if(rhs||integrated)require(r1[5]>1 && r1[6]>1,"multiple RHS streams execute concurrently");
+    if(level){
+        const char *broker_env=std::getenv("SNRT_CHIMES_GPU_BROKERS");
+        const int expected=broker_env?std::atoi(broker_env):1;
+        const auto mask=snrt_chimes_rhs_worker_mask();
+        int workers_used=0;for(auto bits=mask;bits;bits&=bits-1)workers_used++;
+        std::printf("LEVEL_QUEUE_GPU_WORKERS mask=%llu used=%d expected_at_least=%d\n",mask,workers_used,expected);
+        require(workers_used>=expected,"level queue exercised requested independent GPU brokers");
+        if(expected>1)require(r1[5]>1,"multiple level-queue GPU batches were in flight");
+    }
+    if((rhs||integrated) && !level)require(r1[5]>1 && r1[6]>1,"multiple RHS streams execute concurrently");
     if(!rhs && !integrated)require(lu1[6]>1 && lu1[7]>1,"multiple LU streams execute concurrently");
     require(lu1[4]==lu0[4] && r1[3]==r0[3],"warm device errors");
     snrt_chimes_rhs_finalize();snrt_chimes_cvode_cuda_finalize();cuda_pool_finalize();
@@ -611,10 +658,15 @@ int main(int argc,char **argv) {
     require(argc==2 || argc==3,"main table argument");omp_set_dynamic(0);
     double start=omp_get_wtime();
     int init_status=snrt_chimes_initialize(argv[1],0,nullptr,0);
+    if(!init_status)reconcile_roundoff_test();
     if(argc==3 && (!std::strcmp(argv[2],"cpu-bench") || !std::strcmp(argv[2],"cpu-state"))) {
         require(!init_status,"CPU build initialization");cpu_build_test(!std::strcmp(argv[2],"cpu-bench"));return 0;
     }
 #ifndef SNRT_CHIMES_CPU_BUILD_ONLY
+    if(argc==3 && (!std::strcmp(argv[2],"check-level") || !std::strcmp(argv[2],"bench-level"))){
+        require(!init_status,"level bundle initialization");
+        bundle_test(true,!std::strcmp(argv[2],"bench-level"),false,true);return 0;
+    }
     if(argc==3 && (!std::strcmp(argv[2],"check-lu") || !std::strcmp(argv[2],"check-rhs") ||
                    !std::strcmp(argv[2],"bench-lu") || !std::strcmp(argv[2],"bench-rhs") ||
                    !std::strcmp(argv[2],"check-integrated") || !std::strcmp(argv[2],"bench-integrated"))) {
@@ -628,6 +680,9 @@ int main(int argc,char **argv) {
     if(argc==3 && !std::strcmp(argv[2],"tile")){require(!init_status,"tile initialization");tile_test();return 0;}
     if(argc==3 && !std::strcmp(argv[2],"tile-rhs-diagnostic")){require(!init_status,"tile RHS diagnostic initialization");tile_rhs_diagnostic();return 0;}
     if(argc==3 && !std::strcmp(argv[2],"tile-route-diagnostic")){require(!init_status,"tile route diagnostic initialization");tile_route_diagnostic();return 0;}
+#ifdef SNRT_CHIMES_FIXED_DIAGNOSTIC
+    if(argc==3 && !std::strcmp(argv[2],"fixed-route-diagnostic")){require(!init_status,"fixed route initialization");fixed_route_diagnostic();return 0;}
+#endif
 #endif
     if(argc==3 && !std::strcmp(argv[2],"profile")) {
         require(!init_status,"profile initialization");make_cells();Cell reference[nc];

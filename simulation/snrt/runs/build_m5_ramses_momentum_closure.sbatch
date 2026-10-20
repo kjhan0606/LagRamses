@@ -43,24 +43,33 @@ make -j1 \
   GITHASH="$SOURCE_COMMIT" \
   GITREPO="$(git -C "$ROOT" remote get-url origin)" \
   EXEC="$EXEC" \
-  SNRT=1 DUST_LIVE=1 CHIMES=1 HDF5=1 USE_CUDA=1 USE_FFTW=1 \
+  SNRT=1 DUST_LIVE=1 CHIMES=1 CHIMES_CUDA=1 HDF5=1 USE_CUDA=1 USE_FFTW=1 \
   NENER=0 NVECTOR=32 CHIMES_DIR="$BUILD/chimes-install" \
   SUNDIALS_DIR=/gpfs/kjhan/LRD_JWST/.snrt-performance.jDx9Iz/sundials-release \
   ramses > "$ROOT/.m5-momentum-build-$SLURM_JOB_ID.build.log" 2>&1
 
 test -x "$BIN"
+test -f "$BUILD/bin/snrt_chimes_cvode_cuda.o"
+test -f "$BUILD/bin/snrt_chimes_rhs_cuda.o"
 if ldd "$BIN" | rg 'not found'; then
   echo 'Unresolved shared library dependency in momentum-closure executable' >&2
   exit 3
 fi
+strings "$BIN" | rg -F 'hybrid (host CVODE/LU, asynchronous device RHS/cooling)'
 strings "$BIN" | rg -F 'M_N radiation momentum finite check failed'
 strings "$BIN" | rg -F 'M_N RAMSES momentum closure failed'
-sha256sum "$BIN" "$BUILD/bin/snrt_moment_ramses.o" > "$BUILD/build.sha256"
+sha256sum "$BIN" "$BUILD/bin/snrt_moment_ramses.o" \
+  "$BUILD/bin/snrt_chimes_bridge.o" "$BUILD/bin/snrt_chimes_cvode_cuda.o" \
+  "$BUILD/bin/snrt_chimes_rhs_cuda.o" > "$BUILD/build.sha256"
 sha256sum "$SOURCE_TREE/bin/Makefile" \
+  "$SOURCE_TREE/patch/lagRamses/snrt_chimes_bridge.c" \
+  "$SOURCE_TREE/patch/lagRamses/snrt_chimes_cvode_cuda.cu" \
+  "$SOURCE_TREE/patch/lagRamses/snrt_chimes_rhs_cuda.cu" \
+  "$SOURCE_TREE/patch/lagRamses/snrt_chimes_rhs_cuda.h" \
   "$SOURCE_TREE/patch/lagRamses/load_balance.kjhan.f90" \
   "$SOURCE_TREE/patch/lagRamses/snrt_moment_amr.f90" \
   "$SOURCE_TREE/patch/lagRamses/snrt_moment_band.cpp" \
   "$SOURCE_TREE/patch/lagRamses/snrt_moment_ramses.f90" \
   "$SOURCE_TREE/patch/lagRamses/snrt_regrid.f90" > "$BUILD/source.sha256"
-printf 'M5_MOMENTUM_CLOSURE_BUILD_PASS\nSOURCE_COMMIT=%s\nSOURCE_TREE=%s\nBINARY=%s\n' \
+printf 'M5_MOMENTUM_CLOSURE_BUILD_PASS\nCHIMES_CUDA=1\nSOURCE_COMMIT=%s\nSOURCE_TREE=%s\nBINARY=%s\n' \
   "$SOURCE_COMMIT" "$SOURCE_TREE" "$BIN" > "$BUILD/build-result.txt"
