@@ -187,5 +187,9 @@ if [[ "$MODE" == reference-control ]]; then
 else
   printf 'SIMULATION_READY_OUTPUT_POLICY_NOTE caller_must_audit_noutput_aout_tout_foutput_fbackup\n'
 fi
-printf 'SIMULATION_READY_PHYSICAL_STATUS blocked_until_required_assets_and_live_receivers\n'
+if [[ "$MODE" == reference-control ]]; then
+  printf 'SIMULATION_READY_PHYSICAL_STATUS not_admitted reason=reference_control_profile\n'
+else
+  printf 'SIMULATION_READY_PHYSICAL_STATUS not_admitted reason=legacy_comparison_profile\n'
+fi
 printf 'SIMULATION_READY_PASS mode=%s\n' "$MODE"
