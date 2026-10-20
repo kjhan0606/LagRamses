@@ -14,16 +14,22 @@ evidence.
 
 ## Active bundle map
 
-[Full live M5 connection](snrt_m5_full_connection_2026-09-15.md):
-current wiring/evaluation record for native band A/B state, actual stellar/AGN
-sources, H/He/CHIMES, dust/IR/Fe/PAH/relative phases, MHD coadvection,
-MPI/AMR/restart, and live shared-stream CUDA/OpenMP closure/face dispatch.
-The earlier [high-order work log](m5_high_order_coupling_work_2026-09-14.md)
-and fixed-group-only report are historical intermediate scope, not current
-startup exclusions. S_N defaults and existing physical exclusions are retained.
-Completed with final strong-source, parallel and restart controls. This is
-bounded engineering integration, not galaxy calibration or proof of all
-physical combinations; exact control results are in the linked report.
+[M5 wiring and bounded coupling evidence](m5_l8_interpolation_boundary_evidence_2026-09-16.md):
+current source inspection records the M_N material-tile adapter connection,
+while explicitly stating that a completed integrated M5/dust/CHIMES pass and
+cosmological production qualification have not been demonstrated. The
+[M1--M5 dispatch evidence](mn_order_dispatch_efficiency_2026-09-27.md) adds a
+source-active two-step coupled M5 run and bounded backend comparisons; this is
+not a full L8 completion or production qualification. The earlier
+`snrt_m5_full_connection_2026-09-15.md` entry referenced below is absent from
+this checkout and must not be treated as evidence. Existing physical-asset
+admission blockers remain in force.
+
+The current source does contain a compile-time `DUST_LIVE=1` RAMSES field,
+HDF5 identity/restore contract, and M_N material-coupling path. The queued
+`run_snrt_bundle_gate.sbatch` does not enable that profile (`DUST_LIVE` defaults
+to 0), so its result is native/default-profile evidence only, not live-dust
+runtime qualification.
 
 [128^3 M5 runtime diagnosis](snrt_m5_cost_diagnosis_2026-09-14.md):
 separate short kernel/closure cost measurement; original shadow run unchanged,
@@ -247,7 +253,7 @@ dust-field and CR-field interactions explicitly deferred to long-term work.
 | F-P2.4 native nine-group spectral contract | active, RT group contract | [plan](fp2_4_native_nine_group_spectral_contract_bundle_plan_2026-09-05.md) | [evidence](fp2_4_native_nine_group_spectral_contract_bundle_implementation_evidence_2026-09-05.md) | — | [Opus closure](claude_opus5_fp2_4_native_nine_group_spectral_contract_bundle_closure_audit_2026-09-05.md) |
 | F-P2.5 native H/He thermochemistry | active, chemistry receiver | [plan](fp2_5_native_hhe_thermochemistry_bundle_plan_2026-09-05.md) | [evidence](fp2_5_native_hhe_thermochemistry_bundle_implementation_evidence_2026-09-05.md) | — | [Opus end](claude_opus5_fp2_5_native_hhe_thermochemistry_bundle_end_audit_2026-09-05.md) |
 | F-P2.6 native RT transaction | active, transport/chemistry transaction | [plan](fp2_6_native_rt_chemistry_transaction_bundle_plan_2026-09-05.md) | [evidence](fp2_6_native_rt_chemistry_transaction_bundle_implementation_evidence_2026-09-05.md) | [Fable plan](fable_fp2_6_native_rt_chemistry_transaction_bundle_plan_audit_2026-09-05.md) | [Fable closure](fable_fp2_6_native_rt_chemistry_transaction_bundle_closure_audit_2026-09-05.md), conditional pass |
-| F-P2.7 gate consolidation / initialized-RAMSES | active, current engineering bundle | [plan](fp2_7_gate_consolidation_initialized_ramses_bundle_plan_2026-09-05.md) | pending | [Fable plan](fable_fp2_7_gate_consolidation_initialized_ramses_bundle_plan_audit_2026-09-05.md) | pending; implementation in progress |
+| F-P2.7 gate consolidation / initialized-RAMSES | implemented: D2/D3 PASS; D4 PASS for recorded startup binaries; CPU-vs-CUDA binary-identity caveat retained | [plan](fp2_7_gate_consolidation_initialized_ramses_bundle_plan_2026-09-05.md) | [implementation evidence](fp2_7_gate_consolidation_initialized_ramses_bundle_implementation_evidence_2026-09-05.md) | [Fable plan](fable_fp2_7_gate_consolidation_initialized_ramses_bundle_plan_audit_2026-09-05.md) | [Codex D4 audit](codex_fp2_7_initialized_ramses_bundle_end_audit_2026-09-06.md) covers initialized runtime only; no physical-source or production approval |
 
 ## Next bundle queue
 
@@ -292,11 +298,12 @@ dust-field and CR-field interactions explicitly deferred to long-term work.
 
 ## Classification rules
 
-Latest M5 wiring evidence: [full live M5 connection, 2026-09-15](snrt_m5_full_connection_2026-09-15.md).
-This supersedes the [fixed-group-only intermediate report](snrt_m5_live_connection_2026-09-15.md).
-Advanced material connections and live CUDA dispatch are implemented within
-the existing physical admission domain; see the current report for exact tests
-and limits, not the older blanket exclusions.
+Latest M5 wiring evidence: [current-source wiring reconciliation and L8 boundary](m5_l8_interpolation_boundary_evidence_2026-09-16.md), supplemented by the
+[2026-09-27 dispatch/coupled-run record](mn_order_dispatch_efficiency_2026-09-27.md).
+These establish source wiring and bounded tests, not a completed full L8
+M5/dust/CHIMES transaction or production readiness. The missing
+`snrt_m5_full_connection_2026-09-15.md` artifact is not a valid current
+evidence target. Earlier intermediate reports remain historical.
 
 1. A bundle evidence file is the authoritative entry point for its native
    smokes, build/link, hashes, and conclusions.

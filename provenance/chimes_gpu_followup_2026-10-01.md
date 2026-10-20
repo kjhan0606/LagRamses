@@ -1759,3 +1759,76 @@ Effective inputs: `.cvode-gpu/chimes-broker-thread0-411744/{cpu,thread0}/effecti
 The inherited `thread0` directory label denotes the hybrid arm here;
 its explicit policy is `any` with four brokers, requiring worker mask 15.
 No four-broker runtime or speedup result is available at submission.
+
+### 2026-10-10: level-queue hybrid fixture floor and measured throughput
+
+The new `level-qualify` fixture initially inherited the six-cell RHS
+diagnostic input. That could not exercise the GPU broker: the production
+level dispatcher deliberately disables brokers when `cells < 16*OMP`, which
+is 128 cells at OMP8. The fixture was corrected to use 512 cells, request
+four brokers explicitly, retain eight CPU workers, and require the worker mask
+to prove that all four GPU workers participated. A too-small explicit test
+input now fails before compilation rather than silently testing CPU fallback.
+
+H100 NVL job 418599 completed both default and mixed-composition cases in
+50 seconds. It exercised the level-queue path with host CVODE/LU and GPU RHS
+plus cooling, 4 broker workers, 4 CUDA streams, and 512 independent fixture
+cells. All 512 cells were accepted; status mismatches, rejected cells and CUDA
+errors were zero. The maximum species-scaled CPU/GPU error was
+`3.20486254e-3` (the existing fixture bound is 1); temperature relative error
+was `2.44e-15`, energy relative error `2.22e-15`, nuclei relative error
+`1.11e-16`, and absolute charge residual `2.57e-20`. The warm GPU arm reported
+worker mask 15, four streams used, and a maximum of eight submitted-but-not-yet
+observed-complete batches. This queue-depth counter does not prove concurrent
+kernel execution on the device.
+
+Three alternating warm timings (seconds, 512 cells) were:
+
+| Composition | CPU8 median | CPU4 + four GPU brokers median | Hybrid/CPU |
+|---|---:|---:|---:|
+| Default | 0.55854 | 0.81461 | 1.46x slower |
+| Mixed | 1.71413 | 3.53095 | 2.06x slower |
+
+The hybrid lane therefore passes this bounded numerical/dispatch fixture but
+is **not an acceleration** at this scale. The binary and library hashes are
+`a77c29059c312d26f80157ab15568b3a9056291f0341dd2c7c7eb18fe82f9a8a` and
+`2067fcd0c34b6a6443be220b620b00263d34736094be7b2203d7b13c449a6d99`.
+No RAMSES evolution or production `SNRT_CHIMES_COMPUTE_BACKEND=hybrid`
+initialization was run. In particular, this does not qualify the selector in
+an integrated cosmological simulation.
+
+The first H200 submission was cancelled while pending because Slurm reported
+`QOSGrpGRES`; an H100 attempt exposed a stale H200-only device-name guard in
+the diagnostic script and is excluded. The corrected 418599 run was H100-only
+and passed. The planned maximum-supported-batch-128 comparison was submitted
+as 418602; its completion is recorded below. No larger simulation was launched
+from these fixture results.
+
+### 2026-10-11: batch-128 qualification completed
+
+H100 NVL job 418602 completed both compositions in 52 seconds with 512
+independent cells, OMP8, four GPU brokers/streams, host CVODE/LU, GPU RHS plus
+cooling, compact transfer, and an effective batch size of 128. Worker mask 15
+confirmed that all four GPU brokers participated. Both 512-cell cases were
+accepted with zero status mismatches, rejections, or CUDA errors. Maximum
+species-scaled CPU/GPU error was `5.94500334e-4` for default and
+`3.20486254e-3` for mixed composition; temperature, energy, nuclei and charge
+residuals remained within the printed fixture bounds.
+
+Three alternating warm samples (seconds, 512 cells):
+
+| Composition | CPU8 median | CPU4 + four GPU brokers median | Hybrid/CPU |
+|---|---:|---:|---:|
+| Default | 0.55875 | 0.88849 | 1.59x slower |
+| Mixed | 1.71041 | 3.66780 | 2.14x slower |
+
+Thus the batch-128 path also passes this bounded numerical/dispatch fixture,
+but does not accelerate it; CPU remains the production default. Executable
+SHA256 is `a6c0cdcb63e0bc441b5826853b0750adb4138a2de4d1d40c9e89bf8859aac2c1`;
+the linked CHIMES library is unchanged at
+`2067fcd0c34b6a6443be220b620b00263d34736094be7b2203d7b13c449a6d99`. Since
+the test executable hash differs from job 418599, these are two measured
+configurations, not a bit-for-bit controlled batch-size A/B attribution. The
+result does not qualify a RAMSES production selector or cosmological evolution.
+The exact log and disposable fixture build are
+`.cvode-gpu/tile-rhs-418602.log` and `.cvode-gpu/tile-rhs-build-418602/`.

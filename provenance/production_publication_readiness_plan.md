@@ -150,8 +150,19 @@ mirror. `stellar_yield_tables` and the embedded generator convert `age_yr` to
 RAMSES convention including explicit `aexp**2`; the source APIs consume
 `[previous_age_gyr,current_age_gyr]`; and `stellar_progress_contract` commits
 `indtab` only after successful deposition. Native G1 and production-linked
-P0 tests pass. The remaining G1.1 items (SN-energy dimensional audit and
-executed field-map/restart qualification) remain open.
+P0 tests pass. **The legacy SN-energy dimensional audit is not closed**: the
+legacy path forms `NbSN` from the interpolated `NSN2` increment times `mp0`,
+while its Sedov energy conversion has a separate hard-coded normalization. The
+code-mass side is now traced: star formation stores `mp0=n*mstar` in RAMSES
+code mass, and the channel-resolved path converts it with
+`scale_d*scale_l**3 / Msun`; the legacy `NSN2` path has no corresponding
+conversion. The legacy yield-table format has no declared unit for `NSN2` (no
+per-Msun/per-code-mass basis), so its missing normalization and the correct
+event-energy convention cannot be resolved from that file. A candidate helper
+was tested arithmetically, then removed before source integration because it
+was not dimensionally grounded. The existing legacy formulas remain unchanged
+for exact historical comparison pending recovery of the table contract.
+Executed field-map/restart qualification also remains open.
 
 Before changing source, add minimal reproductions and inspect the exact binary
 path:
@@ -168,9 +179,16 @@ path:
    for idempotence.
 3. **SN energy:** trace legacy and Phase-0 energy from source-table units to
    `unew`; explicitly encode whether `energy_erg_per_star` is cgs and whether
-   any `1e51 erg` normalization is already included. Remove magic conversion
-   factors and add a one-event dimensional test. Do not change the suspected
-   `feedback.kjhan3.f90` paths until this test identifies the actual convention.
+   any `1e51 erg` normalization is already included. For legacy feedback,
+   establish the `NSN2` table normalization before selecting an energy-per-
+   event versus specific-energy conversion. `mp0` is a RAMSES code mass
+   (`star_formation.kjhan.f90`: `mp0=n*mstar`); the production channel path
+   explicitly converts it with `scale_d*scale_l**3 / solar_mass_cgs`, whereas
+   legacy multiplies `NSN2` directly by `mp0`. The table has no unit metadata.
+   Do not substitute a guessed conversion. Keep the historical legacy formulas
+   unchanged for exact-build comparison; keep legacy runtime qualification
+   open until the table contract is recovered and a one-population
+   source-to-cell energy ledger closes.
 4. **Field metadata:** replace inferred `scalar_01..scalar_11` meanings with a
    versioned native map tied to `NVAR`, `imetal`, `ichem`, and the executable
    build. Prove He indexing, total-metal treatment, and delayed-cooling field
@@ -194,6 +212,27 @@ path:
   cumulative residual itself to remain non-negative and monotonic.
 - Add native Fortran tests and Python/JAX differential tests on the same table,
   including boundaries and exact-grid queries.
+
+Current-worktree evidence (2026-10-11): the isolated Intel Fortran G1 native
+contract fixture passes, including out-of-domain rejection, missing/duplicate
+grid detection, closure, restart idempotence, and the NVAR=18 field map. The
+six-query Python/JAX differential also passes with zero reported difference
+(`jax==0.11.1`, CPU). The interpreter was borrowed read-only from the distinct
+`/gpfs/kjhan/LRD_JWST` checkout because this checkout has no local `.venv`; the
+sources, fixture, and temporary test data came from this worktree. This closes
+the isolated native/differential fixture check only; production-executable
+admission and source-asset requirements above remain open.
+
+Restart-evidence provenance clarification (2026-10-11): the historical
+`simulation/snrt/data/p0_hdf5_stellar_restart_contract.json` runtime record
+points to a binary under the separate `/gpfs/kjhan/LRD_JWST` checkout and
+explicitly records `true_ptype_star_continuation_equivalence=false`. That
+checkout is at `9bec08c`; this project tree is at `2a88e02` (same origin, but
+ten commits ahead), and this tree has no `bin/ramses_final3d`. Therefore that
+JSON supports only its recorded older-binary schema/restart checks; it does
+not qualify the current source's physical stellar continuation. The linked
+runtime gate must be rebuilt from this tree and executed in an allocated
+compute job before P0.3 can be closed.
 
 **Exit:** G1 has a passing native contract test matrix and a production binary
 that cannot start with an ambiguous field map, unit contract, or query outside

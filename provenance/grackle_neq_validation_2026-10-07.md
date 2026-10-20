@@ -448,3 +448,148 @@ treatment on 2026-10-07 ("자네가 말한 수치 기준을 확정하자"). Exis
 results have not been relabeled as a pass; the prospective specific-energy/
 temperature comparison is authorized and still pending. Astra's production
 verdict remains CONDITIONAL until that qualification is evaluated.
+
+### Approved-policy prospective qualification submitted — 2026-10-07
+
+Operator requested execution of the newly adopted policy. Job **415811**
+uses H100, one rank/eight OpenMP threads, 24 GiB (including a fresh serial
+build) and a three-hour wall limit. Its input bundle is
+`.grackle-accuracy-inputs.LoTZ4C/`; its evidence directory is
+`.grackle-neq-accuracy-415811/`. The two effective namelists are in the
+`candidate` and `reference` subdirectories of each. The approved Courant
+factors are 0.125 and 0.0625, nsubcycle=1, nstepmax=500, fixed level 7,
+and exactly one scheduled snapshot per case at aout=0.1065 with match_aout.
+Dust/RT remain off. Periodic output/backup intervals are 1000000. The
+preflight estimates <=2 GiB per dump, <=4 GiB in total, with 258 TiB free
+on /gpfs. This is an estimated storage budget, not a measured dump size.
+
+The existing `check_grackle_neq_outputs.py` gains a separate approved-policy
+mode without replacing its earlier MPI/OpenMP/restart checks. The analysis
+uses epsilon=(total energy density-kinetic energy density)/rho; temperature
+comes from the actual Grackle API through a small standalone C adapter,
+using each snapshot's chemistry and cosmological units. The adapter links
+the installed non-PIC static library as an executable, not a shared object;
+no Grackle installation changes were needed. Its preflight passed density
+rescaling, atomic composition/particle-count, cross-epoch temperature-unit,
+weighted-percentile and union-mask controls. The job reruns those controls
+before evolution. Weighted thermal/composition p95s, global ratios and both
+aggregate tail masks are tested against the already approved limits.
+
+The new executable is built inside this job, including the output-clock
+floor change; the old evidence executable is untouched. Frozen input/tool
+copies, source hashes, build log, exact batch script and executable hashes
+are retained. A changed source manifest aborts the build qualification.
+Both raw snapshots remain available until evaluation/final audit is done.
+
+Initial submission 415810 was cancelled after ~21 seconds during build:
+the source-check command needed an explicit repository working directory
+after changing to the build folder. That wrapper-only mistake was fixed
+and resubmitted as 415811 before evolution. It is not solver evidence.
+No new numerical result or production approval is asserted by submission;
+Astra's prior CONDITIONAL verdict and the unsent completion email remain.
+
+While 415811 was compiling, its actual VPATH resolution was checked:
+`units.o` uses `patch/cuRamses/units.f90`, whose Mpc conversion is 3.08e24,
+not the 3.0856776e24 constant in `amr/units.f90`. Before analyzer execution,
+the driver corrected the effective run's `analyzer.py` (and maintained
+source tool) to use exactly 3.08e24 for both length and fixed time units.
+The original submitted analyzer remains in the immutable input bundle;
+`effective_analyzer.sha256` identifies the corrected effective artifact.
+Both constants cancel in the temperature velocity-unit ratio, so this is
+an exact unit-identity correction, not a change to solver or error limits.
+
+### Prospective result and owner verification — 2026-10-08
+
+Job 415811 completed successfully in 1:22:06 (exit 0). Candidate Courant
+0.125 reached the target after 190 steps in 26:28; reference 0.0625 after
+381 steps in 53:00. Both contain exactly 2,097,152 leaf cells at fixed level
+7 and the same a=0.1065 epoch to roundoff. Each raw HDF5 snapshot measures
+771,878,592 bytes, below the predeclared storage estimate.
+
+Owner verification job 415928 re-evaluated the original raw snapshots with
+the hash-verified effective analyzer/temperature API, without evolving the
+simulation or overwriting the original summary. The complete summary was
+reproduced exactly. A separate calculation used
+`E_total/rho - 0.5*sum((momentum/rho)^2)` for specific energy,
+inverse-CDF uniform-volume quantiles and independently accumulated mass
+quantiles/union masks. It agrees with recorded statistics to roundoff.
+The mesh has unique coordinates, unit total volume, and matched coordinates
+between both runs. Effective namelists differ only in Courant factor;
+the build log confirms the output-clock fix and cuRamses units source.
+Executable, effective input and effective-analyzer hashes all match.
+No error, MG nonconvergence or nonzero NaN diagnostic was found in either log.
+
+| Adopted quantity | Volume weighted | Gas-mass weighted | Limit |
+|---|---:|---:|---:|
+| epsilon relative p95 | 1.972877% | 1.994915% | 2% |
+| Temperature relative p95 | 1.971430% | 1.993334% | 2% |
+| epsilon OR T >10% union | 0.004482% (94 cells) | 0.014861% | 0.1% |
+| Any composition/e/H >0.01 union | 0.001907% (40 cells) | 0.004231% | 0.01% |
+
+Every local composition/e/H p95 is below 1e-3; the largest mass-weighted
+p95 is e/H at 3.383941e-5. Global HII/H and HeIII/He absolute differences
+are 2.170898e-5 and 3.048081e-5, both below 1e-4. Maximum H/He/charge
+residuals normalized by rho are below 7.601e-11, versus the 1e-6 limit.
+Finite, positive density/epsilon/temperature/element inventories and
+nonnegative species checks pass. All six summary checks pass.
+
+This is a narrow PASS, not comfortable thermal headroom: mass-weighted
+epsilon p95 is only 0.005085 percentage points below 2%, temperature
+0.006666 percentage points below. Large local maxima remain visible:
+epsilon relative difference 350.326%, temperature 334.545%, HeII/He and
+HeIII/He absolute maxima approximately 0.994 and 0.996. Their occupied
+mass/volume is covered by the adopted tail allowances; these individual
+cells are not claimed accurate. No tolerance was weakened.
+
+Evidence: `.grackle-neq-accuracy-415811/accuracy_summary.json`,
+`recheck/accuracy_summary.json`, `recheck/verification.json`,
+`recheck.py`, `recheck.sbatch` and `recheck-415928.log`.
+This owner verification does not constitute Astra approval or absolute
+solution accuracy, and does not extend qualification to arbitrary AMR,
+epochs, dense gas or feedback stiffness. Raw snapshots are retained pending
+the final scoped audit. Operator cancelled the completion email on
+2026-10-08: do not send it, even after an eventual approval.
+
+### R2 closed by operator; final Astra review waived — 2026-10-08
+
+The operator explicitly instructed: "astra최종 승인은 받지 않고, R2를
+마무리 짓는다. 이제 R3로 진행한다." R2 is therefore CLOSED on the
+adopted numerical-policy PASS (415811) and owner-side verification (415928).
+No final Astra approval was obtained, requested, or represented as obtained.
+The preceding CONDITIONAL verdict is historical, not a remaining closeout
+gate. No completion email will be sent. The numerical/physical scope and
+local-error limitations above remain unchanged.
+
+The current Grackle integration/validation records and handover do not
+define the next stage as R3. Historical September F-P1R R3 and unrelated
+audit issue labels must not be reused as this current stage. R3 is authorized
+in principle, but its intended implementation scope needs identification
+before modifying physics or launching a new trajectory. Both current raw
+snapshots are temporarily preserved until it is determined whether R3
+needs them as restart/reference data; otherwise remove them after resolving
+the exact targets and retain a cleanup manifest.
+
+### Subsequent scope clarification and raw-data retention — 2026-10-08
+
+The operator subsequently clarified that the R2/R3 instruction referred to
+another project. Those labels above are historical conversation context,
+not stage names or authorization to invent an R3 in LagRamses. The current
+instruction is to return to galaxy parameter tuning. Final Astra review
+remains waived and the completion email remains cancelled; no external
+approval is claimed. The owner numerical-policy PASS and its scoped
+limitations remain the qualification evidence used for the baseline.
+
+The new calibration starts from the pinned original IC and does not use
+either accuracy snapshot as a restart. After evaluation completion, the
+two raw HDF5 files from 415811 were removed under the operator's test
+cleanup instruction; their SHA256 values and exact paths are recorded in
+`.grackle-neq-accuracy-415811/raw_cleanup_2026-10-08.md`.
+Compact metrics, verification results, snapshot metadata, inputs and logs
+remain. Earlier statements that raw snapshots are temporarily retained
+are superseded. Scientific calibration snapshots and active checkpoints
+are not included in this cleanup.
+
+The active run is documented in
+`provenance/galaxy128_grackle_calibration_baseline_2026-10-08.md`.
+Its successful fixed-level precursor does not establish convergence for
+late-time, adaptive, star-forming gas or dust/RT-on evolution.

@@ -6,9 +6,15 @@ Project: `/gpfs/kjhan/chimes-cvode-gpu-20261001`,
 Status: **APPROVED NUMERICAL POLICY**, adopted by the operator on 2026-10-07
 ("자네가 말한 수치 기준을 확정하자"). The limits below govern prospective
 qualification. Their adoption is not production-readiness approval: the
-specific-energy/temperature refinement comparison remains to be performed.
-Astra's latest production verdict is CONDITIONAL; the completion email
-remains unsent.
+specific-energy/temperature refinement comparison completed in job 415811
+and passed every adopted limit. Owner-side re-evaluation in job 415928
+reproduced the result and independently checked the alternative specific
+energy formula, percentiles and union tails. Astra's latest production
+verdict was CONDITIONAL; no final Astra approval was obtained or is required
+for this closeout. On 2026-10-08 the operator explicitly closed R2 on the
+owner-verified evidence and waived the final Astra review. This is owner
+acceptance of the declared scope, not an external approval or a universal
+accuracy claim. The completion email is cancelled; no email is to be sent.
 
 ## Purpose and supported use
 
@@ -110,11 +116,11 @@ needed follow-up analysis, then remove only the evaluated raw outputs and
 retain inputs, logs, executable/source identities, compact results and a
 cleanup manifest.
 
-Evaluate every adopted limit once, then request Astra's final read-only
-verdict on the scoped evidence. Only an explicit APPROVE triggers the
-authorized completion email to `kjhan0606@gmail.com`, including the audit
-opinion. Policy approval authorizes this qualification; an email still
-requires Astra's explicit production APPROVE.
+Every adopted limit was evaluated and the owner-side verification passed.
+Operator update on 2026-10-08 waived Astra final approval and closed R2
+("astra최종 승인은 받지 않고, R2를 마무리 짓는다. 이제 R3로 진행한다").
+Do not request the waived final audit. The earlier instruction to send a
+completion email was also cancelled; do not send an email.
 
 ## Existing evidence versus this policy
 

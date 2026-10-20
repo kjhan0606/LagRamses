@@ -9,6 +9,17 @@ with the existing 128^3 IC; use matched 256^3/512^3 runs only after the 128^3
 cost and observable sample are known. This is a science calibration campaign,
 not a completed execution or a resolution-only test.
 
+Execution update (2026-10-13): the operator directs parameter tuning after
+the actual Grackle residual-transport failure was diagnosed, repaired and
+verified through its failed coarse interval. Reference job **421829** now
+continues the 12.5 cMpc/128^3 baseline toward z=0 with eps_star=.02,
+Grackle nine-species chemistry/HM2012, existing Kroupa stellar sources,
+RT/dust/AGN off, CPU hydro/chemistry and GPU Poisson. Therefore eps_star is
+the first active fit control; dust and AGN entries in the historical plan
+below remain inactive for this calculation. Obtain actual low-redshift
+galaxy statistics and costs before launching paired parameter responses.
+See [current input, resource and output record](galaxy128_grackle_calibration_baseline_2026-10-08.md).
+
 Historical update (2026-09-15): operator had approved resuming 128^3 only to
 z=6 with the completed M5 connection. That endpoint and its launch record
 remain historical; it does not satisfy the newer low-redshift calibration
