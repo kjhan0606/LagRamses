@@ -15,6 +15,8 @@ set -euo pipefail
 readonly ROOT=/gpfs/kjhan/chimes-cvode-gpu-20261001
 readonly SOURCE_COMMIT=$(git -C "$ROOT" rev-parse HEAD)
 readonly BASE=${M5_BUILD_BASE:-$ROOT/.m5-cosmo-dust-chimes-build-419104}
+readonly SUNDIALS_CUDA_SOURCE=/gpfs/kjhan/LRD_JWST/.dust-extension.AOz7mU/sundials
+readonly SUNDIALS_CUDA_ROOT=$ROOT/.cvode-gpu/sundials-cuda-vector-413666
 readonly BUILD=$ROOT/.m5-ramses-momentum-build-$SLURM_JOB_ID
 readonly SOURCE_TREE=$BUILD/committed-source
 readonly BIN=$BUILD/bin/ramses_m5_ramses_momentum_closure_v13d
@@ -22,6 +24,9 @@ readonly EXEC=$BUILD/bin/ramses_m5_ramses_momentum_closure_v1
 
 test -d "$BASE/bin"
 test -f "$BASE/chimes-install/libchimes.so"
+test -f "$SUNDIALS_CUDA_SOURCE/include/nvector/nvector_cuda.h"
+test -f "$SUNDIALS_CUDA_ROOT/install/include/sundials/sundials_config.h"
+test -f "$SUNDIALS_CUDA_ROOT/build/src/nvector/cuda/libsundials_nveccuda.so"
 test ! -e "$BUILD"
 cp -a -- "$BASE" "$BUILD"
 git -C "$ROOT" worktree add --detach "$SOURCE_TREE" "$SOURCE_COMMIT"
@@ -46,6 +51,9 @@ make -j1 \
   SNRT=1 DUST_LIVE=1 CHIMES=1 CHIMES_CUDA=1 HDF5=1 USE_CUDA=1 USE_FFTW=1 \
   NENER=0 NVECTOR=32 CHIMES_DIR="$BUILD/chimes-install" \
   SUNDIALS_DIR=/gpfs/kjhan/LRD_JWST/.snrt-performance.jDx9Iz/sundials-release \
+  CHIMES_CUDA_SUNDIALS_SOURCE_DIR="$SUNDIALS_CUDA_SOURCE" \
+  CHIMES_CUDA_SUNDIALS_BUILD_DIR="$SUNDIALS_CUDA_ROOT/build" \
+  CHIMES_CUDA_SUNDIALS_INSTALL_DIR="$SUNDIALS_CUDA_ROOT/install" \
   ramses > "$ROOT/.m5-momentum-build-$SLURM_JOB_ID.build.log" 2>&1
 
 test -x "$BIN"

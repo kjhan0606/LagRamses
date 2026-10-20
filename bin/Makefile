@@ -291,9 +291,21 @@ LIBGRACKLE = -lgrackle -lhdf5 -lz
 # Optional native chemistry; external libraries must both be double precision.
 CHIMES ?= 0
 CHIMES_CUDA ?= 0
+CHIMES_CUDA_SUNDIALS_SOURCE_DIR ?=
+CHIMES_CUDA_SUNDIALS_BUILD_DIR ?=
+CHIMES_CUDA_SUNDIALS_INSTALL_DIR ?=
 ifeq ($(CHIMES_CUDA),1)
   ifneq ($(CHIMES)$(USE_CUDA),11)
     $(error CHIMES_CUDA=1 requires CHIMES=1 and USE_CUDA=1)
+  endif
+  ifeq ($(strip $(CHIMES_CUDA_SUNDIALS_SOURCE_DIR)),)
+    $(error Set CHIMES_CUDA_SUNDIALS_SOURCE_DIR for nvector_cuda.h)
+  endif
+  ifeq ($(strip $(CHIMES_CUDA_SUNDIALS_BUILD_DIR)),)
+    $(error Set CHIMES_CUDA_SUNDIALS_BUILD_DIR for libsundials_nveccuda)
+  endif
+  ifeq ($(strip $(CHIMES_CUDA_SUNDIALS_INSTALL_DIR)),)
+    $(error Set CHIMES_CUDA_SUNDIALS_INSTALL_DIR for the CUDA-enabled SUNDIALS config)
   endif
 endif
 ifeq ($(CHIMES),1)
@@ -328,6 +340,8 @@ ifeq ($(CHIMES),1)
     $(LIBS_HDF5) -lcrypto -ldl -lstdc++ -Wl,--as-needed
   ifeq ($(CHIMES_CUDA),1)
     LIBS_CHIMES += $(LIBS_CUDA) -Wl,--export-dynamic -pthread
+    LIBS_CHIMES += -L$(CHIMES_CUDA_SUNDIALS_BUILD_DIR)/src/nvector/cuda \
+      -Wl,-rpath,$(CHIMES_CUDA_SUNDIALS_BUILD_DIR)/src/nvector/cuda -lsundials_nveccuda
   endif
 endif
 LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_SNRT) $(LIBS_FFTW) $(LIBS_CHIMES)
@@ -541,9 +555,15 @@ snrt_thermochemistry_smoke: ../patch/lagRamses/snrt_thermochemistry_smoke.f90 sn
 FORCE_CHIMES_BACKEND:
 snrt_chimes_bridge.o: ../patch/lagRamses/snrt_chimes_bridge.c ../patch/lagRamses/snrt_chimes_atomization.h $(CHIMES_DIR)/src/chimes_proto.h FORCE_CHIMES_BACKEND
 	mpicc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -DCHIMES_USE_DOUBLE_PRECISION $(CHIMES_C_FLAGS) -O2 -Wall -Wextra \
-	  -I$(CHIMES_DIR)/src -I$(SUNDIALS_DIR)/include -I$(HDF5_DIR)/include -c $< -o $@
-snrt_chimes_cvode_cuda.o: ../patch/lagRamses/snrt_chimes_cvode_cuda.cu ../patch/lagRamses/snrt_chimes_cvode_cuda.h
-	$(NVCC) $(NVCCFLAGS) -std=c++17 --fmad=false -Xcompiler -fopenmp -I$(SUNDIALS_DIR)/include -c $< -o $@
+	  -I$(CHIMES_DIR)/src -I$(CHIMES_CUDA_SUNDIALS_INSTALL_DIR)/include \
+	  -I$(CHIMES_CUDA_SUNDIALS_SOURCE_DIR)/include -I$(SUNDIALS_DIR)/include \
+	  -I$(HDF5_DIR)/include -c $< -o $@
+snrt_chimes_cvode_cuda.o: ../patch/lagRamses/snrt_chimes_cvode_cuda.cu ../patch/lagRamses/snrt_chimes_cvode_cuda.h \
+	  $(CHIMES_CUDA_SUNDIALS_SOURCE_DIR)/include/nvector/nvector_cuda.h \
+	  $(CHIMES_CUDA_SUNDIALS_INSTALL_DIR)/include/sundials/sundials_config.h
+	$(NVCC) $(NVCCFLAGS) -std=c++17 --fmad=false -Xcompiler -fopenmp \
+	  -I$(CHIMES_CUDA_SUNDIALS_INSTALL_DIR)/include -I$(CHIMES_CUDA_SUNDIALS_SOURCE_DIR)/include \
+	  -I$(SUNDIALS_DIR)/include -c $< -o $@
 snrt_chimes_rhs_cuda.o: ../patch/lagRamses/snrt_chimes_rhs_cuda.cu ../patch/lagRamses/snrt_chimes_rhs_cuda.h $(CHIMES_DIR)/src/chimes_proto.h
 	$(NVCC) $(NVCCFLAGS) -std=c++17 --fmad=false -Xcompiler -fopenmp -Xcompiler -ffp-contract=off -DCHIMES_USE_DOUBLE_PRECISION -I$(SUNDIALS_DIR)/include -I$(CHIMES_DIR)/src -I$(HDF5_DIR)/include -c $< -o $@
 snrt_chimes_spectrum.o: ../patch/lagRamses/snrt_chimes_spectrum.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h
