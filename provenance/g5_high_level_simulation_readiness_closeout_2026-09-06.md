@@ -49,8 +49,14 @@ effective initialized-RAMSES namelist. The CPU comparison used
   substitute for that physical input contract.
 - The thermal atlas has an approved physics provenance record but its license
   status is still pending explicit confirmation.
-- The live RAMSES driver has no persistent dust field or nonzero dust optical
-  depth, and no live dust thermal, momentum, scattering, or IR receiver.
+- The September baseline's statement that the live RAMSES driver lacked a
+  persistent dust field and dust receivers is superseded for the selected
+  source-active profile by the 2026-10-20 integrated job 430823: it exercised
+  live two-size dust, M5 source/absorption, grain heating, CPU CHIMES, and
+  mixed-AMR coupling with photon/energy accounting. That bounded smoke does
+  not qualify every dust thermal/momentum/scattering/IR path, cosmological
+  evolution, production-scale AMR, or a release binary; those remain separate
+  qualification requirements.
 - The current checkout is dirty because unrelated migration/high-mass work is
   in progress. A physical release requires a clean named commit and a rebuild
   of the selected binary from that commit.
