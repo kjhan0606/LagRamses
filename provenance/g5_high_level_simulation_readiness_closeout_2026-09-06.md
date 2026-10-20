@@ -421,3 +421,22 @@ CHIMES assertions. The explicit production-target run closes that coverage
 gap for this bounded code path. This is a native CPU smoke, not a live
 simulation or production release qualification; the linked objects came from
 the same dirty source tree recorded for job430823, not a clean release commit.
+
+### Current-checkout physical-production admission audit — 2026-10-21
+
+The read-only `simulation_ready_preflight.sh --mode physical-production` was
+run against the candidate executable and continuous-run namelist with the
+manifest-declared environment bindings. Launch identity was checked, but the
+gate correctly rejected production admission. After removing caller-vs-
+manifest environment differences, 17 substantive blockers remain: physical
+release/admission is not approved; there is no clean release commit, the
+repository is dirty, and the candidate source snapshot differs at
+`bin/Makefile`; explicit data terms remain unresolved for CHIMES data, Draine
+D03, the KL16 mirror, and PARSEC VMS; release conditions 1--3 remain open;
+and per-release license records are absent for the ordinary yields, stellar
+SED, AGN groups, dust optics, and SNIa contract. The three manifest conditions
+are to (1) record selected external-data license/provenance for this exact
+release, (2) build and qualify a binary from the exact clean release commit,
+and (3) pass launch admission with an actual-root native environment/selected-
+asset manifest. Public availability is not treated as a license. This audit
+does not approve or waive any physical input and creates no new gate.
