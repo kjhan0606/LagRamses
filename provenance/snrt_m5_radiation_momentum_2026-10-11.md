@@ -754,3 +754,392 @@ comparison remain. This rechecks runner behavior and coupled restart
 consistency for the same-MPI static-64-cell reference-control case; it is not a
 performance measurement, cosmological qualification, or production-physics
 approval.
+
+#### Hybrid dispatch scope clarification — 2026-10-21
+
+Read-only inspection confirms `snrt_chimes_dark_rhs_gpu` declines general
+CHIMES states whenever `N_spectra != 0`; the CUDA reaction kernel covers dark
+reaction groups, not photo/radiation-dependent CHIMES chemistry. The separate
+M5 spectral photo operator also runs on the CPU. However, selected split dark
+solves locally set `N_spectra=0` before invoking the RHS, so this dark-only
+boundary does **not** explain the resumed leg's zero GPU calls. In the logs,
+the continuous run's first photo-solver interval took 0.001 s and later
+intervals took about 39--46 s; resumed photo-solver intervals took about
+35--46 s. These timers are summed per-cell work, not tile wall time. Timing
+does not identify per-cell RHS fallback causes, which the runtime does not
+record. Thus the verified claim remains hybrid-selected restart consistency,
+not GPU acceleration of the photo operator; the reason the resumed dark RHS
+never used the GPU remains unresolved, with no device error reported.
+
+Call-site inspection narrows the M5 dispatch gap: the cooperative
+`snrt_chimes_rhs_tile_run` / `snrt_chimes_rhs_level_run` entry points are
+called from `snrt_dark_matter_runtime` (radiation transport off), while M5's
+`material_tile` uses an OpenMP `schedule(dynamic,1)` cell loop. M5 may still
+submit per-RHS cohorts through the ordinary request queue, but its zero-GPU
+restart counters do not say whether requests were ineligible, short-tail CPU
+work, or unable to acquire a stream. This run had 32 cells per MPI rank and
+four OpenMP workers; the existing level queue deliberately sets
+`active_brokers=0` below `16*workers` (64 cells here). Wiring that queue into
+this exact small tile would therefore select CPU, not explain or fix the
+observed counters. Larger-workload scheduler changes remain a performance
+question, not a proven cause or correctness failure; they must preserve the
+staged material transaction and CPU fallback and be compared against same-
+input CPU execution. No physics or acceptance-threshold change is implied.
+
+#### Manual Ada CPU-backend control and timing comparison — 2026-10-21
+
+To honor the requested manual `lageunha` run, ran the same bounded M5 + dust +
+CHIMES case on its single RTX 5000 Ada, MPI2/OMP4, with the same executable
+SHA256 and effective namelists as the hybrid run; only the CHIMES backend
+selector changed to CPU. M5 transport and material/dust selectors stayed
+`auto`. The CPU control passed its own coupled restart comparison (449 datasets,
+447 bitwise, two negligible sink-angular-momentum differences; 39 contract
+attributes and all six clocks exact; `rtol=1e-12`, `atol=1e-25`).
+
+Using the retained runner logs, the continuous CPU run took 48.987 s versus
+49.163 s hybrid (-0.36%); the resumed CPU run took 32.270 s versus 32.036 s
+hybrid (+0.73%). These sub-1%
+differences show no measurable end-to-end speedup in this one short smoke. The
+hybrid continuous leg did record 2536 and 2871 GPU RHS calls per rank, but the
+CPU-side spectral/photo operator remains outside that CUDA path and dominates
+the recorded per-cell-work sums. The CPU control's all-zero CUDA-bridge counter
+is not a count of ordinary CPU chemistry calls. The checks compare restart
+consistency within each backend, not field-by-field CPU-versus-hybrid outputs;
+they do not establish production scaling or a general speedup claim.
+
+After evaluation, only the three hash-verified HDF5 dumps and three 128-byte
+cooling files were removed (303846544 bytes). The exact paths, sizes, and hashes
+are retained in
+`.m5-effective-restart-lageunha-20261021-cpu-restart-control/raw-cleanup.json`;
+the compact backend comparison and all logs/inputs remain alongside it.
+
+#### Spectral/photo accelerator boundary — 2026-10-21
+
+Read-only call-path inspection confirms the M5 cold receiver invokes
+`chimes_band_photo_molecular_groups` (or its phase-resolved sibling) before a
+separate dark-chemistry solve. The spectral/photo operator in
+`snrt_chimes_photo.cpp` owns a per-cell variable-size CVODE-BDF state of
+`157 + active_nodes + ledger` entries (plus phase ledgers when selected), uses
+host RHS/preconditioner callbacks and `SUNLinSol_SPGMR`. The active spectral
+node count can span up to `9*128`; this is not the fixed, small dark-reaction
+system handled by `snrt_chimes_rhs_cuda.cu`.
+
+The existing experimental `snrt_chimes_cvode_cuda.cu` adapter is a batched
+dense-LU/solve path (`SUNLinSol_Dense`, maximum dimension 256), so it is not a
+drop-in accelerator for the photo solver's variable-size SPGMR system. The
+measured CPU-vs-hybrid smoke therefore identifies a real implementation gap:
+meaningful acceleration requires a batched photo-RHS/integration design that
+preserves each cell's adaptive CVODE trajectory and the existing photon,
+energy, grain and element ledgers. No change to tolerances, ODE physics or
+backend selection is implied by this source review. `snrt_chimes_photo.cpp`
+had a pre-existing uncommitted edit during inspection and was left untouched.
+
+#### Native photo solver call-tree profile — 2026-10-21
+
+On `lageunha`, the standalone `snrt_thermochemistry_smoke` executable passed
+normally and under Callgrind with CPU CHIMES and double-precision SUNDIALS 5.8.
+Profiled executable SHA256:
+`9800810bbf8fb90013c63c1122ce723082106f8a249dd7ee28b95651cf062a53`.
+The test's 114,079,712,873 instruction total was dominated by its synthetic
+molecular-photo check (106,719,653,184; 93.55%). The annotated call tree
+attributes 107,694,752,206 instructions (94.40%) to the `photo_step` subtree;
+it records 11,342 `CVode` entry calls from that wrapper's `CV_ONE_STEP` loop
+and 20,463 `SUNNonlinSolSolve` calls within `CVode`. These are Callgrind call
+edges, not CVODE accepted-step or RHS-evaluation counters. The 97.02% inclusive
+`CVode` figure includes its callbacks and is not solver self-time.
+
+This is a small two-ray native smoke, not a production M5 cell or end-to-end
+runtime profile. It points to the adaptive photo integration/solve path as the
+next place to collect true per-solve CVODE counters; it does not establish the
+same step counts in the coupled M5 run. No ODE tolerance or physics was changed.
+The raw Callgrind file was removed after summary extraction.
+
+#### Coupled M5 + dust + CHIMES CVODE profile — 2026-10-21
+
+Ran the bounded four-coarse-step effective-population M5 order-5 AMR-interface
+case manually on Lageunha's RTX 5000 Ada (MPI=1, OMP=4), with live two-size
+dust and the hybrid CHIMES backend. The run passed the coarse/fine interface
+gate with 56 coarse and 64 fine leaf cells and produced no raw dumps. Its
+effective namelist sets `noutput=1`, future `aout=2.0`, `tout=1e30`, and
+`foutput=fbackup=1000000`. Evidence, inputs, log, binary identity, and the
+temporary profiling interposer source are retained in
+`.m5-effective-amr-lageunha-20261021-cvode-profile-r2/`. The retained source
+SHA256 is `a31e24082a7d591d8ed9cce5bba7ed0583a547cfa1e5dd53c1bce78f31c860c8`;
+the compiled reporter SHA256 is
+`a2f35356194c0cf6255c5b54022ec9d9612b53e23f9fc2f4d25be374061171ba`.
+
+The executable SHA256 is
+`bc03f86c4fcf889daf17a6e84b459c3c97920f068c340443ac2d299abfab28b9`; its
+startup identifies source commit `1c1d928`. The tracked photo, bridge, and
+CUDA-RHS source paths have no committed changes between that commit and the
+current HEAD. The build snapshot's photo source does not include the current
+worktree's uncommitted input-diagnostic/subnormal edge guards; the CVODE
+integration algorithm itself is unchanged. The newer current-source executable
+was CPU-only for CHIMES and was rejected by the hybrid preflight before any
+calculation.
+
+A temporary `LD_PRELOAD` interposer queried SUNDIALS 5.8 counters at each
+`CVodeFree`/reinitialization and separated executable callers from shared-
+library callers. It reported no counter-query errors or CVODE/linear/nonlinear
+failures:
+
+| Caller scope | Solvers | Accepted steps | RHS evals | Error-test failures | Other useful counts |
+|---|---:|---:|---:|---:|---|
+| RAMSES executable (M5 spectral/photo operator) | 360 | 36,133 | 44,007 | 968 | 34,669 SPGMR iterations; 12,436 preconditioner setups |
+| Shared CHIMES library | 480 | 32,893 | 42,926 | 1,369 | 127,100 linear RHS evals; 904 Jacobian evals |
+
+The executable's photo solver therefore accepted about 100 steps per active
+cell solve. Existing per-cell timing sums were 352.022 s for spectral/photo
+work and 7.548 s for dark chemistry; these are sums of cell elapsed times
+across OpenMP workers, not wall-clock durations. The whole run took 147.034 s,
+of which the RAMSES `cooling` category was 140.869 s (95.8%). This identifies
+the CPU M5 spectral/photo CVODE path—not the dark CHIMES RHS—as the dominant
+work in this case.
+
+The hybrid counters recorded 25,200 GPU RHS calls, 144,826 CPU fallback calls,
+6,300 GPU batches, one stream, peak in-flight batches of one, and zero device
+errors. These are call counts, not a speedup fraction. Across the eight logged
+M5 dispatch records, closure work used both CPU and GPU (120,064 / 71,936
+calls), while all 2,280,960 face calls were CPU and zero were GPU. The measured
+run thus confirms active GPU execution but also a CPU-resident photo solve and
+face transport on this configuration.
+
+This was a single instrumented smoke, not a CPU-vs-hybrid timing comparison or
+production qualification. Its 147 s wall time is not compared to the prior
+uninstrumented 133 s run; the interposer and run-to-run scheduling differ. The
+current dense CUDA CVODE adapter remains limited to dimension 256 and is not a
+drop-in for the photo operator's variable-size SPGMR state. The next
+optimization must target that actual hot path while preserving adaptive
+trajectories and photon/energy/element ledgers; no tolerance or physics change
+is authorized by this profile.
+
+#### Photo-CVODE relative-tolerance selection (2026-10-21)
+
+This measured follow-up supersedes the preceding pre-sensitivity statement that
+no tolerance change was authorized by the initial profile; it changes a
+numerical solver tolerance only, not the ODE or physical model.
+
+A controlled sensitivity run changed only the photo solver's relative
+tolerance; the component absolute-tolerance vector was held fixed. The
+68.65 Myr photo-cell regression passed at `rtol=1e-10` in 9.845 s (versus
+11.126 s at `1e-11`), with relative nuclear, charge, photon, and energy
+residuals `3.34438e-10`, `2.57e-12`, `3.58e-12`, and `9.12e-12`. All remain
+below the fixture's existing acceptance limits; the nuclear residual has about
+30x margin to its `1e-8` limit. At `rtol=1e-9`, runtime fell further to 9.287 s,
+but the nuclear residual rose to `3.51629e-9`, leaving only 2.8x margin, so
+that looser value was not selected.
+
+The integrated 4-coarse-step M5+live-dust+CHIMES-hybrid AMR-interface case on
+Lageunha's RTX 5000 Ada also passed with `rtol=1e-10`, no raw RAMSES dumps,
+and zero device errors. Its photo-CVODE profile recorded 27,879 accepted
+steps, 35,647 RHS evaluations, and 11,399 linear setups, versus 36,133,
+44,007, and 12,436 at `1e-11`; the shared-library solver profile was
+unchanged. This supports `1e-10` as the production-source default for this
+bounded domain, not universal production qualification. The tested executable
+was built from source commit `1c1d928` with only the photo relative tolerance
+changed; the current worktree's additional input-diagnostic/subnormal guards
+were not in that binary. A clean build from the current source remains
+required before promoting a rebuilt executable. Run evidence is retained in
+`.m5-effective-amr-lageunha-20261021-photo-rtol1e10/` (binary SHA256
+`c36f5a93b5b04a341fca9e7d8d880ffda8f286889849f251065ea1bfdb4ef53d`, effective
+namelist SHA256
+`dbd00a880b477d0bdd4b905c68dae69582d81774cae317d0f100ecd5c1999dc9`); paired
+cell runs are under `.m5-photo-rtol-sensitivity-20261021/`.
+
+#### Exact-worktree Ada smoke and CHIMES retry interpretation — 2026-10-21
+
+The clean rebuild from the current worktree was run manually on Lageunha's
+RTX 5000 Ada (MPI=1, OMP=4), with the same binary SHA256
+`97dc1a6dc5cf248c992f08aa64e73d384f025d40b50eb33992cfb807a43dff22` and
+effective namelist SHA256
+`dbd00a880b477d0bdd4b905c68dae69582d81774cae317d0f100ecd5c1999dc9` in both
+runs. The initial run at
+`.m5-effective-amr-lageunha-20261021-photo-rtol1e10-current/` completed in
+145.96 s, committed M5 at levels 2 and 3, and produced no raw RAMSES output.
+It logged 28 CHIMES CVODE “unable to correct” warnings and the interposer
+reported 508 shared-library solver instances, including 28 nonlinear failures.
+This is not evidence of 28 accepted bad cells: `snrt_chimes_bridge.c` retries
+the entire cell from its untouched input on CPU when the GPU RHS path sets its
+retry flag; the retry result replaces the failed trial. In this log there was
+no cold-receiver rejection or pre-commit failure, both M5 levels committed,
+and RAMSES completed. The 508-versus-480 solver-instance difference is
+consistent with 28 such whole-cell retries, but the run did not expose a
+dedicated retry counter, so that attribution remains inferred rather than
+directly counted. The trigger (GPU-path ineligibility/queue decline versus a
+transient solver interaction) is not identified by the current log.
+
+A second same-binary/same-namelist manual Ada run at
+`.m5-effective-amr-lageunha-20261021-photo-rtol1e10-current-trace/` completed
+in 145.16 s with no CHIMES warning or negative CVode return captured, 480
+shared-library solver instances, zero device errors, both M5-level commit
+markers, and no raw output. This confirms the bounded path can complete without
+whole-cell retries; it does not explain the first run's retry trigger or prove
+that such fallback is never needed. Two interposers were stacked in this
+diagnostic run, making its `calls=28347` profile field incomparable to the
+single-interposer run; do not use that field for performance analysis.
+
+The original pass marker therefore remains valid for end-to-end completion,
+but the earlier blanket proposal to treat every CHIMES CVODE warning as a hard
+failure was too strict: a warning from an aborted GPU trial can be followed by
+a successful whole-cell CPU retry. The temporary and durable runners now
+reject final receiver/coupled-transaction rejection markers, not this
+recoverable warning alone. The durable runner's main and restart-log checks
+specifically cover cold-stage CHIMES rejection, cold-receiver transaction
+rejection, and live-dust pre-commit validation failure. Focused positive and
+negative marker checks confirm each terminal marker is caught, a recoverable
+CVODE warning alone is allowed, and both retained Ada logs pass the fatal-marker
+scan. The bounded M5+dust+CHIMES integration is an execution smoke, not
+production qualification. Whole-cell retry frequency and reason remain a
+performance/observability item; conservation, transaction rejection, and
+physical-table admission checks remain unchanged.
+
+#### Photo-CVODE secondary-table reuse — 2026-10-21
+
+The photo RHS uses the immutable FS secondary-ionization grid. It was copied
+and fully revalidated into a roughly 174-KiB per-cell stack member before each
+solve. The current source now loads and validates that same grid once per
+OpenMP worker in thread-local storage and references it read-only for each
+cell. The interpolation and normalization expressions are unchanged. The
+updated C++ source passes the Intel C++ syntax check and was compiled on
+Lageunha with Intel C++ 2025.3 into the native long-interval photo regression
+fixture. On the 68.65 Myr cell, the test returned status 0 in 9.816 s and
+passed its nuclear, charge, photon and energy budgets (relative residuals
+`3.34438e-10`, `2.57363e-12`, `3.58403e-12`, and `9.11747e-12`). The fixture
+also passed its no-capture identity and invalid-control transaction checks.
+Source, object and fixture executable SHA256 values were respectively
+`dca5b1bd498c8efe1fe54ebe0e85eb60468d5dd8636cc7496d9ea9b24d765775`,
+`e50ac8128ab9cd8f7883162cae0c5ab617051d981e059117075c3407fc874f17`, and
+`c78f05ba841698765dcd2f65bdc23b60ad74365b62929af74ca25d668dc7d911`.
+The 9.816 s result is consistent with the earlier 9.845 s fixture timing but
+is not a controlled performance comparison; no speedup is claimed. This was a
+native cell regression linked with the existing baseline objects, not a new
+full RAMSES binary or integrated M5 run, and it does not qualify production
+physics.
+
+#### Ada integrated M5+dust+CHIMES smoke — 2026-10-21
+
+After the table-cache change, the integrated smoke was manually run on Lageunha
+using its single NVIDIA RTX 5000 Ada GPU (`MANUAL_LAUNCH=1`, `ADA_OVERRIDE=1`),
+MPI=1 and OMP=4. It used the effective-population M5/live-dust/CHIMES reference
+profile, hybrid CHIMES, and automatic transport/material backend selection.
+The four-coarse-step run completed in 145.676672840491 s and reported
+`M5_COUPLED_AMR_INTERFACE_PASS` (56 coarse and 64 fine leaf cells),
+`device_errors=0`, and CHIMES counters of 21,600 GPU calls, 148,420 CPU fallback
+calls, 5,400 GPU batches, one warm-table upload, one peak in-flight batch and
+one stream. The result file marks the profile `NONPRODUCTION`; this is an
+integrated execution/interface smoke, not a physics calibration or performance
+comparison, and no speedup is inferred. The effective namelist used one future
+dummy `aout=2.0` with `tout=1.0d30` and `foutput=fbackup=1000000`; no RAMSES
+snapshot directory was produced. Compact launch metadata, effective input,
+checksums, result and run log are retained under
+`.m5-effective-amr-photo-cache-integrated-20261021/`.
+
+The full executable SHA256 is
+`a0516e0856828e2ec7a4c2524a6126b329546b8f078223a9d7ed8cdab7172e4d`; the
+photo-table-cache source SHA256 remains
+`dca5b1bd498c8efe1fe54ebe0e85eb60468d5dd8636cc7496d9ea9b24d765775`. The
+integrated test confirms that this rebuilt binary executes the coupled path on
+Ada; it does not establish production readiness.
+
+The run log also shows star formation becoming active (49 and 56 new stars in
+the two AMR levels per reported coarse interval, reaching 417 total by the last
+logged interval) and nonzero M5 source/absorption ledgers. This verifies source
+and receiver wiring under the bounded effective-population setup. It does not
+remove the physical-input admission blocker: the effective stellar source
+contract is still marked `reference_control` and identifies a mixed PARSEC
+comparison population; the nine-group p4 pilot contract is explicitly
+`reference_control`; and the selected DL01/Draine dust contract labels its
+opacity and thermal tables `reference_control`/`reference_thermal_control`.
+Consequently this run must remain labeled NONPRODUCTION even though the coupled
+path and star formation execute. The operator's conditional candidate-use
+approval is already recorded as `LRD-EFFECTIVE-SOURCE-USE-2026-10-12`; it
+permits this declared effective model with its limitations, but does not
+rewrite the source contracts' historical reference statuses or complete the
+release audit. The current native-candidate audit still blocks release on the
+dirty source identity, missing release commit, candidate-to-launch binary and
+namelist identity mismatch, unresolved per-source license/provenance records,
+and the three recorded release conditions. The smoke did not silently promote
+any of those inputs.
+
+#### AGN radiation coverage boundary in the integrated smoke — 2026-10-21
+
+Code-path inspection distinguishes the radiative and mechanical AGN ledgers:
+`grow_bondi` places only the radiated share in `agn_pending_erg`, while the
+reference partition stores heat/jet energy separately. M5 converts
+`agn_pending_erg` into photons using the selected group's energy fractions and
+mean energies, then clears it only after the coupled transaction commits. In
+the effective-population Ada smoke, however, the recorded Eddington ratio was
+about `8.4e-9`, far below `X_floor=1e-2`; the accepted AGN mode was `JET`. Under
+`agn_partition_release`, that branch assigns the released energy to the
+mechanical jet share and zero to the radiative share, so it supplies no AGN
+photons to M5. The later positive M5 source ledgers are not origin-separated
+and coincide with active stellar emission; they cannot be cited as AGN photon
+evidence. Thus this run verifies stellar M5+dust+CHIMES coupling and low-Edd
+mechanical-mode execution, but not an AGN-radiation M5 transaction. A bounded
+thermal/high-Edd source-to-M5 case with nonzero radiative pending energy remains
+an explicit verification target; the p4 group SED remains a separate
+reference-control physical-input blocker.
+
+#### Rejected active-species CVODE compaction — 2026-10-21
+
+A CPU-only Lageunha comparison ran the existing 68.65 Myr photo/molecular
+fixture with the full 157-species state and a temporary exact-constant-species
+elimination prototype, using the same input
+`chimes_photo_long_interval.hex` (SHA256
+`5710bd69dceb734ca215e60f2d77e150048860b4994a27fa3927636a6b4061af`). Both
+passed existing nuclear, charge, photon and energy checks. CVODE CPU time rose
+from 9.806883 s to 11.735516 s (+19.7%; wall 10.649 s to 12.124 s). Across all
+1,625 captured species/ray/ledger values, the maximum absolute difference was
+`1.7136e-11`; grain-energy maximum relative difference was `1.86e-10`.
+Conservation residuals remained below existing limits, but the measured cost
+regressed, so the prototype and its optional state-capture code were reverted.
+No production solver or input contract changed. The logs and hashes are kept
+in `.m5-photo-compact-species-20261021/`; raw state captures and temporary
+executables are removed after the comparison.
+
+#### Rejected CVODE destruction-diagonal reuse — 2026-10-21
+
+A CPU-only Lageunha run tested reuse of the analytic destruction-diagonal
+preconditioner data under CVODE's `jok`/`jcur` contract on the same long-interval
+photo fixture. The baseline took 9.806883 CPU seconds; the reuse variant took
+9.669573 CPU seconds (1.4% lower in this single run). Both returned status 0
+and passed the existing nuclear, charge, photon and energy checks; residuals
+for the reuse variant were `6.2543e-10`, `4.8378e-12`, `3.9418e-12`, and
+`1.1839e-11`, respectively. The small one-run timing difference does not
+establish a repeatable gain, so the cache-reuse code was reverted. The tested
+object hash and fixture log are retained in
+`.m5-photo-prec-reuse-20261021/` (object SHA256
+`8c9eab05593fb25d68192a6d6abb93417db0a1c484c70f1dd5ac43debde183b3`; test
+binary SHA256
+`438d18581e5451cc8dcb8346e737773cb8e0414807fa443b5f2b983f5f3689e8`). This was
+a bounded native fixture, not a full RAMSES rebuild or integrated M5+dust+CHIMES
+comparison.
+
+#### Explicit Lageunha Ada rerun of the integrated M5+dust+CHIMES smoke — 2026-10-21
+
+At the operator's request, reran the bounded `effective_population` AMR
+interface case manually on Lageunha's idle RTX 5000 Ada (MPI=1, OMP=4), using
+the same runner SHA256
+`a63fd6ea641994d0bff1dc35b9a16b5b8143995c9bb6845b1a824410df1ae8be` and
+executable SHA256
+`a0516e0856828e2ec7a4c2524a6126b329546b8f078223a9d7ed8cdab7172e4d` as the
+earlier Ada integrated smoke. The new run ID is
+`lageunha-20261021-ada-manual-rerun`; its launch record is at
+`.m5-effective-amr-lageunha-20261021-ada-manual-rerun/launch.txt`.
+
+The run exited 0 with
+`M5_COUPLED_AMR_INTERFACE_PASS coarse_leaf_cells=56 fine_leaf_cells=64`,
+M5 order-5 commits at levels 2 and 3, and a completed hybrid CHIMES report:
+36,000 GPU RHS calls, 134,020 CPU fallbacks, 9,000 GPU batches, one warm-table
+upload, peak in-flight batch 1, one stream, and zero device errors. The launch
+record kept `noutput=1` with a future dummy output clock and
+`foutput=fbackup=1000000`; no `output_NNNNN` directory was produced. The launch
+to completed-log filesystem timestamps span about 154 seconds. This is an
+operator-requested rerun of the already-passing same-binary/same-runner smoke,
+not a new physics or performance result; it remains NONPRODUCTION and does not
+exercise radiative AGN-to-M5 coupling (see the coverage boundary above).
+
+The queued A40 duplicate (`431707`, pending for `QOSMaxGRESPerUser`) was
+canceled before the manual rerun. Compact inputs, checksums, launch/result
+metadata and the full run log are retained in the run directory; raw RAMSES
+outputs were not generated.

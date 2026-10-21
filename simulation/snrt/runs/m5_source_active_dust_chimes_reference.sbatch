@@ -34,13 +34,12 @@ esac
 case "$MANUAL_LAUNCH" in
   0) ;;
   1)
-    test "$PROFILE" = effective_population
-    test "$CHIMES_BACKEND" = hybrid
     test "$M5_ALLOW_ADA_MANUAL" = 1
     test -n "$RUN_ID"
-    case "$VERIFY_RESTART:$AMR_INTERFACE" in
-      0:1|1:0) ;;
-      *) echo 'Manual Ada mode requires exactly one of AMR interface or restart verification' >&2; exit 2 ;;
+    case "$PROFILE:$CHIMES_BACKEND:$VERIFY_RESTART:$AMR_INTERFACE" in
+      effective_population:hybrid:0:1|effective_population:hybrid:1:0|effective_population:cpu:1:0|\
+      agn_reference:hybrid:0:0) ;;
+      *) echo 'Manual Ada permits the effective-population AMR/restart cases or the hybrid AGN reference smoke' >&2; exit 2 ;;
     esac
     case "$MPI_RANKS" in
       1|2) ;;
@@ -137,14 +136,15 @@ gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | sed -n '1p')
 case "$gpu_name" in
   *A100*|*H100*) ;;
   *RTX*5000*Ada*)
-    if [[ "$MANUAL_LAUNCH" != 1 || "$PROFILE" != effective_population || \
-          "$CHIMES_BACKEND" != hybrid ]]; then
-      echo 'Ada is allowed only for an explicit manual effective-population hybrid smoke' >&2
+    if [[ "$MANUAL_LAUNCH" != 1 || \
+          ("$PROFILE" != effective_population && "$PROFILE" != agn_reference) ]]; then
+      echo 'Ada is allowed only for an explicit manual effective-population or AGN reference smoke' >&2
       exit 2
     fi
-    case "$VERIFY_RESTART:$AMR_INTERFACE" in
-      0:1|1:0) ;;
-      *) echo 'Ada smoke must select either AMR interface or restart verification, not both' >&2; exit 2 ;;
+    case "$PROFILE:$CHIMES_BACKEND:$VERIFY_RESTART:$AMR_INTERFACE" in
+      effective_population:hybrid:0:1|effective_population:hybrid:1:0|effective_population:cpu:1:0|\
+      agn_reference:hybrid:0:0) ;;
+      *) echo 'Ada smoke permits the effective-population AMR/restart cases or the hybrid AGN reference smoke' >&2; exit 2 ;;
     esac
     ;;
   *A40*)
@@ -392,7 +392,7 @@ if [[ "$VERIFY_RESTART" == 1 ]]; then
   grep -q 'Run completed' "$WORK/resumed/run.log"
   if [[ "$CHIMES_BACKEND" == hybrid ]]; then check_hybrid_process_reports "$WORK/resumed/run.log" 0; fi
   grep -Fq 'SNRT_HDF5_RADIATION_RESTORE_PASS' "$WORK/resumed/run.log"
-  if grep -Eiq 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N.*(rejected|failed)' "$WORK/resumed/run.log"; then
+  if grep -Eiq 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N.*(rejected|failed)|CHIMES cold-stage rejection|SNRT_CHIMES_COLD_RECEIVER_REJECT|SNRT DUST_LIVE pre-commit validation failed' "$WORK/resumed/run.log"; then
     echo 'FAIL: restarted runtime rejected; all evidence retained' >&2; exit 3
   fi
   cd "$WORK/continuous"
@@ -429,7 +429,7 @@ if ((momentum_assert_cells<=0)); then
   echo 'FAIL: no successfully committed material-cell momentum-assertion coverage' >&2
   exit 5
 fi
-if grep -Eiq 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N (radiation momentum finite check failed|RAMSES (dust )?momentum closure failed)' run.log; then
+if grep -Eiq 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N (radiation momentum finite check failed|RAMSES (dust )?momentum closure failed)|CHIMES cold-stage rejection|SNRT_CHIMES_COLD_RECEIVER_REJECT|SNRT DUST_LIVE pre-commit validation failed' run.log; then
   echo 'FAIL: runtime error/nonfinite/nonconvergence marker; preserving evidence' >&2
   exit 3
 fi
