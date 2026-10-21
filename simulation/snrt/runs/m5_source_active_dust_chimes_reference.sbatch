@@ -20,6 +20,10 @@ readonly PROFILE=${M5_SOURCE_PROFILE:-agn_reference}
 readonly VERIFY_RESTART=${M5_VERIFY_RESTART:-0}
 readonly AMR_INTERFACE=${M5_AMR_INTERFACE_CHECK:-0}
 readonly A40_SMOKE=${M5_ALLOW_A40_SMOKE:-0}
+readonly MANUAL_LAUNCH=${M5_MANUAL_LAUNCH:-0}
+readonly RUN_ID=${M5_RUN_ID:-${SLURM_JOB_ID:-}}
+readonly OMP_THREADS=${M5_OMP_THREADS:-${SLURM_CPUS_PER_TASK:-8}}
+readonly MPI_RANKS=${SLURM_NTASKS:-1}
 readonly CHIMES_BACKEND=${M5_CHIMES_BACKEND:-cpu}
 readonly TRANSPORT_BACKEND=${M5_TRANSPORT_BACKEND:-auto}
 readonly MATERIAL_BACKEND=${M5_MATERIAL_BACKEND:-auto}
@@ -27,6 +31,25 @@ case "$A40_SMOKE" in
   0|1) ;;
   *) echo 'M5_ALLOW_A40_SMOKE must be 0 or 1' >&2; exit 2 ;;
 esac
+case "$MANUAL_LAUNCH" in
+  0) ;;
+  1)
+    test "$PROFILE" = effective_population
+    test "$VERIFY_RESTART" = 0
+    test "$AMR_INTERFACE" = 1
+    test "$CHIMES_BACKEND" = hybrid
+    test "$M5_ALLOW_ADA_MANUAL" = 1
+    test -n "$RUN_ID"
+    test "$MPI_RANKS" -eq 1
+    ;;
+  *) echo 'M5_MANUAL_LAUNCH must be 0 or 1' >&2; exit 2 ;;
+esac
+[[ "$OMP_THREADS" =~ ^[1-9][0-9]*$ ]] || { echo 'OMP thread count must be a positive integer' >&2; exit 2; }
+if [[ "$CHIMES_BACKEND" == hybrid && "$PROFILE" == effective_population && "$AMR_INTERFACE" == 1 ]] &&
+   ((OMP_THREADS<4)); then
+  echo 'This RT-on per-cell CHIMES hybrid path needs at least 4 OpenMP workers; refusing silent CPU fallback' >&2
+  exit 2
+fi
 case "$CHIMES_BACKEND" in
   cpu|hybrid) ;;
   *) echo 'M5_CHIMES_BACKEND must be cpu or hybrid' >&2; exit 2 ;;
@@ -48,18 +71,18 @@ esac
 case "$PROFILE" in
   agn_reference)
     TEMPLATE=$ROOT/simulation/snrt/config/snrt_stellar_agn_dust_reference_smoke.nml
-    WORK=$ROOT/.m5-source-dust-chimes-$SLURM_JOB_ID
+    WORK=$ROOT/.m5-source-dust-chimes-$RUN_ID
     SOURCE_IC=$ROOT/simulation/snrt/config/snrt_agn_accretion_smoke.ic_sink
     SED=$ROOT/simulation/snrt/config/snrt_stellar_sed_bpass_independent_v3.nml
     ;;
   effective_population)
     TEMPLATE=$ASSETS/.effective-coupled.Q9Kw29/short/run.nml
-    WORK=$ROOT/.m5-effective-dust-chimes-$SLURM_JOB_ID
+    WORK=$ROOT/.m5-effective-dust-chimes-$RUN_ID
     if [[ "$VERIFY_RESTART" == 1 ]]; then
-      WORK=$ROOT/.m5-effective-restart-$SLURM_JOB_ID
+      WORK=$ROOT/.m5-effective-restart-$RUN_ID
     fi
     if [[ "$AMR_INTERFACE" == 1 ]]; then
-      WORK=$ROOT/.m5-effective-amr-$SLURM_JOB_ID
+      WORK=$ROOT/.m5-effective-amr-$RUN_ID
     fi
     SOURCE_IC=$ASSETS/.effective-coupled.Q9Kw29/short/ic_sink
     SED=$ASSETS/.effective-population.gQodLz/inputs/source.nml
@@ -80,6 +103,7 @@ readonly GROUP_DIR=$ASSETS/.dust-extension.AOz7mU/groups-v7
 readonly GROUP_CONTRACT=$ROOT/simulation/snrt/config/snrt_group_contract_reference_control_v1.nml
 readonly SECONDARY=$ROOT/simulation/snrt/config/snrt_secondary_table_contract_v1.nml
 readonly DUST_CONTRACT=$ROOT/simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml
+readonly CHIMES_REPORTER_SOURCE=$ROOT/simulation/snrt/tools/chimes_runtime_counts_reporter.c
 readonly HDF5_ROOT=/home/kjhan/local/hdf5
 readonly SUN=$ASSETS/.snrt-performance.jDx9Iz/sundials-release
 
@@ -101,10 +125,20 @@ cp "$RANK_BIND" "$WORK/rank-bind.sh"
 module purge
 module load intel/tbb/2022.3 intel/compiler-rt/2025.3.0 intel/umf/1.0.2
 module load intel/compiler/2025.3.0 intel/mpi/2021.17 cuda/13.0.2
+readonly CHIMES_REPORTER=$WORK/chimes_counts_reporter.so
+gcc -std=c11 -O2 -fPIC -shared "$CHIMES_REPORTER_SOURCE" -ldl -o "$CHIMES_REPORTER"
 
 gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | sed -n '1p')
 case "$gpu_name" in
   *A100*|*H100*) ;;
+  *RTX*5000*Ada*)
+    if [[ "$MANUAL_LAUNCH" != 1 || "$PROFILE" != effective_population || \
+          "$VERIFY_RESTART" != 0 || "$AMR_INTERFACE" != 1 || \
+          "$CHIMES_BACKEND" != hybrid ]]; then
+      echo 'Ada is allowed only for the explicit manual effective-population hybrid AMR smoke' >&2
+      exit 2
+    fi
+    ;;
   *A40*)
     if [[ "$A40_SMOKE" != 1 || "$PROFILE" != effective_population || \
           "$VERIFY_RESTART" != 0 || "$AMR_INTERFACE" != 1 ]]; then
@@ -114,9 +148,11 @@ case "$gpu_name" in
     ;;
   *) echo "Refusing non-A100/H100 GPU allocation: $gpu_name" >&2; exit 2 ;;
 esac
-printf 'GPU=%s\nJOB_ID=%s\nBINARY=%s\n' "$gpu_name" "$SLURM_JOB_ID" "$BINARY" \
+printf 'GPU=%s\nRUN_ID=%s\nBINARY=%s\n' "$gpu_name" "$RUN_ID" "$BINARY" \
   | tee "$WORK/launch.txt"
 printf 'A40_SMOKE_OVERRIDE=%s\n' "$A40_SMOKE" | tee -a "$WORK/launch.txt"
+printf 'MANUAL_LAUNCH=%s ADA_OVERRIDE=%s\n' "$MANUAL_LAUNCH" "${M5_ALLOW_ADA_MANUAL:-0}" \
+  | tee -a "$WORK/launch.txt"
 
 test -f "$TABLE" -a -f "$GROUP_DIR/manifest.json"
 test -f "$SUN/include/cvode/cvode.h" -a -f "$HDF5_ROOT/include/hdf5.h"
@@ -228,7 +264,9 @@ grep -Fq "radiation_transport='snrt_mn', snrt_moment_order=5" "$WORK/effective.n
 grep -Fq "dust_cooling='chimes_neq_v1'" "$WORK/effective.nml"
 grep -Eq '^[[:space:]]*foutput=1000000$' "$WORK/effective.nml"
 grep -Fq 'fbackup=1000000' "$WORK/effective.nml"
-sha256sum "$TEMPLATE" "$WORK/effective.nml" "$WORK/ic_sink" "$WORK/rank-bind.sh" "$BINARY" \
+sha256sum "$TEMPLATE" "$WORK/effective.nml" "$WORK/ic_sink" "$WORK/rank-bind.sh" \
+  "$ROOT/simulation/snrt/runs/m5_source_active_dust_chimes_reference.sbatch" "$BINARY" \
+  "$CHIMES_REPORTER_SOURCE" "$CHIMES_REPORTER" \
   "$CHIMES_INSTALL/libchimes.so" "$TABLE" "$GROUP_DIR/manifest.json" \
   "$GROUP_DIR"/group_*.hdf5 "$SED" "$GROUP_CONTRACT" "$SECONDARY" "$DUST_CONTRACT" \
   "$ASSETS/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5" \
@@ -242,7 +280,7 @@ if [[ "$PROFILE" == effective_population ]]; then
 fi
 
 export LD_LIBRARY_PATH="$CHIMES_INSTALL:$SUN/lib64:$SUN/lib:$HDF5_ROOT/lib:/opt/ohpc/pub/cuda/13.0.2/lib64:${LD_LIBRARY_PATH:-}"
-export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK" OMP_DYNAMIC=FALSE OMP_PROC_BIND=close OMP_PLACES=cores
+export OMP_NUM_THREADS="$OMP_THREADS" OMP_DYNAMIC=FALSE OMP_PROC_BIND=close OMP_PLACES=cores
 export OMP_STACKSIZE=512M KMP_STACKSIZE=512M I_MPI_FABRICS=shm I_MPI_PIN=0
 export SNRT_BACKEND="$TRANSPORT_BACKEND" SNRT_DUST_BACKEND="$MATERIAL_BACKEND" SNRT_AGN_MODEL=partition_reference_v1
 export SNRT_REDUCED_C=0.01 SNRT_RT_LEVEL=3 SNRT_ALLOW_REFERENCE_CONTROL=1
@@ -271,7 +309,7 @@ fi
 
 printf 'PROFILE=%s_M5_live_dust_CHIMES_reference_NONPRODUCTION\n' "$PROFILE" | tee -a "$WORK/launch.txt"
 printf 'MPI=%s OMP=%s; real_BH_accretion_sink; SED_and_dust_contracts=reference_control; CHIMES_backend=%s; VERIFY_RESTART=%s\n' \
-  "$SLURM_NTASKS" "$OMP_NUM_THREADS" "$CHIMES_BACKEND" "$VERIFY_RESTART" \
+  "$MPI_RANKS" "$OMP_NUM_THREADS" "$CHIMES_BACKEND" "$VERIFY_RESTART" \
   | tee -a "$WORK/launch.txt"
 printf 'TRANSPORT_BACKEND=%s MATERIAL_BACKEND=%s\n' "$TRANSPORT_BACKEND" "$MATERIAL_BACKEND" \
   | tee -a "$WORK/launch.txt"
@@ -283,8 +321,14 @@ run_m5_case() {
   local directory=$1
   (
     cd "$directory"
-    srun --mpi=pmi2 --ntasks="$SLURM_NTASKS" --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=none \
-      bash "$WORK/rank-bind.sh" "$BINARY" effective.nml > run.log 2>&1
+    if [[ "$MANUAL_LAUNCH" == 1 ]]; then
+      mpiexec -genv LD_PRELOAD "$CHIMES_REPORTER" -n "$MPI_RANKS" \
+        "$BINARY" effective.nml > run.log 2>&1
+    else
+      srun --export=ALL,LD_PRELOAD="$CHIMES_REPORTER" --mpi=pmi2 \
+        --ntasks="$SLURM_NTASKS" --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=none \
+        bash "$WORK/rank-bind.sh" "$BINARY" effective.nml > run.log 2>&1
+    fi
   )
 }
 if [[ "$VERIFY_RESTART" == 1 ]]; then
@@ -307,7 +351,7 @@ if [[ "$VERIFY_RESTART" == 1 ]]; then
   run_m5_case "$WORK/resumed"
   grep -q 'Run completed' "$WORK/resumed/run.log"
   grep -Fq 'SNRT_HDF5_RADIATION_RESTORE_PASS' "$WORK/resumed/run.log"
-  if rg -qi 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N.*(rejected|failed)' "$WORK/resumed/run.log"; then
+  if grep -Eiq 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N.*(rejected|failed)' "$WORK/resumed/run.log"; then
     echo 'FAIL: restarted runtime rejected; all evidence retained' >&2; exit 3
   fi
   cd "$WORK/continuous"
@@ -344,7 +388,7 @@ if ((momentum_assert_cells<=0)); then
   echo 'FAIL: no successfully committed material-cell momentum-assertion coverage' >&2
   exit 5
 fi
-if rg -qi 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N (radiation momentum finite check failed|RAMSES (dust )?momentum closure failed)' run.log; then
+if grep -Eiq 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N (radiation momentum finite check failed|RAMSES (dust )?momentum closure failed)' run.log; then
   echo 'FAIL: runtime error/nonfinite/nonconvergence marker; preserving evidence' >&2
   exit 3
 fi
@@ -376,13 +420,20 @@ fi
 if [[ "$AMR_INTERFACE" == 1 ]]; then
   if [[ "$CHIMES_BACKEND" == hybrid ]]; then
     grep -Fq 'CHIMES integrated compute backend: hybrid (host CVODE/LU, asynchronous device RHS/cooling)' run.log
-    grep -Eq 'CHIMES_LEVEL_QUEUE cells=(3[2-9]|[4-9][0-9]|[1-9][0-9][0-9]+).*gpu_brokers=1 gpu_worker_mask=0x[1-9a-f][0-9a-f]*' run.log
+    grep -Eq 'CHIMES_RHS_COUNTS gpu_calls=[1-9][0-9]* .*device_errors=0 .*streams_used=[1-9][0-9]*' run.log || {
+      echo 'FAIL: CHIMES hybrid was selected but no successful GPU RHS calls were reported' >&2
+      exit 6
+    }
+    grep -Eq 'CHIMES_GPU_WORKER_MASK value=[1-9][0-9]*' run.log || {
+      echo 'FAIL: CHIMES hybrid reported no GPU worker use' >&2
+      exit 6
+    }
   fi
   grep -Eq 'Level[[:space:]]+3 has[[:space:]]+8 grids' run.log
   grep -Eq 'SNRT_MN_COMMIT level/order/substeps=[[:space:]]+2[[:space:]]+5' run.log
   grep -Eq 'SNRT_MN_COMMIT level/order/substeps=[[:space:]]+3[[:space:]]+5' run.log
   printf 'M5_COUPLED_AMR_INTERFACE_PASS coarse_leaf_cells=56 fine_leaf_cells=64 MPI=%s OMP=%s raw_outputs=0 reference_controls=NONPRODUCTION\n' \
-    "$SLURM_NTASKS" "$OMP_NUM_THREADS" | tee "$WORK/result.txt"
+    "$MPI_RANKS" "$OMP_NUM_THREADS" | tee "$WORK/result.txt"
   exit 0
 fi
 printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS profile=%s M5_order=5 actual_AGN_source=nonzero dust_mass=enabled CHIMES=cpu momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
